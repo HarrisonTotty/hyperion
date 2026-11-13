@@ -30,7 +30,7 @@ import { GraphicsStatusStore, initialGraphicsStatus } from "../view/engine/statu
 import type { BufferHandle, RenderEngine, RenderTarget } from "../view/engine/types";
 import { TERRAIN_SETTINGS } from "../view/quality/qualitySetting";
 import { terrainMaterialSpec } from "../view/terrain/gpu/material";
-import { TerrainResources } from "../view/terrain/gpu/resources";
+import { normalsAtlasOf, TerrainResources } from "../view/terrain/gpu/resources";
 import { ContactRecords, InstanceRecords, patchTerms } from "../view/terrain/gpu/uniforms";
 import type { PatchKey } from "../view/terrain/patchKey";
 import type {
@@ -51,7 +51,8 @@ const DEFAULT_STORAGE_BINDING_BYTES = 134_217_728;
 /** Makes `setting`'s resources on `engine`, writes its first and last slots and one frame. */
 function exercise(engine: RenderEngine, setting: "high" | "low"): TerrainResources {
   const resources = new TerrainResources(engine, TERRAIN_SETTINGS[setting], WGS84);
-  const { slots, atlas, vertexPath } = resources.layout;
+  const { slots, vertexPath } = resources.layout;
+  const atlas = normalsAtlasOf(resources.layout);
   const n = atlas.samplesPerSide;
   for (const slot of [0, slots.slotCount - 1]) {
     resources.upload({
@@ -62,6 +63,7 @@ function exercise(engine: RenderEngine, setting: "high" | "low"): TerrainResourc
       normals: new Float16Array(n * n * 2),
       originHeightM: 100,
       skirtDepthM: 2,
+      layers: null,
     });
   }
   const instances = new InstanceRecords(slots.slotCount);
@@ -74,7 +76,8 @@ function exercise(engine: RenderEngine, setting: "high" | "low"): TerrainResourc
 
 /** Describes a layout for a check's detail. */
 function describe(resources: TerrainResources): string {
-  const { slots, atlas, vertexPath, fallback } = resources.layout;
+  const { slots, vertexPath, fallback } = resources.layout;
+  const atlas = normalsAtlasOf(resources.layout);
   return `${vertexPath} (fallback ${fallback}), ${slots.slotCount} slots, atlas ${atlas.widthTexels} × ${atlas.heightTexels} × ${atlas.layers}`;
 }
 
@@ -263,7 +266,7 @@ async function drawShot(
   const bakes = await bakeAll(keys, {
     vertexPath: layout.vertexPath,
     normals: TERRAIN_SETTINGS[setting].normals,
-    ridges: "off",
+    source: { kind: "test-planet", ridges: "off" },
   });
   bakes.forEach((bake, slot) => {
     const result = resources.upload({ slot, ...bake });
@@ -342,7 +345,7 @@ async function drawShot(
       storageBuffers[name] = buffer;
     }
   }
-  const atlas = layout.atlas;
+  const atlas = normalsAtlasOf(layout);
   target.render({
     label: "terrain",
     viewRotation: viewRotation4(orientation),
@@ -464,7 +467,7 @@ async function captureShot(
     engine,
     setting: shot.setting,
     planet,
-    ridges: "off",
+    source: { kind: "test-planet", ridges: "off" },
     createPool: (bake) =>
       new HeightWorkerPool({
         workers: 3,
@@ -475,6 +478,9 @@ async function captureShot(
           }),
       }),
   });
+  // The harness compares frames drawn at different times, byte for byte: the time morph's
+  // changes cut at their first draw (R10.T16.i), as under reduced motion.
+  pass.setReducedMotion(true);
   let lit: LitView | null = null;
   let output: RenderTarget | null = null;
   try {
@@ -546,7 +552,7 @@ async function captureShot(
       // oxlint-disable-next-line no-await-in-loop
       await pause(50);
     }
-    lit.render(output, viewRotation, projectionMatrix, frame.draw === null ? [] : [frame.draw]);
+    lit.render(output, viewRotation, projectionMatrix, frame.draws);
     const texels = halfTexels(await engine.readTexture(output.colour));
     const rgba = new Uint8Array(texels.length);
     for (let i = 0; i < texels.length; i += 4) {

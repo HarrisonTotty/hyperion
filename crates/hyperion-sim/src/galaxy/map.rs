@@ -13,12 +13,13 @@
 //!   heights `z_lo` to `z_hi`: the column along `+y`, averaged over the pixel's height, so that a
 //!   disc thinner than a pixel keeps its light instead of falling between samples. The height
 //!   integral is closed-form for every disc and for the bar, and a 4-node rule on panels of at most
-//!   [`PANEL_SCALES`] of the component's vertical scale for the bulge and the halo; along the line of
+//!   `PANEL_SCALES` of the component's vertical scale for the bulge and the halo; along the line of
 //!   sight the integral runs over fixed panels symmetric about `y = 0` with [`gl16`] on each.
 //!
 //! [`render_rows`] fills a range of a [`MapSpec`]'s rows, so that a pool can split a map into bands
 //! and assemble them: the value of a pixel depends on the pixel alone, never on the band it was
-//! rendered in (plan 04, P04.T11).
+//! rendered in (plan 04, P04.T11). [`render_row_ranges`] fills several ranges as one band, which
+//! lets an edge-on band of rows and their mirrors in the plane share its displaced classes' work.
 //!
 //! The panel schemes, the substitutions and the node counts here are part of the generator version,
 //! because the pictures a saved universe shows must not move under it.
@@ -56,7 +57,13 @@ use std::error::Error;
 use std::fmt;
 use std::ops::Range;
 
+mod class_columns;
+
+use self::class_columns::{ClassPlan, Scratch};
+#[cfg(test)]
+use super::PointLy;
 use super::Population;
+use super::displaced::{DisplacedClassId, DisplacedFields, DisplacedForm};
 use super::fields::arms::Arm;
 use super::fields::bar::LongBar;
 use super::fields::bulge::BoxyBulge;
@@ -98,10 +105,14 @@ pub enum MapView {
 /// Which systems a map counts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum MapSelection {
-    /// Every population's systems.
+    /// Every population's systems, and plan 08's displaced classes where the galaxy holds them.
     AllSystems,
     /// The young thin disc alone, which is where the arms show (brainstorm, "Visualiser").
     YoungOnly,
+    /// Layer E's displaced remnants alone, for checks by eye of plan 08's classes (P08.T12.a): the
+    /// `GALAXY MAP`'s `REMNANTS`, which the protocol offers as the population `layer_e_remnants`
+    /// (P08.T15.b), and 0 everywhere for a galaxy that holds no displaced classes.
+    LayerERemnants,
 }
 
 /// A [`MapSpec`] could not be built from what it was given.
@@ -396,26 +407,110 @@ impl MapSpec {
 /// // The young thin disc is a small part of the whole column, and the arms are its own.
 /// assert!(young > 0.0 && young < 0.2 * all);
 /// ```
+///
+/// Where the galaxy's build has installed plan 08's displaced classes (P08.T12.a), each component's
+/// column is weighted by the share of its systems its field keeps, and the classes the selection
+/// counts follow the components, in class order, each its systems inside the cube times its form's
+/// column: the layers' in closed form, times their arm factors, and the spheroids' by [`gl32`]
+/// through the cube.
 #[must_use]
 pub fn column_density_face_on(fields: &Fields, x: f64, y: f64, selection: MapSelection) -> f64 {
     let arm = fields.arms().point(x, y);
     let r_sq = x * x + y * y;
     let r = r_sq.sqrt();
-    fields
-        .components()
+    let column = |component: &Component| match component.shape() {
+        Shape::Disc(disc) => {
+            let factor = disc.arm().map_or(1.0, |arm_of| arm_of.factor(&arm));
+            2.0 * disc.height().value() * disc.envelope(r, 0.0) * factor
+        }
+        Shape::Bulge(bulge) => bulge_face_on(bulge, x, y),
+        Shape::Bar(bar) => 2.0 * bar.height().value() * bar.envelope(x.abs(), y, 0.0),
+        Shape::Halo(halo) => halo_face_on(halo, r_sq),
+    };
+    let counted_components = fields.components().iter().filter(|c| counted(c, selection));
+    match fields.displaced() {
+        None => counted_components.fold(0.0, |sum, component| sum + column(component)),
+        Some(displaced) => {
+            let field = counted_components.fold(0.0, |sum, component| {
+                sum + displaced.kept_share(component.id()) * column(component)
+            });
+            counted_classes(displaced, selection).fold(field, |sum, (weight, form)| {
+                sum + weight * form.face_on_column(x, y)
+            })
+        }
+    }
+}
+
+/// The displaced classes `selection` counts, each with a form, in class order, with the systems
+/// inside the cube it counts of each: layers D and E together for every system, layer E's
+/// remnants for [`MapSelection::LayerERemnants`], none for the young disc alone.
+fn counted_classes(
+    displaced: &DisplacedFields,
+    selection: MapSelection,
+) -> impl Iterator<Item = (f64, &DisplacedForm)> + '_ {
+    displaced
+        .classes()
         .iter()
-        .filter(|c| counted(c, selection))
-        .fold(0.0, |sum, component| {
-            sum + match component.shape() {
-                Shape::Disc(disc) => {
-                    let factor = disc.arm().map_or(1.0, |arm_of| arm_of.factor(&arm));
-                    2.0 * disc.height().value() * disc.envelope(r, 0.0) * factor
-                }
-                Shape::Bulge(bulge) => bulge_face_on(bulge, x, y),
-                Shape::Bar(bar) => 2.0 * bar.height().value() * bar.envelope(x.abs(), y, 0.0),
-                Shape::Halo(halo) => halo_face_on(halo, r_sq),
-            }
+        .enumerate()
+        .filter_map(move |(index, class)| {
+            let form = class.form()?;
+            let id = DisplacedClassId::new(u16::try_from(index).expect("under 97 classes"));
+            Some((displaced.map_count(id, selection)?, form))
         })
+}
+
+/// The mean over a pixel's height, `z_lo` to `z_hi` (ly), of a displaced class's line of sight
+/// `along` at each height: `∫ along dz ÷ (z_hi − z_lo)` by [`gl4`] on panels of at most `widest`,
+/// split at the plane (P08.T12.a). `along` is called at each node in turn, rows' nodes in the order
+/// the panels take them, which is the order [`class_columns`] replays them in.
+#[must_use]
+fn mean_over_height(widest: f64, z_lo: f64, z_hi: f64, mut along: impl FnMut(f64) -> f64) -> f64 {
+    let mut panelled = |lo: f64, hi: f64| {
+        let span = hi - lo;
+        let mut count = 1_u32;
+        while count < MAX_PIXEL_PANELS && f64::from(count) * widest < span {
+            count += 1;
+        }
+        let width = span / f64::from(count);
+        (0..count).fold(0.0, |sum, k| {
+            let a = lo + f64::from(k) * width;
+            let b = if k + 1 == count {
+                hi
+            } else {
+                lo + f64::from(k + 1) * width
+            };
+            sum + gl4(&mut along, a, b)
+        })
+    };
+    let integral = if z_lo < 0.0 && z_hi > 0.0 {
+        panelled(z_lo, 0.0) + panelled(0.0, z_hi)
+    } else {
+        panelled(z_lo, z_hi)
+    };
+    integral / (z_hi - z_lo)
+}
+
+/// A displaced class's mean column over a pixel spanning the heights `z_lo` to `z_hi` at `x` (ly),
+/// looking along `+y`, at one system's weight: `∫∫ n dy dz ÷ (z_hi − z_lo)`, the line of sight by
+/// [`gl16`] on the panels the map's components take (the arm's where the class keeps one), and the
+/// height by [`gl4`] on panels of at most [`PANEL_SCALES`] of the class's least vertical scale,
+/// split at the plane (P08.T12.a).
+///
+/// The direct quadrature, one density at each node: the reference the band's shared quadrature
+/// ([`class_columns`]) is held to, bit for bit, by the tests.
+#[cfg(test)]
+fn displaced_pixel(form: &DisplacedForm, x: f64, z_lo: f64, z_hi: f64) -> f64 {
+    let (panels, symmetry) = if form.has_arm() {
+        (Panels::uniform(ROOT_HALF), Symmetry::Any)
+    } else {
+        (Panels::logarithmic(ROOT_HALF), Symmetry::EvenInY)
+    };
+    let along = |z: f64| {
+        along_line(panels, symmetry, NO_KINK, |y| {
+            form.density(&PointLy::new(x, y, z))
+        })
+    };
+    mean_over_height(PANEL_SCALES * form.vertical_scale(), z_lo, z_hi, along)
 }
 
 /// The column density at `x` (ly) through the pixel spanning the heights `z_lo` to `z_hi` (ly),
@@ -423,7 +518,11 @@ pub fn column_density_face_on(fields: &Fields, x: f64, y: f64, selection: MapSel
 /// P02.T10.b).
 ///
 /// Dividing by the pixel's height makes the value the mean column over the pixel, so a disc
-/// thinner than the pixel keeps its light. It is the value [`render_rows`] gives that pixel, bit
+/// thinner than the pixel keeps its light. Plan 08's displaced classes are counted only by
+/// [`MapSelection::LayerERemnants`], each class by a two-dimensional quadrature; every other
+/// selection keeps the field's picture, which the classes, some 0.5% of the systems, barely move
+/// (P08.T12.a; lean, 2026-10-31).
+/// It is the value [`render_rows`] gives that pixel, bit
 /// for bit, when given the row's own heights, [`MapSpec::pixel_span`].
 ///
 /// # Panics
@@ -463,7 +562,8 @@ pub fn column_density_edge_on(
     plan.vertical_means(z_lo, z_hi, &mut means);
     let mut lines = [0.0; MAX_PARTS];
     plan.line_integrals(x, &wanted_parts(&[means]), &mut lines);
-    plan.pixel(x, z_lo, z_hi, &means, &lines)
+    let classes = plan.class_means(x, &[[z_lo, z_hi]]);
+    plan.pixel(x, z_lo, z_hi, &means, &lines, &classes)
 }
 
 /// Which parts any row of a band wants: the parts whose vertical mean over some row is above 0, and
@@ -522,23 +622,72 @@ fn wanted_parts(means: &[[f64; MAX_PARTS]]) -> [bool; MAX_PARTS] {
 /// # Ok::<(), hyperion_sim::galaxy::map::BuildMapSpecError>(())
 /// ```
 pub fn render_rows(fields: &Fields, spec: &MapSpec, rows: Range<u32>, out: &mut Vec<f64>) {
-    assert!(
-        rows.end <= spec.height_px(),
-        "rows {rows:?} reach past the map's {} rows",
-        spec.height_px()
-    );
+    render_row_ranges(fields, spec, &[rows], out);
+}
+
+/// [`render_rows`] over several ranges of one raster's rows at once: `out` is cleared first and
+/// ends with each range's rows in turn, each pixel bit for bit the value [`render_rows`] gives it.
+///
+/// Rendered together, an edge-on band of rows and of their mirrors in the plane shares each
+/// displaced class's line of sight between a row and its mirror, since every class is even in `z`:
+/// the remnants map then costs some half as much as the two ranges rendered apart. Other pictures
+/// cost the same either way.
+///
+/// # Panics
+///
+/// If a range reaches past `spec.height_px()`.
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::galaxy::fields::Fields;
+/// use hyperion_sim::galaxy::map::{MapSelection, MapSpec, MapView, render_row_ranges, render_rows};
+/// use hyperion_sim::galaxy::params::GalaxyParams;
+/// use hyperion_sim::galaxy::potential::MassModel;
+///
+/// let params = GalaxyParams::milky_way_like();
+/// let fields = Fields::new(&params, &MassModel::new(&params));
+/// let spec = MapSpec::new(
+///     MapView::EdgeOn,
+///     MapSelection::AllSystems,
+///     [32, 16],
+///     [0.0, 0.0],
+///     4_096.0,
+/// )?;
+/// // The top two rows and the bottom two, their mirrors, as one band.
+/// let mut both = Vec::new();
+/// render_row_ranges(&fields, &spec, &[0..2, 14..16], &mut both);
+/// let (mut top, mut bottom) = (Vec::new(), Vec::new());
+/// render_rows(&fields, &spec, 0..2, &mut top);
+/// render_rows(&fields, &spec, 14..16, &mut bottom);
+/// assert_eq!(both, [top, bottom].concat());
+/// # Ok::<(), hyperion_sim::galaxy::map::BuildMapSpecError>(())
+/// ```
+pub fn render_row_ranges(
+    fields: &Fields,
+    spec: &MapSpec,
+    ranges: &[Range<u32>],
+    out: &mut Vec<f64>,
+) {
+    for rows in ranges {
+        assert!(
+            rows.end <= spec.height_px(),
+            "rows {rows:?} reach past the map's {} rows",
+            spec.height_px()
+        );
+    }
+    let rows: Vec<u32> = ranges.iter().flat_map(Clone::clone).collect();
     let width = usize::try_from(spec.width_px()).expect("a map's width fits the address space");
-    let band = usize::try_from(rows.end.saturating_sub(rows.start))
-        .expect("a band's rows fit the address space");
     out.clear();
     out.resize(
-        band.checked_mul(width)
+        rows.len()
+            .checked_mul(width)
             .expect("a band of a map fits memory"),
         0.0,
     );
     match spec.view() {
         MapView::FaceOn => {
-            for (row, line) in rows.clone().zip(out.chunks_mut(width)) {
+            for (&row, line) in rows.iter().zip(out.chunks_mut(width)) {
                 let y = spec.up(f64::from(row));
                 for (column, pixel) in line.iter_mut().enumerate() {
                     let column = u32::try_from(column).expect("a column of the map's width");
@@ -547,32 +696,44 @@ pub fn render_rows(fields: &Fields, spec: &MapSpec, rows: Range<u32>, out: &mut 
                 }
             }
         }
-        MapView::EdgeOn => render_edge_on_rows(fields, spec, rows, out),
+        MapView::EdgeOn => render_edge_on_rows(fields, spec, &rows, out),
     }
 }
 
-/// [`render_rows`] for the edge-on view, which computes each disc's and the bar's line of sight
-/// once per column of the band instead of once per pixel.
+/// [`render_row_ranges`] for the edge-on view, over the rows `rows`, which computes each disc's
+/// and the bar's line of sight once per column of the band instead of once per pixel, and the
+/// displaced classes' columns with what the band's pixels share ([`class_columns`]).
 ///
 /// A separable component contributes the integral along `+y`, which depends on `x` alone, times the
 /// mean of its vertical profile over the pixel, which depends on the row alone. Reusing the first
 /// across a band's rows changes no value: it is the same number, computed once.
-fn render_edge_on_rows(fields: &Fields, spec: &MapSpec, rows: Range<u32>, out: &mut [f64]) {
+fn render_edge_on_rows(fields: &Fields, spec: &MapSpec, rows: &[u32], out: &mut [f64]) {
     let plan = EdgeOnPlan::new(fields, spec.selection());
     let width = usize::try_from(spec.width_px()).expect("a map's width fits the address space");
-    let heights: Vec<[f64; 2]> = rows.clone().map(|row| spec.pixel_span(row)).collect();
+    let heights: Vec<[f64; 2]> = rows.iter().map(|&row| spec.pixel_span(row)).collect();
     let mut means = vec![[0.0; MAX_PARTS]; heights.len()];
     for (row, &[z_lo, z_hi]) in heights.iter().enumerate() {
         plan.vertical_means(z_lo, z_hi, &mut means[row]);
     }
     let wanted = wanted_parts(&means);
     let mut lines = [0.0; MAX_PARTS];
+    let band = plan
+        .displaced
+        .as_ref()
+        .map(|classes| classes.band(&heights));
+    let count = plan.displaced.as_ref().map_or(0, ClassPlan::len);
+    let mut scratch = Scratch::default();
+    let mut classes = vec![0.0; heights.len() * count];
     for column in 0..spec.width_px() {
         let x = spec.across(f64::from(column) + 0.5);
         plan.line_integrals(x, &wanted, &mut lines);
+        if let (Some(displaced), Some(band)) = (&plan.displaced, &band) {
+            displaced.column(band, x, &mut scratch, &mut classes);
+        }
         let column = usize::try_from(column).expect("a column of the map's width");
         for (row, &[z_lo, z_hi]) in heights.iter().enumerate() {
-            out[row * width + column] = plan.pixel(x, z_lo, z_hi, &means[row], &lines);
+            let at = &classes[row * count..(row + 1) * count];
+            out[row * width + column] = plan.pixel(x, z_lo, z_hi, &means[row], &lines, at);
         }
     }
 }
@@ -582,6 +743,7 @@ fn counted(component: &Component, selection: MapSelection) -> bool {
     match selection {
         MapSelection::AllSystems => true,
         MapSelection::YoungOnly => component.population() == Population::YoungThinDisc,
+        MapSelection::LayerERemnants => false,
     }
 }
 
@@ -1092,6 +1254,9 @@ enum Part<'a> {
 struct EdgeOnPlan<'a> {
     parts: Vec<Part<'a>>,
     lines: Vec<Line>,
+    /// Layer E's displaced remnants, for [`MapSelection::LayerERemnants`] in a galaxy that holds
+    /// plan 08's classes (P08.T12.a): each class with its remnants inside the cube.
+    displaced: Option<ClassPlan<'a>>,
 }
 
 impl<'a> EdgeOnPlan<'a> {
@@ -1100,6 +1265,16 @@ impl<'a> EdgeOnPlan<'a> {
         let mut plan = Self {
             parts: Vec::with_capacity(fields.components().len()),
             lines: Vec::with_capacity(fields.components().len()),
+            // The edge-on view keeps the field's picture for every system and the young disc
+            // (lean, 2026-10-31): plan 08's classes are some 0.5% of the systems, and a class's
+            // pixel takes a two-dimensional quadrature, so only layer E's remnants, the map's
+            // `REMNANTS`, are integrated class by class.
+            displaced: match (fields.displaced(), selection) {
+                (Some(displaced), MapSelection::LayerERemnants) => {
+                    Some(ClassPlan::new(counted_classes(displaced, selection)))
+                }
+                (None, _) | (Some(_), MapSelection::AllSystems | MapSelection::YoungOnly) => None,
+            },
         };
         for component in fields.components() {
             let part = if counted(component, selection) {
@@ -1179,8 +1354,27 @@ impl<'a> EdgeOnPlan<'a> {
         }
     }
 
-    /// One pixel's column density, summed in component order, from the vertical means `means` and
-    /// the line integrals `lines` of its row and column.
+    /// Each displaced class's mean column over the rows of heights `heights` at the column `x`
+    /// (ly), row by row in the plan's class order: what [`pixel`](Self::pixel) reads; empty for a
+    /// plan that counts no class.
+    #[must_use]
+    fn class_means(&self, x: f64, heights: &[[f64; 2]]) -> Vec<f64> {
+        let Some(plan) = &self.displaced else {
+            return Vec::new();
+        };
+        let mut classes = vec![0.0; heights.len() * plan.len()];
+        plan.column(
+            &plan.band(heights),
+            x,
+            &mut Scratch::default(),
+            &mut classes,
+        );
+        classes
+    }
+
+    /// One pixel's column density, summed in component order and then class order, from the
+    /// vertical means `means` and the line integrals `lines` of its row and column, and its
+    /// classes' mean columns `classes` ([`ClassPlan::column`]).
     fn pixel(
         &self,
         x: f64,
@@ -1188,6 +1382,7 @@ impl<'a> EdgeOnPlan<'a> {
         z_hi: f64,
         means: &[f64; MAX_PARTS],
         lines: &[f64; MAX_PARTS],
+        classes: &[f64],
     ) -> f64 {
         let mut sum = 0.0;
         for (part, &mean) in self.parts.iter().zip(means.iter()) {
@@ -1197,6 +1392,15 @@ impl<'a> EdgeOnPlan<'a> {
                 Part::Spheroid(spheroid) => spheroid.pixel(x, z_lo, z_hi),
                 Part::Dropped => 0.0,
             };
+        }
+        debug_assert_eq!(
+            classes.len(),
+            self.displaced.as_ref().map_or(0, ClassPlan::len),
+            "one mean column for each class the plan counts"
+        );
+        let weights = self.displaced.iter().flat_map(ClassPlan::weights);
+        for (weight, &class) in weights.zip(classes) {
+            sum += weight * class;
         }
         sum
     }
@@ -1347,7 +1551,7 @@ mod tests {
                 plan.vertical_means(lo, hi, &mut means);
                 let mut lines = [0.0; MAX_PARTS];
                 plan.line_integrals(x, &wanted_parts(&[means]), &mut lines);
-                total += plan.pixel(x, lo, hi, &means, &lines) * (hi - lo);
+                total += plan.pixel(x, lo, hi, &means, &lines, &[]) * (hi - lo);
             }
             total / (z_hi - z_lo)
         };
@@ -1436,6 +1640,185 @@ mod tests {
             }
             println!("edge-on spheroids, {height} ly on the plane, against Simpson: {worst:e}");
             assert!(worst < 3e-3, "{height} ly: {worst:e}");
+        }
+    }
+
+    /// The displaced classes' columns of an edge-on band are the direct quadrature's, bit for bit,
+    /// under every 26 hold (lane `perf-remnants-map`, 2026-11-01): each class's mean column against
+    /// [`displaced_pixel`], and each pixel against the sum the direct quadrature gave it, the
+    /// classes of weight 0 included. The bands are the served 128-pixel raster's rows either side of the
+    /// plane, which share their lines with their mirrors; a raster of an odd number of rows, whose
+    /// middle row straddles the plane, with pixels many panels tall; an off-centre raster whose
+    /// row edges are not whole light-years; and the served 1,024-pixel raster's top and bottom
+    /// rows as one band ([`render_row_ranges`]).
+    #[test]
+    fn the_bands_class_columns_are_the_direct_quadratures_bit_for_bit() {
+        let fields = crate::galaxy::displaced::hold::displaced().fields();
+        let selection = MapSelection::LayerERemnants;
+        let displaced = fields
+            .displaced()
+            .expect("every 26 hold installs the classes");
+        let counted: Vec<(f64, &DisplacedForm)> = counted_classes(displaced, selection).collect();
+        let plan = EdgeOnPlan::new(fields, selection);
+        let classes = plan
+            .displaced
+            .as_ref()
+            .expect("the remnants map counts the classes");
+        let weighted = counted.iter().filter(|(weight, _)| *weight > 0.0).count();
+        assert_eq!(classes.len(), weighted);
+        assert!(weighted > 50, "{weighted} classes of {}", counted.len());
+        let spec = |size: [u32; 2], centre: [f64; 2], ly_per_px: f64| {
+            MapSpec::new(MapView::EdgeOn, selection, size, centre, ly_per_px).expect("a raster")
+        };
+        let cases = [
+            (
+                spec([128, 64], [0.0, 0.0], 1_024.0),
+                vec![28..32, 32..36],
+                vec![40_u32, 70],
+            ),
+            (
+                spec([16, 15], [0.0, 0.0], 8_192.0),
+                vec![6..7, 7..9],
+                vec![2, 8],
+            ),
+            (
+                spec([40, 24], [1_234.5, -777.25], 300.3),
+                vec![10..12, 12..14],
+                vec![0, 17, 39],
+            ),
+            // The served 1,024-pixel raster's top rows with their mirrors, as the server bands
+            // them: thin layers far above the plane, where their density is exactly 0.
+            (
+                spec([1_024, 512], [0.0, 0.0], 128.0),
+                vec![0..2, 510..512],
+                vec![300, 512],
+            ),
+        ];
+        for (spec, ranges, columns) in cases {
+            let mut band = Vec::new();
+            render_row_ranges(fields, &spec, &ranges, &mut band);
+            let width = usize::try_from(spec.width_px()).expect("a width");
+            let heights: Vec<[f64; 2]> = ranges
+                .iter()
+                .flat_map(Clone::clone)
+                .map(|row| spec.pixel_span(row))
+                .collect();
+            for column in columns {
+                let x = spec.across(f64::from(column) + 0.5);
+                let means = plan.class_means(x, &heights);
+                for (k, &[z_lo, z_hi]) in heights.iter().enumerate() {
+                    let mut ours = means[k * classes.len()..(k + 1) * classes.len()].iter();
+                    let mut forms = classes.forms();
+                    // The selection counts no component, so the parts add nothing before the
+                    // classes: `pixel` sums them from 0, as here.
+                    assert!(plan.parts.iter().all(|part| matches!(part, Part::Dropped)));
+                    let mut sum = 0.0;
+                    for &(weight, form) in &counted {
+                        let direct = displaced_pixel(form, x, z_lo, z_hi);
+                        sum += weight * direct;
+                        if weight > 0.0 {
+                            assert!(std::ptr::eq(forms.next().expect("a form"), form));
+                            assert_same_bits(*ours.next().expect("a class's column"), direct);
+                        }
+                    }
+                    let column = usize::try_from(column).expect("a column");
+                    assert_same_bits(band[k * width + column], sum);
+                    assert!(sum > 0.0, "({x}, {z_lo}–{z_hi})");
+                }
+            }
+        }
+    }
+
+    /// The Milky Way fixture's remnants maps under every 26 hold are the bits the direct quadrature
+    /// gave them before the band shared its work (lane `perf-remnants-map`, 2026-11-01; at
+    /// generator version 25, measured again at the lane's base; re-pinned at 26), on every target
+    /// the suite runs on:
+    /// digests of a 32 × 16 edge-on raster of the whole cube, in bands of 5 rows and in its
+    /// mirrored halves, and of a 16 × 16 face-on one.
+    #[test]
+    fn the_remnants_maps_are_pinned_under_every_26_hold() {
+        use hyperion_testkit::golden::f64_digest;
+        let fields = crate::galaxy::displaced::hold::displaced().fields();
+        let selection = MapSelection::LayerERemnants;
+        let edge_on = MapSpec::new(MapView::EdgeOn, selection, [32, 16], [0.0, 0.0], 4_096.0)
+            .expect("the whole cube");
+        let face_on = MapSpec::new(MapView::FaceOn, selection, [16, 16], [0.0, 0.0], 8_192.0)
+            .expect("the whole cube");
+        let mut map = Vec::new();
+        let mut band = Vec::new();
+        for first in (0..16).step_by(5) {
+            render_rows(fields, &edge_on, first..(first + 5).min(16), &mut band);
+            map.extend_from_slice(&band);
+        }
+        assert_eq!(f64_digest(&map), 0x5aed_a206_5fb6_6255, "edge-on in bands");
+        let mut halves = vec![0.0; map.len()];
+        for first in (0..8).step_by(3) {
+            let end = (first + 3).min(8);
+            render_row_ranges(
+                fields,
+                &edge_on,
+                &[first..end, 16 - end..16 - first],
+                &mut band,
+            );
+            let (top, bottom) = band.split_at(32 * usize::try_from(end - first).expect("rows"));
+            let at = |row: u32| 32 * usize::try_from(row).expect("a row");
+            halves[at(first)..at(end)].copy_from_slice(top);
+            halves[at(16 - end)..at(16 - first)].copy_from_slice(bottom);
+        }
+        assert_eq!(
+            f64_digest(&halves),
+            f64_digest(&map),
+            "edge-on in mirrored halves"
+        );
+        render_rows(fields, &face_on, 0..16, &mut map);
+        assert_eq!(f64_digest(&map), 0x8632_e856_7092_9415, "face-on");
+    }
+
+    /// Every class's density is even in z bit for bit, and reads `y` through the radius, which
+    /// `hypot` takes of `|y|`, and the arm factor alone: what lets a band share one height's line
+    /// between a row and its mirror in the plane, and one radius between a line's node and its
+    /// mirror (`class_columns`). The split densities the band takes are the forms' own, bit for
+    /// bit.
+    #[test]
+    fn every_class_is_even_in_z_and_its_split_density_is_its_own() {
+        use crate::galaxy::displaced::forms::DiscBornForm;
+        let fields = crate::galaxy::displaced::hold::displaced().fields();
+        let displaced = fields
+            .displaced()
+            .expect("every 26 hold installs the classes");
+        let mut lcg = Lcg::new(0x0815_e000_0000_0001);
+        for _ in 0..200 {
+            let (x, y) = (
+                120_000.0 * (lcg.next_f64() - 0.5),
+                120_000.0 * (lcg.next_f64() - 0.5),
+            );
+            let z = 20_000.0 * (lcg.next_f64() - 0.5);
+            let r = math::hypot(x, y);
+            assert_same_bits(math::hypot(x, -y), r);
+            for form in displaced.classes().iter().filter_map(|class| class.form()) {
+                let density = form.density(&PointLy::new(x, y, z));
+                assert_same_bits(form.density(&PointLy::new(x, y, -z)), density);
+                let DisplacedForm::Disc(disc) = form else {
+                    continue;
+                };
+                match &**disc {
+                    DiscBornForm::Ballistic(layer) => {
+                        let envelope =
+                            layer.envelope_from(layer.radial_exponent(r), layer.height_exponent(z));
+                        let factor = layer
+                            .arm()
+                            .map(|arm| arm.factor(&arm.geometry().point(x, y)));
+                        assert_same_bits(factor.map_or(envelope, |f| envelope * f), density);
+                    }
+                    DiscBornForm::Fitted { layer, .. } => {
+                        if let Some((_, layer)) = layer {
+                            let split =
+                                layer.density_from(layer.radial(r), layer.scale_height(r), z);
+                            assert_same_bits(split, layer.density(&PointLy::new(x, y, z)));
+                        }
+                    }
+                }
+            }
         }
     }
 

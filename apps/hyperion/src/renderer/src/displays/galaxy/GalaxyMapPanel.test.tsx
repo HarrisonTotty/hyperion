@@ -1,5 +1,5 @@
-import type { RequestOf, ResponseFor } from "@hyperion/protocol";
-import { act, render, screen, within } from "@testing-library/react";
+import type { RequestOf, ResponseFor, UniverseInfo } from "@hyperion/protocol";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -7,11 +7,19 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { UniverseProvider } from "../../components/UniverseProvider";
 import type { CentreLy } from "../../lib/galaxy/model";
 import { FakeWebSocket } from "../../test/FakeWebSocket";
-import { aDensityMap, anOpenedUniverse, aUniverseList } from "../../test/galaxyFixtures";
+import {
+  aDensityMap,
+  anExtinctionMap,
+  anOpenedUniverse,
+  aUniverse,
+  aUniverseList,
+} from "../../test/galaxyFixtures";
 import { stubCanvas } from "../../test/RecordingContext2D";
 import { ServerLinkHarness } from "../../test/ServerLinkHarness";
-import { GalaxyMapPanel } from "./GalaxyMapPanel";
+import { GalaxyMapPanel, OVERLAY_DENSITY_ONLY, OVERLAY_NO_ROOM } from "./GalaxyMapPanel";
+import { DUST_OVERLAY_BRIGHTNESS, DUST_OVERLAY_LABEL } from "./GalaxyMapView";
 import { UniversePanel } from "./UniversePanel";
+import { describedText, statusLine } from "../../test/statusLine";
 
 /** Plays the server's side, letting the outcomes it settles reach React. */
 async function server(play: () => void): Promise<void> {
@@ -39,19 +47,62 @@ function mapFor(body: RequestOf<"density_map">): ResponseFor<"density_map"> {
   });
 }
 
-/** Holds the cursor for the page, as the display does. */
-function MapPage() {
+/** Plan 04's map with no systems for the request: floor and ceiling 0, and every code 0. */
+function emptyMapFor(body: RequestOf<"density_map">): ResponseFor<"density_map"> {
+  const heightPx = body.view === "face_on" ? 8 : 4;
+  return aDensityMap({
+    codes: Array.from({ length: 8 * heightPx }, () => 0),
+    heightPx,
+    view: body.view,
+    population: body.population,
+    floorLog10PerLy2: 0,
+    ceilingLog10PerLy2: 0,
+  });
+}
+
+/** An extinction map for the request, of the density map's size and extents. */
+function extinctionFor(body: RequestOf<"extinction_map">): ResponseFor<"extinction_map"> {
+  const heightPx = body.view === "face_on" ? 8 : 4;
+  return anExtinctionMap({
+    codes: Array.from({ length: 8 * heightPx }, (_, pixel) => pixel),
+    widthPx: 8,
+    heightPx,
+    view: body.view,
+  });
+}
+
+/**
+ * The `GALAXY MAP` page at 1280 × 720 and at 1920 × 1080, as the hidden runs of P07.T11.b measured
+ * it (plan 07's record): compact with no room for the dust overlay, and stacked with room.
+ */
+const PAGE_1280_720 = [798, 520] as const;
+const PAGE_1920_1080 = [1_036, 880] as const;
+
+interface MapPageProps {
+  readonly shown: boolean;
+}
+
+/**
+ * Holds the cursor for the page, as the display does, beside a text field such as the display's
+ * `CURSOR` panel has.
+ */
+function MapPage({ shown }: MapPageProps) {
   const [cursorLy, setCursorLy] = useState<CentreLy>([0, 0, 0]);
   return (
-    <div role="tabpanel" aria-label="GALAXY MAP">
-      <GalaxyMapPanel cursorLy={cursorLy} onCursor={setCursorLy} centreLy={null} />
-    </div>
+    <>
+      <input type="text" aria-label="NOTE" />
+      <div role="tabpanel" aria-label="GALAXY MAP">
+        <GalaxyMapPanel cursorLy={cursorLy} onCursor={setCursorLy} centreLy={null} shown={shown} />
+      </div>
+    </>
   );
 }
 
 /**
- * Lays the page out at `widthPx` by `heightPx`: at 792 × 488 the words take 29.5rem of the width,
- * leaving 320 px, and the pictures together 488 px of the height, face-on 320 and edge-on 160.
+ * Lays the page out at `widthPx` by `heightPx`. 792 × 488 is 30.5 rem tall, so compact: the words
+ * and axes take 32.5 rem of the width, leaving 272 px, and the controls' row and the gap 8 rem of
+ * the height, leaving the rows 360 px; the edge-on row keeps 8.5 rem for its words, so the face-on
+ * picture is 224 px.
  */
 function stubPageSize(widthPx = 792, heightPx = 488): void {
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
@@ -60,14 +111,14 @@ function stubPageSize(widthPx = 792, heightPx = 488): void {
 }
 
 /** Renders the page beside the universe panel, which opens universes for it. */
-async function renderPanel() {
+async function renderPanel({ shown = true, universes = [aUniverse()] } = {}) {
   const user = userEvent.setup();
   stubCanvas();
   render(
     <ServerLinkHarness>
       <UniverseProvider>
         <UniversePanel expanded onToggle={() => undefined} />
-        <MapPage />
+        <MapPage shown={shown} />
       </UniverseProvider>
     </ServerLinkHarness>,
   );
@@ -76,7 +127,7 @@ async function renderPanel() {
     socket.serverWelcomes();
   });
   await server(() => {
-    socket.serverAnswers("list_universes", () => aUniverseList());
+    socket.serverAnswers("list_universes", () => aUniverseList(universes));
   });
   return { user, socket };
 }
@@ -84,17 +135,52 @@ async function renderPanel() {
 async function openUniverse(
   user: ReturnType<typeof userEvent.setup>,
   socket: FakeWebSocket,
+  info: UniverseInfo = aUniverse(),
 ): Promise<void> {
-  await user.click(screen.getByRole("button", { name: "Open universe SURVEY 1" }));
+  await user.click(screen.getByRole("button", { name: `Open universe ${info.name}` }));
   await server(() => {
-    socket.serverAnswers("open_universe", () => anOpenedUniverse());
+    socket.serverAnswers("open_universe", () => anOpenedUniverse(info));
   });
+}
+
+/** `SURVEY 1` at generator version 26, whose galaxy holds plan 08's displaced remnants. */
+const SURVEY_AT_26 = aUniverse({ generator_version: 26 });
+
+/** The `POPULATION` select a 26 universe's page offers its three choices in. */
+function remnantsSelect(): HTMLElement {
+  return within(panel()).getByRole("combobox", { name: "POPULATION" });
+}
+
+/** The `REMNANTS` map's legend line, in the view `name` names, or `null` where it has none. */
+function remnantsLine(name: string): HTMLElement | null {
+  return within(within(panel()).getByRole("region", { name })).queryByText(
+    /^DISPLACED · INIT MASS ABOVE 8/u,
+  );
 }
 
 async function answerBothMaps(socket: FakeWebSocket): Promise<void> {
   await server(() => {
     socket.serverAnswers("density_map", mapFor);
     socket.serverAnswers("density_map", mapFor);
+  });
+}
+
+async function answerBothExtinctionMaps(socket: FakeWebSocket): Promise<void> {
+  await server(() => {
+    socket.serverAnswers("extinction_map", extinctionFor);
+    socket.serverAnswers("extinction_map", extinctionFor);
+  });
+}
+
+function overlayToggle(): HTMLElement {
+  return within(panel()).getByRole("button", { name: "D DUST OVERLAY" });
+}
+
+/** Lays the page out afresh at `widthPx` by `heightPx`, as a resize of the window does. */
+function resizePage([widthPx, heightPx]: readonly [number, number]): void {
+  stubPageSize(widthPx, heightPx);
+  act(() => {
+    window.dispatchEvent(new Event("resize"));
   });
 }
 
@@ -143,13 +229,74 @@ describe("GalaxyMapPanel", () => {
     expect(within(group).getByRole("radio", { name: "YOUNG THIN DISC" })).not.toBeChecked();
   });
 
+  it("does not offer REMNANTS for a universe below generator version 26 (plan 08, P08.T15.b)", async () => {
+    const { user, socket } = await renderPanel({
+      universes: [aUniverse({ generator_version: 25 })],
+    });
+
+    await openUniverse(user, socket, aUniverse({ generator_version: 25 }));
+
+    const group = within(panel()).getByRole("group", { name: "POPULATION" });
+    expect(within(group).queryByRole("radio", { name: "REMNANTS" })).not.toBeInTheDocument();
+  });
+
+  it("offers a 26 universe's three populations as a select, REMNANTS third (plan 08, P08.T15.b)", async () => {
+    const { user, socket } = await renderPanel({ universes: [SURVEY_AT_26] });
+
+    await openUniverse(user, socket, SURVEY_AT_26);
+
+    const select = within(panel()).getByRole("combobox", { name: "POPULATION" });
+    const options = within(select).getAllByRole("option");
+    expect(options.map((option) => option.textContent)).toEqual([
+      "ALL",
+      "YOUNG THIN DISC",
+      "REMNANTS",
+    ]);
+    expect(within(select).getByRole("option", { name: "ALL", selected: true })).toBeInTheDocument();
+    expect(within(panel()).queryByRole("radio", { name: "ALL" })).not.toBeInTheDocument();
+  });
+
+  it("holds the population's select back while the link is down, saying why", async () => {
+    const { user, socket } = await renderPanel({ universes: [SURVEY_AT_26] });
+    await openUniverse(user, socket, SURVEY_AT_26);
+    await answerBothMaps(socket);
+
+    act(() => {
+      socket.close();
+    });
+    const select = within(panel()).getByRole("combobox", { name: "POPULATION" });
+    await user.selectOptions(select, "REMNANTS");
+
+    expect(select).toHaveAttribute("aria-disabled", "true");
+    expect(select).toHaveAccessibleDescription("NO CARRIER");
+    expect(within(select).getByRole("option", { name: "ALL", selected: true })).toBeInTheDocument();
+    expect(socket.requestsOfKind("density_map")).toHaveLength(2);
+  });
+
+  it("reads a REMNANTS choice as ALL in a universe below 26 opened after it (plan 08, P08.T15.b)", async () => {
+    const older = aUniverse({ id: "00000000000000a2", name: "SURVEY 2", generator_version: 24 });
+    const { user, socket } = await renderPanel({ universes: [SURVEY_AT_26, older] });
+    await openUniverse(user, socket, SURVEY_AT_26);
+    await answerBothMaps(socket);
+    await user.selectOptions(remnantsSelect(), "REMNANTS");
+    await answerBothMaps(socket);
+
+    await openUniverse(user, socket, older);
+
+    expect(within(panel()).getByRole("radio", { name: "ALL" })).toBeChecked();
+    const requests = socket.requestsOfKind("density_map").map(({ body }) => body);
+    expect(requests.slice(4).map((body) => [body.universe, body.population])).toEqual([
+      [older.id, "all"],
+      [older.id, "all"],
+    ]);
+  });
+
   it("asks for both views of every system at first, at the resolution the pictures need", async () => {
     const { user, socket } = await renderPanel();
 
     await openUniverse(user, socket);
 
-    // Pictures 320 px wide at a device pixel ratio of 1 take the 256-pixel map, drawn 1.25 times
-    // larger.
+    // Pictures 224 px wide at a device pixel ratio of 1 take the 256-pixel map, drawn smaller.
     expect(
       socket
         .requestsOfKind("density_map")
@@ -174,7 +321,35 @@ describe("GalaxyMapPanel", () => {
     ]);
   });
 
-  it("holds the population back while the link is down, and keeps the maps on show", async () => {
+  it("asks for both views of layer E's displaced remnants when REMNANTS is chosen (plan 08, P08.T15.b)", async () => {
+    const { user, socket } = await renderPanel();
+    await openUniverse(user, socket, SURVEY_AT_26);
+    await answerBothMaps(socket);
+
+    await user.selectOptions(remnantsSelect(), "REMNANTS");
+
+    const requests = socket.requestsOfKind("density_map").map(({ body }) => body);
+    expect(requests.slice(2).map((body) => [body.view, body.population])).toEqual([
+      ["face_on", "layer_e_remnants"],
+      ["edge_on", "layer_e_remnants"],
+    ]);
+  });
+
+  it("draws an empty REMNANTS map as holding no systems", async () => {
+    const { user, socket } = await renderPanel();
+    await openUniverse(user, socket, SURVEY_AT_26);
+    await answerBothMaps(socket);
+    await user.selectOptions(remnantsSelect(), "REMNANTS");
+
+    await server(() => {
+      socket.serverAnswers("density_map", emptyMapFor);
+      socket.serverAnswers("density_map", emptyMapFor);
+    });
+
+    expect(within(panel()).getAllByText("NO SYSTEMS IN MAP")).toHaveLength(2);
+  });
+
+  it("holds the population back while the link is down, and keeps the maps on show, stale", async () => {
     const { user, socket } = await renderPanel();
     await openUniverse(user, socket);
     await answerBothMaps(socket);
@@ -190,11 +365,271 @@ describe("GalaxyMapPanel", () => {
     expect(young).toHaveAccessibleDescription("NO CARRIER");
     expect(socket.requestsOfKind("density_map")).toHaveLength(2);
     expect(
-      within(panel()).getByRole("application", { name: "Galaxy map, face-on" }),
-    ).toBeInTheDocument();
+      within(panel()).getByRole("application", { name: "Galaxy map, face-on, stale" }),
+    ).toHaveAccessibleDescription("ARROWS MOVE CURSOR NO CARRIER");
     expect(
-      within(panel()).getByRole("application", { name: "Galaxy map, edge-on" }),
-    ).toBeInTheDocument();
+      within(panel()).getByRole("application", { name: "Galaxy map, edge-on, stale" }),
+    ).toHaveAccessibleDescription("↑ ↓ MOVE CURSOR NO CARRIER");
+  });
+
+  describe("a stale view's wait (decision-gg-port-a2 §2)", () => {
+    /** The page at 1920 × 1080 with both maps answered, then resized to 1280 × 720's. */
+    async function renderResized() {
+      stubPageSize(...PAGE_1920_1080);
+      const rendered = await renderPanel();
+      await openUniverse(rendered.user, rendered.socket);
+      await answerBothMaps(rendered.socket);
+      // The 554 px pictures take the 512-pixel maps, the 256 px ones the 256-pixel maps.
+      resizePage(PAGE_1280_720);
+      return rendered;
+    }
+
+    it("states PENDING once for the page while the stale views wait", async () => {
+      const { socket } = await renderResized();
+
+      expect(socket.requestsOfKind("density_map").map(({ body }) => body.resolution)).toEqual([
+        512, 512, 256, 256,
+      ]);
+      expect(within(panel()).getByRole("status")).toHaveTextContent(/^PENDING$/);
+      expect(within(panel()).getAllByText("PENDING")).toHaveLength(1);
+      for (const name of ["FACE-ON FROM NORTH", "EDGE-ON ALONG +Y"]) {
+        expect(
+          within(within(panel()).getByRole("region", { name })).queryByRole("status"),
+        ).not.toBeInTheDocument();
+      }
+    });
+
+    it("describes each stale picture by the page's PENDING", async () => {
+      await renderResized();
+
+      expect(
+        within(panel()).getByRole("application", { name: "Galaxy map, face-on, stale" }),
+      ).toHaveAccessibleDescription("ARROWS MOVE CURSOR PENDING");
+      expect(
+        within(panel()).getByRole("application", { name: "Galaxy map, edge-on, stale" }),
+      ).toHaveAccessibleDescription("↑ ↓ MOVE CURSOR PENDING");
+    });
+
+    it("states the link's state in PENDING's place while the link is down, never both", async () => {
+      const { socket } = await renderResized();
+
+      act(() => {
+        socket.close();
+      });
+
+      expect(within(panel()).getByText("NO CARRIER")).toBeInTheDocument();
+      expect(within(panel()).queryByText("PENDING")).not.toBeInTheDocument();
+    });
+
+    it("states nothing once the new maps arrive", async () => {
+      const { socket } = await renderResized();
+
+      await answerBothMaps(socket);
+
+      expect(within(panel()).queryByText("PENDING")).not.toBeInTheDocument();
+      expect(
+        within(panel()).getByRole("application", { name: "Galaxy map, face-on" }),
+      ).toBeInTheDocument();
+    });
+
+    it("lays the page out the same while it states the wait as once the maps arrive", async () => {
+      const { socket } = await renderResized();
+      const grid = panel().querySelector<HTMLElement>(".galaxy-map__grid");
+      const waiting = [pictureWidth(), grid?.getAttribute("style"), grid?.className];
+
+      await answerBothMaps(socket);
+
+      expect([pictureWidth(), grid?.getAttribute("style"), grid?.className]).toEqual(waiting);
+    });
+
+    it("states EXTINCTION PENDING while the stale views await only the extinction maps", async () => {
+      stubPageSize(...PAGE_1920_1080);
+      const { user, socket } = await renderPanel();
+      await openUniverse(user, socket);
+      await answerBothMaps(socket);
+      await user.keyboard("d");
+      await answerBothExtinctionMaps(socket);
+      // A larger page, which still has room for the overlay: the 768 px pictures take the
+      // 1,024-pixel maps.
+      resizePage([1_500, 1_200]);
+
+      await answerBothMaps(socket);
+
+      expect(within(panel()).getByRole("status")).toHaveTextContent(/^EXTINCTION PENDING$/);
+      expect(within(panel()).queryByText("PENDING")).not.toBeInTheDocument();
+    });
+  });
+
+  it("offers the quantity with its key, column density first, and the dust overlay with its own", async () => {
+    stubPageSize(...PAGE_1920_1080);
+    const { user, socket } = await renderPanel();
+
+    await openUniverse(user, socket);
+
+    const group = within(panel()).getByRole("group", { name: "Q QUANTITY" });
+    expect(group).toHaveAttribute("aria-keyshortcuts", "Q");
+    expect(within(group).getByRole("radio", { name: "COLUMN DENSITY" })).toBeChecked();
+    expect(within(group).getByRole("radio", { name: "EXTINCTION" })).not.toBeChecked();
+    const overlay = within(panel()).getByRole("button", { name: "D DUST OVERLAY" });
+    expect(overlay).toHaveAttribute("aria-pressed", "false");
+    expect(overlay).toHaveAttribute("aria-keyshortcuts", "D");
+  });
+
+  it("asks for both views' extinction maps under EXTINCTION", async () => {
+    stubPageSize(...PAGE_1920_1080);
+    const { user, socket } = await renderPanel();
+    await openUniverse(user, socket);
+    await answerBothMaps(socket);
+
+    await user.click(within(panel()).getByRole("radio", { name: "EXTINCTION" }));
+
+    expect(
+      socket.requestsOfKind("extinction_map").map(({ body }) => [body.view, body.resolution]),
+    ).toEqual([
+      ["face_on", 512],
+      ["edge_on", 512],
+    ]);
+  });
+
+  it("holds the overlay back under EXTINCTION, which it does not dim", async () => {
+    stubPageSize(...PAGE_1920_1080);
+    const { user, socket } = await renderPanel();
+    await openUniverse(user, socket);
+
+    await user.click(within(panel()).getByRole("radio", { name: "EXTINCTION" }));
+
+    expect(overlayToggle()).toHaveAttribute("aria-disabled", "true");
+    expect(describedText(overlayToggle())).toBe(OVERLAY_DENSITY_ONLY);
+  });
+
+  it("puts the overlay on with D", async () => {
+    stubPageSize(...PAGE_1920_1080);
+    const { user, socket } = await renderPanel();
+    await openUniverse(user, socket);
+
+    await user.keyboard("d");
+
+    expect(overlayToggle()).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("asks for the extinction maps the overlay dims the density maps by", async () => {
+    stubPageSize(...PAGE_1920_1080);
+    const { user, socket } = await renderPanel();
+    await openUniverse(user, socket);
+    await answerBothMaps(socket);
+
+    await user.keyboard("d");
+
+    expect(socket.requestsOfKind("extinction_map").map(({ body }) => body.view)).toEqual([
+      "face_on",
+      "edge_on",
+    ]);
+  });
+
+  it("steps the quantity with Q", async () => {
+    const { user, socket } = await renderPanel();
+    await openUniverse(user, socket);
+
+    await user.keyboard("q");
+
+    expect(within(panel()).getByRole("radio", { name: "EXTINCTION" })).toBeChecked();
+  });
+
+  it("steps the quantity from the last back to the first", async () => {
+    const { user, socket } = await renderPanel();
+    await openUniverse(user, socket);
+
+    await user.keyboard("qq");
+
+    expect(within(panel()).getByRole("radio", { name: "COLUMN DENSITY" })).toBeChecked();
+  });
+
+  it("leaves Q and D to a text field that has the focus", async () => {
+    stubPageSize(...PAGE_1920_1080);
+    const { user, socket } = await renderPanel();
+    await openUniverse(user, socket);
+
+    await user.click(screen.getByRole("textbox", { name: "NOTE" }));
+    await user.keyboard("qd");
+
+    expect(within(panel()).getByRole("radio", { name: "COLUMN DENSITY" })).toBeChecked();
+    expect(overlayToggle()).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("leaves Q and D alone with a modifier held", async () => {
+    stubPageSize(...PAGE_1920_1080);
+    const { user, socket } = await renderPanel();
+    await openUniverse(user, socket);
+
+    await user.keyboard("{Control>}d{/Control}{Shift>}q{/Shift}{Alt>}q{/Alt}");
+
+    expect(within(panel()).getByRole("radio", { name: "COLUMN DENSITY" })).toBeChecked();
+    expect(overlayToggle()).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("acts once on a key held down, not on its repeats", async () => {
+    const { user, socket } = await renderPanel();
+    await openUniverse(user, socket);
+
+    // A held key's repeats, which user-event does not mark as repeats.
+    fireEvent.keyDown(document, { key: "q", repeat: true });
+
+    expect(within(panel()).getByRole("radio", { name: "COLUMN DENSITY" })).toBeChecked();
+  });
+
+  it("holds D and the toggle back while the link is down, where the page has room", async () => {
+    stubPageSize(...PAGE_1920_1080);
+    const { user, socket } = await renderPanel();
+    await openUniverse(user, socket);
+    await answerBothMaps(socket);
+    act(() => {
+      socket.close();
+    });
+
+    await user.keyboard("d");
+    await user.click(overlayToggle());
+
+    expect(overlayToggle()).toHaveAttribute("aria-pressed", "false");
+    expect(overlayToggle()).toHaveAccessibleDescription("NO CARRIER");
+  });
+
+  it("leaves Q and D alone while its page is behind its tab", async () => {
+    stubPageSize(...PAGE_1920_1080);
+    const { user, socket } = await renderPanel({ shown: false });
+    await openUniverse(user, socket);
+
+    await user.keyboard("qd");
+
+    expect(within(panel()).getByRole("radio", { name: "COLUMN DENSITY" })).toBeChecked();
+    expect(overlayToggle()).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("leaves Q and D alone while no universe is open", async () => {
+    stubPageSize(...PAGE_1920_1080);
+    const { user, socket } = await renderPanel();
+
+    await user.keyboard("qd");
+    await openUniverse(user, socket);
+
+    expect(within(panel()).getByRole("radio", { name: "COLUMN DENSITY" })).toBeChecked();
+    expect(overlayToggle()).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("holds the quantity back while the link is down", async () => {
+    const { user, socket } = await renderPanel();
+    await openUniverse(user, socket);
+    await answerBothMaps(socket);
+
+    act(() => {
+      socket.close();
+    });
+    await user.keyboard("q");
+    const extinction = within(panel()).getByRole("radio", { name: "EXTINCTION" });
+    await user.click(extinction);
+
+    expect(extinction).not.toBeChecked();
+    expect(extinction).toHaveAccessibleDescription("NO CARRIER");
+    expect(socket.requestsOfKind("extinction_map")).toHaveLength(0);
   });
 
   it("gives each view a legend of its own, with its own floor", async () => {
@@ -223,12 +658,14 @@ describe("GalaxyMapPanel", () => {
 
     expect(within(panel()).getAllByText("FRAME")).toHaveLength(1);
     expect(within(panel()).getByText("FRAME").parentElement).toHaveTextContent("FRAME GALACTIC");
-    // 320 px for 131,072 ly: the longest 1-2-5 bar within a quarter of the width.
+    // 224 px for 131,072 ly: the longest 1-2-5 bar within a quarter of the width.
     expect(within(panel()).getAllByText("20,000 ly")).toHaveLength(1);
     expect(within(panel()).getByRole("img", { name: "Scale bar, 20,000 ly" })).toBeInTheDocument();
   });
 
   it("gives both pictures one width, as large as the page's width allows", async () => {
+    // Stacked, 792 px wide leaves 320 px beside the 24 rem words and the axes.
+    stubPageSize(792, 800);
     const { user, socket } = await renderPanel();
 
     await openUniverse(user, socket);
@@ -237,14 +674,107 @@ describe("GalaxyMapPanel", () => {
   });
 
   it("gives both pictures one width, as large as the page's height allows", async () => {
-    // 1,000 px wide leaves 528 px beside the words, but 500 px of height holds face-on 328 px, a
-    // gap and edge-on 164 px.
-    stubPageSize(1_000, 500);
+    // 1,000 px wide leaves 528 px beside the words, but 720 px of height, less the tabs' 2.5 rem
+    // and the gap, holds face-on 448 px and edge-on 224 px.
+    stubPageSize(1_000, 720);
     const { user, socket } = await renderPanel();
 
     await openUniverse(user, socket);
 
-    expect(pictureWidth()).toBe("328px");
+    expect(pictureWidth()).toBe("448px");
+  });
+
+  it("lays a tall page out stacked and a short one compact, as the local chart is", async () => {
+    stubPageSize(1_036, 880);
+    const { user, socket } = await renderPanel();
+    await openUniverse(user, socket);
+    const grid = (): Element | null => panel().querySelector(".galaxy-map__grid");
+
+    expect(grid()).toHaveClass("galaxy-map__grid--stacked");
+
+    resizePage(PAGE_1280_720);
+
+    expect(grid()).toHaveClass("galaxy-map__grid--compact");
+    expect(pictureWidth()).toBe("256px");
+  });
+
+  it.each([
+    ["stacked", ...PAGE_1920_1080],
+    ["compact", ...PAGE_1280_720],
+  ])(
+    "keeps one tab order laid out %s: the choices, the toggles, then face-on and edge-on",
+    async (_layout, widthPx, heightPx) => {
+      stubPageSize(widthPx, heightPx);
+      const { user, socket } = await renderPanel();
+      await openUniverse(user, socket);
+      await answerBothMaps(socket);
+
+      within(panel()).getByRole("radio", { name: "ALL" }).focus();
+      await user.tab();
+      expect(within(panel()).getByRole("radio", { name: "COLUMN DENSITY" })).toHaveFocus();
+      await user.tab();
+      expect(within(panel()).getByRole("button", { name: "D DUST OVERLAY" })).toHaveFocus();
+      // The feature overlay's toggles, under the face-on view's legends (plan 09, P09.T41.b).
+      await user.tab();
+      expect(within(panel()).getByRole("checkbox", { name: "GC" })).toHaveFocus();
+      await user.tab();
+      expect(within(panel()).getByRole("checkbox", { name: "CENTRE" })).toHaveFocus();
+      await user.tab();
+      expect(within(panel()).getByRole("checkbox", { name: "SNR" })).toHaveFocus();
+      // The stream overlay's, beside them (plan 10, P10.T11).
+      await user.tab();
+      expect(within(panel()).getByRole("checkbox", { name: "STREAM" })).toHaveFocus();
+      await user.tab();
+      expect(within(panel()).getByRole("checkbox", { name: "DWARF CORE" })).toHaveFocus();
+      await user.tab();
+      expect(
+        within(panel()).getByRole("application", { name: "Galaxy map, face-on" }),
+      ).toHaveFocus();
+      await user.tab();
+      expect(
+        within(panel()).getByRole("application", { name: "Galaxy map, edge-on" }),
+      ).toHaveFocus();
+    },
+  );
+
+  it("says once, after the overlay's name, what the brightness shows, only under the overlay", async () => {
+    stubPageSize(...PAGE_1920_1080);
+    const { user, socket } = await renderPanel();
+    await openUniverse(user, socket);
+    await answerBothMaps(socket);
+
+    expect(within(panel()).queryByText(DUST_OVERLAY_BRIGHTNESS)).not.toBeInTheDocument();
+
+    await user.keyboard("d");
+
+    const [line] = within(panel()).getAllByText(DUST_OVERLAY_BRIGHTNESS);
+    expect(within(panel()).getAllByText(DUST_OVERLAY_BRIGHTNESS)).toHaveLength(1);
+    expect(
+      within(panel())
+        .getByText(DUST_OVERLAY_LABEL)
+        .compareDocumentPosition(line ?? panel()),
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+
+    await user.keyboard("q");
+
+    expect(within(panel()).queryByText(DUST_OVERLAY_BRIGHTNESS)).not.toBeInTheDocument();
+  });
+
+  it("names the overlay once for the page while it is on, and not under EXTINCTION", async () => {
+    stubPageSize(...PAGE_1920_1080);
+    const { user, socket } = await renderPanel();
+    await openUniverse(user, socket);
+    await answerBothMaps(socket);
+
+    expect(within(panel()).queryByText(DUST_OVERLAY_LABEL)).not.toBeInTheDocument();
+
+    await user.keyboard("d");
+
+    expect(within(panel()).getAllByText(DUST_OVERLAY_LABEL)).toHaveLength(1);
+
+    await user.keyboard("q");
+
+    expect(within(panel()).queryByText(DUST_OVERLAY_LABEL)).not.toBeInTheDocument();
   });
 
   it("keeps its maps while the page is hidden and not laid out", async () => {
@@ -258,8 +788,198 @@ describe("GalaxyMapPanel", () => {
       window.dispatchEvent(new Event("resize"));
     });
 
-    expect(pictureWidth()).toBe("320px");
+    expect(pictureWidth()).toBe("224px");
     expect(socket.requestsOfKind("density_map")).toHaveLength(2);
     expect(socket.cancelledIds()).toEqual([]);
+  });
+
+  describe("the dust overlay's room (decision-gg-port-d0 §3.2)", () => {
+    it("offers it at 1920 × 1080, with both legends in each view and its name once", async () => {
+      stubPageSize(...PAGE_1920_1080);
+      const { user, socket } = await renderPanel();
+      await openUniverse(user, socket);
+      await answerBothMaps(socket);
+
+      await user.keyboard("d");
+      await answerBothExtinctionMaps(socket);
+
+      expect(overlayToggle()).not.toHaveAttribute("aria-disabled");
+      expect(overlayToggle()).toHaveAttribute("aria-pressed", "true");
+      for (const name of ["FACE-ON FROM NORTH", "EDGE-ON ALONG +Y"]) {
+        const view = within(panel()).getByRole("region", { name });
+        expect(within(view).getByText("COLUMN DENSITY")).toBeInTheDocument();
+        expect(within(view).getByText("EXTINCTION A(V)")).toBeInTheDocument();
+      }
+      expect(within(panel()).getAllByText(DUST_OVERLAY_LABEL)).toHaveLength(1);
+    });
+
+    it("offers it at 1920 × 1080 for a served 26 universe too, REMNANTS's line in the edge-on legend", async () => {
+      // decision-gg-port-d0 §3.2.4: the design size keeps the overlay (plan 08, P08.T15.b).
+      stubPageSize(...PAGE_1920_1080);
+      const { user, socket } = await renderPanel({ universes: [SURVEY_AT_26] });
+      await openUniverse(user, socket, SURVEY_AT_26);
+      await answerBothMaps(socket);
+      const width = pictureWidth();
+      await user.selectOptions(remnantsSelect(), "REMNANTS");
+      await answerBothMaps(socket);
+
+      // The select keeps the focus, and `D` acts over it.
+      expect(remnantsSelect()).toHaveFocus();
+      await user.keyboard("d");
+      await answerBothExtinctionMaps(socket);
+
+      expect(overlayToggle()).not.toHaveAttribute("aria-disabled");
+      expect(overlayToggle()).toHaveAttribute("aria-pressed", "true");
+      expect(remnantsLine("EDGE-ON ALONG +Y")).toBeInTheDocument();
+      expect(remnantsLine("FACE-ON FROM NORTH")).not.toBeInTheDocument();
+      expect(panel().querySelector(".galaxy-map__grid")).toHaveClass("galaxy-map__grid--stacked");
+      expect(pictureWidth()).toBe(width);
+    });
+
+    it("keeps REMNANTS's line in the edge-on view while its map is refused, the face-on picture beside it", async () => {
+      stubPageSize(...PAGE_1920_1080);
+      const { user, socket } = await renderPanel({ universes: [SURVEY_AT_26] });
+      await openUniverse(user, socket, SURVEY_AT_26);
+      await answerBothMaps(socket);
+      await user.selectOptions(remnantsSelect(), "REMNANTS");
+
+      const edgeOn = socket
+        .requestsOfKind("density_map")
+        .findLast(({ body }) => body.view === "edge_on");
+      if (edgeOn === undefined) {
+        throw new Error("the page asked for no edge-on map");
+      }
+      await server(() => {
+        socket.serverRejects(edgeOn.id, {
+          code: "queue_full",
+          message: "the bulk queue is full",
+          field: null,
+        });
+        socket.serverAnswers("density_map", mapFor);
+      });
+
+      expect(
+        within(panel()).getByRole("application", { name: "Galaxy map, face-on" }),
+      ).toBeInTheDocument();
+      expect(remnantsLine("FACE-ON FROM NORTH")).not.toBeInTheDocument();
+      expect(remnantsLine("EDGE-ON ALONG +Y")).toBeInTheDocument();
+    });
+
+    it("lays a served 26 universe's page out at 1280 × 720 as a 24 universe's, REMNANTS's line face-on", async () => {
+      stubPageSize(...PAGE_1280_720);
+      const { user, socket } = await renderPanel({ universes: [SURVEY_AT_26] });
+      await openUniverse(user, socket, SURVEY_AT_26);
+      await answerBothMaps(socket);
+      await user.selectOptions(remnantsSelect(), "REMNANTS");
+      await answerBothMaps(socket);
+
+      // The floor size's pictures, 256 px, as the plain page's; the overlay held back as there.
+      expect(panel().querySelector(".galaxy-map__grid")).toHaveClass("galaxy-map__grid--compact");
+      expect(pictureWidth()).toBe("256px");
+      expect(overlayToggle()).toHaveAttribute("aria-disabled", "true");
+      expect(describedText(overlayToggle())).toBe(OVERLAY_NO_ROOM);
+      expect(remnantsLine("FACE-ON FROM NORTH")).toBeInTheDocument();
+      expect(remnantsLine("EDGE-ON ALONG +Y")).not.toBeInTheDocument();
+    });
+
+    it("holds it back at 1280 × 720, saying there is no room for it", async () => {
+      stubPageSize(...PAGE_1280_720);
+      const { user, socket } = await renderPanel();
+      await openUniverse(user, socket);
+
+      expect(overlayToggle()).toHaveAttribute("aria-disabled", "true");
+      expect(describedText(overlayToggle())).toBe(OVERLAY_NO_ROOM);
+      expect(within(panel()).getByText(statusLine(OVERLAY_NO_ROOM))).toBeInTheDocument();
+    });
+
+    it("tracks the room's NOT AVAILABLE: and leaves its sentence, DUST OVERLAY in it, untracked", async () => {
+      stubPageSize(...PAGE_1280_720);
+      const { user, socket } = await renderPanel();
+      await openUniverse(user, socket);
+
+      const state = within(panel()).getByText("NOT AVAILABLE:");
+      expect([
+        state.className,
+        state.nextElementSibling?.className,
+        state.nextElementSibling?.textContent,
+        state.parentElement?.className,
+      ]).toEqual([
+        "status-text__state",
+        "status-text__sentence",
+        " no room for DUST OVERLAY at this window size",
+        "galaxy-map__overlay-reason",
+      ]);
+    });
+
+    it("does nothing on D or a click at 1280 × 720", async () => {
+      stubPageSize(...PAGE_1280_720);
+      const { user, socket } = await renderPanel();
+      await openUniverse(user, socket);
+      await answerBothMaps(socket);
+
+      await user.keyboard("d");
+      await user.click(overlayToggle());
+
+      expect(overlayToggle()).toHaveAttribute("aria-pressed", "false");
+      expect(socket.requestsOfKind("extinction_map")).toEqual([]);
+      expect(within(panel()).queryByText(DUST_OVERLAY_LABEL)).not.toBeInTheDocument();
+    });
+
+    it("keeps the choice while there is no room, and shows the overlay again when there is", async () => {
+      stubPageSize(...PAGE_1920_1080);
+      const { user, socket } = await renderPanel();
+      await openUniverse(user, socket);
+      await answerBothMaps(socket);
+      await user.keyboard("d");
+
+      resizePage(PAGE_1280_720);
+
+      expect(overlayToggle()).toHaveAttribute("aria-pressed", "false");
+      expect(within(panel()).queryByText(DUST_OVERLAY_LABEL)).not.toBeInTheDocument();
+
+      resizePage(PAGE_1920_1080);
+
+      expect(overlayToggle()).toHaveAttribute("aria-pressed", "true");
+      expect(within(panel()).getAllByText(DUST_OVERLAY_LABEL)).toHaveLength(1);
+    });
+
+    it("gives the room's reason before EXTINCTION's", async () => {
+      stubPageSize(...PAGE_1280_720);
+      const { user, socket } = await renderPanel();
+      await openUniverse(user, socket);
+
+      await user.click(within(panel()).getByRole("radio", { name: "EXTINCTION" }));
+
+      expect(describedText(overlayToggle())).toBe(OVERLAY_NO_ROOM);
+      expect(within(panel()).queryByText(statusLine(OVERLAY_DENSITY_ONLY))).not.toBeInTheDocument();
+    });
+
+    it("is described by the link's reason and its own while both hold", async () => {
+      stubPageSize(...PAGE_1280_720);
+      const { user, socket } = await renderPanel();
+      await openUniverse(user, socket);
+
+      act(() => {
+        socket.close();
+      });
+
+      expect(describedText(overlayToggle())).toBe(`NO CARRIER ${OVERLAY_NO_ROOM}`);
+    });
+
+    it("lays the page out the same with the overlay on as off", async () => {
+      stubPageSize(...PAGE_1920_1080);
+      const { user, socket } = await renderPanel();
+      await openUniverse(user, socket);
+      await answerBothMaps(socket);
+      const grid = panel().querySelector<HTMLElement>(".galaxy-map__grid");
+      const before = [pictureWidth(), grid?.getAttribute("style")];
+
+      await user.keyboard("d");
+
+      // With the overlay's name and its brightness line on the page, and both legends in each view.
+      expect(within(panel()).getByText(DUST_OVERLAY_BRIGHTNESS)).toBeInTheDocument();
+      expect([pictureWidth(), grid?.getAttribute("style")]).toEqual(before);
+      expect(grid).toHaveClass("galaxy-map__grid--stacked");
+    });
   });
 });

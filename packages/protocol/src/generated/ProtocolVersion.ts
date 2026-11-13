@@ -5,4 +5,4 @@
  * The version of the wire protocol, sent in every `welcome`. A server that sends
  * another version cannot serve this client.
  */
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;

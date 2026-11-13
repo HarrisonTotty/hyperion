@@ -1,9 +1,10 @@
 //! The global list's orbit integrator (plan 10, P10.T2): its force against the mass model, the
 //! leapfrog's conservation laws and reversibility, and a golden file of an orbit's bits.
 //!
-//! The (R, z) grid costs seconds to build (tens on a loaded machine), so every test here shares one
+//! The (R, z) grid costs seconds to build (tens on a loaded machine), so every test here reads one
 //! set of tables, the Milky Way fixture's, and only the golden file, the determinism check and the
-//! step checks run outside `just test-slow`. Steps follow ruling 146 of 2026-09-22: 1 ⁄ 64 of the
+//! step checks run outside `just test-slow`, as one test on one build of the tables, since nextest
+//! runs each test in a process of its own. Steps follow ruling 146 of 2026-09-22: 1 ⁄ 64 of the
 //! pericentre crossing time, at most 2 Myr ([`FixedStep`]).
 
 use std::sync::OnceLock;
@@ -40,6 +41,16 @@ fn fixture() -> &'static Fixture {
 
 fn leapfrog(step: Seconds) -> Leapfrog<'static> {
     Leapfrog::new(&fixture().tables, step).expect("the full tables and a finite step")
+}
+
+/// The leapfrog's fast checks, each below on one build of the fixture's tables ([`fixture`]), in
+/// turn: the golden orbits, first so that a failing check does not keep `just bless` from writing
+/// them, its refusal of steps it cannot take and the integration's determinism.
+#[test]
+fn the_leapfrog_refuses_bad_steps_and_its_orbits_are_pinned_and_reproducible() {
+    golden_orbits();
+    a_leapfrog_refuses_a_step_it_cannot_take();
+    the_integration_is_deterministic();
 }
 
 /// Light-years to metres.
@@ -349,7 +360,11 @@ fn the_force_is_the_gradient_of_the_potential_across_the_far_field() {
     }
 }
 
-#[test]
+/// A leapfrog refuses a step of zero of either sign, a NaN or an infinity, whether it is made with
+/// it or given it later, and takes a finite step of either sign.
+///
+/// Run on its one build of the tables by
+/// [`the_leapfrog_refuses_bad_steps_and_its_orbits_are_pinned_and_reproducible`].
 fn a_leapfrog_refuses_a_step_it_cannot_take() {
     let tables = &fixture().tables;
     for bad in [0.0, -0.0, f64::NAN, f64::INFINITY] {
@@ -637,7 +652,9 @@ fn the_summary_reads_the_turning_points() {
 /// spec (3,235–11,209 steps), the step itself, and the orbit's summary. The bits depend on the
 /// potential tables and on the step rule, so a change to the galaxy's mass model or to the rule
 /// moves them.
-#[test]
+///
+/// Run on its one build of the tables by
+/// [`the_leapfrog_refuses_bad_steps_and_its_orbits_are_pinned_and_reproducible`].
 fn golden_orbits() {
     let mut writer = GoldenWriter::new();
     writer.header(GENERATOR_VERSION.get());
@@ -684,7 +701,9 @@ fn golden_orbits() {
 
 /// The same start integrated twice, and as one run against steps one at a time, gives the same
 /// bits.
-#[test]
+///
+/// Run on its one build of the tables by
+/// [`the_leapfrog_refuses_bad_steps_and_its_orbits_are_pinned_and_reproducible`].
 fn the_integration_is_deterministic() {
     let leapfrog = leapfrog(Seconds::from(Megayears::new(0.5)));
     let s = STARTS[1];

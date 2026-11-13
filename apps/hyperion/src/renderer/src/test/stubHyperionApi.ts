@@ -35,6 +35,8 @@ export const TEST_SPIKE_LAUNCH: SpikeLaunch = {
   dawnSafety: "on",
   capture: null,
   traceProfile: "off",
+  world: "test-planet",
+  style: null,
 };
 
 /**
@@ -61,6 +63,9 @@ export function stubHyperionApi(
     serverUrl,
     graphics,
     setting,
+    framePacing: "display",
+    performanceThreads: null,
+    planetViewer: false,
     versions: { electron: "44.4.3", chrome: "142.0.0.0", node: "22.21.1" },
     ...(spike === undefined ? {} : { spike }),
     ...(viewsCheck === undefined ? {} : { viewsCheck }),

@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import type { GpuProcessGoneReport, GraphicsLaunchMode } from "../../preload/api";
 import { GPU_PROCESS_GONE_CHANNEL } from "../../preload/graphicsLaunch";
+import { CRASH_LOOP_WINDOW_MS } from "./crashLoop";
 import {
   type ChildProcessGoneDetails,
   GpuProcessMonitor,
@@ -57,6 +58,7 @@ const ARGS: readonly string[] = ["/opt/hyperion/resources/app", "--port", "9000"
 function monitor(
   mode: GraphicsLaunchMode,
   windows: ReadonlyArray<FakeWindow> = [],
+  viewsCheckLog: ((line: string) => void) | null = null,
 ): { app: FakeApp; monitor: GpuProcessMonitor; tick: (ms: number) => void } {
   const app = new FakeApp();
   let nowMs = 0;
@@ -66,6 +68,7 @@ function monitor(
     mode,
     args: ARGS,
     nowMs: () => nowMs,
+    viewsCheckLog,
   });
   return {
     app,
@@ -122,6 +125,74 @@ describe("the GPU-process monitor", () => {
     expect(app.exits).toEqual([0]);
   });
 
+  it("ends a views check with exit 1 and its line after three crashes, never relaunching", () => {
+    const lines: string[] = [];
+    const { app, tick } = monitor("vulkan", [], (line) => lines.push(line));
+    for (let crash = 0; crash < 4; crash += 1) {
+      app.gone("GPU");
+      app.infoUpdate();
+      tick(4_000);
+    }
+    expect([app.relaunches, app.exits, lines]).toEqual([
+      [],
+      [1],
+      ["views check: FAIL the GPU process crashed 3 times"],
+    ]);
+  });
+
+  it("ends a views check, never relaunching, when the feature status drops Vulkan", () => {
+    const lines: string[] = [];
+    const { app, tick } = monitor("vulkan", [], (line) => lines.push(line));
+    app.infoUpdate();
+    tick(1_000);
+    app.featureStatus = { vulkan: "disabled_off", webgpu: "enabled" };
+    app.infoUpdate();
+    expect([app.relaunches, app.exits, lines]).toEqual([
+      [],
+      [1],
+      [
+        "views check: FAIL the GPU's feature status dropped Vulkan or WebGPU (the GPU process crashed 0 times)",
+      ],
+    ]);
+  });
+
+  it("names the feature status where it dropped Vulkan after one crash in a views check", () => {
+    const lines: string[] = [];
+    const { app, tick } = monitor("vulkan", [], (line) => lines.push(line));
+    app.infoUpdate();
+    tick(1_000);
+    app.gone("GPU");
+    app.featureStatus = { vulkan: "disabled_off", webgpu: "enabled" };
+    app.infoUpdate();
+    expect([app.exits, lines]).toEqual([
+      [1],
+      [
+        "views check: FAIL the GPU's feature status dropped Vulkan or WebGPU (the GPU process crashed 1 times)",
+      ],
+    ]);
+  });
+
+  it("names the crashes where three spread past the window precede the drop that ends a views check", () => {
+    const lines: string[] = [];
+    const { app, tick } = monitor("vulkan", [], (line) => lines.push(line));
+    app.infoUpdate();
+    // Three crashes, the first and third more than the window apart: no loop of crashes.
+    for (let crash = 0; crash < 3; crash += 1) {
+      tick(CRASH_LOOP_WINDOW_MS / 2 + 1_000);
+      app.gone("GPU");
+      app.infoUpdate();
+    }
+    const exitsBeforeTheDrop = [...app.exits];
+    app.featureStatus = { vulkan: "disabled_off", webgpu: "enabled" };
+    app.infoUpdate();
+    // The status's drop made the loop, and the line names the crashes (the lean of 2026-10-29).
+    expect([exitsBeforeTheDrop, app.exits, lines]).toEqual([
+      [],
+      [1],
+      ["views check: FAIL the GPU process crashed 3 times"],
+    ]);
+  });
+
   it("relaunches when the feature status drops Vulkan", () => {
     const { app, tick } = monitor("vulkan");
     app.infoUpdate();
@@ -129,6 +200,16 @@ describe("the GPU-process monitor", () => {
     app.featureStatus = { vulkan: "disabled_off", webgpu: "enabled" };
     app.infoUpdate();
     expect(app.relaunches).toHaveLength(1);
+  });
+
+  it("never ends a views check in safe mode", () => {
+    const lines: string[] = [];
+    const { app, tick } = monitor("safe", [], (line) => lines.push(line));
+    for (let crash = 0; crash < 4; crash += 1) {
+      app.gone("GPU");
+      tick(1_000);
+    }
+    expect([app.relaunches, app.exits, lines]).toEqual([[], [], []]);
   });
 
   it("never relaunches in safe mode", () => {

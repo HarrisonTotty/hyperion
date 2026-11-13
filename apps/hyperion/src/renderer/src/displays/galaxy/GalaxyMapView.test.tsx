@@ -4,19 +4,26 @@ import userEvent from "@testing-library/user-event";
 import { Activity } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { RECONNECT_DELAY_MS } from "../../lib/connection";
 import type { CentreLy } from "../../lib/galaxy/model";
+import { buildRamp, parseHexColour, rampColour } from "../../lib/galaxy/ramp";
 import { FakeWebSocket } from "../../test/FakeWebSocket";
-import { aDensityMap, UNIVERSE_ID } from "../../test/galaxyFixtures";
+import { aDensityMap, anExtinctionMap, UNIVERSE_ID } from "../../test/galaxyFixtures";
 import { announcements } from "../../test/liveRegions";
 import { type RecordingContext2D, stubCanvas } from "../../test/RecordingContext2D";
 import { ServerLinkHarness } from "../../test/ServerLinkHarness";
-import { GalaxyMapView } from "./GalaxyMapView";
+import { DUST_OVERLAY_LABEL, GalaxyMapView, type MapQuantity } from "./GalaxyMapView";
+import { StaleWaits } from "./staleWaits";
+import { statusLine } from "../../test/statusLine";
 
 /** An 8 × 8 face-on map: the background, then every code up to the ceiling. */
 const FACE_ON_CODES = Array.from({ length: 64 }, (_, pixel) => pixel * 4);
 
 /** An 8 × 4 edge-on map. */
 const EDGE_ON_CODES = Array.from({ length: 32 }, (_, pixel) => pixel * 8);
+
+/** The ID of the page's line for the views' wait, which a stale canvas is described by. */
+const PAGE_WAIT_ID = "page-wait";
 
 /** Plays the server's side, letting the outcomes it settles reach React. */
 async function server(play: () => void): Promise<void> {
@@ -29,6 +36,8 @@ async function server(play: () => void): Promise<void> {
 interface ViewSpec {
   readonly view?: MapView;
   readonly population?: MapPopulation;
+  readonly quantity?: MapQuantity;
+  readonly dustOverlay?: boolean;
   readonly pictureWidthPx?: number;
   readonly devicePixelRatio?: number;
   readonly cursorLy?: CentreLy;
@@ -38,28 +47,49 @@ interface ViewSpec {
   readonly displayHidden?: boolean;
 }
 
-function viewOf({
-  view = "face_on",
-  population = "all",
-  pictureWidthPx = 400,
-  devicePixelRatio = 1,
-  cursorLy = [0, 0, 0],
-  onCursor = () => undefined,
-  centreLy = null,
-  displayHidden = false,
-}: ViewSpec) {
+/**
+ * The view, reporting its stale wait to `staleWaits`, beside a stand-in for the page's line for the
+ * views' wait, which describes a stale picture.
+ */
+function viewOf(
+  {
+    view = "face_on",
+    population = "all",
+    quantity = "column_density",
+    dustOverlay = false,
+    pictureWidthPx = 400,
+    devicePixelRatio = 1,
+    cursorLy = [0, 0, 0],
+    onCursor = () => undefined,
+    centreLy = null,
+    displayHidden = false,
+  }: ViewSpec,
+  staleWaits: StaleWaits,
+) {
   return (
     <ServerLinkHarness>
+      <p id={PAGE_WAIT_ID}>WAIT</p>
       <Activity mode={displayHidden ? "hidden" : "visible"}>
         <GalaxyMapView
           universe={UNIVERSE_ID}
           view={view}
           population={population}
+          statesPopulation={false}
+          quantity={quantity}
+          dustOverlay={dustOverlay}
           pictureWidthPx={pictureWidthPx}
           devicePixelRatio={devicePixelRatio}
           cursorLy={cursorLy}
           onCursor={onCursor}
           centreLy={centreLy}
+          staleWaits={staleWaits}
+          pageWaitId={PAGE_WAIT_ID}
+          remPx={16}
+          featureLayers={null}
+          featureKinds={new Set()}
+          globalList={null}
+          streamTracks={new Map()}
+          streamKinds={new Set()}
         />
       </Activity>
     </ServerLinkHarness>
@@ -77,7 +107,8 @@ function putPixels(recorder: RecordingContext2D, index = 0): Uint8ClampedArray {
 
 function renderView(spec: ViewSpec = {}) {
   const recorder = stubCanvas();
-  const result = render(viewOf(spec));
+  const staleWaits = new StaleWaits();
+  const result = render(viewOf(spec, staleWaits));
   const socket = FakeWebSocket.latest();
   act(() => {
     socket.serverWelcomes();
@@ -85,9 +116,11 @@ function renderView(spec: ViewSpec = {}) {
   return {
     socket,
     recorder,
+    staleWaits,
     rerender: (next: ViewSpec) => {
-      result.rerender(viewOf(next));
+      result.rerender(viewOf(next, staleWaits));
     },
+    unmount: result.unmount,
   };
 }
 
@@ -106,6 +139,27 @@ async function answerFaceOn(socket: FakeWebSocket): Promise<void> {
       aDensityMap({ codes: FACE_ON_CODES, widthPx: 8, heightPx: 8, population: body.population }),
     );
   });
+}
+
+/** Drops the link with fake timers running, so that its return can be brought on. */
+async function dropLink(socket: FakeWebSocket): Promise<void> {
+  vi.useFakeTimers();
+  await server(() => {
+    socket.close();
+  });
+}
+
+/** Brings the link back on a new socket, after the client's delay. */
+function restoreLink(): FakeWebSocket {
+  act(() => {
+    vi.advanceTimersByTime(RECONNECT_DELAY_MS);
+  });
+  vi.useRealTimers();
+  const next = FakeWebSocket.latest();
+  act(() => {
+    next.serverWelcomes();
+  });
+  return next;
 }
 
 /** Keeps a `focusout` from React, which hears `blur` through it: a focus lost unheard. */
@@ -448,7 +502,27 @@ describe("GalaxyMapView", () => {
     expect(
       screen.getByRole("application", { name: "Galaxy map, face-on, stale" }),
     ).toBeInTheDocument();
-    expect(within(faceOn()).getByRole("status")).toHaveTextContent("PENDING");
+  });
+
+  it("sets no status line among a stale view's words, and reports its wait to the page", async () => {
+    const { socket, staleWaits, rerender } = renderView({ pictureWidthPx: 300 });
+    await answerFaceOn(socket);
+
+    rerender({ pictureWidthPx: 400 });
+
+    expect(within(faceOn()).queryByRole("status")).not.toBeInTheDocument();
+    expect(staleWaits.getSnapshot()).toEqual({ face_on: "map", edge_on: null });
+  });
+
+  it("describes a stale picture by the page's line beside its key hint", async () => {
+    const { socket, rerender } = renderView({ pictureWidthPx: 300 });
+    await answerFaceOn(socket);
+
+    rerender({ pictureWidthPx: 400 });
+
+    expect(
+      screen.getByRole("application", { name: "Galaxy map, face-on, stale" }),
+    ).toHaveAccessibleDescription("ARROWS MOVE CURSOR WAIT");
   });
 
   it("draws the stale picture at the new size", async () => {
@@ -496,14 +570,60 @@ describe("GalaxyMapView", () => {
     await answerBrightFaceOn(socket);
 
     expect(screen.getByRole("application", { name: "Galaxy map, face-on" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("application", { name: "Galaxy map, face-on" }),
+    ).toHaveAccessibleDescription("ARROWS MOVE CURSOR");
     expect(within(faceOn()).queryByText("S")).not.toBeInTheDocument();
     expect(within(faceOn()).queryByRole("status")).not.toBeInTheDocument();
     const reds = Array.from({ length: 64 }, (_, pixel) => putPixels(recorder)[pixel * 4] ?? 0);
     expect(Math.max(...reds)).toBe(0xc8);
   });
 
-  it("keeps the stale picture beside a failure of the new map, with RETRY", async () => {
-    const { socket, rerender } = renderView({ pictureWidthPx: 300 });
+  it("clears its stale wait while its display is hidden or once it unmounts, and reports it again when shown", async () => {
+    const { socket, staleWaits, rerender, unmount } = renderView({ pictureWidthPx: 300 });
+    await answerFaceOn(socket);
+    rerender({ pictureWidthPx: 400 });
+    expect(staleWaits.getSnapshot()).toEqual({ face_on: "map", edge_on: null });
+
+    rerender({ pictureWidthPx: 400, displayHidden: true });
+    expect(staleWaits.getSnapshot()).toEqual({ face_on: null, edge_on: null });
+
+    rerender({ pictureWidthPx: 400, displayHidden: false });
+    expect(staleWaits.getSnapshot()).toEqual({ face_on: "map", edge_on: null });
+
+    unmount();
+    expect(staleWaits.getSnapshot()).toEqual({ face_on: null, edge_on: null });
+  });
+
+  it("reports no wait once the new map arrives", async () => {
+    const { socket, staleWaits, rerender } = renderView({ pictureWidthPx: 300 });
+    await answerFaceOn(socket);
+    rerender({ pictureWidthPx: 400 });
+
+    await answerFaceOn(socket);
+
+    expect(staleWaits.getSnapshot()).toEqual({ face_on: null, edge_on: null });
+  });
+
+  it("keeps the stale picture with the link down, leaving the link's state to the page", async () => {
+    const { socket, staleWaits, rerender } = renderView({ pictureWidthPx: 300 });
+    await answerFaceOn(socket);
+    act(() => {
+      socket.close();
+    });
+
+    rerender({ pictureWidthPx: 400 });
+
+    expect(
+      screen.getByRole("application", { name: "Galaxy map, face-on, stale" }),
+    ).toBeInTheDocument();
+    expect(within(faceOn()).getAllByText("S")).toHaveLength(2);
+    expect(within(faceOn()).queryByRole("status")).not.toBeInTheDocument();
+    expect(staleWaits.getSnapshot()).toEqual({ face_on: null, edge_on: null });
+  });
+
+  it("drops the stale picture for a failure of the new map, which stands in its place with RETRY", async () => {
+    const { socket, staleWaits, rerender } = renderView({ pictureWidthPx: 300 });
     await answerFaceOn(socket);
     rerender({ pictureWidthPx: 400 });
     const [, second] = socket.requestsOfKind("density_map");
@@ -517,12 +637,162 @@ describe("GalaxyMapView", () => {
     });
 
     expect(
-      screen.getByRole("application", { name: "Galaxy map, face-on, stale" }),
-    ).toBeInTheDocument();
-    expect(within(faceOn()).getByRole("status")).toHaveTextContent(
+      screen.queryByRole("application", { name: /Galaxy map, face-on/ }),
+    ).not.toBeInTheDocument();
+    expect(within(faceOn()).queryByText("S")).not.toBeInTheDocument();
+    const area = faceOn().querySelector<HTMLElement>(".map-view__area");
+    expect(area).not.toBeNull();
+    expect(within(area ?? faceOn()).getByRole("status")).toHaveTextContent(
       "REJECTED: the bulk queue is full",
     );
+    expect(within(area ?? faceOn()).getByRole("button", { name: "RETRY" })).toBeInTheDocument();
+    expect(staleWaits.getSnapshot()).toEqual({ face_on: null, edge_on: null });
+  });
+
+  it("drops the stale picture for a new map that times out", async () => {
+    const { socket, staleWaits, rerender } = renderView({ pictureWidthPx: 300 });
+    await answerFaceOn(socket);
+    vi.useFakeTimers();
+    rerender({ pictureWidthPx: 400 });
+
+    act(() => {
+      vi.advanceTimersByTime(120_000);
+    });
+
+    expect(
+      screen.queryByRole("application", { name: /Galaxy map, face-on/ }),
+    ).not.toBeInTheDocument();
+    expect(within(faceOn()).getByRole("status")).toHaveTextContent("TIMED OUT");
     expect(within(faceOn()).getByRole("button", { name: "RETRY" })).toBeInTheDocument();
+    expect(staleWaits.getSnapshot()).toEqual({ face_on: null, edge_on: null });
+  });
+
+  it("drops the stale picture for a new map that fails its checks", async () => {
+    const { socket, rerender } = renderView({ pictureWidthPx: 300 });
+    await answerFaceOn(socket);
+    rerender({ pictureWidthPx: 400 });
+
+    await server(() => {
+      socket.serverAnswers("density_map", () => ({
+        ...aDensityMap({ codes: FACE_ON_CODES, widthPx: 8, heightPx: 8 }),
+        data_base64: "",
+      }));
+    });
+
+    expect(
+      screen.queryByRole("application", { name: /Galaxy map, face-on/ }),
+    ).not.toBeInTheDocument();
+    expect(within(faceOn()).getByRole("status")).toHaveTextContent(
+      "MAP DATA INVALID: pixel codes unreadable",
+    );
+    expect(within(faceOn()).getByRole("button", { name: "RETRY" })).toBeInTheDocument();
+  });
+
+  it("asks again from PENDING, with no stale picture, when RETRY follows a failed new map", async () => {
+    const user = userEvent.setup();
+    const { socket, rerender } = renderView({ pictureWidthPx: 300 });
+    await answerFaceOn(socket);
+    rerender({ pictureWidthPx: 400 });
+    const [, second] = socket.requestsOfKind("density_map");
+    await server(() => {
+      socket.serverRejects(second?.id ?? -1, {
+        code: "queue_full",
+        message: "the bulk queue is full",
+        field: null,
+      });
+    });
+
+    await user.click(within(faceOn()).getByRole("button", { name: "RETRY" }));
+
+    expect(socket.requestsOfKind("density_map")).toHaveLength(3);
+    expect(within(faceOn()).getByRole("status")).toHaveTextContent("PENDING");
+    expect(
+      screen.queryByRole("application", { name: /Galaxy map, face-on/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  describe("with the link down (decision-gg-port-a2 §3)", () => {
+    it("marks an answered picture stale, named so, with its S", async () => {
+      const { socket } = renderView();
+      await answerFaceOn(socket);
+
+      await dropLink(socket);
+
+      const canvas = screen.getByRole("application", { name: "Galaxy map, face-on, stale" });
+      expect(canvas).toHaveAccessibleDescription("ARROWS MOVE CURSOR WAIT");
+      expect(within(faceOn()).getAllByText("S")).toHaveLength(2);
+    });
+
+    it("paints an answered picture up to --text-muted while the link is down", async () => {
+      const { socket, recorder } = renderView();
+      await answerBrightFaceOn(socket);
+      recorder.clear();
+
+      await dropLink(socket);
+
+      const reds = Array.from({ length: 64 }, (_, pixel) => putPixels(recorder)[pixel * 4] ?? 0);
+      expect(Math.max(...reds)).toBe(0x8a);
+    });
+
+    it("draws the legend's bar on the stale ramp while the link is down", async () => {
+      const { socket } = renderView();
+      await answerFaceOn(socket);
+
+      await dropLink(socket);
+
+      // The bar's last step, level 251, of the ramp up to --text-muted, #8a9db3.
+      const stale = buildRamp(parseHexColour("#05080d"), parseHexColour("#8a9db3"));
+      const steps = within(faceOn())
+        .getByRole("img", { name: /^Column density legend/ })
+        .querySelectorAll("rect");
+      expect(steps[31]).toHaveAttribute("fill", rampColour(stale, 251));
+    });
+
+    it("mutes both readings under the cursor with their S, under the overlay", async () => {
+      const { socket } = renderView({ dustOverlay: true });
+      await answerFaceOn(socket);
+      await server(() => {
+        socket.serverAnswers("extinction_map", () =>
+          anExtinctionMap({ codes: FACE_ON_CODES, widthPx: 8, heightPx: 8 }),
+        );
+      });
+
+      await dropLink(socket);
+
+      for (const label of ["CURSOR DENSITY", "CURSOR A(V)"]) {
+        expect(within(faceOn()).getByText(label).parentElement).toHaveTextContent(/S\s*stale$/);
+      }
+    });
+
+    it("mutes BELOW FLOOR with its S", async () => {
+      const { socket } = renderView({ cursorLy: [0, 0, 0] });
+      await server(() => {
+        socket.serverAnswers("density_map", () =>
+          aDensityMap({ codes: Array<number>(64).fill(0), widthPx: 8, heightPx: 8 }),
+        );
+      });
+
+      await dropLink(socket);
+
+      expect(within(faceOn()).getByText(/BELOW FLOOR/)).toHaveTextContent(
+        /^BELOW FLOOR\s*S\s*stale$/,
+      );
+    });
+
+    it("reads current again when the link returns, without asking again", async () => {
+      const { socket, recorder } = renderView();
+      await answerBrightFaceOn(socket);
+      await dropLink(socket);
+      recorder.clear();
+
+      const next = restoreLink();
+
+      expect(screen.getByRole("application", { name: "Galaxy map, face-on" })).toBeInTheDocument();
+      expect(within(faceOn()).queryByText("S")).not.toBeInTheDocument();
+      expect(next.requestsOfKind("density_map")).toEqual([]);
+      const reds = Array.from({ length: 64 }, (_, pixel) => putPixels(recorder)[pixel * 4] ?? 0);
+      expect(Math.max(...reds)).toBe(0xc8);
+    });
   });
 
   it("keeps no picture of another population, which is other data", async () => {
@@ -835,5 +1105,227 @@ describe("GalaxyMapView", () => {
     await answerFaceOn(socket);
 
     expect(within(faceOn()).queryByRole("img", { name: "Chart centre" })).not.toBeInTheDocument();
+  });
+
+  describe("with the extinction map (plan 07, P07.T11.b)", () => {
+    /** An 8 × 8 extinction map from 0.01 to 10 mag: code 1 at the floor, 255 at 10 mag. */
+    async function answerExtinction(socket: FakeWebSocket, codes: ReadonlyArray<number>) {
+      await server(() => {
+        socket.serverAnswers("extinction_map", () =>
+          anExtinctionMap({ codes, widthPx: 8, heightPx: 8 }),
+        );
+      });
+    }
+
+    it("asks for the extinction map alone under EXTINCTION, at the density map's resolution", () => {
+      const { socket } = renderView({ quantity: "extinction", view: "edge_on" });
+
+      expect(socket.requestsOfKind("density_map")).toEqual([]);
+      expect(socket.requestsOfKind("extinction_map").map(({ body }) => body)).toEqual([
+        {
+          kind: "extinction_map",
+          universe: UNIVERSE_ID,
+          view: "edge_on",
+          resolution: 512,
+          bits: 16,
+        },
+      ]);
+    });
+
+    it("asks under the overlay for the density map at 8 bits and the extinction map at 16, at one resolution", () => {
+      const { socket } = renderView({ dustOverlay: true });
+
+      const depths = (kind: "density_map" | "extinction_map") =>
+        socket.requestsOfKind(kind).map(({ body }) => [body.resolution, body.bits]);
+      expect({ density: depths("density_map"), extinction: depths("extinction_map") }).toEqual({
+        density: [[512, 8]],
+        extinction: [[512, 16]],
+      });
+    });
+
+    it("shows the extinction with its own legend, unit and floor, and A(V) under the cursor", async () => {
+      const { socket } = renderView({ quantity: "extinction" });
+
+      await answerExtinction(socket, Array<number>(64).fill(255));
+
+      const view = faceOn();
+      expect(
+        within(view).getByRole("application", { name: "Galaxy map, face-on, extinction" }),
+      ).toBeInTheDocument();
+      expect(within(view).getByText("EXTINCTION A(V)")).toBeInTheDocument();
+      expect(
+        within(view).getByText("mag", { selector: ".density-legend__unit" }),
+      ).toBeInTheDocument();
+      expect(within(view).getByText("LOG SCALE")).toBeInTheDocument();
+      expect(
+        within(view).getByText("FLOOR 0.01 mag: AT OR BELOW SHOWN AS BACKGROUND"),
+      ).toBeInTheDocument();
+      expect(within(view).queryByText("COLUMN DENSITY")).not.toBeInTheDocument();
+      expect(within(view).getByText("CURSOR A(V)").parentElement).toHaveTextContent(
+        "CURSOR A(V) 10.00 mag",
+      );
+      expect(within(view).queryByText(DUST_OVERLAY_LABEL)).not.toBeInTheDocument();
+    });
+
+    // From the floor of 0.01 mag to a ceiling of 50 mag the span is log₁₀ 50 + 2 = 3.69897 dex, and
+    // a 16-bit code stands for 10^(−2 + (code − 1) × 3.69897 ÷ 65,534) mag: 63,817 for 39.9945,
+    // 63,818 for 39.9997 and 63,819 for 40.0049. At 8 bits the nearest code to 40 mag, 248, stands
+    // for 10^(−2 + 247 × 3.69897 ÷ 254) = 39.54 mag, and its neighbours for 38.24 and 40.89 mag,
+    // 1.30 and 1.35 mag away, so only the 16-bit map holds the second decimal.
+    it.each([
+      [63_817, "39.99"],
+      [63_818, "40.00"],
+      [63_819, "40.00"],
+    ])(
+      "reads A(V) under the cursor to two decimals from a 16-bit map: code %i as %s mag",
+      async (code, reading) => {
+        const { socket } = renderView({ quantity: "extinction" });
+
+        await server(() => {
+          socket.serverAnswers("extinction_map", () =>
+            anExtinctionMap({
+              codes: Array<number>(64).fill(code),
+              widthPx: 8,
+              heightPx: 8,
+              ceilingLog10Mag: Math.log10(50),
+              bits: 16,
+            }),
+          );
+        });
+
+        expect(within(faceOn()).getByText("CURSOR A(V)").parentElement).toHaveTextContent(
+          `CURSOR A(V) ${reading} mag`,
+        );
+      },
+    );
+
+    it("waits for both maps under the overlay, then shows both legends", async () => {
+      const { socket } = renderView({ dustOverlay: true });
+
+      expect(socket.requestsOfKind("density_map")).toHaveLength(1);
+      expect(socket.requestsOfKind("extinction_map")).toHaveLength(1);
+      await answerFaceOn(socket);
+      expect(within(faceOn()).getByRole("status")).toHaveTextContent("EXTINCTION PENDING");
+      expect(screen.queryByRole("application")).not.toBeInTheDocument();
+
+      await answerExtinction(socket, Array<number>(64).fill(0));
+
+      const view = faceOn();
+      expect(
+        within(view).getByRole("application", { name: "Galaxy map, face-on, dust overlay" }),
+      ).toBeInTheDocument();
+      // The page names the overlay, once for both views.
+      expect(within(view).queryByText(DUST_OVERLAY_LABEL)).not.toBeInTheDocument();
+      expect(within(view).getByText("COLUMN DENSITY")).toBeInTheDocument();
+      expect(within(view).getByText("EXTINCTION A(V)")).toBeInTheDocument();
+      expect(within(view).getByText("CURSOR DENSITY")).toBeInTheDocument();
+      expect(within(view).getByText("CURSOR A(V)").parentElement).toHaveTextContent(
+        "CURSOR A(V) BELOW FLOOR",
+      );
+    });
+
+    it("reports a stale wait on the extinction map alone as the overlay's, once the density has come", async () => {
+      const { socket, staleWaits, rerender } = renderView({
+        dustOverlay: true,
+        pictureWidthPx: 300,
+      });
+      await answerFaceOn(socket);
+      await answerExtinction(socket, FACE_ON_CODES);
+      rerender({ dustOverlay: true, pictureWidthPx: 400 });
+      expect(staleWaits.getSnapshot().face_on).toBe("map");
+
+      await answerFaceOn(socket);
+
+      expect(
+        screen.getByRole("application", { name: "Galaxy map, face-on, dust overlay, stale" }),
+      ).toBeInTheDocument();
+      expect(staleWaits.getSnapshot().face_on).toBe("extinction");
+    });
+
+    it("reports a stale wait under EXTINCTION as its own map's, plain", async () => {
+      const { socket, staleWaits, rerender } = renderView({
+        quantity: "extinction",
+        pictureWidthPx: 300,
+      });
+      await answerExtinction(socket, FACE_ON_CODES);
+
+      rerender({ quantity: "extinction", pictureWidthPx: 400 });
+
+      expect(staleWaits.getSnapshot().face_on).toBe("map");
+    });
+
+    it("dims the density by the dust before painting it", async () => {
+      // Every density pixel at the ceiling; 10 mag of dust takes 4 dex, 4 × 254 ÷ 5 = 203.2 codes,
+      // off it, and no dust leaves it where it was.
+      const density = Array<number>(64).fill(255);
+      const dust = Array<number>(64).fill(0);
+      dust[0] = 255;
+      const { socket, recorder } = renderView({ dustOverlay: true });
+
+      await server(() => {
+        socket.serverAnswers("density_map", () =>
+          aDensityMap({ codes: density, widthPx: 8, heightPx: 8 }),
+        );
+      });
+      await answerExtinction(socket, dust);
+
+      // The raster's first pixel is the turned picture's top right, as in the undimmed test above.
+      const pixels = putPixels(recorder);
+      const red = (pixel: number): number => pixels[pixel * 4] ?? -1;
+      expect(red(7)).toBeLessThan(red(6));
+      expect(red(6)).toBe(0xc8);
+    });
+
+    it("reads MAP DATA INVALID when the two maps of the overlay do not cover the same pixels", async () => {
+      const { socket } = renderView({ dustOverlay: true });
+      await answerFaceOn(socket);
+
+      await server(() => {
+        socket.serverAnswers("extinction_map", () =>
+          anExtinctionMap({ codes: Array<number>(256).fill(1), widthPx: 16, heightPx: 16 }),
+        );
+      });
+
+      expect(
+        within(faceOn()).getByText(
+          statusLine("MAP DATA INVALID: density and extinction maps do not match"),
+        ),
+      ).toBeInTheDocument();
+      expect(within(faceOn()).getByRole("button", { name: "RETRY" })).toBeInTheDocument();
+    });
+
+    it("reads MAP DATA INVALID for an extinction map whose range cannot be drawn", async () => {
+      const { socket } = renderView({ quantity: "extinction" });
+
+      await server(() => {
+        socket.serverAnswers("extinction_map", () =>
+          anExtinctionMap({
+            codes: Array<number>(64).fill(1),
+            widthPx: 8,
+            heightPx: 8,
+            floorLog10Mag: 1,
+            ceilingLog10Mag: -2,
+          }),
+        );
+      });
+
+      expect(
+        within(faceOn()).getByText(statusLine("MAP DATA INVALID: extinction range unusable")),
+      ).toBeInTheDocument();
+    });
+
+    it("reads the density and A(V) under the cursor in one live region under the overlay", async () => {
+      const { socket, rerender } = renderView({ dustOverlay: true });
+      await answerFaceOn(socket);
+      await answerExtinction(socket, Array<number>(64).fill(128));
+      act(() => {
+        screen.getByRole("application", { name: "Galaxy map, face-on, dust overlay" }).focus();
+      });
+
+      const announced = await announcedOnMove(rerender, { dustOverlay: true });
+
+      expect(announced).toHaveLength(1);
+      expect(announced[0]).toHaveTextContent(/CURSOR DENSITY.*CURSOR A\(V\)/);
+    });
   });
 });

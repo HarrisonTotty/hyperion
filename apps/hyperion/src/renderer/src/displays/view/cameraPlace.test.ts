@@ -3,10 +3,12 @@ import { describe, expect, it } from "vitest";
 
 import { localFrameAt } from "../../geometry/frame";
 import { normalise, vec3 } from "../../geometry/vec3";
+import { stateInSystem, stateNearEarth } from "../../test/sceneFixture";
 import type { CameraPose } from "../../view/camera/pose";
 import { IDENTITY_QUATERNION, lookAlong } from "../../view/camera/quaternion";
 import { AU_M } from "../../view/scenes/kept";
 import { precisionScene } from "../../view/scenes/precision";
+import { servedRun } from "../../test/servedRun";
 import { cameraPlace, directionReading, placeLines, placeStale } from "./cameraPlace";
 import { startRun, type ViewRun } from "./viewRun";
 
@@ -179,4 +181,28 @@ describe("a camera's place going stale (R07.T19.f)", () => {
     ]);
     expect(placeLines(seat, false).map((line) => line.stale === true)).toEqual([false, false]);
   });
+});
+
+describe("where a view's camera is from the own ship in a served system (R10.T12; decision-r10-ship-frame §3)", () => {
+  it.each([
+    ["SEAT", "seat"],
+    ["CHASE", "chase"],
+  ] as const)(
+    "reads POSITION in %s as the range from the centre of the served Earth, 10,000 km off",
+    (_name, preset) => {
+      expect(cameraPlace(servedRun(stateNearEarth(), preset), null).position).toMatch(
+        /^10\.0 Mm /u,
+      );
+    },
+  );
+
+  it.each([
+    ["SEAT", "seat"],
+    ["CHASE", "chase"],
+  ] as const)(
+    "reads POSITION in %s as the range from the barycentre with the ship 1 au out, outside every sphere",
+    (_name, preset) => {
+      expect(cameraPlace(servedRun(stateInSystem(), preset), null).position).toMatch(/^1\.00 AU /u);
+    },
+  );
 });

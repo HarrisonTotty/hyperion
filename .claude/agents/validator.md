@@ -35,16 +35,21 @@ checks, task acceptance, and the gate.
   `log=$(mktemp); cargo test -p hyperion-sim >"$log" 2>&1; echo "exit=$?"`, then
   `grep -nE '^(error|warning)|FAILED|panicked|^test .* \.\.\. FAILED' "$log" | head -50`, and read
   the region around a hit.
-- Give long commands a generous timeout, up to 10 minutes. `just ci` includes the slow statistical
-  tests and can take several minutes.
+- Give long commands a generous timeout, up to 10 minutes. The gate, `just smart-ci`, runs the steps
+  of `just ci` that the change reaches, and of the suites only the tests that reach the changed
+  code (its plan says how many, and why); it can take several minutes, and runs the full `just ci`'s
+  phases when the change touches an input of the whole workspace. Run it with `SMART_CI_SLOT` set
+  to the build-slot command, not inside build-slot, and report its plan's test counts with the
+  verdict. `just smart-ci --all-tests` is the escape hatch: every test of the changed crates.
 - In acceptance criteria:
   - A `grep` criterion ("finds matches only in X"): run it and judge it by the plan's wording.
   - A step marked "by hand", "by eye" or "do not commit": don't do it. List it as manual.
   - A benchmark target ("a miss is a finding"): if the criterion names a benchmark, run it with a
     filter (`just bench -- <name>`) and report the timings against the targets. A miss never
     fails validation.
-- A command listed in more than one tier (usually `just ci` in the acceptance criteria and the
-  gate) runs once, where it comes last.
+- A command listed in more than one tier runs once, where it comes last. A `just ci` in the
+  acceptance criteria is met by the gate's `just smart-ci`: a lane's gate is smart-ci, and
+  integration runs the full `just ci`.
 - Run commands exactly as the plan writes them, including any `TS_RS_EXPORT_DIR=…` prefix: it
   stops the tests from rewriting the checked-in protocol bindings.
 - A command that can't run (a recipe that doesn't exist yet, a by-hand step) is SKIPPED with its

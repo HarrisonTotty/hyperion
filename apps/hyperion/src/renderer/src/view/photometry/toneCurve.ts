@@ -22,6 +22,8 @@
  * applies around the tone mapper. See NOTICE at the repository root.
  */
 
+import { log2, pow } from "../../lib/pinnedMath";
+
 /**
  * A linear colour, one value per channel (red, green, blue): the one per-channel triple R05, R07
  * and R08 share.
@@ -44,7 +46,8 @@ function fromColumns(m: readonly number[]): Rows3 {
   ];
 }
 
-function times(a: Rows3, b: Rows3): Rows3 {
+/** `a · b`, as rows. */
+export function times(a: Rows3, b: Rows3): Rows3 {
   const cell = (i: 0 | 1 | 2, j: 0 | 1 | 2): number =>
     a[i][0] * b[0][j] + a[i][1] * b[1][j] + a[i][2] * b[2][j];
   return [
@@ -54,7 +57,8 @@ function times(a: Rows3, b: Rows3): Rows3 {
   ];
 }
 
-function inverse(m: Rows3): Rows3 {
+/** A 3 × 3 matrix's inverse, by the adjugate, for a matrix that has one. */
+export function inverseRows(m: Rows3): Rows3 {
   const [[a, b, c], [d, e, f], [g, h, i]] = m;
   const determinant = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
   const k = 1 / determinant;
@@ -75,7 +79,8 @@ export function applyRows(m: Rows3, v: Rgb): Rgb {
 }
 
 // Filament's ColorSpaceUtils.h, as written there (columns).
-const SRGB_TO_XYZ = fromColumns([
+/** Linear sRGB (D65) to CIE XYZ, as rows: Filament's `sRGB_to_XYZ`. */
+export const SRGB_TO_XYZ = fromColumns([
   0.412456, 0.212673, 0.0193339, 0.357576, 0.715152, 0.119192, 0.180438, 0.072175, 0.950304,
 ]);
 /** CIE XYZ to linear sRGB (D65), as rows: Filament's `XYZ_to_sRGB`. */
@@ -113,7 +118,7 @@ const AGX_OUTSET_INVERSE: Rows3 = fromColumns([
 ]);
 
 /** AgX's outset matrix, as rows: the inverse of `AgXOutsetMatrixInv`, as Filament builds it. */
-export const AGX_OUTSET: Rows3 = inverse(AGX_OUTSET_INVERSE);
+export const AGX_OUTSET: Rows3 = inverseRows(AGX_OUTSET_INVERSE);
 
 /** The bottom of AgX's log encoding, stops: log₂(2^−10 × 0.18) (Filament's `AgxMinEv`). */
 export const AGX_MIN_EV = -12.47393;
@@ -149,7 +154,7 @@ export function agxSigmoid(x: number): number {
 function agxRec2020(v: Rgb): Rgb {
   const inset = applyRows(AGX_INSET, [Math.max(0, v[0]), Math.max(0, v[1]), Math.max(0, v[2])]);
   const encoded = inset.map((channel) => {
-    const logEv = Math.log2(Math.max(channel, 1e-10));
+    const logEv = log2(Math.max(channel, 1e-10));
     const x = (logEv - AGX_MIN_EV) / (AGX_MAX_EV - AGX_MIN_EV);
     return agxSigmoid(Math.min(1, Math.max(0, x)));
   });
@@ -159,9 +164,9 @@ function agxRec2020(v: Rgb): Rgb {
     encoded[2] ?? Number.NaN,
   ]);
   return [
-    Math.max(0, outset[0]) ** 2.2,
-    Math.max(0, outset[1]) ** 2.2,
-    Math.max(0, outset[2]) ** 2.2,
+    pow(Math.max(0, outset[0]), 2.2),
+    pow(Math.max(0, outset[1]), 2.2),
+    pow(Math.max(0, outset[2]), 2.2),
   ];
 }
 

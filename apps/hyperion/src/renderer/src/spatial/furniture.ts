@@ -10,6 +10,10 @@
  * (decision-r07-quality-and-destination, Q6 (b) to (d); R07.T16.j): the triad's labels keep clear
  * of the other axes' symbols and lines, the core arrow's label of its own arrow, and the curve
  * labels of the marks' stalks and symbols, each giving up that clearance only as its last resort.
+ * An annulus's label has no last resort: it is placed after the marks' labels, or, a selected
+ * annulus's, before them (plan 14, P14.T42.e), apart from every label and off every mark's
+ * bracket's box but, for a ring's label, its own planet's while no reticle is drawn about it
+ * (P14.T42.g), or not at all (plan 14, P14.T42.d).
  */
 
 import {
@@ -22,7 +26,15 @@ import { type CameraAngles, viewBasis, type ViewBasis, type Viewport } from "./c
 import type { CircleLabel, CurveLabel, DrawOp, ScreenPoint, SymbolOp } from "./drawList";
 import type { LocalFrame } from "../geometry/frame";
 import { type BoxPx, halfExtentRem, type TextSizeRem, textSizeRem } from "./labels";
-import { boxGapPx, LABEL_EDGE_CLEARANCE_REM, symbolOutline, unitInradius } from "./symbols";
+import {
+  boxGapPx,
+  GREEK_CROSS_ARM_SHARE,
+  LABEL_EDGE_CLEARANCE_REM,
+  LABEL_NEIGHBOUR_CLEARANCE_REM,
+  LABEL_TEXT_CLEARANCE_REM,
+  symbolOutline,
+  unitInradius,
+} from "./symbols";
 import { dot, type Vec3 } from "../geometry/vec3";
 
 /** The letter spacing of every label over a view, in `em`, as the stylesheet sets it. */
@@ -980,14 +992,18 @@ function blockAtAngle(
   return { leftPx, topPx, widthPx, heightPx };
 }
 
-/** Where a ring's label may go beside a point of its ring: below right first, then round. */
+/**
+ * Where a ring's label may go beside a point of its ring: below right first, then round; kept
+ * `clearOfPointPx` from the point on every side where that is more than its own room.
+ */
 function ringCandidates(
   point: ScreenPoint,
   size: { readonly widthPx: number; readonly heightPx: number },
   remPx: number,
+  clearOfPointPx = 0,
 ): BoxPx[] {
-  const sidePx = CURVE_SIDE_REM * remPx;
-  const clearPx = (CURVE_SIDE_REM / 2) * remPx;
+  const sidePx = Math.max(CURVE_SIDE_REM * remPx, clearOfPointPx);
+  const clearPx = Math.max((CURVE_SIDE_REM / 2) * remPx, clearOfPointPx);
   const right = point.xPx + sidePx;
   const left = point.xPx - sidePx - size.widthPx;
   const below = point.yPx + clearPx;
@@ -1007,52 +1023,58 @@ function ringCandidates(
 const CURVE_MARK_CLEAR_REM = 0.125;
 
 /**
- * The side of a cell of the grid that marks' inks are sorted into, in `rem`, so that a box is
- * tested against the stalks and symbols near it alone and not every mark on a chart.
+ * The side of a cell of the grid that inks and boxes are sorted into, in `rem`, so that a box is
+ * tested against the stalks, symbols, curves and brackets near it alone and not every one on a
+ * chart.
  */
 const INK_CELL_REM = 2;
 
-/** Whether a box comes near an ink where there are none: never. */
-function nearNoInk(): boolean {
+/** Whether a box comes near anything where there is nothing: never. */
+function nearNothing(): boolean {
   return false;
 }
 
 /**
- * Whether any of `inks` comes within `clearPx` of a box inside the view, with the inks sorted once
- * into a grid over the view, so that each box is tested against those that reach its cells alone.
- * An ink wholly outside the view, `clearPx` and its width out, reaches no such box and is left out.
+ * Whether any of `items` meets a box inside the view by `meets`, with the items sorted once into a
+ * grid over the view by the box each reaches (`reachOf`), so that each box is tested against those
+ * that reach its cells alone. An item whose reach lies wholly outside the view reaches no such box
+ * and is left out.
  */
-function inksNear(
-  inks: ReadonlyArray<InkPx>,
+function nearInGrid<Item>(
+  items: ReadonlyArray<Item>,
   viewport: Viewport,
-  clearPx: number,
+  reachOf: (item: Item) => BoxPx,
+  meets: (box: BoxPx, item: Item) => boolean,
 ): (box: BoxPx) => boolean {
-  if (inks.length === 0) {
-    return nearNoInk;
+  if (items.length === 0) {
+    return nearNothing;
   }
   const cellPx = Math.max(1, INK_CELL_REM * viewport.remPx);
   const columns = Math.max(1, Math.ceil(viewport.widthPx / cellPx));
   const rows = Math.max(1, Math.ceil(viewport.heightPx / cellPx));
   const column = (xPx: number): number => clamp(Math.floor(xPx / cellPx), 0, columns - 1);
   const row = (yPx: number): number => clamp(Math.floor(yPx / cellPx), 0, rows - 1);
-  const cells = new Map<number, InkPx[]>();
-  for (const ink of inks) {
-    const reachPx = ink.halfWidthPx + clearPx;
-    const leftPx = Math.min(ink.from.xPx, ink.to.xPx) - reachPx;
-    const rightPx = Math.max(ink.from.xPx, ink.to.xPx) + reachPx;
-    const topPx = Math.min(ink.from.yPx, ink.to.yPx) - reachPx;
-    const bottomPx = Math.max(ink.from.yPx, ink.to.yPx) + reachPx;
-    if (rightPx < 0 || bottomPx < 0 || leftPx > viewport.widthPx || topPx > viewport.heightPx) {
+  const cells = new Map<number, Item[]>();
+  for (const item of items) {
+    const reach = reachOf(item);
+    const rightPx = reach.leftPx + reach.widthPx;
+    const bottomPx = reach.topPx + reach.heightPx;
+    if (
+      rightPx < 0 ||
+      bottomPx < 0 ||
+      reach.leftPx > viewport.widthPx ||
+      reach.topPx > viewport.heightPx
+    ) {
       continue;
     }
-    for (let y = row(topPx); y <= row(bottomPx); y += 1) {
-      for (let x = column(leftPx); x <= column(rightPx); x += 1) {
+    for (let y = row(reach.topPx); y <= row(bottomPx); y += 1) {
+      for (let x = column(reach.leftPx); x <= column(rightPx); x += 1) {
         const key = y * columns + x;
         const cell = cells.get(key);
         if (cell === undefined) {
-          cells.set(key, [ink]);
+          cells.set(key, [item]);
         } else {
-          cell.push(ink);
+          cell.push(item);
         }
       }
     }
@@ -1060,13 +1082,67 @@ function inksNear(
   return (box) => {
     for (let y = row(box.topPx); y <= row(box.topPx + box.heightPx); y += 1) {
       for (let x = column(box.leftPx); x <= column(box.leftPx + box.widthPx); x += 1) {
-        if (cells.get(y * columns + x)?.some((ink) => !clearOfInk(box, ink, clearPx)) === true) {
+        if (cells.get(y * columns + x)?.some((item) => meets(box, item)) === true) {
           return true;
         }
       }
     }
     return false;
   };
+}
+
+/** The box an ink's stroke covers, its width and `clearPx` out on every side. */
+function inkReachPx(ink: InkPx, clearPx: number): BoxPx {
+  const reachPx = ink.halfWidthPx + clearPx;
+  const leftPx = Math.min(ink.from.xPx, ink.to.xPx) - reachPx;
+  const topPx = Math.min(ink.from.yPx, ink.to.yPx) - reachPx;
+  return {
+    leftPx,
+    topPx,
+    widthPx: Math.max(ink.from.xPx, ink.to.xPx) + reachPx - leftPx,
+    heightPx: Math.max(ink.from.yPx, ink.to.yPx) + reachPx - topPx,
+  };
+}
+
+/** Whether any of `inks` comes within `clearPx` of a box inside the view ({@link nearInGrid}). */
+function inksNear(
+  inks: ReadonlyArray<InkPx>,
+  viewport: Viewport,
+  clearPx: number,
+): (box: BoxPx) => boolean {
+  return nearInGrid(
+    inks,
+    viewport,
+    (ink) => inkReachPx(ink, clearPx),
+    (box, ink) => !clearOfInk(box, ink, clearPx),
+  );
+}
+
+/**
+ * Whether any of `inks` crosses or touches a box inside the view at its width: its stroke, the
+ * segment and `halfWidthPx` either side of it, meets the box ({@link nearInGrid}).
+ */
+function inksAcross(inks: ReadonlyArray<InkPx>, viewport: Viewport): (box: BoxPx) => boolean {
+  return nearInGrid(
+    inks,
+    viewport,
+    (ink) => inkReachPx(ink, 0),
+    (box, ink) => segmentBoxGapPx(ink.from, ink.to, box) <= ink.halfWidthPx,
+  );
+}
+
+/** Whether any of `boxes` stands within `clearPx` of a box inside the view ({@link nearInGrid}). */
+function boxesNear(
+  boxes: ReadonlyArray<BoxPx>,
+  viewport: Viewport,
+  clearPx: number,
+): (box: BoxPx) => boolean {
+  return nearInGrid(
+    boxes,
+    viewport,
+    (other) => grow(other, clearPx),
+    (box, other) => boxGapPx(box, other) < clearPx - GAP_TOLERANCE_PX,
+  );
 }
 
 /**
@@ -1083,14 +1159,19 @@ function symbolReachPx(op: SymbolOp, strokes: ReticleStrokesCss): number {
       reachPx = op.radiusPx + strokes.shiftPx + halfStrokePx;
       break;
     case "polygon": {
+      const cornerPx = op.radiusPx + strokes.shiftPx / unitInradius(outline.points);
+      if (op.shape === "greek-cross") {
+        // An arm's outer corner, on the unit circle at (w, 3w), is square, and so mitred out by half
+        // the stroke along each of its sides.
+        const reach = cornerPx / Math.hypot(1, GREEK_CROSS_ARM_SHARE);
+        reachPx = Math.hypot(reach * GREEK_CROSS_ARM_SHARE + halfStrokePx, reach + halfStrokePx);
+        break;
+      }
       // A regular polygon's corner, of interior angle π(n − 2) ÷ n, is mitred out to half the
       // stroke over the sine of half that angle.
       const corners = outline.points.length - 1;
       const halfCornerAngle = (Math.PI * (corners - 2)) / (2 * corners);
-      reachPx =
-        op.radiusPx +
-        strokes.shiftPx / unitInradius(outline.points) +
-        halfStrokePx / Math.sin(halfCornerAngle);
+      reachPx = cornerPx + halfStrokePx / Math.sin(halfCornerAngle);
       break;
     }
     case "ringed-circle":
@@ -1106,8 +1187,10 @@ function symbolReachPx(op: SymbolOp, strokes: ReticleStrokesCss): number {
  *
  * @remarks
  * A stalk is its line at the line scale, `lineScale` ÷ the ratio times its width; a symbol the disc
- * its outline reaches ({@link symbolReachPx}), whatever it holds. The selection's bracket and the
- * destination's chevrons are not counted.
+ * its outline reaches ({@link symbolReachPx}), whatever it holds; and the observer's eye, a
+ * polyline at a mark's weight (plan 12, P12.T11), the disc about the middle of its points that
+ * reaches its farthest, with half its outline. The selection's bracket and the destination's
+ * chevrons are not counted.
  */
 export function markInksPx(
   ops: ReadonlyArray<DrawOp>,
@@ -1121,6 +1204,72 @@ export function markInksPx(
       inks.push({ from: op.from, to: op.to, halfWidthPx: (op.widthPx * lineFactor) / 2 });
     } else if (op.kind === "symbol") {
       inks.push({ from: op.centre, to: op.centre, halfWidthPx: symbolReachPx(op, strokes) });
+    } else if (op.kind === "polyline" && op.weight === "mark" && op.points.length > 0) {
+      const xs = op.points.map((point) => point.xPx);
+      const ys = op.points.map((point) => point.yPx);
+      const centre = {
+        xPx: (Math.min(...xs) + Math.max(...xs)) / 2,
+        yPx: (Math.min(...ys) + Math.max(...ys)) / 2,
+      };
+      const reachPx = Math.max(
+        ...op.points.map((point) => Math.hypot(point.xPx - centre.xPx, point.yPx - centre.yPx)),
+      );
+      inks.push({ from: centre, to: centre, halfWidthPx: reachPx + strokes.markStrokePx / 2 });
+    }
+  }
+  return inks;
+}
+
+/**
+ * The curves' strokes as `paint` draws them at a device-pixel ratio, CSS px: what an annulus's
+ * label prefers a place clear of (plan 14, P14.T42.d).
+ *
+ * @remarks
+ * Each segment of a polyline that is neither in `--line`, as the grid and the plane's rings are,
+ * nor at a mark's weight, as the observer's eye is: the paths' and the annuli's edges. Each is its
+ * line at the line scale, `lineScale` ÷ the ratio times its width, as a stalk is
+ * ({@link markInksPx}). The spheres' circles are not counted, nor are the scene's segments, nor
+ * the ticks, which {@link tickInksPx} gives.
+ */
+export function curveInksPx(
+  ops: ReadonlyArray<DrawOp>,
+  devicePixelRatio: number,
+): ReadonlyArray<InkPx> {
+  const lineFactor = lineScale(devicePixelRatio) / devicePixelRatio;
+  const inks: InkPx[] = [];
+  for (const op of ops) {
+    if (op.kind === "polyline" && op.stroke !== "line" && op.weight !== "mark") {
+      const halfWidthPx = (op.widthPx * lineFactor) / 2;
+      for (let index = 1; index < op.points.length; index += 1) {
+        const from = op.points[index - 1];
+        const to = op.points[index];
+        if (from !== undefined && to !== undefined) {
+          inks.push({ from, to, halfWidthPx });
+        }
+      }
+    }
+  }
+  return inks;
+}
+
+/**
+ * The ticks' strokes as `paint` draws them at a device-pixel ratio, CSS px: each tick of a `ticks`
+ * op at a line's weight, a belt's, the optimistic zone's edges' and a data edge's, at the line
+ * scale as {@link curveInksPx}'s lines are. No annulus label's box may cross one (plan 14,
+ * P14.T42.f).
+ */
+export function tickInksPx(
+  ops: ReadonlyArray<DrawOp>,
+  devicePixelRatio: number,
+): ReadonlyArray<InkPx> {
+  const lineFactor = lineScale(devicePixelRatio) / devicePixelRatio;
+  const inks: InkPx[] = [];
+  for (const op of ops) {
+    if (op.kind === "ticks" && op.weight === "line") {
+      const halfWidthPx = (op.widthPx * lineFactor) / 2;
+      for (const segment of op.segments) {
+        inks.push({ from: segment.from, to: segment.to, halfWidthPx });
+      }
     }
   }
   return inks;
@@ -1136,7 +1285,11 @@ export function markInksPx(
  * inside it, where they fit. A ring's label stands below and to the right of the ring's coreward
  * point, or on another side of it; else beside the first point along its ring, either way from
  * there, where it fits (`RingLabel.alongPx`). A label is dropped only when nowhere fits, as when its
- * circle is out of the view.
+ * circle is out of the view. An annulus's label (`RingLabel.yieldsToMarks`) is not placed here but
+ * by {@link placeAnnulusLabels}, after the marks' labels, which it gives way to, or, for a selected
+ * annulus's label (`RingLabel.selected`), after the furniture and the other curve labels and
+ * before the marks' labels (plan 14, P14.T42.e), and is dropped wherever no place keeps its
+ * clearances.
  *
  * Each place a label tries must also stand 0.125 rem clear of every mark's stalk and symbol, since
  * a stalk carries meaning where the `--line` grid does not (decision-r07-quality-and-destination,
@@ -1207,19 +1360,176 @@ export function placeCurveLabels(
   }
 
   for (const label of labels) {
-    if (label.placement !== "ring") {
+    if (label.placement !== "ring" || label.yieldsToMarks === true) {
       continue;
     }
     const size = textBoxPx(textSizeRem(label.text, OVERLAY_LETTER_SPACING_EM), remPx);
     const box = choose(
       [{ xPx: label.xPx, yPx: label.yPx }, ...(label.alongPx ?? [])].flatMap((point) =>
-        ringCandidates(point, size, remPx),
+        ringCandidates(point, size, remPx, label.clearOfPointPx),
       ),
     );
     if (box === undefined) {
       continue;
     }
     taken.push(box);
+    placed.push({ key: label.key, text: label.text, ...box });
+  }
+  return placed;
+}
+
+/** What the annuli's labels are placed among ({@link placeAnnulusLabels}). */
+export interface AnnulusLabelSurroundings {
+  /**
+   * Every box placed before them, which each stands at least
+   * {@link LABEL_NEIGHBOUR_CLEARANCE_REM} from: the triad's footprint, the core arrow and its
+   * label, the other curve labels, and the marks' labels where they are placed before them, the
+   * selection's and the destination's included.
+   */
+  readonly standing: ReadonlyArray<BoxPx>;
+  /** The marks' stalks and symbols and the observer's eye, as {@link markInksPx} gives them. */
+  readonly marks: ReadonlyArray<InkPx>;
+  /**
+   * The box of the selection's bracket's place about every mark, drawn or not (`bracketBoxPx`),
+   * with the mark's ID, which each stands at least {@link LABEL_TEXT_CLEARANCE_REM} outside, but a
+   * label with `RingLabel.aboutMarkId` that one mark's while no reticle is drawn about it
+   * ({@link AnnulusLabelSurroundings.reticledIds}), from which it then keeps none: a ring's label
+   * names a ring drawn about that very planet, so it cannot be read as the planet's name (plan 14,
+   * P14.T42.g).
+   */
+  readonly brackets: ReadonlyArray<{ readonly id: string; readonly box: BoxPx }>;
+  /**
+   * The IDs of the marks a reticle is drawn about, the selection's bracket and the destination's
+   * chevrons, whose bracket's box even a ring's label about that mark keeps
+   * {@link LABEL_TEXT_CLEARANCE_REM} outside: a drawn bracket is the selection's marker, and no
+   * label stands on it (plan 14, P14.T42.g; main's ruling on issue #96).
+   */
+  readonly reticledIds: ReadonlySet<string>;
+  /** The orbits and the annuli's edges, as {@link curveInksPx} gives them. */
+  readonly curves: ReadonlyArray<InkPx>;
+  /**
+   * The belts' and the edges' ticks, as {@link tickInksPx} gives them, which no label's box may
+   * cross: a tick through a label's letters, in its own `--text-muted`, takes them out.
+   */
+  readonly ticks: ReadonlyArray<InkPx>;
+}
+
+/**
+ * Sets the annuli's labels (plan 14, P14.T42.d): the zones', the belts', the scattered disc's, the
+ * halo's and a planet's rings', those flagged `RingLabel.yieldsToMarks`, after every other label,
+ * or, for a selected annulus's label (`RingLabel.selected`), after the furniture and the other
+ * curve labels and before the marks' labels (plan 14, P14.T42.e), each apart from every label
+ * placed before it and off every mark, or not at all.
+ *
+ * @remarks
+ * A label tries its four places beside its outer edge's point (its rimward point, or its spinward
+ * one where it asks), then those beside each point along that edge every 15° either way, nearest
+ * first, out to the far side (`RingLabel.alongPx`), as a ring's label does in
+ * {@link placeCurveLabels}. A place qualifies where it lies 0.25 rem inside the view; stands at
+ * least {@link LABEL_NEIGHBOUR_CLEARANCE_REM}, 0.5 rem, box to box, from every box standing before
+ * it, the annuli's labels placed before it among them, since touching labels read as one
+ * (decision-r07-quality-and-destination, addendum D, D4); stands at least
+ * {@link LABEL_TEXT_CLEARANCE_REM}, 0.25 rem, outside the box of the selection's bracket's place
+ * about every mark, where a mark's own label starts, so that it never stands nearer a body than the
+ * body's own label and is never read as its name, but that of the mark its annulus is drawn about
+ * (`RingLabel.aboutMarkId`), a ring's planet, whose bracket's box a ring's label may stand in,
+ * since it names a ring drawn about that very body, which the frame names (plan 14, P14.T42.g),
+ * while no reticle is drawn about it (`reticledIds`): a drawn bracket is the selection's marker,
+ * and no label stands on it (main's ruling on issue #96); and stands 0.125 rem clear of every stalk
+ * and of the observer's eye (Q6 (d); R07.T16.j), the symbols among `marks` lying inside their
+ * brackets' boxes, that planet's included; and no tick crosses it at its width, since a belt's
+ * ticks, in the label's own `--text-muted`, take its letters out (plan 14, P14.T42.f). Of the
+ * places that qualify it takes the first that no orbit or annulus edge crosses at its width, since
+ * a stroke through its letters hides them; else the first that qualifies. Where none qualifies the
+ * label is not drawn, with no last resort: the zone is still named in its host's readout and on its
+ * switch, and a belt, ring or halo in the list. The `--line` grid and the plane's rings may pass
+ * under it.
+ *
+ * The labels are taken in the order given, which is the scene's: the zones first, each zone's
+ * `HABITABLE ZONE` before its others, then the populations; each placed label stands for the next.
+ * Labels without the flag are left to {@link placeCurveLabels}.
+ *
+ * @param surroundings - What the labels keep clear of, and the curves they prefer to.
+ */
+export function placeAnnulusLabels(
+  labels: ReadonlyArray<CurveLabel>,
+  viewport: Viewport,
+  surroundings: AnnulusLabelSurroundings,
+): ReadonlyArray<PlacedCurveLabel> {
+  const remPx = viewport.remPx;
+  const edgePx = edgeInsetPx(viewport);
+  const neighbourPx = LABEL_NEIGHBOUR_CLEARANCE_REM * remPx;
+  const standing: BoxPx[] = [...surroundings.standing];
+  const nearMark = inksNear(surroundings.marks, viewport, CURVE_MARK_CLEAR_REM * remPx);
+  const bracketClearPx = LABEL_TEXT_CLEARANCE_REM * remPx;
+  const nearAnyBracket = boxesNear(
+    surroundings.brackets.map((bracket) => bracket.box),
+    viewport,
+    bracketClearPx,
+  );
+  // A ring's label tests every bracket's box but its own planet's, while no reticle is drawn about
+  // the planet: one test for each mark a label's annulus is drawn about, made when a label first
+  // asks for it, since a frame has a ring or two.
+  const nearOtherBrackets = new Map<string, (box: BoxPx) => boolean>();
+  const nearBracketFor = (aboutMarkId: string | undefined): ((box: BoxPx) => boolean) => {
+    if (aboutMarkId === undefined || surroundings.reticledIds.has(aboutMarkId)) {
+      return nearAnyBracket;
+    }
+    let near = nearOtherBrackets.get(aboutMarkId);
+    if (near === undefined) {
+      near = boxesNear(
+        surroundings.brackets
+          .filter((bracket) => bracket.id !== aboutMarkId)
+          .map((bracket) => bracket.box),
+        viewport,
+        bracketClearPx,
+      );
+      nearOtherBrackets.set(aboutMarkId, near);
+    }
+    return near;
+  };
+  const crossesCurve = inksAcross(surroundings.curves, viewport);
+  const crossesTick = inksAcross(surroundings.ticks, viewport);
+  const qualifies = (box: BoxPx, nearBracket: (box: BoxPx) => boolean): boolean =>
+    insideView(box, viewport, edgePx) &&
+    standing.every((other) => boxGapPx(box, other) >= neighbourPx - GAP_TOLERANCE_PX) &&
+    !nearBracket(box) &&
+    !nearMark(box) &&
+    !crossesTick(box);
+  // A curve through a label's letters hides them, but it is a preference and not a rule: a place
+  // that a curve crosses still beats leaving the label out.
+  const choose = (
+    candidates: ReadonlyArray<BoxPx>,
+    nearBracket: (box: BoxPx) => boolean,
+  ): BoxPx | undefined => {
+    let crossed: BoxPx | undefined;
+    for (const candidate of candidates) {
+      if (!qualifies(candidate, nearBracket)) {
+        continue;
+      }
+      if (!crossesCurve(candidate)) {
+        return candidate;
+      }
+      crossed ??= candidate;
+    }
+    return crossed;
+  };
+  const placed: PlacedCurveLabel[] = [];
+  for (const label of labels) {
+    if (label.placement !== "ring" || label.yieldsToMarks !== true) {
+      continue;
+    }
+    const size = textBoxPx(textSizeRem(label.text, OVERLAY_LETTER_SPACING_EM), remPx);
+    const box = choose(
+      [{ xPx: label.xPx, yPx: label.yPx }, ...(label.alongPx ?? [])].flatMap((point) =>
+        ringCandidates(point, size, remPx, label.clearOfPointPx),
+      ),
+      nearBracketFor(label.aboutMarkId),
+    );
+    if (box === undefined) {
+      continue;
+    }
+    standing.push(box);
     placed.push({ key: label.key, text: label.text, ...box });
   }
   return placed;

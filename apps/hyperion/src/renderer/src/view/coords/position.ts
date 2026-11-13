@@ -43,9 +43,9 @@ export interface FrameOrigins {
   bodyCentreM(body: BodyIdHex): Vec3;
   /**
    * The body's rotation from its body-fixed axes to its body frame, or `null` where the rotation
-   * is not modelled (plan R02, Design note 14): the body-fixed axes are then taken as the body
-   * frame's, and, for a body other than a star with a radius, the view says
-   * `ROTATION: NOT YET MODELLED`.
+   * is not modelled or not resolved (plan R02, Design note 14; rotation-not-resolved): the
+   * body-fixed axes are then taken as the body frame's, and, for a body other than a star with a
+   * radius, the view says `ROTATION: NOT YET MODELLED` or `ROTATION: NOT RESOLVED`.
    */
   bodyFixedRotation(body: BodyIdHex): Rotation3 | null;
 }

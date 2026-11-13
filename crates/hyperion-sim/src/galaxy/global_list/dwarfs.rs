@@ -31,7 +31,7 @@
 //! tabulated potential. Plan 02 draws every non-dominant apocentre log-uniform on 20,000–200,000
 //! ly, so about 70% of recent progenitors fall below the window and none above it: the range
 //! fails, and plan 10 says it is corrected in plan 02's parameter table with a version bump, not
-//! patched here. So the orbits are used as drawn, and [`OrbitCheck`] records each one's standing
+//! patched here. So the orbits are used as drawn, and `OrbitCheck` records each one's standing
 //! (P10.T3, as built; reported to the orchestrator).
 
 use crate::coords::{GalacticDisplacement, GalacticVelocity, ROOT_HALF_WIDTH_LY};
@@ -197,7 +197,7 @@ fn dwarfs_on(
 /// The pericentres within `span` years before the epoch, the last `last` years ago and each
 /// `period` before the next.
 #[must_use]
-fn pericentres_within(span: f64, last: f64, period: f64) -> u32 {
+pub(super) fn pericentres_within(span: f64, last: f64, period: f64) -> u32 {
     if span < last {
         return 0;
     }
@@ -215,7 +215,7 @@ fn pericentres_within(span: f64, last: f64, period: f64) -> u32 {
 
 /// The share of a dwarf's mass still bound after `n` pericentres, `(1 − f)ⁿ`.
 #[must_use]
-fn remaining(fraction: f64, n: u32) -> f64 {
+pub(super) fn remaining(fraction: f64, n: u32) -> f64 {
     // A count beyond i32 cannot arise (a few hundred pericentres at most), and would leave
     // nothing bound either way.
     math::powi(1.0 - fraction, i32::try_from(n).unwrap_or(i32::MAX))
@@ -225,7 +225,7 @@ fn remaining(fraction: f64, n: u32) -> f64 {
 /// plane of `elements`' inclination and node with its pericentre `omega` from the ascending node:
 /// its position about the centre (m) and velocity (m/s).
 #[must_use]
-fn epoch_state(
+pub(super) fn epoch_state(
     orbit: &SphericalOrbit,
     phi: &impl Fn(f64) -> f64,
     elements: &Orbit,

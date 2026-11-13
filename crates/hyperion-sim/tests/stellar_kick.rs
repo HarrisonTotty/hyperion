@@ -144,7 +144,8 @@ fn ordinary_neutron_star_speeds_follow_the_log_normal() {
 /// **Provisional (ruling 147.2, lane `kick147`):** with the rank table rebuilt on every
 /// ordinary-mode neutron star, the sky share is 0.0708, above the 3–7% window (the research
 /// expected about 0.04), while the share under 100 km/s is 0.0903, inside its window. The sky
-/// share is held at its measured value until the finding is ruled on; the window is reported.
+/// share is held at its measured value until the finding is ruled on; the window is reported. On
+/// plan 15's production table (P06.T19.e) they are 0.0710 and 0.0904.
 #[test]
 #[ignore = "slow: 20,000 full tracks of 8–150 M☉"]
 fn isolated_pulsars_are_rarely_slow() {
@@ -159,7 +160,7 @@ fn isolated_pulsars_are_rarely_slow() {
             "outside"
         }
     );
-    assert!((sky - 0.0708).abs() <= 0.002, "{sky}");
+    assert!((sky - 0.0710).abs() <= 0.002, "{sky}");
     assert!((0.07..=0.13).contains(&slow), "{slow}");
 }
 
@@ -169,6 +170,7 @@ fn isolated_pulsars_are_rarely_slow() {
 /// **Provisional (ruling 147.2, lane `kick147`):** with the rank table rebuilt on every
 /// ordinary-mode neutron star, the share is 0.1159, below the window (the research expected about
 /// 0.15). It is held at its measured value until the finding is ruled on; the window is reported.
+/// On plan 15's production table (P06.T19.e) it is 0.1156.
 #[test]
 #[ignore = "slow: 20,000 full tracks of 8–150 M☉"]
 fn about_a_sixth_of_neutron_stars_leave_the_disc() {
@@ -181,7 +183,7 @@ fn about_a_sixth_of_neutron_stars_leave_the_disc() {
             "outside"
         }
     );
-    assert!((share - 0.1159).abs() <= 0.002, "{share}");
+    assert!((share - 0.1156).abs() <= 0.002, "{share}");
 }
 
 /// Test 3: the low mode is 20 ± 10% of neutron stars (Igoshev et al. 2021). It pins the 2–3 M☉
@@ -201,7 +203,8 @@ fn the_low_mode_is_a_fifth_of_neutron_stars() {
 /// under 50 km/s; and 24–35% under 100 km/s. It pins the low mode's σ and the ramp.
 ///
 /// Measured at generator version 15: 0.2740 / 0.2781 / 0.3184, with a low-mode share of 0.2740;
-/// after ruling 147.2's rank table (provisional at 15): 0.2740 / 0.2783 / 0.3232.
+/// after ruling 147.2's rank table (provisional at 15): 0.2740 / 0.2783 / 0.3232; on plan 15's
+/// production table (P06.T19.e): 0.2740 / 0.2783 / 0.3233.
 #[test]
 #[ignore = "slow: 20,000 full tracks of 8–150 M☉"]
 fn a_fifth_to_a_third_of_neutron_stars_is_retained_by_a_cluster() {
@@ -338,22 +341,25 @@ fn primary_kick_is(stars: &SystemStars, kind: RemnantKind, mode: KickMode) -> bo
         && stars.natal_kick().is_some_and(|k| k.mode() == mode)
 }
 
-/// The three pinned systems of layer E, found by [`find_kick`] near the solar circle.
+/// The three pinned systems of layer E, found by [`find_kick`] near the solar circle. Searched again
+/// at 27, whose grid places other systems of layer E (plan 08's displaced classes, P08.T12; until 27
+/// the three were `0x8200_b2e0_0000_0000`, `…_000c` and `…_0005`): the first and the third are
+/// displaced classes' remnants, each its kick loop's kept attempt, and the second a retained one.
 const PINNED_KICKS: [PinnedKick; 3] = [
     PinnedKick {
         name: "an ordinary-mode neutron star",
         predicate: |s| primary_kick_is(s, RemnantKind::NeutronStar, KickMode::Ordinary),
-        id: 0x8200_b2e0_0000_0000,
+        id: 0x8200_b2e0_0000_0001,
     },
     PinnedKick {
         name: "a low-mode neutron star",
         predicate: |s| primary_kick_is(s, RemnantKind::NeutronStar, KickMode::Low),
-        id: 0x8200_b2e0_0000_000c,
+        id: 0x8200_b2e0_0000_0002,
     },
     PinnedKick {
         name: "a kicked black hole",
         predicate: |s| primary_kick_is(s, RemnantKind::BlackHole, KickMode::Ordinary),
-        id: 0x8200_b2e0_0000_0005,
+        id: 0x8200_b2e0_0000_0000,
     },
 ];
 

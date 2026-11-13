@@ -1,0 +1,11 @@
+# The mean dwarf sequence on the sim's own grid (plan 06, P06.T23.a's licence fix): Mamajek's
+# version 2022.04.16 of Pecaut and Mamajek's (2013) Table 5, its spectral code, BC_V and B - V
+# resampled onto even grids in log10 T_eff. The parameters are constants of
+# `src/tasks/dwarf_sequence.rs`, recorded here so that the inputs hash covers them; the task
+# refuses a manifest that disagrees with its code.
+task = "dwarf_sequence"
+datasets = ["mamajek_dwarf_sequence"]
+
+[params]
+target_step_dex = 0.0005
+acceptance = [0.05, 0.005, 0.005]

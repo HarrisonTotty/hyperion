@@ -1,7 +1,7 @@
 import type { MassLayer, SystemsInRange, UniverseIdHex } from "@hyperion/protocol";
 import { useState } from "react";
 
-import type { CentreLy, ChartResult } from "../../lib/galaxy/model";
+import { type CentreLy, type ChartResult, NOW_MODE, type QueryMode } from "../../lib/galaxy/model";
 import { toChartResult, toRangeRequest } from "../../lib/galaxy/wire";
 import {
   REQUEST_TIMEOUT_MS,
@@ -20,6 +20,8 @@ export interface RangeQueryInput {
   readonly minLayer: MassLayer;
   /** The chart time, in years from the epoch. */
   readonly timeYr: number;
+  /** The mode to ask in (plan 12, P12.T11); `now` when absent. */
+  readonly mode?: QueryMode | undefined;
   /** Changing it asks the same query again, which is what `RETRY` does after a failure. */
   readonly generation: number;
 }
@@ -46,10 +48,12 @@ interface Shown {
  *
  * @remarks
  * The body is built by `toRangeRequest` and compared by value, so a chart that re-renders asks
- * nothing again; a changed radius, floor, time or centre supersedes the query in flight and cancels
- * it on the server. The answer stays on show while a newer query is pending or has failed (plan 05,
- * design note D4: data already shown is a snapshot, not a live value), and is dropped when another
- * universe is opened. Without a centre nothing is asked and the state is `idle`.
+ * nothing again; a changed radius, floor, time, centre, mode or observer supersedes the query in
+ * flight and cancels it on the server. The answer stays on show while a newer query is pending or
+ * has failed (plan 05, design note D4: data already shown is a snapshot, not a live value), and is
+ * dropped when another universe is opened. Without a centre nothing is asked and the state is
+ * `idle`. An answer is only ever `ok` for the body asked now, so the mode it is charted with is the
+ * one of the request it answers, kept with it: a later choice never relabels it.
  */
 export function useRangeQuery({
   universe,
@@ -57,12 +61,13 @@ export function useRangeQuery({
   queryRadiusLy,
   minLayer,
   timeYr,
+  mode = NOW_MODE,
   generation,
 }: RangeQueryInput): RangeQuery {
   const body =
     universe === null || centreLy === null
       ? null
-      : toRangeRequest(universe, centreLy, queryRadiusLy, timeYr, minLayer);
+      : toRangeRequest(universe, centreLy, queryRadiusLy, timeYr, minLayer, mode);
   const state = useServerRequest<"systems_in_range">(body, REQUEST_TIMEOUT_MS, generation);
   const [shown, setShown] = useState<Shown | null>(null);
 
@@ -70,7 +75,7 @@ export function useRangeQuery({
   // in, and the adapter, which sorts every system, runs once per response.
   let current = shown;
   if (state.kind === "ok" && universe !== null && shown?.response !== state.response) {
-    current = { universe, response: state.response, result: toChartResult(state.response) };
+    current = { universe, response: state.response, result: toChartResult(state.response, mode) };
     setShown(current);
   } else if (current !== null && current.universe !== universe) {
     current = null;

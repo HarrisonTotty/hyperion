@@ -1,0 +1,2372 @@
+{
+  "description": "R08.T17's spectral check: the reference traced in the 15 bake bins, taken to the render channels by the spectral bakes' conversion, against the three-channel reference's vector I and the twin's routed radiance (vectorGate.json), per image: Design note 10's tallies, Δu′v′ (median and largest) beside its noise, the largest ΔE*ab and the relative RMS; the sun's beam straight up and the fluxes by Δu′v′ and luminance; and each geometry's spectral reading in the channels, its σ and its Δu′v′ noise. Recorded, never gated. Written by spectralCheck.test.ts; do not edit by hand.",
+  "format": 1,
+  "writer": "spectralCheck.test.ts, through spectralCheck.ts (plan R08, R08.T17)",
+  "bodies": {
+    "earth": {
+      "parts": ["earth-spectral-day", "earth-spectral-low"],
+      "channelsTally": {
+        "comparisons": 297,
+        "passes": 172,
+        "misses": 7,
+        "refusals": 118,
+        "worstRatio": 1.81705,
+        "worstAt": "ground-s80-v85-a0/b"
+      },
+      "twinTally": {
+        "comparisons": 297,
+        "passes": 174,
+        "misses": 5,
+        "refusals": 118,
+        "worstRatio": 1.722,
+        "worstAt": "ground-s80-v85-a0/b"
+      },
+      "images": [
+        {
+          "image": "ground-s0",
+          "geometries": 4,
+          "medianUvNoise": 0.0005699306,
+          "channels": {
+            "medianUv": 0.003382801,
+            "largestUv": 0.003587577,
+            "largestUvAt": "ground-s0-v30-a0",
+            "largestDeltaE": 1.151213,
+            "relativeRms": [0.01183783, 0.003305047, 0.03654396]
+          },
+          "channelsTally": {
+            "comparisons": 12,
+            "passes": 10,
+            "misses": 0,
+            "refusals": 2,
+            "worstRatio": 0.7018248,
+            "worstAt": "ground-s0-v30-a0/b"
+          },
+          "twin": {
+            "medianUv": 0.001546889,
+            "largestUv": 0.002735518,
+            "largestUvAt": "ground-s0-v30-a0",
+            "largestDeltaE": 0.8659585,
+            "relativeRms": [0.01358867, 0.007052924, 0.02742714]
+          },
+          "twinTally": {
+            "comparisons": 12,
+            "passes": 10,
+            "misses": 0,
+            "refusals": 2,
+            "worstRatio": 0.5608684,
+            "worstAt": "ground-s0-v30-a0/b"
+          }
+        },
+        {
+          "image": "ground-s30",
+          "geometries": 20,
+          "medianUvNoise": 0.0005601548,
+          "channels": {
+            "medianUv": 0.003120644,
+            "largestUv": 0.005831608,
+            "largestUvAt": "ground-s30-v60-a180",
+            "largestDeltaE": 1.790328,
+            "relativeRms": [0.008103671, 0.009931429, 0.03336803]
+          },
+          "channelsTally": {
+            "comparisons": 60,
+            "passes": 52,
+            "misses": 2,
+            "refusals": 6,
+            "worstRatio": 1.079193,
+            "worstAt": "ground-s30-v60-a180/b"
+          },
+          "twin": {
+            "medianUv": 0.001934987,
+            "largestUv": 0.002876938,
+            "largestUvAt": "ground-s30-v60-a180",
+            "largestDeltaE": 1.013713,
+            "relativeRms": [0.01007983, 0.007370507, 0.02486914]
+          },
+          "twinTally": {
+            "comparisons": 60,
+            "passes": 54,
+            "misses": 0,
+            "refusals": 6,
+            "worstRatio": 0.7714094,
+            "worstAt": "ground-s30-v60-a180/b"
+          }
+        },
+        {
+          "image": "ground-s60",
+          "geometries": 20,
+          "medianUvNoise": 0.000598776,
+          "channels": {
+            "medianUv": 0.002959833,
+            "largestUv": 0.005197403,
+            "largestUvAt": "ground-s60-v0-a0",
+            "largestDeltaE": 1.599264,
+            "relativeRms": [0.01323905, 0.006788397, 0.02981754]
+          },
+          "channelsTally": {
+            "comparisons": 60,
+            "passes": 47,
+            "misses": 1,
+            "refusals": 12,
+            "worstRatio": 1.031737,
+            "worstAt": "ground-s60-v30-a180/b"
+          },
+          "twin": {
+            "medianUv": 0.001630557,
+            "largestUv": 0.004230179,
+            "largestUvAt": "ground-s60-v0-a0",
+            "largestDeltaE": 1.427619,
+            "relativeRms": [0.01916234, 0.01238464, 0.02968208]
+          },
+          "twinTally": {
+            "comparisons": 60,
+            "passes": 47,
+            "misses": 1,
+            "refusals": 12,
+            "worstRatio": 1.072867,
+            "worstAt": "ground-s60-v0-a0/b"
+          }
+        },
+        {
+          "image": "disc-p0",
+          "geometries": 1,
+          "medianUvNoise": 0.0003898082,
+          "channels": {
+            "medianUv": 0.001620537,
+            "largestUv": 0.001620537,
+            "largestUvAt": "disc-p0",
+            "largestDeltaE": 0.522659,
+            "relativeRms": [0.002382808, 0.003255792, 0.02287869]
+          },
+          "channelsTally": {
+            "comparisons": 3,
+            "passes": 3,
+            "misses": 0,
+            "refusals": 0,
+            "worstRatio": 0.3560961,
+            "worstAt": "disc-p0/b"
+          },
+          "twin": {
+            "medianUv": 0.00146082,
+            "largestUv": 0.00146082,
+            "largestUvAt": "disc-p0",
+            "largestDeltaE": 0.4627614,
+            "relativeRms": [0.004779764, 0.001694687, 0.01892577]
+          },
+          "twinTally": {
+            "comparisons": 3,
+            "passes": 3,
+            "misses": 0,
+            "refusals": 0,
+            "worstRatio": 0.2945707,
+            "worstAt": "disc-p0/b"
+          }
+        },
+        {
+          "image": "disc-p30",
+          "geometries": 1,
+          "medianUvNoise": 0.0004192012,
+          "channels": {
+            "medianUv": 0.002678509,
+            "largestUv": 0.002678509,
+            "largestUvAt": "disc-p30",
+            "largestDeltaE": 0.9156703,
+            "relativeRms": [0.008451805, 0.00447582, 0.04019562]
+          },
+          "channelsTally": {
+            "comparisons": 3,
+            "passes": 3,
+            "misses": 0,
+            "refusals": 0,
+            "worstRatio": 0.6155915,
+            "worstAt": "disc-p30/b"
+          },
+          "twin": {
+            "medianUv": 0.002232005,
+            "largestUv": 0.002232005,
+            "largestUvAt": "disc-p30",
+            "largestDeltaE": 0.7610564,
+            "relativeRms": [0.006193439, 0.002198179, 0.0319619]
+          },
+          "twinTally": {
+            "comparisons": 3,
+            "passes": 3,
+            "misses": 0,
+            "refusals": 0,
+            "worstRatio": 0.4894929,
+            "worstAt": "disc-p30/b"
+          }
+        },
+        {
+          "image": "disc-p60",
+          "geometries": 1,
+          "medianUvNoise": 0.0005099236,
+          "channels": {
+            "medianUv": 0.002277996,
+            "largestUv": 0.002277996,
+            "largestUvAt": "disc-p60",
+            "largestDeltaE": 0.7684731,
+            "relativeRms": [0.007608311, 0.007689434, 0.03673989]
+          },
+          "channelsTally": {
+            "comparisons": 3,
+            "passes": 3,
+            "misses": 0,
+            "refusals": 0,
+            "worstRatio": 0.5462195,
+            "worstAt": "disc-p60/b"
+          },
+          "twin": {
+            "medianUv": 0.002448174,
+            "largestUv": 0.002448174,
+            "largestUvAt": "disc-p60",
+            "largestDeltaE": 0.8489866,
+            "relativeRms": [0.01323165, 0.007298091, 0.03956458]
+          },
+          "twinTally": {
+            "comparisons": 3,
+            "passes": 3,
+            "misses": 0,
+            "refusals": 0,
+            "worstRatio": 0.5882147,
+            "worstAt": "disc-p60/b"
+          }
+        },
+        {
+          "image": "disc-p75",
+          "geometries": 1,
+          "medianUvNoise": 0.0005885229,
+          "channels": {
+            "medianUv": 0.00309804,
+            "largestUv": 0.00309804,
+            "largestUvAt": "disc-p75",
+            "largestDeltaE": 1.029748,
+            "relativeRms": [0.0125774, 0.01178824, 0.05042917]
+          },
+          "channelsTally": {
+            "comparisons": 3,
+            "passes": 3,
+            "misses": 0,
+            "refusals": 0,
+            "worstRatio": 0.7343015,
+            "worstAt": "disc-p75/b"
+          },
+          "twin": {
+            "medianUv": 0.003369706,
+            "largestUv": 0.003369706,
+            "largestUvAt": "disc-p75",
+            "largestDeltaE": 1.140737,
+            "relativeRms": [0.01825684, 0.01267171, 0.05557248]
+          },
+          "twinTally": {
+            "comparisons": 3,
+            "passes": 3,
+            "misses": 0,
+            "refusals": 0,
+            "worstRatio": 0.8091936,
+            "worstAt": "disc-p75/b"
+          }
+        },
+        {
+          "image": "limb",
+          "geometries": 5,
+          "medianUvNoise": 0.0005953059,
+          "channels": {
+            "medianUv": 0.00216591,
+            "largestUv": 0.003863111,
+            "largestUvAt": "limb-10H",
+            "largestDeltaE": 1.216417,
+            "relativeRms": [0.02368684, 0.007831451, 0.02485593]
+          },
+          "channelsTally": {
+            "comparisons": 15,
+            "passes": 10,
+            "misses": 0,
+            "refusals": 5,
+            "worstRatio": 0.6380189,
+            "worstAt": "limb-10H/b"
+          },
+          "twin": {
+            "medianUv": 0.002089041,
+            "largestUv": 0.003501454,
+            "largestUvAt": "limb-10H",
+            "largestDeltaE": 1.214068,
+            "relativeRms": [0.03533941, 0.004031197, 0.02595715]
+          },
+          "twinTally": {
+            "comparisons": 15,
+            "passes": 10,
+            "misses": 0,
+            "refusals": 5,
+            "worstRatio": 0.6926572,
+            "worstAt": "limb-10H/b"
+          }
+        },
+        {
+          "image": "aerial",
+          "geometries": 3,
+          "medianUvNoise": 0.0005492853,
+          "channels": {
+            "medianUv": 0.0005409538,
+            "largestUv": 0.0007153303,
+            "largestUvAt": "aerial-10km",
+            "largestDeltaE": 0.3026453,
+            "relativeRms": [0.00802538, 0.009021357, 0.01314282]
+          },
+          "channelsTally": {
+            "comparisons": 9,
+            "passes": 9,
+            "misses": 0,
+            "refusals": 0,
+            "worstRatio": 0.2468301,
+            "worstAt": "aerial-32km/b"
+          },
+          "twin": {
+            "medianUv": 0.0005158498,
+            "largestUv": 0.0006504266,
+            "largestUvAt": "aerial-10km",
+            "largestDeltaE": 0.5105479,
+            "relativeRms": [0.02298751, 0.0231821, 0.02963936]
+          },
+          "twinTally": {
+            "comparisons": 9,
+            "passes": 9,
+            "misses": 0,
+            "refusals": 0,
+            "worstRatio": 0.4453519,
+            "worstAt": "aerial-32km/b"
+          }
+        },
+        {
+          "image": "ground-s80",
+          "geometries": 21,
+          "medianUvNoise": 0.0008557601,
+          "channels": {
+            "medianUv": 0.002437121,
+            "largestUv": 0.005071886,
+            "largestUvAt": "ground-s80-v85-a0",
+            "largestDeltaE": 2.203564,
+            "relativeRms": [0.02343774, 0.007217597, 0.09026033]
+          },
+          "channelsTally": {
+            "comparisons": 63,
+            "passes": 19,
+            "misses": 2,
+            "refusals": 42,
+            "worstRatio": 1.81705,
+            "worstAt": "ground-s80-v85-a0/b"
+          },
+          "twin": {
+            "medianUv": 0.002254118,
+            "largestUv": 0.004733316,
+            "largestUvAt": "ground-s80-v85-a0",
+            "largestDeltaE": 2.077536,
+            "relativeRms": [0.03655532, 0.01385891, 0.08309308]
+          },
+          "twinTally": {
+            "comparisons": 63,
+            "passes": 19,
+            "misses": 2,
+            "refusals": 42,
+            "worstRatio": 1.722,
+            "worstAt": "ground-s80-v85-a0/b"
+          }
+        },
+        {
+          "image": "ground-s90",
+          "geometries": 21,
+          "medianUvNoise": 0.0009542118,
+          "channels": {
+            "medianUv": 0.002687422,
+            "largestUv": 0.006451321,
+            "largestUvAt": "ground-s90-v85-a180",
+            "largestDeltaE": 2.696406,
+            "relativeRms": [0.04613934, 0.02129428, 0.06032806]
+          },
+          "channelsTally": {
+            "comparisons": 63,
+            "passes": 12,
+            "misses": 2,
+            "refusals": 49,
+            "worstRatio": 1.277287,
+            "worstAt": "ground-s90-v85-a180/r"
+          },
+          "twin": {
+            "medianUv": 0.002037173,
+            "largestUv": 0.006038976,
+            "largestUvAt": "ground-s90-v85-a180",
+            "largestDeltaE": 2.302749,
+            "relativeRms": [0.06046492, 0.02460986, 0.05009716]
+          },
+          "twinTally": {
+            "comparisons": 63,
+            "passes": 12,
+            "misses": 2,
+            "refusals": 49,
+            "worstRatio": 1.172849,
+            "worstAt": "ground-s90-v85-a180/g"
+          }
+        },
+        {
+          "image": "disc-p85",
+          "geometries": 1,
+          "medianUvNoise": 0.0008955274,
+          "channels": {
+            "medianUv": 0.002682348,
+            "largestUv": 0.002682348,
+            "largestUvAt": "disc-p85",
+            "largestDeltaE": 0.9260545,
+            "relativeRms": [0.01840723, 0.004659027, 0.02944011]
+          },
+          "channelsTally": {
+            "comparisons": 3,
+            "passes": 1,
+            "misses": 0,
+            "refusals": 2,
+            "worstRatio": 0.06265709,
+            "worstAt": "disc-p85/g"
+          },
+          "twin": {
+            "medianUv": 0.004376005,
+            "largestUv": 0.004376005,
+            "largestUvAt": "disc-p85",
+            "largestDeltaE": 1.472332,
+            "relativeRms": [0.02873819, 0.005627242, 0.06142556]
+          },
+          "twinTally": {
+            "comparisons": 3,
+            "passes": 1,
+            "misses": 0,
+            "refusals": 2,
+            "worstRatio": 0.07567816,
+            "worstAt": "disc-p85/g"
+          }
+        }
+      ],
+      "beams": [
+        {
+          "geometry": "ground-s30-v0-a0",
+          "sunZenithDeg": 30,
+          "binsLx": [119084, 100898.2, 81577.54],
+          "channelsLx": [118750.9, 100719.1, 79128.47],
+          "uv": 0.001605426,
+          "luminanceRatio": 0.9963656,
+          "twinUv": 0.001580303
+        },
+        {
+          "geometry": "ground-s60-v0-a0",
+          "sunZenithDeg": 60,
+          "binsLx": [103396.3, 83346.19, 59899.74],
+          "channelsLx": [102847.3, 83190.1, 56831.24],
+          "uv": 0.00255799,
+          "luminanceRatio": 0.994764,
+          "twinUv": 0.002520579
+        },
+        {
+          "geometry": "ground-s80-v0-a0",
+          "sunZenithDeg": 80,
+          "binsLx": [56667.28, 36431.61, 15645.71],
+          "channelsLx": [55762.45, 36645.57, 13644.28],
+          "uv": 0.004504998,
+          "luminanceRatio": 0.9953135,
+          "twinUv": 0.004467122
+        },
+        {
+          "geometry": "ground-s90-v0-a0",
+          "sunZenithDeg": 90,
+          "binsLx": [6.549784, -0.01196457, -0.1246284],
+          "channelsLx": [8.436189, 0.2529801, 0.00005864187],
+          "uv": 0.03614635,
+          "luminanceRatio": 1.435988,
+          "twinUv": 0.03615615
+        }
+      ],
+      "fluxes": [
+        {
+          "flux": "flux-s0/downwelling",
+          "binsLx": [134571.6, 120490.6, 110628.9],
+          "channelsLx": [134429.6, 120436.6, 109442.8],
+          "uv": 0.0006331812,
+          "uvNoise": 0.0001003993,
+          "luminanceRatio": 0.9987421
+        },
+        {
+          "flux": "flux-s0/upwelling",
+          "binsLx": [15179.9, 16612.79, 22821.6],
+          "channelsLx": [15248.04, 16724.25, 23898.23],
+          "uv": 0.003187926,
+          "uvNoise": 0.0004988118,
+          "luminanceRatio": 1.010259
+        },
+        {
+          "flux": "flux-s30/downwelling",
+          "binsLx": [115104, 102822.3, 93824.82],
+          "channelsLx": [114832.6, 102607, 92493.39],
+          "uv": 0.0007497795,
+          "uvNoise": 0.0001314642,
+          "luminanceRatio": 0.9970622
+        },
+        {
+          "flux": "flux-s30/upwelling",
+          "binsLx": [13578.99, 15225.19, 21389.55],
+          "channelsLx": [13650.8, 15311.39, 22327.66],
+          "uv": 0.003022796,
+          "uvNoise": 0.0005101369,
+          "luminanceRatio": 1.00944
+        },
+        {
+          "flux": "flux-s60/downwelling",
+          "binsLx": [61599.03, 54356.58, 48026.61],
+          "channelsLx": [61341.79, 54170.28, 47333.3],
+          "uv": 0.0006618869,
+          "uvNoise": 0.0002138602,
+          "luminanceRatio": 0.9957074
+        },
+        {
+          "flux": "flux-s60/upwelling",
+          "binsLx": [9356.395, 11302.87, 17144.35],
+          "channelsLx": [9422.379, 11373.23, 17825.82],
+          "uv": 0.002742552,
+          "uvNoise": 0.0005714916,
+          "luminanceRatio": 1.010038
+        },
+        {
+          "flux": "flux-s80/downwelling",
+          "binsLx": [15643.91, 13536.47, 11913.35],
+          "channelsLx": [15470.14, 13511.82, 11598.16],
+          "uv": 0.001445386,
+          "uvNoise": 0.0003568008,
+          "luminanceRatio": 0.9944235
+        },
+        {
+          "flux": "flux-s80/upwelling",
+          "binsLx": [5181.095, 6847.525, 10455.54],
+          "channelsLx": [5282.621, 6823.765, 10672.62],
+          "uv": 0.001908784,
+          "uvNoise": 0.0005716883,
+          "luminanceRatio": 1.003001
+        }
+      ],
+      "readings": [
+        {
+          "name": "ground-s0-v30-a0",
+          "radiance": [4381.777, 5453.605, 7968.892],
+          "standardError": [22.09845, 18.31063, 30.32348],
+          "uvNoise": 0.000478018
+        },
+        {
+          "name": "ground-s0-v60-a0",
+          "radiance": [2569.516, 3710.8, 6424.001],
+          "standardError": [16.97378, 15.44894, 30.19258],
+          "uvNoise": 0.0006165524
+        },
+        {
+          "name": "ground-s0-v75-a0",
+          "radiance": [3388.858, 4836.146, 7775.65],
+          "standardError": [21.79784, 18.83952, 35.18459],
+          "uvNoise": 0.0005790142
+        },
+        {
+          "name": "ground-s0-v85-a0",
+          "radiance": [5808.525, 6990.555, 8811.095],
+          "standardError": [34.6489, 27.83973, 42.09617],
+          "uvNoise": 0.0005608471
+        },
+        {
+          "name": "ground-s30-v0-a0",
+          "radiance": [3742.116, 4633.052, 6784.766],
+          "standardError": [19.26371, 15.80465, 26.61811],
+          "uvNoise": 0.0004894606
+        },
+        {
+          "name": "ground-s30-v30-a45",
+          "radiance": [6077.538, 7238.311, 9836.047],
+          "standardError": [32.70492, 26.20571, 39.36698],
+          "uvNoise": 0.0005002578
+        },
+        {
+          "name": "ground-s30-v30-a90",
+          "radiance": [2692.193, 3582.587, 5754.957],
+          "standardError": [15.25601, 13.39464, 25.43065],
+          "uvNoise": 0.0005558021
+        },
+        {
+          "name": "ground-s30-v30-a135",
+          "radiance": [1685.745, 2412.582, 4307.903],
+          "standardError": [9.543205, 8.73339, 18.45987],
+          "uvNoise": 0.0005531025
+        },
+        {
+          "name": "ground-s30-v30-a180",
+          "radiance": [1463.605, 2156.355, 4003.461],
+          "standardError": [8.95761, 8.474019, 18.08718],
+          "uvNoise": 0.0005938235
+        },
+        {
+          "name": "ground-s30-v60-a0",
+          "radiance": [7309.548, 8961.84, 12266.47],
+          "standardError": [39.09665, 32.99251, 49.33823],
+          "uvNoise": 0.0005051179
+        },
+        {
+          "name": "ground-s30-v60-a45",
+          "radiance": [4440.814, 5800.703, 8890.279],
+          "standardError": [25.30885, 21.73677, 40.87245],
+          "uvNoise": 0.0005631104
+        },
+        {
+          "name": "ground-s30-v60-a90",
+          "radiance": [2299.5, 3353.722, 5885.386],
+          "standardError": [16.13597, 13.63765, 27.82975],
+          "uvNoise": 0.0006206964
+        },
+        {
+          "name": "ground-s30-v60-a135",
+          "radiance": [1663.751, 2618.152, 4901.644],
+          "standardError": [12.10795, 11.1942, 22.66839],
+          "uvNoise": 0.0006329862
+        },
+        {
+          "name": "ground-s30-v60-a180",
+          "radiance": [1587.359, 2493.862, 4716.612],
+          "standardError": [12.21603, 10.91425, 22.40117],
+          "uvNoise": 0.0006523926
+        },
+        {
+          "name": "ground-s30-v75-a0",
+          "radiance": [7185.147, 9123.361, 12561.68],
+          "standardError": [41.52603, 36.55445, 59.05461],
+          "uvNoise": 0.0005677096
+        },
+        {
+          "name": "ground-s30-v75-a45",
+          "radiance": [5155.022, 6828.511, 9942.133],
+          "standardError": [29.87972, 25.96139, 43.234],
+          "uvNoise": 0.0005433854
+        },
+        {
+          "name": "ground-s30-v75-a90",
+          "radiance": [3229.408, 4647.614, 7506.17],
+          "standardError": [21.31471, 18.72443, 34.72579],
+          "uvNoise": 0.0005957045
+        },
+        {
+          "name": "ground-s30-v75-a135",
+          "radiance": [2709.854, 4096.516, 6862.859],
+          "standardError": [20.09201, 17.87878, 32.81156],
+          "uvNoise": 0.0006358291
+        },
+        {
+          "name": "ground-s30-v75-a180",
+          "radiance": [2705.408, 4132.378, 6887.639],
+          "standardError": [19.83102, 18.16681, 33.45726],
+          "uvNoise": 0.0006413031
+        },
+        {
+          "name": "ground-s30-v85-a0",
+          "radiance": [10461.56, 11804.84, 13133.08],
+          "standardError": [58.7603, 46.78503, 62.72965],
+          "uvNoise": 0.0005383364
+        },
+        {
+          "name": "ground-s30-v85-a45",
+          "radiance": [8056.448, 9251.383, 10834.02],
+          "standardError": [43.88853, 34.75214, 48.58312],
+          "uvNoise": 0.000516333
+        },
+        {
+          "name": "ground-s30-v85-a90",
+          "radiance": [5595.564, 6782.153, 8525.355],
+          "standardError": [32.7619, 25.88699, 39.77432],
+          "uvNoise": 0.0005449371
+        },
+        {
+          "name": "ground-s30-v85-a135",
+          "radiance": [5096.159, 6279.945, 8061.444],
+          "standardError": [29.81235, 24.65585, 38.17529],
+          "uvNoise": 0.0005571992
+        },
+        {
+          "name": "ground-s30-v85-a180",
+          "radiance": [5182.523, 6401.889, 8270.418],
+          "standardError": [32.27781, 26.3691, 41.44294],
+          "uvNoise": 0.0005890369
+        },
+        {
+          "name": "ground-s60-v0-a0",
+          "radiance": [1155.501, 1706.112, 2996.204],
+          "standardError": [7.595681, 6.996766, 13.56582],
+          "uvNoise": 0.0006024259
+        },
+        {
+          "name": "ground-s60-v30-a0",
+          "radiance": [3966.276, 4806.482, 6659.78],
+          "standardError": [21.35836, 18.65399, 29.92371],
+          "uvNoise": 0.0005452936
+        },
+        {
+          "name": "ground-s60-v30-a45",
+          "radiance": [2393.597, 3134.868, 4895.185],
+          "standardError": [14.0485, 12.33344, 23.83193],
+          "uvNoise": 0.0005951261
+        },
+        {
+          "name": "ground-s60-v30-a90",
+          "radiance": [1208.627, 1806.43, 3267.173],
+          "standardError": [8.446299, 7.506338, 14.86018],
+          "uvNoise": 0.0006147397
+        },
+        {
+          "name": "ground-s60-v30-a135",
+          "radiance": [874.0547, 1413.15, 2735.391],
+          "standardError": [7.061151, 6.347581, 12.70979],
+          "uvNoise": 0.0006577506
+        },
+        {
+          "name": "ground-s60-v30-a180",
+          "radiance": [814.6299, 1341.649, 2642.293],
+          "standardError": [6.960255, 6.288992, 12.58867],
+          "uvNoise": 0.0006822446
+        },
+        {
+          "name": "ground-s60-v60-a45",
+          "radiance": [4668.588, 5943.293, 8525.207],
+          "standardError": [26.61419, 22.99196, 40.40528],
+          "uvNoise": 0.0005687952
+        },
+        {
+          "name": "ground-s60-v60-a90",
+          "radiance": [1688.865, 2569.623, 4593.75],
+          "standardError": [12.31036, 10.93744, 21.73035],
+          "uvNoise": 0.0006348883
+        },
+        {
+          "name": "ground-s60-v60-a135",
+          "radiance": [1397.406, 2306.77, 4307.332],
+          "standardError": [11.74906, 10.53086, 19.99057],
+          "uvNoise": 0.0006602497
+        },
+        {
+          "name": "ground-s60-v60-a180",
+          "radiance": [1484.559, 2459.607, 4649.164],
+          "standardError": [12.11979, 10.90327, 21.07582],
+          "uvNoise": 0.0006432749
+        },
+        {
+          "name": "ground-s60-v75-a0",
+          "radiance": [22316.85, 23764.71, 25398.08],
+          "standardError": [120.4916, 92.25569, 108.7731],
+          "uvNoise": 0.0005025186
+        },
+        {
+          "name": "ground-s60-v75-a45",
+          "radiance": [6998.447, 8619.543, 11090.37],
+          "standardError": [41.43953, 33.90457, 51.45197],
+          "uvNoise": 0.0005535978
+        },
+        {
+          "name": "ground-s60-v75-a90",
+          "radiance": [2748.568, 3965.531, 6310.831],
+          "standardError": [19.78025, 16.757, 29.72571],
+          "uvNoise": 0.0006167142
+        },
+        {
+          "name": "ground-s60-v75-a135",
+          "radiance": [2519.705, 3965.266, 6425.636],
+          "standardError": [19.44774, 17.42193, 30.28539],
+          "uvNoise": 0.0006307271
+        },
+        {
+          "name": "ground-s60-v75-a180",
+          "radiance": [2856.275, 4412.408, 7264.752],
+          "standardError": [22.99989, 19.97404, 35.38636],
+          "uvNoise": 0.0006552956
+        },
+        {
+          "name": "ground-s60-v85-a0",
+          "radiance": [31257.37, 30187.78, 26641.68],
+          "standardError": [153.7096, 108.0953, 116.0226],
+          "uvNoise": 0.0004614285
+        },
+        {
+          "name": "ground-s60-v85-a45",
+          "radiance": [11671.09, 12389.48, 12657.85],
+          "standardError": [64.84365, 49.38372, 61.94856],
+          "uvNoise": 0.0005340542
+        },
+        {
+          "name": "ground-s60-v85-a90",
+          "radiance": [4854.56, 5912.814, 7026.889],
+          "standardError": [29.92057, 24.75939, 34.74758],
+          "uvNoise": 0.0005751084
+        },
+        {
+          "name": "ground-s60-v85-a135",
+          "radiance": [4781.317, 5925.02, 7273.386],
+          "standardError": [30.80192, 24.41417, 34.74346],
+          "uvNoise": 0.0005718635
+        },
+        {
+          "name": "ground-s60-v85-a180",
+          "radiance": [5332.23, 6657.514, 8074.531],
+          "standardError": [34.66943, 28.38603, 39.14138],
+          "uvNoise": 0.0005813576
+        },
+        {
+          "name": "disc-p0",
+          "radiance": [4961.408, 5209.318, 6929.46],
+          "standardError": [16.48825, 13.35866, 24.68384],
+          "uvNoise": 0.0003898082
+        },
+        {
+          "name": "disc-p30",
+          "radiance": [4238.11, 4514.644, 5966.252],
+          "standardError": [15.24297, 12.57658, 22.81486],
+          "uvNoise": 0.0004192012
+        },
+        {
+          "name": "disc-p60",
+          "radiance": [2449.32, 2711.013, 3747.9],
+          "standardError": [11.76553, 9.609486, 16.17418],
+          "uvNoise": 0.0005099236
+        },
+        {
+          "name": "disc-p75",
+          "radiance": [1324.067, 1579.979, 2320.708],
+          "standardError": [8.05358, 6.554698, 10.83561],
+          "uvNoise": 0.0005885229
+        },
+        {
+          "name": "limb-0.1H",
+          "radiance": [3708.587, 5684.054, 9630.035],
+          "standardError": [30.09297, 25.60668, 44.21019],
+          "uvNoise": 0.0006390847
+        },
+        {
+          "name": "limb-0.3H",
+          "radiance": [3670.61, 5624.688, 9481.593],
+          "standardError": [28.77885, 24.10961, 39.75016],
+          "uvNoise": 0.0005983991
+        },
+        {
+          "name": "limb-1H",
+          "radiance": [3575.277, 5446.034, 9446.945],
+          "standardError": [26.13133, 22.32899, 38.33129],
+          "uvNoise": 0.0005752747
+        },
+        {
+          "name": "limb-3H",
+          "radiance": [3201.386, 5010.54, 8813.997],
+          "standardError": [24.76624, 20.95699, 36.37762],
+          "uvNoise": 0.0005897486
+        },
+        {
+          "name": "limb-10H",
+          "radiance": [1914.445, 3191.829, 6010.944],
+          "standardError": [15.62112, 13.57234, 24.1481],
+          "uvNoise": 0.0005953059
+        },
+        {
+          "name": "aerial-1km",
+          "radiance": [955.6043, 966.8237, 1092.543],
+          "standardError": [5.860712, 4.051724, 4.824023],
+          "uvNoise": 0.0005497703
+        },
+        {
+          "name": "aerial-10km",
+          "radiance": [2434.253, 2676.002, 3216.849],
+          "standardError": [12.96659, 10.57255, 15.69845],
+          "uvNoise": 0.0005492853
+        },
+        {
+          "name": "aerial-32km",
+          "radiance": [3505.476, 3626.653, 3945.958],
+          "standardError": [19.70031, 14.53112, 19.42844],
+          "uvNoise": 0.0005471151
+        },
+        {
+          "name": "ground-s80-v0-a0",
+          "radiance": [566.33, 873.5209, 1477.383],
+          "standardError": [6.371938, 5.645661, 9.745777],
+          "uvNoise": 0.0009142999
+        },
+        {
+          "name": "ground-s80-v30-a0",
+          "radiance": [1288.218, 1702.87, 2421.645],
+          "standardError": [11.16609, 9.373472, 15.97879],
+          "uvNoise": 0.0008046518
+        },
+        {
+          "name": "ground-s80-v30-a45",
+          "radiance": [969.6998, 1370.691, 2075.61],
+          "standardError": [9.810438, 8.179477, 14.48552],
+          "uvNoise": 0.0008801905
+        },
+        {
+          "name": "ground-s80-v30-a90",
+          "radiance": [650.7587, 1003.348, 1697.519],
+          "standardError": [7.32891, 6.34056, 11.65852],
+          "uvNoise": 0.0009256153
+        },
+        {
+          "name": "ground-s80-v30-a135",
+          "radiance": [582.1403, 950.7923, 1652.892],
+          "standardError": [6.711222, 5.794541, 10.03351],
+          "uvNoise": 0.0008637435
+        },
+        {
+          "name": "ground-s80-v30-a180",
+          "radiance": [594.2863, 987.1393, 1744.31],
+          "standardError": [7.129891, 6.243826, 11.24041],
+          "uvNoise": 0.0009073623
+        },
+        {
+          "name": "ground-s80-v60-a0",
+          "radiance": [7116.713, 7294.142, 7029.767],
+          "standardError": [39.11594, 27.98892, 33.24037],
+          "uvNoise": 0.000511579
+        },
+        {
+          "name": "ground-s80-v60-a45",
+          "radiance": [2556.175, 3148.445, 4033.263],
+          "standardError": [21.35543, 17.43224, 27.81884],
+          "uvNoise": 0.0008005796
+        },
+        {
+          "name": "ground-s80-v60-a90",
+          "radiance": [1072.85, 1654.306, 2628.129],
+          "standardError": [12.44218, 10.94239, 18.80503],
+          "uvNoise": 0.0009512031
+        },
+        {
+          "name": "ground-s80-v60-a135",
+          "radiance": [1103.854, 1763.22, 2918.873],
+          "standardError": [13.23025, 11.22273, 19.68927],
+          "uvNoise": 0.0009222255
+        },
+        {
+          "name": "ground-s80-v60-a180",
+          "radiance": [1243.137, 2052.65, 3349.022],
+          "standardError": [14.36592, 12.49548, 21.70256],
+          "uvNoise": 0.0008789891
+        },
+        {
+          "name": "ground-s80-v75-a0",
+          "radiance": [19837.16, 17911.73, 14055.84],
+          "standardError": [98.05269, 64.19178, 58.90547],
+          "uvNoise": 0.0004479339
+        },
+        {
+          "name": "ground-s80-v75-a45",
+          "radiance": [4837.338, 5540.793, 5951.273],
+          "standardError": [38.03143, 29.01134, 40.85262],
+          "uvNoise": 0.0007405914
+        },
+        {
+          "name": "ground-s80-v75-a90",
+          "radiance": [1853.96, 2627.342, 3594.085],
+          "standardError": [19.75855, 16.71031, 25.60327],
+          "uvNoise": 0.0008965326
+        },
+        {
+          "name": "ground-s80-v75-a135",
+          "radiance": [1986.249, 2970.115, 4123.775],
+          "standardError": [22.88727, 18.8752, 29.46157],
+          "uvNoise": 0.0009099472
+        },
+        {
+          "name": "ground-s80-v75-a180",
+          "radiance": [2348.136, 3546.708, 4890.925],
+          "standardError": [25.25501, 21.39669, 32.90505],
+          "uvNoise": 0.0008557601
+        },
+        {
+          "name": "ground-s80-v85-a0",
+          "radiance": [40394.93, 31791.83, 18347.32],
+          "standardError": [165.0746, 99.04434, 77.41557],
+          "uvNoise": 0.0003840251
+        },
+        {
+          "name": "ground-s80-v85-a45",
+          "radiance": [9438.891, 8516.763, 6369.23],
+          "standardError": [66.84495, 44.38227, 47.06732],
+          "uvNoise": 0.000685831
+        },
+        {
+          "name": "ground-s80-v85-a90",
+          "radiance": [3302.68, 3654.151, 3498.054],
+          "standardError": [28.07836, 21.28597, 25.10348],
+          "uvNoise": 0.0007720325
+        },
+        {
+          "name": "ground-s80-v85-a135",
+          "radiance": [3436.426, 3968.042, 3863.571],
+          "standardError": [30.88217, 23.34002, 28.08284],
+          "uvNoise": 0.0007909781
+        },
+        {
+          "name": "ground-s80-v85-a180",
+          "radiance": [4030.457, 4638.449, 4458.216],
+          "standardError": [34.73699, 26.82097, 32.01859],
+          "uvNoise": 0.0007719769
+        },
+        {
+          "name": "ground-s90-v0-a0",
+          "radiance": [105.2096, 148.0446, 225.8439],
+          "standardError": [1.174744, 1.061012, 2.064883],
+          "uvNoise": 0.001096583
+        },
+        {
+          "name": "ground-s90-v30-a0",
+          "radiance": [162.1201, 215.5417, 312.9793],
+          "standardError": [1.668897, 1.490367, 2.88167],
+          "uvNoise": 0.00106466
+        },
+        {
+          "name": "ground-s90-v30-a45",
+          "radiance": [140.6668, 195.4154, 289.8946],
+          "standardError": [1.507647, 1.35846, 2.604969],
+          "uvNoise": 0.001062101
+        },
+        {
+          "name": "ground-s90-v30-a90",
+          "radiance": [121.277, 172.5734, 264.5082],
+          "standardError": [1.367362, 1.225663, 2.466017],
+          "uvNoise": 0.001108099
+        },
+        {
+          "name": "ground-s90-v30-a135",
+          "radiance": [127.3245, 185.9408, 278.2614],
+          "standardError": [1.441804, 1.310637, 2.562805],
+          "uvNoise": 0.001089528
+        },
+        {
+          "name": "ground-s90-v30-a180",
+          "radiance": [137.09, 200.6179, 296.8717],
+          "standardError": [1.557923, 1.408711, 2.728103],
+          "uvNoise": 0.001085155
+        },
+        {
+          "name": "ground-s90-v60-a0",
+          "radiance": [480.3497, 499.5069, 614.9937],
+          "standardError": [3.669984, 3.136753, 5.680266],
+          "uvNoise": 0.0009521756
+        },
+        {
+          "name": "ground-s90-v60-a45",
+          "radiance": [304.1986, 383.3405, 507.7009],
+          "standardError": [2.895613, 2.559426, 4.677478],
+          "uvNoise": 0.001017675
+        },
+        {
+          "name": "ground-s90-v60-a90",
+          "radiance": [203.0673, 276.8447, 388.5434],
+          "standardError": [2.114203, 1.873363, 3.514898],
+          "uvNoise": 0.001037832
+        },
+        {
+          "name": "ground-s90-v60-a135",
+          "radiance": [247.6144, 329.6264, 450.4246],
+          "standardError": [2.522885, 2.21512, 4.138169],
+          "uvNoise": 0.00103514
+        },
+        {
+          "name": "ground-s90-v60-a180",
+          "radiance": [295.7609, 393.1454, 526.5241],
+          "standardError": [2.957398, 2.598254, 4.824529],
+          "uvNoise": 0.001019457
+        },
+        {
+          "name": "ground-s90-v75-a0",
+          "radiance": [1152.213, 908.5898, 823.7203],
+          "standardError": [6.386265, 5.001526, 7.776897],
+          "uvNoise": 0.0007968168
+        },
+        {
+          "name": "ground-s90-v75-a45",
+          "radiance": [570.6982, 610.154, 650.1506],
+          "standardError": [4.400996, 3.694656, 5.950246],
+          "uvNoise": 0.0008953954
+        },
+        {
+          "name": "ground-s90-v75-a90",
+          "radiance": [329.2485, 399.8808, 463.4291],
+          "standardError": [2.961122, 2.51275, 4.283721],
+          "uvNoise": 0.0009542118
+        },
+        {
+          "name": "ground-s90-v75-a135",
+          "radiance": [403.0075, 468.5004, 529.7949],
+          "standardError": [3.438234, 2.869001, 4.853096],
+          "uvNoise": 0.0009292793
+        },
+        {
+          "name": "ground-s90-v75-a180",
+          "radiance": [484.437, 554.7448, 601.7753],
+          "standardError": [4.019049, 3.345174, 5.514518],
+          "uvNoise": 0.0009088907
+        },
+        {
+          "name": "ground-s90-v85-a0",
+          "radiance": [2206.879, 1092.171, 540.7157],
+          "standardError": [8.560504, 5.090754, 5.512074],
+          "uvNoise": 0.0005878555
+        },
+        {
+          "name": "ground-s90-v85-a45",
+          "radiance": [887.1628, 653.9289, 442.5536],
+          "standardError": [5.042092, 3.633601, 4.328784],
+          "uvNoise": 0.0007386294
+        },
+        {
+          "name": "ground-s90-v85-a90",
+          "radiance": [456.3513, 393.8874, 332.5054],
+          "standardError": [3.06872, 2.318877, 3.156589],
+          "uvNoise": 0.00082261
+        },
+        {
+          "name": "ground-s90-v85-a135",
+          "radiance": [469.872, 384.841, 313.6167],
+          "standardError": [2.930414, 2.197722, 2.96314],
+          "uvNoise": 0.0007927063
+        },
+        {
+          "name": "ground-s90-v85-a180",
+          "radiance": [533.7978, 400.3819, 322.1044],
+          "standardError": [3.144069, 2.267514, 3.098805],
+          "uvNoise": 0.0007869224
+        },
+        {
+          "name": "disc-p85",
+          "radiance": [506.7483, 688.9371, 1047.285],
+          "standardError": [5.183598, 4.195204, 7.363397],
+          "uvNoise": 0.0008955274
+        }
+      ]
+    },
+    "mars": {
+      "parts": ["mars-spectral-day", "mars-spectral-low"],
+      "channelsTally": {
+        "comparisons": 321,
+        "passes": 188,
+        "misses": 0,
+        "refusals": 133,
+        "worstRatio": 0.6302497,
+        "worstAt": "ground-s60-v75-a180/r"
+      },
+      "twinTally": {
+        "comparisons": 321,
+        "passes": 102,
+        "misses": 86,
+        "refusals": 133,
+        "worstRatio": 19.87169,
+        "worstAt": "ground-s80-v85-a180/g"
+      },
+      "images": [
+        {
+          "image": "ground-s0",
+          "geometries": 4,
+          "medianUvNoise": 0.0004910353,
+          "channels": {
+            "medianUv": 0.002101055,
+            "largestUv": 0.002615881,
+            "largestUvAt": "ground-s0-v85-a0",
+            "largestDeltaE": 1.057121,
+            "relativeRms": [0.01938571, 0.01260655, 0.01403881]
+          },
+          "channelsTally": {
+            "comparisons": 12,
+            "passes": 12,
+            "misses": 0,
+            "refusals": 0,
+            "worstRatio": 0.3637365,
+            "worstAt": "ground-s0-v75-a0/r"
+          },
+          "twin": {
+            "medianUv": 0.001092834,
+            "largestUv": 0.001371481,
+            "largestUvAt": "ground-s0-v85-a0",
+            "largestDeltaE": 1.480077,
+            "relativeRms": [0.03836882, 0.05458519, 0.06086506]
+          },
+          "twinTally": {
+            "comparisons": 12,
+            "passes": 10,
+            "misses": 2,
+            "refusals": 0,
+            "worstRatio": 1.355494,
+            "worstAt": "ground-s0-v30-a0/b"
+          }
+        },
+        {
+          "image": "ground-s30",
+          "geometries": 20,
+          "medianUvNoise": 0.0004968719,
+          "channels": {
+            "medianUv": 0.001856079,
+            "largestUv": 0.003142938,
+            "largestUvAt": "ground-s30-v60-a180",
+            "largestDeltaE": 1.094988,
+            "relativeRms": [0.02194605, 0.006388144, 0.009728342]
+          },
+          "channelsTally": {
+            "comparisons": 60,
+            "passes": 60,
+            "misses": 0,
+            "refusals": 0,
+            "worstRatio": 0.5030181,
+            "worstAt": "ground-s30-v60-a180/r"
+          },
+          "twin": {
+            "medianUv": 0.0009191059,
+            "largestUv": 0.007937263,
+            "largestUvAt": "ground-s30-v30-a90",
+            "largestDeltaE": 6.011003,
+            "relativeRms": [0.06317145, 0.08040138, 0.1097966]
+          },
+          "twinTally": {
+            "comparisons": 60,
+            "passes": 41,
+            "misses": 19,
+            "refusals": 0,
+            "worstRatio": 7.320509,
+            "worstAt": "ground-s30-v30-a180/b"
+          }
+        },
+        {
+          "image": "ground-s60",
+          "geometries": 24,
+          "medianUvNoise": 0.0005085798,
+          "channels": {
+            "medianUv": 0.001555562,
+            "largestUv": 0.003659707,
+            "largestUvAt": "ground-s60-v75-a180",
+            "largestDeltaE": 0.6142022,
+            "relativeRms": [0.005123438, 0.005668948, 0.001949418]
+          },
+          "channelsTally": {
+            "comparisons": 72,
+            "passes": 72,
+            "misses": 0,
+            "refusals": 0,
+            "worstRatio": 0.6302497,
+            "worstAt": "ground-s60-v75-a180/r"
+          },
+          "twin": {
+            "medianUv": 0.001601271,
+            "largestUv": 0.01870155,
+            "largestUvAt": "ground-s60-v60-a90",
+            "largestDeltaE": 7.766889,
+            "relativeRms": [0.08487374, 0.08636513, 0.08431984]
+          },
+          "twinTally": {
+            "comparisons": 72,
+            "passes": 17,
+            "misses": 55,
+            "refusals": 0,
+            "worstRatio": 12.53179,
+            "worstAt": "ground-s60-v60-a180/g"
+          }
+        },
+        {
+          "image": "disc-p0",
+          "geometries": 1,
+          "medianUvNoise": 0.0004676143,
+          "channels": {
+            "medianUv": 0.0004055644,
+            "largestUv": 0.0004055644,
+            "largestUvAt": "disc-p0",
+            "largestDeltaE": 0.1540446,
+            "relativeRms": [0.007946108, 0.0003986462, 0.002553735]
+          },
+          "channelsTally": {
+            "comparisons": 3,
+            "passes": 3,
+            "misses": 0,
+            "refusals": 0,
+            "worstRatio": 0.1175212,
+            "worstAt": "disc-p0/r"
+          },
+          "twin": {
+            "medianUv": 0.0003152579,
+            "largestUv": 0.0003152579,
+            "largestUvAt": "disc-p0",
+            "largestDeltaE": 0.179723,
+            "relativeRms": [0.009025506, 0.005000156, 0.009904312]
+          },
+          "twinTally": {
+            "comparisons": 3,
+            "passes": 3,
+            "misses": 0,
+            "refusals": 0,
+            "worstRatio": 0.1428214,
+            "worstAt": "disc-p0/b"
+          }
+        },
+        {
+          "image": "disc-p30",
+          "geometries": 1,
+          "medianUvNoise": 0.0001446648,
+          "channels": {
+            "medianUv": 0.0001930992,
+            "largestUv": 0.0001930992,
+            "largestUvAt": "disc-p30",
+            "largestDeltaE": 0.08567977,
+            "relativeRms": [0.00302889, 0.002405954, 0.0006800618]
+          },
+          "channelsTally": {
+            "comparisons": 3,
+            "passes": 3,
+            "misses": 0,
+            "refusals": 0,
+            "worstRatio": 0.05469972,
+            "worstAt": "disc-p30/r"
+          },
+          "twin": {
+            "medianUv": 0.0003567352,
+            "largestUv": 0.0003567352,
+            "largestUvAt": "disc-p30",
+            "largestDeltaE": 0.1706933,
+            "relativeRms": [0.00208199, 0.006117108, 0.0002226716]
+          },
+          "twinTally": {
+            "comparisons": 3,
+            "passes": 3,
+            "misses": 0,
+            "refusals": 0,
+            "worstRatio": 0.1123959,
+            "worstAt": "disc-p30/g"
+          }
+        },
+        {
+          "image": "disc-p60",
+          "geometries": 1,
+          "medianUvNoise": 0.0004841332,
+          "channels": {
+            "medianUv": 0.0014334,
+            "largestUv": 0.0014334,
+            "largestUvAt": "disc-p60",
+            "largestDeltaE": 0.5798953,
+            "relativeRms": [0.01677325, 0.005180217, 0.01418682]
+          },
+          "channelsTally": {
+            "comparisons": 3,
+            "passes": 3,
+            "misses": 0,
+            "refusals": 0,
+            "worstRatio": 0.2476762,
+            "worstAt": "disc-p60/r"
+          },
+          "twin": {
+            "medianUv": 0.0006916815,
+            "largestUv": 0.0006916815,
+            "largestUvAt": "disc-p60",
+            "largestDeltaE": 0.3419468,
+            "relativeRms": [0.003468933, 0.01478699, 0.006134365]
+          },
+          "twinTally": {
+            "comparisons": 3,
+            "passes": 3,
+            "misses": 0,
+            "refusals": 0,
+            "worstRatio": 0.2287733,
+            "worstAt": "disc-p60/g"
+          }
+        },
+        {
+          "image": "disc-p75",
+          "geometries": 1,
+          "medianUvNoise": 0.0008510482,
+          "channels": {
+            "medianUv": 0.001429602,
+            "largestUv": 0.001429602,
+            "largestUvAt": "disc-p75",
+            "largestDeltaE": 0.5516925,
+            "relativeRms": [0.03147467, 0.007016135, 0.009196947]
+          },
+          "channelsTally": {
+            "comparisons": 3,
+            "passes": 2,
+            "misses": 0,
+            "refusals": 1,
+            "worstRatio": 0.4689733,
+            "worstAt": "disc-p75/r"
+          },
+          "twin": {
+            "medianUv": 0.00112438,
+            "largestUv": 0.00112438,
+            "largestUvAt": "disc-p75",
+            "largestDeltaE": 0.5926934,
+            "relativeRms": [0.009545296, 0.02619952, 0.009411098]
+          },
+          "twinTally": {
+            "comparisons": 3,
+            "passes": 2,
+            "misses": 0,
+            "refusals": 1,
+            "worstRatio": 0.403088,
+            "worstAt": "disc-p75/g"
+          }
+        },
+        {
+          "image": "limb",
+          "geometries": 5,
+          "medianUvNoise": 0.0004951369,
+          "channels": {
+            "medianUv": 0.002590067,
+            "largestUv": 0.004561364,
+            "largestUvAt": "limb-10H",
+            "largestDeltaE": 1.155046,
+            "relativeRms": [0.02772359, 0.008037685, 0.01259917]
+          },
+          "channelsTally": {
+            "comparisons": 15,
+            "passes": 15,
+            "misses": 0,
+            "refusals": 0,
+            "worstRatio": 0.458644,
+            "worstAt": "limb-0.3H/r"
+          },
+          "twin": {
+            "medianUv": 0.001554604,
+            "largestUv": 0.001591969,
+            "largestUvAt": "limb-10H",
+            "largestDeltaE": 1.982736,
+            "relativeRms": [0.03254876, 0.04020943, 0.02610357]
+          },
+          "twinTally": {
+            "comparisons": 15,
+            "passes": 9,
+            "misses": 6,
+            "refusals": 0,
+            "worstRatio": 1.691713,
+            "worstAt": "limb-10H/g"
+          }
+        },
+        {
+          "image": "aerial",
+          "geometries": 3,
+          "medianUvNoise": 0.0004761928,
+          "channels": {
+            "medianUv": 0.001288213,
+            "largestUv": 0.001921831,
+            "largestUvAt": "aerial-32km",
+            "largestDeltaE": 0.674366,
+            "relativeRms": [0.02682307, 0.005461988, 0.00650346]
+          },
+          "channelsTally": {
+            "comparisons": 9,
+            "passes": 7,
+            "misses": 0,
+            "refusals": 2,
+            "worstRatio": 0.201932,
+            "worstAt": "aerial-1km/g"
+          },
+          "twin": {
+            "medianUv": 0.0008834744,
+            "largestUv": 0.001328192,
+            "largestUvAt": "aerial-32km",
+            "largestDeltaE": 1.101474,
+            "relativeRms": [0.05662952, 0.03896637, 0.03691041]
+          },
+          "twinTally": {
+            "comparisons": 9,
+            "passes": 7,
+            "misses": 0,
+            "refusals": 2,
+            "worstRatio": 0.6439192,
+            "worstAt": "aerial-32km/b"
+          }
+        },
+        {
+          "image": "ground-s80",
+          "geometries": 21,
+          "medianUvNoise": 0.0007774513,
+          "channels": {
+            "medianUv": 0.002517311,
+            "largestUv": 0.003813285,
+            "largestUvAt": "ground-s80-v85-a180",
+            "largestDeltaE": 0.9651982,
+            "relativeRms": [0.01648688, 0.008987895, 0.009425814]
+          },
+          "channelsTally": {
+            "comparisons": 63,
+            "passes": 10,
+            "misses": 0,
+            "refusals": 53,
+            "worstRatio": 0.3495881,
+            "worstAt": "ground-s80-v85-a135/g"
+          },
+          "twin": {
+            "medianUv": 0.004862486,
+            "largestUv": 0.05518619,
+            "largestUvAt": "ground-s80-v85-a90",
+            "largestDeltaE": 13.73071,
+            "relativeRms": [0.2420995, 0.2767543, 0.3279635]
+          },
+          "twinTally": {
+            "comparisons": 63,
+            "passes": 6,
+            "misses": 4,
+            "refusals": 53,
+            "worstRatio": 19.87169,
+            "worstAt": "ground-s80-v85-a180/g"
+          }
+        },
+        {
+          "image": "ground-s90",
+          "geometries": 21,
+          "medianUvNoise": 0.001059311,
+          "channels": {
+            "medianUv": 0.001887342,
+            "largestUv": 0.003761961,
+            "largestUvAt": "ground-s90-v85-a135",
+            "largestDeltaE": 1.136889,
+            "relativeRms": [0.008299455, 0.006146458, 0.02626159]
+          },
+          "channelsTally": {
+            "comparisons": 63,
+            "passes": 0,
+            "misses": 0,
+            "refusals": 63,
+            "worstRatio": 0,
+            "worstAt": ""
+          },
+          "twin": {
+            "medianUv": 0.003606348,
+            "largestUv": 0.02451472,
+            "largestUvAt": "ground-s90-v85-a90",
+            "largestDeltaE": 12.09949,
+            "relativeRms": [0.4018486, 0.4559261, 0.5280498]
+          },
+          "twinTally": {
+            "comparisons": 63,
+            "passes": 0,
+            "misses": 0,
+            "refusals": 63,
+            "worstRatio": 0,
+            "worstAt": ""
+          }
+        },
+        {
+          "image": "disc-p85",
+          "geometries": 1,
+          "medianUvNoise": 0.0007573317,
+          "channels": {
+            "medianUv": 0.001848671,
+            "largestUv": 0.001848671,
+            "largestUvAt": "disc-p85",
+            "largestDeltaE": 0.7168768,
+            "relativeRms": [0.02877679, 0.001733332, 0.01725896]
+          },
+          "channelsTally": {
+            "comparisons": 3,
+            "passes": 1,
+            "misses": 0,
+            "refusals": 2,
+            "worstRatio": 0.02326139,
+            "worstAt": "disc-p85/g"
+          },
+          "twin": {
+            "medianUv": 0.0005170432,
+            "largestUv": 0.0005170432,
+            "largestUvAt": "disc-p85",
+            "largestDeltaE": 0.2088118,
+            "relativeRms": [0.0123247, 0.003314993, 0.005062382]
+          },
+          "twinTally": {
+            "comparisons": 3,
+            "passes": 1,
+            "misses": 0,
+            "refusals": 2,
+            "worstRatio": 0.04448735,
+            "worstAt": "disc-p85/g"
+          }
+        },
+        {
+          "image": "ground-s85",
+          "geometries": 4,
+          "medianUvNoise": 0.0008421468,
+          "channels": {
+            "medianUv": 0.001045811,
+            "largestUv": 0.001357861,
+            "largestUvAt": "aureole-s85-d12",
+            "largestDeltaE": 0.4406018,
+            "relativeRms": [0.009422439, 0.002753573, 0.01352079]
+          },
+          "channelsTally": {
+            "comparisons": 12,
+            "passes": 0,
+            "misses": 0,
+            "refusals": 12,
+            "worstRatio": 0,
+            "worstAt": ""
+          },
+          "twin": {
+            "medianUv": 0.006416389,
+            "largestUv": 0.008652958,
+            "largestUvAt": "aureole-s85-d5",
+            "largestDeltaE": 7.731536,
+            "relativeRms": [0.2677858, 0.2970629, 0.3496485]
+          },
+          "twinTally": {
+            "comparisons": 12,
+            "passes": 0,
+            "misses": 0,
+            "refusals": 12,
+            "worstRatio": 0,
+            "worstAt": ""
+          }
+        }
+      ],
+      "beams": [
+        {
+          "geometry": "ground-s30-v0-a0",
+          "sunZenithDeg": 30,
+          "binsLx": [80597.96, 73401.75, 70159.76],
+          "channelsLx": [80569.54, 73391.65, 70148.23],
+          "uv": 0.00001092284,
+          "luminanceRatio": 0.9998113,
+          "twinUv": 0.00002795463
+        },
+        {
+          "geometry": "ground-s60-v0-a0",
+          "sunZenithDeg": 60,
+          "binsLx": [52957.62, 48442.4, 46451.98],
+          "channelsLx": [52925.88, 48430.96, 46438.97],
+          "uv": 0.00001840534,
+          "luminanceRatio": 0.9996778,
+          "twinUv": 0.00004789083
+        },
+        {
+          "geometry": "ground-s80-v0-a0",
+          "sunZenithDeg": 80,
+          "binsLx": [9905.134, 9221.954, 8957.131],
+          "channelsLx": [9889.959, 9216.153, 8950.666],
+          "uv": 0.00004534505,
+          "luminanceRatio": 0.999161,
+          "twinUv": 0.0001267647
+        },
+        {
+          "geometry": "ground-s90-v0-a0",
+          "sunZenithDeg": 90,
+          "binsLx": [2.141082, 2.181528, 2.259107],
+          "channelsLx": [2.130648, 2.175862, 2.253477],
+          "uv": 0.0001128948,
+          "luminanceRatio": 0.9969351,
+          "twinUv": 0.0005134353
+        }
+      ],
+      "fluxes": [
+        {
+          "flux": "flux-s0/downwelling",
+          "binsLx": [139460.4, 122093, 111335.3],
+          "channelsLx": [138762.1, 123961.4, 111777.3],
+          "uv": 0.001114374,
+          "uvNoise": 0.0001587127,
+          "luminanceRatio": 1.009756
+        },
+        {
+          "flux": "flux-s0/upwelling",
+          "binsLx": [33993.33, 27949.48, 22976.68],
+          "channelsLx": [33402.8, 28043.65, 22917.42],
+          "uv": 0.001134469,
+          "uvNoise": 0.0001862736,
+          "luminanceRatio": 0.9978349
+        },
+        {
+          "flux": "flux-s30/downwelling",
+          "binsLx": [119023.7, 103943.9, 94361.77],
+          "channelsLx": [118312.1, 104546.3, 93848.37],
+          "uv": 0.0007984212,
+          "uvNoise": 0.0004695574,
+          "luminanceRatio": 1.002277
+        },
+        {
+          "flux": "flux-s30/upwelling",
+          "binsLx": [30365.49, 24922.32, 20168.57],
+          "channelsLx": [29965.47, 24917.54, 20150.03],
+          "uv": 0.0007292622,
+          "uvNoise": 0.000376622,
+          "luminanceRatio": 0.9965097
+        },
+        {
+          "flux": "flux-s60/downwelling",
+          "binsLx": [62642.99, 53884.44, 47889.32],
+          "channelsLx": [61764.95, 54340.04, 47725.72],
+          "uv": 0.001239406,
+          "uvNoise": 0.0004711363,
+          "luminanceRatio": 1.002301
+        },
+        {
+          "flux": "flux-s60/upwelling",
+          "binsLx": [20898.59, 16597.65, 12783.12],
+          "channelsLx": [20613.89, 16691.74, 12589.48],
+          "uv": 0.001376092,
+          "uvNoise": 0.0002770445,
+          "luminanceRatio": 0.9995803
+        },
+        {
+          "flux": "flux-s80/downwelling",
+          "binsLx": [16244.73, 13288.72, 10709.76],
+          "channelsLx": [15759.87, 13297.23, 10316.63],
+          "uv": 0.00238215,
+          "uvNoise": 0.0004966308,
+          "luminanceRatio": 0.9908672
+        },
+        {
+          "flux": "flux-s80/upwelling",
+          "binsLx": [11979.29, 9120.669, 6437.554],
+          "channelsLx": [11653.38, 9134.555, 6397.317],
+          "uv": 0.001677736,
+          "uvNoise": 0.0002186193,
+          "luminanceRatio": 0.9934677
+        }
+      ],
+      "readings": [
+        {
+          "name": "ground-s0-v30-a0",
+          "radiance": [11979.68, 9214.084, 6696.316],
+          "standardError": [65.83883, 40.38492, 35.0719],
+          "uvNoise": 0.0005353612
+        },
+        {
+          "name": "ground-s0-v60-a0",
+          "radiance": [7427.28, 5508.85, 3732.938],
+          "standardError": [38.32959, 23.59288, 19.92616],
+          "uvNoise": 0.0005137802
+        },
+        {
+          "name": "ground-s0-v75-a0",
+          "radiance": [9898.967, 7304.244, 4869.846],
+          "standardError": [45.61057, 28.31783, 24.57723],
+          "uvNoise": 0.0004682903
+        },
+        {
+          "name": "ground-s0-v85-a0",
+          "radiance": [13306.34, 9912.549, 6821.586],
+          "standardError": [60.22308, 36.55961, 34.8773],
+          "uvNoise": 0.0004624352
+        },
+        {
+          "name": "ground-s30-v0-a0",
+          "radiance": [10287.3, 7915.524, 5789.265],
+          "standardError": [55.82411, 33.73499, 29.31075],
+          "uvNoise": 0.0005229323
+        },
+        {
+          "name": "ground-s30-v30-a45",
+          "radiance": [18686.26, 14614.58, 10732.53],
+          "standardError": [101.4639, 63.23449, 55.36611],
+          "uvNoise": 0.0005279451
+        },
+        {
+          "name": "ground-s30-v30-a90",
+          "radiance": [7092.395, 5405.659, 3884.417],
+          "standardError": [35.16394, 21.42225, 19.70053],
+          "uvNoise": 0.0004905459
+        },
+        {
+          "name": "ground-s30-v30-a135",
+          "radiance": [4656.868, 3534.857, 2469],
+          "standardError": [24.18191, 14.63624, 13.22873],
+          "uvNoise": 0.0005110579
+        },
+        {
+          "name": "ground-s30-v30-a180",
+          "radiance": [4210.015, 3133.282, 2160.135],
+          "standardError": [20.83485, 12.99961, 11.38122],
+          "uvNoise": 0.0005040064
+        },
+        {
+          "name": "ground-s30-v60-a0",
+          "radiance": [19107.65, 14523.04, 10426.98],
+          "standardError": [104.1949, 63.5413, 54.7073],
+          "uvNoise": 0.0005321453
+        },
+        {
+          "name": "ground-s30-v60-a45",
+          "radiance": [11456.71, 8617.567, 6102.406],
+          "standardError": [55.03267, 33.69393, 29.77285],
+          "uvNoise": 0.0004788887
+        },
+        {
+          "name": "ground-s30-v60-a90",
+          "radiance": [6666.855, 4967.708, 3337.389],
+          "standardError": [32.09907, 20.00779, 16.65564],
+          "uvNoise": 0.0004817789
+        },
+        {
+          "name": "ground-s30-v60-a135",
+          "radiance": [5181.593, 3831.567, 2516.217],
+          "standardError": [24.78754, 15.45301, 14.16796],
+          "uvNoise": 0.0004997053
+        },
+        {
+          "name": "ground-s30-v60-a180",
+          "radiance": [4854.648, 3524.36, 2333.759],
+          "standardError": [23.2142, 13.88945, 13.23082],
+          "uvNoise": 0.0004940385
+        },
+        {
+          "name": "ground-s30-v75-a0",
+          "radiance": [17161.59, 12848.59, 8981.182],
+          "standardError": [86.85866, 53.60203, 47.27898],
+          "uvNoise": 0.0005080629
+        },
+        {
+          "name": "ground-s30-v75-a45",
+          "radiance": [13023.62, 9703.817, 6683.811],
+          "standardError": [65.14243, 40.3239, 36.81365],
+          "uvNoise": 0.0005119611
+        },
+        {
+          "name": "ground-s30-v75-a90",
+          "radiance": [9294.663, 6878.873, 4589.688],
+          "standardError": [45.00908, 27.92981, 26.00355],
+          "uvNoise": 0.0005032617
+        },
+        {
+          "name": "ground-s30-v75-a135",
+          "radiance": [7697.088, 5640.493, 3672.209],
+          "standardError": [35.0261, 21.41214, 19.19845],
+          "uvNoise": 0.0004655868
+        },
+        {
+          "name": "ground-s30-v75-a180",
+          "radiance": [7232.247, 5295.511, 3404.407],
+          "standardError": [33.44599, 21.56796, 19.26697],
+          "uvNoise": 0.0004910307
+        },
+        {
+          "name": "ground-s30-v85-a0",
+          "radiance": [18791.35, 14124.97, 9916.719],
+          "standardError": [88.35256, 53.73571, 50.82016],
+          "uvNoise": 0.0004752317
+        },
+        {
+          "name": "ground-s30-v85-a45",
+          "radiance": [15714.28, 11886.87, 8185.802],
+          "standardError": [77.19076, 48.45676, 45.05472],
+          "uvNoise": 0.0005069483
+        },
+        {
+          "name": "ground-s30-v85-a90",
+          "radiance": [12419.77, 9283.5, 6267.316],
+          "standardError": [58.10184, 36.06787, 34.54383],
+          "uvNoise": 0.0004874273
+        },
+        {
+          "name": "ground-s30-v85-a135",
+          "radiance": [10654.91, 7958.587, 5250.625],
+          "standardError": [47.20669, 30.13475, 27.8857],
+          "uvNoise": 0.0004659155
+        },
+        {
+          "name": "ground-s30-v85-a180",
+          "radiance": [10052, 7516.715, 4978.157],
+          "standardError": [45.05287, 28.74994, 26.88267],
+          "uvNoise": 0.0004709942
+        },
+        {
+          "name": "ground-s60-v0-a0",
+          "radiance": [3277.614, 2413.221, 1680.517],
+          "standardError": [17.52685, 10.22964, 9.139085],
+          "uvNoise": 0.0005259861
+        },
+        {
+          "name": "ground-s60-v30-a0",
+          "radiance": [10607, 8108.737, 5937.026],
+          "standardError": [58.04801, 35.72059, 31.23991],
+          "uvNoise": 0.0005351803
+        },
+        {
+          "name": "ground-s60-v30-a45",
+          "radiance": [6230.477, 4748.101, 3368.365],
+          "standardError": [32.83723, 20.12656, 17.07437],
+          "uvNoise": 0.0005139896
+        },
+        {
+          "name": "ground-s60-v30-a90",
+          "radiance": [3426.082, 2576.013, 1750.211],
+          "standardError": [18.21511, 11.06658, 9.804882],
+          "uvNoise": 0.0005280941
+        },
+        {
+          "name": "ground-s60-v30-a135",
+          "radiance": [2614.599, 1919.981, 1270.913],
+          "standardError": [12.95077, 7.843271, 7.002417],
+          "uvNoise": 0.0004999662
+        },
+        {
+          "name": "ground-s60-v30-a180",
+          "radiance": [2371.265, 1759.23, 1146.318],
+          "standardError": [11.49436, 6.977323, 6.095868],
+          "uvNoise": 0.000485599
+        },
+        {
+          "name": "ground-s60-v60-a45",
+          "radiance": [11855.87, 8968.988, 6370.383],
+          "standardError": [64.58998, 39.41445, 33.81905],
+          "uvNoise": 0.0005346272
+        },
+        {
+          "name": "ground-s60-v60-a90",
+          "radiance": [4869.266, 3634.576, 2388.064],
+          "standardError": [26.10389, 15.93828, 13.14118],
+          "uvNoise": 0.0005292725
+        },
+        {
+          "name": "ground-s60-v60-a135",
+          "radiance": [3545.964, 2557.29, 1621.577],
+          "standardError": [17.15721, 10.272, 8.547239],
+          "uvNoise": 0.000486417
+        },
+        {
+          "name": "ground-s60-v60-a180",
+          "radiance": [3190.118, 2296.753, 1456.426],
+          "standardError": [15.28903, 9.097819, 7.89607],
+          "uvNoise": 0.0004867307
+        },
+        {
+          "name": "ground-s60-v75-a0",
+          "radiance": [70359.78, 55990.2, 43717.32],
+          "standardError": [369.4704, 237.3142, 229.3878],
+          "uvNoise": 0.0005265226
+        },
+        {
+          "name": "ground-s60-v75-a45",
+          "radiance": [15787.46, 11780.11, 8182.323],
+          "standardError": [85.79925, 51.91631, 44.72999],
+          "uvNoise": 0.0005370392
+        },
+        {
+          "name": "ground-s60-v75-a90",
+          "radiance": [7413.959, 5414.544, 3485.941],
+          "standardError": [33.97593, 20.98716, 17.43379],
+          "uvNoise": 0.0004626302
+        },
+        {
+          "name": "ground-s60-v75-a135",
+          "radiance": [5406.478, 3877.448, 2481.733],
+          "standardError": [25.19286, 14.42534, 12.90583],
+          "uvNoise": 0.0004632198
+        },
+        {
+          "name": "ground-s60-v75-a180",
+          "radiance": [5025.343, 3583.812, 2269.449],
+          "standardError": [24.34385, 14.33881, 12.70248],
+          "uvNoise": 0.0004899961
+        },
+        {
+          "name": "ground-s60-v85-a0",
+          "radiance": [43718.58, 34187.1, 25774.29],
+          "standardError": [244.1203, 150.9605, 135.2206],
+          "uvNoise": 0.0005421585
+        },
+        {
+          "name": "ground-s60-v85-a45",
+          "radiance": [17656.9, 13519.59, 9525.028],
+          "standardError": [90.2213, 55.63033, 49.59941],
+          "uvNoise": 0.0005057355
+        },
+        {
+          "name": "ground-s60-v85-a90",
+          "radiance": [9515.512, 7101.289, 4728.242],
+          "standardError": [47.50104, 28.91738, 27.47717],
+          "uvNoise": 0.0005140099
+        },
+        {
+          "name": "ground-s60-v85-a135",
+          "radiance": [7245.577, 5310.17, 3456.508],
+          "standardError": [30.59081, 18.93276, 17.38131],
+          "uvNoise": 0.0004409655
+        },
+        {
+          "name": "ground-s60-v85-a180",
+          "radiance": [6870.441, 5022.925, 3309.303],
+          "standardError": [29.99659, 18.41539, 18.56702],
+          "uvNoise": 0.0004666141
+        },
+        {
+          "name": "disc-p0",
+          "radiance": [12143.55, 10253.1, 8659.152],
+          "standardError": [53.4749, 36.85441, 41.88327],
+          "uvNoise": 0.0004676143
+        },
+        {
+          "name": "disc-p30",
+          "radiance": [10111.89, 8510.956, 7234.462],
+          "standardError": [13.5829, 9.414536, 10.95562],
+          "uvNoise": 0.0001446648
+        },
+        {
+          "name": "disc-p60",
+          "radiance": [6049.461, 4920.554, 3993.803],
+          "standardError": [26.80286, 18.0043, 21.2427],
+          "uvNoise": 0.0004841332
+        },
+        {
+          "name": "disc-p75",
+          "radiance": [3380.643, 2635.465, 1994.876],
+          "standardError": [14.46408, 9.881041, 27.30604],
+          "uvNoise": 0.0008510482
+        },
+        {
+          "name": "limb-0.1H",
+          "radiance": [9887.237, 7450.244, 5001.85],
+          "standardError": [47.06402, 28.94447, 24.76679],
+          "uvNoise": 0.0004697512
+        },
+        {
+          "name": "limb-0.3H",
+          "radiance": [9804.89, 7277.892, 4971.665],
+          "standardError": [49.7176, 29.44946, 26.02718],
+          "uvNoise": 0.0004997558
+        },
+        {
+          "name": "limb-1H",
+          "radiance": [9115.308, 6915.358, 4611.261],
+          "standardError": [41.66377, 25.57067, 22.70159],
+          "uvNoise": 0.000456955
+        },
+        {
+          "name": "limb-3H",
+          "radiance": [5239.968, 3904.013, 2662.68],
+          "standardError": [28.57994, 17.20718, 15.58009],
+          "uvNoise": 0.0005458156
+        },
+        {
+          "name": "limb-10H",
+          "radiance": [11.30287, 8.364369, 5.684221],
+          "standardError": [0.0575602, 0.03251999, 0.03079629],
+          "uvNoise": 0.0004951369
+        },
+        {
+          "name": "aerial-1km",
+          "radiance": [1998.86, 1681.855, 1456.864],
+          "standardError": [8.759171, 6.092653, 7.25264],
+          "uvNoise": 0.0004761928
+        },
+        {
+          "name": "aerial-10km",
+          "radiance": [3986.123, 3238.899, 2579.966],
+          "standardError": [16.30088, 11.42654, 13.23816],
+          "uvNoise": 0.0004607354
+        },
+        {
+          "name": "aerial-32km",
+          "radiance": [6172.721, 4817.735, 3657.009],
+          "standardError": [112.0132, 22.38924, 19.01093],
+          "uvNoise": 0.001040899
+        },
+        {
+          "name": "aureole-s60-d3",
+          "radiance": [447787.8, 479713.1, 540085.7],
+          "standardError": [2183.507, 1606.205, 2151.82],
+          "uvNoise": 0.0004570976
+        },
+        {
+          "name": "aureole-s60-d5",
+          "radiance": [255922.4, 244987.9, 237129.8],
+          "standardError": [1322.098, 991.7259, 1139.55],
+          "uvNoise": 0.0005197608
+        },
+        {
+          "name": "aureole-s60-d8",
+          "radiance": [117296.4, 100257.8, 83711.28],
+          "standardError": [597.7812, 411.48, 417.2721],
+          "uvNoise": 0.0005114242
+        },
+        {
+          "name": "aureole-s60-d12",
+          "radiance": [55574.58, 44657.87, 34995.71],
+          "standardError": [280.6009, 181.4416, 175.7869],
+          "uvNoise": 0.0005054154
+        },
+        {
+          "name": "ground-s80-v0-a0",
+          "radiance": [1535.817, 1140.637, 762.6672],
+          "standardError": [11.873, 7.090067, 6.204623],
+          "uvNoise": 0.0007635469
+        },
+        {
+          "name": "ground-s80-v30-a0",
+          "radiance": [3251.362, 2483.591, 1735.078],
+          "standardError": [26.58126, 16.23866, 13.93075],
+          "uvNoise": 0.0007965733
+        },
+        {
+          "name": "ground-s80-v30-a45",
+          "radiance": [2512.471, 1892.255, 1298.242],
+          "standardError": [20.83235, 12.59951, 10.83049],
+          "uvNoise": 0.0008132684
+        },
+        {
+          "name": "ground-s80-v30-a90",
+          "radiance": [1736.561, 1271.066, 858.4947],
+          "standardError": [13.3841, 7.962302, 7.075872],
+          "uvNoise": 0.0007726609
+        },
+        {
+          "name": "ground-s80-v30-a135",
+          "radiance": [1357.406, 1009.242, 643.0749],
+          "standardError": [11.18801, 6.60955, 5.053067],
+          "uvNoise": 0.0007830186
+        },
+        {
+          "name": "ground-s80-v30-a180",
+          "radiance": [1236.812, 920.337, 590.4026],
+          "standardError": [9.850517, 5.966919, 4.733816],
+          "uvNoise": 0.000775439
+        },
+        {
+          "name": "ground-s80-v60-a0",
+          "radiance": [19852.01, 15714.03, 11891.06],
+          "standardError": [161.0997, 101.3416, 93.81026],
+          "uvNoise": 0.0007967033
+        },
+        {
+          "name": "ground-s80-v60-a45",
+          "radiance": [6097.867, 4542.65, 3188.103],
+          "standardError": [50.15085, 30.24003, 26.35645],
+          "uvNoise": 0.0008119883
+        },
+        {
+          "name": "ground-s80-v60-a90",
+          "radiance": [2777.587, 2022.59, 1323.603],
+          "standardError": [22.09825, 13.17387, 11.04608],
+          "uvNoise": 0.0007877234
+        },
+        {
+          "name": "ground-s80-v60-a135",
+          "radiance": [1913.076, 1360.882, 870.1648],
+          "standardError": [15.0493, 8.670975, 7.243129],
+          "uvNoise": 0.0007774513
+        },
+        {
+          "name": "ground-s80-v60-a180",
+          "radiance": [1747.398, 1261.075, 789.7207],
+          "standardError": [13.84964, 8.07953, 6.55466],
+          "uvNoise": 0.0007756926
+        },
+        {
+          "name": "ground-s80-v75-a0",
+          "radiance": [189205.9, 187302.9, 187026.1],
+          "standardError": [1616.353, 1176.677, 1314.695],
+          "uvNoise": 0.0008026312
+        },
+        {
+          "name": "ground-s80-v75-a45",
+          "radiance": [9837.685, 7327.518, 5212.126],
+          "standardError": [81.07529, 48.67179, 42.60704],
+          "uvNoise": 0.000811421
+        },
+        {
+          "name": "ground-s80-v75-a90",
+          "radiance": [4078.769, 3018.312, 1959.431],
+          "standardError": [31.52066, 19.18005, 15.64296],
+          "uvNoise": 0.0007632012
+        },
+        {
+          "name": "ground-s80-v75-a135",
+          "radiance": [2783.416, 2018.454, 1269.82],
+          "standardError": [21.23519, 12.56273, 10.23588],
+          "uvNoise": 0.0007504597
+        },
+        {
+          "name": "ground-s80-v75-a180",
+          "radiance": [2649.781, 1907.529, 1187.819],
+          "standardError": [20.51815, 12.09235, 9.891463],
+          "uvNoise": 0.000765217
+        },
+        {
+          "name": "ground-s80-v85-a0",
+          "radiance": [161863, 162770.8, 167482.2],
+          "standardError": [1436.977, 1055.788, 1175.042],
+          "uvNoise": 0.0008263325
+        },
+        {
+          "name": "ground-s80-v85-a45",
+          "radiance": [10956.3, 8258.314, 5854.53],
+          "standardError": [92.40743, 55.3714, 46.81991],
+          "uvNoise": 0.0008128034
+        },
+        {
+          "name": "ground-s80-v85-a90",
+          "radiance": [4662.489, 3474.377, 2281.934],
+          "standardError": [36.27235, 22.02571, 18.77646],
+          "uvNoise": 0.0007718338
+        },
+        {
+          "name": "ground-s80-v85-a135",
+          "radiance": [3204.939, 2342.568, 1523.451],
+          "standardError": [23.95051, 14.48913, 12.52175],
+          "uvNoise": 0.0007518225
+        },
+        {
+          "name": "ground-s80-v85-a180",
+          "radiance": [3134.931, 2261.049, 1444.099],
+          "standardError": [23.51018, 14.01609, 11.6207],
+          "uvNoise": 0.0007482637
+        },
+        {
+          "name": "ground-s90-v0-a0",
+          "radiance": [390.6342, 283.3742, 193.3149],
+          "standardError": [4.191426, 2.469271, 2.124679],
+          "uvNoise": 0.00106125
+        },
+        {
+          "name": "ground-s90-v30-a0",
+          "radiance": [756.8536, 572.618, 394.9076],
+          "standardError": [7.876501, 4.979572, 4.130515],
+          "uvNoise": 0.001041321
+        },
+        {
+          "name": "ground-s90-v30-a45",
+          "radiance": [635.1944, 467.8396, 319.6319],
+          "standardError": [6.933571, 4.150553, 3.479636],
+          "uvNoise": 0.001070017
+        },
+        {
+          "name": "ground-s90-v30-a90",
+          "radiance": [443.5409, 333.3639, 218.8296],
+          "standardError": [4.816493, 2.936682, 2.401724],
+          "uvNoise": 0.001056769
+        },
+        {
+          "name": "ground-s90-v30-a135",
+          "radiance": [329.7245, 249.2012, 160.1521],
+          "standardError": [3.556918, 2.215792, 1.726766],
+          "uvNoise": 0.001051412
+        },
+        {
+          "name": "ground-s90-v30-a180",
+          "radiance": [306.1949, 226.2548, 149.7364],
+          "standardError": [3.359438, 1.995302, 1.631704],
+          "uvNoise": 0.001067263
+        },
+        {
+          "name": "ground-s90-v60-a0",
+          "radiance": [3411.825, 2707.398, 1972.242],
+          "standardError": [38.73002, 24.44829, 20.79833],
+          "uvNoise": 0.001090016
+        },
+        {
+          "name": "ground-s90-v60-a45",
+          "radiance": [1527.281, 1139.586, 776.5144],
+          "standardError": [17.08152, 10.15108, 8.474067],
+          "uvNoise": 0.001082413
+        },
+        {
+          "name": "ground-s90-v60-a90",
+          "radiance": [683.8315, 509.4881, 335.3713],
+          "standardError": [7.135755, 4.439761, 3.596005],
+          "uvNoise": 0.001039009
+        },
+        {
+          "name": "ground-s90-v60-a135",
+          "radiance": [443.9042, 320.7428, 199.6097],
+          "standardError": [4.806293, 2.864722, 2.181848],
+          "uvNoise": 0.001059311
+        },
+        {
+          "name": "ground-s90-v60-a180",
+          "radiance": [401.7497, 289.4604, 180.4116],
+          "standardError": [4.196089, 2.468262, 1.9559],
+          "uvNoise": 0.00101435
+        },
+        {
+          "name": "ground-s90-v75-a0",
+          "radiance": [11230.44, 9316.72, 7505.313],
+          "standardError": [127.1959, 80.87223, 74.24157],
+          "uvNoise": 0.001073222
+        },
+        {
+          "name": "ground-s90-v75-a45",
+          "radiance": [2400.9, 1853.329, 1298.033],
+          "standardError": [26.71737, 16.54599, 14.08346],
+          "uvNoise": 0.001080697
+        },
+        {
+          "name": "ground-s90-v75-a90",
+          "radiance": [941.5506, 697.9359, 458.211],
+          "standardError": [10.07664, 6.137484, 5.212949],
+          "uvNoise": 0.001066396
+        },
+        {
+          "name": "ground-s90-v75-a135",
+          "radiance": [555.7829, 397.8223, 244.9866],
+          "standardError": [5.956146, 3.534045, 2.721089],
+          "uvNoise": 0.001051997
+        },
+        {
+          "name": "ground-s90-v75-a180",
+          "radiance": [499.3095, 351.6643, 213.4658],
+          "standardError": [5.37049, 3.082422, 2.3596],
+          "uvNoise": 0.001051878
+        },
+        {
+          "name": "ground-s90-v85-a0",
+          "radiance": [18862.39, 19645.69, 20886.85],
+          "standardError": [239.1541, 164.8336, 179.9975],
+          "uvNoise": 0.001080014
+        },
+        {
+          "name": "ground-s90-v85-a45",
+          "radiance": [2243.798, 1731.254, 1187.614],
+          "standardError": [25.32039, 15.70275, 12.68699],
+          "uvNoise": 0.001084248
+        },
+        {
+          "name": "ground-s90-v85-a90",
+          "radiance": [891.5055, 643.0285, 390.9298],
+          "standardError": [9.180025, 5.576, 4.298],
+          "uvNoise": 0.001021114
+        },
+        {
+          "name": "ground-s90-v85-a135",
+          "radiance": [522.6031, 358.4043, 210.9051],
+          "standardError": [5.227156, 3.003981, 2.405758],
+          "uvNoise": 0.00101103
+        },
+        {
+          "name": "ground-s90-v85-a180",
+          "radiance": [451.0229, 311.5749, 179.4233],
+          "standardError": [4.304045, 2.54914, 2.008618],
+          "uvNoise": 0.0009712915
+        },
+        {
+          "name": "disc-p85",
+          "radiance": [1396.716, 1088.962, 751.7868],
+          "standardError": [10.60756, 6.674091, 5.997954],
+          "uvNoise": 0.0007573317
+        },
+        {
+          "name": "aureole-s85-d3",
+          "radiance": [136150.5, 150686.9, 179367.6],
+          "standardError": [1333.324, 987.2335, 1209.665],
+          "uvNoise": 0.0008586523
+        },
+        {
+          "name": "aureole-s85-d5",
+          "radiance": [101081, 102251.3, 107771.9],
+          "standardError": [980.7641, 689.1158, 797.7091],
+          "uvNoise": 0.0008783769
+        },
+        {
+          "name": "aureole-s85-d8",
+          "radiance": [60809.17, 55768.68, 51512.89],
+          "standardError": [535.7055, 361.4101, 382.6681],
+          "uvNoise": 0.0008256412
+        },
+        {
+          "name": "aureole-s85-d12",
+          "radiance": [34611.88, 29428.57, 24049.37],
+          "standardError": [299.8308, 194.2978, 185.1612],
+          "uvNoise": 0.0008201392
+        }
+      ]
+    }
+  }
+}

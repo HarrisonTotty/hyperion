@@ -2,16 +2,64 @@
 # `hyperion-fit check`. Do not edit.
 
 [[table]]
+name = "binary_awd"
+path = "binary.rs"
+task = "binary_awd"
+revision = 0
+inputs_sha256 = "26e727e7545d08d00c8fb6bfbf11f559b88c3702aa98796f779c86166005a99b"
+body_sha256 = "87896b5ada0fad15ecba67b32979e534237870866fc41c40cf83bc6c41930e91"
+fingerprint = [0.1667766498460038, 0.03421288723233607, 0.009460799072758106, 210473067.41130117, 46200686663.12756, 6883375562.556747, 21080337660.330036, 9034430425.85573, 1772469207.3583622, 860421945.3195934, 1.0960630250705998, 21.0, 1.0, 0.6529028848978797, 0.0322439496270119, 0.000000000012255222349553427]
+since_generator_version = 29
+provisional = false
+acceptance = "kind scales 1.6815e-1/7.6158e-2/1.0693e-2; fast: 2388 members, own nodes 0/15/14/0/6/17/0/4/16/17/17, donors 0.992/0.000/0.008, layers C 0.112 D 0.871 E 0.017, rates a system 7.01e-7/5.25e-5/1.02e-5/1.54e-5/1.89e-5/2.03e-5/6.31e-6, not its own: HeliumPeriod Scratch, HeliumDonorMass Scratch; slow: 25240 members, own nodes 0/16/17/16/5/17/16/9/17/17/17, donors 0.891/0.108/0.001, layers C 0.380 D 0.609 E 0.011, rates a system 4.91e-6/5.15e-4/8.47e-4/6.96e-4/6.22e-4/6.17e-4/9.98e-4; the K–S tests against the other half of the census are the sim's slow `fitted_tables::the_accreting_white_dwarf_samplers_against_the_engine`"
+
+[[table]]
+name = "binary_cooling_floor"
+path = "binary_cooling_floor.rs"
+task = "binary_cooling_floor"
+revision = 0
+inputs_sha256 = "ad373b9c00ea234be39929744e186614c28d487bde080e3739c08f98c9b41bc4"
+body_sha256 = "bd6f65a9bb49829e11c43bdecbf6d8ec7e53b40f9c2e134a2fcc610c5f471004"
+fingerprint = [4.0, 53.0, 10.5755395874214, 1027.0, 10.742286216643544, 1044.0, 14.287777844693752, 1398.0, 15.069499575952566, 1476.0, 10.987455740641227, 1068.0, 11.154240968696186, 1085.0, 14.407691179764827, 1410.0, 16.075532090818918, 1577.0, 11.064789173746224, 1076.0, 11.231597577803784, 1093.0, 14.348788867189512, 1404.0, 16.72643456883263, 1642.0, 10.990884358175528, 1069.0, 11.157683567268855, 1085.0, 14.22594941631091, 1392.0, 16.226455842541984, 1592.0]
+since_generator_version = 21
+provisional = false
+acceptance = "212 values (4 metallicity intervals × 53 age bins) from 1116180 evaluations of the cooling fits; stored V +10.27 to +16.42 mag, margin included, 0 with no V; every interval's floor rises or holds with age; the sim's `no_cooling_star_is_brighter_than_its_floor` checks 20,000 random cooling stars against it and `the_lazy_values_are_fresh_builds` holds it to a fresh build"
+
+[[table]]
+name = "binary_merger"
+path = "binary.rs"
+task = "binary_merger"
+revision = 0
+inputs_sha256 = "ab00c82f45a90665f044fca8c84efa29db5affa712bdfed13211022e15a2ae58"
+body_sha256 = "61752033667debf131af3bf95b5e0f9d82ecdcf508d2672ce6be5548d3be2bb2"
+fingerprint = [0.6709887138678556, 0.1185609499810464, 0.1667766498460038, 0.03421288723233607, 0.009460799072758106, 210473067.41130117, 46200686663.12756, 6883375562.556747, 21080337660.330036, 9034430425.85573, 1772469207.3583622, 860421945.3195934, 32.0, 0.0, 660300442.9930085, 0.0, 132693060.07669601, 0.0, 684424073.1467187, 0.0, 203414168.6319185, 0.0, 321893691.6470565, 0.0, 48634296.22086901, 0.0, 6185247.925306689]
+since_generator_version = 31
+provisional = false
+acceptance = "7165 members, Kish 2239; of the weight, uncovered 0.434, contact 0.017, evolved donor 0.529, dynamical 0.020; channels 0.030/0.935/0.035; layers 0.000/0.000/0.006/0.003/0.991 (target 0.000/0.000/0.665/0.317/0.019, realised 0.000/0.000/0.665/0.317/0.019); layers 0.008/0.019/0.589/0.336/0.048 rates a system 3.90e-11/9.73e-13/2.68e-13/2.17e-13/3.12e-13/7.05e-13/2.37e-13; scratch marks: PrimaryRank, ContactMassRatio, HeliumBurningMassRatio; the K–S tests against the other half of the census are the sim's slow `merger_tables::the_stellar_merger_sampler_against_the_engine`"
+
+[[table]]
+name = "binary_nsm"
+path = "binary.rs"
+task = "binary_nsm"
+revision = 0
+inputs_sha256 = "dd4bf064d56f60bb7b3bcb1f22693b3d19b75551a6594ba2686063ec67ac85c9"
+body_sha256 = "71e1c83c0cfb7890a2ddde749531a72c8e39407a224ae31d1d606e9369ba80d6"
+fingerprint = [0.03421288723233607, 0.009460799072758106, 210473067.41130117, 46200686663.12756, 6883375562.556747, 21080337660.330036, 9034430425.85573, 1772469207.3583622, 860421945.3195934, 29.0, 0.0, 153680261.30380228]
+since_generator_version = 31
+provisional = false
+acceptance = "2910 members, Kish 579; pair kinds 0.537/0.463; of the weight, two black holes 0.000, a neutron star's progenitor outside 8–20 M☉ 0.640, a black hole's outside 25–60 M☉ 0.331; layers 0.000/0.000/0.000/0.073/0.927 rates a system 1.51e-12/1.95e-14/9.39e-16/2.72e-15/4.52e-15/1.61e-14/1.90e-15; scratch marks: none; the K–S tests against the other half of the census are the sim's slow `merger_tables::the_neutron_star_merger_sampler_against_the_engine`"
+
+[[table]]
 name = "binary_pair_light_c"
 path = "binary_pair_light_c.rs"
 task = "binary_pair_light_c"
 revision = 0
 inputs_sha256 = "d02f5d918253a7c16ee4667d771bf06ef92b491332dbe6e29c6657c592525d15"
-body_sha256 = "dfb18fdd89b1efab86c54eeaeb8f793a8bb84923b5ec785ed84d12a503c87bda"
-fingerprint = [6144.0, 223.63731480518544, -4.256550431273945, 2.0, 7.0, 228.14022241245084, 0.0, 0.0, 7.0, 227.91912027947748, -0.5132675566501259, 2.0, 7.0, 228.23487257007756, 5.8071959810886, 1.0, 7.0, 188.84451159042453, -2.913599846621297, 1.0, 7.0, 188.85441668592873, 92.21932843609758, 9.0, 7.0, 98.37663793496192, -6.803624047229877, 2.0, 7.0, 108.05759680135931, 4.970827036125806, 4.0, 7.0, 127.69842032632818, -6.361057027529942, 3.0, 7.0, 131.13305065101875, 61.08688762412844, 9.0, 7.0, 33.08076361745287, -4.616555841884917, 3.0, 7.0, 30.205256730509028, -2.7934757012712654, 2.0, 7.0]
-since_generator_version = 21
+body_sha256 = "e8d0b2fa01d71e1d977d7ccad638555236283bc5508464e7b04128c1e0b8bb99"
+fingerprint = [6144.0, 223.972707751058, -3.497039936938134, 2.0, 7.0, 228.11115231547814, 0.0, 0.0, 7.0, 227.91092039662917, -0.3372478184002432, 2.0, 7.0, 228.20136187388053, 5.807195981088601, 1.0, 7.0, 188.84467843408754, -2.5974838364939252, 1.0, 7.0, 188.85458352959174, 92.21932843609756, 9.0, 7.0, 98.37680477862496, -6.803624047229877, 2.0, 7.0, 108.05776364502233, 5.06336378200347, 4.0, 7.0, 127.63514343664671, -6.36105702752994, 3.0, 7.0, 132.13547688540754, 62.15259111533738, 9.0, 7.0, 32.95442522857451, -4.619189499311541, 3.0, 7.0, 30.886036185102085, -2.0494237377040703, 2.0, 7.0]
+since_generator_version = 29
 provisional = false
-acceptance = "6144 cells, 6144 sampled, 442368 samples (64 + 8 held out a cell), 268829 holding a changed star; held out: 3064 of 242662 changed bins beyond their own cell's samples, 0 bins not bounded by the table of the first 64, the least room -0.095 mag before the 0.3 mag margin; 5168 cells with a changed star, the brightest -8.05 mag; packed 9360 rows, 74933 segments, 280095 characters"
+acceptance = "6144 cells, 6144 sampled, 442368 samples (64 + 8 held out a cell), 325904 holding a changed star; held out: 3251 of 283411 changed bins beyond their own cell's samples, 0 bins not bounded by the table of the first 64, the least room -0.166 mag before the 0.3 mag margin; 6144 cells with a changed star, the brightest -8.05 mag; packed 10780 rows, 83957 segments, 307167 characters"
 
 [[table]]
 name = "binary_pair_light_d"
@@ -19,11 +67,11 @@ path = "binary_pair_light_d.rs"
 task = "binary_pair_light_d"
 revision = 0
 inputs_sha256 = "732c1e063876c4908687a3b97b483519bda1a292e898d485204a46ed3d438992"
-body_sha256 = "7d7c5576434b3a373cefdbac8619dab8953acc95a7b5fad77564cb15894cab51"
-fingerprint = [6528.0, 103.41133542917497, -8.822436033000525, 4.0, 7.0, 107.00560224992425, 28.903508008106897, 7.0, 7.0, 13.138291214694165, -5.802524812960613, 3.0, 7.0, 10.609603743522188, -5.120952228679788, 2.0, 7.0, 13.035128357086329, -9.917437674516325, 3.0, 7.0, 24.068308337101467, -3.5623942433426565, 1.0, 7.0, -32.86294737346111, -13.482889367978164, 5.0, 7.0, -28.93211683321798, -2.4984705477782154, 6.0, 7.0, -26.316891488315168, -12.948016830976552, 5.0, 7.0, -26.21631452901793, -10.088279829406574, 2.0, 7.0, -53.874598640121434, -19.26059759929002, 9.0, 7.0, -53.89967932825623, -7.194068003397632, 2.0, 7.0]
-since_generator_version = 21
+body_sha256 = "382efc486129f6b77185e4657350b27aea91bfad08c2dca4bd2f7c6d070538e9"
+fingerprint = [6528.0, 103.34591467473332, -8.889702197686299, 4.0, 7.0, 108.34573232599705, 23.745482726891534, 6.0, 7.0, 13.009535389815337, -5.81808681162251, 3.0, 7.0, 10.943518639978231, -4.721618112106256, 2.0, 7.0, 13.336014548563288, -9.917483402178886, 3.0, 7.0, 24.37043930096877, -2.9032990513209755, 1.0, 7.0, -32.86406411251578, -13.483573819070717, 5.0, 7.0, -32.408700568662056, -6.670042829478909, 2.0, 7.0, -26.444557937419972, -17.04030556747712, 5.0, 7.0, -26.279439376875928, -10.169032906731019, 2.0, 7.0, -57.183387098351965, -26.804061473733896, 9.0, 7.0, -53.90017083228775, -7.194068003397633, 2.0, 7.0]
+since_generator_version = 30
 provisional = false
-acceptance = "6528 cells, 6528 sampled, 470016 samples (64 + 8 held out a cell), 347005 holding a changed star; held out: 6166 of 307398 changed bins beyond their own cell's samples, 0 bins not bounded by the table of the first 64, the least room -0.032 mag before the 0.3 mag margin; 6040 cells with a changed star, the brightest -8.86 mag; packed 13389 rows, 117756 segments, 412020 characters"
+acceptance = "6528 cells, 6528 sampled, 470016 samples (64 + 8 held out a cell), 384103 holding a changed star; held out: 6815 of 346604 changed bins beyond their own cell's samples, 0 bins not bounded by the table of the first 64, the least room -0.024 mag before the 0.3 mag margin; 6528 cells with a changed star, the brightest -8.86 mag; packed 14408 rows, 134157 segments, 461223 characters"
 
 [[table]]
 name = "binary_pair_light_e"
@@ -31,11 +79,11 @@ path = "binary_pair_light_e.rs"
 task = "binary_pair_light_e"
 revision = 0
 inputs_sha256 = "3562f5290d461477f352050a44bfef53a4a2cbf3e582024f4651996046ebb79d"
-body_sha256 = "d4a909e2eea381a0a0afbf16ecf264c2ded89aa7a1dfc1521b37a208e2ab20e7"
-fingerprint = [7296.0, -68.23093674264436, -61.79790929152627, 16.0, 7.0, -55.55538380454209, -2.487560714490119, 14.0, 7.0, -89.08672104175038, -64.02824827776524, 12.0, 7.0, -64.08463410154252, -15.363152902101497, 3.0, 7.0, -102.41749211779586, -68.29127425062575, 12.0, 7.0, -98.88394812111902, -33.44966484580682, 8.0, 7.0, -88.56936963513313, -79.65056625566673, 12.0, 7.0, -81.08528621759645, -26.423539923752696, 3.0, 7.0, -91.3582595083671, -70.46557000802396, 9.0, 7.0, -92.45854811116914, -33.82585436846854, 5.0, 7.0, -81.86055575359019, -70.46557000802396, 9.0, 7.0, -81.49479467369594, -23.08966982034859, 2.0, 7.0]
-since_generator_version = 21
+body_sha256 = "0d5baa587370c25ca939390ea2fc111983dfac9030edb0ab668c97c474686e6c"
+fingerprint = [7296.0, -68.29662491189316, -61.4966112474516, 16.0, 7.0, -55.62109318001828, -2.220056569989846, 14.0, 7.0, -88.41113556948793, -63.352662805502774, 12.0, 7.0, -64.08463410154253, -15.363152902101497, 3.0, 7.0, -94.59617429118984, -67.66164314950699, 12.0, 7.0, -91.86327966587562, -33.61044896867474, 8.0, 7.0, -86.0083629285052, -69.61060223387204, 12.0, 7.0, -72.60098732858754, -20.414818069328916, 3.0, 7.0, -89.00932828002672, -68.11663877968358, 9.0, 7.0, -88.62697183615137, -9.356515269520708, 1.0, 7.0, -71.05905699326136, -68.11663877968358, 9.0, 7.0, -70.67670054938601, 0.0, 0.0, 7.0]
+since_generator_version = 30
 provisional = false
-acceptance = "7296 cells, 7296 sampled, 525312 samples (64 + 8 held out a cell), 372716 holding a changed star; held out: 7856 of 335340 changed bins beyond their own cell's samples, 58 bins not bounded by the table of the first 64, the least room -0.688 mag before the 0.3 mag margin; 6558 cells with a changed star, the brightest -12.85 mag; packed 11004 rows, 109585 segments, 394419 characters"
+acceptance = "7296 cells, 7296 sampled, 525312 samples (64 + 8 held out a cell), 341742 holding a changed star; held out: 9274 of 324234 changed bins beyond their own cell's samples, 35 bins not bounded by the table of the first 64, the least room -0.611 mag before the 0.3 mag margin; 7124 cells with a changed star, the brightest -11.49 mag; packed 10551 rows, 111181 segments, 399207 characters"
 
 [[table]]
 name = "binary_reach"
@@ -43,11 +91,46 @@ path = "binary_reach.rs"
 task = "binary_reach"
 revision = 0
 inputs_sha256 = "5a58f712e4099da054ef900c4d57b7b32dac4ebbe8c81309290d557acc319ab9"
-body_sha256 = "67f43d60bcc981b4d433f0129d4ac17acdc4f6287781ac299f322fa7affa38c0"
-fingerprint = [0.08, 150.0, -2.250858329719984, 672.0, -0.09925999685298725, -10.42229966956369, 0.0, 0.0, -0.8459825706438243, -88.82816991760168, 1978877815941.3647, 0.0, -0.44690887579774596, -47.82129276212815, 116135134392.30176, 0.0, 2.4261968754670207, 17.180509914931648, 5396570792.222342, 0.0, 2.7651086906372413, 107.21263595239313, 246594110.3380623, 0.0, 3.0498081188175057, 160.85322974615937, 66771190.73897376, 0.0, 2.5816110053963786, 157.7509645030627, 33574928.11128636, 37382023.379784904, 2.7803869537097197, 183.4317358047131, 20078087.795583796, 22229111.799055517, 3.042217521149395, 230.5889840214306, 7162927.075365883, 7848893.6689945, 3.591799497904667, 298.40150422822654, 3217211.6845131665, 3494165.1876484137, 3.7589605944024775, 319.70395179031595, 2299208.7684921073, 2501539.974139915, -0.09924597266962584, -10.420827130310718, 0.0, 0.0, -0.87096542507298, -91.451369632663, 3324199773142.8555, 0.0, -0.42079875514460674, -44.82350597166117, 200082217974.20544, 0.0, 2.440292540045526, 4.803083138469951, 10036560503.14461, 0.0, 2.864265246239104, 118.26310612907542, 345559219.23827827, 0.0, 3.1558569952588225, 175.25437154080626, 76459021.17791474, 0.0, 3.2901607966572137, 206.45032838827763, 34299533.910473965, 39082239.95040984, 2.9489753084160952, 204.51073010559253, 19031806.618058763, 21360612.40381999, 3.1879261678038002, 250.7470747499188, 6372951.484770687, 7125859.8265249925, 3.5011781464603864, 301.3452652664647, 3184487.405427823, 3573461.1172806895, 3.562035334162475, 315.16797242812794, 2503500.8844729713, 2853808.9305248247, -0.09924427352589055, -10.420648720218503, 0.0, 0.0, -0.8746475415272436, -91.87056427487656, 3418682376125.0884, 0.0, -0.41853459003327503, -44.4948964881771, 207610518716.55475, 0.0, 2.4476297904833206, 2.0012814767028413, 11261503153.011839, 0.0, 2.9097358228737975, 119.24646524829492, 362827755.4468308, 0.0, 3.2154055189626374, 179.52913439149378, 76708122.59606557, 0.0, 3.349927206079947, 211.11590673975198, 33405207.658375934, 38181197.03505894, 2.981173498023043, 207.8603164291481, 18202872.382775478, 20534408.628835592, 3.2150113040898707, 255.66799896038322, 6008118.119235152, 6768054.258537465, 3.479322851828418, 302.17154541927664, 3156458.1026506564, 3607546.7827204242, 3.526418808723613, 311.8206324711129, 2574520.956824969, 2979756.9259214215]
+body_sha256 = "5f4cdfe789240b07d1fda1d52694274105e7df7b739645a2221c11bdaa43a65b"
+fingerprint = [0.08, 150.0, -2.250858329719984, 672.0, -0.09925999685298725, -10.42229966956369, 0.0, 0.0, -0.8459825706438243, -88.82816991760168, 1978877815941.3647, 0.0, -0.44690887579774596, -47.82129276212815, 116135134392.30176, 0.0, 2.4261968754670207, 17.180509914931648, 5396570792.222342, 0.0, 2.7651086906372413, 107.21263595239313, 246594110.3380623, 0.0, 3.0498081188175057, 160.85322974615937, 66771190.73897376, 0.0, 2.5816110053963786, 157.7509645030627, 33574928.11128636, 37382023.379784904, 2.7803869537097197, 183.4317358047131, 20078087.795583796, 22229111.799055517, 3.042217521149395, 230.5889840214306, 7162927.075365883, 7848893.6689945, 2.0322285418512265, 182.99325348027142, 3217211.6845131665, 3478208.705514406, 1.915075313109504, 177.72478513075635, 2299208.7684921073, 2506305.9021783965, -0.09924597266962584, -10.420827130310718, 0.0, 0.0, -0.87096542507298, -91.451369632663, 3324199773142.8555, 0.0, -0.42079875514460674, -44.82350597166117, 200082217974.20544, 0.0, 2.440292540045526, 4.803083138469951, 10036560503.14461, 0.0, 2.864265246239104, 118.26310612907542, 345559219.23827827, 0.0, 3.1558569952588225, 175.25437154080626, 76459021.17791474, 0.0, 3.2901607966572137, 206.45032838827763, 34299533.910473965, 39082239.95040984, 2.9489753084160952, 204.51073010559253, 19031806.618058763, 21360612.40381999, 3.1879261678038002, 250.7470747499188, 6372951.484770687, 7125859.8265249925, 2.305102583052385, 212.8356735742729, 3184487.405427823, 3644272.9891782124, 2.193242582603771, 209.86212648447156, 2503500.8844729713, 2917953.4616422364, -0.09924427352589055, -10.420648720218503, 0.0, 0.0, -0.8746475415272436, -91.87056427487656, 3418682376125.0884, 0.0, -0.41853459003327503, -44.4948964881771, 207610518716.55475, 0.0, 2.4476297904833206, 2.0012814767028413, 11261503153.011839, 0.0, 2.9097358228737975, 119.24646524829492, 362827755.4468308, 0.0, 3.2154055189626374, 179.52913439149378, 76708122.59606557, 0.0, 3.349927206079947, 211.11590673975198, 33405207.658375934, 38181197.03505894, 2.981173498023043, 207.8603164291481, 18202872.382775478, 20534408.628835592, 3.2150113040898707, 255.66799896038322, 6008118.119235152, 6768054.258537465, 2.417736619893785, 222.68225680201616, 3156458.1026506564, 3699576.9885180416, 2.3048832461601108, 218.9839297162864, 2574520.956824969, 3077271.434304907]
+since_generator_version = 29
+provisional = false
+acceptance = "672 cells × 105 age bins from 33067 samples and 385968 tracks; stored radii 0.1479 to 3467.4 R☉; 214 cells may all be on their main sequence at 10¹⁰ years; 286 cells hold a sudden death, the lightest from 5.548 M☉; the slow test `the_reach_table_bounds_dense_tracks` checks the bound against dense tracks"
+
+[[table]]
+name = "binary_wind_reach"
+path = "binary_wind_reach.rs"
+task = "binary_wind_reach"
+revision = 0
+inputs_sha256 = "1b512766000553b152fe747950f167356fea9647f9f138c6fb60a6dd4e57c865"
+body_sha256 = "6350c2c972fea5e586ab22b0fa39e96d289f44397126990b5525e4d1dfeada65"
+fingerprint = [0.08, 150.0, -2.250858329719984, 672.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 6.246452521236863, 59.26682483568003, 5736979238.774214, 0.29003687557800273, 0.5503830744500331, 1420.3934584410542, 6.659377773236389, 146.97969308384398, 1373330298.8778055, 0.8251436078897247, 0.6838608825444474, 1806.5943823211821, 7.078082630649631, 2.573486970434244, 284345933.16709006, 1.99061883162877, 0.9603962329545009, 2733.8248860731073, 7.579195102329004, 142.42291606103822, 74832993.28162082, 4.21569608257811, 1.2678917279471038, 4582.373814149068, 4.143622969759476, 63.989311024185646, 22147533.60171796, 0.09833835180755024, 10.811352820947741, 4157.296987167786, 4.379171869890807, 183.98795679848558, 7835388.974044063, 0.08035209365003126, 24.174296886593034, 7555.265225218788, 3.9390420490221256, 216.07444771784108, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 6.582866205475709, 22.737636832594358, 11357926593.55861, 0.4599017724946196, 0.5120327392313277, 2517.160988478438, 6.924817004390662, 122.06854197724003, 2312574782.992324, 0.9920730826506029, 0.5593553356412829, 927.0709130976, 7.428557034063781, 44.1717781266208, 432677258.56366986, 2.25312192517986, 0.7308597543674715, 1428.3501181858599, 7.838193790796681, 221.82818931594693, 87487208.02497068, 4.4288924447919875, 1.0554138960795765, 2294.2846645637414, 4.886007007653436, 198.793239924737, 21273523.41213745, 0.17359598426742728, 9.991727852699297, 3227.17451178157, 6.943183447525656, 420.0661098107572, 0.0, 0.0, 0.0, 0.0, 4.7362333863123025, 320.71516477334353, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 6.6284686370445, 15.897689912061892, 12736373562.68805, 0.4780891654963584, 0.5094028407109162, 2407.9665260862857, 6.9657779436244605, 113.90963302730741, 2514992387.8367176, 1.016582091347975, 0.545143119910691, 836.5623621666248, 7.524943427311665, 16.43717561060498, 453672878.992534, 2.2746851622154445, 0.7109870282768298, 1347.962510680092, 7.935746174283881, 234.0238367115921, 87961943.9987025, 4.443864715914712, 1.0369849948585057, 2142.6066163969426, 5.114310444727317, 223.37903964022908, 20440950.228006206, 0.21623876615997695, 9.572166560287561, 3057.8470029909968, 7.013802253915136, 437.4067532428774, 0.0, 0.0, 0.0, 0.0, 5.055244107732784, 353.4249800990224, 0.0, 0.0, 0.0, 0.0]
+since_generator_version = 29
+provisional = false
+acceptance = "672 cells × 105 age bins from 33067 samples; the largest stored Bondi–Hoyle sum 1.3183e8 R☉² M☉⁻¹; 201 cells lose no wind by 10^10.2 years; 376 cells reach the asymptotic giant branch, the most AGB loss 20.891 M☉ and the largest dust radius 78286.1 R☉, margins included; the sim's `light::tests` tallies hold no `Detached` pair wind-fed"
+
+[[table]]
+name = "binary_xrb"
+path = "binary.rs"
+task = "binary_xrb"
+revision = 0
+inputs_sha256 = "8c5053e3736057c4ac25011a9ebd1da8156cb09ac2627f0029ea44f3cfd256f6"
+body_sha256 = "03ad34caa05d2ebc77a4982df897c4607030236cd88913ddddf00399f93dab8e"
+fingerprint = [0.03421288723233607, 0.009460799072758106, 210473067.41130117, 46200686663.12756, 6883375562.556747, 21080337660.330036, 9034430425.85573, 1772469207.3583622, 860421945.3195934, 25.0, 1.0, 1.55261502182327, 1.3396048261069489, -1.5866839897114011]
+since_generator_version = 31
+provisional = false
+acceptance = "slab members by kind 388/9725/4/91/7/0/239/4/0; young members by kind 543/400/108/169/873/4/97/0/5; census kinds 0.0375/0.9385/0.0007/0.0070/0.0009/0.0000/0.0150/0.0003/0.0000; weights 0.0329/0.8223/0.0006/0.1300/0.0132/0.0002 and 0.0007/0.0000/0.0000; black-hole transients 1300 of 1e4 (the census's 70); high-mass hosts 8; donor mass's own nodes 14; layers C 0.000 D 0.147 E 0.853; rates a system 1.54e-4/2.29e-4/1.67e-4/1.30e-4/1.98e-4/1.21e-4/2.94e-5; scratch marks: NeutronStarRecurrence, BlackHoleRecurrence, SupergiantPeriod, SupergiantDonorMass, SupergiantRate, SupergiantRecoil, SupergiantSinceSupernova, UltracompactRecurrence, SymbioticPeriod, SymbioticDonorMass, SymbioticFilling, BlackHoleHighMassAccretorMass, BlackHoleHighMassPeriod, BlackHoleHighMassDonorMass, BlackHoleHighMassRate; the K–S tests against the other half of the census are the sim's slow `fitted_tables::the_x_ray_binary_sampler_against_the_engine`"
+
+[[table]]
+name = "bowl_permanent_shadow"
+path = "bowl_permanent_shadow.rs"
+task = "bowl_permanent_shadow"
+revision = 0
+inputs_sha256 = "fa7e02f4e36e54002fde50df637388e1efd7bd7353151c4448f9db03d408e1bd"
+body_sha256 = "605f4be2d23f9147f6c2cc95a793e776e8c35da59ff4cd797b2522548fbc277a"
 since_generator_version = 21
 provisional = false
-acceptance = "672 cells × 105 age bins from 33067 samples and 385968 tracks; stored radii 0.1479 to 6606.9 R☉; 214 cells may all be on their main sequence at 10¹⁰ years; 286 cells hold a sudden death, the lightest from 5.548 M☉; the slow test `the_reach_table_bounds_dense_tracks` checks the bound against dense tracks"
+acceptance = "17 × 41 × 26 nodes from 680 bowls of 102946 lattice points each (half disk), Δ standing for δ + α; at the pole the lattice gives eq. 6 within 0.00019; read trilinearly against exact geometry on the lattice, within 0.0030 (d/D 0.300, 89.00°, Δ 1.54°: 0.9306 against 0.9337) at R09.T7.f's points, every degree from the pole to 60° for d/D 0.06, 0.1, 0.2 and 0.3 at Δ of 0–30° and a d/D 0.005 bowl (mean 0.00041), within 0.0036 (d/D 0.452, 88.95°, Δ 19.38°: 0.5165 against 0.5129) at the cell centres near the pole for d/D above 0.37, where the error peaks, and within 0.0045 of eq. 6 on the pole's row between its depth-ratio nodes"
 
 [[table]]
 name = "chabrier"
@@ -59,19 +142,30 @@ body_sha256 = "48a15ea4f829ed94761d32db041f73dfb47a29d9170c727f01783552c70d5ed2"
 fingerprint = [0.7222612477767937, 0.1276205961457899, 0.1301055942610584, 0.020012561816357913]
 since_generator_version = 14
 provisional = false
-acceptance = "s = 0.9201 (1σ 0.8507–0.9927; under the IFMRs of Cummings 2018 0.8957, El-Badry 2018 0.9352); over primaries below 8 M☉: band shares A–D 67.7, 12.0, 16.8, 3.45% against 66.5, 12.8, 17.8, 2.85%, misses of -0.73, +1.19, +1.15, -1.53 Poisson errors, χ² 5.62 on 2 dof (passes); all stars below 0.5 M☉ 69.84% in 67.8–71.0% (passes); local mid-plane mean per system in stars and white dwarfs 0.5517 M☉ in 0.54–0.60 (passes). Reported: the all-inclusive local mean 0.6115 M☉, of which neutron stars and black holes 0.0530; the primaries' mean present mass 0.4027 M☉ against the census's 0.437"
+acceptance = "s = 0.9201 (1σ 0.8507–0.9927; under the IFMRs of Cummings 2018 0.8957, El-Badry 2018 0.9352); over primaries below 8 M☉: band shares A–D 67.7, 12.0, 16.8, 3.45% against 66.5, 12.8, 17.8, 2.85%, misses of -0.73, +1.19, +1.15, -1.53 Poisson errors, χ² 5.62 on 2 dof (passes); all stars below 0.5 M☉ 69.84% in 67.8–71.0% (passes); local mid-plane mean per system in stars and white dwarfs 0.5517 M☉ in 0.54–0.60 (passes). Reported: the all-inclusive local mean 0.6081 M☉, of which neutron stars and black holes 0.0496; the primaries' mean present mass 0.4027 M☉ against the census's 0.437"
+
+[[table]]
+name = "class_boundaries"
+path = "class_boundaries.rs"
+task = "class_boundaries"
+revision = 0
+inputs_sha256 = "5aed79e7cd8430e16aa019d0e3a2e2f1374c82eadd0e3345fc23192bd8574e85"
+body_sha256 = "0e15d474bb5a8758a5834a4b4d9012e4633c5f4621f032fad210cec8ff4626e8"
+since_generator_version = 24
+provisional = false
+acceptance = "Table VII's 257 gravities follow from Tables III, IV and VI by the paper's formula within 0.044 dex (at most 0.045); the six boundaries' 30, 28, 37, 39, 39, 39 nodes each fall strictly in temperature"
 
 [[table]]
 name = "cluster_bh"
 path = "cluster_dynamics.rs"
 task = "cluster_bh"
-revision = 0
-inputs_sha256 = "4efee92684d31ad81aac4f53fdfc763c4b5d402a75211fe60edac1bf384906d6"
+revision = 1
+inputs_sha256 = "757274b19f5d79b654bad73f7ef259f976999b1aea2dad6100f31ac3823b6f49"
 body_sha256 = "964586543142493ab4b88be0dd39b88e609d69f935c3e231310b7227bbdc8b20"
-fingerprint = [0.5859340259539524, 0.04870347946249036, 7.98070989792187]
+fingerprint = [0.5859340259539524, 0.04871940500120706, 7.98070989792187]
 since_generator_version = 15
-provisional = true
-acceptance = "fitted β = 1.5623e-21, ψ₁ = 64780543383733190656.00 (β ψ₁ = 0.1012) at k = 2.5 and c = 0.138 (β and c enter only as β ÷ c) over 124 CMC models at 14 Gyr (1 of them dissolved to under 500 M☉ and left out), 97 retaining any: rms 0.476 dex in log₁₀(1 + N) over those (under 0.3; FAILS; 1.716 at the scratch constants); 19 of 34 predicted empty are empty (FAILS); on the Baumgardt–Hilker catalogue at 12 Gyr, the most in a cluster past 14 t★ 25.88 (FAILS), the median over 3 × 10⁵ M☉ 694 (tens to a few hundred; FAILS), ω Centauri 12167 (thousands; FAILS), 0.006 past the core-collapse line with none (0.15–0.25; FAILS); the table keeps plan 09's scratch β 0.0028, ψ₁ 147 until a ruling"
+provisional = false
+acceptance = "adopted β = 0.0028, ψ₁ = 147, k = 2.5 and c = 0.138 (Antonini and Gieles 2020; ruling 126.4; decision-p15-t8-blocks); on the Baumgardt–Hilker catalogue at 12 Gyr through the sim's ClusterModel, the most in a cluster past 14 t★ 0.00 (under 1; passes), 47 Tucanae 144 (20–400; passes), ω Centauri 8377 (3,000–20,000; passes), 12700 over the catalogue (10⁴–10⁵; passes), 0.218 past the core-collapse line with none (0.15–0.25; passes). Reported: the median over 3 × 10⁵ M☉ 0 (tens to a few hundred); the CMC fit over 124 models at 14 Gyr (1 of them dissolved to under 500 M☉ and left out), 97 retaining any, rms 1.716 dex in log₁₀(1 + N) over those at the adopted constants and 0.478 at the best fit (under 0.3), 26 of 113 and 19 of 34 predicted empty are empty (at least 85%), the best fit's ψ₁ = 1.17e20 and β ψ₁ = 0.1011 (β and c enter only as β ÷ c)"
 
 [[table]]
 name = "cluster_retention"
@@ -79,35 +173,142 @@ path = "cluster_retention.rs"
 task = "cluster_retention"
 revision = 0
 inputs_sha256 = "b23c1c962b071a17cf39dd5aabc161d29b71e684795831b4b0f0d7d64f66f2d7"
-body_sha256 = "65ecdd71d874b61205cc20026918e47b7b8c7d793f51082432b9448b30133ec9"
-fingerprint = [7.999999999999998, 100.00000000000004, -2.3010299956639813, 0.17609125905568124, 0.1, 499.9999999999999, 0.9999999999999918, 0.0, 0.38320536780072606, 0.0, 0.0, 0.02276411725143112, 0.416991557056143, 0.616794632124647, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.4356036781681426, 0.0, 0.0, 0.0, 0.0, 0.001737317651571491, 0.012566721104308134, 0.12534630987471304, 0.5643963218318642, 0.2654526734144497, 0.0, 0.0, 0.0, 0.10462624428328901, 0.27664812006638173, 0.2989380580986681, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-since_generator_version = 16
+body_sha256 = "f8c09d3277270dd9ac5ed40657096ab1f5c991996aa8b0654910533aee215dd4"
+fingerprint = [7.999999999999998, 100.00000000000004, -2.3010299956639813, 0.17609125905568124, 0.1, 499.9999999999999, 0.9999999999999918, 0.0, 0.38320536780072606, 0.0, 0.0, 0.022965573910364172, 0.4184084664870527, 0.6167946321481774, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.4356036781681426, 0.0, 0.0, 0.0, 0.0, 0.001747934730966985, 0.012612938589299426, 0.12736638300020559, 0.5643963218318642, 0.2654526734144497, 0.0, 0.0, 0.0, 0.10500860644986892, 0.27681666571878116, 0.29893850232326236, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+since_generator_version = 26
 provisional = false
-acceptance = "at 64 off-node points ([Fe/H] [-1.95, -1.1, -0.43, 0.05], v [3.3, 17.0, 45.0, 120.0] km/s, Chabrier and Kroupa), the tabulated neutron-star and black-hole retention within 0.00002 absolute of the exact quadrature where it is 0.05 or less and 0.0195 relative where it exceeds 0.05 (ruling 139.5: 0.005 and 3%; met); largest absolute 0.01299"
+acceptance = "at 64 off-node points ([Fe/H] [-1.95, -1.1, -0.43, 0.05], v [3.3, 17.0, 45.0, 120.0] km/s, Chabrier and Kroupa), the tabulated neutron-star and black-hole retention within 0.00003 absolute of the exact quadrature where it is 0.05 or less and 0.0170 relative where it exceeds 0.05 (ruling 139.5: 0.005 and 3%; met); largest absolute 0.00852"
+
+[[table]]
+name = "condensate_extinction"
+path = "condensate_extinction.rs"
+task = "condensate_extinction"
+revision = 0
+inputs_sha256 = "b0d61ec7716c538eb6449f1d682ea8225820926c554166349f13ff07def90a5c"
+body_sha256 = "c68ddec8300237f3e8463c7fec25bced63892cf1cc3eee4df1c5c8216d010bac"
+fingerprint = [12.0, 14.0, 550.0]
+since_generator_version = 24
+provisional = false
+acceptance = "7 index files at 550 nm, found by wavelength on each file's grid (by phase table 1, by spheres 2, by the sphere fallback 4); the half-step check: `Q̄_ext` within 4.12e-4 (aluminium-oxide.json) and ω within 2.17e-4 (basalt.json) of the direct values, against 1e-3; 1 − ω within 5.01e-4"
+
+[[table]]
+name = "condensate_extinction_2"
+path = "condensate_extinction_2.rs"
+task = "condensate_extinction_2"
+revision = 0
+inputs_sha256 = "71fbe5f5883adb35c765c7680939a3096debe417146e0a12b3f32a72ef0882f5"
+body_sha256 = "8014c65ec8affb3c846dc9225b09702fbe0e1e2debf95676f5cf4c3d430c5948"
+fingerprint = [12.0, 14.0, 550.0]
+since_generator_version = 24
+provisional = false
+acceptance = "7 index files at 550 nm, found by wavelength on each file's grid (by phase table 3, by spheres 2, by the sphere fallback 2); the half-step check: `Q̄_ext` within 3.86e-4 (carbon-dioxide-ice.json) and ω within 5.19e-4 (chromium.json) of the direct values, against 1e-3; 1 − ω within 1.66e-3"
+
+[[table]]
+name = "condensate_extinction_3"
+path = "condensate_extinction_3.rs"
+task = "condensate_extinction_3"
+revision = 0
+inputs_sha256 = "2f7250d606f58710daee42f038aeddeb48aa31d4eeffca92459fc54a69376314"
+body_sha256 = "3a9d2de7bd6e55ea3d65a8fcfc8176c9b132077deb1b0d09feabd67a35b8e65f"
+fingerprint = [12.0, 14.0, 550.0]
+since_generator_version = 24
+provisional = false
+acceptance = "7 index files at 550 nm, found by wavelength on each file's grid (by phase table 3, by spheres 3, by the sphere fallback 1); the half-step check: `Q̄_ext` within 3.98e-4 (hydrogen-sulphide-ice.json) and ω within 5.32e-4 (graphite.json) of the direct values, against 1e-3; 1 − ω within 1.46e-3"
+
+[[table]]
+name = "condensate_extinction_4"
+path = "condensate_extinction_4.rs"
+task = "condensate_extinction_4"
+revision = 0
+inputs_sha256 = "a4aaa372ed570a533f037fbadb48070f9b045281e2782aacff5766765d6e6ff1"
+body_sha256 = "c555610e346b92e00f7df477ed8d4008a6f40b79b9584a18600869d8bea54604"
+fingerprint = [12.0, 14.0, 550.0]
+since_generator_version = 24
+provisional = false
+acceptance = "7 index files at 550 nm, found by wavelength on each file's grid (by phase table 5, by spheres 1, by the sphere fallback 1); the half-step check: `Q̄_ext` within 5.19e-4 (manganese-sulphide.json) and ω within 6.59e-4 (iron-sulphide.json) of the direct values, against 1e-3; 1 − ω within 1.67e-3"
+
+[[table]]
+name = "condensate_extinction_5"
+path = "condensate_extinction_5.rs"
+task = "condensate_extinction_5"
+revision = 0
+inputs_sha256 = "dc3fd47c748b9fb0d4fd193a9e08a052ca7a5de755464afecb7646f4a1490e11"
+body_sha256 = "c6dadcf79029c0653971b80f1e1d660441be43661163ee4eafeeeed750317eda"
+fingerprint = [12.0, 14.0, 550.0]
+since_generator_version = 24
+provisional = false
+acceptance = "7 index files at 550 nm, found by wavelength on each file's grid (by phase table 1, by spheres 4, by the sphere fallback 2); the half-step check: `Q̄_ext` within 3.64e-4 (methane-liquid.json) and ω within 7.02e-5 (oxygen-liquid.json) of the direct values, against 1e-3; 1 − ω within 1.45e-3"
+
+[[table]]
+name = "condensate_extinction_6"
+path = "condensate_extinction_6.rs"
+task = "condensate_extinction_6"
+revision = 0
+inputs_sha256 = "1eaa3e84e9122327ecd10cf4c32efbf705731e956ab5906d07c18463c226b4fd"
+body_sha256 = "eb2c7d4e7b35c08718d57221f2de48f7c43988a9919cb9c8df266eb5dd9e1fd0"
+fingerprint = [12.0, 14.0, 550.0]
+since_generator_version = 24
+provisional = false
+acceptance = "7 index files at 550 nm, found by wavelength on each file's grid (by phase table 3, by spheres 3, by the sphere fallback 1); the half-step check: `Q̄_ext` within 4.71e-4 (sulphur.json) and ω within 6.22e-4 (soot.json) of the direct values, against 1e-3; 1 − ω within 1.30e-3"
+
+[[table]]
+name = "condensate_extinction_7"
+path = "condensate_extinction_7.rs"
+task = "condensate_extinction_7"
+revision = 0
+inputs_sha256 = "de521c58f5a1a57dbfcbd6651ad7dc22d227dad243cbbca9c15ff37cd2ecfb6b"
+body_sha256 = "3a9f482846b5188bc33a930af6fdecb3cb64c4c1404def9e66b123a12e60a335"
+fingerprint = [12.0, 14.0, 550.0]
+since_generator_version = 24
+provisional = false
+acceptance = "7 index files at 550 nm, found by wavelength on each file's grid (by phase table 1, by spheres 4, by the sphere fallback 2); the half-step check: `Q̄_ext` within 5.42e-4 (titanium-dioxide.json) and ω within 7.16e-4 (tholin.json) of the direct values, against 1e-3; 1 − ω within 8.23e-2"
+
+[[table]]
+name = "condensate_extinction_8"
+path = "condensate_extinction_8.rs"
+task = "condensate_extinction_8"
+revision = 0
+inputs_sha256 = "b9f933fd0d454d5091e7fa5f8ba467ff7b4ffad18d164d0279e1a9d3d7a6454e"
+body_sha256 = "673af05854783974a962106b27aefd8e1f0ca86a3d8f93d1ed853d9c99b98cfd"
+fingerprint = [12.0, 14.0, 550.0]
+since_generator_version = 25
+provisional = false
+acceptance = "7 index files at 550 nm, found by wavelength on each file's grid (by phase table 0, by spheres 7, by the sphere fallback 0); the half-step check: `Q̄_ext` within 5.09e-4 (calcium-titanate.json) and ω within 7.15e-4 (iron.json) of the direct values, against 1e-3; 1 − ω within 1.45e-3"
 
 [[table]]
 name = "displaced_forms"
 path = "displaced_forms.rs"
 task = "displaced_forms"
+revision = 3
+inputs_sha256 = "918ff8d6158644fc613447af0e798542105afbc3355ca34d27bbfa1758e65760"
+body_sha256 = "c1c6cc47a7545dc6436cd19affe4f355c5d5f72bca4945e183a96df784cc6315"
+fingerprint = [7000.0, 223.9258686462832, 2.5748453060703085, 130.8397166214984, 1.24, 0.0054, 0.26, 1000.0, 1500.0, 0.04, 2000.0, 2500.0]
+since_generator_version = 26
+provisional = false
+acceptance = "on the production orbit run's histograms (19260016 orbits, 1 captured by the black hole and 0 unresolved): disc-born weighted mean misplaced share 0.0479 (unregularised 0.0474, λ 0.001); 18 of 56 classes with a parameter on a box edge (the no-flare and no-hole ends are limits), 7 of them over 10⁻⁴ of the weight; 117 second-difference sign changes along the rows; worst misplaced share thick disc 0.180, halo 0.174, bulge 0.259, bar 0.313, nuclear disc 0.174; own-form shares at the fixture's corotation ratio 1.24, bar 0.99, 0.60, 0.31, 0.16, bulge 1.00, 0.71, 0.51, 0.25, nuclear disc 0.97, 0.07, 0.00, 0.03; bar elongation over the control 1.03, 0.91, 0.74, 0.34, 0.10, -0.03, -0.04, 0.11 and length within 0.81 of it; slowest thin class's mean rotation 0.947 `v_c`, fastest's -0.467; the neutron stars' half-density height at 26,000 ly 131 pc; hypervelocity row misplaced 0.053, 29123 survivors inside the cube (26849 slow, 2273 fast; mean path 78662 ly), 0.017 of slow launches below 1.5 times the local escape speed. Not yet run: the universality potentials, plan 08's births' baseline and the other halo masses and corotation ratios (P15.T6.d–e), and the kick-law reweighting of the unbound, in-cube and phase-mixing checks (the histograms hold no total unbound count and one last age bin)"
+
+[[table]]
+name = "dwarf_sequence"
+path = "dwarf_sequence.rs"
+task = "dwarf_sequence"
 revision = 0
-inputs_sha256 = "349d91b7c28bb56bf4dfad997f2cae86b5e316603f32d341bc337021432a3bd8"
-body_sha256 = "c0f23cfb3ade5d3851ff58f45cf810967d4e828c5698f2880853a2fab448f9a0"
-fingerprint = [7000.0, 223.96085201572214, 2.5745808582515446, 130.6894785661944, 1.24, 0.0054, 0.26, 1000.0, 1500.0, 0.04, 2000.0, 2500.0]
-since_generator_version = 16
-provisional = true
-acceptance = "on P15.T6.b's smoke histograms (211 orbits): disc-born weighted mean misplaced share 0.9661 (unregularised 0.9641, λ 0.01); 52 of 56 classes with a parameter on a box edge, 19 of them over 10⁻⁴ of the weight; 66 second-difference sign changes along the rows; worst misplaced share thick disc 0.986, halo 0.983, bulge 0.998, bar 1.000, nuclear disc 0.999; own-form shares at the fixture's corotation ratio 1.24, bar 1.00, 0.00, 0.00, 0.00, bulge 0.00, 0.00, 0.00, 0.00, nuclear disc 1.00, 0.00, 0.00, 0.00; bar elongation over the control 0.80, -2.04, 1.04, 0.80, -, -, -, - and length within 0.76 of it; slowest thin class's mean rotation 0.889 `v_c`, fastest's -; the neutron stars' half-density height at 26,000 ly 238 pc; hypervelocity row misplaced 0.053, 29123 survivors inside the cube (26849 slow, 2273 fast; mean path 78662 ly), 0.017 of slow launches below 1.5 times the local escape speed. Not yet run: the universality potentials, plan 08's births' baseline and the other halo masses and corotation ratios (P15.T6.d–e), and the kick-law reweighting of the unbound, in-cube and phase-mixing checks (the histograms hold no total unbound count and one last age bin)"
+inputs_sha256 = "0cca245865e91213bd92ae58fc8ed92aca3f5518bb3f26a2a4a615fd734642ad"
+body_sha256 = "a6f690062466937df1d93cf187c76e744b05a06e0eddd4b43bd5976121a500dd"
+since_generator_version = 24
+provisional = false
+acceptance = "the grids against the rows' interpolation over 200000 points each and every row: the code's 4510 nodes (step 0.0005000 dex) within 0.0206 of a subtype (at 1255 K); the bolometric correction's 2840 nodes (step 0.0004999 dex) within 0.0034 mag (at 1870 K); B − V's 2552 nodes (step 0.0005001 dex) within 0.0019 mag (at 3110 K); bounds 0.05 of a subtype and 0.005 and 0.005 mag"
 
 [[table]]
 name = "equipartition"
 path = "cluster_dynamics.rs"
 task = "equipartition"
-revision = 0
-inputs_sha256 = "f46e73a140d825480a77e18cd79ab37ad3ce3531a665c870ff0184ffb20d0402"
+revision = 1
+inputs_sha256 = "87e967f429405ab63ff313d19c30fef585cc87372730264ceb06e1ffeb73407e"
 body_sha256 = "9a2e9fbef5a98ae3185bc365014401803712d89f5f1806decbbc7553138aea5e"
 fingerprint = [0.8330288595208089, 31.2727950943177, 0.38825650148602775, 0.37499999999999994, 0.612]
 since_generator_version = 15
-provisional = true
-acceptance = "η = 0.1675 at δ = 0.5 over 40 multimass King models (W₀ [3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], slopes [-1.5, -1.0, -0.5, 0.0, 0.5]; concentrations 0.81–2.08; mass fractions within 8.7e-12): in 0.8–1.0 (ruling 139.2; FAILS); the living classes' half-mass radii below the turn-off within 0.282 (FAILS; 10%); at plan 09's η = 1 within 0.921; the table keeps plan 09's η until a ruling"
+provisional = false
+acceptance = "adopted η = 1 (δ = ½; decision-p15-t8-blocks): in 0.8–1.0 (ruling 139.2; passes); 40 multimass King models at δ = 0.5 solved, their mass fractions within 8.7e-12 of their targets (10⁻⁶; passes). Reported: the grid (W₀ [3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0], slopes [-1.5, -1.0, -0.5, 0.0, 0.5]; concentrations 0.81–2.08); the living classes' half-mass radii below the turn-off within 0.921 at η = 1 and within 0.282 at the best η = 0.1675 (10%); η rests on δ = ½ (η = 2δ), not on this fit"
 
 [[table]]
 name = "giant_cooling"
@@ -122,16 +323,64 @@ provisional = false
 acceptance = "over the 455 rows, fit minus grid, log₁₀ L within 0.046 dex (rms 0.008) and R within 0.60% (rms 0.12%)"
 
 [[table]]
+name = "helium"
+path = "helium.rs"
+task = "helium"
+revision = 1
+inputs_sha256 = "23461a2622e6f9e33b74d3dc6f5664a25bcac887c776570e07cb4f5a2026cec5"
+body_sha256 = "444226d4c1dd6426234da2912a93dd463ebed5a57fc15405d502af31689f05d4"
+fingerprint = [0.0001, 41267276577.84121, 14440977877.597254, 13806318311.34176, 4831351953.383062, 8880299343.875269, 3107551963.828981, 12106650666.019646, 3.5933192170241854, 11556634283.031178, 3.600679111826002, 0.7710537608237432, 0.32, 0.18]
+since_generator_version = 24
+provisional = false
+acceptance = "lifetime ratios on plan 06's tracks against the grid's, 72 points of 0.6–0.9 M☉ at [Fe/H] -2.40 to -0.42 (the rows bracketing -2.2 to -0.5), ΔY to 0.155: within 2.44% (3% allowed; passes), and the 48 inside -2.2 to -0.5 within 1.88%; ΔY = 0 tracks are `Track::full`'s bit for bit at 720 probes (passes); s at 0.1 and 150 M☉ at the four nodes from -9.09 to -5.04 (negative; passes); ΔY = 0.1 shortens a 0.8 M☉ life by 0.472 at [Fe/H] -2.2, 0.486 at [Fe/H] -1.6, 0.497 at [Fe/H] -1.0, 0.518 at [Fe/H] -0.5 (0.42–0.55; passes); the fitted shift of the zero-age horizontal branch at Y = 0.4 (ΔY 0.152 on average), over its 164 points at fixed envelope mass, 0.0367 dex on average against the grid's 0.0354, within 3.7% (10% allowed; passes); a 1e6 M☉ cluster at 12 Gyr and Z = 0.0008 ([Fe/H] -1.40), ΔY up to 0.18: its horizontal branch's blue end (0.95 quantile of log `T_eff`) at ΔY = 0.154 is 0.422 dex hotter than the first population's (84 and 249 branch stars; hotter, passes), beside the grid's branch's 0.308 dex for the same envelopes (the excess is plan 06's branch, a recorded finding); the core mass at helium ignition on plan 06's tracks 0.4975 M☉ at ΔY 0 and 0.5003 at ΔY 0.154, against the grid's zero-age 0.4917 and 0.4623; extrapolated to ΔY = 0.18 (beyond the grid's reach, not clamped): a 0.8 M☉ star's timescales at Z = 0.0008 scale by 0.293 (s = -6.812), beside the grid's ratios there of 0.694 at ΔY 0.054 (s -6.767), 0.495 at ΔY 0.104 (s -6.760), 0.346 at ΔY 0.154 (s -6.885); the branch's shift (a + b `M_env`) ΔY = 0.068 dex at `M_env` 0 and 0.034 at 0.1 M☉, held beyond `M_env` = 0.2 M☉ and floored at zero, so 0.0006–0.068 dex at every envelope to 150 M☉"
+
+[[table]]
+name = "kick_defaults"
+path = "kick_defaults.rs"
+task = "kick_defaults"
+revision = 0
+inputs_sha256 = "7b6481cc2abe295203ef521c333320d9048f62dc43cf60de8dc49a4fbce15dd0"
+body_sha256 = "804ea316d7b78a5b868ce280ffe1df497174dc23556ce6d8435a34ffa4f96e3b"
+fingerprint = [1.37, 1.37, 1.8423204055145894, 1.2000058311463526, 2.4085944800254784, 1.604297240012739, 3.325821827841992, 1.4325821828291228, 5.0077445862515795, 6.811951403465913, 6.747722114921276, 8.877208586350257, 7.6610504417098095, 10.017002420403667, 8.33987464516553, 10.889849369138359, 0.45, 1.26, 46343093.27551778, 0.4194029742056137, 0.5246263558962185, 0.518193502001322, 2.0, 3.0, 0.75, 0.1, 1.0]
+since_generator_version = 26
+provisional = false
+acceptance = "at the committed defaults on the committed table every observable passes, the two figures ruling 147.2 holds reported as held (sky share under 50 km/s 0.0709 against 0.03–0.07, escape share 0.1159 against 0.12–0.20); resolution: the centre on its rebuild of 100000 scores within 0.0019 in ln(v ÷ km/s) (ordinary ln v sd) and 0.0009 in a share (light black holes above 100 km/s) of the committed table; rebuilds: the low-mode ramp, 0 of 10 equal to the centre's bit for bit; the single-star window, 12 of 12 equal to the centre's bit for bit; the companion-stripped window, 8 of 8 equal to the centre's bit for bit; findings: the black-hole factor at an edge of light black holes above 100 km/s's interval, 0.75–1 (closed below)"
+
+[[table]]
 name = "kick_rank"
 path = "kick_rank.rs"
 task = "kick_rank"
 revision = 1
-inputs_sha256 = "997c5f8c2bc05e7533413420e12f3bd12c1ebf068117256ea67d4f3369a01a04"
-body_sha256 = "46c38ec84d72ea4686dad6f34231e7a62831bbc4a22d1798e02aa604bef2ee73"
-fingerprint = [1.37, 1.37, 1.8423204055145894, 1.2000058311463526, 2.4085944800254784, 1.604297240012739, 3.325821827841992, 1.4325821828291228, 5.0077445862515795, 6.811951403465913, 6.747722114921276, 8.877208586350257, 7.972260428913055, 10.409751131825592, 11.927653994931292, 15.691973502837042, 0.45, 1.26, 46428852.83850509, 0.4194029742056137, 0.5246263558962185, 0.518193502001322]
-since_generator_version = 16
-provisional = true
-acceptance = "100000 fresh scores through the table give ln(v ÷ km/s) of mean 5.6000 and standard deviation 0.6774, rank clamped and untruncated; knots strictly increasing; largest shift of a knot's rank from the committed table 0.06227"
+inputs_sha256 = "0bda1fb5858dec8176782d2329ca84461be30dbc43884c2a001b84d504e8c953"
+body_sha256 = "600707e307b1ba08220edaf1b11a8bdf97af33941a79b9bd42fe210fb2923dfb"
+fingerprint = [1.37, 1.37, 1.8423204055145894, 1.2000058311463526, 2.4085944800254784, 1.604297240012739, 3.325821827841992, 1.4325821828291228, 5.0077445862515795, 6.811951403465913, 6.747722114921276, 8.877208586350257, 7.6610504417098095, 10.017002420403667, 8.33987464516553, 10.889849369138359, 0.45, 1.26, 46343093.27551778, 0.4194029742056137, 0.5246263558962185, 0.518193502001322]
+since_generator_version = 26
+provisional = false
+acceptance = "1000000 fresh scores through the table give ln(v ÷ km/s) of mean 5.5995 and standard deviation 0.6775, rank clamped and untruncated; knots strictly increasing; largest shift of a knot's rank from the committed table 0.00000"
+
+[[table]]
+name = "lbv"
+path = "lbv.rs"
+task = "lbv"
+revision = 0
+inputs_sha256 = "8776b3519710b79328e0c68d2ead3294b1e3814aa9f6a1dd31402a7841f0cfdc"
+body_sha256 = "b0cddb8f73271e32cf7906e850580049bfb5f73bcfa4d61c1518b9d66d0ad0d3"
+fingerprint = [6485973.186367863, 6486045.05919523, 5579848.810334875, 5637243.747185056, 4655979.102816211, 4657520.103534312, 3756154.3428181875, 3757436.789487088, 2436746.353321887, 2833347.8875492387, 150.0, 150.0]
+since_generator_version = 26
+provisional = false
+acceptance = "32–36 M☉ windows 6255927–6900667 yr, held as 6130000–7039000; 36–43 M☉ windows 5040922–6349046 yr, held as 4940000–6477000; 43–55 M☉ windows 4157256–5352657 yr, held as 4074000–5460000; 55–97 M☉ windows 3492249–4539851 yr, held as 3422000–4631000; 97–150 M☉ windows 2144118–3581469 yr, held as 2101000–3654000; no track from 24 M☉ to the lowest node has a window (passes); the class's million-star sample and its masses' K–S test at 1% are the sim's slow `the_class_test_holds_every_host_of_a_million_layer_e_stars`"
+
+[[table]]
+name = "lifetime_bracket"
+path = "lifetime_bracket.rs"
+task = "lifetime_bracket"
+revision = 0
+inputs_sha256 = "c07f89ef768f526ef9c0f425111a24cd6194a00d2ed482e3e8bbd66204e6d135"
+body_sha256 = "5bfed9caa2bf264597e09d14f72a330bec6e42f473b4b8d36b5d83b1f31f06d3"
+fingerprint = [495286679.0645464, 41120225.717763394, 10963201.340789307, 2756936.4924124596, 848636206.7161552, 41598879.237608194, 9326246.457168067, 3384998.577735398, 0.0001, 0.03, 13.0, 33.0, 2.5, 8.0, 150.0, 150.0, 0.02]
+since_generator_version = 26
+provisional = false
+acceptance = "the table is `LifetimeBracket::new()` bit for bit (read from it, and held to a fresh build by the sim's `the_shared_bracket_is_new_bit_for_bit`); band D's lifetimes 4.0917e7–8.4864e8 years, its widest node's greatest 1.713 times its least; band E's 2.7558e6–4.3548e7 years and 1.244; least and greatest fall with mass at every node (passes)"
 
 [[table]]
 name = "limb_darkening"
@@ -145,16 +394,28 @@ provisional = false
 acceptance = "the Sun (5,772 K, log g 4.438) in V: c 0.7837, α 0.6884, disc average 0.7993 (Design note 16: 0.7837, 0.6893, 0.799)"
 
 [[table]]
+name = "liquid_optics"
+path = "liquid_optics.rs"
+task = "liquid_optics"
+revision = 2
+inputs_sha256 = "c00d0f2ec15da05709d2213fbccdec78b63224dc57e45164555d74b5d0990263"
+body_sha256 = "1d39bb1f611419e0ef0550f686fc3cb83fb3d5ef1a438b99620e9e2ff24416f4"
+fingerprint = [380.0, 405.3333333333333, 430.6666666666667, 456.0, 481.3333333333333, 506.6666666666667, 532.0, 557.3333333333334, 582.6666666666666, 608.0, 633.3333333333334, 658.6666666666667, 684.0, 709.3333333333333, 734.6666666666667, 760.0, 90.6941, 111.66715935187688, 0.00020604825887511505, 0.00020358050908603396, 0.00020117675676873642, 0.00019883416717014725, 0.0001965500768116263, 0.0001943219806530168, 0.00019214752039481368, 0.00019002447380239343, 0.00018795074494971087, 0.00018592435529135557, 0.00018394343548210383, 0.00018200621787197677, 0.000180111029612568, 0.00017825628631747188, 0.00017644048622537557, 0.0001746622048200845, 0.00017292008986621437, 0.00017121285682356556, 0.00016953928460694274, 0.00016789821166139776, 0.00016628853232590035, 0.00016470919346093813, 0.00016315919131808324, 0.00016163756863135233, 0.00016014341191241026, 0.00015867584893297147, 0.00015723404637959016, 0.00015581720766718433, 0.00015442457089881177, 0.00015305540696052556, 0.00015170901774095905, 0.0001503847344661109, 0.00014908191614087295, 0.00014779994808928858, 0.00014653824058638178, 0.00014529622757484048, 0.0001440733654606158, 0.000142869131981623, 0.00014168302514461323, 0.00014051456222538913, 0.00013936327882790953, 0.00013822872799843435, 0.0001371104793908841, 0.0001360081184799946, 0.00013492124581912016, 0.00013384947633977224, 0.00013279243869010986, 0.00013174977460992537, 0.0001307211383398264, 0.00012970619606233008, 0.00012870462537301747, 0.0001277161147797317, 0.00012674036322822015, 0.00012577707965253783, 0.00012482598254868636, 0.00012388679957017507, 0.00012295926714414753, 0.00012204313010683126, 0.00012113814135724365, 0.00012024406152807378, 0.00011936065867271316, 0.00011848770796756487, 0.00011762499142872718, 0.00011677229764228072, 90.368, 184.56524939933342, 0.0012660250698505384, 0.0011941992664921764, 0.001126459306699961, 0.00106303713828235, 0.001003970067040625, 0.0009491618342499649, 0.0008984297737582492, 0.0008515398086195729, 0.0008082315362337236, 0.0007682356102706717, 0.0007312853442276748, 0.0006971241023589496, 0.000665509694986465, 0.0006362166939227293, 0.0006090373401697667, 0.0005837815273835173, 0.0005602762027235728, 0.000538364422355915, 0.0005179042234327041, 0.000498767420608301, 0.00048083839732617324, 0.00046401293583272173, 0.0004481971118585774, 0.00043330626774545255, 0.00041926406974147586, 0.0004060016499882627, 0.0003934568304888437, 0.00038157342444888946, 0.0003703006093841989, 0.000359592365978762, 0.00034940697664819745, 0.00033970657796808317, 0.0003304567614674984, 0.00032162621769949194, 0.0003131864189391579, 0.00030511133629920804, 0.0002973771874756365, 0.0002899622117325648, 0.00028284646910090114, 0.0002760116610982222, 0.0002694409705775467, 0.0002631189185818239, 0.00025703123632108896, 0.00025116475060272517, 0.0002455072812346237, 0.00024004754908876278, 0.0002347750936610368, 0.00022968019909437741, 0.00022475382774816326, 0.00021998756049946622, 0.00021537354305236996, 0.00021090443761186833, 0.0002065733793498986, 0.00020237393715404897, 0.00019830007820528396, 0.00019434613598057231, 0.0001905067813202805, 0.00018677699623924663, 0.00018315205019519792, 0.0001796274785590596, 0.00017619906305919367, 0.00017286281399609148, 0.00016961495404585136, 0.0001664519034901933]
+since_generator_version = 22
+provisional = false
+acceptance = "17 material files (16 liquids' and 1 solid's held for the melts), each to 15 bins over 380–760 nm; water.json's a on its grid: 0.00522 m⁻¹ at 440 nm (Mason, Cone and Fry 2016's 0.00522), 0.05650 at 550 nm and 0.62400 at 700 nm (Pope and Fry 1997's 0.0565 and 0.624); supercooled viscosity: CH4 B 166.337 K, `T_0` 21.925 K, worst 2.6e-3 over 90.694–111.667 K; C2H6 B 353.486 K, `T_0` 0.000 K, worst 3.3e-2 over 90.368–184.565 K"
+
+[[table]]
 name = "mge"
 path = "mge.rs"
 task = "mge"
-revision = 1
-inputs_sha256 = "74e52180fba4ca14be6a2ad32f71fa447ed13e8c96a830856c3068daca748140"
-body_sha256 = "516c9a020f2618c0b499ac48ca2252ef12f646cac0d7d96ecc4f37b705a3aa0b"
+revision = 3
+inputs_sha256 = "b75e8c27390e0a7af01509e35561058b83f62e900da521348ee1e694974030a0"
+body_sha256 = "b650018948a5ca7bf2144a0aa07d9a6f1173877e427a1c69565c9a4235d3a0f6"
 fingerprint = [0.55]
-since_generator_version = 11
-provisional = true
-acceptance = "`MGE_EXP` within 1.289% of e^(−s) over s = 0.05–10; `MGE_BAR` within 2.88% of its central value over u = 0–2 and its mass within 0.212%"
+since_generator_version = 25
+provisional = false
+acceptance = "`MGE_EXP` within 0.010% of e^(−s) over s = 0.05–10 and its spherical mass within 0.0014%; `MGE_HOLED_EXP` within 0.083% of e^(−s) over 0.05–8 and its mass fraction within 2.8e-6; `MGE_BAR` within 2.96% of its central value (worst at u = 0.89), its mass within 0.295% and its cumulative mass from u = 0.05 to 2.5 within 4.93% (worst at u = 1.06); the thin disc's speed against Freeman (1970) is held to 0.5% by `tests/mge.rs`; `MGE_BOXY` at c = 3, 3.5 and 4: mass-weighted rms relative density error 13.3%, 17.5% and 20.7% (plan 15's 3% is out of reach of non-negative, axis-aligned centred Gaussians, which are log-convex in (R², z²): a structural miss, ruled 2026-10-23), mass inside spheres of 0.5–4 scale lengths within 0.136%, 0.197% and 0.249%, whole mass within 0.136%, 0.192% and 0.245% and midplane force at 0.25–8 scale lengths within 0.19%, 0.27% and 0.34%"
 
 [[table]]
 name = "period_correction"
@@ -172,12 +433,35 @@ acceptance = "after 12 iterations over 20000 systems a row, the worst bin's rela
 name = "pulsars"
 path = "cluster_dynamics.rs"
 task = "pulsars"
-revision = 0
-inputs_sha256 = "a93eaf6f23b593829cdae6a4c0bc45d69ae4a52714681b68893ac086cd3e960a"
+revision = 1
+inputs_sha256 = "b0831901709d0d9b4d265f93f4d4d31889209333e20140ee37be5c0a7287caf8"
 body_sha256 = "f24767a95fc390d8f535c334f5ff904f5c2198140ed8d6a49f7dd9af71c40bfd"
 since_generator_version = 15
-provisional = true
-acceptance = "fitted over 126 clusters (17 left out for want of a distance; 363 known pulsars): γ = 0.632 (0.5–0.9; passes), A = 38.0 at 47 Tucanae's Γ (30–50; passes), completeness distance 4.8 kpc; the implied total over the catalogue 1539 (2,000–8,000; FAILS); the table keeps plan 09's scratch A 40, γ 0.7 and cap 40 until a ruling"
+provisional = false
+acceptance = "adopted A = 40, γ = 0.7 and cap 40 (decision-p15-t8-blocks); fitted over 126 clusters (17 left out for want of a distance; 363 known pulsars): γ = 0.632 (0.5–0.9; passes), A = 38.0 at 47 Tucanae's Γ (30–50; passes), completeness distance 4.8 kpc; the adopted law inside the census's 95% joint region, d₀ profiled to 4.71 kpc: 2Δln L = 4.41 (at most 5.99; passes). Reported: the implied total over those clusters 1560 at the adopted law and 1539 at the fit (2,000–8,000)"
+
+[[table]]
+name = "rough_plains_cold_traps"
+path = "rough_plains_cold_traps.rs"
+task = "rough_plains_cold_traps"
+revision = 1
+inputs_sha256 = "03aeb5f7aa37c0d9aa1fe1847a8cf09e00aa636b442cfc257bc35ecd5085550b"
+body_sha256 = "641be67af7d5b9318141966103bf5dca9cc803f940302e709103cb9c8cc302f2"
+since_generator_version = 25
+provisional = false
+acceptance = "16 surfaces of 512² pixels, rays to 512 pixels, the facets lit 0.2711° below the star's upper limb, 28.2 pieces a sampled view azimuth; instantaneous shadow within 0.133 of Smith 1967's at 0.5–4° for w 0.1, 0.3 and 0.5 (worst at w 0.1, 4°); under a point star 1.54° from the equator, permanent shadow over 80–90° from 0.0234 to 0.0341 across the surfaces at w 0.1 and 0.2232 to 0.2586 at w 0.3; w 0.1: shadow 0.0279 over 80–90° and 0.00056 over 70–80°, under the real Sun water (110 K) 0.0211 and CO₂ (57 K) 0.001211 over 80–90°; w 0.2: shadow 0.1377 over 80–90° and 0.02305 over 70–80°, under the real Sun water (110 K) 0.0629 and CO₂ (57 K) 0.000448 over 80–90°; w 0.3: shadow 0.2378 over 80–90° and 0.07647 over 70–80°, under the real Sun water (110 K) 0.0541 and CO₂ (57 K) 0.000409 over 80–90°; w 0.5: shadow 0.3715 over 80–90° and 0.19028 over 70–80°, under the real Sun water (110 K) 0.0348 and CO₂ (57 K) 0.000585 over 80–90°; the largest shadow at the last colatitude node 2.38e-6 and at the last limb node 0.00e0; at the real Moon's D, the read against a direct trace on the same surfaces over 80–90° every 0.5°; w 0.1: shadow 0.0218 against 0.0216, water 0.0211 against 0.0213, CO₂ 0.001214 against 0.001304; w 0.2: shadow 0.1233 against 0.1226, water 0.0630 against 0.0657, CO₂ 0.000449 against 0.000405; w 0.3: shadow 0.2213 against 0.2205, water 0.0542 against 0.0572, CO₂ 0.000409 against 0.000379; w 0.5: shadow 0.3566 against 0.3551, water 0.0348 against 0.0381, CO₂ 0.000585 against 0.000497"
+
+[[table]]
+name = "saturation_curves"
+path = "saturation.rs"
+task = "saturation_curves"
+revision = 0
+inputs_sha256 = "84d934ba650a7d68e6ad14bc8b508ac572ad3cd5fca3518c2874c41a99684bba"
+body_sha256 = "85f9931343fa3d62d559de5a6f1e1e530e813b777e1a89f8d022ec3bcaf10579"
+fingerprint = [6.416171781899948, 6.416171667880966, -91.44331784735576, 0.00000011401898181162551, 9.367000184529378, 9.383276628794007, -36.33582453502977, -0.01627644426462993, 8.708526174635335, 8.708375963522544, 4.726506872171809, 0.00015021111279089894, 9.435221115196402, 9.407201363228337, -0.6989344875185726, -0.7270027989117338, -66.19707453502978, 0.028019751968065165, 0.0560880633612264, 4.985880049018148, 4.986437625410767, 0.5460280319087101, 0.5459742633783087, -22.057893405514548, -22.057834263868806, -84.46786453502978, -0.000557576392619552, -0.000503807862218153, -0.0005629495079588764, 13.157656844606302, 13.157633991486248, 7.2859295424657216, 7.282398318553209, -53.020043285029764, 0.000022853120054122655, 0.003554077032566383, 11.14030903435728, 11.140280824376791, -16.164362436856983, 0.000028209980488469455, 11.20514973583823, 11.202381698275802, -45.53082453502979, 0.0027680375624274944, 11.311367673303788, 11.313007095353097, -73.31644953502978, -0.0016394220493083367, 11.383184088019213, 11.438294850150944, 6.511496893541656, -0.05511076213173105, 9.651420141889588, 9.65250713864399, 8.241917237046088, 8.245573219479777, -43.703867537945214, -0.0010869967544024917, -0.004742979188090857, 7.418312509330635, 7.455473218263819, -13.910674535029765, -0.03716070893318424, 10.054562712279942, 10.060156769230424, 8.907692928213802, 8.908584647468789, -20.62374120169644, -0.005594056950481985, -0.006485776205469307, 0.13309583541420444, 0.13469771995796442, -98.63019953502979, -0.0016018845437599794]
+since_generator_version = 23
+provisional = false
+acceptance = "14 condensables, 20 sublimation pieces; each anchor as the factor it puts on its piece's pressure: H2O +0.0000%, CH4 -1.6145%, NH3 +0.0150%, N2 +2.8416% +5.7691%, O2 -0.0557% -0.0504% -0.0563%, CO2 +0.0023% +0.3560%, Ar +0.0028%, Kr +0.2772%, Xe -0.1638%, N2O -5.3620%, CO -0.1086% -0.4732%, SO2 -3.6479%, H2S -0.5578% -0.6465%, C2H6 -0.1601%; the anchored branch meets the one above it within 0.0e0 in ln p at every join; methane's liquid branch against NIST's WebBook -0.0003% at 100 K, -0.0018% at 150 K, +0.0064% at 180 K"
 
 [[table]]
 name = "sky_binary_light_c"
@@ -185,11 +469,11 @@ path = "sky_binary_light_c.rs"
 task = "sky_binary_light_c"
 revision = 0
 inputs_sha256 = "20f3430ceff92ef66bf400a1a4d929041ffdfbab4be4426b113742e5ddbe3861"
-body_sha256 = "4c2fceea83f120c10c624ee1304d66364eebd8eeb657bd0c8c3a79d00d2119b2"
-fingerprint = [-263.8381968096279, -284.3699014268454, -409.3114229769742, -262.53656600281005, -510.04006226429084, -11.0, -2907.1929042479674, 263.8381972014929, 13.0, -128.21299136553327, -134.24803413253488, -159.84127112409323, -130.22513352935272, -290.0825240826778, -30.0, -1578.0091273372761, 128.2129986257281, 36.0, 92.4862350621345, 92.80827297520543, 68.88078278693473, 92.3733198952227, 292.58162563700967, -9.0, 1122.0821172208116, 96.40981702437519, 14.0]
-since_generator_version = 21
+body_sha256 = "a465b925847e6002bf5d2ddf062c06c2181fd51b18659ef033f2bc58f3d98c9a"
+fingerprint = [-286.63293847630274, -308.9133587357554, -444.4013199684933, -285.2266357724602, -554.487008181429, -12.0, -3165.560777962404, 287.53546437494145, 26.0, -808.8666710306339, -880.5215834467264, -1362.7459380261498, -794.1506096286814, -1444.3352319131905, -33.0, -7675.719445363895, 812.6947195013641, 57.0, 92.48628279541008, 92.80832209058516, 68.88083260746262, 92.37336832535571, 292.5817491045646, -9.0, 1122.082839676733, 96.40985434003005, 15.0]
+since_generator_version = 30
 provisional = false
-acceptance = "130 cells × 200000 systems (26000000), 257354 changed by pair evolution; the 1-mag bins from absolute V -7 to 20 held; a cell's mean total light difference -4.6309e-1 to 1.2712e-1 L☉,V a system, its standard error at most 1.3880e-1"
+acceptance = "130 cells × 200000 systems (26000000), 433641 changed by pair evolution; the 1-mag bins from absolute V -7 to 20 held; a cell's mean total light difference -5.0662e-1 to 1.2257e-1 L☉,V a system, its standard error at most 1.5730e-1"
 
 [[table]]
 name = "sky_binary_light_d"
@@ -197,23 +481,23 @@ path = "sky_binary_light_d.rs"
 task = "sky_binary_light_d"
 revision = 0
 inputs_sha256 = "8992e1da34b0fa40cd339dfd38cf30dce5572fdc36265bf7f40445342dbd6033"
-body_sha256 = "8c4b75844ffdd1531b5507138251415a7788d811ff50ffd345c005784e125260"
-fingerprint = [-120.80103229328012, -122.50653195359541, -91.91559036527667, -113.12497010587381, -434.51039927275167, -13.0, -1817.7196419567854, 280.3780427260161, 14.0, -9414.712830467608, -10144.224282040337, -15159.051332495692, -9233.889306665995, -17341.340155618043, -18.0, -71388.83284965425, 9784.137280934947, 26.0, -6703.843993301328, -7308.358247927757, -11364.07619309021, -6601.431970417155, -11785.556111691692, -4.0, -49285.34986909366, 6875.639764279245, 8.0]
-since_generator_version = 21
+body_sha256 = "e8bffc71063fd4044ac7221669e1d180b0615e06142d4edbd88a9ed1c9bbdf67"
+fingerprint = [-449.51164901937756, -454.26508359260254, -355.82319404343315, -441.1863178727718, -1449.4059948872912, -16.0, -5163.428744176823, 594.4321061592332, 17.0, -6615.663044374652, -7124.282457543361, -10604.059659975546, -6486.296447375812, -12278.810559023404, -22.0, -50872.727467789635, 8216.899070537946, 30.0, -7093.980780308867, -7733.610363717335, -12023.89302957789, -6985.542247342455, -12475.675332764518, -4.0, -48831.23196351373, 7265.776551286786, 8.0]
+since_generator_version = 30
 provisional = false
-acceptance = "130 cells × 20000 systems (2600000), 181801 changed by pair evolution; the 1-mag bins from absolute V -8 to 20 held; a cell's mean total light difference -3.7778e1 to 1.9862e0 L☉,V a system, its standard error at most 6.4790e0"
+acceptance = "130 cells × 20000 systems (2600000), 253330 changed by pair evolution; the 1-mag bins from absolute V -7 to 20 held; a cell's mean total light difference -4.4819e1 to 1.2667e0 L☉,V a system, its standard error at most 7.1710e0"
 
 [[table]]
 name = "sky_binary_light_e"
 path = "sky_binary_light_e.rs"
 task = "sky_binary_light_e"
 revision = 0
-inputs_sha256 = "d227f8afab2265943ce7b6595f165e1ecaa0def617b9166b0937c6fd59694126"
-body_sha256 = "58ee5b7be28d5d644ab02340b50479b5a09b29d9e029caca37e450fdf9b4453d"
-fingerprint = [-58325.159292484226, -59304.67345508152, -47238.01823126961, -58730.4018974593, -181131.03373467718, -13.0, -298052.29724445, 86611.71591461901, 19.0, -72724.35132126097, -76050.6745525019, -88525.75272252767, -72458.04721078904, -177202.0372582001, -16.0, -390866.202580038, 99895.35045013922, 24.0, 5017.415334150913, 5027.792337196639, 3501.5570803728983, 4943.186161930343, 16901.925310850762, 0.0, 22485.769042628348, 5019.8701621363325, 9.0]
-since_generator_version = 21
+inputs_sha256 = "8fa5566f3390f7a9f0a589a0783f1d0b9f9ef66f886e40299e840ea3ea857626"
+body_sha256 = "4468f46b9b512234b340498a642c8ebfcc2087f6767129a9d2107512df4d2791"
+fingerprint = [-98541.59396350944, -100805.73020028113, -92894.58436982098, -98247.9729708907, -284512.10848999704, -36.0, -564864.5744310723, 99377.9508178254, 21.0, -85306.28796318581, -88938.25571569987, -100628.42262623546, -84917.28744873093, -213668.95717740277, -48.0, -493145.6135683193, 108243.0363555688, 34.0, 5265.1229441756195, 5275.986669533824, 3674.046395068381, 5187.159916725045, 17737.500630524468, 0.0, 23694.071432929537, 5267.655474570714, 11.0]
+since_generator_version = 30
 provisional = false
-acceptance = "130 cells × 20000 systems (2600000), 343483 changed by pair evolution; the 1-mag bins from absolute V -12 to 20 held; a cell's mean total light difference -7.1860e3 to 4.2545e2 L☉,V a system, its standard error at most 9.5250e2"
+acceptance = "130 cells × 20000 systems (raised: cell 25 100000) (2680000), 538498 changed by pair evolution; the 1-mag bins from absolute V -12 to 20 held; a cell's mean total light difference -2.5266e3 to 6.4145e2 L☉,V a system, its standard error at most 2.3960e2"
 
 [[table]]
 name = "sky_envelope"
@@ -221,11 +505,11 @@ path = "sky_envelope.rs"
 task = "sky_envelope"
 revision = 0
 inputs_sha256 = "00377553328a5b60882b41de374419edba60f6a5c54f3ecb00b69718eb5f4526"
-body_sha256 = "8841e95158b9b9d6cce97bd51a8509e601386bc715eba3c2b86f58d8b917c61f"
-fingerprint = [198.0, 0.01240972504160122, 150.0, 13.027943055377502, 1993.4781831135954, 133.0, 10.575633729507718, 2368.9939198679826, 193.0, 6.267617009745397, 1120.9128833378002, 140.0, -5.411961658162702, 505.6570579529913, 129.0, -6.793861382632567, 88.43501502549661, 88.0, -8.90197030109447, -162.3651081653379, 40.0, -11.728990488164943, -184.84175081816403, 29.0, 13.026173102302929, 2255.3841823514726, 150.0, 10.925813147852466, 2453.6402372068605, 193.0, 6.2676170289564626, 1184.0868225594265, 140.0, -4.296032284572494, 645.9453638455362, 138.0, -5.6895332473556595, 62.13218991923444, 94.0, -8.451132076011069, -181.42412128769683, 38.0, -10.471742109188583, -203.55765805416397, 29.0]
-since_generator_version = 19
+body_sha256 = "e10093f8e7f2e0e8b94a9b51ac510242ad32677af0d6bf193702cd39b57ed575"
+fingerprint = [198.0, 0.01240972504160122, 150.0, 13.027943055377513, 1993.4794028037816, 133.0, 10.575633729507715, 2368.41963146665, 193.0, 6.267617009745398, 1114.6925116697464, 140.0, -5.411961658264001, 556.9368615101404, 140.0, -6.793869694128575, 502.6618732294001, 140.0, -8.903384558859697, -223.64745583761567, 40.0, -9.399651107350461, -204.99695376561488, 29.0, 13.026173102302941, 2255.3848259309757, 150.0, 10.925813147852462, 2453.3658039054835, 193.0, 6.267617028956463, 1182.1069470293826, 140.0, -4.296032285757082, 598.314674664475, 140.0, -5.689559093697621, 427.4523219788661, 140.0, -8.669508220799292, -241.8218863909562, 38.0, -9.511063568670021, -236.62060352378037, 29.0, -4.856247496230692, 787.5794972437227, 140.0, -4.967185169056141, 752.156674990381, 140.0]
+since_generator_version = 27
 provisional = false
-acceptance = "198 mass nodes × 193 age bins from 9240 tracks; 1856 bins dark; every stored value brighter than the build's by 0.000000 to 0.001000 mag (never fainter, so the table bounds the build); brightest -12.850 mag"
+acceptance = "198 mass nodes × 193 age bins from 46200 tracks; 1856 bins dark; every stored value brighter than the build's by 0.000000 to 0.001000 mag (never fainter, so the table bounds the build); brightest -10.931 mag"
 
 [[table]]
 name = "sky_phase_envelope"
@@ -233,11 +517,23 @@ path = "sky_phase_envelope.rs"
 task = "sky_phase_envelope"
 revision = 0
 inputs_sha256 = "6c383342a33bcc36ac48cfc0f9b749aa8a84a8eed37d8cf0d85110aaa7d0b5fa"
-body_sha256 = "a905eb4a16eadddc5d7383f6b5450bc8cb876b7067c55411714bdb30f7919255"
-fingerprint = [198.0, 0.01240972504160122, 150.0, 3135.200629251452, 0.0, 57.0, 840.6061083037024, 13.026173102302929, 0.0, 135.0, 1836.7577018800384, 10.575633729507718, 0.0, 64.0, 637.2106755136858, 6.267616976433615, 3395.0, 332.0, -48.02438056332567, -5.296648202109787, 2041.0, 378.0, 406.3197030603642, -3.816923123561792, 1538.0, 379.0, 901.9536133131066, -1.6909826094614504, 17489.0, 357.0, -683.5650780518276, -6.151294708685611, 24785.0, 654.0, -2310.0645875150803, -6.9492230464171385, 26689.0, 466.0, -2068.472730743051, -5.96135135577902, 34068.0, 233.0, -993.1117459444654, -8.450988196992652, 36813.0, 232.0, -1248.9196635919998, -9.999264782660214]
-since_generator_version = 21
+body_sha256 = "d794ece5b022224d800a692a72e0742a6a231f0146dde6edbf7c5221fc73b065"
+fingerprint = [198.0, 0.01240972504160122, 150.0, 3135.200629251452, 0.0, 57.0, 840.6054061662139, 13.026173102302941, 0.0, 135.0, 1836.7586044843574, 10.575633729507715, 0.0, 64.0, 637.2187354920819, 6.267616976433616, 3395.0, 364.0, 377.6181829437777, -5.297012630346251, 2041.0, 410.0, 964.2252057699136, -3.822112043938717, 1538.0, 411.0, 1291.9379075089055, -1.6909826094614506, 17489.0, 387.0, -191.03379885944665, -6.152512872390798, 24785.0, 684.0, -1606.6879569437608, -6.9492230464171385, 26689.0, 466.0, -2085.337816534597, -5.967558004843184, 34068.0, 233.0, -959.8785679213419, -8.49940156273453, 36712.0, 186.0, -800.5972158234373, -9.769000325915693]
+since_generator_version = 29
 provisional = false
-acceptance = "6501 cells × 322 bins (mass intervals 0..197 sampled) from 253736 samples (each interval sampling its own ends), 197225 of them tracks; 4224 of 9504 node lifetimes at the cap; cells by spread [4662, 5, 826, 447, 391, 87, 31, 52] (of [0.0005, 0.001, 0.002, 0.004, 0.008, 0.016, 0.032, 0.064]), 52 of them passing no spread; 3349 distinct rows of 66112 segments; 64 cells lit beyond the fine bins; every stored value brighter than V 10 brighter than its bins, less the margin, by at most 0.2009 mag; brightest -12.850 mag"
+acceptance = "6501 cells × 322 bins (mass intervals 0..197 sampled) from 253736 samples (each interval sampling its own ends), 197225 of them tracks; 4224 of 9504 node lifetimes at the cap; cells by spread [4719, 6, 762, 414, 365, 153, 40, 42] (of [0.0005, 0.001, 0.002, 0.004, 0.008, 0.016, 0.032, 0.064]), 42 of them passing no spread; 3345 distinct rows of 65519 segments; 1539 cells lit beyond the fine bins; every stored value brighter than V 10 brighter than its bins, less the margin, by at most 0.2009 mag; brightest -10.140 mag"
+
+[[table]]
+name = "space_weathering"
+path = "space_weathering.rs"
+task = "space_weathering"
+revision = 0
+inputs_sha256 = "7d81313f355b0bc1936ae89ad7228e0327d7ba7073cf8fc59b5d09c526ee1193"
+body_sha256 = "7909c3698fd89de3b96c84104533a913d270b295e1df22c904bd1d439ba3f971"
+fingerprint = [440.0, 550.0, 640.0, 1.0, 0.5, 0.2, 0.05, 0.0001, 0.503, 0.503, 0.0, 0.0, 1.31, 0.00007, 0.33, 0.37, 0.78, 0.06, -0.11, 1.0, 0.5098039215686274, 1.7, 7874.0, 55.845, 71.844, 0.4182145530412664, 0.20009049104833562, 0.43409782252346857, 0.20902687047220425, 0.4435230131788559, 0.2144015027835851, 7874.0, 0.6628543015136129, 0.31797625094513166, 0.991629247233215, 0.9621444360128021, 0.9949308985488953, 1.0158347026830084, 2067.0, 0.9982045528760544, 1.0996639686176766, 0.9989787433908976, 1.1323818627590194, 0.9992983999608945, 1.1501211935964375, 1987.0, 0.9982045528760544, 1.0996639686176766, 0.9989787433908976, 1.1323818627590194, 0.9992983999608945, 1.1501211935964375, 2163.0, 0.5320145417290614, 0.2523468856155409, 0.9677023464564605, 0.769491851882079, 0.9746355776711344, 0.8090644706758693, 4089.0, 0.14135943446415392, 0.06201682526012006, 0.13251820365587405, 0.0580115642448318, 0.12887021886762864, 0.05636440749304075, 1856.0, 0.2935429683073254, 0.13437901142468248, 0.27907384359632437, 0.1271802774479402, 0.370480419683485, 0.17406990239065082, 4052.0, 0.5503754213685761, 0.26035401133075153, 0.5458378992813963, 0.2583453433456985, 0.5460096940453223, 0.2584210285520496, 7200.0, 0.11160603419430837, 0.048611347362919506, 0.13944408613044237, 0.06114752963626079, 0.1455718408447611, 0.06393181310114784, 4840.0, 0.9172205615580699, 0.5981803478107676, 0.9272654742214398, 0.6230458658783713, 0.927867139122398, 0.624631063073901, 3202.0, 0.5003383031164171, 0.23923867488083975, 0.5592110601072338, 0.2643240344178994, 0.7522558078112112, 0.3798459640727067, 3219.0, 0.9831190618899633, 0.8708467222957504, 0.9877026578568351, 0.9144711563612481, 0.9894686106837203, 0.9343801985428847, 2649.0, 0.9811092880612732, 0.8544124977776167, 0.981461671150814, 0.8571977603980351, 0.9847579562368248, 0.8853404393650269, 3989.0, 0.20977672253900997, 0.09369147772946029, 0.20543293357191872, 0.09164224304127996, 0.2342366951790163, 0.10533607365883929, 4040.0, 0.6477170303004046, 0.3091767773493026, 0.7349382201848655, 0.3662594575612108, 0.89856458538072, 0.5585206032516707, 4248.0, 0.3054305980531014, 0.1403520304681252, 0.30216965261910356, 0.13870815501989553, 0.30841026353113316, 0.14185772940453847, 2261.0, 0.11904489687479967, 0.05194358128017108, 0.11686369338198592, 0.05096520222427614, 0.11503256461394712, 0.05014469110381517, 1350.0, 0.0869184071678006, 0.03764093225613261, 0.08622542269962068, 0.037334898922579435, 0.0843995500448426, 0.036529051225023666, 1800.0, 0.420371504915137, 0.2012954028017152, 0.7135280125368544, 0.3506519724439932, 0.8829382873994889, 0.5302109350894364, 2600.0, 0.9752549717539174, 0.8129943028296865, 0.980992095008124, 0.8534947093680458, 0.9842711167980587, 0.8809218912128102, 2790.0, 0.9233617640198367, 0.6130363239653435, 0.9422535021356314, 0.6665065439563072, 0.951287014288791, 0.6976947269011285, 2900.0, 0.18135781366623177, 0.08038187310682784, 0.20746285783970517, 0.0925991996639075, 0.21809364295692635, 0.09763058507056828, 3010.0, 0.7363802115077562, 0.367356042640268, 0.7870820810294531, 0.41033195669077094, 0.8023218398415148, 0.4252808415050938, 3310.0, 0.7056414903851436, 0.3451987951317227, 0.807178307970564, 0.430286935964984, 0.8192684314167351, 0.44331463741889804, 3240.0, 0.560845626040407, 0.26506717499706833, 0.5776159439613425, 0.272855481137337, 0.581374425240594, 0.27464340458451253, 2970.0, 0.9696800510667772, 0.7800395863061788, 0.9761007914454374, 0.818484382324645, 0.9793597064831923, 0.8411277329116071, 2650.0, 0.7484304545121435, 0.3767640347518653, 0.8684853921551116, 0.5070454232969672, 0.8600395510884626, 0.4946124894837257, 3320.0, 0.18486567287179426, 0.0820125285458849, 0.2550293303195461, 0.1153822278198129, 0.44610814773538277, 0.21588532593182874, 3310.0, 0.860623528833961, 0.4954485797355986, 0.9678202787723549, 0.7701062463827758, 0.9789771137360805, 0.8383354611182636, 2500.0, 0.2665828889285349, 0.12102630333345375, 0.3583123263171276, 0.16762025457329505, 0.40322530288376945, 0.19178952414393094, 2760.0, 0.9811092880612732, 0.8544124977776167, 0.981461671150814, 0.8571977603980351, 0.9847579562368248, 0.8853404393650269, 3810.0, 0.4182145530412664, 0.20009049104833562, 0.43409782252346857, 0.20902687047220425, 0.4435230131788559, 0.2144015027835851, 7900.0, 0.9892837075705472, 0.9321919302794567, 0.9928562018763235, 0.9801255681714316, 0.9949980179925669, 1.0171358036151186, 3020.0, 0.9954549697608529, 1.0263024380291332, 0.9979934994166973, 1.0922515532820665, 0.9986436427880818, 1.116908423567796, 2540.0, 0.9947894768364269, 1.0131287257142738, 0.9953178075629526, 1.0234920073269804, 0.9954047275319442, 1.0252668556861775, 2710.0, 0.07143897213526398, 0.03082897610015502, 0.0851520461273823, 0.03686107935199972, 0.10965159887408579, 0.04773794420694657, 1400.0, 0.14858954144465622, 0.06530636754614001, 0.16314681660354896, 0.07196929026127773, 0.17576826550468944, 0.07779041180841662, 2590.0, 0.13216263210628604, 0.05785087566995112, 0.15926968433282349, 0.07018944952173324, 0.17863225899979918, 0.07911718367836344, 2920.0, 0.28821393213843705, 0.13171873397715966, 0.3386540128136835, 0.15734399661650142, 0.34690251208796186, 0.16163481841048294, 3540.0, 0.7707065804626777, 0.3954180551263532, 0.8207829266707761, 0.44500708154028285, 0.8352307765959001, 0.4619006889660514, 3720.0, 0.7440576128161203, 0.37329842105853434, 0.8100254568854326, 0.43328041784656257, 0.8278444347091222, 0.45308944445585103, 3580.0, 0.7044864477727999, 0.34441258101131417, 0.7941163798292273, 0.41709456792957905, 0.8171268045444734, 0.4409451623911773, 3540.0, 0.6627070521613603, 0.317888741677262, 0.7586259528716116, 0.38508619973770475, 0.7629955308204843, 0.38876192035804236, 3660.0, 0.07826319184991269, 0.033825918107688514, 0.09370833356074879, 0.040644904292048624, 0.1165328493147393, 0.05081689743627571, 2000.0]
+since_generator_version = 24
+provisional = false
+acceptance = "Λ 2.1301 µm, weighted least squares at m = 1 over B, V and R of both terrains (σ = (P90 − P10) ÷ 2.563), the anchors at 600 nm taken to the bands by A ∝ λ^0.83 (Dollfus and Bowell's Eq. 11, p. 50, one colour for both terrains); highland `feldspathic` at `FeO_T` 0.055, 2900 kg m⁻³: fresh 0.613/0.667/0.698, mature 0.0876/0.1226/0.1368 against 0.088/0.106/0.120 (z -0.04/+0.99/+0.87; in/in/in of 0.074–0.110, 0.089–0.132, 0.101–0.150), its own best Λ 2.4340 µm; mare `basalt_fe` at `FeO_T` 0.16, 3310 kg m⁻³: fresh 0.367/0.410/0.425, mature 0.0519/0.0570/0.0602 against 0.056/0.067/0.076 (z -0.62/-1.37/-1.91; in/out/out of 0.048–0.063, 0.058–0.076, 0.065–0.087), its own best Λ 1.4249 µm; `y_sat` = Λ ÷ ⟨D⟩ (63.54 µm) 0.0335 per unit FeO-iron, inside Morris 1980 Eq. 4's 3.2e-4 per `FeO` (× `M_FeO` ÷ `M_Fe`, 4.117e-4 per FeO-iron) × 75 = 0.0309 within a factor 3 (0.0103–0.0926), beside the mature soils' medians, mare 0.029 and highland 0.040; fresh/mature contrast B/V/R highland 7.00/5.44/5.10 and mare 7.07/7.19/7.06, against fresh craters over the medians at 600 nm (Tycho 1.34–1.48, Proclus 1.58–1.68, Kepler 1.68; Dollfus and Bowell, Table 4); iron's z joined at 1937 nm, Ordal × 1.1820 at `n_h` 1.7 and × 1.1626 at `n_h` 1.31; the frost's Λ 2.8016 µm (⟨D⟩ 83.57 µm); each row's `A_N` inverts to its own w within 2.7e-5"
 
 [[table]]
 name = "star_colour"
@@ -317,11 +613,11 @@ path = "stellar_fates_high.rs"
 task = "stellar_fates_high"
 revision = 0
 inputs_sha256 = "ab3cd3282dbb1d3cafa85ebb8470c9790bd70e78c1a05feb65903bce1bcf0eea"
-body_sha256 = "0bcd17130b9317fce32dbd74cf0645de9f8bd67bbd8fd2088e6e22b10e4602fd"
-fingerprint = [6.9943222296256256, 5.0077445862515795, 6.665239455001237, 18.647754626514384]
-since_generator_version = 16
+body_sha256 = "bb56991e22d3f5d2a25624b0c07dc28342c493d15b26af179108fa6a772ed349"
+fingerprint = [6.9943222296256256, 5.0077445862515795, 6.664861129002288, 17.395795161440116]
+since_generator_version = 26
 provisional = false
-acceptance = "8260 full tracks; 99 of 1633 cells (6.1%) left to the exact track; usable cells' bounds, median and 99th percentile: death age 1.1e-4 and 6.8e-3, a 5.7e-4 and 9.0e-2, b 1.3e-4 and 4.0e-2"
+acceptance = "8260 full tracks; 103 of 1633 cells (6.3%) left to the exact track; usable cells' bounds, median and 99th percentile: death age 1.1e-4 and 6.8e-3, a 8.7e-4 and 1.0e-1, b 3.7e-4 and 6.3e-2"
 
 [[table]]
 name = "stellar_fates_low"
@@ -348,16 +644,76 @@ provisional = false
 acceptance = "22044 full tracks; 135 of 1357 cells (9.9%) left to the exact track; usable cells' bounds, median and 99th percentile: death age 1.1e-4 and 1.1e-3, a 2.4e-4 and 8.2e-3, b 5.1e-4 and 1.3e-2"
 
 [[table]]
+name = "streams"
+path = "streams.rs"
+task = "streams"
+revision = 1
+inputs_sha256 = "25b77310b661620a3d6e4f86b0adbd84933ceb51978477c1d8aa6969132f85b1"
+body_sha256 = "2af55750d8239f96bb9f1514b426867335308bb26ef54600b973ab2dd1d81a1b"
+fingerprint = [179.0, 519073654.41883236, 16284.311539546214, 0.55, 1000.0, 256.0, 48.0, 9.0, 125887.63844176475, 4029.3862368191535, 26912.593685960295, 59213.579279100835, 0.0000001995337813552892, 0.000000015680068582732592]
+since_generator_version = 26
+provisional = false
+acceptance = "k 2.054 (one sigma 1.868–2.240; 0.5–4.5) against 118 ± 10.9 globular-like known streams inside the cut (141 in the census: 14 dwarf, 2 disc, 2 wide, 2 duplicate); globular tubes 0.634% of the halo at k (0.3–1%); without the density condition 1.104, at half and twice the contrast 1.688 and 2.574; per galaxy 1.829–2.251 over 8; 8 galaxies, 1959 tubes built, 0 failed"
+
+[[table]]
 name = "stripping"
 path = "stripping.rs"
 task = "stripping"
 revision = 0
 inputs_sha256 = "865b5a384d01768752dcab8474e86208635c9decfce206c839ce5a8a455dac54"
-body_sha256 = "688d35dc29459779a4569d5ce8125458fc04afe54e7bc4826de8092d2cb712b3"
+body_sha256 = "e277dc44ed7db6aa4a95a61f928f44aaa6df4d6b3a55f64953006b853a494ecb"
 fingerprint = [0.3460343735586854, 0.5343901251039018, 0.4818157115990379, 1.183367218815104, 1.9333278054314231, 2.8904931250733537]
-since_generator_version = 16
+since_generator_version = 26
 provisional = false
-acceptance = "at the centres of 330 cells, the share within 0.0688 of the exact (median 6.5e-4), the core-helium-burning radius within 0.023 relative where the cell's four radii agree to 25% (62 cells spread more)"
+acceptance = "at the centres of 330 cells, the share within 0.0877 of the exact (median 8.3e-4), the core-helium-burning radius within 0.045 relative where the cell's four radii agree to 25% (99 cells spread more)"
+
+[[table]]
+name = "stripping_helium"
+path = "stripping_helium.rs"
+task = "stripping_helium"
+revision = 0
+inputs_sha256 = "40da3188a6c47a9591d32487becf41cc52a4b002e71e9f734f50543703d94ead"
+body_sha256 = "b17fbe867af2f01139096ed3357d6e9ae15cbfdfce7579940caa7b2fc0049e59"
+fingerprint = [0.3464733090200039, 2.4326460420632987, 0.5826806772873225, 2.899762712023834, 0.5039890930223838, 2.8271634708760005]
+since_generator_version = 26
+provisional = false
+acceptance = "at the centres of 990 cells in ln m, [Fe/H] and the helium excess, the share within 0.0866 of the exact (median 8.9e-4), the core-helium-burning radius within 0.037 relative where the cell's eight radii agree to 25% (345 cells spread more)"
+
+[[table]]
+name = "substance_albedos"
+path = "substance_albedo.rs"
+task = "substance_albedos"
+revision = 2
+inputs_sha256 = "0e45512bba94ce25b0bba223c68a5b5058c0b2c8d373a1ffb99aa8e312909bf2"
+body_sha256 = "9813395ad4993fcf9937d3ce2281c1149dea75ba9e2be68d3941c71e49b16bf3"
+fingerprint = [440.0, 550.0, 640.0, 1.0, 0.5, 0.2, 0.05, 0.0001, 0.503, 0.2200079769491843, 0.532579056190227, 6.084798529608233, 0.503, 0.0, 0.0, 0.00007, 0.33, 0.37, 0.78, 0.06, 1.7000000000000002, 0.815, 1.04, -0.11, 1.0, 0.5098039215686274, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 300.0, 390.0, 495.0, 595.0, 700.0, 780.0, 1000.0, 1300.0, 1700.0, 2200.0, 2800.0, 3500.0, 5000.0, 1.0, 3.0, 6.0, 4.0, 0.0, 2.0, 0.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 12.0, 0.0, 0.0, 0.0, 0.0, 8.0, 9.0, 0.0, 0.0, 0.0, 0.0, 0.0, 7.0, 0.0, 13.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 11.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.000001, 10.0, 20.0, 30.0, 90.0, 0.9995, 34315.0, 3450.0, 13859.0, 6894.0]
+since_generator_version = 24
+provisional = false
+acceptance = "55 rows (11 frosts, 44 regoliths); the highest `A_N` 1.1501 (`KCl`), the highest `A_h` 1.0000 (`CH4`, B at μ₀ = 1), both within the bounds of 1.35 and 1; the 12 bins' spherical albedos within [0, 1], the lowest 0.0108 (`H2O`, 2800-3500 nm); `A_N` in V: `H2O` 0.949, `CH4` 0.959, `NH3` 0.959, `N2` 0.959, `O2` 0.959, `CO2` 0.955, `Ar` 0.959, `CO` 0.959, `SO2` 0.805, `H2S` 0.959, `Fe` 0.209, `NH4SH` 0.959, `S8` 0.962, `KCl` 1.132, `NaCl` 1.132, `ZnS` 0.769, `Na2S` 0.058, `MnS` 0.127, `Cr` 0.258, `FeS` 0.061, `MgSiO3` 0.623, `Mg2SiO4` 0.264, `SiO2` 0.914, `Al2O3` 0.857, `CaTiO3` 0.092, `TiO2` 0.366, `graphite` 0.139, `tholin` 0.051, `soot` 0.037, `mars_dust` 0.351, `anorthosite` 0.853, `feldspathic` 0.667, `basalt` 0.093, `basalt_fe` 0.410, `komatiite` 0.430, `basalt_reduced` 0.273, `granite` 0.818, `ultramafic` 0.507, `ferric` 0.115, `phyllosilicate` 0.770, `lava_glass` 0.168, `ca_al_residue` 0.857, `iron_nickel` 0.209, `MgSO4` 0.980, `Na2CO3` 1.092, `CaCO3` 1.023, `carbonaceous` 0.037, `chondrite_ci` 0.072, `chondrite_cm` 0.070, `chondrite_cv` 0.157, `chondrite_h` 0.445, `chondrite_l` 0.433, `chondrite_ll` 0.417, `chondrite_e` 0.385, `cometary` 0.041"
+
+[[table]]
+name = "thermo_equilibrium"
+path = "thermo.rs"
+task = "thermo_equilibrium"
+revision = 0
+inputs_sha256 = "c35802812c1efaa7dcb7f1f75b95e945f32fa2805e1de1f72531333e08b8be70"
+body_sha256 = "75f9bdd202453fa3effaef6be6305ed4e21cafb521d4704fa59a315dca12fa03"
+fingerprint = [0.0, 0.0, 0.0, 2.0, 1.0, 0.0, 1.0, 1.0, 2.0, 0.0, 0.0, 2.0, 4.0, 1.0, 3.0, 0.0, 2.0, 1.0, 0.0, 4.0, 4.0, 0.0, 3.0, 1.0, 0.0, 3.0, 5.0, 0.0, 3.0, 2.0, 6.0, 0.0, 4.0, 2.0, 7.0, 0.0, 2.0, 1.0, 4.0, 2.0, 8.0, 0.0, 13.0, 1.0, 9.0, 0.0, 5.0, 1.0, 10.0, 0.0, 23.0, 1.0, 11.0, 0.0, 24.0, 1.0, 12.0, 0.0, 3.0, 2.0, 4.0, 1.0, 13.0, 0.0, 2.0, 1.0, 4.0, 1.0, 14.0, 0.0, 11.0, 1.0, 4.0, 2.0, 15.0, 0.0, 0.0, 2.0, 11.0, 1.0, 16.0, 0.0, 4.0, 3.0, 17.0, 0.0, 0.0, 1.0, 2.0, 1.0, 3.0, 1.0, 18.0, 0.0, 2.0, 2.0, 0.0, 2.0, 19.0, 0.0, 2.0, 2.0, 0.0, 4.0, 20.0, 0.0, 2.0, 2.0, 0.0, 6.0, 21.0, 0.0, 10.0, 1.0, 0.0, 3.0, 22.0, 0.0, 2.0, 1.0, 0.0, 4.0, 4.0, 1.0, 23.0, 0.0, 0.0, 1.0, 24.0, 0.0, 4.0, 1.0, 25.0, -1.0, 26.0, -1.0, 0.0, 1.0, 27.0, 0.0, 6.0, 1.0, 28.0, 0.0, 14.0, 1.0, 29.0, 0.0, 20.0, 1.0, 30.0, 0.0, 7.0, 1.0, 31.0, 0.0, 9.0, 1.0, 32.0, 0.0, 15.0, 1.0, 33.0, 0.0, 16.0, 1.0, 34.0, 0.0, 9.0, 1.0, 4.0, 1.0, 35.0, 0.0, 16.0, 1.0, 4.0, 1.0, 36.0, 0.0, 17.0, 1.0, 4.0, 1.0, 37.0, 0.0, 20.0, 1.0, 0.0, 1.0, 38.0, 0.0, 8.0, 1.0, 39.0, 0.0, 17.0, 1.0, 40.0, 0.0, 19.0, 1.0, 41.0, 0.0, 21.0, 1.0, 42.0, 0.0, 22.0, 1.0, 43.0, 1.0, 6.0, 1.0, 44.0, 1.0, 7.0, 1.0, 45.0, 1.0, 8.0, 1.0, 46.0, 1.0, 9.0, 1.0, 47.0, 1.0, 14.0, 1.0, 48.0, 1.0, 15.0, 1.0, 49.0, 1.0, 16.0, 1.0, 50.0, 1.0, 17.0, 1.0, 51.0, 1.0, 18.0, 1.0, 52.0, 1.0, 19.0, 1.0, 53.0, 1.0, 20.0, 1.0, 54.0, 1.0, 21.0, 1.0, 55.0, 1.0, 22.0, 1.0, 56.0, 0.0, 0.0, 1.0, 12.0, 1.0, 65.0, 0.0, 18.0, 1.0, 112.0, 0.0, 11.0, 1.0, 113.0, 0.0, 3.0, 1.0, 114.0, 0.0, 2.0, 1.0]
+since_generator_version = 24
+provisional = false
+acceptance = "60 of the registry's 61 gas rows (`FeH` not modelled), 86 items of 198 intervals re-emitted from the records to the bit; dropped as empty: `Si(cr)` 300–298.15 K, `Ca(a)` 300–298.15 K; the reference states' switches to their gas against NIST-JANAF's: Na 1170.43 K (-0.10), Mg 1364.15 K (-1.96), Al 2797.65 K (+6.83), Si 3509.40 K (+4.79), P 1180.96 K (+0.96), S 882.42 K (+0.31), K 1039.41 K (-0.13), Ca 1778.06 K (+4.40), Ti 3634.62 K (+3.66), V 3704.91 K (+14.83), Cr 2951.82 K (-0.26), Mn 2325.03 K (-9.49), Fe 3138.45 K (+5.11), Ni 3159.60 K (+3.01), Zn 1178.83 K (-1.35), within 14.8 K; `MgSO4`'s decomposition at 1 bar 1375.44 K; `MgSO4`'s row 1375.00 K (-0.44); graphite's sublimation at 1 bar 3973.32 K; `graphite`'s row 3973.00 K (-0.32); `soot`'s row 3973.00 K (-0.32)"
+
+[[table]]
+name = "thermo_equilibrium_27"
+path = "thermo_27.rs"
+task = "thermo_equilibrium_27"
+revision = 0
+inputs_sha256 = "e9a2edce7f52bffdbfdd21935d7094fd267181a7919e88e68b92fa31228c94c5"
+body_sha256 = "87ae1af3c56c1cea80898e45b4a6cdd78b8f0e5ed315fdef3f7bb016b556de42"
+fingerprint = [115.0, 0.0, 0.0, 1.0, 11.0, 1.0, 116.0, 0.0, 0.0, 1.0, 4.0, 1.0, 117.0, 1.0, 11.0, 1.0, 118.0, 1.0, 2.0, 1.0, 119.0, 1.0, 0.0, 1.0, 120.0, 1.0, 3.0, 1.0, 121.0, 1.0, 4.0, 1.0, 122.0, 0.0, 10.0, 1.0, 123.0, 0.0, 10.0, 2.0, 124.0, 0.0, 10.0, 1.0, 4.0, 1.0, 125.0, 0.0, 10.0, 1.0, 0.0, 2.0, 126.0, 0.0, 12.0, 1.0]
+since_generator_version = 24
+provisional = false
+acceptance = "12 carriers of P14.T52.e, the registry's gas rows from generator version 27 (`P2`'s record the first table's reference gas), 11 items of 22 intervals re-emitted from the records to the bit; dropped as empty: none"
 
 [[table]]
 name = "type_ia_delay"
@@ -369,7 +725,19 @@ body_sha256 = "c356be8135a256dd4e83491211e6eb5d2dd868929792e859437efa23d6d2bf86"
 fingerprint = [42550000.0, 13700000000.0, 0.00024271086255782685, 0.0008023004142646763, 12499416363.886879, 805033612.7064793, 122457088.15469107, 42548568.488513984, 0.0688898199785383, 2.5, 0.1, 3.0, 0.53, 0.3, 0.04, 0.13]
 since_generator_version = 15
 provisional = false
-acceptance = "the yield integrates to 1.000000 of 1.3 × 10⁻³ per M☉ (passes); 0.187 of delays under 0.1 Gyr (a fifth, passes) and 0.617 under 1 Gyr (about 62%, passes); the lightest primary 2.500 M☉ and layer C's largest share 0.0e0 (passes); at Milky Way values 0.462 Type Ia a century (0.42–0.53, ruling 141.4; passes) and the old populations' exploded share of layer D 0.0360–0.0407 (2–4.5%; passes); primary white dwarfs 0.667–1.266 M☉ (Kalirai et al. 2008); the primaries' 17-point quantiles within 0.0155 of the exact mixture's CDF"
+acceptance = "the yield integrates to 1.000000 of 1.3 × 10⁻³ per M☉ (passes); 0.187 of delays under 0.1 Gyr (a fifth, passes) and 0.617 under 1 Gyr (about 62%, passes); the lightest primary 2.500 M☉ and layer C's largest share 0.0e0 (passes); at Milky Way values 0.465 Type Ia a century (0.42–0.53, ruling 141.4; passes) and the old populations' exploded share of layer D 0.0360–0.0407 (2–4.5%; passes); primary white dwarfs 0.667–1.266 M☉ (Kalirai et al. 2008); the primaries' 17-point quantiles within 0.0155 of the exact mixture's CDF"
+
+[[table]]
+name = "type_ia_yield"
+path = "binary.rs"
+task = "type_ia_yield"
+revision = 0
+inputs_sha256 = "f7e157e1dc81cb8385ba1c14154891b93da35e860fdafb66ea8c6608dec492f1"
+body_sha256 = "b1c9ec5e1cde8f41acc5e366d483b653322d7840363838c94c7555998c9c8d3a"
+fingerprint = [0.1667766498460038, 0.03421288723233607, 0.009460799072758106, 1.0960630250705998, 0.00007045175165970433, 0.0000687768912141925, 0.0000671418474864471, 0.00006554567390744563, 0.00006398744641109867, 0.00006246626289928335, 0.00006098124271959729, 0.00005953152615552191, 0.00005811627392871585, 0.00005673466671313003, 0.00005538590466068287, 0.00005406920693820183, 0.00005278381127539033, 0.00005152897352351225, 0.00005030396722460306, 0.00004910808319089251, 0.00004794062909424209, 0.000046800929065338604, 0.00004568832330241403, 0.00004460216768927103, 0.00004354183342238668, 0.000042506706646881515, 0.00004149618810114428, 0.00004050969276990198, 120.0, 69.0, 2.0, 228623318.61134434, 1.0, 1.44, 1.0, 375197383.3958119, 1.0, 1.2730355319210962, 0.0]
+since_generator_version = 28
+provisional = false
+acceptance = "24 of 24 bins capped at η 1, every short bin among them (passes), the pool ÷ target by bin 0.005/0.110/0.431/0.390/0.510/0.648/0.761/0.587/0.135/0.012/0.025/0.110/0.225/0.423/0.079/0.094/0.098/0.106/0.104/0.108/0.105/0.094/0.093/0.099; the pool 3.1053e-4 per M☉ formed, 0.239 of the yield (mergers 0.056, accretions 0.183); exploded 3.1053e-4, min(pool, target) in every bin within 0.00 σ (passes); η of the even and odd parts within 0.00 σ (passes; both under 4.098 σ, α = 10⁻³ over the bins); 16173 detonatable candidates (mergers 3802, accretions 12371) of 41655; records C/D/E 7924768/1625728/449568, pairs 1709086/951506/301363; recorded, not asserted: the double white dwarfs' contacts over the last Gyr 4.092e-14 per M☉ formed a year, 0.567 × the delay-time distribution's 7.221e-14 at the same ages (Maoz, Hallakoun and Badenes 2018: 4.5–7)"
 
 [[table]]
 name = "wd_cooling"

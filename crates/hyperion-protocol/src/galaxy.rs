@@ -1,4 +1,5 @@
-//! Galaxy messages: the drawn parameters, the density map and the systems within range of a point.
+//! Galaxy messages: the drawn parameters, the density and extinction maps, the extinction along
+//! lines of sight, and the systems within range of a point.
 //!
 //! These are wire types only. The server converts the simulation's types to and from them and
 //! validates every field it receives; nothing here depends on the simulation crate. Quantities
@@ -8,6 +9,8 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::features::{MemberClassWire, SupernovaStateWire, SystemOriginWire};
+use crate::observe::{ObservedDto, QueryModeDto};
 use crate::primitives::{GalacticPosition, SeedHex, SystemIdHex, UniverseIdHex, UniverseTime};
 use crate::stellar::StellarBriefDto;
 
@@ -96,8 +99,10 @@ pub enum ParameterValue {
 ///
 /// The wire carries only units that the bridge client displays, so it formats and never converts:
 /// lengths in light-years, masses in solar masses, times in megayears or gigayears, speeds in
-/// kilometres per second, angles in degrees and densities per cubic light-year. The kiloparsec is
-/// never sent.
+/// kilometres per second, angles in degrees and densities per cubic light-year, and for the gas
+/// the astronomers' units the console shows beside them (plan 07, P07.T10.b): hydrogen per cubic
+/// centimetre, pressure over Boltzmann's constant in kelvin per cubic centimetre, and magnitudes.
+/// The kiloparsec is never sent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
@@ -122,6 +127,12 @@ pub enum Unit {
     Deg,
     /// Per cubic light-year, ly⁻³, for number densities.
     PerLy3,
+    /// Per cubic centimetre, cm⁻³, for the gas's hydrogen number densities.
+    PerCm3,
+    /// Kelvin per cubic centimetre, K cm⁻³, for a gas pressure over Boltzmann's constant.
+    KPerCm3,
+    /// Magnitudes, mag, for extinction.
+    Mag,
 }
 
 /// The direction from which a density map is seen.
@@ -145,6 +156,13 @@ pub enum MapPopulation {
     All,
     /// The young thin disc only, which is where the spiral arms show.
     Young,
+    /// Layer E's displaced remnants alone, the remnants whose natal kicks carried them out of
+    /// their populations' volumes (plan 08, P08.T15.b): edge-on, a flared layer and a faint halo.
+    ///
+    /// A galaxy that holds none of plan 08's displaced classes, every galaxy below generator
+    /// version 26, has no displaced remnant, so its map is a map with no systems: floor and
+    /// ceiling 0 and every code 0.
+    LayerERemnants,
 }
 
 /// Asks for a column-density map of a universe's galaxy (`density_map`), answered with a
@@ -228,6 +246,141 @@ pub struct DensityMap {
     pub data_base64: String,
 }
 
+/// Asks for a map of the visual extinction through a universe's galaxy (`extinction_map`),
+/// answered with an [`ExtinctionMap`].
+///
+/// The raster is the density map's (the same views, resolutions and bit depths); only the quantity
+/// differs, so the two can be drawn one over the other.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ExtinctionMapRequest {
+    /// The universe whose galaxy is mapped.
+    pub universe: UniverseIdHex,
+    /// The direction the map is seen from.
+    pub view: MapView,
+    /// The map's width in pixels: 128, 256, 512 or 1,024.
+    pub resolution: u16,
+    /// Bits per pixel code: 8 or 16.
+    pub bits: u8,
+}
+
+/// A map of the visual extinction A(V) through the whole galaxy along each pixel's line of sight,
+/// in magnitudes, from the mean gas field (lanes included, noise not), as quantised logarithms.
+///
+/// **Encoding, orientation and geometry** are those of [`DensityMap`]: the same base64 of 8- or
+/// 16-bit codes, row by row from the top, the same views and extents, and the same pixel-centre
+/// rule from `centre_ly` and `ly_per_px`.
+///
+/// **Codes.** With `max = 2^bits − 1`, code 0 means "at or below the floor", and codes 1 to `max`
+/// span `floor_log10_mag` to `ceiling_log10_mag` linearly in log₁₀ of magnitudes:
+///
+/// ```text
+/// log10_mag = floor + (code − 1) × (ceiling − floor) ÷ (max − 1)
+/// ```
+///
+/// The floor is fixed at 0.01 mag (`floor_log10_mag` = −2) and the ceiling is the largest value in
+/// the map. A map with nothing above the floor has its ceiling at the floor and every code 0.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ExtinctionMap {
+    /// The universe mapped.
+    pub universe: UniverseIdHex,
+    /// The direction the map is seen from.
+    pub view: MapView,
+    /// Pixels per row.
+    pub width_px: u16,
+    /// Rows.
+    pub height_px: u16,
+    /// The centre of the raster in light-years: (x, y) face-on, (x, z) edge-on.
+    pub centre_ly: [f64; 2],
+    /// The width and height of one pixel in light-years.
+    pub ly_per_px: f64,
+    /// Bits per code: 8 or 16.
+    pub bits: u8,
+    /// log₁₀ of the visual extinction, in magnitudes, that code 1 stands for.
+    pub floor_log10_mag: f64,
+    /// log₁₀ of the visual extinction, in magnitudes, that code `2^bits − 1` stands for.
+    pub ceiling_log10_mag: f64,
+    /// The codes, base64-encoded with the standard alphabet and padding.
+    pub data_base64: String,
+}
+
+/// Asks for the extinction between one point and each of up to 64 targets at a time
+/// (`extinction`), answered with an [`ExtinctionResult`].
+///
+/// The gas is a snapshot at the epoch and does not move; the time places the system targets, which
+/// drift.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ExtinctionRequest {
+    /// The universe whose galaxy's gas is read.
+    pub universe: UniverseIdHex,
+    /// Where every line of sight starts, inside the galaxy's root cube.
+    pub origin: GalacticPosition,
+    /// The instant the system targets are placed at, inside the clock window.
+    pub time: UniverseTime,
+    /// Where each line ends: from 1 to 64 targets.
+    pub targets: Vec<ExtinctionTarget>,
+}
+
+/// Where one line of sight ends.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(tag = "type", rename_all = "snake_case")]
+#[ts(export)]
+pub enum ExtinctionTarget {
+    /// A system, placed where it is at the request's time.
+    System {
+        /// The system's ID.
+        id: SystemIdHex,
+    },
+    /// A point inside the galaxy's root cube.
+    Position {
+        /// The point.
+        position: GalacticPosition,
+    },
+}
+
+/// The extinction to each target of an [`ExtinctionRequest`], in the request's order.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ExtinctionResult {
+    /// The universe read.
+    pub universe: UniverseIdHex,
+    /// Where every line starts, as the request gave it.
+    pub origin: GalacticPosition,
+    /// The instant the system targets were placed at, as the request gave it.
+    pub time: UniverseTime,
+    /// One answer per target, in the request's order.
+    pub targets: Vec<TargetExtinction>,
+}
+
+/// What lies along one line of sight, or why there is no line.
+///
+/// Figures are the seed's own clumpy gas (not its mean), marched at a fixed budget of steps, and
+/// are the same whichever end the line is read from.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(tag = "status", rename_all = "snake_case")]
+#[ts(export)]
+pub enum TargetExtinction {
+    /// The line's extinction and hydrogen columns.
+    Ok {
+        /// Visual extinction A(V), in magnitudes.
+        a_v_mag: f64,
+        /// Reddening E(B−V) = A(B) − A(V), in magnitudes.
+        e_b_v_mag: f64,
+        /// Extinction in the K band (2.2 µm), A(K), in magnitudes.
+        a_k_mag: f64,
+        /// Hydrogen column of every phase, the hot corona included, in atoms per cm².
+        hydrogen_column_per_cm2: f64,
+        /// Neutral hydrogen column, the 21 cm line's, in atoms per cm²; never above
+        /// `hydrogen_column_per_cm2`.
+        neutral_hydrogen_column_per_cm2: f64,
+    },
+    /// The target's ID names no system of this universe, or one that resolves but cannot be
+    /// placed yet: a member of the galactic centre, at every time (plan 07, P07.T10.c).
+    NoSuchSystem,
+}
+
 /// A mass layer of the placement grid: a band of primary initial mass with its own cell size, or
 /// one of the two substellar layers.
 ///
@@ -308,6 +461,14 @@ pub struct SystemsInRangeRequest {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     #[ts(as = "Option<bool>", optional)]
     pub include_stellar: bool,
+    /// The mode to answer in (plan 12, P12.T6): `now` when absent, and written only when
+    /// observed, so that a request of plan 04's form is unchanged.
+    ///
+    /// Observed mode finds the same systems and census as `now`; each row then also carries its
+    /// `observed`, and a row's `stellar`, when asked for, is its primary when the light left it.
+    #[serde(default, skip_serializing_if = "QueryModeDto::is_now")]
+    #[ts(as = "Option<QueryModeDto>", optional)]
+    pub mode: QueryModeDto,
 }
 
 /// The systems within range of a point at a time, with the census that says what was left out.
@@ -402,12 +563,27 @@ pub struct SystemRecord {
     pub age_myr: f64,
     /// The population it was placed from.
     pub population: Population,
+    /// How its layer's grid placed it beside its population (plan 08, P08.T15.a): in the field,
+    /// a remnant retained there, or a displaced remnant, runaway, walkaway or hypervelocity
+    /// survivor.
+    ///
+    /// A server built since P08.T15.a sends it on every grid system's row of a galaxy that holds
+    /// plan 08's displaced classes, from generator version 26. It is absent from a feature's or
+    /// the centre's member's and a catalogue system's row, which no population's grid placed; from
+    /// every row of a galaxy below 26, whose grid places every system in the field; and from every
+    /// row of a server built before P08.T15.a. Such a row is exactly plan 04's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub placement: Option<PlacementKind>,
     /// Its velocity at the epoch, in km/s along the `GALACTIC` frame's axes (plan 08, P08.T7.a):
     /// +x along the bar, +z to galactic north. Systems move in straight lines at it, so its
     /// position at the query's time is its epoch position plus this times the time since the
-    /// epoch.
+    /// epoch. A galactic centre's member's, from generator version 27, which first serves them, is
+    /// its orbit's at the query's time instead: its orbit turns it (plan 10, P10.T10.b).
     pub velocity_km_s: [f64; 3],
-    /// What its primary is now, when the request set `include_stellar` (plan 06, P06.T33).
+    /// What its primary is now, when the request set `include_stellar` (plan 06, P06.T33); in
+    /// observed mode, what it was when the light left it, absent if it had not formed then (plan
+    /// 12, P12.T6).
     ///
     /// Absent otherwise: the key is left out rather than written `null`, so that a row without a
     /// brief is exactly plan 04's. A brown dwarf's brief is its own; a rogue planet has none, and
@@ -426,6 +602,66 @@ pub struct SystemRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub fe_h_dex: Option<f64>,
+    /// What the request's observer receives from the system, in observed mode only (plan 12,
+    /// P12.T6); the key is left out in `now`, so that such a row is exactly plan 04's.
+    ///
+    /// The row's other fields but `stellar` stay the present's in either mode, `position`,
+    /// `age_myr` and `velocity_km_s` among them (plan 12, Design note 4); with `include_stellar`,
+    /// `stellar` is the primary's when the light left it. A server built before P12.T6 answers an
+    /// observed request without this key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub observed: Option<ObservedDto>,
+    /// What placed it: a layer's grid, a feature, the galactic centre or a catalogue class (plan
+    /// 09, P09.T39).
+    ///
+    /// Absent from a server that does not say, as one built before P09.T40 does not, so that its
+    /// row is exactly plan 04's; a server that says sends it on every row.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub origin: Option<SystemOriginWire>,
+    /// Its class in its feature's tables, for a member of a feature or of the galactic centre
+    /// (plan 09, P09.T39); absent from every other row, and from every row of a server that does
+    /// not send `origin`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub member_class: Option<MemberClassWire>,
+    /// What a supernova catalogue entry is at the query's time: its progenitor, the supernova and
+    /// its shell, or the bare remnant (plan 09, P09.T39). Absent from every other row, and from
+    /// every row of a server that does not send `origin`.
+    // Boxed: the state is larger than the rest of the row's optional fields, and few rows carry
+    // one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(as = "Option<SupernovaStateWire>", optional)]
+    pub supernova: Option<Box<SupernovaStateWire>>,
+}
+
+/// How a grid system was placed beside its birth population (plan 08, P08.T15.a): the sim's
+/// placement class, without the displaced class's index.
+///
+/// Every value of the sim's classes has a string from the first build that sends one, the
+/// hypervelocity survivors among them, which no galaxy places before plan 09's P09.T34.b gives
+/// their class weight, so the enum is closed: a value added later bumps the protocol.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum PlacementKind {
+    /// Where its population places it: any system outside layers D and E, a living star, or a
+    /// white dwarf of layer D, which the sim does not tell from its living stars there (plan 08,
+    /// Design note 17).
+    Field,
+    /// A remnant of layer E that stayed with its population after its natal kick.
+    Retained,
+    /// A remnant whose natal kick carried it out of its population's volume.
+    DisplacedRemnant,
+    /// A living star ejected at 30 km/s or more, by a supernova in its binary or an encounter: the
+    /// line Renzo et al. (2019) draw between runaways and walkaways, as the brainstorm's
+    /// "Displaced objects: kicks and runaways" does.
+    Runaway,
+    /// A living star ejected more slowly, under 30 km/s.
+    Walkaway,
+    /// The surviving companion of a Type Ia supernova, a hypervelocity star.
+    HypervelocitySurvivor,
 }
 
 #[cfg(test)]
@@ -523,6 +759,9 @@ mod tests {
             (Unit::DegPerMyr, "deg_per_myr"),
             (Unit::Deg, "deg"),
             (Unit::PerLy3, "per_ly3"),
+            (Unit::PerCm3, "per_cm3"),
+            (Unit::KPerCm3, "k_per_cm3"),
+            (Unit::Mag, "mag"),
         ]);
     }
 
@@ -596,7 +835,11 @@ mod tests {
 
     #[test]
     fn map_population_strings() {
-        assert_wire_strings(&[(MapPopulation::All, "all"), (MapPopulation::Young, "young")]);
+        assert_wire_strings(&[
+            (MapPopulation::All, "all"),
+            (MapPopulation::Young, "young"),
+            (MapPopulation::LayerERemnants, "layer_e_remnants"),
+        ]);
     }
 
     fn chart_centre() -> GalacticPosition {
@@ -614,6 +857,138 @@ mod tests {
     }
 
     #[test]
+    fn extinction_map_request_wire_form() {
+        assert_wire_form(
+            &RequestBody::ExtinctionMap(ExtinctionMapRequest {
+                universe: universe(),
+                view: MapView::EdgeOn,
+                resolution: 256,
+                bits: 16,
+            }),
+            json!({
+                "kind": "extinction_map",
+                "universe": "0123456789abcdef",
+                "view": "edge_on",
+                "resolution": 256,
+                "bits": 16,
+            }),
+        );
+    }
+
+    #[test]
+    fn extinction_map_response_wire_form() {
+        assert_wire_form(
+            &ResponseBody::ExtinctionMap(ExtinctionMap {
+                universe: universe(),
+                view: MapView::FaceOn,
+                width_px: 4,
+                height_px: 2,
+                centre_ly: [0.0, 0.0],
+                ly_per_px: 32_768.0,
+                bits: 8,
+                floor_log10_mag: -2.0,
+                ceiling_log10_mag: 1.5,
+                data_base64: "AAH/gAECAwQ=".to_owned(),
+            }),
+            json!({
+                "kind": "extinction_map",
+                "universe": "0123456789abcdef",
+                "view": "face_on",
+                "width_px": 4,
+                "height_px": 2,
+                "centre_ly": [0.0, 0.0],
+                "ly_per_px": 32_768.0,
+                "bits": 8,
+                "floor_log10_mag": -2.0,
+                "ceiling_log10_mag": 1.5,
+                "data_base64": "AAH/gAECAwQ=",
+            }),
+        );
+    }
+
+    #[test]
+    fn extinction_request_wire_form() {
+        assert_wire_form(
+            &RequestBody::Extinction(ExtinctionRequest {
+                universe: universe(),
+                origin: chart_centre(),
+                time: epoch_plus_a_century(),
+                targets: vec![
+                    ExtinctionTarget::System {
+                        id: SystemIdHex::from_u64(0x0200_0800_2000_0000),
+                    },
+                    ExtinctionTarget::Position {
+                        position: GalacticPosition {
+                            cell_ly: [25_000, 100, 3],
+                            offset_m: [0.5, 0.0, 0.25],
+                        },
+                    },
+                ],
+            }),
+            json!({
+                "kind": "extinction",
+                "universe": "0123456789abcdef",
+                "origin": {
+                    "cell_ly": [26_000, 0, -1],
+                    "offset_m": [0.0, 0.0, 4_730_365_236_290_400.0],
+                },
+                "time": { "seconds": 3_155_760_000_i64, "nanos": 0 },
+                "targets": [
+                    { "type": "system", "id": "0200080020000000" },
+                    {
+                        "type": "position",
+                        "position": {
+                            "cell_ly": [25_000, 100, 3],
+                            "offset_m": [0.5, 0.0, 0.25],
+                        },
+                    },
+                ],
+            }),
+        );
+    }
+
+    #[test]
+    fn extinction_response_wire_form() {
+        assert_wire_form(
+            &ResponseBody::Extinction(ExtinctionResult {
+                universe: universe(),
+                origin: chart_centre(),
+                time: epoch_plus_a_century(),
+                targets: vec![
+                    TargetExtinction::Ok {
+                        a_v_mag: 1.25,
+                        e_b_v_mag: 0.375,
+                        a_k_mag: 0.125,
+                        hydrogen_column_per_cm2: 2.5e21,
+                        neutral_hydrogen_column_per_cm2: 1.5e21,
+                    },
+                    TargetExtinction::NoSuchSystem,
+                ],
+            }),
+            json!({
+                "kind": "extinction",
+                "universe": "0123456789abcdef",
+                "origin": {
+                    "cell_ly": [26_000, 0, -1],
+                    "offset_m": [0.0, 0.0, 4_730_365_236_290_400.0],
+                },
+                "time": { "seconds": 3_155_760_000_i64, "nanos": 0 },
+                "targets": [
+                    {
+                        "status": "ok",
+                        "a_v_mag": 1.25,
+                        "e_b_v_mag": 0.375,
+                        "a_k_mag": 0.125,
+                        "hydrogen_column_per_cm2": 2.5e21,
+                        "neutral_hydrogen_column_per_cm2": 1.5e21,
+                    },
+                    { "status": "no_such_system" },
+                ],
+            }),
+        );
+    }
+
+    #[test]
     fn systems_in_range_request_wire_form() {
         assert_wire_form(
             &RequestBody::SystemsInRange(SystemsInRangeRequest {
@@ -624,6 +999,7 @@ mod tests {
                 min_layer: MassLayer::A,
                 limit: 5_000,
                 include_stellar: false,
+                mode: QueryModeDto::Now,
             }),
             json!({
                 "kind": "systems_in_range",
@@ -657,6 +1033,7 @@ mod tests {
                 min_layer: MassLayer::A,
                 limit: 5_000,
                 include_stellar: false,
+                mode: QueryModeDto::Now,
             })
         );
     }
@@ -709,9 +1086,14 @@ mod tests {
                 initial_mass_msun: 11.25,
                 age_myr: 7_250.5,
                 population: Population::OldThinDisc,
+                placement: None,
                 velocity_km_s: [-12.5, 231.25, 7.0],
                 stellar: None,
                 fe_h_dex: None,
+                observed: None,
+                origin: None,
+                member_class: None,
+                supernova: None,
             },
             SystemRecord {
                 id: SystemIdHex::from_u64(0x6000_0000_0000_0001),
@@ -724,9 +1106,14 @@ mod tests {
                 initial_mass_msun: 0.625,
                 age_myr: 45.0,
                 population: Population::YoungThinDisc,
+                placement: None,
                 velocity_km_s: [3.5, -228.0, -0.75],
                 stellar: None,
                 fe_h_dex: None,
+                observed: None,
+                origin: None,
+                member_class: None,
+                supernova: None,
             },
         ]
     }
@@ -881,6 +1268,7 @@ mod tests {
                 min_layer: MassLayer::C,
                 limit: 5_000,
                 include_stellar: true,
+                mode: QueryModeDto::Now,
             }),
             json!({
                 "kind": "systems_in_range",
@@ -894,6 +1282,96 @@ mod tests {
                 "min_layer": "c",
                 "limit": 5_000,
                 "include_stellar": true,
+            }),
+        );
+    }
+
+    #[test]
+    fn systems_in_range_request_wire_form_observed() {
+        assert_wire_form(
+            &RequestBody::SystemsInRange(SystemsInRangeRequest {
+                universe: universe(),
+                centre: chart_centre(),
+                radius_ly: 50.0,
+                time: epoch_plus_a_century(),
+                min_layer: MassLayer::A,
+                limit: 5_000,
+                include_stellar: false,
+                mode: QueryModeDto::Observed {
+                    observer: GalacticPosition {
+                        cell_ly: [0, 23_000, 0],
+                        offset_m: [0.5, 0.0, 0.0],
+                    },
+                },
+            }),
+            json!({
+                "kind": "systems_in_range",
+                "universe": "0123456789abcdef",
+                "centre": {
+                    "cell_ly": [26_000, 0, -1],
+                    "offset_m": [0.0, 0.0, 4_730_365_236_290_400.0],
+                },
+                "radius_ly": 50.0,
+                "time": { "seconds": 3_155_760_000_i64, "nanos": 0 },
+                "min_layer": "a",
+                "limit": 5_000,
+                "mode": {
+                    "type": "observed",
+                    "observer": { "cell_ly": [0, 23_000, 0], "offset_m": [0.5, 0.0, 0.0] },
+                },
+            }),
+        );
+    }
+
+    #[test]
+    fn systems_in_range_request_of_plan_04_is_asked_now() {
+        // The form plan 04 pinned, with no `mode`, still parses, and reads as `now`.
+        let text = r#"{"kind":"systems_in_range","universe":"0123456789abcdef",
+            "centre":{"cell_ly":[26000,0,-1],"offset_m":[0,0,4730365236290400]},
+            "radius_ly":50,"time":{"seconds":3155760000,"nanos":0},"min_layer":"a","limit":5000}"#;
+        match serde_json::from_str::<RequestBody>(text).unwrap() {
+            RequestBody::SystemsInRange(request) => assert_eq!(request.mode, QueryModeDto::Now),
+            other => panic!("expected a range request, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn system_record_wire_form_observed() {
+        let mut row = two_rows().remove(1);
+        row.observed = Some(ObservedDto {
+            emitted: UniverseTime {
+                seconds: -94_668_796_800,
+                nanos: 125,
+            },
+            light_age_yr: 3_100.25,
+            apparent_position: GalacticPosition {
+                cell_ly: [25_990, 22, 0],
+                offset_m: [0.0, 1.0e15, 3.0e15],
+            },
+            curvature_error_ly: 0.002_5,
+            curvature_error_arcsec: 0.125,
+        });
+        assert_wire_form(
+            &row,
+            json!({
+                "id": "6000000000000001",
+                "designation": "Vorth AB-C b17-2",
+                "position": { "cell_ly": [25_990, 20, 0], "offset_m": [0.0, 2.0e15, 3.0e15] },
+                "layer": "b",
+                "initial_mass_msun": 0.625,
+                "age_myr": 45.0,
+                "population": "young_thin_disc",
+                "velocity_km_s": [3.5, -228.0, -0.75],
+                "observed": {
+                    "emitted": { "seconds": -94_668_796_800_i64, "nanos": 125 },
+                    "light_age_yr": 3_100.25,
+                    "apparent_position": {
+                        "cell_ly": [25_990, 22, 0],
+                        "offset_m": [0.0, 1.0e15, 3.0e15],
+                    },
+                    "curvature_error_ly": 0.002_5,
+                    "curvature_error_arcsec": 0.125,
+                },
             }),
         );
     }
@@ -926,6 +1404,7 @@ mod tests {
                 initial_mass_msun: 11.25,
                 age_myr: 7_250.5,
                 population: Population::OldThinDisc,
+                placement: None,
                 velocity_km_s: [-12.5, 231.25, 7.0],
                 stellar: Some(StellarBriefDto {
                     kind: ObjectKindDto::NeutronStar,
@@ -936,6 +1415,10 @@ mod tests {
                     absolute_v_mag: None,
                 }),
                 fe_h_dex: None,
+                observed: None,
+                origin: None,
+                member_class: None,
+                supernova: None,
             },
             json!({
                 "id": "0200080020000000",
@@ -958,6 +1441,47 @@ mod tests {
                 },
             }),
         );
+    }
+
+    #[test]
+    fn placement_kind_strings() {
+        assert_wire_strings(&[
+            (PlacementKind::Field, "field"),
+            (PlacementKind::Retained, "retained"),
+            (PlacementKind::DisplacedRemnant, "displaced_remnant"),
+            (PlacementKind::Runaway, "runaway"),
+            (PlacementKind::Walkaway, "walkaway"),
+            (
+                PlacementKind::HypervelocitySurvivor,
+                "hypervelocity_survivor",
+            ),
+        ]);
+    }
+
+    #[test]
+    fn system_record_wire_form_with_its_placement() {
+        let mut row = two_rows().remove(0);
+        row.placement = Some(PlacementKind::DisplacedRemnant);
+        let wire = json!({
+            "id": "0200080020000000",
+            "designation": "Vorth AB-C e4-17",
+            "position": { "cell_ly": [26_012, -3, -2], "offset_m": [1.5e15, 0.0, 9.0e15] },
+            "layer": "e",
+            "initial_mass_msun": 11.25,
+            "age_myr": 7_250.5,
+            "population": "old_thin_disc",
+            "placement": "displaced_remnant",
+            "velocity_km_s": [-12.5, 231.25, 7.0],
+        });
+        assert_wire_form(&row, wire.clone());
+        // A row without it, as a server built before P08.T15.a sends, parses as one that does not
+        // say.
+        let mut bare = wire;
+        bare.as_object_mut()
+            .expect("a row is an object")
+            .remove("placement");
+        let record: SystemRecord = serde_json::from_value(bare).unwrap();
+        assert_eq!(record.placement, None);
     }
 
     #[test]
@@ -1007,6 +1531,7 @@ mod tests {
                     min_layer: layer,
                     limit: 5_000,
                     include_stellar: true,
+                    mode: QueryModeDto::Now,
                 }),
                 json!({
                     "kind": "systems_in_range",
@@ -1040,6 +1565,10 @@ mod tests {
                 absolute_v_mag: None,
             }),
             fe_h_dex: None,
+            observed: None,
+            origin: None,
+            member_class: None,
+            supernova: None,
             ..two_rows().remove(1)
         };
         let brown_dwarf = SystemRecord {
@@ -1053,6 +1582,7 @@ mod tests {
             initial_mass_msun: 0.052,
             age_myr: 4_600.0,
             population: Population::OldThinDisc,
+            placement: None,
             velocity_km_s: [10.0, 225.5, -3.25],
             stellar: Some(StellarBriefDto {
                 kind: ObjectKindDto::Substellar,
@@ -1063,6 +1593,10 @@ mod tests {
                 absolute_v_mag: None,
             }),
             fe_h_dex: None,
+            observed: None,
+            origin: None,
+            member_class: None,
+            supernova: None,
         };
         let rogue_planet = SystemRecord {
             id: SystemIdHex::from_u64(0xc1ff_3657_7ff8_0005),
@@ -1075,9 +1609,14 @@ mod tests {
             initial_mass_msun: 3.0e-6,
             age_myr: 8_125.0,
             population: Population::ThickDisc,
+            placement: None,
             velocity_km_s: [-40.0, 190.0, 22.5],
             stellar: None,
             fe_h_dex: Some(-0.375),
+            observed: None,
+            origin: None,
+            member_class: None,
+            supernova: None,
         };
         vec![star, brown_dwarf, rogue_planet]
     }
@@ -1269,5 +1808,75 @@ mod tests {
             (LayerStatus::BelowMassFloor, "below_mass_floor"),
             (LayerStatus::OverCellBudget, "over_cell_budget"),
         ]);
+    }
+
+    /// Plan 09's three row fields (P09.T39): a cluster member's origin and class, and a catalogue
+    /// supernova's origin and state. Each is absent from the rows above, as a server built before
+    /// P09.T40 sends them.
+    #[test]
+    fn system_record_wire_form_with_an_origin_a_member_class_and_a_supernova() {
+        use crate::features::tests::{FEATURE, young_supernova, young_supernova_json};
+        use crate::features::{
+            CatalogueClassWire, ClassKindWire, GenerationWire, MultiplicityWire,
+        };
+        use crate::primitives::FeatureIdHex;
+
+        let row_json = |extra: serde_json::Value| {
+            let mut row = json!({
+                "id": "0200080020000000",
+                "designation": "Vorth AB-C e4-17",
+                "position": { "cell_ly": [26_012, -3, -2], "offset_m": [1.5e15, 0.0, 9.0e15] },
+                "layer": "e",
+                "initial_mass_msun": 11.25,
+                "age_myr": 7_250.5,
+                "population": "old_thin_disc",
+                "velocity_km_s": [-12.5, 231.25, 7.0],
+            });
+            for (key, value) in extra.as_object().unwrap() {
+                row[key] = value.clone();
+            }
+            row
+        };
+
+        let mut member = two_rows().swap_remove(0);
+        member.origin = Some(SystemOriginWire::FeatureMember {
+            feature: FeatureIdHex::from_u64(FEATURE),
+        });
+        member.member_class = Some(MemberClassWire::Cluster {
+            kind: ClassKindWire::WhiteDwarf,
+            band: MassLayer::D,
+            generation: GenerationWire::Second,
+            multiplicity: MultiplicityWire::Single,
+        });
+        assert_wire_form(
+            &member,
+            row_json(json!({
+                "origin": { "type": "feature_member", "feature": "e842000280000000" },
+                "member_class": {
+                    "type": "cluster",
+                    "kind": "white_dwarf",
+                    "band": "d",
+                    "generation": "second",
+                    "multiplicity": "single",
+                },
+            })),
+        );
+
+        let mut supernova = two_rows().swap_remove(0);
+        supernova.origin = Some(SystemOriginWire::CatalogueSystem {
+            class: CatalogueClassWire::CoreCollapse,
+        });
+        supernova.supernova = Some(Box::new(young_supernova()));
+        assert_wire_form(
+            &supernova,
+            row_json(json!({
+                "origin": { "type": "catalogue_system", "class": "core_collapse" },
+                "supernova": young_supernova_json(),
+            })),
+        );
+
+        let mut grid = two_rows().swap_remove(0);
+        grid.origin = Some(SystemOriginWire::Grid);
+        assert_wire_form(&grid, row_json(json!({ "origin": { "type": "grid" } })));
     }
 }

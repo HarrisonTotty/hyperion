@@ -16,6 +16,7 @@ import {
   A_CENTURY,
   aSummaryResponse,
   anUnsupportedBodiesError,
+  anUnsupportedEventsError,
   aNotYetBornSummary,
   aSingleStarSummary,
   aSunlikeStar,
@@ -67,7 +68,7 @@ async function renderAnswered(
   );
   render(
     <ServerLinkHarness>
-      <SystemView target={aSystemTarget({ time })} />
+      <SystemView target={aSystemTarget({ time })} onViewBody={() => undefined} />
     </ServerLinkHarness>,
   );
   const socket = FakeWebSocket.latest();
@@ -83,6 +84,14 @@ async function renderAnswered(
       socket.serverRejects(request.id, anUnsupportedBodiesError());
     } else if (request !== undefined && bodies !== null) {
       socket.serverResponds(request.id, bodies);
+    }
+  });
+  // The events of the century, which the display asks for once the system is known: unserved, as
+  // a server before P14.T36.b answers, so that nothing waits on them.
+  await server(() => {
+    const [events] = socket.requestsOfKind("body_events").toReversed();
+    if (events !== undefined) {
+      socket.serverRejects(events.id, anUnsupportedEventsError());
     }
   });
   return { user, socket, recorder };
@@ -255,7 +264,8 @@ describe("TimeControl", () => {
       });
     });
 
-    expect(screen.getByRole("heading", { name: "Orbit map stale" })).toBeInTheDocument();
+    // The title takes no mark; the canvas's name says it (plan 05, P05.T14).
+    expect(screen.getByRole("heading", { name: "Orbit map" })).toBeInTheDocument();
     expect(screen.getByRole("application", { name: "Orbit map, stale" })).toBeInTheDocument();
   });
 

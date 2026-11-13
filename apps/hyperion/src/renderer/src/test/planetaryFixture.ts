@@ -9,23 +9,39 @@
  * from those answers, and say what they change.
  */
 import {
-  type BodyRecordDto,
+  type BodyHooksDto,
+  type BodyIdHex,
+  type BodyRotationDto,
   type BodySummaryDto,
   decodeServerMessage,
+  type DestructionCauseDto,
+  type HabitabilityDto,
+  type HabitabilityLimitDto,
   type RequestKind,
   type ResponseBody,
   type ResponseFor,
+  type ResourceAbundancesDto,
+  type SurfaceStateDto,
 } from "@hyperion/protocol";
 
 import fixture from "../../../../../../packages/protocol/fixtures/planetary.json" with { type: "json" };
+import { add, cross, scale, vec3, type Vec3 } from "../geometry/vec3";
+import { orbitNormal } from "../lib/system/hierarchy";
 
 /** The name of a response of the fixture. */
 type ResponseName =
   | "system_bodies_response"
   | "system_bodies_populated"
   | "body_detail_response"
+  | "body_detail_jupiter"
+  | "body_detail_hot_jupiter"
   | "body_detail_mass_and_orbit"
-  | "body_detail_contact";
+  | "body_detail_contact"
+  | "body_detail_lava_world"
+  | "body_detail_titan"
+  | "body_detail_temperate_world"
+  | "body_events_response"
+  | "body_events_populated";
 
 /** The fixture's system, which every body ID extends. */
 export const FIXTURE_SYSTEM = "0200080020000000";
@@ -50,6 +66,20 @@ function response<K extends RequestKind>(name: ResponseName, kind: K): ResponseF
   return message.body;
 }
 
+/**
+ * The century about the epoch's events of the fixture's system: one of each kind, in time order, a
+ * comet, an Earth's eruption and a Jupiter's impact before the epoch, a dust storm and a Jupiter's
+ * great storm after it (P14.T36.b, illustrative values).
+ */
+export function populatedEvents(): ResponseFor<"body_events"> {
+  return response("body_events_populated", "body_events");
+}
+
+/** The century about the epoch with no event: a quiet century. */
+export function noEvents(): ResponseFor<"body_events"> {
+  return response("body_events_response", "body_events");
+}
+
 /** The slice's answer: one Sun-like star, its zone, an Earth and a Jupiter. */
 export function sliceBodies(): ResponseFor<"system_bodies"> {
   return response("system_bodies_response", "system_bodies");
@@ -60,9 +90,109 @@ export function populatedBodies(): ResponseFor<"system_bodies"> {
   return response("system_bodies_populated", "system_bodies");
 }
 
-/** The slice's Earth at the `full` level. */
+/**
+ * The slice's Earth at the `full` level: its surface `ok` (P14.T35.e, illustrative values), with
+ * its condensates (P14.T54.a, illustrative values) and its crust in the server's form (P14.T54.a),
+ * the sim's present Earth's, whose melt area is 0, and its envelope not applicable.
+ */
 export function earthDetail(): ResponseFor<"body_detail"> {
   return response("body_detail_response", "body_detail");
+}
+
+/**
+ * The slice's Earth at the `full` level as a server before P14.T35.e sent it: its surface not
+ * modelled, and no `envelope` key.
+ */
+export function earthDetailOfAnOlderServer(): ResponseFor<"body_detail"> {
+  const detail = earthDetail();
+  const { envelope: _envelope, ...older } = detail.record;
+  return { ...detail, record: { ...older, surface: { state: "not_modelled" } } };
+}
+
+/**
+ * The slice's Earth at the `full` level as a server from generator version 24 sends a solid planet
+ * under a supercritical envelope (P14.T53.b part 2; decision-absurd-states-24 R2.3): its class
+ * still rocky, its surface not applicable and its envelope not modelled, the pair a giant's record
+ * sends.
+ */
+export function earthUnderASupercriticalEnvelope(): ResponseFor<"body_detail"> {
+  const detail = earthDetail();
+  return {
+    ...detail,
+    record: {
+      ...detail.record,
+      surface: { state: "not_applicable" },
+      envelope: { state: "not_modelled" },
+    },
+  };
+}
+
+/**
+ * The slice's Earth at the `full` level with its hooks `ok`, holding `hooks`, as a server since
+ * P14.T25–T26 sends them.
+ */
+export function earthWithHooks(hooks: BodyHooksDto): ResponseFor<"body_detail"> {
+  const detail = earthDetail();
+  return { ...detail, record: { ...detail.record, hooks: { state: "ok", value: hooks } } };
+}
+
+/** The detail seed every fixture's hooks carry, as a server derives one (R09.T1.b). */
+export const FIXTURE_DETAIL_SEED = "0123456789abcdef";
+
+/** An Earth's habitability: `temperate`, with no limit (P14.T25). */
+export const EARTH_HABITABILITY: HabitabilityDto = { class: "temperate", limits: [] };
+
+/**
+ * A Mars's habitability: a cold desert inside the optimistic zone, `marginal` and limited by its
+ * frozen surface, as the sim's table Mars is (P14.T25).
+ */
+export const MARS_HABITABILITY: HabitabilityDto = { class: "marginal", limits: ["frozen_surface"] };
+
+/**
+ * A differentiated rocky body's resources, about the bulk silicate Earth's (P14.T26, illustrative
+ * values, the protocol's pinned wire form's): its metals and silicates, a little water, no other
+ * ices or hydrocarbons, and no `helium_3`, which the server leaves off a solid layer's.
+ */
+export function crustResources(): ResourceAbundancesDto {
+  return {
+    iron_group: 0.0684,
+    light_lithophiles: 0.281,
+    rare_earths: 1.52e-5,
+    platinum_group: 2.35e-8,
+    radioactives: 1.28e-7,
+    silicates: 0.648,
+    water_ice: 2.5e-4,
+    other_ices: 0,
+    hydrocarbons: 0,
+    deuterium: 7.8e-8,
+    radioisotopes: {
+      uranium_238: 2.01e-8,
+      uranium_235: 1.46e-10,
+      thorium_232: 7.95e-8,
+      potassium_40: 2.82e-8,
+    },
+  };
+}
+
+/** A habitability limit this build does not know, typed as the decoder types it. */
+export function anUnknownHabitabilityLimit(name = "tidal_heating"): HabitabilityLimitDto {
+  // The decoder's own trust at the wire, made where the test plays a newer server.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+  return name as HabitabilityLimitDto;
+}
+
+/** A destruction cause this build does not know, typed as the decoder types it. */
+export function anUnknownDestructionCause(name = "sublimated"): DestructionCauseDto {
+  // The decoder's own trust at the wire, made where the test plays a newer server.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+  return name as DestructionCauseDto;
+}
+
+/** A surface state this build does not know, typed as the decoder types it. */
+export function anUnknownSurfaceState(name = "steam_world"): SurfaceStateDto {
+  // The decoder's own trust at the wire, made where the test plays a newer server.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+  return name as SurfaceStateDto;
 }
 
 /** The slice's Earth at the `mass_and_orbit` level. */
@@ -77,19 +207,55 @@ export function earthContact(): ResponseFor<"body_detail"> {
 
 /**
  * The slice's Jupiter as a whole record at the `full` level: its list entry with a surface that
- * does not apply, as a gas giant's does not, and hooks not modelled, like the Earth's.
+ * does not apply, as a gas giant's does not, its envelope `ok`, the generator's on its bulk
+ * (P14.T54.b.i), and hooks not modelled, like the Earth's.
  */
 export function jupiterDetail(): ResponseFor<"body_detail"> {
-  const jupiter = sliceBodies().bodies.find((body) => body.id === FIXTURE_JUPITER);
-  if (jupiter === undefined) {
-    throw new Error("the slice's answer lists its Jupiter");
-  }
-  const record: BodyRecordDto = {
-    ...jupiter,
-    surface: { state: "not_applicable" },
-    hooks: { state: "not_modelled" },
-  };
-  return { ...earthDetail(), record };
+  return response("body_detail_jupiter", "body_detail");
+}
+
+/**
+ * A hot Jupiter in the Jupiter's record form at the `full` level (P14.T54.b.i): an illustrative
+ * bulk at HD 209458 b's measured mass, radius and equilibrium temperature, and its envelope the
+ * generator's on that bulk, with alkali absorbers, silicate decks below its photosphere and no
+ * ammonia deck or haze. `packages/protocol/src/planetary.test.ts` cites each measured figure.
+ */
+export function hotJupiterDetail(): ResponseFor<"body_detail"> {
+  return response("body_detail_hot_jupiter", "body_detail");
+}
+
+/**
+ * A locked lava world inside the slice's Earth at the `full` level (P14.T54.a): `airless`, with no
+ * volatile air, its crust as the server sends one whose melt area, its dayside pool, is above 0,
+ * and no `silicate_vapour` key, as every server sends it before P14.T55.b.
+ */
+export function lavaWorldDetail(): ResponseFor<"body_detail"> {
+  return response("body_detail_lava_world", "body_detail");
+}
+
+/**
+ * A Titan, a regular moon of a Saturn beyond the slice's Jupiter, at the `full` level (P14.T54.a):
+ * its N2–CH4 air at the Huygens probe's measured surface figures, its lakes a `ch4_c2h6_n2` liquid
+ * condensate on about 1% of the surface, and its crust as the server sends one, an `H2O` lid whose
+ * melt area is 0 over no melted-rock crust. `packages/protocol/src/planetary.test.ts` cites each
+ * measured figure.
+ */
+export function titanDetail(): ResponseFor<"body_detail"> {
+  return response("body_detail_titan", "body_detail");
+}
+
+/** The system of the fixture's generated temperate world, a golden system, not the slice's. */
+export const TEMPERATE_WORLD_SYSTEM = "42002cb200000000";
+
+/**
+ * A temperate wet world at the `full` level, the generator's whole record of a golden body at the
+ * epoch (plan R08, R08.T19's fifth row), which `hyperion-server`'s
+ * `the_fixture_s_temperate_world_is_the_generator_s` pins: its surface's aerosol inventory, a
+ * liquid water deck's mode and a sulphate layer's, carries the record's τ(550). Its body is of
+ * {@link TEMPERATE_WORLD_SYSTEM}.
+ */
+export function temperateWorldDetail(): ResponseFor<"body_detail"> {
+  return response("body_detail_temperate_world", "body_detail");
 }
 
 /** The slice's answer with its bodies changed by `change`, as a later generator might send it. */
@@ -100,10 +266,136 @@ export function sliceBodiesWith(
   return { ...slice, bodies: slice.bodies.map(change) };
 }
 
+/**
+ * `body`'s summary with the slice Earth's figure (`earthDetail`'s), which the populated answer's
+ * summaries do not carry, as a server from P14.T46 sends it; any other body's as it is.
+ */
+export function withEarthsFigure(body: BodyIdHex): (summary: BodySummaryDto) => BodySummaryDto {
+  const figure = earthDetail().record.figure;
+  if (figure === undefined) {
+    throw new Error("the fixture's Earth has its figure");
+  }
+  return (summary) => (summary.id === body ? { ...summary, figure } : summary);
+}
+
 /** The populated answer with its bodies changed by `change`, as a later generator might send it. */
 export function populatedBodiesWith(
   change: (body: BodySummaryDto) => BodySummaryDto,
 ): ResponseFor<"system_bodies"> {
   const populated = populatedBodies();
   return { ...populated, bodies: populated.bodies.map(change) };
+}
+
+/**
+ * The shared fixture's ring's plane's normal, a unit vector along the galactic axes, as the
+ * populated answer sends it (P14.T56.a).
+ *
+ * @remarks
+ * It is `tiltedPole(…, 0.409).pole` for the populated answer's planet `A b`, whose orbit has
+ * i = 1.0 rad and Ω = 2.5 rad: the pole at the slice Earth's obliquity, 0.409 rad, turned from its
+ * planet's orbit normal about its ascending node.
+ */
+export const FIXTURE_RING_NORMAL: Vec3 = vec3(
+  0.5906558005684119,
+  0.7906802819028946,
+  0.1610913314391793,
+);
+
+/**
+ * A change, for {@link populatedBodiesWith}, that gives the populated answer's ring the plane's
+ * normal `normal` in place of the shared fixture's own, which every server from the 22 → 23
+ * batch sends (decision-p14-t56a §1).
+ */
+export function withRingNormal(
+  normal: readonly [number, number, number],
+): (body: BodySummaryDto) => BodySummaryDto {
+  return (body) =>
+    body.population.state === "ok" && body.population.value.type === "ring"
+      ? {
+          ...body,
+          population: { state: "ok", value: { ...body.population.value, normal: [...normal] } },
+        }
+      : body;
+}
+
+/**
+ * A change, for {@link populatedBodiesWith}, that leaves the populated answer's ring without its
+ * plane's normal, as a server before the 22 → 23 batch sends it, whose rings lie in their planet's
+ * orbital plane; the field stays optional on the wire (decision-p14-t56a §1).
+ */
+export function withoutRingNormal(body: BodySummaryDto): BodySummaryDto {
+  if (body.population.state !== "ok" || body.population.value.type !== "ring") {
+    return body;
+  }
+  const { normal: _sent, ...ring } = body.population.value;
+  return { ...body, population: { state: "ok", value: ring } };
+}
+
+/** A change, for an answer's builder, that gives the body `id` the rotation law `rotation`. */
+export function withBodyRotation(
+  id: string,
+  rotation: BodyRotationDto,
+): (body: BodySummaryDto) => BodySummaryDto {
+  return (body) =>
+    body.id === id ? { ...body, rotation: { state: "ok", value: rotation } } : body;
+}
+
+/** A vector's components as the wire gives them. */
+function onWire(v: Vec3): [number, number, number] {
+  return [v.x, v.y, v.z];
+}
+
+/** A pole tilted from a body's orbit, with the rotation law that states it. */
+export interface TiltedPole {
+  /** The slice Earth's law, its axes and obliquity replaced. */
+  readonly rotation: BodyRotationDto;
+  /** The body's orbit normal, a unit vector along the galactic axes. */
+  readonly orbitNormal: Vec3;
+  /** The pole, a unit vector along the galactic axes. */
+  readonly pole: Vec3;
+  /**
+   * The unit vector at `fromNormalRad` from the orbit normal, turned towards the pole in the plane
+   * of the two, as P14.T56.a's local Laplace pole lies: the pole at the obliquity.
+   */
+  readonly turned: (fromNormalRad: number) => Vec3;
+}
+
+/**
+ * A rotation law for the body `id` of `answer` whose pole stands `obliquityRad` from its orbit's
+ * normal, turned about the orbit's ascending node N̂ by the right-hand rule, so that the equator's
+ * ascending node on the orbital plane, ĥ × p̂ normalised as the simulation takes it
+ * (`planetary/frames.rs`), is N̂; the rest of the law is the slice Earth's.
+ *
+ * @throws Error when the body is not in the answer or has no orbit.
+ */
+export function tiltedPole(
+  answer: ResponseFor<"system_bodies">,
+  id: string,
+  obliquityRad: number,
+): TiltedPole {
+  const template = sliceBodies().bodies.find((body) => body.id === FIXTURE_EARTH)?.rotation;
+  const body = answer.bodies.find((each) => each.id === id);
+  if (template?.state !== "ok" || body?.orbit.state !== "ok") {
+    throw new Error(`the answer's ${id} has an orbit, and the slice's Earth a rotation law`);
+  }
+  const { inclination_rad: inclination, ascending_node_rad: node } = body.orbit.value.orbit;
+  const normal = orbitNormal({ inclinationRad: inclination, ascendingNodeRad: node });
+  const ascending = vec3(Math.cos(node), Math.sin(node), 0);
+  // ĥ turned by an angle about N̂: cos ĥ + sin (N̂ × ĥ).
+  const towards = cross(ascending, normal);
+  const turned = (fromNormalRad: number): Vec3 =>
+    add(scale(normal, Math.cos(fromNormalRad)), scale(towards, Math.sin(fromNormalRad)));
+  const pole = turned(obliquityRad);
+  return {
+    rotation: {
+      ...template.value,
+      pole: onWire(pole),
+      equator_node: onWire(ascending),
+      equator_quarter: onWire(cross(pole, ascending)),
+      obliquity_rad: obliquityRad,
+    },
+    orbitNormal: normal,
+    pole,
+    turned,
+  };
 }

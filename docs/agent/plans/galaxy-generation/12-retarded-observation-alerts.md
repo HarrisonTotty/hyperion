@@ -295,9 +295,11 @@ where a name has changed by the time this plan runs only the call sites here cha
    under the limit is dropped. So the census is complete per class for what the sensor could see.
 6. **An event belongs to the window its light arrives in.** An event emitted at T from a host at
    x_s(T) arrives at t_a = T + |x_s(T) − x_o| ÷ c, which is a closed form with no iteration, and it
-   is reported in the window [t₁, t₂) that holds t_a. That makes a split window return exactly the
-   detections of the whole. To find the candidates, a host at present light time s is evaluated over
-   the emission interval [t₁ − s − D − ε, t₂ − s + ε], where D is the class's longest event duration
+   is reported in the window [t₁, t₂) that holds t_a. That makes a split window return each onset
+   of the whole exactly once, in the part its light arrives in; each part also reports in progress
+   the events still above the limit at its own start (below), so the first part's events in
+   progress are the whole's and a later part's are its own. To find the candidates, a host at
+   present light time s is evaluated over the emission interval [t₁ − s − D − ε, t₂ − s + ε], where D is the class's longest event duration
    (plan 06's look-back idea) and ε = s × pad speed ÷ c covers the change in light time over the
    interval. Events whose arrival precedes t₁ and which are still above the limit at t₁ are reported
    as `InProgress`. One-shot entries compare the arrival of their T directly.
@@ -348,21 +350,23 @@ where a name has changed by the time this plan runs only the call sites here cha
 14. **X-rays are absorbed by metals, so the X-ray band reads A_V.** Plan 07's `Band` runs from U to
     radio through the Cardelli law, which stops at 0.1 µm, and plan 07 is right to leave X-rays out
     of it. X-ray transients and bursts still need a horizon. Photoelectric absorption at a few keV
-    is by the same metals that make the dust, so `xray_optical_depth` is σ_X × A_V ×
+    is by the same metals that make the dust, so `xray_optical_depth` reads the column A_V ×
     `HYDROGEN_COLUMN_PER_MAG`: the solar-equivalent hydrogen column, which follows metallicity as
     plan 07's dust does, and not `Sightline::hydrogen_column`, which counts the hot corona's ionised
-    gas that absorbs almost nothing. σ_X is one cross-section per hydrogen atom at 2 keV, a constant
-    of the generator version whose source T5.a re-checks and cites (candidates: Morrison and
-    McCammon 1983; Wilms, Allen and McCray 2000). `AlertBand::XRay` exists only in this plan;
-    nothing is added to plan 07's `Band`.
+    gas that absorbs almost nothing. The depth is the band's, −ln T, with T the transmission over
+    2–10 keV: Morrison and McCammon's (1983) photoelectric σ(E) plus Thomson scattering by 1.2
+    electrons per H, averaged for a Γ = 2 source at 18 fixed nodes, three to each of MM83's intervals
+    (P12.T5.a.2, main's ruling of 2026-10-30, which replaced T5.a's one cross-section at 2 keV). The
+    rows, the scattering and the nodes are constants of the generator version. `AlertBand::XRay`
+    exists only in this plan; nothing is added to plan 07's `Band`.
 
 ## Tasks
 
 T0 comes first. T1–T3 are a chain in the sim. T4 (lensing) needs only T1 and can run beside
-everything. T5 follows T2; its subtasks run in order. T6 (protocol for modes) follows T3. T7
-(Knowledge) is independent of T5 and can start after T0. T8 follows T5 and T7. T9 follows T8. T10
-(guide) can be written at any time and must land before T11 and T12, which follow T6 and T9 and are
-independent of each other. T13 closes.
+everything. T5 follows T2; its subtasks run in order. T6 (protocol for modes) follows T3, and T6.b
+(the summary's mode) follows T6 and lands before T11. T7 (Knowledge) is independent of T5 and can
+start after T0. T8 follows T5 and T7. T9 follows T8. T10 (guide) can be written at any time and must
+land before T11 and T12, which follow T6 and T9 and are independent of each other. T13 closes.
 
 Rust files are under `crates/hyperion-sim/src/` unless a path says otherwise.
 
@@ -457,13 +461,53 @@ Files: `galaxy/query/segment.rs`, `lensing/{mod,walk,point_lens}.rs`. Acceptance
 
 - **P12.T5.a Types, reach, flux.** The types under Provides; a registry row per `TransientKind`:
   class, peak luminosity bound per band, longest duration D, light-curve function (plans 06, 09,
-  11); `class_reach` (Design note 5); flux = L ÷ 4πd² × 10^(−0.4 A_band), with A_band from plan 07's
-  `sightline` (`NoiseMode::Realised`, `Quality::Budget`, the modifiers of plan 09's `FeatureGas`
-  along the segment, the caller's `NoiseCache` from `AlertContext`) from the apparent position to
-  the observer, and `Sightline::in_band`. `AlertBand::XRay` takes `xray_optical_depth` and plan 11's
-  `xray_luminosity` (Design note 14). Tests: reach grows monotonically as the limit falls and caps
-  at the diagonal; flux of a pinned nova at three distances; the X-ray depth is unity at an A_V the
-  doc comment states from σ_X, and is unchanged by adding hot coronal gas to a test sightline.
+  11). The rows' sources as built (Risks, "Re-validated for P12.T5.a"): plan 09's supernova
+  templates, `catalogue_classes::supernova::LightCurve::luminosity`, a bolometric `Watts` of the
+  `SupernovaKind` and the age (P09.T19.b); the central black hole's flare row reads plan 09's
+  `flares::{BIN_SECONDS, LOOK_BACK_BINS, MAX_DURATION, MAX_PEAK_LUMINOSITY_WATTS}` (in
+  `features::centre::events`) and `CentreFlare::luminosity_watts_at` (P09.T30.a as built: plan 09's
+  Risks, "P09.T30.a as built"), in unabsorbed 2–10 keV; its tidal disruptions' bound, duration and
+  light curve are P09.T30.b's, in `features::centre::events::luminosity`: the bound `XRAY_SHARE` ×
+  `eddington_luminosity_watts` of the galaxy's black hole, which is
+  `DisruptionTail::peak_luminosity_watts` for a tail above Eddington's rate, no end
+  (`TAIL_LOOK_BACK_BINS`), and `DisruptionTail::luminosity_watts_at`; plan 06's
+  `stellar::events::{flares, fu_orionis, glitches}`. `class_reach` (Design note 5); flux = L ÷ 4πd²
+  × 10^(−0.4 A_band), with A_band from plan 07's `galaxy::gas::extinction::sightline`
+  (`NoiseMode::Realised`, `Quality::Budget`, the modifiers of plan 09's
+  `features::gas_overlay::FeatureGas` along the segment, gathered through
+  `galaxy::gas::modifiers::GasModifierSource`, the caller's `galaxy::gas::noise::NoiseCache` from
+  `AlertContext`) from the apparent position to the observer, and `Sightline::in_band`, a
+  `Magnitudes`. `AlertBand::XRay` takes `xray_optical_depth`, from `Sightline::a_v` and
+  `galaxy::gas::ccm::HYDROGEN_COLUMN_PER_MAG`, and plan 11's `xray_luminosity` (Design note 14).
+  _Slice:_ plan 11's light curves and `xray_luminosity` (P11.T9), the magnetar bursts (P06.T28.c)
+  and the giant eruptions (P06.T28.e, with plan 09's class, P09.T43) are not built, so their rows'
+  bounds, durations and light curves are documented `None`s that name the task that fills them, and
+  the flux takes the luminosity as a plain argument. Tests: reach grows monotonically as the limit
+  falls and caps at the diagonal; flux of a pinned nova at three distances; the X-ray depth is unity
+  at an A_V the doc comment states from σ_X, and is unchanged by adding hot coronal gas to a test
+  sightline.
+- **P12.T5.a.2 The X-ray band, the held rows and the citations.** After T5.a, on main's rulings of
+  2026-10-30 on research advice for T5.a's findings and questions (Risks, "P12.T5.a as built").
+  _The X-ray band:_ `xray_optical_depth` becomes the effective depth of the 2–10 keV band,
+  −ln Σₖ wₖ e^(−(σₖ + σ_e) `N_H`), at 18 fixed nodes: a 3-point Gauss–Legendre rule in ln E on each
+  of Morrison and McCammon's (1983) intervals from 2 to 10 keV, split at their breaks (the 7.111 keV
+  iron edge among them), with their photoelectric σ(E) plus Thomson scattering at 1.2 σ_T per H,
+  for a Γ = 2 source (Design note 14). It replaces `XRAY_CROSS_SECTION_CM2`. No golden or version
+  change while nothing reads `alerts`. _The held rows:_ `GiantEruption` (P06.T28.e) is `Recurrent`
+  over `LUMINOUS_BLUE_VARIABLE`, with a photometric bound of 1.2106 × 10³⁴ W, the top of plan 06's
+  peak law, and D = 20 years. `MagnetarBurst` (P06.T28.c) is `Recurrent` over `CORE_COLLAPSE`'s
+  entries, walked by T5.c. Its X-ray bound is 5 × 10⁴⁰ W, a giant flare's spike at the top of its
+  energy law; plan 06's energies are the event's whole output, so it bounds the band. D = 3 s.
+  Each row gets a new `LightCurveSource`. Giant flares take no kind of their own, and thermal
+  pulses take none. Seven rows stay pending, all on P11.T9. _`class_reach`:_ the signature stays,
+  and a tripwire holds every walked row's bound to a constant. _The citations:_ T5.a's, checked at
+  source; the corrected ones fixed, and the sources no check reached named as unread. Files:
+  `alerts/{mod,registry,reach}.rs`. Tests: the 18 nodes recomputed from the rows, the breaks and
+  the rule; the band's transmission against a converged integral, pinned at `A_V` = 1, 12.43, 30
+  and 50 mag; the depth unity at `A_V` = 88.47 mag; the magnetar row bounds every short burst and
+  giant flare; the giant-eruption row bounds the eruption's own light; an X-ray sensor sees the
+  core collapses to the cube's diagonal; walked rows have constant bounds. Acceptance:
+  `cargo test -p hyperion-sim alerts`.
 - **P12.T5.b One-shot classes.** Core collapse, Type Ia, stellar mergers, neutron-star mergers: walk
   the class's cells in the widened reach sphere (`CatalogueClassSource::cells_in_sphere`), take each
   entry's T, compute its arrival, test the window of Design note 6, emit a `Detection` with its
@@ -472,20 +516,26 @@ Files: `galaxy/query/segment.rs`, `lensing/{mod,walk,point_lens}.rs`. Acceptance
 - **P12.T5.c Recurrent classes.** Luminous blue variables (plan 09's class, plan 06's giant
   eruptions), X-ray binaries, and the two accreting white dwarf classes through `scan_cell` using
   plan 11's scan marks only: slow hosts test the eruption times their marks carry, fast hosts ask
-  the monotone phase for events in the emission interval of Design note 6. Dwarf novae and X-ray
-  bursts are excluded from distant scans by reach and come through T5.e. Tests: completeness as in
-  T5.b on a 2,000 ly sphere; `scan_cell` over all cells equals one call over the whole sphere; plan
-  11's `scan::engine_calls()` stays at zero. Bench `awd_scan_marks_cell`.
+  the monotone phase for events in the emission interval of Design note 6. The core collapses'
+  magnetars (P06.T28.c) are walked here too, from the entries whose death lies within 227,273
+  years before the emission interval (main's ruling of 2026-10-30; P12.T5.a.2). X-ray bursts are
+  walked over `XRAY_BINARY`'s bursters through the monotone phase (main's ruling of 2026-10-30;
+  P12.T5.b). Dwarf novae are excluded from distant scans by reach and come through T5.e. Tests: completeness
+  as in T5.b on a 2,000 ly sphere; `scan_cell` over all cells equals one call over the whole
+  sphere; plan 11's `scan::engine_calls()` stays at zero. Bench `awd_scan_marks_cell`.
 - **P12.T5.d Census, features, the global list.** `alerts_in` with Design note 7; feature-level
   lists within reach through plan 09's `FeatureCatalogue::near`; the global list's entries through
   plan 10's `GlobalList::entries_with_class_members` (the centre's tidal disruptions and flares;
   dwarf cores and streams where they hold class members). Tests: a class over the limit returns no
-  detections and says so; halving the reach brings it back; a window split in two gives the same
-  detections as the whole; any order of classes gives the same result.
+  detections and says so; halving the reach brings it back; a window split in two gives the
+  whole's onsets, each once, and its first half the whole's events in progress (Design note 6); any
+  order of classes gives the same result. _Built 2026-10-31 (Risks, "P12.T5.d as built")._
 - **P12.T5.e Local events.** `local_events`: for the systems of an observed-mode range result,
-  flares, glitches, magnetar bursts, FU Orionis outbursts, dwarf novae and bursts over each system's
-  retarded interval, through plans 06 and 11. Tests: equals direct evaluation per system; adds under
-  1 ms to a 50 ly query at the reference density (bench, a finding).
+  flares, glitches, FU Orionis outbursts and dwarf novae over each system's retarded interval,
+  through plans 06 and 11. Magnetar bursts moved to T5.c (P12.T5.a.2), and X-ray bursts
+  (P12.T5.b). Tests: equals
+  direct evaluation per system; adds under 1 ms to a 50 ly query at the reference density (bench, a
+  finding).
 
 Files: `alerts/{mod,registry,reach,oneshot,recurrent,census,local}.rs`.
 
@@ -513,6 +563,31 @@ Tests: wire forms; an integration test asks the same sphere in both modes and ge
 with `observed` present only in one; an observer outside the cube is `BadRequest` naming the field.
 Acceptance: `just ci`.
 
+- **P12.T6.b The summary's mode** (added 2026-10-15 by `decision-gg-port-d0.md` §6.2, from T6's
+  record below; built in `lane/70-p12-t6b-summary-mode`, recorded at the end of Risks). T6 as
+  built is the range query's mode and `resolve_system`; this
+  subtask puts the mode on plan 06's `system_summary`, in the shape the Protocol section above
+  already gives it, so it is additive and `PROTOCOL_VERSION` stays 2. A defaulted
+  `mode: QueryModeDto` on `SystemSummaryRequest` (`#[serde(default)]`, written only when observed,
+  as on `SystemsInRangeRequest`), and an optional `observed: ObservedDto` on `SystemSummaryDto`,
+  written only in observed mode. In observed mode the server reads the system through
+  `observe::summary_observed` over the stars its `SharedSystemCache` already builds for the
+  summary: the stars, existence and age are `summary_at` the emitted time, `time` still echoes the
+  request, and `observed` carries the retardation with its stated error (`curvature_error`), as a
+  range row's does (`convert::observed_dto`). The mode's observer is checked by
+  `convert::observe::query_mode` (`bad_request` naming `mode`), after the summary's own checks; a
+  centre member stays refused as `system_summary` refuses it now. Two consequences to carry:
+  `SystemSummaryRequest` derives `Eq` and `Hash`, which `QueryModeDto` cannot (its position holds
+  `f64`s), so those derives go (nothing hashes the request); and in observed mode the summary's
+  `age_myr` and `existence` are the emitted time's, unlike a range row's, so `SystemSummaryDto`'s
+  docs ("at `time`") change and T11 subtracts no light age from them. Files:
+  `crates/hyperion-protocol/src/stellar.rs`, the server's `system_summary` handler and
+  `convert/stellar.rs`, `packages/protocol/src/generated/*`. Tests: the wire forms in both modes and
+  a summary request of plan 06's form read as `now`; over a socket, one system's summary asked in
+  both modes has the same `system` and `time`, `observed` only in the observed answer, and its
+  stars are `summary_observed`'s; an observer outside the cube is `bad_request` naming `mode`.
+  Acceptance: `just ci`.
+
 ### P12.T7 The Knowledge store
 
 - **P12.T7.a Records and levels.** `ContactRecord`, `Sighting`, `KnowledgeLevel`, `ContactId`
@@ -534,13 +609,27 @@ Files: `crates/hyperion-server/src/knowledge/{mod,record,store,persist}.rs`. Acc
 
 - **P12.T8.a Schedule and advance.** `AlertSchedule`, `Subscription`, and the pure core
   `advance(previous: Observer, next: Observer) -> Advance { due, rescan }` (Design notes 8–9).
-  Tests: advancing in one step or in ten pushes the same detections once each; a backwards clock or
-  a moved observer requests a rescan; nothing from the old position survives a jump.
+  Tests: advancing in one step or in ten pushes each onset once, and an event a later step finds
+  in progress is not pushed again if an earlier step pushed it (Design note 6); a backwards clock
+  or a moved observer requests a rescan; nothing from the old position survives a jump.
+- **P12.T8.b.1 The light the schedule needs** (split from T8.b on 2026-10-31, in the sim, ahead of
+  T5.d; the ID is a lean). Each walk's `Detection` carries its light at the observer:
+  `DetectionLight::Lit`, the flux in its band at each observer time with the knots between which
+  it is monotone, from the source the walk read (the supernova templates through
+  `supernova_luminosity`, a star's flare, an FU Orionis outburst; P11.T9.a's `BinaryLightCurve`
+  once a row names it), or `DetectionLight::Unlit` for a glitch. `Tracked::of_light` bisects it.
+  And a registry bound for each class's longest rise to peak (research's lean of 2026-10-30), by
+  which a first or restarted scan walks back. Files: `alerts/{arriving,mod,oneshot,local,registry}.rs`.
+  Tests: each light is finite, non-negative and continuous after its onset, and is the walk's
+  `Detection` flux at the detection's own time; no class's light peaks later after its onset than
+  its bound. Acceptance: `cargo test -p hyperion-sim alerts`.
 - **P12.T8.b Scans on the pool.** Interactive classes as one `Priority::Interactive` job; background
   classes as `Priority::Bulk` jobs of a few hundred catalogue cells each under a `CancelToken`,
   merged only when all have finished (Design note 7); look-ahead renewal; the `ByteLru` of schedules
   under `SingleFlight`. Tests: a cancelled scan leaves the class `Pending` and delivers nothing; two
   subscriptions with one key share one scan; the cache is bounded.
+- **P12.T8.b.2 A background scan of the whole galaxy** (2026-11-01, after research's
+  research-alerts-galaxy-scan; the ID is a lean). Built: see its record under Risks.
 - **P12.T8.c Into Knowledge.** Each due detection becomes a sighting; the notification carries the
   views of the contacts that changed, and the census per class (`complete`, `over_limit`,
   `pending`). A resolved contact appears first as a bearing if its flux crossed `detect` before
@@ -599,6 +688,15 @@ observer's time past an arrival and receives one contact at `bearing`, then move
 and receives the same `contact` at `resolved` with the pinned host; a JSON-level assertion that no
 `bearing` contact contains a key named `host`. Acceptance: `just ci`.
 
+- **P12.T9.a The wire** (split on 2026-10-31, a lean). Everything above but the integration test:
+  the topic, its state and notification, `alerts_observer`, `alerts_acknowledge`, `ContactDto`,
+  the refusals and the bindings. Without T8.b's scans the census is empty. Tests: the wire forms,
+  the JSON assertion, and a socket test of a subscription's contacts, its observer, an
+  acknowledgement and each refusal. Acceptance: `just ci`.
+- **P12.T9.b The integration test** (split on 2026-10-31). The pinned nova's bearing, then its host
+  resolved, as above. It waits on T8.b's scans and P11.T9.b's novae. Built with T8.b on a pinned
+  supernova while the novae are not walked (P12.T8.b as built).
+
 ### P12.T10 UX guide edits
 
 Edit `docs/frontend/ux-guidelines.md`, on top of plan 05's edits (which add `yr`, E notation, the
@@ -616,6 +714,11 @@ position by a dashed line (dashes already mean prediction), and the rule that th
 `OBSERVED FROM`) is shown with the frame and time. Acceptance: `pnpm format:check` passes, `grep`
 finds `LIGHT AGE`, `kyr`, `W/m²` and `OBSERVED FROM` in the guide, and the edits are one commit for
 the owner to read, as plan 05 does for its own.
+
+- _Built_ 2026-11-01: the guide already held the Observed state, `LIGHT AGE`, `kyr`, `W/m²`, the
+  direction, the sensor detection, the bearing ray, the tick and the mode rule. This commit drafts
+  the alert census's words (`COMPLETE`, `OVER LIMIT`, `PENDING`, `NOT WALKED`) and `NO CENSUS`, for
+  the owner.
 
 ### P12.T11 Client: mode and observed readout
 
@@ -637,6 +740,119 @@ Files: under `apps/hyperion/src/renderer/src/`: `spatial/{marks,drawList,paint}.
 Tests: Vitest for the helpers and the readout in both modes; keyboard operation; no colour-only
 signal. Acceptance: `pnpm test`, `just ci`, and by eye: a supergiant known dead is shown alive from
 afar with its light age.
+
+_Amended 2026-10-15 (`decision-gg-port-d0.md` §6.1–§6.2, from T6 as built):_ an observed row's
+`age_myr` and `velocity_km_s` are the present's, as its `position` is (Design note 4), so in
+observed mode the readout shows the age then, `age_myr − light_age_yr ÷ 10⁶`, as an Observed value,
+and `NOT YET FORMED` where that is below zero; and `—` for the velocity, which is present state the
+crew cannot know, until a task puts the velocity at emission on the wire. A server built before T6
+ignores `mode` and answers `now`, so the readout never labels a row `AS OBSERVED` unless the row
+carries `observed`, whatever was asked. The one system's stars as observed come from T6.b's
+summary.
+
+- **P12.T11.b The HR page's mode** (added 2026-10-21 by main's scoping, from T11's deferred
+  finding (2); built in `lane/73-p12-t11b-hr-mode`, recorded at the end of Risks). The `HR DIAGRAM`
+  page plots the briefs of the chart on show, which in observed mode are the primaries when the
+  light left, and did not say so. Under its plot, before the counts, where the chart's furniture
+  stands, it now reads the answer's time and mode as the furniture does, stale with the answer:
+  `UT` and `MODE NOW`, or `FRAME GALACTIC`, `UT` and `MODE OBSERVED FROM` with the observer's
+  `RADIUS`, `ANGLE` and `HEIGHT`, from `answeredMode` and the result's `timeYr` through the
+  readings the two pages now share (`chartReadings.ts`), and never from the mode being chosen.
+  Files: under `apps/hyperion/src/renderer/src/`: `displays/galaxy/`'s `chartReadings.ts`,
+  `HrDiagram.tsx`, `GalaxyPages.tsx` and `LocalChartPanel.tsx`, `styles.css`'s `.hr-diagram`
+  block, tests. Tests: Vitest for the shared readings, for the page's line in both modes, on the
+  galactic axis and stale, and for the display's page across `OBSERVED` and `NOW` and for an
+  answer asked observed whose rows came without their observation. Acceptance: `pnpm test`,
+  `just ci`, and main's look at 1920 × 1080 and 1280 × 720.
+- **P12.T11.c The observed chart's look follow-ups** (added 2026-10-21 by main's UX decision on
+  T11's landing look; built in `lane/74-p12-t11c-compact-refusals`, recorded at the end of Risks).
+  The look found a refused entry on the compact page pushing the mode row onto the furniture in
+  `OBSERVED`, and smaller findings: `OBSERVER TO CENTRE` sharing `CENTRE` with `CENTRE CHART`, a
+  0.25 rem tick no wider than the selected joiner, a legend sample too short for two dashes, a
+  system's label over the observer's eye, `AGE`'s `AT UT` wrapping at 1920 × 1080, and the
+  `0.01-500 ly` hint. On the compact page a refusal now stands in its field's hint's place on the
+  field's row, its name hidden from sight alone, and never wraps; the command is
+  `OBSERVER TO CHART CENTRE`, on one row with the mode while a chart is on show; the tick is
+  0.5 rem and the sample 2.75 rem; marks' labels keep off the eye; `AGE` reads
+  `· AT UT <time> yr`, wide as observed with its time in a fixed slot; and the hint reads
+  `0.01 to 500 ly`; with the guide's sentences on angles, grouping, the observer's mark, `AT` and
+  the command. Files: under `apps/hyperion/src/renderer/src/`: `displays/galaxy/`'s
+  `ChartControls.tsx`, `SymbolLegend.tsx` and `SystemReadout.tsx`, `spatial/`'s `drawList.ts`,
+  `labels.ts` and `SpatialView.tsx`, `styles.css`, tests; the guide. Tests: Vitest for both
+  refusals at once on a compact and a stacked page, the stylesheet's compact rules, the command,
+  the tick, the sample's dashes, the labels about the eye, `AGE` in both modes and the hint.
+  Acceptance: `pnpm test`, `just ci`, and main's look at 1920 × 1080 and 1280 × 720.
+- **P12.T11.d One stale S per value on the spatial furniture** (added 2026-10-22 by main's UX
+  decision on T11.b's landing look; built in `lane/75-p12-t11d-stale-per-value`, recorded at the
+  end of Risks). The look found the chart's furniture marking a stale answer with one `S` after the
+  scale bar, read `2 ly S` as if the camera's live scale were stale, while the `HR DIAGRAM` page's
+  line, in its own copies of the furniture's readings, marked each value, and the page's counts
+  moved as their `S` came. `Reading` now keeps a 2 ch slot for its `S` where its value can go
+  stale, shared `FRAME` and `MODE` readings serve the furniture and the HR line, the furniture marks
+  each value it reads from the answer and not the frame's or the mode's name, the scale bar or the
+  orbit map's own display time, the scale bar stands between the time and the mode so that the
+  compact chart keeps its lines, and the counts keep a slot too; the guide's `MODE` row names the
+  graph's line. Files: under `apps/hyperion/src/renderer/src/`: `spatial/`'s `Reading.tsx`, the new
+  `FrameReading.tsx` and `ModeReading.tsx`, and `SpatialView.tsx`; `displays/galaxy/`'s
+  `HrDiagram.tsx` and `chartReadings.ts`; `displays/system/OrbitMapPanel.tsx`; `styles.css`; tests;
+  the guide; plan 05's ruling (8). Tests: Vitest for the reading's slot and mark, the shared
+  readings, the furniture's marks per value, its order and its own time, the HR line and counts,
+  the chart's and the orbit map's stale furniture, both pages' stale text, and the compact scale
+  bar's rule. Acceptance: `pnpm test`, `just ci`, and main's look at 1920 × 1080, 1280 × 720 and
+  150%, live and stale.
+- **P12.T11.e No label held back across its own mark, and the age on its own row in both modes**
+  (added 2026-10-22 by main's UX decision on the series' remaining follow-ups; built in
+  `lane/80-p12-t11e-followups`, recorded at the end of Risks). Main's looks at T11.c's and T11.d's
+  landings found that the compact chart's 256 px stage has no room on either side of a centred
+  selection's mark for its label, which ruling 149.1's hold then set back across its own mark and
+  bracket, and that the readout's `AGE … · AT UT +0.00 yr` fills its half row at 1920 × 1080, so
+  that a chart time of 10 yr or more, or a five-character age, wraps it after `AT`. A label whose
+  mark is in view is now drawn only beside its mark, else not at all, the selection's too, and the
+  hold stands for a pinned mark whose bracket lies wholly outside the view alone, by main's answer
+  on the lane's issue; `AGE` takes the readout's row in both modes, its chart time in `NOW`
+  right-aligned in `TIME_WIDTH_CH`'s slot; and the guide's `DISPLAY TIME` cell says the display
+  time is the console's own and never stale (main's edit). Files: under
+  `apps/hyperion/src/renderer/src/`: `spatial/labels.ts` and `displays/galaxy/SystemReadout.tsx`,
+  tests; the guide's `DISPLAY TIME` row; plan 05's note on labels beside reticles. Tests: Vitest
+  for no label where neither side has room, the selection's and the rest's, on a 256 px stage and
+  in a view, the top edge's hold, a selection just past the top or bottom edge with its bracket in
+  part drawn and once it lies outside, the destination's label as with no selection, and the
+  age's row and slot in both modes and at the clock window's edges. Acceptance: `pnpm test`,
+  `just ci`, and main's look at 1920 × 1080, 1280 × 720 and 150%.
+- **P12.T11.f One state prop for a spatial reading, its slot the shared `StaleSlot`** (added
+  2026-10-22 by main's ruling on T11.d's deferred finding (4); built in
+  `lane/84-p12-t11f-reading-state`, recorded at the end of Risks). `Reading`'s optional `stale`
+  and `own` admitted both at once. They are now one `state`, `live`, `stale` or `own`, absent for
+  a reading with no slot, which `ModeReading`, `SpatialView` and the HR page's line pass, and the
+  reading's slot is P05.T14's `StaleSlot`, whose `.stale-slot` replaces
+  `.spatial-reading__stale-slot`. Nothing on screen changes. Files: under
+  `apps/hyperion/src/renderer/src/`: `spatial/`'s `Reading.tsx`, `ModeReading.tsx` and
+  `SpatialView.tsx`, `displays/galaxy/HrDiagram.tsx`, `components/StaleSlot.tsx`'s doc,
+  `styles.css`, tests. Tests: Vitest for the reading's four forms, the type's refusal of the old
+  pair, and the shared class wherever a test read the old one. Acceptance: `pnpm test` and
+  `just smart-ci`; no look, since nothing on screen changes.
+- **P12.T11.g The compact chart's state lines share the census's room** (added 2026-10-22 by
+  main's UX decision on the landing look of #79–#81; built in
+  `fix/p12-t11g-compact-state-lines`, a desktop fix by the look agent, recorded at the end of
+  Risks). At 1280 × 720 in `OBSERVED`, a census hint (`DENSE REGION`) and a filtered census long
+  enough to put `CENSUS BY LAYER` on a line of its own each took a line from the stage, and
+  together left it 188 px, so that the column's mode row stood over the furniture's first line. On
+  the compact page the census row is now a grid: `CENSUS BY LAYER` keeps the row's first line in a
+  column of its own, the summary wraps beside it, and the hint, moved into the row after the
+  toggle, stands under the summary, the census's lines at 1 rem; and the furniture sets the
+  galactic axis's note after the scale bar and before the mode, so that observed mode keeps three
+  lines on the axis. The stage keeps 14 rem in every state but a hint with the summary on two
+  lines, where it keeps 13.25 rem, and the column ends above its foot in every state. Two measured
+  deviations from decision-p12-t11-look-followups §14.4 (the hint in the summary's column alone,
+  and the census line one 1 rem
+  line high) are recorded at the end of Risks. Files: under
+  `apps/hyperion/src/renderer/src/`: `displays/galaxy/CensusReadout.tsx`,
+  `spatial/SpatialView.tsx`, `styles.css`, tests. Tests: Vitest for the hint's place in the row
+  and outside the census's region in both layouts, the furniture's order on the axis with and
+  without a mode, and the stylesheet's compact census grid, its 1 rem lines, the template with no
+  hint row, the stacked hint's own line and the axis note's rules. Acceptance: `pnpm test`,
+  `just smart-ci origin/rendering-and-planets`, and the hidden look at 1280 × 720 and 150%, live
+  and stale, in both modes, with 0 overlaps.
 
 ### P12.T12 Client: alert list and chart marks
 
@@ -662,7 +878,7 @@ geometry at the six named directions; reduced motion has nothing to reduce. Acce
 Run every slow test and bench below, record the figures in the doc comments that own them, and add
 the golden files: retarded observations of six pinned systems from two observers, and the detections
 of a pinned observer over a pinned century. Acceptance: `just ci`, `just test-slow` and `just bench`
-complete.
+complete. _Built 2026-11-05 (Risks, "P12.T13 as built")._
 
 ## Verification
 
@@ -670,7 +886,8 @@ complete.
   Knowledge contact for it (T5, T7).
 - **Linearity:** an extrapolated jump lands on the star (T2).
 - **Completeness per class:** exact set equality with brute force for every class, with split
-  windows and any order (T5); a class over its limit returns nothing and says so.
+  windows (each onset once, each part's events in progress at its start) and any order (T5); a
+  class over its limit returns nothing and says so.
 - **Honesty:** curvature error figures match the brainstorm's; an unresolved contact leaks no host
   at the JSON level; present state is never shown in observed mode.
 - **Time:** the source-horizon sweep; dead supergiants seen alive.
@@ -713,8 +930,9 @@ under plan 04's convention: a defaulted `mode`, new request kinds, and the first
   about an arcminute from 26,000 ly. The model stays consistent, since an extrapolated jump still
   lands on the star, and the figure is honest; whether the Kepler regime should reach further out
   for retarded evaluation is a question for the brainstorm.
-- **The X-ray band** (Design note 14) is one cross-section at one energy. A sensor console that
-  wants soft and hard bands replaces the constant with a function of energy; nothing else changes.
+- **The X-ray band** (Design note 14) is one band, 2–10 keV, for one source spectrum, Γ = 2
+  (P12.T5.a.2). A sensor console that wants soft and hard bands, or each source's own spectrum,
+  replaces the nodes; nothing else changes.
 - **FU Orionis outbursts** are treated as local events. The research notes route them through
   star-forming-region features; if plan 09 lists them at feature level they join T5.d instead.
 - **The alert service's appends on macOS (P12.T8; plan 04, P04.T17.b).** Each Knowledge change is
@@ -1037,3 +1255,1893 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
   `tests/observe_in_system_golden.rs` pins `solar_like` and `close_binary` in
   `observe/in_system.golden`. This plan's galactic functions are unchanged. The subscription
   envelope that R03.T5.a built to P12.T9's design is recorded under P12.T9 above.
+- **T6 as built (lane `obs12d`, 2026-09-30, at `GENERATOR_VERSION` 16; ported onto
+  `rendering-and-planets` on 2026-10-15 at 22, the last item below).** No generated output moves
+  and no golden changes: the modes are new optional wire fields and a new kind, and a request or row
+  without them is byte for byte the one before. `PROTOCOL_VERSION` stays 2 (plan 04, design note
+  15).
+  - _Protocol._ The new `hyperion_protocol` module `observe.rs` holds `QueryModeDto`
+    (`{"type":"now"}` or `{"type":"observed","observer":…}`), `ObservedDto` (`emitted`,
+    `light_age_yr`, `apparent_position`, `curvature_error_ly`, `curvature_error_arcsec`),
+    `ResolveSystemRequest { universe, system, time, mode }` and
+    `ResolvedSystem { universe, time, record }`, whose `record` is a range row. `mode` is
+    `#[serde(default)]` on `SystemsInRangeRequest` and `ResolveSystemRequest` and written only
+    when observed; `SystemRecord.observed` is written only in observed mode.
+    `ResponseBody::ResolveSystem` holds a `Box<ResolvedSystem>`, as `SystemBodies` is boxed, since
+    a row would otherwise make every message a third larger (`clippy::large_enum_variant`).
+    `resolve_system` joins `REQUEST_KINDS` and the server's exhaustive matches (`kind`,
+    `is_large`: not large). No error code is new, so the client's `settledState` switch is
+    unchanged.
+  - _Deviation: the refusal of an ID._ An ID `resolve` refuses, or whose bits are no system ID, is
+    `unknown_system` naming `system`, not `bad_request` as the task's text says: plan 06 added
+    `ErrorCode::UnknownSystem` after this plan was written, for exactly this case, and
+    `system_summary`, `system_bodies` and `body_detail` answer it so. Accepted
+    (`decision-gg-port-d0.md` §6.2).
+  - _Deviation: the answer's shape._ `resolve_system` answers
+    `ResolvedSystem { universe, time, record }`, `record` a range row, not the bare row Provides
+    describes: it echoes the request's universe and time, as `system_summary` does, and is boxed
+    in `ResponseBody` for `clippy::large_enum_variant`. Accepted (`decision-gg-port-d0.md` §6.2).
+  - _Deviation: the summary's mode is not built._ Provides puts `mode` on `SystemSummaryRequest`
+    and `observed` on the summary; the task's text and files do not, so neither is on the wire yet
+    (`observe::summary_observed` is ready for it). A readout of one system as observed has
+    `resolve_system`'s row, and the brief then from a range query with `include_stellar`, but not
+    the stars as observed. Ruled (`decision-gg-port-d0.md` §6.2): it is the new subtask P12.T6.b,
+    before T11, whose text is under T6 above; T6 as built is the range query's mode and
+    `resolve_system`. _Built by P12.T6.b (`lane/70-p12-t6b-summary-mode`, below)._
+  - _Server._ `RangeRequest` checks `mode` after `limit`: an observer that is not a canonical
+    position inside the root cube is `bad_request` naming `mode`, as `refused_query` names the
+    sim's `ObserverOutsideRootCube`. Only the query's time is held to ±H; emitted times before −H
+    are reported as they are. The handler runs plan 03's `range_query` unchanged and then reads
+    each row through `observe_hit` over the system cache, lent as the sim's `StarsCache` by
+    `SharedSystemCache::handle(key)` (`compute::SystemStarsHandle`; a miss builds
+    `observe::stars_of` and stores it under the ID, `SharedSystemCache::get_or_build`, so it shares
+    every entry with `system_summary`). A rogue planet, and a centre member, which has no stars
+    generated, are read on their line alone, as `range_query_observed` reads a rogue planet. The
+    rows are built in the query's job up to `BRIEF_CHUNK_ROWS` and in chunks of that many beyond
+    it, as the briefs are; `range_query_observed` is not called because it observes every row in
+    one call, and a 20,000-row answer whose stars are cold (0.26 ms a system, T3's bench) would
+    hold one worker for about 5 s. The rows are `range_query_observed`'s, bit for bit (unit test
+    `observed_rows_do_not_depend_on_chunks_or_the_cache`, whole and chunked, over an empty, a warm
+    and no cache). With `include_stellar` in observed mode a row's `stellar` is its primary's
+    brief at the emitted time (`ObservedSystem::brief_then`, from the full system), absent when it
+    was not yet born then. `resolve_system` is one interactive job: `resolve` (refusals as above);
+    a grid system placed by `position_at` at `epoch_velocity`, bit for bit the range row, and any
+    other on its own `Drift::of_record` line (plan 08's draw, which `position_at` takes, panics for
+    a record without a density component); a hit at distance zero; and in observed mode the same
+    reading as a range row. Its row has no brief, since the request has no `include_stellar`.
+  - _Centre members._ `centre09c` had not landed in this tree. The central black hole is refused
+    in both modes as `unknown_system` naming `system` ("cannot be placed yet", with
+    `TraceMotionError`'s message), as
+    `system_summary` refuses it, never a panic (`now` would otherwise have panicked in plan 08's
+    draw); the server's range query places no centre member, and should a source ever hand it one
+    observed, the answer is `bad_request` naming `mode`. When P09.T28 traces the centre, the
+    member is placed and read on its orbit with no brief, and
+    `the_central_black_hole_is_refused_until_its_orbit_is_built` changes with it.
+  - _Tests._ Wire forms in `hyperion-protocol` (both modes, the observed row, the request and
+    response of `resolve_system`, a plan 04 request read as `now`); `convert::observe` unit tests
+    (the observer's checks and order, the DTO's exactness, the refusal);
+    `compute::systems::the_stars_handle_shares_the_entries_of_the_systems_ids`; and
+    `tests/observed.rs` over a socket: one 12 ly sphere asked in both modes has the same IDs,
+    census and present rows, `observed` only in the observed answer, each the sim's
+    `range_query_observed` row with its brief then, and a repeat builds no star; an observer
+    outside the cube or off the grid is `bad_request` naming `mode` for both kinds; `resolve_system`
+    gives the range row in either mode; an ID naming no system is `unknown_system`; the black hole
+    as above; and, slow, `resolve_system_places_a_feature_member_on_its_own_line` (a band-C member
+    of the first feature within 3,000 ly of the Sun, placed on its line and observed as
+    `observe_hit` reads it with its member record's stars).
+  - _Port (batch B, 2026-10-15, at `GENERATOR_VERSION` 22; `decision-gg-port-d0.md`)._ Ported from
+    galaxy-generation 9d3a4944 by `git cherry-pick -n` onto the integration tip after A1's P07.T10
+    (277b464c), then brought to 9fbc5ea2; the two branches share no history. The content is
+    unchanged except as follows. The conflicts were the integration branch's appended entries in
+    `compute/mod.rs`, `convert.rs` and `requests/mod.rs`, kept both, and plan 12's record, kept
+    after R03's `observe::in_system`; the envelope's walks merged as
+    `… → Extinction → ResolveSystem → None`, with `resolve_system` last in `REQUEST_KINDS`. The
+    bindings were regenerated by `just gen-protocol`: `RequestBody.ts` and `ResponseBody.ts` gain
+    the kind, and `ObservedDto.ts` and `SystemRecord.ts` the ruled doc sentences. By hand: the
+    `resolve_system` arm meets R03.T10.a's `Answer` seam through `answered`;
+    `mode: QueryModeDto::Now` in the range requests added since the squash (`tests/scene.rs`,
+    `tests/sky.rs`, `tests/websocket.rs`); `resolve_system` among the kinds the fake server of
+    `apps/hyperion/src/tools/placeShip.test.ts` leaves unfaked, since its switch is exhaustive;
+    `every_body`'s `resolve_system` names a universe of its own, the shared one being moved into
+    `scene_ship`; `tests/observed.rs`'s brief comparison carries R02.T5's `absolute_v_mag`, which
+    the wire's brief gained after the squash, and checks it against the brief then as
+    `tests/systems_in_range.rs` checks a present one; and
+    `the_central_black_hole_is_refused_until_its_orbit_is_built` pins version 22, at which its
+    refusal was re-checked, in place of 16. `requests_naming` in `tests/universes.rs` gains a
+    `resolve_system` whose observer is outside the cube, so the new kind is refused for its universe
+    before its `mode` is read, as every other kind is. `PROTOCOL_VERSION`'s doc gains the defaulted
+    `mode`'s sentence (§6.1), and `ObservedDto`'s and `SystemRecord`'s docs the ruled present-state
+    sentences (§6.2), `stellar` excepted, which in observed mode is the brief then. From review:
+    `convert::systems_in_range` takes each row's brief and observation from their iterators instead
+    of collecting two row-long vectors on every range answer, and
+    `observed_rows_do_not_depend_on_chunks_or_the_cache` also asks a 3 ly sphere with the substellar
+    layers (a rogue planet read on its line, a brown dwarf through
+    `SharedSystemCache::get_or_build`), and also runs over a tight cache and one filled through
+    `get_or_generate` as `system_summary` fills it. Re-checked at the port: the centre is still not
+    traced (`TraceMotionError::CentreOrbitNotBuilt` stands, P09.T28 unbuilt) and the server's range
+    query still passes no sources, so the refusals above hold. No golden or generated output moves,
+    and nothing is blessed.
+  - _Deferred findings (2026-10-13 rule), from the port's review._ (1) For a feature member
+    `resolve_system` places the system by `Drift::position_at`, while plan 09's
+    `FeatureMemberSource::hit_at` moves a member by `translated(displacement_over(elapsed))`; the
+    sim's `observe_hit` docs put the two a few metres apart. The server's range query passes no
+    sources, so no answer differs today; when feature sources are wired into it, `resolve_system`
+    should take `hit_at`'s arithmetic so that its row stays the range row bit for bit. (2) The
+    chunk test's galaxy has no kinematic tables (`Galaxy::new`), so its exact comparison with the
+    sim covers systems at rest; `tests/observed.rs` covers moving ones, to 1e-15 relative.
+- **P12.T6: an observed row's `age_myr` and `velocity_km_s` are the present's**, as its `position`
+  is (Design note 4 keeps the row). Ruled (`decision-gg-port-d0.md` §6.2): the wire stays as it is,
+  and `ObservedDto`'s and `SystemRecord::observed`'s docs say so; T11's readout in observed mode
+  shows the age then (`age_myr − light_age_yr ÷ 10⁶`, an Observed value, or `NOT YET FORMED` below
+  zero) and `—` for the velocity, until a task puts the velocity at emission on the wire. T11's
+  text carries the amendment.
+- **P12.T6.b as built (`lane/70-p12-t6b-summary-mode`, 2026-10-21, at `GENERATOR_VERSION` 22).**
+  No golden or generated output moves: the mode and the observation are optional wire fields, and a
+  summary request or answer in `now` is byte for byte plan 06's. `PROTOCOL_VERSION` stays 2; its
+  doc's defaulted-field paragraph now names `system_summary` (`decision-gg-port-d0.md` §6.1).
+  - _Protocol._ `SystemSummaryRequest` gains `mode: QueryModeDto`, last, with
+    `SystemsInRangeRequest.mode`'s attributes, and loses its `Eq` and `Hash` derives;
+    `SystemSummaryDto` gains `observed: Option<ObservedDto>`, last, with `SystemRecord.observed`'s.
+    The summary's docs give its `existence`, `age_myr`, `stars` and `hierarchy` at the described
+    time, `time` in `now` and `observed.emitted` in observed mode, with `time` echoing the request
+    in both, so T11 subtracts no light age from a summary; `ObservedDto`'s doc adds the summary and
+    keeps the row's sentences. The nested types' "the summary's time" (`StarSummaryDto`,
+    `PulsarDto`, `VariabilityDto`, `StarEventDto`, `HierarchyDto`) is left as it is, so that only
+    three bindings move: `SystemSummaryDto`'s doc says that it means the described time. The
+    bindings `SystemSummaryRequest.ts`, `SystemSummaryDto.ts` and
+    `ObservedDto.ts` change, and nothing else.
+  - _Server._ `SummaryRequest` gains the accessor `mode() -> QueryMode` and loses `Eq` and `Hash`;
+    its `TryFrom` checks `time`, decodes `system`, then runs `convert::observe::query_mode`
+    (`bad_request` naming `mode`). `convert::system_summary(request, stars, time)` keeps its
+    signature and answers `observed: None`, so `bodies`, `SceneWorld::hosts` and the scene fixture
+    are unchanged. The observed answer is
+    `convert::system_summary_observed(request, stars, &summary, &retardation, error)`; both are
+    built by the private `summary_dto`, which takes the age at the summary's own time
+    (`SystemSummary::time`), so the two cannot drift. The handler keeps one interactive job:
+    `get_or_generate` first, so a centre member and a rogue planet are `unknown_system` naming
+    `system` in either mode; then, observed, `Observer::new`, `summary_observed` over
+    `stars.record()` and the cached stars, a `TraceMotionError` mapped by `untraced` (unreached:
+    the cache has refused the only systems that raise it), and `curvature_error`. The emitted time
+    is never held to the clock window.
+  - _Tests._ Wire forms in `stellar::tests`:
+    `a_system_summary_request_of_plan_06s_form_reads_as_now`,
+    `system_summary_request_wire_form_observed` and `system_summary_response_wire_form_observed`,
+    the `now` forms unchanged; `observe::tests`'s `observer`, `observed` and `observed_json` are
+    `pub(crate)` for them. In `convert::stellar::tests`:
+    `a_summary_request_checks_time_then_system_then_mode` and
+    `an_observed_summary_is_the_summary_when_the_light_left` (a system born after the epoch, seen
+    from 3,000 ly before its birth; the answer is `system_summary` at the emitted time with
+    `observed` beside it). In `tests/system_summary.rs`, two more properties of the shared-server
+    test `pinned_summaries_are_the_sims_and_refusals_name_their_field`, each with its own universe:
+    `a_summary_asked_in_both_modes_is_the_sims_now_and_when_its_light_left` (a pinned binary a
+    century after the epoch from 3,000 ly coreward, its light emitted before −1,000 years; the
+    observed state is `summary_observed`'s bit for bit and its `observed` the sim's retardation and
+    `curvature_error` to 1e-15 relative, over a second `OnceLock` galaxy with the full potential,
+    `moving_galaxy`) and
+    `an_observed_summary_names_the_mode_for_a_bad_observer_and_the_system_for_the_centre`.
+    `assert_summary_is_the_sims` takes the time it holds the summary at. The literals of the two
+    structs gain `mode: QueryModeDto::Now` or `observed: None`; the hosts of `system_bodies` and the
+    scene's hosts stay `now`.
+  - _The order of the refusals._ "After the summary's own checks" is read as the request's own
+    checks, as the brief orders them and as `resolve_system` does (T6): `SummaryRequest::try_from`
+    checks `time`, decodes the ID's bits, then the observer, and the pool job resolves the ID after
+    that. So an ID that `resolve` refuses, a centre member or a rogue planet asked with a bad
+    observer is `bad_request` naming `mode`, and `unknown_system` naming `system` with a valid
+    observer or in `now`; no pool job is taken for a request that cannot be answered. The wire's
+    `mode` doc and the handler's `# Errors` say so. No other deviation.
+  - _Deferred findings (2026-10-13 rule), from review._ (1) An observed summary of a feature member
+    rebuilds the member's feature interior on every request, cached stars or not: the sim's
+    `summary_observed` traces the record through `Drift::of_record`, which resolves the member over
+    `NoInteriorCache` (`resolve_system`'s observed path does the same). It costs only a summary
+    asked of a member by its ID, since the server's range query passes no feature sources yet; a
+    sim entry point that takes the member's `Drift`, or lends an interior cache, would remove it.
+    (2) `tests/system_summary.rs` keeps its own `close` and `assert_observed_is_the_sims`, near copies of `tests/observed.rs`'s; moving both
+    into `tests/common/` touches files outside this lane.
+- **P12.T11 as built (`lane/72-p12-t11-observed-mode`, 2026-10-21, at `GENERATOR_VERSION` 22).**
+  Client only: no Rust, protocol, binding, server, sim, GPU or golden change, and nothing generated
+  moves. The wire is used as P12.T6 and T6.b left it; a request in `now` carries no `mode` and is
+  byte for byte the one before (`decision-gg-port-d0.md` §6.1).
+  - _Names._ Under `apps/hyperion/src/renderer/src/`: `lib/galaxy/model.ts` gains
+    `QueryMode` (`{ kind: "now" }` or `{ kind: "observed", observerLy }`), `NOW_MODE`,
+    `sameQueryMode`, `Observation` (`emittedYr`, `lightAgeYr`, `apparentRelLy` from the chart
+    centre by `galacticDeltaLy`, `curvatureBoundLy`, `curvatureBoundArcsec`),
+    `ChartSystem.observed: Observation | null`, `ChartResult.mode`, `observedAgeMyr` (the age then,
+    `ageMyr − lightAgeYr ÷ 10⁶`) and `shownAgeMyr`. `lib/galaxy/wire.ts`: `toQueryModeDto`,
+    `toRangeRequest(…, mode = NOW_MODE)` and `toChartResult(response, mode = NOW_MODE)`, the mode
+    passed from the request the answer is `ok` for, so that an answer on show keeps its label.
+    `lib/galaxy/observation.ts`: `formatLightAgeYr`, `formatCurvatureBound` (`BoundUnit`),
+    `formatCurvatureBoundArcsec`, `LIGHT_AGE_WIDTH_CH` (10) and `EMITTED_WIDTH_CH` (11).
+    `spatial/marks.ts`: `SegmentMark` (`id`, `from`, `to`, `line: SegmentLine` `solid` or `dashed`,
+    `stroke: ColourToken`, `widthPx`, and optional `fromMark`, `endTick`, `minLengthPx`),
+    `ObserverMark` (`position`, `label`) and `SpatialScene.segments` and `.observer`, none when
+    absent. `spatial/apparent.ts`: `apparentOffset(present, apparent, frame, camera): ScreenOffset`
+    (`dxPx`, `dyPx`) and `APPARENT_OFFSET_MIN_PX` (4). `spatial/drawList.ts`: `LineOp.dashPx`
+    (`DashPx`), `PolylineOp.weight` (`line` or `mark`), `SEGMENT_DASH_PX` (6 and 4 CSS px, restated
+    from `view/wireframe/drawList.ts`'s `PREDICTED_DASH_PX` with a pointer) and `OBSERVER_MARK_ID`.
+    `spatial/SpatialView.tsx`: `mode?: SpatialMode` (`name`, `from`). `components/ModeControl.tsx`:
+    `ModeControl({ mode, onMode, heldBackId, observedHeldBack })`, `DisplayMode` and `MODE_KEY`
+    (`M`). `ChartControls`: `modes?: ChartModeControls` and `MOVE_OBSERVER_LABEL`.
+    `useLocalChart`: `displayMode`, `observerLy`, `mode`, `observedHeldBack`,
+    `observerMoveHeldBack`, `chooseMode`, `moveObserverToCentre` and `NO_CHART_TO_OBSERVE`.
+    `useRangeQuery`'s input gains `mode?`. `useSystemSummary` takes a fourth argument, the mode,
+    `NOW_MODE` when absent, and returns `shownMode` and `shownEmitted` too. `SystemReadout` gains
+    `starsAt?`, `AS_OBSERVED`, `CURVATURE_BOUND_LABEL` and `EMITTED_LABEL`; `SystemReading` gains
+    `widthCh?`; `SymbolLegend` gains `observed?` and `APPARENT_LEGEND`; `chartModel.ts` gains
+    `OBSERVER_LABEL` and `answeredMode`; `drawList.ts`'s `PolylineOp` gains `fill?` and its
+    `RingLabel` `clearOfPointPx?`, which `furniture.ts`'s ring candidates keep, and `markInksPx`
+    counts a mark-weight polyline as ink. Provides' `ObserverMark` is a scene mark, not a
+    component, and the task's "its coordinates in the readout" is the view's furniture, as the
+    lane's brief directed.
+  - _Deviation: no new draw op._ The existing paint test's `leadingCall` switches over every
+    `DrawOp` kind with no default, so a new kind would fail its type check. A segment and its tick
+    are `line` ops with an optional dash, and the observer's eye a closed `polyline` at a mark's
+    weight with an optional fill, which `paint` draws at `markStrokeDevicePx` and does not move
+    out. Every existing scene's draw list and paint are unchanged.
+  - _Deviation: where the 4 px rule lives._ The view owns its camera and hands it to nobody, so
+    `toScene` cannot measure an offset on the screen. It puts the rule on each segment as data
+    (`minLengthPx` 4, or 0 for the selected system's; `fromMark`, the mark it leaves), and
+    `buildDrawList` measures each segment with `apparentOffset` and cuts it at the mark's outline
+    there. A chart in `now`, and a row without `observed`, have no segment.
+  - _§5 a, the bound._ The present position's readings (`DIST`, `NORTH`, `COREWARD`, `SPINWARD`,
+    `RADIUS`, `ANGLE`, `HEIGHT`) take `~` and no `±`; `CURVATURE BOUND` follows `HEIGHT` under
+    `GALACTIC`, in the distance ladder (`km`, `Mm`, `Gm` and `AU` through `formatBodyDistance`
+    below 0.01 ly, `ly` from there, each switch with `DISTANCE_HYSTERESIS`'s 5%, held across
+    readings as the habitable zones' rows hold theirs), then after a middle dot, as a value of its
+    own in `--text`, in `″` to three significant figures, E notation below 0.001″, set against its
+    digits (`0.632 AU · 0.00150″`), on a row of its own. A bound of zero reads `0 ly · 0″`.
+  - _§5 b, the joiner and the tick._ As leaned: 1 px `--text-muted` at 6 and 4 px, the selected
+    system's `--text` 2 px, the tick 0.25 rem across the joiner's end, solid, as wide; never picked.
+    Both stand only outside the mark's outline, the tick only where the apparent position does, so
+    that the amendment's rule wins over "the selected system whatever its offset" inside the
+    outline. They are drawn before every mark, as no path crosses a symbol, the selected one last
+    among them.
+  - _§5 c, the observer._ An eye, two quadratic arcs 1 rem across and half as tall, filled north
+    of the plane and open south of it as every mark is, with a stalk to its foot in `--text`,
+    labelled `OBSERVER` as a curve label whose text stands 0.25 rem outside the place of a
+    selection's bracket about it, as a mark's label does, counted as ink by the other labels,
+    drawn only inside the view after every mark, and never picked. It is none of the symbol
+    shapes, the bracket, the chevrons, or the galaxy map's upright cross with a gap (its cursor)
+    and diagonal cross (its chart centre). The furniture writes the mode after the time: `MODE NOW`,
+    or `MODE OBSERVED FROM` and the observer's `RADIUS`, `ANGLE` and `HEIGHT`. The furniture, the
+    legend's `OBSERVER` and `TICK APPARENT POSITION, DASHED TO PRESENT` and the eye follow the
+    answer on show's `answeredMode`: the mode asked, but `now` for an answer asked observed whose
+    rows all came without their observation, as from a server that ignores the mode.
+  - _§5 d, words._ As leaned; the rows proposed are in the report and below.
+  - _§5 e, the first observer._ As leaned: `OBSERVED` takes the centre of the chart on show and is
+    held back with `NO CHART: centre one to observe from it` while there is neither an observer nor
+    a chart on show, and with the link's reason, as both modes are. `OBSERVER TO CENTRE` stands
+    beside the mode in both modes and moves the observer at any time, in `NOW` setting where the
+    next `OBSERVED` observes from, so that `M` never takes it from under the focus; it is held back
+    with the link and without a chart on show. The mode and the observer are kept across a new
+    centre and dropped for good with the universe: going back to it does not bring them back.
+  - _`AS OBSERVED`._ A line above the readout's scrolling region, so that it stays on show however
+    far the readings are scrolled, with a copy in the live region, so that a selection is announced
+    with it.
+  - _§5 f, the key._ `M`, gated as `K` is (no modifier, no repeat, not in a text field), stepping
+    to the other mode, and live while the controls are hidden on a compact page.
+  - _§5 g._ `AGE` prints `AT UT <emitted>` in observed mode; the list's `DIST ly` takes `~` for an
+    observed row, its column 7 ch for `~500.00`; `LIGHT AGE` and `EMITTED UT` stand in 10 and 11 ch
+    slots for `228,000.00` and `-228,000.00`, to universe time's 0.01 yr, so that the three times
+    read side by side add up.
+  - _The summary._ `SystemsPanel` asks `system_summary` in the mode of the chart on show; the
+    `SYSTEM` display's `useSystemData` is unchanged and asks in `now`. `toSummaryRequest` takes the
+    wire's mode (`RequestOf<"system_summary">["mode"]`) so that `lib/system/wire.ts` changes in
+    that function alone; `useSystemSummary` converts with `toQueryModeDto` and reads only the
+    answer's `observed` presence and `emitted`, so `toSystemModel` is unchanged. An answer is in the
+    mode asked where it carries `observed` and in `now` where it does not, and is stale where that
+    differs from the selection's: the chart's for a row that carries `observed`, `now` for one that
+    does not. The primary's `DIES IN`/`DIED` counts from the emitted time, which the stars describe.
+  - _Observed rows elsewhere._ A free-floating planet is drawn and listed by its age then
+    (`isFormedPlanet`, `toMark`), and every symbol and class is the brief the row carries, the
+    primary when the light left.
+  - _Deviation: systems unborn when their light left._ A star system that exists now but whose
+    light shows it unborn has no brief in observed mode (Design note 4: the wire drops it and keeps
+    the row), so it is listed as `NOT YET FORMED` and not drawn, as in `now` (the legend's
+    `NOT YET FORMED: LIST ONLY`), although the chart otherwise draws every system at its present
+    position. Whether it should be drawn there, with a mark that claims no type, is the owner's.
+  - _Tests (123 new, as run)._ `lib/galaxy/wire.observed.test.ts` (12),
+    `lib/galaxy/observation.test.ts` (7), `spatial/apparent.test.ts` (6),
+    `spatial/drawList.segments.test.ts` (21), `spatial/paint.test.ts`'s new `paint's segments`
+    block (10), `displays/galaxy/chartModel.observed.test.ts` (20),
+    `components/ModeControl.test.tsx` (9), `displays/galaxy/ChartControls.modes.test.tsx` (6),
+    `displays/galaxy/useRangeQuery.observed.test.tsx` (5),
+    `displays/system/useSystemSummary.test.tsx` (6),
+    `displays/galaxy/SystemReadout.observed.test.tsx` (9),
+    `displays/galaxy/SymbolLegend.observed.test.tsx` (2),
+    `displays/galaxy/GalaxyDisplay.observed.test.tsx` (2: `OBSERVED` held back until a chart is on
+    show, and the mode and observer dropped for good with the universe), and in
+    `displays/galaxy/GalaxyDisplay.integration.test.tsx` two steps of the script (`observed`,
+    `unobserved`) with four tests and the by-eye case's own block of four (a neutron star now 20,002
+    ly from an observer kept at the first centre, read `AS OBSERVED` as the supergiant it was, with
+    `LIGHT AGE 20,002.00 yr`). Every existing test passes unchanged.
+  - _Proposed nomenclature rows (main adds them to the guide)._ `OBSERVED`, control: the mode
+    control's word for `OBSERVED FROM`. `MODE`, label: a display's mode in its furniture and on its
+    control (`MODE NOW`). `EMITTED`, label: when the light a reading shows left the thing, in
+    universe time (`EMITTED UT -4197.50 yr`). `CURVATURE BOUND`, label: the stated bound on an
+    apparent position's error from the neglected curvature of the source's orbit, a bound and not a
+    `±`, in the distance ladder and in `″` to three significant figures (E notation below 0.001″).
+    `LIGHT AGE`'s precision: 0.01 yr, as universe time. `OBSERVER`, legend and label: the eye, two
+    arcs meeting at points, with a stalk, that marks the observer in observed mode.
+    `TICK APPARENT POSITION, DASHED TO PRESENT`, legend: the apparent position's marks.
+    `OBSERVER TO CENTRE`, command: moves the observer to the centre of the chart on show.
+    `NO CHART: centre one to observe from it`, held-back reason.
+  - _Deferred findings (2026-10-13 rule)._ (1) `FROM CHART CENTRE` stays the present's dust from
+    the chart's centre at the chart's time; with the observer moved off the centre it is not the
+    dust the observed light crossed, which would be the observer to the apparent position at the
+    emitted time. (2) The `HR DIAGRAM` page plots the briefs of the chart on show, which in
+    observed mode are the primaries when the light left, and does not name the mode; it could carry
+    the chart's `MODE` reading. _Closed by P12.T11.b._ (3) The legend's dashed sample relies on
+    `stroke-dasharray` at `--line-scale` in a non-scaling-stroke SVG, which only the look at
+    landing can check. _Closed by P12.T11.c._ (4) The legend names no selected joiner (`--text`,
+    2 px), as the orbit map's does its selected orbit. (5) `OBSERVER TO CENTRE` shares `CENTRE`
+    with `CENTRE CHART`; `OBSERVE FROM CENTRE` was weighed and left, since it reads as a choice of
+    the mode; the nomenclature row decides. _Closed by P12.T11.c._
+- **The observed brief reads the summary's primary (P12.T2 fix, lane `observed-class`,
+  2026-10-21, at `GENERATOR_VERSION` 22).** P12.T11's landing look (look-72) found one system at
+  one emitted instant reading two classes on one screen: GDG 0E0V00 E-141 of LOOK72
+  (`820E6EE00000008D`, 10.96 + 6.38 M☉ at P = 326 d), seen from 20,000 ly, was
+  `M6.5Ib SUPERGIANT` in its observed range row and `sdO3 HOT SUBDWARF, 2.25 M☉` as the observed
+  summary's STAR A. The row read `SystemStars::brief_at`, the primary's single-star track (T0's
+  note above: "observed mode reads `SystemStars::brief_at`"; plan 11's "Deviations in P11.T11,
+  as built", _The brief_), and the summary read the pair's timeline. The pair's Roche-lobe
+  overflow in the Hertzsprung gap at 20.1946 Myr ran into a common envelope at 20.19485 Myr that
+  left a 2.37 M☉ helium star in a 1.04 d orbit. The light left 2.5 Myr later, so the summary was
+  right, and the row's red supergiant, which the stripped star never becomes, was wrong (science
+  check: Götberg et al. 2018, A&A 615, A78; Laplace et al. 2020, A&A 637, A6).
+  - _The fix._ `SystemStars::summary_brief_at(t)` is the brief of `summary_at(t)`'s primary: its
+    kind, class, log L and `T_eff` from the one private helper that chooses between a star's own
+    model and its pair's state (`summarised`, which `star_summary_with` now reads too), and the
+    kept attempt's star count (`SystemStars::star_count`). `observe_on_line`, and so
+    `observe_hit`, `range_query_observed` and the server's observed rows and `resolve_system`,
+    report it as `brief_then`. `SystemStars::brief_at` and the range brief (`BriefModel`) are
+    unchanged, so now mode is plan 06's row for row. _Since P11.T11.a_ (plan 11; ruling
+    `decision-observed-class-findings.md` §A) `SystemStars::brief_at` has this body and
+    `summary_brief_at` is gone, so one brief remains, and now mode's rows read the pair too.
+  - _What moves._ An observed row of a primary its pair has changed by the emitted time (a
+    stripped star, an Algol's donor or gainer, a merger product), and the star count of a
+    redrawn system's observed row (P11.T7, about 5 × 10⁻⁴ of the grid). No golden pins an
+    observed row, so none moves; the record is not touched, so no bump.
+  - _Tests._ `tests/observe_brief.rs`: look-72's system at look-72's instant (the stripped helium
+    star of 2–4 M☉ in both the row and the summary, no supergiant, where its single-star track is
+    EAGB), and six layer-E systems near it whose primary its pair strips, re-aged so that the
+    stripping starts 40,000 years before the epoch and observed 20,000 years before, during and
+    20,000 years after it: the row's kind, class, log L, `T_eff` and count are the summary's
+    primary's, bit for bit. `stellar::system`'s `the_summary_brief_counts_the_kept_stars` held
+    the kept count against a first attempt's (removed by P11.T11.a with `first_star_count`, since
+    the one brief counts the kept stars by construction). T2's dying supergiant is now searched by the
+    summary's brief, as observed mode reads it.
+  - _Deferred findings (2026-10-20 rule)._ (1) Now mode keeps the divergence: a range row
+    (`BriefModel`, single-star) and the now summary disagree for a primary its pair has changed
+    at the query's time (P11.T11's open ruling; with a decision agent through main). **Ruled
+    2026-10-21 (`decision-observed-class-findings.md` §A), built by plan 11's P11.T11.a.** (2)
+    `822C72E00000008C`, a case-A Algol, core-collapses its donor while it is still on the main
+    sequence (6.34 M☉) at its pinned single-star death age, 24.6187 Myr (`binary/supernova.rs`,
+    `pinned_collapse`; with a decision agent through main). (3) The stripped mass, 2.37 M☉ for a
+    10.96 M☉ primary, is some 30% under the detailed grids' 3.32 M☉ (Götberg et al. 2018, Table 1,
+    Z = 0.014) and 3.43 M☉ (Laplace et al. 2020, Table A.2), likely the Hertzsprung-gap core mass
+    of Hurley et al.'s fits. (4) **Closed** by galaxy plan 06's P06.T24.c (lane `stripped-class`,
+    2026-10-21; `decision-stripped-star-class.md`): a 2.25 M☉ stripped star was classified
+    `HOT SUBDWARF`, but Götberg et al. (2018) find subdwarf-like spectra only up to about 1.7 M☉,
+    and Drout et al. (2023, Science 382, 1287) put the 2–8 M☉ stripped stars between the subdwarfs
+    and the Wolf-Rayet stars. Hot subdwarfs now end at 1.7 M☉, and the heavier helium stars below
+    the Wolf-Rayet floor are `STRIPPED HELIUM STAR`s (`He-sdO3` here, in the observed and the now
+    summary alike). Plan 11's P11.T11.b (the same lane) closes the other half: a paired helium
+    star now carries its helium-star entry mass, so its surface follows the single star's rule and
+    a paired Wolf-Rayet star turns WC as a single one does.
+    (5) The pin collapses the helium star at about 0.7 of its helium main sequence (Hurley et al.
+    2000, eq. 79, gives 3.71 and 3.38 Myr at 2.25 and 2.37 M☉, against the 2.53 Myr to the pin),
+    not after core-helium depletion; ruled not a blocker (`decision-observed-class-findings.md`
+    §B.1).
+- **P12.T11.b as built (`lane/73-p12-t11b-hr-mode`, 2026-10-21, at `GENERATOR_VERSION` 22).**
+  Client only: no Rust, protocol, binding, server, sim, GPU or golden change, nothing generated
+  moves, and the guide is not edited. The `HR DIAGRAM` page names the mode and time of the answer
+  it plots, as the chart's furniture does, and closes T11's deferred finding (2).
+  - _Names._ Under `apps/hyperion/src/renderer/src/displays/galaxy/`: the new `chartReadings.ts`,
+    the one writer of the chart's readings, exports `CHART_FRAME_NAME` (`GALACTIC`, the
+    furniture's `frameName` literal before), `RADIUS_WIDTH_CH` (9), `ANGLE_WIDTH_CH` (6),
+    `HEIGHT_WIDTH_CH` (9), `TIME_WIDTH_CH` (9), `CENTRE_DECIMALS` (1), `radiusReading`,
+    `placeReadings`, `timeReading(timeYr)` and `modeReading(mode)`, each with TSDoc. The constants
+    and the three functions are moved from `LocalChartPanel.tsx`, and the time reading's
+    construction is made `timeReading`; the panel imports them and its furniture reads exactly as
+    before. `HrDiagramProps` gains `mode: QueryMode` and `timeYr`; `HrDiagram.tsx` gains the
+    private `ModeLine` and `LineReading`. `GalaxyPages` passes `answeredMode(chart.result)` and
+    `chart.result.timeYr`; its empty state is unchanged. In `styles.css`'s `.hr-diagram` block:
+    `.hr-diagram__readings`, `.hr-diagram__stale-slot`, and the line added to
+    `.hr-diagram--stale`'s muted rule.
+  - _Deviation: the line's own reading._ The brief named the chart's `Reading`
+    (`spatial/Reading.tsx`), but it has no room for a stale mark, a mark beside its `div` would
+    stand in the `dl` outside any term's group, and `spatial/` is outside the lane's files.
+    `LineReading` writes `Reading`'s markup in `Reading`'s classes (`field spatial-reading`,
+    `field__value`, `spatial-reading__value` in its `ch` slot, `spatial-reading__unit`,
+    `readout__missing`) and adds after the unit a slot, `hr-diagram__stale-slot`, 2 ch wide in the
+    value's monospaced figures. The labels, slots and precisions are the shared module's, as the
+    chart's are. Posted to the lane's issue.
+  - _§5 a, where the line stands._ As leaned: a `dl` under the plot, after the temperature axis's
+    label and before the counts. It is in the furniture's own classes as well
+    (`spatial-view__readings`, and `spatial-view__mode` and `spatial-view__observer` within it), so
+    that it wraps between readings and never inside one as the furniture does, with no selector
+    added outside the `.hr-diagram` block. `.hr-diagram__readings` adds only `flex: none`.
+  - _§5 b, the time and the frame._ As leaned: `UT` at `TIME_WIDTH_CH`, then `MODE`. In observed
+    mode `FRAME GALACTIC` stands before `UT` and is the heading the observer's `RADIUS`, `ANGLE`
+    and `HEIGHT` stand under, as on the chart's furniture; no second `GALACTIC` is written. In
+    `NOW` there is no `FRAME`, since the diagram plots no positions.
+  - _§5 c, read from the answer._ As leaned: the page reads `answeredMode(chart.result)` and the
+    result's `timeYr`, so a choice not yet answered leaves it as its answer reads, and an answer
+    asked observed whose rows all came without their observation reads `MODE NOW`.
+  - _§5 d, stale._ As leaned: the line joins `.hr-diagram--stale`'s muted rule, and the time and
+    each coordinate trail `StaleMark`'s `S` in their slot; `NOW`, `OBSERVED FROM`, `GALACTIC` and
+    an em dash take none. The slot is kept while the answer is live, so that the mark's coming
+    moves nothing on the line. The chart's own single furniture `S` is unchanged.
+  - _§5 e–g._ As leaned: the canvas's accessible name stays `Hertzsprung-Russell diagram` (and
+    `…, stale`), the line being DOM text in the figure after the plot; no new words; no
+    `AS OBSERVED` line.
+  - _Tests (22 new, as run)._ `displays/galaxy/chartReadings.test.ts` (7: the frame's name, a
+    place's readings at 0.1 ly in the chart's 9, 6 and 9 ch slots, the axis's missing `ANGLE`, the
+    radius, the time in its 9 ch slot, `NOW`, and `OBSERVED FROM` with the observer as a place);
+    `displays/galaxy/HrDiagram.test.tsx`'s new block (10: `NOW` with `UT` and no `FRAME` or
+    observer; the line's place in the figure, between the axis's label and the counts; observed,
+    `FRAME GALACTIC` and the observer at the chart's precisions nested in `MODE`; the axis's
+    `ANGLE —`; the accessible name unchanged; four stale marks, on the time and each coordinate and
+    on no word; the time stale but not `NOW`; no mark on the em dash; the slots' room; and the
+    line in the stale rule); `displays/galaxy/GalaxyDisplay.observed.test.tsx`'s new block (5,
+    with an off-axis centre typed into `CURSOR` and observed: the `HR DIAGRAM` page reads
+    `OBSERVED FROM` and the observer; it reads the chart furniture's `MODE` and `UT` text; it keeps
+    `OBSERVED FROM` while `NOW` is chosen and not yet answered; it reads `MODE NOW` once answered;
+    and an answer asked observed whose rows came without `observed` reads `MODE NOW`). The existing
+    `HrDiagram` tests pass with only the new props added, and every chart furniture test passes
+    unchanged.
+  - _Deferred findings (2026-10-13 rule)._ (1) The two pages mark a stale answer differently: the
+    chart's furniture trails one `S` for the whole block (plan 05's ruling (8), applied in its T11
+    validation), the HR page's line one after each value, as its counts do, so the same answer's
+    `UT` reads `+0.00 yr` beside the block's one `S` on one page and `+0.00 yr S` on the other;
+    main decides. _Closed by P12.T11.d._ (2) A `stale` prop on `Reading`, and a shared `FRAME` and
+    `MODE` reading, in plan 05's `spatial/`, would let the HR page's line use the chart's own markup
+    rather than write it again in `LineReading` and `ModeLine`; outside this lane. _Closed by
+    P12.T11.d._ (3) The guide's `MODE` row places the reading in a spatial view's furniture only;
+    the `HR DIAGRAM` page, a graph, now carries it under its plot, which the row could name (UX
+    review; the guide is main's). _Closed by P12.T11.d._ (4) The page's existing counts keep no
+    room for their `S` (P06.T37), so a stale answer moves them while the new line keeps its place:
+    the page now behaves two ways (UX review). _Closed by P12.T11.d._
+- **P12.T11.c as built (`lane/74-p12-t11c-compact-refusals`, 2026-10-22, at `GENERATOR_VERSION`
+  22).** Client and guide only: no Rust, protocol, binding, server, sim, GPU or golden change, and
+  nothing generated moves. P06.T24.c was not on `origin/rendering-and-planets` at the lane's last
+  merge, so the compact comment's figures are look-72's and `LocalChartPanel.tsx`'s doc is
+  unchanged. Closes T11's deferred findings (3) and (5).
+  - _Names._ Under `apps/hyperion/src/renderer/src/`: `spatial/drawList.ts` exports
+    `SEGMENT_TICK_REM` (0.5, private before) and
+    `observerBoxPx(scene, camera, viewport): ScreenBoxPx | null`, the eye's 1 rem square where it
+    is drawn, else `null`, which shares the private `observerCentre` with `observerOps`.
+    `spatial/labels.ts`: `LabelSurroundings.observer` (`BoxPx | null`, optional), which
+    `SpatialView` fills. `ChartControls.tsx`: `MOVE_OBSERVER_LABEL` is `OBSERVER TO CHART CENTRE`;
+    the private `refusalPart`, through `StatusText`'s `renderPart`; the classes
+    `chart-controls__field--refused`, `chart-controls__error-name` and
+    `chart-controls__modes--reason`. `SystemReadout.tsx`: the private `AtTime`. `styles.css`: the
+    compact rules for the three classes, after the choices' bottom margin, and
+    `.system-readout__beside .system-readout__value`, its stale form and `.system-readout__whole`.
+  - _A2.1, the refusals._ As briefed. The field is marked `--refused` while its refusal stands,
+    and the compact page hides its hint then; the refusal takes `flex-basis: auto`, no margin and
+    `nowrap`, and its name, with its trailing space, the `.visually-hidden` pattern, whose
+    declarations a guard test holds the rule to. "Never wraps" rests on the row's room, since the
+    field keeps `flex-wrap: wrap`: reckoned, the refusals end near 775 and 801 px of the page,
+    inside the column that ends at 831 (the UX review reckons 461 and 499 px of their rows, the
+    same). The stacked page is unchanged.
+  - _A2.2, the command._ The 0.5 rem gap, and `nowrap` with `flex: none` on the row's parts while
+    the row is not marked `--reason`, which it is only with the link up and a `NO CHART` reason on
+    show. Reckoned, the row ends some 5–8 px inside the column at 1280 × 720 (the lane 6–8, the
+    UX review 5), room for the 3 px focus ring, so the 0.25 rem padding fallback is not built and
+    `.control` is untouched. Unshrunk, a row the look finds short runs past the column rather than
+    wraps onto the furniture.
+  - _A2.3 and A2.4, the tick and the sample._ As briefed: the sample is 2.75 rem, 44 units, the
+    joiner `M 42 4 H 0` drawn from the tick, (6 + 4 + 6) px × 2.56 = 40.96 of its 42; the tick 8
+    units, 0.5 rem. The compact legend keeps six lines in both modes by the UX review's reckoning,
+    the observed last line ending near 768 px.
+  - _Deviation: the eye is its own surrounding._ The eye's box is `LabelSurroundings.observer`
+    rather than one of `obstacles`, and `placeLabels` adds it to the obstacles for the destination's
+    label and the rest, since furniture never moves the selection's label and the eye must (its
+    other side, or none, as where it yields to the destination's).
+  - _Deviation: the eye at a system's point._ A label beside the mark the eye stands on starts
+    `labelOffsetPx` out, the mark's radius, 0.5 rem and 0.75 px + 5δ, outside the eye's 0.5 rem
+    half-width, so it never covers the eye and is kept, the selection's too: the brief's tests
+    "the observer at an unselected system's point drops that system's label" and "at the selected
+    system's point puts its label on its other side, or none" contradict its rule that a label that
+    would cover the eye is dropped. The tests put the eye under the label instead, look-72's case
+    (a system's label at the centre), and one pins that the label of the mark the eye stands on is
+    kept. Only a label held inside the view back across its own mark covers the eye there.
+  - _A2.6, `AGE`._ `· AT UT <time> yr` in both modes, the time's figures a value's, in `--text`
+    and untracked, muted with a stale readout, as `EMITTED UT`'s are and as the terrain readout's
+    `· AT 243 K` sets its figure (UX review); its words and unit stay muted. `.readout dd` already
+    set the figures in B612 Mono, so only their tracking and colour changed. As observed the
+    reading is wide and the time stands in `EMITTED_WIDTH_CH`'s 11 ch slot. `UT <time> yr` is kept
+    whole (`nowrap`) in both modes and `· AT` is not, so that the readings' one column at 1280 × 720
+    breaks the reading after `AT` rather than run it 19–34 px past its edge (the UX review's
+    must-fix, against a first build that kept `· AT UT <time> yr` whole); in the wide row at
+    1920 × 1080 it stands on one line.
+  - _A2.7 and A2.8._ As briefed, `CHART TIME`'s `±1000 yr` kept. The guide's sentences are written
+    as given but one: the angle bullet's last sentence names the picoarcsecond too, "The
+    milliarcsecond, microarcsecond and picoarcsecond, which Table 8's note gives for astronomy, are
+    not used", since Table 8's note gives all three (SI Brochure, 9th edition, V4.01 (2026), note
+    (a), p. 141; note (b) in V1.08 to V3.02). Table 8's degree, minute and second, and §5.4.3's
+    "no space is left between the numerical value and the unit symbol" for `°`, `′` and `″`, held
+    as written (science check).
+  - _Left as written._ T11's record keeps `OBSERVER TO CENTRE` and plan 05's records `0.01-500 ly`:
+    they say what was built then.
+  - _Tests (44 new, as run)._ `displays/galaxy/ChartControls.test.tsx` (7: the hint in words; each
+    field's refusal in its own field while both stand, described by its own; each name, with its
+    trailing space, in its element; the same refusals and descriptions inside a compact and a
+    stacked page, which pins that the markup does not depend on the page; the refused mark dropped
+    with the refusal); `ChartControls.modes.test.tsx` (4: the row's `--reason` mark with both
+    reasons, with the command's alone, with a chart on show and with the link down);
+    `LocalChartPanel.compact.test.tsx` (8 stylesheet guards: the refusal's row, the hint giving
+    way, the hidden name, the stacked rules; the row's gap, its `nowrap` and `flex: none`, its
+    wrapping reasons, `.control` untouched); `SymbolLegend.observed.test.tsx` (4: the dash, two
+    dashes and the gap at 2.56, a dash meeting the tick, the tick's 0.5 rem);
+    `spatial/drawList.segments.test.ts` (3: `observerBoxPx` inside the view, in `now` and outside
+    it); `spatial/labels.test.ts` (6: a label over the eye dropped, the label beside the mark the
+    eye stands on kept, the selection's other side, the selection's none, the destination's next
+    place, and no eye placing every label as before); `spatial/SpatialView.test.tsx` (4: dropped,
+    the selection's other side, `now`, the observer outside the view);
+    `displays/galaxy/SystemReadout.observed.test.tsx` (8: wide as observed, the 11 ch slot, the
+    time whole with its label and unit in both modes, the stylesheet's `nowrap`, `--text` and
+    untracked, stale muted, `now`'s slot). Updated for the words: the tick's ends (0.5 rem), the
+    command's name in the mode and integration tests, and `· AT UT` in four readout tests and the
+    integration test, which now reads `AGE` by its term. Every other existing test passes
+    unchanged.
+  - _Deferred findings (2026-10-13 rule)._ (1) `CHART TIME`'s hint `±1000 yr` sets a limit with
+    the sign the guide's `±` row keeps for an Estimated value's uncertainty; `-1000 to 1000 yr`,
+    its refusal's words, would follow § Numbers as `DRIVE RANGE`'s now does (UX review; the brief
+    kept it). (2) In `NOW` the time after `AT` has no fixed slot, so `yr` moves as `CHART TIME`
+    changes; an 8 ch slot would make the reading as long as its longest, which the UX review
+    reckons wraps after `AT` in its half row at 1920 × 1080; main's look measures. _Closed by
+    P12.T11.e._ (3) The guide's
+    grouping bullet credits the thin space to the SI Brochure's §5.4.4, which says "a space"; the
+    thin, fixed space is NIST SP 811's (§10.5.3; science check). (4) The guide's observer bullet
+    says marks' labels keep off the eye "as they keep off the core arrow", but the selection's
+    label, which the core arrow never moves, takes its other side or none (plan-conformance
+    review). (5) The beside's words, `AT UT`, `yr` and `AGO`, inherit `.readout dd`'s B612 Mono,
+    where § Typography gives labels B612 (UX review; before this task). (6) The guide's
+    `1/8,000 s` (its exposure row) groups a four-digit whole part, which the clearer grouping rule
+    now rules out (UX review; before this task). (7) The eye standing on a centred system's mark
+    is left as both true positions, the eye drawn after every mark; main's look judges whether the
+    two read as one. (8) Putting the eye's box on the `DrawList` would project the observer once
+    (TypeScript review); left, since the smoke harness's and the HR projection's draw lists, outside
+    this lane, build the type, and both paths already share `observerCentre`.
+- **P12.T11.d as built (`lane/75-p12-t11d-stale-per-value`, 2026-10-22, at `GENERATOR_VERSION`
+  22).** Client, guide and plan only: no Rust, protocol, binding, server, sim, GPU or golden
+  change, and nothing generated moves. Neither P06.T24.c nor the `GENERATOR_VERSION` 23 bump was on
+  `origin/rendering-and-planets` at the lane's last merge (`a324a05a`), so the reckoning is at the
+  base's figures. Main's ruling on the fit came before Part A was committed, so Parts A and B are
+  one commit. Closes T11.b's deferred findings (1) to (4).
+  - _Names._ `spatial/Reading.tsx`: `ReadingProps.stale?: boolean | undefined`, the brief's shape,
+    and `ReadingProps.own?: boolean | undefined`; the slot `span.spatial-reading__stale-slot`,
+    whose rule (`.hr-diagram__stale-slot`'s: `inline-block`, `min-width: 2ch`, right-aligned) now
+    stands beside `.spatial-reading__unit`; the modifier `spatial-reading--own`. The new
+    `spatial/FrameReading.tsx` (`FrameReading`, `FrameReadingProps.frameName`) and
+    `spatial/ModeReading.tsx` (`ModeReading`, `ModeReadingProps.mode` and `.stale?`, and
+    `SpatialMode`, moved from `SpatialView.tsx`, which `chartReadings.ts` now imports from there).
+    `SpatialViewProps.timeIsOwn?: boolean | undefined`. In `HrDiagram.tsx` `LineReading` and
+    `ModeLine` are gone: the line is a `dl` of `FrameReading`, `Reading` and `ModeReading` written
+    in place, and each count's `dd` ends in `span.hr-diagram__count-slot`. In `styles.css`:
+    `.hr-diagram__count-slot`, `.spatial-view--stale .spatial-reading--own` (`color: var(--text)`)
+    after the muting rule, and the compact scale bar's `margin-right: 0.75rem`.
+  - _§3, the fit._ The lane's reckoning from look-73's boxes agrees with main's. With a 2 ch slot
+    (18.2 px) after `RADIUS`, `ANGLE`, `HEIGHT` and `UT` (191.4, 136.2, 192.1 and 152.9 px) and
+    after the observer's three (the mode 728.9 px), line 1's five readings come to 802.4 px with no
+    gap, more than the 798 px line, so in today's order `UT` wraps (it would end at 883.4) and
+    compact `OBSERVED` takes a fourth line, its stage 222 px against its 240 px floor. Main's ruling
+    of 2026-10-22, on the lane's issue, replaced the brief's stop: the furniture holds a first `dl`
+    (`FRAME`, the centre and the time), the scale bar, then, only where `mode` is given, a second
+    `dl.spatial-view__readings` holding the mode alone; the compact scale bar takes the readings'
+    0.75 rem as `margin-right`; nothing else in the layout changes; and the orbit map's
+    `DISPLAY TIME UT`, the console's own clock, takes no mark and is not muted. As built, reckoned
+    at 1280 × 720 and 100% (at 150% every edge within 0.5 px, the furniture from 32.7 px):
+    - `NOW`: line 1 ends after `HEIGHT` at 718.5; line 2 holds `UT` (33–185.9), the bar
+      (197.9–384.9) and `MODE NOW` (396.9–488.2). Two lines, as before; the stage 258 px (264.6 at
+      150%) over its 240.
+    - `OBSERVED`: line 1 the same; line 2 `UT` and the bar, to 384.9, the mode not fitting after
+      them (it would end at 1125.8); line 3 the mode, 33–761.9. Three lines, as before; the stage
+      240 px (248 at 150%), at its floor. Line 3 is the tightest: the mode's box ends 69 px inside
+      the page's 831, and with its 0.75 rem margin, which the line holds as the base's `UT` held
+      its own (823 of 831), 57.1 px inside (the UX review's figure; main's ruling gave 69); every
+      wrap is certain, `UT` by 52.4 px past line 1's end and the mode by 294.8 past line 2's.
+    - At 150%, main's figures: line 1 ends at 718.1; line 2 at 487.9 in `NOW` and 384.6 observed;
+      line 3 32.7–761.5. With P06.T24.c, not in this tree, main's figures: the same edges at 100%
+      (about 718, 488, 385 and 762 at 150%), and the stages 262 px in `NOW` and 228 observed at
+      100%, 266 and 232 at 150%, against its 224 px floor.
+    - Live and stale alike, since every slot is kept and the own time has none; no reading wraps
+      inside itself, each being `nowrap` and the longest, the mode, 728.9 px of the line's 798.
+    - The stacked page (1920 × 1080, the furniture to 1068.7, its readings 1.25 rem apart and its
+      parts 1.5 rem): line 1 the first `dl`, to 915.4; line 2 the bar (33–220) and the mode
+      (244–335.3 in `NOW`; 244–996.9 observed, the observer 1.25 rem apart). Two lines in both
+      modes, where `OBSERVED` had three, so its stage gains a line, about 22 px.
+    - The orbit map has no mode, so one `dl` and the bar, as before: its centre's three readings
+      grow 54.6 px and the display time not at all. By estimate only (B612's tracked capitals at
+      about 10.7 px, from look-73's boxes, and the `SYSTEM` grid's 2fr column): at 1280 × 720
+      `FRAME SYSTEM BARYCENTRIC` to `HEIGHT` comes to about 794 px of a map about 785 wide, so
+      `HEIGHT` may now open the display time's line (the two about 564 px), three lines either way;
+      at 1920 × 1080 the five readings, about 1166 px, still share one line of about 1210, and the
+      bar takes the second.
+    - The HR counts each grow 18.2 px live, so stale moves none: `OFF SCALE` stands at 167.6 in
+      both states, look-73's stale place. `NOT PLOTTED`'s row, from 49 with one-digit counts:
+      `NEUTRON STAR` to 215.2, `BLACK HOLE` 231.2–372.2, and by estimate `NO REMNANT` to about 526
+      and `NOT YET FORMED` to about 718, inside 831; a `PLANET` count would end near 833 and a
+      `DATA INVALID` count alone near 893, so either may now wrap the row where before only both
+      together did, and more digits wrap it sooner. The first row under a `STARS` filter
+      (`SYSTEMS 1,630 OF 1,630 SHOWN: REMNANTS`, `PLOTTED 1,630`, `OFF SCALE 0`) ends near 713.
+      A wrap there is a watch item: the HR stage has 204 px over its 128 px floor at 1280 × 720.
+  - _Choices._ (a) The own time is a second optional prop on `Reading`, `own`, rather than a third
+    state of `stale`, so that `stale` keeps the brief's shape; `SpatialView` gives the own time
+    `own` and no `stale`, and `own` overrides any `stale` given with it, so that an own reading has
+    no slot and no mark whatever `stale` says (deferred finding (4)). (b) The shared readings are
+    components in files of their own, since the TypeScript rules give each exported component its
+    own file, and `SpatialMode` moved with `ModeReading`, which reads it. (c) The counts' slot has
+    a rule of its own at the reading's 2 ch, not a second selector on the reading's, so that
+    `stylesheetRule` holds each by its selector. (d) The HR line keeps no private wrapper. (e)
+    `LocalChartPanel.tsx`'s stale sentence, "drawn and read as stale, in `--text-muted` with a
+    trailing `S`", still holds and is unchanged.
+  - _Deviations, by main's ruling._ On a display with a mode the furniture's order is now the
+    frame, the centre, the time, the scale bar, then the mode in a second
+    `dl.spatial-view__readings`; with none, the one `dl` and the order are as before. `SpatialView`
+    gains `timeIsOwn` and the stylesheet the own time's rule, and `OrbitMapPanel` sets `timeIsOwn`,
+    its one code change. The guide's `MODE` cell is the brief's, with "after the time and the scale
+    bar" for "after the time". The "furniture tests that count one `S`" were none: no test counted
+    the row's one `S`, and `LocalChartPanel.test.tsx`'s stale test, which counted the page's
+    `stale` marks, now reads each value's.
+  - _Tests (38 new, 3 changed, as run)._ `spatial/Reading.test.tsx` (9: no slot without `stale`,
+    an empty slot live, the mark after the unit, after a value with no unit, the em dash's empty
+    slot, the slot's rule, the own reading's class and no slot, no mark on an own reading given
+    `stale`, no other reading's class); `spatial/FrameReading.test.tsx` (2);
+    `spatial/ModeReading.test.tsx` (7: `NOW`, the observer nested, marks on the observer's values
+    only, the axis's em dash, `NOW` never marked, empty slots live, none without `stale`);
+    `spatial/SpatialView.test.tsx`, in a block of its own after the furniture's, "SpatialView's
+    stale furniture, one S per value" (15: the centre's and the time's marks, the observer's, none
+    on the frame's or the mode's name, the em dash's empty slot, none in the bar, no mark outside a
+    slot, empty slots live, `AZM` and `ELV` bare live and stale (two cases), the order by
+    `compareDocumentPosition`, one `dl` with no mode, the own time, its colour rule, the canvas's
+    stale name, the muting rule); `HrDiagram.test.tsx` (2: an empty slot after each count live,
+    `SYSTEMS` among them, and each count's mark in its slot); `GalaxyDisplay.observed.test.tsx` (1:
+    stale, both pages read `+0.00 yr S` and the same observer with its marks);
+    `SystemView.test.tsx` (1, beside the unchanged stale test: the centre's values marked,
+    `DISPLAY TIME UT` not); `LocalChartPanel.compact.test.tsx` (1: the compact scale bar's margin).
+    Changed: the HR line's slot test names the shared slot and its rule; the chart's stale test
+    reads each furniture value's `S` and `GALACTIC` bare; the compact guard that said `UT` ends the
+    first line is renamed. Every other existing test passes unchanged.
+  - _For main's look._ The order (the time, the bar, then the mode); compact `OBSERVED`'s line 3,
+    57.1 px inside the page with its margin (69 to its box), and its stage at the 240 px floor (228
+    against 224 with P06.T24.c); line 2's right edge (384.9 observed, 488.2 in `NOW`); the stacked
+    page's `OBSERVED` furniture on two lines; the orbit map's first line at 1280 × 720, where
+    `HEIGHT` may wrap, and its `DISPLAY TIME UT` in `--text` with no `S` while stale; the HR counts'
+    second row with a `PLANET` or `DATA INVALID` count; `OFF SCALE` at its live x; and `AZM` and
+    `ELV` unchanged.
+  - _Deferred findings (2026-10-13 rule)._ (1) The console now marks a stale answer two ways: each
+    value in the spatial furniture and on the HR page, and once a block in the census line, the
+    list, the readout and the panels' titles (`Systems`, `Orbit map`, `Bodies`), where the guide's
+    "Data states" says each state "looks the same everywhere"; the blocks are outside this task.
+    _Closed by P05.T14, but for the `Bodies` panel and the star list's captions, which keep their
+    marks per block, and the census table, muted under the census line's marks (plan 05's
+    record)._ (2) The guide says the console's own values are never stale only of
+    `BASELINE` and `PAD WIDTH`; its `DISPLAY TIME` row could say so of the display time, which
+    main's ruling now leaves unmarked and unmuted (UX review; the brief allows no other guide
+    edit). _Closed by P12.T11.e._ (3) Under a `STARS` filter a stale `SYSTEMS` count reads
+    `… SHOWN: REMNANTS S`, its `S` after the filter's name, the console's own live choice, as
+    look-73 found `2 ly S` after the scale; the marks could follow the figures instead (UX review;
+    the place is P06.T37's and the brief's §5 A4 kept it). _Closed by P05.T14._ (4) `Reading`'s
+    `stale` and `own` are two optional props, so the type admits both at once, which renders as
+    `own` alone; one union prop (a source that is the answer's, stale or not, or the console's
+    own) would rule the pair out, but renames the brief's `stale` (TypeScript review; main's
+    call). _Closed by P12.T11.f._
+- **P12.T11.e as built (`lane/80-p12-t11e-followups`, 2026-10-22, at `GENERATOR_VERSION` 23).**
+  Client, guide and plan only: no Rust, protocol, binding, server, sim, GPU or golden change, and
+  nothing generated moves. P06.T24.c and the 23 bump are on the base, and the lane's last merge of
+  `origin/rendering-and-planets` is `174d583c` (P14.T52.a, nothing under `apps/`). Main's UX
+  decision of 2026-10-22 found none of the series' twelve remaining items a blocker: it had the
+  two built here, the hold and the `NOW` slot, made the guide's `DISPLAY TIME` cell its own edit,
+  made here as main wrote it, and recorded the other nine itself. Closes T11.c's and T11.d's
+  deferred findings (2).
+  - _Names._ No export is added or renamed. In `spatial/labels.ts`, inside `placeLabels`, the
+    private `inPlace(label, anchor)`: whether a label on its mark's line stands beside its mark
+    (`besideItsMark`), or its mark is out of the view and the held label clear of its bracket; and
+    beside `besideItsMark` the private
+    `clearOfItsBracket(label, anchor, viewport, reticles): boolean`, whether a held label stands
+    `LABEL_TEXT_CLEARANCE_REM` clear of the bracket's box, to its line's outer edge, as `paint`
+    draws it. `lineLabels` now holds only the labels in place. The docs of `lineLabel`,
+    `besideItsMark`, `LabelSurroundings.pinnedIds` and
+    `placeLabels`' remarks say what is now true. In `displays/galaxy/SystemReadout.tsx`, `AtTime`
+    sets its time in a `system-readout__value--fixed` slot in both modes, `TIME_WIDTH_CH` (from
+    `chartReadings.ts`) in `NOW` and `EMITTED_WIDTH_CH` as observed, and the age's `Reading` is
+    always `wide`, so the private `ageReading` no longer returns the `formed` it was read for. The
+    docs of `destinationLabel`'s `others` and `placeLabels`' remarks name the labels the
+    destination's is placed against. The guide's `DISPLAY TIME` cell is main's, word for word;
+    Prettier re-padded no other line.
+  - _A, the hold._ As briefed. A label whose mark is in view is drawn only where `besideItsMark`
+    holds: the rest are dropped; the selection's, held back on its first side, tries its other
+    side under the conditions it takes it under where it yields (clear of the destination's label
+    and chevrons and of the eye, and beside its mark), else is not drawn; the destination's own
+    rule is unchanged. A pinned mark out of the view keeps the 0.25 rem hold where its bracket
+    lies wholly outside the view (below), and the hold at the top and bottom edges, which leaves a
+    label beside its mark, stands. For a mark in view the first side is held back only where both
+    are, since `lineLabel` flips to the left only where the right would run past the right edge,
+    and the right never runs past the left edge for a mark at x ≥ 0; so the other side never
+    rescues it, and the code tries it anyway, as briefed.
+  - _Deviation, by main's answer on the lane's issue (2026-10-22): the hold needs the bracket out
+    of the view._ The brief reads "inside the view" as `inView`, the mark's centre, and kept the
+    hold for every pinned mark outside it. But the canvas culls no mark and draws the selection's
+    bracket wherever it stands, so a selection whose centre lies just past the top or bottom edge
+    showed part of its symbol and bracket with its held label across them (the UX review's
+    must-fix): at (128, -2) on the 256 × 262 px stage, a 16-character designation about a class-4
+    mark at a ratio of 1, the label stood at x 4–142.88, y 4–21.5, the bracket's box at x 114–142,
+    y -16–12, and the label cut in and out as the mark crossed the edge. Main accepted the lane's
+    lean: a held label is drawn only where it stands 0.25 rem clear of the bracket's box
+    (`clearOfItsBracket`), main's second wording; else it is not drawn, as for a mark in view with
+    no room. Where the held label spans the bracket across, as one with room on neither side does,
+    that is once the bracket lies wholly outside the view, main's first wording: about a class-4
+    mark at 1 the bracket reaches 14 px from the centre, so the hold returns from 14 px past the
+    edge (the tests pin 13 and 14 px past each edge). The gap is a straight line, so a held label
+    beside the bracket's corner, not across it, may stand 0.25 rem clear while the bracket still
+    reaches 1 px into the view (a 22-character label about a mark at (211.96, -13): 3 px across
+    and 3 px down, 4.24 px; UX re-review); the guide's 0.25 rem holds there. The left and right
+    edges need no change: there a mark whose bracket reaches into the view has its label beside it
+    wherever the label is no wider than the view less its offset and the 0.25 rem edge (234 px on
+    the 256 px stage about a class-4 mark). Plan 05's note keeps main's words, "only a pinned
+    label whose mark lies outside the view is still held inside", the mark read whole.
+  - _Choice: the destination's label avoids no label held back._ A chosen label that would be held
+    back across its own mark in view is left out of the labels the destination's is placed
+    against, as a label whose mark is out of view already was (R07.T16.j), since with no selection
+    it is never drawn (addendum C, C1: placed "as though no mark were selected"). So the
+    destination's label may now take a place that such a label's held box covered. Its own places
+    and rule are unchanged, and selecting still never moves it.
+  - _A's reckoning_ (estimated boxes, as `placeLabels` reckons them; the stage 256 px wide, its
+    edge clearance 4 px). A 16-character designation is 138.88 px wide (16 × 0.62 em at
+    0.875 rem). Its near edge stands the mark's radius, 0.5 rem and 2.00 px out at a ratio of 1,
+    and 0.75 px at 1.5, where δ is 0 and the outline 1.5 px. About a class-4 mark (radius 8 px:
+    18 px out at 1, 16.75 at 1.5) the right side fits to x 95.12 and the left from x 160.88 at 1,
+    and to 96.37 and from 159.63 at 1.5: so marks from 95.12 to 160.88 px across (65.76 px, about
+    the stage's middle quarter) now have no label at 1, and from 96.37 to 159.63 (63.26 px) at 1.5.
+    About a class-0 mark (radius 4 px) the band is 99.12–156.88 (57.76 px) at 1 and 100.37–155.63
+    (55.26 px) at 1.5. A label of n characters whose box starts d px out has no side over a band
+    2d + 17.36n − 248 px wide, so about a class-4 mark at 1 no label of 12 characters or fewer
+    loses its side. A stage wider than 2 × (18 + 138.88 + 4) = 321.76 px always has a side for the
+    16-character label, so the stacked page's 1036 px stage and the orbit map's 787 px are
+    unchanged. The tests pin both ratios' edges (95 and 96, 160 and 161 px at 1; 96 and 97, 159
+    and 160 at 1.5).
+  - _B, the age._ As briefed. The age's reading is `wide` in both modes, so at 1920 × 1080 `MASS`
+    stands alone on its row in `NOW` as it does as observed, and the two modes set the readout's
+    rows alike but for the rows `AS OBSERVED` adds; with nothing selected the age's em dash takes
+    the row too. Its time stands right-aligned in a fixed slot in both modes: in `NOW`
+    `TIME_WIDTH_CH`, 9 ch, the furniture's `UT` slot, so that the chart time takes one width
+    wherever it stands (`-1000.00` and `+1000.00` are 8 characters, the furniture's 1 ch to spare
+    kept); as observed `EMITTED_WIDTH_CH`, 11 ch, as before. `UT <time> yr` stays whole and `· AT`
+    does not, in both modes. No comment in `styles.css` goes false: those of
+    `.system-readout__value--fixed` and `.system-readout__beside .system-readout__value` hold in
+    both modes, and the file is unchanged.
+  - _B's reckoning_ (from look-74's figures; a `ch` of the readout's figures is 9.1 px). At
+    1920 × 1080 the age's reading in `NOW` takes the row from observed's left edge, the wide `dd`
+    starting in the first value column, with a slot 2 ch (18.2 px) shorter: for the same age text
+    it ends at 1541 − 18.2 = 1522.8 px, 345.2 px inside the readout's edge at 1868, on one line.
+    Look-74's two figures agree on the left edges: with `+0.00`'s 5 ch the half row's reading ends
+    at 1867.2 and observed's ends at 1541 with 11 ch, so the half row starts 380.8 px right of the
+    row, about half the readout, as its two-column grid sets it. The slot is fixed, so
+    `UT -1000.00 yr` (8 of its 9 ch) ends where `UT +0.00 yr` does, and the longest `NOW` reading
+    is set by the age alone: a five-character age, `0.150 Myr` at `UT -1000.00 yr`, ends at 1531.9
+    (336.1 inside). The formatter writes a younger age with more figures (`0.0150 Myr`, six, 1541.0;
+    `0.00150 Myr`, seven, 1550.1), and the row holds 37 characters more than a four-character age
+    (345.2 ÷ 9.1), so every `NOW` reading stands on one line. At 1280 × 720 and 150%, one reading
+    to a line, the reading breaks after `AT` as before: its first line is unchanged, and its time
+    line is 4 ch (36.4 px) longer than the unslotted `UT +0.00 yr` and 2 ch shorter than
+    observed's in its 11 ch slot, which look-74 found inside the column (53.8 and 59.4 px to
+    spare), so it fits with at least 72.0 and 77.6 px, at one width for every chart time.
+  - _Tests (29 new, 2 changed, as run)._ `spatial/labels.test.ts` (543 to 566): "keeps a label
+    whole and 0.25 rem inside a view too narrow for it on either side of its mark", which pinned
+    the hold for a mark in view, is now two: in its 160 px view the mark at x 80 draws no label,
+    and a label at the top edge is held 0.25 rem inside it beside its mark; and a new block,
+    "placeLabels on the compact chart's 256 px stage" (22): the centred selection with no label
+    and none over its bracket, an unselected mark at the middle, the side or none at nine places
+    on both ratios' edges, by main's answer a selection just past the top and the bottom edge with
+    no label while its held label would stand within 0.25 rem of its bracket, at y -2, -13, 263
+    and 275, and its label held 0.25 rem inside once the bracket lies outside the view, at y -14,
+    -15, 276 and 277 (x 128), the selection 2 rem from the left edge
+    on the right as before, the selection held back on both sides beside a destination whose
+    label stands as with no selection (C1), and the destination's label taking no account of a
+    label that would be held back. `spatial/SpatialView.test.tsx` (2, in a block of their own): a
+    selection at the view's centre has no label element in a 256 px stage and its label in a
+    1036 px one.
+    `displays/galaxy/SystemReadout.observed.test.tsx` (17 to 21): "keeps the age's slot in now,
+    its time after a middle dot in no fixed slot" becomes "takes the readout's row for the age in
+    now, its time in the chart time's slot", its text unchanged; new: the chart time at the clock
+    window's edges, `-1000.00` and `+1000.00`, within `TIME_WIDTH_CH` (2), `NOT YET FORMED` taking
+    the row, and a row without its observation, asked observed, in `NOW`'s slot. Every other
+    existing test passes unchanged, among them "draws no label for a selection at the view's right
+    edge whose other side would be held back across its own mark", "starts a pinned label held
+    inside at the left 0.25 rem in", "draws no label for the selection where its other side is not
+    clear either" and "keeps the age's time whole with its system's label and its unit" in both
+    modes; no other test pinned the hold for a mark in view. Against the base's code the 11
+    refusals (10 in `labels.test.ts`, the 256 px case in `SpatialView.test.tsx`) and the 4 slot
+    tests fail, and the rest pass; against the lane's first commit the edge refusals at -2 and 263
+    fail and the edge holds pass. The `spatial` and `displays/galaxy` suites: 56 files, 2399
+    tests; the gate's other planned files (`App`, `displays/system`, `lib/serverLink`,
+    `view/engine/engineBoundary`, `wasm/surfaceImports`): 20 files, 348 tests.
+  - _Review._ TypeScript: a test asserted a label present with `queryAllBy*`, now `getBy*` through
+    `overlayLabel` in a test of its own; `ageReading`'s unread `formed` removed. UX: the top and
+    bottom edges' must-fix, asked on the issue and built by main's answer (the deviation above);
+    two guide sentences proposed, deferred findings (1) and (2); and, before this task, (3) and
+    (4); the `DISPLAY TIME` cell checked true against the code. Plan conformance: the
+    galactic-axis case carried into the look below; the docs of the labels the destination's is
+    placed against, and two phrases here, reworded. Re-review of main's answer as built:
+    TypeScript, `{@link LABEL_TEXT_CLEARANCE_REM}` in `clearOfItsBracket`'s doc, the issue named
+    there, the boundary pairs at 13 and 14 px past each edge, and two comments that still scoped
+    the refusal to a mark in view; UX, no defect, the same comments and pairs, and the
+    straight-line gap's corner case recorded with the deviation above.
+  - _Deferred findings (2026-10-13 rule)._ (1) The guide's spatial-display bullets do not say that
+    a label with room on neither side is not drawn, as its Views paragraph says of a view's; the
+    UX review proposes "A mark's label that has room on neither side of its mark is not drawn, the
+    selection's too, and the bracket, the list and the readout still name the mark; only the label
+    of a selection whose bracket lies wholly outside the view is held `0.25rem` inside its edge"
+    (main decides). (2) § Data states says "Loss of the server link makes every live value on the
+    console stale at once", and only the rows of `DISPLAY TIME`, `BASELINE` and `PAD WIDTH` except
+    the console's own values; the UX review proposes "A value the console keeps itself, such as
+    the `DISPLAY TIME`, `BASELINE` or `PAD WIDTH`, is not a live value: it never goes stale, and on
+    loss of the link stays in `--text` with no `S`" (main decides). (3) The age's value has no
+    fixed slot, from 3 to 7 characters (`123`, `4.57`, `0.150`, `0.00150`), so the time's slot
+    still moves between selections, and in `NOW` as a young system's age crosses 0.1 or 1 Myr
+    while the chart time steps (§ Numbers: "A field has a fixed width sized for its longest
+    possible value"; before this task; UX review). (4) `formatAge` writes ages below 1 Myr in
+    `Myr` (`0.150 Myr`), where § Numbers says "ages are in `kyr`, `Myr` and `Gyr`" (before this
+    task; UX review). (5) A selection centred on the 256 px stage, as after centring the chart on
+    it, now has no label on the chart; a place above or below its bracket, as the destination's
+    has, would keep it named there (plan-conformance review; main's ruling chose not drawn).
+    (6) The selection's other side never rescues a first side held back for a mark in view
+    (A above); kept as briefed, it could be dropped from that path (TypeScript and
+    plan-conformance reviews).
+  - _For main's look._ The compact `LOCAL CHART` at 1280 × 720 and 150%, in `NOW` and `OBSERVED`:
+    the chart centred on its selection, its bracket drawn and no label over its own mark or
+    bracket; a label coming back as a cut once its mark leaves the band (95.12–160.88 px across at
+    1 for a 16-character designation about a class-4 mark); every label of a mark with a side as
+    in look-75; a selection in the band crossing the top or bottom edge, unlabelled until its
+    bracket has left the view, then held inside as a cut (the deviation above); the
+    observer moved to the centre on the selection, the eye in the bracket with no label beside it
+    (item 7); a destination beside a mark whose label has no side, which may now take a place that
+    label's held box covered; the stage's heights, unchanged, against P06.T24.c's figures (262 and
+    228 px at 100%, 266 and 232 at 150%), and its galactic-axis case (the chart centred on
+    [0, 0, 3000] ly, 212 px in `OBSERVED` at 100% and 216 at 150%, from plan 06's P06.T24.c
+    record); and B612's real widths against the 0.62 em estimate the band's edges rest on. The
+    stacked page at 1920 × 1080: every label as in look-75. The readout at 1920 × 1080: `AGE` on
+    its own row in `NOW` at `CHART TIME` +0.00 and -1000, one line, its time in its 9 ch slot,
+    reckoned to end near 1523 for a four-character age, and a young system's longer age; `MASS`
+    alone on its row, with nothing selected too; as observed, unchanged. The readout at
+    1280 × 720 and 150%: the break after `AT` as before, the time's line one width, and no
+    sideways scroll.
+  - _Main's landing look (2026-10-22): the selection's label yields to the other text's glyphs._
+    The look found the selection's label over the core arrow's label, text over text, on the
+    compact stage at 150% in `OBSERVED`: `GDG 75DY08 A-3` at (145.5, 47.7) on the 256.67 × 232 px
+    stage, its left side (17.3–132.8 px across, 38.9–56.4 px down) across `CORE 8914.7 ly`
+    (4–128.6, 37–54.5), and the same at 1280 × 720 in `NOW` once turned and zoomed. It came before
+    this task, since a pinned label was never dropped for other text. By main's ruling it is a
+    blocker, and `placeLabels` now has the selection's label yield to `texts` (the triad's
+    footprint, the core arrow's label, the curve labels) as it yields to the eye: it takes its
+    other side, and is not drawn where that is not clear either. The test is of the glyphs' ink,
+    not the line boxes (`INK_INSET_EM`, 0.275 em inside each box's top and bottom, from B612's
+    ascender, descender and cap height against the 1.25 line), by main's second ruling: tested by
+    box, the orbit map's selected planet between `HABITABLE ZONE` and `SNOW LINE`, whose boxes
+    overlap by their leading alone, about 5 px, lost its label at 1280 × 720 and 150%. This
+    narrows R07.T16.j's "pinned labels are unchanged" (D4 against the other text) for the
+    selection's glyphs alone; the 0.5 rem clearance stays the lesser labels', and the
+    destination's places are unchanged. Tests, in `spatial/labels.test.ts`: the measured case, its
+    other side taken, both sides over text, the orbit map's case kept, and the band's edge at 7.6
+    and 7.8 px of overlap.
+- **P12.T11.f as built (`lane/84-p12-t11f-reading-state`, 2026-10-22, at `GENERATOR_VERSION` 23).**
+  Client and plan only: no Rust, protocol, binding, server, sim, GPU, golden or guide change.
+  Nothing on screen changes: the DOM text is the same live, stale, own and missing, the slot keeps
+  its three declarations in the font of the same `dd`, and every class but the slot's is the same.
+  The lane's base is `origin/rendering-and-planets` at `1177743a`, and its last merge of it is
+  `b7415c5d` (R08.T8.d, which touches none of this task's files). Closes T11.d's deferred finding
+  (4).
+  - _Names._ In `spatial/Reading.tsx`: `ReadingState`, `"live" | "stale" | "own"`; `SourceState`,
+    `Exclude<ReadingState, "own">`, the state of a value from a source that can go stale (the
+    brief's "or a named alias"), which `sourceState(stale: boolean)` returns for the callers that
+    hold a boolean (the brief's `readingState`, renamed by the TypeScript review for its return
+    type); and `ReadingProps.state?: ReadingState | undefined` in place of `stale` and `own`. The
+    private `formOf(state): ReadingForm` tells the four forms apart in one exhaustive `switch`, in
+    the repository's assign-and-break form (a `switch` that returns fails oxlint's
+    `consistent-return`), into `own` (the class), `slot` and `marked`; so a new state fails the
+    build until all three are decided for it. `ModeReadingProps.state?: SourceState | undefined`
+    replaces its `stale`. `SpatialView`'s centre and mode and the HR page's line pass
+    `sourceState(stale)`, the time `timeIsOwn ? "own" : sourceState(stale)` in one `Reading`, and
+    `AZM` and `ELV` no state.
+  - _The slot._ `Reading`'s own `span.spatial-reading__stale-slot` is now P05.T14's `StaleSlot`,
+    `span.stale-slot`, after the unit or the value as before, holding the mark where `marked`
+    holds and the value is not missing: the brief's
+    `stale={state === "stale" && reading.value !== null}`, read through `formOf`.
+    `.spatial-reading__stale-slot`'s rule and comment are gone, and `.stale-slot`'s comment names
+    the spatial readings and the em dash's empty slot. The two rules held the same declarations, and
+    no other rule reaches the slot inside a reading (`.system-list__range > .stale-slot` is the
+    system list's), so the cascade is the old one. `StaleSlot`'s TSDoc names the spatial readings.
+  - _Tests (as run)._ Changed in selectors, props and names only, but for one replaced test and
+    one added assertion. `spatial/Reading.test.tsx` (9, as before): "never marks a value the
+    console keeps itself stale, even if given stale" is now "admits no reading that is both the
+    console's own and stale", a `@ts-expect-error` before one call that gives `own` and `stale`
+    together; without the directive `pnpm --filter hyperion typecheck` fails (TS2353, `own` not in
+    `ReadingProps`). Of the other eight, six pass `state` and seven read `.stale-slot` (the rule
+    test its rule), the first is named "when no state is given", and the live slot's test also
+    asserts the class `stale-slot`. `spatial/ModeReading.test.tsx` (7): `state` and
+    `.stale-slot`, and "no state" in a name; `spatial/SpatialView.test.tsx` (145; 3 selectors),
+    `spatial/FrameReading.test.tsx` (2; 1), `displays/system/SystemView.test.tsx` (24; 1) and
+    `displays/galaxy/HrDiagram.test.tsx` (31; the class and the rule): `.stale-slot`. No assertion
+    on text, a count, another class or an order changed.
+  - _Deviation: the type-level guard's test keeps the old test's two assertions_ (no slot, and
+    `26,000.0 ly` with no `S`), where the brief drops the run-time test: oxlint's
+    `vitest(expect-expect)` fails a test with no assertion (tried), and the repository's other
+    directives in tests each come before a run-time assertion. They now pin that the old props, if
+    given, are not read.
+  - _Review._ TypeScript: `ModeReadingProps.state`'s doc repeated its type, cut; `AZM` and `ELV`
+    called "live" beside the `live` state (the UX review too), reworded; `readingState` renamed
+    `sourceState`; a shared-class test that could fail only with the live slot's, folded into it
+    as the brief's one assertion; the directive, which covers its whole line, kept on the one line
+    the brief gives rather than on the `own` property's. UX: no finding but the wording above; the
+    DOM in each form, the cascade, the comments and the TSDoc checked true. Plan conformance: the
+    "nor with `own`" clause dropped; one `switch` for the four forms (`formOf`), where the first
+    build's decided the slot alone; this record's tests, deviation and base lines corrected.
+  - _Deferred findings (2026-10-13 rule)._ (1) Only the `stale` form is tested for having no
+    `spatial-reading--own`; the absent and `live` forms are not (before this task; plan-conformance
+    review). (2) Plan 05's P05.T14 text and record say `.spatial-reading__stale-slot` stays, true
+    as built then; a note there could point to this task (plan-conformance review; the brief keeps
+    plan 05's record as written).
+- **P12.T11.g as built (`fix/p12-t11g-compact-state-lines`, 2026-10-22, at `GENERATOR_VERSION` 23).**
+  A desktop fix by main's look agent, on 7723013b, by main's UX decision
+  (decision-p12-t11-look-followups §14). Client and plan only: no Rust, protocol, binding,
+  server, sim, GPU, golden or guide change.
+  - _As built._ `CensusReadout` sets the hint in `.census-readout__row` after `CENSUS BY LAYER`,
+    outside the `Census` region, and gives `RETRY` the class `census-readout__retry`. On the
+    stacked page `.census-readout__row > .census-readout__hint` is `flex: 0 0 100%`, a line of its
+    own under the row as before. The compact template has six rows, with no `hint` row, and the
+    compact census row is the decision's §14.4 grid: the summary at 1 / 1 in `minmax(0, max-content)`, `RETRY`
+    and the toggle in `max-content` columns 1 rem after it by margin, `gap: 0`, the summary's and
+    the hint's lines 1 rem, the toggle spanning both lines from the top where a hint stands.
+    `SpatialView` sets the axis note after the scale bar and before the mode's `dl`; it lost its
+    `flex-basis: 100%`, and in compact it is `inline-block`, `nowrap`, 0.75 rem before what
+    follows. This amends the decision's §11.3, "the axis note stays last".
+  - _Deviations from the decision's §14.4, measured and accepted by main._ (1) The hint stands in the summary's
+    column alone, `grid-area: 2 / 1 / 3 / 2`, not across `RETRY`'s too: spanning it, the grid put
+    the hint's width into `RETRY`'s empty column, whose minimum is its content, and left the
+    summary 203 px on three lines (DENSE REGION at 50 ly, 1280 × 720). (2) The compact census line
+    is one 1 rem line high (`height: 1rem`): its `M☉`'s drawn sun, set as a subscript, hung 0.8 px
+    below a 1 rem line and made the census row 0.8 px taller, which left the state with both lines
+    211.2 px, under its 212 px floor. The sun overhangs the next line's leading alone: whole, not
+    clipped, and clear of the glyphs under it in 3× crops. Its cost, recorded: with a `RETRY` on
+    show the hint has the summary's column alone, 516.3 px at 1280 × 720, not about 602, and the
+    longest hint, `LARGE VOLUME`, fits it by 1.1 px (1.7 px at 150%), measured on Linux. (3) The
+    stacked page's hint rule is `.census-readout__row > .census-readout__hint`, the same layout as
+    the decision's `.census-readout__hint`, so that the stylesheet's tests read it apart from the
+    rule it shares with the census line. (4) With the census table shown the column is the table,
+    which takes the stage's row and so ends at the stage's foot (0 px), with 0 overlaps.
+  - _Measured_ (look-79-81, hidden, 14 runs, 122 captures, every one passing; CSS px at
+    1280 × 720 and, after the slash, at 150%, against the decision's §14.7). In `OBSERVED`: nothing standing 228 / 232; the hint
+    228 / 232; the summary on two lines (`REMNANTS`, `LIVING`) 228 / 232; both (the finding,
+    50 ly, `REMNANTS`, and `LIVING` with the hint, and `PENDING` under `ALL` with four-figure
+    counts and the hint) 212 / 216, the column 2.5 / 6.5 px above the stage's foot; the census
+    table shown in that state 212 / 216; on the galactic axis 228 / 232, with `REMNANTS` 228 /
+    232, with the hint 228 / 232, with both 212 / 216, the note on the furniture's second line
+    (396.8 to 733.9 px), three furniture lines. In `NOW`, 34 px more off the axis (262 / 266, both
+    246 / 250) and 18 px more on it (246 / 250, both 230 / 234), since `MODE NOW` then takes the
+    third line. One refusal and two changed nothing. Live and
+    stale alike. 0 overlapping boxes in every capture, `NO CHART` included; no page scroll; no
+    row's `scrollWidth` past its `clientWidth`; the legend inside the page. The `LARGE VOLUME`
+    hint, by probe, is 515.2 px on one line, and 1.1 px inside its column with a `RETRY` on show.
+    The stacked page at 1920 × 1080: 509 px in `NOW` and 491 with the hint (491 and 473 in
+    `OBSERVED`), the hint on its own line under the row, and on the axis the note after the scale
+    bar, `NOW` on two furniture lines and `OBSERVED` on three; stale, the stacked axis stage is
+    18 px shorter (491 and 451 px), the link's reason taking a line in the controls, as before this
+    task.
+  - _Tests._ `CensusReadout.test.tsx`: the hint a child of the census row after the toggle and
+    outside the region, and `RETRY`'s class; one render covers both layouts, since the component
+    renders the same DOM in both and the layout is the page's. `LocalChartPanel.compact.test.tsx` (its header names this
+    look): the template's six rows with no `hint` area; the row's grid, columns, `gap` and
+    alignment; the 1 rem lines; `RETRY`'s and the toggle's columns and margins; the hint's area
+    and the toggle's span under `:has`; the census line's 1 rem height, which deviation (2) rests
+    on; the stacked hint's own line; the axis note's base and
+    compact rules; and the furniture's order on the axis, the time, the scale bar, the note and
+    the mode, and the note last with no mode.
+  - _Recorded, not changed_ (the decision's §14.10): a `REJECTED:` reason long enough to set the
+    summary on three lines beside a hint would leave 196 px and overrun (§14.6); the census's first
+    line meets the furniture's last with a hint or a summary on two lines, with no space or
+    hairline between the two groups (the guide's § Layout, "Separate groups with space first and a
+    hairline second"), since at 13.25 rem the stage has nothing left to give: a 1 px rule would
+    leave 211 px (ux-reviewer; main ruled against it, below); and P05.T14's sanctioned
+    unkept census marks lose one of their two reasons in compact, since the toggle no longer
+    wraps.
+  - _Main's rulings on the review (2026-10-22)._ (a) No hairline between the furniture and the
+    census: the 212 px floor binds, and the comment's reason stands. (b) `CENSUS BY LAYER` stays
+    1 rem after the summary, as the decision's §14.4 gives it; the toggle shifting about 90 px as
+    the summary wraps (to x 651 from x 562) is a finding for a later pass, where pinning it at the
+    row's end (`minmax(0, 1fr)`) keeps it still (ux-reviewer). (c) The hint is never announced,
+    as before this task: an accessibility follow-up, the hint's own `role="status"` beside the
+    `Census` region. (d) With a `RETRY` on show `LARGE VOLUME` has 1.1 px to spare (1.7 px at
+    150%), measured on Linux. B612 is bundled, so its metrics are the same on every platform, and
+    the owner's macOS run will confirm it; the fallback, if it ever wraps, is the decision's
+    2 / 1 / 3 / 3 span with `contain: inline-size` on the hint, so that its width sizes no column
+    (plan-conformance reviewer; untested). (e) With the census table shown, a 0 px foot with
+    nothing overlapping meets "the column's foot above the stage's foot".
+  - _Not checked._ Keyboard focus on `CENSUS BY LAYER` in the hint states, whose 2 px ring
+    reaches 3 px over the furniture's foot and the legend's first line, and its hover and pressed
+    fills over the two-line box; the interface scales of 80% and 125%; the orbit map on the
+    galactic axis, whose note now runs beside the scale bar; a screen reader over the census row.
+- **Re-validated for P12.T5.a at `b5a5ecd` (lane `p12-alerts`, 2026-10-30, at `GENERATOR_VERSION`
+  23).** T5.a's Consumes only, checked against the code; T5.b–T5.e are pending re-validation, each
+  by its own lane. T5.a's text now names its sources as built. The corrections:
+  - _Plan 07._ The names are in `galaxy::gas`'s submodules, not at its root:
+    `extinction::{sightline, Sightline, NoiseMode, Quality}`, `noise::NoiseCache`,
+    `modifiers::{GasModifier, GasModifierSource, NoModifiers}` and
+    `ccm::{Band, HYDROGEN_COLUMN_PER_MAG}`. `HYDROGEN_COLUMN_PER_MAG` is Bohlin, Savage and Drake's
+    5.8 × 10²¹ ÷ `R_V`, 1.871 × 10²¹ cm⁻² mag⁻¹. `Sightline::a_v` and `in_band` return `Magnitudes`,
+    and `hydrogen_column` returns `PerCm2`. `sightline` takes the modifiers as a slice, so the
+    caller first gathers them from a `GasModifierSource`. `Quality::Budget` takes a `NonZeroU32`.
+    Plan 07's `SIGHTLINE_QUALITY` (`Budget(256)`) is shared by the readers that want its budget; a
+    reader that wants another takes a constant of its own.
+  - _Plan 09._ `features::gas_overlay::FeatureGas::new(galaxy, cache, time)` is the
+    `GasModifierSource`. Its features sit at their epoch positions, at one evaluation time that the
+    caller picks.
+  - _Plan 09, the centre._ The flares are at `features::centre::events::flares`, with `CentreFlare`
+    re-exported from `features::centre::events`. The luminosities are bare `f64` watts, in the
+    unabsorbed 2–10 keV band and above the quiescence. P09.T30.b has landed: its tails are
+    `luminosity::DisruptionTail`. Their bound is `XRAY_SHARE` × `eddington_luminosity_watts` of the
+    galaxy's black hole, so it depends on the galaxy, and they have no end (`TAIL_LOOK_BACK_BINS`).
+    Main ruled on 2026-10-29 that T30.b's luminosity law is physically absurd for the Milky Way.
+    P09.T30.c replaces it behind a hold at 25, in which the efficiency falls with the fallback rate.
+    The Eddington cap bounds the tails under either law.
+  - _Plan 09, the supernovae._ `LightCurve::luminosity` is bolometric. No band is split out of it.
+  - _Plan 06._ The event kinds as built are `stellar::events::{flares, fu_orionis, glitches}`. A
+    star flare and an FU Orionis outburst give a luminosity factor over the star's quiescent
+    luminosity (`Flare::luminosity_factor_at`, `Outburst::luminosity_factor_at`); a glitch gives no
+    light. The magnetar bursts (P06.T28.c) and the LBV giant eruptions (P06.T28.e) are not in the
+    tree.
+  - _Plan 11._ `stellar::binary::events` (P11.T9: `light_curve` and `xray_luminosity`) and the scan
+    marks (P11.T8) are not built. Of plan 11, only the class values in `catalogue_classes::ClassId`
+    exist.
+  - _Not in the code_, so T5.a defines them in `alerts`: `ClassSet`, and the root cube's diagonal (2
+    × `coords::ROOT_HALF_WIDTH_LY` × √3, 227,023.36 ly).
+  - _For T5.b–T5.e, noted and not re-validated._ The catalogue-class interface as built (P09.T32) is
+    `catalogue_classes::{ClassProcess, ClassLookup, ProductionClasses, resolve}` with the free
+    `grid::cells_in_sphere`, not a `CatalogueClassSource`. `expected_hosts_in_sphere` and
+    `catalogue_classes::lbv` do not exist yet. No class has a process (P09.T33.a is in lane
+    `p09-classes`).
+- **P12.T5.a as built (lane `p12-alerts`, 2026-10-30, at `GENERATOR_VERSION` 23).** No generated
+  output moves, no golden changes and no draw or tag is added: the registry, reach and flux only
+  read. Files `alerts/{mod,registry,reach}.rs`; T5.b–T5.e are not started. Names and shapes that
+  differ from the sketches:
+  - _Types._ Beside Provides' types: `BandLimits` with `BuildBandLimitsError`,
+    `BuildSensorHorizonError`, `AlertQueryBuilder`, `BuildAlertQueryError`, `DEFAULT_HOST_LIMIT` and
+    `AlertBand::ALL` (plan 07's ten bands, then `XRay`). `SensorHorizon::new(bands)` takes one
+    `BandLimits` (`detect`, `resolve`: positive and finite, `resolve` no fainter) per band it has,
+    at least one and none twice; `limits(band)` is `None` for a band it lacks. It is `PartialEq` and
+    `PartialOrd` only, since the sim bans float bits, so T8's `ScanKey` keys the sensor its own way.
+    `ClassSet` is one bit per class value under `ClassId::LIMIT`.
+    `AlertQuery::builder(observer_position, window, sensor)`: `classes` defaults to `ClassSet::ALL`
+    and `host_limit` to `DEFAULT_HOST_LIMIT`; `build` refuses an observer outside the root cube and
+    a window reaching outside ±H. `Detection`, `ClassCensus` and `AlertResult` have getters and no
+    public constructor, as `ObservedSystem` has none: T5.b–T5.e build them. `resolvable` is
+    `is_resolvable()`.
+  - _`DEFAULT_HOST_LIMIT` (lean, 2026-10-30)._ 2²⁴, above the galaxy's accreting white dwarfs (6–12
+    × 10⁶; Pala et al. 2020), so that by default `BACKGROUND_THRESHOLD_HOSTS` alone parts the
+    interactive classes from the background ones and no galaxy-wide scan is `OverLimit`. T8 sets the
+    service's limit.
+  - _`AlertContext`, T5.a's part._ `new(noise, gas)` holds plan 07's `NoiseCache` and a
+    `&dyn GasModifierSource`: plan 09's `FeatureGas` at the one evaluation time the caller gives it,
+    not each event's emitted time. `sightline(galaxy, from, to)` gathers the modifiers along the
+    segment afresh and marches plan 07's line in `Realised` noise at plan 07's `SIGHTLINE_QUALITY`
+    (`Budget(256)`), shared because the alerts want the same budget for the same reason. The class
+    lookup, the `FeatureCatalogue` with its cell cache and the `GlobalList` join it with T5.b–T5.d.
+  - _The registry._ `TransientKind::{ALL, row}` and
+    `TransientRow::{kind, classes, route, peak_bound, duration, light_curve, pending}`; a row is
+    built or pending, never both.
+    - The plan's "class" is a `ClassSet`: novae and dwarf novae belong to both accreting white dwarf
+      classes.
+    - `Route` (`OneShot`, `Recurrent`, `Centre`, `Local`) is new: the subtask that walks the kind.
+    - The bound "per band" is two slots, one shared by every photometric band and one for X-rays.
+      Each is a `PeakBound`: `Watts`, `EddingtonShare` of the galaxy's black hole (`in_galaxy`), or
+      `PerHost`.
+    - D is `LongestDuration::{AtMost(Span), Unending}`.
+    - The light curve is `LightCurveSource`, a tag naming the source's function, not a callable: the
+      sources' events share no type, so a walk calls the named function on the event it holds. Every
+      curve is the event's own light: the centre's flares above its quiescence, and a star flare's
+      or an FU Orionis outburst's (factor − 1) × the star's quiescent luminosity, so that a
+      detection clears when the event fades (Design note 11).
+  - _The rows._
+    - Core collapse: `CORE_COLLAPSE_PEAK`, 10³⁸ W, the IIP, IIL and IIb breakout at T. Type Ia:
+      `TYPE_IA_PEAK`, 1.0730 × 10³⁶ W (the template's 1.07291 × 10³⁶ W at 15.13 days, rounded up).
+      Both are bolometric, photometric only and unending. The templates state no peak, so both are
+      restated and a test holds them to the templates.
+    - Tidal disruptions: `EddingtonShare(XRAY_SHARE)` in X-rays and `EddingtonShare(1.0)`
+      photometric, from `bolometric_watts_at`; unending.
+    - Centre flares: X-rays only, `MAX_PEAK_LUMINOSITY_WATTS` and `AtMost(MAX_DURATION)`, 8,175 s;
+      `BIN_SECONDS` × `LOOK_BACK_BINS` is read only by the test that holds D under it.
+    - Star flares and FU Orionis outbursts: `PerHost`, `AtMost` their modules' `MAX_DURATION` (a
+      day; 500 years). Glitches: no light and `AtMost(Span::ZERO)`, the spin step's instant, not
+      plan 06's `RECOVERY_SPAN`, which is a timing residual.
+    - The black hole's quiescence has no row (main's note of 2026-10-29: no row from T30.b's law).
+  - _Slice._ Nine rows keep their kind, classes and route and name the task whose source fills them:
+    P11.T9 for `LuminousRedNova`, `Kilonova`, `Nova`, `DwarfNova`, `XrayTransient`, `XrayBurst` and
+    `BeXOutburst`; P06.T28.e for `GiantEruption`, whose class process is P09.T43; P06.T28.c for
+    `MagnetarBurst`. Until then their classes reach nothing (lean, 2026-10-30), which is true while
+    no event of theirs can be generated. _Seven since P12.T5.a.2_, all on P11.T9.
+  - _The tails, provisional on P09.T30.c._ The bound is the Eddington cap and the curve the tail's
+    own, so the row reads T30.b's law now and T30.c's arm once its hold is in force, provided that
+    arm keeps `min(…, L_Edd)` and `XRAY_SHARE`. The test
+    `the_galaxys_own_tails_stay_under_the_rows_bounds_under_each_rule_set` holds the fixture's own
+    tails under the bounds under the rules in force and under `every_25_hold`, so T30.c's arm meets
+    it when it lands.
+  - _Reach._ `class_reach` keeps the plan's signature and is the largest `kind_reach` of the class's
+    kinds that are not local; `kind_reach` is the largest, over the sensor's bands, of
+    `reach(bound, limits)`, √(L ÷ 4πF) at the band's detection limit capped at `ROOT_CUBE_DIAGONAL`
+    (227,023.363 ly). `reach` takes a `BandLimits`, whose detection limit is proven positive.
+    - (lean, 2026-10-30) `class_reach` takes no galaxy, so an `EddingtonShare` or `PerHost` bound
+      reaches the diagonal: the tidal-disruption class reaches it with any sensor (the centre is one
+      host), and local kinds are not walked by reach.
+    - (lean, 2026-10-30) Local kinds add nothing to their classes' reach: T5.c's "excluded from
+      distant scans by reach", for dwarf novae and X-ray bursts, is built as the route, whatever
+      their bound.
+  - _Flux._ `flux(luminosity, distance, sightline, band) -> Option<WattsPerSquareMetre>` is
+    `inverse_square_flux` × `transmission`, and `None` at no distance; the plan's single flux is
+    split so that a walk marches one line (`AlertContext::sightline`) and reads every band from it.
+    `transmission` is 10^(−0.4 `in_band`), 1 in radio, or e^(−τ_X). `reach`, `kind_reach`,
+    `inverse_square_flux` and `transmission` are public as well.
+  - _X-rays._ `XRAY_CROSS_SECTION_CM2` is 4.301 × 10⁻²³ cm², Morrison and McCammon's (1983) Table 2
+    fit at 2 keV. τ_X is 1 at `A_V` = 12.43 mag (`N_H` = 2.325 × 10²² cm⁻²) with plan 07's
+    `HYDROGEN_COLUMN_PER_MAG`; Predehl and Schmitt's (1995) 1.79 × 10²¹ would put it at 12.99 mag,
+    Güver and Özel's (2009) 2.21 × 10²¹ at 10.52.
+  - _Tests_ (pod, 4 vCPU, debug: the 20 unit tests in 1.4 s, the 7 doctests in 1.1 s).
+    `reach_grows_as_the_limit_falls_and_caps_at_the_diagonal`: `class_reach` for both supernova
+    classes in V and `kind_reach` for the centre's flares in X-rays, 61 limits from 1 to 10⁻³⁰ W
+    m⁻², the closed form to 10⁻¹⁴ under the cap and the diagonal to the bit at it.
+    `a_pinned_novas_flux_at_three_distances`: 1.257 × 10³¹ W, the Eddington luminosity of a
+    solar-mass white dwarf (Della Valle and Izzo 2020, A&A Rev. 28, 3), at 100, 1,000 and 10,000 ly,
+    bare fluxes 1.1176 × 10⁻⁶, ⁻⁸ and ⁻¹⁰ W m⁻².
+    `the_xray_depth_is_unity_at_its_stated_visual_extinction`.
+    `hot_coronal_gas_leaves_the_xray_depth_unchanged`: a 500 ly superbubble filled at 0.005 cm⁻³
+    adds 4.730 × 10¹⁸ cm⁻² of hydrogen and leaves `a_v` and τ_X the same to the bit. Acceptance:
+    `cargo test -p hyperion-sim alerts`.
+  - _Science check._ The arithmetic, the two supernova bounds against the templates, the tails'
+    bounds and the doc examples were checked. The citations (Morrison and McCammon 1983's
+    coefficients and abundances, Predehl and Schmitt 1995, Güver and Özel 2009, Wilms, Allen and
+    McCray 2000, Della Valle and Izzo 2020) match the checker's knowledge but were not read at
+    source, since the lane's pod could open no source: pending a re-check with the network.
+    _Checked at source on 2026-10-30_ (P12.T5.a.2; Risks, "P12.T5.a.2's citations, checked at
+    source"): the coefficients, Predehl and Schmitt's ratio, Güver and Özel's and Wilms, Allen and
+    McCray's confirmed, and MM83's abundances and Della Valle and Izzo's figure corrected.
+  - _Findings, recorded and not changed._
+    - **The 2 keV cross-section under-counts the 2–10 keV band.** The centre's flares and tails are
+      unabsorbed 2–10 keV luminosities, and photoelectric σ falls about as E^−2.5 above 2 keV
+      (Morrison and McCammon's 4.038–7.111 keV row gives 3.5 × 10⁻²⁴ cm² at 5 keV). Taking τ at 2
+      keV for the whole band under-counts the flux about 2.3 times at `A_V` = 12.4 and 7–8 times at
+      `A_V` = 30, towards the centre (science check, not re-checked at source). Design note 14 fixes
+      2 keV and this plan's Risks name one energy; it errs towards saying less. A band-averaged
+      transmission as a function of the column, or an effective energy, would replace the constant:
+      for main's ruling. _Ruled on 2026-10-30_ (P12.T5.a.2): the band's transmission over 2–10 keV
+      replaces the constant (Design note 14).
+    - **Bolometric curves in a band.** The supernova templates, the tails' bolometric light, star
+      flares and FU Orionis outbursts are bolometric, so a band's flux from them errs bright by the
+      bolometric correction: a core collapse's 10⁵–10⁶ K breakout puts a small share of its light in
+      V, so T5.b must not read the template as a V-band luminosity without a correction, or every
+      breakout is detected across the cube. A split by band is plan 09's (and plan 06's) to make.
+      The breakout's X-rays are not split out either, so an X-ray-only sensor reaches no supernova.
+    - **X-ray bursts and magnetar bursts are routed `Local`**, as T5.c and T5.e have them, though
+      the brainstorm names only flares, dwarf novae and glitches as local. Both are seen across the
+      Galaxy (an X-ray burst near a neutron star's Eddington luminosity, a magnetar's giant flare
+      far above it), so no distant sensor sees them while they are local: for main's ruling before
+      P11.T9 and P06.T28.c fill the rows. _Ruled on 2026-10-30 for the magnetars_ (P12.T5.a.2):
+      `Recurrent` over `CORE_COLLAPSE`, walked by T5.c. X-ray bursts stay `Local` until P11.T9.
+    - Star flares have no X-ray bound: P06.T28.a models white light only.
+  - _For T5.b–T5.e, T9 and T13._ T5.b adds `Detection`'s crate-private constructor and T5.d
+    `AlertResult`'s and `ClassCensus`'s. A glitch has no light or band, so T5.e decides what its
+    `Detection` carries. The centre's flares have `class() == None`. The shared re-observation test,
+    T9's integration test and the by-eye check need novae, so they wait on P11.T9 and T5.c. Under
+    T30.b's law the fixture's 26 unending tails stay above a sensitive sensor's limit, so T5.d would
+    report the centre's disruptions in progress at every time: it should land after P09.T30.c.
+- **P12.T5.a.2's citations, checked at source (2026-10-30, main's ruling of that date).** A research
+  science check read T5.a's citations at source on 2026-10-30, through the Internet Archive's copies
+  and OpenAlex, which answers T5.a's "pending a re-check with the network". Of 35 claims, 26 were
+  confirmed, 6 corrected and 3 not reached.
+  - _Corrected in `alerts`._
+    - (a) Morrison and McCammon's (1983) fit is for neutral atomic gas, not "gas and grains". Their
+      §III reads "we have not included the effects of grains in the fit whose coefficients are given
+      in Table 2". Their Fig. 1 has "all elements in the gas phase and in neutral atomic form". Their
+      Table 1's abundances are Anders and Ebihara's (1982), except helium at 0.10 by number.
+    - (b) Della Valle and Izzo (2020) speak of "Eddington novae" and "super-Eddington novae" and give
+      no 10³⁸ erg/s. The nova test's comment now cites the white dwarf's Eddington luminosity alone.
+  - _For P09.T30.c to apply in `features::centre::events::luminosity`._ Its lane holds the file
+    behind the hold at 25, so nothing under `centre/` changes here.
+    - (c) `eddington_luminosity_watts`'s doc should read "Stone and Metzger (2016, after
+      equation 24) take L_Edd ≃ 1.5 × 10⁴⁶ M₈ erg/s, some 19% higher, as for an opacity of about
+      0.33 cm² g⁻¹". It now says "a solar-composition opacity, 0.34 cm² g⁻¹, some 17% higher", but
+      the paper states no κ.
+    - (d) The module doc cites Stone and Metzger's "§3, equation 23" for the fallback rate. Their
+      equation 23 is the fallback time, t_fall = 3.5 × 10⁶ s, which `fallback_time` matches and
+      cites rightly. Cite it as the fallback time.
+    - (e) `BOLOMETRIC_CORRECTION`'s doc should read "15.8, the median bolometric correction of
+      low-luminosity active nuclei below a tenth of Eddington (Ho 2009, ApJ 699, 626, §3:
+      'sources with Lbol/LEdd ≲ 0.1 have a median CX = 15.8, with an interquartile range of
+      9.6')". The quoted "median CX = Lbol/LX = 15.8" is not the paper's. _Corrected by
+      P12.T5.a.2's science check:_ the median of about 8 is that of Ho's small sample of nuclei
+      with broadband SEDs (Table 1), not of the whole sample, and 15.8 comes from Ho's more
+      extensive data set (in preparation), which Ho 2009 adopts. The finding that goes with it is
+      in plan 09's Risks.
+  - _Corrected, a finding._ The Type Ia template's peak "about 15 days in" (`LightCurve::of`'s
+    doc) is earlier than observed. Firth et al. (2015, MNRAS 446, 3895) give 18.98 ± 0.54 days.
+    Scalzo et al. (2014, MNRAS 440, 1498, equation 6) give a bolometric rise of 16.5 ± 2 days,
+    Contardo et al. (2000) 16–20 days and Stritzinger et al. (2006) 19 days. It is recorded in
+    "Deferred findings", from P12.T5.a.2, and in plan 09's Risks.
+  - _Confirmed at source._
+    - Plan 07 and the X-ray depth: MM83's Table 2, every row from 1.303 to 10 keV (σ(2 keV) =
+      4.30125 × 10⁻²³ cm²); Predehl and Schmitt's 1.79 × 10²¹ (abstract); Güver and Özel's
+      (2.21 ± 0.09) × 10²¹; Wilms, Allen and McCray's metals 20–30% below solar (§2.3) and σ moved
+      by up to 30% (Fig. 2); Bohlin, Savage and Drake's 5.8 × 10²¹.
+    - The centre: the Eddington figure, 1.257065 × 10³¹ W per M☉; Stone and Metzger's η ∼ 0.1
+      (§3); Nowak et al.'s (2012) quiescence; Baganoff et al.'s (2003, §5.3) 2.4 × 10³³ erg/s;
+      Neilsen et al.'s (2013) rate (§5), slopes (Table 2), brightest flare (Table 1), test (§4.3)
+      and edges (§3); Ponti et al.'s (2015) 1.08 ± 0.10 a day (Table 3).
+    - The flare bound: `MAX_PEAK_LUMINOSITY_WATTS`, 3.5965 × 10²⁸ W, bounds the generated flares
+      exactly. It is 25% under Nowak et al.'s observed peak of 4.8 (+1.9 −1.1) × 10³⁵ erg/s,
+      which one Gaussian per flare cannot reach. Cite that peak in its doc when plan 09 next
+      touches it; nothing changes.
+    - The supernovae: Nadyozhin's (1994) equation 19 and its positron share. The IIP, IIL, Ib
+      and Ic breakouts are typical (Nakar and Sari 2010; Waxman and Katz 2017; Soderberg et al.
+      2008). The two bounds hold against the templates. The Type Ia peak luminosity is confirmed
+      (Stritzinger et al. 2006; Contardo et al. 2000), and so is Foley et al.'s (2013) Iax.
+    - Plan 06: the star flares' and the FU Orionis outbursts' figures.
+  - _Not reached, named as unread._
+    - Predehl and Schmitt's use of MM83's cross-section: their scan is image-only. Zhu et al.
+      (2017, Table 3), a secondary source, list Anders and Ebihara's abundances for them.
+    - The share of hydrogen and helium in σ at 2 keV: MM83's Fig. 1 was not read numerically. The
+      module doc no longer states it as a figure.
+    - The IIb breakout's 10⁴⁵ erg/s over 500 s (plan 09's template).
+    - Not reached in any run: Gezari et al. 2008; Schawinski et al. 2008; Lyman et al. 2016;
+      Medina et al. 2020; Yang and Liu 2019; Scholz et al. 2013; Szabó et al. 2021–2022; the
+      numbers in MM83's and Wilms et al.'s figures; the CODATA and IAU constants themselves; and
+      Haggard et al. 2019.
+- **P12.T5.a.2 as built (2026-10-30, main's rulings of that date, at `GENERATOR_VERSION` 23).** No
+  generated output moves, no golden changes and no draw or tag is added. Nothing on the record reads
+  the depth or the rows: outside `alerts`, only the server's Knowledge
+  (`knowledge::{record, store, persist}`) names `AlertBand`, whose variants are unchanged, and no
+  golden or integration test reads `alerts`. From the first task that reads it, a change to the
+  rows, the scattering or the nodes is a bless. Files `alerts/{mod,registry,reach}.rs`.
+  - _The rulings._ Main adopted the research advice's items 1 (the band), 2 (the magnetars'
+    route), 3 (`class_reach`'s tripwire), 4 (the citations) and 6 (the held rows) as written. It
+    also adopted the advice's answers to its three questions:
+    - giant flares take no kind of their own;
+    - plan 06's magnetar energies are the event's whole output;
+    - the magnetars' completeness gap beyond 34,871 ly is accepted for now and recorded as a
+      finding (below), since its fix changes membership and needs a bump.
+
+    Item 5, the bolometric curves in a band, is T5.b's first commit. T5.a's findings on the 2 keV
+    cross-section and on the magnetars' `Local` route are answered by these. X-ray bursts stay
+    `Local` until P11.T9 fills their row; the advice leans to `Recurrent` over `XRAY_BINARY` by
+    the same reasoning, which is not ruled.
+
+  - _The X-ray band._
+    - `XRAY_CROSS_SECTION_CM2` and its re-export from `alerts` are gone; no plan consumes them.
+      Private to `reach` in their place: `MM83_ROWS` (six `Mm83Row`s, 1.840–10 keV),
+      `XRAY_BAND_KEV` (2, 10), `THOMSON_CROSS_SECTION_CM2` (CODATA 2018),
+      `ELECTRON_SCATTERING_CM2` (1.2 σ_T, 7.983 × 10⁻²⁵ cm²) and `XRAY_BAND_NODES`, 18 `BandNode`s
+      (energy, photoelectric σ, weight) stored at full precision. The rows, the band's ends and
+      the nodes' energies are read only by the test that recomputes the nodes, so they carry
+      `expect(dead_code)` outside tests.
+    - `xray_optical_depth` keeps its signature. The depth is ln(Σₖ wₖ ÷ Σₖ wₖ e^(−(σₖ + σ_e)
+      `N_H`)): the entry's form divided by the weights' own sum, which is 1 within 10⁻¹⁵, so that
+      a clear line's depth is exactly 0. `transmission`'s X-ray arm stays e^(−τ).
+    - One figure of the advice is corrected: the scattering is 0.84 of MM83's σ at 10 keV (9.532
+      × 10⁻²⁵ cm²), not equal to it. Nothing else moves.
+    - τ = 1 at `A_V` = 88.47 mag (`N_H` = 1.655 × 10²³ cm⁻²), and at 112.31 mag without the
+      scattering. τ = 0.223 at 12.43 mag. ⟨σ⟩ = 1.0775 × 10⁻²³ cm², of which 9.977 × 10⁻²⁴ is
+      photoelectric and 7.4% the scattering. With the scattering, the band's T is 0.980239 at 1
+      mag, 0.800478 at 12.43, 0.628037 at 30 and 0.506926 at 50.
+    - The band against T5.a's 2 keV, photoelectric only, Γ = 2, at plan 07's 1.871 × 10²¹ cm⁻²
+      mag⁻¹ (the advice's figures, recomputed). With the scattering, the band's T falls a further
+      2% at 12.43 mag, 4% at 30, 7% at 50 and 11% at 80.
+
+      | `A_V` (mag) | `N_H` (cm⁻²) | e^(−τ) at 2 keV | band T | band ÷ 2 keV |
+      | ----------- | ------------ | --------------- | ------ | ------------ |
+      | 1           | 1.87 × 10²¹  | 0.923           | 0.982  | 1.06         |
+      | 5           | 9.36 × 10²¹  | 0.669           | 0.915  | 1.37         |
+      | 12.43       | 2.33 × 10²²  | 0.368           | 0.815  | 2.22         |
+      | 30          | 5.61 × 10²²  | 0.0894          | 0.657  | 7.34         |
+      | 50          | 9.36 × 10²²  | 0.0179          | 0.546  | 30.5         |
+      | 80          | 1.50 × 10²³  | 0.0016          | 0.442  | 276          |
+
+    - The abundances stay MM83's, which with Predehl and Schmitt's ratio are the consistent
+      pair. A move to Wilms, Allen and McCray's changes the cross-section and the ratio together
+      (Foight et al. 2016's 2.87 × 10²¹ or Zhu et al. 2017's 2.47 × 10²¹, as the advice quotes
+      them).
+  - _The held rows._
+    - `GiantEruption` is `Recurrent` over `LUMINOUS_BLUE_VARIABLE`, with a photometric bound of
+      `GIANT_ERUPTION_PEAK` (1.2106 × 10³⁴ W, 10^7.5 L☉ rounded up at the fifth figure), no X-ray
+      bound, `AtMost(lbv::MAX_DURATION)` (20 yr) and `LightCurveSource::GiantEruption`.
+    - `MagnetarBurst` is `Recurrent` over `CORE_COLLAPSE`; T5.a had it `Local` with no class. Its
+      X-ray bound is `MAGNETAR_BURST_PEAK` (5 × 10⁴⁰ W), it has no photometric bound, and it takes
+      `AtMost(magnetar::MAX_BURST_DURATION)` (3 s, which covers the 0.2 s spike) and
+      `LightCurveSource::MagnetarBurst`, a top hat at the event's mean luminosity.
+    - Both constants are public and re-exported from `alerts`, beside `CORE_COLLAPSE_PEAK` and
+      `TYPE_IA_PEAK`. Seven rows stay pending, all on P11.T9, and `pending`'s doc names only it.
+      Thermal pulses take no kind.
+    - The magnetar test restates `Burst::mean_luminosity_watts` and
+      `GiantFlare::mean_luminosity_watts` as energy ÷ duration at the laws' ends, because plan 06
+      builds those events only from their series. The giant flare's `1e40 / 0.2` is held under
+      the bound with `<=` and within 10⁻⁶ of it; the burst is held at 2.512 × 10³⁶ W. A drift in
+      plan 06's methods is caught only once T5.c walks real events.
+    - Consumed beyond the plan's list:
+      - from `stellar::events::lbv`: `MAX_DURATION`, `LOG_PEAK_LUMINOSITY_SOLAR_LUMINOSITIES` and
+        `Eruption`;
+      - from `stellar::events::magnetar`: `MAX_BURST_DURATION`, `GIANT_FLARE_SPIKE`,
+        `BURST_ENERGY_JOULES`, `GIANT_FLARE_ENERGY_JOULES`, `BURST_DURATION_MEDIAN_SECONDS`,
+        `BURST_DURATION_SIGMA_DEX`, `BURST_DURATION_TRUNCATION`, `Burst` and `GiantFlare`;
+      - `units::consts::SOLAR_LUMINOSITY_W`.
+
+      Plan 06's P06.T28.c record names P12.T5.e as the magnetars' reader; it is now T5.c.
+  - _Reach._ `class_reach` keeps its signature, and its doc says that a walked class's bounds are
+    constants, which `walked_rows_have_constant_bounds` holds. Through the magnetars,
+    `class_reach(CORE_COLLAPSE)` is the diagonal for any X-ray sensor whose detection limit is
+    under 8.6 × 10⁻⁴ W m⁻², while `kind_reach(CoreCollapse)` stays zero in X-rays.
+    `class_reach(LUMINOUS_BLUE_VARIABLE)` is 3,281 ly at a V limit of 10⁻⁶ W m⁻².
+  - _The citations._ Two of the five corrections are made, in `reach.rs`. The other three are in
+    `features::centre::events::luminosity` and wait for P09.T30.c, whose lane holds that file
+    ("P12.T5.a.2's citations, checked at source", (c) to (e)). So the entry's "the corrected ones
+    fixed" holds for `alerts` only. `reach.rs`'s `THOMSON_CROSS_SECTION_CM2` repeats
+    `luminosity.rs`'s private `THOMSON_CROSS_SECTION_M2`; one shared constant can replace both
+    when that file is free (Rust review).
+  - _Science check_ (2026-10-30, at source through the Internet Archive's copies and OpenAlex).
+    - Confirmed:
+      - MM83's six rows as typed, and their breaks within 4 eV of the K edges of S, Ar, Ca, Fe
+        and Ni;
+      - CODATA 2018's σ_T;
+      - Wilms, Allen and McCray's §3.3 and Neilsen et al.'s §3, verbatim;
+      - every computed figure of the band, recomputed;
+      - the two bounds, against IAU 2015 B3's nominal L☉;
+      - Nakar and Sari's equation A-8 and §4.1.
+    - Thomson rather than Klein–Nishina scattering is at most 4% high at 10 keV, which moves the
+      depth by at most 0.3%. The metals' electrons, about 0.013 per H, are left out.
+    - Two texts were corrected. The thermal pulses' rate holds only for interpulse periods of 100
+      years or more, so the registry now states it as a share of the period. Ho's median of
+      about 8 is his small SED sample's, not the whole sample's: the citations record's (e) is
+      corrected.
+  - _Tests_ (pod, 8 vCPU, debug: the 26 unit tests in 1.3 s, the 7 doctests in 1.1 s).
+    - New in `reach`:
+      - `the_band_nodes_are_the_rule_over_mm83s_rows`: the 18 nodes to the bit, and the first and
+        last against the advice's six figures.
+      - `the_band_transmission_matches_a_converged_integral`: its reference is Simpson's rule in
+        ln E, 2,000 steps an interval, not the advice's 200-point Gauss–Legendre. The reference
+        meets the advice's converged values to 5 × 10⁻⁷, and the nodes meet the reference to 5 ×
+        10⁻⁵ from 0.1 to 200 mag.
+    - Moved in `reach`:
+      - `the_xray_depth_is_unity_at_its_stated_visual_extinction`, now at 88.47 mag, with 112.31,
+        0.223 and ⟨σ⟩. It also pins the depth's bits at 1, 12.43 and 88.47 mag, so a rewrite of
+        its arithmetic cannot move them unseen (determinism audit).
+      - `the_best_band_sets_the_reach` takes `LUMINOUS_BLUE_VARIABLE` off its zero list.
+    - New in `registry`: `the_magnetar_row_bounds_every_burst_and_giant_flare`,
+      `the_giant_eruption_row_bounds_its_own_light`,
+      `the_core_collapses_reach_the_diagonal_in_x_rays` and `walked_rows_have_constant_bounds`.
+      `a_row_without_its_source_names_the_task_that_fills_it` counts 7 rows, all on P11.T9.
+    - Acceptance: `cargo test -p hyperion-sim alerts`.
+  - _For T5.b–T5.e._
+    - T5.c walks the magnetars: the class's cells within `kind_reach(MagnetarBurst)`; entries
+      prefiltered by their death T ∈ [t₁ − s − 227,273 yr, t₂ − s] before any `StarModel` is
+      built; then `MagnetarModel::of`, and `bursts_in` and `giant_flares_in` over the interval.
+      The 227,273 years are 10¹⁹ G yr ÷ 4.4 × 10¹³ G from plan 06's constants: derive them there,
+      do not restate them. A detection's sub-kind, if T9 wants one, comes from the event's series
+      (`star.ev.magnetar_burst` or `star.ev.magnetar_giant`).
+    - T5.b walks the supernovae by their own `kind_reach` and T5.c the magnetars by theirs; the
+      census reads `class_reach`, which the magnetars lift to the diagonal for any X-ray sensor.
+      `the_core_collapses_reach_the_diagonal_in_x_rays` pins `kind_reach(CoreCollapse)` at zero
+      in X-rays, which T5.b's X-ray bound for the breakout will change.
+    - A magnetar's 2–10 keV flux needs a band share through T5.b's mechanism: about 0.1 for short
+      bursts and at most about 0.004 for giant-flare spikes, over the event's whole output (the
+      advice's figures).
+    - T5.e no longer lists magnetar bursts, so a magnetar's event is reported once.
+- **Deferred findings (2026-10-13 rule)**, from P12.T5.a.2 (main's ruling of 2026-10-30). Recorded
+  and deferred, not built.
+  - _The Type Ia template rises too fast_ (plan 09, P09.T19.b). It peaks at 15.1 days, against
+    Firth et al.'s (2015) 18.98 ± 0.54 days and Scalzo et al.'s (2014) bolometric 16.5 ± 2 days.
+    A retune moves `TYPE_IA_PEAK` with it, since its test holds the bound to the template. The
+    detail is in plan 09's Risks.
+  - _Ho's 15.8 is applied at the Eddington cap_, outside Ho's (2009, §3) range below a tenth of
+    Eddington (plan 09's tails; P09.T30.c). As the tails' X-ray bound it errs high, which is safe
+    for reach. The detail is in plan 09's Risks.
+  - _The magnetars' completeness gap._
+    - A magnetar goes quiet within 10¹⁹ G yr ÷ `B_c` − τ < 227,273 years of its birth. A core
+      collapse is an entry if −(`W_eff` + L + H) < T ≤ +H, with L = 262,144 years. So every
+      magnetar active at an emission time seen from closer than L − 227,273 yr × c = 34,871 ly is
+      an entry, whatever its window.
+    - Beyond that distance, an entry whose `W_eff` is under 192,152 years (hot gas, and shells
+      ended at a superbubble's wall) can leave the class while its magnetar is still active at
+      the emission time. Seen from d, activity at ages above L + `W_eff` − d is lost: past 162,144
+      years (B < 6.2 × 10¹³ G) at 100,000 ly, and past 35,121 years at the diagonal.
+    - Accepted for now, under "finding it from afar lapses" ("Events in time"). T5.c's
+      completeness test compares against the same class, so it does not see the gap.
+    - The fix widens the core-collapse test to −(max(`W_eff`, 192,152 yr) + L + H) for deaths
+      that leave a neutron star. That changes membership and so IDs, and needs a bump: defer it to
+      a bump train if a census shows the gap matters.
+  - _`LUMINOUS_BLUE_VARIABLE` reaches beyond zero_, though P09.T43's process is not built.
+    - Its reach is 3,281 ly at a V limit of 10⁻⁶ W m⁻² from the bolometric bound, and about 1,000
+      ly once T5.b's band share at 5,000 K (0.094) applies.
+    - T5.c's walk finds no hosts until P09.T43 lands, and T5.d's census should report the class
+      as one with no hosts, not as a missing class.
+    - This departs from T5.a's lean that an unbuilt class reaches nothing: the row's source is
+      built, though the class's is not.
+- **P12.T5.b as built (lane `p12-t5b`, 2026-10-30, at `GENERATOR_VERSION` 23).** No generated
+  output moves. `alerts/registry.golden` is new (every row's bounds band by band, the templates'
+  peaks and their light at 20 days): from here a change to a row or to the band light is a bless.
+  - _The band light (first commit; main's ruling of 2026-10-30 on item 5)._ New file
+    `alerts/light.rs`: `band_share(Kelvin, AlertBand) -> f64` (16-point Gauss–Legendre),
+    `supernova_luminosity(SupernovaKind, Years, AlertBand) -> Watts` (Σₖ Lₖ sₖ through plan 09's
+    `terms_at`), `supernova_peak(SupernovaKind, AlertBand) -> Watts` (the template's greatest on a
+    fixed grid), `TOP_HAT_FWHM_UM`, `N_BAND_UM`. A band's luminosity is defined on `AlertBand`'s
+    doc. Five spectra and six templates' peaks are stored and recomputed to the bit.
+  - _One bound per band._ `TransientRow::peak_bound` reads one bound per band; new
+    `CORE_COLLAPSE_BAND_PEAKS` and `TYPE_IA_BAND_PEAKS` (`[Watts; 11]`, `AlertBand::ALL`'s order).
+    `CORE_COLLAPSE_PEAK` and `TYPE_IA_PEAK` stay, as the bolometric bounds over them. V:
+    2.1922 × 10³⁴ and 1.4081 × 10³⁵ W, which reach 4,415 and 11,189 ly at a V limit of 10⁻⁶ W m⁻².
+    The core collapses' X-ray bound is 8.0931 × 10³⁶ W (the Ib and Ic breakout), so
+    `kind_reach(CoreCollapse)` is the diagonal for any X-ray limit under 1.4 × 10⁻⁷ W m⁻².
+  - _X-ray bursts_ are `Recurrent` over `XRAY_BINARY` (main's ruling of 2026-10-30, adopting the
+    advice's item 7; still pending on P11.T9): T5.c's and T5.e's text now say so.
+  - _Leans (2026-10-30)._ The Ib and Ic breakout at 1 keV, the low end of Nakar and Sari's 1–2
+    keV (0.809 in 2–10 keV); the IIb's at the red supergiants' 2.9 × 10⁵ K; a 7,000 K blackbody
+    for every radioactive term but the Type Ia's, the IIP's and IIL's included; the Type Ia's J to
+    N at a 10⁴ K blackbody's colours; the plateau's `BC_V` +0.14 (IAU scale).
+  - _The Type Ia's U to I (science check)._ They are SN 2011fe's peak shares from Pereira et al.'s
+    (2013) Table 1 magnitudes and Bessell, Castelli and Plez's zero points, not a 10⁴ K
+    blackbody's, which put I 1.75 times too bright. Its B bound is 2.6941 × 10³⁵ W.
+  - _For T5.c–T5.e._ A later row takes `band_share` at its own temperature (star flares, giant
+    eruptions, FU Orionis outbursts) and stores its shares the same way. The magnetars' 2–10 keV
+    shares are constants of the event's whole output, not `band_share`.
+  - _The walk (second commit)._ `alerts/oneshot.rs`, re-exported:
+    `one_shot_detections(galaxy, context, query, process, out)`, generic over
+    `OneShotClass: ClassProcess` (`kind`, `event`), implemented for `CoreCollapseProcess`;
+    `OneShotEvent::of_supernova(&SupernovaEntry, &CatalogueMotion)`; `OneShotCells` and
+    `NoOneShotCells`, lent by `AlertContext::with_one_shot_cells`. The plan's
+    `CatalogueClassSource::cells_in_sphere` is `catalogue_classes::cells_in_sphere`. Detections
+    are struct literals of the child module (no constructor); `Retardation::of_emission`
+    (crate-private) gives the onset's light exactly.
+  - _Not built: the Type Ia in production._ `TypeIaProcess` (P09.T34.a) is not in the tree; that
+    task adds `impl OneShotClass for TypeIaProcess` (member 0's `SupernovaEntry` and motion). The
+    tests' Type Ia class is a toy on its documented interface. The two merger classes wait on
+    P11.T8–T9.
+  - _Leans (2026-10-30)._ One detection per event, in the sensor's band where its flux stands
+    highest over the detection limit (the first in `AlertBand::ALL` on a tie). An onset reports its
+    peak flux there (`supernova_peak`), an event in progress its flux at t₁. "In progress" is
+    judged at t₁ alone, Design note 6's words, so an event still rising below the limit at t₁ is
+    not reported. The sphere is the kind's reach, not widened by 1%: `cells_in_sphere` pads it by
+    4,096 ly, and the walk reads each site at T. The retardation is the onset's.
+  - _Tests._ `tests/alerts_oneshot.rs` with `tests/common/observe.rs`:
+    `brute_force_detections(galaxy, context, cells, process, query)`, for one-shot classes only,
+    walks a box 2 × (reach + 4,096 ly) wide, not the whole catalogue; `observer_at(ly)` takes no
+    galaxy. The toy class runs for three observers over a year and a century, a split window and
+    six queries in any order; slow, the core collapses of seed 9 about two recent deaths. The
+    acceptance adds `cargo test -p hyperion-sim supernova::` for plan 09's `terms_at` and
+    `phase_four_golden`, and the slow test runs with `--test alerts_oneshot -- --ignored`.
+  - _For T5.c–T5.e._
+    - T5.d's `alerts_in` calls `one_shot_detections` per one-shot class after its census, and
+      T8's server keeps the one-shot cells. T5.c's magnetars walk the same `CORE_COLLAPSE` cells
+      with a cache of their own.
+    - A split window gives each onset once, and its first half the whole's events in progress; a
+      later half's are judged at its own start (lean, 2026-10-30, agreed by main's research;
+      Design note 6, T5.d, T8.a and Verification say so). Tests:
+      `one_shot_alerts_in_progress_in_a_first_half_are_the_whole_windows`,
+      `one_shot_alerts_see_a_slow_riser_at_its_onset_not_while_it_rises_below_the_limit`.
+    - The tails' photometric bound is still their bolometric light (`EddingtonShare(1.0)`): T5.d
+      gives them a share.
+    - An X-ray sensor fainter than 1.4 × 10⁻⁷ W m⁻² takes the core collapses' reach to the
+      diagonal, and their walk to every class cell of the cube: the census must count that cost.
+- **P12.T5.e as built (lane `p12-t5e`, 2026-10-30, at `GENERATOR_VERSION` 24).** No generated
+  output moves and nothing is blessed: `local_events` is new and only reads. File
+  `alerts/local.rs` (`pub mod local`, `local_events` re-exported from `alerts`).
+  - _Signature._ The arguments are
+    `(galaxy, ctx, query: &AlertQuery, observed, stars: &mut impl StarsCache, out)`. The query
+    gives the observer's position, which Provides' list lacks, with the window and the sensor; the
+    stars come through T3's `StarsCache`, since a rogue planet's row has none. The query's classes
+    and host limit are not read.
+  - _Kinds._ Flares, FU Orionis outbursts and glitches, Crab-like and Vela-like. Waiting, with no
+    stand-in, on P11.T9 (the registry's pending task): `DwarfNova`, and `XrayBurst` while its row
+    is local.
+  - _Consumed beyond the plan's list._ Plan 06's `flares::flares_in`, `fu_orionis::outbursts_in`
+    and `glitches::{glitches_in, large_glitches_in}` (no `events_in` or `active_at` exists),
+    `StarModel::{state_at, pulsar_at, neutron_star}`, `PulsarState::{is_radio_alive, beam}` and
+    `PulsarBeam::sweeps`; `Drift::new`, `retarded`, `bearing` and `AlertContext::sightline`.
+  - _Band light (lean, 2026-10-30)._ Blackbody shares through T5.b's top hats (plan 07's centres,
+    Bessell's and Tokunaga's widths), crate-private: flares at 10,000 K, outbursts at 6,500 K for
+    U–I and 4,000 K for J to the mid infrared, none in radio or X-rays. They are T5.b's
+    `band_share` to 10⁻¹², which the test checks, and keep their first bits (2026-10-31).
+  - _Detections (lean, 2026-10-30)._ One per event, in the sensor's band where it stands highest
+    over the limit. An onset is seen by its peak flux at its distance then, so that a split window
+    finds every onset as the whole does (Design note 6); an event in progress by its light at t₁.
+    The bearing is `retarded`'s for the light first counted (an onset's arrival, or t₁), `class`
+    is `None`, and a host at the observer, which has no bearing, is dropped. Built by T5.b's
+    `Detection::new`, so `retardation` is the onset's light, `Retardation::of_emission` as a
+    one-shot's (lean, 2026-10-31): only it moved from the struct literal's. An onset's flux and
+    resolvability are its peak's, whose light arrives after `arrival()` (minutes for a flare, up to
+    25 years for an outburst). T8 pushes an onset when its flux at the observer first reaches
+    `detect`, as a bearing, and again when it reaches `resolve` (T8.a, T8.c). The detection's flux
+    is its peak's and decides only whether it is listed.
+  - _Glitches (lean, 2026-10-30)._ In `Band::Radio` with zero flux, never resolvable, when the
+    sensor has a radio band, the pulsar is radio-alive at the glitch and its beam sweeps the
+    observer. No flux limit applies, since plan 06 gives a pulsar no radio luminosity. Under Design
+    note 11 a flux of zero clears at once. T8 clears a detection whose row has no light at its
+    arrival plus the glitch's recovery time, τ_d = 3.1 days (`Glitch::recovery_time_seconds`), for
+    both kinds (lean, 2026-10-31; on the owner's UX list). The wire and the list show it with no
+    flux.
+  - _Lines and sightlines._ Each host moves on its record's epoch position at its velocity then,
+    `Drift::of_record`'s line, and takes one sightline, from that epoch position to the observer, so
+    that a row read at any time gives the same bits, and so does any split of the window to each
+    onset. Design note 6's ε
+    is β (W + s) ÷ (1 − β) + 1 s here, W the window's furthest end from the row's time; the light
+    at t₁ is the light-cone step iterated to 1 ns.
+  - _Tests._ The direct evaluation (each row on `Drift::of_record`, plan 06's listings over a wider
+    span, t₁'s light by bisection) matches in events, phases, bands and arrivals exactly, onsets'
+    fluxes to the bit and in-progress fluxes within 10⁻⁹.
+  - _For P09.T28 and T8._ A row on a followed orbit trips a debug assertion: its events need the
+    orbit. `alerts/local_events_50ly_day` misses 1 ms (a finding); nearly half of it is plan 06's
+    `FlareModel`, built for each star on each call inside `flares_in`.
+- **P12.T5.e's cost (lane `p12-t5e-cost`, 2026-10-31, at `GENERATOR_VERSION` 24).** Nothing
+  moves: every detection is the one before, bit for bit.
+  - _Signature._ `local_events` takes `cache: &mut LocalEventsCache` before `out`
+    (`alerts::local`, re-exported from `alerts`): each star's flare rates (plan 06's `FlareRates`)
+    and the span of its FU Orionis outbursts, kept by body for one galaxy (its seed, parameters
+    and rules), at most `capacity` stars, emptied when full. T8 keeps one per subscription. Plan
+    06's `PoissonBins::events_in` no longer asks a rate outside its window (P06.T27's record).
+  - _Levers left._ Sightlines kept across calls by host and observer position would be exact only
+    while `AlertContext`'s gas source stays the same, which `local_events` cannot see, so they are
+    not kept here. The state that thinning reads for each candidate flare has no exact shortcut:
+    the phase comes from the track's model point, and the mass is interpolated, not monotone.
+- **P12.T8.a as built (lane `p12-t8a`, 2026-10-31, at `GENERATOR_VERSION` 24).** No generated
+  output moves. Files `crates/hyperion-server/src/alerts/{mod,schedule}.rs`; the sim's
+  `alerts::testing::detection` (behind `testing`) makes a `Detection` by hand for tests.
+  - _Types._ `alerts::{Subscription, AlertSchedule, Tracked, Crossing, Push, Advance, Rescan}`,
+    `ScanRequest`, `MergeScanError`, `ALERT_LOOKAHEAD`, `CROSSING_RESOLUTION` (1 ms) and
+    `GLITCH_CLEAR_AFTER`. `Subscription::new(observer, sensor, classes, host_limit)` returns the
+    first `ScanRequest`; `advance(next) -> Advance`, `query(&ScanRequest)` (the sim's
+    `AlertQuery`), `merge(&ScanRequest, tracks)`. The plan's core is
+    `AlertSchedule::advance(&previous, &next)`; `Advance::{due, rescan, into_parts}`, and
+    `Rescan::{Renew, Restart}` each hold a `ScanRequest`. `SubscriptionId`, `ScanKey`,
+    `AlertService` and `SubscribeError` wait for T8.b and T9.
+  - _The crossing rule._ `Tracked::of_light(detection, sensor, knots, light)` takes the flux at
+    the observer as a function of its time, monotone between `knots`, and lists every crossing in
+    time order, `Tracked::crossings()`: a `Detect` at each rise to `detect`, a `Resolve` at each
+    rise to `resolve`, and a `Clear` at each fall under `detect` (research's ruling of 2026-10-31,
+    which overturned the last-fall lean). Each is the first point of the clock's 1 ms grid past its
+    limit, so it does not depend on the knots. `Tracked::of_unlit` serves a row with no light:
+    `Detect` at arrival, `Clear` 3.1 days later.
+  - _For T8.b._ A merged scan schedules the crossings in its own window, and the first scan after
+    a start or a restart also the state at the start (`Detect`, and `Resolve` if that high).
+    A scan must list every event whose light may reach `detect` in its window, those under it at
+    the window's start among them, and give each the same light whichever scan lists it.
+    `Tracked::of` takes P12.T8.b.1's lights. Scans merge in the order asked, each once, empty if one
+    failed; one asked for before a jump or a backwards clock is `MergeScanError::Stale`.
+  - _For T8.c._ `Crossing::level()` is the sighting's `KnowledgeLevel`, and `Clear` is no
+    sighting. `Push::flux` is the light at the crossing; the state at the schedule's start is
+    pushed then, with the flux of the crossing that made it. The detection's `retardation()` is the
+    onset's light (T5.b's constructor) and its `bearing()` the light first counted's. Neither is
+    `Push::at`'s: a sighting takes the emitted time and bearing of its own light then.
+- **P12.T5.c as built, its magnetar half (lane `p12-t5b`, 2026-10-31, at `GENERATOR_VERSION` 23;
+  main's ruling to build it ahead of plan 11).** No generated output moves. One line of
+  `alerts/registry.golden` moves (the magnetar row's X-ray bound), a bless by name, and
+  `alerts/recurrent.golden` is new (a toy observer's year of magnetar detections).
+  - _Not built:_ the accreting white dwarfs and their novae (P11.T8.a: their classes,
+    `AwdScanMarks`, `scan_marks`, `engine_calls`), the X-ray binaries with their transients, X-ray
+    bursts and Be/X outbursts (P11.T8.b: `XrbScanMarks`), and the luminous blue variables (P09.T43:
+    `LbvProcess`). `scan_plan` and `scan_cell` give them nothing; the bench `awd_scan_marks_cell`
+    and the `engine_calls` test wait on T8.a.
+  - _Names._ `alerts/recurrent.rs`, re-exported: `scan_plan(galaxy, class, query)` (the galaxy
+    unused by the magnetars) and `scan_cell(galaxy, ctx, class, cell, query, out)`, as Provides
+    has them; the generic `magnetar_scan_plan`, `magnetar_scan_cell` and `magnetar_detections`;
+    `MagnetarClass: ClassProcess` (`magnetar_host`), implemented for `CoreCollapseProcess`;
+    `MagnetarHost::new` and `StarRecipe::new`, both checked (`BuildMagnetarHostError`, plan 06's
+    `BuildStarModelError`), and `StarRecipe::to_star`; `MagnetarCells`, `NoMagnetarCells`,
+    `AlertContext::with_magnetar_cells`; `MAGNETAR_ACTIVE_SPAN` (227,272.7 yr, derived),
+    `MAGNETAR_BURST_XRAY_SHARE` (0.1063) and `MAGNETAR_GIANT_FLARE_XRAY_SHARE` (0.0036).
+  - _The row's X-ray bound_ is the band's own, `MAGNETAR_BURST_XRAY_PEAK` = `MAGNETAR_BURST_PEAK`
+    × 0.0036 = 1.8 × 10³⁸ W, as T5.b's bounds are. It replaces P12.T5.a.2's 5 × 10⁴⁰ W, which
+    `MAGNETAR_BURST_PEAK` keeps as the whole output, and so its "under 8.6 × 10⁻⁴ W m⁻²":
+    `class_reach(CORE_COLLAPSE)` is the diagonal for an X-ray limit under 3.1 × 10⁻⁶ W m⁻², and a
+    limit of 0.040 W m⁻² reaches 2,000 ly.
+  - _Leans (2026-10-31)._
+    - The emission interval runs between the light cone's exact roots on the remnant's straight
+      line for t₁ (less twice D and a day) and t₂ (plus a day), so Design note 6's ε is not
+      needed. It is cut to each host's own active span, 10¹⁹ G yr ÷ `B_Q` − 10¹⁹ G yr ÷ B₀, a day
+      either side, not 227,273 years for every host. The sphere is the kind's reach, not widened
+      by 1%, as T5.b's is.
+    - The line of sight is from the remnant's position at the start of the Julian year that holds
+      the onset, once per host and year, so a detection's flux does not depend on the window.
+    - An event is in progress while its light, onset to end, is arriving at t₁ (a top hat).
+    - The bursts' share is two blackbodies of kT 5 and 10 keV of equal fluence.
+  - _Tests._ `tests/alerts_recurrent.rs`, with `brute_force_magnetar_detections` and
+    `KeepMagnetarCells` in `tests/common/observe.rs`. Toy magnetars on the 2,000 ly sphere for
+    three observers over a year, and over a century (slow); `scan_cell` over the plan, in reverse
+    with fresh contexts, equals one walk; six queries in any order, and with no cache; the golden.
+    Slow: seed 9's core collapses about two points of the solar circle, and 0.1 ly from the
+    strongest of the 9 magnetars active at the epoch within some 10,000 ly. The slow tests run with
+    `cargo test -p hyperion-sim --test alerts_recurrent -- --ignored`.
+  - _For T8 (main's adoption, 2026-10-31; not built here)._ The service pushes a riser that
+    crosses the limit after a subscription starts, from the flux it follows over time; T5's walks
+    keep judging "in progress" at a window's start.
+  - _For T5.d._ A sensitive X-ray sensor takes the magnetars' reach to the diagonal, as the core
+    collapses': the census must count the cells it would walk.
+- **P12.T8.b.1 as built (lane `p12-t8a`, 2026-10-31, at `GENERATOR_VERSION` 24).** No generated
+  output moves. New file `alerts/arriving.rs`.
+  - _Lights._ `Detection::light() -> &DetectionLight`: `Lit(ArrivingLight)`, with `flux_at(t)`,
+    `knots()` and `band()`, or `Unlit` for a glitch; `Detection::new` takes it last. The light holds
+    the detection's distance, line of sight and light time, so it is the walk's flux at the
+    detection's own time (an onset's flare peak to 10⁻⁹, the knot being floored to the nanosecond).
+    Built for the one-shot walk's supernovae, the local walk's flares and outbursts, and T5.c's
+    magnetar bursts and giant flares: a top hat in X-rays from onset to end (research's ruling of
+    2026-10-31). T5.d adds the centre's, and P11.T9.b plan 11's `BinaryLightCurve` with its rows.
+  - _For T8.b._ `Tracked::of(detection, sensor)` tracks a walk's detection on its own light. A
+    supernova's knots are its peak grid's 21,945 ages, so its track costs as many template
+    evaluations. A local event's light holds its detection's emission, so an onset's and a later
+    in-progress detection's differ by the host's motion over the event: tens of ms over a flare's
+    day, hours over an outburst's centuries. Track a local event on the light first listed, or a
+    crossing that near a window's edge can be pushed twice or not at all. `TransientRow::longest_rise() -> Option<LongestRise>` (`AtMost(Span)`, or
+    `PerEvent` for the tails) and `class_longest_rise(class)`: core collapses 78 days, Type Ia 16,
+    flares 4,115 s, outbursts 25 years, eruptions 5 years, the centre's flares 4,088 s, magnetars
+    and glitches none.
+- **P12.T9.a as built (lane `p12-t8a`, 2026-10-31, at `GENERATOR_VERSION` 24; `PROTOCOL_VERSION`
+  3, additive).** File `crates/hyperion-protocol/src/alerts.rs`; server
+  `alerts/{contacts,topic}.rs` and `convert/alerts.rs`.
+  - _Wire._ `ContactDto` is tagged by `level`: `Bearing(BearingContactDto)` has no host field,
+    and `Resolved(ResolvedContactDto)` flattens a bearing's fields beside the host's.
+    `AlertsNotification` has a `sequence`, as the scene's has. A bearing's `kind` is `unclassified`
+    unless it is a glitch, the one kind its band names (lean, 2026-10-31). `ClassCensusDto` has
+    `reach_ly` and `expected_hosts` beside `class` and `status`.
+  - _For T8.b and T8.c._ `Sighting::new` takes the `&Detection` it sighted, its flux and level,
+    and the stated curvature error: the kind, phase and band are the detection's, and the error is
+    stored for the resolved view. The contacts file's sighting line gains `transient`, `phase` and
+    `curvature_error_ly`, all required. No file was written before, since nothing recorded
+    sightings. `AppState::contacts` (`UniverseContacts::of`) holds each universe's one
+    `PersistedKnowledge`. The topic answers `alerts_observer` by `Subscription::advance` and
+    drops what it returns: T8.b runs the scans, and T8.c records the pushes and notifies.
+  - _For T12._ An acknowledgement pushes its contact to its own subscription only. Other
+    subscriptions of the universe are not told: T8.c's notifications will carry it.
+- **P12.T6, a member's line through the server's interiors (lane `perf-small-server`, 2026-10-31;
+  no output moves).** `Drift::of_record_in` is public, beside the new `observe_hit_in` and
+  `summary_observed_in`. The server's `system_motion` and `observe_row` take a
+  `&dyn FeatureInteriorCache`. `resolve_system`, `extinction`, `scene_ship`, the observed rows and
+  the observed summary pass the server's; the scene's core passes none.
+- **P12.T5.d as built (lane `p12-t5d`, 2026-10-31, at `GENERATOR_VERSION` 24).** No generated
+  output moves and nothing is blessed. Files `alerts/{census,centre}.rs`;
+  `alerts/{mod,oneshot,arriving}.rs`; `DisruptionTail::peak_bolometric_watts` (plan 09, the same
+  bits as before). Rebased onto P12.T8.b.1 and P12.T9.a.
+  - _Signature._ `alerts_in(galaxy, ctx, query, observed, stars, cache)`: T5.e's rows and caches,
+    `&[]` for none. `alerts_in_with` takes an `AlertClasses` lookup (`ProductionAlertClasses` in
+    production); a lookup answers with `class_alerts(galaxy, query, class, process, walk)`, which
+    builds the process only for a class whose cells it counts, or `unwalked_class`.
+  - _Types._ `ClassStatus::Unwalked(Unwalked::{NotBuilt(task), NoGlobalList})`;
+    `ClassCensus::expected_hosts` is an `Option<f64>`; `AlertResult::{sources, class_census}` with
+    `SourceCensus`, `AlertSource::{Centre, DwarfCores, FeatureLists}` and `SourceStatus`.
+    `AlertContext::with_global_list` lends plan 10's list; without it the centre is not walked.
+  - _The census (lean, 2026-10-31)._ Plan 09's `expected_hosts_in_sphere` is not built, so a
+    class's expected hosts are Σ bound × volume over its cells within its reach widened by 1%: the
+    candidates its walk draws, an upper bound. A walk of more than `BACKGROUND_THRESHOLD_CELLS`
+    (10⁵) cells is `NeedsBackgroundScan`, uncounted: past a reach of some 10,500 ly, a V limit
+    under 1.8 × 10⁻⁷ W m⁻² for the core collapses or 1.1 × 10⁻⁶ for the Type Ia, and for the core
+    collapses any X-ray limit under 1.4 × 10⁻³, through their magnetars.
+  - _Walked._ The core collapses (supernovae and magnetars) and the Type Ia (new
+    `impl OneShotClass for TypeIaProcess`); the centre through the global list
+    (`centre_detections`: the flares in X-rays, whatever the classes asked, and the tails in
+    X-rays and, as a 23,174 K blackbody's share of their whole light, photometrically: lean,
+    `TAIL_TEMPERATURE`, Gezari 2021's median); the local events. Not built, each named in the
+    result: the luminous blue variables (P12.T5.c), the X-ray binaries (P11.T8.b), the accreting
+    white dwarfs and the mergers (P11.T9), the dwarf cores' lists (P10.T7.b) and the features'
+    (P09.T36).
+  - _Lights (P12.T8.b.1's, for the centre)._ Two new `Source`s in `arriving.rs`: a centre flare,
+    its own 2–10 keV light, knots at its onset, peak and end; a tail, its band's share of its whole
+    light (`XRAY_SHARE` in X-rays, bit for bit `luminosity_watts_at`), knots at its disruption, its
+    fallback time rounded up to the nanosecond, and `ClockWindow::END`, since a tail falls for
+    ever. Each is the walk's flux at the detection's own time.
+  - _For T8.b._ Interactive: one `alerts_in`. A `NeedsBackgroundScan` class: the new
+    `one_shot_scan_plan` and `one_shot_scan_cell` with the class's process built once (the Type
+    Ia's costs 37 ms), and `scan_plan` and `scan_cell` for its recurrent kinds, which stay T5.c's
+    (main's ruling of 2026-10-31). If lane `p12-t5b-classes` lands its Type Ia `OneShotClass`
+    first, it replaces this one.
+  - _For T8.c._ `ClassStatus::Unwalked` and an uncounted class (`expected_hosts` of `None`) have
+    no value in T9.a's `ClassCensusDto` yet (its statuses are `complete`, `over_limit` and
+    `pending`, and its `expected_hosts` an `f64`).
+  - _Tests._ `tests/alerts_census.rs`, on toy classes and the Milky Way fixture's centre. The
+    shared re-observation test runs on the centre's flares while the novae wait on P11.T9 (lean).
+- **P12.T12 as built (lane `p12-t12`, 2026-11-01; client only, no wire or version moves).**
+  - _The hook._ `useAlerts(universe, observer)` reads the requests from the server link, as
+    `useScene` does, not as a parameter. `observer` is the chart's observer and time
+    (`AlertObserver`); with none the status is `no_observer` and nothing is asked. A push
+    numbered at or before the last is dropped, and a gap resubscribes. An `alerts_acknowledge`
+    answered `ok` marks the contact acknowledged, since no push follows for a contact the
+    universe had acknowledged already.
+  - _The sensor stand-in (lean, 2026-11-01)._ `STAND_IN_SENSOR` in `lib/useAlerts.ts`: V detects
+    at magnitude 17 and resolves at 12; X-rays detect at 10 mCrab and resolve at 1 Crab. Every
+    class is asked for, at the server's host limit. The sensor consoles replace it.
+  - _The list's place (lean, 2026-11-01)._ The `SYSTEMS` panel's third list, `ALERTS`, beside
+    `SYSTEMS` and `FEATURES`, with the census per class under it. Making a resolved row active
+    selects its host.
+  - _For T8.c._ The wire cannot tell a contact that has cleared, so the list shows every contact
+    the subscription holds. For a cleared contact to leave the list (Design note 11), T8.c's
+    notification has to say it has cleared.
+  - _Spatial._ `SegmentMark.endLabel` labels a segment at its drawn end, or up to 8 rem back along
+    it. A segment whose `fromMark` is `OBSERVER_MARK_ID` is cut at the eye. The `transient`
+    `SymbolShape` is a four-point star whose waist is at `TRANSIENT_WAIST_SHARE`. Rays are drawn
+    only in observed mode, from the drawn observer; a resolved host's star is drawn in both modes.
+  - _Pending._ The by-eye check against the pinned nova waits on T8.b–c and P12.T9.b.
+- **P12.T8.b and P12.T9.b as built (lane `p12-t8a`, 2026-11-01; `PROTOCOL_VERSION` 3).** Built.
+  - _Names._ `alerts/{scan,service}.rs`: `AlertScans` (`AppState::alert_scans`; `interactive`,
+    `background`), keyed by `ScanKey` in `--alert-cache` (32 MiB); `ScanSpec`, `ScanResult`;
+    `AlertSchedule::merge_late`, `ScanRequest::starts_schedule`.
+  - _For T8.c._ The topic already records each due `Detect` and `Resolve` as a sighting and pushes
+    the changed contacts with the census. Left: clears, and telling the universe's other
+    subscriptions.
+  - _Wire._ The census adds `unwalked` and an optional `expected_hosts`, no bump: no build had
+    sent one. Each class opens `pending`.
+  - _Leans (2026-11-01)._ The cache holds walks, not schedules, keyed by galaxy, not universe.
+    Feature gas at the epoch, so a light is the same in every scan. Local events from grid rows
+    within 10 ly. The centre is `unwalked`: no global list in the server.
+  - _Lean (2026-11-01; overturned by P12.T8.b.2)._ A background class whose sphere holds over
+    2²⁰ cells is not walked and reads `over_limit`.
+  - _T9.b on a supernova (lean, 2026-11-01)._ The novae are not walked (P11.T9), so the test pins
+    seed 9's IIP at +874 yr in core-collapse cell [-3, 48, 0]. Not built: the `awd_scan_cold`
+    bench (no accreting white dwarfs).
+- **P12.T5.b's other three classes as built (lane `p12-t5b-classes`, 2026-10-31, at
+  `GENERATOR_VERSION` 24).** No generated output moves; `alerts/registry.golden` re-blessed by name.
+  - _The event's light._ `OneShotEvent::light() -> &OneShotLight` replaces `supernova()`:
+    `Supernova(SupernovaKind)` or `Binary(BinaryLightCurve)`, with `peaks()` and
+    `luminosities(Span)`; `OneShotEvent::of_binary(&BinaryEvent, host, motion)`. New
+    `alerts::{binary_luminosity, binary_peak}`: a binary event's light is its curve's until it stays
+    under plan 11's `ACTIVE_SHARE` of its peak, then none (lean, 2026-10-31). Its `ArrivingLight`'s
+    knots are its arrival, peak, plateau's end and end.
+  - _The trait._ `OneShotClass::event(&self, galaxy, entry) -> Option<OneShotEvent>`, and a
+    provided `cell_events(galaxy, key)`, which the merger classes take from their scan marks.
+    Implemented for `StellarMergers` and `NeutronStarMergers`.
+  - _The rows._ `LuminousRedNova` at 300 M☉, the class's heaviest: V 7.6311 × 10³³ W (P11.T9.a's
+    curve as fixed on 2026-11-01), D 280 d, rise 10 d. `Kilonova` at 0.05 M☉, the class's most,
+    not the curve's 1 M☉ (lean, 2026-10-31): V 4.6816 × 10³³ W, D 35 d, rise 1 d.
+    `LightCurveSource::BinaryCurve`. Five rows stay pending on P11.T9.
+  - _For T5.d's census and T8.b._ `class_reach(STELLAR_MERGER)` is the cube's diagonal only for a
+    V limit under 1.3 × 10⁻¹⁰ W m⁻², and 2,605 ly at 10⁻⁶ W m⁻².
+  - _Rebased onto P12.T5.d (2026-11-01)._ The Type Ia's `OneShotClass` is T5.d's, on the new
+    signature; `one_shot_scan_cell` reads `cell_events`. `ProductionAlertClasses` walks
+    `STELLAR_MERGER` and `NEUTRON_STAR_MERGER` with `one_shot_detections`; neither is `Unwalked`.
+- **P12.T8.c as built (lane `p12-t8a`, 2026-11-01; `PROTOCOL_VERSION` 3, additive).** Built.
+  - _Names._ `KnowledgeStore::record_clear` and `PersistedKnowledge::record_clear(event, at)`,
+    written as a `cleared` line; `BearingContact::cleared()`; `PersistedKnowledge::changes()`, a
+    `watch` of `ChangedContacts` that every alerts subscription of the universe pushes from.
+  - _Wire._ `BearingContactDto.cleared` is optional and absent while a contact is lit.
+    `useAlerts` drops a cleared contact (`contactLit`); the alert list words `unwalked` as
+    `NOT WALKED`.
+  - _Leans (2026-11-01)._ A clear holds until the contact's next sighting is recorded, whatever its
+    time, and its level never falls. The `cleared` line joins format 1 with no bump: no file held a
+    sighting before T8.b.
+  - _For T12._ An acknowledgement, a sighting and a clear now reach every subscription of the
+    universe.
+- **P12.T5.c as built, the other classes (lane `p12-t5c-classes`, 2026-10-31, rebased onto
+  P12.T5.b and T5.d on 2026-11-01, at `GENERATOR_VERSION` 24).** No generated output moves.
+  `alerts/registry.golden` is re-blessed by name; `alerts/recurrent_binaries.golden` and
+  `alerts/recurrent_eruptions.golden` are new; `alerts/recurrent.golden` does not move. The magnetar
+  half's "_Not built_" bullet above is built here, but for the dwarf novae (below).
+  - _Rows._ Plan 11's other five are built on T5.b's `LightCurveSource::BinaryCurve`, each band's
+    bound its curve's peak at the top of the samplers' masses (`NOVA_BAND_PEAKS`,
+    `DWARF_NOVA_BAND_PEAKS`, `XRAY_TRANSIENT_BAND_PEAKS`, `XRAY_BURST_BAND_PEAKS`,
+    `BEX_OUTBURST_BAND_PEAKS`), D to 1% of the peak (P11.T9.b's `ACTIVE_SHARE`): novae 3.2612 ×
+    10³¹ W in V, 169.26 d, rise 9.58 d; dwarf novae 1.8985 × 10²⁶ W in V, 5,517 yr (a loose sum of
+    extremes), rise 1 d; X-ray transients 1.0282 × 10³² W in X, 143.16 d, 5 d; bursts 3.9023 ×
+    10³¹ W in X, 144 s, 5 s; Be/X outbursts 2.9472 × 10³⁰ W in X only, 102.10 d, 10 d.
+    `GiantEruption` is now per band (`GIANT_ERUPTION_BAND_PEAKS`, a 5,000 K blackbody,
+    `GIANT_ERUPTION_SHARES`): 1.1401 × 10³³ W in V, 1,007 ly at a V limit of 10⁻⁶ W m⁻². With T5.b's
+    mergers every row is built; `RowSource::Pending` and `pending_on` stay for a kind registered
+    before its source.
+  - _Names._ `scan_plan` and `scan_cell` dispatch the core collapses, both accreting white dwarf
+    classes, the X-ray binaries and the luminous blue variables. New: `recurrent_scan_plan`,
+    `recurrent_reach` (the largest `kind_reach` of a class's recurrent kinds),
+    `recurrent_detections`, and `giant_eruption_scan_cell` with `EruptionClass`, `EruptionHost`
+    and `BuildEruptionHostError`; the binary classes' walks are crate-private, reached through
+    `scan_cell`. The binary events' light is T5.b's (`ArrivingLight::binary`, `binary_luminosity`);
+    `ArrivingLight` gains an eruption's own light. `class_longest_rise`: X-ray binaries 10 d,
+    accreting white dwarfs 9.58 d.
+  - _Leans (2026-10-31)._ A binary or LBV host's emission interval is bounded by its speed (one
+    distance, no light-cone root), and a host is passed over unasked if it stays beyond its kind's
+    reach; a slow white dwarf by its carried eruptions, a fast one by its phase's noise bound. An
+    event is in progress until plan 11's end of the event (an eruption's own end), seen by its
+    light at t₁; an onset by its peak. The line of sight is the magnetars' rule, per host and
+    Julian year.
+  - _Dwarf novae are not walked (T5.e)._ Plan 11 lists them only from an `AwdEntry` (its orbit),
+    not from scan marks, and no range query's rows are catalogue hosts. They join `local_events`
+    with the task that brings catalogue hosts into the range query.
+  - _In `alerts_in` (after T5.d)._ `ProductionAlertClasses` walks both white dwarf classes, the
+    X-ray binaries and the luminous blue variables with `recurrent_detections` once `class_alerts`
+    finds them complete, its own process counting the hosts and the walk building one per cell.
+    Every class is walked now but the centre's victims, through the global list.
+  - _For T8.b._ No cell cache is lent for the new classes: white dwarf and X-ray binary cells are
+    rescanned from their marks (`binary/awd_scan_marks`), and an LBV cell is generated whole each
+    call; a server that rescans should keep LBV cells as it keeps the magnetars'.
+- **P12.T8.b.2 as built (lane `p12-t8a`, 2026-11-01; no output moves).** Built.
+  - _Names._ `ClassProcess::event_time` (rule 10; the core collapses' and the Type Ia's),
+    `entries_when`, `class_slabs`, `cells_in_slab`, `occupied_cells` and
+    `OneShotClass::cell_events_when`. `one_shot_scan_cell` and `magnetar_scan_cell` build only the
+    candidates whose time can light the window (`alerts/cut.rs`). `RecurrentProcess` (both white
+    dwarf classes, the X-ray binaries, the LBVs) lends one process to each cell's `scan_cell`. The
+    server's `background_plan` builds the process once and splits the slabs into at most 256 bulk
+    jobs (`walk_slabs`, `SLABS_PER_JOB` = 1): every class the census can send there, one-shot and
+    recurrent alike.
+  - _The census._ T8.b's 2²⁰-cell refusal is gone: a whole-galaxy class reads `complete`, its
+    `expected_hosts` the candidates its walk drew (lean). Past the host limit it reads `over_limit`
+    and merges nothing. A class with no plan, the centre's victims, reads `unwalked`.
+  - _Benches._ `oneshot_scan_galaxy` and `awd_scan_cold` (the plan's), on the default workers.
+  - _Leans (2026-11-01)._ No cache of occupied cells: a rescan sweeps the slabs again. Each kind is
+    walked only on cells within its reach, so a V-only sensor walks no magnetar.
+- **P12.T12's `ALERTS` count as built (lane `alerts-count-and-desert`, 2026-11-01; client only).**
+  The count's place is four B612 Mono figures and a stale slot, set from its left; past 9999 it is
+  the guide's Overflow, `****`, the accessible name keeping it whole (lean, 2026-11-01: the wire
+  bounds no subscription's contacts). While another list shows, a hidden `output` of the panel's
+  says the newest unacknowledged alert, as `AlertList`'s does while it shows.
+- **P12.T13 as built (lane `p12-t13-verification`, 2026-11-05, at 27; no output moves).**
+  - _Goldens, blessed by name._ `observe/retarded` (six systems picked by rule, two observers),
+    `alerts/century` (the Sun-like point over [0, 100) yr: 13 fast novae) and `observe/sightline`
+    (the disc bench's lens events at 30,000 Einstein radii, segment keys, bearings).
+  - _Names._ `LensEvent::{closest_seconds, closest_impact}`; the bench `alerts_interactive`.
+  - _Re-pinned at 27, hold-off path (the field's walk reads no feature's deaths; P09.T36's hold at
+    29 moves them)._ Four slow tests' host searches widened; the Type Ia watch skips a Iax; whole
+    cube's supernovae 4 → 1, novae (91, 11, 1) → (63, 7, 0) and 98 → 94; `awd_scan_cold` 63.
+  - _Also re-pinned, since it stopped plan 12's benches:_ `range_500ly_floor_d` 37,668 → 33,387
+    (with `sky_caps`' `RANGE_REALISED`).
+  - _Pending: the owner's quiet bench run._ The benches' figures are "pod, loaded".
+- **P12 perf, the lens walk within ruling 143.3's targets (lane `perf-lens-walk`, 2026-11-05, at
+  28; no output moves: the walk's candidates, events and census are the whole-cell walk's).**
+  - _The walk reads its cells in part._ `LensWalkPlan::walk` makes a system whole only where its
+    epoch position passes the cone with its own speed cut (crate-private `placement::visit_cell`,
+    `query::SpeedCut`); it counts the rest from their pick, and in layer E from plan 08's marks
+    without a track (`marks::Tracks::Defer`), whose dead records are refused the catalogue's claims
+    from the least age they can have (`site::no_site_from`, `lbv::may_host_from`).
+  - _The cache._ `walk`, `lens_candidates` and `lenses_along` keep their `cache` argument but ask
+    it for no cell, which they would have to generate whole (lean, 2026-11-05).
+  - _The speed cut._ In layers D and E the cone of every system but a member of the classes the
+    escape cut exempts takes the escape speed's bound, not the layer's pad; the cells still cover
+    the pad (lean, 2026-11-05).
+  - _Names._ `LensWalkPlan::chunks(threads)` and `lensing::CHUNKS_PER_THREAD` (4 runs a thread of
+    each layer, the largest cells first); the bench's pool walks them.
+  - _`hyperion-base`._ `running_sums` reserves its list: glibc's `realloc` serialised threads, so
+    `PiecewiseLinear::new` per dead record stopped layer E scaling past eight threads.
+- **P12 perf, layer E's exact fates (lane `perf-layer-e-fates`, 2026-11-05, at 28; no output
+  moves).** `fate_of` is a serial chain of some 1,000 dependent evaluations whose inputs never
+  repeat (67,702 distinct (m, Z) in the bulge walk's layer E), so the exact cuts are small: about
+  4% of layer E's whole-cell cost.
+  - _Names._ `ZCoeffs::alpha_r_power_law_ends` (αR at a66 and a67, once a Z; `ZCoeffs`'s `Debug`
+    now by hand, its print unchanged) and `Builder::electron_capture_windows` (once a build).
+  - _The wind._ `hot_or_cool` takes its cool side as a closure, read only below 12,500 K;
+    `small_envelope_factor` returns the clamp's ends without the power where they decide it.
+  - _Not cut (lean, 2026-11-05)._ No memo of fates across records or calls (no input repeats, and
+    a hidden one would warm the cold benches); `table_fate`'s domain as it was.
+- **P12 perf, the stellar mergers' walk balanced (lane `perf-mergers-walk-balance`, 2026-11-05, at
+  28; no output moves: the walk's tracks, in their order, and its candidates are the slab jobs').**
+  - _Names (sim)._ `one_shot_scan_cell_in`, `OneShotClass::cell_events_when_in` and
+    `entries_when_in` (crate-private `scan_merger_cell_in`, `scan_nsm_cell_in`) read a cell's
+    candidates of an index range; each whole-cell form is its range `0..u32::MAX`. A class reads
+    its events its own way by overriding `cell_events_when_in`, never `cell_events_when`.
+  - _Names (server)._ `walk_slabs`, `SlabsWalked` and `ScanResult::of_jobs` are gone: the plan's
+    slab jobs are `census_slabs` (occupied cells as `Piece::Cell`, a merger class's dense ones as
+    `Piece::Part`s by `CellParts::SERVICE`, then each slab's lists), then `walk_pieces` jobs take
+    pieces from a shared `BackgroundWork`, keeping only those that found anything.
+  - _Leans (2026-11-05)._ Only the merger classes' cells split (parts of at least 512 candidates,
+    at most 64 a cell); a walk job hands its worker back after `JOB_BUDGET` = 1 s; as many at once
+    as the pool has workers; `ScanResult::of_pieces` merges a split cell's parts by arrival, event.
+- **P12 perf, the alert walks' CPU (lane `perf-mergers-walk-balance`, part 2, 2026-11-05, at 28;
+  no output moves).**
+  - _Names (sim)._ `ToldEntries` and the provided `ListedHostsCache::told_entries`: a feature's
+    told deaths' entries, every one built once a walk's cut takes one, which the server keeps as
+    entries of their own (`ListedKey::Told`), charged as built. `OneShotClass::events_drift` (true
+    for the mergers) picks `cut::one_shot_drifting`; the merger scans' range forms take a `wanted`
+    on the merger time read first (`merger_time_of`, `nsm_time_of`), before the site's thinning.
+  - _Leans (2026-11-05)._ The mergers implement no `ClassProcess::event_time`: rule 10 asks its
+    classes to keep their events in their cells' boxes, and a merger's host moves within
+    `LIFETIME_REACH` of its cell (rule 5), so the merger scans read and cut the time themselves.
+- **P09.T40 memory, the dense class cells at the galactic centre (lane `perf-mergers-walk-balance`,
+  part 3, 2026-11-05, at 28; no output moves).**
+  - _Names (sim)._ `ClassCellSystems::streams_places` and the provided
+    `CatalogueClassCellCache::most_kept_places` (default `MAX_KEPT_PLACES` = 2¹⁸; 0 for
+    `NoClassCellCache`): a placed class's cell of more candidates keeps no place, and the hits and
+    the shells' hosts read its places again, in index order, as they walk it.
+  - _Lean (2026-11-05)._ Streaming, the server's cache keeping as many places a cell as a quarter
+    of its budget holds (174,762 at 32 MiB): past a quarter a cell evicts most of the cache, and the
+    cells of 8–32 MiB about the centre, made side by side, held 0.6 GB more at the peak.
+- **P12.T5.e, a glitch's alert hold, ruled (2026-11-13, the owner's delegated UX call,
+  ux-calls-and-checklist-gaps):** the lean stands: a detection with no light clears at its arrival
+  plus 3.1 d (`RECOVERY_TIME_DAYS`, Crab-like τ_d and Vela-like `LARGE_GLITCH_DURATION` alike),
+  as the guide's sensor bullet now says. The alert list read its 0 flux as `0.00 W/m²`; it now
+  reads `FLUX RADIO —`, Missing (`AlertList.tsx`'s `fluxReading`). Server and wire unchanged.

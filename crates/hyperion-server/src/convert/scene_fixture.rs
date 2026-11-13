@@ -68,7 +68,7 @@ fn the_in_system_golden_systems_are_pinned_as_the_client_receives_them() {
         let system = SystemId::from_raw(raw).expect("a pinned ID is a system ID");
         let record = resolve(&galaxy, system).expect("a pinned ID names a system");
         let stars = SystemStars::generate(&galaxy, &record);
-        let ctx = SystemContext::from_stars(&galaxy, &stars);
+        let ctx = SystemContext::for_stars(&galaxy, &stars).expect("a pinned system is generated");
         let planets = generate(galaxy.seed(), &ctx);
         for time in times {
             let request = SystemBodiesRequest {
@@ -132,7 +132,7 @@ fn scene_message_sizes() {
         let system = SystemId::from_raw(raw).expect("a pinned ID is a system ID");
         let record = resolve(&galaxy, system).expect("a pinned ID names a system");
         let stars = SystemStars::generate(&galaxy, &record);
-        let ctx = SystemContext::from_stars(&galaxy, &stars);
+        let ctx = SystemContext::for_stars(&galaxy, &stars).expect("a pinned system is generated");
         let planets = generate(galaxy.seed(), &ctx);
         let ship = KinematicsDto {
             position: FramePositionDto::System {
@@ -206,6 +206,7 @@ fn scene_message_sizes() {
                     }),
                     bodies: Vec::new(),
                     craft: None,
+                    surface_revisions: None,
                 }),
             });
             let count = summaries.len();
@@ -243,6 +244,7 @@ fn scene_message_sizes() {
             arrival: None,
             bodies: Vec::new(),
             craft: Some(craft.clone()),
+            surface_revisions: None,
         }),
     });
     let one_craft = serde_json::to_string(&craft[0])

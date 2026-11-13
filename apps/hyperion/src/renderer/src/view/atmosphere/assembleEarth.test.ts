@@ -1,0 +1,290 @@
+/**
+ * The generated Earth's medium with its line tables (plan R08, R08.T10.a): its terms, its sun's
+ * curves and the labels the bound and today's tables give it; a Mars-like record's pending CO
+ * overtones; the cases of six absorber profiles (`decision-r08-cmf-licence.md` §2.3) and of
+ * more terms than a medium holds; and the drawn terms' sources (R08.T14.c).
+ */
+import { beforeAll, describe, expect, it } from "vitest";
+
+import {
+  detailOf,
+  earthClassLinesDetail,
+  electronsDetail,
+  marsLikeDetail,
+  pastTheCapDetail,
+  pastTheCapWithElectronsDetail,
+  recordInput,
+  sixProfilesDetail,
+  withSurface,
+} from "../../test/atmosphereRecords";
+import { inlinePart } from "../../test/kDistributionFixtures";
+import { testPatienceMs } from "../../test/patience";
+import { sourceMisses } from "../../test/sourceChecks";
+import { earthDetail } from "../../test/planetaryFixture";
+import { type KDistributionTable, loadKDistributions } from "./absorbers/kDistribution";
+import {
+  type AssembledMedium,
+  absorberCurveSlots,
+  absorberSpecsOf,
+  assembleMedium,
+  type CurveSlots,
+  curveSlotsOf,
+  lineSpeciesOf,
+  THICK_REASON,
+  withCurves,
+} from "./assemble";
+import { checkAbsorberCurves } from "./tables";
+
+/** The line tables the cases here list: the generated Earth's, O₂'s, H₂'s and CO's. */
+let tables: ReadonlyArray<KDistributionTable> = [];
+
+/** The generated Earth, the wire fixture's, assembled with its tables. */
+let earth: AssembledMedium;
+
+/** Its curves under the Sun, whole on one thread. */
+let earthCurves: CurveSlots = [];
+
+beforeAll(async () => {
+  const input = recordInput(detailOf(earthDetail()));
+  tables = await loadKDistributions([...lineSpeciesOf(input), "O2", "H2", "CO"], inlinePart);
+  earth = assembleMedium(input, { kDistributions: tables });
+  if (earth.drawn !== undefined) {
+    earthCurves = absorberCurveSlots(earth.drawn);
+  }
+}, testPatienceMs());
+
+/** An assembly with this file's line tables. */
+function withTables(detail: ReturnType<typeof detailOf>): AssembledMedium {
+  return assembleMedium(recordInput(detail), { kDistributions: tables });
+}
+
+describe("the generated Earth (the wire fixture's) with its line tables", () => {
+  it("builds the molecular term, its gases' lines on one profile and its water's continuum", () => {
+    // N₂ has nothing visible to draw below 1,800 K; Ar, listed for the pairs' partners, no optics.
+    expect(earth.medium?.terms.map((term) => term.name)).toEqual([
+      "rayleigh",
+      "absorber:H2O+Ar+CO2",
+      "pair:H2O+H2O,H2O+air",
+    ]);
+  });
+
+  it("carries the column's pressure for its line absorbers", () => {
+    expect(earth.medium?.pressureBar).toBeDefined();
+  });
+
+  it("is APPROXIMATE, beside the inventory's note", () => {
+    expect(earth.labels).toEqual(["aerosolsNotYetModelled", "atmosphereApproximate"]);
+  });
+
+  it("is so for its water's continuum below 567 nm and its multiple scattering past the checked range", () => {
+    // Its lines, which CO2 broadens with no width on file, clear the widthless gases' effect bound
+    // since R08.T10.c, and give no reason; its air is past the boundary by depth since R08.T13.d.
+    expect(earth.reasons).toEqual([
+      "H2O–H2O pairs: their absorption estimated, not measured",
+      "H2O–air pairs: their absorption estimated, not measured",
+      THICK_REASON,
+    ]);
+  });
+
+  it("names H2O negligible, its lines' broadening by CO2 under the effect bound, and CO2, its held χ and its fixed-g mix under the bound", () => {
+    expect(earth.negligible).toEqual(["H2O", "CO2"]);
+  });
+
+  it("takes one light slot of curves, one a term", () => {
+    const curved = withCurves(earth, earthCurves);
+    expect([curved.drawn?.curves.length, curved.drawn?.curves[0]?.length]).toEqual([1, 2]);
+  });
+
+  it("gives curves the tables accept", () => {
+    const curved = withCurves(earth, earthCurves);
+    if (curved.medium === undefined) {
+      throw new Error("the generated Earth draws no medium");
+    }
+    expect(() => {
+      checkAbsorberCurves(curved.medium, curved.drawn.curves);
+    }).not.toThrow();
+  });
+
+  it("joins a pool's curves, one list an absorber by light, into the same slots", () => {
+    const perAbsorber = (earthCurves[0] ?? []).map((channels) => [{ channels }]);
+    expect(curveSlotsOf(perAbsorber, 1)).toEqual(earthCurves);
+  });
+
+  it("gives a curve job on another worker the same specs, with no aerosols' optics", () => {
+    const input = recordInput(detailOf(earthDetail()));
+    expect(absorberSpecsOf(input, { kDistributions: tables }).specs).toEqual(
+      earth.drawn?.absorbers,
+    );
+  });
+});
+
+describe("the generated Earth with its CO2 raised past the widthless gases' bound (R08.T10.c)", () => {
+  /**
+   * CO2's raised mole fraction, 1%: past the 6.0–6.1 times 330 ppm at which H2O's bound crosses
+   * 10⁻³ (`negligible.test.ts`).
+   */
+  const RAISED_CO2 = 0.01;
+
+  /** The generated Earth with CO2 at {@link RAISED_CO2}, its other gases scaled to the rest. */
+  function raisedCo2(): AssembledMedium {
+    const raised = withSurface(earthDetail(), (surface) => {
+      const co2 = surface.gases.find((gas) => gas.species === "CO2")?.mole_fraction ?? 0;
+      const scale = (1 - RAISED_CO2) / (1 - co2);
+      // The wire lists the gases largest first.
+      return {
+        ...surface,
+        gases: surface.gases
+          .map((gas) => ({
+            ...gas,
+            mole_fraction: gas.species === "CO2" ? RAISED_CO2 : gas.mole_fraction * scale,
+          }))
+          .toSorted((a, b) => b.mole_fraction - a.mole_fraction),
+      };
+    });
+    return withTables(detailOf(raised));
+  }
+
+  it("labels its H2O lines estimated, their broadening by CO2 past the bound", () => {
+    const raised = raisedCo2();
+    expect([
+      raised.reasons.includes("H2O: its absorption estimated, not measured"),
+      raised.labels.includes("atmosphereApproximate"),
+      raised.negligible.includes("H2O"),
+    ]).toEqual([true, true, false]);
+  });
+});
+
+describe("an Earth-class record with O2 among its gases", () => {
+  it("draws O2's lines with the other gases' and its collision pairs with the water's continuum", () => {
+    expect(withTables(earthClassLinesDetail()).medium?.terms.map((term) => term.name)).toEqual([
+      "rayleigh",
+      "absorber:O2+H2O+Ar+CO2",
+      "pair:O2+O2,O2+N2,O2+CO2,H2O+H2O,H2O+air",
+    ]);
+  });
+});
+
+describe("a Mars-like record's CO, whose overtones from 8–0 are pending (R08.T4.f)", () => {
+  it("keeps CO's measured bands drawn", () => {
+    const species = withTables(marsLikeDetail()).drawn?.absorbers.flatMap((spec) =>
+      spec.kind === "column" ? spec.species.map((s) => s.species) : [],
+    );
+    expect(species).toContain("CO");
+  });
+
+  it("names CO negligible, its pending overtones under their bound", () => {
+    expect(withTables(marsLikeDetail()).negligible).toContain("CO");
+  });
+
+  it("gives CO no reason", () => {
+    expect(
+      withTables(marsLikeDetail()).reasons.filter((reason) => reason.startsWith("CO:")),
+    ).toEqual([]);
+  });
+
+  it("gives CO its reason where a column a million times Mars's takes its overtones past their bound", () => {
+    expect(
+      withTables(marsLikeDetail(1e6)).reasons.filter((reason) => reason.startsWith("CO:")),
+    ).toEqual(["CO: part of its absorption has no data on file, not drawn"]);
+  });
+});
+
+describe("free electrons", () => {
+  it("scatter as a Thomson term on e−'s layer", () => {
+    expect(withTables(electronsDetail()).medium?.terms.map((term) => term.name)).toContain(
+      "thomson",
+    );
+  });
+
+  it("are left out past the term limit where theirs is the least depth, and say so", () => {
+    expect(assembleMedium(recordInput(pastTheCapWithElectronsDetail())).reasons).toContain(
+      "e− scattering: left out, the console can draw no more layers",
+    );
+  });
+});
+
+/**
+ * The six-profile record, assembled with no line tables, so that its six profiles are its
+ * cross-sections' and its pairs'.
+ */
+function six(): AssembledMedium {
+  return assembleMedium(recordInput(sixProfilesDetail()));
+}
+
+describe("six absorber profiles (decision-r08-cmf-licence.md §2.3)", () => {
+  it("keep the five of greatest depth", () => {
+    expect(six().drawn?.absorbers.map((spec) => spec.name)).toEqual([
+      "absorber:O3",
+      "absorber:CH4",
+      "absorber:SO2",
+      "pair:H2O+H2O,H2O+air",
+      "pair:O2+O2,O2+N2",
+    ]);
+  });
+
+  it("leave out H2's pairs, the least, and say so", () => {
+    expect(six().reasons.filter((reason) => reason.includes("left out"))).toEqual([
+      "H2–He pairs: left out, the console can draw no more layers of absorbing gas",
+      "H2–H2 pairs: left out, the console can draw no more layers of absorbing gas",
+    ]);
+  });
+
+  it("carry APPROXIMATE for them", () => {
+    expect(six().labels).toContain("atmosphereApproximate");
+  });
+});
+
+describe("more terms than a medium holds", () => {
+  it("holds eight", () => {
+    expect(assembleMedium(recordInput(pastTheCapDetail())).medium?.terms.length).toBe(8);
+  });
+
+  it("leaves out the term of least depth, here the thinnest haze, and says so", () => {
+    expect(assembleMedium(recordInput(pastTheCapDetail())).reasons).toContain(
+      "liquid H2SO4 particles: left out, the console can draw no more layers",
+    );
+  });
+
+  it("gives a curve job the specs the medium draws, the term limit applied", () => {
+    const input = recordInput(pastTheCapDetail());
+    expect(absorberSpecsOf(input).specs).toEqual(assembleMedium(input).drawn?.absorbers);
+  });
+});
+
+/** An assembly's terms' sources' kinds, in their order, and where they miss the drawn terms. */
+function sourcesOf(assembled: AssembledMedium): {
+  readonly kinds: ReadonlyArray<string>;
+  readonly misses: ReadonlyArray<string>;
+} {
+  if (assembled.medium === undefined) {
+    throw new Error("the record draws a medium");
+  }
+  const { sources } = assembled.drawn;
+  return {
+    kinds: sources.map((source) => source.kind),
+    misses: sourceMisses(assembled.medium, sources),
+  };
+}
+
+describe("the drawn terms' sources (R08.T14.c)", () => {
+  it("give the generated Earth's molecular and absorber terms at the channels to the bit", () => {
+    const { kinds, misses } = sourcesOf(earth);
+    expect(kinds).toEqual(["molecular", ...(earth.drawn?.absorbers.map(() => "absorber") ?? [])]);
+    expect(misses).toEqual([]);
+  });
+
+  it("give a Mars-like record's terms at the channels to the bit", () => {
+    const { kinds, misses } = sourcesOf(withTables(marsLikeDetail()));
+    expect([kinds[0], misses]).toEqual(["molecular", []]);
+  });
+
+  it("give free electrons' Thomson term its n_e, at the channels to the bit", () => {
+    const { kinds, misses } = sourcesOf(withTables(electronsDetail()));
+    expect([kinds.filter((kind) => kind === "thomson").length, misses]).toEqual([1, []]);
+  });
+
+  it("travel with the assembly through a structured clone, as the worker answers it", () => {
+    const sources = earth.drawn?.sources;
+    expect(structuredClone(sources)).toEqual(sources);
+  });
+});

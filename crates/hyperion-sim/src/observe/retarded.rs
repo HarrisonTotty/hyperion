@@ -6,9 +6,11 @@ use std::fmt;
 
 use crate::coords::{GalacticDisplacement, GalacticPosition, GalacticVelocity, LyCell};
 use crate::galaxy::Galaxy;
+use crate::galaxy::catalogue_classes::CatalogueMotion;
 use crate::galaxy::features::members::{
-    FeatureInteriorCache, MemberRecord, NoInteriorCache, resolve_member,
+    FeatureInteriorCache, MemberRecord, NoInteriorCache, listed_death_motion, resolve_member,
 };
+use crate::galaxy::global_list::members::GlobalMemberRecord;
 use crate::galaxy::placement::{SystemOrigin, SystemRecord};
 use crate::galaxy::query::epoch_velocity;
 use crate::id::{SystemId, SystemIdKind};
@@ -49,6 +51,20 @@ pub enum TraceMotionError {
     /// not built; a straight line would misplace it by more than a tidal radius a century at 1 ly
     /// (brainstorm, "Orbits and time"), so no line is given for any centre member until then.
     CentreOrbitNotBuilt(SystemId),
+    /// The system is a member of the global list, a stream's or a dwarf core's (plan 10): its
+    /// velocity is its member record's, which the caller's list and tube tables give, so its line
+    /// is [`Drift::of_global_member`]'s, not one from the system record alone.
+    GlobalListMember(SystemId),
+    /// The system is a catalogue system (plan 09, P09.T33.a). A supernova entry's moves on two
+    /// lines that meet at its explosion, where its remnant takes its natal kick, so no one line
+    /// traces it, and a retarded time across the explosion would misplace it by the kick's travel;
+    /// its class's motion ([`CatalogueMotion`](crate::galaxy::catalogue_classes::CatalogueMotion))
+    /// has no tracer yet.
+    CatalogueMotionNotTraced(SystemId),
+    /// The system is a tidal disruption's victim (plan 09, P09.T30.b) asked about after its
+    /// disruption, when it is no system: its path
+    /// ([`CentrePath`](crate::galaxy::features::centre::CentrePath)) ends there.
+    Disrupted(SystemId),
 }
 
 impl fmt::Display for TraceMotionError {
@@ -57,6 +73,22 @@ impl fmt::Display for TraceMotionError {
             Self::CentreOrbitNotBuilt(id) => write!(
                 f,
                 "the centre member {} follows an orbit that is not built yet",
+                id.raw()
+            ),
+            Self::GlobalListMember(id) => write!(
+                f,
+                "the global-list member {} is traced from its member record",
+                id.raw()
+            ),
+            Self::CatalogueMotionNotTraced(id) => write!(
+                f,
+                "the catalogue system {} moves on a line broken at its explosion, which is not \
+                 traced yet",
+                id.raw()
+            ),
+            Self::Disrupted(id) => write!(
+                f,
+                "the centre member {} was disrupted by the central black hole before then",
                 id.raw()
             ),
         }
@@ -195,10 +227,18 @@ pub trait Trajectory {
 /// let moved = start.distance_to(&later).value();
 /// assert!((moved - hyperion_sim::units::consts::METRES_PER_LIGHT_YEAR).abs() < 1.0);
 /// ```
+///
+/// A listed core collapse of a feature's list (plan 09, P09.T36; fix-p09-recent-kicks) moves on
+/// its progenitor's line broken at its death, where its remnant takes its natal kick, as a
+/// catalogue class's entry does: its drift holds that [`CatalogueMotion`] and reads it at every
+/// time ([`Drift::broken`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Drift {
     epoch_position: GalacticPosition,
     velocity: GalacticVelocity,
+    /// A listed core collapse's line broken at its death, which the drift reads in place of the
+    /// straight one.
+    broken: Option<CatalogueMotion>,
 }
 
 impl Drift {
@@ -208,6 +248,19 @@ impl Drift {
         Self {
             epoch_position,
             velocity,
+            broken: None,
+        }
+    }
+
+    /// The two lines of `motion`, broken at its instant: a listed core collapse's, its progenitor's
+    /// before its death and its remnant's after it (fix-p09-recent-kicks). Its epoch position and
+    /// velocity are the motion's at the epoch.
+    #[must_use]
+    pub fn broken(motion: CatalogueMotion) -> Self {
+        Self {
+            epoch_position: motion.position_at(UniverseTime::EPOCH),
+            velocity: motion.velocity_at(UniverseTime::EPOCH),
+            broken: Some(motion),
         }
     }
 
@@ -221,7 +274,11 @@ impl Drift {
     /// # Errors
     ///
     /// [`TraceMotionError::CentreOrbitNotBuilt`] for a member of the galactic centre, whose Kepler
-    /// regime and orbit wait for plan 09's P09.T28 (P12.T2 as built, provisional).
+    /// regime and orbit wait for plan 09's P09.T28 (P12.T2 as built, provisional), and
+    /// [`TraceMotionError::GlobalListMember`] for a stream's or a dwarf core's member, whose line
+    /// is [`of_global_member`](Self::of_global_member)'s, and
+    /// [`TraceMotionError::CatalogueMotionNotTraced`] for a catalogue system, whose line is broken
+    /// at its explosion (plan 09, P09.T33.a).
     ///
     /// # Panics
     ///
@@ -231,9 +288,12 @@ impl Drift {
         Self::of_record_in(galaxy, &NoInteriorCache, record)
     }
 
-    /// [`of_record`](Self::of_record) with a feature member's interior from `interiors`, so that a
-    /// caller tracing many members of one feature builds its interior once (P12.T3 as built). The
-    /// line is the same whatever the cache holds.
+    /// [`of_record`](Self::of_record) with a feature member's interior from `interiors`.
+    ///
+    /// A caller tracing many members of one feature builds its interior once (P12.T3 as built),
+    /// and a server lends the cache it keeps interiors in (P12.T6), which saves a member's
+    /// interior, some 0.2 ms near the Sun, at each line. The line is the same whatever the cache
+    /// holds.
     ///
     /// # Errors
     ///
@@ -242,7 +302,42 @@ impl Drift {
     /// # Panics
     ///
     /// As [`of_record`](Self::of_record).
-    pub(crate) fn of_record_in(
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use hyperion_sim::Seed;
+    /// use hyperion_sim::coords::GalacticPosition;
+    /// use hyperion_sim::galaxy::Galaxy;
+    /// use hyperion_sim::galaxy::features::catalogue::{FeatureCatalogue, NoFeatureCache};
+    /// use hyperion_sim::galaxy::features::members::FeatureInterior;
+    /// use hyperion_sim::galaxy::features::members::source::KeepInteriors;
+    /// use hyperion_sim::galaxy::imf::MassBand;
+    /// use hyperion_sim::galaxy::placement::SystemOrigin;
+    /// use hyperion_sim::observe::Drift;
+    /// use hyperion_sim::units::LightYears;
+    ///
+    /// let galaxy = Galaxy::new(Seed::new(0x4d2)).with_full_potential();
+    /// let sun = GalacticPosition::from_light_years([0.0, 26_000.0, 0.0]).ok_or("in range")?;
+    /// // A member of the first feature with members near the Sun.
+    /// let interior = FeatureCatalogue::near(&galaxy, &sun, LightYears::new(3_000.0), &NoFeatureCache)
+    ///     .find_map(|feature| FeatureInterior::of(&galaxy, &feature))
+    ///     .ok_or("a feature with members")?;
+    /// let mut members = Vec::new();
+    /// let found = interior.grid().owned_cells().any(|cell| {
+    ///     interior.members_in_cell(&galaxy, MassBand::C, cell, &mut members);
+    ///     !members.is_empty()
+    /// });
+    /// assert!(found, "a member in band C");
+    /// let record = *members[0].0.record();
+    /// assert!(matches!(record.origin(), SystemOrigin::FeatureMember { .. }));
+    /// // Through a cache that keeps its feature's interior, built once for all the members traced,
+    /// // the member's line is the one through none.
+    /// let kept = KeepInteriors::new(&galaxy);
+    /// assert_eq!(Drift::of_record_in(&galaxy, &kept, &record)?, Drift::of_record(&galaxy, &record)?);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn of_record_in(
         galaxy: &Galaxy,
         interiors: &dyn FeatureInteriorCache,
         record: &SystemRecord,
@@ -253,12 +348,22 @@ impl Drift {
                 let SystemIdKind::FeatureMember(id) = record.id().kind() else {
                     unreachable!("a feature member's record is built with a member ID")
                 };
+                // A listed core collapse moves on its broken line (fix-p09-recent-kicks).
+                if let Some(motion) = listed_death_motion(galaxy, id) {
+                    return Ok(Self::broken(motion));
+                }
                 resolve_member(galaxy, interiors, id)
                     .expect("a feature member's record resolves in the galaxy that placed it")
                     .velocity()
             }
             SystemOrigin::CentreMember { .. } => {
                 return Err(TraceMotionError::CentreOrbitNotBuilt(record.id()));
+            }
+            SystemOrigin::GlobalListMember { .. } => {
+                return Err(TraceMotionError::GlobalListMember(record.id()));
+            }
+            SystemOrigin::CatalogueSystem(_) => {
+                return Err(TraceMotionError::CatalogueMotionNotTraced(record.id()));
             }
         };
         Ok(Self::new(*record.epoch_position(), velocity))
@@ -288,13 +393,21 @@ impl Drift {
         Self::new(*member.record().epoch_position(), member.velocity())
     }
 
+    /// The line a global-list member follows, a stream's or a dwarf core's, from the member
+    /// itself: straight, at its own velocity (plan 10, P10.T8.c).
+    #[must_use]
+    pub fn of_global_member(member: &GlobalMemberRecord) -> Self {
+        Self::new(*member.record().epoch_position(), member.velocity())
+    }
+
     /// The position at the epoch.
     #[must_use]
     pub const fn epoch_position(&self) -> &GalacticPosition {
         &self.epoch_position
     }
 
-    /// The constant velocity.
+    /// The velocity at the epoch: a straight line's at every time ([`Trajectory::velocity_at`]
+    /// reads a broken one's).
     #[must_use]
     pub const fn velocity(&self) -> GalacticVelocity {
         self.velocity
@@ -317,6 +430,9 @@ impl Trajectory for Drift {
         &self,
         t: UniverseTime,
     ) -> (GalacticPosition, GalacticDisplacement) {
+        if let Some(motion) = &self.broken {
+            return (motion.position_at(t), GalacticDisplacement::default());
+        }
         drift(
             &self.epoch_position,
             [0.0; 3],
@@ -330,8 +446,10 @@ impl Trajectory for Drift {
         )
     }
 
-    fn velocity_at(&self, _t: UniverseTime) -> GalacticVelocity {
-        self.velocity
+    fn velocity_at(&self, t: UniverseTime) -> GalacticVelocity {
+        self.broken
+            .as_ref()
+            .map_or(self.velocity, |motion| motion.velocity_at(t))
     }
 }
 
@@ -552,6 +670,43 @@ pub fn retarded_from(
         apparent_residual,
         velocity_then: source.velocity_at(emitted),
         motion: source.motion(),
+    }
+}
+
+impl Retardation {
+    /// The reading of light that left `apparent_position` at `emitted`, from a source moving at
+    /// `velocity_then`, as an observer at rest at `observer` receives it.
+    ///
+    /// It is observed at `emitted` plus its light time, rounded to the nanosecond, and `present`,
+    /// the source's position then, gives [`distance_now`](Self::distance_now). It serves an event
+    /// whose time and place are known, a one-shot alert's (plan 12, P12.T5.b), which needs no step
+    /// on the light cone (Design note 6).
+    ///
+    /// # Panics
+    ///
+    /// If the arrival falls off the clock, which no light time across the addressable range can
+    /// make it do from a time on the clock.
+    #[must_use]
+    pub(crate) fn of_emission(
+        observer: &GalacticPosition,
+        emitted: UniverseTime,
+        apparent_position: GalacticPosition,
+        velocity_then: GalacticVelocity,
+        present: &GalacticPosition,
+    ) -> Self {
+        let light_age = light_time(observer.distance_to(&apparent_position));
+        Self {
+            observed: emitted
+                .checked_add(light_age)
+                .expect("a light time across the addressable range keeps a time on the clock"),
+            emitted,
+            light_age,
+            distance_now: LightYears::from(observer.distance_to(present)),
+            apparent_position,
+            apparent_residual: GalacticDisplacement::default(),
+            velocity_then,
+            motion: Motion::Drift,
+        }
     }
 }
 

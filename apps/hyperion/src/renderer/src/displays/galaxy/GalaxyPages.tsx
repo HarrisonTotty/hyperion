@@ -1,6 +1,9 @@
 import { Activity, type KeyboardEvent, useId, useLayoutEffect, useRef } from "react";
 
+import { StatusText } from "../../components/StatusText";
 import type { CentreLy } from "../../lib/galaxy/model";
+import { answeredMode } from "./chartModel";
+import { placePrecisionFor } from "./chartReadings";
 import { GalaxyMapPanel } from "./GalaxyMapPanel";
 import { HrDiagram } from "./HrDiagram";
 import { LocalChartPanel } from "./LocalChartPanel";
@@ -190,7 +193,12 @@ export function GalaxyPages({
             focusTab(baseId, "map");
           }}
         >
-          <GalaxyMapPanel cursorLy={cursorLy} onCursor={onCursor} centreLy={centreLy} />
+          <GalaxyMapPanel
+            cursorLy={cursorLy}
+            onCursor={onCursor}
+            centreLy={centreLy}
+            shown={page === "map"}
+          />
         </PageTabFocus>
       </div>
       <div
@@ -226,9 +234,13 @@ export function GalaxyPages({
         <Activity mode={page === "hr" ? "visible" : "hidden"}>
           {chart.result === null ? (
             <p className="panel__empty">
-              {chart.fault === null
-                ? "NO CHART: centre one to plot its systems"
-                : "CHART DATA INVALID: retry on the LOCAL CHART page"}
+              <StatusText
+                text={
+                  chart.fault === null
+                    ? "NO CHART: centre one to plot its systems"
+                    : "CHART DATA INVALID: retry on the LOCAL CHART page"
+                }
+              />
             </p>
           ) : (
             <HrDiagram
@@ -239,6 +251,10 @@ export function GalaxyPages({
               onSelect={chart.select}
               driveRangeLy={chart.driveRangeLy}
               stale={chart.stale}
+              // The mode and time of the answer on show, as the chart's furniture reads them.
+              mode={answeredMode(chart.result)}
+              timeYr={chart.result.timeYr}
+              placePrecision={placePrecisionFor(chart.result.radiusLy, chart.result.centreLy)}
             />
           )}
         </Activity>

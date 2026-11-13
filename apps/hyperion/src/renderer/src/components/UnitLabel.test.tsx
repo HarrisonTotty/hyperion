@@ -2,6 +2,7 @@ import type { Unit } from "@hyperion/protocol";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
+import { anUnknownUnit } from "../test/galaxyFixtures";
 import { UnitLabel } from "./UnitLabel";
 
 const SUN_SIGN = String.fromCodePoint(0x2609);
@@ -22,6 +23,9 @@ describe("UnitLabel", () => {
     ["deg_per_myr", "°/Myr"],
     ["deg", "°"],
     ["per_ly3", "/ly³"],
+    ["per_cm3", "/cm³"],
+    ["k_per_cm3", "K/cm³"],
+    ["mag", "mag"],
   ])("writes %s as %s", (unit, symbol) => {
     const { container } = render(<UnitLabel unit={unit} />);
 
@@ -33,4 +37,13 @@ describe("UnitLabel", () => {
 
     expect(container).toBeEmptyDOMElement();
   });
+
+  it.each(["furlongs", "toString"])(
+    "writes nothing for %s, a unit this build does not know",
+    (name) => {
+      const { container } = render(<UnitLabel unit={anUnknownUnit(name)} />);
+
+      expect(container).toBeEmptyDOMElement();
+    },
+  );
 });

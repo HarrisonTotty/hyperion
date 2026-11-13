@@ -1,8 +1,10 @@
 /**
  * How this launch runs the GPU: Chromium's own path off Linux (no switches, never relaunched), the
- * forced Vulkan path on Linux, or the declared safe mode, which has no WebGPU.
+ * forced Vulkan path on Linux, the declared safe mode, which has no WebGPU, or the check-only
+ * software mode, a views check's or a descent spike's on Linux on the command line's own SwiftShader
+ * switches, which draws both styles on a fallback adapter (plan R01, R01.T16).
  */
-export type GraphicsLaunchMode = "default" | "vulkan" | "safe";
+export type GraphicsLaunchMode = "default" | "vulkan" | "safe" | "software";
 
 /** A GPU-process crash, as the main process reports it to the renderer. */
 export interface GpuProcessGoneReport {
@@ -28,6 +30,14 @@ export interface GraphicsApi {
 /** A quality setting's name as the command line gives it (`--setting`, R05 Design note 26). */
 export type QualitySettingName = "high" | "low";
 
+/**
+ * How `VIEW` paces its views (`--frame-pacing`, plan R07, T19; the owner's frame rate): `display`
+ * counts animation frames, every view at up to the display's rate (a 60 Hz view every frame, a
+ * 30 Hz one every second); `rate` draws each at its design rate by time, on a whole number of the
+ * measured vsync period, whatever the display's rate.
+ */
+export type FramePacingName = "rate" | "display";
+
 /** The spike's quality setting (R05 Design note 26). */
 export type SpikeSettingName = QualitySettingName;
 
@@ -40,6 +50,20 @@ export type SpikeNormals = "double" | "mesh";
 /** An on/off option. */
 export type SpikeSwitch = "on" | "off";
 
+/**
+ * The world the spike flies (`--world`, plan R10, R10.T14.c): R05's test planet, `TERRAIN TEST`'s
+ * moon through the terrain session, or a generated body the server serves (`served`, plan R10,
+ * R10.T15.b), named by the launch's `universe` and `body`; the renderer's `SpikeWorldName` is this
+ * type.
+ */
+export type SpikeWorldName = "test-planet" | "terrain-test" | "served";
+
+/**
+ * The style the spike's main view draws in over a generated world (`--style`, R10.T14.c), through
+ * `VIEW`'s frame drawer; the test planet's main view is the spike's own lit view.
+ */
+export type SpikeStyleName = "photorealistic" | "wireframe";
+
 /** The spike's options as the command line gave them (T13.c). */
 export interface SpikeLaunch {
   readonly setting: SpikeSettingName;
@@ -47,7 +71,10 @@ export interface SpikeLaunch {
   readonly seed: string;
   /** A 10 s run that writes no results file and exits with a status. */
   readonly smoke: boolean;
-  /** Where the results file goes, or `null` for `docs/measurements/descent-spike/`. */
+  /**
+   * Where the results file goes, or `null` for `docs/measurements/descent-spike/`, or for
+   * `target/descent-spike/results/` in the software mode (`spikeResultsDir`).
+   */
   readonly out: string | null;
   /** The height-worker count, or `null` for Design note 11's default. */
   readonly workers: number | null;
@@ -65,6 +92,45 @@ export interface SpikeLaunch {
    * diagnostic, never judged (decision-r05-trace-windows.md).
    */
   readonly traceProfile: SpikeSwitch;
+  /** The world flown (`--world`, R10.T14.c): the test planet unless given. */
+  readonly world: SpikeWorldName;
+  /**
+   * The main view's style over a generated world (`--style`, R10.T14.c): photorealistic unless
+   * given; `null` over the test planet, which takes no `--style`, its main view being the spike's
+   * own lit view (`SPIKE LIT`).
+   */
+  readonly style: SpikeStyleName | null;
+  /**
+   * `on` where the run measures the terrain caches' sizes (`--sizes on`, plan R10, R10.T14.b;
+   * decision-r10-t14b-measure): over the terrain world, a second view, the counting of each pass,
+   * the bake clock and the 4 Hz readout, with a `sizes` block in the report. Refused over the test
+   * planet. Absent is off, the default, so that an unmeasured launch, and the options its results
+   * file records, are as they were before the option.
+   */
+  readonly sizes?: "on";
+  /**
+   * `off` where a generated world's lit patches skip the horizon map (`--horizon off`, plan R10,
+   * R10.T15.b): the A/B whose run beside an ordinary one gives the map's share of the height
+   * workers' bake time. Refused over the test planet, whose bakes make none, and with the
+   * wireframe's style, whose bakes skip it already; absent on every other launch, which bakes it,
+   * so that its options and results file are as before the option.
+   */
+  readonly horizon?: "off";
+  /**
+   * The served world's universe and body (`--universe`, `--body`; plan R10, R10.T15.b): present
+   * exactly where `world` is `served`, and absent on every other launch, whose options and results
+   * file are as before.
+   */
+  readonly served?: ServedWorldNames;
+}
+
+/**
+ * A served world as a launch names it (plan R10, R10.T15.b): the universe's ID and the body's ID,
+ * in their wire forms.
+ */
+export interface ServedWorldNames {
+  readonly universe: string;
+  readonly body: string;
 }
 
 /** Where a spike run's results file and its summary were written. */
@@ -109,6 +175,11 @@ export interface SpikeApi {
    * process checks its trace's windows against the report and answers whether one failed (T14.i).
    */
   writeResults(report: DescentSpikeReport): Promise<SpikeResultsAnswer>;
+  /**
+   * Hands the main process a part of the report as the run flies, from which the results of the
+   * segments finished so far are written as each ends (R14's Mac measurements).
+   */
+  writePart(part: SpikeReportPart): Promise<void>;
   /** Writes a GPU capture (T15.a) as `capture.json` and `capture.bin` into `--capture`'s directory. */
   writeCapture(capture: { readonly json: string; readonly bin: Uint8Array }): Promise<string>;
   /** Ends the run, and the app with it. */
@@ -130,15 +201,109 @@ export interface HyperionApi {
    * unless it gave `low`; a spike's or a check's launch gives its own.
    */
   readonly setting: QualitySettingName;
+  /**
+   * How `VIEW` paces its views, from the launch's `--frame-pacing` (plan R07, T19): the launch's
+   * default unless it gave one.
+   */
+  readonly framePacing: FramePacingName;
+  /**
+   * The machine's performance cores' hardware threads, where its OS tells them from its efficiency
+   * cores (Apple silicon's, `hw.perflevel0.logicalcpu`), with a third of its efficiency cores'
+   * (`hw.perflevel1.logicalcpu`) rounded down, which the height workers' default count reads (plan
+   * R10, R10.T6.a); `null` elsewhere.
+   */
+  readonly performanceThreads: number | null;
+  /**
+   * Whether the client offers the `PLANET VIEWER` display (plan R15), a development tool: on a
+   * client that is not packaged, and on one launched with `--planet-viewer`.
+   */
+  readonly planetViewer: boolean;
   readonly versions: {
     readonly electron: string;
     readonly chrome: string;
     readonly node: string;
   };
+  /**
+   * The launch's development override of how the terrain's geometry is drawn (`--geometry`, plan
+   * R14, Design note 17), applied over its setting's: present only on a `--descent-spike` or
+   * `--views-check` launch that gave it.
+   */
+  readonly geometry?: GeometryOverride;
+  /**
+   * The launch's compile budget for the renderer's engine (`--compile-budget`, plan R14's Mac
+   * measurements): a whole number from 1, or `unlimited`, every compile at once; present only on a
+   * `--descent-spike` or `--views-check` launch that gave it, the engine's default otherwise.
+   */
+  readonly compileBudget?: number | "unlimited";
   /** The descent spike's functions, present only on a `--descent-spike` launch. */
   readonly spike?: SpikeApi;
   /** The several-views check's functions, present only on a `--views-check` launch (R07.T20). */
   readonly viewsCheck?: ViewsCheckApi;
+}
+
+/**
+ * A launch's override of the view's geometry settings (`--geometry <field>=<value>[,…]`, plan R14,
+ * Design note 17): each field it names replaces the setting's, so that the owner's before and after
+ * runs come from one build. Its fields are the renderer's `GeometrySettings`' (`qualitySetting.ts`,
+ * which holds the two equal).
+ */
+export interface GeometryOverride {
+  /** Whether the terrain draws through plan R14's cluster path; `false` is the way back. */
+  readonly clusterPath?: boolean;
+  /** R14.T1.c: casters culled by the view depths their receivers sample. */
+  readonly casterDepthCull?: boolean;
+  /** R14.T1.d: the coarsest stride a caster may take at its cascade's texel. */
+  readonly casterStrideCap?: 1 | 2 | 4 | 8;
+  /** R14.T1.e: where the symbology's pass takes the terrain's depth. */
+  readonly overlayDepth?: "redraw" | "scene-depth" | "cluster";
+  /** R14.T2.a: the lit pass's interior patches through the cluster path. */
+  readonly litClusters?: boolean;
+  /** R14.T6.b: the frames between re-renders of the far shadow cascades; 1 renders all four. */
+  readonly farCascadeRate?: 1 | 2 | 4;
+  /** R14.T4.a: the mesh regime's figures through the cluster path. */
+  readonly figureClusters?: boolean;
+  /** R14.T4.b: the hulls' occluder faces through the cluster path. */
+  readonly hullClusters?: boolean;
+  /** R14.T4.c: the wireframe's interior patches through the cluster path. */
+  readonly wireClusters?: boolean;
+  /** R14.T5.b: the mesh page pool's bytes, 0 for none. */
+  readonly pageBytes?: number;
+  /** R14.T5.f: a mesh's DAG-cut tolerance, px, in its camera pass and as a wireframe occluder. */
+  readonly meshTolerancePx?: MeshTolerancePx;
+  /** R14.T1.g: the lit pass's edge patches through the cluster path, their fins and heads too. */
+  readonly finClusters?: boolean;
+  /** R14.T3.c: the lit pass's clusters at stride 1, or at each one's stated error and e_s. */
+  readonly strides?: "off" | "measured";
+  /** R14.T3.d: two-pass occlusion against the depth pyramid. */
+  readonly occlusion?: "off" | "hzb";
+  /** R14.T2: the lit pass's interior patches shaded forward, or by the visibility buffer. */
+  readonly shading?: "forward" | "visibility";
+  /** R14.T3.e: the lit pass's selection budget, its patches alone or its lit triangles too. */
+  readonly terrainBudget?: "patches" | "triangles";
+  /**
+   * R14.T3.c's stand-ins: every sub-patch stand-in at stride 1, those on their own grids at the
+   * camera's cap, or the masks strided too.
+   */
+  readonly standInStrides?: "off" | "own-grids" | "all";
+  /** R10.T16.c: the overlay's marks a body's ground hides drawn, or culled with the ground's depth. */
+  readonly hiddenMarks?: "drawn" | "culled";
+  /**
+   * R14.T3.c's edge stand-ins: an edge bake's stand-ins by the lit mesh, the exact forms on the
+   * cluster path, or level-1 masks across the survey's edge too.
+   */
+  readonly edgeStandIns?: "off" | "surveyed" | "masks";
+  /** Plan R07's `disc cells` pass: a cell an invocation, or each workgroup's points packed. */
+  readonly discCells?: "per-cell" | "packed";
+  /** Plan R07's mesh-regime figure: shaded forward, or once a pixel by its IDs and a resolve. */
+  readonly figureShading?: "forward" | "screen";
+  /** The mesh-regime terrain's planetshine: every source its record carries, or the brightest. */
+  readonly terrainPlanetshine?: "record" | "brightest";
+}
+
+/** A mesh's DAG-cut tolerance (plan R14, R14.T5.f), px: in its camera pass, and as an occluder. */
+export interface MeshTolerancePx {
+  readonly camera: number;
+  readonly wireframeOccluder: number;
 }
 
 declare global {
@@ -149,6 +314,21 @@ declare global {
 
 /** Which of Design note 21's GPU rows a pass counts towards. */
 export type SpikePassRow = "terrain" | "atmosphere" | "other";
+
+/**
+ * A part of the descent spike's report, handed to the main process as the run flies, so that each
+ * segment's results are written as it ends and a run stopped part-way keeps its finished segments
+ * (R14's Mac measurements): the report's frames from `fromFrame` on, those that began before
+ * `throughS` of the script, and the rest of the report as it stands, but for the geometry and the
+ * sizes blocks, which only the whole report carries.
+ */
+export interface SpikeReportPart {
+  /** The run's frames handed over before the part's first frame. */
+  readonly fromFrame: number;
+  /** Script time, s, before which every frame of the run is in this part or those before it. */
+  readonly throughS: number;
+  readonly report: DescentSpikeReport;
+}
 
 /** The state of R01's pass timer over a run (`PassTimes.timer`). */
 export type SpikePassTimer = "full" | "quantized" | "absent";
@@ -250,6 +430,611 @@ export interface SpikeTraceWindow {
 }
 
 /**
+ * A figure of the measured sizes (plan R10, R10.T14.b): a value, or `null` with the reason it is
+ * missing, the results file's own `Measured` form.
+ */
+export type SpikeFigure<T> =
+  { readonly value: T; readonly reason: null } | { readonly value: null; readonly reason: string };
+
+/** Which terrain cache a pass is: the lit one (photorealistic views) or the wireframe's. */
+export type SpikeSizesCache = "lit" | "wireframe";
+
+/** Where in the script a sample or a peak fell. */
+export interface SpikeSizesMoment {
+  /** Script time, s. */
+  readonly scriptTimeS: number;
+  /** The segment under way, or `null` past the script's end. */
+  readonly segment: string | null;
+  /**
+   * The main view's camera above the ground, m: the craft's own pose, which the main view's
+   * selection sees, above the floor of the stretch under way (`DescentPose.heightAboveFloorM`, the
+   * highest ground the measurement found under the stretch), so at most its height above the
+   * ground beneath it; `null` where none is known.
+   */
+  readonly heightAboveGroundM: number | null;
+}
+
+/** A count's peak over the run: the most patches at a sample, and the first sample it fell at. */
+export interface SpikeSizesPeak {
+  /** Patches; 0 where no sample counted it. */
+  readonly patches: number;
+  /** `null` where no sample counted it. */
+  readonly at: SpikeSizesMoment | null;
+}
+
+/** One count's peaks: each described view's, and the union's (the leaves any view sees). */
+export interface SpikeSizesCountPeaks {
+  readonly views: ReadonlyArray<SpikeSizesPeak>;
+  readonly union: SpikeSizesPeak;
+}
+
+/** The forced region's peak, counted once, and how many of it some view saw then. */
+export interface SpikeSizesForcedPeak {
+  readonly patches: number;
+  readonly at: SpikeSizesMoment | null;
+  readonly seen: number;
+}
+
+/** A share's peak over the run, 0 to 1, and where it fell; `null` where no sample gave one. */
+export interface SpikeSizesShare {
+  readonly share: number | null;
+  readonly at: SpikeSizesMoment | null;
+}
+
+/** A sizing figure in slots (unrounded, as `cacheBudget.ts`' rules give them) and bytes (whole slots). */
+export interface SpikeSizesRuleFigure {
+  readonly slots: number;
+  readonly bytes: number;
+}
+
+/**
+ * The sizing rule's four forms (decision-r10-t14b-measure §2): the ruled Σ_views max(1.3 AR_peak,
+ * 3 F_peak) + forced, (a) its largest same-sample value, (b) the union form, (c) the frustum rule.
+ */
+export interface SpikeSizesRule {
+  readonly ruled: SpikeSizesRuleFigure;
+  readonly sameSample: SpikeSizesRuleFigure;
+  readonly union: SpikeSizesRuleFigure;
+  readonly frustum: SpikeSizesRuleFigure;
+}
+
+/**
+ * The diagnostic occluder's price on a view or the union (§5), in the rule's slots: each term's
+ * difference at the peaks as the rule weighs it, and its share of the sized all-round peak.
+ */
+export interface SpikeSizesPriceTerm {
+  /** AR_peak − AR′_peak, patches. */
+  readonly allRoundPatches: number;
+  /** F_peak − F′_peak, patches. */
+  readonly frustumPatches: number;
+  /** The all-round term's price, 1.3 (AR_peak − AR′_peak), slots. */
+  readonly allRoundSlots: number;
+  /** The frustum term's price, 3 (F_peak − F′_peak), slots. */
+  readonly frustumSlots: number;
+  /**
+   * Each slots ÷ the sized all-round peak, the ruled sum's all-round term Σ_views 1.3 AR_peak
+   * ({@link SpikeSizesPrice.sizedAllRoundSlots}), so that a view's all-round share is
+   * (AR − AR′) ÷ AR_peak where it is the only view; `null` where that peak is 0.
+   */
+  readonly allRoundShare: number | null;
+  readonly frustumShare: number | null;
+}
+
+/** The A/B's price (§5), over the samples that made both the plain and the diagnostic counts. */
+export interface SpikeSizesPrice {
+  readonly views: ReadonlyArray<SpikeSizesPriceTerm>;
+  readonly union: SpikeSizesPriceTerm;
+  /** The sized all-round peak, the ruled sum's all-round term Σ_views 1.3 AR_peak, slots. */
+  readonly sizedAllRoundSlots: number;
+  /** The rule's own difference, the ruled figure less its diagnostic one (rule − rule′), slots. */
+  readonly ruledSlots: number;
+  /**
+   * That ÷ the sized all-round peak; `null` at 0. The reading §5's 10% test takes: over 0.1 is a
+   * finding for main.
+   */
+  readonly ruledShare: number | null;
+}
+
+/** One level's bound ratio k_n = ε_n P₀ ÷ e_n (T14.a's k₀). */
+export interface SpikeSizesBoundRatio {
+  readonly level: number;
+  /** ε_n, m. */
+  readonly boundM: number;
+  /** ε_n plus the chord's sagitta, the error selection charges, m. */
+  readonly chargedM: number;
+  /** e_n, the level's mean patch edge, m. */
+  readonly edgeM: number;
+  readonly ratio: number;
+  readonly chargedRatio: number;
+}
+
+/** The bound ratios of one level table the pass selected over. */
+export interface SpikeSizesBoundTable {
+  /** The table's number, from 0 in the order the pass met them. */
+  readonly version: number;
+  /** The script time of its first selection, s. */
+  readonly firstSeenS: number;
+  readonly levels: ReadonlyArray<SpikeSizesBoundRatio>;
+}
+
+/** One level's box heights: the frustum count's seen leaves' extents along their normals, m. */
+export interface SpikeSizesBoxHeights {
+  readonly level: number;
+  readonly maxM: number;
+  /** The median at F∪'s peak sample, or `null` where none of the level was seen there. */
+  readonly medianAtFrustumPeakM: number | null;
+}
+
+/** A moment of the forced region's residency: when, and the pass's forced patches then. */
+export interface SpikeSizesForcedMark {
+  /** Script time, s. */
+  readonly atS: number;
+  /** The forced patches of the pass's last selection, and those of them resident. */
+  readonly forced: number;
+  readonly forcedResident: number;
+}
+
+/** The forced region's lead before contact and its residency at contact (T14.c's finding 3). */
+export interface SpikeSizesContact {
+  /** The pass's first selection holding a forced patch, script s, or `null`. */
+  readonly firstForcedS: number | null;
+  /** The first sample whose forced patches were every one resident, script s, or `null`. */
+  readonly allResidentS: number | null;
+  /** Whether every later sample's were all resident too; `null` where no sample's ever were. */
+  readonly allResidentHeld: boolean | null;
+  /**
+   * Touchdown: the first frame whose pose had reached the ground, its camera down to its rest over
+   * the site (`touchedDown`), with the forced patches then; `null` where the run ended before it.
+   */
+  readonly touchdown: SpikeSizesForcedMark | null;
+  /** The forced region's lead before contact, touchdown − all resident, s; `null` where either is. */
+  readonly leadS: number | null;
+  /**
+   * The contact by the session's rule: the first frame whose pass's selection held a contact
+   * (`passContact`), which fires in the step that first selects the forced patches.
+   */
+  readonly sessionContact: SpikeSizesForcedMark | null;
+}
+
+/** The 50th and 95th percentiles (nearest rank) and the largest of some times, ms; `null` with none. */
+export interface SpikeSizesSpread {
+  readonly p50: number | null;
+  readonly p95: number | null;
+  readonly max: number | null;
+}
+
+/** A figure's mean and largest over a segment's frames. */
+export interface SpikeSizesMeanMax {
+  readonly mean: number;
+  readonly max: number;
+}
+
+/** One of a pass's described views: the cache's views in its style (§4's table). */
+export interface SpikeSizesView {
+  /** Its ID in the terrain session: the main view's `spike`, the second view's `instrument-1`. */
+  readonly id: string;
+  readonly style: SpikeStyleName;
+  /** Its streaming weight, by which it is matched in the pass's selection input: 1 or 0.25. */
+  readonly weight: number;
+}
+
+/**
+ * One whole-number column of a pass's 1 Hz samples, in the results' memory-series form: a reading
+ * a sample, -1 within one of the gaps, each gap a stretch of samples with its reason.
+ */
+export interface SpikeSizesColumn {
+  readonly samples: ReadonlyArray<number>;
+  readonly gaps: ReadonlyArray<{
+    /** The first sample's index, and the last's, inclusive. */
+    readonly from: number;
+    readonly to: number;
+    readonly reason: string;
+  }>;
+}
+
+/** The five counts at each sample (§2): F, F₀, AR, F′ and AR′, patches. */
+export interface SpikeSizesCountColumns {
+  readonly frustum: SpikeSizesColumn;
+  readonly frustumNoMargin: SpikeSizesColumn;
+  readonly allRound: SpikeSizesColumn;
+  readonly frustumDiagnostic: SpikeSizesColumn;
+  readonly allRoundDiagnostic: SpikeSizesColumn;
+}
+
+/**
+ * A pass's samples, once a second of script time, in column form: one entry a sample in each.
+ *
+ * @remarks
+ * The columns are those the record reads at 1 Hz: the moment, each view's five counts, the forced
+ * region and its residency, the slots in use and §3's shares' numerators. The pass's own counts
+ * beside them (its selection, its budget, its resident patches and its pins) are kept by segment
+ * instead ({@link SpikeSizesPass.logged}), and the seconds and the segments are written compactly,
+ * so that the block stays within its budget, `SIZES_BLOCK_BUDGET_BYTES` formatted, on the longest
+ * run.
+ */
+export interface SpikeSizesSeries {
+  /**
+   * The whole second of script time each sample was the first selection in, s, compactly: from
+   * `first`, one a second but for the `skipped` seconds, which no selection fell in, so that
+   * sample i is the i-th second from `first` that is not skipped.
+   */
+  readonly seconds: { readonly first: number; readonly skipped: ReadonlyArray<number> };
+  /**
+   * Each sample's segment, compactly, as runs of samples: each run's segment, its index in
+   * {@link SpikeSizesReport.segments} or -1 past the script's end, from the run's first sample's
+   * index to the next run's.
+   */
+  readonly segmentRuns: ReadonlyArray<{ readonly segment: number; readonly from: number }>;
+  /** {@link SpikeSizesMoment.heightAboveGroundM} at each sample, whole m. */
+  readonly heightAboveGroundM: ReadonlyArray<number | null>;
+  /** Per described view, in the pass's `views` order. */
+  readonly views: ReadonlyArray<SpikeSizesCountColumns>;
+  /**
+   * The unions; `null` for a pass of one described view, whose own columns stand for them except
+   * at the samples {@link SpikeSizesSeries.unionDiffers} counts, where a view it does not describe
+   * (the main view's wireframe stand-in) was in its input too. Left out so that the file stays
+   * within the repository's added-file limit.
+   */
+  readonly union: SpikeSizesCountColumns | null;
+  /** Samples at which a union count differed from the one described view's; 0 with the unions given. */
+  readonly unionDiffers: number;
+  /** The forced leaves, seen or not. */
+  readonly forced: ReadonlyArray<number>;
+  /**
+   * The pass's own selection's forced patches resident: the same patches as the counts' forced
+   * leaves, since selection never refuses a forced split.
+   */
+  readonly forcedResident: SpikeSizesColumn;
+  /** |AR∪ ∩ resident|, §3's resident share's numerator over AR∪. */
+  readonly allRoundResident: SpikeSizesColumn;
+  /** |AR∪ ∩ every key the pass has selected so far|, the swept share's numerator. */
+  readonly allRoundSwept: ReadonlyArray<number>;
+  /** The cache's slots in use, as the last retain left them. */
+  readonly usedSlots: SpikeSizesColumn;
+}
+
+/**
+ * A pass's own counts in one segment, each at its largest over the segment's samples (§2, "Logged
+ * beside"), which the samples' columns leave out.
+ */
+export interface SpikeSizesLoggedSegment {
+  readonly segment: string | null;
+  readonly samples: number;
+  /** The pass's own budgeted selection's patches, and the samples whose budget limited it. */
+  readonly selectedMax: number;
+  readonly limitedSamples: number;
+  /** Its selected patches resident; `null` where its input held no ranges. */
+  readonly selectedResidentMax: number | null;
+  /**
+   * The cache's slots in use and its pins, forced and drawn outside the forced region, as the last
+   * retain set them; `null` where the pass's ranges were no patch cache.
+   */
+  readonly usedSlotsMax: number | null;
+  readonly pinnedForcedMax: number | null;
+  readonly pinnedDrawnMax: number | null;
+}
+
+/** A pass's streaming in one segment, from its last step after each frame's step (§6(d), §6(e)). */
+export interface SpikeSizesStreaming {
+  readonly segment: string | null;
+  /** Frames read: those with a last step. */
+  readonly frames: number;
+  /** Patches drawn, standing in (drawn by a coarser resident ancestor) and missing. */
+  readonly drawn: SpikeSizesMeanMax;
+  readonly standingIn: SpikeSizesMeanMax;
+  readonly missing: SpikeSizesMeanMax;
+  /** Standing in ÷ selected, 0 to 1, over the frames with a selection. */
+  readonly standInShare: SpikeSizesMeanMax;
+  /** Frames whose selection the budget limited. */
+  readonly limitedFrames: number;
+  /** Patches the pass made resident, and a second over the segment's frames' script time. */
+  readonly residents: number;
+  readonly residentsPerS: number | null;
+}
+
+/** Bakes posted and answered at the workers, and their times (`BakeClock`). */
+export interface SpikeSizesBakeTimes {
+  readonly posted: number;
+  readonly baked: number;
+  readonly failed: number;
+  readonly unsurveyed: number;
+  /** Post to reply, ms. */
+  readonly postToReplyMs: SpikeSizesSpread;
+  /** The estimated worker time, reply − max(post, the worker's previous reply), ms. */
+  readonly computeMs: SpikeSizesSpread;
+}
+
+/** The flight's bakes, or a segment's, with their rate and the residents. */
+export interface SpikeSizesBakeWindow extends SpikeSizesBakeTimes {
+  readonly residents: number;
+  /** Baked − residents (§6(c)): below 0 where earlier bakes became resident in it. */
+  readonly bakedNeverResident: number;
+  readonly spanMs: number;
+  readonly bakesPerSecond: number | null;
+}
+
+/** One segment's figures beside the passes': the workers' bakes, and the profile's ground speed. */
+export interface SpikeSizesSegment {
+  readonly segment: string | null;
+  readonly bakes: SpikeSizesBakeWindow;
+  /** The ground speed ÷ the height above the floor over the segment's frames, s⁻¹. */
+  readonly groundSpeedPerHeight: SpikeSizesMeanMax | null;
+}
+
+/** A count of messages of one kind. */
+export interface SpikeSizesMessageCount {
+  readonly kind: string;
+  readonly count: number;
+}
+
+/** The bake clock's figures at the spike's worker boundary (§6(c)). */
+export interface SpikeSizesBakes {
+  /** The workers wrapped, restarts included. */
+  readonly workersMade: number;
+  readonly total: SpikeSizesBakeWindow;
+  readonly byWorker: ReadonlyArray<SpikeSizesBakeTimes & { readonly worker: number }>;
+  readonly requests: ReadonlyArray<SpikeSizesMessageCount>;
+  readonly replies: ReadonlyArray<SpikeSizesMessageCount>;
+  readonly inFlight: number;
+  readonly abandoned: number;
+}
+
+/** A pass's counted sizes over the run (§2, §3, §5), with its streaming and its samples. */
+export interface SpikeSizesPass {
+  readonly cache: SpikeSizesCache;
+  /** Its described views, the cache's style's; another view in its input counts in the unions. */
+  readonly views: ReadonlyArray<SpikeSizesView>;
+  /**
+   * "stand-in only, not sized" and why, for a pass with no described view: one that only stood
+   * in, as the wireframe pass a high photorealistic run's views draw while their pipelines
+   * compile. It is no sized cache: its rule's figures are `null` and its samples are left out of
+   * the file. `null` for a sized pass.
+   */
+  readonly notSized: string | null;
+  /** B, the first pass's of the cache. */
+  readonly bytesPerSlot: number;
+  readonly slots: number | null;
+  /**
+   * The times its counter was attached to the session's pass of the cache: one, or more where the
+   * session made the pass anew, or let it go and took it again.
+   */
+  readonly attachments: number;
+  readonly samples: number;
+  readonly failedSamples: number;
+  readonly firstFailure: string | null;
+  readonly counts: {
+    readonly frustum: SpikeSizesCountPeaks;
+    readonly frustumNoMargin: SpikeSizesCountPeaks;
+    readonly allRound: SpikeSizesCountPeaks;
+    readonly frustumDiagnostic: SpikeSizesCountPeaks;
+    readonly allRoundDiagnostic: SpikeSizesCountPeaks;
+  };
+  readonly forced: SpikeSizesForcedPeak;
+  readonly residentShare: SpikeSizesShare;
+  readonly sweptShare: SpikeSizesShare;
+  /** Whether the resident share reached 100% at some sample (§3's criterion). */
+  readonly allRoundEverResident: boolean;
+  /** Slots ÷ |AR∪| at AR∪'s peak. */
+  readonly capAtAllRoundPeak: number | null;
+  /** The deepest diagnostic occluder the primed counts used, m above the datum. */
+  readonly deepestOccluderM: SpikeFigure<number>;
+  /** The as-built occluder, `lowestHeightM` of the pass's last level table, m above the datum. */
+  readonly asBuiltOccluderM: number;
+  readonly boundRatios: ReadonlyArray<SpikeSizesBoundTable>;
+  readonly boxHeights: ReadonlyArray<SpikeSizesBoxHeights>;
+  /** The five counts' CPU time a sample, ms. */
+  readonly countingMs: SpikeSizesSpread;
+  /** The rule's forms on the plain counts; `null` for a pass {@link SpikeSizesPass.notSized}. */
+  readonly rule: SpikeSizesRule | null;
+  /** The same on the diagnostic counts; `null` where none was made, or the pass is not sized. */
+  readonly ruleDiagnostic: SpikeSizesRule | null;
+  readonly occluderPrice: SpikeSizesPrice | null;
+  readonly contact: SpikeSizesContact;
+  readonly streaming: ReadonlyArray<SpikeSizesStreaming>;
+  /** The pass's own counts by segment, in the order the samples met them. */
+  readonly logged: ReadonlyArray<SpikeSizesLoggedSegment>;
+  /** Its 1 Hz samples; `null` for a pass {@link SpikeSizesPass.notSized}, whose are left out. */
+  readonly series: SpikeSizesSeries | null;
+}
+
+/** A peak of the session's memory at 1 Hz: its bytes, and when it was first read, script s. */
+export interface SpikeSizesBytePeak {
+  readonly bytes: number;
+  readonly atS: number;
+}
+
+/**
+ * A peak of the engine's live bytes: its bytes, and the script time it was first reached at, s,
+ * `null` where that was before the flight.
+ */
+export interface SpikeSizesEnginePeak {
+  readonly bytes: number;
+  readonly atS: number | null;
+}
+
+/**
+ * The engine's own tally of its allocations (`RenderEngine.onAllocation`), from the run's control's
+ * subscription on: each creation adds its bytes to its memory category's live bytes, the
+ * destruction of an allocation whose creation was seen takes them away, and uploads are left out.
+ */
+export interface SpikeSizesEngineTally {
+  /** Each memory category's peak live bytes, in the order of their first creations. */
+  readonly categories: ReadonlyArray<SpikeSizesEnginePeak & { readonly category: string }>;
+  /** The whole tally's peak live bytes: the peak of the sum, not the sum of the categories' peaks. */
+  readonly peak: SpikeSizesEnginePeak;
+  /**
+   * Destructions of an allocation whose creation was not seen, made before the subscription, and
+   * left out of the tally.
+   */
+  readonly unseenDestroyed: number;
+}
+
+/**
+ * The shadow cascades as built (R10.T9.b): the engine's `shadows` category at its peak, or none
+ * where nothing was allocated under it, beside T9.a's spec figure.
+ */
+export interface SpikeSizesCascades {
+  /** The `shadows` category's peak live bytes in the engine's tally; 0 where none was allocated. */
+  readonly bytes: number;
+  readonly source: "engine" | "none";
+  /** Why none was allocated (the low setting, or the wireframe alone); `null` where it was. */
+  readonly reason: string | null;
+  /** `CASCADE_BYTES`, T9.a's spec figure (67,108,864 B). */
+  readonly specBytes: number;
+  /** Whether the engine allocated other than the spec's bytes; `false` where none was allocated. */
+  readonly differsFromSpec: boolean;
+}
+
+/** The resident total's parts, itemized, and the engine's own tally beside them (§6(d)). */
+export interface SpikeSizesMemory {
+  /** `TerrainSession.memory()` samples, at 1 Hz. */
+  readonly samples: number;
+  /** The height workers' copies of the fields together, and the pool's own copy, at their peaks. */
+  readonly workerFieldBytes: SpikeSizesBytePeak;
+  readonly keptFieldBytes: SpikeSizesBytePeak;
+  /**
+   * The session's textures by memory category, each at its peak, as the session reports them: its
+   * masks and class maps under `coarse-field-gpu`, and on the high setting the cascades under
+   * `shadows` and their placeholder under `other` (R10.T9.b).
+   */
+  readonly sessionGpu: ReadonlyArray<SpikeSizesBytePeak & { readonly category: string }>;
+  /** Each cache's allocation, slot count × bytes a slot, at its largest. */
+  readonly caches: ReadonlyArray<{
+    readonly cache: SpikeSizesCache;
+    readonly slotCount: number;
+    readonly bytesPerSlot: number;
+    readonly allocationBytes: number;
+  }>;
+  readonly cascades: SpikeSizesCascades;
+  /** The engine's own tally: the app's own GPU figure, beside the itemized one, for the driver's. */
+  readonly engine: SpikeSizesEngineTally;
+  /**
+   * The caches' allocations, the session's textures but its `shadows`, and the cascades as the
+   * engine allocated them, B: the session's own `shadows` figure is the same set's, counted once.
+   */
+  readonly itemizedGpuBytes: number;
+  /** That and the workers' field copies, the plan's resident total, B. */
+  readonly itemizedTotalBytes: number;
+  /** The height workers the session started, and the workers the bake clock wrapped. */
+  readonly workersStarted: number;
+}
+
+/** The storage binding the caches are held in (§6(g)). */
+export interface SpikeSizesBinding {
+  /** The adapter's reported `maxStorageBufferBindingSize`, B. */
+  readonly adapterBytes: SpikeFigure<number>;
+  /** The limit the engine requested of the device (`requiredLimits`), B. */
+  readonly requestedBytes: SpikeFigure<number>;
+  /** The device's own (`RenderEngine.capabilities`), B. */
+  readonly deviceBytes: SpikeFigure<number>;
+  /**
+   * Each cache's slots as last read, how its layout met the device's binding, and its binding
+   * ceiling, the most slots whose storage fields fit one binding (`bindingCeilingSlots`), at the
+   * requested binding and at WebGPU's default 128 MiB; `null` where no storage field has bytes.
+   */
+  readonly caches: ReadonlyArray<{
+    readonly cache: SpikeSizesCache;
+    readonly slotCount: number;
+    /**
+     * The slots the layout was asked for and its fallback past the binding; absent from a block
+     * written before R10.T14.b's clamp, which reads as before.
+     */
+    readonly layout?: SpikeSizesCacheLayout;
+    readonly ceilingAtRequestedSlots: number | null;
+    readonly ceilingAtDefaultSlots: number | null;
+  }>;
+}
+
+/**
+ * How a cache's layout met the device's storage binding (`TerrainLayout`'s,
+ * decision-r10-t14b-constants §4): the slots the setting asked for and the fallback that kept or
+ * clamped them.
+ *
+ * @remarks
+ * The cache's `slotCount` is `requestedSlotCount` where the fallback is `none`, and at most it on
+ * `binding-limit`.
+ */
+export interface SpikeSizesCacheLayout {
+  /** The setting's own slot count, over its cache budget on its own path, before any fallback. */
+  readonly requestedSlotCount: number;
+  /**
+   * `binding-limit` where the layout changed path to `face-differences` or clamped its slots to
+   * the device's binding, else `none`.
+   */
+  readonly fallback: "none" | "binding-limit";
+}
+
+/** The second view (§4): the craft instrument at its chase pose as a session view. */
+export interface SpikeSizesSecondView {
+  /** Its ID in the session (`instrumentViewId(1)`) and its engine view's name. */
+  readonly id: string;
+  readonly engineName: string;
+  /** The style asked of it: the main view's on high, the wireframe on low. */
+  readonly style: SpikeStyleName;
+  readonly weight: number;
+  /** Its presented viewport, device px, each time it changed, from script s. */
+  readonly viewports: ReadonlyArray<{
+    readonly widthPx: number;
+    readonly heightPx: number;
+    readonly fromS: number;
+  }>;
+}
+
+/** `VIEW`'s terrain readout asked on the main view at 4 Hz, its answers not shown (§6(f)). */
+export interface SpikeSizesReadouts {
+  /** ms between publishes. */
+  readonly intervalMs: number;
+  readonly publishes: number;
+  /** Publishes whose snapshot held an answer. */
+  readonly answeredPublishes: number;
+  /** Queries posted to the height workers in the flight, and their answers and refusals. */
+  readonly asked: number;
+  readonly answered: number;
+  readonly failed: number;
+  /**
+   * The times the readout's guards asked to fail the session's computation (after 250 ms of
+   * refusals): counted and logged, and never passed to the session, so that the measurement's
+   * readout cannot end the run.
+   */
+  readonly failComputationCalls: number;
+}
+
+/** How often the lit and wireframe passes' forced key sets differed (T14.c's finding 4). */
+export interface SpikeSizesForcedSets {
+  /** Frames after the step at which both passes had a last step, and at which their sets differed. */
+  readonly comparedFrames: number;
+  readonly differingFrames: number;
+  /** The first such frame, script s. */
+  readonly firstDifferingS: number | null;
+  /** The largest symmetric difference, patches. */
+  readonly largestDifference: number;
+}
+
+/**
+ * The measured sizes of a `--sizes on` run (plan R10, R10.T14.b; decision-r10-t14b-measure): each
+ * pass's counted peaks, rules, shares and samples, the streaming, the bakes, the memory itemized and
+ * as the engine tallied it, the binding and the readout.
+ */
+export interface SpikeSizesReport {
+  /** The segments in the order the script met them, which the series' `segment` indexes. */
+  readonly segments: ReadonlyArray<string>;
+  readonly secondView: SpikeSizesSecondView;
+  /**
+   * The field header's lowest sampled height, the last read, m above the datum: its sea level on a
+   * body with no main liquid, where the header defines it as the lowest cell's elevation.
+   */
+  readonly sampledLowestM: SpikeFigure<number>;
+  readonly passes: ReadonlyArray<SpikeSizesPass>;
+  /** Missing where the two passes never had a last step in the same frame. */
+  readonly forcedSets: SpikeFigure<SpikeSizesForcedSets>;
+  readonly segmentFigures: ReadonlyArray<SpikeSizesSegment>;
+  readonly bakes: SpikeSizesBakes;
+  readonly memory: SpikeSizesMemory;
+  readonly binding: SpikeSizesBinding;
+  readonly readouts: SpikeSizesReadouts;
+}
+
+/**
  * What the descent spike's renderer reports at the end of a run, for the results file (R05.T14.c);
  * T14.a gathers it.
  */
@@ -294,6 +1079,55 @@ export interface DescentSpikeReport {
    * `--vertex-path` and `--normals` chose (T13.c).
    */
   readonly terrain?: { readonly vertexPath: SpikeVertexPath; readonly normals: SpikeNormals };
+  /**
+   * The measured sizes of a `--sizes on` run (plan R10, R10.T14.b); absent on every other run,
+   * whose report is as before.
+   */
+  readonly sizes?: SpikeSizesReport;
+  /**
+   * The main view's terrain geometry a frame by segment over a generated world (plan R14, R14.T1.f;
+   * results version 8): absent over the test planet, whose spike shading has no cluster path.
+   */
+  readonly geometry?: SpikeGeometryReport;
+}
+
+/** One count's figures over a segment's frames that had it (plan R14, R14.T1.f). */
+export interface SpikeCountFigures {
+  /** The frames that had the count. */
+  readonly frames: number;
+  /** Its median and its largest over them. */
+  readonly p50: number;
+  readonly max: number;
+}
+
+/**
+ * One segment's terrain geometry a frame on the main view's lit pass (plan R14, R14.T1.f;
+ * `TerrainPass.counts`): its interior and edge patches, its drawn triangles (the interior mesh's,
+ * and as the lit pass's clusters drew them, R14.T2.a), its four cascades' caster triangles summed
+ * and its overlay depth's triangles, each `null` where no frame of the segment had it (no cascades
+ * on low, no counters back yet).
+ */
+export interface SpikeGeometrySegment {
+  readonly segment: string;
+  readonly interiorPatches: SpikeCountFigures | null;
+  readonly edgePatches: SpikeCountFigures | null;
+  /**
+   * Of the edge patches, those the lit pass's cluster path drew (plan R14, R14.T1.g; the rest are
+   * stand-ins, or the lit mesh's where `finClusters` is off); `null` in a file written before it.
+   */
+  readonly finPatches: SpikeCountFigures | null;
+  readonly drawnTriangles: SpikeCountFigures | null;
+  /** The drawn triangles as the lit pass's cluster path drew them (plan R14, R14.T2.a). */
+  readonly litClusterTriangles: SpikeCountFigures | null;
+  readonly casterTriangles: SpikeCountFigures | null;
+  readonly overlayTriangles: SpikeCountFigures | null;
+}
+
+/** A generated world's run's terrain geometry (plan R14, R14.T1.f; {@link SpikeGeometrySegment}). */
+export interface SpikeGeometryReport {
+  /** How the main view's pass drew its geometry: its setting's, or the launch's override over. */
+  readonly settings: Required<GeometryOverride>;
+  readonly segments: ReadonlyArray<SpikeGeometrySegment>;
 }
 
 /** The several-views check's options as the command line gave them (plan R07, T20). */
@@ -304,7 +1138,183 @@ export interface ViewsCheckLaunch {
   readonly smoke: boolean;
   /** Where the results file goes, or `null` for the default. */
   readonly out: string | null;
+  /** The run the launch makes ({@link ViewsCheckRunKind}). */
+  readonly run: ViewsCheckRunKind;
+  /**
+   * The field the terrain run or its hand-over check is served ({@link ViewsCheckTerrainFixture}):
+   * `terrain-test` on every launch but a `--terrain --weathered` one; T20's run and the atmosphere
+   * run serve none.
+   */
+  readonly fixture: ViewsCheckTerrainFixture;
+  /**
+   * The hand-over check's served world (`--universe`, `--body`; plan R10, R10.T15.b): present only
+   * on a `--terrain --handover` launch that names one, whose looks are then made on the body the
+   * server serves in `TERRAIN TEST`'s place (its `fixture` `terrain-test`, unread), and on every
+   * `--inspection` launch, whose body it names; absent on every other launch.
+   */
+  readonly served?: ServedWorldNames;
+  /**
+   * The whole body's field, the file `--whole` names (plan R10, R10.T14.c's whole-body run): the
+   * native tool's `whole.golden`, which the main process reads (`ViewsCheckApi.wholeField`).
+   * Present only on a `--terrain --whole` launch, whose `fixture` is `terrain-test-whole`.
+   */
+  readonly wholeField?: string;
+  /**
+   * The inspection run's frame profile (`--timing`; the owner's report, 2026-11-01): present, and
+   * `true`, only on an `--inspection` launch that asks for it, whose run then measures a window of
+   * frames from orbit and another closed in ({@link InspectionTimingRecord}) and writes them under
+   * `target/views-check/timing/`; absent on every other launch.
+   */
+  readonly timing?: true;
+  /**
+   * The frame profile's probe of the atmosphere's composite (`--composite-probe`; the owner's
+   * priority, 2026-11-01): present only on an `--inspection --timing` launch that asks for it,
+   * whose `VIEW` then draws its composite under it ({@link CompositeProbeName}); absent on every
+   * other launch, whose composite is drawn as on a player's.
+   */
+  readonly compositeProbe?: CompositeProbeName;
+  /**
+   * The frame profile's count of WebGPU calls (`--count-gpu-calls`; plan R14, the owner's Mac):
+   * present, and `true`, only on an `--inspection --timing` launch that asks for it, whose engine's
+   * device then counts every call by kind and by pass over each window
+   * ({@link InspectionTimingWindow.gpuCalls}), at a little of the main thread's time; absent on
+   * every other launch.
+   */
+  readonly countGpuCalls?: true;
+  /**
+   * The frame profile's probe of the atmosphere's march (`--march-probe`; plan R08, R08.T8.d):
+   * present only on an `--inspection --timing` launch that asks for it, whose `VIEW` then makes its
+   * march under it ({@link MarchProbeName}); absent on every other launch.
+   */
+  readonly marchProbe?: MarchProbeName;
+  /**
+   * The frame profile's atmosphere levers over its setting's (`--march-cover`, `--limb-rays`,
+   * `--march-sources`, `--surface-lobes`, `--decked-air-surface`; plan R08, R08.T8.d): present only on an `--inspection --timing` launch that gives either, whose
+   * `VIEW` then draws its atmospheres with them over `SETTINGS[s].atmosphereLevers`, for the A/B of
+   * each lever on and off on one build; absent on every other launch.
+   */
+  readonly atmosphereLevers?: AtmosphereLeversOverride;
+  /**
+   * The frame profile's probe of the lit passes (`--lit-probe`; plan R08, R08.T9.b's measurement):
+   * present only on an `--inspection --timing` launch that asks for it, whose `VIEW` then makes its
+   * lit materials and kernels under it ({@link LitProbeName}); absent on every other launch, whose
+   * surfaces are lit as on a player's.
+   */
+  readonly litProbe?: LitProbeName;
+  /**
+   * The one look a `--terrain --handover` launch runs (`--look`; R10.T15.b.2's runs), absent for all
+   * three in order: a served look on SwiftShader at the high setting takes over an hour, so that
+   * three in one launch pass its watchdog, and a look a launch makes each run resumable by look.
+   */
+  readonly look?: HandoverLookName;
+  /**
+   * The `RANDOMIZE` draws a `--planet-viewer` launch captures in place of its three ranges
+   * (`--randomize`; the owner's report, 2026-11-05), 1 to 32, each under both white balances;
+   * absent on every other launch.
+   */
+  readonly randomize?: number;
+  /**
+   * The terrain run's GPU time by pass (`--hyperion-gpu-timing`; R14's Mac measurements): present,
+   * and `true`, only on a `--terrain` launch given the switch, each of whose phases then records
+   * its passes' times ({@link TerrainCheckPhaseRecord.passes}); absent on every other launch. The
+   * switch also lifts the timestamps' quantization, on the owner's Mac as on Linux.
+   */
+  readonly passTimes?: true;
 }
+
+/**
+ * A probe of the atmosphere's composite for the inspection run's frame profile (the owner's
+ * priority, 2026-11-01): `sky-off` draws every sky pixel as the scene's light, with no sky branch;
+ * `transmittance-off` draws the sky with no transmittance across from above the top (the per-pixel,
+ * per-channel lookups over the far limb's footprint), 1 in its place; `per-pixel` forms that
+ * transmittance per pixel whatever the setting, the way back's composite, the frame forming its
+ * target at the march's resolution all the same; `surface-grey` dims every drawn surface by the
+ * channels' mean whatever the setting (plan R08, R08.T9.c), the grey way back's composite, the frame
+ * storing the transmittance per channel all the same. Each is a measurement's picture, never a
+ * player's.
+ */
+export type CompositeProbeName = "sky-off" | "transmittance-off" | "per-pixel" | "surface-grey";
+
+/**
+ * A probe of the atmosphere's march for the inspection run's frame profile (plan R08, R08.T8.d; the
+ * owner's Mac): `centre` marches every texel's centre ray alone, with no far-limb footprint formed
+ * or marched, so that a profile tells the footprint's node rays apart from the rest of the march;
+ * and of its step's sources (R08.T8.e's measurement): `depth-zero` lights each step through no air,
+ * its source lookups compiled out, `one-source` marches the first source alone, and `no-lobes`
+ * takes no forward lobes' higher orders. A measurement's picture, never a player's: under `centre`
+ * the limb from orbit flickers as before R08.T8.c.
+ */
+export type MarchProbeName = "centre" | "depth-zero" | "one-source" | "no-lobes";
+
+/**
+ * The atmosphere's levers a frame profile draws with over its setting's (plan R08, R08.T8.d): the
+ * march's cover (`area`, or `tiles`, the exact tile cull), its far limb's node rays (`per-texel`,
+ * or `packed`), and since R08.T8.e's table its step's sources (`table`, from the sources' table, or
+ * `per-step`, the sliced lookup), and since fix-r08-decked-air-route a drawn surface's forward lobes
+ * (`transmitted`, or `extinguished`, the way back) and a decked air's ground (`departure`, or
+ * `uniform`, the bake's average ground), each as `hillaire.ts`'s `AtmosphereSettings` names them,
+ * the step's sources the thick read's shared read's too (perf-thick-march); any may be absent, the
+ * setting's then. The pictures are a player's, the cover's and the limb's to
+ * the bit on a fallback adapter.
+ */
+export interface AtmosphereLeversOverride {
+  readonly marchCover?: "area" | "tiles";
+  readonly limbRays?: "per-texel" | "packed";
+  readonly marchSourceTransmittance?: "table" | "per-step";
+  readonly surfaceLobes?: "transmitted" | "extinguished";
+  readonly deckedAirSurface?: "departure" | "uniform";
+}
+
+/**
+ * A probe of the lit passes for the inspection run's frame profile (plan R08, R08.T9.b's
+ * measurement): `transmittance-one` takes every source's transmittance through the air as 1, with
+ * no lookup; `planetshine-centre` takes a planetshine source's at its disc's centre node alone, one
+ * lookup in place of three; `no-annuli` forms the eclipse term with no annuli, every star unhidden;
+ * `per-fragment` takes each source's transmittance per fragment whatever the setting's sources'
+ * table, the lever's way back; and the lit terrain's alone (perf-bodies-near-ground):
+ * `terrain-unshaded` forms its fragment's shading normal and cascades' lit fraction but not its
+ * light, `terrain-no-cascades` reads no cascade, `terrain-no-horizon` no horizon map and
+ * `terrain-no-maturity` no maturity node. Each but `per-fragment` is a measurement's picture, never
+ * a player's.
+ */
+export type LitProbeName =
+  | "transmittance-one"
+  | "planetshine-centre"
+  | "no-annuli"
+  | "per-fragment"
+  | "terrain-unshaded"
+  | "terrain-no-cascades"
+  | "terrain-no-horizon"
+  | "terrain-no-maturity";
+
+/**
+ * The terrain golden a terrain run's kept scene serves in the server's place: `TERRAIN TEST`'s
+ * own (`terrain-test`, `terrain_test.golden`); `TEST MOON` weathered's (`terrain-test-weathered`,
+ * `terrain_test_weathered.golden`, `--weathered`; plan R10, R10.T1.c's client half;
+ * decision-r10-t1c-client-scope §3), the same moon on a 1 Gyr surface whose young craters' haloes
+ * of fresh regolith the maturity draws, which no generated body carries before generator version
+ * 24; or `TEST MOON`'s whole body (`terrain-test-whole`, `--whole`; plan R10, R10.T14.c's
+ * whole-body run, the owner's request), the same field with every cell surveyed, which the native
+ * tool writes uncommitted (`ViewsCheckLaunch.wholeField`).
+ */
+export type ViewsCheckTerrainFixture =
+  "terrain-test" | "terrain-test-weathered" | "terrain-test-whole";
+
+/**
+ * The run a views-check launch makes: T20's phases on `PHASE TEST` (`several-views`, plan R07,
+ * T20); the terrain run on `TERRAIN TEST` (`terrain`, `--terrain`, plan R10, R10.T16.d;
+ * decision-r10-t16-contracts §6); or the terrain run's check-only hand-over variant in its place
+ * (`handover`, `--terrain --handover`, plan R10, R10.T10.g; decision-r10-t16-leans §1), the three
+ * hand-over looks on `TERRAIN TEST`'s world ({@link HandoverCheckRecord}); or the atmosphere's
+ * scripted hand flight on `ATMOSPHERE TEST` (`atmosphere`, `--atmosphere`, plan R08, R08.T10.b;
+ * {@link AtmosphereCheckRecord}); or a served body opened from `SYSTEM` through `VIEW BODY` and its
+ * photorealistic body inspection captured (`inspection`, `--inspection`, the owner's request,
+ * 2026-11-01), which writes its capture alone; or the `PLANET VIEWER`'s planet generated and
+ * captured from orbit, low orbit and its surface (`planet-viewer`, `--planet-viewer`, plan R15,
+ * T6), which writes its captures alone.
+ */
+export type ViewsCheckRunKind =
+  "several-views" | "terrain" | "handover" | "atmosphere" | "inspection" | "planet-viewer";
 
 /**
  * The check's phases, each a configuration of `VIEW` held while it is measured (R07.T20): the
@@ -371,6 +1381,11 @@ export interface ViewsCheckPhaseRecord {
   readonly droppedResolves: number;
   /** The GPU time of resolves no view's or target's `render` made (uploads, mipmaps), ms. */
   readonly unattributedGpuMs: number;
+  /**
+   * The primary label block's statements as the window ended, in order: `IMAGE: DETAIL LIMITED`
+   * among them where its image stood below its setting's (fix-retina-frame).
+   */
+  readonly statements: ReadonlyArray<string>;
 }
 
 /** A view's canvas, by the view's name. */
@@ -423,22 +1438,1247 @@ export interface ViewsCheckWindow {
 }
 
 /**
+ * The terrain run's phases (plan R10, R10.T16.d; decision-r10-t16-contracts §6), each a
+ * configuration of `VIEW` on `TERRAIN TEST`; a launch runs one setting's three, in order: on high
+ * `terrain-alone`, `terrain-photoreal-wireframe` and `terrain-loss`, on low `terrain-alone`,
+ * `terrain-wireframe` and `terrain-loss`.
+ */
+export type TerrainCheckPhaseName =
+  /** The photorealistic primary alone, through the hand-over, the descent and the sunset. */
+  | "terrain-alone"
+  /** High: the same, with instrument 1 photorealistic and instrument 2 in the wireframe. */
+  | "terrain-photoreal-wireframe"
+  /** Low: the primary with one wireframe instrument, since `QUALITY LOW` allows one photorealistic view. */
+  | "terrain-wireframe"
+  /** The primary alone on a fresh session, its device destroyed by the harness mid-stream. */
+  | "terrain-loss";
+
+/** A phase of either run of the views check: T20's or the terrain run's. */
+export type CheckPhaseName = ViewsCheckPhaseName | TerrainCheckPhaseName;
+
+/** Bytes of one memory category (R01's `MemoryCategory` names). */
+export interface TerrainCheckBytes {
+  readonly category: string;
+  readonly bytes: number;
+}
+
+/** The terrain session's memory as a phase ends (`TerrainSession.memory`, and the probe's tally). */
+export interface TerrainCheckMemory {
+  /** What the height workers hold of the fields, bytes. */
+  readonly workerFieldBytes: number;
+  /** The blocks the pool keeps for a worker made again, bytes. */
+  readonly keptFieldBytes: number;
+  /** The session's own textures (masks and class maps), by category. */
+  readonly sessionGpuBytes: ReadonlyArray<TerrainCheckBytes>;
+  /**
+   * The terrain's GPU allocations alive as the phase ends, by category: the session's textures and
+   * its passes' resources, every allocation named `terrain …`, `coverage mask …` or `class map …`.
+   */
+  readonly liveBytes: ReadonlyArray<TerrainCheckBytes>;
+  /** The most of them alive at once over the phase, by category. */
+  readonly peakBytes: ReadonlyArray<TerrainCheckBytes>;
+}
+
+/** One view over one phase of the terrain run. */
+export interface TerrainCheckViewRecord {
+  readonly name: ViewsCheckViewName;
+  /** The style its canvas's accessible name said it drew when the phase ended. */
+  readonly style: ViewsCheckStyle;
+  readonly canvas: ViewsCheckCanvas;
+  /** The animation frames in which it submitted a pass. */
+  readonly draws: number;
+  /** Its timed GPU time in each frame it drew whose resolves all arrived, ms. */
+  readonly gpuMs: ReadonlyArray<number>;
+  /** The engine's CPU time in its `render` calls each frame it drew, ms. */
+  readonly submitMs: ReadonlyArray<number>;
+  /**
+   * The animation frames in which it was due at its own cadence (its most common count of frames
+   * between two draws: 1 at 60 Hz, 2 at 30 Hz) and did not draw, outside the loss's restore (from
+   * the device's destruction to the terrain's first draw after the restore).
+   */
+  readonly missedFrames: number;
+  /**
+   * The longest time between two of its draws, ms, outside the loss's restore: a stall of the
+   * whole page shows here and not among the missed frames, since no animation frame ran. The run
+   * fails on one over its limit (plan R10, R10.T14.d; `TERRAIN_GAP_LIMIT_MS`).
+   */
+  readonly longestGapMs: number;
+  /**
+   * The script's time at that gap's end, s: its draw after the gap, or the phase's end; `null`
+   * where the stage had told no script time by then (R10.T14.d).
+   */
+  readonly longestGapEndScriptS: number | null;
+  /**
+   * Its draws while `TEST MOON` was handed over to its terrain with a drawn patch in its view (the
+   * pass took the view, and some patch of its draw set lies in the view's).
+   */
+  readonly handedOverDraws: number;
+  /**
+   * Its draws while handed over with no drawn patch in its view: past the survey, where the
+   * reference surface alone is drawn, or every patch it sees still to come.
+   */
+  readonly offSurveyDraws: number;
+  /** Of those, the draws whose submissions held a draw of the terrain's lit material. */
+  readonly terrainDraws: number;
+  /**
+   * Handed-over draws without the terrain after its first terrain draw of the phase, or from the
+   * phase's first frame where it drew the terrain on its session before the phase, outside the
+   * loss's restore: a terrain once drawn that went missing.
+   */
+  readonly terrainGaps: number;
+  /** The first spans of those draws, each its first and last draw's script time, s. */
+  readonly terrainGapSpansS: ReadonlyArray<readonly [number, number]>;
+  /** When it first handed over in the phase, ms, and the script's time then, s; `null` for never. */
+  readonly firstHandoverMs: number | null;
+  readonly firstHandoverScriptS: number | null;
+  /** When it first drew the terrain in the phase, ms; `null` for never. */
+  readonly firstTerrainMs: number | null;
+  /**
+   * When the hand-over it first drew the terrain in began, ms: the first of the handed-over draws
+   * that ran unbroken to that draw (R10.T14.d), so that a lone handed-over draw before it, such as
+   * the frame the script's loop moves the camera in, before the pass has let the view go, is not
+   * taken for its hand-over; `null` for never.
+   */
+  readonly terrainHandoverMs: number | null;
+  /** Its scene target's read-backs over the phase. */
+  readonly readBacks: number;
+  /** Texels of those read-backs not finite in any channel. */
+  readonly nonFiniteTexels: number;
+}
+
+/**
+ * A phase's primary draws at which `TEST MOON`'s patch cache's pins passed its slots, or it had
+ * refused an arrival (`CachePressure.exceeded`; plan R10, R10.T16.i; research-leans-35 §2): the
+ * draw set's held coarsens pin the slots beside the selection's, and where the pins fill them,
+ * refinement stalls.
+ */
+export interface TerrainCheckCachePressure {
+  /** Those draws, among the ones `patchesDrawn` counts. */
+  readonly draws: number;
+  /** The script's time at the first, s; `null` for none, or before the stage told any. */
+  readonly firstScriptS: number | null;
+}
+
+/** What the renderer measured over one phase of the terrain run. */
+export interface TerrainCheckPhaseRecord {
+  readonly name: TerrainCheckPhaseName;
+  /** The window, `performance.now()` ms. */
+  readonly startMs: number;
+  readonly endMs: number;
+  /** The script's time at the window's start and at its end, s; it loops at its length. */
+  readonly scriptStartS: number;
+  readonly scriptEndS: number;
+  /** The views shown, the primary first. */
+  readonly views: ReadonlyArray<TerrainCheckViewRecord>;
+  /** Intervals between consecutive animation frames, ms. */
+  readonly frameIntervalsMs: ReadonlyArray<number>;
+  /** Each animation frame's time in the page's `requestAnimationFrame` callbacks, ms. */
+  readonly mainThreadMs: ReadonlyArray<number>;
+  /** Each frame's timed GPU time, every view's passes, where all its resolves arrived, ms. */
+  readonly frameGpuMs: ReadonlyArray<number>;
+  /** The patches `TEST MOON`'s pass drew, at each of the primary's draws while it had a pass. */
+  readonly patchesDrawn: ReadonlyArray<number>;
+  /**
+   * The patches its selection held at those draws (`Selection.patches`): the draw set beside them
+   * holds a coarsen's finer patches until its fade ends (plan R10, R10.T16.i), so it may draw more.
+   */
+  readonly patchesSelected: ReadonlyArray<number>;
+  /** The draws its cache's pins passed its slots at; `null` in a record written before them. */
+  readonly cachePressure: TerrainCheckCachePressure | null;
+  /**
+   * The terrain's triangles at those draws (plan R14, R14.T1.b; `TerrainPass.counts`): the lit
+   * draws', and the shadow cascades' casters', every cascade's, at those draws that drew cascades
+   * and whose cluster counts had come back.
+   */
+  readonly trianglesDrawn: ReadonlyArray<number>;
+  readonly casterTriangles: ReadonlyArray<number>;
+  /** Bakes posted to the height workers, and their answers, over the window. */
+  readonly bakes: {
+    readonly posted: number;
+    readonly baked: number;
+    /** Answered `bake-failed` or `bake-unsurveyed`. */
+    readonly refused: number;
+  };
+  /** Field messages posted to the height workers over the window, each worker's counted. */
+  readonly fieldPosts: {
+    readonly inits: number;
+    readonly chunks: number;
+    readonly releases: number;
+  };
+  /** The fixture's `surface_field` asks over the window, and the payload blocks it sent. */
+  readonly fieldAsks: number;
+  readonly blocksSent: number;
+  /** The session's memory as the window ends, or `null` with no session then. */
+  readonly memory: TerrainCheckMemory | null;
+  /**
+   * Each pass label's GPU time in each of the window's frames whose resolves all arrived, as the
+   * inspection run's frame profile reads them (`ViewsProbe.passTimes`): the bodies pass, the shadow
+   * cascades, the cluster cull and compaction, the overlay and the rest, on a launch given
+   * `--hyperion-gpu-timing` (`ViewsCheckLaunch.passTimes`); `null` on any other.
+   */
+  readonly passes: ReadonlyArray<InspectionTimingPass> | null;
+}
+
+/**
+ * A terrain run's phase as it ends, handed to the main process, which writes the run's finished
+ * phases so that a run stopped part-way keeps them (R14's Mac measurements): the phase's record,
+ * and the pass timer's kind and the page's device-pixel ratio so far, as the run's record gives them.
+ */
+export interface TerrainCheckPhaseUpdate {
+  readonly timer: SpikePassTimer;
+  readonly devicePixelRatio: number;
+  readonly phase: TerrainCheckPhaseRecord;
+}
+
+/** An engine fault the terrain run saw, with its time. */
+export interface TerrainCheckFault {
+  /** `performance.now()` ms. */
+  readonly atMs: number;
+  /** The fault's kind, as R01's `GraphicsFault` names it. */
+  readonly kind: "device-lost" | "gpu-process-gone" | "shader-refused" | "view-refused";
+  /** A device loss's reason (`destroyed`, `unknown`); `null` for any other fault. */
+  readonly reason: string | null;
+  /** The fault as a line, as T20's record gives it. */
+  readonly line: string;
+}
+
+/**
+ * The terrain session's fault as the terrain run saw it raised or changed (plan R10, R10.T16.e;
+ * decision-r10-t16-leans §8): the views whose label blocks showed it, and its text.
+ */
+export interface TerrainCheckSessionFault {
+  /** `performance.now()` ms. */
+  readonly atMs: number;
+  /**
+   * Its fault line by the session's first cause, which every view shows alike: the renderer's
+   * `TERRAIN_NOT_AVAILABLE` or `TERRAIN_COMPUTATION_FAILED` (`view/terrain/annunciation.ts`).
+   */
+  readonly text: string;
+  /** The views that showed it, by their engine names (`view`, `instrument-1`, `instrument-2`). */
+  readonly views: ReadonlyArray<string>;
+}
+
+/** The forced loss (decision-r10-t16-contracts §6): what stood when the harness destroyed the device, and after. */
+export interface TerrainCheckLossRecord {
+  /** When the harness destroyed the device, ms, and the script's time then, s; `null` if it did not. */
+  readonly destroyedAtMs: number | null;
+  readonly destroyedAtScriptS: number | null;
+  /** Why the harness did not destroy the device, or `null`. */
+  readonly notDestroyed: string | null;
+  /** At the destruction: the payload's blocks the fixture had still to send, and bakes in flight. */
+  readonly blocksToCome: number;
+  readonly bakesInFlight: number;
+  /** After the destruction, to the phase's end. */
+  readonly after: {
+    readonly fieldAsks: number;
+    readonly fieldInits: number;
+    readonly fieldChunks: number;
+    /** The blocks the fixture sent: those of the answer in flight at the destruction. */
+    readonly blocksSent: number;
+  };
+  /** The session's height workers, by which each block is posted. */
+  readonly workers: number;
+  /** When the primary first drew the terrain after the restore, ms; `null` for never. */
+  readonly terrainAgainAtMs: number | null;
+  /** The body's GPU coverage mask, read back: surveyed cells, `null` where unread. */
+  readonly masks: {
+    /** Just before the destruction. */
+    readonly before: number | null;
+    /** As soon as it could be read after the restore. */
+    readonly afterRestore: number | null;
+    /** At the phase's end, every block taken. */
+    readonly end: number | null;
+    /** The store's coverage at the phase's end: the cells the mask should hold. */
+    readonly expected: number;
+    /** Whether every cell of `before` is in `afterRestore`. */
+    readonly beforeKept: boolean;
+    /** Whether `end` holds exactly the cells of `expected`. */
+    readonly endAsExpected: boolean;
+  };
+}
+
+/** The terrain session's teardown at the run's end: `VIEW` on a kept scene with no terrain. */
+export interface TerrainCheckTeardownRecord {
+  /** Whether the session was disposed (its watch ended). */
+  readonly disposed: boolean;
+  /** The height workers made over the run, and those not terminated. */
+  readonly workersMade: number;
+  readonly workersLive: number;
+  /** The session's own textures' bytes after it, by its memory report. */
+  readonly sessionGpuBytes: number;
+  /** The terrain's GPU allocations still alive after it, by category. */
+  readonly liveBytes: ReadonlyArray<TerrainCheckBytes>;
+}
+
+/**
+ * A terrain session the run saw `VIEW` make, and the compile of its materials, which it starts as
+ * it is made, before any hand-over (plan R10, R10.T14.d): a stall a compile cost the page would
+ * fall here, outside every phase, which starts once the compile has ended, and is judged by the
+ * same limit as a phase's gaps.
+ */
+export interface TerrainCheckSessionRecord {
+  /** When it was made, its materials' compile beginning, `performance.now()` ms. */
+  readonly madeAtMs: number;
+  readonly compile: TerrainCheckSessionCompile;
+}
+
+/** A session's materials' compile: still running at the run's end, or ended (R10.T14.d). */
+export type TerrainCheckSessionCompile =
+  | { readonly kind: "pending" }
+  | {
+      readonly kind: "ended";
+      /** From the session's making to its materials' compile ended, ms. */
+      readonly compileMs: number;
+      /** How many of its setting's materials compiled. */
+      readonly compiled: number;
+      /**
+       * The longest time between two animation frames from its making to the first frame after
+       * the compile ended, ms, a stall of the page showing here; `null` where no frame followed.
+       */
+      readonly longestFrameGapMs: number | null;
+    };
+
+/**
+ * VIEW's opening as the terrain run saw it (plan R10, R10.T14.d): from the run's start until the
+ * materials' preparations its views made as they opened had settled. A disc drawn in its first
+ * frames compiles before any preparation can land, so its longest gap is recorded, not judged.
+ */
+export interface TerrainCheckOpeningRecord {
+  /** From the run's start to its views' preparations settled, ms. */
+  readonly preparedMs: number;
+  /** How many preparations its views made. */
+  readonly preparations: number;
+  /**
+   * The longest time between two animation frames from the run's start to the first frame after the
+   * preparations settled, ms; `null` where no frame followed.
+   */
+  readonly longestFrameGapMs: number | null;
+}
+
+/**
+ * The terrain run's judged span (plan R10, R10.T14.d; decision-r10-t14d-stall §3): from the end of
+ * VIEW's opening to the teardown's choice of `PHASE TEST`, every phase, each session's making and
+ * compile, and the scene choices and configurations between them, outside the forced loss's
+ * restore and the run's own computations.
+ */
+export interface TerrainCheckSpanRecord {
+  /** Its ends, `performance.now()` ms. */
+  readonly fromMs: number;
+  readonly toMs: number;
+  /**
+   * The page's longest time between two animation frames over it, outside the restore and the
+   * run's own computations, ms.
+   */
+  readonly longestFrameGapMs: number;
+  /** When that gap ended, ms, and the script's time then, s (`null` where none was told). */
+  readonly longestGapEndMs: number;
+  readonly longestGapEndScriptS: number | null;
+  /**
+   * The time the run's own computations held the page's main thread, its phases' records made at
+   * their ends, ms: the gaps they made are left out, as the restore is.
+   */
+  readonly harnessMs: number;
+}
+
+/** What the terrain run's renderer reports at the end of a run, for its results file. */
+export interface TerrainCheckRecord {
+  /** The pass timer's kind, as its reports gave it (`absent` when none arrived). */
+  readonly timer: SpikePassTimer;
+  readonly devicePixelRatio: number;
+  readonly phases: ReadonlyArray<TerrainCheckPhaseRecord>;
+  /** Every engine fault over the run, timed. */
+  readonly faults: ReadonlyArray<TerrainCheckFault>;
+  /**
+   * Each time the terrain session's `terrainFaults` held a view or changed while it did, timed
+   * (R10.T16.e): the run fails on any, of either cause.
+   */
+  readonly terrainFaults: ReadonlyArray<TerrainCheckSessionFault>;
+  /** Each terrain session `VIEW` made over the run, in order, and its materials' compile (R10.T14.d). */
+  readonly sessions: ReadonlyArray<TerrainCheckSessionRecord>;
+  /** VIEW's opening, until its views' preparations settled (R10.T14.d); recorded, not judged. */
+  readonly opening: TerrainCheckOpeningRecord;
+  /** The judged span's page-wide longest gap (R10.T14.d). */
+  readonly span: TerrainCheckSpanRecord;
+  /** Every restore of the engine after a loss, `performance.now()` ms. */
+  readonly restoresAtMs: ReadonlyArray<number>;
+  readonly loss: TerrainCheckLossRecord;
+  readonly teardown: TerrainCheckTeardownRecord;
+  /**
+   * `TEST MOON`'s hand-over range at the primary's canvas and field of view, m, and the script's
+   * time at which the descent crosses it, s (`handoverRangeM`); `null` before its field's header.
+   */
+  readonly handover: { readonly rangeM: number; readonly scriptS: number } | null;
+  /**
+   * The whole-body run's own readings (plan R10, R10.T14.c; research-leans-20 §2), on a `--terrain
+   * --whole` launch alone ({@link TerrainWholeRecord}).
+   */
+  readonly whole?: TerrainWholeRecord;
+}
+
+/** The whole-body run's check-only looks at `TEST MOON`, each at full phase (`wholeLooks.ts`). */
+export type TerrainWholeLookName = "orbit" | "cube-corner" | "antipode";
+
+/**
+ * One of the whole-body run's looks: read back from the primary's photorealistic scene target
+ * (`read`), or not, with why (`failed`).
+ */
+export type TerrainWholeLookRecord =
+  | {
+      readonly kind: "read";
+      readonly name: TerrainWholeLookName;
+      /** Whether its terrain settled before the read-back: drawn, and no bake in flight a while. */
+      readonly settled: boolean;
+      /** The pixels well inside the disc, and of them those of the sky's black, where no ground drew. */
+      readonly discPixels: number;
+      readonly skyPixels: number;
+      /**
+       * The pixels well beyond the limb, the datum's spheroid and the field's relief past it, and of
+       * them those lit: ground drawn beyond the body's figure.
+       */
+      readonly outsidePixels: number;
+      readonly litOutsidePixels: number;
+      /** Whether every texel read was finite. */
+      readonly finite: boolean;
+    }
+  | {
+      readonly kind: "failed";
+      readonly name: TerrainWholeLookName;
+      readonly settled: boolean;
+      readonly failure: string;
+    };
+
+/** The whole-body run's own readings (plan R10, R10.T14.c; research-leans-20 §2). */
+export interface TerrainWholeRecord {
+  /** The field's level's cells, and those the session's coverage held as the first phase ended. */
+  readonly cells: number;
+  readonly heldCells: number;
+  /**
+   * The page's text sampled over the first phase: how often, and how often it read `NOT
+   * SURVEYED` or named a `SURVEY EDGE` among the targets.
+   */
+  readonly textSamples: number;
+  readonly notSurveyedSamples: number;
+  readonly surveyEdgeSamples: number;
+  /**
+   * From `TERRAIN TEST`'s first choice to its coverage held whole, ms, to a quarter second, and the
+   * page's longest time between animation frames over it; `null` where it was never held whole.
+   */
+  readonly decodeMs: number | null;
+  readonly decodeLongestFrameGapMs: number | null;
+  /**
+   * The setting's patch cache budget, bytes (`TerrainSettings.cacheBytes`, R10.T14.b), recorded
+   * beside the cache's peak; and the lit pass's selection budget, half its cache's slots
+   * (`TerrainPass.maxPatches`), as the first phase ended, which no selection may pass, or `null`
+   * with no pass then.
+   */
+  readonly cacheBytes: number;
+  readonly selectionBudget: number | null;
+  readonly looks: ReadonlyArray<TerrainWholeLookRecord>;
+}
+
+/**
+ * The hand-over check's looks (plan R10, R10.T10.g; decision-r10-t16-leans §1), each a check-only
+ * kept scene that a `--handover` launch alone offers: the survey's middle at incidence i and
+ * emission e, the phase α = i + e, in one plane.
+ */
+export type HandoverLookName =
+  /** `HAND-OVER 30°`: i = e = 15°, judged. */
+  | "handover-30"
+  /** `HAND-OVER 90°`: i = e = 45°, judged. */
+  | "handover-90"
+  /** `HAND-OVER TERMINATOR`: i = 78°, e = 12°, recorded and not judged. */
+  | "handover-terminator"
+  /**
+   * `HAND-OVER HALO`: straight above a young crater of `TEST MOON` weathered's survey in its
+   * middle's place, i = 15°, e = 0° (R10.T1.c's close-range halo frame), recorded and not judged;
+   * taken only where `--look` names it.
+   */
+  | "handover-halo";
+
+/**
+ * How a frame drew the look's body, by the materials of its scene target's draws: its disc
+ * (`bodies:disc…`), its smooth figure alone (`bodies:smoothMesh`, the hand-over's mesh before the
+ * terrain's first draw), its terrain (`terrain-lit-…`), or none of them.
+ */
+export type HandoverRegime = "disc" | "figure" | "terrain" | "none";
+
+/**
+ * A switch the hand-over check compares the frames either side of: the regime's switch from the
+ * disc (the disc's last frame and the first after it), the terrain's first draw (the disc's last
+ * frame and the terrain's first), and the hand-back (the terrain's last frame and the disc's first
+ * after it).
+ */
+export type HandoverSwitchName = "disc-to-figure" | "disc-to-terrain" | "terrain-to-disc";
+
+/** The angles at the survey's middle, from its datum normal, deg. */
+export interface HandoverAngles {
+  /** The sun's incidence i. */
+  readonly incidenceDeg: number;
+  /** The camera's emission e. */
+  readonly emissionDeg: number;
+  /** The phase α, between the sun and the camera. */
+  readonly phaseDeg: number;
+}
+
+/** A frame the hand-over check read back. */
+export interface HandoverFrameRecord {
+  /** The animation frame it was drawn in, `performance.now()` ms. */
+  readonly atMs: number;
+  /** The script's time it drew, s. */
+  readonly scriptS: number;
+  readonly regime: HandoverRegime;
+  /** The camera's distance to the body's limb over the hand-over range. */
+  readonly rangeRatio: number;
+  /** Its scene target's size, px (the internal size). */
+  readonly target: ViewsCheckCanvas;
+  /** The body's pixels, by the target's meter classes (its lit and unlit body). */
+  readonly bodyPixels: number;
+  /**
+   * Of those, the pixels whose ray through the centre misses the datum spheroid: the camera
+   * model's self-check (the limb's relief alone may miss).
+   */
+  readonly bodyMisses: number;
+  /** The body's pixels whose ray meets a surveyed cell. */
+  readonly surveyPixels: number;
+  /** The angles at the survey's middle from this frame's camera. */
+  readonly angles: HandoverAngles;
+}
+
+/**
+ * A mean of the HDR's Rec. 709 luminance over each frame's own pixels, before and after, in the
+ * scene target's units (before the exposure's scale); 0 over no pixel.
+ */
+export interface HandoverOwnMeans {
+  readonly pixelsBefore: number;
+  readonly pixelsAfter: number;
+  readonly meanBefore: number;
+  readonly meanAfter: number;
+}
+
+/**
+ * The same mean over the pixels both frames share: the same pixel of the body, and for the survey
+ * and a cell the same pixel assigned to the same cell; 0 over no pixel.
+ */
+export interface HandoverSharedMeans {
+  readonly pixels: number;
+  readonly meanBefore: number;
+  readonly meanAfter: number;
+}
+
+/**
+ * One surveyed cell across a switch: its means over the pixels of the frame not the disc's that
+ * fall on it, each against the disc's frame resampled at the pixel's ground point (R10.T15.b.2;
+ * `handoverReading.ts`' `compareReadings`), which the main process judges (decision-r10-t16-leans
+ * §1: at least 2 such pixels, no floor; a cell dark on one side counted, never dropped), unless the
+ * disc's μ floor binds at its centre (R10.T15.b).
+ */
+export interface HandoverTexelRecord {
+  /** The cell as its coverage-mask texel: face × N² + row j × N + column i, N = 2^level. */
+  readonly texel: number;
+  /** The pixels its means are over, at least 1. */
+  readonly sharedPixels: number;
+  readonly meanBefore: number;
+  readonly meanAfter: number;
+  /**
+   * Whether the disc's floor on the law's μ binds at the cell's centre seen from either frame's
+   * eye, n′ · v < ½ μ_ν (plan R10, R10.T15.b; decision-r10-t16-leans, "R10.T10.g terminator
+   * cross-fade"): the per-cell bound leaves such a cell out and counts it.
+   */
+  readonly muFloored: boolean;
+}
+
+/**
+ * The pixels of a switch's frame not the disc's, on surveyed cells, that its cells' means leave out
+ * (R10.T15.b.2): where the disc's frame cannot be resampled at the pixel's ground point, its four
+ * pixels about it straddling the terminator or the limb, off the region read, or the point facing
+ * away; and the cells all of whose pixels are so left out, which no means list.
+ */
+export interface HandoverResampleGaps {
+  readonly pixels: number;
+  readonly cells: number;
+}
+
+/** The frames either side of a switch, and what changed between them. */
+export interface HandoverComparisonRecord {
+  readonly name: HandoverSwitchName;
+  readonly before: HandoverFrameRecord;
+  readonly after: HandoverFrameRecord;
+  /** The animation frames from `before` to `after`: 1 where they are consecutive frames. */
+  readonly framesApart: number;
+  /** Whether `before` was the last frame drawn in its regime, and `after` the first in its own. */
+  readonly beforeWasLast: boolean;
+  readonly afterWasFirst: boolean;
+  readonly body: { readonly own: HandoverOwnMeans; readonly shared: HandoverSharedMeans };
+  readonly survey: { readonly own: HandoverOwnMeans; readonly shared: HandoverSharedMeans };
+  /** Every surveyed cell with a pixel its means are over, in texel order. */
+  readonly texels: ReadonlyArray<HandoverTexelRecord>;
+  /** What the cells' means leave out (R10.T15.b.2). */
+  readonly resampleGaps: HandoverResampleGaps;
+}
+
+/** The look's exposure: `AUTO` on `LIT` until it settled, then `INHIBIT`, and whether that held. */
+export interface HandoverExposureRecord {
+  /** The EV100 the exposure was locked at, as `EXPOSURE` read it; `null` where it was not. */
+  readonly lockedEv100: number | null;
+  /** `EXPOSURE`'s reading once locked, and at the look's end; `null` where unread. */
+  readonly lockedReading: string | null;
+  readonly endReading: string | null;
+  /** Whether the lock held: `INHIBITED · OPERATOR` at the locked EV100 from the lock to the end. */
+  readonly held: boolean;
+}
+
+/** One look of the hand-over check. */
+export interface HandoverLookRecord {
+  readonly name: HandoverLookName;
+  /** Its kept scene's name. */
+  readonly scene: string;
+  /** Whether the verdict judges it (30° and 90°) or records it (the terminator's). */
+  readonly judged: boolean;
+  /** The angles asked, and those at the hand-over range's distance. */
+  readonly nominal: HandoverAngles;
+  readonly atRange: HandoverAngles;
+  readonly exposure: HandoverExposureRecord;
+  /** The cells the session's coverage held surveyed when the approach began. */
+  readonly surveyedCells: number;
+  /** Surveyed cells whose centre's direction did not map back to their texel (0 expected). */
+  readonly mappingMismatches: number;
+  /**
+   * The script's time of the first frame of each regime as the frames drew it, s: the figure's
+   * (or the terrain's, where it drew at the switch), the terrain's, and the disc's after it;
+   * `null` where none was seen.
+   */
+  readonly switchesS: {
+    readonly figure: number | null;
+    readonly terrain: number | null;
+    readonly disc: number | null;
+  };
+  /** The switches' comparisons, as many as were read: three for a look that ran whole. */
+  readonly comparisons: ReadonlyArray<HandoverComparisonRecord>;
+  /** Why the look could not be read whole: the harness's failures, each a reason. */
+  readonly failures: ReadonlyArray<string>;
+}
+
+/**
+ * What the hand-over check's renderer reports (plan R10, R10.T10.g), for its results file: the
+ * world, the range, the sizes and each look's comparisons.
+ */
+export interface HandoverCheckRecord {
+  /** The world the looks were made on: `TERRAIN TEST`'s now, a served world's for T15. */
+  readonly world: string;
+  readonly devicePixelRatio: number;
+  /** The primary's canvas, px (the presented size), and its scene target's (the internal size). */
+  readonly canvas: ViewsCheckCanvas;
+  readonly target: ViewsCheckCanvas;
+  /** The body's realised relief, m, the τ it hands over at, px, and the pixel, rad. */
+  readonly reliefM: number;
+  readonly tauPx: number;
+  readonly radPerPx: number;
+  /** The hand-over range, m, against the camera's distance to the limb. */
+  readonly rangeM: number;
+  /** The level of the cells the texels are, 6 on `TERRAIN TEST`. */
+  readonly cellLevel: number;
+  /**
+   * The camera's line: its rate, 1/s (the fraction of its distance to the limb it closes or opens a
+   * second), and its ratios of the range, and its hold, s.
+   */
+  readonly approach: {
+    readonly ratePerS: number;
+    readonly startRatio: number;
+    readonly closestRatio: number;
+    readonly holdS: number;
+    readonly endRatio: number;
+  };
+  readonly looks: ReadonlyArray<HandoverLookRecord>;
+  /** Every engine fault over the run, timed. */
+  readonly faults: ReadonlyArray<TerrainCheckFault>;
+}
+
+/**
+ * The primary's frames over an atmosphere-run capture's window (plan R08, R08.T10.b): from the
+ * capture before it, or the run's start, to it.
+ */
+export interface AtmosphereCheckFrames {
+  /** The window, `performance.now()` ms. */
+  readonly fromMs: number;
+  readonly toMs: number;
+  /** The animation frames in which the primary drew. */
+  readonly draws: number;
+  /** The intervals between those frames, ms: median and 95th percentile; `null` under two draws. */
+  readonly intervalMedianMs: number | null;
+  readonly intervalP95Ms: number | null;
+  /** Its timed GPU time in each draw whose resolves all arrived, ms; `null` where none did. */
+  readonly gpuMedianMs: number | null;
+  readonly gpuP95Ms: number | null;
+}
+
+/**
+ * What every capture of the atmosphere run records (plan R08, R08.T10.b), whichever its kind: its
+ * label, the style the primary drew and what its label block said as it was taken, and its frames.
+ */
+export interface AtmosphereCheckCaptureTaken {
+  /**
+   * Its label, which names its picture among the run's captures: `fixture-<designation in lower
+   * kebab case>`, or `moonlit-night`; in the software mode also a look's, `ground-test-earth-noon`.
+   */
+  readonly label: string;
+  /** The camera's preset as the label block's `CAMERA` line read it (`SEAT`, `FREE · RATE …`). */
+  readonly camera: string | null;
+  /** The `EXPOSURE` line's reading as it was taken; `null` where none was shown. */
+  readonly exposure: string | null;
+  /**
+   * The style the primary's canvas's accessible name said it drew as it was taken; `null` where it
+   * named none (R08.T10.g).
+   */
+  readonly style: ViewsCheckStyle | null;
+  /**
+   * How long the run waited before it, from the camera's arrival (or the night's meter chosen)
+   * until the `EXPOSURE` line's EV held steady, `AUTO` settled, ms.
+   */
+  readonly exposureSettleMs: number;
+  /** When it was taken, `performance.now()` ms. */
+  readonly atMs: number;
+  readonly frames: AtmosphereCheckFrames;
+  /** The primary label block's statements as it was taken, in order. */
+  readonly statements: ReadonlyArray<string>;
+  /** The primary label block's fault lines as it was taken: graphics, terrain, then atmosphere. */
+  readonly faults: ReadonlyArray<string>;
+  /**
+   * The primary's scene target's scale against its canvas as it was taken, the last the views
+   * probe recorded over its frames (`ViewsCheckViewRecord.scales`), or `null` where it recorded
+   * none (fix-retina-frame).
+   */
+  readonly primaryScale: number | null;
+  /**
+   * The setting whose sizes its air was drawn at: the low setting's where its label block stated
+   * `IMAGE: DETAIL LIMITED`, the frame-rate floor having stepped its air, else the launch's.
+   */
+  readonly airSetting: QualitySettingName;
+}
+
+/**
+ * A capture of an air fixture, seen from the free camera at a few radii, or in the software mode
+ * from a place by it, its disc or its sky from its ground (`atmospherePlaces.ts`).
+ */
+export interface AtmosphereFixtureCapture extends AtmosphereCheckCaptureTaken {
+  readonly kind: "fixture";
+  /** The fixture's designation (`TEST EARTH`). */
+  readonly designation: string;
+  /**
+   * The camera's distance from the fixture's centre as the run flew it, m, dead-reckoned from the
+   * scene's geometry, the free camera's rate and the primary's frames; placed, in the software
+   * mode, as the label block's `POSITION` line read it.
+   */
+  readonly rangeM: number;
+  /** The phase angle at the fixture between the star and the camera as flown or placed, deg. */
+  readonly phaseDeg: number;
+}
+
+/** The capture of the moonlit night, the seat's look at `TEST MOON`. */
+export interface AtmosphereNightCapture extends AtmosphereCheckCaptureTaken {
+  readonly kind: "night";
+}
+
+/**
+ * One capture of the atmosphere run (plan R08, R08.T10.b): a fixture seen from a few radii, or the
+ * moonlit night from the seat, with what the primary's label block said as it was taken.
+ */
+export type AtmosphereCheckCapture = AtmosphereFixtureCapture | AtmosphereNightCapture;
+
+/**
+ * One stage of the atmosphere run's flight as flown (plan R08, R08.T10.b): a hold of `W` along its
+ * leg's line, with the rate it was flown at and how far it was reckoned to fly.
+ */
+export interface AtmosphereCheckStage {
+  /** Its leg's target, which the camera looked at: a fixture, or `TEST MOON` for the climb. */
+  readonly target: string;
+  /** Its place in its leg, from 1. */
+  readonly stage: number;
+  /** The free camera's rate step as the `CAMERA` line read it back once set. */
+  readonly rateStep: number;
+  /**
+   * The distance asked of it, m: from where the camera was reckoned to stand to its end, ahead
+   * along the line of sight (`W`), or below zero back along it (`S`).
+   */
+  readonly askedM: number;
+  /** The hold planned for that distance at that rate, ms. */
+  readonly holdMs: number;
+  /** The hold as the primary's frames show it, from the press's frame to the release's, ms. */
+  readonly heldMs: number;
+  /**
+   * The longest of the primary's steps over the hold, ms, uncapped: a stalled frame, whose step
+   * the free camera caps at `MAX_FREE_STEP_S` and the release waits out.
+   */
+  readonly longestStepMs: number;
+  /** How far it flew as reckoned, m: the rate times the hold as held, below zero back. */
+  readonly flownM: number;
+  /**
+   * How far short of the target's centre, along the leg's line, the camera was reckoned to stand
+   * after it, m: below zero past the centre.
+   */
+  readonly shortOfCentreM: number;
+}
+
+/** What the atmosphere run's renderer reports at the end of a run, for its results file. */
+export interface AtmosphereCheckRecord {
+  /** The pass timer's kind, as its reports gave it (`absent` when none arrived). */
+  readonly timer: SpikePassTimer;
+  readonly devicePixelRatio: number;
+  /** The primary's canvas as the run ended, px (the presented size). */
+  readonly canvas: ViewsCheckCanvas;
+  /**
+   * From the scene's choice to its fixtures' media built and no `ATMOSPHERE: PENDING` standing on
+   * the primary's label block, ms.
+   */
+  readonly mediaReadyMs: number;
+  /** The captures, in the order taken. */
+  readonly captures: ReadonlyArray<AtmosphereCheckCapture>;
+  /** The flight's stages, in the order flown, the climb's first; none where the run was placed. */
+  readonly stages: ReadonlyArray<AtmosphereCheckStage>;
+  /** The engine's faults over the run, each as a line, as T20's record gives them. */
+  readonly faults: ReadonlyArray<string>;
+}
+
+/**
+ * The inspection run's profiled windows (the owner's report, 2026-11-01): from orbit, as the first
+ * capture is taken, closed in, as the close capture is, and low over the ground, where the shadow
+ * cascades draw (main's ask, 2026-11-01).
+ */
+export type InspectionTimingWindowName = "orbit" | "close" | "low";
+
+/**
+ * The primary's terrain's cluster counters as a profiled window ended (plan R14, R14.T1.b; with
+ * R14.T3.d's two rasters, the lit pass's two passes), of the inspected body's lit pass: each pass of
+ * the cull by its name (`lit`, `lit late`, `overlay depth`, the cascades'), its clusters and triangles
+ * drawn.
+ */
+export interface InspectionTimingClusters {
+  readonly passes: ReadonlyArray<{
+    readonly label: string;
+    readonly clusters: number;
+    readonly triangles: number;
+  }>;
+}
+
+/** One pass label's GPU time in a profiled window. */
+export interface InspectionTimingPass {
+  /**
+   * The pass's label, as R01's pass timer reports it (`sky`, `atmosphere view`, `tonemap`), and a
+   * label a frame repeats numbered in its order from the second (`atmosphere view #2`, the
+   * atmosphere's sky view, aerial perspective and ray march being one label's dispatches, and the
+   * shadow cascades' four `terrain shadows`).
+   */
+  readonly label: string;
+  /**
+   * Its time in each frame of the window whose passes were all timed, ms, in the frames' order,
+   * every pass of the label in the frame summed and 0 in a frame that has none.
+   */
+  readonly ms: ReadonlyArray<number>;
+  /**
+   * Where the label's passes are a kernel's dispatches, the kernels' names, each once, and their
+   * workgroups in each of the same frames, 0 where none was dispatched (an indirect dispatch's
+   * count is the GPU's and is not counted); none, and an empty list, for a render pass.
+   */
+  readonly kernels: ReadonlyArray<string>;
+  readonly workgroups: ReadonlyArray<number>;
+}
+
+/** Bytes a count of the engine's writes or allocations came to. */
+export interface InspectionTimingBytes {
+  readonly count: number;
+  readonly bytes: number;
+}
+
+/** One resource's writes over a profiled window. */
+export interface InspectionTimingUpload extends InspectionTimingBytes {
+  /** The buffer's or texture's name, as made (`view star sprites`, `view:hdr`). */
+  readonly name: string;
+}
+
+/**
+ * What the engine wrote to the GPU and made or released over a profiled window (the owner's
+ * report, 2026-11-01): every `writeBuffer` and `writeTexture`, the buffers and textures made and
+ * those released, and the writes by resource, the most bytes first.
+ */
+export interface InspectionTimingMemory {
+  readonly uploaded: InspectionTimingBytes;
+  readonly created: InspectionTimingBytes;
+  readonly destroyed: InspectionTimingBytes;
+  /** The resources written most over the window, by bytes, at most ten. */
+  readonly uploads: ReadonlyArray<InspectionTimingUpload>;
+}
+
+/**
+ * One WebGPU call's count under one pass label over a profiled window (`--count-gpu-calls`; plan
+ * R14, the owner's Mac): the calls made in the pass, or for it (a write, a bind group or a view
+ * made before it began), its encoder's own and its submission.
+ */
+export interface InspectionGpuCall {
+  /** The pass's label, or the encoder's (`pass times`), or `(after the last pass)`. */
+  readonly label: string;
+  /** The call, `<object>.<method>`: `render pass.setBindGroup`, `queue.writeBuffer`. */
+  readonly call: string;
+  readonly count: number;
+  /**
+   * The bytes its calls wrote, for `queue.writeBuffer` and `queue.writeTexture`, and for
+   * `device.createBuffer` the staged writes' staging buffers' (a buffer mapped for writing at its
+   * creation); 0 otherwise.
+   */
+  readonly bytes: number;
+}
+
+/** Where an attachment's texels come from as a render pass begins (`--count-gpu-calls`). */
+export type InspectionAttachmentLoad = "load" | "clear" | "read-only";
+
+/** What becomes of an attachment's texels as a render pass ends (`--count-gpu-calls`). */
+export type InspectionAttachmentStore = "store" | "discard" | "read-only" | "resolve";
+
+/** Which of a render pass's attachments: a colour target, its resolve target, or a depth aspect. */
+export type InspectionAttachmentSlot =
+  `colour ${number}` | `resolve ${number}` | "depth" | "stencil";
+
+/** An attachment's view: its format, its mip level's size, px, and its texture's samples. */
+export interface InspectionAttachmentView {
+  readonly format: string;
+  readonly widthPx: number;
+  readonly heightPx: number;
+  readonly sampleCount: number;
+}
+
+/**
+ * One kind of attachment a pass label's render passes took over a profiled window
+ * (`--count-gpu-calls`; plan R14, R14.T2.e, the owner's Mac): its aspect, view and operations, the
+ * passes that took it so, and the bytes they moved between memory and a tile-based GPU's tile
+ * memory where no tile is kept from one pass to the next.
+ */
+export interface InspectionGpuAttachment {
+  /** The pass's label, or its encoder's for an unlabelled pass. */
+  readonly label: string;
+  readonly attachment: InspectionAttachmentSlot;
+  /** Its view, or `null` for a view the counter did not see made. */
+  readonly view: InspectionAttachmentView | null;
+  /** Its operations, `null` where the pass gave none (a stencil aspect left alone). */
+  readonly loadOp: InspectionAttachmentLoad | null;
+  readonly storeOp: InspectionAttachmentStore | null;
+  /** The render passes that took it so. */
+  readonly passes: number;
+  /**
+   * The bytes those passes read into tiles (a load, or a read-only aspect) and wrote back (a store
+   * or a resolve), its texels' own size, a clear and a discard none; `null` where its format or
+   * size is not known.
+   */
+  readonly bytesLoaded: number | null;
+  readonly bytesStored: number | null;
+}
+
+/**
+ * The atmosphere's read a body drew (plan R08): the thin read, the thick table's (R08.T14.c,
+ * every world with air since its correction was routed), over a cloud deck (R08.T15.a.2), or
+ * beneath one (R08.T15.b.2).
+ */
+export type InspectionAtmosphereReadName = "thin" | "thick" | "deck" | "beneath a deck";
+
+/**
+ * One body's atmosphere as a profiled window drew it, from the kernels its frames dispatched: its
+ * read, whether by the kernels' thermal forms (a self-luminous body, R08.T18.b), and in how many
+ * of the window's frames.
+ */
+export interface InspectionAtmosphereRead {
+  /** The body with air, numbered from 1 in the order its tables were first dispatched against. */
+  readonly air: number;
+  readonly read: InspectionAtmosphereReadName;
+  readonly thermal: boolean;
+  /** The window's frames that drew it by this read. */
+  readonly frames: number;
+  /** The kernels its frames dispatched by it, each once, in the order first dispatched. */
+  readonly kernels: ReadonlyArray<string>;
+}
+
+/**
+ * React's commits over a profiled window of the inspection run (lane perf-render-thread-2;
+ * `reactCommits.ts`): how many, and each component's renders.
+ */
+export interface InspectionReactCommits {
+  readonly commits: number;
+  /** Every component's renders over the window, mounts among them. */
+  readonly renders: number;
+  /** The components that rendered, the most renders first, at most 80. */
+  readonly components: ReadonlyArray<InspectionReactComponent>;
+}
+
+/** One component's renders over a profiled window, by what changed for each. */
+export interface InspectionReactComponent {
+  /** Its function's or class's name, its `displayName` first, or `(anonymous)`. */
+  readonly name: string;
+  /** Its renders, its mounts among them. */
+  readonly renders: number;
+  readonly mounts: number;
+  /**
+   * Of its renders after a mount, those with every prop and state hook as its last render's had
+   * them: rendered for its parent's render, or for a context.
+   */
+  readonly unchanged: number;
+  /** Of its renders after a mount, those with a state hook's value changed. */
+  readonly stateChanged: number;
+  /** The props that changed, with the renders each changed in, the most first, at most 6. */
+  readonly propsChanged: ReadonlyArray<{ readonly prop: string; readonly renders: number }>;
+}
+
+/** One task of the page's main thread of 50 ms or more (lane perf-page-long-tasks). */
+export interface InspectionLongTask {
+  /** Its start on the page's clock, `performance.now()` ms. */
+  readonly startMs: number;
+  readonly durationMs: number;
+  /**
+   * Its frame's rendering update (the animation frame's callbacks, the draw loop's among them,
+   * then style, layout and paint) where that began within it, ms; else 0.
+   */
+  readonly renderMs: number;
+}
+
+/**
+ * The page's long tasks over the inspection run (`--timing`; lane perf-page-long-tasks), from
+ * Chromium's `longtask` entries, each with its `long-animation-frame` entry's rendering update.
+ */
+export interface InspectionLongTasks {
+  /** Whether the page reported each kind of entry. */
+  readonly observed: { readonly longtask: boolean; readonly longAnimationFrame: boolean };
+  /**
+   * From when they were observed to when they were taken, on the page's clock, ms; the entries
+   * buffered before the observer started are among them.
+   */
+  readonly fromMs: number;
+  readonly toMs: number;
+  /** Every task of 50 ms or more, in order. */
+  readonly tasks: ReadonlyArray<InspectionLongTask>;
+}
+
+/** What the renderer measured over one profiled window of the inspection run. */
+export interface InspectionTimingWindow {
+  readonly name: InspectionTimingWindowName;
+  /** The window on the page's clock, `performance.now()` ms, which the trace is clipped to. */
+  readonly startMs: number;
+  readonly endMs: number;
+  /** The primary's canvas as the window ended, px (the presented size). */
+  readonly canvas: ViewsCheckCanvas;
+  /** The primary's internal scale in force at the window's start, then each change in it. */
+  readonly scales: ReadonlyArray<number>;
+  /** The intervals between the primary's draws, ms. */
+  readonly intervalsMs: ReadonlyArray<number>;
+  /**
+   * The intervals between the window's animation frames, ms, whether the primary drew in them or
+   * not (R07.T19): its vsync period, by the renderer's rule.
+   */
+  readonly frameIntervalsMs: ReadonlyArray<number>;
+  /** Each animation frame's callbacks on the main thread, ms: every view's encoding among them. */
+  readonly mainThreadMs: ReadonlyArray<number>;
+  /** The primary's renders' encoding and submission in each of its draws, ms. */
+  readonly submitMs: ReadonlyArray<number>;
+  /** Each frame's GPU time, every view's and target's passes, ms, of the frames timed in full. */
+  readonly gpuMs: ReadonlyArray<number>;
+  /** The frames timed in full's passes by label, in order of first appearance. */
+  readonly passes: ReadonlyArray<InspectionTimingPass>;
+  /** Frames with a resolve whose times never arrived, left out of `gpuMs` and `passes`. */
+  readonly untimedFrames: number;
+  /** What the engine wrote to the GPU and made or released over the window. */
+  readonly memory: InspectionTimingMemory;
+  /**
+   * Every WebGPU call made over the window, by pass label and call (`--count-gpu-calls`; plan R14),
+   * or `null` on a launch that did not count them.
+   */
+  readonly gpuCalls: ReadonlyArray<InspectionGpuCall> | null;
+  /**
+   * Every render pass's attachments over the window, by pass label (`--count-gpu-calls`; plan R14,
+   * R14.T2.e), or `null` on a launch that did not count them.
+   */
+  readonly gpuAttachments: ReadonlyArray<InspectionGpuAttachment> | null;
+  /**
+   * Each body's atmosphere read over the window, from the kernels its frames dispatched, by body
+   * and read; none where no frame drew air.
+   */
+  readonly atmosphereReads: ReadonlyArray<InspectionAtmosphereRead>;
+  /**
+   * React's commits over the window (lane perf-render-thread-2), or `null` where React did not take
+   * the profile's hook as it loaded.
+   */
+  readonly react: InspectionReactCommits | null;
+  /**
+   * The primary's terrain's cluster counters as the window ended (plan R14), or `null` where its
+   * body has no lit pass or none came back.
+   */
+  readonly clusters: InspectionTimingClusters | null;
+  /**
+   * The samples a ray of the atmosphere's march takes at the sizes its air was drawn at
+   * (`TableSizes.rayMarchSamples`: the setting's, or the low setting's while `IMAGE: DETAIL LIMITED`
+   * stands), by which its time a texel is read a step: nominal, the high setting's depth steps
+   * aside.
+   */
+  readonly marchSamples: number;
+  /** The primary's `POSITION` line as the window ended, or `null`. */
+  readonly position: string | null;
+  /** The primary's statements as the window ended (`ATMOSPHERE: APPROXIMATE`, `TERRAIN: …`). */
+  readonly statements: ReadonlyArray<string>;
+  /**
+   * The far limb's census of the march the frame after the window dispatched (plan R08, R08.T8.d),
+   * or `null` where none was taken: no march, or none within the window's settling time.
+   */
+  readonly marchCensus: InspectionTimingMarchCensus | null;
+}
+
+/**
+ * A march's far-limb census (plan R08, R08.T8.d; `view/atmosphere/marchProbe.ts`'s `MarchCensus`):
+ * what each texel of its area marches as the footprint's entry point marches it, counted.
+ */
+export interface InspectionTimingMarchCensus {
+  /** The march's kernel the census was taken beside. */
+  readonly kernel: string;
+  /** The texels on the target by their footprints' node rays, 0 to 10. */
+  readonly texelsByNodes: ReadonlyArray<number>;
+  /** The texels whose footprint's blend is 1, which march no centre ray. */
+  readonly wholeMeans: number;
+  /** The texels whose centre ray meets the top's shell. */
+  readonly centresInAir: number;
+  /** The area's tiles of 8 × 8 texels, the march's workgroups, and those holding a node ray. */
+  readonly tiles: number;
+  readonly limbTiles: number;
+  /** The rays that meet the shell, and the same as each tile's lanes wait on its slowest texel. */
+  readonly rays: number;
+  readonly laneRays: number;
+}
+
+/**
+ * One asynchronous pipeline compile over the inspection run, from the device's compile budget
+ * (`compileBudget.ts`; plan R08, fix-r08-decked-air-route): a one-time cost told apart from the
+ * frames'.
+ */
+export interface InspectionTimingCompile {
+  /** The pipeline's owner: its kernel's, material's, post pass's or splat's name. */
+  readonly name: string;
+  /** `draw`, a pipeline a draw was waiting for; `ahead`, one made ahead of its first draw. */
+  readonly lane: "draw" | "ahead";
+  /** When its pipeline was ready, or it failed, on the page's clock (`performance.now()`), ms. */
+  readonly readyAtMs: number;
+  /** Its wait for a place in the budget, ms. */
+  readonly waitedMs: number;
+  /** From its create call to its pipeline's being ready, wall-clock ms. */
+  readonly ms: number;
+}
+
+/**
+ * One of the primary's first frames, apart from the windows' steady frames (plan R08,
+ * fix-r08-decked-air-route): its first draw, or its first that drew a body's air.
+ */
+export interface InspectionTimingFirstFrame {
+  readonly kind: "drawn" | "air";
+  /** The animation frame's timestamp, on the page's clock, ms. */
+  readonly atMs: number;
+  /** From the primary's draw before it, ms, or `null` for its first draw. */
+  readonly intervalMs: number | null;
+  /** The animation frame's callbacks on the main thread, ms. */
+  readonly mainThreadMs: number;
+  /** The primary's renders' encoding and submission in it, ms. */
+  readonly submitMs: number;
+  /** Its GPU time, every view's and target's passes, ms, or `null` where its times never came. */
+  readonly gpuMs: number | null;
+}
+
+/** What the inspection run's renderer reports of its frame profile, for its timing file. */
+export interface InspectionTimingRecord {
+  /** The pass timer's kind, as its reports gave it (`absent` when none arrived). */
+  readonly timer: SpikePassTimer;
+  readonly devicePixelRatio: number;
+  /** The windows, in the order measured. */
+  readonly windows: ReadonlyArray<InspectionTimingWindow>;
+  /**
+   * The page's long tasks over the run (lane perf-page-long-tasks), or `null` where none were
+   * recorded.
+   */
+  readonly longTasks: InspectionLongTasks | null;
+  /** When `VIEW`'s engine was made, on the page's clock, ms, or `null` where none was. */
+  readonly engineAtMs: number | null;
+  /** Every pipeline compile the device's budget ran over the run, in the order they settled. */
+  readonly compiles: ReadonlyArray<InspectionTimingCompile>;
+  /** The primary's first draw, then its first that drew a body's air, where each was drawn. */
+  readonly firstFrames: ReadonlyArray<InspectionTimingFirstFrame>;
+}
+
+/**
  * The views check's narrow functions (plan R07, T20), present only when the client was launched
  * with `--views-check`; the main process checks each call's sender and arguments.
  */
 export interface ViewsCheckApi {
   readonly launch: ViewsCheckLaunch;
-  /** Starts a phase's trace window. */
-  startPhase(name: ViewsCheckPhaseName): Promise<void>;
+  /**
+   * Starts a phase's trace window; a terrain run's phases (R10.T16.d) take no trace. The main
+   * process refuses a phase that is not of the launch's run.
+   */
+  startPhase(name: CheckPhaseName): Promise<void>;
   /**
    * Ends it: stops the trace, reduces it over the measured `window` (marked in the trace by a
    * `performance.measure` span) and saves a capture of the page.
    */
-  endPhase(name: ViewsCheckPhaseName, window: ViewsCheckWindow): Promise<void>;
+  endPhase(name: CheckPhaseName, window: ViewsCheckWindow): Promise<void>;
   /** Asks the person at a shown run whether every view is the right way up, and keeps the answer. */
   askRightWayUp(): Promise<void>;
   /** Writes the results file and its summary from the renderer's record. */
   writeResults(record: ViewsCheckRecord): Promise<SpikeResultsPaths>;
-  /** Ends the run, and the app with it: 0 for `pass`, 1 for `fail`. */
+  /**
+   * Writes a terrain run's results file and its summary (R10.T16.d) from its renderer's record;
+   * the main process judges it, and a run whose checks fail ends with 1 whatever its end says.
+   */
+  writeTerrainResults(record: TerrainCheckRecord): Promise<SpikeResultsPaths>;
+  /**
+   * Hands a terrain run's phase to the main process as it ends, which writes the run's finished
+   * phases so far, unjudged, so that a run stopped part-way keeps them (R14's Mac measurements);
+   * refused on any other launch. The results file takes their place as the run ends.
+   */
+  writeTerrainPhase(update: TerrainCheckPhaseUpdate): Promise<SpikeResultsPaths>;
+  /**
+   * Writes a hand-over check's results file and its summary (R10.T10.g) from its renderer's
+   * record, refused on any other launch; the main process judges it, and a run whose verdict fails
+   * ends with 1 whatever its end says.
+   */
+  writeHandoverResults(record: HandoverCheckRecord): Promise<SpikeResultsPaths>;
+  /**
+   * Writes an atmosphere run's results file and its summary (plan R08, R08.T10.b) from its
+   * renderer's record, refused on any other launch; the main process judges it, and a run whose
+   * captures fail ends with 1 whatever its end says.
+   */
+  writeAtmosphereResults(record: AtmosphereCheckRecord): Promise<SpikeResultsPaths>;
+  /**
+   * The whole body's field as the native tool wrote it (`ViewsCheckLaunch.wholeField`), its text in
+   * the terrain golden's format, read by the main process.
+   *
+   * @throws Error (a rejection) on any launch but a `--terrain --whole` one, where the file cannot
+   *   be read or is no terrain golden, each naming the remedy, or where the answer is no text.
+   */
+  wholeField(): Promise<string>;
+  /**
+   * Starts a profiled window of the inspection run's frame (`--timing`; the owner's report): a
+   * trace with V8's CPU profiler on every thread. Refused on any other launch, and while another
+   * window records.
+   */
+  startProfile(name: InspectionTimingWindowName): Promise<void>;
+  /**
+   * Ends it: stops the trace and reduces it over the measured `window` (marked in the trace by a
+   * `performance.measure` span) to each thread's busy time, its GC and its hottest functions.
+   */
+  endProfile(name: InspectionTimingWindowName, window: ViewsCheckWindow): Promise<void>;
+  /**
+   * Writes the inspection run's timing file and its summary from its renderer's record, with the
+   * windows' traces, under `target/views-check/timing/`; refused on any launch but an
+   * `--inspection --timing` one, which ends with 1 unless it was written.
+   */
+  writeTimingResults(record: InspectionTimingRecord): Promise<SpikeResultsPaths>;
+  /**
+   * Saves a picture of the page under the run's captures, named for the phase recording and
+   * `label` (lower case letters, digits and hyphens, at most 48): a terrain run's look at a moment
+   * of its script, for the looks by eye (R10.T16.d), or an atmosphere run's fixture or night
+   * (R08.T10.b).
+   */
+  capture(label: string): Promise<void>;
+  /**
+   * Ends the run, and the app with it: 0 for `pass`, 1 for `fail` (and for a terrain run whose
+   * results fail).
+   */
   end(outcome: SpikeEnd): Promise<void>;
 }

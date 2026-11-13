@@ -1,7 +1,7 @@
 import { add, scale, type Vec3 } from "../../geometry/vec3";
 import { type KeplerOrbit, orbitPolyline } from "../../lib/orbit";
 import type { ProjectionCamera, Viewport } from "../camera/projection";
-import { type Polyline, sampleCurve } from "./curve";
+import { distanceSagWithin, type Polyline, sampleCurve } from "./curve";
 
 /**
  * An orbit's ellipse from its focus as a function of the eccentric anomaly E, m in the axes of the
@@ -32,7 +32,9 @@ export function ellipseOf(orbit: KeplerOrbit): (eccentricAnomalyRad: number) => 
 /**
  * An orbit's path as the wireframe draws it, sampled by screen-space error rather than a fixed count
  * (plan R02, R02.T12.b): each chord leaves a sagitta under 0.25 px, so a far orbit takes few points
- * and a near one many.
+ * and a near one many, and stands within `CURVE_DEPTH_SAG_SHARE` of the orbit's distance along the
+ * view, so that an orbit seen from near its focus, drawn nearly straight, passes behind its planet
+ * (R08.T17).
  *
  * @param parentM - The orbit's focus (its parent's centre) from the camera, m.
  */
@@ -48,6 +50,7 @@ export function orbitPath(
       point: (eccentricAnomalyRad) => add(parentM, ellipse(eccentricAnomalyRad)),
       windows: [[0, 2 * Math.PI]],
       initialSpans: 16,
+      depthSagWithin: distanceSagWithin,
     },
     camera,
     viewport,

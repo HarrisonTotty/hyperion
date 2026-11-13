@@ -76,6 +76,7 @@ describe("glareSourceVeil", () => {
       direction: { x: 0, y: 0, z: -1 },
       angularRadiusRad: 0.267 * DEG,
       excessLuminance: [3e9, 2e9, 1e9],
+      luminance: [3e9, 2e9, 1e9],
     };
     const omega = glareSourceSolidAngleSr(source);
     for (const role of ["eye", "camera"] as const) {
@@ -112,6 +113,7 @@ describe("a resolved source's veil", () => {
     direction: { x: 0, y: 0, z: -1 },
     angularRadiusRad: 0.267 * DEG,
     excessLuminance: [1, 1, 1],
+    luminance: [1, 1, 1],
   };
 
   it("is within +15% of a quadrature over the disc just outside the limb", () => {

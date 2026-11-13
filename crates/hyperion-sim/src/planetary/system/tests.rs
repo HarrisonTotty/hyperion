@@ -4,6 +4,7 @@
 //! galaxy at the solar circle (P14.T1.d), whose contexts carry plan 11's companions and plan 06's
 //! models; the synthetic hosts are the context builder's.
 
+use core::f64::consts::PI;
 use std::sync::OnceLock;
 
 use hyperion_testkit::float::assert_same_bits;
@@ -15,18 +16,22 @@ use crate::id::Layer;
 use crate::orbit::Eccentricity;
 use crate::planetary::architecture::HostMultiplicity;
 use crate::planetary::architecture::template::EARTH_MASSES_PER_JUPITER_MASS;
+use crate::planetary::derive::atmosphere::{Gas, SurfaceState};
 use crate::planetary::derive::{PlanetClass, habitable_zone};
 use crate::planetary::fate::DestructionCause;
+use crate::planetary::hooks::figures::{Crust, LEFTOVER_DENSITY, TectonicRegime};
 use crate::planetary::index::{BodySlot, BodySub};
 use crate::planetary::params::{FLATTENING_CAP, HILL_STABLE_GAP};
 use crate::planetary::placement::mutual_hill_radius;
-use crate::planetary::record::{DetailLevel, MoonOrigin, Population, RecordSection, SectionState};
-use crate::planetary::satellites::generate_satellites;
+use crate::planetary::record::{
+    DetailLevel, Modelled, MoonOrigin, Population, RecordSection, SectionState,
+};
+use crate::planetary::satellites::{MoonPlane, generate_satellites};
 use crate::planetary::testing::{SampleFilter, sample_contexts, synthetic_binary, synthetic_star};
 use crate::stellar::Phase;
 use crate::stellar::multiplicity::star_positions_at;
 use crate::time::{CLOCK_WINDOW_H, ClockWindow, Span};
-use crate::units::{AstronomicalUnits, Dex, Kelvin, Years};
+use crate::units::{AstronomicalUnits, Dex, Kelvin, Pascals, Years};
 
 /// The universe every test generates in.
 pub(crate) const SEED: Seed = Seed::new(0x5eed_0014_0030);
@@ -56,6 +61,35 @@ pub(crate) fn whole() -> &'static [(SystemContext, PlanetarySystem)] {
     static SYSTEMS: OnceLock<Vec<(SystemContext, PlanetarySystem)>> = OnceLock::new();
     SYSTEMS.get_or_init(|| {
         sample()
+            .iter()
+            .map(|ctx| (ctx.clone(), generate(SEED, ctx)))
+            .collect()
+    })
+}
+
+/// How many of the sample's systems the fast tier's whole-system property tests walk, the first in
+/// the sample's order: P14.T54.b.l's §C.7 split (decision-p14-t54a-passes §C.7, pre-authorised for
+/// 24 by decision-24-cost D5), sized on 24's times, where a record costs several times 23's. Each
+/// such test has an ignored twin over [`whole_rest`], so that the two walk disjoint chunks of the
+/// sample, each with the full per-record check.
+const FAST_WHOLE: usize = 200;
+
+/// The first [`FAST_WHOLE`] of [`whole`]'s systems, generated once: the fast tier's chunk.
+pub(crate) fn whole_fast() -> &'static [(SystemContext, PlanetarySystem)] {
+    static SYSTEMS: OnceLock<Vec<(SystemContext, PlanetarySystem)>> = OnceLock::new();
+    SYSTEMS.get_or_init(|| {
+        sample()[..FAST_WHOLE]
+            .iter()
+            .map(|ctx| (ctx.clone(), generate(SEED, ctx)))
+            .collect()
+    })
+}
+
+/// The rest of [`whole`]'s systems, after [`whole_fast`]'s, generated once: the slow tier's chunk.
+pub(crate) fn whole_rest() -> &'static [(SystemContext, PlanetarySystem)] {
+    static SYSTEMS: OnceLock<Vec<(SystemContext, PlanetarySystem)>> = OnceLock::new();
+    SYSTEMS.get_or_init(|| {
+        sample()[FAST_WHOLE..]
             .iter()
             .map(|ctx| (ctx.clone(), generate(SEED, ctx)))
             .collect()
@@ -121,12 +155,14 @@ fn generate_planets_is_generate_with_its_satellites_removed() {
     for ((ctx, planets), (_, whole)) in generated().iter().zip(whole()) {
         assert_eq!(planets.zones(), whole.zones(), "{:?}", ctx.id());
         assert_eq!(planets.hosts(), whole.hosts());
-        // `generate` attaches the held rotation laws after phase D, and `generate_planets`
-        // holds none (P14.T46.b); every other part of a planet is the same.
+        // `generate` attaches the held rotation laws (P14.T46.b) and the satellites' Laplace frames
+        // (P14.T56.a) after phase D, and `generate_planets` holds neither; every other part of a
+        // planet is the same.
         let kept: Vec<Body> = whole
             .planets()
             .map(|body| Body {
                 rotation: None,
+                laplace: None,
                 ..body.clone()
             })
             .collect();
@@ -179,6 +215,42 @@ fn generate_satellites_is_each_planet_s_children_in_generate() {
     assert!(compared > 1_000, "{compared} planets");
 }
 
+/// P14.T55.j.a: under every 27 hold, a planet's satellites alone still equal its children in
+/// `generate`, and each regular moon's record at the epoch reads its satellite's damped
+/// eccentricity to the bit, the one its positions, events and tides read. Recorded: the moons
+/// circularised.
+#[test]
+fn under_every_27_hold_a_regular_moon_s_record_reads_its_damped_eccentricity() {
+    use crate::planetary::satellites::SatelliteMoon;
+    let contexts = sample_contexts(150, Seed::new(0x5a7e_1117), SampleFilter::ALL).unwrap();
+    let (mut moons, mut circular) = (0_u32, 0_u32);
+    {
+        for ctx in &contexts {
+            let system = generate(SEED, ctx);
+            for planet in system.planets() {
+                let found = system.satellites_of(planet.index());
+                let belt = system.nearest_belt(planet.index());
+                assert_eq!(generate_satellites(SEED, ctx, planet, belt), found);
+                let regular = found.moons().iter().filter_map(|moon| match moon.moon() {
+                    SatelliteMoon::Regular(regular) => Some((moon.index(), *regular.orbit())),
+                    SatelliteMoon::GiantImpact(_) | SatelliteMoon::Captured(_) => None,
+                });
+                for (index, orbit) in regular {
+                    let e = orbit.eccentricity().value();
+                    let record = system.body_at(ctx, index, UniverseTime::EPOCH).unwrap();
+                    if let Section::Ok(read) = record.orbit() {
+                        assert_same_bits(read.elements().eccentricity().value(), e);
+                    }
+                    moons += 1;
+                    circular += u32::from(e == 0.0);
+                }
+            }
+        }
+    };
+    eprintln!("{moons} regular moons under every 27 hold: {circular} circular");
+    assert!(moons > 20, "{moons}");
+}
+
 /// P14.T30.a with ruling 95.1: a belt member's satellites alone equal its children in `generate`,
 /// its one possible moon at `Member(0x80 + k)`, whose index names the member as its parent.
 #[test]
@@ -190,7 +262,7 @@ fn generate_satellites_is_each_member_s_children_in_generate() {
         for member in system.bodies().iter().filter(|b| b.member_of().is_some()) {
             let alone = generate_satellites(SEED, ctx, member, None);
             assert_eq!(alone, system.satellites_of(member.index()));
-            assert!(alone.rings().is_empty());
+            assert_eq!(alone.rings(), []);
             assert!(alone.moons().len() <= 1);
             let children: Vec<BodyIndex> =
                 system.children(member.index()).map(Body::index).collect();
@@ -319,7 +391,7 @@ fn each_host_is_the_chain_of_its_stages() {
     for (ctx, system) in generated().iter().take(150) {
         let (seed, id) = (SEED, ctx.id());
         let stars = ctx.zone_stars();
-        let hierarchy = ctx.hierarchy();
+        let hierarchy = ctx.hierarchy().unwrap();
         let under = members_under(hierarchy);
         let mut slot = FIRST_PLANET_SLOT;
         for (zone, host) in system.zones().iter().zip(system.hosts()) {
@@ -474,6 +546,7 @@ fn an_unborn_system_s_bodies_are_all_not_yet_formed() {
 
 #[test]
 fn a_snapshot_is_body_at_body_by_body() {
+    let (mut moons, mut rings) = (0_u32, 0_u32);
     for (ctx, system) in whole().iter().take(80) {
         for t in window() {
             let snapshot = system.snapshot_at(ctx, t);
@@ -481,7 +554,13 @@ fn a_snapshot_is_body_at_body_by_body() {
             assert_eq!(snapshot.time(), t);
             assert_eq!(snapshot.bodies().len(), system.indices().len());
             for (record, index) in snapshot.bodies().iter().zip(system.indices()) {
-                assert_eq!(record, &system.body_at(ctx, index, t).unwrap());
+                let kind = record.identity().kind();
+                moons += u32::from(matches!(kind, BodyKind::Moon(_)));
+                rings += u32::from(matches!(kind, BodyKind::Ring));
+                let alone = system.body_at(ctx, index, t).unwrap();
+                assert_eq!(record, &alone);
+                // Bit for bit, signed zeros included: the surface section's floats with the rest.
+                assert_eq!(format!("{record:?}"), format!("{alone:?}"));
                 assert_eq!(
                     record.position(),
                     system.position_at(ctx, index, t).unwrap()
@@ -489,13 +568,32 @@ fn a_snapshot_is_body_at_body_by_body() {
             }
         }
     }
+    // The satellites' checks over whole systems read their records from snapshots
+    // (`tests/planetary_properties.rs`), so the agreement holds for moons and rings too.
+    assert!(moons > 0 && rings > 0, "{moons} moons, {rings} rings");
+}
+
+/// P14.T28.a's and T28.d's disc bodies, from generator version 26: populations with no orbit
+/// and no position, their extent while present.
+fn assert_disc_record(record: &BodyRecord) {
+    assert_eq!(record.position(), None);
+    assert_eq!(
+        record.section_state(RecordSection::Orbit),
+        SectionState::NotApplicable
+    );
+    let extent = if record.identity().state() == BodyState::Present {
+        SectionState::Ok
+    } else {
+        SectionState::NotApplicable
+    };
+    assert_eq!(record.section_state(RecordSection::Population), extent);
 }
 
 /// The section states (ruling 34): what is not computed says so, what does not apply to a kind
 /// is not applicable, and phase D's sections are `Ok` where modelled (P14.T34).
 #[test]
 fn a_record_tags_what_the_generator_does_not_compute() {
-    let (mut present, mut giants, mut moons, mut rings) = (0, 0, 0, 0);
+    let (mut present, mut giants, mut moons, mut rings, mut dwarfs) = (0, 0, 0, 0, 0);
     for (ctx, system) in whole().iter().take(120) {
         let snapshot = system.snapshot_at(ctx, UniverseTime::EPOCH);
         let belts: Vec<BodyIndex> = system.belts().iter().map(Belt::index).collect();
@@ -520,18 +618,9 @@ fn a_record_tags_what_the_generator_does_not_compute() {
                         record.section_state(RecordSection::Population),
                         SectionState::NotApplicable
                     );
-                    assert_eq!(
-                        record.section_state(RecordSection::Hooks),
-                        SectionState::NotModelled
-                    );
                     if identity.state() == BodyState::Present {
                         present += 1;
-                        let bulk = record.bulk().ok().unwrap();
-                        let surface = record.section_state(RecordSection::Surface);
-                        if bulk.class().has_surface() {
-                            assert_eq!(surface, SectionState::NotModelled);
-                        } else {
-                            assert_eq!(surface, SectionState::NotApplicable);
+                        if !assert_surface_or_envelope(record) {
                             giants += 1;
                         }
                         assert!(record.position().is_some());
@@ -544,6 +633,12 @@ fn a_record_tags_what_the_generator_does_not_compute() {
                     if identity.state() == BodyState::Present {
                         assert_eq!(record.section_state(RecordSection::Bulk), SectionState::Ok);
                         assert_eq!(record.section_state(RecordSection::Orbit), SectionState::Ok);
+                        assert!(assert_surface_or_envelope(record), "{:?}", record.index());
+                    } else {
+                        assert_eq!(
+                            record.section_state(RecordSection::Envelope),
+                            SectionState::NotApplicable
+                        );
                     }
                 }
                 BodyKind::Ring => {
@@ -575,14 +670,908 @@ fn a_record_tags_what_the_generator_does_not_compute() {
                         record.section_state(RecordSection::Rings),
                         SectionState::NotModelled
                     );
+                    if identity.state() == BodyState::Present {
+                        dwarfs += 1;
+                        assert!(assert_surface_or_envelope(record), "{:?}", record.index());
+                    }
                 }
-                other => panic!("{other:?} in a snapshot"),
+                BodyKind::ProtoplanetaryDisc | BodyKind::DebrisDisc => assert_disc_record(record),
+                BodyKind::Unresolved => panic!("an unresolved contact in a full snapshot"),
             }
         }
     }
     assert!(
-        present > 100 && giants > 5 && moons > 20 && rings > 5,
-        "{present} present, {giants} giants, {moons} moons, {rings} rings"
+        present > 100 && giants > 5 && moons > 20 && rings > 5 && dwarfs > 5,
+        "{present} present, {giants} giants, {moons} moons, {rings} rings, {dwarfs} dwarf planets"
+    );
+}
+
+/// P14.T48.e: a record's surface is rebuilt from its parts bit for bit, its regime the
+/// conditions' own and its condensates (P14.T54.a) the published ones it was built with, and
+/// `Surface::new` refuses the gas-envelope state and conditions before their second stage, which
+/// have no regime.
+///
+/// From generator version 24 (P14.T53.b part 2), the invariant `CoarseInputs::for_body` relies
+/// on, that no `Ok` surface lies where there is none (decision-p14-t35e-wire §2.4), also holds
+/// under a supercritical envelope: over the same systems and
+/// the census body's ([`SUPERCRITICAL_METHANE_BODY`]) generated afresh, no `Ok` surface lies under
+/// one, and every solid class whose surface is not applicable lies under one, its envelope not
+/// modelled ([`assert_envelope_tags`]).
+#[test]
+fn a_surface_holds_a_solid_state_and_its_conditions_regime() {
+    let mut checked = 0;
+    for (ctx, system) in whole().iter().take(10) {
+        for record in system.snapshot_at(ctx, UniverseTime::EPOCH).bodies() {
+            let Section::Ok(surface) = record.surface() else {
+                continue;
+            };
+            let (state, material) = (surface.state(), surface.material());
+            let (conditions, figures) = (surface.conditions().clone(), surface.figures().clone());
+            let condensates = surface.condensates();
+            assert_ne!(state, SurfaceState::GasEnvelope);
+            assert_ne!(state, SurfaceState::SteamEnvelope);
+            assert_eq!(
+                surface.conditions().climate_regime().as_ref(),
+                Some(surface.climate_regime())
+            );
+            // With the basis its record built it on (rule (f)), and its crust (P14.T54.a's C3).
+            let rebuilt = Surface::new(
+                state,
+                material,
+                conditions.clone(),
+                figures.clone(),
+                condensates.clone(),
+            )
+            .map(|rebuilt| rebuilt.with_basis(*surface.basis().unwrap()))
+            .map(|rebuilt| rebuilt.with_crust(surface.crust().ok().map(|crust| **crust)))
+            // And its air's vertical structure and aerosols and its modifiers (P14.T54.b), and its
+            // taxonomic class (P14.T51.e), each on the record from 24.
+            .map(|rebuilt| rebuilt.with_taxonomic_class(surface.taxonomic_class()))
+            .map(|rebuilt| {
+                rebuilt.with_vertical_structure(match surface.vertical_structure() {
+                    Modelled::Ok(structure) => Modelled::Ok(structure.cloned()),
+                    Modelled::NotModelled => Modelled::NotModelled,
+                })
+            })
+            .map(|rebuilt| {
+                rebuilt.with_aerosols(match surface.aerosols() {
+                    Modelled::Ok(aerosols) => Modelled::Ok(aerosols.clone()),
+                    Modelled::NotModelled => Modelled::NotModelled,
+                })
+            })
+            .map(|rebuilt| {
+                rebuilt.with_modifiers(match surface.modifiers() {
+                    Modelled::Ok(modifiers) => Modelled::Ok(modifiers.clone()),
+                    Modelled::NotModelled => Modelled::NotModelled,
+                })
+            });
+            assert_eq!(rebuilt.as_ref(), Some(surface));
+            for refused in [SurfaceState::GasEnvelope, SurfaceState::SteamEnvelope] {
+                assert_eq!(
+                    Surface::new(
+                        refused,
+                        material,
+                        conditions.clone(),
+                        figures.clone(),
+                        condensates.clone(),
+                    ),
+                    None
+                );
+            }
+            assert_eq!(
+                Surface::new(
+                    state,
+                    material,
+                    conditions.without_climate(),
+                    figures,
+                    condensates.clone()
+                ),
+                None
+            );
+            checked += 1;
+        }
+    }
+    assert!(checked > 20, "{checked}");
+
+    let census_body = supercritical_methane_context();
+    let sets: Vec<(&str, Seed, &SystemContext)> = whole()
+        .iter()
+        .take(10)
+        .map(|(ctx, _)| ("sample", SEED, ctx))
+        .chain(core::iter::once(("sample", SEED, census_body)))
+        .collect();
+    // With P14.T53.b part 3, from generator version 25, part 2's census body keeps its surface,
+    // and none of these bodies is hidden (decision-p14-t53b-part3 §12 (0400)).
+    let (mut surfaces, mut hidden) = (0_u32, 0_u32);
+    for body in &envelope_census(&sets) {
+        assert_envelope_tags(body);
+        surfaces += u32::from(body.surface == SectionState::Ok);
+        hidden += u32::from(body.hidden.is_some());
+    }
+    eprintln!("{surfaces} surfaces, {hidden} hidden");
+    assert!(surfaces > 20);
+    assert_eq!(hidden, 0);
+}
+
+/// P14.T54.a: a record's surface section holds P14.T51.a's published condensates, the ones its
+/// liquids and ices read ([`check_record_condensates`]), by the cover's rule W1–W4, exactly
+/// ([`check_cover_rule`]; decision-p14-t54a-water-consistency §4), and an Earth's condensates hold
+/// `H2O`: every temperate world with liquid water whose figures list a water ocean holds a liquid
+/// `H2O` entry with a reservoir, a layer and an area, which the test prints.
+///
+/// Water's sea is its own layer's fill (§1): `01ffeb2ce0000000.0300`, whose ice holds its water,
+/// publishes no sea, and R09's inputs read none. Every water sea is printed against the whole
+/// water's potential ocean, which it took before, for the bless note. The walk is the first 60
+/// sample systems and the golden systems: from 24 every water sea of the 60 lies on a `Snowball`
+/// at the 273.15 K cap (P14.T53.a's thermostat; P14.T53.e's to cure), so the Earths are the
+/// goldens' (`filler_c`'s 0200).
+#[test]
+fn the_record_s_surface_holds_its_published_condensates() {
+    use crate::planetary::chem::partition::CondensatePhase;
+    let water = Gas::Water.substance();
+    let (mut surfaces, mut entries, mut earths) = (0_u32, 0_usize, 0_u32);
+    let mut tally = CondensateTally::default();
+    let mut cover = CoverRuleTally::default();
+    let mut ice_bulks = IceBulkTally::default();
+    let mut dry = false;
+    let systems = whole()
+        .iter()
+        .take(60)
+        .map(|(ctx, system)| (ctx, system))
+        .chain(
+            golden_systems()
+                .iter()
+                .map(|(_, ctx, system)| (ctx, system)),
+        );
+    for (ctx, system) in systems {
+        let snapshot = system.snapshot_at(ctx, UniverseTime::EPOCH);
+        for record in snapshot.bodies() {
+            let Section::Ok(surface) = record.surface() else {
+                continue;
+            };
+            let id = record.identity().id();
+            let condensates = check_record_condensates(id, surface, &mut tally);
+            check_cover_rule(id, surface, None, &mut cover);
+            check_ice_bulk(id, surface, &mut ice_bulks);
+            if let Some(sea) = condensates.entry(water, CondensatePhase::Liquid) {
+                eprintln!(
+                    "{id}: water's sea {:.6} (the whole water's potential ocean {:.6}), {:?} m, a \
+                     {:?} at {:.2} K",
+                    sea.area_fraction(),
+                    surface.figures().potential_ocean(),
+                    sea.reservoir_gel().map(crate::units::Metres::value),
+                    surface.state(),
+                    surface.conditions().mean_surface_temperature().value()
+                );
+            }
+            if id.to_string() == "01ffeb2ce0000000.0300" {
+                assert!(
+                    condensates.entry(water, CondensatePhase::Liquid).is_none(),
+                    "{id}: {:?}",
+                    condensates.entries()
+                );
+                let inputs = r09_inputs(record);
+                assert!(inputs.liquids().is_empty(), "{id}: {:?}", inputs.liquids());
+                assert_same_bits(inputs.ocean_fraction(), 0.0);
+                dry = true;
+            }
+            let ocean = surface
+                .figures()
+                .surface_liquids()
+                .iter()
+                .any(|&(s, f)| s == water && f > 0.0);
+            if surface.state() == SurfaceState::Temperate
+                && surface.conditions().liquid_water()
+                && ocean
+            {
+                let sea = condensates
+                    .entry(water, CondensatePhase::Liquid)
+                    .unwrap_or_else(|| panic!("{id}: an Earth's condensates hold its water"));
+                assert!(
+                    sea.reservoir().value() > 0.0
+                        && sea.reservoir_gel().is_some_and(|gel| gel.value() > 0.0)
+                        && sea.area_fraction() > 0.0,
+                    "{id}: {sea:?}"
+                );
+                eprintln!(
+                    "an Earth, {id}, at {:.2} K and {:.0} Pa: {:?}",
+                    surface.conditions().mean_surface_temperature().value(),
+                    surface.conditions().surface_pressure().value(),
+                    condensates
+                        .entries()
+                        .iter()
+                        .map(described)
+                        .collect::<Vec<_>>()
+                );
+                earths += 1;
+            }
+            surfaces += 1;
+            entries += condensates.entries().len();
+        }
+    }
+    eprintln!(
+        "{surfaces} surfaces, {entries} entries ({} supercritical; with no layer {:?}), {earths} \
+         Earths; the cover's appended water ice (W3 a) {}, ocean under ice (W3 b) {}, scaled \
+         lists {}",
+        tally.supercritical, tally.unlayered, cover.crust_ice, cover.under_ice, cover.scaled
+    );
+    eprintln!(
+        "ice bulks: {} surfaces, {} listing their crust's frozen water as H2O solid, {} T24.b's \
+         surface water, none listed {:?}",
+        ice_bulks.surfaces, ice_bulks.crust, ice_bulks.surface_water, ice_bulks.dry
+    );
+    assert!(
+        surfaces > 100 && entries > 100 && earths > 0,
+        "{surfaces} {entries} {earths}"
+    );
+    assert!(ice_bulks.crust > 100, "{ice_bulks:?}");
+    assert!(dry, "01ffeb2ce0000000.0300 is in the sample");
+}
+
+/// What [`check_ice_bulk`] counts for the bless note: the surfaces whose bulk is ice, those whose
+/// `H2O` solid entry is their crust's frozen water, those whose entry is T24.b's surface water,
+/// and those that list no water ice, by state.
+#[derive(Debug, Default)]
+struct IceBulkTally {
+    surfaces: u32,
+    crust: u32,
+    surface_water: u32,
+    dry: std::collections::BTreeMap<String, u32>,
+}
+
+/// Decision-p14-t54a-ganymede, C1 follow-up §C1.4: on `surface`, the record of `id`, whose bulk is
+/// ice and whose surface water holds none (T24.b's, on water's Jeans verdict), an `H2O` solid
+/// entry is the crust's frozen water: its area T24.b's ice area and its layer its mass over ice
+/// Ih's density at the mean surface temperature, to the bit while the cold traps are held (until
+/// P14.T54.b), and no water sea is listed beside it. An ice bulk that lists no water ice is
+/// printed, with its state and mean temperature.
+fn check_ice_bulk(id: crate::id::BodyId, surface: &Surface, tally: &mut IceBulkTally) {
+    use crate::planetary::chem::partition::CondensatePhase;
+    use crate::planetary::derive::atmosphere::SurfaceMaterial;
+    use crate::planetary::hooks::figures::cover;
+    if surface.material() != SurfaceMaterial::Ice {
+        return;
+    }
+    tally.surfaces += 1;
+    let water = Gas::Water.substance();
+    let (figures, conditions) = (surface.figures(), surface.conditions());
+    let mean = conditions.mean_surface_temperature();
+    let Some(entry) = surface.condensates().entry(water, CondensatePhase::Solid) else {
+        eprintln!(
+            "{id}: an ice bulk, a {:?} at {:.2} K, lists no water ice",
+            surface.state(),
+            mean.value()
+        );
+        *tally
+            .dry
+            .entry(format!("{:?}", surface.state()))
+            .or_insert(0) += 1;
+        return;
+    };
+    if figures.surface_water().value() > 0.0 {
+        tally.surface_water += 1;
+        return;
+    }
+    tally.crust += 1;
+    assert!(
+        surface
+            .condensates()
+            .entry(water, CondensatePhase::Liquid)
+            .is_none(),
+        "{id}: {:?}",
+        surface.condensates()
+    );
+    if entry.trapped_area_fraction() > 0.0 {
+        return;
+    }
+    // Over the ground its condensates were published on (rule (f)).
+    let ground = surface.basis().map_or_else(
+        || figures.partition_ground(MetresPerSecondSquared::new(0.0), surface.material()),
+        |basis| basis.ground,
+    );
+    let ice = cover::ice_fraction(&cover::IceInputs {
+        conditions,
+        state: surface.state(),
+        water_state: figures.water_state(),
+        crust: ground.crust,
+        surface_water: ground.surface_water,
+    });
+    assert_same_bits(entry.area_fraction(), ice);
+    let rho = crate::substance::ice_ih_density(mean);
+    let layer = entry.reservoir_gel().expect("ice Ih's density is read");
+    assert_same_bits(layer.value(), entry.reservoir().value() / rho.value());
+}
+
+/// What [`check_cover_rule`] counts for the bless note: the surfaces whose ices take T24.b's water
+/// ice with an area and no `H2O` solid entry (W3 (a)), the `Snowball`s with an ocean under their
+/// ice, which their liquids took to version 23 (W3 (b)), and the lists scaled to the surface (W2);
+/// and, where it reads the
+/// partition, the water follow-up check's ([`liquid_stability`]).
+#[derive(Debug, Default)]
+struct CoverRuleTally {
+    crust_ice: u32,
+    under_ice: u32,
+    scaled: u32,
+    liquids: LiquidTally,
+}
+
+/// The lithology of the lid of the record's surface `surface`, its crust's
+/// ([`CrustComposition::lid_lithology`](crate::planetary::hooks::crust::CrustComposition::lid_lithology)),
+/// which the record's dark lag reads (P14.T53.c; [`DarkLag::of`]); `None` where its crust is not
+/// modelled, as where it reads no lid.
+///
+/// [`DarkLag::of`]: crate::planetary::hooks::figures::lag::DarkLag::of
+fn record_lid(surface: &Surface) -> Option<crate::planetary::hooks::crust::CrustLithology> {
+    let row = surface.crust().ok()?.lid_lithology();
+    crate::planetary::hooks::crust::CrustLithology::ALL
+        .into_iter()
+        .find(|lid| lid.substance() == row)
+}
+
+/// Decision-p14-t54a-water-consistency §4.2: `surface`'s liquids and ices, the record of `id`, are
+/// the cover its condensates give, exactly.
+///
+/// - **W1–W3.** Each list is its phase's entries in their order, with at most one `H2O` item
+///   appended: in the ices T24.b's water ice where no `H2O` solid is listed, from generator
+///   version 25 its lag's exposed share, held to that ice, on an ice bulk under a dark lid
+///   ([`lag::shown`] of [`DarkLag::of`] its material and its record's crust's lid, P14.T53.c; W3
+///   (a)); in the liquids, to version 23, a `Snowball`'s ocean under its ice at its potential
+///   ocean where no `H2O` liquid was (from 24 none, P14.T53.c). Each is divided by the list's
+///   total, the appended item included, where that total exceeds 1, and otherwise to the bit.
+///   Nothing else is listed.
+/// - **W4.** Water's sea is the share of the basins its own layer fills, to the bit, and the other
+///   liquids share the basins by volume, a supercritical reservoir among them from generator
+///   version 25 (P14.T53.b part 3); no entry has no mass but a supercritical fluid that is the air
+///   at the surface, which covers nothing; a solid's area is at most its layer spread at the sheet's thickness, but
+///   water on an ice-rich crust or under a `Snowball`'s cover, which T24.b does not cap, and an
+///   entry with no layer, whose density is not read.
+/// - **W5.** Each list sums to at most 1.
+/// - **The water follow-up check** (decision-p14-t54a-water-consistency, "Batch B follow-up"),
+///   given the partition `partition` the condensates were published from, the published pass's
+///   (rule (f)): every liquid entry is liquid where it lies, and every phase `condensate_of`'s
+///   fallback set is listed ([`liquid_stability`]).
+///
+/// [`lag::shown`]: crate::planetary::hooks::figures::lag::shown
+/// [`DarkLag::of`]: crate::planetary::hooks::figures::lag::DarkLag::of
+fn check_cover_rule(
+    id: crate::id::BodyId,
+    surface: &Surface,
+    partition: Option<&crate::planetary::chem::partition::Partition>,
+    tally: &mut CoverRuleTally,
+) {
+    use crate::planetary::chem::partition::{Basins, CondensatePhase};
+    use crate::planetary::hooks::figures::cover;
+    use crate::planetary::hooks::figures::lag::{self, DarkLag};
+    let water = Gas::Water.substance();
+    let (figures, conditions) = (surface.figures(), surface.conditions());
+    let condensates = surface.condensates();
+    // The ground its condensates were published on: its published pass's context's (rule (f)).
+    let ground = surface.basis().map_or_else(
+        || figures.partition_ground(MetresPerSecondSquared::new(0.0), surface.material()),
+        |basis| basis.ground,
+    );
+    // From 24 (P14.T53.c) a `Snowball`'s ocean under its ice is no surface liquid and is not
+    // appended (W3 (b)'s end): counted.
+    let liquids = condensates.surface_liquids();
+    let under_ice = cover::under_ice_ocean(
+        surface.state(),
+        figures.surface_water(),
+        conditions.mean_surface_temperature(),
+        figures.heat_flow(),
+    );
+    if under_ice && condensates.entry(water, CondensatePhase::Liquid).is_none() {
+        tally.under_ice += 1;
+    }
+    let mut ices = condensates.surface_ices();
+    let crust = ground.crust;
+    if condensates.entry(water, CondensatePhase::Solid).is_none() {
+        let ice = cover::ice_fraction(&cover::IceInputs {
+            conditions,
+            state: surface.state(),
+            water_state: figures.water_state(),
+            crust,
+            surface_water: ground.surface_water,
+        });
+        // From 25 an ice bulk under a dark lid lists its lag's exposed share, held to the cover's
+        // ice, its lid the record's crust's (P14.T53.c): the cover's ice area there is the ice
+        // table beneath the lag, not ice at the surface.
+        let ice = lag::shown(DarkLag::of(surface.material(), record_lid(surface)), ice);
+        ices.push((water, ice));
+        tally.crust_ice += u32::from(ice > 0.0);
+    }
+    for (raw, listed) in [
+        (liquids, figures.surface_liquids()),
+        (ices, figures.surface_ices()),
+    ] {
+        let total = raw.iter().fold(0.0, |sum, &(_, f)| sum + f);
+        assert_eq!(
+            raw.iter().map(|&(s, _)| s).collect::<Vec<_>>(),
+            listed.iter().map(|&(s, _)| s).collect::<Vec<_>>(),
+            "{id}: {raw:?} against {listed:?}"
+        );
+        for (&(_, f), &(_, area)) in raw.iter().zip(listed) {
+            assert_same_bits(area, if total > 1.0 { f / total } else { f });
+        }
+        tally.scaled += u32::from(total > 1.0);
+        let sum = listed.iter().fold(0.0, |sum, &(_, f)| sum + f);
+        assert!(sum <= 1.0 + 1e-12, "{id}: {listed:?}");
+    }
+    // The fractions are shares of the surface, held at 1 though a scaled list's sum may round an
+    // ulp over it (as `filler_b`'s did at C0, 1.000 000 000 000 000 2).
+    for fraction in [figures.ocean_fraction(), figures.ice_fraction()] {
+        assert!((0.0..=1.0).contains(&fraction), "{id}: {fraction}");
+    }
+    let basins: Basins = *ground.ground.basins();
+    let (mut others, mut other_area) = (0.0, 0.0);
+    for e in condensates.entries() {
+        match e.phase() {
+            CondensatePhase::Supercritical if e.reservoir().value() <= 0.0 => {
+                assert_same_bits(e.reservoir().value(), 0.0);
+                assert_same_bits(e.area_fraction(), 0.0);
+                continue;
+            }
+            CondensatePhase::Liquid | CondensatePhase::Solid | CondensatePhase::Supercritical => {
+                assert!(e.reservoir().value() > 0.0, "{id}: {e:?}");
+            }
+        }
+        let Some(layer) = e.reservoir_gel() else {
+            continue;
+        };
+        match e.phase() {
+            CondensatePhase::Liquid if e.substance() == water => {
+                assert_same_bits(e.area_fraction(), basins.area_filled(layer));
+            }
+            CondensatePhase::Liquid | CondensatePhase::Supercritical => {
+                others += layer.value();
+                other_area += e.area_fraction();
+            }
+            CondensatePhase::Solid => {
+                let uncapped = e.substance() == water
+                    && (crust == Crust::IceRich || surface.state() == SurfaceState::Snowball);
+                // Its zonal part at most its sheet's spread; from 24 its cold-trapped part beside
+                // it (P14.T54.b.f).
+                let spread = layer.value() / cover::ICE_SHEET_THICKNESS.value();
+                let zonal = e.area_fraction() - e.trapped_area_fraction();
+                assert!(
+                    uncapped || zonal <= spread * (1.0 + 1e-12),
+                    "{id}: {e:?} over {spread}"
+                );
+            }
+        }
+    }
+    let filled = basins.area_filled(crate::units::Metres::new(others));
+    assert!(
+        (other_area - filled).abs() <= 1e-12,
+        "{id}: the other liquids cover {other_area}, their layers fill {filled}"
+    );
+    if let Some(partition) = partition {
+        liquid_stability(&id.to_string(), surface, partition, &mut tally.liquids);
+    }
+}
+
+/// What [`liquid_stability`] counts and lists: the liquid entries checked, the phases
+/// `condensate_of`'s fallback set (each with its body, `p_s` and `p_sat`), and the liquid entries
+/// with an area that would boil or lie at or above their critical temperature
+/// (decision-p14-t54a-water-consistency, "Batch B follow-up", §F.1).
+#[derive(Debug, Default)]
+struct LiquidTally {
+    liquids: u32,
+    fallbacks: Vec<String>,
+    boiling: Vec<String>,
+}
+
+/// The phase a reservoir of the substance of `diagram`, whose frozen assemblage first melts at
+/// `first_melt` and whose partial pressure is `partial`, takes at `temperature` under the surface
+/// pressure `pressure`, or `None` where it cannot lie condensed there: `chem::partition`'s
+/// `condensed_phase_at`, written again from the registry's diagram as the check's oracle.
+fn phase_there(
+    diagram: &crate::substance::diagram::PhaseDiagram,
+    first_melt: Kelvin,
+    temperature: Kelvin,
+    (pressure, partial): (crate::units::Pascals, crate::units::Pascals),
+) -> Option<crate::planetary::chem::partition::CondensatePhase> {
+    use crate::planetary::chem::partition::CondensatePhase;
+    if temperature >= diagram.critical_temperature() {
+        return (partial >= diagram.critical_pressure()).then_some(CondensatePhase::Supercritical);
+    }
+    let triple = diagram.triple_temperature();
+    match diagram
+        .phase_at(temperature, pressure)
+        .and_then(CondensatePhase::of)
+    {
+        Some(CondensatePhase::Solid)
+            if first_melt < triple && temperature >= first_melt && temperature < triple =>
+        {
+            Some(CondensatePhase::Liquid)
+        }
+        phase => phase,
+    }
+}
+
+/// Decision-p14-t54a-water-consistency, "Batch B follow-up" §F.1 (the bless note's
+/// water-consistency follow-up): on `surface`, the record of `what`, whose condensates its
+/// partition `partition` published (rule (f): its published pass's), every liquid entry with an
+/// area lies where its substance is liquid at the temperature it lies at and the surface
+/// pressure, `p_s` ≥ `p_sat`(T) with T below its critical temperature; the liquid part of a
+/// reservoir that lies solid lies at the warmest zone, where it melts. Every condensate whose phase
+/// `condensate_of`'s fallback set (none at the temperature it lies at: the coldest zone's, else its
+/// first melt's rule) is listed with its entries' areas, `p_s` and `p_sat`.
+fn liquid_stability(
+    what: &str,
+    surface: &Surface,
+    partition: &crate::planetary::chem::partition::Partition,
+    tally: &mut LiquidTally,
+) {
+    use crate::planetary::chem::partition::CondensatePhase;
+    let p_s = partition.surface_pressure();
+    for c in partition.condensates() {
+        let Some(diagram) = c.substance().substance().phase_diagram() else {
+            continue;
+        };
+        if c.phase() == CondensatePhase::Supercritical || c.reservoir().value() <= 0.0 {
+            continue;
+        }
+        let partial = partition.of(c.substance()).map_or(
+            crate::units::Pascals::ZERO,
+            crate::planetary::chem::partition::Partitioned::partial_pressure,
+        );
+        let its = |e: &&crate::planetary::chem::partition::CondensateEntry| {
+            e.substance() == c.substance() || e.substance() == c.liquid()
+        };
+        let t = c.lies_at();
+        if phase_there(diagram, c.first_melt(), t, (p_s, partial)).is_none() {
+            let entries: Vec<String> = surface
+                .condensates()
+                .entries()
+                .iter()
+                .filter(its)
+                .map(|e| format!("{:?} over {:.6}", e.phase(), e.area_fraction()))
+                .collect();
+            tally.fallbacks.push(format!(
+                "{what}: {} {:?} (its liquid {}), lies at {:.2} K, coldest {:.2} K, p_s {:.6e} \
+                 Pa, p_sat {:.6e} Pa there; entries {entries:?}",
+                c.substance().substance().key(),
+                c.phase(),
+                c.liquid().substance().key(),
+                t.value(),
+                partition.climate().coldest().value(),
+                p_s.value(),
+                diagram.saturation_pressure(t).value(),
+            ));
+        }
+        let liquids = surface.condensates().entries().iter().filter(its);
+        for e in liquids.filter(|e| e.phase() == CondensatePhase::Liquid) {
+            tally.liquids += 1;
+            let at = if c.phase() == CondensatePhase::Liquid {
+                t
+            } else {
+                partition.climate().warmest()
+            };
+            let p_sat = diagram.saturation_pressure(at);
+            let liquid = p_s >= p_sat && at < diagram.critical_temperature();
+            if !liquid && e.area_fraction() > 0.0 {
+                tally.boiling.push(format!(
+                    "{what}: {} over {:.6} at {:.2} K, p_s {:.6e} Pa against p_sat {:.6e} Pa, T_c \
+                     {:.2} K",
+                    e.substance().substance().key(),
+                    e.area_fraction(),
+                    at.value(),
+                    p_s.value(),
+                    p_sat.value(),
+                    diagram.critical_temperature().value(),
+                ));
+            }
+            if what == "01ffeb2ce0000000.0400" && e.substance() == Gas::Water.substance() {
+                eprintln!(
+                    "{what}: water's sea over {:.6} lies at {:.3} K under p_s {:.4} bar against \
+                     p_sat {:.4} bar there (water's p_sat at 573.8 K by the registry: {:.4} bar; \
+                     86.67 bar by IAPWS-95)",
+                    e.area_fraction(),
+                    at.value(),
+                    p_s.value() / 1e5,
+                    p_sat.value() / 1e5,
+                    diagram.saturation_pressure(Kelvin::new(573.8)).value() / 1e5,
+                );
+            }
+        }
+    }
+}
+
+/// The condensables the air `air` holds at their cap: each gas with a phase diagram whose airborne
+/// weight lies below its inventory's, some of it condensed, by P14.T24.a's greenhouse gain's own
+/// test (`greenhouse_gain`'s `Ordering::Less`). A change of the set between passes is an onset
+/// (decision-pre-23-review item 22).
+fn capped_gases(air: &crate::planetary::derive::Atmosphere) -> Vec<Gas> {
+    Gas::ALL
+        .into_iter()
+        .filter(|&gas| {
+            gas.substance().substance().phase_diagram().is_some()
+                && matches!(
+                    air.partial_pressures()
+                        .of(gas)
+                        .partial_cmp(&air.inventory_weights().of(gas)),
+                    Some(core::cmp::Ordering::Less)
+                )
+        })
+        .collect()
+}
+
+/// The members of the discrete key that differ between `a` and `b` (decision-p14-t54a-passes
+/// §1.5): the figures present, the basins' shape, the water share's outgassing branch, the regime,
+/// the craters' crust class, a moon's tide branch, the inertia lid, `lid_of`'s unresurfaced test
+/// the state P14.T53.e's rules 5–7 carry (from 25) and the open water a locked world's deck reads
+/// (P14.T24.j, from 26). The key is destructured, so that a member added to it is a compile error
+/// here.
+fn key_members(
+    a: &crate::planetary::derive::pass_record::PassContextKey,
+    b: &crate::planetary::derive::pass_record::PassContextKey,
+) -> Vec<&'static str> {
+    let crate::planetary::derive::pass_record::PassContextKey {
+        figures,
+        basins,
+        volcanic,
+        regime,
+        crust,
+        tide,
+        lid,
+        unresurfaced,
+        present,
+        open_water,
+    } = *a;
+    [
+        ("figures", figures != b.figures),
+        ("basins", basins != b.basins),
+        ("water share", volcanic != b.volcanic),
+        ("regime", regime != b.regime),
+        ("crust class", crust != b.crust),
+        ("tide branch", tide != b.tide),
+        ("lid", lid != b.lid),
+        ("resurfacing", unresurfaced != b.unresurfaced),
+        ("carried state", present != b.present),
+        ("open water", open_water != b.open_water),
+    ]
+    .into_iter()
+    .filter_map(|(member, differs)| differs.then_some(member))
+    .collect()
+}
+
+/// R09's coarse inputs of `record` (`CoarseInputs::from_record`), with a basalt lid and an entry
+/// for each ice on the ground, as its documentation's example builds them: for a planet, whose
+/// seasons are its own orbit's.
+fn r09_inputs(record: &BodyRecord) -> crate::planetary::surface::CoarseInputs {
+    use crate::planetary::surface::{CoarseInputs, CrustInputs, LidCrust, SeasonsFromRecord};
+    use hyperion_surface::field::{MaterialPalette, MechanicsFamily, PaletteEntry, PaletteRole};
+    use hyperion_surface::substance_key::SubstanceKey;
+    let Section::Ok(surface) = record.surface() else {
+        panic!("{:?} has a surface", record.index());
+    };
+    let basalt = SubstanceKey::new("basalt").unwrap();
+    let entry = |substance, role| PaletteEntry {
+        substance,
+        role,
+        normal_albedo_bvr: [0.1; 3],
+        phase_row: 0,
+        grain_density_kg_m3: 3_010.0,
+        transition: Kelvin::new(1_253.15),
+        mechanics: MechanicsFamily::Silicate,
+        liquid: None,
+        feo_mass_fraction: None,
+    };
+    let mut entries = vec![entry(basalt, PaletteRole::SecondaryCrust)];
+    let ices = surface.figures().surface_ices().iter();
+    let on_the_ground = ices.filter(|&&(_, area_fraction)| area_fraction > 0.0);
+    entries.extend(on_the_ground.map(|&(id, _)| entry(id.substance().key(), PaletteRole::Ice)));
+    let crust = CrustInputs {
+        primary: None,
+        secondary: Some(basalt),
+        tertiary: None,
+        bulk: None,
+        lid: LidCrust::Secondary,
+        provinces: basalt,
+        melt_area_fraction: 0.0,
+    };
+    CoarseInputs::from_record(
+        record,
+        SeasonsFromRecord::Own,
+        crust,
+        [],
+        MaterialPalette::new(entries).unwrap(),
+    )
+    .unwrap()
+}
+
+/// What [`check_record_condensates`] counts: the supercritical entries, and the entries with no
+/// layer by substance and phase.
+#[derive(Debug, Default)]
+struct CondensateTally {
+    supercritical: u32,
+    unlayered: std::collections::BTreeMap<
+        (String, crate::planetary::chem::partition::CondensatePhase),
+        u32,
+    >,
+}
+
+/// A published condensate, printed: its substance, phase, reservoir, layer, area and flag.
+fn described(e: &crate::planetary::chem::partition::CondensateEntry) -> String {
+    format!(
+        "{} {:?} {:.4e} kg m⁻² ({:?} m), area {:.4}, seasonal {}",
+        e.substance().substance().key(),
+        e.phase(),
+        e.reservoir().value(),
+        e.reservoir_gel().map(crate::units::Metres::value),
+        e.area_fraction(),
+        e.is_seasonal()
+    )
+}
+
+/// P14.T54.a: the condensates of `surface`, the record of `id`, which it holds `Ok`, checked. There
+/// are at most `MAX_CONDENSATES` entries, each substance and phase once, in `Partition::publish`'s
+/// order (by reservoir mass, largest first, ties by substance, then phase). Each area is a
+/// fraction, each reservoir and each layer, where the registry has read its density, not
+/// negative, and a supercritical fluid that is the air at the surface covers nothing (from
+/// generator version 25 a supercritical reservoir covers its share of the basins, P14.T53.b part
+/// 3). Every liquid and solid that covers an area is among the figures' liquids or ices, and every
+/// substance listed there but water, which keeps T24.b's ice and its ocean under ice where the
+/// partition holds none, has its entry.
+fn check_record_condensates<'a>(
+    id: crate::id::BodyId,
+    surface: &'a Surface,
+    tally: &mut CondensateTally,
+) -> &'a crate::planetary::chem::partition::Condensates {
+    use crate::planetary::chem::partition::{CondensateEntry, CondensatePhase};
+    use crate::planetary::surface::MAX_CONDENSATES;
+    use std::cmp::Ordering;
+    let order = |a: &CondensateEntry, b: &CondensateEntry| {
+        b.reservoir()
+            .value()
+            .total_cmp(&a.reservoir().value())
+            .then(a.substance().cmp(&b.substance()))
+            .then(a.phase().cmp(&b.phase()))
+    };
+    let condensates = surface.condensates();
+    let (figures, list) = (surface.figures(), condensates.entries());
+    assert!(list.len() <= MAX_CONDENSATES, "{id}: {list:?}");
+    for pair in list.windows(2) {
+        assert_eq!(order(&pair[0], &pair[1]), Ordering::Less, "{id}: {list:?}");
+    }
+    let unique: std::collections::BTreeSet<_> =
+        list.iter().map(|e| (e.substance(), e.phase())).collect();
+    assert_eq!(
+        unique.len(),
+        list.len(),
+        "{id}: each substance and phase once: {list:?}"
+    );
+    let listed = |areas: &[(crate::substance::SubstanceId, f64)], e: &CondensateEntry| {
+        areas.iter().any(|&(other, _)| other == e.substance())
+    };
+    for e in list {
+        let area = e.area_fraction();
+        assert!((0.0..=1.0).contains(&area), "{id}: {e:?}");
+        assert!(e.reservoir().value() >= 0.0, "{id}: {e:?}");
+        if let Some(gel) = e.reservoir_gel() {
+            assert!(gel.value() >= 0.0, "{id}: {e:?}");
+        } else {
+            let key = (e.substance().substance().key().to_string(), e.phase());
+            *tally.unlayered.entry(key).or_insert(0) += 1;
+        }
+        match e.phase() {
+            CondensatePhase::Supercritical => {
+                if e.reservoir().value() <= 0.0 {
+                    assert_same_bits(area, 0.0);
+                }
+                tally.supercritical += 1;
+            }
+            CondensatePhase::Liquid if area > 0.0 => {
+                assert!(listed(figures.surface_liquids(), e), "{id}: {e:?}");
+            }
+            CondensatePhase::Solid if area > 0.0 => {
+                assert!(listed(figures.surface_ices(), e), "{id}: {e:?}");
+            }
+            CondensatePhase::Liquid | CondensatePhase::Solid => {}
+        }
+    }
+    let water = Gas::Water.substance();
+    for (areas, phase) in [
+        (figures.surface_liquids(), CondensatePhase::Liquid),
+        (figures.surface_ices(), CondensatePhase::Solid),
+    ] {
+        for &(substance, _) in areas.iter().filter(|&&(s, _)| s != water) {
+            assert!(
+                condensates.entry(substance, phase).is_some(),
+                "{id}: {substance:?} {phase:?} listed with no entry"
+            );
+        }
+    }
+    condensates
+}
+
+/// P14.T48.e's gas-envelope split on a present body's record with a bulk section: a body with a
+/// solid surface has its surface section `Ok`, from `DetailLevel::Surface` and not below, and its
+/// envelope not applicable, or its surface not applicable and its envelope its model or not
+/// modelled under a supercritical envelope (P14.T53.b part 2 and P14.T53.f, whose test the record
+/// does not carry:
+/// `a_surface_holds_a_solid_state_and_its_conditions_regime` checks it on the derivation); every
+/// other its surface not applicable and its envelope `Ok` or not modelled (P14.T54.b.i's,
+/// `system::envelope`'s tests), so that exactly one of the two applies. Whether the body's class
+/// has a solid surface.
+fn assert_surface_or_envelope(record: &BodyRecord) -> bool {
+    let index = record.index();
+    let bulk = record.bulk().ok().unwrap();
+    let surface = record.section_state(RecordSection::Surface);
+    let envelope = record.section_state(RecordSection::Envelope);
+    let solid = bulk.class().has_solid_surface();
+    if solid && surface == SectionState::NotApplicable {
+        // From 26 a supercritical envelope's section is its model (P14.T53.f), or not modelled.
+        assert!(
+            matches!(envelope, SectionState::Ok | SectionState::NotModelled),
+            "{index:?}: {envelope:?}"
+        );
+        let at = |level| record.degrade(level).section_state(RecordSection::Surface);
+        assert_eq!(
+            at(DetailLevel::Surface),
+            SectionState::NotApplicable,
+            "{index:?}"
+        );
+    } else if solid {
+        assert_eq!(surface, SectionState::Ok, "{index:?}");
+        assert_eq!(envelope, SectionState::NotApplicable, "{index:?}");
+        let at = |level| record.degrade(level).section_state(RecordSection::Surface);
+        assert_eq!(at(DetailLevel::Surface), SectionState::Ok, "{index:?}");
+        assert_eq!(
+            at(DetailLevel::Bulk),
+            SectionState::NotResolved,
+            "{index:?}"
+        );
+    } else {
+        assert_eq!(surface, SectionState::NotApplicable, "{index:?}");
+        assert!(
+            matches!(envelope, SectionState::Ok | SectionState::NotModelled),
+            "{index:?}: {envelope:?}"
+        );
+    }
+    solid
+}
+
+/// R09.T1.b: a planet, moon or dwarf planet present at the record's time carries its own detail
+/// seed in its hooks section, never its surface seed; a ring, a belt, the halo and a body not
+/// present carry no hooks.
+#[test]
+fn a_present_body_s_hooks_are_its_detail_seed() {
+    let (mut seeded, mut absent, mut rings, mut belts) = (0, 0, 0, 0);
+    for (ctx, system) in whole().iter().take(120) {
+        for record in system.snapshot_at(ctx, UniverseTime::EPOCH).bodies() {
+            let identity = record.identity();
+            let surfaced = matches!(
+                identity.kind(),
+                BodyKind::Planet | BodyKind::Moon(_) | BodyKind::DwarfPlanet
+            );
+            if surfaced && identity.state() == BodyState::Present {
+                let seed = hooks::detail_seed(system.seed, identity.id());
+                assert_eq!(
+                    record.hooks(),
+                    &Section::Ok(Hooks::new(seed)),
+                    "{}",
+                    identity.id()
+                );
+                let surface = system.surface_seed(record.index()).unwrap().unwrap();
+                assert_ne!(seed.get(), surface.get(), "{}", identity.id());
+                seeded += 1;
+            } else {
+                assert_eq!(record.hooks(), &Section::NotApplicable, "{}", identity.id());
+                if surfaced {
+                    absent += 1;
+                } else if identity.kind() == BodyKind::Ring {
+                    rings += 1;
+                } else if matches!(identity.kind(), BodyKind::Belt(_)) {
+                    belts += 1;
+                }
+            }
+        }
+    }
+    eprintln!("{seeded} seeded, {absent} not present, {rings} rings, {belts} belts");
+    assert!(
+        seeded > 100 && absent > 0 && rings > 5 && belts > 0,
+        "{seeded} seeded, {absent} not present, {rings} rings, {belts} belts"
     );
 }
 
@@ -626,7 +1615,7 @@ fn a_body_is_at_its_host_s_position_plus_its_orbit() {
     for (ctx, system) in generated() {
         for t in window() {
             let epoch = Epoch::new(system, ctx, t);
-            star_positions_at(ctx.hierarchy(), t, &mut positions);
+            star_positions_at(ctx.hierarchy().unwrap(), t, &mut positions);
             for (n, (_, at)) in positions.iter().enumerate() {
                 let centre = epoch.centre(1 << n);
                 for (x, y) in centre.metres().into_iter().zip(at.metres()) {
@@ -638,7 +1627,7 @@ fn a_body_is_at_its_host_s_position_plus_its_orbit() {
                 let centre = epoch.centre(members_of(zone)).metres();
                 let (mut moment, mut mass, mut reach) = ([0.0; 3], 0.0, 1.0_f64);
                 for m in zone.members() {
-                    let star = ctx.hierarchy().stars()[usize::from(m)]
+                    let star = ctx.hierarchy().unwrap().stars()[usize::from(m)]
                         .initial_mass()
                         .value();
                     let at = positions[usize::from(m)].1.metres();
@@ -708,7 +1697,7 @@ fn a_star_s_zone_moves_with_star_states_at_bit_for_bit() {
     for (ctx, system) in generated() {
         for t in window() {
             let epoch = Epoch::new(system, ctx, t);
-            crate::stellar::multiplicity::star_states_at(ctx.hierarchy(), t, &mut states);
+            crate::stellar::multiplicity::star_states_at(ctx.hierarchy().unwrap(), t, &mut states);
             for (n, (_, _, velocity)) in states.iter().enumerate() {
                 let centre = epoch.centre_velocity(1 << n);
                 for (x, y) in centre
@@ -729,13 +1718,37 @@ fn a_star_s_zone_moves_with_star_states_at_bit_for_bit() {
 /// a second, to 10⁻⁶ relative, with a floor for the positions' own rounding, a few ε of the widest
 /// orbit on its path (the host's pairs' and its own apocentres, and its distance), which a
 /// difference over 2 s carries into the velocity.
+///
+/// The fast tier walks the first [`FAST_VELOCITY`] of the 200 systems, and
+/// [`a_body_s_velocity_is_the_derivative_of_its_position_over_the_rest_of_its_systems`] the rest.
 #[test]
 fn a_body_s_velocity_is_the_derivative_of_its_position() {
+    a_body_s_velocity_is_the_derivative_of_its_position_in(&whole_fast()[..FAST_VELOCITY]);
+}
+
+/// [`a_body_s_velocity_is_the_derivative_of_its_position`] over the rest of its 200 systems: the
+/// slow tier's chunk of P14.T54.b.l's §C.7 split.
+#[test]
+#[ignore = "slow: the velocities of 100 whole systems at ±H, the fast tier's other chunk"]
+fn a_body_s_velocity_is_the_derivative_of_its_position_over_the_rest_of_its_systems() {
+    a_body_s_velocity_is_the_derivative_of_its_position_in(&whole_fast()[FAST_VELOCITY..]);
+}
+
+/// How many of [`a_body_s_velocity_is_the_derivative_of_its_position`]'s 200 systems the fast tier
+/// walks (P14.T54.b.l's §C.7 split, sized on 24's times: 248 s over the 200, pod, 4 vCPU).
+const FAST_VELOCITY: usize = 100;
+
+/// The body of [`a_body_s_velocity_is_the_derivative_of_its_position`] and its slow twin, over the
+/// systems `systems`.
+fn a_body_s_velocity_is_the_derivative_of_its_position_in(
+    systems: &[(SystemContext, PlanetarySystem)],
+) {
     let second = Span::from_seconds(1);
     let mut checked = 0;
-    for (ctx, system) in whole().iter().take(200) {
+    for (ctx, system) in systems {
         let pairs = ctx
             .hierarchy()
+            .unwrap()
             .pairs()
             .map(|(_, orbit)| orbit.apoapsis().value())
             .fold(0.0, f64::max);
@@ -779,7 +1792,7 @@ fn a_body_s_velocity_is_the_derivative_of_its_position() {
             }
         }
     }
-    assert!(checked > 1_000, "{checked} bodies checked");
+    assert!(checked > 500, "{checked} bodies checked");
 }
 
 #[test]
@@ -850,22 +1863,75 @@ fn a_companion_s_light_pushes_a_star_s_habitable_zone_out() {
 /// post-main-sequence mass loss destabilises, so the share rose with the packing. The slice does
 /// not model that instability; the bound below holds it to under 5%.
 ///
-/// The zone is the one at birth, its outer limit widened as its host's orbits are, by the
-/// host's initial mass over its mass then (design note 11's a₀ M₀ ÷ M): until plan 11's binary
-/// evolution (P11.T4) a pair's orbit does not widen as its stars lose mass (ruling 33), while
-/// their planets' orbits do, so an evolved star's planet can outgrow the zone its companion bounds
-/// at birth: 7 of this sample's 4,830 bodies at the epoch, all about hosts that have lost mass.
+/// The zone is the one at the time, [`PlanetarySystem::zones_at`]'s (P14.T9.d): the zone at birth
+/// widened as its host's orbits are, by the host's initial mass over its mass then (design note
+/// 11's a₀ M₀ ÷ M), since a pair the binary engine did not run keeps its drawn orbit as its stars
+/// lose mass (ruling 33) while their planets' orbits widen; and from 27, for a zone a pair the
+/// engine ran bounds, intersected with Holman and Wiegert's on the pair's state then. A body
+/// beyond its zone at birth has outgrown it: 7 of this sample's 4,830 at the epoch, all about
+/// hosts that have lost mass. A body lies inside its zone's inner limit only about a host that has
+/// lost mass, and only those its walk names ([`InnerMisses`]).
+///
+/// The fast tier walks [`whole_fast`]'s chunk of the sample, and
+/// [`no_overlapping_orbits_in_generated_systems_over_the_rest_of_the_sample`] the rest
+/// (P14.T54.b.l's §C.7 split, sized on 24's times: 246 s over the whole sample, pod, 4 vCPU).
 #[test]
 fn no_overlapping_orbits_in_generated_systems() {
+    no_overlapping_orbits_in(whole_fast(), NO_INNER_MISSES);
+}
+
+/// [`no_overlapping_orbits_in_generated_systems`] over the rest of the sample ([`whole_rest`]): the
+/// slow tier's chunk of P14.T54.b.l's §C.7 split. `SystemId(0x42002cae00000001)`'s circumbinary
+/// planet `0800` lies 0.258% inside its zone's inner limit ([`SUDDEN_LOSS_INNER_MISSES`]).
+#[test]
+#[ignore = "slow: the orbits of 200 whole systems at ±H, the fast tier's other chunk"]
+fn no_overlapping_orbits_in_generated_systems_over_the_rest_of_the_sample() {
+    no_overlapping_orbits_in(whole_rest(), SUDDEN_LOSS_INNER_MISSES);
+}
+
+/// The bodies a walk of [`no_overlapping_orbits_in`] finds inside their zone's inner limit, past
+/// rounding: how many at −H, the epoch and +H together, and the share of the limit each lies
+/// inside it by at most, about a host that has lost mass.
+#[derive(Debug, Clone, Copy)]
+struct InnerMisses {
+    count: u32,
+    share: f64,
+}
+
+/// None.
+const NO_INNER_MISSES: InnerMisses = InnerMisses {
+    count: 0,
+    share: 0.0,
+};
+
+/// The rest of the sample's, pinned as they stand (P14.T28.g's merged steps):
+/// `SystemId(0x42002cae00000001)`'s circumbinary planet `0800` 0.258% inside its zone's inner
+/// limit after its pair's common envelope, at each of the three times, the one such body of the
+/// sample's 400 systems. A sudden loss of a host's mass leaves a body's pericentre where it
+/// was, while the zone's limit, widened by the host's initial mass over its mass then, moves out by
+/// the mass before over the mass after, and about a zone no pair the engine ran bounds the fate
+/// unbinds no body for it.
+const SUDDEN_LOSS_INNER_MISSES: InnerMisses = InnerMisses {
+    count: 3,
+    share: 3e-3,
+};
+
+/// The body of [`no_overlapping_orbits_in_generated_systems`] and its slow twin, over the systems
+/// `systems`, which hold the bodies inside their zone's inner limit `misses`.
+fn no_overlapping_orbits_in(systems: &[(SystemContext, PlanetarySystem)], misses: InnerMisses) {
     let (mut pairs, mut bodies, mut outgrown, mut unstable) = (0_u32, 0_u32, 0_u32, 0_u32);
+    let mut inside = 0_u32;
     // On whole systems (P14.T30.b): the planets about each host, the records whose parent is the
     // host; moons keep T22.b's rule about their planet, and a belt's members, listed under their
     // belt, keep T21.c's clearance of the chaotic zones instead.
-    for (ctx, system) in whole() {
+    for (ctx, system) in systems {
         let strip = ctx.strip_radius();
         for t in window() {
             let snapshot = system.snapshot_at(ctx, t);
-            for zone in system.zones() {
+            for zone in &system.zones_at(ctx, t) {
+                let birth = system
+                    .zone(zone.host())
+                    .expect("a zone at a time is one of the system's zones");
                 let mut orbits: Vec<(EarthMasses, KeplerElements)> = snapshot
                     .bodies()
                     .iter()
@@ -882,20 +1948,31 @@ fn no_overlapping_orbits_in_generated_systems() {
                     .fold(SolarMasses::ZERO, |sum, m| sum + m);
                 let widening = zone.host_mass() / host;
                 for (_, orbit) in &orbits {
-                    if let Some(inner) = zone.inner() {
+                    if let Some(inner) = zone.inner()
+                        && orbit.periapsis() < inner * (1.0 - 1e-12)
+                    {
                         assert!(
-                            orbit.periapsis() >= inner * (1.0 - 1e-12),
+                            widening > 1.0 && orbit.periapsis() >= inner * (1.0 - misses.share),
+                            "{:?} at {t:?}: a pericentre {} of its zone's inner limit, about a \
+                             host widened by {widening}",
+                            system.system(),
+                            orbit.periapsis() / inner
+                        );
+                        inside += 1;
+                    }
+                    if let Some(outer) = zone.outer() {
+                        assert!(
+                            orbit.apoapsis() <= outer * (1.0 + 1e-12),
                             "{:?}",
                             system.system()
                         );
                     }
-                    if let Some(outer) = zone.outer() {
-                        let widened = outer * (widening * (1.0 + 1e-12));
-                        assert!(orbit.apoapsis() <= widened, "{:?}", system.system());
-                        if t == UniverseTime::EPOCH && orbit.apoapsis() > outer {
-                            assert!(widening > 1.01, "only mass loss widens an orbit");
-                            outgrown += 1;
-                        }
+                    if let Some(outer) = birth.outer()
+                        && t == UniverseTime::EPOCH
+                        && orbit.apoapsis() > outer
+                    {
+                        assert!(widening > 1.01, "only mass loss widens an orbit");
+                        outgrown += 1;
                     }
                     assert!(orbit.apoapsis() <= strip);
                     bodies += 1;
@@ -933,22 +2010,27 @@ fn no_overlapping_orbits_in_generated_systems() {
         }
     }
     assert!(
-        pairs > 300 && bodies > 900,
+        pairs > 150 && bodies > 450,
         "{pairs} pairs, {bodies} bodies"
     );
     assert!(
         outgrown < bodies / 100 && unstable < pairs / 20,
         "{outgrown} of {bodies} bodies outgrew their zone, {unstable} of {pairs} pairs unsettled"
     );
+    assert_eq!(
+        inside, misses.count,
+        "bodies at a time inside their zone's inner limit, of {bodies}"
+    );
 }
 
-/// How many real systems of primaries over 8 M☉ the supernova overlap test samples: 600. Since
+/// How many real systems of primaries over 8 M☉ the supernova overlap test samples: 800. Since
 /// plan 11's ruling 81 nearly every massive primary has close direct companions (Moe and Di
 /// Stefano's Table 13; 18 of 120 sampled are single), which leave its planets little room: 120
 /// systems held 33 surviving pairs about exploded hosts, where the test asks for more than 60;
 /// since ruling 106.2's rocky groups of 2–6, 360 held 57, and since ruling 116.1's farther first
-/// rocky planet 480 held 60.
-const MASSIVE_SAMPLE: usize = 600;
+/// rocky planet 480 held 60. At generator version 27, whose paired hosts' bodies take their fates
+/// and zones from their pairs' timelines (P14.T28.g, P14.T9.d), 600 hold 45 and 800 hold 63.
+const MASSIVE_SAMPLE: usize = 800;
 
 /// Ruling 71.3: the overlap property on post-supernova survivors. A sudden death gives each
 /// survivor its own eccentricity, and the scattering step (P14.T28.c) must leave no two orbits of
@@ -1038,11 +2120,29 @@ fn hottest_light(ctx: &SystemContext, t: UniverseTime) -> Option<Kelvin> {
 /// P14.T16.b rerun on whole generated systems (P14.T30.b): no present body, its internal heat
 /// included, is hotter than the hottest star that lights it, at −H, the epoch and +H; systems with
 /// a black hole are left out.
+///
+/// The fast tier walks [`whole_fast`]'s chunk of the sample, and
+/// [`no_planet_hotter_than_its_star_in_generated_systems_over_the_rest_of_the_sample`] the rest
+/// (P14.T54.b.l's §C.7 split, sized on 24's times: 246 s over the whole sample, pod, 4 vCPU).
 #[test]
 fn no_planet_hotter_than_its_star_in_generated_systems() {
+    no_planet_hotter_than_its_star_in(whole_fast());
+}
+
+/// [`no_planet_hotter_than_its_star_in_generated_systems`] over the rest of the sample
+/// ([`whole_rest`]): the slow tier's chunk of P14.T54.b.l's §C.7 split.
+#[test]
+#[ignore = "slow: the bodies of 200 whole systems at ±H, the fast tier's other chunk"]
+fn no_planet_hotter_than_its_star_in_generated_systems_over_the_rest_of_the_sample() {
+    no_planet_hotter_than_its_star_in(whole_rest());
+}
+
+/// The body of [`no_planet_hotter_than_its_star_in_generated_systems`] and its slow twin, over the
+/// systems `systems`.
+fn no_planet_hotter_than_its_star_in(systems: &'static [(SystemContext, PlanetarySystem)]) {
     let (mut bodies, mut giants) = (0_u32, 0_u32);
     // On whole systems (P14.T30.b): planets, moons and belt members.
-    for (ctx, system) in whole() {
+    for (ctx, system) in systems {
         for t in window() {
             let Some(hottest) = hottest_light(ctx, t) else {
                 continue;
@@ -1066,38 +2166,65 @@ fn no_planet_hotter_than_its_star_in_generated_systems() {
         }
     }
     assert!(
-        bodies > 900 && giants > 20,
+        bodies > 450 && giants > 10,
         "{bodies} bodies, {giants} giants"
     );
 }
 
-/// P14.T16.b's continuity rerun on whole generated systems: at steps of a year across ±H, no
-/// present body's radius, equilibrium temperature or envelope fraction jumps by a relative 10⁻³,
-/// except in a step where a star of its system changes phase or the body's own state changes.
+/// How far either side of the epoch the fast tier's continuity test steps, years: P14.T54.b.l's
+/// §C.7 split (decision-p14-t54a-passes §C.7, pre-authorised for 24 by decision-24-cost D5), sized
+/// on 24's times, where the record's path across times costs many times 23's (±100 years took
+/// 292 s, pod, 4 vCPU).
+const FAST_CONTINUITY_YEARS: i64 = 50;
+
+/// P14.T16.b's continuity rerun on whole generated systems: at steps of a year, no present body's
+/// radius, equilibrium temperature or envelope fraction jumps by a relative 10⁻³, except in a step
+/// where a star of its system changes phase or the body's own state changes. The fast tier steps
+/// the first 12 systems over ±[`FAST_CONTINUITY_YEARS`] about the epoch at the test's own
+/// resolution, a year (§C.7's split at 24; not a stride, which would change its statement); the
+/// whole ±H window is
+/// [`radius_temperature_and_envelope_are_continuous_across_the_whole_window`]'s.
 #[test]
 fn radius_temperature_and_envelope_are_continuous_across_the_window() {
-    continuity(generated().iter().take(12), 1);
+    continuity(generated().iter().take(12), 1, FAST_CONTINUITY_YEARS);
+}
+
+/// The continuity test over the first 12 systems across the whole ±H window, a year at a time: the
+/// fast tier's test before §C.7's split at 24, run by name once before 24's blessing message.
+#[test]
+#[ignore = "slow: steps every body of 12 real systems through ±H a year at a time"]
+fn radius_temperature_and_envelope_are_continuous_across_the_whole_window() {
+    continuity(generated().iter().take(12), 1, window_years());
 }
 
 /// The continuity test on the whole ordinary sample.
 #[test]
 #[ignore = "slow: steps every body of 400 real systems through ±H a year at a time"]
 fn radius_temperature_and_envelope_are_continuous_across_the_window_slow() {
-    continuity(generated().iter(), 1);
+    continuity(generated().iter(), 1, window_years());
 }
 
-/// Steps the systems `systems` through ±H at `step_years`, and checks every step (see
-/// [`radius_temperature_and_envelope_are_continuous_across_the_window`]).
-fn continuity<'a>(
-    systems: impl Iterator<Item = &'a (SystemContext, PlanetarySystem)>,
-    step_years: i64,
-) {
-    let window = CLOCK_WINDOW_H.as_julian_years_f64();
+/// H, the clock window's half-width, in whole years.
+fn window_years() -> i64 {
     #[expect(
         clippy::cast_possible_truncation,
         reason = "H is a whole number of years, 1,000"
     )]
-    let steps = (2.0 * window) as i64 / step_years;
+    let years = CLOCK_WINDOW_H.as_julian_years_f64() as i64;
+    years
+}
+
+/// Steps the systems `systems` through ±`half_years` about the epoch at `step_years`, and checks
+/// every step (see [`radius_temperature_and_envelope_are_continuous_across_the_window`]).
+fn continuity<'a>(
+    systems: impl Iterator<Item = &'a (SystemContext, PlanetarySystem)>,
+    step_years: i64,
+    half_years: i64,
+) {
+    let steps = 2 * half_years / step_years;
+    let start = UniverseTime::EPOCH
+        .checked_sub(Span::from_julian_years(half_years).unwrap())
+        .unwrap();
     let mut checked = 0_u64;
     for (ctx, system) in systems {
         if system.bodies().is_empty() {
@@ -1105,7 +2232,7 @@ fn continuity<'a>(
         }
         let mut previous: Option<(Vec<Option<Phase>>, SystemSnapshot)> = None;
         for k in 0..=steps {
-            let t = ClockWindow::START
+            let t = start
                 .checked_add(Span::from_julian_years(k * step_years).unwrap())
                 .unwrap();
             let phases: Vec<Option<Phase>> = ctx
@@ -1144,7 +2271,7 @@ fn continuity<'a>(
             previous = Some((phases, snapshot));
         }
     }
-    assert!(checked > 5_000, "{checked} steps");
+    assert!(checked > 4_000, "{checked} steps");
 }
 
 /// T28's states in whole systems: a body that has ended stays ended, and one present at +H was
@@ -1186,11 +2313,30 @@ fn every_body_s_states_across_the_window_are_a_prefix_of_its_life() {
 /// Across the window, in whole systems: a moon or a ring is never present while its parent is
 /// not, and takes its parent's state then (a giant engulfed by its evolved host takes its moons
 /// and rings with it); a regular or captured moon and a ring are present whenever their parent
-/// is; and a belt member's moon is no exception (P14.T30.b).
+/// is, but for a small moon whose rock has evaporated (P14.T55.b.a, from generator version 28);
+/// and a belt member's moon is no exception (P14.T30.b).
+///
+/// The fast tier walks [`whole_fast`]'s chunk of the sample, and
+/// [`satellites_share_their_parent_s_state_across_the_window_over_the_rest_of_the_sample`] the rest
+/// (P14.T54.b.l's §C.7 split, sized on 24's times: 247 s over the whole sample, pod, 4 vCPU).
 #[test]
 fn satellites_share_their_parent_s_state_across_the_window() {
-    let (mut followed, mut engulfed) = (0u32, 0u32);
-    for (ctx, system) in whole() {
+    satellites_share_their_parent_s_state(whole_fast());
+}
+
+/// [`satellites_share_their_parent_s_state_across_the_window`] over the rest of the sample
+/// ([`whole_rest`]): the slow tier's chunk of P14.T54.b.l's §C.7 split.
+#[test]
+#[ignore = "slow: the satellites of 200 whole systems at ±H, the fast tier's other chunk"]
+fn satellites_share_their_parent_s_state_across_the_window_over_the_rest_of_the_sample() {
+    satellites_share_their_parent_s_state(whole_rest());
+}
+
+/// The body of [`satellites_share_their_parent_s_state_across_the_window`] and its slow twin, over
+/// the systems `systems`.
+fn satellites_share_their_parent_s_state(systems: &'static [(SystemContext, PlanetarySystem)]) {
+    let (mut followed, mut engulfed, mut evaporated) = (0u32, 0u32, 0u32);
+    for (ctx, system) in systems {
         for t in window() {
             let snapshot = system.snapshot_at(ctx, t);
             let state_of = |index: BodyIndex| {
@@ -1208,7 +2354,22 @@ fn satellites_share_their_parent_s_state_across_the_window() {
                 let (own, of_parent) = (state_of(body.index()), state_of(parent));
                 match (of_parent, body.kind()) {
                     (BodyState::Present, BodyKind::Moon(MoonOrigin::GiantImpact)) => {}
-                    (BodyState::Present, _) => assert_eq!(own, BodyState::Present),
+                    // A small moon whose rock has evaporated keeps its own ending, before its
+                    // parent's if its parent has one.
+                    (_, _)
+                        if matches!(
+                            own,
+                            BodyState::Destroyed {
+                                cause: DestructionCause::Evaporated,
+                                at,
+                            } if of_parent.ended_at().is_none_or(|end| at <= end)
+                        ) =>
+                    {
+                        evaporated += 1;
+                    }
+                    (BodyState::Present, _) => {
+                        assert_eq!(own, BodyState::Present, "{:?}", body.index());
+                    }
                     (other, _) => {
                         assert_eq!(own, other, "{:?} of {parent:?}", body.index());
                         followed += 1;
@@ -1225,7 +2386,10 @@ fn satellites_share_their_parent_s_state_across_the_window() {
         }
     }
     assert!(followed > 0, "no satellite of an absent parent");
-    eprintln!("{followed} satellites followed an absent parent, {engulfed} engulfed");
+    eprintln!(
+        "{followed} satellites followed an absent parent, {engulfed} engulfed; {evaporated} \
+         evaporated about a present parent"
+    );
 }
 
 /// Every body's primordial circularisation is T8.e's damping time with Chen and Kipping's median
@@ -1339,8 +2503,8 @@ fn a_query_does_not_depend_on_the_queries_before_it() {
 }
 
 /// Design note 10's close-binary flag is Kraus et al.'s (2016) 47 au cut: a component of a pair
-/// inside it has its planets suppressed and its circumbinary zone takes the pair's plane, and one
-/// of a pair outside it neither.
+/// inside it is flagged and its circumbinary zone takes the pair's plane, and one of a pair outside
+/// it neither.
 #[test]
 fn the_close_binary_flag_and_the_aligned_plane_are_kraus_s_cut() {
     let e = Eccentricity::new(0.3).unwrap();
@@ -1368,7 +2532,7 @@ fn the_close_binary_flag_and_the_aligned_plane_are_kraus_s_cut() {
             },
             "{au} au"
         );
-        let pair = ctx.hierarchy().pairs().next().unwrap().1;
+        let pair = ctx.hierarchy().unwrap().pairs().next().unwrap().1;
         let aligned = SystemPlane::of_orbit(pair.orientation());
         let barycentre = system.host(OrbitHost::Barycentre).unwrap();
         assert_eq!(
@@ -1385,10 +2549,32 @@ fn the_close_binary_flag_and_the_aligned_plane_are_kraus_s_cut() {
 
 /// P14.T30.b: on whole systems, every body lies inside its zone and the strip radius at ±H, and
 /// every population inside the strip radius; an unborn system's bodies are all not yet formed.
+///
+/// The fast tier walks [`whole_fast`]'s chunk of the sample, and
+/// [`every_body_of_the_rest_of_the_sample_lies_inside_its_zone_and_the_strip_radius`] the rest
+/// (P14.T54.b.l's §C.7 split, sized on 24's times: 247 s over the whole sample, pod, 4 vCPU).
 #[test]
 fn every_body_of_a_whole_system_lies_inside_its_zone_and_the_strip_radius() {
+    every_body_lies_inside_its_zone_and_the_strip_radius(whole_fast());
+    unborn_systems_hold_no_formed_body();
+}
+
+/// [`every_body_of_a_whole_system_lies_inside_its_zone_and_the_strip_radius`] over the rest of the
+/// sample ([`whole_rest`]): the slow tier's chunk of P14.T54.b.l's §C.7 split.
+#[test]
+#[ignore = "slow: the bodies of 200 whole systems at ±H, the fast tier's other chunk"]
+fn every_body_of_the_rest_of_the_sample_lies_inside_its_zone_and_the_strip_radius() {
+    every_body_lies_inside_its_zone_and_the_strip_radius(whole_rest());
+}
+
+/// The sample's half of
+/// [`every_body_of_a_whole_system_lies_inside_its_zone_and_the_strip_radius`], over the systems
+/// `systems`.
+fn every_body_lies_inside_its_zone_and_the_strip_radius(
+    systems: &'static [(SystemContext, PlanetarySystem)],
+) {
     let mut checked = 0;
-    for (ctx, system) in whole() {
+    for (ctx, system) in systems {
         let strip = ctx.strip_radius();
         for t in window() {
             for record in system.snapshot_at(ctx, t).bodies() {
@@ -1427,7 +2613,13 @@ fn every_body_of_a_whole_system_lies_inside_its_zone_and_the_strip_radius() {
             }
         }
     }
-    assert!(checked > 1_000, "{checked}");
+    assert!(checked > 500, "{checked}");
+}
+
+/// The unborn half of
+/// [`every_body_of_a_whole_system_lies_inside_its_zone_and_the_strip_radius`]: an unborn system's
+/// bodies are all not yet formed.
+fn unborn_systems_hold_no_formed_body() {
     for i in 0..20 {
         let ctx = synthetic_star(
             id(900 + i),
@@ -1509,8 +2701,16 @@ fn a_companion_widens_by_its_regime() {
 fn drifting_records(
     t: UniverseTime,
 ) -> Vec<(&'static SystemContext, &'static PlanetarySystem, BodyRecord)> {
+    drifting_records_in(whole(), t)
+}
+
+/// [`drifting_records`] over the systems `systems`.
+fn drifting_records_in(
+    systems: &'static [(SystemContext, PlanetarySystem)],
+    t: UniverseTime,
+) -> Vec<(&'static SystemContext, &'static PlanetarySystem, BodyRecord)> {
     let mut found = Vec::new();
-    for (ctx, system) in whole() {
+    for (ctx, system) in systems {
         for record in system.snapshot_at(ctx, t).bodies() {
             if record
                 .orbit()
@@ -1561,7 +2761,10 @@ fn last_instant_of(orbit: &BodyOrbit) -> UniverseTime {
 /// Records are one per cell where cells are halved or cut too: before the window's start, at the
 /// epoch and in the window's last cells, where the sample's 2¹⁶ s cells sit, at the reference, the
 /// middle and the last instant of each cell, bit for bit and whatever was asked before (P14.T45.a).
+/// An order-independence test, so §C.7 never splits it: at 24 it takes the slow tier whole
+/// (P14.T54.b.l; 977 s, pod, 4 vCPU, 71 s on the owner's desktop at 23).
 #[test]
+#[ignore = "slow: an order-independence test over the drift cells at every time in them"]
 fn records_of_halved_and_cut_drift_cells_are_the_same_at_every_time_in_them() {
     use crate::planetary::drift::DRIFT_CELL_MAX_LOG2;
     let before_start = ClockWindow::START
@@ -1677,14 +2880,34 @@ fn a_drifting_record_s_velocity_is_the_derivative_of_its_position() {
 
 /// The share of evolving orbits whose cells fall to the smallest size, over the sample at three
 /// times, counting the cells that neither a segment nor a state cut: under 10⁻³ (P14.T45.a).
+///
+/// The fast tier walks [`whole_fast`]'s chunk of the sample, and
+/// [`few_evolving_orbits_fall_to_the_smallest_drift_cell_over_the_rest_of_the_sample`] the rest
+/// (P14.T54.b.l's §C.7 split, sized on 24's times: 246 s over the whole sample, pod, 4 vCPU).
 #[test]
 fn few_evolving_orbits_fall_to_the_smallest_drift_cell() {
+    few_evolving_orbits_fall_to_the_smallest_drift_cell_in(whole_fast());
+}
+
+/// [`few_evolving_orbits_fall_to_the_smallest_drift_cell`] over the rest of the sample
+/// ([`whole_rest`]): the slow tier's chunk of P14.T54.b.l's §C.7 split.
+#[test]
+#[ignore = "slow: the drift cells of 200 whole systems at three times, the fast tier's other chunk"]
+fn few_evolving_orbits_fall_to_the_smallest_drift_cell_over_the_rest_of_the_sample() {
+    few_evolving_orbits_fall_to_the_smallest_drift_cell_in(whole_rest());
+}
+
+/// The body of [`few_evolving_orbits_fall_to_the_smallest_drift_cell`] and its slow twin, over the
+/// systems `systems`.
+fn few_evolving_orbits_fall_to_the_smallest_drift_cell_in(
+    systems: &'static [(SystemContext, PlanetarySystem)],
+) {
     use crate::planetary::drift::{DRIFT_CELL_MAX_LOG2, DRIFT_CELL_MIN_LOG2};
     let (mut cells, mut floor) = (0_u32, 0_u32);
     let mut sizes = [0_u32; DRIFT_CELL_MAX_LOG2 as usize + 1];
     let later = UniverseTime::from_julian_years(500).expect("in the window");
     for t in [ClockWindow::START, UniverseTime::EPOCH, later] {
-        for (_, _, record) in drifting_records(t) {
+        for (_, _, record) in drifting_records_in(systems, t) {
             let orbit = record.orbit().ok().expect("drifting");
             let start = orbit.drift().expect("drifting").reference();
             let Some(until) = orbit.valid_until() else {
@@ -1708,7 +2931,7 @@ fn few_evolving_orbits_fall_to_the_smallest_drift_cell() {
             }
         }
     }
-    assert!(cells > 300, "{cells} cells");
+    assert!(cells > 150, "{cells} cells");
     assert!(
         f64::from(floor) < 1e-3 * f64::from(cells),
         "{floor} of {cells} cells at the floor; sizes by log2 {sizes:?}"
@@ -1796,7 +3019,7 @@ fn a_receding_moon_s_record_before_the_window_is_cut_at_its_planet_s_change() {
             let Part::Moon(moon) = &body.part else {
                 continue;
             };
-            let (alone, until) = moon_trajectory(ctx, moon, t, None);
+            let (alone, until) = moon_trajectory(ctx, moon, t, (None, None));
             let (Some(drift), Some(until)) = (alone.drift(), until) else {
                 continue;
             };
@@ -1805,7 +3028,7 @@ fn a_receding_moon_s_record_before_the_window_is_cut_at_its_planet_s_change() {
             if change >= until {
                 continue;
             }
-            let (cut, cut_until) = moon_trajectory(ctx, moon, t, Some(change));
+            let (cut, cut_until) = moon_trajectory(ctx, moon, t, (Some(change), None));
             assert_eq!(cut_until, Some(change), "{:?}", body.index);
             assert!(cut.drift().is_some(), "{:?}", body.index);
             checked += 1;
@@ -1905,13 +3128,17 @@ fn a_planets_only_system_holds_no_rotation() {
 }
 
 /// P14.T46.a (a): a regular moon's locking time and its held law's are one law, at one moment of
-/// inertia: they differ only by their primordial periods, the moon derivation's fixed 15 h and the
-/// law's drawn one (τ ∝ ω), to 10⁻¹².
+/// inertia and its own tides (P14.T56.d): they differ only by their primordial periods, the moon
+/// derivation's fixed 15 h and the law's drawn one (τ ∝ ω), to 10⁻¹², for every moon its first
+/// round held (P14.T54.a's Q2, whose own test holds their tides to the bit:
+/// `a_moon_s_law_is_held_after_at_most_two_rounds`). A moon its second round held reads its record's
+/// tides under that round's law, not under the first's, and is listed there.
 #[test]
 fn a_regular_moon_has_one_locking_time() {
-    let mut moons = 0;
+    let (mut moons, mut second) = (0, 0);
     for (ctx, system) in whole() {
         let snapshot = system.snapshot_at(ctx, parent_time(ctx));
+        let epoch = Epoch::new(system, ctx, parent_time(ctx));
         for record in snapshot.bodies() {
             if record.identity().kind() != BodyKind::Moon(MoonOrigin::Regular) {
                 continue;
@@ -1924,12 +3151,26 @@ fn a_regular_moon_has_one_locking_time() {
                 continue;
             };
             let body = system.body(record.index()).unwrap();
-            let Part::Moon(moon) = &body.part else {
-                unreachable!("a regular moon is a moon")
+            let (Part::Moon(moon), OrbitHost::Body(parent)) = (&body.part, body.host) else {
+                unreachable!("a regular moon is a moon of a body")
             };
             let elements = moon
                 .satellite
                 .orbit_at(&moon.parent, ctx.age_at(parent_time(ctx)));
+            let primary = system.body(parent).unwrap();
+            let host = fate_host(ctx, system.zone_of(primary));
+            let fate = system.fate_of(primary, &host);
+            let cosines = HourCosines::new();
+            let now = system.parent_now(&epoch, &cosines, parent, &fate);
+            let held = system
+                .moon_law(&epoch, &cosines, body, moon, (&now, &fate))
+                .unwrap();
+            assert_eq!(held.law, rotation, "{:?}", record.index());
+            if matches!(held.round, MoonRound::Second { .. }) {
+                second += 1;
+                continue;
+            }
+            let derived = system.record_moon(&epoch, body, (&now, &fate)).unwrap();
             let mass = Kilograms::from(*mass);
             let primary = Kilograms::new(
                 elements.gravitational_parameter().value() / GRAVITATIONAL_CONSTANT - mass.value(),
@@ -1941,6 +3182,7 @@ fn a_regular_moon_has_one_locking_time() {
                 elements.semi_major_axis(),
                 bulk.class(),
                 &bulk.fractions(),
+                derived.spin_tides(),
             );
             let fixed = crate::planetary::moons::regular::MOON_PRIMORDIAL_PERIOD_HOURS * 3_600.0;
             let expected =
@@ -1954,7 +3196,96 @@ fn a_regular_moon_has_one_locking_time() {
             moons += 1;
         }
     }
+    eprintln!("{moons} regular moons held after round 1, {second} after round 2");
     assert!(moons > 100, "{moons}");
+}
+
+/// P14.T14.d: every present planet's locking time and the heaviest moon it keeps are those of the
+/// tides its bulk section gives, with its one moment of inertia, bit for bit: `rotation::tides`.
+#[test]
+fn a_planet_s_locking_time_and_moon_limit_take_its_tides() {
+    use crate::planetary::derive::OrbitSense;
+    use crate::planetary::derive::limits::{TidalPlanet, moon_mass_limit};
+    use crate::planetary::derive::rotation::{
+        SpinningBody, moment_of_inertia_factor, tidal_locking_time, tides,
+    };
+    use crate::units::{EarthRadii, Seconds};
+    let t = UniverseTime::EPOCH;
+    let mut planets = 0;
+    let mut enveloped = 0;
+    for (ctx, system) in whole() {
+        // The rotation's time is the epoch for a system born by then (`parent_time`).
+        if ctx.age_at_epoch().value() <= 0.0 {
+            continue;
+        }
+        let epoch = Epoch::new(system, ctx, t);
+        for body in system.bodies() {
+            if !matches!(body.part, Part::Planet(_)) {
+                continue;
+            }
+            let host = fate_host(ctx, system.zone_of(body));
+            let fate = system.fate_of(body, &host);
+            let label = label::label(system, body.index).unwrap();
+            let (record, now) =
+                system.primary_record(&epoch, &HourCosines::new(), body, label, &fate);
+            let (Section::Ok(bulk), Section::Ok(mass), Section::Ok(orbit), Some(derived)) =
+                (record.bulk(), record.mass(), record.orbit(), now.derived)
+            else {
+                continue;
+            };
+            let (class, fractions) = (bulk.class(), bulk.fractions());
+            let (kg, r) = (Kilograms::from(*mass), Metres::from(bulk.radius()));
+            // Both readers take the tides of these kilograms and metres.
+            let (k2, q) = tides(
+                class,
+                EarthMasses::from(kg),
+                EarthRadii::from(r),
+                &fractions,
+            );
+
+            // P14.T15's limit, at the prograde limit and the age it was derived at.
+            let tidal = TidalPlanet::new(kg, r, k2, q).unwrap();
+            let age =
+                Years::new(ctx.age_at_epoch().value() + t.since_epoch().as_julian_years_f64());
+            let limit = moon_mass_limit(
+                derived.satellite_limit(OrbitSense::Prograde),
+                &tidal,
+                Seconds::from(age),
+            );
+            assert_same_bits(
+                derived.maximum_moon_mass().value(),
+                EarthMasses::from(limit).value(),
+            );
+
+            // P14.T14.b's locking time, on the orbit about the primary the rotation reads.
+            let rotation = system
+                .rotation_of(ctx, body.index)
+                .unwrap()
+                .expect("a present planet of a whole system holds its rotation");
+            let elements = fate.at(t).orbit().copied().unwrap_or(*orbit.elements());
+            let primary = Kilograms::new(
+                elements.gravitational_parameter().value() / GRAVITATIONAL_CONSTANT - kg.value(),
+            );
+            let spinning =
+                SpinningBody::new(kg, r, moment_of_inertia_factor(class, &fractions), k2, q)
+                    .unwrap();
+            let tau = tidal_locking_time(
+                &spinning,
+                rotation.primordial_period(),
+                elements.semi_major_axis(),
+                primary,
+            );
+            assert_same_bits(rotation.locking_time().value(), tau.value());
+            planets += 1;
+            if matches!(class, PlanetClass::SubNeptune | PlanetClass::IceGiant) {
+                enveloped += 1;
+            }
+        }
+    }
+    assert!(
+        planets > 300 && enveloped > 30,
+        "{planets} planets, {enveloped} enveloped"
+    );
 }
 
 /// P14.T46.d (d): the figure section's states by kind, and its level: `degrade(MassAndOrbit)`
@@ -2003,8 +3334,12 @@ fn the_figure_section_by_kind_and_level() {
 }
 
 /// P14.T47.c (c) and T47.b (b): the photometry section's states by kind and level, `Ok` exactly
-/// where the bulk is; every sampled body's p q is at most 1 per band, and a generated airless-ice
-/// body or snowball states a ratio within 5% of 1.
+/// where the bulk is; every sampled body's p q is at most 1 per band, and a generated snowball
+/// states a ratio within 5% of 1. A generated airless-ice body states 0.43 × 0.80 ÷ `A_ref` where
+/// its p is not capped, its reference the fresh `H2O` frost's (P14.T51.b), where Ganymede's
+/// measured Bond albedo, whose p the row draws, is 0.35 (`photometry::tests`, recorded in the bless
+/// note): the closed form stands until the weathered icy regolith, its owner P14.T49.m
+/// (decision-p14-t54a-ganymede §1b), darkens the reference.
 #[test]
 fn the_photometry_section_by_kind_and_level() {
     use crate::planetary::derive::photometry::PhaseTemplate;
@@ -2021,13 +3356,32 @@ fn the_photometry_section_by_kind_and_level() {
                     for (p, q) in [(p.b, q.b), (p.v, q.v), (p.r, q.r)] {
                         assert!(p > 0.0 && p * q <= 1.0 + 1e-12, "{:?}", record.index());
                     }
-                    if matches!(
-                        photometry.template(),
-                        PhaseTemplate::AirlessIce | PhaseTemplate::Snowball
-                    ) {
-                        let ratio = photometry.bond_ratio();
-                        assert!((ratio - 1.0).abs() < 0.05, "{:?}: {ratio}", record.index());
-                        borrowed += 1;
+                    let ratio = photometry.bond_ratio();
+                    match photometry.template() {
+                        PhaseTemplate::Snowball => {
+                            assert!((ratio - 1.0).abs() < 0.05, "{:?}: {ratio}", record.index());
+                            borrowed += 1;
+                        }
+                        PhaseTemplate::AirlessIce => {
+                            let reference =
+                                PhaseTemplate::AirlessIce.row().reference_bond().value();
+                            assert!(
+                                ratio <= 0.43 * 0.80 / reference + 1e-9,
+                                "{:?}: {ratio}",
+                                record.index()
+                            );
+                            borrowed += 1;
+                        }
+                        PhaseTemplate::Moon
+                        | PhaseTemplate::Mercury
+                        | PhaseTemplate::Mars
+                        | PhaseTemplate::Venus
+                        | PhaseTemplate::Earth
+                        | PhaseTemplate::Jupiter
+                        | PhaseTemplate::Saturn
+                        | PhaseTemplate::Uranus
+                        | PhaseTemplate::Neptune
+                        | PhaseTemplate::Magma => {}
                     }
                     drawn += 1;
                 }
@@ -2053,8 +3407,31 @@ fn the_photometry_section_by_kind_and_level() {
 
 /// P14.T46.c (c): a body's flattening is continuous in time across the clock window, except where
 /// its law locks between two times, a recorded state change.
+///
+/// The fast tier walks the first [`FAST_FLATTENING`] of the sample's first 60 systems, and
+/// [`the_flattening_is_continuous_in_time_over_the_rest_of_its_systems`] the rest (P14.T54.b.l's
+/// §C.7 split, sized on 24's times: 415 s over the 60, pod, 4 vCPU).
 #[test]
 fn the_flattening_is_continuous_in_time() {
+    let checked = the_flattening_is_continuous_in(&whole_fast()[..FAST_FLATTENING]);
+    assert!(checked > 300, "{checked}");
+}
+
+/// [`the_flattening_is_continuous_in_time`] over the rest of its 60 systems: the slow tier's chunk
+/// of P14.T54.b.l's §C.7 split.
+#[test]
+#[ignore = "slow: the flattening of 40 whole systems at 17 times, the fast tier's other chunk"]
+fn the_flattening_is_continuous_in_time_over_the_rest_of_its_systems() {
+    let checked = the_flattening_is_continuous_in(&whole_fast()[FAST_FLATTENING..60]);
+    assert!(checked > 600, "{checked}");
+}
+
+/// How many of [`the_flattening_is_continuous_in_time`]'s 60 systems the fast tier walks.
+const FAST_FLATTENING: usize = 20;
+
+/// The body of [`the_flattening_is_continuous_in_time`] and its slow twin, over the systems
+/// `systems`: the pairs of times checked.
+fn the_flattening_is_continuous_in(systems: &[(SystemContext, PlanetarySystem)]) -> u32 {
     let step = CLOCK_WINDOW_H.as_seconds_f64() / 8.0;
     let times: Vec<UniverseTime> = (-8_i32..=8)
         .map(|k| {
@@ -2064,17 +3441,21 @@ fn the_flattening_is_continuous_in_time() {
         })
         .collect();
     let mut checked = 0;
-    for (ctx, system) in whole().iter().take(60) {
+    for (ctx, system) in systems {
         for body in system.bodies() {
             let Some(rotation) = system.rotation_of(ctx, body.index()).unwrap() else {
                 continue;
             };
-            let flattening = |t: UniverseTime| {
-                let record = system.body_at(ctx, body.index(), t).unwrap();
-                record.figure().ok().map(|f| f.spheroid().flattening())
-            };
-            for pair in times.windows(2) {
-                let (Some(before), Some(after)) = (flattening(pair[0]), flattening(pair[1])) else {
+            // Each time's record built once (P14.T54.b.l: at 24 a record costs many times 23's).
+            let flattening: Vec<Option<f64>> = times
+                .iter()
+                .map(|&t| {
+                    let record = system.body_at(ctx, body.index(), t).unwrap();
+                    record.figure().ok().map(|f| f.spheroid().flattening())
+                })
+                .collect();
+            for (pair, values) in times.windows(2).zip(flattening.windows(2)) {
+                let (Some(before), Some(after)) = (values[0], values[1]) else {
                     continue;
                 };
                 let locks = rotation
@@ -2093,5 +3474,11155 @@ fn the_flattening_is_continuous_in_time() {
             }
         }
     }
-    assert!(checked > 1_000, "{checked}");
+    eprintln!("{checked} pairs of times checked");
+    checked
+}
+
+/// P14.T24.a's surface conditions and P14.T24.b's global figures, published from the 21 → 22
+/// batch's bump: `hooks_at` repeats the record's surface section (P14.T48.e) in the same state,
+/// every present body with a solid surface has both, a moon's read under its planet's orbit, and
+/// every gas-envelope body neither.
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one walk of the sample's hooks, each body's surface checked and tallied"
+)]
+fn the_hooks_publish_the_record_s_surface_conditions_and_figures() {
+    let t = UniverseTime::EPOCH;
+    let (mut planets, mut moons, mut envelopes) = (0_u32, 0_u32, 0_u32);
+    let mut regimes = std::collections::BTreeMap::new();
+    let mut fields = std::collections::BTreeMap::new();
+    let mut craters = CraterTally::default();
+    let mut histories = HistoryTally::default();
+    let mut cover = CoverTally::default();
+    for (ctx, system) in whole().iter().take(60) {
+        for index in system.indices() {
+            let Some(open) = system.hooks_at(ctx, index, t).unwrap() else {
+                continue;
+            };
+            assert_eq!(open.figures().state(), open.surface().state(), "{index:?}");
+            let record = system.body_at(ctx, index, t).unwrap();
+            assert_eq!(
+                open.surface().state(),
+                record.surface().state(),
+                "{index:?}"
+            );
+            if let Section::Ok(surface) = record.surface() {
+                assert_eq!(open.surface(), &Section::Ok(surface.conditions().clone()));
+                assert_eq!(open.figures(), &Section::Ok(surface.figures().clone()));
+            }
+            let present = record.identity().state() == BodyState::Present;
+            match open.surface() {
+                Section::Ok(conditions) => {
+                    assert!(present, "{index:?}");
+                    let Section::Ok(bulk) = record.bulk() else {
+                        panic!("{index:?} has conditions but no bulk section");
+                    };
+                    assert!(
+                        matches!(bulk.class(), PlanetClass::Rocky | PlanetClass::Icy),
+                        "{index:?} is a {:?}",
+                        bulk.class()
+                    );
+                    let sum = conditions.gases().iter().fold(0.0, |sum, &(_, x)| sum + x);
+                    assert!(
+                        conditions.gases().is_empty() || (sum - 1.0).abs() < 1e-9,
+                        "{index:?}: {sum}"
+                    );
+                    assert!(conditions.day_night_contrast_k() >= 0.0);
+                    let Section::Ok(figures) = open.figures() else {
+                        panic!("{index:?} has conditions but no figures");
+                    };
+                    // The heat flow its conditions read: its published pass's context's (rule (f)).
+                    let heat_flow = match record.surface() {
+                        Section::Ok(surface) => surface
+                            .basis()
+                            .map_or(figures.heat_flow(), |basis| basis.heat_flow),
+                        _ => figures.heat_flow(),
+                    };
+                    check_published_figures(index, conditions, (figures, heat_flow));
+                    let cover_of = (bulk.surface_gravity(), water_sea(&record));
+                    check_published_cover(index, conditions, figures, cover_of);
+                    assert_same_bits(
+                        figures.craters().system_age().value(),
+                        ctx.age_at(t).value() / 1e9,
+                    );
+                    *regimes.entry(figures.tectonic_regime()).or_insert(0_u32) += 1;
+                    *fields.entry(figures.magnetic_field()).or_insert(0_u32) += 1;
+                    craters.count(figures);
+                    histories.count(conditions, figures);
+                    cover.count(conditions, figures);
+                    match record.identity().kind() {
+                        BodyKind::Moon(_) => moons += 1,
+                        BodyKind::Planet | BodyKind::DwarfPlanet => planets += 1,
+                        kind @ (BodyKind::Ring
+                        | BodyKind::Belt(_)
+                        | BodyKind::CometaryHalo
+                        | BodyKind::ProtoplanetaryDisc
+                        | BodyKind::DebrisDisc
+                        | BodyKind::Unresolved) => {
+                            panic!("{index:?}, a {kind:?}, has surface conditions")
+                        }
+                    }
+                }
+                Section::NotApplicable => {
+                    if present {
+                        let Section::Ok(bulk) = record.bulk() else {
+                            panic!("{index:?} is present with no bulk section");
+                        };
+                        // From 24 a solid class under a supercritical envelope publishes none,
+                        // its envelope not modelled (P14.T53.b part 2).
+                        assert!(
+                            matches!(
+                                bulk.class(),
+                                PlanetClass::SubNeptune
+                                    | PlanetClass::IceGiant
+                                    | PlanetClass::GasGiant
+                            ) || (bulk.class().has_solid_surface()
+                                && record.envelope() == &Section::NotModelled),
+                            "{index:?} is a {:?}",
+                            bulk.class()
+                        );
+                        envelopes += 1;
+                    }
+                }
+                Section::NotModelled => {
+                    assert_eq!(open.bulk(), &Section::NotModelled, "{index:?}");
+                }
+                Section::NotResolved => panic!("{index:?}: hooks are never degraded"),
+            }
+        }
+    }
+    eprintln!("{planets} planets and {moons} moons with conditions, {envelopes} envelopes");
+    eprintln!("regimes {regimes:?}; fields {fields:?}");
+    craters.report();
+    histories.report();
+    cover.report();
+    assert!(planets > 20 && moons > 5 && envelopes > 20);
+}
+
+/// The area of `record`'s water sea, its surface's liquid `H2O` condensate's, where it has one.
+fn water_sea(record: &BodyRecord) -> Option<f64> {
+    use crate::planetary::chem::partition::{CondensateEntry, CondensatePhase};
+    let Section::Ok(surface) = record.surface() else {
+        return None;
+    };
+    surface
+        .condensates()
+        .entry(Gas::Water.substance(), CondensatePhase::Liquid)
+        .map(CondensateEntry::area_fraction)
+}
+
+/// The published relief and cover of one body follow their rules (P14.T48.a, P14.T24.b;
+/// science-p14-t24b-laws §4.1–4.6 and §4.x): continents only on a mobile lid; V in [0, `V_s`] and
+/// the constructional share under the strength limit, `h♂` (g♂ ÷ g) ÷ 4, at the body's gravity
+/// `gravity`; every fraction in [0, 1] and each list summing to its fraction; water's ocean its
+/// `sea`, its condensate's own layer's fill (decision-p14-t54a-water-consistency §1), or where it
+/// has none only under a `Snowball`'s ice; no ice where the coldest zone is above the melting
+/// point; θ the potential ocean's; and the cloud in [0, 1].
+fn check_published_cover(
+    index: BodyIndex,
+    conditions: &SurfaceConditions,
+    figures: &GlobalFigures,
+    (gravity, sea): (crate::units::MetresPerSecondSquared, Option<f64>),
+) {
+    use hooks::figures::relief::{
+        CONSTRUCTIONAL_REFERENCE_GRAVITY, TALLEST_EDIFICE_RELIEF, VOLCANISM_SATURATION,
+    };
+    let v = figures.volcanism();
+    assert!(
+        (0.0..=VOLCANISM_SATURATION).contains(&v),
+        "{index:?}: V {v}"
+    );
+    let limit = TALLEST_EDIFICE_RELIEF.value() * CONSTRUCTIONAL_REFERENCE_GRAVITY.value()
+        / gravity.value()
+        / 4.0;
+    let built = figures.relief().constructional().value();
+    assert!(
+        built <= limit * (1.0 + 1e-12),
+        "{index:?}: {built} m over {limit}"
+    );
+    if figures.ice_fraction() > 0.0 {
+        // The coldest zone: the zonal profile's least point, or a locked world's night, which the
+        // climate's range bounds.
+        let coldest = conditions
+            .zonal_points()
+            .iter()
+            .fold(conditions.climate_range().0.value(), |low, &(_, t)| {
+                low.min(t)
+            });
+        assert!(
+            coldest < hooks::figures::cover::melting_point().value(),
+            "{index:?}: ice where no zone is below melting ({coldest} K)"
+        );
+    }
+    let f_c = figures.continental_fraction();
+    assert!((0.0..=0.7).contains(&f_c), "{index:?}: {f_c}");
+    if f_c > 0.0 {
+        assert_eq!(
+            figures.tectonic_regime(),
+            TectonicRegime::MobileLid,
+            "{index:?}"
+        );
+    }
+    assert!(
+        figures.volcanism() >= 0.0 && figures.volcanism().is_finite(),
+        "{index:?}"
+    );
+    assert!(figures.sigma_h().value() > 0.0, "{index:?}");
+    // The record's liquids and ices are P14.T51.a's published condensates: each substance listed
+    // once, the lists within the whole surface to rounding, and each fraction its list's sum held
+    // at 1, which a list divided by its total sums back to only to rounding.
+    for (fraction, list) in [
+        (figures.ocean_fraction(), figures.surface_liquids()),
+        (figures.ice_fraction(), figures.surface_ices()),
+    ] {
+        for (k, &(id, _)) in list.iter().enumerate() {
+            assert!(list[..k].iter().all(|&(other, _)| other != id), "{index:?}");
+        }
+        assert!((0.0..=1.0).contains(&fraction), "{index:?}: {fraction}");
+        let sum = list.iter().fold(0.0, |sum, &(_, f)| sum + f);
+        assert!(sum <= 1.0 + 1e-12, "{index:?}: {list:?}");
+        assert_same_bits(if sum > 1.0 { 1.0 } else { sum }, fraction);
+    }
+    assert!(
+        (0.0..=1.0).contains(&figures.potential_ocean()),
+        "{index:?}"
+    );
+    assert_eq!(
+        figures.ocean_weight(),
+        hooks::surface::OceanWeight::of_potential_ocean(figures.potential_ocean()),
+        "{index:?}"
+    );
+    // Water's published liquid is its condensate's `sea`, the share of the basins its own layer
+    // fills (decision-p14-t54a-water-consistency §1), or where it has none a `Snowball`'s ocean
+    // under its ice at its potential ocean (W3 (b)); each is scaled down with the other liquids
+    // where together they would cover more than the surface (`within_the_surface`). Any other
+    // liquid is the partition's own sea (P14.T51.a), which the potential ocean, water's, does not
+    // read.
+    let water = Gas::Water.substance();
+    let ocean = figures
+        .surface_liquids()
+        .iter()
+        .find(|&&(id, _)| id == water)
+        .map_or(0.0, |&(_, f)| f);
+    let liquids = figures.ocean_fraction();
+    let whole = sea.unwrap_or(figures.potential_ocean());
+    if ocean > 0.0 && liquids < 1.0 - 1e-9 {
+        assert_same_bits(ocean, whole);
+    }
+    assert!(
+        ocean <= whole * (1.0 + 1e-12),
+        "{index:?}: {ocean} against {whole}"
+    );
+    if !conditions.liquid_water() && ocean > 0.0 {
+        assert!(
+            hooks::figures::cover::under_ice_ocean(
+                SurfaceState::Snowball,
+                figures.surface_water(),
+                conditions.mean_surface_temperature(),
+                figures.heat_flow(),
+            ),
+            "{index:?}: an ocean with no liquid at the surface lies under a Snowball's ice"
+        );
+    }
+    assert!((0.0..=1.0).contains(&figures.cloud_fraction()), "{index:?}");
+}
+
+/// The published relief and cover's spread over a sample, for the record (P14.T48.a, P14.T24.b):
+/// the continents, the volcanism levels, `σ_h`'s range, the oceans published and held back, the
+/// ice and the ocean worlds.
+#[derive(Debug, Default)]
+struct CoverTally {
+    bodies: u32,
+    continents: u32,
+    greatest_continents: f64,
+    volcanic: u32,
+    greatest_volcanism: f64,
+    sigma_h: Option<(f64, f64)>,
+    oceans: u32,
+    ocean_worlds: u32,
+    potential_only: u32,
+    iced: u32,
+    wholly_iced: u32,
+    under_ice: u32,
+    continents_without_epoch: u32,
+    beyond_calibration: u32,
+    over_20_km: u32,
+}
+
+impl CoverTally {
+    /// Counts `figures`' relief and cover, published with `conditions`.
+    fn count(&mut self, conditions: &SurfaceConditions, figures: &GlobalFigures) {
+        self.bodies += 1;
+        let f_c = figures.continental_fraction();
+        if f_c > 0.0 {
+            self.continents += 1;
+            self.greatest_continents = self.greatest_continents.max(f_c);
+            self.continents_without_epoch += u32::from(figures.wet_epoch().is_none());
+        }
+        self.beyond_calibration += u32::from(figures.volcanism() > 2.76);
+        self.over_20_km += u32::from(figures.sigma_h().value() > 20e3);
+        if figures.volcanism() > 0.01 {
+            self.volcanic += 1;
+        }
+        self.greatest_volcanism = self.greatest_volcanism.max(figures.volcanism());
+        let sigma = figures.sigma_h().value();
+        self.sigma_h = Some(self.sigma_h.map_or((sigma, sigma), |(low, high)| {
+            (low.min(sigma), high.max(sigma))
+        }));
+        if figures.ocean_fraction() > 0.0 {
+            self.oceans += 1;
+            self.under_ice += u32::from(!conditions.liquid_water());
+            self.ocean_worlds += u32::from(figures.ocean_fraction() >= 1.0);
+        } else if figures.potential_ocean() > 0.0 {
+            self.potential_only += 1;
+        }
+        if figures.ice_fraction() > 0.0 {
+            self.iced += 1;
+            self.wholly_iced += u32::from(figures.ice_fraction() >= 1.0);
+        }
+    }
+
+    /// Prints the tally, and checks that the strength limit binds somewhere on the sample
+    /// (science-p14-t24b-laws §4.x.1).
+    fn report(&self) {
+        assert_same_bits(
+            self.greatest_volcanism,
+            hooks::figures::relief::VOLCANISM_SATURATION,
+        );
+        eprintln!(
+            "cover over {} bodies: {} with continents (greatest {:.3}, {} with no epoch); {} with \
+             V over 0.01 (greatest {:.3}, {} over 2.76); σ_h {:?} m ({} over 20 km); {} oceans \
+             published ({} under ice, {} ocean worlds), {} potential oceans held back; {} iced \
+             ({} wholly)",
+            self.bodies,
+            self.continents,
+            self.greatest_continents,
+            self.continents_without_epoch,
+            self.volcanic,
+            self.greatest_volcanism,
+            self.beyond_calibration,
+            self.sigma_h,
+            self.over_20_km,
+            self.oceans,
+            self.under_ice,
+            self.ocean_worlds,
+            self.potential_only,
+            self.iced,
+            self.wholly_iced
+        );
+    }
+}
+
+/// The published volatile histories' spread over a sample, for the record (P14.T48.b): the bodies
+/// wet now, those with a past epoch and their longest span, those wet now by their flag with no
+/// epoch, and those from a colder state.
+#[derive(Debug, Default)]
+struct HistoryTally {
+    wet_now: u32,
+    past: u32,
+    longest_past_gyr: f64,
+    flagged_without: u32,
+    from_colder: u32,
+}
+
+impl HistoryTally {
+    /// Counts `figures`' history, published with `conditions`.
+    fn count(&mut self, conditions: &SurfaceConditions, figures: &GlobalFigures) {
+        match figures.wet_epoch() {
+            Some(epoch) if epoch.end().value() <= 0.0 => self.wet_now += 1,
+            Some(epoch) => {
+                self.past += 1;
+                let span = epoch.start().value() - epoch.end().value();
+                self.longest_past_gyr = self.longest_past_gyr.max(span);
+            }
+            None => self.flagged_without += u32::from(conditions.liquid_water()),
+        }
+        self.from_colder += u32::from(figures.from_colder());
+    }
+
+    /// Prints the tally.
+    fn report(&self) {
+        eprintln!(
+            "wet epochs: {} to the present, {} past (longest {:.3} Gyr); {} liquid by the flag \
+             with none; {} from a colder state",
+            self.wet_now, self.past, self.longest_past_gyr, self.flagged_without, self.from_colder
+        );
+    }
+}
+
+/// The published crater contracts' spread over a sample, for the record (P14.T24.b, T48.c): the
+/// crusts, the least and greatest rate, the surfaces under 1 Gyr old, and each source rule's
+/// bodies and greatest abundance.
+#[derive(Debug, Default)]
+struct CraterTally {
+    crusts: std::collections::BTreeMap<Crust, u32>,
+    abundances: std::collections::BTreeMap<&'static str, (u32, f64)>,
+    rates: Option<(f64, f64)>,
+    young: u32,
+}
+
+impl CraterTally {
+    /// Counts `figures`' contract.
+    fn count(&mut self, figures: &GlobalFigures) {
+        let impactors = figures.impactors();
+        *self.crusts.entry(impactors.crust()).or_insert(0) += 1;
+        let rule = match impactors.source() {
+            hooks::figures::ImpactorSource::InBelt { .. } => "in belt",
+            hooks::figures::ImpactorSource::Comets => "comets",
+            hooks::figures::ImpactorSource::NearestBelt { .. } => "nearest belt",
+            hooks::figures::ImpactorSource::InnerComets { .. } => "inner comets",
+        };
+        let (bodies, most) = self.abundances.entry(rule).or_insert((0, 0.0));
+        *bodies += 1;
+        *most = most.max(impactors.abundance());
+        let rate = impactors.rate();
+        self.rates = Some(self.rates.map_or((rate, rate), |(least, most)| {
+            (least.min(rate), most.max(rate))
+        }));
+        self.young += u32::from(figures.surface_age().value() < 1e9);
+    }
+
+    /// Prints the tally.
+    fn report(&self) {
+        eprintln!(
+            "crusts {:?}; R_b from {:?}; {} surfaces under 1 Gyr; bodies and greatest Ψ by \
+             source {:?}",
+            self.crusts, self.rates, self.young, self.abundances
+        );
+    }
+}
+
+/// What every published body's figures hold with its conditions (P14.T24.b, T48.c): its climate
+/// never reaches below the night's floor that its heat flow sets; its heat flow is positive and
+/// its outgassing not negative; an ice shell lies over a computed ocean; a conducting body's lid is
+/// stagnant unless it is one; its surface age lies within its system's; its crater density is the
+/// lunar chronology times its rate, which is at least the floor's share; and an ice-rich crust lies
+/// under 273 K by its conditions' mean.
+fn check_published_figures(
+    index: BodyIndex,
+    conditions: &SurfaceConditions,
+    (figures, heat_flow): (&GlobalFigures, crate::units::WattsPerSquareMetre),
+) {
+    let floor = hooks::surface::night_floor(heat_flow);
+    let (coldest, warmest) = conditions.climate_range();
+    assert!(
+        coldest >= floor && warmest >= coldest,
+        "{index:?}: {coldest:?} to {warmest:?} over {floor:?}"
+    );
+    assert!(figures.heat_flow().value() > 0.0, "{index:?}");
+    assert!(figures.outgassing() >= 0.0, "{index:?}");
+    let ocean = matches!(figures.subsurface_ocean(), Subsurface::Ocean(_));
+    match figures.tectonic_regime() {
+        TectonicRegime::IceShell => assert!(ocean, "{index:?}"),
+        TectonicRegime::MobileLid
+        | TectonicRegime::Episodic
+        | TectonicRegime::HeatPipe
+        | TectonicRegime::StagnantLid => {
+            if figures.interior() == hooks::figures::Interior::Conducting {
+                assert_eq!(
+                    figures.tectonic_regime(),
+                    TectonicRegime::StagnantLid,
+                    "{index:?}"
+                );
+            }
+        }
+    }
+    let craters = figures.craters();
+    let (age, system_age) = (figures.surface_age().value() / 1e9, craters.system_age());
+    assert!(
+        (0.0..=system_age.value()).contains(&age),
+        "{index:?}: {age} Gyr"
+    );
+    let chronology =
+        hyperion_surface::craters::lunar_chronology(crate::units::Gigayears::new(age), system_age);
+    assert_same_bits(
+        figures.crater_density().value(),
+        (chronology * figures.impactors().rate()).value(),
+    );
+    let rate = figures.impactors().rate();
+    assert!(rate.is_finite() && rate > 0.0, "{index:?}: R_b {rate}");
+    assert!(
+        figures.impactors().abundance() >= LEFTOVER_DENSITY,
+        "{index:?}"
+    );
+    if figures.impactors().crust() == Crust::IceRich {
+        assert!(
+            conditions.mean_surface_temperature().value() < 273.0,
+            "{index:?}"
+        );
+    }
+    // P14.T48.b: the epoch lies inside the system's age, and only a world wet now has one to the
+    // present at Earth's runoff.
+    if let Some(epoch) = figures.wet_epoch() {
+        let (start, end) = (epoch.start().value(), epoch.end().value());
+        assert!(
+            0.0 <= end && end <= start && start <= system_age.value(),
+            "{index:?}: {epoch:?}"
+        );
+        assert!(epoch.effective_flow().value() >= 0.0, "{index:?}");
+        assert!(epoch.paleo_inventory().value() > 0.0, "{index:?}");
+        assert_eq!(
+            epoch.liquid(),
+            crate::planetary::derive::atmosphere::Gas::Water.substance()
+        );
+        let wet_now = (epoch.runoff_m_per_year()
+            - hooks::figures::wet_epoch::WET_WORLD_RUNOFF_M_PER_YEAR)
+            .abs()
+            < 1e-15;
+        if wet_now {
+            assert!(conditions.liquid_water(), "{index:?}");
+            assert_same_bits(end, 0.0);
+            assert_same_bits(epoch.effective_flow().value() / 1e9, start);
+        }
+    }
+}
+
+/// A moon's surface conditions are read under its planet's orbit at the time, not its own
+/// (P14.T24.a): rebuilt here from the derivation, they are the planet's orbit's, which differ from
+/// the own orbit's where the moon's pole stands off its planet's orbital normal.
+#[test]
+fn a_moon_s_published_conditions_read_its_planet_s_orbit() {
+    let t = UniverseTime::EPOCH;
+    let mut checked = 0_u32;
+    for (ctx, system) in whole().iter().take(60) {
+        for moon in system.bodies() {
+            let (OrbitHost::Body(parent), Part::Moon(part), Some(rotation)) =
+                (moon.host, &moon.part, moon.rotation.as_ref())
+            else {
+                continue;
+            };
+            let Some(hooks) = system.hooks_at(ctx, moon.index(), t).unwrap() else {
+                continue;
+            };
+            let Section::Ok(published) = hooks.surface() else {
+                continue;
+            };
+            let planet = system.body(parent).unwrap();
+            let epoch = Epoch::new(system, ctx, t);
+            let host = fate_host(ctx, system.zone_of(planet));
+            let fate = system.fate_of(planet, &host);
+            let label = label::label(system, planet.index).unwrap();
+            let (_, now) = system.primary_record(&epoch, &HourCosines::new(), planet, label, &fate);
+            let seasonal = *fate.at(t).orbit().unwrap();
+            let orbit = part.satellite.orbit_at(&part.parent, ctx.age_at(t));
+            let derived = system.record_moon(&epoch, moon, (&now, &fate)).unwrap();
+            // Its bulk at its mass left (`MoonPart::at_mass_left`), as its record reads it.
+            let left = part.at_mass_left(&fate, part.state_at(now.state, &fate, ctx, t).0, t);
+            let bulk = PlanetarySystem::moon_bulk_of(&left, &derived, &now);
+            // Its conditions read its published pass's context's heat flow and θ (rule (f)).
+            let record = system.body_at(ctx, moon.index(), t).unwrap();
+            let Section::Ok(surface) = record.surface() else {
+                panic!("{:?} has conditions but no surface", moon.index());
+            };
+            let basis = *surface.basis().expect("a record's surface holds its basis");
+            // The greenhouse gain reads T13.c's terms at the moon's base, the larger of its night's
+            // floor and the surface its heat and light give, (`T_eq`⁴ + F ÷ σ)^¼ at its published
+            // pass's heat flow (P14.T55.j's record side), the one its τ was computed at; a tenuous
+            // air's greenhouse is the airless one (P14.T53.c).
+            let air = derived.atmosphere();
+            if air.state() == SurfaceState::Tenuous {
+                assert_same_bits(air.optical_depth(), 0.0);
+            } else if air.state() != SurfaceState::Airless {
+                let floor = crate::planetary::hooks::surface::night_floor(basis.heat_flow);
+                let lit = crate::planetary::moons::tides::radiating_surface_temperature(
+                    derived.equilibrium_temperature(),
+                    basis.heat_flow,
+                );
+                let base = if floor.value() > lit.value() {
+                    floor
+                } else {
+                    lit
+                };
+                let terms = crate::planetary::derive::atmosphere::GreenhouseConstants::in_force()
+                    .terms(air.partial_pressures(), base, bulk.surface_gravity());
+                let sum = terms.iter().fold(0.0, |sum, term| sum + term.depth());
+                assert_same_bits(sum, air.optical_depth());
+            }
+            let inputs = |spin: SeasonalSpin| SurfaceInputs {
+                atmosphere: derived.atmosphere(),
+                equilibrium_temperature: derived.equilibrium_temperature(),
+                surface_gravity: bulk.surface_gravity(),
+                radius: Metres::from(bulk.radius()),
+                material: surface.material(),
+                lid: basis.lid,
+                stellar_flux: WattsPerSquareMetre::from(derived.flux()),
+                xuv_flux: derived.xuv_flux(),
+                spin,
+                heat_flow: basis.heat_flow,
+                ocean_weight: basis.ocean_weight,
+                holds_liquid_water: derived.atmosphere().lists_liquid_water(),
+            };
+            let frame = rotation.frame();
+            let under_planet = SeasonalSpin::of(frame, t, &seasonal, SeasonsFrom::Planet);
+            let under_own = SeasonalSpin::of(frame, t, &orbit, SeasonsFrom::Own);
+            // The published conditions carry their climate regime (P14.T48.d), which the rebuilt
+            // first stage does not.
+            assert!(published.climate_regime().is_some(), "{:?}", moon.index());
+            assert_eq!(
+                SurfaceConditions::derive(&inputs(under_planet)),
+                Some(published.clone().without_climate()),
+                "{:?}",
+                moon.index()
+            );
+            if (under_planet.obliquity.value() - under_own.obliquity.value()).abs() > 0.02 {
+                let own = SurfaceConditions::derive(&inputs(under_own)).unwrap();
+                let apart =
+                    (own.equator_pole_contrast_k() - published.equator_pole_contrast_k()).abs();
+                assert!(apart > 1e-9, "{:?}", moon.index());
+                checked += 1;
+            }
+        }
+    }
+    eprintln!("{checked} moons read off their own orbit's obliquity");
+    assert!(checked > 0);
+}
+
+/// Pins `record`'s published state, its desert label included (ux-calls-data's ruling 9), as the
+/// body `name`'s.
+fn pin_published_state(
+    w: &mut hyperion_testkit::golden::GoldenWriter,
+    name: &str,
+    record: &BodyRecord,
+) {
+    if let Section::Ok(surface) = record.surface() {
+        w.line(&format!(
+            "{name}_published_state = {:?}",
+            surface.published_state()
+        ));
+    }
+}
+
+/// The surface conditions and global figures `hooks_at` publishes, the records' surface sections,
+/// pinned over the sample's first systems (P14.T24.a, T24.b, T48.e): what `SeasonalSpin::of` and
+/// the bulk sections feed the derivation reaches every contrast's bits, and the heat flow the
+/// night's floor.
+#[test]
+fn the_published_surface_conditions_are_pinned() {
+    use hyperion_testkit::golden;
+    use hyperion_testkit::golden::GoldenWriter;
+
+    let mut w = GoldenWriter::new();
+    w.header(crate::GENERATOR_VERSION.get());
+    let t = UniverseTime::EPOCH;
+    let mut pinned = 0_u32;
+    for (ctx, system) in whole().iter().take(8) {
+        for body in system.bodies() {
+            let Some(hooks) = system.hooks_at(ctx, body.index(), t).unwrap() else {
+                continue;
+            };
+            let Section::Ok(c) = hooks.surface() else {
+                continue;
+            };
+            let name = body.index().body_id(ctx.id()).to_string();
+            w.f64(
+                &format!("{name}_mean_surface_temperature"),
+                c.mean_surface_temperature().value(),
+            );
+            w.f64(
+                &format!("{name}_equator_pole_contrast_k"),
+                c.equator_pole_contrast_k(),
+            );
+            w.f64(
+                &format!("{name}_day_night_contrast_k"),
+                c.day_night_contrast_k(),
+            );
+            let (coldest, warmest) = c.climate_range();
+            w.f64(&format!("{name}_coldest"), coldest.value());
+            w.f64(&format!("{name}_warmest"), warmest.value());
+            w.f64(
+                &format!("{name}_surface_pressure"),
+                c.surface_pressure().value(),
+            );
+            for &(id, x) in c.gases() {
+                w.f64(
+                    &format!("{name}_mole_fraction_{}", id.substance().key().as_str()),
+                    x,
+                );
+            }
+            w.f64(&format!("{name}_stellar_flux"), c.stellar_flux().value());
+            w.line(&format!("{name}_radiation = {:?}", c.radiation()));
+            w.line(&format!("{name}_liquid_water = {}", c.liquid_water()));
+            let record = system.body_at(ctx, body.index(), t).unwrap();
+            pin_published_state(&mut w, &name, &record);
+            hooks::surface::regime::tests::pin_regime(&mut w, &name, c.climate_regime());
+            let Section::Ok(f) = hooks.figures() else {
+                panic!("{name} has conditions but no figures");
+            };
+            w.f64(&format!("{name}_heat_flow"), f.heat_flow().value());
+            w.f64(
+                &format!("{name}_non_tidal_heat_flow"),
+                f.non_tidal_heat_flow().value(),
+            );
+            w.line(&format!("{name}_interior = {:?}", f.interior()));
+            w.line(&format!(
+                "{name}_tectonic_regime = {:?}",
+                f.tectonic_regime()
+            ));
+            w.line(&format!("{name}_magnetic_field = {:?}", f.magnetic_field()));
+            w.f64(&format!("{name}_outgassing"), f.outgassing());
+            match f.subsurface_ocean() {
+                Subsurface::Ocean(ocean) => {
+                    w.f64(
+                        &format!("{name}_shell_thickness"),
+                        ocean.shell_thickness().value(),
+                    );
+                    w.f64(
+                        &format!("{name}_ocean_thickness"),
+                        ocean.thickness().value(),
+                    );
+                }
+                other @ (Subsurface::NoOcean | Subsurface::NotComputed) => {
+                    w.line(&format!("{name}_subsurface_ocean = {other:?}"));
+                }
+            }
+            pin_crater_contract(&mut w, &name, f);
+            hooks::figures::wet_epoch::tests::pin_history(
+                &mut w,
+                &name,
+                f.wet_epoch(),
+                f.from_colder(),
+            );
+            hooks::figures::tests::pin_relief(&mut w, &name, f);
+            hooks::figures::tests::pin_cover(&mut w, &name, f);
+            w.f64(
+                &format!("{name}_continental_asymptote"),
+                hooks::figures::relief::continental_asymptote(
+                    system.seed,
+                    body.index().body_id(ctx.id()),
+                ),
+            );
+            pinned += 1;
+        }
+    }
+    assert!(pinned > 20, "{pinned}");
+    pin_remnant_crust(&mut w, "41ffecb200000005", "41ffecb200000005.e605");
+    golden!("planetary/surface_conditions_published", w.as_str());
+}
+
+/// Pins the `H2O` solid entry of the record `body` of the sample's system `system`, a remnant's ice
+/// bulk on an ice-rich crust, by bits: its area, reservoir and layer, the crust's frozen water a
+/// past runaway leaves it (P14.T54.a's C0c; decision-p14-t54a-ganymede, "Remnant ice-bulk bodies'
+/// water"). `41ffecb200000005.e605`, at 3.2 K about its host's remnant, lies beyond the systems
+/// [`the_published_surface_conditions_are_pinned`] reads.
+fn pin_remnant_crust(w: &mut hyperion_testkit::golden::GoldenWriter, system: &str, body: &str) {
+    use crate::planetary::chem::partition::CondensatePhase;
+    use crate::planetary::derive::atmosphere::SurfaceMaterial;
+    let (ctx, generated) = whole()
+        .iter()
+        .find(|(ctx, _)| ctx.id().to_string() == system)
+        .unwrap_or_else(|| panic!("{system} is in the sample"));
+    let snapshot = generated.snapshot_at(ctx, UniverseTime::EPOCH);
+    let record = snapshot
+        .bodies()
+        .iter()
+        .find(|record| record.identity().id().to_string() == body)
+        .unwrap_or_else(|| panic!("{body} is in its system"));
+    let Section::Ok(surface) = record.surface() else {
+        panic!("{body} has a surface");
+    };
+    assert_eq!(surface.material(), SurfaceMaterial::Ice, "{body}");
+    assert_eq!(
+        surface.figures().impactors().crust(),
+        Crust::IceRich,
+        "{body}"
+    );
+    let entry = surface
+        .condensates()
+        .entry(Gas::Water.substance(), CondensatePhase::Solid)
+        .unwrap_or_else(|| panic!("{body} lists its crust's water"));
+    assert!(entry.area_fraction() > 0.0, "{body}: {entry:?}");
+    w.line(&format!("{body}_state = {:?}", surface.state()));
+    w.line(&format!("{body}_crust = {:?}", Crust::IceRich));
+    w.f64(
+        &format!("{body}_h2o_solid_area_fraction"),
+        entry.area_fraction(),
+    );
+    w.f64(
+        &format!("{body}_h2o_solid_reservoir_kg_m2"),
+        entry.reservoir().value(),
+    );
+    let layer = entry.reservoir_gel().expect("ice Ih's density is read");
+    w.f64(&format!("{body}_h2o_solid_reservoir_gel_m"), layer.value());
+}
+
+/// P14.T48.d's published climate regime over the sample: every published body has one, read from
+/// its own conditions, history and ice cover. An airless body is airless-like in radiative
+/// equilibrium with no condensable; a world locked to its seasonal host takes the locked forcing
+/// and no seasonal model; an isothermal surface is an efficient air's; an ice belt came from a
+/// colder state with ice that covers some of its sphere, its poles free; and a condensable is a
+/// condensable row the air holds.
+#[test]
+fn the_published_climate_regimes_hold_over_the_sample() {
+    use crate::planetary::hooks::surface::regime::{by_redistribution, effective_redistribution};
+    use crate::planetary::hooks::surface::{Forcing, ThermalRegime};
+    use hyperion_surface::field::ClimateModelKind;
+    use std::collections::BTreeMap;
+
+    let t = UniverseTime::EPOCH;
+    let mut tally: BTreeMap<String, u32> = BTreeMap::new();
+    let mut count = |key: String| *tally.entry(key).or_insert(0) += 1;
+    let (mut published, mut slow, mut moved) = (0_u32, 0_u32, 0_u32);
+    for (ctx, system) in whole().iter().take(60) {
+        for body in system.bodies() {
+            let Some(hooks) = system.hooks_at(ctx, body.index(), t).unwrap() else {
+                continue;
+            };
+            let (Section::Ok(c), Section::Ok(f)) = (hooks.surface(), hooks.figures()) else {
+                continue;
+            };
+            let index = body.index();
+            let regime = c
+                .climate_regime()
+                .unwrap_or_else(|| panic!("{index:?} is published with no regime"));
+            published += 1;
+            count(format!("thermal {:?}", regime.thermal()));
+            count(format!("forcing {:?}", regime.forcing()));
+            count(match regime.condensable() {
+                Some(id) => format!("condensable {}", id.substance().key().as_str()),
+                None => "condensable none".to_owned(),
+            });
+            count(format!("model {:?}", regime.model()));
+            if c.gases().is_empty() {
+                assert_eq!(regime.thermal(), ThermalRegime::AirlessLike, "{index:?}");
+                assert_eq!(
+                    regime.model(),
+                    ClimateModelKind::RadiativeEquilibrium,
+                    "{index:?}"
+                );
+                assert_eq!(regime.condensable(), None, "{index:?}");
+            }
+            if regime.forcing() == Forcing::Locked {
+                assert_ne!(regime.model(), ClimateModelKind::EnergyBalance, "{index:?}");
+            }
+            if regime.model() == ClimateModelKind::Isothermal {
+                assert_eq!(regime.thermal(), ThermalRegime::Efficient, "{index:?}");
+            }
+            if regime.forcing() == Forcing::IceBelt {
+                assert!(f.from_colder(), "{index:?}");
+                assert!(
+                    f.ice_fraction() > 0.0 && f.ice_fraction() < 1.0,
+                    "{index:?}"
+                );
+            }
+            if let Some(id) = regime.condensable() {
+                assert!(id.substance().phase_diagram().is_some(), "{index:?}");
+                assert!(
+                    c.gases().iter().any(|&(gas, x)| gas == id && x > 0.0),
+                    "{index:?}"
+                );
+            }
+            // "main"'s ruling of 2026-10-13: a slow rotator's label reads its damped
+            // redistribution, where Koll's literal ε would have read the air's alone.
+            let air = c.air_transport();
+            if !c.gases().is_empty() && air.diurnal_storage.is_some_and(|storage| storage <= 1.0) {
+                slow += 1;
+                if by_redistribution(air.redistribution)
+                    != by_redistribution(effective_redistribution(&air))
+                {
+                    moved += 1;
+                }
+            }
+        }
+    }
+    eprintln!("{published} published regimes: {tally:?}");
+    eprintln!("{slow} rotators with air in Koll's own regime, {moved} labels off his literal ε");
+    assert!(published > 100, "{published}");
+}
+
+/// Pins the crater contract of the published figures `f` under `name`: its source rule, crust,
+/// abundance and rate, the parts the shared density reads beside them, its surface age and its
+/// N☾(>1 km) (P14.T48.c, T48.f).
+fn pin_crater_contract(
+    w: &mut hyperion_testkit::golden::GoldenWriter,
+    name: &str,
+    f: &GlobalFigures,
+) {
+    let (impactors, craters) = (f.impactors(), f.craters());
+    let rule = match impactors.source() {
+        hooks::figures::ImpactorSource::InBelt { .. } => "in_belt",
+        hooks::figures::ImpactorSource::Comets => "comets",
+        hooks::figures::ImpactorSource::NearestBelt { .. } => "nearest_belt",
+        hooks::figures::ImpactorSource::InnerComets { .. } => "inner_comets",
+    };
+    w.line(&format!("{name}_impactor_rule = {rule}"));
+    w.line(&format!("{name}_crust = {:?}", impactors.crust()));
+    w.f64(&format!("{name}_abundance"), impactors.abundance());
+    w.f64(&format!("{name}_rate"), impactors.rate());
+    w.f64(
+        &format!("{name}_impact_velocity"),
+        impactors.velocity().value(),
+    );
+    w.f64(
+        &format!("{name}_projectile_density"),
+        impactors.projectile_density().value(),
+    );
+    w.line(&format!(
+        "{name}_target_class = {:?}",
+        impactors.target().class
+    ));
+    w.f64(
+        &format!("{name}_target_density"),
+        impactors.target().density.value(),
+    );
+    w.f64(&format!("{name}_k_target"), impactors.k_target());
+    match craters.screening() {
+        hyperion_surface::craters::Screening::Atmosphere { column_mass } => {
+            w.f64(&format!("{name}_column_mass"), column_mass.value());
+        }
+        other @ (hyperion_surface::craters::Screening::None
+        | hyperion_surface::craters::Screening::Cutoff { .. }) => {
+            w.line(&format!("{name}_screening = {other:?}"));
+        }
+    }
+    w.f64(&format!("{name}_surface_age"), f.surface_age().value());
+    w.f64(
+        &format!("{name}_crater_density"),
+        f.crater_density().value(),
+    );
+}
+
+/// The published hooks are the same whatever order the bodies are asked in, a moon before its
+/// planet included (P14.T24.a).
+#[test]
+fn the_published_hooks_are_order_independent() {
+    let (ctx, system) = whole()
+        .iter()
+        .find(|(_, system)| {
+            system
+                .bodies()
+                .iter()
+                .any(|body| matches!(body.host, OrbitHost::Body(_)))
+        })
+        .expect("the sample holds a system with moons");
+    let indices: Vec<BodyIndex> = system.bodies().iter().map(Body::index).collect();
+    let later = UniverseTime::from_julian_years(500).expect("in the window");
+    for t in [UniverseTime::EPOCH, later] {
+        assert_order_independent(&indices, |&index| system.hooks_at(ctx, index, t).unwrap());
+    }
+}
+
+/// P14.T24.b's published figures read each body's interior: a planet or a member feels no tide;
+/// a moon's tide is its derivation's, P14.T17.b's, added to its own heat flow. From 24 every
+/// body's published ocean is its record's own solve (P14.T51.g.b), which
+/// `system::ocean_tests`' census holds at the record's inputs, in place of version 23's (a
+/// planet's or a member's not computed, a regular moon's its flag's, another moon's not
+/// computed); the oceans are counted by kind.
+#[test]
+fn the_published_figures_read_each_body_s_interior() {
+    let t = UniverseTime::EPOCH;
+    let (mut regular, mut oceans, mut other_moons) = (0_u32, 0_u32, 0_u32);
+    let mut published: std::collections::BTreeMap<&str, u32> = std::collections::BTreeMap::new();
+    for (ctx, system) in whole().iter().take(60) {
+        for body in system.bodies() {
+            let Some(hooks) = system.hooks_at(ctx, body.index(), t).unwrap() else {
+                continue;
+            };
+            let Section::Ok(figures) = hooks.figures() else {
+                continue;
+            };
+            let index = body.index();
+            if matches!(figures.subsurface_ocean(), Subsurface::Ocean(_)) {
+                *published.entry(kind_name(&body.part)).or_insert(0) += 1;
+            }
+            match &body.part {
+                Part::Planet(_) | Part::Member(_) => {
+                    assert_same_bits(
+                        figures.heat_flow().value(),
+                        figures.non_tidal_heat_flow().value(),
+                    );
+                }
+                Part::Moon(part) => {
+                    let OrbitHost::Body(parent) = body.host else {
+                        panic!("{index:?}: a moon goes round a body");
+                    };
+                    let planet = system.body(parent).unwrap();
+                    let epoch = Epoch::new(system, ctx, t);
+                    let host = fate_host(ctx, system.zone_of(planet));
+                    let fate = system.fate_of(planet, &host);
+                    let label = label::label(system, planet.index).unwrap();
+                    let (_, now) =
+                        system.primary_record(&epoch, &HourCosines::new(), planet, label, &fate);
+                    let derived = system.record_moon(&epoch, body, (&now, &fate)).unwrap();
+                    // Every moon's tide is its derivation's, P14.T17.b's.
+                    assert_same_bits(
+                        figures.heat_flow().value(),
+                        figures.non_tidal_heat_flow().value() + derived.heat_flux().value(),
+                    );
+                    match part.satellite.moon() {
+                        SatelliteMoon::Regular(_) => {
+                            regular += 1;
+                            oceans += u32::from(matches!(
+                                figures.subsurface_ocean(),
+                                Subsurface::Ocean(_)
+                            ));
+                        }
+                        SatelliteMoon::GiantImpact(_) | SatelliteMoon::Captured(_) => {
+                            other_moons += 1;
+                        }
+                    }
+                }
+                Part::Ring(_) => panic!("{index:?}: a ring has no hooks"),
+            }
+        }
+    }
+    eprintln!(
+        "{regular} regular moons, {oceans} with oceans; {other_moons} other moons; the published \
+         oceans by kind {published:?}"
+    );
+    assert!(regular > 5 && other_moons > 0, "{regular}, {other_moons}");
+}
+
+/// The kind of the body of part `part`, as [`the_published_figures_read_each_body_s_interior`]
+/// counts its oceans.
+fn kind_name(part: &Part) -> &'static str {
+    match part {
+        Part::Planet(_) => "planet",
+        Part::Member(_) => "member",
+        Part::Moon(_) => "moon",
+        Part::Ring(_) => "ring",
+    }
+}
+
+/// How a moon came to orbit its parent, as the published crater contract's test reads it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MoonBirthKind {
+    Regular,
+    GiantImpact,
+    GiantsCapture,
+    RockyCapture,
+}
+
+/// The birth of the moon `body` (part `part`) of `system` and the birthplace its crust reads by
+/// science-p14-t24b-laws §2.4, from its published bulk composition `composition`: a regular moon
+/// is icy when it holds water; a giant-impact moon takes its parent's, icy for an icy belt's
+/// member; a giant's capture is icy; a rocky planet's capture takes its neighbouring belt's.
+fn moon_birth_of(
+    system: &PlanetarySystem,
+    body: &Body,
+    part: &MoonPart,
+    composition: &BulkComposition,
+) -> (MoonBirthKind, hooks::figures::Birthplace) {
+    use crate::planetary::belts::BeltComposition;
+    use crate::planetary::moons::CaptureKind;
+    let OrbitHost::Body(parent) = body.host else {
+        panic!("{:?}: a moon goes round a body", body.index());
+    };
+    let (kind, icy) = match part.satellite.moon() {
+        SatelliteMoon::Regular(_) => (
+            MoonBirthKind::Regular,
+            composition.fractions().water() > 0.0,
+        ),
+        SatelliteMoon::GiantImpact(_) => (
+            MoonBirthKind::GiantImpact,
+            system
+                .body(parent)
+                .and_then(Body::member_of)
+                .is_some_and(|member| member.composition() == BeltComposition::Icy),
+        ),
+        SatelliteMoon::Captured(captured) => match captured.kind() {
+            CaptureKind::Irregular | CaptureKind::Large => (MoonBirthKind::GiantsCapture, true),
+            CaptureKind::Small => (
+                MoonBirthKind::RockyCapture,
+                system.nearest_belt(parent).is_some_and(|belt| {
+                    belt.adjacency() == BeltAdjacency::Neighbouring
+                        && belt.composition() == BeltComposition::Icy
+                }),
+            ),
+        },
+    };
+    let birthplace = if icy {
+        hooks::figures::Birthplace::Icy
+    } else {
+        hooks::figures::Birthplace::Other
+    };
+    (kind, birthplace)
+}
+
+/// P14.T48.c's published crater contract over the sample (science-p14-t24b-laws §2.1–2.4): the
+/// projectile abundance of a body that goes round its host holds from one time to another, its
+/// belts' masses taken at 4.567 Gyr, and its rate moves only with its escape speed; a planet's
+/// surface is no older than the time since its magma ocean's end (P14.T28.a); and every moon's
+/// crust is `Crust::of` at the birthplace its birth gives ([`moon_birth_of`]), its water and its
+/// radius, so that a cold regular moon holding ice and a cold giant's capture are ice-rich, and a
+/// giant-impact moon of a planet or a capture beside a rocky belt is ice-rich by its water alone.
+#[test]
+fn the_published_crater_contract_reads_each_body_s_history() {
+    let later = UniverseTime::from_julian_years(500).expect("in the window");
+    let t = UniverseTime::EPOCH;
+    let (mut held, mut cold_captures, mut impacts) = (0_u32, 0_u32, 0_u32);
+    for (ctx, system) in whole().iter().take(60) {
+        for body in system.bodies() {
+            let published_at = |time: UniverseTime| {
+                let hooks = system.hooks_at(ctx, body.index(), time).unwrap()?;
+                let (Section::Ok(conditions), Section::Ok(figures), Section::Ok(bulk)) =
+                    (hooks.surface(), hooks.figures(), hooks.bulk())
+                else {
+                    return None;
+                };
+                Some((
+                    conditions.mean_surface_temperature(),
+                    figures.clone(),
+                    *bulk,
+                ))
+            };
+            let Some((mean, figures, composition)) = published_at(t) else {
+                continue;
+            };
+            let index = body.index();
+            match &body.part {
+                Part::Planet(planet) => {
+                    let melt = Years::from(planet.fate.formation().molten_until()).value();
+                    let since = ctx.age_at(t).value() - melt;
+                    assert!(figures.surface_age().value() <= since.max(0.0), "{index:?}");
+                }
+                Part::Member(_) => {}
+                Part::Moon(part) => {
+                    let record = system.body_at(ctx, index, t).unwrap();
+                    let Section::Ok(bulk) = record.bulk() else {
+                        panic!("{index:?} has figures but no bulk section");
+                    };
+                    let birth = moon_birth_of(system, body, part, &composition);
+                    impacts += u32::from(matches!(birth.0, MoonBirthKind::GiantImpact));
+                    let cold = mean.value() < 273.0;
+                    cold_captures +=
+                        u32::from(matches!(birth.0, MoonBirthKind::GiantsCapture) && cold);
+                    let kg = Kilograms::from(body.mass()).value();
+                    let water = composition
+                        .inventory()
+                        .water()
+                        .value()
+                        .max(composition.fractions().water() * kg);
+                    let expected = hooks::figures::Crust::of(
+                        birth.1,
+                        mean,
+                        Kilograms::new(water),
+                        Metres::from(bulk.radius()),
+                    );
+                    assert_eq!(
+                        figures.impactors().crust(),
+                        expected,
+                        "{index:?}: {birth:?}"
+                    );
+                }
+                Part::Ring(_) => panic!("{index:?}: a ring has no hooks"),
+            }
+            if matches!(body.part, Part::Planet(_) | Part::Member(_))
+                && let Some((_, after, _)) = published_at(later)
+            {
+                let (now, then) = (figures.impactors(), after.impactors());
+                assert_same_bits(now.abundance(), then.abundance());
+                assert!((now.rate() / then.rate() - 1.0).abs() < 1e-6, "{index:?}");
+                held += 1;
+                if now.rate() > 300.0 || now.rate() < 1e-3 {
+                    eprintln!(
+                        "{index:?}: {:?}, Ψ {:.3e}, V {:.3e} m/s, R_b {:.3e}",
+                        now.source(),
+                        now.abundance(),
+                        now.encounter_speed().value(),
+                        now.rate()
+                    );
+                }
+            }
+        }
+    }
+    eprintln!(
+        "{held} rates held in time; {cold_captures} cold giants' captures; {impacts} impact moons"
+    );
+    assert!(
+        held > 20 && cold_captures > 0 && impacts > 0,
+        "{held}, {cold_captures}, {impacts}"
+    );
+}
+
+/// P14.T48.b's past sky reads the hosts and orbits the derivation reads now: at the present its
+/// window is each light's flux over Kopparapu's runaway limit at the stars' states now, the zone's
+/// along the orbit now and each companion's along its pair's, as `Epoch::lights` and
+/// `Epoch::companions` give them, and a single star's planet's is its derivation's flux over the
+/// limit. The orbit it reads at any time is the fate's, bit for bit. Checked at the epoch and 500
+/// years after it, where the round trip through the age is not exact.
+#[test]
+fn the_past_sky_is_the_derivation_s_at_the_present() {
+    use crate::planetary::derive::habitable_zone::HabitableLimit;
+
+    let later = UniverseTime::from_julian_years(500).expect("in the window");
+    let (mut planets, mut multiple, mut orbits) = (0_u32, 0_u32, 0_u32);
+    for t in [UniverseTime::EPOCH, later] {
+        for (ctx, system) in whole().iter().take(60) {
+            let epoch = Epoch::new(system, ctx, t);
+            for body in system.bodies() {
+                let (Part::Planet(_) | Part::Member(_)) = body.part else {
+                    continue;
+                };
+                let zone = system.zone_of(body);
+                let host = fate_host(ctx, zone);
+                let fate = system.fate_of(body, &host);
+                let past = PastSky::new(ctx, zone, &fate, t);
+                // The orbit at past ages and at the present is the fate's.
+                for share in [0.01, 0.3, 0.9] {
+                    let age = Years::new(share * ctx.age_at(t).value());
+                    let Some(then) = time_at_age(age, ctx.age_at_epoch()) else {
+                        continue;
+                    };
+                    let (fast, full) = (fate.orbit_at(then), fate.at(then).orbit().copied());
+                    assert_eq!(fast, full, "{:?} at {age:?}", body.index());
+                    orbits += u32::from(fast.is_some());
+                }
+                let Some(orbit) = fate.at(t).orbit().copied() else {
+                    continue;
+                };
+                assert_eq!(fate.orbit_at(t), Some(orbit));
+                let window = past.window_at(ctx.age_at(t));
+                let runaway = |flux: f64, t_eff: Kelvin| {
+                    flux / HabitableLimit::RunawayGreenhouse.flux(t_eff).value()
+                };
+                let (a, e) = (orbit.semi_major_axis(), orbit.eccentricity().value());
+                let lights = epoch.lights(zone).unwrap();
+                let companions = epoch.companions(zone).unwrap();
+                let expected = lights
+                    .iter()
+                    .filter(|light| light.luminosity().value() > 0.0)
+                    .map(|light| {
+                        runaway(
+                            luminosity_flux(light.luminosity(), a, e).value(),
+                            light.effective_temperature(),
+                        )
+                    })
+                    .chain(
+                        companions
+                            .iter()
+                            .filter(|c| c.host().luminosity().value() > 0.0)
+                            .map(|c| runaway(c.flux().value(), c.host().effective_temperature())),
+                    )
+                    .fold(0.0, |sum, x| sum + x);
+                assert!(
+                    (window.runaway() / expected - 1.0).abs() < 1e-12,
+                    "{:?}: {} against {expected}",
+                    body.index(),
+                    window.runaway()
+                );
+                multiple += u32::from(ctx.stars().len() > 1);
+                if ctx.stars().len() == 1 {
+                    let label = label::label(system, body.index).unwrap();
+                    let (_, now) =
+                        system.primary_record(&epoch, &HourCosines::new(), body, label, &fate);
+                    if let Some(derived) = now.derived {
+                        let star = ctx.stars()[0].state_at(t).unwrap();
+                        let alone = runaway(derived.flux().value(), star.effective_temperature());
+                        assert!(
+                            (window.runaway() / alone - 1.0).abs() < 1e-9,
+                            "{:?}",
+                            body.index()
+                        );
+                        planets += 1;
+                    }
+                }
+            }
+        }
+    }
+    eprintln!(
+        "{planets} single-star bodies' windows, {multiple} in multiple systems; {orbits} past orbits"
+    );
+    assert!(
+        planets > 50 && multiple > 10 && orbits > 100,
+        "{planets}, {multiple}, {orbits}"
+    );
+}
+
+/// The published volatile history reads the body's own past: the window of its primary's past
+/// sky from its magma ocean's end, a moon's its planet's, its outgassing then, and its conditions'
+/// liquid-water flag (P14.T48.b), as rebuilt here from the parts.
+#[test]
+fn the_published_volatile_history_reads_each_body_s_past() {
+    let t = UniverseTime::EPOCH;
+    let (mut checked, mut moons, mut epochs) = (0_u32, 0_u32, 0_u32);
+    for (ctx, system) in whole().iter().take(60) {
+        for body in system.bodies() {
+            let Some(hooks) = system.hooks_at(ctx, body.index(), t).unwrap() else {
+                continue;
+            };
+            let (Section::Ok(conditions), Section::Ok(figures)) =
+                (hooks.surface(), hooks.figures())
+            else {
+                continue;
+            };
+            let primary = match body.host {
+                OrbitHost::Body(parent) => system.body(parent).unwrap(),
+                OrbitHost::Star(_) | OrbitHost::Pair(_) | OrbitHost::Barycentre => body,
+            };
+            let zone = system.zone_of(primary);
+            let host = fate_host(ctx, zone);
+            let fate = system.fate_of(primary, &host);
+            let past = PastSky::new(ctx, zone, &fate, t);
+            let molten_until = match &body.part {
+                Part::Planet(planet) => Some(Years::from(planet.fate.formation().molten_until())),
+                Part::Member(_) | Part::Moon(_) | Part::Ring(_) => None,
+            };
+            let age = ctx.age_at(t);
+            let start = molten_until
+                .unwrap_or(hooks::figures::wet_epoch::UNDRAWN_HISTORY_START)
+                .value();
+            let window = |age: Years| past.window_at(age);
+            if start < age.value() {
+                let expected = !window(Years::new(start)).inside_maximum_greenhouse()
+                    && window(age).inside_maximum_greenhouse();
+                assert_eq!(figures.from_colder(), expected, "{:?}", body.index());
+            }
+            if let Some(epoch) = figures.wet_epoch() {
+                epochs += 1;
+                // It opened inside the window, after the magma ocean.
+                let opened = age.value() - epoch.start().value() * 1e9;
+                assert!(opened >= start - 1.0, "{:?}", body.index());
+                assert!(
+                    window(Years::new(opened + 1.0)).in_window(),
+                    "{:?}",
+                    body.index()
+                );
+                if epoch.end().value() > 0.0 {
+                    assert!(
+                        (epoch.runoff_m_per_year()
+                            - hooks::figures::wet_epoch::PAST_EPOCH_RUNOFF_M_PER_YEAR)
+                            .abs()
+                            < 1e-15
+                    );
+                } else {
+                    assert!(conditions.liquid_water(), "{:?}", body.index());
+                }
+            }
+            moons += u32::from(matches!(body.part, Part::Moon(_)));
+            checked += 1;
+        }
+    }
+    eprintln!("{checked} published histories, {moons} moons'; {epochs} wet epochs");
+    assert!(checked > 100 && moons > 5, "{checked}, {moons}");
+}
+
+// P14.T56.a: every moon and ring on its parent's Laplace surface.
+
+/// Asserts two vectors equal bit for bit.
+fn same3(a: [f64; 3], b: [f64; 3]) {
+    for (x, y) in a.into_iter().zip(b) {
+        assert_same_bits(x, y);
+    }
+}
+
+fn dot3(a: [f64; 3], b: [f64; 3]) -> f64 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
+/// The angle between two unit vectors, rad.
+fn between(a: [f64; 3], b: [f64; 3]) -> f64 {
+    let c = [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ];
+    crate::math::atan2(dot3(c, c).sqrt(), dot3(a, b))
+}
+
+/// P14.T56.a: the Laplace surface turns planes only. Each parent's satellites as its orbital plane
+/// gives them, those `generate_satellites` finds for the parent with no frame (step 7's first
+/// pass), keep their index, draws, local elements and mass on its frame, so that T22.b's
+/// properties, which read nothing else, stand; and no regular moon or ring of the sample lies in an
+/// eccentricity band (decision-p14-moons §1.2 expects none of 5 × 10⁻¹¹ of giants).
+#[test]
+fn the_laplace_surface_moves_no_satellite_s_elements_mass_or_count() {
+    let (mut frames, mut moons, mut rings, mut tilted) = (0, 0, 0, 0);
+    for (ctx, system) in whole() {
+        for b in system.satellites() {
+            let body = system.body(b.parent_index()).unwrap();
+            frames += usize::from(body.laplace().is_some());
+            let unframed = Body {
+                laplace: None,
+                ..body.clone()
+            };
+            let belt = match body.part {
+                Part::Planet(_) => system.nearest_belt(body.index()),
+                Part::Moon(_) | Part::Ring(_) | Part::Member(_) => None,
+            };
+            let a = &generate_satellites(SEED, ctx, &unframed, belt);
+            assert_eq!(a.parent_index(), b.parent_index());
+            assert_eq!(a.parent(), b.parent());
+            assert_eq!(a.moonlets(), b.moonlets());
+            assert_eq!(a.irregulars(), b.irregulars());
+            assert_eq!(a.moons().len(), b.moons().len(), "{:?}", a.parent_index());
+            let Some(parent) = a.parent() else {
+                continue;
+            };
+            let age = ctx.age_at_epoch();
+            for (x, y) in a.moons().iter().zip(b.moons()) {
+                assert_eq!(
+                    (x.index(), x.moon(), x.radius_rank(), x.volatiles()),
+                    (y.index(), y.moon(), y.radius_rank(), y.volatiles())
+                );
+                assert_eq!(x.local_orbit_at(parent, age), y.local_orbit_at(parent, age));
+                assert_eq!(x.plane(), &MoonPlane::OrbitalPlane);
+                if matches!(y.plane(), MoonPlane::Laplace(_)) {
+                    tilted += 1;
+                }
+                moons += 1;
+            }
+            assert_eq!(a.rings().len(), b.rings().len(), "{:?}", a.parent_index());
+            for (x, y) in a.rings().iter().zip(b.rings()) {
+                assert_eq!(
+                    (
+                        x.index(),
+                        x.kind(),
+                        x.inner_edge(),
+                        x.outer_edge(),
+                        x.mass(),
+                        x.gaps()
+                    ),
+                    (
+                        y.index(),
+                        y.kind(),
+                        y.inner_edge(),
+                        y.outer_edge(),
+                        y.mass(),
+                        y.gaps()
+                    )
+                );
+                same3(x.normal(), parent.orbit().orientation().normal());
+                rings += 1;
+            }
+        }
+    }
+    assert!(
+        frames > 300 && moons > 100 && rings > 50 && tilted * 10 > moons * 9,
+        "{frames} frames, {moons} moons ({tilted} on a Laplace plane), {rings} rings"
+    );
+}
+
+/// P14.T56.a: each moon's orbit lies at its drawn inclination to its own local Laplace plane,
+/// whose pole lies between its parent's spin pole and orbit normal.
+#[test]
+fn every_moon_lies_at_its_drawn_tilt_to_its_local_laplace_plane() {
+    let mut moons = 0;
+    for (ctx, system) in whole() {
+        let age = ctx.age_at(parent_time(ctx));
+        for found in system.satellites() {
+            let (Some(parent), Some(frame)) = (
+                found.parent(),
+                system.body(found.parent_index()).and_then(Body::laplace),
+            ) else {
+                continue;
+            };
+            for moon in found.moons() {
+                let MoonPlane::Laplace(plane) = moon.plane() else {
+                    panic!("{:?} of a parent with a frame lies off it", moon.index());
+                };
+                let local = moon.local_orbit_at(parent, age);
+                let pole = plane.pole_at(local.semi_major_axis());
+                let normal = moon.orbit_at(parent, age).orientation().normal();
+                let tilt = between(normal, pole);
+                assert!(
+                    (tilt - local.inclination().value()).abs() < 1e-7,
+                    "{:?}",
+                    moon.index()
+                );
+                let (spin, orbit) = (frame.spin_pole(), frame.orbit_normal());
+                match moon.moon() {
+                    SatelliteMoon::Captured(_) => {
+                        assert_eq!(plane.sense(), crate::planetary::laplace::PoleSense::Orbit);
+                        assert!(dot3(pole, orbit) > 0.0, "{:?}", moon.index());
+                    }
+                    SatelliteMoon::Regular(_) | SatelliteMoon::GiantImpact(_) => {
+                        assert_eq!(plane.sense(), crate::planetary::laplace::PoleSense::Spin);
+                        assert!(dot3(pole, spin) > 0.0, "{:?}", moon.index());
+                    }
+                }
+                let sided = if dot3(pole, orbit) < 0.0 {
+                    pole.map(|v| -v)
+                } else {
+                    pole
+                };
+                let across = between(spin, sided).min(between(spin.map(|v| -v), sided));
+                let apart = between(spin, orbit).min(between(spin.map(|v| -v), orbit));
+                assert!(across <= apart + 1e-12, "{:?}", moon.index());
+                assert!(plane.laplace_radius().value() > 0.0);
+                moons += 1;
+            }
+        }
+    }
+    assert!(moons > 100, "{moons} moons");
+}
+
+/// P14.T56.a: a ring lies on its parent's local Laplace plane at the geometric mean of its edges,
+/// with the regular moons inside that radius counted, on the spin's side. Close in that is the
+/// equator: under 0.1 `r_L` the pole is within ¼ sin 2ε′ (r ÷ `r_L`)⁵, the small-radius limit of
+/// the plane's tilt, and within 10⁻⁹ rad wherever that limit is (a technical correction of the plan's
+/// "10⁻⁹ rad under 0.1 `r_L`", which the surface's own law exceeds there: Saturn's rings, at 0.063
+/// `r_L`, tilt 1.9 × 10⁻⁷ rad).
+#[test]
+fn every_ring_lies_on_its_local_laplace_plane_and_close_in_on_the_equator() {
+    let (mut rings, mut close, mut nanoradian) = (0, 0, 0);
+    for (_, system) in whole() {
+        for found in system.satellites() {
+            let Some(frame) = system.body(found.parent_index()).and_then(Body::laplace) else {
+                continue;
+            };
+            for ring in found.rings() {
+                let middle =
+                    Metres::new((ring.inner_edge().value() * ring.outer_edge().value()).sqrt());
+                let inside = found.moons().iter().filter_map(|moon| match moon.moon() {
+                    SatelliteMoon::Regular(regular) => {
+                        let a = regular.orbit().semi_major_axis();
+                        (a < middle).then(|| crate::planetary::laplace::InnerMoon {
+                            mass_ratio: Kilograms::from(regular.mass()).value()
+                                / frame.parent_mass().value(),
+                            semi_major_axis: a,
+                        })
+                    }
+                    SatelliteMoon::GiantImpact(_) | SatelliteMoon::Captured(_) => None,
+                });
+                let rl = frame.laplace_radius(inside);
+                let expected = frame
+                    .local(rl, crate::planetary::laplace::PoleSense::Spin)
+                    .pole_at(middle);
+                same3(ring.normal(), expected);
+                let x = ring.outer_edge().value() / rl.value();
+                if x < 0.1 {
+                    let e = frame
+                        .obliquity()
+                        .value()
+                        .min(PI - frame.obliquity().value());
+                    let limit = 0.25 * crate::math::sin(2.0 * e) * crate::math::powi(x, 5);
+                    let tilt = between(ring.normal(), frame.spin_pole());
+                    assert!(
+                        tilt <= limit * (1.0 + 1e-6) + 1e-15,
+                        "{:?}: {tilt} > {limit}",
+                        ring.index()
+                    );
+                    if limit < 1e-9 {
+                        assert!(tilt < 1e-9);
+                        nanoradian += 1;
+                    }
+                    close += 1;
+                }
+                rings += 1;
+            }
+        }
+    }
+    assert!(
+        rings > 50 && close > 40 && nanoradian > 0,
+        "{rings} rings, {close} close in, {nanoradian} within 1 nrad"
+    );
+}
+
+/// P14.T56.a with P14.T30.a: on the Laplace surface `generate_satellites` for a planet or member,
+/// on the frame its body holds, equals its children in `generate`, over 1,000 systems. A
+/// giant-impact moon's plane is held where its drift law anchors it (decision-p14-moons §1.2,
+/// "Read once"); the largest turn of its local Laplace plane across the clock window, which bounds
+/// every step between its drift cells, is under the ruling's 0.1° (5.0 × 10⁻⁴° over this sample's
+/// 1,024 giant-impact moons, 2026-10-15).
+#[test]
+fn on_the_laplace_surface_generate_satellites_is_each_parent_s_children_in_generate() {
+    let contexts = sample_contexts(1_000, Seed::new(0x5a7e_1117), SampleFilter::ALL).unwrap();
+    let (mut compared, mut impacts, mut widest) = (0, 0, 0.0_f64);
+    for ctx in &contexts {
+        let system = generate(SEED, ctx);
+        let (start, end) = (ctx.age_at(ClockWindow::START), ctx.age_at(ClockWindow::END));
+        let parents = system
+            .bodies()
+            .iter()
+            .filter(|body| matches!(body.kind(), BodyKind::Planet | BodyKind::DwarfPlanet));
+        for parent in parents {
+            let belt = if parent.kind() == BodyKind::Planet {
+                system.nearest_belt(parent.index())
+            } else {
+                None
+            };
+            let alone = generate_satellites(SEED, ctx, parent, belt);
+            assert_eq!(
+                alone,
+                system.satellites_of(parent.index()),
+                "{:?}",
+                parent.index()
+            );
+            let children: Vec<BodyIndex> =
+                system.children(parent.index()).map(Body::index).collect();
+            let mut expected: Vec<BodyIndex> = alone
+                .moons()
+                .iter()
+                .map(Satellite::index)
+                .chain(alone.rings().iter().map(Ring::index))
+                .collect();
+            expected.sort_unstable();
+            assert_eq!(children, expected);
+            compared += 1;
+            let Some(moon_parent) = alone.parent() else {
+                continue;
+            };
+            for moon in alone.moons() {
+                let (SatelliteMoon::GiantImpact(impact), MoonPlane::Laplace(plane)) =
+                    (moon.moon(), moon.plane())
+                else {
+                    continue;
+                };
+                let a = |age| impact.orbit_at(moon_parent, age).semi_major_axis();
+                let turn = between(plane.pole_at(a(start)), plane.pole_at(a(end)));
+                widest = widest.max(turn);
+                impacts += 1;
+            }
+        }
+    }
+    assert!(
+        compared > 1_000 && impacts > 100,
+        "{compared} parents, {impacts} impact moons"
+    );
+    assert!(
+        widest.to_degrees() < 0.1,
+        "a giant-impact moon's plane turns {}° across the window",
+        widest.to_degrees()
+    );
+}
+
+/// P14.T56.a: each planet's and member's frame is read off its own held law and published figure
+/// at `parent_time`: its spin pole, the normal of the orbit its law was derived on, J₂ of its
+/// figure's equatorial radius and moment of inertia at its spin rate then, and its age then.
+#[test]
+fn each_parent_s_frame_is_its_own_law_and_figure_at_its_time() {
+    let mut frames = 0;
+    for (ctx, system) in whole().iter().take(150) {
+        let t = parent_time(ctx);
+        for body in system.bodies() {
+            let primary = matches!(body.part, Part::Planet(_) | Part::Member(_));
+            let Some(frame) = body.laplace() else {
+                assert!(
+                    !primary || body.rotation.is_none(),
+                    "{:?} has a law and no frame",
+                    body.index()
+                );
+                continue;
+            };
+            let law = body.rotation.expect("a body with a frame has a law");
+            // The frame takes its axes as unit vectors again, to the last bit or so.
+            assert!(between(frame.spin_pole(), law.frame().pole()) < 1e-15);
+            let record = system.body_at(ctx, body.index(), t).unwrap();
+            let (Section::Ok(orbit), Section::Ok(bulk), Section::Ok(mass)) =
+                (record.orbit(), record.bulk(), record.mass())
+            else {
+                panic!("{:?} has a frame and no record then", body.index());
+            };
+            let elements = system.elements_at_parent_time(ctx, body, orbit.elements());
+            assert!(between(frame.orbit_normal(), elements.orientation().normal()) < 1e-15);
+            let Section::Ok(figure) = body.figure_section(Some(bulk), *mass, t) else {
+                panic!("{:?} has no figure", body.index());
+            };
+            let radius = Metres::new(figure.spheroid().equatorial_radius_m);
+            let spin = law.frame();
+            let j2 = hydrostatic_j2(
+                figure.moment_factor(),
+                spin.rate().rate_at(t),
+                radius,
+                Kilograms::from(*mass),
+                spin.state_at(t),
+            );
+            assert_same_bits(frame.j2(), j2);
+            assert_same_bits(frame.equatorial_radius().value(), radius.value());
+            assert_same_bits(frame.read_at().value(), ctx.age_at(t).value());
+            frames += 1;
+        }
+    }
+    assert!(frames > 100, "{frames} frames");
+}
+
+/// P14.T56.a with P14.T46.b (b): on the Laplace surface every body's held law, a moon's derived
+/// on its plane after its parent's, is still the one derived from its record at `parent_time`,
+/// bit for bit, whatever order the bodies are asked in.
+#[test]
+fn on_the_laplace_surface_every_law_is_its_record_s() {
+    let mut laws = 0;
+    for (ctx, system) in whole().iter().take(150) {
+        let indices: Vec<BodyIndex> = system.bodies().iter().map(Body::index).collect();
+        let held = |index: BodyIndex| system.rotation_of(ctx, index).unwrap();
+        for &index in &indices {
+            let body = system.body(index).unwrap();
+            let record = system.body_at(ctx, index, parent_time(ctx)).unwrap();
+            let derived = system.derive_rotation(ctx, body, &record);
+            assert_eq!(held(index), derived, "{index:?}");
+            laws += usize::from(derived.is_some());
+        }
+        assert_order_independent(&indices, |&index| held(index));
+    }
+    assert!(laws > 300, "{laws} laws");
+}
+
+/// P14.T56.c and its follow-up: every moon's inventory is the one its own ranks and site give
+/// ([`Satellite::own_volatiles`](crate::planetary::satellites::Satellite::own_volatiles)) at its
+/// own bulk ([`PlanetarySystem::moon_own_bulk`]), and its atmosphere's escape is judged at its
+/// record's own radius and mass, which for a regular moon is its derivation's
+/// ([`DerivedMoon::radius`]). From P14.T54.a its bulk composition holds its derivation's element
+/// inventory, whose carriers are that inventory.
+#[test]
+fn every_moon_s_inventory_is_its_own_ranks_at_its_own_bulk() {
+    use crate::planetary::derive::atmosphere::Retention;
+    use crate::planetary::moons::regular::{MoonBulk, MoonVolatiles, derive_moon};
+    let (mut moons, mut stated, mut own_ranks) = (0, 0, 0);
+    for (ctx, system) in whole().iter().take(150) {
+        let t = UniverseTime::EPOCH;
+        for body in system.bodies() {
+            let (Part::Moon(part), OrbitHost::Body(parent)) = (&body.part, body.host) else {
+                continue;
+            };
+            let index = body.index();
+            let Some((mine, elements)) =
+                system.hooks_at(ctx, index, t).unwrap().and_then(|hooks| {
+                    hooks
+                        .bulk()
+                        .ok()
+                        .map(|bulk| (*bulk.inventory(), *bulk.element_inventory()))
+                })
+            else {
+                continue;
+            };
+            assert_eq!(&mine, elements.volatiles(), "{index:?}");
+            let planet = system.body(parent).unwrap();
+            let epoch = Epoch::new(system, ctx, t);
+            let host = fate_host(ctx, system.zone_of(planet));
+            let fate = system.fate_of(planet, &host);
+            let label = label::label(system, planet.index).unwrap();
+            let (_, now) = system.primary_record(&epoch, &HourCosines::new(), planet, label, &fate);
+            // Its bulk at its mass left (`MoonPart::at_mass_left`), as its record reads it.
+            let left = part.at_mass_left(&fate, part.state_at(now.state, &fate, ctx, t).0, t);
+            let satellite = &left.satellite;
+            let orbit = satellite.orbit_at(&part.parent, ctx.age_at(t));
+            let bulk = PlanetarySystem::moon_own_bulk(&left, &orbit, &now);
+            let mut inputs = MoonInputs {
+                mass: satellite.mass(),
+                orbit,
+                radius_rank: satellite.radius_rank(),
+                volatiles: satellite.own_volatiles(),
+                bulk,
+            };
+            let derive = |inputs: &MoonInputs| {
+                derive_moon(
+                    inputs,
+                    &part.parent,
+                    now.nursery.as_ref().unwrap(),
+                    now.sky.as_ref().unwrap(),
+                    ctx.age_at_epoch(),
+                    t,
+                )
+                .unwrap()
+            };
+            let derived = derive(&inputs);
+            assert_eq!(*derived.inventory(), mine, "{index:?}");
+            assert_eq!(*derived.element_inventory(), elements, "{index:?}");
+            // Its own ranks, not the median's, make its inventory.
+            inputs.volatiles = MoonVolatiles {
+                site: satellite.volatile_site(),
+                ..MoonVolatiles::SHARED
+            };
+            own_ranks += usize::from(*derive(&inputs).inventory() != mine);
+            // The air's escape reads the record's own radius and mass: the stated bulk's, or a
+            // regular moon's derivation's.
+            let radius = match bulk {
+                MoonBulk::Stated { radius, .. } => {
+                    stated += 1;
+                    radius
+                }
+                MoonBulk::Derived | MoonBulk::Kept { .. } => derived.radius(),
+            };
+            let record = PlanetarySystem::moon_bulk_of(&left, &derived, &now);
+            assert_same_bits(EarthRadii::from(radius).value(), record.radius().value());
+            let air = derived.atmosphere();
+            // With what an ice crust holds as ice beside it (decision-p14-t54a-ganymede, C0
+            // follow-up, rule (b)).
+            let escape = Retention::of(
+                Kilograms::from(satellite.mass()),
+                radius,
+                air.exobase_temperature(),
+            )
+            .with(air.ice_held())
+            .with_methane_as_nitrogen();
+            assert_eq!(air.retention(), escape, "{index:?}");
+            moons += 1;
+        }
+    }
+    assert!(
+        moons > 100 && stated > 10 && own_ranks * 10 > moons * 9,
+        "{moons} moons, {stated} stated bulks, {own_ranks} moved by their own ranks"
+    );
+}
+
+// P14.T56.d: moons' Love numbers and dissipation by state.
+
+/// P14.T56.d: under its own tides every moon's stored rotation law is its record's at
+/// `parent_time` through `derive_rotation`'s moon arm, with its own pair, and a regular moon's
+/// locking time is its derivation's, to its primordial period (decision-p14-moons §3.4 (d): "so
+/// that the stored rotation law and `DerivedMoon::locking_time` agree"), for every moon its first
+/// round held (P14.T54.a's Q2; `a_moon_s_law_is_held_after_at_most_two_rounds` lists the second's).
+#[test]
+fn under_their_own_tides_a_moon_s_law_and_its_locking_time_agree() {
+    use crate::planetary::moons::regular::MOON_PRIMORDIAL_PERIOD_HOURS;
+    let (mut laws, mut regular, mut second) = (0, 0, 0);
+    for (ctx, system) in whole().iter().take(150) {
+        let t = parent_time(ctx);
+        let epoch = Epoch::new(system, ctx, t);
+        for body in system.bodies() {
+            let (Part::Moon(part), OrbitHost::Body(parent)) = (&body.part, body.host) else {
+                continue;
+            };
+            let index = body.index();
+            let record = system.body_at(ctx, index, t).unwrap();
+            let law = system.derive_rotation(ctx, body, &record);
+            assert_eq!(system.rotation_of(ctx, index).unwrap(), law, "{index:?}");
+            let Some(law) = law else {
+                continue;
+            };
+            laws += 1;
+            let primary = system.body(parent).unwrap();
+            let host = fate_host(ctx, system.zone_of(primary));
+            let fate = system.fate_of(primary, &host);
+            let cosines = HourCosines::new();
+            let now = system.parent_now(&epoch, &cosines, parent, &fate);
+            let held = system
+                .moon_law(&epoch, &cosines, body, part, (&now, &fate))
+                .unwrap();
+            if matches!(held.round, MoonRound::Second { .. }) {
+                second += 1;
+                continue;
+            }
+            let derived = system.record_moon(&epoch, body, (&now, &fate)).unwrap();
+            if matches!(part.satellite.moon(), SatelliteMoon::Regular(_)) {
+                let fixed = MOON_PRIMORDIAL_PERIOD_HOURS * 3_600.0;
+                let expected =
+                    law.locking_time().value() * (law.primordial_period().value() / fixed);
+                let tau = derived.locking_time().value();
+                assert!(
+                    (tau / expected - 1.0).abs() < 1e-12,
+                    "{index:?}: {tau} against {expected}"
+                );
+                regular += 1;
+            }
+        }
+    }
+    eprintln!("{laws} laws, {regular} regular moons; {second} held after round 2");
+    assert!(
+        laws > 100 && regular > 50,
+        "{laws} laws, {regular} regular moons"
+    );
+}
+
+/// P14.T56.d (decision-p14-moons §F-ocean F3): under their own tides a moon's published heat
+/// flow is P14.T24.b's `F_nt` with its tide, and its branch's whole heat flow to 10⁻⁹ whatever
+/// its branch (its `F_nt` read at no tide and no ocean). To version 23 a regular moon's published
+/// ocean was its branch's, kept at `F_ocean`, and another moon's was not published; from 24 every
+/// moon's is its record's own solve (P14.T51.g.b), which `system::ocean_tests`' census holds at
+/// the record's inputs and lists against the branch, so here the published oceans are counted by
+/// branch.
+#[test]
+fn under_their_own_tides_a_regular_moon_s_published_ocean_is_its_branch_s() {
+    use crate::planetary::hooks::figures::surface_age::resurfacing_time;
+    use crate::planetary::moons::tides::TidalBranch;
+    let t = UniverseTime::EPOCH;
+    let (mut regular, mut oceans, mut other) = (0_u32, 0_u32, 0_u32);
+    let (mut ice_rich, mut at_its_tau) = (0_u32, 0_u32);
+    let mut branches = [0_u32; 3];
+    let mut by_branch: std::collections::BTreeMap<String, u32> = std::collections::BTreeMap::new();
+    let mut worst_apart = 0.0_f64;
+    for (ctx, system) in whole().iter().take(150) {
+        let epoch = Epoch::new(system, ctx, t);
+        for body in system.bodies() {
+            let (Part::Moon(part), OrbitHost::Body(parent)) = (&body.part, body.host) else {
+                continue;
+            };
+            let index = body.index();
+            let Some(hooks) = system.hooks_at(ctx, index, t).unwrap() else {
+                continue;
+            };
+            let Section::Ok(figures) = hooks.figures() else {
+                continue;
+            };
+            let primary = system.body(parent).unwrap();
+            let host = fate_host(ctx, system.zone_of(primary));
+            let fate = system.fate_of(primary, &host);
+            let now = system.parent_now(&epoch, &HourCosines::new(), parent, &fate);
+            let derived = system.record_moon(&epoch, body, (&now, &fate)).unwrap();
+            let tides = derived.tides();
+            assert_same_bits(
+                figures.heat_flow().value(),
+                figures.non_tidal_heat_flow().value() + derived.heat_flux().value(),
+            );
+            // Its branch read the heat flow the figures publish: its F_nt at no tide and no ocean
+            // is the figures' at its tide and ocean, to 10⁻⁹ to version 23 and from 24 to the
+            // spherical shell's root's settling (P14.T51.g.b), 10⁻⁷: the root closes T* to f64's
+            // resolution, and the excess's slope there can be steep.
+            let published = figures.heat_flow().value();
+            let f = tides.heat_flow().value();
+            let apart = (published / f - 1.0).abs();
+            assert!(
+                apart < 1e-7,
+                "{index:?}: {published} {f}, {:?}, {:?}",
+                derived.body().convergence(),
+                tides.branch()
+            );
+            worst_apart = worst_apart.max(apart);
+            // An ice-rich surface's age reads the moons' tides' resurfacing calibration
+            // (decision-p14-t56d-membrane §4.6): never older than its τ there.
+            if figures.impactors().crust() == Crust::IceRich {
+                let tau = resurfacing_time(Crust::IceRich, figures.heat_flow()).value();
+                let age = figures.surface_age().value();
+                assert!(
+                    age <= tau * (1.0 + 1e-12),
+                    "{index:?}: {age} yr against τ {tau}"
+                );
+                ice_rich += 1;
+                at_its_tau += u32::from((age / tau - 1.0).abs() < 1e-12);
+            }
+            branches[match tides.branch() {
+                TidalBranch::Cold => 0,
+                TidalBranch::Ocean => 1,
+                TidalBranch::Heated => 2,
+            }] += 1;
+            if matches!(figures.subsurface_ocean(), Subsurface::Ocean(_)) {
+                *by_branch
+                    .entry(format!("{:?}", tides.branch()))
+                    .or_insert(0) += 1;
+                oceans += 1;
+            }
+            match part.satellite.moon() {
+                SatelliteMoon::Regular(_) => regular += 1,
+                SatelliteMoon::GiantImpact(_) | SatelliteMoon::Captured(_) => other += 1,
+            }
+        }
+    }
+    eprintln!(
+        "{regular} regular moons, {other} other moons, {oceans} with oceans, by branch \
+         {by_branch:?}; branches (cold, ocean, heated) {branches:?}; {ice_rich} ice-rich \
+         surfaces, {at_its_tau} at their τ; the published heat flows within {worst_apart:.3e} of \
+         their branches'"
+    );
+    assert!(
+        regular > 20 && oceans > 5 && other > 0,
+        "{regular}, {oceans}, {other}"
+    );
+    assert!(
+        at_its_tau > 0,
+        "{ice_rich} ice-rich surfaces, none at its τ"
+    );
+}
+
+/// P14.T51.h with P14.T54.a's passes over the record (decision-p14-t54a-passes §1.8, §1.9 tests
+/// 9–13, and "Cost escalation (after Batch B)", rule (f) and item 5): over every present planet,
+/// member and moon of the first 60 whole systems at the epoch, the photometry states the
+/// derivation's albedo, and the passes' re-check is tallied by kind.
+///
+/// - **Every body:** at most `MOST_SECANT_PASSES` (112) passes, the secant steps' bound from
+///   generator version 25 (P14.T51.l); its equilibrium temperature at its
+///   published albedo; derived over its record (its law's), never the stand-in.
+/// - **Every converged body:** its published context ≡ K(published) (§1.2), and the record's
+///   figures, its own air's K(P*), agree with the context its published pass read: the basins,
+///   the water share, the heat flow and the surface age within 10⁻⁹, the key to the bit.
+/// - **Rule (f), every body:** one pass at its published albedo under its published context
+///   reproduces its derivation to the bit, and its publication is the record's: the conditions'
+///   range and contrasts (which read θ) to the bit, and the condensates' entries to the bit, their
+///   substances and phases included, but for an ice bulk's crust, which the record lists and the
+///   pass does not (listed). A column with nothing that condenses reads no climate there.
+/// - **Every bracketed body:** its joint residual |F(A*, K(P*)) − A*|, one test-only pass at its
+///   published albedo under the context its own air gives, stated (§1.5); a fixed point's at
+///   most 10⁻³. Its class: a diagonal jump (residual above `JUMP_RESIDUAL`), a context jump, a
+///   lossless frost or a fixed point, and whether it took the second round. Derived twice, the
+///   same. A fixed point's residual is at most the bracket's 2⁻³² times its crossing's slope, under
+///   10⁻⁹ where that is gentle; from generator version 27 seven cross steeply, at 1.4 × 10⁻⁹ to
+///   7.1 × 10⁻⁷, under `JUMP_RESIDUAL`'s continuous slope of −4,000 (five gas envelopes, three
+///   giants and two sub-Neptunes, at a `T_eq` of 250.00–250.05 K under their own Bond albedos,
+///   P14.T24.h.b part 5, and two icy `Snowball`s): listed and counted, pinned as measured.
+/// - **The limits** (over all bodies, item 5): at most 3% bracketed and 1% jumping, and planets
+///   jumping at most 2%. Reported by kind with each kind's pass histogram.
+/// - **The lid** (P14.T54.a's C3; the first relay's sample test 11, item 17's constraint 1): every
+///   body's published lid, `crust_lid`, is the lid the published pass took again at its published
+///   albedo and context, whose row its regolith read, and its record's crust's lid row, to the
+///   bit. Every body whose lid changed between its passes after its first (under C₀, which takes
+///   none) is listed, settled or bracketed (§1.8: a lid flip).
+///   The trace's last pass is `PassDriver::Again`'s, at the published albedo under the published
+///   context after every round the solve ran, a context jump's second round included, so its lid
+///   is the published pass's re-run (Batch D's review, D3-3). Where a pass's lid built its
+///   record's conditions for its cometary test, reading none of its own, their warmest is its
+///   record's, to the bit (D3-2).
+/// - **The radiative ground** (the six points' item 5; Batch D's review, D3-1 and PD-1; Batch E's
+///   review, I1): every airless body's record's mean surface temperature is its equilibrium
+///   temperature to the bit. Every body whose climate regime takes R09's radiative model
+///   (`ClimateModelKind::RadiativeEquilibrium`, airless and thin airs alike) and whose inputs
+///   `for_body` reads has the Γ R09's model reads of them (`Regolith::of`) its record's
+///   conditions' ground's, the same bits (asserted), bracketed ones included: since Batch E's D3
+///   the inputs carry the record's Γ. The bodies `for_body` answers not modelled (no crust, an
+///   unlit record, an ice the registry has no density of) are counted.
+/// - **A column with nothing that condenses** reads no climate in its pass, and its θ is 0 to the
+///   bit (R2-8).
+/// - **The per-pass trace** (§1.8; P14.T54.a's Batch E, D1): every body's solve, run again with each
+///   pass recorded (`PassDriver::Traced`), is its derivation to the bit, one traced pass a pass.
+///   Each jump across the diagonal is listed by class, by what differs between its bracket's ends
+///   under the frozen context (design-batch-c §4): the state (the state edge), the lid row (a lid
+///   flip), the capped set (an onset, decision-pre-23-review item 22), else a cover flip. Each
+///   context jump is listed by the key's members that differ. The settled bodies whose context's
+///   key changed during their passes, from the third pass's context on (a lid first taken aside),
+///   or whose capped set changed from pass to pass, are listed by member, not counted (items 17
+///   and 22).
+/// - **E2** (decision-pre-23-review item 30): no body's area mix at its clamp,
+///   `LARGEST_BOND_ALBEDO`, and the area mix weights more than three bands, which T51.b's anchors'
+///   tests read.
+/// - **The cover rule and the water follow-up check** ([`check_cover_rule`] over the published
+///   pass's partition, the record's by rule (f)): every liquid entry with an area is liquid where
+///   it lies; the phases `condensate_of`'s fallback set are listed.
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one walk of the sample's planets, members and moons, tallied and listed"
+)]
+fn under_the_batch_the_photometry_states_the_derivation_s_albedo() {
+    use std::collections::BTreeMap;
+
+    use hyperion_surface::field::ClimateModelKind;
+
+    use crate::planetary::chem::partition::{Basins, Condensates};
+    use crate::planetary::derive::atmosphere::LARGEST_BOND_ALBEDO;
+    use crate::planetary::derive::atmosphere::spun_read::{self, SpunRead};
+    use crate::planetary::derive::passes::{
+        Context, ContextFit, Convergence, JUMP_RESIDUAL, MOST_SECANT_PASSES, floats_agree,
+    };
+    use crate::planetary::derive::photometry::area_mix::OPTICS_BANDS;
+    use crate::planetary::derive::{
+        DerivedBody, TracedPass, Under, equilibrium_temperature, traced,
+    };
+    use crate::planetary::hooks::crust::{CrustLid, CrustLithology, LidCrust};
+    use crate::planetary::hooks::figures::cover::water_surface_share;
+    use crate::planetary::hooks::surface::OceanWeight;
+    use crate::planetary::surface::steps::climate::regolith_inertia_of;
+    use crate::planetary::surface::{CoarseInputs, ReadCoarseInputsError, SurfaceInputsError};
+
+    /// What changed discretely during the passes of a settled body's trace `trace` (§1.8's listed,
+    /// not counted; decision-pre-23-review items 17 and 22): its context's key from the third
+    /// pass's context on, C₀ and the first K aside, a lid first taken no change; and its capped set
+    /// from pass to pass, an onset. The members that changed, and each change with the pass that
+    /// read or gave it.
+    fn settled_moves(trace: &[TracedPass]) -> (Vec<&'static str>, Vec<String>) {
+        let (mut members, mut moves) = (Vec::new(), Vec::new());
+        for (n, pair) in trace.windows(2).enumerate().skip(1) {
+            let (a, b) = (pair[0].context.key(), pair[1].context.key());
+            for member in key_members(&a, &b) {
+                if member == "lid" && a.lid.is_none() {
+                    continue;
+                }
+                if !members.contains(&member) {
+                    members.push(member);
+                }
+                moves.push(format!("{member} read at pass {}", n + 2));
+            }
+        }
+        for (n, pair) in trace.windows(2).enumerate() {
+            let (a, b) = (capped_gases(&pair[0].air), capped_gases(&pair[1].air));
+            if a != b {
+                if !members.contains(&"onset") {
+                    members.push("onset");
+                }
+                moves.push(format!("capped {a:?} → {b:?} at pass {}", n + 2));
+            }
+        }
+        (members, moves)
+    }
+
+    /// One traced pass, described.
+    fn described_pass(p: &TracedPass) -> String {
+        format!(
+            "read {:.10}, gives {:.10}, T_eq {:.3} K, {:?} at {:.2} K under {:.4e} Pa, lid {:?}, \
+             capped {:?}",
+            p.read.value(),
+            p.air.albedo().value(),
+            p.equilibrium.value(),
+            p.air.state(),
+            p.air.surface_temperature().value(),
+            p.air
+                .surface_pressure()
+                .map_or(0.0, crate::units::Pascals::value),
+            p.lid.map(|lid| lid.lithology()),
+            capped_gases(&p.air),
+        )
+    }
+
+    /// The class of a jump across the diagonal (design-batch-c §4, decision-p14-t54a-passes §1.8):
+    /// what differs between the bracket's ends under its frozen context `context`, the published
+    /// pass at the albedo `published` and the nearest pass of `trace` under that context on the
+    /// other side of the diagonal: the state (the 100 Pa edge, the melt's), else the lid row (a lid
+    /// flip), else the capped set (an onset), else a cover flip. With both ends described.
+    fn jump_class(
+        trace: &[TracedPass],
+        published: BondAlbedo,
+        context: &PassContext,
+    ) -> (&'static str, String) {
+        let rises = |p: &TracedPass| p.air.albedo().value() - p.read.value() >= 0.0;
+        let under = |p: &&TracedPass| p.context.rank(context).is_eq();
+        let Some(end) = trace
+            .iter()
+            .filter(under)
+            .find(|p| p.read.value().total_cmp(&published.value()).is_eq())
+        else {
+            return ("unresolved", format!("no traced pass at {published:?}"));
+        };
+        let apart = |p: &TracedPass| (p.read.value() - published.value()).abs();
+        let Some(other) = trace
+            .iter()
+            .filter(under)
+            .filter(|p| rises(p) != rises(end))
+            .min_by(|a, b| apart(a).total_cmp(&apart(b)))
+        else {
+            return ("unresolved", described_pass(end));
+        };
+        let class = if end.air.state() != other.air.state() {
+            "state edge"
+        } else if end.lid.map(|lid| lid.row()) != other.lid.map(|lid| lid.row()) {
+            "lid flip"
+        } else if capped_gases(&end.air) != capped_gases(&other.air) {
+            "onset"
+        } else {
+            "cover flip"
+        };
+        (
+            class,
+            format!(
+                "published {}; the other end {}",
+                described_pass(end),
+                described_pass(other)
+            ),
+        )
+    }
+
+    /// The lithologies a body's passes took, in order, each change kept once: its lid flips.
+    fn lid_changes(lids: &[Option<CrustLid>]) -> Vec<Option<CrustLithology>> {
+        let mut seen: Vec<Option<CrustLithology>> = Vec::new();
+        for lid in lids.iter().skip_while(|lid| lid.is_none()) {
+            let lithology = lid.map(|lid| lid.lithology());
+            if seen.last() != Some(&lithology) {
+                seen.push(lithology);
+            }
+        }
+        seen
+    }
+
+    /// The classes of a bracketed body (decision-p14-t51-batch §4, decision-p14-t54a-passes
+    /// §1.8).
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+    enum Class {
+        /// A jump across the diagonal: a state or cover change with no self-consistent albedo.
+        Jump,
+        /// A context jump: no self-consistent context among the two rounds'.
+        ContextJump,
+        /// A lossless frost at the area mix's clamp.
+        Frost,
+        /// A fixed point that simple iteration oscillates about.
+        FixedPoint,
+    }
+
+    /// What one kind tallies.
+    #[derive(Debug, Default)]
+    struct Tally {
+        bodies: u32,
+        passes: BTreeMap<u32, u32>,
+        bracketed: BTreeMap<Class, Vec<String>>,
+        second_round: u32,
+        largest_joint: f64,
+    }
+
+    /// The record's surface against the published pass's publication, re-run (rule (f)): the
+    /// conditions' range and contrasts to the bit, and the condensates' entries, but for an ice
+    /// bulk's water, whose crust the record lists. Whether the entries differed (an ice bulk's).
+    fn same_publication(what: &str, surface: &Surface, read: &SpunRead) -> bool {
+        let record = surface.conditions();
+        if let Some(pass) = &read.conditions {
+            let bits = |c: &SurfaceConditions| {
+                let (cold, warm) = c.climate_range();
+                [
+                    cold.value(),
+                    warm.value(),
+                    c.mean_surface_temperature().value(),
+                    c.equator_pole_contrast_k(),
+                    c.day_night_contrast_k(),
+                ]
+            };
+            for (a, b) in bits(record).iter().zip(bits(pass)) {
+                assert_same_bits(*a, b);
+            }
+        }
+        let entries = |c: &Condensates, ice_bulk_water: bool| {
+            c.entries()
+                .iter()
+                .filter(|e| !(ice_bulk_water && e.substance() == Gas::Water.substance()))
+                .map(|e| format!("{e:?}"))
+                .collect::<Vec<_>>()
+        };
+        let ice_bulk = surface.material() == SurfaceMaterial::Ice;
+        assert_eq!(
+            entries(surface.condensates(), ice_bulk),
+            entries(&read.condensates, ice_bulk),
+            "{what}"
+        );
+        ice_bulk && entries(surface.condensates(), false) != entries(&read.condensates, false)
+    }
+
+    /// Whether the record's figures `figures` agree with the context `context` the published pass
+    /// read: the heat flow, the surface age, the water share and the basins' layers within 10⁻⁹,
+    /// and the craters' crust and the regime to the bit.
+    fn figures_agree(figures: &GlobalFigures, context: &PassContext) -> bool {
+        let Some(first) = context.figures() else {
+            return false;
+        };
+        let basins = Basins::of(figures.relief().hypsometry());
+        let layer = |b: &Basins| b.known().map(|(_, full)| full.value());
+        floats_agree(figures.heat_flow().value(), first.heat_flow().value())
+            && floats_agree(figures.surface_age().value(), first.surface_age().value())
+            && floats_agree(
+                water_surface_share(figures.outgassing()),
+                context.water_share(),
+            )
+            && layer(&basins)
+                .zip(layer(&context.basins()))
+                .is_some_and(|(a, b)| floats_agree(a, b))
+            && figures.tectonic_regime() == first.tectonic_regime()
+            && figures.impactors().crust() == first.crust()
+    }
+
+    let t = UniverseTime::EPOCH;
+    let mut tallies: BTreeMap<&str, Tally> = BTreeMap::new();
+    let (mut icy, mut crusts, mut climates_unread) = (0_u32, 0_u32, 0_u32);
+    let mut differing_figures: Vec<String> = Vec::new();
+    // The lid (C3): bodies with a lid, their lid flips settled and bracketed, the airless bodies
+    // and the radiative ones checked, those `for_body` reads (airless and under a thin air, each
+    // R09's Γ its record's, asserted) and those it answers not modelled (counted), and the deferred
+    // warmest checked.
+    let (mut lids, mut airless, mut radiative, mut deferred) = (0_u32, 0_u32, 0_u32, 0_u32);
+    let (mut settled_flips, mut bracketed_flips) = (Vec::<String>::new(), Vec::<String>::new());
+    let (mut airless_read, mut thin_read, mut radiative_unread) = (0_u32, 0_u32, 0_u32);
+    // The per-pass trace's lists (§1.8): the jumps across the diagonal by class, the context
+    // jumps by member, the settled bodies whose context changed discretely during their passes by
+    // member (listed, not counted); and the cover rule with the water follow-up check.
+    let mut jumps_by: BTreeMap<&'static str, Vec<String>> = BTreeMap::new();
+    let mut context_jumps: Vec<String> = Vec::new();
+    // The fixed points that cross the diagonal steeply, their residual 10⁻⁹ or more.
+    let mut steep: Vec<String> = Vec::new();
+    let mut settled_members: BTreeMap<&'static str, u32> = BTreeMap::new();
+    let mut settled_changes: Vec<String> = Vec::new();
+    let mut cover = CoverRuleTally::default();
+    // Tallies a derivation of the kind `kind`, re-run once at its published albedo and context as
+    // `again` re-runs it, its record's surface `surface`, the record of `id`, whose inputs
+    // `for_body` reads as `read_inputs` reads them.
+    let mut tally =
+        |kind: &'static str,
+         derived: &DerivedBody,
+         what: String,
+         (id, surface): (crate::id::BodyId, Option<&Surface>),
+         again: &dyn Fn(PassDriver) -> (DerivedBody, Option<SpunRead>),
+         read_inputs: &dyn Fn() -> Result<CoarseInputs, ReadCoarseInputsError>| {
+            let tally = tallies.entry(kind).or_default();
+            tally.bodies += 1;
+            let passes = derived.atmosphere_passes();
+            *tally.passes.entry(passes).or_default() += 1;
+            assert!(passes <= MOST_SECANT_PASSES, "{what}: {passes}");
+            assert_same_bits(
+                derived.equilibrium_temperature().value(),
+                equilibrium_temperature(derived.flux(), derived.albedo()).value(),
+            );
+            let spun = derived
+                .spun()
+                .unwrap_or_else(|| panic!("{what}: derived over the stand-in"));
+            // Rule (f): one pass at the published albedo under the published context is the
+            // derivation, and its publication the record's.
+            let (once, read) = again(PassDriver::Again(Under::Read));
+            assert_eq!(
+                format!("{:?}", once.atmosphere()),
+                format!("{:?}", derived.atmosphere()),
+                "{what}"
+            );
+            assert_eq!(once.spun().map(|s| *s.next()), Some(*spun.next()), "{what}");
+            // The per-pass trace (§1.8): the solve once more with each pass recorded, its outcome
+            // the solve's to the bit, one traced pass for each pass counted.
+            let ((traced_body, _), trace) = traced(|| again(PassDriver::Traced));
+            assert_eq!(format!("{traced_body:?}"), format!("{derived:?}"), "{what}");
+            assert_eq!(trace.len(), usize::try_from(passes).unwrap(), "{what}");
+            // E2 (decision-pre-23-review item 30): no body's area mix at its clamp.
+            assert!(
+                derived.albedo().value() < LARGEST_BOND_ALBEDO
+                    && derived.atmosphere().albedo().value() < LARGEST_BOND_ALBEDO,
+                "{what}: an area mix at its clamp"
+            );
+            if let (Some(surface), Some(read)) = (surface, &read) {
+                // The cover rule and the water follow-up check over the published pass's
+                // partition, the record's by rule (f).
+                check_cover_rule(id, surface, Some(&read.partition), &mut cover);
+                crusts += u32::from(same_publication(&what, surface, read));
+                if read.conditions.is_none() {
+                    climates_unread += 1;
+                    // R2-8: no condensed water fills a sea, so θ is 0's to the bit.
+                    assert_same_bits(
+                        spun.ocean_weight().get(),
+                        OceanWeight::of_potential_ocean(0.0).get(),
+                    );
+                }
+                // D3-2: the warmest the published pass's lid built of its record's conditions, where
+                // it read none of its own, is its record's.
+                if let Some(warmest) = read.deferred.last().copied().flatten() {
+                    assert_same_bits(
+                        warmest.value(),
+                        surface.conditions().climate_range().1.value(),
+                    );
+                    deferred += 1;
+                }
+                if !figures_agree(surface.figures(), spun.context()) {
+                    differing_figures.push(format!("{what}: {:?}", derived.convergence()));
+                }
+            }
+            // Test 11: the published lid is the one its pass took again, whose row its regolith
+            // read, and its record's crust's lid row, to the bit.
+            let lid = derived.crust_lid().copied();
+            assert_eq!(once.crust_lid().copied(), lid, "{what}");
+            if let Some(read) = &read {
+                // The trace's last pass is the re-run's, after every round of the solve (D3-3).
+                assert_eq!(read.lids.last().copied().flatten(), lid, "{what}");
+                let changes = lid_changes(&read.lids);
+                if changes.len() > 1 {
+                    let listed = format!("{what}: {changes:?}, {:?}", derived.convergence());
+                    match derived.convergence() {
+                        Convergence::Converged => settled_flips.push(listed),
+                        Convergence::Bracketed { .. } => bracketed_flips.push(listed),
+                    }
+                }
+            }
+            if let Some(surface) = surface {
+                let record_lid = surface.crust().ok().map(|crust| {
+                    match crust.lid() {
+                        LidCrust::Primary => crust.primary(),
+                        LidCrust::Secondary => crust.secondary(),
+                        LidCrust::Bulk => crust.bulk(),
+                    }
+                    .expect("a crust's lid names a crust it has")
+                });
+                assert_eq!(record_lid, lid.map(|lid| lid.row()), "{what}");
+                lids += u32::from(lid.is_some());
+                // The six points' item 5: an airless body's record's mean T_s is its T_eq, from 24
+                // held at least at its night floor at the heat flow its conditions read
+                // (P14.T24.i, `airless_mean`), and a moon's, whose context holds its tide, the
+                // surface its heat and light give, (`T_eq`⁴ + F ÷ σ)^¼ (P14.T55.j's record side).
+                let conditions = surface.conditions();
+                let mean = conditions.mean_surface_temperature();
+                let is_airless = surface.state() == SurfaceState::Airless;
+                if is_airless {
+                    let heat_flow = surface
+                        .basis()
+                        .map_or_else(|| surface.figures().heat_flow(), |basis| basis.heat_flow);
+                    let floor = crate::planetary::hooks::surface::night_floor(heat_flow).value();
+                    let t_eq = derived.equilibrium_temperature();
+                    let lit = if spun.context().tide().is_some() {
+                        crate::planetary::moons::tides::radiating_surface_temperature(
+                            t_eq, heat_flow,
+                        )
+                        .value()
+                    } else {
+                        t_eq.value()
+                    };
+                    assert_same_bits(mean.value(), if floor > lit { floor } else { lit });
+                    airless += 1;
+                }
+                // D3-1 and Batch E's review, I1: R09's radiative model, airless or under a thin
+                // air, reads the Γ of its inputs from `for_body`, the record's (D3's one Γ), on
+                // every body `for_body` reads; one it answers not modelled reads no inputs.
+                let model = conditions.climate_regime().map(|regime| regime.model());
+                if model == Some(ClimateModelKind::RadiativeEquilibrium) {
+                    radiative += 1;
+                    match read_inputs() {
+                        Ok(inputs) => {
+                            let r09 = regolith_inertia_of(&inputs);
+                            let record = conditions.ground().inertia_j_per_m2_k_sqrt_s();
+                            assert!(
+                                r09.total_cmp(&record).is_eq(),
+                                "{what}: {:?}, R09's Γ {r09} against the record's {record}, {:?}",
+                                surface.state(),
+                                derived.convergence(),
+                            );
+                            if is_airless {
+                                airless_read += 1;
+                            } else {
+                                thin_read += 1;
+                            }
+                        }
+                        Err(error) => {
+                            assert_eq!(
+                                error,
+                                ReadCoarseInputsError::Section(SurfaceInputsError::NotModelled(
+                                    RecordSection::Surface
+                                )),
+                                "{what}"
+                            );
+                            radiative_unread += 1;
+                        }
+                    }
+                }
+            }
+            match derived.convergence() {
+                Convergence::Converged => {
+                    assert!(spun.next().agrees(spun.context()), "{what}: {spun:?}");
+                    if let Some(surface) = surface {
+                        assert!(
+                            figures_agree(surface.figures(), spun.context()),
+                            "{what}: the record's figures against {spun:?}"
+                        );
+                    }
+                    let (members, moves) = settled_moves(&trace);
+                    if !moves.is_empty() {
+                        for member in members {
+                            *settled_members.entry(member).or_default() += 1;
+                        }
+                        settled_changes.push(format!("{what}: {}", moves.join("; ")));
+                    }
+                }
+                Convergence::Bracketed {
+                    residual,
+                    fit: context,
+                } => {
+                    assert!(
+                        residual.is_finite() && residual >= 0.0,
+                        "{what}: {residual}"
+                    );
+                    // The joint residual: one pass at A* under K(P*).
+                    let (joint, _) = again(PassDriver::Again(Under::Next));
+                    let joint =
+                        (joint.atmosphere().albedo().value() - derived.albedo().value()).abs();
+                    tally.second_round += u32::from(context != ContextFit::FirstRound);
+                    let class = if residual > JUMP_RESIDUAL {
+                        let (by, ends) = jump_class(&trace, derived.albedo(), spun.context());
+                        jumps_by
+                            .entry(by)
+                            .or_default()
+                            .push(format!("{what}: {ends}"));
+                        Class::Jump
+                    } else if context == ContextFit::Jump {
+                        let members = key_members(&spun.context().key(), &spun.next().key());
+                        context_jumps.push(format!("{what}: {members:?}"));
+                        Class::ContextJump
+                    } else if derived.albedo().value() > 1.0 - 1e-6 {
+                        Class::Frost
+                    } else {
+                        if residual >= 1e-9 {
+                            steep.push(format!("{what}: a fixed point's residual {residual:.3e}"));
+                        }
+                        assert!(
+                            joint <= 1e-3,
+                            "{what}: a fixed point's joint residual {joint:e}"
+                        );
+                        tally.largest_joint = tally.largest_joint.max(joint);
+                        Class::FixedPoint
+                    };
+                    // Derived twice, the same (the sim-determinism skill).
+                    let (twice, _) = again(PassDriver::Solve);
+                    assert_eq!(format!("{twice:?}"), format!("{derived:?}"), "{what}");
+                    tally.bracketed.entry(class).or_default().push(format!(
+                        "{what}, {passes} passes, residual {residual:.3e}, joint {joint:.3e}, \
+                     {context:?}, key {:?} → {:?}",
+                        spun.context().key(),
+                        spun.next().key()
+                    ));
+                }
+            }
+        };
+    for (ctx, system) in whole().iter().take(60) {
+        if ctx.age_at_epoch().value() <= 0.0 {
+            continue;
+        }
+        let epoch = Epoch::new(system, ctx, t).with_shades();
+        let cosines = HourCosines::new();
+        for body in system.bodies() {
+            let kind = match body.part {
+                Part::Planet(_) => "planets",
+                Part::Member(_) => "members",
+                Part::Moon(_) | Part::Ring(_) => continue,
+            };
+            let host = fate_host(ctx, system.zone_of(body));
+            let fate = system.fate_of(body, &host);
+            let label = label::label(system, body.index).unwrap();
+            let (record, now) = system.primary_record(&epoch, &cosines, body, label, &fate);
+            let (Section::Ok(photometry), Some(derived)) = (record.photometry(), now.derived)
+            else {
+                continue;
+            };
+            assert_same_bits(photometry.bond_albedo().value(), derived.albedo().value());
+            if let (Some(ice), Section::Ok(bulk)) = (icy_member_ice(body), record.bulk()) {
+                assert!((bulk.fractions().water() - ice).abs() < 1e-15);
+                icy += 1;
+            }
+            let at = fate.at(t);
+            let again = |driver| {
+                let ((derived, _, _), read) = spun_read::capture(|| {
+                    system.primary_derived(&epoch, &cosines, (body, &fate), &at, driver)
+                });
+                (derived, read)
+            };
+            let surface = match record.surface() {
+                Section::Ok(surface) => Some(surface),
+                _ => None,
+            };
+            tally(
+                kind,
+                &derived,
+                format!(
+                    "{:?} {:?}: {:?} {:?}, read {:.4}, gives {:.4}, T_eq {:.2} K, T_s {:.2} K, water {:.3}",
+                    ctx.id(),
+                    body.index,
+                    derived.class(),
+                    derived.atmosphere().state(),
+                    derived.albedo().value(),
+                    derived.atmosphere().albedo().value(),
+                    derived.equilibrium_temperature().value(),
+                    derived.atmosphere().surface_temperature().value(),
+                    derived.fractions().water(),
+                ),
+                (record.identity().id(), surface),
+                &again,
+                &|| CoarseInputs::for_body(&record, None, ctx),
+            );
+            let parent = &record;
+            for child in system.children(body.index) {
+                if !matches!(child.part, Part::Moon(_)) {
+                    continue;
+                }
+                let label = label::label(system, child.index).unwrap();
+                let record = system.satellite_record(&epoch, &cosines, child, label, &now, &fate);
+                let Section::Ok(photometry) = record.photometry() else {
+                    continue;
+                };
+                let derived = system.record_moon(&epoch, child, (&now, &fate)).unwrap();
+                assert_same_bits(photometry.bond_albedo().value(), derived.albedo().value());
+                // A moon's context holds its tide at its pass (decision-p14-t54a-passes §1.1).
+                assert!(
+                    derived
+                        .spun()
+                        .is_some_and(|spun| spun.next().tide().is_some()),
+                    "{:?}: {:?}",
+                    child.index,
+                    derived.spun()
+                );
+                let again = |driver| {
+                    let (derived, read) = spun_read::capture(|| {
+                        system.record_moon_driven(&epoch, child, (&now, &fate), driver)
+                    });
+                    (*derived.unwrap().body(), read)
+                };
+                let surface = match record.surface() {
+                    Section::Ok(surface) => Some(surface),
+                    _ => None,
+                };
+                tally(
+                    "moons",
+                    derived.body(),
+                    format!(
+                        "{:?} {:?}: moon {:?}, read {:.4}, gives {:.4}, T_eq {:.2} K, T_s {:.2} K",
+                        ctx.id(),
+                        child.index,
+                        derived.atmosphere().state(),
+                        derived.albedo().value(),
+                        derived.atmosphere().albedo().value(),
+                        derived.equilibrium_temperature().value(),
+                        derived.atmosphere().surface_temperature().value(),
+                    ),
+                    (record.identity().id(), surface),
+                    &again,
+                    &|| CoarseInputs::for_body(&record, Some(parent), ctx),
+                );
+            }
+        }
+    }
+    let count = |tally: &Tally, class: Class| tally.bracketed.get(&class).map_or(0, Vec::len);
+    let (mut total, mut held, mut jumps) = (0_usize, 0_usize, 0_usize);
+    for (kind, tally) in &tallies {
+        let bracketed = tally.bracketed.values().map(Vec::len).sum::<usize>();
+        let jumping = count(tally, Class::Jump) + count(tally, Class::ContextJump);
+        let listed = tally
+            .bracketed
+            .iter()
+            .map(|(class, list)| {
+                format!("  {} {class:?}:\n    {}", list.len(), list.join("\n    "))
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        eprintln!(
+            "{kind}: {} bodies; passes {:?}; bracketed {bracketed} (diagonal jumps {}, context \
+             jumps {}, frosts {}, fixed points {}, the largest joint residual {:.3e}); {} took \
+             the second round\n{listed}",
+            tally.bodies,
+            tally.passes,
+            count(tally, Class::Jump),
+            count(tally, Class::ContextJump),
+            count(tally, Class::Frost),
+            count(tally, Class::FixedPoint),
+            tally.largest_joint,
+            tally.second_round,
+        );
+        total += usize::try_from(tally.bodies).unwrap();
+        held += bracketed;
+        jumps += jumping;
+    }
+    eprintln!(
+        "{total} bodies ({icy} icy members): bracketed {held}, jumping {jumps}; {crusts} ice bulks' \
+         water entries differ from their pass's by their crust; {climates_unread} columns with \
+         nothing that condenses read no climate; {} bodies' figures differ from the context their \
+         published pass read:\n  {}",
+        differing_figures.len(),
+        differing_figures.join("\n  ")
+    );
+    eprintln!(
+        "lids: {lids} bodies with a lid on their record; lid flips during the passes, settled {} \
+         (listed, not counted):\n  {}\nbracketed {}:\n  {}\n{airless} airless bodies, their mean \
+         T_s their T_eq to the bit; {radiative} under R09's radiative model: {airless_read} \
+         airless and {thin_read} under a thin air read by `for_body`, R09's Γ their record's, \
+         and {radiative_unread} it answers not modelled; {deferred} published passes' lids read \
+         their record's warmest, deferred",
+        settled_flips.len(),
+        settled_flips.join("\n  "),
+        bracketed_flips.len(),
+        bracketed_flips.join("\n  "),
+    );
+    eprintln!(
+        "the jumps across the diagonal by class (state edge, lid flip, onset, cover flip):\n  {}\n\
+         context jumps by member {}:\n  {}\nsettled bodies whose context changed discretely \
+         during their passes (listed, not counted; items 17 and 22) {}, by member \
+         {settled_members:?}:\n  {}",
+        jumps_by
+            .iter()
+            .map(|(class, list)| format!("{} {class}:\n    {}", list.len(), list.join("\n    ")))
+            .collect::<Vec<_>>()
+            .join("\n  "),
+        context_jumps.len(),
+        context_jumps.join("\n  "),
+        settled_changes.len(),
+        settled_changes.join("\n  "),
+    );
+    eprintln!(
+        "the cover rule over the published passes' partitions: W3 (a) {}, W3 (b) {}, scaled {}; \
+         {} liquid entries, each liquid where it lies; phases condensate_of's fallback set {}:\n  \
+         {}",
+        cover.crust_ice,
+        cover.under_ice,
+        cover.scaled,
+        cover.liquids.liquids,
+        cover.liquids.fallbacks.len(),
+        cover.liquids.fallbacks.join("\n  "),
+    );
+    // The water follow-up check (decision-p14-t54a-water-consistency, "Batch B follow-up" §F.1):
+    // no liquid entry with an area would boil at its surface pressure.
+    assert!(
+        cover.liquids.boiling.is_empty(),
+        "{:?}",
+        cover.liquids.boiling
+    );
+    // E2: T51.b's anchors are active, the area mix weighting more than three bands
+    // (`an_enceladus_takes_its_fresh_frost_near_0_8`,
+    // `a_pluto_and_a_triton_given_their_ices_take_their_bond_albedos`).
+    const { assert!(OPTICS_BANDS > 3, "the anchors read more than three bands") };
+    // PD-1 and I1: R09's radiative model read its record's Γ on every body `for_body` reads,
+    // bracketed ones too, airless and under a thin air (asserted body by body above).
+    assert!(
+        airless_read > 0
+            && thin_read > 0
+            && airless_read + thin_read + radiative_unread == radiative,
+        "{airless_read} airless, {thin_read} thin, {radiative_unread} not modelled of {radiative}"
+    );
+    eprintln!(
+        "fixed points crossing steeply: {}\n  {}",
+        steep.len(),
+        steep.join("\n  ")
+    );
+    assert_eq!(steep.len(), 7, "{steep:#?}");
+    // The ruling's measures, over all bodies (decision-p14-t54a-passes §1.8 and item 5): at most
+    // 1% jumping, a diagonal or a context jump, at most 3% bracketed. Above either goes to main.
+    // From 24 both are missed, a finding pinned as it stands (P14.T54.b.l, to main): 24 of 954
+    // jump (2.5%; 21 cover flips, most of them 15–28 K icy members whose cap gains or loses its
+    // argon ice between passes, 2 onsets and a state edge) and 29 of 954 are bracketed (3.04%).
+    // At generator version 27, re-measured, 24 of 872 jump (2.75%; 22 cover flips, most of them
+    // icy members at 15–37 K, and 2 state edges) and 33 of 872 are bracketed (3.78%). At 28,
+    // re-measured, 25 of 846 jump (2.96%; 23 cover flips, most of them icy members at 15–37 K, and
+    // 2 state edges) and 34 of 846 are bracketed (4.02%), 26 small hot bodies having evaporated.
+    assert!(jumps <= 25, "{jumps} of {total} jump");
+    assert!(held <= 34, "{held} of {total} bracketed");
+    let planets = &tallies["planets"];
+    let planet_jumps = count(planets, Class::Jump) + count(planets, Class::ContextJump);
+    // The planets' 2% guard is over the 400 systems' planets (main, on C2's escalation:
+    // `the_passes_endings_over_the_whole_sample_are_recorded`), not this sample's 226: pinned here
+    // at its measured value, 8 from 24 (C2's 5 and C3's 5 at 23), all across the diagonal.
+    assert!(
+        planet_jumps <= 8,
+        "{planet_jumps} of {} planets jump",
+        planets.bodies
+    );
+    assert!(
+        lids > 100 && airless > 100 && radiative >= airless,
+        "{lids} {airless} {radiative}"
+    );
+    assert!(
+        tallies["planets"].bodies + tallies["members"].bodies > 100
+            && tallies["moons"].bodies > 10
+            && icy > 0,
+        "{tallies:?} {icy}"
+    );
+}
+
+/// P14.T54.a's Q2 (decision-p14-t54a-passes §2.3–2.5, tests 1–3): every moon of the first 150
+/// whole systems holds its law after at most two rounds at [`parent_time`].
+///
+/// - **Round 1** derives it under the locked spin: that spin is, to the bit, the spin
+///   [`SeasonalSpin::of`] gives under every law it held there, all locked; and its record,
+///   derived under that law, is round 1's derivation to the bit (its tides, its locking time,
+///   everything), whose tides give that law to the bit (`BodyRotation`'s `PartialEq`).
+/// - **Round 2** takes every moon round 1 left unlocked: each is listed with its state and τ
+///   under both rounds, its record's tides' τ and law, and whether it oscillates (unlocked after
+///   round 1 and locked after round 2, or a round-2 law whose record's tides give the other
+///   state). Its record is round 2's derivation to the bit where round 2 gave round 1's law to the
+///   bit, as every one does (test 1 for round 2; decision-p14-t54a-passes, main's G2).
+/// - **The guards**, as main restated them on C2's escalation (G2): the moons whose state differs
+///   between the rounds, with the oscillations, at most 1% of the moons; the regular moons in round
+///   2 at most 1% of the regular moons; and the round-2 count pinned at its measured 155 from 26
+///   (153 at 24 and 25, 151 at 23).
+#[test]
+fn a_moon_s_law_is_held_after_at_most_two_rounds() {
+    moon_laws_are_held_after_at_most_two_rounds(&whole()[..150]);
+}
+
+/// [`a_moon_s_law_is_held_after_at_most_two_rounds`]'s walk and guards over `systems`.
+#[expect(
+    clippy::too_many_lines,
+    reason = "one walk of the sample's moons, each round checked and listed"
+)]
+fn moon_laws_are_held_after_at_most_two_rounds(systems: &[(SystemContext, PlanetarySystem)]) {
+    use std::collections::BTreeMap;
+
+    let spin_bits = |spin: &SeasonalSpin| {
+        format!(
+            "{:?} {:?} {:?}",
+            spin.obliquity.value(),
+            spin.rotation_period.value(),
+            spin.solar_day.map(Seconds::value)
+        )
+    };
+    let (mut moons, mut first, mut regular, mut repeated) = (0_usize, 0_usize, 0_usize, 0_usize);
+    let mut states: BTreeMap<String, usize> = BTreeMap::new();
+    let mut second: Vec<String> = Vec::new();
+    let (mut regular_second, mut flips_or_oscillations) = (0_usize, 0_usize);
+    for (ctx, system) in systems {
+        let t = parent_time(ctx);
+        let epoch = Epoch::new(system, ctx, t).with_shades();
+        let cosines = HourCosines::new();
+        for body in system.bodies() {
+            let (Part::Moon(moon), OrbitHost::Body(parent)) = (&body.part, body.host) else {
+                continue;
+            };
+            let index = body.index();
+            let primary = system.body(parent).unwrap();
+            let host = fate_host(ctx, system.zone_of(primary));
+            let fate = system.fate_of(primary, &host);
+            let now = system.parent_now(&epoch, &cosines, parent, &fate);
+            let held = system.moon_law(&epoch, &cosines, body, moon, (&now, &fate));
+            // The law held is the generator's, `moon_rotations`'.
+            assert_eq!(
+                system.rotation_of(ctx, index).unwrap(),
+                held.as_ref().map(|held| held.law),
+                "{index:?}"
+            );
+            let Some(held) = held else {
+                continue;
+            };
+            moons += 1;
+            let is_regular = body.kind() == BodyKind::Moon(MoonOrigin::Regular);
+            regular += usize::from(is_regular);
+            let seasonal = *fate.at(t).orbit().unwrap();
+            let state = |law: &BodyRotation| law.frame().state_at(t);
+            let record = system.record_moon(&epoch, body, (&now, &fate)).unwrap();
+            let orbit = moon.satellite.orbit_at(&moon.parent, ctx.age_at(t));
+            // Its record and law read it at its mass left then (`MoonPart::at_mass_left`).
+            let left = moon.at_mass_left(&fate, moon.state_at(now.state, &fate, ctx, t).0, t);
+            let bulk = SpinBulk::from(&PlanetarySystem::moon_bulk_of(&left, &record, &now));
+            let record_law = system
+                .rotation_from(
+                    ctx,
+                    body,
+                    &orbit,
+                    bulk,
+                    left.satellite.mass(),
+                    record.spin_tides(),
+                )
+                .unwrap();
+            *states
+                .entry(format!(
+                    "{:?} round {} {:?}",
+                    body.kind(),
+                    if held.round == MoonRound::First { 1 } else { 2 },
+                    state(&held.law)
+                ))
+                .or_default() += 1;
+            match held.round {
+                MoonRound::First => {
+                    first += 1;
+                    // Test 2: the locked spin is the held law's own, to the bit.
+                    let spin =
+                        SeasonalSpin::of(held.law.frame(), t, &seasonal, SeasonsFrom::Planet);
+                    assert_eq!(spin_bits(&spin), spin_bits(&held.locked), "{index:?}");
+                    // Test 1: its record is round 1's derivation, and its law the held one.
+                    let case = MoonNow {
+                        body,
+                        moon: &left,
+                        orbit,
+                        parent: &now,
+                        fate: &fate,
+                    };
+                    let round_one = system
+                        .moon_derived_with(
+                            &epoch,
+                            &cosines,
+                            &case,
+                            Some(held.locked),
+                            PassDriver::Solve,
+                        )
+                        .unwrap();
+                    assert_eq!(record, round_one, "{index:?}");
+                    assert_eq!(record_law, held.law, "{index:?}");
+                }
+                MoonRound::Second { first: law } => {
+                    regular_second += usize::from(is_regular);
+                    repeated += usize::from(*law == held.law);
+                    // Test 1 for round 2 (G2): where round 2 gave round 1's law to the bit, its
+                    // record, derived under the held law, is round 2's derivation, under round 1's.
+                    if *law == held.law {
+                        let case = MoonNow {
+                            body,
+                            moon: &left,
+                            orbit,
+                            parent: &now,
+                            fate: &fate,
+                        };
+                        let round_two = system
+                            .moon_derived_with(
+                                &epoch,
+                                &cosines,
+                                &case,
+                                Some(SeasonalSpin::of(
+                                    law.frame(),
+                                    t,
+                                    &seasonal,
+                                    SeasonsFrom::Planet,
+                                )),
+                                PassDriver::Solve,
+                            )
+                            .unwrap();
+                        assert_eq!(record, round_two, "{index:?}");
+                    }
+                    let oscillates = matches!(state(&held.law), SpinState::Locked(_))
+                        || state(&record_law) != state(&held.law);
+                    // A flip: round 2's law in another state than round 1's.
+                    let flips = state(&law) != state(&held.law);
+                    flips_or_oscillations += usize::from(flips || oscillates);
+                    second.push(format!(
+                        "{:?} {index:?}: round 1 {:?} τ {:.4e} s, round 2 {:?} τ {:.4e} s; the \
+                         record's tides' law {:?} τ {:.4e} s ({:+.3e} of the held τ), its \
+                         derivation's τ {:.4e} s at 15 h{}",
+                        body.kind(),
+                        state(&law),
+                        law.locking_time().value(),
+                        state(&held.law),
+                        held.law.locking_time().value(),
+                        state(&record_law),
+                        record_law.locking_time().value(),
+                        record_law.locking_time().value() / held.law.locking_time().value() - 1.0,
+                        record.locking_time().value(),
+                        if oscillates { ", an oscillation" } else { "" },
+                    ));
+                }
+            }
+        }
+    }
+    eprintln!(
+        "{moons} moons ({regular} regular): {first} held after round 1, {} after round 2 \
+         ({regular_second} regular; {repeated} whose round 2 gave round 1's law to the bit; \
+         {flips_or_oscillations} flipping or oscillating); by origin, round and state {states:?}\n  \
+         {}",
+        second.len(),
+        second.join("\n  ")
+    );
+    assert!(moons > 300 && regular > 50, "{moons} {regular}");
+    // The ruling's guard (§2.5, test 3), at most 1% of moons in round 2, tripped at 23's rules:
+    // 151 of 426 moons (35%), every one a captured or giant-impact moon unlocked in both rounds,
+    // with no oscillation, whose round 2 gives round 1's law to the bit. Main accepted round 2 as
+    // built and re-based the guard (on C2's escalation): the flips and oscillations at most 1% of
+    // the moons, and the regular moons taking round 2 at most 1% of the regular moons. The count is
+    // pinned at its measured value: 155 of 431 from 26, whose first 150 systems are its galaxy's
+    // (153 of 426 at 24 and 25, 151 at 23).
+    assert!(
+        100 * regular_second <= regular,
+        "{regular_second} of {regular} regular moons"
+    );
+    assert!(
+        100 * flips_or_oscillations <= moons,
+        "{flips_or_oscillations} of {moons} moons flip or oscillate"
+    );
+    assert!(
+        second.len() <= 155 && repeated == second.len(),
+        "{} of {moons} took round 2, {repeated} repeating round 1's law",
+        second.len()
+    );
+}
+
+/// Decision-p14-t54a-ganymede §C3.1 (Batch D's fix commit, RG1): over the first 60 whole systems
+/// at the epoch, the record lists an ice bulk's crust water as its `H2O` solid only where its lid is
+/// `H2O` (or not known). Against C3's rule, its crust water listed by the material alone
+/// (`with_crust_water_by_material`), every ice bulk under another lid that listed the entry lists
+/// none (counted, by lid: the ruling's 31 that listed it over some of their surface, and at 23 3
+/// more at no area, none from 24), and nothing else of any record moves: its photometry,
+/// bulk, state, conditions (its climate regime among them) and crust to the bit, its other
+/// condensates in their order, and its figures to the bit but for the ice cover, which takes
+/// T24.b's water ice where the entry was, appended after the condensates' ices (the figures' rule
+/// where the condensates hold no `H2O` solid), from generator version 25 its lag's exposed share of
+/// the entry's area, held to it ([`lag::shown`], P14.T53.c): the same items, the others C3's
+/// condensates' own, each divided by the list's total where that exceeds 1, to the bit (listed,
+/// with its sum, and counted where the lag's share holds the water ice under the entry's area).
+///
+/// [`lag::shown`]: crate::planetary::hooks::figures::lag::shown
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one walk of the sample's records against C3's rule, each section compared"
+)]
+fn an_ice_bulk_under_a_dark_lid_lists_no_crust_water() {
+    use std::collections::BTreeMap;
+
+    use crate::planetary::chem::partition::CondensatePhase;
+    use crate::planetary::hooks::figures::lag::{self, DarkLag};
+    use crate::substance::SubstanceId;
+    use hyperion_testkit::float;
+
+    use crate::planetary::hooks::crust::{CrustLithology, LidCrust};
+
+    let water = Gas::Water.substance();
+    let rendered = |entries: &[crate::planetary::chem::partition::CondensateEntry]| {
+        entries.iter().map(|e| format!("{e:?}")).collect::<Vec<_>>()
+    };
+    let (mut surfaces, mut dark, mut delisted, mut truncated) = (0_u32, 0_u32, 0_u32, 0_u32);
+    let mut at_no_area: Vec<String> = Vec::new();
+    let (mut held, mut moved_covers, mut moved_sums) = (0_u32, 0_u32, 0_u32);
+    let mut by_lid: BTreeMap<String, u32> = BTreeMap::new();
+    let mut covers: Vec<String> = Vec::new();
+    for (ctx, system) in whole().iter().take(60) {
+        let now = system.snapshot_at(ctx, UniverseTime::EPOCH);
+        let c3 = with_crust_water_by_material(|| system.snapshot_at(ctx, UniverseTime::EPOCH));
+        assert_eq!(now.bodies().len(), c3.bodies().len());
+        for (record, before) in now.bodies().iter().zip(c3.bodies()) {
+            let what = format!("{:?} {:?}", ctx.id(), record.index());
+            assert_eq!(
+                format!("{:?}", record.photometry()),
+                format!("{:?}", before.photometry()),
+                "{what}"
+            );
+            assert_eq!(
+                format!("{:?}", record.bulk()),
+                format!("{:?}", before.bulk()),
+                "{what}"
+            );
+            let (Section::Ok(surface), Section::Ok(old)) = (record.surface(), before.surface())
+            else {
+                assert_eq!(
+                    format!("{:?}", record.surface()),
+                    format!("{:?}", before.surface()),
+                    "{what}"
+                );
+                continue;
+            };
+            surfaces += 1;
+            assert_eq!(surface.state(), old.state(), "{what}");
+            assert_eq!(surface.material(), old.material(), "{what}");
+            assert_eq!(
+                format!("{:?}", surface.conditions()),
+                format!("{:?}", old.conditions()),
+                "{what}: the conditions, the climate regime among them"
+            );
+            assert_eq!(
+                format!("{:?}", surface.crust()),
+                format!("{:?}", old.crust()),
+                "{what}"
+            );
+            let lid = surface.crust().ok().map(|crust| {
+                match crust.lid() {
+                    LidCrust::Primary => crust.primary(),
+                    LidCrust::Secondary => crust.secondary(),
+                    LidCrust::Bulk => crust.bulk(),
+                }
+                .expect("a crust's lid names a crust it has")
+            });
+            let is_dark = surface.material() == SurfaceMaterial::Ice
+                && lid.is_some_and(|row| row != CrustLithology::Water.substance());
+            dark += u32::from(is_dark);
+            let listed = old
+                .condensates()
+                .entry(water, CondensatePhase::Solid)
+                .is_some();
+            let (entries, old_entries) = (
+                rendered(surface.condensates().entries()),
+                rendered(old.condensates().entries()),
+            );
+            if !(is_dark && listed) {
+                assert_eq!(entries, old_entries, "{what}");
+                assert_eq!(
+                    format!("{:?}", surface.figures()),
+                    format!("{:?}", old.figures()),
+                    "{what}"
+                );
+                continue;
+            }
+            // De-listed: the entry is gone, the others as they were, and an entry the list had
+            // truncated may follow them.
+            assert!(
+                surface
+                    .condensates()
+                    .entry(water, CondensatePhase::Solid)
+                    .is_none(),
+                "{what}"
+            );
+            let kept: Vec<String> = old
+                .condensates()
+                .entries()
+                .iter()
+                .filter(|e| !(e.substance() == water && e.phase() == CondensatePhase::Solid))
+                .map(|e| format!("{e:?}"))
+                .collect();
+            assert_eq!(entries[..kept.len()], kept[..], "{what}");
+            assert!(entries.len() <= kept.len() + 1, "{what}");
+            truncated += u32::from(entries.len() > kept.len());
+            delisted += 1;
+            if old
+                .condensates()
+                .entry(water, CondensatePhase::Solid)
+                .is_some_and(|e| e.area_fraction() <= 0.0)
+            {
+                at_no_area.push(what.clone());
+            }
+            let key = lid.map_or_else(
+                || "none".to_owned(),
+                |row| row.substance().key().as_str().to_owned(),
+            );
+            *by_lid.entry(key.clone()).or_default() += 1;
+            // The cover: the liquids as they were; the ices the same items, T24.b's water ice
+            // appended after the condensates' own.
+            let (figures, old_figures) = (surface.figures(), old.figures());
+            assert_eq!(
+                format!("{:?}", figures.surface_liquids()),
+                format!("{:?}", old_figures.surface_liquids()),
+                "{what}"
+            );
+            // The same substances, each once, water's last: the condensates' own ices as C3 listed
+            // them, then T24.b's water ice, from 25 its lag's exposed share of the entry's area,
+            // held to it (`lag::shown`, P14.T53.c), each divided by the list's total where that
+            // exceeds 1 (`within_the_surface`), to the bit.
+            let (ices, old_ices) = (figures.surface_ices(), old_figures.surface_ices());
+            let substances = |list: &[(SubstanceId, f64)]| {
+                let mut ids: Vec<SubstanceId> = list.iter().map(|&(id, _)| id).collect();
+                ids.sort_unstable();
+                ids
+            };
+            assert_eq!(substances(ices), substances(old_ices), "{what}");
+            let area = old
+                .condensates()
+                .entry(water, CondensatePhase::Solid)
+                .map_or(
+                    0.0,
+                    crate::planetary::chem::partition::CondensateEntry::area_fraction,
+                );
+            let lag = DarkLag::of(surface.material(), record_lid(surface));
+            assert!(lag.is_some(), "{what}: no lag under a {key} lid");
+            let shown = lag::shown(lag, area);
+            let mut raw = surface.condensates().surface_ices();
+            let mut c3_others = old.condensates().surface_ices();
+            c3_others.retain(|&(id, _)| id != water);
+            assert_eq!(
+                format!("{raw:?}"),
+                format!("{c3_others:?}"),
+                "{what}: the condensates' other ices"
+            );
+            raw.push((water, shown));
+            let total = raw.iter().fold(0.0, |sum, &(_, f)| sum + f);
+            assert_eq!(ices.len(), raw.len(), "{what}");
+            let mut moved = false;
+            for (&(id, listed), &(raw_id, f)) in ices.iter().zip(&raw) {
+                assert_eq!(id, raw_id, "{what}: {ices:?} against {raw:?}");
+                let expected = if total > 1.0 { f / total } else { f };
+                assert_eq!(
+                    float::bits(listed),
+                    float::bits(expected),
+                    "{what}: {id:?} {listed:e} against {expected:e}"
+                );
+                let &(_, was) = old_ices
+                    .iter()
+                    .find(|(other, _)| *other == id)
+                    .unwrap_or_else(|| panic!("{what}: {id:?} not in {old_ices:?}"));
+                moved |= float::bits(listed) != float::bits(was);
+            }
+            let held_by_lag = shown < area;
+            let sum_moved =
+                float::bits(figures.ice_fraction()) != float::bits(old_figures.ice_fraction());
+            held += u32::from(held_by_lag);
+            moved_covers += u32::from(moved);
+            moved_sums += u32::from(sum_moved);
+            covers.push(format!(
+                "{what}: lid {key}, {lag:?} lag, ices {ices:?} (was {old_ices:?}), sum {:e} (was \
+                 {:e}){}{}",
+                figures.ice_fraction(),
+                old_figures.ice_fraction(),
+                if held_by_lag {
+                    ", water ice held to the lag's share"
+                } else {
+                    ""
+                },
+                if moved { ", areas moved" } else { "" },
+            ));
+        }
+    }
+    eprintln!(
+        "{surfaces} surfaces, {dark} ice bulks under a non-H2O lid; {delisted} de-listed their H2O \
+         solid ({truncated} with a truncated entry back, {} at no area: {at_no_area:?}), by lid \
+         {by_lid:?}; {held} water ices held to their lag's share; {moved_covers} ice covers \
+         moved, {moved_sums} sums:\n  {}",
+        at_no_area.len(),
+        covers.join("\n  ")
+    );
+    // The ruling's count (§C3.1) is the 31 that listed the entry over some of their surface. At 23
+    // the same rule de-listed 3 more, whose entry lay at no area (61ffd9680000000c's 0201 and 0202
+    // and 42002cb1ffc00004's 0401, under `chondrite_h`, `chondrite_ll` and `basalt_fe` lids),
+    // which C3's count of entries over the surface left out; from 24 none lies at no area.
+    assert_eq!(
+        (
+            delisted - u32::try_from(at_no_area.len()).expect("a few bodies"),
+            at_no_area.len()
+        ),
+        (31, 0),
+        "{by_lid:?}"
+    );
+}
+
+/// P14.T54.a's six points, item 2 (decision-p14-t54a-passes §3.2): no record section reads a
+/// stand-in derivation. Over the first 60 whole systems at the epoch and at [`parent_time`], every
+/// present planet's, member's and moon's record derives it over its record, under its law, where
+/// it holds one: its derivation carries the context its published pass read. One with no law, a
+/// body not present at its law's time, keeps the stand-in, and its surface is not modelled
+/// (listed); every body of a `generate_planets` system does.
+#[test]
+fn no_record_section_reads_a_stand_in_derivation() {
+    let (mut real, mut stand_in) = (0_u32, Vec::<String>::new());
+    for (ctx, system) in whole().iter().take(60) {
+        for t in [UniverseTime::EPOCH, parent_time(ctx)] {
+            let epoch = Epoch::new(system, ctx, t).with_shades();
+            let cosines = HourCosines::new();
+            for body in system.bodies() {
+                if !matches!(body.part, Part::Planet(_) | Part::Member(_)) {
+                    continue;
+                }
+                let host = fate_host(ctx, system.zone_of(body));
+                let fate = system.fate_of(body, &host);
+                let label = label::label(system, body.index).unwrap();
+                let (record, now) = system.primary_record(&epoch, &cosines, body, label, &fate);
+                let mut check = |index: BodyIndex,
+                                 derived: &DerivedBody,
+                                 surface: &Section<Surface>,
+                                 law: bool| {
+                    if law {
+                        assert!(derived.spun().is_some(), "{index:?} at {t:?}");
+                        real += 1;
+                    } else {
+                        assert!(derived.spun().is_none(), "{index:?} at {t:?}");
+                        assert!(
+                            matches!(surface, Section::NotModelled | Section::NotApplicable),
+                            "{index:?} at {t:?}: {surface:?}"
+                        );
+                        stand_in.push(format!("{index:?} at {t:?}"));
+                    }
+                };
+                let Some(derived) = now.derived else {
+                    continue;
+                };
+                check(
+                    body.index,
+                    &derived,
+                    record.surface(),
+                    body.rotation.is_some(),
+                );
+                for child in system.children(body.index) {
+                    if !matches!(child.part, Part::Moon(_)) {
+                        continue;
+                    }
+                    let label = label::label(system, child.index).unwrap();
+                    let record =
+                        system.satellite_record(&epoch, &cosines, child, label, &now, &fate);
+                    // A moon not present, lost before the time, has no section a derivation fills.
+                    if record.identity().state() != BodyState::Present {
+                        continue;
+                    }
+                    let Some(derived) = system.record_moon(&epoch, child, (&now, &fate)) else {
+                        continue;
+                    };
+                    check(
+                        child.index,
+                        derived.body(),
+                        record.surface(),
+                        child.rotation.is_some(),
+                    );
+                }
+            }
+        }
+    }
+    for (ctx, system) in generated().iter().take(20) {
+        for record in system.snapshot_at(ctx, UniverseTime::EPOCH).bodies() {
+            if record.identity().state() == BodyState::Present {
+                assert!(
+                    matches!(
+                        record.surface(),
+                        Section::NotModelled | Section::NotApplicable
+                    ),
+                    "{:?}",
+                    record.index()
+                );
+            }
+        }
+    }
+    eprintln!(
+        "{real} derivations over their records; {} over the stand-in, with no law:\n  {}",
+        stand_in.len(),
+        stand_in.join("\n  ")
+    );
+    assert!(real > 1_000, "{real}");
+}
+
+/// P14.T54.a's six points, item 2, and Q1's body test 8 (decision-p14-t54a-passes §1.2, §3.2): an
+/// envelope body's passes over its record are its stand-in's, T51.h's, to the bit, their count
+/// included, since K gives a body with no figures C₀ at every pass. So the rings of a giant, whose
+/// parent `RingParent` reads its effective or equilibrium temperature off the stand-in derivation
+/// at generation (`parent_at_epoch`), read what its record's passes give. Every ringed planet
+/// without an envelope is listed with the difference between the two.
+#[test]
+fn an_envelope_body_s_passes_over_its_record_are_its_stand_in_s() {
+    let (mut envelopes, mut ringed) = (0_u32, Vec::<String>::new());
+    for (ctx, system) in whole().iter().take(60) {
+        let t = parent_time(ctx);
+        let epoch = Epoch::new(system, ctx, t).with_shades();
+        let cosines = HourCosines::new();
+        for body in system.planets() {
+            if body.rotation.is_none() {
+                continue;
+            }
+            let host = fate_host(ctx, system.zone_of(body));
+            let fate = system.fate_of(body, &host);
+            let at = fate.at(t);
+            if at.state() != BodyState::Present {
+                continue;
+            }
+            let (real, _, _) =
+                system.primary_derived(&epoch, &cosines, (body, &fate), &at, PassDriver::Solve);
+            let placed = PlanetarySystem::placed_now(body, at.orbit().unwrap(), at.mass());
+            let (stand_in, _) = system.derive(
+                &epoch,
+                body,
+                system.zone_of(body),
+                &placed,
+                fate.host_mass(t),
+                (PassRecord::StandIn, PassDriver::Solve),
+            );
+            let summary = |d: &DerivedBody| {
+                format!(
+                    "{:?} {:?} {:?} {:?} {} {:?}",
+                    d.albedo().value(),
+                    d.equilibrium_temperature().value(),
+                    d.effective_temperature().map(Kelvin::value),
+                    d.atmosphere(),
+                    d.atmosphere_passes(),
+                    d.convergence()
+                )
+            };
+            if real.atmosphere().state() == SurfaceState::GasEnvelope {
+                assert_eq!(summary(&real), summary(&stand_in), "{:?}", body.index);
+                envelopes += 1;
+            } else if !system.satellites_of(body.index).rings().is_empty() {
+                let temperature = |d: &DerivedBody| {
+                    d.effective_temperature()
+                        .unwrap_or_else(|| d.equilibrium_temperature())
+                        .value()
+                };
+                ringed.push(format!(
+                    "{:?} {:?}: {:.3} K over its record, {:.3} K over the stand-in",
+                    body.index,
+                    real.atmosphere().state(),
+                    temperature(&real),
+                    temperature(&stand_in)
+                ));
+            }
+        }
+    }
+    eprintln!(
+        "{envelopes} envelope bodies the same; ringed planets with a surface:\n  {}",
+        ringed.join("\n  ")
+    );
+    assert!(envelopes > 50, "{envelopes}");
+}
+
+/// The C1 review's DD2: the bracket's reuse of an end that read its frozen context to the bit,
+/// which reads `rank`'s `Equal`, takes the same bits as evaluating it again under T51.h's halvings
+/// (`with_halvings`, the secant root's oracle, P14.T51.l), whose steps read only the side of the
+/// diagonal each end lies on. Over the first 20 whole systems at the epoch, every planet's,
+/// member's and moon's derivation under the halvings with every end re-evaluated
+/// (`with_ends_evaluated`) is the one with the reuse, but for its count of passes, at most two more
+/// a round.
+///
+/// Under the secant root in force from generator version 25 the reuse may differ from
+/// re-evaluation in the last bits (P14.T54.c's finding): two of these derivations do, at an albedo
+/// of 0.292 661 551 075 345 1 against 0.292 661 551 075 345 2 and of 0.770 947 618 521 452 1
+/// against 0.770 947 618 521 493 6. A pass is a function of what it reads, but `rank` leaves out
+/// the context's crater contract (its screening's column mass, its target's density), which a
+/// pass's cold traps read: the end it reuses, a detected 2-cycle's, holds the g of other craters
+/// than the frozen context's, up to 2 × 10⁻¹³ from it, and the secant's false position reads g
+/// itself.
+#[test]
+fn reusing_a_bracket_s_ends_moves_no_bit_of_the_sample() {
+    use crate::planetary::derive::passes::{Convergence, with_ends_evaluated, with_halvings};
+
+    let t = UniverseTime::EPOCH;
+    let (mut bodies, mut bracketed) = (0_u32, 0_u32);
+    for (ctx, system) in whole().iter().take(20) {
+        if ctx.age_at_epoch().value() <= 0.0 {
+            continue;
+        }
+        let epoch = Epoch::new(system, ctx, t).with_shades();
+        let cosines = HourCosines::new();
+        let mut compare = |derive: &dyn Fn() -> Option<DerivedBody>| {
+            let (Some(reused), Some(evaluated)) = (
+                with_halvings(derive),
+                with_halvings(|| with_ends_evaluated(derive)),
+            ) else {
+                return;
+            };
+            let read = |d: &DerivedBody| {
+                format!(
+                    "{:?} {:?} {:?} {:?}",
+                    d.albedo().value(),
+                    d.atmosphere(),
+                    d.convergence(),
+                    d.spun()
+                )
+            };
+            assert_eq!(read(&reused), read(&evaluated));
+            let extra = evaluated.atmosphere_passes() - reused.atmosphere_passes();
+            assert!(extra <= 4, "{extra}");
+            bodies += 1;
+            bracketed += u32::from(matches!(
+                reused.convergence(),
+                Convergence::Bracketed { .. }
+            ));
+        };
+        for body in system.bodies() {
+            match &body.part {
+                Part::Planet(_) | Part::Member(_) => {
+                    let host = fate_host(ctx, system.zone_of(body));
+                    let fate = system.fate_of(body, &host);
+                    let at = fate.at(t);
+                    if at.state() != BodyState::Present {
+                        continue;
+                    }
+                    compare(&|| {
+                        Some(
+                            system
+                                .primary_derived(
+                                    &epoch,
+                                    &cosines,
+                                    (body, &fate),
+                                    &at,
+                                    PassDriver::Solve,
+                                )
+                                .0,
+                        )
+                    });
+                }
+                Part::Moon(_) => {
+                    let OrbitHost::Body(parent) = body.host else {
+                        unreachable!("a moon's host is a body")
+                    };
+                    let primary = system.body(parent).unwrap();
+                    let host = fate_host(ctx, system.zone_of(primary));
+                    let fate = system.fate_of(primary, &host);
+                    let now = system.parent_now(&epoch, &cosines, parent, &fate);
+                    compare(&|| {
+                        system
+                            .record_moon(&epoch, body, (&now, &fate))
+                            .map(|d| *d.body())
+                    });
+                }
+                Part::Ring(_) => {}
+            }
+        }
+    }
+    eprintln!(
+        "{bodies} derivations, {bracketed} bracketed, the same under the halvings with every end \
+         re-evaluated"
+    );
+    assert!(bodies > 200 && bracketed > 0, "{bodies} {bracketed}");
+}
+
+/// A measurement for the bless note, run by name (decision-p14-t54a-passes, "Cost escalation
+/// (after Batch B)", item 5): how the passes end for every present planet, member and moon of all
+/// 400 whole systems at the epoch, by kind, the population the ruling's planets' 1.53% (24 of
+/// 1,568, at Batch B's stand-ins) was measured on: bodies, bracketed, jumping (across the diagonal
+/// or a context jump) and the pass histogram. It asserts the planets' guard alone, which main ruled
+/// at most 2% of them jumping over this population (on C2's escalation), missed at 24 and pinned.
+#[test]
+#[ignore = "a measurement, run by name"]
+fn the_passes_endings_over_the_whole_sample_are_recorded() {
+    use std::collections::BTreeMap;
+
+    use crate::planetary::derive::passes::Convergence;
+
+    /// A kind's bodies, bracketed and jumping, and its pass histogram.
+    type Endings = (u32, u32, u32, BTreeMap<u32, u32>);
+
+    let t = UniverseTime::EPOCH;
+    let mut kinds: BTreeMap<&str, Endings> = BTreeMap::new();
+    let mut tally = |kind: &'static str, derived: &DerivedBody| {
+        let entry = kinds.entry(kind).or_default();
+        entry.0 += 1;
+        entry.1 += u32::from(matches!(
+            derived.convergence(),
+            Convergence::Bracketed { .. }
+        ));
+        entry.2 += u32::from(derived.convergence().is_jump());
+        *entry.3.entry(derived.atmosphere_passes()).or_default() += 1;
+    };
+    for (ctx, system) in whole() {
+        if ctx.age_at_epoch().value() <= 0.0 {
+            continue;
+        }
+        let epoch = Epoch::new(system, ctx, t).with_shades();
+        let cosines = HourCosines::new();
+        for body in system.bodies() {
+            let kind = match body.part {
+                Part::Planet(_) => "planets",
+                Part::Member(_) => "members",
+                Part::Moon(_) | Part::Ring(_) => continue,
+            };
+            let host = fate_host(ctx, system.zone_of(body));
+            let fate = system.fate_of(body, &host);
+            let at = fate.at(t);
+            let now = system.primary_now(&epoch, &cosines, body, &fate, &at);
+            let Some(derived) = now.derived else {
+                continue;
+            };
+            tally(kind, &derived);
+            for child in system.children(body.index) {
+                if let Some(moon) = system.record_moon(&epoch, child, (&now, &fate)) {
+                    tally("moons", moon.body());
+                }
+            }
+        }
+    }
+    for (kind, (bodies, bracketed, jumping, passes)) in &kinds {
+        eprintln!(
+            "{kind}: {bodies} bodies, {bracketed} bracketed ({:.2}%), {jumping} jumping ({:.2}%); \
+             passes {passes:?}",
+            100.0 * f64::from(*bracketed) / f64::from(*bodies),
+            100.0 * f64::from(*jumping) / f64::from(*bodies),
+        );
+    }
+    // Main's guard, at most 2% of the planets jumping, is missed at 24: 40 of 1,568 (2.55%; 1.53%
+    // at Batch B's stand-ins). Pinned at that count and recorded for main (P14.T54.b.l).
+    let (planets, _, planets_jumping, _) = &kinds["planets"];
+    assert!(
+        *planets_jumping <= 40,
+        "{planets_jumping} of {planets} planets jump"
+    );
+}
+
+/// The 18 Temperates P14.T53.a's weathering thermostat raised in its census, each as its system
+/// (the sample's by ID, a golden system's by name) and body index: the 16 its plain passes settled,
+/// then the two they left to the bracket, P14.T51.l's lever (plan 14's P14.T53.a record;
+/// decision-24-cost D4).
+const THERMOSTAT_RAISED: [&str; 18] = [
+    "02000b2ca0000001.0200",
+    "02000b2ca0000000.0300",
+    "02001b2ca0000000.0100",
+    "02000b2c20000000.0100",
+    "02000b2cdfff0000.0200",
+    "01ffeb2c9fff0000.0200",
+    "02000b2ce0010000.0200",
+    "02001b2c9ffe0000.0300",
+    "220016587ff80001.0700",
+    "02000b2cdffe0000.0200",
+    "02000b2cdffe0000.0300",
+    "01ffeb2c60020000.0300",
+    "41ffecb1ffc00009.0a00",
+    "01fffb2be0000001.0200",
+    "m_dwarf_resonant_chain.0100",
+    "close_binary.0600",
+    "02001b2ce0010000.0100",
+    "01ffeb2c60020000.0400",
+];
+
+/// The 18 bodies whose partials alone move under P14.T51.l's secant steps, beyond 10⁻⁹ of max(each,
+/// 10⁻⁶ Pa), with `T_eq` within 3.1 × 10⁻¹⁰, `T_s` within 10⁻⁶ and every discrete member the same:
+/// at jumps across the diagonal or steep crossings, where both roots stop within 2⁻³² of the
+/// crossing, in the walk's order. Re-measured at generator version 28: 41ffecb1ffc00007.0d00,
+/// whose orbit about its pair P14.T9.d's placement margin widens (440 → 453 Gm), an N₂ `Snowball`
+/// on the 100 Pa line from 28, joins them, and 41ffecb200000005.1600's partials stay within the
+/// bound; at 27 the other 17 and 1600. To 26 they were 19, two of which, 01fffb2bdfff0001.0600
+/// and `close_binary`'s 0900, end at 27 at another crossing, and three more still move their
+/// partials, 01ffeb2d20000000.e101, 41ffecb1ffc00007.e101 and 01ffcb2ba0010000.0700: mostly icy
+/// N₂ and methane `Snowball`s and cold airless or tenuous members, bracketed under both roots.
+const SECANT_PARTIALS_ONLY: [&str; 18] = [
+    "02000b2ca0000000.0800",
+    "02001b2ca0000000.0300",
+    "01ffeb2c20000000.0500",
+    "02001b2c9ffe0000.0500",
+    "01ffdb2c1fff0001.0501",
+    "01ffdb2c1fff0000.e103",
+    "01ffdb2c1fff0000.e104",
+    "41ffecb600000001.0700",
+    "01ffeb2d20000000.e101",
+    "02003b2c1fff0000.0900",
+    "01ffdb2c60020000.0400",
+    "02003b2ce0010000.0400",
+    "41ffecb1ffc00007.0d00",
+    "41ffecb1ffc00007.e101",
+    "01fffb2ce0030000.0400",
+    "01ffeb2d5fff0001.0800",
+    "01ffdb2d1ffd0001.0400",
+    "01ffcb2ba0010000.0700",
+];
+
+/// The bodies whose secant root is another crossing of the diagonal than the halvings', in the
+/// walk's order (P14.T51.l's record; `under_the_secant_root_the_passes_and_movers_are_stated`):
+/// 12 at generator version 28, 27's 11 and 41ffecb1ffc00007.0d01, a moon of the planet 0d00 that
+/// P14.T9.d's placement margin moves out about its pair, which from 28 ends at another fixed point
+/// (`T_eq` 45.6 → 62.0 K, `T_s` 46.9 → 81.2 K, its argon no longer capped and its jump gone). At
+/// 27, re-measured, 01fffb2bdfff0001.0600, an N₂ `Snowball`, ends at
+/// another fixed point (`T_eq` 51.1 → 59.6 K, `T_s` 52.1 → 78.1 K, its argon no longer capped and
+/// its jump gone); one of the gas envelopes at a `T_eq` of 250.0 K, 41ffecb5ffc00004.0400, stops
+/// 1.7 × 10⁻⁵ of `T_eq` away on its steep crossing; and nine `Snowball`s at jumps, `close_binary`'s
+/// 0900 among them, stop on the jump's other side, `T_s` up to 1.2 × 10⁻⁴ of itself away, three of
+/// them a jump under the secant steps alone. To 26 they were three: 01ffdb2c1fff0001.0b00 and
+/// 02003b2d1ffe0001.0200, which at 27 end where the halvings do, and 41ffecb200000004.0200, gone
+/// from the sample with its system at 27.
+const SECANT_OTHER_CROSSINGS: [&str; 12] = [
+    "01fffb2bdfff0001.0600",
+    "02001b2ce0020002.0800",
+    "21ffd65a7ff80001.0700",
+    "41ffecb5ffc00004.0400",
+    "41ffecb1ffc00007.0d01",
+    "41ffecb600000005.0500",
+    "02003b2c60010001.0600",
+    "01fffb2d5ffe0000.0700",
+    "02000b2b60020000.0600",
+    "02003b2c60020000.0500",
+    "42002cb200400001.0600",
+    "close_binary.0900",
+];
+
+/// P14.T51.l, a measurement for its record, run by name: every present planet, member and moon of
+/// the 400 sample systems and the golden systems at the epoch, each system generated and derived
+/// afresh under T51.h's halvings, their oracle (`with_halvings`), and under the secant steps in
+/// force from generator version 25, compared body by
+/// body as the plan's test asks: the state, the deck, the carbon carrier, the lid, the capped set
+/// (each gas held below its inventory's weight), the dominant gas and its condensing peer, whether
+/// it jumps, and the surface temperature's branch equal; `T_eq` within 10⁻⁹ of itself; every
+/// partial within 10⁻⁹ of max(itself, 10⁻⁶ Pa). It states every mover, the passes by kind and
+/// ending before and after, and the thermostat's raised bodies' passes by name.
+#[test]
+#[ignore = "a measurement for P14.T51.l's record, run by name"]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one walk under each root, each mover listed and the passes tallied by kind"
+)]
+fn under_the_secant_root_the_passes_and_movers_are_stated() {
+    use std::collections::BTreeMap;
+
+    use std::time::Instant;
+
+    use crate::planetary::derive::passes::{
+        Convergence, PassRoot, SECANT_STEPS, with_halvings, with_secant_rounds,
+    };
+
+    /// A kind's bodies, then for each root its bracketed, its jumping, and its passes over the
+    /// bracketed and over all.
+    type Tally = (u32, [(u32, u32, u32, u32); 2]);
+
+    /// What the comparison reads of one body's derivation.
+    #[derive(Debug, Clone)]
+    struct Line {
+        label: String,
+        kind: &'static str,
+        discrete: String,
+        t_eq: f64,
+        t_s: f64,
+        partials: [f64; 9],
+        convergence: Convergence,
+        passes: u32,
+    }
+    let line = |label: String, kind: &'static str, derived: &DerivedBody| {
+        let air = derived.atmosphere();
+        let weights = air.inventory_weights();
+        let capped: Vec<Gas> = Gas::ALL
+            .into_iter()
+            .filter(|&gas| air.partial_pressures().of(gas) < weights.of(gas))
+            .collect();
+        let moles = |gas: Gas| air.partial_pressures().of(gas).value() / gas.molar_mass_g_per_mol();
+        let dominant = Gas::ALL
+            .into_iter()
+            .max_by(|x, y| moles(*x).total_cmp(&moles(*y)));
+        let condensing = capped
+            .iter()
+            .copied()
+            .max_by(|x, y| moles(*x).total_cmp(&moles(*y)));
+        Line {
+            label,
+            kind,
+            discrete: format!(
+                "{:?} {:?} {:?} {:?} capped {capped:?} dominant {dominant:?} condensing \
+                 {condensing:?} jump {}",
+                air.state(),
+                air.runaway_deck(),
+                air.carbon_carrier(),
+                derived
+                    .crust_lid()
+                    .map(|lid| (lid.crust(), lid.lithology())),
+                derived.convergence().is_jump(),
+            ),
+            t_eq: derived.equilibrium_temperature().value(),
+            t_s: air.surface_temperature().value(),
+            partials: Gas::ALL.map(|gas| air.partial_pressures().of(gas).value()),
+            convergence: derived.convergence(),
+            passes: derived.atmosphere_passes(),
+        }
+    };
+    let t = UniverseTime::EPOCH;
+    let sets: Vec<(String, Seed, SystemContext)> = sample()
+        .iter()
+        .map(|ctx| (format!("{:016x}", ctx.id().raw()), SEED, ctx.clone()))
+        .chain(golden_systems().iter().map(|(name, ctx, _)| {
+            (
+                (*name).to_owned(),
+                Seed::new(GOLDEN_SYSTEMS_SEED),
+                ctx.clone(),
+            )
+        }))
+        .collect();
+    let walk = |root: PassRoot| {
+        let lines = || {
+            let mut lines = Vec::new();
+            for (name, seed, ctx) in &sets {
+                if ctx.age_at_epoch().value() <= 0.0 {
+                    continue;
+                }
+                let system = generate(*seed, ctx);
+                let epoch = Epoch::new(&system, ctx, t).with_shades();
+                let cosines = HourCosines::new();
+                for body in system.bodies() {
+                    let kind = match body.part {
+                        Part::Planet(_) => "planets",
+                        Part::Member(_) => "members",
+                        Part::Moon(_) | Part::Ring(_) => continue,
+                    };
+                    let host = fate_host(ctx, system.zone_of(body));
+                    let fate = system.fate_of(body, &host);
+                    let at = fate.at(t);
+                    let now = system.primary_now(&epoch, &cosines, body, &fate, &at);
+                    let Some(derived) = now.derived else {
+                        continue;
+                    };
+                    let label = format!("{name}.{:04x}", body.index.get());
+                    lines.push(line(label, kind, &derived));
+                    for child in system.children(body.index) {
+                        if let Some(moon) = system.record_moon(&epoch, child, (&now, &fate)) {
+                            let label = format!("{name}.{:04x}", child.index.get());
+                            lines.push(line(label, "moons", moon.body()));
+                        }
+                    }
+                }
+            }
+            lines
+        };
+        match root {
+            PassRoot::Halvings => with_halvings(lines),
+            PassRoot::Secant => lines(),
+        }
+    };
+    let start = Instant::now();
+    let halvings = walk(PassRoot::Halvings);
+    let halvings_walk = start.elapsed();
+    let start = Instant::now();
+    let (secant, rounds) = with_secant_rounds(|| walk(PassRoot::Secant));
+    let secant_walk = start.elapsed();
+    assert_eq!(halvings.len(), secant.len());
+    let mut steps = BTreeMap::<u32, u32>::new();
+    for &round in &rounds {
+        *steps.entry(round).or_default() += 1;
+    }
+    eprintln!(
+        "the walks (pod, slow-test profile): the halvings {halvings_walk:?}, the secant steps \
+         {secant_walk:?}; the secant rounds' steps, {} rounds: {steps:?}",
+        rounds.len()
+    );
+    let mut kinds: BTreeMap<&str, Tally> = BTreeMap::new();
+    let (mut movers, mut other_roots, mut partials_only) = (Vec::new(), Vec::new(), Vec::new());
+    let mut jumps = Vec::new();
+    let mut worst_t_eq: f64 = 0.0;
+    for (h, s) in halvings.iter().zip(&secant) {
+        assert_eq!(h.label, s.label);
+        let entry = kinds.entry(h.kind).or_default();
+        entry.0 += 1;
+        for (k, at) in [h, s].into_iter().enumerate() {
+            let bracketed = matches!(at.convergence, Convergence::Bracketed { .. });
+            entry.1[k].0 += u32::from(bracketed);
+            entry.1[k].1 += u32::from(at.convergence.is_jump());
+            if bracketed {
+                entry.1[k].2 += at.passes;
+            }
+            entry.1[k].3 += at.passes;
+        }
+        let t_eq = if s.t_eq.total_cmp(&h.t_eq).is_eq() {
+            0.0
+        } else {
+            (s.t_eq / h.t_eq - 1.0).abs()
+        };
+        worst_t_eq = worst_t_eq.max(t_eq);
+        // Each partial's move as a share of max(itself, 10⁻⁶ Pa): the largest, and whether any is
+        // above 10⁻⁹, by comparison so that a partial that is not a number moves.
+        let shares: Vec<f64> = h
+            .partials
+            .iter()
+            .zip(&s.partials)
+            .map(|(a, b)| (a - b).abs() / a.abs().max(1e-6))
+            .collect();
+        let partial = shares.iter().copied().fold(0.0, f64::max);
+        let partial_moved = !shares.iter().all(|share| *share <= 1e-9);
+        if h.convergence.is_jump() || s.convergence.is_jump() {
+            let residual = |convergence: Convergence| match convergence {
+                Convergence::Converged => 0.0,
+                Convergence::Bracketed { residual, .. } => residual,
+            };
+            jumps.push(format!(
+                "{}: {:.6e} → {:.6e}",
+                h.label,
+                residual(h.convergence),
+                residual(s.convergence)
+            ));
+        }
+        let t_s_held = s.t_s.total_cmp(&h.t_s).is_eq() || (s.t_s / h.t_s - 1.0).abs() <= 1e-6;
+        let branch = !t_s_held;
+        // By comparison, so that a move that is not a number is a mover.
+        let t_eq_held = t_eq <= 1e-9;
+        let other_root = h.discrete != s.discrete || !t_eq_held || branch;
+        if other_root {
+            other_roots.push(h.label.clone());
+        } else if partial_moved {
+            partials_only.push(h.label.clone());
+        }
+        if other_root || partial_moved {
+            movers.push(format!(
+                "{} ({}): T_eq {:.9} → {:.9} K ({t_eq:.2e}), T_s {:.6} → {:.6} K, partials \
+                 {partial:.2e}\n      \
+                 halvings {} {:?} ({} passes)\n      secant   {} {:?} ({} passes)",
+                h.label,
+                h.kind,
+                h.t_eq,
+                s.t_eq,
+                h.t_s,
+                s.t_s,
+                h.discrete,
+                h.convergence,
+                h.passes,
+                s.discrete,
+                s.convergence,
+                s.passes,
+            ));
+        }
+    }
+    eprintln!(
+        "{} bodies; the largest move of T_eq {worst_t_eq:.3e}",
+        halvings.len()
+    );
+    for (kind, (bodies, [h, s])) in &kinds {
+        eprintln!(
+            "{kind}: {bodies} bodies; halvings {} bracketed, {} jumping, {} passes over the \
+             bracketed, {} in all; secant {} bracketed, {} jumping, {} over the bracketed, {} in all",
+            h.0, h.1, h.2, h.3, s.0, s.1, s.2, s.3
+        );
+    }
+    eprintln!("THE THERMOSTAT'S RAISED BODIES:");
+    let (mut raised_halvings, mut raised_secant, mut found) = (0, 0, 0);
+    for name in THERMOSTAT_RAISED {
+        let at = |lines: &[Line]| lines.iter().find(|l| l.label == name).cloned();
+        if let (Some(h), Some(s)) = (at(&halvings), at(&secant)) {
+            eprintln!(
+                "  {name}: {} → {} passes, {:?} → {:?}",
+                h.passes, s.passes, h.convergence, s.convergence
+            );
+            raised_halvings += h.passes;
+            raised_secant += s.passes;
+            found += 1;
+        } else {
+            eprintln!("  {name}: not in the walk");
+        }
+    }
+    eprintln!("  {found} found: {raised_halvings} passes → {raised_secant}");
+    eprintln!("THE JUMPS' RESIDUALS, halvings → secant ({}):", jumps.len());
+    for jump in &jumps {
+        eprintln!("  {jump}");
+    }
+    eprintln!("MOVERS ({}):", movers.len());
+    for mover in &movers {
+        eprintln!("  {mover}");
+    }
+    assert_eq!(found, THERMOSTAT_RAISED.len());
+    let slowest = rounds.iter().copied().max().unwrap_or(0);
+    assert!(slowest < SECANT_STEPS, "a round took {slowest} steps");
+    assert!(halvings.len() > 2_000, "{}", halvings.len());
+    // Pinned as measured (P14.T51.l's record, re-measured at 28). Twelve bodies end at another
+    // crossing of the diagonal (`SECANT_OTHER_CROSSINGS`): two at another fixed point, a gas
+    // envelope on its steep crossing, and nine `Snowball`s on a jump's other side. The rest move
+    // only their partials, at jumps or steep crossings where both roots stop within 2⁻³² of the
+    // crossing. To 26 three ended at another crossing: 41ffecb200000004.0200, whose 2-cycle's
+    // bracket held another fixed point than the plain passes' (T_eq 0.37 K warmer);
+    // 02003b2d1ffe0001.0200, whose bracket held several jumps (T_s 239.8 → 193.3 K); and
+    // 01ffdb2c1fff0001.0b00, whose jump lay against nitrogen's cover's edge.
+    assert_eq!(
+        other_roots, SECANT_OTHER_CROSSINGS,
+        "the bodies whose secant root is another crossing"
+    );
+    assert_eq!(
+        partials_only, SECANT_PARTIALS_ONLY,
+        "the bodies that move their partials alone"
+    );
+}
+
+/// The pinned bodies of P14.T51.l's record ([`SECANT_OTHER_CROSSINGS`], [`SECANT_PARTIALS_ONLY`])
+/// whose passes converge under both roots, where with its holds they ended in brackets, in the
+/// walk's order: none of 27's or 28's, every one of their pins bracketed under both roots. To 26 the pins
+/// held twelve: from generator version 25 five by P14.T53.b part 3 (01ffeb2c5ffe0000.0400,
+/// 01ffdb2c1fff0001.0900 and .0b00, 01ffdb2c60020000.0100 and 01ffeb2d1ffc0000.0600), and
+/// 02003b2d1ffe0001.0200, whose bracket held several jumps, by P14.T53.e's present state; from 26
+/// 01ffeb2cdffd0000.0a02, and `close_binary`'s `.0800` and `.e501`, which the CO₂ cap's energy
+/// balance moves (P14.T53.h); and from 27 01ffdb2c1fff0000.0700, 01ffeb2d1ffc0000.0900 and
+/// 41ffecb1ffc00007.0d01; 27's re-measured pins hold none of them.
+const SECANT_PINNED_CONVERGED: [&str; 0] = [];
+
+/// P14.T51.l's pinned bodies end at crossings, not only at their pinned bits (research's condition
+/// on the record's leans): each of [`SECANT_OTHER_CROSSINGS`] and [`SECANT_PARTIALS_ONLY`], derived
+/// at the epoch under T51.h's halvings, their oracle (`with_halvings`), and under the secant steps,
+/// is
+/// bracketed, and every bracket round whose published end is the body's albedo stopped at a
+/// crossing of the diagonal: its two ends' g on opposite sides within 2⁻³² in albedo
+/// (`Crossing::is_valid`); but [`SECANT_PINNED_CONVERGED`]'s, which converge under both (none of
+/// the pins as re-measured at generator versions 27 and 28). It moves no output.
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one walk of the pinned bodies under each root, the oracle's and the root in force"
+)]
+fn the_secant_root_s_pinned_bodies_end_at_crossings() {
+    use crate::planetary::derive::passes::{
+        Convergence, Crossing, PassRoot, with_crossings, with_halvings,
+    };
+
+    let pinned: Vec<&str> = SECANT_OTHER_CROSSINGS
+        .into_iter()
+        .chain(SECANT_PARTIALS_ONLY)
+        .collect();
+    let is_pinned = |label: &str| pinned.contains(&label);
+    let system_of = |label: &'static str| label.split_once('.').map_or(label, |(name, _)| name);
+    let sets: Vec<(String, Seed, SystemContext)> = sample()
+        .iter()
+        .map(|ctx| (format!("{:016x}", ctx.id().raw()), SEED, ctx.clone()))
+        .chain(golden_systems().iter().map(|(name, ctx, _)| {
+            (
+                (*name).to_owned(),
+                Seed::new(GOLDEN_SYSTEMS_SEED),
+                ctx.clone(),
+            )
+        }))
+        .filter(|(name, ..)| pinned.iter().any(|label| system_of(label) == name))
+        .collect();
+    let check = |label: &str, root: PassRoot, derived: &DerivedBody, crossings: &[Crossing]| {
+        if SECANT_PINNED_CONVERGED.contains(&label) {
+            assert_eq!(
+                derived.convergence(),
+                Convergence::Converged,
+                "{label} under {root:?}"
+            );
+            return;
+        }
+        assert!(
+            matches!(derived.convergence(), Convergence::Bracketed { .. }),
+            "{label} under {root:?}: {:?}",
+            derived.convergence()
+        );
+        let albedo = derived.albedo().value();
+        let published: Vec<&Crossing> = crossings
+            .iter()
+            .filter(|crossing| crossing.published().total_cmp(&albedo).is_eq())
+            .collect();
+        assert!(
+            !published.is_empty(),
+            "{label} under {root:?}: no round published its albedo {albedo}: {crossings:?}"
+        );
+        for crossing in published {
+            assert!(
+                crossing.is_valid(),
+                "{label} under {root:?}: the round {crossing:?} stopped at no crossing"
+            );
+        }
+        eprintln!("{label} under {root:?}: albedo {albedo:.12}, {crossings:?}");
+    };
+    let t = UniverseTime::EPOCH;
+    for root in [PassRoot::Halvings, PassRoot::Secant] {
+        let found = || {
+            let mut found = 0_usize;
+            for (name, seed, ctx) in &sets {
+                if ctx.age_at_epoch().value() <= 0.0 {
+                    continue;
+                }
+                let system = generate(*seed, ctx);
+                let epoch = Epoch::new(&system, ctx, t).with_shades();
+                let cosines = HourCosines::new();
+                for body in system.bodies() {
+                    if matches!(body.part, Part::Moon(_) | Part::Ring(_)) {
+                        continue;
+                    }
+                    let label = format!("{name}.{:04x}", body.index.get());
+                    let children: Vec<_> = system
+                        .children(body.index)
+                        .filter(|child| is_pinned(&format!("{name}.{:04x}", child.index.get())))
+                        .collect();
+                    if !is_pinned(&label) && children.is_empty() {
+                        continue;
+                    }
+                    let host = fate_host(ctx, system.zone_of(body));
+                    let fate = system.fate_of(body, &host);
+                    let at = fate.at(t);
+                    let (now, crossings) =
+                        with_crossings(|| system.primary_now(&epoch, &cosines, body, &fate, &at));
+                    if is_pinned(&label) {
+                        let derived = now.derived.as_ref().expect("a pinned body is derived");
+                        check(&label, root, derived, &crossings);
+                        found += 1;
+                    }
+                    for child in children {
+                        let label = format!("{name}.{:04x}", child.index.get());
+                        let (moon, crossings) =
+                            with_crossings(|| system.record_moon(&epoch, child, (&now, &fate)));
+                        let moon = moon.expect("a pinned moon is derived");
+                        check(&label, root, moon.body(), &crossings);
+                        found += 1;
+                    }
+                }
+            }
+            found
+        };
+        let found = match root {
+            PassRoot::Halvings => with_halvings(found),
+            PassRoot::Secant => found(),
+        };
+        assert_eq!(found, pinned.len(), "under {root:?}");
+    }
+}
+
+/// A measurement for the bless note, run by name (decision-pre-23-review items 7, 16 and 17;
+/// P14.T54.a's C3): over every present planet, member and moon of the first 60 whole systems at
+/// the epoch, each record derived with its lid and without it (`without_crust`, the derivation
+/// before C3: its material's regolith and inertia), by lid lithology:
+///
+/// - the bodies whose regolith row changed from the stand-in (an airless body's by its bare
+///   regolith's Bond albedo, which the space-weathering cap may leave the Moon's 0.11; any other's
+///   by its row against the material's, `basalt` or `H2O`), with their equilibrium temperatures'
+///   moves;
+/// - the airless bodies, how many take the cap (a `Silicate` lid), and the nights the ground's
+///   inertia at the lid moves (the coldest of the climate's range);
+/// - the ice bulks whose lid is not `H2O`, whose record lists the crust's water as its `H2O` solid
+///   (decision-p14-t54a-ganymede, C1 follow-up §C1.4) beside a regolith of another row.
+///
+/// It asserts only that the walk found the sample's surfaces.
+#[test]
+#[ignore = "a measurement for the bless note, run by name"]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one walk of the sample's bodies with and without the lid, tallied by lithology"
+)]
+fn the_lid_s_moves_from_the_stand_in_are_recorded() {
+    use std::collections::BTreeMap;
+
+    use crate::planetary::chem::partition::{CondensateEntry, CondensatePhase};
+    use crate::planetary::derive::photometry::area_mix::{Regolith, capped_lid};
+    use crate::planetary::derive::without_crust;
+    use crate::planetary::hooks::crust::CrustLithology;
+
+    /// One lithology's tally: bodies, rows changed, the moves of `T_eq` of the changed (least,
+    /// greatest, sum), airless, capped, airless nights moved (least, greatest), and of them those
+    /// whose `T_eq` held to the bit, which the ground's inertia alone moved.
+    #[derive(Debug, Default)]
+    struct Moves {
+        bodies: u32,
+        changed: u32,
+        t_eq: Option<(f64, f64)>,
+        t_eq_sum: f64,
+        airless: u32,
+        capped: u32,
+        nights_moved: u32,
+        nights: Option<(f64, f64)>,
+        inertia_nights: u32,
+        inertia: Option<(f64, f64)>,
+    }
+
+    let widen = |range: &mut Option<(f64, f64)>, x: f64| {
+        *range = Some(range.map_or((x, x), |(lo, hi)| (lo.min(x), hi.max(x))));
+    };
+    let t = UniverseTime::EPOCH;
+    let mut moves: BTreeMap<String, Moves> = BTreeMap::new();
+    let (mut bodies, mut unchanged_lidless, mut ice_bulks_apart) = (0_u32, 0_u32, Vec::new());
+    let mut record = |what: String,
+                      with: (&BodyRecord, &DerivedBody),
+                      without: (&BodyRecord, &DerivedBody)| {
+        let (Section::Ok(surface), Section::Ok(before)) = (with.0.surface(), without.0.surface())
+        else {
+            return;
+        };
+        bodies += 1;
+        let Some(lid) = with.1.crust_lid() else {
+            unchanged_lidless += 1;
+            return;
+        };
+        let lithology = lid.lithology();
+        let tally = moves.entry(lithology.key().to_owned()).or_default();
+        tally.bodies += 1;
+        let state = surface.state();
+        let material = surface.material();
+        let changed = if state == SurfaceState::Airless {
+            with.1
+                .regolith_albedo()
+                .total_cmp(&without.1.regolith_albedo())
+                .is_ne()
+        } else {
+            lid.row() != Regolith::stand_in_row(material)
+        };
+        if changed {
+            tally.changed += 1;
+            let dt = with.1.equilibrium_temperature().value()
+                - without.1.equilibrium_temperature().value();
+            widen(&mut tally.t_eq, dt);
+            tally.t_eq_sum += dt;
+        }
+        if state == SurfaceState::Airless {
+            tally.airless += 1;
+            tally.capped += u32::from(capped_lid(lid.row(), state));
+            if before.state() == SurfaceState::Airless {
+                let night = surface.conditions().climate_range().0.value();
+                let night_before = before.conditions().climate_range().0.value();
+                if night.total_cmp(&night_before).is_ne() {
+                    tally.nights_moved += 1;
+                    widen(&mut tally.nights, night - night_before);
+                    let held = with
+                        .1
+                        .equilibrium_temperature()
+                        .value()
+                        .total_cmp(&without.1.equilibrium_temperature().value());
+                    if held.is_eq() {
+                        tally.inertia_nights += 1;
+                        widen(&mut tally.inertia, night - night_before);
+                    }
+                }
+            }
+        }
+        if material == SurfaceMaterial::Ice && lithology != CrustLithology::Water {
+            let ice = surface
+                .condensates()
+                .entry(Gas::Water.substance(), CondensatePhase::Solid)
+                .map_or(0.0, CondensateEntry::area_fraction);
+            ice_bulks_apart.push(format!(
+                "{what}: {}, {state:?}, its H2O solid entry over {ice:.3}",
+                lithology.key()
+            ));
+        }
+    };
+    for (ctx, system) in whole().iter().take(60) {
+        if ctx.age_at_epoch().value() <= 0.0 {
+            continue;
+        }
+        let epoch = Epoch::new(system, ctx, t).with_shades();
+        let cosines = HourCosines::new();
+        for body in system.bodies() {
+            if !matches!(body.part, Part::Planet(_) | Part::Member(_)) {
+                continue;
+            }
+            let host = fate_host(ctx, system.zone_of(body));
+            let fate = system.fate_of(body, &host);
+            let label = label::label(system, body.index).unwrap();
+            let (with, now) = system.primary_record(&epoch, &cosines, body, label.clone(), &fate);
+            let (without, before) = without_crust(|| {
+                system.primary_record(&epoch, &cosines, body, label.clone(), &fate)
+            });
+            let (Some(derived), Some(prior)) = (now.derived, before.derived) else {
+                continue;
+            };
+            record(
+                format!("{:?} {:?}", ctx.id(), body.index),
+                (&with, &derived),
+                (&without, &prior),
+            );
+            for child in system.children(body.index) {
+                if !matches!(child.part, Part::Moon(_)) {
+                    continue;
+                }
+                let label = label::label(system, child.index).unwrap();
+                let with =
+                    system.satellite_record(&epoch, &cosines, child, label.clone(), &now, &fate);
+                let without = without_crust(|| {
+                    system.satellite_record(&epoch, &cosines, child, label, &before, &fate)
+                });
+                let (Some(derived), Some(prior)) = (
+                    system.record_moon(&epoch, child, (&now, &fate)),
+                    without_crust(|| system.record_moon(&epoch, child, (&before, &fate))),
+                ) else {
+                    continue;
+                };
+                record(
+                    format!("{:?} {:?} (moon)", ctx.id(), child.index),
+                    (&with, derived.body()),
+                    (&without, prior.body()),
+                );
+            }
+        }
+    }
+    let listed = moves
+        .iter()
+        .map(|(key, m)| {
+            let range = |range: Option<(f64, f64)>| {
+                range.map_or_else(|| "none".to_owned(), |(lo, hi)| format!("{lo:+.3} to {hi:+.3} K"))
+            };
+            format!(
+                "{key}: {} bodies, {} rows changed, ΔT_eq {} (mean {:+.3} K); {} airless, {} capped, \
+                 {} nights moved {}, {} of them by the inertia alone {}",
+                m.bodies,
+                m.changed,
+                range(m.t_eq),
+                if m.changed > 0 { m.t_eq_sum / f64::from(m.changed) } else { 0.0 },
+                m.airless,
+                m.capped,
+                m.nights_moved,
+                range(m.nights),
+                m.inertia_nights,
+                range(m.inertia),
+            )
+        })
+        .collect::<Vec<_>>();
+    eprintln!(
+        "{bodies} surfaces, {unchanged_lidless} with no lid; by lid lithology:\n  {}\n{} ice bulks \
+         whose lid is not H2O:\n  {}",
+        listed.join("\n  "),
+        ice_bulks_apart.len(),
+        ice_bulks_apart.join("\n  ")
+    );
+    assert!(bodies > 500, "{bodies}");
+}
+
+/// Rule (f)'s reuse (decision-p14-t54a-passes, "Cost escalation (after Batch B)" §C.3): a record's
+/// figures reuse the first stage its passes' solve computed last, K(P*), which is the stage of its
+/// own air's figures' inputs to the bit. Over the first 20 whole systems, the snapshots at the
+/// epoch with every record's first stage computed again (`with_first_stage_recomputed`) are the
+/// same, bit for bit.
+#[test]
+fn the_record_s_figures_reuse_its_last_pass_s_k_to_the_bit() {
+    let mut surfaces = 0_usize;
+    for (ctx, system) in whole().iter().take(20) {
+        let reused = system.snapshot_at(ctx, UniverseTime::EPOCH);
+        let recomputed =
+            with_first_stage_recomputed(|| system.snapshot_at(ctx, UniverseTime::EPOCH));
+        assert_eq!(
+            format!("{reused:?}"),
+            format!("{recomputed:?}"),
+            "{:?}",
+            ctx.id()
+        );
+        surfaces += reused
+            .bodies()
+            .iter()
+            .filter(|record| matches!(record.surface(), Section::Ok(_)))
+            .count();
+    }
+    assert!(surfaces > 50, "{surfaces}");
+}
+
+/// P14.T51.i, end to end: the sample's airless, uncollisional planets and members carry the
+/// regolith's albedo from their derivation, which their records' cold traps read. The count of the
+/// records whose ices the traps move, against the cold traps' held rules, went with their hold at
+/// the 23 → 24 bump.
+#[test]
+fn under_24_s_record_rules_the_records_read_the_derivations_regolith() {
+    use crate::planetary::hooks::cold_traps::is_collisional;
+
+    let t = UniverseTime::EPOCH;
+    let mut airless = 0_u32;
+    for (ctx, system) in whole().iter().take(12) {
+        if ctx.age_at_epoch().value() <= 0.0 {
+            continue;
+        }
+        let epoch = Epoch::new(system, ctx, t);
+        for body in system.bodies() {
+            if !matches!(body.part, Part::Planet(_) | Part::Member(_)) {
+                continue;
+            }
+            let host = fate_host(ctx, system.zone_of(body));
+            let fate = system.fate_of(body, &host);
+            let label = label::label(system, body.index).unwrap();
+            let (record, now) =
+                system.primary_record(&epoch, &HourCosines::new(), body, label, &fate);
+            let (Some(derived), Section::Ok(bulk), Section::Ok(_)) =
+                (now.derived, record.bulk(), record.surface())
+            else {
+                continue;
+            };
+            let air = derived.atmosphere();
+            if air.state() != SurfaceState::Airless || is_collisional(air, bulk.surface_gravity()) {
+                continue;
+            }
+            let regolith = derived.regolith_albedo();
+            assert!((0.0..1.0).contains(&regolith), "{regolith}");
+            airless += 1;
+        }
+    }
+    eprintln!("{airless} airless, uncollisional bodies");
+    assert!(airless > 20, "{airless}");
+}
+
+/// The batch's surface temperatures over the sample, measured for P14.T54.a's bless note
+/// (P14.T57.a's moves at 23): over the sample's first 60 systems generated whole (`whole`), every
+/// present planet's, member's and moon's mean surface temperature (P14.T51.a's partition, T51.b's
+/// area mix, T51.h's passes and T57.a's greenhouse constants), each body on its own line with its
+/// equilibrium temperature, pressure and partial pressures of carbon dioxide and water, and the
+/// bodies by state. Version 22's figures are plan 14's (P14.T57.a's record); a measurement, it
+/// asserts nothing.
+#[test]
+#[ignore = "a measurement, run by name"]
+fn the_batch_s_surface_temperatures_over_the_sample_are_recorded() {
+    use std::collections::BTreeMap;
+
+    use crate::planetary::derive::DerivedBody;
+
+    /// What a body's line holds: its state, `T_s` and `T_eq`, K, and its surface pressure and
+    /// partial pressures of carbon dioxide and water, Pa.
+    type Row = (SurfaceState, f64, f64, f64, f64, f64);
+    let row = |derived: &DerivedBody| -> Row {
+        let air = derived.atmosphere();
+        (
+            air.state(),
+            air.surface_temperature().value(),
+            derived.equilibrium_temperature().value(),
+            air.surface_pressure()
+                .map_or(0.0, crate::units::Pascals::value),
+            air.partial_pressures().of(Gas::CarbonDioxide).value(),
+            air.partial_pressures().of(Gas::Water).value(),
+        )
+    };
+    let t = UniverseTime::EPOCH;
+    let mut rows: BTreeMap<String, Row> = BTreeMap::new();
+    for (ctx, system) in whole().iter().take(60) {
+        if ctx.age_at_epoch().value() <= 0.0 {
+            continue;
+        }
+        let epoch = Epoch::new(system, ctx, t);
+        for body in system.bodies() {
+            if !matches!(body.part, Part::Planet(_) | Part::Member(_)) {
+                continue;
+            }
+            let host = fate_host(ctx, system.zone_of(body));
+            let fate = system.fate_of(body, &host);
+            let label = label::label(system, body.index).unwrap();
+            let (_, now) = system.primary_record(&epoch, &HourCosines::new(), body, label, &fate);
+            let Some(derived) = now.derived else {
+                continue;
+            };
+            rows.insert(format!("{:?} {:?}", ctx.id(), body.index), row(&derived));
+            for child in system.children(body.index) {
+                if !matches!(child.part, Part::Moon(_)) {
+                    continue;
+                }
+                let Some(derived) = system.record_moon(&epoch, child, (&now, &fate)) else {
+                    continue;
+                };
+                rows.insert(
+                    format!("{:?} {:?} moon", ctx.id(), child.index),
+                    row(derived.body()),
+                );
+            }
+        }
+    }
+    let mut states: BTreeMap<String, u32> = BTreeMap::new();
+    for (key, b) in &rows {
+        eprintln!(
+            "T57A | {key} | {:?} | {:.3} | {:.3} | {:.6e} | {:.6e} | {:.6e}",
+            b.0, b.1, b.2, b.3, b.4, b.5
+        );
+        *states.entry(format!("{:?}", b.0)).or_default() += 1;
+    }
+    eprintln!("{} bodies; by state: {states:?}", rows.len());
+}
+
+// P14.T54.a, lever (h): a body's zonal insolation table (decision-p14-t54a-passes §C.3).
+
+/// Asserts two renderings `with` and `without` the same, showing where they first differ.
+fn same_rendering(with: &str, without: &str, what: &str) {
+    if with == without {
+        return;
+    }
+    let at = with
+        .bytes()
+        .zip(without.bytes())
+        .position(|(a, b)| a != b)
+        .unwrap_or_else(|| with.len().min(without.len()));
+    let near = |s: &str| {
+        let start = (at.saturating_sub(300)..=at)
+            .find(|&k| s.is_char_boundary(k))
+            .unwrap_or(0);
+        let end = (at..=(at + 300).min(s.len()))
+            .rev()
+            .find(|&k| s.is_char_boundary(k))
+            .unwrap_or(s.len());
+        s.get(start..end).unwrap_or_default().to_owned()
+    };
+    panic!(
+        "{what} differs at byte {at}\n  with the table: …{}…\n  without it:     …{}…",
+        near(with),
+        near(without)
+    );
+}
+
+/// Lever (h): over the 60-system sample, every zonal profile `generate` and `snapshot_at` build
+/// reads its body's insolation table to the bit of the profile's own path, each profile checked
+/// as it is built (`TableReads::Checked`), and the generated systems and their snapshots at the
+/// epoch are the same, bit for bit, with the table and without it (`TableReads::Unlevered`).
+#[test]
+fn the_zonal_insolation_table_moves_no_bit_of_the_sample() {
+    use crate::planetary::hooks::surface::{TableReads, with_table_reads};
+
+    let run = || -> Vec<String> {
+        sample()
+            .iter()
+            .take(60)
+            .map(|ctx| {
+                let system = generate(SEED, ctx);
+                let snapshot = system.snapshot_at(ctx, UniverseTime::EPOCH);
+                format!("{system:?}\n{snapshot:?}")
+            })
+            .collect()
+    };
+    let (read, checked) = with_table_reads(TableReads::Checked, run);
+    let (unlevered, uncounted) = with_table_reads(TableReads::Unlevered, run);
+    assert_eq!(uncounted, 0);
+    assert_eq!(read.len(), 60);
+    for (k, (with, without)) in read.iter().zip(&unlevered).enumerate() {
+        same_rendering(with, without, &format!("system {k} of the sample"));
+    }
+    eprintln!("{checked} profiles with modes read off their tables and checked");
+    // 1,461 at L1; 744 since lever (a), whose record builds one profile a surface, not two.
+    assert!(checked > 500, "{checked}");
+}
+
+// P14.T54.a, levers (a) and (p): one profile a surface, and the bit-exact exits
+// (decision-p14-t54a-passes, "Cost escalation (after Batch B)").
+
+/// Every planet's, member's and moon's derivation in `system`, of context `ctx`, at the epoch, as
+/// the records read them: its passes and their convergence included.
+fn derivations_at_epoch(ctx: &SystemContext, system: &PlanetarySystem) -> String {
+    use core::fmt::Write as _;
+
+    let mut out = String::new();
+    if ctx.age_at_epoch().value() <= 0.0 {
+        return out;
+    }
+    let t = UniverseTime::EPOCH;
+    let epoch = Epoch::new(system, ctx, t);
+    for body in system.bodies() {
+        if !matches!(body.part, Part::Planet(_) | Part::Member(_)) {
+            continue;
+        }
+        let host = fate_host(ctx, system.zone_of(body));
+        let fate = system.fate_of(body, &host);
+        let label = label::label(system, body.index).unwrap();
+        let (_, now) = system.primary_record(&epoch, &HourCosines::new(), body, label, &fate);
+        writeln!(out, "{:?}: {:?}", body.index, now.derived).unwrap();
+        for child in system.children(body.index) {
+            if !matches!(child.part, Part::Moon(_)) {
+                continue;
+            }
+            let derived = system.record_moon(&epoch, child, (&now, &fate));
+            writeln!(out, "{:?}: {derived:?}", child.index).unwrap();
+        }
+    }
+    out
+}
+
+/// Levers (a) and (p) over the 60-system sample: T24.b's water ice read from the record's
+/// partition's cover, and the partition's solves and the partitioned greenhouses stopping at their
+/// bit-exact fixed points.
+///
+/// - Every ice the record's second stage reads (`IceReads::Checked`), and every greenhouse and every
+///   solve outside one (`Exits::Checked`), is checked against the unlevered path to the bit as it
+///   is made.
+/// - The generated systems, their snapshots at the epoch and every planet's, member's and moon's
+///   derivation then, its pass count included, are the same bit for bit with the levers and
+///   without (`IceReads::Unlevered`, `Exits::Unlevered`).
+#[test]
+fn levers_a_and_p_move_no_bit_of_the_sample() {
+    use crate::planetary::chem::partition::{ExitCounts, Exits, with_exits};
+    use crate::planetary::hooks::figures::{IceReads, with_ice_reads};
+
+    let run = || -> Vec<String> {
+        sample()
+            .iter()
+            .take(60)
+            .map(|ctx| {
+                let system = generate(SEED, ctx);
+                let snapshot = system.snapshot_at(ctx, UniverseTime::EPOCH);
+                let derivations = derivations_at_epoch(ctx, &system);
+                format!("{system:?}\n{snapshot:?}\n{derivations}")
+            })
+            .collect()
+    };
+    let ((levered, counts), ices) =
+        with_ice_reads(IceReads::Checked, || with_exits(Exits::Checked, run));
+    let ((unlevered, uncounted), unread) =
+        with_ice_reads(IceReads::Unlevered, || with_exits(Exits::Unlevered, run));
+    assert_eq!(uncounted, ExitCounts::default());
+    assert_eq!(unread, 0);
+    assert_eq!(levered.len(), 60);
+    for (k, (with, without)) in levered.iter().zip(&unlevered).enumerate() {
+        same_rendering(with, without, &format!("system {k} of the sample"));
+    }
+    let most =
+        counts.greenhouses * u64::from(crate::planetary::derive::atmosphere::GREENHOUSE_STEPS + 1);
+    eprintln!(
+        "{ices} record ices checked; {} greenhouses checked, {} evaluations of {most} at most, {} \
+         step climates read; {} solves outside them checked; {} solves, {} sweeps of {} at most",
+        counts.checked_greenhouses,
+        counts.evaluations,
+        counts.climates,
+        counts.checked_solves,
+        counts.solves,
+        counts.sweeps,
+        counts.solves * u64::from(crate::planetary::chem::partition::PARTITION_SWEEPS),
+    );
+    assert!(ices > 50, "{ices}");
+    assert_eq!(counts.checked_greenhouses, counts.greenhouses);
+    assert!(
+        counts.greenhouses > 1_000 && counts.checked_solves > 1_000,
+        "{counts:?}"
+    );
+}
+
+// P14.T54.a, levers (d) and (e): the host shade's constants once a call chain, and generation's
+// dead derivations (decision-p14-t54a-passes, "Cost escalation (after Batch B)" §C.3).
+
+/// The first 60 systems of the sample, generated, and their snapshots at the epoch, rendered.
+fn sixty_rendered() -> Vec<String> {
+    sample()
+        .iter()
+        .take(60)
+        .map(|ctx| {
+            let system = generate(SEED, ctx);
+            let snapshot = system.snapshot_at(ctx, UniverseTime::EPOCH);
+            format!("{system:?}\n{snapshot:?}")
+        })
+        .collect()
+}
+
+/// Lever (d) over the 60-system sample: every body's shade that `generate` and `snapshot_at`
+/// build, planets', members' and moons' alike, read off its call chain's book, is the shade each
+/// body computes for itself, to the bit, each checked as it is built (`ShadeReads::Checked`); and
+/// the generated systems and their snapshots are the same, bit for bit, with the book and without
+/// it (`ShadeReads::Unlevered`).
+#[test]
+fn every_host_shade_off_its_book_is_its_own_to_the_bit() {
+    use crate::planetary::derive::photometry::area_mix::{ShadeReads, with_shade_reads};
+
+    let (read, checked) = with_shade_reads(ShadeReads::Checked, sixty_rendered);
+    let (unlevered, uncounted) = with_shade_reads(ShadeReads::Unlevered, sixty_rendered);
+    assert_eq!(uncounted, 0);
+    assert_eq!(read.len(), 60);
+    for (k, (with, without)) in read.iter().zip(&unlevered).enumerate() {
+        same_rendering(with, without, &format!("system {k} of the sample"));
+    }
+    eprintln!("{checked} shades read off their books and checked");
+    assert!(checked > 2_000, "{checked}");
+}
+
+/// Lever (d) under P14.T24.h.b's adding rule, whose re-split water cloud a book holds: every body's
+/// shade of the 60-system sample read off its book is still its own, to the bit, each checked as
+/// it is built (`ShadeReads::Checked`).
+#[test]
+fn under_the_adding_rule_every_host_shade_off_its_book_is_its_own_to_the_bit() {
+    use crate::planetary::derive::photometry::area_mix::{
+        RayleighAddingRules, ShadeReads, with_rayleigh_adding, with_shade_reads,
+    };
+
+    let (read, checked) = with_rayleigh_adding(RayleighAddingRules::Added, || {
+        with_shade_reads(ShadeReads::Checked, sixty_rendered)
+    });
+    assert_eq!(read.len(), 60);
+    assert!(checked > 2_000, "{checked}");
+}
+
+/// Lever (e) over the 60-system sample: the rotation pass's and the Laplace frames' records at
+/// `parent_time` read before the passes (e1), each member as its moons' parent before its passes
+/// (e2) and each parent as its moons read it without its record (e3) are the unlevered path's,
+/// each checked as it is read (`PassFree::Checked`); and the generated systems (every law,
+/// Laplace frame, satellite, ring and moon) and their snapshots at the epoch are the same, bit for
+/// bit, with the lever and without it (`PassFree::Unlevered`).
+///
+/// (e1) and (e2) are checked against paths of their own. (e3) is a structural move with no
+/// independent check (Batch D's review, RD1): `primary_record` builds its record on
+/// `primary_now_under`, which the record-free read's `primary_now` wraps, so its oracle is that
+/// function again, and its count is the reads' count alone.
+#[test]
+fn generation_s_dead_derivations_move_no_bit_of_the_sample() {
+    let (read, checked) = with_pass_free(PassFree::Checked, sixty_rendered);
+    let (unlevered, uncounted) = with_pass_free(PassFree::Unlevered, sixty_rendered);
+    assert_eq!(uncounted, PassFreeCounts::default());
+    assert_eq!(read.len(), 60);
+    for (k, (with, without)) in read.iter().zip(&unlevered).enumerate() {
+        same_rendering(with, without, &format!("system {k} of the sample"));
+    }
+    eprintln!("checked: {checked:?}");
+    assert_eq!(checked.records, 60, "{checked:?}");
+    assert!(checked.members > 400 && checked.parents > 50, "{checked:?}");
+}
+
+// P14.T54.a, Batch E's D1: the states census, the dark-thick-air census and item 26's re-check over
+// the sample and the golden systems.
+
+/// The universe the golden systems are pinned in: `tests/planetary_golden.rs`'s `SYSTEMS_SEED`.
+pub(super) const GOLDEN_SYSTEMS_SEED: u64 = 0x5eed_0000_0014_0032;
+
+/// The golden systems of `tests/planetary_golden.rs` (its `GOLDEN_SYSTEMS`, P14.T32) by name and
+/// pinned ID, whose `planetary/systems` goldens pin them: the census's fixtures. A copy, since an
+/// integration test's items are not the library's; `the_golden_systems_are_the_golden_test_s`
+/// holds it to the original, in order.
+const GOLDEN_SYSTEMS: [(&str, u64); 15] = [
+    ("m_dwarf_resonant_chain", 0x0200_2b2c_a000_0000),
+    ("hot_jupiter", 0x41fc_ecba_0000_0006),
+    ("solar_like", 0x4200_6cba_0000_0009),
+    ("eccentric_giant", 0x4200_acaa_0000_000a),
+    ("halo_star", 0x0202_5b2b_e000_0001),
+    ("close_binary", 0x4200_2cb2_0000_0009),
+    ("wide_binary", 0x41ff_ecae_0000_0004),
+    ("hierarchical_triple", 0x4200_2cb2_0000_0003),
+    ("subgiant", 0x4200_6c9a_0000_0004),
+    ("red_giant", 0x4200_ecd2_0000_0003),
+    ("fallback_black_hole", 0x8200_b2e0_0000_0002),
+    ("filler_a", 0x01ff_fb2c_6000_0000),
+    ("filler_b", 0x2200_1659_8000_0000),
+    ("filler_c", 0x4200_2cb2_0000_0000),
+    ("t_tauri", 0x4215_6b82_0000_0005),
+];
+
+/// The golden systems ([`GOLDEN_SYSTEMS`]) in the Milky Way fixture at their seed, generated whole
+/// as `golden_systems_are_pinned` generates them, once.
+pub(super) fn golden_systems() -> &'static [(&'static str, SystemContext, PlanetarySystem)] {
+    static SYSTEMS: OnceLock<Vec<(&'static str, SystemContext, PlanetarySystem)>> = OnceLock::new();
+    SYSTEMS.get_or_init(golden_systems_afresh)
+}
+
+/// The golden systems ([`GOLDEN_SYSTEMS`]) generated afresh, apart from [`golden_systems`]'
+/// cache.
+pub(super) fn golden_systems_afresh() -> Vec<(&'static str, SystemContext, PlanetarySystem)> {
+    golden_contexts()
+        .into_iter()
+        .map(|(name, ctx)| {
+            let system = generate(Seed::new(GOLDEN_SYSTEMS_SEED), &ctx);
+            (name, ctx, system)
+        })
+        .collect()
+}
+
+/// The golden systems' ([`GOLDEN_SYSTEMS`]) names and contexts in the Milky Way fixture at their
+/// seed, [`GOLDEN_SYSTEMS_SEED`], with no system generated: for a census that generates its own
+/// under its switches.
+pub(super) fn golden_contexts() -> Vec<(&'static str, SystemContext)> {
+    let galaxy = crate::galaxy::Galaxy::from_params(
+        Seed::new(GOLDEN_SYSTEMS_SEED),
+        crate::galaxy::params::GalaxyParams::milky_way_like(),
+    )
+    .expect("the Milky Way fixture's gas is mostly neutral");
+    GOLDEN_SYSTEMS
+        .iter()
+        .map(|&(name, id)| {
+            let id = SystemId::from_raw(id).expect("a pinned ID is well formed");
+            let ctx = SystemContext::for_system(&galaxy, id).expect("a pinned ID names a system");
+            (name, ctx)
+        })
+        .collect()
+}
+
+/// A rocky body's core share answers to the rock its crust's basis reads (the core share by the
+/// host, at 27): a golden system's bodies' hosts at the epoch, and its moon generators' parents'
+/// ([`host_rock`]), carry its host's Mg/Si and \[α/Fe\] as [`PlanetarySystem::crust_host`] gives
+/// them, the halo star's α-rich.
+#[test]
+fn a_body_s_hosts_carry_the_rock_its_crust_reads() {
+    let mut alpha_rich = 0;
+    for (name, ctx, system) in golden_systems() {
+        let host = system.crust_host(ctx);
+        let rock = (host.host_magnesium_to_silicon, host.alpha_fe);
+        assert_eq!(
+            host_rock(Seed::new(GOLDEN_SYSTEMS_SEED), ctx),
+            rock,
+            "{name}"
+        );
+        alpha_rich += u32::from(host.alpha_fe.value() > 0.1);
+        let epoch = Epoch::new(system, ctx, UniverseTime::EPOCH);
+        for zone in &system.zones {
+            let has_disc = system
+                .host(zone.host())
+                .and_then(|host| host.disc.profile())
+                .is_some();
+            if !has_disc || epoch.lights(zone).is_none() || epoch.companions(zone).is_none() {
+                continue;
+            }
+            let carried = system.with_hosts(&epoch, zone, zone.host_mass(), |_, hosts| {
+                (hosts.host_magnesium_to_silicon(), hosts.alpha_fe())
+            });
+            assert_eq!(carried, rock, "{name}");
+        }
+    }
+    assert!(alpha_rich > 0);
+}
+
+/// Batch E's review, R9: [`GOLDEN_SYSTEMS`] and [`GOLDEN_SYSTEMS_SEED`] are the golden test's own,
+/// `tests/planetary_golden.rs`'s `GOLDEN_SYSTEMS` (each name and pinned ID, in order) and
+/// `SYSTEMS_SEED`, as its source states them.
+#[test]
+fn the_golden_systems_are_the_golden_test_s() {
+    let source = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/planetary_golden.rs"
+    ));
+    // A pinned ID as the source writes it, in groups of four hexadecimal digits.
+    let literal = |value: u64| {
+        let hex = format!("{value:016x}");
+        format!(
+            "0x{}_{}_{}_{}",
+            &hex[0..4],
+            &hex[4..8],
+            &hex[8..12],
+            &hex[12..16]
+        )
+    };
+    let seed = format!(
+        "const SYSTEMS_SEED: u64 = {};",
+        literal(GOLDEN_SYSTEMS_SEED)
+    );
+    assert!(source.contains(&seed), "{seed}");
+    let (_, list) = source
+        .split_once("const GOLDEN_SYSTEMS: [GoldenSystem; 15] = [")
+        .expect("the golden test's list");
+    let (list, _) = list.split_once("\n];").expect("the list's end");
+    let found: Vec<(String, String)> = list
+        .split("GoldenSystem {")
+        .skip(1)
+        .map(|entry| {
+            let field = |name: &str| {
+                entry
+                    .lines()
+                    .find_map(|line| line.trim().strip_prefix(name))
+                    .map_or_else(
+                        || panic!("an entry without its {name}: {entry}"),
+                        |value| value.trim_end_matches(',').to_owned(),
+                    )
+            };
+            (field("name: "), field("id: "))
+        })
+        .collect();
+    let expected: Vec<(String, String)> = GOLDEN_SYSTEMS
+        .iter()
+        .map(|&(name, id)| (format!("\"{name}\""), literal(id)))
+        .collect();
+    assert_eq!(found, expected);
+}
+
+/// A body derived again under a driver, with its published pass's publication.
+type DerivedAgain<'a> = &'a dyn Fn(
+    PassDriver,
+) -> (
+    DerivedBody,
+    Option<crate::planetary::derive::atmosphere::spun_read::SpunRead>,
+);
+
+/// A present planet, member or moon with a surface, as the census walks it ([`census_walk`]).
+struct CensusCase<'a> {
+    /// "sample", or the golden system's name.
+    set: &'a str,
+    /// P14.T57.a's key, `SystemId(…) BodyIndex(…)`, with " moon" for a moon.
+    key: String,
+    /// "planets", "members" or "moons".
+    kind: &'static str,
+    /// Its record at the epoch.
+    record: &'a BodyRecord,
+    /// Its record's surface.
+    surface: &'a Surface,
+    /// Its derivation over its record.
+    derived: &'a DerivedBody,
+    /// Its zone's stars at the time: each one's phase and effective temperature.
+    hosts: String,
+    /// Its zone's stars' phases.
+    phases: String,
+    /// Σ Fᵢ ÷ `S_eff,i` at the runaway-greenhouse limit at the hosts' present luminosities
+    /// ([`runaway_now`]): 1 or more inside the present runaway limit.
+    runaway_now: f64,
+    /// The same at the hosts' largest past luminosities ([`runaway_at_peak`]), `Sky::of`'s sum:
+    /// 1 or more inside the runaway limit at the peak.
+    runaway_peak: f64,
+    /// Σ Fᵢ ÷ `S_eff,i` at the maximum-greenhouse limit at the hosts' present luminosities
+    /// ([`limit_now`]): below 1 beyond it.
+    maximum_now: f64,
+    /// [`runaway_now`], [`runaway_peak`](Self::runaway_peak) and [`maximum_now`](Self::maximum_now)
+    /// with each `S_eff` unheld below the fit's 2,600 K ([`unheld_flux`]), in that order: P14.T53.b
+    /// part 1's dependence on the hold beyond Kopparapu et al.'s fit.
+    unheld: [f64; 3],
+    /// It derived again under a driver.
+    again: DerivedAgain<'a>,
+}
+
+/// The phases and effective temperatures of the stars of `zone` at `t`.
+fn zone_hosts(ctx: &SystemContext, zone: &OrbitZone, t: UniverseTime) -> (String, String) {
+    let states: Vec<_> = zone
+        .members()
+        .map(|member| ctx.stars()[usize::from(member)].state_at(t))
+        .collect();
+    let hosts = states
+        .iter()
+        .map(|state| {
+            state.map_or_else(
+                || "unformed".to_owned(),
+                |s| format!("{:?} {:.0} K", s.phase(), s.effective_temperature().value()),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" + ");
+    let phases = states
+        .iter()
+        .map(|state| state.map_or_else(|| "unformed".to_owned(), |s| format!("{:?}", s.phase())))
+        .collect::<Vec<_>>()
+        .join(" + ");
+    (hosts, phases)
+}
+
+/// Σ Fᵢ ÷ `S_eff,i` at the runaway-greenhouse limit (Kopparapu et al. 2013, P14.T12.b) at the
+/// present luminosities of the stars `zone`'s bodies orbit, along `orbit`, and of the companions,
+/// along their pairs' orbits: `Sky::of`'s sum, at the luminosities now rather than at their
+/// largest past (decision-pre-23-review item 33). 1 or more inside the present runaway limit.
+pub(super) fn runaway_now(epoch: &Epoch<'_>, zone: &OrbitZone, orbit: &KeplerElements) -> f64 {
+    limit_now(
+        crate::planetary::derive::habitable_zone::HabitableLimit::RunawayGreenhouse,
+        epoch,
+        zone,
+        orbit,
+    )
+}
+
+/// The flux `S_eff` of the limit `limit` about a host at `t_eff`, as the generator reads it:
+/// [`HabitableLimit::flux`], held to the fit's 2,600–7,200 K.
+///
+/// [`HabitableLimit::flux`]: crate::planetary::derive::habitable_zone::HabitableLimit::flux
+fn held_flux(
+    limit: crate::planetary::derive::habitable_zone::HabitableLimit,
+    t_eff: Kelvin,
+) -> f64 {
+    limit.flux(t_eff).value()
+}
+
+/// [`held_flux`] unheld below the fit's 2,600 K: Kopparapu et al.'s quartic (2013, ApJ 765, 131,
+/// eq. 2, the erratum's coefficients, ApJ 770, 82, Table 3) extrapolated to a cooler host, and held
+/// above 7,200 K as the generator holds it, so that it is [`held_flux`]'s to the bit from 2,600 K
+/// up. For P14.T53.b part 1's census of the present class's dependence on the hold (the batch
+/// review's item 8): the fit is not valid below 2,600 K, so neither value is the true limit there.
+fn unheld_flux(
+    limit: crate::planetary::derive::habitable_zone::HabitableLimit,
+    t_eff: Kelvin,
+) -> f64 {
+    use crate::planetary::derive::habitable_zone::{FIT_CENTRE, FIT_HOTTEST};
+    let [at_centre, linear, quadratic, cubic, quartic] = limit.coefficients();
+    let offset = t_eff.value().min(FIT_HOTTEST.value()) - FIT_CENTRE.value();
+    at_centre
+        + linear * offset
+        + quadratic * offset * offset
+        + cubic * offset * offset * offset
+        + quartic * crate::math::powi(offset, 4)
+}
+
+/// Σ Fᵢ ÷ `S_eff,i` at the runaway-greenhouse limit at the largest past luminosities of the
+/// stars `zone`'s bodies orbit, along `orbit`, and of the companions, along their pairs' orbits:
+/// `Sky::of`'s sum for the insolation the inventory reads (P14.T53.b part 1 (a)). 1 or more inside
+/// the runaway limit at the hosts' peak.
+pub(super) fn runaway_at_peak(epoch: &Epoch<'_>, zone: &OrbitZone, orbit: &KeplerElements) -> f64 {
+    limit_at(
+        crate::planetary::derive::habitable_zone::HabitableLimit::RunawayGreenhouse,
+        (HostLight::peak_luminosity, held_flux),
+        (epoch, zone, orbit),
+    )
+}
+
+/// Σ Fᵢ ÷ `S_eff,i` at the habitable zone's limit `limit` at the present luminosities of the stars
+/// `zone`'s bodies orbit, along `orbit`, and of the companions, along their pairs' orbits
+/// ([`runaway_now`]; at the maximum-greenhouse limit `Sky::of`'s sum now, the ceiling's: below 1
+/// beyond it).
+pub(super) fn limit_now(
+    limit: crate::planetary::derive::habitable_zone::HabitableLimit,
+    epoch: &Epoch<'_>,
+    zone: &OrbitZone,
+    orbit: &KeplerElements,
+) -> f64 {
+    limit_at(
+        limit,
+        (HostLight::luminosity, held_flux),
+        (epoch, zone, orbit),
+    )
+}
+
+/// The runaway ratio now, at the peak and the maximum-greenhouse ratio now of a body of `zone`
+/// along `orbit` with each `S_eff` unheld below 2,600 K ([`unheld_flux`]; [`CensusCase::unheld`]).
+fn unheld_ratios(epoch: &Epoch<'_>, zone: &OrbitZone, orbit: &KeplerElements) -> [f64; 3] {
+    use crate::planetary::derive::habitable_zone::HabitableLimit;
+    let at = |limit, luminosity| limit_at(limit, (luminosity, unheld_flux), (epoch, zone, orbit));
+    [
+        at(HabitableLimit::RunawayGreenhouse, HostLight::luminosity),
+        at(
+            HabitableLimit::RunawayGreenhouse,
+            HostLight::peak_luminosity,
+        ),
+        at(HabitableLimit::MaximumGreenhouse, HostLight::luminosity),
+    ]
+}
+
+/// The limits' fluxes `S_eff`(`T_eff`) as a census reads them: [`held_flux`] or [`unheld_flux`].
+type LimitFlux = fn(crate::planetary::derive::habitable_zone::HabitableLimit, Kelvin) -> f64;
+
+/// [`limit_now`] at each host's luminosity as `luminosity` reads it, its present one or its
+/// largest past ([`runaway_at_peak`]), over the limit's flux as `s_eff` reads it, held or not. A
+/// host counts where it shines now, as `Sky::of` counts it.
+fn limit_at(
+    limit: crate::planetary::derive::habitable_zone::HabitableLimit,
+    (luminosity, s_eff): (fn(&HostLight) -> crate::units::SolarLuminosities, LimitFlux),
+    (epoch, zone, orbit): (&Epoch<'_>, &OrbitZone, &KeplerElements),
+) -> f64 {
+    let share = |light: &HostLight, (a, e): (crate::units::Metres, f64)| {
+        if light.luminosity().value() > 0.0 {
+            luminosity_flux(luminosity(light), a, e).value()
+                / s_eff(limit, light.effective_temperature())
+        } else {
+            0.0
+        }
+    };
+    let along = (orbit.semi_major_axis(), orbit.eccentricity().value());
+    let orbited: f64 = epoch
+        .lights(zone)
+        .unwrap_or_default()
+        .iter()
+        .map(|light| share(light, along))
+        .sum();
+    let companions: f64 = epoch
+        .companions(zone)
+        .unwrap_or_default()
+        .iter()
+        .map(|c| share(c.host(), (c.semi_major_axis(), c.eccentricity())))
+        .sum();
+    orbited + companions
+}
+
+/// Every present planet, member and moon of `system` with a surface and a derivation at the epoch,
+/// in body order, each given to `visit` ([`CensusCase`]).
+fn census_walk(
+    set: &str,
+    ctx: &SystemContext,
+    system: &PlanetarySystem,
+    visit: &mut dyn FnMut(&CensusCase<'_>),
+) {
+    use crate::planetary::derive::atmosphere::spun_read;
+    let t = UniverseTime::EPOCH;
+    if ctx.age_at_epoch().value() <= 0.0 {
+        return;
+    }
+    let epoch = Epoch::new(system, ctx, t).with_shades();
+    let cosines = HourCosines::new();
+    for body in system.bodies() {
+        let kind = match body.part {
+            Part::Planet(_) => "planets",
+            Part::Member(_) => "members",
+            Part::Moon(_) | Part::Ring(_) => continue,
+        };
+        let zone = system.zone_of(body);
+        let host = fate_host(ctx, zone);
+        let fate = system.fate_of(body, &host);
+        let at = fate.at(t);
+        let (hosts, phases) = zone_hosts(ctx, zone, t);
+        let runaway = at
+            .orbit()
+            .map_or(f64::NAN, |orbit| runaway_now(&epoch, zone, orbit));
+        let runaway_peak = at
+            .orbit()
+            .map_or(f64::NAN, |orbit| runaway_at_peak(&epoch, zone, orbit));
+        let maximum = at.orbit().map_or(f64::NAN, |orbit| {
+            limit_now(
+                habitable_zone::HabitableLimit::MaximumGreenhouse,
+                &epoch,
+                zone,
+                orbit,
+            )
+        });
+        let unheld = at
+            .orbit()
+            .map_or([f64::NAN; 3], |orbit| unheld_ratios(&epoch, zone, orbit));
+        let label = label::label(system, body.index).unwrap();
+        let (record, now) = system.primary_record(&epoch, &cosines, body, label, &fate);
+        if let (Section::Ok(surface), Some(derived)) = (record.surface(), now.derived.as_ref()) {
+            let again = |driver| {
+                let ((derived, _, _), read) = spun_read::capture(|| {
+                    system.primary_derived(&epoch, &cosines, (body, &fate), &at, driver)
+                });
+                (derived, read)
+            };
+            visit(&CensusCase {
+                set,
+                key: format!("{:?} {:?}", ctx.id(), body.index),
+                kind,
+                record: &record,
+                surface,
+                derived,
+                hosts: hosts.clone(),
+                phases: phases.clone(),
+                runaway_now: runaway,
+                runaway_peak,
+                maximum_now: maximum,
+                unheld,
+                again: &again,
+            });
+        }
+        for child in system.children(body.index) {
+            if !matches!(child.part, Part::Moon(_)) {
+                continue;
+            }
+            let label = label::label(system, child.index).unwrap();
+            let record = system.satellite_record(&epoch, &cosines, child, label, &now, &fate);
+            let Some(moon) = system.record_moon(&epoch, child, (&now, &fate)) else {
+                continue;
+            };
+            let Section::Ok(surface) = record.surface() else {
+                continue;
+            };
+            let again = |driver| {
+                let (derived, read) = spun_read::capture(|| {
+                    system.record_moon_driven(&epoch, child, (&now, &fate), driver)
+                });
+                (*derived.unwrap().body(), read)
+            };
+            visit(&CensusCase {
+                set,
+                key: format!("{:?} {:?} moon", ctx.id(), child.index),
+                kind: "moons",
+                record: &record,
+                surface,
+                derived: moon.body(),
+                hosts: hosts.clone(),
+                phases: phases.clone(),
+                runaway_now: runaway,
+                runaway_peak,
+                maximum_now: maximum,
+                unheld,
+                again: &again,
+            });
+        }
+    }
+}
+
+/// Every present planet, member and moon of `system` with a derivation and a bulk section at the
+/// epoch, whatever its surface's tag, in body order, each given to `visit` with its kind
+/// ("planets", "members" or "moons"), its record and its derivation: P14.T53.b part 2's walk,
+/// since [`census_walk`] visits only the `Ok` surfaces.
+fn envelope_walk(
+    ctx: &SystemContext,
+    system: &PlanetarySystem,
+    visit: &mut dyn FnMut(&str, &BodyRecord, &DerivedBody),
+) {
+    let t = UniverseTime::EPOCH;
+    if ctx.age_at_epoch().value() <= 0.0 {
+        return;
+    }
+    let epoch = Epoch::new(system, ctx, t).with_shades();
+    let cosines = HourCosines::new();
+    for body in system.bodies() {
+        let kind = match body.part {
+            Part::Planet(_) => "planets",
+            Part::Member(_) => "members",
+            Part::Moon(_) | Part::Ring(_) => continue,
+        };
+        let host = fate_host(ctx, system.zone_of(body));
+        let fate = system.fate_of(body, &host);
+        let label = label::label(system, body.index).unwrap();
+        let (record, now) = system.primary_record(&epoch, &cosines, body, label, &fate);
+        if let (Section::Ok(_), Some(derived)) = (record.bulk(), now.derived.as_ref()) {
+            visit(kind, &record, derived);
+        }
+        for child in system.children(body.index) {
+            if !matches!(child.part, Part::Moon(_)) {
+                continue;
+            }
+            let label = label::label(system, child.index).unwrap();
+            let record = system.satellite_record(&epoch, &cosines, child, label, &now, &fate);
+            if record.bulk().ok().is_none() {
+                continue;
+            }
+            if let Some(moon) = system.record_moon(&epoch, child, (&now, &fate)) {
+                visit("moons", &record, moon.body());
+            }
+        }
+    }
+}
+
+/// What the census tallies and lists ([`the_states_and_the_dark_thick_airs_are_recorded`]).
+#[derive(Default)]
+struct Census {
+    bodies: std::collections::BTreeMap<String, u32>,
+    dark: Vec<String>,
+    dark_by_kind: std::collections::BTreeMap<String, u32>,
+    snowballs: std::collections::BTreeMap<String, u32>,
+    hot: Vec<String>,
+    iced: Vec<String>,
+    dry_melts: Vec<String>,
+    outside_runaway: Vec<String>,
+    airless_with_pressure: std::collections::BTreeMap<String, (u32, f64)>,
+    under_ice: Vec<String>,
+    second_starts: Vec<String>,
+    escalations: Vec<String>,
+    cover: CoverRuleTally,
+}
+
+impl Census {
+    /// Tallies and lists the body `case`.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one body's census across the rulings' classes, each listed"
+    )]
+    fn visit(&mut self, case: &CensusCase<'_>) {
+        use crate::planetary::chem::partition::CondensatePhase;
+        use crate::planetary::derive::Under;
+        use crate::planetary::derive::atmosphere::GreenhouseConstants;
+        use crate::planetary::hooks::figures::cover::UNDER_ICE_MELTING_POINT;
+        let (surface, derived) = (case.surface, case.derived);
+        let group = if case.set == "sample" {
+            "sample"
+        } else {
+            "goldens"
+        };
+        let index = case.record.index().get();
+        let name = if case.set == "sample" {
+            format!("{} ({})", case.record.identity().id(), case.key)
+        } else {
+            format!("{} {index:04x}", case.set)
+        };
+        let state = surface.state();
+        let (conditions, figures) = (surface.conditions(), surface.figures());
+        let t_s = conditions.mean_surface_temperature().value();
+        let p = conditions.surface_pressure().value();
+        let (bond, t_eq) = (
+            derived.albedo().value(),
+            derived.equilibrium_temperature().value(),
+        );
+        let g = derived.surface_gravity().value();
+        let (ice, ocean) = (figures.ice_fraction(), figures.ocean_fraction());
+        let terms = GreenhouseConstants::in_force().terms(
+            derived.atmosphere().partial_pressures(),
+            derived.equilibrium_temperature(),
+            derived.surface_gravity(),
+        );
+        let largest = terms
+            .iter()
+            .max_by(|a, b| a.depth().total_cmp(&b.depth()))
+            .copied()
+            .expect("the greenhouse has its five terms");
+        *self
+            .bodies
+            .entry(format!("{group} {}", case.kind))
+            .or_default() += 1;
+        let line = format!(
+            "{name}: {} {state:?}, T_s {t_s:.2} K, p_s {:.4} bar, T_eq {t_eq:.2} K, A {bond:.4}, \
+             ice {ice:.4}, ocean {ocean:.4}, g {g:.3} m s⁻², τ {terms:?}, host {}",
+            case.kind,
+            p / 1e5,
+            case.hosts,
+        );
+        eprintln!(
+            "CENSUS | {} | {} | {} | {index:04x} | {} | {state:?} | {t_s:.6} | {p:.6e} | \
+             {t_eq:.6} | {bond:.6} | {ice:.6} | {ocean:.6} | {g:.6} | {:?} | {}",
+            case.set,
+            case.key,
+            case.record.identity().id(),
+            case.kind,
+            largest.gas(),
+            case.phases,
+        );
+        // G3: the dark-thick-air census (decision-p14-t54a-passes §G3.6).
+        if state != SurfaceState::MagmaOcean && p >= 1e5 && bond < 0.1 {
+            *self
+                .dark_by_kind
+                .entry(format!("{group} {}", case.kind))
+                .or_default() += 1;
+            self.dark.push(format!(
+                "{line}; p_s ÷ g {:.2} of Earth's",
+                (p / g) / (101_325.0 / 9.806_65)
+            ));
+        }
+        // Decision-p14-t54a-states §6.4: the states.
+        match state {
+            SurfaceState::Snowball => {
+                *self
+                    .snowballs
+                    .entry(format!("{group} {}", case.phases))
+                    .or_default() += 1;
+                if t_s > 273.15 {
+                    self.hot
+                        .push(format!("{line}; its largest τ term {largest:?}"));
+                    if largest.gas() != Gas::CarbonDioxide {
+                        self.escalations.push(format!(
+                            "a hot Snowball whose largest τ term is not CO₂'s: {line}"
+                        ));
+                    }
+                }
+                let liquid = surface
+                    .condensates()
+                    .entry(Gas::Water.substance(), CondensatePhase::Liquid)
+                    .is_some();
+                let layer = figures.surface_water().value();
+                let melting = UNDER_ICE_MELTING_POINT.value();
+                if t_s >= melting
+                    && figures.heat_flow().value() > 0.0
+                    && (t_s > melting || layer > 0.0)
+                {
+                    self.under_ice.push(format!(
+                        "{line}; its surface water {layer:.4e} kg m⁻², an H2O liquid entry \
+                         {liquid}, so the guard {}",
+                        if liquid {
+                            "moved nothing"
+                        } else {
+                            "removed an ocean under ice"
+                        }
+                    ));
+                }
+            }
+            SurfaceState::Temperate | SurfaceState::Desert if ice >= 0.5 => {
+                self.iced.push(line.clone());
+            }
+            SurfaceState::MagmaOcean if p <= 0.0 => self.dry_melts.push(line.clone()),
+            SurfaceState::RunawayGreenhouse => {
+                if case.runaway_now < 1.0 {
+                    self.outside_runaway.push(format!(
+                        "{line}; Σ F ÷ S_eff,runaway now {:.4}",
+                        case.runaway_now
+                    ));
+                } else if t_s < 373.15 {
+                    self.escalations.push(format!(
+                        "a RunawayGreenhouse below 373.15 K inside the present runaway limit \
+                         ({:.4}): {line}",
+                        case.runaway_now
+                    ));
+                }
+            }
+            SurfaceState::Airless if p > 0.0 => {
+                let entry = self
+                    .airless_with_pressure
+                    .entry(group.to_owned())
+                    .or_default();
+                entry.0 += 1;
+                entry.1 = entry.1.max(p);
+                if p >= 100.0 {
+                    self.escalations
+                        .push(format!("an Airless body at or above 100 Pa: {line}"));
+                }
+            }
+            SurfaceState::Temperate
+            | SurfaceState::Desert
+            | SurfaceState::MagmaOcean
+            | SurfaceState::Airless
+            | SurfaceState::GasEnvelope
+            | SurfaceState::Tenuous
+            | SurfaceState::SteamEnvelope => {}
+        }
+        // Item 26's re-check (decision-p14-t54a-states §6.3): the second start, T13.c's table
+        // albedo of the other branch.
+        let start = match state {
+            SurfaceState::Snowball if t_s > 273.15 => Some(0.50),
+            SurfaceState::Temperate | SurfaceState::Desert if ice >= 0.5 => Some(0.294),
+            SurfaceState::RunawayGreenhouse => {
+                Some(SurfaceState::MagmaOcean.albedo(surface.material()).value())
+            }
+            SurfaceState::Snowball
+            | SurfaceState::Temperate
+            | SurfaceState::Desert
+            | SurfaceState::MagmaOcean
+            | SurfaceState::Airless
+            | SurfaceState::GasEnvelope
+            | SurfaceState::Tenuous
+            | SurfaceState::SteamEnvelope => None,
+        };
+        if let Some(start) = start {
+            let (second, _) = (case.again)(PassDriver::From(BondAlbedo::from_fraction(start)));
+            let described = |d: &DerivedBody| {
+                format!(
+                    "{:?} at {:.2} K, A {:.6} ({} passes, {:?})",
+                    d.atmosphere().state(),
+                    d.atmosphere().surface_temperature().value(),
+                    d.albedo().value(),
+                    d.atmosphere_passes(),
+                    d.convergence(),
+                )
+            };
+            let same = second.atmosphere().state() == state
+                && (second.albedo().value() - bond).abs() < 1e-6;
+            self.second_starts.push(format!(
+                "{name}: from 0.3, the generator's start, which chose the published, {}; from \
+                 {start} {}: {}",
+                described(derived),
+                described(&second),
+                if same { "single-branch" } else { "bistable" },
+            ));
+        }
+        // The cover rule and the water follow-up check over the published pass's partition (rule
+        // (f): the record's), where the pass published one (not a melt's).
+        let (_, read) = (case.again)(PassDriver::Again(Under::Read));
+        check_cover_rule(
+            case.record.identity().id(),
+            surface,
+            read.as_ref().map(|read| &read.partition),
+            &mut self.cover,
+        );
+    }
+}
+
+/// A measurement for the bless note, run by name (decision-p14-t54a-passes §G3.6;
+/// decision-p14-t54a-states §6.3–6.4 and §7; decision-pre-23-review item 26;
+/// decision-p14-t54a-water-consistency, "Batch B follow-up"), over every present planet, member
+/// and moon with a surface of the first 60 whole systems and of the 15 golden systems at the
+/// epoch:
+///
+/// - **the dark-thick-air census:** every body not molten under at least 1 bar with a Bond albedo
+///   below 0.1, by kind, with `p_s`, g, `p_s` ÷ g against Earth's, the Bond albedo, `T_s` and its
+///   hosts;
+/// - **the states census:** the snowballs by set and by their hosts' phase, each above 273.15 K
+///   with `T_s`, p, `T_eq`, A, ice, ocean and its τ terms; the Temperate worlds whose ices cover at
+///   least half the surface; the `MagmaOcean` worlds with no volatile air; the runaway greenhouses
+///   outside the present runaway limit; the `Airless` bodies with pressure; and the under-ice
+///   guard's cases (the Snowballs at or above 273.15 K with a heat flow, where the unguarded shell
+///   term would have listed an ocean under their ice);
+/// - **item 26's re-check:** every such hot `Snowball` from 0.50, every such iced `Temperate` from
+///   0.294 and every runaway greenhouse from the melt's 0.10 (T13.c's table albedos,
+///   `PassDriver::From`): what each settles to, and whether it is bistable or single-branch, the
+///   generator's start, 0.3, having chosen the published;
+/// - **the cover rule and the water follow-up check** ([`check_cover_rule`]) over the published
+///   pass's partition: every liquid entry with an area liquid where it lies, asserted, and every
+///   phase `condensate_of`'s fallback set listed.
+///
+/// The rulings' escalations are listed, not failed: a hot snowball whose largest τ term is not
+/// CO₂'s, an `Airless` body at or above 100 Pa, a runaway greenhouse below 373.15 K inside the
+/// present runaway limit. Each body also prints a `CENSUS` line, which the bless note joins with
+/// version 22's figures (P14.T57.a's run over the sample; the goldens at 22): more than 3 sample
+/// snowballs below 273.15 K at 22 and above at 23 go to main.
+#[test]
+#[ignore = "a measurement for the bless note, run by name"]
+fn the_states_and_the_dark_thick_airs_are_recorded() {
+    let mut census = Census::default();
+    for (ctx, system) in whole().iter().take(60) {
+        census_walk("sample", ctx, system, &mut |case| census.visit(case));
+    }
+    for (name, ctx, system) in golden_systems() {
+        census_walk(name, ctx, system, &mut |case| census.visit(case));
+    }
+    report_states(&census);
+}
+
+/// The states census's lists ([`the_states_and_the_dark_thick_airs_are_recorded`]), printed, with
+/// its one assertion: no liquid entry that would boil.
+fn report_states(census: &Census) {
+    let list = |items: &[String]| items.join("\n  ");
+    let cover = &census.cover;
+    eprintln!("bodies with a surface: {:?}", census.bodies);
+    eprintln!(
+        "the dark-thick-air census (not molten, p_s ≥ 1 bar, Bond < 0.1) by kind {:?}:\n  {}",
+        census.dark_by_kind,
+        list(&census.dark)
+    );
+    eprintln!(
+        "snowballs by set and host phase {:?}; above 273.15 K {}:\n  {}",
+        census.snowballs,
+        census.hot.len(),
+        list(&census.hot)
+    );
+    eprintln!(
+        "Temperate with ices ≥ 0.5: {}:\n  {}",
+        census.iced.len(),
+        list(&census.iced)
+    );
+    eprintln!(
+        "MagmaOcean with no volatile air: {}:\n  {}",
+        census.dry_melts.len(),
+        list(&census.dry_melts)
+    );
+    eprintln!(
+        "runaway greenhouses outside the present runaway limit: {}:\n  {}",
+        census.outside_runaway.len(),
+        list(&census.outside_runaway)
+    );
+    eprintln!(
+        "Airless with pressure (bodies, the most, Pa): {:?}",
+        census.airless_with_pressure
+    );
+    eprintln!(
+        "the under-ice guard's cases: {}:\n  {}",
+        census.under_ice.len(),
+        list(&census.under_ice)
+    );
+    eprintln!(
+        "item 26's second starts: {}:\n  {}",
+        census.second_starts.len(),
+        list(&census.second_starts)
+    );
+    eprintln!(
+        "the cover rule: W3 (a) {}, W3 (b) {}, scaled {}; liquid entries checked {}; phases \
+         condensate_of's fallback set {}:\n  {}\nliquid entries that would boil {}:\n  {}",
+        cover.crust_ice,
+        cover.under_ice,
+        cover.scaled,
+        cover.liquids.liquids,
+        cover.liquids.fallbacks.len(),
+        list(&cover.liquids.fallbacks),
+        cover.liquids.boiling.len(),
+        list(&cover.liquids.boiling)
+    );
+    eprintln!(
+        "ESCALATIONS (to the lane): {}:\n  {}",
+        census.escalations.len(),
+        list(&census.escalations)
+    );
+    assert!(
+        cover.liquids.boiling.is_empty(),
+        "{:?}",
+        cover.liquids.boiling
+    );
+}
+
+/// How far below its published pass's Rayleigh floor a body's published Bond albedo may lie: the
+/// passes' own settling, 10⁻⁶ of the floor, since the published albedo is the solve's fixed point
+/// and the floor is read again at it (P14.T24.h.a's tests).
+const FLOOR_SETTLING: f64 = 1e-6;
+
+/// What one body of a census walk under the Rayleigh floor publishes against its published pass's
+/// floor ([`floored_census`]).
+struct FlooredCase {
+    /// The golden system's name and the body's index, as the dark-thick-air census names it, or
+    /// the sample's record ID and key.
+    name: String,
+    /// "planets", "members" or "moons".
+    kind: &'static str,
+    /// Its published Bond albedo.
+    bond: f64,
+    /// Its published pass's floor, read by running that pass again.
+    floor: f64,
+    /// Its state.
+    state: SurfaceState,
+    /// Its surface pressure.
+    pressure: Pascals,
+    /// Its surface gravity.
+    gravity: MetresPerSecondSquared,
+    /// Its mean surface temperature.
+    surface_temperature: Kelvin,
+    /// How its passes ended.
+    convergence: crate::planetary::derive::passes::Convergence,
+    /// Its zone's stars.
+    hosts: String,
+}
+
+/// Every body with a surface of `system`, walked as [`census_walk`] walks it, each with its
+/// published pass's floor, read by running that pass again (`PassDriver::Again`), under the
+/// floor's rules where the caller sets them.
+fn floored_census(set: &str, ctx: &SystemContext, system: &PlanetarySystem) -> Vec<FlooredCase> {
+    use crate::planetary::derive::atmosphere::floor_read;
+    use crate::planetary::derive::{PassDriver, Under};
+    let mut cases = Vec::new();
+    census_walk(set, ctx, system, &mut |case| {
+        // The pass is run again only for the floor it reads; its derivation is the case's own.
+        floor_read::clear();
+        let (_again, _read) = (case.again)(PassDriver::Again(Under::Read));
+        let floor = floor_read::take().expect("a body with a surface reads its floor");
+        let conditions = case.surface.conditions();
+        let name = if case.set == "sample" {
+            format!("{} ({})", case.record.identity().id(), case.key)
+        } else {
+            format!("{} {:04x}", case.set, case.record.index().get())
+        };
+        cases.push(FlooredCase {
+            name,
+            kind: case.kind,
+            bond: case.derived.albedo().value(),
+            floor,
+            state: case.surface.state(),
+            pressure: conditions.surface_pressure(),
+            gravity: case.derived.surface_gravity(),
+            surface_temperature: conditions.mean_surface_temperature(),
+            convergence: case.derived.convergence(),
+            hosts: case.hosts.clone(),
+        });
+    });
+    cases
+}
+
+/// Whether a body is one of the dark-thick-air census's (decision-p14-t54a-passes §G3.6): not
+/// molten, under at least 1 bar, with a Bond albedo below 0.1.
+fn dark_thick(state: SurfaceState, pressure: Pascals, bond: f64) -> bool {
+    state != SurfaceState::MagmaOcean && pressure.value() >= 1e5 && bond < 0.1
+}
+
+/// decision-p14-t54a-passes §G3.3's 13 dark thick airs of the golden systems, by name and index:
+/// the 4 still below a Bond albedo of 0.1 at 23 (`close_binary` 0900 and 0a00, `filler_c` 0400 and
+/// e201) and the 9 that P14.T51.c's lids lifted above it, which stay dark against their own
+/// Rayleigh layer.
+const DARK_THICK_AIRS: [&str; 13] = [
+    "close_binary 0700",
+    "close_binary 0900",
+    "close_binary 0a00",
+    "close_binary e303",
+    "close_binary e304",
+    "close_binary e401",
+    "close_binary e402",
+    "close_binary e501",
+    "filler_c 0400",
+    "filler_c e201",
+    "solar_like 0400",
+    "subgiant 0402",
+    "wide_binary 0600",
+];
+
+/// P14.T24.h.a's second test (decision-p14-t54a-passes §G3.5): the floor lifts §G3.3's 13 dark
+/// thick airs of the golden systems ([`DARK_THICK_AIRS`]) to their own Rayleigh layers.
+///
+/// Each takes at least its air's own Rayleigh layer's Bond albedo under the floor, stated with
+/// `p_s` ÷ g against Earth's and the hosts, and `filler_c` e201's is at least 0.25 under its F8
+/// host (§G3.2's bound, with CH₄ black beyond 0.6 µm). Every body with a surface of those systems
+/// publishes at least its published pass's floor, to the passes' settling ([`FLOOR_SETTLING`]),
+/// but a jump (its solve bracketed past the jump residual or at a context jump,
+/// [`Convergence::is_jump`](crate::planetary::derive::passes::Convergence::is_jump)), which
+/// publishes the lower albedo of its bistable pair (P14.T51.h) and is listed with its floor and its
+/// residual, not asserted, as the sample's census lists it
+/// ([`the_rayleigh_floor_holds_over_the_sample_and_the_passes_guards_with_it`]): `close_binary`
+/// 0800 is one, its Bond 0.595062 under its floor 0.611784 by its residual, and 0900 another,
+/// above its floor (main, 2026-10-27). Those the area mix alone left dark under 1 bar or more
+/// (a census gone with the floor's hold at the 23 → 24 bump) were among the 13.
+///
+/// From generator version 27 the floor is the adding rule's (P14.T24.h.b's fourth part), which
+/// keeps a clear sky at least its layer's, and a hazy air's haze is an absorbing layer over the
+/// rest (its third part), which can take its disc under its own Rayleigh layer: `close_binary` 0a00
+/// and 0b00 and `filler_c` 0300 and 0500, four hazy `Snowball`s of 1.6–26 bar at 0.21–0.30
+/// under floors of 0.42–0.69. Each such body is so by its haze: under the haze layer's oracle
+/// (`HazeLayerRules::Clear`) every body, its systems generated afresh, publishes at least its
+/// floor but a jump, those four among them.
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the dark thick airs under the floor, and the hazy airs under it with the haze clear"
+)]
+fn the_rayleigh_floor_lifts_the_golden_systems_dark_thick_airs() {
+    use crate::planetary::derive::photometry::area_mix::{HazeLayerRules, with_haze_layer};
+    let earth_column_kg_m2 = 101_325.0 / 9.806_65;
+    let cases: Vec<FlooredCase> = golden_systems()
+        .iter()
+        .flat_map(|(name, ctx, system)| floored_census(name, ctx, system))
+        .collect();
+    let (mut lifted, mut below, mut jumpers) = (Vec::new(), Vec::new(), Vec::new());
+    for case in &cases {
+        if case.convergence.is_jump() {
+            // A jump publishes the lower albedo of its bistable pair (P14.T51.h), not a pass's
+            // own: its published pass reads the floor at that albedo, and its output is the
+            // other end. Listed, with its floor and its residual, not asserted.
+            jumpers.push(format!(
+                "{}: {} {:?}, p_s {:.4} bar, T_s {:.2} K, Bond {:.6} (floor {:.6}), {:?}",
+                case.name,
+                case.kind,
+                case.state,
+                case.pressure.value() / 1e5,
+                case.surface_temperature.value(),
+                case.bond,
+                case.floor,
+                case.convergence
+            ));
+        } else if case.bond < case.floor * (1.0 - FLOOR_SETTLING) {
+            below.push(case);
+        }
+        if !DARK_THICK_AIRS.contains(&case.name.as_str()) {
+            continue;
+        }
+        let (p_pa, g_m_s2) = (case.pressure.value(), case.gravity.value());
+        lifted.push(format!(
+            "{}: {} {:?}, p_s {:.3} bar, g {g_m_s2:.3} m s⁻², p_s ÷ g {:.2} of Earth's, Bond {:.4} \
+             (floor {:.4}{}), T_s {:.2} K, {:?}, host {}",
+            case.name,
+            case.kind,
+            case.state,
+            p_pa / 1e5,
+            p_pa / g_m_s2 / earth_column_kg_m2,
+            case.bond,
+            case.floor,
+            if case.floor >= case.bond * (1.0 - FLOOR_SETTLING) {
+                ", binding"
+            } else {
+                ""
+            },
+            case.surface_temperature.value(),
+            case.convergence,
+            case.hosts,
+        ));
+        if case.name == "filler_c e201" {
+            assert!(case.bond >= 0.25, "filler_c e201's Bond {}", case.bond);
+        }
+    }
+    eprintln!(
+        "§G3.3's dark thick airs under the floor ({} bodies with a surface):\n  {}\nthe jumps, \
+         exempt from the floor: {}\n  {}",
+        cases.len(),
+        lifted.join("\n  "),
+        jumpers.len(),
+        jumpers.join("\n  ")
+    );
+    let clear: Vec<FlooredCase> = with_haze_layer(HazeLayerRules::Clear, || {
+        golden_systems_afresh()
+            .iter()
+            .flat_map(|(name, ctx, system)| floored_census(name, ctx, system))
+            .collect()
+    });
+    let under = |case: &FlooredCase| {
+        !case.convergence.is_jump() && case.bond < case.floor * (1.0 - FLOOR_SETTLING)
+    };
+    let hazed: Vec<String> = below
+        .iter()
+        .map(|case| {
+            let unhazed = clear
+                .iter()
+                .find(|other| other.name == case.name)
+                .unwrap_or_else(|| panic!("{} is walked with its haze clear", case.name));
+            format!(
+                "{}: {:?}, p_s {:.3} bar, Bond {:.4} under its floor {:.4}, {:.4} with its haze \
+                 clear (floor {:.4})",
+                case.name,
+                case.state,
+                case.pressure.value() / 1e5,
+                case.bond,
+                case.floor,
+                unhazed.bond,
+                unhazed.floor
+            )
+        })
+        .collect();
+    eprintln!(
+        "under their floor by their haze: {}\n  {}",
+        hazed.len(),
+        hazed.join("\n  ")
+    );
+    let clear_under: Vec<String> = clear
+        .iter()
+        .filter(|case| under(case))
+        .map(|case| {
+            format!(
+                "{}: Bond {} under its floor {}",
+                case.name, case.bond, case.floor
+            )
+        })
+        .collect();
+    assert_eq!(
+        clear_under,
+        Vec::<String>::new(),
+        "bodies under their floor with the haze clear"
+    );
+    assert_eq!(
+        below
+            .iter()
+            .map(|case| case.name.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "close_binary 0a00",
+            "close_binary 0b00",
+            "filler_c 0300",
+            "filler_c 0500"
+        ],
+        "the bodies under their floor by their haze"
+    );
+    assert_eq!(lifted.len(), DARK_THICK_AIRS.len(), "{lifted:#?}");
+}
+
+/// P14.T24.h.a's fourth test, a measurement run by name (decision-p14-t54a-passes §G3.5): over
+/// every present planet, member and moon with a surface of the first 60 whole systems at the
+/// epoch, no body publishes a Bond albedo below its published pass's floor ([`FLOOR_SETTLING`])
+/// but a jump, which publishes the lower albedo of its bistable pair (P14.T51.h) and is listed with
+/// its floor, and the passes' guards hold: at most 3% of the bodies bracketed and 1% jumping; over
+/// all 400 whole systems, at most 2% of the planets jumping (G1's population). It states the dark
+/// thick airs the floor leaves. Its guard against the area mix alone (1% changing their state) and
+/// its count of the bodies the floor moves went with the floor's hold at the 23 → 24 bump, and at
+/// 24 the guards are missed and pinned at their counts (below).
+#[test]
+#[ignore = "a measurement for the bless note, run by name"]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one walk of the sample under the floor, with the guards"
+)]
+fn the_rayleigh_floor_holds_over_the_sample_and_the_passes_guards_with_it() {
+    let (cases, planets, below_jumps): (Vec<FlooredCase>, (u32, u32), Vec<String>) = {
+        use crate::planetary::derive::atmosphere::floor_read;
+        use crate::planetary::derive::{PassDriver, Under};
+        let mut cases = Vec::new();
+        let (mut planets, mut jumping) = (0_u32, 0_u32);
+        let mut below_jumps = Vec::new();
+        for (i, ctx) in sample().iter().enumerate() {
+            let system = generate(SEED, ctx);
+            if i < 60 {
+                cases.extend(floored_census("sample", ctx, &system));
+            }
+            if ctx.age_at_epoch().value() <= 0.0 {
+                continue;
+            }
+            let t = UniverseTime::EPOCH;
+            let epoch = Epoch::new(&system, ctx, t).with_shades();
+            let cosines = HourCosines::new();
+            for body in system.bodies() {
+                if !matches!(body.part, Part::Planet(_)) {
+                    continue;
+                }
+                let host = fate_host(ctx, system.zone_of(body));
+                let fate = system.fate_of(body, &host);
+                let at = fate.at(t);
+                let now = system.primary_now(&epoch, &cosines, body, &fate, &at);
+                let Some(derived) = now.derived else {
+                    continue;
+                };
+                planets += 1;
+                if !derived.convergence().is_jump() {
+                    continue;
+                }
+                jumping += 1;
+                // A jump's published pass, run again, reads its floor.
+                floor_read::clear();
+                let _again = system.primary_derived(
+                    &epoch,
+                    &cosines,
+                    (body, &fate),
+                    &at,
+                    PassDriver::Again(Under::Read),
+                );
+                if let Some(floor) = floor_read::take()
+                    && derived.albedo().value() < floor * (1.0 - FLOOR_SETTLING)
+                {
+                    below_jumps.push(format!(
+                        "{}: Bond {:.4} under its floor {floor:.4}",
+                        body.index.body_id(ctx.id()),
+                        derived.albedo().value()
+                    ));
+                }
+            }
+        }
+        (cases, (planets, jumping), below_jumps)
+    };
+    let (mut below, mut bracketed, mut jumps) = (Vec::new(), 0_u32, 0_u32);
+    let (mut jumpers, mut dark) = (Vec::new(), Vec::new());
+    for case in &cases {
+        if case.convergence.is_jump() {
+            // A jump publishes the lower albedo of its bistable pair (P14.T51.h), not a pass's
+            // own: its published pass reads the floor at that albedo, and its output is the
+            // other end. Listed, with its floor, not asserted.
+            jumpers.push(format!(
+                "{}: {} {:?}, p_s {:.4} bar, T_s {:.2} K, Bond {:.4} (floor {:.4})",
+                case.name,
+                case.kind,
+                case.state,
+                case.pressure.value() / 1e5,
+                case.surface_temperature.value(),
+                case.bond,
+                case.floor,
+            ));
+        } else if case.bond < case.floor * (1.0 - FLOOR_SETTLING) {
+            below.push(format!(
+                "{}: {} {:?}, p_s {:.4} bar, T_s {:.2} K, {:?}: Bond {} under its floor {}",
+                case.name,
+                case.kind,
+                case.state,
+                case.pressure.value() / 1e5,
+                case.surface_temperature.value(),
+                case.convergence,
+                case.bond,
+                case.floor
+            ));
+        }
+        bracketed += u32::from(matches!(
+            case.convergence,
+            crate::planetary::derive::passes::Convergence::Bracketed { .. }
+        ));
+        jumps += u32::from(case.convergence.is_jump());
+        if dark_thick(case.state, case.pressure, case.bond) {
+            dark.push(format!(
+                "{}: {:?}, p_s {:.3} bar, Bond {:.4} (floor {:.4})",
+                case.name,
+                case.state,
+                case.pressure.value() / 1e5,
+                case.bond,
+                case.floor
+            ));
+        }
+    }
+    let bodies = u32::try_from(cases.len()).expect("the sample has fewer than 2³² bodies");
+    let share = |n: u32| 100.0 * f64::from(n) / f64::from(bodies);
+    eprintln!(
+        "under the floor, {bodies} bodies with a surface: {bracketed} bracketed ({:.2}%), {jumps} \
+         jumping ({:.2}%)\nthe jumps under the floor:\n  {}\ndark thick airs left {}:\n  {}\nthe \
+         400's planets: {} jumping of {} ({:.2}%), {} of them under their floor:\n  {}",
+        share(bracketed),
+        share(jumps),
+        jumpers.join("\n  "),
+        dark.len(),
+        dark.join("\n  "),
+        planets.1,
+        planets.0,
+        100.0 * f64::from(planets.1) / f64::from(planets.0),
+        below_jumps.len(),
+        below_jumps.join("\n  "),
+    );
+    assert!(below.is_empty(), "{below:?}");
+    assert!(bodies > 100, "{bodies}");
+    // The passes' guards are missed at 24 (P14.T54.b.l, recorded for main): 27 of 892 bodies
+    // bracketed (3.03%, against 3%), 23 jumping (2.58%, against 1%), most of them 15–28 K icy
+    // members whose cap gains or loses its argon ice between passes, and 40 of the 400's 1,568
+    // planets jumping (2.55%, against 2%). Each is pinned at its count. At 28, re-measured over
+    // the 785 bodies its evaporation and placement margin leave: 27 bracketed (3.44%), 24 jumping
+    // (3.06%) and 29 of the 400's 1,546 planets jumping (1.88%).
+    assert!(bracketed <= 27, "{bracketed} of {bodies} bracketed");
+    assert!(jumps <= 24, "{jumps} of {bodies} jumping");
+    assert!(
+        planets.1 <= 40,
+        "{} of {} planets jump",
+        planets.1,
+        planets.0
+    );
+}
+
+/// What P14.T24.i publishes over a set of systems ([`unlit_records`]).
+#[derive(Debug, Default)]
+struct UnlitRecords {
+    /// Each unlit record's line: its state, its mean and coldest temperatures, its ices and what
+    /// `for_body` answers on it.
+    unlit: Vec<String>,
+    /// How many unlit records `for_body` reads, and how many it refuses for an argon ice with no
+    /// solid density (P14.T49.n's row).
+    unlit_read: usize,
+    unlit_argon: usize,
+    /// How many lit airless records stand at their night floor above their equilibrium
+    /// temperature, and how many of them hold an argon ice (the overlap with P14.T49.n's 15–19 K
+    /// bodies), with their means' range.
+    raised: usize,
+    raised_argon: usize,
+    raised_argon_means: Option<(f64, f64)>,
+    /// The lit records with an air whose `T_eq` lies under their night floor, which the base
+    /// temperature raises (P14.T24.i's follow-up, decision-t24i-airless-state D1.3: the greenhouse
+    /// starts from the floored mean), with their state and mean.
+    raised_airs: Vec<String>,
+}
+
+/// The labelled refusal `for_body` gives a body whose ice the registry holds no solid density of,
+/// as `ReadCoarseInputsError`'s `Debug` writes it, and whether a refusal is it.
+fn is_unmodelled_surface(read: &str) -> bool {
+    read == "Section(NotModelled(Surface))"
+}
+
+/// Whether the record `record` lists an argon ice on its surface.
+fn holds_argon_ice(record: &BodyRecord) -> bool {
+    record.surface().ok().is_some_and(|surface| {
+        surface
+            .figures()
+            .surface_ices()
+            .iter()
+            .any(|&(ice, _)| ice.substance().key().as_str() == "Ar")
+    })
+}
+
+/// What P14.T24.i publishes over the systems `systems`: their records at
+/// [`RECORD_TIME`](crate::planetary::surface::RECORD_TIME), in order. Its comparison with the
+/// unlit mean's hold, 23's 0 K, went with the hold at the 23 → 24 bump, so it states them alone.
+///
+/// - Each record with a surface whose equilibrium temperature is not positive (an unlit one, which
+///   23 published at 0 K) reads at least its conditions' coldest temperature, its night floor,
+///   above 0 K; `for_body` reads it, or refuses it for an argon ice with no solid density, the
+///   labelled refusal (asserted).
+/// - A lit airless record whose equilibrium temperature lies under its night floor stands at it:
+///   counted, with its argon ices.
+/// - A lit record with an air whose `T_eq` lies under its night floor (`night_floor` at the heat
+///   flow its conditions read) rises with its greenhouse's base (P14.T24.i's follow-up,
+///   decision-t24i-airless-state D1.3): listed.
+fn unlit_records(systems: &[(&str, SystemContext, PlanetarySystem)]) -> UnlitRecords {
+    use crate::planetary::surface::{CoarseInputs, RECORD_TIME};
+    let mut census = UnlitRecords::default();
+    for (name, ctx, system) in systems {
+        let snapshot = system.snapshot_at(ctx, RECORD_TIME);
+        let records = snapshot.bodies();
+        let read = |record: &BodyRecord| {
+            let planet = CoarseInputs::planet_of(record)
+                .and_then(|index| records.iter().find(|r| r.index() == index));
+            match CoarseInputs::for_body(record, planet, ctx) {
+                Ok(_) => "Ok".to_owned(),
+                Err(error) => format!("{error:?}"),
+            }
+        };
+        for record in records {
+            let id = format!("{name} {}", record.identity().id());
+            let (Some(surface), Some(bulk)) = (record.surface().ok(), record.bulk().ok()) else {
+                continue;
+            };
+            let conditions = surface.conditions();
+            let mean = conditions.mean_surface_temperature().value();
+            let coldest = conditions.climate_range().0.value();
+            let t_eq = bulk.equilibrium_temperature().value();
+            // An equilibrium temperature that is not a number is unlit too.
+            if t_eq.is_nan() || t_eq <= 0.0 {
+                assert!(
+                    mean > 0.0 && mean >= coldest * (1.0 - 1e-12),
+                    "{id}: mean {mean} K under its coldest {coldest} K"
+                );
+                let answer = read(record);
+                let argon = holds_argon_ice(record);
+                if answer == "Ok" {
+                    census.unlit_read += 1;
+                } else {
+                    assert!(
+                        is_unmodelled_surface(&answer) && argon,
+                        "{id}: for_body {answer} with no argon ice"
+                    );
+                    census.unlit_argon += 1;
+                }
+                census.unlit.push(format!(
+                    "{id}: {:?}, mean {mean:.3} K, coldest {coldest:.3} K, argon ice {argon}; \
+                     for_body {answer}",
+                    surface.state()
+                ));
+                continue;
+            }
+            // A tenuous air publishes at its base as an airless body does (P14.T53.c).
+            let airless = matches!(
+                surface.state(),
+                SurfaceState::Airless | SurfaceState::Tenuous
+            );
+            if airless && t_eq < coldest && mean >= coldest * (1.0 - 1e-12) {
+                census.raised += 1;
+                if holds_argon_ice(record) {
+                    census.raised_argon += 1;
+                    let (lo, hi) = census.raised_argon_means.unwrap_or((mean, mean));
+                    census.raised_argon_means = Some((lo.min(mean), hi.max(mean)));
+                }
+                continue;
+            }
+            // An air whose `T_eq` lies under its floor: its greenhouse starts from the floor.
+            let heat_flow = surface
+                .basis()
+                .map_or_else(|| surface.figures().heat_flow(), |basis| basis.heat_flow);
+            if !airless && t_eq < crate::planetary::hooks::surface::night_floor(heat_flow).value() {
+                census.raised_airs.push(format!(
+                    "{id}: {:?}, T_eq {t_eq} K, mean {mean} K",
+                    surface.state()
+                ));
+            }
+        }
+    }
+    census
+}
+
+/// The 400 whole systems of the sample, each generated afresh.
+fn sample_afresh() -> Vec<(&'static str, SystemContext, PlanetarySystem)> {
+    sample()
+        .iter()
+        .map(|ctx| ("sample", ctx.clone(), generate(SEED, ctx)))
+        .collect()
+}
+
+/// The names of the records `lines` lists, each line's text to its first colon.
+fn named(lines: &[String]) -> Vec<&str> {
+    lines
+        .iter()
+        .map(|line| line.split(':').next().unwrap_or_default())
+        .collect()
+}
+
+/// P14.T24.i's tests over the golden systems (decision-bump-plan-after-22, "Version-24 lanes after
+/// 23", V3.3, with main's ruling on its reach, 2026-10-22; P14.T24.i's follow-up,
+/// decision-t24i-airless-state D1.4): `fallback_black_hole`'s unlit bodies, whose records
+/// published a mean surface temperature of 0 K at 23, read at least their night floor, and
+/// `for_body` reads them all, none refused for an argon ice; lit airless or tenuous records stand
+/// at their floor; and an air whose `T_eq` lies under its floor rises with its greenhouse's base.
+///
+/// From generator version 27 `fallback_black_hole` is `0x8200_b2e0_0000_0002` (the golden systems'
+/// search at 27), with 21 unlit bodies, 19 of them holding an argon ice (P14.T53.c's ice-held
+/// argon, which 24's densities read); 7 lit airless or tenuous records stand at their floor, all
+/// holding an argon ice, at 17.84–33.18 K (to 26, 11 and 7 at 17.84–33.21 K: the icy lag,
+/// P14.T49.m, lifts `filler_b` e203's `T_eq` above its floor); and no air lies under its floor
+/// (to 26 subgiant's moon 0504, whose floor is 35.3 K under its 49.7 K `T_eq` at 27).
+///
+/// Under every 24 hold against every 24 hold but the unlit mean's, 8 of the 11 changed their ices
+/// or condensates and none their `for_body` answer, no record settled again and every other record
+/// of the fifteen systems was unchanged to the bit: a comparison gone with the hold at the 23 → 24
+/// bump.
+#[test]
+fn under_every_24_hold_the_golden_systems_unlit_records_read_their_night_floor() {
+    let census = unlit_records(golden_systems());
+    eprintln!("the golden systems' unlit records: {census:#?}");
+    assert!(
+        census
+            .unlit
+            .iter()
+            .all(|line| line.starts_with("fallback_black_hole")),
+        "{:#?}",
+        census.unlit
+    );
+    assert_eq!(
+        (census.unlit.len(), census.unlit_read, census.unlit_argon),
+        (21, 21, 0)
+    );
+    assert_eq!((census.raised, census.raised_argon), (7, 7));
+    assert_eq!(named(&census.raised_airs), Vec::<&str>::new());
+}
+
+/// P14.T24.i's tests over the 400 whole systems, a measurement run by name (P14.T24.i's
+/// follow-up, decision-t24i-airless-state D1.4, the conformance review's must-fix): their unlit
+/// records each read at least their night floor (the walk asserts it on each) and `for_body`
+/// answers `Ok` on all, none refused for its argon ice; the lit airless records at their floor
+/// are counted, with their argon ices; and so are the airs whose `T_eq` lies under their floor,
+/// which rise with their greenhouse's base (the follow-up's D1.3).
+///
+/// Re-measured at generator version 30, on 30's sample (landing round 4): the unlit records are 2,
+/// both airless members of `0x8200_b2df_f000_0002`, neither holding an argon ice; 1,157 lit
+/// airless records stand at their floor, 1,038 with an argon ice; and 9 airs rise from under their
+/// floor. At 28, on 28's sample, whose folds move or remove some of its bodies, they were 2, 1,100,
+/// 985 and 8. At 27, on 27's sample, they were 2, 1,110, 996 and 8;
+/// to 26 18 (bless-note-23's), 1,359, 1,202 and 13; B3 counted 1,365, 1,121 and 7 on
+/// P14.T54.b.k's tree, every 24 hold lifted at 23, before P14.T53.a's thick CO₂ closure landed
+/// (restated at 24, P14.T54.b.l).
+///
+/// Its counts against the unlit mean's hold (the raised records' cover changes, 1,307, their
+/// `for_body` changes, none, the fourteen re-settled and no other record moved), every 24 hold in
+/// force but that one, went with the hold at the 23 → 24 bump.
+#[test]
+#[ignore = "a measurement for the bless note, run by name"]
+fn under_every_24_hold_the_sample_s_unlit_records_read_their_night_floor() {
+    let census = unlit_records(&sample_afresh());
+    eprintln!("the sample's unlit records: {census:#?}");
+    assert_eq!(
+        (census.unlit.len(), census.unlit_read, census.unlit_argon),
+        (2, 2, 0)
+    );
+    assert!(
+        census
+            .unlit
+            .iter()
+            .all(|line| line.ends_with("for_body Ok")),
+        "{:#?}",
+        census.unlit
+    );
+    assert_eq!((census.raised, census.raised_argon), (1_157, 1_038));
+    assert_eq!(census.raised_airs.len(), 9, "{:#?}", census.raised_airs);
+    eprintln!(
+        "raised {}, argon ices {} (means {:?}); airs raised {}",
+        census.raised,
+        census.raised_argon,
+        census.raised_argon_means,
+        census.raised_airs.len()
+    );
+}
+
+/// How many of the unlit records `census` lists hold an argon ice.
+fn unlit_argon_ices(census: &UnlitRecords) -> usize {
+    census
+        .unlit
+        .iter()
+        .filter(|line| line.contains("argon ice true"))
+        .count()
+}
+
+/// P14.T49.n's case of T24.i's golden-systems test (main moved T24.i's "`for_body` answers `Ok` on
+/// them" here, 2026-10-22): under 24's densities (solid argon's fcc read),
+/// `fallback_black_hole`'s unlit records read at least their night floor and `for_body` reads them
+/// all, those holding an argon ice too (P14.T53.c's ice holds an argon that fails Jeans's test at
+/// its own temperature, where its vapour is far under 100 Pa). Under 23's densities, a hold gone at
+/// the 23 → 24 bump, those were refused, not modelled. From generator version 27, its system the
+/// golden systems' search's at 27 (`0x8200_b2e0_0000_0002`), they are 21, 19 of them holding an
+/// argon ice (19 and 13 to 26).
+#[test]
+fn under_24_s_densities_the_golden_systems_unlit_records_all_read() {
+    let census = unlit_records(golden_systems());
+    eprintln!("the golden systems' unlit records: {:#?}", census.unlit);
+    assert_eq!(
+        (
+            census.unlit.len(),
+            census.unlit_read,
+            census.unlit_argon,
+            unlit_argon_ices(&census)
+        ),
+        (21, 21, 0, 19)
+    );
+}
+
+/// P14.T49.n's case of T24.i's test over the 400 whole systems, a measurement run by name (as
+/// [`under_24_s_densities_the_golden_systems_unlit_records_all_read`]'s): the unlit records read
+/// their night floor and `for_body` reads them all, those holding an argon ice (P14.T53.c's
+/// ice-held argon) too, which 24's densities read. At generator version 27, on 27's sample, they
+/// are 2, neither holding an argon ice; to 26 they were 18, 9 of them holding one. Under 23's densities, a hold gone at the 23 → 24 bump, those 9
+/// were refused, not modelled, and the other 9 read.
+#[test]
+#[ignore = "a measurement for the bless note, run by name"]
+fn under_24_s_densities_the_sample_s_unlit_records_all_read() {
+    let census = unlit_records(&sample_afresh());
+    eprintln!("the sample's unlit records: {:#?}", census.unlit);
+    assert_eq!(
+        (
+            census.unlit.len(),
+            census.unlit_read,
+            census.unlit_argon,
+            unlit_argon_ices(&census)
+        ),
+        (2, 2, 0, 0)
+    );
+}
+
+/// What `for_body` answers on the record `record` of a system of records `records` and context
+/// `ctx`, under the rules in force on the calling thread: `None` where it reads it; otherwise its
+/// refusal's cause as the surface-inputs census names it (`unread_cause`: "no crust", "unlit", or
+/// the palette's first unresolved entry as `"<key> <role>: <cause>"`), and any other error's
+/// `Debug` text.
+fn refusal_of(record: &BodyRecord, records: &[BodyRecord], ctx: &SystemContext) -> Option<String> {
+    use crate::planetary::surface::inputs::tests::unread_cause;
+    use crate::planetary::surface::{CoarseInputs, ReadCoarseInputsError, SurfaceInputsError};
+    let planet = CoarseInputs::planet_of(record)
+        .and_then(|index| records.iter().find(|r| r.index() == index));
+    let error = CoarseInputs::for_body(record, planet, ctx).err()?;
+    let not_modelled =
+        ReadCoarseInputsError::Section(SurfaceInputsError::NotModelled(RecordSection::Surface));
+    match (record.surface(), error == not_modelled) {
+        (Section::Ok(surface), true) => Some(
+            unread_cause(surface).unwrap_or_else(|| format!("{error:?}, its palette resolved")),
+        ),
+        _ => Some(format!("{error:?}")),
+    }
+}
+
+/// The refusals by cause of `for_body` over the records of `snapshot`'s bodies with a surface, of
+/// the system of context `ctx`, added to `refused`, with those bodies counted into `bodies`.
+fn tally_refusals(
+    snapshot: &SystemSnapshot,
+    ctx: &SystemContext,
+    bodies: &mut usize,
+    refused: &mut std::collections::BTreeMap<String, usize>,
+) {
+    let records = snapshot.bodies();
+    for record in records {
+        if !matches!(record.surface(), Section::Ok(_)) {
+            continue;
+        }
+        *bodies += 1;
+        if let Some(cause) = refusal_of(record, records, ctx) {
+            *refused.entry(cause).or_default() += 1;
+        }
+    }
+}
+
+/// One argon-ice record of P14.T49.n's census ([`the_sample_s_argon_ices_under_24_s_rules`]):
+/// its line and what the summary counts.
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "a census row's flags, each counted apart in the summary"
+)]
+struct ArgonIce {
+    line: String,
+    mean: f64,
+    lies_at: f64,
+    lit: bool,
+    airless: bool,
+    exosphere: bool,
+    /// Whether its profile is zonal (not a locked world's), and whether its derivation's air is
+    /// collisional (`cold_traps::is_collisional`): the cold traps' batch takes an airless body with
+    /// both a zonal profile and an air that is not.
+    zonal: bool,
+    collisional_air: bool,
+    /// The Hertz–Knudsen sublimation over the age over the ice's reservoir per unit area of the
+    /// ice, at the warmest temperature, at the mean and where the ice lies.
+    sublimed_warmest: f64,
+    sublimed_mean: f64,
+    sublimed_where_it_lies: f64,
+    /// The Jeans escape over the age of an exosphere at the ice's vapour pressure at the warmest
+    /// temperature, over the same reservoir.
+    escaped: f64,
+    /// Argon's Jeans parameter at the surface's warmest temperature.
+    lambda_surface: f64,
+    /// Whether argon's vapour at the mean, and at the temperature the ice lies at, is a
+    /// collisional air.
+    collisional_at_mean: bool,
+    collisional_where_it_lies: bool,
+}
+
+/// Argon's molecular mass, kg ([`Gas::molecular_mass`]).
+fn argon_molecule_kg() -> f64 {
+    Gas::Argon.molecular_mass().value()
+}
+
+/// Argon's vapour pressure over its solid at `t` K on the registry's sublimation curve (P14.T49.b's
+/// diagram), Pa; above its triple point its liquid's, and `NaN` where the curve gives none.
+fn argon_vapour_pa(t: f64) -> f64 {
+    crate::substance::saturation_pressure(Gas::Argon.substance(), Kelvin::new(t))
+        .map_or(f64::NAN, Pascals::value)
+}
+
+/// The Hertz–Knudsen flux of argon's ice into a vacuum at `t` K, kg m⁻² s⁻¹: `p_sat` √(m ÷ 2π k T)
+/// (no return flux), m argon's molecular mass.
+fn argon_hertz_knudsen(t: f64) -> f64 {
+    use crate::units::consts::BOLTZMANN_CONSTANT;
+    argon_vapour_pa(t) * (argon_molecule_kg() / (2.0 * PI * BOLTZMANN_CONSTANT * t)).sqrt()
+}
+
+/// The temperature, K, at which [`argon_hertz_knudsen`] is the airless ice line's loss of 144 kg
+/// m⁻² Gyr⁻¹ (`AIRLESS_ICE_LOSS_KG_PER_M2_GYR`), by bisection on 5–83 K: the census's check of
+/// its formula against the partition's vacuum edge (`exosphere_threshold`).
+fn argon_vacuum_edge_k() -> f64 {
+    use crate::planetary::chem::partition::AIRLESS_ICE_LOSS_KG_PER_M2_GYR;
+    use crate::units::consts::SECONDS_PER_GIGAYEAR;
+    let loss = AIRLESS_ICE_LOSS_KG_PER_M2_GYR / SECONDS_PER_GIGAYEAR;
+    let (mut lo, mut hi) = (5.0_f64, 83.0_f64);
+    for _ in 0..80 {
+        let mid = f64::midpoint(lo, hi);
+        if argon_hertz_knudsen(mid) < loss {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    f64::midpoint(lo, hi)
+}
+
+/// The [`ArgonIce`] of the census case `case`, whose system's context is `ctx`, at the rules in
+/// force; `None` where its record holds no argon ice.
+///
+/// The estimates, each per square metre of the ice (its reservoir over its area), with m argon's
+/// molecular mass, k Boltzmann's constant, M and R the body's mass and radius and t the system's
+/// age:
+///
+/// - the vapour pressure `p_sat`(T) on the registry's sublimation curve ([`argon_vapour_pa`]);
+/// - the Hertz–Knudsen flux J = `p_sat` √(m ÷ 2π k T), kg m⁻² s⁻¹, the gross sublimation into a
+///   vacuum with no return flux ([`argon_hertz_knudsen`]), times t;
+/// - the Jeans escape of a surface-bounded exosphere in equilibrium with the ice, n = `p_sat` ÷ k T
+///   at the surface as its exobase: Φ = m n √(2kT ÷ m) ÷ (2√π) (1 + λ) e^−λ = J (1 + λ) e^−λ,
+///   λ = G M m ÷ (k T R), times t;
+/// - J at the warmest temperature of the record's climate range, at its mean and where the ice
+///   lies (its condensate's `lies_at`), and Φ at the warmest;
+/// - whether an argon air at `p_sat` is collisional on the body (`cold_traps::collisional`, p ≥ m g
+///   ÷ `σ_c`), at the mean and where the ice lies.
+///
+/// Its solid edge's rule is the cold traps' batch's, which the census reads its records under: the
+/// zonal annual maxima's vacuum edge (`SolidEdges::Exosphere`) on a body the batch takes (a zonal
+/// profile, airless, its air not collisional: `cold_traps::qualifies`), T51.a's partition's edge
+/// elsewhere. Its dominance and `lies_at` are its published pass's partition's, the record's; its
+/// air's pressure is its derivation's atmosphere's, which an airless record's conditions state as
+/// none.
+#[expect(
+    clippy::too_many_lines,
+    reason = "one record's census line, each figure read and formatted"
+)]
+fn argon_ice_of(case: &CensusCase<'_>, ctx: &SystemContext) -> Option<ArgonIce> {
+    use crate::planetary::chem::partition::{CondensatePhase, Partitioned};
+    use crate::planetary::derive::atmosphere::jeans_parameter;
+    use crate::planetary::derive::{PassDriver, Under};
+    use crate::planetary::hooks::cold_traps::{collisional, is_collisional};
+    use crate::planetary::hooks::surface::ColdProfile;
+    use crate::units::consts::SECONDS_PER_JULIAN_YEAR;
+    use crate::units::{EarthMasses, Kilograms, Metres};
+    let ar = Gas::Argon.substance();
+    let surface = case.surface;
+    let entry = *surface.condensates().entry(ar, CondensatePhase::Solid)?;
+    let record = case.record;
+    let bulk = record.bulk().ok()?;
+    let conditions = surface.conditions();
+    let (coldest, warmest) = conditions.climate_range();
+    let (warmest, mean) = (
+        warmest.value(),
+        conditions.mean_surface_temperature().value(),
+    );
+    let profile = conditions.cold_profile();
+    let (zonal_lo, zonal_hi) = match &profile {
+        ColdProfile::Eyeball { day_k, night_k } => (*night_k, *day_k),
+        ColdProfile::Zonal(points) => points
+            .iter()
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), &(_, t)| {
+                (lo.min(t), hi.max(t))
+            }),
+    };
+    let air = case.derived.atmosphere();
+    let g = bulk.surface_gravity();
+    let airless = surface.state() == SurfaceState::Airless;
+    let zonal = matches!(profile, ColdProfile::Zonal(_));
+    let collisional_air = is_collisional(air, g);
+    let exosphere = zonal && airless && !collisional_air;
+    let (_, read) = (case.again)(PassDriver::Again(Under::Read));
+    let (d, lies_at, condensed, airborne) =
+        read.as_ref()
+            .map_or((f64::NAN, f64::NAN, f64::NAN, f64::NAN), |read| {
+                let partition = &read.partition;
+                let condensate = partition.condensate(ar);
+                (
+                    partition.of(ar).map_or(f64::NAN, Partitioned::dominance),
+                    condensate.map_or(f64::NAN, |c| c.lies_at().value()),
+                    condensate.map_or(f64::NAN, |c| c.reservoir().value()),
+                    partition
+                        .of(ar)
+                        .map_or(f64::NAN, |s| s.partial_pressure().value()),
+                )
+            });
+    let p_s = air.surface_pressure().map_or(f64::NAN, Pascals::value);
+    let p_ar = air.partial_pressures().of(Gas::Argon).value();
+    let t_exo = air.exobase_temperature().value();
+    let mass = Kilograms::from(
+        record
+            .mass()
+            .ok()
+            .copied()
+            .unwrap_or(EarthMasses::new(f64::NAN)),
+    );
+    let radius = Metres::from(bulk.radius());
+    let lambda_at = |t: f64| jeans_parameter(mass, radius, Gas::Argon, Kelvin::new(t));
+    let lambda_surface = lambda_at(warmest);
+    let lambda_exo = lambda_at(t_exo.max(warmest));
+    let age_s = ctx.age_at_epoch().value() * SECONDS_PER_JULIAN_YEAR;
+    let area = entry.area_fraction();
+    let per_ice = entry.reservoir().value() / area;
+    let j_warm = argon_hertz_knudsen(warmest);
+    let jeans = j_warm * (1.0 + lambda_surface) * crate::math::exp(-lambda_surface);
+    let over_reservoir = |flux: f64| flux * age_s / per_ice;
+    let collides = |t: f64| {
+        collisional(
+            Pascals::new(argon_vapour_pa(t)),
+            Gas::Argon.molar_mass_g_per_mol(),
+            g,
+        )
+    };
+    let ice = ArgonIce {
+        line: String::new(),
+        mean,
+        lies_at,
+        lit: bulk.equilibrium_temperature().value() > 0.0,
+        airless,
+        exosphere,
+        zonal,
+        collisional_air,
+        sublimed_warmest: over_reservoir(j_warm),
+        sublimed_mean: over_reservoir(argon_hertz_knudsen(mean)),
+        sublimed_where_it_lies: over_reservoir(argon_hertz_knudsen(lies_at)),
+        escaped: over_reservoir(jeans),
+        lambda_surface,
+        collisional_at_mean: collides(mean),
+        collisional_where_it_lies: collides(lies_at),
+    };
+    let line = format!(
+        "{} {} {:?} {:?}: M {:.3e} kg, R {:.1} km, g {:.3} m s⁻², age {:.3} Gyr; T_s {mean:.2} K \
+         (range {:.2}–{warmest:.2} K, zonal annual means {zonal_lo:.2}–{zonal_hi:.2} K), T_eq \
+         {:.2} K, {}; Ar ice: lies_at {lies_at:.2} K, area {area:.4e} (trapped {:.3e}), reservoir \
+         {:.4e} kg m⁻² ({per_ice:.4e} per m² of ice; the partition's {condensed:.4e}), layer {}; \
+         air p_s {p_s:.4e} Pa, p_Ar {p_ar:.4e} Pa (the partition's airborne {airborne:.4e}), {} \
+         profile, air {}collisional; edge {}, d {d:.4}; T_exo {t_exo:.1} K, λ_Ar {lambda_exo:.2} \
+         at max(T_exo, warmest), {lambda_surface:.2} at the warmest; p_sat(Ar) {:.3e} Pa at the \
+         warmest, {:.3e} at the mean, {:.3e} at lies_at; HK × age ÷ reservoir {:.3e} at the \
+         warmest, {:.3e} at the mean, {:.3e} at lies_at; Jeans × age ÷ reservoir {:.3e}; an Ar air \
+         at p_sat collisional at the mean {}, at lies_at {}",
+        record.identity().id(),
+        case.kind,
+        surface.state(),
+        bulk.class(),
+        mass.value(),
+        radius.value() / 1e3,
+        g.value(),
+        ctx.age_at_epoch().value() / 1e9,
+        coldest.value(),
+        bulk.equilibrium_temperature().value(),
+        if ice.lit { "lit" } else { "unlit" },
+        entry.trapped_area_fraction(),
+        entry.reservoir().value(),
+        entry
+            .reservoir_gel()
+            .map_or("none".to_owned(), |gel| format!("{:.4e} m", gel.value())),
+        if zonal { "zonal" } else { "locked" },
+        if collisional_air { "" } else { "not " },
+        if exosphere { "Exosphere" } else { "Partition" },
+        argon_vapour_pa(warmest),
+        argon_vapour_pa(mean),
+        argon_vapour_pa(lies_at),
+        ice.sublimed_warmest,
+        ice.sublimed_mean,
+        ice.sublimed_where_it_lies,
+        ice.escaped,
+        ice.collisional_at_mean,
+        ice.collisional_where_it_lies,
+    );
+    Some(ArgonIce { line, ..ice })
+}
+
+/// P14.T49.n's census of the argon ice, a measurement run by name for its science check ("that
+/// argon ice is retained on the airless bodies that hold it"; plan 14): over the 400 whole systems,
+/// `for_body`'s refusals by cause at 24's rules (the read densities, the unlit mean floored, the
+/// compressed liquids and the cold traps' batch), and every record holding an argon ice, its
+/// state, its climate, its ice, its air, the solid edge's rule that applied, its dominance, its
+/// exobase and Jeans parameters, its ice's vapour pressure and the sublimation and escape over its
+/// age against its reservoir ([`argon_ice_of`]'s estimates), with the summary counts and the
+/// records whose `T_eq` is 0 (unlit, 0 K at 23). Its half at 23's rules went with the holds at the
+/// 23 → 24 bump. It eprints and writes nothing to the tree; it asserts only that 24's rules refuse
+/// no ice for its density.
+#[test]
+#[ignore = "a measurement for P14.T49.n's science check, run by name"]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one census, each argon-ice record listed and tallied"
+)]
+fn the_sample_s_argon_ices_under_24_s_rules() {
+    use crate::planetary::chem::partition::CondensatePhase;
+    use crate::planetary::surface::RECORD_TIME;
+    let ar = Gas::Argon.substance();
+    let holds_ar = |record: &BodyRecord| {
+        record.surface().ok().is_some_and(|surface| {
+            surface
+                .condensates()
+                .entry(ar, CondensatePhase::Solid)
+                .is_some()
+        })
+    };
+    let ices_of = |record: &BodyRecord| {
+        record.surface().ok().map_or(String::new(), |surface| {
+            let keys: Vec<String> = surface
+                .condensates()
+                .entries()
+                .iter()
+                .filter(|e| e.phase() == CondensatePhase::Solid)
+                .map(|e| e.substance().substance().key().as_str().to_owned())
+                .collect();
+            keys.join(" ")
+        })
+    };
+    let (bodies_24, refused_24, argon_24, ices, unlit_at_24) = {
+        let (mut bodies, mut refused) = (0_usize, std::collections::BTreeMap::new());
+        let mut argon = 0_usize;
+        let mut ices: Vec<ArgonIce> = Vec::new();
+        let mut unlit_at_24: Vec<String> = Vec::new();
+        for ctx in sample() {
+            let system = generate(SEED, ctx);
+            let snapshot = system.snapshot_at(ctx, RECORD_TIME);
+            tally_refusals(&snapshot, ctx, &mut bodies, &mut refused);
+            let mut any = false;
+            for record in snapshot.bodies() {
+                any |= holds_ar(record);
+                argon += usize::from(holds_ar(record));
+                let unlit = record
+                    .bulk()
+                    .ok()
+                    .is_some_and(|bulk| bulk.equilibrium_temperature().value() <= 0.0);
+                if let (true, Some(surface)) = (unlit, record.surface().ok()) {
+                    unlit_at_24.push(format!(
+                        "{}: {:?}, mean {:.3} K, ices {}",
+                        record.identity().id(),
+                        surface.state(),
+                        surface.conditions().mean_surface_temperature().value(),
+                        ices_of(record)
+                    ));
+                }
+            }
+            if !any {
+                continue;
+            }
+            census_walk("sample", ctx, &system, &mut |case| {
+                if let Some(ice) = argon_ice_of(case, ctx) {
+                    ices.push(ice);
+                }
+            });
+        }
+        (bodies, refused, argon, ices, unlit_at_24)
+    };
+    let ice_refusals = |refused: &std::collections::BTreeMap<String, usize>, key: &str| {
+        refused
+            .get(&format!("{key} Ice: DensityNotModelled"))
+            .copied()
+            .unwrap_or(0)
+    };
+    eprintln!(
+        "(a) for_body over the sample's {bodies_24} solid bodies at 24's rules ({argon_24} with an \
+         argon ice entry): refused {refused_24:?}; Ar ice {}, O2 ice {}",
+        ice_refusals(&refused_24, "Ar"),
+        ice_refusals(&refused_24, "O2"),
+    );
+    eprintln!(
+        "(a) the {} records with T_eq 0 at 24's rules: {unlit_at_24:#?}",
+        unlit_at_24.len()
+    );
+    let edge = crate::planetary::chem::partition::exosphere_threshold(
+        ar,
+        crate::planetary::chem::partition::AIRLESS_ICE_LOSS_KG_PER_M2_GYR,
+    )
+    .expect("argon's row has a phase diagram and a molar mass")
+    .value();
+    eprintln!(
+        "(b, c) the {} records holding an argon ice at 24's rules that the census derives (Ar's \
+         vacuum edge at 144 kg m⁻² Gyr⁻¹: the partition's {edge:.3} K, this census's Hertz–Knudsen \
+         {:.3} K):",
+        ices.len(),
+        argon_vacuum_edge_k()
+    );
+    for ice in &ices {
+        eprintln!("  {}", ice.line);
+    }
+    let bands = [15.0, 19.0, 25.0, 35.0, 50.0];
+    let mut by_band = [0_usize; 6];
+    for ice in &ices {
+        let band = bands.iter().take_while(|&&edge| ice.mean >= edge).count();
+        by_band[band] += 1;
+    }
+    let count = |test: &dyn Fn(&ArgonIce) -> bool| ices.iter().filter(|ice| test(ice)).count();
+    let warmest = ices
+        .iter()
+        .map(|ice| ice.mean)
+        .fold(f64::NEG_INFINITY, f64::max);
+    eprintln!(
+        "(d) argon-ice records by mean T_s: <15 K {}, 15–19 K {}, 19–25 K {}, 25–35 K {}, 35–50 K \
+         {}, >50 K {}; airless {}, under air {}; lit {}, unlit {}; edge Exosphere {}, Partition {} \
+         ({} of them airless: {} locked, {} zonal under a collisional air); lying above Ar's \
+         vacuum edge {} (Exosphere {}, Partition {}); HK × age > reservoir at the warmest {}, at \
+         the mean {}, at lies_at {}; Jeans × age > reservoir {}; λ_Ar < 25 at the warmest surface \
+         temperature {}; an Ar air at p_sat collisional at the mean {}, at lies_at {} (airless \
+         {}); the warmest mean T_s {warmest:.2} K",
+        by_band[0],
+        by_band[1],
+        by_band[2],
+        by_band[3],
+        by_band[4],
+        by_band[5],
+        count(&|ice| ice.airless),
+        count(&|ice| !ice.airless),
+        count(&|ice| ice.lit),
+        count(&|ice| !ice.lit),
+        count(&|ice| ice.exosphere),
+        count(&|ice| !ice.exosphere),
+        count(&|ice| !ice.exosphere && ice.airless),
+        count(&|ice| !ice.exosphere && ice.airless && !ice.zonal),
+        count(&|ice| !ice.exosphere && ice.airless && ice.zonal && ice.collisional_air),
+        count(&|ice| ice.lies_at > edge),
+        count(&|ice| ice.lies_at > edge && ice.exosphere),
+        count(&|ice| ice.lies_at > edge && !ice.exosphere),
+        count(&|ice| ice.sublimed_warmest > 1.0),
+        count(&|ice| ice.sublimed_mean > 1.0),
+        count(&|ice| ice.sublimed_where_it_lies > 1.0),
+        count(&|ice| ice.escaped > 1.0),
+        count(&|ice| ice.lambda_surface < 25.0),
+        count(&|ice| ice.collisional_at_mean),
+        count(&|ice| ice.collisional_where_it_lies),
+        count(&|ice| ice.collisional_where_it_lies && ice.airless),
+    );
+    let mut warm: Vec<&ArgonIce> = ices.iter().collect();
+    warm.sort_by(|a, b| b.mean.total_cmp(&a.mean));
+    eprintln!("(d) the ten warmest argon-ice records:");
+    for ice in warm.iter().take(10) {
+        eprintln!("  {}", ice.line);
+    }
+    assert_eq!(ice_refusals(&refused_24, "Ar"), 0, "{refused_24:?}");
+    assert_eq!(ice_refusals(&refused_24, "O2"), 0, "{refused_24:?}");
+}
+
+/// What P14.T56.f moves over a set of systems ([`MoonBulkMoves::visit`]): each moon's water against
+/// the water its origin gave it before either arm ([`unthinned_water`]).
+#[derive(Debug, Default)]
+struct MoonBulkMoves {
+    /// Each moved moon's line: its R, T0, `t_hot`, d, water before and after, class and density.
+    lines: Vec<String>,
+    /// Moons made `Rocky`, and thinned but still `Icy`.
+    rocky: u32,
+    thinned_icy: u32,
+    /// Moves by arm: captures formed inside the snow line, beside a rocky belt and with no
+    /// neighbouring belt, and moons hot above the melting point.
+    inside_rocky_belt: u32,
+    inside_no_belt: u32,
+    hot: u32,
+    /// Hot ice bulks (T0 above the limit) left `Icy`, each with an `Ice` surface: a wrong state on
+    /// the published surface, P14.T56.g's serve-gate must-fix (main, 2026-10-22).
+    hot_icy: Vec<String>,
+    /// Stripped bodies above 200 km: porosity against their kept bulk's grain and the uniform
+    /// sphere's central pressure, (2π ÷ 3) G ρ² R².
+    stripped_large: Vec<String>,
+    /// Ice bulks at T0 of 200–273.15 K under 10 km, which the lag may empty over Gyr (G2), by their
+    /// kept water.
+    small_warm_ice: u32,
+    /// Bodies not moons whose bulk is icy and whose `T_eq` is above the melting point (R1.6's
+    /// "a hot ice bulk that is not a moon", for P14.T56.g).
+    hot_icy_not_moons: Vec<String>,
+    /// Records with an `Ice` surface whose T0 is above the melting point, after the arms.
+    ice_surfaces_above_melting: u32,
+    /// Every moon's bulk read.
+    moons: u32,
+}
+
+/// The water the moon `part` of the system `system` held before P14.T56.f's arms, by its origin
+/// as its record's bulk reads it (`PlanetarySystem::stated_moon_bulk`, `moon_own_bulk`), its
+/// parent as `now` says, its derivation `derived` and its record's mass `mass`: a regular moon's
+/// placement's ice ([`DerivedMoon::ice_fraction`]), a giant-impact moon's its icy parent's water
+/// or none, and a capture's the ice its density holds wherever it formed. From generator version
+/// 29 a record's bulk is the moon's at the mass its rock's evaporation has left it (P14.T55.b.a),
+/// a capture's radius shrunk by the cube root of that share to keep its density, which keeps it
+/// but for its last bits: a capture's water is read at that mass and radius, as its record's is.
+fn unthinned_water(
+    part: &MoonPart,
+    now: &ParentNow,
+    derived: &DerivedMoon,
+    mass: EarthMasses,
+) -> f64 {
+    match part.satellite.moon() {
+        SatelliteMoon::Regular(_) => derived.ice_fraction(),
+        SatelliteMoon::GiantImpact(_) => match (part.parent.class(), &now.derived) {
+            (PlanetClass::Icy, Some(planet)) => planet.fractions().water(),
+            _ => 0.0,
+        },
+        SatelliteMoon::Captured(captured) => {
+            ice_fraction_of(sphere_density(mass, captured.with_mass(mass).radius()))
+        }
+    }
+}
+
+impl MoonBulkMoves {
+    /// Adds the moves of the system `name` of context `ctx`, `batch`.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one walk of a system's records, each classed and listed"
+    )]
+    fn visit(&mut self, name: &str, ctx: &SystemContext, batch: &PlanetarySystem) {
+        use crate::planetary::hooks::figures::interior::ROCK_THERMAL_DIFFUSIVITY_M2_PER_S;
+        use crate::planetary::surface::RECORD_TIME;
+        use moon_ice::HOT_ICE_LIMIT;
+
+        let t = RECORD_TIME;
+        if ctx.age_at(t).value() <= 0.0 {
+            return;
+        }
+        let after = batch.snapshot_at(ctx, t);
+        let epoch = Epoch::new(batch, ctx, t).with_shades();
+        let cosines = HourCosines::new();
+        for body in batch.bodies() {
+            let id = format!("{name} {}", body.index.body_id(ctx.id()));
+            let find = |records: &[BodyRecord]| {
+                records
+                    .iter()
+                    .find(|r| r.index() == body.index)
+                    .and_then(|r| r.bulk().ok().copied())
+            };
+            let Some(new) = find(after.bodies()) else {
+                continue;
+            };
+            let record_mass = after
+                .bodies()
+                .iter()
+                .find(|r| r.index() == body.index)
+                .and_then(|r| r.mass().ok().copied())
+                .unwrap_or_else(|| body.mass());
+            let (OrbitHost::Body(parent), Part::Moon(part)) = (body.host, &body.part) else {
+                if new.class() == PlanetClass::Icy && new.equilibrium_temperature() > HOT_ICE_LIMIT
+                {
+                    self.hot_icy_not_moons.push(format!(
+                        "{id}: T_eq {:.0} K, water {:.3}",
+                        new.equilibrium_temperature().value(),
+                        new.fractions().water()
+                    ));
+                }
+                continue;
+            };
+            self.moons += 1;
+            let primary = batch.body(parent).expect("a moon's parent is a body");
+            let fate_host = fate_host(ctx, batch.zone_of(primary));
+            let fate = batch.fate_of(primary, &fate_host);
+            let at = fate.at(t);
+            let now = batch.primary_now(&epoch, &cosines, primary, &fate, &at);
+            let Some(derived) = batch.record_moon(&epoch, body, (&now, &fate)) else {
+                continue;
+            };
+            let ice = now.moon_ice.and_then(|m| m.ice);
+            let t0 = ice.map_or(f64::NAN, |ice| ice.t0(&part.orbit).value());
+            let hot_gyr = ice.map_or(0.0, |ice| {
+                ice.history.hot_for(Kelvin::new(t0)).value() / 1e9
+            });
+            let r_km = Metres::from(new.radius()).value() / 1e3;
+            let (w0, w1) = (
+                unthinned_water(part, &now, &derived, record_mass),
+                new.fractions().water(),
+            );
+            if w1 > 0.0 && r_km < 10.0 && (200.0..=HOT_ICE_LIMIT.value()).contains(&t0) {
+                self.small_warm_ice += 1;
+            }
+            let hot = t0 > HOT_ICE_LIMIT.value();
+            if hot && new.class() == PlanetClass::Icy {
+                self.hot_icy.push(format!(
+                    "{id}: {r_km:.0} km at T0 {t0:.0} K keeps {w1:.3}, {:?}",
+                    new.class()
+                ));
+            }
+            let inside = match part.satellite.moon() {
+                SatelliteMoon::Captured(captured) => {
+                    let inside = PlanetarySystem::capture_formed_inside(captured.kind(), &now);
+                    // The bulk and the crust read one birthplace (§C3.2).
+                    let craters = batch
+                        .moon_craters(primary, part, 0.0, &part.orbit)
+                        .expect("a capture's parent orbits its host");
+                    let ImpactorOrbit::Moon { formed, .. } = craters.orbit else {
+                        panic!("{id}: a moon's impactors are a moon's");
+                    };
+                    assert_eq!(formed == SnowLineSide::Inside, inside, "{id}");
+                    inside
+                }
+                SatelliteMoon::Regular(_) | SatelliteMoon::GiantImpact(_) => false,
+            };
+            if !inside && w1.total_cmp(&w0).is_eq() {
+                continue;
+            }
+            // A bulk moves only by one of the two arms: a capture formed inside the snow
+            // line, or a moon hot above the melting point.
+            assert!(inside || hot, "{id}: moved neither inside nor hot");
+            if inside {
+                let rocky_belt = batch
+                    .nearest_belt(primary.index)
+                    .is_some_and(|belt| belt.adjacency() == BeltAdjacency::Neighbouring);
+                if rocky_belt {
+                    self.inside_rocky_belt += 1;
+                } else {
+                    self.inside_no_belt += 1;
+                }
+                assert_same_bits(w1, 0.0);
+            } else {
+                self.hot += 1;
+            }
+            // A thinned regular moon's derivation reads the water its record states (G2
+            // amendment 3): its own bulk keeps it, to the bit.
+            if let SatelliteMoon::Regular(_) = part.satellite.moon() {
+                let orbit = part.satellite.orbit_at(&part.parent, ctx.age_at(t));
+                let own = PlanetarySystem::moon_own_bulk(part, &orbit, &now);
+                let MoonBulk::Kept { water, .. } = own else {
+                    panic!("{id}: {own:?}");
+                };
+                assert_same_bits(water, w1);
+            }
+            match new.class() {
+                PlanetClass::Rocky => self.rocky += 1,
+                PlanetClass::Icy => self.thinned_icy += 1,
+                PlanetClass::GasGiant | PlanetClass::IceGiant | PlanetClass::SubNeptune => {}
+            }
+            let depth_km = (ROCK_THERMAL_DIFFUSIVITY_M2_PER_S
+                * hot_gyr
+                * 1e9
+                * crate::units::consts::SECONDS_PER_JULIAN_YEAR)
+                .sqrt()
+                / 1e3;
+            let density = new.density().value();
+            if w1 < w0 && r_km > 200.0 {
+                let pressure_mpa = 2.0 * PI / 3.0
+                    * crate::units::consts::GRAVITATIONAL_CONSTANT
+                    * density
+                    * density
+                    * (r_km * 1e3)
+                    * (r_km * 1e3)
+                    / 1e6;
+                // Its grain density, the kept ice's and the rock's without pore space.
+                let grain =
+                    1.0 / (w1 / MOON_ICE_DENSITY.value() + (1.0 - w1) / MOON_ROCK_DENSITY.value());
+                self.stripped_large.push(format!(
+                    "{id}: {r_km:.0} km at {density:.0} kg m⁻³, porosity {:.0}% against its \
+                     grain's {grain:.0} kg m⁻³, central pressure {pressure_mpa:.0} MPa",
+                    100.0 * (1.0 - density / grain),
+                ));
+            }
+            let kind = match part.satellite.moon() {
+                SatelliteMoon::Regular(_) => "regular".to_owned(),
+                SatelliteMoon::GiantImpact(_) => "giant impact".to_owned(),
+                SatelliteMoon::Captured(captured) => format!("{:?} capture", captured.kind()),
+            };
+            self.lines.push(format!(
+                "{id} ({kind}{}): R {r_km:.1} km, T0 {t0:.1} K, t_hot {hot_gyr:.3} Gyr, d \
+                 {depth_km:.0} km, water {w0:.4} → {w1:.4}, {} → {:?}, {density:.0} kg m⁻³",
+                if inside { ", formed inside" } else { "" },
+                if w0 > 0.0 { "icy" } else { "dry" },
+                new.class(),
+            ));
+        }
+        // An Ice surface above the melting point is counted.
+        for new in after.bodies() {
+            if let (Some(surface), Some(bulk)) = (new.surface().ok(), new.bulk().ok())
+                && surface.material() == SurfaceMaterial::Ice
+                && bulk.equilibrium_temperature() > HOT_ICE_LIMIT
+            {
+                self.ice_surfaces_above_melting += 1;
+            }
+        }
+    }
+}
+
+/// P14.T56.f's tests over the golden systems (decision-p14-t54a-ganymede §C3.2;
+/// decision-bump-plan-after-22 R1.6 and G2, with main's corrections, 2026-10-22):
+///
+/// - the two small captures beside rocky belts (`close_binary` 0602 and `filler_c` 0201) are
+///   `Rocky` with no water, their bulk and crust one birthplace;
+/// - the hot ice bulks of `wide_binary` 0101–0104, `subgiant` 0201–0304 and `red_giant` 0505–0508
+///   lose their ice; `subgiant` 0101 and `red_giant` 0503 and 0504 are thinned and stay `Icy`;
+/// - every moved moon (its water below its origin's, [`unthinned_water`], or a capture formed
+///   inside) moved by one of the two arms, and is listed with its R, T0, `t_hot`, d and water: the
+///   cold irregulars keep theirs (R1.6 moves a giant's hot ones, so the plan's "a giant's
+///   irregulars, unchanged" reads "below the melting point"), `eccentric_giant` 0101–0103 among
+///   them.
+///
+/// Its comparison against the moon bulk's hold, under which every other record was unchanged to
+/// the bit, went with the hold at the 23 → 24 bump.
+#[test]
+fn a_moon_s_bulk_reads_its_birthplace_and_its_ice_s_history() {
+    let mut moves = MoonBulkMoves::default();
+    for (name, ctx, system) in golden_systems() {
+        moves.visit(name, ctx, system);
+    }
+    eprintln!(
+        "the golden systems' {} moons: {} moved:\n  {}\n{moves:#?}",
+        moves.moons,
+        moves.lines.len(),
+        moves.lines.join("\n  ")
+    );
+    for capture in [
+        "close_binary 42002cb200000009.0602",
+        "filler_c 42002cb200000000.0201",
+    ] {
+        assert!(
+            moves
+                .lines
+                .iter()
+                .any(|line| line.starts_with(capture) && line.contains("formed inside")),
+            "{capture} is rock by its birthplace"
+        );
+    }
+    for unchanged in ["0101", "0102", "0103"] {
+        assert!(
+            !moves
+                .lines
+                .iter()
+                .any(|line| line.starts_with("eccentric_giant")
+                    && line.contains(&format!(".{unchanged} "))),
+            "eccentric_giant {unchanged} keeps its bulk"
+        );
+    }
+    // G2's expected, as main corrected it: 18 made Rocky (2 by birthplace, 16 hot), and 3 hot ice
+    // bulks left Icy (subgiant 0101 at 0.113, red_giant 0503 and 0504 at 0.124 and 0.123).
+    assert_eq!(
+        (moves.rocky, moves.thinned_icy),
+        (18, 3),
+        "{:#?}",
+        moves.lines
+    );
+    assert_eq!(
+        (moves.inside_rocky_belt + moves.inside_no_belt, moves.hot),
+        (2, 19)
+    );
+    assert_eq!(moves.hot_icy.len(), 3, "{:?}", moves.hot_icy);
+}
+
+/// P14.T56.f's census over the 400 whole systems, a measurement run by name: the moons it moves,
+/// by class and by arm (the birthplace arm beside a rocky belt and with no neighbouring belt), the
+/// hot ice bulks it leaves `Icy` (each to main at the gate, G2 item 10, and an `Ice` surface on
+/// them P14.T56.g's must-fix), the stripped bodies above 200 km, the small warm ice bulks, the hot
+/// ice bulks that are not moons, and the `Ice` surfaces above the melting point, as its golden
+/// twin.
+#[test]
+#[ignore = "a measurement for the bless note, run by name"]
+fn a_moon_s_bulk_reads_its_birthplace_over_the_sample() {
+    let mut moves = MoonBulkMoves::default();
+    for ctx in sample() {
+        moves.visit("sample", ctx, &generate(SEED, ctx));
+    }
+    eprintln!(
+        "the sample's {} moons: {} moved:\n  {}\n{moves:#?}",
+        moves.moons,
+        moves.lines.len(),
+        moves.lines.join("\n  ")
+    );
+    assert!(moves.moons > 1_000, "{}", moves.moons);
+}
+
+/// The class of the first star of `hosts`, [`zone_hosts`]'s "phase, effective temperature" list:
+/// a main-sequence star's spectral class by its effective temperature, at Pecaut and Mamajek's
+/// (2013, `ApJS` 208, 9) dwarf zero points (B0 31,400 K, A0 9,700 K, F0 7,220 K, G0 5,930 K, K0
+/// 5,270 K), an M dwarf below the escape's `M_DWARF_EDGE`, 3,900 K; or "pre-main-sequence",
+/// "evolved", "substellar" (plan 06's `Substellar`, the latest M dwarfs among them) or "remnant".
+fn host_class(hosts: &str) -> String {
+    let first = hosts.split(" + ").next().unwrap_or_default();
+    let mut words = first.split_whitespace();
+    let phase = words.next().unwrap_or_default();
+    let t: f64 = words
+        .next()
+        .and_then(|t| t.parse().ok())
+        .unwrap_or(f64::NAN);
+    let class = match phase {
+        "MainSequence" if t >= 31_400.0 => "main-sequence O",
+        "MainSequence" if t >= 9_700.0 => "main-sequence B",
+        "MainSequence" if t >= 7_220.0 => "main-sequence A",
+        "MainSequence" if t >= 5_930.0 => "main-sequence F",
+        "MainSequence" if t >= 5_270.0 => "main-sequence G",
+        "MainSequence" if t >= 3_900.0 => "main-sequence K",
+        "MainSequence" => "M dwarf",
+        "Protostar" | "PreMainSequence" => "pre-main-sequence",
+        "Substellar" => "substellar",
+        "HeliumWhiteDwarf"
+        | "CarbonOxygenWhiteDwarf"
+        | "OxygenNeonWhiteDwarf"
+        | "NeutronStar"
+        | "BlackHole"
+        | "NoRemnant" => "remnant",
+        "unformed" => "unformed",
+        _ => "evolved",
+    };
+    class.to_owned()
+}
+
+/// One body's figures as the LOOK72 triage states them
+/// ([`under_every_24_hold_look72_s_triaged_bodies_are_stated`]): its record's and its derivation's
+/// at the epoch.
+#[derive(Debug, Clone, PartialEq)]
+struct EscapeCensusBody {
+    /// "sample", or the golden system's name.
+    set: String,
+    /// The census's key ([`CensusCase::key`]).
+    key: String,
+    /// The body's ID, as its record gives it.
+    id: String,
+    /// Its index in its system.
+    index: u16,
+    /// "planets", "members" or "moons".
+    kind: &'static str,
+    /// Its zone's stars at the epoch.
+    hosts: String,
+    /// Its zone's first star's class ([`host_class`]).
+    host_class: String,
+    /// Its record's surface state.
+    state: SurfaceState,
+    /// Its record's mean surface temperature, K.
+    t_s: f64,
+    /// Its record's surface pressure, Pa.
+    p: f64,
+    /// Its derivation's equilibrium temperature, K.
+    t_eq: f64,
+    /// Its record's ice fraction, 0 to 1.
+    ice: f64,
+    /// Its record's coldest zone, the colder end of its climate range, K.
+    coldest: f64,
+    /// Carbon dioxide's mole fraction in its record's air, and whether it is the air's largest.
+    co2: (f64, bool),
+    /// Carbon dioxide's frost point at its partial pressure, its mole fraction of the surface
+    /// pressure, K, where it has one.
+    co2_frost: Option<f64>,
+    /// Its record's carbon dioxide ice: its area fraction and its reservoir, kg m⁻².
+    co2_ice: Option<(f64, f64)>,
+    /// Its derivation's partial pressures (column weights), bar, of each gas with any.
+    air: String,
+    /// The greenhouse's terms under the rules in force, each absorber's depth.
+    terms: String,
+    /// Its escape, the batch's alone: the shoreline, the weathering thermostat's airborne share of
+    /// the carbon, and the oxygen of its water the air keeps, kg.
+    escape: Option<(crate::planetary::chem::escape::Shoreline, f64, f64)>,
+    /// Its derivation's atmosphere passes.
+    passes: u32,
+    /// Its record's warmest zone, the warmer end of its climate range, K.
+    warmest: f64,
+    /// The maximum-greenhouse ceiling its grey surface is held under (P14.T53.a).
+    ceiling: crate::planetary::derive::atmosphere::GreenhouseCeiling,
+    /// The ceiling's temperature, max(273.15 K, `T_rest`), `T_rest` its nitrogen's and hydrogen's
+    /// grey surface, K.
+    cap: f64,
+    /// How its derivation's passes ended.
+    convergence: crate::planetary::derive::passes::Convergence,
+}
+
+impl EscapeCensusBody {
+    /// The figures of the body `case`, under the rules in force.
+    fn of(case: &CensusCase<'_>) -> Self {
+        use crate::planetary::chem::partition::CondensatePhase;
+        use crate::planetary::derive::atmosphere::GreenhouseConstants;
+        let (surface, derived) = (case.surface, case.derived);
+        let conditions = surface.conditions();
+        let p = conditions.surface_pressure().value();
+        let carbon_dioxide = Gas::CarbonDioxide.substance();
+        let fraction = conditions
+            .gases()
+            .iter()
+            .find(|&&(id, _)| id == carbon_dioxide)
+            .map_or(0.0, |&(_, x)| x);
+        let dominant = conditions
+            .gases()
+            .first()
+            .is_some_and(|&(id, _)| id == carbon_dioxide);
+        let co2_frost = carbon_dioxide
+            .substance()
+            .phase_diagram()
+            .and_then(|diagram| {
+                diagram.saturation_temperature(crate::units::Pascals::new(fraction * p))
+            })
+            .map(Kelvin::value);
+        let co2_ice = surface
+            .condensates()
+            .entry(carbon_dioxide, CondensatePhase::Solid)
+            .map(|entry| (entry.area_fraction(), entry.reservoir().value()));
+        let partials = derived.atmosphere().partial_pressures();
+        let air = Gas::ALL
+            .into_iter()
+            .filter(|&gas| partials.of(gas).value() > 0.0)
+            .map(|gas| format!("{gas:?} {:.4e}", partials.of(gas).value() / 1e5))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let grey_terms = GreenhouseConstants::in_force().terms(
+            partials,
+            derived.equilibrium_temperature(),
+            derived.surface_gravity(),
+        );
+        let terms = grey_terms
+            .iter()
+            .map(|term| format!("{:?} {:.4}", term.absorber(), term.depth()))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let rest = grey_terms
+            .iter()
+            .filter(|term| {
+                matches!(
+                    term.absorber(),
+                    crate::planetary::derive::atmosphere::Absorber::Nitrogen
+                        | crate::planetary::derive::atmosphere::Absorber::Hydrogen
+                )
+            })
+            .fold(0.0, |sum, term| sum + term.depth());
+        let cap = crate::planetary::derive::atmosphere::grey_surface_temperature(
+            derived.equilibrium_temperature(),
+            rest,
+        )
+        .value()
+        .max(crate::planetary::derive::atmosphere::WATER_MELTING_POINT.value());
+        let escape = derived.atmosphere().escape().map(|escape| {
+            (
+                *escape.shoreline(),
+                escape.airborne_carbon_share(),
+                escape.oxygen().kept().value(),
+            )
+        });
+        Self {
+            set: case.set.to_owned(),
+            key: case.key.clone(),
+            id: case.record.identity().id().to_string(),
+            index: case.record.index().get(),
+            kind: case.kind,
+            hosts: case.hosts.clone(),
+            host_class: host_class(&case.hosts),
+            state: surface.state(),
+            t_s: conditions.mean_surface_temperature().value(),
+            p,
+            t_eq: derived.equilibrium_temperature().value(),
+            ice: surface.figures().ice_fraction(),
+            coldest: conditions.climate_range().0.value(),
+            co2: (fraction, dominant),
+            co2_frost,
+            co2_ice,
+            air,
+            terms,
+            escape,
+            passes: derived.atmosphere_passes(),
+            warmest: conditions.climate_range().1.value(),
+            ceiling: derived.atmosphere().greenhouse_ceiling(),
+            cap,
+            convergence: derived.convergence(),
+        }
+    }
+
+    /// Whether it holds no air: `Airless`, or under [`AIRLESS_PRESSURE`](crate::planetary::derive::atmosphere::AIRLESS_PRESSURE).
+    fn airless(&self) -> bool {
+        self.state == SurfaceState::Airless
+            || self.p < crate::planetary::derive::atmosphere::AIRLESS_PRESSURE.value()
+    }
+}
+
+/// The seed of look-72's universe, LOOK72 (`tests/observe_brief.rs`'s).
+const LOOK72: u64 = 0xa49f_649b_ef43_4b20;
+
+/// The 62 bodies of LOOK72 whose surface state the triage of 2026-10-22 found at odds with their
+/// temperature or phases (triage-absurd-states; decision-absurd-states-24 R4.3), in its order.
+const LOOK72_TRIAGED: [&str; 62] = [
+    "820e6ee00000008d.0900",
+    "020e56ef60080004.0200",
+    "020e56ef60080007.0200",
+    "020e56ef60080007.0400",
+    "020e56ef60080003.0400",
+    "020e56ef60080003.0500",
+    "020e56ef60080003.0600",
+    "020e56ef60080003.0700",
+    "220e4dde80200008.0b00",
+    "220e4dde80200008.0c00",
+    "220e4dde80200008.0d00",
+    "020e56ef60080000.0200",
+    "620e377802000074.0703",
+    "020e56ef60070001.0400",
+    "020e56efa0080003.0100",
+    "020e56ef60090005.0200",
+    "020e56ef60090005.0300",
+    "020e56ef60090005.0400",
+    "020e56ef60090005.0500",
+    "020e66ef60070004.0200",
+    "020e66ef60070004.0300",
+    "020e66ef60070004.0400",
+    "020e56ef20080001.0300",
+    "020e56ef60090006.0300",
+    "020e66efa0080003.0200",
+    "020e66efa0080003.0300",
+    "020e66efa0080003.0400",
+    "220e6dde8020000d.0201",
+    "020e56ef60070005.0100",
+    "020e56ef20080005.0300",
+    "020e56ef20080005.0400",
+    "020e66efa0070007.0500",
+    "020e66efa0070007.0600",
+    "020e56ef20080000.0500",
+    "020e56ef20080000.0600",
+    "020e56ef20080000.0700",
+    "020e56ef20080000.0900",
+    "220e4dde8020000b.0700",
+    "220e4dde8020000b.0800",
+    "220e4dde8020000b.0900",
+    "220e6dde80180002.0200",
+    "020e66efa007000b.0300",
+    "020e66efa007000b.0400",
+    "020e66efa007000b.0500",
+    "020e66efa007000b.0700",
+    "020e66efa007000b.0800",
+    "020e66efa007000b.0900",
+    "020e66efa007000b.0a00",
+    "020e56efa0080000.0100",
+    "020e56efa0080000.0200",
+    "020e56ef20090004.0400",
+    "020e56ef20090004.0600",
+    "020e56ef20080004.0400",
+    "020e56ef20080004.0500",
+    "020e56ef20080004.0600",
+    "020e66efa007000c.0500",
+    "020e66efa007000c.0600",
+    "020e66efa007000c.0800",
+    "020e56ef20080006.0100",
+    "020e56ef20080006.0200",
+    "020e56ef20080006.0300",
+    "020e56ef20080006.0400",
+];
+
+/// LOOK72's galaxy, as the server builds it, once per process.
+pub(super) fn look72_galaxy() -> &'static crate::galaxy::Galaxy {
+    static GALAXY: OnceLock<crate::galaxy::Galaxy> = OnceLock::new();
+    GALAXY.get_or_init(|| crate::galaxy::Galaxy::new(Seed::new(LOOK72)).with_full_potential())
+}
+
+/// The contexts of the systems of [`LOOK72_TRIAGED`]'s bodies, each once, in ID order.
+fn look72_triaged_contexts() -> Vec<SystemContext> {
+    let galaxy = look72_galaxy();
+    let ids: std::collections::BTreeSet<&str> = LOOK72_TRIAGED
+        .iter()
+        .map(|id| id.split_once('.').expect("a body ID").0)
+        .collect();
+    ids.into_iter()
+        .map(|id| {
+            SystemContext::for_system(galaxy, id.parse().expect("a system ID"))
+                .expect("a system of LOOK72")
+        })
+        .collect()
+}
+
+/// LOOK72's three regular moons whose oceans look-92-93 read on the wire at 23
+/// (decision-p14-t51g Q9): 020e56ef60080002.0c01, 1,395.1 km under 51.3 km, and
+/// 420e5bbe00800024.0306, 976.1 km under 29.8 km, which end on ice V at 24 under P14.T51.g.a
+/// (about 336 and 493 km at the look's inferred bulk); and 420e5bbe00800032.0701, 519.5 km to rock
+/// at 429 MPa under 18.5 km, which keeps its whole hydrosphere on rock (count (xiii)'s example).
+/// Their systems are three of [`look72_audit_contexts`]'.
+pub(super) const LOOK72_OCEANS: [&str; 3] = [
+    "020e56ef60080002.0c01",
+    "420e5bbe00800024.0306",
+    "420e5bbe00800032.0701",
+];
+
+/// The contexts of LOOK72's systems every 24 census reads (P14.T54.b.k; design-k §0's sets): the
+/// 27 systems of [`LOOK72_TRIAGED`]'s bodies ([`look72_triaged_contexts`]) and those of
+/// [`LOOK72_OCEANS`], each once, in ID order: 30 systems.
+pub(super) fn look72_audit_contexts() -> Vec<SystemContext> {
+    let galaxy = look72_galaxy();
+    let ids: std::collections::BTreeSet<&str> = LOOK72_TRIAGED
+        .iter()
+        .chain(&LOOK72_OCEANS)
+        .map(|id| id.split_once('.').expect("a body ID").0)
+        .collect();
+    ids.into_iter()
+        .map(|id| {
+            SystemContext::for_system(galaxy, id.parse().expect("a system ID"))
+                .expect("a system of LOOK72")
+        })
+        .collect()
+}
+
+/// A condensable's critical isochore at `t_s` against its column (decision-absurd-states-24 R2.3),
+/// [`SupercriticalReservoir::of`](crate::planetary::derive::atmosphere::SupercriticalReservoir::of)'s
+/// figures at the record's `T_s` and the derivation's gravity: its own partial pressure `p_i`,
+/// p* = `p_c` + `s_c` (`T_s` − `T_c`) with `s_c` the slope of the registry's vapour-pressure curve
+/// at its critical point, its melting pressure at `T_s`, and the reservoir's share of the body's
+/// mass, 4π G Δp ÷ g², Δp the column between p* and the lesser of `p_i` and the melting pressure.
+struct IsochoreCase {
+    gas: Gas,
+    t_ratio: f64,
+    p_i: f64,
+    p_star: f64,
+    p_melt: Option<f64>,
+    fraction: f64,
+}
+
+/// [`IsochoreCase`] for each gas of `derived`'s air at or above its critical temperature at `t_s`.
+fn isochore_cases(derived: &DerivedBody, t_s: f64) -> Vec<IsochoreCase> {
+    use crate::planetary::derive::atmosphere::SupercriticalReservoir;
+    let partials = derived.atmosphere().partial_pressures();
+    let g = derived.surface_gravity();
+    Gas::ALL
+        .into_iter()
+        .filter_map(|gas| {
+            let column = SupercriticalReservoir::of(gas, Kelvin::new(t_s), partials.of(gas), g)?;
+            Some(IsochoreCase {
+                gas,
+                t_ratio: column.temperature_ratio(),
+                p_i: column.partial_pressure().value(),
+                p_star: column.isochore_pressure().value(),
+                p_melt: column.melting_pressure().map(Pascals::value),
+                fraction: column.share(),
+            })
+        })
+        .collect()
+}
+
+/// decision-absurd-states-24 R4.3's evidence run: LOOK72's 62 triaged bodies ([`LOOK72_TRIAGED`])
+/// generated and derived afresh (decision-t24i-airless-state D2–D3.3), stated by the decision's
+/// four groups:
+///
+/// - the nine hot `Snowball`s against the maximum-greenhouse ceiling's cap, max(273.15 K,
+///   `T_rest`);
+/// - the two dry `Temperate`s against water's saturation temperature at their surface pressure;
+/// - the three methane `Snowball`s against the critical isochore ([`isochore_cases`]);
+/// - the 106 K runaway's present ratios at the runaway and maximum-greenhouse limits.
+///
+/// Every triaged body's state, `T_s` and `p_s` follow, and any not found; then the movers above
+/// their isochore. Its rows under version 23's rules and under the escape's batch alone went with
+/// the holds at the 23 → 24 bump.
+#[test]
+#[ignore = "a measurement for decision-absurd-states-24 R4.3, run by name"]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one census's four groups and its body list, each stated"
+)]
+fn under_every_24_hold_look72_s_triaged_bodies_are_stated() {
+    use std::collections::BTreeMap;
+
+    struct Row {
+        body: EscapeCensusBody,
+        runaway_now: f64,
+        maximum_now: f64,
+        isochore: Vec<IsochoreCase>,
+    }
+    let contexts = look72_triaged_contexts();
+    let seed = look72_galaxy().seed();
+    let collect = || {
+        let mut rows: BTreeMap<String, Row> = BTreeMap::new();
+        for ctx in &contexts {
+            let system = generate(seed, ctx);
+            census_walk("look72", ctx, &system, &mut |case| {
+                let body = EscapeCensusBody::of(case);
+                let isochore = isochore_cases(case.derived, body.t_s);
+                rows.insert(
+                    body.id.clone(),
+                    Row {
+                        body,
+                        runaway_now: case.runaway_now,
+                        maximum_now: case.maximum_now,
+                        isochore,
+                    },
+                );
+            });
+        }
+        rows
+    };
+    let batch = collect();
+    let water = Gas::Water
+        .substance()
+        .substance()
+        .phase_diagram()
+        .expect("water's diagram");
+    let line = |row: &Row| {
+        let b = &row.body;
+        format!(
+            "{:?} T_s {:.2} K, p_s {:.4e} bar, T_eq {:.2} K, cap {:.2} K, {:?}, air [{}]",
+            b.state,
+            b.t_s,
+            b.p / 1e5,
+            b.t_eq,
+            b.cap,
+            b.ceiling,
+            b.air
+        )
+    };
+    let missing: Vec<&str> = LOOK72_TRIAGED
+        .iter()
+        .copied()
+        .filter(|id| !batch.contains_key(*id))
+        .collect();
+    let groups: [(&str, &[&str]); 4] = [
+        ("A, the 106 K runaway", &["820e6ee00000008d.0900"]),
+        (
+            "B, the nine hot Snowballs",
+            &[
+                "220e6dde8020000d.0201",
+                "220e4dde80200008.0d00",
+                "020e66efa0080003.0300",
+                "020e56ef20080000.0700",
+                "020e56ef20080006.0100",
+                "020e66ef60070004.0300",
+                "220e4dde8020000b.0900",
+                "020e66efa007000b.0500",
+                "020e56ef20080005.0400",
+            ],
+        ),
+        (
+            "D, the two dry Temperates",
+            &["020e66efa0070007.0500", "020e56ef20080004.0400"],
+        ),
+        (
+            "C, the three methane Snowballs",
+            &[
+                "020e56ef20080000.0900",
+                "020e56ef60090005.0500",
+                "020e56ef60080003.0600",
+            ],
+        ),
+    ];
+    for (name, ids) in groups {
+        eprintln!("GROUP {name}");
+        for id in ids {
+            let Some(b) = batch.get(*id) else {
+                eprintln!("  {id}: not found");
+                continue;
+            };
+            eprintln!("  {id}\n    {}", line(b));
+            let bb = &b.body;
+            let saturation = water
+                .saturation_temperature(Pascals::new(bb.p))
+                .map_or(f64::NAN, Kelvin::value);
+            eprintln!(
+                "    batch: runaway now {:.4}, maximum now {:.4}; above the cap {}; T_sat(H2O, p_s) {:.2} K, above it {}; airless {}",
+                b.runaway_now,
+                b.maximum_now,
+                bb.t_s > bb.cap,
+                saturation,
+                bb.t_s > saturation,
+                bb.airless(),
+            );
+            for case in &b.isochore {
+                eprintln!(
+                    "    isochore {:?}: T/T_c {:.4}, p_i {:.4e} bar, p* {:.4e} bar, p_melt {}, above {}, fraction {:.3e} (mover {})",
+                    case.gas,
+                    case.t_ratio,
+                    case.p_i / 1e5,
+                    case.p_star / 1e5,
+                    case.p_melt
+                        .map_or_else(|| "none".to_owned(), |m| format!("{:.4e} bar", m / 1e5)),
+                    case.p_i > case.p_star,
+                    case.fraction,
+                    case.fraction >= crate::planetary::params::THIN_ENVELOPE_FRACTION,
+                );
+            }
+        }
+    }
+    eprintln!("ALL {} triaged bodies:", LOOK72_TRIAGED.len());
+    for id in LOOK72_TRIAGED {
+        if let Some(b) = batch.get(id) {
+            eprintln!(
+                "  {id}: {:?} {:.1} K {:.4e} bar (runaway now {:.3}, maximum now {:.3})",
+                b.body.state,
+                b.body.t_s,
+                b.body.p / 1e5,
+                b.runaway_now,
+                b.maximum_now,
+            );
+        }
+    }
+    eprintln!("MISSING {missing:?}");
+    eprintln!(
+        "MOVERS (batch, any gas above its isochore with fraction >= THIN_ENVELOPE_FRACTION) over all {} bodies of the 27 systems:",
+        batch.len()
+    );
+    for (id, row) in &batch {
+        for case in &row.isochore {
+            if case.p_i > case.p_star
+                && case.fraction >= crate::planetary::params::THIN_ENVELOPE_FRACTION
+            {
+                eprintln!(
+                    "  {id} {:?} {:?}: T/T_c {:.4}, fraction {:.3e}",
+                    row.body.state, case.gas, case.t_ratio, case.fraction
+                );
+            }
+        }
+    }
+}
+
+// P14.T24.i's follow-up: the floored mean on the escape's batch path, and the state read at it
+// (decision-t24i-airless-state D1.4).
+
+/// One body of [`FloorCensus`]: its figures at the epoch.
+#[derive(Debug, Clone)]
+struct FloorBody {
+    /// Its name: its set ("sample", the golden system's name, or "look72"), its ID and its kind.
+    label: String,
+    /// Its ID, as its record gives it.
+    id: String,
+    /// Its record's surface state.
+    state: SurfaceState,
+    /// Its record's mean surface temperature, K.
+    t_s: f64,
+    /// Its derivation's surface pressure, Pa.
+    p_s: f64,
+    /// Its derivation's equilibrium temperature, K.
+    t_eq: f64,
+    /// Its night floor, K: `night_floor` at the heat flow its record's conditions read, its
+    /// published pass's context's, the one that pass's base temperature read.
+    floor: f64,
+    /// Its derivation's partial pressures, Pa, of each gas with any.
+    partials: String,
+    /// Its derivation's argon partial pressure, Pa.
+    argon: f64,
+    /// The airborne total of its published pass's partition, Pa, and its argon's, for an
+    /// `Airless` or a `Tenuous` record: the published pass repeated under the context it read
+    /// (`PassDriver::Again(Under::Read)`), to the bit.
+    airborne: Option<(f64, f64)>,
+    /// Its derivation's atmosphere passes.
+    passes: u32,
+}
+
+impl FloorBody {
+    /// The figures of the body `case`, under the rules in force.
+    fn of(case: &CensusCase<'_>) -> Self {
+        use crate::planetary::derive::{PassDriver, Under};
+        use crate::planetary::hooks::surface::night_floor;
+        let (surface, derived) = (case.surface, case.derived);
+        let air = derived.atmosphere();
+        let heat_flow = surface
+            .basis()
+            .map_or_else(|| surface.figures().heat_flow(), |basis| basis.heat_flow);
+        let airborne = matches!(
+            surface.state(),
+            SurfaceState::Airless | SurfaceState::Tenuous
+        )
+        .then(|| {
+            let (_, read) = (case.again)(PassDriver::Again(Under::Read));
+            read.map_or((f64::NAN, f64::NAN), |read| {
+                let species = read.partition.species();
+                let total = species
+                    .iter()
+                    .fold(0.0, |sum, s| sum + s.partial_pressure().value());
+                let argon = read
+                    .partition
+                    .of(Gas::Argon.substance())
+                    .map_or(0.0, |s| s.partial_pressure().value());
+                (total, argon)
+            })
+        });
+        let partials = air.partial_pressures();
+        let id = case.record.identity().id().to_string();
+        let label = format!("{} {id} {}", case.set, case.kind);
+        Self {
+            label,
+            id,
+            state: surface.state(),
+            t_s: surface.conditions().mean_surface_temperature().value(),
+            p_s: air.surface_pressure().map_or(f64::NAN, Pascals::value),
+            t_eq: derived.equilibrium_temperature().value(),
+            floor: night_floor(heat_flow).value(),
+            partials: Gas::ALL
+                .into_iter()
+                .filter(|&gas| partials.of(gas).value() > 0.0)
+                .map(|gas| format!("{gas:?} {:.4e}", partials.of(gas).value()))
+                .collect::<Vec<_>>()
+                .join(", "),
+            argon: partials.of(Gas::Argon).value(),
+            airborne,
+            passes: derived.atmosphere_passes(),
+        }
+    }
+
+    /// Whether its equilibrium temperature lies under its night floor.
+    fn under_its_floor(&self) -> bool {
+        self.t_eq < self.floor
+    }
+
+    /// Its state, `T_s`, `T_eq`, floor, `p_s` and passes, for a census line.
+    fn line(&self) -> String {
+        format!(
+            "{:?} T_s {:.3} K (T_eq {:.3} K, floor {:.3} K), p_s {:.4e} Pa [{}], {} passes",
+            self.state, self.t_s, self.t_eq, self.floor, self.p_s, self.partials, self.passes
+        )
+    }
+}
+
+/// P14.T24.i's follow-up's census (decision-t24i-airless-state D1.4): every present planet, member
+/// and moon with a surface at the epoch ([`census_walk`]) of the first 60 sample systems, the 15
+/// golden systems and the 27 systems of LOOK72's 62 triaged bodies ([`look72_triaged_contexts`]),
+/// each system generated and derived afresh, body by body in order. Built once a process, for the
+/// tests that read it. Its twin with every 24 hold but the unlit mean's went with the holds at the
+/// 23 → 24 bump.
+struct FloorCensus {
+    floored: Vec<FloorBody>,
+}
+
+/// The [`FloorCensus`], built once.
+fn floor_census() -> &'static FloorCensus {
+    static CENSUS: OnceLock<FloorCensus> = OnceLock::new();
+    CENSUS.get_or_init(|| {
+        let look72 = look72_triaged_contexts();
+        let look72_seed = look72_galaxy().seed();
+        let sets: Vec<(&str, Seed, &SystemContext)> = sample()
+            .iter()
+            .take(60)
+            .map(|ctx| ("sample", SEED, ctx))
+            .chain(
+                golden_systems()
+                    .iter()
+                    .map(|(name, ctx, _)| (*name, Seed::new(GOLDEN_SYSTEMS_SEED), ctx)),
+            )
+            .chain(look72.iter().map(|ctx| ("look72", look72_seed, ctx)))
+            .collect();
+        let walk = || {
+            let mut bodies = Vec::new();
+            for &(set, seed, ctx) in &sets {
+                let system = generate(seed, ctx);
+                census_walk(set, ctx, &system, &mut |case| {
+                    bodies.push(FloorBody::of(case));
+                });
+            }
+            bodies
+        };
+        FloorCensus { floored: walk() }
+    })
+}
+
+/// P14.T24.i's follow-up over the census's set and LOOK72's systems
+/// (decision-t24i-airless-state D1.4): no surface body's mean surface temperature lies below its
+/// night floor, and no `Airless` record's published partition holds
+/// [`AIRLESS_PRESSURE`](crate::planetary::derive::atmosphere::AIRLESS_PRESSURE) or more airborne;
+/// LOOK72's 62 triaged bodies are among them, but those generator version 27 no longer generates
+/// ([`LOOK72_GONE`]). The 18 unlit records' `for_body` answer waits for P14.T49.n's solid argon
+/// (D2).
+#[test]
+fn under_every_24_hold_no_surface_lies_below_its_night_floor() {
+    use crate::planetary::derive::atmosphere::AIRLESS_PRESSURE;
+    let census = floor_census();
+    let bodies = &census.floored;
+    let below: Vec<String> = bodies
+        .iter()
+        .filter(|b| b.t_s.is_nan() || b.t_s < b.floor * (1.0 - 1e-12))
+        .map(|b| format!("{}: {}", b.label, b.line()))
+        .collect();
+    assert_eq!(below, Vec::<String>::new(), "a mean below its night floor");
+    let airborne: Vec<String> = bodies
+        .iter()
+        .filter(|b| {
+            b.airborne
+                .is_some_and(|(total, _)| total.is_nan() || total >= AIRLESS_PRESSURE.value())
+        })
+        .map(|b| format!("{}: {}, airborne {:?}", b.label, b.line(), b.airborne))
+        .collect();
+    assert_eq!(
+        airborne,
+        Vec::<String>::new(),
+        "an Airless record whose partition holds 100 Pa or more airborne"
+    );
+    let missing: Vec<&str> = LOOK72_TRIAGED
+        .iter()
+        .copied()
+        .filter(|id| {
+            !bodies
+                .iter()
+                .any(|b| b.label.starts_with("look72") && b.id == *id)
+        })
+        .collect();
+    assert_eq!(
+        missing, LOOK72_GONE,
+        "LOOK72's triaged bodies, but those gone at 27"
+    );
+    let airless = bodies.iter().filter(|b| b.airborne.is_some()).count();
+    let under = bodies.iter().filter(|b| b.under_its_floor()).count();
+    eprintln!(
+        "the floor's census: {} bodies, {airless} Airless, {under} with T_eq \
+         under their floor",
+        bodies.len()
+    );
+}
+
+/// The four bodies of decision-t24i-airless-state D1.1: their state and greenhouse read the
+/// floored mean, as their published mean and partition do (D1.3). With every 24 hold but the unlit
+/// mean's (a twin gone with the holds at the 23 → 24 bump), the escape batch's greenhouse from
+/// `T_eq` (P14.T53.a), each was `Airless` at its `T_eq` with mPa to a few Pa of nitrogen and argon,
+/// while its night floor lies 12–28 K above it.
+///
+/// From the floor its nitrogen ice, the bulk of its airborne inventory, sublimes as its argon does
+/// (nitrogen's vapour is some kPa at 54–57 K), and its √p greenhouse warms the surface above the
+/// floor, so three of the four flipped from `Airless` to their division's state (D1.4's "a state
+/// flipped"), two from generator version 27; the ruling's expectation of argon alone (331 Pa, and
+/// 2.5–9.1 Pa) counted no nitrogen:
+///
+/// - 01ffeb2b9ffc0000.0700, published `Airless` at 3.6 Pa from its `T_eq`, is a `Snowball` at
+///   69.69 K over its 57.15 K floor with 40.9 kPa of air: nitrogen 35.4 kPa, argon 5.35 kPa (above
+///   the 331 Pa of D1.1's partition at the floor), methane 64.6 Pa;
+/// - 01ffdb2c1fff0001.0d00 was a `Snowball` at 46.82 K over its 45.77 K floor at 100.67 Pa, a
+///   state edge (nitrogen 89.8 Pa, argon 10.9 Pa); from generator version 27, its floor 45.33 K
+///   (the same under the scattering's and the icy lag's oracles), it stays `Tenuous` at its floor
+///   to the bit, at 84.1 Pa (nitrogen 75.4 Pa, argon 8.64 Pa), its published partition holding
+///   81.8 Pa airborne (argon 3.98 Pa), as 0a00 does;
+/// - 01fffb2c20040000.0300 is a `Snowball` at 62.35 K over its 54.50 K floor with 11.5 kPa
+///   (nitrogen 10.2 kPa, argon 1.29 kPa);
+/// - 02000b2b60020000.0a00 stays `Airless`, at its 44.36 K floor to the bit, publishing its floored
+///   mean's partial pressures, 55.8 Pa (nitrogen 50.7 Pa, argon 5.14 Pa), its published partition
+///   holding 54.6 Pa airborne (argon 2.49 Pa).
+#[test]
+fn under_every_24_hold_the_four_split_bodies_read_their_floor() {
+    use crate::planetary::derive::atmosphere::AIRLESS_PRESSURE;
+    const FLIPPED: [&str; 2] = ["01ffeb2b9ffc0000.0700", "01fffb2c20040000.0300"];
+    const AT_THE_FLOOR: [&str; 2] = ["02000b2b60020000.0a00", "01ffdb2c1fff0001.0d00"];
+    let ids = || FLIPPED.into_iter().chain(AT_THE_FLOOR);
+    let systems: std::collections::BTreeSet<SystemId> = ids()
+        .map(|id| {
+            id.split_once('.')
+                .expect("a body ID")
+                .0
+                .parse()
+                .expect("a system ID")
+        })
+        .collect();
+    let walk = || {
+        let mut bodies = std::collections::BTreeMap::new();
+        for id in &systems {
+            let ctx = sample()
+                .iter()
+                .find(|ctx| ctx.id() == *id)
+                .expect("a system of the sample");
+            let system = generate(SEED, ctx);
+            census_walk("sample", ctx, &system, &mut |case| {
+                let body = FloorBody::of(case);
+                bodies.insert(body.id.clone(), body);
+            });
+        }
+        bodies
+    };
+    let floored = walk();
+    for id in ids() {
+        eprintln!(
+            "{id}: {}, airborne {:?}",
+            floored[id].line(),
+            floored[id].airborne
+        );
+        let after = &floored[id];
+        // The split: a floor that lies above its `T_eq`, its mean at or above it.
+        assert!(after.under_its_floor(), "{id}: {}", after.line());
+        assert!(after.t_s >= after.floor, "{id}: {}", after.line());
+    }
+    for id in FLIPPED {
+        let body = &floored[id];
+        assert_eq!(body.state, SurfaceState::Snowball, "{id}: {}", body.line());
+        assert!(
+            body.p_s >= AIRLESS_PRESSURE.value(),
+            "{id}: {}",
+            body.line()
+        );
+        assert!(body.t_s > body.floor, "{id}: {}", body.line());
+    }
+    assert!(
+        floored[FLIPPED[0]].argon >= 331.0,
+        "{}: {}",
+        FLIPPED[0],
+        floored[FLIPPED[0]].line()
+    );
+    for id in AT_THE_FLOOR {
+        let body = &floored[id];
+        assert!(
+            matches!(body.state, SurfaceState::Airless | SurfaceState::Tenuous),
+            "{id}: {}",
+            body.line()
+        );
+        assert_same_bits(body.t_s, body.floor);
+        assert!(body.p_s > 1.0, "{id}: {}", body.line());
+        let (total, argon) = body.airborne.expect("an Airless record's partition");
+        assert!(
+            total < AIRLESS_PRESSURE.value(),
+            "{id}: {total} Pa airborne"
+        );
+        assert!(
+            (2.0..10.0).contains(&body.argon) && (2.0..10.0).contains(&argon),
+            "{id}: argon {} Pa published, {argon} Pa in its partition",
+            body.argon
+        );
+    }
+}
+
+/// The bistability re-check's driver from the generator's own first albedo, 0.3, is the solve to
+/// the bit (`PassDriver::From`; decision-pre-23-review item 26): over the first 5 whole systems'
+/// present planets, members and moons with a surface, over their records at the epoch.
+#[test]
+fn a_second_start_at_the_first_s_albedo_is_the_solve() {
+    let mut bodies = 0;
+    for (ctx, system) in whole().iter().take(5) {
+        census_walk("sample", ctx, system, &mut |case| {
+            let (from, _) = (case.again)(PassDriver::From(BondAlbedo::BEFORE_ATMOSPHERES));
+            assert_eq!(
+                format!("{from:?}"),
+                format!("{:?}", case.derived),
+                "{}",
+                case.key
+            );
+            bodies += 1;
+        });
+    }
+    assert!(bodies > 20, "{bodies}");
+}
+
+/// P14.T54.a's test list: every present planet's keyed members hold registry keys only, over the
+/// first 60 whole systems at the epoch. Each substance its surface section names (its condensates'
+/// entries, its liquids and ices, its air's gases and its crust's rows) is a row of the substance
+/// registry whose key resolves to it.
+#[test]
+fn every_present_planet_s_keyed_members_hold_registry_keys_only() {
+    use crate::substance::SubstanceId;
+    let resolves = |id: SubstanceId, what: &str| {
+        let key = id.substance().key();
+        assert_eq!(
+            crate::substance::by_key(key.as_str()),
+            Some(id),
+            "{what}: {key:?}"
+        );
+    };
+    let (mut planets, mut keys) = (0_u32, 0_u32);
+    for (ctx, system) in whole().iter().take(60) {
+        for record in system.snapshot_at(ctx, UniverseTime::EPOCH).bodies() {
+            let identity = record.identity();
+            if identity.kind() != BodyKind::Planet || identity.state() != BodyState::Present {
+                continue;
+            }
+            let Section::Ok(surface) = record.surface() else {
+                continue;
+            };
+            let what = identity.id().to_string();
+            let figures = surface.figures();
+            let mut named: Vec<SubstanceId> = surface
+                .condensates()
+                .entries()
+                .iter()
+                .map(crate::planetary::chem::partition::CondensateEntry::substance)
+                .collect();
+            named.extend(figures.surface_liquids().iter().map(|&(id, _)| id));
+            named.extend(figures.surface_ices().iter().map(|&(id, _)| id));
+            named.extend(surface.conditions().gases().iter().map(|&(id, _)| id));
+            if let Some(crust) = surface.crust().ok() {
+                named.extend(
+                    [
+                        crust.primary(),
+                        crust.secondary(),
+                        crust.tertiary(),
+                        crust.bulk(),
+                    ]
+                    .into_iter()
+                    .flatten(),
+                );
+                named.push(crust.provinces());
+            }
+            for id in named {
+                resolves(id, &what);
+                keys += 1;
+            }
+            planets += 1;
+        }
+    }
+    eprintln!("{planets} present planets with a surface, {keys} keys, each the registry's");
+    assert!(planets > 50 && keys > 500, "{planets} {keys}");
+}
+
+// P14.T53.a part C: the escape's stated cases in the sample and the goldens, each system generated
+// afresh under the escape's batch rules (the cached systems were built under the rules in force).
+
+/// The present planet or member `index` of `system` (of `ctx`) derived at the epoch under the rules
+/// in force, as the record derives it: its derivation, its orbit then, and its hosts' mass then.
+fn derived_at_epoch(
+    ctx: &SystemContext,
+    system: &PlanetarySystem,
+    index: u16,
+) -> Option<(DerivedBody, KeplerElements, SolarMasses)> {
+    let t = UniverseTime::EPOCH;
+    let epoch = Epoch::new(system, ctx, t).with_shades();
+    let cosines = HourCosines::new();
+    let body = system
+        .bodies()
+        .iter()
+        .find(|body| body.index.get() == index)?;
+    if !matches!(body.part, Part::Planet(_) | Part::Member(_)) {
+        return None;
+    }
+    let zone = system.zone_of(body);
+    let host = fate_host(ctx, zone);
+    let fate = system.fate_of(body, &host);
+    let at = fate.at(t);
+    let orbit = *at.orbit()?;
+    let (derived, _, _) =
+        system.primary_derived(&epoch, &cosines, (body, &fate), &at, PassDriver::Solve);
+    Some((derived, orbit, fate.host_mass(t)))
+}
+
+/// The cosmic shoreline's figures of a planet or member `derived` on `orbit` about hosts of mass
+/// `host`: its escape speed, its X-ray and ultraviolet fluence over Earth's and the insolation, each
+/// in dex from the line 0.66 (v ÷ 5 km s⁻¹)⁴ (Zahnle and Catling 2017, Fig. 1, as
+/// `SHORELINE_FLUENCE_AT_REFERENCE` reads it; positive on the airless side), and its impact speed
+/// over its escape speed at its circular orbital speed.
+fn shoreline_figures(derived: &DerivedBody, orbit: &KeplerElements, host: SolarMasses) -> String {
+    use crate::planetary::chem::escape::{
+        SHORELINE_FLUENCE_AT_REFERENCE, SHORELINE_REFERENCE_ESCAPE_SPEED, planet_impact_speed,
+        shoreline_distance_dex,
+    };
+    use crate::planetary::derive::atmosphere::earth_xuv_fluence;
+    use crate::units::consts::GRAVITATIONAL_CONSTANT;
+    use crate::units::{Kilograms, Metres, MetresPerSecond};
+    let (m, r) = (
+        Kilograms::from(derived.mass()).value(),
+        Metres::from(derived.radius()).value(),
+    );
+    let escape = MetresPerSecond::new((2.0 * GRAVITATIONAL_CONSTANT * m / r).sqrt());
+    let fluence = derived.xuv_fluence().value() / earth_xuv_fluence().value();
+    let line = SHORELINE_FLUENCE_AT_REFERENCE
+        * crate::math::powi(escape.value() / SHORELINE_REFERENCE_ESCAPE_SPEED.value(), 4);
+    let insolation = derived.flux().value();
+    let orbital = (GRAVITATIONAL_CONSTANT * Kilograms::from(host).value()
+        / orbit.semi_major_axis().value())
+    .sqrt();
+    let impact = planet_impact_speed(MetresPerSecond::new(orbital), escape);
+    format!(
+        "v_esc {:.3} km/s; XUV {fluence:.4} F⊕ at {:+.3} dex; insolation {insolation:.4} S⊕ at \
+         {:+.3} dex; impact {:.3} km/s, ratio {:.3}",
+        escape.value() / 1e3,
+        shoreline_distance_dex(fluence, escape),
+        crate::math::log10(insolation / line),
+        impact.value() / 1e3,
+        impact.value() / escape.value(),
+    )
+}
+
+/// A one-line statement of an air under the escape's batch: its state, temperature, pressure,
+/// oxygen and carbon dioxide, and its escape's shoreline and oxygen.
+fn escape_line(derived: &DerivedBody) -> String {
+    let air = derived.atmosphere();
+    let bar = |gas: Gas| air.partial_pressures().of(gas).value() / 1e5;
+    format!(
+        "{:?} {:.2} K at {:.4} bar (O2 {:.4} bar, CO2 {:.4} bar, N2 {:.4} bar, water inventory \
+         {:.4e} kg); escape {:?}",
+        air.state(),
+        air.surface_temperature().value(),
+        air.surface_pressure().map_or(0.0, |p| p.value() / 1e5),
+        bar(Gas::Oxygen),
+        bar(Gas::CarbonDioxide),
+        bar(Gas::Nitrogen),
+        derived.inventory().water().value(),
+        air.escape()
+            .map(|escape| (escape.shoreline(), escape.oxygen())),
+    )
+}
+
+/// decision-p14-t54a-ganymede C1.3's six O₂ airs, as version 23 recorded them (98.7, 9.19, 2,678,
+/// 351, 100 and 14.9 bar of O₂), by system and body: 21fff6587ff80000.0200,
+/// 01ffeb2c20000000.0400, 01ffeb2c1ffe0000.0200 (the 2,678 bar case), 02001b2c9ffe0000.0100,
+/// 01ffeb2c20000000.0200 and 01ffeb2c20000000.0300.
+const OXYGEN_AIRS: [(u64, u16); 6] = [
+    (0x21ff_f658_7ff8_0000, 0x0200),
+    (0x01ff_eb2c_2000_0000, 0x0400),
+    (0x01ff_eb2c_1ffe_0000, 0x0200),
+    (0x0200_1b2c_9ffe_0000, 0x0100),
+    (0x01ff_eb2c_2000_0000, 0x0200),
+    (0x01ff_eb2c_2000_0000, 0x0300),
+];
+
+/// P14.T53.a: decision-p14-t54a-ganymede C1.3's six O₂ airs and the 2,678 bar case, recomputed
+/// under the batch's timed route (Luger and Barnes 2015's loss over the exposure, Schaefer et al.
+/// 2016's melt, Earth's sink per unit area after it, and the cosmic shoreline before), each stated
+/// with its shoreline's figures (for P14.T54.b's bless note).
+#[test]
+#[ignore = "a measurement for P14.T53.a's record, run by name"]
+fn under_the_escape_batch_the_six_oxygen_airs_are_stated() {
+    let mut systems: Vec<(u64, PlanetarySystem)> = Vec::new();
+    for (id, index) in OXYGEN_AIRS {
+        let ctx = sample()
+            .iter()
+            .find(|ctx| ctx.id().raw() == id)
+            .expect("the six O₂ airs' systems are in the sample");
+        if !systems.iter().any(|(known, _)| *known == id) {
+            systems.push((id, generate(SEED, ctx)));
+        }
+        let (_, system) = systems.iter().find(|(known, _)| *known == id).unwrap();
+        let (now, orbit, host) = derived_at_epoch(ctx, system, index).expect("a present body");
+        eprintln!(
+            "{id:016x}.{index:04x}: {:.3} M⊕, {}\n  {}",
+            now.mass().value(),
+            escape_line(&now),
+            shoreline_figures(&now, &orbit, host),
+        );
+    }
+}
+
+/// The present maximum-greenhouse ratio, Σ Fᵢ ÷ `S_eff,max`, of the planet or member `index` of
+/// `system` at the epoch ([`limit_now`]): below 1 beyond the limit.
+fn maximum_greenhouse_ratio_at_epoch(
+    ctx: &SystemContext,
+    system: &PlanetarySystem,
+    index: u16,
+) -> f64 {
+    let t = UniverseTime::EPOCH;
+    let epoch = Epoch::new(system, ctx, t);
+    let body = system
+        .bodies()
+        .iter()
+        .find(|body| body.index.get() == index)
+        .expect("a body");
+    let zone = system.zone_of(body);
+    let host = fate_host(ctx, zone);
+    let fate = system.fate_of(body, &host);
+    let orbit = *fate.at(t).orbit().expect("an orbit at the epoch");
+    limit_now(
+        crate::planetary::derive::habitable_zone::HabitableLimit::MaximumGreenhouse,
+        &epoch,
+        zone,
+        &orbit,
+    )
+}
+
+/// One line of the state of `derived` for the ceiling's and the thermostat's named bodies: its
+/// state, `T_s`, `p_s`, its carbon dioxide airborne and condensed (column weights, bar), the O₂
+/// it keeps and its thermostat's airborne carbon share.
+fn named_state(derived: &DerivedBody) -> String {
+    let air = derived.atmosphere();
+    let co2 = Gas::CarbonDioxide;
+    let (airborne, column) = (
+        air.partial_pressures().of(co2).value(),
+        air.inventory_weights().of(co2).value(),
+    );
+    let escape = air.escape();
+    format!(
+        "{:?} {:.3} K, {:.4e} bar; CO2 {:.4e} bar airborne, {:.4e} bar condensed; O2 kept {:.4e} \
+         kg, airborne C share {:.4e}",
+        air.state(),
+        air.surface_temperature().value(),
+        air.surface_pressure().map_or(0.0, |p| p.value() / 1e5),
+        airborne / 1e5,
+        (column - airborne).max(0.0) / 1e5,
+        escape.map_or(0.0, |e| e.oxygen().kept().value()),
+        escape.map_or(
+            f64::NAN,
+            crate::planetary::chem::escape::EscapeOutcome::airborne_carbon_share
+        ),
+    )
+}
+
+/// The census's three thick airs beyond the maximum-greenhouse limit that the batch, before its
+/// ceiling, made 2,469 K and 2,599 K magma oceans and a 671 K runaway (decision-bump-plan-after-22,
+/// "T53.a's thick-air ceiling", K1).
+const CEILING_BODIES: [(u64, u16); 3] = [
+    (0x0200_1b2c_dfff_0000, 0x0100),
+    (0x01ff_eb2c_2000_0000, 0x0500),
+    (0x01ff_eb2c_2000_0000, 0x0300),
+];
+
+/// The ceiling's three (K4, test 2): each beyond the maximum-greenhouse limit now (its present
+/// ratio stated, and below 1), none a `MagmaOcean`, each at or under max(273.15 K, `T_rest`), its
+/// new state stated.
+#[test]
+fn under_the_escape_batch_the_ceiling_holds_the_three_thick_airs_at_or_under_freezing() {
+    use crate::planetary::derive::atmosphere::{
+        Absorber, GreenhouseConstants, WATER_MELTING_POINT, grey_surface_temperature,
+    };
+    for (id, index) in CEILING_BODIES {
+        let ctx = sample()
+            .iter()
+            .find(|ctx| ctx.id().raw() == id)
+            .expect("the ceiling's three are in the sample");
+        let system = generate(SEED, ctx);
+        let ratio = maximum_greenhouse_ratio_at_epoch(ctx, &system, index);
+        let (derived, ..) = derived_at_epoch(ctx, &system, index).expect("a present body");
+        let air = derived.atmosphere();
+        let rest = GreenhouseConstants::in_force()
+            .terms(
+                air.partial_pressures(),
+                derived.equilibrium_temperature(),
+                derived.surface_gravity(),
+            )
+            .iter()
+            .filter(|term| matches!(term.absorber(), Absorber::Nitrogen | Absorber::Hydrogen))
+            .fold(0.0, |sum, term| sum + term.depth());
+        let cap = grey_surface_temperature(derived.equilibrium_temperature(), rest)
+            .value()
+            .max(WATER_MELTING_POINT.value());
+        eprintln!(
+            "{id:016x}.{index:04x}: present ratio {ratio:.4}, T_eq {:.3} K, cap {cap:.3} K: {}",
+            derived.equilibrium_temperature().value(),
+            named_state(&derived)
+        );
+        assert!(
+            ratio < 1.0,
+            "{id:016x}.{index:04x}: inside the limit, at {ratio}"
+        );
+        assert_ne!(
+            air.state(),
+            SurfaceState::MagmaOcean,
+            "{id:016x}.{index:04x}"
+        );
+        assert!(
+            air.surface_temperature().value() <= cap + 1e-9,
+            "{id:016x}.{index:04x}: {} K over {cap} K",
+            air.surface_temperature().value()
+        );
+    }
+}
+
+/// The census's three Temperates the weathering thermostat took all-airborne past the liquid
+/// window before its correction (decision-bump-plan-after-22, "T53.a's thick-air ceiling", K5):
+/// 02000b2ce0010000.0200 (199 → 850 K, 577 bar), 01ffeb2c60020000.0400 (189 → 861 K, 490 bar),
+/// and `close_binary` .0600 (195 → 723 K, 183 bar).
+const OVERSHOT_TEMPERATES: [(&str, u64, u16); 3] = [
+    ("sample", 0x0200_0b2c_e001_0000, 0x0200),
+    ("sample", 0x01ff_eb2c_6002_0000, 0x0400),
+    ("close_binary", 0, 0x0600),
+];
+
+/// The thermostat's correction (R3 Q1 (3), as K5 applies it), on its three overshot Temperates:
+/// each keeps part of its carbon stored, its surface at the set point, liquid at its edge or frozen
+/// just below a jump, and none above water's liquid range (each state stated). From generator
+/// version 25 (P14.T53.e) the sample's two, frozen at 256.6 K and 267.4 K, are `Snowball`s by rule
+/// 5, and `close_binary`'s stays `Temperate`. Before the correction, each took all its carbon
+/// airborne at 723–861 K.
+///
+/// From generator version 27 the adding rule lays 02000b2ce0010000.0200's air's Rayleigh layer
+/// over its clear sky (P14.T24.h.b), its Bond albedo 0.64 (0.54 under the scattering's oracles),
+/// and it freezes past the set point to 201.0 K, its CO₂ condensing (230 bar of it, 0.22 bar
+/// airborne): with no liquid water to weather it, none of its carbon is stored, and it is a
+/// `Snowball` under freezing, past the thermostat's reach. The other two keep the correction.
+#[test]
+fn under_the_escape_batch_the_three_overshot_temperates_stop_at_the_set_point() {
+    use crate::planetary::derive::atmosphere::{WaterPhase, water_phase};
+    for (set, id, index) in OVERSHOT_TEMPERATES {
+        let (ctx, seed) = if set == "sample" {
+            let ctx = sample()
+                .iter()
+                .find(|ctx| ctx.id().raw() == id)
+                .expect("the overshot Temperates' systems are in the sample");
+            (ctx, SEED)
+        } else {
+            let (_, ctx, _) = golden_systems()
+                .iter()
+                .find(|(golden, ..)| *golden == set)
+                .expect("a golden system");
+            (ctx, Seed::new(GOLDEN_SYSTEMS_SEED))
+        };
+        let system = generate(seed, ctx);
+        let (derived, ..) = derived_at_epoch(ctx, &system, index).expect("a present body");
+        let air = derived.atmosphere();
+        let (t, p) = (
+            air.surface_temperature(),
+            air.surface_pressure()
+                .unwrap_or(crate::units::Pascals::ZERO),
+        );
+        let share = air.escape().map_or(
+            f64::NAN,
+            crate::planetary::chem::escape::EscapeOutcome::airborne_carbon_share,
+        );
+        eprintln!("{set} {id:016x}.{index:04x}: {}", named_state(&derived));
+        let state = if set == "sample" {
+            SurfaceState::Snowball
+        } else {
+            SurfaceState::Temperate
+        };
+        assert_eq!(air.state(), state, "{set} {index:04x}");
+        if id == 0x0200_0b2c_e001_0000 {
+            assert_same_bits(share, 1.0);
+            assert!(t.value() < 273.15, "{set} {index:04x}: {} K", t.value());
+        } else {
+            assert!(share < 1.0, "{set} {index:04x}: all of its carbon airborne");
+        }
+        assert_ne!(water_phase(t, p), WaterPhase::Hot, "{set} {index:04x}");
+        assert!(t.value() < 330.0, "{set} {index:04x}: {} K", t.value());
+    }
+}
+
+/// P14.T53.a's cost lever: a methane reservoir whose air stays at its cap through its loss keeps
+/// the state its greenhouse solved, the partition holding the same air. Over the golden systems'
+/// generation and the sample's first 20, every such loss is solved again all the same and compared:
+/// the largest share by which a temperature or a partial pressure moves is under 10⁻⁹, the passes'
+/// own convergence (`ATMOSPHERE_CONVERGENCE`), with the counts stated.
+#[test]
+fn under_the_escape_batch_a_saturated_methane_reservoir_s_loss_keeps_its_state() {
+    use crate::planetary::derive::atmosphere::{Thermostat, with_resolve_check, with_thermostat};
+    let ((((), difference), counts), systems) = {
+        let mut systems = 0;
+        let checked = with_thermostat(Thermostat::On, || {
+            with_resolve_check(|| {
+                for (_, ctx, _) in golden_systems() {
+                    let _ = generate(Seed::new(GOLDEN_SYSTEMS_SEED), ctx);
+                    systems += 1;
+                }
+                for ctx in sample().iter().take(20) {
+                    let _ = generate(SEED, ctx);
+                    systems += 1;
+                }
+            })
+        });
+        (checked, systems)
+    };
+    eprintln!(
+        "{systems} systems under the batch: {counts:?}; the largest share a saturated reservoir's \
+         solve again moves: {difference:e}"
+    );
+    assert!(counts.saturated > 0, "{counts:?}");
+    assert!(difference < 1e-9, "{difference:e}: {counts:?}");
+}
+
+/// The golden systems' knife edges of the cosmic shoreline (decision-p14-t54a-ganymede §1.7, C0
+/// item 1; decision-bump-plan-after-22, R3 Q2): `close_binary` e304, `hierarchical_triple` 0500
+/// and `solar_like` .0300.
+const KNIFE_EDGES: [(&str, u16); 3] = [
+    ("close_binary", 0xe304),
+    ("hierarchical_triple", 0x0500),
+    ("solar_like", 0x0300),
+];
+
+/// P14.T53.a: the shoreline's knife edges under the batch, stated, not asserted (R3 Q2): each one's
+/// verdict, its distance in dex on the XUV axis and on the insolation axis, and its impact ratio;
+/// and the weathering thermostat's solves over them.
+#[test]
+#[ignore = "a measurement for P14.T53.a's record, run by name"]
+fn under_the_escape_batch_the_shoreline_s_knife_edges_are_stated() {
+    use crate::planetary::derive::atmosphere::{Thermostat, with_thermostat};
+    for (name, index) in KNIFE_EDGES {
+        let (_, ctx, _) = golden_systems()
+            .iter()
+            .find(|(golden, ..)| *golden == name)
+            .expect("a golden system");
+        let ((now, orbit, host), counts) = with_thermostat(Thermostat::On, || {
+            let batch = generate(Seed::new(GOLDEN_SYSTEMS_SEED), ctx);
+            derived_at_epoch(ctx, &batch, index).expect("a present body")
+        });
+        eprintln!(
+            "{name} {index:04x}: {:.3} M⊕, {}\n  {}\n  {counts:?}",
+            now.mass().value(),
+            escape_line(&now),
+            shoreline_figures(&now, &orbit, host),
+        );
+    }
+}
+
+/// P14.T53.a: each golden envelope's He/H and helium mass fraction Y after its escape's
+/// fractionation, stated for P14.T54.b to pass to P14.T50.b as its primordial He/H
+/// (decision-p14-t50b-envelope §5): every planet of the golden systems that formed with an
+/// envelope, its envelope's share and loss, generated and derived under the batch. Stated with
+/// them, for the batch's cost against decision-p14-t54a-passes §C.6, the weathering thermostat's
+/// and the batch's extra greenhouse solves over the fifteen systems' generation and their planets'
+/// and members' derivations.
+#[test]
+#[ignore = "a measurement for P14.T53.a's record, run by name"]
+fn under_the_escape_batch_the_golden_envelopes_helium_is_stated() {
+    use crate::planetary::derive::atmosphere::{Thermostat, with_thermostat};
+    let ((), counts) = with_thermostat(Thermostat::On, || {
+        for (name, ctx, _) in golden_systems() {
+            let system = generate(Seed::new(GOLDEN_SYSTEMS_SEED), ctx);
+            for body in system.bodies() {
+                let Some((derived, ..)) = derived_at_epoch(ctx, &system, body.index.get()) else {
+                    continue;
+                };
+                let Some(envelope) = derived
+                    .atmosphere()
+                    .escape()
+                    .and_then(|escape| escape.envelope().copied())
+                else {
+                    continue;
+                };
+                eprintln!(
+                    "{name} {:04x}: {:.3} M⊕, {:?}, envelope {:.5} of its mass (formed with \
+                         {:.5}, {:.4e} M⊕ lost); He/H {:.6}, Y {:.6}, H kept {:.6}, He kept {:.6}",
+                    body.index.get(),
+                    derived.mass().value(),
+                    derived.atmosphere().state(),
+                    derived.fractions().envelope(),
+                    derived.initial_envelope_fraction(),
+                    derived.envelope_lost().value(),
+                    envelope.helium_to_hydrogen(),
+                    envelope.helium_mass_fraction(),
+                    envelope.hydrogen_kept_share(),
+                    envelope.helium_kept_share(),
+                );
+            }
+        }
+    });
+    eprintln!("the batch's extra solves over the goldens: {counts:?}");
+}
+
+/// P14.T54.b.h: the `Airless` and `Tenuous` records as the wire sends them (P14.T53.c), over the
+/// sample's first 60 systems, the golden systems and LOOK72's. An
+/// `Airless` record lists no gas, at a surface pressure of exactly 0 and with no mixture figures
+/// (μ and `c_p` ÷ R `None`, sent `null`); a `Tenuous` one lists its air's gases, largest first with
+/// each fraction in [0, 1] and their sum 1 to 10⁻⁹, at a surface pressure above 0 and under 100 Pa
+/// whose column p ÷ g reaches the tenuous floor (`TENUOUS_FLOOR_COLUMN`, 10⁻⁴ kg m⁻²), with its
+/// mixture figures. The server sends each member one to one (`convert::planetary`'s surface: the
+/// state's `tenuous` string, pinned by the protocol's wire-string test, and the conditions' gases,
+/// pressure, μ and `c_p` ÷ R), and the client's decoder reads both shapes (`bodiesWire.test.ts`).
+#[test]
+fn under_every_24_hold_an_airless_record_lists_no_gas_and_a_tenuous_one_its_air() {
+    use crate::planetary::chem::tenuous::TENUOUS_FLOOR_COLUMN;
+    use crate::planetary::derive::atmosphere::AIRLESS_PRESSURE;
+    let look72 = look72_triaged_contexts();
+    let look72_seed = look72_galaxy().seed();
+    let sets: Vec<(&str, Seed, &SystemContext)> = sample()
+        .iter()
+        .take(60)
+        .map(|ctx| ("sample", SEED, ctx))
+        .chain(
+            golden_systems()
+                .iter()
+                .map(|(name, ctx, _)| (*name, Seed::new(GOLDEN_SYSTEMS_SEED), ctx)),
+        )
+        .chain(look72.iter().map(|ctx| ("look72", look72_seed, ctx)))
+        .collect();
+    let (mut airless, mut tenuous) = (0_usize, Vec::new());
+    for &(set, seed, ctx) in &sets {
+        let system = generate(seed, ctx);
+        census_walk(set, ctx, &system, &mut |case| {
+            let conditions = case.surface.conditions();
+            let at = format!("{} {}", case.set, case.key);
+            match case.surface.state() {
+                SurfaceState::Airless => {
+                    assert_eq!(conditions.gases(), [], "{at}");
+                    assert_same_bits(conditions.surface_pressure().value(), 0.0);
+                    assert_eq!(conditions.mean_molar_mass_g_per_mol(), None, "{at}");
+                    assert_eq!(conditions.heat_capacity_over_r(), None, "{at}");
+                    airless += 1;
+                }
+                SurfaceState::Tenuous => {
+                    let p = conditions.surface_pressure().value();
+                    let g = case.derived.surface_gravity().value();
+                    let gases = conditions.gases();
+                    let sum = gases.iter().fold(0.0, |sum, &(_, x)| sum + x);
+                    assert!(p > 0.0 && p < AIRLESS_PRESSURE.value(), "{at}: {p} Pa");
+                    assert!(
+                        p / g >= TENUOUS_FLOOR_COLUMN.value(),
+                        "{at}: {} kg/m2",
+                        p / g
+                    );
+                    assert!(!gases.is_empty(), "{at}");
+                    assert!((sum - 1.0).abs() <= 1e-9, "{at}: {gases:?}");
+                    assert!(
+                        gases.iter().all(|&(_, x)| (0.0..=1.0).contains(&x))
+                            && gases.windows(2).all(|pair| pair[0].1 >= pair[1].1),
+                        "{at}: {gases:?}"
+                    );
+                    assert!(
+                        conditions
+                            .mean_molar_mass_g_per_mol()
+                            .is_some_and(|mu| mu > 0.0),
+                        "{at}"
+                    );
+                    assert!(conditions.heat_capacity_over_r().is_some(), "{at}");
+                    tenuous.push(format!(
+                        "{at} {}: {p:.4e} Pa, {:.4e} kg/m2, {}",
+                        case.kind,
+                        p / g,
+                        gases
+                            .iter()
+                            .map(|&(id, x)| format!("{} {x:.4}", id.substance().key()))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ));
+                }
+                SurfaceState::GasEnvelope
+                | SurfaceState::MagmaOcean
+                | SurfaceState::RunawayGreenhouse
+                | SurfaceState::SteamEnvelope
+                | SurfaceState::Temperate
+                | SurfaceState::Desert
+                | SurfaceState::Snowball => {}
+            }
+        });
+    }
+    eprintln!(
+        "{airless} airless records list no gas; {} tenuous ones their air:\n  {}",
+        tenuous.len(),
+        tenuous.join("\n  ")
+    );
+    assert!(airless > 0 && !tenuous.is_empty());
+}
+
+/// P14.T54.b.h: every derivation carries the helium P14.T53.a's fractionation left its envelope,
+/// the one its passes read (`DerivedBody::envelope_helium`, for P14.T54.b.i's envelope and T50.b's
+/// primordial He/H, decision-p14-t50b-envelope §5). Over the golden systems: a body that formed
+/// with an envelope carries one, and one that formed with none carries none; each one's published
+/// air's escape outcome holds it too (`EscapeOutcome::envelope`, the one its thin envelope's air
+/// was built at), the same to the bit. At 23 no derivation carried one. Each is stated by kind
+/// with its He/H and Y.
+#[test]
+fn under_every_24_hold_a_derivation_carries_its_envelope_s_helium() {
+    use crate::planetary::chem::escape::EnvelopeHelium;
+    let same = |a: &EnvelopeHelium, b: &EnvelopeHelium| {
+        assert_same_bits(a.helium_to_hydrogen(), b.helium_to_hydrogen());
+        assert_same_bits(a.helium_mass_fraction(), b.helium_mass_fraction());
+        assert_same_bits(a.hydrogen_kept_share(), b.hydrogen_kept_share());
+        assert_same_bits(a.helium_kept_share(), b.helium_kept_share());
+        assert_same_bits(
+            a.initial_helium_mass_fraction(),
+            b.initial_helium_mass_fraction(),
+        );
+    };
+    let (mut carried, mut on_the_outcome, mut none) = (0, 0, 0);
+    for (name, ctx, system) in golden_systems() {
+        for body in system.bodies() {
+            let Some((derived, ..)) = derived_at_epoch(ctx, system, body.index.get()) else {
+                continue;
+            };
+            let formed_with_one = derived.initial_envelope_fraction() > 0.0;
+            let Some(helium) = derived.envelope_helium() else {
+                assert!(!formed_with_one, "{name} {:04x}", body.index.get());
+                none += 1;
+                continue;
+            };
+            assert!(formed_with_one, "{name} {:04x}", body.index.get());
+            carried += 1;
+            let outcome = derived
+                .atmosphere()
+                .escape()
+                .and_then(|escape| escape.envelope());
+            if let Some(outcome) = outcome {
+                same(helium, outcome);
+                on_the_outcome += 1;
+            }
+            eprintln!(
+                "{name} {:04x}: {:?}, {:?}, formed with {:.5} of its mass in its envelope; \
+                     He/H {:.6}, Y {:.6}{}",
+                body.index.get(),
+                derived.class(),
+                derived.atmosphere().state(),
+                derived.initial_envelope_fraction(),
+                helium.helium_to_hydrogen(),
+                helium.helium_mass_fraction(),
+                if outcome.is_some() {
+                    ", its escape outcome's"
+                } else {
+                    ""
+                },
+            );
+        }
+    }
+    eprintln!(
+        "{carried} derivations carry their envelope's helium ({on_the_outcome} on their escape \
+         outcome too), {none} none"
+    );
+    // Every carried helium is on its escape outcome too: the escape reads the derivation's.
+    assert!(carried > 0);
+    assert_eq!(on_the_outcome, carried);
+}
+
+/// P14.T54.b.i: under the host star's primordial helium, over the golden systems and eight
+/// synthetic Suns at the epoch: every carried helium starts at its host's start
+/// (`fractionation_start`), to the bit, and about a solar host at the protosolar Y; the escape
+/// outcome's helium, airborne and escaped as its ledger books it (`envelope_at_formation`), is the
+/// formed envelope's mass times the start its carry records
+/// (`EnvelopeHelium::initial_helium_mass_fraction`), to 10⁻¹². Its run against the protosolar
+/// start, which counted the movers and found no state change, went with the hold at the 23 → 24
+/// bump.
+#[test]
+fn under_the_host_helium_only_envelope_bearing_bodies_about_other_hosts_move() {
+    use crate::planetary::chem::escape::{EnvelopeHelium, fractionation_start};
+    use crate::planetary::derive::DerivedBody;
+    use crate::planetary::derive::atmosphere::protosolar_helium_mass_fraction;
+    use crate::stellar::Composition;
+    use crate::substance::Element;
+    use crate::units::Kilograms;
+    // The ledger's formed helium (`envelope_at_formation`): the envelope's mass at formation, its
+    // share of the body's mass now and what energy-limited escape took (`envelope_history`), times
+    // the start the carry records; the outcome's helium, airborne and escaped, is all of it.
+    let booked = |at: &str, derived: &DerivedBody, helium: &EnvelopeHelium| {
+        let formed = derived.fractions().envelope() * Kilograms::from(derived.mass()).value()
+            + Kilograms::from(derived.envelope_lost()).value();
+        let start = helium.initial_helium_mass_fraction();
+        let expected = formed * start;
+        let outcome = derived
+            .atmosphere()
+            .escape()
+            .and_then(|escape| escape.element(Element::He))
+            .unwrap_or_else(|| {
+                panic!("{at}: a carried envelope's escape outcome holds its helium")
+            });
+        let got = outcome.airborne().value() + outcome.escaped().value();
+        assert!(
+            (got - expected).abs() <= 1e-12 * expected,
+            "{at}: the ledger's helium {got:e} kg against the formed envelope's {formed:e} kg \
+             times Y0 {start} ({expected:e} kg)"
+        );
+    };
+    let mut sets: Vec<(String, Seed, SystemContext)> = golden_systems()
+        .iter()
+        .map(|(name, ctx, _)| {
+            (
+                (*name).to_owned(),
+                Seed::new(GOLDEN_SYSTEMS_SEED),
+                ctx.clone(),
+            )
+        })
+        .collect();
+    sets.extend((1..=8).map(|k| (format!("sun {k}"), SEED, sun(k))));
+    let (mut carried, mut solar) = (0_usize, 0_usize);
+    let protosolar = protosolar_helium_mass_fraction();
+    for (name, seed, ctx) in &sets {
+        let system = generate(*seed, ctx);
+        let is_solar = *ctx.composition() == Composition::SOLAR;
+        for body in system.bodies() {
+            let index = body.index.get();
+            let Some((host, ..)) = derived_at_epoch(ctx, &system, index) else {
+                continue;
+            };
+            let Some(helium) = host.envelope_helium() else {
+                continue;
+            };
+            let at = format!("{name} {index:04x}");
+            carried += 1;
+            booked(&at, &host, helium);
+            assert_same_bits(
+                helium.initial_helium_mass_fraction(),
+                fractionation_start(ctx.composition()),
+            );
+            if is_solar {
+                assert_same_bits(helium.initial_helium_mass_fraction(), protosolar);
+                solar += 1;
+            }
+        }
+    }
+    eprintln!("{carried} carried ({solar} about a solar host, at the protosolar start)");
+    assert!(carried > 10, "{carried}");
+    assert!(solar > 0, "a solar host's envelope");
+}
+
+// P14.T53.b part 1: the state from the present insolation, and the runaway's deck
+// (decision-absurd-states-24 R3–R4; decision-pre-23-review item 33).
+
+/// How [`PresentBody::class`] reads the limits' `S_eff` below Kopparapu et al.'s fit's 2,600 K.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SEffFit {
+    /// Held at its 2,600 K value, as the generator holds it ([`held_flux`]).
+    Held,
+    /// Extrapolated below 2,600 K ([`unheld_flux`]).
+    Unheld,
+}
+
+/// One body of P14.T53.b part 1's census ([`present_census`]), under the rules in force.
+#[derive(Debug, Clone, PartialEq)]
+struct PresentBody {
+    /// Its set ("sample", the golden system's name, or "look72"), its ID and its kind.
+    label: String,
+    /// Its ID, as its record gives it.
+    id: String,
+    /// Its zone's stars at the epoch: each one's phase and effective temperature.
+    hosts: String,
+    /// Its record's surface state.
+    state: SurfaceState,
+    /// The state its water follows (`Atmosphere::water_state`).
+    water_state: SurfaceState,
+    /// Whether a runaway keeps Venus's deck (`Atmosphere::runaway_deck`).
+    deck: crate::planetary::derive::atmosphere::RunawayDeck,
+    /// Its record's mean surface temperature, K.
+    t_s: f64,
+    /// Its derivation's mean surface temperature, the passes', K: the one P14.T53.b part 1 (c)'s
+    /// test reads.
+    air_t_s: f64,
+    /// Its derivation's surface pressure, Pa.
+    p_s: f64,
+    /// Its derivation's Bond albedo.
+    bond: f64,
+    /// Its derivation's cloud fraction.
+    cloud: f64,
+    /// For a runaway outside the present runaway limit, the solves without the deck and as a
+    /// hothouse its derivation took solved again
+    /// ([`with_deck_counts`](crate::planetary::derive::atmosphere::with_deck_counts)): a hothouse's
+    /// counts one (c) re-solve after a first solve that (c) judged; `None` for every other body.
+    resolved: Option<crate::planetary::derive::atmosphere::DeckCounts>,
+    /// Σ Fᵢ ÷ `S_eff,runaway` at its hosts' present luminosities ([`runaway_now`]).
+    runaway_now: f64,
+    /// The same at their largest past luminosities ([`runaway_at_peak`]).
+    runaway_peak: f64,
+    /// Σ Fᵢ ÷ `S_eff,max` now ([`limit_now`]).
+    maximum_now: f64,
+    /// The runaway ratio now, at the peak and the maximum-greenhouse ratio now with `S_eff` unheld
+    /// below 2,600 K ([`CensusCase::unheld`]).
+    unheld: [f64; 3],
+    /// Its record's surface water, kg m⁻².
+    surface_water: f64,
+    /// Its record's potential ocean, 0 to 1.
+    potential_ocean: f64,
+    /// Its record's ocean fraction, 0 to 1.
+    ocean: f64,
+    /// The `H2O` areas of its record's ices and liquids, the ocean under a `Snowball`'s ice among
+    /// them.
+    h2o: (f64, f64),
+    /// Whether its record's condensates hold an `H2O` solid and an `H2O` liquid entry.
+    h2o_entries: (bool, bool),
+    /// Its derivation's atmosphere passes.
+    passes: u32,
+    /// How its derivation's passes ended.
+    convergence: crate::planetary::derive::passes::Convergence,
+}
+
+impl PresentBody {
+    /// The figures of the body `case`: a runaway outside the present runaway limit is derived
+    /// again for its solves' counts ([`resolved`](Self::resolved)).
+    fn of(case: &CensusCase<'_>) -> Self {
+        use crate::planetary::chem::partition::CondensatePhase;
+        use crate::planetary::derive::atmosphere::with_deck_counts;
+        let (surface, derived) = (case.surface, case.derived);
+        let resolved = (surface.state() == SurfaceState::RunawayGreenhouse
+            && (case.runaway_now.is_nan() || case.runaway_now < 1.0))
+            .then(|| with_deck_counts(|| (case.again)(PassDriver::Solve)).1);
+        let (air, figures) = (derived.atmosphere(), surface.figures());
+        let water = Gas::Water.substance();
+        let area = |list: &[(crate::substance::SubstanceId, f64)]| {
+            list.iter()
+                .filter(|(id, _)| *id == water)
+                .fold(0.0, |sum, &(_, area)| sum + area)
+        };
+        let id = case.record.identity().id().to_string();
+        let condensates = surface.condensates();
+        Self {
+            label: format!("{} {id} {}", case.set, case.kind),
+            id,
+            hosts: case.hosts.clone(),
+            state: surface.state(),
+            water_state: air.water_state(),
+            deck: air.runaway_deck(),
+            t_s: surface.conditions().mean_surface_temperature().value(),
+            air_t_s: air.surface_temperature().value(),
+            p_s: air.surface_pressure().map_or(f64::NAN, Pascals::value),
+            bond: derived.albedo().value(),
+            cloud: air.cloud_fraction(),
+            resolved,
+            runaway_now: case.runaway_now,
+            runaway_peak: case.runaway_peak,
+            maximum_now: case.maximum_now,
+            unheld: case.unheld,
+            surface_water: figures.surface_water().value(),
+            potential_ocean: figures.potential_ocean(),
+            ocean: figures.ocean_fraction(),
+            h2o: (
+                area(figures.surface_ices()),
+                area(figures.surface_liquids()),
+            ),
+            h2o_entries: (
+                condensates.entry(water, CondensatePhase::Solid).is_some(),
+                condensates.entry(water, CondensatePhase::Liquid).is_some(),
+            ),
+            passes: derived.atmosphere_passes(),
+            convergence: derived.convergence(),
+        }
+    }
+
+    /// Its state, deck, `T_s`, A, `p_s` and ratios, for a census line.
+    fn line(&self) -> String {
+        format!(
+            "{:?} ({:?}, water {:?}) T_s {:.2} K, A {:.4}, cloud {:.4}, p_s {:.4e} bar; runaway \
+             now {:.4}, at the peak {:.4}, maximum now {:.4}; {} passes, {:?}",
+            self.state,
+            self.deck,
+            self.water_state,
+            self.t_s,
+            self.bond,
+            self.cloud,
+            self.p_s / 1e5,
+            self.runaway_now,
+            self.runaway_peak,
+            self.maximum_now,
+            self.passes,
+            self.convergence
+        )
+    }
+
+    /// A hothouse's figures, for a census line (P14.T53.b part 1 (c); decision-t53b-arm-c): its
+    /// present ratios, its solves' counts ([`resolved`](Self::resolved)) and its published
+    /// solve's state, deck, `T_s`, Bond albedo, `p_s` and passes, and water's saturation
+    /// temperature at its `p_s` by (c)'s convention.
+    fn hothouse_line(&self) -> String {
+        use crate::planetary::derive::atmosphere::water_saturation_temperature;
+        let saturation =
+            |p: f64| water_saturation_temperature(Pascals::new(p)).map_or(f64::NAN, Kelvin::value);
+        let first = self.resolved.map_or_else(
+            || "none".to_owned(),
+            |counts| {
+                format!(
+                    "{} (c) re-solve, {} passes Temperate before it",
+                    counts.hothouses, counts.temperate_passes
+                )
+            },
+        );
+        format!(
+            "runaway now {:.4}, at the peak {:.4}, maximum now {:.4} | solves {first} | \
+             published {:?} {:?} T_s {:.2} K (the record's {:.2} K), A {:.4}, p_s {:.4e} bar \
+             (water's T_sat {:.3} K), {} passes",
+            self.runaway_now,
+            self.runaway_peak,
+            self.maximum_now,
+            self.state,
+            self.deck,
+            self.air_t_s,
+            self.t_s,
+            self.bond,
+            self.p_s / 1e5,
+            saturation(self.p_s),
+            self.passes
+        )
+    }
+
+    /// Its water's figures, for a census line.
+    fn water_line(&self) -> String {
+        format!(
+            "surface water {:.4e} kg m⁻², potential ocean {:.4}, ocean {:.4}, H2O ice {:.4} and \
+             liquid {:.4}, entries {:?}",
+            self.surface_water,
+            self.potential_ocean,
+            self.ocean,
+            self.h2o.0,
+            self.h2o.1,
+            self.h2o_entries
+        )
+    }
+
+    /// The class its ratios give, `(runaway at the peak, runaway now, maximum now)` read with
+    /// `S_eff` as `fit` reads it below 2,600 K: inside the runaway limit at the peak and now, a
+    /// runaway; at the peak alone, its present class (P14.T53.b part 1 (a)); otherwise its peak
+    /// class. For the census of the dependence on the hold, as `Sky::of`'s sums read them.
+    fn class(&self, fit: SEffFit) -> &'static str {
+        let (peak, now, maximum) = match fit {
+            SEffFit::Held => (self.runaway_peak, self.runaway_now, self.maximum_now),
+            SEffFit::Unheld => (self.unheld[1], self.unheld[0], self.unheld[2]),
+        };
+        if peak >= 1.0 && now >= 1.0 {
+            "RunawayGreenhouse"
+        } else if maximum < 1.0 {
+            "Snowball"
+        } else {
+            "Temperate"
+        }
+    }
+}
+
+/// P14.T53.b part 1's census (decision-absurd-states-24 R3–R4): every present planet, member and
+/// moon with a surface at the epoch ([`census_walk`]) of the first 60 sample systems, the 15
+/// golden systems and the 27 systems of LOOK72's 62 triaged bodies ([`look72_triaged_contexts`]),
+/// the floor census's set ([`floor_census`]), each system generated and derived afresh, each
+/// runaway outside the present runaway limit with its solves' counts ([`PresentBody::resolved`]),
+/// body by body; with the solves without the deck and as a hothouse that generating and walking
+/// the systems took ([`with_deck_counts`](crate::planetary::derive::atmosphere::with_deck_counts)).
+/// Built once a process, for the tests that read it. Its twin as P14.T53.a's batch built it
+/// (`PresentState::Peak`) went with the escape's hold at the 23 → 24 bump.
+struct PresentCensus {
+    present: Vec<PresentBody>,
+    generated: crate::planetary::derive::atmosphere::DeckCounts,
+    walked: crate::planetary::derive::atmosphere::DeckCounts,
+}
+
+/// The [`PresentCensus`], built once.
+fn present_census() -> &'static PresentCensus {
+    use crate::planetary::derive::atmosphere::with_deck_counts;
+    static CENSUS: OnceLock<PresentCensus> = OnceLock::new();
+    CENSUS.get_or_init(|| {
+        let look72 = look72_triaged_contexts();
+        let look72_seed = look72_galaxy().seed();
+        let sets: Vec<(&str, Seed, &SystemContext)> = sample()
+            .iter()
+            .take(60)
+            .map(|ctx| ("sample", SEED, ctx))
+            .chain(
+                golden_systems()
+                    .iter()
+                    .map(|(name, ctx, _)| (*name, Seed::new(GOLDEN_SYSTEMS_SEED), ctx)),
+            )
+            .chain(look72.iter().map(|ctx| ("look72", look72_seed, ctx)))
+            .collect();
+        let (systems, generated) = with_deck_counts(|| {
+            sets.iter()
+                .map(|&(_, seed, ctx)| generate(seed, ctx))
+                .collect::<Vec<_>>()
+        });
+        let (present, walked) = with_deck_counts(|| {
+            let mut bodies = Vec::new();
+            for (&(set, _, ctx), system) in sets.iter().zip(&systems) {
+                census_walk(set, ctx, system, &mut |case| {
+                    bodies.push(PresentBody::of(case));
+                });
+            }
+            bodies
+        });
+        PresentCensus {
+            present,
+            generated,
+            walked,
+        }
+    })
+}
+
+/// The census's five decked runaways about M dwarfs (decision-absurd-states-24 R3.1), each
+/// published under Venus's deck at 273–360 K by P14.T53.a's batch; from generator version 25
+/// (P14.T53.e) all but [`DECKED_DESERTS`]' two are runaways solved without the deck.
+const DECKED_FIVE: [&str; 5] = [
+    "220016587ff80000.0900",
+    "02001b2c9ffe0000.0200",
+    "01fffb2c20000001.0200",
+    "01ffeb2ce0000000.0100",
+    "01ffeb2ca0000000.0100",
+];
+
+/// The two of [`DECKED_FIVE`] that are `Temperate` from generator version 25 by P14.T53.e's rule
+/// 7, each a dry desert inside the present runaway limit: one at 351.9 K under 1.2 mbar, below
+/// water's triple-point pressure, where rule 6 is not judged, and one at 341.1 K under 1.13 bar,
+/// below water's saturation temperature there.
+const DECKED_DESERTS: [&str; 2] = ["220016587ff80000.0900", "02001b2c9ffe0000.0200"];
+
+/// P14.T53.b part 1's census, a measurement for the record (decision-absurd-states-24 R3–R4), run
+/// by name over [`present_census`]'s set: the runaways solved without the deck whose deckless
+/// `T_s` is at or above the cycling temperature (a partial deck, not modelled, for P14.T53.e); the
+/// bodies whose present runaway ratio exceeds their peak's; the re-solve's count, its share of the
+/// bodies and its passes; the past-only runaways; the `Temperate`s at or above water's saturation
+/// temperature at their `p_s` (R4.2's test, none expected); (c)'s hothouses between the limits,
+/// each with its present ratios, its solves' counts, `T_s`, Bond albedo and `p_s` and water's
+/// saturation temperature there, and (c)'s count and cost beside (b)'s (decision-t53b-arm-c); and
+/// (the batch review's item 8) every census body whose class or ceiling the extrapolation of
+/// `S_eff` below Kopparapu et al.'s fit's 2,600 K ([`unheld_flux`]) would flip. Its statement of
+/// each body part 1 moves against P14.T53.a's batch as built went with the escape's hold at the
+/// 23 → 24 bump.
+#[test]
+#[ignore = "a measurement for P14.T53.b part 1's record, run by name"]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one census's bodies and its cost, each listed"
+)]
+fn under_every_24_hold_part_one_s_moved_bodies_are_stated() {
+    use crate::planetary::derive::atmosphere::{ACID_CYCLING_TEMPERATURE, RunawayDeck};
+    let census = present_census();
+    let bodies = &census.present;
+    eprintln!("bodies with a surface: {}", bodies.len());
+    let flips: Vec<String> = bodies
+        .iter()
+        .filter(|b| b.class(SEffFit::Held) != b.class(SEffFit::Unheld))
+        .map(|b| {
+            format!(
+                "{}: {} → {} (peak {:.4} → {:.4}, now {:.4} → {:.4}, maximum {:.4} → {:.4}; {})",
+                b.label,
+                b.class(SEffFit::Held),
+                b.class(SEffFit::Unheld),
+                b.runaway_peak,
+                b.unheld[1],
+                b.runaway_now,
+                b.unheld[0],
+                b.maximum_now,
+                b.unheld[2],
+                b.hosts
+            )
+        })
+        .collect();
+    eprintln!(
+        "verdicts the extrapolation below 2,600 K flips, of {} bodies: {}:\n  {}",
+        bodies.len(),
+        flips.len(),
+        flips.join("\n  ")
+    );
+    let ceiling_flips = bodies
+        .iter()
+        .filter(|b| (b.maximum_now < 1.0) != (b.unheld[2] < 1.0))
+        .count();
+    eprintln!(
+        "maximum-greenhouse ceilings (ratio below 1) the extrapolation flips: {ceiling_flips}"
+    );
+    let past_only: Vec<String> = bodies
+        .iter()
+        .filter(|b| b.runaway_peak >= 1.0 && b.runaway_now < 1.0)
+        .map(|b| {
+            format!(
+                "{} [{}; {}]: {}; its water {}",
+                b.label,
+                host_class(&b.hosts),
+                b.hosts,
+                b.line(),
+                b.water_line()
+            )
+        })
+        .collect();
+    eprintln!(
+        "inside the runaway limit at the hosts' peak alone: {}:\n  {}",
+        past_only.len(),
+        past_only.join("\n  ")
+    );
+    let deckless: Vec<&PresentBody> = bodies
+        .iter()
+        .filter(|b| b.deck == RunawayDeck::Deckless)
+        .collect();
+    let partial: Vec<String> = deckless
+        .iter()
+        .filter(|b| b.t_s >= ACID_CYCLING_TEMPERATURE.value())
+        .map(|b| format!("{}: {}", b.label, b.line()))
+        .collect();
+    eprintln!(
+        "solved without the deck: {} of {} bodies ({:.3}%), their passes without it {} (the walk's \
+         counts {:?}; the generation's, every derivation of the systems, {:?}); deckless at or \
+         above {} K: {}:\n  {}",
+        deckless.len(),
+        bodies.len(),
+        100.0 * f64::from(u32::try_from(deckless.len()).unwrap())
+            / f64::from(u32::try_from(bodies.len()).unwrap()),
+        deckless.iter().map(|b| b.passes).sum::<u32>(),
+        census.walked,
+        census.generated,
+        ACID_CYCLING_TEMPERATURE.value(),
+        partial.len(),
+        partial.join("\n  ")
+    );
+    let passes = bodies.iter().map(|b| u64::from(b.passes)).sum::<u64>();
+    eprintln!(
+        "the walk's passes: {passes}; the re-solves' {} passes are {:.3}% of them",
+        census.walked.deckless_passes,
+        100.0 * f64::from(u32::try_from(census.walked.deckless_passes).unwrap())
+            / f64::from(u32::try_from(passes).unwrap()),
+    );
+    let hothouse_passes = census.walked.hothouse_passes + census.walked.hothouse_deckless_passes;
+    eprintln!(
+        "(c)'s re-solves: {} passes after {} in the first solves they replace, {:.3}% and {:.3}% \
+         of the walk",
+        hothouse_passes,
+        census.walked.temperate_passes,
+        100.0 * f64::from(u32::try_from(hothouse_passes).unwrap())
+            / f64::from(u32::try_from(passes).unwrap()),
+        100.0 * f64::from(u32::try_from(census.walked.temperate_passes).unwrap())
+            / f64::from(u32::try_from(passes).unwrap()),
+    );
+    let above_peak: Vec<String> = bodies
+        .iter()
+        .filter(|b| b.runaway_now > b.runaway_peak)
+        .map(|b| format!("{}: {}", b.label, b.line()))
+        .collect();
+    eprintln!(
+        "present runaway ratio above the peak's: {}:\n  {}",
+        above_peak.len(),
+        above_peak.join("\n  ")
+    );
+    // decision-absurd-states-24 R4.2's test of arm (c): a `Temperate` at or above water's
+    // saturation temperature at its p_s, by (c)'s convention (the liquid–vapour curve, 647.096 K at
+    // or above 22.064 MPa, not judged below 611.657 Pa; decision-t53b-arm-c §2).
+    let hot: Vec<String> = bodies
+        .iter()
+        .filter(|b| {
+            b.state == SurfaceState::Temperate
+                && crate::planetary::derive::atmosphere::water_saturation_temperature(Pascals::new(
+                    b.p_s,
+                ))
+                .is_some_and(|t| b.air_t_s >= t.value())
+        })
+        .map(|b| format!("{}: {}", b.label, b.line()))
+        .collect();
+    eprintln!(
+        "Temperates at or above water's saturation temperature at their p_s (arm (c)'s test): \
+         {}:\n  {}",
+        hot.len(),
+        hot.join("\n  ")
+    );
+    // Arm (c): each hothouse between the limits, with its solves, and its cost beside (b)'s.
+    let hothouses: Vec<&PresentBody> = bodies
+        .iter()
+        .filter(|b| {
+            b.resolved.is_some_and(|counts| counts.hothouses > 0)
+                && b.state == SurfaceState::RunawayGreenhouse
+        })
+        .collect();
+    for b in &hothouses {
+        eprintln!(
+            "HOTHOUSE | {} | {} | {} | {}",
+            b.label,
+            host_class(&b.hosts),
+            b.hosts,
+            b.hothouse_line(),
+        );
+    }
+    eprintln!(
+        "(c)'s hothouses: {} of {} bodies, {} of them deckless; the walk's {} re-solves took {} \
+         passes under the deck after {} in their first solves ({} third solves without it, {} \
+         passes); the generation's {:?}",
+        hothouses.len(),
+        bodies.len(),
+        hothouses
+            .iter()
+            .filter(|b| b.deck == RunawayDeck::Deckless)
+            .count(),
+        census.walked.hothouses,
+        census.walked.hothouse_passes,
+        census.walked.temperate_passes,
+        census.walked.hothouse_deckless,
+        census.walked.hothouse_deckless_passes,
+        census.generated,
+    );
+    for name in DECKED_FIVE {
+        for b in bodies.iter().filter(|b| b.id == name) {
+            eprintln!("DECKED FIVE | {} | {}", b.label, b.line());
+        }
+    }
+}
+
+/// P14.T53.b part 1 (b)'s re-solve in the tests' trace (the batch review's fixes): a runaway solved
+/// once more without its deck drops its first solve's traced passes alone, not what was traced
+/// before it. the census's decked runaway
+/// [`DECKED_FIVE`]'s 01ffeb2ca0000000.0100 is published deckless, and its traced solve lists one
+/// pass for each it counts; two of them traced together list both.
+#[test]
+fn under_every_24_hold_a_re_solve_keeps_what_was_traced_before_it() {
+    use crate::planetary::derive::atmosphere::RunawayDeck;
+    use crate::planetary::derive::{PassDriver, traced};
+    let body = DECKED_FIVE[4];
+    let (system_id, _) = body.split_once('.').expect("a body ID");
+    let ctx = sample()
+        .iter()
+        .find(|ctx| ctx.id().to_string() == system_id)
+        .expect("the decked runaway's system is in the sample");
+    let mut found = 0;
+    {
+        let system = generate(SEED, ctx);
+        census_walk("sample", ctx, &system, &mut |case| {
+            if case.record.identity().id().to_string() != body {
+                return;
+            }
+            found += 1;
+            let passes = usize::try_from(case.derived.atmosphere_passes()).unwrap();
+            assert_eq!(
+                case.derived.atmosphere().runaway_deck(),
+                RunawayDeck::Deckless,
+                "{body}"
+            );
+            let (_, alone) = traced(|| (case.again)(PassDriver::Traced));
+            assert_eq!(alone.len(), passes, "{body}");
+            let (_, both) = traced(|| {
+                (case.again)(PassDriver::Traced);
+                (case.again)(PassDriver::Traced)
+            });
+            assert_eq!(both.len(), 2 * passes, "{body}");
+        });
+    }
+    assert_eq!(found, 1, "{body} is present at the epoch");
+}
+
+/// decision-pre-23-review item 33's world: the sample's planet at the airless threshold whose
+/// other side was a `RunawayGreenhouse` under Venus's deck, at a `T_s` of 45.8 K by P14.T51.h's
+/// census at 23's stand-ins (plan 14's deferred findings: "one rocky member about an evolved
+/// host") and at 100.01 Pa and 56.6 K at 23 (bless-note-23, "across the diagonal": published
+/// `Airless` at 99.86 Pa), inside the runaway limit only at its substellar host's largest past
+/// luminosity (a runaway ratio of 1.51 then, 0.0029 now).
+pub(crate) const ITEM_33_WORLD: &str = "02000b2ca0000001.1100";
+
+/// LOOK72's 106 K runaway (decision-absurd-states-24 R4.1, item 1): at 23 a `RunawayGreenhouse`
+/// at 106.5 K under 5.33 bar, mostly O₂, its present runaway ratio 0.0405 and its
+/// maximum-greenhouse ratio 0.1152. From generator version 27 its system, four remnants (a black
+/// hole, two white dwarfs and a neutron star), places no planet, and it is not generated
+/// ([`LOOK72_GONE`]).
+const LOOK72_106_K_RUNAWAY: &str = "820e6ee00000008d.0900";
+
+/// The bodies of [`LOOK72_TRIAGED`] that generator version 27 no longer generates: its 106 K
+/// runaway ([`LOOK72_106_K_RUNAWAY`]), whose system's records are its belts' members and a moon
+/// of one alone.
+const LOOK72_GONE: [&str; 1] = [LOOK72_106_K_RUNAWAY];
+
+/// The census's hothouse between the limits (decision-t53b-arm-c §1): about a 2,456 K substellar
+/// host, its runaway ratio 61.9 at the peak and 0.547 now, its maximum-greenhouse ratio 2.11 now;
+/// under P14.T53.a's batch a `RunawayGreenhouse` under Venus's deck and 414.8 bar of carbon
+/// dioxide, A 0.76, and under P14.T53.b part 1 (a) alone a `Temperate`, A 0.30. Under the
+/// thick-air closure (decision-p14-t53a-thick-co2 §6) its decked solve is 622.4 K, now under
+/// water's saturation temperature, 647.096 K, and its first solve 799.8 K; before it, 934.6 K and
+/// 1,221.6 K.
+pub(super) const HOTHOUSE_BODY: &str = "01ffeb2c5ffe0000.0100";
+
+/// The hothouse between the limits that joins (c) under the thick-air closure, by (c)'s test
+/// (decision-p14-t53a-thick-co2 §6, pre-ruled): its runaway ratio 31.2 at the peak and 0.522 now,
+/// its maximum-greenhouse ratio 2.00 now; its first solve a `Temperate` at
+/// 850.5 K and A 0.49 under 989.2 bar, 203 K above water's saturation temperature, and published
+/// under Venus's deck at 716.0 K and A 0.76; before the closure a `MagmaOcean` at 1,759.7 K.
+pub(super) const CLOSURE_HOTHOUSE_BODY: &str = "01ffeb2c5fff0000.0100";
+
+/// P14.T53.b part 1's assertions over [`present_census`]'s set (decision-absurd-states-24 R3.4,
+/// R4.1 and R4.2; decision-t53b-arm-c §5.4–5.5; bless-note-23's states census, line 4, made an
+/// assertion):
+///
+/// - no `RunawayGreenhouse` lies beyond the maximum-greenhouse limit now ([`limit_now`] below 1),
+///   and none between the limits now ([`runaway_now`] below 1) but hothouses, each listed by name
+///   with its present ratios, its solves' counts, `T_s`, Bond albedo and `p_s`, and water's
+///   saturation temperature there: from generator version 25 (P14.T53.e) its first solve's passes
+///   carry rule 6's `RunawayGreenhouse`, so that, solved again, it takes no (c) re-solve, and at 24
+///   they are the census's [`HOTHOUSE_BODY`] and, under the thick-air closure,
+///   [`CLOSURE_HOTHOUSE_BODY`];
+/// - no `Temperate` lies at or above water's saturation temperature at its `p_s` by (c)'s
+///   convention (`water_saturation_temperature`: the liquid–vapour curve, 647.096 K at or above
+///   22.064 MPa, not judged below 611.657 Pa; R4.2's serve-gate test);
+/// - none keeps Venus's deck below the acid's cycling temperature, 430 K;
+/// - every body whose water is a runaway's and which is not one, a runaway at the hosts' peak,
+///   publishes a present climate's state by rules 5–7 from generator version 25 (P14.T53.e),
+///   `Snowball` or `Temperate`, whatever its insolation class, so that a dry desert inside the
+///   runaway limit now is `Temperate` by rule 7; LOOK72's 106 K runaway ([`LOOK72_106_K_RUNAWAY`])
+///   was a `Snowball` whose water, kept beyond its escape's capacity from generator version 25,
+///   lay as its ice (P14.T53.b part 3; decision-p14-t53b-part3 §12 (0900)), and from 27 is not
+///   generated ([`LOOK72_GONE`]);
+/// - decision-pre-23-review item 33's world ([`ITEM_33_WORLD`]) is not a runaway;
+/// - the census's five decked runaways ([`DECKED_FIVE`]) lie inside the present limit, each stated
+///   with its present ratio, `T_s`, Bond albedo and `p_s`: three solved without the deck, and
+///   [`DECKED_DESERTS`]' two `Temperate` by rule 7;
+/// - no present runaway ratio exceeds its peak's.
+///
+/// The bodies solved without the deck whose deckless `T_s` is at or above the cycling temperature
+/// (a partial deck, not modelled, for P14.T53.e) are counted, not failed; and so (count (xi),
+/// brief-notes-24) are (c)'s bodies that end deckless or whose published `T_s` lies under water's
+/// saturation temperature, by name (at 24, under the thick-air closure, [`HOTHOUSE_BODY`], its
+/// published `T_s` under water's saturation temperature; decision-p14-t53a-thick-co2 §6). Its
+/// comparisons against P14.T53.a's batch as built (each body part 1 does not move the same to the
+/// bit, but a named set; a past-only runaway's water that batch's) went with the escape's hold at
+/// the 23 → 24 bump.
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "part 1's assertions over one census, each stated"
+)]
+fn under_every_24_hold_only_a_hothouse_lies_outside_the_present_limit_and_none_on_a_cold_deck() {
+    use crate::planetary::derive::atmosphere::{
+        ACID_CYCLING_TEMPERATURE, RunawayDeck, water_saturation_temperature,
+    };
+    let census = present_census();
+    let cycling = ACID_CYCLING_TEMPERATURE.value();
+    let runaways = |bodies: &[PresentBody], test: &dyn Fn(&PresentBody) -> bool| -> Vec<String> {
+        bodies
+            .iter()
+            .filter(|b| b.state == SurfaceState::RunawayGreenhouse && test(b))
+            .map(|b| format!("{}: {}", b.label, b.line()))
+            .collect()
+    };
+    let outside = |b: &PresentBody| b.runaway_now.is_nan() || b.runaway_now < 1.0;
+    let beyond = |b: &PresentBody| b.maximum_now.is_nan() || b.maximum_now < 1.0;
+    let between = |b: &PresentBody| outside(b) && !beyond(b);
+    let too_cold = |b: &PresentBody| b.deck == RunawayDeck::Kept && b.t_s < cycling;
+    assert_eq!(
+        runaways(&census.present, &beyond),
+        Vec::<String>::new(),
+        "a runaway beyond the maximum-greenhouse limit now"
+    );
+    assert_eq!(
+        runaways(&census.present, &too_cold),
+        Vec::<String>::new(),
+        "a runaway under Venus's deck below the cycling temperature"
+    );
+
+    // Arm (c): every runaway between the limits now is a hothouse, from generator version 25 its
+    // first solve's passes carrying rule 6's runaway (P14.T53.e), with no (c) re-solve.
+    let hothouses: Vec<&PresentBody> = census
+        .present
+        .iter()
+        .filter(|b| b.state == SurfaceState::RunawayGreenhouse && between(b))
+        .collect();
+    eprintln!(
+        "runaways between the limits now, (c)'s hothouses: {}",
+        hothouses.len()
+    );
+    for hothouse in &hothouses {
+        eprintln!(
+            "HOTHOUSE | {} | {}",
+            hothouse.label,
+            hothouse.hothouse_line()
+        );
+        let counts = hothouse
+            .resolved
+            .unwrap_or_else(|| panic!("{}: not solved again", hothouse.label));
+        assert_eq!(
+            counts.hothouses,
+            0,
+            "{}: solved again by (c): {}",
+            hothouse.label,
+            hothouse.hothouse_line()
+        );
+    }
+    assert_eq!(
+        hothouses
+            .iter()
+            .map(|b| b.label.clone())
+            .collect::<Vec<_>>(),
+        [HOTHOUSE_BODY, CLOSURE_HOTHOUSE_BODY]
+            .map(|id| format!("sample {id} planets"))
+            .to_vec(),
+        "the hothouses at 24"
+    );
+    // Count (xi): a hothouse that ends deckless, or whose published `T_s` lies under water's
+    // saturation temperature, is named to main.
+    let saturation =
+        |p: f64| water_saturation_temperature(Pascals::new(p)).map_or(f64::NAN, Kelvin::value);
+    let named: Vec<String> = hothouses
+        .iter()
+        .filter(|b| b.deck == RunawayDeck::Deckless || b.air_t_s < saturation(b.p_s))
+        .map(|b| format!("{}: {}", b.label, b.hothouse_line()))
+        .collect();
+    eprintln!(
+        "count (xi): hothouses deckless or under water's saturation temperature: {}:\n  {}",
+        named.len(),
+        named.join("\n  ")
+    );
+    // R4.2's test: no `Temperate` at or above water's saturation temperature at its `p_s`.
+    let hot_temperate = |b: &PresentBody| {
+        b.state == SurfaceState::Temperate
+            && water_saturation_temperature(Pascals::new(b.p_s))
+                .is_some_and(|t| b.air_t_s >= t.value())
+    };
+    assert_eq!(
+        census
+            .present
+            .iter()
+            .filter(|b| hot_temperate(b))
+            .map(|b| format!("{}: {}", b.label, b.line()))
+            .collect::<Vec<_>>(),
+        Vec::<String>::new(),
+        "a Temperate at or above water's saturation temperature at its p_s"
+    );
+    // A runaway's water under a state that is not a runaway's: a runaway at the hosts' peak,
+    // published at a present climate's state by rules 5–7 (P14.T53.e).
+    let mut runaway_waters = 0;
+    for now in &census.present {
+        if now.water_state == SurfaceState::RunawayGreenhouse
+            && now.state != SurfaceState::RunawayGreenhouse
+        {
+            assert!(now.runaway_peak >= 1.0, "{}: {}", now.label, now.line());
+            assert!(
+                matches!(now.state, SurfaceState::Snowball | SurfaceState::Temperate),
+                "{}: {}",
+                now.label,
+                now.line()
+            );
+            runaway_waters += 1;
+        }
+    }
+    // From generator version 27 LOOK72's 106 K runaway is not generated (`LOOK72_GONE`).
+    let runaway_106_k: Vec<&PresentBody> = census
+        .present
+        .iter()
+        .filter(|b| b.label.starts_with("look72") && b.id == LOOK72_106_K_RUNAWAY)
+        .collect();
+    assert_eq!(runaway_106_k.len(), 0, "{LOOK72_106_K_RUNAWAY}");
+    for now in runaway_106_k {
+        eprintln!(
+            "LOOK72's 106 K runaway {}: {}; its water {}",
+            now.label,
+            now.line(),
+            now.water_line()
+        );
+        assert_eq!(now.state, SurfaceState::Snowball);
+        assert_eq!(now.water_state, SurfaceState::Snowball);
+    }
+    let item_33: Vec<&PresentBody> = census
+        .present
+        .iter()
+        .filter(|b| b.label.starts_with("sample") && b.id == ITEM_33_WORLD)
+        .collect();
+    assert_eq!(item_33.len(), 1, "{ITEM_33_WORLD}");
+    for world in item_33 {
+        eprintln!("item 33's world {}: {}", world.label, world.line());
+        assert_ne!(world.state, SurfaceState::RunawayGreenhouse);
+    }
+    for name in DECKED_FIVE {
+        let found: Vec<&PresentBody> = census
+            .present
+            .iter()
+            .filter(|b| b.label.starts_with("sample") && b.id == name)
+            .collect();
+        assert_eq!(found.len(), 1, "{name}");
+        for now in found {
+            eprintln!("{name}: {}", now.line());
+            if DECKED_DESERTS.contains(&name) {
+                assert_eq!(now.state, SurfaceState::Temperate, "{name}");
+            } else {
+                assert_eq!(now.state, SurfaceState::RunawayGreenhouse, "{name}");
+                assert_eq!(now.deck, RunawayDeck::Deckless, "{name}");
+            }
+            assert!(now.runaway_now >= 1.0, "{name}");
+        }
+    }
+    let partial: Vec<String> = census
+        .present
+        .iter()
+        .filter(|b| b.deck == RunawayDeck::Deckless && b.t_s >= cycling)
+        .map(|b| format!("{}: {}", b.label, b.line()))
+        .collect();
+    let deckless = census
+        .present
+        .iter()
+        .filter(|b| b.deck == RunawayDeck::Deckless)
+        .count();
+    eprintln!(
+        "{runaway_waters} runaways' waters publish a present climate's state; {} hothouses \
+         publish a runaway; {deckless} runaways are solved without the deck ({:?} in the walk), \
+         {} of them at or above {cycling} K without it (a partial deck, for P14.T53.e):\n  {}",
+        hothouses.len(),
+        census.walked,
+        partial.len(),
+        partial.join("\n  ")
+    );
+    let above_peak: Vec<String> = census
+        .present
+        .iter()
+        .filter(|b| b.runaway_now > b.runaway_peak)
+        .map(|b| format!("{}: {}", b.label, b.line()))
+        .collect();
+    assert_eq!(
+        above_peak,
+        Vec::<String>::new(),
+        "a present ratio above the peak's"
+    );
+}
+
+/// P14.T54.b.g (brief-notes-24's V3.9 MUST-FIX (b); decision-absurd-states-24 R3.3): the record's
+/// aerosol inventory takes P14.T24.g's case from its published state and deck
+/// (`SulphurCycle::case_of`), over the sample's first 60 systems, the golden systems and LOOK72's:
+///
+/// - no record carries Venus's acid deck (an `H2SO4` deck) but a runaway its passes solved under
+///   the deck at or above the acid's cycling temperature, 430 K, so that none keeps it colder;
+/// - a runaway solved without the deck (`RunawayDeck::Deckless`) carries none, its sulphur case
+///   2's dry branch, once through, as a temperate world's; the census's five decked runaways
+///   ([`DECKED_FIVE`]) but [`DECKED_DESERTS`]' two, `Temperate` from generator version 25
+///   (P14.T53.e), are among them;
+/// - the census's hothouse ([`HOTHOUSE_BODY`]) keeps its deck, the cycling case.
+///
+/// The decked and deckless runaways are printed with their `T_s` and `p_s`, the deckless with
+/// whether they carry a sulphate layer (an `H2SO4` mode of no deck).
+#[test]
+fn under_every_24_hold_no_record_keeps_venus_s_deck_below_the_cycling_temperature() {
+    use crate::planetary::derive::atmosphere::{ACID_CYCLING_TEMPERATURE, RunawayDeck};
+    let look72 = look72_triaged_contexts();
+    let look72_seed = look72_galaxy().seed();
+    let sets: Vec<(&str, Seed, &SystemContext)> = sample()
+        .iter()
+        .take(60)
+        .map(|ctx| ("sample", SEED, ctx))
+        .chain(
+            golden_systems()
+                .iter()
+                .map(|(name, ctx, _)| (*name, Seed::new(GOLDEN_SYSTEMS_SEED), ctx)),
+        )
+        .chain(look72.iter().map(|ctx| ("look72", look72_seed, ctx)))
+        .collect();
+    let acid = crate::substance::by_key("H2SO4").expect("sulphuric acid is a registry row");
+    let cycling = ACID_CYCLING_TEMPERATURE.value();
+    let (mut decked, mut deckless, mut wrong) = (Vec::new(), Vec::new(), Vec::new());
+    for &(set, seed, ctx) in &sets {
+        let system = generate(seed, ctx);
+        envelope_walk(ctx, &system, &mut |kind, record, derived| {
+            let Section::Ok(surface) = record.surface() else {
+                return;
+            };
+            let Modelled::Ok(inventory) = surface.aerosols() else {
+                return;
+            };
+            let id = record.identity().id().to_string();
+            let state = surface.state();
+            let deck = derived.atmosphere().runaway_deck();
+            let conditions = surface.conditions();
+            let t_s = conditions.mean_surface_temperature().value();
+            let p_s = conditions.surface_pressure().value();
+            let has_deck = inventory.decks().iter().any(|d| d.condensate() == acid);
+            let layer = !has_deck && inventory.modes().iter().any(|m| m.deck() == acid);
+            let line = format!(
+                "{set} {id} {kind}: {state:?} {deck:?} at {t_s:.2} K, {:.4e} bar",
+                p_s / 1e5
+            );
+            let kept = state == SurfaceState::RunawayGreenhouse && deck == RunawayDeck::Kept;
+            if has_deck && !(kept && t_s >= cycling) {
+                wrong.push(format!("{line}: Venus's deck"));
+            }
+            if state == SurfaceState::RunawayGreenhouse {
+                match (deck, has_deck) {
+                    (RunawayDeck::Kept, true) => decked.push(line),
+                    (RunawayDeck::Kept, false) => {
+                        decked.push(format!("{line}, no acid deck formed"));
+                    }
+                    (RunawayDeck::Deckless, false) => {
+                        deckless.push(format!("{line}, sulphate layer {layer}"));
+                    }
+                    (RunawayDeck::Deckless, true) => {
+                        wrong.push(format!("{line}: a deck solved without one"));
+                    }
+                }
+            }
+        });
+    }
+    eprintln!(
+        "runaways under the deck at or above {cycling} K: {}:\n  {}\nrunaways solved without it, \
+         case 2's dry branch: {}:\n  {}",
+        decked.len(),
+        decked.join("\n  "),
+        deckless.len(),
+        deckless.join("\n  ")
+    );
+    assert_eq!(
+        wrong,
+        Vec::<String>::new(),
+        "Venus's deck below the cycling temperature"
+    );
+    for name in DECKED_FIVE
+        .into_iter()
+        .filter(|name| !DECKED_DESERTS.contains(name))
+    {
+        assert!(
+            deckless
+                .iter()
+                .any(|line| line.starts_with(&format!("sample {name} "))),
+            "{name}: not among the deckless runaways"
+        );
+    }
+    assert!(
+        decked
+            .iter()
+            .any(|line| line.starts_with(&format!("sample {HOTHOUSE_BODY} "))
+                && !line.ends_with("no acid deck formed")),
+        "{HOTHOUSE_BODY}: the hothouse without its deck"
+    );
+}
+
+/// P14.T53.b part 1 (c) through the passes (decision-t53b-arm-c §3, §5.5): the census's hothouse
+/// between the limits, [`HOTHOUSE_BODY`], publishes a `RunawayGreenhouse` under Venus's deck,
+/// P14.T24.g's cycling case (`SulphurCycle::case_of`'s first arm), its `T_s`, A and `p_s` stated:
+/// under the thick-air closure (decision-p14-t53a-thick-co2 §6) 622.4 K, 0.76 and 415.4 bar
+/// (re-measured at 27, 414.8 bar to 26, which the scattering's and the icy lag's oracles leave as
+/// it is), its `T_s` under water's saturation temperature, where T53.a's batch as built had 934.6 K
+/// above it,
+/// above water's critical pressure, so that its saturation temperature is 647.096 K. From
+/// generator version 25 (P14.T53.e) its first solve's passes carry rule 6's `RunawayGreenhouse`
+/// from a dry `Temperate`'s figures above water's saturation temperature, so that its first solve
+/// is published, carrying that state, and no re-solve is counted; under the insolation class's
+/// state, version 24's before P14.T53.e's hold went, its passes were counted as one hothouse
+/// re-solve after a first solve that (c) judged. Its first solve's own figures (with (c) off, a
+/// `Temperate` at about 799.8 K and A 0.30) and its comparison with P14.T53.a's batch's decked
+/// solve, to the bit, went with the escape's hold at the 23 → 24 bump.
+#[test]
+fn under_every_24_hold_the_census_s_hothouse_publishes_a_runaway_under_its_deck() {
+    use crate::planetary::derive::atmosphere::{
+        DeckCounts, PresentClimate, RunawayDeck, water_saturation_temperature, with_deck_counts,
+    };
+    let (system_id, _) = HOTHOUSE_BODY.split_once('.').expect("a body ID");
+    let ctx = sample()
+        .iter()
+        .find(|ctx| ctx.id().to_string() == system_id)
+        .expect("the hothouse's system is in the sample");
+    let system = generate(SEED, ctx);
+    let mut found: Vec<(SurfaceState, f64, DerivedBody)> = Vec::new();
+    let ((), counts) = with_deck_counts(|| {
+        census_walk("sample", ctx, &system, &mut |case| {
+            if case.record.identity().id().to_string() != HOTHOUSE_BODY {
+                return;
+            }
+            found.push((
+                case.surface.state(),
+                case.surface.conditions().mean_surface_temperature().value(),
+                *case.derived,
+            ));
+        });
+    });
+    assert_eq!(found.len(), 1, "{HOTHOUSE_BODY} is present at the epoch");
+    let (state, t_s, derived) = &found[0];
+    let air = derived.atmosphere();
+    let bar = air.surface_pressure().map_or(f64::NAN, |p| p.value() / 1e5);
+    let saturation = air
+        .surface_pressure()
+        .and_then(water_saturation_temperature)
+        .map_or(f64::NAN, Kelvin::value);
+    eprintln!(
+        "{HOTHOUSE_BODY}: published {:?} {:?} T_s {:.3} K (the record's {t_s:.3} K), A {:.4}, p_s \
+         {bar:.4} bar (water's T_sat {saturation:.3} K), {} passes (T53.a's batch before the \
+         thick-air closure: 934.6 K, A 0.76, 414.8 bar); counts {counts:?}",
+        air.state(),
+        air.runaway_deck(),
+        air.surface_temperature().value(),
+        derived.albedo().value(),
+        derived.atmosphere_passes(),
+    );
+    assert_eq!(*state, SurfaceState::RunawayGreenhouse);
+    assert_eq!(air.state(), SurfaceState::RunawayGreenhouse);
+    // A runaway under Venus's deck: P14.T24.g's cycling case.
+    assert_eq!(air.runaway_deck(), RunawayDeck::Kept);
+    assert!((t_s - 622.4).abs() < 0.1, "{t_s} K");
+    assert!((derived.albedo().value() - 0.76).abs() < 0.005);
+    assert!((bar - 415.4).abs() < 0.1, "{bar} bar");
+    assert_same_bits(saturation, 647.096);
+    assert!(air.surface_temperature().value() < saturation);
+    assert_eq!(
+        air.carried_state(),
+        Some(PresentClimate::RunawayGreenhouse),
+        "rule 6's runaway, carried"
+    );
+    assert_eq!(counts, DeckCounts::default(), "no re-solve");
+}
+
+// P14.T53.b part 2: the supercritical envelope's section (decision-absurd-states-24 R2), with every
+// landed 24 hold in force (decision-t24i-airless-state D3.3).
+
+/// The census's sample body under kilobars of supercritical methane (decision-absurd-states-24
+/// R2.1): a `Snowball` at 12.9 kbar and 209.1 K under the hold, and about 10 kbar, 8.78 of CH₄
+/// and 1.27 of N₂, at 192.6 K under the escape's batch, 2 K above methane's critical point.
+const SUPERCRITICAL_METHANE_BODY: &str = "02001b2ca0000000.0400";
+
+/// LOOK72's three methane `Snowball`s above methane's critical temperature at 23
+/// (decision-absurd-states-24 R2.1–R2.2; R4.3's census).
+const LOOK72_METHANE_SNOWBALLS: [&str; 3] = [
+    "020e56ef20080000.0900",
+    "020e56ef60090005.0500",
+    "020e56ef60080003.0600",
+];
+
+/// LOOK72's nitrogen `Snowball`s at 81–313 bar (decision-absurd-states-24 R2.3).
+const LOOK72_NITROGEN_SNOWBALLS: [&str; 4] = [
+    "020e56ef20090004.0600",
+    "020e66efa007000b.0900",
+    "020e66efa007000b.0a00",
+    "020e56ef20080006.0300",
+];
+
+/// The sample's context of [`SUPERCRITICAL_METHANE_BODY`]'s system.
+fn supercritical_methane_context() -> &'static SystemContext {
+    let (system, _) = SUPERCRITICAL_METHANE_BODY
+        .split_once('.')
+        .expect("a body ID");
+    sample()
+        .iter()
+        .find(|ctx| ctx.id().to_string() == system)
+        .expect("the census body's system is in the sample")
+}
+
+/// One present planet, member or moon of [`envelope_walk`] at the epoch: its record's section
+/// tags, and each condensable of its derivation's air at or above its critical temperature
+/// against its critical isochore under its bulk's gravity (P14.T53.b part 2).
+pub(super) struct EnvelopeBody {
+    /// Its set ("sample", the golden system's name, or "look72"), its ID and its kind.
+    label: String,
+    /// Its ID, as its record gives it.
+    id: String,
+    /// Its bulk's class.
+    class: PlanetClass,
+    /// Its record's surface section's tag.
+    surface: SectionState,
+    /// Its record's envelope section's tag.
+    envelope: SectionState,
+    /// Its derivation's surface state.
+    state: SurfaceState,
+    /// The state its derivation publishes, a steam envelope's label included (P14.T53.b part 3).
+    published: SurfaceState,
+    /// Its atmosphere's mean surface temperature, K.
+    t_s: f64,
+    /// Its atmosphere's surface pressure, Pa.
+    p_s: f64,
+    /// Its bulk's surface gravity, m s⁻².
+    g: f64,
+    /// Its condensables at or above their critical temperatures, whatever their shares.
+    columns: Vec<crate::planetary::derive::atmosphere::SupercriticalReservoir>,
+    /// The reservoir that hides its surface, as the record reads it.
+    pub(super) hidden: Option<crate::planetary::derive::atmosphere::SupercriticalReservoir>,
+    /// Its partition's reservoir with the most liquid-like fluid under its bulk's gravity, whatever
+    /// its share: the one the record reads (P14.T53.b part 3).
+    partitioned: Option<crate::planetary::derive::atmosphere::SupercriticalReservoir>,
+}
+
+impl EnvelopeBody {
+    /// The body `record` of the set `set` and kind `kind`, derived as `derived`, under the rules in
+    /// force.
+    pub(super) fn of(set: &str, kind: &str, record: &BodyRecord, derived: &DerivedBody) -> Self {
+        let bulk = record.bulk().ok().expect("a walked body has its bulk");
+        let gravity = bulk.surface_gravity();
+        let air = derived.atmosphere();
+        let id = record.identity().id().to_string();
+        Self {
+            label: format!("{set} {id} {kind}"),
+            id,
+            class: bulk.class(),
+            surface: record.section_state(RecordSection::Surface),
+            envelope: record.section_state(RecordSection::Envelope),
+            state: air.state(),
+            published: air.published_state(),
+            t_s: air.surface_temperature().value(),
+            p_s: air.surface_pressure().map_or(f64::NAN, Pascals::value),
+            g: gravity.value(),
+            columns: air.critical_columns(gravity).collect(),
+            hidden: air.supercritical_reservoir(gravity),
+            partitioned: air.partitioned_reservoir(gravity),
+        }
+    }
+
+    /// A column's figures, for a census line: its gas, `T_s` ÷ `T_c`, `p_i`, p*, the melting
+    /// pressure, the share and the margins `p_i` ÷ p* and share ÷ [`THIN_ENVELOPE_FRACTION`].
+    ///
+    /// [`THIN_ENVELOPE_FRACTION`]: crate::planetary::params::THIN_ENVELOPE_FRACTION
+    pub(super) fn column_line(
+        column: &crate::planetary::derive::atmosphere::SupercriticalReservoir,
+    ) -> String {
+        format!(
+            "{:?} T/T_c {:.4}, p_i {:.4e} bar, p* {:.4e} bar (p_i/p* {:.4}), p_melt {}, share \
+             {:.4e} (of the line {:.4})",
+            column.gas(),
+            column.temperature_ratio(),
+            column.partial_pressure().value() / 1e5,
+            column.isochore_pressure().value() / 1e5,
+            column.partial_pressure().value() / column.isochore_pressure().value(),
+            column.melting_pressure().map_or_else(
+                || "none".to_owned(),
+                |m| format!("{:.4e} bar", m.value() / 1e5)
+            ),
+            column.share(),
+            column.share() / crate::planetary::params::THIN_ENVELOPE_FRACTION,
+        )
+    }
+
+    /// Its tags, state, `T_s`, `p_s`, g and columns, for a census line.
+    fn line(&self) -> String {
+        format!(
+            "{:?} {:?} (published {:?}), T_s {:.3} K, p_s {:.4e} bar, g {:.4} m s⁻²; surface {:?}, \
+             envelope {:?}; partition's {}; [{}]",
+            self.class,
+            self.state,
+            self.published,
+            self.t_s,
+            self.p_s / 1e5,
+            self.g,
+            self.surface,
+            self.envelope,
+            self.partitioned
+                .as_ref()
+                .map_or_else(|| "none".to_owned(), Self::column_line),
+            self.columns
+                .iter()
+                .map(Self::column_line)
+                .collect::<Vec<_>>()
+                .join("; ")
+        )
+    }
+}
+
+/// Every body of [`envelope_walk`] over the systems `sets`, each generated afresh at its seed
+/// under the rules in force on the calling thread, in order.
+fn envelope_census(sets: &[(&str, Seed, &SystemContext)]) -> Vec<EnvelopeBody> {
+    let mut bodies = Vec::new();
+    for &(set, seed, ctx) in sets {
+        let system = generate(seed, ctx);
+        envelope_walk(ctx, &system, &mut |kind, record, derived| {
+            bodies.push(EnvelopeBody::of(set, kind, record, derived));
+        });
+    }
+    bodies
+}
+
+/// The census's [`SUPERCRITICAL_METHANE_BODY`]'s record and derivation at the epoch, its system
+/// generated afresh under the rules in force on the calling thread (P14.T53.b part 2), for the
+/// record builder's test.
+pub(crate) fn supercritical_methane_body() -> (BodyRecord, DerivedBody) {
+    let ctx = supercritical_methane_context();
+    let system = generate(SEED, ctx);
+    let mut found = None;
+    envelope_walk(ctx, &system, &mut |_, record, derived| {
+        if record.identity().id().to_string() == SUPERCRITICAL_METHANE_BODY {
+            found = Some((record.clone(), *derived));
+        }
+    });
+    found.expect("the census body is present at the epoch")
+}
+
+/// The census body's moon, which a hand-built nitrogen rank puts under a supercritical envelope
+/// ([`under_every_24_hold_a_moon_under_a_supercritical_envelope_takes_the_envelope_s_tags`]): at
+/// its own ranks a `Snowball` holding 18.3 bar of N₂ at 135.9 K, 1.08 N₂'s `T_c`, against its
+/// isochore's 49.9 bar, the sample's moon nearest the line (P14.T53.b part 2's moons' census).
+const SUPERCRITICAL_MOON: &str = "02001b2ca0000000.0401";
+
+/// P14.T53.b part 2 through a moon's record (the batch review's fixes): no moon of the 400 lies
+/// under a supercritical envelope (`under_every_24_hold_the_sample_s_moons_supercritical_columns_
+/// are_stated`), so one is built by hand from the sample's nearest, [`SUPERCRITICAL_MOON`], its
+/// nitrogen rank raised to 1 − 10⁻⁶ in its generated system. Its
+/// record (`satellite_record`) then takes the envelope's tags, its surface not applicable and its
+/// envelope its model (from 26, P14.T53.f), under its nitrogen's reservoir above N₂'s critical
+/// isochore; at its own ranks its surface stays.
+#[test]
+fn under_every_24_hold_a_moon_under_a_supercritical_envelope_takes_the_envelope_s_tags() {
+    use crate::stellar::draws::UnitUniform;
+    let ctx = supercritical_methane_context();
+    let (_, sub) = SUPERCRITICAL_MOON.split_once('.').expect("a body ID");
+    let index = u16::from_str_radix(sub, 16).expect("a hexadecimal index");
+    let moon_of = |system: &PlanetarySystem| {
+        let mut found = Vec::new();
+        envelope_walk(ctx, system, &mut |kind, record, derived| {
+            if record.identity().id().to_string() == SUPERCRITICAL_MOON {
+                found.push(EnvelopeBody::of("sample", kind, record, derived));
+            }
+        });
+        assert_eq!(
+            found.len(),
+            1,
+            "{SUPERCRITICAL_MOON} is present at the epoch"
+        );
+        found.pop().expect("one body")
+    };
+    let (own, raised) = {
+        let mut system = generate(SEED, ctx);
+        let own = moon_of(&system);
+        let moon = system
+            .bodies
+            .iter_mut()
+            .find(|body| body.index.get() == index)
+            .expect("the moon is a body of its system");
+        let Part::Moon(part) = &mut moon.part else {
+            panic!("{SUPERCRITICAL_MOON} is a moon")
+        };
+        let draws = crate::planetary::derive::atmosphere::VolatileDraws {
+            nitrogen: UnitUniform::new(1.0 - 1e-6).expect("a rank in (0, 1)"),
+            ..*part.satellite.volatiles()
+        };
+        part.satellite = part.satellite.with_volatiles(draws);
+        (own, moon_of(&system))
+    };
+    eprintln!(
+        "{SUPERCRITICAL_MOON}\n  at its own ranks {}\n  its nitrogen raised {}",
+        own.line(),
+        raised.line()
+    );
+    assert_envelope_tags(&own);
+    assert_eq!(own.surface, SectionState::Ok);
+    assert!(own.hidden.is_none());
+    assert_envelope_tags(&raised);
+    assert!(raised.label.ends_with("moons"), "{}", raised.label);
+    assert!(raised.class.has_solid_surface(), "{}", raised.line());
+    assert_eq!(raised.surface, SectionState::NotApplicable);
+    // From 26 its supercritical envelope is its model (P14.T53.f).
+    assert_eq!(raised.envelope, SectionState::Ok);
+    let hidden = raised
+        .hidden
+        .expect("its nitrogen's reservoir hides the surface");
+    eprintln!("  hidden by {}", EnvelopeBody::column_line(&hidden));
+    assert_eq!(hidden.gas(), Gas::Nitrogen);
+}
+
+/// P14.T53.b part 2's moons over the 400 whole systems, a measurement run by name (the batch
+/// review's fixes, item 2): every moon with a condensable at
+/// or above its critical temperature, its margins, and every moon a supercritical envelope hides,
+/// each with its tags checked ([`assert_envelope_tags`]).
+#[test]
+#[ignore = "a measurement for P14.T53.b part 2's record, run by name"]
+fn under_every_24_hold_the_sample_s_moons_supercritical_columns_are_stated() {
+    let sets: Vec<(&str, Seed, &SystemContext)> =
+        sample().iter().map(|ctx| ("sample", SEED, ctx)).collect();
+    let bodies = envelope_census(&sets);
+    let moons: Vec<&EnvelopeBody> = bodies
+        .iter()
+        .filter(|b| b.label.ends_with("moons"))
+        .collect();
+    let (mut columns, mut above, mut hidden) = (0, 0, 0);
+    for body in &moons {
+        assert_envelope_tags(body);
+        columns += body.columns.len();
+        above += body.columns.iter().filter(|c| c.share() > 0.0).count();
+        hidden += usize::from(body.hidden.is_some());
+        if !body.columns.is_empty() {
+            eprintln!("MOON {}: {}", body.label, body.line());
+        }
+    }
+    eprintln!(
+        "{} moons of {} bodies; {columns} columns at or above T_c, {above} above their isochores; \
+         {hidden} hidden",
+        moons.len(),
+        bodies.len()
+    );
+}
+
+/// P14.T53.b part 2's and part 3's tags on `body`: none of [`envelope_tag_faults`]' faults.
+fn assert_envelope_tags(body: &EnvelopeBody) {
+    assert_eq!(envelope_tag_faults(body), Vec::<String>::new());
+}
+
+/// The faults of P14.T53.b part 2's and part 3's tags on `body` ([`EnvelopeBody`]), each a line by
+/// name.
+///
+/// A solid class has its surface `Ok` and its envelope not applicable exactly where no
+/// supercritical envelope hides its surface and its published state is no steam envelope (part 3's
+/// label, the section's whatever the bulk's gravity), and its surface not applicable and its
+/// envelope `Ok` or not modelled where either holds (from 26 a supercritical envelope's section is
+/// its model, P14.T53.f; to 25 it stayed not modelled, decision-p14-t53b-part3 §5); every other
+/// class its surface not applicable and its envelope `Ok` or not modelled (P14.T54.b.i's envelope,
+/// `system::envelope`'s tests). So no
+/// `Ok` surface lies under a supercritical envelope, and exactly one of the two applies. No
+/// derivation's own state is a steam envelope; a hidden surface's reservoir hides it, and its share
+/// is, to the bit, the partition's reservoir's (P14.T53.b part 3).
+#[must_use]
+pub(super) fn envelope_tag_faults(body: &EnvelopeBody) -> Vec<String> {
+    let at = || format!("{}: {}", body.label, body.line());
+    let mut faults = Vec::new();
+    // A steam envelope's label is the section's whatever the bulk's gravity (P14.T53.b part 3),
+    // and only the published state carries it.
+    let steam = body.published == SurfaceState::SteamEnvelope;
+    if body.state == SurfaceState::SteamEnvelope {
+        faults.push(format!(
+            "{}: a steam envelope as its derivation's state",
+            at()
+        ));
+    }
+    let solid = body.class.has_solid_surface();
+    let (surface, envelope): (SectionState, &[SectionState]) =
+        if solid && body.hidden.is_none() && !steam {
+            (SectionState::Ok, &[SectionState::NotApplicable])
+        } else if solid {
+            // From 26 a solid body's supercritical envelope is its model (P14.T53.f).
+            (
+                SectionState::NotApplicable,
+                &[SectionState::Ok, SectionState::NotModelled],
+            )
+        } else {
+            (
+                SectionState::NotApplicable,
+                &[SectionState::Ok, SectionState::NotModelled],
+            )
+        };
+    if body.surface != surface || !envelope.contains(&body.envelope) {
+        faults.push(format!(
+            "{}: its tags against surface {surface:?} and envelope {envelope:?}",
+            at()
+        ));
+    }
+    if let Some(hidden) = &body.hidden {
+        if !hidden.hides_the_surface() {
+            faults.push(format!(
+                "{}: a hidden surface its reservoir does not hide",
+                at()
+            ));
+        }
+        // The record reads the partition's reservoir, and the air's own partial pressures lie at
+        // or under their caps (P14.T53.b part 3).
+        let largest = body.partitioned.as_ref().map_or(
+            f64::NAN,
+            crate::planetary::derive::atmosphere::SupercriticalReservoir::share,
+        );
+        let share = hidden.share();
+        let same = !share.is_nan()
+            && !largest.is_nan()
+            && hyperion_testkit::float::bits(share) == hyperion_testkit::float::bits(largest);
+        if !same {
+            faults.push(format!(
+                "{}: its reservoir's share {share} not the one the record reads, {largest}",
+                at()
+            ));
+        }
+    }
+    faults
+}
+
+/// decision-p14-t53b-part3 §12 (0400): with P14.T53.b part 3 in force, the census's
+/// [`SUPERCRITICAL_METHANE_BODY`] keeps its surface. The partition's cap holds its nitrogen at its
+/// critical isochore, about 95 bar at 1.29 `T_c`, so that its air cools under methane's 190.564 K
+/// critical point and its methane condenses there, a liquid at the surface, as the guide's
+/// `LIQUID COVER` row reads it, 27 K under that point and 3.3 times under the line. Its `T_s` and
+/// `p_s`, 159.171 K and 95.75 bar, are re-measured at 27, whose minor clouds, sediment, adding
+/// rule and haze (P14.T24.h.b) move them from 163.414 K and 104.15 bar.
+#[test]
+fn part_three_returns_the_census_s_methane_snowball_its_surface() {
+    use crate::planetary::chem::partition::CondensatePhase;
+    use crate::planetary::derive::atmosphere::METHANE_RELATIVE_HUMIDITY;
+    use crate::planetary::derive::passes::Convergence;
+    use crate::planetary::derive::{PassDriver, Under};
+    use crate::planetary::params::THIN_ENVELOPE_FRACTION;
+    let ctx = supercritical_methane_context();
+    let (methane, nitrogen) = (Gas::Methane.substance(), Gas::Nitrogen.substance());
+    let diagram = |id: crate::substance::SubstanceId| {
+        id.substance()
+            .phase_diagram()
+            .expect("a condensable's row has a phase diagram")
+    };
+    let mut seen = 0;
+    let system = generate(SEED, ctx);
+    census_walk("sample", ctx, &system, &mut |case| {
+        if case.record.identity().id().to_string() != SUPERCRITICAL_METHANE_BODY {
+            return;
+        }
+        seen += 1;
+        let (record, air) = (case.record, case.derived.atmosphere());
+        let g = record.bulk().ok().expect("its bulk").surface_gravity();
+        let t_s = air.surface_temperature().value();
+        let p_s = air.surface_pressure().expect("an air").value();
+        eprintln!(
+            "{SUPERCRITICAL_METHANE_BODY}: {:?} at {t_s:.4} K under {:.4} bar, {:?}",
+            air.published_state(),
+            p_s / 1e5,
+            case.derived.convergence()
+        );
+        assert_eq!(air.published_state(), SurfaceState::Snowball);
+        assert_eq!(case.surface.state(), SurfaceState::Snowball);
+        assert_eq!(
+            (
+                record.section_state(RecordSection::Surface),
+                record.section_state(RecordSection::Envelope)
+            ),
+            (SectionState::Ok, SectionState::NotApplicable)
+        );
+        assert!(air.supercritical_reservoir(g).is_none());
+        assert_eq!(case.derived.convergence(), Convergence::Converged);
+        assert!((t_s - 159.171).abs() <= 0.001, "{t_s}");
+        assert!((p_s / 1e5 - 95.75).abs() <= 0.01, "{p_s}");
+        assert!(diagram(methane).critical_temperature().value() - t_s >= 10.0);
+        let (_, read) = (case.again)(PassDriver::Again(Under::Read));
+        let read = read.expect("its published pass reads its partition");
+        let partition = &read.partition;
+        let surface_pressure = partition.surface_pressure();
+        // Its methane: liquid at the surface, below its critical temperature and its melting
+        // pressure there, at its humidity's share of its saturation pressure.
+        let ch4 = partition.of(methane).expect("its methane");
+        let sea = partition.condensate(methane).expect("its methane's sea");
+        eprintln!("  CH4 {ch4:?}\n  {sea:?}");
+        assert_eq!(sea.phase(), CondensatePhase::Liquid);
+        let d = diagram(methane);
+        assert!(ch4.lies_at() < d.critical_temperature());
+        assert!(surface_pressure < d.melting_pressure(ch4.lies_at()).expect("a melting curve"));
+        let liquids = case.surface.condensates().surface_liquids();
+        assert!(
+            liquids.iter().any(|&(id, _)| id == sea.liquid()),
+            "{liquids:?}"
+        );
+        let held = METHANE_RELATIVE_HUMIDITY * d.saturation_pressure(ch4.lies_at()).value();
+        assert_same_bits(ch4.dominance(), 0.0);
+        assert!((ch4.partial_pressure().value() / held - 1.0).abs() < 1e-9);
+        let summed = ch4.airborne().value() + ch4.condensed().value();
+        assert!((summed / ch4.inventory().value() - 1.0).abs() < 1e-9);
+        // Its nitrogen: held at its critical isochore, a supercritical reservoir of under half
+        // the envelope's line, no liquid.
+        let n2 = partition.of(nitrogen).expect("its nitrogen");
+        let isochore = diagram(nitrogen)
+            .critical_isochore_pressure(n2.lies_at())
+            .expect("above its critical temperature")
+            .value();
+        eprintln!("  N2 {n2:?}");
+        assert!((n2.partial_pressure().value() / isochore - 1.0).abs() < 1e-9);
+        assert_eq!(
+            partition
+                .condensate(nitrogen)
+                .map(crate::planetary::chem::partition::Condensate::phase),
+            Some(CondensatePhase::Supercritical)
+        );
+        let column = air.supercritical_column().expect("its steps' column");
+        assert_the_steps_column_is_published(&column, n2, partition);
+        let reservoir = air.partitioned_reservoir(g).expect("its nitrogen's column");
+        assert_eq!(reservoir.gas(), Gas::Nitrogen);
+        assert!(
+            reservoir.share() < 0.5 * THIN_ENVELOPE_FRACTION,
+            "{reservoir:?}"
+        );
+        assert!(liquids.iter().all(|&(id, _)| id != nitrogen), "{liquids:?}");
+    });
+    assert_eq!(
+        seen, 1,
+        "{SUPERCRITICAL_METHANE_BODY} is present at the epoch"
+    );
+}
+
+/// The greenhouse steps' last solve's column `column` (`partitioned_greenhouse`, which the section
+/// reads) against the published pass's partition `partition` and its entry `species` for the
+/// column's substance: the same, to the bit (decision-p14-t53b-part3 §6).
+fn assert_the_steps_column_is_published(
+    column: &crate::planetary::chem::partition::CriticalColumn,
+    species: &crate::planetary::chem::partition::Partitioned,
+    partition: &crate::planetary::chem::partition::Partition,
+) {
+    eprintln!("  steps' column {column:?}");
+    assert_eq!(column.substance(), species.substance());
+    for (what, steps, published) in [
+        (
+            "T_lies",
+            column.lies_at().value(),
+            species.lies_at().value(),
+        ),
+        (
+            "p_i",
+            column.partial_pressure().value(),
+            species.partial_pressure().value(),
+        ),
+        (
+            "p_s",
+            column.surface_pressure().value(),
+            partition.surface_pressure().value(),
+        ),
+        ("R", column.reservoir().value(), species.condensed().value()),
+    ] {
+        eprintln!("  {what}: steps {steps:e}, published {published:e}");
+        assert_same_bits(steps, published);
+    }
+}
+
+/// P14.T53.b part 2 (decision-absurd-states-24 R2.3, R4.3): LOOK72's three methane `Snowball`s and
+/// its nitrogen `Snowball`s at 81–313 bar keep their surfaces, none under a supercritical envelope,
+/// their margins printed: 0900 keeps about 27 bar of methane at 190.9 K against its isochore's 46.5
+/// bar, 0500 and 0600 keep no methane (T53.a's methane route), and the nitrogen bodies' columns
+/// above their isochores hold far less than a thousandth of their mass.
+#[test]
+fn under_every_24_hold_look72_s_snowballs_keep_their_surfaces() {
+    let galaxy = look72_galaxy();
+    let systems: std::collections::BTreeSet<&str> = LOOK72_METHANE_SNOWBALLS
+        .iter()
+        .chain(&LOOK72_NITROGEN_SNOWBALLS)
+        .map(|id| id.split_once('.').expect("a body ID").0)
+        .collect();
+    let contexts: Vec<SystemContext> = systems
+        .into_iter()
+        .map(|id| {
+            SystemContext::for_system(galaxy, id.parse().expect("a system ID"))
+                .expect("a system of LOOK72")
+        })
+        .collect();
+    let sets: Vec<(&str, Seed, &SystemContext)> = contexts
+        .iter()
+        .map(|ctx| ("look72", galaxy.seed(), ctx))
+        .collect();
+    let bodies = envelope_census(&sets);
+    for body in &bodies {
+        assert_envelope_tags(body);
+    }
+    for (group, ids) in [
+        ("methane", &LOOK72_METHANE_SNOWBALLS[..]),
+        ("nitrogen", &LOOK72_NITROGEN_SNOWBALLS[..]),
+    ] {
+        for id in ids {
+            let body = bodies
+                .iter()
+                .find(|body| body.id == *id)
+                .unwrap_or_else(|| panic!("{id} is present at the epoch"));
+            eprintln!("LOOK72's {group} Snowball {}: {}", body.label, body.line());
+            assert_eq!(body.surface, SectionState::Ok, "{}", body.line());
+            assert!(body.hidden.is_none(), "{}", body.line());
+        }
+    }
+}
+
+/// P14.T53.b part 2's census, a measurement for the record (decision-absurd-states-24 R2.3), run
+/// by name over part 1's census set ([`present_census`]'s: the first 60 sample systems, the
+/// golden systems and the 27 systems of LOOK72's triaged bodies), each generated afresh: every
+/// body whose surface a supercritical envelope hides, by
+/// name, substance, `T_s` ÷ `T_c` and share of its mass; those beyond 2.5 `T_c`, past the line's
+/// checked range, with their margins; the near misses, a column of 10⁻⁴ to 10⁻³ of the mass; and
+/// the count of columns above their isochores. Every body's tags are checked
+/// ([`assert_envelope_tags`]).
+#[test]
+#[ignore = "a measurement for P14.T53.b part 2's record, run by name"]
+fn under_every_24_hold_part_two_s_movers_are_stated() {
+    let look72 = look72_triaged_contexts();
+    let look72_seed = look72_galaxy().seed();
+    let sets: Vec<(&str, Seed, &SystemContext)> = sample()
+        .iter()
+        .take(60)
+        .map(|ctx| ("sample", SEED, ctx))
+        .chain(
+            golden_systems()
+                .iter()
+                .map(|(name, ctx, _)| (*name, Seed::new(GOLDEN_SYSTEMS_SEED), ctx)),
+        )
+        .chain(look72.iter().map(|ctx| ("look72", look72_seed, ctx)))
+        .collect();
+    let bodies = envelope_census(&sets);
+    for body in &bodies {
+        assert_envelope_tags(body);
+    }
+    let columns: usize = bodies.iter().map(|body| body.columns.len()).sum();
+    let above: Vec<(
+        &EnvelopeBody,
+        &crate::planetary::derive::atmosphere::SupercriticalReservoir,
+    )> = bodies
+        .iter()
+        .flat_map(|body| body.columns.iter().map(move |column| (body, column)))
+        .filter(|(_, column)| column.share() > 0.0)
+        .collect();
+    let movers: Vec<&EnvelopeBody> = bodies.iter().filter(|b| b.hidden.is_some()).collect();
+    eprintln!(
+        "{} bodies of {} systems; {columns} columns at or above T_c, {} above their isochores; {} \
+         movers",
+        bodies.len(),
+        sets.len(),
+        above.len(),
+        movers.len()
+    );
+    eprintln!("MOVERS:");
+    for body in &movers {
+        let hidden = body.hidden.as_ref().expect("a mover's reservoir");
+        eprintln!(
+            "  {} by {}\n    {}",
+            body.label,
+            EnvelopeBody::column_line(hidden),
+            body.line()
+        );
+    }
+    eprintln!("MOVERS BEYOND 2.5 T_c:");
+    for body in &movers {
+        for column in body.columns.iter().filter(|c| c.hides_the_surface()) {
+            if column.temperature_ratio() > 2.5 {
+                eprintln!("  {}: {}", body.label, EnvelopeBody::column_line(column));
+            }
+        }
+    }
+    eprintln!("NEAR MISSES (a column of 1e-4 to 1e-3 of the mass):");
+    for (body, column) in &above {
+        if (1e-4..crate::planetary::params::THIN_ENVELOPE_FRACTION).contains(&column.share()) {
+            eprintln!(
+                "  {} (hidden {}): {}",
+                body.label,
+                body.hidden.is_some(),
+                EnvelopeBody::column_line(column)
+            );
+        }
+    }
+    eprintln!("EVERY COLUMN ABOVE ITS ISOCHORE:");
+    for (body, column) in &above {
+        eprintln!("  {}: {}", body.label, EnvelopeBody::column_line(column));
+    }
+}
+
+/// The four ice-bulk planets that Jeans's test lets keep their water, published dry at 85–134 K
+/// as past-only runaways (decision-p14-t54a-ganymede, "Remnant ice-bulk bodies' water"), whose
+/// water P14.T53.b part 3 states.
+const JEANS_RETAINING_ICE_BULKS: [&str; 4] = [
+    "02001b2cdfff0000.0200",
+    "01ffeb2c5ffe0000.0300",
+    "01ffeb2c20000000.0500",
+    "01ffeb2c20000000.0600",
+];
+
+/// The Jeans-retaining ice bulk that decision-p14-t53b-part3 §12 (0300) names, a past-only runaway that
+/// keeps water beyond its escape's capacity.
+const KEPT_WATER_ICE_BULK: &str = "01ffeb2c5ffe0000.0300";
+
+/// One present planet, member or moon of P14.T53.b part 3's census ([`part_three_census`]).
+struct SteamBody {
+    /// "{set} {id} {kind}", and its ID.
+    label: String,
+    id: String,
+    /// Its record's surface and envelope tags.
+    surface: SectionState,
+    envelope: SectionState,
+    /// Its derivation's state, published state and water state.
+    state: SurfaceState,
+    published: SurfaceState,
+    water_state: SurfaceState,
+    /// Its mean surface temperature, K, surface pressure, Pa, and Bond albedo.
+    t_s: f64,
+    p_s: f64,
+    albedo: f64,
+    /// Its bulk's surface gravity, m s⁻².
+    g: f64,
+    /// Its air's water column and airborne water, as weights, Pa.
+    water_column: f64,
+    water_airborne: f64,
+    /// The water its surface can hold where a past-only runaway kept some, kg.
+    kept_water: Option<f64>,
+    /// Its free water beyond its escape's capacity, kg: its inventory's after the cosmic
+    /// shoreline, less the timed route's loss, none below zero (P14.T53.b part 3's steam).
+    beyond_the_capacity: f64,
+    /// Its air's column and airborne weights by gas, in [`Gas::ALL`]'s order, Pa.
+    columns: [f64; 9],
+    airborne: [f64; 9],
+    /// Its record's surface pressure, Pa, where its surface is `Ok`: finite.
+    record_p_s: Option<f64>,
+    /// Whether its derivation's air has no surface pressure, a gas envelope's.
+    no_surface_pressure: bool,
+    /// Its record's H₂O liquid and solid entries' reservoirs, kg m⁻², where its surface is `Ok`.
+    water_entries: Vec<(crate::planetary::chem::partition::CondensatePhase, f64)>,
+    /// Its partition's supercritical column, and that column's reservoir under its bulk's gravity.
+    column: Option<crate::planetary::chem::partition::CriticalColumn>,
+    reservoir: Option<crate::planetary::derive::atmosphere::SupercriticalReservoir>,
+    /// The reservoir that hides its surface, as the record reads it.
+    hidden: Option<crate::planetary::derive::atmosphere::SupercriticalReservoir>,
+    /// Its passes and how they ended.
+    passes: u32,
+    convergence: crate::planetary::derive::passes::Convergence,
+}
+
+impl SteamBody {
+    /// The body `record` of the set `set` and kind `kind`, derived as `derived`.
+    fn of(set: &str, kind: &str, record: &BodyRecord, derived: &DerivedBody) -> Self {
+        use crate::planetary::chem::partition::CondensatePhase;
+        let bulk = record.bulk().ok().expect("a walked body has its bulk");
+        let gravity = bulk.surface_gravity();
+        let air = derived.atmosphere();
+        let id = record.identity().id().to_string();
+        let water_entries = match record.surface() {
+            Section::Ok(surface) => surface
+                .condensates()
+                .entries()
+                .iter()
+                .filter(|e| {
+                    e.substance() == Gas::Water.substance()
+                        && matches!(e.phase(), CondensatePhase::Liquid | CondensatePhase::Solid)
+                })
+                .map(|e| (e.phase(), e.reservoir().value()))
+                .collect(),
+            _ => Vec::new(),
+        };
+        Self {
+            label: format!("{set} {id} {kind}"),
+            id,
+            surface: record.section_state(RecordSection::Surface),
+            envelope: record.section_state(RecordSection::Envelope),
+            state: air.state(),
+            published: air.published_state(),
+            water_state: air.water_state(),
+            t_s: air.surface_temperature().value(),
+            p_s: air.surface_pressure().map_or(f64::NAN, Pascals::value),
+            albedo: air.albedo().value(),
+            g: gravity.value(),
+            water_column: air.inventory_weights().of(Gas::Water).value(),
+            water_airborne: air.partial_pressures().of(Gas::Water).value(),
+            kept_water: air.kept_water().map(crate::units::Kilograms::value),
+            beyond_the_capacity: air.escape().map_or(0.0, |escape| {
+                let free = derived.inventory().water().value() * escape.shoreline().kept();
+                (free - escape.oxygen().water_lost().value()).max(0.0)
+            }),
+            columns: Gas::ALL.map(|gas| air.inventory_weights().of(gas).value()),
+            airborne: Gas::ALL.map(|gas| air.partial_pressures().of(gas).value()),
+            record_p_s: record
+                .surface()
+                .ok()
+                .map(|surface| surface.conditions().surface_pressure().value()),
+            no_surface_pressure: air.surface_pressure().is_none(),
+            water_entries,
+            column: air.supercritical_column(),
+            reservoir: air.partitioned_reservoir(gravity),
+            hidden: air.supercritical_reservoir(gravity),
+            passes: derived.atmosphere_passes(),
+            convergence: derived.convergence(),
+        }
+    }
+
+    /// Its figures, for a census line.
+    fn line(&self) -> String {
+        format!(
+            "{:?} (published {:?}, water {:?}), T_s {:.3} K, p_s {:.4e} bar, A {:.4}, g {:.3}; \
+             water {:.4e} of {:.4e} bar airborne, kept {:?} kg; surface {:?}, envelope {:?}; \
+             H2O entries {:?}; {} passes, {:?}; partition's {}",
+            self.state,
+            self.published,
+            self.water_state,
+            self.t_s,
+            self.p_s / 1e5,
+            self.albedo,
+            self.g,
+            self.water_airborne / 1e5,
+            self.water_column / 1e5,
+            self.kept_water,
+            self.surface,
+            self.envelope,
+            self.water_entries,
+            self.passes,
+            self.convergence,
+            self.column.map_or_else(
+                || "none".to_owned(),
+                |c| {
+                    let depth = c
+                        .substance()
+                        .substance()
+                        .liquid_density_at_pressure(
+                            c.substance()
+                                .substance()
+                                .phase_diagram()
+                                .expect("a supercritical column's row has a diagram")
+                                .critical_temperature(),
+                            c.surface_pressure(),
+                        )
+                        .map_or(f64::NAN, |rho| c.fluid().value() / self.g / rho.value());
+                    format!(
+                        "{} at {:.2} K (T/T_c {:.4}), x p {:.4e} bar, p* {:.4e} bar, p_melt {:?}, \
+                         reservoir {:.4e} bar, fluid {:.4e} bar, {depth:.1} m at its T_c's density; \
+                         share {:.4e}",
+                        c.substance().substance().key().as_str(),
+                        c.lies_at().value(),
+                        c.temperature_ratio(),
+                        c.partial_pressure().value() / 1e5,
+                        c.isochore_pressure().value() / 1e5,
+                        c.melting_pressure().map(|m| m.value() / 1e5),
+                        c.reservoir().value() / 1e5,
+                        c.fluid().value() / 1e5,
+                        self.reservoir.map_or(f64::NAN, |r| r.share()),
+                    )
+                }
+            ),
+        )
+    }
+}
+
+/// [`part_three_census`]: part 3's landing with P14.T53.e's present state, P14.T53.c's exposed
+/// share and R09.T7.g's ray-traced plains, on the record from generator version 25, under T51.h's
+/// halvings, the oracle of P14.T51.l's secant steps, whose movers are its own
+/// (`under_the_secant_root_the_passes_and_movers_are_stated`).
+fn part_three_s_own_25_census(sets: &[(&str, Seed, &SystemContext)]) -> Vec<SteamBody> {
+    use crate::planetary::derive::passes::with_halvings;
+    with_halvings(|| part_three_census(sets))
+}
+
+/// Every body of [`envelope_walk`] over the systems `sets`, each generated afresh at its seed
+/// under the rules in force on the calling thread, in order, for P14.T53.b part 3's census.
+fn part_three_census(sets: &[(&str, Seed, &SystemContext)]) -> Vec<SteamBody> {
+    let mut bodies = Vec::new();
+    for &(set, seed, ctx) in sets {
+        let system = generate(seed, ctx);
+        envelope_walk(ctx, &system, &mut |kind, record, derived| {
+            bodies.push(SteamBody::of(set, kind, record, derived));
+        });
+    }
+    bodies
+}
+
+/// The boarding items B1, B4 and B5 each body of the census `on` fails (decision-p14-t53b-part3
+/// §8), and the walk's passes.
+fn part_three_boarding(on: &[SteamBody]) -> (Vec<String>, u64) {
+    let mut failures = Vec::new();
+    let mut passes = 0_u64;
+    for a in on {
+        passes += u64::from(a.passes);
+        // A gas envelope has no surface pressure (`None`, the census's `NaN`), which is no figure;
+        // every other body's is finite, its record's too (decision-p14-t53b-part3 and main's relay of 2026-10-26).
+        let p_s = if a.no_surface_pressure {
+            a.state == SurfaceState::GasEnvelope
+        } else {
+            a.p_s.is_finite()
+        };
+        let record = a.record_p_s.is_none_or(f64::is_finite);
+        if !(p_s && record && a.t_s.is_finite() && a.albedo.is_finite()) {
+            failures.push(format!("B4 not finite: {}: {}", a.label, a.line()));
+        }
+        // B1: condensed water on a present runaway or a steam envelope that is no supercritical
+        // reservoir above water's critical point (its partition's column), or any H₂O liquid or
+        // solid entry on its record.
+        let present_runaway = a.state == SurfaceState::RunawayGreenhouse;
+        let supercritical_water = a
+            .column
+            .is_some_and(|c| c.substance() == Gas::Water.substance() && c.fluid() == c.reservoir());
+        let condensed = a.water_airborne < a.water_column && !supercritical_water;
+        if (present_runaway || a.published == SurfaceState::SteamEnvelope)
+            && (!a.water_entries.is_empty() || condensed)
+        {
+            failures.push(format!("B1 condensed water: {}: {}", a.label, a.line()));
+        }
+        if a.published == SurfaceState::SteamEnvelope
+            && (a.state != SurfaceState::RunawayGreenhouse || a.surface == SectionState::Ok)
+        {
+            failures.push(format!("B5 steam envelope: {}: {}", a.label, a.line()));
+        }
+    }
+    (failures, passes)
+}
+
+/// decision-p14-t53b-part3 §13.3 over the census `on`, each failure pushed to `failures`: every
+/// critical column beyond 2.5 `T_c` keeping its verdict with its line at 0.75 and 1.25 times, and
+/// none.
+fn check_part_three_rulings(on: &[SteamBody], failures: &mut Vec<String>) {
+    use crate::planetary::params::THIN_ENVELOPE_FRACTION;
+    use crate::units::consts::GRAVITATIONAL_CONSTANT;
+    let fourpi_g = 4.0 * PI * GRAVITATIONAL_CONSTANT;
+    for a in on {
+        let Some(c) = a.column.filter(|c| c.temperature_ratio() > 2.5) else {
+            continue;
+        };
+        let k = usize::from(c.substance().index());
+        let (whole, airborne) = (a.columns[k], a.airborne[k]);
+        let hides = |scale: f64| {
+            let reservoir = (whole - scale * airborne).max(0.0);
+            fourpi_g * reservoir / (a.g * a.g) >= THIN_ENVELOPE_FRACTION
+        };
+        let verdict = a.hidden.is_some();
+        let kept = [0.75, 1.25].iter().all(|&scale| hides(scale) == verdict);
+        eprintln!(
+            "BEYOND 2.5 T_c {}: hides {verdict}, at 0.75 p* {}, at 1.25 p* {}, with no line {}",
+            a.label,
+            hides(0.75),
+            hides(1.25),
+            hides(0.0)
+        );
+        if !kept || (a.id == "01ffeb2c1ffe0000.0200" && hides(0.0)) {
+            failures.push(format!("§13.3 beyond 2.5 T_c: {}: {}", a.label, a.line()));
+        }
+    }
+}
+
+/// Part 3's census groups (decision-p14-t53b-part3 §9), printed: every steam envelope, the
+/// runaways keeping water, the supercritical reservoirs under an `Ok` surface, the reservoirs that
+/// water hides under another state, those beyond 2.5 `T_c` and the four Jeans-retaining ice-bulk
+/// planets.
+fn print_part_three_groups(on: &[SteamBody]) {
+    eprintln!("STEAM ENVELOPES:");
+    for a in on
+        .iter()
+        .filter(|a| a.published == SurfaceState::SteamEnvelope)
+    {
+        eprintln!("  {}: {}", a.label, a.line());
+    }
+    eprintln!("RUNAWAYS KEEPING WATER (present, then past-only):");
+    for a in on {
+        let present = a.state == SurfaceState::RunawayGreenhouse
+            && a.water_state == SurfaceState::RunawayGreenhouse
+            && a.water_column > 0.0;
+        if present || a.kept_water.is_some() {
+            eprintln!("  {}: {}", a.label, a.line());
+        }
+    }
+    eprintln!("SUPERCRITICAL RESERVOIRS UNDER AN OK SURFACE:");
+    for a in on {
+        if a.surface == SectionState::Ok && a.column.is_some_and(|c| c.reservoir().value() > 0.0) {
+            eprintln!("  {}: {}", a.label, a.line());
+        }
+    }
+    eprintln!("HIDDEN BY WATER ON ANOTHER STATE (a gravity's mismatch):");
+    for a in on {
+        if a.hidden.is_some_and(|h| h.gas() == Gas::Water)
+            && a.published != SurfaceState::SteamEnvelope
+        {
+            eprintln!("  {}: {}", a.label, a.line());
+        }
+    }
+    eprintln!("BEYOND 2.5 T_c:");
+    for a in on {
+        if a.column.is_some_and(|c| c.temperature_ratio() > 2.5) {
+            eprintln!("  {}: {}", a.label, a.line());
+        }
+    }
+    eprintln!("THE JEANS-RETAINING ICE BULKS:");
+    for id in JEANS_RETAINING_ICE_BULKS {
+        for a in on.iter().filter(|a| a.id == id) {
+            eprintln!("  {}: {}", a.label, a.line());
+        }
+    }
+}
+
+/// P14.T53.b part 3's census and boarding test (decision-p14-t53b-part3 §8–§9), run by name over
+/// part 1's census set (the first 60 sample systems, the golden systems and the 27 systems of
+/// LOOK72's triaged bodies), each generated afresh, part 3 in force from generator version 25: its
+/// groups, every steam envelope, the supercritical reservoirs under an `Ok` surface, the four
+/// Jeans-retaining ice-bulk planets' water, and the walk's passes. It asserts the boarding items it
+/// can see by body:
+///
+/// - B1: no present runaway or steam envelope holds H₂O condensed, on its record or in its air;
+/// - B3: [`SUPERCRITICAL_METHANE_BODY`] keeps its surface section;
+/// - B4: every figure finite;
+/// - B5: every steam envelope's division a runaway's and its surface not `Ok`; that it is a label
+///   alone holds by construction (`Atmosphere::state` never gives it, so no figure reads it).
+///
+/// B2 is `venus_earth_mars_and_titan_publish_their_own_states`'. It is the census of part 3 at 25
+/// (decision-p14-t53b-part3 §8, as main relayed its riding 25 on 2026-10-27).
+#[test]
+#[ignore = "a measurement and boarding test for P14.T53.b part 3's record, run by name"]
+fn part_three_s_census_is_stated() {
+    use crate::planetary::chem::partition::CondensatePhase;
+    let look72 = look72_triaged_contexts();
+    let look72_seed = look72_galaxy().seed();
+    let sets: Vec<(&str, Seed, &SystemContext)> = sample()
+        .iter()
+        .take(60)
+        .map(|ctx| ("sample", SEED, ctx))
+        .chain(
+            golden_systems()
+                .iter()
+                .map(|(name, ctx, _)| (*name, Seed::new(GOLDEN_SYSTEMS_SEED), ctx)),
+        )
+        .chain(look72.iter().map(|ctx| ("look72", look72_seed, ctx)))
+        .collect();
+    let on = part_three_s_own_25_census(&sets);
+    let (mut failures, passes) = part_three_boarding(&on);
+    print_part_three_groups(&on);
+    check_part_three_rulings(&on, &mut failures);
+    // decision-p14-t53b-part3 §12 (0300): a past-only runaway keeping water beyond its escape's
+    // capacity, one of the four Jeans-retaining ice bulks, holds it as its present class's ice.
+    for a in on.iter().filter(|a| a.id == KEPT_WATER_ICE_BULK) {
+        let at = format!("{}: {}", a.label, a.line());
+        assert_eq!(a.published, SurfaceState::Snowball, "{at}");
+        assert_eq!(a.water_state, SurfaceState::Snowball, "{at}");
+        let kept = a
+            .kept_water
+            .unwrap_or_else(|| panic!("{at}: it keeps water"));
+        assert!(kept > 0.0, "{at}");
+        assert!(
+            (a.beyond_the_capacity / kept - 1.0).abs() < 1e-12,
+            "{at}: {} beyond the capacity",
+            a.beyond_the_capacity
+        );
+        assert!(
+            a.water_entries
+                .iter()
+                .all(|(phase, _)| *phase == CondensatePhase::Solid)
+                && !a.water_entries.is_empty(),
+            "{at}"
+        );
+    }
+    // decision-p14-t53b-part3 §12 (0900): LOOK72's 106 K past runaway kept water beyond its
+    // escape's capacity, as ice alone, a `Snowball`; from generator version 27 it is not generated
+    // (`LOOK72_GONE`).
+    let runaway_106_k: Vec<&SteamBody> = on
+        .iter()
+        .filter(|a| a.label.starts_with("look72") && a.id == LOOK72_106_K_RUNAWAY)
+        .collect();
+    assert_eq!(runaway_106_k.len(), 0, "{LOOK72_106_K_RUNAWAY}");
+    for a in runaway_106_k {
+        let at = format!("{}: {}", a.label, a.line());
+        assert_eq!(a.published, SurfaceState::Snowball, "{at}");
+        assert!(a.kept_water.is_some_and(|kept| kept > 0.0), "{at}");
+        assert!(
+            !a.water_entries.is_empty()
+                && a.water_entries
+                    .iter()
+                    .all(|(phase, _)| *phase == CondensatePhase::Solid),
+            "{at}"
+        );
+    }
+    let methane = on
+        .iter()
+        .find(|a| a.id == SUPERCRITICAL_METHANE_BODY)
+        .expect("the census body is present at the epoch");
+    eprintln!("PART 2'S CASE {}: {}", methane.label, methane.line());
+    // B3, as decision-p14-t53b-part3 §12 (0400) rules it: its surface returns.
+    if (methane.surface, methane.envelope) != (SectionState::Ok, SectionState::NotApplicable) {
+        failures.push(format!(
+            "B3 part 2's case: {}: {}",
+            methane.label,
+            methane.line()
+        ));
+    }
+    eprintln!(
+        "{} bodies of {} systems; {passes} passes",
+        on.len(),
+        sets.len()
+    );
+    for failure in &failures {
+        eprintln!("FAILURE {failure}");
+    }
+    assert_eq!(failures, Vec::<String>::new(), "boarding failures");
+}
+
+/// One body of P14.T53.c's census ([`thin_air_census`]): its record's state and air, and its
+/// dominant condensable against its ice.
+pub(crate) struct ThinAirBody {
+    /// "{set} {kind} {id}".
+    pub(crate) label: String,
+    pub(crate) state: SurfaceState,
+    /// Its record's surface pressure, Pa, and its column p ÷ g, kg m⁻².
+    pub(crate) p: f64,
+    pub(crate) column: f64,
+    /// Its derivation's surface pressure, Pa: an airless body's residue too.
+    pub(crate) air_p: f64,
+    /// Its record's mean surface temperature and coldest zone, K.
+    pub(crate) t_s: f64,
+    pub(crate) coldest: f64,
+    /// Its record's gases, as listed, their mean molar mass, g mol⁻¹, and its surface gravity,
+    /// m s⁻².
+    pub(crate) gases: Vec<(crate::substance::SubstanceId, f64)>,
+    pub(crate) mu: Option<f64>,
+    pub(crate) g: f64,
+    /// Its record's liquids' cover, 0 to 1.
+    pub(crate) liquid_cover: f64,
+    /// Whether its record's aerosols are modelled (a value, an inventory, empty or not).
+    pub(crate) aerosols_modelled: bool,
+    /// Its record's vertical structure: `None` where not modelled, else whether it holds a
+    /// profile (`false`, computed as no air).
+    pub(crate) structure: Option<bool>,
+    /// Its air's largest gas where that gas lies as ice on its surface: the gas, its partial
+    /// pressure, Pa, the temperature its ice is judged at (its own where its ice holds it,
+    /// P14.T53.c, else the record's coldest zone), K, and the gas's saturation pressure there, Pa.
+    pub(crate) dominant: Option<(Gas, f64, f64, f64)>,
+    /// Whether its record's liquids list water's ocean under a `Snowball`'s ice (W3 (b)): an `H2O`
+    /// item with no `H2O` liquid entry.
+    pub(crate) under_ice_item: bool,
+    /// Its liquid entries whose listed share differs from their own `area_fraction` while the
+    /// entries' total is at most 1 (W2), by key.
+    pub(crate) misread: Vec<String>,
+    /// Rendering plan R09's reading of a planet's or a member's record
+    /// (`CoarseInputs::for_body`): `None` for a moon, which reads its planet's record too, else
+    /// whether it read and, where not, why.
+    pub(crate) r09: Option<Result<(), String>>,
+    /// Each gas its ice holds by P14.T53.c's rule, with its saturation pressure at its ice's
+    /// temperature, Pa.
+    pub(crate) held_ice: Vec<(Gas, f64)>,
+    /// Its record's CO₂ cap, K, where it holds one (P14.T53.h).
+    pub(crate) cap: Option<f64>,
+    /// a ÷ `L_Ro` = 2Ωa ÷ c of its record's air, c = `R_air` √(`T_eq` ÷ `c_p`) at its derivation's
+    /// equilibrium temperature: NaN with no air.
+    pub(crate) rossby: f64,
+    /// Its hosts' light, S ÷ S⊕.
+    pub(crate) flux_earths: f64,
+    /// The spin its record's conditions were derived under.
+    pub(crate) spin: crate::planetary::hooks::surface::SeasonalSpin,
+    /// Its derivation's surface temperature, K, and airborne CO₂, Pa: what P14.T53.h's settled
+    /// log is matched on.
+    pub(crate) air_t: f64,
+    pub(crate) co2: f64,
+    /// Its derivation's N₂, Pa: an airless body's residue too (P14.T53.i's census).
+    pub(crate) nitrogen: f64,
+    /// Its derivation's CO₂ partial pressure x p, Pa, x its mole fraction by its weights over their
+    /// molar masses, and its CO₂ inventory as a column weight, Pa (P14.T53.h's census at the cap).
+    pub(crate) co2_partial: f64,
+    pub(crate) co2_inventory: f64,
+}
+
+impl ThinAirBody {
+    /// The figures of `record` and `derived`, a body of `set` and `kind`, with an `Ok` bulk and
+    /// surface.
+    fn of(
+        (set, ctx): (&str, &SystemContext),
+        kind: &str,
+        record: &BodyRecord,
+        derived: &crate::planetary::derive::DerivedBody,
+    ) -> Option<Self> {
+        use crate::planetary::chem::partition::CondensatePhase;
+        use crate::planetary::record::Modelled;
+        let Section::Ok(surface) = record.surface() else {
+            return None;
+        };
+        let conditions = surface.conditions();
+        let p = conditions.surface_pressure().value();
+        // The record's own gravity, its bulk's: a moon's radius is its own (ruling 83.7) and an
+        // icy member's ruling 112.8's, not its derivation's body's; a moon's air is judged at it.
+        let g = record.bulk().ok()?.surface_gravity().value();
+        let coldest = conditions.climate_range().0.value();
+        let gases = conditions.gases().to_vec();
+        let air = derived.atmosphere();
+        let dominant = gases.first().and_then(|&(id, x)| {
+            let gas = id.gas()?;
+            let diagram = id.substance().phase_diagram()?;
+            surface.condensates().entry(id, CondensatePhase::Solid)?;
+            let at = air.held_ice_temperature(gas).map_or(coldest, Kelvin::value);
+            let p_sat = diagram.saturation_pressure(Kelvin::new(at)).value();
+            Some((gas, x * p, at, p_sat))
+        });
+        let water = Gas::Water.substance();
+        let figures = surface.figures();
+        let condensates = surface.condensates();
+        let under_ice_item = figures.surface_liquids().iter().any(|&(id, _)| id == water)
+            && condensates.entry(water, CondensatePhase::Liquid).is_none();
+        let liquids: Vec<_> = condensates
+            .entries()
+            .iter()
+            .filter(|e| e.phase() == CondensatePhase::Liquid)
+            .collect();
+        let total: f64 = liquids.iter().map(|e| e.area_fraction()).sum();
+        let misread = if total <= 1.0 {
+            liquids
+                .iter()
+                .filter_map(|e| {
+                    let listed = figures
+                        .surface_liquids()
+                        .iter()
+                        .find(|&&(id, _)| id == e.substance())
+                        .map_or(f64::NAN, |&(_, a)| a);
+                    listed.total_cmp(&e.area_fraction()).is_ne().then(|| {
+                        format!(
+                            "{} listed {listed:.5}, its own {:.5}",
+                            e.substance().substance().key(),
+                            e.area_fraction()
+                        )
+                    })
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        Some(Self {
+            label: format!("{set} {kind} {}", record.identity().id()),
+            state: air.state(),
+            p,
+            column: p / g,
+            air_p: air.surface_pressure().map_or(0.0, Pascals::value),
+            t_s: conditions.mean_surface_temperature().value(),
+            coldest,
+            gases,
+            mu: conditions.mean_molar_mass_g_per_mol(),
+            g,
+            liquid_cover: figures.ocean_fraction(),
+            aerosols_modelled: matches!(surface.aerosols(), Modelled::Ok(_)),
+            structure: match surface.vertical_structure() {
+                Modelled::NotModelled => None,
+                Modelled::Ok(profile) => Some(profile.is_some()),
+            },
+            dominant,
+            under_ice_item,
+            misread,
+            r09: (kind != "moons").then(|| {
+                crate::planetary::surface::CoarseInputs::for_body(record, None, ctx)
+                    .map(|_| ())
+                    .map_err(|error| format!("{error:?}"))
+            }),
+            held_ice: [Gas::Nitrogen, Gas::Argon]
+                .into_iter()
+                .filter_map(|gas| {
+                    let ice = air.held_ice_temperature(gas)?;
+                    let p = crate::substance::saturation_pressure(gas.substance(), ice)?;
+                    Some((gas, p.value()))
+                })
+                .collect(),
+            cap: conditions.carbon_dioxide_cap().map(Kelvin::value),
+            rossby: rossby_ratio(conditions, derived),
+            flux_earths: conditions.stellar_flux().value()
+                / crate::units::consts::SOLAR_CONSTANT_W_PER_M2,
+            spin: conditions.spin(),
+            air_t: air.surface_temperature().value(),
+            co2: air.partial_pressures().of(Gas::CarbonDioxide).value(),
+            nitrogen: air.partial_pressures().of(Gas::Nitrogen).value(),
+            co2_partial: crate::planetary::derive::atmosphere::mole_fraction_of(
+                air.partial_pressures(),
+                Gas::CarbonDioxide,
+            ) * air.partial_pressures().total().value(),
+            co2_inventory: air.inventory_weights().of(Gas::CarbonDioxide).value(),
+        })
+    }
+
+    /// The dominant condensable's supersaturation over its ice, p ÷ `p_sat`, where it has one.
+    pub(crate) fn factor(&self) -> Option<f64> {
+        self.dominant.map(|(_, p, _, p_sat)| p / p_sat)
+    }
+
+    /// The mole fraction of `gas` in its record's air.
+    pub(crate) fn share(&self, gas: Gas) -> f64 {
+        self.gases
+            .iter()
+            .find(|&&(id, _)| id == gas.substance())
+            .map_or(0.0, |&(_, x)| x)
+    }
+
+    pub(crate) fn line(&self) -> String {
+        let gases = self
+            .gases
+            .iter()
+            .map(|(id, x)| format!("{} {x:.4}", id.substance().key()))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let dominant = self
+            .dominant
+            .map_or_else(String::new, |(gas, p, at, p_sat)| {
+                format!(
+                    "; {gas:?} {p:.4e} Pa over its ice at {at:.2} K, p_sat {p_sat:.4e} Pa, \
+                     ×{:.3e}",
+                    p / p_sat
+                )
+            });
+        format!(
+            "{:?} at {:.2} K (coldest {:.2} K), {:.4e} Pa, column {:.3e} kg m⁻² \
+             [{gases}]{dominant}",
+            self.state, self.t_s, self.coldest, self.p, self.column
+        )
+    }
+}
+
+/// a ÷ `L_Ro` = 2Ωa ÷ c of the air the conditions `conditions` of the derived body `derived`
+/// publish, c = `R_air` √(`T_eq` ÷ `c_p`) at its derivation's equilibrium temperature: NaN with no
+/// air (P14.T53.h's census).
+fn rossby_ratio(
+    conditions: &crate::planetary::hooks::surface::SurfaceConditions,
+    derived: &crate::planetary::derive::DerivedBody,
+) -> f64 {
+    let r = crate::planetary::derive::atmosphere::MOLAR_GAS_CONSTANT;
+    let (mu, cp_r) = (
+        conditions.mean_molar_mass_g_per_mol().unwrap_or(f64::NAN) * 1e-3,
+        conditions.heat_capacity_over_r().unwrap_or(f64::NAN),
+    );
+    let wave = r / mu * (derived.equilibrium_temperature().value() / (cp_r * r / mu)).sqrt();
+    let omega = core::f64::consts::TAU / conditions.spin().rotation_period.value();
+    2.0 * omega * crate::units::Metres::from(derived.radius()).value() / wave
+}
+
+/// P14.T53.c's census's sets: the 400 whole systems of the sample, the golden systems and LOOK72's
+/// triaged systems, each with its seed.
+pub(crate) fn thin_air_sets() -> Vec<(&'static str, Seed, SystemContext)> {
+    let look72_seed = look72_galaxy().seed();
+    sample()
+        .iter()
+        .map(|ctx| ("sample", SEED, ctx.clone()))
+        .chain(
+            golden_systems()
+                .iter()
+                .map(|(name, ctx, _)| (*name, Seed::new(GOLDEN_SYSTEMS_SEED), ctx.clone())),
+        )
+        .chain(
+            look72_triaged_contexts()
+                .into_iter()
+                .map(|ctx| ("look72", look72_seed, ctx)),
+        )
+        .collect()
+}
+
+/// Every present planet, member and moon of `sets` with an `Ok` surface at the epoch, its system
+/// generated afresh ([`ThinAirBody`]), its record carrying its air's sections, so that the
+/// aerosols' arm for a tenuous air is read.
+pub(crate) fn thin_air_census(sets: &[(&str, Seed, SystemContext)]) -> Vec<ThinAirBody> {
+    let mut bodies = Vec::new();
+    for (set, seed, ctx) in sets {
+        let system = generate(*seed, ctx);
+        envelope_walk(ctx, &system, &mut |kind, record, derived| {
+            bodies.extend(ThinAirBody::of((set, ctx), kind, record, derived));
+        });
+    }
+    bodies
+}
+
+/// P14.T53.c (decision-absurd-states-24 R1; decision-p14-t54a-water-consistency W2–W3), over the
+/// golden systems generated afresh: no record's liquids list water's ocean under a `Snowball`'s
+/// ice, where with T53.c held, to version 23, some did (W3 (b), subgiant's moons among them), and
+/// every liquid entry is listed at its own extent where the entries' total is at most 1.
+#[test]
+fn under_every_24_hold_no_golden_record_lists_an_ocean_under_its_ice() {
+    let sets: Vec<(&str, Seed, SystemContext)> = golden_systems()
+        .iter()
+        .map(|(name, ctx, _)| (*name, Seed::new(GOLDEN_SYSTEMS_SEED), ctx.clone()))
+        .collect();
+    let tenuous = thin_air_census(&sets);
+    let listed: Vec<String> = tenuous
+        .iter()
+        .filter(|b| b.under_ice_item)
+        .map(|b| b.label.clone())
+        .collect();
+    assert_eq!(listed, Vec::<String>::new());
+    for body in &tenuous {
+        assert!(
+            body.misread.is_empty(),
+            "{}: {:?}",
+            body.label,
+            body.misread
+        );
+    }
+}
+
+/// One body of P14.T53.a's thick-air closure's census ([`thick_air_walk`]): its set, ID and kind,
+/// its record's section tags and a hash of its record, its derivation, its hottest host's
+/// effective temperature, and its runaway and maximum-greenhouse ratios now ([`runaway_now`],
+/// [`limit_now`]), a moon's its planet's.
+struct ThickAirCase {
+    label: String,
+    id: String,
+    sections: (SectionState, SectionState),
+    record_bits: u64,
+    derived: DerivedBody,
+    hottest: Kelvin,
+    ratios: (f64, f64),
+}
+
+impl ThickAirCase {
+    /// Its census line (the guard twin's `thick_air_line`), with its surface's and envelope's
+    /// tags.
+    fn line(&self) -> String {
+        format!(
+            "{}; surface {:?}, envelope {:?}",
+            crate::planetary::derive::atmosphere::guard_twin::thick_air_line(
+                &self.derived,
+                self.hottest,
+                self.ratios
+            ),
+            self.sections.0,
+            self.sections.1
+        )
+    }
+
+    /// Whether it is one of arm (c)'s hothouses: a published `RunawayGreenhouse` between the
+    /// limits now (decision-t53b-arm-c).
+    fn hothouse(&self) -> bool {
+        self.derived.atmosphere().state() == SurfaceState::RunawayGreenhouse
+            && self.ratios.0 < 1.0
+            && self.ratios.1 >= 1.0
+    }
+}
+
+/// Every present planet, member and moon of `system` with a derivation and a bulk section at the
+/// epoch, whatever its surface's tag ([`envelope_walk`]'s), in body order, each as a
+/// [`ThickAirCase`] of the set `set`.
+fn thick_air_walk(set: &str, ctx: &SystemContext, system: &PlanetarySystem) -> Vec<ThickAirCase> {
+    use std::hash::{DefaultHasher, Hash, Hasher};
+    let t = UniverseTime::EPOCH;
+    let mut cases = Vec::new();
+    if ctx.age_at_epoch().value() <= 0.0 {
+        return cases;
+    }
+    let epoch = Epoch::new(system, ctx, t).with_shades();
+    let cosines = HourCosines::new();
+    let case = |kind: &str, record: &BodyRecord, derived: &DerivedBody, hottest, ratios| {
+        let mut hasher = DefaultHasher::new();
+        format!("{record:?}").hash(&mut hasher);
+        let id = record.identity().id().to_string();
+        ThickAirCase {
+            label: format!("{set} {id} {kind}"),
+            id,
+            sections: (
+                record.section_state(RecordSection::Surface),
+                record.section_state(RecordSection::Envelope),
+            ),
+            record_bits: hasher.finish(),
+            derived: *derived,
+            hottest,
+            ratios,
+        }
+    };
+    for body in system.bodies() {
+        let kind = match body.part {
+            Part::Planet(_) => "planets",
+            Part::Member(_) => "members",
+            Part::Moon(_) | Part::Ring(_) => continue,
+        };
+        let zone = system.zone_of(body);
+        let host = fate_host(ctx, zone);
+        let fate = system.fate_of(body, &host);
+        let at = fate.at(t);
+        let hottest = zone
+            .members()
+            .filter_map(|member| ctx.stars()[usize::from(member)].state_at(t))
+            .map(|state| state.effective_temperature().value())
+            .fold(0.0, f64::max);
+        let ratios = at.orbit().map_or((f64::NAN, f64::NAN), |orbit| {
+            (
+                runaway_now(&epoch, zone, orbit),
+                limit_now(
+                    habitable_zone::HabitableLimit::MaximumGreenhouse,
+                    &epoch,
+                    zone,
+                    orbit,
+                ),
+            )
+        });
+        let hottest = Kelvin::new(hottest);
+        let label = label::label(system, body.index).unwrap();
+        let (record, now) = system.primary_record(&epoch, &cosines, body, label, &fate);
+        if let (Section::Ok(_), Some(derived)) = (record.bulk(), now.derived.as_ref()) {
+            cases.push(case(kind, &record, derived, hottest, ratios));
+        }
+        for child in system.children(body.index) {
+            if !matches!(child.part, Part::Moon(_)) {
+                continue;
+            }
+            let label = label::label(system, child.index).unwrap();
+            let record = system.satellite_record(&epoch, &cosines, child, label, &now, &fate);
+            if record.bulk().ok().is_none() {
+                continue;
+            }
+            if let Some(moon) = system.record_moon(&epoch, child, (&now, &fate)) {
+                cases.push(case("moons", &record, moon.body(), hottest, ratios));
+            }
+        }
+    }
+    cases
+}
+
+/// The six arm (c) hothouses over set A, the 400 (decision-p14-t54b-k-hothouses §1), which
+/// decision-p14-t53a-thick-co2 §6 states by name under the thick-air closure.
+const SET_A_HOTHOUSES: [&str; 6] = [
+    "01ffeb2c5ffe0000.0100",
+    "02002b2ca0010000.0200",
+    "02002b2ca0030001.0300",
+    "02000b2d5ffd0000.0100",
+    "02000b2d5ffd0000.0200",
+    "02002b2bdffd0000.0100",
+];
+
+/// P14.T53.a's thick-air closure's census (decision-p14-t53a-thick-co2 §7.5), a measurement for
+/// the record, run by name over set A (the 400 sample systems), the golden systems and the 27
+/// systems of LOOK72's triaged bodies, each generated and derived afresh, with the closure and
+/// with it lifted
+/// ([`without_thick_air`](crate::planetary::derive::atmosphere::without_thick_air)): every body
+/// that moves, both lines; the counts by flip (state, `MagmaOcean` to solid, into or out of arm
+/// (c), into or out of part 2's section, decked to deckless); the movers by dominant gas; the
+/// knife edges within 20 K of the silicate solidus, water's critical temperature and the acid's
+/// 430 K; any new jump or new bracketed residual above 10⁻⁶, each one of the closure's recorded
+/// nine (`guard_twin::CLOSURE_JUMPS`; decision-p14-t53a-thick-co2 §11.1), in part 2's section and
+/// in its state as before, any other to main; count (xvii) over every body
+/// (`guard_twin::MeltOxygen`, §11.2); the six of set A by name; and arm (c)'s set as it ends. The
+/// guard's samples are the guard twin's
+/// (`under_every_24_hold_the_thick_air_closure_s_movers_among_the_guard_s_samples_are_stated`).
+#[test]
+#[ignore = "a measurement for P14.T53.a's thick-air closure's record, run by name"]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one walk of the census's sets, each mover listed and tallied"
+)]
+fn under_every_24_hold_the_thick_air_closure_s_movers_are_stated() {
+    use std::collections::BTreeMap;
+
+    use crate::planetary::derive::atmosphere::guard_twin::{MeltOxygen, closure_jump_exempt};
+    use crate::planetary::derive::atmosphere::{SILICATE_SOLIDUS, without_thick_air};
+    let look72 = look72_triaged_contexts();
+    let look72_seed = look72_galaxy().seed();
+    let sets: Vec<(&str, Seed, &SystemContext)> = sample()
+        .iter()
+        .map(|ctx| ("sample", SEED, ctx))
+        .chain(
+            golden_systems()
+                .iter()
+                .map(|(name, ctx, _)| (*name, Seed::new(GOLDEN_SYSTEMS_SEED), ctx)),
+        )
+        .chain(look72.iter().map(|ctx| ("look72", look72_seed, ctx)))
+        .collect();
+    let run = || {
+        sets.iter()
+            .flat_map(|&(set, seed, ctx)| thick_air_walk(set, ctx, &generate(seed, ctx)))
+            .collect::<Vec<_>>()
+    };
+    let after = run();
+    let before = without_thick_air(run);
+    assert_eq!(after.len(), before.len());
+    // Each line reads the closure and part 2's section, so it is built under the rules in force.
+    let mut flips = BTreeMap::<String, u32>::new();
+    let mut by_gas = BTreeMap::<String, u32>::new();
+    let (mut edges, mut convergence, mut to_main) = (Vec::new(), Vec::new(), Vec::new());
+    let mut movers = 0;
+    eprintln!("MOVERS:");
+    for (a, b) in after.iter().zip(&before) {
+        assert_eq!(a.label, b.label);
+        if a.derived == b.derived && a.record_bits == b.record_bits {
+            continue;
+        }
+        movers += 1;
+        eprintln!(
+            "  {}\n    before {}\n    after  {}",
+            a.label,
+            b.line(),
+            a.line()
+        );
+        let (air, was) = (a.derived.atmosphere(), b.derived.atmosphere());
+        let moles = |gas: Gas| air.partial_pressures().of(gas).value() / gas.molar_mass_g_per_mol();
+        let dominant = Gas::ALL
+            .into_iter()
+            .max_by(|x, y| moles(*x).total_cmp(&moles(*y)))
+            .expect("nine gases");
+        *by_gas.entry(format!("{dominant:?}")).or_default() += 1;
+        let molten =
+            |case: &ThickAirCase| case.derived.atmosphere().state() == SurfaceState::MagmaOcean;
+        for (what, then, now) in [
+            (
+                "state",
+                format!("{:?}", was.state()),
+                format!("{:?}", air.state()),
+            ),
+            ("molten", format!("{}", molten(b)), format!("{}", molten(a))),
+            (
+                "arm (c)",
+                format!("{}", b.hothouse()),
+                format!("{}", a.hothouse()),
+            ),
+            (
+                "surface",
+                format!("{:?}", b.sections.0),
+                format!("{:?}", a.sections.0),
+            ),
+            (
+                "deck",
+                format!("{:?}", was.runaway_deck()),
+                format!("{:?}", air.runaway_deck()),
+            ),
+        ] {
+            if then != now {
+                *flips.entry(format!("{what}: {then} → {now}")).or_default() += 1;
+            }
+        }
+        let t = air.surface_temperature().value();
+        for (edge, at) in [
+            ("the solidus", SILICATE_SOLIDUS.value()),
+            ("water's T_c", 647.096),
+            ("the acid's 430 K", 430.0),
+        ] {
+            if (t - at).abs() <= 20.0 {
+                edges.push(format!("{}: {t:.2} K within 20 K of {edge}", a.label));
+            }
+        }
+        let residual = |case: &ThickAirCase| match case.derived.convergence() {
+            crate::planetary::derive::passes::Convergence::Converged => 0.0,
+            crate::planetary::derive::passes::Convergence::Bracketed { residual, .. } => residual,
+        };
+        if (a.derived.convergence().is_jump() && !b.derived.convergence().is_jump())
+            || (residual(a) > 1e-6 && residual(b) <= 1e-6)
+        {
+            let line = format!("{}: {:?}", a.label, a.derived.convergence());
+            if closure_jump_exempt(&a.id, &b.derived, &a.derived) {
+                convergence.push(line);
+            } else {
+                to_main.push(line);
+            }
+        }
+    }
+    eprintln!("{movers} of {} bodies move under the closure", after.len());
+    eprintln!("FLIPS: {flips:?}");
+    eprintln!("BY DOMINANT GAS: {by_gas:?}");
+    eprintln!("KNIFE EDGES: {edges:#?}");
+    eprintln!("NEW JUMPS OR BRACKETED ABOVE 1e-6, the closure's recorded ones: {convergence:#?}");
+    let mut melt_oxygen = MeltOxygen::default();
+    for case in &after {
+        melt_oxygen.add(&case.label, &case.derived, case.hottest);
+    }
+    eprintln!("COUNT (xvii) over the systems: {}", melt_oxygen.line());
+    eprintln!("THE SIX OF SET A:");
+    for id in SET_A_HOTHOUSES {
+        for (a, b) in after.iter().zip(&before).filter(|(a, _)| a.id == id) {
+            eprintln!(
+                "  {}\n    before {}\n    after  {}",
+                a.label,
+                b.line(),
+                a.line()
+            );
+        }
+    }
+    eprintln!("ARM (C) AS IT ENDS:");
+    for case in after.iter().filter(|case| case.hothouse()) {
+        eprintln!("  {} {}", case.label, case.line());
+    }
+    assert!(movers > 0);
+    assert_eq!(
+        to_main,
+        Vec::<String>::new(),
+        "TO MAIN: a new jump outside the closure's named nine, out of part 2's section or \
+         whose state moved (decision-p14-t53a-thick-co2 §11.1)"
+    );
+}
+
+// P14.T55.j's record side: a moon's air and record read its surface's internal heat.
+
+/// What P14.T55.j's record-side tests read of a body's published surface.
+#[derive(Debug, Clone, Copy)]
+struct PublishedSurface {
+    index: BodyIndex,
+    kind: BodyKind,
+    state: SurfaceState,
+    /// Whether its conditions hold liquid water, its condensates list water ice, and its figures
+    /// hold a subsurface ocean.
+    water: [bool; 3],
+    /// Its mean surface temperature, K.
+    mean: f64,
+    /// Its climate's range, coldest and warmest, K.
+    range: (f64, f64),
+    /// Its record's equilibrium temperature, K.
+    equilibrium: f64,
+    /// The heat flow its published pass read, its surface's basis's, else its figures', W m⁻².
+    heat_flow: f64,
+    /// Whether its surface carries the basis its published pass read.
+    based: bool,
+}
+
+impl PublishedSurface {
+    /// The surface its air starts from under P14.T55.j's rule: the larger of its night's floor and
+    /// (`T_eq`⁴ + F ÷ σ)^¼ at the heat flow its published pass read.
+    fn radiated_base(&self) -> f64 {
+        let (lit, floor) = self.lit_and_floor();
+        if floor > lit { floor } else { lit }
+    }
+
+    /// (`T_eq`⁴ + F ÷ σ)^¼ and its night's floor at the heat flow its published pass read, K.
+    fn lit_and_floor(&self) -> (f64, f64) {
+        use crate::planetary::hooks::surface::night_floor;
+        use crate::planetary::moons::tides::radiating_surface_temperature;
+        let f = WattsPerSquareMetre::new(self.heat_flow);
+        (
+            radiating_surface_temperature(Kelvin::new(self.equilibrium), f).value(),
+            night_floor(f).value(),
+        )
+    }
+
+    /// (F ÷ σ)^¼, the least surface at which it radiates its heat flow alone.
+    fn heat_alone(&self) -> f64 {
+        crate::math::powf(
+            self.heat_flow.max(0.0) / crate::units::consts::STEFAN_BOLTZMANN,
+            0.25,
+        )
+    }
+}
+
+/// The published surfaces of `ctx`'s system's bodies at the epoch, generated afresh under every 27
+/// hold.
+fn published_surfaces(ctx: &SystemContext) -> Vec<PublishedSurface> {
+    use crate::planetary::chem::partition::CondensatePhase;
+    use crate::planetary::hooks::figures::Subsurface;
+    {
+        let system = generate(SEED, ctx);
+        system
+            .bodies()
+            .iter()
+            .filter_map(|body| {
+                let record = system
+                    .body_at(ctx, body.index(), UniverseTime::EPOCH)
+                    .unwrap();
+                let (Section::Ok(surface), Section::Ok(bulk)) = (record.surface(), record.bulk())
+                else {
+                    return None;
+                };
+                let water = Gas::Water.substance();
+                let condensates = surface.condensates();
+                let heat_flow = surface
+                    .basis()
+                    .map_or_else(|| surface.figures().heat_flow(), |basis| basis.heat_flow);
+                Some(PublishedSurface {
+                    index: body.index(),
+                    kind: body.kind(),
+                    state: surface.state(),
+                    water: [
+                        surface.conditions().liquid_water(),
+                        condensates.entry(water, CondensatePhase::Solid).is_some(),
+                        matches!(surface.figures().subsurface_ocean(), Subsurface::Ocean(_)),
+                    ],
+                    mean: surface.conditions().mean_surface_temperature().value(),
+                    range: (
+                        surface.conditions().climate_range().0.value(),
+                        surface.conditions().climate_range().1.value(),
+                    ),
+                    equilibrium: bulk.equilibrium_temperature().value(),
+                    heat_flow: heat_flow.value(),
+                    based: surface.basis().is_some(),
+                })
+            })
+            .collect()
+    }
+}
+
+/// P14.T55.j's record side, its failing-first case: a 10 Myr Sun's young moon heated to 570 W m⁻²
+/// on its record, at 283 K from its sunlight, published its night's floor of 321 K, the heat
+/// radiated alone, where its tides read (`T_eq`⁴ + F ÷ σ)^¼ = 358 K. Under every 27 hold its
+/// airless record publishes that surface, to the bit, more than 30 K above its floor. Recorded:
+/// its climate's range.
+#[test]
+fn under_every_27_hold_a_young_heated_moon_publishes_the_surface_its_heat_and_light_give() {
+    let ctx = synthetic_star(
+        id(50_744),
+        SolarMasses::new(1.0),
+        Dex::ZERO,
+        Years::new(1e7),
+    )
+    .unwrap();
+    let surfaces = published_surfaces(&ctx);
+    let radiated = *surfaces
+        .iter()
+        .find(|body| body.index.body_id(ctx.id()).to_string() == "42002cb20000c638.0201")
+        .expect("the 10 Myr system's heated moon has a surface");
+    assert!(
+        surfaces
+            .iter()
+            .any(|body| !matches!(body.kind, BodyKind::Moon(_))),
+        "the system has a planet with a surface"
+    );
+    eprintln!(
+        "radiated {radiated:?}\nits climate's range {:?} K",
+        radiated.range
+    );
+    assert!(radiated.based, "{radiated:?}");
+    assert_eq!(radiated.state, SurfaceState::Airless, "{radiated:?}");
+    assert!(radiated.heat_flow > 500.0, "{radiated:?}");
+    assert_same_bits(radiated.mean, radiated.radiated_base());
+    assert!(radiated.mean >= radiated.heat_alone(), "{radiated:?}");
+    let (_, floor) = radiated.lit_and_floor();
+    assert!(
+        radiated.mean - floor > 30.0,
+        "{} K against its floor's {floor} K",
+        radiated.mean
+    );
+}
+
+/// P14.T55.j's record side's census (its acceptance) at the age `age`, the `k`th of its three:
+/// the moons of synthetic Suns' systems of that age, at least 5,000 with a published surface,
+/// generated under every 27 hold. No moon publishes a surface below (F ÷ σ)^¼, and an airless one
+/// whose published pass read its basis publishes max(floor, (`T_eq`⁴ + F ÷ σ)^¼) to the bit.
+/// Recorded: the moons with liquid water, water ice or a subsurface ocean, those with an air whose
+/// published mean lies below its base (a Snowball's below its `T_eq`, as at 24), the heated moons
+/// whose floor binds, at `ε_r`, over their lit balance, and the largest rise of a published
+/// surface over its sunlight's. Returned: the moons at least 1 K above their sunlight's.
+fn heated_moon_census(k: u32, age: Years) -> u32 {
+    const MOONS: usize = 5_000;
+    let (mut moons, mut based, mut heated, mut warmer) = (0_usize, 0_u32, 0_u32, 0_u32);
+    let (mut under, mut floored, mut waters) = (0_u32, 0_u32, [0_u32; 3]);
+    let mut largest = None::<(f64, String)>;
+    let mut i = 0_u32;
+    while moons < MOONS {
+        let ctx = synthetic_star(
+            id(60_000 * (k + 1) + i),
+            SolarMasses::new(1.0),
+            Dex::ZERO,
+            age,
+        )
+        .unwrap();
+        i += 1;
+        let surfaces = published_surfaces(&ctx);
+        for moon in surfaces
+            .iter()
+            .filter(|body| matches!(body.kind, BodyKind::Moon(_)))
+        {
+            let name = moon.index.body_id(ctx.id()).to_string();
+            moons += 1;
+            based += u32::from(moon.based);
+            heated += u32::from(moon.heat_flow >= 1.0);
+            for (count, water) in waters.iter_mut().zip(moon.water) {
+                *count += u32::from(water);
+            }
+            assert!(
+                moon.mean >= moon.heat_alone() * (1.0 - 1e-12),
+                "{name}: {moon:?} below its heat alone, {} K",
+                moon.heat_alone()
+            );
+            if moon.based && moon.state == SurfaceState::Airless {
+                assert_same_bits(moon.mean, moon.radiated_base());
+            }
+            // An air's published mean is its passes' greenhouse and partition at the base, not
+            // the base itself: counted, not asserted.
+            under += u32::from(moon.based && moon.mean < moon.radiated_base());
+            // Where the floor binds, at `ε_r`, the published base is not the lit balance.
+            let (lit, floor) = moon.lit_and_floor();
+            floored += u32::from(moon.heat_flow > 0.0 && floor > lit);
+            let rise = moon.mean - moon.equilibrium;
+            warmer += u32::from(rise >= 1.0);
+            if largest.as_ref().is_none_or(|(most, _)| rise > *most) {
+                largest = Some((rise, format!("{name} {moon:?}")));
+            }
+        }
+    }
+    eprintln!(
+        "age {:e} yr: {i} systems, {moons} moons with a surface ({based} on their basis, \
+         {heated} at 1 W m⁻² or more); {warmer} at least 1 K above their sunlight's; liquid water \
+         {}, water ice {}, ocean {}; {under} with an air below its base; {floored} on their floor; \
+         the largest rise {largest:?}",
+        age.value(),
+        waters[0],
+        waters[1],
+        waters[2],
+    );
+    warmer
+}
+
+/// [`heated_moon_census`] at 10 Myr, where the young heated tail is largest.
+#[test]
+#[ignore = "slow: 5,000 moons' records twice under every 27 hold, about 190 s in the slow-test \
+            profile on a pod"]
+fn under_every_27_hold_no_moon_at_10_myr_publishes_a_surface_below_its_heat_and_light() {
+    assert!(heated_moon_census(0, Years::new(1e7)) > 0, "no moon warmed");
+}
+
+/// [`heated_moon_census`] at 100 Myr.
+#[test]
+#[ignore = "slow: 5,000 moons' records twice under every 27 hold, about 190 s in the slow-test \
+            profile on a pod"]
+fn under_every_27_hold_no_moon_at_100_myr_publishes_a_surface_below_its_heat_and_light() {
+    assert!(heated_moon_census(1, Years::new(1e8)) > 0, "no moon warmed");
+}
+
+/// [`heated_moon_census`] at the Sun's age.
+#[test]
+#[ignore = "slow: 5,000 moons' records twice under every 27 hold, about 190 s in the slow-test \
+            profile on a pod"]
+fn under_every_27_hold_no_moon_at_the_sun_s_age_publishes_a_surface_below_its_heat_and_light() {
+    assert!(
+        heated_moon_census(2, Years::new(4.57e9)) > 0,
+        "no moon warmed"
+    );
 }

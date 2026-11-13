@@ -2,8 +2,8 @@ import { dot, norm, type Vec3 } from "../../geometry/vec3";
 import {
   NEAR_PLANE_M,
   type ProjectionCamera,
-  toViewAxes,
   type Viewport,
+  viewAxesBy,
 } from "../camera/projection";
 
 /**
@@ -24,10 +24,18 @@ export function sphereInFrustum(
   camera: ProjectionCamera,
   viewport: Viewport,
 ): boolean {
-  if (norm(centreM) <= radiusM) {
-    return true;
-  }
-  const v = toViewAxes(centreM, camera.orientation);
+  return frustumOf(camera, viewport)(centreM, radiusM);
+}
+
+/**
+ * {@link sphereInFrustum} for one camera and view, its planes taken once, for the many spheres of
+ * a mark (plan R10, R10.T16.c's cost): the same sums, so the same answers.
+ */
+export function frustumOf(
+  camera: ProjectionCamera,
+  viewport: Viewport,
+): (centreM: Vec3, radiusM: number) => boolean {
+  const inView = viewAxesBy(camera.orientation);
   const halfX = camera.fovXRad / 2;
   const halfY = Math.atan(Math.tan(halfX) / (viewport.widthPx / viewport.heightPx));
   // Inward normals of the side planes in view space, where the camera looks down −z.
@@ -37,10 +45,16 @@ export function sphereInFrustum(
     { x: 0, y: Math.cos(halfY), z: -Math.sin(halfY) },
     { x: 0, y: -Math.cos(halfY), z: -Math.sin(halfY) },
   ];
-  if (-v.z < NEAR_PLANE_M - radiusM) {
-    return false;
-  }
-  return planes.every((n) => dot(n, v) >= -radiusM);
+  return (centreM, radiusM) => {
+    if (norm(centreM) <= radiusM) {
+      return true;
+    }
+    const v = inView(centreM);
+    if (-v.z < NEAR_PLANE_M - radiusM) {
+      return false;
+    }
+    return planes.every((n) => dot(n, v) >= -radiusM);
+  };
 }
 
 /** The fraction of the way to a point within which a sphere it lies on does not hide it: 10⁻⁹. */

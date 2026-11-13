@@ -17,6 +17,11 @@ export type ViewKeyAction =
   | { readonly kind: "target"; readonly step: -1 | 1 }
   | { readonly kind: "fov"; readonly step: -1 | 1 }
   | { readonly kind: "rate"; readonly step: -1 | 1 }
+  /**
+   * An `ORBIT` camera's zoom (plan R15, T4): `steps` steps of its altitude, nearer for a positive
+   * step, from a wheel over the view's canvas.
+   */
+  | { readonly kind: "zoom"; readonly steps: number }
   /** The view's style: one of R07's styles, or `toggle` to the other (the key `4`). */
   | { readonly kind: "style"; readonly style: RenderStyle | "toggle" };
 
@@ -51,6 +56,7 @@ export const VIEW_SINGLE_KEYS: Readonly<Record<string, ViewKeyAction>> = {
   "1": { kind: "preset", preset: "seat" },
   "2": { kind: "preset", preset: "chase" },
   "3": { kind: "preset", preset: "free" },
+  "0": { kind: "preset", preset: "orbit" },
   [STYLE_TOGGLE_KEY]: { kind: "style", style: "toggle" },
   "]": { kind: "target", step: 1 },
   "[": { kind: "target", step: -1 },

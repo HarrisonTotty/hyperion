@@ -12,7 +12,7 @@
 //!   held below `r_h ÷ 10^0.1` so that a core never outgrows the half-mass radius (ours).
 //! - **The half-mass relaxation time** `t★ = 0.138 √(M r_h³ ÷ G) ÷ (⟨m⟩ ln Λ)` with ⟨m⟩ = 0.45 M☉
 //!   and ln Λ = 10 (Spitzer 1987; the prefactor is
-//!   [`BH_RELAXATION_PREFACTOR`](crate::tables::cluster_dynamics::BH_RELAXATION_PREFACTOR)).
+//!   [`BH_RELAXATION_PREFACTOR`]).
 //! - **The central escape speed** `√(G M ÷ r_h) × 10^(0.1055 + 0.2550 u − 0.0769 u²)` with
 //!   `u = log₁₀(r_h ÷ r_c)`, the brainstorm's fit to the Baumgardt–Hilker catalogue (Baumgardt and Hilker 2018, MNRAS 478, 1520; re-checked
 //!   against it: P09.T7's test), and at birth today's times `√((M₀ ÷ M)(r_h ÷ r_h0))`.
@@ -41,6 +41,8 @@
 //! rise as `Γ^0.74` (Pooley et al. 2003, ApJ 591, L131); blue stragglers number `N = 10^1.6 ×
 //! (M_core ÷ 10⁴ M☉)^0.38` (ours, the slope of Knigge, Leigh and Sills 2009, Nature 457, 288, with
 //! a normalisation of our own). The last two are provisional.
+//!
+//! [`retention`]: super::interior::retention
 
 use crate::galaxy::consts::{G, LIGHT_YEARS_PER_PARSEC, LIGHT_YEARS_PER_YEAR_PER_KM_S};
 use crate::galaxy::fields::ComponentId;
@@ -49,6 +51,7 @@ use crate::galaxy::{Galaxy, PointLy, Population};
 use crate::math;
 use crate::rng::{Mark, Stream};
 use crate::stellar::Composition;
+use crate::stellar::rules::StellarRules;
 use crate::stellar::sse::turn_off_mass;
 use crate::tables::cluster_dynamics::{
     BH_CLOCK_FACTOR, BH_LOSS_BETA, BH_LOSS_PSI_SLOPE, BH_RELAXATION_PREFACTOR,
@@ -58,9 +61,13 @@ use crate::units::consts::METRES_PER_LIGHT_YEAR;
 use crate::units::{Dex, HeliumExcess, KilometresPerSecond, LightYears, SolarMasses, Years};
 
 use super::catalogue::{FeatureMarks, FeatureRecord};
+use super::interior::abundances::first_population_share;
 use super::interior::retention::{EFFECTIVE_ESCAPE_FACTOR, Retention, retention_tabulated};
 use super::kinds::globular::history;
+use super::kinds::nursery::NurseryStage;
 use super::kinds::open_cluster::DISRUPTION_GAMMA as DISRUPTION_GAMMA_FOR_RATE;
+use super::kinds::open_cluster::{dissolution_time, evolution_survival, present_mass};
+use super::members::remnants::{self, RemnantTable, RulesCell};
 use crate::rng::{ObjectKey, tags};
 
 /// The mean member mass in the relaxation time, M☉ (P09.T7).
@@ -76,7 +83,8 @@ pub const PLUMMER_HALF_MASS_RATIO: f64 = 1.304_766_372_624_786;
 pub const BLACK_HOLE_BIRTH_FRACTION: f64 = 0.06;
 
 /// The mean mass of a retained black hole, M☉, which turns their mass fraction into a count
-/// (ours, provisional: a stand-in for the mass spectrum P15.T8.a fits).
+/// (ours, provisional by ruling 126.9: a stand-in for their mass spectrum, which P15.T8.a does not
+/// fit; its block, `tables::cluster_dynamics`, holds the loss law's β, ψ₁, clock and prefactor).
 pub const MEAN_BLACK_HOLE_MASS: f64 = 15.0;
 
 /// A cluster older than this many relaxation times with no black holes is core-collapsed
@@ -203,104 +211,12 @@ pub struct ClusterParameters {
     pub marks: ClusterMarks,
 }
 
-/// One cluster's structure, time scales and remnants (module documentation).
-#[derive(Debug, Clone, PartialEq)]
-pub struct ClusterModel {
-    parameters: ClusterParameters,
-    composition: Composition,
-    tidal_radius: LightYears,
-    core_radius: LightYears,
-    turn_off: SolarMasses,
-    relaxation_time: Years,
-    escape_central: KilometresPerSecond,
-    escape_birth: KilometresPerSecond,
-    central_density: f64,
-    retention: Retention,
-    black_hole_fraction: f64,
-}
-
-impl ClusterModel {
-    /// The model of the cluster `parameters` describe, in `galaxy` (module documentation).
-    ///
-    /// Its retention reads `tables::cluster_retention` (ruling 139.5), so it costs microseconds;
-    /// the caller still caches the interior built on it.
-    ///
-    /// # Panics
-    ///
-    /// If a mass or radius is not positive and finite.
+impl ClusterParameters {
+    /// The parameters of a catalogue feature's cluster, or `None` for one that is no cluster at
+    /// the epoch: what [`ClusterModel::from_record`] builds its model from (its documentation says
+    /// how), without the model's time scales and remnants.
     #[must_use]
-    pub fn new(galaxy: &Galaxy, parameters: &ClusterParameters) -> Self {
-        let p = *parameters;
-        for value in [
-            p.mass.value(),
-            p.initial_mass.value(),
-            p.half_mass_radius.value(),
-            p.birth_half_mass_radius.value(),
-        ] {
-            assert!(
-                value > 0.0 && value.is_finite(),
-                "a cluster parameter of {value}"
-            );
-        }
-        let composition = Composition::from_fe_h(p.fe_h, HeliumExcess::ZERO);
-        let tidal_radius = LightYears::new(
-            galaxy.potential().tidal_radius(p.mass, &p.position).value() / METRES_PER_LIGHT_YEAR,
-        );
-        let r_h = p.half_mass_radius.value();
-        let core_radius = LightYears::new(p.core_radius.map_or_else(
-            || {
-                (tidal_radius.value() / math::exp10(p.concentration))
-                    .min(r_h / math::exp10(MIN_LOG_HALF_MASS_OVER_CORE))
-            },
-            LightYears::value,
-        ));
-        let turn_off = turn_off_mass(Years::new(p.age.value().max(0.0)), &composition);
-        let relaxation_time = relaxation_time(p.mass, p.half_mass_radius);
-        let escape_central = central_escape_speed(p.mass, p.half_mass_radius, core_radius);
-        let birth_ratio =
-            (p.initial_mass.value() / p.mass.value()) * (r_h / p.birth_half_mass_radius.value());
-        let escape_birth = KilometresPerSecond::new(escape_central.value() * birth_ratio.sqrt());
-        let central_density =
-            central_density(p.mass.value(), core_radius.value(), tidal_radius.value());
-        let v_eff = KilometresPerSecond::new(escape_birth.value() * EFFECTIVE_ESCAPE_FACTOR);
-        // The table, not the sixteen-track quadrature it was made from (ruling 139.5).
-        let kept = retention_tabulated(galaxy.mass_function(), &composition, v_eff);
-        let f0 = BLACK_HOLE_BIRTH_FRACTION * kept.black_holes;
-        let black_hole_fraction = black_hole_fraction(
-            f0,
-            BH_CLOCK_FACTOR * p.age.value() / relaxation_time.value(),
-        );
-        Self {
-            parameters: p,
-            composition,
-            tidal_radius,
-            core_radius,
-            turn_off,
-            relaxation_time,
-            escape_central,
-            escape_birth,
-            central_density,
-            retention: kept,
-            black_hole_fraction,
-        }
-    }
-
-    /// The model of a catalogue feature, or `None` for one that is no cluster at the epoch: a
-    /// cloud, an association, an unbound embedded region or a dissolved cluster.
-    ///
-    /// An open cluster, old or a young bound nursery, takes Lamers et al. 2005's present mass
-    /// and disruption rate ([`open_cluster`](super::kinds::open_cluster)), its birth half-mass
-    /// radius equal to today's. A globular takes its history (P09.T13) on its bulk velocity, or on
-    /// a circular orbit in a galaxy built without its kinematic tables. The cluster's own marks are
-    /// drawn on its `feature.cluster` stream.
-    #[must_use]
-    #[expect(
-        clippy::too_many_lines,
-        reason = "one arm per kind of feature, each a short list of its parameters"
-    )]
-    pub fn from_record(galaxy: &Galaxy, feature: &FeatureRecord) -> Option<Self> {
-        use super::kinds::nursery::NurseryStage;
-        use super::kinds::open_cluster::{dissolution_time, evolution_survival, present_mass};
+    pub(crate) fn of_record(galaxy: &Galaxy, feature: &FeatureRecord) -> Option<Self> {
         let position = PointLy::from(feature.position());
         let mut stream = Stream::open(
             galaxy.seed(),
@@ -342,7 +258,7 @@ impl ClusterModel {
                 marks,
             })
         };
-        let parameters = match feature.marks() {
+        match feature.marks() {
             FeatureMarks::Cloud(_) => None,
             FeatureMarks::OpenCluster(m) => open(
                 m.age_at_epoch(),
@@ -376,6 +292,7 @@ impl ClusterModel {
                     galaxy,
                     feature.position(),
                     velocity,
+                    m.origin().population(),
                     m.mass(),
                     m.half_mass_radius(),
                     m.age(),
@@ -398,8 +315,127 @@ impl ClusterModel {
                     marks,
                 })
             }
-        }?;
-        Some(Self::new(galaxy, &parameters))
+        }
+    }
+
+    /// The cluster's tidal radius in `galaxy`: its model's ([`ClusterModel::tidal_radius`]), bit
+    /// for bit, without the rest of the model.
+    #[must_use]
+    pub(crate) fn tidal_radius(&self, galaxy: &Galaxy) -> LightYears {
+        LightYears::new(
+            galaxy
+                .potential()
+                .tidal_radius(self.mass, &self.position)
+                .value()
+                / METRES_PER_LIGHT_YEAR,
+        )
+    }
+}
+
+/// One cluster's structure, time scales and remnants (module documentation).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClusterModel {
+    parameters: ClusterParameters,
+    composition: Composition,
+    tidal_radius: LightYears,
+    core_radius: LightYears,
+    turn_off: SolarMasses,
+    relaxation_time: Years,
+    escape_central: KilometresPerSecond,
+    escape_birth: KilometresPerSecond,
+    central_density: f64,
+    retention: Retention,
+    black_hole_fraction: f64,
+    /// [`ClusterModel::remnant_table`], found when first asked.
+    remnant_table: RulesCell<RemnantTable>,
+    /// [`ClusterModel::co_core_floor`], found when first asked.
+    co_core_floor: RulesCell<SolarMasses>,
+    /// [`ClusterModel::main_sequence_loss`], found when first asked.
+    main_sequence_loss: RulesCell<SolarMasses>,
+    /// [`ClusterModel::white_dwarf_main_sequence_loss`], found when first asked.
+    white_dwarf_main_sequence_loss: RulesCell<SolarMasses>,
+}
+
+impl ClusterModel {
+    /// The model of the cluster `parameters` describe, in `galaxy` (module documentation).
+    ///
+    /// Its retention reads `tables::cluster_retention` (ruling 139.5), so it costs microseconds;
+    /// the caller still caches the interior built on it.
+    ///
+    /// # Panics
+    ///
+    /// If a mass or radius is not positive and finite.
+    #[must_use]
+    pub fn new(galaxy: &Galaxy, parameters: &ClusterParameters) -> Self {
+        let p = *parameters;
+        for value in [
+            p.mass.value(),
+            p.initial_mass.value(),
+            p.half_mass_radius.value(),
+            p.birth_half_mass_radius.value(),
+        ] {
+            assert!(
+                value > 0.0 && value.is_finite(),
+                "a cluster parameter of {value}"
+            );
+        }
+        let composition = Composition::from_fe_h(p.fe_h, HeliumExcess::ZERO);
+        let tidal_radius = p.tidal_radius(galaxy);
+        let r_h = p.half_mass_radius.value();
+        let core_radius = LightYears::new(p.core_radius.map_or_else(
+            || {
+                (tidal_radius.value() / math::exp10(p.concentration))
+                    .min(r_h / math::exp10(MIN_LOG_HALF_MASS_OVER_CORE))
+            },
+            LightYears::value,
+        ));
+        let turn_off = turn_off_mass(Years::new(p.age.value().max(0.0)), &composition);
+        let relaxation_time = relaxation_time(p.mass, p.half_mass_radius);
+        let escape_central = central_escape_speed(p.mass, p.half_mass_radius, core_radius);
+        let birth_ratio =
+            (p.initial_mass.value() / p.mass.value()) * (r_h / p.birth_half_mass_radius.value());
+        let escape_birth = KilometresPerSecond::new(escape_central.value() * birth_ratio.sqrt());
+        let central_density =
+            central_density(p.mass.value(), core_radius.value(), tidal_radius.value());
+        let v_eff = KilometresPerSecond::new(escape_birth.value() * EFFECTIVE_ESCAPE_FACTOR);
+        // The table, not the sixteen-track quadrature it was made from (ruling 139.5).
+        let kept = retention_tabulated(galaxy.mass_function(), &composition, v_eff);
+        let f0 = BLACK_HOLE_BIRTH_FRACTION * kept.black_holes;
+        let black_hole_fraction = black_hole_fraction(
+            f0,
+            BH_CLOCK_FACTOR * p.age.value() / relaxation_time.value(),
+        );
+        Self {
+            parameters: p,
+            composition,
+            tidal_radius,
+            core_radius,
+            turn_off,
+            relaxation_time,
+            escape_central,
+            escape_birth,
+            central_density,
+            retention: kept,
+            black_hole_fraction,
+            remnant_table: RulesCell::default(),
+            co_core_floor: RulesCell::default(),
+            main_sequence_loss: RulesCell::default(),
+            white_dwarf_main_sequence_loss: RulesCell::default(),
+        }
+    }
+
+    /// The model of a catalogue feature, or `None` for one that is no cluster at the epoch: a
+    /// cloud, an association, an unbound embedded region or a dissolved cluster.
+    ///
+    /// An open cluster, old or a young bound nursery, takes Lamers et al. 2005's present mass
+    /// and disruption rate ([`open_cluster`](super::kinds::open_cluster)), its birth half-mass
+    /// radius equal to today's. A globular takes its history (P09.T13) on its bulk velocity, or on
+    /// a circular orbit in a galaxy built without its kinematic tables. The cluster's own marks are
+    /// drawn on its `feature.cluster` stream.
+    #[must_use]
+    pub fn from_record(galaxy: &Galaxy, feature: &FeatureRecord) -> Option<Self> {
+        ClusterParameters::of_record(galaxy, feature)
+            .map(|parameters| Self::new(galaxy, &parameters))
     }
 
     /// The parameters it was built from.
@@ -412,6 +448,16 @@ impl ClusterModel {
     #[must_use]
     pub const fn kind(&self) -> ClusterKind {
         self.parameters.kind
+    }
+
+    /// The first population's share of its members: a globular's after Milone and Marino
+    /// ([`first_population_share`]), 1 for an open cluster, which has no second.
+    #[must_use]
+    pub(crate) fn first_population_share(&self) -> f64 {
+        match self.kind() {
+            ClusterKind::Globular => first_population_share(self.initial_mass()),
+            ClusterKind::Open => 1.0,
+        }
     }
 
     /// Its members' composition: the cluster's [Fe/H], no helium excess (the second population's
@@ -657,6 +703,44 @@ impl ClusterModel {
     #[must_use]
     pub const fn marks(&self) -> &ClusterMarks {
         &self.parameters.marks
+    }
+
+    /// The members' tabulated remnants under the stellar `rules`, that version 26's member draws
+    /// read ([`RemnantTable`]: the white-dwarf ceilings and the capture window's top), found the
+    /// first time they are asked, some 5–20 ms, and kept with the model.
+    #[must_use]
+    pub(crate) fn remnant_table(&self, rules: StellarRules) -> RemnantTable {
+        self.remnant_table
+            .get(rules, || RemnantTable::of(self, rules))
+    }
+
+    /// The lightest initial mass from which every member dies with a carbon–oxygen core past the
+    /// low mode's ramp, under the stellar `rules` ([`remnants::co_core_floor`]), M☉, found the first
+    /// time it is asked, some 10–20 ms, and kept with the model.
+    #[must_use]
+    pub(crate) fn co_core_floor(&self, rules: StellarRules) -> SolarMasses {
+        self.co_core_floor
+            .get(rules, || remnants::co_core_floor(self, rules))
+    }
+
+    /// The most mass a slow pair's stripped neutron-star member loses on its main sequence, with a
+    /// margin, under the stellar `rules` ([`remnants::main_sequence_loss`]), M☉, found the first
+    /// time it is asked, about a millisecond, and kept with the model.
+    #[must_use]
+    pub(crate) fn main_sequence_loss(&self, rules: StellarRules) -> SolarMasses {
+        self.main_sequence_loss
+            .get(rules, || remnants::main_sequence_loss(self, rules))
+    }
+
+    /// The most mass a white-dwarf member between the ceilings and the refusals loses on its main
+    /// sequence, with a margin, under the stellar `rules`
+    /// ([`remnants::white_dwarf_main_sequence_loss`]), M☉, found the first time it is asked, about a
+    /// millisecond, and kept with the model.
+    #[must_use]
+    pub(crate) fn white_dwarf_main_sequence_loss(&self, rules: StellarRules) -> SolarMasses {
+        self.white_dwarf_main_sequence_loss.get(rules, || {
+            remnants::white_dwarf_main_sequence_loss(self, rules)
+        })
     }
 }
 

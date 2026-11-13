@@ -9,12 +9,14 @@ import userEvent from "@testing-library/user-event";
 import { Activity } from "react";
 import { vi } from "vitest";
 
+import type { AtmosphereLeversOverride, FramePacingName } from "../../../preload/api";
 import { UniverseProvider } from "../components/UniverseProvider";
+import { rootRemPx } from "../lib/useElementSize";
 import type { ViewEngineSource } from "../displays/view/useViewEngine";
 import { ViewDisplay } from "../displays/view/ViewDisplay";
 import { type MarkLabelSide, PLATE_SIDE_PADDING_REM } from "../displays/view/ViewMarkLabels";
 import type { OffsetPx } from "../spatial/symbols";
-import { ViewSceneProvider } from "../displays/view/ViewSceneProvider";
+import { type InspectionOpening, ViewSceneProvider } from "../displays/view/ViewSceneProvider";
 import { UniversePanel } from "../displays/galaxy/UniversePanel";
 import { requestAdapterOutcome } from "../view/engine/platform";
 import {
@@ -41,7 +43,13 @@ import { type FakeViewEngine, fakeViewEngineSource } from "./fakeViewEngine";
 import { FakeWebSocket } from "./FakeWebSocket";
 import { anOpenedUniverse, aUniverseList } from "./galaxyFixtures";
 import { SCENE_TIDAL_RADIUS_M, sceneClock, shipInSystem, sliceSceneSystem } from "./sceneFixture";
+import { ScriptedHeightWorker } from "./scriptedHeightWorker";
+import { SilentOpticsWorker } from "./silentOpticsWorker";
 import { ServerLinkHarness } from "./ServerLinkHarness";
+import type { WorkerLike } from "../view/terrain/workers/pool";
+import type { OpticsWorkerLike } from "../view/atmosphere/opticsPool";
+import type { TerrainSession } from "../view/terrain/session";
+import type { SceneOption } from "../displays/view/viewRun";
 
 /**
  * The stage's laid-out width in the tests, CSS px (and device px, at a ratio of 1): 80 rem, room
@@ -53,11 +61,24 @@ export const STAGE_WIDTH_PX = 1280;
 export const STAGE_HEIGHT_PX = 720;
 
 /**
- * An open instrument slot's laid-out size in the tests, CSS px: as measured on the development
- * machine at 1920 × 1080 (R07.T19).
+ * An open instrument slot's laid-out size in the tests at 16 px to the rem, CSS px: as measured on
+ * the development machine at 1920 × 1080 (R07.T19). Laid out in rem, it grows with the interface
+ * scale (R10.T12.b).
  */
 export const SLOT_WIDTH_PX = 555;
 export const SLOT_HEIGHT_PX = 254;
+
+/**
+ * A held `INSTRUMENT 2`'s stub's laid-out height in the tests at 16 px to the rem, CSS px (plan
+ * R10, R10.T12.b): its 4 rem, `STUB_HEIGHT_REM`, as measured at 1280 × 720; as wide as a slot, and
+ * growing with the interface scale as the slots do.
+ */
+export const STUB_HEIGHT_PX = 64;
+
+/** The interface scale against 16 px to the rem, by which the slots' laid-out sizes grow. */
+function slotScale(): number {
+  return rootRemPx() / 16;
+}
 
 /**
  * The `.view` box's laid-out size in the tests unless a test gives another, CSS px: about the box
@@ -184,16 +205,19 @@ function rect({ widthPx, heightPx }: LaidOutPx): DOMRect {
 }
 
 /**
- * Lays every element out at `stagePx`, but for the `.view` box, at `viewPx()`; each open
- * instrument slot, at {@link SLOT_WIDTH_PX} by {@link SLOT_HEIGHT_PX}; each mark's label, at
+ * Lays every element out at `stagePx` (or, given as a function, at what it gives each time), but
+ * for the `.view` box, at `viewPx()`; each open instrument slot, at {@link SLOT_WIDTH_PX} by
+ * {@link SLOT_HEIGHT_PX}, and a held `INSTRUMENT 2`'s stub at {@link SLOT_WIDTH_PX} by
+ * {@link STUB_HEIGHT_PX}, both grown with the interface scale; each mark's label, at
  * {@link MARK_LABEL_PX}; and the primary's label block, at `blockPx()`, by default nothing at the
  * stage's top left, so that a label is placed clear of it wherever its mark stands (R07.T16.i).
  */
 export function stubViewLayout(
-  stagePx: LaidOutPx,
+  stagePx: LaidOutPx | (() => LaidOutPx),
   viewPx: () => LaidOutPx,
   blockPx: () => LaidOutBoxPx = () => ({ leftPx: 0, topPx: 0, widthPx: 0, heightPx: 0 }),
 ): void {
+  const stageAt = typeof stagePx === "function" ? stagePx : () => stagePx;
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function laidOut(
     this: HTMLElement,
   ) {
@@ -202,6 +226,15 @@ export function stubViewLayout(
     }
     if (this.classList.contains("view-marks__label")) {
       return rect(MARK_LABEL_PX);
+    }
+    // A plate's parts, and the room's hidden copies (R10.T12.b), are laid out as nothing: the plate
+    // stands as `blockPx()` gives it, and its own parts never stand as tall as the stage.
+    if (
+      this.closest(".view-room-sizers") !== null ||
+      (this.closest(".view__overlay > .view-label") !== null &&
+        !this.matches(".view__overlay > .view-label"))
+    ) {
+      return rect({ widthPx: 0, heightPx: 0 });
     }
     if (this.matches(".view__overlay > .view-label")) {
       const block = blockPx();
@@ -212,9 +245,12 @@ export function stubViewLayout(
         height: block.heightPx,
       });
     }
+    if (this.classList.contains("view-instrument--stub")) {
+      return rect({ widthPx: SLOT_WIDTH_PX * slotScale(), heightPx: STUB_HEIGHT_PX * slotScale() });
+    }
     return this.classList.contains("view-instrument")
-      ? rect({ widthPx: SLOT_WIDTH_PX, heightPx: SLOT_HEIGHT_PX })
-      : rect(stagePx);
+      ? rect({ widthPx: SLOT_WIDTH_PX * slotScale(), heightPx: SLOT_HEIGHT_PX * slotScale() })
+      : rect(stageAt());
   });
 }
 
@@ -384,13 +420,36 @@ export interface ViewDisplayHarness {
   readonly advance: (ms: number) => void;
   /** Lays the `.view` box out at another size, as a window resize does, and lays out again. */
   readonly resizeView: (viewPx: LaidOutPx) => void;
+  /**
+   * Lays every element that takes the stage's size out at another, as a window resize or a change
+   * of the side columns does (plan R10, R10.T12.b), and lays out again.
+   */
+  readonly resizeStage: (stagePx: LaidOutPx) => void;
   /** Every view the engines made, first first. */
   readonly views: () => FakeView[];
   /** The server link's socket, which the test answers as the server. */
   readonly socket: FakeWebSocket;
+  /**
+   * Opens another body inspection, as `SYSTEM`'s `VIEW BODY` or the `PLANET VIEWER`'s next planet
+   * hands `VIEW` one: its stage is a new one.
+   */
+  readonly inspect: (opening: InspectionOpening) => void;
+  /**
+   * Every height worker the display's terrain sessions started, first first (plan R10,
+   * R10.T16.a): scripted, each answering when the test tells it.
+   */
+  readonly heightWorkers: ReadonlyArray<ScriptedHeightWorker>;
 }
 
-/** Renders `VIEW` in its providers with fake frames, layout and engine. */
+/**
+ * Starts one of the atmosphere cache's optics workers, which answers nothing, so that no frame
+ * waits on the optics (R08.T10.b).
+ */
+function startOpticsWorker(): OpticsWorkerLike {
+  return new SilentOpticsWorker();
+}
+
+/** Renders `VIEW` in its providers with fake frames, layout, engine and height workers. */
 export function renderViewDisplay(options: {
   readonly store: GraphicsStatusStore;
   readonly source: ViewEngineSource;
@@ -402,35 +461,67 @@ export function renderViewDisplay(options: {
   readonly viewPx?: LaidOutPx;
   /** The primary's label block's laid-out box, each time it is measured: nothing by default. */
   readonly blockPx?: () => LaidOutBoxPx;
+  /** The kept scenes `VIEW` offers: its own by default (the views check's terrain run gives its own). */
+  readonly sceneOptions?: ReadonlyArray<SceneOption>;
+  /** The views check's watch of the terrain session (R10.T16.d): none by default. */
+  readonly watchTerrain?: (session: TerrainSession) => () => void;
+  /** The body inspection opened as `VIEW` mounts (the owner's request, 2026-11-01): none by default. */
+  readonly inspection?: InspectionOpening;
+  /** A frame profile's atmosphere levers over the setting's (R08.T8.d): none by default. */
+  readonly atmosphereLevers?: AtmosphereLeversOverride;
+  /** How the views are paced (`--frame-pacing`, R07.T19): `display`, ViewDisplay's own, by default. */
+  readonly framePacing?: FramePacingName;
 }): ViewDisplayHarness {
   const advanceTimers = fakeFramesAndTimeouts();
   let viewPx: LaidOutPx = options.viewPx ?? FULL_VIEW_PX;
+  let stagePx: LaidOutPx = options.stagePx ?? {
+    widthPx: STAGE_WIDTH_PX,
+    heightPx: STAGE_HEIGHT_PX,
+  };
   stubViewLayout(
-    options.stagePx ?? { widthPx: STAGE_WIDTH_PX, heightPx: STAGE_HEIGHT_PX },
+    () => stagePx,
     () => viewPx,
     options.blockPx,
   );
   vi.stubGlobal("WebSocket", FakeWebSocket);
   const user = userEvent.setup({ advanceTimers });
-  render(
+  const heightWorkers: ScriptedHeightWorker[] = [];
+  // One factory for the render's life: a session is made anew only when its source changes.
+  const startHeightWorker = (): WorkerLike => {
+    const worker = new ScriptedHeightWorker();
+    heightWorkers.push(worker);
+    return worker;
+  };
+
+  const tree = (inspection: InspectionOpening | null) => (
     <ServerLinkHarness>
       <UniverseProvider>
         <GraphicsStatusContext value={options.store}>
           <UniversePanel expanded onToggle={() => undefined} />
-          <ViewSceneProvider active knownSystem={null}>
+          <ViewSceneProvider active knownSystem={null} inspection={inspection}>
             {() => (
               <Activity mode="visible">
                 {/* In the console frame's work area, as `ConsoleFrame` lays VIEW out. */}
                 <main className="console__work console__work--view">
-                  <ViewDisplay engineSource={options.source} setting={options.setting} />
+                  <ViewDisplay
+                    engineSource={options.source}
+                    setting={options.setting}
+                    framePacing={options.framePacing}
+                    heightWorkers={startHeightWorker}
+                    opticsWorkers={startOpticsWorker}
+                    sceneOptions={options.sceneOptions}
+                    watchTerrain={options.watchTerrain}
+                    atmosphereLevers={options.atmosphereLevers}
+                  />
                 </main>
               </Activity>
             )}
           </ViewSceneProvider>
         </GraphicsStatusContext>
       </UniverseProvider>
-    </ServerLinkHarness>,
+    </ServerLinkHarness>
   );
+  const { rerender } = render(tree(options.inspection ?? null));
   const socket = FakeWebSocket.latest();
   act(() => {
     socket.serverWelcomes();
@@ -449,8 +540,20 @@ export function renderViewDisplay(options: {
         FakeResizeObserver.resizeAll();
       });
     },
+    resizeStage: (next) => {
+      stagePx = next;
+      act(() => {
+        FakeResizeObserver.resizeAll();
+      });
+    },
     views: () => options.engines.flatMap((engine) => engine.views),
     socket,
+    inspect: (opening) => {
+      act(() => {
+        rerender(tree(opening));
+      });
+    },
+    heightWorkers,
   };
 }
 

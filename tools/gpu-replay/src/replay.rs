@@ -1932,8 +1932,8 @@ mod tests {
             canvas_view_formats(wgpu::TextureFormat::Bgra8Unorm),
             vec![wgpu::TextureFormat::Bgra8UnormSrgb]
         );
-        assert!(canvas_view_formats(wgpu::TextureFormat::Bgra8UnormSrgb).is_empty());
-        assert!(canvas_view_formats(wgpu::TextureFormat::Rgba16Float).is_empty());
+        assert_eq!(canvas_view_formats(wgpu::TextureFormat::Bgra8UnormSrgb), []);
+        assert_eq!(canvas_view_formats(wgpu::TextureFormat::Rgba16Float), []);
     }
 
     #[test]

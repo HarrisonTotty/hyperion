@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 
 import { useState } from "react";
 
 import { AU_PER_LY, formatScaleLength, SCALE_AU_BELOW_LY } from "../lib/format";
+import { reticleStrokesCssPx } from "../lib/strokes";
 import { FakeResizeObserver } from "../test/FakeResizeObserver";
 import { fakeFramesAndTimeouts } from "../test/fakeFramesAndTimeouts";
 import { stubMatchMedia } from "../test/stubMatchMedia";
@@ -12,11 +13,16 @@ import { type RecordingContext2D, stubCanvas } from "../test/RecordingContext2D"
 import { type CameraAngles, PRESETS, project, viewBasis } from "./camera";
 import { easeOut, TRANSITION_MS, tweenCamera } from "./transition";
 import { localFrameAt, planeFrame } from "../geometry/frame";
-import type { PointMark, SpatialScene } from "./marks";
+import { type BoxPx, segmentBoxGapPx } from "./furniture";
+import type { AnnulusMark, PointMark, SpatialScene } from "./marks";
+import type { SpatialMode } from "./ModeReading";
 import type { ScaleUnit } from "./scale";
 import { SpatialView, type SpatialViewProps } from "./SpatialView";
-import { textSizeRem } from "./labels";
+import { stylesheetRule } from "../test/stylesheet";
+import { bracketBoxPx, textSizeRem } from "./labels";
+import { boxGapPx } from "./symbols";
 import { add, dot, scale, vec3, type Vec3 } from "../geometry/vec3";
+import { statusLine } from "../test/statusLine";
 
 const FRAME = localFrameAt(vec3(26_000, 0, 0));
 
@@ -122,7 +128,7 @@ describe("SpatialView", () => {
     renderView();
 
     expect(screen.getByRole("application", { name: "Local chart" })).toHaveAccessibleDescription(
-      "AZM 030° ELV +30° ARROWS ROTATE +/− ZOOM Z FIT",
+      "AZM 030° ELV +30° ARROWS ROTATE +/- ZOOM Z FIT",
     );
   });
 
@@ -1270,9 +1276,22 @@ describe("SpatialView's readouts", () => {
   it("replaces the core arrow on the galactic axis and names the fallback directions", () => {
     const { container } = setup({ scene: aScene({ frame: localFrameAt(vec3(0, 0, 0)) }) });
 
-    expect(screen.getByText("DIRECTIONS UNDEFINED: grid aligned to -X")).toBeInTheDocument();
+    expect(
+      screen.getByText(statusLine("DIRECTIONS UNDEFINED: grid aligned to -X")),
+    ).toBeInTheDocument();
     expect(container.querySelector("[data-core]")).toBeNull();
     expect(within(screen.getByRole("img", { name: "Axis triad" })).getByText("-X")).toBeVisible();
+  });
+
+  it("tracks DIRECTIONS UNDEFINED: in the axis note, and leaves the grid's sentence untracked", () => {
+    setup({ scene: aScene({ frame: localFrameAt(vec3(0, 0, 0)) }) });
+
+    const state = screen.getByText("DIRECTIONS UNDEFINED:");
+    expect([
+      state.className,
+      state.nextElementSibling?.className,
+      state.parentElement?.className,
+    ]).toEqual(["status-text__state", "status-text__sentence", "spatial-view__axis-note"]);
   });
 
   it("shortens the triad to a stage under its usual box, which the overlay would clip", () => {
@@ -1469,6 +1488,205 @@ describe("SpatialView's scale bar, frame, centre and time", () => {
 
     expect(readout("ANGLE")).toBe("—");
     expect(screen.getByText("—")).toHaveClass("readout__missing");
+  });
+});
+
+/** The observer the furniture's tests observe from, written as the centre is. */
+const OBSERVED_FROM: SpatialMode = {
+  name: "OBSERVED FROM",
+  from: [
+    { label: "RADIUS", value: "10,000.0", unit: "ly", widthCh: 9 },
+    { label: "ANGLE", value: "036.9°", unit: "", widthCh: 6 },
+    { label: "HEIGHT", value: "-12.3", unit: "ly", widthCh: 9 },
+  ],
+};
+
+/** A centre on the galactic axis, whose `ANGLE` is missing. */
+const CENTRE_ON_AXIS: SpatialViewProps["centre"] = [
+  { label: "RADIUS", value: "0.0", unit: "ly", widthCh: 9 },
+  { label: "ANGLE", value: null, unit: "", widthCh: 6 },
+  { label: "HEIGHT", value: "+100.0", unit: "ly", widthCh: 9 },
+];
+
+/** The view's furniture, the row under its canvas, which its `FRAME` reading opens. */
+function furniture(): HTMLElement {
+  const row = screen.getByText("FRAME", { selector: "dt" }).closest(".spatial-view__furniture");
+  if (!(row instanceof HTMLElement)) {
+    throw new Error("the view has no furniture");
+  }
+  return row;
+}
+
+/** A reading's value in the furniture, by its term's label, the `n`th where the label repeats. */
+function furnitureValue(label: string, n = 0): HTMLElement {
+  const value = screen.getAllByText(label, { selector: ".spatial-view__furniture dt" })[n]
+    ?.nextElementSibling;
+  if (!(value instanceof HTMLElement)) {
+    throw new Error(`the furniture has no ${label} value`);
+  }
+  return value;
+}
+
+/** A value's stale slot, or `null` where it has none. */
+function slotOf(value: HTMLElement): Element | null {
+  return value.querySelector(":scope > .stale-slot");
+}
+
+describe("SpatialView's stale furniture, one S per value (plan 12, P12.T11.d)", () => {
+  function setup(props: Partial<SpatialViewProps> = {}): void {
+    fakeFramesAndTimeouts();
+    stubLayout(400, 300);
+    stubCanvas();
+    render(viewOf(props));
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("trails an S after each of the centre's values and the time while stale", () => {
+    setup({ stale: true });
+
+    for (const label of ["RADIUS", "ANGLE", "HEIGHT", "UT"]) {
+      expect(slotOf(furnitureValue(label))).toHaveTextContent(/^S\s*stale$/u);
+    }
+  });
+
+  it("trails an S after each of the observer's values in observed mode", () => {
+    setup({ stale: true, mode: OBSERVED_FROM });
+
+    for (const label of ["RADIUS", "ANGLE", "HEIGHT"]) {
+      // The observer's are the second of each label, nested in the mode's value.
+      expect(slotOf(furnitureValue(label, 1))).toHaveTextContent(/^S\s*stale$/u);
+    }
+    // The centre's three, the time and the observer's three: seven marks, and no others.
+    expect(screen.getAllByText("stale")).toHaveLength(7);
+  });
+
+  it("marks neither the frame's name nor the mode's name, which are words", () => {
+    setup({ stale: true, mode: OBSERVED_FROM });
+
+    expect(furnitureValue("FRAME")).toHaveTextContent(/^GALACTIC$/u);
+    expect(furnitureValue("MODE").firstChild?.textContent).toBe("OBSERVED FROM");
+  });
+
+  it("keeps an em dash's slot empty while stale", () => {
+    setup({ stale: true, centre: CENTRE_ON_AXIS });
+
+    expect(furnitureValue("ANGLE")).toHaveTextContent(/^—$/u);
+    expect(slotOf(furnitureValue("ANGLE"))).toBeEmptyDOMElement();
+  });
+
+  it("marks nothing in the scale bar, which is the camera's", () => {
+    setup({ stale: true, mode: OBSERVED_FROM });
+
+    expect(within(scaleBarElement()).queryByText("stale")).not.toBeInTheDocument();
+  });
+
+  it("leaves no mark outside a value's slot, after the scale bar or anywhere else", () => {
+    setup({ stale: true, mode: OBSERVED_FROM });
+
+    for (const mark of furniture().querySelectorAll(".stale-mark")) {
+      expect(mark.closest(".stale-slot")).not.toBeNull();
+    }
+  });
+
+  it("keeps each value's slot, empty, while live", () => {
+    setup({ mode: OBSERVED_FROM });
+
+    for (const [label, n] of [
+      ["RADIUS", 0],
+      ["ANGLE", 0],
+      ["HEIGHT", 0],
+      ["UT", 0],
+      ["RADIUS", 1],
+      ["ANGLE", 1],
+      ["HEIGHT", 1],
+    ] as const) {
+      const slot = slotOf(furnitureValue(label, n));
+      expect(slot).not.toBeNull();
+      expect(slot).toBeEmptyDOMElement();
+    }
+    expect(screen.queryByText("stale")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["live", false],
+    ["stale", true],
+  ])("gives the camera's AZM and ELV no slot and no mark while %s", (_, stale) => {
+    setup({ stale });
+
+    for (const label of ["AZM", "ELV"]) {
+      const value = screen.getByText(label, { selector: "dt" }).nextElementSibling;
+      expect(value).toHaveTextContent(/^[+\-\d]+°$/u);
+      expect(value?.querySelector(".stale-slot")).toBeNull();
+    }
+  });
+
+  it("stands the scale bar after the time and before the mode, in a dl of its own", () => {
+    setup({ mode: OBSERVED_FROM });
+
+    const time = furnitureValue("UT").parentElement;
+    const mode = furnitureValue("MODE").closest("dl");
+    const bar = scaleBarElement();
+    if (time === null || mode === null) {
+      throw new Error("the furniture has no time or no mode");
+    }
+    expect(time.compareDocumentPosition(bar)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(bar.compareDocumentPosition(mode)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(mode).toHaveClass("spatial-view__readings");
+    expect(mode.parentElement).toBe(furniture());
+    expect(mode.children).toHaveLength(1);
+  });
+
+  it("keeps one dl, then the scale bar, on a view with no mode", () => {
+    setup();
+
+    const lists = furniture().querySelectorAll(":scope > dl");
+    expect(lists).toHaveLength(1);
+    expect([...(lists[0]?.querySelectorAll("dt") ?? [])].map((term) => term.textContent)).toEqual([
+      "FRAME",
+      "RADIUS",
+      "ANGLE",
+      "HEIGHT",
+      "UT",
+    ]);
+    expect(lists[0]?.nextElementSibling).toBe(scaleBarElement());
+  });
+
+  it("gives a time the console keeps itself no slot and no S while stale, marked as its own", () => {
+    setup({
+      stale: true,
+      time: { label: "DISPLAY TIME UT", value: "+0 yr 000/00:00:00", unit: "", widthCh: 21 },
+      timeIsOwn: true,
+    });
+
+    const time = furnitureValue("DISPLAY TIME UT");
+    expect(time).toHaveTextContent(/^\+0 yr 000\/00:00:00$/u);
+    expect(slotOf(time)).toBeNull();
+    expect(time.parentElement).toHaveClass("spatial-reading--own");
+    // The centre's values are the answer's, and stay marked.
+    expect(slotOf(furnitureValue("HEIGHT"))).toHaveTextContent(/^S\s*stale$/u);
+  });
+
+  it("keeps a time the console keeps itself in --text while the view is stale", () => {
+    expect(stylesheetRule(".spatial-view--stale .spatial-reading--own")).toMatch(
+      /color: var\(--text\);/u,
+    );
+  });
+
+  it("still names its canvas stale", () => {
+    setup({ stale: true, mode: OBSERVED_FROM });
+
+    expect(screen.getByRole("application", { name: "Local chart, stale" })).toBeInTheDocument();
+  });
+
+  it("still mutes the furniture's readings, both lists of them, while stale", () => {
+    expect(
+      stylesheetRule(
+        ".spatial-view--stale :is(.spatial-view__readings, .spatial-view__labels),\n.census-readout--stale,\n.systems-panel--stale :is(.system-list, .system-readout)",
+      ),
+    ).toMatch(/color: var\(--text-muted\);/u);
   });
 });
 
@@ -1836,6 +2054,69 @@ function drawnAt(position: Vec3) {
   );
 }
 
+describe("SpatialView's labels off the observer's eye (plan 12, P12.T11.c)", () => {
+  beforeEach(() => {
+    stubLayout(1200, 900);
+  });
+
+  // A mark 40 px left of the view's centre, its label running right across the centre, from about
+  // 576 to 654 px, where the eye stands: unlabelled, so that only the eye's box can drop the label.
+  const near = aMark("m", { position: onPlaneAt(560, 450), label: "MARK NEAR" });
+  const eye = { position: onPlaneAt(600, 450), label: "" };
+
+  it("drops a system's label that would cover the eye", () => {
+    renderView({ scene: aScene({ points: [near], observer: eye }) });
+
+    expect(screen.queryByText("MARK NEAR")).toBeNull();
+  });
+
+  it("puts the selection's label on its other side, clear of the eye", () => {
+    renderView({ scene: aScene({ points: [near], selectedId: "m", observer: eye }) });
+
+    expect(placement(overlayLabel("MARK NEAR"))).toContain("- 100%");
+  });
+
+  it("labels the system as before in now, with no observer", () => {
+    renderView({ scene: aScene({ points: [near], selectedId: "m" }) });
+
+    expect(placement(overlayLabel("MARK NEAR"))).not.toContain("- 100%");
+  });
+
+  it("labels the system as before with the observer outside the view", () => {
+    renderView({
+      scene: aScene({ points: [near], observer: { position: onPlaneAt(-200, 450), label: "" } }),
+    });
+
+    expect(screen.getByText("MARK NEAR")).toBeInTheDocument();
+  });
+});
+
+describe("SpatialView's labels with no side beside their mark (plan 12, P12.T11.e)", () => {
+  const DESIGNATION = "GDG 0E0V00 E-141";
+  // At the view's centre, a class-4 symbol whose 16-character label, 138.88 px from 18 px out, has
+  // room on neither side in the compact chart's 256 px stage, and on the right in the stacked one.
+  const centred = aMark("s", { position: vec3(0, 0, 0), sizeClass: 4, label: DESIGNATION });
+
+  it("gives the selection at the view's centre no label in the compact chart's 256 px stage", () => {
+    stubLayout(256, 262);
+    renderView({ scene: aScene({ points: [centred], selectedId: "s" }) });
+
+    expect(
+      screen.queryAllByText(
+        (_text, element) =>
+          element instanceof HTMLSpanElement && element.textContent === DESIGNATION,
+      ),
+    ).toHaveLength(0);
+  });
+
+  it("gives the selection at the view's centre its label in the stacked page's 1036 px stage", () => {
+    stubLayout(1036, 600);
+    renderView({ scene: aScene({ points: [centred], selectedId: "s" }) });
+
+    expect(overlayLabel(DESIGNATION)).toBeInTheDocument();
+  });
+});
+
 describe("SpatialView's furniture text clear of the marks (R07.T16.j)", () => {
   beforeEach(() => {
     stubLayout(1200, 900);
@@ -1917,6 +2198,401 @@ describe("SpatialView's furniture text clear of the marks (R07.T16.j)", () => {
       before,
       expect.stringContaining("- 100%"),
     ]);
+  });
+});
+
+/**
+ * A label's box over the view, from where it is placed and its estimated size, CSS px: a curve
+ * label's set with the overlay's 0.1 em letter spacing, a mark's on its right with none.
+ */
+function boxOfLabel(element: HTMLElement, text: string, letterSpacingEm: number): BoxPx {
+  const [leftRem = Number.NaN, topRem = Number.NaN] = (
+    /^translate\(([-\d.e]+)rem, ([-\d.e]+)rem\)$/u.exec(placement(element)) ?? []
+  )
+    .slice(1)
+    .map(Number);
+  const size = textSizeRem(text, letterSpacingEm);
+  return {
+    leftPx: 16 * leftRem,
+    topPx: 16 * topRem,
+    widthPx: size.widthRem * 16,
+    heightPx: size.heightRem * 16,
+  };
+}
+
+/** The box of a label that must be drawn over the view ({@link boxOfLabel}). */
+function drawnBox(text: string, letterSpacingEm: number): BoxPx {
+  return boxOfLabel(overlayLabel(text), text, letterSpacingEm);
+}
+
+/** The box of an annulus's label, `null` where it is not drawn, as it may not be. */
+function annulusBox(text: string): BoxPx | null {
+  const element = screen.queryByText(
+    (_, candidate) => candidate instanceof HTMLSpanElement && candidate.textContent === text,
+  );
+  return element === null ? null : boxOfLabel(element, text, 0.1);
+}
+
+/** Whether a box stands at another's place, to within rounding. */
+function sameBox(a: BoxPx, b: BoxPx): boolean {
+  return Math.abs(a.leftPx - b.leftPx) < 1e-6 && Math.abs(a.topPx - b.topPx) < 1e-6;
+}
+
+/** The box of the selection's bracket's place about a class-2 mark, 12 px about its centre at 1. */
+function bracketAbout(xPx: number, yPx: number): BoxPx {
+  return bracketBoxPx({ id: "m", xPx, yPx, depth: 0, radiusPx: 6 }, 16, reticleStrokesCssPx(1));
+}
+
+/** A habitable zone 14 to 20 ly about the view centre, labelled at its outer rimward point. */
+const ZONE: AnnulusMark = {
+  id: "hz",
+  innerRadius: 14,
+  outerRadius: 20,
+  ticks: false,
+  label: "HABITABLE ZONE",
+};
+/** The zone's outer edge's rimward point, where the default camera draws it. */
+const RIMWARD = drawnAt(scale(FRAME.coreward, -20));
+/** The zone's label's first place: 0.5 rem right of the point, 0.25 rem below. */
+const FIRST: BoxPx = {
+  leftPx: RIMWARD.xPx + 8,
+  topPx: RIMWARD.yPx + 4,
+  widthPx: textSizeRem("HABITABLE ZONE", 0.1).widthRem * 16,
+  heightPx: 17.5,
+};
+
+describe("SpatialView's annulus labels, placed after the marks' (plan 14, P14.T42.d)", () => {
+  beforeEach(() => {
+    stubLayout(1200, 900);
+  });
+
+  it("draws a lesser mark's label over an annulus label's first place, which stands 0.5 rem off it", () => {
+    // A mark 10 px left of and 12 px below the rimward point, clear of the zone's label's first
+    // place by its symbol, its label `M` across that place: dropped for it before (D4).
+    const at = onPlaneAt(RIMWARD.xPx - 10, RIMWARD.yPx + 12);
+    renderView({ scene: aScene({ points: [aMark("m", { position: at })], annuli: [ZONE] }) });
+
+    const mark = drawnBox("M", 0);
+    const zone = annulusBox("HABITABLE ZONE");
+    expect([
+      boxGapPx(mark, FIRST) === 0,
+      zone === null || boxGapPx(zone, mark) >= 8 - 1e-6,
+      zone === null || boxGapPx(zone, bracketAbout(RIMWARD.xPx - 10, RIMWARD.yPx + 12)) >= 4 - 1e-6,
+    ]).toEqual([true, true, true]);
+  });
+
+  it("keeps the label of a selection on an annulus's rimward point at its right", () => {
+    renderView({
+      scene: aScene({
+        points: [aMark("s", { position: onPlaneAt(RIMWARD.xPx, RIMWARD.yPx), label: "S /256" })],
+        selectedId: "s",
+        annuli: [ZONE],
+      }),
+    });
+
+    const selection = drawnBox("S /256", 0);
+    const zone = annulusBox("HABITABLE ZONE");
+    expect([
+      placement(overlayLabel("S /256")),
+      zone === null || boxGapPx(zone, selection) >= 8 - 1e-6,
+    ]).toEqual([expect.not.stringContaining("- 100%"), true]);
+  });
+
+  it("moves an annulus's label 0.25 rem outside a mark's bracket's box, 0.125 rem of which stood beside its first place", () => {
+    // A mark right of the zone's label's first place, its bracket's box 2 px from it, its symbol
+    // 7.5 px, its label 30 px: the first place met every rule but the bracket's before.
+    const xPx = FIRST.leftPx + FIRST.widthPx + 2 + 12;
+    const yPx = FIRST.topPx + FIRST.heightPx / 2;
+    renderView({
+      scene: aScene({ points: [aMark("m", { position: onPlaneAt(xPx, yPx) })], annuli: [ZONE] }),
+    });
+
+    const zone = drawnBox("HABITABLE ZONE", 0.1);
+    expect([
+      boxGapPx(FIRST, bracketAbout(xPx, yPx)),
+      sameBox(zone, FIRST),
+      boxGapPx(zone, bracketAbout(xPx, yPx)) >= 4 - 1e-6,
+    ]).toEqual([expect.closeTo(2, 6), false, true]);
+  });
+
+  it("moves an annulus's label off a belt's ticks across its first place", () => {
+    // A belt 5 to 25 ly about a point 44 ly rimward, ticked every 10°, whose ticks, and not its
+    // edges, cross the zone's label's first place.
+    const centre = scale(FRAME.coreward, -44);
+    const belt: AnnulusMark = {
+      id: "belt",
+      centre,
+      innerRadius: 5,
+      outerRadius: 25,
+      ticks: true,
+      label: "",
+    };
+    const onBelt = (radius: number, angleDeg: number) => {
+      const angle = (angleDeg * Math.PI) / 180;
+      return drawnAt(
+        add(
+          centre,
+          add(
+            scale(FRAME.coreward, radius * Math.cos(angle)),
+            scale(FRAME.spinward, radius * Math.sin(angle)),
+          ),
+        ),
+      );
+    };
+    // Each 1 px wide, drawn 2 px wide at a ratio of 1.
+    const across = (box: BoxPx): number =>
+      Array.from({ length: 36 }, (_, index) => index * 10).filter(
+        (angleDeg) => segmentBoxGapPx(onBelt(5, angleDeg), onBelt(25, angleDeg), box) <= 1,
+      ).length;
+    renderView({ scene: aScene({ points: [], annuli: [ZONE, belt] }) });
+
+    const zone = drawnBox("HABITABLE ZONE", 0.1);
+    expect([across(FIRST) > 0, sameBox(zone, FIRST), across(zone)]).toEqual([true, false, 0]);
+  });
+});
+
+/** A label over the view, `null` where it is not drawn, as a lesser mark's may not be. */
+function labelOrNull(text: string): HTMLElement | null {
+  return screen.queryByText(
+    (_, element) => element instanceof HTMLSpanElement && element.textContent === text,
+  );
+}
+
+describe("SpatialView's selected annulus's label, placed as the selection's (plan 14, P14.T42.e)", () => {
+  beforeEach(() => {
+    stubLayout(1200, 900);
+  });
+
+  /**
+   * A selected annulus at the zone's place, unticked and labelled as a belt: the pass tells a belt
+   * from a zone by nothing but its flags.
+   */
+  const BELT: AnnulusMark = { ...ZONE, id: "belt", label: "BELT 1", selected: true };
+  /** The belt's label's first place, where the zone's starts. */
+  const BELT_FIRST: BoxPx = { ...FIRST, widthPx: textSizeRem("BELT 1", 0.1).widthRem * 16 };
+  /**
+   * A lesser mark 10 px left of and 12 px below the rimward point, as in T42.d's first test: its
+   * label `M` covers the first place, which its bracket's box stands 6 px left of.
+   */
+  const LESSER = aMark("m", { position: onPlaneAt(RIMWARD.xPx - 10, RIMWARD.yPx + 12) });
+  const LESSER_BRACKET = bracketAbout(RIMWARD.xPx - 10, RIMWARD.yPx + 12);
+
+  it("keeps a selected belt's label at its first place, where a lesser mark's label gives way", () => {
+    renderView({ scene: aScene({ points: [LESSER], annuli: [BELT] }) });
+
+    expect([
+      boxGapPx(BELT_FIRST, LESSER_BRACKET),
+      sameBox(drawnBox("BELT 1", 0.1), BELT_FIRST),
+      labelOrNull("M"),
+    ]).toEqual([expect.closeTo(6, 6), true, null]);
+  });
+
+  it("still draws a lesser mark's label over an unselected belt's first place, as T42.d built", () => {
+    renderView({ scene: aScene({ points: [LESSER], annuli: [{ ...BELT, selected: false }] }) });
+
+    const mark = drawnBox("M", 0);
+    const belt = annulusBox("BELT 1");
+    expect([boxGapPx(mark, BELT_FIRST), belt === null || boxGapPx(belt, mark) >= 8 - 1e-6]).toEqual(
+      [0, true],
+    );
+  });
+
+  it("keeps a selected belt's label at its first place, which a zone's label earlier in the scene would take", () => {
+    renderView({ scene: aScene({ points: [], annuli: [ZONE, BELT] }) });
+
+    const belt = drawnBox("BELT 1", 0.1);
+    const zone = annulusBox("HABITABLE ZONE");
+    expect([
+      boxGapPx(FIRST, BELT_FIRST),
+      sameBox(belt, BELT_FIRST),
+      zone === null || boxGapPx(zone, belt) >= 8 - 1e-6,
+    ]).toEqual([0, true, true]);
+  });
+
+  it("leaves out a selected belt's label whose every place stands within 0.25 rem of a mark's bracket's box", () => {
+    // A belt 0.1 to 0.3 ly about a mark, within 2.6 px of its centre on the screen: every place
+    // beside its outer edge, 0.5 rem to one side and 0.25 rem above or below, starts inside the
+    // mark's bracket's box, 12 px about its centre. The mark's own label stands beside it.
+    const at = onPlaneAt(800, 300);
+    renderView({
+      scene: aScene({
+        points: [aMark("m", { position: at })],
+        annuli: [{ ...BELT, centre: at, innerRadius: 0.1, outerRadius: 0.3 }],
+      }),
+    });
+
+    expect([annulusBox("BELT 1"), overlayLabel("M").textContent]).toEqual([null, "M"]);
+  });
+
+  it("places a selected belt's scattered disc's label with the belt's, before the marks' labels", () => {
+    // The belt 5 to 10 ly, labelled at its spinward point, and its scattered disc at the zone's
+    // place, both selected, as `populationAnnuli` gives them: the lesser mark's label covers the
+    // disc's first place, which `HABITABLE ZONE`'s length makes `FIRST`.
+    const belt: AnnulusMark = {
+      id: "belt",
+      innerRadius: 5,
+      outerRadius: 10,
+      ticks: false,
+      label: "BELT 1",
+      labelSpinward: true,
+      selected: true,
+    };
+    const disc: AnnulusMark = {
+      ...ZONE,
+      id: "belt:scattered",
+      label: "SCATTERED DISC",
+      selected: true,
+    };
+    renderView({ scene: aScene({ points: [LESSER], annuli: [belt, disc] }) });
+
+    // The belt's label, placed before it in the scene's order, stands 0.5 rem off it.
+    const placed = drawnBox("SCATTERED DISC", 0.1);
+    const beltLabel = annulusBox("BELT 1");
+    expect([
+      sameBox(placed, FIRST),
+      labelOrNull("M"),
+      beltLabel === null || boxGapPx(beltLabel, placed) >= 8 - 1e-6,
+    ]).toEqual([true, null, true]);
+  });
+
+  it("keeps a selected belt's label 0.5 rem from a curve label placed before it", () => {
+    // A belt 15 to 20 ly about a point 40 ly coreward, whose outer edge's rimward point is the
+    // plane ring's coreward point: the ring's label, placed first, stands at the belt's first place.
+    const centre = scale(FRAME.coreward, 40);
+    const point = drawnAt(scale(FRAME.coreward, 20));
+    const beltFirst: BoxPx = { ...BELT_FIRST, leftPx: point.xPx + 8, topPx: point.yPx + 4 };
+    renderView({
+      scene: aScene({
+        points: [],
+        plane: { spacing: 20, extent: 50, rings: [{ radius: 20, label: "PLANE 20 ly" }] },
+        annuli: [{ ...BELT, centre, innerRadius: 15, outerRadius: 20 }],
+      }),
+    });
+
+    const ring = drawnBox("PLANE 20 ly", 0.1);
+    const belt = annulusBox("BELT 1");
+    expect([sameBox(ring, beltFirst), belt === null || boxGapPx(belt, ring) >= 8 - 1e-6]).toEqual([
+      true,
+      true,
+    ]);
+  });
+});
+
+describe("SpatialView's annulus labels, crossed by no tick (plan 14, P14.T42.f)", () => {
+  beforeEach(() => {
+    stubLayout(1200, 900);
+  });
+
+  it("leaves out a zone's label whose every place a belt's ticks cross, and draws it with the belt switched off", () => {
+    // A zone 1 to 2 ly about the view centre, its outer edge 17 px or less from it on the screen,
+    // inside a belt 0.5 to 45 ly about the same centre, ticked every 10° from 4 to 376 px out:
+    // every place beside the zone's outer edge, 8.8 rem long, lies across that fan of ticks. Before
+    // P14.T42.f, which makes the ticks a rule and not a preference, the label stood across them.
+    const zone: AnnulusMark = { ...ZONE, innerRadius: 1, outerRadius: 2 };
+    const belt: AnnulusMark = {
+      id: "belt",
+      innerRadius: 0.5,
+      outerRadius: 45,
+      ticks: true,
+      label: "",
+    };
+    const view = renderView({ scene: aScene({ points: [], annuli: [zone, belt] }) });
+    const withBelt = annulusBox("HABITABLE ZONE");
+    view.rerender({ scene: aScene({ points: [], annuli: [zone] }) });
+
+    expect([withBelt, annulusBox("HABITABLE ZONE") === null]).toEqual([null, false]);
+  });
+});
+
+describe("SpatialView's ring label about its own planet (plan 14, P14.T42.g)", () => {
+  beforeEach(() => {
+    stubLayout(1200, 900);
+  });
+
+  /**
+   * A planet at the view centre, as `bodyScene` draws the focused body, and its ring 0.3 to 0.6 ly
+   * about it, its outer edge 5.02 px or less from its centre on the screen: every place beside that
+   * edge stands within 0.25 rem of the planet's bracket's box, 12 px about its centre, as the ring
+   * `A j RING 1` about its planet did at the `BODY` frame's fit at 1280 × 720.
+   */
+  const PLANET = aMark("p", {
+    position: vec3(0, 0, 0),
+    shape: "triangle-down",
+    label: "A-11",
+    labelPriority: Number.MAX_VALUE,
+  });
+  const PLANET_BRACKET = bracketAbout(600, 450);
+  const RING: AnnulusMark = {
+    id: "ring:r",
+    innerRadius: 0.3,
+    outerRadius: 0.6,
+    ticks: true,
+    label: "A j RING 1",
+    aboutId: "p",
+  };
+
+  /** Whether the ring's outer edge, at its points every 15°, lies inside the planet's bracket's box. */
+  function ringInsideBracket(): boolean {
+    const { leftPx, topPx, widthPx, heightPx } = PLANET_BRACKET;
+    return Array.from({ length: 24 }, (_, index) => (index * 15 * Math.PI) / 180).every((angle) => {
+      const at = drawnAt(
+        add(
+          scale(FRAME.coreward, RING.outerRadius * Math.cos(angle)),
+          scale(FRAME.spinward, RING.outerRadius * Math.sin(angle)),
+        ),
+      );
+      return (
+        at.xPx > leftPx && at.xPx < leftPx + widthPx && at.yPx > topPx && at.yPx < topPx + heightPx
+      );
+    });
+  }
+
+  it("draws a selected ring's label within 0.25 rem of its planet's bracket's box, no bracket drawn about the planet", () => {
+    // The ring selected from the list, as `bodyScene` gives it: the annulus selected, and no mark.
+    renderView({
+      scene: aScene({ points: [PLANET], annuli: [{ ...RING, selected: true }], selectedId: null }),
+    });
+
+    const ring = drawnBox("A j RING 1", 0.1);
+    expect([ringInsideBracket(), boxGapPx(ring, PLANET_BRACKET) < 4]).toEqual([true, true]);
+  });
+
+  it.each([
+    ["the selection", { selectedId: "p", destinationId: null }],
+    ["the destination", { selectedId: null, destinationId: "p" }],
+  ] as const)(
+    "keeps a ring's label 0.25 rem outside its planet's bracket's box while the planet is %s, or leaves it out (main's ruling on issue #96)",
+    (_, ids) => {
+      renderView({ scene: aScene({ points: [PLANET], annuli: [RING], ...ids }) });
+
+      const ring = annulusBox("A j RING 1");
+      expect([
+        ringInsideBracket(),
+        ring === null || boxGapPx(ring, PLANET_BRACKET) >= 4 - 1e-6,
+        overlayLabel("A-11").textContent,
+      ]).toEqual([true, true, "A-11"]);
+    },
+  );
+
+  it("draws an unselected ring's label within 0.25 rem of its planet's bracket's box, 0.5 rem from the planet's label", () => {
+    renderView({ scene: aScene({ points: [PLANET], annuli: [RING], selectedId: null }) });
+
+    const ring = drawnBox("A j RING 1", 0.1);
+    const planet = drawnBox("A-11", 0);
+    expect([
+      ringInsideBracket(),
+      boxGapPx(ring, PLANET_BRACKET) < 4,
+      boxGapPx(ring, planet) >= 8 - 1e-6,
+    ]).toEqual([true, true, true]);
+  });
+
+  it("draws an unselected ring's label within 0.25 rem of its planet's bracket's box while a moon is the selection", () => {
+    // A moon well away from the planet, up and to the right, its bracket drawn about it alone.
+    const moon = aMark("m", { position: onPlaneAt(800, 300), shape: "pentagon", label: "M" });
+    renderView({ scene: aScene({ points: [PLANET, moon], annuli: [RING], selectedId: "m" }) });
+
+    const ring = drawnBox("A j RING 1", 0.1);
+    expect([ringInsideBracket(), boxGapPx(ring, PLANET_BRACKET) < 4]).toEqual([true, true]);
   });
 });
 
@@ -2119,7 +2795,9 @@ describe("SpatialView on a system's plane, with the galactic axes given apart", 
   it("names the fallback directions from the axes given, which are the galaxy's", () => {
     renderOnTheAxis();
 
-    expect(screen.getByText("DIRECTIONS UNDEFINED: grid aligned to -X")).toBeInTheDocument();
+    expect(
+      screen.getByText(statusLine("DIRECTIONS UNDEFINED: grid aligned to -X")),
+    ).toBeInTheDocument();
     expect(within(screen.getByRole("img", { name: "Axis triad" })).getByText("-X")).toBeVisible();
   });
 

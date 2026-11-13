@@ -12,46 +12,97 @@
 //! generated cells a range query reads, [`SharedSystemCache`] the systems' stars a
 //! `system_summary` reads and [`SharedBodyCache`] the planetary systems `system_bodies` and
 //! `body_detail` read, each keyed by a [`GalaxyKey`]. A density map is computed and cached as a
-//! [`RawDensityMap`] and quantised for each response by [`quantise_map`]. A sky's caps, census,
-//! band and limit map run as bulk jobs, as far as its [`SkyCaps`] reach, each census cell's bright
-//! subset kept in the sky's own cell cache, and each galaxy's sky tables built once on the pool and
-//! kept in a cache of their own (rendering plan R06).
+//! [`RawDensityMap`] and quantised for each response by [`quantise_map`]; an extinction map by
+//! [`ExtinctionMapService`] into the same raw type, quantised by [`quantise_map_with_floor`]
+//! (plan 07, P07.T10.a). [`SharedSightlineCache`] holds the lines of sight the `extinction`
+//! request marches (P07.T10.c). [`SharedFeatureCellCache`] holds plan 09's feature cells and
+//! [`SharedClusterModelCache`] their interiors (P09.T40.a), [`SharedCentreOrbitCache`] the
+//! galactic centre's cells of members and their orbits (P09.T37.b), and [`served_range_query`]
+//! generates a cold range query's cells into those caches on the pool's workers before it walks
+//! them.
+//! [`global_list_on`] and [`tube_table_on`] make plan 10's global list and a stream's tube table
+//! on the pool's workers, each galaxy's spray table kept in [`SharedSprayForces`] (P10.T5.b). A sky's
+//! caps, census, band and limit
+//! map run as bulk jobs, as far as its [`SkyCaps`] reach, each census cell's bright subset kept in
+//! the sky's own cell cache, and each galaxy's sky tables built once on the pool and kept in a cache
+//! of their own (rendering plan R06).
 
 mod bodies;
 mod cancel;
 mod cells;
+mod centre_orbits;
+mod class_cells;
 mod density_map;
+mod envelope_files;
 mod error;
+mod extinction_map;
+mod features;
 mod float_mode;
 mod galaxies;
+mod global_list;
 mod key;
 mod pool;
+mod range;
+mod sightlines;
 mod single_flight;
 pub(crate) mod sky;
 mod sky_cells;
+mod sky_table_files;
 mod sky_tables;
 mod systems;
+mod thread_priority;
+mod tube_tables;
+mod viewer;
 
 pub use bodies::{BodyCacheCounters, GenerateBodiesError, GeneratedSystem, SharedBodyCache};
 pub use cancel::{CancelOnDrop, CancelToken};
 pub use cells::{CachedCell, CellCacheHandle, SharedCellCache};
+pub use centre_orbits::{CentreOrbitHandle, SharedCentreOrbitCache};
+pub use class_cells::{ClassCellHandle, SharedClassCellCache};
 pub use density_map::{
     BuildRawMapError, CodeDepth, DensityMapService, MAP_WIDTH_LY, MapKey, MapResolution,
-    ParseCodeDepthError, ParseMapResolutionError, QuantisedMap, RawDensityMap, quantise_map,
+    ParseCodeDepthError, ParseMapResolutionError, PerLy2, QuantisedMap, RawDensityMap, RawMap,
+    quantise_map, quantise_map_with_floor,
 };
+pub use envelope_files::EnvelopeFileCounters;
+pub(crate) use envelope_files::{ENVELOPE_FILES_DIR, EnvelopeFiles};
 pub use error::ComputeError;
+pub use extinction_map::{
+    EXTINCTION_FLOOR_LOG10_MAG, ExtinctionMapKey, ExtinctionMapService, Mag, RawExtinctionMap,
+};
+pub use features::{
+    ClusterModelHandle, FeatureCellHandle, GalaxyFeaturesService, KeptInteriors, MapGlobular,
+    MapGlobulars, SharedClusterModelCache, SharedFeatureCellCache,
+};
+pub(crate) use features::{counted_members, expected_members_of};
 pub use float_mode::{FlushProbe, probe_flush_to_zero};
 pub use galaxies::{GalaxyCache, GalaxyCounters};
-pub use key::GalaxyKey;
-pub use pool::{
-    CpuPool, JobError, JobReceiver, PoolCounters, Priority, ShutDownPoolError, StartPoolError,
-    SubmitJobError,
+pub use global_list::{
+    BuildTubeOnPoolError, SharedSprayForces, Shares, TRACERS_PER_SHARE, global_list_on,
+    tube_table_on,
 };
+pub use global_list::{GlobalListService, HeldGlobalList};
+pub use key::GalaxyKey;
+pub(crate) use pool::JobClass;
+pub use pool::{
+    BulkGate, CpuPool, JobError, JobReceiver, PoolCounters, PoolThread, Priority, Promotion,
+    ShutDownPoolError, StartPoolError, SubmitJobError,
+};
+#[cfg(test)]
+pub(crate) use range::served_sources;
+pub(crate) use range::with_row_reads;
+pub use range::{RangeCaches, RowReads, ServedQuery, served_range_query};
+pub use sightlines::{LineGas, SharedSightlineCache, SightlineMarcher};
 pub use single_flight::{Flight, SingleFlight};
 pub use sky::{ForceSkyCapsError, SkyCaps, SkyTablesSource};
 pub use sky_cells::SkyCellCounters;
+pub use sky_table_files::SkyTableFileCounters;
+pub(crate) use sky_table_files::{SKY_TABLE_FILES_DIR, SkyTableFiles};
 pub use sky_tables::SkyTablesCounters;
-pub use systems::{SharedBriefCache, SharedSystemCache};
+pub use systems::{SharedBriefCache, SharedSystemCache, SystemStarsHandle};
+pub use thread_priority::TwinPriority;
+pub use tube_tables::{ListedTubes, Listing, TubeKey, TubeTableCache};
+pub use viewer::{DENSITY_GRIDS, VIEWER_SYSTEMS_PER_GALAXY, ViewerSystems};
 
 pub(crate) use pool::panic_message;
 pub(crate) use sky_cells::SharedSkyCellCache;

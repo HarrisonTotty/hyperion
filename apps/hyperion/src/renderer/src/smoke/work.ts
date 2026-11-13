@@ -1,11 +1,12 @@
 /**
  * The smoke page's checks of offscreen chains, asynchronous pipelines, indirect work and pass
- * timing (T9.h), and of the engine's rebuild after a forced loss (T9.f).
+ * timing (T9.h), of the engine's rebuild after a forced loss (T9.f), and of a kernel's array
+ * bindings of one layer (R08.T0).
  */
 
-import { BUFFER_USAGE } from "../view/engine/gpuFlags";
+import { BUFFER_USAGE, TEXTURE_USAGE } from "../view/engine/gpuFlags";
 import type { GraphicsStatusStore } from "../view/engine/status";
-import type { PassTimes, RenderEngine } from "../view/engine/types";
+import type { ComputeHandle, PassTimes, RenderEngine } from "../view/engine/types";
 import FRAME_WGSL from "../view/shaders/frame.wgsl?raw";
 import {
   type Checks,
@@ -13,6 +14,7 @@ import {
   flatSpec,
   frameOf,
   fullScreenMesh,
+  halfBits,
   halfTexels,
   near,
   pause,
@@ -278,6 +280,100 @@ export async function checkTargetsAsyncIndirectTiming(
   stopTimes();
   first.dispose();
   second.dispose();
+}
+
+/** The side, in texels, of each layer {@link checkOneLayerArrays} copies: one workgroup's. */
+const LAYER_COPY_TEXELS = 4;
+
+/**
+ * R08.T0: a kernel declaring a `texture_2d_array` input and a `texture_storage_2d_array` output
+ * copies a one-layer and a three-layer texture layer by layer, and the copy reads back bit for bit.
+ *
+ * @remarks
+ * A one-layer texture binds there only as a one-layer `2d-array` view: at its own `2d`, WebGPU
+ * refuses the bind group, and the dispatch's submission with it. Each channel is a quarter of its
+ * index, exact in half precision (at most 191/4, well within a half's 11 significant bits).
+ */
+export async function checkOneLayerArrays(engine: RenderEngine, checks: Checks): Promise<void> {
+  const copy = await engine.createComputeAsync({
+    name: "smoke layer copy",
+    readback: "bit-exact",
+    subgroup: null,
+    reference: `
+@group(0) @binding(0) var source : texture_2d_array<f32>;
+@group(0) @binding(1) var copy : texture_storage_2d_array<rgba16float, write>;
+@compute @workgroup_size(${LAYER_COPY_TEXELS}, ${LAYER_COPY_TEXELS}, 1)
+fn main(@builtin(global_invocation_id) id : vec3u) {
+  textureStore(copy, id.xy, id.z, textureLoad(source, id.xy, id.z, 0));
+}`,
+  });
+  for (const layers of [1, 3]) {
+    // The harness's checks run in order: each reads the GPU back before the next draws.
+    // oxlint-disable-next-line no-await-in-loop
+    const { written, read } = await copiedLayers(engine, copy, layers);
+    const differing =
+      read.length === written.length
+        ? written.filter((bits, index) => read[index] !== bits).length
+        : written.length;
+    checks.check(
+      `R08.T0 a kernel declaring arrays copies a ${layers}-layer texture, read back exactly`,
+      read.length === written.length && differing === 0,
+      `${read.length / 4} of ${written.length / 4} texels read; ${differing} channels differ`,
+    );
+  }
+}
+
+/**
+ * The half-float bits {@link checkOneLayerArrays} writes into a texture of `layers` layers, and
+ * those `copy` writes from it into another, read back; both textures are released, whatever
+ * happens.
+ */
+async function copiedLayers(
+  engine: RenderEngine,
+  copy: ComputeHandle,
+  layers: number,
+): Promise<{ readonly written: Uint16Array; readonly read: Uint16Array }> {
+  const size = { width: LAYER_COPY_TEXELS, height: LAYER_COPY_TEXELS, depthOrArrayLayers: layers };
+  const source = engine.createTexture({
+    name: `layer copy source ${layers}`,
+    size,
+    dimension: "2d",
+    format: "rgba16float",
+    mips: 1,
+    usage: TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_DST,
+    category: "other",
+  });
+  const out = engine.createTexture({
+    name: `layer copy ${layers}`,
+    size,
+    dimension: "2d",
+    format: "rgba16float",
+    mips: 1,
+    usage: TEXTURE_USAGE.STORAGE_BINDING | TEXTURE_USAGE.COPY_SRC,
+    category: "other",
+  });
+  try {
+    const written = Uint16Array.from(
+      { length: LAYER_COPY_TEXELS * LAYER_COPY_TEXELS * layers * 4 },
+      (_, index) => halfBits(index / 4),
+    );
+    engine.writeTexture(source, [0, 0, 0], size, written);
+    engine.dispatch(
+      copy,
+      {
+        uniforms: {},
+        buffers: {},
+        sampled: { source },
+        storage: { copy: { texture: out, level: 0 } },
+      },
+      [1, 1, layers],
+      `layer copy ${layers}`,
+    );
+    return { written, read: new Uint16Array(await engine.readTexture(out)) };
+  } finally {
+    engine.releaseTexture(source);
+    engine.releaseTexture(out);
+  }
 }
 
 /**

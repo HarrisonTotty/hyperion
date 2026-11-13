@@ -2,7 +2,7 @@ import type { SystemIdHex } from "@hyperion/protocol";
 import { type MouseEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { SolarUnit } from "../../components/SolarUnit";
-import { StaleMark } from "../../components/StaleMark";
+import { StaleSlot } from "../../components/StaleSlot";
 import { formatNumber, formatSci } from "../../lib/format";
 import {
   HR_LOG_L_TICKS,
@@ -15,13 +15,17 @@ import {
   type PlotAreaPx,
   projectHr,
 } from "../../lib/galaxy/hrProjection";
-import type { ChartSystem } from "../../lib/galaxy/model";
+import type { ChartSystem, QueryMode } from "../../lib/galaxy/model";
 import { useElementSize } from "../../lib/useElementSize";
 import { LegendReticle } from "../../spatial/LegendReticle";
 import { LegendSymbol } from "../../spatial/LegendSymbol";
+import { FrameReading } from "../../spatial/FrameReading";
+import { ModeReading } from "../../spatial/ModeReading";
 import { type ColourTokens, paint, readTokens, sameTokens, staleTokens } from "../../spatial/paint";
+import { Reading, sourceState } from "../../spatial/Reading";
 import { SIZE_CLASS_REM } from "../../spatial/symbols";
-import { shownCountText, type StarFilter } from "./chartModel";
+import { shownCount, type StarFilter } from "./chartModel";
+import { CHART_FRAME_NAME, modeReading, type PlacePrecision, timeReading } from "./chartReadings";
 import { StarShapeLegend } from "./StarShapeLegend";
 
 /**
@@ -71,6 +75,11 @@ function at(xPx: number, yPx: number, remPx: number): string {
 interface CountRow {
   readonly label: string;
   readonly text: string;
+  /**
+   * Words after the value and its slot that are not the answer's, the `STARS` filter's
+   * `SHOWN: REMNANTS`, which take no mark (plan 05, P05.T14); none when absent.
+   */
+  readonly filterWords?: string;
 }
 
 /** Props of {@link Counts}. */
@@ -81,7 +90,16 @@ interface CountsProps {
   readonly underHeading?: boolean;
 }
 
-/** A line of the caption's counts, each a label and its value. */
+/**
+ * A line of the caption's counts, each a label and its value.
+ *
+ * @remarks
+ * Every count is read from the answer, so every one is stale with it. Each keeps a slot after its
+ * value for its `S`, 2 ch in its monospaced figures, while the answer is live as well
+ * ({@link StaleSlot}), so that a stale answer moves no count (plan 12, P12.T11.d), as the chart's
+ * readings keep theirs. The `SYSTEMS` count's slot follows its figure and comes before the
+ * filter's words, the console's own choice: `9 OF 88 S SHOWN: REMNANTS` (plan 05, P05.T14).
+ */
 function Counts({ rows, stale, underHeading = false }: CountsProps) {
   return (
     <dl
@@ -90,13 +108,13 @@ function Counts({ rows, stale, underHeading = false }: CountsProps) {
         underHeading ? "hr-diagram__counts hr-diagram__counts--under" : "hr-diagram__counts"
       }
     >
-      {rows.map(({ label, text }) => (
+      {rows.map(({ label, text, filterWords }) => (
         <div className="hr-diagram__count" key={label}>
           <dt>{label}</dt>
           <dd>
             {text}
-            {/* Every count is read from the answer, so every one is stale with it. */}
-            {stale ? <StaleMark /> : null}
+            <StaleSlot stale={stale} />
+            {filterWords === undefined ? null : ` ${filterWords}`}
           </dd>
         </div>
       ))}
@@ -118,6 +136,18 @@ export interface HrDiagramProps {
   readonly driveRangeLy: number;
   /** Whether the answer is a snapshot the link no longer backs: drawn muted, with a trailing `S`. */
   readonly stale: boolean;
+  /**
+   * The mode the answer on show was given in, as `answeredMode` reads it, which the diagram names
+   * under its plot: in observed mode every point is a primary as its light shows it.
+   */
+  readonly mode: QueryMode;
+  /** The answer's chart time, in years from the epoch: the observer's time in observed mode. */
+  readonly timeYr: number;
+  /**
+   * The decimals the chart's furniture reads the answer's places at (`placePrecisionFor`), so that
+   * the observer is written here as there.
+   */
+  readonly placePrecision: PlacePrecision;
 }
 
 /**
@@ -141,6 +171,15 @@ export interface HrDiagramProps {
  * hides. The title is the page's name, `HR DIAGRAM`, and the canvas's accessible name spells it
  * out (ruling 115.4).
  *
+ * Under the plot, before the counts, where the chart's furniture stands, the answer's time and mode
+ * are read as the furniture reads them, in the furniture's own readings (plan 12, P12.T11.b and
+ * P12.T11.d): `UT` and `MODE NOW`, or `FRAME GALACTIC`, `UT` and `MODE OBSERVED FROM` with the
+ * observer, since in observed mode each point is the primary its light shows, when the light left.
+ * The diagram plots no positions, so in `NOW` the line names no frame; observed, the frame names
+ * the one the observer's coordinates are given in. The line follows the answer's mode, never the
+ * mode being chosen, and is stale with the answer: the time and each coordinate trail their `S` in
+ * the slot each keeps while live, and the frame's and the mode's names, words, take none.
+ *
  * A click selects the point within 1 rem, which selects the system everywhere. The canvas is an
  * image with an accessible name and is not focusable: keyboard access is through the shared list in
  * `SYSTEMS`, where every point is a row. It is painted when what it shows changes, never on a loop.
@@ -153,6 +192,9 @@ export function HrDiagram({
   onSelect,
   driveRangeLy,
   stale,
+  mode,
+  timeYr,
+  placePrecision,
 }: HrDiagramProps) {
   const { ref: stageRef, size } = useElementSize();
   const widthPx = size?.widthPx ?? 0;
@@ -214,12 +256,19 @@ export function HrDiagram({
   };
 
   const { counts } = projection;
+  const shownSystems = shownCount(systems.length, total, starFilter);
   const accessibleName = "Hertzsprung-Russell diagram";
   // What the filter hides, then what is plotted, the pegged among them (ruling 115.3).
   const plottedRows: ReadonlyArray<CountRow> = [
     ...(starFilter === "all"
       ? []
-      : [{ label: "SYSTEMS", text: shownCountText(systems.length, total, starFilter) }]),
+      : [
+          {
+            label: "SYSTEMS",
+            text: shownSystems.figure,
+            ...(shownSystems.filterWords === null ? {} : { filterWords: shownSystems.filterWords }),
+          },
+        ]),
     { label: "PLOTTED", text: formatNumber(counts.plotted, 0) },
     { label: "OFF SCALE", text: formatNumber(counts.offScale, 0) },
   ];
@@ -236,6 +285,11 @@ export function HrDiagram({
     ...(counts.dataInvalid === 0
       ? []
       : [{ label: "DATA INVALID", text: formatNumber(counts.dataInvalid, 0) }]),
+    // Objects of a layer this build does not know, which a newer server may send; only when there
+    // are any.
+    ...(counts.unlistedLayer === 0
+      ? []
+      : [{ label: "UNLISTED LAYER", text: formatNumber(counts.unlistedLayer, 0) }]),
   ];
 
   return (
@@ -303,6 +357,12 @@ export function HrDiagram({
       <p className="hr-diagram__axis-label hr-diagram__axis-label--x">
         EFFECTIVE TEMPERATURE K, LOG SCALE
       </p>
+      {/* In the furniture's own classes too, so that the line is set as the chart's furniture is. */}
+      <dl className="hr-diagram__readings spatial-view__readings">
+        {mode.kind === "observed" ? <FrameReading frameName={CHART_FRAME_NAME} /> : null}
+        <Reading reading={timeReading(timeYr)} state={sourceState(stale)} />
+        <ModeReading mode={modeReading(mode, placePrecision)} state={sourceState(stale)} />
+      </dl>
       <Counts rows={plottedRows} stale={stale} />
       <h3 className="hr-diagram__counts-heading">NOT PLOTTED</h3>
       <Counts rows={notPlottedRows} stale={stale} underHeading />
@@ -311,7 +371,7 @@ export function HrDiagram({
       <div className="symbol-legend" role="group" aria-label="Hertzsprung-Russell diagram legend">
         <p className="symbol-legend__item">SYMBOLS NOT TO SCALE</p>
         {/* Neutron stars and black holes are counted, not plotted, so their shapes are not here. */}
-        <StarShapeLegend compactRemnants={false} />
+        <StarShapeLegend compactRemnants={false} unlistedLayer={counts.unlistedLayer > 0} />
         <p className="symbol-legend__item">
           <LegendSymbol shape="circle" diameterRem={SIZE_CLASS_REM[4]} filled available />
           IN DRIVE RANGE

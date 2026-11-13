@@ -30,6 +30,7 @@ pub mod photometry;
 pub mod premain;
 pub mod remnant;
 pub mod rotation;
+pub(crate) mod rules;
 pub mod sse;
 pub mod state;
 pub mod substellar;

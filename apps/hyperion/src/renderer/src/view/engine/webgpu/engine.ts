@@ -11,6 +11,7 @@
  * an allocation event for it.
  */
 
+import { assertMaterialSupported } from "../depthLayers";
 import type { KernelPair } from "../kernels";
 import type { AllocationEvent, BufferSpec, MemoryCategory, TextureSpec } from "../memory";
 import {
@@ -30,9 +31,14 @@ import type {
 } from "../status";
 import type {
   BufferHandle,
+  CompileBudgetSize,
+  CompileEvent,
   ComputeBindings,
   ComputeHandle,
   CreateWebGpuEngine,
+  DepthLayerPass,
+  DepthLayersSpec,
+  DepthLayerTarget,
   DepthPolicy,
   FrameSubmission,
   IndirectArgs,
@@ -43,34 +49,44 @@ import type {
   PointSplatHandle,
   PointSplatSpec,
   PostProcessHandle,
+  PreparedTarget,
   RenderEngine,
   RenderTarget,
   RenderTargetFormat,
   RenderTargetSpec,
   RenderView,
   SamplerSpec,
+  TargetRender,
   TexelRect,
   TextureHandle,
   WgslMaterialSpec,
   WgslPostProcessSpec,
 } from "../types";
+import { CompileBudget, DEFAULT_COMPILE_BUDGET } from "./compileBudget";
 import {
   createKernel,
   createKernelAsync,
+  DispatchObjects,
   encodeDispatch,
   type KernelRecord,
+  prepareKernel,
   type Workgroups,
 } from "./compute";
+import { WebGpuDepthLayers } from "./depthLayers";
 import { logUncapturedErrors, watchDeviceLoss } from "./deviceLoss";
 import {
+  type DepthLayerOutput,
   Drawing,
   type DrawingHost,
   type FrameOutput,
   type MaterialRecord,
   type PostProcessRecord,
 } from "./drawing";
+import { errorText } from "./errorText";
+import { KernelCache } from "./kernelCache";
 import { resolveKernelResources } from "./kernelResources";
 import {
+  assertOutputsFit,
   FULL_SCREEN_WGSL,
   materialBindings,
   type MaterialModules,
@@ -79,6 +95,7 @@ import {
 } from "./materials";
 import { MeshRecord } from "./meshes";
 import { MipGenerator } from "./mipmaps";
+import { pipelineOutputs } from "./pipelineOutputs";
 import {
   assertSplatInputs,
   assertSplatSupported,
@@ -104,27 +121,21 @@ import {
 import { WebGpuRenderTarget } from "./target";
 import { PASSES_PER_FRAME, PassTimer } from "./timing";
 import { assertDrawStruct, OFFSET_MEMBER, uniformLayout } from "./uniforms";
-import { srgbViewFormat, WebGpuView } from "./view";
+import { WebGpuView } from "./view";
 
 /**
- * The colour formats, with or without depth, a material's pipelines are made for ahead of its
- * draws, for one of `createMaterialAsync`'s targets.
+ * The engine's sampler cache's key of `spec`: its filter, its address mode and its comparison
+ * (R10.T9.b), all that its descriptor holds but its name.
  */
-export function pipelineOutputs(
-  target: RenderTargetFormat,
-  preferredCanvas: GPUTextureFormat,
-): Array<readonly [GPUTextureFormat, boolean]> {
-  if (target === "canvas") {
-    return [[srgbViewFormat(preferredCanvas), true]];
-  }
-  if (target === "canvas-in-pass") {
-    return [[preferredCanvas, true]];
-  }
-  return [
-    [target, true],
-    [target, false],
-  ];
+export function samplerKey(spec: Pick<SamplerSpec, "filter" | "address" | "compare">): string {
+  return `${spec.filter}:${spec.address}:${spec.compare ?? "none"}`;
 }
+
+/** A submission that resolves the passes timed so far: a frame's, a splat's, a mip chain's. */
+const ALWAYS = (): boolean => true;
+
+/** A submission that resolves nothing: a readback's, a copy's, the rounding probe's. */
+const NEVER = (): boolean => false;
 
 /** A caught value as an `Error`, keeping it as the cause when it is not one. */
 function asError(error: unknown): Error {
@@ -146,13 +157,27 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
   readonly capabilities: GpuCapabilities;
   readonly depthPolicy: DepthPolicy = "reversed-z-float";
   readonly device: GPUDevice;
+  /** The device's compiles in flight (`compileBudget.ts`): every asynchronous pipeline's. */
+  readonly compiles: CompileBudget;
   readonly #status: GraphicsStatusStore;
   readonly #meshes = new WeakMap<MeshHandle, MeshRecord>();
   readonly #materials = new WeakMap<MaterialHandle, MaterialRecord>();
+  /**
+   * The compile check of each material of `createMaterial`, which a preparation waits on so that a
+   * broken one is not prepared (R10.T14.d).
+   */
+  readonly #compileChecks = new WeakMap<MaterialRecord, Promise<void>>();
+  /** The meshes and materials released, so that a later use names the release (R10.T16.b). */
+  readonly #released = new WeakSet<MeshHandle | MaterialHandle>();
   readonly #postProcesses = new WeakMap<PostProcessHandle, PostProcessRecord>();
-  readonly #kernels = new WeakMap<ComputeHandle, KernelRecord>();
+  /**
+   * Each distinct kernel's record, shared by its handles with its uniform buffers, until its last
+   * handle is released or the device is lost (R01.T15).
+   */
+  readonly #kernels: KernelCache;
   readonly #views = new Set<WebGpuView>();
   readonly #targets = new Set<WebGpuRenderTarget>();
+  readonly #depthLayers = new Set<WebGpuDepthLayers>();
   /** The kernel that last wrote each buffer and texture (Design notes 16 and 20). */
   readonly #writers = new WriterRecord();
   #mipGenerator: MipGenerator | null = null;
@@ -164,8 +189,8 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
   readonly #watches: ReadonlyArray<() => void>;
   readonly #resources: ResourceRegistry;
   readonly #drawing: Drawing;
-  /** Each kernel's uniform buffers, by uniform name. */
-  readonly #kernelUniforms = new Map<KernelRecord, Map<string, BufferHandle>>();
+  /** The dispatches' kept layouts, views and bind groups (plan R14). */
+  readonly #dispatchObjects: DispatchObjects;
   /** The device's loss, once reported. */
   #lost: GraphicsFault | null = null;
   #disposed = false;
@@ -176,8 +201,13 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
    * @param status - Where a shader that fails to compile is reported, and whose `gpuTiming` says
    * whether `--hyperion-gpu-timing` lifted timestamp quantization this launch.
    */
-  constructor(device: GPUDevice, status: GraphicsStatusStore) {
+  constructor(
+    device: GPUDevice,
+    status: GraphicsStatusStore,
+    compileBudget: CompileBudgetSize = DEFAULT_COMPILE_BUDGET,
+  ) {
     this.device = device;
+    this.compiles = new CompileBudget(compileBudget);
     this.#status = status;
     this.capabilities = deviceCapabilities(device);
     this.#resources = new ResourceRegistry(device, (event) => {
@@ -185,6 +215,18 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
         listener(event);
       }
     });
+    this.#kernels = new KernelCache({
+      compile: (pair, spec) => createKernel(device, pair, spec),
+      compileAsync: (pair, spec) =>
+        this.compiles.run(pair.name, () => createKernelAsync(device, pair, spec)),
+      // A kernel's uniform buffers are bound by its dispatches alone, never by a draw's cached bind
+      // group, so the draw path's cache is left as it is, and the dispatches' forgotten.
+      destroyBuffer: (buffer) => {
+        this.#resources.destroyBuffer(buffer);
+        this.#dispatchObjects.forgetBindGroups();
+      },
+    });
+    this.#dispatchObjects = new DispatchObjects(device);
     const { gpuTiming } = status.getSnapshot();
     this.#timer = new PassTimer(
       {
@@ -200,6 +242,10 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
         () => this.#disposed,
         (fault) => {
           this.#lost = fault;
+          // The reads of the pass times in flight died with it too, and no later one is read.
+          this.#timer.deviceLost();
+          // The records' pipelines died with the device: none is handed out again.
+          this.#kernels.clear();
           for (const listener of this.#faultListeners) {
             listener(fault);
           }
@@ -232,15 +278,18 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
   destroyBuffer(handle: BufferHandle): void {
     this.#resources.destroyBuffer(handle);
     this.#drawing.forgetBindGroups();
+    this.#dispatchObjects.forgetBindGroups();
   }
 
   destroyTexture(texture: TextureHandle): void {
     this.#resources.destroyTexture(texture);
     this.#drawing.forgetBindGroups();
+    this.#dispatchObjects.forgetBindGroups();
   }
 
-  sampler(spec: Pick<SamplerSpec, "name" | "filter" | "address">): GPUSampler {
-    const key = `${spec.filter}:${spec.address}`;
+  /** The one sampler of each filter, address mode and comparison, made at its first use. */
+  sampler(spec: Pick<SamplerSpec, "name" | "filter" | "address" | "compare">): GPUSampler {
+    const key = samplerKey(spec);
     let sampler = this.#samplers.get(key);
     if (sampler === undefined) {
       sampler = this.device.createSampler(samplerDescriptor({ ...spec, binding: 0 }));
@@ -255,19 +304,53 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
 
   generateMips(texture: TextureHandle): void {
     const { texture: gpuTexture, spec } = this.#resources.textureOf(texture);
-    this.#submit(`${spec.name} mips`, (encoder) => {
-      const writes = this.#timer.writesFor(`${spec.name} mips`);
-      this.#mips.encode(encoder, gpuTexture, spec.mips, writes);
-    });
-    this.#resolveTimes();
+    this.#submit(
+      `${spec.name} mips`,
+      (encoder) => {
+        const writes = this.#timer.writesFor(`${spec.name} mips`);
+        this.#mips.encode(encoder, gpuTexture, spec.mips, writes);
+      },
+      ALWAYS,
+    );
   }
 
   /** Draws `frame` into `output` in the adapter's own passes, timed, and submits them. */
   renderFrame(frame: FrameSubmission, output: FrameOutput): void {
-    this.#submit(frame.label, (encoder) => {
-      this.#drawing.encodeFrame(encoder, frame, output, (label) => this.#timer.writesFor(label));
-    });
-    this.#resolveTimes();
+    this.#submit(
+      frame.label,
+      (encoder) => {
+        this.#drawing.encodeFrame(encoder, frame, output, (label) => this.#timer.writesFor(label));
+      },
+      ALWAYS,
+    );
+  }
+
+  /**
+   * Draws one pass of a depth-layer target into `output`, timed, in a submission of its own
+   * (R10.T9.b).
+   *
+   * @remarks
+   * Its timestamps take no resolve of their own: they ride the next one, as a dispatch's do, the
+   * same view's next render's, so a photorealistic frame keeps its count of resolves, which
+   * `TIMING_FRAMES_IN_FLIGHT` is sized by (decision-r10-t9b-design D1). A run of passes that has
+   * half filled the query set resolves at once, as a bake's dispatches do.
+   */
+  renderDepthLayer(label: string, pass: DepthLayerPass, output: DepthLayerOutput): void {
+    this.#submit(
+      label,
+      (encoder) => {
+        this.#drawing.encodeDepthLayer(encoder, pass, output, (timed) =>
+          this.#timer.writesFor(timed),
+        );
+      },
+      () => this.#timer.mark() >= PASSES_PER_FRAME / 2,
+    );
+  }
+
+  forgetDepthLayers(target: DepthLayerTarget): void {
+    if (target instanceof WebGpuDepthLayers) {
+      this.#depthLayers.delete(target);
+    }
   }
 
   forgetView(view: RenderView): void {
@@ -285,7 +368,9 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
   materialOf(handle: MaterialHandle): MaterialRecord {
     const record = this.#materials.get(handle);
     if (record === undefined) {
-      throw new Error(`material ${handle.name} was not made by this engine`);
+      throw new Error(
+        `material ${handle.name} ${this.#released.has(handle) ? "was released" : "was not made by this engine"}`,
+      );
     }
     return record;
   }
@@ -293,7 +378,9 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
   meshOf(handle: MeshHandle): MeshRecord {
     const record = this.#meshes.get(handle);
     if (record === undefined) {
-      throw new Error(`mesh ${handle.name} was not made by this engine`);
+      throw new Error(
+        `mesh ${handle.name} ${this.#released.has(handle) ? "was released" : "was not made by this engine"}`,
+      );
     }
     return record;
   }
@@ -306,13 +393,13 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
     return record;
   }
 
-  /** The kernel behind `handle`, which must be this engine's. */
+  /**
+   * The kernel behind `handle`, which must be this engine's.
+   *
+   * @throws Error naming the kernel for a handle this engine did not make or has released.
+   */
   kernelOf(handle: ComputeHandle): KernelRecord {
-    const record = this.#kernels.get(handle);
-    if (record === undefined) {
-      throw new Error(`kernel ${handle.name} was not made by this engine`);
-    }
-    return record;
+    return this.#kernels.kernelOf(handle).record;
   }
 
   /**
@@ -349,8 +436,79 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
 
   createRenderTarget(spec: RenderTargetSpec): RenderTarget {
     this.#assertLive();
+    // A target drawn with another's depth takes it from this engine's own (plan R14, R14.T2.b):
+    // the depth's texture is this engine's and live, or its lookup throws naming why.
+    if (spec.depthOf !== undefined) {
+      const shared = spec.depthOf.depth;
+      if (shared === null) {
+        throw new Error(
+          `target ${spec.name} draws with ${spec.depthOf.name}'s depth, which has none`,
+        );
+      }
+      this.gpuTextureOf(shared);
+    }
     const target = new WebGpuRenderTarget(this, spec);
     this.#targets.add(target);
+    return target;
+  }
+
+  /**
+   * Renders each frame into its target, in order, in one submission, its passes' times resolved
+   * at its end (plan R14, the owner's Mac): exactly as each target's `render` in turn, whose frame
+   * would have been a submission of its own, since each frame takes its own `Frame` block and ring
+   * slots ({@link Drawing.encodeFrames}) and the queue runs the passes in the same order. A target
+   * of several mips ends a submission, its mips made after it, as its `render` makes them, before
+   * the next target's frame is encoded.
+   *
+   * @throws Error for a target this engine did not make, and as a target's `render` does, before
+   *   anything is encoded.
+   */
+  renderTargets(renders: ReadonlyArray<TargetRender>): void {
+    const prepared = renders.flatMap(({ target, frame }) => {
+      if (
+        !(target instanceof WebGpuRenderTarget) ||
+        (!this.#targets.has(target) && !target.disposed)
+      ) {
+        throw new Error(`target ${target.name} was not made by this engine`);
+      }
+      // A disposed target draws nothing, as its `render` does.
+      const made = target.prepare(frame);
+      return made === null ? [] : [{ frame, ...made }];
+    });
+    const submissions: Array<typeof prepared> = [[]];
+    for (const each of prepared) {
+      submissions.at(-1)?.push(each);
+      if (each.mips) {
+        submissions.push([]);
+      }
+    }
+    for (const submission of submissions) {
+      const [first] = submission;
+      if (first === undefined) {
+        continue;
+      }
+      this.#submit(
+        first.frame.label,
+        (encoder) => {
+          this.#drawing.encodeFrames(encoder, submission, (label) => this.#timer.writesFor(label));
+        },
+        ALWAYS,
+      );
+      for (const { drawn } of submission) {
+        drawn();
+      }
+    }
+  }
+
+  /**
+   * A depth-only target of array layers (R10.T9.b).
+   *
+   * @throws Error naming the target where its size or layer count does not fit the device.
+   */
+  createDepthLayers(spec: DepthLayersSpec): DepthLayerTarget {
+    this.#assertLive();
+    const target = new WebGpuDepthLayers(this, spec);
+    this.#depthLayers.add(target);
     return target;
   }
 
@@ -373,7 +531,7 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
 
   createMaterial(spec: WgslMaterialSpec): MaterialHandle {
     const { handle, record } = this.#makeMaterial(spec, false);
-    void compilationErrorsOf(record.modules)
+    const checked = compilationErrorsOf(record.modules)
       .then((errors): void => {
         if (errors.length > 0) {
           record.broken = true;
@@ -384,6 +542,7 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
       .catch((error: unknown) => {
         this.#reportCompileCheckFailure(`material ${spec.name}`, error);
       });
+    this.#compileChecks.set(record, checked);
     return handle;
   }
 
@@ -394,7 +553,12 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
    * @remarks
    * A canvas target is the preferred canvas format's sRGB view with depth, `canvas-in-pass` the
    * format itself with depth (R07.T15's pass, which encodes); a colour target is made both with and
-   * without depth, since a target may have either.
+   * without depth, since a target may have either. A fragment output a target's format does not
+   * take is refused by name for each target, with `meshes` or none, as the catalogue's compile
+   * makes it (plan R14, R14.T2.b's finding).
+   *
+   * @throws Error, as a rejection, naming the material, the format and the two types for a fragment
+   *   output a target's format does not take ({@link assertOutputsFit}).
    */
   async createMaterialAsync(
     spec: WgslMaterialSpec,
@@ -410,6 +574,10 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
     }
     const preferred = navigator.gpu.getPreferredCanvasFormat();
     const outputs = targets.flatMap((target) => pipelineOutputs(target, preferred));
+    assertOutputsFit(
+      spec,
+      outputs.map(([format]) => format),
+    );
     await Promise.all(
       meshes.flatMap((mesh) =>
         outputs.map(([format, hasDepth]) =>
@@ -418,6 +586,34 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
       ),
     );
     return handle;
+  }
+
+  async prepareMaterial(
+    material: MaterialHandle,
+    targets: ReadonlyArray<PreparedTarget>,
+    meshes: ReadonlyArray<MeshHandle>,
+  ): Promise<void> {
+    this.#assertLive();
+    const record = this.materialOf(material);
+    const records = meshes.map((mesh) => this.meshOf(mesh));
+    // A material whose shaders failed is reported once, by its check, and drawn by none.
+    await this.#compileChecks.get(record);
+    if (record.broken) {
+      return;
+    }
+    const preferred = navigator.gpu.getPreferredCanvasFormat();
+    const outputs = targets.flatMap((target) => pipelineOutputs(target, preferred));
+    assertOutputsFit(
+      record.spec,
+      outputs.map(([format]) => format),
+    );
+    await Promise.all(
+      records.flatMap((mesh) =>
+        outputs.map(([format, hasDepth]) =>
+          this.#drawing.preparePipeline(record, mesh, format, hasDepth),
+        ),
+      ),
+    );
   }
 
   createPostProcess(spec: WgslPostProcessSpec): PostProcessHandle {
@@ -457,17 +653,34 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
     return handle;
   }
 
+  /**
+   * A new handle over the device's one record of `pair` (R01.T15): compiled now where the engine
+   * holds none of its key (`kernelKey`).
+   */
   createCompute(pair: KernelPair): ComputeHandle {
     this.#assertLive();
-    const record = createKernel(this.device, pair, this.capabilities);
-    return this.#kernelHandle(pair, record);
+    return this.#kernels.create(pair, prepareKernel(pair, this.capabilities));
   }
 
-  /** A kernel whose pipeline is made by `createComputePipelineAsync`, off the frame path. */
+  /**
+   * A kernel whose pipeline is made by `createComputePipelineAsync`, off the frame path: a new
+   * handle over the device's one record of `pair`, which concurrent creates of its key wait on
+   * together, and which a record already held serves at once (R01.T15).
+   */
   async createComputeAsync(pair: KernelPair): Promise<ComputeHandle> {
     this.#assertLive();
-    const record = await createKernelAsync(this.device, pair, this.capabilities);
-    return this.#kernelHandle(pair, record);
+    return this.#kernels.createAsync(pair, prepareKernel(pair, this.capabilities));
+  }
+
+  /**
+   * Lets a kernel's handle go (R01.T15): the last handle over its record destroys the record's
+   * uniform buffers, each raising its `destroyed` event, and the engine forgets the record.
+   *
+   * @throws Error for a handle this engine did not make or has released.
+   */
+  releaseCompute(kernel: ComputeHandle): void {
+    this.#assertLive();
+    this.#kernels.release(kernel);
   }
 
   createBuffer(spec: BufferSpec): BufferHandle {
@@ -496,8 +709,9 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
   }
 
   /**
-   * @throws Error for a render target's colour or depth, which the target owns and releases at
-   *   its disposal, as well as for a handle the engine did not make or has released.
+   * @throws Error for a render target's colour or depth, or a depth-layer target's layers, which
+   *   the target owns and releases at its disposal, as well as for a handle the engine did not make
+   *   or has released.
    */
   releaseTexture(texture: TextureHandle): void {
     this.#assertLive();
@@ -508,7 +722,33 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
         );
       }
     }
+    for (const target of this.#depthLayers) {
+      if (target.depth === texture) {
+        throw new Error(
+          `texture ${texture.name} belongs to a depth-layer target and is released with it`,
+        );
+      }
+    }
     this.destroyTexture(texture);
+  }
+
+  releaseMesh(mesh: MeshHandle): void {
+    this.#assertLive();
+    const record = this.meshOf(mesh);
+    for (const buffer of record.buffers) {
+      this.#resources.destroyBuffer(buffer);
+    }
+    this.#meshes.delete(mesh);
+    this.#released.add(mesh);
+  }
+
+  releaseMaterial(material: MaterialHandle): void {
+    this.#assertLive();
+    this.materialOf(material);
+    this.#materials.delete(material);
+    this.#released.add(material);
+    // The cache is keyed by layouts and resources, not by material: cleared whole, as a destroy does.
+    this.#drawing.forgetBindGroups();
   }
 
   writePackedCubeLevel(cube: TextureHandle, level: number, packed: Uint32Array): void {
@@ -527,10 +767,11 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
     level: number,
     packed: BufferHandle,
     face?: number,
+    region?: TexelRect,
   ): void {
     this.#assertLive();
     this.#submit(`${cube.name} level ${level}`, (encoder) => {
-      this.#resources.encodePackedCubeLevelFromBuffer(encoder, cube, level, packed, face);
+      this.#resources.encodePackedCubeLevelFromBuffer(encoder, cube, level, packed, face, region);
     });
     // The cube carries the buffer's writer, so a presentation-only result stays refused; one face
     // of six is a part of it.
@@ -567,8 +808,8 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
     assertSplatSupported(this.capabilities);
     const { vertex, fragment } = this.#splatModules(spec);
     try {
-      const pipeline = await this.device.createRenderPipelineAsync(
-        pointSplatPipelineDescriptor(spec, vertex, fragment),
+      const pipeline = await this.compiles.run(spec.name, () =>
+        this.device.createRenderPipelineAsync(pointSplatPipelineDescriptor(spec, vertex, fragment)),
       );
       return this.#splatHandle(spec, pipeline);
     } catch (error: unknown) {
@@ -612,13 +853,16 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
         const { texture, spec: targetSpec } = this.#resources.textureOf(target);
         const { buffer, spec: pointsSpec } = this.#resources.bufferOf(points);
         assertSplatInputs(spec, targetSpec, pointsSpec);
-        this.#submit(spec.name, (encoder) => {
-          const writes = this.#timer.writesFor(spec.name);
-          encodeSplat(this.device, encoder, pipeline, texture, buffer, count, spec.name, writes);
-        });
+        this.#submit(
+          spec.name,
+          (encoder) => {
+            const writes = this.#timer.writesFor(spec.name);
+            encodeSplat(this.device, encoder, pipeline, texture, buffer, count, spec.name, writes);
+          },
+          ALWAYS,
+        );
         // A splat adds to what the target holds, so it keeps the target's writer.
         this.#writers.wrotePart(target, null);
-        this.#resolveTimes();
       },
       dispose: (): void => {
         disposed = true;
@@ -633,10 +877,17 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
     pass = "compute",
   ): void {
     this.#assertLive();
-    const record = this.kernelOf(kernel);
-    const uniforms = this.#kernelUniforms.get(record) ?? new Map<string, BufferHandle>();
-    this.#kernelUniforms.set(record, uniforms);
-    const resources = resolveKernelResources(this.#resources, record, bindings, uniforms);
+    const { record, uniforms } = this.#kernels.kernelOf(kernel);
+    // The uniforms are written here, through the queue, and the dispatch is submitted below before
+    // anything else is encoded, so that a record's buffers shared by several handles hold each
+    // dispatch's own values when it runs (R01.T15).
+    const resources = resolveKernelResources(
+      this.#resources,
+      record,
+      bindings,
+      uniforms,
+      this.#dispatchObjects,
+    );
     const counts: Workgroups =
       "buffer" in workgroups
         ? {
@@ -645,19 +896,20 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
             offsetBytes: workgroups.offsetBytes,
           }
         : { kind: "direct", counts: workgroups };
-    this.#submit(pass, (encoder) => {
-      const timestampWrites = this.#timer.writesFor(pass);
-      encodeDispatch(this.device, encoder, record, resources, counts, {
-        label: pass,
-        ...(timestampWrites === undefined ? {} : { timestampWrites }),
-      });
-    });
     // Dispatch times wait for the next frame's resolve, unless a bake of many dispatches between
     // frames has half filled the query set: then they resolve now, so that the frame's own passes
     // still find room.
-    if (this.#timer.mark() >= PASSES_PER_FRAME / 2) {
-      this.#resolveTimes();
-    }
+    this.#submit(
+      pass,
+      (encoder) => {
+        const timestampWrites = this.#timer.writesFor(pass);
+        encodeDispatch(this.#dispatchObjects, encoder, record, resources, counts, {
+          label: pass,
+          ...(timestampWrites === undefined ? {} : { timestampWrites }),
+        });
+      },
+      () => this.#timer.mark() >= PASSES_PER_FRAME / 2,
+    );
     // Only what the kernel may write is recorded: a binding declared `read` (a `read` storage
     // texture, a `read` storage buffer) keeps the writer it had (Design note 16).
     for (const [name, handle] of Object.entries(bindings.buffers)) {
@@ -676,6 +928,11 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
         this.#writers.wrotePart(texture, record.pair);
       }
     }
+  }
+
+  stagedWrites<T>(label: string, write: () => T): T {
+    this.#assertLive();
+    return this.#resources.staged(label, write);
   }
 
   writeBuffer(buffer: BufferHandle, offsetBytes: number, data: ArrayBufferView): void {
@@ -750,6 +1007,10 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
     };
   }
 
+  onCompile(listener: (event: CompileEvent) => void): () => void {
+    return this.compiles.onCompile(listener);
+  }
+
   /** Never fires here: the engine `loadRenderEngine` returns re-creates this one after a loss. */
   onRestored(_listener: () => void): () => void {
     return () => undefined;
@@ -788,14 +1049,20 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
       target.dispose();
     }
     this.#targets.clear();
+    for (const target of this.#depthLayers) {
+      target.dispose();
+    }
+    this.#depthLayers.clear();
     this.#drawing.dispose();
+    this.#dispatchObjects.forgetBindGroups();
     this.#timer.dispose();
     this.#resources.dispose();
-    this.#kernelUniforms.clear();
+    this.#kernels.clear();
     this.#samplers.clear();
     this.device.destroy();
     this.#allocationListeners.clear();
     this.#faultListeners.clear();
+    this.compiles.clearListeners();
   }
 
   #makeMaterial(
@@ -803,6 +1070,8 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
     asyncPipelines: boolean,
   ): { readonly handle: MaterialHandle; readonly record: MaterialRecord } {
     this.#assertLive();
+    // Refused before any module is made: the device would refuse every pipeline of it.
+    assertMaterialSupported(spec, this.capabilities);
     const drawLayout = uniformLayout([OFFSET_MEMBER, ...spec.uniforms]);
     assertDrawStruct(`material ${spec.name}`, drawLayout, spec.vertexWgsl, spec.fragmentWgsl);
     const bindings = materialBindings(spec);
@@ -848,28 +1117,27 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
   /** A compile check that could not run (a lost device, say): logged unless the engine is gone. */
   #reportCompileCheckFailure(owner: string, error: unknown): void {
     if (!this.#disposed) {
-      console.error(`the compile check of ${owner} failed:`, error);
+      console.error(`the compile check of ${owner} failed: ${errorText(error)}`);
     }
   }
 
-  #kernelHandle(pair: KernelPair, record: KernelRecord): ComputeHandle {
-    const handle: ComputeHandle = Object.freeze({
-      kind: "compute",
-      name: pair.name,
-      path: record.path,
-    });
-    this.#kernels.set(handle, record);
-    return handle;
-  }
-
   /**
-   * Encodes and submits one command buffer.
+   * Encodes and submits one command buffer, ending it with the resolve of the passes timed so far
+   * where `resolves` says so once it is encoded, and reads their times once it is submitted.
    *
    * @remarks
    * When the encoding throws, nothing is submitted, so the passes it timed are forgotten: their
-   * timestamps would otherwise be resolved and reported unwritten.
+   * timestamps would otherwise be resolved and reported unwritten. The resolve is the command
+   * buffer's last commands, after every pass it times, rather than a command buffer and a
+   * submission of its own after it (plan R14, the owner's Mac): the queue runs them in the same
+   * order, and the times are the same; the resolve takes the same number, and is read at the same
+   * point, as before.
    */
-  #submit(label: string, encode: (encoder: GPUCommandEncoder) => void): void {
+  #submit(
+    label: string,
+    encode: (encoder: GPUCommandEncoder) => void,
+    resolves: () => boolean = NEVER,
+  ): void {
     const mark = this.#timer.mark();
     const encoder = this.device.createCommandEncoder({ label });
     let encoded = false;
@@ -881,17 +1149,11 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
         this.#timer.rollBack(mark);
       }
     }
+    const read = resolves() ? this.#timer.resolve(encoder) : null;
+    // The writes a staged scope holds go first, as queue writes made before would have.
+    this.#resources.flushStaged();
     this.device.queue.submit([encoder.finish()]);
-  }
-
-  /** Resolves the frame's timestamps, when any pass was timed, in a submission of their own. */
-  #resolveTimes(): void {
-    const encoder = this.device.createCommandEncoder({ label: "pass times" });
-    const read = this.#timer.resolve(encoder);
-    if (read !== null) {
-      this.device.queue.submit([encoder.finish()]);
-      read();
-    }
+    read?.();
   }
 
   #assertLive(): void {
@@ -916,6 +1178,7 @@ export const createWebGpuEngine: CreateWebGpuEngine = async (
   outcome: AdapterOutcome & { readonly kind: "adapter" },
   status: GraphicsStatusStore,
   overrides: CapabilityOverrides | undefined,
+  compileBudget?: CompileBudgetSize,
 ): Promise<RenderEngine> => {
   const requested = requiredFeatures(outcome.adapter, overrides);
   const device = await outcome.adapter.requestDevice({
@@ -927,7 +1190,7 @@ export const createWebGpuEngine: CreateWebGpuEngine = async (
   if (notEnabled.length > 0) {
     console.warn(`the device did not enable ${notEnabled.join(", ")}, which it was asked for`);
   }
-  const engine = new WebGpuRenderEngine(device, status);
+  const engine = new WebGpuRenderEngine(device, status, compileBudget);
   // The device's features, not the adapter's, so that a withheld feature reads as absent in the
   // status too (Design note 24).
   status.dispatch({ kind: "device-capabilities", capabilities: engine.capabilities });

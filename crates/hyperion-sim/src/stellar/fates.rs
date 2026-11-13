@@ -696,7 +696,7 @@ const _: () = assert!(
 pub const REMNANT_QUADRATURE_NODES: u32 = 8;
 
 /// The masses of the [`TrackFates`] grid, M☉, ascending: [`TRACK_FATES_MASSES`] of them, log-spaced
-/// within each mass band ([`MASS_BAND_EDGES`](crate::galaxy::imf::MASS_BAND_EDGES)), the edges
+/// within each mass band ([`MASS_BAND_EDGES`]), the edges
 /// exact.
 ///
 /// # Panics
@@ -776,7 +776,7 @@ fn node_fate(m0: f64, comp: &Composition) -> (f64, f64, f64) {
 }
 
 /// Real lifetimes and remnant masses at one metallicity, for the galaxy's mean mass per system
-/// (plan 06, P06.T30.b): plan 02's [`StellarFates`](crate::galaxy::fates::StellarFates) from the
+/// (plan 06, P06.T30.b): plan 02's [`StellarFates`] from the
 /// generator's own tracks.
 ///
 /// A star of initial mass m lives to its track's death at the median draws, and leaves the mean of
@@ -790,7 +790,7 @@ fn node_fate(m0: f64, comp: &Composition) -> (f64, f64, f64) {
 ///
 /// Every interior node is a kink of the interpolant, so [`breaks`](StellarFates::breaks) lists
 /// them all, and plan 02's quadrature takes each as a panel edge. Companions are
-/// [`ProvisionalFates`](crate::galaxy::fates::ProvisionalFates)'; P11.T1.d's
+/// [`ProvisionalFates`]'; P11.T1.d's
 /// [`MultiplicityFates`](crate::stellar::multiplicity::MultiplicityFates) wraps this with plan 11's.
 ///
 /// # Examples

@@ -23,19 +23,36 @@
 
 mod cache;
 mod candidate;
+#[cfg(test)]
+mod carve_out_hold;
 mod cell;
+#[cfg(test)]
+mod displaced_hold;
+#[cfg(test)]
+mod fates_hold;
 mod generate;
 mod headroom;
+#[cfg(test)]
+mod hypervelocity_hold;
 mod layers;
+mod marks;
+#[cfg(test)]
+mod marks_hold;
 mod record;
 mod resolve;
+#[cfg(test)]
+mod velocity_hold;
 
 use std::error::Error;
 use std::fmt;
 
 pub use cache::{CellCache, NoCache};
+pub(crate) use candidate::Visited;
+#[cfg(test)]
+pub(crate) use candidate::catalogue_claims;
 pub use candidate::{CandidateOutcome, evaluate_candidate};
 pub use cell::{CellKey, candidate_count};
+pub(crate) use generate::visit_cell;
 pub use generate::{cell_heap_bytes, generate_cell, generate_cell_where};
 #[cfg(test)]
 pub(crate) use headroom::largest_headroom_mean;
@@ -44,11 +61,11 @@ pub(crate) use headroom::{partition, saturated};
 pub use layers::{
     LayerSpec, STELLAR_LAYERS, SUBSTELLAR_LAYERS, layer_for_initial_mass, layer_spec,
 };
-pub use record::{Existence, SystemKind, SystemOrigin, SystemRecord};
-pub use resolve::{resolve, resolve_with};
+pub(crate) use marks::{ballistic_motion, is_ballistic, is_helium_donor, survivor_flight};
+pub use record::{Existence, KickConstraint, SystemKind, SystemOrigin, SystemRecord};
+pub use resolve::{resolve, resolve_list_member_with, resolve_with};
 
 use candidate::evaluate_candidate_from_bound;
-use cell::layer_bound;
 
 use crate::coords::{BuildGenCellError, GenCell};
 use crate::id::Layer;

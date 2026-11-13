@@ -11,6 +11,7 @@
 
 import { assertNoF16Subgroups, type KernelPair, selectKernel } from "../kernels";
 import type { GpuCapabilities } from "../platform";
+import { BindGroupCache } from "./bindGroupCache";
 
 /** Where a resource a kernel declares is bound, and how. */
 export interface KernelBinding {
@@ -20,6 +21,16 @@ export interface KernelBinding {
   readonly kind: "uniform" | "storage" | "texture" | "storage-texture" | "sampler";
   /** Whether the kernel may write it: a `read_write` storage buffer, or a storage texture. */
   readonly writable: boolean;
+  /**
+   * The view dimension a texture's declaration takes under the pipeline's `auto` layout, which a
+   * dispatch views the texture at (R08.T0).
+   *
+   * @remarks
+   * `undefined` for a buffer, a sampler, a `texture_external` and a type the table of WebGPU's
+   * types does not list (an `alias`, a `binding_array`): a texture given there is viewed at its own
+   * dimension, unchecked, as before R08.T0.
+   */
+  readonly viewDimension: GPUTextureViewDimension | undefined;
 }
 
 /** WGSL without its comments, so that a commented-out declaration is not read. */
@@ -29,6 +40,31 @@ function withoutComments(wgsl: string): string {
 
 const DECLARATION =
   /@group\(\s*(\d+)\s*\)\s*@binding\(\s*(\d+)\s*\)\s*var\s*(<[^>]*>)?\s*(\w+)\s*:\s*(\w+)(<[^;]*>)?/gu;
+
+/**
+ * The view dimension of each WGSL texture type: the "Corresponding WGSL types" of
+ * `GPUTextureViewDimension` (W3C WebGPU, Candidate Recommendation, §6.2.1 "Texture View
+ * Creation", read 2026-10-09). `texture_external` binds an external texture, not a view, and has
+ * none.
+ */
+const TYPE_VIEW_DIMENSIONS: ReadonlyMap<string, GPUTextureViewDimension> = new Map([
+  ["texture_1d", "1d"],
+  ["texture_storage_1d", "1d"],
+  ["texture_2d", "2d"],
+  ["texture_storage_2d", "2d"],
+  ["texture_multisampled_2d", "2d"],
+  ["texture_depth_2d", "2d"],
+  ["texture_depth_multisampled_2d", "2d"],
+  ["texture_2d_array", "2d-array"],
+  ["texture_storage_2d_array", "2d-array"],
+  ["texture_depth_2d_array", "2d-array"],
+  ["texture_cube", "cube"],
+  ["texture_depth_cube", "cube"],
+  ["texture_cube_array", "cube-array"],
+  ["texture_depth_cube_array", "cube-array"],
+  ["texture_3d", "3d"],
+  ["texture_storage_3d", "3d"],
+]);
 
 function kindOf(addressSpace: string | undefined, type: string): KernelBinding["kind"] {
   if (addressSpace !== undefined) {
@@ -47,7 +83,8 @@ function kindOf(addressSpace: string | undefined, type: string): KernelBinding["
  * A kernel uses every binding it declares: its pipeline's layout is `auto`, which holds only the
  * bindings the entry point uses, and every declared binding goes into the bind group.
  * Reads `@group(g) @binding(b) var<space> name : type` declarations, the attributes in that order,
- * which is how every kernel in the catalogue writes them.
+ * which is how every kernel in the catalogue writes them. A texture's view dimension is its type's,
+ * which is the one its `auto` layout entry takes.
  */
 export function kernelBindings(wgsl: string): ReadonlyMap<string, KernelBinding> {
   const bindings = new Map<string, KernelBinding>();
@@ -64,6 +101,7 @@ export function kernelBindings(wgsl: string): ReadonlyMap<string, KernelBinding>
       writable:
         (kind === "storage-texture" && !/,\s*read\s*>/u.test(parameters ?? "")) ||
         (kind === "storage" && (space ?? "").includes("read_write")),
+      viewDimension: space === undefined ? TYPE_VIEW_DIMENSIONS.get(type) : undefined,
     });
   }
   return bindings;
@@ -78,47 +116,115 @@ export interface KernelRecord {
 }
 
 /**
- * The variant the device runs, checked and with its bindings read.
+ * Everything that shapes the pipeline a kernel's chosen variant compiles to, besides the device:
+ * its module, entry point, pipeline-overridable constants and layout (plan R01, R01.T15).
+ *
+ * @remarks
+ * The engine's cache keys a pipeline by every member of these with the pair ({@link kernelKey}),
+ * and {@link createKernel} compiles from them alone, so that no part of a descriptor can be left
+ * out of the key. A {@link KernelPair} names no entry point, constant or layout: every kernel in
+ * the catalogue is `main` under the `auto` layout, with no `override` declaration.
+ */
+export interface KernelPipelineSpec {
+  readonly path: "reference" | "subgroup";
+  readonly module: GPUShaderModuleDescriptor;
+  /** `main`, this module's convention, for every kernel. */
+  readonly entryPoint: string;
+  /** The `override` declarations' values by name; none for every kernel. */
+  readonly constants: Readonly<Record<string, GPUPipelineConstantValue>>;
+  /** `auto`: the layout holds the bindings the entry point uses (see {@link kernelBindings}). */
+  readonly layout: "auto";
+}
+
+/**
+ * The variant the device runs, checked, with what its pipeline is compiled from.
  *
  * @throws Error naming the kernel when its chosen source enables both `f16` and `subgroups`.
  */
-export function prepareKernel(
-  pair: KernelPair,
-  capabilities: GpuCapabilities,
-): { readonly path: "reference" | "subgroup"; readonly module: GPUShaderModuleDescriptor } {
+export function prepareKernel(pair: KernelPair, capabilities: GpuCapabilities): KernelPipelineSpec {
   const { path, wgsl } = selectKernel(pair, capabilities);
   assertNoF16Subgroups(pair.name, wgsl);
-  return { path, module: { label: `${pair.name}:${path}`, code: wgsl } };
+  return {
+    path,
+    module: { label: `${pair.name}:${path}`, code: wgsl },
+    entryPoint: "main",
+    constants: {},
+    layout: "auto",
+  };
 }
 
-/** Compiles `pair`'s variant on `device`, blocking the queue's timeline on the compile. */
+/** A constant's value as the key holds it: `-0` apart from `0`, which an `f32` override keeps. */
+function constantText(value: GPUPipelineConstantValue): string {
+  return Object.is(value, -0) ? "-0" : String(value);
+}
+
+/**
+ * The key a device's cache holds `pair`'s record under (plan R01, R01.T15): its name, its readback
+ * class, both its sources, and everything its pipeline is compiled from in `spec` (its path, its
+ * module's label and code, its entry point, constants and layout).
+ *
+ * @remarks
+ * Two kernels share a record exactly where their keys are equal. The readback class shapes no
+ * pipeline, but the record's pair is what the readback guard reads a writer from, so a kernel that
+ * differs only in it keeps a record of its own. The source compiled is keyed as the module's code,
+ * which {@link prepareKernel} takes from it, and the other source as it is, so that each source is
+ * keyed once (the atmosphere's march is some 190 kB of WGSL) and a spec of any other code keys a
+ * record of its own. Constants are keyed in the order of their names, which WebGPU does not depend
+ * on.
+ */
+export function kernelKey(pair: KernelPair, spec: KernelPipelineSpec): string {
+  const constants = Object.entries(spec.constants)
+    .toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([name, value]) => [name, constantText(value)]);
+  const uncompiled = spec.path === "subgroup" ? pair.reference : pair.subgroup;
+  return JSON.stringify([
+    pair.name,
+    pair.readback,
+    spec.path,
+    spec.module.label ?? null,
+    spec.module.code,
+    uncompiled,
+    spec.entryPoint,
+    constants,
+    spec.layout,
+  ]);
+}
+
+/** The pipeline descriptor of `spec` on `device`: its constants only where it has any. */
+function pipelineDescriptor(
+  device: GPUDevice,
+  pair: KernelPair,
+  spec: KernelPipelineSpec,
+): GPUComputePipelineDescriptor {
+  const module = device.createShaderModule(spec.module);
+  return {
+    label: spec.module.label ?? pair.name,
+    layout: spec.layout,
+    compute:
+      Object.keys(spec.constants).length > 0
+        ? { module, entryPoint: spec.entryPoint, constants: spec.constants }
+        : { module, entryPoint: spec.entryPoint },
+  };
+}
+
+/** Compiles `pair`'s variant `spec` on `device`, blocking the queue's timeline on the compile. */
 export function createKernel(
   device: GPUDevice,
   pair: KernelPair,
-  capabilities: GpuCapabilities,
+  spec: KernelPipelineSpec,
 ): KernelRecord {
-  const { path, module } = prepareKernel(pair, capabilities);
-  const pipeline = device.createComputePipeline({
-    label: module.label ?? pair.name,
-    layout: "auto",
-    compute: { module: device.createShaderModule(module), entryPoint: "main" },
-  });
-  return { pair, path, pipeline, bindings: kernelBindings(module.code) };
+  const pipeline = device.createComputePipeline(pipelineDescriptor(device, pair, spec));
+  return { pair, path: spec.path, pipeline, bindings: kernelBindings(spec.module.code) };
 }
 
-/** Compiles `pair`'s variant on `device` off the queue's timeline. */
+/** Compiles `pair`'s variant `spec` on `device` off the queue's timeline. */
 export async function createKernelAsync(
   device: GPUDevice,
   pair: KernelPair,
-  capabilities: GpuCapabilities,
+  spec: KernelPipelineSpec,
 ): Promise<KernelRecord> {
-  const { path, module } = prepareKernel(pair, capabilities);
-  const pipeline = await device.createComputePipelineAsync({
-    label: module.label ?? pair.name,
-    layout: "auto",
-    compute: { module: device.createShaderModule(module), entryPoint: "main" },
-  });
-  return { pair, path, pipeline, bindings: kernelBindings(module.code) };
+  const pipeline = await device.createComputePipelineAsync(pipelineDescriptor(device, pair, spec));
+  return { pair, path: spec.path, pipeline, bindings: kernelBindings(spec.module.code) };
 }
 
 /** A resource bound to one of a kernel's declarations, resolved to the GPU object it is. */
@@ -185,9 +291,84 @@ export type Workgroups =
   | { readonly kind: "direct"; readonly counts: readonly [number, number, number] }
   | { readonly kind: "indirect"; readonly buffer: GPUBuffer; readonly offsetBytes: number };
 
-/** Encodes one dispatch in its own compute pass. */
+/**
+ * The object a bind-group entry's resource binds, by which a kept bind group is known: a buffer
+ * binding's buffer, bound whole as {@link bindingResource} binds every one, or the view or sampler.
+ */
+function boundObject(resource: GPUBindingResource): object {
+  return "buffer" in resource ? resource.buffer : resource;
+}
+
+/**
+ * What the dispatch path keeps from one dispatch to the next (plan R14, the owner's Mac): each
+ * kernel's bind-group layouts, each texture's views by their descriptor, and the bind groups over
+ * them, so that a steady frame's dispatches make no layout, view or bind group of their own.
+ *
+ * @remarks
+ * Each is what a new one would be: a pipeline's group layout is the pipeline's, a view of a texture
+ * by one descriptor views the same subresources the same way, and a bind group binds the objects it
+ * was made over ({@link BindGroupCache}). Its bind groups are forgotten as a buffer or texture is
+ * destroyed; its layouts and views go with their pipeline or texture.
+ */
+export class DispatchObjects {
+  readonly #layouts = new WeakMap<GPUComputePipeline, Map<number, GPUBindGroupLayout>>();
+  readonly #views = new WeakMap<GPUTexture, Map<string, GPUTextureView>>();
+  readonly #bindGroups: BindGroupCache;
+
+  constructor(device: Pick<GPUDevice, "createBindGroup">) {
+    this.#bindGroups = new BindGroupCache(device);
+  }
+
+  /** The layout of `pipeline`'s group `group`, asked of it once. */
+  layout(pipeline: GPUComputePipeline, group: number): GPUBindGroupLayout {
+    const layouts = this.#layouts.get(pipeline) ?? new Map<number, GPUBindGroupLayout>();
+    this.#layouts.set(pipeline, layouts);
+    let layout = layouts.get(group);
+    if (layout === undefined) {
+      layout = pipeline.getBindGroupLayout(group);
+      layouts.set(group, layout);
+    }
+    return layout;
+  }
+
+  /** The view of `texture` by `descriptor`, made at its first use. */
+  view(texture: GPUTexture, descriptor: GPUTextureViewDescriptor): GPUTextureView {
+    const views = this.#views.get(texture) ?? new Map<string, GPUTextureView>();
+    this.#views.set(texture, views);
+    // Every field the descriptor gives, so that two that differ in any take views of their own.
+    const key = JSON.stringify(descriptor);
+    let view = views.get(key);
+    if (view === undefined) {
+      view = texture.createView(descriptor);
+      views.set(key, view);
+    }
+    return view;
+  }
+
+  /** The bind group of `kernel`'s group `group` over `entries`, made at its first use. */
+  bindGroup(
+    kernel: KernelRecord,
+    group: number,
+    entries: ReadonlyArray<GPUBindGroupEntry>,
+  ): GPUBindGroup {
+    return this.#bindGroups.bindGroup(
+      this.layout(kernel.pipeline, group),
+      `${kernel.pair.name}:${group}`,
+      entries.map(({ binding, resource }) => ({ binding, resource, key: boundObject(resource) })),
+    );
+  }
+
+  /** Forgets every bind group, after a texture or buffer they may hold was destroyed. */
+  forgetBindGroups(): void {
+    this.#bindGroups.clear();
+  }
+}
+
+/**
+ * Encodes one dispatch in its own compute pass, its bind groups those `objects` keeps (plan R14).
+ */
 export function encodeDispatch(
-  device: GPUDevice,
+  objects: Pick<DispatchObjects, "bindGroup">,
   encoder: GPUCommandEncoder,
   kernel: KernelRecord,
   resources: ReadonlyMap<string, BoundResource>,
@@ -198,14 +379,7 @@ export function encodeDispatch(
   const pass = encoder.beginComputePass(descriptor);
   pass.setPipeline(kernel.pipeline);
   for (const [group, entries] of groups) {
-    pass.setBindGroup(
-      group,
-      device.createBindGroup({
-        label: `${kernel.pair.name}:${group}`,
-        layout: kernel.pipeline.getBindGroupLayout(group),
-        entries: [...entries],
-      }),
-    );
+    pass.setBindGroup(group, objects.bindGroup(kernel, group, entries));
   }
   if (workgroups.kind === "direct") {
     const [x, y, z] = workgroups.counts;

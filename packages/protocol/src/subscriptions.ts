@@ -44,6 +44,7 @@ const ERROR_CODES: Readonly<Record<ErrorCode, true>> = {
   hello_required: true,
   unknown_universe: true,
   unknown_system: true,
+  unknown_feature: true,
   unknown_body: true,
   generator_version_mismatch: true,
   unsupported_save_format: true,
@@ -57,6 +58,14 @@ const ERROR_CODES: Readonly<Record<ErrorCode, true>> = {
 };
 
 /**
+ * Whether `code` is one this client knows. `ErrorCode` grows without a protocol bump (galaxy plan
+ * 04's reserved list), so a newer server may send one it does not.
+ */
+export function isErrorCode(code: string): code is ErrorCode {
+  return Object.hasOwn(ERROR_CODES, code);
+}
+
+/**
  * Whether `error`, as parsed from the wire, is a request error this client can read: a code it
  * knows, a message, and a field as a string or `null`.
  */
@@ -66,7 +75,7 @@ function isRequestError(error: unknown): error is RequestError {
     error !== null &&
     "code" in error &&
     typeof error.code === "string" &&
-    Object.hasOwn(ERROR_CODES, error.code) &&
+    isErrorCode(error.code) &&
     "message" in error &&
     typeof error.message === "string" &&
     "field" in error &&

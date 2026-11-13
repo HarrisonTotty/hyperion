@@ -182,7 +182,9 @@ pub struct SceneStateDto { sequence: u64, clock: SceneClockDto, ship: Kinematics
 pub struct SceneNotificationDto { sequence: u64, clock: SceneClockDto,
     ship: Option<KinematicsDto>, arrival: Option<SceneArrivalDto>,
     bodies: Vec<SceneBodyDto>, craft: Option<Vec<SceneCraftDto>> }
-// later optional fields: R07's `main_screen`, R09's `surface_revisions` (Design note 4)
+// later optional fields: R07's `main_screen`, R09's `surface_revisions:
+// Option<Vec<SurfaceRevisionDto { body: BodyIdHex, revision: u32 }>>` (Design note 4; accepted
+// 2026-10-10, signoff-3.md)
 pub enum SceneArrivalDto { System { system: Box<SceneSystemDto>, tidal_radius_m: f64 }, NoSystem }
 // tidal_radius_m: the system's FrameCandidate::tidal_radius at the arrival time (R02's ask)
 pub struct SceneCraftDto { craft: String, hull: String, state: KinematicsDto,
@@ -367,9 +369,26 @@ BodyPosition, GalacticPosition}`, `time::{UniverseTime, Span, ClockWindow}`,
    a craft, about 0.25 MB/s for 100 bodies and 10 craft (Runtime and code shape), are re-measured by
    R03.T15: plan 14's `BodySummaryDto` with its `bulk` section is larger than a bare `BodyOrbitDto`,
    perhaps 700–900 bytes, which changes the arrival's size and not the rate, since bodies are pushed
-   only on change. The state leaves room for R07's camera field (`main_screen`) and R09's
+   only on change. _Resolved 2026-10-09 (the brainstorm sign-off, `signoff-brainstorm.md`, row
+   610):_ the brainstorm now takes R03.T15's measured sizes, "about 0.4 kB at the least detail
+   level, 0.8–0.9 kB with its mass and orbit and 1.1 kB with its bulk section (measured)", and
+   0.252 MB/s for ten craft at 64 Hz.
+   The state leaves room for R07's camera field (`main_screen`) and R09's
    `surface_revisions` (a revision per body), each an optional field added by its plan, which moves
-   no version. `SceneCraftDto` is a draft, the least a renderer needs of a craft (a hull
+   no version. _R09's field, drafted by R09.T0.a (2026-10-09) for this plan's owner and accepted
+   with amendments 2026-10-10 by the sign-off agent (owner's delegation, `signoff-3.md`):_
+   `surface_revisions: Option<Vec<SurfaceRevisionDto>>` on `SceneNotificationDto`, with
+   `SurfaceRevisionDto { body: BodyIdHex, revision: u32 }`, each a body whose surveyed cover grew
+   (a `survey_pass` raises its revision), declared `#[serde(default, skip_serializing_if =
+"Option::is_none")]` and `#[ts(optional)]` as `tidal_radius_m` is, so that `PROTOCOL_VERSION`
+   stays 2; a merged pending push (Design note 5) merges it by body, keeping the larger revision. A
+   body's revision only rises, since revision n is the fold of its first n passes (R09.T18 as
+   built), so the merge does not depend on order. A client re-asks R09's `surface_field` with
+   `have_revision` for the new cells. The scene's state (`SceneStateDto`) carries no revisions, and
+   a notification missed while unsubscribed is not replayed. So a client that subscribes or
+   resubscribes re-asks `surface_field`, with the `have_revision` it holds, for each body whose
+   field it keeps.
+   R09.T19.b builds it. `SceneCraftDto` is a draft, the least a renderer needs of a craft (a hull
    definition's key, a pose and its rates), and belongs to the sessions plan, which may reshape it
    freely while nothing sends it. Its optional `planned_path` is the flight computer's predicted
    path as poses at stated times, which the sessions plan and the flight model fill; R11's
@@ -399,10 +418,13 @@ BodyPosition, GalacticPosition}`, `time::{UniverseTime, Span, ClockWindow}`,
    or in a frame of another system or of a body not in the scene; in the galactic frame, one in any
    system's frame, since the ship is in none), and will use them to bound what cannot all be sent,
    which will be the contacts drawn as hulls; R09 sends every surveyed cell (at most about 12 MB)
-   and does not bound them by camera (R09 Design note 19). Poses are
+   and does not bound them by camera (R09 Design note 19; R09's ask, carried here since this plan
+   was written, as R09.T0.a confirmed on 2026-10-09). Poses are
    neither saved nor echoed to other subscriptions.
 7. **Drawn positions are the ship's apparent positions, computed on the client from the elements**
-   (researched 2026-09-29). The observer enters only at reception: τ solves |x_B(t − τ) − x_o(t)| =
+   (researched 2026-09-29; the brainstorm's words quoted below are its text before the sign-off of
+   2026-10-09, which took this note's reading, as the note's last paragraph records). The observer
+   enters only at reception: τ solves |x_B(t − τ) − x_o(t)| =
    c τ, and aberration uses the observer's velocity at reception, v_o(t). The brainstorm's
    x_B(t − τ) − x_cam(t − τ) equals this only for an observer moving uniformly; for one that
    accelerates, as a ship in orbit does, the two differ by ½ a τ², an angle of a τ ÷ 2c, 1.5 × 10⁻⁵
@@ -515,6 +537,17 @@ BodyPosition, GalacticPosition}`, `time::{UniverseTime, Span, ClockWindow}`,
    be a bug to fix rather than a bound to widen. The coefficient 10⁻¹⁴ is of medium confidence and
    that measurement settles it.
 
+   _Resolved 2026-10-09 (the brainstorm sign-off, `signoff-brainstorm.md`, rows 595–599):_ the
+   brainstorm now says what this note does. It draws "each body at x_B(t − τ) − x_ship(t), the
+   body's position at the retarded time less the ship's position at reception", aberrated "by the
+   ship's velocity at t"; "The observer is the ship, never the camera"; the ship's local body is
+   drawn geometrically, and "A free camera's own local body, if it is another, is drawn apparent
+   like every other body"; a source moving with the ship and the ship "combine exactly into their
+   rest-frame separation"; the 10 m is the cost of drawing the local body apparent, "in any frame,
+   while light time alone moves it by nothing in the body frame and by about 40 m in the system
+   frame"; and the solve stops "within a cap of ten corrections", so that "SPICE's converged
+   'CN+S' correction, three iterations for Solar System speeds, is not enough".
+
 8. **The in-system functions are built here, in plan 12's module; velocities are asked of plans 14
    and 11.** Plan 12 has no task for `SystemTrajectory` or `retarded_in_system`, and plan 14 none
    for a body's velocity, so this plan builds the first two in `observe/in_system.rs` beside plan
@@ -581,22 +614,73 @@ BodyPosition, GalacticPosition}`, `time::{UniverseTime, Span, ClockWindow}`,
     `hyperion_server::tap_socket`, does it, and all three places that call `axum::serve` use it:
     `main.rs`, the unit-test `Harness` in `src/testing.rs` and the integration harness in
     `tests/common/mod.rs`, so every scene and bulk test runs with the option set. A failure is
-    logged at `warn` and the connection goes on. socket2 does not expose it on
-    macOS, and Windows has none, so there the chunk bound alone holds. At 40 Mbit/s of Wi-Fi a push
-    then waits about 52 ms behind a chunk and 13 ms behind the kernel, plus the bytes in flight, under
-    the main screen's 100 ms loop; at 1 Gbit/s about 2 ms. With 1 MB chunks it would be over 200 ms
-    however the kernel is tuned. A chunk takes about 2 s at 1 Mbit/s, inside the 10 s write timeout.
-    Loopback drains a megabyte in microseconds, so R03.T10.b measures on an emulated slow link: a test
-    reader with a fixed 64 KiB receive buffer (socket2's `set_recv_buffer_size`, which turns off
-    receive autotuning) reading through a 5 MB/s token bucket, with the low-water mark on and off.
-    The renderer must not stall its own receive path either, since Chromium's backpressure reaches the
-    TCP window: chunks are kept as `ArrayBuffer`s and parsed when complete, by R06 and R09 off the
-    main thread. Measured by R03.T10.b on 2026-09-30, on the shared development machine (load
-    average 6–12, provisional; `bulk::tests::streaming::heartbeat_latency_behind_a_transfer_on_a_slow_link`,
-    run by hand): a heartbeat behind a 15 MB transfer, read at 5 MB/s through a 64 KiB receive
-    buffer, waited a median of 103–108 ms and at worst 150–156 ms with the low-water mark on, and
-    577–616 ms with it off. The worst case with it on is a finding over the 100 ms of this note,
-    for R12: the reader's own buffer and the chunk ahead of the push add to the kernel's share.
+    logged at `warn` and the connection goes on. Off Linux and Android the mark is not set, a limit
+    stated by a delegated decision of 2026-10-06 (R03.T17) from sources read on 2026-10-05:
+
+    - **macOS has the option, but it does not do what Linux's does.** XNU
+      (`apple-oss-distributions/xnu`, `main`) defines `TCP_NOTSENT_LOWAT` publicly, 0x201 in
+      `bsd/netinet/tcp.h`, and `tcp_usrreq.c` sets it. Only `tcp_notsent_lowat_check()`
+      (`tcp_subr.c`) reads it, for `sowriteable()` (`uipc_socket2.c`, behind select and poll) and
+      `filt_sowrite_common()` (`uipc_socket.c`, behind kqueue's `EVFILT_WRITE`), and reports the
+      socket writable once the unsent bytes are at most the mark. `sosendcheck()` (`uipc_socket.c`)
+      checks only the buffer's space against `sb_lowat`, so a non-blocking `send` goes on taking
+      bytes up to the buffer's high-water mark: the mark gates the readiness event, not the write,
+      where Linux refuses new data once the unsent bytes reach it.
+    - **Under tokio it would barely help.** tokio 1.53.1 retries a write until `WouldBlock` and
+      waits for readiness only after that (`Registration::poll_io`,
+      `src/runtime/io/registration.rs`), so on XNU the mark would delay each refill until 64 KiB or
+      less is unsent, and tokio would then fill the buffer to its high-water mark again: the rhythm
+      of the refills would change, not the worst case a push waits behind. Setting it would need
+      `unsafe` besides: libc 0.2.190 has no Apple binding, socket2 0.6.5 gates the option to Linux
+      and Android, and rustix 1.1.5 and nix 0.31.3 have none. All of it holds at the locked tokio
+      1.53.3 and libc 0.2.191, rechecked on 2026-10-20.
+    - **What XNU holds without it.** The send buffer starts at `tcp_sendspace`, 128 KiB
+      (`tcp_usrreq.c`), and grows in steps of `tcp_autosndbuf_inc`, 8 KiB, up to
+      `tcp_autosndbuf_max` (`tcp_output.c`): 2 MiB, 4 MiB on machines with at least 4 GiB of memory
+      and 8 MiB under `serverperfmode` (`tcp_subr.c`). It grows only while the peer's window × 5/4
+      is at least the buffer, the buffer is at least 7/8 full and `min(snd_wnd, snd_cwnd)` covers
+      every unsent byte (`tcp_output()`), and it is trimmed when the congestion window backs off
+      (`tcp_sbsnd_trim()`, `tcp_input.c`). So the unsent bytes stay at about one send window at
+      most. Setting `SO_SNDBUF` clears `SB_AUTOSIZE` (`uipc_socket.c`) and pins the buffer.
+    - **Windows has no such option, and keeps about one ideal send backlog outstanding.** Microsoft
+      Learn's SIO_IDEAL_SEND_BACKLOG_QUERY page: "the send buffer limit determines how much data is
+      kept outstanding in TCP"; the ideal send backlog, "the ideal value for the amount of data
+      outstanding (sent but not acknowledged yet)", is a function of the bandwidth-delay product and
+      the receiver's advertised receive window, at most 16 MB; and "Dynamic send buffering for TCP
+      is enabled unless an application sets the SO_SNDBUF socket option". So Windows holds about
+      what is in flight and little unsent, the effect the mark has on Linux.
+
+    | Platform | The kernel's share behind a push                                                                                                                           |
+    | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+    | Linux    | at most 64 KiB unsent (13.1 ms at 40 Mbit/s), plus the bytes in flight                                                                                     |
+    | macOS    | at most max(128 KiB, about one send window) unsent, from XNU's autosizing rule: at least 26.2 ms at 40 Mbit/s, and growing only with the congestion window |
+    | Windows  | about one ideal send backlog outstanding in total                                                                                                          |
+
+    Each comes on top of the one-chunk bound, which is platform-independent and tested on every
+    platform (`every_chunk_precedes_the_terminal_response_in_order_and_one_is_queued_at_a_time` is
+    not gated), and over loopback, where the single-player local server runs, all three are
+    negligible (R03.T15). `SO_SNDBUF` is pinned on neither platform: on macOS it would cap
+    throughput at the buffer per round trip on every path, where the autosizing rule already keeps
+    the unsent part near one window, and on Windows it would turn dynamic send buffering off.
+    Pacing in the application would need the link's rate, which the server does not know. R03.T17.b
+    adds the `Kernel` figures measured on macOS, by hand.
+
+    On Linux, at 40 Mbit/s of Wi-Fi a push then waits about 52 ms behind a chunk and 13 ms behind
+    the kernel, plus the bytes in flight, under the main screen's 100 ms loop; at 1 Gbit/s about
+    2 ms. With 1 MB chunks it would be over 200 ms however the kernel is tuned. A chunk takes about
+    2 s at 1 Mbit/s, inside the 10 s write timeout. Loopback drains a megabyte in microseconds, so
+    R03.T10.b measures on an emulated slow link: a test reader with a fixed 64 KiB receive buffer
+    (socket2's `set_recv_buffer_size`, which turns off receive autotuning) reading through a 5 MB/s
+    token bucket, with the low-water mark on and off. The renderer must not stall its own receive
+    path either, since Chromium's backpressure reaches the TCP window: chunks are kept as
+    `ArrayBuffer`s and parsed when complete, by R06 and R09 off the main thread. Measured by
+    R03.T10.b on 2026-09-30, on the shared development machine (load average 6–12, provisional;
+    `bulk::tests::streaming::heartbeat_latency_behind_a_transfer_on_a_slow_link`, run by hand): a
+    heartbeat behind a 15 MB transfer, read at 5 MB/s through a 64 KiB receive buffer, waited a
+    median of 103–108 ms and at worst 150–156 ms with the low-water mark on, and 577–616 ms with it
+    off. The worst case with it on is a finding over the 100 ms of this note, for R12: the reader's
+    own buffer and the chunk ahead of the push add to the kernel's share.
+
 12. **Open question 21: no version bump.** `lib.rs`'s rule bumps `PROTOCOL_VERSION` for a removed or
     changed message and not for an added kind or optional field, because an older peer refuses what
     it does not know. The first `notification` and the first binary frames are additions of the same
@@ -609,7 +693,10 @@ BodyPosition, GalacticPosition}`, `time::{UniverseTime, Span, ClockWindow}`,
     receives only text frames of the existing types. This is the plan's ruling on a question the
     brainstorm left open; it reverses if either message is ever sent unasked. The ruling is a
     brainstorm revision like the README's corrections, drafted for the owner's revision pass by
-    R03.T1.
+    R03.T1. _Resolved 2026-10-09 (the brainstorm sign-off, `signoff-brainstorm.md`, open question
+    21):_ applied as drafted. Open question 21 now reads "**Closed: no bump.**", and Runtime and
+    code shape says the first `notification` message and the first binary frames leave
+    `PROTOCOL_VERSION` at 2, "which a client receives only when it asks for them".
 13. **Knowledge as a seam, a level per body.** The scene is built through a `SceneKnowledge`
     trait: the level granted for each body and the craft that are contacts. Production uses
     `GrantAsked`, the level asked for every body and no craft, as plan 14's handlers grant today;
@@ -650,7 +737,9 @@ order; T6 follows T5.a; T7 follows T3 and T6, since it evaluates contacts with `
 follows T5.b and T7; T9 follows T8. T10.a (binary frames) can start after T1 and runs beside
 T4–T9; T10.b follows T5.b and T10.a, and its heartbeat measurement follows T8.a; T11 follows
 T10.a. T12 follows T5.c; T13 follows T3, T12 and R02.T8.a; T14 follows T8, T11 and T13. T15
-closes. T16, added 2026-10-02 by a delegated decision, follows T15 and R02.T17.
+closes. T16, added 2026-10-02 by a delegated decision, follows T15 and R02.T17. T17, added
+2026-10-06 by a delegated decision, follows T10.b and changes no behaviour; T17.b is by hand on the
+owner's Mac, optional, and blocks nothing.
 
 ### R03.T1 Reconcile, reserve the kinds, rule question 21
 
@@ -710,7 +799,8 @@ Tests:
   cos θ′ = (cos θ + β) ÷ (1 + β cos θ), to 10⁻¹²; at 30 km/s the result equals the first-order
   r + v_o τ to within β² ÷ 4 in direction.
 - An observer on a circular orbit (a ≈ 8.7 m/s²) seeing a body about 2 au away differs from the
-  brainstorm's x_B(t − τ) − x_o(t − τ) by an angle of a τ ÷ 2c to 10%.
+  brainstorm's former x_B(t − τ) − x_o(t − τ) (replaced on 2026-10-09, Design note 7) by an angle
+  of a τ ÷ 2c to 10%.
 - The brainstorm's figure, reworded (Design note 7): a body at rest and an observer 400 km away moving
   at 7.7 km/s across the line of sight: the light-time point is not displaced and the apparent point
   is displaced 10.27 ± 0.01 m along the observer's velocity; adding the same 30 km/s to both leaves
@@ -842,9 +932,10 @@ server, with no server mode of its own: it finds or creates a universe (`Dev Fix
 0.01 au behind the planet along its orbital velocity, so that the seat camera, which looks along
 the stand-in's velocity in the system frame (R02.T17's stand-in attitude), has the planet ahead;
 `--look-at barycentre` puts it at rest 1 au along galactic +z from the barycentre instead, and
-`--look-at <body ID>`, `--distance`, `--time` and `--rate` choose the rest. The README's
-"Seeing a generated system in `VIEW`" lists the options. The sessions plan, which retires the
-stand-in, retires the tool with it. Added 2026-10-02 (RM1 validation, see the Risks).
+`--look-at <body ID>`, `--distance`, `--time` and `--rate` choose the rest.
+`docs/development/running.md`'s "Seeing a generated system in `VIEW`" lists the options. The
+sessions plan, which retires the stand-in, retires the tool with it. Added 2026-10-02 (RM1
+validation, see the Risks).
 
 ### R03.T7 The scene's core
 
@@ -1120,6 +1211,36 @@ and no kind is added.
   `pnpm --filter hyperion exec vitest run src/renderer/src/displays/view`;
   `pnpm --filter hyperion exec vitest run src/renderer/src/view/scene`; `just ci`.
 
+### R03.T17 The low-water mark off Linux, stated
+
+Added 2026-10-06 by a delegated decision (`decision-cross-platform-server.md`, item 1). Nothing
+changes behaviour. The decision accepts the low-water mark's absence off Linux and Android with a
+stated limit (Design note 11): no `TCP_NOTSENT_LOWAT` on macOS, since it would not work under tokio,
+and no `SO_SNDBUF` on either platform. No `unsafe` exception is asked for. T17 follows T10.b, and
+T17.b follows T17.a.
+
+- **R03.T17.a The limit, in the code and the plan.** `crates/hyperion-server/src/lib.rs`: correct
+  `tap_socket`'s docs, whose reason, "socket2 does not expose the option there", is incomplete. They
+  say that XNU has the option (0x201), but it gates only writability events while `send` fills the
+  buffer, and tokio writes until `WouldBlock`, so it would not bound the queue; that Windows has
+  none, and its dynamic send buffering keeps about one ideal send backlog; and the stated limit.
+  `src/limits.rs`: the same in `TCP_NOTSENT_LOWAT_BYTES`'s docs. `src/testing.rs`:
+  `Tap::LowWaterMark`'s docs say that it sets the mark on Linux and Android only. `src/bulk.rs`,
+  `heartbeat_latency_behind_a_transfer_on_a_slow_link`: off Linux and Android, run only the `Kernel`
+  leg, and say in its report that no mark exists there; note in its docs that the reader's fixed
+  64 KiB receive buffer keeps XNU's buffer at its 128 KiB start, since 64 KiB × 5/4 is less than
+  128 KiB; gate any import this needs as 7f8cf94 did. This plan: in Design note 11, replace
+  "socket2 does not expose it on macOS, and Windows has none, so there the chunk bound alone holds"
+  with the findings and the limit, citing the XNU and Microsoft sources; add to Risks the R12
+  candidate (text frames ahead of a queued chunk); add this task. Tests: none new, since behaviour
+  does not change; the Linux-only tests stay gated as they are. Acceptance:
+  `cargo test -p hyperion-server bulk`; `cargo doc -p hyperion-server --no-deps` with no warnings;
+  `just cross-clippy`, for `aarch64-apple-darwin` and `x86_64-pc-windows-msvc`; `just ci`.
+- **R03.T17.b The macOS figure, by hand (the owner, optional, blocks nothing).** On the Mac, quiet,
+  run
+  `cargo test -p hyperion-server --lib bulk::tests::streaming::heartbeat_latency -- --ignored --nocapture`
+  and record the `Kernel` figures, marked provisional, in Design note 11 beside the Linux ones.
+
 ## Verification
 
 - **Honest scene:** the Knowledge-bound test over 200 camera placements, with a level per body
@@ -1158,9 +1279,15 @@ convention, and `PROTOCOL_VERSION` stays 2 (Design note 12).
 - **Head-of-line blocking below the server.** The chunk size, the one-chunk queue and
   `TCP_NOTSENT_LOWAT` bound what the server and the kernel hold, not the router's or access point's
   queue, which a bufferbloated access point can hold for hundreds of milliseconds, nor macOS and
-  Windows, where the option is not set. If a wired LAN still holds pushes past the main screen's
-  100 ms loop, the fallbacks are, in order: pacing bulk to a fraction of the measured goodput, then a
-  second WebSocket for bulk, which escapes the send buffer but still shares the bottleneck queue.
+  Windows, where the option is not set (Design note 11 states the kernel's share there). If a wired
+  LAN still holds pushes past the main screen's 100 ms loop, the fallbacks are, in order: pacing
+  bulk to a fraction of the measured goodput, then a second WebSocket for bulk, which escapes the
+  send buffer but still shares the bottleneck queue.
+- **An R12 candidate: text frames ahead of a queued chunk (R03.T17, delegated decision
+  2026-10-06).** Prioritising control frames in the writer would remove the chunk ahead of a push,
+  at most 52.4 ms at 40 Mbit/s, on every platform alike. That is a lever for R12's existing finding,
+  the worst case of 150–156 ms on Linux over Design note 11's 100 ms (R03.T10.b), not a fix for a
+  platform gap, so it is recorded for R12 and not built.
 - **Gravitational deflection is omitted**, as SPICE omits it: 1.75″ at the Sun's limb, some 8.5
   telescopic pixels, milliarcseconds in the anti-solar hemisphere, and about 3.6 × 10⁻⁴ rad at 10⁴ km
   from a white dwarf. No task; a telescopic view near a compact remnant is where it would first show.
@@ -1216,8 +1343,8 @@ convention, and `PROTOCOL_VERSION` stays 2 (Design note 12).
 - **Body frames on the wire.** `FramePositionDto::Body` names a non-rotating body frame, plan 01's
   `Frame::Body`. R02's `BodyFixedPosition`, which rotates, is a position type and does not go on the
   wire here; if R02 needs it there, it adds a variant.
-- **Re-validated at `899db5e` (R03.T1, 2026-09-30).** No brainstorm change since the plan was
-  written. Found in the tree: P12.T9 has not landed (no `SubscribeRequest`, `Subscribed`,
+- **Re-validated at `899db5e`, now `9d955b26` (R03.T1, 2026-09-30).** No brainstorm change since the
+  plan was written. Found in the tree: P12.T9 has not landed (no `SubscribeRequest`, `Subscribed`,
   `SubscriptionTopic` or `ServerMessage::Notification` anywhere), so R03.T5.a builds the whole
   envelope; `PlanetarySystem::state_at`, `star_states_at` and `galaxy::frame::candidate_at` are
   absent, so R03.T3 and R03.T7.a add them by agreement. The velocities they need exist and are
@@ -1257,8 +1384,9 @@ e, mass, primary_mass)` is the pericentre form R02 wants; `tidal_radius` takes a
   gets `unsupported`. `subscription_ended` needs no bump either: like a notification, it is sent
   only on a subscription the client opened. `PROTOCOL_VERSION` stays 2 while none of these is ever
   sent unasked; a test pins it (plan R03, Design note 12)." The owner signs off. _Closure decided
-  2026-09-30 by a delegated decision (protocol item 3), with the `subscription_ended` sentence; the
-  brainstorm edit itself waits for its revision pass._
+  2026-09-30 by a delegated decision (protocol item 3), with the `subscription_ended` sentence.
+  Applied to the brainstorm 2026-10-09 as drafted (the brainstorm sign-off,
+  `signoff-brainstorm.md`)._
 - **Deviations in T2, as built.** `BuildSystemObserverError` gains `NotSlowerThanLight`: the
   Lorentz factor needs |v_o| < c. `InSystemRetardation::residual` is the last correction's change
   |τₖ − τₖ₋₁|: at most 1 ns when converged, above it only where the noise rule stopped the
@@ -1554,6 +1682,11 @@ FetchSystemError>`, `set_cameras(cameras, t, world) -> Result<(), RequestError>`
   `lightTime.test.ts`. _R07.T10.a adds `emittedM` (`apparentPosition`'s `geometricThenM`) and
   `emittedVelocityMPerS` (the composed orbits' velocity at `emitted`) to `placed` entries and to
   `SceneStarFrame`, the retarded centres lighting takes; fields only._
+- **Added in R10.T12 to T13's `SceneFrame` (2026-10-20; decision-r10-ship-frame):**
+  `SceneFrame.localBodyVelocityMPerS`, the local body's present velocity relative to the
+  barycentre at the frame's time (`composedVelocity`, as `shipObserver` adds it for a body-held
+  stand-in), `null` with no local body, against which R02.T17's view scene holds the own ship's
+  velocity in that body's frame.
 - **Deviations in T8.a, as built.** The topic is `scene/topic.rs`: `open` (reached through
   `Handlers::subscribe`) builds the core on the pool at `Priority::Interactive`, re-running the
   job after fetching each system it asks for (`FetchSystemError`) from the body cache, and spawns
@@ -1694,6 +1827,47 @@ FetchSystemError>`, `set_cameras(cameras, t, world) -> Result<(), RequestError>`
   server change. Run 15 times in a row and 40 times as 20 concurrent copies (load average over 20):
   no failure. Whether a merged arrival should state its own clock was decided on 2026-09-30 (the
   "T8 and T9 after review" note above): each record states its own time, as Design note 5 has it.
+- **T9 after review: the clock check without a wall-clock tolerance (lane fix-scene-agree,
+  2026-10-11).** The same test failed again at load averages of 21–22, once in a full native run
+  and once in three runs alone, a clock 15 s and 19 s of scene time off the line: its clock check
+  allowed one second of real time at 10× between the server's reading a clock and the client's
+  hearing it, and its stages were paced by the test's `sleep`s and real-time deadlines, so that a
+  slow setting or arrival could also miss them. Pausing the runtime's clock cannot fix it: a
+  paused runtime advances to its next timer whenever it waits on the pool's threads or a socket,
+  so the server's ticks and the harness's patience would run out at once. The test now holds
+  each clock between bounds that causality gives, with no tolerance: no earlier than its setting's
+  time, and no later than that time plus the rate times the real time from sending the setting to
+  hearing the clock; no earlier than the clock before it under the same setting; and, for a state,
+  no earlier than the setting's line where it stood when the subscription was sent, counted from
+  the setting's answer, which for the second client is ten seconds of scene time or more past the
+  first setting's time. How long a push waited before it was heard has no causal bound, so a
+  push's clock is bounded below only by its setting's time, where the old band also caught a push
+  lagging its line by more than 10 s. The minute is paced by the clock the clients hear: the
+  second opens once the first has heard a second of the server's clock past both the first
+  setting's answer and its own state, each stage runs until both clients have been told its
+  setting, its departure or arrival, and 20 s of scene time from the first clock each heard under
+  it, and the next setting continues from the latest clock either heard. The move back is now
+  set only after both clients have heard the departure, which the old sleeps could merge away
+  under an arrival. Two mutations of the server were caught: a state reading its setting's time
+  (a clock anchored at the subscription), and pushes reading two seconds ahead. No server change.
+  Run 20 times in a row at load averages of 4.8–12.7, 16–19 s each: no failure. Its scope held to
+  10% of a CPU (5 runs) or frozen for 2 s five times a run (3 runs): no failure either, but the old
+  test passed those too, so they do not reproduce the loaded machine's stall.
+- **T9 after review: each return waits for its departure (lane fix-scene-knowledge,
+  2026-10-12).** `scene_knowledge.rs` failed under heavy load with three arrivals of the four. The
+  universe's scene setting is a watch that keeps only the latest, and the test set the move back
+  as soon as the move out was answered. A subscription's task still in a pool job (a heartbeat's
+  advance) when both settings landed took only the move back, a move within the system, which
+  brings no arrival. The test then gave up after its 1,000 reads, about 15.6 s of 64 Hz craft
+  pushes. Raising the count would not have helped: the arrival never comes. An instrumented copy
+  heard no departure in any of its 7 failures. The move back is now set only once the departure
+  has been heard, which the task pushes after it has taken the move out. Each wait reads until
+  what it waits for has come, bounded only by the harness's patience, so a server that never sends
+  one now fails after that patience rather than after the count. The test counts the whole
+  systems it checks and holds that there are at least four (a body that no longer resolved at its
+  grant could bring one more). No server change. With 16 copies at once on four CPUs beside four
+  busy loops, the old test failed 6 of 192 runs (round-start load averages 25–34; the instrumented
+  copy 7 of 128) and the new one 0 of 416 (13.6–270). Run alone in turn, both took 5.2–5.6 s.
 - **Deviations in T14, as built.** `useScene(universe, { detail, designate })` reads the request
   client and the link's status from `useServerLink()`, as the app's other server hooks do, rather
   than taking `requests`; `detail` is the level asked of the topic. **The designation (T12's open
@@ -1782,6 +1956,11 @@ FetchSystemError>`, `set_cameras(cameras, t, world) -> Result<(), RequestError>`
     largest payload runs in R06.T17. No sky reaches 15 MiB: its largest payload is 7,494,912 bytes
     (29 chunks). The 61-chunk check is R09's coarse field's, after RM3 (R09's Risks; decided
     2026-10-07 by the orchestrator)._
+    _Built by R10.T15.b.1 (2026-10-29) as the smoke harness's transfer mode over R09's coarse
+    field (`smoke/transfer.ts`, `scripts/transferCheck.sh`): at generator version 23, with the
+    serve gate opened in a scratch build, an Earth-sized world fully surveyed at level 8 served
+    15,140,689 bytes in 58 chunks, whole and in order, in a pod on SwiftShader; the 15 MiB run is
+    R10.T15.b.2's at 24 (plan 10's R10.T15.b record)._
   - **The envelope against P12.T9**, for plan 12's writer. As P12.T9 designs it: `subscribe`,
     `unsubscribe`, `Subscribed { subscription, state }`, `SubscriptionTopic`, `SubscriptionState`,
     `ServerMessage::Notification { subscription, body }`, `NotificationBody`, the unknown
@@ -1989,3 +2168,72 @@ Vec3Tuple`, and `time`), `charted` (the chart's barycentre only, which `App` bui
   `BulkAssembler` checks each answer against its own manifest and starts again from chunk 0.
   `PROTOCOL_VERSION` stays 2: only a client that asks `sky` receives one. R06's Risks,
   "Deviations in T11.d, as built", have the rest.
+- **Deviations in T17.a, as built.** The entry is the delegated decision's, in this plan's style;
+  its acceptance names `just cross-clippy`, which has landed. Design note 11 and the doc comments
+  cite XNU (`apple-oss-distributions/xnu`, `main`, read 2026-10-05) by file and function, not by
+  line, since those sources were not re-read and their lines move; tokio by `Registration::poll_io`
+  and Microsoft Learn by the SIO_IDEAL_SEND_BACKLOG_QUERY page. The lock has moved past the
+  decision's tokio 1.53.1 and libc 0.2.190 to 1.53.3 and 0.2.191: the crate facts were rechecked
+  there on 2026-10-20 and hold (`poll_io` unchanged; libc binds the option for Linux-likes and Hurd
+  only; socket2 0.6.5 gates it to Linux and Android; rustix 1.1.5 and nix 0.31.3 have none), and the
+  doc comments cite the locked versions, Design note 11 both. The note's Linux figures and
+  R03.T10.b's measurement are unchanged; the sentence that gives them now starts "On Linux," so that
+  it reads after the off-Linux limit, and the limit's table keeps the decision's "Linux" row, though
+  `tap_socket` sets the mark on Android too. `TCP_NOTSENT_LOWAT_BYTES`'s "Linux only" is "Linux and
+  Android", as `tap_socket` has it. "Head-of-line blocking below the server" points at the note's
+  limit, and nothing else in it changed. Off Linux and Android,
+  `heartbeat_latency_behind_a_transfer_on_a_slow_link` runs only the `Kernel` leg, and its line ends
+  "(no low-water mark on this platform: tap_socket sets it on Linux and Android only)"; the legs are
+  chosen with `cfg!`, so both arms type-check everywhere and no import or helper became
+  platform-gated (`Tap::LowWaterMark` stays in use on every platform, as
+  `Harness::start_with_limits`'s default and in `push_latency_on_loopback`). The test's docs give
+  64 KiB × 5/4 as 80 KiB, below XNU's 128 KiB start. The off-Linux leg is compiled by cross-clippy
+  only, and untested until a macOS or Windows runner exists; R03.T17.b's macOS figures are still
+  owed.
+- **Fixed in P07.T10.c (lane `fix-server-positions`, 2026-10-29, at `GENERATOR_VERSION` 23): a
+  member's ID as the ship's frame.** `scene_ship`'s `check_frame` placed the frame's system by plan
+  03's `position_at`, and the core's `ship_galactic` and `drift` by `position_at` and
+  `epoch_velocity`. In a server galaxy, which has kinematic tables, those panic for a catalogue
+  feature's member or a member of the galactic centre: away from the epoch for `position_at`, and
+  at every time for `epoch_velocity`. So a `system` frame on a member, or a `body` frame in a
+  feature member's system, answered `internal` away from the epoch. A frame accepted at the epoch
+  made `subscribe` answer `internal` once the clock ran, and `drift` panicked at the epoch too
+  when the scene's system was a grid system other than the ship's frame (the observer's
+  "elsewhere" branch). All three now place the frame's system through plan 07's
+  `convert::system_motion` (plan 07's Risks, "Fixed in P07.T10.c"), by its origin.
+  - _`scene_ship`._ A `system` frame and a `body` frame both place their system through it. A
+    refusal is `unknown_system` naming `ship.position`, through a new `untraced_frame_system`
+    beside `unknown_frame_system` in `convert/scene.rs`, worded as `untraced_system` words
+    `resolve_system`'s ("… cannot be placed yet: …"). A centre member is refused at every time,
+    the epoch included, where it was accepted before; a feature member's frame is placed on its
+    line at every time. `bodies_of` still refuses the centre's members first for a body frame.
+  - _The core._ `ship_galactic` and `drift` call it too. `drift` now takes the time as a third
+    argument, which the function needs and which the 25 wiring will read. Their `expect`s
+    are now real invariants, said in each message and in a `# Panics` section: the scene's
+    setting lives only in memory and is set only by `scene_ship` (`SceneService::set`), which
+    refuses every frame the function refuses, and the refusal does not depend on the time.
+  - _Tests (pod, 4 vCPU, test profile)._ `scene::core`'s
+    `a_ship_framed_on_a_feature_member_rides_the_member_s_line` (8.5 s, fast): in the seed's
+    `with_full_potential` galaxy, `ship_galactic` puts a ship framed on a feature member at its
+    line's position plus the offset, bit for bit, and `drift` is the line's velocity, at the
+    epoch, +100 and −999 yr. Over the socket, in `tests/system_origins.rs`'s shared server (19.0 s
+    with `extinction`'s property): a `system` frame on the grid system and the feature member is
+    accepted at the epoch and +100 yr, and on each centre ID is `unknown_system` naming
+    `ship.position`; a `body` frame on the feature member's first body at +100 yr is accepted;
+    and a ship framed on the feature member at the epoch, offset to 1 au from the grid system,
+    with `time_rate` 100,000, subscribes, is in the grid system, and takes two advances with no
+    `subscription_ended`, the clock moving on.
+  - _The scene property's placement, as tested (against the brief's "its ship where the member's
+    line plus the offset puts it")._ The wire carries no galactic position for the ship, so over
+    the socket the scene's arrival in the grid system shows only that the ship lies inside that
+    system's entry sphere (0.9 of a tidal radius of over 10¹⁵ m): placed from the member, not
+    grossly misplaced. Over the seconds before `subscribe` the member's line and its epoch
+    position differ by under an au, which that cannot tell apart. The arrival's observer does go
+    through `drift` on the member (the "elsewhere" branch, which panicked at BASE), but its
+    value is not read there. The bit-for-bit placement and the drift's value are the core's unit
+    test above.
+- **Fixed in lane `fix-night-sky-stars` (2026-11-05): the link's socket is read on a worker's
+  thread.** `useServerConnection` opens `openLinkSocket` (`lib/linkSocket.ts`, its worker
+  `linkSocket.worker.ts`), so that a long task of the page's no longer leaves frames unread past
+  `WRITE_TIMEOUT`, dropping a sky mid-reply (Design note 10's receive path); without `Worker`, the
+  page's own `WebSocket`.

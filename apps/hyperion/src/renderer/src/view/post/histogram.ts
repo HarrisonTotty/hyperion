@@ -19,8 +19,11 @@ import type {
   TextureHandle,
   ViewSize,
 } from "../engine/types";
+import { packGlareTerms } from "./bloomChain";
+import { type GlareSource, glareSourcePerUnit, type GlareSpreadTerms } from "./glare";
+import GLARE_WGSL from "./glare.wgsl?raw";
 import HISTOGRAM_WGSL from "./histogram.wgsl?raw";
-import { meterWeights, type MeterMode } from "./meter";
+import { type HistogramMeter, meterLuma, meterWeights } from "./meter";
 
 /** The histogram's bin count. */
 export const HISTOGRAM_BINS = 256;
@@ -38,8 +41,7 @@ export const HISTOGRAM_BINS_PER_STOP =
 /** The kernel's workgroup side, texels: 16 × 16 invocations. */
 export const HISTOGRAM_WORKGROUP = 16;
 
-/** The weights of Rec. 709 luminance from linear red, green and blue (ITU-R BT.709-6, item 3.2). */
-export const METER_LUMA: readonly [number, number, number] = [0.2126, 0.7152, 0.0722];
+export { METER_LUMA } from "./meter";
 
 /** One frame's histogram, as read back. */
 export interface Histogram {
@@ -58,7 +60,7 @@ export interface Histogram {
  */
 export const HISTOGRAM_KERNEL: KernelPair = {
   name: "exposure histogram",
-  reference: HISTOGRAM_WGSL,
+  reference: `${GLARE_WGSL}\n${HISTOGRAM_WGSL}`,
   subgroup: null,
   readback: "bit-exact",
 };
@@ -99,16 +101,80 @@ export function meterClassOf(alpha: number): number {
 }
 
 /**
+ * The frame's glare sources as the histogram weighs them (`histogram.wgsl`): the view they are
+ * seen from, its spread function, and the sources, each spreading its whole light.
+ */
+export interface MeteredGlare {
+  readonly sources: ReadonlyArray<GlareSource>;
+  /** The target's pre-exposure scale, 1 ÷ (cd/m²). */
+  readonly preExposure: number;
+  /** The frame's view rotation, sixteen `f32` column-major (`viewRotation4`). */
+  readonly viewRotation: Float32Array;
+  /** The frame's projection, sixteen `f32` column-major (`perspectiveReversedInfinite`). */
+  readonly projection: Float32Array;
+  /** The view's spread function (`glareSpreadTerms`). */
+  readonly terms: GlareSpreadTerms;
+}
+
+/** A column-major 4 × 4 matrix times a direction (w = 0). */
+function rotated(
+  m: Float32Array,
+  v: { x: number; y: number; z: number },
+): [number, number, number] {
+  const at = (i: number): number => m[i] ?? 0;
+  return [
+    at(0) * v.x + at(4) * v.y + at(8) * v.z,
+    at(1) * v.x + at(5) * v.y + at(9) * v.z,
+    at(2) * v.x + at(6) * v.y + at(10) * v.z,
+  ];
+}
+
+/** A vector's unit, or itself where it has no length. */
+function unit(v: readonly [number, number, number]): [number, number, number] {
+  const length = Math.hypot(v[0], v[1], v[2]);
+  return length > 0 ? [v[0] / length, v[1] / length, v[2] / length] : [v[0], v[1], v[2]];
+}
+
+/**
+ * The veil of every source of `glare` at texel (x, y) of a target of `size`, through Rec. 709's
+ * weights, pre-exposed: the kernel's `meteredVeil`, its pixel's direction as the tone-mapping
+ * pass's `glare_pixel_direction` takes it.
+ */
+export function meteredVeil(glare: MeteredGlare, size: ViewSize, xPx: number, yPx: number): number {
+  const p = glare.projection;
+  const ndcX = ((xPx + 0.5) / size.widthPx) * 2 - 1;
+  const ndcY = 1 - ((yPx + 0.5) / size.heightPx) * 2;
+  const pixel = unit([ndcX / (p[0] ?? 1), ndcY / (p[5] ?? 1), -1]);
+  let veil = 0;
+  for (const source of glare.sources) {
+    const d = unit(rotated(glare.viewRotation, source.direction));
+    const cross = Math.hypot(
+      d[1] * pixel[2] - d[2] * pixel[1],
+      d[2] * pixel[0] - d[0] * pixel[2],
+      d[0] * pixel[1] - d[1] * pixel[0],
+    );
+    const theta = Math.atan2(cross, d[0] * pixel[0] + d[1] * pixel[1] + d[2] * pixel[2]);
+    veil +=
+      meterLuma(source.luminance) *
+      glare.preExposure *
+      glareSourcePerUnit(source, theta, glare.terms);
+  }
+  return veil;
+}
+
+/**
  * The CPU twin of the kernel over RGBA texels, row-major.
  *
  * @param rgba - Four values per texel: pre-exposed linear red, green, blue and the meter class.
  * @param stride - 1, or 2 for the low setting's quarter-resolution input.
+ * @param glare - The frame's glare sources, whose veil each weighed texel adds; none where absent.
  */
 export function cpuHistogram(
   rgba: Float32Array,
   size: ViewSize,
-  mode: MeterMode,
+  mode: HistogramMeter,
   stride: 1 | 2,
+  glare?: MeteredGlare,
 ): Uint32Array {
   const bins = new Uint32Array(HISTOGRAM_BINS);
   const weights = meterWeights(mode);
@@ -119,20 +185,45 @@ export function cpuHistogram(
       if (weight === 0) {
         continue;
       }
-      const luminance =
-        METER_LUMA[0] * (rgba[at] ?? 0) +
-        METER_LUMA[1] * (rgba[at + 1] ?? 0) +
-        METER_LUMA[2] * (rgba[at + 2] ?? 0);
-      const bin = histogramBin(luminance);
+      const stored = meterLuma([rgba[at] ?? 0, rgba[at + 1] ?? 0, rgba[at + 2] ?? 0]);
+      const veil = glare === undefined ? 0 : meteredVeil(glare, size, x, y);
+      const bin = histogramBin(stored + veil);
       bins[bin] = (bins[bin] ?? 0) + weight;
     }
   }
   return bins;
 }
 
-/** The kernel's uniform `Params`: the weights, the size, the stride and padding, as `u32`. */
-export function histogramParams(size: ViewSize, mode: MeterMode, stride: 1 | 2): Uint32Array {
-  return new Uint32Array([...meterWeights(mode), size.widthPx, size.heightPx, stride, 0]);
+/**
+ * The kernel's uniform `Params`: the weights, the size, the stride and the glare sources' count,
+ * as `u32`.
+ */
+export function histogramParams(
+  size: ViewSize,
+  mode: HistogramMeter,
+  stride: 1 | 2,
+  sourceCount: number,
+): Uint32Array {
+  return new Uint32Array([...meterWeights(mode), size.widthPx, size.heightPx, stride, sourceCount]);
+}
+
+/**
+ * The kernel's uniform `MeteredGlare`: the view rotation and projection, then the spread function
+ * as the tone-mapping pass's `GlareTerms` takes it (`packGlareTerms`), 52 `f32`.
+ */
+export function histogramGlareUniform(
+  glare: Pick<MeteredGlare, "viewRotation" | "projection" | "terms">,
+): Float32Array {
+  const terms = packGlareTerms(glare.terms);
+  const out = new Float32Array(52);
+  out.set(glare.viewRotation.subarray(0, 16), 0);
+  out.set(glare.projection.subarray(0, 16), 16);
+  ["glarePoisson0", "glarePoisson1", "glarePoisson2", "glareBroad", "glareMisc"].forEach(
+    (name, i) => {
+      out.set(terms[name] ?? new Float32Array(4), 32 + 4 * i);
+    },
+  );
+  return out;
 }
 
 /** The workgroups that cover `size` read at `stride`. */
@@ -164,11 +255,24 @@ export interface HistogramRequest {
   /** The view's HDR colour, `rgba16float` with the meter class in alpha. */
   readonly hdrColour: TextureHandle;
   readonly size: ViewSize;
-  readonly mode: MeterMode;
+  readonly mode: HistogramMeter;
   /** 1 on the high setting, 2 on the low (Design note 18). */
   readonly stride: 1 | 2;
   /** The scale the target was pre-exposed with, 1 ÷ (cd/m²). */
   readonly preExposure: number;
+  /** The frame's glare sources, as the tone-mapping pass reads them. */
+  readonly glare: HistogramGlare;
+}
+
+/** The frame's glare sources as the kernel binds them: the tone-mapping pass's own buffer. */
+export interface HistogramGlare {
+  /** The sources as `packGlareSources` packs them, at the frame's pre-exposure. */
+  readonly sources: BufferHandle;
+  /** The sources in the buffer. */
+  readonly count: number;
+  readonly viewRotation: Float32Array;
+  readonly projection: Float32Array;
+  readonly terms: GlareSpreadTerms;
 }
 
 /**
@@ -243,11 +347,15 @@ export class HistogramReader {
     const sequence = this.#issued;
     this.#issued += 1;
     this.#engine.writeBuffer(buffer, 0, this.#zeros);
+    const { glare } = request;
     this.#engine.dispatch(
       this.#kernel,
       {
-        uniforms: { params: histogramParams(request.size, request.mode, request.stride) },
-        buffers: { bins: buffer },
+        uniforms: {
+          params: histogramParams(request.size, request.mode, request.stride, glare.count),
+          glare: histogramGlareUniform(glare),
+        },
+        buffers: { bins: buffer, glareSources: glare.sources },
         sampled: { hdr: request.hdrColour },
         storage: {},
       },
@@ -280,6 +388,14 @@ export class HistogramReader {
     }
     this.#delivered = sequence;
     this.#onHistogram({ bins: new Uint32Array(bytes), preExposure });
+  }
+
+  /**
+   * Drops the reads now in flight: none of them is delivered, so that the next histogram delivered
+   * is of an image measured after the call (a cut's, `AutoExposure.cut`).
+   */
+  dropInFlight(): void {
+    this.#delivered = this.#issued;
   }
 
   /**

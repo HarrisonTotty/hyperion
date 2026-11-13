@@ -4,12 +4,14 @@
  *
  * @remarks
  * A body is a `point` while its angular diameter is under {@link POINT_BELOW_PX} of the view's own
- * pixels (brainstorm, "The scales the view spans"), a `disc` above, and a `mesh` only where depth
- * against other geometry requires it (Design note 2's promotion) or R10 hands it to terrain. Each
- * threshold has {@link REGIME_HYSTERESIS}: a point becomes a disc at 3.3 px and a disc a point at
- * 2.7 px, so a body at the boundary does not flip every frame. The set is a function of the bodies,
- * the camera, the viewport and the previous set only, each body's regime its own, so input order
- * cannot change it. An oblate body is sized on its equatorial radius.
+ * pixels (brainstorm, "The scales the view spans"), a `disc` above, a `mesh` only where depth
+ * against other geometry requires it (Design note 2's promotion), and `terrain` where R10 hands it
+ * to terrain (plan R10, R10.T10.e: `terrain/handover.ts`), the mesh regime whose surveyed ground
+ * R05's quadtree draws. Each threshold has {@link REGIME_HYSTERESIS}: a point becomes a disc at
+ * 3.3 px and a disc a point at 2.7 px, so a body at the boundary does not flip every frame. The set
+ * is a function of the bodies, the camera, the viewport and the previous set only, each body's
+ * regime its own, so input order cannot change it. An oblate body is sized on its equatorial
+ * radius.
  */
 import type { BodyIdHex } from "@hyperion/protocol";
 
@@ -23,8 +25,17 @@ import {
 import { angularDiameterPx } from "../wireframe/bodies";
 import { sphereOutsideView, sphereScreenRect } from "../wireframe/submit";
 
-/** How a lit body is drawn. */
-export type LitRegime = "point" | "disc" | "mesh";
+/**
+ * How a lit body is drawn: a point, an analytic disc, a smooth mesh, or `terrain`, a mesh whose
+ * geometry is handed to R05's quadtree (R10 Design note 13), its figure the reference surface
+ * beneath the terrain.
+ */
+export type LitRegime = "point" | "disc" | "mesh" | "terrain";
+
+/** Whether a regime draws the body's figure as a mesh, with depth: `mesh` and `terrain`. */
+export function drawnAsMesh(regime: LitRegime | undefined): boolean {
+  return regime === "mesh" || regime === "terrain";
+}
 
 /** Below this angular diameter, px, a body is a point (brainstorm, "The scales the view spans"). */
 export const POINT_BELOW_PX = 3;
@@ -39,6 +50,21 @@ export const GAS_GIANT_FULL_PASS_BOUNDARY_M = 1e9;
 
 /** Each threshold's hysteresis, a fraction of it (Design note 1). */
 export const REGIME_HYSTERESIS = 0.1;
+
+/**
+ * Whether a body with an atmosphere is drawn by its disc table beyond the full passes' boundary
+ * (plan R08, R08.T16.b; Design note 13), with {@link REGIME_HYSTERESIS}: a body drawn by its full
+ * passes takes its table past (1 + h) × 10⁹ m, and one drawn by its table keeps it down to
+ * (1 − h) × 10⁹ m, so that a body at the boundary does not flip every frame.
+ *
+ * @param distanceM - Its centre's distance from the camera, m.
+ * @param wasTabled - Whether it was drawn by its table on the previous frame.
+ */
+export function drawnByTable(distanceM: number, wasTabled: boolean): boolean {
+  const threshold =
+    GAS_GIANT_FULL_PASS_BOUNDARY_M * (wasTabled ? 1 - REGIME_HYSTERESIS : 1 + REGIME_HYSTERESIS);
+  return distanceM > threshold;
+}
 
 /** A lit body as the regime and the painter order see it. */
 export interface LitSphere {
@@ -60,8 +86,9 @@ function pointOrDisc(diameterPx: number, previous: LitRegime | undefined): "poin
  * Each body's point or disc regime on a view, before Design note 2's promotion to `mesh`.
  *
  * @remarks
- * A body seen from inside its sphere is a disc. A body that was a `mesh` keeps the disc side of the
- * hysteresis; whether it stays a mesh is {@link promoteOverlapping}'s to decide each frame.
+ * A body seen from inside its sphere is a disc. A body that was a `mesh` or `terrain` keeps the
+ * disc side of the hysteresis; whether it stays a mesh is {@link promoteOverlapping}'s to decide
+ * each frame, and whether it stays handed over R10's (`handOverRegimes`).
  *
  * @param previous - Each body's regime on the previous frame; a body absent from it starts as a
  *   point, so that it must clear 3.3 px to become a disc.
@@ -135,7 +162,8 @@ function overlaps(a: ScreenCircle, b: ScreenCircle): boolean {
  *
  * @remarks
  * Promotion spreads: a disc overlapping a newly promoted mesh is promoted too, until nothing
- * changes. The result depends on the sets only, not their order.
+ * changes. A body handed over to terrain (`terrain`) writes depth as a mesh does. The result
+ * depends on the sets only, not their order.
  *
  * @param footprints - Each disc's and mesh's footprint on the view.
  * @param depthWriters - The footprints of the view's other depth-writing geometry.
@@ -152,7 +180,7 @@ export function promoteOverlapping(
     const writers = [
       ...depthWriters,
       ...[...promoted]
-        .filter(([, regime]) => regime === "mesh")
+        .filter(([, regime]) => drawnAsMesh(regime))
         .flatMap(([id]) => {
           const footprint = footprints.get(id);
           return footprint === undefined ? [] : [footprint];

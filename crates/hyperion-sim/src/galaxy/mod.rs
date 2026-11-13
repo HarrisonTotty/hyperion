@@ -25,6 +25,7 @@ pub mod consts;
 pub mod displaced;
 pub mod fates;
 pub mod features;
+pub(crate) mod field_share;
 pub mod fields;
 pub mod frame;
 pub mod gas;
@@ -38,6 +39,7 @@ pub mod placement;
 pub mod potential;
 pub mod quad;
 pub mod query;
+pub(crate) mod rules;
 pub mod shares;
 pub mod snr;
 pub mod special;
@@ -45,20 +47,38 @@ pub mod substellar;
 
 use std::error::Error;
 use std::fmt;
+use std::sync::{Arc, OnceLock};
 
+use self::ages::FieldShareRules;
+use self::catalogue_classes::core_collapse::CoreCollapseProcess;
+use self::catalogue_classes::type_ia::DelayTimeDistribution;
+use self::displaced::class_table::{ClassTable, FormTable};
+use self::displaced::forms::BuildFormError;
+use self::displaced::site::CarveOutRules;
+use self::displaced::{DisplacedFields, DisplacedRules};
+use self::fates::{CompanionMasses, fates_for};
+use self::features::centre::{BuildCentreError, CentreModel};
 use self::features::shares::FeatureShares;
+use self::field_share::FieldShare;
 use self::fields::Fields;
 use self::gas::field::GasField;
 use self::gas::params::BuildGasParamsError;
-use self::imf::{BandShares, Chabrier, Kroupa, MassFunction, MassFunctionKind};
+use self::global_list::share::discrete_share;
+use self::imf::{BandShares, Chabrier, Kept, Kroupa, MassFunction, MassFunctionKind};
 use self::kinematics::KinematicTables;
+use self::motion::CentreMotion;
 use self::params::GalaxyParams;
-use self::potential::{MassModel, PotentialTables};
+use self::potential::{MassModel, PotentialGrid, PotentialGridPlan, PotentialTables};
+use self::rules::GalaxyRules;
 use self::shares::ShareMatrix;
+use self::snr::WindowCaps;
 use self::substellar::{SubstellarAbundance, SubstellarParams};
-use crate::Seed;
 use crate::coords::GalacticPosition;
+#[cfg(doc)]
+use crate::tables::binary::CLASS_SHARES;
+use crate::tables::binary::ClassShareTable;
 use crate::units::SolarMasses;
+use crate::{GENERATOR_VERSION, Seed};
 
 /// A point of the galactic frame in light-years, as `f64`s: the argument of every density.
 ///
@@ -158,16 +178,23 @@ impl Population {
 /// It holds the drawn and derived parameters, the mass function they were derived with, the mass
 /// model with its potential tables, the density fields, the gas field and the share matrix, all
 /// pure functions of the seed (or of the parameters, for a fixture) and the generator version. The
-/// fates behind the mean masses are held as their result, [`GalaxyParams::mean_system_mass`].
+/// fates behind the mean masses are held as their result, [`GalaxyParams::mean_system_mass`]. It
+/// also carries the arms its galaxy-side holds take, the generator version's, which its equality
+/// compares (decision-galaxy-25-train §1; plan 09, P09.T28.b.b).
 ///
 /// A galaxy is immutable and `Send + Sync`, so one build can be shared between threads behind an
 /// `Arc`, as the server's galaxy cache holds it (plan 04). Its only interior mutability is the
 /// parameters' black hole ([`GalaxyParams::black_hole`]), solved once from the parameters when first
-/// read, which the mass model does while the galaxy is built; the sim caches nothing else. [`Galaxy::new`] takes about 130 ms, against plan 02's target of
+/// read, which the mass model does while the galaxy is built, the centre's motion
+/// ([`centre_motion`](Self::centre_motion)), built from the parameters and the mass model when
+/// first read (plan 09, P09.T28.b.a), and the centre's model ([`centre`](Self::centre)) and
+/// potential (`centre_potential`, P09.T28.d.b), built from that motion when first read (plan 09,
+/// P09.T29); the sim caches nothing else. [`Galaxy::new`] takes about 130 ms, against plan 02's target of
 /// 100 ms, two thirds of it the discs' vertical Jeans solve in [`Fields::new`] (plan 02, Risks,
 /// R19); the gas field adds its two radial quadratures, some tens of microseconds, and nothing on
-/// the heap (plan 07). [`heap_bytes`](Self::heap_bytes) states what one costs to keep, about
-/// 1.4 MiB.
+/// the heap (plan 07), and the shell window's caps their scan, about 1% (plan 09,
+/// [`window_caps`](Self::window_caps)). [`heap_bytes`](Self::heap_bytes) states what one costs to
+/// keep, about 1.4 MiB.
 ///
 /// # Examples
 ///
@@ -203,6 +230,22 @@ pub struct Galaxy {
     kinematics: Option<Box<KinematicTables>>,
     feature_shares: FeatureShares,
     substellar: SubstellarAbundance,
+    window_caps: WindowCaps,
+    centre_motion: CentreMotionCell,
+    centre: CentreModelCell,
+    centre_potential: CentrePotentialCell,
+    companions: CompanionsCell,
+    type_ia_delays: TypeIaDelaysCell,
+    core_collapse: CoreCollapseCell,
+    lifetime_envelope: LifetimeEnvelopeCell,
+    /// The field's share of each component's budget, from generator version 26 (P09.T2.c); none
+    /// under the held arm, where the field is the budget.
+    field_share: Option<Box<FieldShare>>,
+    /// What the field keeps of each component's layer D, in the fields' order, from generator
+    /// version 26 (P09.T35): 1 less its ancient Type Ia, and with plan 08's displaced classes
+    /// `1 − a ÷ stay_D` of the stay's slice (`with_displaced_classes`); none under the held arm.
+    layer_d_kept: Option<Box<[f64]>>,
+    rules: GalaxyRules,
 }
 
 impl Galaxy {
@@ -215,7 +258,8 @@ impl Galaxy {
     /// the warm layer is clamped so that the neutral layer keeps at least half the gas wherever the
     /// molecular disc, at most 3 × 10⁶ M☉, weighs less than half of it. Every galaxy plan 02 draws
     /// has at least 2.5 × 10⁹ M☉ of gas, the least at any corner of its ranges; the proof is
-    /// `gas::params`'s `the_neutral_share_is_at_least_half_at_every_corner_of_the_draws`.
+    /// `gas::params`'s `the_neutral_share_is_at_least_half_at_every_corner_of_the_draws`. Nor
+    /// does [`from_params`](Self::from_params)'s check of the shell window's caps fire, as it says.
     #[must_use]
     pub fn new(seed: Seed) -> Self {
         Self::with_mass_function(seed, MassFunctionKind::default())
@@ -236,8 +280,10 @@ impl Galaxy {
         )
     }
 
-    /// The galaxy of `params`, with `seed` keying the streams that place its stars (plan 03) and
-    /// the gas field's own draws (plan 07).
+    /// The galaxy of `params`, with `seed` keying the streams that place its stars (plan 03), the
+    /// gas field's own draws (plan 07) and, from generator version 27, the global list's dwarfs,
+    /// whose share of the halo's budget the halo's field gives up (plan 10, P10.T3.d.b's
+    /// [`discrete_share`]).
     ///
     /// The parameters are `params`, such as the Milky Way fixture
     /// ([`GalaxyParams::milky_way_like`]) or a builder's, not the seed's draws.
@@ -248,7 +294,203 @@ impl Galaxy {
     /// disc and warm ionised layer, drawn for `seed`, outweigh its gas disc (plan 07, ruling 22).
     /// Since the warm layer's clamp (ruling 91) that needs a gas disc under 6 × 10⁶ M☉, which no
     /// galaxy the builder accepts has.
+    ///
+    /// # Panics
+    ///
+    /// If a cap of the shell window over the gas exceeds
+    /// [`SHELL_WINDOW_CAP`](snr::SHELL_WINDOW_CAP) ([`WindowCaps::from_gas_params`]). It never
+    /// does: the caps are largest at the lowest pressure floor a galaxy's gas has, 300 K cm⁻³,
+    /// where the field's is 3.67 Myr (P09.T15.b, ruling 136.3).
     pub fn from_params(seed: Seed, params: GalaxyParams) -> Result<Self, BuildGalaxyError> {
+        Self::build(seed, params, GalaxyRules::of_version(GENERATOR_VERSION))
+    }
+
+    /// [`from_params`](Self::from_params) under generator version `version`'s rules, every hold
+    /// that version turns on in force: another crate's door to a later version's arms, for its
+    /// tests alone (P06.T28.g's server test of the wire's 26 arm). Nothing generated builds one.
+    ///
+    /// # Errors
+    ///
+    /// As [`from_params`](Self::from_params).
+    ///
+    /// # Panics
+    ///
+    /// As [`from_params`](Self::from_params).
+    #[cfg(any(test, feature = "testing"))]
+    #[doc(hidden)]
+    pub fn from_params_at_version(
+        seed: Seed,
+        params: GalaxyParams,
+        version: crate::GeneratorVersion,
+    ) -> Result<Self, BuildGalaxyError> {
+        Self::build(seed, params, GalaxyRules::of_version(version))
+    }
+
+    /// [`from_params_at_version`](Self::from_params_at_version) with the share matrix's class
+    /// shares from the binary classes' scratch rows (P11.T7's, `SCRATCH_CLASS_SHARES`) in place
+    /// of the fitted ones (P15.T10.b's refit): the census galaxy of `hyperion-fit`'s binary tasks.
+    /// From 26 the field gives up the class shares (P09.T2.c), so the records a census runs depend
+    /// on the rows; under the scratch rows the census of the version's engine does not read the
+    /// rows it refits (plan 15's lean of 2026-11-01). Its classes read the fitted tables, which no
+    /// census reads. Nothing generated builds one.
+    ///
+    /// # Errors
+    ///
+    /// As [`from_params`](Self::from_params).
+    ///
+    /// # Panics
+    ///
+    /// As [`from_params`](Self::from_params).
+    #[cfg(any(test, feature = "testing"))]
+    #[doc(hidden)]
+    pub fn from_params_for_binary_refit(
+        seed: Seed,
+        params: GalaxyParams,
+        version: crate::GeneratorVersion,
+    ) -> Result<Self, BuildGalaxyError> {
+        Self::build_with_class_shares(
+            seed,
+            params,
+            GalaxyRules::of_version(version),
+            &crate::tables::binary::SCRATCH_CLASS_SHARES,
+        )
+    }
+
+    /// [`from_params`](Self::from_params) under `rules` in place of the generator version's: the
+    /// tests' door to a later version's galaxy-side holds (decision-galaxy-25-train §1.3), and to
+    /// the tests' own rules, such as a field without plan 08's displaced classes.
+    ///
+    /// # Errors
+    ///
+    /// As [`from_params`](Self::from_params), and, under rules that install plan 08's displaced
+    /// classes, [`BuildGalaxyError::DisplacedForm`] if a class's form cannot be built from the
+    /// form table.
+    ///
+    /// # Panics
+    ///
+    /// As [`from_params`](Self::from_params).
+    #[cfg(test)]
+    pub(crate) fn from_params_with_rules(
+        seed: Seed,
+        params: GalaxyParams,
+        rules: GalaxyRules,
+    ) -> Result<Self, BuildGalaxyError> {
+        Self::build(seed, params, rules)
+    }
+
+    /// This galaxy under `rules`, for tests that compare two arms on one galaxy without building its
+    /// potential's grid twice.
+    ///
+    /// It is what [`from_params_with_rules`](Self::from_params_with_rules) builds from the same
+    /// seed and parameters, with the builders after it, since nothing a galaxy builds when it is
+    /// built reads its rules but the field share, the carve-out, the displaced classes' arm and the
+    /// binary tables (below; and, through the displaced classes' table, the stellar rules): each
+    /// other held call site reads them when asked, and a test holds the two equal. It keeps the centre's motion and potential if they have been read, since the motion
+    /// reads only the parameters and the mass model, and the potential only the motion. It keeps
+    /// the centre's model and the field's Type Ia delay-time distribution only if the stellar rules
+    /// ([`GalaxyRules::stellar`]) stay as they were.
+    /// The model's classes are built from the stellar law (the kick law's parameters and the
+    /// turn-off), and the distribution from stellar lifetimes, so under other stellar rules both
+    /// memos are emptied. The reset is pre-emptive: no
+    /// stellar field reaches the model yet, and it builds again to the same bits. The first stellar
+    /// hold that reaches it must also pass the galaxy's stellar rules into
+    /// `CentreModel::from_parts`, since the reset alone does not route them. A galaxy-side hold
+    /// whose arm reaches any of these memos must reset it here too.
+    ///
+    /// The field share (`GalaxyRules::field_share`, P09.T2.c), the carve-out
+    /// (`GalaxyRules::carve_out`, P09.T35), plan 08's displaced classes
+    /// (`GalaxyRules::displaced`, P08.T12.a) are the holds read when the galaxy is built, so
+    /// `rules` must keep this galaxy's: a test of any of their new arms builds the galaxy through
+    /// [`from_params_with_rules`](Self::from_params_with_rules). A galaxy that holds the displaced
+    /// classes keeps its stellar rules too, whose kick law its class table was built with.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, which every test profile is, if `rules` changes the field share, the
+    /// carve-out or the displaced classes' arm, or the
+    /// stellar rules of a galaxy that holds the classes.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn with_rules(self, rules: GalaxyRules) -> Self {
+        debug_assert_eq!(
+            rules.field_share, self.rules.field_share,
+            "the field share is read when a galaxy is built: build it under the new rules with \
+             `Galaxy::from_params_with_rules`"
+        );
+        debug_assert_eq!(
+            rules.carve_out, self.rules.carve_out,
+            "the carve-out is read when a galaxy is built: build it under the new rules with \
+             `Galaxy::from_params_with_rules`"
+        );
+        debug_assert_eq!(
+            rules.displaced, self.rules.displaced,
+            "the displaced classes' arm is read when a galaxy is built: build it under the new \
+             rules with `Galaxy::from_params_with_rules`"
+        );
+        debug_assert!(
+            self.fields.displaced().is_none() || rules.stellar == self.rules.stellar,
+            "the displaced classes' table was built under the galaxy's stellar rules, so a galaxy \
+             under others is built with `Galaxy::from_params_with_rules`"
+        );
+        let (centre, type_ia_delays) = if rules.stellar == self.rules.stellar {
+            (self.centre, self.type_ia_delays)
+        } else {
+            (CentreModelCell::default(), TypeIaDelaysCell::default())
+        };
+        let core_collapse = if rules == self.rules {
+            self.core_collapse
+        } else {
+            CoreCollapseCell::default()
+        };
+        Self {
+            centre,
+            type_ia_delays,
+            core_collapse,
+            rules,
+            ..self
+        }
+    }
+
+    /// [`from_params`](Self::from_params) under `rules`.
+    fn build(
+        seed: Seed,
+        params: GalaxyParams,
+        rules: GalaxyRules,
+    ) -> Result<Self, BuildGalaxyError> {
+        Self::build_with_class_shares(seed, params, rules, &crate::tables::binary::CLASS_SHARES_31)
+    }
+
+    /// [`build`](Self::build) with the share matrix's class shares from `class_shares`
+    /// (the fitted rows, [`CLASS_SHARES`], or the census galaxy's scratch rows).
+    ///
+    /// This is the one `match` on the displaced classes (P08.T12.a; [`DisplacedRules`], E4′ of
+    /// decision-stellar-holds, lean of 2026-10-31). The field galaxy is built first. The class
+    /// table is built from it (some 0.4–0.5 s in a release build, plan 08's P08.T9 as built, and
+    /// never kept as a static), and the classes and the share matrix's stay shares and class counts
+    /// are installed, so that every reader of layers D and E reads them through the galaxy's fields
+    /// and shares; the tests' field alone ([`DisplacedRules`]'s test-only arm) is the field galaxy.
+    fn build_with_class_shares(
+        seed: Seed,
+        params: GalaxyParams,
+        rules: GalaxyRules,
+        class_shares: &ClassShareTable,
+    ) -> Result<Self, BuildGalaxyError> {
+        let field = Self::build_field(seed, params, rules, class_shares)?;
+        match rules.displaced {
+            #[cfg(test)]
+            DisplacedRules::FieldOnly => Ok(field),
+            DisplacedRules::Displaced => field.with_displaced_classes(),
+        }
+    }
+
+    /// The field galaxy: version 25's build verbatim, with nothing of plan 08's displaced classes,
+    /// its class shares `class_shares`'.
+    fn build_field(
+        seed: Seed,
+        params: GalaxyParams,
+        rules: GalaxyRules,
+        class_shares: &ClassShareTable,
+    ) -> Result<Self, BuildGalaxyError> {
         let mass_function = HeldMassFunction::of(params.mass_function());
         let model = MassModel::new(&params);
         let potential = PotentialTables::in_plane(&model);
@@ -269,8 +511,20 @@ impl Galaxy {
             mass_function.as_dyn(),
             params.mean_formed_mass(),
         );
-        feature_shares.set_class_shares(&crate::tables::binary::CLASS_SHARES);
-        Ok(Self {
+        feature_shares.set_class_shares(class_shares);
+        // From version 27 the halo gives up its discrete share to the global list's streams and
+        // dwarf cores, whose members the range query serves, before the field's factors are taken
+        // from the shares (plan 10, P10.T3.d.b).
+        feature_shares.set_halo_discrete(discrete_share(seed, &params, &potential));
+        let field_share = match rules.field_share {
+            #[cfg(test)]
+            FieldShareRules::None => None,
+            FieldShareRules::Phi => {
+                Some(Box::new(FieldShare::new(&params, &fields, &feature_shares)))
+            }
+        };
+        let window_caps = WindowCaps::from_gas_params(gas.params());
+        let mut galaxy = Self {
             seed,
             params,
             mass_function,
@@ -282,6 +536,66 @@ impl Galaxy {
             kinematics: None,
             feature_shares,
             substellar,
+            window_caps,
+            centre_motion: CentreMotionCell::default(),
+            centre: CentreModelCell::default(),
+            centre_potential: CentrePotentialCell::default(),
+            companions: CompanionsCell::default(),
+            type_ia_delays: TypeIaDelaysCell::default(),
+            core_collapse: CoreCollapseCell::default(),
+            lifetime_envelope: LifetimeEnvelopeCell::default(),
+            field_share,
+            layer_d_kept: None,
+            rules,
+        };
+        // A second step, once the parts it reads exist: layer D's ancient Type Ia come from the
+        // built galaxy's delay-time distribution (P09.T35).
+        galaxy.layer_d_kept = match rules.carve_out {
+            #[cfg(test)]
+            CarveOutRules::Unclaimed => None,
+            CarveOutRules::Claimed => Some(field_share::layer_d_kept(&galaxy)),
+        };
+        Ok(galaxy)
+    }
+
+    /// This field galaxy with plan 08's displaced classes installed (P08.T12.a): the class table
+    /// from it, under plan 15's committed form table, the classes in its fields and their stay
+    /// shares and counts in its share matrix.
+    ///
+    /// The stay shares are the budget's ([`ClassTable::budget_stay_share`]): the field share's
+    /// thinning (P09.T2.c), after the pick, takes φ. Layer D's carve-out (P09.T35) keeps `1 − a`
+    /// of the budget's layer D, its ancient Type Ia `a` all among the dead, which stay; inside the
+    /// stay's slice of the pick, which has already given the runaways and walkaways to their
+    /// classes, it keeps `1 − a ÷ stay`, so that the field loses its ancient Type Ia exactly. It
+    /// keeps 0 should `a` pass the stay; the carve-out's D3 test holds every component of the Milky
+    /// Way fixture above that.
+    fn with_displaced_classes(self) -> Result<Self, BuildGalaxyError> {
+        let displaced = DisplacedFields::new(&self, &FormTable::committed())
+            .map_err(BuildGalaxyError::DisplacedForm)?;
+        let (stay, counts) = displaced.share_columns(&self.fields);
+        let layer_d_kept = self.layer_d_kept.as_ref().map(|kept| {
+            kept.iter()
+                .zip(&stay)
+                .map(|(&kept, &[stay_d, _])| {
+                    if stay_d > 0.0 {
+                        (1.0 - (1.0 - kept) / stay_d).max(0.0)
+                    } else {
+                        kept
+                    }
+                })
+                .collect()
+        });
+        let shares = self.shares.with_displaced(&stay, &counts);
+        let fields = self.fields.with_displaced(displaced);
+        Ok(Self {
+            fields,
+            shares,
+            layer_d_kept,
+            // The core-collapse process reads the classes, so the field galaxy's, were it read,
+            // is not this galaxy's.
+            core_collapse: CoreCollapseCell::default(),
+            lifetime_envelope: LifetimeEnvelopeCell::default(),
+            ..self
         })
     }
 
@@ -304,27 +618,112 @@ impl Galaxy {
     /// it (plan 08, P08.T5): what velocities, and so every position away from the epoch, need.
     ///
     /// Plans 08–10 read the potential off the plane. The grid takes about 2 s to build (plan 02,
-    /// Risks, R15) and the kinematic tables some tens of milliseconds more; a galaxy that has them
-    /// already is returned as it is. Nothing else changes.
+    /// Risks, R15; 3.45 s on one thread from version 28, release, pod, 16 vCPU, 2026-11-05) and the
+    /// kinematic tables some 0.13 s more; a galaxy that has them already is returned as it is.
+    /// Nothing else changes. A caller with threads makes the grid on them
+    /// ([`potential_grid_plan`](Self::potential_grid_plan)).
     #[must_use]
     pub fn with_full_potential(self) -> Self {
         if self.potential.has_grid() && self.kinematics.is_some() {
             return self;
         }
-        let potential = if self.potential.has_grid() {
-            self.potential
+        if self.potential.has_grid() {
+            self.with_kinematics()
         } else {
-            self.potential.with_grid(&self.model)
-        };
+            Self {
+                potential: self.potential.with_grid(&self.model),
+                ..self
+            }
+            .with_kinematics()
+        }
+    }
+
+    /// The plan of the (R, |z|) grid that [`with_full_potential`](Self::with_full_potential)
+    /// adds to [`Galaxy::new`]'s galaxy of `seed`.
+    ///
+    /// It is the grid of the same mass model, built here from the seed's parameters in some 0.11 s,
+    /// without the rest of the galaxy (release, pod, 16 vCPU, 2026-11-05), so that a caller with
+    /// threads can make the grid's points on them beside [`Galaxy::new`], as the server does on its
+    /// pool (perf-galaxy-build-start), and hand the grid to
+    /// [`with_full_potential_grid`](Self::with_full_potential_grid). It is of [`Galaxy::new`]'s
+    /// galaxy alone, not of one built from other parameters or with another mass function.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::thread;
+    ///
+    /// use hyperion_sim::Seed;
+    /// use hyperion_sim::galaxy::Galaxy;
+    /// use hyperion_sim::galaxy::potential::GRID_POINTS;
+    ///
+    /// let seed = Seed::new(42);
+    /// let plan = Galaxy::potential_grid_plan(seed);
+    /// // The galaxy on one thread, and its grid's points in two shares on two more.
+    /// let (galaxy, points) = thread::scope(|scope| {
+    ///     let galaxy = scope.spawn(|| Galaxy::new(seed));
+    ///     let shares = [0, 1].map(|first| {
+    ///         let plan = &plan;
+    ///         scope.spawn(move || {
+    ///             (first..GRID_POINTS).step_by(2).map(|k| plan.point(k)).collect::<Vec<_>>()
+    ///         })
+    ///     });
+    ///     let points: Vec<_> = shares.into_iter().flat_map(|share| share.join().unwrap()).collect();
+    ///     (galaxy.join().unwrap(), points)
+    /// });
+    /// // The serial `Galaxy::new(seed).with_full_potential()`, bit for bit.
+    /// let galaxy = galaxy.with_full_potential_grid(plan.finish(points));
+    /// assert!(galaxy.kinematics().is_some());
+    /// ```
+    #[must_use]
+    pub fn potential_grid_plan(seed: Seed) -> PotentialGridPlan {
+        PotentialGridPlan::new(MassModel::new(&GalaxyParams::from_seed(
+            seed,
+            MassFunctionKind::default(),
+        )))
+    }
+
+    /// [`with_full_potential`](Self::with_full_potential), with `grid` in place of the grid it
+    /// would make.
+    ///
+    /// It is the same galaxy, bit for bit, since a grid's points are pure functions of its model
+    /// ([`PotentialGridPlan`]). A galaxy that has the grid already keeps its own.
+    ///
+    /// # Panics
+    ///
+    /// If `grid` is not of this galaxy's mass model.
+    #[must_use]
+    pub fn with_full_potential_grid(self, grid: PotentialGrid) -> Self {
+        assert_eq!(
+            grid.model(),
+            &self.model,
+            "a galaxy's grid is of its own mass model"
+        );
+        if self.potential.has_grid() && self.kinematics.is_some() {
+            return self;
+        }
+        if self.potential.has_grid() {
+            self.with_kinematics()
+        } else {
+            Self {
+                potential: self.potential.with_made_grid(grid),
+                ..self
+            }
+            .with_kinematics()
+        }
+    }
+
+    /// This galaxy, whose potential has the (R, |z|) grid, with the kinematic tables built in it.
+    #[must_use]
+    fn with_kinematics(self) -> Self {
         let kinematics = KinematicTables::new(
             self.seed,
             &self.params,
             &self.fields,
             &self.model,
-            &potential,
+            &self.potential,
         );
         Self {
-            potential,
             kinematics: Some(Box::new(kinematics)),
             ..self
         }
@@ -333,18 +732,219 @@ impl Galaxy {
     /// The velocity laws of every population (plan 08), which
     /// [`with_full_potential`](Self::with_full_potential) builds; `None` for a galaxy built
     /// without them, whose systems keep their epoch positions at every time
-    /// ([`query::epoch_velocity`](query::epoch_velocity)).
+    /// ([`query::epoch_velocity`]).
     #[must_use]
     pub fn kinematics(&self) -> Option<&KinematicTables> {
         self.kinematics.as_deref()
     }
 
     /// The feature catalogue's rates and the share φ of each population in features (plan 09,
-    /// P09.T2.b), built with the galaxy (plan 09, Design note 15). Nothing reads φ into the fields
-    /// until P09.T2.c.
+    /// P09.T2.b), built with the galaxy (plan 09, Design note 15). The density fields stay the
+    /// budget; from generator version 26 the field placement thins to gives φ up (P09.T2.c).
     #[must_use]
     pub fn feature_shares(&self) -> &FeatureShares {
         &self.feature_shares
+    }
+
+    /// The shell window's caps over this galaxy's gas, one per environment (plan 09, P09.T15.b),
+    /// which the supernova test cuts every window at (P09.T17's `claims`).
+    ///
+    /// They are [`WindowCaps::from_gas_params`] of the gas's parameters, a fixed scan of some 5,000
+    /// windows, computed once with the galaxy: 3.7 ms against 352 ms for the whole of
+    /// [`Galaxy::new`] in the same test build (2026-10-27, on a shared machine), about 1%, where a
+    /// scan on every claim would cost that for every recent death. [`WindowCaps::from_galaxy`]
+    /// reads them here.
+    #[must_use]
+    pub const fn window_caps(&self) -> &WindowCaps {
+        &self.window_caps
+    }
+
+    /// What the Kepler regime reads of the centre (plan 09, P09.T28.b.a).
+    ///
+    /// That is the mass about the black hole, the cluster's and the rest of the galaxy's, the
+    /// influence radius where it weighs the black hole, and the loss cone. The record reads it from
+    /// generator version 25 (P09.T28.b.b). It is held with the
+    /// galaxy (plan 09, Design note 15) and built when first read, from the parameters and the mass
+    /// model alone, so it is the same bits whichever caller reads it first and whenever; the
+    /// galaxy's equality and its `Debug` text do not depend on whether it has been read. Building it takes about 64 ms, nearly all of it the galaxy's spherical average
+    /// ([`SphericalAverage::of_extended`](potential::SphericalAverage::of_extended)), which a
+    /// galaxy that never asks about the centre's motion does not pay (P09.T28.b.a as built).
+    ///
+    /// # Panics
+    ///
+    /// Never: [`CentreMotion::new`] refuses a nuclear cluster or a black hole whose mass is
+    /// negative or not finite, which the parameters never derive (the cluster's is a positive
+    /// share of the nuclear disc's, capped, and the black hole's the M–σ relation's at the
+    /// bulge's positive dispersion), and a galaxy whose mass inside 10⁻³–10⁴ ly does not bracket
+    /// the black hole's, which none of the sweep's (seeds 1–300) is.
+    #[must_use]
+    pub fn centre_motion(&self) -> &CentreMotion {
+        self.centre_motion.0.get_or_init(|| {
+            CentreMotion::new(&self.params, &self.model).expect(
+                "the parameters' nuclear cluster and black hole have finite, positive masses, and \
+                 the mass inside 1e-3 to 1e4 ly brackets the black hole's at every seed of \
+                 P09.T28.b.a's sweep",
+            )
+        })
+    }
+
+    /// The band-E single stars' lifetimes over initial mass and metallicity under the galaxy's
+    /// stellar rules ([`LifetimeEnvelope`](displaced::envelope::LifetimeEnvelope)), which a listed
+    /// core collapse's death test reads before its track (P09.T37's cold cost): made when first
+    /// read, each metallicity's column too (some 30 ms), and kept.
+    #[must_use]
+    pub(crate) fn lifetime_envelope(&self) -> &displaced::envelope::LifetimeEnvelope {
+        self.lifetime_envelope
+            .0
+            .get_or_init(|| displaced::envelope::LifetimeEnvelope::new(self.rules.stellar))
+    }
+
+    /// The stellar companions of systems drawn from the galaxy's mass function
+    /// ([`CompanionMasses::new`] under [`fates_for`]'s, which every population's fates share).
+    ///
+    /// A quadrature of the mass of systems born at one age reads them, as a globular's own μ does
+    /// under every 26 hold (plan 09, ruling 145.5). They are built when first read, in about 14 ms
+    /// (a test build on a pod's core), and kept, as [`centre_motion`](Self::centre_motion) is:
+    /// they are a pure function of the mass function, so the galaxy's equality and its `Debug`
+    /// text do not depend on whether they have been read.
+    #[must_use]
+    pub(crate) fn companions(&self) -> &CompanionMasses {
+        self.companions.0.get_or_init(|| {
+            CompanionMasses::new(
+                self.mass_function.as_dyn(),
+                fates_for(Population::OldThinDisc),
+            )
+        })
+    }
+
+    /// The field's Type Ia delay-time distribution ([`DelayTimeDistribution`] over the field's
+    /// systems and ages), which the Type Ia class reads (plan 09, P09.T34.a).
+    ///
+    /// It is built when first read, in some 31 ms (release, pod, 16 vCPU, 2026-10-31), and kept,
+    /// as [`centre_motion`](Self::centre_motion) is: a class process built for every catalogue
+    /// ID resolved built it twice each time. It is a pure function of the galaxy's fields and
+    /// ages, so the galaxy's equality and its `Debug` text do not depend on whether it has been
+    /// read.
+    #[must_use]
+    pub(crate) fn type_ia_delays(&self) -> &Arc<DelayTimeDistribution> {
+        self.type_ia_delays
+            .0
+            .get_or_init(|| Arc::new(DelayTimeDistribution::of_field(self)))
+    }
+
+    /// The core-collapse class's process ([`CoreCollapseProcess::new`]), which the production
+    /// lookup visits (plan 09, P09.T33.a–b).
+    ///
+    /// It is built when first read and kept, as [`centre_motion`](Self::centre_motion) is: under
+    /// every 27 hold it costs some 0.42 ms (the runaway and walkaway terms' largest shares; release,
+    /// pod, 16 vCPU, 2026-11-01), which the lookup paid at every visit and `system_of` twice. It is
+    /// a pure function of the galaxy's fields, shares, window caps and rules, so the galaxy's
+    /// equality and its `Debug` text do not depend on whether it has been read.
+    #[must_use]
+    pub(crate) fn core_collapse(&self) -> &CoreCollapseProcess {
+        self.core_collapse
+            .0
+            .get_or_init(|| Box::new(CoreCollapseProcess::new(self)))
+    }
+
+    /// Builds now what a range query in this galaxy would otherwise build when it first read it,
+    /// under the galaxy's rules, so that no query pays for it (P09.T37's bench): with the kinematic
+    /// tables and from the Kepler regime's version (P09.T28.b.b), the centre's motion
+    /// ([`centre_motion`](Self::centre_motion)), some 64 ms, which every grid record's loss-cone
+    /// carve reads, so that a served query's cell jobs each waited some 55 ms on the first of them
+    /// to build it (8 workers, measured 2026-11-01); and for the catalogue classes' source
+    /// (P09.T37.a), the Type Ia class's delay times (`type_ia_delays`), some 32 ms, and the
+    /// core-collapse class's process (`core_collapse`).
+    ///
+    /// Each is built when first read in any case, and is the same bits whenever it is built, so no
+    /// answer depends on whether this was called. The server calls it where it builds its
+    /// galaxies.
+    pub fn make_query_tables(&self) {
+        if self.kinematics().is_some() {
+            // Built and kept in the galaxy; the reference is not needed here.
+            let _ = self.centre_motion();
+        }
+        // Built and kept in the galaxy, as the motion is.
+        let _ = self.type_ia_delays();
+        let _ = self.core_collapse();
+    }
+
+    /// The galactic centre's model: the nuclear cluster's profile, its four distribution
+    /// functions, marks and classes, what its members are placed from (plan 09, Design note 15;
+    /// P09.T29).
+    ///
+    /// Held with the galaxy and built when first read, as [`centre_motion`](Self::centre_motion)
+    /// is, from that motion's profile and the galaxy's mass function: the same bits as
+    /// [`CentreModel::new`] gives (a test holds them equal), whichever caller reads it first and
+    /// whenever, and the galaxy's equality and `Debug` text do not depend on whether it has been
+    /// read. Building it takes the motion's 64 ms, if not yet paid, and the four inversions, the
+    /// marks' acceptances and the classes (`CentreModel::new`: 91 ms in release with three
+    /// inversions, P09.T27 as built, and 234 ms with ruling 144's fourth on a 4-vCPU pod, P09.T29
+    /// as built); a galaxy that never asks about its centre pays nothing. The range query's centre
+    /// source and `resolve` of a centre member read it. [`with_full_potential`](Self::with_full_potential) and
+    /// [`with_substellar_params`](Self::with_substellar_params) carry it, built or not, as they
+    /// carry the motion: neither changes the parameters, the mass model or the mass function it
+    /// reads.
+    ///
+    /// # Errors
+    ///
+    /// [`BuildCentreError::NegativeDistribution`] if a tracer has no isotropic distribution
+    /// function in the galaxy's potential, which no galaxy the builder allows does
+    /// ([`CentreModel::new`]'s documentation), the same error at every read.
+    ///
+    /// # Panics
+    ///
+    /// As [`centre_motion`](Self::centre_motion), which it reads: if the mass inside 10⁻³–10⁴ ly
+    /// does not bracket the black hole's, which no seed of P09.T28.b.a's sweep (1–300) does, or a
+    /// mass is not finite and positive, which the parameters never derive.
+    pub fn centre(&self) -> Result<&CentreModel, BuildCentreError> {
+        self.centre
+            .0
+            .get_or_init(|| {
+                CentreModel::from_parts(
+                    self.centre_motion().profile().clone(),
+                    self.mass_function(),
+                )
+                .map(Box::new)
+            })
+            .as_deref()
+            .map_err(|e| *e)
+    }
+
+    /// The centre's potential as the exact orbits in it read it (plan 09, P09.T28.d.b): the black
+    /// hole's, the cluster's and the rest of the galaxy's monopole, tabulated
+    /// ([`CentrePotential`](motion::spherical::CentrePotential)).
+    ///
+    /// Only the Kepler regime's exact orbit reads it, from generator version 25 (P09.T28.d.b),
+    /// where a trajectory is prepared with the centre's motion
+    /// ([`Trajectory::new`](motion::Trajectory::new)). It is held with the galaxy and built when
+    /// first read, as [`centre_motion`](Self::centre_motion) is, from that motion alone, in well
+    /// under a millisecond once the motion is built: the same bits whichever caller reads it first
+    /// and whenever, and the galaxy's equality and `Debug` text do not depend on whether it has
+    /// been read. The builders that carry the motion carry it, built or not. It is shared, so that
+    /// an exact orbit whose state is taken by the arc from the epoch holds it (P09.T28.d.c).
+    ///
+    /// # Panics
+    ///
+    /// As [`centre_motion`](Self::centre_motion), which it reads.
+    #[must_use]
+    pub(crate) fn centre_potential(&self) -> &Arc<motion::spherical::CentrePotential> {
+        self.centre_potential.0.get_or_init(|| {
+            Arc::new(motion::spherical::CentrePotential::new(
+                self.centre_motion(),
+            ))
+        })
+    }
+
+    /// The galaxy-side holds' arms this galaxy takes, which each held call site reads its field of
+    /// (decision-galaxy-25-train §1).
+    ///
+    /// They are the generator version's, from [`from_params`](Self::from_params) and every builder
+    /// that calls it, and [`with_full_potential`](Self::with_full_potential) and
+    /// [`with_substellar_params`](Self::with_substellar_params) keep them.
+    #[must_use]
+    pub(crate) const fn rules(&self) -> GalaxyRules {
+        self.rules
     }
 
     /// The free-floating brown dwarfs and rogue planets per system, with the rogue planets' cap
@@ -389,10 +989,19 @@ impl Galaxy {
         &self.potential
     }
 
-    /// The density fields.
+    /// The density fields, with plan 08's displaced classes after their components once the build
+    /// has installed them ([`Fields::displaced`]).
     #[must_use]
     pub fn fields(&self) -> &Fields {
         &self.fields
+    }
+
+    /// The class table the displaced classes were built from (plan 08, P08.T9), held with the
+    /// galaxy once its build has installed them; `None` for a galaxy that holds none, every galaxy
+    /// below generator version 26 (P08.T12's hold).
+    #[must_use]
+    pub fn class_table(&self) -> Option<&ClassTable> {
+        self.fields.displaced().map(DisplacedFields::class_table)
     }
 
     /// The gas and dust field (plan 07).
@@ -437,8 +1046,8 @@ impl Galaxy {
     /// The initial mass formed per system, with nothing dead: the denominator of rates quoted per
     /// solar mass formed.
     ///
-    /// It depends on the mass function alone: 0.957 M☉ under the default, 0.836 M☉ under
-    /// Kroupa's.
+    /// It depends on the mass function alone: 1.0961 M☉ under the default, 0.8215 M☉ under
+    /// Kroupa's, at generator version 23 (plan 11, P11.T8.e).
     #[must_use]
     pub fn mean_formed_mass(&self) -> SolarMasses {
         self.params.mean_formed_mass()
@@ -450,7 +1059,13 @@ impl Galaxy {
     /// It varies little between seeds, since the parts are fixed-size tables but for the halo's
     /// three to six components. Most of it is the mass model's Gaussians (some 770, each with its
     /// quadrature nodes); the (R, |z|) grid adds 128 KiB and the kinematic tables that read it
-    /// about 0.7 MiB (plan 08). The gas field is held inline and adds nothing.
+    /// about 0.7 MiB (plan 08). The gas field is held inline and adds nothing. The centre's
+    /// motion, once read, adds its tables, about 20 KiB (plan 09, P09.T28.b.a), and the centre's
+    /// model, once built, its distribution functions' tables, about 0.5 MiB (P09.T29), and the
+    /// centre's potential, once read, its table and basis, about 15 kB (P09.T28.d.b), the
+    /// companions, once read, 3.8 KiB, the field's Type Ia delay-time distribution, once read,
+    /// its components' ages and its tables of lifetimes (P09.T34.a), and the core-collapse
+    /// process, once read, its components and terms, so the figure depends on what has been read.
     #[must_use]
     pub fn heap_bytes(&self) -> usize {
         self.params.heap_bytes()
@@ -460,9 +1075,44 @@ impl Galaxy {
             + self.gas.heap_bytes()
             + self.shares.heap_bytes()
             + self
+                .centre_motion
+                .0
+                .get()
+                .map_or(0, CentreMotion::heap_bytes)
+            + self
+                .centre
+                .0
+                .get()
+                // A centre that failed to build holds no tables, so it owns no heap: the error
+                // is not lost, `centre` returns it at every read.
+                .and_then(|built| built.as_deref().ok())
+                .map_or(0, |model| size_of::<CentreModel>() + model.heap_bytes())
+            + self.centre_potential.0.get().map_or(0, |potential| {
+                size_of::<motion::spherical::CentrePotential>() + potential.heap_bytes()
+            })
+            + self
                 .kinematics
                 .as_ref()
                 .map_or(0, |k| size_of::<KinematicTables>() + k.heap_bytes())
+            + self
+                .companions
+                .0
+                .get()
+                .map_or(0, CompanionMasses::heap_bytes)
+            + self.type_ia_delays.0.get().map_or(0, |delays| {
+                size_of::<DelayTimeDistribution>() + delays.heap_bytes()
+            })
+            + self.core_collapse.0.get().map_or(0, |process| {
+                size_of::<CoreCollapseProcess>() + process.heap_bytes()
+            })
+            + self
+                .field_share
+                .as_ref()
+                .map_or(0, |field| size_of::<FieldShare>() + field.heap_bytes())
+            + self
+                .layer_d_kept
+                .as_ref()
+                .map_or(0, |kept| size_of_val::<[f64]>(kept))
     }
 }
 
@@ -479,12 +1129,19 @@ fn substellar_shares(shares: ShareMatrix, abundance: &SubstellarAbundance) -> Sh
 pub enum BuildGalaxyError {
     /// The gas field could not be built (plan 07, ruling 22).
     Gas(BuildGasParamsError),
+    /// A displaced class's form could not be built from plan 15's form table (plan 08, P08.T12.a):
+    /// a parameter out of range, or an integral over the cube that is not positive and finite.
+    /// Only a galaxy that holds the displaced classes builds them.
+    DisplacedForm(BuildFormError),
 }
 
 impl fmt::Display for BuildGalaxyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Gas(e) => write!(f, "the galaxy's gas cannot be built: {e}"),
+            Self::DisplacedForm(e) => {
+                write!(f, "a displaced class's form cannot be built: {e}")
+            }
         }
     }
 }
@@ -493,15 +1150,164 @@ impl Error for BuildGalaxyError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Gas(e) => Some(e),
+            Self::DisplacedForm(e) => Some(e),
         }
     }
 }
 
-/// A galaxy's mass function, held by value so that [`Galaxy`] stays `Clone` and comparable.
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// [`Galaxy::centre_motion`]'s value, built when first read (the sim-determinism skill's lazy
+/// exception, as [`GalaxyParams::black_hole`]'s second phase is held).
+#[derive(Clone, Default)]
+struct CentreMotionCell(OnceLock<CentreMotion>);
+
+/// Equal always: the centre's motion is a pure function of the parameters and the mass model,
+/// which [`Galaxy`]'s equality compares, so comparing it would make two equal galaxies unequal
+/// because only one of them had been read.
+impl PartialEq for CentreMotionCell {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+/// The same text whether or not the value has been read, so that a galaxy's `Debug` text depends
+/// on what it is and not on its history.
+impl fmt::Debug for CentreMotionCell {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("CentreMotionCell")
+    }
+}
+
+/// [`Galaxy::centre`]'s value, built when first read, as [`CentreMotionCell`] is; boxed, since the
+/// model's tables and arrays would otherwise add some kilobytes to every galaxy moved.
+#[derive(Clone, Default)]
+struct CentreModelCell(OnceLock<Result<Box<CentreModel>, BuildCentreError>>);
+
+/// Equal always, as [`CentreMotionCell`]: the model is a pure function of what the galaxy's
+/// equality compares.
+impl PartialEq for CentreModelCell {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+/// The same text whether or not the value has been built, as [`CentreMotionCell`]'s.
+impl fmt::Debug for CentreModelCell {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("CentreModelCell")
+    }
+}
+
+/// [`Galaxy::centre_potential`]'s value, built when first read, as [`CentreMotionCell`] is; shared,
+/// as the exact orbits under the arc from the epoch hold it (P09.T28.d.c).
+#[derive(Clone, Default)]
+struct CentrePotentialCell(OnceLock<Arc<motion::spherical::CentrePotential>>);
+
+/// Equal always, as [`CentreMotionCell`]: the potential is a pure function of the centre's
+/// motion, itself one of what the galaxy's equality compares.
+impl PartialEq for CentrePotentialCell {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+/// [`Galaxy::type_ia_delays`]' value, built when first read, as [`CentreMotionCell`] is.
+#[derive(Clone, Default)]
+struct TypeIaDelaysCell(OnceLock<Arc<DelayTimeDistribution>>);
+
+/// Equal always, as [`CentreMotionCell`]: the distribution is a pure function of the galaxy's
+/// fields and ages, which its equality compares.
+impl PartialEq for TypeIaDelaysCell {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+/// The same text whether or not the value has been built, as [`CentreMotionCell`]'s.
+impl fmt::Debug for TypeIaDelaysCell {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("TypeIaDelaysCell")
+    }
+}
+
+/// [`Galaxy::companions`]' value, built when first read, as [`CentreMotionCell`] is.
+#[derive(Clone, Default)]
+struct CompanionsCell(OnceLock<CompanionMasses>);
+
+/// Equal always, as [`CentreMotionCell`]: the companions are a pure function of the mass
+/// function, which the galaxy's equality compares.
+impl PartialEq for CompanionsCell {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+/// The same text whether or not the value has been built, as [`CentreMotionCell`]'s.
+impl fmt::Debug for CompanionsCell {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("CompanionsCell")
+    }
+}
+
+/// [`Galaxy::lifetime_envelope`]'s value, made when first read, as [`CentreMotionCell`] is, its
+/// columns when first read.
+#[derive(Default)]
+struct LifetimeEnvelopeCell(OnceLock<displaced::envelope::LifetimeEnvelope>);
+
+/// A fresh cell: what it holds is made again on the clone's first read, the same bits.
+impl Clone for LifetimeEnvelopeCell {
+    fn clone(&self) -> Self {
+        Self::default()
+    }
+}
+
+/// Equal always, as [`CentreMotionCell`]: the envelope is a pure function of the galaxy's stellar
+/// rules, which the galaxy's equality compares.
+impl PartialEq for LifetimeEnvelopeCell {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+/// The same text whether or not the value has been built, as [`CentreMotionCell`]'s.
+impl fmt::Debug for LifetimeEnvelopeCell {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("LifetimeEnvelopeCell")
+    }
+}
+
+/// [`Galaxy::core_collapse`]'s value, built when first read, as [`CentreMotionCell`] is; boxed, as
+/// [`CentreModelCell`]'s is.
+#[derive(Clone, Default)]
+struct CoreCollapseCell(OnceLock<Box<CoreCollapseProcess>>);
+
+/// Equal always, as [`CentreMotionCell`]: the process is a pure function of what the galaxy's
+/// equality compares.
+impl PartialEq for CoreCollapseCell {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+/// The same text whether or not the value has been built, as [`CentreMotionCell`]'s.
+impl fmt::Debug for CoreCollapseCell {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("CoreCollapseCell")
+    }
+}
+
+/// The same text whether or not the value has been built, as [`CentreMotionCell`]'s.
+impl fmt::Debug for CentrePotentialCell {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("CentrePotentialCell")
+    }
+}
+
+/// A galaxy's mass function, held by value so that [`Galaxy`] stays `Clone` and comparable, with
+/// its bands' draws kept ([`Kept`]).
+#[derive(Debug, Clone, PartialEq)]
 enum HeldMassFunction {
-    Kroupa(Kroupa),
-    Chabrier(Chabrier),
+    Kroupa(Kept<Kroupa>),
+    Chabrier(Kept<Chabrier>),
 }
 
 impl HeldMassFunction {
@@ -509,8 +1315,8 @@ impl HeldMassFunction {
     #[must_use]
     fn of(kind: MassFunctionKind) -> Self {
         match kind {
-            MassFunctionKind::Kroupa => Self::Kroupa(Kroupa),
-            MassFunctionKind::Chabrier => Self::Chabrier(Chabrier::provisional()),
+            MassFunctionKind::Kroupa => Self::Kroupa(Kept::new(Kroupa)),
+            MassFunctionKind::Chabrier => Self::Chabrier(Kept::new(Chabrier::provisional())),
         }
     }
 
@@ -531,6 +1337,91 @@ mod tests {
     use super::*;
     use crate::coords::LyCell;
     use crate::units::consts::METRES_PER_LIGHT_YEAR;
+
+    /// P09.T37's bench: a galaxy makes its query tables ahead where its rules read them, the same
+    /// values as made when first read: under every 27 hold the Type Ia delay times and the
+    /// core-collapse process, and with the kinematic tables the centre's motion; at the version's
+    /// own rules without them, the classes' where its holds register them.
+    #[test]
+    fn a_galaxy_makes_its_query_tables_where_its_rules_read_them() {
+        use self::rules::GalaxyRules;
+        let seed = Seed::new(0x0937_0000_7461_626c);
+        let made = |galaxy: &Galaxy| {
+            [
+                galaxy.centre_motion.0.get().is_some(),
+                galaxy.type_ia_delays.0.get().is_some(),
+                galaxy.core_collapse.0.get().is_some(),
+            ]
+        };
+        let bare = Galaxy::from_params_with_rules(
+            seed,
+            GalaxyParams::milky_way_like(),
+            GalaxyRules::of_version(crate::GENERATOR_VERSION),
+        )
+        .unwrap();
+        let full = bare.clone().with_full_potential();
+        bare.make_query_tables();
+        assert_eq!(made(&bare), [false, true, true], "no kinematic tables");
+        full.make_query_tables();
+        assert_eq!(made(&full), [true, true, true]);
+        let lazy = Galaxy::from_params_with_rules(
+            seed,
+            GalaxyParams::milky_way_like(),
+            GalaxyRules::of_version(crate::GENERATOR_VERSION),
+        )
+        .unwrap()
+        .with_full_potential();
+        assert_eq!(full.centre_motion(), lazy.centre_motion());
+        assert_eq!(full.type_ia_delays(), lazy.type_ia_delays());
+        assert_eq!(full.core_collapse(), lazy.core_collapse());
+        let version = Galaxy::from_params(seed, GalaxyParams::milky_way_like()).unwrap();
+        version.make_query_tables();
+        assert_eq!(made(&version), [false, true, true], "no kinematic tables");
+    }
+
+    /// perf-galaxy-build-start: the plan of a seed's grid is of [`Galaxy::new`]'s mass model, and
+    /// the galaxy given the grid gathered from its points, made in shares dealt out in turn, the
+    /// last share first, is its full potential's, bit for bit: the tables' and the kinematic
+    /// tables' `Debug` text, which prints every double's shortest round trip, and the galaxy's.
+    #[test]
+    #[ignore = "slow: two full potentials of one drawn galaxy"]
+    fn a_galaxy_given_its_grid_made_in_shares_is_its_full_potential_bit_for_bit() {
+        use self::potential::GRID_POINTS;
+        let seed = Seed::new(0x4d2);
+        let built = Galaxy::new(seed);
+        let plan = Galaxy::potential_grid_plan(seed);
+        assert_eq!(plan.model(), &built.model);
+        let shares = 7;
+        let points: Vec<_> = (0..shares)
+            .rev()
+            .flat_map(|share| (share..GRID_POINTS).step_by(shares))
+            .map(|k| plan.point(k))
+            .collect();
+        let made = built.clone().with_full_potential_grid(plan.finish(points));
+        let whole = built.with_full_potential();
+        assert_eq!(
+            format!("{:?}", made.potential()),
+            format!("{:?}", whole.potential())
+        );
+        assert_eq!(
+            format!("{:?}", made.kinematics()),
+            format!("{:?}", whole.kinematics())
+        );
+        assert_eq!(made, whole);
+        // A galaxy with its grid keeps it, given even a grid that no model has.
+        let filled = self::potential::PotentialGrid::filled(whole.model.clone(), 1.0);
+        assert_eq!(whole.clone().with_full_potential_grid(filled), whole);
+    }
+
+    /// A grid is refused by a galaxy of another mass model, before anything is built from it.
+    #[test]
+    #[should_panic(expected = "a galaxy's grid is of its own mass model")]
+    fn a_galaxy_refuses_another_model_s_grid() {
+        let plan = Galaxy::potential_grid_plan(Seed::new(0x4d2));
+        // Any values will do: the model is checked first.
+        let grid = self::potential::PotentialGrid::filled(plan.model().clone(), 0.0);
+        let _ = Galaxy::new(Seed::new(0x4d3)).with_full_potential_grid(grid);
+    }
 
     #[test]
     fn populations_are_listed_in_index_order() {

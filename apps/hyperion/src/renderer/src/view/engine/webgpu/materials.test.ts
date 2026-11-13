@@ -10,6 +10,8 @@ import {
   postProcessPipelineDescriptor,
   resourceLayoutEntries,
   samplerDescriptor,
+  stageVisibility,
+  storageBuffersPerStage,
 } from "./materials";
 
 const SPEC: WgslMaterialSpec = {
@@ -40,6 +42,50 @@ const BUFFERS: ReadonlyArray<GPUVertexBufferLayout> = [
   { arrayStride: 12, attributes: [{ shaderLocation: 0, offset: 0, format: "float32x3" }] },
 ];
 
+describe("a material's pipeline into an ID target (plan R14, R14.T2.b)", () => {
+  it("writes r32uint with no blend", () => {
+    const descriptor = materialPipelineDescriptor(
+      SPEC,
+      { vertex: MODULE, fragment: MODULE },
+      LAYOUT,
+      BUFFERS,
+      "triangle-list",
+      "r32uint",
+      true,
+    );
+    expect([...(descriptor.fragment?.targets ?? [])]).toEqual([
+      { format: "r32uint", writeMask: 0xf },
+    ]);
+  });
+
+  it("keeps the material's reversed depth test into an ID target", () => {
+    const descriptor = materialPipelineDescriptor(
+      SPEC,
+      { vertex: MODULE, fragment: MODULE },
+      LAYOUT,
+      BUFFERS,
+      "triangle-list",
+      "r32uint",
+      true,
+    );
+    expect(descriptor.depthStencil?.depthCompare).toBe("greater-equal");
+  });
+
+  it("refuses a material that blends, which no integer target takes", () => {
+    expect(() =>
+      materialPipelineDescriptor(
+        { ...SPEC, blend: "premultiplied" },
+        { vertex: MODULE, fragment: MODULE },
+        LAYOUT,
+        BUFFERS,
+        "triangle-list",
+        "r32uint",
+        true,
+      ),
+    ).toThrow("material hull blends premultiplied into r32uint, which no blend takes");
+  });
+});
+
 describe("a material's pipeline", () => {
   it("tests reversed depth greater-or-equal, with the material's own state", () => {
     const descriptor = materialPipelineDescriptor(
@@ -65,6 +111,7 @@ describe("a material's pipeline", () => {
       depthCompare: "greater-equal",
       depthBias: 0,
       depthBiasSlopeScale: 0,
+      depthBiasClamp: 0,
     });
     expect([...(descriptor.fragment?.targets ?? [])]).toEqual([
       { format: "rgba16float", blend: BLEND_STATES.additive, writeMask: 0 },
@@ -89,10 +136,82 @@ describe("a material's pipeline", () => {
     expect(depthBiasOf(bias, "triangle-list")).toEqual({
       depthBias: -4,
       depthBiasSlopeScale: -1.5,
+      depthBiasClamp: 0,
     });
-    expect(depthBiasOf(bias, "line-list")).toEqual({ depthBias: 0, depthBiasSlopeScale: 0 });
+    expect(depthBiasOf(bias, "line-list")).toEqual({
+      depthBias: 0,
+      depthBiasSlopeScale: 0,
+      depthBiasClamp: 0,
+    });
+  });
+
+  it("negates a bias's clamp with it, so that it bounds the reversed bias from below (R10.T9.b)", () => {
+    expect(depthBiasOf({ constant: 1, slopeScale: 1, clamp: 0.01 }, "triangle-list")).toEqual({
+      depthBias: -1,
+      depthBiasSlopeScale: -1,
+      depthBiasClamp: -0.01,
+    });
+    // 0 bounds nothing, as WebGPU's 0 does, and is never -0.
+    expect(
+      Object.is(
+        depthBiasOf({ constant: 1, slopeScale: 1, clamp: 0 }, "triangle-list").depthBiasClamp,
+        0,
+      ),
+    ).toBe(true);
+  });
+
+  it("has no colour target into depth-only, keeps the fragment stage, and keeps the material's depth state (R10.T9.b)", () => {
+    const descriptor = materialPipelineDescriptor(
+      { ...SPEC, depthWrite: true, colourWrites: false },
+      { vertex: MODULE, fragment: MODULE },
+      LAYOUT,
+      BUFFERS,
+      "triangle-list",
+      "depth-only",
+      false,
+    );
+    expect([...(descriptor.fragment?.targets ?? [])]).toEqual([]);
+    expect(descriptor.fragment?.entryPoint).toBe("fragmentMain");
+    expect(descriptor.depthStencil).toMatchObject({
+      format: "depth32float",
+      depthWriteEnabled: true,
+      depthCompare: "greater-equal",
+    });
+  });
+
+  it("takes unclippedDepth only for a material that asks for it (R10.T9.b)", () => {
+    const of = (spec: WgslMaterialSpec): GPUPrimitiveState | undefined =>
+      materialPipelineDescriptor(
+        spec,
+        { vertex: MODULE, fragment: MODULE },
+        LAYOUT,
+        BUFFERS,
+        "triangle-list",
+        "depth-only",
+        true,
+      ).primitive;
+    expect(of({ ...SPEC, unclippedDepth: true })).toEqual({
+      topology: "triangle-list",
+      cullMode: "back",
+      frontFace: "ccw",
+      unclippedDepth: true,
+    });
+    expect(of(SPEC)).not.toHaveProperty("unclippedDepth");
   });
 });
+
+/** Storage buffers of every visibility: both stages by default, one stage each, and both named. */
+const STAGED = {
+  owner: "material lit",
+  textures: [],
+  samplers: [],
+  storageBuffers: [
+    { name: "both", binding: 0 },
+    { name: "vertex", binding: 1, stages: ["vertex"] },
+    { name: "fragment", binding: 2, stages: ["fragment"] },
+    { name: "named both", binding: 3, stages: ["fragment", "vertex"] },
+  ],
+} as const;
 
 describe("a material's resources", () => {
   it("are laid out at their declared bindings, in both stages", () => {
@@ -102,6 +221,29 @@ describe("a material's resources", () => {
       { binding: 2, visibility: 3, buffer: { type: "read-only-storage" } },
       { binding: 3, visibility: 3, texture: { sampleType: "depth", viewDimension: "2d" } },
     ]);
+  });
+
+  it("make each storage buffer visible to its declared stages alone, both by default", () => {
+    expect(resourceLayoutEntries(STAGED).map((e) => [e.binding, e.visibility])).toEqual([
+      [0, 3],
+      [1, 1],
+      [2, 2],
+      [3, 3],
+    ]);
+    expect(stageVisibility(undefined)).toBe(3);
+  });
+
+  it("count each stage's storage buffers by their declared stages", () => {
+    expect(storageBuffersPerStage(STAGED)).toEqual({ vertex: 3, fragment: 3 });
+  });
+
+  it("refuse a storage buffer visible to no stage, naming it", () => {
+    expect(() =>
+      resourceLayoutEntries({
+        ...STAGED,
+        storageBuffers: [{ name: "nowhere", binding: 4, stages: [] }],
+      }),
+    ).toThrow("material lit declares storage buffer nowhere visible to no stage");
   });
 
   it("refuse two resources at one binding, naming the material", () => {
@@ -124,6 +266,34 @@ describe("a material's resources", () => {
       addressModeU: "repeat",
       addressModeW: "repeat",
     });
+    expect(samplerDescriptor(nearest)).not.toHaveProperty("compare");
+  });
+
+  it("make a comparison sampler compare, and bind it as comparison whatever its filter (R10.T9.b)", () => {
+    const pcf = {
+      name: "cascades",
+      filter: "linear",
+      address: "clamp-to-edge",
+      binding: 1,
+      compare: "greater-equal",
+    } as const;
+    const point = { ...pcf, name: "cascades point", filter: "nearest", binding: 2 } as const;
+    expect(samplerDescriptor(pcf)).toMatchObject({
+      magFilter: "linear",
+      minFilter: "linear",
+      compare: "greater-equal",
+    });
+    expect(
+      resourceLayoutEntries({
+        owner: "m",
+        textures: [],
+        samplers: [pcf, point],
+        storageBuffers: [],
+      }),
+    ).toEqual([
+      { binding: 1, visibility: 3, sampler: { type: "comparison" } },
+      { binding: 2, visibility: 3, sampler: { type: "comparison" } },
+    ]);
   });
 });
 

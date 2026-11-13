@@ -14,6 +14,8 @@
 
 import type {
   DescentSpikeReport,
+  SpikeCountFigures,
+  SpikeGeometryReport,
   SpikeLatePipeline,
   SpikePassRow,
   SpikeSegmentSpan,
@@ -22,6 +24,8 @@ import type {
 import type { GpuTimer } from "../engine/status";
 import type { AllocationEvent } from "../engine/memory";
 import type { PassTimes } from "../engine/types";
+import type { GeometrySettings } from "../quality/qualitySetting";
+import type { SpikeGeometrySample } from "./spikeRun";
 
 /** The `performance.measure` name prefix of a segment's span, which marks it in the trace. */
 export const SEGMENT_MEASURE_PREFIX = "spike.segment:";
@@ -47,13 +51,21 @@ export interface FrameSample {
   readonly callbackStartMs: number;
   /** The main thread's time in the frame callback, engine submission included, ms. */
   readonly callbackMs: number;
-  /** Passes the frame submitted. */
-  readonly passesSubmitted: number;
+  /**
+   * Passes the frame submitted, or `null` where the frame counts none (`SpikeFrameSample`'s over a
+   * generated world, R10.T14.c), which then adds no untimed pass.
+   */
+  readonly passesSubmitted: number | null;
   /** Patches selected this frame under the hard bound and under min(hard, 4σ). */
   readonly patchesHard: number;
   readonly patchesCalibrated: number;
   /** Whether `TERRAIN: STREAMING` shows. */
   readonly streaming: boolean;
+  /**
+   * A generated world's terrain geometry this frame (plan R14, R14.T1.f); `null` or absent over the
+   * test planet.
+   */
+  readonly geometry?: SpikeGeometrySample | null;
 }
 
 /** A patch event's kind (Design note 18: requested, baked, made resident). */
@@ -117,6 +129,31 @@ interface SegmentTally {
   streamingS: number;
 }
 
+/** A segment's geometry counts, a value a frame that had each (plan R14, R14.T1.f). */
+interface GeometryTally {
+  readonly interiorPatches: number[];
+  readonly edgePatches: number[];
+  readonly finPatches: number[];
+  readonly drawnTriangles: number[];
+  readonly litClusterTriangles: number[];
+  readonly casterTriangles: number[];
+  readonly overlayTriangles: number[];
+}
+
+/** The median and the largest of `values`, with their count; `null` for none. */
+function countFigures(values: ReadonlyArray<number>): SpikeCountFigures | null {
+  if (values.length === 0) {
+    return null;
+  }
+  const sorted = values.toSorted((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  const p50 =
+    sorted.length % 2 === 1
+      ? (sorted[mid] ?? 0)
+      : ((sorted[mid - 1] ?? 0) + (sorted[mid] ?? 0)) / 2;
+  return { frames: sorted.length, p50, max: sorted.at(-1) ?? 0 };
+}
+
 /** Gathers a run's figures, frame by frame, into a {@link SpikeMetricsReport}. */
 export class SpikeMetrics {
   readonly #options: SpikeMetricsOptions;
@@ -130,6 +167,9 @@ export class SpikeMetrics {
   readonly #reportedResolves: number[] = [];
   readonly #passes = new Map<string, Array<number | null>>();
   readonly #segments = new Map<string, SegmentTally>();
+  /** Each segment's geometry counts (plan R14), and the geometry the last frame's pass drew with. */
+  readonly #geometry = new Map<string, GeometryTally>();
+  #geometrySettings: GeometrySettings | null = null;
   #lastRafMs: number | undefined;
   #lastScriptS: number | undefined;
   #timer: GpuTimer = "absent";
@@ -173,13 +213,16 @@ export class SpikeMetrics {
     for (const series of this.#passes.values()) {
       series.push(null);
     }
-    this.#untimedPasses += Math.max(0, sample.passesSubmitted - TIMED_PASSES_A_FRAME);
+    if (sample.passesSubmitted !== null) {
+      this.#untimedPasses += Math.max(0, sample.passesSubmitted - TIMED_PASSES_A_FRAME);
+    }
     const tally = this.#tallyAt(sample.scriptTimeS);
     if (tally !== undefined) {
       tally.frames += 1;
       tally.patchesHard += sample.patchesHard;
       tally.patchesCalibrated += sample.patchesCalibrated;
     }
+    this.#takeGeometry(sample);
     if (sample.streaming && this.#lastScriptS !== undefined) {
       this.#addStreaming(this.#lastScriptS, sample.scriptTimeS);
     }
@@ -229,33 +272,36 @@ export class SpikeMetrics {
   }
 
   /**
-   * Each frame's resolves whose pass times never arrived: those it numbered, after the frame
-   * before it, less those reported. The timer reports a resolve once, so the difference is never
-   * below 0 but for a report the timer would not make; it is floored there.
+   * Each frame's resolves whose pass times never arrived, of the frames from `from` up to `to`:
+   * those it numbered, after the frame before it, less those reported. The timer reports a resolve
+   * once, so the difference is never below 0 but for a report the timer would not make; it is
+   * floored there.
    */
-  #missingResolves(): number[] {
-    let before = this.#options.firstEngineFrame ?? 0;
-    return this.#lastEngineFrame.map((last, i) => {
+  #missingResolves(from: number, to: number): number[] {
+    const first = this.#options.firstEngineFrame ?? 0;
+    // The frames' last numbers rise, so the frame before `from` holds the highest before it.
+    let before = Math.max(first, from > 0 ? (this.#lastEngineFrame[from - 1] ?? first) : first);
+    return this.#lastEngineFrame.slice(from, to).map((last, i) => {
       const numbered = Math.max(0, last - before);
       before = Math.max(before, last);
-      return Math.max(0, numbered - (this.#reportedResolves[i] ?? 0));
+      return Math.max(0, numbered - (this.#reportedResolves[from + i] ?? 0));
     });
   }
 
   /**
-   * Each frame's missing resolves among `inFlight`, the engine frame numbers still being read:
-   * those it numbered that have not reported, each at most once.
+   * Each frame's missing resolves among `inFlight`, the engine frame numbers still being read, of
+   * the frames from `from` up to `to`: those it numbered that have not reported, each at most once.
    */
-  #inFlightResolves(inFlight: ReadonlyArray<number>): number[] {
-    const counts = this.#lastEngineFrame.map(() => 0);
+  #inFlightResolves(inFlight: ReadonlyArray<number>, from: number, to: number): number[] {
+    const counts = Array.from({ length: Math.max(0, to - from) }, () => 0);
     for (const engineFrame of new Set(inFlight)) {
       const index = this.#frameOfEngine(engineFrame);
-      if (index !== undefined) {
-        counts[index] = (counts[index] ?? 0) + 1;
+      if (index !== undefined && index >= from && index < to) {
+        counts[index - from] = (counts[index - from] ?? 0) + 1;
       }
     }
     // An in-flight number the frame also has a report for is not missing; floored as the count is.
-    const missingResolves = this.#missingResolves();
+    const missingResolves = this.#missingResolves(from, to);
     return counts.map((count, i) => Math.min(count, missingResolves[i] ?? 0));
   }
 
@@ -272,6 +318,70 @@ export class SpikeMetrics {
     if (tally !== undefined) {
       tally[kind] += count;
     }
+  }
+
+  /** Takes a frame's geometry counts into its segment's tally (plan R14, R14.T1.f). */
+  #takeGeometry(sample: FrameSample): void {
+    const geometry = sample.geometry ?? null;
+    if (geometry === null) {
+      return;
+    }
+    this.#geometrySettings = geometry.settings;
+    const name = this.segmentAt(sample.scriptTimeS);
+    const counts = geometry.counts;
+    if (name === undefined || counts === null) {
+      return;
+    }
+    let tally = this.#geometry.get(name);
+    if (tally === undefined) {
+      tally = {
+        interiorPatches: [],
+        edgePatches: [],
+        finPatches: [],
+        drawnTriangles: [],
+        litClusterTriangles: [],
+        casterTriangles: [],
+        overlayTriangles: [],
+      };
+      this.#geometry.set(name, tally);
+    }
+    tally.interiorPatches.push(counts.patches.interior);
+    tally.edgePatches.push(counts.patches.edge);
+    tally.finPatches.push(counts.patches.fins);
+    tally.drawnTriangles.push(counts.drawnTriangles);
+    if (counts.litClusterTriangles !== null) {
+      tally.litClusterTriangles.push(counts.litClusterTriangles);
+    }
+    if (counts.casterTriangles !== null) {
+      tally.casterTriangles.push(counts.casterTriangles.reduce((sum, n) => sum + n, 0));
+    }
+    if (counts.overlayTriangles !== null) {
+      tally.overlayTriangles.push(counts.overlayTriangles);
+    }
+  }
+
+  /** The run's geometry by segment, or `null` where no frame was a generated world's. */
+  #geometryReport(): SpikeGeometryReport | null {
+    const settings = this.#geometrySettings;
+    if (settings === null) {
+      return null;
+    }
+    return {
+      settings: { ...settings },
+      segments: this.#options.segments.map(({ name }) => {
+        const tally = this.#geometry.get(name);
+        return {
+          segment: name,
+          interiorPatches: countFigures(tally?.interiorPatches ?? []),
+          edgePatches: countFigures(tally?.edgePatches ?? []),
+          finPatches: countFigures(tally?.finPatches ?? []),
+          drawnTriangles: countFigures(tally?.drawnTriangles ?? []),
+          litClusterTriangles: countFigures(tally?.litClusterTriangles ?? []),
+          casterTriangles: countFigures(tally?.casterTriangles ?? []),
+          overlayTriangles: countFigures(tally?.overlayTriangles ?? []),
+        };
+      }),
+    };
   }
 
   /** Shares the streaming interval `[fromS, toS)` among the segments it overlaps. */
@@ -292,6 +402,40 @@ export class SpikeMetrics {
 
   /** The run's report. */
   report(extra: SpikeReportExtras): SpikeMetricsReport {
+    const geometry = this.#geometryReport();
+    return {
+      ...this.#reportOf(extra, 0, this.#scriptTimesS.length),
+      ...(geometry === null ? {} : { geometry }),
+    };
+  }
+
+  /** The frames recorded so far whose script time is before `scriptTimeS`: a count, as it rises. */
+  framesBefore(scriptTimeS: number): number {
+    const times = this.#scriptTimesS;
+    let lo = 0;
+    let hi = times.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if ((times[mid] ?? Infinity) < scriptTimeS) {
+        lo = mid + 1;
+      } else {
+        hi = mid;
+      }
+    }
+    return lo;
+  }
+
+  /**
+   * The run's report with its frames from `from` up to `to` alone, and the rest as it stands but
+   * for the geometry block, whose figures sort every frame's counts and which only the whole report
+   * carries: a part the main process puts after those before it (R14's Mac measurements).
+   */
+  reportPart(extra: SpikeReportExtras, from: number, to: number): SpikeMetricsReport {
+    return this.#reportOf(extra, from, to);
+  }
+
+  /** {@link SpikeMetrics.report}'s, of the frames from `from` up to `to`, with no geometry block. */
+  #reportOf(extra: SpikeReportExtras, from: number, to: number): SpikeMetricsReport {
     const streaming: SpikeStreamingSegment[] = this.#options.segments.map(
       ({ name, startS, endS }) => {
         const tally = this.#segments.get(name);
@@ -318,16 +462,16 @@ export class SpikeMetrics {
       timer: this.#timer,
       untimedPasses: this.#untimedPasses,
       frames: {
-        scriptTimesS: [...this.#scriptTimesS],
-        rafIntervalsMs: [...this.#rafIntervalsMs],
-        ourCodeMs: [...this.#ourCodeMs],
-        callbackStartsMs: [...this.#callbackStartsMs],
-        missingResolves: this.#missingResolves(),
-        inFlightResolves: this.#inFlightResolves(extra.inFlightResolves),
+        scriptTimesS: this.#scriptTimesS.slice(from, to),
+        rafIntervalsMs: this.#rafIntervalsMs.slice(from, to),
+        ourCodeMs: this.#ourCodeMs.slice(from, to),
+        callbackStartsMs: this.#callbackStartsMs.slice(from, to),
+        missingResolves: this.#missingResolves(from, to),
+        inFlightResolves: this.#inFlightResolves(extra.inFlightResolves, from, to),
         passes: [...this.#passes].map(([label, gpuMs]) => ({
           label,
           row: this.#options.rowOf(label),
-          gpuMs: [...gpuMs],
+          gpuMs: gpuMs.slice(from, to),
         })),
       },
       streaming,

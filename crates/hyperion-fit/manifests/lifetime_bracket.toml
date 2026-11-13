@@ -1,0 +1,6 @@
+# The lifetime bracket of layers D and E (plan 08, P08.T9.d; baked by its follow-up, main's ruling on
+# P08.T13's cost, 2026-10-15): per mass node of bands D and E, the least and greatest of plan 06's
+# single-star lifetime over Z = 10⁻⁴–0.03 at the median draws. The lifetimes and the bracket's loop
+# are the sim's own (`stellar::lifetime`, `galaxy::displaced::marks::LifetimeBracket::new`), read
+# through its public API and pinned by the fingerprint; it takes no parameters and no dataset.
+task = "lifetime_bracket"

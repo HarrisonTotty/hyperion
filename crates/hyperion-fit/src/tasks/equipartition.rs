@@ -26,9 +26,19 @@
 //! - **Fit.** η minimises the squared log errors of the living classes' half-mass radii below the
 //!   turn-off over the grid, by golden-section search.
 //!
-//! Acceptance: each class's half-mass radius below the turn-off to 10%; η within 0.8–1.0 (ruling
-//! 139.2: Peuten et al. 2017 find δ ≃ 0.5 in N-body models, Hénault-Brunet et al. 2019 fit 0.44 at
-//! 47 Tucanae).
+//! Revision 1 (P15.T8.d; decision-p15-t8-blocks) emits plan 09's η, [`SCRATCH_ETA`], as
+//! production, whatever the fit finds. η = 2δ rests on δ = ½ (ruling 139.2), not on this fit:
+//! Peuten et al. (2017, MNRAS 470, 2736) find "δ ≃ 0.5 for almost all models" of their multimass
+//! models of N-body clusters, and Hénault-Brunet et al. (2020, MNRAS 491, 113, §4.1) fit
+//! δ = 0.44 ± 0.02 at 47 Tucanae. (η here is the exponent of `q` in the class profile, 2δ; it is
+//! not Gieles and Zocchi's anisotropy exponent η, their eq. 25.) The class profile's form cannot
+//! reach the light classes' half-mass radii at any η; the form is plan 09's (its Design note 9).
+//!
+//! Gates (the block is `@generated` when both pass, else `@provisional` by P15.T8.b): the adopted
+//! η within 0.8–1.0 (ruling 139.2); and the grid's models solved, every class's mass fraction
+//! within 10⁻⁶ of its target. Reported, not gated: the grid (central potentials, slopes,
+//! concentrations), and the living classes' half-mass radii below the turn-off at the adopted η
+//! and at the best η, against the plan's 10%.
 
 use std::num::NonZeroUsize;
 
@@ -45,8 +55,8 @@ use crate::manifest::{Manifest, ManifestParamError, SimFingerprint};
 use crate::optimise::golden_section;
 use crate::task::{FitTask, RunTaskError, TaskClass, TaskOutput, check_manifest};
 
-/// The task's revision.
-pub const VERSION: u32 = 0;
+/// The task's revision: 1 adopts [`SCRATCH_ETA`] as production (P15.T8.d).
+pub const VERSION: u32 = 1;
 
 /// The living stars' bins, even in `ln m` from 0.08 M☉ to the turn-off.
 const LIVING_BINS: usize = 10;
@@ -54,8 +64,16 @@ const LIVING_BINS: usize = 10;
 /// The white dwarfs' bins, even in `ln m` of their progenitors from the turn-off to 8 M☉.
 const DWARF_BINS: usize = 6;
 
-/// Plan 09's scratch η, 1 (δ = ½), which the table keeps while the fit misses its acceptance.
+/// Plan 09's η, 1, adopted as production: δ = ½ mass segregation, η = 2δ (ruling 139.2;
+/// decision-p15-t8-blocks).
 pub const SCRATCH_ETA: f64 = 1.0;
+
+/// The adopted η's window (ruling 139.2).
+const ETA_WINDOW: core::ops::RangeInclusive<f64> = 0.8..=1.0;
+
+/// The largest share by which a solved model's class may miss its mass fraction: the gate's 10⁻⁶
+/// (decision-p15-t8-blocks), against the 8.7 × 10⁻¹² the grid reaches.
+const NORMALISATION_TOLERANCE: f64 = 1e-6;
 
 /// The neutron stars' mass, M☉, as plan 09's classes weigh them.
 const NEUTRON_STAR_MASS: f64 = 1.35;
@@ -371,7 +389,8 @@ pub struct GridModel {
     pub tidal: f64,
     /// `(q, half-mass radius)` of each living class below the turn-off.
     pub living: Vec<(f64, f64)>,
-    /// The largest share by which a class's mass fraction missed its target.
+    /// The largest share by which a class's mass fraction missed its target, infinite if one is
+    /// not a number.
     pub normalisation_miss: f64,
 }
 
@@ -388,11 +407,16 @@ pub fn grid_model(w0: f64, alpha: f64, delta: f64) -> GridModel {
         .filter(|(c, _)| c.living && c.mass < m_to)
         .map(|(c, &r)| (c.mass / m_to, r))
         .collect();
+    // A class that is not finite counts as an infinite miss: `f64::max` would drop a NaN, and the
+    // largest miss is a gate (P15.T8.d).
     let normalisation_miss = classes
         .iter()
         .zip(&model.fractions)
         .take(classes.len() - 1)
-        .fold(0.0_f64, |m, (c, &f)| m.max((f / c.fraction - 1.0).abs()));
+        .fold(0.0_f64, |m, (c, &f)| {
+            let miss = (f / c.fraction - 1.0).abs();
+            m.max(if miss.is_nan() { f64::INFINITY } else { miss })
+        });
     GridModel {
         w0,
         alpha,
@@ -426,6 +450,18 @@ pub fn misfit(models: &[GridModel], eta: f64) -> (f64, f64) {
 #[must_use]
 pub fn fit_eta(models: &[GridModel], lo: f64, hi: f64) -> f64 {
     golden_section(|eta| misfit(models, eta).0, lo, hi, 60)
+}
+
+/// Whether each gate of revision 1 passes (P15.T8.d): `eta` within 0.8–1.0 (ruling 139.2), and
+/// every model of `models` solved, its classes' mass fractions within 10⁻⁶ of their targets.
+#[must_use]
+pub fn gates(eta: f64, models: &[GridModel]) -> [bool; 2] {
+    [
+        ETA_WINDOW.contains(&eta),
+        models
+            .iter()
+            .all(|m| m.normalisation_miss <= NORMALISATION_TOLERANCE),
+    ]
 }
 
 /// The fit: the grid's models and η.
@@ -571,46 +607,43 @@ impl FitTask for EquipartitionTask {
             .models
             .iter()
             .fold(0.0_f64, |m, g| m.max(g.normalisation_miss));
-        let in_window = (0.8..=1.0).contains(&fit.eta);
-        let radii = fit.worst <= 0.1;
+        let [in_window, solved] = gates(SCRATCH_ETA, &fit.models);
         let verdict = |ok: bool| if ok { "passes" } else { "FAILS" };
         let acceptance = format!(
-            "η = {:.4} at δ = {} over {} multimass King models (W₀ {:?}, slopes {:?}; \
-             concentrations {:.2}–{:.2}; mass fractions within {:.1e}): in 0.8–1.0 (ruling 139.2; \
-             {}); the living classes' half-mass radii below the turn-off within {:.3} ({}; 10%); \
-             at plan 09's η = {} within {:.3}{}",
-            fit.eta,
-            fit.delta,
+            "adopted η = {SCRATCH_ETA} (δ = ½; decision-p15-t8-blocks): in 0.8–1.0 (ruling 139.2; \
+             {}); {} multimass King models at δ = {} solved, their mass fractions within {:.1e} \
+             of their targets (10⁻⁶; {}). Reported: the grid (W₀ {:?}, slopes {:?}; \
+             concentrations {:.2}–{:.2}); the living classes' half-mass radii below the turn-off \
+             within {:.3} at η = {SCRATCH_ETA} and within {:.3} at the best η = {:.4} (10%); η \
+             rests on δ = ½ (η = 2δ), not on this fit{}",
+            verdict(in_window),
             fit.models.len(),
+            fit.delta,
+            miss,
+            verdict(solved),
             w0s,
             alphas,
             c_lo,
             c_hi,
-            miss,
-            verdict(in_window),
-            fit.worst,
-            verdict(radii),
-            SCRATCH_ETA,
             fit.worst_committed,
-            if in_window && radii {
+            fit.worst,
+            fit.eta,
+            if in_window && solved {
                 ""
             } else {
-                "; the table keeps plan 09's η until a ruling"
+                "; provisional until a ruling on the failed gates"
             },
         );
         Ok(TaskOutput {
-            table: render(if in_window && radii {
-                fit.eta
-            } else {
-                SCRATCH_ETA
-            }),
+            table: render(SCRATCH_ETA),
             source: "multimass lowered-isothermal models (Da Costa and Freeman 1976, ApJ 206, \
                      128; Gunn and Griffin 1979, AJ 84, 752) in the parametrisation of Gieles and \
-                     Zocchi (2015, MNRAS 454, 576), integrated by the task; plan 09's class \
-                     profiles and counts"
+                     Zocchi (2015, MNRAS 454, 576), integrated by the task; δ = ½ from Peuten et \
+                     al. (2017, MNRAS 470, 2736) and Hénault-Brunet et al. (2020, MNRAS 491, 113); \
+                     plan 09's class profiles and counts"
                 .to_owned(),
             acceptance,
-            provisional: (!(in_window && radii)).then_some("P15.T8.b"),
+            provisional: (!(in_window && solved)).then_some("P15.T8.b"),
         })
     }
 }
@@ -651,6 +684,23 @@ mod tests {
         let c = math::log10(model.tidal);
         assert!((c - 1.25).abs() < 0.03, "{c}");
         assert!((model.fractions[0] - 1.0).abs() < 1e-12);
+    }
+
+    /// Revision 1's gates: plan 09's η in its window and a model that solves pass; an η outside
+    /// 0.8–1.0 fails, and so does a model that cannot solve (W₀ 0, whose classes' fractions come
+    /// out not a number, an infinite miss).
+    #[test]
+    fn the_gates_pass_the_adopted_eta_and_fail_a_model_that_does_not_solve() {
+        let solved = grid_model(6.0, -0.5, 0.5);
+        assert!(solved.normalisation_miss <= 1e-6, "{solved:?}");
+        assert_eq!(
+            gates(SCRATCH_ETA, std::slice::from_ref(&solved)),
+            [true, true]
+        );
+        assert_eq!(gates(0.1675, std::slice::from_ref(&solved)), [false, true]);
+        let unsolved = grid_model(0.0, -0.5, 0.5);
+        assert_eq!(unsolved.normalisation_miss, f64::INFINITY, "{unsolved:?}");
+        assert_eq!(gates(SCRATCH_ETA, &[solved, unsolved]), [true, false]);
     }
 
     /// Heavier classes sit deeper: the half-mass radii fall with mass, and the fractions converge.

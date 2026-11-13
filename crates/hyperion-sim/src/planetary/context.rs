@@ -11,7 +11,7 @@
 //!
 //! - [`SystemContext::for_system`] resolves a system ID through plan 03 and builds the rest from
 //!   the system's record: its stars through [`SystemStars`], its \[Fe/H\] through
-//!   [`draw_metallicity`](crate::stellar::system::draw_metallicity), and its sphere of influence
+//!   [`draw_metallicity`], and its sphere of influence
 //!   from plan 02's potential at its epoch position.
 //! - [`SystemContext::builder`] makes synthetic hosts for tests and tools: a star or a binary of
 //!   chosen masses, \[Fe/H\] and age, under a caller-supplied [`SystemId`] so that the stage's
@@ -24,49 +24,75 @@
 //! documented value rather than code to replace:
 //!
 //! - **Binary evolution.** A real system's stars are [`SystemStars`]' primary and companions, with
-//!   the hierarchy plan 11's draw gives a grid system (P11.T2.c), but each evolves as a single star
-//!   until plan 11's P11.T4–T11, so the zones are the zones at birth.
+//!   the hierarchy plan 11's draw gives a grid system (P11.T2.c), and the context keeps the
+//!   timeline of each pair the binary engine ran ([`SystemStars::pairs`]). A star of such a pair is
+//!   read from its pair's timeline wherever the stage reads its light (P14.T1.e, from generator
+//!   version 27). The context's
+//!   zones are the zones at birth; a system's zones at a later time read its pairs' states from 27
+//!   (P14.T9.d).
 //! - **\[α/Fe\]** is P14.T1.a's closed form of \[Fe/H\] and population ([`alpha_fe`](fn@alpha_fe)),
 //!   the two sequences' means, since plan 06 draws none of its own. A star's X-ray and
 //!   ultraviolet history is P14.T1.a's closed form too ([`XuvHistory`]).
-//! - **The sphere of influence** is the galactic tidal radius alone,
+//! - **The sphere of influence** was the galactic tidal radius alone,
 //!   [`PotentialTables::tidal_radius`](crate::galaxy::potential::PotentialTables::tidal_radius) of
-//!   the system's mass at its epoch position. Plan 09's rule, the smaller of that and a feature's,
-//!   with the pericentre rule of P09.T28.c in the central black hole's Kepler regime, changes it
-//!   only for feature members and for systems within about 10 ly of the centre.
-//! - **The encounter environment** is `None`: only plan 09's feature members have one.
-//! - **Every host is [`HostKind::Stellar`]**: plan 13 places the free-floating brown dwarfs and
-//!   rogue planets, and P14.T27 gives them contexts.
+//!   the system's mass at its epoch position, until generator version 26 (P14.T29, [`strip`]).
+//!   From 26 a grid system takes the pericentre rule of P09.T28.c in the central black hole's
+//!   Kepler regime, and a feature member the smaller of that and its cluster's radius.
+//! - **The encounter environment** was `None` until 26 too; from it a feature member takes its
+//!   cluster's at its place.
+//! - **Every host was [`HostKind::Stellar`]** below generator version 26: plan 13 places the
+//!   free-floating brown dwarfs and rogue planets, and from 26 P14.T27.a gives a brown dwarf its
+//!   context ([`hosts::substellar`](super::hosts::substellar)), as [`HostKind::BrownDwarf`], and
+//!   P14.T27.b a rogue planet its own, as [`HostKind::RoguePlanet`].
+//!
+//! # A rogue planet's context
+//!
+//! A rogue planet has no star (plan 13, P13.T5.d), so its context holds none (P14.T27.b, lean,
+//! 2026-10-31): its [`stars`](SystemContext::stars), [`zones`](SystemContext::zones),
+//! [`zone_stars`](SystemContext::zone_stars) and
+//! [`xuv_histories`](SystemContext::xuv_histories) are empty, its
+//! [`hierarchy`](SystemContext::hierarchy) is `None`, and in their place it holds the object's own
+//! plan 13 record: its mass ([`rogue_planet_mass`](SystemContext::rogue_planet_mass)), its age at
+//! the epoch, and its composition, at the \[Fe/H\] plan 13 draws for it
+//! ([`draw_metallicity`]). Its \[α/Fe\], sphere of
+//! influence and encounter environment are a grid system's, at its own mass.
 
 use std::error::Error;
 use std::fmt;
 
-use super::params::SATELLITE_STABILITY_FRACTION;
+use super::hosts::strip::{self, Surroundings};
 use super::placement::{OrbitZone, ZoneHierarchy, ZoneStar, stable_zones};
 use crate::Seed;
-use crate::galaxy::features::members::{NoInteriorCache, resolve_member};
+use crate::galaxy::catalogue_classes::{CatalogueSystem, system_of};
+use crate::galaxy::features::members::{
+    FeatureInteriorCache, KeepInteriors, MemberRecord, NoInteriorCache, resolve_member,
+};
 use crate::galaxy::imf::MASS_LIMIT_LO;
 use crate::galaxy::placement::{
     Existence, ResolveSystemError, SystemKind, SystemOrigin, SystemRecord, resolve,
 };
-use crate::galaxy::{Galaxy, PointLy, Population};
+use crate::galaxy::{Galaxy, Population};
 use crate::id::{SystemId, SystemIdKind};
 use crate::math;
 use crate::observe::stars_of;
 use crate::orbit::{BuildOrbitError, Eccentricity, OpenOrbit};
+use crate::stellar::binary::{Component as PairComponent, SegmentKind};
 use crate::stellar::draws::StarDraws;
 use crate::stellar::multiplicity::{
     LOG_PERIOD_MAX, LOG_PERIOD_MIN, MIN_COMPANION_MASS, MIN_SUBSTELLAR_COMPANION_MASS,
     MultiplicityModel, SlotKind, SystemHierarchy, TIDAL_CUT_SHARE,
 };
+use crate::stellar::remnant::{CompactRemnant, PulsarState, RemnantKind};
 use crate::stellar::sse::{self, ZCoeffs, zams};
-use crate::stellar::system::{MAX_STAR_MASS, StarModel, SystemStars};
-use crate::stellar::{Composition, substellar};
-use crate::time::{CLOCK_WINDOW_H, UniverseTime};
+use crate::stellar::system::{
+    MAX_STAR_MASS, PairTimeline, StarModel, SystemStars, draw_metallicity, pair_of, remnant_kind,
+};
+use crate::stellar::{Composition, Phase, StarState, substellar};
+use crate::time::{CLOCK_WINDOW_H, ClockWindow, UniverseTime};
 use crate::units::consts::{GM_SUN, METRES_PER_KILOPARSEC, SECONDS_PER_JULIAN_YEAR};
 use crate::units::{
     Days, Dex, HeliumExcess, JoulesPerSquareMetre, KilometresPerSecond, Metres, PerCubicLightYear,
-    SolarLuminosities, SolarMasses, Watts, Years,
+    SolarLuminosities, SolarMasses, Watts, WattsPerSquareMetre, Years,
 };
 
 /// The age of the universe, 13.787 Gyr: the oldest age at the epoch a context takes.
@@ -283,6 +309,22 @@ pub const XUV_SATURATION_BLENDS: [(SolarMasses, SolarMasses); 2] = [
 pub struct XuvHistory {
     saturated: Watts,
     saturation_time: Years,
+    /// From generator version 27 (P14.T1.f), what the binary engine made of the star later: from
+    /// an age on it shines as another closed form, or not at all; `None` for a single star's.
+    later: Option<XuvLater>,
+}
+
+/// The closed form a star of a pair the binary engine ran shines as from an age on (P14.T1.f):
+/// a star merged away shines no more, and a star the binary leaves on the main sequence at a new
+/// mass, an accretor or a merger's product, shines as a star of that mass.
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+struct XuvLater {
+    /// The age from which it shines so, Julian years.
+    since: Years,
+    /// Its saturated X-ray and ultraviolet luminosity then: zero for a star merged away.
+    saturated: Watts,
+    /// Its saturation time then.
+    saturation_time: Years,
 }
 
 impl XuvHistory {
@@ -300,6 +342,22 @@ impl XuvHistory {
         Self {
             saturated: Watts::new(saturated),
             saturation_time: saturation_time(initial_mass),
+            later: None,
+        }
+    }
+
+    /// This history until `since`, and `then`'s closed form after it (P14.T1.f): the energy
+    /// delivered by an age is this one's to `since` and `then`'s from `since` on, so that it never
+    /// falls; `then`'s own later change, if it has one, is not taken.
+    #[must_use]
+    const fn then_from(self, since: Years, then: Self) -> Self {
+        Self {
+            later: Some(XuvLater {
+                since,
+                saturated: then.saturated,
+                saturation_time: then.saturation_time,
+            }),
+            ..self
         }
     }
 
@@ -308,6 +366,7 @@ impl XuvHistory {
     pub const DARK: Self = Self {
         saturated: Watts::ZERO,
         saturation_time: XUV_SATURATION_FGK,
+        later: None,
     };
 
     /// The X-ray and ultraviolet luminosity while saturated.
@@ -323,34 +382,33 @@ impl XuvHistory {
     }
 
     /// The X-ray and ultraviolet luminosity at `age`: the saturated level until the saturation
-    /// time, then falling as (t ÷ `t_sat`)^−1.5; zero before birth.
+    /// time, then falling as (t ÷ `t_sat`)^−1.5; zero before birth. From generator version 27 a
+    /// star of a pair the binary engine ran shines after its pair changed it as the star it became
+    /// (P14.T1.f), its age counted from its birth still.
     #[must_use]
     pub fn luminosity(&self, age: Years) -> Watts {
-        let (t, t_sat) = (age.value(), self.saturation_time.value());
-        if t.is_nan() || t <= 0.0 {
-            return Watts::ZERO;
-        }
-        if t <= t_sat {
-            self.saturated
-        } else {
-            Watts::new(self.saturated.value() * math::powf(t / t_sat, -XUV_DECAY_INDEX))
+        match self.later {
+            Some(later) if age > later.since => {
+                closed_form_luminosity(later.saturated, later.saturation_time, age)
+            }
+            Some(_) | None => closed_form_luminosity(self.saturated, self.saturation_time, age),
         }
     }
 
-    /// The X-ray and ultraviolet energy the star has emitted by `age`, as a duration at the
-    /// saturated level, seconds: t while saturated, and `t_sat` (3 − 2 √(`t_sat` ÷ t)) after, the
-    /// integral of the t^−1.5 decline, which tends to 3 `t_sat`.
+    /// The X-ray and ultraviolet energy the star has emitted by `age`, J: the saturated level
+    /// times [`saturated_seconds`] of its saturation time, and from generator version 27, after
+    /// its pair changed it (P14.T1.f), this to the change and the later closed form's from it.
     #[must_use]
-    fn saturated_seconds(&self, age: Years) -> f64 {
-        let (t, t_sat) = (age.value(), self.saturation_time.value());
-        let years = if t.is_nan() || t <= 0.0 {
-            0.0
-        } else if t <= t_sat {
-            t
-        } else {
-            t_sat * (3.0 - 2.0 * (t_sat / t).sqrt())
-        };
-        years * SECONDS_PER_JULIAN_YEAR
+    fn emitted(&self, age: Years) -> f64 {
+        match self.later {
+            Some(later) if age > later.since => {
+                let before = saturated_seconds(later.since, self.saturation_time);
+                let after = saturated_seconds(age, later.saturation_time)
+                    - saturated_seconds(later.since, later.saturation_time);
+                self.saturated.value() * before + later.saturated.value() * after
+            }
+            Some(_) | None => self.saturated.value() * saturated_seconds(age, self.saturation_time),
+        }
     }
 
     /// The X-ray and ultraviolet energy per unit area that a body on an orbit of semi-major axis
@@ -372,8 +430,81 @@ impl XuvHistory {
             return JoulesPerSquareMetre::ZERO;
         }
         let area = 4.0 * core::f64::consts::PI * a * a * (1.0 - eccentricity * eccentricity).sqrt();
-        JoulesPerSquareMetre::new(self.saturated.value() * self.saturated_seconds(age) / area)
+        JoulesPerSquareMetre::new(self.emitted(age) / area)
     }
+
+    /// The X-ray and ultraviolet flux that a body on an orbit of semi-major axis
+    /// `semi_major_axis` and eccentricity `eccentricity` about the star receives while the star is
+    /// saturated: the saturated luminosity over 4π a² √(1 − e²), the orbit average that
+    /// [`fluence`](Self::fluence) takes (P14.T24.f reads it for a runaway world's water loss).
+    ///
+    /// Zero for an axis that is not positive and finite or an eccentricity outside [0, 1).
+    #[must_use]
+    pub fn saturated_flux(
+        &self,
+        semi_major_axis: Metres,
+        eccentricity: f64,
+    ) -> WattsPerSquareMetre {
+        let a = semi_major_axis.value();
+        if !(a.is_finite() && a > 0.0 && (0.0..1.0).contains(&eccentricity)) {
+            return WattsPerSquareMetre::ZERO;
+        }
+        let area = 4.0 * core::f64::consts::PI * a * a * (1.0 - eccentricity * eccentricity).sqrt();
+        WattsPerSquareMetre::new(self.saturated.value() / area)
+    }
+
+    /// The X-ray and ultraviolet flux that a body on an orbit of semi-major axis
+    /// `semi_major_axis` and eccentricity `eccentricity` about the star receives at `age`: the
+    /// [`luminosity`](Self::luminosity) then over 4π a² √(1 − e²), the orbit average that
+    /// [`fluence`](Self::fluence) takes (P14.T24.a's radiation class reads it).
+    ///
+    /// Zero before birth, and for an axis that is not positive and finite or an eccentricity
+    /// outside [0, 1).
+    #[must_use]
+    pub fn flux(
+        &self,
+        age: Years,
+        semi_major_axis: Metres,
+        eccentricity: f64,
+    ) -> WattsPerSquareMetre {
+        let a = semi_major_axis.value();
+        if !(a.is_finite() && a > 0.0 && (0.0..1.0).contains(&eccentricity)) {
+            return WattsPerSquareMetre::ZERO;
+        }
+        let area = 4.0 * core::f64::consts::PI * a * a * (1.0 - eccentricity * eccentricity).sqrt();
+        WattsPerSquareMetre::new(self.luminosity(age).value() / area)
+    }
+}
+
+/// The X-ray and ultraviolet luminosity at `age` of a closed form saturated at `saturated` until
+/// `saturation_time` ([`XuvHistory::luminosity`]).
+#[must_use]
+fn closed_form_luminosity(saturated: Watts, saturation_time: Years, age: Years) -> Watts {
+    let (t, t_sat) = (age.value(), saturation_time.value());
+    if t.is_nan() || t <= 0.0 {
+        return Watts::ZERO;
+    }
+    if t <= t_sat {
+        saturated
+    } else {
+        Watts::new(saturated.value() * math::powf(t / t_sat, -XUV_DECAY_INDEX))
+    }
+}
+
+/// The X-ray and ultraviolet energy a closed form of saturation time `saturation_time` has emitted
+/// by `age`, as a duration at its saturated level, seconds: t while saturated, and `t_sat` (3 − 2
+/// √(`t_sat` ÷ t)) after, the integral of the t^−1.5 decline, which tends to 3 `t_sat`.
+#[must_use]
+fn saturated_seconds(age: Years, saturation_time: Years) -> f64 {
+    let (t, t_sat) = (age.value(), saturation_time.value());
+    let years = if t.is_nan() || t <= 0.0 {
+        0.0
+    } else if t <= t_sat {
+        t
+    } else {
+        t_sat * (3.0 - 2.0 * (t_sat / t).sqrt())
+    };
+    years * SECONDS_PER_JULIAN_YEAR
 }
 
 /// The saturation time of a star of initial mass `mass` (ruling 122.2): [`XUV_SATURATION_M`] up
@@ -418,9 +549,10 @@ pub enum HostKind {
 /// The encounter environment of a feature member: what sets the second cut of design note 14,
 /// where the time to a disrupting encounter equals the system's age (P14.T29).
 ///
-/// Plan 09 supplies it from the feature's class profiles at the member's place; until then no
-/// system has one. The three quantities are those of T29's cross-section,
-/// 1 ÷ (n π a² (1 + 2 G M ÷ (a σ²)) σ).
+/// A feature member's is its cluster's at its place, from the feature's class profiles and its
+/// cluster's dispersion, once P14.T29's hold lifts at generator version 26 ([`strip`]); until then
+/// no real system has one. The three quantities are those of T29's rate
+/// ([`encounter_radius`](super::hosts::strip::encounter_radius)).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct EncounterEnvironment {
     number_density: PerCubicLightYear,
@@ -467,7 +599,8 @@ impl EncounterEnvironment {
     }
 
     /// Their one-dimensional velocity dispersion, km s⁻¹, as the feature's profiles give it; the
-    /// relative speed of an encounter is P14.T29's to form from it.
+    /// encounters' relative speeds are a Maxwellian of it
+    /// ([`encounter_radius`](super::hosts::strip::encounter_radius)).
     #[must_use]
     pub const fn velocity_dispersion(&self) -> KilometresPerSecond {
         self.velocity_dispersion
@@ -505,6 +638,34 @@ impl fmt::Display for BuildEncounterEnvironmentError {
 
 impl Error for BuildEncounterEnvironmentError {}
 
+/// How near its model's own death age, as a share of it, an age of a paired star's death or
+/// explosion on its pair's timeline stands for that death: 10⁻⁹, the stellar stage's rule for a
+/// death the engine pins to the model's (`SystemStars`' paired state, design note 16 of plan 11),
+/// which an engine landing an ulp short of the age keeps (P14.T1.g, T1.h).
+pub(crate) const OWN_DEATH_SHARE: f64 = 1e-9;
+
+/// `age`, Julian years, a death or a remnant's birth on the pair's timeline of the star `model`,
+/// at its model's own death age where the two agree within [`OWN_DEATH_SHARE`], and `age`
+/// otherwise: so that a death the engine lands an ulp off its model's reads the model's, as every
+/// paired reader of the planetary stage takes it (P14.T1.g, T1.h).
+#[must_use]
+pub(crate) fn at_own_death(model: &StarModel, age: Years) -> Years {
+    match model.death().map(|death| death.age()) {
+        Some(own) if (age.value() - own.value()).abs() <= OWN_DEATH_SHARE * own.value() => own,
+        Some(_) | None => age,
+    }
+}
+
+/// The remnant a star leaves by the end of the clock window and when it is born, as the planetary
+/// stage's generation reads them ([`SystemContext::remnant_by_end`], P14.T1.h).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct StarRemnant {
+    /// The remnant: its kind and its mass at its birth.
+    pub(crate) remnant: CompactRemnant,
+    /// Its birth, the star's age then, Julian years.
+    pub(crate) born: Years,
+}
+
 /// Everything plan 14's generators read about one system (P14.T1.d): its ID and host kind, its
 /// stars and their hierarchy, its composition, its age, its sphere of influence and its
 /// encounter environment.
@@ -531,7 +692,8 @@ impl Error for BuildEncounterEnvironmentError {}
 ///
 /// let context = SystemContext::for_system(&galaxy, id)?;
 /// assert_eq!(context.host_kind(), HostKind::Stellar);
-/// assert_eq!(context.stars().len(), usize::from(context.hierarchy().star_count()));
+/// let hierarchy = context.hierarchy().ok_or("a star system has a hierarchy")?;
+/// assert_eq!(context.stars().len(), usize::from(hierarchy.star_count()));
 /// // Nothing is generated beyond 0.49 of the sphere of influence (design note 14).
 /// assert!(context.strip_radius() < context.tidal_radius());
 /// // [α/Fe] is the closed form of its [Fe/H] and population (P14.T1.a).
@@ -543,12 +705,30 @@ pub struct SystemContext {
     id: SystemId,
     host_kind: HostKind,
     stars: Vec<StarModel>,
-    hierarchy: SystemHierarchy,
+    /// The pairs of two stars the binary engine ran, depth first ([`SystemStars::pairs`]); none
+    /// for a synthetic host and a rogue planet.
+    pairs: Vec<PairTimeline>,
+    /// For each star, by body index, the system's age from which the stellar stage no longer shows
+    /// it, a supernova having released it (`SystemStars::departures`, P11.T10); empty for a
+    /// synthetic host and a rogue planet.
+    departures: Vec<Option<Years>>,
+    /// The stars' hierarchy; `None` for a rogue planet, which has no star.
+    hierarchy: Option<SystemHierarchy>,
+    /// A rogue planet's mass, its plan 13 record's; `None` for every other host.
+    rogue_planet_mass: Option<SolarMasses>,
     composition: Composition,
     alpha_fe: Option<Dex>,
     age_at_epoch: Years,
     tidal_radius: Metres,
     encounter_environment: Option<EncounterEnvironment>,
+}
+
+/// A system as resolved for its stars: a feature member and a catalogue class's system bring their
+/// own (plan 09, P09.T10 and P09.T33.a), every other record the stellar stage's of its own marks.
+enum Resolved {
+    Member(MemberRecord),
+    Catalogue(CatalogueSystem),
+    Placed(SystemRecord),
 }
 
 impl SystemContext {
@@ -558,42 +738,67 @@ impl SystemContext {
     /// resolves always has a context, whether it is born at the epoch or not. A catalogue
     /// feature's member takes its
     /// [`MemberRecord::stars`](crate::galaxy::features::members::MemberRecord::stars), at its
-    /// cluster's composition, and its feature's interior is built once.
+    /// cluster's composition, and its feature's interior is built once; a catalogue class's
+    /// system its class's stars ([`CatalogueSystem::stars`](crate::galaxy::catalogue_classes::CatalogueSystem::stars),
+    /// plan 09, P09.T33.a), resolved once, and a class that models none answers
+    /// [`KindNotGenerated`](ResolveSystemError::KindNotGenerated).
     ///
     /// # Errors
     ///
     /// Whatever [`resolve`] refuses: [`ResolveSystemError::NoSuchSystem`] for an ID that names no
     /// system and [`KindNotGenerated`](ResolveSystemError::KindNotGenerated) for the kinds plans
-    /// 09 and 10 add. Plan 13 places the brown dwarfs and rogue planets, which the stellar stage
-    /// does not model yet (P13.T5.a), so their IDs return
-    /// [`LayerNotGenerated`](ResolveSystemError::LayerNotGenerated) here.
+    /// 09 and 10 add. Plan 13 places the brown dwarfs and rogue planets: from generator version 26
+    /// P14.T27.a gives a free-floating brown dwarf a [`HostKind::BrownDwarf`] context and P14.T27.b
+    /// a rogue planet, which has no stars (P13.T5.d), its [`HostKind::RoguePlanet`] one (the
+    /// [module documentation](self)).
     pub fn for_system(galaxy: &Galaxy, id: SystemId) -> Result<Self, ResolveSystemError> {
         // A feature member is resolved once, here, rather than through `resolve` and again for
-        // its stars: its interior is the costly part.
-        let member = match id.kind() {
+        // its stars: its interior is the costly part, and is kept for its surroundings too. So
+        // is a catalogue class's system, whose stars are its class's (plan 09, P09.T33.a).
+        let interiors = KeepInteriors::new(galaxy);
+        let resolved = match id.kind() {
             SystemIdKind::FeatureMember(member) => {
-                Some(resolve_member(galaxy, &NoInteriorCache, member)?)
+                Resolved::Member(resolve_member(galaxy, &interiors, member)?)
             }
-            _ => None,
+            SystemIdKind::Catalogue(system) => Resolved::Catalogue(system_of(galaxy, system)?),
+            SystemIdKind::Grid(_)
+            | SystemIdKind::Centre(_)
+            | SystemIdKind::Stream(_)
+            | SystemIdKind::DwarfCore(_)
+            | SystemIdKind::Pinned(_) => Resolved::Placed(resolve(galaxy, id)?),
         };
-        let record = match &member {
-            Some(member) => *member.record(),
-            None => resolve(galaxy, id)?,
+        let record = match &resolved {
+            Resolved::Member(member) => *member.record(),
+            Resolved::Catalogue(system) => *system.record(),
+            Resolved::Placed(record) => *record,
         };
-        // The galactic centre's members resolve since plan 09's P09.T27, but their stars take
-        // the centre's own composition and its black hole is no star: their system stage is not
-        // generated yet.
-        if matches!(record.origin(), SystemOrigin::CentreMember { .. }) {
-            return Err(ResolveSystemError::KindNotGenerated);
+        refuse_ungenerated(&record)?;
+        if record.kind() == SystemKind::RoguePlanet {
+            return Ok(Self::of_rogue_planet(galaxy, &record));
         }
-        if record.kind() != SystemKind::Stellar {
-            return Err(ResolveSystemError::LayerNotGenerated(record.layer()));
-        }
-        let stars = match member {
-            Some(member) => member.stars(galaxy),
-            None => SystemStars::generate(galaxy, &record),
+        let stars = match resolved {
+            Resolved::Member(member) => member.stars(galaxy),
+            Resolved::Catalogue(system) => system
+                .stars(galaxy)
+                .ok_or(ResolveSystemError::KindNotGenerated)?,
+            Resolved::Placed(record) => SystemStars::generate(galaxy, &record),
         };
-        Ok(Self::from_stars(galaxy, &stars))
+        Ok(Self::from_stars_with(galaxy, &interiors, &stars))
+    }
+
+    /// The context of the system whose stars `stars` are, refused as
+    /// [`for_system`](Self::for_system) refuses the system's ID: [`from_stars`](Self::from_stars)
+    /// for a caller that holds the stars already and must answer as `for_system` would, such as
+    /// a server's body cache, which builds its contexts from its cache of [`SystemStars`].
+    ///
+    /// # Errors
+    ///
+    /// [`for_system`](Self::for_system)'s refusal of a system that resolves:
+    /// [`KindNotGenerated`](ResolveSystemError::KindNotGenerated) for a member of the galactic
+    /// centre.
+    pub fn for_stars(galaxy: &Galaxy, stars: &SystemStars) -> Result<Self, ResolveSystemError> {
+        refuse_ungenerated(stars.record())?;
+        Ok(Self::from_stars_with(galaxy, &NoInteriorCache, stars))
     }
 
     /// The context of the system `record` of `galaxy`, for a caller that holds the record already
@@ -601,11 +806,12 @@ impl SystemContext {
     ///
     /// - The stars are [`stars_of`]'s, primary first, and the composition theirs: for a grid
     ///   system [`SystemStars::generate`]'s, at
-    ///   [`draw_metallicity`](crate::stellar::system::draw_metallicity) of the record, and for a
+    ///   [`draw_metallicity`] of the record, and for a
     ///   catalogue feature's member its
     ///   [`MemberRecord::stars`](crate::galaxy::features::members::MemberRecord::stars), at its
-    ///   cluster's composition (its feature's interior is built again: a caller that has the
-    ///   member's stars already passes them to [`from_stars`](Self::from_stars)).
+    ///   cluster's composition (its feature's interior is built again, once for its stars and
+    ///   its surroundings: a caller that has the member's stars already passes them to
+    ///   [`from_stars`](Self::from_stars)).
     /// - The hierarchy is [`SystemStars`]' own, the one
     ///   [`draw_hierarchy`](crate::stellar::multiplicity::draw_hierarchy) draws for a grid system
     ///   under [`MultiplicityContext::Free`](crate::stellar::multiplicity::MultiplicityContext::Free)
@@ -614,18 +820,36 @@ impl SystemContext {
     /// - The sphere of influence is plan 02's
     ///   [`tidal_radius`](crate::galaxy::potential::PotentialTables::tidal_radius) of the
     ///   hierarchy's [`system_mass`](SystemHierarchy::system_mass) at the record's epoch position,
-    ///   zero for a system at the galactic centre itself.
+    ///   zero for a system at the galactic centre itself, and the encounter environment `None`;
+    ///   from P14.T29's hold at generator version 26, plan 09's rule and a feature member's
+    ///   cluster's ([`strip`]).
     /// - The age at the epoch is the record's, [\[α/Fe\]](Self::alpha_fe) the closed form of the
-    ///   composition's \[Fe/H\] and the record's population, the encounter environment `None`, and
-    ///   the host [`HostKind::Stellar`].
+    ///   composition's \[Fe/H\] and the record's population, and the host [`HostKind::Stellar`],
+    ///   or from generator version 26 [`HostKind::BrownDwarf`] for a free-floating brown dwarf
+    ///   (P14.T27.a).
     ///
     /// # Panics
     ///
-    /// As [`stars_of`] does: for a record of another galaxy, a rogue planet, and a member of the
-    /// galactic centre, whose system stage is not generated yet.
+    /// As [`stars_of`] does: for a record of another galaxy, and a member of the galactic
+    /// centre, whose system stage is not generated yet; and where `stars_of` refuses, for a
+    /// catalogue system whose class does not model its stars (a Type Ia's, plan 09, P09.T34.a),
+    /// which [`for_system`](Self::for_system) answers with `KindNotGenerated`. A rogue planet,
+    /// which has no stars, takes its own context (P14.T27.b; the [module documentation](self)),
+    /// under every generator version's rules, as `from_record` refuses nothing.
     #[must_use]
     pub fn from_record(galaxy: &Galaxy, record: &SystemRecord) -> Self {
-        Self::from_stars(galaxy, &stars_of(galaxy, &NoInteriorCache, record))
+        if record.kind() == SystemKind::RoguePlanet {
+            return Self::of_rogue_planet(galaxy, record);
+        }
+        // A feature member's interior is built once, for its stars and its surroundings both.
+        let interiors = KeepInteriors::new(galaxy);
+        let stars = stars_of(galaxy, &interiors, record).unwrap_or_else(|error| {
+            panic!(
+                "{:?} has no stars of the stellar stage's: {error}",
+                record.id()
+            )
+        });
+        Self::from_stars_with(galaxy, &interiors, &stars)
     }
 
     /// The context of the system whose stars `stars` are, for a caller that holds them
@@ -634,30 +858,76 @@ impl SystemContext {
     ///
     /// The models are copied with their built tracks, so nothing is evolved twice, and the
     /// context equals `from_record(galaxy, stars.record())` exactly. `stars` must be of `galaxy`,
-    /// whose potential gives the sphere of influence.
+    /// whose potential gives the sphere of influence. A feature member's surroundings read its
+    /// feature's interior, which this builds afresh from P14.T29's hold at generator version 26
+    /// (14–17 ms); a caller that keeps interiors passes them to
+    /// [`from_stars_with`](Self::from_stars_with).
     #[must_use]
     pub fn from_stars(galaxy: &Galaxy, stars: &SystemStars) -> Self {
+        Self::from_stars_with(galaxy, &NoInteriorCache, stars)
+    }
+
+    /// [`from_stars`](Self::from_stars), with a feature member's interior from `interiors`: the
+    /// same context, whichever cache lends it, since a cache lends each interior exactly as it is
+    /// built.
+    ///
+    /// # Panics
+    ///
+    /// From P14.T29's hold at generator version 26, as [`stars_of`] does, for a feature member's
+    /// stars that are not of `galaxy`.
+    #[must_use]
+    pub fn from_stars_with(
+        galaxy: &Galaxy,
+        interiors: &dyn FeatureInteriorCache,
+        stars: &SystemStars,
+    ) -> Self {
         let record = stars.record();
         let hierarchy = stars.hierarchy().clone();
-        let tidal_radius = galaxy.potential().tidal_radius(
-            hierarchy.system_mass(),
-            &PointLy::from(record.epoch_position()),
-        );
+        let surroundings =
+            Surroundings::of_record(galaxy, interiors, record, hierarchy.system_mass());
         Self {
             id: record.id(),
-            host_kind: HostKind::Stellar,
+            host_kind: HostKind::from(record.kind()),
             composition: *stars.primary().composition(),
             // `SystemStars` lends its models; the copy keeps their built tracks, so nothing is
             // evolved twice.
             stars: stars.stars().to_vec(),
-            hierarchy,
+            pairs: stars.pairs().to_vec(),
+            departures: stars.departures(),
+            hierarchy: Some(hierarchy),
+            rogue_planet_mass: None,
             alpha_fe: Some(alpha_fe(
                 stars.primary().composition().fe_h(),
                 record.population(),
             )),
             age_at_epoch: record.age_at_epoch(),
-            tidal_radius,
-            encounter_environment: None,
+            tidal_radius: surroundings.sphere_of_influence,
+            encounter_environment: surroundings.encounter_environment,
+        }
+    }
+
+    /// The context of the rogue planet `record` of `galaxy` (P14.T27.b; the
+    /// [module documentation](self)): no stars, and the object's mass, age and composition, its
+    /// \[Fe/H\] plan 13's draw ([`draw_metallicity`]),
+    /// with the surroundings of a grid record at its own mass.
+    #[must_use]
+    fn of_rogue_planet(galaxy: &Galaxy, record: &SystemRecord) -> Self {
+        let mass = record.primary_initial_mass();
+        let composition = draw_metallicity(galaxy, record);
+        let surroundings = Surroundings::of_record(galaxy, &NoInteriorCache, record, mass);
+        Self {
+            id: record.id(),
+            host_kind: HostKind::RoguePlanet,
+            stars: Vec::new(),
+            pairs: Vec::new(),
+            departures: Vec::new(),
+            hierarchy: None,
+            rogue_planet_mass: Some(mass),
+            composition,
+            alpha_fe: Some(alpha_fe(composition.fe_h(), record.population())),
+            age_at_epoch: record.age_at_epoch(),
+            tidal_radius: surroundings.sphere_of_influence,
+            encounter_environment: surroundings.encounter_environment,
         }
     }
 
@@ -673,33 +943,269 @@ impl SystemContext {
         self.id
     }
 
-    /// What the host is: [`HostKind::Stellar`] for every context of this generator version.
+    /// What the host is: [`HostKind::Stellar`] for a star system and a synthetic host, and from
+    /// generator version 26 [`HostKind::BrownDwarf`] for a free-floating brown dwarf (P14.T27.a)
+    /// and [`HostKind::RoguePlanet`] for a rogue planet (P14.T27.b).
     #[must_use]
     pub const fn host_kind(&self) -> HostKind {
         self.host_kind
     }
 
     /// The stars, by body index, the primary first: one for each of the hierarchy's
-    /// [`stars`](SystemHierarchy::stars), with the same initial mass.
+    /// [`stars`](SystemHierarchy::stars), with the same initial mass; none for a rogue planet.
     #[must_use]
     pub fn stars(&self) -> &[StarModel] {
         &self.stars
     }
 
-    /// Plan 11's hierarchy of the stars, which bounds the stable zones.
+    /// The pairs of two stars the binary engine ran, depth first, each with its timeline
+    /// ([`SystemStars::pairs`]); none for a synthetic host and a rogue planet.
     #[must_use]
-    pub const fn hierarchy(&self) -> &SystemHierarchy {
-        &self.hierarchy
+    pub fn pairs(&self) -> &[PairTimeline] {
+        &self.pairs
+    }
+
+    /// The system's age, Julian years, from which the stellar stage no longer shows component
+    /// `star`, if it does not show it at the end of the ages its pairs were run to: a star a
+    /// supernova released from the system (P11.T10), whose planets go with it (P14.T9.d). `None`
+    /// for every star of a synthetic host and below version 27's stellar rules.
+    #[must_use]
+    pub(crate) fn departure(&self, star: usize) -> Option<Years> {
+        self.departures.get(star).copied().flatten()
+    }
+
+    /// Whether component `star` has left the system by `t`, a supernova having released it
+    /// (P11.T10): once the system's age reaches the star's [`departure`](Self::departure)
+    /// (P14.T9.d, from generator version 27), after which the stage reads no zone of it and none
+    /// of its light.
+    #[must_use]
+    pub(crate) fn has_left(&self, star: usize, t: UniverseTime) -> bool {
+        self.departure(star)
+            .is_some_and(|left| self.age_at(t) >= left)
+    }
+
+    /// Component `star`'s state at `t` as the planetary stage reads its light, or `None` before it
+    /// forms.
+    ///
+    /// From generator version 27 (P14.T1.e) a star of a pair the engine ran is its component of
+    /// the pair's state then ([`BinaryTimeline::state_at`](crate::stellar::binary::BinaryTimeline::state_at)),
+    /// where [`SystemStars::state_at`] reads it: a star merged into its companion is plan 06's
+    /// `NoRemnant`, with no light and no mass, and a merger's product or a stripped star is the
+    /// engine's. Every other star, and a paired star at a time past the ages its timeline was run
+    /// to (+H), is its own model's ([`StarModel::state_at`]).
+    ///
+    /// # Panics
+    ///
+    /// If `star` is not a component of the system; in debug builds also as
+    /// [`StarModel::state_at`].
+    #[must_use]
+    pub(crate) fn star_state_at(&self, star: usize, t: UniverseTime) -> Option<StarState> {
+        let model = &self.stars[star];
+        self.paired_at(star, t).map_or_else(
+            || model.state_at(t),
+            |(pair, component, age)| Some(pair.timeline().state_at(age).stars()[component.index()]),
+        )
+    }
+
+    /// The largest luminosity component `star` has had up to `t`, L☉, as
+    /// [`star_state_at`](Self::star_state_at) reads its light: from its pair's timeline
+    /// (`BinaryTimeline::max_luminosity_until`) where that reads its state, and otherwise its own
+    /// model's ([`StarModel::max_luminosity_until`]).
+    ///
+    /// # Panics
+    ///
+    /// As [`star_state_at`](Self::star_state_at).
+    #[must_use]
+    pub(crate) fn max_luminosity_until(&self, star: usize, t: UniverseTime) -> SolarLuminosities {
+        let model = &self.stars[star];
+        self.paired_at(star, t).map_or_else(
+            || model.max_luminosity_until(t),
+            |(pair, component, age)| pair.timeline().max_luminosity_until(component, age),
+        )
+    }
+
+    /// Component `star`'s pair, its component there and the age at `t` its timeline is read at,
+    /// where the cometary halo, the habitability clock, the moons' hot history and the pulsar host
+    /// read the star from the engine (P14.T1.g, from generator version 27): if the engine ran it in
+    /// a pair whose timeline holds `t`; `None` otherwise, whose readers read its own model.
+    #[must_use]
+    pub(crate) fn history_pair_at(
+        &self,
+        star: usize,
+        t: UniverseTime,
+    ) -> Option<(&PairTimeline, PairComponent, Years)> {
+        self.paired_at(star, t)
+    }
+
+    /// Component `star`'s state at `t` as the cometary halo reads it (P14.T1.g): from its pair's
+    /// timeline where [`history_pair_at`](Self::history_pair_at) gives one, and otherwise its own
+    /// model's.
+    ///
+    /// # Panics
+    ///
+    /// If `star` is not a component of the system; in debug builds also as
+    /// [`StarModel::state_at`].
+    #[must_use]
+    pub(crate) fn history_state_at(&self, star: usize, t: UniverseTime) -> Option<StarState> {
+        self.history_pair_at(star, t).map_or_else(
+            || self.stars[star].state_at(t),
+            |(pair, component, age)| Some(pair.timeline().state_at(age).stars()[component.index()]),
+        )
+    }
+
+    /// The pulsar component `star` is at `t`, as the pulsar host's light reads it (P14.T1.g),
+    /// where `SystemStars::summary_at` reads it: a star of a pair the engine ran and changed is the
+    /// pulsar its pair's history makes it, recycled where it was, if it is a neutron star then; a
+    /// star its pair left as its own model, and any other star, its own model's
+    /// ([`StarModel::pulsar_at`]).
+    ///
+    /// # Panics
+    ///
+    /// If `star` is not a component of the system; in debug builds also as
+    /// [`StarModel::state_at`].
+    #[must_use]
+    pub(crate) fn pulsar_at(&self, star: usize, t: UniverseTime) -> Option<PulsarState> {
+        let model = &self.stars[star];
+        let Some((pair, component, age)) = self.history_pair_at(star, t) else {
+            return model.pulsar_at(t);
+        };
+        let timeline = pair.timeline();
+        let state = timeline.state_at(age).stars()[component.index()];
+        if model.state_at(t) == Some(state) {
+            return model.pulsar_at(t);
+        }
+        (state.phase() == Phase::NeutronStar)
+            .then(|| {
+                timeline
+                    .class_context(age)
+                    .pulsar(component)
+                    .map(|p| *p.state())
+            })
+            .flatten()
+    }
+
+    /// Component `star`'s pair, its component there and its state at its timeline's end, where
+    /// the generation reads what the star leaves from its pair's timeline (P14.T1.h, from
+    /// generator version 28): if the engine ran it in a pair that changed it, its state at the
+    /// timeline's end (+H) not its own model's then. `None` for a star its pair left alone, which
+    /// reads its model's remnant and death to the bit, and for every other star.
+    #[must_use]
+    fn remnants_pair(&self, star: usize) -> Option<(&PairTimeline, PairComponent, StarState)> {
+        let (pair, component) = pair_of(&self.pairs, u8::try_from(star).ok()?)?;
+        let timeline = pair.timeline();
+        let end = timeline.state_at(timeline.until()).stars()[component.index()];
+        (self.stars[star].state_at(ClockWindow::END) != Some(end)).then_some((pair, component, end))
+    }
+
+    /// The remnant component `star` is by the end of the clock window (+H), with its birth, as
+    /// the planetary stage's generation reads it (P14.T1.h): its own model's
+    /// ([`StarModel::remnant`] at its death) where it dies by then; from generator version 28,
+    /// for a star of a pair the engine ran and changed, the remnant its pair's timeline leaves it
+    /// at +H, born at the first age it is that kind of remnant
+    /// ([`BinaryTimeline::first_age_where`](crate::stellar::binary::BinaryTimeline::first_age_where)),
+    /// at its mass then, its birth at its model's own death where the two agree ([`at_own_death`]).
+    /// `None` for a star alive at +H and for one that leaves nothing, merged away or destroyed.
+    ///
+    /// # Panics
+    ///
+    /// If `star` is not a component of the system.
+    #[must_use]
+    pub(crate) fn remnant_by_end(&self, star: usize) -> Option<StarRemnant> {
+        let model = &self.stars[star];
+        let Some((pair, component, end)) = self.remnants_pair(star) else {
+            model.remnant_age_at(ClockWindow::END)?;
+            return Some(StarRemnant {
+                remnant: model
+                    .remnant()
+                    .filter(|remnant| remnant.kind() != RemnantKind::None)?,
+                born: model.death()?.age(),
+            });
+        };
+        let timeline = pair.timeline();
+        let kind = remnant_kind(end.phase()).filter(|&kind| kind != RemnantKind::None)?;
+        let born =
+            timeline.first_age_where(component, |phase| remnant_kind(phase) == Some(kind))?;
+        let mass = timeline.state_at(born).stars()[component.index()].mass();
+        Some(StarRemnant {
+            remnant: CompactRemnant::new(kind, mass),
+            born: at_own_death(model, born),
+        })
+    }
+
+    /// The age, Julian years, at which component `star` dies, as the planetary stage's generation
+    /// reads it (P14.T1.h): its model's death ([`StarModel::death`]); from generator version 28,
+    /// for a star of a pair the engine ran and changed, the first age its pair's timeline leaves it
+    /// no living star, if it does by +H
+    /// ([`BinaryTimeline::first_death_age`](crate::stellar::binary::BinaryTimeline::first_death_age)),
+    /// at its model's own death where the two agree ([`at_own_death`]).
+    ///
+    /// # Panics
+    ///
+    /// If `star` is not a component of the system.
+    #[must_use]
+    pub(crate) fn death_age(&self, star: usize) -> Option<Years> {
+        let model = &self.stars[star];
+        match self.remnants_pair(star) {
+            None => model.death().map(|death| death.age()),
+            Some((pair, component, _)) => pair
+                .timeline()
+                .first_death_age(component)
+                .map(|age| at_own_death(model, age)),
+        }
+    }
+
+    /// Component `star`'s pair, its component there and the age at `t` its timeline is read at, if
+    /// the engine ran the star in a pair whose timeline holds `t`.
+    #[must_use]
+    fn paired_at(
+        &self,
+        star: usize,
+        t: UniverseTime,
+    ) -> Option<(&PairTimeline, PairComponent, Years)> {
+        let (pair, component) = pair_of(&self.pairs, u8::try_from(star).ok()?)?;
+        Some((pair, component, pair.age_at(&self.stars, t)?))
+    }
+
+    /// Plan 11's hierarchy of the stars, which bounds the stable zones; `None` for a rogue
+    /// planet, which has no star (P14.T27.b).
+    #[must_use]
+    pub const fn hierarchy(&self) -> Option<&SystemHierarchy> {
+        self.hierarchy.as_ref()
+    }
+
+    /// A rogue planet's mass, M☉, its plan 13 record's (P14.T27.b); `None` for every other host.
+    #[must_use]
+    pub const fn rogue_planet_mass(&self) -> Option<SolarMasses> {
+        self.rogue_planet_mass
+    }
+
+    /// The system's initial mass, M☉: its hierarchy's
+    /// [`system_mass`](SystemHierarchy::system_mass), or a rogue planet's own.
+    ///
+    /// # Panics
+    ///
+    /// Never for a context this module builds, which holds one or the other.
+    #[must_use]
+    pub fn system_mass(&self) -> SolarMasses {
+        match (&self.hierarchy, self.rogue_planet_mass) {
+            (Some(hierarchy), _) => hierarchy.system_mass(),
+            (None, Some(mass)) => mass,
+            (None, None) => unreachable!("a context holds stars or a rogue planet"),
+        }
     }
 
     /// The stable zones, each an orbit host with its limits (design note 10): P14.T9's
-    /// [`stable_zones`] of [`ZoneHierarchy::from`] the hierarchy, recomputed on each call.
+    /// [`stable_zones`] of [`ZoneHierarchy::from`] the hierarchy, recomputed on each call; none
+    /// for a rogue planet, which has no star.
     ///
-    /// They are the zones at birth, all the slice has: design note 10 intersects them with the
-    /// zones of the evaluated state once plan 11 evolves binaries (P11.T4).
+    /// They are the zones at birth, which placement reads; `PlanetarySystem::zones_at` gives a
+    /// system's zones at a later time, at the evaluated state of each pair the binary engine ran
+    /// from generator version 27 (P14.T9.d, design note 10).
     #[must_use]
     pub fn zones(&self) -> Vec<OrbitZone> {
-        stable_zones(&ZoneHierarchy::from(&self.hierarchy))
+        self.hierarchy.as_ref().map_or_else(Vec::new, |hierarchy| {
+            stable_zones(&ZoneHierarchy::from(hierarchy))
+        })
     }
 
     /// What each component's disc reads (P14.T9.c), by body index: its zero-age luminosity and
@@ -711,8 +1217,11 @@ impl SystemContext {
     /// - A star of 0.08–0.1 M☉ takes the cooling fits' main sequence, their state at 5 Gyr
     ///   ([`substellar::cooling`], ruling 61.3): [`StarModel`] evolves it on those fits, so its
     ///   disc sees the star the model does, not Tout et al.'s fits extrapolated below their 0.1 M☉.
-    /// - A brown-dwarf companion takes its cooling fit's luminosity and radius at 10 Myr, the
-    ///   substellar rule of design note 6.
+    /// - A brown-dwarf companion, and a free-floating brown dwarf
+    ///   ([`HostKind::BrownDwarf`], P14.T27.a), take their cooling fit's luminosity and radius at
+    ///   10 Myr, the substellar rule of design note 6.
+    ///
+    /// None for a rogue planet, which has no star.
     ///
     /// # Panics
     ///
@@ -727,12 +1236,15 @@ impl SystemContext {
             (state.luminosity(), state.radius())
         };
         self.hierarchy
-            .stars()
             .iter()
+            .flat_map(SystemHierarchy::stars)
             .zip(&self.stars)
             .map(|(slot, star)| {
                 let mass = slot.initial_mass();
                 let (zams_luminosity, zams_radius) = match slot.kind() {
+                    SlotKind::Star if self.host_kind == HostKind::BrownDwarf => {
+                        cooling(mass, SUBSTELLAR_DISC_AGE)
+                    }
                     SlotKind::Star if mass < sse::MIN_INITIAL_MASS => {
                         cooling(mass, COOLING_MAIN_SEQUENCE_AGE)
                     }
@@ -788,19 +1300,77 @@ impl SystemContext {
     }
 
     /// The X-ray and ultraviolet history of every component, in body order: [`xuv_history`]
-    /// of each.
+    /// of each; none for a rogue planet.
+    ///
+    /// A star of a pair the binary engine ran follows what the engine made of it (P14.T1.f, from
+    /// generator version 27): merged into its companion, it shines no more
+    /// from the merger; left on the main sequence at another mass by the pair's first interaction,
+    /// an accretor or a merger's product, it shines from that interaction's start as a star of
+    /// that mass ([`XuvHistory::new`] of it and its zero-age luminosity), its age counted from its
+    /// birth (lean, 2026-11-02). A stripped or evolved star keeps its own closed form.
     ///
     /// [`xuv_history`]: Self::xuv_history
     #[must_use]
     pub fn xuv_histories(&self) -> Vec<XuvHistory> {
-        self.hierarchy
-            .stars()
+        let histories = self
+            .hierarchy
             .iter()
+            .flat_map(SystemHierarchy::stars)
             .zip(self.zone_stars())
             .map(|(slot, zone_star)| {
                 XuvHistory::new(slot.initial_mass(), zone_star.zams_luminosity)
-            })
+            });
+        histories
+            .enumerate()
+            .map(|(star, history)| self.engine_xuv(star, history))
             .collect()
+    }
+
+    /// Star `star`'s X-ray and ultraviolet history `history` as the binary engine leaves it
+    /// ([`xuv_histories`](Self::xuv_histories), P14.T1.f): `history` itself for a star of no pair
+    /// the engine ran.
+    #[must_use]
+    fn engine_xuv(&self, star: usize, history: XuvHistory) -> XuvHistory {
+        let Some((pair, component)) = u8::try_from(star)
+            .ok()
+            .and_then(|index| pair_of(&self.pairs, index))
+        else {
+            return history;
+        };
+        let timeline = pair.timeline();
+        let segments = timeline.segments();
+        let gone = timeline.state_at(timeline.until()).stars()[component.index()].phase()
+            == Phase::NoRemnant;
+        if gone && let Some(merger) = timeline.merger_age() {
+            return history.then_from(merger, XuvHistory::DARK);
+        }
+        let Some(first) = segments
+            .iter()
+            .position(|segment| segment.kind() != SegmentKind::Detached)
+        else {
+            return history;
+        };
+        // The star the first interaction leaves: at the next detached segment's start, or at the
+        // coalescence's; a coalescence that is itself the first interaction (a dynamical merger's,
+        // which no transfer leads to) leaves its product at its own start, where its next segment
+        // starts only at the product's next phase.
+        let left = if segments[first].kind() == SegmentKind::Merged {
+            segments[first].start()
+        } else {
+            segments[first + 1..]
+                .iter()
+                .find(|segment| {
+                    matches!(segment.kind(), SegmentKind::Detached | SegmentKind::Merged)
+                })
+                .map_or(timeline.until(), crate::stellar::binary::Segment::start)
+        };
+        let after = timeline.state_at(left).stars()[component.index()];
+        if after.phase() != Phase::MainSequence || after.mass() < sse::MIN_INITIAL_MASS {
+            return history;
+        }
+        let coeffs = ZCoeffs::new(self.composition.z_fit());
+        let then = XuvHistory::new(after.mass(), zams::luminosity(after.mass(), &coeffs));
+        history.then_from(segments[first].start(), then)
     }
 
     /// The system's age at the epoch, Julian years: negative for a system that forms during play.
@@ -827,46 +1397,72 @@ impl SystemContext {
         }
     }
 
-    /// The system's sphere of influence, m: the galactic tidal radius of its mass at its epoch
-    /// position for a real system, and until plan 09 for every system (module documentation).
+    /// The system's sphere of influence, m: for a real system the galactic tidal radius of its
+    /// mass at its epoch position, and from P14.T29's hold at generator version 26 plan 09's rule
+    /// (module documentation).
     #[must_use]
     pub const fn tidal_radius(&self) -> Metres {
         self.tidal_radius
     }
 
     /// The radius inside which the stage generates bodies, m: design note 14's
-    /// [`SATELLITE_STABILITY_FRACTION`] (0.4895) of the [`tidal_radius`](Self::tidal_radius).
+    /// [`SATELLITE_STABILITY_FRACTION`](super::params::SATELLITE_STABILITY_FRACTION) (0.4895) of
+    /// the [`tidal_radius`](Self::tidal_radius), and for a context with an
+    /// [`encounter_environment`](Self::encounter_environment) the smaller of that and its
+    /// encounter cut ([`strip`]).
     ///
-    /// P14.T29 adds here the encounter cut of a feature member, the smaller of this and the radius
-    /// at which a disrupting encounter is expected within the system's age, so that the stage has
-    /// one strip radius. Until then an [`encounter_environment`](Self::encounter_environment) a
-    /// synthetic host was given is carried but not applied; no real system of this generator
-    /// version has one.
+    /// The encounter cut applies from generator version 26 (P14.T29): before it an environment a
+    /// synthetic host was given was carried but not applied, and no real system had one.
     #[must_use]
     pub fn strip_radius(&self) -> Metres {
-        self.tidal_radius * SATELLITE_STABILITY_FRACTION
+        strip::strip_radius(self)
     }
 
-    /// The system's encounter environment: `None` except for a feature member, which plan 09
-    /// places, or a synthetic host given one.
+    /// The system's encounter environment: `None` except for a feature member from P14.T29's hold
+    /// at generator version 26, or a synthetic host given one.
     #[must_use]
     pub const fn encounter_environment(&self) -> Option<&EncounterEnvironment> {
         self.encounter_environment.as_ref()
     }
 
     /// The bytes the context owns on the heap, beyond `size_of::<SystemContext>()`: each star's
-    /// model and track and the hierarchy's lists, by capacity, as [`SystemStars::heap_bytes`]
-    /// counts them.
+    /// model and track, the hierarchy's lists and each pair's timeline, by capacity, as
+    /// [`SystemStars::heap_bytes`] counts them.
     ///
     /// It is what a server charges a cached context against its byte budget (plan 14, P14.T36.a);
     /// nothing generated reads it.
     #[must_use]
     pub fn heap_bytes(&self) -> usize {
-        self.stars.iter().fold(
-            self.stars.capacity() * size_of::<StarModel>() + self.hierarchy.heap_bytes(),
+        let stars = self.stars.iter().fold(
+            self.stars.capacity() * size_of::<StarModel>()
+                + self
+                    .hierarchy
+                    .as_ref()
+                    .map_or(0, SystemHierarchy::heap_bytes),
             |bytes, star| bytes + star.heap_bytes(),
+        );
+        self.pairs.iter().fold(
+            stars
+                + self.pairs.capacity() * size_of::<PairTimeline>()
+                + self.departures.capacity() * size_of::<Option<Years>>(),
+            |bytes, pair| bytes + pair.timeline().heap_bytes(),
         )
     }
+}
+
+/// The refusal of a system that resolves but whose planetary stage is not generated, for
+/// [`SystemContext::for_system`] and [`SystemContext::for_stars`] alike.
+///
+/// # Errors
+///
+/// [`ResolveSystemError::KindNotGenerated`] for a member of the galactic centre: its members resolve
+/// since plan 09's P09.T27, but their stars take the centre's own composition and its black hole is
+/// no star.
+fn refuse_ungenerated(record: &SystemRecord) -> Result<(), ResolveSystemError> {
+    if matches!(record.origin(), SystemOrigin::CentreMember { .. }) {
+        return Err(ResolveSystemError::KindNotGenerated);
+    }
+    Ok(())
 }
 
 /// How a synthetic host's stars take their plan 06 draws ([`StarDraws`]).
@@ -1122,7 +1718,10 @@ impl SystemContextBuilder {
             id,
             host_kind: HostKind::Stellar,
             stars: models,
-            hierarchy,
+            pairs: Vec::new(),
+            departures: Vec::new(),
+            hierarchy: Some(hierarchy),
+            rogue_planet_mass: None,
             composition,
             alpha_fe: Some(alpha_fe(
                 self.fe_h,
@@ -1348,10 +1947,12 @@ mod tests {
 
     use super::*;
     use crate::coords::GalacticPosition;
+    use crate::galaxy::PointLy;
     use crate::galaxy::params::GalaxyParams;
     use crate::galaxy::placement::{CellKey, generate_cell};
     use crate::id::{BodyId, Layer};
     use crate::orbit::BuildOrbitError;
+    use crate::planetary::params::SATELLITE_STABILITY_FRACTION;
     use crate::planetary::placement::{OrbitHost, ZoneNode};
     use crate::stellar::multiplicity::{MultiplicityContext, RedrawAttempt, draw_hierarchy};
     use crate::stellar::system::draw_metallicity;
@@ -1502,10 +2103,11 @@ mod tests {
             let held = SystemContext::from_stars(&galaxy, &stars);
             assert_eq!(held, SystemContext::from_record(&galaxy, &record));
             // Its heap is its stars' own, less the spare capacity of the stars' list, which the
-            // copy does not keep.
+            // copy does not keep, and with its stars' departures (P14.T9.d).
             let models = size_of_val(stars.stars());
+            let departures = stars.stars().len() * size_of::<Option<Years>>();
             assert!(
-                (models..=stars.heap_bytes()).contains(&held.heap_bytes()),
+                (models..=stars.heap_bytes() + departures).contains(&held.heap_bytes()),
                 "{} bytes held, the stars {}",
                 held.heap_bytes(),
                 stars.heap_bytes()
@@ -1545,13 +2147,19 @@ mod tests {
                 MultiplicityContext::Free,
                 RedrawAttempt::FIRST,
             );
-            assert_eq!(context.hierarchy(), &drawn);
-            assert_eq!(context.hierarchy(), stars.hierarchy());
+            assert_eq!(context.hierarchy(), Some(&drawn));
+            assert_eq!(context.hierarchy(), Some(stars.hierarchy()));
             assert_eq!(
-                usize::from(context.hierarchy().star_count()),
+                usize::from(context.hierarchy().unwrap().star_count()),
                 context.stars().len()
             );
-            for (slot, star) in context.hierarchy().stars().iter().zip(context.stars()) {
+            for (slot, star) in context
+                .hierarchy()
+                .unwrap()
+                .stars()
+                .iter()
+                .zip(context.stars())
+            {
                 assert_eq!(slot.body().system(), record.id());
                 assert_same_bits(slot.initial_mass().value(), star.initial_mass().value());
             }
@@ -1570,7 +2178,7 @@ mod tests {
             if drawn.star_count() == 1 {
                 assert_eq!(context.zones().len(), 1);
             } else {
-                assert!(!context.zones().is_empty());
+                assert_ne!(context.zones(), []);
             }
         }
     }
@@ -1796,9 +2404,16 @@ mod tests {
         assert_eq!(a.host_kind(), HostKind::Stellar);
         assert_eq!(
             a.hierarchy(),
-            &SystemHierarchy::single(id(3), SolarMasses::new(1.0), SlotKind::Star)
+            Some(&SystemHierarchy::single(
+                id(3),
+                SolarMasses::new(1.0),
+                SlotKind::Star
+            ))
         );
-        assert_eq!(a.hierarchy().stars()[0].body(), BodyId::new(id(3), 0));
+        assert_eq!(
+            a.hierarchy().unwrap().stars()[0].body(),
+            BodyId::new(id(3), 0)
+        );
         assert_same_bits(
             a.tidal_radius().value(),
             solar_neighbourhood_tidal_radius(SolarMasses::new(1.0)).value(),
@@ -1829,7 +2444,10 @@ mod tests {
             for (n, star) in (0_u16..).zip(context.stars()) {
                 let body = BodyId::new(context.id(), n);
                 assert_eq!(star.draws(), &StarDraws::for_star(seed, body));
-                assert_eq!(context.hierarchy().stars()[usize::from(n)].body(), body);
+                assert_eq!(
+                    context.hierarchy().unwrap().stars()[usize::from(n)].body(),
+                    body
+                );
             }
         }
         assert_ne!(a.stars()[0].draws(), b.stars()[0].draws());
@@ -1839,7 +2457,7 @@ mod tests {
     #[test]
     fn a_synthetic_binary_is_a_hierarchy_the_zones_read() {
         let context = binary(1.1, 0.9, 20.0, 0.3).build().unwrap();
-        let h = context.hierarchy();
+        let h = context.hierarchy().unwrap();
         assert_eq!(h.star_count(), 2);
         assert_eq!(context.stars().len(), 2);
         let (node, orbit) = h.pairs().next().unwrap();
@@ -1885,11 +2503,14 @@ mod tests {
     #[test]
     fn a_companion_below_the_stellar_floor_is_a_brown_dwarf() {
         let dwarf = binary(0.9, 0.05, 5.0, 0.1).build().unwrap();
-        assert_eq!(dwarf.hierarchy().stars()[1].kind(), SlotKind::BrownDwarf);
+        assert_eq!(
+            dwarf.hierarchy().unwrap().stars()[1].kind(),
+            SlotKind::BrownDwarf
+        );
         let floor = binary(0.9, MIN_COMPANION_MASS.value(), 5.0, 0.1)
             .build()
             .unwrap();
-        assert_eq!(floor.hierarchy().stars()[1].kind(), SlotKind::Star);
+        assert_eq!(floor.hierarchy().unwrap().stars()[1].kind(), SlotKind::Star);
         assert!(
             binary(0.9, MIN_SUBSTELLAR_COMPANION_MASS.value(), 5.0, 0.1)
                 .build()
@@ -2161,6 +2782,41 @@ mod tests {
         let bound = saturated * 3.0 * 1e8 * SECONDS_PER_JULIAN_YEAR
             / (4.0 * core::f64::consts::PI * au.value() * au.value());
         assert!(limit < bound && limit > 0.999 * bound);
+        // The saturated flux is what the fluence grows by while saturated (P14.T24.f).
+        let flux = sun.saturated_flux(au, 0.0167).value();
+        let early = sun.fluence(Years::new(5e7), au, 0.0167).value();
+        assert!((flux * 5e7 * SECONDS_PER_JULIAN_YEAR / early - 1.0).abs() < 1e-12);
+        assert!((flux / 0.301 - 1.0).abs() < 0.01, "{flux} W m⁻² at 1 au");
+        assert_eq!(
+            sun.saturated_flux(Metres::ZERO, 0.0),
+            WattsPerSquareMetre::ZERO
+        );
+        assert_eq!(sun.saturated_flux(au, 1.0), WattsPerSquareMetre::ZERO);
+        // The flux at an age is the luminosity then over the orbit-averaged sphere (P14.T24.a):
+        // the saturated flux while saturated, some 300 times fainter today, and none before
+        // birth or on an orbit that is no orbit.
+        let now = Years::new(4.57e9);
+        let area = 4.0
+            * core::f64::consts::PI
+            * au.value()
+            * au.value()
+            * (1.0_f64 - 0.0167 * 0.0167).sqrt();
+        assert_same_bits(
+            sun.flux(now, au, 0.0167).value(),
+            sun.luminosity(now).value() / area,
+        );
+        assert_same_bits(
+            sun.flux(Years::new(5e7), au, 0.0167).value(),
+            sun.saturated_flux(au, 0.0167).value(),
+        );
+        assert_eq!(sun.flux(Years::ZERO, au, 0.0), WattsPerSquareMetre::ZERO);
+        assert_eq!(sun.flux(now, Metres::ZERO, 0.0), WattsPerSquareMetre::ZERO);
+        assert_eq!(
+            sun.flux(now, Metres::new(f64::INFINITY), 0.0),
+            WattsPerSquareMetre::ZERO
+        );
+        assert_eq!(sun.flux(now, au, 1.0), WattsPerSquareMetre::ZERO);
+        assert_eq!(sun.flux(now, au, -0.1), WattsPerSquareMetre::ZERO);
         // M dwarfs stay saturated ten times as long, K dwarfs as long as the Sun, and the blend
         // is continuous.
         let m = |mass: f64| {

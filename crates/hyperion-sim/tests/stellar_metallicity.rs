@@ -89,27 +89,33 @@ fn mean_and_sd(xs: &[f64]) -> (f64, f64) {
 /// (`GalaxyParams::metallicity_gradient`, −0.05 dex per kpc for the fixture), and the scatter about
 /// the line is the field's 0.20 dex.
 ///
-/// The sample is every young- and old-thin-disc record of layer E in a strip of cells in the plane
+/// The sample is every young- and old-thin-disc record of layer C in a strip of cells in the plane
 /// along +y, clear of the bar, from 12,800 to 44,800 ly, of every age: the thin discs'
 /// age–metallicity relation is flat at every age (plan 02, ruling 42.5 and P02.T12.c; until
-/// version 12 the sample stopped at 8 Gyr, beyond which it fell). Over that radial
+/// version 12 the sample stopped at 8 Gyr, beyond which it fell). Until generator version 27 it
+/// was layer E's, in a strip 1,024 ly wide and 512 ly high; from 27 a dead record of layers D and
+/// E, retained or a displaced remnant, takes its birth source's reference composition, and a
+/// living one draws at its formation site and stored age (plan 08, P08.T12.c, Design note 19), so
+/// layer E's thin-disc records, nearly all dead, gave a slope of −4 × 10⁻⁵ dex per kpc and a
+/// scatter of 0.0085 dex. Layer C, the heaviest layer whose marks are still plan 03's, draws
+/// every record at its epoch position and age, in a strip 128 ly wide and high. Over that radial
 /// range the field's mean is exactly linear in radius (its clamp at −1.0 and +0.5 dex binds only
 /// beyond 90,000 ly and inside the centre for this gradient), so the slope's only error is the
 /// sampling error of a line fitted to normal scatter. The bracket is the slope's standard error
 /// from the sample's own residuals and radii, times the two-sided quantile at α = 10⁻³; the
 /// scatter's bracket is its standard error under normality, σ ÷ √(2(n − 2)), likewise.
 #[test]
-#[ignore = "slow: places a strip of layer-E cells across the thin disc and draws 10⁵ systems"]
+#[ignore = "slow: places a strip of layer-C cells across the thin disc and draws 10⁵ systems"]
 fn the_thin_discs_radial_gradient_is_the_galaxys_drawn_one() {
     let galaxy = milky_way();
     let drawn = galaxy.params().metallicity_gradient().value();
     let mut radii_kpc = Vec::new();
     let mut fe_h = Vec::new();
     let mut cell = Vec::new();
-    for iy in 100..350 {
-        for ix in -4..4 {
+    for iy in 400..1_400 {
+        for ix in -2..2 {
             for iz in -2..2 {
-                let key = CellKey::new(Layer::E, [ix, iy, iz]).expect("inside the root cube");
+                let key = CellKey::new(Layer::C, [ix, iy, iz]).expect("inside the root cube");
                 cell.clear();
                 generate_cell(&galaxy, key, &mut cell);
                 for r in &cell {

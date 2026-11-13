@@ -1,0 +1,19 @@
+# Hexagonal H2O ice's near-infrared absorption at 100 K of Grundy and Schmitt (1998): the frost
+# `H2O`'s imaginary index over 0.9623-2.742 µm (plan 14, P14.T49.i), in place of Warren and Brandt
+# 2008's warm ice there. Reduced by `reduce.py` from the authors' table (git-ignored,
+# `data/cache/grundy_schmitt_1998_h2o/alpha_H2O.ascii.gz`) to its 100 K column, rows sharing a
+# printed wavelength merged, and committed as measured values with the citation. Reproduced from
+# the raw by hand on 2026-10-16: `python3 -I crates/hyperion-fit/data/grundy_schmitt_1998_h2o/reduce.py
+# <raw> crates/hyperion-fit/data/grundy_schmitt_1998_h2o/alpha_100k.csv`, from outside the raw's
+# directory. Read by `run substance_albedos`.
+dataset = "grundy_schmitt_1998_h2o"
+class = "committed"
+citation = "W. M. Grundy and B. Schmitt (1998), J. Geophys. Res. 103 (E11), 25809-25822, DOI 10.1029/98JE00738: the temperature-dependent near-infrared absorption spectrum of hexagonal H2O ice; the Lambert absorption coefficient α (cm⁻¹) at 100 K over 0.9623-2.742 µm"
+url = "http://74.208.185.217/grundy/abstracts/ice/alpha_H2O.ascii.gz"
+retrieved = "2026-10-16"
+release = "alpha_H2O.ascii.gz as served on the retrieval date from the author's pages (Lowell Observatory's www2.lowell.edu/users/grundy/abstracts/1998.H2Oice.html, now at a bare IP address; sha256 56e45ef87ee6238197722a50b4512e40534d9c843e57b5ef1875caf5e802c0fc; α every 10 K from 20 to 270 K in columns 2-27), reduced by reduce.py"
+licence = "none stated (the table's header and the paper's page give the citation alone); only the measured coefficients at one temperature, facts, are committed, with the citation"
+
+[[files]]
+name = "alpha_100k.csv"
+sha256 = "987116223e305903b7f079b9aa1e52d9446040da82b2b9751a77ed42f4911f09"

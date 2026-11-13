@@ -23,17 +23,21 @@
 //!
 //! Beyond the grid's edge at 2¹⁸ ly (80 kpc), where dwarfs and some orphans have their
 //! apocentres, the tables continue the Gaussian components by scaling the edge's value as `1 ÷ h`
-//! from the clamped point, and their force there is not the gradient of their potential: it
-//! departs from the potential's central differences by up to 3 × 10⁻⁴ of itself outside the grid's
-//! box, against 10⁻¹⁰ inside (measured on the Milky Way fixture, 2026-09-29). So the integrator
-//! continues the galaxy on its own, as Design note 3 asks: the spherical components in closed
-//! form (the NFW halo among them) and the Gaussian components, the stars and gas, as a point mass
-//! plus the axisymmetric quadrupole of the discs, `A ÷ h + B P₂(z ÷ h) ÷ h³`, with `A` and `B`
-//! matched to the tables' Gaussian part in the plane and on the axis at 2¹⁸ ly. Between spherical
-//! radii of 2¹⁷·⁵ and 2¹⁸ ly the two potentials are blended by a smooth step in radius, and the
-//! force is the blend's exact gradient, so the whole field is the gradient of one continuously
-//! differentiable potential. Inside 100 ly no tube progenitor comes, and the tables serve there
-//! as everywhere inside the blend.
+//! from the clamped point. Their force there is that continuation's exact gradient (plan 02,
+//! P02.T6.f, 2026-10-12); before it, where only one coordinate passed the edge, the force departed
+//! from the potential's central differences by up to 5 × 10⁻⁴ of itself, against 10⁻¹⁰ inside the
+//! grid's box (measured on the Milky Way fixture, 2026-09-29 and 2026-10-12). The
+//! continuation's slope is still not the grid's, so the force jumps at the box's faces.
+//!
+//! This integrator continues the galaxy on its own, as Design note 3 asks. It keeps doing so,
+//! since moving it onto the tables' continuation would move its output. Its far field holds the
+//! spherical components in closed form (the NFW halo among them) and the Gaussian components, the
+//! stars and gas, as a point mass plus the axisymmetric quadrupole of the discs,
+//! `A ÷ h + B P₂(z ÷ h) ÷ h³`, with `A` and `B` matched to the tables' Gaussian part in the plane
+//! and on the axis at 2¹⁸ ly. Between spherical radii of 2¹⁷·⁵ and 2¹⁸ ly the two potentials are
+//! blended by a smooth step in radius, and the force is the blend's exact gradient, so the whole
+//! field is the gradient of one continuously differentiable potential. Inside 100 ly no tube
+//! progenitor comes, and the tables serve there as everywhere inside the blend.
 //!
 //! # The step
 //!
@@ -61,6 +65,7 @@
 
 use std::error::Error;
 use std::fmt;
+use std::num::NonZeroU32;
 
 use crate::coords::{GalacticDisplacement, GalacticVelocity};
 use crate::galaxy::potential::{GRID_EDGE_LY, PotentialTables};
@@ -82,10 +87,10 @@ pub const STEPS_PER_PERICENTRE_CROSSING: u32 = 64;
 pub const MAX_STEP: Seconds = Seconds::new(2.0 * SECONDS_PER_MEGAYEAR);
 
 /// (km/s)² in (m/s)².
-const SQUARED_KM_S_IN_SI: f64 = 1e6;
+pub(super) const SQUARED_KM_S_IN_SI: f64 = 1e6;
 
 /// A gradient in (km/s)² per light-year in metres per second squared.
-const FORCE_IN_SI: f64 = SQUARED_KM_S_IN_SI / METRES_PER_LIGHT_YEAR;
+pub(super) const FORCE_IN_SI: f64 = SQUARED_KM_S_IN_SI / METRES_PER_LIGHT_YEAR;
 
 /// Where the blend from the tables to the far field begins, 2¹⁷·⁵ ly (module documentation, "The
 /// far field"); it ends at the grid's edge, 2¹⁸ ly.
@@ -164,6 +169,26 @@ impl FixedStep {
         pericentre_speed: MetresPerSecond,
         span: Seconds,
     ) -> Result<Self, BuildLeapfrogError> {
+        /// The step rule's steps a crossing, as `with_steps_per_crossing` takes them.
+        const STEPS: NonZeroU32 =
+            NonZeroU32::new(STEPS_PER_PERICENTRE_CROSSING).expect("64 is not zero");
+        Self::with_steps_per_crossing(pericentre, pericentre_speed, span, STEPS)
+    }
+
+    /// [`new`](Self::new)'s step at `steps` steps per pericentre crossing in place of
+    /// [`STEPS_PER_PERICENTRE_CROSSING`]: the longest step `min(τ_p ÷ steps, 2 Myr)`, the same bits
+    /// as `new`'s at 64. A spray may take ruling 146.3's fallback, `τ_p ÷ 32` (P10.T10.b's orphans
+    /// from 27, [`SprayParams`](super::spray::SprayParams)).
+    ///
+    /// # Errors
+    ///
+    /// As [`new`](Self::new).
+    pub fn with_steps_per_crossing(
+        pericentre: Metres,
+        pericentre_speed: MetresPerSecond,
+        span: Seconds,
+        steps: NonZeroU32,
+    ) -> Result<Self, BuildLeapfrogError> {
         let crossing = pericentre.value() / pericentre_speed.value();
         if !(crossing.is_finite() && crossing > 0.0) {
             return Err(BuildLeapfrogError::InvalidStep(Seconds::new(crossing)));
@@ -171,7 +196,7 @@ impl FixedStep {
         if !span.value().is_finite() {
             return Err(BuildLeapfrogError::InvalidStep(span));
         }
-        let longest = (crossing / f64::from(STEPS_PER_PERICENTRE_CROSSING)).min(MAX_STEP.value());
+        let longest = (crossing / f64::from(steps.get())).min(MAX_STEP.value());
         let steps = (span.value().abs() / longest).ceil();
         // Also refuses a NaN, from a subnormal crossing time that makes `longest` zero.
         if steps.is_nan() || steps > f64::from(u32::MAX) {
@@ -445,9 +470,28 @@ impl<'a> Leapfrog<'a> {
 
     /// [`potential_j_kg`](Self::potential_j_kg) at `position`, m.
     fn potential(&self, position: [f64; 3]) -> f64 {
-        let p = position.map(|c| c / METRES_PER_LIGHT_YEAR);
+        self.potential_ly(position.map(|c| c / METRES_PER_LIGHT_YEAR)) * SQUARED_KM_S_IN_SI
+    }
+
+    /// The potential at `(R, 0, z)`, (km/s)², with its gradient `[∂Φ ÷ ∂R, ∂Φ ÷ ∂z]`, (km/s)² per
+    /// light-year, `R` and `z` in light-years: what plan 10's spray table samples at its nodes
+    /// (P10.T5.b).
+    #[must_use]
+    pub(crate) fn potential_and_gradient(&self, r_cyl_ly: f64, z_ly: f64) -> (f64, [f64; 2]) {
+        let p = [r_cyl_ly, 0.0, z_ly];
+        let gradient = self.gradient(p);
+        (
+            self.potential_ly(p),
+            [gradient.horizontal * r_cyl_ly, gradient.vertical],
+        )
+    }
+
+    /// The potential at `p` (ly), (km/s)²: the tables', the far field's or their blend (module
+    /// documentation, "The far field").
+    #[must_use]
+    fn potential_ly(&self, p: [f64; 3]) -> f64 {
         let h = dot(p, p).sqrt();
-        let potential = if h <= BLEND_START_LY {
+        if h <= BLEND_START_LY {
             self.table_potential(p)
         } else if h >= GRID_EDGE_LY {
             self.far.potential(self.tables, p, h)
@@ -458,8 +502,7 @@ impl<'a> Leapfrog<'a> {
                 self.far.potential(self.tables, p, h),
             );
             w * table + (1.0 - w) * far
-        };
-        potential * SQUARED_KM_S_IN_SI
+        }
     }
 
     /// The tables' potential at `p` (ly), (km/s)².
@@ -706,11 +749,15 @@ impl Turns {
     }
 }
 
-fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
+/// The dot product of two vectors.
+#[must_use]
+pub(super) fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
 
-fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+/// The cross product `a × b`.
+#[must_use]
+pub(super) fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
     [
         a[1] * b[2] - a[2] * b[1],
         a[2] * b[0] - a[0] * b[2],
@@ -737,8 +784,13 @@ mod tests {
             "tanh", "asinh", "acosh", "atanh", "exp", "exp2", "exp_m1", "ln", "log", "log2",
             "log10", "ln_1p", "powf", "powi", "cbrt", "hypot", "mul_add", "to_bits",
         ];
+        // The spray and its table integrate under the same rule (P10.T5.b), and the list widens
+        // its shells from the spray's orbits (P10.T4).
         let sources = [
             ("global_list/orbit.rs", include_str!("orbit.rs")),
+            ("global_list/mod.rs", include_str!("mod.rs")),
+            ("global_list/spray.rs", include_str!("spray.rs")),
+            ("global_list/spray/force.rs", include_str!("spray/force.rs")),
             ("potential/force.rs", include_str!("../potential/force.rs")),
             (
                 "potential/tables.rs",

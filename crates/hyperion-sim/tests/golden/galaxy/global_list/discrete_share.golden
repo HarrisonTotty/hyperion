@@ -1,0 +1,60 @@
+# generator_version = 31
+galaxies 2000
+applied share, percentile 0 = 0x3f5fcb9569d8f426  # 0.0019406279674421072
+applied share, percentile 1 = 0x3f6a40da72603f49  # 0.0032047525919622105
+applied share, percentile 5 = 0x3f7429421c3337b5  # 0.004922159426497365
+applied share, percentile 10 = 0x3f78e9784781e7f8  # 0.006082029191128761
+applied share, percentile 25 = 0x3f82a5778a08a71e  # 0.009104665660817409
+applied share, percentile 50 = 0x3f8e96cdbc3bf173  # 0.014936072642279119
+applied share, percentile 75 = 0x3f9b376a2e36a213  # 0.026578578062670454
+applied share, percentile 90 = 0x3faa265f0bb1f1b2  # 0.05107399957430249
+applied share, percentile 95 = 0x3fb45596093ba338  # 0.07943093991674466
+applied share, percentile 99 = 0x3fbee6413b760376  # 0.12070090963062605
+applied share, percentile 100 = 0x3fc2d17dbb4b26c1  # 0.14701816220467914
+applied share, mean = 0x3f97ce986c930734  # 0.02324903643307792
+physical share, percentile 0 = 0x3f5fcb9569d8f426  # 0.0019406279674421072
+physical share, percentile 1 = 0x3f6a40da72603f49  # 0.0032047525919622105
+physical share, percentile 5 = 0x3f7429421c3337b5  # 0.004922159426497365
+physical share, percentile 10 = 0x3f78e9784781e7f8  # 0.006082029191128761
+physical share, percentile 25 = 0x3f82a5778a08a71e  # 0.009104665660817409
+physical share, percentile 50 = 0x3f8e96cdbc3bf173  # 0.014936072642279119
+physical share, percentile 75 = 0x3f9bff2ec91c2be0  # 0.027340632462294567
+physical share, percentile 90 = 0x3fb3da0bdda612c3  # 0.07754587327333255
+physical share, percentile 95 = 0x3fc732c2adfcfc04  # 0.18123658652800156
+physical share, percentile 99 = 0x3fe6fc647372c36c  # 0.7183096175050259
+physical share, percentile 100 = 0x40102b5dc20aace1  # 4.0423498457923595
+physical share, mean = 0x3fa984f5802a67f6  # 0.04984252156755524
+globular share, percentile 0 = 0x3f5c6d4e283a212e  # 0.001735044789628114
+globular share, percentile 1 = 0x3f619d44dfb8dab8  # 0.0021501870340004635
+globular share, percentile 5 = 0x3f6846f43f833d3d  # 0.0029635210486060035
+globular share, percentile 10 = 0x3f6c8c5ba7e95f34  # 0.003484896674574767
+globular share, percentile 25 = 0x3f74445b6755b704  # 0.004948002858652382
+globular share, percentile 50 = 0x3f7eb39efd57f58c  # 0.007495518735138328
+globular share, percentile 75 = 0x3f879884e14b24d5  # 0.011521375775731016
+globular share, percentile 90 = 0x3f90a6c467a72e4e  # 0.01626116640708935
+globular share, percentile 95 = 0x3f93ff59f9dcdbca  # 0.019528776050005615
+globular share, percentile 99 = 0x3f9b0ddf763aba23  # 0.026420108405256337
+globular share, percentile 100 = 0x3fab032228e2ce30  # 0.05275828122230697
+globular share, mean = 0x3f825436d74a6080  # 0.008949688382287713
+drawn share, percentile 0 = 0x3f947d4eb187b3a4  # 0.020009259782387226
+drawn share, percentile 1 = 0x3f96c7d6f2892d14  # 0.02224670272179903
+drawn share, percentile 5 = 0x3f9b61722f739db4  # 0.026738914629189828
+drawn share, percentile 10 = 0x3fa0dc5f4aab58e6  # 0.03293130671015536
+drawn share, percentile 25 = 0x3fab1e08afe5d286  # 0.05296351573170903
+drawn share, percentile 50 = 0x3fb5ac39ea8ef151  # 0.08465921379587839
+drawn share, percentile 75 = 0x3fbdb64c105680b2  # 0.11606288336634199
+drawn share, percentile 90 = 0x3fc196b4c0e3a293  # 0.13741168421190206
+drawn share, percentile 95 = 0x3fc26a0e225be95a  # 0.14386154821097358
+drawn share, percentile 99 = 0x3fc30f8cd9d9bee1  # 0.14891205441698843
+drawn share, percentile 100 = 0x3fc3327313356059  # 0.14997709691920383
+drawn share, mean = 0x3fb5affeae018f1a  # 0.08471671817966034
+applied share under 1%: 603 galaxies
+applied share 1–2%: 679 galaxies
+applied share 2–5%: 510 galaxies
+applied share 5–10%: 156 galaxies
+applied share 10–15%: 52 galaxies
+drawn share binds, dwarfs scaled: 227 galaxies
+no dwarf debris inside: 10 galaxies
+globular tubes outside 0.3–1% of the halo: 786 galaxies
+globular tubes at or above the drawn share: 3 galaxies
+applied share digest, in seed order = 0x8c71da172cf5b73e

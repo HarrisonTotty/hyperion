@@ -22,7 +22,7 @@
 //!   when the region emerges.
 //! - **The size** is `max(D₀, v × age)`, held to 10–300 ly, where `D₀` is the diameter of the
 //!   birth clump of mass `M_* ÷ ε` by the clouds' mass–radius relation
-//!   ([`cloud_radius`](super::cloud::cloud_radius)). The 10 ly floor and the
+//!   ([`cloud_radius`]). The 10 ly floor and the
 //!   300 ly cap are the brainstorm's range for star-forming regions and associations ("Large
 //!   features"); the floor is provisional, since a small clump is smaller. A bound cluster stops
 //!   expanding when it emerges: its size is then four half-mass radii, 10–100 ly, and its
@@ -52,13 +52,42 @@
 //! smooth gas at the site. The radius is capped at blow-out, 2.5 neutral scale heights, and the
 //! interior is log-normal about 0.005 cm⁻³ with 0.3 dex (the scatter is ours), truncated at two
 //! standard deviations (1.26 × 10⁻³ to 0.020 cm⁻³; ruling 136.3), at 10^6.2 K.
+//!
+//! # The merge and the wall (P09.T5, from generator version 29)
+//!
+//! Grown as Weaver's to blow-out, the bubbles filled 0.96 of the plane at the solar circle and
+//! carried no dust, against a hot filling of 0.2–0.5 there (Ferrière 2001, Rev. Mod. Phys. 73,
+//! 1031). So every galaxy's bubble is [`Superbubble::merging`]'s:
+//!
+//! - **The merge.** A bubble's shell stops growing once it has slowed to the speed at which a
+//!   remnant's shell merges with the gas, `v_m = β c_net` (the shell window's: β = 2,
+//!   `c_net² = C₀² + σ²`, σ = 8 km/s; Cioffi, McKee and Bertschinger 1988, ApJ 334, 252, p. 264,
+//!   ruling 98), with `C₀ = √(P ÷ ρ)` the smooth gas's at the site at the field's thermal pressure
+//!   (ours, a lean of 2026-11-05). Weaver's shell moves at `Ṙ = ⅗ R ÷ t` under a constant power
+//!   `L`, so it reaches `v_m` at the radius `R_m = α (⅗ α)^(3/2) (L ÷ ρ)^½ v_m^(−3/2)`, α = 0.76.
+//!   The power is not constant, so a bubble takes its mean power so far, `L̄ = E(t) ÷ t`, and its
+//!   radius is the least of Weaver's, `R_m(L̄)` and the blow-out cap, to its last core collapse.
+//! - **The wall.** The gas the bubble sweeps up, the site's mean density over its whole sphere
+//!   (Weaver et al. 1977's shell of swept-up gas), lies in a uniform wall at [`WALL_COMPRESSION`]
+//!   times that density, β² = 4, an isothermal shock's compression `M²` at the merge speed, whose
+//!   Mach number in `c_net` is β (ours): from [`WALL_INNER_SHARE`] = `(1 − 1 ÷ β²)^⅓` = 0.909 of its
+//!   radius to its edge. So a bubble moves the plane's gas and dust and does not take them away, and
+//!   its hot core is the hole: the cores fill a fifth of the plane at the solar circle, and with the
+//!   field's own hot phase half of it is hot.
 
+use crate::coords::GalacticPosition;
+use crate::galaxy::Galaxy;
 use crate::galaxy::consts::YEARS_PER_MEGAYEAR;
+use crate::galaxy::snr::MERGE_FACTOR;
+use crate::galaxy::snr::window::merge_speed;
 use crate::math;
-use crate::units::consts::{HYDROGEN_MASS_KG, METRES_PER_LIGHT_YEAR, SECONDS_PER_JULIAN_YEAR};
-use crate::units::{
-    Dex, HydrogenPerCm3, Kelvin, KilometresPerSecond, LightYears, SolarMasses, Years,
+use crate::units::consts::{
+    BOLTZMANN_CONSTANT, HYDROGEN_MASS_KG, METRES_PER_LIGHT_YEAR, SECONDS_PER_JULIAN_YEAR,
 };
+use crate::units::{
+    Dex, HydrogenPerCm3, Kelvin, KelvinPerCm3, KilometresPerSecond, LightYears, SolarMasses, Years,
+};
+use crate::words::{WordSink, WordSource};
 
 use super::cloud::cloud_radius;
 use super::open_cluster::{NURSERY_MASS_MIN, dissolution_time, present_mass};
@@ -128,6 +157,15 @@ pub const BUBBLE_INTERIOR_TRUNCATION: f64 = 2.0;
 /// A superbubble's interior temperature, 10^6.2 K (P09.T4.b).
 pub const BUBBLE_TEMPERATURE: Kelvin = Kelvin::new(1_584_893.192_461_114);
 
+/// How many times its site's mean density a superbubble's wall of swept-up gas holds: β² = 4, the
+/// compression of an isothermal shock at the merge speed (module documentation; ours). A parameter
+/// of the generator version.
+pub const WALL_COMPRESSION: f64 = MERGE_FACTOR * MERGE_FACTOR;
+
+/// The share of a superbubble's radius at which its wall begins, `(1 − 1 ÷ β²)^⅓` = `∛¾`, so that
+/// the wall from it to the edge holds the gas of the whole sphere at [`WALL_COMPRESSION`].
+pub const WALL_INNER_SHARE: f64 = 0.908_560_296_416_069_8;
+
 /// The share `G(age)` of associations born `age` ago that have dissolved: uniform dissolution ages
 /// on [`DISSOLUTION_AGE_MYR`] (Design note 2).
 #[must_use]
@@ -178,6 +216,80 @@ pub struct NurseryMarks {
 }
 
 impl NurseryMarks {
+    /// Writes the marks' every bit into `sink`, in their fields' order, the bound as 0 or 1: a
+    /// nursery's part of the features' gas index's words
+    /// ([`FeatureGasIndex::write_words`](crate::galaxy::features::gas_overlay::FeatureGasIndex::write_words)).
+    /// The marks are taken apart in full, so that a field added fails to compile here until it is
+    /// written.
+    pub(crate) fn write_words(&self, sink: &mut impl WordSink) {
+        let Self {
+            age_at_epoch,
+            mass,
+            bound,
+            embedded_duration,
+            dissolution_age,
+            expansion_speed,
+            age_spread,
+            efficiency,
+            fe_h,
+            bubble_interior,
+            half_mass_radius,
+            concentration,
+        } = self;
+        sink.float(age_at_epoch.value());
+        sink.float(mass.value());
+        sink.word(u64::from(*bound));
+        for value in [
+            embedded_duration.value(),
+            dissolution_age.value(),
+            expansion_speed.value(),
+            age_spread.value(),
+            *efficiency,
+            fe_h.value(),
+            bubble_interior.value(),
+            half_mass_radius.value(),
+            *concentration,
+        ] {
+            sink.float(value);
+        }
+    }
+
+    /// The marks [`write_words`](Self::write_words) wrote into `source`, or `None` for too few
+    /// words or a bound neither 0 nor 1.
+    #[must_use]
+    pub(crate) fn read_words(source: &mut impl WordSource) -> Option<Self> {
+        let age_at_epoch = Years::new(source.float()?);
+        let mass = SolarMasses::new(source.float()?);
+        let bound = match source.word()? {
+            0 => false,
+            1 => true,
+            _ => return None,
+        };
+        let embedded_duration = Years::new(source.float()?);
+        let dissolution_age = Years::new(source.float()?);
+        let expansion_speed = KilometresPerSecond::new(source.float()?);
+        let age_spread = Years::new(source.float()?);
+        let efficiency = source.float()?;
+        let fe_h = Dex::new(source.float()?);
+        let bubble_interior = HydrogenPerCm3::new(source.float()?);
+        let half_mass_radius = LightYears::new(source.float()?);
+        let concentration = source.float()?;
+        Some(Self {
+            age_at_epoch,
+            mass,
+            bound,
+            embedded_duration,
+            dissolution_age,
+            expansion_speed,
+            age_spread,
+            efficiency,
+            fe_h,
+            bubble_interior,
+            half_mass_radius,
+            concentration,
+        })
+    }
+
     /// The nursery's age at the epoch: the time since its first stars formed.
     #[must_use]
     pub const fn age_at_epoch(&self) -> Years {
@@ -379,11 +491,23 @@ impl SupernovaClock {
     }
 }
 
-/// A nursery's superbubble at one age: a hole in the gas (P09.T4.b).
+/// A nursery's superbubble at one age: a hole in the gas (P09.T4.b), lined from generator version
+/// 29 by a wall of the gas it swept up (P09.T5).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Superbubble {
     radius: LightYears,
     interior: HydrogenPerCm3,
+    wall: Option<HydrogenPerCm3>,
+}
+
+/// The energy a nursery expecting `count` core collapses has put into its bubble by age `a`
+/// (years), J: its winds' and its supernovae's (module documentation).
+fn injected_energy(count: f64, a: f64, clock: &SupernovaClock) -> f64 {
+    let (first, last) = (clock.first.value(), clock.last.value());
+    let wind_span = WIND_DURATION_MYR * YEARS_PER_MEGAYEAR;
+    let winds = count * WIND_ENERGY_J * (a / wind_span).min(1.0);
+    let supernovae = count * SUPERNOVA_ENERGY_J * ((a - first) / (last - first)).clamp(0.0, 1.0);
+    winds + supernovae
 }
 
 impl Superbubble {
@@ -398,16 +522,12 @@ impl Superbubble {
         clock: &SupernovaClock,
     ) -> Option<Self> {
         let count = marks.mass.value() * clock.per_solar_mass;
-        let (first, last) = (clock.first.value(), clock.last.value());
+        let last = clock.last.value();
         let a = age.value();
         if count < 1.0 || a <= 0.0 || a >= last || ambient.value() <= 0.0 {
             return None;
         }
-        let wind_span = WIND_DURATION_MYR * YEARS_PER_MEGAYEAR;
-        let winds = count * WIND_ENERGY_J * (a / wind_span).min(1.0);
-        let supernovae =
-            count * SUPERNOVA_ENERGY_J * ((a - first) / (last - first)).clamp(0.0, 1.0);
-        let energy = winds + supernovae;
+        let energy = injected_energy(count, a, clock);
         let density = MASS_PER_HYDROGEN_FACTOR * HYDROGEN_MASS_KG * ambient.value() * 1e6;
         let t = a * SECONDS_PER_JULIAN_YEAR;
         let radius_m = BUBBLE_COEFFICIENT * math::powf(energy * t * t / density, 0.2);
@@ -416,7 +536,83 @@ impl Superbubble {
         (radius > 0.0).then_some(Self {
             radius: LightYears::new(radius),
             interior: marks.bubble_interior,
+            wall: None,
         })
+    }
+
+    /// The bubble of `marks` at `age` (module documentation, "The merge and the wall"):
+    /// [`of`](Self::of)'s, stopped where its shell slows to the merge speed
+    /// in gas of smooth density `ambient` at thermal pressure `pressure`, and lined by a wall of
+    /// the gas it swept up. `None` where `of` gives none.
+    #[must_use]
+    pub fn merging(
+        marks: &NurseryMarks,
+        age: Years,
+        ambient: HydrogenPerCm3,
+        pressure: KelvinPerCm3,
+        neutral_height: LightYears,
+        clock: &SupernovaClock,
+    ) -> Option<Self> {
+        let weaver = Self::of(marks, age, ambient, neutral_height, clock)?;
+        let a = age.value();
+        let count = marks.mass.value() * clock.per_solar_mass;
+        let power = injected_energy(count, a, clock) / (a * SECONDS_PER_JULIAN_YEAR);
+        let density = MASS_PER_HYDROGEN_FACTOR * HYDROGEN_MASS_KG * ambient.value() * 1e6;
+        let sound = (pressure.value() * BOLTZMANN_CONSTANT * 1e6 / density).sqrt();
+        let merge = merge_speed(sound);
+        // R_m = α (⅗ α)^(3/2) (L̄ ÷ ρ)^½ v_m^(−3/2), with square roots alone.
+        let speed_factor = 0.6 * BUBBLE_COEFFICIENT;
+        let merged_m =
+            BUBBLE_COEFFICIENT * speed_factor * speed_factor.sqrt() * (power / density).sqrt()
+                / (merge * merge.sqrt());
+        let merged = merged_m / METRES_PER_LIGHT_YEAR;
+        let radius = if merged < weaver.radius.value() {
+            merged
+        } else {
+            weaver.radius.value()
+        };
+        // The swept-up gas, `n (4/3) π R³`, in the wall from `WALL_INNER_SHARE R` to `R`.
+        let wall = ambient.value() * WALL_COMPRESSION;
+        (radius > 0.0).then_some(Self {
+            radius: LightYears::new(radius),
+            interior: weaver.interior,
+            wall: Some(HydrogenPerCm3::new(wall)),
+        })
+    }
+
+    /// The bubble the nursery of `marks` at `centre` in `galaxy` blows at `age`:
+    /// [`merging`](Self::merging)'s, in the smooth gas at `centre`. What the features' gas, the
+    /// recently dead and a feature's answers read.
+    #[must_use]
+    pub fn in_galaxy(
+        galaxy: &Galaxy,
+        centre: &GalacticPosition,
+        marks: &NurseryMarks,
+        age: Years,
+    ) -> Option<Self> {
+        let gas = galaxy.gas();
+        Self::in_centre_gas(
+            galaxy,
+            marks,
+            age,
+            gas.mean_density(centre),
+            gas.pressure(centre),
+        )
+    }
+
+    /// [`in_galaxy`](Self::in_galaxy)'s bubble from the smooth gas at its centre, read by the
+    /// caller: the mean density `ambient` and the thermal pressure `pressure`.
+    #[must_use]
+    pub(crate) fn in_centre_gas(
+        galaxy: &Galaxy,
+        marks: &NurseryMarks,
+        age: Years,
+        ambient: HydrogenPerCm3,
+        pressure: KelvinPerCm3,
+    ) -> Option<Self> {
+        let height = galaxy.gas().params().neutral_height();
+        let clock = galaxy.feature_shares().supernova_clock();
+        Self::merging(marks, age, ambient, pressure, height, clock)
     }
 
     /// The bubble's radius.
@@ -435,6 +631,28 @@ impl Superbubble {
     #[must_use]
     pub const fn temperature(&self) -> Kelvin {
         BUBBLE_TEMPERATURE
+    }
+
+    /// The density of its wall of swept-up gas, or `None` for a bubble with no wall (one of
+    /// [`of`](Self::of)'s).
+    #[must_use]
+    pub const fn wall_density(&self) -> Option<HydrogenPerCm3> {
+        self.wall
+    }
+
+    /// Its wall's inner radius, [`WALL_INNER_SHARE`] of its radius.
+    #[must_use]
+    pub fn wall_inner_radius(&self) -> LightYears {
+        LightYears::new(self.radius.value() * WALL_INNER_SHARE)
+    }
+
+    /// The radius of its hot interior: its wall's inner radius if it has a wall, its radius if not.
+    #[must_use]
+    pub fn core_radius(&self) -> LightYears {
+        match self.wall {
+            Some(_) => self.wall_inner_radius(),
+            None => self.radius,
+        }
     }
 }
 
@@ -538,6 +756,128 @@ mod tests {
         .unwrap();
         assert!((capped.radius().value() - 1_000.0).abs() < 1e-9);
         assert!(Superbubble::of(&marks(50.0, false), myr(10.0), n, height, &clock).is_none());
+    }
+
+    /// The wall's inner share is `(1 − 1 ÷ β²)^⅓` to the last bit but one.
+    #[test]
+    fn the_wall_begins_where_it_holds_its_sphere_s_gas() {
+        let share = math::cbrt(1.0 - 1.0 / WALL_COMPRESSION);
+        assert!(
+            (share / WALL_INNER_SHARE - 1.0).abs() < 4.0 * f64::EPSILON,
+            "{share}"
+        );
+        assert!((WALL_COMPRESSION - 4.0).abs() < f64::EPSILON);
+    }
+
+    /// Under a constant power (the winds' first 4 Myr) a merging bubble is Weaver's until its shell
+    /// slows to the merge speed and keeps that radius after; its wall holds the gas of its whole
+    /// sphere, and a nursery that blows no bubble blows none merging.
+    #[test]
+    fn a_merging_bubble_stops_at_the_merge_speed_and_keeps_its_swept_up_gas() {
+        let clock = SupernovaClock::new(myr(4.0), myr(40.0), 0.01);
+        let nursery = marks(2e3, false);
+        let height = LightYears::new(700.0);
+        let (n, p) = (HydrogenPerCm3::new(0.7), KelvinPerCm3::new(4_000.0));
+        let rho = MASS_PER_HYDROGEN_FACTOR * HYDROGEN_MASS_KG * 0.7e6;
+        let merge = merge_speed((4_000.0 * BOLTZMANN_CONSTANT * 1e6 / rho).sqrt());
+        // Weaver's shell speed, ⅗ R ÷ t, at each age, against the merge speed.
+        let speed = |t_myr: f64| {
+            let weaver = Superbubble::of(&nursery, myr(t_myr), n, height, &clock).unwrap();
+            0.6 * weaver.radius().value() * METRES_PER_LIGHT_YEAR
+                / (t_myr * YEARS_PER_MEGAYEAR * SECONDS_PER_JULIAN_YEAR)
+        };
+        let (mut lo, mut hi) = (1e-3, 3.99);
+        assert!(
+            speed(lo) > merge && speed(hi) < merge,
+            "the merge falls in the winds' span"
+        );
+        for _ in 0..80 {
+            let mid = f64::midpoint(lo, hi);
+            if speed(mid) > merge {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        let at_merge = Superbubble::of(&nursery, myr(hi), n, height, &clock)
+            .unwrap()
+            .radius()
+            .value();
+        for t in [0.2 * hi, 0.9 * hi] {
+            let weaver = Superbubble::of(&nursery, myr(t), n, height, &clock).unwrap();
+            let merging = Superbubble::merging(&nursery, myr(t), n, p, height, &clock).unwrap();
+            assert_eq!(
+                merging.radius(),
+                weaver.radius(),
+                "{t} Myr, before the merge"
+            );
+        }
+        for t in [1.1 * hi, 3.9] {
+            let merging = Superbubble::merging(&nursery, myr(t), n, p, height, &clock).unwrap();
+            assert!(
+                (merging.radius().value() / at_merge - 1.0).abs() < 1e-9,
+                "{t} Myr: {merging:?} against {at_merge}"
+            );
+            let wall = merging.wall_density().unwrap().value();
+            let r = merging.radius().value();
+            let inner = merging.wall_inner_radius().value();
+            let shell = r * r * r - inner * inner * inner;
+            assert!(
+                (wall * shell / (0.7 * r * r * r) - 1.0).abs() < 1e-12,
+                "{wall}"
+            );
+            assert!((merging.core_radius().value() - inner).abs() < 1e-12 * r);
+            assert!(
+                Superbubble::of(&nursery, myr(t), n, height, &clock)
+                    .unwrap()
+                    .wall_density()
+                    .is_none()
+            );
+        }
+        assert!(
+            Superbubble::merging(&marks(50.0, false), myr(10.0), n, p, height, &clock).is_none()
+        );
+    }
+
+    /// A galaxy's every bubble near the Sun is at most Weaver's and walled, and most are smaller.
+    #[test]
+    fn a_galaxy_s_bubbles_merge() {
+        use crate::Seed;
+        use crate::galaxy::features::catalogue::{FeatureCatalogue, FeatureMarks};
+        use crate::galaxy::params::GalaxyParams;
+        use crate::id::FeatureCell;
+        let seed = Seed::new(0x0905_b0bb_0000_0001);
+        let galaxy = Galaxy::from_params(seed, GalaxyParams::milky_way_like()).unwrap();
+        let gas = galaxy.gas();
+        let clock = galaxy.feature_shares().supernova_clock();
+        let (mut bubbles, mut smaller) = (0, 0);
+        for cell in [[0, 6, 0], [0, 6, -1], [-1, 6, 0]] {
+            let cell = FeatureCell::new(cell).unwrap();
+            for feature in FeatureCatalogue::cell(&galaxy, cell).features() {
+                let FeatureMarks::Nursery(marks) = feature.marks() else {
+                    continue;
+                };
+                let (centre, age) = (feature.position(), marks.age_at_epoch());
+                let weaver = Superbubble::of(
+                    marks,
+                    age,
+                    gas.mean_density(centre),
+                    gas.params().neutral_height(),
+                    clock,
+                );
+                let new = Superbubble::in_galaxy(&galaxy, centre, marks, age);
+                assert_eq!(new.is_some(), weaver.is_some());
+                let (Some(weaver), Some(new)) = (weaver, new) else {
+                    continue;
+                };
+                bubbles += 1;
+                assert!(new.radius() <= weaver.radius(), "{new:?} {weaver:?}");
+                assert!(new.radius().value() > 0.0 && new.wall_density().is_some());
+                smaller += u32::from(new.radius() < weaver.radius());
+            }
+        }
+        assert!(bubbles > 20, "{bubbles} bubbles");
+        assert!(smaller * 2 > bubbles, "{smaller} of {bubbles} smaller");
     }
 
     #[test]

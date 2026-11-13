@@ -11,7 +11,10 @@
 //! own dust-to-gas ratio. The Plummer form is chosen because its column along a line is algebraic
 //! (the extinction integral's Design note 16), so clouds cost the integral no steps and no
 //! transcendental function; the interface sketch's Gaussian cloud is replaced by it, and plan 09 as
-//! it now reads uses the Plummer form.
+//! it now reads uses the Plummer form. A **wall** is a uniform spherical shell of gas with its own
+//! dust, a superbubble's swept-up gas about its hole (plan 09, P09.T5). It replaces the field where
+//! no hole covers the point, so that a bubble inside another's hole sweeps up nothing; where walls
+//! overlap the densest wins. Like a hole's, its pieces of a line take no steps.
 
 use crate::coords::GalacticPosition;
 use crate::units::consts::METRES_PER_LIGHT_YEAR;
@@ -48,11 +51,27 @@ pub enum GasModifier {
         /// field's.
         dust_per_hydrogen: f64,
     },
+    /// A uniform spherical shell of gas from `inner` to `outer` about `centre`, with its own dust,
+    /// that replaces the field where no hole covers it: a superbubble's wall of swept-up gas.
+    Wall {
+        /// The shell's centre.
+        centre: GalacticPosition,
+        /// Its inner radius, at least 0 and below `outer`.
+        inner: LightYears,
+        /// Its outer radius.
+        outer: LightYears,
+        /// Its density, the same throughout the shell.
+        density: HydrogenPerCm3,
+        /// Its dust per hydrogen nucleus in units of the solar ratio, as a cloud's: what multiplies
+        /// its density into the dust-bearing density.
+        dust_per_hydrogen: f64,
+    },
 }
 
 impl GasModifier {
     /// Whether the modifier's lengths are positive and finite and its densities finite and not
-    /// negative: what its source must guarantee.
+    /// negative, and a wall's inner radius is not negative and below its outer: what its source
+    /// must guarantee.
     #[must_use]
     pub fn is_valid(&self) -> bool {
         let length = |ly: LightYears| ly.value().is_finite() && ly.value() > 0.0;
@@ -69,6 +88,19 @@ impl GasModifier {
             } => {
                 length(core_radius) && amount(central_density.value()) && amount(dust_per_hydrogen)
             }
+            Self::Wall {
+                inner,
+                outer,
+                density,
+                dust_per_hydrogen,
+                ..
+            } => {
+                length(outer)
+                    && amount(inner.value())
+                    && inner.value() < outer.value()
+                    && amount(density.value())
+                    && amount(dust_per_hydrogen)
+            }
         }
     }
 }
@@ -82,7 +114,8 @@ impl GasModifier {
 /// last bits. The order of the list is immaterial to
 /// [`sightline`](super::extinction::sightline), which sums clouds in a canonical order; the point
 /// rule adds them in the list's order. Plan 09's `features::gas_overlay::FeatureGas` implements it with a [`GasModifier::Hole`]
-/// per superbubble and a [`GasModifier::Cloud`] per cloud and embedded region.
+/// per superbubble, from generator version 29 a [`GasModifier::Wall`] per superbubble's wall, and a
+/// [`GasModifier::Cloud`] per cloud and embedded region.
 pub trait GasModifierSource {
     /// Appends to `out` the modifiers near the segment from `a` to `b`.
     fn modifiers_near_segment(
@@ -141,7 +174,7 @@ pub(crate) fn apply(
     }
     let (mut density, mut dust) = match interior {
         Some(inside) => (inside, 0.0),
-        None => (density, dust),
+        None => densest_wall(mods, p).unwrap_or((density, dust)),
     };
     for modifier in mods {
         if let GasModifier::Cloud {
@@ -161,6 +194,43 @@ pub(crate) fn apply(
         }
     }
     (density, dust)
+}
+
+/// The densest of the walls among `mods` whose shell holds the point `p` at `distance(centre)`, as
+/// its hydrogen density and dust-bearing density (cm⁻³), by [`densest`]: what the point rule puts
+/// in place of the field outside every hole. `None` if no wall holds it.
+fn densest_wall(mods: &[GasModifier], p: &GalacticPosition) -> Option<(f64, f64)> {
+    densest(mods.iter().filter_map(|modifier| match *modifier {
+        GasModifier::Wall {
+            centre,
+            inner,
+            outer,
+            density,
+            dust_per_hydrogen,
+        } => {
+            let r = distance_ly(&centre, p);
+            (r >= inner.value() && r < outer.value())
+                .then(|| (density.value(), dust_per_hydrogen * density.value()))
+        }
+        GasModifier::Hole { .. } | GasModifier::Cloud { .. } => None,
+    }))
+}
+
+/// The densest of `walls`' (hydrogen, dust-bearing) densities, the dustier on a tie: the same
+/// whatever their order.
+pub(crate) fn densest(walls: impl IntoIterator<Item = (f64, f64)>) -> Option<(f64, f64)> {
+    walls.into_iter().reduce(|best, wall| {
+        if wall
+            .0
+            .total_cmp(&best.0)
+            .then(wall.1.total_cmp(&best.1))
+            .is_gt()
+        {
+            wall
+        } else {
+            best
+        }
+    })
 }
 
 /// The Plummer density `n_c (1 + r² ÷ a²)^(−5/2)` at distance `r` from the centre of a ball of
@@ -261,6 +331,48 @@ mod tests {
         assert_same_bits(plummer(1.0, 0.0, 1.0), 0.0);
     }
 
+    fn wall(centre: [f64; 3], inner: f64, outer: f64, density: f64, dust: f64) -> GasModifier {
+        GasModifier::Wall {
+            centre: at(centre),
+            inner: LightYears::new(inner),
+            outer: LightYears::new(outer),
+            density: HydrogenPerCm3::new(density),
+            dust_per_hydrogen: dust,
+        }
+    }
+
+    /// A wall replaces the field with its density and its own dust from its inner radius to just
+    /// inside its outer, where no hole covers the point; a hole wins over it, the densest of
+    /// overlapping walls wins whatever their order, and a cloud adds on top.
+    #[test]
+    fn a_wall_replaces_the_field_inside_its_shell_outside_every_hole() {
+        let centre = [26_000.0, 0.0, 0.0];
+        let w = wall(centre, 90.0, 100.0, 2.5, 0.8);
+        let in_wall = at([26_095.0, 0.0, 0.0]);
+        let (n, d) = apply(&[hole(centre, 90.0, 0.004), w], &in_wall, 0.7, 0.6);
+        assert_same_bits(n, 2.5);
+        assert!((d - 2.0).abs() < 1e-15, "{d}");
+        // Inside another bubble's hole the wall swept up nothing.
+        let other = hole([26_120.0, 0.0, 0.0], 40.0, 0.003);
+        let (n, d) = apply(&[w, other], &in_wall, 0.7, 0.6);
+        assert_same_bits(n, 0.003);
+        assert_same_bits(d, 0.0);
+        let denser = wall([26_190.0, 0.0, 0.0], 92.0, 98.0, 4.0, 0.5);
+        for pair in [[w, denser], [denser, w]] {
+            let (n, d) = apply(&pair, &in_wall, 0.7, 0.6);
+            assert_same_bits(n, 4.0);
+            assert_same_bits(d, 2.0);
+        }
+        let c = cloud(centre, 50.0, 10.0, 1.0);
+        let (n, _) = apply(&[w, c], &in_wall, 0.7, 0.6);
+        assert!(n > 2.5 && n < 2.5 + 10.0 / 32.0, "{n}");
+        for outside in [[26_050.0, 0.0, 0.0], [26_000.0, 101.0, 0.0]] {
+            let (n, d) = apply(&[w], &at(outside), 0.7, 0.6);
+            assert_same_bits(n, 0.7);
+            assert_same_bits(d, 0.6);
+        }
+    }
+
     #[test]
     fn a_modifier_knows_whether_it_is_valid() {
         assert!(hole([0.0; 3], 10.0, 0.0).is_valid());
@@ -269,5 +381,12 @@ mod tests {
         assert!(cloud([0.0; 3], 1.0, 100.0, 1.0).is_valid());
         assert!(!cloud([0.0; 3], f64::NAN, 100.0, 1.0).is_valid());
         assert!(!cloud([0.0; 3], 1.0, 100.0, f64::INFINITY).is_valid());
+        assert!(wall([0.0; 3], 0.0, 10.0, 1.0, 1.0).is_valid());
+        assert!(wall([0.0; 3], 9.0, 10.0, 0.0, 0.0).is_valid());
+        assert!(!wall([0.0; 3], 10.0, 10.0, 1.0, 1.0).is_valid());
+        assert!(!wall([0.0; 3], -1.0, 10.0, 1.0, 1.0).is_valid());
+        assert!(!wall([0.0; 3], 9.0, f64::INFINITY, 1.0, 1.0).is_valid());
+        assert!(!wall([0.0; 3], 9.0, 10.0, -1.0, 1.0).is_valid());
+        assert!(!wall([0.0; 3], 9.0, 10.0, 1.0, f64::NAN).is_valid());
     }
 }

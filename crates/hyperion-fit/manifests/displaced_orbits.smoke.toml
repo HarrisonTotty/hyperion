@@ -1,5 +1,7 @@
-# The displaced form table's smoke run: a few orbits per class on coarse steps, for the crate's
-# tests (reproducibility and thread independence, not accuracy).
+# The displaced form table's smoke run: a few orbits per class on coarse steps (1 ÷ 50 of the local
+# circular period, a drift tolerance of 10⁻² and one halving), for the crate's tests
+# (reproducibility and thread independence, not accuracy). It records its unresolved orbits without
+# the fit's limit (P15.T6.g).
 task = "displaced_forms"
 
 [params]
@@ -11,7 +13,6 @@ nuclear_orbits_per_class = 1
 control_orbits = 1
 step_fraction = 0.02
 nuclear_step_fraction = 0.02
-min_step_years = 100_000.0
 drift_tolerance = 1e-2
 max_halvings = 1
 bar_strength = 0.05

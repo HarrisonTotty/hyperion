@@ -7,8 +7,10 @@
  * eviction order, and the terrain pass (T11) writes each patch's bytes into the GPU buffers at the
  * slot it is given. Eviction is least recently used among unpinned patches. Two pins: a patch in a
  * grounded body's forced region is never evicted, whatever the budget; a patch in the current draw
- * set, the selection or the selection's resident ancestors is evicted only after everything
- * unpinned, and among patches used as recently the deepest goes first. The baked patches the
+ * set, the selection or the selection's resident ancestors (the selection's chain) is never evicted
+ * for an arrival outside the forced region, which is refused instead, and is evicted for a forced
+ * one only after everything unpinned, the deepest first among patches used as recently. The baked
+ * patches the
  * selection found hidden ({@link Selection.hiddenBaked}) are not pinned, but are used each frame
  * they are hidden, and among the unpinned patches used as recently they go last. The six roots are
  * never evicted either, so that once baked every selected patch has a resident ancestor to stand in
@@ -18,6 +20,7 @@
  * cache: the selection stays a pure function of its inputs (Design note 7).
  */
 
+import { MAX_SUB_PATCH_LEVELS } from "./gpu/uniforms";
 import type { BodyFixedVec3 } from "./planet";
 import type { SlotLayout } from "./slotLayout";
 import type { HeightRangeLookup, Selection } from "./select";
@@ -49,7 +52,27 @@ export interface CachedPatch extends ResidentPatch {
 export type CacheInsert =
   /** The patch holds `slot`, having evicted the patch keyed `evicted` if it is not `null`. */
   | { readonly kind: "stored"; readonly slot: number; readonly evicted: string | null }
-  /** Every slot is pinned by the forced region or a root, so nothing could be evicted. */
+  /**
+   * Every slot is pinned by the forced region, a root or, for a patch outside the forced region,
+   * the selection's chain, so nothing could be evicted.
+   */
+  | { readonly kind: "refused" };
+
+/** What {@link PatchCache.replace} did. */
+export type CacheReplace =
+  /**
+   * The patch holds `slot`, having evicted the patch keyed `evicted` if it is not `null`; a newer
+   * bake of a resident patch, in a slot of its own, its older bake kept in `retired`, which no
+   * patch takes until {@link PatchCache.releaseRetired} gives it back, or `null` where no slot was
+   * spare and the newer bake took the older's.
+   */
+  | {
+      readonly kind: "stored";
+      readonly slot: number;
+      readonly evicted: string | null;
+      readonly retired: number | null;
+    }
+  /** As {@link CacheInsert}'s. */
   | { readonly kind: "refused" };
 
 /** The pins against the slots, which the metrics and the annunciation read. */
@@ -114,6 +137,9 @@ export class PatchCache implements HeightRangeLookup {
   private refused = false;
   /** The last retain found the pins beyond the slots, or a refusal before it. */
   private exceededAtRetain = false;
+  private refusalCount = 0;
+  /** The slots holding a rebaked patch's older bake while it fades ({@link PatchCache.replace}). */
+  private readonly retired = new Set<number>();
 
   constructor(layout: SlotLayout) {
     this.layout = layout;
@@ -128,9 +154,9 @@ export class PatchCache implements HeightRangeLookup {
     return this.layout.slotCount;
   }
 
-  /** The number of slots holding a patch. */
+  /** The number of slots holding a patch, or a rebaked patch's older bake. */
   get usedSlots(): number {
-    return this.entries.size;
+    return this.entries.size + this.retired.size;
   }
 
   /**
@@ -138,7 +164,15 @@ export class PatchCache implements HeightRangeLookup {
    * themselves are allocated whole, `slotCount × bytesPerSlot`, by the terrain pass.
    */
   get heldBytes(): number {
-    return this.entries.size * this.layout.bytesPerSlot;
+    return this.usedSlots * this.layout.bytesPerSlot;
+  }
+
+  /**
+   * How many inserts it has refused in its life ({@link CacheInsert}'s `refused`): each one a bake
+   * made and thrown away, which the terrain pass asks for again at its next demand.
+   */
+  get refusals(): number {
+    return this.refusalCount;
   }
 
   /** The cached patch keyed by `keyString` (a `patchKeyString`), if it is resident. */
@@ -171,15 +205,25 @@ export class PatchCache implements HeightRangeLookup {
   /**
    * Stores a baked patch, in its own slot if it is already resident (a newer bake), else in a free
    * slot, else in the slot of the evicted patch: the least recently used unpinned one, the hidden
-   * baked patches last among those used as recently, then the least recently used of those the
-   * selection, its ancestors or the draw set pins; the deepest first among patches used as
-   * recently. A forced or root patch is never evicted.
+   * baked patches last among those used as recently, the deepest first among patches used as
+   * recently. A forced or root patch is never evicted, nor, for a patch outside the forced region,
+   * one the selection, its resident ancestors or the draw set pins: with only those left the
+   * arrival is refused, and the pins are reported as exceeding the slots ({@link
+   * PatchCache.pressure}). A forced arrival takes the least recently used of those pinned patches
+   * instead, the deepest first among those used as recently.
    *
    * @remarks
+   * An arrival that evicted a drawn patch, or an ancestor of one, made the drawn ground collapse to
+   * a coarser ancestor over its whole area: one missing patch, two or more levels down, and every
+   * resident patch beside it was drawn by that ancestor (TERRAIN TEST, 3 workers × 41 ms: 52 frames
+   * on high and 36 on low whose drawn set fell below half the frame before's). A refused bake costs
+   * a bake again, once the camera has moved enough that the selection lets go of a pinned patch.
+   *
    * Only the {@link ResidentPatch} fields are kept: the terrain pass hands over the worker's whole
    * bake, whose heights, offsets and normals its slot already holds, and keeping them here would
-   * hold about 51 KB a patch in the renderer, about 66 MB with the low setting's 1,296 slots full
-   * (R05.T14.c's memory probe).
+   * hold about 51 KB a patch in the renderer, about 66 MB with R05's spike layout's 1,296 low slots
+   * full (R05.T14.c's memory probe); the low setting's lit layout holds 375 (R10.T14.a, with
+   * R10.T1.c's maturity layer).
    *
    * @throws RangeError for a key deeper than {@link MAX_LEVEL}, before anything is changed.
    */
@@ -196,10 +240,12 @@ export class PatchCache implements HeightRangeLookup {
     }
     let slot = this.freeSlots.pop();
     let evicted: string | null = null;
+    const forced = this.forcedKeys.has(keyString);
     if (slot === undefined) {
-      evicted = this.victim();
+      evicted = this.victim(forced);
       if (evicted === null) {
         this.refused = true;
+        this.refusalCount += 1;
         return { kind: "refused" };
       }
       const victim = this.entries.get(evicted);
@@ -209,7 +255,6 @@ export class PatchCache implements HeightRangeLookup {
       slot = victim.patch.slot;
       this.forget(evicted, victim);
     }
-    const forced = this.forcedKeys.has(keyString);
     const entry: Entry = {
       patch: cachedPatch(patch, slot, keyString),
       lastUsed: this.tick,
@@ -220,6 +265,48 @@ export class PatchCache implements HeightRangeLookup {
     this.entries.set(keyString, entry);
     this.byKey.set(patch.key, entry);
     return { kind: "stored", slot, evicted };
+  }
+
+  /**
+   * Stores a baked patch as {@link PatchCache.insert} does, but a newer bake of a resident patch in
+   * a slot of its own where one is spare (free, or an unpinned patch's to evict), its older bake
+   * kept in its slot, retired, for the terrain pass's fade between the two (plan R10, R10.T16.i).
+   *
+   * @throws RangeError for a key deeper than {@link MAX_LEVEL}, before anything is changed.
+   */
+  replace(patch: ResidentPatch): CacheReplace {
+    const keyString = patchKeyString(patch.key);
+    const present = this.entries.get(keyString);
+    if (present === undefined) {
+      const stored = this.insert(patch);
+      return stored.kind === "stored" ? { ...stored, retired: null } : stored;
+    }
+    let slot = this.freeSlots.pop();
+    let evicted: string | null = null;
+    if (slot === undefined) {
+      evicted = this.victim(false);
+      const victim = evicted === null ? undefined : this.entries.get(evicted);
+      if (evicted === null || victim === undefined) {
+        const stored = this.insert(patch);
+        return stored.kind === "stored" ? { ...stored, retired: null } : stored;
+      }
+      slot = victim.patch.slot;
+      this.forget(evicted, victim);
+    }
+    const retired = present.patch.slot;
+    this.retired.add(retired);
+    present.patch = cachedPatch(patch, slot, keyString);
+    present.lastUsed = this.tick;
+    return { kind: "stored", slot, evicted, retired };
+  }
+
+  /** Frees a slot {@link PatchCache.replace} retired, returning whether it was retired. */
+  releaseRetired(slot: number): boolean {
+    if (!this.retired.delete(slot)) {
+      return false;
+    }
+    this.freeSlots.push(slot);
+    return true;
   }
 
   /** Drops a resident patch and frees its slot, returning whether it was resident. */
@@ -342,14 +429,17 @@ export class PatchCache implements HeightRangeLookup {
     this.pinnedDrawn = drawn;
   }
 
-  /** The patch to evict, or `null` if every resident patch is forced or a root. */
-  private victim(): string | null {
+  /**
+   * The patch to evict for an arrival, or `null` if every resident patch is forced or a root, or,
+   * unless `forcedArrival`, pinned by the selection's chain.
+   */
+  private victim(forcedArrival: boolean): string | null {
     let best: string | null = null;
     let bestRank = 0;
     let bestUsed = 0;
     let bestLevel = 0;
     for (const [keyString, entry] of this.entries) {
-      if (entry.forced || entry.patch.key.level === 0) {
+      if (entry.forced || entry.patch.key.level === 0 || (entry.drawn && !forcedArrival)) {
         continue;
       }
       const rank = entry.drawn ? 2 : entry.hidden ? 1 : 0;
@@ -375,38 +465,63 @@ export class PatchCache implements HeightRangeLookup {
   }
 }
 
-/** A patch the terrain pass draws this frame. */
+/** A patch the terrain pass draws this frame, whole or a part of it. */
 export interface DrawnPatch {
   readonly keyString: string;
   readonly patch: CachedPatch;
   /** Whether it stands in for one or more selected patches not yet resident. */
   readonly standIn: boolean;
+  /**
+   * The selected patch, not resident, whose area alone it draws of {@link DrawnPatch.patch}'s
+   * surface, that patch its nearest resident ancestor: a sub-patch (the seamless lane, the owner's
+   * priority, 2026-11-01); `null` where it draws its patch's whole area.
+   */
+  readonly within: PatchKey | null;
 }
 
 /**
- * What the terrain pass draws: resident patches covering the selection without overlap.
+ * What the terrain pass draws: resident patches, whole or in part, covering the selection without
+ * overlap.
  *
  * @remarks
  * A {@link DrawSetResolver} returns the same object every call, its arrays rewritten in place, so
  * that resolving each frame allocates nothing after warm-up: read it before the next call.
+ *
+ * The views' masks (plan R10, R10.T16.b; decision-r10-t16-contracts §3) are bit k for the
+ * selection's view k (`SelectedPatch.views`): each drawn patch's {@link DrawSet.views}, and the
+ * views with a stand-in and with a missing patch, from which each view's `TERRAIN: STREAMING` and
+ * its own draw are made.
  */
 export interface DrawSet {
   /** How many patches are drawn: the length of {@link DrawSet.patches}, and of `slots`' prefix. */
   readonly count: number;
-  /** The drawn patches, in the selection's order with each stand-in where it is first needed. */
+  /**
+   * The drawn patches, in the selection's order with each whole stand-in where it is first needed.
+   */
   readonly patches: ReadonlyArray<DrawnPatch>;
   /**
    * Each drawn patch's slot index in its first {@link DrawSet.count} entries, in the same order: the
-   * instanced draw's per-instance data. Its length is the cache's slot count, fixed.
+   * instanced draw's per-instance data, a slot once for each sub-patch drawn of it. Its length is
+   * the cache's slot count, fixed.
    */
   readonly slots: Uint32Array;
   /**
-   * How many selected patches are drawn by a coarser resident ancestor, those beneath an ancestor
-   * standing in for a sibling included.
+   * How many selected patches are drawn by a coarser resident ancestor: each one a sub-patch
+   * stands for, and, beneath a whole stand-in, every selected patch it covers.
    */
   readonly standingIn: number;
   /** How many selected patches have no resident ancestor at all, and are not drawn. */
   readonly missing: number;
+  /**
+   * Each drawn patch's views in its first {@link DrawSet.count} entries, in {@link DrawSet.patches}'
+   * order: the union of the views that see the selected patches it draws or stands in for. Its
+   * length is the cache's slot count, fixed.
+   */
+  readonly views: Uint32Array;
+  /** The views that see a selected patch drawn by a coarser resident ancestor. */
+  readonly standingInViews: number;
+  /** The views that see a selected patch with no resident ancestor at all. */
+  readonly missingViews: number;
 }
 
 /** A drawn patch's record, reused from call to call. */
@@ -414,6 +529,11 @@ interface DrawnRecord {
   keyString: string;
   patch: CachedPatch;
   standIn: boolean;
+  within: PatchKey | null;
+  /** The views of the selected patches it draws or stands in for. */
+  views: number;
+  /** The whole stand-in that draws it in its place this call, or `null`. */
+  drawnBy: DrawnRecord | null;
 }
 
 /** The draw set the resolver rewrites in place. */
@@ -423,25 +543,37 @@ interface ResolvedSet {
   readonly slots: Uint32Array;
   standingIn: number;
   missing: number;
+  readonly views: Uint32Array;
+  standingInViews: number;
+  missingViews: number;
 }
 
 /**
  * Resolves what to draw for one cache, each frame, with no allocation after warm-up: each selected
- * patch some view sees, if resident, else its nearest resident ancestor (Design note 7).
+ * patch some view sees, if resident, else the part of its nearest resident ancestor over it alone,
+ * a sub-patch (Design note 7; the seamless lane, the owner's priority, 2026-11-01).
  *
  * @remarks
- * An ancestor standing in covers its whole area, so a resident selected patch beneath it is drawn
- * through the ancestor rather than on top of it; the drawn patches never overlap. It reads the
- * cache and changes nothing; {@link PatchCache.retain} records the frame's use. Lookups go by a
- * key's ancestor at a level ({@link PatchCache.residentOver}), so no key or string is built; the
- * records, the arrays and the map of chosen patches are kept and reused, and no sort is run.
+ * A stand-in drawn whole covered its whole area, so a resident selected patch beneath it was drawn
+ * through it: one patch missing two levels under a level-4 ancestor drew that ancestor in place of
+ * 120 resident ones (TERRAIN TEST on low, 231.6 s). A sub-patch draws the ancestor's surface over
+ * the missing patch's area, and the resident patches beside it draw themselves, so the drawn
+ * patches never overlap. Where a missing patch lies more than `MAX_SUB_PATCH_LEVELS` below its
+ * nearest resident ancestor (the instance record's sub-patch word holds no deeper part), or where
+ * the selection holds more patches than the draw set's arrays, which hold an instance a selected
+ * patch, its ancestor stands in whole as before, and everything chosen beneath that ancestor is
+ * drawn through it.
+ *
+ * It reads the cache and changes nothing; {@link PatchCache.retain} records the frame's use. Lookups
+ * go by a key's ancestor at a level ({@link PatchCache.residentOver}), so no key or string is built;
+ * the records, the arrays and the map of whole stand-ins are kept and reused, and no sort is run.
  */
 export class DrawSetResolver {
   private readonly cache: PatchCache;
   private readonly set: ResolvedSet;
-  /** The patches chosen this call, to their records. */
+  /** The patches chosen whole this call, to their records. */
   private readonly chosen = new Map<CachedPatch, DrawnRecord>();
-  /** Every record made so far, reused in order. */
+  /** Every record made so far, reused in order: those of this call are its first `used`. */
   private readonly pool: DrawnRecord[] = [];
   private used = 0;
 
@@ -453,6 +585,9 @@ export class DrawSetResolver {
       slots: new Uint32Array(cache.slotCount),
       standingIn: 0,
       missing: 0,
+      views: new Uint32Array(cache.slotCount),
+      standingInViews: 0,
+      missingViews: 0,
     };
   }
 
@@ -463,6 +598,11 @@ export class DrawSetResolver {
     this.used = 0;
     let missing = 0;
     let unseen = 0;
+    let missingViews = 0;
+    let standingInViews = 0;
+    // A sub-patch is an instance a selected patch, and the arrays hold as many as the slots.
+    const parts = selection.patches.size <= cache.slotCount;
+    let wholeStandIns = false;
     for (const selected of selection.patches.values()) {
       if (!selected.seen) {
         // A forced patch no view sees is kept resident by the pins, not drawn.
@@ -470,6 +610,7 @@ export class DrawSetResolver {
         continue;
       }
       const key = selected.key;
+      const views = selected.views;
       let found: CachedPatch | undefined;
       let standIn = false;
       for (let level = key.level; level >= 0; level -= 1) {
@@ -481,25 +622,54 @@ export class DrawSetResolver {
       }
       if (found === undefined) {
         missing += 1;
+        missingViews |= views;
         continue;
+      }
+      if (standIn) {
+        standingInViews |= views;
+        if (parts && key.level - found.key.level <= MAX_SUB_PATCH_LEVELS) {
+          this.record(found, true, views, key);
+          continue;
+        }
+        wholeStandIns = true;
       }
       const known = chosen.get(found);
       if (known === undefined) {
-        chosen.set(found, this.record(found, standIn));
-      } else if (standIn) {
-        known.standIn = true;
+        chosen.set(found, this.record(found, standIn, views, null));
+      } else {
+        known.standIn ||= standIn;
+        known.views |= views;
+      }
+    }
+    // A record whose area lies under a whole stand-in is drawn by the coarsest one, which no other
+    // covers: its views go to that stand-in's, and stand in there.
+    const pool = this.pool;
+    if (wholeStandIns) {
+      for (let n = 0; n < this.used; n += 1) {
+        const record = pool[n];
+        if (record === undefined) {
+          continue;
+        }
+        const drawnBy = this.coarsestChosenAncestor(record.within ?? record.patch.key);
+        record.drawnBy = drawnBy;
+        if (drawnBy !== null) {
+          drawnBy.views |= record.views;
+          standingInViews |= record.views;
+        }
       }
     }
     let count = 0;
     let drawnAsThemselves = 0;
-    for (const record of chosen.values()) {
-      if (this.hasChosenAncestor(record.patch.key)) {
+    for (let n = 0; n < this.used; n += 1) {
+      const record = pool[n];
+      if (record === undefined || record.drawnBy !== null) {
         continue;
       }
       set.patches[count] = record;
       set.slots[count] = record.patch.slot;
+      set.views[count] = record.views;
       count += 1;
-      if (selection.patches.has(record.keyString)) {
+      if (record.within === null && selection.patches.has(record.keyString)) {
         drawnAsThemselves += 1;
       }
     }
@@ -507,31 +677,43 @@ export class DrawSetResolver {
     set.count = count;
     set.missing = missing;
     set.standingIn = selection.patches.size - unseen - missing - drawnAsThemselves;
+    set.missingViews = missingViews;
+    set.standingInViews = standingInViews;
     return set;
   }
 
-  private record(patch: CachedPatch, standIn: boolean): DrawnRecord {
+  private record(
+    patch: CachedPatch,
+    standIn: boolean,
+    views: number,
+    within: PatchKey | null,
+  ): DrawnRecord {
     let record = this.pool[this.used];
     if (record === undefined) {
-      record = { keyString: patch.keyString, patch, standIn };
+      record = { keyString: patch.keyString, patch, standIn, within, views, drawnBy: null };
       this.pool.push(record);
     } else {
       record.keyString = patch.keyString;
       record.patch = patch;
       record.standIn = standIn;
+      record.within = within;
+      record.views = views;
+      record.drawnBy = null;
     }
     this.used += 1;
     return record;
   }
 
-  private hasChosenAncestor(key: PatchKey): boolean {
-    for (let level = key.level - 1; level >= 0; level -= 1) {
+  /** The record of `key`'s coarsest ancestor chosen whole this call, or `null` where none is. */
+  private coarsestChosenAncestor(key: PatchKey): DrawnRecord | null {
+    for (let level = 0; level < key.level; level += 1) {
       const patch = this.cache.residentOver(key, level);
-      if (patch !== undefined && this.chosen.has(patch)) {
-        return true;
+      const record = patch === undefined ? undefined : this.chosen.get(patch);
+      if (record !== undefined) {
+        return record;
       }
     }
-    return false;
+    return null;
   }
 }
 

@@ -8,7 +8,12 @@
 task = "sky_binary_light_e"
 
 [params]
+# 2 × 10⁴ in every cell, and more in a cell that carries a component bin's error past the gate
+# ("T5.d gate reading"), a cell being its [Fe/H] node × 26 + age bin. From generator version 26
+# cell 25 ([Fe/H] −2, the last age bin) carried 64% of the halo's [Fe/H] −1.5 bin's 1σ, 2.77% of
+# its light at 2 × 10⁴ systems.
 systems_per_cell = 20_000
+raised_cells = [[25, 100_000]]
 fe_h_nodes = [-2.0, -1.0, -0.5, 0.0, 0.18]
 first_age_log10 = 5.0
 age_step_dex = 0.2

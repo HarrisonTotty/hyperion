@@ -14,10 +14,12 @@ use std::path::Path;
 use hyperion_testkit::float::{assert_same_bits, bits};
 use hyperion_testkit::golden::{GoldenWriter, Mode, check_embedded_in_mode, check_in_mode};
 use hyperion_testkit::order::assert_order_independent;
+use hyperion_testkit::pins::{HEADER, Pins, Tolerance};
 use hyperion_testkit::stats::{
     ALPHA, assert_p_value, assert_poisson_count, chi_square_gof, ks_one_sample, ks_two_sample,
     regularised_gamma_q,
 };
+use hyperion_testkit::threads::in_shares;
 
 fn text(version: u32, lines: &[&str]) -> String {
     let mut w = GoldenWriter::new();
@@ -129,6 +131,62 @@ fn hidden_counter_fails() {
     });
 }
 
+// pins
+
+/// A census's pins, as a test binary embeds its file.
+fn embedded_census(mode: Mode) -> Pins {
+    let text = format!("{HEADER}\na_census.count = 471\na_census.median = 2.5\n");
+    Pins::embedded_in_mode(mode, "census/compact", &text, "a_census")
+}
+
+#[test]
+#[should_panic(
+    expected = "a_census.count is stale\n  pinned:   471\n  received: 472\nto match exactly; if the change is intended, re-pin it with `just repin a_census`\n  file: census/compact.pins (embedded)"
+)]
+fn an_embedded_stale_pin_fails_naming_its_key_and_both_values() {
+    embedded_census(Mode::Compare).exact("count", 472_u32);
+}
+
+#[test]
+#[should_panic(
+    expected = "a_census.share is not pinned: received 0.5; pin it with `just repin a_census`\n  file: census/compact.pins (embedded)"
+)]
+fn an_embedded_missing_key_fails() {
+    embedded_census(Mode::Compare).exact("share", 0.5);
+}
+
+#[test]
+#[should_panic(expected = "cannot bless census/compact.pins (embedded)")]
+fn an_embedded_file_never_blesses() {
+    let _ = embedded_census(Mode::Bless);
+}
+
+#[test]
+#[should_panic(expected = "a_census.median received a NaN, which cannot be pinned")]
+fn a_pin_refuses_a_nan() {
+    embedded_census(Mode::Compare).within("median", f64::NAN, Tolerance::absolute(1.0));
+}
+
+#[test]
+#[should_panic(expected = "a_census.count is pinned twice through one handle")]
+fn a_key_is_pinned_once_per_handle() {
+    let mut pins = embedded_census(Mode::Compare);
+    pins.exact("count", 471_u32);
+    pins.exact("count", 471_u32);
+}
+
+#[test]
+#[should_panic(expected = "must be segments of ASCII letters, digits, `_` and `-` joined by dots")]
+fn a_pin_key_of_other_characters_is_refused() {
+    embedded_census(Mode::Compare).exact("the count", 471_u32);
+}
+
+#[test]
+#[should_panic(expected = "a tolerance is finite and not negative, got -1.0")]
+fn a_negative_tolerance_is_refused() {
+    let _ = Tolerance::relative(-1.0);
+}
+
 // stats
 
 #[test]
@@ -173,4 +231,12 @@ fn count_outside_the_interval_fails_naming_both() {
 #[should_panic(expected = "must be positive and finite")]
 fn non_positive_shape_panics() {
     let _ = regularised_gamma_q(0.0, 1.0);
+}
+
+// threads
+
+#[test]
+#[should_panic(expected = "share 2 fails")]
+fn a_shares_panic_is_resumed_where_it_is_awaited() {
+    let _ = in_shares(4, 4, |k| assert_ne!(k, 2, "share 2 fails"));
 }

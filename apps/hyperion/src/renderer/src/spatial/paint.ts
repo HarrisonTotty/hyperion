@@ -274,12 +274,34 @@ function paintOp(
     case "line":
       context.beginPath();
       tracePoints(context, [op.from, op.to]);
-      strokeWith(context, tokens, op.stroke, op.widthPx * strokes.lineFactor);
+      if (op.dashPx === undefined) {
+        strokeWith(context, tokens, op.stroke, op.widthPx * strokes.lineFactor);
+      } else {
+        // A dash's lengths are drawn at the line scale, as its width is (the guide's lines on a
+        // canvas), and the dash goes again with the stroke, so that no other op inherits it.
+        context.setLineDash([
+          op.dashPx.onPx * strokes.lineFactor,
+          op.dashPx.offPx * strokes.lineFactor,
+        ]);
+        strokeWith(context, tokens, op.stroke, op.widthPx * strokes.lineFactor);
+        context.setLineDash([]);
+      }
       break;
     case "polyline":
       context.beginPath();
       tracePoints(context, op.points);
-      strokeWith(context, tokens, op.stroke, op.widthPx * strokes.lineFactor);
+      // A closed mark, the observer's eye, is filled above the plane as a symbol is.
+      if (op.fill !== undefined && op.fill !== null) {
+        context.closePath();
+        context.fillStyle = tokens[op.fill];
+        context.fill();
+      }
+      strokeWith(
+        context,
+        tokens,
+        op.stroke,
+        op.weight === "mark" ? strokes.markWidthPx : op.widthPx * strokes.lineFactor,
+      );
       break;
     case "circle":
       context.beginPath();
@@ -319,13 +341,17 @@ function paintOp(
  * No stroke is narrower than 2 device px (decision-thin-line-contrast, item 2; R07.T16.f): every op
  * but a mark is stroked at its `widthPx` times `lineScale(pixelRatio)` ÷ `pixelRatio`, so that lines
  * keep their ratios to one another, and a mark's outline at `markStrokeDevicePx(pixelRatio)` ÷
- * `pixelRatio`, whatever its op's `widthPx`: a symbol's, a reticle's, the destination's chevrons'
- * and a `ticks` op's whose weight is `mark`, the HR diagram's off-scale arrowhead (R07.T16.h). Where
+ * `pixelRatio`, whatever its op's `widthPx`: a symbol's, a reticle's, the destination's chevrons',
+ * a `ticks` op's whose weight is `mark`, the HR diagram's off-scale arrowhead (R07.T16.h), and a
+ * polyline's whose weight is `mark`, the observer's eye, filled where its op says, above the
+ * plane, as a symbol is (plan 12, P12.T11). Where
  * that outline is wider than 1.5 CSS px it widens outward by δ, `markShiftDevicePx(pixelRatio)` ÷
  * `pixelRatio`, so that every hole stays as built: a symbol's outline by δ on every side, a ringed
  * circle's disc by δ and its ring by 3δ, and a reticle's half-size by 4δ, with the chevrons moved
- * out as the bracket is; an arrowhead holds nothing to keep and is not moved. The draw list itself
- * stays in the guide's CSS widths.
+ * out as the bracket is; an arrowhead holds nothing to keep and is not moved, and nor is the
+ * observer's eye, half a rem tall, whose middle stays open at every ratio. A dashed line's
+ * dash lengths are drawn at the same line factor as its width. The draw list itself stays in the
+ * guide's CSS widths.
  *
  * @param pixelRatio - Backing-store pixels in one CSS pixel, the device pixel ratio. Required, so
  *   that a caller cannot leave a high-density canvas drawn in its top left-hand corner.

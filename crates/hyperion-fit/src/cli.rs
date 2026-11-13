@@ -1,7 +1,8 @@
 //! The command line (plan 15, P15.T1):
 //!
 //! ```text
-//! hyperion-fit list                      # tasks, class (fast or slow), table path, state
+//! hyperion-fit list                      # every table: name, revision, class (fast or slow),
+//!                                        # runtime, state, path and acceptance figures
 //! hyperion-fit run <task> [--since <generator version>] [--smoke] [--threads N] [--out PATH]
 //!                         [--data DIR] [--manifest PATH]
 //! hyperion-fit check [--rerun-fast]      # staleness
@@ -9,25 +10,45 @@
 //! hyperion-fit orbits [--smoke | --manifest PATH] [--threads N] [--out DIR] [--max-parts N]
 //!                                        # the displaced form table's orbit run (P15.T6.b),
 //!                                        # resumable from DIR/parts (ruling 120.4)
+//! hyperion-fit atmosphere-reference <case.json> --out <reference.json> [--samples N]
+//!                                   [--threads N] [--stokes] [--work DIR]
+//!                                   [--resume-other-build]
+//!                                        # an atmosphere case's reference radiances (plan R08,
+//!                                        # R08.T12.a), not a fit: outside `tables.lock`;
+//!                                        # resumable from DIR, its jobs whole or in part
+//!                                        # (R08.T12.h, R08.T16.a.2)
+//! hyperion-fit atmosphere-sweep <sweep.case.json> --out <sweep.json> --work <dir>
+//!                               --cpu-per-vertex-us X --vroom-cpu-per-vertex-us Y
+//!                               [--point-cap-cpu-h 24] [--threads N] [--max-points N]
+//!                               [--pilot-only --points I,J,…]
+//! hyperion-fit atmosphere-sweep --smoke --out <sweep.json> [--threads N]
+//!                                        # R08.T13's sweep of the analytic term's drift (plan
+//!                                        # R08, R08.T13.a), resumable from <dir>; not a fit
 //! ```
 //!
-//! `run` writes into the sim's `tables/` unless `--out` says otherwise, and then needs `--since`
-//! equal to the sim's `GENERATOR_VERSION` (Design note 10); `--out` elsewhere needs none, which is
-//! how plan 02's `run mge --out <path>` keeps working. `--smoke` runs the task's smoke manifest,
-//! and `--manifest` another manifest, and both need `--out`. `--data` reads the task's one dataset from another directory, for a fetched
-//! dataset kept outside the cache.
+//! `run` writes into the `tables/` of its table's crate unless `--out` says otherwise, and then
+//! needs `--since` equal to the sim's `GENERATOR_VERSION` (Design note 10); `--out` elsewhere
+//! needs none, which is how plan 02's `run mge --out <path>` keeps working. `--smoke` runs the
+//! task's smoke manifest, and `--manifest` another manifest, and both need `--out`. `--data` reads
+//! the task's one dataset from another directory, for a fetched dataset kept outside the cache.
 
 use std::io::Write;
-use std::num::NonZeroUsize;
-use std::path::PathBuf;
+use std::num::{NonZeroU64, NonZeroUsize};
+use std::path::{Path, PathBuf};
+use std::time::Instant;
 
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 use hyperion_sim::GENERATOR_VERSION;
-use hyperion_sim::tables::MANIFEST;
 
 use crate::RunFitError;
-use crate::check::{CheckInputs, Rerun, check};
+use crate::atmosphere::sweep::{POINT_CAP_CPU_H, PositiveFigure};
+use crate::atmosphere::{
+    AtmosphereCase, OtherBuilds, Polarisation, ReadCaseError, TraceWork, trace_reference,
+    trace_reference_resumably,
+};
+use crate::check::{CheckInputs, REPOSITORY_MANIFESTS, Rerun, check};
 use crate::emit::{Destination, Workspace, write_table};
+use crate::list::listing;
 use crate::manifest::Manifest;
 use crate::pipeline::{ManifestKind, load_manifest, prepare};
 use crate::task::{self, FitTask};
@@ -44,14 +65,15 @@ pub struct Cli {
 /// A subcommand.
 #[derive(Debug, Clone, PartialEq, Eq, Subcommand)]
 pub enum Command {
-    /// List the tasks: name, class, table path and state.
+    /// List the tables: name, revision, class, runtime, state, path and acceptance figures, and
+    /// each table file no registered task writes.
     List,
     /// Run a task and write its table.
     Run {
         /// The task.
         task: String,
-        /// The generator version the table takes effect at: required when writing into the sim's
-        /// tables, and equal to its `GENERATOR_VERSION`.
+        /// The generator version the table takes effect at: required when writing into the
+        /// tables, and equal to the sim's `GENERATOR_VERSION`.
         #[arg(long)]
         since: Option<u32>,
         /// Run the smoke manifest, a reduced run of a few seconds; needs `--out`.
@@ -60,7 +82,7 @@ pub enum Command {
         /// Threads for the fit; the output is the same for any number.
         #[arg(long)]
         threads: Option<NonZeroUsize>,
-        /// Write the table here instead of into the sim's tables.
+        /// Write the table here instead of into the tables of its crate.
         #[arg(long)]
         out: Option<PathBuf>,
         /// Read the task's dataset from this directory.
@@ -104,7 +126,93 @@ pub enum Command {
         #[arg(long)]
         max_parts: Option<u64>,
     },
+    /// Trace an atmosphere case's reference radiances (plan R08, R08.T12.a) and write them as
+    /// JSON.
+    ///
+    /// Not a fit: its output is a client fixture, outside `tables.lock`.
+    AtmosphereReference(AtmosphereReferenceArgs),
+    /// Sweep single-layer media for where the client's analytic multiple scattering drifts from
+    /// the reference (plan R08, R08.T13.a), resumably, and write the sweep's cells and points.
+    ///
+    /// Not a fit: its output is a client fixture, outside `tables.lock`.
+    AtmosphereSweep(AtmosphereSweepArgs),
 }
+
+/// `atmosphere-sweep`'s arguments.
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+pub struct AtmosphereSweepArgs {
+    /// The sweep case, JSON in the format of `atmosphere::sweep`.
+    #[arg(required_unless_present = "smoke", conflicts_with = "smoke")]
+    pub case: Option<PathBuf>,
+    /// Where to write the sweep's output.
+    #[arg(long)]
+    pub out: PathBuf,
+    /// The work directory: each finished point is kept in it, and a rerun resumes from it.
+    #[arg(long, required_unless_present = "smoke")]
+    pub work: Option<PathBuf>,
+    /// Threads for the run; the output is the same for any number.
+    #[arg(long)]
+    pub threads: Option<NonZeroUsize>,
+    /// The most a point's pilot and final trace may be projected to take, CPU-h; the ladder's
+    /// first step lowers it to 12. The smoke takes its own.
+    #[arg(long, default_value_t = POINT_CAP_CPU_H, conflicts_with = "smoke")]
+    pub point_cap_cpu_h: PositiveFigure,
+    /// The CPU a vertex takes under R08.T12.c's estimator, µs, which the projections take: the
+    /// pilot's measured figure, with no default (main's reading 2).
+    #[arg(long, required_unless_present = "smoke", conflicts_with = "smoke")]
+    pub cpu_per_vertex_us: Option<PositiveFigure>,
+    /// The CPU a vertex takes under VROOM, µs: the pilot's measured figure, with no default.
+    #[arg(long, required_unless_present = "smoke", conflicts_with = "smoke")]
+    pub vroom_cpu_per_vertex_us: Option<PositiveFigure>,
+    /// Run the pilot stage alone on `--points`, and write their pilots and projections.
+    #[arg(long, requires = "points")]
+    pub pilot_only: bool,
+    /// The points `--pilot-only` pilots, by index, comma-separated.
+    #[arg(long, value_delimiter = ',', requires = "pilot_only")]
+    pub points: Vec<u64>,
+    /// Compute at most this many points, then stop; run again to resume from `--work`.
+    #[arg(long, requires = "work")]
+    pub max_points: Option<usize>,
+    /// Run the embedded smoke sweep, two columns at a few τ and four geometries at small counts,
+    /// in seconds, through the whole walk and the floor scan.
+    #[arg(long)]
+    pub smoke: bool,
+}
+
+/// `atmosphere-reference`'s arguments.
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+pub struct AtmosphereReferenceArgs {
+    /// The case, JSON in the format of `atmosphere::case`.
+    pub case: PathBuf,
+    /// Where to write the reference.
+    #[arg(long)]
+    pub out: PathBuf,
+    /// Samples per geometry, aggregate and wavelength, for each the case gives no count of its
+    /// own (R08.T12.b.1).
+    #[arg(long, default_value_t = DEFAULT_REFERENCE_SAMPLES)]
+    pub samples: NonZeroU64,
+    /// Threads for the run; the output is the same for any number.
+    #[arg(long)]
+    pub threads: Option<NonZeroUsize>,
+    /// Trace the Stokes vector (I, Q, U, V) and the scalar radiance of the same paths: every
+    /// scattering term needs its scattering matrix, or the case's `depolarising` mark.
+    #[arg(long)]
+    pub stokes: bool,
+    /// Keep each geometry's and aggregate's moments at each wavelength in this directory as they
+    /// finish, and the job being traced in part every 10 minutes, and read back those there on a
+    /// rerun of the same trace, which then traces only the rest: the reference is the same, bit
+    /// for bit (R08.T12.h, R08.T16.a.2).
+    #[arg(long)]
+    pub work: Option<PathBuf>,
+    /// Read `--work`'s checkpoints written by another build of the tracer, which are refused
+    /// otherwise: only for a rebuild of the same tree, whose binary may differ in its bytes alone.
+    #[arg(long, requires = "work")]
+    pub resume_other_build: bool,
+}
+
+/// `atmosphere-reference`'s samples per geometry, aggregate and wavelength unless `--samples`
+/// or the case's own count for a geometry or aggregate says otherwise.
+const DEFAULT_REFERENCE_SAMPLES: NonZeroU64 = NonZeroU64::new(100_000).expect("not zero");
 
 /// The threads to use: `threads`, or every core the machine offers.
 fn threads_or_all(threads: Option<NonZeroUsize>) -> NonZeroUsize {
@@ -122,7 +230,15 @@ fn find(name: &str) -> Result<&'static dyn FitTask, RunFitError> {
 ///
 /// [`RunFitError::UnknownTask`] for a task that is not registered; the task's, the emitter's and
 /// the manifest's errors from `run`; [`RunFitError::Check`] if `check` finds a stale table;
-/// [`RunFitError::Output`] if `out` cannot be written.
+/// [`RunFitError::List`] if `list` cannot read the lock file or a table;
+/// [`RunFitError::AtmosphereCase`] if `atmosphere-reference`'s case cannot be read,
+/// [`RunFitError::AtmosphereReference`] if it cannot be traced and
+/// [`RunFitError::WriteReference`] if its reference cannot be written;
+/// [`RunFitError::SweepCase`] if `atmosphere-sweep`'s case cannot be read,
+/// [`RunFitError::SweepNeeds`] if its command line lacks an argument,
+/// [`RunFitError::HashBinary`] if the running binary cannot be read for its SHA-256,
+/// [`RunFitError::Sweep`] if it cannot be run and [`RunFitError::WriteSweep`] if its output cannot
+/// be written; [`RunFitError::Output`] if `out` cannot be written.
 pub fn run(cli: &Cli, out: &mut dyn Write) -> Result<(), RunFitError> {
     run_in(cli, &Workspace::repository(), out)
 }
@@ -178,7 +294,7 @@ pub fn run_in(cli: &Cli, workspace: &Workspace, out: &mut dyn Write) -> Result<(
                 &CheckInputs {
                     workspace,
                     tasks: task::registry(),
-                    manifest: MANIFEST,
+                    manifests: REPOSITORY_MANIFESTS,
                     current: GENERATOR_VERSION.get(),
                 },
                 if *rerun_fast {
@@ -212,6 +328,8 @@ pub fn run_in(cli: &Cli, workspace: &Workspace, out: &mut dyn Write) -> Result<(
             },
             out,
         ),
+        Command::AtmosphereReference(args) => atmosphere_reference(args, out),
+        Command::AtmosphereSweep(args) => atmosphere_sweep(args, out),
         Command::Fingerprint { task } => {
             let task = find(task)?;
             let fingerprint = task.fingerprint();
@@ -291,36 +409,172 @@ fn orbits(
     Ok(())
 }
 
-/// `list`: every task's name, class, table and state.
-fn list(workspace: &Workspace, out: &mut dyn Write) -> Result<(), RunFitError> {
-    let tasks = task::registry();
-    let report = check(
-        &CheckInputs {
-            workspace,
-            tasks,
-            manifest: MANIFEST,
-            current: GENERATOR_VERSION.get(),
-        },
-        Rerun::None,
-        NonZeroUsize::MIN,
-    );
-    writeln!(out, "{:<16}{:<7}{:<20}state", "task", "class", "table")?;
-    for task in tasks {
-        let name = task.name();
-        let state = if report.findings.iter().any(|f| f.table == name) {
-            "stale"
-        } else if report.warnings.iter().any(|(t, _)| t == name) {
-            "provisional"
-        } else {
-            "fresh"
-        };
+/// `atmosphere-reference`: traces the case and writes its reference, printing what it traced and
+/// how long it took.
+fn atmosphere_reference(
+    args: &AtmosphereReferenceArgs,
+    out: &mut dyn Write,
+) -> Result<(), RunFitError> {
+    // Read once, so that a resumable trace keys its checkpoints by the text it parsed.
+    let text = std::fs::read_to_string(&args.case).map_err(|source| ReadCaseError::Read {
+        path: args.case.clone(),
+        source,
+    })?;
+    let case = AtmosphereCase::from_json(&text)?;
+    let polarisation = if args.stokes {
+        Polarisation::Stokes
+    } else {
+        Polarisation::Scalar
+    };
+    let (samples, threads) = (args.samples, threads_or_all(args.threads));
+    let start = Instant::now();
+    let reference = match &args.work {
+        None => trace_reference(&case, polarisation, samples, threads)?,
+        Some(dir) => {
+            // Its line ends taken as LF, as the sweep's case is hashed.
+            let case_sha256 = crate::emit::sha256_hex(text.replace("\r\n", "\n").as_bytes());
+            let build_sha256 = binary_sha256()?;
+            let other_builds = if args.resume_other_build {
+                OtherBuilds::Read
+            } else {
+                OtherBuilds::Refused
+            };
+            let work = TraceWork::new(dir, &case_sha256, &build_sha256, other_builds);
+            let (reference, resumed) =
+                trace_reference_resumably(&case, polarisation, samples, threads, &work)?;
+            writeln!(
+                out,
+                "read {} of {} jobs from {}, and carried {} on from their parts{}",
+                resumed.read(),
+                resumed.jobs(),
+                dir.display(),
+                resumed.partial(),
+                if resumed.other_build() > 0 {
+                    format!(
+                        ", {} of them written by another build of the tracer",
+                        resumed.other_build()
+                    )
+                } else {
+                    String::new()
+                }
+            )?;
+            reference
+        }
+    };
+    let seconds = start.elapsed().as_secs_f64();
+    std::fs::write(&args.out, reference.to_json()).map_err(|source| {
+        RunFitError::WriteReference {
+            path: args.out.clone(),
+            source,
+        }
+    })?;
+    writeln!(
+        out,
+        "wrote {} ({} geometries and {} aggregates at {} wavelengths, {samples} samples each \
+         where the case gives no count, {threads} threads, {seconds:.1} s)",
+        args.out.display(),
+        case.geometry_count(),
+        case.aggregate_count(),
+        case.wavelengths_nm().len(),
+    )?;
+    Ok(())
+}
+
+/// The SHA-256 of the running binary, which keys a sweep's work directory (main's reading 4).
+fn binary_sha256() -> Result<String, RunFitError> {
+    let path = std::env::current_exe().map_err(|source| RunFitError::HashBinary {
+        path: PathBuf::new(),
+        source,
+    })?;
+    let bytes = std::fs::read(&path).map_err(|source| RunFitError::HashBinary { path, source })?;
+    Ok(crate::emit::sha256_hex(&bytes))
+}
+
+/// `atmosphere-sweep`: reads the case, or the smoke's, runs the sweep, printing each point as it
+/// finishes, and writes its output (to a temporary name beside it, then renamed), printing what it
+/// traced and how long it took.
+fn atmosphere_sweep(args: &AtmosphereSweepArgs, out: &mut dyn Write) -> Result<(), RunFitError> {
+    use crate::atmosphere::sweep::{
+        SMOKE_CASE, SweepCase, SweepMode, SweepRun, SweepSettings, run_sweep,
+    };
+    let case = match &args.case {
+        Some(path) => SweepCase::read(path)?,
+        None if args.smoke => SweepCase::from_json(SMOKE_CASE)?,
+        None => return Err(RunFitError::SweepNeeds("a sweep case")),
+    };
+    let settings = if args.smoke {
+        SweepSettings::SMOKE
+    } else {
+        let cpu = args
+            .cpu_per_vertex_us
+            .ok_or(RunFitError::SweepNeeds("--cpu-per-vertex-us"))?;
+        let vroom = args
+            .vroom_cpu_per_vertex_us
+            .ok_or(RunFitError::SweepNeeds("--vroom-cpu-per-vertex-us"))?;
+        if args.work.is_none() {
+            return Err(RunFitError::SweepNeeds("--work"));
+        }
+        SweepSettings::ruled(cpu, vroom).with_point_cap(args.point_cap_cpu_h)
+    };
+    let mode = if args.pilot_only {
+        SweepMode::PilotOnly(args.points.clone())
+    } else {
+        SweepMode::Walk
+    };
+    let binary = binary_sha256()?;
+    let threads = threads_or_all(args.threads);
+    let start = Instant::now();
+    let mut run = SweepRun::new(&case, settings, mode, threads, &binary);
+    if let Some(root) = &args.work {
+        run = run.with_work(root);
+    }
+    if let Some(most) = args.max_points {
+        run = run.with_max_points(most);
+    }
+    let outcome = run_sweep(&run, out)?;
+    let seconds = start.elapsed().as_secs_f64();
+    let (computed, resumed) = (outcome.computed(), outcome.resumed());
+    let Some(text) = outcome.into_text() else {
         writeln!(
             out,
-            "{name:<16}{:<7}{:<20}{state}",
-            task.class().as_str(),
-            task.table_path()
+            "stopped after {computed} points ({resumed} resumed); run again to resume from {}",
+            args.work
+                .as_deref()
+                .map_or_else(|| "nothing".to_owned(), |p| p.display().to_string())
         )?;
-    }
+        return Ok(());
+    };
+    let partial = {
+        let mut name = args.out.clone().into_os_string();
+        name.push(".partial");
+        PathBuf::from(name)
+    };
+    let write = |path: &Path| {
+        let path = path.to_path_buf();
+        move |source| RunFitError::WriteSweep { path, source }
+    };
+    std::fs::write(&partial, text).map_err(write(&partial))?;
+    std::fs::rename(&partial, &args.out).map_err(write(&args.out))?;
+    writeln!(
+        out,
+        "wrote {} ({}: {} points traced or piloted, {} resumed, {threads} threads, {seconds:.1} s)",
+        args.out.display(),
+        case.name(),
+        computed,
+        resumed,
+    )?;
+    Ok(())
+}
+
+/// `list`: every table's name, revision, class, runtime, state, path and acceptance figures.
+fn list(workspace: &Workspace, out: &mut dyn Write) -> Result<(), RunFitError> {
+    let listing = listing(&CheckInputs {
+        workspace,
+        tasks: task::registry(),
+        manifests: REPOSITORY_MANIFESTS,
+        current: GENERATOR_VERSION.get(),
+    })?;
+    writeln!(out, "{listing}")?;
     Ok(())
 }
 
@@ -340,6 +594,7 @@ fn run_task(
         Some(path) => Destination::Out { path, current },
         None => Destination::Tables {
             workspace,
+            tasks: task::registry(),
             since,
             current,
         },
@@ -424,18 +679,481 @@ mod tests {
     }
 
     #[test]
-    fn list_prints_registered_tasks() {
+    fn atmosphere_reference_parses() {
+        assert_eq!(
+            parse(&[
+                "atmosphere-reference",
+                "earth.case.json",
+                "--out",
+                "earth.reference.json",
+                "--samples",
+                "500",
+                "--threads",
+                "2",
+                "--stokes"
+            ])
+            .unwrap()
+            .command,
+            Command::AtmosphereReference(AtmosphereReferenceArgs {
+                case: "earth.case.json".into(),
+                out: "earth.reference.json".into(),
+                samples: NonZeroU64::new(500).unwrap(),
+                threads: NonZeroUsize::new(2),
+                stokes: true,
+                work: None,
+                resume_other_build: false,
+            })
+        );
+        assert_eq!(
+            parse(&["atmosphere-reference", "earth.case.json"])
+                .unwrap_err()
+                .kind(),
+            clap::error::ErrorKind::MissingRequiredArgument
+        );
+        assert_eq!(
+            parse(&[
+                "atmosphere-reference",
+                "a.json",
+                "--out",
+                "b.json",
+                "--samples",
+                "0"
+            ])
+            .unwrap_err()
+            .kind(),
+            clap::error::ErrorKind::ValueValidation
+        );
+    }
+
+    #[test]
+    fn atmosphere_reference_resumes_from_its_work_directory_to_the_bit() {
+        // R08.T12.h: the sample case thickened, which runs the deep estimator at 440 nm, traced
+        // with `--work`, again from its checkpoints alone, again with three of its eight jobs'
+        // checkpoints lost as a run cut short loses them, and without `--work`: the same reference
+        // to the bit each time. Another case's checkpoints, and a file that is not one, are
+        // refused.
+        let dir = tempfile::tempdir().unwrap();
+        let (case_path, work) = (dir.path().join("thick.case.json"), dir.path().join("work"));
+        let case = crate::atmosphere::case::tests::thickened_sample_case();
+        std::fs::write(&case_path, case.to_string()).unwrap();
+        let trace = |work: Option<&std::path::Path>, out: &str| {
+            let out_path = dir.path().join(out);
+            let mut args = vec![
+                "hyperion-fit".to_owned(),
+                "atmosphere-reference".to_owned(),
+                case_path.to_str().unwrap().to_owned(),
+                "--out".to_owned(),
+                out_path.to_str().unwrap().to_owned(),
+                "--samples".to_owned(),
+                "1100".to_owned(),
+                "--threads".to_owned(),
+                "3".to_owned(),
+            ];
+            if let Some(work) = work {
+                args.extend(["--work".to_owned(), work.to_str().unwrap().to_owned()]);
+            }
+            let mut printed = Vec::new();
+            let result = run(&Cli::try_parse_from(args).unwrap(), &mut printed);
+            result.map(|()| {
+                (
+                    std::fs::read_to_string(&out_path).unwrap(),
+                    String::from_utf8(printed).unwrap(),
+                )
+            })
+        };
+        let (whole, printed) = trace(Some(&work), "whole.json").unwrap();
+        assert!(printed.contains("read 0 of 8 jobs"), "{printed}");
+        let (again, printed) = trace(Some(&work), "again.json").unwrap();
+        assert!(printed.contains("read 8 of 8 jobs"), "{printed}");
+        assert_eq!(again, whole);
+        for lost in [
+            "geometry-0001-w1.json",
+            "ground-0000-w1.json",
+            "top-0000-w0.json",
+        ] {
+            std::fs::remove_file(work.join(lost)).unwrap();
+        }
+        let (resumed, printed) = trace(Some(&work), "resumed.json").unwrap();
+        assert!(printed.contains("read 5 of 8 jobs"), "{printed}");
+        assert_eq!(resumed, whole);
+        assert_eq!(trace(None, "plain.json").unwrap().0, whole);
+        let mut other = case;
+        other["seed"] = serde_json::json!(9);
+        std::fs::write(&case_path, other.to_string()).unwrap();
+        let error = trace(Some(&work), "other.json").unwrap_err();
+        assert_eq!(error.exit_code(), 1);
+        assert!(
+            matches!(
+                error,
+                RunFitError::AtmosphereReference(
+                    crate::atmosphere::TraceReferenceError::StaleCheckpoint { .. }
+                )
+            ),
+            "{error:?}"
+        );
+        let fresh = dir.path().join("fresh");
+        std::fs::create_dir(&fresh).unwrap();
+        std::fs::write(fresh.join("geometry-0000-w0.json"), "{}").unwrap();
+        let error = trace(Some(&fresh), "corrupt.json").unwrap_err();
+        assert!(
+            matches!(
+                error,
+                RunFitError::AtmosphereReference(
+                    crate::atmosphere::TraceReferenceError::CorruptCheckpoint { .. }
+                )
+            ),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn atmosphere_reference_writes_its_reference_and_names_its_failures() {
+        let dir = tempfile::tempdir().unwrap();
+        let case_path = dir.path().join("sample.case.json");
+        let out_path = dir.path().join("sample.reference.json");
+        let case = crate::atmosphere::case::tests::sample_case();
+        std::fs::write(&case_path, case.to_string()).unwrap();
+        let path = |p: &std::path::Path| p.to_str().unwrap().to_owned();
+        let args = [
+            "atmosphere-reference".to_owned(),
+            path(&case_path),
+            "--out".to_owned(),
+            path(&out_path),
+            "--samples".to_owned(),
+            "64".to_owned(),
+            "--threads".to_owned(),
+            "2".to_owned(),
+        ];
+        let cli =
+            Cli::try_parse_from(std::iter::once("hyperion-fit".to_owned()).chain(args)).unwrap();
+        let mut out = Vec::new();
+        run(&cli, &mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(
+            text.contains("2 geometries and 1 aggregates at 2 wavelengths, 64 samples"),
+            "{text}"
+        );
+        let written = std::fs::read_to_string(&out_path).unwrap();
+        let reference: crate::atmosphere::ReferenceRadiances =
+            serde_json::from_str(&written).unwrap();
+        assert_eq!(reference.case(), "sample");
+        assert_eq!(reference.geometries().len(), 2);
+        assert_eq!(reference.to_json(), written);
+
+        // The Stokes mode of a case with an aerosol is a bad command line; a missing case is not.
+        // Every command line here that reaches `threads_or_all` names its threads, so that none
+        // takes every core while other tests run beside it.
+        let stokes = Cli::try_parse_from([
+            "hyperion-fit",
+            "atmosphere-reference",
+            case_path.to_str().unwrap(),
+            "--out",
+            out_path.to_str().unwrap(),
+            "--stokes",
+            "--threads",
+            "1",
+        ])
+        .unwrap();
+        let error = run(&stokes, &mut Vec::new()).unwrap_err();
+        assert_eq!(error.exit_code(), 2);
+        match error {
+            RunFitError::AtmosphereReference(
+                crate::atmosphere::TraceReferenceError::StokesNeedsMatrix { term },
+            ) => assert_eq!(term, "aerosol"),
+            other => panic!("{other:?}"),
+        }
+        let missing = parse(&["atmosphere-reference", "missing.json", "--out", "x.json"]).unwrap();
+        let error = run(&missing, &mut Vec::new()).unwrap_err();
+        assert_eq!(error.exit_code(), 1);
+        assert!(
+            matches!(
+                error,
+                RunFitError::AtmosphereCase(crate::atmosphere::ReadCaseError::Read { .. })
+            ),
+            "{error:?}"
+        );
+        // A reference that cannot be written names its path.
+        let nowhere = dir.path().join("missing-directory").join("out.json");
+        let unwritable = Cli::try_parse_from([
+            "hyperion-fit",
+            "atmosphere-reference",
+            case_path.to_str().unwrap(),
+            "--out",
+            nowhere.to_str().unwrap(),
+            "--samples",
+            "2",
+            "--threads",
+            "1",
+        ])
+        .unwrap();
+        let error = run(&unwritable, &mut Vec::new()).unwrap_err();
+        assert_eq!(error.exit_code(), 1);
+        match error {
+            RunFitError::WriteReference { path, .. } => assert_eq!(path, nowhere),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn atmosphere_sweep_parses() {
+        let figure = |text: &str| text.parse::<PositiveFigure>().unwrap();
+        assert_eq!(
+            parse(&[
+                "atmosphere-sweep",
+                "ms-sweep-w950.case.json",
+                "--out",
+                "ms-sweep-w950.json",
+                "--work",
+                "work",
+                "--cpu-per-vertex-us",
+                "45",
+                "--vroom-cpu-per-vertex-us",
+                "90",
+                "--point-cap-cpu-h",
+                "12",
+                "--threads",
+                "4",
+            ])
+            .unwrap()
+            .command,
+            Command::AtmosphereSweep(AtmosphereSweepArgs {
+                case: Some("ms-sweep-w950.case.json".into()),
+                out: "ms-sweep-w950.json".into(),
+                work: Some("work".into()),
+                threads: NonZeroUsize::new(4),
+                point_cap_cpu_h: figure("12"),
+                cpu_per_vertex_us: Some(figure("45")),
+                vroom_cpu_per_vertex_us: Some(figure("90")),
+                pilot_only: false,
+                points: Vec::new(),
+                max_points: None,
+                smoke: false,
+            })
+        );
+        let Command::AtmosphereSweep(pilot) = parse(&[
+            "atmosphere-sweep",
+            "a.case.json",
+            "--out",
+            "a.json",
+            "--work",
+            "w",
+            "--cpu-per-vertex-us",
+            "45",
+            "--vroom-cpu-per-vertex-us",
+            "45",
+            "--pilot-only",
+            "--points",
+            "3,17,700",
+        ])
+        .unwrap()
+        .command
+        else {
+            panic!("an atmosphere-sweep");
+        };
+        assert_eq!((pilot.pilot_only, pilot.points), (true, vec![3, 17, 700]));
+        assert_eq!(pilot.point_cap_cpu_h, figure("24"));
+        assert!(parse(&["atmosphere-sweep", "--smoke", "--out", "s.json"]).is_ok());
+    }
+
+    #[test]
+    fn atmosphere_sweep_refuses_a_bad_command_line() {
+        use clap::error::ErrorKind;
+        for (args, kind) in [
+            (
+                &[
+                    "atmosphere-sweep",
+                    "a.json",
+                    "--out",
+                    "b.json",
+                    "--work",
+                    "w",
+                ][..],
+                ErrorKind::MissingRequiredArgument,
+            ),
+            (
+                &["atmosphere-sweep", "a.json", "--smoke", "--out", "b.json"][..],
+                ErrorKind::ArgumentConflict,
+            ),
+            (
+                &[
+                    "atmosphere-sweep",
+                    "a.json",
+                    "--out",
+                    "b.json",
+                    "--work",
+                    "w",
+                    "--cpu-per-vertex-us",
+                    "45",
+                    "--vroom-cpu-per-vertex-us",
+                    "45",
+                    "--point-cap-cpu-h",
+                    "0",
+                ][..],
+                ErrorKind::ValueValidation,
+            ),
+            (
+                &[
+                    "atmosphere-sweep",
+                    "--smoke",
+                    "--out",
+                    "b.json",
+                    "--cpu-per-vertex-us",
+                    "45",
+                ][..],
+                ErrorKind::ArgumentConflict,
+            ),
+            (
+                &[
+                    "atmosphere-sweep",
+                    "--smoke",
+                    "--out",
+                    "b.json",
+                    "--max-points",
+                    "1",
+                ][..],
+                ErrorKind::MissingRequiredArgument,
+            ),
+            (
+                &[
+                    "atmosphere-sweep",
+                    "--smoke",
+                    "--out",
+                    "b.json",
+                    "--points",
+                    "1",
+                ][..],
+                ErrorKind::MissingRequiredArgument,
+            ),
+        ] {
+            assert_eq!(parse(args).unwrap_err().kind(), kind, "{args:?}");
+        }
+    }
+
+    #[test]
+    fn atmosphere_sweep_smoke_writes_its_output_and_names_a_point_it_lacks() {
+        let dir = tempfile::tempdir().unwrap();
+        let out_path = dir.path().join("smoke.json");
+        let out_arg = out_path.to_str().unwrap();
+        let mut out = Vec::new();
+        run(
+            &parse(&[
+                "atmosphere-sweep",
+                "--smoke",
+                "--out",
+                out_arg,
+                "--threads",
+                "4",
+            ])
+            .unwrap(),
+            &mut out,
+        )
+        .unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(
+            text.contains("wrote") && text.contains("sweep-smoke"),
+            "{text}"
+        );
+        let written: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&out_path).unwrap()).unwrap();
+        assert_eq!(written["kind"], "sweep");
+        let unknown = parse(&[
+            "atmosphere-sweep",
+            "--smoke",
+            "--out",
+            out_arg,
+            "--pilot-only",
+            "--points",
+            "999999",
+            "--threads",
+            "1",
+        ])
+        .unwrap();
+        let error = run(&unknown, &mut Vec::new()).unwrap_err();
+        assert_eq!(error.exit_code(), 2);
+        assert!(matches!(
+            error,
+            RunFitError::Sweep(crate::atmosphere::sweep::RunSweepError::UnknownPoint(
+                999_999
+            ))
+        ));
+    }
+
+    /// `list` prints every registered table's name, revision, class, runtime, state, file and
+    /// acceptance figures, in columns, and then each table file whose header no registered task
+    /// writes: the hand-made `binary`, until P11.T15 registers it (P15.T12).
+    #[test]
+    fn list_prints_every_tables_revision_class_runtime_and_acceptance() {
         let mut out = Vec::new();
         run(&parse(&["list"]).unwrap(), &mut out).unwrap();
         let text = String::from_utf8(out).unwrap();
-        let rows: Vec<&str> = text.lines().skip(1).collect();
-        assert_eq!(rows.len(), task::registry().len(), "{text}");
-        for (row, task) in rows.iter().zip(task::registry()) {
-            assert!(row.starts_with(task.name()), "{row}");
-            assert!(row.contains(task.table_path()), "{row}");
-            assert!(row.contains(task.class().as_str()), "{row}");
+        let mut lines = text.lines();
+        let head = lines.next().unwrap();
+        let labels = [
+            "name",
+            "revision",
+            "class",
+            "runtime",
+            "state",
+            "table",
+            "acceptance",
+        ];
+        let starts: Vec<usize> = labels
+            .iter()
+            .map(|label| {
+                head.find(label)
+                    .unwrap_or_else(|| panic!("no `{label}` in `{head}`"))
+            })
+            .collect();
+        assert!(starts.is_sorted(), "{head}");
+        assert_eq!(starts[0], 0, "{head}");
+        let cells = |row: &str| -> Vec<String> {
+            (0..starts.len())
+                .map(|i| {
+                    let end = starts.get(i + 1).copied().unwrap_or(row.len());
+                    row.get(starts[i]..end)
+                        .unwrap_or_else(|| panic!("`{row}` is short of column {i}"))
+                        .trim()
+                        .to_owned()
+                })
+                .collect()
+        };
+        let rows: Vec<&str> = lines.collect();
+        let tasks = task::registry();
+        assert_eq!(rows.len(), tasks.len() + 1, "{text}");
+        let lock = crate::manifest::LockFile::read(&Workspace::repository().lock_path).unwrap();
+        for (row, task) in rows.iter().zip(tasks) {
+            let entry = lock.get(task.name()).unwrap();
+            let runtime = match task.class() {
+                task::TaskClass::Fast => "< 1 min",
+                task::TaskClass::Slow => "-",
+            };
+            assert_eq!(
+                cells(row),
+                [
+                    task.name(),
+                    &entry.revision.to_string(),
+                    task.class().as_str(),
+                    runtime,
+                    "fresh",
+                    task.table_path(),
+                    entry.acceptance.as_deref().unwrap_or("-"),
+                ],
+                "{row}"
+            );
         }
-        assert!(text.contains("mge             fast   mge.rs"), "{text}");
+        assert_eq!(
+            cells(rows[tasks.len()]),
+            [
+                "binary",
+                "-",
+                "-",
+                "-",
+                "unregistered provisional",
+                "binary.rs",
+                "-"
+            ],
+            "{text}"
+        );
     }
 
     #[test]
@@ -467,12 +1185,17 @@ mod tests {
 
     #[test]
     fn writing_into_the_tables_needs_since() {
+        // The task runs before the table is refused. It ignores the count, which each run names
+        // so that the test stays small beside the others if the task ever uses it.
         let mut out = Vec::new();
-        match run(&parse(&["run", "mge"]).unwrap(), &mut out) {
+        match run(&parse(&["run", "mge", "--threads", "1"]).unwrap(), &mut out) {
             Err(RunFitError::Emit(crate::emit::EmitTableError::SinceRequired)) => {}
             other => panic!("{other:?}"),
         }
-        match run(&parse(&["run", "mge", "--since", "1"]).unwrap(), &mut out) {
+        match run(
+            &parse(&["run", "mge", "--since", "1", "--threads", "1"]).unwrap(),
+            &mut out,
+        ) {
             Err(RunFitError::Emit(crate::emit::EmitTableError::SinceNotCurrent {
                 since: 1,
                 ..

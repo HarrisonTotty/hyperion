@@ -101,6 +101,11 @@ pub fn bearing(from: &GalacticPosition, to: &GalacticPosition) -> Option<Bearing
     let mut azimuth = Degrees::from(Radians::new(math::atan2(across, along))).value();
     if azimuth < 0.0 {
         azimuth += 360.0;
+    } else {
+        // A target dead ahead whose across part is −0 has `atan2`'s −0, which [0°, 360°) leaves
+        // out; under round-to-nearest −0 + +0 is +0, and any other value is itself (IEEE 754-2019
+        // §6.3), on every target.
+        azimuth += 0.0;
     }
     if azimuth >= 360.0 {
         azimuth = 0.0;
@@ -177,6 +182,27 @@ mod tests {
         let c = directions.coreward().components();
         let to = step(&from, [c[0], c[1], 1.0], 100.0);
         assert_bearing(bearing(&from, &to).unwrap(), 0.0, 45.0, BearingFrame::Local);
+    }
+
+    /// A target dead coreward has azimuth +0°, not −0°, which [0°, 360°) leaves out: from the Sun's
+    /// (0, 26,000, 68) ly the centre lies below, and the across part's three products are each −0
+    /// (spinward's x and y against the step's, and its zero z against the step down), so `atan2`
+    /// gives −0.
+    #[test]
+    fn a_target_dead_coreward_has_azimuth_plus_zero() {
+        for (from, to) in [
+            ([0.0, 26_000.0, 68.0], [0.0, 0.0, 0.0]),
+            ([0.0, 26_000.0, 0.0], [0.0, 0.0, -68.0]),
+            ([0.0, -26_000.0, 68.0], [0.0, 0.0, 0.0]),
+            ([26_000.0, 0.0, 68.0], [0.0, 0.0, 0.0]),
+            ([-26_000.0, 0.0, 68.0], [0.0, 0.0, 0.0]),
+            ([0.0, 26_000.0, 0.0], [0.0, 0.0, 0.0]),
+        ] {
+            let b = bearing(&at_ly(from), &at_ly(to)).unwrap();
+            assert_eq!(b.frame(), BearingFrame::Local);
+            assert!(b.azimuth().value() < 1e-9, "{from:?} to {to:?}: {b:?}");
+            hyperion_testkit::float::assert_same_bits(b.azimuth().value(), 0.0);
+        }
     }
 
     /// Within a light-year of the axis the azimuth runs from +x through +y (Design note 12).

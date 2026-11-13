@@ -1,0 +1,19 @@
+# The smoke run of the streams' fit (plan 15, P15.T11.b): one galaxy, eight orphans and two
+# observers on a coarse grid, the production cut.
+task = "streams"
+datasets = ["stream_census"]
+
+[params]
+generator_version = 27
+grid_low = 0.5
+grid_high = 4.5
+grid_steps = 8
+seed = 0x0f11_b000_0000_0000
+galaxies = 1
+orphans_per_galaxy = 8
+observer_kpc = 8.0
+observers = 2
+min_mass_msun = 1000.0
+max_distance_kpc = 30.0
+min_contrast = 10.0
+min_latitude_deg = 15.0

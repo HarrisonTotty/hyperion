@@ -1,11 +1,17 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 
+import type { GeometryOverride } from "../../../../preload/api";
+import { STROKE_PX } from "../wireframe/drawList";
 import {
+  GEOMETRY_BEFORE_R14,
+  geometryOf,
+  type GeometrySettings,
   QUALITY_SETTINGS,
   SETTINGS,
   TERRAIN_SETTINGS,
   type TerrainSettings,
   terrainSettingsFor,
+  WIREFRAME_TERRAIN_SLOTS,
 } from "./qualitySetting";
 
 // One entry per field, so that a field added to `TerrainSettings` and missed here fails the typecheck.
@@ -15,6 +21,7 @@ const TERRAIN_FIELDS = {
   normals: true,
   vertexPath: true,
   cacheBytes: true,
+  handoverDetail: true,
 } satisfies Record<keyof TerrainSettings, true>;
 
 describe("the quality settings", () => {
@@ -37,17 +44,33 @@ describe("the quality settings", () => {
       normals: "mesh",
       vertexPath: "face-differences",
       cacheBytes: 64 * 1024 * 1024,
+      handoverDetail: "whole",
     });
   });
 
-  it("gives the high setting a 1 px tolerance at the canvas's size with doubled normals", () => {
+  it("gives the high setting a 1 px tolerance at 1080 rows at most with doubled normals", () => {
     expect(SETTINGS.high.terrain).toMatchObject({
       tauPx: 1,
-      renderHeightPx: null,
+      renderHeightPx: 1080,
       normals: "double",
       vertexPath: "baked-offsets",
     });
     expect(SETTINGS.high.terrain.cacheBytes).toBeGreaterThan(SETTINGS.low.terrain.cacheBytes);
+  });
+
+  it("fades the terrain's sub-cell shading in below the hand-over on the high setting alone (R10.T15.b.2)", () => {
+    expect([SETTINGS.high.terrain.handoverDetail, SETTINGS.low.terrain.handoverDetail]).toEqual([
+      "faded",
+      "whole",
+    ]);
+  });
+
+  it("gives the high setting's cache 400,000,000 B, held by R10.T14.b until R10.T4.b", () => {
+    expect(SETTINGS.high.terrain.cacheBytes).toBe(400_000_000);
+  });
+
+  it("gives the wireframe's cache 520 slots on either setting, held by R10.T14.b until R10.T4.b", () => {
+    expect(WIREFRAME_TERRAIN_SLOTS).toBe(520);
   });
 
   it("holds the photorealistic view's internal scale in [0.5, 1.0] on both settings", () => {
@@ -70,6 +93,7 @@ describe("the quality settings", () => {
       bloom: { firstLevel: 1, levels: 5 },
       discAnnuli: 3,
       planetshineSources: 1,
+      floorLimbSamples: 2,
     });
   });
 
@@ -79,6 +103,7 @@ describe("the quality settings", () => {
       bloom: { firstLevel: 0, levels: 7 },
       discAnnuli: 4,
       planetshineSources: 2,
+      floorLimbSamples: 2,
     });
   });
 
@@ -110,5 +135,106 @@ describe("the quality settings", () => {
 
   it("refuses the low setting with the baked-offsets path", () => {
     expect(() => terrainSettingsFor("low", { vertexPath: "baked-offsets" })).toThrow(RangeError);
+  });
+});
+
+describe("the geometry's settings (plan R14)", () => {
+  it("draws through the cluster path on both settings, its casters culled by their receivers' depths and at their texel, the overlay's depth its own on the cluster path, its far cascades every fourth frame, a mesh page pool of 128 MiB high and 32 MiB low, its edge patches on the path, its camera strides measured, their acceptance passed, occlusion off until its acceptance (R14.T3.c, T3.d), the shading forward (R14.T2), the hidden marks culled (R10.T16.c), triangle budget on both (R14.T3.e), the stand-ins strided, as masks on high and on their own grids on low (R14.T3.c's stand-ins), and the edge bakes' stand-ins on the path, as masks on high and where exact on low (R14.T3.c's edge stand-ins), the disc cells packed and the figures forward until the owner's Mac pair (plan R07), the terrain lit by every planetshine source until its own pair, and keeps the way back", () => {
+    for (const setting of QUALITY_SETTINGS) {
+      const {
+        pageBytes: _pageBytes,
+        meshTolerancePx: _meshTolerancePx,
+        ...levers
+      } = SETTINGS[setting].geometry;
+      expect(levers).toEqual({
+        clusterPath: true,
+        casterDepthCull: true,
+        casterStrideCap: 8,
+        overlayDepth: "cluster",
+        litClusters: true,
+        farCascadeRate: 4,
+        figureClusters: true,
+        hullClusters: true,
+        wireClusters: true,
+        finClusters: true,
+        strides: "measured",
+        occlusion: "off",
+        shading: "forward",
+        terrainBudget: "triangles",
+        standInStrides: setting === "high" ? "all" : "own-grids",
+        hiddenMarks: "culled",
+        edgeStandIns: setting === "high" ? "masks" : "surveyed",
+        discCells: "packed",
+        figureShading: "forward",
+        terrainPlanetshine: "record",
+      });
+    }
+    expect([SETTINGS.high.geometry.pageBytes, SETTINGS.low.geometry.pageBytes]).toEqual([
+      134_217_728, 33_554_432,
+    ]);
+    expect(GEOMETRY_BEFORE_R14).toEqual({
+      clusterPath: false,
+      casterDepthCull: false,
+      casterStrideCap: 1,
+      overlayDepth: "redraw",
+      litClusters: false,
+      farCascadeRate: 1,
+      figureClusters: false,
+      hullClusters: false,
+      wireClusters: false,
+      pageBytes: 0,
+      meshTolerancePx: { camera: 0, wireframeOccluder: 0 },
+      finClusters: false,
+      strides: "off",
+      occlusion: "off",
+      shading: "forward",
+      terrainBudget: "patches",
+      standInStrides: "off",
+      hiddenMarks: "drawn",
+      edgeStandIns: "off",
+      discCells: "per-cell",
+      figureShading: "forward",
+      terrainPlanetshine: "record",
+    });
+  });
+
+  it("cuts meshes at 1 px high and 2 px low in the camera, and at half the thin stroke as the wireframe's occluders (plan R14, R14.T5.f)", () => {
+    expect([SETTINGS.high.geometry.meshTolerancePx, SETTINGS.low.geometry.meshTolerancePx]).toEqual(
+      [
+        { camera: 1, wireframeOccluder: STROKE_PX.thin / 2 },
+        { camera: 2, wireframeOccluder: STROKE_PX.thin / 2 },
+      ],
+    );
+  });
+
+  it("takes a launch's override over the setting's, field by field, the override's fields the settings' own (Design note 17)", () => {
+    expectTypeOf<GeometryOverride>().toEqualTypeOf<Partial<GeometrySettings>>();
+    expect([
+      geometryOf("low", { clusterPath: false }),
+      geometryOf("high", { casterStrideCap: 1, overlayDepth: "redraw" }),
+      geometryOf("high", {}),
+      geometryOf("high", { farCascadeRate: 1 }),
+      geometryOf("high", { pageBytes: 2 ** 20 }),
+      geometryOf("low", { finClusters: false }),
+      geometryOf("high", { strides: "measured" }),
+      geometryOf("low", { terrainBudget: "patches" }),
+      geometryOf("high", { standInStrides: "off" }),
+      geometryOf("high", { edgeStandIns: "off" }),
+      geometryOf("low", { discCells: "per-cell" }),
+      geometryOf("high", { figureShading: "screen" }),
+    ]).toEqual([
+      { ...SETTINGS.low.geometry, clusterPath: false },
+      { ...SETTINGS.high.geometry, casterStrideCap: 1, overlayDepth: "redraw" },
+      SETTINGS.high.geometry,
+      { ...SETTINGS.high.geometry, farCascadeRate: 1 },
+      { ...SETTINGS.high.geometry, pageBytes: 2 ** 20 },
+      { ...SETTINGS.low.geometry, finClusters: false },
+      { ...SETTINGS.high.geometry, strides: "measured" },
+      { ...SETTINGS.low.geometry, terrainBudget: "patches" },
+      { ...SETTINGS.high.geometry, standInStrides: "off" },
+      { ...SETTINGS.high.geometry, edgeStandIns: "off" },
+      { ...SETTINGS.low.geometry, discCells: "per-cell" },
+      { ...SETTINGS.high.geometry, figureShading: "screen" },
+    ]);
   });
 });

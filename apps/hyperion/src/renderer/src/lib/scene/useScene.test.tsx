@@ -1,6 +1,6 @@
 import {
   decodeServerMessage,
-  type NotificationBody,
+  type NotificationOf,
   type SceneStateDto,
   type ServerMessage,
   type UniverseIdHex,
@@ -27,7 +27,7 @@ import { CAMERA_REPORT_INTERVAL_MS } from "./cameraReports";
 import type { SceneKinematics } from "./model";
 import { RECONNECT_DELAY_MS } from "../connection";
 import { REQUEST_TIMEOUT_MS } from "../useServerRequest";
-import { SCENE_SILENCE_MS, type SceneOptions, useScene } from "./useScene";
+import { SCENE_SILENCE_MS, type SceneOptions, type SceneSurfaceEvent, useScene } from "./useScene";
 
 const UNIVERSE: UniverseIdHex = "00000000000000a1";
 const OTHER_UNIVERSE: UniverseIdHex = "00000000000000b2";
@@ -49,7 +49,7 @@ function stateInSystem(seconds = 3_000): SceneStateDto {
 }
 
 /** A heartbeat numbered `sequence`, at `seconds`. */
-function heartbeat(sequence: number, seconds: number): NotificationBody {
+function heartbeat(sequence: number, seconds: number): NotificationOf<"scene"> {
   return { topic: "scene", sequence, clock: sceneClock(seconds, RATE), bodies: [] };
 }
 
@@ -92,7 +92,7 @@ function ended(subscription: number): ServerMessage {
 }
 
 /** A push of the fixture's craft, numbered `push`, stating its time `push` seconds on. */
-function craftPush(push: number): NotificationBody {
+function craftPush(push: number): NotificationOf<"scene"> {
   const craft = craftFixture();
   const time = sceneClock(3_000 + push, RATE).time;
   return {
@@ -170,6 +170,22 @@ describe("useScene", () => {
         universe: UNIVERSE,
         topic: { topic: "scene", detail: "full", cameras: [] },
       },
+    ]);
+  });
+
+  it("hands a render for another cause the same scene, and a push a new one (lane perf-render-thread-2)", async () => {
+    const { result, rerender, socket } = renderScene();
+    await opens(socket, 3);
+    const opened = result.current;
+    rerender();
+    const again = result.current;
+    act(() => {
+      socket.serverNotifies(3, heartbeat(1, 4_600));
+    });
+    expect([again === opened, result.current === opened, result.current.model?.sequence]).toEqual([
+      true,
+      false,
+      1,
     ]);
   });
 
@@ -790,7 +806,7 @@ describe("useScene", () => {
     const { result, socket } = renderScene();
     const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
     await opens(socket, 1);
-    const unusable: NotificationBody = {
+    const unusable: NotificationOf<"scene"> = {
       ...heartbeat(1, 3_100),
       clock: { ...sceneClock(3_100, RATE), time_rate: 7 },
     };
@@ -907,6 +923,126 @@ describe("useScene", () => {
     await settle();
 
     expect(renders).toBe(before);
+  });
+
+  it("hands a push's surface revisions to its surface listeners", async () => {
+    const { result, socket } = renderScene();
+    await opens(socket, 3);
+    const events: SceneSurfaceEvent[] = [];
+    result.current.onSurface((event) => events.push(event));
+    const revisions = [{ body: FIXTURE_EARTH, revision: 4 }];
+
+    act(() => {
+      socket.serverNotifies(3, { ...heartbeat(1, 3_100), surface_revisions: revisions });
+      socket.serverNotifies(3, heartbeat(2, 3_200));
+    });
+
+    expect(events).toEqual([{ kind: "revisions", revisions }]);
+  });
+
+  it("renders a push naming surface revisions as one naming none", async () => {
+    let renders = 0;
+    const hook = renderHook(
+      () => {
+        renders += 1;
+        return useScene(UNIVERSE, OPTIONS);
+      },
+      { wrapper: ServerLinkHarness },
+    );
+    const socket = FakeWebSocket.latest();
+    act(() => {
+      socket.serverWelcomes();
+    });
+    await opens(socket, 3);
+    hook.result.current.onSurface(() => undefined);
+    const before = renders;
+
+    act(() => {
+      socket.serverNotifies(3, {
+        ...heartbeat(1, 3_100),
+        surface_revisions: [{ body: FIXTURE_EARTH, revision: 4 }],
+      });
+    });
+    const named = renders - before;
+    act(() => {
+      socket.serverNotifies(3, heartbeat(2, 3_200));
+    });
+
+    expect(renders - before - named).toBe(named);
+  });
+
+  it("tells its surface listeners to resync once the scene is open again after a gap", async () => {
+    const { result, socket } = renderScene();
+    await opens(socket, 3);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const events: SceneSurfaceEvent[] = [];
+    result.current.onSurface((event) => events.push(event));
+
+    act(() => {
+      socket.serverNotifies(3, heartbeat(2, 4_000));
+    });
+    expect(events).toEqual([]);
+    await opens(socket, 4, stateInSystem(4_000));
+
+    expect(events).toEqual([{ kind: "resync" }]);
+  });
+
+  it("tells no resync for a scene opened afresh when the link returns", async () => {
+    const { result, socket } = renderScene();
+    await opens(socket, 3);
+    const events: SceneSurfaceEvent[] = [];
+    result.current.onSurface((event) => events.push(event));
+    act(() => {
+      socket.close();
+    });
+    act(() => {
+      vi.advanceTimersByTime(RECONNECT_DELAY_MS);
+    });
+    const next = FakeWebSocket.latest();
+    act(() => {
+      next.serverWelcomes();
+    });
+
+    await opens(next, 1, stateInSystem(9_000));
+
+    expect(events).toEqual([]);
+  });
+
+  it("reports a surface listener that throws, and tells the others", async () => {
+    const { result, socket } = renderScene();
+    await opens(socket, 3);
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const events: SceneSurfaceEvent[] = [];
+    result.current.onSurface(() => {
+      throw new Error("a listener's bug");
+    });
+    result.current.onSurface((event) => events.push(event));
+    const revisions = [{ body: FIXTURE_EARTH, revision: 2 }];
+
+    act(() => {
+      socket.serverNotifies(3, { ...heartbeat(1, 3_100), surface_revisions: revisions });
+    });
+
+    expect(errors).toHaveBeenCalledOnce();
+    expect(events).toEqual([{ kind: "revisions", revisions }]);
+    expect(result.current.status).toEqual({ kind: "live" });
+  });
+
+  it("stops telling a surface listener once it unsubscribes", async () => {
+    const { result, socket } = renderScene();
+    await opens(socket, 3);
+    const events: SceneSurfaceEvent[] = [];
+    const unsubscribe = result.current.onSurface((event) => events.push(event));
+    unsubscribe();
+
+    act(() => {
+      socket.serverNotifies(3, {
+        ...heartbeat(1, 3_100),
+        surface_revisions: [{ body: FIXTURE_EARTH, revision: 2 }],
+      });
+    });
+
+    expect(events).toEqual([]);
   });
 
   it("subscribes once under StrictMode's double effects, and receives the scene", async () => {

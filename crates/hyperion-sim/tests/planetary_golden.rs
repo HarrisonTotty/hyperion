@@ -19,7 +19,7 @@ use hyperion_sim::coords::{CellSize, GenCell};
 use hyperion_sim::galaxy::params::GalaxyParams;
 use hyperion_sim::galaxy::placement::{SystemRecord, resolve};
 use hyperion_sim::galaxy::{Galaxy, Population};
-use hyperion_sim::id::{Layer, SystemId};
+use hyperion_sim::id::{BodyId, Layer, SystemId};
 use hyperion_sim::planetary::architecture::CLOSE_BINARY_CUTOFF_AU;
 use hyperion_sim::planetary::architecture::template::{
     CountLaw, EARLY_M_DWARF_FIRST_PERIOD_SCALE, EccentricityLaw, Location, MassLaw, PeriodLaw,
@@ -27,9 +27,9 @@ use hyperion_sim::planetary::architecture::template::{
 };
 use hyperion_sim::planetary::architecture::template::{EARTH_MASSES_PER_JUPITER_MASS, GroupRole};
 use hyperion_sim::planetary::architecture::{
-    ArchitectureClass, ClassConstraints, ClassDraw, HostMultiplicity, ZoneLimit, class_weights,
-    first_period_share,
+    ArchitectureClass, ClassConstraints, ClassDraw, ZoneLimit, class_weights, first_period_share,
 };
+use hyperion_sim::planetary::derive::atmosphere::SurfaceState;
 use hyperion_sim::planetary::derive::figure::BodyFigure;
 use hyperion_sim::planetary::derive::limits::{TidalPlanet, moon_mass_limit};
 use hyperion_sim::planetary::derive::photometry::{Bands, BodyPhotometry};
@@ -40,13 +40,16 @@ use hyperion_sim::planetary::derive::{
 use hyperion_sim::planetary::disc::{self, Disc, DiscDraws, DiscHost, Truncation};
 use hyperion_sim::planetary::fate::{BodyState, DestructionCause};
 use hyperion_sim::planetary::frames::BodyFixedFrame;
+use hyperion_sim::planetary::hooks::figures::interior::RadiogenicIsotope;
+use hyperion_sim::planetary::hooks::{detail_seed, surface_seed};
 use hyperion_sim::planetary::placement::OrbitHost;
 use hyperion_sim::planetary::placement::{
     Neighbour, PlacedPlanet, mutual_hill_factor, mutual_hill_radius, next_semi_major_axis,
     satisfies_floor, spacing_floor,
 };
 use hyperion_sim::planetary::record::{
-    BodyKind, BodyRecord, Population as BodyPopulation, Section, SystemSnapshot,
+    BodyKind, BodyRecord, DetailLevel, Modelled, Population as BodyPopulation, Section, Surface,
+    SystemSnapshot,
 };
 use hyperion_sim::planetary::{self, Body, BodyIndex, PlanetarySystem, SystemContext};
 use hyperion_sim::stellar::Composition;
@@ -217,12 +220,8 @@ fn class_probabilities_draws_and_templates_are_pinned() {
     let constraints = [
         ("none", ClassConstraints::NONE),
         (
-            "zone inside the snow line, close binary",
-            ClassConstraints::new(
-                &disc,
-                ZoneLimit::Outer(au(2.0)),
-                HostMultiplicity::CloseBinary,
-            ),
+            "zone inside the snow line",
+            ClassConstraints::new(&disc, ZoneLimit::Outer(au(2.0))),
         ),
     ];
     for (name, c) in constraints {
@@ -379,6 +378,48 @@ fn write_eccentricity(w: &mut GoldenWriter, name: &str, law: EccentricityLaw) {
             w.f64(&format!("{name} e long beta b"), long_b);
         }
     }
+}
+
+/// A seed of each of six bodies, by `seed_of`, in four universes: the seed goldens.
+fn body_seeds(seed_of: impl Fn(Seed, BodyId) -> u64) -> GoldenWriter {
+    let mut w = GoldenWriter::new();
+    w.header(GENERATOR_VERSION.get());
+    let bodies = [
+        (0x0200_0800_2000_0000, 0x0000),
+        (0x0200_0800_2000_0000, 0x0001),
+        (0x0200_0800_2000_0000, 0x0300),
+        (0x0200_0800_2000_0001, 0x0000),
+        (0x0200_0800_2000_0031, 0x0101),
+        (0x0200_0800_2000_0031, 0xffff),
+    ];
+    for seed in [0, 7, 0x0014_0023, u64::MAX] {
+        for (raw, index) in bodies {
+            let body = BodyId::new(SystemId::from_raw(raw).unwrap(), index);
+            w.u64_hex(
+                &format!("seed {seed:016x} body {body}"),
+                seed_of(Seed::new(seed), body),
+            );
+        }
+    }
+    w
+}
+
+/// The surface seeds of a few bodies (P14.T23): a function of the universe seed and the body's ID
+/// alone, which no change to the derivation may move. Pinned when R09.T1.a moved the type into the
+/// base crate, at the values the sim's own type gave.
+#[test]
+fn surface_seeds_are_pinned() {
+    let w = body_seeds(|seed, body| surface_seed(seed, body).get());
+    golden!("planetary/surface_seed", w.as_str());
+}
+
+/// The detail seeds of the same bodies (R09.T1.b): a function of the universe seed and the body's
+/// ID alone, on a tag of its own, which the client is sent in the surface seed's place and whose
+/// synthesis it keys.
+#[test]
+fn detail_seeds_are_pinned() {
+    let w = body_seeds(|seed, body| detail_seed(seed, body).get());
+    golden!("planetary/detail_seed", w.as_str());
 }
 
 #[test]
@@ -555,7 +596,7 @@ fn g_dwarf(c: &Candidate<'_>) -> bool {
 
 /// Whether slot `n` of `c`'s hierarchy is a star, not a bound brown dwarf (P11.T2.d).
 fn is_star(c: &Candidate<'_>, n: usize) -> bool {
-    c.context().hierarchy().stars()[n].kind() == SlotKind::Star
+    c.context().hierarchy().unwrap().stars()[n].kind() == SlotKind::Star
 }
 
 /// The number of stars in `c`'s system: its hierarchy's slots less any bound brown dwarf, which
@@ -576,7 +617,7 @@ fn all_dwarfs(c: &Candidate<'_>) -> bool {
 /// The pairs of `c`'s hierarchy whose outer member is a star, by semi-major axis in au: a bound
 /// brown dwarf's orbit about the system is no stellar pair (P11.T2.d).
 fn pair_separations_au(c: &Candidate<'_>) -> Vec<f64> {
-    let hierarchy = c.context().hierarchy();
+    let hierarchy = c.context().hierarchy().unwrap();
     hierarchy
         .pairs()
         .filter(|&(node, _)| {
@@ -876,12 +917,14 @@ const GOLDEN_SYSTEMS: [GoldenSystem; 15] = [
         // rocky belts at 434–461 and 543–568 au. Re-pinned by the search at version 16 (the
         // pin before, 0x8201_b2a0_0000_001a, still satisfies the predicate, but the search now
         // finds this system first); after plan 11's ruling 81 the first pin,
-        // 0x8200_b2e0_0000_000d, had stopped satisfying it.
+        // 0x8200_b2e0_0000_000d, had stopped satisfying it. Re-pinned by the search at version 27,
+        // whose field share and carve-out move layer E's records (0x8200_b2e0_0000_000a no longer
+        // satisfies the predicate).
         name: "fallback_black_hole",
         layer: Layer::E,
         budget: 200_000,
         predicate: fallback_black_hole_with_survivors,
-        id: 0x8200_b2e0_0000_000a,
+        id: 0x8200_b2e0_0000_0002,
     },
     GoldenSystem {
         // A 0.335 M☉ M dwarf of 3,600 K, [Fe/H] 0.00, `CompactMulti`: one rocky planet of 1.02 M⊕
@@ -920,12 +963,14 @@ const GOLDEN_SYSTEMS: [GoldenSystem; 15] = [
         // −0.04, 3.6 Myr old, `TerrestrialOnly`: four planets of 0.11–0.15 M⊕ and two of their
         // giant-impact moons, three asteroid belts and a Kuiper belt, none of them formed yet; no
         // halo. Pinned by the search in round 9 (`track06`), once P06.T15 gave the tracks a
-        // pre-main sequence.
+        // pre-main sequence. Re-pinned by the search at version 27 (0x41fe_2c96_0000_000c is
+        // gone), its budget raised from 200,000: from 27 the young field gives most of its young
+        // stars to the features that bore them (P09.T2.c).
         name: "t_tauri",
         layer: Layer::C,
-        budget: 200_000,
+        budget: 2_000_000,
         predicate: t_tauri_star,
-        id: 0x41fe_2c96_0000_000c,
+        id: 0x4215_6b82_0000_0005,
     },
 ];
 
@@ -1004,6 +1049,8 @@ fn write_population(w: &mut GoldenWriter, population: &BodyPopulation) {
                     gap.radius().value(),
                 );
             }
+            // P14.T56.a: the ring's plane on its planet's Laplace surface, after its older lines.
+            write_vector(w, "normal", ring.normal());
         }
         BodyPopulation::Belt(belt) => {
             w.line(&format!(
@@ -1029,6 +1076,31 @@ fn write_population(w: &mut GoldenWriter, population: &BodyPopulation) {
             w.f64("outer_m", halo.outer_edge().value());
             w.f64("comets", halo.comets());
             w.f64("comet_rate_per_s", halo.comet_rate().value());
+        }
+        // P14.T28.a, from generator version 26: no golden system holds one below it.
+        BodyPopulation::ProtoplanetaryDisc(disc) => {
+            w.line(&format!("protoplanetary disc about {:?}", disc.host()));
+            w.f64("inner_m", disc.inner_edge().value());
+            w.f64("outer_m", disc.outer_edge().value());
+            w.f64("snow_line_m", disc.snow_line().value());
+            w.f64(
+                "characteristic_radius_m",
+                disc.characteristic_radius().value(),
+            );
+            w.f64("gas_msun", disc.gas_mass().value());
+            w.f64("solid_mearth", disc.solid_mass().value());
+            for gap in disc.gaps() {
+                w.f64(
+                    &format!("gap_{:04x}_m", gap.giant().get()),
+                    gap.radius().value(),
+                );
+            }
+        }
+        // P14.T28.d, from generator version 26: no golden system holds one below it.
+        BodyPopulation::DebrisDisc(disc) => {
+            w.line(&format!("debris disc about {:?}", disc.host()));
+            w.f64("inner_m", disc.inner_edge().value());
+            w.f64("outer_m", disc.outer_edge().value());
         }
     }
 }
@@ -1108,7 +1180,11 @@ fn write_record(w: &mut GoldenWriter, record: &BodyRecord) {
         other => write_section_state(w, "population", other),
     }
     write_section_state(w, "surface", record.surface());
-    write_section_state(w, "hooks", record.hooks());
+    // R09.T1.b: a present body's hooks section holds its detail seed, pinned by value.
+    match record.hooks() {
+        Section::Ok(hooks) => w.u64_hex("hooks detail_seed", hooks.detail_seed().get()),
+        other => write_section_state(w, "hooks", other),
+    }
     // P14.T46.f and T47.d: the frame, the figure and the photometry the wire carries, after every
     // older line, so that the older lines keep their keys.
     match record.rotation() {
@@ -1122,6 +1198,86 @@ fn write_record(w: &mut GoldenWriter, record: &BodyRecord) {
     match record.photometry() {
         Section::Ok(photometry) => write_photometry(w, photometry),
         other => write_section_state(w, "photometry", other),
+    }
+    // P14.T48.e: the surface section's summary and the envelope's state, after every older line.
+    if let Section::Ok(surface) = record.surface() {
+        write_surface(w, surface);
+    }
+    write_section_state(w, "envelope", record.envelope());
+}
+
+/// A body's surface section, in summary (P14.T48.e): its state, material and climate regime, the
+/// figures R09's coarse pass reads first, its published condensates (P14.T51.a, on the record
+/// from P14.T54.a), each entry's substance, phase and seasonal flag, reservoir, layer and area, and
+/// its crust (P14.T51.c, on the record from P14.T54.a's C3): its lid and crusts by key, its
+/// provinces, redox and thermal history, its melt area and its peak central temperature.
+/// `planetary/surface_conditions_published` pins the conditions and figures whole on a sample.
+fn write_surface(w: &mut GoldenWriter, surface: &Surface) {
+    let regime = surface.climate_regime();
+    w.line(&format!(
+        "surface_state: {:?}, {:?}; climate {:?}, {:?}, {}, {:?}",
+        surface.state(),
+        surface.material(),
+        regime.thermal(),
+        regime.forcing(),
+        regime
+            .condensable()
+            .map_or_else(|| "none".to_owned(), |id| id.substance().key().to_string()),
+        regime.model()
+    ));
+    let (conditions, figures) = (surface.conditions(), surface.figures());
+    w.f64(
+        "mean_surface_temperature_k",
+        conditions.mean_surface_temperature().value(),
+    );
+    w.f64(
+        "equator_pole_contrast_k",
+        conditions.equator_pole_contrast_k(),
+    );
+    w.f64("day_night_contrast_k", conditions.day_night_contrast_k());
+    w.f64("surface_pressure_pa", conditions.surface_pressure().value());
+    w.f64("sigma_h_m", figures.sigma_h().value());
+    w.f64("continental_fraction", figures.continental_fraction());
+    w.f64("heat_flow_w_m2", figures.heat_flow().value());
+    w.f64("surface_age_yr", figures.surface_age().value());
+    w.f64("ocean_fraction", figures.ocean_fraction());
+    w.f64("ice_fraction", figures.ice_fraction());
+    for entry in surface.condensates().entries() {
+        w.line(&format!(
+            "condensate: {}, {:?}, seasonal {}",
+            entry.substance().substance().key(),
+            entry.phase(),
+            entry.is_seasonal()
+        ));
+        w.f64("reservoir_kg_m2", entry.reservoir().value());
+        match entry.reservoir_gel() {
+            Some(gel) => w.f64("reservoir_gel_m", gel.value()),
+            None => w.line("reservoir_gel_m: none"),
+        }
+        w.f64("area_fraction", entry.area_fraction());
+    }
+    let Modelled::Ok(crust) = surface.crust() else {
+        w.line("crust: not modelled");
+        return;
+    };
+    let key = |id: Option<hyperion_sim::substance::SubstanceId>| {
+        id.map_or_else(|| "none".to_owned(), |id| id.substance().key().to_string())
+    };
+    w.line(&format!(
+        "crust: lid {:?}; primary {}, secondary {}, tertiary {}, bulk {}; provinces {}; {:?}, {:?}",
+        crust.lid(),
+        key(crust.primary()),
+        key(crust.secondary()),
+        key(crust.tertiary()),
+        key(crust.bulk()),
+        key(Some(crust.provinces())),
+        crust.redox(),
+        crust.thermal_history(),
+    ));
+    w.f64("melt_area_fraction", crust.melt_area_fraction());
+    match crust.peak_central_temperature() {
+        Some(peak) => w.f64("peak_central_temperature_k", peak.value()),
+        None => w.line("peak_central_temperature_k: none"),
     }
 }
 
@@ -1250,7 +1406,7 @@ fn golden_systems_are_pinned() {
                 w.f64("teff_k", state.effective_temperature().value());
             }
         }
-        for (node, orbit) in context.hierarchy().pairs() {
+        for (node, orbit) in context.hierarchy().unwrap().pairs() {
             w.line(&format!("pair {}:", node.get()));
             w.f64("a_au", orbit.semi_major_axis().value() / METRES_PER_AU);
             w.f64("e", orbit.eccentricity().value());
@@ -1273,6 +1429,159 @@ fn golden_systems_are_pinned() {
         }
         golden!(&format!("planetary/systems/{}", golden.name), w.as_str());
     }
+}
+
+/// P14.T25: the habitability assessment `hooks_at` gives every body of the golden systems that
+/// has hooks, at the epoch: its class and the plan's limits, or its section's state, and on a
+/// line of its own the four limits added after the plan's list (lean, 2026-11-01), so that the
+/// lines pinned before them stand.
+#[test]
+fn golden_systems_habitability_is_pinned() {
+    use hyperion_sim::planetary::hooks::HabitabilityLimit;
+
+    let added = [
+        HabitabilityLimit::MoltenSurface,
+        HabitabilityLimit::DrySurface,
+        HabitabilityLimit::MassOutsideTemperateRange,
+        HabitabilityLimit::FrozenSurface,
+    ];
+    let galaxy = fixture();
+    let mut w = GoldenWriter::new();
+    w.header(GENERATOR_VERSION.get());
+    let t = UniverseTime::EPOCH;
+    for golden in &GOLDEN_SYSTEMS {
+        let (_, context, system) = pinned(&galaxy, golden.id);
+        w.line(&format!("{} {:#018x}:", golden.name, golden.id));
+        for body in system.bodies() {
+            let Some(hooks) = system
+                .hooks_at(&context, body.index(), t)
+                .expect("a body of the system")
+            else {
+                continue;
+            };
+            let id = body.index().body_id(context.id());
+            match hooks.habitability() {
+                Section::Ok(assessment) => {
+                    let (planned, since): (Vec<_>, Vec<_>) = assessment
+                        .limits()
+                        .iter()
+                        .partition(|limit| !added.contains(limit));
+                    w.line(&format!("{id}: {:?} {planned:?}", assessment.class()));
+                    w.line(&format!("{id}_added_limits = {since:?}"));
+                }
+                section => w.line(&format!("{id}: {:?}", section.state())),
+            }
+        }
+    }
+    golden!("planetary/habitability", w.as_str());
+}
+
+/// P14.T26: every golden system's bodies' resource abundances at the epoch, each fraction and each
+/// radioactive isotope's by its bits, from `hooks_at`, over the crust's lid or the envelope's gas;
+/// a body whose abundances are not `Ok` by its section's state.
+#[test]
+fn the_golden_systems_resource_abundances_are_pinned() {
+    let galaxy = fixture();
+    let mut w = GoldenWriter::new();
+    w.header(GENERATOR_VERSION.get());
+    let mut pinned_bodies = 0_u32;
+    for golden in &GOLDEN_SYSTEMS {
+        let (_, context, system) = pinned(&galaxy, golden.id);
+        for body in system.bodies() {
+            let Some(hooks) = system
+                .hooks_at(&context, body.index(), UniverseTime::EPOCH)
+                .unwrap()
+            else {
+                continue;
+            };
+            let name = format!("{} {:04x}", golden.name, body.index().get());
+            match hooks.resources() {
+                Section::Ok(abundances) => {
+                    for (resource, x) in abundances.iter() {
+                        w.f64(&format!("{name} {}", resource.key()), x);
+                    }
+                    for isotope in RadiogenicIsotope::ALL {
+                        w.f64(
+                            &format!("{name} {isotope:?}"),
+                            abundances.radioactive(isotope),
+                        );
+                    }
+                    pinned_bodies += 1;
+                }
+                other => w.line(&format!("{name} = {:?}", other.state())),
+            }
+        }
+    }
+    assert!(pinned_bodies > 20, "{pinned_bodies}");
+    golden!("planetary/resources", w.as_str());
+}
+
+/// P14.T48.e's gas-envelope split on the golden systems: a present planet's surface is `Ok`
+/// exactly when its class has a solid surface, and then never in the gas-envelope state, or, from
+/// generator version 24, its class has a solid surface under a supercritical envelope (P14.T53.b
+/// part 2), when its surface is not applicable and its envelope not modelled; from 24 a gas
+/// envelope's section is the record's own (P14.T54.b.i; not modelled to 23), `Ok` or not modelled
+/// where the record refuses it (`close_binary`'s 0500), and a solid surface's envelope is not
+/// applicable, so that exactly one of the two applies; and degrading below `Surface` withholds the
+/// envelope.
+#[test]
+fn the_golden_systems_split_surfaces_from_envelopes() {
+    let galaxy = fixture();
+    let (mut solid, mut enveloped, mut modelled) = (0, 0, 0_u32);
+    for golden in &GOLDEN_SYSTEMS {
+        let (_, context, system) = pinned(&galaxy, golden.id);
+        let snapshot = system.snapshot_at(&context, UniverseTime::EPOCH);
+        for record in snapshot.bodies() {
+            let present = record.identity().state() == BodyState::Present;
+            let Section::Ok(bulk) = record.bulk() else {
+                continue;
+            };
+            if !present || record.identity().kind() != BodyKind::Planet {
+                continue;
+            }
+            let name = format!("{} {:04x}", golden.name, record.index().get());
+            let has_solid_surface = bulk.class().has_solid_surface();
+            // A solid class under a supercritical envelope, from 24 (P14.T53.b part 2): the test
+            // that decides it is the crate's own, so the tag pair alone stands for it here.
+            let hidden = has_solid_surface
+                && record.surface() == &Section::NotApplicable
+                && record.envelope() == &Section::NotModelled;
+            assert!(!hidden || GENERATOR_VERSION.get() >= 24, "{name}");
+            assert_eq!(
+                matches!(record.surface(), Section::Ok(_)),
+                has_solid_surface && !hidden,
+                "{name}: a {:?}",
+                bulk.class()
+            );
+            if let Section::Ok(surface) = record.surface() {
+                assert_ne!(surface.state(), SurfaceState::GasEnvelope, "{name}");
+                solid += 1;
+            } else {
+                assert_eq!(record.surface(), &Section::NotApplicable, "{name}");
+                enveloped += 1;
+            }
+            if has_solid_surface && !hidden {
+                assert_eq!(record.envelope(), &Section::NotApplicable, "{name}");
+            } else if hidden {
+                assert_eq!(record.envelope(), &Section::NotModelled, "{name}");
+            } else {
+                assert!(
+                    matches!(record.envelope(), Section::Ok(_) | Section::NotModelled),
+                    "{name}"
+                );
+                modelled += u32::from(matches!(record.envelope(), Section::Ok(_)));
+            }
+            assert_eq!(
+                record.degrade(DetailLevel::Bulk).envelope(),
+                &Section::NotResolved,
+                "{name}"
+            );
+        }
+    }
+    assert!(
+        solid > 10 && enveloped > 10 && modelled > 10,
+        "{solid} solid, {enveloped} enveloped, {modelled} envelopes modelled"
+    );
 }
 
 /// P14.T30.c on the Solar-like golden: its five planets are lettered `A b` to `A f` from the inside

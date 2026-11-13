@@ -14,6 +14,7 @@ use ts_rs::TS;
 
 use crate::planetary::{BodySummaryDto, DetailLevelDto, SystemBodiesDto};
 use crate::primitives::{BodyIdHex, GalacticPosition, SystemIdHex, UniverseIdHex, UniverseTime};
+use crate::surface::SurfaceRevisionDto;
 
 /// A position in one of plan 01's frames, tagged by `frame`.
 ///
@@ -312,6 +313,13 @@ pub struct SceneNotificationDto {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub craft: Option<Vec<SceneCraftDto>>,
+    /// The bodies whose surveyed coverage grew since the last notification, each once with its
+    /// latest revision (rendering plan R09, R09.T19.b): a client keeping a body's field asks
+    /// `surface_field` with the revision it holds for the new cells. Omitted when none grew. A
+    /// body of any system may be named, not only the scene's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub surface_revisions: Option<Vec<SurfaceRevisionDto>>,
 }
 
 #[cfg(test)]
@@ -688,6 +696,7 @@ mod tests {
                 arrival: None,
                 bodies: Vec::new(),
                 craft: None,
+                surface_revisions: None,
             },
             json!({ "sequence": 12, "clock": clock_json(), "bodies": [] }),
         );
@@ -707,6 +716,10 @@ mod tests {
                     seen: None,
                 }],
                 craft: Some(Vec::new()),
+                surface_revisions: Some(vec![SurfaceRevisionDto {
+                    body: BodyIdHex::from_parts(SYSTEM, 0x0103),
+                    revision: 3,
+                }]),
             },
             json!({
                 "sequence": 13,
@@ -715,7 +728,22 @@ mod tests {
                 "arrival": { "type": "no_system" },
                 "bodies": [{ "level": "full", "record": planet_summary_json() }],
                 "craft": [],
+                "surface_revisions": [
+                    { "body": "0200080020000000.0103", "revision": 3 },
+                ],
             }),
         );
+    }
+
+    /// A notification of an older server, before R09.T19.b, has no `surface_revisions`, and one
+    /// that names none omits it, so the field moves no protocol version.
+    #[test]
+    fn a_notification_without_surface_revisions_omits_them() {
+        let read: SceneNotificationDto =
+            serde_json::from_value(json!({ "sequence": 2, "clock": clock_json(), "bodies": [] }))
+                .unwrap();
+        assert_eq!(read.surface_revisions, None);
+        let written = serde_json::to_value(&read).unwrap();
+        assert!(written.get("surface_revisions").is_none(), "{written}");
     }
 }

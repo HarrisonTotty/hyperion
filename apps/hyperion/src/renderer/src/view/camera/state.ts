@@ -16,17 +16,27 @@ import {
 import type { CameraFrame, CameraPose, CraftId, Quaternion } from "./pose";
 import { DEFAULT_FOV_DEG, FOV_STEPS_DEG } from "./projection";
 import { lookAlong, multiply, quaternionFromAxisAngle, rotate, slerp } from "./quaternion";
+import { type OrbitDatum, orbitRadiusM, orbitStart } from "./orbit";
 import { type FrameChange, rebase, sameCameraFrame } from "./rebase";
 
 /**
- * Where a local view's camera is held: at the own ship's seat, chasing it, or detached (plan R02,
- * R02.T9.a; brainstorm, "The free camera").
+ * Where a local view's camera is held: at the own ship's seat, chasing it, detached, or held about
+ * a body from far out down to its ground (`orbit`, plan R15, T4; `orbit.ts`) (plan R02, R02.T9.a;
+ * brainstorm, "The free camera").
  *
  * @remarks
  * The union is open: R07.T25's Phase C adds `slaved`, a station's view following the main
  * screen's camera.
  */
-export type CameraPreset = "seat" | "chase" | "free";
+export type CameraPreset = "seat" | "chase" | "free" | "orbit";
+
+/**
+ * A body an `ORBIT` camera may be held about (plan R15, T4), with its reference spheroid, the datum
+ * the orbit's altitude is measured from.
+ */
+export interface OrbitBody extends OrbitDatum {
+  readonly id: BodyIdHex;
+}
 
 /**
  * How a view draws: R02's `wireframe`, or R07's `photorealistic` (R07.T7). A style chooses passes
@@ -35,8 +45,14 @@ export type CameraPreset = "seat" | "chase" | "free";
 export type RenderStyle = "wireframe" | "photorealistic";
 
 /**
- * What a view stands for: `eye` for the single-player cockpit view, whose star limits are a human
- * eye's, and `camera` for every other view (R06's star limits read it).
+ * What a view stands for: `camera` for a ship's camera feed, every view a display draws (`VIEW`'s
+ * primary and its instruments, the main screen's), and `eye` for a view seen by eye through a
+ * ship's window, whose star limits and glare are a human eye's (R06's star limits, R07's glare and
+ * the host discs' reach read it).
+ *
+ * @remarks
+ * No display offers a view through a window yet; the role is kept for one (ux-calls-view, item 3a,
+ * the owner's delegated call, 2026-11-01).
  */
 export type ViewRole = "eye" | "camera";
 
@@ -121,6 +137,14 @@ export interface CameraScene {
   readonly ownShip: OwnShip | null;
   /** The pose a camera with no own ship starts at. */
   readonly defaultPose: CameraPose;
+  /** The bodies an `ORBIT` camera may be held about: every planet, dwarf planet and moon drawn with a radius. */
+  readonly orbitBodies: ReadonlyArray<OrbitBody>;
+  /**
+   * The body an `ORBIT` camera is held about where the target is no body of
+   * {@link CameraScene.orbitBodies}: the `PLANET VIEWER`'s planet; `null` for every other scene,
+   * which offers no `ORBIT`.
+   */
+  readonly orbitHome: BodyIdHex | null;
 }
 
 /**
@@ -219,9 +243,28 @@ const STILL: FreeFlight = {
   pendingS: 0,
 };
 
-/** The presets a scene offers: all three with an own ship, only `free` without one. */
+/**
+ * The presets a scene offers: `seat` and `chase` with an own ship, `free` always, and `orbit`
+ * where the scene offers a body to hold it about ({@link CameraScene.orbitHome}).
+ */
 export function offeredPresets(scene: CameraScene): readonly CameraPreset[] {
-  return scene.ownShip === null ? ["free"] : ["seat", "chase", "free"];
+  const own: readonly CameraPreset[] =
+    scene.ownShip === null ? ["free"] : ["seat", "chase", "free"];
+  return orbitBodyOf(null, scene) === null ? own : [...own, "orbit"];
+}
+
+/**
+ * The body an `ORBIT` camera aimed at `target` is held about: the target where it is a body of
+ * the scene's orbit bodies, else the scene's own ({@link CameraScene.orbitHome}); `null` where the
+ * scene offers no `ORBIT`.
+ */
+export function orbitBodyOf(target: CameraTarget | null, scene: CameraScene): OrbitBody | null {
+  if (scene.orbitHome === null) {
+    return null;
+  }
+  const find = (id: BodyIdHex | null): OrbitBody | undefined =>
+    id === null ? undefined : scene.orbitBodies.find((body) => body.id === id);
+  return find(target?.kind === "body" ? target.body : null) ?? find(scene.orbitHome) ?? null;
 }
 
 /** Where a target is. */
@@ -336,6 +379,8 @@ export function sceneFrameFor(pose: CameraPose, scene: CameraScene): CameraFrame
  * `seat` is at the own ship's eye point and `chase` astern of it, both in the ship's `craft` frame
  * (Design note 22). `free` detaches from `from` where it stands: into the target craft's frame when
  * the target is a craft (it then orbits that craft), otherwise into the scene's own frames.
+ * `orbit` holds the camera about its body ({@link orbitBodyOf}) in the body's frame, from where it
+ * stands, looking at the centre (`orbitStart`); `null` where the scene has no body to hold it about.
  */
 export function presetPose(
   preset: CameraPreset,
@@ -359,6 +404,17 @@ export function presetPose(
           ? { kind: "craft", craft: target.craft }
           : sceneFrameFor(from, scene);
       pose = rebase(from, frame, scene.origins).pose;
+      break;
+    }
+    case "orbit": {
+      const body = orbitBodyOf(target, scene);
+      if (body === null) {
+        pose = null;
+        break;
+      }
+      const frame: CameraFrame = { kind: "body", body: body.id };
+      const held = rebase(from, frame, scene.origins).pose;
+      pose = orbitStart(held, frame, orbitRadiusM(body, held.positionM));
       break;
     }
   }
@@ -406,7 +462,7 @@ export interface CutOptions {
  */
 export type CutResult =
   | { readonly kind: "cut"; readonly state: CameraState; readonly change: FrameChange | null }
-  | { readonly kind: "refused"; readonly reason: "no_own_ship" };
+  | { readonly kind: "refused"; readonly reason: "no_own_ship" | "no_body" };
 
 /**
  * The camera after a preset change, a slew to a target or a change of the seat's look.
@@ -446,7 +502,7 @@ export function cutTo(
   const onScreen = displayPose(state, scene.origins);
   let pose = presetPose(preset, look, target, scene, onScreen);
   if (pose === null) {
-    return { kind: "refused", reason: "no_own_ship" };
+    return { kind: "refused", reason: preset === "orbit" ? "no_body" : "no_own_ship" };
   }
   if (
     preset === "free" &&
@@ -485,7 +541,7 @@ export function cutTo(
  */
 export function followPreset(state: CameraState, scene: CameraScene): CameraState {
   const ship = scene.ownShip;
-  if (state.preset === "free" || ship === null) {
+  if (state.preset === "free" || state.preset === "orbit" || ship === null) {
     return state;
   }
   const pose = presetPose(state.preset, state.look, state.target, scene, state.pose);
@@ -502,7 +558,7 @@ export function followPreset(state: CameraState, scene: CameraScene): CameraStat
  */
 export function turnLook(state: CameraState, turn: ViewTurn, scene: CameraScene): CameraState {
   const ship = scene.ownShip;
-  if (state.preset === "free" || ship === null || !isTurn(turn)) {
+  if (state.preset === "free" || state.preset === "orbit" || ship === null || !isTurn(turn)) {
     return state;
   }
   const base = presetPose(state.preset, state.look, state.target, scene, state.pose);
@@ -579,7 +635,7 @@ export function nextTarget(
  */
 export function onSystemChange(state: CameraState, scene: CameraScene): CameraState {
   const ship = scene.ownShip;
-  if (state.preset !== "free" && ship !== null) {
+  if (state.preset !== "free" && state.preset !== "orbit" && ship !== null) {
     return followPreset({ ...state, move: null }, scene);
   }
   return {

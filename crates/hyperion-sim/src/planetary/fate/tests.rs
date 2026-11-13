@@ -367,6 +367,70 @@ fn a_planet_engulfed_at_the_red_giant_tip_stays_destroyed_though_the_winds_widen
 
 /// Test (c): a planet of a star that loses over half its mass at once with no kick is unbound
 /// from a circular orbit, and black holes from complete fallback keep their bodies.
+/// P14.T28.e: a second-generation body forms after its host's death, on its orbit about the
+/// remnant, which it keeps; its states are a prefix of not yet formed → present, among the
+/// unbound primordial bodies of its host, which it does not move. A primordial body of the same
+/// formation never forms.
+#[test]
+fn a_second_generation_body_forms_after_its_neutron_star_s_death_and_keeps_its_orbit() {
+    let neutron = star(12.0, 5e7);
+    let death = death_of(&neutron).expect("dead by the epoch");
+    let host = FateHost::star(&neutron);
+    let death_age = neutron.age_at(death.at).value();
+    let formed_at = Megayears::new(death_age / 1e6 + 10.0);
+    let orbit = KeplerElements::from_semi_major_axis(
+        Metres::from(AstronomicalUnits::new(0.36)),
+        GravitationalParameter::from_solar_masses(death.after),
+        Eccentricity::new(0.02).expect("valid"),
+        orientation(0.4, 1.3, 2.2),
+        Radians::new(0.9),
+    )
+    .expect("a valid orbit");
+    let mass = EarthMasses::new(4.3);
+    let formation =
+        Formation::second_generation(mass, formed_at, &FormationDraws::MEDIAN).expect("valid");
+    let primordial = FateBody::new(formation, orbit, mass, EARTH_DENSITY).expect("valid");
+    let second = primordial.second_generation();
+    assert_eq!(primordial.generation(), Generation::Primordial);
+    assert_eq!(second.generation(), Generation::Second);
+    let jupiters = [
+        body(60.0, 0.0, jupiter_mass(), 12.0, 0.3),
+        body(200.0, 0.0, jupiter_mass(), 12.0, 0.3),
+    ];
+    let alone = BodyFate::resolve(&second, &host);
+    let all = BodyFate::resolve_all(&[&jupiters[0], &second, &jupiters[1]], &host);
+    let formed = at_age(&neutron, formed_at.value() * 1e6);
+    assert_eq!(alone.formed_at(), Some(formed));
+    assert_eq!(alone.ending(), None);
+    assert_eq!(BodyFate::resolve(&primordial, &host).formed_at(), None);
+    for jupiter in [&all[0], &all[2]] {
+        assert_eq!(jupiter.ending(), Some(BodyState::Unbound { at: death.at }));
+    }
+    let times = [
+        death.at,
+        after(formed, -86_400),
+        formed,
+        after(formed, 86_400),
+        UniverseTime::EPOCH,
+    ];
+    let states: Vec<BodyState> = times.iter().map(|&t| alone.at(t).state()).collect();
+    assert_eq!(
+        states,
+        [
+            BodyState::NotYetFormed,
+            BodyState::NotYetFormed,
+            BodyState::Present,
+            BodyState::Present,
+            BodyState::Present
+        ]
+    );
+    for &t in &times[2..] {
+        assert_eq!(alone.at(t), all[1].at(t));
+        assert_eq!(alone.at(t).orbit(), Some(&orbit));
+    }
+    assert_eq!(alone.host_mass(UniverseTime::EPOCH), death.after);
+}
+
 #[test]
 fn a_neutron_star_unbinds_its_planets_and_a_fallback_black_hole_keeps_them() {
     let neutron = star(12.0, 5e7);

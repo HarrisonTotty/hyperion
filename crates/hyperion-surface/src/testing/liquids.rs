@@ -1,0 +1,233 @@
+//! The synthetic palettes' liquid records (decision-r11-palette-liquids §1 and §4): liquid water
+//! at 25 °C, liquid methane at Titan's surface temperature, and a basaltic melt, each value with
+//! its source and each record with its basis.
+//!
+//! These are test inputs, entered by hand, not the registry's: the server resolves a generated
+//! body's records from plan 14's columns (P14.T49.h, P14.T54.a). The optical members are the
+//! uniform means over R08's fifteen bake bins of R08's committed material files
+//! (`apps/hyperion/src/renderer/src/view/atmosphere/materials/`), each file's 5 nm grid
+//! interpolated linearly in n and in a = 4πk ÷ λ, as decision-r11-palette-liquids §1.8 takes them,
+//! n to six decimal places and a to six significant figures. The water's and the methane's
+//! scattering is the registry's (P14.T49.h), copied to the bit (decision-r10-t10b-r09-t2e §7). A
+//! member left out is not modelled here, never 0.
+//!
+//! The client's `view/atmosphere/materials/paletteLiquids.test.ts` reads these records, and the
+//! sim's copies of two of them, from their sources, and holds each bin to its file's bin mean, so
+//! that a change to a material file fails a test rather than leaving a record stale. Taking such a
+//! change re-blesses `wire/payloads.golden` at the version in force (and, for water, the Earth-like
+//! world's sea's normal albedo, `testing/worlds.rs`'s `WATER`, the record's Fresnel reflectance).
+
+use hyperion_base::units::Kelvin;
+
+use crate::field::{LIQUID_BINS, LiquidBasis, LiquidProperties};
+
+/// Liquid water at 25 °C and 100 kPa, every member measured, so `Measured`
+/// (decision-r11-palette-liquids §1.8's water row).
+///
+/// - **n:** R08's `water.json` since R08.T5.h, IAPWS R9-97 (1997) at 25 °C and IAPWS-95's density
+///   at 1 atm: the refit of Schiebener et al. 1990 (J. Phys. Chem. Ref. Data 19, 677) that Harvey,
+///   Gallagher and Levelt Sengers 1998 (J. Phys. Chem. Ref. Data 27, 761) publish. 1.343 789 in
+///   the bin about 393 nm and 1.329 086 in the bin about 747 nm.
+/// - **a:** the same file: Mason, Cone and Fry 2016 (Appl. Opt. 55, 7163) at 23 °C over
+///   380–495 nm, Pope and Fry 1997 (Appl. Opt. 36, 8710) at 22 °C over 500–725 nm, and Kou,
+///   Labrie and Chýlek 1993 (Appl. Opt. 32, 3531) at 22 °C over 730–780 nm. In the bin about
+///   443 nm it is 0.006 24 m⁻¹, against the file's 0.005 22 at 440 nm (the bin's mean rises to its
+///   red edge), and in the bin about 545 nm 0.051 8, against Pope and Fry's 0.056 5 at 550 nm.
+/// - **The reference Earth's copy** (`hyperion_sim::planetary::surface::reference`'s
+///   `WATER_RECORD`) is the same record.
+/// - **Density:** 997.047 kg m⁻³, IAPWS-95's at 298.15 K and 100 kPa (IAPWS R6-95(2018);
+///   Wagner and Pruß 2002, J. Phys. Chem. Ref. Data 31, 387): 997.047 0, and 997.047 6 at 1 atm,
+///   the same within the formulation's uncertainty, and the pressure of the viscosity's figure.
+/// - **Surface tension:** 0.071 97 N m⁻¹, IAPWS R1-76(2014)'s σ = 235.8 mN m⁻¹ τ^1.256
+///   (1 − 0.625 τ), τ = 1 − T ÷ 647.096 K, at 298.15 K, against its own vapour.
+/// - **Viscosity:** 8.900 × 10⁻⁴ Pa s, IAPWS R12-08's (Huber et al. 2009, J. Phys. Chem. Ref. Data
+///   38, 101), its eqs. (10)–(12) at 298.15 K and IAPWS-95's density at 100 kPa: 0.890 02 mPa s.
+/// - **Scattering:** P14.T49.h's, `hyperion_sim::substance::liquid_properties`' b at 298.15 K, the
+///   registry's Einstein–Smoluchowski–Cabannes (Zhang, Hu and He 2009's density term with
+///   IAPWS-95's `κ_T` at the saturated liquid's density and δ = 0.039 there), copied as shortest
+///   round-trip decimals (decision-r10-t10b-r09-t2e §7): 0.005 47 m⁻¹ in the bin about 393 nm and
+///   0.000 370 in the bin about 747 nm. A sim test holds it to the registry's to the bit.
+///
+/// A sea warmer than an Earth's mean, about 18 °C at its surface: the temperature is the file's
+/// and its index's, at which every member but the absorption was measured. The absorption was
+/// measured at 23 °C to 495 nm and 22 °C from 500 nm, and the file and this record take it as it
+/// stands at 25 °C (R08.T5.g's deferred "one temperature per liquid"; near 740 nm it would rise
+/// about 1.7%, the file's reduction states).
+#[must_use]
+pub fn liquid_water() -> LiquidProperties {
+    LiquidProperties {
+        temperature: Kelvin::new(298.15),
+        density_kg_m3: LIQUID_WATER_DENSITY_KG_M3,
+        basis: LiquidBasis::Measured,
+        refractive_index: [
+            1.343_789, 1.341_476, 1.339_564, 1.337_962, 1.336_599, 1.335_422, 1.334_396, 1.333_487,
+            1.332_676, 1.331_946, 1.331_283, 1.330_673, 1.330_109, 1.329_581, 1.329_086,
+        ],
+        absorption_per_m: Some([
+            0.001_875_00,
+            0.003_054_05,
+            0.006_244_14,
+            0.010_301_2,
+            0.017_715_8,
+            0.039_037_0,
+            0.051_761_7,
+            0.073_031_0,
+            0.180_294,
+            0.277_590,
+            0.334_405,
+            0.442_138,
+            0.601_402,
+            1.442_47,
+            2.800_88,
+        ]),
+        scattering_per_m: Some([
+            0.005_469_387_272_826_296,
+            0.004_181_643_650_890_754,
+            0.003_254_641_324_180_969_4,
+            0.002_572_758_840_890_256_4,
+            0.002_061_546_784_888_825,
+            0.001_671_864_057_626_776,
+            0.001_370_471_055_788_929_3,
+            0.001_134_243_878_283_069,
+            0.000_946_934_327_145_038_1,
+            0.000_796_821_586_256_235_6,
+            0.000_675_356_514_061_437_1,
+            0.000_576_186_174_358_237_9,
+            0.000_494_570_413_029_009_8,
+            0.000_426_895_418_578_785_24,
+            0.000_370_397_943_504_135_35,
+        ]),
+        surface_tension_n_per_m: Some(0.071_97),
+        viscosity_pa_s: Some(8.900e-4),
+    }
+}
+
+/// [`liquid_water`]'s density, kg m⁻³, which its [`PaletteRole::Liquid`] entry's grain density
+/// is.
+///
+/// [`PaletteRole::Liquid`]: crate::field::PaletteRole::Liquid
+pub const LIQUID_WATER_DENSITY_KG_M3: f64 = 997.047;
+
+/// Liquid methane at Titan's surface temperature, 93.65 K (Huygens's HASI at its landing site,
+/// 93.65 ± 0.25 K; Fulchignoni et al. 2005, Nature 438, 785), `Derived`
+/// (decision-r11-palette-liquids §1.8's methane row, for a sea of methane alone).
+///
+/// - **Density:** 447.6 kg m⁻³, Setzmann and Wagner 1991's equation of state (J. Phys. Chem. Ref.
+///   Data 20, 1061, as the NIST Chemistry WebBook, SRD 69, evaluates it) at 93.65 K and Huygens's
+///   1,467 hPa (Fulchignoni et al. 2005): 447.614, against the saturated liquid's 447.525.
+/// - **n:** R08's `methane-liquid.json`, Martonchik and Orton 1994 (Appl. Opt. 33, 8306) at 90 K,
+///   each bin's mean carried to 93.65 K by Lorentz–Lorenz at constant molar refraction, (n² − 1)
+///   ÷ (n² + 2) times 447.6 ÷ 452.4: 452.4 kg m⁻³ is the saturated-liquid line extrapolated to
+///   90 K, 0.69 K below the triple point (90.694 K), an extrapolation, so the record is `Derived`.
+///   About 0.0034 lower, 1.2903 in the bin about 545 nm.
+/// - **Scattering:** P14.T49.h's, `hyperion_sim::substance::liquid_properties`' b at 93.65 K, the
+///   registry's Einstein–Smoluchowski–Cabannes with Setzmann and Wagner 1991's `κ_T` at the
+///   saturated liquid's 447.53 kg m⁻³ and the depolarisation from methane's anisotropy ratio
+///   (decision-p14-t49h-gas-index §4.3), `Derived`, copied as shortest round-trip decimals
+///   (decision-r10-t10b-r09-t2e §7): 0.003 87 m⁻¹ in the bin about 393 nm and 0.000 269 in the bin
+///   about 747 nm. A sim test holds it to the registry's to the bit.
+/// - **Not modelled here:** the absorption (the file's k is `derived` since R08.T5.j: Martonchik
+///   and Orton's Fig. 3 over 555.6–780 nm, and the gas's coefficients at the liquid's density over
+///   380–555.6 nm, since nothing was measured shortward of 552.5 nm and Fig. 3 ends at 555.6 nm),
+///   the surface tension and the viscosity, which the registry resolves for a generated body.
+#[must_use]
+pub fn liquid_methane_titan() -> LiquidProperties {
+    LiquidProperties {
+        temperature: Kelvin::new(93.65),
+        density_kg_m3: LIQUID_METHANE_TITAN_DENSITY_KG_M3,
+        basis: LiquidBasis::Derived,
+        refractive_index: [
+            1.296_516, 1.295_764, 1.294_671, 1.293_578, 1.292_486, 1.291_394, 1.290_300, 1.289_209,
+            1.288_562, 1.287_754, 1.287_153, 1.286_718, 1.286_668, 1.286_660, 1.286_355,
+        ],
+        absorption_per_m: None,
+        scattering_per_m: Some([
+            0.003_865_809_149_989_438_4,
+            0.002_989_879_265_953_119,
+            0.002_339_992_177_513_175_5,
+            0.001_855_513_682_522_143_7,
+            0.001_488_726_493_932_331_1,
+            0.001_207_091_327_156_444_5,
+            0.000_988_092_827_130_07,
+            0.000_815_891_544_344_150_6,
+            0.000_681_679_037_661_234_1,
+            0.000_572_882_364_591_951_5,
+            0.000_485_555_912_859_613_3,
+            0.000_414_686_511_108_925_1,
+            0.000_357_392_279_184_591_24,
+            0.000_309_766_467_640_019_4,
+            0.000_269_111_878_909_328_93,
+        ]),
+        surface_tension_n_per_m: None,
+        viscosity_pa_s: None,
+    }
+}
+
+/// [`liquid_methane_titan`]'s density, kg m⁻³.
+pub const LIQUID_METHANE_TITAN_DENSITY_KG_M3: f64 = 447.6;
+
+/// A basaltic melt at 1,200 °C, a lava's, on a basalt crust entry, `StandIn`
+/// (decision-r11-palette-liquids §1.8's molten silicate row).
+///
+/// - **n and a:** R08's `basaltic-glass.json`, Pollack, Toon and Khare 1973 (Icarus 19, 372), a
+///   room-temperature glass standing in for the melt: about 10⁴ m⁻¹, opaque at a millimetre.
+/// - **Density:** 2,700 kg m⁻³, a stated constant near a tholeiitic melt's at 1,200 °C and 1 bar,
+///   not the solid's grain density: about 2,690–2,750 kg m⁻³ for tholeiites there by the partial
+///   molar volumes of Lange 1997 and Lange and Carmichael 1987 (Geochim. Cosmochim. Acta 51, 2931)
+///   as `DensityX` (Iacovino and Till 2019, Volcanica 2, 1) combines them, at Fe³⁺/ΣFe 0.1.
+/// - **Not modelled here:** the scattering, the surface tension and the viscosity.
+#[must_use]
+pub fn basaltic_melt() -> LiquidProperties {
+    LiquidProperties {
+        temperature: Kelvin::new(1_473.15),
+        density_kg_m3: 2_700.0,
+        basis: LiquidBasis::StandIn,
+        refractive_index: [
+            1.570_000, 1.570_000, 1.570_000, 1.570_000, 1.569_965, 1.569_227, 1.568_213, 1.567_200,
+            1.566_187, 1.565_173, 1.564_160, 1.563_147, 1.562_133, 1.561_120, 1.560_107,
+        ],
+        absorption_per_m: Some(BASALTIC_GLASS_ABSORPTION_PER_M),
+        scattering_per_m: None,
+        surface_tension_n_per_m: None,
+        viscosity_pa_s: None,
+    }
+}
+
+/// The basaltic glass's absorption by bin, m⁻¹ ([`basaltic_melt`]): the file extrapolates its
+/// k over 380–400 nm from its 400 and 420 nm rows, as its own reduction states.
+const BASALTIC_GLASS_ABSORPTION_PER_M: [f64; LIQUID_BINS] = [
+    27_451.2, 19_827.5, 15_333.2, 13_571.3, 12_378.3, 11_384.0, 10_562.0, 9_813.11, 9_151.09,
+    8_868.34, 8_714.66, 8_576.86, 8_457.78, 8_399.9, 8_365.92,
+];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    use wasm_bindgen_test::wasm_bindgen_test as test;
+
+    /// Water's surface tension is IAPWS R1-76(2014)'s at 25 °C, to its printed 0.01 mN m⁻¹.
+    #[test]
+    fn the_synthetic_water_s_surface_tension_is_iapws_r1_76() {
+        let tau = 1.0 - 298.15 / 647.096;
+        let sigma = 235.8e-3 * hyperion_base::math::powf(tau, 1.256) * (1.0 - 0.625 * tau);
+        let held = liquid_water().surface_tension_n_per_m.unwrap();
+        assert!((sigma - held).abs() < 5e-6, "{sigma} N/m against {held}");
+    }
+
+    /// Each record's index falls with wavelength (normal dispersion) and lies where its liquid's
+    /// does: water's about 1.33 (IAPWS R9-97's, 1.345 at 380 nm), methane's about 1.29, a
+    /// basaltic glass's about 1.57.
+    #[test]
+    fn the_synthetic_liquids_indices_fall_with_wavelength() {
+        for (record, low, high) in [
+            (liquid_water(), 1.325, 1.350),
+            (liquid_methane_titan(), 1.285, 1.297),
+            (basaltic_melt(), 1.559, 1.571),
+        ] {
+            let n = record.refractive_index;
+            assert!(n.windows(2).all(|w| w[1] <= w[0]), "{n:?}");
+            assert!(n.iter().all(|v| (low..high).contains(v)), "{n:?}");
+        }
+    }
+}

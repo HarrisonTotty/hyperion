@@ -229,6 +229,82 @@ pub(super) fn layer_bound(galaxy: &Galaxy, key: CellKey) -> f64 {
     )
 }
 
+/// A cell's bound as its candidates are thinned against it (plan 08, P08.T12.b): the layer's
+/// bound, [`layer_bound`], and, where the layer holds plan 08's displaced classes, the bound of the
+/// classes from each one in the band's order to the last, which the pick's early rejection reads.
+///
+/// A cell evaluates it once, as it does the bound, so that a candidate's pick reads its classes'
+/// bounds without evaluating them; the classes' terms are the bound's own, taken as its sum takes
+/// them ([`Fields::layer_bound_each`]), so the total is [`layer_bound`]'s bit for bit.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct CellBound {
+    total: f64,
+    /// `classes[i]`: `share × bound` of the band's displaced class number `i` in its order; empty
+    /// where the layer holds none.
+    classes: Vec<f64>,
+    /// `rest[i]`: `classes[i..]` summed from the last.
+    rest: Vec<f64>,
+}
+
+impl CellBound {
+    /// The bound of `key`'s cell in `galaxy`.
+    #[must_use]
+    pub(super) fn of(galaxy: &Galaxy, key: CellKey) -> Self {
+        let band = key.band();
+        let mut classes = Vec::new();
+        let total = super::saturated(
+            band,
+            galaxy
+                .fields()
+                .layer_bound_each(galaxy.shares(), band, &key.cell_box(), |term| {
+                    classes.push(term);
+                }),
+        );
+        let mut rest = vec![0.0; classes.len()];
+        let mut sum = 0.0;
+        for (slot, &bound) in rest.iter_mut().zip(&classes).rev() {
+            sum += bound;
+            *slot = sum;
+        }
+        Self {
+            total,
+            classes,
+            rest,
+        }
+    }
+
+    /// A bound of `total` with no displaced classes, for the tests' bounds that no cell has.
+    #[cfg(test)]
+    #[must_use]
+    pub(super) fn with_total(total: f64) -> Self {
+        Self {
+            total,
+            classes: Vec::new(),
+            rest: Vec::new(),
+        }
+    }
+
+    /// The layer's bound over the cell, systems per cubic light-year: [`layer_bound`]'s.
+    #[must_use]
+    pub(super) fn total(&self) -> f64 {
+        self.total
+    }
+
+    /// The bound of the band's displaced classes from number `i` in its order to the last; 0 past
+    /// the last.
+    #[must_use]
+    pub(super) fn rest(&self, i: usize) -> f64 {
+        self.rest.get(i).copied().unwrap_or(0.0)
+    }
+
+    /// The bound of the band's displaced class number `i` in its order, `share × bound`; 0 past the
+    /// last.
+    #[must_use]
+    pub(super) fn class(&self, i: usize) -> f64 {
+        self.classes.get(i).copied().unwrap_or(0.0)
+    }
+}
+
 /// How many candidates the cell draws: a Poisson number with mean bound × volume, on the cell's own
 /// stream.
 ///
@@ -602,6 +678,17 @@ mod tests {
             .expect("the Milky Way fixture's gas is mostly neutral")
     }
 
+    /// The fixture without plan 08's displaced classes (the tests' field alone,
+    /// `DisplacedRules::FieldOnly`): plan 03's field components alone in every layer.
+    fn field_only() -> Galaxy {
+        let rules = crate::galaxy::rules::GalaxyRules {
+            displaced: crate::galaxy::displaced::DisplacedRules::FieldOnly,
+            ..crate::galaxy::rules::GalaxyRules::of_version(crate::GENERATOR_VERSION)
+        };
+        Galaxy::from_params_with_rules(Seed::new(SEED), GalaxyParams::milky_way_like(), rules)
+            .expect("the Milky Way fixture's gas is mostly neutral")
+    }
+
     fn sunlike() -> GalacticPosition {
         GalacticPosition::from_light_years(SUNLIKE_LY).expect("the Sun-like point is in the cube")
     }
@@ -688,9 +775,11 @@ mod tests {
         }
     }
 
+    /// Plan 03's field alone ([`field_only`]): plan 08's displaced classes, whose forms reach the
+    /// cube's corner, are another layer E's.
     #[test]
     fn a_cell_of_negligible_density_draws_no_candidate() {
-        let galaxy = galaxy();
+        let galaxy = field_only();
         // The far corner of the cube: the discs and the bar have underflowed and the halo is past
         // its cut, so all that is left is the bulge's 10⁻⁶⁵ of its centre, under one candidate in
         // 10⁹ cells.

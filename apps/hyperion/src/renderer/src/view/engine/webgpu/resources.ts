@@ -22,8 +22,9 @@ import {
   textureBytes,
   type TextureSpec,
 } from "../memory";
-import type { BufferHandle, TextureHandle } from "../types";
+import type { BufferHandle, TexelRect, TextureHandle } from "../types";
 import { paddedBytesPerRow } from "./readback";
+import { StagedWrites } from "./stagedWrites";
 
 /** A buffer the registry made. */
 export interface BufferRecord {
@@ -58,6 +59,25 @@ export function viewDimensionOf(spec: TextureSpec): GPUTextureViewDimension {
   return VIEW_DIMENSIONS[spec.dimension];
 }
 
+/**
+ * Whether a texture whose own view dimension is `own` binds where a layout declares `declared`:
+ * the one rule of the material and compute paths.
+ *
+ * @remarks
+ * The same dimension always binds. A single-layer 2D texture (`own` `2d`) also binds as a
+ * one-layer `2d-array`, a view WebGPU allows (W3C WebGPU, §6.2.1 "Texture View Creation":
+ * `"2d-array"` asks only that the texture be `"2d"`, whatever its layer count), so that a
+ * material declaring an array binds it whatever its layer count (R05.T11.a's normals atlas, whose
+ * layers depend on the device's limits), and a kernel declaring `texture_2d_array` or
+ * `texture_storage_2d_array` binds a one-layer table (R08.T0). Nothing else is reinterpreted.
+ */
+export function viewDimensionBinds(
+  declared: GPUTextureViewDimension,
+  own: GPUTextureViewDimension,
+): boolean {
+  return own === declared || (declared === "2d-array" && own === "2d");
+}
+
 /** The name a packed star cube takes when its caller names none. */
 export const PACKED_CUBE_NAME = "packed star cube";
 
@@ -90,15 +110,38 @@ export class ResourceRegistry {
   readonly #querySets = new Map<GPUQuerySet, string>();
   /** Every handle destroyed before disposal, so that a later use names the release. */
   readonly #released = new WeakSet<BufferHandle | TextureHandle>();
+  /** The writes of the open staged scopes ({@link ResourceRegistry.staged}). */
+  readonly #staged: StagedWrites;
 
   /**
    * Makes a registry on `device`.
    *
    * @param emit - Called once for every creation, destruction and upload.
+   * @param stagingPartBytes - The most bytes staged before they are submitted (`stagedWrites.ts`'
+   *   `STAGING_PART_BYTES` but in a test).
    */
-  constructor(device: GPUDevice, emit: (event: AllocationEvent) => void) {
+  constructor(
+    device: GPUDevice,
+    emit: (event: AllocationEvent) => void,
+    stagingPartBytes?: number,
+  ) {
     this.#device = device;
     this.#emit = emit;
+    this.#staged = new StagedWrites(device, stagingPartBytes);
+  }
+
+  /**
+   * Runs `write` with every buffer and texture write made through the registry staged
+   * (`stagedWrites.ts`; lane perf-page-long-tasks), submitted before the engine's next submission
+   * ({@link ResourceRegistry.flushStaged}), destruction or write outside a scope.
+   */
+  staged<T>(label: string, write: () => T): T {
+    return this.#staged.run(label, write);
+  }
+
+  /** Submits the writes staged so far, before a submission of the engine's; nothing with none. */
+  flushStaged(): void {
+    this.#staged.flush();
   }
 
   /** Makes a buffer of `spec`. */
@@ -180,25 +223,32 @@ export class ResourceRegistry {
   }
 
   /**
-   * Writes `data` into a buffer at `offsetBytes`, through the queue.
+   * Writes `data` into a buffer at `offsetBytes`, through the queue, or staged inside a staged
+   * scope ({@link ResourceRegistry.staged}).
    *
    * @remarks
-   * A queue write takes effect before any command submitted after it, as WebGPU orders them.
+   * A queue write takes effect before any command submitted after it, as WebGPU orders them; a
+   * staged write is submitted before any of the engine's submissions after it, which orders it the
+   * same.
    */
   writeBuffer(handle: BufferHandle, offsetBytes: number, data: ArrayBufferView): void {
     const { buffer } = this.bufferOf(handle);
-    this.#device.queue.writeBuffer(
-      buffer,
-      offsetBytes,
-      data.buffer,
-      data.byteOffset,
-      data.byteLength,
-    );
+    if (!(this.#staged.open && this.#staged.buffer(buffer, offsetBytes, data))) {
+      // A write the copies cannot make goes to the queue after what is staged, as before.
+      this.#staged.flush();
+      this.#device.queue.writeBuffer(
+        buffer,
+        offsetBytes,
+        data.buffer,
+        data.byteOffset,
+        data.byteLength,
+      );
+    }
     this.#emit({ kind: "uploaded", name: handle.name, bytes: data.byteLength });
   }
 
   /**
-   * Writes `data` into a region of a texture, through the queue.
+   * Writes `data` into a region of a texture, through the queue, or staged inside a staged scope.
    *
    * @remarks
    * Rows of `data` are tightly packed: `size.width` texels of the format each.
@@ -212,16 +262,18 @@ export class ResourceRegistry {
   ): void {
     const { texture, spec } = this.textureOf(handle);
     const extent = extentOf(size);
-    this.#device.queue.writeTexture(
-      { texture, origin, mipLevel },
-      data,
-      {
-        offset: 0,
-        bytesPerRow: extent.width * bytesPerTexel(spec.format),
-        rowsPerImage: extent.height,
-      },
-      extent,
-    );
+    const rowBytes = extent.width * bytesPerTexel(spec.format);
+    if (!(
+      this.#staged.open && this.#staged.texture(texture, origin, mipLevel, extent, rowBytes, data)
+    )) {
+      this.#staged.flush();
+      this.#device.queue.writeTexture(
+        { texture, origin, mipLevel },
+        data,
+        { offset: 0, bytesPerRow: rowBytes, rowsPerImage: extent.height },
+        extent,
+      );
+    }
     this.#emit({ kind: "uploaded", name: handle.name, bytes: data.byteLength });
   }
 
@@ -247,9 +299,11 @@ export class ResourceRegistry {
    * @remarks
    * The buffer holds six faces, face after face, each row padded to 256 bytes
    * (`paddedBytesPerRow(size, 4)`), as `copyBufferToTexture` requires; or, given `face`, that one
-   * face alone (R06.T13.g).
+   * face alone (R06.T13.g); or, given a `region` of it too, those texels alone, each row padded
+   * to 256 bytes (R06's tiled bake).
    *
-   * @throws Error for a face outside 0–5, a buffer too small or without `COPY_SRC`.
+   * @throws Error for a face outside 0–5, a region without a face or outside the level, a buffer
+   *   too small or without `COPY_SRC`.
    */
   encodePackedCubeLevelFromBuffer(
     encoder: Pick<GPUCommandEncoder, "copyBufferToTexture">,
@@ -257,6 +311,7 @@ export class ResourceRegistry {
     level: number,
     packed: BufferHandle,
     face?: number,
+    region?: TexelRect,
   ): void {
     const faceTexels = this.#cubeLevelSize(cube, level);
     const { texture } = this.textureOf(cube);
@@ -264,10 +319,28 @@ export class ResourceRegistry {
     if (face !== undefined && !(Number.isInteger(face) && face >= 0 && face < 6)) {
       throw new Error(`${cube.name} has no face ${face}`);
     }
+    if (region !== undefined && face === undefined) {
+      throw new Error(`a region of ${cube.name} is written on one face`);
+    }
+    const { x, y, width, height } = region ?? {
+      x: 0,
+      y: 0,
+      width: faceTexels,
+      height: faceTexels,
+    };
+    if (
+      !(Number.isInteger(x) && Number.isInteger(y) && x >= 0 && y >= 0) ||
+      !(Number.isInteger(width) && Number.isInteger(height) && width >= 1 && height >= 1) ||
+      x + width > faceTexels ||
+      y + height > faceTexels
+    ) {
+      throw new Error(
+        `the region is outside level ${level} of ${cube.name}, ${faceTexels} × ${faceTexels}`,
+      );
+    }
     const faces = face === undefined ? 6 : 1;
-    const bytesPerRow = paddedBytesPerRow(faceTexels, 4);
-    const needed =
-      bytesPerRow * faceTexels * (faces - 1) + bytesPerRow * (faceTexels - 1) + faceTexels * 4;
+    const bytesPerRow = paddedBytesPerRow(width, 4);
+    const needed = bytesPerRow * height * (faces - 1) + bytesPerRow * (height - 1) + width * 4;
     if (spec.bytes < needed) {
       throw new Error(`${packed.name} holds ${spec.bytes} bytes; level ${level} needs ${needed}`);
     }
@@ -275,15 +348,19 @@ export class ResourceRegistry {
       throw new Error(`${packed.name} was not made with COPY_SRC`);
     }
     encoder.copyBufferToTexture(
-      { buffer, bytesPerRow, rowsPerImage: faceTexels },
-      { texture, mipLevel: level, origin: [0, 0, face ?? 0] },
-      [faceTexels, faceTexels, faces],
+      { buffer, bytesPerRow, rowsPerImage: height },
+      { texture, mipLevel: level, origin: [x, y, face ?? 0] },
+      [width, height, faces],
     );
   }
 
-  /** Destroys one buffer, raising its `destroyed` event. */
+  /**
+   * Destroys one buffer, raising its `destroyed` event, the writes staged so far submitted first,
+   * as a queue write made before the destruction would have been.
+   */
   destroyBuffer(handle: BufferHandle): void {
     const { spec, buffer } = this.bufferOf(handle);
+    this.#staged.flush();
     buffer.destroy();
     this.#buffers.delete(handle);
     this.#released.add(handle);
@@ -295,17 +372,22 @@ export class ResourceRegistry {
     });
   }
 
-  /** Destroys one texture, raising its `destroyed` event. */
+  /** Destroys one texture, raising its `destroyed` event, the writes staged so far submitted first. */
   destroyTexture(handle: TextureHandle): void {
     const { spec, texture, bytes } = this.textureOf(handle);
+    this.#staged.flush();
     texture.destroy();
     this.#textures.delete(handle);
     this.#released.add(handle);
     this.#emit({ kind: "destroyed", name: handle.name, bytes, category: spec.category });
   }
 
-  /** Destroys every buffer, texture and query set, raising each one's `destroyed` event. */
+  /**
+   * Destroys every buffer, texture and query set, raising each one's `destroyed` event; writes
+   * staged and not yet submitted are dropped with them.
+   */
   dispose(): void {
+    this.#staged.discard();
     for (const [querySet, name] of this.#querySets) {
       querySet.destroy();
       this.#emit({ kind: "destroyed", name, bytes: querySet.count * 8, category: "other" });

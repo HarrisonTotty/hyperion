@@ -38,11 +38,14 @@
 //! take no steps and add `interior × length`. A cloud is a Plummer ball whose column along a line
 //! is algebraic — with `b` the line's impact parameter, `c² = a² + b²` and `s` the distance along
 //! the line from the closest approach, `n_c a⁵ [s (3c² + 2s²) ÷ (3c⁴ (c² + s²)^(3/2))]` between the
-//! segment's two values of `s` — so clouds cost no steps (Design note 16). The clouds' columns are
-//! added in a canonical order, so the modifiers' order is immaterial; but a cloud adds a little at
-//! any distance, so two-way visibility with modifiers needs their source to give the same set for
-//! `(a, b)` as for `(b, a)`. With no modifiers every result is bit-identical to one computed
-//! without them.
+//! segment's two values of `s` — so clouds cost no steps (Design note 16). A wall, a superbubble's
+//! uniform shell of swept-up gas (plan 09, P09.T5), replaces the field where no hole covers it: the
+//! segment is cut at both its surfaces too, and a piece inside a wall and no hole takes no steps
+//! and adds the densest wall's density and dust times its length. The clouds' columns are added in
+//! a canonical order, so the modifiers' order is immaterial; but a cloud adds a little at any
+//! distance, so two-way visibility with modifiers needs their source to give the same set for `(a,
+//! b)` as for `(b, a)`. With no modifiers every result is bit-identical to one computed without
+//! them.
 //!
 //! # The neutral column
 //!
@@ -51,7 +54,8 @@
 //! neutral column is the integral of `n_neutral + n_mol` in [`NoiseMode::Mean`] and of
 //! `(n_neutral + n_mol) F` in [`NoiseMode::Realised`], whose expectation over seeds it is. No draw
 //! and no classification is needed. Holes are hot and add none; clouds are neutral and add all of
-//! theirs.
+//! theirs, and so do walls, which are the H I supershells about superbubbles (McClure-Griffiths et
+//! al. 2002, ApJ 578, 176).
 
 use std::num::NonZeroU32;
 
@@ -59,7 +63,7 @@ use crate::coords::{GalacticDisplacement, GalacticPosition, UnitVector};
 use crate::galaxy::gas::CENTIMETRES_PER_LIGHT_YEAR;
 use crate::galaxy::gas::ccm::{Band, HYDROGEN_COLUMN_PER_MAG};
 use crate::galaxy::gas::field::{GasField, Site};
-use crate::galaxy::gas::modifiers::GasModifier;
+use crate::galaxy::gas::modifiers::{GasModifier, densest};
 use crate::galaxy::gas::noise::{NoiseCache, SmoothingScale};
 use crate::galaxy::gas::smooth::GasLayer;
 use crate::units::consts::METRES_PER_LIGHT_YEAR;
@@ -108,6 +112,23 @@ pub enum Quality {
     /// smoothed to twice their length.
     Budget(NonZeroU32),
 }
+
+/// The budget lines of sight are marched at where a line's cost must be bounded whatever its
+/// length: `Budget(256)` (plan 07, P07.T10.c; `decision-gg-port-d0.md` §5).
+///
+/// Two readers share it, so that the value has one owner:
+///
+/// - **the server's `extinction` request**, whose lines to at most 64 targets are then a few
+///   milliseconds of one worker (plan 07's Risks, "Cost on long-range charts");
+/// - **the sky band's ray profiles**, which `sky::band` marches by [`profile`] (rendering plan
+///   R06, R06.T9.a), whose light lies within 3% of the same rays marched at [`Quality::Full`]
+///   (`sky::band`'s test
+///   `above_the_disc_the_band_is_brighter_towards_the_plane_by_the_models_own_integral`).
+///
+/// The sky census's per-star lines take a budget of their own, for another purpose (rendering plan
+/// R06, Design note 10). A reader that wants another budget takes a constant of its own, with its
+/// reason, rather than change this one.
+pub const SIGHTLINE_QUALITY: Quality = Quality::Budget(NonZeroU32::new(256).expect("256 is not 0"));
 
 /// What a line of sight passes through: its visual extinction, its hydrogen columns and the steps
 /// it took.
@@ -221,6 +242,11 @@ pub fn sightline(
         let length_cm = (piece.t1 - piece.t0) * line.length_ly * CENTIMETRES_PER_LIGHT_YEAR;
         match piece.kind {
             PieceKind::Hole { interior } => sums.hydrogen += interior * length_cm,
+            PieceKind::Wall { density, dust } => {
+                sums.hydrogen += density * length_cm;
+                sums.neutral += density * length_cm;
+                sums.dust += dust * length_cm;
+            }
             PieceKind::Outside => sums.hydrogen += field.smooth().corona_density() * length_cm,
             PieceKind::Stepped { .. } => {
                 sums.hydrogen += field.smooth().corona_density() * length_cm;
@@ -249,7 +275,7 @@ pub fn sightline(
                 central: central_density.value(),
                 zeta: dust_per_hydrogen,
             }),
-            GasModifier::Hole { .. } => None,
+            GasModifier::Hole { .. } | GasModifier::Wall { .. } => None,
         })
         .collect();
     clouds.sort_by(Cloud::order);
@@ -375,9 +401,10 @@ pub fn horizon(
 /// Within a step the column is interpolated linearly. The march is from the origin outward, so,
 /// as for [`horizon`], it is an instrument's integral and not symmetric: its last value equals a
 /// [`sightline`] over the same segment to rounding, not bit for bit. Clouds among `modifiers` add
-/// their Plummer column from the origin to each node; holes are carved as [`sightline`] carves
-/// them. A node that is not finite or not positive reads zero, and one beyond 2¹⁹ ly the column
-/// to there. `cache` changes the cost, never the values; in [`NoiseMode::Mean`] it is not read.
+/// their Plummer column from the origin to each node; holes and walls are carved as [`sightline`]
+/// carves them, a wall's column rising linearly across its piece. A node that is not finite or not
+/// positive reads zero, and one beyond 2¹⁹ ly the column to there. `cache` changes the cost, never
+/// the values; in [`NoiseMode::Mean`] it is not read.
 ///
 /// # Panics
 ///
@@ -429,31 +456,35 @@ pub fn profile(
         .iter()
         .map(|d| clamp(d.value()) / line.length_ly)
         .collect();
-    let mut columns = vec![0.0; nodes.len()];
-    let mut next = 0;
+    let mut columns = NodeColumns::new(&fractions);
     let mut sums = Sums::default();
-    for (piece, steps) in plan.stepped() {
+    let mut counts = plan.counts.iter().copied();
+    for piece in &plan.pieces {
+        let steps = match piece.kind {
+            PieceKind::Stepped { .. } => counts
+                .next()
+                .expect("a plan holds a step count for every stepped piece"),
+            PieceKind::Wall { dust, .. } => {
+                // One stretch whose column rises linearly, as a step's is read.
+                let (start, stop) = (piece.t0, piece.t1);
+                let before = sums.dust;
+                columns.reach(start, before);
+                sums.dust += dust * (stop - start) * line.length_ly * CENTIMETRES_PER_LIGHT_YEAR;
+                columns.rise((start, stop - start, stop), (before, sums.dust));
+                continue;
+            }
+            PieceKind::Hole { .. } | PieceKind::Outside => continue,
+        };
         let dt = (piece.t1 - piece.t0) / f64::from(steps);
         for step in 0..steps {
             let start = piece.t0 + dt * f64::from(step);
-            // Every node at or before a step's start takes the column so far.
-            while next < fractions.len() && fractions[next] <= start {
-                columns[next] = sums.dust;
-                next += 1;
-            }
             let before = sums.dust;
+            columns.reach(start, before);
             marcher.step(piece, steps, step, cache, &mut sums);
-            let stop = start + dt;
-            while next < fractions.len() && fractions[next] < stop {
-                let within = (fractions[next] - start) / dt;
-                columns[next] = before + (sums.dust - before) * within;
-                next += 1;
-            }
+            columns.rise((start, dt, start + dt), (before, sums.dust));
         }
     }
-    for column in &mut columns[next..] {
-        *column = sums.dust;
-    }
+    let mut columns = columns.finish(sums.dust);
     // Clouds in the canonical order, as sightline adds them, each from the origin to the node.
     let mut clouds: Vec<Cloud> = modifiers
         .iter()
@@ -469,7 +500,7 @@ pub fn profile(
                 central: central_density.value(),
                 zeta: dust_per_hydrogen,
             }),
-            GasModifier::Hole { .. } => None,
+            GasModifier::Hole { .. } | GasModifier::Wall { .. } => None,
         })
         .collect();
     clouds.sort_by(Cloud::order);
@@ -490,6 +521,51 @@ pub fn profile(
             .iter()
             .map(|&dust| Magnitudes::new(dust / HYDROGEN_COLUMN_PER_MAG)),
     );
+}
+
+/// A profile's running columns at its nodes, filled in order along the line.
+struct NodeColumns<'a> {
+    /// The nodes' fractions of the line, ascending.
+    fractions: &'a [f64],
+    columns: Vec<f64>,
+    /// The first node not yet given its column.
+    next: usize,
+}
+
+impl<'a> NodeColumns<'a> {
+    fn new(fractions: &'a [f64]) -> Self {
+        Self {
+            fractions,
+            columns: vec![0.0; fractions.len()],
+            next: 0,
+        }
+    }
+
+    /// Every node at or before `start` takes the column so far, `column`.
+    fn reach(&mut self, start: f64, column: f64) {
+        while self.next < self.fractions.len() && self.fractions[self.next] <= start {
+            self.columns[self.next] = column;
+            self.next += 1;
+        }
+    }
+
+    /// Every node before `stop` of the stretch from `start`, `width` long, takes the column
+    /// interpolated linearly across it from `before` to `after`.
+    fn rise(&mut self, (start, width, stop): (f64, f64, f64), (before, after): (f64, f64)) {
+        while self.next < self.fractions.len() && self.fractions[self.next] < stop {
+            let within = (self.fractions[self.next] - start) / width;
+            self.columns[self.next] = before + (after - before) * within;
+            self.next += 1;
+        }
+    }
+
+    /// The columns, every node past the last stretch taking `column`, the whole line's.
+    fn finish(mut self, column: f64) -> Vec<f64> {
+        for rest in &mut self.columns[self.next..] {
+            *rest = column;
+        }
+        self.columns
+    }
 }
 
 /// A cloud's parts, as [`sightline`] sums its column.
@@ -614,7 +690,42 @@ impl Line {
         let (a, half_b, c) = self.sphere_quadratic(from_centre, radius);
         (a * t + 2.0 * half_b) * t + c < 0.0
     }
+
+    /// The fractions outside which [`inside_sphere`](Self::inside_sphere) is false at every `t` in
+    /// `[0, 1]`, rounding and all, for the sphere of `radius` about the point `from_centre` ly
+    /// behind the first point; `None` where it is false at every such `t`.
+    ///
+    /// The quadratic is `q(t) = a (t − v)² + m`, with `v = −half_b ÷ a` and `m = c − half_b² ÷ a`.
+    /// For `|t| ≤ 1`, `inside_sphere`'s three roundings move `q` by at most `4u` of its terms'
+    /// magnitudes, `S = a + 2|half_b| + |c| + half_b² ÷ a` bounding them, with `u` 2⁻⁵³; so `q` reads
+    /// negative only where it is below `margin = 10⁻⁹ S`, which is within `√((margin − m) ÷ a)` of
+    /// `v`. That width and `v` are widened by far more than their own roundings. A line of no
+    /// length, or terms that are not finite, gives the whole line.
+    #[must_use]
+    fn inside_bounds(&self, from_centre: [f64; 3], radius: f64) -> Option<(f64, f64)> {
+        let whole = Some((f64::NEG_INFINITY, f64::INFINITY));
+        let (a, half_b, c) = self.sphere_quadratic(from_centre, radius);
+        if !(a.is_finite() && a > 0.0) {
+            return whole;
+        }
+        let vertex = -half_b / a;
+        let lowest = c - half_b * half_b / a;
+        let scale = a + 2.0 * half_b.abs() + c.abs() + half_b * half_b / a;
+        let margin = INSIDE_MARGIN * scale;
+        if !(vertex.is_finite() && lowest.is_finite() && margin.is_finite()) {
+            return whole;
+        }
+        if lowest >= margin {
+            return None;
+        }
+        let width = ((margin - lowest) / a).sqrt() * (1.0 + 1e-6) + 1e-9 * (1.0 + vertex.abs());
+        Some((vertex - width, vertex + width))
+    }
 }
+
+/// [`Line::inside_bounds`]' margin on the quadratic, relative to its terms' magnitudes: some 10⁶
+/// times the `4u` its roundings can move it by.
+const INSIDE_MARGIN: f64 = 1e-9;
 
 fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
@@ -632,6 +743,9 @@ fn push_inside(t: f64, out: &mut Vec<f64>) {
 enum PieceKind {
     /// Inside a hole, whose lowest interior density (cm⁻³) replaces the field.
     Hole { interior: f64 },
+    /// Inside a wall and no hole: the densest wall's hydrogen and dust-bearing densities (cm⁻³)
+    /// replace the field.
+    Wall { density: f64, dust: f64 },
     /// Outside the slab, where only the corona is.
     Outside,
     /// Inside the slab, marched with steps of at most `base × 2^lod` ly.
@@ -666,7 +780,7 @@ impl Plan {
             .iter()
             .filter_map(|piece| match piece.kind {
                 PieceKind::Stepped { base } => Some(((piece.t1 - piece.t0) * line.length_ly, base)),
-                PieceKind::Hole { .. } | PieceKind::Outside => None,
+                PieceKind::Hole { .. } | PieceKind::Wall { .. } | PieceKind::Outside => None,
             })
             .collect();
         match quality {
@@ -685,7 +799,9 @@ impl Plan {
                         PieceKind::Stepped { base } => {
                             Some(((piece.t1 - piece.t0) * line.length_ly, base))
                         }
-                        PieceKind::Hole { .. } | PieceKind::Outside => None,
+                        PieceKind::Hole { .. } | PieceKind::Wall { .. } | PieceKind::Outside => {
+                            None
+                        }
                     })
                     .collect();
                 let lod = (0..=LOD_MAX)
@@ -751,8 +867,8 @@ fn total(lengths: &[(f64, f64)], lod: u32) -> u32 {
     })
 }
 
-/// The pieces of `line`: cut at the slab's faces, at the smooth scales' boundaries and at every
-/// hole's surface, each labelled by its middle.
+/// The pieces of `line`: cut at the slab's faces, at the smooth scales' boundaries, at every hole's
+/// surface and at both of every wall's, each labelled by its middle.
 fn pieces(field: &GasField, line: &Line, mods: &[GasModifier]) -> Vec<Piece> {
     let gas = field.smooth();
     let slab = SLAB_WARM_HEIGHTS * gas.height(GasLayer::Warm);
@@ -778,27 +894,54 @@ fn pieces(field: &GasField, line: &Line, mods: &[GasModifier]) -> Vec<Piece> {
                 radius.value(),
                 interior.value(),
             )),
-            GasModifier::Cloud { .. } => None,
+            GasModifier::Cloud { .. } | GasModifier::Wall { .. } => None,
         })
         .collect();
     for &(from_centre, radius, _) in &holes {
         line.crossings_of_sphere(from_centre, radius, &mut cuts);
     }
+    let mut walls = WallSweep::new(line, mods);
+    walls.cut(line, &mut cuts);
     cuts.sort_by(f64::total_cmp);
     cuts.dedup();
+    // The pieces' middles rise along the line, so a sweep keeps only the holes whose bounds hold
+    // the middle (`active`, in the list's order), and each piece tests those alone: the same holes
+    // pass, in the same order, as when every piece tested every hole. A profile from the Sun-like
+    // point through the centre, past 10,597 bubbles, took 174 ms so and takes 13.7 ms (P09.T40.a;
+    // pod, test build, 2026-11-05).
+    let mut rising: Vec<(usize, (f64, f64))> = holes
+        .iter()
+        .enumerate()
+        .filter_map(|(hole, &(from_centre, radius, _))| {
+            line.inside_bounds(from_centre, radius)
+                .map(|bounds| (hole, bounds))
+        })
+        .collect();
+    rising.sort_by(|(_, (left, _)), (_, (right, _))| left.total_cmp(right));
+    let mut rising = rising.into_iter().peekable();
+    let mut active: Vec<(usize, f64)> = Vec::new();
     let smooth = smooth_scales(field);
     let mut pieces = Vec::with_capacity(cuts.len() + 1);
     let mut t0 = 0.0;
     for t1 in cuts.into_iter().chain(core::iter::once(1.0)) {
         let middle = f64::midpoint(t0, t1);
-        let lowest = holes
+        while let Some((hole, (_, high))) = rising.next_if(|(_, (low, _))| *low <= middle) {
+            let at = active.partition_point(|&(earlier, _)| earlier < hole);
+            active.insert(at, (hole, high));
+        }
+        active.retain(|&(_, high)| high >= middle);
+        let lowest = active
             .iter()
-            .filter(|&&(from_centre, radius, _)| line.inside_sphere(from_centre, radius, middle))
-            .map(|&(_, _, interior)| interior)
+            .map(|&(hole, _)| holes[hole])
+            .filter(|&(from_centre, radius, _)| line.inside_sphere(from_centre, radius, middle))
+            .map(|(_, _, interior)| interior)
             .reduce(|lowest, interior| if interior < lowest { interior } else { lowest });
         let [_, _, z] = line.at_ly(middle);
+        let wall = walls.at(line, middle);
         let kind = if let Some(interior) = lowest {
             PieceKind::Hole { interior }
+        } else if let Some((density, dust)) = wall {
+            PieceKind::Wall { density, dust }
         } else if z.is_nan() || z.abs() > slab {
             PieceKind::Outside
         } else {
@@ -815,6 +958,83 @@ fn pieces(field: &GasField, line: &Line, mods: &[GasModifier]) -> Vec<Piece> {
         t0 = t1;
     }
     pieces
+}
+
+/// The walls of a line's modifiers, swept along it as [`pieces`] sweeps the holes: by their outer
+/// spheres' bounds ([`Line::inside_bounds`]), so that each piece tests only the walls that can hold
+/// its middle. The densest wins whatever their order, so the active walls keep none.
+struct WallSweep {
+    /// Each wall's centre's offset behind the line's first point (ly), its inner and outer radii
+    /// (ly), and its hydrogen and dust-bearing densities (cm⁻³).
+    walls: Vec<([f64; 3], f64, f64, f64, f64)>,
+    /// The walls not yet reached, with their bounds, by their low bounds.
+    rising: core::iter::Peekable<std::vec::IntoIter<(usize, (f64, f64))>>,
+    /// The walls reached, with their high bounds.
+    active: Vec<(usize, f64)>,
+}
+
+impl WallSweep {
+    fn new(line: &Line, mods: &[GasModifier]) -> Self {
+        let walls: Vec<([f64; 3], f64, f64, f64, f64)> = mods
+            .iter()
+            .filter_map(|modifier| match *modifier {
+                GasModifier::Wall {
+                    centre,
+                    inner,
+                    outer,
+                    density,
+                    dust_per_hydrogen,
+                } => Some((
+                    centre
+                        .displacement_to(&line.start)
+                        .metres()
+                        .map(|m| m / METRES_PER_LIGHT_YEAR),
+                    inner.value(),
+                    outer.value(),
+                    density.value(),
+                    dust_per_hydrogen * density.value(),
+                )),
+                GasModifier::Hole { .. } | GasModifier::Cloud { .. } => None,
+            })
+            .collect();
+        let mut rising: Vec<(usize, (f64, f64))> = walls
+            .iter()
+            .enumerate()
+            .filter_map(|(wall, &(from_centre, _, outer, _, _))| {
+                line.inside_bounds(from_centre, outer)
+                    .map(|bounds| (wall, bounds))
+            })
+            .collect();
+        rising.sort_by(|(_, (left, _)), (_, (right, _))| left.total_cmp(right));
+        Self {
+            walls,
+            rising: rising.into_iter().peekable(),
+            active: Vec::new(),
+        }
+    }
+
+    /// The fractions at which `line` meets every wall's two spheres, appended to `cuts`.
+    fn cut(&self, line: &Line, cuts: &mut Vec<f64>) {
+        for &(from_centre, inner, outer, _, _) in &self.walls {
+            line.crossings_of_sphere(from_centre, inner, cuts);
+            line.crossings_of_sphere(from_centre, outer, cuts);
+        }
+    }
+
+    /// The densest wall whose shell holds the point a fraction `middle` along `line`, as its
+    /// hydrogen and dust-bearing densities; the middles asked for must rise.
+    fn at(&mut self, line: &Line, middle: f64) -> Option<(f64, f64)> {
+        while let Some((wall, (_, high))) = self.rising.next_if(|(_, (low, _))| *low <= middle) {
+            self.active.push((wall, high));
+        }
+        self.active.retain(|&(_, high)| high >= middle);
+        densest(self.active.iter().filter_map(|&(wall, _)| {
+            let (from_centre, inner, outer, density, dust) = self.walls[wall];
+            (line.inside_sphere(from_centre, outer, middle)
+                && !line.inside_sphere(from_centre, inner, middle))
+            .then_some((density, dust))
+        }))
+    }
 }
 
 /// The base step of each smooth region, ly: half its smallest smooth scale, capped at the noise's
@@ -1155,6 +1375,196 @@ mod tests {
         }
     }
 
+    /// The sweep labels every piece with the hole every hole's own test gives it (P09.T40.a): the
+    /// same lowest interior, bit for bit, or none. The lines are long and short, and their holes
+    /// many, near and far, holding the whole line, and grazing it at a tangent, where the test's
+    /// roundings decide.
+    #[test]
+    fn the_sweep_labels_each_piece_as_testing_every_hole_does() {
+        let field = milky_way(Seed::new(3));
+        let mut lcg = Lcg::new(0x0940_a0d6);
+        let uniform = |lcg: &mut Lcg, scale: f64| scale * (2.0 * lcg.next_f64() - 1.0);
+        let mut grazing = 0;
+        for case in 0..60 {
+            let length = [10.0, 900.0, 30_000.0][case % 3];
+            let start = [0; 3].map(|_| uniform(&mut lcg, 3_000.0));
+            let direction = [0; 3].map(|_| uniform(&mut lcg, 1.0));
+            let norm = direction.iter().map(|c| c * c).sum::<f64>().sqrt();
+            let end: [f64; 3] = [0, 1, 2].map(|k| start[k] + length * direction[k] / norm);
+            let line = Line::new(&at(start), &at(end));
+            let mut mods = Vec::new();
+            for _ in 0..300 {
+                let t = 1.4 * lcg.next_f64() - 0.2;
+                let on = line.at_ly(t);
+                let offset = [0; 3].map(|_| uniform(&mut lcg, 1.0));
+                let reach = uniform(&mut lcg, 0.5 * length);
+                let miss = [0, 1, 2].map(|k| on[k] + reach * offset[k]);
+                let centre = at(miss);
+                let from_centre = centre
+                    .displacement_to(&line.start)
+                    .metres()
+                    .map(|m| m / METRES_PER_LIGHT_YEAR);
+                // A third graze the line: the radius is the centre's distance from it.
+                let (a, half_b, c) = line.sphere_quadratic(from_centre, 0.0);
+                let distance = (c - half_b * half_b / a).max(0.0).sqrt();
+                let radius = match lcg.next_below(3) {
+                    0 => {
+                        grazing += 1;
+                        distance
+                    }
+                    1 => distance * (0.5 + lcg.next_f64()),
+                    _ => length * (0.01 + 3.0 * lcg.next_f64()),
+                };
+                if radius > 0.0 {
+                    mods.push(GasModifier::Hole {
+                        centre,
+                        radius: LightYears::new(radius),
+                        interior: HydrogenPerCm3::new(0.001 + lcg.next_f64()),
+                    });
+                }
+            }
+            let holes: Vec<([f64; 3], f64, f64)> = mods
+                .iter()
+                .map(|modifier| match *modifier {
+                    GasModifier::Hole {
+                        centre,
+                        radius,
+                        interior,
+                    } => (
+                        centre
+                            .displacement_to(&line.start)
+                            .metres()
+                            .map(|m| m / METRES_PER_LIGHT_YEAR),
+                        radius.value(),
+                        interior.value(),
+                    ),
+                    GasModifier::Cloud { .. } | GasModifier::Wall { .. } => {
+                        unreachable!("only holes")
+                    }
+                })
+                .collect();
+            let swept = pieces(&field, &line, &mods);
+            assert!(swept.len() > 2, "case {case}: the holes cut the line");
+            for piece in &swept {
+                let middle = f64::midpoint(piece.t0, piece.t1);
+                let every = holes
+                    .iter()
+                    .filter(|&&(from_centre, radius, _)| {
+                        line.inside_sphere(from_centre, radius, middle)
+                    })
+                    .map(|&(_, _, interior)| interior)
+                    .reduce(|lowest, interior| if interior < lowest { interior } else { lowest });
+                match (every, piece.kind) {
+                    (Some(lowest), PieceKind::Hole { interior }) => {
+                        assert_same_bits(interior, lowest);
+                    }
+                    (None, PieceKind::Outside | PieceKind::Stepped { .. }) => {}
+                    (every, kind) => panic!("case {case} at {middle}: {kind:?} against {every:?}"),
+                }
+            }
+        }
+        assert!(grazing > 5_000, "{grazing} grazing holes");
+    }
+
+    /// The walls' sweep labels every piece with the wall testing every hole and every wall gives
+    /// it (P09.T5): a hole first, then the densest wall holding the middle, bit for bit, or the
+    /// field. The walls are many, some grazing the line, some lining a hole.
+    #[test]
+    fn the_sweep_labels_each_wall_piece_as_testing_every_wall_does() {
+        let field = milky_way(Seed::new(4));
+        let mut lcg = Lcg::new(0x0905_ba11);
+        let uniform = |lcg: &mut Lcg, scale: f64| scale * (2.0 * lcg.next_f64() - 1.0);
+        let mut walled = 0;
+        for case in 0..30 {
+            let length = [10.0, 900.0, 30_000.0][case % 3];
+            let start = [0; 3].map(|_| uniform(&mut lcg, 3_000.0));
+            let direction = [0; 3].map(|_| uniform(&mut lcg, 1.0));
+            let norm = direction.iter().map(|c| c * c).sum::<f64>().sqrt();
+            let end: [f64; 3] = [0, 1, 2].map(|k| start[k] + length * direction[k] / norm);
+            let line = Line::new(&at(start), &at(end));
+            let mut mods = Vec::new();
+            for _ in 0..200 {
+                let on = line.at_ly(1.4 * lcg.next_f64() - 0.2);
+                let reach = uniform(&mut lcg, 0.5 * length);
+                let offset = [0; 3].map(|_| uniform(&mut lcg, 1.0));
+                let centre = at([0, 1, 2].map(|k| on[k] + reach * offset[k]));
+                let from_centre = centre
+                    .displacement_to(&line.start)
+                    .metres()
+                    .map(|m| m / METRES_PER_LIGHT_YEAR);
+                let (a, half_b, c) = line.sphere_quadratic(from_centre, 0.0);
+                let distance = (c - half_b * half_b / a).max(0.0).sqrt();
+                let outer = if lcg.next_below(3) == 0 {
+                    distance
+                } else {
+                    length * (0.01 + 2.0 * lcg.next_f64())
+                };
+                if outer <= 0.0 {
+                    continue;
+                }
+                let inner = 0.9 * outer;
+                // Some small bubbles' holes, which leave most of the line to the walls.
+                if outer < 0.2 * length && lcg.next_below(2) == 0 {
+                    mods.push(GasModifier::Hole {
+                        centre,
+                        radius: LightYears::new(inner),
+                        interior: HydrogenPerCm3::new(0.001 + 0.01 * lcg.next_f64()),
+                    });
+                }
+                mods.push(GasModifier::Wall {
+                    centre,
+                    inner: LightYears::new(inner),
+                    outer: LightYears::new(outer),
+                    density: HydrogenPerCm3::new(0.1 + lcg.next_f64()),
+                    dust_per_hydrogen: lcg.next_f64(),
+                });
+            }
+            let inside = |centre: &GalacticPosition, radius: f64, t: f64| {
+                let from_centre = centre
+                    .displacement_to(&line.start)
+                    .metres()
+                    .map(|m| m / METRES_PER_LIGHT_YEAR);
+                line.inside_sphere(from_centre, radius, t)
+            };
+            for piece in &pieces(&field, &line, &mods) {
+                let middle = f64::midpoint(piece.t0, piece.t1);
+                let holed = mods.iter().any(|m| match *m {
+                    GasModifier::Hole { centre, radius, .. } => {
+                        inside(&centre, radius.value(), middle)
+                    }
+                    GasModifier::Wall { .. } | GasModifier::Cloud { .. } => false,
+                });
+                let every = densest(mods.iter().filter_map(|m| {
+                    match *m {
+                        GasModifier::Wall {
+                            centre,
+                            inner,
+                            outer,
+                            density,
+                            dust_per_hydrogen,
+                        } => (inside(&centre, outer.value(), middle)
+                            && !inside(&centre, inner.value(), middle))
+                        .then_some((density.value(), dust_per_hydrogen * density.value())),
+                        GasModifier::Hole { .. } | GasModifier::Cloud { .. } => None,
+                    }
+                }));
+                match (holed, every, piece.kind) {
+                    (true, _, PieceKind::Hole { .. })
+                    | (false, None, PieceKind::Outside | PieceKind::Stepped { .. }) => {}
+                    (false, Some((n, d)), PieceKind::Wall { density, dust }) => {
+                        assert_same_bits(density, n);
+                        assert_same_bits(dust, d);
+                        walled += 1;
+                    }
+                    (holed, every, kind) => {
+                        panic!("case {case} at {middle}: {kind:?} against {holed} {every:?}")
+                    }
+                }
+            }
+        }
+        assert!(walled > 1_000, "{walled} wall pieces");
+    }
+
     /// Full quality steps no longer than 32 ly, and a budget's noise is smoothed to twice its step.
     #[test]
     fn full_quality_takes_the_finest_steps() {
@@ -1223,6 +1633,141 @@ mod tests {
             (column / (4.0 / 3.0 * core * central) - 1.0).abs() < 1e-9,
             "{column}"
         );
+    }
+
+    /// Far above the disc, where only the corona is, a wall puts its density and dust in place of
+    /// the corona's along its shell's chords: twice its thickness through the centre, the outer
+    /// sphere's chord where the line misses the inner, the part inside the shell for a segment
+    /// that ends in it, nothing for a line that misses it, and nothing inside a hole. Its column is
+    /// neutral, the same both ways, and a profile reads it rising across the wall.
+    #[test]
+    fn a_wall_replaces_the_field_along_its_shells_chords() {
+        let field = milky_way(Seed::new(5));
+        let corona = field.smooth().corona_density();
+        let centre = [1_000.0, 26_000.0, 40_000.0];
+        let wall = GasModifier::Wall {
+            centre: at(centre),
+            inner: LightYears::new(90.0),
+            outer: LightYears::new(100.0),
+            density: HydrogenPerCm3::new(3.0),
+            dust_per_hydrogen: 0.8,
+        };
+        let cm = CENTIMETRES_PER_LIGHT_YEAR;
+        let [cx, cy, cz] = centre;
+        let half = |miss: f64, r: f64| (r * r - miss * miss).sqrt();
+        let tolerance = 1e-9 * 3.0 * 20.0 * cm;
+        for (a, b, chord) in [
+            ([cx - 500.0, cy, cz], [cx + 500.0, cy, cz], 20.0),
+            (
+                [cx - 500.0, cy + 95.0, cz],
+                [cx + 500.0, cy + 95.0, cz],
+                2.0 * half(95.0, 100.0),
+            ),
+            (
+                [cx - 500.0, cy + 60.0, cz],
+                [cx + 500.0, cy + 60.0, cz],
+                2.0 * (half(60.0, 100.0) - half(60.0, 90.0)),
+            ),
+            ([cx - 500.0, cy, cz], [cx + 95.0, cy, cz], 15.0),
+            (
+                [cx - 500.0, cy + 101.0, cz],
+                [cx + 500.0, cy + 101.0, cz],
+                0.0,
+            ),
+        ] {
+            let mut cache = NoiseCache::with_capacity(64);
+            let mut line = |a, b, mods: &[GasModifier]| {
+                sightline(
+                    &field,
+                    &at(a),
+                    &at(b),
+                    NoiseMode::Mean,
+                    Quality::Full,
+                    mods,
+                    &mut cache,
+                )
+            };
+            let (with, without) = (line(a, b, &[wall]), line(a, b, &[]));
+            assert_eq!(with, line(b, a, &[wall]));
+            let gained = with.hydrogen_column().value() - without.hydrogen_column().value();
+            let expected = (3.0 - corona) * chord * cm;
+            assert!(
+                (gained - expected).abs() <= tolerance,
+                "{gained} against {expected}"
+            );
+            let neutral = with.neutral_hydrogen_column().value();
+            assert!((neutral - 3.0 * chord * cm).abs() <= tolerance, "{neutral}");
+            let dust = with.a_v().value() * HYDROGEN_COLUMN_PER_MAG;
+            assert!((dust - 0.8 * 3.0 * chord * cm).abs() <= tolerance, "{dust}");
+            assert_same_bits(without.a_v().value(), 0.0);
+        }
+    }
+
+    /// A hole over half a wall's near chord takes that half out, and a profile reads the wall's
+    /// column rising across it to the line's.
+    #[test]
+    fn a_hole_takes_out_the_wall_it_covers_and_a_profile_reads_the_rest() {
+        let field = milky_way(Seed::new(5));
+        let centre = [1_000.0, 26_000.0, 40_000.0];
+        let wall = GasModifier::Wall {
+            centre: at(centre),
+            inner: LightYears::new(90.0),
+            outer: LightYears::new(100.0),
+            density: HydrogenPerCm3::new(3.0),
+            dust_per_hydrogen: 0.8,
+        };
+        let cm = CENTIMETRES_PER_LIGHT_YEAR;
+        let [cx, cy, cz] = centre;
+        let tolerance = 1e-9 * 3.0 * 20.0 * cm;
+        let hole = GasModifier::Hole {
+            centre: at([cx - 97.5, cy, cz]),
+            radius: LightYears::new(2.5),
+            interior: HydrogenPerCm3::new(0.004),
+        };
+        let mut cache = NoiseCache::with_capacity(64);
+        let (a, b) = (at([cx - 500.0, cy, cz]), at([cx - 50.0, cy, cz]));
+        let holed = sightline(
+            &field,
+            &a,
+            &b,
+            NoiseMode::Mean,
+            Quality::Full,
+            &[wall, hole],
+            &mut cache,
+        );
+        let dust = holed.a_v().value() * HYDROGEN_COLUMN_PER_MAG;
+        assert!((dust - 0.8 * 3.0 * 5.0 * cm).abs() <= tolerance, "{dust}");
+        let from = at([cx - 500.0, cy, cz]);
+        let mut out = Vec::new();
+        profile(
+            &field,
+            &from,
+            UnitVector::X,
+            &[
+                LightYears::new(300.0),
+                LightYears::new(405.0),
+                LightYears::new(1_000.0),
+            ],
+            NoiseMode::Mean,
+            Quality::Full,
+            &[wall],
+            &mut cache,
+            &mut out,
+        );
+        let whole = sightline(
+            &field,
+            &from,
+            &at([cx + 500.0, cy, cz]),
+            NoiseMode::Mean,
+            Quality::Full,
+            &[wall],
+            &mut cache,
+        );
+        assert_same_bits(out[0].value(), 0.0);
+        let into = 0.8 * 3.0 * 5.0 * cm / HYDROGEN_COLUMN_PER_MAG;
+        assert!(((out[1].value() - into) / into).abs() < 1e-12, "{out:?}");
+        let (last, all) = (out[2].value(), whole.a_v().value());
+        assert!(((last - all) / all).abs() < 1e-12, "{last} against {all}");
     }
 
     /// The canonical order is by cell, then by offset, and a point never precedes itself.

@@ -8,34 +8,42 @@
  * groups: the pass's `Frame`, written once a pass; the draw's `Draw`, a slot of the frame's
  * {@link UniformRing} at a dynamic offset; and the material's resources. With post-processes, the
  * draws go into an `rgba16float` intermediate of the output's size, and the passes ping-pong
- * between two such intermediates, the last writing the output.
+ * between two such intermediates, the last writing the output. A depth-layer target's pass (plan
+ * R10, R10.T9.b) is a depth-only variant of a frame's draws' pass, into one layer, and a
+ * submission of its own, as a frame is.
  */
 
-import { BUFFER_USAGE } from "../gpuFlags";
-import type { TextureSpec } from "../memory";
+import { ID_NONE } from "../idTarget";
+import { extentOf, type TextureSpec } from "../memory";
 import {
-  type BufferHandle,
+  type DepthLayerPass,
   type DrawItem,
   type FrameSubmission,
   type PostProcessItem,
+  type SamplerSpec,
+  type TexelRect,
   type TextureHandle,
   type ViewSize,
   type WgslMaterialSpec,
   type WgslPostProcessSpec,
 } from "../types";
+import type { CompileBudget } from "./compileBudget";
 import {
   type MaterialModules,
   materialPipelineDescriptor,
+  type PipelineColour,
   postProcessPipelineDescriptor,
   type ResourceBindings,
   resourceLayoutEntries,
   SHADER_STAGE,
 } from "./materials";
+import { errorText } from "./errorText";
 import type { MeshRecord } from "./meshes";
-import { viewDimensionOf } from "./resources";
+import { BindGroupCache, type CachedBindGroupEntry } from "./bindGroupCache";
+import { viewDimensionBinds, viewDimensionOf } from "./resources";
 import type { TextureBindingSpec } from "../types";
 import {
-  FRAME_BYTES,
+  FrameBlocks,
   packFrame,
   type RingHost,
   type RingSlot,
@@ -46,12 +54,33 @@ import {
 /** The colour a pass clears to: black, opaque. */
 export const CLEAR_COLOUR: GPUColor = { r: 0, g: 0, b: 0, a: 1 };
 
+/** The value an ID target's pass clears to: none, {@link ID_NONE} (plan R14, Design note 9). */
+export const CLEAR_ID: GPUColor = { r: ID_NONE, g: 0, b: 0, a: 0 };
+
 /**
  * The load operation of a frame's draws' pass: `load` when it asks to keep what an earlier
- * submission drew and has no post-processes, whose chain starts clear; `clear` otherwise.
+ * submission drew, or a copy of another's colour, and has no post-processes, whose chain starts
+ * clear; `clear` otherwise.
  */
 export function sceneLoadOp(frame: FrameSubmission, hasPostProcesses: boolean): GPULoadOp {
-  return !hasPostProcesses && frame.colourLoad === "load" ? "load" : "clear";
+  return !hasPostProcesses && (frame.colourLoad === "load" || frame.colourFrom !== undefined)
+    ? "load"
+    : "clear";
+}
+
+/**
+ * Checks a frame's scissor against its output's size.
+ *
+ * @throws RangeError when the scissor is not whole pixels within the output.
+ */
+export function assertScissorWithin(scissor: TexelRect, size: ViewSize): void {
+  const { x, y, width, height } = scissor;
+  const whole = [x, y, width, height].every((value) => Number.isInteger(value) && value >= 0);
+  if (!whole || x + width > size.widthPx || y + height > size.heightPx) {
+    throw new RangeError(
+      `scissor (${x}, ${y}) ${width} × ${height} is not within ${size.widthPx} × ${size.heightPx}`,
+    );
+  }
 }
 
 /** The format of a post-process chain's intermediates. */
@@ -92,25 +121,39 @@ export interface PostProcessRecord {
 export interface FrameOutput {
   readonly size: ViewSize;
   readonly colour: GPUTextureView;
+  /** The texture {@link FrameSubmission.colourFrom} is copied into; `null` on a view's canvas. */
+  readonly colourTexture: GPUTexture | null;
   readonly colourFormat: GPUTextureFormat;
   readonly depth: GPUTextureView | null;
+  /**
+   * `load` for a depth another output drew, which the draws' pass loads whatever the frame's
+   * `colourLoad` (a target drawn with `depthOf`'s, plan R14, R14.T2.b); the frame's load op where
+   * absent.
+   */
+  readonly depthLoad?: "load";
   /** Two `rgba16float` textures of the output's size, asked for only when there are post-processes. */
   readonly intermediates: () => readonly [GPUTexture, GPUTexture];
+}
+
+/** Where a depth-layer target's pass is drawn (plan R10, R10.T9.b). */
+export interface DepthLayerOutput {
+  /** The layer's size: the pass's `Frame` viewport. */
+  readonly size: ViewSize;
+  /** The pass's layer as its attachment: a single-layer `2d` view of the target's texture. */
+  readonly depth: GPUTextureView;
 }
 
 /** What the draw path needs of the engine. */
 export interface DrawingHost extends RingHost {
   readonly device: GPUDevice;
+  /** The device's compiles in flight, which every asynchronous pipeline waits its turn in. */
+  readonly compiles: CompileBudget;
   materialOf(handle: DrawItem["material"]): MaterialRecord;
   meshOf(handle: DrawItem["mesh"]): MeshRecord;
   postProcessOf(handle: PostProcessItem["postProcess"]): PostProcessRecord;
   /** A texture's GPU object and specification. */
   textureOf(handle: TextureHandle): { readonly texture: GPUTexture; readonly spec: TextureSpec };
-  sampler(spec: {
-    readonly name: string;
-    readonly filter: "nearest" | "linear";
-    readonly address: "clamp-to-edge" | "repeat";
-  }): GPUSampler;
+  sampler(spec: Pick<SamplerSpec, "name" | "filter" | "address" | "compare">): GPUSampler;
 }
 
 /** A draw resolved to what its encoding needs. */
@@ -138,6 +181,7 @@ function pipelineFor(
   owner: string,
   asynchronous: boolean,
   device: GPUDevice,
+  compiles: CompileBudget,
   descriptor: () => GPURenderPipelineDescriptor,
 ): GPURenderPipeline | undefined {
   const existing = pipelines.get(key);
@@ -149,24 +193,37 @@ function pipelineFor(
     pipelines.set(key, pipeline);
     return pipeline;
   }
+  // A descriptor the engine refuses (a blending material into an integer target, R14.T2.b) fails
+  // its key at once, as a compile that fails does, rather than leaving it pending.
+  let made: GPURenderPipelineDescriptor;
+  try {
+    made = descriptor();
+  } catch (error: unknown) {
+    pipelines.set(key, "failed");
+    throw error;
+  }
   pipelines.set(key, "pending");
-  void device
-    .createRenderPipelineAsync(descriptor())
+  // A draw waits for it now: ahead of every compile made ahead of its first draw.
+  void compiles
+    .run(owner, () => device.createRenderPipelineAsync(made), "draw")
     .then((pipeline): void => {
       pipelines.set(key, pipeline);
       return undefined;
     })
     .catch((error: unknown) => {
       pipelines.set(key, "failed");
-      console.error(`the pipeline of ${owner} could not be made:`, error);
+      console.error(`the pipeline of ${owner} could not be made: ${errorText(error)}`);
     });
   return undefined;
 }
 
-/** A pipeline's key: the mesh's layout (or none), the colour format and whether there is depth. */
+/**
+ * A pipeline's key: the mesh's layout (or none), the colour format (or `depth-only`) and whether
+ * there is depth.
+ */
 export function pipelineKey(
   layoutKey: string,
-  colourFormat: GPUTextureFormat,
+  colourFormat: PipelineColour,
   hasDepth: boolean,
 ): string {
   return `${layoutKey}|${colourFormat}|${String(hasDepth)}`;
@@ -177,14 +234,11 @@ export class Drawing {
   readonly #host: DrawingHost;
   readonly frameLayout: GPUBindGroupLayout;
   readonly drawLayout: GPUBindGroupLayout;
-  readonly #frameBuffer: BufferHandle;
-  readonly #frameBindGroup: GPUBindGroup;
+  /** Each submission's `Frame` blocks, one a frame (plan R14). */
+  readonly #frames: FrameBlocks;
   readonly #ring: UniformRing;
   readonly #fullScreen: GPUShaderModule;
-  /** Each object's number, for cache keys. */
-  readonly #ids = new WeakMap<object, number>();
-  #nextId = 1;
-  readonly #bindGroups = new Map<string, GPUBindGroup>();
+  readonly #bindGroups: BindGroupCache;
   readonly #views = new WeakMap<GPUTexture, Map<string, GPUTextureView>>();
 
   constructor(host: DrawingHost, fullScreenWgsl: string) {
@@ -199,18 +253,9 @@ export class Drawing {
       label: "draw",
       entries: [{ binding: 0, visibility, buffer: { type: "uniform", hasDynamicOffset: true } }],
     });
-    this.#frameBuffer = host.createBuffer({
-      name: "frame uniforms",
-      bytes: FRAME_BYTES,
-      usage: BUFFER_USAGE.UNIFORM | BUFFER_USAGE.COPY_DST,
-      category: "other",
-    });
-    this.#frameBindGroup = device.createBindGroup({
-      label: "frame",
-      layout: this.frameLayout,
-      entries: [{ binding: 0, resource: { buffer: host.gpuBufferOf(this.#frameBuffer) } }],
-    });
+    this.#frames = new FrameBlocks(host, this.frameLayout);
     this.#ring = new UniformRing(host, this.drawLayout);
+    this.#bindGroups = new BindGroupCache(device);
     this.#fullScreen = device.createShaderModule({ label: "full screen", code: fullScreenWgsl });
   }
 
@@ -239,7 +284,7 @@ export class Drawing {
   materialPipeline(
     record: MaterialRecord,
     mesh: MeshRecord,
-    colourFormat: GPUTextureFormat,
+    colourFormat: PipelineColour,
     hasDepth: boolean,
     asynchronous = record.asyncPipelines,
   ): GPURenderPipeline | undefined {
@@ -249,6 +294,7 @@ export class Drawing {
       `material ${record.spec.name}`,
       asynchronous,
       this.#host.device,
+      this.#host.compiles,
       () =>
         materialPipelineDescriptor(
           record.spec,
@@ -266,7 +312,7 @@ export class Drawing {
   async prepareMaterialPipeline(
     record: MaterialRecord,
     mesh: MeshRecord,
-    colourFormat: GPUTextureFormat,
+    colourFormat: PipelineColour,
     hasDepth: boolean,
   ): Promise<void> {
     const key = pipelineKey(mesh.layoutKey, colourFormat, hasDepth);
@@ -277,15 +323,17 @@ export class Drawing {
     try {
       record.pipelines.set(
         key,
-        await this.#host.device.createRenderPipelineAsync(
-          materialPipelineDescriptor(
-            record.spec,
-            record.modules,
-            record.layout,
-            mesh.layouts,
-            mesh.spec.topology,
-            colourFormat,
-            hasDepth,
+        await this.#host.compiles.run(record.spec.name, () =>
+          this.#host.device.createRenderPipelineAsync(
+            materialPipelineDescriptor(
+              record.spec,
+              record.modules,
+              record.layout,
+              mesh.layouts,
+              mesh.spec.topology,
+              colourFormat,
+              hasDepth,
+            ),
           ),
         ),
       );
@@ -298,12 +346,57 @@ export class Drawing {
   }
 
   /**
+   * Makes the pipeline of `record` for `mesh` into an output ahead of its first draw (R10.T14.d):
+   * for a synchronous material without marking it pending, so that a draw meanwhile makes its own,
+   * which is kept; an asynchronous one's as {@link Drawing.prepareMaterialPipeline} does.
+   */
+  async preparePipeline(
+    record: MaterialRecord,
+    mesh: MeshRecord,
+    colourFormat: PipelineColour,
+    hasDepth: boolean,
+  ): Promise<void> {
+    if (record.asyncPipelines) {
+      await this.prepareMaterialPipeline(record, mesh, colourFormat, hasDepth);
+      return;
+    }
+    const key = pipelineKey(mesh.layoutKey, colourFormat, hasDepth);
+    if (record.pipelines.has(key)) {
+      return;
+    }
+    let pipeline: GPURenderPipeline | null;
+    try {
+      pipeline = await this.#host.compiles.run(record.spec.name, async () =>
+        // A draw that came first made its own while this one waited its turn: none is made twice.
+        record.pipelines.has(key)
+          ? null
+          : this.#host.device.createRenderPipelineAsync(
+              materialPipelineDescriptor(
+                record.spec,
+                record.modules,
+                record.layout,
+                mesh.layouts,
+                mesh.spec.topology,
+                colourFormat,
+                hasDepth,
+              ),
+            ),
+      );
+    } catch (error: unknown) {
+      throw new Error(`the pipeline of material ${record.spec.name} could not be prepared`, {
+        cause: error,
+      });
+    }
+    if (pipeline !== null && !record.pipelines.has(key)) {
+      record.pipelines.set(key, pipeline);
+    }
+  }
+
+  /**
    * Encodes `frame` into `output`: the draws' pass, then each post-process's.
    *
    * @remarks
-   * The `Frame` buffer and the ring are shared by every view and target and rewritten from the
-   * start for each frame, so the caller submits `encoder` before it encodes the next frame: the
-   * queue then orders each frame's uploads before its own commands and after the previous ones.
+   * {@link Drawing.encodeFrames} of the one frame.
    *
    * @param timestamps - The timestamp writes of a pass by its label, when the frame is timed.
    */
@@ -313,41 +406,97 @@ export class Drawing {
     output: FrameOutput,
     timestamps: (label: string) => GPURenderPassTimestampWrites | undefined,
   ): void {
-    const host = this.#host;
-    this.#ring.begin();
-    // A post-process whose shaders failed is left out of the chain; with none left, the draws go
-    // straight to the output.
-    const postProcesses = this.#resolvePostProcesses(frame, output.colourFormat);
-    const intermediates = postProcesses.length > 0 ? output.intermediates() : null;
-    const sceneFormat = intermediates === null ? output.colourFormat : INTERMEDIATE_FORMAT;
-    const draws = this.#resolveDraws(frame, sceneFormat, output.depth !== null);
-    host.writeBuffer(this.#frameBuffer, 0, packFrame(frame, output.size));
-    this.#ring.upload();
+    this.encodeFrames(encoder, [{ frame, output }], timestamps);
+  }
 
+  /**
+   * Encodes each frame into its output, in order: its draws' pass, then each post-process's, as
+   * {@link Drawing.encodeFrame} would one by one (plan R14, the owner's Mac).
+   *
+   * @remarks
+   * The `Frame` blocks and the ring are shared by every view and target and rewritten from the
+   * start for each submission, so the caller submits `encoder` before it encodes the next: the
+   * queue then orders the submission's uploads before its own commands and after the previous
+   * ones. Within it each frame takes a `Frame` block and ring slots of its own, all uploaded before
+   * any is read, so that each frame's passes read what they would in a submission of their own.
+   *
+   * @param timestamps - The timestamp writes of a pass by its label, when the frame is timed.
+   */
+  encodeFrames(
+    encoder: GPUCommandEncoder,
+    frames: ReadonlyArray<{ readonly frame: FrameSubmission; readonly output: FrameOutput }>,
+    timestamps: (label: string) => GPURenderPassTimestampWrites | undefined,
+  ): void {
+    this.#ring.begin();
+    const resolved = frames.map(({ frame, output }) => {
+      // A post-process whose shaders failed is left out of the chain; with none left, the draws go
+      // straight to the output.
+      const postProcesses = this.#resolvePostProcesses(frame, output.colourFormat);
+      const intermediates = postProcesses.length > 0 ? output.intermediates() : null;
+      const sceneFormat = intermediates === null ? output.colourFormat : INTERMEDIATE_FORMAT;
+      const draws = this.#resolveDraws(frame.draws, sceneFormat, output.depth !== null);
+      return { frame, output, postProcesses, intermediates, draws };
+    });
+    this.#frames.write(frames.map(({ frame, output }) => packFrame(frame, output.size)));
+    this.#ring.upload();
+    resolved.forEach((each, index) => {
+      this.#encodeResolvedFrame(encoder, each, this.#frames.bindGroup(index), timestamps);
+    });
+  }
+
+  /** Encodes one frame of {@link Drawing.encodeFrames}, its uploads written, its `Frame` `frameGroup`. */
+  #encodeResolvedFrame(
+    encoder: GPUCommandEncoder,
+    resolved: {
+      readonly frame: FrameSubmission;
+      readonly output: FrameOutput;
+      readonly postProcesses: ReadonlyArray<ResolvedPostProcess>;
+      readonly intermediates: readonly [GPUTexture, GPUTexture] | null;
+      readonly draws: ReadonlyArray<ResolvedDraw>;
+    },
+    frameGroup: GPUBindGroup,
+    timestamps: (label: string) => GPURenderPassTimestampWrites | undefined,
+  ): void {
+    const { frame, output, postProcesses, intermediates, draws } = resolved;
     const sceneColour =
       intermediates === null ? output.colour : this.#viewOf(intermediates[0], "2d", false);
+    // Another pass's colour, copied in, under a scissor that leaves the rest of it as it was.
+    if (frame.colourFrom !== undefined && intermediates === null) {
+      this.#copyColour(encoder, frame.colourFrom, output);
+    }
     // A frame drawn over an earlier one keeps its colour and depth (R07.T16's symbology).
     const load = sceneLoadOp(frame, intermediates !== null);
     const scene = encoder.beginRenderPass({
       label: frame.label,
       colorAttachments: [
-        { view: sceneColour, loadOp: load, storeOp: "store", clearValue: CLEAR_COLOUR },
+        {
+          view: sceneColour,
+          loadOp: load,
+          storeOp: "store",
+          // An ID target takes no post-process, so its colour is the scene's (R14.T2.b).
+          clearValue: output.colourFormat === "r32uint" ? CLEAR_ID : CLEAR_COLOUR,
+        },
       ],
       ...(output.depth === null
         ? {}
         : {
             depthStencilAttachment: {
               view: output.depth,
-              depthLoadOp: load,
+              depthLoadOp: output.depthLoad ?? load,
               depthStoreOp: "store",
               depthClearValue: 0,
             },
           }),
       ...optionalTimestamps(timestamps(frame.label)),
     });
-    scene.setBindGroup(0, this.#frameBindGroup);
-    for (const resolved of draws) {
-      encodeDraw(scene, resolved, this.#ring.bindGroup(resolved.slot));
+    if (frame.scissor !== undefined && intermediates === null) {
+      const { x, y, width, height } = frame.scissor;
+      scene.setScissorRect(x, y, width, height);
+    }
+    scene.setBindGroup(0, frameGroup);
+    const bound = new BoundState();
+    for (const draw of draws) {
+      encodeDraw(scene, draw, this.#ring.bindGroup(draw.slot), bound);
     }
     scene.end();
 
@@ -355,7 +504,7 @@ export class Drawing {
       return;
     }
     const steps = chainSteps(postProcesses.length);
-    postProcesses.forEach((resolved, index) => {
+    postProcesses.forEach((post, index) => {
       const step = steps[index];
       if (step === undefined) {
         return;
@@ -365,7 +514,7 @@ export class Drawing {
         step.output === "output"
           ? output.colour
           : this.#viewOf(intermediates[step.output], "2d", false);
-      const label = `${frame.label} ${resolved.record.spec.name}`;
+      const label = `${frame.label} ${post.record.spec.name}`;
       const pass = encoder.beginRenderPass({
         label,
         colorAttachments: [
@@ -373,19 +522,61 @@ export class Drawing {
         ],
         ...optionalTimestamps(timestamps(label)),
       });
-      pass.setPipeline(resolved.pipeline);
-      pass.setBindGroup(0, this.#frameBindGroup);
-      pass.setBindGroup(1, this.#ring.bindGroup(resolved.slot), [resolved.slot.offsetBytes]);
-      pass.setBindGroup(2, this.#postProcessResources(resolved, input));
+      pass.setPipeline(post.pipeline);
+      pass.setBindGroup(0, frameGroup);
+      pass.setBindGroup(1, this.#ring.bindGroup(post.slot), [post.slot.offsetBytes]);
+      pass.setBindGroup(2, this.#postProcessResources(post, input));
       pass.draw(3);
       pass.end();
     });
   }
 
+  /**
+   * Encodes one pass of a depth-layer target into `output` (plan R10, R10.T9.b): the depth-only
+   * variant of {@link Drawing.encodeFrame}'s draws' pass, with no colour attachment and the pass's
+   * layer as its depth, cleared to 0 and stored, its draws through their materials' `depth-only`
+   * pipelines.
+   *
+   * @remarks
+   * It rewinds the ring and rewrites the first `Frame` block, as a frame does, so the caller submits
+   * `encoder` before it encodes the next pass or frame: each layer is a submission of its own. A
+   * draw whose pipeline is still being made is left out, as from a frame.
+   *
+   * @param timestamps - The timestamp writes of a pass by its label, when it is timed.
+   */
+  encodeDepthLayer(
+    encoder: GPUCommandEncoder,
+    pass: DepthLayerPass,
+    output: DepthLayerOutput,
+    timestamps: (label: string) => GPURenderPassTimestampWrites | undefined,
+  ): void {
+    this.#ring.begin();
+    const draws = this.#resolveDraws(pass.draws, "depth-only", true);
+    this.#frames.write([packFrame(pass, output.size)]);
+    this.#ring.upload();
+    const encoded = encoder.beginRenderPass({
+      label: pass.label,
+      colorAttachments: [],
+      depthStencilAttachment: {
+        view: output.depth,
+        depthLoadOp: "clear",
+        depthStoreOp: "store",
+        depthClearValue: 0,
+      },
+      ...optionalTimestamps(timestamps(pass.label)),
+    });
+    encoded.setBindGroup(0, this.#frames.bindGroup(0));
+    const bound = new BoundState();
+    for (const draw of draws) {
+      encodeDraw(encoded, draw, this.#ring.bindGroup(draw.slot), bound);
+    }
+    encoded.end();
+  }
+
   /** Destroys the draw path's buffers. */
   dispose(): void {
     this.#ring.dispose();
-    this.#host.destroyBuffer(this.#frameBuffer);
+    this.#frames.dispose();
     this.#bindGroups.clear();
   }
 
@@ -395,12 +586,12 @@ export class Drawing {
   }
 
   #resolveDraws(
-    frame: FrameSubmission,
-    colourFormat: GPUTextureFormat,
+    draws: ReadonlyArray<DrawItem>,
+    colourFormat: PipelineColour,
     hasDepth: boolean,
   ): ResolvedDraw[] {
     const resolved: ResolvedDraw[] = [];
-    for (const draw of frame.draws) {
+    for (const draw of draws) {
       if ((draw.instanceCount ?? 1) === 0 && draw.indirect === undefined) {
         continue;
       }
@@ -451,6 +642,7 @@ export class Drawing {
         `post-process ${record.spec.name}`,
         false,
         this.#host.device,
+        this.#host.compiles,
         () =>
           postProcessPipelineDescriptor(
             record.spec,
@@ -470,11 +662,7 @@ export class Drawing {
   }
 
   #drawResources(record: MaterialRecord, draw: DrawItem): GPUBindGroup {
-    const entries: Array<{
-      readonly binding: number;
-      readonly resource: GPUBindingResource;
-      readonly key: object;
-    }> = [];
+    const entries: CachedBindGroupEntry[] = [];
     for (const texture of record.bindings.textures) {
       const handle = draw.textures[texture.name];
       if (handle === undefined) {
@@ -495,16 +683,12 @@ export class Drawing {
       const gpuSampler = this.#host.sampler(sampler);
       entries.push({ binding: sampler.binding, resource: gpuSampler, key: gpuSampler });
     }
-    return this.#bindGroup(record.resourceLayout, record.spec.name, entries);
+    return this.#bindGroups.bindGroup(record.resourceLayout, record.spec.name, entries);
   }
 
   #postProcessResources(resolved: ResolvedPostProcess, input: GPUTexture): GPUBindGroup {
     const { record, item } = resolved;
-    const entries: Array<{
-      readonly binding: number;
-      readonly resource: GPUBindingResource;
-      readonly key: object;
-    }> = [];
+    const entries: CachedBindGroupEntry[] = [];
     for (const texture of record.bindings.textures) {
       let view: GPUTextureView;
       if (texture.name === "hdr-colour") {
@@ -522,43 +706,16 @@ export class Drawing {
       const gpuSampler = this.#host.sampler(sampler);
       entries.push({ binding: sampler.binding, resource: gpuSampler, key: gpuSampler });
     }
-    return this.#bindGroup(record.resourceLayout, record.spec.name, entries);
-  }
-
-  #bindGroup(
-    layout: GPUBindGroupLayout,
-    label: string,
-    entries: ReadonlyArray<{
-      readonly binding: number;
-      readonly resource: GPUBindingResource;
-      readonly key: object;
-    }>,
-  ): GPUBindGroup {
-    const key = [
-      this.#id(layout),
-      ...entries.map((entry) => `${entry.binding}:${this.#id(entry.key)}`),
-    ].join(",");
-    let bindGroup = this.#bindGroups.get(key);
-    if (bindGroup === undefined) {
-      if (this.#bindGroups.size > 4096) {
-        this.#bindGroups.clear();
-      }
-      bindGroup = this.#host.device.createBindGroup({
-        label,
-        layout,
-        entries: entries.map(({ binding, resource }) => ({ binding, resource })),
-      });
-      this.#bindGroups.set(key, bindGroup);
-    }
-    return bindGroup;
+    return this.#bindGroups.bindGroup(record.resourceLayout, record.spec.name, entries);
   }
 
   /**
    * The view a texture binding takes, checked against what the layout declared.
    *
    * @throws Error naming the owner and the binding when the texture's dimension is not the one
-   * declared (`2d` by default), or a depth texture is not declared `depth`, or the reverse: the
-   * bind group would fail validation and the draw silently draw nothing.
+   * declared (`2d` by default), or a depth texture is not declared `depth`, or an unsigned integer
+   * texture (an ID target's `r32uint`, plan R14, R14.T2.b) not declared `uint`, or the reverse:
+   * the bind group would fail validation and the draw silently draw nothing.
    */
   #boundView(owner: string, binding: TextureBindingSpec, handle: TextureHandle): GPUTextureView {
     const { texture, spec } = this.#host.textureOf(handle);
@@ -570,12 +727,37 @@ export class Drawing {
       );
     }
     const depth = spec.format.startsWith("depth");
-    if (depth !== (binding.sampleType === "depth")) {
+    const unsigned = spec.format.endsWith("uint");
+    if (
+      depth !== (binding.sampleType === "depth") ||
+      unsigned !== (binding.sampleType === "uint")
+    ) {
       throw new Error(
         `${owner} declares ${binding.name} as ${binding.sampleType ?? "float"}, but ${handle.name} is ${spec.format}`,
       );
     }
     return this.#viewOf(texture, declared, depth);
+  }
+
+  /**
+   * Encodes the copy of `source`'s level 0 into `output`'s colour, before the frame's draws' pass.
+   *
+   * @throws Error on a view's canvas, or for a source whose size or format is not the output's.
+   */
+  #copyColour(encoder: GPUCommandEncoder, source: TextureHandle, output: FrameOutput): void {
+    const destination = output.colourTexture;
+    if (destination === null) {
+      throw new Error(`a view takes no copy of ${source.name} into its canvas`);
+    }
+    const { texture, spec } = this.#host.textureOf(source);
+    const { width, height } = extentOf(spec.size);
+    const { widthPx, heightPx } = output.size;
+    if (width !== widthPx || height !== heightPx || spec.format !== output.colourFormat) {
+      throw new Error(
+        `${source.name} (${width} × ${height}, ${spec.format}) is not the output's ${widthPx} × ${heightPx} ${output.colourFormat}`,
+      );
+    }
+    encoder.copyTextureToTexture({ texture }, { texture: destination }, [width, height]);
   }
 
   /** A view of every mip of `texture` as `dimension`, its depth aspect alone for a depth format. */
@@ -588,16 +770,6 @@ export class Drawing {
       views.set(dimension, view);
     }
     return view;
-  }
-
-  #id(object: object): number {
-    let id = this.#ids.get(object);
-    if (id === undefined) {
-      id = this.#nextId;
-      this.#nextId += 1;
-      this.#ids.set(object, id);
-    }
-    return id;
   }
 }
 
@@ -626,36 +798,75 @@ function optionalTimestamps(writes: GPURenderPassTimestampWrites | undefined): {
 }
 
 /**
- * Whether a texture whose own view dimension is `own` binds where a layout declares `declared`.
+ * What a pass has set so far: its pipeline, its `@group(2)` resources, its vertex buffers by slot
+ * and its index buffer (plan R14, the owner's Mac).
  *
  * @remarks
- * The same dimension always binds. A single-layer 2D texture (`own` `2d`) also binds as a
- * one-layer `2d-array`, a view WebGPU allows (§6.1.4, `createView` with `arrayLayerCount` 1), so
- * that a material declaring an array binds it whatever its layer count (R05.T11.a's normals atlas,
- * whose layers depend on the device's limits). Nothing else is reinterpreted.
+ * A pass keeps each of them until it is set again, whatever pipeline is set between (W3C WebGPU,
+ * `GPUBindingCommandsMixin`'s `[[bind_groups]]` and `GPURenderCommandsMixin`'s `[[pipeline]]`,
+ * `[[vertex_buffers]]` and `[[index_buffer]]`), so a draw that sets one to what the pass holds
+ * already draws exactly as one that does not: the call is skipped, each one a call the browser
+ * serializes to the GPU process and Dawn encodes. The `Draw` group is set for every draw, since its
+ * dynamic offset is the draw's own slot.
  */
-export function viewDimensionBinds(
-  declared: GPUTextureViewDimension,
-  own: GPUTextureViewDimension,
-): boolean {
-  return own === declared || (declared === "2d-array" && own === "2d");
+class BoundState {
+  #pipeline: GPURenderPipeline | null = null;
+  #resources: GPUBindGroup | null = null;
+  readonly #vertexBuffers: Array<GPUBuffer | undefined> = [];
+  #index: GPUBuffer | null = null;
+
+  /** Sets `pipeline` on `pass` unless the pass holds it already. */
+  pipeline(pass: GPURenderPassEncoder, pipeline: GPURenderPipeline): void {
+    if (this.#pipeline !== pipeline) {
+      pass.setPipeline(pipeline);
+      this.#pipeline = pipeline;
+    }
+  }
+
+  /** Sets `resources` as `@group(2)` on `pass` unless the pass holds them already. */
+  resources(pass: GPURenderPassEncoder, resources: GPUBindGroup): void {
+    if (this.#resources !== resources) {
+      pass.setBindGroup(2, resources);
+      this.#resources = resources;
+    }
+  }
+
+  /** Sets `buffer` in vertex slot `slot` on `pass` unless the pass holds it there already. */
+  vertexBuffer(pass: GPURenderPassEncoder, slot: number, buffer: GPUBuffer): void {
+    if (this.#vertexBuffers[slot] !== buffer) {
+      pass.setVertexBuffer(slot, buffer);
+      this.#vertexBuffers[slot] = buffer;
+    }
+  }
+
+  /** Sets `buffer` as the `uint32` index buffer on `pass` unless the pass holds it already. */
+  indexBuffer(pass: GPURenderPassEncoder, buffer: GPUBuffer): void {
+    if (this.#index !== buffer) {
+      pass.setIndexBuffer(buffer, "uint32");
+      this.#index = buffer;
+    }
+  }
 }
 
-/** Encodes one resolved draw: direct, indexed or indirect, as its mesh and item say. */
+/**
+ * Encodes one resolved draw: direct, indexed or indirect, as its mesh and item say, setting only
+ * the state the pass does not hold already (`bound`, the pass's own).
+ */
 function encodeDraw(
   pass: GPURenderPassEncoder,
   resolved: ResolvedDraw,
   drawGroup: GPUBindGroup,
+  bound: BoundState,
 ): void {
   const { draw, mesh, pipeline, slot, resources } = resolved;
-  pass.setPipeline(pipeline);
+  bound.pipeline(pass, pipeline);
   pass.setBindGroup(1, drawGroup, [slot.offsetBytes]);
-  pass.setBindGroup(2, resources);
+  bound.resources(pass, resources);
   mesh.vertexBuffers.forEach((buffer, index) => {
-    pass.setVertexBuffer(index, buffer);
+    bound.vertexBuffer(pass, index, buffer);
   });
   if (mesh.index !== null) {
-    pass.setIndexBuffer(mesh.index.buffer, "uint32");
+    bound.indexBuffer(pass, mesh.index.buffer);
   }
   if (resolved.indirect !== null) {
     // The GPU wrote the counts (Design note 19), in WebGPU's layout of the draw call.

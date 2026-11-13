@@ -1,0 +1,1972 @@
+/**
+ * The lit style's terrain material (plan R10, R10.T10.b; Design notes 8, 9 and 11): a body's
+ * patches shaded from their baked palette and class weights, each class by its own lunar-Lambert
+ * law through R07's `body_brdf` and its own row of the phase table, summed by weight, lit as R07's
+ * disc is lit, through R08's surface lighting. This module holds the material's spec, the class
+ * laws and their rows, the packing of a frame's lights, and the CPU twin of the blend.
+ *
+ * @remarks
+ * - **One law per class, summed by weight.** A texel reflects Σ wₖ rₖ, each rₖ its class's own
+ *   `body_brdf` I/F, never the I/F of one law of weighted parameters, which differs from the sum by
+ *   the covariance of A_N and L: 1.7× too bright at μ₀ = 0.5, μ = 0.1 for an even blend of regolith
+ *   (A_N 0.12, L 1) and snow (A_N 0.9, L 0) (Design note 8; decision-r07-t8b). A zero weight adds
+ *   nothing, and the largest weight's class is the one a readout names ({@link dominantSlot}).
+ * - **A class's law** is its palette slot's photometry, as the worker resolves it from R10.T10.a's
+ *   scaled albedo and R10.T1.a's law (`TerrainLayers.photometry`): A = c A_N per display channel
+ *   (Johnson R, V and B as r, g and b, as R07's `modelledPhotometry` maps them), times the figure's
+ *   factor R07's disc gives each of its laws, its class-map classes' included (`oblateAlbedoScale`
+ *   of the class's L(0), 1 for a sphere; R10.T10.e), so that the disc and the terrain draw one
+ *   law a class on an oblate body too; L(0) the law's at c A_N, and the law's template and
+ *   exponent s ({@link CLASS_LAW_TEMPLATES}), a Regolith class's the body's on a regolith
+ *   template, with its L(α) curve and L(0) no higher than the body's ({@link classRowLaw},
+ *   R10.T10.e). Its row of R07's
+ *   phase table holds its f against its L(α), L(0) times McEwen's profile for the particulate laws
+ *   and 0 for Lambert's, in alpha ({@link TerrainPhaseRows}): one row per (law, L(0)), so the
+ *   materials of L(0) = 1, every one up to A_N 0.60, share one row of their law, and a bright
+ *   frost takes its own (decision-r10-limb). The task's "three rows" are read as three kinds.
+ * - **Law 0** is the body's uniform law (R07's `elsewhere`, the photometry's `lawFor`), its A
+ *   scaled for the figure as R07's disc scales it (`oblateAlbedoScale`), and takes what the
+ *   weights leave: the share of a slot whose palette names no substance, and of the vertices
+ *   outside the survey, which have no weights, so that the terrain shows there what the disc shows
+ *   ({@link terrainShares}; T10.c then discards those texels over the reference surface).
+ * - **Maturity** (R10.T1.c's client half; decision-r10-t1c-client-scope §1.4). Where a bake carries
+ *   a maturity layer (`TerrainLayers.maturity`), each named slot's A is drawn from its albedo nodes
+ *   (`maturityNodes.ts`): the bilinear mean over the texel's quad's four vertices of T_n at each
+ *   vertex's maturity at the patch's band level n, mixed by the morph factor μ with the parent's
+ *   term, the bilinear mean over the parent's quad, on the even vertices, of T_{n−1} at each
+ *   vertex's maturity at n − 1, so that at μ = 1 the patch draws its parent's field exactly (the
+ *   albedo interpolated, not the maturity: the halo ruling's finding 8). The nodes take the
+ *   figure's factor as A does ({@link packClassNodes}); L(0), the row and law 0 stay the slot's and
+ *   the body's. A flag in each slot's law ({@link packClassLaws}) marks a slot drawn from its
+ *   nodes, so that without a layer every A is the law's, bit for bit. The twin is
+ *   {@link texelClassAlbedo}, which {@link terrainTexelLaws} takes for a texel's place and morph.
+ * - **The twin** ({@link terrainReflectance}) is R07.T4.c's: each law's I/F through `brdfFromTable`
+ *   with its own row, as `body_brdf` reads it; the shader's `terrain_reflectance` replaces μ₀ by
+ *   a source's irradiance factor and floors the Lommel–Seeliger term at the source's angular
+ *   radius, as R07's disc does (`lit_disc_term`), which equals the twin wherever the whole source
+ *   is up and μ₀ + μ exceeds that radius.
+ * - **The shadow cascades** (R10.T9.b; Design note 11): the lit material receives them
+ *   (`shadows/cascadeShadow.wgsl`, its twin `shadows/cascadeShadow.ts`), star 0's direct light
+ *   taking min(1, c′ ÷ m) beside the horizon map; the caster ({@link terrainShadowMaterialSpec})
+ *   draws the lit vertices into each cascade, depth alone.
+ * - **The ground's thermal emission** (plan R08, R08.T18.a; decision-composition §1.9): a body above
+ *   R08's visibility cut is drawn by the lit material's emissive form
+ *   ({@link terrainLitEmissiveMaterialSpec}), whose `shade_terrain` adds what the texel emits as its
+ *   last step (`shaders/terrainEmission.wgsl`): its laws' A by their shares through R08's shared
+ *   function (`thermal.wgsl`) at its record's field's temperature there, each slot of the `Melt`
+ *   form at no less than the melt's least temperature (its laws' word 6, {@link packClassLaws}), as
+ *   R07's disc draws it (`discReflectance.ts`, whose `discEmissionAt` is the twin of both). Its
+ *   block lies past the lights ({@link packTerrainLighting}). The plain form is drawn for every
+ *   other body and stays as it was, byte for byte; `terrainLit.wgsl`'s note that the emission is
+ *   not drawn is left as it was with it, and stands for the plain form.
+ */
+import { brdfFromTable } from "../appearance/brdf";
+import {
+  type PhaseFactorTable,
+  phaseFactorTableOf,
+  type PhaseTemplateId,
+  type PhotometricLaw,
+} from "../appearance/law";
+import { withTemplateCurve } from "../appearance/phase";
+import {
+  DISC_EMISSION_ROWS,
+  type DiscEmission,
+  packDiscEmission,
+} from "../atmosphere/discReflectance";
+import { SURFACE_LIGHTING_WGSL, surfaceLightingTextures } from "../atmosphere/surfaceLighting";
+import { THERMAL_WGSL } from "../atmosphere/thermal";
+import type { DiscLight, DiscOccluder, DiscSecondary } from "../bodies/discShading";
+import { oblateAlbedoScale } from "../bodies/oblate";
+import type {
+  StorageBufferSpec,
+  TextureHandle,
+  UniformSpec,
+  WgslMaterialSpec,
+} from "../engine/types";
+import type { Rgb } from "../photometry/toneCurve";
+import type { TerrainVertexPath } from "../quality/qualitySetting";
+import frameWgsl from "../shaders/frame.wgsl?raw";
+import litBodyWgsl from "../shaders/litBody.wgsl?raw";
+import maturityNodesWgsl from "../shaders/maturityNodes.wgsl?raw";
+import { PATH_SOURCES, TERRAIN_BINDINGS, terrainVertexStorage } from "./gpu/material";
+import {
+  MATURITY_NODES,
+  maturityCodeRatio,
+  maturityNodeAlbedo,
+  type MaturitySegment,
+  maturitySegment,
+} from "./maturityNodes";
+import { CASCADE_UNIFORM_SPECS } from "./shadows/cascadeShadow";
+import cascadeShadowWgsl from "./shadows/cascadeShadow.wgsl?raw";
+import { CASCADE_DEPTH_BIAS } from "./shadows/cascades";
+import horizonWgsl from "./shadows/horizon.wgsl?raw";
+import patchVertexWgsl from "./shaders/patchVertex.wgsl?raw";
+import terrainClusterDepthWgsl from "./shaders/terrainClusterDepth.wgsl?raw";
+import terrainDepthWgsl from "./shaders/terrainDepth.wgsl?raw";
+import terrainEmissionWgsl from "./shaders/terrainEmission.wgsl?raw";
+import terrainLitWgsl from "./shaders/terrainLit.wgsl?raw";
+import terrainLitShadeWgsl from "./shaders/terrainLitShade.wgsl?raw";
+import terrainPatchWgsl from "./shaders/terrainPatch.wgsl?raw";
+import terrainClusterWgsl from "./shaders/terrainCluster.wgsl?raw";
+import { type ResolveMaterial, VISIBILITY_IDS_TEXTURE } from "../clusters/resolve";
+import resolveTerrainWgsl from "../clusters/resolveTerrain.wgsl?raw";
+import { VISIBLE_FIRST_UNIFORM } from "../clusters/visibility";
+import terrainClusterIdWgsl from "./shaders/terrainClusterId.wgsl?raw";
+import terrainClusterIdDeindexedWgsl from "./shaders/terrainClusterIdDeindexed.wgsl?raw";
+import terrainClusterIdPrimitiveWgsl from "./shaders/terrainClusterIdPrimitive.wgsl?raw";
+import terrainClusterShadowWgsl from "./shaders/terrainClusterShadow.wgsl?raw";
+import terrainShadowWgsl from "./shaders/terrainShadow.wgsl?raw";
+import terrainStridesWgsl from "./shaders/terrainStrides.wgsl?raw";
+import terrainSurveyWgsl from "./shaders/terrainSurvey.wgsl?raw";
+import { CLASS_NODES_BYTES, PATCH_VERTICES_PER_SIDE } from "./slotLayout";
+import { PHOTOMETRY_STRIDE, type TerrainMaturity } from "./workers/messages";
+
+/** A palette's slots: `hyperion_surface`'s `MAX_CLASSES`. */
+export const TERRAIN_CLASSES = 8;
+
+/** The laws a texel shades with: law 0, `elsewhere`, and one per palette slot. */
+export const TERRAIN_LAWS = TERRAIN_CLASSES + 1;
+
+/** The `@group(2)` bindings of `terrainLit.wgsl`: R05's, then the lit material's. */
+export const TERRAIN_LIT_BINDINGS = {
+  ...TERRAIN_BINDINGS,
+  /**
+   * Each slot's class weights and laws, and its maturity codes and nodes (R10.T1.c), one storage
+   * buffer (`slotLayout.ts`' `class-layers`).
+   */
+  classLayers: 6,
+  phaseFactorTable: 7,
+  terrainLights: 8,
+  /** The first of the seven tables of R08's surface lighting. */
+  atmosphere: 9,
+  /** Each slot's horizon map (`slotLayout.ts`' `horizon-map`, R10.T8.b). */
+  horizonMap: 16,
+  /** Each slot's survey mask (`slotLayout.ts`' `survey-mask`, R10.T10.c). */
+  surveyMask: 17,
+  /** The shadow cascades' layers, a `texture_depth_2d_array` (`cascadeShadow.wgsl`, R10.T9.b). */
+  shadowCascades: 19,
+  /** The comparison sampler that reads them, a `sampler_comparison` (R10.T9.b). */
+  shadowCompare: 20,
+  /** The table below a cloud deck over a surface, R08's surface lighting's eighth (R08.T15.b.2). */
+  belowDeck: 21,
+  /** The cluster path's bucket lists, which its terrain vertex stage reads (plan R14, R14.T1.b). */
+  clusterLists: 22,
+  /** The sources' transmittance table, R08's surface lighting's ninth (R08.T9.b's lever). */
+  sourceTable: 23,
+  /**
+   * The disc's normal map, which the shading normal fades from near a hand-over (R10.T15.b.2;
+   * `terrainLitShade.wgsl`'s `disc_normals`).
+   */
+  discNormals: 24,
+} as const;
+
+/**
+ * The `DrawItem.textures` name under which a lit terrain draw binds the shadow cascades' layers
+ * (R10.T9.b): the engine's `DepthLayerTarget.depth`, or, where no cascades are drawn, any
+ * `depth32float` array texture, which the receiver never samples at w = 0.
+ */
+export const SHADOW_CASCADES_TEXTURE = "shadowCascades";
+
+/**
+ * The `DrawItem.textures` name under which a lit terrain draw binds its disc's normal map
+ * (R10.T15.b.2; {@link HandoverFade.discNormals}), or, with no fade under way, any 2D array texture
+ * of floats, which the fragment never reads at a detail share of 1.
+ */
+export const DISC_NORMALS_TEXTURE = "discNormals";
+
+/**
+ * The lit material's comparison sampler (R10.T9.b): declared by the spec and made by the engine,
+ * linear for the 2 × 2 PCF, clamped to the edge and `greater-equal`; a draw binds nothing for it.
+ */
+export const SHADOW_COMPARE_SAMPLER = "shadowCompare";
+
+/**
+ * The lit `Draw`'s fields after `offsetFromCameraM` that {@link LIT_TERRAIN_SOURCE} reads, which
+ * the depth material and the caster mirror: the body's rotation, the camera's body-fixed place and
+ * the normals atlas.
+ */
+const LIT_DRAW_UNIFORMS: ReadonlyArray<UniformSpec> = [
+  { name: "bodyRotation", type: "mat4x4f" },
+  { name: "cameraBodyFixedM", type: "vec4f" },
+  { name: "atlas", type: "vec4f" },
+];
+
+/** The console names of the two paths' lit materials. */
+const DISPLAY_NAMES: Readonly<Record<TerrainVertexPath, string>> = {
+  "baked-offsets": "LIT TERRAIN OFFSETS",
+  "face-differences": "LIT TERRAIN",
+};
+
+/**
+ * What every lit terrain module composes before its `Draw` and fragment stage: `frame.wgsl`,
+ * `patchVertex.wgsl`, R08's surface lighting, R07's `litBody.wgsl`, `terrainPatch.wgsl`, the
+ * horizon map's lookup (`shadows/horizon.wgsl`, R10.T8.b), the survey's placement and discard
+ * (`terrainSurvey.wgsl`, which the wireframe's terrain shares, R10.T11), the stride morph
+ * (`terrainStrides.wgsl`, plan R14, R14.T3.c; each material's own source declares whether it takes
+ * it), the maturity nodes' formula (`shaders/maturityNodes.wgsl`, R10.T1.c) and `terrainLit.wgsl`,
+ * its vertices and shading.
+ */
+const LIT_TERRAIN_SOURCE =
+  frameWgsl +
+  patchVertexWgsl +
+  SURFACE_LIGHTING_WGSL +
+  litBodyWgsl +
+  terrainPatchWgsl +
+  horizonWgsl +
+  terrainSurveyWgsl +
+  terrainStridesWgsl +
+  maturityNodesWgsl +
+  terrainLitWgsl;
+
+/**
+ * The lit terrain material of a vertex path: {@link LIT_TERRAIN_SOURCE}, its own `Draw` and
+ * fragment stage (`terrainLitShade.wgsl`), the shadow cascades' receiver
+ * (`shadows/cascadeShadow.wgsl`, R10.T9.b) and the path's source.
+ *
+ * @remarks
+ * Its uniforms are the `Draw`'s own fields, then the cascades' ({@link CASCADE_UNIFORM_SPECS},
+ * which `packCascadeUniforms` writes; zeros read as no cascades), and it binds the cascades' layers
+ * as {@link SHADOW_CASCADES_TEXTURE} at binding 19, `depth` and `2d-array`, read through the
+ * comparison sampler {@link SHADOW_COMPARE_SAMPLER} at binding 20, and the disc's normal map as
+ * {@link DISC_NORMALS_TEXTURE} at binding 24 (R10.T15.b.2). The receiver is composed here
+ * alone, not into {@link LIT_TERRAIN_SOURCE}, which the depth material and the caster share: WGSL
+ * type-checks every function, and their `Draw`s have none of the cascades' fields
+ * (decision-r10-t9b-design D5(a)). Textures and samplers are visible to both stages, as the engine
+ * lays out every material's.
+ *
+ * Each storage buffer is visible only to the stages that read it (decision-r10-t10b-r09-t2e §5):
+ * R05's five, four on `face-differences`, to the vertex stage, the class layers, the lights and
+ * the horizon map to the fragment stage, and the survey mask to both (R10.T10.c), the vertex stage
+ * placing the survey edge's fins by its cell code and the fragment stage discarding by its mask:
+ * six and four, five and four on `face-differences`, so that neither stage counts more than
+ * WebGPU's default eight, which the engine never raises. It draws the lit mesh
+ * (`gpu/resources.ts`' `litPatchMeshData`), whose skirts and fins join the terrain to the reference
+ * surface at the survey's edge.
+ */
+export function terrainLitMaterialSpec(path: TerrainVertexPath): WgslMaterialSpec {
+  const source = LIT_TERRAIN_SOURCE + terrainLitShadeWgsl + cascadeShadowWgsl + PATH_SOURCES[path];
+  const b = TERRAIN_LIT_BINDINGS;
+  const fragment = ["fragment"] as const;
+  const storageBuffers: StorageBufferSpec[] = [
+    ...terrainVertexStorage(path),
+    { name: "classLayers", binding: b.classLayers, stages: fragment },
+    { name: "terrainLights", binding: b.terrainLights, stages: fragment },
+    { name: "horizonMap", binding: b.horizonMap, stages: fragment },
+    { name: "surveyMask", binding: b.surveyMask, stages: ["vertex", "fragment"] },
+  ];
+  return {
+    name: `terrain-lit-${path}`,
+    displayName: DISPLAY_NAMES[path],
+    vertexWgsl: source,
+    fragmentWgsl: source,
+    uniforms: [...LIT_DRAW_UNIFORMS, ...CASCADE_UNIFORM_SPECS],
+    samplers: [
+      {
+        name: SHADOW_COMPARE_SAMPLER,
+        filter: "linear",
+        address: "clamp-to-edge",
+        binding: b.shadowCompare,
+        compare: "greater-equal",
+      },
+    ],
+    textures: [
+      { name: "normals", binding: b.normals, viewDimension: "2d-array" },
+      { name: "phaseFactorTable", binding: b.phaseFactorTable, sampleType: "unfilterable-float" },
+      ...surfaceLightingTextures(b.atmosphere, b.belowDeck, b.sourceTable),
+      {
+        name: SHADOW_CASCADES_TEXTURE,
+        binding: b.shadowCascades,
+        sampleType: "depth",
+        viewDimension: "2d-array",
+      },
+      { name: DISC_NORMALS_TEXTURE, binding: b.discNormals, viewDimension: "2d-array" },
+    ],
+    cullMode: "back",
+    depthWrite: true,
+    colourWrites: true,
+    blend: "none",
+    storageBuffers,
+  };
+}
+
+/** The console names of the two paths' lit materials' emissive forms (R08.T18.a). */
+const EMISSIVE_DISPLAY_NAMES: Readonly<Record<TerrainVertexPath, string>> = {
+  "baked-offsets": "EMISSIVE TERRAIN OFFSETS",
+  "face-differences": "EMISSIVE TERRAIN",
+};
+
+/**
+ * The line of `terrainLit.wgsl`'s `shade_terrain` after which its emissive form adds the texel's
+ * emission: the last of its planetshine loop, its closing brace and the function's return.
+ */
+const SHADE_TERRAIN_END =
+  "    out.radiance = out.radiance + source.xyz * misc.y * reflectance * transmitted;\n  }\n  return out;\n}";
+
+/**
+ * {@link SHADE_TERRAIN_END} with the emission added before the return: each class set's by its
+ * weight (`class_sets`, lane fix-coast-class-map), a texel of one set's as before.
+ */
+const EMISSIVE_SHADE_TERRAIN_END =
+  "    out.radiance = out.radiance + source.xyz * misc.y * reflectance * transmitted;\n  }\n  for (var s = 0u; s < sets.count; s = s + 1u) {\n    out.radiance = out.radiance + sets.weight[s] * terrain_emission(nu, sets.shares[s], sets.albedos[s], sets.slot[s]);\n  }\n  return out;\n}";
+
+/**
+ * A lit terrain source's emissive form (the module's remarks): `source` with `shade_terrain` adding
+ * `terrain_emission` to each texel's light as its last step, and R08's shared function
+ * (`thermal.ts`' `THERMAL_WGSL`) and the terrain's term (`shaders/terrainEmission.wgsl`) appended,
+ * no binding of its own: the block is read from the lights' buffer, the `Melt` flags from the class
+ * layers'.
+ *
+ * @throws Error unless `shade_terrain`'s end occurs exactly once in `source`.
+ */
+export function withTerrainEmission(source: string): string {
+  const parts = source.split(SHADE_TERRAIN_END);
+  if (parts.length !== 2) {
+    throw new Error(
+      `a lit terrain's emissive form needs terrainLit.wgsl's shade_terrain once, found ${parts.length - 1}`,
+    );
+  }
+  return `${parts.join(EMISSIVE_SHADE_TERRAIN_END)}\n${THERMAL_WGSL}\n${terrainEmissionWgsl}`;
+}
+
+/**
+ * The lit terrain material of a vertex path in its emissive form (plan R08, R08.T18.a;
+ * {@link withTerrainEmission}), for a body above R08's visibility cut: the plain form's bindings,
+ * uniforms and states.
+ */
+export function terrainLitEmissiveMaterialSpec(path: TerrainVertexPath): WgslMaterialSpec {
+  const plain = terrainLitMaterialSpec(path);
+  const source = withTerrainEmission(plain.fragmentWgsl);
+  return {
+    ...plain,
+    name: `terrain-lit-emissive-${path}`,
+    displayName: EMISSIVE_DISPLAY_NAMES[path],
+    vertexWgsl: source,
+    fragmentWgsl: source,
+  };
+}
+
+/** The console names of the two paths' interior patches' lit materials (plan R14, R14.T1.a). */
+const INTERIOR_DISPLAY_NAMES: Readonly<Record<TerrainVertexPath, string>> = {
+  "baked-offsets": "INTERIOR TERRAIN OFFSETS",
+  "face-differences": "INTERIOR TERRAIN",
+};
+
+/** The console names of their emissive forms (plan R14, R14.T1.a; R08.T18.a). */
+const INTERIOR_EMISSIVE_DISPLAY_NAMES: Readonly<Record<TerrainVertexPath, string>> = {
+  "baked-offsets": "INTERIOR EMISSIVE OFFSETS",
+  "face-differences": "INTERIOR EMISSIVE TERRAIN",
+};
+
+/** `terrainLitShade.wgsl`'s survey discard, which an interior patch's fragment never takes. */
+const SURVEY_DISCARD = "  if (!survey_kept(in)) {\n    discard;\n  }\n";
+
+/**
+ * A lit terrain source with its fragment stage's survey discard taken out (plan R14, R14.T1.a), for
+ * the interior patches, whose every vertex is surveyed (`gpu/resources.ts`' `isInteriorBake`):
+ * none of their fragments is discarded, so they draw what the plain form draws, with no discard in
+ * their draw to keep a tile-based GPU from rejecting their occluded fragments before they shade.
+ *
+ * @throws Error unless the discard occurs exactly once in `source`.
+ */
+export function withoutSurveyDiscard(source: string): string {
+  const parts = source.split(SURVEY_DISCARD);
+  if (parts.length !== 2) {
+    throw new Error(
+      `an interior patch's lit form needs terrainLitShade.wgsl's survey discard once, found ${parts.length - 1}`,
+    );
+  }
+  return parts.join("");
+}
+
+/**
+ * The interior patches' lit material of a vertex path (plan R14, R14.T1.a): the plain form's
+ * bindings, uniforms and states, without its survey discard ({@link withoutSurveyDiscard}), drawn
+ * with the interior patches' mesh (`gpu/resources.ts`' `litInteriorMeshData`).
+ */
+export function terrainLitInteriorMaterialSpec(path: TerrainVertexPath): WgslMaterialSpec {
+  const plain = terrainLitMaterialSpec(path);
+  const source = withoutSurveyDiscard(plain.fragmentWgsl);
+  return {
+    ...plain,
+    name: `terrain-lit-interior-${path}`,
+    displayName: INTERIOR_DISPLAY_NAMES[path],
+    vertexWgsl: source,
+    fragmentWgsl: source,
+  };
+}
+
+/**
+ * The interior patches' lit material of a vertex path in its emissive form (plan R14, R14.T1.a;
+ * R08.T18.a): {@link terrainLitEmissiveMaterialSpec}'s, without the survey discard.
+ */
+export function terrainLitEmissiveInteriorMaterialSpec(path: TerrainVertexPath): WgslMaterialSpec {
+  const emissive = terrainLitEmissiveMaterialSpec(path);
+  const source = withoutSurveyDiscard(emissive.fragmentWgsl);
+  return {
+    ...emissive,
+    name: `terrain-lit-emissive-interior-${path}`,
+    displayName: INTERIOR_EMISSIVE_DISPLAY_NAMES[path],
+    vertexWgsl: source,
+    fragmentWgsl: source,
+  };
+}
+
+/** The console names of the two paths' depth materials. */
+const DEPTH_DISPLAY_NAMES: Readonly<Record<TerrainVertexPath, string>> = {
+  "baked-offsets": "TERRAIN DEPTH OFFSETS",
+  "face-differences": "TERRAIN DEPTH",
+};
+
+/**
+ * The lit terrain of a vertex path as depth alone, for the symbology's pass over the
+ * photorealistic image (plan R10, R10.T16.c; `terrainDepth.wgsl`): {@link LIT_TERRAIN_SOURCE}, the
+ * depth's own `Draw` and fragment stage and the path's source, drawn with a lit view draw's
+ * resources (`TerrainPass.drawFor`'s) into the canvas's depth before the overlay's lines, so that
+ * nearer ground hides them, each fragment pushed away by 2⁻¹⁶ of its depth alone (R10.T16.c's
+ * grazing fix; its `occluderSlopePx` uniform is carried and unread).
+ *
+ * @remarks
+ * It binds what its entry points read alone: R05's vertex storage (four on `face-differences`)
+ * and the survey mask, in both stages as the lit material's, which places the fins by its code and
+ * discards by its mask, and no texture. Colour writes are off, and it writes depth from its
+ * fragment, as R02's occluders do.
+ */
+export function terrainDepthMaterialSpec(path: TerrainVertexPath): WgslMaterialSpec {
+  const source = LIT_TERRAIN_SOURCE + terrainDepthWgsl + PATH_SOURCES[path];
+  return {
+    name: `terrain-depth-${path}`,
+    displayName: DEPTH_DISPLAY_NAMES[path],
+    vertexWgsl: source,
+    fragmentWgsl: source,
+    uniforms: [...LIT_DRAW_UNIFORMS, { name: "occluderSlopePx", type: "f32" }],
+    samplers: [],
+    textures: [],
+    cullMode: "back",
+    depthWrite: true,
+    colourWrites: false,
+    blend: "none",
+    storageBuffers: [
+      ...terrainVertexStorage(path),
+      {
+        name: "surveyMask",
+        binding: TERRAIN_LIT_BINDINGS.surveyMask,
+        stages: ["vertex", "fragment"],
+      },
+    ],
+  };
+}
+
+/** The console names of the two paths' shadow casters (decision-r10-t9b-design D4). */
+const SHADOW_DISPLAY_NAMES: Readonly<Record<TerrainVertexPath, string>> = {
+  "baked-offsets": "TERRAIN SHADOWS OFFSETS",
+  "face-differences": "TERRAIN SHADOWS",
+};
+
+/**
+ * The lit terrain of a vertex path as a caster into the high setting's shadow cascades, depth
+ * alone (plan R10, R10.T9.b; Design note 11; `terrainShadow.wgsl`): {@link LIT_TERRAIN_SOURCE},
+ * the caster's own `Draw` and fragment stage and the path's source, drawn into each cascade's
+ * layer of a `depth-only` target with a lit view draw's own records, storage and `Draw` values,
+ * the pass's `Frame` being the cascade's.
+ *
+ * @remarks
+ * Its vertex stage is the lit material's, unchanged, so a patch casts the surface the view draws,
+ * at the view's own morph factors. It binds what its entry points read alone, as the depth
+ * material does: R05's vertex storage (four on `face-differences`) and the survey mask in both
+ * stages, and no texture. Its uniforms are the lit `Draw`'s own three, without the cascades'.
+ * Culling is off, so that either face casts (decision-r10-t9b-design D1); colour writes are off,
+ * and its depth, the rasteriser's, is biased away from the light by `CASCADE_DEPTH_BIAS`.
+ *
+ * @param unclippedDepth - `primitive.unclippedDepth`, pancaking casters in front of a cascade's
+ *   near plane onto it: the engine's `capabilities.depthClipControl` at every creation and
+ *   re-creation, since the engine refuses it on a device without the feature (D1).
+ */
+export function terrainShadowMaterialSpec(
+  path: TerrainVertexPath,
+  unclippedDepth: boolean,
+): WgslMaterialSpec {
+  const source = LIT_TERRAIN_SOURCE + terrainShadowWgsl + PATH_SOURCES[path];
+  return {
+    name: `terrain-shadow-${path}`,
+    displayName: SHADOW_DISPLAY_NAMES[path],
+    vertexWgsl: source,
+    fragmentWgsl: source,
+    uniforms: LIT_DRAW_UNIFORMS,
+    samplers: [],
+    textures: [],
+    cullMode: "none",
+    depthWrite: true,
+    colourWrites: false,
+    blend: "none",
+    storageBuffers: [
+      ...terrainVertexStorage(path),
+      {
+        name: "surveyMask",
+        binding: TERRAIN_LIT_BINDINGS.surveyMask,
+        stages: ["vertex", "fragment"],
+      },
+    ],
+    depthBiasAway: {
+      constant: CASCADE_DEPTH_BIAS.constant,
+      slopeScale: CASCADE_DEPTH_BIAS.slopeScale,
+      clamp: CASCADE_DEPTH_BIAS.clamp,
+    },
+    unclippedDepth,
+  };
+}
+
+/** terrainLit.wgsl's vertex stage's head, which a cluster draw's source calls as `lit_vertex`. */
+const LIT_VERTEX_HEAD =
+  "@vertex\nfn vertexMain(@location(0) grid : vec3f, @builtin(instance_index) instance : u32) -> LitVertexOut {";
+
+/** {@link LIT_VERTEX_HEAD} as a function, no longer an entry point. */
+const LIT_VERTEX_FUNCTION = "fn lit_vertex(grid : vec3f, instance : u32) -> LitVertexOut {";
+
+/**
+ * A lit terrain source with its vertex stage taken by the cluster path (plan R14, R14.T1.b): the
+ * lit material's `vertexMain` renamed `lit_vertex`, a function, and `terrainCluster.wgsl`'s entry
+ * point appended, which hands it each template vertex as the lit mesh's own grid vertex and its
+ * instance, read from a bucket's list; every placement and varying as the lit mesh's.
+ *
+ * @throws Error unless the lit vertex stage's head occurs exactly once in `source`.
+ */
+export function withClusterVertex(source: string): string {
+  const parts = source.split(LIT_VERTEX_HEAD);
+  if (parts.length !== 2) {
+    throw new Error(
+      `a cluster draw's source needs terrainLit.wgsl's vertex stage once, found ${parts.length - 1}`,
+    );
+  }
+  return `${parts.join(LIT_VERTEX_FUNCTION)}\n${terrainClusterWgsl}`;
+}
+
+/** The console names of the two paths' cluster casters (plan R14, R14.T1.b). */
+const CLUSTER_SHADOW_DISPLAY_NAMES: Readonly<Record<TerrainVertexPath, string>> = {
+  "baked-offsets": "CLUSTER SHADOWS OFFSETS",
+  "face-differences": "TERRAIN CLUSTER SHADOWS",
+};
+
+/**
+ * The interior patches' caster into the high setting's shadow cascades on the cluster path, for a
+ * vertex path (plan R14, R14.T1.b; `terrainClusterShadow.wgsl`): the caster's states, depth bias
+ * and `unclippedDepth`, its uniforms with `clusterBase`, a bucket's list base, after them, drawn
+ * with the terrain cluster mesh (`clusters/templates.ts`) from a bucket's list
+ * ({@link withClusterVertex}), and no survey discard, which an interior patch never takes.
+ *
+ * @remarks
+ * Its storage is the vertex stage's alone: R05's (four on `face-differences`), the survey mask,
+ * which `lit_place` reads for the fins, and the lists, seven at most against WebGPU's eight.
+ */
+export function terrainClusterShadowMaterialSpec(
+  path: TerrainVertexPath,
+  unclippedDepth: boolean,
+): WgslMaterialSpec {
+  const source = withClusterVertex(
+    LIT_TERRAIN_SOURCE + terrainClusterShadowWgsl + PATH_SOURCES[path],
+  );
+  const vertex = ["vertex"] as const;
+  return {
+    name: `terrain-cluster-shadow-${path}`,
+    displayName: CLUSTER_SHADOW_DISPLAY_NAMES[path],
+    vertexWgsl: source,
+    fragmentWgsl: source,
+    uniforms: [...LIT_DRAW_UNIFORMS, { name: "clusterBase", type: "u32" }],
+    samplers: [],
+    textures: [],
+    cullMode: "none",
+    depthWrite: true,
+    colourWrites: false,
+    blend: "none",
+    storageBuffers: [
+      ...terrainVertexStorage(path),
+      { name: "surveyMask", binding: TERRAIN_LIT_BINDINGS.surveyMask, stages: vertex },
+      { name: "clusterLists", binding: TERRAIN_LIT_BINDINGS.clusterLists, stages: vertex },
+    ],
+    depthBiasAway: {
+      constant: CASCADE_DEPTH_BIAS.constant,
+      slopeScale: CASCADE_DEPTH_BIAS.slopeScale,
+      clamp: CASCADE_DEPTH_BIAS.clamp,
+    },
+    unclippedDepth,
+  };
+}
+
+/** terrainLitShade.wgsl's `Draw`'s last field and its end, after which a cluster form takes its base. */
+const LIT_DRAW_END = "  cascadeViewAxis : vec4f,\n}";
+
+/**
+ * A lit terrain source whose `Draw` takes a bucket's list base, `clusterBase`, after its own
+ * fields (plan R14, R14.T2.a), as the cluster vertex stage reads it (`terrainCluster.wgsl`); the
+ * shading is the lit material's to the byte.
+ *
+ * @throws Error unless the lit `Draw`'s end occurs exactly once in `source`.
+ */
+export function withClusterBase(source: string): string {
+  const parts = source.split(LIT_DRAW_END);
+  if (parts.length !== 2) {
+    throw new Error(
+      `a lit cluster form needs terrainLitShade.wgsl's Draw once, found ${String(parts.length - 1)}`,
+    );
+  }
+  return parts.join(
+    "  cascadeViewAxis : vec4f,\n  // The bucket's first entry in the lists (`clusters/buckets.ts`' `clusterBase`).\n  clusterBase : u32,\n}",
+  );
+}
+
+/** The console names of the two paths' interior patches' lit forms on the cluster path (R14.T2.a). */
+const LIT_CLUSTER_DISPLAY_NAMES: Readonly<Record<TerrainVertexPath, string>> = {
+  "baked-offsets": "CLUSTER TERRAIN OFFSETS",
+  "face-differences": "TERRAIN CLUSTERS",
+};
+
+/** The console names of their emissive forms (plan R14, R14.T2.a; R08.T18.a). */
+const LIT_EMISSIVE_CLUSTER_DISPLAY_NAMES: Readonly<Record<TerrainVertexPath, string>> = {
+  "baked-offsets": "CLUSTER EMISSIVE OFFSETS",
+  "face-differences": "EMISSIVE TERRAIN CLUSTERS",
+};
+
+/**
+ * The interior patches' lit material on the cluster path, or its emissive form, for a vertex path
+ * (plan R14, R14.T2.a): the interior form's bindings, uniforms, states and fragment stage, without
+ * the survey discard, its vertex stage the cluster path's (`withClusterVertex`), drawn with the
+ * terrain cluster mesh from the lit pass's buckets, its `Draw` taking `clusterBase` after the
+ * cascades' fields.
+ *
+ * @remarks
+ * Its vertex stage reads R05's storage (four on `face-differences`), the survey mask and the
+ * lists: seven at most against WebGPU's eight; its fragment stage the interior form's four.
+ */
+export function terrainLitClusterMaterialSpec(
+  path: TerrainVertexPath,
+  emissive: boolean,
+): WgslMaterialSpec {
+  const interior = emissive
+    ? terrainLitEmissiveInteriorMaterialSpec(path)
+    : terrainLitInteriorMaterialSpec(path);
+  const source = withClusterVertex(withClusterBase(interior.fragmentWgsl));
+  return {
+    ...interior,
+    name: `terrain-lit-${emissive ? "emissive-" : ""}cluster-${path}`,
+    displayName: (emissive ? LIT_EMISSIVE_CLUSTER_DISPLAY_NAMES : LIT_CLUSTER_DISPLAY_NAMES)[path],
+    vertexWgsl: source,
+    fragmentWgsl: source,
+    uniforms: [...interior.uniforms, { name: "clusterBase", type: "u32" }],
+    storageBuffers: [
+      ...(interior.storageBuffers ?? []),
+      { name: "clusterLists", binding: TERRAIN_LIT_BINDINGS.clusterLists, stages: ["vertex"] },
+    ],
+  };
+}
+
+/** The console names of the two paths' edge patches' lit forms on the cluster path (R14.T1.g). */
+const LIT_FIN_DISPLAY_NAMES: Readonly<Record<TerrainVertexPath, string>> = {
+  "baked-offsets": "FIN TERRAIN OFFSETS",
+  "face-differences": "TERRAIN FINS",
+};
+
+/** The console names of their emissive forms (plan R14, R14.T1.g; R08.T18.a). */
+const LIT_EMISSIVE_FIN_DISPLAY_NAMES: Readonly<Record<TerrainVertexPath, string>> = {
+  "baked-offsets": "FIN EMISSIVE OFFSETS",
+  "face-differences": "EMISSIVE TERRAIN FINS",
+};
+
+/**
+ * The edge patches' may-discard clusters' lit material on the cluster path, or its emissive form,
+ * for a vertex path (plan R14, R14.T1.g): the lit material's bindings, uniforms, states and
+ * fragment stage, its survey discard kept, its vertex stage the cluster path's
+ * (`withClusterVertex`), drawn with the terrain cluster mesh from the lit pass's may-discard
+ * buckets (their fins, their skirt heads, and their blocks and strips at the survey's edge), its
+ * `Draw` taking `clusterBase` after the cascades' fields.
+ *
+ * @remarks
+ * Its storage is {@link terrainLitClusterMaterialSpec}'s: seven at most in its vertex stage, and
+ * its fragment stage's four, the survey mask among them, which the discard reads.
+ */
+export function terrainLitFinMaterialSpec(
+  path: TerrainVertexPath,
+  emissive: boolean,
+): WgslMaterialSpec {
+  const plain = emissive ? terrainLitEmissiveMaterialSpec(path) : terrainLitMaterialSpec(path);
+  const source = withClusterVertex(withClusterBase(plain.fragmentWgsl));
+  return {
+    ...plain,
+    name: `terrain-lit-${emissive ? "emissive-" : ""}fin-${path}`,
+    displayName: (emissive ? LIT_EMISSIVE_FIN_DISPLAY_NAMES : LIT_FIN_DISPLAY_NAMES)[path],
+    vertexWgsl: source,
+    fragmentWgsl: source,
+    uniforms: [...plain.uniforms, { name: "clusterBase", type: "u32" }],
+    storageBuffers: [
+      ...(plain.storageBuffers ?? []),
+      { name: "clusterLists", binding: TERRAIN_LIT_BINDINGS.clusterLists, stages: ["vertex"] },
+    ],
+  };
+}
+
+/** The head of a depth-only cluster form's fragment stage, after which its fin form discards. */
+const CLUSTER_FRAGMENT_HEAD = "@fragment\nfn fragmentMain(in : LitVertexOut)";
+
+/**
+ * A cluster form's source with `terrainLitShade.wgsl`'s survey discard put first in its fragment
+ * stage (plan R14, R14.T1.g), as the depth's and the caster's own (`terrainDepth.wgsl`,
+ * `terrainShadow.wgsl`) take it: for the edge patches' may-discard clusters.
+ *
+ * @throws Error unless the fragment stage's head occurs exactly once in `source`.
+ */
+export function withSurveyDiscard(source: string): string {
+  const parts = source.split(CLUSTER_FRAGMENT_HEAD);
+  const [before, after] = parts;
+  const open = after?.indexOf("{\n") ?? -1;
+  if (parts.length !== 2 || before === undefined || after === undefined || open < 0) {
+    throw new Error(
+      `a fin form needs a cluster form's fragment stage once, found ${String(parts.length - 1)}`,
+    );
+  }
+  return `${before}${CLUSTER_FRAGMENT_HEAD}${after.slice(0, open + 2)}${SURVEY_DISCARD}${after.slice(open + 2)}`;
+}
+
+/** The console names of the two paths' fin casters (plan R14, R14.T1.g). */
+const FIN_SHADOW_DISPLAY_NAMES: Readonly<Record<TerrainVertexPath, string>> = {
+  "baked-offsets": "FIN SHADOWS OFFSETS",
+  "face-differences": "TERRAIN FIN SHADOWS",
+};
+
+/**
+ * The edge patches' may-discard clusters' caster into the high setting's shadow cascades on the
+ * cluster path, for a vertex path (plan R14, R14.T1.g): {@link terrainClusterShadowMaterialSpec}'s
+ * states, bias and uniforms with the caster's survey discard ({@link withSurveyDiscard}), so that
+ * the survey mask is bound to both stages.
+ */
+export function terrainFinShadowMaterialSpec(
+  path: TerrainVertexPath,
+  unclippedDepth: boolean,
+): WgslMaterialSpec {
+  const cluster = terrainClusterShadowMaterialSpec(path, unclippedDepth);
+  const source = withSurveyDiscard(cluster.fragmentWgsl);
+  return {
+    ...cluster,
+    name: `terrain-fin-shadow-${path}`,
+    displayName: FIN_SHADOW_DISPLAY_NAMES[path],
+    vertexWgsl: source,
+    fragmentWgsl: source,
+    storageBuffers: finStorage(cluster),
+  };
+}
+
+/** A cluster form's storage with the survey mask bound to both stages, which its fin form's discard reads. */
+function finStorage(cluster: WgslMaterialSpec): ReadonlyArray<StorageBufferSpec> {
+  return (cluster.storageBuffers ?? []).map((buffer): StorageBufferSpec =>
+    buffer.name === "surveyMask"
+      ? { name: buffer.name, binding: buffer.binding, stages: ["vertex", "fragment"] }
+      : buffer,
+  );
+}
+
+/** The console names of the two paths' cluster depths (plan R14, R14.T1.e). */
+const CLUSTER_DEPTH_DISPLAY_NAMES: Readonly<Record<TerrainVertexPath, string>> = {
+  "baked-offsets": "CLUSTER DEPTH OFFSETS",
+  "face-differences": "TERRAIN CLUSTER DEPTH",
+};
+
+/**
+ * The interior patches' depth for the symbology's pass on the cluster path, for a vertex path (plan
+ * R14, R14.T1.e; `terrainClusterDepth.wgsl`): the depth material's states and push, its uniforms
+ * with `clusterBase` after them, drawn with the terrain cluster mesh from a bucket's list
+ * ({@link withClusterVertex}) into the canvas, and no survey discard, which an interior patch never
+ * takes.
+ *
+ * @remarks
+ * Its storage is the vertex stage's alone, as the cluster caster's: R05's (four on
+ * `face-differences`), the survey mask and the lists, seven at most against WebGPU's eight.
+ */
+export function terrainClusterDepthMaterialSpec(path: TerrainVertexPath): WgslMaterialSpec {
+  const source = withClusterVertex(
+    LIT_TERRAIN_SOURCE + terrainClusterDepthWgsl + PATH_SOURCES[path],
+  );
+  const vertex = ["vertex"] as const;
+  return {
+    name: `terrain-cluster-depth-${path}`,
+    displayName: CLUSTER_DEPTH_DISPLAY_NAMES[path],
+    vertexWgsl: source,
+    fragmentWgsl: source,
+    uniforms: [
+      ...LIT_DRAW_UNIFORMS,
+      { name: "occluderSlopePx", type: "f32" },
+      { name: "clusterBase", type: "u32" },
+    ],
+    samplers: [],
+    textures: [],
+    cullMode: "back",
+    depthWrite: true,
+    colourWrites: false,
+    blend: "none",
+    storageBuffers: [
+      ...terrainVertexStorage(path),
+      { name: "surveyMask", binding: TERRAIN_LIT_BINDINGS.surveyMask, stages: vertex },
+      { name: "clusterLists", binding: TERRAIN_LIT_BINDINGS.clusterLists, stages: vertex },
+    ],
+  };
+}
+
+/** The console names of the two paths' fin depths (plan R14, R14.T1.g). */
+const FIN_DEPTH_DISPLAY_NAMES: Readonly<Record<TerrainVertexPath, string>> = {
+  "baked-offsets": "FIN DEPTH OFFSETS",
+  "face-differences": "TERRAIN FIN DEPTH",
+};
+
+/**
+ * The edge patches' may-discard clusters' depth for the symbology's pass on the cluster path, for a
+ * vertex path (plan R14, R14.T1.g): {@link terrainClusterDepthMaterialSpec}'s states, push and
+ * uniforms with the depth material's survey discard ({@link withSurveyDiscard}), so that the survey
+ * mask is bound to both stages.
+ */
+export function terrainFinDepthMaterialSpec(path: TerrainVertexPath): WgslMaterialSpec {
+  const cluster = terrainClusterDepthMaterialSpec(path);
+  const source = withSurveyDiscard(cluster.fragmentWgsl);
+  return {
+    ...cluster,
+    name: `terrain-fin-depth-${path}`,
+    displayName: FIN_DEPTH_DISPLAY_NAMES[path],
+    vertexWgsl: source,
+    fragmentWgsl: source,
+    storageBuffers: finStorage(cluster),
+  };
+}
+
+/** `terrainCluster.wgsl`'s entry point, which a form with an entry point of its own takes as a function. */
+const CLUSTER_VERTEX_HEAD =
+  "@vertex\nfn vertexMain(@location(0) local : vec3f, @builtin(instance_index) entry : u32) -> LitVertexOut {";
+
+/**
+ * A lit terrain source with entry points of its own over the cluster path's decode (plan R14,
+ * R14.T2.c): its lit vertex stage made the function `lit_vertex` and `terrainCluster.wgsl`'s decode
+ * appended without its entry point, the file's last function, which reads a `Draw`'s `clusterBase`
+ * that a form of its own may not declare (the resolve's, T2.d), so that the source's own entry
+ * points read a bucket's lists and decode its clusters as the cluster forms do.
+ *
+ * @throws Error unless the lit vertex stage's head occurs exactly once in `source`, and
+ *   `terrainCluster.wgsl`'s entry point once, after its decode.
+ */
+export function withClusterLibrary(source: string): string {
+  const parts = source.split(LIT_VERTEX_HEAD);
+  const [decode, entry, ...rest] = terrainClusterWgsl.split(CLUSTER_VERTEX_HEAD);
+  if (parts.length !== 2 || decode === undefined || entry === undefined || rest.length > 0) {
+    throw new Error(
+      `a form over the cluster decode needs terrainLit.wgsl's vertex stage once, found ${String(parts.length - 1)}, and terrainCluster.wgsl's entry point once`,
+    );
+  }
+  return `${parts.join(LIT_VERTEX_FUNCTION)}\n${decode}`;
+}
+
+/** The directive a `primitive_index` source begins with (plan R14, R14.T2.c). */
+const PRIMITIVE_INDEX_ENABLE = "enable primitive_index;\n";
+
+/** The console names of the two paths' ID rasters on each of its two paths (plan R14, R14.T2.c). */
+const CLUSTER_ID_DISPLAY_NAMES: Readonly<Record<TerrainVertexPath, string>> = {
+  "baked-offsets": "ID RASTER OFFSETS",
+  "face-differences": "TERRAIN ID RASTER",
+};
+
+/** Their `primitive_index` forms' names (plan R14, R14.T2.c). */
+const CLUSTER_ID_PRIMITIVE_DISPLAY_NAMES: Readonly<Record<TerrainVertexPath, string>> = {
+  "baked-offsets": "PRIMITIVE IDS OFFSETS",
+  "face-differences": "TERRAIN PRIMITIVE IDS",
+};
+
+/**
+ * The visibility buffer's ID raster for a vertex path (plan R14, R14.T2.c;
+ * `terrainClusterId.wgsl`): the lit pass's opaque buckets drawn into an `r32uint` target with the
+ * scene's depth, their vertices placed as the lit cluster form places them, `@invariant`, with no
+ * discard and no shading, by `primitive_index` where `primitive` (a device with `primitive-index`)
+ * over the terrain cluster mesh, else de-indexed (`clusters/visibility.ts`'
+ * `deindexedClusterMesh`).
+ *
+ * @remarks
+ * Its storage is the vertex stage's alone, as the cluster caster's: R05's (four on
+ * `face-differences`), the survey mask, which `lit_place` reads for the fins, and the lists, seven
+ * at most against WebGPU's eight; its fragment stage reads none and no texture. Its vertex stage
+ * hands the fragment stage the clip position and one flat `u32`, 20 B (Design note 9).
+ */
+export function terrainClusterIdMaterialSpec(
+  path: TerrainVertexPath,
+  primitive: boolean,
+): WgslMaterialSpec {
+  const entries = primitive ? terrainClusterIdPrimitiveWgsl : terrainClusterIdDeindexedWgsl;
+  const source =
+    (primitive ? PRIMITIVE_INDEX_ENABLE : "") +
+    withClusterLibrary(LIT_TERRAIN_SOURCE + terrainClusterIdWgsl + entries + PATH_SOURCES[path]);
+  const vertex = ["vertex"] as const;
+  return {
+    name: `terrain-id-cluster-${primitive ? "primitive-" : ""}${path}`,
+    displayName: (primitive ? CLUSTER_ID_PRIMITIVE_DISPLAY_NAMES : CLUSTER_ID_DISPLAY_NAMES)[path],
+    vertexWgsl: source,
+    fragmentWgsl: source,
+    uniforms: [
+      ...LIT_DRAW_UNIFORMS,
+      { name: "clusterBase", type: "u32" },
+      { name: VISIBLE_FIRST_UNIFORM, type: "u32" },
+    ],
+    samplers: [],
+    textures: [],
+    cullMode: "back",
+    depthWrite: true,
+    colourWrites: true,
+    blend: "none",
+    storageBuffers: [
+      ...terrainVertexStorage(path),
+      { name: "surveyMask", binding: TERRAIN_LIT_BINDINGS.surveyMask, stages: vertex },
+      { name: "clusterLists", binding: TERRAIN_LIT_BINDINGS.clusterLists, stages: vertex },
+    ],
+  };
+}
+
+/**
+ * The `DrawItem.textures` name under which the resolve binds the view's resolve frame (plan R14,
+ * R14.T2.d; `gpu/resources.ts`' `resolveFrame`): its lights and contacts as `rgba32float` texels.
+ */
+export const RESOLVE_FRAME_TEXTURE = "resolveFrame";
+
+/** The resolve's bindings beside the lit material's (plan R14, R14.T2.d; `resolveTerrain.wgsl`). */
+const RESOLVE_BINDINGS = { visibilityIds: 25, resolveFrame: 26 } as const;
+
+/**
+ * Replaces each of `parts`' `from` in `source` with its `to`, each found exactly `count` times.
+ *
+ * @throws Error naming the form and the text where one is found another number of times.
+ */
+function rewritten(
+  form: string,
+  source: string,
+  parts: ReadonlyArray<readonly [from: string, to: string, count: number]>,
+): string {
+  let out = source;
+  for (const [from, to, count] of parts) {
+    const found = out.split(from).length - 1;
+    if (found !== count) {
+      throw new Error(
+        `${form} needs ${JSON.stringify(from)} ${String(count)} times, found ${String(found)}`,
+      );
+    }
+    out = out.replaceAll(from, to);
+  }
+  return out;
+}
+
+/** The lit fragment stage's head, which the resolve calls as `lit_fragment` over a face's edges. */
+const LIT_FRAGMENT_HEAD = "@fragment\nfn fragmentMain(in : LitVertexOut) -> @location(0) vec4f {";
+
+/** The resolve's console names, a vertex path's and its emissive form's (plan R14, R14.T2.d). */
+const RESOLVE_DISPLAY_NAMES: Readonly<Record<TerrainVertexPath, string>> = {
+  "baked-offsets": "RESOLVE OFFSETS",
+  "face-differences": "TERRAIN RESOLVE",
+};
+
+const RESOLVE_EMISSIVE_DISPLAY_NAMES: Readonly<Record<TerrainVertexPath, string>> = {
+  "baked-offsets": "EMISSIVE RESOLVE OFFSETS",
+  "face-differences": "EMISSIVE TERRAIN RESOLVE",
+};
+
+/**
+ * The visibility buffer's resolve of terrain for a vertex path, or its emissive form (plan R14,
+ * R14.T2.d; `clusters/resolveTerrain.wgsl`; Design note 9): a full-screen draw into the scene target
+ * that shades each pixel holding a terrain ID once, by the interior form's fragment stage over the
+ * triangle's vertices refetched by its vertex function, writing no depth.
+ *
+ * @remarks
+ * Made from the interior form's source ({@link terrainLitInteriorMaterialSpec}, its emissive form's
+ * where `emissive`): its lit vertex stage the function `lit_vertex` and terrainCluster.wgsl's decode
+ * beside it ({@link withClusterLibrary}); its fragment stage the function `lit_fragment`, its
+ * geometric normal from the face's edges in place of its place's screen derivatives; its `Draw` with
+ * the resolve's fields after the cascades' (`clusters/resolve.ts`' `resolveUniforms`). Every storage
+ * buffer is read by the fragment stage: R05's but the contacts (four on `face-differences`), the
+ * survey mask, the lists, the class layers and the horizon map, eight at most against WebGPU's
+ * eight (Design note 6), the lights and the contacts, the lit forms' other two, read from the
+ * view's resolve frame as {@link RESOLVE_FRAME_TEXTURE}, an `rgba32float` row by `textureLoad` (a
+ * lean, 2026-11-04: the engine's `Draw` holds no array). Its textures are the lit material's, then
+ * the view's IDs as {@link VISIBILITY_IDS_TEXTURE} and the resolve frame: 15 against WebGPU's 16 a
+ * stage. R11's planned additions to terrain's shading (the cloud layer's shadow, the rings' shadow on
+ * the planet, the decoration's albedo) are textures or uniforms, none a storage buffer: the 8 hold.
+ */
+export function terrainResolveMaterialSpec(
+  path: TerrainVertexPath,
+  emissive: boolean,
+): WgslMaterialSpec {
+  const interior = emissive
+    ? terrainLitEmissiveInteriorMaterialSpec(path)
+    : terrainLitInteriorMaterialSpec(path);
+  const form = `the ${emissive ? "emissive " : ""}resolve`;
+  const shaded = rewritten(form, interior.fragmentWgsl, [
+    [
+      LIT_DRAW_END,
+      "  cascadeViewAxis : vec4f,\n  // The resolve's lists and templates (`clusters/resolve.ts`' `resolveUniforms`).\n  resolveLists : vec4f,\n  resolveTemplates0 : vec4f,\n  resolveTemplates1 : vec4f,\n}",
+      1,
+    ],
+    [
+      LIT_FRAGMENT_HEAD,
+      "fn lit_fragment(in : LitVertexOut, face_dx : vec3f, face_dy : vec3f) -> vec4f {",
+      1,
+    ],
+    ["dpdxFine(in.fromCameraBf), dpdyFine(in.fromCameraBf)", "face_dx, face_dy", 1],
+    [
+      "@group(2) @binding(8) var<storage, read> terrain_lights : array<vec4f>;",
+      "// The lights are the resolve frame's rows (`resolveTerrain.wgsl`).",
+      1,
+    ],
+    ["  return terrain_lights[i];", "  return textureLoad(resolve_frame, vec2u(i, 0u), 0);", 1],
+    [
+      "@group(2) @binding(3) var<storage, read> contacts : Contacts;",
+      "// The contacts are the resolve frame's texels (`resolveTerrain.wgsl`).",
+      1,
+    ],
+    ["contacts.count", "resolve_contact_count()", 2],
+    ["contacts.items[i]", "resolve_contact(i)", 2],
+  ]);
+  const source = `${withClusterLibrary(shaded)}\n${resolveTerrainWgsl}`;
+  const fragment = ["fragment"] as const;
+  const b = TERRAIN_LIT_BINDINGS;
+  return {
+    name: `terrain-resolve-${emissive ? "emissive-" : ""}${path}`,
+    displayName: (emissive ? RESOLVE_EMISSIVE_DISPLAY_NAMES : RESOLVE_DISPLAY_NAMES)[path],
+    vertexWgsl: source,
+    fragmentWgsl: source,
+    uniforms: [
+      ...interior.uniforms,
+      { name: "resolveLists", type: "vec4f" },
+      { name: "resolveTemplates0", type: "vec4f" },
+      { name: "resolveTemplates1", type: "vec4f" },
+    ],
+    samplers: interior.samplers,
+    textures: [
+      ...(interior.textures ?? []),
+      { name: VISIBILITY_IDS_TEXTURE, binding: RESOLVE_BINDINGS.visibilityIds, sampleType: "uint" },
+      {
+        name: RESOLVE_FRAME_TEXTURE,
+        binding: RESOLVE_BINDINGS.resolveFrame,
+        sampleType: "unfilterable-float",
+      },
+    ],
+    cullMode: "none",
+    depthWrite: false,
+    colourWrites: true,
+    blend: "none",
+    storageBuffers: [
+      ...terrainVertexStorage(path).flatMap((buffer): StorageBufferSpec[] =>
+        buffer.name === "contacts"
+          ? []
+          : [{ name: buffer.name, binding: buffer.binding, stages: fragment }],
+      ),
+      { name: "surveyMask", binding: b.surveyMask, stages: fragment },
+      { name: "clusterLists", binding: b.clusterLists, stages: fragment },
+      { name: "classLayers", binding: b.classLayers, stages: fragment },
+      { name: "horizonMap", binding: b.horizonMap, stages: fragment },
+    ],
+  };
+}
+
+/**
+ * Terrain's {@link ResolveMaterial} (plan R14, R14.T2.d; `clusters/resolve.ts`): its consumer class
+ * and its resolve of a vertex path ({@link terrainResolveMaterialSpec}), or the resolve's emissive
+ * form.
+ */
+export function terrainResolveMaterial(
+  path: TerrainVertexPath,
+  emissive: boolean,
+): ResolveMaterial {
+  return { consumer: "terrain", spec: terrainResolveMaterialSpec(path, emissive) };
+}
+
+/** Both paths' lit materials, for the catalogue. */
+export const TERRAIN_LIT_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
+  terrainLitMaterialSpec("baked-offsets"),
+  terrainLitMaterialSpec("face-differences"),
+];
+
+/** Both paths' lit materials' emissive forms (R08.T18.a), for the catalogue. */
+export const TERRAIN_LIT_EMISSIVE_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
+  terrainLitEmissiveMaterialSpec("baked-offsets"),
+  terrainLitEmissiveMaterialSpec("face-differences"),
+];
+
+/** Both paths' interior patches' lit materials (plan R14, R14.T1.a), for the catalogue. */
+export const TERRAIN_LIT_INTERIOR_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
+  terrainLitInteriorMaterialSpec("baked-offsets"),
+  terrainLitInteriorMaterialSpec("face-differences"),
+];
+
+/** Their emissive forms (plan R14, R14.T1.a; R08.T18.a), for the catalogue. */
+export const TERRAIN_LIT_EMISSIVE_INTERIOR_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
+  terrainLitEmissiveInteriorMaterialSpec("baked-offsets"),
+  terrainLitEmissiveInteriorMaterialSpec("face-differences"),
+];
+
+/** Both paths' depth materials (R10.T16.c), for the catalogue. */
+export const TERRAIN_DEPTH_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
+  terrainDepthMaterialSpec("baked-offsets"),
+  terrainDepthMaterialSpec("face-differences"),
+];
+
+/** Both paths' interior patches' lit forms on the cluster path (plan R14, R14.T2.a), for the catalogue. */
+export const TERRAIN_LIT_CLUSTER_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
+  terrainLitClusterMaterialSpec("baked-offsets", false),
+  terrainLitClusterMaterialSpec("face-differences", false),
+];
+
+/** Their emissive forms (plan R14, R14.T2.a; R08.T18.a), for the catalogue. */
+export const TERRAIN_LIT_EMISSIVE_CLUSTER_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
+  terrainLitClusterMaterialSpec("baked-offsets", true),
+  terrainLitClusterMaterialSpec("face-differences", true),
+];
+
+/** Both paths' edge patches' lit forms on the cluster path (plan R14, R14.T1.g), for the catalogue. */
+export const TERRAIN_LIT_FIN_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
+  terrainLitFinMaterialSpec("baked-offsets", false),
+  terrainLitFinMaterialSpec("face-differences", false),
+];
+
+/** Their emissive forms (plan R14, R14.T1.g; R08.T18.a), for the catalogue. */
+export const TERRAIN_LIT_EMISSIVE_FIN_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
+  terrainLitFinMaterialSpec("baked-offsets", true),
+  terrainLitFinMaterialSpec("face-differences", true),
+];
+
+/** Both paths' fin depths (plan R14, R14.T1.g), for the catalogue, compiled for the canvas. */
+export const TERRAIN_FIN_DEPTH_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
+  terrainFinDepthMaterialSpec("baked-offsets"),
+  terrainFinDepthMaterialSpec("face-differences"),
+];
+
+/**
+ * Both paths' ID rasters on the de-indexed path (plan R14, R14.T2.c), for the catalogue, compiled
+ * for `r32uint`; their `primitive_index` forms only where the device has the feature.
+ */
+export const TERRAIN_CLUSTER_ID_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
+  terrainClusterIdMaterialSpec("baked-offsets", false),
+  terrainClusterIdMaterialSpec("face-differences", false),
+];
+
+/** The ID rasters' `primitive_index` forms (plan R14, R14.T2.c), for a device with `primitive-index`. */
+export const TERRAIN_CLUSTER_ID_PRIMITIVE_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
+  terrainClusterIdMaterialSpec("baked-offsets", true),
+  terrainClusterIdMaterialSpec("face-differences", true),
+];
+
+/**
+ * Both paths' resolves and their emissive forms (plan R14, R14.T2.d), for the catalogue, compiled for
+ * the scene's `rgba16float`.
+ */
+export const TERRAIN_RESOLVE_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
+  terrainResolveMaterialSpec("baked-offsets", false),
+  terrainResolveMaterialSpec("face-differences", false),
+  terrainResolveMaterialSpec("baked-offsets", true),
+  terrainResolveMaterialSpec("face-differences", true),
+];
+
+/** Both paths' cluster depths (plan R14, R14.T1.e), for the catalogue, compiled for the canvas. */
+export const TERRAIN_CLUSTER_DEPTH_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
+  terrainClusterDepthMaterialSpec("baked-offsets"),
+  terrainClusterDepthMaterialSpec("face-differences"),
+];
+
+/**
+ * Both paths' shadow casters (R10.T9.b), for the catalogue, which compiles them for `depth-only`:
+ * without `unclippedDepth`, the path every adapter can take, SwiftShader among them.
+ */
+export const TERRAIN_SHADOW_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
+  terrainShadowMaterialSpec("baked-offsets", false),
+  terrainShadowMaterialSpec("face-differences", false),
+];
+
+/**
+ * Both paths' cluster casters (plan R14, R14.T1.b), for the catalogue, compiled for `depth-only`
+ * without `unclippedDepth`, as the casters' are.
+ */
+export const TERRAIN_CLUSTER_SHADOW_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
+  terrainClusterShadowMaterialSpec("baked-offsets", false),
+  terrainClusterShadowMaterialSpec("face-differences", false),
+];
+
+/**
+ * Both paths' fin casters (plan R14, R14.T1.g), for the catalogue, compiled for `depth-only`
+ * without `unclippedDepth`, as the casters' are.
+ */
+export const TERRAIN_FIN_SHADOW_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
+  terrainFinShadowMaterialSpec("baked-offsets", false),
+  terrainFinShadowMaterialSpec("face-differences", false),
+];
+
+/**
+ * R10.T1.a's photometric laws' codes by name (`material/properties.rs`'s `PhaseLaw`; code 0 names
+ * no law): Regolith's, Ice's and Lambert's.
+ */
+export const PHASE_LAW = { regolith: 1, ice: 2, lambert: 3 } as const;
+
+/** A photometric law's code ({@link PHASE_LAW}). */
+export type PhaseLawCode = (typeof PHASE_LAW)[keyof typeof PHASE_LAW];
+
+/**
+ * The exponent s of the Ice law's f on R07's `airless-ice` template: the generator's solved
+ * exponent for Ganymede's q of 0.80 at L = 1 (plan 14's `photometry.rs`, `S_AIRLESS_ICE`, solved by
+ * `exponent_for` to Squyres and Veverka 1981, Icarus 46, 137; provisional there, labelled), which
+ * the generator's `templates.golden` pins as `airless_ice`'s `s`.
+ */
+export const AIRLESS_ICE_EXPONENT = 0.8215365032066868;
+
+/**
+ * Each law's template and exponent s, grey (R10.T1.a's `PhaseLaw::template`; decision-r10-limb):
+ * Regolith's the Moon's curve at s = 1 (q 0.626), Ice's `airless-ice` at {@link
+ * AIRLESS_ICE_EXPONENT}, and Lambert's `lambert` at s = 1, f ≡ 1 (q 3/2; provisional, labelled
+ * there). On a body of a {@link REGOLITH_TEMPLATES} template the Regolith row is the body's curve
+ * instead ({@link classRowLaw}).
+ */
+export const CLASS_LAW_TEMPLATES: Readonly<
+  Record<PhaseLawCode, { readonly template: PhaseTemplateId; readonly phaseExponent: number }>
+> = {
+  [PHASE_LAW.regolith]: { template: "moon", phaseExponent: 1 },
+  [PHASE_LAW.ice]: { template: "airless-ice", phaseExponent: AIRLESS_ICE_EXPONENT },
+  [PHASE_LAW.lambert]: { template: "lambert", phaseExponent: 1 },
+};
+
+/**
+ * The templates of a body whose ground is a regolith family's, on which a Regolith class draws its
+ * body's curve (plan R10, R10.T10.e; {@link classRowLaw}): plan 14's airless rock's Mercury, a
+ * thin-aired magma ocean's `magma` (Mercury's curve), a thin-aired world's Mars (P14.T47.b's
+ * template choice, `photometry.rs`' `choose`), and the Moon's, which `TEST MOON` takes.
+ *
+ * @remarks
+ * Every other template is a whole planet's under cloud or a thick air (Venus, Earth, the giants),
+ * an ice's (`airless-ice`, `snowball`) or the provisional Lambert sphere: none is a curve of its
+ * rock, so a Regolith class keeps the Moon's curve at s = 1 there, as before.
+ */
+export const REGOLITH_TEMPLATES: ReadonlySet<PhaseTemplateId> = new Set<PhaseTemplateId>([
+  "moon",
+  "mercury",
+  "magma",
+  "mars",
+]);
+
+function isPhaseLawCode(code: number): code is PhaseLawCode {
+  return code === PHASE_LAW.regolith || code === PHASE_LAW.ice || code === PHASE_LAW.lambert;
+}
+
+/**
+ * The law whose row holds f and L(α) for code `code` at L(0) `l0`: A of 1 (a row holds no A), the
+ * law's template and grey s, and the template's L(α) curve (`withTemplateCurve`); on a body whose
+ * uniform law `body` is on a {@link REGOLITH_TEMPLATES} template, a Regolith class's is the body's
+ * curve (plan R10, R10.T10.e).
+ *
+ * @remarks
+ * There the row takes the body's template, its exponent s per channel and its L(α) curve, and its
+ * L(0) no higher than the body's (the law's `lommelSeeligerCeiling`, set where the body's is the
+ * lesser: Mars's 0.5 under the particulate rule's 1). The class keeps its A and L(0), and so its p
+ * (R10.T10.a's), its figure's factor and its maturity nodes: f is tabulated against the share
+ * drawn, so on a sphere a class of the body's p draws the body's own law at every phase and
+ * geometry, and its q is the body's wherever its L(0) is at least the body's (below it, past a
+ * template's range, where f is held, the class's own L(0) moves q: −2.0% at L(0) 0.3 on Mars's,
+ * which the particulate rule gives only above A_N 1.09). On an oblate body the figure's factor stays
+ * at the class's L(0), as the disc's and the terrain's both are, so a capped class stands
+ * k(L′) ÷ k(L(0)) under the body's law: 4.7 × 10⁻⁴ on Mars's figure. Before, every body drew
+ * the Moon's curve at s = 1 on its Regolith classes, q 0.626 against Mercury's 0.480 and Mars's
+ * 1.085 (R10.T10.e's finding). The Ice and Lambert rows, and a Regolith class on any other
+ * template, are the law's own.
+ *
+ * @param body - The body's uniform law, `elsewhere`; absent, the law's own row.
+ */
+export function classRowLaw(code: PhaseLawCode, l0: number, body?: PhotometricLaw): PhotometricLaw {
+  if (code === PHASE_LAW.regolith && body !== undefined && REGOLITH_TEMPLATES.has(body.template)) {
+    const curve = body.lommelSeeligerCurve;
+    const ceiling = body.lommelSeeligerShare;
+    return {
+      a: [1, 1, 1],
+      lommelSeeligerShare: l0,
+      ...(curve === undefined ? {} : { lommelSeeligerCurve: curve }),
+      ...(ceiling < l0 ? { lommelSeeligerCeiling: ceiling } : {}),
+      template: body.template,
+      phaseExponent: body.phaseExponent,
+    };
+  }
+  const { template, phaseExponent: s } = CLASS_LAW_TEMPLATES[code];
+  return withTemplateCurve({
+    a: [1, 1, 1],
+    lommelSeeligerShare: l0,
+    template,
+    phaseExponent: [s, s, s],
+  });
+}
+
+/** A palette slot's law as the worker resolved it (`TerrainLayers.photometry`). */
+export interface ClassPhotometry {
+  /** c A_N per display channel (r, g, b): the Johnson R, V and B bands. */
+  readonly a: Rgb;
+  /** L(0), the law's at c A_N in V. */
+  readonly l0: number;
+  readonly code: PhaseLawCode;
+}
+
+/**
+ * Slot `slot`'s law in a bake's photometry, or `null` for a slot with none: empty, or of a
+ * substance the palette does not name (law code 0).
+ *
+ * @throws Error for a law code no law has, which no worker of this build gives.
+ */
+export function classPhotometryOf(photometry: Float32Array, slot: number): ClassPhotometry | null {
+  const at = PHOTOMETRY_STRIDE * slot;
+  const [b = 0, v = 0, r = 0, code = 0, l0 = 0] = photometry.subarray(at, at + PHOTOMETRY_STRIDE);
+  if (code === 0) {
+    return null;
+  }
+  if (!isPhaseLawCode(code)) {
+    throw new Error(`palette slot ${String(slot)} names law ${String(code)}, which no law has`);
+  }
+  return { a: [r, v, b], l0, code };
+}
+
+/**
+ * Whether two laws give the same phase table row: the same A, L(0), ceiling, template and
+ * exponents, and the same L(α) profile object (the templates' own, shared), or each none.
+ */
+function sameLaw(a: PhotometricLaw, b: PhotometricLaw): boolean {
+  return (
+    a === b ||
+    (a.a[0] === b.a[0] &&
+      a.a[1] === b.a[1] &&
+      a.a[2] === b.a[2] &&
+      a.lommelSeeligerShare === b.lommelSeeligerShare &&
+      a.lommelSeeligerCurve === b.lommelSeeligerCurve &&
+      a.lommelSeeligerCeiling === b.lommelSeeligerCeiling &&
+      a.template === b.template &&
+      a.phaseExponent[0] === b.phaseExponent[0] &&
+      a.phaseExponent[1] === b.phaseExponent[1] &&
+      a.phaseExponent[2] === b.phaseExponent[2])
+  );
+}
+
+/**
+ * The rows of a terrain's phase table (`phase_factor_table`): row 0 the body's uniform law, then
+ * one row per (law, L(0)) as the patches' class laws ask for them, kept in the order asked, each
+ * the row of its law on the body ({@link classRowLaw} with row 0's law).
+ *
+ * @remarks
+ * Rows are only added: a body's palette has at most fifteen entries, and every material up to A_N
+ * 0.60 shares its law's row at L(0) = 1, so a body takes a handful. A Regolith row follows row 0's
+ * law, and is made again in its place when row 0 changes (R10.T10.e), so that the slots' packed
+ * rows hold and no slot is written again. {@link version} rises with each change, so that the
+ * holder re-uploads the table.
+ */
+export class TerrainPhaseRows {
+  readonly #laws: PhotometricLaw[];
+  readonly #rows = new Map<string, number>();
+  /** The Regolith rows' L(0), by row: those made again when row 0 changes. */
+  readonly #regolith = new Map<number, number>();
+  #version = 0;
+
+  constructor(elsewhere: PhotometricLaw) {
+    this.#laws = [elsewhere];
+  }
+
+  /** The rows' laws, row 0 first. */
+  get laws(): ReadonlyArray<PhotometricLaw> {
+    return this.#laws;
+  }
+
+  /** A count of the changes made: a row added or row 0 replaced. */
+  get version(): number {
+    return this.#version;
+  }
+
+  /**
+   * Puts `law` in row 0, and makes the Regolith rows again on it; whether it changed. A law equal
+   * to row 0's by value changes nothing, so that the views of one body, each lit by its own frame's
+   * law object, upload the table once (plan R10, R10.T16.b).
+   */
+  setElsewhere(law: PhotometricLaw): boolean {
+    const held = this.#laws[0];
+    if (held !== undefined && sameLaw(held, law)) {
+      return false;
+    }
+    this.#laws[0] = law;
+    for (const [row, l0] of this.#regolith) {
+      this.#laws[row] = classRowLaw(PHASE_LAW.regolith, l0, law);
+    }
+    this.#version += 1;
+    return true;
+  }
+
+  /** The row of law `code` at L(0) `l0` on row 0's body, added if it is new. */
+  rowOf(code: PhaseLawCode, l0: number): number {
+    const key = `${String(code)}:${String(l0)}`;
+    const known = this.#rows.get(key);
+    if (known !== undefined) {
+      return known;
+    }
+    const row = this.#laws.length;
+    this.#laws.push(classRowLaw(code, l0, this.#laws[0]));
+    this.#rows.set(key, row);
+    if (code === PHASE_LAW.regolith) {
+      this.#regolith.set(row, l0);
+    }
+    this.#version += 1;
+    return row;
+  }
+}
+
+/**
+ * The `Melt` form's class code (`hyperion-surface`'s `MaterialClass::Melt`, `material/class.rs`;
+ * `readouts.ts`' `MELT`), whose ground emits at no less than its melt's temperature (plan R08,
+ * R08.T18.a).
+ */
+export const MELT_CLASS_CODE = 6;
+
+/** `vec4f` rows of one slot's class laws in `class_layers`: two per palette slot. */
+export const CLASS_LAW_ROWS = 2 * TERRAIN_CLASSES;
+
+/**
+ * A class's A as a texel draws it, per display channel: c A_N times the figure's factor
+ * (`oblateAlbedoScale` of its L(0)), as R07's disc scales each of its laws' A (R10.T10.e).
+ *
+ * @param polarOverEquatorial - The body's c ÷ a, 1 for a sphere.
+ */
+export function figureScaledA(photometry: ClassPhotometry, polarOverEquatorial: number): Rgb {
+  const k = oblateAlbedoScale(photometry.l0, polarOverEquatorial);
+  return [photometry.a[0] * k, photometry.a[1] * k, photometry.a[2] * k];
+}
+
+/**
+ * A patch's class laws as `terrainLit.wgsl`'s `class_layers` holds them after its slot's weights,
+ * each palette slot two `vec4f`: A per display channel, scaled for the figure ({@link
+ * figureScaledA}), and L(0), then its row (−1 for a slot with no law), the rows taken from `rows`,
+ * which adds any it lacks, then whether the slot is drawn from its maturity nodes (R10.T1.c): 1 for
+ * a slot with a law where `drawnFromNodes`, else 0, so that a patch without a maturity layer packs
+ * what it packed before, bit for bit; then 1 where the slot's form is `Melt` (`meltSlots`, R08.T18.a),
+ * which the plain material never reads and its emissive form does, else 0.
+ *
+ * @param polarOverEquatorial - The body's c ÷ a, 1 for a sphere.
+ * @param drawnFromNodes - Whether the patch carries a maturity layer (`TerrainLayers.maturity`),
+ *   whose nodes ({@link packClassNodes}) its named slots are then drawn from.
+ * @param meltSlots - Which of the palette's slots are of the `Melt` form ({@link paletteMeltSlots});
+ *   none where absent.
+ */
+export function packClassLaws(
+  photometry: Float32Array,
+  rows: TerrainPhaseRows,
+  polarOverEquatorial: number,
+  drawnFromNodes = false,
+  meltSlots: ReadonlyArray<boolean> = [],
+): Float32Array {
+  const out = new Float32Array(CLASS_LAW_ROWS * 4);
+  for (let k = 0; k < TERRAIN_CLASSES; k += 1) {
+    const law = classPhotometryOf(photometry, k);
+    if (law === null) {
+      out[8 * k + 4] = -1;
+      continue;
+    }
+    out.set([...figureScaledA(law, polarOverEquatorial), law.l0], 8 * k);
+    out[8 * k + 4] = rows.rowOf(law.code, law.l0);
+    if (drawnFromNodes) {
+      out[8 * k + 5] = 1;
+    }
+    if (meltSlots[k] === true) {
+      out[8 * k + 6] = 1;
+    }
+  }
+  return out;
+}
+
+/**
+ * Which of a patch's palette slots (`TerrainLayers.palette`, two bytes a slot: its form's class code
+ * and its entry) are of the `Melt` form ({@link MELT_CLASS_CODE}), an empty slot none.
+ */
+export function paletteMeltSlots(palette: Uint8Array): ReadonlyArray<boolean> {
+  return Array.from({ length: TERRAIN_CLASSES }, (_, k) => palette[2 * k] === MELT_CLASS_CODE);
+}
+
+/** The `f32` values of a patch's maturity nodes, as the module gives them and as packed. */
+const CLASS_NODE_VALUES = CLASS_NODES_BYTES / 4;
+
+/** The values of one palette slot's nodes: both levels' K nodes of three channels. */
+const SLOT_NODE_VALUES = 2 * MATURITY_NODES * 3;
+
+/**
+ * A patch's maturity nodes as `terrainLit.wgsl`'s `class_layers` holds them after its maturity
+ * codes (R10.T1.c's client half): the module's layout (`TerrainMaturity.nodes`, slot k's level ℓ's
+ * node j at `3 (K (2k + ℓ) + j)`), each node's B, V and R turned to the display channels r, g and
+ * b as {@link classPhotometryOf} turns a law's A, and scaled for the figure as {@link
+ * figureScaledA} scales A: each times `oblateAlbedoScale` of the slot's L(0), the product taken in
+ * `f64` and narrowed once; zeros for a slot with no law.
+ *
+ * @param nodes - The bake's `TerrainMaturity.nodes`.
+ * @param photometry - The bake's `TerrainLayers.photometry`, which names each slot's law.
+ * @param polarOverEquatorial - The body's c ÷ a, 1 for a sphere.
+ * @throws RangeError for nodes of another length than 8 × 2 × K × 3.
+ */
+export function packClassNodes(
+  nodes: Float32Array,
+  photometry: Float32Array,
+  polarOverEquatorial: number,
+): Float32Array {
+  if (nodes.length !== CLASS_NODE_VALUES) {
+    throw new RangeError(
+      `${String(nodes.length)} maturity node values, where a patch has ${String(CLASS_NODE_VALUES)}`,
+    );
+  }
+  const out = new Float32Array(CLASS_NODE_VALUES);
+  for (let k = 0; k < TERRAIN_CLASSES; k += 1) {
+    const law = classPhotometryOf(photometry, k);
+    if (law === null) {
+      continue;
+    }
+    const factor = oblateAlbedoScale(law.l0, polarOverEquatorial);
+    for (let at = SLOT_NODE_VALUES * k; at < SLOT_NODE_VALUES * (k + 1); at += 3) {
+      out[at] = (nodes[at + 2] ?? 0) * factor;
+      out[at + 1] = (nodes[at + 1] ?? 0) * factor;
+      out[at + 2] = (nodes[at] ?? 0) * factor;
+    }
+  }
+  return out;
+}
+
+/**
+ * A handed-over body's terrain near its hand-over, drawn between the disc's shading and its own
+ * (plan R10, R10.T15.b.2; `handover.ts`' `handoverDetailShare`).
+ */
+export interface HandoverFade {
+  /**
+   * The share of its own sub-cell shading it is drawn with, 0 to 1, below 1: each texel lit at a
+   * place mixed from the disc's point along its ray, its shading normal mixed from the disc's normal
+   * map's and its horizon map's elevations scaled, at 0 lit as the disc lights the pixel.
+   */
+  readonly detailShare: number;
+  /** The disc's normal map (R10.T10.g; `bodies/discNormals.ts`' layout), its normals faded from. */
+  readonly discNormals: TextureHandle;
+}
+
+/** The stars that light one terrain at most: the brightest two, as R07's disc's. */
+export const MAX_TERRAIN_LIGHTS = 2;
+
+/** The occluders one terrain's stars are cut by at most, as R07's disc's. */
+export const MAX_TERRAIN_OCCLUDERS = 2;
+
+/** The lit neighbours that light one terrain by planetshine at most, as R07's disc's. */
+export const MAX_TERRAIN_SECONDARIES = 2;
+
+/** `vec4f` rows of `terrain_lights` (`terrainLit.wgsl`'s head). */
+export const TERRAIN_LIGHT_ROWS = 25;
+
+/**
+ * `vec4f` rows of the lights' buffer: {@link TERRAIN_LIGHT_ROWS}, then the emission block that the
+ * emissive form reads from row 25 (`terrainEmission.wgsl`'s `FIRST_TERRAIN_EMISSION_ROW`; R08.T18.a).
+ */
+export const TERRAIN_LIGHT_BUFFER_ROWS = TERRAIN_LIGHT_ROWS + DISC_EMISSION_ROWS;
+
+const FIRST_LIGHT_ROW = 3;
+const LIGHT_ROWS = 8;
+const FIRST_OCCLUDER_ROW = 19;
+const FIRST_SECONDARY_ROW = 21;
+const SECONDARY_ROWS = 2;
+
+/**
+ * What lights a body's terrain in a frame, as R07's disc record carries it, but along the body's
+ * own axes (body-fixed): its stars, the bodies that may eclipse them and its planetshine sources,
+ * each relative to the body's centre over its equatorial radius a.
+ */
+export interface TerrainLighting {
+  /** The stars, the brightest first; at most {@link MAX_TERRAIN_LIGHTS} are drawn. */
+  readonly lights: ReadonlyArray<DiscLight>;
+  readonly occluders: ReadonlyArray<DiscOccluder>;
+  readonly secondaries: ReadonlyArray<DiscSecondary>;
+  /** The body's uniform law, R07's `elsewhere`: the photometry's law. */
+  readonly elsewhere: PhotometricLaw;
+  /** The frame's pre-exposure (R02's `exposureScale` of its EV100). */
+  readonly exposureScale: number;
+  /**
+   * The hand-over's fade of the terrain's own detail (plan R10, R10.T15.b.2), where it is under way;
+   * absent, the terrain is drawn with its own detail whole.
+   */
+  readonly fade?: HandoverFade;
+  /**
+   * The ground's thermal emission, body-fixed, for a body above R08's visibility cut (R08.T18.a;
+   * its disc record's, `DiscRecord.emission`, its star turned into the body's axes); absent below
+   * it, when the plain material draws the terrain.
+   */
+  readonly emission?: DiscEmission;
+}
+
+/**
+ * The lights as `terrainLit.wgsl`'s `terrain_lights`, {@link TERRAIN_LIGHT_ROWS} rows, law 0 in row
+ * 0 of the phase table and its A scaled for a figure of c ÷ a `polarOverEquatorial`; with the
+ * lighting's emission (R08.T18.a), its block after them (`discReflectance.ts`' `packDiscEmission`
+ * at the frame's exposure), {@link TERRAIN_LIGHT_BUFFER_ROWS} rows in all.
+ */
+export function packTerrainLighting(
+  lighting: TerrainLighting,
+  polarOverEquatorial: number,
+): Float32Array {
+  const { emission } = lighting;
+  const out = new Float32Array(
+    (emission === undefined ? TERRAIN_LIGHT_ROWS : TERRAIN_LIGHT_BUFFER_ROWS) * 4,
+  );
+  if (emission !== undefined) {
+    out.set(packDiscEmission(emission, lighting.exposureScale), TERRAIN_LIGHT_ROWS * 4);
+  }
+  const put = (row: number, values: ReadonlyArray<number>): void => {
+    out.set(values, row * 4);
+  };
+  const lights = lighting.lights.slice(0, MAX_TERRAIN_LIGHTS);
+  const occluders = lighting.occluders.slice(0, MAX_TERRAIN_OCCLUDERS);
+  const secondaries = lighting.secondaries.slice(0, MAX_TERRAIN_SECONDARIES);
+  put(0, [
+    lights.length,
+    occluders.length,
+    secondaries.length,
+    lights[0]?.annuli[0].flux.length ?? 0,
+  ]);
+  const { elsewhere } = lighting;
+  const k = oblateAlbedoScale(elsewhere.lommelSeeligerShare, polarOverEquatorial);
+  put(1, [
+    elsewhere.a[0] * k,
+    elsewhere.a[1] * k,
+    elsewhere.a[2] * k,
+    elsewhere.lommelSeeligerShare,
+  ]);
+  put(2, [0, lighting.exposureScale / Math.PI, lighting.fade?.detailShare ?? 1, 0]);
+  lights.forEach((light, j) => {
+    const first = FIRST_LIGHT_ROW + j * LIGHT_ROWS;
+    put(first, [light.direction.x, light.direction.y, light.direction.z, light.distance]);
+    put(first + 1, [...light.illuminance, light.radius]);
+    light.annuli.forEach((set, c) => {
+      put(
+        first + 2 + 2 * c,
+        [1, 2, 3, 4].map((edge) => set.edges[edge] ?? 1),
+      );
+      put(
+        first + 3 + 2 * c,
+        [0, 1, 2, 3].map((annulus) => set.flux[annulus] ?? 0),
+      );
+    });
+  });
+  occluders.forEach((occluder, slot) => {
+    const c = occluder.centre;
+    put(FIRST_OCCLUDER_ROW + slot, [c.x, c.y, c.z, occluder.radius]);
+  });
+  secondaries.forEach((source, j) => {
+    const first = FIRST_SECONDARY_ROW + j * SECONDARY_ROWS;
+    const d = source.direction;
+    put(first, [d.x, d.y, d.z, source.distance]);
+    put(first + 1, [...source.illuminance, source.radius]);
+  });
+  return out;
+}
+
+/**
+ * A texel's class weights at (u, v) of its patch, each in [0, 1]: each slot's byte ÷ 255
+ * interpolated bilinearly between its quad's four vertices, as `terrainLit.wgsl`'s
+ * `terrain_shares` reads them; all 0 where the weights were not baked.
+ *
+ * @param weights - The bake's `TerrainLayers.weights`, 8 bytes a vertex.
+ * @param u - The patch's x ÷ 64, 0 to 1.
+ * @param v - The patch's y ÷ 64, 0 to 1.
+ */
+export function texelWeights(weights: Uint8Array, u: number, v: number): number[] {
+  const out = Array.from({ length: TERRAIN_CLASSES }, () => 0);
+  if (weights.length === 0) {
+    return out;
+  }
+  const quads = PATCH_VERTICES_PER_SIDE - 1;
+  const sx = Math.max(u * quads, 0);
+  const sy = Math.max(v * quads, 0);
+  const x = Math.min(Math.floor(sx), quads - 1);
+  const y = Math.min(Math.floor(sy), quads - 1);
+  const fx = Math.min(Math.max(sx - x, 0), 1);
+  const fy = Math.min(Math.max(sy - y, 0), 1);
+  const at = (vx: number, vy: number, k: number): number =>
+    (weights[TERRAIN_CLASSES * (vy * PATCH_VERTICES_PER_SIDE + vx) + k] ?? 0) / 255;
+  for (let k = 0; k < TERRAIN_CLASSES; k += 1) {
+    const below = at(x, y, k) + fx * (at(x + 1, y, k) - at(x, y, k));
+    const above = at(x, y + 1, k) + fx * (at(x + 1, y + 1, k) - at(x, y + 1, k));
+    out[k] = below + fy * (above - below);
+  }
+  return out;
+}
+
+/** One level's quad of a texel's maturity: its four corners' segments and the bilinear fractions. */
+interface MaturityQuad {
+  /** Corners (0, 0), (1, 0), (0, 1) and (1, 1) of the quad, in that order. */
+  readonly corners: ReadonlyArray<MaturitySegment>;
+  readonly fx: number;
+  readonly fy: number;
+}
+
+/**
+ * The quad of corner (`x`, `y`) and side `span` vertices (1 the patch's own, 2 the parent's on the
+ * even vertices), each corner's code at `level` (0 the patch's band level, 1 its parent's) as its
+ * segment, as `terrainLit.wgsl`'s `maturity_quad`.
+ */
+function maturityQuad(
+  codes: Uint16Array,
+  x: number,
+  y: number,
+  span: number,
+  level: number,
+  fx: number,
+  fy: number,
+): MaturityQuad {
+  const corners = [0, 1, 2, 3].map((c) => {
+    const vx = x + span * (c & 1);
+    const vy = y + span * (c >> 1);
+    const code = codes[2 * (vy * PATCH_VERTICES_PER_SIDE + vx) + level];
+    if (code === undefined) {
+      throw new RangeError(`vertex (${String(vx)}, ${String(vy)}) has no maturity code`);
+    }
+    return maturitySegment(maturityCodeRatio(code));
+  });
+  return { corners, fx, fy };
+}
+
+/** WGSL's `mix(a, b, t)`, a (1 − t) + b t. */
+function wgslMix(a: number, b: number, t: number): number {
+  return a * (1 - t) + b * t;
+}
+
+/**
+ * Palette slot `slot`'s albedo over `quad` at `level` from the packed nodes, the bilinear mean of
+ * its corners' interpolated nodes, as `terrainLit.wgsl`'s `maturity_quad_albedo`.
+ */
+function maturityQuadAlbedo(
+  nodes: Float32Array,
+  slot: number,
+  level: number,
+  quad: MaturityQuad,
+): Rgb {
+  const first = 3 * MATURITY_NODES * (2 * slot + level);
+  const [c00, c10, c01, c11] = quad.corners.map((segment) =>
+    maturityNodeAlbedo(nodes, first, segment),
+  );
+  if (c00 === undefined || c10 === undefined || c01 === undefined || c11 === undefined) {
+    throw new Error("a maturity quad has four corners");
+  }
+  const channel = (c: 0 | 1 | 2): number =>
+    wgslMix(wgslMix(c00[c], c10[c], quad.fx), wgslMix(c01[c], c11[c], quad.fx), quad.fy);
+  return [channel(0), channel(1), channel(2)];
+}
+
+/**
+ * Palette slot `slot`'s A at (u, v) of its patch with morph factor `morph`, drawn from its maturity
+ * nodes (R10.T1.c's client half; decision-r10-t1c-client-scope §1.4), the twin of `terrainLit.wgsl`'s
+ * `terrain_class_albedo`, operation for operation in `f64`: the bilinear mean over the texel's quad
+ * of the slot's nodes at the patch's band level n, each vertex at its own code at n, mixed by the
+ * morph factor μ with the bilinear mean over the parent's quad, on the even vertices, of its nodes
+ * at n − 1, each vertex at its code at n − 1; with explicit ends, so that μ ≤ 0 draws the patch's
+ * own field and μ ≥ 1 the parent's exactly, which a bilinear field on the parent's grid draws on
+ * the child's.
+ *
+ * @param codes - The bake's `TerrainMaturity.codes`.
+ * @param nodes - The patch's packed nodes ({@link packClassNodes}): display channels, figure
+ *   scaled.
+ * @param slot - The palette slot, 0 to 7.
+ * @param u - The patch's x ÷ 64, 0 to 1.
+ * @param v - The patch's y ÷ 64, 0 to 1.
+ * @param morph - The texel's morph factor μ: 0 the patch's own field, 1 its parent's.
+ * @throws RangeError for codes or nodes too short for the patch's vertices or the slot.
+ */
+export function texelClassAlbedo(
+  codes: Uint16Array,
+  nodes: Float32Array,
+  slot: number,
+  u: number,
+  v: number,
+  morph: number,
+): Rgb {
+  const quads = PATCH_VERTICES_PER_SIDE - 1;
+  const sx = Math.max(u * quads, 0);
+  const sy = Math.max(v * quads, 0);
+  const own = (): Rgb => {
+    const x = Math.min(Math.floor(sx), quads - 1);
+    const y = Math.min(Math.floor(sy), quads - 1);
+    const fx = Math.min(Math.max(sx - x, 0), 1);
+    const fy = Math.min(Math.max(sy - y, 0), 1);
+    return maturityQuadAlbedo(nodes, slot, 0, maturityQuad(codes, x, y, 1, 0, fx, fy));
+  };
+  const parent = (): Rgb => {
+    const x = Math.min(2 * Math.floor(sx / 2), quads - 2);
+    const y = Math.min(2 * Math.floor(sy / 2), quads - 2);
+    const fx = Math.min(Math.max((sx - x) / 2, 0), 1);
+    const fy = Math.min(Math.max((sy - y) / 2, 0), 1);
+    return maturityQuadAlbedo(nodes, slot, 1, maturityQuad(codes, x, y, 2, 1, fx, fy));
+  };
+  if (!(morph > 0)) {
+    return own();
+  }
+  if (morph >= 1) {
+    return parent();
+  }
+  const [a, b] = [own(), parent()];
+  return [
+    (1 - morph) * a[0] + morph * b[0],
+    (1 - morph) * a[1] + morph * b[1],
+    (1 - morph) * a[2] + morph * b[2],
+  ];
+}
+
+/**
+ * The share of each of a texel's {@link TERRAIN_LAWS} laws from its slots' weights: each slot with
+ * a law at its weight, scaled down to sum to 1 where they sum to more, and law 0 (`elsewhere`)
+ * what they leave, an unnamed slot's weight among it (`terrain_shares`).
+ *
+ * @param weights - The slots' weights, each in [0, 1] ({@link texelWeights}).
+ * @param named - Whether each slot has a law (its `classPhotometryOf` is not `null`).
+ */
+export function terrainShares(
+  weights: ReadonlyArray<number>,
+  named: ReadonlyArray<boolean>,
+): number[] {
+  const shares = Array.from({ length: TERRAIN_LAWS }, () => 0);
+  let total = 0;
+  for (let k = 0; k < TERRAIN_CLASSES; k += 1) {
+    if (named[k] === true) {
+      const w = weights[k] ?? 0;
+      shares[k + 1] = w;
+      total += w;
+    }
+  }
+  if (total > 1) {
+    for (let m = 1; m < TERRAIN_LAWS; m += 1) {
+      shares[m] = (shares[m] ?? 0) / total;
+    }
+  }
+  shares[0] = total >= 1 ? 0 : 1 - total;
+  return shares;
+}
+
+/** One of a texel's laws as the twin reads it: its A and its own row's table. */
+export interface TexelLaw {
+  readonly a: Rgb;
+  readonly table: PhaseFactorTable;
+}
+
+/** A law's {@link TexelLaw}: its A and its own table. */
+export function texelLawOf(law: PhotometricLaw): TexelLaw {
+  return { a: law.a, table: phaseFactorTableOf(law) };
+}
+
+/**
+ * A class's law as a texel draws it: its A scaled for the figure ({@link figureScaledA}), and the
+ * table of its row's law on the body, f against its L(α) ({@link classRowLaw}).
+ *
+ * @param polarOverEquatorial - The body's c ÷ a, 1 for a sphere.
+ * @param body - The body's uniform law, `elsewhere`, which a Regolith row may follow.
+ */
+export function classTexelLaw(
+  photometry: ClassPhotometry,
+  polarOverEquatorial: number,
+  body: PhotometricLaw,
+): TexelLaw {
+  return {
+    a: figureScaledA(photometry, polarOverEquatorial),
+    table: phaseFactorTableOf(classRowLaw(photometry.code, photometry.l0, body)),
+  };
+}
+
+/** Where a texel lies in a patch with a maturity layer, and its morph (R10.T1.c's client half). */
+export interface TexelMaturity {
+  /** The bake's `TerrainLayers.maturity`. */
+  readonly maturity: TerrainMaturity;
+  /** The patch's x ÷ 64, 0 to 1. */
+  readonly u: number;
+  /** The patch's y ÷ 64, 0 to 1. */
+  readonly v: number;
+  /** The texel's morph factor μ: 0 the patch's own field, 1 its parent's. */
+  readonly morph: number;
+}
+
+/**
+ * A bake's {@link TERRAIN_LAWS} laws as the lit terrain draws them, the twin of {@link
+ * packTerrainLighting}'s law 0 and {@link packClassLaws}' slots: law 0, `elsewhere` with its A
+ * scaled for the figure (`oblateAlbedoScale` of its L(0)), then each palette slot's ({@link
+ * classTexelLaw}), `null` for a slot with none; and, at a texel of a patch with a maturity layer
+ * (`at`), each slot's A drawn from its nodes there ({@link texelClassAlbedo} over {@link
+ * packClassNodes}), its table and law 0 as without (R10.T1.c's client half). Without `at` it is
+ * what it was, bit for bit.
+ *
+ * @param photometry - The bake's `TerrainLayers.photometry`.
+ * @param polarOverEquatorial - The body's c ÷ a, 1 for a sphere.
+ * @param at - The texel's place in a patch with a maturity layer, and its morph factor.
+ * @throws RangeError for a maturity layer of another size than a patch's.
+ */
+export function terrainTexelLaws(
+  photometry: Float32Array,
+  elsewhere: PhotometricLaw,
+  polarOverEquatorial: number,
+  at?: TexelMaturity,
+): Array<TexelLaw | null> {
+  const k = oblateAlbedoScale(elsewhere.lommelSeeligerShare, polarOverEquatorial);
+  const law0: TexelLaw = {
+    a: [elsewhere.a[0] * k, elsewhere.a[1] * k, elsewhere.a[2] * k],
+    table: phaseFactorTableOf(elsewhere),
+  };
+  const nodes =
+    at === undefined ? null : packClassNodes(at.maturity.nodes, photometry, polarOverEquatorial);
+  return [
+    law0,
+    ...Array.from({ length: TERRAIN_CLASSES }, (_, slot): TexelLaw | null => {
+      const law = classPhotometryOf(photometry, slot);
+      if (law === null) {
+        return null;
+      }
+      const texel = classTexelLaw(law, polarOverEquatorial, elsewhere);
+      return at === undefined || nodes === null
+        ? texel
+        : {
+            ...texel,
+            a: texelClassAlbedo(at.maturity.codes, nodes, slot, at.u, at.v, at.morph),
+          };
+    }),
+  ];
+}
+
+/**
+ * The reflectance I/F of a texel, R07.T4.c's twin (`brdfFromTable`): Σ sₘ rₘ over its laws, each
+ * rₘ its law's I/F through its own row, a zero share skipped, so that a law with a zero share adds
+ * nothing whatever its values.
+ *
+ * @param laws - Law 0 (`elsewhere`) then each slot's, `null` for a slot with none; at a texel of a
+ *   patch with a maturity layer, each slot's A drawn from its nodes there ({@link
+ *   terrainTexelLaws} with its texel, R10.T1.c's client half).
+ * @param shares - Each law's share ({@link terrainShares}).
+ * @param mu0 - Cosine of the incidence angle on the texel's normal.
+ * @param mu - Cosine of the emission angle.
+ * @param phaseRad - Phase angle, rad.
+ */
+export function terrainReflectance(
+  laws: ReadonlyArray<TexelLaw | null>,
+  shares: ReadonlyArray<number>,
+  mu0: number,
+  mu: number,
+  phaseRad: number,
+): Rgb {
+  const out: [number, number, number] = [0, 0, 0];
+  laws.forEach((law, m) => {
+    const share = shares[m] ?? 0;
+    if (law === null || !(share > 0)) {
+      return;
+    }
+    const r = brdfFromTable(law, law.table, mu0, mu, phaseRad);
+    out[0] += share * r[0];
+    out[1] += share * r[1];
+    out[2] += share * r[2];
+  });
+  return out;
+}
+
+/**
+ * The palette slot of a texel's largest weight, the class a readout names; the lowest such slot on
+ * a tie; `null` where no slot has weight.
+ */
+export function dominantSlot(weights: ReadonlyArray<number>): number | null {
+  let best: number | null = null;
+  let largest = 0;
+  weights.forEach((w, k) => {
+    if (w > largest) {
+      largest = w;
+      best = k;
+    }
+  });
+  return best;
+}

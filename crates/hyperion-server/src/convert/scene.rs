@@ -6,13 +6,15 @@
 //! (`ship.velocity_m_s`, finite and below c, which the observer's Lorentz factor needs) and the
 //! position (`ship.position`, finite, and a galactic position canonical and inside the root
 //! cube). A frame's ID whose bits are no system's is `unknown_system`, and a body index outside
-//! plan 14's layout `bad_request`, both naming `ship.position`; the handler resolves the rest.
+//! plan 14's layout `bad_request`, both naming `ship.position`; the handler resolves the rest, and
+//! refuses a frame whose system it cannot place yet `unknown_system` too (P07.T10.c).
 
 use hyperion_protocol::{
     BodyIdHex, ErrorCode, FramePositionDto, KinematicsDto, RequestError, SceneShipRequest,
 };
 use hyperion_sim::coords::{BodyPosition, GalacticPosition, LyCell, SystemPosition};
 use hyperion_sim::id::{BodyId, SystemId};
+use hyperion_sim::observe::TraceMotionError;
 use hyperion_sim::planetary::BodyIndex;
 use hyperion_sim::time::{ClockWindow, UniverseTime};
 use hyperion_sim::units::consts::SPEED_OF_LIGHT;
@@ -178,6 +180,21 @@ pub(crate) fn unknown_frame_system(what: &str, reason: impl std::fmt::Display) -
     RequestError {
         code: ErrorCode::UnknownSystem,
         message: format!("{what} names no system of this universe: {reason}"),
+        field: Some(POSITION.to_owned()),
+    }
+}
+
+/// The refusal of a frame whose system the server does not place at every time of the clock window
+/// ([`SystemLine`](super::SystemLine): below generator version 27 a member of the galactic centre
+/// or the global list, or a catalogue system; a tidal disruption's victim disrupted inside it):
+/// `unknown_system`, naming
+/// `ship.position`, as `resolve_system` refuses it, with a message that says why the system
+/// cannot be placed rather than that it does not exist.
+#[must_use]
+pub(crate) fn untraced_frame_system(what: &str, error: TraceMotionError) -> RequestError {
+    RequestError {
+        code: ErrorCode::UnknownSystem,
+        message: format!("{what} cannot be placed yet: {error}"),
         field: Some(POSITION.to_owned()),
     }
 }

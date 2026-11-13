@@ -411,6 +411,9 @@ pub enum ObjectKind {
     WolfRayet,
     /// A hot subdwarf (sdB, sdO): a helium-burning core with almost no envelope.
     HotSubdwarf,
+    /// A stripped helium star (He-sdO, He-sdB): a naked helium star heavier than a hot subdwarf
+    /// and fainter than a Wolf-Rayet star (P06.T24.c).
+    StrippedHeliumStar,
     /// A white dwarf of any composition.
     WhiteDwarf,
     /// A neutron star.
@@ -425,7 +428,7 @@ pub enum ObjectKind {
 
 impl ObjectKind {
     /// Every kind, in declaration order.
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 14] = [
         Self::Protostar,
         Self::PreMainSequence,
         Self::Dwarf,
@@ -434,6 +437,7 @@ impl ObjectKind {
         Self::Supergiant,
         Self::WolfRayet,
         Self::HotSubdwarf,
+        Self::StrippedHeliumStar,
         Self::WhiteDwarf,
         Self::NeutronStar,
         Self::BlackHole,
@@ -613,11 +617,12 @@ mod tests {
             ObjectKind::Supergiant => 5,
             ObjectKind::WolfRayet => 6,
             ObjectKind::HotSubdwarf => 7,
-            ObjectKind::WhiteDwarf => 8,
-            ObjectKind::NeutronStar => 9,
-            ObjectKind::BlackHole => 10,
-            ObjectKind::NoRemnant => 11,
-            ObjectKind::Substellar => 12,
+            ObjectKind::StrippedHeliumStar => 8,
+            ObjectKind::WhiteDwarf => 9,
+            ObjectKind::NeutronStar => 10,
+            ObjectKind::BlackHole => 11,
+            ObjectKind::NoRemnant => 12,
+            ObjectKind::Substellar => 13,
         };
         for (i, kind) in ObjectKind::ALL.into_iter().enumerate() {
             assert_eq!(index(kind), i, "{kind:?}");

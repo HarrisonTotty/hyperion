@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { FrameSubmission } from "../types";
 import { sceneLoadOp } from "./drawing";
-import { pipelineOutputs } from "./engine";
+import { pipelineOutputs } from "./pipelineOutputs";
 import { canvasPassFormat } from "./view";
 
 const FRAME: FrameSubmission = {

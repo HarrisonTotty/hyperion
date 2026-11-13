@@ -1,0 +1,4193 @@
+//! A body's surface conditions (plan 14, P14.T24.a, with P14.T48.e's signed contrasts): what the
+//! layers above read of its air and climate, computed from its derivation at a time and its spin.
+//!
+//! [`SurfaceConditions::derive`] gives, from plain values ([`SurfaceInputs`]):
+//!
+//! - the mean surface temperature, P14.T13's, or on a world locked 1:1 with open water its
+//!   substellar deck's (P14.T24.j, from generator version 26, the crate's `deck`);
+//! - the **equator–pole contrast**, signed (a warm pole is negative), from the obliquity to the
+//!   seasonal orbit, the rotation and the column;
+//! - the **day–night contrast**, from the rotation state and the column, stated about the
+//!   substellar axis for a world locked 1:1 to its seasonal host;
+//! - the surface pressure and the **gases as mole fractions** by substance, largest first, with
+//!   their mean molar mass μ and mixed `c_p` ÷ R (signoff-3.md, item 1.1; [`mole_fractions`]);
+//! - the stellar flux, the **radiation class** of the hosts' X-ray and ultraviolet flux
+//!   ([`RadiationClass`]), the **climate's range** of temperature, and the **liquid-water flag**
+//!   from water's phase over that range ([`liquid_water`]).
+//!
+//! [`SurfaceConditions::with_climate`] then adds the **climate regime** (P14.T48.d,
+//! [`regime`]): its thermal regime, forcing and condensable, and the coarse model it names, from
+//! what the batch's later steps give.
+//!
+//! The surface gravity, which the column reads, is the bulk section's and is not repeated here
+//! (P14.T35.e).
+//!
+//! # The contrasts' model
+//!
+//! Both contrasts are closed forms of a linear energy balance on the body's mean state, so that
+//! they need no field and are continuous in every input but one switch, a gas's reaching its cap
+//! (which turns on its vapour feedback): the condensate partition's holding of it
+//! (`greenhouse_gain`). A world's wetness enters
+//! continuously, as P14.T24.b's ocean weight θ ([`OceanWeight`], [`SurfaceInputs::ocean_weight`]), which weights
+//! the transport's moist share and Φ (science-p14-t24a-climate.md §1; science-p14-t24b-laws
+//! §4.4). They are science-p14-t24a-climate.md's (2026-10-11), each piece cited on its constant;
+//! plan 14's Risks ("Deviations in P14.T24.a, as built") records how they compare with the Solar
+//! System's bodies.
+//!
+//! - **Equator–pole**, T(0°) − T(90°), as rendering plan R09 imposes it on its annual field's ends,
+//!   by a correction shaped like `P₂` (its Design note 8). With no transport each latitude is in
+//!   radiative balance with its annual-mean insolation, which relative to the mean S ÷ 4 is
+//!   (8 ÷ π²) E(sin β) at the equator and (4 ÷ π) sin β at a pole, at obliquity β, E the complete
+//!   elliptic integral of the second kind ([`annual_insolation`]). An eccentric orbit changes only
+//!   the mean flux, since by Kepler's second law (a ÷ r)² dt runs uniformly in the sun's longitude.
+//!   The grey column scales each to the surface (P14.T13.c's `T_s` = `T_eq` (1 + ¾τ)^¼), so the
+//!   radiative ends are `T_s` `q_eq`^¼ and `T_s` `q_pole`^¼. Transport damps the insolation's
+//!   Legendre modes, each at its own rate n(n + 1)D as in North's (1975, J. Atmos. Sci. 32, 2033)
+//!   diffusive model, in the emitted flux and at each end's own restoring. The contrast is the
+//!   difference of the ends this gives (`zonal_ends_k`; science-p14-t24a-climate.md §7), with each
+//!   mode damped by `B_P` ÷ (`B_eff` + max(n(n + 1)D, W `B_P`)). Its Earth is fitted by North,
+//!   Cahalan and Coakley's (1981) procedure (decision-p14-t54a-bands §2.6): Φ⊕ in their measured
+//!   balance, B = 2.09 W m⁻² K⁻¹ ([`EARTH_OUTGOING_LONGWAVE_SLOPE_W_PER_M2_K`]) and D ÷ B = 0.310
+//!   ([`EARTH_TRANSPORT_PARTITION`]), and then D⊕ to Earth's contrast at its own restoring, D "left
+//!   as an adjustable parameter" as they left it. 6D⊕ ÷ `B_eff`⊕ is then 1.99 from generator
+//!   version 24 ([`BROADENED_EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`]; 2.14 at 23), against their
+//!   1.86 at their B; their own balance, B + 6D = 5.98 W m⁻² K⁻¹, gives 2.00 at the model's 1.995.
+//!   - `B_P` = 4F ÷ `T_s` is the grey column's restoring at fixed τ, F the absorbed mean flux.
+//!     `B_eff` = `B_P` (1 − g) is its restoring with its own vapour feedback, g the gain of the
+//!     gases the surface holds at their cap (0.4022 on the batch's measured Earth as its fit takes
+//!     it, `B_eff` 1.995 W m⁻² K⁻¹, from 24 under P14.T53.a's constants; 0.431 and 1.898 at 23,
+//!     decision-p14-t57a-fits §1.3).
+//!   - Φ multiplies a wet world's `P₂` forcing, its cold zones' brightening by ice, cloud and low
+//!     sun, which a uniform albedo misses ([`WET_ALBEDO_GRADIENT`], 1.5055, against the Earth
+//!     Radiation Budget's gradient, 1.52–1.54). It is 1 + (Φ⊕ − 1)θ at the ocean weight θ.
+//!   - D is Earth's conductance ([`BROADENED_EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`] from 24)
+//!     scaled by the air's specific heat and by Kaspi and Showman's (2015, ApJ 804, 60) sweeps: in
+//!     rotation, as R09 takes them ([`rotation_transport_factor`]), in the column's mass
+//!     ([`COLUMN_TRANSPORT_EXPONENT`], linear to zero below a fifth of Earth's) and in gravity
+//!     ([`GRAVITY_TRANSPORT_EXPONENT`]), with no term of its own in the radius; it is ½ + ½θ of
+//!     that, halved on a dry world ([`DRY_TRANSPORT_SHARE`]).
+//!   - W is Koll's (2022, ApJ 924, 134) weak-temperature-gradient transport over the restoring,
+//!     X ÷ k (below), which governs a slow rotator such as Venus. It is weighted by
+//!     1 ÷ (1 + (3a ÷ `L_Ro`)²), so that it governs only where the deformation radius `L_Ro`
+//!     exceeds three planetary radii ([`WEAK_GRADIENT_DEFORMATION_RADII`]).
+//!
+//!   The sign changes at 53.9° of obliquity on an airless body, where the equator's and the
+//!   poles' insolation are equal, and toward 54.7° as the transport grows.
+//! - **Day–night** (Cowan and Agol 2011, ApJ 729, 54, eqs. 4–5). With a redistribution efficiency
+//!   ε from 0 (none) to 1 (uniform), the dayside and nightside temperatures are
+//!   `T_eq` (8/3 − 5ε/3)^¼ and `T_eq` ε^¼, scaled to the surface by `T_s` ÷ `T_eq`. ε joins the
+//!   air's share, the ground's and the night's floor:
+//!   - the air's, Koll's scaling of locked rocky planets' GCMs, ε = X ÷ (k + X), with
+//!     X = `τ_LW`^⅓ (`p_s` ÷ 1 bar)^⅔ (`T_eq` ÷ 600 K)^−4/3 at `τ_LW` = (3/2)τ
+//!     ([`FLUX_OPTICAL_DEPTH_PER_GREY`]) and k the body's own, by his eq. 9's definition;
+//!   - the ground's, its regolith's diurnal storage, x ÷ (1 + x) with x = 0.635 Θ^0.905
+//!     ([`REGOLITH_REDISTRIBUTION_FIT`]), Θ the thermal parameter at its ground's inertia Γ:
+//!     P14.T49.j's law at its crust's lid ([`SurfaceInputs::lid`], from P14.T54.a), a vacuum
+//!     lower bound under air with no pore gas, or where the lid has no law P14.T24.a's constant of
+//!     its material;
+//!   - the two in series, 1 − ε = (1 − `ε_air`)(1 − `ε_ground`), to which the floor adds
+//!     (`T_floor` ÷ `T_eq`)⁴, with ε capped at 1.
+//!
+//!   A rotating body's departures from `T_s` are each damped by the column's storage over the
+//!   solar day, 1 ÷ √(1 + (ω C (1 − ε) ÷ `B_P`)²), C the air's heat capacity per unit area: the
+//!   linear response of a slab forced at the solar rate ω under the locked contrast's own
+//!   restoring, `B_P` ÷ (1 − ε).
+//! - **The climate's range**, the span of the orbit-mean climate: the warmer end of the zonal
+//!   profile plus the day's excess over `T_s`, down to the colder end less the night's deficit,
+//!   never below the floor ([`SurfaceConditions::climate_range`]). The profile's ends are the
+//!   equator–pole contrast's own (`zonal_ends_k`, science-p14-t24a-climate.md §6 and §7): an
+//!   airless body's radiative ends, `T_s` `q_eq`^¼ and `T_s` `q_pole`^¼, at no transport, tending
+//!   to `T_s` as the transport grows.
+//!
+//! - **The zonal profile at each latitude** ([`SurfaceConditions::zonal_temperature`];
+//!   science-p14-t24b-laws §4.3): the same modal form evaluated at x = sin φ, with the insolation
+//!   at x ([`annual_insolation_at`]) and the modes' Legendre polynomials at x in the ends' places,
+//!   each mode damped over the latitude's own restoring. Its cold area below a threshold
+//!   ([`SurfaceConditions::cold_area`]) is read at the ends and at [`ZONAL_AREA_POINTS`] points
+//!   uniform in area, and a world locked 1:1 takes the eyeball's from its day and night means:
+//!   P14.T24.b's ice fraction reads it.
+//!
+//! An airless body's equator–pole contrast is the radiative one. Its night is its regolith's: the
+//! diurnal storage enters Cowan and Agol's ε as x ÷ (1 + x), x = 0.635 Θ^0.905, Θ the thermal
+//! parameter at the ground's inertia, above a floor set by the internal heat and the cosmic
+//! background (science-p14-t24a-climate §2). At the rock constant's 55 the Moon's night is 106 K
+//! (Diviner, ~95 K before dawn) and Mercury's 102 K (Mariner 10, 100–130 K); from P14.T54.a the
+//! inertia is its lid's (P14.T49.j). The floor is [`night_floor`]: the cosmic
+//! background's [`COSMIC_BACKGROUND_TEMPERATURE`], raised by the body's internal heat flow
+//! (P14.T24.b's, [`SurfaceInputs::heat_flow`]) to about 21 K on a Mercury, 22 K on a Moon and 36 K
+//! on an Earth.
+//!
+//! Koll's scaling is valid for dry, tidally locked rocky planets with a high mean molecular
+//! weight, at `T_eq` of 391–805 K, 0.01–100 bar and `τ_LW` of 0.1–5, to a factor of two in his χ
+//! (Koll 2022, §3). It is extrapolated here to rotators and colder worlds, labelled. It does not
+//! hold where the bulk gas condenses on the night side (an N₂ or CO₂ collapse, Wordsworth 2015,
+//! ApJ 806, 180): no cutoff is applied here, which P14.T48.d's climate regime takes as its thin
+//! end ([`regime`]).
+//!
+//! # Where they are published
+//!
+//! A present body's conditions are its record's surface section's
+//! ([`record::Surface`](crate::planetary::record::Surface), P14.T48.e), with its global figures,
+//! from the 21 → 22 batch's bump, and [`BodyHooks::surface`](crate::planetary::hooks::BodyHooks::surface)
+//! repeats them for the server.
+
+use core::fmt;
+use std::error::Error;
+
+use hyperion_surface::field::MechanicsFamily;
+
+use crate::math;
+use crate::orbit::KeplerElements;
+use crate::planetary::chem::condense::COLLISION_CONSTANTS;
+use crate::planetary::chem::partition::{ClimateSpan, CondensatePhase, Condensates, dominance};
+use crate::planetary::chem::tenuous::holds_tenuous_air;
+use crate::planetary::context::XuvHistory;
+use crate::planetary::derive::atmosphere::{
+    AIRLESS_PRESSURE, Atmosphere, Crust, EARTH_REFERENCE_AGE, Gas, GreenhouseCeiling,
+    GreenhouseConstants, MOLAR_GAS_CONSTANT, PartialPressures, REFERENCE_SUN_ZAMS_LUMINOSITY,
+    SILICATE_SOLIDUS, SurfaceMaterial, SurfaceState, grey_surface_temperature,
+};
+use crate::planetary::derive::rotation::{SpinOrbitResonance, SpinState};
+use crate::planetary::frames::BodyFixedFrame;
+use crate::planetary::hooks::crust::CrustLithology;
+#[cfg(doc)]
+use crate::planetary::hooks::figures::GlobalFigures;
+#[cfg(doc)]
+use crate::substance::PhaseDiagram;
+use crate::substance::thermal::{
+    BuildPoreGasError, EvaluateRegolithInertiaError, LidAir, PoreGas, Pores, RegolithInertiaRules,
+    reference_regolith_thermal_inertia_under,
+};
+use crate::substance::{
+    Phase, SubstanceId, mean_molar_mass_g_per_mol, mixture_heat_capacity_over_r_at, phase_at,
+};
+use crate::time::UniverseTime;
+use crate::units::consts::{COSMIC_BACKGROUND_TEMPERATURE_K, METRES_PER_AU, STEFAN_BOLTZMANN};
+use crate::units::{
+    Kelvin, Metres, MetresPerSecondSquared, Pascals, Radians, Seconds, SolarMasses,
+    WattsPerSquareMetre,
+};
+
+pub(crate) mod deck;
+pub mod regime;
+
+pub use regime::{ClimateInputs, ClimateRegime, Forcing, ThermalRegime};
+
+#[cfg(test)]
+pub(crate) mod tests;
+
+/// Earth's annual, zonal-mean equator–pole contrast of surface temperature, K: 42, −(3/2) T₂ of
+/// the fit T₀ + T₂ `P₂`(sin φ) with T₂ = −28.0 °C, North, Cahalan and Coakley's fit to the
+/// Northern Hemisphere's sea-level temperatures, symmetrised about the equator (1981, Rev.
+/// Geophys. 19, 91, Table 1, read in its NASA preprint, NTRS 19810008165; rendering plan R09's
+/// Earth-like reference world takes the same figure). The figure [`WET_ALBEDO_GRADIENT`] and
+/// [`EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`] are fitted to.
+pub const EARTH_EQUATOR_POLE_CONTRAST_K: f64 = 42.0;
+
+/// Earth's meridional conductance over its radiative restoring, D ÷ B: 0.310, North, Cahalan and
+/// Coakley's partition at their B, [`EARTH_OUTGOING_LONGWAVE_SLOPE_W_PER_M2_K`] (1981, Rev.
+/// Geophys. 19, 91, §2, read in its NASA preprint, NTRS 19810008165).
+///
+/// It is their fit, not a measurement. They measured B and the absorbed sunlight's `P₂` forcing
+/// `H₂` = −0.500 (the coalbedo a₀ = 0.681 and a₂ = −0.202, the Earth Radiation Budget's data), and
+/// took the observed T₂ = −28.0 °C: D "was left as an adjustable parameter. By taking the observed
+/// value for T2 (−28.0°C), we compute D/B = 0.310, D = 0.649" (p. 20). What their data measure is
+/// B + 6D = `H₂` ÷ T₂ = 5.98 W m⁻² K⁻¹, so the ratio holds at their B alone:
+/// [`WET_ALBEDO_GRADIENT`] is fitted in that balance, and
+/// [`EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`] then at the model's own restoring
+/// (decision-p14-t54a-bands §2.4–§2.6). Rendering plan R09 inverted Kaspi and
+/// Showman's rotation sweep in this partition ([`ROTATION_TRANSPORT_EXPONENTS`]).
+pub const EARTH_TRANSPORT_PARTITION: f64 = 0.310;
+
+/// Earth's outgoing longwave radiation's slope in its surface temperature, B: 2.09 W m⁻² K⁻¹,
+/// North, Cahalan and Coakley's fit in Budyko's (1969, Tellus 21, 611) linear form A + BT (1981,
+/// Rev. Geophys. 19, 91, p. 8, read in its NASA preprint, NTRS 19810008165: "Based on data from
+/// the northern hemisphere (North and Coakley, 1979)").
+///
+/// It is a zonal all-sky regression that ignores the cloud cover, one measured value among
+/// others: their own stated range is 1.3–3.1 (pp. 42–43), and the model's restoring, the fixed
+/// relative humidity Planck feedback, is compared with 1.7–2.3 (decision-p14-t54a-bands §1). It
+/// and [`EARTH_TRANSPORT_PARTITION`] are the measured balance [`WET_ALBEDO_GRADIENT`] is fitted in.
+pub const EARTH_OUTGOING_LONGWAVE_SLOPE_W_PER_M2_K: f64 = 2.09;
+
+/// Version 23's meridional conductance of Earth D⊕, W m⁻² K⁻¹ (North, Cahalan and Coakley's
+/// units: the diffusion's flux divergence per kelvin of the `P₂` mode is 6D): 0.6760, so that
+/// Earth's measured state, at its own restoring with its vapour feedback, `B_eff`⊕, and at
+/// [`WET_ALBEDO_GRADIENT`], holds [`EARTH_EQUATOR_POLE_CONTRAST_K`] (`Fitted`, by bisection on the
+/// zonal solver, with the 64-step bisection of each end, the tests', as its oracle). From 24 the
+/// generator reads [`BROADENED_EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`], which a test refits; this
+/// one is kept as its documented fit (P14.T54.b.l).
+///
+/// It is North, Cahalan and Coakley's procedure carried to the model's own restoring
+/// (decision-p14-t54a-bands §2.6, amending decision-pre-23-review item 20(2)): they measured B and
+/// `H₂`, took the observed T₂, and fitted D, which "was left as an adjustable parameter" (NTRS
+/// 19810008165, p. 20). Φ⊕ is fitted first, in their measured balance, and D⊕ then here. 6D⊕ ÷
+/// `B_eff`⊕ is 2.14, against their 1.86 at their B; their own balance, B + 6D = 5.98 W m⁻² K⁻¹,
+/// gives 2.15 at 1.898.
+///
+/// Plan 14's order of fits: nitrogen on Titan, carbon dioxide on Venus, water on Earth
+/// ([`GREENHOUSE_WATER`](crate::planetary::derive::atmosphere::GREENHOUSE_WATER)), then D⊕ on
+/// Earth's contrast. Φ⊕ is fitted in North, Cahalan and Coakley's balance and reads none of the
+/// chain (decision-p14-t54a-bands §2.6). This fit reads the water's.
+///
+/// Earth's measured state: 288 K at the surface (NASA's Earth fact sheet), 23.44° of obliquity, an
+/// absorbed flux of (1 − 0.294) × 1,361.17 ÷ 4 = 240.25 W m⁻² (the fact sheet's Bond albedo, and
+/// [`SOLAR_CONSTANT_W_PER_M2`](crate::units::consts::SOLAR_CONSTANT_W_PER_M2)), the grey τ that
+/// holds 288 K over it (0.8317), a column of [`EARTH_COLUMN_MASS_KG_PER_M2`] of dry air
+/// ([`EARTH_AIR_SPECIFIC_HEAT_J_PER_KG_K`]) under [`STANDARD_GRAVITY`], a radius of 6,371.0 km and
+/// [`EARTH_SIDEREAL_DAY`]. Its vapour feedback is the batch's measured Earth's, the state the
+/// water's fit takes (decision-p14-t57a-fits §1.3):
+///
+/// - the table's Earth's air under the batch, abiotic and so free of oxygen
+///   (decision-p14-t57a-fits §1.3's state): 42.08 Pa of carbon dioxide and 0.7474 bar of nitrogen
+///   by weight, Earth's per unit mass, with its water where P14.T51.a's partition holds a minor
+///   condensable at 288 K, at 0.77 of its saturation pressure on water's phase diagram: 837.2 Pa
+///   by weight, 0.496 of the 1.689 kPa saturation pressure, a mole fraction of 0.0169;
+/// - P14.T57.a's water constant, 4.47 per √bar, under which that water's τ is 0.409;
+/// - the batch's gain rule, which counts a gas the partition holds at its cap, at its curve's
+///   slope at 288 K, 44.47 kJ mol⁻¹ (P14.T49.b's fitted curve).
+///
+/// That gain is g = 0.4311, so `B_eff` is 1.898 W m⁻² K⁻¹, against North, Cahalan and Coakley's
+/// 2.09 and the grey column's 3.337 at fixed τ.
+///
+/// Cross-checks, not fitted (science-p14-t24a-climate.md §1): the peak diffusive transport,
+/// 2πR² D⊕ (2 ÷ √3) × 28 K, is 5.57 PW, against North, Cahalan and Coakley's 5.35 at their D and
+/// the 5.5–6 PW measured (Trenberth and Caron 2001, J. Climate 14, 3433, not re-read; its
+/// abstract gives the atmosphere's peak as 5.0 ± 0.14 PW, at 43°N). As a diffusivity of
+/// temperature, D⊕ R² ÷ (`c_p` m⊕), it is 2.71 × 10⁶ m² s⁻¹, against Siler, Roe and Armour's
+/// (2018, J. Climate 31, 7481; eq. 2 and §2, p. 7483: D fitted to ERA-Interim's 1981–2010 2-m
+/// temperature at sea level) diffusivity of moist static energy, 1.16 × 10⁶ m² s⁻¹, converted to
+/// temperature at 288 K and 80% relative humidity (× 2.33), 2.70 × 10⁶.
+pub const EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K: f64 = 0.676_013_14;
+
+/// Earth's meridional conductance D⊕ under P14.T53.a's broadened greenhouse, W m⁻² K⁻¹: 0.6618,
+/// refitted as [`EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`] is, by bisection on the zonal solver
+/// with the 64-step bisection of each end as its oracle, so that Earth's measured state holds
+/// [`EARTH_EQUATOR_POLE_CONTRAST_K`] at its own restoring under the batch, `B_eff`⊕, at the
+/// unchanged Φ⊕ ([`WET_ALBEDO_GRADIENT`]; a test refits it). From generator version 24 it replaces
+/// 0.6760.
+///
+/// It is the last of P14.T53.a's chain (N₂ on Titan, CO₂'s a, n and b on Earth's forcing, Mars and
+/// Venus, water's vapour and cloud on Earth, then D⊕ on Earth's contrast; decision-pre-23-review
+/// item 20(6), decision-p14-t54a-bands ruling 2 and §2.6's two-step fit): Φ⊕ is fitted in North,
+/// Cahalan and Coakley's measured balance, reads none of the chain, and refits under the batch to
+/// 1.505 462 21, unmoved. The measured Earth's state is
+/// [`EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`]'s, its water's term at
+/// [`BROADENED_GREENHOUSE_WATER_VAPOUR`](crate::planetary::derive::atmosphere::BROADENED_GREENHOUSE_WATER_VAPOUR),
+/// 4.17 per √bar, 0.382 of the τ of 0.8317 that holds 288 K (its cloud's term, which does not
+/// feed back, takes 0.19 more), and its gain's weight the batch's (1 − x)(1 − d), d 0 at its
+/// water's mole fraction of 0.017. Its gain is then g = 0.4022, its fixed relative humidity
+/// feedback `B_P` g 1.342 W m⁻² K⁻¹ against AR6's 1.36 ± 0.04, and `B_eff`⊕ 1.995, inside the fixed
+/// relative humidity Planck feedback's 1.7–2.3 (decision-p14-t54a-bands §1); 6D⊕ ÷ `B_eff`⊕ is
+/// 1.99, against North, Cahalan and Coakley's 1.86 at their B.
+pub const BROADENED_EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K: f64 = 0.661_844_07;
+
+/// The factor Φ⊕ by which a wet world's cold zones brighten its equator–pole forcing: 1.5055,
+/// multiplying the `P₂` mode of the annual insolation of a world of ocean weight 1, and 1 + (Φ⊕ −
+/// 1)θ at a weight θ ([`OceanWeight::albedo_gradient`]; `Fitted`, so that Earth's measured state
+/// in North, Cahalan and Coakley's measured balance gives [`EARTH_EQUATOR_POLE_CONTRAST_K`]; a
+/// test refits it).
+///
+/// It is fitted in that balance (decision-p14-t54a-bands §2.6): the measured Earth's column
+/// ([`EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`]'s state) with its gain set so that its `B_eff` is
+/// their B, 2.09 ([`EARTH_OUTGOING_LONGWAVE_SLOPE_W_PER_M2_K`]), and D their 0.310 × 2.09
+/// ([`EARTH_TRANSPORT_PARTITION`]), by a 200-step bisection on [1, 3] to the 42 K contrast on the
+/// zonal solver, the safeguarded Newton steps, which the 64-step bisection of each end, the tests'
+/// oracle, matches within 10⁻⁹. So it reads none of the greenhouse chain: only their B and
+/// partition, the 42 K and the measured Earth's absorbed flux move it, and a refit of the water
+/// moves D⊕ alone. Under a uniform albedo (Φ = 1) the measured Earth's contrast, at D⊕, is 28.4 K.
+///
+/// Earth's cold zones are brighter, by ice, cloud and low sun, which a uniform albedo misses. No
+/// closed form on this task's inputs supplies it: P14.T24.b's ice and P14.T24.c's clouds come
+/// later, and an ice-albedo solve would bring Budyko's multiple equilibria, which are R09's and
+/// P14.T48.d's (science-p14-t24a-climate.md §1). It multiplies the `P₂` forcing alone, the
+/// coalbedo gradient it stands for (science-p14-t24a-climate.md §7).
+///
+/// Cross-checks, not fitted:
+/// - the Earth Radiation Budget's coalbedo gradient amplifies the uniform `P₂` forcing by
+///   `H₂` ÷ (`S₂` `a₀`) = 1.539 (North, Cahalan and Coakley's `H₂` = −0.500, `S₂` = −0.477 and
+///   `a₀` = 0.681), 2% above Φ⊕: the linear model's gradient, of which the model's own
+///   structure, its T^¼ profile and its higher modes, takes up the rest, as version 22's
+///   calibration, at a `B_eff`⊕ within 0.7% of their B, gave 1.495;
+/// - with it, the measured Earth's equator and pole are 302.5 and 260.5 K, against North,
+///   Cahalan and Coakley's `P₂` fit of 302.1 and 260.1 K;
+/// - Komacek and Abbot (2019, ApJ 871, 245, Table 2) find that sea ice and clouds raise an
+///   Earth-like contrast by up to some 100 K over Kaspi and Showman's, so the amplification is
+///   real and, if anything, larger.
+///
+/// A Mars's CO₂ caps and a Titan's methane are not brightened until P14.T51.a names a cap at the
+/// cold zone (22 → 23).
+pub const WET_ALBEDO_GRADIENT: f64 = 1.505_462_21;
+
+/// Earth's mean column of air, kg m⁻²: 10,094, its atmosphere's 5.1480 × 10¹⁸ kg over
+/// 5.100 × 10¹⁴ m² (Trenberth and Smith 2005, J. Climate 18, 864), the column the conductance's
+/// mass factor is relative to ([`COLUMN_TRANSPORT_EXPONENT`]).
+pub const EARTH_COLUMN_MASS_KG_PER_M2: f64 = 10_094.0;
+
+/// Dry air's specific heat at constant pressure, the one the conductance is relative to: 1,004.7
+/// J kg⁻¹ K⁻¹, 7/2 R over 28.9644 g mol⁻¹.
+///
+/// 7/2 is kinetic theory's `c_p` ÷ R for a diatomic molecule's five degrees, N₂'s and O₂'s, which
+/// the registry's statistical sum gives Earth's dry air at 288 K within 0.1% (`c_p` ÷ R 3.498,
+/// science-r08-gases-2.md §1.2's R ÷ `c_p` 0.2859), and 28.9644 g mol⁻¹ the sea-level mean
+/// molar mass M₀ of the US Standard Atmosphere 1976 (NOAA, NASA and USAF; not re-read). T24.a as
+/// first built took 28.9647.
+pub const EARTH_AIR_SPECIFIC_HEAT_J_PER_KG_K: f64 =
+    3.5 * MOLAR_GAS_CONSTANT / (EARTH_AIR_MOLAR_MASS_G_PER_MOL * 1e-3);
+
+/// Dry air's mean molar mass at sea level, M₀: 28.9644 g mol⁻¹ (the US Standard Atmosphere 1976;
+/// not re-read), the measured Earth's air ([`EARTH_AIR_SPECIFIC_HEAT_J_PER_KG_K`]).
+pub const EARTH_AIR_MOLAR_MASS_G_PER_MOL: f64 = 28.964_4;
+
+/// The standard acceleration of gravity g₀: 9.806 65 m s⁻² (the 3rd CGPM, 1901), the gravity the
+/// conductance's gravity factor is relative to ([`GRAVITY_TRANSPORT_EXPONENT`]).
+pub const STANDARD_GRAVITY: MetresPerSecondSquared = MetresPerSecondSquared::new(9.806_65);
+
+/// The exponent of the meridional conductance in the air's column mass relative to Earth's: 0.2,
+/// from Kaspi and Showman's (2015, ApJ 804, 60) Fig. 15c, as rendering plan R09's transport law
+/// takes it.
+///
+/// Their contrasts run from 0.2 to 50 bar at fixed τ, and "the increase in MSE flux with
+/// atmospheric mass becomes more gradual beyond 10 bars" (their §3.3). The variable is the
+/// column's mass, not the surface pressure, by their §3.4: "if atmospheric surface pressure,
+/// rather than atmospheric mass, is held constant while the gravity is varying (not shown), then
+/// the simulations would resemble those of varying atmospheric mass".
+pub const COLUMN_TRANSPORT_EXPONENT: f64 = 0.2;
+
+/// The column masses, relative to [`EARTH_COLUMN_MASS_KG_PER_M2`], over which the conductance
+/// follows [`COLUMN_TRANSPORT_EXPONENT`]: 0.2 to 50, Kaspi and Showman's runs.
+///
+/// Below 0.2 it falls linearly to zero, 0.2^0.2 × m ÷ 0.2, continuous at 0.2, since with no air
+/// there is no transport (a 6 mbar Mars's is weak, 6D ÷ B = 0.07); above 50 it holds its end
+/// value (science-p14-t24a-climate.md §1).
+pub const COLUMN_TRANSPORT_RANGE: (f64, f64) = (0.2, 50.0);
+
+/// The exponent of the meridional conductance in the surface gravity relative to
+/// [`STANDARD_GRAVITY`]: −0.43, a least-squares fit to Kaspi and Showman's (2015) Fig. 18a,
+/// densities of 500 to 11,200 kg m⁻³ at Earth's radius and column mass, with an rms error of 1.8%
+/// (science-p14-t24a-climate.md §1).
+///
+/// The radius takes no term of its own: their Fig. 20b, radii of 1,000 to 50,000 km at Earth's
+/// density, so with g ∝ R, is reproduced within 8% by this factor alone. Komacek and Abbot 2019
+/// (their Table 2) find a trend in radius at fixed gravity, confounded by glaciation; Kaspi and
+/// Showman's cleanly separated sweeps are taken.
+pub const GRAVITY_TRANSPORT_EXPONENT: f64 = -0.43;
+
+/// The gravities, relative to [`STANDARD_GRAVITY`], over which the conductance follows
+/// [`GRAVITY_TRANSPORT_EXPONENT`], and beyond which it holds its end values: 0.09 to 7.85, the
+/// span of Kaspi and Showman's Fig. 18a and of Fig. 20b's rocky line.
+pub const GRAVITY_TRANSPORT_RANGE: (f64, f64) = (0.09, 7.85);
+
+/// The planetary radii the deformation radius must exceed for Koll's weak-temperature-gradient
+/// transport to govern the equator–pole contrast: 3 (science-p14-t24a-climate.md §4's).
+///
+/// It weights the transport by 1 ÷ (1 + (3a ÷ `L_Ro`)²), with a ÷ `L_Ro` = 2Ωa ÷ c and
+/// c = `R_air` √(`T_eq` ÷ `c_p`) the gravity waves' speed (Koll 2022, §3.1). The weak-gradient
+/// regime holds where the deformation radius exceeds the planet (Pierrehumbert 2011; Showman et
+/// al. 2013; neither re-read). The factor 3 is fitted so that Kaspi and Showman's slowest
+/// (Ω⊕ ÷ 24, a ÷ `L_Ro` = 0.27) and smallest (1,000 km, 1.0) Earths keep their GCM's contrasts,
+/// 24 and 22 K.
+pub const WEAK_GRADIENT_DEFORMATION_RADII: f64 = 3.0;
+
+/// The share of the meridional transport a world without surface liquid keeps: 0.5, halved
+/// where no latent heat is carried, as rendering plan R09's energy-balance model takes it (its
+/// Design note 8, after Williams and Kasting 1997, Icarus 129, 254, not re-read; `Adopted`).
+///
+/// Kaspi and Showman (2015, ApJ 804, 60, §3.2 and Fig. 9b) find Earth's dry and latent fluxes
+/// "very similar in magnitude", and R09's split of Siler et al.'s diffusivity, about 0.3 dry of
+/// 0.7 moist W m⁻² K⁻¹, gives 0.43.
+pub const DRY_TRANSPORT_SHARE: f64 = 0.5;
+
+/// The ocean fraction from which a world's ocean weighs fully in its contrasts: 0.708, Earth's
+/// ocean area fraction as science-p14-t24a-climate.md §1 rounds it (Eakins and Sharman 2010 give
+/// 0.7095, 361.9 × 10⁶ of 510.1 × 10⁶ km²), since Kaspi and Showman's and Komacek and Abbot's
+/// worlds are aquaplanets, which Earth matches. The ramp below it is that ruling's own and
+/// provisional: no land-fraction sweep was read.
+pub const FULL_OCEAN_FRACTION: f64 = 0.708;
+
+/// θ, the weight of a world's ocean in its contrasts, 0 to 1 (science-p14-t24a-climate.md §1;
+/// science-p14-t24b-laws §4.4): min(1, `f_pot` ÷ [`FULL_OCEAN_FRACTION`]), `f_pot` P14.T24.b's
+/// potential ocean, the share of the surface its surface water fills
+/// ([`potential_ocean`](crate::planetary::hooks::figures::cover::potential_ocean)).
+///
+/// It weights the transport's moist share, ½ + ½θ ([`transport_share`](Self::transport_share)),
+/// and the cold zones' brightening, 1 + (Φ⊕ − 1)θ ([`albedo_gradient`](Self::albedo_gradient)). It
+/// reads the potential ocean, not the published one, which waits on the liquid-water flag θ feeds,
+/// so the order has no loop. The generated Earth's 0.746 makes θ = 1, and the generated Mars's
+/// 20 m of water 0.030 (the ruling's estimate, about 0.1).
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default)]
+pub struct OceanWeight(f64);
+
+impl OceanWeight {
+    /// No ocean: half the transport, under a uniform albedo.
+    pub const NONE: Self = Self(0.0);
+
+    /// A full ocean, Earth's: the whole transport, and the brighter cold zones.
+    pub const FULL: Self = Self(1.0);
+
+    /// The weight of a potential ocean `potential_ocean`, the share of the surface its surface
+    /// water fills: min(1, `f_pot` ÷ [`FULL_OCEAN_FRACTION`]), and none for a share that is not
+    /// positive.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use hyperion_sim::planetary::hooks::surface::OceanWeight;
+    ///
+    /// assert_eq!(OceanWeight::of_potential_ocean(0.731), OceanWeight::FULL);
+    /// assert!((OceanWeight::of_potential_ocean(0.0708).get() - 0.1).abs() < 1e-12);
+    /// assert_eq!(OceanWeight::of_potential_ocean(0.0), OceanWeight::NONE);
+    /// ```
+    #[must_use]
+    pub fn of_potential_ocean(potential_ocean: f64) -> Self {
+        // By comparison, so that a NaN takes none.
+        if potential_ocean.is_nan() || potential_ocean <= 0.0 {
+            return Self::NONE;
+        }
+        let weight = potential_ocean / FULL_OCEAN_FRACTION;
+        Self(if weight < 1.0 { weight } else { 1.0 })
+    }
+
+    /// θ itself, 0 to 1.
+    #[must_use]
+    pub const fn get(self) -> f64 {
+        self.0
+    }
+
+    /// The share of the meridional transport the world keeps, w = ½ + ½θ: [`DRY_TRANSPORT_SHARE`]
+    /// with no ocean and 1 with a full one.
+    #[must_use]
+    pub fn transport_share(self) -> f64 {
+        DRY_TRANSPORT_SHARE + (1.0 - DRY_TRANSPORT_SHARE) * self.0
+    }
+
+    /// The cold zones' brightening of the `P₂` forcing, Φ = 1 + (Φ⊕ − 1)θ: 1 with no ocean and
+    /// [`WET_ALBEDO_GRADIENT`] with a full one.
+    #[must_use]
+    pub fn albedo_gradient(self) -> f64 {
+        1.0 + (WET_ALBEDO_GRADIENT - 1.0) * self.0
+    }
+}
+
+/// Earth's rotation period against the stars, s: the stellar day, 86,164.0989.
+///
+/// Its rate 2π ÷ it, 7.292 115 1 × 10⁻⁵ rad s⁻¹, is the nominal rotation rate
+/// Ω = 7.292 115 × 10⁻⁵ rad s⁻¹ (IERS Conventions 2010, TN 36, Table 1.2, GRS80's) to Ω's digits,
+/// the rate Ω⊕ that [`rotation_transport_factor`] is relative to. 2π over the nominal Ω itself is
+/// 86,164.1006 s, which would move the transport's rotation ratio by 2 × 10⁻⁸. The sidereal day
+/// against the equinox is 86,164.0905 s.
+pub const EARTH_SIDEREAL_DAY: Seconds = Seconds::new(86_164.098_9);
+
+/// The rotation rates, relative to Earth's, between which [`rotation_transport_factor`] follows
+/// Kaspi and Showman's runs, and beyond which it holds its end values: Ω⊕ ÷ 24 to 12 Ω⊕ (Kaspi
+/// and Showman 2015, ApJ 804, 60, Fig. 8a, as rendering plan R09's transport law reads them).
+pub const ROTATION_TRANSPORT_RANGE: (f64, f64) = (1.0 / 24.0, 12.0);
+
+/// The exponents of the meridional transport in the rotation rate relative to Earth's: −¼ below
+/// Earth's rate and −½ above it (rendering plan R09, Design note 8's transport law, inverted from
+/// Kaspi and Showman 2015's Fig. 8a in North, Cahalan and Coakley's partition of B and D,
+/// [`EARTH_TRANSPORT_PARTITION`]; medium confidence). This module's Earth takes 6D⊕ ÷ `B_eff`⊕ =
+/// 2.14, not that partition's 1.86 ([`EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`]), and there the
+/// factors move an Earth's 42 K over 23.2–83.2 K from Ω⊕ ÷ 24 to 12 Ω⊕, against the GCM's
+/// 24.2–80.9 K at the same scale, within 4.8% but at Ω⊕ ÷ 4, the GCM's plateau (−13.0%;
+/// decision-p14-t54a-bands D9, recorded).
+pub const ROTATION_TRANSPORT_EXPONENTS: (f64, f64) = (-0.25, -0.5);
+
+/// Koll's inefficiency factor χ of the day–night heat engine: 0.2, which "should be treated as
+/// uncertain by at least a factor of two since χ accounts not only for the atmosphere's
+/// thermodynamic efficiency but also the circulation geometry" (Koll 2022, ApJ 924, 134, §3.2,
+/// read), adopted on his GCMs of dry, tidally locked rocky planets.
+pub const REDISTRIBUTION_INEFFICIENCY: f64 = 0.2;
+
+/// Koll's surface drag coefficient `C_d`: 1.9 × 10⁻³ (Koll 2022, §3.2).
+pub const REDISTRIBUTION_DRAG_COEFFICIENT: f64 = 1.9e-3;
+
+/// Koll's `n_LW`, the power of the pressure in the longwave optical depth, τ ∝ p^`n_LW`: 2, for
+/// pressure broadening (Koll 2022, §2; 1 where the opacity is independent of pressure).
+pub const REDISTRIBUTION_BROADENING: f64 = 2.0;
+
+/// Koll's longwave optical depth `τ_LW` over P14.T13.c's grey τ: 3/2 (science-p14-t24a-climate.md
+/// §4).
+///
+/// His FMS model solves the grey two-stream dU ÷ dτ = U − σT⁴, dD ÷ dτ = σT⁴ − D (Frierson, Held
+/// and Zurita-Gotor 2006, J. Atmos. Sci. 63, 2548, not re-read; Kaspi and Showman 2015 print it as
+/// their eqs. 6–7), whose radiative equilibrium holds the ground at `T_eq`⁴ (1 + `τ_LW` ÷ 2).
+/// T13.c's Eddington form holds it at `T_eq`⁴ (1 + ¾τ).
+pub const FLUX_OPTICAL_DEPTH_PER_GREY: f64 = 1.5;
+
+/// The surface pressure Koll's X and k are scaled to, Pa: 1 bar.
+pub const REDISTRIBUTION_REFERENCE_PRESSURE: Pascals = Pascals::new(1e5);
+
+/// The equilibrium temperature Koll's X and k are scaled to: 600 K.
+pub const REDISTRIBUTION_REFERENCE_TEMPERATURE: Kelvin = Kelvin::new(600.0);
+
+/// A regolith's infrared emissivity `ε_r`: 0.95, the lunar regolith's (Hayne et al. 2017, JGR
+/// Planets 122, 2371, Table A1, read).
+pub const REGOLITH_EMISSIVITY: f64 = 0.95;
+
+/// The thermal inertia of a regolith of rock, J m⁻² K⁻¹ s^−½: 55, the Moon's at 273 K (Hayne et
+/// al. 2017, abstract and Table A1, read).
+///
+/// Hayne et al. give "55 ± 2" over the Moon's top 4–7 cm. Mercury's is of the same order: under
+/// 50 over most of Mariner 10's transect, 19 at the surface and 71 at depth (Bandfield, Osterloo
+/// and Holsclaw 2019, LPSC 50, abstract 2653, read). A vacuum value: pore gas raises a real
+/// regolith's under air (Mars's measured 180–250, Mellon et al. 2000, Icarus 148, 437,
+/// and Putzig et al. 2005, Icarus 173, 325, neither re-read; science-p14-t24a-climate.md §2).
+///
+/// From P14.T54.a it is a fallback alone (decision-pre-23-review item 7): a ground's inertia is
+/// P14.T49.j's law at its crust's lid, and this constant stands only where that lid is not known
+/// on a rocky bulk, where the lid's row has no thermal columns (`graphite`), and where a lid of
+/// another family than water ice has no solid at the temperature.
+pub const ROCK_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S: f64 = 55.0;
+
+/// The thermal inertia of a regolith of ice, J m⁻² K⁻¹ s^−½: 20 (provisional,
+/// science-p14-t24a-climate.md §2), within the 5–70 of the Saturnian icy moons, Pluto and
+/// Europa (Howett et al. 2010, Icarus 206, 573; Lellouch et al. 2011, Icarus 214, 701; Rathbun et
+/// al. 2010, Icarus 210, 763, Europa's 70; none re-read).
+///
+/// From P14.T54.a it is a fallback alone (decision-pre-23-review item 7): it stands only where a
+/// ground's lid is not known on an icy bulk, where the lid's family has no regolith form (the
+/// `Organic` lids, `cometary` and `carbonaceous`, until an organic form is ruled), and where a
+/// water-ice lid has no solid at the temperature.
+pub const ICE_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S: f64 = 20.0;
+
+/// Where a ground's thermal inertia Γ comes from (P14.T54.a; decision-pre-23-review item 7;
+/// decision-p14-t54a-passes §3.5): P14.T49.j's law at its crust's lid, or one of P14.T24.a's two
+/// constants as its fallback, rock's [`ROCK_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S`] and ice's
+/// [`ICE_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum InertiaSource {
+    /// The law at the lid's row, at the temperature
+    /// ([`reference_regolith_thermal_inertia_under`]).
+    Law,
+    /// No lid known (the passes' first context, the passes' stand-in, a body with no crust): the
+    /// bulk material's constant.
+    NoLid,
+    /// The lid's row has no thermal columns (`graphite`): rock's constant.
+    NoThermalColumns,
+    /// The lid's row's family has no regolith form (`Organic`: `cometary`, `carbonaceous`): ice's
+    /// constant.
+    NoRegolithForm,
+    /// The lid's row has no solid at the temperature: its family's constant, ice's for `WaterIce`
+    /// and rock's otherwise.
+    NoSolid,
+    /// A column under no light, whose equilibrium temperature is not positive: nothing it stores
+    /// by day, and the bulk material's constant, which its climate does not read
+    /// ([`GroundInertia::at_equilibrium`]).
+    Unlit,
+    /// What a lid's row at a positive, finite temperature never gives (a temperature that is not
+    /// one; a row with no condensed columns, or a form of another family than its row's, which no
+    /// [`CrustLithology`] has): the bulk material's constant, and a failed `debug_assert` in a
+    /// debug build.
+    Unreachable,
+}
+
+/// A ground's thermal inertia Γ with where it comes from (P14.T54.a; [`ground_inertia`]): what
+/// carries the day's heat into the night ([`ground_redistribution`]).
+///
+/// A ground read at a lid keeps the lid, so that a column's pore gas can read it once more under
+/// P14.T49.l's hold ([`under`](Self::under)). It keeps no temperature: one more `Kelvin` here
+/// takes `derive::atmosphere`'s `StepClimate` over Clippy's `large_enum_variant` bound (tried,
+/// 2026-10-31), so each caller passes the temperature it read the ground at.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct GroundInertia {
+    gamma: f64,
+    source: InertiaSource,
+    /// The lid it was read at, `None` for no lid or no light.
+    lid: Option<CrustLithology>,
+    material: SurfaceMaterial,
+}
+
+impl GroundInertia {
+    /// The ground of a bulk of `material` whose lid is not known: P14.T24.a's constant of the
+    /// material, to the bit ([`InertiaSource::NoLid`]).
+    #[must_use]
+    pub(crate) const fn of_material(material: SurfaceMaterial) -> Self {
+        Self {
+            gamma: material_inertia_j_per_m2_k_sqrt_s(material),
+            source: InertiaSource::NoLid,
+            lid: None,
+            material,
+        }
+    }
+
+    /// The ground of a column at the equilibrium temperature `equilibrium` whose crust's lid is
+    /// `lid` and whose bulk is of `material`: [`ground_inertia`] at that temperature where it is
+    /// positive and finite, and otherwise, a column under no light, the material's constant
+    /// ([`InertiaSource::Unlit`]), which its climate never reads: with no light absorbed, nothing
+    /// is stored by day ([`ground_redistribution`]).
+    #[must_use]
+    pub(crate) fn at_equilibrium(
+        lid: Option<CrustLithology>,
+        material: SurfaceMaterial,
+        equilibrium: Kelvin,
+    ) -> Self {
+        let t = equilibrium.value();
+        if t.is_finite() && t > 0.0 {
+            ground_inertia(lid, material, equilibrium, LidAir::Airless, &Pores::Vacuum)
+        } else {
+            Self {
+                gamma: material_inertia_j_per_m2_k_sqrt_s(material),
+                source: InertiaSource::Unlit,
+                lid: None,
+                material,
+            }
+        }
+    }
+
+    /// The ground read at `equilibrium` ([`at_equilibrium`](Self::at_equilibrium)'s, the
+    /// caller's) on a lid under `air` ([`lid_air`]) whose pores hold what `pores` gives
+    /// ([`pores_of`]; P14.T49.l): below the hold, or for a ground read at no lid or under no light,
+    /// itself to the bit, `pores` never called; under [`RegolithInertiaRules::PoreGas`], the law at
+    /// its lid at `equilibrium` read once more at the form for its air with the gas in its pores
+    /// ([`ground_inertia`]), at every step that calls it.
+    #[must_use]
+    pub(crate) fn under(
+        self,
+        equilibrium: Kelvin,
+        air: LidAir,
+        pores: impl FnOnce() -> Pores,
+    ) -> Self {
+        match (RegolithInertiaRules::in_force(), self.lid) {
+            (RegolithInertiaRules::PoreGas, Some(lid)) => {
+                ground_inertia(Some(lid), self.material, equilibrium, air, &pores())
+            }
+            (RegolithInertiaRules::Vacuum, _) | (RegolithInertiaRules::PoreGas, None) => self,
+        }
+    }
+
+    /// The thermal inertia Γ, J m⁻² K⁻¹ s^−½, positive.
+    #[must_use]
+    pub(crate) const fn inertia_j_per_m2_k_sqrt_s(&self) -> f64 {
+        self.gamma
+    }
+
+    /// Where it comes from.
+    #[cfg_attr(not(test), expect(dead_code, reason = "the inertia's tests read it"))]
+    #[must_use]
+    pub(crate) const fn source(&self) -> InertiaSource {
+        self.source
+    }
+}
+
+/// P14.T24.a's constant of a regolith of `material`, J m⁻² K⁻¹ s^−½: rock's 55 or ice's 20, the
+/// fallback alone ([`GroundInertia`]).
+#[must_use]
+const fn material_inertia_j_per_m2_k_sqrt_s(material: SurfaceMaterial) -> f64 {
+    match material {
+        SurfaceMaterial::Rock => ROCK_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S,
+        SurfaceMaterial::Ice => ICE_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S,
+    }
+}
+
+/// The thermal inertia of the ground of a body whose crust's lid is `lid` and whose bulk is of
+/// `material`, at `temperature`, on a lid under `air`, its pores holding `pores` (P14.T54.a;
+/// decision-pre-23-review item 7; decision-p14-t54a-passes §3.5): P14.T49.j's law at the lid's row
+/// at the rules in force ([`reference_regolith_thermal_inertia_under`]; below P14.T49.l's hold, a
+/// dry regolith in vacuum of its family's reference form), and otherwise P14.T24.a's constants,
+/// [`ROCK_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S`] and
+/// [`ICE_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S`], as its fallback ([`InertiaSource`]):
+///
+/// - no lid: the bulk material's constant, as P14.T24.a read it before the lid, to the bit;
+/// - a row with no thermal columns (`graphite`): rock's, 55;
+/// - a family with no regolith form (the `Organic` lids): ice's, 20;
+/// - no solid at the temperature: the lid's family's, 20 for `WaterIce` and 55 otherwise;
+/// - the law's other refusals, which a lid's row at a positive, finite temperature never gives:
+///   the bulk material's constant, with a `debug_assert`.
+///
+/// Below P14.T49.l's hold the law under air is a vacuum lower bound, its pores unread: Mars's
+/// measured 180–250 (Mellon et al. 2000, Icarus 148, 437; Putzig et al. 2005, Icarus 173, 325;
+/// neither re-read) lies against its `basalt_fe` lid's about 47 here at its `T_eq` (46.91 at the
+/// reference Mars's 206.9 K), and Titan's about 236 (MacKenzie et al. 2019, JGR Planets 124, 1728;
+/// not re-read) against its ice's 57. Under the hold the gas in the pores adds its conduction
+/// (P14.T49.l): the reference Mars reads 147.4, and Titan's ice, under its air at P14.T49.j's form,
+/// about 130 at its 94 K surface; an airless water-ice lid takes the outer system's ice.
+///
+/// The lid is a [`CrustLithology`], T51.c's closed set, every row of which has condensed columns
+/// and takes its own family's form: so the law's refusal of a row with none, or of a form of
+/// another family, cannot be reached by type.
+///
+/// `temperature` is the ground's, K, positive and finite: P14.T24.a's column's equilibrium
+/// temperature, or R09.T13.c's mean surface temperature. Each row's thermal columns hold their
+/// end values beyond their own valid range (P14.T49.j), and above the lid row's transition the
+/// row has no solid ([`InertiaSource::NoSolid`]). Its one way in is
+/// [`GroundInertia::at_equilibrium`], which passes only a positive, finite temperature (an unlit
+/// column takes [`InertiaSource::Unlit`] before it), and its tests.
+///
+/// In a debug build it panics on the fallback's [`InertiaSource::Unreachable`] (a temperature
+/// that is not positive and finite, which only its tests pass; or a lid row with no condensed
+/// columns, which no [`CrustLithology`] lacks), whose Γ is the bulk material's constant in every
+/// build.
+#[must_use]
+fn ground_inertia(
+    lid: Option<CrustLithology>,
+    material: SurfaceMaterial,
+    temperature: Kelvin,
+    air: LidAir,
+    pores: &Pores,
+) -> GroundInertia {
+    let Some(lid) = lid else {
+        return GroundInertia::of_material(material);
+    };
+    let error = match reference_regolith_thermal_inertia_under(
+        lid.substance(),
+        temperature,
+        RegolithInertiaRules::in_force(),
+        air,
+        pores,
+    ) {
+        Ok(inertia) => {
+            return GroundInertia {
+                gamma: inertia.inertia_j_per_m2_k_sqrt_s(),
+                source: InertiaSource::Law,
+                lid: Some(lid),
+                material,
+            };
+        }
+        Err(error) => error,
+    };
+    let (gamma, source) = match error {
+        EvaluateRegolithInertiaError::NoThermalColumns { .. } => (
+            ROCK_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S,
+            InertiaSource::NoThermalColumns,
+        ),
+        EvaluateRegolithInertiaError::NoRegolithForm { .. } => (
+            ICE_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S,
+            InertiaSource::NoRegolithForm,
+        ),
+        EvaluateRegolithInertiaError::NoSolid { id, .. } => {
+            let ice = id
+                .substance()
+                .condensed()
+                .is_some_and(|row| row.mechanics() == MechanicsFamily::WaterIce);
+            let gamma = if ice {
+                ICE_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S
+            } else {
+                ROCK_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S
+            };
+            (gamma, InertiaSource::NoSolid)
+        }
+        EvaluateRegolithInertiaError::Temperature { .. }
+        | EvaluateRegolithInertiaError::NotCondensed { .. }
+        | EvaluateRegolithInertiaError::FamilyMismatch { .. } => (
+            material_inertia_j_per_m2_k_sqrt_s(material),
+            InertiaSource::Unreachable,
+        ),
+    };
+    debug_assert_ne!(
+        source,
+        InertiaSource::Unreachable,
+        "{error}: a lid's row at a positive, finite temperature never gives it"
+    );
+    GroundInertia {
+        gamma,
+        source,
+        lid: Some(lid),
+        material,
+    }
+}
+
+/// Whether the lid of a body of surface gravity `gravity` whose airborne inventory, none of it
+/// condensed, is the column `inventory` lies under an air (P14.T49.l, [`LidAir`]): under one where
+/// that column's gases other than water, all airborne, would reach the tenuous floor
+/// ([`holds_tenuous_air`]), the line between a `Tenuous` air and none.
+///
+/// The passes' steps and the record's conditions take it from the pass's inventory, the column the
+/// first step of T13.c's passes reads, and R09's hand-built inputs from their own air
+/// ([`lid_air_of_air`]): once a pass, and never from a step's partition, so that the form a lid
+/// takes cannot freeze out the air that chose it. A body whose air condenses to a tenuous one or to
+/// none keeps its inventory's form. Water is left out: a water-ice lid's own vapour is no air over
+/// it, and an icy body's inventory holds its whole hydrosphere, which would put every airless icy
+/// moon under an air (lean, 2026-11-01).
+#[must_use]
+pub(crate) fn lid_air(inventory: &PartialPressures, gravity: MetresPerSecondSquared) -> LidAir {
+    let air = Gas::ALL
+        .into_iter()
+        .filter(|&gas| gas != Gas::Water)
+        .fold(0.0, |sum, gas| sum + inventory.of(gas).value());
+    lid_air_at(Pascals::new(air), gravity)
+}
+
+/// Whether a hand-built world's lid lies under its air, the gases `gases` (mole fractions) at the
+/// surface pressure `pressure` under the surface gravity `gravity` ([`lid_air`]'s rule, over its
+/// air's gases other than water).
+#[must_use]
+pub(crate) fn lid_air_of_air(
+    pressure: Pascals,
+    gases: &[(SubstanceId, f64)],
+    gravity: MetresPerSecondSquared,
+) -> LidAir {
+    let water = Gas::Water.substance();
+    let share = gases
+        .iter()
+        .filter(|&&(id, _)| id != water)
+        .fold(0.0, |sum, &(_, x)| sum + x);
+    lid_air_at(Pascals::new(pressure.value() * share), gravity)
+}
+
+/// [`lid_air`]'s line: under an air where the gases other than water weigh `air` under `gravity`,
+/// a column at or above the tenuous floor.
+#[must_use]
+fn lid_air_at(air: Pascals, gravity: MetresPerSecondSquared) -> LidAir {
+    if holds_tenuous_air(air, gravity) {
+        LidAir::UnderAir
+    } else {
+        LidAir::Airless
+    }
+}
+
+/// What fills the pores of a regolith under the column `column` of the gases `gases`, largest
+/// first (P14.T49.l): the column's air at its surface pressure, its mean molar mass and specific
+/// heat, with the Lennard-Jones constants of its most abundant gas that has them
+/// ([`COLLISION_CONSTANTS`]; ammonia has none); and nothing for a column that holds no air (an
+/// airless or tenuous one, under [`AIRLESS_PRESSURE`]), or whose gases have no constants.
+///
+/// The record's conditions and T13.c's passes read it from the same column, so that the published
+/// pass's ground and the record's agree. Its specific heat is the column's, at its mean surface
+/// temperature.
+#[must_use]
+pub(crate) fn pores_of(column: &Column, gases: &[(SubstanceId, f64)]) -> Pores {
+    pores_at(
+        column.surface_pressure,
+        column.molar_mass_g_per_mol,
+        column.specific_heat_j_per_kg_k,
+        gases,
+    )
+}
+
+/// What fills the pores of a regolith under an air of the gases `gases` (mole fractions, largest
+/// first) at the surface pressure `pressure` and mean surface temperature `surface_temperature`, as
+/// a column of that air holds it ([`pores_of`]): nothing under [`AIRLESS_PRESSURE`], where a column
+/// holds no air. For an air given by hand, as R09's reference worlds give theirs.
+#[must_use]
+pub(crate) fn pores_of_air(
+    pressure: Pascals,
+    gases: &[(SubstanceId, f64)],
+    surface_temperature: Kelvin,
+) -> Pores {
+    if pressure < AIRLESS_PRESSURE {
+        return Pores::Vacuum;
+    }
+    let (Some(mu), Some(cp)) = (
+        mean_molar_mass_g_per_mol(gases),
+        mixture_heat_capacity_over_r_at(gases, surface_temperature),
+    ) else {
+        return Pores::Vacuum;
+    };
+    pores_at(pressure, mu, specific_heat_j_per_kg_k(cp, mu), gases)
+}
+
+/// The pores' gas at `pressure` of mean molar mass `molar_mass_g_per_mol` and specific heat
+/// `specific_heat_j_per_kg_k` among the gases `gases`, largest first ([`pores_of`]).
+#[must_use]
+fn pores_at(
+    pressure: Pascals,
+    molar_mass_g_per_mol: f64,
+    specific_heat_j_per_kg_k: f64,
+    gases: &[(SubstanceId, f64)],
+) -> Pores {
+    if pressure.value() <= 0.0 {
+        return Pores::Vacuum;
+    }
+    let Some(collision) = gases.iter().find_map(|&(id, _)| {
+        let key = id.substance().key();
+        COLLISION_CONSTANTS
+            .iter()
+            .find(|constants| constants.key == key.as_str())
+            .copied()
+    }) else {
+        return Pores::Vacuum;
+    };
+    match PoreGas::new(
+        pressure,
+        molar_mass_g_per_mol,
+        specific_heat_j_per_kg_k,
+        collision,
+    ) {
+        Ok(gas) => Pores::Gas(gas),
+        // A column with air has a positive molar mass and a c_p above R ÷ M, but for gases over a
+        // surface at 0 K, whose c_p is zero and which absorbs no light: its pores are empty.
+        Err(BuildPoreGasError::SpecificHeat { .. }) => Pores::Vacuum,
+        // A column's pressure is finite (its partial pressures are, or it has no column), its
+        // molar mass positive where it holds air, and the collision table's constants positive:
+        // a bug, which a release build reads as empty pores.
+        Err(
+            error @ (BuildPoreGasError::Pressure { .. }
+            | BuildPoreGasError::MolarMass { .. }
+            | BuildPoreGasError::Collision { .. }),
+        ) => {
+            debug_assert!(false, "{error}: a column's air is always a pore gas");
+            Pores::Vacuum
+        }
+    }
+}
+
+/// The fit (a, n) of a regolith's redistribution ε = x ÷ (1 + x), x = a Θ^n: (0.635, 0.905),
+/// science-p14-t24a-climate.md §2's.
+///
+/// Θ is the thermal parameter Γ √ω ÷ (`ε_r` σ `T_ss`³) (Spencer, Lebofsky and Sykes 1989, Icarus
+/// 78, 337, not re-read). The fit is to a 1-D model of constant inertia over seven latitudes,
+/// whose night hemisphere emits 0.0053, 0.0246, 0.103, 0.254 and 0.480 of σ `T_eq`⁴ at
+/// Θ = 0.0051, 0.028, 0.152, 0.506 and 1.52, each within 1%. It tends to 0 for a slow or locked
+/// body and to 1, isothermal in longitude, as Θ grows. It is checked against Hayne et al.'s full
+/// lunar regolith (a 102 K mean night on the Moon's equator) and Diviner's "about 95 K before
+/// sunrise" (Williams et al. 2017, Icarus 283, 300).
+///
+/// It is fitted over Θ of 0.0051 to 1.52 and extrapolated beyond. Mercury's Θ, 0.0027, lies
+/// below: its night, 102 K, is under the 117 K mean that the ruling's 1-D model of Hayne et al.'s
+/// lunar regolith gives on Mercury's orbit-mean flux, and within Mariner 10's 100–130 K
+/// (Bandfield, Osterloo and Holsclaw 2019).
+pub const REGOLITH_REDISTRIBUTION_FIT: (f64, f64) = (0.635, 0.905);
+
+/// The cosmic microwave background's temperature, the floor of a night with no internal heat:
+/// 2.725 48 K ([`COSMIC_BACKGROUND_TEMPERATURE_K`], Fixsen 2009, ApJ 707, 916: 2.725 48 ± 0.000 57
+/// K).
+///
+/// P14.T24.b's heat flow F raises the floor to (`T_CMB`⁴ + F ÷ `ε_r` σ)^¼ ([`night_floor`]).
+pub const COSMIC_BACKGROUND_TEMPERATURE: Kelvin = Kelvin::new(COSMIC_BACKGROUND_TEMPERATURE_K);
+
+/// The floor of a night on a body of internal heat flow `heat_flow`: (`T_CMB`⁴ + F ÷ `ε_r` σ)^¼,
+/// at which its regolith radiates its internal heat and the cosmic background's
+/// ([`COSMIC_BACKGROUND_TEMPERATURE`], [`REGOLITH_EMISSIVITY`]; science-p14-t24a-climate.md §2).
+///
+/// A world locked 1:1 to its seasonal host has no solar day, so its night is the floor: about 21 K
+/// at a Mercury's heat flow, 22 K at a Moon's and 36 K at an Earth's (science-p14-t24b-laws §1.5).
+/// The floor is weak in F, a factor of 2 in F being 19% in T. Diviner's permanently shadowed
+/// craters, 25–40 K (Paige et al. 2010, Science 330, 479; not re-read), are not heat-flow floors:
+/// scattered light and the crater walls' infrared hold them above it. It is the cosmic
+/// background's for a heat flow that is not positive.
+///
+/// # Examples
+///
+/// The Moon's 11.9 mW m⁻² hold its dark at 21.7 K:
+///
+/// ```
+/// use hyperion_sim::planetary::hooks::surface::{COSMIC_BACKGROUND_TEMPERATURE, night_floor};
+/// use hyperion_sim::units::WattsPerSquareMetre;
+///
+/// let floor = night_floor(WattsPerSquareMetre::new(0.0119));
+/// assert!((floor.value() - 21.7).abs() < 0.05);
+/// assert_eq!(night_floor(WattsPerSquareMetre::new(0.0)), COSMIC_BACKGROUND_TEMPERATURE);
+/// ```
+#[must_use]
+pub fn night_floor(heat_flow: WattsPerSquareMetre) -> Kelvin {
+    let f = heat_flow.value();
+    if f.is_nan() || f <= 0.0 {
+        return COSMIC_BACKGROUND_TEMPERATURE;
+    }
+    let background = math::powi(COSMIC_BACKGROUND_TEMPERATURE.value(), 4);
+    Kelvin::new(math::powf(
+        background + f / (REGOLITH_EMISSIVITY * STEFAN_BOLTZMANN),
+        0.25,
+    ))
+}
+
+/// What [`SurfaceConditions::derive`] reads of a body at a time, as plain values.
+///
+/// The fields carry no invariant the derivation relies on: a gravity, radius or temperature that
+/// is not positive gives no column and no contrast, so they are public.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SurfaceInputs<'a> {
+    /// The body's atmosphere at the time (P14.T13, with P14.T24.f's gases).
+    pub atmosphere: &'a Atmosphere,
+    /// Its equilibrium temperature from its hosts' light at the time, at its Bond albedo
+    /// (P14.T12): σ `T_eq`⁴ is the mean flux it absorbs.
+    pub equilibrium_temperature: Kelvin,
+    /// Its mean surface gravity, the bulk section's: the column is `p_s` ÷ g.
+    pub surface_gravity: MetresPerSecondSquared,
+    /// Its mean radius, the bulk section's.
+    pub radius: Metres,
+    /// What its surface is made of, as its photometry section's Bond albedo reads it (P14.T47):
+    /// the body's surface material, its bulk's (its record's composition, the bulk section's mass
+    /// fractions, [`SurfaceMaterial::of`]), or rock where its heated shell lost its ice
+    /// (P14.T56.g); the regolith whose thermal inertia carries the day's heat into the night.
+    ///
+    /// The equilibrium temperature is the derivation's, whose albedo reads the placement's
+    /// fractions. For an icy belt member, a moon, a giant-impact moon or a capture the two can
+    /// differ, by up to 8.2% in the equilibrium temperature, until P14.T51.b's passes read the
+    /// record's composition (science-p14-t24a-climate.md §6, item 3).
+    pub material: SurfaceMaterial,
+    /// The lithology of its crust's lid (P14.T51.c, from P14.T54.a): its regolith's thermal
+    /// inertia is P14.T49.j's law at that row at the equilibrium temperature, a vacuum lower bound
+    /// under air, with no pore gas (P14.T49.l's). `None` where the lid is not known, as over the
+    /// passes' stand-in: the material's constant then stands in, P14.T24.a's
+    /// ([`ROCK_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S`],
+    /// [`ICE_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S`]), as it does for a lid with no law.
+    pub lid: Option<CrustLithology>,
+    /// The flux of its hosts' light at it, orbit-averaged, at the time.
+    pub stellar_flux: WattsPerSquareMetre,
+    /// The X-ray and extreme-ultraviolet flux of its hosts at it, orbit-averaged, at the time
+    /// ([`XuvHistory::flux`]).
+    pub xuv_flux: WattsPerSquareMetre,
+    /// How it turns under its seasonal host.
+    pub spin: SeasonalSpin,
+    /// Its internal heat flow at the surface at the time, P14.T24.b's F
+    /// ([`GlobalFigures::heat_flow`](crate::planetary::hooks::figures::GlobalFigures::heat_flow)),
+    /// which raises its night's floor above the cosmic background's ([`night_floor`]).
+    pub heat_flow: WattsPerSquareMetre,
+    /// Its ocean's weight θ in the contrasts, P14.T24.b's from its potential ocean
+    /// (science-p14-t24b-laws §4.4; [`GlobalFigures::ocean_weight`]).
+    pub ocean_weight: OceanWeight,
+    /// Whether its surface holds open water (P14.T24.j): liquid water its published condensates
+    /// list, or, at a pass solved under the deck, water its warmest zone melts.
+    ///
+    /// A world locked 1:1 takes its substellar deck only over open water, from generator version
+    /// 26; no other body reads it. On the record it is the flag its published pass read, at a pass
+    /// the previous pass's.
+    pub holds_liquid_water: bool,
+}
+
+/// How a body turns under the host that sets its seasons, as its contrasts read it: its
+/// obliquity to the seasonal orbit, its sidereal rotation period and its solar day (as rendering
+/// plan R09's `Spin` states them).
+///
+/// The seasonal orbit is the body's own about its star or stars, or its planet's for a moon
+/// (`decision-r09-t2.md` item 1); a moon's moves with P14.T56.a's Laplace planes at 22 → 23.
+///
+/// Plain data with public fields: the contrasts read any values, a period that is not positive
+/// and finite holding the slowest rotation's transport.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SeasonalSpin {
+    /// The angle between the spin axis and the seasonal orbit's normal, rad, 0 to π.
+    pub obliquity: Radians,
+    /// The sidereal rotation period, s, positive: the rate Ω the meridional transport scales with.
+    pub rotation_period: Seconds,
+    /// The mean solar day, s, positive; `None` for a world locked 1:1 to its seasonal host, whose
+    /// hosts stand still in its sky.
+    pub solar_day: Option<Seconds>,
+}
+
+/// Whose orbit sets a body's seasons ([`SeasonalSpin::of`]): a selector, not rendering plan R09's
+/// `SeasonalOrbit`, which states that orbit's eccentricity and period.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum SeasonsFrom {
+    /// The body's own: a planet's, a dwarf planet's or a belt member's about its host.
+    Own,
+    /// Its planet's about the planet's host: a moon's.
+    Planet,
+}
+
+/// Whether a body of spin `spin` turns under its seasonal host: a solar day that is positive. A
+/// world locked 1:1 to its seasonal host, whose hosts stand still in its sky, does not, and its
+/// conditions' cold profile is the eyeball's, not a zonal one ([`SurfaceConditions::cold_profile`]);
+/// a solar day that is not positive is no solar day. The cold traps read it before a pass's
+/// conditions (P14.T54.b.f).
+#[must_use]
+pub(crate) fn rotates(spin: &SeasonalSpin) -> bool {
+    spin.solar_day.is_some_and(|day| day.value() > 0.0)
+}
+
+impl SeasonalSpin {
+    /// The spin at `t` of the body whose frame is `frame`, under the seasonal orbit `seasonal`,
+    /// which is `whose`.
+    ///
+    /// - Its obliquity is the frame's for its own orbit, and for a moon the angle between its pole
+    ///   and its planet's orbital normal, which the frame's obliquity to the moon's own orbit is
+    ///   not (a Titan in its planet's equator sees its planet's 26.7°).
+    /// - Its mean solar day is 2π ÷ |ω ∓ n|, with ω its spin rate at `t` and n the seasonal
+    ///   orbit's mean motion, less for a spin within 90° of the orbit's normal and more beyond it,
+    ///   since the sun's right ascension turns once a year whatever the tilt (Earth's 24 h from
+    ///   its 23.93 h; Venus's 116.75 d from its 243.0 d at 177.4°). A body locked 1:1 to its own
+    ///   orbit's host has none.
+    ///
+    /// # Examples
+    ///
+    /// A moon's seasons are its planet's: pass the planet's orbit, not the moon's own. A Titan
+    /// spinning along its orbit's normal, in an orbit tilted 26.7° from its planet's, sees that
+    /// tilt, and turns under the Sun once in about its orbit:
+    ///
+    /// ```
+    /// use hyperion_sim::orbit::{Eccentricity, KeplerElements, Orientation};
+    /// use hyperion_sim::planetary::frames::{BodyFixedFrame, FrameSpin};
+    /// use hyperion_sim::planetary::hooks::surface::{SeasonalSpin, SeasonsFrom};
+    /// use hyperion_sim::time::UniverseTime;
+    /// use hyperion_sim::units::consts::{METRES_PER_AU, SECONDS_PER_DAY};
+    /// use hyperion_sim::units::{Degrees, GravitationalParameter, Metres, Radians, Seconds, SolarMasses, Years};
+    ///
+    /// let circular = |a: f64, mu: GravitationalParameter, tilt: Radians| {
+    ///     KeplerElements::from_semi_major_axis(Metres::new(a), mu, Eccentricity::new(0.0)?, Orientation::new(tilt, Radians::ZERO, Radians::ZERO)?, Radians::ZERO)
+    /// };
+    /// let tilt = Radians::from(Degrees::new(26.73));
+    /// let saturn = circular(9.58 * METRES_PER_AU, GravitationalParameter::from_solar_masses(SolarMasses::new(1.0)), Radians::ZERO)?;
+    /// let titan = circular(1.221_87e9, GravitationalParameter::new(3.793_1e16), tilt)?;
+    /// let spin = FrameSpin {
+    ///     obliquity: Radians::ZERO,
+    ///     pole_azimuth: Radians::ZERO,
+    ///     primordial_period: Seconds::new(15.945 * SECONDS_PER_DAY),
+    ///     locking_time: Seconds::new(1e10),
+    ///     phase_at_epoch: Radians::ZERO,
+    /// };
+    /// let frame = BodyFixedFrame::new(&titan, &spin, Years::new(4.57e9))?;
+    /// let seasons = SeasonalSpin::of(&frame, UniverseTime::EPOCH, &saturn, SeasonsFrom::Planet);
+    /// assert!((seasons.obliquity.value() - tilt.value()).abs() < 1e-9);
+    /// let day = seasons.solar_day.expect("a moon turns under its star").value() / SECONDS_PER_DAY;
+    /// assert!((day - 15.97).abs() < 0.05);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn of(
+        frame: &BodyFixedFrame,
+        t: UniverseTime,
+        seasonal: &KeplerElements,
+        whose: SeasonsFrom,
+    ) -> Self {
+        let obliquity = match whose {
+            SeasonsFrom::Own => frame.obliquity(),
+            SeasonsFrom::Planet => {
+                let [px, py, pz] = frame.pole();
+                let [nx, ny, nz] = seasonal.orientation().normal();
+                let cosine = (px * nx + py * ny + pz * nz).clamp(-1.0, 1.0);
+                Radians::new(math::acos(cosine))
+            }
+        };
+        let rate = frame.rate().rate_at(t);
+        let tau = 2.0 * core::f64::consts::PI;
+        // A law's rates are positive; one that is not would be a body that does not turn, whose
+        // period is infinite.
+        let rotation_period = Seconds::new(if rate > 0.0 {
+            tau / rate
+        } else {
+            f64::INFINITY
+        });
+        let locked = matches!(
+            (whose, frame.state_at(t)),
+            (
+                SeasonsFrom::Own,
+                SpinState::Locked(SpinOrbitResonance::Synchronous)
+            )
+        );
+        // Over a year the sun's right ascension turns once, with the spin below 90° of
+        // obliquity and against it above, whatever the tilt: the mean solar day is the synodic
+        // one.
+        let mean_motion = tau / seasonal.period().value();
+        let solar_rate = if obliquity.value() <= core::f64::consts::FRAC_PI_2 {
+            (rate - mean_motion).abs()
+        } else {
+            rate + mean_motion
+        };
+        let solar_day = (!locked && solar_rate > 0.0).then(|| Seconds::new(tau / solar_rate));
+        Self {
+            obliquity,
+            rotation_period,
+            solar_day,
+        }
+    }
+}
+
+/// The class of the X-ray and extreme-ultraviolet flux a body's hosts give it, in decades of the
+/// present Earth's ([`earth_xuv_flux`]): the host's activity level as the body receives it
+/// (HYPERION's bands, a decade each, as plan 06's activity levels are).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum RadiationClass {
+    /// No X-ray or ultraviolet light: a body with no luminous host.
+    Dark,
+    /// Below 10 times the present Earth's flux: the Solar System's planets today.
+    Quiet,
+    /// 10 to 100 times: a Sun-like host under 1.0 Gyr old at 1 au, or a quieter one close in.
+    Active,
+    /// 100 to 1,000 times: a saturated Sun-like host at 1 au (some 300 times), or a hot Jupiter's
+    /// orbit about an old one.
+    Intense,
+    /// 1,000 times or more: a saturated M dwarf's habitable zone, or the closest orbits.
+    Extreme,
+}
+
+impl RadiationClass {
+    /// The class of the X-ray and ultraviolet flux `xuv_flux` at a body: [`Self::Dark`] for none,
+    /// and otherwise by its ratio to [`earth_xuv_flux`], each band closed below.
+    #[must_use]
+    pub fn of(xuv_flux: WattsPerSquareMetre) -> Self {
+        let flux = xuv_flux.value();
+        if flux.is_nan() || flux <= 0.0 {
+            return Self::Dark;
+        }
+        let ratio = flux / earth_xuv_flux().value();
+        if ratio < 10.0 {
+            Self::Quiet
+        } else if ratio < 100.0 {
+            Self::Active
+        } else if ratio < 1_000.0 {
+            Self::Intense
+        } else {
+            Self::Extreme
+        }
+    }
+}
+
+/// The X-ray and extreme-ultraviolet flux Earth receives from the Sun today, the unit of the
+/// radiation class: [`XuvHistory`] of 1 M☉ at
+/// [`REFERENCE_SUN_ZAMS_LUMINOSITY`] at [`EARTH_REFERENCE_AGE`], at 1 au on a circular orbit,
+/// about 9.75 × 10⁻⁴ W m⁻², as Earth's fluence is taken
+/// ([`earth_xuv_fluence`](crate::planetary::derive::atmosphere::earth_xuv_fluence)).
+#[must_use]
+pub fn earth_xuv_flux() -> WattsPerSquareMetre {
+    XuvHistory::new(SolarMasses::new(1.0), REFERENCE_SUN_ZAMS_LUMINOSITY).flux(
+        EARTH_REFERENCE_AGE,
+        Metres::new(METRES_PER_AU),
+        0.0,
+    )
+}
+
+/// A body's surface conditions at a time (P14.T24.a): its mean temperature, contrasts and range
+/// of temperature, its surface pressure and gases, the light it receives, whether water can be
+/// liquid on it, and from the second stage its climate regime (P14.T48.d).
+#[derive(Debug, Clone, PartialEq)]
+pub struct SurfaceConditions {
+    zonal: ZonalProfile,
+    day_and_night: (Kelvin, Kelvin),
+    locked: bool,
+    spin: SeasonalSpin,
+    air: AirTransport,
+    climate_regime: Option<ClimateRegime>,
+    mean_surface_temperature: Kelvin,
+    equator_pole_contrast_k: f64,
+    day_night_contrast_k: f64,
+    climate_range: (Kelvin, Kelvin),
+    surface_pressure: Pascals,
+    gases: Vec<(SubstanceId, f64)>,
+    mean_molar_mass_g_per_mol: Option<f64>,
+    heat_capacity_over_r: Option<f64>,
+    stellar_flux: WattsPerSquareMetre,
+    radiation: RadiationClass,
+    liquid_water: bool,
+    ground: GroundInertia,
+    carbon_dioxide_cap: Option<Kelvin>,
+}
+
+impl SurfaceConditions {
+    /// The conditions of the body `inputs` describe; `None` for a body in the gas-envelope state,
+    /// which has no surface (P14.T48.e's split).
+    ///
+    /// An airless body has no gases, and its surface pressure is zero whatever residue its
+    /// partial pressures hold, so that the list agrees with the state (P14.T53.c's test); its μ
+    /// and `c_p` ÷ R are none, as T49.a's functions give for an empty mixture.
+    ///
+    /// # Examples
+    ///
+    /// Earth, as [`derive_body`](crate::planetary::derive::derive_body)'s example derives it, with
+    /// its own spin:
+    ///
+    /// ```
+    /// use hyperion_sim::orbit::{Eccentricity, KeplerElements, Orientation};
+    /// use hyperion_sim::planetary::derive::atmosphere::SurfaceMaterial;
+    /// use hyperion_sim::planetary::derive::{BodyHosts, HostLight, PlacedBody, derive_body};
+    /// use hyperion_sim::planetary::disc::{self, DiscDraws, DiscHost, Truncation};
+    /// use hyperion_sim::planetary::hooks::surface::{
+    ///     OceanWeight, SeasonalSpin, SurfaceConditions, SurfaceInputs,
+    /// };
+    /// use hyperion_sim::stellar::Composition;
+    /// use hyperion_sim::stellar::draws::UnitUniform;
+    /// use hyperion_sim::time::UniverseTime;
+    /// use hyperion_sim::units::consts::{METRES_PER_AU, SOLAR_MASS_KG};
+    /// use hyperion_sim::units::{
+    ///     Degrees, Dex, EarthMasses, GravitationalParameter, Kelvin, Kilograms, Megayears, Metres,
+    ///     Radians, Seconds, SolarLuminosities, SolarMasses, SolarRadii, WattsPerSquareMetre, Years,
+    /// };
+    ///
+    /// let host = DiscHost::new(SolarMasses::new(1.0), Dex::new(0.0), SolarLuminosities::new(0.7), SolarRadii::new(0.89))?;
+    /// let disc = disc::derive(&host, Megayears::new(3.0), &DiscDraws::MEDIAN, Truncation::NONE);
+    /// let disc = disc.profile().expect("a median disc exists");
+    /// let a = Metres::new(METRES_PER_AU);
+    /// let mu = GravitationalParameter::from_solar_masses(SolarMasses::new(1.0));
+    /// let orientation = Orientation::new(Radians::ZERO, Radians::ZERO, Radians::ZERO)?;
+    /// let orbit = KeplerElements::from_semi_major_axis(a, mu, Eccentricity::new(0.0167)?, orientation, Radians::ZERO)?;
+    /// let rank = UnitUniform::new(0.384).expect("inside (0, 1)");
+    /// let earth = PlacedBody::new(EarthMasses::new(1.0), orbit, a, rank)?;
+    /// let sun = [HostLight::new(SolarLuminosities::new(1.0), Kelvin::new(5_772.0), SolarRadii::new(1.0))?];
+    /// let hosts = BodyHosts::new(Kilograms::new(SOLAR_MASS_KG), Composition::SOLAR, &sun, &[])?;
+    /// let derived = derive_body(&earth, &hosts, disc, Years::new(4.57e9), UniverseTime::EPOCH)?;
+    /// let conditions = SurfaceConditions::derive(&SurfaceInputs {
+    ///     atmosphere: derived.atmosphere(),
+    ///     equilibrium_temperature: derived.equilibrium_temperature(),
+    ///     surface_gravity: derived.surface_gravity(),
+    ///     radius: Metres::from(derived.radius()),
+    ///     material: SurfaceMaterial::of(&derived.fractions()),
+    ///     lid: None,
+    ///     stellar_flux: WattsPerSquareMetre::from(derived.flux()),
+    ///     xuv_flux: derived.xuv_flux(),
+    ///     spin: SeasonalSpin {
+    ///         obliquity: Radians::from(Degrees::new(23.44)),
+    ///         rotation_period: Seconds::new(86_164.1),
+    ///         solar_day: Some(Seconds::new(86_400.0)),
+    ///     },
+    ///     heat_flow: WattsPerSquareMetre::new(0.0925),
+    ///     ocean_weight: OceanWeight::FULL,
+    ///     holds_liquid_water: derived.atmosphere().lists_liquid_water(),
+    /// })
+    /// .expect("an Earth has a surface");
+    /// // Its fractions are by number and sum to 1, its equator is the warmer, its poles stay
+    /// // above 250 K, and water can be liquid on it.
+    /// let sum = conditions.gases().iter().fold(0.0, |sum, &(_, x)| sum + x);
+    /// assert!((sum - 1.0).abs() < 1e-9);
+    /// assert!(conditions.equator_pole_contrast_k() > 30.0);
+    /// let (coldest, warmest) = conditions.climate_range();
+    /// assert!(coldest.value() > 250.0 && warmest.value() < 320.0);
+    /// assert!(conditions.liquid_water());
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn derive(inputs: &SurfaceInputs<'_>) -> Option<Self> {
+        let Surface {
+            column,
+            pressure: surface_pressure,
+            gases,
+            mean_molar_mass_g_per_mol,
+            heat_capacity_over_r,
+        } = Surface::of(inputs)?;
+        // The passes' cap at the record's own column, so that its CO₂ ice is theirs (P14.T53.h).
+        let carbon_dioxide_cap = carbon_dioxide_cap(
+            &CapBody {
+                spin: inputs.spin,
+                stellar_flux: inputs.stellar_flux,
+                heat_flow: inputs.heat_flow,
+                molten: inputs.atmosphere.state() == SurfaceState::MagmaOcean,
+                carbon_dioxide_inventory: inputs
+                    .atmosphere
+                    .inventory_weights()
+                    .of(Gas::CarbonDioxide),
+            },
+            &column,
+            inputs.atmosphere.partial_pressures(),
+        );
+        let floor = night_floor(inputs.heat_flow);
+        // The ground's inertia, once: at its lid's row at the column's equilibrium temperature, its
+        // pores holding the column's air under P14.T49.l's hold at the form of the inventory's
+        // air, as the published pass's step.
+        let ground = GroundInertia::at_equilibrium(
+            inputs.lid,
+            inputs.material,
+            inputs.equilibrium_temperature,
+        )
+        .under(
+            inputs.equilibrium_temperature,
+            lid_air(
+                inputs.atmosphere.inventory_weights(),
+                inputs.surface_gravity,
+            ),
+            || pores_of(&column, &gases),
+        );
+        // A world locked 1:1 with open water takes its substellar deck in its column (P14.T24.j).
+        let deck::Decked {
+            column,
+            climate:
+                ColumnClimate {
+                    zonal,
+                    response,
+                    day_and_night: (day, night),
+                    range,
+                },
+            ..
+        } = deck::under_deck(
+            &column,
+            &deck::DeckBody {
+                spin: inputs.spin,
+                stellar_flux: inputs.stellar_flux,
+                liquid_water: inputs.holds_liquid_water,
+            },
+            |column| climate_of(column, &inputs.spin, inputs.ocean_weight, ground, floor),
+        );
+        let equator_pole = zonal.ends.0 - zonal.ends.1;
+        let air = AirTransport {
+            redistribution: heat_redistribution(&column),
+            diurnal_storage: response.and_then(|r| r.storage),
+            meridional_transport: zonal.transport_over_restoring(),
+        };
+        Some(Self {
+            zonal,
+            day_and_night: (day, night),
+            // A solar day that is not positive is no solar day, as `day_and_night` takes it.
+            locked: !rotates(&inputs.spin),
+            spin: SeasonalSpin {
+                solar_day: inputs.spin.solar_day.filter(|day| day.value() > 0.0),
+                ..inputs.spin
+            },
+            air,
+            climate_regime: None,
+            mean_surface_temperature: column.surface_temperature,
+            equator_pole_contrast_k: equator_pole,
+            day_night_contrast_k: day.value() - night.value(),
+            climate_range: range,
+            surface_pressure,
+            gases,
+            mean_molar_mass_g_per_mol,
+            heat_capacity_over_r,
+            stellar_flux: inputs.stellar_flux,
+            radiation: RadiationClass::of(inputs.xuv_flux),
+            liquid_water: liquid_water(range, surface_pressure),
+            ground,
+            carbon_dioxide_cap,
+        })
+    }
+
+    /// The temperature of the body's permanent CO₂ cap at its column, in K, above 0 and below CO₂'s
+    /// triple point, which its partition reads as CO₂'s cold trap where that lies colder
+    /// than the coldest zone (P14.T53.h, from generator version 26; [`carbon_dioxide_cap`]): the
+    /// cap T13.c's passes' last step reads, to the bit. `None` where the body holds no such cap,
+    /// and under version 25's rules and before.
+    #[must_use]
+    pub(crate) const fn carbon_dioxide_cap(&self) -> Option<Kelvin> {
+        self.carbon_dioxide_cap
+    }
+
+    /// The ground's thermal inertia its night read (P14.T54.a): P14.T49.j's law at its lid, or
+    /// P14.T24.a's constant as its fallback ([`SurfaceInputs::lid`]). Rendering plan R09's
+    /// `CoarseInputs` carries it from the record to its radiative model, so that the two read one
+    /// Γ (decision-p14-t54a-passes §3.5).
+    #[must_use]
+    pub(crate) const fn ground(&self) -> GroundInertia {
+        self.ground
+    }
+
+    /// The mean surface temperature (P14.T13.c), which rendering plan R08's profile starts from:
+    /// the surface's emission mean, (⟨σT⁴⟩ ÷ σ)^¼, about 1.3 K above the area mean for Earth-like
+    /// contrasts (decision-p14-t57a-fits §2.2).
+    ///
+    /// On a world locked 1:1 under its substellar deck (P14.T24.j, from generator version 26) it is
+    /// the deck's column's, `T_s,w`, colder than T13.c's own, the air's
+    /// ([`Atmosphere::surface_temperature`]), which the air's gases, pressure and greenhouse are
+    /// taken at: the two differ on such a world (the table's Earth locked about an M dwarf's
+    /// orbit, 245.4 K against 290.4 K).
+    #[must_use]
+    pub const fn mean_surface_temperature(&self) -> Kelvin {
+        self.mean_surface_temperature
+    }
+
+    /// The annual-mean equator–pole contrast T(0°) − T(90°), K, which rendering plan R09 imposes
+    /// on its annual field's ends, by a correction shaped like `P₂`: negative where the poles are
+    /// warmer, as from 53.9° to 126.1° of obliquity (the [module](self)'s model; P14.T48.e's sign).
+    #[must_use]
+    pub const fn equator_pole_contrast_k(&self) -> f64 {
+        self.equator_pole_contrast_k
+    }
+
+    /// The day–night contrast, the dayside's less the nightside's temperature, K, at least 0
+    /// (the [module](self)'s model). For a world locked 1:1 to its seasonal host (its rotation
+    /// section's [`SpinState::Locked`] with [`SpinOrbitResonance::Synchronous`]) it is stated
+    /// about the substellar axis (P14.T48.e); for every other, the solar day turns it.
+    #[must_use]
+    pub const fn day_night_contrast_k(&self) -> f64 {
+        self.day_night_contrast_k
+    }
+
+    /// The climate's range of temperature, coldest then warmest: the span of its orbit-mean
+    /// climate, from the coldest latitude's nightside to the warmest latitude's dayside, each a
+    /// half-day mean on the orbit-averaged flux (science-p14-t24a-climate.md §3 and §6, item 1;
+    /// P14.T48.d's).
+    ///
+    /// It is not the noon peak, the predawn minimum or a perihelion's, which rendering plan R09's
+    /// field resolves.
+    ///
+    /// - The zonal profile's ends, at the equator and a pole, are those whose difference is the
+    ///   equator–pole contrast: the radiative ends, `T_s` `q_eq`^¼ and `T_s` `q_pole`^¼, under the
+    ///   transport that damps each of the insolation's Legendre modes at its own rate
+    ///   (science-p14-t24a-climate.md §7). An airless body's are its radiative profile's, and a
+    ///   strong transport's tend to `T_s`.
+    /// - The warmest is the warmer end plus the dayside's excess over `T_s`, `T_day` − `T_s`.
+    /// - The coldest is the colder end, at most `T_s`, less the nightside's deficit,
+    ///   `T_s` − `T_night`. It never lies below the night's floor, the cosmic background's
+    ///   raised by the body's heat flow ([`night_floor`]).
+    ///
+    /// Cowan and Agol's day and night are not symmetric about `T_s`: with no redistribution the
+    /// day stands 0.278 `T_s` above it and the night `T_s` below. An airless body's warmest lies
+    /// between its dayside and its orbit-mean subsolar temperature, `T_eq` (4 ÷ `ε_r`)^¼. The
+    /// signed contrast puts a warm-pole world's coldest at its equator.
+    #[must_use]
+    pub const fn climate_range(&self) -> (Kelvin, Kelvin) {
+        self.climate_range
+    }
+
+    /// The surface pressure of the modelled air, the volatiles': the sum of the gases' weights,
+    /// zero for an airless body and for a surface holding melt whose volatiles are gone, and a
+    /// tenuous air's own below 100 Pa (P14.T53.c).
+    ///
+    /// It does not include the melt's own vapour, which no rule computes until P14.T55.b.
+    #[must_use]
+    pub const fn surface_pressure(&self) -> Pascals {
+        self.surface_pressure
+    }
+
+    /// The gases at the surface as `(SubstanceId, x)` mole fractions, largest first with ties by
+    /// `SubstanceId`, summing to 1 ([`mole_fractions`]); empty for an airless body, or for a
+    /// surface holding melt with no volatile air, which does not deny the melt's own vapour
+    /// (P14.T55.b), and listed for a tenuous one (P14.T53.c). Every gas the atmosphere holds is
+    /// listed, whatever its share.
+    #[must_use]
+    pub fn gases(&self) -> &[(SubstanceId, f64)] {
+        &self.gases
+    }
+
+    /// The gases' mean molar mass μ = Σ xᵢ μᵢ, g mol⁻¹, summed over [`gases`](Self::gases) in its
+    /// order (T49.a's [`mean_molar_mass_g_per_mol`]); `None` with an empty `gases`: an airless
+    /// body, or a surface holding melt with no volatile air.
+    #[must_use]
+    pub const fn mean_molar_mass_g_per_mol(&self) -> Option<f64> {
+        self.mean_molar_mass_g_per_mol
+    }
+
+    /// The gases' mixed ideal-gas `c_p` ÷ R at T13.c's mean surface temperature, the air's,
+    /// Σ xᵢ (`c_p,ᵢ` ÷ R): the [published mean](Self::mean_surface_temperature) but under a
+    /// locked world's substellar deck.
+    ///
+    /// It is summed over [`gases`](Self::gases) in its order: T49.b's statistical sum
+    /// ([`mixture_heat_capacity_over_r_at`]), the one its column's specific heat takes, since
+    /// P14.T54.a's switch from the kinetic-theory classes. Above 1,500 K, a magma ocean's air, it
+    /// is the harmonic sum's extrapolation ([`thermo`](crate::substance::thermo)): at 2,879 K
+    /// below NASA Glenn's by 1.6% for CO₂, 4.7% for H₂O and 1.1% for N₂. `None` with an empty
+    /// `gases` (an airless body, or a surface holding melt with no volatile air), and at a mean
+    /// surface temperature not above 0 K or not finite, where the statistical sum has no `c_p`.
+    ///
+    /// On a world locked 1:1 under its substellar deck (P14.T24.j) it is at T13.c's own mean, the
+    /// air's, which its column's specific heat reads, not at the deck's published mean.
+    #[must_use]
+    pub const fn heat_capacity_over_r(&self) -> Option<f64> {
+        self.heat_capacity_over_r
+    }
+
+    /// The flux of the hosts' light at the body, orbit-averaged.
+    #[must_use]
+    pub const fn stellar_flux(&self) -> WattsPerSquareMetre {
+        self.stellar_flux
+    }
+
+    /// The class of the hosts' X-ray and ultraviolet flux at the body.
+    #[must_use]
+    pub const fn radiation(&self) -> RadiationClass {
+        self.radiation
+    }
+
+    /// Whether water can be liquid at the surface pressure somewhere in the climate's range of
+    /// temperature ([`climate_range`](Self::climate_range), [`liquid_water`]): a condition of the
+    /// surface, whether or not the body holds water. On the record P14.T51.a derives it from the
+    /// partition (`with_condensates`).
+    #[must_use]
+    pub const fn liquid_water(&self) -> bool {
+        self.liquid_water
+    }
+
+    /// The conditions with their liquid-water flag read from P14.T51.a's published condensates
+    /// `condensates` (P14.T51.a's second part): true where they hold liquid water, a condition of
+    /// the body's own water, no longer of its surface alone.
+    #[must_use]
+    pub(crate) fn with_condensates(self, condensates: &Condensates) -> Self {
+        let water = Gas::Water.substance();
+        Self {
+            liquid_water: condensates.entry(water, CondensatePhase::Liquid).is_some(),
+            ..self
+        }
+    }
+
+    /// The conditions with their climate regime (P14.T48.d, [`ClimateRegime::of`]), from what the
+    /// batch's later steps give, `inputs`: step 10 of science-p14-t24b-laws §4.6, after the
+    /// volatile history and the ice cover it reads.
+    ///
+    /// [`derive`](Self::derive) alone gives the first stage, with no regime: the conditions
+    /// [`PlanetarySystem::hooks_at`](crate::planetary::PlanetarySystem::hooks_at) publishes always
+    /// carry it. [`ClimateRegime::of`]'s example classifies an Earth.
+    #[must_use]
+    pub fn with_climate(self, inputs: &ClimateInputs<'_>) -> Self {
+        let regime = ClimateRegime::of(&self, inputs);
+        Self {
+            climate_regime: Some(regime),
+            ..self
+        }
+    }
+
+    /// The climate regime (P14.T48.d): its thermal regime, forcing and condensable, and the coarse
+    /// model it names; `None` before [`with_climate`](Self::with_climate).
+    #[must_use]
+    pub const fn climate_regime(&self) -> Option<ClimateRegime> {
+        self.climate_regime
+    }
+
+    /// How the air carries its heat, as the climate regime reads it.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn air_transport(&self) -> AirTransport {
+        self.air
+    }
+
+    /// The spin the conditions were derived under, a solar day that is not positive taken as none:
+    /// what a census reads of a locked world (P14.T24.j's).
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn spin(&self) -> SeasonalSpin {
+        self.spin
+    }
+
+    /// The conditions' first stage, with no climate regime, as [`derive`](Self::derive) gives
+    /// them: what a test compares a rebuilt derivation with.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn without_climate(self) -> Self {
+        Self {
+            climate_regime: None,
+            ..self
+        }
+    }
+
+    /// The annual-mean surface temperature at the latitude whose sine is `sine_latitude`, −1 to 1,
+    /// read off the zonal profile whose ends are the equator–pole contrast's
+    /// (science-p14-t24a-climate.md §7, evaluated at each latitude by science-p14-t24b-laws §4.3).
+    ///
+    /// The insolation at x = sin φ ([`annual_insolation_at`]) and its Legendre modes at x take the
+    /// ends' places, and each mode is damped at its own rate over the latitude's own restoring,
+    /// (T(x) ÷ `T_s`)³. It gives the ends at the equator and the poles, bit for bit, and is exact
+    /// at no transport, `T_s` q(x)^¼ on an airless body. It is symmetric about the equator, the
+    /// annual mean being so, and flat at `T_s` where no light is absorbed.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use hyperion_sim::orbit::{Eccentricity, KeplerElements, Orientation};
+    /// # use hyperion_sim::planetary::derive::atmosphere::SurfaceMaterial;
+    /// # use hyperion_sim::planetary::derive::{BodyHosts, HostLight, PlacedBody, derive_body};
+    /// # use hyperion_sim::planetary::disc::{self, DiscDraws, DiscHost, Truncation};
+    /// # use hyperion_sim::planetary::hooks::surface::{
+    /// #     OceanWeight, SeasonalSpin, SurfaceConditions, SurfaceInputs,
+    /// # };
+    /// # use hyperion_sim::stellar::Composition;
+    /// # use hyperion_sim::stellar::draws::UnitUniform;
+    /// # use hyperion_sim::time::UniverseTime;
+    /// # use hyperion_sim::units::consts::{METRES_PER_AU, SOLAR_MASS_KG};
+    /// # use hyperion_sim::units::{
+    /// #     Degrees, Dex, EarthMasses, GravitationalParameter, Kelvin, Kilograms, Megayears, Metres,
+    /// #     Radians, Seconds, SolarLuminosities, SolarMasses, SolarRadii, WattsPerSquareMetre, Years,
+    /// # };
+    /// # let host = DiscHost::new(SolarMasses::new(1.0), Dex::new(0.0), SolarLuminosities::new(0.7), SolarRadii::new(0.89))?;
+    /// # let disc = disc::derive(&host, Megayears::new(3.0), &DiscDraws::MEDIAN, Truncation::NONE);
+    /// # let disc = disc.profile().expect("a median disc exists");
+    /// # let a = Metres::new(METRES_PER_AU);
+    /// # let mu = GravitationalParameter::from_solar_masses(SolarMasses::new(1.0));
+    /// # let orientation = Orientation::new(Radians::ZERO, Radians::ZERO, Radians::ZERO)?;
+    /// # let orbit = KeplerElements::from_semi_major_axis(a, mu, Eccentricity::new(0.0167)?, orientation, Radians::ZERO)?;
+    /// # let earth = PlacedBody::new(EarthMasses::new(1.0), orbit, a, UnitUniform::new(0.384).expect("inside (0, 1)"))?;
+    /// # let sun = [HostLight::new(SolarLuminosities::new(1.0), Kelvin::new(5_772.0), SolarRadii::new(1.0))?];
+    /// # let hosts = BodyHosts::new(Kilograms::new(SOLAR_MASS_KG), Composition::SOLAR, &sun, &[])?;
+    /// # let derived = derive_body(&earth, &hosts, disc, Years::new(4.57e9), UniverseTime::EPOCH)?;
+    /// # let conditions = SurfaceConditions::derive(&SurfaceInputs {
+    /// #     atmosphere: derived.atmosphere(),
+    /// #     equilibrium_temperature: derived.equilibrium_temperature(),
+    /// #     surface_gravity: derived.surface_gravity(),
+    /// #     radius: Metres::from(derived.radius()),
+    /// #     material: SurfaceMaterial::of(&derived.fractions()),
+    /// #     lid: None,
+    /// #     stellar_flux: WattsPerSquareMetre::from(derived.flux()),
+    /// #     xuv_flux: derived.xuv_flux(),
+    /// #     spin: SeasonalSpin {
+    /// #         obliquity: Radians::from(Degrees::new(23.44)),
+    /// #         rotation_period: Seconds::new(86_164.1),
+    /// #         solar_day: Some(Seconds::new(86_400.0)),
+    /// #     },
+    /// #     heat_flow: WattsPerSquareMetre::new(0.0925),
+    /// #     ocean_weight: OceanWeight::FULL,
+    /// #     holds_liquid_water: derived.atmosphere().lists_liquid_water(),
+    /// # })
+    /// # .expect("an Earth has a surface");
+    /// // An Earth's annual mean falls from its equator to its poles, through its mean near 30°.
+    /// use hyperion_sim::math;
+    /// let at = |degrees: f64| conditions.zonal_temperature(math::sin(degrees.to_radians())).value();
+    /// let t_s = conditions.mean_surface_temperature().value();
+    /// let contrast = conditions.equator_pole_contrast_k();
+    /// assert!((at(0.0) - at(90.0) - contrast).abs() < 1e-9);
+    /// assert!(at(0.0) > at(30.0) && at(30.0) > at(60.0) && at(60.0) > at(90.0));
+    /// assert!((at(30.0) - t_s).abs() < 6.0, "{} against {t_s}", at(30.0));
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn zonal_temperature(&self, sine_latitude: f64) -> Kelvin {
+        Kelvin::new(self.zonal.at(sine_latitude))
+    }
+
+    /// The dayside's and the nightside's mean temperatures (the [module](self)'s model), whose
+    /// difference is the day–night contrast: about the substellar axis for a world locked 1:1.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn day_and_night(&self) -> (Kelvin, Kelvin) {
+        self.day_and_night
+    }
+
+    /// The zonal profile at the equator, at [`ZONAL_AREA_POINTS`] points uniform in area,
+    /// xₖ = (k + ½) ÷ 64, and at the pole, as `(x, T)` with T in K: what
+    /// [`cold_area`](Self::cold_area) reads of a rotating world.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn zonal_points(&self) -> Vec<(f64, f64)> {
+        self.zonal.points()
+    }
+
+    /// The share of the surface whose annual-mean climate lies below `threshold`, 0 to 1
+    /// (science-p14-t24b-laws §4.3; P14.T24.b's ice fraction reads it at its ice's temperature).
+    ///
+    /// - **A rotating world**: the zonal profile ([`zonal_temperature`](Self::zonal_temperature))
+    ///   at the equator, at [`ZONAL_AREA_POINTS`] points uniform in area, xₖ = (k + ½) ÷ 64, and at
+    ///   the pole, linear between them, so that the area is continuous in time.
+    /// - **A world locked 1:1** to its seasonal host, which has no solar day, is not zonal: its
+    ///   cold area is the eyeball's (Pierrehumbert 2011, ApJ 726, L8; from memory), from its day
+    ///   and night means. With E = σT⁴, its flux on the dayside is `E_n` + (3/2)(`E_d` − `E_n`) μ,
+    ///   μ the cosine from the substellar point, and `E_n` on the night: Cowan and Agol's day and
+    ///   night (2011, ApJ 729, 54, eqs. 4–5) are equator-weighted, the μ-weighted means of their
+    ///   hemispheres, which with this profile is `E_d`, and it conserves the absorbed flux (Cowan
+    ///   and Agol's own local model; science-p14-t24b-laws §4.x.3: Cowan and Agol's `T_d` is
+    ///   μ-weighted; [`EYEBALL_SLOPE`]). The cold area is (1 + `μ_c`) ÷ 2 for `μ_c` =
+    ///   (σ`T_ice`⁴ − `E_n`) ÷ ((3/2)(`E_d` − `E_n`)) held to [0, 1], and none where the night is
+    ///   not below the threshold: the whole night turns at once there. It is the whole sphere
+    ///   where the substellar point, `E_n` + (3/2)(`E_d` − `E_n`), is below the threshold.
+    #[must_use]
+    pub fn cold_area(&self, threshold: Kelvin) -> f64 {
+        self.cold_profile().area_below(threshold)
+    }
+
+    /// The profile [`cold_area`](Self::cold_area) reads, built once, so that the cold areas
+    /// below many thresholds read one profile (decision-p14-t51a-part2 §3.5: P14.T51.a's solids
+    /// each read their own edge): a rotating world's zonal points, or a locked world's day and
+    /// night.
+    #[must_use]
+    pub(crate) fn cold_profile(&self) -> ColdProfile {
+        if self.locked {
+            self.eyeball()
+        } else {
+            ColdProfile::Zonal(self.zonal.points())
+        }
+    }
+
+    /// [`cold_profile`](Self::cold_profile), a rotating world's zonal points read off its body's
+    /// insolation table `table` (lever (h), [`ZonalProfile::points_over`]): the same bits. A
+    /// world locked 1:1 reads none of it.
+    ///
+    /// # Panics
+    ///
+    /// As [`ZonalProfile::points_over`]: if a rotating world's `table` is not of its obliquity.
+    #[must_use]
+    pub(crate) fn cold_profile_over(&self, table: &ZonalInsolation) -> ColdProfile {
+        if self.locked {
+            self.eyeball()
+        } else {
+            ColdProfile::Zonal(self.zonal.points_over(table))
+        }
+    }
+
+    /// [`cold_area`](Self::cold_area) read off the body's insolation table `table`
+    /// ([`cold_profile_over`](Self::cold_profile_over)): the same bits.
+    ///
+    /// # Panics
+    ///
+    /// As [`cold_profile_over`](Self::cold_profile_over).
+    #[must_use]
+    pub(crate) fn cold_area_over(&self, threshold: Kelvin, table: &ZonalInsolation) -> f64 {
+        self.cold_profile_over(table).area_below(threshold)
+    }
+
+    /// The insolation table of the conditions' own obliquity, over hour angles' cosines of its
+    /// own ([`ZonalInsolation`]): for the conditions built outside a record's call chain.
+    #[must_use]
+    pub(crate) fn zonal_insolation(&self) -> ZonalInsolation {
+        ZonalInsolation::of(self.spin.obliquity, &HourCosines::new())
+    }
+
+    /// A locked world's cold profile, its day's and night's mean temperatures.
+    #[must_use]
+    fn eyeball(&self) -> ColdProfile {
+        ColdProfile::Eyeball {
+            day_k: self.day_and_night.0.value(),
+            night_k: self.day_and_night.1.value(),
+        }
+    }
+}
+
+/// A climate's annual-mean profile as [`SurfaceConditions::cold_area`] reads it
+/// ([`SurfaceConditions::cold_profile`]).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum ColdProfile {
+    /// A world locked 1:1 to its seasonal host: its day's and night's mean temperatures, K.
+    Eyeball {
+        /// The dayside's, K.
+        day_k: f64,
+        /// The nightside's, K.
+        night_k: f64,
+    },
+    /// A rotating world: its zonal profile's points, `(x, T)`, from the equator to the pole.
+    Zonal(Vec<(f64, f64)>),
+}
+
+impl ColdProfile {
+    /// The share of the surface whose annual-mean climate lies below `threshold`, 0 to 1:
+    /// [`SurfaceConditions::cold_area`]'s rule, to the bit.
+    #[must_use]
+    pub(crate) fn area_below(&self, threshold: Kelvin) -> f64 {
+        let t_ice = threshold.value();
+        match self {
+            &Self::Eyeball {
+                day_k: day,
+                night_k: night,
+            } => {
+                if night.is_nan() || night >= t_ice {
+                    return 0.0;
+                }
+                let (e_d, e_n, e_ice) = (
+                    math::powi(day, 4),
+                    math::powi(night, 4),
+                    math::powi(t_ice, 4),
+                );
+                let reach = if e_d > e_n {
+                    ((e_ice - e_n) / (EYEBALL_SLOPE * (e_d - e_n))).clamp(0.0, 1.0)
+                } else {
+                    1.0
+                };
+                f64::midpoint(1.0, reach)
+            }
+            Self::Zonal(points) => area_below(points, threshold),
+        }
+    }
+}
+
+/// The gases of the column weights `weights` as `(SubstanceId, x)` mole fractions (signoff-3.md,
+/// item 1.1): xᵢ = (pᵢ ÷ μᵢ) ÷ Σⱼ (pⱼ ÷ μⱼ), μᵢ each row's molar mass, for every gas of positive
+/// weight, largest first with ties by `SubstanceId`.
+///
+/// P14.T13.c's partial pressures are column weights, pᵢ = Mᵢ g ÷ 4πR², which sum to the surface
+/// pressure, so pᵢ ÷ `p_s` is a mass fraction; their mean molar mass is then
+/// μ = Σ xᵢ μᵢ = `p_s` ÷ Σⱼ (pⱼ ÷ μⱼ). Any registry row with a molar mass may be weighed, each
+/// once: the sum runs in the order given, and the list is empty if no gas has weight.
+///
+/// # Errors
+///
+/// - [`CountMolesError::NoMolarMass`] for a row of positive weight that has no molar mass;
+/// - [`CountMolesError::NotFinite`] for a weight that is not finite, NaN included.
+///
+/// # Examples
+///
+/// Equal weights of nitrogen and carbon dioxide hold more nitrogen molecules:
+///
+/// ```
+/// use hyperion_sim::planetary::derive::atmosphere::Gas;
+/// use hyperion_sim::planetary::hooks::surface::mole_fractions;
+/// use hyperion_sim::units::Pascals;
+///
+/// let (n2, co2) = (Gas::Nitrogen, Gas::CarbonDioxide);
+/// let gases = mole_fractions([(n2.substance(), Pascals::new(5e4)), (co2.substance(), Pascals::new(5e4))])?;
+/// assert_eq!(gases[0].0, n2.substance());
+/// let (m_n2, m_co2) = (n2.molar_mass_g_per_mol(), co2.molar_mass_g_per_mol());
+/// assert!((gases[0].1 - m_co2 / (m_co2 + m_n2)).abs() < 1e-12);
+/// # Ok::<(), hyperion_sim::planetary::hooks::surface::CountMolesError>(())
+/// ```
+pub fn mole_fractions(
+    weights: impl IntoIterator<Item = (SubstanceId, Pascals)>,
+) -> Result<Vec<(SubstanceId, f64)>, CountMolesError> {
+    mole_fractions_by(weights, |id| id.substance().molar_mass_g_per_mol())
+}
+
+/// [`mole_fractions`] with each row's molar mass, g mol⁻¹, from `molar_mass`.
+fn mole_fractions_by(
+    weights: impl IntoIterator<Item = (SubstanceId, Pascals)>,
+    molar_mass: impl Fn(SubstanceId) -> Option<f64>,
+) -> Result<Vec<(SubstanceId, f64)>, CountMolesError> {
+    let mut moles = Vec::new();
+    for (id, weight) in weights {
+        let p = weight.value();
+        if !p.is_finite() {
+            return Err(CountMolesError::NotFinite(id));
+        }
+        if p > 0.0 {
+            let mu = molar_mass(id).ok_or(CountMolesError::NoMolarMass(id))?;
+            moles.push((id, p / mu));
+        }
+    }
+    let total = moles.iter().fold(0.0, |sum, &(_, n)| sum + n);
+    let mut gases: Vec<(SubstanceId, f64)> =
+        moles.into_iter().map(|(id, n)| (id, n / total)).collect();
+    debug_assert!(
+        gases.iter().all(|&(_, x)| x.is_finite()),
+        "finite weights over positive molar masses give finite fractions"
+    );
+    gases.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
+    Ok(gases)
+}
+
+/// The gases of an atmosphere's partial pressures `partials` as mole fractions
+/// ([`mole_fractions`] over [`Gas::ALL`]'s rows, in registry order).
+///
+/// # Panics
+///
+/// Never: every [`Gas`] row of the registry has a molar mass (the registry's tests).
+#[must_use]
+pub fn atmosphere_mole_fractions(partials: &PartialPressures) -> Vec<(SubstanceId, f64)> {
+    // One computation with the conditions' and the passes' columns ([`StepColumn::column`]).
+    GasFractions::of(partials, false)
+        .expect("every `Gas` row of the registry has a molar mass")
+        .as_slice()
+        .to_vec()
+}
+
+/// [`mole_fractions`] was given a weight it cannot count in molecules.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum CountMolesError {
+    /// The row of positive weight has no molar mass: it is not a gas.
+    NoMolarMass(SubstanceId),
+    /// The row's weight is infinite or not a number.
+    NotFinite(SubstanceId),
+}
+
+impl fmt::Display for CountMolesError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NoMolarMass(id) => write!(
+                f,
+                "the substance {} has weight but no molar mass",
+                id.substance().key().as_str()
+            ),
+            Self::NotFinite(id) => write!(
+                f,
+                "the substance {} has a weight that is not finite",
+                id.substance().key().as_str()
+            ),
+        }
+    }
+}
+
+impl Error for CountMolesError {}
+
+/// The column the contrasts read, as plain values ([`SurfaceConditions::derive`] builds it from
+/// its inputs). Its fields carry no invariant: a temperature, pressure, mass, gravity or radius
+/// that is not positive gives no contrast or no transport.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Column {
+    /// The mean surface temperature.
+    pub(crate) surface_temperature: Kelvin,
+    /// The equilibrium temperature: σ `T_eq`⁴ is the absorbed mean flux.
+    pub(crate) equilibrium_temperature: Kelvin,
+    /// The surface pressure.
+    pub(crate) surface_pressure: Pascals,
+    /// The air's mass per unit area, `p_s` ÷ g, kg m⁻²: zero for no air.
+    pub(crate) air_mass_kg_per_m2: f64,
+    /// The air's specific heat at constant pressure, J kg⁻¹ K⁻¹: zero for no air.
+    pub(crate) specific_heat_j_per_kg_k: f64,
+    /// The air's mean molar mass μ, g mol⁻¹: zero for no air.
+    pub(crate) molar_mass_g_per_mol: f64,
+    /// The mean surface gravity.
+    pub(crate) surface_gravity: MetresPerSecondSquared,
+    /// The grey optical depth of the greenhouse (P14.T13.c).
+    pub(crate) optical_depth: f64,
+    /// The greenhouse gain g of the gases the surface holds at their cap, by the condensate
+    /// partition ([`greenhouse_gain`]): zero for none.
+    pub(crate) greenhouse_gain: f64,
+    /// The body's mean radius.
+    pub(crate) radius: Metres,
+}
+
+impl Column {
+    /// The absorbed mean flux σ `T_eq`⁴.
+    #[must_use]
+    fn absorbed(&self) -> WattsPerSquareMetre {
+        WattsPerSquareMetre::new(
+            STEFAN_BOLTZMANN * math::powi(self.equilibrium_temperature.value(), 4),
+        )
+    }
+
+    /// The radiative restoring at the surface, `B_P` = 4F ÷ `T_s`, W m⁻² K⁻¹: the grey column's
+    /// dOLR ÷ d`T_s` at fixed τ.
+    #[must_use]
+    pub(crate) fn restoring_w_per_m2_k(&self) -> f64 {
+        4.0 * self.absorbed().value() / self.surface_temperature.value()
+    }
+
+    /// The radiative restoring with the column's own vapour feedback, `B_eff` = `B_P` (1 − g),
+    /// W m⁻² K⁻¹, never negative ([`greenhouse_gain`]; science-p14-t24a-climate.md §1).
+    #[must_use]
+    pub(crate) fn effective_restoring_w_per_m2_k(&self) -> f64 {
+        self.restoring_w_per_m2_k() * (1.0 - self.greenhouse_gain).max(0.0)
+    }
+
+    /// The air's heat capacity per unit area, `c_p` (`p_s` ÷ g), J m⁻² K⁻¹: zero for no air.
+    #[must_use]
+    pub(crate) fn heat_capacity_j_per_m2_k(&self) -> f64 {
+        self.specific_heat_j_per_kg_k * self.air_mass_kg_per_m2
+    }
+
+    /// The air's specific gas constant `R_air` = R ÷ μ, J kg⁻¹ K⁻¹: infinite for no air, whose μ
+    /// is zero.
+    #[must_use]
+    fn gas_constant_j_per_kg_k(&self) -> f64 {
+        MOLAR_GAS_CONSTANT / (self.molar_mass_g_per_mol * 1e-3)
+    }
+}
+
+/// How a body's air carries its heat, as P14.T48.d's climate regime reads it ([`regime`]),
+/// computed once with the contrasts.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct AirTransport {
+    /// Koll's redistribution of the air alone, ε = X ÷ (k + X) ([`heat_redistribution`]): zero
+    /// with no air.
+    pub(crate) redistribution: f64,
+    /// The column's storage over the solar day against its locked contrast's restoring,
+    /// ω C (1 − ε) ÷ `B_P`, ε the air's, the ground's and the floor's in series (the day–night
+    /// contrast's, [`diurnal_response`]); `None` for a world with no solar day, or where no light is
+    /// absorbed or nothing restores the column.
+    pub(crate) diurnal_storage: Option<f64>,
+    /// The zonal profile's meridional transport over its restoring, max(6D, W `B_P`) ÷ `B_eff`,
+    /// D after the dry world's share ([`ZonalProfile::transport_over_restoring`]): zero for a flat
+    /// profile.
+    pub(crate) meridional_transport: f64,
+}
+
+/// What [`SurfaceConditions::derive`] reads off its inputs before the contrasts: the column and its
+/// gases.
+#[derive(Debug, Clone, PartialEq)]
+struct Surface {
+    column: Column,
+    /// The air's surface pressure as published: the column's, and a tenuous air's own over a
+    /// column that holds none (P14.T53.c).
+    pressure: Pascals,
+    gases: Vec<(SubstanceId, f64)>,
+    mean_molar_mass_g_per_mol: Option<f64>,
+    heat_capacity_over_r: Option<f64>,
+}
+
+impl Surface {
+    /// The surface of the body `inputs` describe; `None` in the gas-envelope state. An airless
+    /// body's column holds no air, whatever residue its partial pressures hold, and lists no gas.
+    /// A tenuous one's column holds none either, as the greenhouse's steps read an air under
+    /// [`AIRLESS_PRESSURE`] ([`step_climate`]), so that its climate is theirs to the bit, while its
+    /// gases, their pressure, mean molar mass and heat capacity are its air's own (P14.T53.c).
+    ///
+    /// Its column is [`StepColumn::column`]'s, the one computation T13.c's passes read too
+    /// ([`step_climate`]).
+    #[must_use]
+    fn of(inputs: &SurfaceInputs<'_>) -> Option<Self> {
+        let air = inputs.atmosphere;
+        let (airless, tenuous) = match air.state() {
+            // A steam envelope's surface is hidden, as a gas envelope's (P14.T53.b part 3); its
+            // label is never an atmosphere's state, so no figure reaches this.
+            SurfaceState::GasEnvelope | SurfaceState::SteamEnvelope => return None,
+            SurfaceState::Airless => (true, false),
+            SurfaceState::Tenuous => (true, true),
+            SurfaceState::MagmaOcean
+            | SurfaceState::RunawayGreenhouse
+            | SurfaceState::Temperate
+            | SurfaceState::Desert
+            | SurfaceState::Snowball => (false, false),
+        };
+        let (column, fractions) = StepColumn {
+            surface_temperature: air.surface_temperature(),
+            partials: air.partial_pressures(),
+            surface_pressure: air.surface_pressure().unwrap_or(Pascals::ZERO),
+            optical_depth: air.optical_depth(),
+            airless,
+            equilibrium_temperature: inputs.equilibrium_temperature,
+            surface_gravity: inputs.surface_gravity,
+            radius: inputs.radius,
+            inventory: air.inventory_weights(),
+            ceiling: air.greenhouse_ceiling(),
+        }
+        .column()
+        .expect("every `Gas` row of the registry has a molar mass");
+        let (pressure, fractions) = if tenuous {
+            (
+                air.surface_pressure().unwrap_or(Pascals::ZERO),
+                GasFractions::of(air.partial_pressures(), false).expect(
+                    "every `Gas` row of the registry has a molar mass, and a tenuous air's partial \
+                     pressures are finite (their total passed `holds_tenuous_air`)",
+                ),
+            )
+        } else {
+            (column.surface_pressure, fractions)
+        };
+        Some(Self {
+            column,
+            pressure,
+            gases: fractions.as_slice().to_vec(),
+            mean_molar_mass_g_per_mol: fractions.mean_molar_mass_g_per_mol,
+            heat_capacity_over_r: fractions.heat_capacity_over_r_at(column.surface_temperature),
+        })
+    }
+}
+
+/// The gases of a column as mole fractions, on the stack, with their mean molar mass
+/// ([`StepColumn::column`]): what [`atmosphere_mole_fractions`] lists, without the allocation
+/// T13.c's passes cannot afford at every step.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct GasFractions {
+    list: [(SubstanceId, f64); Gas::ALL.len()],
+    len: usize,
+    mean_molar_mass_g_per_mol: Option<f64>,
+}
+
+impl GasFractions {
+    /// The gases of the partial pressures `partials`, largest first with ties by `SubstanceId`,
+    /// by [`mole_fractions`]'s arithmetic to the bit: each gas of positive weight, in
+    /// [`Gas::ALL`]'s order, counted as its weight over its row's molar mass, then the counts over
+    /// their sum, added in that order; none for an airless column.
+    ///
+    /// # Errors
+    ///
+    /// As [`mole_fractions`]:
+    /// - [`CountMolesError::NoMolarMass`] for a gas of positive weight whose row has no molar
+    ///   mass, which no [`Gas`] row lacks;
+    /// - [`CountMolesError::NotFinite`] for a weight that is not finite.
+    fn of(partials: &PartialPressures, airless: bool) -> Result<Self, CountMolesError> {
+        let mut list = [(Gas::Hydrogen.substance(), 0.0); Gas::ALL.len()];
+        let mut len = 0;
+        if !airless {
+            for gas in Gas::ALL {
+                let id = gas.substance();
+                let p = partials.of(gas).value();
+                if !p.is_finite() {
+                    return Err(CountMolesError::NotFinite(id));
+                }
+                if p > 0.0 {
+                    let mu = id
+                        .substance()
+                        .molar_mass_g_per_mol()
+                        .ok_or(CountMolesError::NoMolarMass(id))?;
+                    list[len] = (id, p / mu);
+                    len += 1;
+                }
+            }
+        }
+        let gases = &mut list[..len];
+        let total = gases.iter().fold(0.0, |sum, &(_, n)| sum + n);
+        for gas in gases.iter_mut() {
+            gas.1 /= total;
+        }
+        // A total order with no ties, each row named once: the stable sort's order, in place.
+        gases.sort_unstable_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
+        let gases = &list[..len];
+        Ok(Self {
+            list,
+            len,
+            mean_molar_mass_g_per_mol: mean_molar_mass_g_per_mol(gases),
+        })
+    }
+
+    /// The fractions, largest first.
+    #[must_use]
+    fn as_slice(&self) -> &[(SubstanceId, f64)] {
+        &self.list[..self.len]
+    }
+
+    /// The gases' mixed ideal-gas `c_p` ÷ R at `temperature`, summed over
+    /// [`as_slice`](Self::as_slice) in its order ([`mixture_heat_capacity_over_r_at`]); `None`
+    /// for no gases.
+    ///
+    /// The column takes it at its mean surface temperature, the one its step or its record
+    /// publishes ([`StepColumn::column`]). No circle closes there: the specific heat enters the
+    /// contrasts, the diurnal response and the range, never the mean temperature it is taken at,
+    /// which T13.c's greenhouse, or the step of its passes, gives the column.
+    #[must_use]
+    fn heat_capacity_over_r_at(&self, temperature: Kelvin) -> Option<f64> {
+        mixture_heat_capacity_over_r_at(self.as_slice(), temperature)
+    }
+}
+
+/// What a column of P14.T24.a's contrasts is built from, at a step of T13.c's passes or on the
+/// record ([`StepColumn::column`]).
+#[derive(Debug, Clone, Copy)]
+struct StepColumn<'a> {
+    /// The mean surface temperature.
+    surface_temperature: Kelvin,
+    /// The partial pressures, as column weights.
+    partials: &'a PartialPressures,
+    /// The surface pressure, the partial pressures' sum.
+    surface_pressure: Pascals,
+    /// The greenhouse's grey optical depth at those partial pressures.
+    optical_depth: f64,
+    /// Whether the column holds no air ([`SurfaceState::Airless`]): no gases and no pressure,
+    /// whatever residue the partial pressures hold.
+    airless: bool,
+    /// The equilibrium temperature.
+    equilibrium_temperature: Kelvin,
+    /// The mean surface gravity.
+    surface_gravity: MetresPerSecondSquared,
+    /// The mean radius.
+    radius: Metres,
+    /// Its airborne inventory before any of it condensed, as column weights
+    /// ([`Atmosphere::inventory_weights`]).
+    inventory: &'a PartialPressures,
+    /// The ceiling its grey surface is held under: where it binds, the surface reads no τ and the
+    /// greenhouse gain is 0 (P14.T53.a; [`GreenhouseCeiling::binds`]).
+    ceiling: GreenhouseCeiling,
+}
+
+/// The surface pressure the conditions of the air `air` publish
+/// ([`SurfaceConditions::surface_pressure`]): none in the airless state, whose column holds no air
+/// whatever residue its partial pressures hold ([`StepColumn::column`]'s rule), and otherwise its
+/// own, none where it has none: a tenuous air's own under 100 Pa among them, as its conditions
+/// publish it (P14.T53.c's `Surface::of`). A pass's maturity reads it so (P14.T54.b.e), as the
+/// record's modifiers read its conditions'.
+#[must_use]
+pub(crate) fn published_surface_pressure(air: &Atmosphere) -> Pascals {
+    match air.state() {
+        SurfaceState::Airless => Pascals::ZERO,
+        SurfaceState::GasEnvelope
+        | SurfaceState::MagmaOcean
+        | SurfaceState::RunawayGreenhouse
+        | SurfaceState::SteamEnvelope
+        | SurfaceState::Temperate
+        | SurfaceState::Desert
+        | SurfaceState::Snowball
+        | SurfaceState::Tenuous => air.surface_pressure().unwrap_or(Pascals::ZERO),
+    }
+}
+
+impl StepColumn<'_> {
+    /// The column, with its gases' mole fractions and mean molar mass; its specific heat takes
+    /// their `c_p` ÷ R at its mean surface temperature ([`GasFractions::heat_capacity_over_r_at`]).
+    ///
+    /// # Errors
+    ///
+    /// As [`GasFractions::of`]: [`CountMolesError::NoMolarMass`] for a gas row with no molar
+    /// mass, which none lacks, and [`CountMolesError::NotFinite`] for a partial pressure that is
+    /// not finite.
+    fn column(&self) -> Result<(Column, GasFractions), CountMolesError> {
+        let airless = self.airless;
+        let fractions = GasFractions::of(self.partials, airless)?;
+        let surface_pressure = if airless {
+            Pascals::ZERO
+        } else {
+            self.surface_pressure
+        };
+        let column = Column {
+            surface_temperature: self.surface_temperature,
+            equilibrium_temperature: self.equilibrium_temperature,
+            surface_pressure,
+            air_mass_kg_per_m2: column_mass_kg_per_m2(surface_pressure, self.surface_gravity),
+            specific_heat_j_per_kg_k: match (
+                fractions.mean_molar_mass_g_per_mol,
+                fractions.heat_capacity_over_r_at(self.surface_temperature),
+            ) {
+                (Some(mu), Some(cp)) => specific_heat_j_per_kg_k(cp, mu),
+                // No gases, an airless column; or gases over a surface not above 0 K or not
+                // finite, where the statistical sum has no c_p, and the column stores no heat. A
+                // surface at 0 K absorbs no light (T_s ≥ T_eq ≥ 0), so has no contrast to store.
+                (None, _) | (_, None) => 0.0,
+            },
+            molar_mass_g_per_mol: fractions.mean_molar_mass_g_per_mol.unwrap_or(0.0),
+            surface_gravity: self.surface_gravity,
+            optical_depth: if airless { 0.0 } else { self.optical_depth },
+            greenhouse_gain: if airless
+                || self.ceiling.binds(
+                    &GreenhouseConstants::in_force(),
+                    (self.partials, self.optical_depth),
+                    self.equilibrium_temperature,
+                    self.surface_gravity,
+                ) {
+                0.0
+            } else {
+                greenhouse_gain(
+                    self.surface_temperature,
+                    self.partials,
+                    self.optical_depth,
+                    fractions.as_slice(),
+                    self.equilibrium_temperature,
+                    self.surface_gravity,
+                    self.inventory,
+                )
+            },
+            radius: self.radius,
+        };
+        Ok((column, fractions))
+    }
+}
+
+/// The climate of a column ([`climate_of`]): its zonal profile, its diurnal response, its day and
+/// night, and its range, coldest then warmest.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ColumnClimate {
+    zonal: ZonalProfile,
+    response: Option<DiurnalResponse>,
+    day_and_night: (Kelvin, Kelvin),
+    range: (Kelvin, Kelvin),
+}
+
+/// The climate of the column `column` under the spin `spin` at the ocean weight `weight`, its
+/// ground of the thermal inertia `ground`, over a night floored at `floor`, its zonal points solved
+/// by the safeguarded Newton steps ([`zonal_point_newton`]): P14.T24.a's range and what it is made
+/// of, the one computation [`SurfaceConditions::derive`] publishes and T13.c's passes read
+/// ([`step_climate`]; decision-p14-t51a-partition §6, condition 1).
+#[must_use]
+fn climate_of(
+    column: &Column,
+    spin: &SeasonalSpin,
+    weight: OceanWeight,
+    ground: GroundInertia,
+    floor: Kelvin,
+) -> ColumnClimate {
+    let zonal = ZonalProfile::of(column, spin, weight);
+    let response = diurnal_response(column, spin, ground, floor);
+    let (day, night) = day_and_night_of(column, response);
+    let range = climate_range(column.surface_temperature, zonal.ends, day, night, floor);
+    ColumnClimate {
+        zonal,
+        response,
+        day_and_night: (day, night),
+        range,
+    }
+}
+
+/// What the climate of T13.c's passes reads of a body beyond each step's column and ocean weight
+/// ([`step_climate`]; decision-p14-t51a-partition §6): the inputs of
+/// [`SurfaceConditions::derive`] that the passes do not change.
+///
+/// P14.T54.a derives the spin before the passes (its rotation law reads nothing they give), and
+/// takes the heat flow, an input the figures give after them, from the context the pass reads,
+/// the previous pass's figures ([`SpunClimate`](crate::planetary::derive::atmosphere::SpunClimate)),
+/// and its ground's inertia from that context's lid, the previous pass's own, at the pass's
+/// equilibrium temperature, once a pass. Its surface gravity, radius and material are the record's
+/// bulk's, at which the record's conditions are derived.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct ClimateBody {
+    /// The equilibrium temperature from the hosts' light at the albedo in use.
+    pub(crate) equilibrium_temperature: Kelvin,
+    /// The mean surface gravity.
+    pub(crate) surface_gravity: MetresPerSecondSquared,
+    /// The mean radius.
+    pub(crate) radius: Metres,
+    /// The thermal inertia of its ground, whose regolith carries the day's heat into the night
+    /// ([`GroundInertia::at_equilibrium`]): read once a pass, and under P14.T49.l's hold read once
+    /// more at each step with that step's air in its pores ([`GroundInertia::under`]).
+    pub(crate) ground: GroundInertia,
+    /// How it turns under its seasonal host.
+    pub(crate) spin: SeasonalSpin,
+    /// Its internal heat flow at the surface, which raises the night's floor.
+    pub(crate) heat_flow: WattsPerSquareMetre,
+    /// The pass's airborne inventory before any of it condensed, as column weights
+    /// ([`Atmosphere::inventory_weights`]): the condensate partition's inventory.
+    pub(crate) inventory: PartialPressures,
+    /// The ceiling its grey surface is held under (P14.T53.a): where it binds, the greenhouse gain
+    /// is 0 ([`GreenhouseCeiling::binds`]).
+    pub(crate) ceiling: GreenhouseCeiling,
+    /// The flux of its hosts' light at it, orbit-averaged, which a locked world's deck reads
+    /// ([`deck`], P14.T24.j).
+    pub(crate) stellar_flux: WattsPerSquareMetre,
+    /// Whether its surface holds open water as the previous pass gave it, the context's
+    /// (P14.T24.j): liquid water listed, or melted in its warmest zone under the deck; a locked
+    /// world's deck needs open water under it ([`deck`]).
+    pub(crate) holds_liquid_water: bool,
+    /// Its crust: a molten one, T13.c's young magma ocean, holds no CO₂ cap
+    /// ([`carbon_dioxide_cap`], P14.T53.h).
+    pub(crate) crust: Crust,
+}
+
+/// The span of the climate of the body `body` at a step of T13.c's passes whose mean surface
+/// temperature is `surface_temperature` over the column of partial pressures `partials`, at the
+/// ocean weight `ocean_weight` (P14.T51.a's second part; decision-p14-t51a-partition §6), whose
+/// safeguarded Newton steps make it a partition step's cost (decision-p14-t51a-part2 §1).
+///
+/// It is P14.T24.a's range by the one computation the record's
+/// [`climate_range`](SurfaceConditions::climate_range) is (`climate_of`), on the column the
+/// conditions would build of an atmosphere of that temperature and those partial pressures: its
+/// greenhouse's optical depth T13.c's under the constants in force
+/// ([`GreenhouseConstants::in_force`]: P14.T57.a's to version 23, P14.T53.a's from 24), and
+/// airless below
+/// [`AIRLESS_PRESSURE`], as T13.c's state is but for a molten surface, which T13.c calls a
+/// `MagmaOcean` and on which nothing condenses. So a body's last step reads the range its record
+/// publishes, but where the range does not hold the mean, whose ends are then widened to it
+/// ([`ClimateSpan::about`]). On a world locked 1:1 with open water, the previous pass's
+/// ([`ClimateBody::holds_liquid_water`]), the column takes its substellar deck first, as the
+/// record's does ([`deck`], P14.T24.j), while the span's mean stays the step's own. From
+/// generator version 26 the span carries the body's permanent CO₂ cap at the step's column, as the
+/// record's conditions do ([`carbon_dioxide_cap`], P14.T53.h); a step at or over the
+/// [`SILICATE_SOLIDUS`], or on a molten crust, holds none. It allocates nothing.
+#[must_use]
+pub(crate) fn step_climate(
+    body: &ClimateBody,
+    ocean_weight: OceanWeight,
+    surface_temperature: Kelvin,
+    partials: &PartialPressures,
+) -> ClimateSpan {
+    let Some((column, fractions)) = step_column(body, surface_temperature, partials) else {
+        // A partial pressure that is not finite has no climate the contrasts can give.
+        return ClimateSpan::isothermal(surface_temperature);
+    };
+    // The pass's ground, its pores holding this step's air under P14.T49.l's hold, at the form
+    // of the pass's inventory's air, the first step's column.
+    let ground = body.ground.under(
+        body.equilibrium_temperature,
+        lid_air(&body.inventory, body.surface_gravity),
+        || pores_of(&column, fractions.as_slice()),
+    );
+    let cap = carbon_dioxide_cap(
+        &CapBody {
+            spin: body.spin,
+            stellar_flux: body.stellar_flux,
+            heat_flow: body.heat_flow,
+            molten: body.crust == Crust::Molten || surface_temperature >= SILICATE_SOLIDUS,
+            carbon_dioxide_inventory: body.inventory.of(Gas::CarbonDioxide),
+        },
+        &column,
+        partials,
+    );
+    let floor = night_floor(body.heat_flow);
+    // The record's rule (P14.T24.j): a world locked 1:1 with open water under its deck.
+    let climate = deck::under_deck(
+        &column,
+        &deck::DeckBody {
+            spin: body.spin,
+            stellar_flux: body.stellar_flux,
+            liquid_water: body.holds_liquid_water,
+        },
+        |column| climate_of(column, &body.spin, ocean_weight, ground, floor),
+    )
+    .climate;
+    let span = ClimateSpan::about(climate.range, surface_temperature);
+    match cap {
+        Some(t) => span.with_cap(Gas::CarbonDioxide.substance(), t),
+        None => span,
+    }
+}
+
+/// The column of the body `body` at a step of T13.c's passes whose mean surface temperature is
+/// `surface_temperature` over the partial pressures `partials` ([`step_climate`]'s), with its gases
+/// as mole fractions, largest first, which the step's pore gas reads ([`pores_of`]).
+///
+/// It is airless below [`AIRLESS_PRESSURE`] of them ([`below_the_line`]); `None` where a partial
+/// pressure is not finite.
+#[must_use]
+fn step_column(
+    body: &ClimateBody,
+    surface_temperature: Kelvin,
+    partials: &PartialPressures,
+) -> Option<(Column, GasFractions)> {
+    let surface_pressure = partials.total();
+    let step = StepColumn {
+        surface_temperature,
+        partials,
+        surface_pressure,
+        optical_depth: GreenhouseConstants::in_force().optical_depth(
+            partials,
+            body.equilibrium_temperature,
+            body.surface_gravity,
+        ),
+        airless: below_the_line(partials),
+        equilibrium_temperature: body.equilibrium_temperature,
+        surface_gravity: body.surface_gravity,
+        radius: body.radius,
+        inventory: &body.inventory,
+        ceiling: body.ceiling,
+    };
+    step.column().ok()
+}
+
+/// Whether a step over the partial pressures `partials` reads the airless climate, their total
+/// under [`AIRLESS_PRESSURE`] ([`step_column`]'s line, which P14.T53.i's record reads too).
+#[must_use]
+pub(crate) fn below_the_line(partials: &PartialPressures) -> bool {
+    partials.total() < AIRLESS_PRESSURE
+}
+
+/// Whether P14.T53.h's CO₂ cap is in force: from generator version 26, and in the tests its held
+/// arm, their oracle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum CapBalanceRules {
+    /// Version 25's and before: CO₂'s cold trap is the coldest zone; the tests' oracle
+    /// ([`with_cap_balance`]).
+    Held,
+    /// Version 26's: a rotator's CO₂ air is cold-trapped by its cap's balance too
+    /// ([`carbon_dioxide_cap`]).
+    Balanced,
+}
+
+impl CapBalanceRules {
+    /// The rules in force: the cap's balance; in the tests, the rules a test's switch sets on its
+    /// thread ([`with_cap_balance`]).
+    #[must_use]
+    pub(crate) fn in_force() -> Self {
+        #[cfg(test)]
+        if let Some(rules) = CAP_BALANCE_RULES.with(core::cell::Cell::get) {
+            return rules;
+        }
+        Self::Balanced
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The cap balance's rules a test sets on its thread, `None` for the cap's balance.
+    static CAP_BALANCE_RULES: core::cell::Cell<Option<CapBalanceRules>> =
+        const { core::cell::Cell::new(None) };
+}
+
+/// `run`'s result with the cap balance's rules `rules` on this thread, the held arm the tests'
+/// oracle; the cap's balance is set back after, a panic in `run` included.
+#[cfg(test)]
+pub(crate) fn with_cap_balance<R>(rules: CapBalanceRules, run: impl FnOnce() -> R) -> R {
+    /// Sets the thread's rules back as it drops.
+    struct Restore(Option<CapBalanceRules>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            CAP_BALANCE_RULES.with(|cell| cell.set(self.0));
+        }
+    }
+    let _restore = Restore(CAP_BALANCE_RULES.with(|cell| cell.replace(Some(rules))));
+    run()
+}
+
+/// The bolometric albedo `A_c` of a permanent CO₂ cap, 0 to 1: 0.73 (P14.T53.h). Ward, Murray and
+/// Malin (1974, JGR 79, 3387) take A ≈ 0.70 for the cap in their model and put pure CO₂ frost at
+/// about 0.75; 0.73 is fitted between the two, so that the table's Mars settles near 6 mbar on the
+/// registry's CO₂ curve (its lean, 2026-10-31). The Mars Climate Sounder's seasonal deposits
+/// poleward of 60° are darker, 0.39 in the north and 0.51 in the south (Gary-Bicas et al. 2020,
+/// JGR Planets 125, e2019JE006150), but they are seasonal frost, which does not survive the
+/// summer.
+pub(crate) const CAP_ALBEDO: f64 = 0.73;
+
+/// The infrared emissivity `ε_c` of a permanent CO₂ cap, 0 to 1: 0.85, Ward, Murray and Malin's
+/// (1974) model value E ≈ 0.85, between the seasonal deposits' winter 32 μm emissivities of 0.84
+/// in the north and 0.87 in the south (Gary-Bicas et al. 2020).
+pub(crate) const CAP_EMISSIVITY: f64 = 0.85;
+
+/// The efficiency δ, dimensionless, of the air's baroclinic transport of heat into a permanent cap,
+/// δ (g H² ÷ Ω R²) p (1 − `T_c` ÷ `T_a`)² (Ward, Murray and Malin 1974, eq. 22, after Gierasch and
+/// Toon 1973, J. Atmos. Sci. 30, 1502): 0.01, fitted to the collapse range of Soto et al.'s (2015,
+/// Icarus 250, 553) `MarsWRF` runs (every inventory from 6 to 3,000 mb collapsed at 15° of obliquity
+/// or less, the 60–1,200 mb ones still at 25°, none at 45°; as P14.T53.h's research read them, not
+/// re-read by its builder), P14.T53.h's lean (2026-10-31).
+pub(crate) const CAP_TRANSPORT_EFFICIENCY: f64 = 0.01;
+
+/// How many halvings solve a permanent cap's balance ([`carbon_dioxide_cap`]): 64, the fixed
+/// count of decision-composition §1.3, more than the 53 that take [0, `T_a`] to one ulp of `T_c`
+/// in `f64`, after which a halving moves nothing.
+pub(crate) const CAP_BALANCE_HALVINGS: u32 = 64;
+
+/// The least a ÷ `L_Ro`, the planetary radius over the deformation radius c ÷ 2Ω, at which a CO₂
+/// cap holds ([`carbon_dioxide_cap`]): 1. Under it the deformation radius exceeds the planet, so
+/// that the weak-gradient regime carries the day's heat to the poles and no cold pole forms (Koll
+/// 2022, §3.1; the module's [`WEAK_GRADIENT_DEFORMATION_RADII`]): P14.T53.h's amendment, the
+/// research's lean adopted by main (2026-10-31).
+pub(crate) const CAP_ROSSBY_RATIO: f64 = 1.0;
+
+/// What the CO₂ cap's balance reads of a body beyond its column ([`carbon_dioxide_cap`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct CapBody {
+    /// How it turns under its seasonal host: its obliquity sets the pole's light, its sidereal
+    /// rate the air's transport, and a body that does not turn holds no cap ([`rotates`]).
+    pub(crate) spin: SeasonalSpin,
+    /// The flux of its hosts' light at it, orbit-averaged, F⋆.
+    pub(crate) stellar_flux: WattsPerSquareMetre,
+    /// Its internal heat flow at the surface, `F_geo`, whose negative part is taken as none.
+    pub(crate) heat_flow: WattsPerSquareMetre,
+    /// Whether its surface is molten, T13.c's `MagmaOcean`, on which nothing condenses.
+    pub(crate) molten: bool,
+    /// Its CO₂'s inventory as a column weight M g ÷ 4πR², before any of it condensed: the CO₂ a
+    /// cap could hold ([`Atmosphere::inventory_weights`], [`ClimateBody::inventory`]), which
+    /// [`carbon_dioxide_cap`]'s scope reads.
+    pub(crate) carbon_dioxide_inventory: Pascals,
+}
+
+/// The temperature of a rotator's permanent CO₂ cap over the column `column` of partial
+/// pressures `partials`, on the body `body` (P14.T53.h, from generator version 26).
+///
+/// A permanent cap lies at one temperature all year, kept there by its latent heat, and holds its
+/// air at its saturation pressure (Leighton and Murray 1966, Science 153, 136). Over the year it
+/// radiates what it absorbs (Ward, Murray and Malin 1974, JGR 79, 3387, eq. 3 and (B1)):
+///
+/// `ε_c` σ `T_c`⁴ = (1 − `A_c`) ⟨`I_p`⟩ + `F_geo` + δ `R_air`² p (`T_a` − `T_c`)² ÷ (g Ω R²)
+///
+/// - ⟨`I_p`⟩ = (4 ÷ π) sin β F⋆ ÷ 4, the pole's annual-mean light (Ward's eq. 1;
+///   [`annual_insolation`]), F⋆ the orbit-mean flux; `A_c` [`CAP_ALBEDO`] and `ε_c`
+///   [`CAP_EMISSIVITY`].
+/// - The last term is the air's heat into the cap, Ward's eq. 22 with H = `R_air` `T_a` ÷ g (after
+///   Gierasch and Toon 1973, J. Atmos. Sci. 30, 1502), δ [`CAP_TRANSPORT_EFFICIENCY`]: `R_air` the
+///   column's specific gas
+///   constant, p its surface pressure, `partials`' total (the whole air's column carries the heat,
+///   and H is the whole air's; δ's target, Soto et al.'s runs, are CO₂ airs, where the two
+///   readings agree, and the table's Mars meets its windows under this reading), g its
+///   gravity, R its radius and Ω the sidereal rate. `T_a`
+///   is the larger of the column's mean surface temperature and its grey `T_eq` (1 + ¾τ)^¼
+///   (P14.T13.c's [`grey_surface_temperature`]):
+///   the steps' temperature alone starts at the base, at which a thick air would collapse on its
+///   first step.
+///
+/// `T_c` is found by [`CAP_BALANCE_HALVINGS`] halvings on [0, `T_a`], in K, above 0 and below
+/// `T_a`. It is `None` where `ε_c` σ `T_a`⁴ does not exceed the light and heat absorbed, so that no
+/// cap lies below the air; where `T_c` is not below CO₂'s triple point (the registry's 216.592 K,
+/// Span and Wagner 1996), since the cap is frost; on a slow rotator, a ÷ `L_Ro` = 2Ωa ÷ c under
+/// [`CAP_ROSSBY_RATIO`], c the column's gravity waves' speed (Koll 2022, §3.1); where the column
+/// holds no airborne CO₂; where another gas's partial pressure exceeds CO₂'s inventory as a column
+/// weight ([`CapBody::carbon_dioxide_inventory`]), the CO₂ the cap could hold before any of it
+/// condensed; on a body that does not turn ([`rotates`]) or whose surface is molten; and in the
+/// tests under the held arm, version 25's rules ([`CapBalanceRules`]).
+///
+/// The scope reads CO₂'s inventory, not its airborne partial pressure, because the cap sets that
+/// partial pressure: read on it, a cap that drew CO₂ under N₂ switched itself off, the CO₂ came
+/// back, and the passes' steps cycled with a period of 2 to 6 across the gate, which has no fixed
+/// point (P14.T53.h's settled check; main, 2026-10-31).
+#[must_use]
+pub(crate) fn carbon_dioxide_cap(
+    body: &CapBody,
+    column: &Column,
+    partials: &PartialPressures,
+) -> Option<Kelvin> {
+    if CapBalanceRules::in_force() == CapBalanceRules::Held || body.molten || !rotates(&body.spin) {
+        return None;
+    }
+    let carbon_dioxide = partials.of(Gas::CarbonDioxide).value();
+    let inventory = body.carbon_dioxide_inventory.value();
+    // A NaN partial pressure or inventory holds no cap.
+    if carbon_dioxide.is_nan()
+        || carbon_dioxide <= 0.0
+        || inventory.is_nan()
+        || Gas::ALL
+            .iter()
+            .any(|&gas| gas != Gas::CarbonDioxide && partials.of(gas).value() > inventory)
+    {
+        return None;
+    }
+    let omega_rad_per_s = sidereal_rate_rad_per_s(&body.spin)?;
+    // A slow rotator's air carries the day's heat to its poles (a ÷ `L_Ro` under 1); a column
+    // with no air, whose waves have no finite speed, gives 0 or NaN and holds none.
+    let rossby = cap_rossby_ratio(column, omega_rad_per_s);
+    if rossby.is_nan() || rossby < CAP_ROSSBY_RATIO {
+        return None;
+    }
+    let t_c = cap_balance_temperature(body, column, partials.total(), omega_rad_per_s)?.value();
+    let triple = Gas::CarbonDioxide
+        .substance()
+        .substance()
+        .phase_diagram()
+        .map(|diagram| diagram.triple_temperature().value());
+    // A frost cap only: none at or above the triple point, where CO₂ would lie as a liquid.
+    triple
+        .is_some_and(|triple| t_c < triple)
+        .then(|| Kelvin::new(t_c))
+}
+
+/// The sidereal rate Ω of the spin `spin`, rad s⁻¹: `None` for a rotation period that is not
+/// finite and positive.
+#[must_use]
+fn sidereal_rate_rad_per_s(spin: &SeasonalSpin) -> Option<f64> {
+    let period = spin.rotation_period.value();
+    (period.is_finite() && period > 0.0).then(|| core::f64::consts::TAU / period)
+}
+
+/// a ÷ `L_Ro` = 2Ωa ÷ c of the column `column` at the sidereal rate `omega_rad_per_s`, c its
+/// gravity waves' speed (Koll 2022, §3.1; [`carbon_dioxide_cap`]'s gate, [`CAP_ROSSBY_RATIO`]): 0 or
+/// NaN for a column with no air.
+#[must_use]
+fn cap_rossby_ratio(column: &Column, omega_rad_per_s: f64) -> f64 {
+    2.0 * omega_rad_per_s * column.radius.value() / gravity_wave_speed_m_per_s(column)
+}
+
+/// The temperature `T_c` that balances a permanent cap of the body `body` over the column `column`
+/// whose surface pressure is `pressure` at the sidereal rate `omega_rad_per_s`, on [0, `T_a`]
+/// ([`carbon_dioxide_cap`]'s balance, before its gates of scope, rotation and frost): `None` where
+/// `ε_c` σ `T_a`⁴ does not exceed the light and heat absorbed.
+#[must_use]
+fn cap_balance_temperature(
+    body: &CapBody,
+    column: &Column,
+    pressure: Pascals,
+    omega_rad_per_s: f64,
+) -> Option<Kelvin> {
+    let grey =
+        grey_surface_temperature(column.equilibrium_temperature, column.optical_depth).value();
+    let surface = column.surface_temperature.value();
+    let air = if grey > surface { grey } else { surface };
+    let pole = annual_insolation(body.spin.obliquity).1 * body.stellar_flux.value() / 4.0;
+    let heat = body.heat_flow.value();
+    let geothermal = if heat > 0.0 { heat } else { 0.0 };
+    let (g, r) = (column.surface_gravity.value(), column.radius.value());
+    let r_air = column.gas_constant_j_per_kg_k();
+    // An airless column, whose μ is zero, carries no heat.
+    let transport = if r_air.is_finite() {
+        CAP_TRANSPORT_EFFICIENCY * r_air * r_air / (g * omega_rad_per_s * r * r)
+    } else {
+        0.0
+    };
+    let absorbed = (1.0 - CAP_ALBEDO) * pole + geothermal;
+    let pressure = pressure.value();
+    let excess = |t: f64| {
+        CAP_EMISSIVITY * STEFAN_BOLTZMANN * math::powi(t, 4)
+            - absorbed
+            - transport * pressure * (air - t) * (air - t)
+    };
+    let surplus = excess(air);
+    if surplus.is_nan() || surplus <= 0.0 {
+        return None;
+    }
+    let (mut cold, mut warm) = (0.0, air);
+    for _ in 0..CAP_BALANCE_HALVINGS {
+        let mid = f64::midpoint(cold, warm);
+        if excess(mid) > 0.0 {
+            warm = mid;
+        } else {
+            cold = mid;
+        }
+    }
+    Some(Kelvin::new(warm))
+}
+
+/// What P14.T53.h's census prints of the cap at a step's column ([`step_cap_figures`]).
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct CapFigures {
+    /// a ÷ `L_Ro` of the step's column, which [`CAP_ROSSBY_RATIO`] gates.
+    pub(crate) rossby: f64,
+    /// The balance's `T_c` at the step's column, before the gates of scope, rotation and frost
+    /// ([`cap_balance_temperature`]): `None` with no CO₂, or where no cap lies below the air.
+    pub(crate) temperature: Option<Kelvin>,
+}
+
+/// The cap's figures at the column of a step of the body `body` at mean surface temperature
+/// `surface_temperature` over the partial pressures `partials` ([`step_climate`]'s column), whether
+/// or not the gates let a cap form there; `None` where the column or the spin gives none.
+#[cfg(test)]
+#[must_use]
+pub(crate) fn step_cap_figures(
+    body: &ClimateBody,
+    surface_temperature: Kelvin,
+    partials: &PartialPressures,
+) -> Option<CapFigures> {
+    let (column, _) = step_column(body, surface_temperature, partials)?;
+    let omega_rad_per_s = sidereal_rate_rad_per_s(&body.spin)?;
+    let carbon_dioxide = partials.of(Gas::CarbonDioxide).value();
+    let cap = CapBody {
+        spin: body.spin,
+        stellar_flux: body.stellar_flux,
+        heat_flow: body.heat_flow,
+        molten: false,
+        carbon_dioxide_inventory: body.inventory.of(Gas::CarbonDioxide),
+    };
+    Some(CapFigures {
+        rossby: cap_rossby_ratio(&column, omega_rad_per_s),
+        temperature: if carbon_dioxide > 0.0 {
+            cap_balance_temperature(&cap, &column, partials.total(), omega_rad_per_s)
+        } else {
+            None
+        },
+    })
+}
+
+/// The greenhouse gain g of an air over a surface at `surface` under the partial pressures
+/// `partials`, whose greenhouse's optical depth is `optical_depth` and whose published mole
+/// fractions are `gases`, over a surface in equilibrium at `equilibrium` under the surface gravity
+/// `gravity`, its greenhouse taken from
+/// the airborne inventory `inventory`, as column weights before any of it condensed
+/// ([`StepColumn::column`], at a step of T13.c's passes as on
+/// the record): the share of the grey column's Planck restoring that its condensing gases' vapour
+/// feedback takes back, `B_eff` = `B_P` (1 − g) (science-p14-t24a-climate.md §1).
+///
+/// Each condensing gas is held at its cap, so the column's outgoing flux σ `T_s`⁴ ÷ (1 + ¾τ(`T_s`))
+/// has the slope `B_P` (1 − g), with
+///
+/// g = (`T_s` ÷ 4) ¾ Σᵢ (1 − xᵢ)(1 − dᵢ) (∂τᵢ ÷ ∂ln pᵢ) Lᵢ ÷ (R `T_s`²) ÷ (1 + ¾τ)
+///
+/// (P14.T53.a, from generator version 24), summed in their order over the τ terms at the constants
+/// in force ([`GreenhouseConstants::in_force`]), whose gas the surface holds at its cap: where
+/// P14.T51.a's
+/// partition holds it at its cap, on either branch, by the partition's own state, some of its
+/// inventory condensed, so that its airborne weight lies below its inventory's. The partition holds
+/// a minor condensable's partial pressure at its humidity, below its saturation pressure (Earth's
+/// water at 0.77 of it, a weight of 0.496 of it), where version 22's comparison with the saturation
+/// pressure would drop its feedback, which h `p_sat`(T) keeps, with the same ∂ln p ÷ ∂T
+/// (decision-p14-t57a-fits §5; P14.T51.a's fix).
+///
+/// - ∂τᵢ ÷ ∂ln pᵢ is each term's own slope ([`GreenhouseConstants::terms`]): ½τᵢ for the terms in
+///   √pᵢ, water vapour's and nitrogen's, and n a Xⁿ (1 + x) + 2 b Y for the broadened carbon
+///   dioxide term, x its share of the surface pressure, which holds it. Water's cloud term, which
+///   has no fixed relative humidity feedback, and hydrogen's, which never condenses, are not read;
+/// - dᵢ = [`dominance`] of xᵢ (decision-pre-23-review item 21). The partition takes d of a
+///   condensable's share on its minor branch, a closed form of its inventory and climate, which
+///   the published mole fraction approximates here. At d = 1 the cap is the cold trap's, set
+///   globally: a cold-trapped dominant condensable, Mars's carbon dioxide, adds no local feedback,
+///   where 1 − x alone kept 1 − x of it;
+/// - Lᵢ ÷ (R `T_s`²) is d ln `p_sat` ÷ dT at `T_s` on the gas's phase diagram, P14.T49.b's fitted
+///   curves ([`PhaseDiagram::clausius_clapeyron_enthalpy_j_per_mol`]): the slope of the branch in
+///   force there, sublimation's below the triple point and vaporisation's from it, on which the
+///   vapour is held at h `p_sat` (P14.T54.a's switch from the held constant-enthalpy curves;
+///   decision-pre-23-review item 23). Water's is 44.47 kJ mol⁻¹ at
+///   Earth's 288 K, where the held curve took 43.5. A gas at or above its critical temperature at
+///   `T_s`, where the curve has no slope, adds none;
+/// - xᵢ is the gas's published mole fraction: the factor 1 − xᵢ removes a dominant condensable,
+///   whose pressure the cold trap sets globally, not locally, continuously in its share.
+///
+/// To version 23 the sum was (1 − xᵢ) ½τᵢ at P14.T57.a's constants, which the 23 → 24 bump
+/// (P14.T54.b) deleted.
+///
+/// The batch's measured Earth gives 0.4022 (`B_eff` 1.995 W m⁻² K⁻¹), as
+/// [`BROADENED_EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`] is fitted on it (0.4311 and 1.898 at 23,
+/// where [`EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`] was; decision-p14-t57a-fits §1.3), the
+/// counterpart of Kaspi and Showman's prescribed τ, which they state stands in for water vapour,
+/// with no feedback of its own. The table's Earth gives 0.4251 (`B_eff` 1.943) through the passes'
+/// stand-ins from 27, whose adding rule lays its air's Rayleigh layer over its clear sky (P14.T24.h.b;
+/// 0.4230 and 1.948 at 26, 0.4545 and 1.841 at 23; version 22's rules gave it 0.3997, `B_eff`
+/// 1.987). Zero where no gas is held, or at a surface not above 0 K.
+#[must_use]
+fn greenhouse_gain(
+    surface: Kelvin,
+    partials: &PartialPressures,
+    optical_depth: f64,
+    gases: &[(SubstanceId, f64)],
+    equilibrium: Kelvin,
+    gravity: MetresPerSecondSquared,
+    inventory: &PartialPressures,
+) -> f64 {
+    let t = surface.value();
+    if t.is_nan() || t <= 0.0 {
+        return 0.0;
+    }
+    let slope = GreenhouseConstants::in_force()
+        .terms(partials, equilibrium, gravity)
+        .into_iter()
+        .fold(0.0, |sum, term| {
+            // Water's cloud has no fixed relative humidity feedback, and hydrogen never condenses.
+            if !term.absorber().feeds_back() {
+                return sum;
+            }
+            let gas = term.gas();
+            let id = gas.substance();
+            let Some(diagram) = id.substance().phase_diagram() else {
+                return sum;
+            };
+            // Held only where some of it condensed: a weight that is not a number is not.
+            let held = matches!(
+                partials.of(gas).partial_cmp(&inventory.of(gas)),
+                Some(core::cmp::Ordering::Less)
+            );
+            if !held {
+                return sum;
+            }
+            // The curve's own slope at T_s, R T_s² d ln p_sat ÷ dT: none at or above the critical
+            // temperature, which the curve does not reach.
+            let Some(enthalpy) = diagram.clausius_clapeyron_enthalpy_j_per_mol(surface) else {
+                return sum;
+            };
+            let share = gases
+                .iter()
+                .find(|&&(gas, _)| gas == id)
+                .map_or(0.0, |&(_, x)| x);
+            let feedback = (1.0 - share) * (1.0 - dominance(share)) * term.log_slope();
+            sum + feedback * enthalpy / (MOLAR_GAS_CONSTANT * t * t)
+        });
+    grey_gain(surface, optical_depth, slope)
+}
+
+/// The gain (`T_s` ÷ 4) ¾ τ′ ÷ (1 + ¾τ) of a grey column of optical depth `optical_depth` over a
+/// surface at `surface`, whose τ rises with the surface temperature at τ′ =
+/// `slope_per_k` per kelvin ([`greenhouse_gain`]).
+#[must_use]
+fn grey_gain(surface: Kelvin, optical_depth: f64, slope_per_k: f64) -> f64 {
+    surface.value() / 4.0 * 0.75 * slope_per_k / (1.0 + 0.75 * optical_depth)
+}
+
+/// The specific heat at constant pressure of a mixture of `c_p` ÷ R `heat_capacity_over_r` and
+/// molar mass `molar_mass_g_per_mol`, J kg⁻¹ K⁻¹.
+#[must_use]
+pub(crate) fn specific_heat_j_per_kg_k(
+    heat_capacity_over_r: f64,
+    molar_mass_g_per_mol: f64,
+) -> f64 {
+    heat_capacity_over_r * MOLAR_GAS_CONSTANT / (molar_mass_g_per_mol * 1e-3)
+}
+
+/// The column's mass per unit area, `p_s` ÷ g, kg m⁻²: zero for a gravity that is not positive.
+#[must_use]
+fn column_mass_kg_per_m2(pressure: Pascals, gravity: MetresPerSecondSquared) -> f64 {
+    let g = gravity.value();
+    if g > 0.0 { pressure.value() / g } else { 0.0 }
+}
+
+/// The share of Earth's meridional transport a world rotating once in `rotation_period` keeps,
+/// D(Ω) ÷ D(Ω⊕) = (Ω ÷ Ω⊕)^−¼ below Earth's rate and (Ω ÷ Ω⊕)^−½ above it
+/// ([`ROTATION_TRANSPORT_EXPONENTS`]), held at its ends beyond [`ROTATION_TRANSPORT_RANGE`]
+/// (rendering plan R09's transport law, after Kaspi and Showman 2015, Fig. 8a: their contrast,
+/// 40 K at Ω⊕, is 23 K at Ω⊕ ÷ 24 and 77 K at 12 Ω⊕).
+///
+/// A slower world's transport is stronger: its eddies are larger and its Hadley cells wider. A
+/// period that is not positive and finite holds the slow end.
+#[must_use]
+pub fn rotation_transport_factor(rotation_period: Seconds) -> f64 {
+    let period = rotation_period.value();
+    let (slowest, fastest) = ROTATION_TRANSPORT_RANGE;
+    let ratio = if period.is_finite() && period > 0.0 {
+        (EARTH_SIDEREAL_DAY.value() / period).clamp(slowest, fastest)
+    } else {
+        slowest
+    };
+    let (slow, fast) = ROTATION_TRANSPORT_EXPONENTS;
+    math::powf(ratio, if ratio <= 1.0 { slow } else { fast })
+}
+
+/// Earth's meridional conductance D⊕ in force, W m⁻² K⁻¹: P14.T24.a's fit refitted at P14.T53.a's
+/// greenhouse, [`BROADENED_EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`], from version 24, where
+/// version 23 read [`EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`].
+#[must_use]
+fn earth_meridional_conductance_w_per_m2_k() -> f64 {
+    BROADENED_EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K
+}
+
+/// The meridional conductance D of the column `column` under the spin `spin`, W m⁻² K⁻¹ (North,
+/// Cahalan and Coakley's units), before the dry world's halving: Earth's under the rules in force
+/// ([`earth_meridional_conductance_w_per_m2_k`]), times
+///
+/// - the air's specific heat over [`EARTH_AIR_SPECIFIC_HEAT_J_PER_KG_K`];
+/// - s(m ÷ m⊕) = (m ÷ m⊕)^0.2 in the column's mass ([`COLUMN_TRANSPORT_EXPONENT`]), linear to zero
+///   below 0.2 and held above 50 ([`COLUMN_TRANSPORT_RANGE`]);
+/// - h(g ÷ g₀) = (g ÷ g₀)^−0.43 in the gravity ([`GRAVITY_TRANSPORT_EXPONENT`]), held beyond
+///   [`GRAVITY_TRANSPORT_RANGE`];
+/// - f(Ω), [`rotation_transport_factor`];
+///
+/// each after Kaspi and Showman 2015's sweeps (science-p14-t24a-climate.md §1). The radius takes
+/// no term of its own. Zero with no air or no gravity.
+#[must_use]
+pub(crate) fn meridional_conductance_w_per_m2_k(column: &Column, spin: &SeasonalSpin) -> f64 {
+    let g = column.surface_gravity.value();
+    let mass = column.air_mass_kg_per_m2 / EARTH_COLUMN_MASS_KG_PER_M2;
+    if !(g > 0.0 && mass > 0.0) {
+        return 0.0;
+    }
+    let (low, high) = COLUMN_TRANSPORT_RANGE;
+    let mass_factor = if mass < low {
+        math::powf(low, COLUMN_TRANSPORT_EXPONENT) * mass / low
+    } else {
+        math::powf(mass.min(high), COLUMN_TRANSPORT_EXPONENT)
+    };
+    let (g_low, g_high) = GRAVITY_TRANSPORT_RANGE;
+    let gravity = (g / STANDARD_GRAVITY.value()).clamp(g_low, g_high);
+    earth_meridional_conductance_w_per_m2_k()
+        * (column.specific_heat_j_per_kg_k / EARTH_AIR_SPECIFIC_HEAT_J_PER_KG_K)
+        * mass_factor
+        * math::powf(gravity, GRAVITY_TRANSPORT_EXPONENT)
+        * rotation_transport_factor(spin.rotation_period)
+}
+
+/// Koll's weak-temperature-gradient transport over the dry restoring, W of the module's
+/// equator–pole model: X ÷ k (his ε ÷ (1 − ε), [`heat_redistribution`]), weighted by
+/// 1 ÷ (1 + (3a ÷ `L_Ro`)²), with a ÷ `L_Ro` = 2Ωa ÷ c, c = `R_air` √(`T_eq` ÷ `c_p`) the gravity
+/// waves' speed (Koll 2022, §3.1) and Ω the sidereal rate, 0 for a body that does not turn
+/// ([`WEAK_GRADIENT_DEFORMATION_RADII`]; science-p14-t24a-climate.md §1 and §4). Zero with no air
+/// or no greenhouse.
+#[must_use]
+pub(crate) fn weak_gradient_transport(column: &Column, spin: &SeasonalSpin) -> f64 {
+    let x = redistribution_parameter(column);
+    let k = redistribution_scale(column);
+    if !(x > 0.0 && k > 0.0) {
+        return 0.0;
+    }
+    let wave = gravity_wave_speed_m_per_s(column);
+    let period = spin.rotation_period.value();
+    let omega = if period.is_finite() && period > 0.0 {
+        core::f64::consts::TAU / period
+    } else {
+        0.0
+    };
+    let ratio = WEAK_GRADIENT_DEFORMATION_RADII * 2.0 * omega * column.radius.value() / wave;
+    (x / k) / (1.0 + ratio * ratio)
+}
+
+/// The speed of the column `column`'s gravity waves, c = `R_air` √(`T_eq` ÷ `c_p`), m s⁻¹ (Koll
+/// 2022, §3.1), with which the deformation radius `L_Ro` = c ÷ 2Ω is taken: infinite or not a
+/// number with no air.
+#[must_use]
+fn gravity_wave_speed_m_per_s(column: &Column) -> f64 {
+    column.gas_constant_j_per_kg_k()
+        * (column.equilibrium_temperature.value() / column.specific_heat_j_per_kg_k).sqrt()
+}
+
+/// The annual-mean equator–pole contrast of the column `column` under the spin `spin` at the ocean
+/// weight `weight`, K: T(0°) − T(90°), signed (the module's model): the difference of the zonal
+/// ends ([`zonal_ends_k`]; science-p14-t24a-climate.md §7).
+///
+/// Zero where no light is absorbed. It changes sign at 53.9° on an airless body, where the
+/// equator's and the poles' light are equal, and toward 54.7°, where `P₂`(cos β) vanishes, as the
+/// transport grows. It is negative beyond, up to the mirror angles near 126°.
+///
+/// [`SurfaceConditions::derive`] takes the same difference of the ends it solves once, so this
+/// form is the tests'.
+#[cfg(test)]
+#[must_use]
+pub(crate) fn equator_pole_contrast_k(
+    column: &Column,
+    spin: &SeasonalSpin,
+    weight: OceanWeight,
+) -> f64 {
+    let (equator, pole) = zonal_ends_k(column, spin, weight);
+    equator - pole
+}
+
+/// The even Legendre degree to which the zonal ends sum the annual insolation's modes one by one:
+/// 32, in 16 modes.
+///
+/// The modes beyond enter as their tail at degree 34's response (science-p14-t24a-climate.md §7).
+/// The tail is known exactly, since the modes sum to the insolation at each end, so the ends
+/// converge by degree 16 to 10⁻⁴ `T_s`.
+const ZONAL_MODES: usize = 16;
+
+/// The steps of each zonal point's bracket: 64. Its upper end doubles from 2 `T_s` at most as many
+/// times ([`zonal_point_newton`]'s bracket), and the bisection that solves the point for its own
+/// restoring, the tests' oracle, halves it as many times, past its last bit.
+const ZONAL_END_STEPS: u32 = 64;
+
+/// One even Legendre mode of the annual-mean insolation over S ÷ 4 ([`insolation_modes`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct InsolationMode {
+    /// Its degree n.
+    pub(crate) degree: f64,
+    /// Its coefficient qₙ.
+    pub(crate) coefficient: f64,
+    /// Pₙ(0), its value at the equator; Pₙ(1) = 1 at a pole.
+    pub(crate) at_equator: f64,
+}
+
+/// The even Legendre modes of the annual-mean insolation over S ÷ 4 at the obliquity `obliquity`,
+/// degrees 2 to 32 (science-p14-t24a-climate.md §7).
+///
+/// The daily-mean insolation is the longitude mean of max(0, μ) = Σ hₙ Pₙ(μ). The addition
+/// theorem, once over the day and once over the year along the ecliptic, gives
+/// q(x) = Σₙ qₙ Pₙ(x), with qₙ = 4 hₙ Pₙ(0) Pₙ(cos β), where:
+/// - hₙ = (2n + 1) ÷ 2 × cₙ, with cₙ = ∫₀¹ μ Pₙ(μ) dμ, c₂ = 1/8 and
+///   c_{n+2} = −(n − 1) ÷ (n + 4) cₙ;
+/// - P_{n+2}(0) = −(n + 1) ÷ (n + 2) Pₙ(0);
+/// - Pₙ(cos β) is summed by Bonnet's recurrence.
+///
+/// The odd modes vanish, the year being symmetric. q₂ = −(5/8) `P₂`(cos β) is North's (1975)
+/// `s₂`, −0.477 at 23.44°.
+#[must_use]
+pub(crate) fn insolation_modes(obliquity: Radians) -> [InsolationMode; ZONAL_MODES] {
+    let c = math::cos(obliquity.value());
+    let mut modes = [InsolationMode {
+        degree: 0.0,
+        coefficient: 0.0,
+        at_equator: 0.0,
+    }; ZONAL_MODES];
+    // Bonnet's recurrence, (n + 1) P_{n+1} = (2n + 1) c Pₙ − n P_{n−1}, from P₀ and P₁.
+    let (mut previous, mut current, mut n) = (1.0, c, 1.0_f64);
+    let (mut integral, mut at_equator) = (0.125, -0.5);
+    for mode in &mut modes {
+        (previous, current) = (
+            current,
+            ((2.0 * n + 1.0) * c * current - n * previous) / (n + 1.0),
+        );
+        n += 1.0;
+        *mode = InsolationMode {
+            degree: n,
+            coefficient: 2.0 * (2.0 * n + 1.0) * integral * at_equator * current,
+            at_equator,
+        };
+        integral *= -(n - 1.0) / (n + 4.0);
+        at_equator *= -(n + 1.0) / (n + 2.0);
+        (previous, current) = (
+            current,
+            ((2.0 * n + 1.0) * c * current - n * previous) / (n + 1.0),
+        );
+        n += 1.0;
+    }
+    modes
+}
+
+/// What the zonal ends read of a column's restoring and transport, W m⁻² K⁻¹ ([`zonal_ends_k`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct ZonalTransport {
+    /// The grey column's restoring at fixed τ, `B_P`.
+    pub(crate) planck: f64,
+    /// Its restoring with its own vapour feedback, `B_eff`.
+    pub(crate) effective: f64,
+    /// The meridional conductance D, after the dry world's share.
+    pub(crate) conductance: f64,
+    /// Koll's weak-gradient transport as a conductance, W `B_P`.
+    pub(crate) weak: f64,
+    /// Φ, the brightening of the cold zones that multiplies the `P₂` forcing:
+    /// [`OceanWeight::albedo_gradient`], [`WET_ALBEDO_GRADIENT`] at a full ocean and 1 with none.
+    pub(crate) albedo: f64,
+}
+
+/// The Legendre polynomials of the insolation's modes at one point of the zonal profile, Pₙ(x) for
+/// n = 2, 4, …, 32 ([`insolation_modes`]): Pₙ(0) at the equator, 1 at a pole.
+type ModeValues = [f64; ZONAL_MODES];
+
+/// The modes' Legendre polynomials at x = sin φ, by Bonnet's recurrence from P₀ and P₁, as
+/// [`insolation_modes`] sums Pₙ(cos β).
+#[must_use]
+fn legendre_at(x: f64) -> ModeValues {
+    let mut values = [0.0; ZONAL_MODES];
+    let (mut previous, mut current, mut n) = (1.0, x, 1.0_f64);
+    for value in &mut values {
+        (previous, current) = (
+            current,
+            ((2.0 * n + 1.0) * x * current - n * previous) / (n + 1.0),
+        );
+        n += 1.0;
+        *value = current;
+        (previous, current) = (
+            current,
+            ((2.0 * n + 1.0) * x * current - n * previous) / (n + 1.0),
+        );
+        n += 1.0;
+    }
+    values
+}
+
+/// The emitted flux over the mean at a point of the zonal profile whose modes' Legendre
+/// polynomials are `legendre`, of insolation `insolation` over S ÷ 4 and modes `modes`, under the
+/// transport `transport` at the point's restoring over `B_P`, `scale` ([`zonal_ends`]).
+#[must_use]
+fn point_flux(
+    insolation: f64,
+    modes: &[InsolationMode; ZONAL_MODES],
+    legendre: &ModeValues,
+    transport: &ZonalTransport,
+    scale: f64,
+) -> f64 {
+    let response = |degree: f64| {
+        transport.planck
+            / (transport.effective
+                + (degree * (degree + 1.0) * transport.conductance).max(transport.weak) / scale)
+    };
+    let first = modes[0];
+    let mut flux = insolation
+        + (transport.albedo - 1.0) * first.coefficient * legendre[0] * response(first.degree);
+    let mut partial = 1.0;
+    for (mode, &at) in modes.iter().zip(legendre) {
+        let value = mode.coefficient * at;
+        flux += value * (response(mode.degree) - 1.0);
+        partial += value;
+    }
+    flux + (insolation - partial) * (response(modes[ZONAL_MODES - 1].degree + 2.0) - 1.0)
+}
+
+/// The radiative temperature, K, of a point of the profile about the mean `surface_k` whose
+/// insolation over S ÷ 4 is `insolation` and whose modes' Legendre polynomials are `legendre`,
+/// under the transport `transport` with the modes `modes`, at the restoring's scale `scale`:
+/// `T_s` max(0, E(s))^¼ ([`point_flux`]). At s = 1 with no transport it is the point itself
+/// ([`zonal_point_newton`]).
+#[must_use]
+fn point_temperature(
+    surface_k: f64,
+    transport: &ZonalTransport,
+    modes: &[InsolationMode; ZONAL_MODES],
+    (insolation, legendre): (f64, &ModeValues),
+    scale: f64,
+) -> f64 {
+    surface_k
+        * math::powf(
+            point_flux(insolation, modes, legendre, transport, scale).max(0.0),
+            0.25,
+        )
+}
+
+/// The annual-mean surface temperature, K, at a point of the profile about the mean `surface_k`
+/// whose insolation over S ÷ 4 is `insolation` and whose modes' Legendre polynomials are
+/// `legendre`, under the transport `transport` with the modes `modes`, by bisection: with no
+/// transport its radiative temperature, and otherwise its own restoring's fixed point, by
+/// [`ZONAL_END_STEPS`] doublings of the bracket at most and as many halvings. Version 22's
+/// solver, kept for the tests as the oracle of [`zonal_point_newton`]'s sweeps.
+#[cfg(test)]
+#[must_use]
+fn zonal_point(
+    surface_k: f64,
+    transport: &ZonalTransport,
+    modes: &[InsolationMode; ZONAL_MODES],
+    insolation: f64,
+    legendre: &ModeValues,
+) -> f64 {
+    let temperature =
+        |scale: f64| point_temperature(surface_k, transport, modes, (insolation, legendre), scale);
+    let transported = transport.conductance > 0.0 || transport.weak > 0.0;
+    if !transported {
+        return temperature(1.0);
+    }
+    let excess = |t: f64| t - temperature(math::powi(t / surface_k, 3));
+    let mut high = 2.0 * surface_k;
+    for _ in 0..ZONAL_END_STEPS {
+        if excess(high) > 0.0 {
+            break;
+        }
+        high *= 2.0;
+    }
+    let mut low = 0.0;
+    for _ in 0..ZONAL_END_STEPS {
+        let middle = f64::midpoint(low, high);
+        if excess(middle) > 0.0 {
+            high = middle;
+        } else {
+            low = middle;
+        }
+    }
+    f64::midpoint(low, high)
+}
+
+/// The safeguarded Newton steps that solve each zonal point: 16, a fixed count from a fixed start
+/// (decision-composition §1.3; decision-p14-t51a-part2 §1.3).
+///
+/// The ruling's default sweep (`the_newton_zonal_points_are_the_bisection_s`: obliquities of
+/// 0–180°, mean temperatures of 40–737 K, 6D ÷ `B_eff` of 10⁻⁴ to 50, Koll's W of 0 or `B_P`,
+/// `B_eff` ÷ `B_P` of 1 or 0.3, Φ of 1 or Φ⊕, at the equator, the pole and every eighth area point)
+/// holds every point within 10⁻¹³ `T_s` of the 64-step bisection ([`ZONAL_END_STEPS`]) from 9
+/// steps. Its wider sweep (`…_over_a_wider_sweep`: every area point, obliquities every 5°, finer
+/// grids and `B_eff` ÷ `B_P` down to 0.1) needs 14, at its slowest points: cold zones of a thin
+/// air under a strong vapour feedback, whose flux nears nothing. The count is the wider sweep's
+/// least, plus two. At 16 the default sweep misses by at most 7.9 × 10⁻¹⁶ `T_s` and the wider one
+/// by 6.8 × 10⁻¹⁵.
+pub(crate) const ZONAL_NEWTON_STEPS: u32 = 16;
+
+/// The terms of a point's emitted flux over the mean, for [`zonal_point_newton`]: E = `base` +
+/// Σₖ wₖ rₖ(s), each term's weight wₖ and damping Xₖ = max(n(n + 1)D, W `B_P`) read once, so that
+/// each of the Newton steps reads only its responses rₖ = `B_P` ÷ (`B_eff` + Xₖ ÷ s).
+///
+/// The terms are [`point_flux`]'s: the albedo's, (Φ − 1) q₂ `P₂` at P₂'s damping; each mode's,
+/// qₙ Pₙ; and the tail's, q − 1 − Σ qₙ Pₙ at degree 34's. The base is the insolation less the
+/// modes' and the tail's weights, their responses' 1.
+#[derive(Debug, Clone, Copy)]
+struct PointTerms {
+    base: f64,
+    terms: [(f64, f64); ZONAL_MODES + 2],
+}
+
+impl PointTerms {
+    /// The terms of the point of insolation `insolation` and Legendre values `legendre` under the
+    /// transport `transport` with the modes `modes`.
+    #[must_use]
+    fn of(
+        insolation: f64,
+        modes: &[InsolationMode; ZONAL_MODES],
+        legendre: &ModeValues,
+        transport: &ZonalTransport,
+    ) -> Self {
+        let damping =
+            |degree: f64| (degree * (degree + 1.0) * transport.conductance).max(transport.weak);
+        let first = modes[0];
+        let mut terms = [(0.0, 0.0); ZONAL_MODES + 2];
+        terms[0] = (
+            (transport.albedo - 1.0) * first.coefficient * legendre[0],
+            damping(first.degree),
+        );
+        let (mut base, mut partial) = (insolation, 1.0);
+        for (k, (mode, &at)) in modes.iter().zip(legendre).enumerate() {
+            let value = mode.coefficient * at;
+            terms[k + 1] = (value, damping(mode.degree));
+            base -= value;
+            partial += value;
+        }
+        let tail = insolation - partial;
+        terms[ZONAL_MODES + 1] = (tail, damping(modes[ZONAL_MODES - 1].degree + 2.0));
+        Self {
+            base: base - tail,
+            terms,
+        }
+    }
+
+    /// E and its slope dE ÷ ds at the restoring's scale `scale`, s: Σₖ wₖ rₖ, and
+    /// Σₖ wₖ rₖ² Xₖ ÷ (`B_P` s²), since drₖ ÷ ds = rₖ² Xₖ ÷ (`B_P` s²) (decision-p14-t51a-part2
+    /// §1.3).
+    #[must_use]
+    fn flux_and_slope(&self, transport: &ZonalTransport, scale: f64) -> (f64, f64) {
+        let inverse = 1.0 / scale;
+        let (mut flux, mut slope) = (self.base, 0.0);
+        for &(weight, damping) in &self.terms {
+            let r = transport.planck / (transport.effective + damping * inverse);
+            flux += weight * r;
+            slope += weight * r * r * damping;
+        }
+        (flux, slope * inverse * inverse / transport.planck)
+    }
+}
+
+/// The annual-mean surface temperature, K, at a point of the profile about the mean `surface_k`
+/// whose insolation over S ÷ 4 is `insolation` and whose modes' Legendre polynomials are
+/// `legendre`, under the transport `transport` with the modes `modes` (`zonal_point`'s, the
+/// bisection the tests keep as its oracle): the root of t = `T_s` max(0, E(s))^¼ with
+/// s = (t ÷ `T_s`)³, by [`ZONAL_NEWTON_STEPS`] Newton steps safeguarded by the bisection's bracket
+/// (decision-p14-t51a-part2 §1.3).
+///
+/// The steps are taken on g(u) = u⁴ − E(u³), u = t ÷ `T_s`, whose root is the same: g > 0 exactly
+/// where t exceeds `T_s` max(0, E)^¼, E ≤ 0 included, so the bracket narrows on the same sign as
+/// the bisection's. It is smooth through E = 0, where t − `T_s` E^¼ has an infinite slope: at a dark
+/// pole, and where a strong vapour feedback (`B_eff` well under `B_P`) drives a cold zone's flux to
+/// nothing. Its slope is g′ = 4u³ − 3u² dE ÷ ds ([`PointTerms`]).
+///
+/// - The bracket is the bisection's, [0, high] with high doubled from 2 `T_s` while the point lies
+///   below its own temperature there, its lower end raised to where the slowest mode, P₂'s, is
+///   damped to a part in 10⁶ wherever g confirms it lies below there. At s = 0 every mode is
+///   damped out and E = 1, so u = 0 lies below.
+/// - The start is u = 1, the mean's temperature, the bisection's own first middle.
+/// - Each step evaluates g and g′ at u, narrows the bracket on g's sign, and takes the Newton
+///   candidate in w = ln u, u e^(−g ÷ (u g′)), where it is finite and inside the bracket, and
+///   otherwise the bracket's middle, geometric once its lower end is above 0: a cold zone's
+///   transition spans decades in s. The bracket and the candidate read the one g, so that at the
+///   root they agree to the last bit.
+///
+/// A point with no transport is its radiative temperature ([`point_temperature`] at s = 1), as the
+/// bisection's is, bit for bit.
+#[must_use]
+fn zonal_point_newton(
+    surface_k: f64,
+    transport: &ZonalTransport,
+    modes: &[InsolationMode; ZONAL_MODES],
+    insolation: f64,
+    legendre: &ModeValues,
+) -> f64 {
+    newton_point(
+        surface_k,
+        transport,
+        modes,
+        (insolation, legendre),
+        ZONAL_NEWTON_STEPS,
+    )
+    .0
+}
+
+/// [`zonal_point_newton`] with `steps` steps, K, with the bracket it ends in, K: for the tests that
+/// find the least count and hold the answer inside its bracket.
+#[must_use]
+fn newton_point(
+    surface_k: f64,
+    transport: &ZonalTransport,
+    modes: &[InsolationMode; ZONAL_MODES],
+    (insolation, legendre): (f64, &ModeValues),
+    steps: u32,
+) -> (f64, (f64, f64)) {
+    let transported = transport.conductance > 0.0 || transport.weak > 0.0;
+    if !transported {
+        let t = point_temperature(surface_k, transport, modes, (insolation, legendre), 1.0);
+        return (t, (t, t));
+    }
+    // g and g′ at u, the point's terms read once.
+    let terms = PointTerms::of(insolation, modes, legendre, transport);
+    let excess = |u: f64| {
+        let (e, slope) = terms.flux_and_slope(transport, math::powi(u, 3));
+        let square = u * u;
+        (square * square - e, 4.0 * square * u - 3.0 * square * slope)
+    };
+    let mut high = 2.0;
+    for _ in 0..ZONAL_END_STEPS {
+        if excess(high).0 > 0.0 {
+            break;
+        }
+        high *= 2.0;
+    }
+    // A lower end above 0, where the slowest mode, P₂'s, is damped to a part in 10⁶: E is 1 there,
+    // the mean, to that part, far above u⁴. It is taken where g confirms it, and 0 otherwise.
+    let slowest = (6.0 * transport.conductance).max(transport.weak);
+    let floor = math::cbrt(1e-6 * slowest / transport.planck);
+    let mut low = if floor > 0.0 && floor < high && excess(floor).0 <= 0.0 {
+        floor
+    } else {
+        0.0
+    };
+    // The start, the mean's temperature: the bisection's own first middle.
+    let mut u = 1.0;
+    for _ in 0..steps {
+        let (g, slope) = excess(u);
+        if g > 0.0 {
+            high = u;
+        } else {
+            low = u;
+        }
+        // The step in w = ln u, whose slope is u g′: a cold zone's transition spans decades in s.
+        let candidate = u * math::exp(-g / (u * slope));
+        u = if candidate.is_finite() && low <= candidate && candidate <= high {
+            candidate
+        } else if low > 0.0 {
+            // The bracket's geometric middle, its middle in w.
+            (low * high).sqrt()
+        } else {
+            f64::midpoint(low, high)
+        };
+    }
+    (surface_k * u, (surface_k * low, surface_k * high))
+}
+
+/// The annual-mean surface temperatures at the equator and at a pole of the column `column` under
+/// the spin `spin` at the ocean weight `weight`, K ([`zonal_ends`];
+/// science-p14-t24a-climate.md §7). Their difference is the equator–pole contrast. Both are `T_s`
+/// where no light is absorbed, or where nothing restores the column.
+///
+/// [`SurfaceConditions::derive`] keeps the whole profile ([`ZonalProfile`]), so this form is the
+/// tests'.
+#[cfg(test)]
+#[must_use]
+pub(crate) fn zonal_ends_k(
+    column: &Column,
+    spin: &SeasonalSpin,
+    weight: OceanWeight,
+) -> (f64, f64) {
+    ZonalProfile::of(column, spin, weight).ends
+}
+
+/// The annual-mean surface temperatures at the equator and at a pole, K, of a profile about the
+/// mean `surface_k` under the transport `transport`, at the obliquity `obliquity`: the
+/// insolation's Legendre modes ([`insolation_modes`]), each damped at its own rate in the emitted
+/// flux, at each end's own restoring (science-p14-t24a-climate.md §7).
+///
+/// Written in the emitted flux E, the transport −∇·(D∇T) diffuses at D ÷ `B_local`, with
+/// `B_local` = 4E ÷ T. So the mode n of the flux is damped by
+///
+/// rₙ = `B_P` ÷ (`B_eff` + max(n(n + 1) D, W `B_P`) ÷ s),   s = (T ÷ `T_s`)³,
+///
+/// and each end's flux over the mean is
+///
+/// E ÷ F = q + (Φ − 1) q₂ `P₂` r₂ + Σₙ qₙ Pₙ (rₙ − 1) + (q − Σₙ qₙ Pₙ)(r₃₄ − 1),
+///
+/// with T = `T_s` (E ÷ F)^¼.
+/// - The sum runs to degree 32, and the tail beyond takes degree 34's response; the modes sum to
+///   q at each end.
+/// - Φ multiplies the `P₂` forcing, the coalbedo gradient it stands for.
+/// - Each end solves for its own s, since T − T(E(T)) rises with T, by safeguarded Newton steps
+///   ([`zonal_point_newton`]).
+///
+/// The limits:
+/// - With no transport the ends are the radiative ones, `T_s` q^¼, bit for bit on an airless
+///   body.
+/// - With strong transport they are the linear modes' response, whose `P₂` term is North's
+///   (15/64) `P₂`(cos β) `T_s` damped by 1 + 6D ÷ B.
+///
+/// Against a nonlinear one-dimensional diffusive balance over obliquities of 0–98° and 6D ÷ B of
+/// 0.001–50, the contrast lies within 5.7%, the equator within 0.0013 `T_s` and the pole within
+/// 0.016 `T_s`. Damping the whole radiative contrast at `P₂`'s rate overstated it up to 4.3 times
+/// at low obliquity, where it is a narrow polar cap that any transport erases. Both ends are
+/// `surface_k` where nothing restores the column.
+#[must_use]
+pub(crate) fn zonal_ends(
+    surface_k: f64,
+    transport: &ZonalTransport,
+    obliquity: Radians,
+) -> (f64, f64) {
+    if !restored(transport) {
+        return (surface_k, surface_k);
+    }
+    let modes = insolation_modes(obliquity);
+    let (equator, pole) = annual_insolation(obliquity);
+    let at_equator = modes.map(|mode| mode.at_equator);
+    let point = |insolation: f64, legendre: &ModeValues| {
+        zonal_point_newton(surface_k, transport, &modes, insolation, legendre)
+    };
+    (
+        point(equator, &at_equator),
+        point(pole, &[1.0; ZONAL_MODES]),
+    )
+}
+
+/// Whether anything restores a column of transport `transport`: only a column whose gain cancels
+/// its restoring and that has no transport, which no air with a gravity has, leaves nothing to
+/// restore it.
+#[must_use]
+fn restored(transport: &ZonalTransport) -> bool {
+    let total = transport.effective + (6.0 * transport.conductance).max(transport.weak);
+    !(total.is_nan() || total <= 0.0)
+}
+
+/// The steps of the trapezoid rule that integrates [`annual_insolation_at`] over half a turn of
+/// its angle: 1,024, which keeps it within 10⁻⁶ of the integral at every latitude and obliquity,
+/// where the integrand's kinks (at the polar circle, and at the ends near 90°) hold 256 steps to
+/// 2 × 10⁻⁶ at Earth's obliquity and 1 × 10⁻⁵ at 90°.
+const ZONAL_INSOLATION_STEPS: u32 = 1_024;
+
+/// The trapezoid's inner points, [`ZONAL_INSOLATION_STEPS`] − 1, as an array's length.
+const INNER_POINTS: usize = ZONAL_INSOLATION_STEPS as usize - 1;
+
+/// The annual-mean insolation at x = sin φ of a world at obliquity `obliquity`, relative to the
+/// mean S ÷ 4: (2 ÷ π²) ∫₀^{2π} √(1 − (√(1 − x²) sin β cos γ − x cos β)²) dγ, by
+/// `ZONAL_INSOLATION_STEPS` steps of the trapezoid rule on [0, π], the integrand being even in
+/// γ (McGehee and Lehman 2012, SIAM J. Appl. Dyn. Syst. 11, 684, after Ward 1974; from memory, and
+/// checked against [`annual_insolation`]'s closed forms at the equator and the poles).
+///
+/// The year's mean is taken first, in closed form: over a year the sun moves on the ecliptic's
+/// great circle, and the mean of max(0, μ) along it at a point whose normal makes an angle with
+/// the ecliptic pole of cosine c is √(1 − c²) ÷ π. The integral then runs over the body's rotation
+/// angle γ, which carries the point's normal about the spin axis. It is symmetric in x, the year
+/// being symmetric.
+#[must_use]
+pub fn annual_insolation_at(obliquity: Radians, sine_latitude: f64) -> f64 {
+    insolation_with(obliquity, sine_latitude, &hour_cosines())
+}
+
+/// The cosines of the trapezoid's hour angles, cos(jπ ÷ [`ZONAL_INSOLATION_STEPS`]) for j = 0 to
+/// the last step, which every latitude's insolation shares ([`annual_insolation_at`]).
+#[must_use]
+fn hour_cosines() -> Vec<f64> {
+    let step = core::f64::consts::PI / f64::from(ZONAL_INSOLATION_STEPS);
+    (0..=ZONAL_INSOLATION_STEPS)
+        .map(|j| math::cos(step * f64::from(j)))
+        .collect()
+}
+
+/// The trapezoid's hour angles' cosines ([`hour_cosines`]), computed once for a call chain that
+/// builds records (`snapshot_at`'s, `body_at`'s, `hooks_at`'s, and generation's moon rotations')
+/// and read by every body's [`ZonalInsolation`] in it (decision-p14-t54a-passes §C.3, lever (h)).
+/// They depend on nothing, so the chain that builds them changes no bit.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct HourCosines(Vec<f64>);
+
+impl HourCosines {
+    /// The cosines, [`ZONAL_INSOLATION_STEPS`] + 1 of them.
+    #[must_use]
+    pub(crate) fn new() -> Self {
+        Self(hour_cosines())
+    }
+}
+
+/// A body's zonal insolation at the profile's area points, built once a body from its obliquity
+/// and read by every zonal profile the body builds (decision-p14-t54a-passes §C.3, lever (h)): the
+/// insolation's modes ([`insolation_modes`]), and at each point xₖ = (k + ½) ÷ 64 of
+/// [`ZONAL_AREA_POINTS`] its insolation ([`annual_insolation_at`]'s trapezoid) and its modes'
+/// Legendre polynomials.
+///
+/// None of these reads a pass: the obliquity holds over a body's passes and its record, and only
+/// the points' temperatures read the column ([`zonal_point_newton`]). The trapezoid, 64 × 1,024
+/// square roots, is 95% of a profile's cost: a table takes 0.154 ms to build, and a profile read
+/// off it 7.9 µs, against 0.165 ms for one that computes its own (release, one CPU, the 400-system
+/// sample's 5,978 tables and 9,155 profiles, 2026-10-20). Its values are those each profile
+/// computed for itself before, to the bit, an immutable table built in its constructor, which
+/// holds no state between calls.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ZonalInsolation {
+    /// The obliquity it is the table of.
+    obliquity: Radians,
+    /// The insolation's modes at that obliquity.
+    modes: [InsolationMode; ZONAL_MODES],
+    /// At each area point, from the equator: x, its insolation over S ÷ 4 and its modes' Legendre
+    /// polynomials.
+    points: Vec<(f64, f64, ModeValues)>,
+}
+
+impl ZonalInsolation {
+    /// The table at the obliquity `obliquity`, its trapezoids over the hour angles' cosines
+    /// `cosines`.
+    #[must_use]
+    pub(crate) fn of(obliquity: Radians, cosines: &HourCosines) -> Self {
+        let n = f64::from(ZONAL_AREA_POINTS);
+        let points = (0..ZONAL_AREA_POINTS)
+            .map(|k| {
+                let x = (f64::from(k) + 0.5) / n;
+                (x, insolation_with(obliquity, x, &cosines.0), legendre_at(x))
+            })
+            .collect();
+        Self {
+            obliquity,
+            modes: insolation_modes(obliquity),
+            points,
+        }
+    }
+
+    /// Whether it is the table of the obliquity `obliquity`, bit for bit.
+    #[must_use]
+    pub(crate) fn is_at(&self, obliquity: Radians) -> bool {
+        self.obliquity.value().total_cmp(&obliquity.value()).is_eq()
+    }
+}
+
+/// How the zonal profiles read their body's [`ZonalInsolation`], a test-only switch of lever (h)
+/// ([`with_table_reads`]).
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TableReads {
+    /// Off the table, as the generator reads it.
+    Table,
+    /// Each profile's own insolation, as before the table: the unlevered path, the oracle.
+    Unlevered,
+    /// Both: each profile's points off the table asserted the unlevered path's to the bit, and
+    /// counted.
+    Checked,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The switch on this thread, a test's own: tests run on threads of one process.
+    static TABLE_READS: core::cell::Cell<TableReads> = const {
+        core::cell::Cell::new(TableReads::Table)
+    };
+    /// The profiles [`TableReads::Checked`] has checked on this thread.
+    static CHECKED_PROFILES: core::cell::Cell<u64> = const { core::cell::Cell::new(0) };
+}
+
+/// `run`'s result with the zonal profiles reading their tables as `reads` says, and how many
+/// profiles with modes it checked against the unlevered path under [`TableReads::Checked`]. The
+/// switch is set back after.
+#[cfg(test)]
+#[must_use]
+pub(crate) fn with_table_reads<R>(reads: TableReads, run: impl FnOnce() -> R) -> (R, u64) {
+    let before = TABLE_READS.with(|cell| cell.replace(reads));
+    CHECKED_PROFILES.with(|cell| cell.set(0));
+    let result = run();
+    TABLE_READS.with(|cell| cell.set(before));
+    (result, CHECKED_PROFILES.with(core::cell::Cell::take))
+}
+
+/// [`annual_insolation_at`] at x = `sine_latitude` with the hour angles' cosines `cosines`
+/// ([`hour_cosines`]).
+#[must_use]
+fn insolation_with(obliquity: Radians, sine_latitude: f64, cosines: &[f64]) -> f64 {
+    let x = sine_latitude.abs().min(1.0);
+    let across = (1.0 - x * x).max(0.0).sqrt();
+    let (sin_b, cos_b) = math::sin_cos(obliquity.value());
+    let pi = core::f64::consts::PI;
+    let step = pi / f64::from(ZONAL_INSOLATION_STEPS);
+    let integrand = |cosine: f64| {
+        let a = across * sin_b * cosine - x * cos_b;
+        (1.0 - a * a).max(0.0).sqrt()
+    };
+    let (first, last) = (cosines[0], cosines[cosines.len() - 1]);
+    let ends = f64::midpoint(integrand(first), integrand(last));
+    // The inner points' values first, each independent of the others, so that they can be taken
+    // several at a time; then their sum in order, the trapezoid's bits (P14.T54.b.l): D5's
+    // `snapshot_at` under every 26 hold fell from 570 to 560 ms with it (pod, one core).
+    debug_assert_eq!(cosines.len(), INNER_POINTS + 2, "the trapezoid's cosines");
+    let mut values = [0.0_f64; INNER_POINTS];
+    for (value, &cosine) in values.iter_mut().zip(&cosines[1..cosines.len() - 1]) {
+        *value = integrand(cosine);
+    }
+    let inner = values.iter().fold(0.0, |sum, &value| sum + value);
+    4.0 * step / (pi * pi) * (ends + inner)
+}
+
+/// A body's annual-mean zonal profile of surface temperature (science-p14-t24a-climate.md §7,
+/// evaluated at each latitude by science-p14-t24b-laws §4.3): its mean, its transport and
+/// obliquity, and its ends.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct ZonalProfile {
+    /// The mean surface temperature, K.
+    surface_k: f64,
+    /// The transport and the obliquity of a profile with modes; `None` for a flat one, at the
+    /// mean everywhere.
+    modal: Option<(ZonalTransport, Radians)>,
+    /// The temperatures at the equator and at a pole, K: the contrast's ends.
+    ends: (f64, f64),
+}
+
+impl ZonalProfile {
+    /// The profile of the column `column` under the spin `spin` at the ocean weight `weight`,
+    /// whose transport keeps ½ + ½θ of the meridional conductance and whose cold zones brighten by
+    /// 1 + (Φ⊕ − 1)θ ([`OceanWeight`]), its points solved by the safeguarded Newton steps
+    /// ([`zonal_point_newton`]).
+    #[must_use]
+    pub(crate) fn of(column: &Column, spin: &SeasonalSpin, weight: OceanWeight) -> Self {
+        let t_s = column.surface_temperature.value();
+        let planck = column.restoring_w_per_m2_k();
+        if !(planck.is_finite() && planck > 0.0 && t_s > 0.0) {
+            return Self {
+                surface_k: t_s,
+                modal: None,
+                ends: (t_s, t_s),
+            };
+        }
+        let transport = ZonalTransport {
+            planck,
+            effective: column.effective_restoring_w_per_m2_k(),
+            conductance: meridional_conductance_w_per_m2_k(column, spin) * weight.transport_share(),
+            weak: weak_gradient_transport(column, spin) * planck,
+            albedo: weight.albedo_gradient(),
+        };
+        Self {
+            surface_k: t_s,
+            modal: restored(&transport).then_some((transport, spin.obliquity)),
+            ends: zonal_ends(t_s, &transport, spin.obliquity),
+        }
+    }
+
+    /// The `P₂` mode's meridional transport over the radiative restoring, max(6D, W `B_P`) ÷
+    /// `B_eff`, D after the dry world's share.
+    ///
+    /// It is under 1 where the air moves less heat poleward than radiation restores, so that each
+    /// latitude lies nearer its own radiative balance. Zero for a flat profile, and infinite where
+    /// the transport has no restoring to work against.
+    #[must_use]
+    pub(crate) fn transport_over_restoring(&self) -> f64 {
+        self.modal.map_or(0.0, |(transport, _)| {
+            (6.0 * transport.conductance).max(transport.weak) / transport.effective
+        })
+    }
+
+    /// The annual-mean surface temperature at x = sin φ, K: the ends at x = 0 and 1, bit for bit,
+    /// and between them the modal form at x, each mode at its own damping over the point's own
+    /// restoring (science-p14-t24b-laws §4.3). Exact at no transport, `T_s` q(x)^¼ on an airless
+    /// body.
+    #[must_use]
+    fn at(&self, sine_latitude: f64) -> f64 {
+        let x = sine_latitude.abs();
+        // By comparison, so that a NaN reads the pole.
+        if x <= 0.0 {
+            return self.ends.0;
+        }
+        if x.is_nan() || x >= 1.0 {
+            return self.ends.1;
+        }
+        let Some((transport, obliquity)) = self.modal else {
+            return self.surface_k;
+        };
+        self.modal_at(
+            &transport,
+            obliquity,
+            x,
+            (&insolation_modes(obliquity), &hour_cosines()),
+        )
+    }
+
+    /// The modal form at x = sin φ, strictly between the ends, under the transport `transport`
+    /// at the obliquity `obliquity`, with the insolation's modes and the hour angles' cosines
+    /// `shared`, which every latitude shares.
+    #[must_use]
+    fn modal_at(
+        &self,
+        transport: &ZonalTransport,
+        obliquity: Radians,
+        x: f64,
+        (modes, cosines): (&[InsolationMode; ZONAL_MODES], &[f64]),
+    ) -> f64 {
+        zonal_point_newton(
+            self.surface_k,
+            transport,
+            modes,
+            insolation_with(obliquity, x, cosines),
+            &legendre_at(x),
+        )
+    }
+
+    /// The profile at the equator, at [`ZONAL_AREA_POINTS`] points uniform in area,
+    /// xₖ = (k + ½) ÷ 64, and at the pole, as `(x, T)` with T in K, read off its own obliquity's
+    /// [`ZonalInsolation`], built for it: [`points_over`](Self::points_over) of that table.
+    #[must_use]
+    fn points(&self) -> Vec<(f64, f64)> {
+        let inner = match self.modal {
+            Some((transport, obliquity)) => self.inner_points(
+                &transport,
+                &ZonalInsolation::of(obliquity, &HourCosines::new()),
+            ),
+            None => self.flat_points(),
+        };
+        self.with_ends(inner)
+    }
+
+    /// [`points`](Self::points) read off the body's table `table`, built once for every profile
+    /// the body builds (lever (h)): the same bits.
+    ///
+    /// # Panics
+    ///
+    /// If the profile has modes and `table` is not the table of its obliquity, a broken
+    /// invariant: a body's profiles all read its one spin.
+    #[must_use]
+    pub(crate) fn points_over(&self, table: &ZonalInsolation) -> Vec<(f64, f64)> {
+        let inner = match self.modal {
+            Some((transport, obliquity)) => {
+                assert!(
+                    table.is_at(obliquity),
+                    "a zonal profile reads the insolation table of its own obliquity"
+                );
+                self.inner_points(&transport, table)
+            }
+            None => self.flat_points(),
+        };
+        self.with_ends(inner)
+    }
+
+    /// The points strictly between the ends of a profile with modes under the transport
+    /// `transport`, each solved by [`zonal_point_newton`] at the table `table`'s insolation and
+    /// Legendre values, of the profile's own obliquity (the tests may switch the table off,
+    /// `with_table_reads`).
+    #[must_use]
+    fn inner_points(&self, transport: &ZonalTransport, table: &ZonalInsolation) -> Vec<(f64, f64)> {
+        #[cfg(test)]
+        match TABLE_READS.with(core::cell::Cell::get) {
+            TableReads::Table => {}
+            TableReads::Unlevered => {
+                return self.inner_points_unlevered(transport, table.obliquity);
+            }
+            TableReads::Checked => {
+                let points = self.inner_points_read(transport, table);
+                let oracle = self.inner_points_unlevered(transport, table.obliquity);
+                assert_eq!(points.len(), oracle.len());
+                for (&(x, t), &(x_oracle, t_oracle)) in points.iter().zip(&oracle) {
+                    hyperion_testkit::float::assert_same_bits(x, x_oracle);
+                    hyperion_testkit::float::assert_same_bits(t, t_oracle);
+                }
+                CHECKED_PROFILES.with(|cell| cell.set(cell.get() + 1));
+                return points;
+            }
+        }
+        self.inner_points_read(transport, table)
+    }
+
+    /// [`inner_points`](Self::inner_points) off the table `table`.
+    #[must_use]
+    fn inner_points_read(
+        &self,
+        transport: &ZonalTransport,
+        table: &ZonalInsolation,
+    ) -> Vec<(f64, f64)> {
+        table
+            .points
+            .iter()
+            .map(|(x, insolation, legendre)| {
+                (
+                    *x,
+                    zonal_point_newton(
+                        self.surface_k,
+                        transport,
+                        &table.modes,
+                        *insolation,
+                        legendre,
+                    ),
+                )
+            })
+            .collect()
+    }
+
+    /// [`inner_points`](Self::inner_points) as each profile computed them before its body's table
+    /// (lever (h)): the modes, the hour angles' cosines, and each point's insolation and Legendre
+    /// values computed for the profile itself, at the obliquity `obliquity`. The tests' oracle.
+    #[cfg(test)]
+    #[must_use]
+    fn inner_points_unlevered(
+        &self,
+        transport: &ZonalTransport,
+        obliquity: Radians,
+    ) -> Vec<(f64, f64)> {
+        let n = f64::from(ZONAL_AREA_POINTS);
+        let (modes, cosines) = (insolation_modes(obliquity), hour_cosines());
+        (0..ZONAL_AREA_POINTS)
+            .map(|k| {
+                let x = (f64::from(k) + 0.5) / n;
+                (
+                    x,
+                    self.modal_at(transport, obliquity, x, (&modes, &cosines)),
+                )
+            })
+            .collect()
+    }
+
+    /// The points strictly between the ends of a flat profile, at its mean.
+    #[must_use]
+    fn flat_points(&self) -> Vec<(f64, f64)> {
+        let n = f64::from(ZONAL_AREA_POINTS);
+        (0..ZONAL_AREA_POINTS)
+            .map(|k| ((f64::from(k) + 0.5) / n, self.surface_k))
+            .collect()
+    }
+
+    /// The points `inner` with the equator's end before them and the pole's after.
+    #[must_use]
+    fn with_ends(&self, inner: Vec<(f64, f64)>) -> Vec<(f64, f64)> {
+        core::iter::once((0.0, self.ends.0))
+            .chain(inner)
+            .chain(core::iter::once((1.0, self.ends.1)))
+            .collect()
+    }
+}
+
+/// The share of x from 0 to 1 on which a profile through the points `points`, `(x, T)` with x
+/// ascending from 0 to 1 and linear between them, lies below `threshold`: continuous in every T.
+#[must_use]
+pub(crate) fn area_below(points: &[(f64, f64)], threshold: Kelvin) -> f64 {
+    let t_ice = threshold.value();
+    points.windows(2).fold(0.0, |area, pair| {
+        let ((a, t_a), (b, t_b)) = (pair[0], pair[1]);
+        area + length_below(a, b, t_a, t_b, t_ice)
+    })
+}
+
+/// The slope of a 1:1-locked world's dayside flux in the cosine μ from the substellar point, over
+/// the day's excess over the night, `E_d` − `E_n`: 3/2 (science-p14-t24b-laws §4.x.3). Cowan and
+/// Agol's day and night temperatures (2011, ApJ 729, 54, eqs. 4–5) are "the equator-weighted
+/// temperatures of their respective hemispheres", their μ-weighted means, and their eqs. 4–5 are
+/// the local model `E_n` + (3/2)(`E_d` − `E_n`) μ, which conserves the absorbed flux at every
+/// redistribution.
+pub const EYEBALL_SLOPE: f64 = 1.5;
+
+/// The area-uniform points at which [`SurfaceConditions::cold_area`] reads the zonal profile
+/// between its ends: 64, xₖ = (k + ½) ÷ 64 (science-p14-t24b-laws §4.3).
+pub const ZONAL_AREA_POINTS: u32 = 64;
+
+/// The share of the interval from `a` to `b`, on which a temperature runs linearly from `t_a` to
+/// `t_b`, that lies below `threshold`, as a length: continuous in both temperatures.
+#[must_use]
+fn length_below(a: f64, b: f64, t_a: f64, t_b: f64, threshold: f64) -> f64 {
+    match (t_a < threshold, t_b < threshold) {
+        (true, true) => b - a,
+        (false, false) => 0.0,
+        (cold_first, _) => {
+            let crossing = a + (b - a) * (threshold - t_a) / (t_b - t_a);
+            if cold_first {
+                crossing - a
+            } else {
+                b - crossing
+            }
+        }
+    }
+}
+
+/// The annual-mean insolation at the equator and at a pole of a world at obliquity `obliquity`,
+/// each relative to the mean S ÷ 4: `(8 ÷ π²) E(sin β)` and `(4 ÷ π) sin β`.
+///
+/// The equator is lit half of every day, so its daily mean is (S ÷ π) cos δ, and the year's mean
+/// of cos δ, with sin δ = sin β sin λ uniform in the sun's longitude λ, is (2 ÷ π) E(sin β). A
+/// pole's daily mean is S sin δ in its summer and nothing in its winter, (S ÷ π) sin β over the
+/// year. At 23.44° they are 1.2213 and 0.5065; they are equal at 53.9°.
+#[must_use]
+pub fn annual_insolation(obliquity: Radians) -> (f64, f64) {
+    let sine = math::sin(obliquity.value()).abs();
+    let pi = core::f64::consts::PI;
+    (8.0 / (pi * pi) * complete_elliptic_e(sine), 4.0 / pi * sine)
+}
+
+/// The complete elliptic integral of the second kind E(k) = ∫₀^{π/2} √(1 − k² sin²θ) dθ for a
+/// modulus `k` in [0, 1], by the arithmetic–geometric mean (DLMF §19.8(i)):
+/// E = (π ÷ 2M) (1 − Σₙ 2ⁿ⁻¹ cₙ²) with c₀ = k, over [`ELLIPTIC_STEPS`] fixed steps; E(1) = 1.
+#[must_use]
+fn complete_elliptic_e(k: f64) -> f64 {
+    if k >= 1.0 {
+        return 1.0;
+    }
+    let (mut a, mut b) = (1.0, (1.0 - k * k).sqrt());
+    let mut weight = 0.5;
+    let mut sum = weight * k * k;
+    for _ in 0..ELLIPTIC_STEPS {
+        let c = 0.5 * (a - b);
+        weight *= 2.0;
+        sum += weight * c * c;
+        (a, b) = (f64::midpoint(a, b), (a * b).sqrt());
+    }
+    core::f64::consts::FRAC_PI_2 / a * (1.0 - sum)
+}
+
+/// The arithmetic–geometric mean's steps in [`complete_elliptic_e`]: 40, past its convergence to
+/// the last bit for any modulus below 1 (it converges quadratically once a and b are close, within
+/// some ten steps from b₀ = 10⁻¹⁶), so that every modulus takes the same arithmetic.
+const ELLIPTIC_STEPS: u32 = 40;
+
+/// Koll's parameter X of the column `column`: `τ_LW`^⅓ (`p_s` ÷ 1 bar)^⅔ (`T_eq` ÷ 600 K)^−4/3,
+/// with `τ_LW` = (3/2)τ ([`FLUX_OPTICAL_DEPTH_PER_GREY`]; Koll 2022, ApJ 924, 134, eqs. 9–10).
+/// Zero with no air, no greenhouse or no light.
+#[must_use]
+pub(crate) fn redistribution_parameter(column: &Column) -> f64 {
+    let (tau, p, t_eq) = (
+        column.optical_depth,
+        column.surface_pressure.value(),
+        column.equilibrium_temperature.value(),
+    );
+    if !(tau > 0.0 && p > 0.0 && t_eq > 0.0) {
+        return 0.0;
+    }
+    math::cbrt(FLUX_OPTICAL_DEPTH_PER_GREY * tau)
+        * math::powf(p / REDISTRIBUTION_REFERENCE_PRESSURE.value(), 2.0 / 3.0)
+        * math::powf(
+            t_eq / REDISTRIBUTION_REFERENCE_TEMPERATURE.value(),
+            -4.0 / 3.0,
+        )
+}
+
+/// Koll's k of the column `column`, the body's own by his eq. 9's definition:
+/// k = `n_LW` L g ÷ (χ `R_air`) × (`C_d` σ² ÷ `R_air`)^⅓ (1 bar)^−⅔ (600 K)^4/3, with L its radius
+/// and `R_air` = R ÷ μ ([`REDISTRIBUTION_BROADENING`], [`REDISTRIBUTION_INEFFICIENCY`],
+/// [`REDISTRIBUTION_DRAG_COEFFICIENT`]). It gives 1.23, 1.89 and 2.35 at his three planets, against
+/// his 1.2, 1.9 and 2.3, and goes as a g μ^4/3: Earth's is 1.3, a Titan's 0.07 and a Venus's 2.1
+/// (science-p14-t24a-climate.md §4).
+/// Zero for no air, whose μ is zero.
+#[must_use]
+pub(crate) fn redistribution_scale(column: &Column) -> f64 {
+    let r_air = column.gas_constant_j_per_kg_k();
+    REDISTRIBUTION_BROADENING * column.radius.value() * column.surface_gravity.value()
+        / (REDISTRIBUTION_INEFFICIENCY * r_air)
+        * math::cbrt(REDISTRIBUTION_DRAG_COEFFICIENT * STEFAN_BOLTZMANN * STEFAN_BOLTZMANN / r_air)
+        * math::powf(REDISTRIBUTION_REFERENCE_PRESSURE.value(), -2.0 / 3.0)
+        * math::powf(REDISTRIBUTION_REFERENCE_TEMPERATURE.value(), 4.0 / 3.0)
+}
+
+/// Koll's heat-redistribution efficiency ε of the air of the column `column`, from 0 (none) to 1
+/// (uniform): X ÷ (k + X) ([`redistribution_parameter`], [`redistribution_scale`]; Koll 2022,
+/// whose f = 2/3 − (5/12) ε is Cowan and Agol 2011's with this ε).
+///
+/// Zero with no air, no greenhouse or no light, and 1 where k is not positive.
+#[must_use]
+pub(crate) fn heat_redistribution(column: &Column) -> f64 {
+    let x = redistribution_parameter(column);
+    let k = redistribution_scale(column);
+    if x.is_nan() || x <= 0.0 {
+        0.0
+    } else if !(x.is_finite() && k > 0.0) {
+        1.0
+    } else {
+        x / (k + x)
+    }
+}
+
+/// The regolith's redistribution efficiency ε of the ground of the column `column` under the spin
+/// `spin`, of the thermal inertia `ground`: x ÷ (1 + x) with x = 0.635 Θ^0.905
+/// ([`REGOLITH_REDISTRIBUTION_FIT`]), Θ = Γ √ω ÷ (`ε_r` σ `T_ss`³) the thermal parameter at the
+/// ground's inertia Γ (P14.T49.j's law at its lid, or P14.T24.a's constant of its material as the
+/// fallback, [`ROCK_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S`],
+/// [`ICE_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S`]; [`GroundInertia`]), ω = 2π over the solar
+/// day, and `T_ss` = `T_eq` (4 ÷ `ε_r`)^¼ the subsolar point's temperature
+/// ([`REGOLITH_EMISSIVITY`]; science-p14-t24a-climate.md §2). Under air the law's Γ is a vacuum
+/// lower bound, with no pore gas (P14.T49.l's).
+///
+/// What the regolith stores by day it gives back by night, so its diurnal storage is a
+/// redistribution. Zero for a world locked 1:1 to its seasonal host, which has no solar day, and
+/// where no light is absorbed.
+#[must_use]
+pub(crate) fn ground_redistribution(
+    column: &Column,
+    spin: &SeasonalSpin,
+    ground: GroundInertia,
+) -> f64 {
+    let Some(day) = spin.solar_day else {
+        return 0.0;
+    };
+    let subsolar =
+        column.equilibrium_temperature.value() * math::powf(4.0 / REGOLITH_EMISSIVITY, 0.25);
+    let d = day.value();
+    if !(d > 0.0 && subsolar > 0.0) {
+        return 0.0;
+    }
+    let inertia = ground.inertia_j_per_m2_k_sqrt_s();
+    let theta = inertia * (core::f64::consts::TAU / d).sqrt()
+        / (REGOLITH_EMISSIVITY * STEFAN_BOLTZMANN * math::powi(subsolar, 3));
+    regolith_redistribution(theta)
+}
+
+/// The regolith's redistribution efficiency at the thermal parameter `thermal_parameter`,
+/// x ÷ (1 + x) with x = a Θ^n ([`REGOLITH_REDISTRIBUTION_FIT`]).
+#[must_use]
+fn regolith_redistribution(thermal_parameter: f64) -> f64 {
+    let (a, n) = REGOLITH_REDISTRIBUTION_FIT;
+    let x = a * math::powf(thermal_parameter, n);
+    x / (1.0 + x)
+}
+
+/// The dayside's and the nightside's surface temperatures of the column `column` under the spin
+/// `spin`, its ground of the thermal inertia `ground`, over a night floored at `floor` (the
+/// module's model; science-p14-t24a-climate.md §2 and §4).
+///
+/// At a redistribution ε they are Cowan and Agol's (2011, eqs. 4–5), `T_s` (8/3 − 5ε/3)^¼ and
+/// `T_s` ε^¼, where:
+///
+/// - 1 − ε = (1 − `ε_air`)(1 − `ε_ground`), the air's ([`heat_redistribution`]) and the ground's
+///   ([`ground_redistribution`]) in series, so that a thin air joins the airless body
+///   continuously;
+/// - the floor adds its share of the absorbed flux, (`T_floor` ÷ `T_eq`)⁴, and ε is capped at 1.
+///
+/// On a rotating body each departure from `T_s` is damped by 1 ÷ √(1 + (ω C (1 − ε) ÷ `B_P`)²),
+/// ω = 2π over the solar day and C the air's heat capacity per unit area: a slab's linear
+/// response under the locked contrast's own restoring, `B_P` ÷ (1 − ε). `B_P`, not `B_eff`, since
+/// over a day the column's vapour follows the surface's swing, not the air's. A locked world's are
+/// about its substellar axis, undamped; an airless body's, with no air to store, are undamped too.
+/// Both are `T_s` where no light is absorbed.
+///
+/// [`SurfaceConditions::derive`] takes the same response it keeps for the climate regime
+/// ([`diurnal_response`]), so this form is the tests'.
+#[cfg(test)]
+#[must_use]
+pub(crate) fn day_and_night(
+    column: &Column,
+    spin: &SeasonalSpin,
+    ground: GroundInertia,
+    floor: Kelvin,
+) -> (Kelvin, Kelvin) {
+    day_and_night_of(column, diurnal_response(column, spin, ground, floor))
+}
+
+/// How the column's day and night respond to its redistribution and its rotation
+/// ([`diurnal_response`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct DiurnalResponse {
+    /// The redistribution ε, the air's, the ground's and the floor's in series, at most 1.
+    pub(crate) redistribution: f64,
+    /// The column's storage over the solar day against its locked contrast's restoring,
+    /// ω C (1 − ε) ÷ `B_P`; `None` for a world with no positive solar day.
+    pub(crate) storage: Option<f64>,
+}
+
+/// The redistribution and the diurnal storage of the column `column` under the spin `spin`, its
+/// ground of the thermal inertia `ground`, over a night floored at `floor` ([`day_and_night`]):
+/// `None` where no light is absorbed, or where nothing restores the column.
+#[must_use]
+pub(crate) fn diurnal_response(
+    column: &Column,
+    spin: &SeasonalSpin,
+    ground: GroundInertia,
+    floor: Kelvin,
+) -> Option<DiurnalResponse> {
+    let t_s = column.surface_temperature.value();
+    let planck = column.restoring_w_per_m2_k();
+    if !(planck.is_finite() && planck > 0.0 && t_s > 0.0) {
+        return None;
+    }
+    let through =
+        (1.0 - heat_redistribution(column)) * (1.0 - ground_redistribution(column, spin, ground));
+    let floor_share = math::powi(floor.value() / column.equilibrium_temperature.value(), 4);
+    let epsilon = (1.0 - through + floor_share).min(1.0);
+    // A solar day that is not positive is no solar day, as `ground_redistribution` takes it.
+    let storage = spin
+        .solar_day
+        .map(Seconds::value)
+        .filter(|&day| day > 0.0)
+        .map(|day| {
+            core::f64::consts::TAU / day * column.heat_capacity_j_per_m2_k() * (1.0 - epsilon)
+                / planck
+        });
+    Some(DiurnalResponse {
+        redistribution: epsilon,
+        storage,
+    })
+}
+
+/// [`day_and_night`] of the column `column` from its diurnal response `response`.
+#[must_use]
+fn day_and_night_of(column: &Column, response: Option<DiurnalResponse>) -> (Kelvin, Kelvin) {
+    let Some(response) = response else {
+        return (column.surface_temperature, column.surface_temperature);
+    };
+    let t_s = column.surface_temperature.value();
+    let epsilon = response.redistribution;
+    let damping = response
+        .storage
+        .map_or(1.0, |storage| 1.0 / math::hypot(1.0, storage));
+    let day = t_s * math::powf(8.0 / 3.0 - 5.0 / 3.0 * epsilon, 0.25);
+    let night = t_s * math::powf(epsilon, 0.25);
+    (
+        Kelvin::new(t_s + damping * (day - t_s)),
+        Kelvin::new(t_s - damping * (t_s - night)),
+    )
+}
+
+/// The climate's range of temperature, coldest then warmest, of a mean surface temperature
+/// `surface` whose zonal profile ends at `ends_k`, K, the equator's then a pole's
+/// ([`zonal_ends_k`]),
+/// with a dayside at `day` and a nightside at `night`, over a night floored at `floor`
+/// ([`SurfaceConditions::climate_range`]; science-p14-t24a-climate.md §3 and §6, item 1):
+///
+/// - the coldest, max(`T_floor`, min(`T₀`, `T₉₀`, `T_s`) − (`T_s` − `T_night`));
+/// - the warmest, max(`T₀`, `T₉₀`) + (`T_day` − `T_s`), and never below the coldest.
+///
+/// The colder end is bounded by `T_s`. From about 52° to 59° of obliquity both ends receive more
+/// than the mean light, and the coldest zone lies at mid-latitudes, within 0.008 `T_s` of `T_s`.
+#[must_use]
+pub(crate) fn climate_range(
+    surface: Kelvin,
+    ends_k: (f64, f64),
+    day: Kelvin,
+    night: Kelvin,
+    floor: Kelvin,
+) -> (Kelvin, Kelvin) {
+    let t_s = surface.value();
+    let (equator, pole) = ends_k;
+    let cold = (equator.min(pole).min(t_s) - (t_s - night.value())).max(floor.value());
+    let warm = (equator.max(pole) + (day.value() - t_s)).max(cold);
+    (Kelvin::new(cold), Kelvin::new(warm))
+}
+
+/// Whether water can be liquid at `pressure` somewhere over the climate's range `range`, coldest
+/// then warmest ([`SurfaceConditions::climate_range`]; P14.T48.d's), by the registry's
+/// [`phase_at`] on `H2O`'s phase diagram (P14.T49.b's).
+///
+/// On the diagram water's liquid at a pressure from its triple point's to 629 MPa (where ice V's
+/// melting curve reaches the triple temperature, IAPWS R14-08) is one span of temperature, from
+/// its melting curve, at or below the triple temperature (ice Ih melts under pressure: 0.70 K
+/// below it at Venus's 92 bar, 272.463 K by IAPWS R14-08's eq. 1), to its boiling point or the
+/// critical temperature. So the range holds liquid exactly where its point nearest the triple
+/// temperature does: the triple temperature itself where the range holds it, and otherwise its
+/// nearer end. Above 629.3 MPa the liquid begins above the triple temperature, on the melting
+/// curve's rising branch, and a range across that branch reads no liquid (the lane's, recorded):
+/// from 629.3 MPa to ice V and VI's triple point with the liquid, 632.4 MPa at 273.31 K, the test
+/// at the triple temperature reads ice V, where the liquid lies a little above it.
+#[must_use]
+pub fn liquid_water(range: (Kelvin, Kelvin), pressure: Pascals) -> bool {
+    let (coldest, warmest) = (range.0.value(), range.1.value());
+    let water = Gas::Water.substance();
+    let Some(triple) = water
+        .substance()
+        .phase_diagram()
+        .map(|d| d.triple_temperature().value())
+    else {
+        return false;
+    };
+    let nearest = coldest.max(triple).min(warmest);
+    coldest <= warmest && phase_at(water, Kelvin::new(nearest), pressure) == Some(Phase::Liquid)
+}

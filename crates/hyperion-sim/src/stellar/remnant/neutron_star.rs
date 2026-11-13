@@ -27,7 +27,7 @@
 //! lane's research has not confirmed it against its source; the doc comment of each constant says
 //! which.
 //!
-//! The thermal luminosity of a neutron star stays HPT's photon-cooling law ([`hpt_luminosity`],
+//! The thermal luminosity of a neutron star stays HPT's photon-cooling law (`hpt_luminosity`,
 //! ruling 33), which the track's remnant stage reads.
 
 use core::f64::consts::{FRAC_PI_2, PI};

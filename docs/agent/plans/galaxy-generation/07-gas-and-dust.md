@@ -1121,6 +1121,9 @@ variants exist.
   and its test, `packages/protocol/src/index.ts`, `packages/protocol/fixtures/extinction_map_4x2.json`;
   and for T10.b the four client files named there.
 - Acceptance: `just gen-protocol-check` and `just ci` green after each subtask.
+- **Built** (2026-10-14, at version 22): T10.a, T10.b and T10.c, ported from galaxy-generation
+  5b1c3285 (its T10 half) by lane `gg-port-a1` under `decision-gg-port-d0.md`; see Risks,
+  "P07.T10.a–c, ported".
 
 ### P07.T11 Client: map layer and chart readout
 
@@ -1149,12 +1152,14 @@ variants exist.
     only when both legends are shown and the overlay is named on the display. The rule as built allows
     one raster, one hue and one mandatory legend, and already names dust among the fields it covers
     ("such as column density or dust"), so this is an extension of the rule rather than a new one.
-  - **Nomenclature.** Add `EXTINCTION`, `DUST OVERLAY`, `A(V)`, `A(K)`, `E(B-V)` and `N(H)` to the
-    list, in the parenthesised form until the owner rules on `<sub>`, with `-` as the guide's signed
-    form (plan 05's ruling 8) rather than the typographic minus. The guide's "One name per thing" rule
-    means nothing on the console may use an abbreviation that is not on this list.
-- **P07.T11.b Galaxy map.** A quantity selector (`SYSTEMS`, `EXTINCTION`, and a `DUST OVERLAY` toggle
-  available under `SYSTEMS`), keyboard-operable with its key shown, a display control and styled as
+  - **Nomenclature.** Add `EXTINCTION`, `DUST OVERLAY`, `A(V)`, `A(K)`, `E(B−V)` and `N(H)` to the
+    list, in the parenthesised form until the owner rules on `<sub>`, with `E(B−V)` taking the minus
+    sign for its subtraction (signoff-6; plan 05's ruling 8 governs a number's sign). The guide's
+    "One name per thing" rule means nothing on the console may use an abbreviation that is not on
+    this list.
+- **P07.T11.b Galaxy map.** A quantity selector (`COLUMN DENSITY`, `EXTINCTION`, and a
+  `DUST OVERLAY` toggle available under `COLUMN DENSITY` where the page has room for it
+  (decision-gg-port-d0)), keyboard-operable with its key shown, a display control and styled as
   one. It belongs in `GalaxyMapPanel.tsx` beside the `POPULATION` choice it already owns, and is passed
   to both `GalaxyMapView`s as a prop: the panel holds **no** request, and the only
   `useServerRequest` in the map pipeline is in `GalaxyMapView.tsx`, so that is where
@@ -1184,7 +1189,7 @@ variants exist.
   `decodeExtinctionMap`'s accessor is `log10Mag`, not `log10PerLy2`, so any shared helper takes the
   accessor as an argument.
 - **P07.T11.c Chart readout.** When a system is selected the chart requests its extinction from the
-  chart centre at the chart's time and the readout gains four rows: `A(V)`, `E(B-V)`, `A(K)` in `mag`
+  chart centre at the chart's time and the readout gains four rows: `A(V)`, `E(B−V)`, `A(K)` in `mag`
   to two decimals, and `N(H)` in `/cm²` in E notation through `formatSci` (there is no formatter that
   writes a mantissa and a separate power of ten, and the guide's standing rule is E notation; if the
   owner had allowed `<sup>` under T11.a, this row would have changed with it; the owner did not). The request lives in a new
@@ -1200,6 +1205,62 @@ variants exist.
   the rows show the guide's missing state — the em dash `—` in `--text-muted`, which
   `SystemReadout`'s own `Reading` already renders for a `null` value — with `RequestStatus` beside
   them, never zero.
+- **P07.T11.d The map's stale state and the overlay's brightness line** (needs T11.b and T11.c;
+  decision-gg-port-a2 §2, §3 and §5).
+  - **Stale on a link loss.** `GalaxyMapView` marks a picture on show stale while the link is down
+    (`linkDownReason(status) !== null`), as `useLocalChart` marks the chart: the ramp up to
+    `--text-muted`, the trailing `S`, the canvas named `…, stale`, `CURSOR DENSITY`, `CURSOR A(V)`
+    and `BELOW FLOOR` muted with their `S`, the legends on the stale ramp. The answer is kept and
+    not asked again (`useServerRequest` unchanged), and the mark goes when the link returns. This
+    meets T11.b's "a map kept after the link drops is marked stale" and plan 05's T11 ruling (8).
+  - **No status line among a stale view's words.** A stale view whose new map is awaited keeps its
+    stale picture, and the page states the wait once, in the place the link's state stands (the
+    tabs' row compact, the controls' first line stacked): the link's state while the link is down,
+    as now; otherwise `PENDING`, or `EXTINCTION PENDING` where the stale views await only the
+    extinction map; never both. Each stale canvas is described by that line beside its hint. A
+    stale view whose new map fails (`REJECTED: <reason>`, `TIMED OUT`, `MAP DATA INVALID: <cause>`)
+    drops its stale picture and shows the failure with `RETRY` in the picture's place, as a first
+    load's failure stands (amends plan 05's T10 ruling (3)). The panel still holds no request: a
+    view reports its stale wait to the page.
+  - **The overlay's brightness line.** While the overlay is shown, the page states once, after
+    `DUST OVERLAY: A(V), WHOLE LINE OF SIGHT`, `Brightness is COLUMN DENSITY dimmed by A(V)`, a
+    sentence (mixed case, no letter spacing), drafted for the owner (sign-off item 22 (j)). It
+    counts in `WORDS_REM.stacked.overlay.faceOn`, re-measured; compact, where the overlay is never
+    offered at the current constants, it stands after the name.
+  - **Measured** in hidden runs as decision-gg-port-d0 §3.4 has them (seed 0x4d2; both shell
+    states), at 1280 × 720, 1280 × 1024 and 1920 × 1080: the link down after both maps loaded, now
+    stale, its `S` marks inside the cursor lines' fixed fields; the page's `PENDING` after a resize
+    across a resolution step (1920 × 1080 to 1280 × 720 and back); the overlay with its line at
+    1920 × 1080. Acceptance: D0 §3.4's 1–5 in every state; a constant moves only from these lines;
+    the 1280 × 720 pictures stay 256 px (254 under the banner); the overlay is still offered at
+    1920 × 1080.
+  - **Tests.** `GalaxyMapView.test.tsx`: an answered map goes stale on the link's loss (ramp, `S`,
+    the canvas's name, both cursor readings) and current on its return with no request sent; a
+    resize's wait sets no status line among the view's words and is reported to the page; a
+    resize's failure replaces the stale picture with the failure and `RETRY`. `GalaxyMapPanel.test.tsx`:
+    the page's `PENDING` while a stale view waits, the link's state in its place while the link is
+    down, never both; the brightness line only under the overlay, once; the layout unchanged by
+    either. `mapLayout.test.ts` re-pinned if a constant moves.
+  - **Records.** This task's as-built record; plan 05's D4 and T10 ruling (3) noted as amended
+    (decision-gg-port-a2 §2–§3); `useServerRequest`'s and `GalaxyMapView`'s docs; the A2 record's
+    "For main" questions marked ruled (decision-gg-port-a2 §1–§7) and its stacked-rows deviation
+    accepted (§1).
+  - Commit: `fix(galaxy): P07.T11.d The map's stale state and the overlay's brightness line`.
+- **P07.T11.e The extinction map at 16 bits** (needs T11.b; decision-gg-port-a2 §4).
+  `GalaxyMapView` asks for the `extinction_map` at `EXTINCTION_MAP_BITS = 16`; the `density_map`
+  stays at `MAP_BITS = 8` (plan 05, D5). `CURSOR A(V)` is written to two decimals, as every A(V)
+  on the console is; an 8-bit code step is the map's span ÷ 254 dex, at least 3.3 % edge-on
+  (about 1.3 mag at the 40.47 mag read at the edge-on centre at 1920 × 1080) and 2.1 % face-on,
+  so the second decimal is not held above about 0.3 mag edge-on and 0.5 mag face-on; at 16 bits
+  (span ÷ 65,534) it is held to about 79 mag edge-on and 120 mag face-on. The constant's doc says
+  so. The decoder, `codeToLevel`, `turnClockwise` and `dustOverlay` take 16-bit codes already;
+  no server, protocol or golden change, and the picture is unchanged (the ramp's 256 levels).
+  - Tests: the request bodies ask 16 bits for the extinction map and 8 for the density; a 16-bit
+    extinction map reads `CURSOR A(V)` to two decimals at a code whose 8-bit neighbours would read
+    more than 1 mag apart; `dustOverlay` dims an 8-bit density by a 16-bit extinction.
+  - Record: the base64 sizes (512 px: 699,052 characters face-on and 349,528 edge-on; 1,024 px:
+    2,796,204 and 1,398,104) beside D5's.
+  - Commit: `fix(galaxy): P07.T11.e The extinction map at 16 bits`.
 - Files: under `apps/hyperion/src/renderer/src/`: in `displays/galaxy/`, `GalaxyMapPanel.tsx`,
   `GalaxyMapView.tsx`, a new `ExtinctionLegend.tsx` beside `DensityLegend.tsx`, `SystemReadout.tsx`,
   `SystemsPanel.tsx`, `useLocalChart.ts` and a new `useExtinction.ts` beside `useRangeQuery.ts`;
@@ -1213,6 +1274,9 @@ variants exist.
 --deny-warnings`, a root-only script) and `pnpm test` as well as the Rust gate; one file at a time
   with `pnpm --filter hyperion exec vitest run <path>`. By eye, dark lanes lie on the inner edges of
   the young population's arms in the face-on overlay.
+- **Built** (2026-10-15, at version 22): T11.b and T11.c, ported from galaxy-generation 5b1c3285
+  (its T11 half) by lane `gg-port-a2` under `decision-gg-port-d0.md`; see Risks,
+  "P07.T11.b–c, ported".
 
 ### P07.T12 Milky Way and statistical verification
 
@@ -1624,7 +1688,7 @@ windows:
   no superscript minus and so `cm⁻²` cannot be set. Whether `<sup>` and `<sub>` may be used — which
   would allow `cm⁻²`, `A_V` and `10⁻⁴`, since they shift ordinary glyphs rather than needing superscript
   characters — reverses the guide's standing E-notation rule, on which plan 05 built `formatSci` and
-  `DensityLegend`'s ticks. Until it is ruled on, the nomenclature names are `A(V)`, `A(K)`, `E(B-V)` and
+  `DensityLegend`'s ticks. Until it is ruled on, the nomenclature names are `A(V)`, `A(K)`, `E(B−V)` and
   `N(H)` and `N(H)` is written in E notation. Ruled on 2026-09-25: the owner kept E notation and the
   parenthesised names, and accepted the four units and the second raster quantity with its overlay.
 - **For the owner: the four units themselves**, and the second raster quantity with its overlay, which
@@ -1994,3 +2058,643 @@ Quality::Budget(256), &[], cache)` and reads `a_v`, `reddening`, `in_band(Band::
   n̄_w of 0.030 cm⁻³ is twice their 0.014, and the peak sits at 0.9 kpc rather than their 1.4–2
   (§4.5: 0.30 at 1.4 kpc). Not tuned. T12's test text (`tests/gas_statistics.rs`) says so; its
   windows are unchanged.
+- **P07.T10.a–c, as built (lane `ext07`, round 9, 2026-09-30, at version 15; re-gated at 16 by
+  lane `ext07b`) on `galaxy-generation`.** Kept as history; the port below brings it onto
+  `rendering-and-planets` at version 22. No generated value moved: `galaxy_parameters.golden`
+  gained the `gas` group and nothing else, the density map's golden is unchanged, and the one new
+  golden is `crates/hyperion-server/tests/golden/extinction_map_face_on_128.golden`, whose ceiling
+  is 0.322 dex (2.1 mag face-on) and whose centre pixel (code 195) sits below the ring's (206): the
+  hole inside the bar.
+  - _T10.a, shared banding._ `compute/density_map.rs`'s band loop is now
+    `render_bands(pool, galaxy, spec, resolution, view, render_band)`, which both map services call;
+    `to_log10` and `spec_view` are `pub(super)`, `BAND_ROWS` `pub(crate)`. `quantise_map_with_floor`
+    gives a map with nothing above its floor a ceiling equal to the floor and every code 0; a
+    density map, whose floor is set from its ceiling, is bit-identical. The floor is
+    `compute::EXTINCTION_FLOOR_LOG10_MAG` (−2).
+  - _T10.a/c, conversions._ The checks and answer builders of both kinds are in a new
+    `convert/extinction.rs` (`ExtinctionMapQuery`, `ExtinctionQuery`, `LineEnd`, `extinction_map`,
+    `target_extinction`, `extinction_result`), a submodule as `stellar` and `planetary` are.
+  - _T10.c, the sightline cache_ is a new `compute/sightlines.rs`: `SharedSightlineCache`, whose
+    `marcher(key, galaxy)` gives a job's `SightlineMarcher` (it owns the job's `NoiseCache` of
+    4,096), and `SIGHTLINE_QUALITY` = `Budget(256)` (moved into the sim by the port, below). The key
+    is the `GalaxyKey`, the two ends' cell and offset bits in sorted order (design note 15) and the
+    quality; the mode and modifiers are fixed by the marcher, which takes neither.
+  - _T10.a/c, budgets._ `--extinction-map-cache` (`HYPERION_EXTINCTION_MAP_CACHE_MB`, 16 MiB) and
+    `--sightline-cache` (`HYPERION_SIGHTLINE_CACHE_MB`, 4 MiB); the plan named only the first.
+    `ServerStats` gains `extinction_maps()` and `sightlines()`.
+  - _T10.c, refusals._ Zero targets are refused `bad_request` naming `targets`, as 65 are. A system
+    ID whose bits are no `SystemId`, or one `resolve` refuses for any reason (a kind or layer not
+    placed yet included), answers that target `no_such_system`.
+  - _T10.c, tests._ The system target is compared with the sim's own line at the epoch only: the
+    server builds the full potential that `position_at` drifts a system by, which a debug test must
+    not build. The a→b and b→a test asks two servers, so the cache cannot hide an asymmetry. An
+    extra test takes the map over the socket (geometry, a refused resolution, the cache hit).
+    `universes.rs`'s refusals moved into `requests_naming()` for Clippy's line limit.
+  - _T10.b, the count._ `PARAMETERS_ACCOUNTED_FOR` is 99 → 116. The task's "95 … rises by the
+    group's size plus one" is wrong twice: the base was already 99, and moving `gas.scale_height`
+    from the exclusions to the sent keys leaves sent plus excluded unchanged, so the rise is the 17
+    new keys. The group's order is design note 3's, `gas.scale_height` first, with each derived share
+    beside its layer (`PLAN_TABLE` pins it). `Unit::Mag` exists but no parameter sends it yet. The
+    client writes `/cm³` in E notation, `K/cm³` to three figures and `mag` to two decimals.
+  - _Re-gated at version 16 (`ext07b`)._ The two new pins moved with the base and were re-blessed
+    at 16: the extinction map's ceiling from 0.32182 to 0.32188 dex (code sum 1,449,236 →
+    1,449,344), and five of the `gas` entries by at most 1.2 × 10⁻⁴ relative
+    (`gas.warm_fraction` 0.156600 → 0.156583, `gas.molecular_length` 382.362 → 382.381,
+    `gas.molecular_height` 92.932 → 92.936, `gas.molecular_fraction` and `gas.neutral_fraction`),
+    with version 16's base.
+- **P07.T10.a–c, ported (lane `gg-port-a1`, 2026-10-14, at version 22).** Built on
+  `rendering-and-planets`: ported from galaxy-generation 5b1c3285 (its T10 half) by
+  `git cherry-pick -n`, under `decision-gg-port-d0.md` (batch A1). Its T11.b–c paths (the map, the
+  legends, the layout, the readout, `RequestStatus`, `mapPicture` and `styles.css`) were restored to
+  the tip for batch A2; `test/galaxyFixtures.ts` came whole, with `anExtinctionMap` and
+  `anExtinctionResult` for A2. No `GENERATOR_VERSION` bump and no `PROTOCOL_VERSION` bump.
+  - _Figures at 22._ `extinction_map_face_on_128.golden` is its version-16 pin bar the header:
+    ceiling 0.321879 dex (2.10 mag face-on), floor −2 (0.01 mag), code sum 1,449,344, the centre's
+    code 195 below the ring's 206 at (80, 80), and 164–169 a quarter of the map's width from the
+    centre along the axes. `galaxy_parameters.golden` gains the `gas` group of 18 entries
+    (`gas.scale_height` and the 17 new keys) and nothing else: `git diff` removes no line. Seed
+    0x4d2's gas at 22: drawn, a hole scale of 17,609.3 ly, a warm ionised density of 0.03353 cm⁻³
+    and height of 3,122.6 ly, a molecular disc of 2.164 × 10⁶ M☉ and 92.94 ly high, a corona of
+    6.816 × 10⁻⁴ cm⁻³, a pressure floor of 368.7 K cm⁻³, σ_ln 1.018, and lanes 453.9 ly inside the
+    arms, 239.4 ly wide with a share of 0.1624; derived, the molecular scale length 382.38 ly and
+    the shares 0.15658 (warm ionised), 2.386 × 10⁻⁴ (molecular) and 0.84318 (neutral); fixed, the
+    neutral scale height 700 ly, the pressure scale height 1,500 ly and σ_P 5.15 km/s. The five
+    entries `ext07b`'s re-gate moved, the four derived ones and `gas.molecular_height` (drawn as a
+    share of the derived R_c), differ from their version-16 pins by at most 8.3 × 10⁻¹⁴ relative
+    (`gas.molecular_fraction`); the other thirteen are bit-identical.
+    `density_map_face_on_128.golden` is byte-identical through the `render_bands` refactor.
+  - _`golden_diff.py`._ It lists the new `extinction_map_face_on_128.golden`, and
+    `galaxy_parameters.golden` with 167 new labels and "4 changed": those four are JSON closing
+    lines (`}` and `]`) that the tool keys by their text and occurrence, and whose indentation
+    differs once the `gas` group is appended. No value moved, so its "bump required" verdict is a
+    false positive here (a deferred finding, below; the determinism review agrees).
+  - _Conflicts._ Every one was both sides appending to one list: `config.rs` (the options table, the
+    variables, the defaults, the clap fields, the builder and its tests, with the two caches placed
+    after the brief cache and the tests' cache arrays grown from 8 to 10), `requests/mod.rs` (the
+    dispatch, `kind`, `is_large` and its doc, the test imports and `every_body`), `envelope.rs`
+    (the variants, `REQUEST_KINDS` and `request_kinds_are_pinned`, the kinds appended after
+    `survey_pass`), `compute/mod.rs`, `lib.rs`, `stats.rs`, `convert.rs`, `limits.rs` and
+    `packages/protocol/src/index.ts`. By hand: the walks `next_request` and `next_response` are
+    re-threaded `SurveyPass → ExtinctionMap → Extinction → None`; the handlers now return an
+    `Answer`, so both kinds go through `answered` as every JSON-only kind does; `next_request`,
+    `next_response` and `every_body` passed Clippy's 100-line limit, and each takes an
+    `#[expect(clippy::too_many_lines)]` with its reason; `RequestBody.ts` and `ResponseBody.ts`
+    were regenerated by `just gen-protocol`; and `apps/hyperion/src/tools/placeShip.test.ts`'s fake
+    server, exhaustive over the kinds, names the two new ones among those it does not fake.
+    `is_large`: `extinction_map` is large and `extinction` is not, which a test now pins.
+  - _Ruling 1 (`decision-gg-port-d0.md` §1)._ `PROTOCOL_VERSION` stays 2, and its doc and plan 04's
+    Design note 15 and reserved list state the rule for the enums that grow. `Unit`'s wire-strings
+    test holds `per_cm3`, `k_per_cm3` and `mag`. The client reads a unit it does not know as
+    Missing: `parameterReadings.ts`'s precisions and `UnitLabel.tsx`'s symbols are
+    `Readonly<Record<Unit, …>>` tables read through `Object.hasOwn`, so a unit added to the
+    protocol without an entry is still a type error; a `ParameterReading`'s `text` is `null` for a
+    Missing value, with no unit, and `ParametersPanel` draws `—` in `.readout__missing`
+    (`--text-muted`). Tests: `toReading` and `UnitLabel` of a unit this build does not know (and of
+    `toString`, which the prototype must not answer), and the panel's row; the one cast is
+    `test/galaxyFixtures.ts`'s `anUnknownUnit`, documented as the decoder's own trust at the wire.
+  - _Ruling 2 (§2.2)._ The group is `GAS AND DUST`, built to D0 §2.4 (f)'s draft of the guide's
+    groups row, pending the owner's sign-off (the sign-off queue's item for the galaxy map's
+    extinction names); the guide is not edited here. _Signed off since, (f) as drafted, on
+    2026-10-16 (`signoff-11.md`, item 22), and applied to the guide's `PARAMETERS` groups row._
+    `gas.molecular_mass` reads
+    `MOLECULAR DISC MASS` and `gas.pressure_speed` `VELOCITY DISPERSION`; the other sixteen labels
+    are 5b1c3285's.
+  - _Ruling 5 (§5)._ `SIGHTLINE_QUALITY` (`Budget(256)`) is the sim's,
+    `galaxy::gas::extinction::SIGHTLINE_QUALITY`, its doc naming both readers;
+    `compute::sightlines` imports it and defines none, and `compute` no longer re-exports it;
+    `sky::band::BAND_PROFILE_QUALITY` is deleted and the band's profile and its test read the sim's
+    constant. The value is unchanged, so no output moves: the sim's `gas::extinction` and
+    `sky::band` tests pass (45). R06's text notes the move.
+  - _From review._ The raw and quantised maps carry their unit as a marker type: `RawMap<U>` and
+    `QuantisedMap<U>`, with `RawDensityMap` = `RawMap<PerLy2>` and `RawExtinctionMap` =
+    `RawMap<Mag>`, so that neither map can be quantised by the other's rule or answered as the
+    other (the Rust rules' "Physical quantities always carry their unit in the type or the name").
+    This departs from T10.a's text, which reuses `RawDensityMap` and names
+    `quantise_map_with_floor(&RawDensityMap, …)`: it takes `&RawMap<U>`, and `quantise_map` and
+    `convert::density_map` take the density map's unit, `convert::extinction_map` the extinction
+    map's. The wire is unchanged. Also: the sightline cache's order independence is tested through
+    a warm cache, a fresh one and one that holds a single line (`assert_order_independent`); the
+    tests name the error variants they expect; and the budgets' docs give the measured charges (an
+    extinction map's every view and resolution is 8.0 MiB of `f32`, and a cached line is charged
+    128 bytes, so 4 MiB holds 32,768 lines, not 5b1c3285's "some 20,000").
+  - _Also:_ `E(B−V)` with U+2212 in `TargetExtinction`'s doc and `convert::extinction`'s.
+  - _Time._ `tests/extinction.rs` alone: 5 tests in 8.5 s (debug, 4 test threads,
+    `CPUQuota=400%`, a shared machine: provisional).
+  - _Left for A2 (P07.T11.b–c):_ the dust overlay, `QUANTITY`, the extinction legend, the compact
+    map page and the readout's `FROM CHART CENTRE` rows, with D0's rulings 2 (their names) and 3.
+  - _Deferred findings (2026-10-13 rule)._
+    - `golden_diff.py`'s `by_label` keys an unlabelled line by its stripped text and occurrence but
+      compares it with its indentation, so a group appended to a JSON golden reports its closing
+      lines as changed and asks for a bump. A fix would compare stripped text, or key JSON goldens
+      by path.
+    - The `extinction` answer's values at `SIGHTLINE_QUALITY` are pinned by no golden: the tests
+      compare the server's lines with the sim's own call, `gas_extinction_is_pinned` pins `Full`
+      and `Budget(64)` only, and `sky/band_face_row` pins the band's profile at `Budget(256)` to
+      10⁻¹² rather than bit for bit. A server golden of a few lines would pin them; not added,
+      since D0 §6.4 fixes this batch's goldens (one new, one extended). For main.
+    - The guide has no row for a value the server sent in a unit the console does not know. D0
+      rules it Missing (`—`); the guide's `UNLISTED MATERIAL` row keeps the em dash from a value
+      the server did send. A line for the sign-off queue's drafts, or a reason beside the dash.
+    - The console-ux skill's `ux_lint.py` reports `UnitLabel.tsx`'s table keys `per_ly3` and
+      `per_cm3` as code names on screen, a false positive for the two entries whose text starts
+      with `/`.
+    - D0 counts the gas labels as 17 (§1.1's rows, A1's "the 17 labels", §2.2's "15 kept and 2
+      renamed"); the group sends 18 (15 in units an older client knows, 3 in new ones), all 18
+      labelled as §2.2's table lists them. Nothing it rules depends on the count.
+- **P07.T11.b–c, as built (lanes `ext07` and `ext07b`, 2026-09-30, at versions 15 and 16) on
+  `galaxy-generation`.** Kept as history, condensed; the port below brings it onto
+  `rendering-and-planets` and supersedes its layout bullets, its provisional pin and its list for
+  the owner.
+  - _T11.b._ `GalaxyMapView.tsx` exports `MapQuantity` and `DUST_OVERLAY_LABEL`; the panel's keys
+    are `Q` (steps `QUANTITY`) and `D` (toggles `DUST OVERLAY`, a `.control` with `aria-pressed`,
+    held back under `EXTINCTION`). `RasterLegend.tsx` is extracted from `DensityLegend.tsx`, whose
+    output is unchanged; `ExtinctionLegend` builds on it with plain-decimal ticks (`0.01`, `0.1`,
+    `1`, `10`). A picture of two maps waits for both, and under the overlay the status names
+    `EXTINCTION` when it is that map's. The view also reads `CURSOR A(V)` in `mag`; under the overlay the undimmed density
+    and A(V) share one live region. `dustOverlay` keeps a pixel with no dust above 0.01 mag at its
+    code, and sends one the shift takes to or below the floor to code 0.
+  - _T11.c._ `SystemReadoutProps` gains only the reading (`extinction: LineExtinction | null`);
+    `SystemsPanel` shows the request's state after the summary's, outside the readout's live region
+    (rulings 13 and 14), through `RequestStatus`'s new `subject` prop. `RETRY` is
+    `LocalChartState.retryExtinction`. The rows stand under the heading `FROM CHART CENTRE`; the
+    line runs from the centre of the chart on show, at its time.
+  - _The compact layout (`ext07b`)._ `mapLayout(size)` is `compact` below `COMPACT_BELOW_REM`
+    (44 rem, ruling 149.2) and `stacked` otherwise and before the page is measured;
+    `mapPictureWidth(size, layout)` replaces the panel's `pictureWidthFor`. Compact, the controls
+    stand in a row across the page, 7.5 rem tall with the tabs' clearance; the words column is at
+    least 27 rem; each view's row is as tall as its picture or its words; under the overlay a
+    view's two legends stand side by side; the link's reason stands in the tabs' row. Both layouts
+    name the overlay once for the page, beside its toggle, and stacked, the pictures start 2.5 rem
+    down, clear of the page tabs (which had drawn `HR DIAGRAM` over the face-on picture).
+  - _Superseded by the port:_ `ext07`'s "Open: the map page's compact layout", "Found, not this
+    lane's", "1280 × 720, deferred" and "For the owner (UX, deferred)" bullets; `ext07b`'s
+    measurements (taken before R01.T5.b's header strip); and its provisional pin, the overlay at
+    1280 × 720 running 70 px past the edge-on picture with the compact page scrolling 68 px, with
+    the `overflow-y: auto; scrollbar-gutter: stable` rule that let it.
+- **P07.T11.b–c, ported (lane `gg-port-a2`, 2026-10-15, at version 22).** Built on
+  `rendering-and-planets`: ported from galaxy-generation 5b1c3285 (its T11 half) by checking its
+  client paths out over the tip and merging each by hand, under `decision-gg-port-d0.md` (batch
+  A2). The client and this plan only: no `GENERATOR_VERSION` or `PROTOCOL_VERSION` change, no wire
+  change.
+  - _Merged by hand._ `RasterLegend`'s ticks carry R07.T16.f's `density-legend__tick-mark` class
+    (stroke `calc(1px * var(--line-scale))`, decision-thin-line-contrast), and the commit's
+    `strokeWidth={1}` goes; `DensityLegend` is the commit's `RasterLegend` form. `RequestStatus`
+    keeps the tip's `isRefusal` beside `subject`. `styles.css` took the commit's block into the
+    grown file by a clean three-way merge. `useLocalChart` and `SystemReadout` keep the `geometry/`
+    imports. `SystemReadout.summary.test.tsx`, which the tip added since, passes `extinction={null}`.
+  - _Ruling 2, the names (D0 §2.1)._ The quantities are `COLUMN DENSITY` and `EXTINCTION`
+    (`MapQuantity` is `"column_density" | "extinction"`, not `"systems"`). The toggle is held back
+    with `NOT AVAILABLE: dims COLUMN DENSITY only` under `EXTINCTION` (`OVERLAY_DENSITY_ONLY`) and
+    `NOT AVAILABLE: no room for DUST OVERLAY at this window size` where the page has no room
+    (`OVERLAY_NO_ROOM`), each a visible line beside the toggle and its description. `CURSOR A(V)`,
+    `FROM CHART CENTRE` and `QUANTITY` are kept. `RequestStatus`'s subject stands before the
+    request's own state with a space (`EXTINCTION PENDING`, `EXTINCTION REJECTED: <reason>`,
+    `EXTINCTION TIMED OUT`) and never before the link's state. `SystemsPanel` reads
+    `EXTINCTION REJECTED: no such system` for a target the server resolves to none, as a refusal
+    with no `RETRY`, and shows the link's state once: not again for the extinction while the
+    summary's status shows it. `E(B−V)` has U+2212 in the readout's row, the doc comments and the
+    tests. No caption under the overlay's legends (§2.3). Built to D0 §2.4's drafts, signed off
+    2026-10-16 (`signoff-11.md`, item 22: (d) widened to the display's present state, the rest as
+    drafted) and applied to the guide; P07.T11.d builds (j)'s line.
+  - _Ruling 3, the room (D0 §3.2)._ The compact page's scroll rule is deleted, and nothing on the
+    page scrolls. `mapLayout.ts` gains the measured `WORDS_REM` (the tallest words of each view,
+    plain and under the overlay, in each layout, plus 0.5 rem), and three rules on the page's size
+    alone: `mapPictureWidth` compact leaves the edge-on row its tallest plain words, and the
+    face-on row likewise (at 1280 × 720 the pictures are 256 px, not 260, and under a mode banner
+    254); `mapRows(size, layout)` gives each view its picture's height or its tallest plain words',
+    whichever is taller, and the stacked grid takes its rows from it (`--map-face-row`,
+    `--map-edge-row`); and `overlayHasRoom(size, layout)` is true where those rows hold the
+    overlay's words. Where it is false, the toggle is held back (`aria-disabled`, described by the
+    reason, and by the link's reason too while the link is down), `D` does nothing, and the choice
+    is kept for when the page has room; the room's reason comes before `EXTINCTION`'s. The overlay
+    is offered at 1920 × 1080 and held back at 1280 × 720, 1536 × 864 and 1280 × 1024.
+  - _Deviations from the ruling's text, with their reasons._
+    - **The stacked rows (not in D0).** At 1280 × 1024 the stacked pictures are as wide as the page
+      allows (326 px), and the face-on words with the controls above them (up to 414 px, 25.9 rem,
+      with the link's and the room's reasons) ran 40–66 px past the face-on row into the edge-on
+      view: no picture width could fix that, since the pictures cannot grow. The face-on view now
+      keeps the height of its tallest plain words where they are taller than the picture, which
+      stands at its top (`mapRows`); the edge-on view likewise. At every size whose pictures are
+      the taller, 1920 × 1080 among them, the layout is unchanged. The smallest change that keeps
+      ruling 149.2's 44 rem switch, which the local chart shares; accepted (decision-gg-port-a2
+      §1).
+    - **The overlay's legends side by side in both layouts (D0 §3.2.4's fallback).** Measured at
+      the narrowest stacked column (24 rem, at 1280 × 1024), the edge-on words under the overlay
+      were 270 px, 278 with the headroom, against the 276–277 px of the 1920 × 1080 edge-on
+      picture, so a rule on the page's size alone could not offer the overlay at the design size;
+      at its own 24.6 rem column they were 252 px. With the legends side by side they are 218 px at
+      both columns, leaving 1920 × 1080 50 px beyond the headroom.
+    - **§3.3's lean taken.** A stale view's status line under its head, counted in the plain
+      reserve, would have narrowed the 1280 × 720 pictures from 260 to 226 px, 34 px past the
+      lean's 24 px. A stale view whose request waits on the link now leaves the link's state to the
+      page, which states it once for both views (the tabs' row compact, the controls stacked); its
+      `S` marks and muted ramp stay.
+    - **The held-back reason's letter-spacing.** The reasons beside the toggle are sentences, now
+      set as the `VIEW` display sets its own (`.view-instruments-panel__reason`), without the
+      labels' 0.15 em: with it, `OVERLAY_NO_ROOM` took three lines of the compact controls' row
+      (138 px against its 7.5 rem, 120 px) and the 1280 × 720 page ran 10 px past its foot.
+  - _Measured_ (D0 §3.4): hidden runs of the lane's own build, the client offscreen and never
+    shown (a `--require` hook in the lane's `target/a2-layout/`, not committed), against the lane's
+    `hyperion-server` with seed 0x4d2's universe, at 1280 × 720, 1536 × 864 (1920 × 1080 at 125%),
+    1920 × 1080 and 1280 × 1024, in the header strip as it is and with the graphics safe mode's
+    banner (2 px taller, so binding), in six states each (`COLUMN DENSITY` with `ALL` and with
+    `YOUNG THIN DISC`, `EXTINCTION`, the overlay on or its toggle held back, the first load, and
+    the link down after both maps loaded). Words are a view's last line of words less its top;
+    overruns the words' foot less the row's (negative fits). Before (5b1c3285's layout as ported,
+    the scroll rule deleted, the overlay offered everywhere) → after (the lane's commit):
+    - 1280 × 720 (page 798 × 520, 518 under the banner; compact): pictures 260 → 256 (254). Plain
+      words face-on 150 px and edge-on 128 px in every state, the edge-on row's fit −2 → the edge-on
+      row 128 px with the page's foot 8 px below it. Under the overlay the content ran 68 px (70)
+      past the page's foot, clipped → the toggle held back in all six states, with
+      `OVERLAY_NO_ROOM` in two lines of the 120 px controls' row, and with the link's reason too
+      while it is down.
+    - 1536 × 864 (page 816 × 664, 662; compact): pictures 296 → 296; plain edge-on words fit by
+      20 px and the page's foot is 92 px (90) below them. Under the overlay the edge-on words, 200
+      px, made their row taller than its 148 px picture and still ended 40 px above the page's foot
+      → the toggle held back, as the ruling's test of half the picture's height has it (a finding,
+      below).
+    - 1920 × 1080 (page 1,036 × 880, 878; stacked): pictures 554 (552) → unchanged; plain words
+      face-on −206 (−204) and edge-on −149 (−148), unchanged; the overlay's face-on words 292 → 258
+      px (−78 → −112) and edge-on 252 → 218 px against 277 (276), −25 → −59 (−58); offered, named
+      once beside its toggle.
+    - 1280 × 1024 (page 798 × 824, 822; stacked): pictures 326 → 326. The face-on words with the
+      controls overran their row by 40 px (`COLUMN DENSITY`), 44 (`EXTINCTION`) and 66 (the link
+      down) → the face-on view 462 px, the words inside it by 34 px and by 8 with the link down;
+      edge-on −17 px, unchanged; the page's foot 191 px (189) below the edge-on view; the toggle
+      held back, its reason 3.2 lines of the 24 rem column.
+    - Nothing scrolls in any state at any size (the page's, the work area's and the document's
+      scroll sizes equal their client sizes); no element clips; the tabs stand clear of the face-on
+      picture. The axis labels stand outside the picture's box by design (`map-view__area`'s
+      `scrollWidth` 24 px over its width, overflow visible).
+    - Found: the link down after both maps loaded is not a stale state: an `ok` answer outlives the
+      link (`useServerRequest`), so the maps stay current and only the page shows `NO CARRIER`. A
+      view goes stale only when it asks again, after a resize across a resolution step; its words
+      were measured by setting its status line under its head (`NO CARRIER`, 30 px; a failure
+      with `RETRY`, 44 px).
+  - _By eye (T11.b's acceptance)._ Seed 0x4d2, face-on, `YOUNG THIN DISC`, 1920 × 1080: with the
+    overlay a thin dark lane runs along the inner edge of each arm, clearest on the inner turns,
+    and the centre is dimmed; without it neither. Shots in the lane's `target/a2-layout/shots/`.
+  - _Tests._ `mapLayout.test.ts` pins the layout, the pictures' width, the rows and the room at
+    each size measured, with and without the banner; `GalaxyMapPanel.test.tsx` holds the toggle
+    back at 1280 × 720's page (described by the room's reason, `D` and a click inert, the choice
+    kept through a resize and back), offers it at 1920 × 1080's with both legends in each view and
+    the overlay named once, gives the room's reason before `EXTINCTION`'s, and lays the page out
+    the same with the overlay on as off; `GalaxyMapView.test.tsx` keeps a stale picture with the
+    link down without a status line of its own; `RequestStatus.test.tsx` the subject's space and
+    the link's state without one; `SystemReadout.extinction.test.tsx` the refusal without `RETRY`
+    and the link's state shown once.
+  - _From review_ (TypeScript, UX and plan-conformance reviewers).
+    - The extinction's answer is a union, `LineAnswer` (`none`, `line`, `no_such_system`,
+      `invalid`), switched on in `SystemsPanel`; an answer of other than one line, or with a figure
+      that is not finite, reads `EXTINCTION DATA INVALID: <cause>` with `RETRY`, a fault, as an
+      answer that fails a display's checks does (a new name, below).
+    - `MapQuantity` is switched on with no `default` (`takesOverlay`, `needsDensity`,
+      `needsExtinction`, `layerKind`).
+    - `Q` and `D` act only while the map page is on show (`GalaxyMapPanel`'s new `shown`, from
+      `GalaxyPages`) and a universe is open: the page stays mounted behind its tab, so that its
+      maps are kept, and the keys had changed the unseen map from the other three pages.
+    - The tests split to one behaviour each; new ones cover a text field, modified and repeated
+      keys, the link down where the page has room, the page behind its tab and no universe open.
+    - The console-ux scripts: `ux_lint.py` 0 errors (its 10 checks are the lists' existing
+      `overflow-y: auto` rules, outside the diff); `contrast.py` passes every required pairing
+      (`--text-muted` on `--surface-1` 6.76:1, the `--accent` underline 9.72:1; no token changed);
+      `glyphs.py` finds U+2212, `²`, `³`, `↑` and `↓` in both B612 faces.
+  - _Also as built._
+    - §3.3 covers a stale view's line only. A view with no picture yet, when the link drops before
+      its first map, shows the link's state where its picture will be, beside the page's; it
+      costs the words column nothing.
+    - Before the page is measured `overlayHasRoom` has no size, and the toggle is held back with
+      the room's reason; the page is measured in a layout effect before the first paint, so the
+      reason never shows at a size with room.
+    - The map's status names `EXTINCTION` only under the overlay, once the density map has
+      answered; under `EXTINCTION` the one map's state reads plain (`PENDING`), with no other
+      beside it to tell apart.
+    - The measured build predates the review's changes, none of which moves the layout.
+  - _New name, for the sign-off queue._ `EXTINCTION DATA INVALID`, beside the guide's
+    `MAP DATA INVALID` and `CHART DATA INVALID` in the `SYSTEM DATA INVALID` row.
+  - _For main (questions, each with the lean built)._ All seven ruled by decision-gg-port-a2
+    (2026-10-15): the stacked rows as built (§1); a stale view's own line moved to the page, and a
+    failure to the picture's place (§2), and a kept map stale while the link is down (§3), both
+    built in P07.T11.d; the extinction map at 16 bits (§4, built in P07.T11.e); the overlay's
+    brightness line (§5, built in P07.T11.d); the density map's status as built (§6); one form for
+    `STATE: cause` lines (§7, P05.T13, after sign-off item 24).
+    - **The stacked rows.** Whether a stacked page too narrow for its pictures to hold its words
+      should give the face-on view their height (built, `mapRows`), or go compact, as 1280 × 1024
+      would then be (pictures 278 px under the controls' row, the local chart staying stacked).
+      Lean: as built, since it keeps ruling 149.2's one switch for the panel's two pages and
+      moves nothing at 1920 × 1080.
+    - **A stale view's own line.** A view goes stale only after a resize across a resolution step
+      (above), and its status line, `PENDING` or a failure with `RETRY`, then stands under its
+      head. At 1280 × 720 that takes the edge-on words 22 px (`PENDING`) or 36 px (a failure) past
+      the page's foot, clipped there, until the new map answers or `RETRY` is pressed; stacked it
+      fits but for a failure at 1280 × 1024 (10 px into the gap). D0's plain states do not name it,
+      and its acceptance 1 is "nothing clips in any state". Options: reserve the line (the
+      1280 × 720 pictures 226 px for `PENDING`, 212 for a failure, past §3.3's 24 px); state a
+      stale view's line once for the page, as §3.3 does the link's (`PENDING` of a resize stands in
+      both views at once); or accept it. Lean: as built until ruled, since the `PENDING` is a few
+      seconds after a resize and the failure rare, and the smallest reversible choice is none.
+    - **Whether a link drop makes a kept map stale.** T11.b's text says "a map kept after the link
+      drops is marked stale as the guide requires", and plan 05's ruling (8) reads the guide's
+      "Loss of the server link makes every live value on the console stale at once" so; plan 05's
+      design note D4 calls a map a snapshot, not a live value, and the code (`useServerRequest`,
+      plan 05) keeps an answered map current through a link loss, so `CURSOR DENSITY`, now
+      `CURSOR A(V)` too, and the pictures stay in `--text` with no `S` while the page says
+      `NO CARRIER`. It predates this port; the port follows the code. Lean: a task of its own for
+      the map as a whole, after a ruling; T11.b's sentence is left as written.
+    - **`CURSOR A(V)`'s precision.** Two decimals, as every A(V) on the console is written, from an
+      8-bit map: the edge-on map's code step is about 3.3 %, about 1.3 mag at 40 mag, so
+      `40.47 mag` shows figures the map does not hold (the guide's "the precision the operator can
+      act on"). `CURSOR DENSITY`'s three figures are the same case, ruled before (a code's centre
+      carries no `~`). Options: the extinction map at 16 bits, which the protocol allows; or
+      fewer figures for a map reading. Lean: as built until ruled.
+    - **The overlay's A(V) bar.** The UX reviewer reads a real, not certain, risk that the A(V)
+      bar beside the dimmed density is taken for the picture's brightness, which D0 §2.3 leaves to
+      a page-level line beside the overlay's name. Lean: none added; for the ruling D0 §2.3 names.
+    - **The density map's status under the overlay** reads `REJECTED: <reason>` beside
+      `EXTINCTION REJECTED: …` with no subject of its own; a subject such as `COLUMN DENSITY` would
+      be a new composed name. Lean: as built.
+    - **One grammar for `STATE: cause` lines.** The held-back reasons are set without the labels'
+      letter-spacing (the `VIEW` display's form); `EXTINCTION REJECTED: …` and `NO CHART: …` on
+      the same display are spaced. Lean: as built; a ship-wide ruling may set one form.
+  - _Deferred findings (2026-10-13 rule)._
+    - At 1536 × 864 (1920 × 1080 at 125%) the overlay's edge-on words, 200 px, would have stood
+      on the page 40 px above its foot, in a row grown past its 148 px picture, with nothing above
+      that picture moving; the ruling's test (half the picture at least as tall as the words) holds
+      the overlay back there. A later ruling may offer it where a compact page holds the rows the
+      overlay's words make; the rule is constants and one comparison in `overlayHasRoom`.
+    - `BELOW FLOOR`, which predates the port and now also follows `CURSOR A(V)`, is not on the
+      nomenclature list.
+    - `LocalChartPanel.test.tsx`'s "asks again for a new centre, keeping every setting but the
+      selection" took 15.4 s and failed once under a load of about 30 with the galaxy suites beside
+      it; it passes alone (24 of 24).
+- **P07.T11.e, as built (lane `lane/26-p07-t11e-extinction-16bit`, 2026-10-15, at version 22).**
+  Built on `rendering-and-planets` under main's ruling, decision-gg-port-a2 §4, which answers the
+  A2 record's question on `CURSOR A(V)`'s precision. The client and this plan only: no server,
+  protocol or golden change, `GENERATOR_VERSION` 22 and `PROTOCOL_VERSION` 2 as they were, nothing
+  new on the wire (the protocol offers 8 or 16 bits), and the layout unchanged.
+  - _What changed._ `GalaxyMapView.tsx` gains `EXTINCTION_MAP_BITS = 16` beside `MAP_BITS`, its
+    doc giving the ruling's reason and precision; `MAP_BITS`'s doc names the density map, which
+    stays at 8 bits (plan 05, D5); `extinctionBody` asks at `EXTINCTION_MAP_BITS`; and
+    `GalaxyMapView`'s doc names the `extinction_map` at 16 bits. Nothing else in the file moves.
+    The fixtures' `anExtinctionMap` takes an optional `bits` of 8 or 16, 8 by default, so that
+    every earlier caller is unchanged, and at 16 writes each code as two bytes, little-endian, as
+    `CodeDepth::Sixteen` and `readLittleEndianU16` have them, throwing for a code outside 0 to
+    65,535; `aDensityMap` stays 8-bit. `mapPicture.ts` and `ramp.ts` are unchanged: no 16-bit test
+    found a defect in them.
+  - _The cost_, in characters of base64 (4 ⌈bytes ÷ 3⌉), beside D5's 8-bit density map, 349,528
+    face-on at 512 px and 1,398,104 at 1,024 px (D5's "about 350 kB"): the 16-bit extinction map
+    is 699,052 face-on and 349,528 edge-on at 512 px, and 2,796,204 and 1,398,104 at 1,024 px. It
+    is asked for only under `EXTINCTION` or the dust overlay. The maps' framing is unchanged
+    (plans 04 and R03 would send them as bulk frames).
+  - _Tests._ `GalaxyMapView.test.tsx`: "asks for the extinction map alone under EXTINCTION, at the
+    density map's resolution" now expects `bits: 16`; a new test asks under the overlay for the
+    `density_map` at 8 bits and the `extinction_map` at 16, both at 512 px; and a new table reads
+    `CURSOR A(V)` from a 16-bit map from 0.01 to 50 mag (3.69897 dex) at codes 63,817, 63,818 and
+    63,819 as `39.99`, `40.00` and `40.00 mag` (39.9945, 39.9997 and 40.0049 mag by the decode
+    rule), where at 8 bits the nearest code, 248, stands for 39.54 mag and its neighbours for 38.24
+    and 40.89 mag, 1.30 and 1.35 mag away. `mapPicture.test.ts`: `dustOverlay` dims an 8-bit
+    density spanning 5 dex by a 16-bit extinction from 0.01 to 100 mag, codes 32,768, 44,220, 1,
+    65,535 and 0 (1, 5.0003, 0.01 and 100 mag, and below the floor), taking density codes 255,
+    255, 200, 100 and 128 to 235, 153, 200, 0 and 128, an 8-bit map (`Uint8Array`, `maxCode` 255).
+    The tests that answer a 16-bit request with an 8-bit `anExtinctionMap` stay as they are: the
+    decoder takes either depth.
+  - _Deviations._
+    - **The picture.** The task's "the picture is unchanged" holds under `EXTINCTION`, but for one
+      level where a 16-bit code's level and the 8-bit code round apart (about 0.1 % of values).
+      Under the dust overlay `dustOverlay` now takes A(V) at the 16-bit step rather than at the
+      centre of an 8-bit code, so the edge-on picture moves by up to 4 of the ramp's levels where
+      A(V) is about 10–17 mag (the density's span 7 dex), and the face-on picture by at most 1,
+      each towards the value computed for the pixel: the gain the ruling names for the overlay's
+      arithmetic (swept over the server's `code_of` and the overlay's rule). The constant's doc
+      says so. No test pins it.
+    - **T11.b in part.** T11.b's "at `MAP_BITS` and `MAP_TIMEOUT_MS` as the density map's is" now
+      holds for the timeout only: the extinction map is asked for at `EXTINCTION_MAP_BITS`. T11.b's
+      text is left as written.
+    - **The ruling's example.** It gives code 248's 8-bit neighbours as each about 1.35 mag away;
+      by the decode rule they are 1.30 mag below and 1.35 mag above, both over the 1 mag the test
+      asks for.
+    - **The size, against the brainstorm.** Its Visualiser lean has the map "quantised to 8 or 16
+      bits and base64-encoded, a few hundred kilobytes": the 16-bit extinction map at 512 px is
+      699,052 characters, and under the overlay at 1920 × 1080 the face-on view's two maps are
+      1,048,580 together. The 1,024 px maps were past it at 8 bits already.
+  - _Deferred findings (2026-10-13 rule)._
+    - The view does not compare an answer's `bits` with the request's, for either map. An 8-bit
+      answer to the 16-bit request would be drawn, and `CURSOR A(V)` would write two decimals from
+      8-bit codes without `MAP DATA INVALID`. The server quantises at the request's depth, so this
+      is a server fault only; the brief adds no such check.
+    - `anExtinctionMap`'s 16-bit path has no test of its own (a round trip through
+      `decodeExtinctionMap` and a refused code), as `aDensityMap` has in `galaxyFixtures.test.ts`,
+      which is outside this task's files; the view's 16-bit reading pins its byte order (swapped
+      bytes read about 0.12 mag).
+    - `MapViewBody`'s comment "Decoding 350 kB of base64 takes milliseconds" predates T11.e; under
+      the overlay the two maps at 512 px are now 350 kB and 700 kB. Left as written, so that the
+      file's diff stays to the constant, the body and the two doc sentences for T11.d's merge.
+    - The 79 and 120 mag to which 16 bits hold the second decimal are for the spans read at
+      1920 × 1080. A higher ceiling widens the span: at a ceiling of 100 mag the step at the
+      ceiling is 0.014 mag (span 4 dex), 1.4 units of the last place.
+- **P07.T11.d, as built (lane `gg-port-a2-d`, 2026-10-16, at version 22).** Built on
+  `rendering-and-planets` under decision-gg-port-a2 §2, §3 and §5, and
+  decision-p07-t11d-stale-waits. The client and plans 05 and 07 only: no server, protocol or golden
+  change, `GENERATOR_VERSION` 22 and `PROTOCOL_VERSION` 2 as they were.
+  - _What changed._ `GalaxyMapView` reads the link (`useServerLink`) and marks a picture on show
+    stale while it is down; a kept picture (the same question at another resolution) stays only
+    while its new map is awaited, and a failure (`REJECTED`, `TIMED OUT`, or `MAP DATA INVALID`)
+    drops it, so the failure and `RETRY` stand in the picture's place; the view's words carry no
+    status line in any state; a stale canvas is described by its key hint and the page's line
+    (`pageWaitId`). `GalaxyMapPanel` gives the page one line for the views' wait,
+    `.galaxy-map__wait`: the link's reason (the `p` as built) or, with the link up, a stale view's
+    new map in flight, `PENDING` or `EXTINCTION PENDING` (an `output`, a live region, with the same
+    classes), one ID for both (`waitId`, formerly `linkReasonId`), never both at once. It shows
+    `DUST_OVERLAY_BRIGHTNESS`, `Brightness is COLUMN DENSITY dimmed by A(V)`, exported beside
+    `DUST_OVERLAY_LABEL`, after the overlay's name on a line of its own
+    (`.galaxy-map__overlay-brightness`, `flex: 1 1 100%`, `--text`, no letter spacing). The line
+    was signed off as drafted on 2026-10-16 (`signoff-11.md`, item 22 (j)); the guide's raster
+    rule takes it in the sign-off's commit, not here.
+    `styles.css`'s compact rule for the line now selects `.galaxy-map__wait`, not
+    `.panel__inhibit`. Docs: `useServerRequest` (§3's sentence), `GalaxyMapView`,
+    `GalaxyMapPanel` and `WORDS_REM`.
+  - _Deviations._
+    - **The page's wait under `EXTINCTION`.** It reads plain `PENDING`. `EXTINCTION PENDING`
+      stands only under the overlay, once the density map has answered. The task's "where the
+      stale views await only the extinction map" is read through §6 and draft (k): the map of the
+      quantity shown reads plain, as the view's own status does. If main reads §2.2 literally, the
+      change is one condition on `stateSubject` in `GalaxyMapView.tsx` and one test.
+    - **A new file.** `displays/galaxy/staleWaits.ts` (`StaleWaits`, `StaleWait`, `ViewWaits`,
+      `staleWaitText`) and `staleWaits.test.ts` are beyond T11's Files list; `GalaxyMapViewProps`
+      gains the required `staleWaits` and `pageWaitId`.
+    - **A failure the link clears.** `useServerRequest` drops a failure when the link changes
+      ("only an answer outlives the link"), so after a failed new map a link drop brings the stale
+      picture back under the page's link state, and the map is asked for again when the link
+      returns; a later resize after a failure likewise brings it back while the new map is
+      `PENDING`.
+    - **The failure's subject under the overlay.** The extinction map's failure keeps its subject in
+      the picture's place (`EXTINCTION REJECTED: <reason>`, `EXTINCTION TIMED OUT`), as §6 has it.
+    - **The commit's type.** `feat(galaxy)`, as main's brief has it, where §9.1's text says
+      `fix(galaxy)`.
+  - _A recorded exception to the TypeScript rules (decision-p07-t11d-stale-waits)._ The views
+    report their stale waits to the page through `StaleWaits` (`displays/galaxy/staleWaits.ts`).
+    The page creates this store once and reads it with `useSyncExternalStore`, and each
+    `GalaxyMapView` writes its own wait from a layout effect. That is an effect notifying a
+    parent, which `.claude/rules/typescript-dev.md` (React) forbids. The rule's remedy is to lift
+    both views' requests, decodes and kept pictures into the page, with `RETRY` as a generation
+    bump. That would reverse T11.b's "the panel holds **no** request", this task's "The panel
+    still holds no request" and decision-gg-port-a2 §2.2's "`RETRY` mounts the view afresh",
+    all for one transient line.
+    - _Bounds._ The exception holds only within these:
+      - the wait is derived during render, and the effect only writes it;
+      - the store belongs to one page and goes to its two views alone;
+      - a report that changes nothing tells no one, so the page renders again once per change,
+        before the paint;
+      - the effect's cleanup clears the view's wait, so a view unmounted by `RETRY`, or hidden
+        under `Activity`, leaves none behind.
+    - _Scope._ It is not a pattern for other displays. It lapses if the map requests ever leave
+      `GalaxyMapView`, as they would if maps move to bulk frames (decision-gg-port-a2, "Seen,
+      not ruled" 4). The page then derives the wait during render, and the store goes.
+    - _Rejected._ Reporting from the request's own callbacks was weighed and rejected.
+      `useServerRequest`'s `pending` is derived during render and it sends from a passive
+      effect, so the same write would only move into the hook's effect, after the paint, with
+      the wait worked out twice.
+  - _Measured_ (D0 §3.4): hidden runs of the lane's build, the client offscreen and never shown
+    (A2's `--require` hook, extended, in the lane's `target/a2d-layout/`, not committed), against
+    the lane's `hyperion-server` with seed 0x4d2's universe, under the GPU lock, all after the
+    machine's reboot of 2026-10-16 07:22 on binaries built after it (an earlier set, taken before
+    the hold, gave the same figures). The resize runs hold the server with `SIGSTOP` while each new
+    map is asked for, so that the page's `PENDING` stands to be measured, and continue it after.
+    Clipping excludes the visually hidden `stale` word that follows each `S` (1 px by design).
+    Figures as words/overrun px, P the pictures; the safe mode's banner in brackets:
+    - 1280 × 720 (compact): P 256 (254); plain words face-on 150/−106 (−104) and edge-on 128/0 with
+      the page's foot 8 px below, in every state; the toggle held back. The link down after both
+      maps loaded, under `COLUMN DENSITY` and under `EXTINCTION`: both pictures stale (named
+      `…, stale`, described by `NO CARRIER`), `NO CARRIER` in the tabs' row (32 px, the line it
+      held before), the words unchanged, each cursor line one line with its `S`, 118 px (120) to
+      spare in the 27 rem column (`CURSOR A(V)` 207 px (209)). The resize from 1920 × 1080:
+      `PENDING` (an `output`) in the same place and height, both pictures stale and described by
+      it, the words unchanged; the maps then current, nothing on the page's line.
+    - 1536 × 864 (compact): P 296; words face-on 150/−146, edge-on 128/−20, the page's foot 92 px
+      (90) below; link down stale, the cursor lines' `S` 96 px to spare.
+    - 1920 × 1080 (stacked): P 554 (552); plain face-on 168/−206 (−204), edge-on 128/−149 (−148).
+      The page's line, `NO CARRIER` with the link down or `PENDING` after the resize back from
+      1280 × 720, is one 18 px line at the head of the controls (212 → 238 px), the face-on words
+      then 168/−180 (−178); the cursor lines' `S` 58 px (60) to spare. The overlay is offered,
+      named once, with its brightness line on one line (18 px, letter spacing `normal`): face-on
+      words 258/−90 (−88), edge-on 218/−59 (−58), the face-on words with the controls 29.0 rem;
+      with the link down as well, the pictures stale and all four cursor lines with their `S`
+      (58 px and 147 px to spare), 258/−64 (−62) and 30.625 rem.
+    - 1280 × 1024 (stacked): P 326; the face-on view 462 px, its words with the controls 24.25 rem,
+      186/−34, and with `NO CARRIER` 25.875 rem, 186/−8 (the plain reserve's 25.875 + 0.5 holds);
+      edge-on 146/−17; the page's foot 191 px (189) below; the toggle held back; link down stale,
+      the cursor lines' `S` 48 px to spare (`CURSOR A(V)` 137 px).
+    - The probe (the overlay offered at every size, a build not committed), at 1280 × 1024's 24 rem
+      column: the brightness line one line; the face-on words with the controls 29.0 rem, and
+      30.625 rem with the page's line above them, as at 1920 × 1080. So
+      `WORDS_REM.stacked.overlay.faceOn` moves from 28.125 to 30.625 + 0.5 = **31.125 rem**
+      (498 px), the tallest state's (the link's reason or a stale view's `PENDING`, one line of
+      one height). The overlay is still offered at 1920 × 1080 (a 552–554 px face-on row) and
+      held back at 1280 × 1024 (422 px); a stacked page now offers it from 498 px pictures, where
+      it did from 450 px. Checked on the final build at 1920 × 1080 and 1280 × 1024, both shells.
+    - Nothing scrolls or clips in any state measured; the tabs stand clear of the pictures.
+    - `mapLayout.test.ts`: its edge-on threshold test (a 450 px picture against 452) is re-pinned
+      as the face-on one (496 px against 498): with 31.125 rem face-on, more than twice the
+      edge-on's 14.125, the face-on words bind first in every stacked page, and the edge-on
+      comparison in `overlayHasRoom` no longer decides at the current constants.
+  - _Tests._ `GalaxyMapView.test.tsx`: a resize's wait sets no status line and is reported
+    (`map`), and cleared on the new map's arrival, with the link down, while the display is
+    hidden and once the view unmounts; the stale canvas described by the page's line; a rejection,
+    a timeout and invalid data after a resize each drop the stale picture for the failure and
+    `RETRY`, and `RETRY` asks again from `PENDING`; with the link down an answered picture is
+    stale (its name, description and `S`, the ramp up to `--text-muted`, the legend's bar on the
+    stale ramp, both cursor readings under the overlay and `BELOW FLOOR` muted with their `S`),
+    and current again on the link's return with nothing asked; under the overlay a wait on the
+    extinction map alone is reported as `extinction`, and under `EXTINCTION` as `map`.
+    `GalaxyMapPanel.test.tsx`: the page's `PENDING` once (a `status`) while the stale views wait,
+    no status in either view, each canvas described by it, `NO CARRIER` in its place with the link
+    down and never both, nothing once the maps arrive, the layout unchanged by it, and
+    `EXTINCTION PENDING` under the overlay; the brightness line once, after the overlay's name,
+    only under the overlay, and the layout unchanged with it; the link-down test now finds the
+    pictures stale. `staleWaits.test.ts`: the store and the page's wording.
+  - _From review_ (TypeScript, UX and plan-conformance reviewers). The store as an effect that
+    notifies a parent: ruled a recorded exception (above). A timeout after a resize had no test;
+    added. `staleWaitText` returns its two words' literal union. The page's `PENDING` is asserted
+    by role. The overlay's layout test compares the grid's whole style. The legend's stale ramp is
+    tested. `ux_lint.py` 0 errors (its 10 checks on old lines of `styles.css`); no new glyph or
+    colour pairing.
+  - _Superseded:_ the A2 record's "Found: the link down after both maps loaded is not a stale
+    state…" and its lean on whether a link drop makes a kept map stale.
+  - _Deferred findings (2026-10-13 rule)._
+    - The legends' tick labels and `FLOOR …` value stay in `--text` with no `S` while the picture is
+      stale; ruling §3 asks for the stale ramp only, and the resize case was built so (UX
+      reviewer). For the owner: whether a legend's figures are values from the answer or the key of
+      a picture that carries its own `S`.
+    - A focused stale picture that a failure drops leaves the focus on the document's body, as a
+      `Q` pressed on a focused picture already does; `RETRY` takes the focus to the page's tab.
+    - The guide's stale state has "the age is available on request"; no stale value on the console
+      offers its age (the chart and `SYSTEMS` likewise).
+- **Fixed in P07.T10.c (lane `fix-server-positions`, 2026-10-29, at `GENERATOR_VERSION` 23): a
+  member's ID as a target.** A `{ system }` target naming a catalogue feature's member or a member
+  of the galactic centre (a member of its grid, the black hole or a tidal disruption's victim) was
+  placed by plan 03's `position_at`, which in a galaxy with kinematic tables (every server galaxy)
+  panics for any record but a grid record's away from the epoch (`kinematics::draw`'s
+  `record.component()`): the job panicked, the request answered `internal`, and every other
+  target was lost. `scene_ship` and the scene's core had the same fault (rendering plan R03's
+  Risks, "Fixed in P07.T10.c"). No sim, protocol or golden change; `PROTOCOL_VERSION` stays 3.
+  - _One routing function._ `convert::system_motion(galaxy, record, t)`, in a new
+    `convert/motion.rs`, gives the position and the velocity or a `TraceMotionError`. It is the
+    one place the server places a system it resolved from a client's ID: a grid record by
+    `position_at` and `epoch_velocity` (the range query's bits), a feature member by
+    `observe::Drift::of_record`'s line, and a centre member refused, `CentreOrbitNotBuilt`, at
+    every time. `resolve_system` calls it in place of its own `if let`, with nothing it answers
+    changed. Its doc says that version 25's wiring of the Kepler regime
+    changes the grid arm (P09.T28.b.b's deferred finding (2)).
+  - _A wildcard arm, against the brief's "no `_` arm"._ `SystemOrigin` is `#[non_exhaustive]`
+    and the server is another crate, so its `match` cannot compile without one, and
+    `non_exhaustive_omitted_patterns` is unstable on the pinned 1.99.1. The `_` arm takes
+    `Drift::of_record`'s line, whose own `match` in the sim is exhaustive: an origin the sim adds
+    fails to compile there first, and here is placed on the sim's line for it or refused by its
+    error, never through a grid record's draw. The feature member keeps its own arm, with an
+    `#[expect(clippy::match_same_arms)]` that says why.
+  - _Answers changed._ A centre member's target is `no_such_system` at every time; at the epoch it
+    was a line to the member's epoch position, which for a victim is only formal (all nine of seed
+    0x4d2's were disrupted 43,000–227,000 years before the epoch) and which `resolve_system`
+    already refused. A feature member's target away from the epoch is answered, on its own line.
+    `LineEnd::System`'s doc and the handler's say so.
+  - _The centre's members are not placed here (lean, 2026-10-29)._ The sim could place them
+    (`EpochState::of_centre_member` and its `Trajectory` for a Kepler member and the black hole, a
+    victim's own `TidalDisruptionVictim::state_at`, whose `NoSuchSystem` after the disruption
+    would become "no such system at `t`"), but victims, the black hole and the centre's grid
+    members share `SystemOrigin::CentreMember`, so that arm would dispatch on the ID's slot. That
+    is P09.T37's and P09.T40's (the source's registration and the server's centre cache), which
+    turn the centre arm on in this one function.
+  - _Tests (pod, 4 vCPU, test profile; each in its own nextest process, most of it the galaxy's
+    full potential)._ In `convert/motion.rs`, fast, over a `with_full_potential` galaxy of seed
+    0x4d2 at the epoch, +100 and −999 yr: `a_grid_system_is_placed_as_the_range_query_places_it`
+    (8.2 s), `a_feature_member_moves_on_its_own_line` (8.3 s) and
+    `the_centre_s_members_are_refused_at_every_time` (8.3 s: the first member of
+    `CentrePlacement::peak_candidates`'s band and cell, the black hole and the first victim). The
+    IDs come from the sim at test time, through a `#[cfg(test)]` module `convert::origins` that
+    the scene core's test shares. Over the socket, on one server, a new `tests/system_origins.rs`,
+    `a_client_s_system_is_placed_by_its_origin_in_every_request` (19.0 s), runs four properties:
+    `extinction` with the five IDs as targets of one request at the epoch and +100 yr (the grid
+    target is the sim's line to `position_at`, the feature member's equals a `Position` target at
+    its line's position, the three centre IDs are `no_such_system`, and the next request is
+    answered); and the three `scene_ship` and scene properties of R03's record. `observed.rs`'s
+    `a_feature_member` moved to `tests/common/origins.rs`, beside `the_centre_s_members`, for both
+    files. This supersedes "P07.T10.a–c, as built"'s _T10.c, tests_, which compared the system
+    target at the epoch only so as not to build the full potential in a debug test:
+    `tests/system_origins.rs` builds seed 0x4d2's in the test process, as `tests/observed.rs`
+    already did (4.4 s in the test profile), and compares the grid target at +100 yr too. Run on
+    BASE, split into its four properties, each failed: `extinction` answered the centre's three
+    IDs with lines at the epoch, `scene_ship` accepted a centre frame at the epoch, and the body
+    frame and the scene answered `internal` on the panic at `kinematics/draw.rs:105`.
+  - _Deferred findings (2026-10-13 rule)._ (1) _Cost:_ a feature member is resolved twice on each
+    path, by `resolve` and again inside `Drift::of_record`, each building its feature's interior
+    (14–17 ms by plan 09's record of its cluster table; not re-measured): up to 64 extra builds
+    in one `extinction` job, and in the scene's core up to three a heartbeat for a ship framed on
+    a member (`ship_galactic`, then `drift` and `ship_galactic` again in an arrival's observer). No
+    range row carries a member until P09.T40.a registers the features' source; when member IDs
+    reach the chart, resolve the member once (`resolve_member` and `Drift::of_member`, as
+    `compute/systems.rs` does for the stars) or pass an interior cache. Not a blocker: before the
+    fix those IDs crashed the job. (2) _Wire docs:_ `TargetExtinction::NoSuchSystem` ("names no
+    system of this universe") and `ErrorCode::UnknownSystem` do not say that a system that
+    resolves but cannot be placed yet is answered so too, as `resolve_system` has answered it
+    since P12.T6; widen both at the next protocol change and run `just gen-protocol`. The protocol
+    is unchanged here.

@@ -1,0 +1,110 @@
+# generator_version = 31
+component 0 share = 0x3f40eed831bc9eff  # 0.0005167537342218586
+component 0 rate per year = 0x3e263599e5f65740  # 2.585512068069762e-9
+component 0 candidates per system = 0x3f74be2615b7c107  # 0.005064152497183955
+component 9 share = 0x3edb28f880228d54  # 6.475458578378394e-6
+component 9 rate per year = 0x3dcb7cde0caccdf4  # 4.999995000009548e-11
+component 9 candidates per system = 0x3f9401daf4b6cba0  # 0.01953832739463801
+component 10 share = 0x3edb28f880228d54  # 6.475458578378394e-6
+component 10 rate per year = 0x3dcb7cde0caccdf4  # 4.999995000009548e-11
+component 10 candidates per system = 0x3f9401daf4b6cba0  # 0.01953832739463801
+node 0 lightest mass = 0x4040000000000000  # 32.0
+node 0 heaviest mass = 0x4042000000000000  # 36.0
+node 0 first age = 0x4157615a00000000  # 6129000.0
+node 0 last age = 0x415bdb0000000000  # 7302144.0
+node 0 share = 0x3f988578170893a5  # 0.023946644216397712
+node 0 weight = 0x40db6f372ab912fb  # 28092.861982601677
+node 1 lightest mass = 0x4042000000000000  # 36.0
+node 1 heaviest mass = 0x4045800000000000  # 43.0
+node 1 first age = 0x4152d73e00000000  # 4939000.0
+node 1 last age = 0x4159b62c00000000  # 6740144.0
+node 1 share = 0x3f9e90deb9d8597d  # 0.0298495102816445
+node 1 weight = 0x40ea406885e98fb5  # 53763.266346722296
+node 2 lightest mass = 0x4045800000000000  # 43.0
+node 2 heaviest mass = 0x404b800000000000  # 55.0
+node 2 first age = 0x414f131400000000  # 4073000.0
+node 2 last age = 0x4155d50200000000  # 5723144.0
+node 2 share = 0x3fa01b1689a10fa1  # 0.031456665325577456
+node 2 weight = 0x40e95880e1aa4436  # 51908.02754700968
+node 3 lightest mass = 0x404b800000000000  # 55.0
+node 3 heaviest mass = 0x4058400000000000  # 97.0
+node 3 first age = 0x414a19a400000000  # 3421000.0
+node 3 last age = 0x4152ab7000000000  # 4894144.0
+node 3 share = 0x3fa648a0754a2f6e  # 0.04352284843216024
+node 3 weight = 0x40ef4e6d8977c68d  # 64115.423030746264
+node 4 lightest mass = 0x4058400000000000  # 97.0
+node 4 heaviest mass = 0x4062c00000000000  # 150.0
+node 4 first age = 0x4140059000000000  # 2100000.0
+node 4 last age = 0x414de2ac00000000  # 3917144.0
+node 4 share = 0x3f91ac78be8934e3  # 0.0172594896596835
+node 4 weight = 0x40dea0be98d51f26  # 31362.978078155917
+cell [0, 1, 0] bound = 0x3e19648ac4a304a3  # 1.478052141223837e-9
+cell [0, 1, 0] candidates 99 entries 1
+cell [0, 1, 0] fc48088800000280 component 0 window T-11240627441028.015625000 s to T-1990599737392.309570313 s
+cell [0, 1, 0] fc48088800000280 mass = 0x405f7c171cb84ff3  # 125.93891065596817
+cell [0, 1, 0] fc48088800000280 age = 0x4147b862301b1148  # 3109060.3758260347
+cell [0, 1, 0] fc48088800000280 feh = 0x3f35cae0cd2a9400  # 0.0003325270492189891
+cell [0, 1, 0] fc48088800000280 site cell [2871, 5845, 129]
+cell [0, 1, 0] fc48088800000280 site offset 0 = 0x4336a29238424bb0  # 6371198380428208.0
+cell [0, 1, 0] fc48088800000280 site offset 1 = 0x42f890597ca8d243  # 432132091186468.2
+cell [0, 1, 0] fc48088800000280 site offset 2 = 0x432fc000a704f90b  # 4468416656342149.5
+cell [0, 1, 0] fc48088800000280 velocity 0 = 0xc10290ea100830c4  # -152093.25782812212
+cell [0, 1, 0] fc48088800000280 velocity 1 = 0x40fc409d43d6d622  # 115721.82906230589
+cell [0, 1, 0] fc48088800000280 velocity 2 = 0xc0bb6c479db92ca4  # -7020.279750417136
+cell [0, 1, -1] bound = 0x3e19648ac4a304a3  # 1.478052141223837e-9
+cell [0, 1, -1] candidates 99 entries 0
+cell [0, 2, 0] bound = 0x3e10e3000a548123  # 9.829364347808104e-10
+cell [0, 2, 0] candidates 69 entries 1
+cell [0, 2, 0] fc48090800000180 component 0 window T-6657536096959.293945313 s to T+3617168601035.164550781 s
+cell [0, 2, 0] fc48090800000180 mass = 0x405f037dc5f5c02f  # 124.05455159186452
+cell [0, 2, 0] fc48090800000180 age = 0x414645a54f4e7c2e  # 2919242.6195826745
+cell [0, 2, 0] fc48090800000180 feh = 0xbfc529216c519db2  # -0.16531770504955784
+cell [0, 2, 0] fc48090800000180 site cell [3035, 9305, 291]
+cell [0, 2, 0] fc48090800000180 site offset 0 = 0x43381eabea764bf1  # 6789123162917873.0
+cell [0, 2, 0] fc48090800000180 site offset 1 = 0x4333b54205e8f9a1  # 5547319729125793.0
+cell [0, 2, 0] fc48090800000180 site offset 2 = 0x4309bd0abd0bd736  # 905591029594854.8
+cell [0, 2, 0] fc48090800000180 velocity 0 = 0xc10aa59157bbc72d  # -218290.16783862692
+cell [0, 2, 0] fc48090800000180 velocity 1 = 0x40c4ff1e34b2fa3a  # 10750.235983249837
+cell [0, 2, 0] fc48090800000180 velocity 2 = 0xc0c08cc2af26d428  # -8473.520970204918
+cell [0, 2, -1] bound = 0x3e10e3000a548123  # 9.829364347808104e-10
+cell [0, 2, -1] candidates 61 entries 0
+cell [0, 3, 0] bound = 0x3e225000414b2627  # 2.131856034020766e-9
+cell [0, 3, 0] candidates 134 entries 0
+cell [0, 3, -1] bound = 0x3e225000414b2627  # 2.131856034020766e-9
+cell [0, 3, -1] candidates 125 entries 0
+cell [0, 4, 0] bound = 0x3e2060a4befa2aed  # 1.9065935426083695e-9
+cell [0, 4, 0] candidates 122 entries 0
+cell [0, 4, -1] bound = 0x3e2060a4befa2aed  # 1.9065935426083695e-9
+cell [0, 4, -1] candidates 133 entries 0
+cell [0, 5, 0] bound = 0x3e167365ed713fbd  # 1.3068070425863818e-9
+cell [0, 5, 0] candidates 90 entries 0
+cell [0, 5, -1] bound = 0x3e167365ed713fbd  # 1.3068070425863818e-9
+cell [0, 5, -1] candidates 104 entries 1
+cell [0, 5, -1] fc480a87800001c0 component 0 window T-3376530389601.745117188 s to T-3338623980404.776855469 s
+cell [0, 5, -1] fc480a87800001c0 mass = 0x404dfb8834c13c0d  # 59.96509417948992
+cell [0, 5, -1] fc480a87800001c0 age = 0x414ff4a3ec7d2082  # 4188487.8475685725
+cell [0, 5, -1] fc480a87800001c0 feh = 0xbfb59b56446fd762  # -0.08440150423834106
+cell [0, 5, -1] fc480a87800001c0 site cell [3072, 22748, -96]
+cell [0, 5, -1] fc480a87800001c0 site offset 0 = 0x432289639baefd74  # 2608805243748026.0
+cell [0, 5, -1] fc480a87800001c0 site offset 1 = 0x43390cd679ab1b2c  # 7050989721557804.0
+cell [0, 5, -1] fc480a87800001c0 site offset 2 = 0x43031237572ac5e9  # 671006681553085.1
+cell [0, 5, -1] fc480a87800001c0 velocity 0 = 0xc10c7c391b3bc0f2  # -233351.13829756487
+cell [0, 5, -1] fc480a87800001c0 velocity 1 = 0x40dfd916a4d2447c  # 32612.353809897308
+cell [0, 5, -1] fc480a87800001c0 velocity 2 = 0x40b4da92218e1acf  # 5338.5708245101405
+cell [0, 6, 0] bound = 0x3dcbaea08fdb37b5  # 5.0353514744992534e-11
+cell [0, 6, 0] candidates 0 entries 0
+cell [0, 6, -1] bound = 0x3dcbaea08fdb37b5  # 5.0353514744992534e-11
+cell [0, 6, -1] candidates 5 entries 0
+cell [0, 7, 0] bound = 0x3e03231842fc830a  # 5.569625923420697e-10
+cell [0, 7, 0] candidates 45 entries 0
+cell [0, 7, -1] bound = 0x3e03231842fc830a  # 5.569625923420697e-10
+cell [0, 7, -1] candidates 43 entries 0
+cell [0, 0, 0] bound = 0x3ef661935b112c9a  # 2.1344332427991436e-5
+cell [0, 0, 0] candidates 1465048 entries 0
+cell [-1, -1, -1] bound = 0x3ef661935b112c9a  # 2.1344332427991436e-5
+cell [-1, -1, -1] candidates 1466287 entries 0
+hosts per galaxy 61
+hosts by component [49, 12, 0]
+hosts by node [0, 0, 3, 28, 30]
+candidates by component [514, 221, 15], windows 61, core collapses 0
+luminous blue variables at the epoch 8, hosts dead by +H 0

@@ -1,10 +1,13 @@
 //! Tests of the binary engine (P11.T4).
 
+use std::sync::Arc;
+
 use super::star::positive;
 use super::*;
 use crate::orbit::{Eccentricity, KeplerElements, Orientation};
 use crate::stellar::Composition;
 use crate::stellar::draws::StarDraws;
+use crate::stellar::rules::StellarRules;
 use crate::units::{GravitationalParameter, Radians, Seconds, SolarMasses, Years};
 
 /// A pair of `m1` and `m2` M☉ on an orbit of `period_days` and `e`, in the reference plane.
@@ -160,14 +163,18 @@ fn a_wide_pair_is_two_single_stars() {
     }
 }
 
-/// T4.a: a close pair can interact, and a wide one cannot, by the pre-test's periastron.
+/// T4.a: a close pair can interact, and a wide one cannot, by the pre-test's periastron, which its
+/// lobe test reads. Since P11.T12's fix the wind's onset feeds the 10⁴-day pair whatever its
+/// eccentricity, so the pair still passed over is circular at 10⁶ days, too wide for the wind.
 #[test]
 fn the_pre_test_reads_the_periastron() {
     let until = Years::new(1.2e10);
     assert!(can_interact(&pair(1.2, 0.8, 100.0, 0.0, 0.02), until));
     // A giant reaches about 170 R☉: 10⁴ days is out of reach circular, and in reach at e = 0.95.
-    assert!(!can_interact(&pair(1.2, 0.8, 1.0e4, 0.0, 0.02), until));
+    assert!(!lobe_reached(&pair(1.2, 0.8, 1.0e4, 0.0, 0.02), until));
+    assert!(lobe_reached(&pair(1.2, 0.8, 1.0e4, 0.95, 0.02), until));
     assert!(can_interact(&pair(1.2, 0.8, 1.0e4, 0.95, 0.02), until));
+    assert!(!can_interact(&pair(1.2, 0.8, 1.0e6, 0.0, 0.02), until));
     // By 1 Gyr the 1.2 M☉ star is still on its main sequence.
     assert!(!can_interact(
         &pair(1.2, 0.8, 100.0, 0.0, 0.02),
@@ -283,23 +290,14 @@ fn early_agb_core_at(
     Some((tau, rc, filling))
 }
 
-/// BSE section 3.2's cataclysmic variable (6.0 + 1.3 M☉, 630 d, `α_CE` = 1): the primary fills its
-/// lobe on the early AGB at 78 Myr, a common envelope leaves a helium giant of 1.5 M☉ that soon
-/// fills its lobe again, and a second leaves a carbon–oxygen white dwarf of 0.94 M☉ with the
-/// 1.3 M☉ star in an orbit under a day. Angular-momentum loss brings the main-sequence star into
-/// contact with its lobe, and it gives its mass to the dwarf through novae, across the
-/// Hertzsprung gap and up the giant branch, until it is a helium white dwarf of about 0.16 M☉ in
-/// a 4.5 d orbit.
-#[test]
-fn the_papers_cataclysmic_variable_reproduces_its_sequence() {
-    let timeline = run(
-        6.0,
-        1.3,
-        630.0,
-        0.0,
-        BinaryParams::GENERATOR.with_alpha_ce(1.0),
-    );
-    let stages = starts(&timeline);
+/// BSE section 3.2's cataclysmic variable (6.0 + 1.3 M☉, 630 d, `α_CE` = 1) to the carbon–oxygen
+/// white dwarf its second common envelope leaves: the pair's stages and the
+/// second envelope's, with the entry, both envelopes and the dwarf of 0.88–1.0 M☉ in an orbit under
+/// a day asserted as the paper has them.
+fn papers_cataclysmic_variable_to_its_dwarf(
+    timeline: &BinaryTimeline,
+) -> (Vec<(SegmentKind, BinaryState)>, usize) {
+    let stages = starts(timeline);
     let first =
         find(&stages, 0, |k, _| *k == SegmentKind::CommonEnvelope).expect("a common envelope");
     let (_, entry) = &stages[first];
@@ -337,11 +335,7 @@ fn the_papers_cataclysmic_variable_reproduces_its_sequence() {
          would fill from τ = {filling:.4?}",
         entry.age().value() / 1e6
     );
-    assert!(
-        rc < lobe,
-        "the core fills its lobe: {}",
-        describe(&timeline)
-    );
+    assert!(rc < lobe, "the core fills its lobe: {}", describe(timeline));
     let second =
         find(&stages, first + 1, |k, _| *k == SegmentKind::CommonEnvelope).expect("a second one");
     let after = &stages[second + 1].1;
@@ -352,6 +346,59 @@ fn the_papers_cataclysmic_variable_reproduces_its_sequence() {
         after.stars()[0].mass()
     );
     assert!(days(after) < 1.0, "{}", days(after));
+    (stages, second)
+}
+
+/// The age, years, at which the mass ratio of the pair in `timeline`'s segment `i` of stable
+/// transfer from its secondary reverses, the donor first no heavier than its white dwarf, by
+/// bisection; `None` if it is still the heavier at the segment's end.
+pub(super) fn reversal_age(timeline: &BinaryTimeline, i: usize) -> Option<Years> {
+    let s = &timeline.segments()[i];
+    let lighter = |age: f64| {
+        let [dwarf, donor] = *timeline.state_at(Years::new(age)).stars();
+        donor.mass() <= dwarf.mass()
+    };
+    let (mut lo, mut hi) = (
+        s.start().value(),
+        s.end().value().min(timeline.until().value()),
+    );
+    if !lighter(hi) {
+        return None;
+    }
+    for _ in 0..60 {
+        let mid = f64::midpoint(lo, hi);
+        if lighter(mid) {
+            hi = mid;
+        } else {
+            lo = mid;
+        }
+    }
+    Some(Years::new(hi))
+}
+
+/// The paper's cataclysmic variable's helium white dwarf at the end under every 27 hold, (M☉, P d),
+/// as measured (2026-11-04, at generator version 26): a wider orbit than the paper's 4.5 d, since
+/// its donor transfers on its nuclear timescale while it is the heavier.
+const PAPERS_CV_END_27: (f64, f64) = (0.190_5, 9.178_6);
+
+/// BSE section 3.2's cataclysmic variable under every 27 hold (P11.T4's heavy donors on): the
+/// paper's sequence to its white dwarf ([`papers_cataclysmic_variable_to_its_dwarf`]); then its 1.3 M☉ main-sequence
+/// star, heavier than the dwarf, fills its lobe at no less than a tenth of its thermal rate,
+/// M ÷ `τ_KH`, and above the novae's 1.03 × 10⁻⁷ M☉ yr⁻¹, with the dwarf still a carbon–oxygen
+/// white dwarf, which blows the excess off in a wind rather than swell, and the pair unmerged; once
+/// the mass ratio has reversed, the transfer goes on in the paper's novae; and the donor ends a
+/// helium white dwarf, pinned as measured ([`PAPERS_CV_END_27`]; P11.T4's heavy-donor wind, its
+/// research of 2026-11-04).
+#[test]
+fn the_papers_cataclysmic_variable_reproduces_its_sequence_under_every_27_hold() {
+    let timeline = evolve(
+        &pair(6.0, 1.3, 630.0, 0.0, 0.02)
+            .with_params(BinaryParams::GENERATOR.with_alpha_ce(1.0))
+            .with_rules(StellarRules::of_version(crate::GENERATOR_VERSION)),
+        Years::new(1.5e10),
+    );
+    let (stages, second) = papers_cataclysmic_variable_to_its_dwarf(&timeline);
+    assert_eq!(timeline.merger_age(), None, "{}", describe(&timeline));
     let cv = find(&stages, second, |k, s| {
         matches!(
             k,
@@ -360,11 +407,26 @@ fn the_papers_cataclysmic_variable_reproduces_its_sequence() {
             }
         ) && s.stars()[1].phase() == Phase::MainSequence
     })
-    .expect("the main-sequence star fills its lobe: a cataclysmic variable");
-    let mid = Years::new(f64::midpoint(
-        stages[cv].1.age().value(),
-        timeline.segments()[cv].end().value(),
-    ));
+    .expect("the main-sequence star fills its lobe");
+    let opening = &timeline.segments()[cv];
+    let state = timeline.state_at(Years::new(opening.start().value() + 1.0));
+    let [dwarf, donor] = state.stars();
+    assert_eq!(dwarf.phase(), Phase::CarbonOxygenWhiteDwarf);
+    assert!(donor.mass() > dwarf.mass(), "{:?}", state.stars());
+    // M ÷ τ_KH, with τ_KH = 10⁷ M² ÷ (R L) years (Hurley, Tout and Pols 2002, equation 61).
+    let (m, r, l) = (
+        donor.mass().value(),
+        donor.radius().value(),
+        donor.luminosity().value(),
+    );
+    let thermal = r * l / (1e7 * m);
+    let rate = state.transfer_rate().expect("transfer").value();
+    assert!(
+        rate >= 0.1 * thermal && rate >= 1.03e-7,
+        "{rate} against the thermal {thermal}"
+    );
+    let reversed = reversal_age(&timeline, cv).expect("the mass ratio reverses in the transfer");
+    let mid = Years::new(f64::midpoint(reversed.value(), opening.end().value()));
     let rate = timeline
         .state_at(mid)
         .transfer_rate()
@@ -375,17 +437,14 @@ fn the_papers_cataclysmic_variable_reproduces_its_sequence() {
         "novae, below 1.03 × 10⁻⁷ M☉/yr: {rate}"
     );
     let end = timeline.state_at(Years::new(1.5e10));
+    let (mass, period) = PAPERS_CV_END_27;
     assert_eq!(end.stars()[1].phase(), Phase::HeliumWhiteDwarf);
     assert!(
-        (0.12..0.2).contains(&end.stars()[1].mass().value()),
+        (end.stars()[1].mass().value() / mass - 1.0).abs() < 1e-3,
         "{:?}",
         end.stars()[1].mass()
     );
-    assert!(
-        (2.5..7.0).contains(&days(&end)),
-        "the paper's 4.5 d: {}",
-        days(&end)
-    );
+    assert!((days(&end) / period - 1.0).abs() < 1e-3, "{}", days(&end));
 }
 
 /// BSE section 3.4's double neutron star, in the variant of 13.6 M☉ with a lighter companion that
@@ -584,13 +643,20 @@ fn check_no_repeated_instants(timeline: &BinaryTimeline, what: &impl Fn() -> Str
 /// Checks P11.T4's invariants on the timeline of `input`: inside every segment the state is
 /// continuous (no jump above 1% between samples 10⁻⁶ of the segment apart); no main-sequence star
 /// is older than its effective lifetime; the pair's total mass never rises; the timeline never
-/// reaches the cap on segments; no detached segment widens the orbit past its mass loss.
+/// reaches the cap on segments; no transfer step starts from a donor with nothing living (P11.T4.o);
+/// no detached segment widens the orbit past its mass loss; no
+/// pinned primary collapses from its hydrogen main sequence ([`check_no_main_sequence_collapse`]);
+/// every swelled giant starts with an envelope around its own core ([`check_swells`], P11.T4.m).
+///
+/// The continuity's events are each a segment's edge: a change of kind, a change of phase, a
+/// death, a strip, and the pinned primary's own main-sequence end, where a main sequence the pair
+/// has prolonged steps onto the pin's own track in L and R (P11.T4.n).
 #[expect(
     clippy::many_single_char_names,
     reason = "a sample's two states and their values"
 )]
 fn check_invariants(input: &BinaryInput, until: Years) {
-    let timeline = evolve(input, until);
+    let timeline = evolve_from_living_donors(input, until);
     let what = || {
         format!(
             "{:?} P {} d e {}\n{}",
@@ -659,7 +725,9 @@ fn check_invariants(input: &BinaryInput, until: Years) {
     check_detached_widening(&timeline, &what);
     check_no_repeated_instants(&timeline, &what);
     check_no_bare_giant(&timeline, &what);
+    check_swells(&timeline, &what);
     check_collapses(input, &timeline, &what);
+    check_no_main_sequence_collapse(input, &timeline, &what);
     // Ruling 108.1: no contact pair lives below Rasio's (1995) mass ratio.
     for segment in timeline.segments() {
         if segment.kind() == SegmentKind::Contact {
@@ -793,13 +861,162 @@ fn check_no_bare_giant(timeline: &BinaryTimeline, what: &impl Fn() -> String) {
     }
 }
 
+/// A swell (P11.T4.m): member `slot`, the accretor of a stable transfer, is a helium star or a
+/// white dwarf at the end of one segment and a giant the binary carries at the start of the next,
+/// with the same mass.
+#[derive(Debug, Clone, Copy)]
+struct SwellSeen {
+    slot: usize,
+    /// The swell's age, years.
+    age: f64,
+    /// The accretor's phase before it.
+    from: Phase,
+    /// The accretor's mass at the start of the step that swelled it and at its end, M☉.
+    masses: [f64; 2],
+    /// That step's length, years.
+    step: f64,
+    /// The accretor's core at the step's start, M☉: a helium giant's carbon–oxygen core.
+    core_before: f64,
+    /// Its τ at the swell, for a helium main-sequence star the binary carries.
+    tau: Option<f64>,
+    /// The giant at the swell.
+    giant: crate::stellar::StarState,
+    /// The giant's share of central helium burning done there (BSE's y).
+    burnt: f64,
+}
+
+/// The swells of `timeline` ([`SwellSeen`]), read from its segments' members.
+fn swells_of(timeline: &BinaryTimeline) -> Vec<SwellSeen> {
+    use super::star::Member;
+
+    let giant = |phase: Phase| {
+        matches!(
+            phase,
+            Phase::FirstGiantBranch
+                | Phase::CoreHeliumBurning
+                | Phase::EarlyAgb
+                | Phase::ThermallyPulsingAgb
+        )
+    };
+    let fed = |phase: Phase| {
+        matches!(
+            phase,
+            Phase::HeliumMainSequence
+                | Phase::HeliumHertzsprungGap
+                | Phase::HeliumGiantBranch
+                | Phase::HeliumWhiteDwarf
+                | Phase::CarbonOxygenWhiteDwarf
+                | Phase::OxygenNeonWhiteDwarf
+        )
+    };
+    let ctx = timeline.context();
+    let mut out = Vec::new();
+    for pair in timeline.segments().windows(2) {
+        let (prev, next) = (&pair[0], &pair[1]);
+        let SegmentKind::StableTransfer { donor } = prev.kind() else {
+            continue;
+        };
+        let age = next.start().value();
+        if !prev.end().value().total_cmp(&age).is_eq() {
+            continue;
+        }
+        let slot = 1 - donor.index();
+        let (before, after) = (&prev.members()[slot], &next.members()[slot]);
+        let Member::Shaped { mass: carried, .. } = after else {
+            continue;
+        };
+        let (path, tau) = match before {
+            Member::MainSequence {
+                helium: true,
+                mass,
+                tau,
+            } => (mass, Some(tau.last())),
+            Member::Shaped { mass, .. } | Member::Remnant { mass, .. } => (mass, None),
+            Member::MainSequence { .. }
+            | Member::Track { .. }
+            | Member::Cooling { .. }
+            | Member::Frozen { .. }
+            | Member::Gone => continue,
+        };
+        let knots = path.knots();
+        let Some(&[[start, pre], [end, m]]) = knots.get(knots.len().saturating_sub(2)..) else {
+            continue;
+        };
+        // A swell keeps the accretor's mass, where a merger at the same instant does not.
+        if !carried.at(age).total_cmp(&m).is_eq() {
+            continue;
+        }
+        let from = before.state_at(ctx, slot, end).phase();
+        let Some(structure) = after.evaluate(ctx, slot, age, m, 0.0) else {
+            continue;
+        };
+        if !fed(from) || !giant(structure.state.phase()) {
+            continue;
+        }
+        let core_before = before
+            .evaluate(ctx, slot, start, pre, tau.unwrap_or(0.0))
+            .map_or(0.0, |s| s.state.core_mass().value());
+        out.push(SwellSeen {
+            slot,
+            age,
+            from,
+            masses: [pre, m],
+            step: end - start,
+            core_before,
+            tau,
+            giant: structure.state,
+            burnt: structure.burnt,
+        });
+    }
+    out
+}
+
+/// P11.T4.m (ruling p11-c2-swell of 2026-10-06): every swelled giant starts its segment with an
+/// envelope, M − Mc > 0, and with the core the ruling asks for to 10⁻⁹: a helium star's or white
+/// dwarf's mass at the start of the step that swelled it, a helium giant's carbon–oxygen core then.
+fn check_swells(timeline: &BinaryTimeline, what: &impl Fn() -> String) {
+    for swell in swells_of(timeline) {
+        let (m, mc) = (swell.giant.mass().value(), swell.giant.core_mass().value());
+        assert!(
+            m > mc,
+            "a swelled giant with no envelope, {swell:?}: {}",
+            what()
+        );
+        let core = match swell.from {
+            Phase::HeliumHertzsprungGap | Phase::HeliumGiantBranch => swell.core_before,
+            Phase::HeliumMainSequence
+            | Phase::HeliumWhiteDwarf
+            | Phase::CarbonOxygenWhiteDwarf
+            | Phase::OxygenNeonWhiteDwarf => swell.masses[0],
+            Phase::Protostar
+            | Phase::PreMainSequence
+            | Phase::MainSequence
+            | Phase::HertzsprungGap
+            | Phase::FirstGiantBranch
+            | Phase::CoreHeliumBurning
+            | Phase::EarlyAgb
+            | Phase::ThermallyPulsingAgb
+            | Phase::PostAgb
+            | Phase::NeutronStar
+            | Phase::BlackHole
+            | Phase::NoRemnant
+            | Phase::Substellar => unreachable!("`swells_of` reads only fed phases: {swell:?}"),
+        };
+        assert!(
+            (mc - core).abs() <= 1e-9 * core,
+            "a swelled giant's core {mc} M☉ is not {core} M☉, {swell:?}: {}",
+            what()
+        );
+    }
+}
+
 /// P11.T4.k's invariants on `timeline`, the timeline of `input` (rulings p11-supernova-pins and
 /// p11-t4k-faults, 2026-10-06: every collapse is applied once, from the star's last living mass),
-/// in a pair the engine runs and whose timeline is not capped. A pair the pre-test passes over
-/// keeps its drawn orbit through its stars' collapses with no record, the version-21 limit that
-/// P11.T4.l lifts, and a capped timeline never reaches its later deaths (P11.T4.g's finding C2,
-/// `swell`'s core, can cycle a helium accretor to the cap; the 10³ suites assert no pair reaches
-/// it); neither is checked. `what` describes the pair for the failure message.
+/// whose timeline is not capped: a pair the engine runs, or one the pre-test passes over, whose
+/// collapses the closed form applies (P11.T4.l). A capped timeline never reaches its later deaths
+/// (P11.T4.g's finding C2, `swell`'s core, can cycle a helium accretor to the cap; the 10³ suites
+/// assert no pair reaches it), and is not checked. `what` describes the pair for the failure
+/// message.
 ///
 /// - No member goes from a living phase to a neutron star or black hole without a supernova
 ///   record of its component at that age (10⁻⁹ relative), but where it is the compact star its
@@ -813,7 +1030,7 @@ fn check_collapses(input: &BinaryInput, timeline: &BinaryTimeline, what: &impl F
     use super::star::Member;
 
     let until = timeline.until();
-    if timeline.hit_segment_cap() || !can_interact(input, until) {
+    if timeline.hit_segment_cap() {
         return;
     }
     let compact = |phase: Phase| matches!(phase, Phase::NeutronStar | Phase::BlackHole);
@@ -912,6 +1129,38 @@ fn check_collapses(input: &BinaryInput, timeline: &BinaryTimeline, what: &impl F
     }
 }
 
+/// P11.T4.n's invariant on `timeline`, the pair of `input` (decision-observed-class-findings §B):
+/// no pinned primary collapses from its hydrogen main sequence, a hot, non-degenerate core. Where
+/// its pin is recorded, the primary just before it is a supergiant or a naked helium star, or held
+/// at one (`Member::Frozen`). `what` describes the pair for the failure message.
+fn check_no_main_sequence_collapse(
+    input: &BinaryInput,
+    timeline: &BinaryTimeline,
+    what: &impl Fn() -> String,
+) {
+    let Some(pin) =
+        super::evolve::pinned_death_age_years(input).filter(|&pin| pin < timeline.until().value())
+    else {
+        return;
+    };
+    let recorded = timeline.supernovae().iter().any(|r| {
+        r.component() == Component::Primary && (r.age().value() - pin).abs() <= 1e-9 * pin
+    });
+    if !recorded {
+        return;
+    }
+    let before = timeline.state_at(Years::new(super::detached::last_living(pin)));
+    let star = before.stars()[0];
+    assert_ne!(
+        star.phase(),
+        Phase::MainSequence,
+        "the pinned primary collapses at {pin} yr from its main sequence, {} M☉ at log L {}: {}",
+        star.mass().value(),
+        crate::math::log10(star.luminosity().value()),
+        what()
+    );
+}
+
 /// P11.T4's invariants over a sample of close pairs (the plan's 10³ in the slow suite).
 #[test]
 fn close_pairs_keep_the_engines_invariants() {
@@ -958,7 +1207,18 @@ fn a_thousand_close_pairs_keep_the_engines_invariants() {
 /// the same states whatever was asked before.
 #[test]
 fn a_timeline_is_the_same_in_any_order() {
-    let inputs = sample_pairs(12, 0x5eed_0003);
+    // With two wide pairs whose collapses the closed form applies (P11.T4.l).
+    let no_kicks = BinaryParams {
+        natal_kicks: false,
+        ..BinaryParams::GENERATOR
+    };
+    let inputs: Vec<BinaryInput> = sample_pairs(12, 0x5eed_0003)
+        .into_iter()
+        .chain([
+            pair(40.0, 10.0, 1.0e5, 0.0, 0.02).with_params(no_kicks),
+            pair(15.0, 12.0, 1.0e5, 0.4, 0.02).with_params(no_kicks),
+        ])
+        .collect();
     let until = Years::new(1.2e10);
     let forward: Vec<_> = inputs.iter().map(|i| evolve(i, until)).collect();
     let backward: Vec<_> = inputs.iter().rev().map(|i| evolve(i, until)).collect();
@@ -1227,7 +1487,11 @@ fn pinned_pair(mix: &mut Mix, i: u32) -> BinaryInput {
 
 /// The engine's output is pinned bit for bit over 10³ pairs (written before the engine was sped
 /// up, and kept so that no optimisation moves a result): each line is one pair's [`digest`]. Every
-/// timeline also keeps P11.T4.k's invariants ([`check_collapses`]).
+/// timeline also keeps P11.T4.k's invariants ([`check_collapses`]) and P11.T4.n's
+/// ([`check_no_main_sequence_collapse`]), and P11.T4.o's: no transfer step starts from a dead
+/// donor, and no accepted step moves more than 1% of its donor ([`transfer_shares`]), but for
+/// pair 0171's one step at 693.35 Myr, 4.3% after its eight halvings (the first step of a helium
+/// white dwarf's transfer; plan 11's Risks, "P11.T4.o as built").
 #[test]
 fn a_thousand_timelines_are_pinned() {
     use hyperion_testkit::golden;
@@ -1239,10 +1503,24 @@ fn a_thousand_timelines_are_pinned() {
     let mut mix = Mix(0x0b1e_0001);
     for i in 0..1_000_u32 {
         let input = pinned_pair(&mut mix, i);
-        let timeline = evolve(&input, until);
-        check_collapses(&input, &timeline, &|| {
-            format!("pinned pair {i:04}: {}", describe(&timeline))
-        });
+        let timeline = evolve_from_living_donors(&input, until);
+        let what = || format!("pinned pair {i:04}: {}", describe(&timeline));
+        check_collapses(&input, &timeline, &what);
+        check_no_main_sequence_collapse(&input, &timeline, &what);
+        for (age, share) in transfer_shares(&timeline) {
+            // Pair 0171's first step from its new helium white dwarf onto its carbon–oxygen one, a
+            // ten-thousandth of the dwarf's Kelvin–Helmholtz time, keeps 4.3% after eight halvings.
+            let most = if i == 171 && (age / 693.353_165e6 - 1.0).abs() < 1e-8 {
+                0.043
+            } else {
+                0.01
+            };
+            assert!(
+                share <= most,
+                "{share} of the donor at {age} yr: {}",
+                what()
+            );
+        }
         let [m1, m2] = input.masses().map(SolarMasses::value);
         w.u64_hex(
             &format!(
@@ -1574,9 +1852,12 @@ fn a_held_bare_core_that_touches_its_companion_merges() {
 }
 
 /// Ruling 132.3: pair 0077 of the pinned thousand (2.23 + 1.16 M☉ at 0.56 d) feeds its companion
-/// to the end of its main sequence. The rejuvenated accretor leaves it at 1,052.889 Myr, once,
-/// where the steps used to close in on its receding end until the segment cap. (1,052.655 Myr
-/// before P11.T4.i, which starts the engine at the primary's arrival, 7 Myr before the
+/// to the end of its main sequence. The rejuvenated accretor leaves it at 1,035.446 Myr, once, at
+/// the first step aimed at that end over which it ages (P11.T4.o, finding F18), where the steps
+/// used to close in on its receding end until the segment cap. (1,052.889 Myr before T4.o: F18
+/// alone ends it 0.50 Myr sooner, at that step rather than after more of them, a segment each, and
+/// F17 alone 17.2 Myr sooner, its accretion taken in steps of at most 1% of the donor; 1,052.655
+/// Myr before P11.T4.i, which starts the engine at the primary's arrival, 7 Myr before the
 /// companion's, and so moves its knots.)
 #[test]
 fn a_rejuvenated_accretor_leaves_its_main_sequence_once() {
@@ -1597,7 +1878,7 @@ fn a_rejuvenated_accretor_leaves_its_main_sequence_once() {
         .map(|state| state.age().value())
         .expect("the accretor leaves its main sequence");
     assert!(
-        (left - 1.052_889e9).abs() <= 1.0e3,
+        (left - 1.035_446e9).abs() <= 1.0e3,
         "left at {left} yr: {}",
         describe(&timeline)
     );
@@ -1923,6 +2204,27 @@ fn assert_same_history(early: &BinaryTimeline, later: &BinaryTimeline, until: Ye
     }
 }
 
+/// That `early` and `later`, the same pair run to `until` and past it, hold the same supernova
+/// records before `until`, bit for bit (P11.T4.l's build-age contract covers the records as well as
+/// the states: a record is a collapse's recoil, kick and velocities, which no state shows).
+fn assert_same_records(early: &BinaryTimeline, later: &BinaryTimeline, until: Years) {
+    let before = |timeline: &BinaryTimeline| -> Vec<SupernovaRecord> {
+        timeline
+            .supernovae()
+            .iter()
+            .filter(|record| record.age() < until)
+            .copied()
+            .collect()
+    };
+    assert_eq!(
+        before(early),
+        before(later),
+        "the records before {until:?}:\n{}\nagainst\n{}",
+        describe(early),
+        describe(later)
+    );
+}
+
 /// How a pair run to an earlier age compares with the same pair run to a later one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EarlierRun {
@@ -1931,28 +2233,69 @@ enum EarlierRun {
     /// The pre-test passed over the pair at the earlier age (two single stars on the drawn orbit),
     /// and the later run met no interaction before it.
     PassedOver,
+    /// The pre-test passed over the pair at both ages, and a star collapsed before the earlier
+    /// one (P11.T4.l): the same history to the earlier age, bit for bit.
+    PassedOverThroughCollapses,
     /// The pre-test passed over the pair at the earlier age, but the later run holds an
     /// interaction before it ([`interaction_before`]): the pre-test failed to bound the decay.
     MissedInteraction,
 }
 
 /// Plan 11's consistency to any age (P11's build-age dependence, 2026-10-05), for `input` run to
-/// `until` and to `later`. A pair that [`can_interact`] by `until` has the same history to `until`
-/// as the later run, bit for bit ([`assert_same_history`]). One it passes over is one detached
-/// segment of its stars' own forms on the drawn orbit, and each star on its own track is the later
-/// run's to the later run's first event (a star below 0.1 M☉ on the cooling fits takes its
-/// companion's wind in the later run).
+/// `until` and to `later`. A pair that [`can_interact`] by `until`, or a star of which collapses by
+/// then (P11.T10's fix, [`engine_runs`](super::evolve::engine_runs)), has the same history to `until` as the later run, bit for bit ([`assert_same_history`]), and
+/// the same supernova records before it ([`assert_same_records`]), whether the engine runs it or,
+/// under P11.T12's fix, it is wind-fed in closed form. One it passes over is a detached segment of
+/// its stars' own forms on the drawn orbit to its first collapse (P11.T4.l). If the pre-test
+/// passes it over at `later` too, the two runs are the same to `until`, records included, bit for
+/// bit, or, where the later run's engine takes the pair over after a collapse, to that collapse,
+/// its record included; otherwise each star on its own track is the later run's to the later
+/// run's first event (a star below 0.1 M☉ on the cooling fits takes its companion's wind in the
+/// later run).
 fn check_any_age(input: &BinaryInput, until: Years, later: Years) -> EarlierRun {
     use super::star::Member;
 
-    let early = evolve(input, until);
-    let late = evolve(input, later);
-    if can_interact(input, until) {
+    let early = evolve_from_living_donors(input, until);
+    let late = evolve_from_living_donors(input, later);
+    if super::evolve::engine_runs(input, until) || can_interact(input, until) {
         assert!(!early.hit_segment_cap(), "{}", describe(&early));
         assert_same_history(&early, &late, until);
+        assert_same_records(&early, &late, until);
         return EarlierRun::Same;
     }
-    assert_eq!(early.segments().len(), 1, "{}", describe(&early));
+    let first_collapse = early
+        .supernovae()
+        .first()
+        .map_or(until, SupernovaRecord::age);
+    let first = &early.segments()[0];
+    assert_eq!(first.kind(), SegmentKind::Detached, "{}", describe(&early));
+    assert_eq!(first.end(), first_collapse, "{}", describe(&early));
+    if !(super::evolve::engine_runs(input, later) || can_interact(input, later)) {
+        // The same history to `until`, bit for bit, unless the pre-test asked again after a
+        // collapse passes the pair at `later` and not at `until`: then the later run's engine
+        // evolves the orbit from the collapse where the earlier keeps it fixed, and only the
+        // history up to the collapse is the same, with no interaction before `until`.
+        match (taken_over_at(&early), taken_over_at(&late)) {
+            (None, Some(collapse)) if collapse < until => {
+                assert_same_history(&early, &late, Years::new(collapse.value() * (1.0 - 1e-12)));
+                assert_same_records(&early, &late, Years::new(collapse.value() * (1.0 + 1e-12)));
+                assert!(
+                    interaction_after_a_collapse(&late, until).is_none(),
+                    "{}",
+                    describe(&late)
+                );
+            }
+            (None | Some(_), _) => {
+                assert_same_history(&early, &late, until);
+                assert_same_records(&early, &late, until);
+            }
+        }
+        return if early.supernovae().is_empty() {
+            EarlierRun::PassedOver
+        } else {
+            EarlierRun::PassedOverThroughCollapses
+        };
+    }
     // To the later run's first event, which is not compared unless it lies past `until`.
     let first_event = late.segments()[0].end();
     let (horizon, last) = if first_event < until {
@@ -1982,11 +2325,39 @@ fn check_any_age(input: &BinaryInput, until: Years, later: Years) -> EarlierRun 
     }
 }
 
+/// Where the engine took over a pair the pre-test passed over, after a collapse (P11.T4.l): the
+/// start of `timeline`'s first segment whose orbit is the engine's, not fixed, if any (the closed
+/// form's orbits are all fixed).
+fn taken_over_at(timeline: &BinaryTimeline) -> Option<Years> {
+    timeline
+        .segments()
+        .iter()
+        .find(|s| s.paths().0.is_some_and(|o| o.fixed.is_none()))
+        .map(Segment::start)
+}
+
+/// The first segment of `timeline` that is an interaction starting after its first supernova and
+/// before `until`: stable transfer, a common envelope, contact, or a merger that leaves one star
+/// (P11.T4.l's pre-test asked again after a collapse).
+fn interaction_after_a_collapse(timeline: &BinaryTimeline, until: Years) -> Option<&Segment> {
+    let first = timeline.supernovae().first()?.age();
+    timeline.segments().iter().find(|s| {
+        let interacts = match s.kind() {
+            SegmentKind::Detached | SegmentKind::Disrupted { .. } => false,
+            SegmentKind::Merged => one_star_left(timeline, s),
+            SegmentKind::StableTransfer { .. }
+            | SegmentKind::CommonEnvelope
+            | SegmentKind::Contact => true,
+        };
+        interacts && s.start() >= first && s.start() < until
+    })
+}
+
 /// The first segment of `timeline` that is an interaction starting before `until` and before the
 /// pair's first supernova (ruling p11-channels of 2026-10-06, section 1.2): stable transfer, a
 /// common envelope, contact, or a merger that leaves one star. A detached or disrupted segment is
-/// none, and a supernova of a pair the pre-test passes over is not the pre-test's to foresee
-/// (finding F3: plan 11's P11.T10 decides wide pairs' supernovae).
+/// none, and a supernova of a pair the pre-test passes over is not the pre-test's to foresee: the
+/// closed form applies it, and asks the pre-test again of the orbit it leaves (P11.T4.l).
 fn interaction_before(timeline: &BinaryTimeline, until: Years) -> Option<&Segment> {
     let first_supernova = timeline
         .supernovae()
@@ -2018,27 +2389,49 @@ fn one_star_left(timeline: &BinaryTimeline, segment: &Segment) -> bool {
 /// Runs `n` pinned-sample pairs ([`pinned_pair`]), each to an age log-uniform in 10⁵–1.2 × 10¹⁰
 /// years, and one whose stars' arrivals differ also to an age uniform between them (P11.T4.i), and
 /// each to 1.5 × 10¹⁰, through [`check_any_age`], and returns how many runs were the same, passed
-/// over and missed interactions, at the first ages and between the arrivals. The ages between
-/// arrivals are drawn on a stream of their own, so that the pairs and their first ages are the
-/// sample's as before.
-fn any_age_over(n: u32, seed: u64) -> [[u32; 3]; 2] {
+/// over (without and with a collapse before the age) and missed interactions, at the first ages,
+/// between the arrivals, and for a wide massive pair ([`wide_massive_pair`]) beside every tenth,
+/// whose collapses the pre-test leaves to the closed form (P11.T4.l). The ages between arrivals
+/// and the wide pairs are drawn on streams of their own, so that the pairs and their first ages
+/// are the sample's as before.
+fn any_age_over(n: u32, seed: u64) -> [[u32; 4]; 3] {
+    any_age_over_under(n, seed, None, 1.5e10)
+}
+
+/// [`any_age_over`] with each pair under `rules` where given, and otherwise the version's, and
+/// each run to `later` years in place of 1.5 × 10¹⁰.
+fn any_age_over_under(n: u32, seed: u64, rules: Option<StellarRules>, later: f64) -> [[u32; 4]; 3] {
     let mut mix = Mix(seed);
     let mut between = Mix(seed ^ 0x0a77_1fa1_0000_0000);
-    let mut counts = [[0_u32; 3]; 2];
+    let mut wide = Mix(seed ^ 0x0a77_1fa1_0000_0001);
+    let mut counts = [[0_u32; 4]; 3];
     for i in 0..n {
         let input = pinned_pair(&mut mix, i);
+        let input = match rules {
+            Some(rules) => input.with_rules(rules),
+            None => input,
+        };
         let until =
             crate::math::exp(crate::math::ln(1.0e5) + mix.next() * crate::math::ln(1.2e10 / 1.0e5));
-        let mut ages = vec![(0, until)];
+        let mut runs = vec![(0, until, input.clone())];
         if let Some((first, late)) = first_and_late(&input) {
-            ages.push((1, first + (late - first) * between.next()));
+            runs.push((1, first + (late - first) * between.next(), input));
         }
-        for (kind, until) in ages {
-            let outcome = check_any_age(&input, Years::new(until), Years::new(1.5e10));
+        if i % 10 == 0 {
+            let (pair, age) = wide_massive_pair(&mut wide, i);
+            let pair = match rules {
+                Some(rules) => pair.with_rules(rules),
+                None => pair,
+            };
+            runs.push((2, age, pair));
+        }
+        for (kind, until, input) in runs {
+            let outcome = check_any_age(&input, Years::new(until), Years::new(later));
             let slot = match outcome {
                 EarlierRun::Same => 0,
                 EarlierRun::PassedOver => 1,
-                EarlierRun::MissedInteraction => 2,
+                EarlierRun::PassedOverThroughCollapses => 2,
+                EarlierRun::MissedInteraction => 3,
             };
             counts[kind][slot] += 1;
         }
@@ -2046,41 +2439,181 @@ fn any_age_over(n: u32, seed: u64) -> [[u32; 3]; 2] {
     counts
 }
 
+/// A wide massive pair for the build-age suites (P11.T4.l), the `i`th of its stream: primary
+/// log-uniform in 8–40 M☉, mass ratio uniform in 0.05–1 (no lighter than 0.08 M☉), period
+/// log-uniform in 10⁵–10⁷ d, e uniform in 0–0.7, one of three metallicities and each star's own
+/// draws, with an age log-uniform in 5 × 10⁶–1.2 × 10¹⁰ years to run it to: mostly passed over,
+/// and mostly past its primary's collapse.
+fn wide_massive_pair(mix: &mut Mix, i: u32) -> (BinaryInput, f64) {
+    use crate::Seed;
+    use crate::coords::{CellSize, GenCell};
+    use crate::id::{BodyId, Layer, SystemId};
+
+    let m1 = log_uniform(8.0, 40.0, mix.next());
+    let m2 = (m1 * (0.05 + 0.95 * mix.next())).max(0.08);
+    let period = log_uniform(1.0e5, 1.0e7, mix.next());
+    let e = 0.7 * mix.next();
+    let z = [0.02, 0.004, 0.0005][usize::try_from(i % 3).expect("a small index")];
+    let until = log_uniform(5.0e6, 1.2e10, mix.next());
+    let base = pair(m1, m2, period, e, z);
+    let x = i32::try_from(i).expect("a small index") - 500;
+    let cell = GenCell::new(CellSize::Ly8, [x, 8, 0]).expect("a cell");
+    let system = SystemId::from_parts(Layer::A, cell, 0).expect("a system");
+    let draws = [0, 1].map(|k| StarDraws::for_star(Seed::new(0x0b1e_5eef), BodyId::new(system, k)));
+    let input = BinaryInput::new(
+        base.masses()[0],
+        base.masses()[1],
+        *base.composition(),
+        *base.orbit(),
+        draws,
+        base.age_at_epoch(),
+    )
+    .expect("a pair");
+    (input, until)
+}
+
 /// The engine's history does not depend on the age it is run to (P11's build-age dependence,
-/// 2026-10-05): [`check_any_age`] over 60 pairs, and between their stars' arrivals (P11.T4.i).
-/// No pair the pre-test passes over interacts before its age in the later run (P11.T4.j: the
-/// pre-test bounds the decay that magnetic braking, tides and gravitational radiation make).
+/// 2026-10-05): [`check_any_age`] over 60 pairs, between their stars' arrivals (P11.T4.i), and
+/// over six wide massive pairs. No pair the pre-test passes over interacts before its age in the
+/// later run (P11.T4.j: the pre-test bounds the decay that magnetic braking, tides and
+/// gravitational radiation make). From 27 a pair a star of which collapses by its age is the
+/// engine's (P11.T10's fix), so no pair is passed over through a collapse, as P11.T4.l's closed
+/// form passed them, and the wide massive pairs past their collapses are the same in both runs.
 #[test]
 fn a_timeline_is_the_same_whatever_age_it_is_run_to() {
     // The runs between the arrivals are checked as the others are; none of them passes the
     // pre-test in this sample (`a_late_companion_meets_its_primarys_envelope` compares such runs
     // directly).
-    let [[same, passed, missed], _] = any_age_over(60, 0x0b1e_00a9);
+    let [
+        [same, passed, collapsed, missed],
+        _,
+        [wide_same, _, wide_collapsed, wide_missed],
+    ] = any_age_over(60, 0x0b1e_00a9);
     assert!(same > 10 && passed > 10, "{same} run, {passed} passed over");
-    assert_eq!(missed, 0, "{missed} interactions missed");
+    assert_eq!(
+        collapsed + wide_collapsed,
+        0,
+        "{collapsed} + {wide_collapsed} passed over through collapses"
+    );
+    assert!(wide_same > 0, "{wide_same} wide massive pairs run");
+    assert_eq!(missed + wide_missed, 0, "interactions missed");
+}
+
+/// [`a_timeline_is_the_same_whatever_age_it_is_run_to`] with each pair run on to the universe's
+/// age, the horizon to which P11.T12's fix (`wind_accretion.rs`), which feeds a pair the lobe and
+/// decay tests pass over its partner's wind in closed form, holds a pair the engine runs at no
+/// age: such a pair has the same history to the earlier age as the later run, and one passed over
+/// at the earlier age keeps its stars' own forms to the later run's first event. The brief's
+/// wind-fed halo pairs have the same history to each earlier age.
+#[test]
+fn a_timeline_is_the_same_whatever_age_it_is_run_to_under_the_wind_accretion_arm() {
+    use crate::planetary::context::UNIVERSE_AGE;
+    let later = UNIVERSE_AGE.value();
+    let [[same, passed, collapsed, missed], _, [_, _, _, wide_missed]] =
+        any_age_over_under(60, 0x0b1e_00a9, None, later);
+    println!("{same} same, {passed} passed over and {collapsed} through collapses");
+    assert_eq!(missed + wide_missed, 0, "interactions missed");
+    // The sample's pairs are rarely wind-fed, so the brief's halo pairs are checked too: 0.85 and
+    // 0.80 M☉ at Z = 0.0003, at 10³–10⁴ days, run to ages from 11.5 to 13 Gyr.
+    let mut fed = 0;
+    for days in [1.0e3, 3.0e3, 1.0e4] {
+        let input = pair(0.85, 0.80, days, 0.0, 0.0003);
+        for until in [1.15e10, 1.2e10, 1.3e10] {
+            let until = Years::new(until);
+            if can_interact(&input, until) {
+                assert_eq!(
+                    check_any_age(&input, until, Years::new(later)),
+                    EarlierRun::Same,
+                    "{days} d at {until:?}"
+                );
+                fed += 1;
+            }
+        }
+    }
+    assert!(fed >= 6, "{fed} halo runs wind-fed");
+}
+
+/// A star's own sudden death runs its pair, the primary's at its pin where design note 16 pins
+/// it, and a white dwarf's birth does not: the earliest of the two stars' collapses, on their own
+/// tracks, whichever member it is.
+#[test]
+fn a_pair_s_first_sudden_death_is_either_star_s_collapse_and_no_white_dwarf_s_birth() {
+    use super::evolve::first_sudden_death;
+    use super::star::Member;
+    use crate::stellar::sse::Track;
+
+    let comp = Composition::SOLAR;
+    let member = |m: f64| Member::Track {
+        track: Arc::new(Track::full(
+            SolarMasses::new(m),
+            &comp,
+            &StarDraws::median(),
+        )),
+        offset: 0.0,
+    };
+    let death = |m: f64| {
+        let track = Track::full(SolarMasses::new(m), &comp, &StarDraws::median());
+        let death = track.death().expect("a full track dies");
+        (death.age().value(), death.kind().is_sudden())
+    };
+    let ((at_15, sudden_15), (at_3, sudden_3)) = (death(15.0), death(3.0));
+    assert!(sudden_15 && !sudden_3);
+    assert_eq!(
+        first_sudden_death(&[member(15.0), member(3.0)], None),
+        Some(at_15)
+    );
+    // The companion's own collapse, beside a star whose death is a white dwarf's birth.
+    assert_eq!(
+        first_sudden_death(&[member(3.0), member(15.0)], None),
+        Some(at_15)
+    );
+    assert_eq!(first_sudden_death(&[member(3.0), member(1.0)], None), None);
+    assert!(at_3 > 0.0);
+    // The pin's age stands for the primary's own.
+    assert_eq!(
+        first_sudden_death(&[member(15.0), member(3.0)], Some(0.5 * at_15)),
+        Some(0.5 * at_15)
+    );
 }
 
 /// [`a_timeline_is_the_same_whatever_age_it_is_run_to`] over 10³ pairs, with the ages between
-/// arrivals (P11.T4.i). No interaction is missed (P11.T4.j): before the decay-aware pre-test, 4 of
-/// the first ages and 9 of the 721 between the arrivals were pairs under 1.4 d that braking or
-/// tides bring into contact or a merger before the age, which the drawn-orbit test passed over.
+/// arrivals (P11.T4.i) and a hundred wide massive pairs (P11.T4.l). No interaction is missed
+/// (P11.T4.j): before the decay-aware pre-test, 4 of the first ages and 9 of the 721 between the
+/// arrivals were pairs under 1.4 d that braking or tides bring into contact or a merger before the
+/// age, which the drawn-orbit test passed over. From 27 the engine runs every pair a star of which
+/// collapses by its age (P11.T10's fix), so none is passed over through a collapse, and the wide
+/// massive pairs past their collapses are the same in both runs (restated with the fast suite at
+/// 27, not yet run there).
 #[test]
-#[ignore = "slow: about 3.4 × 10³ binaries run through the engine"]
+#[ignore = "slow: about 3.6 × 10³ binaries run through the engine"]
 fn a_thousand_timelines_are_the_same_whatever_age_they_are_run_to() {
     let [
-        [same, passed, missed],
-        [same_between, passed_between, missed_between],
+        [same, passed, collapsed, missed],
+        [same_between, passed_between, _, missed_between],
+        [same_wide, passed_wide, collapsed_wide, missed_wide],
     ] = any_age_over(1_000, 0x0b1e_00aa);
     eprintln!(
-        "{same} run at both ages, {passed} passed over, {missed} interactions missed; between \
-         arrivals {same_between} run, {passed_between} passed over, {missed_between} missed"
+        "{same} run at both ages, {passed} passed over, {collapsed} through collapses, {missed} \
+         interactions missed; between arrivals {same_between} run, {passed_between} passed over, \
+         {missed_between} missed; wide massive pairs {same_wide} run, {passed_wide} passed over, \
+         {collapsed_wide} through collapses, {missed_wide} missed"
     );
     assert_eq!(missed, 0, "{missed} interactions missed at the first ages");
     assert_eq!(
         missed_between, 0,
         "{missed_between} interactions missed between the arrivals"
     );
+    assert_eq!(missed_wide, 0, "{missed_wide} missed in the wide pairs");
     assert!(same_between > 0, "{same_between} run between arrivals");
+    assert_eq!(
+        collapsed + collapsed_wide,
+        0,
+        "{collapsed} + {collapsed_wide} passed over through collapses"
+    );
+    assert!(
+        same_wide > 10,
+        "{same_wide} wide pairs run through collapses"
+    );
 }
 
 /// Each star's arrival on its main sequence, years ([`Track::main_sequence_arrival`], which needs
@@ -2801,11 +3334,14 @@ fn a_core_stripped_past_its_end_is_held_until_its_pin() {
 /// has no life left at its stripping dies at once, through `Engine::die`. Two pairs of the pinned
 /// thousand ([`pinned_pair`]):
 ///
-/// - **0544** (32.26 + 28.99 M☉, 1,518 d, e 0.37, Z = 0.004): the companion, grown to 35.5 M☉ by
-///   the primary's transfer, enters a common envelope around the primary's black hole at
-///   8.4807 Myr late on its early AGB, and collapses there to a 14.25 M☉ black hole: recorded,
-///   bound, kick-free (a direct collapse), with no recoil. Before T4.k it was a helium star dead
-///   from its start, with no record.
+/// - **0739** (34.46 + 12.07 M☉, 1,590 d, e 0.50, Z = 0.004): the companion, grown to 27.26 M☉ by
+///   the primary's transfer, gives mass back to the primary's black hole from 12.58 Myr in its core
+///   helium burning, enters a common envelope around it at 13.0375 Myr, and collapses there to a
+///   10.396 M☉ black hole: recorded, bound, kick-free (a direct collapse), with no recoil. (Until
+///   generator version 26 the test read pair 0544, whose companion from 26, under the enforced
+///   Humphreys–Davidson limit, collapses detached at 8.4794 Myr, before any envelope; at 26 it read
+///   pair 0701, whose companion from 27 fills its lobe stably onto the black hole the wind has fed
+///   and collapses with no envelope, and 0739 is the one pair of the thousand that does so at 27.)
 /// - **0145** (1.22 + 0.77 M☉, 494 d, Z = 0.004): the primary's envelope at 4,377.6 Myr leaves a
 ///   0.524 M☉ helium star whose carbon–oxygen core is past its shell limit, a carbon–oxygen white
 ///   dwarf at once: the stripping's member dies now (before T4.k it was placed alive). The dwarf
@@ -2831,9 +3367,9 @@ fn a_core_stripped_past_its_end_dies_at_once() {
             .value()
     };
 
-    let collapse = evolve(&pinned_sample_pair(544), until);
+    let collapse = evolve(&pinned_sample_pair(739), until);
     let envelope = last_envelope(&collapse);
-    assert!((envelope / 8.4807e6 - 1.0).abs() < 1e-5, "{envelope} yr");
+    assert!((envelope / 13.0375e6 - 1.0).abs() < 1e-5, "{envelope} yr");
     let record = *collapse
         .supernovae()
         .iter()
@@ -2849,7 +3385,7 @@ fn a_core_stripped_past_its_end_dies_at_once() {
         crate::stellar::remnant::RemnantKind::BlackHole
     );
     assert!(
-        (record.remnant().mass().value() - 14.253).abs() < 1e-3,
+        (record.remnant().mass().value() - 10.396).abs() < 1e-3,
         "{:?}",
         record.remnant()
     );
@@ -3049,7 +3585,8 @@ fn the_pre_test_only_widens_with_age() {
     assert!(passes > 10, "{passes} pairs pass at some age");
 }
 
-/// P11.T4.j: a wide pair is still two single stars. 1 + 0.8 M☉ at 10⁴ d fails at 13.8 Gyr. The
+/// P11.T4.j: a wide pair is still two single stars. 1 + 0.8 M☉ at 10⁶ d fails at 13.8 Gyr (at
+/// 10⁴ d the companion takes the primary's wind since P11.T12's fix). The
 /// bound's boundary for a circular 1 + 0.8 M☉ pair ([Fe/H] 0, median draws) lies at P₀ ≈ 0.73 d
 /// at 1 Gyr and 1.54 d at 10 Gyr, against the science check's 0.64 and 1.22 d from BSE equation
 /// 50 at a locked spin alone (plan 11's Risks): above them by the spins' reservoir and the
@@ -3057,7 +3594,7 @@ fn the_pre_test_only_widens_with_age() {
 #[test]
 fn a_wide_pair_is_still_passed_over() {
     assert!(!can_interact(
-        &pair(1.0, 0.8, 1.0e4, 0.0, 0.02),
+        &pair(1.0, 0.8, 1.0e6, 0.0, 0.02),
         Years::new(1.38e10)
     ));
     let tracks = full_tracks(&pair(1.0, 0.8, 1.0, 0.0, 0.02));
@@ -3339,6 +3876,11 @@ fn in_shares<I: Sync>(items: &[I], check: impl Fn(&mut DecayTally, &I) + Sync) -
 /// them (the braking channel, the pinned sample's ranges, giants' tidal captures). The passes that
 /// do not interact are recorded. No merger leaves both stars (finding F1), and every pair the
 /// pre-test passes at its age it passes at 1.6 × 10¹⁰ years too.
+///
+/// From generator version 26, under the enforced Humphreys–Davidson limit and on the tables
+/// refitted at 26, the pre-test passes over 13 (1 of the pinned sample's ranges, 12 of the giants'
+/// captures): primaries of 32–39 M☉ on orbits of 6,400–15,000 days that the engine takes into a
+/// common envelope or a stable transfer at 5.8–6.8 Myr. A finding, pinned as it stands, at most 13.
 #[test]
 #[ignore = "slow: 1.8 × 10⁴ binaries run through the engine"]
 fn the_decay_bound_never_passes_over_an_interaction() {
@@ -3371,14 +3913,19 @@ fn the_decay_bound_never_passes_over_an_interaction() {
         assert!(t.missed_by_drawn > 0, "sample {kind} tests the bound");
         missed += t.missed.len();
     }
-    assert_eq!(missed, 0, "interactions the pre-test passed over");
+    assert!(
+        missed <= 13,
+        "{missed} interactions the pre-test passed over"
+    );
 }
 
 /// P11.T4.j: each term of the bound is the engine's, and goes with its [`BinaryParams`] switch.
 /// The braked 1.04 + 0.45 M☉ pair at 0.69 d passes at 2 Gyr only with magnetic braking and the
 /// tides that pass it to the orbit. A 0.3 + 0.3 M☉ pair at 0.2 d, below BSE's braking floor and
 /// inside its lobes on the drawn orbit, passes at 13.8 Gyr by gravitational radiation alone, which
-/// merges it in the engine at about 3.6 Gyr, and fails without it.
+/// merges it in the engine at about 3.6 Gyr, and fails without it. A giant near its reach passes
+/// the lobe and decay tests only with the wind's spin (P11.T4.l); from 27 its companion takes its
+/// wind (P11.T12's fix), which sends the pair to the engine with the switch off too.
 #[test]
 fn the_bound_follows_the_engines_switches() {
     let with = |params: BinaryParams| move |input: BinaryInput| input.with_params(params);
@@ -3416,6 +3963,30 @@ fn the_bound_follows_the_engines_switches() {
         merger.is_some_and(|age| (3.0e9..4.2e9).contains(&age)),
         "{merger:?}:\n{}",
         describe(&timeline)
+    );
+    // P11.T4.l: a giant near its drawn reach, 1.5 + 0.45 M☉ at 2,300 d, passes the lobe and decay
+    // tests by 13.8 Gyr only by the spin its wind takes beyond its inertia's share, which the tides
+    // restore from the orbit, and so only with the wind's spin switch on. From 27 its companion
+    // takes 10⁻⁴ M☉ of that wind by then (P11.T12's fix), so the pre-test runs the pair either way.
+    let no_wind_spin = with(BinaryParams {
+        wind_angular_momentum: false,
+        ..BinaryParams::GENERATOR
+    });
+    let lobe_or_decay = |input: &BinaryInput| {
+        let at = until.value();
+        super::evolve::interacts(input, &super::evolve::own_members(input, at, None), at)
+    };
+    let giant = || pair(1.5, 0.45, 2_300.0, 0.0, 0.02);
+    assert!(!lobe_reached(&giant(), until));
+    assert!(lobe_or_decay(&generator(giant())));
+    assert!(
+        !lobe_or_decay(&no_wind_spin(giant())),
+        "without the wind's spin"
+    );
+    assert!(can_interact(&generator(giant()), until));
+    assert!(
+        can_interact(&no_wind_spin(giant()), until),
+        "wind-fed without the wind's spin"
     );
 }
 
@@ -3585,16 +4156,18 @@ fn a_carried_primary_collapses_at_its_pin() {
     assert!((e - e1).abs() < 1e-6, "e {e} against A1's {e1}");
 }
 
-/// P11.T4.k, finding A (ruling p11-t4k-faults, 2026-10-06, §1.1): pair 0004 of the pinned thousand
-/// (34.94 + 19.76 M☉, 2,974 d, e 0.48, Z = 0.004). The pinned primary, a stable-transfer donor
-/// carried on its own track, dies on it exactly at its pin, 6.4576 Myr, on the transfer's last
+/// P11.T4.k, finding A (ruling p11-t4k-faults, 2026-10-06, §1.1): pair 0257 of the pinned thousand
+/// (21.48 + 18.99 M☉, 230 d, e 0.22, Z = 0.0005). The pinned primary, a stable-transfer donor
+/// carried on its own track, dies on it exactly at its pin, 10.1571 Myr, on the transfer's last
 /// step. The step reads the dying donor inside its lobe as its remnant, but it lands on the pin, so
-/// the detachment test does not end it: the pin is acted on, a 14.13 M☉ black hole, bound, and the
+/// the detachment test does not end it: the pin is acted on, an 8.283 M☉ black hole, bound, and the
 /// transfer ends with its donor. Before T4.k the "transfer is over" return came first and the pin
-/// was never seen again: no record.
+/// was never seen again: no record. (Until generator version 26 the test read pair 0004, whose
+/// transfer from 26, under the enforced Humphreys–Davidson limit, ends in a common envelope some
+/// 4,100 yr before the pin.)
 #[test]
 fn a_transfers_last_step_applies_the_pin() {
-    let input = pinned_sample_pair(4);
+    let input = pinned_sample_pair(257);
     let pin = super::evolve::pinned_death_age_years(&input).expect("a pinned primary");
     let timeline = evolve(&input, Years::new(1.2e10));
     let record = primary_record(&timeline);
@@ -3603,7 +4176,7 @@ fn a_transfers_last_step_applies_the_pin() {
         "{:?} against the pin at {pin} yr",
         record.age()
     );
-    assert!((pin - 6.4576e6).abs() < 1.0e2, "{pin}");
+    assert!((pin - 10.1571e6).abs() < 1.0e2, "{pin}");
     assert_eq!(
         segment_ending_at(&timeline, pin).kind(),
         SegmentKind::StableTransfer {
@@ -3615,7 +4188,7 @@ fn a_transfers_last_step_applies_the_pin() {
         crate::stellar::remnant::RemnantKind::BlackHole
     );
     assert!(
-        (record.remnant().mass().value() - 14.130).abs() < 1e-3,
+        (record.remnant().mass().value() - 8.283).abs() < 1e-3,
         "{:?}",
         record.remnant()
     );
@@ -3628,16 +4201,19 @@ fn a_transfers_last_step_applies_the_pin() {
     );
 }
 
-/// P11.T4.k, finding A: pair 0741 of the pinned thousand (14.10 + 13.53 M☉, 72.1 d, e 0.61, [Fe/H]
-/// 0). After its common envelope at 17.508 Myr the companion is a helium star, which transfers onto
-/// the primary's 2.84 M☉ black hole from 18.6279 Myr (case BB, ruling 129.4b) and dies in that
-/// transfer at 18.6316 Myr, as Tauris, Langer and Podsiadlowski (2015) find most such donors do.
-/// The transfer's last step lands on the death and acts on it: a 1.411 M☉ neutron star, bound
-/// beside the black hole. No merger follows. Before T4.k the death was never seen, the dead donor
-/// was read past its death on its closed forms, and the pair showed a merger at 985.7 Myr.
+/// P11.T4.k, finding A: pair 0318 of the pinned thousand (11.32 + 10.62 M☉ at 14.7 d). The
+/// companion, its envelope taken, is a helium star, which transfers onto the primary's 1.51 M☉
+/// neutron star from 26.1266 Myr (case BB, ruling 129.4b) and dies in that transfer at 26.1370 Myr,
+/// as Tauris, Langer and Podsiadlowski (2015) find most such donors do. The transfer's last step
+/// lands on the death and acts on it: a 1.856 M☉ neutron star, whose 226 km/s kick unbinds the
+/// pair (re-measured at 27, whose engine feeds the first neutron star the companion's wind, 1.507
+/// to 1.514 M☉, P11.T4's neutron-star accretion; until 27 the pair stayed bound). No merger
+/// follows. Before T4.k the death was never seen, and the dead donor was read past its death on its
+/// closed forms. (Until P11.T4.o this test read pair 0741, whose helium star now collapses
+/// detached: F17's shorter steps leave its primary 0.005 M☉ heavier after its first transfer.)
 #[test]
 fn a_transfers_last_step_applies_the_death() {
-    let input = pinned_sample_pair(741);
+    let input = pinned_sample_pair(318);
     let timeline = evolve(&input, Years::new(1.2e10));
     let record = *timeline
         .supernovae()
@@ -3645,7 +4221,7 @@ fn a_transfers_last_step_applies_the_death() {
         .find(|s| s.component() == Component::Secondary)
         .unwrap_or_else(|| panic!("the companion's collapse: {}", describe(&timeline)));
     let death = record.age().value();
-    assert!((death - 18.6316e6).abs() < 1.0e2, "{death}");
+    assert!((death - 26.136_98e6).abs() < 1.0e2, "{death}");
     assert_eq!(
         segment_ending_at(&timeline, death).kind(),
         SegmentKind::StableTransfer {
@@ -3661,58 +4237,43 @@ fn a_transfers_last_step_applies_the_death() {
         "a helium-star donor (case BB): {:?}",
         before.stars()[1]
     );
-    assert_eq!(before.stars()[0].phase(), Phase::BlackHole);
+    assert_eq!(before.stars()[0].phase(), Phase::NeutronStar);
     assert_eq!(
         record.remnant().kind(),
         crate::stellar::remnant::RemnantKind::NeutronStar
     );
     assert!(
-        (record.remnant().mass().value() - 1.411).abs() < 1e-3,
-        "{:?}",
-        record.remnant()
-    );
-    assert!(record.bound(), "{}", describe(&timeline));
-    assert_eq!(timeline.merger_age(), None, "{}", describe(&timeline));
-}
-
-/// P11.T4.k, finding C (ruling p11-t4k-faults, 2026-10-06, §1.2): pair 0277 of the pinned thousand
-/// (7.68 + 3.88 M☉, 0.674 d, Z = 0.004). After its Case A transfer the pair is in contact from
-/// 19.67 Myr, and its primary, kept on its main sequence by the mass it lost, is still there at
-/// plan 06's death, 46.831 Myr. The contact's knots stop at the pin, and the primary collapses
-/// from its main sequence (design note 16): a 1.188 M☉ neutron star, which the kick unbinds. A run
-/// to 30 Myr, inside the contact and before the pin, records nothing, stays in contact, and is the
-/// full run's to 30 Myr bit for bit, as runs to 46 and 46.9 Myr are, just before the pin and just
-/// past it. Before T4.k the contact ran to its coalescence at 47.51 Myr,
-/// past the pin, and the merger's product died at 69.05 Myr.
-#[test]
-fn a_contact_stops_at_the_pin() {
-    let input = pinned_sample_pair(277);
-    let pin = super::evolve::pinned_death_age_years(&input).expect("a pinned primary");
-    assert!((pin - 46.831e6).abs() < 1.0e3, "{pin}");
-    let timeline = evolve(&input, Years::new(1.2e10));
-    let record = primary_record(&timeline);
-    assert!(
-        (record.age().value() - pin).abs() <= 1e-9 * pin,
-        "{:?} against the pin at {pin} yr",
-        record.age()
-    );
-    assert_eq!(
-        segment_ending_at(&timeline, pin).kind(),
-        SegmentKind::Contact
-    );
-    let before = timeline.state_at(Years::new(super::detached::last_living(pin)));
-    assert_eq!(before.stars()[0].phase(), Phase::MainSequence);
-    assert_eq!(
-        record.remnant().kind(),
-        crate::stellar::remnant::RemnantKind::NeutronStar
-    );
-    assert!(
-        (record.remnant().mass().value() - 1.188).abs() < 1e-3,
+        (record.remnant().mass().value() - 1.856).abs() < 1e-3,
         "{:?}",
         record.remnant()
     );
     assert!(!record.bound(), "{}", describe(&timeline));
     assert_eq!(timeline.merger_age(), None, "{}", describe(&timeline));
+}
+
+/// P11.T4.k, finding C (ruling p11-t4k-faults, 2026-10-06, §1.2), as P11.T4.n leaves it: pair
+/// 0277 of the pinned thousand (7.68 + 3.88 M☉, 0.674 d, Z = 0.004). After its Case A transfer the
+/// pair is in contact from 19.67 Myr, and its primary, kept on its main sequence by the mass it
+/// lost, would be there still at plan 06's death, 46.831 Myr. The contact's knots stop at the
+/// primary's own main-sequence end, 41.914 Myr, as they stop at the pin (T4.k): the primary goes on
+/// along its own track there, and the pair coalesces
+/// ([`pinned_contact_pairs_collapse_from_past_their_main_sequences`]). A run to 30 Myr, inside the
+/// contact, records nothing, stays in contact, and is the full run's to 30 Myr bit for bit, as
+/// runs to 41 and 41.95 Myr are, after the contact's last knot before the end (40.55 Myr) and just
+/// past the end, and one to 46.9 Myr, past the pin. Before T4.k the contact ran to its coalescence
+/// at 47.51 Myr, past the pin, and the merger's product died at 69.05 Myr; before T4.n its knots
+/// stopped at the pin, and the primary collapsed from its main sequence there.
+#[test]
+fn a_contact_stops_at_its_primarys_own_main_sequence_end() {
+    let input = pinned_sample_pair(277);
+    let (track, _) = super::evolve::pinned_track_and_pin(&input).expect("a pinned primary");
+    let end = track.main_sequence_end().expect("a main sequence").value();
+    assert!((end - 41.914e6).abs() < 1.0e3, "{end}");
+    let timeline = evolve(&input, Years::new(1.2e10));
+    assert_eq!(
+        segment_ending_at(&timeline, end).kind(),
+        SegmentKind::Contact
+    );
     let early = Years::new(3.0e7);
     let short = evolve(&input, early);
     assert!(short.supernovae().is_empty(), "{}", describe(&short));
@@ -3720,14 +4281,299 @@ fn a_contact_stops_at_the_pin() {
         short.segments().last().map(Segment::kind),
         Some(SegmentKind::Contact)
     );
-    // The build-age contract either side of the pin: at 46 Myr, after the contact's last knot
-    // before the pin (45.8 Myr), whose next knot is clamped to the pin past that age; and at
-    // 46.9 Myr, past the collapse.
-    for until in [early, Years::new(4.6e7), Years::new(4.69e7)] {
+    // The build-age contract either side of the end: at 41 Myr, after the contact's last knot
+    // before it, whose next knot is clamped to the end past that age; at 41.95 Myr, past the
+    // coalescence; and at 46.9 Myr, past the collapse.
+    for until in [
+        early,
+        Years::new(4.1e7),
+        Years::new(4.195e7),
+        Years::new(4.69e7),
+    ] {
         assert_eq!(
             check_any_age(&input, until, Years::new(1.2e10)),
             EarlierRun::Same,
             "to {until:?}"
+        );
+    }
+}
+
+/// P11.T4.n (decision-observed-class-findings §B): pairs 0223 (14.16 + 6.00 M☉, 0.996 d) and 0277
+/// (7.68 + 3.88 M☉, 0.674 d) of the pinned thousand, both at Z = 0.004, are contact pairs whose
+/// primaries the binary kept on their main sequences to plan 06's deaths, where they collapsed at
+/// τ 0.999 and 0.987 (Risks, "P11.T4.k's known departures"). Each contact now ends at its
+/// primary's own main-sequence end, 15.521 and 41.914 Myr: the primary goes on along the pin's own
+/// track at offset 0, and the pair coalesces, as a contact does when a star leaves its main
+/// sequence, through a common envelope into a Hertzsprung-gap product of 20.00 and 11.50 M☉. That
+/// product's own track dies before the pin, and it is held there, an early-AGB supergiant, until
+/// the pin collapses it into plan 06's neutron star, bit for bit: 1.4222 and 1.1881 M☉, at 17.195
+/// and 46.831 Myr.
+#[test]
+fn pinned_contact_pairs_collapse_from_past_their_main_sequences() {
+    use hyperion_testkit::float::bits;
+
+    use super::star::Member;
+
+    for (i, end_myr, product_msun) in [(223, 15.5205, 19.997), (277, 41.9137, 11.500)] {
+        let input = pinned_sample_pair(i);
+        let timeline = evolve(&input, Years::new(1.2e10));
+        let what = || format!("pinned pair {i:04}: {}", describe(&timeline));
+        let (track, pin) = super::evolve::pinned_track_and_pin(&input).expect("a pinned primary");
+        let end = track.main_sequence_end().expect("a main sequence").value();
+        assert!((end / 1e6 - end_myr).abs() < 1e-4, "{end}: {}", what());
+        assert_eq!(
+            segment_ending_at(&timeline, end).kind(),
+            SegmentKind::Contact
+        );
+        let envelope = timeline
+            .segments()
+            .iter()
+            .find(|s| s.kind() == SegmentKind::CommonEnvelope)
+            .unwrap_or_else(|| panic!("the contact coalesces: {}", what()));
+        assert_eq!(bits(envelope.start().value()), bits(end), "{}", what());
+        let Member::Shaped { offset, .. } = &envelope.members()[0] else {
+            panic!("the primary on the pin's own track: {}", what());
+        };
+        assert_eq!(bits(*offset), bits(0.0), "at offset {offset}");
+        let after = timeline.state_at(Years::new(end));
+        assert_eq!(after.kind(), SegmentKind::Merged, "{}", what());
+        assert_eq!(after.stars()[0].phase(), Phase::HertzsprungGap);
+        assert!(
+            (after.stars()[0].mass().value() - product_msun).abs() < 1e-3,
+            "{:?}",
+            after.stars()[0]
+        );
+        let at = pin.death.age().value();
+        let record = primary_record(&timeline);
+        assert!(
+            (record.age().value() - at).abs() <= 1e-9 * at,
+            "{record:?} against {at}"
+        );
+        let before = timeline.state_at(Years::new(super::detached::last_living(at)));
+        assert_eq!(before.stars()[0].phase(), Phase::EarlyAgb, "{}", what());
+        assert_eq!(Some(record.remnant()), plan_06_star(&input).remnant());
+        assert_eq!(record.kick(), pin.kick);
+        check_no_main_sequence_collapse(&input, &timeline, &what);
+    }
+}
+
+/// P11.T4.n (decision-observed-class-findings §B): pair 0040 of the pinned thousand (14.77 +
+/// 2.93 M☉, 2.23 d, Z = 0.004), whose stars merge on their main sequences into a 17.656 M☉ star on
+/// a track of its own, younger than the primary (BSE equation 80), that holds the pin. At the
+/// primary's own main-sequence end, 14.637 Myr, a step of the merged star lands on it, and the
+/// product goes on along the pin's own track at offset 0: a Hertzsprung-gap star of its mass with
+/// that track's 3.62 M☉ core, its L up 0.21 dex, from log L 4.522 to 4.734. It collapses at the
+/// pin, 16.210 Myr, an early-AGB supergiant, into plan 06's remnant with plan 06's kick, bit for
+/// bit. Before T4.n the product collapsed there from its main sequence.
+#[test]
+fn a_pinned_merger_product_leaves_its_main_sequence_at_the_primarys_end() {
+    use hyperion_testkit::float::bits;
+
+    use super::star::Member;
+
+    let input = pinned_sample_pair(40);
+    let timeline = evolve(&input, Years::new(1.2e10));
+    let what = || format!("pinned pair 0040: {}", describe(&timeline));
+    let (track, pin) = super::evolve::pinned_track_and_pin(&input).expect("a pinned primary");
+    let end = track.main_sequence_end().expect("a main sequence").value();
+    assert!((end - 14.6366e6).abs() < 1.0e2, "{end}");
+    let closed = segment_ending_at(&timeline, end);
+    assert_eq!(closed.kind(), SegmentKind::Merged, "{}", what());
+    let Member::Track {
+        track: product,
+        offset,
+    } = &closed.members()[0]
+    else {
+        panic!("the merger's product on its own track: {}", what());
+    };
+    let own = product
+        .main_sequence_end()
+        .expect("built past its main sequence");
+    assert!(
+        offset + own.value() > end,
+        "its main sequence outlasts the primary's"
+    );
+    let next = timeline
+        .segments()
+        .iter()
+        .find(|s| (s.start().value() - end).abs() <= 1e-9 * end && s.end() > s.start())
+        .unwrap_or_else(|| panic!("a segment starts at the end: {}", what()));
+    assert_eq!(bits(next.start().value()), bits(end));
+    let Member::Shaped {
+        track: shaped,
+        offset,
+        ..
+    } = &next.members()[0]
+    else {
+        panic!("the product on the pin's own track: {}", what());
+    };
+    assert_eq!(bits(*offset), bits(0.0), "at offset {offset}");
+    assert_eq!(shaped.initial_mass(), track.initial_mass());
+    let [was, now] =
+        [end * (1.0 - 1e-12), end].map(|t| timeline.state_at(Years::new(t)).stars()[0]);
+    assert_eq!(was.phase(), Phase::MainSequence);
+    assert_eq!(now.phase(), Phase::HertzsprungGap);
+    assert!((was.mass().value() - 17.656).abs() < 1e-3, "{was:?}");
+    assert!(
+        (now.mass().value() / was.mass().value() - 1.0).abs() < 1e-9,
+        "{now:?}"
+    );
+    let log_l = |s: &crate::stellar::StarState| crate::math::log10(s.luminosity().value());
+    assert!((log_l(&was) - 4.522).abs() < 1e-3, "{was:?}");
+    assert!((log_l(&now) - 4.734).abs() < 1e-3, "{now:?}");
+    assert!((now.core_mass().value() - 3.623).abs() < 1e-3, "{now:?}");
+    let at = pin.death.age().value();
+    let record = primary_record(&timeline);
+    assert!(
+        (record.age().value() - at).abs() <= 1e-9 * at,
+        "{record:?} against {at}"
+    );
+    let before = timeline.state_at(Years::new(super::detached::last_living(at)));
+    assert_eq!(before.stars()[0].phase(), Phase::EarlyAgb, "{}", what());
+    assert_eq!(Some(record.remnant()), plan_06_star(&input).remnant());
+    assert_eq!(record.kick(), pin.kick);
+    check_no_main_sequence_collapse(&input, &timeline, &what);
+    for until in [end * (1.0 - 1e-6), end * (1.0 + 1e-6)] {
+        assert_eq!(
+            check_any_age(&input, Years::new(until), Years::new(1.2e10)),
+            EarlierRun::Same,
+            "to {until} yr"
+        );
+    }
+}
+
+/// The pair of record 822C72E000000009's primary in the universe LOOK72 (seed
+/// `0xa49f_649b_ef43_4b20`, the full potential), as `SystemStars` runs it: its input, its timeline
+/// and the primary's model. Until 27 it was record 822C72E00000008C, the look's own, which 27's
+/// grid no longer places (plan 08's displaced classes, P08.T12, and the field's share, P09.T2.c);
+/// 822C72E000000009, of the same cell, is the first of the cell's records whose pinned primary's
+/// main sequence ends so inside its case-A transfer.
+fn look72_case_a_pair() -> (
+    BinaryInput,
+    BinaryTimeline,
+    crate::stellar::system::StarModel,
+) {
+    use crate::galaxy::Galaxy;
+    use crate::galaxy::placement::resolve;
+    use crate::stellar::multiplicity::{HierarchyNode, StarIndex};
+    use crate::stellar::system::SystemStars;
+
+    let galaxy = Galaxy::new(crate::Seed::new(0xa49f_649b_ef43_4b20)).with_full_potential();
+    let id: crate::id::SystemId = "822c72e000000009".parse().expect("a system ID");
+    let record = resolve(&galaxy, id).expect("a grid system of LOOK72");
+    let stars = SystemStars::generate(&galaxy, &record);
+    let pair = stars
+        .pairs()
+        .iter()
+        .find(|pair| pair.stars()[0] == StarIndex::PRIMARY)
+        .expect("the engine runs the primary's pair");
+    let HierarchyNode::Pair { orbit, .. } = *stars.hierarchy().node(pair.node()) else {
+        panic!("a pair's node is a pair");
+    };
+    let [primary, companion] = pair.stars().map(|s| &stars.stars()[usize::from(s.get())]);
+    let input = BinaryInput::new(
+        primary.initial_mass(),
+        companion.initial_mass(),
+        *primary.composition(),
+        orbit,
+        [primary.draws().clone(), companion.draws().clone()],
+        primary.age_at_epoch(),
+    )
+    .expect("a pair");
+    (input, pair.timeline().clone(), primary.clone())
+}
+
+/// P11.T4.n (decision-observed-class-findings §B), on record 822C72E000000009 of the universe
+/// LOOK72 ([`look72_case_a_pair`]; the finding's 822C72E00000008C until 27), a pinned primary of
+/// 10.734 M☉ at Z = 0.026 whose companion keeps it on its main sequence through a case-A transfer.
+/// At its own track's main-sequence end, 21.2574 Myr, the segment closes inside the transfer, and
+/// the donor, an 8.405 M☉ main-sequence star the binary carries, goes on along the pin's own track
+/// at offset 0: a Hertzsprung-gap star of that mass with the track's 2.274 M☉ core (Mc,TMS at the
+/// track's own mass there). L steps up 0.401 dex there, from log L 3.910 to 4.311. Case AB strips
+/// it to a naked helium star of 2.321 M☉ by 21.345 Myr (2.30 M☉ at 22 Myr), which collapses at its
+/// pin, 23.9374 Myr, into plan 06's 1.440 M☉ neutron star with plan 06's kick, bit for bit. (The
+/// finding's record, before T4.n, collapsed from its main sequence, a 5.80 M☉ star at log L 3.31.)
+#[test]
+fn a_pinned_case_a_donor_leaves_its_main_sequence_at_its_own_end() {
+    use hyperion_testkit::float::bits;
+
+    use super::star::Member;
+
+    let (input, timeline, primary) = look72_case_a_pair();
+    let timeline = &timeline;
+    let what = || format!("822C72E000000009: {}", describe(timeline));
+    let (track, pin) = super::evolve::pinned_track_and_pin(&input).expect("a pinned primary");
+    let end = track.main_sequence_end().expect("a main sequence").value();
+    assert!((end - 21.2574e6).abs() < 1.0e2, "{end}");
+    let closed = segment_ending_at(timeline, end);
+    assert_eq!(
+        closed.kind(),
+        SegmentKind::StableTransfer {
+            donor: Component::Primary
+        },
+        "{}",
+        what()
+    );
+    assert!(matches!(
+        closed.members()[0],
+        Member::MainSequence { helium: false, .. }
+    ));
+    let next = timeline
+        .segments()
+        .iter()
+        .find(|s| (s.start().value() - end).abs() <= 1e-9 * end && s.end() > s.start())
+        .unwrap_or_else(|| panic!("a segment starts at the end: {}", what()));
+    // The step lands on the end exactly, and the track is placed at zero there.
+    assert_eq!(bits(next.start().value()), bits(end));
+    let Member::Shaped {
+        track: shaped,
+        offset,
+        ..
+    } = &next.members()[0]
+    else {
+        panic!("the donor on the pin's own track: {}", what());
+    };
+    assert_eq!(bits(*offset), bits(0.0), "at offset {offset}");
+    assert_eq!(shaped.initial_mass(), track.initial_mass());
+    assert_eq!(shaped.main_sequence_end(), track.main_sequence_end());
+    let [was, now] =
+        [end * (1.0 - 1e-12), end].map(|t| timeline.state_at(Years::new(t)).stars()[0]);
+    assert_eq!(was.phase(), Phase::MainSequence);
+    assert_eq!(now.phase(), Phase::HertzsprungGap);
+    assert!((was.mass().value() - 8.405).abs() < 1e-3, "{was:?}");
+    assert!(
+        (now.mass().value() / was.mass().value() - 1.0).abs() < 1e-9,
+        "{now:?}"
+    );
+    let log_l = |s: &crate::stellar::StarState| crate::math::log10(s.luminosity().value());
+    assert!((log_l(&was) - 3.910).abs() < 1e-3, "{was:?}");
+    assert!((log_l(&now) - 4.311).abs() < 1e-3, "{now:?}");
+    assert!((now.core_mass().value() - 2.274).abs() < 1e-3, "{now:?}");
+    let stripped = timeline.state_at(Years::new(2.2e7)).stars()[0];
+    assert_eq!(stripped.phase(), Phase::HeliumMainSequence, "{}", what());
+    assert!(
+        (stripped.mass().value() - 2.30).abs() < 0.01,
+        "{stripped:?}"
+    );
+    let at = pin.death.age().value();
+    assert!((at - 23.9374e6).abs() < 1.0e2, "{at}");
+    let collapse = primary_record(timeline);
+    assert!(
+        (collapse.age().value() - at).abs() <= 1e-9 * at,
+        "{collapse:?} against {at}"
+    );
+    let before = timeline.state_at(Years::new(super::detached::last_living(at)));
+    assert_eq!(before.stars()[0].phase(), Phase::HeliumMainSequence);
+    assert_eq!(Some(collapse.remnant()), primary.remnant());
+    assert_eq!(collapse.kick(), primary.natal_kick());
+    check_no_main_sequence_collapse(&input, timeline, &what);
+    // The build-age contract either side of the end: a run to just before it, whose last step
+    // lands on it past the age asked, and one to just past it.
+    for until in [end * (1.0 - 1e-6), end * (1.0 + 1e-6)] {
+        assert_eq!(
+            check_any_age(&input, Years::new(until), timeline.until()),
+            EarlierRun::Same,
+            "to {until} yr"
         );
     }
 }
@@ -3769,6 +4615,71 @@ fn engine_with_its_pin(input: &BinaryInput, age_years: f64, a_rsun: f64) -> supe
         orbit,
         Some(pin),
     )
+}
+
+/// P11.T4.n's backstop: the pinned primary's own main-sequence end, still pending at the engine's
+/// age as a phase's exit before its stop leaves it (a transfer that detaches on the step that
+/// lands on the end), is acted on before the next phase. An engine at that end on the 17 + 12 M☉
+/// pair's 4,396 R☉ orbit, its primary a carried main-sequence star of its own mass at τ 0.9, takes
+/// the primary onto the pin's own track there, at offset 0 and its mass, where no step could land
+/// on the end, and the pin collapses it later, once.
+#[test]
+fn a_main_sequence_end_due_at_the_engines_age_is_applied() {
+    use super::star::{Member, Path};
+
+    let (input, at) = untouched_pinned_pair();
+    let end = super::evolve::own_main_sequence_end_of(&input);
+    let (track, _) = super::evolve::pinned_track_and_pin(&input).expect("a pinned primary");
+    let end_years = track.main_sequence_end().expect("a main sequence").value();
+    let mut engine =
+        engine_with_its_pin(&input, end_years.next_down(), 4_396.0).with_own_main_sequence_end(end);
+    let mass = input.masses()[0].value();
+    engine.members[0] = Member::MainSequence {
+        helium: false,
+        mass: Path::starting(engine.age, mass),
+        tau: Path::starting(engine.age, 0.9),
+    };
+    // The engine reaches the end by an exit other than its stop.
+    engine.age = end_years;
+    engine.run();
+    let timeline = engine.finish();
+    let next = timeline
+        .segments()
+        .iter()
+        .find(|s| s.start().value() >= end_years && s.end() > s.start())
+        .unwrap_or_else(|| panic!("a segment from the end: {}", describe(&timeline)));
+    assert!(
+        (next.start().value() - end_years).abs() <= 1e-9 * end_years,
+        "{}",
+        describe(&timeline)
+    );
+    let Member::Shaped {
+        track: shaped,
+        offset,
+        mass: carried,
+    } = &next.members()[0]
+    else {
+        panic!(
+            "the primary on the pin's own track: {}",
+            describe(&timeline)
+        );
+    };
+    assert!(offset.abs() <= 1e-9 * end_years, "at offset {offset}");
+    assert_eq!(shaped.initial_mass(), track.initial_mass());
+    assert!((carried.at(end_years) / mass - 1.0).abs() < 1e-12);
+    let after = timeline.state_at(Years::new(end_years));
+    assert_eq!(after.stars()[0].phase(), Phase::HertzsprungGap);
+    let records = timeline
+        .supernovae()
+        .iter()
+        .filter(|s| s.component() == Component::Primary)
+        .count();
+    assert_eq!(records, 1, "{}", describe(&timeline));
+    let record = primary_record(&timeline);
+    assert!(
+        (record.age().value() - at).abs() <= 1e-9 * at,
+        "{record:?} against {at}"
+    );
 }
 
 /// P11.T4.k's backstop (ruling p11-t4k-faults, 2026-10-06, §2.1): a pin still pending at the
@@ -3831,4 +4742,3984 @@ fn a_transfer_without_a_living_donor_ends() {
     };
     engine.end_without_a_living_donor(0);
     assert_eq!(engine.kind, SegmentKind::Detached);
+}
+
+// --- P11.T4.l: a passed-over pair's collapses --------------------------------------------------
+
+/// The universe time of the engine's age `age_years` in `input`'s pair, as the engine maps it.
+fn universe_time_of(input: &BinaryInput, age_years: f64) -> crate::time::UniverseTime {
+    super::supernova::universe_time_at(&super::timeline::Context::of(input), age_years)
+}
+
+/// The full tracks of `input`'s two stars, to compare a passed-over pair's stars with their own.
+fn own_tracks(input: &BinaryInput) -> [crate::stellar::sse::Track; 2] {
+    core::array::from_fn(|i| {
+        crate::stellar::sse::Track::full(
+            super::evolve::track_mass(input.masses()[i]),
+            input.composition(),
+            &input.draws()[i],
+        )
+    })
+}
+
+/// That every state of `timeline`, `input`'s run, holds each star as its own track's state, at 64
+/// even ages and either side of each supernova.
+fn assert_own_models(input: &BinaryInput, timeline: &BinaryTimeline) {
+    let tracks = own_tracks(input);
+    let until = timeline.until().value();
+    let ages = (0..=64_u32).map(|k| until * f64::from(k) / 64.0).chain(
+        timeline.supernovae().iter().flat_map(|s| {
+            let age = s.age().value();
+            [super::detached::last_living(age), age]
+        }),
+    );
+    for age in ages {
+        let state = timeline.state_at(Years::new(age));
+        for (star, track) in state.stars().iter().zip(&tracks) {
+            assert_eq!(
+                *star,
+                track.state_at(Years::new(age)),
+                "at {age} yr: {}",
+                describe(timeline)
+            );
+        }
+    }
+}
+
+/// P11.T4.l (ruling p11-supernova-pins of 2026-10-06, finding F3), as P11.T10's fix leaves it: a
+/// wide pair the pre-test passes over is unbound by its primary's collapse. 15 + 3 M☉ at
+/// P = 10⁵ d (about 23,760 R☉), circular, \[Fe/H\] 0 with the median draws, kicks off: the pinned
+/// primary collapses at plan 06's death (14.32 Myr) from its living 9.65 M☉ to a 1.43 M☉ neutron
+/// star, more than half the pair's mass, so the pair is `Disrupted` by the primary (Blaauw 1961).
+/// From 27 the engine runs the pair from its start, since its primary dies by the age it is run to
+/// (P11.T10's fix): its detached segments end at the primary's phases, and the orbit before the
+/// collapse is the engine's, widened by the winds to 33,845 R☉ (Jeans's mode gives 0.14% less;
+/// until 27 P11.T4.l's closed form kept the drawn orbit to the collapse). With no kick each star keeps
+/// the velocity it had in the barycentre's frame on that orbit, to 10⁻⁶; there is no recoil, and
+/// both stars are their own models throughout. Before T4.l the pair kept its drawn orbit through
+/// the collapse, with no record.
+#[test]
+fn a_wide_pair_is_unbound_by_its_primarys_collapse() {
+    let params = BinaryParams {
+        natal_kicks: false,
+        ..BinaryParams::GENERATOR
+    };
+    let input = pair(15.0, 3.0, 1.0e5, 0.0, 0.02).with_params(params);
+    let until = Years::new(1.0e8);
+    assert!(!can_interact(&input, until), "the pre-test passes it over");
+    let timeline = evolve(&input, until);
+    let death = plan_06_star(&input).death().expect("a massive star dies");
+    let d = death.age().value();
+    let [record] = timeline.supernovae() else {
+        panic!("one collapse: {}", describe(&timeline));
+    };
+    assert_eq!(record.component(), Component::Primary);
+    assert!(
+        (record.age().value() - d).abs() <= 1e-9 * d,
+        "{:?} against plan 06's {d} yr",
+        record.age()
+    );
+    assert_eq!(record.kick(), None);
+    assert!(!record.bound());
+    assert_eq!((record.recoil(), timeline.recoil()), (None, None));
+    let kinds: Vec<SegmentKind> = timeline.segments().iter().map(Segment::kind).collect();
+    let (disrupted, detached) = kinds.split_last().expect("segments");
+    assert_eq!(
+        *disrupted,
+        SegmentKind::Disrupted {
+            by: Component::Primary
+        },
+        "{}",
+        describe(&timeline)
+    );
+    assert!(
+        detached.iter().all(|&k| k == SegmentKind::Detached),
+        "{}",
+        describe(&timeline)
+    );
+    let p = death.progenitor();
+    let living = p.helium_core_mass().value() + p.envelope_mass().value();
+    let before = timeline.state_at(Years::new(super::detached::last_living(d)));
+    let companion = before.stars()[1].mass().value();
+    let total = living + companion;
+    let lost = total - (record.remnant().mass().value() + companion);
+    assert!(lost > 0.5 * total, "{lost} of {total} M☉ lost");
+    // The engine's orbit before the collapse, widened by the winds about as Jeans's mode widens it.
+    let orbit = before.orbit().expect("bound before the collapse");
+    let (a0, e0) = axis_rsun_and_e(&before).expect("bound before the collapse");
+    let (drawn, _) = axis_rsun_and_e(&timeline.state_at(Years::new(0.0))).expect("drawn");
+    let f = (15.0 + 3.0) / total;
+    assert!(e0 < 1e-12, "circular: e {e0}");
+    assert!((a0 - 33_845.4).abs() < 0.1, "{a0} R☉");
+    assert!(
+        ((a0 / drawn) / f - 1.0).abs() < 5e-3,
+        "{a0} R☉ from {drawn} R☉, f {f}"
+    );
+    assert_eq!(timeline.state_at(record.age()).orbit(), None);
+    // Each star's velocity in the barycentre's frame before, on that circular orbit: the relative
+    // speed is the orbit's, √(G M ÷ a), and the barycentre is at rest. (The engine's orbit carries
+    // its own phase, which the elements' mean anomaly at the epoch does not give.)
+    let [v0, v1] = record.velocities().map(|v| v.metres_per_second());
+    let mu = GravitationalParameter::from_solar_masses(SolarMasses::new(total)).value();
+    let speed = (mu / orbit.semi_major_axis().value()).sqrt();
+    let relative: f64 = (0..3)
+        .map(|c| (v1[c] - v0[c]) * (v1[c] - v0[c]))
+        .sum::<f64>()
+        .sqrt();
+    assert!(
+        (relative / speed - 1.0).abs() < 1e-6,
+        "{relative} against {speed} m/s"
+    );
+    for c in 0..3 {
+        let momentum = living * v0[c] + companion * v1[c];
+        assert!(
+            momentum.abs() <= 1e-9 * speed * total,
+            "{momentum} M☉ m/s along {c}"
+        );
+    }
+    assert_own_models(&input, &timeline);
+}
+
+/// P11.T4.l, as P11.T10's fix leaves it: a direct-collapse primary beside a wide companion stays
+/// bound. 40 + 10 M☉ at P = 10⁵ d, circular, \[Fe/H\] 0 with the median draws: plan 06's 40 M☉
+/// star, stripped by its own winds to a 9.83 M☉ helium star, collapses at 5.51 Myr into a black
+/// hole of its whole mass with no kick. From 27 the engine runs the pair from its start, since its
+/// primary dies by the age it is run to (P11.T10's fix), so the orbit before the collapse is the
+/// engine's, widened by the winds of both stars from the drawn 33,401 R☉ to 84,153 R☉ (Jeans's mode,
+/// f = 50 ÷ 19.8 = 2.52, gives 0.1% more; until 27 P11.T4.l's closed form widened the drawn rails
+/// by f at the collapse). BSE appendix A1 from that orbit leaves it at A1's a′ and e′ for the mass
+/// lost (none, to rounding, at version 23: the plan's "small mass lost" was the prototype's), with
+/// a record and the pair's recoil. The stars stay their own models, and the companion's own
+/// collapse at 27.82 Myr is recorded on the orbit the first left. With kicks off that collapse,
+/// which loses most of the companion's mass but under half the pair's, keeps the pair bound: A1
+/// from the engine's orbit just before it gives Blaauw's a′ and e′ and the recoil
+/// v `m_BH` ΔM ÷ (M M′), to 10⁻⁹.
+#[test]
+#[expect(
+    clippy::many_single_char_names,
+    reason = "the orbits' a and e, before and after, and the widening's f"
+)]
+fn a_wide_black_hole_pair_stays_bound() {
+    let input = pair(40.0, 10.0, 1.0e5, 0.0, 0.02);
+    let until = Years::new(1.0e8);
+    assert!(!can_interact(&input, until), "the pre-test passes it over");
+    let timeline = evolve(&input, until);
+    let record = primary_record(&timeline);
+    let d = record.age().value();
+    assert!((d - 5.5118e6).abs() < 1.0e3, "{d}");
+    assert_eq!(
+        record.remnant().kind(),
+        crate::stellar::remnant::RemnantKind::BlackHole
+    );
+    assert!(kick_speed_m_s(&record) <= 0.0, "{:?}", record.kick());
+    assert!(record.bound(), "{}", describe(&timeline));
+    let before = timeline.state_at(Years::new(super::detached::last_living(d)));
+    let after = timeline.state_at(record.age());
+    let (drawn, _) = axis_rsun_and_e(&timeline.state_at(Years::new(0.0))).expect("drawn");
+    assert!((drawn - 33_401.1).abs() < 0.1, "{drawn} R☉");
+    let (a0, e0) = axis_rsun_and_e(&before).expect("the engine's orbit");
+    assert!(e0 < 1e-12 && (a0 - 84_153.2).abs() < 0.1, "{a0} R☉, e {e0}");
+    let death = plan_06_star(&input).death().expect("a massive star dies");
+    let p = death.progenitor();
+    let living = p.helium_core_mass().value() + p.envelope_mass().value();
+    let total = living + before.stars()[1].mass().value();
+    let total_after = record.remnant().mass().value() + before.stars()[1].mass().value();
+    let f = 50.0 / total;
+    assert!((f - 2.52).abs() < 0.01, "f {f}");
+    assert!(
+        ((a0 / drawn) / f - 1.0).abs() < 5e-3,
+        "{a0} R☉ against {f} × {drawn}"
+    );
+    let (a1, e1) = blaauw_orbit_rsun(a0, total, total_after).expect("bound");
+    let (a, e) = axis_rsun_and_e(&after).expect("bound after the collapse");
+    assert!((a / a1 - 1.0).abs() < 1e-9, "a {a} R☉ against A1's {a1}");
+    assert!((e - e1).abs() < 1e-9, "e {e} against A1's {e1}");
+    assert!((a - 84_153.2).abs() < 1.0, "{a} R☉");
+    let recoil = record.recoil().expect("a bound pair recoils");
+    let lost = total - total_after;
+    let (_, v) = before
+        .orbit()
+        .expect("the engine's orbit")
+        .relative_state_at(universe_time_of(&input, d));
+    let speed = v.speed().value();
+    let expected = speed * before.stars()[1].mass().value() * lost / (total * total_after);
+    assert!(
+        (recoil.speed().value() - expected).abs() <= 1e-9 * speed,
+        "recoil {:?} against {expected} m/s",
+        recoil.speed()
+    );
+    assert_eq!(timeline.recoil(), None, "the companion's kick unbinds it");
+    let [_, second] = timeline.supernovae() else {
+        panic!("the companion collapses too: {}", describe(&timeline));
+    };
+    assert_eq!(second.component(), Component::Secondary);
+    assert!((second.age().value() - 27.8177e6).abs() < 1.0e3);
+    assert_own_models(&input, &timeline);
+
+    let no_kicks = input.clone().with_params(BinaryParams {
+        natal_kicks: false,
+        ..BinaryParams::GENERATOR
+    });
+    let timeline = evolve(&no_kicks, until);
+    let [first, second] = timeline.supernovae() else {
+        panic!("two collapses: {}", describe(&timeline));
+    };
+    assert!(first.bound() && second.bound(), "{}", describe(&timeline));
+    let c = second.age().value();
+    let before = timeline.state_at(Years::new(super::detached::last_living(c)));
+    let after = timeline.state_at(second.age());
+    let (a0, e0) = axis_rsun_and_e(&before).expect("the first collapse's orbit");
+    assert!(e0 < 1e-12, "circular: e {e0}");
+    let p = own_tracks(&no_kicks)[1]
+        .death()
+        .expect("the companion dies")
+        .progenitor();
+    let living = p.helium_core_mass().value() + p.envelope_mass().value();
+    let hole = first.remnant().mass().value();
+    let (total, total_after) = (hole + living, hole + second.remnant().mass().value());
+    let lost = total - total_after;
+    assert!(
+        lost > 0.25 * total && lost < 0.5 * total,
+        "{lost} of {total} M☉ lost"
+    );
+    let (a1, e1) = blaauw_orbit_rsun(a0, total, total_after).expect("bound");
+    let (a, e) = axis_rsun_and_e(&after).expect("bound after the collapse");
+    assert!((a / a1 - 1.0).abs() < 1e-9, "a {a} R☉ against A1's {a1}");
+    assert!((e - e1).abs() < 1e-9, "e {e} against A1's {e1}");
+    let (_, v) = before
+        .orbit()
+        .expect("the first collapse's orbit")
+        .relative_state_at(universe_time_of(&no_kicks, c));
+    let speed = v.speed().value();
+    let expected = speed * hole * lost / (total * total_after);
+    let recoil = second.recoil().expect("a bound pair recoils");
+    assert!(expected > 1.0e3, "{expected} m/s");
+    assert!(
+        (recoil.speed().value() - expected).abs() <= 1e-9 * speed,
+        "recoil {:?} against {expected} m/s",
+        recoil.speed()
+    );
+}
+
+/// P11.T4.l: A1's input on a passed-over pair's rails is widened by Jeans's mode (Hurley, Tout and
+/// Pols 2002, section 2.2): for the mass falling from M₀ to M, the separation is the drawn one × f,
+/// f = M₀ ÷ M, the velocity ÷ f, so that the state lies on the orbit of a × f about M, of the
+/// drawn e, at the true anomaly the rails give then, to 10⁻¹².
+#[test]
+#[expect(
+    clippy::many_single_char_names,
+    reason = "the state's r and v, the orbit's e and k, the time t and the widening's f"
+)]
+fn the_widening_is_jeans_mode() {
+    use crate::orbit::{Orbit, elements_from_state};
+
+    use super::supernova::jeans_widened_state;
+
+    let mu = |m: f64| GravitationalParameter::from_solar_masses(SolarMasses::new(m));
+    let (m0, now) = (25.0, 16.0);
+    let f = m0 / now;
+    for (e, mean_anomaly, years) in [(0.0, 0.0, 1.0e7), (0.3, 1.0, 2.3e7), (0.7, 4.0, 3.1e8)] {
+        let drawn = KeplerElements::from_period(
+            Seconds::new(1.0e5 * 86_400.0),
+            mu(m0),
+            Eccentricity::new(e).expect("an eccentricity"),
+            Orientation::new(Radians::new(0.3), Radians::new(0.5), Radians::new(1.2))
+                .expect("an orientation"),
+            Radians::new(mean_anomaly),
+        )
+        .expect("an orbit");
+        let t = crate::time::UniverseTime::EPOCH
+            .checked_add(
+                crate::time::Span::from_seconds_f64(
+                    years * crate::units::consts::SECONDS_PER_JULIAN_YEAR,
+                )
+                .expect("a span"),
+            )
+            .expect("a time");
+        let (r, v) = drawn.relative_state_at(t);
+        let (widened, slower) = jeans_widened_state(&drawn, m0, now, t);
+        assert_eq!(widened, r * f, "the separation × f");
+        for (a, b) in slower.metres_per_second().iter().zip(v.metres_per_second()) {
+            assert!(
+                (a * f - b).abs() <= 1e-15 * b.abs().max(1.0),
+                "{a} × {f} against {b}"
+            );
+        }
+        let Ok(Orbit::Bound(k)) = elements_from_state(widened, slower, mu(now), t) else {
+            panic!("the widened state is bound");
+        };
+        let axis = drawn.semi_major_axis().value() * f;
+        assert!(
+            (k.semi_major_axis().value() / axis - 1.0).abs() < 1e-12,
+            "a {:?} against {axis} m",
+            k.semi_major_axis()
+        );
+        assert!(
+            (k.eccentricity().value() - e).abs() < 1e-12,
+            "e {:?} against {e}",
+            k.eccentricity()
+        );
+        if e > 0.0 {
+            // At the drawn e, the same mean anomaly is the same true anomaly.
+            let turn = core::f64::consts::TAU;
+            let phase =
+                (k.mean_anomaly_at(t).value() - drawn.mean_anomaly_at(t).value()).rem_euclid(turn);
+            assert!(
+                phase.min(turn - phase) < 1e-12,
+                "the phase moves by {phase} rad"
+            );
+            for (a, b) in [
+                (k.inclination(), drawn.inclination()),
+                (k.ascending_node(), drawn.ascending_node()),
+                (k.argument_of_periapsis(), drawn.argument_of_periapsis()),
+            ] {
+                assert!((a.value() - b.value()).abs() < 1e-12, "{a:?} against {b:?}");
+            }
+        }
+    }
+}
+
+/// The ages a passed-over pair of `timeline` is run to in
+/// [`a_passed_over_pair_is_the_same_whatever_age_it_is_run_to`]: before its first collapse, just
+/// past each collapse and between them, and late, but never a collapse's own age, where the run to
+/// it ends at the instant a run past it applies the collapse.
+fn ages_around_collapses(timeline: &BinaryTimeline) -> Vec<Years> {
+    let collapses: Vec<f64> = timeline
+        .supernovae()
+        .iter()
+        .map(|s| s.age().value())
+        .collect();
+    let mut ages = vec![0.5 * collapses[0], 0.999_999 * collapses[0]];
+    for (k, &age) in collapses.iter().enumerate() {
+        let next = collapses
+            .get(k + 1)
+            .copied()
+            .unwrap_or(0.9 * timeline.until().value());
+        ages.extend([
+            age + 1.0e-3,
+            age + 1.0e3,
+            f64::midpoint(age, next),
+            next * (1.0 - 1e-9),
+        ]);
+    }
+    ages.into_iter().map(Years::new).collect()
+}
+
+/// P11.T4.l's build-age contract, as P11.T10's fix leaves it: a pair the pre-test passes over at
+/// every age is run by the engine from its start to any age past its first collapse, so a run to
+/// an age between or after its collapses is the run to 10⁸ years to then, bit for bit, with the
+/// same records. A run to an age before the first collapse is passed over: its stars are their own
+/// models, as in the later run, with no record, on the drawn orbit where the later run's engine
+/// widens it by the winds (the lean of 2026-11-01 in `collapses.rs`: the pre-collapse orbit depends
+/// on the age the pair is run to; until 27 P11.T4.l's closed form kept the drawn orbit to the
+/// collapse in both runs). Over four wide pairs, kicks on and off, bound and unbound by each
+/// collapse.
+#[test]
+fn a_passed_over_pair_is_the_same_whatever_age_it_is_run_to() {
+    let no_kicks = BinaryParams {
+        natal_kicks: false,
+        ..BinaryParams::GENERATOR
+    };
+    let later = Years::new(1.0e8);
+    let (mut bound, mut unbound) = (0, 0);
+    for input in [
+        pair(15.0, 3.0, 1.0e5, 0.0, 0.02).with_params(no_kicks),
+        pair(40.0, 10.0, 1.0e5, 0.0, 0.02),
+        pair(15.0, 12.0, 1.0e5, 0.4, 0.02).with_params(no_kicks),
+        pair(15.0, 12.0, 1.0e5, 0.0, 0.004),
+    ] {
+        assert!(!can_interact(&input, later));
+        let late = evolve(&input, later);
+        assert!(!late.supernovae().is_empty(), "{}", describe(&late));
+        for record in late.supernovae() {
+            if record.bound() {
+                bound += 1;
+            } else {
+                unbound += 1;
+            }
+        }
+        let first = late.supernovae()[0].age();
+        for until in ages_around_collapses(&late) {
+            assert!(!can_interact(&input, until), "to {until:?}");
+            let early = evolve(&input, until);
+            if until < first {
+                assert_eq!(early.segments().len(), 1, "{}", describe(&early));
+                for k in 0..=64_u32 {
+                    let age = Years::new(until.value() * f64::from(k) / 64.0);
+                    let (a, b) = (early.state_at(age), late.state_at(age));
+                    assert_eq!(a.stars(), b.stars(), "at {age:?}");
+                    assert_eq!(a.orbit(), Some(input.orbit()), "at {age:?}");
+                }
+            } else {
+                assert_same_history(&early, &late, until);
+            }
+            let reached: Vec<_> = late
+                .supernovae()
+                .iter()
+                .filter(|s| s.age() < until)
+                .copied()
+                .collect();
+            assert_eq!(early.supernovae(), reached, "to {until:?}");
+        }
+    }
+    assert!(bound > 0 && unbound > 0, "{bound} bound, {unbound} unbound");
+}
+
+/// P11.T4.l: the engine that takes over a passed-over pair at a collapse carries each living star
+/// with its zero-age spin's angular momentum times the wind's factor (M ÷ M₀)^{2/(3k′₃)}, held at
+/// most at its break-up now, where [`super::evolve::Engine::new`] gives it the zero-age velocity
+/// at its radius then. 15 + 14.9 M☉ (median draws, \[Fe/H\] 0): at the primary's death (14.32
+/// Myr) the companion has left its main sequence, and `Engine::new`'s start would spin it past
+/// break-up; a 3 M☉ companion is still on its main sequence and keeps its zero-age angular
+/// momentum less its wind's factor's ulps. The remnant keeps `Engine::new`'s.
+#[test]
+fn a_taken_over_star_keeps_its_zero_age_spin() {
+    use std::sync::Arc;
+
+    use super::evolve::{Engine, LiveOrbit};
+    use super::star::{G, Member, moment_of_inertia, zams_spin};
+    use hyperion_testkit::float::bits;
+
+    for (m2, evolved) in [(14.9, true), (3.0, false)] {
+        let input = pair(15.0, m2, 1.0e5, 0.0, 0.02);
+        let tracks = own_tracks(&input).map(Arc::new);
+        let death = tracks[0].lifetime().expect("built in full").value();
+        let arrival = tracks[1]
+            .main_sequence_arrival()
+            .expect("a main sequence")
+            .value();
+        let members = tracks.map(|track| Member::Track { track, offset: 0.0 });
+        let k = input.orbit();
+        let orbit = LiveOrbit::new(
+            death,
+            k.semi_major_axis().value() / crate::units::consts::SOLAR_RADIUS_M,
+            0.5,
+            *k.orientation(),
+            k.mean_anomaly_at_epoch(),
+        );
+        let ctx = Arc::new(super::timeline::Context::of(&input));
+        let mut engine = Engine::new(ctx, death, 1.0e8, members, orbit, None);
+        let started = engine.spins;
+        engine.take_over(Vec::new(), Vec::new());
+        assert_eq!(bits(engine.spins[0]), bits(started[0]), "the remnant's");
+        let (mass, tau) = engine.current(1);
+        let now = engine.structure(1, death, mass, tau).expect("living");
+        let zero_age = engine
+            .structure(1, arrival, mass, tau)
+            .expect("its arrival");
+        let zero_age_momentum = moment_of_inertia(&zero_age)
+            * zams_spin(
+                zero_age.state.mass().value(),
+                zero_age.state.radius().value(),
+            );
+        let (m, r) = (now.state.mass().value(), now.state.radius().value());
+        let m0 = zero_age.state.mass().value();
+        let wind =
+            crate::math::powf_positive(m / m0, 2.0 / (3.0 * crate::stellar::sse::CORE_GYRATION));
+        assert!(wind <= 1.0, "{m} M☉ from {m0}");
+        let break_up = moment_of_inertia(&now) * (G * m / (r * r * r)).sqrt();
+        assert_eq!(
+            bits(engine.spins[1]),
+            bits((zero_age_momentum * wind).min(break_up)),
+            "{:?}",
+            now.state
+        );
+        assert_eq!(
+            now.state.phase() != Phase::MainSequence,
+            evolved,
+            "{:?}",
+            now.state
+        );
+        if evolved {
+            assert!(started[1] > break_up, "{} against {break_up}", started[1]);
+            assert!(engine.spins[1] < started[1]);
+        } else {
+            assert!(
+                1.0 - wind < 1e-5,
+                "a main sequence's wind takes little: {wind}"
+            );
+            assert_eq!(bits(engine.spins[1]), bits(zero_age_momentum * wind));
+        }
+    }
+}
+
+/// P11.T4.l's label in the engine too (the train's fix): a pair its primary's collapse unbinds is
+/// `Disrupted { by: Primary }` from then on, its companion's later collapse included, as the
+/// closed form labels it (`Engine::passed_over`). 15 + 10.5 M☉ at 10 d (median draws, \[Fe/H\] 0),
+/// which the engine runs: the primary's neutron star unbinds the pair at 14.32 Myr, and the
+/// companion collapses alone at 19.75 Myr.
+#[test]
+fn a_disrupted_pair_keeps_the_label_of_the_death_that_unbound_it() {
+    let input = pair(15.0, 10.5, 10.0, 0.0, 0.02);
+    let until = Years::new(1.0e8);
+    assert!(can_interact(&input, until));
+    let timeline = evolve(&input, until);
+    let [first, second] = timeline.supernovae() else {
+        panic!("two collapses: {}", describe(&timeline));
+    };
+    assert_eq!(first.component(), Component::Primary);
+    assert!(!first.bound(), "{}", describe(&timeline));
+    assert_eq!(second.component(), Component::Secondary);
+    assert!(
+        (first.age().value() - 14.32e6).abs() < 1.0e4
+            && (second.age().value() - 19.75e6).abs() < 1.0e4,
+        "{}",
+        describe(&timeline)
+    );
+    let after: Vec<&Segment> = timeline
+        .segments()
+        .iter()
+        .filter(|s| s.start() >= first.age())
+        .collect();
+    assert!(
+        after.iter().any(|s| s.start() >= second.age()),
+        "{}",
+        describe(&timeline)
+    );
+    for segment in after {
+        assert_eq!(
+            segment.kind(),
+            SegmentKind::Disrupted {
+                by: Component::Primary
+            },
+            "{}",
+            describe(&timeline)
+        );
+    }
+}
+
+/// P11.T4.e's label for a pinned pair instability (the train's fix): a pinned primary the binary
+/// carries off its own track, whose plan 06 death is a pair instability below the 150 M☉ cap,
+/// leaves nothing at its pin ([`super::star::Member::Gone`]), and the pair that death unbinds is
+/// `Disrupted { by: Primary }` from then on, as the closed form labels the same death: no merger,
+/// so no `merger_age`. 149.9 + 74.95 M☉ at 10 d, Z = 10⁻⁴ (median draws): a 65.18 M☉ helium core
+/// at the pin, 2.757 Myr, after a stable transfer from the primary. (Until generator version 26 it
+/// read 145 + 72.5 M☉, a 66 M☉ core; from 26 that primary's track leaves a 62.98 M☉ core, a black
+/// hole, and at Z = 10⁻⁴ only a primary from about 149.6 M☉ keeps the 65 M☉ core of a pair
+/// instability below the cap.)
+#[test]
+fn a_pinned_pair_instability_disrupts_the_pair() {
+    use crate::stellar::remnant::RemnantKind;
+
+    let input = pair(149.9, 74.95, 10.0, 0.0, 0.0001);
+    let until = Years::new(1.0e8);
+    let (_, pin) = super::evolve::pinned_track_and_pin(&input).expect("a pinned primary");
+    assert_eq!(pin.remnant.kind(), RemnantKind::None, "a pair instability");
+    assert!(can_interact(&input, until));
+    let timeline = evolve(&input, until);
+    let collapse = timeline
+        .supernovae()
+        .iter()
+        .find(|r| r.component() == Component::Primary)
+        .unwrap_or_else(|| panic!("the pin: {}", describe(&timeline)));
+    let at = pin.death.age().value();
+    assert!(
+        (collapse.age().value() - at).abs() <= 1e-9 * at,
+        "{collapse:?} at {at}"
+    );
+    assert_eq!(collapse.remnant().kind(), RemnantKind::None);
+    assert!(!collapse.bound(), "{}", describe(&timeline));
+    assert!(
+        timeline
+            .segments()
+            .iter()
+            .any(|s| s.start() < collapse.age()
+                && matches!(s.kind(), SegmentKind::StableTransfer { .. })),
+        "{}",
+        describe(&timeline)
+    );
+    assert_eq!(timeline.merger_age(), None, "{}", describe(&timeline));
+    // The companion collapses later, alone: `quiet_kind` keeps the label past it.
+    let companion = timeline
+        .supernovae()
+        .iter()
+        .find(|r| r.component() == Component::Secondary)
+        .unwrap_or_else(|| panic!("the companion's collapse: {}", describe(&timeline)));
+    let after: Vec<&Segment> = timeline
+        .segments()
+        .iter()
+        .filter(|s| s.start() >= collapse.age())
+        .collect();
+    assert!(
+        after.first().is_some_and(|s| s.members()[0].is_gone())
+            && after.iter().any(|s| s.start() >= companion.age()),
+        "{}",
+        describe(&timeline)
+    );
+    for segment in after {
+        assert_eq!(
+            segment.kind(),
+            SegmentKind::Disrupted {
+                by: Component::Primary
+            },
+            "{}",
+            describe(&timeline)
+        );
+    }
+}
+
+/// P11.T4.l: the pre-test asked again after a passed-over pair's bound collapse never passes over
+/// an interaction. Over 3,000 wide massive pairs ([`wide_massive_pair`]) run to their ages, every
+/// pair whose bound collapse the closed form keeps on its fixed orbit shows no stable transfer,
+/// common envelope, contact or merger after the collapse before its age when the engine runs it
+/// from the collapse anyway ([`super::evolve::evolve_past_the_second_pre_test`]). None is allowed.
+/// The bound pairs checked, the engine's takeovers and the interactions are recorded.
+#[test]
+#[ignore = "slow: 3,000 wide massive pairs, those bound after a collapse run through the engine"]
+fn the_second_pre_test_never_passes_over_an_interaction() {
+    use super::evolve::evolve_past_the_second_pre_test;
+
+    let mut mix = Mix(0x0b1e_0c12);
+    let pairs: Vec<(BinaryInput, Years)> = (0..3_000)
+        .map(|i| {
+            let (input, until) = wide_massive_pair(&mut mix, i);
+            (input, Years::new(until))
+        })
+        .collect();
+    // In the tally: `pairs` the pairs passed over with a bound collapse before their age,
+    // `passes` those the engine takes over, `interacting` those the engine run from the collapse
+    // brings into an interaction, and `missed` those of them the closed form kept.
+    let t = in_shares(&pairs, |tally, (input, until)| {
+        if can_interact(input, *until) {
+            return;
+        }
+        let timeline = evolve(input, *until);
+        if !timeline.supernovae().iter().any(SupernovaRecord::bound) {
+            return;
+        }
+        tally.pairs += 1;
+        let taken_over = taken_over_at(&timeline).is_some();
+        tally.passes += u32::from(taken_over);
+        let forced = evolve_past_the_second_pre_test(input, *until);
+        if let Some(segment) = interaction_after_a_collapse(&forced, *until) {
+            tally.interacting += 1;
+            if !taken_over {
+                let [m1, m2] = input.masses().map(SolarMasses::value);
+                tally.missed.push(format!(
+                    "{m1:.3} + {m2:.3} M☉ at {:.3e} d, e {:.2}, to {:.3e} yr: {:?} at {:.4e} yr",
+                    input.orbit().period().value() / 86_400.0,
+                    input.orbit().eccentricity().value(),
+                    until.value(),
+                    segment.kind(),
+                    segment.start().value()
+                ));
+            }
+        }
+    });
+    eprintln!(
+        "{} passed-over pairs bound after a collapse; the pre-test asked again passes {}; the \
+         engine run from the collapse interacts in {}; missed {}",
+        t.pairs,
+        t.passes,
+        t.interacting,
+        t.missed.len()
+    );
+    for line in t.missed.iter().take(20) {
+        eprintln!("  missed: {line}");
+    }
+    assert!(t.pairs > 100, "{} bound pairs checked", t.pairs);
+    assert_eq!(
+        t.missed.len(),
+        0,
+        "interactions the pre-test asked again passed over"
+    );
+}
+
+// --- P11.T4.m: a fed helium star or white dwarf swells around its own core ---------------------
+
+/// An engine at `age_years` of a pair at metallicity `z` holding `accretor` in slot 0 and a
+/// 2.5 M☉ main-sequence donor at τ = 0.5 in slot 1, in stable transfer from it on a circular
+/// 10 R☉ orbit: the state at the end of a step of transfer, for the swell's unit tests.
+fn fed_engine(accretor: super::star::Member, age_years: f64, z: f64) -> super::evolve::Engine {
+    fed_engine_of(&pair(2.0, 2.5, 1.0, 0.0, z), accretor, age_years)
+}
+
+/// [`fed_engine`]'s engine for the pair `input` (its composition and rules).
+fn fed_engine_of(
+    input: &BinaryInput,
+    accretor: super::star::Member,
+    age_years: f64,
+) -> super::evolve::Engine {
+    use std::sync::Arc;
+
+    use super::evolve::{Engine, LiveOrbit};
+    use super::star::{Member, Path};
+    use super::timeline::Context;
+
+    let k = input.orbit();
+    let donor = Member::MainSequence {
+        helium: false,
+        mass: Path::starting(age_years, 2.5),
+        tau: Path::starting(age_years, 0.5),
+    };
+    let orbit = LiveOrbit::new(
+        age_years,
+        10.0,
+        0.0,
+        *k.orientation(),
+        k.mean_anomaly_at_epoch(),
+    );
+    let mut engine = Engine::new(
+        Arc::new(Context::of(input)),
+        age_years,
+        1.0e10,
+        [accretor, donor],
+        orbit,
+        None,
+    );
+    engine.segment_start = age_years;
+    engine.kind = SegmentKind::StableTransfer {
+        donor: Component::Secondary,
+    };
+    engine
+}
+
+/// A helium main-sequence star of `m` M☉ at τ = `tau` that the binary carries from `age_years`.
+fn carried_helium_star(m: f64, tau: f64, age_years: f64) -> super::star::Member {
+    use super::star::{Member, Path};
+
+    Member::MainSequence {
+        helium: true,
+        mass: Path::starting(age_years, m),
+        tau: Path::starting(age_years, tau),
+    }
+}
+
+/// The core mass of `member`, slot 0 of `engine`, at `age_years` and `m` M☉.
+fn core_of(
+    engine: &super::evolve::Engine,
+    member: &super::star::Member,
+    age_years: f64,
+    m: f64,
+) -> f64 {
+    member
+        .evaluate(&engine.ctx, 0, age_years, m, 0.0)
+        .expect("a star")
+        .state
+        .core_mass()
+        .value()
+}
+
+/// P11.T4.m (ruling p11-c2-swell of 2026-10-06, §3.1 item 4, §3.3 A): a 2 M☉ helium
+/// main-sequence accretor at τ = 0.5 fed hydrogen over a step of 10³ yr swells only where both
+/// gates pass. Fed at half the placed giant's core growth over the step, its shell would burn the
+/// hydrogen as it lands (the burn gate); fed a hundred times that but losing 41/42 of it to its
+/// own wind, its accretion does not beat 1.05 times its wind (BSE's gate, `evolv2.f` 1480), though
+/// it gains mass. Each stays a helium star with the step's mass, and no segment closes. Fed twice
+/// the growth with no wind, it swells into a core-helium-burning giant around its whole mass at
+/// the step's start, with the step's gain as its envelope.
+#[test]
+fn a_swell_the_shell_would_burn_is_refused() {
+    use super::rlof::Fed;
+    use super::star::{Kind, Member};
+    use crate::stellar::sse::NewStar;
+
+    let (before, tau, age, dt) = (2.0, 0.5, 5.0e7, 1.0e3);
+    let probe = fed_engine(carried_helium_star(before, tau, age), age, 0.02);
+    let burnt = probe
+        .structure(0, age, before, tau)
+        .expect("a helium star")
+        .burnt;
+    let giant = probe
+        .swelled_star(
+            0,
+            NewStar::CoreHeliumBurning { burnt },
+            before * (1.0 + 1e-3),
+            before,
+        )
+        .expect("a core-helium-burning star has a 2 M☉ core");
+    // Read well above the core, where the core is not held at the mass.
+    let heavy = 2.0 * before;
+    let growth = core_of(&probe, &giant, age + dt, heavy) - core_of(&probe, &giant, age, heavy);
+    assert!(
+        growth > 0.0,
+        "the giant's core grows over the step: {growth}"
+    );
+    for (gained, wind, swells) in [
+        (0.5 * growth, 0.0, false),
+        (100.0 * growth, 100.0 * growth * 41.0 / 42.0, false),
+        (2.0 * growth, 0.0, true),
+    ] {
+        let m = before + gained - wind;
+        let mut engine = fed_engine(carried_helium_star(m, tau, age), age, 0.02);
+        let s = engine.structure(0, age, m, tau).expect("a helium star");
+        let fed = Fed {
+            kind: Kind::HeliumMainSequence,
+            before,
+            core_before: 0.0,
+            gained,
+            dt,
+        };
+        let swelled = engine.swell(0, Kind::HeliumMainSequence, m, &s, fed);
+        let case =
+            format!("fed {gained:e} M☉ against a wind of {wind:e} and a growth of {growth:e}");
+        assert_eq!(swelled, swells, "{case}");
+        if swells {
+            assert_eq!(engine.segments.len(), 1, "{case}");
+            let star = engine.members[0].state_at(&engine.ctx, 0, age);
+            assert_eq!(star.phase(), Phase::CoreHeliumBurning, "{case}");
+            let core = star.core_mass().value();
+            assert!(
+                (core - before).abs() <= 1e-9 * before,
+                "{case}: core {core}"
+            );
+            let envelope = star.mass().value() - core;
+            assert!(
+                (envelope - (m - before)).abs() <= 1e-9 * m,
+                "{case}: envelope {envelope}"
+            );
+        } else {
+            assert!(
+                engine.segments.is_empty(),
+                "{case}: a refusal closes no segment"
+            );
+            assert!(
+                matches!(engine.members[0], Member::MainSequence { helium: true, .. }),
+                "{case}: {}",
+                engine.members[0].form()
+            );
+            assert!(
+                (engine.current(0).0 - m).abs() <= 1e-15 * m,
+                "{case}: it keeps the step's mass"
+            );
+        }
+    }
+}
+
+/// P11.T4.m (ruling p11-c2-swell of 2026-10-06, §3.1 item 2): a helium Hertzsprung-gap star of
+/// 1.45 M☉ (a 1.5 M☉ helium star halfway through its gap, Z = 0.02) fed hydrogen with no wind
+/// swells into a thermally pulsing AGB star around its carbon–oxygen core at the step's start, to
+/// 10⁻⁹, with the step's mass (BSE `evolv2.f` 1482 and 1487, `massc(j2)`). The same step read as
+/// one over which the accretor's type changed swells nothing (BSE reads `kstar(j2)` at the step's
+/// start), and closes no segment.
+#[test]
+fn a_fed_helium_giant_swells_around_its_carbon_oxygen_core() {
+    use std::sync::Arc;
+
+    use super::rlof::Fed;
+    use super::star::{Kind, Member, Path};
+    use crate::stellar::sse::{NewStar, Track};
+
+    let (age, dt) = (5.0e7, 1.0e3);
+    let track = Arc::new(Track::helium_star_full(
+        SolarMasses::new(1.5),
+        &Composition::SOLAR,
+        &StarDraws::median(),
+    ));
+    let at = track
+        .age_in_phase(Phase::HeliumHertzsprungGap, 0.5)
+        .expect("a helium Hertzsprung gap");
+    let offset = super::evolve::offset_for(age, at);
+    let before = track.mass_at(age - offset);
+    let giant = |m: f64| Member::Shaped {
+        track: Arc::clone(&track),
+        offset,
+        mass: Path::starting(age, m),
+    };
+    let probe = fed_engine(giant(before), age, 0.02);
+    let start = probe
+        .structure(0, age, before, 0.0)
+        .expect("a helium giant");
+    assert_eq!(start.state.phase(), Phase::HeliumHertzsprungGap);
+    let core_before = start.state.core_mass().value();
+    let placed = probe
+        .swelled_star(0, NewStar::PulsingAgb, 2.0 * before, core_before)
+        .expect("a thermally pulsing AGB star has the core");
+    let growth = core_of(&probe, &placed, age + dt, 2.0 * before)
+        - core_of(&probe, &placed, age, 2.0 * before);
+    let gained = 2.0 * growth.max(1e-9);
+    let m = before + gained;
+    for (step_kind, swells) in [(Kind::HeliumMainSequence, false), (Kind::HeliumGap, true)] {
+        let mut engine = fed_engine(giant(m), age, 0.02);
+        let s = engine.structure(0, age, m, 0.0).expect("a helium giant");
+        let fed = Fed {
+            kind: step_kind,
+            before,
+            core_before,
+            gained,
+            dt,
+        };
+        let case = format!("a step from a {step_kind:?}");
+        assert_eq!(
+            engine.swell(0, Kind::HeliumGap, m, &s, fed),
+            swells,
+            "{case}"
+        );
+        let star = engine.members[0].state_at(&engine.ctx, 0, age);
+        if swells {
+            assert_eq!(engine.segments.len(), 1, "{case}");
+            assert_eq!(star.phase(), Phase::ThermallyPulsingAgb, "{case}");
+            let core = star.core_mass().value();
+            assert!(
+                (core - core_before).abs() <= 1e-9 * core_before,
+                "{case}: core {core} against {core_before}"
+            );
+            assert!(
+                star.mass().value().total_cmp(&m).is_eq(),
+                "{case}: a mass of {:?} for {m}",
+                star.mass()
+            );
+        } else {
+            assert!(
+                engine.segments.is_empty(),
+                "{case}: a refusal closes no segment"
+            );
+            assert_eq!(star.phase(), Phase::HeliumHertzsprungGap, "{case}");
+        }
+    }
+}
+
+/// P11.T4.m, the determinism audit: pinned pairs 0255 (a helium star's swell), 0305 (a white
+/// dwarf's) and 0487 (a white dwarf's swell refused, its exact placement failing) are the same
+/// timelines in either order, and each run to just past each of its events, its swells among them,
+/// agrees with a run to 1.5 × 10¹⁰ years: the swell's track builds hold no state between runs.
+#[test]
+fn a_swell_is_the_same_in_any_order_and_at_any_age() {
+    let until = Years::new(1.2e10);
+    let inputs: Vec<BinaryInput> = [255, 305, 487]
+        .map(pinned_sample_pair)
+        .into_iter()
+        .collect();
+    let forward: Vec<_> = inputs.iter().map(|i| evolve(i, until)).collect();
+    let backward: Vec<_> = inputs.iter().rev().map(|i| evolve(i, until)).collect();
+    for (a, b) in forward.iter().zip(backward.iter().rev()) {
+        assert_eq!(a, b);
+    }
+    assert!(
+        forward[..2].iter().all(|t| !swells_of(t).is_empty()),
+        "0255 and 0305 swell"
+    );
+    let events: usize = inputs
+        .iter()
+        .map(|input| check_after_events(input, until)[0])
+        .sum();
+    assert!(events > 20, "{events} runs compared just past events");
+}
+
+/// P11.T4.m (ruling p11-c2-swell of 2026-10-06, §3.3 B): only a hydrogen-rich donor swells a helium
+/// star, which then takes the whole transfer (BSE `evolv2.f` 1478–1479, the else branch of
+/// `kstar(j1).ge.7`; Hurley, Tout and Pols 2002, section 2.6.6). A white dwarf, a helium star or a
+/// neutron star feeding one gives it the thermally limited share, min(1, 10 `τ_Ṁ` ÷ `τ_KH`)
+/// (BSE 1477), and it does not swell.
+#[test]
+fn a_white_dwarf_donor_does_not_swell_a_helium_star() {
+    use super::rlof::kelvin_helmholtz;
+    use super::star::Kind;
+
+    let (m, tau, age) = (1.2, 0.3, 5.0e7);
+    let engine = fed_engine(carried_helium_star(m, tau, age), age, 0.02);
+    let sa = engine.structure(0, age, m, tau).expect("a helium star");
+    let ka = Kind::HeliumMainSequence;
+    for rate in [1e-9, 1e-6, 1e-3] {
+        let thermal = (10.0 * (m / rate) / kelvin_helmholtz(&sa, ka)).min(1.0);
+        for kd in [
+            Kind::HeliumWhiteDwarf,
+            Kind::CarbonOxygenWhiteDwarf,
+            Kind::OxygenNeonWhiteDwarf,
+            Kind::HeliumMainSequence,
+            Kind::HeliumGiant,
+            Kind::NeutronStar,
+        ] {
+            let accretion = engine.accretion(kd, 1.0, ka, rate, m, &sa);
+            assert!(!accretion.swells, "{kd:?} at {rate:e} M☉/yr");
+            assert!(
+                (accretion.share - thermal).abs() <= 1e-15,
+                "{kd:?} at {rate:e} M☉/yr: {} against {thermal}",
+                accretion.share
+            );
+        }
+        for kd in [Kind::MainSequence, Kind::GiantBranch, Kind::PulsingAgb] {
+            let accretion = engine.accretion(kd, 1.0, ka, rate, m, &sa);
+            assert!(accretion.swells, "{kd:?} at {rate:e} M☉/yr");
+            assert!(
+                accretion.share.total_cmp(&1.0).is_eq(),
+                "{kd:?} at {rate:e} M☉/yr: a share of {}",
+                accretion.share
+            );
+        }
+    }
+}
+
+/// P11.T4.m (ruling p11-c2-swell of 2026-10-06, §3.3 C; finding F15): a helium main-sequence
+/// accretor keeps its fraction burnt as it accretes, τ + dt ÷ `t_HeMS`(m₁), as BSE's code
+/// (`evolv2.f` 1889–1900) and COMPAS's `HURLEY` option do; a hydrogen main-sequence accretor
+/// outside 0.35–1.25 M☉ is still mixed, τ m₀ ÷ m₁ + dt ÷ `t_MS`(m₁), and one inside keeps its τ.
+#[test]
+fn a_helium_accretor_keeps_its_fraction_burnt() {
+    use super::star::{Member, Path};
+    use crate::stellar::sse::main_sequence_lifetime;
+
+    let (age, dt, tau) = (5.0e7, 1.0e3, 0.6);
+    let mut engine = fed_engine(carried_helium_star(1.0, tau, age), age, 0.02);
+    let ctx = std::sync::Arc::clone(&engine.ctx);
+    let lifetime = |helium: bool, m: f64| main_sequence_lifetime(ctx.coeffs(), helium, m);
+    let (m0, m1) = (1.0, 1.01);
+    let helium = engine.rejuvenated_tau(0, tau, m0, m1, dt);
+    let kept = tau + dt / lifetime(true, m1);
+    assert!((helium - kept).abs() <= 1e-15, "{helium} against {kept}");
+    for (m0, m1, mixed) in [(3.0, 3.03, true), (1.0, 1.01, false), (0.3, 0.303, true)] {
+        engine.members[0] = Member::MainSequence {
+            helium: false,
+            mass: Path::starting(age, m0),
+            tau: Path::starting(age, tau),
+        };
+        let got = engine.rejuvenated_tau(0, tau, m0, m1, dt);
+        let start = if mixed { tau * m0 / m1 } else { tau };
+        let expected = start + dt / lifetime(false, m1);
+        assert!(
+            (got - expected).abs() <= 1e-15,
+            "a hydrogen accretor from {m0} to {m1} M☉: {got} against {expected}"
+        );
+    }
+}
+
+/// P11.T4.m (ruling p11-c2-swell of 2026-10-06, §3.3 A4): a swelled giant's built track has the
+/// core asked for at its placement, to 10⁻⁹ of it, or the placement is refused. Core-helium-burning
+/// stars at y = 0.1, 0.5 and 0.9 with cores of 0.8–8 M☉ and thermally pulsing AGB stars with
+/// carbon–oxygen cores of 0.55–1.3 M☉, at Z = 0.02 and 0.004. `placed_star`, which every other
+/// caller keeps (finding F16), misses by up to −8.4% over them (core-helium-burning at y = 0.1,
+/// 8 M☉, Z = 0.02, the one case refused: its exact ask lies at about 1.108 times the core, past
+/// the bracket's 1.1); the miss is printed, not asserted, being F16's.
+#[test]
+fn the_swells_placement_is_exact() {
+    use crate::stellar::sse::NewStar;
+
+    let age = 5.0e7;
+    let mut placed = 0;
+    let mut refused = Vec::new();
+    let mut worst_miss: f64 = 0.0;
+    for z in [0.02, 0.004] {
+        let engine = fed_engine(carried_helium_star(1.0, 0.5, age), age, z);
+        let mut cases: Vec<(NewStar, f64)> = Vec::new();
+        for y in [0.1, 0.5, 0.9] {
+            for core in [0.8, 1.5, 2.5, 4.0, 8.0] {
+                cases.push((NewStar::CoreHeliumBurning { burnt: y }, core));
+            }
+        }
+        for core in [0.55, 0.7, 1.0, 1.3] {
+            cases.push((NewStar::PulsingAgb, core));
+        }
+        for (target, core) in cases {
+            let m = core * (1.0 + 1e-4);
+            if let Some(old) = engine.placed_star(0, target, m, core) {
+                worst_miss = worst_miss.min(core_of(&engine, &old, age, m) / core - 1.0);
+            }
+            match engine.swelled_star(0, target, m, core) {
+                Some(member) => {
+                    let built = core_of(&engine, &member, age, m);
+                    assert!(
+                        (built - core).abs() <= 1e-9 * core,
+                        "{target:?} of {core} M☉ at Z = {z}: built {built}"
+                    );
+                    assert!(
+                        member.mass_at(age).total_cmp(&m).is_eq(),
+                        "{target:?} of {core} M☉ at Z = {z}: a mass of {} for {m}",
+                        member.mass_at(age)
+                    );
+                    placed += 1;
+                }
+                None => refused.push(format!("{target:?} of {core} M☉ at Z = {z}")),
+            }
+        }
+    }
+    eprintln!(
+        "{placed} placed exactly, {} refused {refused:?}; placed_star's worst miss {worst_miss:.4}",
+        refused.len()
+    );
+    assert!(
+        refused.len() * 10 <= placed,
+        "{} of {} refused: {refused:?}",
+        refused.len(),
+        placed + refused.len()
+    );
+}
+
+/// P11.T4.m (ruling p11-c2-swell of 2026-10-06, §3.4): pinned pair 0255 (20.79 + 20.51 M☉ at
+/// 969 d, Z = 0.02). Its primary, stripped to a 5.53 M☉ helium star, is fed hydrogen by its
+/// main-sequence companion faster than its wind takes mass and than a hydrogen shell on its core
+/// would burn it: at 8.6114 Myr it swells into a core-helium-burning star whose core is its helium
+/// mass at the step's start, 5.530251 M☉, to 10⁻⁹, whose envelope is the step's net gain,
+/// 3.19 × 10⁻⁴ M☉, to 10⁻⁹ of its mass, whose fraction burnt is the helium star's τ, and which
+/// stays compact (under 1 R☉, HPT's small-envelope perturbation). Before P11.T4.m it swelled at
+/// 8.6095 Myr into a 1,076 R☉ giant around its whole mass, with nothing accreted.
+#[test]
+fn a_fed_helium_star_swells_around_its_own_core() {
+    let input = pinned_sample_pair(255);
+    let timeline = evolve(&input, Years::new(1.2e10));
+    let swells = swells_of(&timeline);
+    let swell = swells
+        .iter()
+        .find(|s| s.slot == 0 && s.from == Phase::HeliumMainSequence)
+        .unwrap_or_else(|| panic!("the primary swells: {}", describe(&timeline)));
+    let [before, after] = swell.masses;
+    let (m, core) = (swell.giant.mass().value(), swell.giant.core_mass().value());
+    let tau = swell
+        .tau
+        .expect("a helium main-sequence star the binary carries");
+    eprintln!(
+        "pair 0255 swells at {} yr, fed {:e} M☉/yr over {} yr: core {core} M☉, envelope {:e} M☉, \
+         y {} against τ {tau}, R {} R☉",
+        swell.age,
+        (after - before) / swell.step,
+        swell.step,
+        m - core,
+        swell.burnt,
+        swell.giant.radius().value()
+    );
+    assert!((swell.age / 8.6114e6 - 1.0).abs() < 1e-4, "{swell:?}");
+    assert_eq!(swell.giant.phase(), Phase::CoreHeliumBurning, "{swell:?}");
+    assert!((before - 5.530_251).abs() < 1e-6, "{swell:?}");
+    assert!((core - before).abs() <= 1e-9 * before, "{swell:?}");
+    assert!(
+        ((m - core) - (after - before)).abs() <= 1e-9 * m,
+        "the envelope is the step's net gain: {swell:?}"
+    );
+    assert!((after - before - 3.19e-4).abs() < 0.01e-4, "{swell:?}");
+    assert!((swell.burnt - tau).abs() <= 1e-9, "{swell:?}");
+    assert!(swell.giant.radius().value() < 1.0, "{swell:?}");
+}
+
+/// P11.T4.m (ruling p11-c2-swell of 2026-10-06, §3.1 item 3): a white dwarf fed hydrogen at
+/// 2.71 × 10⁻⁷ M☉ yr⁻¹ or more swells into a giant around itself. In pinned pair 0118 (2.64 +
+/// 2.42 M☉ at 605 d, Z = 0.004) the primary's 0.720 M☉ carbon–oxygen dwarf becomes a thermally
+/// pulsing AGB star whose core is the dwarf's mass at the step's start, to 10⁻⁹, and whose
+/// envelope is the step's net gain. In pinned pair 0305 (3.30 + 2.22 M☉ at 76.9 d), whose dwarf
+/// was swelled bare before P11.T4.m, kept everything and grew to a 1.77 M☉ carbon–oxygen dwarf
+/// that collapsed at 526.2 Myr, the 0.790 M☉ dwarf, fed from 511.24 Myr by its companion's main
+/// sequence, swells around its own 0.9498 M☉ at 511.77 Myr, and no carbon–oxygen dwarf above the
+/// Chandrasekhar mass is shown. Both were re-measured at 27, whose heavy donors' dwarfs keep what
+/// they can burn and shed the rest in a wind (P11.T4's heavy donors): until 27 the two dwarfs
+/// swelled at 0.715 and 0.8036 M☉, 0305's at 532.19 Myr fed by its companion's Hertzsprung gap.
+/// (Between P11.T4.m and P11.T4.o 0305's swelled at 526.23 Myr around 1.2745 M☉, which one
+/// 1.57 Myr step of 0.49 M☉ had brought it to: finding F17.)
+#[test]
+fn a_fed_white_dwarf_swells_around_itself() {
+    use crate::stellar::remnant::structure::CHANDRASEKHAR_MASS;
+
+    let until = Years::new(1.2e10);
+    for (i, dwarf) in [(118, 0.720_355), (305, 0.949_758)] {
+        let input = pinned_sample_pair(i);
+        let timeline = evolve(&input, until);
+        let swells = swells_of(&timeline);
+        let swell = swells
+            .iter()
+            .find(|s| s.from == Phase::CarbonOxygenWhiteDwarf)
+            .unwrap_or_else(|| panic!("pair {i:04}'s dwarf swells: {}", describe(&timeline)));
+        let [before, after] = swell.masses;
+        let (m, core) = (swell.giant.mass().value(), swell.giant.core_mass().value());
+        assert!((before - dwarf).abs() < 1e-6, "pair {i:04}: {swell:?}");
+        assert!(
+            (after - before) / swell.step >= 2.71e-7,
+            "pair {i:04}: {swell:?}"
+        );
+        assert_eq!(
+            swell.giant.phase(),
+            Phase::ThermallyPulsingAgb,
+            "pair {i:04}: {swell:?}"
+        );
+        assert!(
+            (core - before).abs() <= 1e-9 * before,
+            "pair {i:04}: {swell:?}"
+        );
+        assert!(
+            ((m - core) - (after - before)).abs() <= 1e-9 * m,
+            "pair {i:04}: the envelope is the step's net gain: {swell:?}"
+        );
+        let mut ages: Vec<f64> = Vec::new();
+        for segment in timeline.segments() {
+            ages.extend([segment.start().value(), segment.end().value()]);
+            for member in segment.members() {
+                if let super::star::Member::Remnant { mass, .. } = member {
+                    ages.extend(mass.knots().iter().map(|knot| knot[0]));
+                }
+            }
+        }
+        for age in ages.into_iter().filter(|&age| age < until.value()) {
+            for star in timeline.state_at(Years::new(age)).stars() {
+                assert!(
+                    star.phase() != Phase::CarbonOxygenWhiteDwarf
+                        || star.mass() <= CHANDRASEKHAR_MASS,
+                    "pair {i:04}: a {:?} carbon–oxygen dwarf at {age} yr",
+                    star.mass()
+                );
+            }
+        }
+    }
+}
+
+/// P11.T4's heavy-donor wind: a carbon–oxygen white dwarf fed hydrogen at
+/// 2.71 × 10⁻⁷ M☉ yr⁻¹ or more by a heavier main-sequence donor keeps the larger of its critical
+/// rate, 5.3 × 10⁻⁷ (1.7 − X) ÷ X (M − 0.4) (Hachisu, Kato and Nomoto 1996, ApJ 470, L97; in this
+/// form Hachisu, Kato and Nomoto 1999, ApJ 522, 487, equation 5), and 2.71 × 10⁻⁷, blows the rest
+/// off from itself and does not swell; fed by a lighter main-sequence donor or a giant, it swells
+/// as BSE has it.
+#[test]
+fn a_white_dwarf_fed_by_a_heavier_donor_blows_off_the_excess() {
+    use super::star::{Kind, Member, Path, cooling_origin};
+
+    let age = 1.0e9;
+    let co = Kind::CarbonOxygenWhiteDwarf;
+    for ma in [0.6, 0.95, 1.1] {
+        let arm = {
+            let input = pair(2.0, 2.5, 1.0, 0.0, 0.02);
+            let ctx = super::timeline::Context::of(&input);
+            let phase = Phase::CarbonOxygenWhiteDwarf;
+            let dwarf = Member::Remnant {
+                phase,
+                birth: 0.5 * age,
+                origin: cooling_origin(&ctx, phase, ma, None),
+                mass: Path::starting(age, ma),
+            };
+            fed_engine_of(&input, dwarf, age)
+        };
+        let sa = arm.structure(0, age, ma, 0.0).expect("a white dwarf");
+        assert_eq!(sa.state.phase(), Phase::CarbonOxygenWhiteDwarf);
+        let x = 0.76 - 3.0 * arm.ctx.composition().z_fit().value();
+        let limit = 5.3e-7 * (1.7 - x) / x * (ma - 0.4);
+        for rate in [2.71e-7, 4.17e-7, 1e-6, 1e-4] {
+            let case = format!("{ma} M☉ at {rate:e} M☉/yr");
+            let wind = arm.accretion(Kind::MainSequence, 1.3, co, rate, ma, &sa);
+            let kept = (limit.max(2.71e-7) / rate).min(1.0);
+            assert!(!wind.swells && wind.from_accretor, "{case}: {wind:?}");
+            assert!(
+                (wind.share - kept).abs() <= 1e-12 * kept,
+                "{case}: {wind:?} against {kept}"
+            );
+            for (kd, md) in [(Kind::MainSequence, 0.5), (Kind::GiantBranch, 1.3)] {
+                let swell = arm.accretion(kd, md, co, rate, ma, &sa);
+                let expected = super::rlof::Accretion {
+                    share: 1.0,
+                    from_accretor: false,
+                    swells: true,
+                };
+                assert_eq!(swell, expected, "{case}, from a {kd:?} of {md} M☉");
+            }
+        }
+        let below = arm.accretion(Kind::MainSequence, 1.3, co, 2.0e-7, ma, &sa);
+        assert!(!below.swells && !below.from_accretor, "{ma}: {below:?}");
+    }
+}
+
+// --- P11.T4.o: the transfer loop's steps -------------------------------------------------------
+
+/// The transfer steps this thread has started from a donor with nothing living
+/// (`rlof::DEAD_DONOR_STEPS`, `Engine::transfer_phase`'s backstop).
+fn dead_donor_steps() -> u32 {
+    super::rlof::DEAD_DONOR_STEPS.with(core::cell::Cell::get)
+}
+
+/// The timeline of `input` to `until`, asserting that no transfer step of it started from a donor
+/// with nothing living (P11.T4.o).
+fn evolve_from_living_donors(input: &BinaryInput, until: Years) -> BinaryTimeline {
+    let dead = dead_donor_steps();
+    let timeline = evolve(input, until);
+    assert_eq!(
+        dead_donor_steps(),
+        dead,
+        "a transfer step from a dead donor: {:?} P {} d\n{}",
+        input.masses(),
+        input.orbit().period().value() / 86_400.0,
+        describe(&timeline)
+    );
+    timeline
+}
+
+/// The share of its donor's mass that each accepted step of stable transfer in `timeline` moved:
+/// each knot of a transfer segment's rates is a step's end and its mean rate there, and the
+/// donor's mass path holds its mass at the step's start.
+fn transfer_shares(timeline: &BinaryTimeline) -> Vec<(f64, f64)> {
+    let mut shares = Vec::new();
+    for segment in timeline.segments() {
+        let SegmentKind::StableTransfer { donor } = segment.kind() else {
+            continue;
+        };
+        let (_, Some(rates)) = segment.paths() else {
+            continue;
+        };
+        let mut start = segment.start().value();
+        for &[age, rate] in rates.knots() {
+            let donor_mass = segment.members()[donor.index()].mass_at(start);
+            if positive(donor_mass) && age > start {
+                shares.push((age, rate * (age - start) / donor_mass));
+            }
+            start = age;
+        }
+    }
+    shares
+}
+
+/// P11.T4.o, finding F17 (ruling p11-c2-swell of 2026-10-06, §4.4): a step of transfer that moves
+/// more than 2 × BSE equation 92's 0.5% of its donor is taken again at half its length. In pinned
+/// pair 0305 (3.30 + 2.22 M☉ at 76.9 d) one 1.57 Myr step, which a slower step's longer hint had
+/// started, moved 0.49 M☉ onto its white dwarf at 526.23 Myr, 27% of its donor; no step of the
+/// pair moves more than 1% now.
+#[test]
+fn a_transfer_step_moves_at_most_a_hundredth_of_its_donor() {
+    let input = pinned_sample_pair(305);
+    let timeline = evolve(&input, Years::new(1.2e10));
+    let shares = transfer_shares(&timeline);
+    assert!(shares.len() > 100, "{}", describe(&timeline));
+    for (age, share) in shares {
+        assert!(share <= 0.01, "{share} of the donor at {age} yr");
+    }
+}
+
+/// P11.T4.o, finding F18: a fed accretor that does not age over the step aimed at its main
+/// sequence's end, its rejuvenation at or above its ageing, keeps its main sequence, and the step
+/// closes no segment. In sample 17 of D's cell 4783 (5.62 + 4.41 M☉ at 6.72 d, under a seed of
+/// P11.T4.o's probe, the fit's with its last byte changed) the gainer, 8.98 M☉ near its end, is fed so on three such steps in a row from
+/// 97.70 Myr; each ends inside its segment, with the gainer still on its main sequence.
+#[test]
+fn a_fed_accretor_that_does_not_age_keeps_its_main_sequence() {
+    use super::star::Member;
+
+    let grid = pair_light::PairGrid::of(crate::id::Layer::D).expect("D's grid");
+    let input = pair_light::sample_input(&grid, 4_783, 17, pair_light::FIT_SEED ^ 0x0d);
+    let timeline = evolve(&input, Years::new(pair_light::LAST_AGE_YEARS));
+    let coeffs = crate::stellar::sse::ZCoeffs::new(input.composition().z_fit());
+    let mut kept = 0;
+    for segment in timeline.segments() {
+        let SegmentKind::StableTransfer { donor } = segment.kind() else {
+            continue;
+        };
+        let Member::MainSequence { helium, mass, tau } = &segment.members()[1 - donor.index()]
+        else {
+            continue;
+        };
+        let (masses, taus) = (mass.knots(), tau.knots());
+        for k in 1..taus.len() {
+            let dt = taus[k][0] - taus[k - 1][0];
+            let rest = (1.0 - taus[k - 1][1])
+                * crate::stellar::sse::main_sequence_lifetime(&coeffs, *helium, masses[k - 1][1]);
+            let aimed = dt > 0.0 && (dt - rest).abs() <= 1e-9 * rest;
+            if aimed && masses[k][1] > masses[k - 1][1] && taus[k][1] <= taus[k - 1][1] {
+                assert!(
+                    k + 1 < taus.len(),
+                    "the step ends its segment: {}",
+                    describe(&timeline)
+                );
+                kept += 1;
+            }
+        }
+    }
+    assert_eq!(kept, 3, "{}", describe(&timeline));
+}
+
+/// P11.T4.o, finding F18: an unfed star's main sequence ends where it did before T4.o, to 10⁻⁹ of
+/// the age. A carried main sequence that is not fed lands short of its end only as its own wind
+/// lengthens its lifetime, and the phase goes on to land on it, closing no segment at the short
+/// landing (it closed one there before). Pinned pairs 0004, 0005, 0010 and 0015, each companion
+/// left on its own by its primary's death, have one, one, one and two segments fewer. From
+/// generator version 26 pair 0004's history moves: its companion's main sequence ends at
+/// 10.1938 Myr (10.1959 Myr until 26), in 13 segments (10); the other three are as they were. From
+/// 27 pair 0005's timeline has 16 segments (15 until 27), its main sequence's end unmoved: its
+/// helium star's detached run to its pinned collapse is cut once more.
+#[test]
+fn an_unfed_main_sequence_ends_where_it_did() {
+    use super::star::Member;
+
+    for (i, end, segments) in [
+        (4, 1.019_375_460_369_789_2e7, 13),
+        (5, 1.744_360_084_346_238_4e8, 16),
+        (10, 7.287_576_551_262_443e7, 15),
+        (15, 1.269_029_482_407_306e7, 14),
+    ] {
+        let timeline = evolve(&pinned_sample_pair(i), Years::new(1.2e10));
+        let left = timeline
+            .segments()
+            .windows(2)
+            .find(|w| {
+                matches!(w[0].members()[1], Member::MainSequence { .. })
+                    && matches!(w[1].members()[1], Member::Shaped { .. })
+            })
+            .unwrap_or_else(|| panic!("pair {i:04}'s companion: {}", describe(&timeline)))[1]
+            .start()
+            .value();
+        assert!(
+            (left - end).abs() <= 1e-9 * end,
+            "pair {i:04}: {left} yr against {end} yr"
+        );
+        assert_eq!(timeline.segments().len(), segments, "pair {i:04}");
+    }
+}
+
+/// P11.T4.o, the engine finding of "P11.T17.b as built": the fit's sample 49 of E's cell 3579
+/// (32.75 + 31.83 M☉ at [Fe/H] −1.98, circular at 65.8 R☉). The secondary's common envelope leaves
+/// a 19.9 M☉ helium star, which gives mass to the primary's black hole until its helium main
+/// sequence ends at 8.5057 Myr, and plan 06's helium star of that mass has no Hertzsprung gap: the
+/// end is its death. It collapses there (BSE section 2.5) to a 19.14 M☉ black hole, bound beside
+/// the 12.51 M☉ one, which no transfer step follows. Before T4.o it was left at its remnant with
+/// nothing acted on, the next transfer step started from it (a debug assertion), and a release
+/// build merged the pair into one 31.65 M☉ black hole at once.
+#[test]
+fn a_helium_donor_whose_main_sequence_end_is_its_death_collapses() {
+    let grid = pair_light::PairGrid::of(crate::id::Layer::E).expect("E's grid");
+    let input = pair_light::sample_input(&grid, 3_579, 49, pair_light::FIT_SEED);
+    let timeline = evolve_from_living_donors(&input, Years::new(pair_light::LAST_AGE_YEARS));
+    let record = *timeline
+        .supernovae()
+        .iter()
+        .find(|s| s.component() == Component::Secondary)
+        .unwrap_or_else(|| panic!("the secondary's collapse: {}", describe(&timeline)));
+    let death = record.age().value();
+    assert!((death / 8.5057e6 - 1.0).abs() < 1e-4, "{death}");
+    assert_eq!(
+        record.remnant().kind(),
+        crate::stellar::remnant::RemnantKind::BlackHole
+    );
+    assert!(
+        (record.remnant().mass().value() - 19.14).abs() < 0.01,
+        "{record:?}"
+    );
+    assert!(record.bound(), "{}", describe(&timeline));
+    let before = timeline.state_at(Years::new(super::detached::last_living(death)));
+    assert_eq!(before.stars()[1].phase(), Phase::HeliumMainSequence);
+    let after = timeline.state_at(Years::new(death * (1.0 + 1e-6)));
+    assert_eq!(
+        after.kind(),
+        SegmentKind::Detached,
+        "{}",
+        describe(&timeline)
+    );
+    assert_eq!(after.stars().map(|s| s.phase()), [Phase::BlackHole; 2]);
+}
+
+/// P11.T4.o: a transfer step that would start from a donor with nothing living, its death inside
+/// the last step not landed on, acts on the death instead (the backstop of
+/// `Engine::transfer_phase`): a 19.5 M☉ helium star placed at its own death beside a 12.5 M☉
+/// black hole collapses, as at `Stop::Death`, and the transfer ends.
+#[test]
+fn a_transfer_from_a_dead_donor_acts_on_its_death() {
+    use std::sync::Arc;
+
+    use super::evolve::{Engine, LiveOrbit, offset_for};
+    use super::star::{Member, Path};
+    use super::timeline::Context;
+
+    let age = 8.5e6;
+    let input = pair(32.75, 31.83, 7.7, 0.0, 2.1e-4);
+    let ctx = Arc::new(Context::of(&input));
+    let track = crate::stellar::sse::Track::helium_star_full(
+        SolarMasses::new(19.5),
+        ctx.composition(),
+        ctx.draws(1),
+    );
+    let lifetime = track.lifetime().expect("a helium star dies").value();
+    let donor = Member::Shaped {
+        track: Arc::new(track),
+        offset: offset_for(age, lifetime),
+        mass: Path::starting(age, 19.5),
+    };
+    let hole = Member::Remnant {
+        phase: Phase::BlackHole,
+        birth: 6.7e6,
+        origin: crate::units::Megayears::ZERO,
+        mass: Path::starting(age, 12.5),
+    };
+    let k = input.orbit();
+    let orbit = LiveOrbit::new(age, 60.0, 0.0, *k.orientation(), k.mean_anomaly_at_epoch());
+    let mut engine = Engine::new(ctx, age, 1.0e10, [hole, donor], orbit, None);
+    engine.segment_start = age;
+    engine.kind = SegmentKind::StableTransfer {
+        donor: Component::Secondary,
+    };
+    let dead = dead_donor_steps();
+    engine.transfer_phase(1);
+    assert_eq!(dead_donor_steps(), dead + 1);
+    let record = engine
+        .supernovae
+        .iter()
+        .find(|s| s.component() == Component::Secondary)
+        .expect("the donor's collapse");
+    assert!(
+        (record.age().value() - age).abs() <= 1e-9 * age,
+        "{record:?}"
+    );
+    assert!(
+        !matches!(engine.kind, SegmentKind::StableTransfer { .. }),
+        "{:?}",
+        engine.kind
+    );
+}
+
+/// P11.T4.o, finding F18: [`super::detached::main_sequence_end_landed`]'s four cases, on member 1
+/// of a step from τ = 0.999: any other stop passes as it is; a step that reaches τ = 1 takes the
+/// end; a fed member that ages takes it early, with τ set to 1; a fed member that does not age,
+/// and an unfed one that falls short, land on nothing, their τ as the step left it.
+#[test]
+fn a_main_sequence_end_is_taken_where_reached_or_fed_and_aged() {
+    use super::detached::{Snapshot, Stop, main_sequence_end_landed};
+
+    let start = Snapshot {
+        age: 1.0e8,
+        j: 1.0,
+        e: 0.0,
+        spins: [1.0; 2],
+        masses: [1.0, 8.0],
+        taus: [0.5, 0.999],
+    };
+    let end = |mass: f64, tau: f64| Snapshot {
+        age: 1.01e8,
+        masses: [1.0, mass],
+        taus: [0.5, tau],
+        ..start
+    };
+    let ends = Some(Stop::MainSequenceEnd(1));
+    for (stop, mass, tau, landed, tau_after) in [
+        (
+            Some(Stop::Boundary),
+            8.0,
+            0.9995,
+            Some(Stop::Boundary),
+            0.9995,
+        ),
+        (ends, 7.99, 1.0, ends, 1.0),
+        (ends, 8.01, 0.9995, ends, 1.0),
+        (ends, 8.01, 0.9985, None, 0.9985),
+        (ends, 7.99, 0.9995, None, 0.9995),
+    ] {
+        let mut next = end(mass, tau);
+        assert_eq!(
+            main_sequence_end_landed(stop, &start, &mut next),
+            landed,
+            "{stop:?} to {mass} M☉ at τ {tau}"
+        );
+        assert_eq!(
+            hyperion_testkit::float::bits(next.taus[1]),
+            hyperion_testkit::float::bits(tau_after),
+            "{stop:?} to {mass} M☉ at τ {tau}: τ {}",
+            next.taus[1]
+        );
+    }
+}
+
+/// P11.T4.o, the dead donor's cause in a detached pair: a carried 19.5 M☉ helium main-sequence star
+/// at Z = 2.1 × 10⁻⁴, on a wide orbit beside a 12.5 M☉ black hole, whose helium-star track has no
+/// Hertzsprung gap, dies at its main sequence's end: a supernova record there, and a remnant on its
+/// own track from it. Before T4.o `Engine::after_boundary` placed it at its track's death and acted
+/// on nothing, so that it was shown as a remnant of the carried mass with no record.
+#[test]
+fn a_detached_helium_star_whose_main_sequence_end_is_its_death_collapses() {
+    use std::sync::Arc;
+
+    use super::evolve::{Engine, LiveOrbit};
+    use super::star::{Member, Path};
+    use super::timeline::Context;
+
+    let age = 8.0e6;
+    let input = pair(32.75, 31.83, 7.7, 0.0, 2.1e-4);
+    let ctx = Arc::new(Context::of(&input));
+    let star = Member::MainSequence {
+        helium: true,
+        mass: Path::starting(age, 19.5),
+        tau: Path::starting(age, 0.999),
+    };
+    let hole = Member::Remnant {
+        phase: Phase::BlackHole,
+        birth: 6.7e6,
+        origin: crate::units::Megayears::ZERO,
+        mass: Path::starting(age, 12.5),
+    };
+    let k = input.orbit();
+    let orbit = LiveOrbit::new(age, 2.0e4, 0.0, *k.orientation(), k.mean_anomaly_at_epoch());
+    let mut engine = Engine::new(ctx, age, 1.0e10, [hole, star], orbit, None);
+    engine.segment_start = age;
+    for _ in 0..8 {
+        if !engine.supernovae.is_empty() {
+            break;
+        }
+        engine.detached_phase();
+    }
+    let record = engine
+        .supernovae
+        .iter()
+        .find(|s| s.component() == Component::Secondary)
+        .expect("the helium star's collapse at its main sequence's end");
+    assert!(record.age().value() > age, "{record:?}");
+    assert!(
+        matches!(&engine.members[1], Member::Track { .. }),
+        "{:?}",
+        engine.members[1].form()
+    );
+}
+
+/// P11.T4.o (the determinism audit): a timeline run to just past each of its events is the full
+/// run's to there, bit for bit, for pairs that reach each new path: pinned pairs 0305 and 0171
+/// (F17's halvings, 0171's eight), the fed accretor of D's cell 4783 that does not age over its
+/// steps aimed at its main sequence's end (F18), and E's cell 3579 sample 49, whose helium donor
+/// dies at its main sequence's end (`Engine::after_boundary`).
+#[test]
+fn the_steps_of_t4o_are_the_same_whatever_age_they_are_run_to() {
+    let grid = |layer| pair_light::PairGrid::of(layer).expect("a grid");
+    let inputs = [
+        pinned_sample_pair(305),
+        pinned_sample_pair(171),
+        pair_light::sample_input(
+            &grid(crate::id::Layer::D),
+            4_783,
+            17,
+            pair_light::FIT_SEED ^ 0x0d,
+        ),
+        pair_light::sample_input(&grid(crate::id::Layer::E), 3_579, 49, pair_light::FIT_SEED),
+    ];
+    for input in &inputs {
+        let [after_events, _] = check_after_events(input, Years::new(1.5e10));
+        assert!(after_events > 0, "{:?}", input.masses());
+    }
+}
+
+// --- Version 25's wiring: the held floor's drop ------------------------------------------------
+
+/// Version 25's wiring drops P11.T17.c's held floor (`decision-galaxy-25-train.md`, "The held
+/// floor"), on the check research-leans-2 asked for: the one capped timeline that P11.T4.o's
+/// re-run of the follow-up's probes left, sample 11 of D's cell 2027 under the probe's seed (the
+/// fit's with its last byte changed; 3.68 + 2.76 M☉ at 108.2 d, e 0.90, Z 0.0142), ends as it
+/// does with the engine's cap on segments raised. From 27 the engine's cap is 256, and the sample
+/// is not capped: the comparison is run under the cap of 64 it had until 27.
+///
+/// A common envelope at 275.38 Myr leaves a 0.61 M☉ helium star beside a 1.03 M☉ one at 0.72 R☉.
+/// The heavier fills its lobe at 290.22 Myr and, shrinking as it loses mass and as it ages, gives
+/// mass in 24 spells to 294.80 Myr, detaching after each until the orbit's decay brings its lobe
+/// back to it, a segment each. Where its helium main sequence ends, the pair's second common
+/// envelope merges it at 294.85 Myr, in the 64th segment, where the cap stops the engine. That
+/// segment holds the merger's 1.63 M☉ helium Hertzsprung-gap star on its own track, no star the
+/// binary carries on its main sequence, whose oxygen–neon core collapses by electron capture at
+/// 295.58 Myr, from 29 (P11.T4's kept-core endings), to a 1.26 M☉ neutron star; until 29 the track
+/// made it a 1.44 M☉ oxygen–neon white dwarf there. With the cap raised the run takes that birth as
+/// a 65th segment, the collapse its one supernova, and stops there. Up to the cap the two runs are
+/// the same segment for segment, and from the birth on they hold the same states, with the same
+/// pooled Type Ia records and merger; the capped run, stopped at the cap, records no supernova. No
+/// companion is left whose gravitational-wave merger could lie past the cap.
+///
+/// Between the cap and the birth, 0.72 Myr, both hold the star living, but the capped run's keeps
+/// its mass at the cap, 1.63 M☉, where the raised run's wind takes it to 1.44 M☉ and strips it in
+/// its last 2 × 10³ years. The raised run's star is brightest at M<sub>V</sub> −7.51, the capped
+/// run's at −7.28: 0.23 mag fainter, within the 0.3 mag by which the pair-light tables brighten
+/// what their walk reads ([`MARGIN_MAG`](pair_light::MARGIN_MAG)).
+#[test]
+fn the_last_capped_sample_ends_as_it_does_with_the_cap_raised() {
+    use super::star::Member;
+
+    /// The engine's cap on segments until 27, under which the sample was capped.
+    const CAP_UNTIL_27: usize = 64;
+
+    let grid = pair_light::PairGrid::of(crate::id::Layer::D).expect("D's grid");
+    let (cell, index) = (2_027, 11);
+    let input = pair_light::sample_input(&grid, cell, index, pair_light::FIT_SEED ^ 0x0d);
+    let until = Years::new(pair_light::LAST_AGE_YEARS);
+    let capped = super::evolve::evolve_with_segment_cap(&input, until, CAP_UNTIL_27);
+    let raised = super::evolve::evolve_with_segment_cap(&input, until, 64 * MAX_SEGMENTS);
+    assert!(capped.hit_segment_cap(), "{}", describe(&capped));
+    assert!(!raised.hit_segment_cap(), "{}", describe(&raised));
+    // From 27 the engine's own cap (MAX_SEGMENTS) is above the sample's history.
+    assert_eq!(evolve(&input, until), raised);
+    assert_eq!(capped.segments().len(), CAP_UNTIL_27);
+    assert_eq!(
+        raised.segments().len(),
+        CAP_UNTIL_27 + 1,
+        "{}",
+        describe(&raised)
+    );
+    let (last, before) = capped.segments().split_last().expect("segments");
+    assert_eq!(before, &raised.segments()[..CAP_UNTIL_27 - 1]);
+    let [merged, birth] = [CAP_UNTIL_27 - 1, CAP_UNTIL_27].map(|k| &raised.segments()[k]);
+    let cap = last.start();
+    assert_eq!((merged.kind(), merged.start()), (last.kind(), cap));
+    assert!((cap.value() / 294.853e6 - 1.0).abs() < 1e-5, "{cap:?}");
+    // The merger's star, on the same track at the same offset in both runs, its companion gone.
+    assert_eq!(last.members()[0].track(), merged.members()[0].track());
+    assert!(matches!(last.members()[0], Member::Shaped { .. }));
+    assert!(
+        matches!(last.members()[1], Member::Gone) && matches!(merged.members()[1], Member::Gone)
+    );
+    let born = birth.start().value();
+    assert!((born / 295.575e6 - 1.0).abs() < 1e-5, "{born}");
+    let v = |state: crate::stellar::StarState| {
+        crate::stellar::photometry::absolute_v_of_state(&state)
+            .map_or(f64::INFINITY, crate::units::Magnitudes::value)
+    };
+    let mut brightest = [f64::INFINITY; 2];
+    for k in 0..20_000 {
+        let age = Years::new(cap.value() + (born - cap.value()) * f64::from(k) / 20_000.0);
+        let (held, run) = (
+            capped.state_at(age).stars()[0],
+            raised.state_at(age).stars()[0],
+        );
+        assert!(
+            held.phase().is_living() && run.phase().is_living(),
+            "at {age:?}"
+        );
+        assert!(held.mass().value() >= run.mass().value(), "at {age:?}");
+        brightest = [brightest[0].min(v(held)), brightest[1].min(v(run))];
+    }
+    assert!(
+        brightest[0] <= brightest[1] + pair_light::MARGIN_MAG,
+        "the brightest V, capped and raised: {brightest:?}"
+    );
+    for age in [born, f64::midpoint(born, until.value()), until.value()] {
+        let age = Years::new(age);
+        assert_eq!(capped.state_at(age), raised.state_at(age), "at {age:?}");
+    }
+    assert_eq!(capped.supernovae(), []);
+    let [collapse] = raised.supernovae() else {
+        panic!("one collapse: {:?}", raised.supernovae());
+    };
+    assert!(
+        (collapse.age().value() / born - 1.0).abs() < 1e-12,
+        "{collapse:?}"
+    );
+    assert_eq!(
+        collapse.remnant().kind(),
+        crate::stellar::remnant::RemnantKind::NeutronStar,
+        "{collapse:?}"
+    );
+    assert_eq!(capped.pooled_ia(), raised.pooled_ia());
+    assert_eq!(capped.merger_age(), raised.merger_age());
+    assert!(
+        raised.merger_age().is_some_and(|m| m <= cap),
+        "{:?}",
+        raised.merger_age()
+    );
+    let end = raised.state_at(until);
+    assert_eq!(end.orbit(), None);
+    assert_eq!(
+        end.stars().map(|s| s.phase()),
+        [Phase::NeutronStar, Phase::NoRemnant]
+    );
+}
+
+// --- P11.T4: the dwarf limit ------------------------------------------------------------------
+
+/// The state of `timeline` at the start of its first merged segment, and that age, years.
+fn merged_state(timeline: &BinaryTimeline) -> (BinaryState, f64) {
+    let merged = timeline
+        .segments()
+        .iter()
+        .find(|s| s.kind() == SegmentKind::Merged)
+        .unwrap_or_else(|| panic!("the pair merges: {}", describe(timeline)));
+    let age = merged.start().value();
+    (timeline.state_at(Years::new(age)), age)
+}
+
+/// P11.T4's dwarf limit: a merger's product around a carbon–oxygen core that no star of its kind
+/// can hold leaves the engine's own remnant. Pinned pairs 0252 and 0902 merge into a thermally
+/// pulsing AGB product around a carbon–oxygen core of 1.765 and 1.948 M☉ (which the held arm showed
+/// as a carbon–oxygen dwarf of that mass to 12 Gyr). Their primaries' pins are pending, so from 27
+/// (P11.T4's pinned white dwarfs) each product is held at its core's mass to the pin, 28.414 and
+/// 33.894 Myr, where it collapses into plan 06's neutron star with plan 06's kick; until 27, under
+/// the dwarf limit alone, each collapsed at once to the 1.26 M☉ neutron star of an
+/// accretion-induced collapse. No pair of the pinned thousand leaves such a product unpinned at 27,
+/// so where no pin holds it the rule is checked on the cores themselves: the dwarf the fallback
+/// leaves is at or above the Chandrasekhar mass, which `Engine::finish_merger` collapses at once
+/// as an accreting one, typed as a pinned primary's product is ([`ProductTyping::Pinned`]). The same
+/// pair twice gives the same timeline.
+///
+/// [`ProductTyping::Pinned`]: super::dwarf_limit::ProductTyping::Pinned
+#[test]
+fn an_unplaced_carbon_oxygen_core_collapses_at_the_chandrasekhar_mass() {
+    use super::dwarf_limit::{CoreSource, ProductTyping, Unplaced, collapses};
+    use super::star::Kind;
+    use super::testing::shows_a_dwarf_above_the_limit;
+
+    let until = Years::new(1.2e10);
+    for (name, input, core, pin) in [
+        ("0252", pinned_sample_pair(252), 1.764_8, 28.4141e6),
+        ("0902", pinned_sample_pair(902), 1.947_7, 33.8942e6),
+    ] {
+        let timeline = evolve(&input, until);
+        assert!(
+            !shows_a_dwarf_above_the_limit(&timeline, until.value()),
+            "{name}: {}",
+            describe(&timeline)
+        );
+        let (state, age) = merged_state(&timeline);
+        let held = state.stars()[0];
+        assert_eq!(held.phase(), Phase::ThermallyPulsingAgb, "{name}: {held:?}");
+        assert!(
+            (held.mass().value() - core).abs() < 1e-4,
+            "{name}: {held:?}"
+        );
+        assert!(
+            (held.core_mass().value() / held.mass().value() - 1.0).abs() < 1e-9,
+            "{name}: held at its core: {held:?}"
+        );
+        let at = super::evolve::pinned_death_age_years(&input).expect("a pinned primary");
+        assert!((at - pin).abs() < 1.0e2, "{name}: the pin at {at} yr");
+        assert!(at > age, "{name}: the pin after the merger at {age} yr");
+        let collapse = primary_record(&timeline);
+        assert!(
+            (collapse.age().value() - at).abs() <= 1e-9 * at,
+            "{name}: {collapse:?} against the pin at {at} yr"
+        );
+        let plan_06 = plan_06_star(&input);
+        assert_eq!(Some(collapse.remnant()), plan_06.remnant(), "{name}");
+        assert_eq!(collapse.kick(), plan_06.natal_kick(), "{name}");
+        assert_eq!(
+            collapse.remnant().kind(),
+            crate::stellar::remnant::RemnantKind::NeutronStar,
+            "{name}"
+        );
+        let core_mass = SolarMasses::new(core);
+        let Unplaced::WhiteDwarf { mass, .. } = ProductTyping::Pinned.unplaced(
+            Kind::PulsingAgb,
+            core_mass,
+            core_mass,
+            CoreSource::Other,
+        ) else {
+            panic!("{name}: a carbon–oxygen core leaves a dwarf");
+        };
+        assert!(
+            collapses(mass.value()),
+            "{name}: a {mass:?} dwarf collapses"
+        );
+        assert_eq!(evolve(&input, until), timeline, "{name}");
+    }
+}
+
+/// P11.T4's dwarf limit: a merger's product around a helium core that no star of its kind can hold
+/// leaves the engine's own remnant. Pinned pair 0438 (13.7 + 3.7 M☉ at 16.7 d) and a 108 + 78 M☉
+/// pair at 8.67 d merge into a core-helium-burning product around a helium core of 3.22 and
+/// 28.6 M☉ (which the held arm showed as a carbon–oxygen dwarf), the naked helium star of that core,
+/// which then dies by plan 06. A product around a carbon–oxygen core under 0.5 M☉ (a helium dwarf
+/// under the held arm) leaves a carbon–oxygen dwarf: pinned pair 0787's 0.457 M☉ core did under the
+/// dwarf limit alone, but under every 27 hold (on the train's base already) its 0.373 M☉ dwarf
+/// swells around itself beside its 1.87 M☉ companion and merges into a thermally pulsing AGB product
+/// around a 0.813 M☉ core, which its kind holds. No pair of the pinned thousand leaves such a
+/// product at 27, so the rule is checked on that core itself: a thermally pulsing product's, and a
+/// pinned primary's of any kind around a carbon–oxygen core, a helium giant's of no pinned
+/// primary ending by its mass (`an_unplaced_helium_giant_ends_by_its_mass_from_29`).
+#[test]
+fn an_unplaced_helium_core_is_its_helium_star() {
+    use super::testing::shows_a_dwarf_above_the_limit;
+
+    use super::dwarf_limit::{CoreSource, ProductTyping, Unplaced};
+    use super::star::Kind;
+
+    let until = 1.2e10;
+    let version = crate::stellar::rules::StellarRules::of_version(crate::GENERATOR_VERSION);
+    let run =
+        |input: &BinaryInput, rules| evolve(&input.clone().with_rules(rules), Years::new(until));
+    for (name, input, core, rules) in [
+        ("0438", pinned_sample_pair(438), 3.224_5, version),
+        (
+            "108 + 78",
+            pair(108.0, 78.0, 8.67, 0.0, 0.02),
+            28.614,
+            version,
+        ),
+    ] {
+        let arm = run(&input, rules);
+        assert!(
+            !shows_a_dwarf_above_the_limit(&arm, until),
+            "{name}: {}",
+            describe(&arm)
+        );
+        let (state, age) = merged_state(&arm);
+        let star = state.stars()[0];
+        assert_eq!(
+            star.phase(),
+            Phase::HeliumMainSequence,
+            "{name}: {}",
+            describe(&arm)
+        );
+        assert!(
+            (star.mass().value() - core).abs() < 1e-3,
+            "{name}: {star:?}"
+        );
+        let death = arm
+            .supernovae()
+            .iter()
+            .find(|s| s.age().value() > age)
+            .unwrap_or_else(|| panic!("{name}'s helium star dies: {}", describe(&arm)));
+        println!("{name}: a {core} M☉ helium star at {age} yr, then {death:?}");
+    }
+    let (arm, _) = merged_state(&run(&pinned_sample_pair(787), version));
+    assert_eq!(arm.stars()[0].phase(), Phase::ThermallyPulsingAgb);
+    assert!(
+        (arm.stars()[0].core_mass().value() - 0.813).abs() < 1e-3,
+        "{arm:?}"
+    );
+    let (agb, gap, giant) = (Kind::PulsingAgb, Kind::HeliumGap, Kind::HeliumGiant);
+    for (typing, kind) in [
+        (ProductTyping::Unpinned, agb),
+        (ProductTyping::Pinned, agb),
+        (ProductTyping::Pinned, gap),
+        (ProductTyping::Pinned, giant),
+    ] {
+        assert_eq!(
+            typing.unplaced(
+                kind,
+                SolarMasses::new(1.626),
+                SolarMasses::new(0.457_2),
+                CoreSource::Other,
+            ),
+            Unplaced::WhiteDwarf {
+                phase: Phase::CarbonOxygenWhiteDwarf,
+                mass: SolarMasses::new(0.457_2)
+            },
+            "{typing:?}, {kind:?}"
+        );
+    }
+}
+
+/// P11.T4's dwarf limit: a carbon–oxygen dwarf fed helium past the edge-lit detonation's 0.15 M☉
+/// ends at the Chandrasekhar mass. Two pairs whose primary's dwarf is fed by its companion's naked
+/// helium star after a common envelope (5.43 + 1.69 M☉ at 7 d and 6.6 + 1.65 M☉ at 3.4 d, solar),
+/// which showed a dwarf above the Chandrasekhar mass before the dwarf limit, show none: the dwarf
+/// disrupts and leaves nothing (P11.T4's `co_chandrasekhar`), its edge-lit candidate pooled first.
+#[test]
+fn a_dwarf_fed_helium_disrupts_at_the_chandrasekhar_mass() {
+    use super::testing::shows_a_dwarf_above_the_limit;
+
+    let until = 1.2e10;
+    for (m1, m2, period) in [(5.43, 1.69, 7.0), (6.6, 1.65, 3.4)] {
+        let input = pair(m1, m2, period, 0.0, 0.02);
+        let arm = evolve(&input, Years::new(until));
+        assert!(
+            !shows_a_dwarf_above_the_limit(&arm, until),
+            "{m1} + {m2}: {}",
+            describe(&arm)
+        );
+        let pooled = arm.pooled_ia().expect("the edge-lit candidate is pooled");
+        assert_eq!(pooled.channel(), IaPoolChannel::Accretion);
+        let collapse = arm
+            .supernovae()
+            .iter()
+            .find(|s| s.age() > pooled.age())
+            .unwrap_or_else(|| panic!("{m1} + {m2}'s dwarf disrupts: {}", describe(&arm)));
+        assert_eq!(
+            collapse.remnant().kind(),
+            crate::stellar::remnant::RemnantKind::None,
+            "{m1} + {m2}"
+        );
+        let before = arm.state_at(Years::new(collapse.age().value() * (1.0 - 1e-12)));
+        let dwarf = before.stars()[collapse.component().index()];
+        assert_eq!(dwarf.phase(), Phase::CarbonOxygenWhiteDwarf, "{m1} + {m2}");
+        println!(
+            "{m1} + {m2}: disrupts at {:?} from {:?}",
+            collapse.age(),
+            dwarf.mass()
+        );
+    }
+}
+
+/// P11.T4's dwarf limit: over the pinned thousand no pair shows a white dwarf above the
+/// Chandrasekhar mass (under the held arm three did, whose merger's product no star holds: 0252 and
+/// 0902 around a carbon–oxygen core, 0438 around a helium one).
+#[test]
+fn no_pinned_pair_shows_a_dwarf_above_the_limit() {
+    use super::testing::shows_a_dwarf_above_the_limit;
+
+    let until = 1.2e10;
+    let mut mix = Mix(0x0b1e_0001);
+    for i in 0..1000 {
+        let input = pinned_pair(&mut mix, i);
+        let timeline = evolve(&input, Years::new(until));
+        assert!(
+            !shows_a_dwarf_above_the_limit(&timeline, until),
+            "pair {i:04}: {}",
+            describe(&timeline)
+        );
+    }
+}
+
+/// What a merger's product of `kind`, `m` M☉ and core `core` M☉ with `burnt` of its helium burnt
+/// leaves in an engine of metallicity `z` with no pin, under `rules`, once the merger is recorded,
+/// its core from `source`: the engine and its primary's state then.
+fn unplaced_product(
+    kind: super::star::Kind,
+    (m, core, burnt): (f64, f64, f64),
+    z: f64,
+    rules: crate::stellar::rules::StellarRules,
+    source: super::dwarf_limit::CoreSource,
+) -> (super::evolve::Engine, crate::stellar::StarState) {
+    use super::common_envelope::CoalescedProduct;
+
+    let mut engine = fed_dwarf_engine(0.6, z, rules);
+    let product = engine.product_member(
+        CoalescedProduct::Star {
+            kind,
+            mass: m,
+            core,
+            burnt,
+            fraction: 0.0,
+        },
+        source,
+    );
+    engine.finish_merger_with(product);
+    let state = engine.members[0].state_at(&engine.ctx, 0, engine.age);
+    (engine, state)
+}
+
+/// P11.T4's dwarf limit: a merger's product that no star of its kind can hold, in a pair with no
+/// pin, leaves the engine's own remnant. Thermally pulsing AGB products around a carbon–oxygen core
+/// of 1.765 and 1.948 M☉ (pinned pairs 0252's and 0902's mergers, Z = 0.02 and 0.0005) have iron
+/// cores (`Mc,BAGB` above 2.25 M☉, HPT section 6) and collapse at once as one (BSE section 2.7.4):
+/// a neutron star of plan 06's iron-core collapse under the pair's recipe and the primary's remnant
+/// draws, with plan 06's ordinary kick for an iron core, and no Type Ia candidate (version 27 made
+/// them oxygen–neon dwarfs, which collapsed at once to the 1.26 M☉ neutron star of an
+/// accretion-induced collapse). One around a 0.457 M☉ core (0787's, Z = 0.004) is a carbon–oxygen
+/// dwarf. Core-helium-burning products with nothing burnt around a helium core of 1.4433, 6.977 and
+/// 1.4368 M☉ (of layers D and E, Z = 0.02, 2026-11-02, and Z = 0.0005) are the naked helium star
+/// of that core, any helium core of 0.5 M☉ or more being one (HPT section 6; version 27 left the
+/// last, below the Chandrasekhar mass, a carbon–oxygen dwarf).
+#[test]
+fn an_unplaced_merger_product_takes_the_engine_s_own_remnant() {
+    use super::star::Kind;
+
+    let rules = crate::stellar::rules::StellarRules::of_version(crate::GENERATOR_VERSION);
+    let (ns, co, he) = (
+        Phase::NeutronStar,
+        Phase::CarbonOxygenWhiteDwarf,
+        Phase::HeliumMainSequence,
+    );
+    for (kind, m, core, burnt, z, phase) in [
+        (Kind::PulsingAgb, 4.331_5, 1.764_8, 1.0, 0.02, ns),
+        (Kind::PulsingAgb, 3.689_9, 1.947_7, 1.0, 0.0005, ns),
+        (Kind::PulsingAgb, 2.240_1, 0.457_2, 1.0, 0.004, co),
+        (Kind::CoreHeliumBurning, 4.984_3, 1.443_3, 0.0, 0.02, he),
+        (Kind::CoreHeliumBurning, 17.965_6, 6.977_3, 0.0, 0.02, he),
+        (Kind::CoreHeliumBurning, 4.334_3, 1.436_8, 0.0, 0.0005, he),
+    ] {
+        let case = format!("{kind:?} of {m} M☉ around {core} M☉");
+        let other = super::dwarf_limit::CoreSource::Other;
+        let (engine, state) = unplaced_product(kind, (m, core, burnt), z, rules, other);
+        assert_eq!(state.phase(), phase, "{case}");
+        if phase == Phase::NeutronStar {
+            assert_an_iron_core_collapse(&case, &engine, state, m, core);
+        } else {
+            assert!(
+                state.mass().value().total_cmp(&core).is_eq(),
+                "{case}: a mass of {:?}",
+                state.mass()
+            );
+            assert!(engine.supernovae.is_empty(), "{case}");
+        }
+    }
+}
+
+/// `case`'s unplaced product of `m` M☉ around a `core` M☉ carbon–oxygen core in `engine`, `state`
+/// once the merger is recorded, collapsed as an iron core: plan 06's neutron star of the primary's
+/// remnant draws, not electron capture's, with the ordinary kick of an iron core's collapse from
+/// the product with its envelope on, and no Type Ia candidate.
+fn assert_an_iron_core_collapse(
+    case: &str,
+    engine: &super::evolve::Engine,
+    state: crate::stellar::StarState,
+    m: f64,
+    core: f64,
+) {
+    use crate::stellar::remnant::collapse::electron_capture_remnant;
+    use crate::stellar::remnant::{
+        CollapseChannel, KickDraws, KickLaw, KickMode, ProgenitorAtDeath, RemnantKind,
+        StandardKickLaw, Stripping,
+    };
+
+    let [collapse] = engine.supernovae.as_slice() else {
+        panic!("{case}: one collapse, not {:?}", engine.supernovae);
+    };
+    let remnant = collapse.remnant();
+    assert_eq!(remnant.kind(), RemnantKind::NeutronStar, "{case}");
+    assert_ne!(remnant, electron_capture_remnant(), "{case}");
+    assert!(
+        remnant
+            .mass()
+            .value()
+            .total_cmp(&IRON_CORE_NEUTRON_STAR_MSUN)
+            .is_eq(),
+        "{case}: {remnant:?}"
+    );
+    assert!(
+        state
+            .mass()
+            .value()
+            .total_cmp(&remnant.mass().value())
+            .is_eq(),
+        "{case}: {state:?}"
+    );
+    let (co_core, envelope) = (SolarMasses::new(core), SolarMasses::new(m - core));
+    let progenitor = ProgenitorAtDeath::new(co_core, co_core, envelope, Stripping::None);
+    let kick = StandardKickLaw::under(crate::stellar::rules::StellarRules::of_version(
+        crate::GENERATOR_VERSION,
+    ))
+    .kick(
+        CollapseChannel::IronCore,
+        &progenitor,
+        &remnant,
+        &KickDraws::of(engine.ctx.draws(0)),
+    );
+    assert_eq!(collapse.kick(), Some(kick), "{case}");
+    assert_eq!(kick.mode(), KickMode::Ordinary, "{case}");
+    assert!(engine.pooled.is_none(), "{case}");
+    println!("{case}: {remnant:?}, {:?}", kick.speed());
+}
+
+/// The neutron star of the two iron cores' collapses under the median draws, M☉, as measured
+/// (2026-11-03, at generator version 25, and the same at 27).
+const IRON_CORE_NEUTRON_STAR_MSUN: f64 = 1.200_005_831_146_352_6;
+
+/// P11.T4's dwarf limit: the dwarf an unplaced product leaves, by its kind, mass, core and the
+/// dwarf it merged from ([`ProductTyping::unplaced`]). For a product of no pinned primary
+/// oxygen–neon where a thermally pulsing AGB product's core at the base of the AGB, as its
+/// placement solves it back, is 1.6 M☉ or more, or where it merged from an oxygen–neon dwarf; an
+/// iron core where that core at the base of the AGB is 2.25 M☉ or more (a carbon–oxygen core of
+/// 1.438 M☉ or more, HPT section 6) and it merged from no dwarf; a helium giant of no dwarf's
+/// ending by its mass (HPT section 6.1; P11.T4's kept-core endings), an electron capture from
+/// 1.6 M☉; the naked helium star of a helium core of 0.5 M☉ or more; and the kind of the dwarf it
+/// merged from, if it did (a core's composition does not change with its hydrogen envelope). A
+/// pinned primary's, typed as at 27: a helium giant by its core as a thermally pulsing star is, and
+/// a helium core its helium star only from the Chandrasekhar mass.
+///
+/// [`ProductTyping::unplaced`]: super::dwarf_limit::ProductTyping::unplaced
+#[test]
+fn an_unplaced_product_s_dwarf_is_typed_by_its_core() {
+    use super::dwarf_limit::{CoreSource, ProductTyping, Unplaced};
+    use super::star::Kind;
+
+    let w = |phase, mass: f64| Unplaced::WhiteDwarf {
+        phase,
+        mass: SolarMasses::new(mass),
+    };
+    let h = |mass: f64| Unplaced::HeliumStar {
+        mass: SolarMasses::new(mass),
+    };
+    let fe = |co_core: f64, helium_core: f64, mass: f64| Unplaced::IronCore {
+        co_core: SolarMasses::new(co_core),
+        helium_core: SolarMasses::new(helium_core),
+        mass: SolarMasses::new(mass),
+    };
+    let ec = |co_core: f64, mass: f64| Unplaced::ElectronCapture {
+        co_core: SolarMasses::new(co_core),
+        mass: SolarMasses::new(mass),
+    };
+    let (co, one, he) = (
+        Phase::CarbonOxygenWhiteDwarf,
+        Phase::OxygenNeonWhiteDwarf,
+        Phase::HeliumWhiteDwarf,
+    );
+    let (agb, giant, cheb) = (Kind::PulsingAgb, Kind::HeliumGiant, Kind::CoreHeliumBurning);
+    let (other, ne, cod) = (
+        CoreSource::Other,
+        CoreSource::OxygenNeonDwarf,
+        CoreSource::CarbonOxygenDwarf,
+    );
+    // (Mc − 0.448) ÷ 0.44 = 1.6 at Mc = 1.152, and 2.25 at 1.438.
+    for (kind, m, core, source, unpinned, pinned) in [
+        (agb, 5.0, 1.0, other, w(co, 1.0), w(co, 1.0)),
+        (agb, 5.0, 1.2, other, w(one, 1.2), w(one, 1.2)),
+        (agb, 5.0, 1.43, other, w(one, 1.43), w(one, 1.43)),
+        (agb, 5.0, 1.5, other, fe(1.5, 1.5, 5.0), w(one, 1.5)),
+        (giant, 2.0, 1.5, other, ec(1.5, 2.0), w(one, 1.5)),
+        (agb, 5.0, 1.5, ne, w(one, 1.5), w(one, 1.5)),
+        (agb, 5.0, 1.2, cod, w(co, 1.2), w(one, 1.2)),
+        (agb, 5.0, 1.5, cod, w(co, 1.5), w(one, 1.5)),
+        (giant, 1.7, 1.0, cod, w(co, 1.0), w(co, 1.0)),
+        (giant, 1.7, 1.43, other, ec(1.43, 1.7), w(one, 1.43)),
+        (giant, 2.0, 1.5, ne, w(one, 1.5), w(one, 1.5)),
+        (giant, 1.4, 1.2, other, w(co, 1.2), w(one, 1.2)),
+        (giant, 1.7, 1.0, other, ec(1.0, 1.7), w(co, 1.0)),
+        (giant, 1.4, 1.0, ne, w(one, 1.0), w(one, 1.0)),
+        (cheb, 5.0, 1.2, other, h(1.2), w(co, 1.2)),
+        (cheb, 5.0, 0.5, other, h(0.5), w(co, 0.5)),
+        (cheb, 5.0, 1.5, other, h(1.5), h(1.5)),
+        (Kind::GiantBranch, 5.0, 0.4, other, w(he, 0.4), w(he, 0.4)),
+    ] {
+        let case = format!("{kind:?} of {m} M☉ around {core} M☉ from {source:?}");
+        let (m, core) = (SolarMasses::new(m), SolarMasses::new(core));
+        let unplaced = ProductTyping::Unpinned.unplaced(kind, m, core, source);
+        assert_eq!(unplaced, unpinned, "{case}");
+        let unplaced = ProductTyping::Pinned.unplaced(kind, m, core, source);
+        assert_eq!(unplaced, pinned, "{case}: pinned");
+    }
+}
+
+/// A carbon–oxygen white dwarf of `dwarf` M☉ beside a 3 M☉ star at the start of its thermally
+/// pulsing AGB, 3,000 R☉ apart, detached, solar, with no pin, under `rules`.
+fn wind_fed_dwarf_engine(
+    dwarf: f64,
+    rules: crate::stellar::rules::StellarRules,
+) -> super::evolve::Engine {
+    use std::sync::Arc;
+
+    use super::evolve::{Engine, LiveOrbit};
+    use super::star::{Member, Path};
+    use super::timeline::Context;
+
+    let input = pair(3.0, dwarf, 1.0e4, 0.0, 0.02).with_rules(rules);
+    let ctx = Arc::new(Context::of(&input));
+    let track = Arc::new(crate::stellar::sse::Track::full_with(
+        SolarMasses::new(3.0),
+        &Composition::SOLAR,
+        &StarDraws::median(),
+        ctx.track_options(),
+    ));
+    let at = track
+        .age_in_phase(Phase::ThermallyPulsingAgb, 0.0)
+        .expect("a 3 M☉ star has a thermally pulsing AGB");
+    let age = at + 1.0e6;
+    let giant = Member::Track {
+        track,
+        offset: super::evolve::offset_for(age, at),
+    };
+    let wd = Member::Remnant {
+        phase: Phase::CarbonOxygenWhiteDwarf,
+        birth: 0.5 * age,
+        origin: crate::units::Megayears::ZERO,
+        mass: Path::starting(age, dwarf),
+    };
+    let k = input.orbit();
+    let orbit = LiveOrbit::new(age, 3.0e3, 0.0, *k.orientation(), k.mean_anomaly_at_epoch());
+    let mut engine = Engine::new(ctx, age, 1.0e10, [wd, giant], orbit, None);
+    engine.segment_start = age;
+    engine.kind = SegmentKind::Detached;
+    engine
+}
+
+/// P11.T4's dwarf limit: a carbon–oxygen dwarf of 1.439 M☉ that a 3 M☉ star's AGB wind feeds in a
+/// detached phase stops at the Chandrasekhar mass and disrupts there, leaving nothing (P11.T4's
+/// `co_chandrasekhar`), its Type Ia candidate pooled first (as first built, it grew past the limit
+/// to 1.4454 M☉ by the end of the giant's AGB).
+#[test]
+fn a_dwarf_a_wind_feeds_stops_at_the_chandrasekhar_mass() {
+    use crate::stellar::remnant::RemnantKind;
+    use crate::stellar::remnant::structure::CHANDRASEKHAR_MASS;
+
+    let rules = crate::stellar::rules::StellarRules::of_version(crate::GENERATOR_VERSION);
+    let mut engine = wind_fed_dwarf_engine(1.439, rules);
+    engine.detached_phase();
+    let [collapse] = engine.supernovae.as_slice() else {
+        panic!("one death, not {:?}", engine.supernovae);
+    };
+    assert_eq!(collapse.remnant().kind(), RemnantKind::None);
+    assert!(
+        collapse
+            .age()
+            .value()
+            .total_cmp(&WIND_FED_COLLAPSE_AGE)
+            .is_eq(),
+        "{:?}",
+        collapse.age()
+    );
+    let pooled = engine
+        .pooled
+        .expect("the dwarf's Type Ia candidate is pooled");
+    assert_eq!(pooled.channel(), IaPoolChannel::Accretion);
+    let at = pooled.masses()[0].value();
+    assert!(
+        (at / CHANDRASEKHAR_MASS.value() - 1.0).abs() < 1e-6,
+        "a dwarf of {at} M☉ at the collapse"
+    );
+}
+
+/// The age of the wind-fed dwarf's collapse, years, as measured (2026-11-02, at generator version
+/// 25, and the same at 27).
+const WIND_FED_COLLAPSE_AGE: f64 = 480_515_539.091_214_66;
+
+/// P11.T4's dwarf limit and swollen dwarf: each is deterministic. The same pair, engine or swell
+/// twice gives the same timeline or member: an edge-lit dwarf's pair (5.43 + 1.69 M☉ at 7 d), an
+/// unplaced product's iron core, the wind-fed dwarf, a fed helium dwarf's swell and a
+/// carbon–oxygen and an oxygen–neon dwarf's giant with its kind under the version's rules, and a
+/// swollen dwarf's pair (1.1 + 0.9 M☉ at 100 d, Z = 0.004),
+/// pinned pair 0080 and an oxygen–neon dwarf's placed product under every 29 hold.
+#[test]
+fn the_dwarf_limit_s_and_the_swollen_dwarf_s_arms_are_deterministic() {
+    use super::rlof::Fed;
+    use super::star::{Kind, Member, Path};
+    use crate::stellar::rules::StellarRules;
+
+    let until = Years::new(1.2e10);
+    let input = pair(5.43, 1.69, 7.0, 0.0, 0.02).with_rules(
+        crate::stellar::rules::StellarRules::of_version(crate::GENERATOR_VERSION),
+    );
+    assert_eq!(evolve(&input, until), evolve(&input, until));
+    let iron_core = || {
+        let (engine, _) = unplaced_product(
+            Kind::PulsingAgb,
+            (4.331_5, 1.764_8, 1.0),
+            0.02,
+            crate::stellar::rules::StellarRules::of_version(crate::GENERATOR_VERSION),
+            super::dwarf_limit::CoreSource::Other,
+        );
+        (engine.members, engine.supernovae, engine.pooled)
+    };
+    assert_eq!(iron_core(), iron_core());
+    let wind = || {
+        let mut engine = wind_fed_dwarf_engine(
+            1.439,
+            crate::stellar::rules::StellarRules::of_version(crate::GENERATOR_VERSION),
+        );
+        engine.detached_phase();
+        (engine.age, engine.members, engine.supernovae, engine.pooled)
+    };
+    assert_eq!(wind(), wind());
+    let swollen = StellarRules::of_version(crate::GENERATOR_VERSION);
+    let swell = || {
+        let mut engine = fed_dwarf_engine(0.38, 0.004, swollen);
+        let (age, m) = (engine.age, 0.381);
+        engine.members[1] = Member::MainSequence {
+            helium: false,
+            mass: Path::starting(age, 0.3),
+            tau: Path::starting(age, 0.5),
+        };
+        let s = engine.structure(0, age, m, 0.0).expect("a white dwarf");
+        let fed = Fed {
+            kind: Kind::HeliumWhiteDwarf,
+            before: 0.38,
+            core_before: 0.38,
+            gained: 1.0e-3,
+            dt: 1.0e3,
+        };
+        assert!(engine.swell(0, Kind::HeliumWhiteDwarf, m, &s, fed));
+        engine.members
+    };
+    assert_eq!(swell(), swell());
+    let input = pair(1.1, 0.9, 100.0, 0.0, 0.004)
+        .with_rules(StellarRules::of_version(crate::GENERATOR_VERSION));
+    assert_eq!(evolve(&input, until), evolve(&input, until));
+    for (phase, dwarf) in [
+        (Phase::OxygenNeonWhiteDwarf, 1.07),
+        (Phase::CarbonOxygenWhiteDwarf, 1.25),
+    ] {
+        let swollen_kind = || {
+            let engine = swollen_dwarf_engine(phase, dwarf, 0.02, swollen);
+            (engine.members, engine.dwarf_cores)
+        };
+        assert_eq!(swollen_kind(), swollen_kind(), "{phase:?}");
+    }
+    let input =
+        pinned_pair_number(80).with_rules(StellarRules::of_version(crate::GENERATOR_VERSION));
+    assert_eq!(evolve(&input, until), evolve(&input, until));
+    let placed = || {
+        let engine = placed_product_engine(
+            Phase::OxygenNeonWhiteDwarf,
+            1.07,
+            0.02,
+            StellarRules::of_version(crate::GENERATOR_VERSION),
+        );
+        (engine.members, engine.dwarf_cores)
+    };
+    assert_eq!(placed(), placed());
+}
+
+/// `MAX_SEGMENTS` at 27: the sky-light fit's system 984 of layer E's cell 48
+/// (`sky::binary_light::fit_record`; Z = 0.002, 2.89 Gyr old), whose inner pair of 110.77 +
+/// 99.79 M☉ at 27.4 d (e 0.13) the old cap of 64 stopped at 3.176 Myr with its companion on its
+/// main sequence for good. After the primary's first transfer, from its Hertzsprung gap, it gives
+/// mass in 32 spells, detaching after each until its swelling refills its lobe some 5 years on, to
+/// its helium star at 3.1761 Myr: 71 segments, under the cap, to two black holes of 37.94 and
+/// 32.33 M☉.
+#[test]
+fn a_massive_gap_donor_s_spells_of_transfer_end_under_the_cap() {
+    use crate::id::Layer;
+    use crate::sky::binary_light::{fit_galaxy, fit_record};
+    use crate::stellar::multiplicity::MultiplicityContext;
+    use crate::stellar::system::SystemStars;
+
+    let galaxy = fit_galaxy();
+    let (record, composition) = fit_record(&galaxy, Layer::E, 48, 984);
+    let stars =
+        SystemStars::generate_with(&galaxy, &record, &composition, MultiplicityContext::Free);
+    let pair = stars
+        .pairs()
+        .iter()
+        .find(|p| {
+            let primary = &stars.stars()[usize::from(p.stars()[0].get())];
+            (primary.initial_mass().value() - 110.77).abs() < 0.01
+        })
+        .expect("the 110.8 + 99.8 M☉ pair");
+    let timeline = pair.timeline();
+    assert!(!timeline.hit_segment_cap(), "{}", describe(timeline));
+    assert_eq!(timeline.segments().len(), 71, "{}", describe(timeline));
+    let spells = timeline
+        .segments()
+        .iter()
+        .filter(|s| {
+            s.kind()
+                == SegmentKind::StableTransfer {
+                    donor: Component::Primary,
+                }
+        })
+        .count();
+    assert_eq!(spells, 32, "spells of transfer");
+    let end = *timeline.state_at(record.age_at_epoch()).stars();
+    assert_eq!(end.map(|s| s.phase()), [Phase::BlackHole, Phase::BlackHole]);
+    assert!(
+        (end[0].mass().value() - 37.943).abs() < 1e-3,
+        "{:?}",
+        end[0]
+    );
+    assert!(
+        (end[1].mass().value() - 32.329).abs() < 1e-3,
+        "{:?}",
+        end[1]
+    );
+}
+
+// --- P11.T4: the swollen helium dwarf ------------------------------------------------------------
+
+/// A helium white dwarf of `dwarf` M☉ fed by a 2.5 M☉ main-sequence donor at τ = 0.5 in
+/// transfer, at metallicity `z` and 5 Gyr, with no pin, under `rules` (`fed_engine`'s pair, under
+/// any rules).
+fn fed_dwarf_engine(
+    dwarf: f64,
+    z: f64,
+    rules: crate::stellar::rules::StellarRules,
+) -> super::evolve::Engine {
+    use std::sync::Arc;
+
+    use super::evolve::{Engine, LiveOrbit};
+    use super::star::{Member, Path};
+    use super::timeline::Context;
+
+    let age = 5.0e9;
+    let input = pair(2.0, 2.5, 1.0, 0.0, z).with_rules(rules);
+    let k = input.orbit();
+    let accretor = Member::Remnant {
+        phase: Phase::HeliumWhiteDwarf,
+        birth: 0.5 * age,
+        origin: crate::units::Megayears::ZERO,
+        mass: Path::starting(age, dwarf),
+    };
+    let donor = Member::MainSequence {
+        helium: false,
+        mass: Path::starting(age, 2.5),
+        tau: Path::starting(age, 0.5),
+    };
+    let orbit = LiveOrbit::new(age, 10.0, 0.0, *k.orientation(), k.mean_anomaly_at_epoch());
+    let mut engine = Engine::new(
+        Arc::new(Context::of(&input)),
+        age,
+        1.0e10,
+        [accretor, donor],
+        orbit,
+        None,
+    );
+    engine.segment_start = age;
+    engine.kind = SegmentKind::StableTransfer {
+        donor: Component::Secondary,
+    };
+    engine
+}
+
+/// P11.T4's swollen dwarf: a 0.38 M☉ helium white dwarf, above `Mc,BGB`(`M_HeF`), fed hydrogen
+/// faster than its core grows by a 0.3 M☉ main-sequence donor, held to no thermal rate, swells onto
+/// the first giant branch of a 0.7 `M_HeF` star, its core the dwarf's to 10⁻⁹, whose strip leaves a
+/// helium white dwarf again (BSE's placement, at the base of the giant branch of a star heavier
+/// than `M_HeF`, left a helium main-sequence star). Fed by `fed_dwarf_engine`'s 2.5 M☉ donor,
+/// heavier than its dwarf and so held to its thermal rate, the swell is refused: the giant would be
+/// fed at a nuclear rate and stripped back at once.
+#[test]
+fn a_swollen_helium_dwarf_keeps_its_degenerate_core() {
+    use super::rlof::Fed;
+    use super::star::{Kind, Member, Path};
+    use crate::stellar::rules::StellarRules;
+
+    let (dwarf, dt, gained) = (0.38, 1.0e3, 1.0e-3);
+    let rules = StellarRules::of_version(crate::GENERATOR_VERSION);
+    let m = dwarf + gained;
+    let fed = Fed {
+        kind: Kind::HeliumWhiteDwarf,
+        before: dwarf,
+        core_before: dwarf,
+        gained,
+        dt,
+    };
+    let swollen = |donor: f64| {
+        let mut engine = fed_dwarf_engine(dwarf, 0.004, rules);
+        let age = engine.age;
+        engine.members[1] = Member::MainSequence {
+            helium: false,
+            mass: Path::starting(age, donor),
+            tau: Path::starting(age, 0.5),
+        };
+        let s = engine.structure(0, age, m, 0.0).expect("a white dwarf");
+        let swells = engine.swell(0, Kind::HeliumWhiteDwarf, m, &s, fed);
+        (engine, swells)
+    };
+    let (engine, swells) = swollen(0.3);
+    assert!(swells);
+    let m_hef = engine.ctx.coeffs().m_hef().value();
+    let Member::Shaped { track, .. } = &engine.members[0] else {
+        panic!(
+            "a swollen giant the binary carries: {:?}",
+            engine.members[0]
+        );
+    };
+    let m0 = track.initial_mass().value();
+    let giant = engine.members[0].state_at(&engine.ctx, 0, engine.age);
+    assert_eq!(giant.phase(), Phase::FirstGiantBranch);
+    let (stripped, _) = engine.stripped_member(0);
+    let left = stripped.state_at(&engine.ctx, 0, engine.age).phase();
+    println!(
+        "M0 {m0} (M_HeF {m_hef}), core {:?}, stripped to {left:?}",
+        giant.core_mass()
+    );
+    assert!((m0 / m_hef - 0.7).abs() < 1e-12, "{m0} against {m_hef}");
+    let pinned = SWOLLEN_GIANT;
+    assert!(
+        m0.total_cmp(&pinned[0]).is_eq(),
+        "{m0} against {}",
+        pinned[0]
+    );
+    let core = giant.core_mass().value();
+    assert!((core - dwarf).abs() <= 1e-9 * dwarf, "{core}");
+    assert!(
+        core.total_cmp(&pinned[1]).is_eq(),
+        "{core} against {}",
+        pinned[1]
+    );
+    assert_eq!(left, Phase::HeliumWhiteDwarf);
+    let (engine, swells) = swollen(2.5);
+    assert!(!swells);
+    assert!(engine.segments.is_empty(), "a refusal closes no segment");
+}
+
+/// The swollen giant's track's initial mass and its core at the placement, M☉ (2026-11-02, under
+/// every 29 hold at generator version 25, and the same at 27).
+const SWOLLEN_GIANT: [f64; 2] = [1.303_933_496_419_151_8, 0.379_999_999_812_082_2];
+
+/// P11.T4's swollen dwarf: two pairs whose primary leaves a helium white dwarf after a common
+/// envelope beside a lighter main-sequence companion that then overflows at its thermal rate
+/// (1.1 + 0.9 M☉ at 100 d and 1.4 + 0.9 M☉ at 200 d, Z = 0.004). As first built at 27 the dwarf
+/// swelled under the held arm and its giant was stripped at once to a helium main-sequence star of
+/// the dwarf's 0.377 and 0.437 M☉. Since version 27's heavy-donor wind such a dwarf blows the excess
+/// off and never swells (`Engine::optically_thick_wind`), so under every 27 hold and under every 29
+/// hold no helium main-sequence star appears and no timeline caps.
+#[test]
+fn a_heavy_donor_s_helium_dwarf_becomes_no_helium_star() {
+    use crate::stellar::rules::StellarRules;
+
+    let until = Years::new(1.2e10);
+    for (m1, m2, period) in [(1.1, 0.9, 100.0), (1.4, 0.9, 200.0)] {
+        let input = pair(m1, m2, period, 0.0, 0.004);
+        for rules in [
+            StellarRules::of_version(crate::GENERATOR_VERSION),
+            StellarRules::of_version(crate::GENERATOR_VERSION),
+        ] {
+            let timeline = evolve(&input.clone().with_rules(rules), until);
+            let helium_star = timeline.segments().iter().any(|s| {
+                [s.start(), s.end()].iter().any(|&age| {
+                    timeline.state_at(age).stars()[0].phase() == Phase::HeliumMainSequence
+                })
+            });
+            assert!(
+                !helium_star,
+                "{m1} + {m2}, {rules:?}: {}",
+                describe(&timeline)
+            );
+            assert!(!timeline.hit_segment_cap(), "{m1} + {m2}");
+        }
+    }
+}
+
+// --- P11.T4: the swollen dwarf's kind -----------------------------------------------------------
+
+/// P11.T4's swollen dwarf: pinned pair 0080's primary leaves an oxygen–neon white dwarf of
+/// 1.070 M☉ (a helium giant of 1.669 M☉ stripped by a common envelope, HPT section 6.1), which its
+/// Hertzsprung-gap companion's transfer swells at 220 Myr into a giant on a thermally pulsing AGB
+/// track whose core at the base of the AGB is below 1.6 M☉, and a common envelope strips back.
+/// The dwarf comes back oxygen–neon, the kind it swelled from, not carbon–oxygen, the track's
+/// kind, since gaining and losing a hydrogen envelope changes no core's composition; under the
+/// version's rules and under every 29 hold alike.
+#[test]
+fn a_swollen_oxygen_neon_dwarf_strips_back_to_its_kind() {
+    use super::testing::swollen_dwarf_kinds;
+    use crate::stellar::rules::StellarRules;
+
+    let input = pinned_pair_number(80);
+    let one = Phase::OxygenNeonWhiteDwarf;
+    for rules in [
+        StellarRules::of_version(crate::GENERATOR_VERSION),
+        StellarRules::of_version(crate::GENERATOR_VERSION),
+    ] {
+        let timeline = evolve(&input.clone().with_rules(rules), Years::new(1.2e10));
+        assert_eq!(
+            swollen_dwarf_kinds(&timeline),
+            [(one, one, false)],
+            "{rules:?}: {}",
+            describe(&timeline)
+        );
+    }
+}
+
+/// Pinned pair `n` of the pinned thousand (`pinned_pair`'s).
+fn pinned_pair_number(n: u32) -> BinaryInput {
+    let mut mix = Mix(0x0b1e_0001);
+    (0..=n)
+        .map(|i| pinned_pair(&mut mix, i))
+        .last()
+        .expect("a pair")
+}
+
+/// A white dwarf of `phase` and `dwarf` M☉ in `fed_dwarf_engine`'s place, at metallicity `z`,
+/// swollen by 0.01 M☉ of hydrogen over a century into the giant around its core, under `rules`.
+fn swollen_dwarf_engine(
+    phase: Phase,
+    dwarf: f64,
+    z: f64,
+    rules: crate::stellar::rules::StellarRules,
+) -> super::evolve::Engine {
+    use super::rlof::Fed;
+    use super::star::{Kind, Member, Path};
+
+    let mut engine = fed_dwarf_engine(dwarf, z, rules);
+    let age = engine.age;
+    engine.members[0] = Member::Remnant {
+        phase,
+        birth: 0.5 * age,
+        origin: crate::units::Megayears::ZERO,
+        mass: Path::starting(age, dwarf),
+    };
+    let (gained, dt) = (1.0e-2, 1.0e2);
+    let m = dwarf + gained;
+    let kind = Kind::of(phase, dwarf);
+    let s = engine.structure(0, age, m, 0.0).expect("a white dwarf");
+    let fed = Fed {
+        kind,
+        before: dwarf,
+        core_before: dwarf,
+        gained,
+        dt,
+    };
+    assert!(engine.swell(0, kind, m, &s, fed), "{phase:?} of {dwarf} M☉");
+    engine
+}
+
+/// P11.T4's swollen dwarf: an oxygen–neon dwarf of 1.07 M☉ and a carbon–oxygen one of 1.25 M☉
+/// swell into giants on thermally pulsing AGB tracks whose cores at the base of the AGB, solved
+/// back from the dwarfs' (`sse::pulsing_agb_helium_core`: 1.41 and 1.82 M☉), are of the other kind
+/// (HPT section 6). The giant's strip, its strip after a merger it survives as itself and its own
+/// track's death leave the dwarf's kind, not the track's.
+#[test]
+fn a_swollen_dwarf_s_giant_leaves_the_dwarf_s_kind() {
+    use super::star::Member;
+    use crate::stellar::rules::StellarRules;
+
+    let rules = StellarRules::of_version(crate::GENERATOR_VERSION);
+    let (one, co) = (Phase::OxygenNeonWhiteDwarf, Phase::CarbonOxygenWhiteDwarf);
+    for (phase, dwarf) in [(one, 1.07), (co, 1.25)] {
+        let case = format!("{phase:?} of {dwarf} M☉");
+        let mut engine = swollen_dwarf_engine(phase, dwarf, 0.02, rules);
+        let (stripped, _) = engine.stripped_member(0);
+        let left = stripped.state_at(&engine.ctx, 0, engine.age).phase();
+        assert_eq!(left, phase, "{case}: stripped");
+        let mut merged = swollen_dwarf_engine(phase, dwarf, 0.02, rules);
+        merged.members[1] = Member::Gone;
+        merged.mix();
+        let (stripped, _) = merged.stripped_member(0);
+        let left = stripped.state_at(&merged.ctx, 0, merged.age).phase();
+        assert_eq!(left, phase, "{case}: merged as itself, then stripped");
+        let Member::Shaped { track, offset, .. } = &engine.members[0] else {
+            panic!("{case}: a giant the binary carries");
+        };
+        let death = track.death().expect("a track built in full");
+        let at = offset + death.age().value();
+        println!("{case}: the track dies by {:?} at {at} yr", death.kind());
+        engine.age = at;
+        engine.die(0);
+        let dead = engine.members[0].state_at(&engine.ctx, 0, engine.age);
+        assert_eq!(dead.phase(), phase, "{case}: dead, {dead:?}");
+    }
+}
+
+/// P11.T4's swollen dwarf: a carbon–oxygen dwarf of 1.43 M☉ at Z = 0.004 swells onto the thermally
+/// pulsing AGB track of a 7.41 M☉ star, whose oxygen–neon core collapses by electron capture at
+/// its death. The giant's carbon–oxygen core ignites carbon there and nothing is left (HPT section
+/// 6), where BSE's giant, of the track's kind, collapsed to the 1.26 M☉ neutron star; its core's
+/// Type Ia candidate is pooled (P11.T4's `co_chandrasekhar`).
+#[test]
+fn a_swollen_carbon_oxygen_dwarf_s_giant_disrupts_where_its_track_captures_electrons() {
+    use super::star::Member;
+    use crate::stellar::remnant::{DeathKind, RemnantKind};
+    use crate::stellar::rules::StellarRules;
+
+    let rules = StellarRules::of_version(crate::GENERATOR_VERSION);
+    let mut engine = swollen_dwarf_engine(Phase::CarbonOxygenWhiteDwarf, 1.43, 0.004, rules);
+    let Member::Shaped { track, offset, .. } = &engine.members[0] else {
+        panic!("a giant the binary carries");
+    };
+    let death = track.death().expect("a track built in full");
+    assert_eq!(death.kind(), DeathKind::ElectronCapture);
+    engine.age = offset + death.age().value();
+    engine.die(0);
+    let dead = engine.members[0].state_at(&engine.ctx, 0, engine.age);
+    assert_eq!(dead.phase(), Phase::NoRemnant, "{dead:?}");
+    let [collapse] = engine.supernovae.as_slice() else {
+        panic!("one death, not {:?}", engine.supernovae);
+    };
+    assert_eq!(collapse.remnant().kind(), RemnantKind::None);
+    let pooled = engine.pooled.expect("the core's candidate");
+    assert_eq!(pooled.channel(), IaPoolChannel::Accretion);
+}
+
+/// P11.T4's swollen dwarf: a thermally pulsing AGB product of 4.33 M☉ around a 1.76 M☉ core that
+/// no star can hold, made from the giant an oxygen–neon or carbon–oxygen dwarf swelled into, is a
+/// dwarf of that kind, not an iron core (the product of no dwarf's, as
+/// `an_unplaced_merger_product_takes_the_engine_s_own_remnant` has it): above the Chandrasekhar mass
+/// the oxygen–neon one collapses at once to the 1.26 M☉ neutron star of an accretion-induced
+/// collapse, and the carbon–oxygen one disrupts and leaves nothing after its Type Ia candidate
+/// (P11.T4's `co_chandrasekhar`).
+#[test]
+fn an_unplaced_product_of_a_swollen_dwarf_keeps_its_kind() {
+    use super::common_envelope::CoalescedProduct;
+    use super::star::Kind;
+    use crate::stellar::remnant::collapse::electron_capture_remnant;
+    use crate::stellar::remnant::{CompactRemnant, RemnantKind};
+    use crate::stellar::rules::StellarRules;
+
+    for (phase, dwarf, pooled) in [
+        (Phase::OxygenNeonWhiteDwarf, 1.07, false),
+        (Phase::CarbonOxygenWhiteDwarf, 1.25, true),
+    ] {
+        let case = format!("{phase:?} of {dwarf} M☉");
+        let mut engine = swollen_dwarf_engine(
+            phase,
+            dwarf,
+            0.02,
+            StellarRules::of_version(crate::GENERATOR_VERSION),
+        );
+        let source = engine.dwarf_cores[0];
+        assert_eq!(source.dwarf(), Some(phase), "{case}");
+        let product = engine.product_member(
+            CoalescedProduct::Star {
+                kind: Kind::PulsingAgb,
+                mass: 4.331_5,
+                core: 1.764_8,
+                burnt: 1.0,
+                fraction: 0.0,
+            },
+            source,
+        );
+        engine.finish_merger_with(product);
+        let [death] = engine.supernovae.as_slice() else {
+            panic!("{case}: one death, not {:?}", engine.supernovae);
+        };
+        let remnant = if pooled {
+            CompactRemnant::new(RemnantKind::None, SolarMasses::ZERO)
+        } else {
+            electron_capture_remnant()
+        };
+        assert_eq!(death.remnant(), remnant, "{case}");
+        assert_eq!(engine.pooled.is_some(), pooled, "{case}");
+    }
+}
+
+// --- P11.T4: the placed product's kind and the helium product's core (held at 29) -------------
+
+/// A white dwarf of `phase` and `dwarf` M☉ merged with `fed_dwarf_engine`'s 2.5 M☉ main-sequence
+/// star at metallicity `z` under `rules` (BSE table 2: a thermally pulsing AGB star around the
+/// dwarf), placed on a track by its core.
+fn placed_product_engine(
+    phase: Phase,
+    dwarf: f64,
+    z: f64,
+    rules: crate::stellar::rules::StellarRules,
+) -> super::evolve::Engine {
+    use super::star::{Member, Path};
+
+    let mut engine = fed_dwarf_engine(dwarf, z, rules);
+    let age = engine.age;
+    engine.members[0] = Member::Remnant {
+        phase,
+        birth: 0.5 * age,
+        origin: crate::units::Megayears::ZERO,
+        mass: Path::starting(age, dwarf),
+    };
+    engine.mix();
+    assert!(
+        matches!(engine.members[0], Member::Shaped { .. }) && engine.members[1].is_gone(),
+        "{phase:?} of {dwarf} M☉: a placed product, not {:?}",
+        engine.members
+    );
+    engine
+}
+
+/// P11.T4's dwarf limit: a placed merger product of a carbon–oxygen or oxygen–neon dwarf and a
+/// main-sequence star (BSE table 2, 11 or 12 + 1 → 6) keeps the dwarf's kind, whatever its track's
+/// `Mc,BAGB` (research-leans-35 §7). An oxygen–neon dwarf of 1.07 M☉ is placed on a track whose
+/// `Mc,BAGB`, 1.41 M☉, would type it carbon–oxygen, and a carbon–oxygen one of 1.25 M☉ on one
+/// whose 1.82 M☉ would type it oxygen–neon: the strip and the track's death leave the dwarf's kind,
+/// where version 27's left the track's. A carbon–oxygen one of 1.43 M☉ at Z = 0.004 is placed on a
+/// 7.41 M☉ track that collapses by electron capture at its death: its carbon–oxygen core takes the
+/// carbon–oxygen ending there, a disruption that leaves nothing, not a neutron star, after its Type
+/// Ia candidate (P11.T4's `co_chandrasekhar`).
+#[test]
+fn a_placed_product_of_a_dwarf_keeps_its_kind() {
+    use super::star::Member;
+    use crate::stellar::rules::StellarRules;
+
+    let rules = StellarRules::of_version(crate::GENERATOR_VERSION);
+    let (one, co) = (Phase::OxygenNeonWhiteDwarf, Phase::CarbonOxygenWhiteDwarf);
+    for (phase, dwarf, z, kind) in [
+        (one, 1.07, 0.02, one),
+        (co, 1.25, 0.02, co),
+        (co, 1.43, 0.004, Phase::NoRemnant),
+    ] {
+        let case = format!("{phase:?} of {dwarf} M☉ at Z = {z}, {kind:?}");
+        let mut engine = placed_product_engine(phase, dwarf, z, rules);
+        if matches!(
+            kind,
+            Phase::CarbonOxygenWhiteDwarf | Phase::OxygenNeonWhiteDwarf
+        ) {
+            let (stripped, _) = engine.stripped_member(0);
+            let left = stripped.state_at(&engine.ctx, 0, engine.age).phase();
+            assert_eq!(left, kind, "{case}: stripped");
+        }
+        let Member::Shaped { track, offset, .. } = &engine.members[0] else {
+            panic!("{case}: a giant the binary carries");
+        };
+        let death = track.death().expect("a track built in full");
+        engine.age = offset + death.age().value();
+        engine.die(0);
+        let dead = engine.members[0].state_at(&engine.ctx, 0, engine.age);
+        assert_eq!(dead.phase(), kind, "{case}: dead, {dead:?}");
+        assert_eq!(engine.pooled.is_some(), kind == Phase::NoRemnant, "{case}");
+    }
+}
+
+/// P11.T4's dwarf limit: a coalescence reads its parents' dwarfs. A 0.6 M☉ carbon–oxygen dwarf
+/// coalescing with a 1.8 M☉ helium star in its Hertzsprung gap, whose track types its core
+/// oxygen–neon (a helium star of 1.6–2.25 M☉, HPT section 6.1), gives an oxygen–neon core
+/// (research-leans-35 §7), where version 27 read no dwarf parent there. Of that core, a thermally
+/// pulsing AGB product of 2.24 M☉ around 0.457 M☉ at Z = 0.004 that no star can hold leaves an
+/// oxygen–neon dwarf, where version 27's typing left a carbon–oxygen one: a check of the typing
+/// alone, since no oxygen–neon dwarf is so light.
+#[test]
+fn a_coalescence_reads_its_dwarf_parents_only_from_29() {
+    use std::sync::Arc;
+
+    use super::dwarf_limit::CoreSource;
+    use super::star::{Kind, Member, Path};
+    use crate::stellar::rules::StellarRules;
+    use crate::stellar::sse::Track;
+
+    let rules = StellarRules::of_version(crate::GENERATOR_VERSION);
+    let track = Arc::new(Track::helium_star_full(
+        SolarMasses::new(1.8),
+        &Composition::SOLAR,
+        &StarDraws::median(),
+    ));
+    let at = track
+        .age_in_phase(Phase::HeliumHertzsprungGap, 0.5)
+        .expect("a helium Hertzsprung gap");
+    let mut engine = fed_dwarf_engine(0.6, 0.02, rules);
+    let age = engine.age;
+    let offset = super::evolve::offset_for(age, at);
+    engine.members[0] = Member::Shaped {
+        mass: Path::starting(age, track.mass_at(age - offset)),
+        track: Arc::clone(&track),
+        offset,
+    };
+    engine.members[1] = Member::Remnant {
+        phase: Phase::CarbonOxygenWhiteDwarf,
+        birth: 0.5 * age,
+        origin: crate::units::Megayears::ZERO,
+        mass: Path::starting(age, 0.6),
+    };
+    let parents = [(0, Kind::HeliumGap), (1, Kind::CarbonOxygenWhiteDwarf)];
+    assert_eq!(
+        engine.coalesced_source(parents),
+        CoreSource::OxygenNeonDwarf
+    );
+    let product = (2.240_1, 0.457_2, 1.0);
+    let source = CoreSource::OxygenNeonDwarf;
+    let (_, state) = unplaced_product(Kind::PulsingAgb, product, 0.004, rules, source);
+    assert_eq!(state.phase(), Phase::OxygenNeonWhiteDwarf);
+}
+
+/// P11.T4's dwarf limit: a placed product's core is a dwarf's where either parent's is, oxygen–neon
+/// if either is (carbon burning is not undone), and a pinned primary's product keeps none.
+#[test]
+fn a_placed_product_s_dwarf_is_either_parent_s() {
+    use super::dwarf_limit::{CoreSource, ProductTyping};
+
+    let (co, one, other) = (
+        CoreSource::CarbonOxygenDwarf,
+        CoreSource::OxygenNeonDwarf,
+        CoreSource::Other,
+    );
+    for (a, b, both) in [
+        (one, co, one),
+        (co, one, one),
+        (one, other, one),
+        (other, co, co),
+        (co, co, co),
+        (other, other, other),
+    ] {
+        assert_eq!(a.with(b), both, "{a:?} with {b:?}");
+        assert_eq!(ProductTyping::Unpinned.placed(both), both);
+        assert_eq!(ProductTyping::Pinned.placed(both), other);
+    }
+}
+
+/// P11.T4's dwarf limit: an unplaced helium-giant product of no dwarf whose carbon–oxygen core of
+/// 1.5 M☉ is an iron core (`an_unplaced_product_s_dwarf_is_typed_by_its_core`'s row) collapses at
+/// once through plan 06's iron-core fate, with the ordinary kick of an iron core's collapse from a
+/// helium star of 2 M☉ with no hydrogen, and pools no Type Ia candidate; it is no oxygen–neon dwarf
+/// and takes no accretion-induced collapse (research-leans-35 §8). No helium-giant product with
+/// such a core goes unplaced in the engine, whose helium giants hold it, so the arm is a guard.
+#[test]
+fn an_unplaced_helium_giant_s_iron_core_collapses_as_one() {
+    use super::common_envelope::Product;
+    use crate::stellar::remnant::collapse::electron_capture_remnant;
+    use crate::stellar::remnant::{
+        CollapseChannel, KickDraws, KickLaw, KickMode, ProgenitorAtDeath, RemnantKind,
+        StandardKickLaw, Stripping,
+    };
+
+    let mut engine = fed_dwarf_engine(
+        0.6,
+        0.02,
+        crate::stellar::rules::StellarRules::of_version(crate::GENERATOR_VERSION),
+    );
+    let (co_core, helium_core) = (SolarMasses::new(1.5), SolarMasses::new(2.0));
+    engine.finish_merger_with(Product::IronCore {
+        co_core,
+        helium_core,
+        mass: helium_core,
+    });
+    let [collapse] = engine.supernovae.as_slice() else {
+        panic!("one collapse, not {:?}", engine.supernovae);
+    };
+    let remnant = collapse.remnant();
+    assert_eq!(remnant.kind(), RemnantKind::NeutronStar);
+    assert_ne!(remnant, electron_capture_remnant());
+    let progenitor =
+        ProgenitorAtDeath::new(co_core, helium_core, SolarMasses::ZERO, Stripping::None);
+    let kick = StandardKickLaw::under(crate::stellar::rules::StellarRules::of_version(
+        crate::GENERATOR_VERSION,
+    ))
+    .kick(
+        CollapseChannel::IronCore,
+        &progenitor,
+        &remnant,
+        &KickDraws::of(engine.ctx.draws(0)),
+    );
+    assert_eq!(collapse.kick(), Some(kick));
+    assert_eq!(kick.mode(), KickMode::Ordinary);
+    assert!(engine.pooled.is_none());
+    let state = engine.members[0].state_at(&engine.ctx, 0, engine.age);
+    assert_eq!(state.phase(), Phase::NeutronStar);
+}
+
+/// P11.T4's swollen dwarf and dwarf limit: under the default recipe an oxygen–neon core on a track
+/// that would type it carbon–oxygen collapses by electron capture where it reaches the capture
+/// mass, 1.37 M☉ (`Engine::core_limit_age`; research-leans-35 §8). The capture's age is the first
+/// at which the core reaches it, to the bisection's halvings, on a core growing from 1.0 to
+/// 1.44 M☉ over 10⁶ years. The 1.07 M☉ dwarf's giant's core, whose track's thermally pulsing AGB
+/// ends at 1.09 M☉, never does (the heaviest carbon–oxygen dwarf of a single track at
+/// Z = 10⁻⁴–0.03 is 1.20 M☉, 2026-11-03): there the stop is a guard. At the capture the giant
+/// leaves the 1.26 M☉ neutron star with the low-mode kick and no Type Ia candidate.
+#[test]
+fn an_oxygen_neon_core_collapses_at_the_capture_mass() {
+    use super::supernova::first_age_at;
+    use crate::stellar::remnant::collapse::electron_capture_remnant;
+    use crate::stellar::remnant::{KickMode, RemnantKind};
+    use crate::stellar::rules::StellarRules;
+
+    let core = |age: f64| 1.0 + 0.44 * age / 1.0e6;
+    let at = first_age_at(core, 0.0, 1.0e6, 1.37).expect("a capture");
+    let exact = (1.37 - 1.0) / 0.44 * 1.0e6;
+    assert!(
+        core(at) >= 1.37 && at - exact < 1e-6,
+        "{at} against {exact}"
+    );
+    assert_eq!(first_age_at(core, 0.0, 0.5e6, 1.37), None);
+    assert_eq!(first_age_at(core, 0.9e6, 1.0e6, 1.37), Some(0.9e6));
+    let mut engine = swollen_dwarf_engine(
+        Phase::OxygenNeonWhiteDwarf,
+        1.07,
+        0.02,
+        StellarRules::of_version(crate::GENERATOR_VERSION),
+    );
+    assert_eq!(engine.core_limit_age(0), None);
+    engine.reach_core_limit(0);
+    let [collapse] = engine.supernovae.as_slice() else {
+        panic!("one collapse, not {:?}", engine.supernovae);
+    };
+    assert_eq!(collapse.remnant(), electron_capture_remnant());
+    assert_eq!(collapse.remnant().kind(), RemnantKind::NeutronStar);
+    assert_eq!(collapse.kick().map(|k| k.mode()), Some(KickMode::Low));
+    assert!(engine.pooled.is_none());
+}
+
+/// P11.T4's dwarf limit: a strip keeps a star's dwarf core where it leaves a star and gives it to
+/// the white dwarf it leaves. An early-AGB product of a carbon–oxygen dwarf's (4 M☉ around a
+/// 1.8 M☉ helium core) is stripped to its naked helium giant, which keeps the record; an
+/// oxygen–neon dwarf's placed product is stripped to an oxygen–neon dwarf, whose own phase holds
+/// the kind, and the record goes.
+#[test]
+fn a_strip_keeps_a_dwarf_core_where_it_leaves_a_star() {
+    use super::common_envelope::CoalescedProduct;
+    use super::dwarf_limit::CoreSource;
+    use super::star::{Kind, Member};
+    use crate::stellar::rules::StellarRules;
+
+    let every_29 = StellarRules::of_version(crate::GENERATOR_VERSION);
+    let mut engine = fed_dwarf_engine(0.6, 0.02, every_29);
+    let product = engine.product_member(
+        CoalescedProduct::Star {
+            kind: Kind::EarlyAgb,
+            mass: 4.0,
+            core: 1.8,
+            burnt: 0.7,
+            fraction: 0.0,
+        },
+        CoreSource::CarbonOxygenDwarf,
+    );
+    engine.finish_merger_with(product);
+    assert!(
+        matches!(engine.members[0], Member::Shaped { .. }),
+        "a placed product"
+    );
+    assert_eq!(engine.dwarf_cores[0], CoreSource::CarbonOxygenDwarf);
+    engine.strip(0);
+    let left = engine.members[0].state_at(&engine.ctx, 0, engine.age);
+    assert!(left.phase().is_living(), "a naked helium star: {left:?}");
+    assert_eq!(engine.dwarf_cores[0], CoreSource::CarbonOxygenDwarf);
+    let mut engine = placed_product_engine(Phase::OxygenNeonWhiteDwarf, 1.07, 0.02, every_29);
+    assert_eq!(engine.dwarf_cores[0], CoreSource::OxygenNeonDwarf);
+    engine.strip(0);
+    let left = engine.members[0].state_at(&engine.ctx, 0, engine.age);
+    assert_eq!(left.phase(), Phase::OxygenNeonWhiteDwarf);
+    assert_eq!(engine.dwarf_cores[0], CoreSource::Other);
+}
+
+/// P11.T4's swollen dwarf and dwarf limit: the core-limit stop lands where an oxygen–neon core on a
+/// carbon–oxygen track reaches the capture mass, and the core collapses there by electron capture
+/// (`Engine::core_limit_age`, `detached::Stop::CoreLimit`). No built track's carbon–oxygen core
+/// reaches 1.37 M☉, so the test lowers the mass to 1.07 M☉ (`supernova::with_capture_mass`): an
+/// oxygen–neon dwarf of 1.07 M☉'s placed product of 3.57 M☉, alone after its merger, reaches it
+/// on its track's thermally pulsing AGB, whose core grows from 1.068 M☉, with its envelope on
+/// (its wind strips it at 1.073 M☉), and its detached phase ends there, once and the same each
+/// time, in the 1.26 M☉ neutron star with the low-mode kick.
+#[test]
+fn a_core_limit_stop_lands_where_the_core_reaches_the_capture_mass() {
+    use super::dwarf_limit::{Ending, dwarf_core_deaths};
+    use super::star::Member;
+    use super::supernova::with_capture_mass;
+    use crate::stellar::remnant::KickMode;
+    use crate::stellar::remnant::collapse::electron_capture_remnant;
+    use crate::stellar::rules::StellarRules;
+
+    let run = || {
+        let mut engine = placed_product_engine(
+            Phase::OxygenNeonWhiteDwarf,
+            1.07,
+            0.02,
+            StellarRules::of_version(crate::GENERATOR_VERSION),
+        );
+        let at = engine
+            .core_limit_age(0)
+            .expect("a capture under the lowered mass");
+        assert!(at > engine.age, "{at} after {}", engine.age);
+        let Member::Shaped { track, offset, .. } = &engine.members[0] else {
+            panic!("a placed giant");
+        };
+        let core = track.state_at(Years::new(at - offset)).core_mass().value();
+        assert!((core - 1.07).abs() < 1e-9, "{core}");
+        let captures = dwarf_core_deaths()[Ending::CaptureAtLimit as usize];
+        engine.detached_phase();
+        assert_eq!(
+            dwarf_core_deaths()[Ending::CaptureAtLimit as usize],
+            captures + 1
+        );
+        (at, engine.age, engine.members, engine.supernovae)
+    };
+    let (at, age, members, supernovae) = with_capture_mass(1.07, run);
+    assert!(age.total_cmp(&at).is_eq(), "the stop at {age}, not {at}");
+    let [collapse] = supernovae.as_slice() else {
+        panic!("one collapse, not {supernovae:?}");
+    };
+    assert_eq!(collapse.remnant(), electron_capture_remnant());
+    assert_eq!(collapse.kick().map(|k| k.mode()), Some(KickMode::Low));
+    assert!(matches!(
+        members[0],
+        Member::Remnant {
+            phase: Phase::NeutronStar,
+            ..
+        }
+    ));
+    assert_eq!(with_capture_mass(1.07, run), (at, age, members, supernovae));
+    let engine = placed_product_engine(
+        Phase::OxygenNeonWhiteDwarf,
+        1.07,
+        0.02,
+        StellarRules::of_version(crate::GENERATOR_VERSION),
+    );
+    assert_eq!(engine.core_limit_age(0), None, "none at 1.37 M☉");
+}
+
+/// P11.T4's swollen dwarf: how a swollen dwarf's giant ends where its own track dies
+/// ([`SwollenDeath::of`]), by the dwarf it came from, the track's death and the remnant's phase.
+///
+/// [`SwollenDeath::of`]: super::supernova::SwollenDeath::of
+#[test]
+fn a_swollen_dwarf_s_giant_dies_as_its_dwarf_would() {
+    use super::dwarf_limit::CoreSource;
+    use super::supernova::SwollenDeath;
+    use crate::stellar::remnant::{DeathKind, SupernovaType};
+
+    let (one, co) = (Phase::OxygenNeonWhiteDwarf, Phase::CarbonOxygenWhiteDwarf);
+    let (ecsn, ia) = (
+        DeathKind::ElectronCapture,
+        DeathKind::ThermonuclearDisruption,
+    );
+    let (ns, none) = (Phase::NeutronStar, Phase::NoRemnant);
+    let core_collapse = DeathKind::CoreCollapse {
+        supernova: SupernovaType::IIP,
+    };
+    for (source, death, phase, outcome) in [
+        (
+            CoreSource::Other,
+            DeathKind::EnvelopeLoss,
+            co,
+            SwollenDeath::Own,
+        ),
+        (CoreSource::Other, ia, none, SwollenDeath::Own),
+        (
+            CoreSource::OxygenNeonDwarf,
+            DeathKind::EnvelopeLoss,
+            one,
+            SwollenDeath::Own,
+        ),
+        (
+            CoreSource::OxygenNeonDwarf,
+            DeathKind::EnvelopeLoss,
+            co,
+            SwollenDeath::WhiteDwarf(one),
+        ),
+        (
+            CoreSource::CarbonOxygenDwarf,
+            DeathKind::EnvelopeLoss,
+            one,
+            SwollenDeath::WhiteDwarf(co),
+        ),
+        (CoreSource::OxygenNeonDwarf, ecsn, ns, SwollenDeath::Own),
+        (
+            CoreSource::OxygenNeonDwarf,
+            ia,
+            none,
+            SwollenDeath::ElectronCapture,
+        ),
+        (CoreSource::CarbonOxygenDwarf, ia, none, SwollenDeath::Own),
+        (
+            CoreSource::CarbonOxygenDwarf,
+            ecsn,
+            ns,
+            SwollenDeath::Disruption,
+        ),
+        (
+            CoreSource::OxygenNeonDwarf,
+            core_collapse,
+            ns,
+            SwollenDeath::Own,
+        ),
+        (
+            CoreSource::CarbonOxygenDwarf,
+            core_collapse,
+            ns,
+            SwollenDeath::Own,
+        ),
+    ] {
+        assert_eq!(
+            SwollenDeath::of(
+                source,
+                death,
+                crate::stellar::remnant::structure::CHANDRASEKHAR_MASS,
+                phase,
+            ),
+            outcome,
+            "{source:?}, {death:?}, {phase:?}"
+        );
+    }
+    // A carbon–oxygen core below the Chandrasekhar mass where its track captures electrons is
+    // left as its dwarf.
+    assert_eq!(
+        SwollenDeath::of(
+            CoreSource::CarbonOxygenDwarf,
+            ecsn,
+            SolarMasses::new(1.3),
+            ns
+        ),
+        SwollenDeath::WhiteDwarf(co)
+    );
+}
+
+// --- P11.T4: the kept core's endings -------------------------------------------------------------
+
+/// Runs `engine`'s detached phases until a death is recorded, at most twenty.
+fn until_a_death(engine: &mut super::evolve::Engine) {
+    for _ in 0..20 {
+        if !engine.supernovae.is_empty() || engine.age >= engine.until {
+            return;
+        }
+        engine.detached_phase();
+    }
+}
+
+/// P11.T4's kept-core endings: a placed product's kept core ends as its track does, the kept kind
+/// setting only what is left (research-leans-38).
+///
+/// - A carbon–oxygen dwarf of 1.36 M☉ placed with a 2.5 M☉ main-sequence star (BSE table 2,
+///   11 + 1 → 6) on a track whose `Mc,BAGB`, 1.85 M☉, lies outside the capture window, which caps
+///   its pulses at the capture mass, ends as a carbon–oxygen dwarf of the capture mass. The
+///   brief's 1.2 M☉ dwarf's track loses its envelope at 1.22 M☉, below the cap, and leaves that.
+/// - One of 1.43 M☉ at Z = 0.004, placed on a track inside the window that collapses by electron
+///   capture at `Mc,SN`, the Chandrasekhar mass, ends in a thermonuclear disruption that leaves
+///   nothing, with a Type Ia candidate of its core pooled (P11.T4's `co_chandrasekhar`).
+/// - An early-AGB product of 4.5 M☉ around a 2.4 M☉ helium core of a carbon–oxygen dwarf's, whose
+///   track collapses an iron core, collapses as the track does (before the fix the placed
+///   product's kept core disrupted at the Chandrasekhar mass on the way).
+#[test]
+fn a_kept_core_ends_as_its_track_does_from_29() {
+    use super::common_envelope::CoalescedProduct;
+    use super::dwarf_limit::CoreSource;
+    use super::star::{Kind, Member};
+    use crate::stellar::remnant::RemnantKind;
+    use crate::stellar::remnant::collapse::OXYGEN_NEON_CAPTURE_MASS;
+    use crate::stellar::rules::StellarRules;
+
+    let rules = StellarRules::of_version(crate::GENERATOR_VERSION);
+    let co = Phase::CarbonOxygenWhiteDwarf;
+    for (dwarf, z, phase) in [(1.36, 0.02, co), (1.43, 0.004, Phase::NoRemnant)] {
+        let case = format!("{dwarf} M☉ at Z = {z}");
+        let mut engine = placed_product_engine(co, dwarf, z, rules);
+        let Member::Shaped { track, offset, .. } = &engine.members[0] else {
+            panic!("{case}: a placed giant");
+        };
+        let death = track.death().expect("a track built in full");
+        engine.age = offset + death.age().value();
+        engine.die(0);
+        let dead = engine.members[0].state_at(&engine.ctx, 0, engine.age);
+        assert_eq!(dead.phase(), phase, "{case}: {dead:?}");
+        if phase == co {
+            let capture = OXYGEN_NEON_CAPTURE_MASS.value();
+            assert!(
+                (dead.mass().value() - capture).abs() < 1e-9 * capture,
+                "{case}: {dead:?}"
+            );
+        } else {
+            let [death] = engine.supernovae.as_slice() else {
+                panic!("{case}: one death, not {:?}", engine.supernovae);
+            };
+            assert_eq!(death.remnant().kind(), RemnantKind::None, "{case}");
+        }
+        assert_eq!(engine.pooled.is_some(), phase != co, "{case}");
+    }
+    let mut engine = fed_dwarf_engine(0.6, 0.02, rules);
+    let product = engine.product_member(
+        CoalescedProduct::Star {
+            kind: Kind::EarlyAgb,
+            mass: 4.5,
+            core: 2.4,
+            burnt: 0.7,
+            fraction: 0.0,
+        },
+        CoreSource::CarbonOxygenDwarf,
+    );
+    engine.finish_merger_with(product);
+    let Member::Shaped { track, .. } = &engine.members[0] else {
+        panic!("a placed early-AGB star");
+    };
+    assert!(
+        matches!(
+            track.death().map(|d| d.kind()),
+            Some(crate::stellar::remnant::DeathKind::CoreCollapse { .. })
+        ),
+        "an iron core's track"
+    );
+    until_a_death(&mut engine);
+    let [death] = engine.supernovae.as_slice() else {
+        panic!("one death, not {:?}", engine.supernovae);
+    };
+    assert_eq!(death.remnant().kind(), RemnantKind::NeutronStar);
+}
+
+/// P11.T4's kept-core endings: an oxygen–neon dwarf collapses at the capture mass, 1.37 M☉
+/// (research-leans-38; Miyaji et al. 1980, Nomoto 1984): one of 1.369 M☉ a 3 M☉ star's AGB wind
+/// feeds stops there and collapses by accretion-induced collapse, with no Type Ia candidate, where
+/// before the fix it grew to the Chandrasekhar mass first; and a merger of a 0.8 M☉ oxygen–neon
+/// dwarf with a 0.6 M☉ carbon–oxygen one, 1.40 M☉, collapses at once, where before the fix it
+/// stayed an oxygen–neon dwarf.
+#[test]
+fn an_oxygen_neon_dwarf_collapses_at_the_capture_mass_from_29() {
+    use super::star::{Member, Path};
+    use crate::stellar::remnant::collapse::electron_capture_remnant;
+    use crate::stellar::rules::StellarRules;
+
+    let one = Phase::OxygenNeonWhiteDwarf;
+    let rules = StellarRules::of_version(crate::GENERATOR_VERSION);
+    let mut engine = wind_fed_dwarf_engine(1.369, rules);
+    let age = engine.age;
+    engine.members[0] = Member::Remnant {
+        phase: one,
+        birth: 0.5 * age,
+        origin: crate::units::Megayears::ZERO,
+        mass: Path::starting(age, 1.369),
+    };
+    engine.detached_phase();
+    let [collapse] = engine.supernovae.as_slice() else {
+        panic!("one collapse, not {:?}", engine.supernovae);
+    };
+    assert_eq!(collapse.remnant(), electron_capture_remnant());
+    assert!(engine.pooled.is_none());
+    let mut engine = fed_dwarf_engine(0.8, 0.02, rules);
+    let age = engine.age;
+    engine.members = [0.8, 0.6].map(|m| Member::Remnant {
+        phase: if m > 0.7 {
+            one
+        } else {
+            Phase::CarbonOxygenWhiteDwarf
+        },
+        birth: 0.5 * age,
+        origin: crate::units::Megayears::ZERO,
+        mass: Path::starting(age, m),
+    });
+    engine.mix();
+    let product = engine.members[0].state_at(&engine.ctx, 0, engine.age);
+    assert_eq!(product.phase(), Phase::NeutronStar, "{product:?}");
+    assert!(engine.pooled.is_some(), "the merger's candidate");
+}
+
+/// P11.T4's kept-core endings: a helium star of 1.6–2.25 M☉ leaves no oxygen–neon dwarf above the
+/// capture mass, 1.37 M☉, collapsing by electron capture where its core reaches it; before the fix
+/// such stars left oxygen–neon dwarfs of up to 1.44 M☉.
+#[test]
+fn no_helium_star_leaves_an_oxygen_neon_dwarf_above_the_capture_mass_from_29() {
+    use crate::stellar::remnant::collapse::OXYGEN_NEON_CAPTURE_MASS;
+    use crate::stellar::sse::Track;
+
+    let mut heaviest = 0.0_f64;
+    for k in 0..33 {
+        let m = SolarMasses::new(1.6 + 0.02 * f64::from(k));
+        let track = Track::helium_star_full(m, &Composition::SOLAR, &StarDraws::median());
+        if let (Some((Phase::OxygenNeonWhiteDwarf, ..)), Some(remnant)) =
+            (track.remnant_clock(), track.remnant())
+        {
+            heaviest = heaviest.max(remnant.mass().value());
+        }
+    }
+    assert!(
+        heaviest <= OXYGEN_NEON_CAPTURE_MASS.value(),
+        "the heaviest oxygen–neon dwarf {heaviest} M☉"
+    );
+}
+
+/// P11.T4's kept-core endings: a merger's helium-giant product that no star holds, of no pinned
+/// primary, ends by its mass, which stands for `Mc,BAGB` (research-leans-38 and 40; HPT sections 6 and
+/// 6.1, plan 06's `helium_star_end`): an iron core from 2.25 M☉, an oxygen–neon core's electron
+/// capture from 1.6 M☉, a thermonuclear disruption from 1.44 M☉, a carbon–oxygen dwarf below; a
+/// thermally pulsing AGB product keeps its iron core at a 1.438 M☉ carbon–oxygen core. The
+/// disruption leaves nothing, with a Type Ia candidate of its mass (P11.T4's `co_chandrasekhar`).
+#[test]
+fn an_unplaced_helium_giant_ends_by_its_mass_from_29() {
+    use super::common_envelope::Product;
+    use super::dwarf_limit::{CoreSource, ProductTyping, Unplaced};
+    use super::star::Kind;
+    use crate::stellar::remnant::RemnantKind;
+
+    let arm = ProductTyping::Unpinned;
+    let other = CoreSource::Other;
+    let msun = SolarMasses::new;
+    for (kind, m, core, unplaced) in [
+        (
+            Kind::HeliumGiant,
+            2.3,
+            1.0,
+            Unplaced::IronCore {
+                co_core: msun(1.0),
+                helium_core: msun(2.3),
+                mass: msun(2.3),
+            },
+        ),
+        (
+            Kind::HeliumGiant,
+            2.0,
+            1.0,
+            Unplaced::ElectronCapture {
+                co_core: msun(1.0),
+                mass: msun(2.0),
+            },
+        ),
+        (
+            Kind::HeliumGiant,
+            1.6,
+            1.0,
+            Unplaced::ElectronCapture {
+                co_core: msun(1.0),
+                mass: msun(1.6),
+            },
+        ),
+        (
+            Kind::HeliumGiant,
+            1.5,
+            1.0,
+            Unplaced::Disruption { mass: msun(1.5) },
+        ),
+        (
+            Kind::HeliumGiant,
+            1.4,
+            1.2,
+            Unplaced::WhiteDwarf {
+                phase: Phase::CarbonOxygenWhiteDwarf,
+                mass: msun(1.2),
+            },
+        ),
+        (
+            Kind::PulsingAgb,
+            5.0,
+            1.5,
+            Unplaced::IronCore {
+                co_core: msun(1.5),
+                helium_core: msun(1.5),
+                mass: msun(5.0),
+            },
+        ),
+    ] {
+        assert_eq!(
+            arm.unplaced(kind, msun(m), msun(core), other),
+            unplaced,
+            "{kind:?} of {m} M☉ around {core} M☉"
+        );
+    }
+    let mut engine = fed_dwarf_engine(
+        0.6,
+        0.02,
+        crate::stellar::rules::StellarRules::of_version(crate::GENERATOR_VERSION),
+    );
+    engine.finish_merger_with(Product::Disruption { mass: msun(1.5) });
+    let [death] = engine.supernovae.as_slice() else {
+        panic!("one death, not {:?}", engine.supernovae);
+    };
+    assert_eq!(death.remnant().kind(), RemnantKind::None);
+    assert!(
+        engine.pooled.is_some(),
+        "its Type Ia candidate (P11.T4's `co_chandrasekhar`)"
+    );
+    assert_eq!(
+        engine.members[0]
+            .state_at(&engine.ctx, 0, engine.age)
+            .phase(),
+        Phase::NoRemnant
+    );
+}
+
+/// P11.T4's kept-core endings: under every 29 hold a merger's helium-giant product of 2.0 M☉ that
+/// no star holds, its oxygen–neon core of 1.0 M☉, collapses at once by electron capture
+/// (research-leans-40; `Engine::capture_collapse`): one death, Mandel and Müller's 1.26 M☉ neutron
+/// star with the low-mode kick, and no Type Ia candidate.
+#[test]
+fn an_unplaced_oxygen_neon_helium_giant_captures_electrons_from_29() {
+    use super::common_envelope::Product;
+    use crate::stellar::remnant::KickMode;
+    use crate::stellar::remnant::collapse::electron_capture_remnant;
+    use crate::stellar::rules::StellarRules;
+
+    let mut engine = fed_dwarf_engine(
+        0.6,
+        0.02,
+        StellarRules::of_version(crate::GENERATOR_VERSION),
+    );
+    engine.finish_merger_with(Product::ElectronCapture {
+        co_core: SolarMasses::new(1.0),
+        mass: SolarMasses::new(2.0),
+    });
+    let [death] = engine.supernovae.as_slice() else {
+        panic!("one death, not {:?}", engine.supernovae);
+    };
+    assert_eq!(death.remnant(), electron_capture_remnant());
+    assert_eq!(death.kick().map(|k| k.mode()), Some(KickMode::Low));
+    assert!(engine.pooled.is_none());
+    let left = engine.members[0].state_at(&engine.ctx, 0, engine.age);
+    assert_eq!(left.phase(), Phase::NeutronStar, "{left:?}");
+}
+
+/// P11.T4's kept-core endings: an oxygen–neon dwarf a companion's transfer feeds collapses at the
+/// capture mass, 1.37 M☉ (research-leans-38): one of 1.375 M☉ fed by `fed_dwarf_engine`'s
+/// main-sequence donor collapses by accretion-induced collapse into the 1.26 M☉ neutron star, with
+/// no Type Ia candidate, and the transfer ends, where before the fix it was fed on towards the
+/// Chandrasekhar mass.
+#[test]
+fn a_dwarf_fed_by_transfer_collapses_at_the_capture_mass_from_29() {
+    use super::rlof::{Accretion, Fed};
+    use super::star::{Kind, Member, Path};
+    use crate::stellar::remnant::collapse::electron_capture_remnant;
+    use crate::stellar::rules::StellarRules;
+
+    let dwarf = 1.375;
+    let rules = StellarRules::of_version(crate::GENERATOR_VERSION);
+    let mut engine = fed_dwarf_engine(dwarf, 0.02, rules);
+    let age = engine.age;
+    engine.members[0] = Member::Remnant {
+        phase: Phase::OxygenNeonWhiteDwarf,
+        birth: 0.5 * age,
+        origin: crate::units::Megayears::ZERO,
+        mass: Path::starting(age, dwarf),
+    };
+    let fed = Fed {
+        kind: Kind::OxygenNeonWhiteDwarf,
+        before: dwarf - 1.0e-3,
+        core_before: dwarf - 1.0e-3,
+        gained: 1.0e-3,
+        dt: 1.0e3,
+    };
+    let accretion = Accretion {
+        share: 1.0,
+        from_accretor: false,
+        swells: false,
+    };
+    assert!(
+        engine.accretor_events(1, 1.0e-6, fed, accretion),
+        "the transfer ends"
+    );
+    let left = engine.members[0].state_at(&engine.ctx, 0, engine.age);
+    let [collapse] = engine.supernovae.as_slice() else {
+        panic!("one collapse, not {:?}", engine.supernovae);
+    };
+    assert_eq!(collapse.remnant(), electron_capture_remnant());
+    assert_eq!(left.phase(), Phase::NeutronStar, "{left:?}");
+    assert!(engine.pooled.is_none());
+}
+
+/// A single 8.25 M☉ star at Z = 0.02 under `rules`, inside the electron-capture window, whose
+/// core is above the capture mass from the second dredge-up, in `fed_dwarf_engine`'s place halfway
+/// along its thermal pulses, with its core's mass there.
+fn window_giant_engine(
+    rules: crate::stellar::rules::StellarRules,
+) -> (super::evolve::Engine, SolarMasses) {
+    use std::sync::Arc;
+
+    use super::star::Member;
+    use crate::stellar::sse::{Track, TrackOptions};
+
+    let options = TrackOptions::default().with_rules(rules);
+    let track = Track::full_with(
+        SolarMasses::new(8.25),
+        &Composition::SOLAR,
+        &StarDraws::median(),
+        options,
+    );
+    let death = track.death().expect("a track built in full").age().value();
+    let pulses: Vec<f64> = (0..2000)
+        .map(|k| death * f64::from(k) / 2000.0)
+        .filter(|&age| track.state_at(Years::new(age)).phase() == Phase::ThermallyPulsingAgb)
+        .collect();
+    let at = pulses[pulses.len() / 2];
+    let core = track.state_at(Years::new(at)).core_mass();
+    let mut engine = fed_dwarf_engine(0.6, 0.02, rules);
+    engine.members[0] = Member::Track {
+        track: Arc::new(track),
+        offset: engine.age - at,
+    };
+    (engine, core)
+}
+
+/// P11.T4's kept-core endings: a strip that leaves an oxygen–neon dwarf at or above the capture
+/// mass, 1.37 M☉, collapses it at once (research-leans-38). A window's single star keeps its
+/// thermal pulses with its core above the cap (`window_giant_engine`'s); stripped there, at a core
+/// of 1.434 M☉, it leaves the 1.26 M☉ neutron star of an accretion-induced collapse, with no Type
+/// Ia candidate, where before the fix it left an oxygen–neon dwarf of that mass.
+#[test]
+fn a_window_giant_stripped_past_the_capture_mass_collapses_from_29() {
+    use crate::stellar::remnant::collapse::{OXYGEN_NEON_CAPTURE_MASS, electron_capture_remnant};
+    use crate::stellar::rules::StellarRules;
+
+    let rules = StellarRules::of_version(crate::GENERATOR_VERSION);
+    let (mut engine, core) = window_giant_engine(rules);
+    assert!(core > OXYGEN_NEON_CAPTURE_MASS, "{core:?}");
+    engine.strip(0);
+    let left = engine.members[0].state_at(&engine.ctx, 0, engine.age);
+    let [collapse] = engine.supernovae.as_slice() else {
+        panic!("one collapse, not {:?}", engine.supernovae);
+    };
+    assert_eq!(collapse.remnant(), electron_capture_remnant());
+    assert_eq!(left.phase(), Phase::NeutronStar, "{left:?}");
+    assert!(engine.pooled.is_none());
+}
+
+/// P11.T4's kept-core endings are deterministic. The same engine, track or pair twice under every
+/// 29 hold gives the same outcome: a carbon–oxygen dwarf's early-AGB product
+/// whose iron core collapses, the oxygen–neon dwarf a wind feeds to the capture mass, an unplaced
+/// helium giant's disruption, a window giant's strip, a 1.8 M☉ helium star's collapse at its end,
+/// and pinned pair 0080 and a swollen dwarf's pair (1.1 + 0.9 M☉ at 100 d, Z = 0.004).
+#[test]
+fn the_core_endings_arm_is_deterministic() {
+    use super::common_envelope::{CoalescedProduct, Product};
+    use super::dwarf_limit::CoreSource;
+    use super::star::Kind;
+    use crate::stellar::rules::StellarRules;
+    use crate::stellar::sse::Track;
+
+    let every_29 = StellarRules::of_version(crate::GENERATOR_VERSION);
+    let iron_core = || {
+        let mut engine = fed_dwarf_engine(0.6, 0.02, every_29);
+        let product = engine.product_member(
+            CoalescedProduct::Star {
+                kind: Kind::EarlyAgb,
+                mass: 4.5,
+                core: 2.4,
+                burnt: 0.7,
+                fraction: 0.0,
+            },
+            CoreSource::CarbonOxygenDwarf,
+        );
+        engine.finish_merger_with(product);
+        until_a_death(&mut engine);
+        (engine.age, engine.members, engine.supernovae, engine.pooled)
+    };
+    assert_eq!(iron_core(), iron_core());
+    let wind = || {
+        let mut engine = wind_fed_dwarf_engine(1.369, every_29);
+        engine.detached_phase();
+        (engine.age, engine.members, engine.supernovae, engine.pooled)
+    };
+    assert_eq!(wind(), wind());
+    let disruption = || {
+        let mut engine = fed_dwarf_engine(0.6, 0.02, every_29);
+        engine.finish_merger_with(Product::Disruption {
+            mass: SolarMasses::new(1.5),
+        });
+        (engine.members, engine.supernovae, engine.pooled)
+    };
+    assert_eq!(disruption(), disruption());
+    let strip = || {
+        let (mut engine, _) = window_giant_engine(every_29);
+        engine.strip(0);
+        (engine.members, engine.supernovae, engine.pooled)
+    };
+    assert_eq!(strip(), strip());
+    let helium_star = || {
+        Track::helium_star_full(
+            SolarMasses::new(1.8),
+            &Composition::SOLAR,
+            &StarDraws::median(),
+        )
+    };
+    assert_eq!(helium_star(), helium_star());
+    let until = Years::new(1.2e10);
+    for input in [pinned_pair_number(80), pair(1.1, 0.9, 100.0, 0.0, 0.004)] {
+        let input = input.with_rules(every_29);
+        assert_eq!(evolve(&input, until), evolve(&input, until));
+    }
+}
+
+// --- P11.T4: the carbon–oxygen dwarfs at the Chandrasekhar mass --------------------------------
+
+/// Asserts that `engine`'s member `i` has ended in a disruption that left nothing, its pair's only
+/// death, with its companion alone on no orbit, and that the pair's Type Ia candidate is pooled on
+/// the accretion channel at the death, of a dwarf of `dwarf` M☉ (to 10⁻⁶), and can detonate
+/// (P11.T4's `co_chandrasekhar`).
+fn assert_disrupted_with_a_candidate(
+    engine: &super::evolve::Engine,
+    i: usize,
+    dwarf: f64,
+    case: &str,
+) {
+    use crate::stellar::remnant::RemnantKind;
+
+    let [death] = engine.supernovae.as_slice() else {
+        panic!("{case}: one death, not {:?}", engine.supernovae);
+    };
+    assert_eq!(death.remnant().kind(), RemnantKind::None, "{case}");
+    assert_eq!(death.component(), Component::of_index(i), "{case}");
+    let left = engine.members[i].state_at(&engine.ctx, i, engine.age);
+    assert_eq!(left.phase(), Phase::NoRemnant, "{case}: {left:?}");
+    assert!(engine.orbit.is_none(), "{case}: the pair is unbound");
+    let pooled = engine
+        .pooled
+        .expect("the dwarf's Type Ia candidate is pooled");
+    assert_eq!(pooled.channel(), IaPoolChannel::Accretion, "{case}");
+    assert!(
+        pooled.age().value().total_cmp(&death.age().value()).is_eq(),
+        "{case}: {pooled:?}"
+    );
+    let at = pooled.masses()[0].value();
+    assert!(
+        (at / dwarf - 1.0).abs() < 1e-6,
+        "{case}: a dwarf of {at} M☉, not {dwarf}"
+    );
+    assert!(super::ia::is_detonatable(&pooled), "{case}: {pooled:?}");
+}
+
+/// P11.T4's carbon–oxygen dwarfs at the Chandrasekhar mass, a white dwarf a companion feeds (the
+/// paths `Transfer` and `Wind`): a carbon–oxygen dwarf of 1.4401 M☉ that `fed_dwarf_engine`'s
+/// main-sequence donor feeds, and one of 1.439 M☉ that a 3 M☉ star's AGB wind feeds to it in a
+/// detached phase, each disrupt and leave nothing, their companion alone, with a Type Ia candidate,
+/// the wind's at the age it collapsed at before the fold. An oxygen–neon dwarf of
+/// 1.375 M☉ fed by the same donor keeps its accretion-induced collapse at the capture mass, with no
+/// candidate (Hurley, Tout and Pols 2002, section 2.6, as BSE's `evolv2.f` codes it).
+#[test]
+fn a_fed_carbon_oxygen_dwarf_at_the_chandrasekhar_mass_disrupts() {
+    use super::rlof::{Accretion, Fed};
+    use super::star::{Kind, Member, Path};
+    use crate::stellar::remnant::collapse::electron_capture_remnant;
+    use crate::stellar::remnant::structure::CHANDRASEKHAR_MASS;
+
+    let fed_by_transfer = |phase: Phase, dwarf: f64, rules: StellarRules| {
+        let mut engine = fed_dwarf_engine(dwarf, 0.02, rules);
+        let age = engine.age;
+        engine.members[0] = Member::Remnant {
+            phase,
+            birth: 0.5 * age,
+            origin: crate::units::Megayears::ZERO,
+            mass: Path::starting(age, dwarf),
+        };
+        let fed = Fed {
+            kind: Kind::of(phase, dwarf),
+            before: dwarf - 1.0e-3,
+            core_before: dwarf - 1.0e-3,
+            gained: 1.0e-3,
+            dt: 1.0e3,
+        };
+        let accretion = Accretion {
+            share: 1.0,
+            from_accretor: false,
+            swells: false,
+        };
+        assert!(
+            engine.accretor_events(1, 1.0e-6, fed, accretion),
+            "{phase:?} of {dwarf} M☉: the transfer ends"
+        );
+        engine
+    };
+    let co = Phase::CarbonOxygenWhiteDwarf;
+    let dwarf = 1.4401;
+    let disrupted = fed_by_transfer(
+        co,
+        dwarf,
+        StellarRules::of_version(crate::GENERATOR_VERSION),
+    );
+    assert_disrupted_with_a_candidate(&disrupted, 0, dwarf, "transfer");
+    let companion = disrupted.members[1].state_at(&disrupted.ctx, 1, disrupted.age);
+    assert_eq!(companion.phase(), Phase::MainSequence, "{companion:?}");
+
+    let one = fed_by_transfer(
+        Phase::OxygenNeonWhiteDwarf,
+        1.375,
+        StellarRules::of_version(crate::GENERATOR_VERSION),
+    );
+    let [collapse] = one.supernovae.as_slice() else {
+        panic!(
+            "an oxygen–neon dwarf: one collapse, not {:?}",
+            one.supernovae
+        );
+    };
+    assert_eq!(collapse.remnant(), electron_capture_remnant());
+    assert!(
+        one.pooled.is_none(),
+        "an oxygen–neon dwarf pools no candidate"
+    );
+
+    let mut wind = wind_fed_dwarf_engine(1.439, StellarRules::of_version(crate::GENERATOR_VERSION));
+    wind.detached_phase();
+    assert_disrupted_with_a_candidate(&wind, 0, CHANDRASEKHAR_MASS.value(), "wind");
+    assert!(
+        wind.supernovae[0]
+            .age()
+            .value()
+            .total_cmp(&WIND_FED_COLLAPSE_AGE)
+            .is_eq(),
+        "{:?}",
+        wind.supernovae
+    );
+}
+
+/// P11.T4's carbon–oxygen dwarfs at the Chandrasekhar mass, a merger's product (the paths
+/// `MergedDwarf` and `UnplacedProduct`): the thermally pulsing AGB product of 4.33 M☉ around a
+/// 1.765 M☉ core that no star holds, made from the giant a 1.25 M☉ carbon–oxygen dwarf swelled
+/// into, is a carbon–oxygen dwarf of its core, which disrupts and leaves nothing, with a Type Ia
+/// candidate of the dwarf's mass alone. A merger's helium-giant product of 1.5 M☉ that no star
+/// holds, whose core ignites carbon (`Product::Disruption`), disrupts, with a candidate of its mass
+/// alone.
+#[test]
+fn a_merged_carbon_oxygen_dwarf_at_the_chandrasekhar_mass_disrupts() {
+    use super::common_envelope::{CoalescedProduct, Product};
+    use super::star::Kind;
+
+    let core = 1.764_8;
+    let merged = |rules: StellarRules| {
+        let mut engine = swollen_dwarf_engine(Phase::CarbonOxygenWhiteDwarf, 1.25, 0.02, rules);
+        let source = engine.dwarf_cores[0];
+        let product = engine.product_member(
+            CoalescedProduct::Star {
+                kind: Kind::PulsingAgb,
+                mass: 4.331_5,
+                core,
+                burnt: 1.0,
+                fraction: 0.0,
+            },
+            source,
+        );
+        engine.finish_merger_with(product);
+        engine
+    };
+    let disrupted = merged(StellarRules::of_version(crate::GENERATOR_VERSION));
+    assert_disrupted_with_a_candidate(&disrupted, 0, core, "the merged dwarf");
+    assert_eq!(
+        disrupted.pooled.map(|p| p.masses()[1]),
+        Some(SolarMasses::ZERO)
+    );
+
+    let unplaced = |rules: StellarRules| {
+        let mut engine = fed_dwarf_engine(0.6, 0.02, rules);
+        engine.finish_merger_with(Product::Disruption {
+            mass: SolarMasses::new(1.5),
+        });
+        engine
+    };
+    let disrupted = unplaced(StellarRules::of_version(crate::GENERATOR_VERSION));
+    assert_disrupted_with_a_candidate(&disrupted, 0, 1.5, "the unplaced product");
+}
+
+/// P11.T4's carbon–oxygen dwarfs at the Chandrasekhar mass, a giant whose core is a carbon–oxygen
+/// dwarf's (the path `KeptCoreAtDeath`): the 1.43 M☉ dwarf placed with a 2.5 M☉ main-sequence star
+/// at Z = 0.004 on a track that captures electrons at its death disrupts and leaves nothing, with a
+/// Type Ia candidate of the core and nothing beside it (the product's companion gone in the
+/// merger). Since the 29 folds a kept
+/// carbon–oxygen core has no limit of its own (`a_kept_core_ends_as_its_track_does_from_29`), so no
+/// path ends one at the Chandrasekhar mass before its track dies.
+#[test]
+fn a_kept_carbon_oxygen_core_at_the_chandrasekhar_mass_pools_a_candidate() {
+    use super::star::Member;
+
+    let at_death = |rules: StellarRules| {
+        let mut engine = placed_product_engine(Phase::CarbonOxygenWhiteDwarf, 1.43, 0.004, rules);
+        let Member::Shaped { track, offset, .. } = &engine.members[0] else {
+            panic!("a placed giant");
+        };
+        let death = track.death().expect("a track built in full");
+        let core = death.progenitor().co_core_mass().value();
+        engine.age = offset + death.age().value();
+        engine.die(0);
+        (engine, core)
+    };
+    let (disrupted, core) = at_death(StellarRules::of_version(crate::GENERATOR_VERSION));
+    assert_disrupted_with_a_candidate(&disrupted, 0, core, "at its death");
+}
+
+/// P11.T4's carbon–oxygen dwarfs at the Chandrasekhar mass are deterministic. The
+/// fed dwarf's, the wind-fed dwarf's and the unplaced product's engines twice
+/// give the same members, deaths and candidates, and so do pinned pair 0080 and a swollen dwarf's
+/// pair (1.1 + 0.9 M☉ at 100 d, Z = 0.004) evolved twice.
+#[test]
+fn the_co_chandrasekhar_ending_is_deterministic() {
+    use super::common_envelope::Product;
+
+    let rules = StellarRules::of_version(crate::GENERATOR_VERSION);
+    let wind = || {
+        let mut engine = wind_fed_dwarf_engine(1.439, rules);
+        engine.detached_phase();
+        (engine.age, engine.members, engine.supernovae, engine.pooled)
+    };
+    assert_eq!(wind(), wind());
+    let disruption = || {
+        let mut engine = fed_dwarf_engine(0.6, 0.02, rules);
+        engine.finish_merger_with(Product::Disruption {
+            mass: SolarMasses::new(1.5),
+        });
+        (engine.members, engine.supernovae, engine.pooled)
+    };
+    assert_eq!(disruption(), disruption());
+    let until = Years::new(1.2e10);
+    for input in [pinned_pair_number(80), pair(1.1, 0.9, 100.0, 0.0, 0.004)] {
+        let input = input.with_rules(rules);
+        assert_eq!(evolve(&input, until), evolve(&input, until));
+    }
+}
+
+/// P11.T4's carbon–oxygen dwarfs at the Chandrasekhar mass, a pinned primary's merged dwarf (the
+/// path `PinnedMerger`): two carbon–oxygen dwarfs of 0.8 M☉ in the 17 + 12 M☉ pinned pair's places,
+/// its pin pending, merge (`Engine::mix`) into a 1.6 M☉ dwarf, which pools the pair's `Merger`
+/// candidate and ends at once by a disruption that leaves nothing, the pair's candidate still the
+/// merger's, its first.
+#[test]
+fn a_pinned_primary_s_merged_dwarf_disrupts() {
+    use super::star::{Member, Path};
+    use crate::stellar::remnant::RemnantKind;
+
+    let merged = |rules: StellarRules| {
+        let (input, pin) = untouched_pinned_pair();
+        let input = input.with_rules(rules);
+        let age = 1.0e6;
+        assert!(age < pin, "the pin is still to come");
+        let mut engine = engine_with_its_pin(&input, age, 10.0);
+        for i in 0..2 {
+            engine.members[i] = Member::Remnant {
+                phase: Phase::CarbonOxygenWhiteDwarf,
+                birth: 0.5 * age,
+                origin: crate::units::Megayears::ZERO,
+                mass: Path::starting(age, 0.8),
+            };
+        }
+        assert!(engine.pin_pending(0));
+        engine.mix();
+        engine
+    };
+    let disrupted = merged(StellarRules::of_version(crate::GENERATOR_VERSION));
+    let [death] = disrupted.supernovae.as_slice() else {
+        panic!("one death, not {:?}", disrupted.supernovae);
+    };
+    assert_eq!(death.remnant().kind(), RemnantKind::None);
+    let left = disrupted.members[0].state_at(&disrupted.ctx, 0, disrupted.age);
+    assert_eq!(left.phase(), Phase::NoRemnant, "{left:?}");
+    let pooled = disrupted.pooled.expect("the merger's candidate");
+    assert_eq!(pooled.channel(), IaPoolChannel::Merger);
+}
+
+/// P11.T4's carbon–oxygen dwarfs at the Chandrasekhar mass, a kept core's own carbon ignition (the
+/// path `KeptCoreIgnition`, which no built track reaches: none of 3–9 M☉ at Z 0.0001–0.02, nor a
+/// helium star of 1.40–1.69 M☉, dies by carbon ignition): where a giant whose core is a carbon–oxygen
+/// dwarf's dies by its own track's thermonuclear disruption, `Engine::own_carbon_ignition` pools a
+/// candidate of its core, 1.38 M☉, beside its companion, and none for any other death.
+#[test]
+fn a_kept_core_s_own_carbon_ignition_pools_a_candidate() {
+    use crate::stellar::remnant::DeathKind;
+
+    let (core, before) = (SolarMasses::new(1.38), 1.9);
+    let ignited = |rules: StellarRules, death: DeathKind| {
+        let mut engine = fed_dwarf_engine(0.6, 0.02, rules);
+        engine.own_carbon_ignition(0, death, core, before);
+        engine.pooled
+    };
+    let rules = StellarRules::of_version(crate::GENERATOR_VERSION);
+    let pooled = ignited(rules, DeathKind::ThermonuclearDisruption).expect("a candidate");
+    assert_eq!(pooled.channel(), IaPoolChannel::Accretion);
+    assert_eq!(pooled.masses(), [core, SolarMasses::new(2.5)]);
+    assert!(super::ia::is_detonatable(&pooled), "{pooled:?}");
+    assert_eq!(ignited(rules, DeathKind::EnvelopeLoss), None);
+}
+
+/// P11.T4's merged capture: a coalescence around a 1.53 M☉ core of an oxygen–neon dwarf's
+/// (`CoreSource::OxygenNeonDwarf`), research-leans-45's early-AGB product of 1.78 M☉, is an
+/// electron capture where no pin is pending (`fed_dwarf_engine`), and a star left to its pin where
+/// the primary's is (the 17 + 12 M☉ pinned pair).
+#[test]
+fn a_pinned_primary_s_oxygen_neon_coalescence_is_left_to_its_pin() {
+    use super::common_envelope::{CoalescedProduct, Product};
+    use super::dwarf_limit::CoreSource;
+    use super::star::Kind;
+
+    let product = CoalescedProduct::Star {
+        kind: Kind::EarlyAgb,
+        mass: 1.78,
+        core: 1.53,
+        burnt: 1.0,
+        fraction: 0.0,
+    };
+    let unpinned = |rules: StellarRules| {
+        fed_dwarf_engine(0.6, 0.02, rules).product_member(product, CoreSource::OxygenNeonDwarf)
+    };
+    assert!(matches!(
+        unpinned(StellarRules::of_version(crate::GENERATOR_VERSION)),
+        Product::ElectronCapture { .. }
+    ));
+    let (input, _) = untouched_pinned_pair();
+    let input = input.with_rules(StellarRules::of_version(crate::GENERATOR_VERSION));
+    let engine = engine_with_its_pin(&input, 1.0e6, 10.0);
+    assert!(engine.pin_pending(0));
+    assert!(matches!(
+        engine.product_member(product, CoreSource::OxygenNeonDwarf),
+        Product::Member(..)
+    ));
 }

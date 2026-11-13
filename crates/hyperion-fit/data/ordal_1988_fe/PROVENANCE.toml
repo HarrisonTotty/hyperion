@@ -1,0 +1,17 @@
+# The optical constants of iron of Ordal et al. (1988), as the refractiveindex.info database
+# tabulates them (λ in µm, n, k; 0.667-286 µm, 52 rows): the infrared of the nanophase iron of the
+# space-weathering law beyond Johnson and Christy's 1.937 µm (rendering plan R10, R10.T1.d;
+# decision-p14-t51d-weathering §1.4), scaled at the join to meet `johnson_christy_1974_fe`. The
+# database is in the public domain (CC0 1.0), so the file is committed unmodified. Read by
+# `run space_weathering`.
+dataset = "ordal_1988_fe"
+class = "committed"
+citation = "Ordal, Bell, Alexander, Newquist and Querry (1988), Appl. Opt. 27, 1203, DOI 10.1364/AO.27.001203: optical properties of Al, Fe, Ti, Ta, W and Mo at submillimeter wavelengths, iron 0.667-286 µm, 52 rows; via the refractiveindex.info database (Polyanskiy 2024, Sci. Data 11, 94)"
+url = "https://raw.githubusercontent.com/polyanskiy/refractiveindex.info-database/c5c2f188e848453def5970e347399d653df2ffc2/database/data/main/Fe/nk/Ordal.yml"
+retrieved = "2026-10-19"
+release = "database/data/main/Fe/nk/Ordal.yml at the database's commit c5c2f188e848453def5970e347399d653df2ffc2"
+licence = "CC0 1.0 Universal (the file's header: \"refractiveindex.info database is in the public domain; copyright and related rights waived via CC0 1.0\")"
+
+[[files]]
+name = "Ordal.yml"
+sha256 = "8502fb1c96087916c0c24806c401a5fe5ede390366c395cd1a36cb64e53e71c7"

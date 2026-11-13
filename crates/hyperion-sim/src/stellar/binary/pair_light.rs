@@ -38,7 +38,7 @@
 //!
 //!   A star on its own track bit for bit (the first segment's track, at no offset) is its own
 //!   model and is not read again. The brightness is the caller's photometry: the fit passes the
-//!   sky's ([`sky::photometry::absolute_v_of_state`](crate::sky::photometry::absolute_v_of_state)).
+//!   sky's ([`stellar::photometry::absolute_v_of_state`](crate::stellar::photometry::absolute_v_of_state)).
 //! - **Values** ([`assemble`]): each cell's brightest over its samples; cumulative over every wider
 //!   periastron bin, so that a cell bounds every orbit of a periastron at least its own; dilated by
 //!   one cell along each of the four axes and one age bin; brightened by [`MARGIN_MAG`]; runs of
@@ -65,14 +65,9 @@
 //!   past their cells' values. The engine evaluates such a member at its own age and at no more
 //!   than 0.1 M☉, however much wind it accretes, so no such star is brighter than the cooling fit
 //!   at 0.1 M☉ at that age. For a pair whose lighter star lies below 0.1 M☉ the reader takes each
-//!   value that is not DARK as the brighter of it and that floor, margin included.
-//! - **The held floor** (`held_floor`, crate-private; P11.T17.c's follow-up). A timeline capped
-//!   at the engine's [`MAX_SEGMENTS`](super::MAX_SEGMENTS) holds a star the binary carries on its
-//!   main sequence for ever, which the tables' samples seldom catch. The floor is the brightest hydrogen or
-//!   helium main-sequence star of at most a pair's total mass, from the engine's own models, from
-//!   the first age bin at which any star of that mass can have ended its main sequence. P11.T17.c's
-//!   bound reads every living and changed value through it, DARK included, wherever the pair may
-//!   have interacted by its window's end.
+//!   value that is not DARK as the brighter of it and that floor, margin included. The floor is a
+//!   fitted table, [`tables::binary_cooling_floor`](crate::tables::binary_cooling_floor), of
+//!   [`build_cooling_floor_cmag`]'s values.
 //! - **Storage**, format [`FORMAT`]: the distinct rows of a cell's bins (living, changed or count
 //!   classes) packed as segments of a run of bins (6 bits) and a value (12 bits), three base64
 //!   characters a segment, and per cell its three rows' indices, three characters each
@@ -80,9 +75,9 @@
 //!   R06.T8.m's phase envelope packs its rows (as plain decimals a table would be some 2 MB).
 //!   [`PairLightTable::generator`] decodes a layer's table once.
 //!
-//! The decoded tables and the two floors are built lazily, once a process (`OnceLock` statics),
-//! each a pure function of the crate's constants, the same whichever is asked first (the
-//! sim-determinism skill's order independence; a test holds each to a fresh build).
+//! The decoded tables are built lazily, once a process (`OnceLock` statics), each a pure function
+//! of the crate's constants, the same whichever is asked first (the sim-determinism skill's order
+//! independence; a test holds each to a fresh build).
 //!
 //! The tables depend on no galaxy. `hyperion-fit`'s tasks `binary_pair_light_c`, `_d` and `_e`
 //! build them from [`sample_input`], [`pair_rows`] and [`assemble`], validate them on held-out
@@ -91,6 +86,23 @@
 //! They are statistical: a rare channel left unsampled in a cell's neighbourhood could hide a
 //! brighter star (the ruling's §10), which the margins, the dilation, T17.c's `None` for thin cells
 //! and the slow tests guard against.
+//!
+//! A timeline the engine stops at its cap on segments ([`MAX_SEGMENTS`](super::MAX_SEGMENTS)) is
+//! walked as it stands. P11.T17.c's follow-up had read every value through a held floor, the
+//! brightest main-sequence star of the pair's total mass, since such a timeline could hold a star
+//! the binary carries on its main sequence for ever; P11.T4.m and T4.o removed the rules that
+//! capped those, and version 25's wiring dropped the floor (`decision-galaxy-25-train.md`, "The
+//! held floor"). The one capped timeline left in T4.o's re-run of the follow-up's probes, sample
+//! 11 of D's cell 2027, holds no such star at its cap: it ends as it does with the cap raised, and
+//! its merged star is within [`MARGIN_MAG`] of that run's in between (the engine's test
+//! `the_last_capped_sample_ends_as_it_does_with_the_cap_raised`).
+//!
+//! The cooling floor depends on no galaxy either, only on the cooling fits and the photometry:
+//! `hyperion-fit`'s task `binary_cooling_floor` writes it from [`build_cooling_floor_cmag`] and
+//! checks it in as `tables::binary_cooling_floor`, which a fast test holds to a fresh build on
+//! every run, natively and on WebAssembly, rather than each process building it at its first
+//! read, some 10⁶ evaluations of the fits and 2.6 s in a test build (decided 2026-10-11,
+//! `decision-test-coverage.md` §3.2, N7).
 
 use std::sync::{Arc, OnceLock};
 
@@ -104,9 +116,11 @@ use crate::rng::Mark;
 use crate::stellar::draws::{StandardNormal, StarDraws, StarDrawsParts};
 use crate::stellar::multiplicity::MultiplicityModel;
 use crate::stellar::photometry::absolute_magnitude_v;
-use crate::stellar::sse::{self, MIN_INITIAL_MASS, ZCoeffs};
+use crate::stellar::sse::MIN_INITIAL_MASS;
 use crate::stellar::{Composition, StarState, substellar};
-use crate::tables::{binary_pair_light_c, binary_pair_light_d, binary_pair_light_e};
+use crate::tables::{
+    binary_cooling_floor, binary_pair_light_c, binary_pair_light_d, binary_pair_light_e,
+};
 use crate::units::consts::{GM_SUN, SECONDS_PER_DAY, SOLAR_RADIUS_M};
 use crate::units::{
     Days, Dex, GravitationalParameter, HeliumExcess, Magnitudes, Metres, Radians, SolarMasses,
@@ -853,11 +867,11 @@ impl PairRows {
 ///
 /// ```
 /// use hyperion_sim::orbit::{Eccentricity, KeplerElements, Orientation};
-/// use hyperion_sim::sky::photometry::absolute_v_of_state;
 /// use hyperion_sim::stellar::Composition;
 /// use hyperion_sim::stellar::binary::BinaryInput;
 /// use hyperion_sim::stellar::binary::pair_light::{age_bin, pair_rows};
 /// use hyperion_sim::stellar::draws::StarDraws;
+/// use hyperion_sim::stellar::photometry::absolute_v_of_state;
 /// use hyperion_sim::units::consts::METRES_PER_AU;
 /// use hyperion_sim::units::{GravitationalParameter, Metres, Radians, SolarMasses, Years};
 ///
@@ -1150,7 +1164,7 @@ pub fn merge_tolerance_mag(v: f64) -> f64 {
 /// Never: a class is at most 32.
 #[must_use]
 pub fn count_class(count: u32) -> i16 {
-    i16::try_from(u32::BITS - count.leading_zeros()).expect("at most 32")
+    i16::try_from(count.bit_width()).expect("at most 32")
 }
 
 /// The stored value of magnitude `v`: +∞ is [`DARK_CMAG`], [`UNSEEN_MAG`] [`UNSEEN_CMAG`], and a
@@ -1655,22 +1669,29 @@ fn word_of(chars: &[u8]) -> Option<u32> {
 
 // --- The cooling floor -----------------------------------------------------------------------
 
-/// The masses, M☉, at which the cooling floor reads the cooling fits: 0.08–0.1 M☉ in 64 even
-/// steps, the fits' top (P06.T13; [`substellar::MAX_MASS`]) last.
-const COOLING_FLOOR_MASSES: u32 = 64;
+/// The even steps in mass, from [`LOWEST_COMPANION_MSUN`] to the cooling fits' top (P06.T13;
+/// [`substellar::MAX_MASS`]), at whose ends the cooling floor reads the fits: 64 steps, 65 masses
+/// of 0.08–0.1 M☉, edges included.
+pub const COOLING_FLOOR_MASSES: u32 = 64;
 
-/// The metallicities a cooling floor's interval is read at, edges included.
-const COOLING_FLOOR_FE_H: u32 = 8;
+/// The even steps across a cooling floor's metallicity interval at whose ends it reads the fits:
+/// 8 steps, 9 metallicities, edges included.
+pub const COOLING_FLOOR_FE_H: u32 = 8;
 
-/// The ages a cooling floor's bin is read at, edges included.
-const COOLING_FLOOR_AGES: u32 = 8;
+/// The even steps across a cooling floor's age bin at whose ends it reads the fits: 8 steps,
+/// 9 ages, edges included.
+pub const COOLING_FLOOR_AGES: u32 = 8;
 
 /// The brightest V, mag, of a star on P06.T13's cooling fits of 0.08–0.1 M☉ and metallicity in
 /// interval `fe_cell` of [`FE_H_EDGES`] at an age in bin `bin`: read on a grid of masses,
 /// metallicities and ages, edges included, through plan 06's photometry (the sky's for these
-/// states, which it never darkens).
+/// states, which it never darkens); +∞ where none has a V.
+///
+/// # Panics
+///
+/// If `fe_cell` or `bin` is past its axis.
 #[must_use]
-fn cooling_brightest(fe_cell: usize, bin: usize) -> f64 {
+pub fn cooling_brightest_mag(fe_cell: usize, bin: usize) -> f64 {
     let (f_lo, f_hi) = (FE_H_EDGES[fe_cell], FE_H_EDGES[fe_cell + 1]);
     let (t_lo, t_hi) = (age_edge_years(bin), age_edge_years(bin + 1));
     let mut brightest = f64::INFINITY;
@@ -1700,30 +1721,47 @@ fn cooling_brightest(fe_cell: usize, bin: usize) -> f64 {
 ///
 /// It is the brightest V ([`from_cmag`]) of a star on the cooling fits of the interval at an age in
 /// the bin, brightened by [`MARGIN_MAG`] and rounded brighter, or [`UNSEEN_CMAG`] where none has a
-/// V. Computed once, at the first call.
+/// V: [`build_cooling_floor_cmag`]'s value, as the fitted table
+/// [`tables::binary_cooling_floor`](crate::tables::binary_cooling_floor) holds it.
 ///
 /// # Panics
 ///
 /// If `fe_cell` or `bin` is past its axis.
 #[must_use]
 pub fn cooling_floor_cmag(fe_cell: usize, bin: usize) -> i16 {
-    static FLOOR: OnceLock<Vec<[i16; AGE_BINS]>> = OnceLock::new();
-    let floor = FLOOR.get_or_init(|| {
-        (0..FE_H_CELLS)
-            .map(|f| {
-                core::array::from_fn(|k| {
-                    let v = cooling_brightest(f, k);
-                    let v = if v.is_finite() {
-                        v - MARGIN_MAG
-                    } else {
-                        UNSEEN_MAG
-                    };
-                    to_cmag(v).expect("a cooling star's V is storable")
-                })
-            })
-            .collect()
-    });
-    floor[fe_cell][bin]
+    binary_cooling_floor::COOLING_FLOOR_CMAG[fe_cell][bin]
+}
+
+/// The cooling floor of metallicity interval `fe_cell` at age bin `bin` built afresh, hundredths of
+/// a magnitude: [`cooling_brightest_mag`] brightened by [`MARGIN_MAG`] and rounded brighter
+/// ([`to_cmag`]), or [`UNSEEN_CMAG`] where it is +∞.
+///
+/// Some 5,000 evaluations of the cooling fits. `hyperion-fit`'s task `binary_cooling_floor`
+/// writes these values as the table [`cooling_floor_cmag`] reads.
+///
+/// # Panics
+///
+/// If `fe_cell` or `bin` is past its axis, or the brightest V is past what the table stores,
+/// which the cooling fits' V (some +10 to +16 mag) rules out.
+#[must_use]
+pub fn build_cooling_floor_cmag(fe_cell: usize, bin: usize) -> i16 {
+    cooling_floor_of_brightest(cooling_brightest_mag(fe_cell, bin))
+}
+
+/// The cooling floor's stored value for the brightest V `v` (mag) of its interval and bin: `v`
+/// brightened by [`MARGIN_MAG`] and rounded brighter, or [`UNSEEN_CMAG`] for +∞.
+///
+/// # Panics
+///
+/// If `v` is past what the table stores.
+#[must_use]
+fn cooling_floor_of_brightest(v: f64) -> i16 {
+    let v = if v.is_finite() {
+        v - MARGIN_MAG
+    } else {
+        UNSEEN_MAG
+    };
+    to_cmag(v).expect("a cooling star's V is storable")
 }
 
 /// A cell's value as a pair whose lighter star lies below 0.1 M☉ reads it.
@@ -1778,172 +1816,6 @@ pub fn with_cooling_floor(stored: i16, fe_cell: usize, bin: usize) -> i16 {
 #[must_use]
 pub fn reads_cooling_floor(lighter_msun: f64) -> bool {
     lighter_msun < MIN_INITIAL_MASS.value()
-}
-
-// --- The held floor --------------------------------------------------------------------------
-
-/// The pair masses, M☉, at which the held floor is tabulated: [`HELD_FLOOR_NODES`] nodes even in
-/// ln m from [`MIN_INITIAL_MASS`] (a lighter star the binary carries is on the cooling fits) to
-/// [`HELD_FLOOR_TOP_MSUN`].
-const HELD_FLOOR_NODES: usize = 57;
-
-/// The top of the held floor's masses, M☉: twice the tracks' 150 M☉, the heaviest pair.
-const HELD_FLOOR_TOP_MSUN: f64 = 300.0;
-
-/// The masses a held floor's interval of masses is read at, edges included.
-const HELD_FLOOR_MASS_STEPS: u32 = 4;
-
-/// The fractional ages a held floor's main sequences are read at, edges included.
-const HELD_FLOOR_TAU_STEPS: u32 = 32;
-
-/// The metallicities a held floor's interval is read at, edges included.
-const HELD_FLOOR_FE_H: u32 = 4;
-
-/// Node `k` of the held floor's masses, M☉.
-#[must_use]
-fn held_floor_node_msun(k: usize) -> f64 {
-    let last = u32::try_from(HELD_FLOOR_NODES - 1).expect("a few dozen nodes");
-    let k = u32::try_from(k).expect("a few dozen nodes");
-    log_lerp(
-        MIN_INITIAL_MASS.value(),
-        HELD_FLOOR_TOP_MSUN,
-        f64::from(k) / f64::from(last),
-    )
-}
-
-/// What the held floor holds for a metallicity interval: per mass node, the first age bin and the
-/// value.
-#[derive(Debug, Clone, PartialEq)]
-struct HeldFloorTable {
-    /// The nodes' masses, M☉ ([`held_floor_node_msun`]), kept so that a query reads no logarithm.
-    node_msun: [f64; HELD_FLOOR_NODES],
-    /// The first age bin in which a held star of a pair of at most the node's mass can live,
-    /// [`AGE_BINS`] for none.
-    first_bin: [usize; HELD_FLOOR_NODES],
-    /// Its brightest V, hundredths of a magnitude, margin included.
-    cmag: [i16; HELD_FLOOR_NODES],
-}
-
-/// The held floor of metallicity interval `fe_cell` (see [`held_floor`]): read on a grid of
-/// masses, fractional ages and metallicities, edges included, through plan 06's photometry (the
-/// sky's for these states), each node's values taken over every lighter mass.
-#[must_use]
-fn held_floor_of(fe_cell: usize) -> HeldFloorTable {
-    let (f_lo, f_hi) = (FE_H_EDGES[fe_cell], FE_H_EDGES[fe_cell + 1]);
-    let draws = StarDraws::median();
-    let coeffs: Vec<(Composition, ZCoeffs)> = (0..=HELD_FLOOR_FE_H)
-        .map(|j| {
-            let fe_h = lerp(f_lo, f_hi, f64::from(j) / f64::from(HELD_FLOOR_FE_H));
-            let comp = Composition::from_fe_h(Dex::new(fe_h), HeliumExcess::ZERO);
-            (comp, ZCoeffs::new(comp.z_fit()))
-        })
-        .collect();
-    let mut floor = HeldFloorTable {
-        node_msun: core::array::from_fn(held_floor_node_msun),
-        first_bin: [AGE_BINS; HELD_FLOOR_NODES],
-        cmag: [DARK_CMAG; HELD_FLOOR_NODES],
-    };
-    let (mut brightest, mut earliest) = (f64::INFINITY, f64::INFINITY);
-    for k in 0..HELD_FLOOR_NODES {
-        let lo = held_floor_node_msun(k.saturating_sub(1));
-        let hi = held_floor_node_msun(k);
-        for n in 0..=HELD_FLOOR_MASS_STEPS {
-            let m = log_lerp(lo, hi, f64::from(n) / f64::from(HELD_FLOOR_MASS_STEPS));
-            for (comp, c) in &coeffs {
-                earliest = earliest.min(sse::main_sequence_lifetime(c, false, m));
-                for helium in [false, true] {
-                    for t in 0..=HELD_FLOOR_TAU_STEPS {
-                        let tau = f64::from(t) / f64::from(HELD_FLOOR_TAU_STEPS);
-                        let (s, _) =
-                            sse::main_sequence_structure(c, comp, &draws, helium, m, tau, 0.0);
-                        if let Some(v) = absolute_magnitude_v(&s.state) {
-                            brightest = brightest.min(v.value());
-                        }
-                    }
-                }
-            }
-        }
-        floor.cmag[k] =
-            to_cmag(brightest - MARGIN_MAG).expect("a main-sequence star's V is storable");
-        // A lifetime past the table's ages holds no star of the pair at its end: never.
-        floor.first_bin[k] = age_bin(earliest).unwrap_or(AGE_BINS);
-    }
-    floor
-}
-
-/// The held floor of a pair of total initial mass `total_msun` (M☉) and metallicity interval
-/// `fe_cell` of [`FE_H_EDGES`]: the first age bin from which it applies, and its value,
-/// hundredths of a magnitude ([`HeldFloor`]); `None` for a total that is not a number or lies
-/// past [`HELD_FLOOR_TOP_MSUN`].
-///
-/// **Why.** A timeline that reaches the engine's cap on segments ([`MAX_SEGMENTS`]) is left as it
-/// stands, its last segment stretched to the age asked (a broken invariant the engine's tests
-/// count). A star the binary carries on its main sequence there ([`Member::MainSequence`],
-/// hydrogen or helium) is held at its last mass and fractional age, alive at every later age,
-/// long past its own lifetime. The engine reaches that cap where an accretor so carried is fed
-/// as it nears its main sequence's end, each step aimed at that end landing short of it once
-/// the accretion has lowered its fractional age (plan 11's Risks: finding F15 for a helium
-/// accretor, and the same for a hydrogen one above 1.25 M☉), and in P11.T4.g's swell and strip
-/// cycle of a fed helium star (finding C2). Such a pair is rare (about 10⁻⁴ of close pairs of
-/// 5–8 M☉, P11.T17.c's follow-up probe) and the tables' 72 samples a cell seldom hold one, so the
-/// tables can read DARK where it lives. The floor bounds it from the engine's own models:
-///
-/// - its value is the brightest V of a hydrogen or helium main-sequence star of mass at most
-///   `total_msun` (the binary never adds mass), at any fractional age and any metallicity of the
-///   interval, Z held at the tracks' 0.03 in the top one ([`sse::main_sequence_structure`], the
-///   state the engine gives such a member; plan 06's photometry), brightened by [`MARGIN_MAG`]
-///   and rounded brighter. Hurley, Pols and Tout's (2000) models are fitted over 0.5–50 M☉ and
-///   extrapolated past them, as the engine extrapolates them: above about 50 M☉ the floor is
-///   brighter than any star seen (a 150 M☉ pair's −11.6 against R136a1's M<sub>V</sub> −7.4,
-///   Crowther et al. 2010, MNRAS 408, 731), safe but loose;
-/// - its first bin is that of the least main-sequence lifetime of such a star: no star of the
-///   pair can reach its main sequence's end, or be stripped to a helium star, sooner, since a
-///   star's τ grows at no more than 1 ÷ `t_MS` of its mass, and accretion never raises it.
-///
-/// Computed once, at the first call.
-///
-/// # Panics
-///
-/// If `fe_cell` is past [`FE_H_CELLS`].
-///
-/// [`MAX_SEGMENTS`]: super::MAX_SEGMENTS
-#[must_use]
-pub(crate) fn held_floor(fe_cell: usize, total_msun: f64) -> Option<HeldFloor> {
-    static FLOOR: OnceLock<Vec<HeldFloorTable>> = OnceLock::new();
-    let floor = &FLOOR.get_or_init(|| (0..FE_H_CELLS).map(held_floor_of).collect())[fe_cell];
-    if total_msun.is_nan() || total_msun > HELD_FLOOR_TOP_MSUN {
-        return None;
-    }
-    // The first node at or above the total; each node's values hold for every lighter pair.
-    let k = floor
-        .node_msun
-        .partition_point(|&m| m < total_msun)
-        .min(HELD_FLOOR_NODES - 1);
-    Some(HeldFloor {
-        first_bin: floor.first_bin[k],
-        cmag: floor.cmag[k],
-    })
-}
-
-/// A pair's held floor ([`held_floor`]): the first age bin from which it applies, and its value.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct HeldFloor {
-    first_bin: usize,
-    cmag: i16,
-}
-
-impl HeldFloor {
-    /// The first age bin from which the floor applies: [`AGE_BINS`] for none.
-    #[must_use]
-    pub(crate) const fn first_bin(self) -> usize {
-        self.first_bin
-    }
-
-    /// The floor's value, hundredths of a magnitude ([`from_cmag`]), margin included.
-    #[must_use]
-    pub(crate) const fn cmag(self) -> i16 {
-        self.cmag
-    }
 }
 
 // --- The reader ------------------------------------------------------------------------------

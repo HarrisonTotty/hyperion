@@ -263,6 +263,8 @@ function bodyAt(
     appearance: null,
     symbol: bodyKindSymbol(kind),
     orbitNormal: kind === "star" ? null : vec3(0, 0, 1),
+    // The giant has no surface for a survey line, though a free camera can enter its frame (R10.T12).
+    ...(id === ECLIPSE_GIANT ? { surfaceless: true as const } : {}),
   };
 }
 

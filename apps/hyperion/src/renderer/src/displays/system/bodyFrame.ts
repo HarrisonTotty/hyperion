@@ -7,8 +7,10 @@
  * astronomical units, now about the planet's centre along the galactic axes, since a satellite's
  * elements on the wire are in its planet's body frame, a translation of the system frame (plan 14,
  * phase D): a moon's offset from its planet is its own orbit's position, and nothing is rotated.
- * The reference plane is the planet's equatorial plane, which this generator version takes to be
- * its orbital plane, and in which its rings lie.
+ * The reference plane is the planet's equatorial plane, normal to its rotation section's pole, or
+ * to its orbit's normal without the section (plan R02, Design note 14; plan 14, P14.T56.b). Each
+ * ring lies in its own plane, the one its normal gives (P14.T56.a), or its planet's orbital plane
+ * where an older server sends no normal.
  */
 import type { UniverseTime } from "@hyperion/protocol";
 
@@ -122,23 +124,111 @@ export function focusHeldReason(
     : "NO PLANET SELECTED";
 }
 
-/** The orbit of a body that {@link focusTarget} chose, which it holds. */
-function focusOrbit(body: SystemBody): BodyOrbit {
-  if (body.orbit.state !== "ok") {
-    throw new Error(`the focused body ${body.id} has no orbit`);
+/**
+ * The body `VIEW BODY` opens in `VIEW` (the owner's request, 2026-11-01): a moon of the focused
+ * planet where one is selected, else the focused planet itself; `null` with no planet focused.
+ */
+export function inspectionTarget(
+  focused: SystemBody | null,
+  selected: SystemBody | null,
+): SystemBody | null {
+  if (focused === null) {
+    return null;
   }
-  return body.orbit.value;
+  const parent = selected?.parent;
+  const moonOfFocus =
+    selected?.kind.kind === "moon" && parent?.kind === "body" && parent.id === focused.id;
+  return moonOfFocus ? selected : focused;
+}
+
+/** A section named `name` in its state's words where it is withheld or not computed, else `null`. */
+function withheld(name: string, state: SystemBody["orbit"]["state"]): string | null {
+  return state === "not_resolved" || state === "not_modelled"
+    ? `${name} ${sectionStateLabel(state)}`
+    : null;
 }
 
 /**
- * A focused body's reference plane: its equatorial plane, taken in this generator version to be its
- * orbital plane, with the galactic coreward laid onto it, as the system's plane is (D21).
+ * Why `VIEW BODY` is held back, in words, or `null` when it opens its body ({@link inspectionTarget}):
+ * `NO BODY FOCUSED` before `FOCUS BODY` has focused one; the body by its kind and state where it is
+ * not present (`MOON DESTROYED`); or the section that `VIEW` would draw it from as its state stands,
+ * withheld at the granted level or not computed: its orbit's, where it could not be placed
+ * (`ORBIT NOT RESOLVED`), its bulk's, where it would have no radius (`BULK NOT YET MODELLED`), and
+ * its mass's, where the view's camera could not hold its frame (`MASS NOT RESOLVED`).
+ */
+export function inspectionHeldReason(
+  focused: SystemBody | null,
+  selected: SystemBody | null,
+): string | null {
+  const target = inspectionTarget(focused, selected);
+  if (target === null) {
+    return "NO BODY FOCUSED";
+  }
+  if (target.state.kind !== "present") {
+    return `${bodyKindLabel(target.kind)} ${bodyStateLabel(target.state)}`;
+  }
+  if (target.orbit.state !== "ok") {
+    return withheld("ORBIT", target.orbit.state) ?? "NO ORBIT";
+  }
+  if (target.figure.state !== "ok" && target.bulk.state !== "ok") {
+    return withheld("BULK", target.bulk.state) ?? "NO RADIUS";
+  }
+  if (target.massMearth.state !== "ok") {
+    return withheld("MASS", target.massMearth.state) ?? "NO MASS";
+  }
+  return null;
+}
+
+/**
+ * The normal of a body's equatorial plane, a unit vector along the galactic axes: its rotation
+ * section's pole; or, where the server does not model its rotation, its orbit's normal, which
+ * stands for its pole (plan R02, Design note 14); `null` where its rotation is withheld or does
+ * not apply, or where the orbit that would stand for it is not given.
+ *
+ * @remarks
+ * The pole is the spin axis by the right-hand rule, so a body spinning retrograde has its
+ * equator's north on the far side from its orbit's, and its moons, prograde about its spin, are
+ * filled above it (plan 14, P14.T56.a). A withheld rotation is not stood in for, so that no
+ * reading is taken to a plane the display does not have.
+ */
+export function equatorNormal(body: SystemBody): Vec3 | null {
+  let normal: Vec3 | null;
+  switch (body.rotation.state) {
+    case "ok":
+      normal = body.rotation.value.pole;
+      break;
+    case "not_modelled":
+      normal = body.orbit.state === "ok" ? orbitNormal(body.orbit.value.orbit) : null;
+      break;
+    case "not_resolved":
+    case "not_applicable":
+      normal = null;
+      break;
+  }
+  return normal;
+}
+
+/**
+ * A focused body's reference plane: its equatorial plane ({@link equatorNormal}), with the
+ * galactic coreward laid onto it, as the system's plane is (D21).
+ *
+ * @remarks
+ * Where the body's rotation is withheld the map still needs a plane, and its orbital plane stands
+ * in, as for a body whose rotation is not modelled. No server withholds it yet, since the display
+ * asks for every level; how the plane is then labelled waits for the knowledge overlay (plan 14,
+ * P14.T56.b's record).
  *
  * @param galactic - The galactic directions at the system, whose coreward the plane's follows.
  */
 export function bodyPlane(body: SystemBody, galactic: LocalFrame): OrbitPlane {
+  const north =
+    equatorNormal(body) ?? (body.orbit.state === "ok" ? orbitNormal(body.orbit.value.orbit) : null);
+  if (north === null) {
+    // focusTarget chooses only a body on an orbit.
+    throw new Error(`the focused body ${body.id} has no orbit`);
+  }
   return {
-    frame: planeFrame(orbitNormal(focusOrbit(body).orbit), galactic.coreward),
+    frame: planeFrame(north, galactic.coreward),
     name: "EQUATORIAL PLANE",
     isSystemPlane: true,
   };
@@ -218,9 +308,13 @@ export interface BodySceneInput {
 
 /**
  * The orbit map in a focused body's frame at the display time: the body at the centre, its moons
- * on their orbits, each orbit a path, the selected moon's `selected`, and its rings as annuli on
- * its equatorial plane, labelled, their two edges joined by radial ticks every 10° as the guide
- * draws a belt and a ring, the selected ring's drawn as a selected orbit is (plan 14, P14.T42.a–b).
+ * on their orbits, each orbit a path, the selected moon's `selected`, and its rings as annuli,
+ * each in its own plane, labelled, their two edges joined by radial ticks every 10° as the guide
+ * draws a belt and a ring, the selected ring's drawn as a selected orbit is (plan 14, P14.T42.a–b),
+ * each drawn about the body, whose bracket's box its label need not keep outside while the body is
+ * not the selection (P14.T42.g). A ring's plane is the one its normal gives, close to the
+ * equatorial plane well inside the planet's Laplace radius (P14.T56.a), or the planet's orbital
+ * plane where an older server sends no normal, so that each is drawn where the server places it.
  *
  * @remarks
  * A moon or ring not present is not drawn; it stays in the list. Nothing beyond the body's own
@@ -228,6 +322,8 @@ export interface BodySceneInput {
  */
 export function bodyScene(input: BodySceneInput): SpatialScene {
   const { body, bodies, plane, time, selectedId, fitRadiusAu } = input;
+  // Where a ring's normal is not sent, the ring lies in its planet's orbital plane.
+  const orbitalNormal = body.orbit.state === "ok" ? orbitNormal(body.orbit.value.orbit) : undefined;
   const points: PointMark[] = [];
   const paths: PathMark[] = [];
   const annuli: AnnulusMark[] = [];
@@ -274,11 +370,15 @@ export function bodyScene(input: BodySceneInput): SpatialScene {
         id: `ring:${satellite.id}`,
         innerRadius: population.innerEdgeM / METRES_PER_AU,
         outerRadius: population.outerEdgeM / METRES_PER_AU,
+        normal: population.normal ?? orbitalNormal,
         ticks: true,
         label: populationName(satellite),
         // A second ring lies about the first, whose label stands rimward.
         labelSpinward: annuli.length % 2 === 1,
         selected: satellite.id === selectedId,
+        // Its label names a ring (`populationName`), never the planet, which is why it may stand
+        // inside the planet's bracket's box while no bracket is drawn there (plan 14, P14.T42.g).
+        aboutId: body.id,
       });
     }
   }

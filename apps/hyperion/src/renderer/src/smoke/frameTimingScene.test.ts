@@ -1,0 +1,1024 @@
+import { beforeAll, describe, expect, it } from "vitest";
+
+import { add, dot, norm, normalise, sub, vec3 } from "../geometry/vec3";
+import { NO_NORMAL_ABOVE, type NormalMapTexels } from "../view/bodies/discNormals";
+import { type ClassMapTexels, classMapSide } from "../view/bodies/discSurface";
+import { heightAtPressureM, SATURN_OBLATE_CASE } from "../view/atmosphere/reference/cases";
+import {
+  TITAN_GROUND_ALBEDO,
+  TITAN_RADIUS_M,
+  titanColumn,
+  VENUS_DECK,
+  VENUS_RADIUS_M,
+  VENUS_SURFACE_PRESSURES_PA,
+  venusColumn,
+} from "../view/atmosphere/reference/thickCases";
+import { builtOfCase } from "../view/scenes/atmosphereScene";
+import { CLASS_MAP_FACE_TEXELS } from "../view/terrain/classMap";
+import {
+  EARTH_REFERENCE,
+  EARTH_REFERENCE_CURVES,
+  EARTH_SLAB_REFERENCE,
+  EARTH_SLAB_REFERENCE_CURVES,
+  R05_EARTH_REFERENCE,
+} from "../view/atmosphere/earth";
+import { geodeticOf, TABLE_SIZES } from "../view/atmosphere/hillaire";
+import type { AtmosphereMedium } from "../view/atmosphere/medium";
+import { SKY_SUN_CAP } from "../view/atmosphere/settings";
+import { horizonDipRad } from "../view/atmosphere/sources";
+import {
+  absorberCount,
+  type AbsorberCurveSlots,
+  NO_ABSORBER_CURVES,
+} from "../view/atmosphere/tables";
+import { type BodyLightSources, bodyLightSources } from "../view/bodies/draw";
+import { GAS_GIANT_FULL_PASS_BOUNDARY_M } from "../view/bodies/regime";
+import { rotate } from "../view/camera/quaternion";
+import { SUN_RADIUS_M } from "../view/lighting/hostDisc";
+import { photopicIlluminance } from "../view/lighting/illuminance";
+import { type QualitySetting, SETTINGS } from "../view/quality/qualitySetting";
+import { AU_M } from "../view/scenes/kept";
+import { sphereOutsideView } from "../view/wireframe/submit";
+import { FAR_LIMB_TIMING_PLACES, settingOutput, SLICES_EARTH } from "./atmosphere";
+import {
+  angleBetweenRad,
+  COMPANION_DISTANCE_M,
+  earthInput,
+  farLimbFrameScene,
+  type FrameScene,
+  GENERATED_CLASSES,
+  GENERATED_REGION_TEXELS,
+  generatedClassLaws,
+  generatedClassMapTexels,
+  generatedNormalMapTexels,
+  GIANT_DISTANCE_M,
+  GIANT_EQUATORIAL_RADIUS_M,
+  listSources,
+  type ListedSources,
+  NORMAL_MAP_LEVEL,
+  placesScaledTo,
+  planetshineShare,
+  handJupiterDeckMedium,
+  oneSheetOf,
+  type RoutedMedium,
+  routedPlacesOf,
+  routedSets,
+  SATURN_GIANT_DISTANCE_M,
+  selfLuminousEarthMedium,
+  SMALL_TRIO,
+  type SourceSet,
+  smallEarthScene,
+  smallEarthsScene,
+  smokeClassLaws,
+  smokeClassMapTexels,
+  smokeNormalMapTexels,
+  sourcesAsSet,
+  sourceSetsOf,
+  trioSourceSet,
+  withoutOblateTwinMisses,
+} from "./frameTimingScene";
+
+/** The three media the frames are timed on, each with its tables' light slots' curves. */
+const MEDIA: ReadonlyArray<{
+  readonly name: string;
+  readonly medium: AtmosphereMedium;
+  readonly curves: AbsorberCurveSlots;
+}> = [
+  { name: "R05's Earth", medium: R05_EARTH_REFERENCE, curves: NO_ABSORBER_CURVES },
+  {
+    name: "the measured Earth",
+    medium: EARTH_REFERENCE,
+    curves: [...EARTH_REFERENCE_CURVES, ...EARTH_REFERENCE_CURVES],
+  },
+  {
+    name: "the slab Earth",
+    medium: EARTH_SLAB_REFERENCE,
+    curves: [...EARTH_SLAB_REFERENCE_CURVES, ...EARTH_SLAB_REFERENCE_CURVES],
+  },
+];
+
+const SETTINGS_TIMED: readonly QualitySetting[] = ["high", "low"];
+
+/** One frame of the timings: its setting, set, camera and medium, the scene and its sky's sources. */
+interface Case {
+  readonly label: string;
+  readonly setting: QualitySetting;
+  readonly set: SourceSet;
+  readonly scene: FrameScene;
+  readonly listed: ListedSources;
+}
+
+/** Every frame the timings draw, with its sources as the plan makes them (`bodyLightSources`). */
+function cases(): Case[] {
+  return SETTINGS_TIMED.flatMap((setting) => {
+    const viewport = settingOutput(setting);
+    const photoreal = SETTINGS[setting].photoreal;
+    return MEDIA.flatMap(({ name, medium, curves }) =>
+      FAR_LIMB_TIMING_PLACES.flatMap((place) =>
+        sourceSetsOf(setting).map((set): Case => {
+          const scene = farLimbFrameScene(place.distanceM, viewport, set);
+          const earth = earthInput("0200080020000000.0311", medium, scene.earthCentreM);
+          const sources = bodyLightSources(earth, [earth, ...scene.giants], scene.lights, {
+            annuli: photoreal.discAnnuli,
+            planetshine: photoreal.planetshineSources,
+          });
+          const lightSlots = absorberCount(medium) > 0 ? curves.length : Infinity;
+          const listed = listSources(
+            sources,
+            scene.air,
+            SLICES_EARTH.figure,
+            medium,
+            lightSlots,
+            TABLE_SIZES[setting].marchSourceCap,
+          );
+          return {
+            label: `${setting} ${name} ${place.label} ${set.name}`,
+            setting,
+            set,
+            scene,
+            listed,
+          };
+        }),
+      ),
+    );
+  });
+}
+
+const CASES = cases();
+
+describe("the photorealistic frame's timed sets", () => {
+  it("takes the sky's two stars at each setting's whole count", () => {
+    expect([SKY_SUN_CAP.high, SKY_SUN_CAP.low]).toEqual([2, 2]);
+  });
+
+  it("names the setting's whole count by its sources: x4 on high, x3 on low", () => {
+    expect(sourceSetsOf("high").map((set) => set.name)).toEqual(["x1", "x2", "x2p", "x4"]);
+    expect(sourceSetsOf("low").map((set) => set.name)).toEqual(["x1", "x2", "x2p", "x3"]);
+  });
+
+  it("draws every setting's sets at every camera on every medium, giants in half of them", () => {
+    expect(CASES).toHaveLength(2 * 3 * 5 * 4);
+    expect(CASES.filter(({ scene }) => scene.giants.length > 0)).toHaveLength(2 * 3 * 5 * 2);
+  });
+
+  it("keeps exactly each set's sources, kind and slot, and marches the set's two, everywhere", () => {
+    const wrong = CASES.filter(
+      ({ setting, set, listed }) => !sourcesAsSet(listed, set, TABLE_SIZES[setting].marchSourceCap),
+    ).map(({ label }) => label);
+    expect(wrong).toEqual([]);
+  });
+
+  it("tells a march of one source from the set's two", () => {
+    const passed = CASES.filter(
+      ({ set, listed }) => set.stars + set.giants > 1 && sourcesAsSet(listed, set, 1),
+    ).map(({ label }) => label);
+    expect(passed).toEqual([]);
+  });
+
+  it("leaves none of the plan's sources out of the sky", () => {
+    const left = CASES.filter(({ listed }) => listed.left.length > 0).map(({ label }) => label);
+    expect(left).toEqual([]);
+  });
+
+  it("keeps every giant out of the view", () => {
+    const seen = CASES.filter(({ setting, scene }) =>
+      scene.giants.some(
+        (giant) =>
+          !sphereOutsideView(
+            giant.centreM,
+            giant.figure.equatorialRadiusM,
+            scene.camera,
+            settingOutput(setting),
+          ),
+      ),
+    ).map(({ label }) => label);
+    expect(seen).toEqual([]);
+  });
+
+  it("keeps every giant above the camera's horizon dip, so that the twilight skip keeps it", () => {
+    const below = CASES.filter(({ scene }) => {
+      const geodetic = geodeticOf(scene.air.positionM, SLICES_EARTH.figure);
+      const dipRad = horizonDipRad(SLICES_EARTH.figure, geodetic.heightM);
+      return scene.giants.some((giant) => {
+        const toGiant = normalise(giant.centreM);
+        const sine =
+          toGiant.x * geodetic.normal.x +
+          toGiant.y * geodetic.normal.y +
+          toGiant.z * geodetic.normal.z;
+        return !(Math.asin(sine) > -dipRad);
+      });
+    }).map(({ label }) => label);
+    expect(below).toEqual([]);
+  });
+
+  it("gives each giant's planetshine over 5e-4 of the Sun at the camera, under the second star", () => {
+    // Under the binary's second star's tenth, so that the march's two are the stars.
+    const outside = CASES.filter(({ set, listed }) => {
+      const share = planetshineShare(listed);
+      return set.giants === 0 ? share !== null : share === null || share < 5e-4 || share >= 0.05;
+    }).map(({ label }) => label);
+    expect(outside).toEqual([]);
+  });
+
+  it("lets no giant eclipse the Sun for the Earth", () => {
+    const radiiRad =
+      Math.asin(GIANT_EQUATORIAL_RADIUS_M / GIANT_DISTANCE_M) + Math.asin(SUN_RADIUS_M / AU_M);
+    const eclipsed = CASES.filter(({ scene }) => {
+      const sun = scene.lights[0];
+      return (
+        sun === undefined ||
+        scene.giants.some(
+          (giant) =>
+            !(
+              angleBetweenRad(
+                sub(sun.centreM, scene.earthCentreM),
+                sub(giant.centreM, scene.earthCentreM),
+              ) >
+              radiiRad + Math.PI / 6
+            ),
+        )
+      );
+    }).map(({ label }) => label);
+    expect(eclipsed).toEqual([]);
+  });
+});
+
+describe("the small air bodies' frames", () => {
+  const viewport = settingOutput("high");
+  const DIAMETERS_PX = [4, 10, 32] as const;
+  const scenes = DIAMETERS_PX.map((diameterPx) => ({
+    diameterPx,
+    scene: smallEarthScene(diameterPx, viewport, SLICES_EARTH.figure),
+  }));
+
+  it("draws the Earth whole at its diameter in pixels", () => {
+    const drawn = scenes.map(({ scene }) => {
+      const pxPerRad = viewport.widthPx / (2 * Math.tan(scene.camera.fovXRad / 2));
+      const distanceM = -scene.earthCentreM.z;
+      const px = 2 * Math.asin(SLICES_EARTH.figure.equatorialRadiusM / distanceM) * pxPerRad;
+      return Number(px.toFixed(6));
+    });
+    expect(drawn).toEqual([...DIAMETERS_PX]);
+  });
+
+  it("centres the Earth on the view's axis, the air's camera on the far side of its centre", () => {
+    for (const { scene } of scenes) {
+      expect(scene.earthCentreM).toEqual({ x: 0, y: 0, z: scene.earthCentreM.z });
+      expect(scene.air.positionM).toEqual({ x: 0, y: 0, z: -scene.earthCentreM.z });
+    }
+  });
+
+  it("lights the Earth by the Sun 40° off the line of sight", () => {
+    const offDeg = scenes.map(({ scene }) => {
+      const sun = scene.lights[0];
+      const offRad =
+        sun === undefined
+          ? Number.NaN
+          : angleBetweenRad(sub(sun.centreM, scene.earthCentreM), scene.air.positionM);
+      return Number(((offRad * 180) / Math.PI).toFixed(6));
+    });
+    expect(offDeg).toEqual([40, 40, 40]);
+  });
+});
+
+describe("TEST SATURN's frames", () => {
+  const built = builtOfCase(SATURN_OBLATE_CASE, "saturn-oblate");
+  const figure = built.body?.figure ?? SLICES_EARTH.figure;
+  const places = placesScaledTo(figure);
+  const lightSlots = absorberCount(built.medium) > 0 ? built.curves.length : Infinity;
+  const SATURN_ID = "0200080020000000.0315";
+
+  /** Saturn's frame at `distanceM` under `set` on `setting`, its giants `giantDistanceM` off. */
+  const frameAt = (
+    setting: QualitySetting,
+    distanceM: number,
+    set: SourceSet,
+    giantDistanceM: number,
+  ): {
+    readonly scene: FrameScene;
+    readonly sources: BodyLightSources;
+    readonly listed: ListedSources;
+  } => {
+    const photoreal = SETTINGS[setting].photoreal;
+    const scene = farLimbFrameScene(distanceM, settingOutput(setting), set, figure, giantDistanceM);
+    const body = earthInput(SATURN_ID, built.medium, scene.earthCentreM, figure);
+    const sources = bodyLightSources(body, [body, ...scene.giants], scene.lights, {
+      annuli: photoreal.discAnnuli,
+      planetshine: photoreal.planetshineSources,
+    });
+    const listed = listSources(
+      sources,
+      scene.air,
+      figure,
+      built.medium,
+      lightSlots,
+      TABLE_SIZES[setting].marchSourceCap,
+    );
+    return { scene, sources, listed };
+  };
+
+  const frames = SETTINGS_TIMED.flatMap((setting) =>
+    places.flatMap((place) =>
+      sourceSetsOf(setting).map((set) => {
+        const { scene, sources, listed } = frameAt(
+          setting,
+          place.distanceM,
+          set,
+          SATURN_GIANT_DISTANCE_M,
+        );
+        return {
+          label: `${setting} ${place.label} ${set.name}`,
+          setting,
+          set,
+          scene,
+          sources,
+          listed,
+        };
+      }),
+    ),
+  );
+
+  it("is drawn on Saturn's spheroid, not the Earth's", () => {
+    expect(built.body).not.toBeNull();
+    expect(figure.equatorialRadiusM).toBeGreaterThan(9 * SLICES_EARTH.figure.equatorialRadiusM);
+    expect(figure.polarRadiusM).toBeLessThan(0.95 * figure.equatorialRadiusM);
+  });
+
+  it("sees its disc as the Earth's at each of the Earth's five cameras", () => {
+    const earthRad = FAR_LIMB_TIMING_PLACES.map(({ distanceM }) =>
+      Math.asin(SLICES_EARTH.figure.equatorialRadiusM / distanceM),
+    );
+    const saturnRad = places.map(({ distanceM }) =>
+      Math.asin(figure.equatorialRadiusM / distanceM),
+    );
+    expect(saturnRad.map((rad, i) => Math.abs(rad - (earthRad[i] ?? Number.NaN)))).toEqual(
+      places.map(() => expect.closeTo(0, 12)),
+    );
+  });
+
+  it("names each camera by its distance", () => {
+    expect(places.map(({ label }) => label)).toEqual([
+      "6.40e7 m",
+      "9.45e7 m",
+      "1.46e8 m",
+      "2.41e8 m",
+      "9.45e8 m",
+    ]);
+  });
+
+  it("aims each view's centre ray at Saturn's datum, at a tangent height of 0", () => {
+    const off = frames
+      .filter(({ scene }) => {
+        const p = scene.air.positionM;
+        const along = dot(p, rotate(scene.air.orientation, vec3(0, 0, -1)));
+        const missM = Math.sqrt(dot(p, p) - along * along);
+        return !(Math.abs(missM - figure.equatorialRadiusM) < 1e-9 * figure.equatorialRadiusM);
+      })
+      .map(({ label }) => label);
+    expect(off).toEqual([]);
+  });
+
+  it("gives its body Saturn's radii about the frame's +z", () => {
+    const body = earthInput(SATURN_ID, built.medium, vec3(0, 0, 0), figure);
+    expect(body.figure).toEqual({
+      equatorialRadiusM: figure.equatorialRadiusM,
+      polarRadiusM: figure.polarRadiusM,
+      pole: vec3(0, 0, 1),
+    });
+  });
+
+  it("stands every camera above its air's top", () => {
+    const inside = frames
+      .filter(
+        ({ scene }) => !(geodeticOf(scene.air.positionM, figure).heightM > built.medium.topHeightM),
+      )
+      .map(({ label }) => label);
+    expect(inside).toEqual([]);
+  });
+
+  it("draws every setting's sets at every camera, giants in half of them, as the Earth's", () => {
+    expect(frames).toHaveLength(2 * 5 * 4);
+    expect(frames.filter(({ scene }) => scene.giants.length > 0)).toHaveLength(2 * 5 * 2);
+  });
+
+  it("keeps exactly each set's sources, kind and slot, and marches the set's two, everywhere", () => {
+    const wrong = frames
+      .filter(
+        ({ setting, set, listed }) =>
+          !sourcesAsSet(listed, set, TABLE_SIZES[setting].marchSourceCap),
+      )
+      .map(({ label }) => label);
+    expect(wrong).toEqual([]);
+  });
+
+  it("leaves none of the plan's sources out of the sky, its giants' planetshine included", () => {
+    const left = frames.filter(({ listed }) => listed.left.length > 0).map(({ label }) => label);
+    expect(left).toEqual([]);
+  });
+
+  it("stands its giants twenty of their radii from Saturn's centre, beyond its farthest camera", () => {
+    const farthestM = Math.max(...places.map(({ distanceM }) => distanceM));
+    const off = frames
+      .filter(({ scene }) =>
+        scene.giants.some(
+          (giant) =>
+            !(
+              Math.abs(norm(sub(giant.centreM, scene.earthCentreM)) / SATURN_GIANT_DISTANCE_M - 1) <
+              1e-12
+            ),
+        ),
+      )
+      .map(({ label }) => label);
+    expect([SATURN_GIANT_DISTANCE_M / GIANT_EQUATORIAL_RADIUS_M, off]).toEqual([20, []]);
+    expect(SATURN_GIANT_DISTANCE_M / farthestM).toBeCloseTo(1.51, 2);
+  });
+
+  it("keeps every giant out of the view of every camera", () => {
+    const seen = frames
+      .filter(({ setting, scene }) =>
+        scene.giants.some(
+          (giant) =>
+            !sphereOutsideView(
+              giant.centreM,
+              giant.figure.equatorialRadiusM,
+              scene.camera,
+              settingOutput(setting),
+            ),
+        ),
+      )
+      .map(({ label }) => label);
+    expect(seen).toEqual([]);
+  });
+
+  it("keeps every giant's disc off Saturn's from every camera, neither covering the other", () => {
+    // Each disc bounded by its equatorial radius; the nearest camera leaves 7.8° between them.
+    const covered = frames
+      .filter(({ scene }) => {
+        const saturnRad = Math.asin(figure.equatorialRadiusM / norm(scene.earthCentreM));
+        return scene.giants.some(
+          (giant) =>
+            !(
+              angleBetweenRad(giant.centreM, scene.earthCentreM) >
+              saturnRad + Math.asin(giant.figure.equatorialRadiusM / norm(giant.centreM))
+            ),
+        );
+      })
+      .map(({ label }) => label);
+    expect(covered).toEqual([]);
+  });
+
+  it("gives each giant's planetshine over 5e-4 of the Sun at every camera, under the second star", () => {
+    // The Earth's rows' bounds: 7.2e-4 at the nearest camera in x2p, up to 2.5e-3 at the farthest.
+    const outside = frames
+      .filter(({ set, listed }) => {
+        const share = planetshineShare(listed);
+        return set.giants === 0 ? share !== null : share === null || share < 5e-4 || share >= 0.05;
+      })
+      .map(({ label }) => label);
+    expect(outside).toEqual([]);
+  });
+
+  it("records each giant's planetshine at Saturn's centre as a share of the Sun's there", () => {
+    // R07's E = E★ (R ÷ Δ)² p Φ(α) (`planetshine.ts`): for a Lambert sphere at 20 R and 60° of
+    // phase, (1 ÷ 20)² × 0.5 × [sin α + (π − α) cos α] ÷ π = 2.5e-3 × 0.5 × 0.6090 = 7.61e-4
+    // (Russell 1916, ApJ 43, 173, the Lambert sphere's phase law; R and c, Jupiter's at 1 bar:
+    // Archinal et al. 2018, Celest. Mech. Dyn. Astron. 130, 22, Table 4; p 0.5, near Jupiter's
+    // visual 0.54: Mallama, Krobusek and Pavlov 2017, Icarus 282, 19); the Sun's inverse square
+    // at the giant, 120° from the Sun and so 7.2e8 m farther from it, × 0.9904: 7.54e-4; R07's
+    // reflection integrated over Jupiter's spheroid (c ÷ a 0.935) and law, the first giant seen
+    // 14.5° off its equator, × 0.964: 7.27e-4. In the whole count the second star, a tenth of the
+    // Sun at another phase, lights each giant too, and the second giant is seen 64° off its
+    // equator, nearer its larger pole-on disc.
+    const recorded: Readonly<Record<SourceSet["name"], ReadonlyArray<number>>> = {
+      x1: [],
+      x2: [],
+      x2p: [7.2716e-4],
+      x3: [8.341e-4],
+      x4: [8.341e-4, 8.6565e-4],
+    };
+    const shares = frames.map(({ label, sources }) => {
+      const sun = sources.stars[0];
+      const sunLx = sun === undefined ? Number.NaN : photopicIlluminance(sun.illuminance);
+      return {
+        label,
+        shares: sources.planetshine.map(
+          (source) => photopicIlluminance(source.illuminance) / sunLx,
+        ),
+      };
+    });
+    expect(shares).toEqual(
+      frames.map(({ label, set }) => ({
+        label,
+        shares: recorded[set.name].map((share) => expect.closeTo(share, 7)),
+      })),
+    );
+  });
+
+  it("would lose x2p's giant at the nearest camera were the Earth's giants scaled as the cameras are", () => {
+    const nearest = places[0];
+    const x2p = sourceSetsOf("high").find((set) => set.name === "x2p");
+    if (nearest === undefined || x2p === undefined) {
+      throw new Error("Saturn's cameras and high's sets are not empty");
+    }
+    const ratio = figure.equatorialRadiusM / SLICES_EARTH.figure.equatorialRadiusM;
+    const { listed } = frameAt("high", nearest.distanceM, x2p, GIANT_DISTANCE_M * ratio);
+    expect(listed.left.map(({ source, why }) => `${source.kind}: ${why}`)).toEqual([
+      "planetshine: negligible",
+    ]);
+  });
+});
+
+describe("three small air bodies in one view", () => {
+  const viewport = settingOutput("high");
+  const set = sourceSetsOf("high").find((each) => each.name === "x2");
+  if (set === undefined) {
+    throw new Error("high's sets hold x2");
+  }
+  const scene = smallEarthsScene(viewport, SLICES_EARTH.figure, set);
+  const pxPerRad = viewport.widthPx / (2 * Math.tan(scene.camera.fovXRad / 2));
+  const middle = scene.bodies[1];
+  if (middle === undefined) {
+    throw new Error("the trio has a middle body");
+  }
+
+  it("draws each at its diameter, on the on-axis reckoning", () => {
+    const drawn = scene.bodies.map(({ centreM }) =>
+      Number(
+        (2 * Math.asin(SLICES_EARTH.figure.equatorialRadiusM / norm(centreM)) * pxPerRad).toFixed(
+          6,
+        ),
+      ),
+    );
+    expect(drawn).toEqual(SMALL_TRIO.map(({ diameterPx }) => diameterPx));
+  });
+
+  it("stands them 6° apart", () => {
+    const apartDeg = scene.bodies
+      .slice(1)
+      .map((body, i) =>
+        Number(
+          (
+            (angleBetweenRad(scene.bodies[i]?.centreM ?? body.centreM, body.centreM) * 180) /
+            Math.PI
+          ).toFixed(9),
+        ),
+      );
+    expect(apartDeg).toEqual([6, 6]);
+  });
+
+  it("leaves more than 150 px between their discs' edges", () => {
+    const gapsPx = scene.bodies.slice(1).map((body, i) => {
+      const before = scene.bodies[i];
+      return before === undefined
+        ? Number.NaN
+        : angleBetweenRad(before.centreM, body.centreM) * pxPerRad -
+            (before.diameterPx + body.diameterPx) / 2;
+    });
+    expect(gapsPx.filter((gap) => !(gap > 150))).toEqual([]);
+  });
+
+  it("puts each body's air camera on the far side of its centre", () => {
+    const off = scene.bodies.filter((body) => !(norm(add(body.air.positionM, body.centreM)) === 0));
+    expect(off).toEqual([]);
+  });
+
+  it("gives each body's air camera the frame's axes", () => {
+    expect(scene.bodies.map((body) => body.air.orientation)).toEqual(
+      scene.bodies.map(() => scene.camera.orientation),
+    );
+  });
+
+  it("lights the middle body by the Sun 40° off its line of sight", () => {
+    const sun = scene.lights[0];
+    const offDeg =
+      sun === undefined
+        ? Number.NaN
+        : (angleBetweenRad(sub(sun.centreM, middle.centreM), middle.air.positionM) * 180) / Math.PI;
+    expect(offDeg).toBeCloseTo(40, 9);
+  });
+
+  it("turns the second star 40° from the Sun about the pole, at √10 au", () => {
+    const sun = scene.lights[0];
+    const second = scene.lights[1];
+    if (sun === undefined || second === undefined) {
+      throw new Error("x2 places two stars");
+    }
+    const s = normalise(sub(sun.centreM, middle.centreM));
+    const c = sub(second.centreM, middle.centreM);
+    const turnDeg = ((Math.atan2(c.y, c.x) - Math.atan2(s.y, s.x)) * 180) / Math.PI;
+    expect([norm(c) / COMPANION_DISTANCE_M, c.z / norm(c) - s.z, turnDeg]).toEqual([
+      expect.closeTo(1, 12),
+      expect.closeTo(0, 12),
+      expect.closeTo(40, 9),
+    ]);
+  });
+
+  it("draws each body's sources as the set's two stars and the other two's planetshine", () => {
+    expect(trioSourceSet(set, "high")).toEqual({ name: "x2", stars: 2, giants: 2 });
+  });
+
+  it("lights every body by both stars, each on its own slot, and the other two's planetshine", () => {
+    const photoreal = SETTINGS.high.photoreal;
+    const drawn = trioSourceSet(set, "high");
+    const ids = ["0200080020000000.0341", "0200080020000000.0342", "0200080020000000.0343"];
+    const inputs = scene.bodies.map((body, i) =>
+      earthInput(ids[i] ?? "0200080020000000.0340", EARTH_REFERENCE, body.centreM),
+    );
+    const wrong = inputs.filter((input, i) => {
+      const body = scene.bodies[i];
+      if (body === undefined) {
+        return true;
+      }
+      const listed = listSources(
+        bodyLightSources(input, inputs, scene.lights, {
+          annuli: photoreal.discAnnuli,
+          planetshine: photoreal.planetshineSources,
+        }),
+        body.air,
+        SLICES_EARTH.figure,
+        EARTH_REFERENCE,
+        2 * EARTH_REFERENCE_CURVES.length,
+        TABLE_SIZES.high.marchSourceCap,
+      );
+      return (
+        listed.left.length > 0 || !sourcesAsSet(listed, drawn, TABLE_SIZES.high.marchSourceCap)
+      );
+    });
+    expect(wrong).toEqual([]);
+  });
+
+  it("takes no giant", () => {
+    const x2p: SourceSet = { name: "x2p", stars: 1, giants: 1 };
+    expect(() => smallEarthsScene(viewport, SLICES_EARTH.figure, x2p)).toThrow(RangeError);
+  });
+});
+
+/** Each face texel's byte per class of `map`, face by face, row by row. */
+function texelBytes(map: ClassMapTexels): number[][] {
+  const side = classMapSide(map.faceTexels);
+  const n = map.faceTexels;
+  return Array.from({ length: 6 * n * n }, (_, t) => {
+    const face = Math.floor(t / (n * n));
+    const i = t % n;
+    const j = Math.floor(t / n) % n;
+    return Array.from({ length: map.classes }, (_unused, k) => {
+      const layer = face + 6 * Math.floor(k / 4);
+      return map.data[((layer * side + (j + 1)) * side + (i + 1)) * 4 + (k % 4)] ?? Number.NaN;
+    });
+  });
+}
+
+/** Whether each face cell of `normals` holds a normal, face by face, row by row. */
+function normalsHeld(normals: NormalMapTexels): boolean[] {
+  const n = normals.faceTexels;
+  const side = classMapSide(n);
+  return Array.from({ length: 6 * n * n }, (_, t) => {
+    const face = Math.floor(t / (n * n));
+    const i = t % n;
+    const j = Math.floor(t / n) % n;
+    const x = normals.data[((face * side + (j + 1)) * side + (i + 1)) * 2] ?? Number.NaN;
+    return Math.abs(x) <= NO_NORMAL_ABOVE;
+  });
+}
+
+/** The classes a texel's bytes hold, as `0,3,5`. */
+function classesOf(texel: ReadonlyArray<number>): string {
+  return texel.flatMap((b, k) => (b > 0 ? [k] : [])).join(",");
+}
+
+describe("R10's smoke class map", () => {
+  const map = smokeClassMapTexels();
+  const bytes = texelBytes(map);
+  const n = map.faceTexels;
+
+  it("holds two classes at R10's level with no maturity, as the smoke's R10.T10.d map", () => {
+    expect([map.classes, map.faceTexels, map.maturity]).toEqual([
+      2,
+      CLASS_MAP_FACE_TEXELS,
+      undefined,
+    ]);
+  });
+
+  it("shades its classes by the smoke's lunar and terrestrial laws", () => {
+    expect(smokeClassLaws().map((law) => law.template)).toEqual(["moon", "earth"]);
+  });
+
+  it("surveys half of every face, the edge column half, and nothing past it", () => {
+    const off = bytes.filter((texel, t) => {
+      const i = t % n;
+      const sum = texel.reduce((a, b) => a + b, 0);
+      return i < n / 2 - 1 ? sum !== 255 : i === n / 2 - 1 ? Math.abs(sum - 128) > 1 : sum !== 0;
+    });
+    expect(off).toEqual([]);
+  });
+
+  it("carries its normals at level 7 over the same half of every face", () => {
+    const normals = smokeNormalMapTexels(SLICES_EARTH.figure);
+    const m = 2 ** NORMAL_MAP_LEVEL;
+    const wrong = normalsHeld(normals).filter((held, t) => held !== t % m < m / 2);
+    expect([normals.faceTexels, wrong]).toEqual([128, []]);
+  });
+});
+
+describe("a generated palette's class map", () => {
+  const map = generatedClassMapTexels();
+  const bytes = texelBytes(map);
+  const n = map.faceTexels;
+  const r = GENERATED_REGION_TEXELS;
+
+  it("holds a generated patch's eight classes at R10's level", () => {
+    expect([map.classes, map.faceTexels]).toEqual([8, CLASS_MAP_FACE_TEXELS]);
+  });
+
+  it("draws every class from its maturity nodes", () => {
+    expect(map.maturity?.drawn).toEqual(Array.from({ length: GENERATED_CLASSES }, () => true));
+  });
+
+  it("gives each class a law", () => {
+    expect(generatedClassLaws()).toHaveLength(GENERATED_CLASSES);
+  });
+
+  it("surveys every texel whole, three classes a texel", () => {
+    const off = bytes.filter(
+      (texel) =>
+        texel.reduce((sum, b) => sum + b, 0) !== 255 || texel.filter((b) => b > 0).length !== 3,
+    );
+    expect([bytes.length, off]).toEqual([6 * 64 * 64, []]);
+  });
+
+  it("keeps one region's three classes across it", () => {
+    const split = bytes.filter((texel, t) => {
+      const face = Math.floor(t / (n * n));
+      const i = t % n;
+      const j = Math.floor(t / n) % n;
+      const corner = bytes[face * n * n + (j - (j % r)) * n + (i - (i % r))] ?? [];
+      return classesOf(texel) !== classesOf(corner);
+    });
+    expect(split).toEqual([]);
+  });
+
+  it("holds every class of the palette somewhere", () => {
+    const held = new Set(bytes.flatMap((texel) => texel.flatMap((b, k) => (b > 0 ? [k] : []))));
+    expect([...held].toSorted((a, b) => a - b)).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+  });
+
+  it("carries the field's normals at level 7 on every cell", () => {
+    const normals = generatedNormalMapTexels(SLICES_EARTH.figure);
+    expect([normals.faceTexels, normalsHeld(normals).filter((held) => !held)]).toEqual([
+      2 ** NORMAL_MAP_LEVEL,
+      [],
+    ]);
+  });
+});
+
+/**
+ * Every frame of `routed`'s row, with its sources as the plan makes them, each medium with an
+ * absorber on a binary's two light slots, as the rows' tables take its curves twice.
+ */
+function framesOf(routed: RoutedMedium): Array<{
+  readonly label: string;
+  readonly set: SourceSet;
+  readonly scene: FrameScene;
+  readonly listed: ListedSources;
+}> {
+  const viewport = settingOutput("high");
+  const photoreal = SETTINGS.high.photoreal;
+  return routedPlacesOf(routed).flatMap((place) =>
+    routedSets().map((set) => {
+      const scene = farLimbFrameScene(
+        place.distanceM,
+        viewport,
+        set,
+        routed.figure,
+        routed.giantDistanceM,
+      );
+      const body = earthInput(
+        "0200080020000000.031c",
+        routed.medium,
+        scene.earthCentreM,
+        routed.drawnFigure,
+      );
+      const sources = bodyLightSources(body, [body, ...scene.giants], scene.lights, {
+        annuli: photoreal.discAnnuli,
+        planetshine: photoreal.planetshineSources,
+      });
+      const listed = listSources(
+        sources,
+        scene.air,
+        routed.figure,
+        routed.medium,
+        2,
+        TABLE_SIZES.high.marchSourceCap,
+      );
+      return { label: `${routed.name} ${place.label} ${set.name}`, set, scene, listed };
+    }),
+  );
+}
+
+/** A routed medium's terms' names, in their order. */
+function termNames(routed: RoutedMedium): string[] {
+  return routed.medium.terms.map(({ name }) => name);
+}
+
+describe("the routes' rows' frames (R08.T11's (R) to (U))", () => {
+  // Titan's sphere and its air's top as its case stands on them (`thickCases.ts`' `titanCase`, its
+  // medium's top its column's), without its haze's optics.
+  const titanFigure = { equatorialRadiusM: TITAN_RADIUS_M, polarRadiusM: TITAN_RADIUS_M };
+  const titan: RoutedMedium = {
+    name: "titan-class through its haze route",
+    table: { kind: "thick" },
+    medium: {
+      name: "titan-class",
+      topHeightM: titanColumn().topHeightM,
+      groundAlbedo: [TITAN_GROUND_ALBEDO, TITAN_GROUND_ALBEDO, TITAN_GROUND_ALBEDO],
+      terms: [],
+    },
+    curves: [],
+    figure: titanFigure,
+    gravity: null,
+    thermal: null,
+    drawnFigure: titanFigure,
+    giantDistanceM: GIANT_DISTANCE_M,
+  };
+  const earth = selfLuminousEarthMedium();
+  // venus-92bar's air above its deck as its row stands on it (`venusDeckMedium`), its split at the
+  // deck's top pressure on its column, without its deck's Mie.
+  const venusColumnOf = venusColumn(VENUS_SURFACE_PRESSURES_PA["venus-92bar"]);
+  const venusSplitM = heightAtPressureM(venusColumnOf, VENUS_DECK.topPa);
+  const venusDatum = {
+    equatorialRadiusM: VENUS_RADIUS_M + venusSplitM,
+    polarRadiusM: VENUS_RADIUS_M + venusSplitM,
+  };
+  const venus: RoutedMedium = {
+    name: "venus-92bar through its deck route",
+    table: { kind: "deck", deckAltitudeM: venusSplitM, floor: "ground" },
+    medium: {
+      name: "venus-92bar above its deck",
+      topHeightM: venusColumnOf.topHeightM - venusSplitM,
+      groundAlbedo: [0, 0, 0],
+      terms: [],
+    },
+    curves: [],
+    figure: venusDatum,
+    gravity: null,
+    thermal: null,
+    drawnFigure: { equatorialRadiusM: VENUS_RADIUS_M, polarRadiusM: VENUS_RADIUS_M },
+    giantDistanceM: GIANT_DISTANCE_M,
+  };
+  let jupiter: RoutedMedium | undefined;
+
+  beforeAll(async () => {
+    jupiter = await handJupiterDeckMedium();
+  }, 120_000);
+
+  /** The hand Jupiter's medium, once made. */
+  const handJupiter = (): RoutedMedium => {
+    if (jupiter === undefined) {
+      throw new Error("the hand Jupiter's medium is made before the tests");
+    }
+    return jupiter;
+  };
+
+  const media = (): RoutedMedium[] => [titan, handJupiter(), earth, venus];
+
+  it("takes high's x1, x2 and x4", () => {
+    expect(routedSets().map((set) => set.name)).toEqual(["x1", "x2", "x4"]);
+  });
+
+  it("takes (A)'s five cameras on the Earth", () => {
+    expect(routedPlacesOf(earth)).toEqual(FAR_LIMB_TIMING_PLACES);
+  });
+
+  it("leaves out Titan's nearest scaled camera, which stands in its air", () => {
+    const scaled = placesScaledTo(titanFigure);
+    expect([
+      (scaled[0]?.distanceM ?? Number.NaN) - TITAN_RADIUS_M < titan.medium.topHeightM,
+      routedPlacesOf(titan).map(({ label }) => label),
+    ]).toEqual([true, scaled.slice(1).map(({ label }) => label)]);
+  });
+
+  it("leaves out the hand Jupiter's farthest scaled camera, past the full passes' boundary", () => {
+    const routed = handJupiter();
+    const scaled = placesScaledTo(routed.figure);
+    expect([
+      (scaled.at(-1)?.distanceM ?? 0) >= GAS_GIANT_FULL_PASS_BOUNDARY_M,
+      routedPlacesOf(routed).map(({ label }) => label),
+    ]).toEqual([true, scaled.slice(0, -1).map(({ label }) => label)]);
+  });
+
+  it("routes the hand Jupiter through its envelope's deck at its floor, its disc on its medium's datum below", () => {
+    const routed = handJupiter();
+    const lowerM = routed.figure.equatorialRadiusM - routed.drawnFigure.equatorialRadiusM;
+    expect([routed.table.kind, routed.table.kind === "deck" ? routed.table.floor : null]).toEqual([
+      "deck",
+      "envelope",
+    ]);
+    // The floor 1,049 km over the medium's datum before the NH₃ haze (research-rm4-rm5-close-out
+    // §1.3); 30's haze (`test/giantFixtures.ts`'s `coldGiantHazes`) lifts it to 2.12 bar, 1,286 km
+    // over it at the equator, where the datum spheroid through it stands a little higher.
+    expect(lowerM).toBeGreaterThan(1.2e6);
+    expect(lowerM).toBeLessThan(1.35e6);
+    expect(routed.medium.groundAlbedo).toEqual([0, 0, 0]);
+  });
+
+  it("holds every row's twins to its whole medium but the hand Jupiter's NH₃ haze, its aerosol decks among them", () => {
+    const left = withoutOblateTwinMisses(handJupiter());
+    expect([
+      termNames(handJupiter()).filter((name) => !termNames(left).includes(name)),
+      [titan, earth].map((medium) => withoutOblateTwinMisses(medium) === medium),
+    ]).toEqual([["aerosol:NH3:2"], [true, true]]);
+  });
+
+  it("keeps the hand Jupiter's gas and its NH₃ ice alone for the one-sheet twins", () => {
+    const routed = handJupiter();
+    const kept = termNames(oneSheetOf(routed));
+    expect([
+      termNames(routed).filter((name) => !kept.includes(name)),
+      kept.filter((name) => name.startsWith("aerosol:")),
+      oneSheetOf(routed).table,
+    ]).toEqual([
+      ["aerosol:NH4SH", "aerosol:NH3:2", "aerosol:chromophore"],
+      ["aerosol:NH3"],
+      routed.table,
+    ]);
+  });
+
+  it("takes venus-92bar's five scaled cameras, every one above its air, its deck some 60 km up", () => {
+    expect([
+      routedPlacesOf(venus).map(({ label }) => label),
+      venusSplitM > 5e4 && venusSplitM < 8e4,
+    ]).toEqual([placesScaledTo(venusDatum).map(({ label }) => label), true]);
+  });
+
+  it("draws the self-luminous Earth's air at 3,000 K beside its correction alone", () => {
+    expect([earth.table.kind, earth.thermal?.temperaturesK[0]]).toEqual(["correction", 3_000]);
+  });
+
+  it("stands every camera above its air's top", () => {
+    const inside = media().flatMap((routed) =>
+      framesOf(routed)
+        .filter(
+          ({ scene }) =>
+            !(geodeticOf(scene.air.positionM, routed.figure).heightM > routed.medium.topHeightM),
+        )
+        .map(({ label }) => label),
+    );
+    expect(inside).toEqual([]);
+  });
+
+  it("keeps exactly each set's sources, kind and slot, and marches the set's two, everywhere", () => {
+    const wrong = media().flatMap((routed) =>
+      framesOf(routed)
+        .filter(({ set, listed }) => !sourcesAsSet(listed, set, TABLE_SIZES.high.marchSourceCap))
+        .map(({ label }) => label),
+    );
+    expect(wrong).toEqual([]);
+  });
+
+  it("leaves none of the plan's sources out of the sky", () => {
+    const left = media().flatMap((routed) =>
+      framesOf(routed)
+        .filter(({ listed }) => listed.left.length > 0)
+        .map(({ label }) => label),
+    );
+    expect(left).toEqual([]);
+  });
+
+  it("keeps every giant out of the view, and its disc off the body's", () => {
+    const seen = media().flatMap((routed) =>
+      framesOf(routed)
+        .filter(({ scene }) => {
+          const bodyRad = Math.asin(routed.figure.equatorialRadiusM / norm(scene.earthCentreM));
+          return scene.giants.some(
+            (giant) =>
+              !sphereOutsideView(
+                giant.centreM,
+                giant.figure.equatorialRadiusM,
+                scene.camera,
+                settingOutput("high"),
+              ) ||
+              !(
+                angleBetweenRad(giant.centreM, scene.earthCentreM) >
+                bodyRad + Math.asin(giant.figure.equatorialRadiusM / norm(giant.centreM))
+              ),
+          );
+        })
+        .map(({ label }) => label),
+    );
+    expect(seen).toEqual([]);
+  });
+
+  it("gives each giant's planetshine over 5e-4 of the Sun at the camera, under the second star", () => {
+    const outside = media().flatMap((routed) =>
+      framesOf(routed)
+        .filter(({ set, listed }) => {
+          const share = planetshineShare(listed);
+          return set.giants === 0
+            ? share !== null
+            : share === null || share < 5e-4 || share >= 0.05;
+        })
+        .map(({ label }) => label),
+    );
+    expect(outside).toEqual([]);
+  });
+});

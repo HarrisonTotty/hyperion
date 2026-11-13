@@ -245,6 +245,17 @@ impl HaloProfile {
         self.envelope(p.x * p.x + p.y * p.y, p.z)
     }
 
+    /// The component's law at `p` with no cut, systems per cubic light-year.
+    ///
+    /// It is the density inside the cut, and beyond it the law the cut stops,
+    /// `n0 (1 + m² ÷ a²)^(−γ ÷ 2) B(m)` with the same `n0`. The cut keeps the placed halo inside the
+    /// root cube; a halo observed beyond 65,000 ly, as plan 15's census of streams sees it
+    /// (P15.T11.b), goes on falling by that law.
+    #[must_use]
+    pub fn density_without_cut(&self, p: &PointLy) -> f64 {
+        self.n0 * self.profile(self.radius_sq(p.x * p.x + p.y * p.y, p.z))
+    }
+
     /// The density at `site`.
     pub(crate) fn density_at(&self, site: &Site) -> f64 {
         self.envelope(site.r_sq, site.abs_z)
@@ -393,6 +404,33 @@ mod tests {
                 radial.to(m)
             );
         }
+    }
+
+    /// The law without its cut is the density inside the cut, bit for bit, and beyond it goes on
+    /// falling by the broken power law.
+    #[test]
+    fn the_law_without_its_cut_is_the_density_inside_and_falls_beyond() {
+        let halo = broken(0.7);
+        for p in [
+            PointLy::new(8_000.0, 0.0, 0.0),
+            PointLy::new(-20_000.0, 30_000.0, -15_000.0),
+            PointLy::new(0.0, 0.0, 64_000.0),
+        ] {
+            assert!(
+                halo.density_without_cut(&p)
+                    .total_cmp(&halo.density(&p))
+                    .is_eq(),
+                "{p:?}"
+            );
+        }
+        let beyond = PointLy::new(0.0, 66_000.0, 0.0);
+        assert!(halo.density(&beyond).abs() < f64::MIN_POSITIVE);
+        let at_cut = halo.density(&PointLy::new(0.0, 65_000.0, 0.0));
+        let ratio = halo.density_without_cut(&beyond) / at_cut;
+        // The core's factor `(1 + m² ÷ a²)^(−7/4)` and the break's `(m ÷ r_b)^(−2)`, in the plane.
+        let core = |m: f64| math::powf(1.0 + (m / 3_000.0) * (m / 3_000.0), -1.75);
+        let want = core(66_000.0) / core(65_000.0) * math::powf(66.0 / 65.0, -2.0);
+        assert!((ratio / want - 1.0).abs() < 1e-12, "{ratio} against {want}");
     }
 
     /// The break steepens the slope by Δ and keeps the density continuous.

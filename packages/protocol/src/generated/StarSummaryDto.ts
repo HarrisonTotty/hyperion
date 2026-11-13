@@ -104,8 +104,8 @@ variability?: VariabilityDto | null,
  */
 planetary_nebula?: PlanetaryNebulaDto | null, 
 /**
- * Its events in progress at the summary's time, by onset; empty when none is. Absent until
- * plan 06's T28.
+ * Its events in progress at the summary's time, by onset; empty when none is (plan 06,
+ * P06.T28.g). Absent for a star its pair has changed, whose events are not composed.
  */
 active_events?: Array<StarEventDto>, 
 /**

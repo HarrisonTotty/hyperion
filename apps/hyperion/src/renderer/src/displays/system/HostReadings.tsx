@@ -69,8 +69,14 @@ function pending<T>(reading: Pending<T>, show: (present: T) => Shown): Shown {
   return reading.kind === "not_modelled" ? MISSING : show(reading.value);
 }
 
-/** Whether a host's radius is read in kilometres: a neutron star's or a black hole's (ruling 36). */
-function radiusInKm(host: HostBody): boolean {
+/**
+ * Whether a host is a core-collapse remnant, a neutron star or a black hole: its radius is read in
+ * kilometres (ruling 36), and it lights no planetary nebula, which comes only from a star of
+ * 0.8–8 M☉ that leaves a white dwarf (Kwitter and Henry 2022, PASP 134, 022001, §1), where these
+ * come from one above about 8 M☉ through core collapse (Smartt 2009, ARA&A 47, 63) (plan 09,
+ * P09.T44).
+ */
+function isCoreCollapseRemnant(host: HostBody): boolean {
   return host.kind === "neutron_star" || host.kind === "black_hole";
 }
 
@@ -82,12 +88,21 @@ function kick(reading: Pending<{ readonly speedKmS: number }>): Shown {
 const EXPANSION_DECIMALS = 1;
 
 /**
- * The planetary nebula's rows (the orchestrator's ruling 149.4): `NEBULA RADIUS` always, the em dash
- * where it is not modelled and `NONE` where the star lights none; with a nebula, its age, expansion
- * speed, ionised mass and excitation class, which a class on a scale reads bare, as a spectral
- * class does.
+ * The planetary nebula's rows (the orchestrator's ruling 149.4, as P09.T44 amends it):
+ * `NEBULA RADIUS` for every host but a core-collapse remnant, the em dash where it is not modelled
+ * and `NONE` where the star lights none; with a nebula, its age, expansion speed, ionised mass and
+ * excitation class, which a class on a scale reads bare, as a spectral class does.
+ *
+ * @remarks
+ * None of them for a neutron star or a black hole ({@link isCoreCollapseRemnant}), which never
+ * lights one: there the rows do not apply and are left out, amending ruling 149.4's "always" for
+ * those two kinds (P09.T44), until P09.T41.c's remnant rows, the supernova shell's, take their place.
  */
-function nebulaReadings(nebula: Modelled<PlanetaryNebula>): ReactNode {
+function nebulaReadings(host: HostBody): ReactNode {
+  if (isCoreCollapseRemnant(host)) {
+    return null;
+  }
+  const nebula: Modelled<PlanetaryNebula> = host.planetaryNebula;
   return (
     <>
       <ReadoutRow
@@ -349,10 +364,12 @@ export interface HostReadingsProps {
  * yet (rotation, activity, variability, the nebula, the events in progress, a pulsar's spin, a black
  * hole's spin, kicks) is the guide's em dash; what is modelled as none reads `NONE`. After
  * `VARIABILITY` stand the planetary nebula's rows, its radius always and the rest only with a
- * nebula, and `EVENTS` (ruling 149.4). An object with no light, as a black hole, has the
- * em dash for its luminosity and temperature with the reason, `NO LIGHT`. A star that left no
- * remnant has nothing whose mass, light or size could be read, so those rows are left out, as a
- * section that does not apply is (ruling 34). Then each zone that holds it, its own first: what the
+ * nebula, and `EVENTS` (ruling 149.4); for a neutron star or a black hole, which never light a
+ * planetary nebula, its rows are left out and `EVENTS` stays (P09.T44), until P09.T41.c's remnant
+ * rows take their place. An object with no light, as a black hole, has the em dash for its
+ * luminosity and temperature with the reason, `NO LIGHT`. A star that left no remnant has nothing
+ * whose mass, light or size could be read, so those rows are left out, as a section that does not
+ * apply is (ruling 34). Then each zone that holds it, its own first: what the
  * zone is about, its host's architecture class, its stable limits where companions set them, its
  * snow line, its conservative habitable zone and its optimistic one (`OPTIMISTIC`, ruling 65.4),
  * each span one reading with one unit (ruling 113.3).
@@ -391,7 +408,7 @@ export function HostReadings({ host, zones }: HostReadingsProps) {
           <ReadoutRow
             label="RADIUS"
             shown={
-              radiusInKm(host)
+              isCoreCollapseRemnant(host)
                 ? value(formatRadiusKm(host.radiusRsun * KM_PER_RSUN), "km")
                 : value(formatRadiusRsun(host.radiusRsun), <SolarUnit quantity="radius" />)
             }
@@ -434,7 +451,7 @@ export function HostReadings({ host, zones }: HostReadingsProps) {
             )}
             wide
           />
-          {nebulaReadings(host.planetaryNebula)}
+          {nebulaReadings(host)}
           <ReadoutRow label="EVENTS" shown={eventsShown(host.activeEvents)} wide />
         </>
       )}

@@ -4,43 +4,212 @@
 #
 # Each test runs in its own process, so a `OnceLock` shared between tests is built once per test,
 # not once per binary: slow tests that would share expensive data are written as one test instead.
+#
+# A test's `threads-required` is capped at the run's test threads. nextest's scheduler (future-queue
+# 0.4.0, under nextest 0.9.150) sets a weight above the pool's size to the pool's size, so a test
+# reserving 8 slots at `--test-threads 4` (or `NEXTEST_TEST_THREADS=4`) holds all 4 and runs alone,
+# and running 8 threads of its own it would put 8 on 4 slots (checked on 2026-10-29). So the tests
+# below that run threads of their own run no more than they hold: `hyperion_testkit::threads`'s
+# `granted(n)` gives a test reserving n slots the fewer of n and the run's test threads, which
+# nextest gives every test process as `NEXTEST_TEST_THREADS` (since 0.9.130), and `in_shares` runs
+# a test's fixed shares of work on that many. Their results are the same on any number of threads,
+# as each pool's documentation says. Each reservation below is the most threads its test runs, and
+# the test states the same number in its code: change the two together. Not capped, as each runs a
+# fixed number of threads, each with a part of its own: the server's tests that run threads beside
+# the server's own workers (the near-Sun sky, the caps' counts at the ceiling, the range query's
+# reference) and the nuclear disc's slow quadrants, which reserve 4 or fewer, and the density map's
+# budget, which takes every slot to measure every worker at once; each holds what it runs on any run
+# of at least that many test threads. An older nextest, which gives the tests no
+# `NEXTEST_TEST_THREADS`, warns.
+nextest-version = { recommended = "0.9.130" }
 
-# Every test that reads the sky's luminosity tables builds its own copy, since each test runs in its
-# own process. On 2026-10-03 sixteen of them at once, at about 2 GB a build, beside other lanes'
-# builds, exhausted the machine's 32 GB and froze it, so every such test is in this group. Building
-# one metallicity at a time (a934837) cut a build to about 300 MiB (2026-10-05), so the group now
-# runs six at a time: about 2 GB together.
-[test-groups]
-sky-tables = { max-threads = 6 }
+# The protocol's `export_bindings_*` tests write the checked-in bindings (`TS_RS_EXPORT_DIR`,
+# `.cargo/config.toml`), and ts-rs 12 fsyncs each file it writes. In nextest's process per test each
+# rewrites its type's whole closure of imports: 1,432 fsynced writes a run, where `cargo test`'s one
+# process writes 143. In integration's `ci` of 2026-10-10 they took 2,118 test-seconds, with other
+# worktrees building beside it, against 1.4 s for the protocol's 203 other tests.
+# `just gen-protocol-check` runs them all, in one process under `cargo test`, into a temporary
+# directory and diffs that with the committed bindings, so nextest skips them. Filters on the
+# command line (`-p`, `-E`, test names) select within this set, and `--ignore-default-filter` lifts
+# it. The `slow` profile inherits it; a profile that sets its own `default-filter` replaces it.
+[profile.default]
+default-filter = "not (package(hyperion-protocol) & test(/export_bindings/))"
 
+# Each run's JUnit report, with every test's start time and duration, in
+# `target/nextest/<profile>/junit.xml`, from which a log's suites can be read for their wall time
+# and their use of the cores (perf-build.md Q4 and L6). Every profile inherits it.
+[profile.default.junit]
+path = "junit.xml"
+
+# The wasip1 suites' profile, which `just _wasip1` names (`NEXTEST_PROFILE`, unless a run gives its
+# own `--profile`): the default one, whose settings and overrides every profile inherits, under a
+# name of its own, so that the wasip1 run's report does not replace the native run's, which `ci`
+# makes just before it in the same hold of the heavy-test lock.
+[profile.wasip1]
+
+# The profile under which `just hold-ci` (`tools/smart-ci/hold_ci.py`) runs each of the next
+# version's held tests and each slow census that reads holds, alone: the default one, with a test
+# past 2 h ended (TIMEOUT) and the output it wrote printed, so that one long census cannot hold the
+# rest of a round.
+[profile.hold-ci]
+slow-timeout = { period = "600s", terminate-after = 12 }
+
+# wasm32-wasip1 has no threads, so there every test runs on one: the sky's census and oracle helpers
+# and the bound checks run their jobs in turn (`THREADS` is 1 in `tests/common/sky.rs`; the others
+# branch on `target_family = "wasm"`). So under wasip1 each test takes one slot, whatever it
+# reserves natively below, and the sky's tests leave the tables' memory group for the whole pool:
+# measured on 2026-10-11 under the heavy lock, most wasip1 sky tests peak at 100–200 MiB of
+# wasmtime, the heaviest at 807 MiB, and the run's sixteen heaviest come to 5.0 GiB together; a
+# whole wasip1 fast run on the whole pool peaked at 3.1 GiB in its scope, within the 8 GB that
+# `decision-test-coverage.md` §4 allows. Being first, this override wins over the native ones for
+# these two settings (nextest takes, for each setting, the first matching override that sets it);
+# the group's priority below still applies. The slow profile's own overrides are checked before it,
+# so `test-wasm-slow` keeps their group and their reservations. The next override, the sky census's
+# own, came first and gives its tests the same one slot.
 [[profile.default.overrides]]
-filter = "package(hyperion-sim) & (test(/^sky::(luminosity|caps|census|envelope|band|limits|dgl)/) | binary(/^sky_/))"
-test-group = "sky-tables"
+platform = 'cfg(target_family = "wasm")'
+threads-required = 1
+test-group = "@global"
 
+# On WebAssembly, which has no threads, the sky census's identity tests run on one (`THREADS`), so
+# they take one slot there (the override below sets eight elsewhere; the first that matches wins).
+# At eight, more than their group's six, nextest 0.9.146 left them unrun in `ci`'s wasip1 run once
+# `wasm_sky` had thinned the group (2026-10-11): a test queued behind its full group is taken up
+# again only when another test of the group ends, and only if the whole pool has room for it then
+# (future-queue 0.4.0), so when the group's last other test ended with more than eight slots busy,
+# they never ran.
+[[profile.default.overrides]]
+platform = 'cfg(target_arch = "wasm32")'
+filter = "package(hyperion-sim) & binary(=sky_census)"
+threads-required = 1
+
+# The sky's tests that read its luminosity tables are in this group. Each test runs in its own
+# process, and each once built its own copy of the tables: on 2026-10-03 sixteen of them at once, at
+# about 2 GB a build, beside other lanes' builds, exhausted the machine's 32 GB and froze it.
+# Building one metallicity at a time (a934837) cut a build to about 300 MiB (2026-10-05), and now
+# one process a run builds them and the others read its file (`sky::testing::shared`). Measured
+# natively on 2026-10-11 under the heavy lock (each test process's peak RSS): most of the group's
+# tests 100–200 MiB, the heaviest 671 MiB (`census::query`'s plan at a ceiling), the heaviest others
+# 349, 180, 166 and 147 MiB. Twelve at once, each as heavy as the heaviest, beside those four, come
+# to 8.7 GiB: under three quarters of the lanes' 12 GiB heavy-test cap (`HEAVY_MEMORY_MAX`), where
+# sixteen would not be (10.5 GiB). A whole native fast run at twelve peaked at 1.3 GiB in its scope,
+# under the half of that cap which `decision-test-coverage.md` §4 allows.
+[test-groups]
+sky-tables = { max-threads = 12 }
+# The slow tier's sky tests (the census's oracles, the realised sky, the hybrid boundary) keep the
+# group's old limit of six, in a group of their own, on both targets, until the slow pass has
+# measured their memory (`decision-test-coverage.md` §4).
+sky-tables-slow = { max-threads = 6 }
+
+# The sky's tests below run on threads of their own and reserve those slots, so they stay out of the
+# group, in the whole pool, and start as early as it does. nextest 0.9.146's scheduler (future-queue
+# 0.4.0's `future_queue_grouped`) starts a test queued behind its full group only when another of
+# the group's tests finishes, and only if the pool then has room for all its slots; the first queued
+# test that does not fit holds back the rest. So a test of 4 or 8 slots queued as the group drains,
+# while other tests fill the pool, never starts: `sky_census`'s six fast tests were left unrun that
+# way in a whole native run on 2026-10-11, as four were on wasip1 (lane wasm-coverage). A one-slot
+# test always fits the slot its finishing group-mate frees, so the group holds only those. These
+# tests peak at 9–324 MiB a process, 81 MiB or less a slot, within the group's memory arithmetic
+# above.
+#
 # The sky census's identity tests run the census and its oracle on eight threads of their own
 # (`THREADS` in `tests/common/sky.rs`), so each takes eight slots rather than a nominal one.
 [[profile.default.overrides]]
 filter = "package(hyperion-sim) & binary(=sky_census)"
 threads-required = 8
+test-group = "@global"
+priority = 50
 
 # Two of the sky's band tests run their census's cells on four threads of their own, so each takes
 # four slots rather than a nominal one.
 [[profile.default.overrides]]
 filter = "package(hyperion-sim) & (test(=sky::limits::tests::the_eyes_light_is_independent_of_the_census_radius) | test(=sky::band::tests::one_marchs_light_at_100_200_and_400_ly_agrees_within_1_percent))"
 threads-required = 4
+test-group = "@global"
+priority = 50
 
-# The shell plan's census tests (R06.T8.i) census their cells on four threads of their own too.
+# The crust entries' census over the 400 sample systems (R09.T10.c) reads their records on
+# sixteen threads of its own (`CRUST_CENSUS_THREADS` in `planetary/surface/mod.rs`).
 [[profile.default.overrides]]
-filter = "package(hyperion-sim) & (test(=sky::census::query::tests::shells_merged_are_the_census_to_each_edge_and_the_last_is_the_plans) | test(=sky::census::query::tests::by_ray_shells_merged_hold_the_census_to_each_shells_radii))"
+filter = "package(hyperion-sim) & test(=planetary::surface::tests::no_generated_cell_lacks_its_crust_s_entry)"
+threads-required = 16
+test-group = "@global"
+priority = 50
+
+# The surface colour's census of the planet viewer's draws generates them on sixteen threads of its
+# own (`CENSUS_THREADS` in `planetary/viewer/colour_census.rs`).
+[[profile.default.overrides]]
+filter = "package(hyperion-sim) & test(=planetary::viewer::colour_census::randomize_s_discs_take_their_own_colours)"
+threads-required = 16
+test-group = "@global"
+priority = 50
+
+# The shell plan's census tests (R06.T8.i), and the census's at a synthetic ceiling (R13.T2.a),
+# census their cells on four threads of their own too.
+[[profile.default.overrides]]
+filter = "package(hyperion-sim) & (test(=sky::census::query::tests::shells_merged_are_the_census_to_each_edge_and_the_last_is_the_plans) | test(=sky::census::query::tests::by_ray_shells_merged_hold_the_census_to_each_shells_radii) | test(=sky::census::query::tests::at_a_ceiling_shells_merged_are_the_census_forced_to_the_real_boundary) | test(=sky::census::query::tests::at_a_ceiling_every_star_within_its_texels_real_boundary_is_listed))"
 threads-required = 4
+test-group = "@global"
+priority = 50
+
+# The census's bound star by star (R06.T8.g) checks its realised systems on four threads of its own,
+# in its fast test and its slow one (below), so each takes four slots rather than a nominal one.
+[[profile.default.overrides]]
+filter = "package(hyperion-sim) & test(=sky::census::cell::tests::the_star_bound_holds_for_some_realised_systems)"
+threads-required = 4
+test-group = "@global"
+priority = 50
 
 # R06.T11.c's near-Sun sky builds the galaxy's luminosity tables twice, on the server's pool and
 # serially in the test, and marches its band on three threads of its own beside the server's three
-# workers, so it takes four slots and joins the tables' group.
+# workers, so it takes four slots, starting as early as the group.
 [[profile.default.overrides]]
 filter = "package(hyperion-server) & binary(=sky) & test(=a_sky_near_the_sun_returns_the_stars_texels_and_host_discs_the_sim_returns)"
-test-group = "sky-tables"
 threads-required = 4
+priority = 50
+
+# From generator version 27 a sky's census takes the features' members and the catalogue classes'
+# hosts beside its grid (R06.T16.a's switch), its jobs on the server's three workers: under a whole
+# run's load at one slot each, seven of the server's sky tests waited past the harness's patience
+# for their replies (train 27's gate), so each takes four slots and starts as early as the group.
+[[profile.default.overrides]]
+filter = "package(hyperion-server) & binary(=sky)"
+threads-required = 4
+priority = 50
+
+# R13.T2.b's real boundary in jobs builds the server's galaxy's luminosity tables on its pool of
+# three workers, as the server builds them (`build_on_pool`), counts the caps' rays in jobs on that
+# pool beside its runtime's threads, and runs the sim's three references on threads of their own, so
+# it takes four slots, starting as early as the group.
+[[profile.default.overrides]]
+filter = "package(hyperion-server) & test(=compute::sky::tests::at_the_ceiling_the_caps_counts_in_jobs_are_the_sims_real_boundary)"
+threads-required = 4
+priority = 50
+
+# R13.T2.b's caps in jobs measure and count their rays on a pool of three workers, between the
+# sim's references on the test's own thread, so the test takes three slots, starting as early as the
+# group: 75 s alone (pod, 2026-11-06).
+[[profile.default.overrides]]
+filter = "package(hyperion-server) & test(=compute::sky::tests::the_caps_rays_measured_in_jobs_are_the_sims_caps)"
+threads-required = 3
+priority = 50
+
+# P12.T8.b.2's walks of a class across the whole galaxy run on a server of four workers
+# (`common::alerts::WALK_WORKERS`): the core collapses' 101.6 s on two, and the X-ray binaries'
+# 52.7 s, in one wait each (pod, 2026-11-06). So each takes four slots, starting as early as the
+# group.
+[[profile.default.overrides]]
+filter = "package(hyperion-server) & binary(=alerts_scans) & (test(=alerts_scans_walk_a_galaxy_wide_class_to_complete) | test(=alerts_scans_walk_a_recurrent_class_in_the_background_and_deliver_its_detections))"
+threads-required = 4
+priority = 50
+
+# The group's tests start first. They are the fast tier's longest (40–160 s each natively, up to
+# about 300 s on wasip1, where most tests take seconds), and in binary order they started after most
+# of the sim's tests and ran on alone at the end of each run (`perf-sim-sky.md`, 2026-10-10).
+[[profile.default.overrides]]
+filter = "package(hyperion-sim) & (test(/^sky::(luminosity|caps|census|envelope|band|limits|dgl|pins)/) | binary(/^sky_/))"
+test-group = "sky-tables"
+priority = 50
 
 # The hierarchy bound's tests (P11.T16) check their records on four threads of their own, so each
 # takes four slots rather than a nominal one.
@@ -48,28 +217,129 @@ threads-required = 4
 filter = "package(hyperion-sim) & test(/^stellar::multiplicity::bound::tests::the_(bound_holds|hierarchy_bound_holds)/)"
 threads-required = 4
 
+# The range query's merged properties build their reference galaxy on a thread of their own, beside
+# the server's build of it, so the test takes two slots.
+[[profile.default.overrides]]
+filter = "package(hyperion-server) & binary(=systems_in_range) & test(=the_range_query_answers_as_the_sim_and_refuses_what_it_cannot_use)"
+threads-required = 2
+
+# The nuclear disc's slow identity test is four, one for each quadrant about its place
+# (`sky_census.rs`), each holding a cell of D and one of E and running on three threads of its own:
+# E's census, E's oracle, and D's census then D's oracle. So each takes three slots, not the eight
+# of the census's other tests below, and while the slow tier's memory is unmeasured, three holds
+# the group to two of them at once, four of the old test's eight cells. At eight, more than the
+# group's six, a test takes the whole group (future-queue 0.4.0 holds a test's weight to its
+# group's limit), so the four would run one after another. Measured on 2026-10-13 on an 8-thread
+# i7-8665U, two at a time: each process peaked at 123 MiB or less, and the run's scope, with both,
+# at 252 MiB (`memory.peak`). They start after the group's six- and eight-slot tests, at a priority
+# below the group's, against the slow tier's longest-first order until the slow group is
+# revisited: a test queued behind its full group starts only when another of the group ends, and
+# only if the pool then has room for all its slots (the default profile's overrides), so a
+# three-slot test ending last could strand an eight-slot one queued behind it, which nextest then
+# reports as not run. Queued behind those, a quadrant follows only a test at least as heavy as
+# itself. Being first, this override's priority wins over the group's next, and its slots over the
+# census's own below; it sets nothing else, and the group is the next one's.
 [[profile.slow.overrides]]
-filter = "package(hyperion-sim) & (test(/^sky::(luminosity|caps|census|envelope|band|limits|dgl)/) | binary(/^sky_/))"
-test-group = "sky-tables"
+filter = "package(hyperion-sim) & binary(=sky_census) & test(/^the_census_is_its_oracle_for_d_and_e_in_the_nuclear_disc_/)"
+threads-required = 3
+priority = -10
+
+# The slow tier's sky tests keep the group's old limit (`sky-tables-slow`) and the slow tier's order
+# below: the priority the default profile gives the fast tier's group does not reach them. The slow
+# tier's slots and group stay as they were until its own memory is measured (2026-10-11).
+[[profile.slow.overrides]]
+filter = "package(hyperion-sim) & (test(/^sky::(luminosity|caps|census|envelope|band|limits|dgl|pins)/) | binary(/^sky_/))"
+test-group = "sky-tables-slow"
+priority = 0
+
+# So this census test keeps the four slots it held in `test-wasm-slow`, which runs it (it is ignored
+# as slow on wasm32-wasip1 only), rather than the one slot of the wasip1 override above.
+[[profile.slow.overrides]]
+filter = "package(hyperion-sim) & test(=sky::census::query::tests::at_a_ceiling_every_star_within_its_texels_real_boundary_is_listed)"
+threads-required = 4
 
 [[profile.slow.overrides]]
 filter = "package(hyperion-sim) & test(=stellar::multiplicity::bound::tests::the_hierarchy_bound_holds_for_generated_systems)"
 threads-required = 4
 
-# The census's bound star by star (R06.T8.g) checks its realised systems on four threads of its
-# own, in its fast test and its slow one, so each takes four slots rather than a nominal one.
-[[profile.default.overrides]]
-filter = "package(hyperion-sim) & test(=sky::census::cell::tests::the_star_bound_holds_for_some_realised_systems)"
-threads-required = 4
-
+# The census's bound star by star in the slow tier, on four threads of its own (its fast test
+# above).
 [[profile.slow.overrides]]
 filter = "package(hyperion-sim) & test(=sky::census::cell::tests::the_star_bound_holds_for_realised_systems)"
 threads-required = 4
+
+# P10.T12's budget sweep, its drawn galaxy's tubes and option A's tripwire build galaxies and spray
+# their streams on eight threads of their own (`global_list::statistics`'s `THREADS`).
+[[profile.slow.overrides]]
+filter = "package(hyperion-sim) & test(/^galaxy::global_list::statistics::(the_discrete_share_s_budgets_hold_over_the_sweep|a_drawn_galaxy_s_tubes_and_contrast_keep_their_measured_figures|option_a_drops_a_bounded_share_over_the_sweep)$/)"
+threads-required = 8
+
+# The global list's census over a drawn galaxy builds its tube tables and sums its cells by hand
+# on eight threads of its own (`global_list::source`'s test, perf-range-census-streams).
+[[profile.slow.overrides]]
+filter = "package(hyperion-sim) & test(=galaxy::global_list::source::tests::a_drawn_galaxy_s_census_is_the_old_path_s_bit_for_bit)"
+threads-required = 8
+
+# P10.T10.b's warm-up at Milky Way values builds every tube table on a pool of eight workers of its
+# own (`compute::global_list`'s test of it).
+[[profile.slow.overrides]]
+filter = "package(hyperion-server) & test(=compute::global_list::tests::the_warm_up_readies_every_track_and_a_range_query_finds_a_stream_s_members)"
+threads-required = 8
+
+# P10.T12's millennium test sprays its three test streams on three threads of their own
+# (`global_list::statistics`'s `SPRAY_THREADS`).
+[[profile.slow.overrides]]
+filter = "package(hyperion-sim) & test(=galaxy::global_list::statistics::the_test_streams_members_keep_to_their_tubes_over_a_millennium)"
+threads-required = 3
+
+# P09.T31's centre profile test follows its six shells on six threads of their own
+# (`centre::over_time::SHELLS`).
+[[profile.slow.overrides]]
+filter = "package(hyperion-sim) & test(=galaxy::features::centre::over_time::the_centre_keeps_its_profile_and_flattening_over_a_millennium)"
+threads-required = 6
+
+# P10.T10.b's registration test serves its queries on a pool of eight workers of its own
+# (`requests::galaxy::registration`'s `WORKERS`).
+[[profile.slow.overrides]]
+filter = "package(hyperion-server) & test(=requests::galaxy::registration::from_27_a_range_query_serves_the_list_s_members_and_the_centre_s)"
+threads-required = 8
 
 # P11.T17.c's verdicts against the engine check their pairs on eight threads of their own.
 [[profile.slow.overrides]]
 filter = "package(hyperion-sim) & test(=stellar::binary::light::tests::the_pair_verdicts_hold_against_the_engine)"
 threads-required = 8
+
+# P15.T10.b's fitted samplers against the engine run their census of 10⁷ records through the
+# binary engine on sixteen threads of their own (`fitted_tables::CENSUS_THREADS`).
+[[profile.slow.overrides]]
+filter = "package(hyperion-sim) & test(/^galaxy::catalogue_classes::binary::fitted_tables::the_.*_against_the_engine$/)"
+threads-required = 16
+
+# P08.T12 at 27's remnants through the stellar stage run on four threads of their own
+# (`placement::fates_hold`'s `SLOW_THREADS`).
+[[profile.slow.overrides]]
+filter = "package(hyperion-sim) & test(/^galaxy::placement::fates_hold::the_dead_records_remnants_are_built_through_the_stellar_stage$/)"
+threads-required = 4
+
+# P11.T5's helium-donor hold runs its two censuses of 10⁶ records on sixteen threads of their own
+# (`awd_donors_hold::CENSUS_THREADS`).
+[[profile.slow.overrides]]
+filter = "package(hyperion-sim) & test(=stellar::rules::awd_donors_hold::the_helium_fed_hosts_leave_the_fast_class_in_a_census)"
+threads-required = 16
+
+# P11.T5's and P11.T8.b's X-ray binary hold runs its four censuses of 10⁶ records on sixteen
+# threads of their own (`xrb_class_hold::CENSUS_THREADS`).
+[[profile.slow.overrides]]
+filter = "package(hyperion-sim) & test(=stellar::rules::xrb_class_hold::no_census_member_is_fed_under_the_floor_and_every_member_has_a_kind)"
+threads-required = 16
+
+# Plan 02's seed sweeps (`galaxy_sweeps`) share their seeds out in fixed parts on sixteen threads
+# of their own (`THREADS` in `tests/galaxy_sweeps.rs`), so each reserves sixteen slots natively.
+# On WebAssembly they run their parts in turn, on the one slot the wasm override gives them.
+[[profile.slow.overrides]]
+platform = 'cfg(not(target_family = "wasm"))'
+filter = "package(hyperion-sim) & binary(=galaxy_sweeps)"
+threads-required = 16
 
 # R06.T5.f's realised sky (`sky_realised`) runs its jobs on eight threads of its own too.
 [[profile.slow.overrides]]
@@ -80,6 +350,12 @@ threads-required = 8
 # own, one a point, each counting the caps at seven cuts and recounting 3,072 rays at ten.
 [[profile.slow.overrides]]
 filter = "package(hyperion-sim) & binary(=sky_hybrid) & test(=the_hybrid_boundary_is_recorded)"
+threads-required = 6
+
+# R13.T1.b's record of the boundary held within the real limit measures the same six points on six
+# threads of its own, each counting the caps at five cuts and recounting 3,072 rays at ten.
+[[profile.slow.overrides]]
+filter = "package(hyperion-sim) & binary(=sky_hybrid) & test(=the_capped_boundary_is_recorded)"
 threads-required = 6
 
 [profile.slow]
@@ -95,6 +371,70 @@ slow-timeout = "120s"
 filter = "package(hyperion-server) & binary(density_map) & test(=density_map_512_builds_within_budget)"
 threads-required = "num-cpus"
 
+# P09.T35's carve-out census walks the young field's layer-E cells and two classes' cells in sixteen
+# shares of its own (`in_shares`), so it reserves sixteen slots.
+[[profile.slow.overrides]]
+filter = "package(hyperion-sim) & test(=galaxy::placement::carve_out_hold::census_of_the_carve_out)"
+threads-required = 16
+
+# The carve-out residuals' cheap tests (research-leans-49) run sixteen shares of their own
+# (`in_shares`): the core collapses' class walk, the ridge cells' dead records and living hosts.
+[[profile.slow.overrides]]
+filter = "package(hyperion-sim) & (test(=galaxy::placement::carve_out_hold::the_class_s_deaths_inside_the_table_s_excess) | test(=galaxy::placement::marks::tests::no_table_read_dead_record_died_within_the_reach) | test(=galaxy::catalogue_classes::lbv::residuals_hold::ridge_cells_living_hosts_match_the_grid))"
+threads-required = 16
+
+# P11.T4's neutron-star accretion census runs two slab censuses of the binary engine's pairs in
+# sixteen shares of its own (`in_shares`, `stellar::binary::testing::census::THREADS`), so it
+# reserves sixteen slots.
+[[profile.slow.overrides]]
+filter = "package(hyperion-sim) & test(=stellar::rules::ns_accretion_hold::census_of_the_neutron_star_accretion)"
+threads-required = 16
+
+# P11.T4's diagnosis of the black holes' low-mass companions runs one slab census the same way, so
+# it reserves sixteen slots.
+[[profile.slow.overrides]]
+filter = "package(hyperion-sim) & test(=stellar::binary::testing::census::tests::the_black_holes_low_mass_companions_end_by_fallback)"
+threads-required = 16
+
+# P11.T4's heavy-donor census runs its two slab censuses the same way, so it reserves sixteen slots
+# too.
+[[profile.slow.overrides]]
+filter = "package(hyperion-sim) & test(=stellar::rules::heavy_donor_hold::census_of_the_heavy_donors)"
+threads-required = 16
+
+# P11.T4's dwarf-limit census runs its generated pairs in sixteen shares of its own (`in_shares`,
+# `dwarf_limit_hold::THREADS`), so it reserves sixteen slots too.
+[[profile.slow.overrides]]
+filter = "package(hyperion-sim) & test(=stellar::rules::dwarf_limit_hold::no_white_dwarf_passes_the_chandrasekhar_mass_under_every_27_hold)"
+threads-required = 16
+
+# P09.T36.a's census walks every catalogue feature's list and two classes' cells in sixteen shares of
+# its own (`in_shares`), so it reserves sixteen slots too.
+[[profile.slow.overrides]]
+filter = "package(hyperion-sim) & test(=galaxy::features::members::recent::tests::the_features_hold_most_core_collapses_and_some_of_the_shells)"
+threads-required = 16
+
+# P09.T38's slow tests walk their mark sets, cells, volumes and censuses in sixteen shares of their
+# own (`in_shares`), so each reserves sixteen slots.
+[[profile.slow.overrides]]
+filter = "package(hyperion-sim) & test(/^galaxy::catalogue_classes::verification::/)"
+threads-required = 16
+
+# P11.T12's statistical suite draws its generated records in 64 fixed parts on eight threads of
+# its own (`in_shares`, `THREADS` in `tests/binaries_statistical.rs`), so each test reserves eight
+# slots.
+[[profile.slow.overrides]]
+filter = "package(hyperion-sim) & binary(=binaries_statistical)"
+threads-required = 8
+
+# R10.T4.a's level bounds (`level_bound_worlds`, one slow test) measure each of the six sample worlds
+# on a thread of its own, its body's σ on one more and its points and patches on four more
+# (`THREADS`): up to 36 threads at once, more than a run's pool, so the test takes every slot and
+# runs alone (main's ruling of 2026-10-26, R10.T4.a's records, "Deviations in R10.T4.a, as built").
+[[profile.slow.overrides]]
+filter = "package(hyperion-sim) & binary(=level_bound_worlds)"
+threads-required = "num-test-threads"
+
 # Nextest starts tests in binary order, so without priorities the longest ones could start ten
 # minutes in and then run alone for the last quarter of an hour. Higher priorities start sooner
 # (-100 to 100); the order follows each test's slot time in the slow-test audit of 2026-09-27,
@@ -103,12 +443,22 @@ threads-required = "num-cpus"
 filter = "package(hyperion-sim) & binary(galaxy_sweeps) & test(=the_rotation_curve_over_four_thousand_seeds)"
 priority = 100
 
-# The million-system satellite check shares its cells among its own threads: it takes four slots
+# P14.T33.c's four composition censuses (10⁵ bodies of 6,800 systems and 10⁶ of 68,000, each under
+# the version's rules and under every 26 hold) generate their systems on sixteen threads of their
+# own (`ORDINARY_THREADS` and `SLOW_THREADS` in `planetary/system/census_tests.rs`), so each takes
+# sixteen slots, and they start with the rotation curve: the 10⁶ censuses' slot time is the tier's
+# longest. They are compiled out on WebAssembly.
+[[profile.slow.overrides]]
+filter = "package(hyperion-sim) & test(/^planetary::system::census_tests::composition_census_/)"
+threads-required = 16
+priority = 100
+
+# The million-system satellite check shares its cells among its own threads: it takes sixteen slots
 # rather than a nominal one, so its threads do not slow the tests beside it, and it is capped at
-# four threads to match (`check_all` in `planetary_properties.rs`).
+# sixteen threads to match (`SLOW_THREADS` in `planetary_properties.rs`).
 [[profile.slow.overrides]]
 filter = "package(hyperion-sim) & binary(planetary_properties) & test(=satellites::moons_inside_hill_spheres_and_rings_inside_roche_limits_slow)"
-threads-required = 4
+threads-required = 16
 priority = 90
 
 [[profile.slow.overrides]]
@@ -126,3 +476,27 @@ priority = 60
 [[profile.slow.overrides]]
 filter = "package(hyperion-sim) & binary(gas_statistics) & test(=the_neutral_disc_holds_most_of_the_gas_over_2000_galaxies)"
 priority = 60
+
+# R08.T12.g's spheroid at a = c traces on sixteen threads (`SPHEROID_THREADS` in
+# `atmosphere/mod.rs`).
+[[profile.slow.overrides]]
+filter = "package(hyperion-fit) & test(=atmosphere::tests::atmosphere_spheroid_with_a_equal_to_c_follows_the_spheres_paths)"
+threads-required = 16
+
+# R08.T12.h's importance over the thick cases builds their channels' media on sixteen threads
+# (`IMPORTANCE_THREADS` in `atmosphere/transport.rs`).
+[[profile.slow.overrides]]
+filter = "package(hyperion-fit) & test(=atmosphere::transport::tests::atmosphere_importance_is_finite_and_positive_in_every_thick_case)"
+threads-required = 16
+
+# The atmosphere tracer's benchmarks (rendering plan R08, R08.T12.c) each trace on sixteen
+# threads, `atmosphere::benchmarks`'s `THREADS`.
+[[profile.slow.overrides]]
+filter = "package(hyperion-fit) & test(/^atmosphere::benchmarks::/)"
+threads-required = 16
+
+# P11.T10's agreement tests (`binary_kick_*`) run their samples in sixty-four shares on sixteen
+# threads of their own (`in_shares`), so each reserves sixteen slots.
+[[profile.slow.overrides]]
+filter = "package(hyperion-sim) & test(/^stellar::binary::supernova::agreement::binary_kick_/)"
+threads-required = 16

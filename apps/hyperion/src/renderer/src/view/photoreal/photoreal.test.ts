@@ -4,6 +4,7 @@ import { CLEAR_COLOUR } from "../engine/webgpu/drawing";
 import { HDR_COLOUR_FORMAT } from "../photometry/toneCurve";
 import { METER_CLASS } from "../post/meter";
 import { QUALITY_SETTINGS } from "../quality/qualitySetting";
+import { TERRAIN_PASS_LABEL, TERRAIN_SHADOW_PASS_LABEL } from "../terrain/gpu/material";
 import { PHOTOREAL_PASS_LABELS, photorealisticPasses } from "./passes";
 import { sceneTargetSpec } from "./sceneTarget";
 import { aCameraScene } from "../../test/viewFixtures";
@@ -31,14 +32,84 @@ describe("photorealisticPasses", () => {
 
   it("puts the disc cells between the sky and the discs, before the mesh bodies that read them (R07.T8.d)", () => {
     const labels = photorealisticPasses("high").passes.map((pass) => pass.label);
-    expect(labels.slice(0, 3)).toEqual(["sky", "disc cells", "bodies"]);
+    expect(labels.slice(0, 2)).toEqual(["sky", "disc cells"]);
+    expect(labels.indexOf("disc cells")).toBeLessThan(labels.indexOf("bodies"));
     expect(labels.indexOf("disc cells")).toBeLessThan(labels.indexOf("discs"));
   });
 
+  it.each(QUALITY_SETTINGS)(
+    "puts R10's terrain shadows, built, just before the bodies and the terrain on %s (R10.T9.b)",
+    (setting) => {
+      const passes = photorealisticPasses(setting).passes;
+      const labels = passes.map((pass) => pass.label);
+      const at = labels.indexOf(TERRAIN_SHADOW_PASS_LABEL);
+      expect(passes[at]).toEqual({ label: "terrain shadows", owner: "R10", built: true });
+      expect(labels.slice(at, at + 2)).toEqual([TERRAIN_SHADOW_PASS_LABEL, "bodies"]);
+      expect(at).toBeLessThan(labels.indexOf(TERRAIN_PASS_LABEL));
+    },
+  );
+
+  it.each(QUALITY_SETTINGS)(
+    "puts the visibility buffer's ID raster, the pyramid, its late raster and the resolve, built, in the bodies pass's place on %s (R14.T2.c to T2.e)",
+    (setting) => {
+      const passes = photorealisticPasses(setting).passes;
+      const labels = passes.map((pass) => pass.label);
+      const at = labels.indexOf("terrain id raster");
+      // The figures' raster and resolve between them where the figures are shaded once a pixel
+      // (plan R07, `figureShading` `screen`), the resolve's within the terrain's.
+      expect(passes.slice(at, at + 6)).toEqual([
+        { label: "terrain id raster", owner: "R14", built: true },
+        { label: "figure id raster", owner: "R07", built: true },
+        { label: "figure resolve", owner: "R07", built: true },
+        { label: "depth pyramid", owner: "R14", built: true },
+        { label: "terrain id raster late", owner: "R14", built: true },
+        { label: "terrain resolve", owner: "R14", built: true },
+      ]);
+      // Forward, the pyramid between the bodies pass and its late raster (R14.T3.d).
+      expect(labels.indexOf("bodies")).toBeLessThan(at);
+      expect(labels.indexOf("depth pyramid")).toBeLessThan(labels.indexOf("bodies late"));
+      expect(labels.indexOf("bodies late")).toBeLessThan(labels.indexOf("discs"));
+    },
+  );
+
+  it.each(QUALITY_SETTINGS)(
+    "puts the figures' raster and then their resolve after the bodies pass and before the discs on %s (plan R07, `figureShading` `screen`)",
+    (setting) => {
+      const labels = photorealisticPasses(setting).passes.map((pass) => pass.label);
+      const raster = labels.indexOf("figure id raster");
+      expect([
+        labels.indexOf("bodies") < raster,
+        labels.indexOf("figure resolve") === raster + 1,
+        raster + 1 < labels.indexOf("discs"),
+      ]).toEqual([true, true, true]);
+    },
+  );
+
   it("leaves the slots of plans not yet built empty, R06's sky built (R07.T8.a)", () => {
     const empty = photorealisticPasses("high").passes.filter((pass) => !pass.built);
-    expect(new Set(empty.map((pass) => pass.owner))).toEqual(new Set(["R08", "R11"]));
+    expect(new Set(empty.map((pass) => pass.owner))).toEqual(new Set(["R11"]));
   });
+
+  it.each(QUALITY_SETTINGS)(
+    "builds R08's atmosphere after the discs and before R11's rings, with its passes' labels, on %s (R08.T10.b)",
+    (setting) => {
+      const passes = photorealisticPasses(setting).passes;
+      const labels = passes.map((pass) => pass.label);
+      const at = labels.indexOf("atmosphere");
+      expect(passes[at]).toEqual({
+        label: "atmosphere",
+        owner: "R08",
+        built: true,
+        labels: [
+          "atmosphere tables",
+          "atmosphere view",
+          "atmosphere behind",
+          "atmosphere composite",
+        ],
+      });
+      expect(labels.slice(at - 1, at + 2)).toEqual(["discs", "atmosphere", "rings"]);
+    },
+  );
 });
 
 describe("sceneTargetSpec", () => {

@@ -7,7 +7,7 @@ exclude = ["tools/*"]
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.98"
+rust-version = "1.99"
 publish = false
 
 [workspace.dependencies]
@@ -19,17 +19,21 @@ hyperion-testkit = { path = "crates/hyperion-testkit" }
 
 anyhow = "1.0.104"
 axum = { version = "0.8.9", features = ["ws"] }
-base64 = "0.22.1"
+base64 = "0.23.1"
 clap = { version = "4.6.7", features = ["derive", "env"] }
 criterion = { version = "0.8.2", default-features = false }
 futures-util = "0.3.34"
+# The server only (rendering plan R06, R06.T11.k): the CPU pool's bulk work at a lower OS priority
+# without `unsafe`, `set_thread_priority` on Linux, macOS and Windows. Without its default `rtkit`,
+# which asks the desktop's D-Bus broker for raised priorities the pool never asks for.
+gdt-cpus = { version = "0.2606.1", default-features = false }
 # `OsEntropy` is the only user; nothing else sees its API, which changed between 0.3 and 0.4.
 getrandom = "0.4.3"
 # Pinned exactly: libm is reproducible across platforms but not across its own versions, so a bump
 # is a generator-version change. `arch` is off so that there is one code path to reason about.
 libm = { version = "=0.2.16", default-features = false }
 # `hyperion-fit` only (plan 15, Design note 3): its deterministic parallel map-reduce.
-rayon = "1.11.0"
+rayon = "1.12.0"
 serde = { version = "1.0.229", features = ["derive"] }
 # The server only (rendering plan R03, R03.T10.a): `TCP_NOTSENT_LOWAT` on accepted sockets without
 # `unsafe`, through `SockRef`; `all` for that option. Already in the tree through tokio.
@@ -37,12 +41,12 @@ socket2 = { version = "0.6.5", features = ["all"] }
 # `float_roundtrip` (ruling 64.7): the default parser can read a 17-digit float one ulp off, so a
 # client's coordinates would reach the server a bit away from what it sent. Writing is exact either
 # way, so no server output moves.
-serde_json = { version = "1.0.151", features = ["float_roundtrip"] }
+serde_json = { version = "1.0.154", features = ["float_roundtrip"] }
 # `hyperion-fit` only: the tables' input and lock-file hashes (plan 15, Design notes 6 and 8).
-sha2 = "0.10.9"
+sha2 = "0.11.1"
 tempfile = "3.27.0"
-thiserror = "2.0.20"
-tokio = { version = "1.53.1", features = [
+thiserror = "2.0.21"
+tokio = { version = "1.53.3", features = [
     "macros",
     "net",
     "rt-multi-thread",
@@ -52,7 +56,7 @@ tokio = { version = "1.53.1", features = [
 ] }
 tokio-tungstenite = "0.30.0"
 # `hyperion-fit` only: its manifests, datasets' provenance and lock file.
-toml = "1.1.6"
+toml = "1.1.8"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 # The browser target's test harness (plan R04, Design note 12), a dev-dependency of the crates whose
@@ -85,8 +89,21 @@ lto = "thin"
 # the build directory was 15 GB against 7.8 GB (measured 2026-10-03 under shared load of about 30).
 # Debug info changes no generated code, so no output moves. For a debugger session, override it:
 # `CARGO_PROFILE_DEV_DEBUG=true cargo build`.
+#
+# Split, the line tables stay in a `.dwo` file per object, written once per compile, and each
+# executable links only the objects' skeleton units: lld otherwise copies into every test binary the
+# debug sections of each object it links, those of the functions it discards included. The
+# workspace's 129 test executables came to 2.62 GB with 1.77 GB of debug sections, against 4.23 GB
+# with 3.38 GB unsplit, for 0.89 GB of `.dwo` files in 44k files; the rebuild after touching the
+# sim's `lib.rs` took 1,350 and 1,206 unit-seconds (374 and 312 s at 4 jobs) against 1,459 and 1,521
+# (370 and 391 s), A/B back to back at a 1-minute load of 25 to 34 (measured 2026-10-12,
+# perf-build.md L2). Backtraces keep file and line (checked on a test's panic). Cargo passes the
+# option only to targets for which `rustc --print split-debuginfo` lists it: Linux and macOS
+# (macOS's default already), not Windows MSVC (`packed` only) or the wasm targets (`off` only),
+# which keep their defaults (checked with `cargo build -v` for each target).
 [profile.dev]
 debug = "line-tables-only"
+split-debuginfo = "unpacked"
 
 # Slow statistical tests (`just test-slow`): release speed, but with the debug assertions and
 # overflow checks that the sim's bound checks rely on. Without the release build's thin LTO: the

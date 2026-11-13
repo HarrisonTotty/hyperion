@@ -1,0 +1,36 @@
+# generator_version = 31
+z0.u = 0x3fe00bc3bec13694  # 0.501436111991739
+z0.mean_k = 0x4072087314d1b32e  # 288.5280960265544
+z0.orbits = 30 jumps = 2 rejects = 1 start = Steady converged = true searched = true held = false
+z0.drift_k = none
+z1.u = 0x3fe00737c370afcd  # 0.5008810822669091
+z1.mean_k = 0x4072034c5dbf0470  # 288.20614409080645
+z1.orbits = 36 jumps = 0 rejects = 2 start = Continued converged = true searched = true held = false
+z1.drift_k = none
+z2.u = 0x3fe0044e78e3bf3b  # 0.5005256997228352
+z2.mean_k = 0x4071fe6542731cf2  # 287.8997215744595
+z2.orbits = 19 jumps = 0 rejects = 2 start = Predicted converged = true searched = true held = false
+z2.drift_k = none
+z3.u = 0x3fe005425f7025e2  # 0.5006420005822145
+z3.mean_k = 0x4071ffc1e4d1da5d  # 287.9848373601324
+z3.orbits = 7 jumps = 0 rejects = 1 start = Predicted converged = true searched = true held = false
+z3.drift_k = none
+z4.u = 0x3fe0056dd25317e9  # 0.5006627185728095
+z4.mean_k = 0x4071ffd59c60678a  # 287.9896510854529
+z4.orbits = 7 jumps = 0 rejects = 1 start = Predicted converged = true searched = true held = false
+z4.drift_k = none
+z5.u = 0x3fe005cb3b27ee1a  # 0.5007072596922086
+z5.mean_k = 0x4071fffb4a3d0d72  # 287.9988500962128
+z5.orbits = 5 jumps = 0 rejects = 1 start = Predicted converged = true searched = true held = false
+z5.drift_k = none
+g1.u = 0x3fe005cb3b27ee1a  # 0.5007072596922086
+g1.mean_k = 0x4071edb81bb5c20d  # 286.8574483013079
+g1.orbits = 5 jumps = 0 rejects = 1 start = Continued converged = false searched = false held = false
+g1.drift_k = 0xbfd04b719bdb3c00  # -0.25460472317075755
+g2.u = 0x3fe03506aac21c96  # 0.5064729056474728
+g2.mean_k = 0x4071ffe0490f6284  # 287.99225717553804
+g2.orbits = 13 jumps = 0 rejects = 0 start = Steady converged = true searched = false held = true
+g2.drift_k = none
+kept = G2
+seasonal_k = 0x4071ffe0490f6284  # 287.99225717553804
+cells = 0x6fa1e517ff81232c

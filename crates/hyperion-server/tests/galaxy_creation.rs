@@ -69,6 +69,7 @@ fn query(universe: &UniverseIdHex, centre: GalacticPosition, time: UniverseTime)
         min_layer: MassLayer::A,
         limit: MAX_CENSUS_LIMIT,
         include_stellar: false,
+        mode: hyperion_protocol::QueryModeDto::Now,
     })
 }
 
@@ -251,7 +252,7 @@ async fn a_universe_is_created_charted_and_reopened_over_one_socket() {
     );
     let (later, _) = ask(&mut client, query(&universe.id, centre, century)).await;
     assert_eq!(later.time, century);
-    assert!(!later.systems.is_empty());
+    assert_ne!(later.systems, []);
 
     // Nothing but the identity is saved, so another server on the same directory answers the same
     // query with the same bytes.
@@ -284,9 +285,11 @@ async fn a_universe_is_created_charted_and_reopened_over_one_socket() {
         "the restarted server starts from the save alone"
     );
     let (again, again_bytes) = ask(&mut client, query(&universe.id, centre, epoch)).await;
+    // Held none before, so every cell it holds now it generated for the re-answer: ahead of the
+    // query's walk, which then finds each of them (P09.T40.a), so its lookups are all hits.
     let cells = server.stats().cells();
     assert!(
-        cells.entries() > 0 && cells.hits() == 0,
+        cells.entries() > 0,
         "the re-answer generated its cells: {cells:?}"
     );
     assert_eq!(again, at_epoch);

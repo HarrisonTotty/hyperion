@@ -68,12 +68,13 @@
 //! `ObjectKey::feature(FeatureRef::object_word())`, each on its own tag, so a candidate keeps its
 //! streams whatever the other candidates do.
 
+use std::cell::OnceCell;
 use std::sync::Arc;
 
 use crate::coords::{GalacticPosition, GalacticVelocity, LyCell};
 use crate::galaxy::ages::SubDisc;
 use crate::galaxy::bounds::CellBox;
-use crate::galaxy::fields::{Component, ComponentId, Shape};
+use crate::galaxy::fields::{Component, ComponentId, MAX_COMPONENTS, Shape};
 use crate::galaxy::gas::SOLAR_MASSES_PER_LY3_AT_UNIT_DENSITY;
 #[cfg(doc)]
 use crate::galaxy::gas::field::GasField;
@@ -86,6 +87,7 @@ use crate::math;
 use crate::rng::{DomainTag, ObjectKey, PowerLaw, Stream, Threshold, tags};
 use crate::units::consts::METRES_PER_LIGHT_YEAR;
 use crate::units::{Dex, HydrogenPerCm3, KilometresPerSecond, LightYears, SolarMasses, Years};
+use crate::words::{WordSink, WordSource};
 
 use super::ids::{FeatureId, FeatureKind, FeatureProcess};
 use super::kinds::cloud::{CLOUD_MASS_MAX, CLOUD_MASS_MIN, CLOUD_MASS_SLOPE, CloudMarks};
@@ -113,7 +115,7 @@ use crate::galaxy::fields::VerticalProfile;
 pub const MAX_FEATURE_REACH: LightYears = LightYears::new(4_096.0);
 
 /// A feature cell's edge, ly.
-const EDGE: f64 = 4_096.0;
+pub(crate) const EDGE: f64 = 4_096.0;
 
 /// A feature cell's index capacity: 2¹⁴ candidates.
 pub const INDEX_CAPACITY: u32 = 1 << 14;
@@ -126,6 +128,15 @@ const CLUSTER_REACH_RADII: f64 = 10.0;
 
 /// A cloud's reach, in core radii: its Plummer column there is 10⁻⁴ of the central one.
 const CLOUD_REACH_CORES: f64 = 10.0;
+
+/// How much nearer than its process's [`farthest_reach`] a cell must lie to a lookup's sphere for
+/// [`FeatureCatalogue::near`] to read that process there, ly: far above the rounding of a
+/// feature's distance, some 10⁻¹¹ ly at the root cube's size.
+const NEAR_MARGIN_LY: f64 = 1.0;
+
+/// The relative margin of [`farthest_reach`]'s clouds over the reach of the heaviest cloud, for
+/// the rounding of its mass's draw and of the radius's power.
+const FARTHEST_CLOUD_MARGIN: f64 = 1e-6;
 
 /// A feature's marks, by the process that drew it.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -192,6 +203,15 @@ impl FeatureRecord {
         self.reach
     }
 
+    /// Whether its reach touches the sphere of `radius` about `centre`: the test by which
+    /// [`FeatureCatalogue::near`] finds it, which the features' gas index applies with the same
+    /// bits (P09.T40.a).
+    #[must_use]
+    pub(crate) fn touches_sphere(&self, centre: &GalacticPosition, radius: LightYears) -> bool {
+        self.position.distance_to(centre).value() / METRES_PER_LIGHT_YEAR
+            <= radius.value() + self.reach.value()
+    }
+
     /// Its age at the epoch, or `None` for a cloud.
     #[must_use]
     pub const fn age_at_epoch(&self) -> Option<Years> {
@@ -220,13 +240,119 @@ impl FeatureRecord {
             FeatureMarks::Cloud(_) => Some(FeatureKind::MolecularCloud),
         }
     }
+
+    /// Writes a nursery's or a cloud's every bit into `sink`, as the features' gas index keeps it
+    /// for a caller that stores it
+    /// ([`FeatureGasIndex::write_words`](super::gas_overlay::FeatureGasIndex::write_words)): its
+    /// kind, its ID's cell and candidate number, its centre's cell and offset in metres, its
+    /// component (a 0, or a 1 and its index), its reach, then its marks. Its process is its
+    /// marks' kind's. The record is taken apart in full, so that a field added fails to compile
+    /// here until it is written. A cluster, which carries no gas and which no index holds, writes
+    /// its kind alone, which [`read_gas_words`](Self::read_gas_words) refuses.
+    pub(crate) fn write_gas_words(&self, sink: &mut impl WordSink) {
+        let Self {
+            id,
+            process: _,
+            position,
+            component,
+            marks,
+            reach,
+        } = self;
+        match marks {
+            FeatureMarks::Nursery(_) => sink.word(GAS_NURSERY),
+            FeatureMarks::Cloud(_) => sink.word(GAS_CLOUD),
+            FeatureMarks::Globular(_) | FeatureMarks::OpenCluster(_) => {
+                sink.word(NO_GAS);
+                return;
+            }
+        }
+        let feature = id.feature_ref();
+        for coordinate in feature.cell().to_array() {
+            sink.word(u64::from(coordinate.cast_unsigned()));
+        }
+        sink.word(u64::from(feature.index()));
+        for coordinate in position.cell().to_array() {
+            sink.word(u64::from(coordinate.cast_unsigned()));
+        }
+        for offset in position.offset_metres() {
+            sink.float(offset);
+        }
+        match component {
+            Some(component) => {
+                sink.word(1);
+                sink.count(component.index());
+            }
+            None => sink.word(0),
+        }
+        sink.float(reach.value());
+        match marks {
+            FeatureMarks::Nursery(marks) => marks.write_words(sink),
+            FeatureMarks::Cloud(marks) => marks.write_words(sink),
+            FeatureMarks::Globular(_) | FeatureMarks::OpenCluster(_) => {}
+        }
+    }
+
+    /// The nursery or cloud of `galaxy` that [`write_gas_words`](Self::write_gas_words) wrote into
+    /// `source`, or `None` for too few words, a cluster, or an ID, centre or component that is not
+    /// one.
+    #[must_use]
+    pub(crate) fn read_gas_words(source: &mut impl WordSource, galaxy: &Galaxy) -> Option<Self> {
+        let kind = source.word()?;
+        if kind != GAS_NURSERY && kind != GAS_CLOUD {
+            return None;
+        }
+        let cell = FeatureCell::new(read_coordinates(source)?).ok()?;
+        let index = u16::try_from(source.word()?).ok()?;
+        let id = FeatureId::of(cell, index)?;
+        let cell = LyCell::new(read_coordinates(source)?);
+        let offset = [source.float()?, source.float()?, source.float()?];
+        let position = GalacticPosition::new(cell, offset).ok()?;
+        let component = match source.word()? {
+            0 => None,
+            1 => Some(galaxy.fields().component_ids().nth(source.count()?)?),
+            _ => return None,
+        };
+        let reach = LightYears::new(source.float()?);
+        let (process, marks) = if kind == GAS_NURSERY {
+            let marks = NurseryMarks::read_words(source)?;
+            (FeatureProcess::Nursery, FeatureMarks::Nursery(marks))
+        } else {
+            (
+                FeatureProcess::Cloud,
+                FeatureMarks::Cloud(CloudMarks::read_words(source)?),
+            )
+        };
+        Some(Self {
+            id,
+            process,
+            position,
+            component,
+            marks,
+            reach,
+        })
+    }
+}
+
+/// The kinds a feature's gas words lead with ([`FeatureRecord::write_gas_words`]): a nursery, a
+/// cloud, and a cluster, which carries no gas.
+const GAS_NURSERY: u64 = 0;
+const GAS_CLOUD: u64 = 1;
+const NO_GAS: u64 = 2;
+
+/// A cell's three coordinates, each written as its `i32`'s bits.
+#[must_use]
+fn read_coordinates(source: &mut impl WordSource) -> Option<[i32; 3]> {
+    let mut coordinate = || Some(u32::try_from(source.word()?).ok()?.cast_signed());
+    Some([coordinate()?, coordinate()?, coordinate()?])
 }
 
 /// Everything a feature cell holds: its candidate counts per process and its features in index
-/// order.
+/// order; or, for a cell made only [`through`](FeatureCatalogue::cell_through) one process, the
+/// counts and features of the processes up to it in [`FeatureProcess::ALL`]'s order.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FeatureCellContents {
     cell: FeatureCell,
+    through: FeatureProcess,
     counts: [u32; 8],
     features: Vec<FeatureRecord>,
 }
@@ -238,37 +364,83 @@ impl FeatureCellContents {
         self.cell
     }
 
-    /// The candidate counts of each process, in [`FeatureProcess::ALL`]'s order.
+    /// The candidate counts of each process, in [`FeatureProcess::ALL`]'s order: 0 for a process
+    /// the contents do not [`hold`](Self::holds).
     #[must_use]
     pub const fn counts(&self) -> [u32; 8] {
         self.counts
     }
 
-    /// The accepted features, in index order.
+    /// The accepted features, in index order: those of every process the contents
+    /// [`hold`](Self::holds).
     #[must_use]
     pub fn features(&self) -> &[FeatureRecord] {
         &self.features
+    }
+
+    /// Whether the contents hold `process`'s count and features: always for a whole cell
+    /// ([`FeatureCatalogue::cell`]), for one made through a process only for the processes up to
+    /// it (P09.T40.a).
+    #[must_use]
+    pub const fn holds(&self, process: FeatureProcess) -> bool {
+        process.index() <= self.through.index()
+    }
+
+    /// The bytes the contents own on the heap: the features' buffer, by its capacity, since a
+    /// [`FeatureRecord`] owns nothing on the heap itself. What a caller's byte-bounded cache
+    /// charges a cell (P09.T40.a).
+    #[must_use]
+    pub fn heap_bytes(&self) -> usize {
+        self.features.capacity() * size_of::<FeatureRecord>()
     }
 }
 
 /// Where a caller keeps feature cells between lookups (P09.T3.b).
 ///
-/// It takes `&self`, so an implementation that keeps cells uses interior mutability, and it must
-/// lend each cell's contents exactly as [`FeatureCatalogue::cell`] makes them. **An implementation
-/// that keeps cells between calls keys them by galaxy as well as by cell** (ruling 25 of
-/// 2026-09-22, as plan 03's `CellCache` documents it): the trait does not check the galaxy.
+/// It takes `&self`, so an implementation that keeps cells uses interior mutability. It must lend
+/// from [`contents`](Self::contents) each whole cell exactly as [`FeatureCatalogue::cell`] makes
+/// it, and from [`contents_through`](Self::contents_through) a cell holding at least the processes
+/// asked for exactly as [`FeatureCatalogue::cell_through`] makes it. **An implementation that
+/// keeps cells between calls keys them by galaxy as well as by cell** (ruling 25 of 2026-09-22, as
+/// plan 03's `CellCache` documents it): the trait does not check the galaxy.
 pub trait FeatureCellCache {
-    /// The contents of `cell` in `galaxy`.
+    /// The whole contents of `cell` in `galaxy`.
     fn contents(&self, galaxy: &Galaxy, cell: FeatureCell) -> Arc<FeatureCellContents>;
+
+    /// Contents of `cell` in `galaxy` that [`hold`](FeatureCellContents::holds) at least the
+    /// processes up to the last one asked for (P09.T40.a).
+    ///
+    /// They are as [`FeatureCatalogue::cell_through`] makes them through that process or a later
+    /// one: by default the whole cell, unless an implementation keeps or makes less.
+    /// [`FeatureCatalogue::near`] asks for a cell this way when the processes after the last reach
+    /// too short a way to touch its sphere from it.
+    fn contents_through(
+        &self,
+        galaxy: &Galaxy,
+        cell: FeatureCell,
+        _last: FeatureProcess,
+    ) -> Arc<FeatureCellContents> {
+        self.contents(galaxy, cell)
+    }
 }
 
-/// The cache that keeps nothing: every lookup generates its cell.
+/// The cache that keeps nothing: every lookup generates its cell, or as much of it as it is asked
+/// for.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct NoFeatureCache;
 
 impl FeatureCellCache for NoFeatureCache {
     fn contents(&self, galaxy: &Galaxy, cell: FeatureCell) -> Arc<FeatureCellContents> {
         Arc::new(FeatureCatalogue::cell(galaxy, cell))
+    }
+
+    fn contents_through(
+        &self,
+        galaxy: &Galaxy,
+        cell: FeatureCell,
+        last: FeatureProcess,
+    ) -> Arc<FeatureCellContents> {
+        Arc::new(FeatureCatalogue::cell_through(galaxy, cell, last))
     }
 }
 
@@ -447,7 +619,13 @@ impl FeatureCatalogue {
     /// drawn from.
     #[must_use]
     pub fn expected_candidates(galaxy: &Galaxy, process: FeatureProcess, cell: FeatureCell) -> f64 {
-        proposal(galaxy, process, cell).mean()
+        proposal(
+            galaxy,
+            process,
+            cell,
+            &DiscColumns::new(galaxy, cell, [process]),
+        )
+        .mean()
     }
 
     /// The candidate counts of every process in `cell`, in [`FeatureProcess::ALL`]'s order,
@@ -460,8 +638,14 @@ impl FeatureCatalogue {
     pub fn counts(galaxy: &Galaxy, cell: FeatureCell) -> [u32; 8] {
         let mut counts = [0; 8];
         let mut total = 0_u32;
+        let columns = DiscColumns::new(galaxy, cell, FeatureProcess::ALL);
         for process in FeatureProcess::ALL {
-            let terms = term_counts(galaxy, process, cell, &proposal(galaxy, process, cell));
+            let terms = term_counts(
+                galaxy,
+                process,
+                cell,
+                &proposal(galaxy, process, cell, &columns),
+            );
             counts[process.index()] = clamp_count(cell, process, terms, &mut total);
         }
         counts
@@ -488,11 +672,58 @@ impl FeatureCatalogue {
     /// ```
     #[must_use]
     pub fn cell(galaxy: &Galaxy, cell: FeatureCell) -> FeatureCellContents {
+        Self::cell_through(galaxy, cell, FeatureProcess::Cloud)
+    }
+
+    /// The counts and features of `cell`'s processes up to `last`, in [`FeatureProcess::ALL`]'s
+    /// order (P09.T40.a).
+    ///
+    /// They are the whole cell's, bit for bit, less those of the processes after `last`, which are
+    /// not generated: a process's candidates take their indices after the counts of the processes
+    /// before it, so those are all it needs. [`FeatureCatalogue::near`] reads a far cell so: the
+    /// clouds and the nurseries reach some 1,400 and 1,750 ly at most at Milky Way values, and a
+    /// cell's nurseries cost more than all its other processes.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, if the counts would overflow the index.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use hyperion_sim::Seed;
+    /// use hyperion_sim::galaxy::Galaxy;
+    /// use hyperion_sim::galaxy::features::FeatureProcess;
+    /// use hyperion_sim::galaxy::features::catalogue::FeatureCatalogue;
+    /// use hyperion_sim::id::FeatureCell;
+    ///
+    /// let galaxy = Galaxy::new(Seed::new(9));
+    /// let cell = FeatureCell::new([0, 6, 0])?;
+    /// let whole = FeatureCatalogue::cell(&galaxy, cell);
+    /// let clusters = FeatureCatalogue::cell_through(&galaxy, cell, FeatureProcess::Nursery);
+    /// assert!(clusters.holds(FeatureProcess::Nursery) && !clusters.holds(FeatureProcess::Cloud));
+    /// let held: Vec<_> = whole
+    ///     .features()
+    ///     .iter()
+    ///     .filter(|f| f.process() != FeatureProcess::Cloud)
+    ///     .collect();
+    /// assert_eq!(clusters.features().iter().collect::<Vec<_>>(), held);
+    /// assert_eq!(clusters.counts()[..7], whole.counts()[..7]);
+    /// # Ok::<(), hyperion_sim::id::BuildSystemIdError>(())
+    /// ```
+    #[must_use]
+    pub fn cell_through(
+        galaxy: &Galaxy,
+        cell: FeatureCell,
+        last: FeatureProcess,
+    ) -> FeatureCellContents {
+        let processes = &FeatureProcess::ALL[..=last.index()];
+        let columns = DiscColumns::new(galaxy, cell, processes.iter().copied());
         let mut counts = [0; 8];
         let mut features = Vec::new();
         let mut total = 0_u32;
-        for process in FeatureProcess::ALL {
-            let proposal = proposal(galaxy, process, cell);
+        for &process in processes {
+            let proposal = proposal(galaxy, process, cell, &columns);
             let terms = term_counts(galaxy, process, cell, &proposal);
             let offset = total;
             let n = clamp_count(cell, process, terms, &mut total);
@@ -511,6 +742,7 @@ impl FeatureCatalogue {
         }
         FeatureCellContents {
             cell,
+            through: last,
             counts,
             features,
         }
@@ -523,8 +755,9 @@ impl FeatureCatalogue {
         let cell = id.cell();
         let index = u32::from(id.index());
         let mut total = 0_u32;
+        let columns = DiscColumns::new(galaxy, cell, FeatureProcess::ALL);
         for process in FeatureProcess::ALL {
-            let proposal = proposal(galaxy, process, cell);
+            let proposal = proposal(galaxy, process, cell, &columns);
             let terms = term_counts(galaxy, process, cell, &proposal);
             let offset = total;
             let n = clamp_count(cell, process, terms, &mut total);
@@ -545,12 +778,83 @@ impl FeatureCatalogue {
 
     /// The features whose reach touches the sphere of `radius` about `centre`, from the cells
     /// within `radius` + [`MAX_FEATURE_REACH`], through `cache`, in cell and index order.
+    ///
+    /// A cell is read only [`through`](FeatureCellCache::contents_through) the last process whose
+    /// farthest reach can touch the sphere from it ([`cells_near`](Self::cells_near)): no feature
+    /// of the processes after it can, so what is found is what the whole cells hold (P09.T40.a).
     pub fn near(
         galaxy: &Galaxy,
         centre: &GalacticPosition,
         radius: LightYears,
         cache: &dyn FeatureCellCache,
     ) -> impl Iterator<Item = FeatureRecord> + use<> {
+        let mut found = Vec::new();
+        for (cell, last) in Self::cells_near(galaxy, centre, radius) {
+            Self::found_in(galaxy, cache, (cell, last), (centre, radius), &mut found);
+        }
+        found.into_iter()
+    }
+
+    /// The features of `cell`, read through `last` from `cache`, whose reach touches the sphere
+    /// of `radius` about `centre`, appended to `found` in index order: what [`near`](Self::near)
+    /// finds there.
+    pub(crate) fn found_in(
+        galaxy: &Galaxy,
+        cache: &dyn FeatureCellCache,
+        (cell, last): (FeatureCell, FeatureProcess),
+        (centre, radius): (&GalacticPosition, LightYears),
+        found: &mut Vec<FeatureRecord>,
+    ) {
+        let contents = if last == FeatureProcess::Cloud {
+            cache.contents(galaxy, cell)
+        } else {
+            cache.contents_through(galaxy, cell, last)
+        };
+        debug_assert!(
+            contents.holds(last),
+            "a feature cell cache lent {:?} without the {last} it was asked for",
+            cell.to_array()
+        );
+        found.extend(
+            contents
+                .features()
+                .iter()
+                .copied()
+                .filter(|f| f.touches_sphere(centre, radius)),
+        );
+    }
+
+    /// The cells [`near`](Self::near) reads for the sphere of `radius` about `centre`, in the
+    /// order it reads them, each with the last process it reads it through (P09.T40.a).
+    ///
+    /// They are the cells within `radius` + [`MAX_FEATURE_REACH`], and a cell's last process is
+    /// the last whose farthest reach can touch the sphere from it, with a light-year to spare. A
+    /// sphere about the same centre that is no larger reads no other cell, and none through a
+    /// later process: what a server generates ahead of a lookup.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use hyperion_sim::Seed;
+    /// use hyperion_sim::coords::GalacticPosition;
+    /// use hyperion_sim::galaxy::Galaxy;
+    /// use hyperion_sim::galaxy::features::FeatureProcess;
+    /// use hyperion_sim::galaxy::features::catalogue::FeatureCatalogue;
+    /// use hyperion_sim::units::LightYears;
+    ///
+    /// let galaxy = Galaxy::new(Seed::new(9));
+    /// let sun = GalacticPosition::from_light_years([0.0, 26_000.0, 0.0]).expect("in range");
+    /// let cells = FeatureCatalogue::cells_near(&galaxy, &sun, LightYears::new(50.0));
+    /// // The cells that hold the sphere are read whole, the farthest through the clusters alone.
+    /// assert!(cells.iter().any(|&(_, last)| last == FeatureProcess::Cloud));
+    /// assert!(cells.iter().any(|&(_, last)| last.index() < FeatureProcess::Nursery.index()));
+    /// ```
+    #[must_use]
+    pub fn cells_near(
+        galaxy: &Galaxy,
+        centre: &GalacticPosition,
+        radius: LightYears,
+    ) -> Vec<(FeatureCell, FeatureProcess)> {
         let [cx, cy, cz] = centre.to_light_years_f64();
         let reach = radius.value() + MAX_FEATURE_REACH.value();
         let range = |c: f64| {
@@ -563,25 +867,30 @@ impl FeatureCatalogue {
             (lo as i32, hi as i32)
         };
         let (x, y, z) = (range(cx), range(cy), range(cz));
-        let mut found = Vec::new();
+        let farthest = FeatureProcess::ALL.map(|process| farthest_reach(galaxy, process).value());
+        let mut cells = Vec::new();
         for i in x.0..=x.1 {
             for j in y.0..=y.1 {
                 for k in z.0..=z.1 {
                     let Ok(cell) = FeatureCell::new([i, j, k]) else {
                         continue;
                     };
-                    if box_distance(cell, [cx, cy, cz]) > reach {
+                    let distance = box_distance(cell, [cx, cy, cz]);
+                    if distance > reach {
                         continue;
                     }
-                    let contents = cache.contents(galaxy, cell);
-                    found.extend(contents.features().iter().copied().filter(|f| {
-                        f.position.distance_to(centre).value() / METRES_PER_LIGHT_YEAR
-                            <= radius.value() + f.reach.value()
-                    }));
+                    // Every feature lies in its cell, so at least `distance` from the centre, and
+                    // reaches no farther than its process's farthest.
+                    let last = FeatureProcess::ALL
+                        .into_iter()
+                        .rev()
+                        .find(|p| distance <= radius.value() + farthest[p.index()] + NEAR_MARGIN_LY)
+                        .unwrap_or(FeatureProcess::Cloud);
+                    cells.push((cell, last));
                 }
             }
         }
-        found.into_iter()
+        cells
     }
 
     /// Every feature of `process` in the galaxy, cell by cell over all 32,768 cells in the order
@@ -606,6 +915,26 @@ impl FeatureCatalogue {
     }
 }
 
+/// How far a feature of `process` can reach from its centre at most, ly (P09.T40.a): every
+/// nursery's reach ([`nursery_reach`]), the reach of the heaviest cloud raised by
+/// [`FARTHEST_CLOUD_MARGIN`], and [`MAX_FEATURE_REACH`] for the clusters, whose reaches follow
+/// normals with no useful bound.
+#[must_use]
+fn farthest_reach(galaxy: &Galaxy, process: FeatureProcess) -> LightYears {
+    match process {
+        FeatureProcess::Globular | FeatureProcess::OldOpenCluster(_) => MAX_FEATURE_REACH,
+        FeatureProcess::Nursery => nursery_reach(galaxy),
+        FeatureProcess::Cloud => {
+            // The heaviest cloud's: a cloud's reach rises with its mass, which its draw keeps at
+            // most `CLOUD_MASS_MAX`.
+            let heaviest = cloud_reach(&CloudMarks::new(CLOUD_MASS_MAX, 1.0));
+            LightYears::new(
+                (heaviest.value() * (1.0 + FARTHEST_CLOUD_MARGIN)).min(MAX_FEATURE_REACH.value()),
+            )
+        }
+    }
+}
+
 /// The bulk velocity of a cluster or nursery: the law of the population it follows at its centre,
 /// on its own `feature.velocity` stream (P09.T4.a), or `None` for a cloud or a galaxy without
 /// kinematic tables ([`Galaxy::with_full_potential`]).
@@ -624,8 +953,10 @@ fn process_features(
     cell: FeatureCell,
 ) -> Vec<FeatureRecord> {
     let mut total = 0_u32;
-    for earlier in FeatureProcess::ALL {
-        let proposal = proposal(galaxy, earlier, cell);
+    let processes = &FeatureProcess::ALL[..=process.index()];
+    let columns = DiscColumns::new(galaxy, cell, processes.iter().copied());
+    for &earlier in processes {
+        let proposal = proposal(galaxy, earlier, cell, &columns);
         let terms = term_counts(galaxy, earlier, cell, &proposal);
         let offset = total;
         let n = clamp_count(cell, earlier, terms, &mut total);
@@ -715,8 +1046,93 @@ fn z_near(cell: FeatureCell) -> f64 {
     }
 }
 
-/// The proposal of `process` in `cell` (module documentation).
-fn proposal(galaxy: &Galaxy, process: FeatureProcess, cell: FeatureCell) -> Proposal {
+/// A disc process's features per system and its largest component height, or `None` if either is
+/// not positive: the process then proposes no candidates.
+#[must_use]
+fn disc_scales(galaxy: &Galaxy, process: FeatureProcess) -> Option<(f64, LightYears)> {
+    let factor = disc_factor(galaxy, process);
+    let height = disc_components(galaxy, process)
+        .map(|(_, c)| disc_height(c))
+        .fold(0.0, f64::max);
+    (height > 0.0 && factor > 0.0).then_some((factor, LightYears::new(height)))
+}
+
+/// The bounds of the disc processes' components over a cell's columns, x-major, made when a
+/// proposal first reads them: each column's corner, ranges of radius and phase and arm factors are
+/// found once for every process that reads the column, not once for each, the same bits as each
+/// component's [`bound`](Component::bound) ([`Fields::component_bounds`]; P09.T40.a).
+///
+/// The five sub-discs share one arm, and their four processes with clusters and the nurseries read
+/// the same 256 columns; read so, a cell's disc proposals cost about half as much (measured
+/// 2026-10-30).
+///
+/// [`Fields::component_bounds`]: crate::galaxy::fields::Fields::component_bounds
+struct DiscColumns<'g> {
+    galaxy: &'g Galaxy,
+    cell: FeatureCell,
+    wanted: [bool; MAX_COMPONENTS],
+    bounds: OnceCell<Vec<[f64; MAX_COMPONENTS]>>,
+}
+
+impl<'g> DiscColumns<'g> {
+    /// The columns of `cell` for the components that the disc processes among `processes` follow.
+    #[must_use]
+    fn new(
+        galaxy: &'g Galaxy,
+        cell: FeatureCell,
+        processes: impl IntoIterator<Item = FeatureProcess>,
+    ) -> Self {
+        let mut wanted = [false; MAX_COMPONENTS];
+        for process in processes {
+            let disc = matches!(
+                process,
+                FeatureProcess::OldOpenCluster(_) | FeatureProcess::Nursery
+            );
+            if disc && disc_scales(galaxy, process).is_some() {
+                for (id, _) in disc_components(galaxy, process) {
+                    wanted[id.index()] = true;
+                }
+            }
+        }
+        Self {
+            galaxy,
+            cell,
+            wanted,
+            bounds: OnceCell::new(),
+        }
+    }
+
+    /// Each column's bounds, by component index: 0 for a component no process here follows.
+    #[must_use]
+    fn bounds(&self) -> &[[f64; MAX_COMPONENTS]] {
+        self.bounds.get_or_init(|| {
+            let [ox, oy, oz] = self.cell.origin().to_array();
+            let plane_z = if oz < 0 { -COLUMN_EDGE_I32 } else { 0 };
+            let fields = self.galaxy.fields();
+            let per_axis = usize::try_from(COLUMNS_PER_AXIS).expect("sixteen fits in usize");
+            let mut bounds = Vec::with_capacity(per_axis * per_axis);
+            bounds.extend(column_boxes(ox, oy, plane_z).map(|column| {
+                let mut out = [0.0; MAX_COMPONENTS];
+                fields.component_bounds_of(&column, &self.wanted, &mut out);
+                out
+            }));
+            bounds
+        })
+    }
+}
+
+/// The proposal of `process` in `cell` (module documentation), its disc columns read from
+/// `columns`, which must be made for it.
+///
+/// # Panics
+///
+/// If `process` is a disc process and `columns` were not made for it.
+fn proposal(
+    galaxy: &Galaxy,
+    process: FeatureProcess,
+    cell: FeatureCell,
+    columns: &DiscColumns<'_>,
+) -> Proposal {
     let z_near = z_near(cell);
     let [ox, oy, oz] = cell.origin().to_array();
     match process {
@@ -734,16 +1150,13 @@ fn proposal(galaxy: &Galaxy, process: FeatureProcess, cell: FeatureCell) -> Prop
             Proposal::one(Term::new(bound, axes, Part::All))
         }
         FeatureProcess::OldOpenCluster(_) | FeatureProcess::Nursery => {
-            let factor = disc_factor(galaxy, process);
-            let height = disc_components(galaxy, process)
-                .map(|(_, c)| disc_height(c))
-                .fold(0.0, f64::max);
-            if height <= 0.0 || factor <= 0.0 {
+            let Some((factor, height)) = disc_scales(galaxy, process) else {
                 return Proposal::NONE;
-            }
+            };
+            let height = height.value();
             let rate = 1.0 / height;
-            let ratios: Vec<(&Component, f64)> = disc_components(galaxy, process)
-                .map(|(_, c)| {
+            let ratios: Vec<(usize, f64)> = disc_components(galaxy, process)
+                .map(|(id, c)| {
                     let Shape::Disc(disc) = c.shape() else {
                         unreachable!("a disc process follows discs")
                     };
@@ -751,15 +1164,21 @@ fn proposal(galaxy: &Galaxy, process: FeatureProcess, cell: FeatureCell) -> Prop
                         disc.profile()
                             .max_ratio_to_exponential(z_near, z_near + EDGE, rate)
                             * math::exp(-rate * z_near);
-                    (c, ratio)
+                    assert!(
+                        columns.wanted[id.index()],
+                        "the {process} proposal reads columns made without it"
+                    );
+                    (id.index(), ratio)
                 })
                 .collect();
-            let plane_z = if oz < 0 { -COLUMN_EDGE_I32 } else { 0 };
-            let bounds = column_boxes(ox, oy, plane_z)
+            // Each column's bound is `Component::bound` over it, bit for bit (`DiscColumns`).
+            let bounds = columns
+                .bounds()
+                .iter()
                 .map(|column| {
                     ratios
                         .iter()
-                        .fold(0.0, |sum, (c, ratio)| sum + c.bound(&column) * ratio)
+                        .fold(0.0, |sum, &(id, ratio)| sum + column[id] * ratio)
                         * factor
                         * (1.0 + BOUND_MARGIN)
                 })
@@ -1079,6 +1498,12 @@ fn pick_component<'g>(
     point: &PointLy,
     u: f64,
 ) -> Option<(ComponentId, &'g Component)> {
+    // The loop below picks a process's one component whatever the densities, since it is also the
+    // last; so they are not evaluated for it (P09.T40.a).
+    let mut components = disc_components(galaxy, process);
+    if let (Some(only), None) = (components.next(), components.next()) {
+        return Some(only);
+    }
     let total = disc_components(galaxy, process)
         .map(|(_, c)| c.density(point))
         .fold(0.0, |sum, d| sum + d);
@@ -1263,18 +1688,27 @@ fn nursery(
         concentration,
         ..life
     };
-    let bubble_cap = BLOW_OUT_HEIGHTS * galaxy.gas().params().neutral_height().value();
-    let reach = (SIZE_RANGE_LY.1 / 2.0)
-        .max(bubble_cap)
-        .min(MAX_FEATURE_REACH.value());
     Some(FeatureRecord {
         id,
         process,
         position,
         component: Some(component_id),
         marks: FeatureMarks::Nursery(marks),
-        reach: LightYears::new(reach),
+        reach: nursery_reach(galaxy),
     })
+}
+
+/// Every nursery's reach: the greater of its largest size's radius and its bubble's blow-out
+/// radius, [`BLOW_OUT_HEIGHTS`] neutral heights, at most [`MAX_FEATURE_REACH`]. It is also the
+/// nurseries' [`farthest_reach`].
+#[must_use]
+fn nursery_reach(galaxy: &Galaxy) -> LightYears {
+    let bubble_cap = BLOW_OUT_HEIGHTS * galaxy.gas().params().neutral_height().value();
+    LightYears::new(
+        (SIZE_RANGE_LY.1 / 2.0)
+            .max(bubble_cap)
+            .min(MAX_FEATURE_REACH.value()),
+    )
 }
 
 /// A globular's reach, in tidal radii: its tails' extent until P09.T21's grid (ours).
@@ -1350,15 +1784,29 @@ fn cloud(galaxy: &Galaxy, id: FeatureId, position: GalacticPosition) -> FeatureR
     .expect("the cloud mass function's limits and slope are valid");
     let mass = SolarMasses::new(stream.power_law(&law));
     let marks = CloudMarks::new(mass, galaxy.gas().dust_per_hydrogen(&position));
-    let reach = (CLOUD_REACH_CORES * marks.core_radius().value()).min(MAX_FEATURE_REACH.value());
+    let reach = cloud_reach(&marks);
+    debug_assert!(
+        reach.value() <= farthest_reach(galaxy, FeatureProcess::Cloud).value(),
+        "a cloud of {mass:?} reaches past the clouds' farthest"
+    );
     FeatureRecord {
         id,
         process: FeatureProcess::Cloud,
         position,
         component: None,
         marks: FeatureMarks::Cloud(marks),
-        reach: LightYears::new(reach),
+        reach,
     }
+}
+
+/// A cloud's reach: [`CLOUD_REACH_CORES`] core radii, at most [`MAX_FEATURE_REACH`]. A function of
+/// its mass alone, rising with it, so the heaviest cloud's bounds every cloud's
+/// ([`farthest_reach`]).
+#[must_use]
+fn cloud_reach(marks: &CloudMarks) -> LightYears {
+    LightYears::new(
+        (CLOUD_REACH_CORES * marks.core_radius().value()).min(MAX_FEATURE_REACH.value()),
+    )
 }
 
 /// The distance from `p` (ly) to the nearest point of `cell`, ly.
@@ -1382,6 +1830,7 @@ fn box_distance(cell: FeatureCell, p: [f64; 3]) -> f64 {
 
 #[cfg(test)]
 mod tests {
+    use hyperion_testkit::float::assert_same_bits;
     use hyperion_testkit::golden;
     use hyperion_testkit::golden::GoldenWriter;
     use hyperion_testkit::order::assert_order_independent;
@@ -1479,7 +1928,8 @@ mod tests {
         let per_cell = 100_000 / CELLS.len();
         for process in FeatureProcess::ALL {
             for &c in &CELLS {
-                let proposal = proposal(&galaxy, process, cell(c));
+                let columns = DiscColumns::new(&galaxy, cell(c), [process]);
+                let proposal = proposal(&galaxy, process, cell(c), &columns);
                 for term in proposal.terms.iter().flatten() {
                     for _ in 0..per_cell {
                         let (p, envelope) = random_point(&mut stream, cell(c), term);
@@ -1667,6 +2117,177 @@ mod tests {
         assert_eq!(checked, 3);
     }
 
+    /// A disc proposal's column bounds, read from the cell's shared columns made for that process
+    /// alone or for every process, are the bits of `Component::bound` over each column, summed as
+    /// the proposal sums them (P09.T40.a).
+    #[test]
+    fn the_shared_disc_columns_are_each_component_s_bound_bit_for_bit() {
+        let galaxy = milky_way(0);
+        let mut compared = 0;
+        for &c in &CELLS {
+            let all = DiscColumns::new(&galaxy, cell(c), FeatureProcess::ALL);
+            for process in FeatureProcess::ALL {
+                let Some((factor, height)) = disc_scales(&galaxy, process) else {
+                    continue;
+                };
+                let height = height.value();
+                if !matches!(
+                    process,
+                    FeatureProcess::OldOpenCluster(_) | FeatureProcess::Nursery
+                ) {
+                    continue;
+                }
+                let z_near = z_near(cell(c));
+                let rate = 1.0 / height;
+                let ratios: Vec<(&Component, f64)> = disc_components(&galaxy, process)
+                    .map(|(_, component)| {
+                        let Shape::Disc(disc) = component.shape() else {
+                            unreachable!("a disc process follows discs")
+                        };
+                        let ratio =
+                            disc.profile()
+                                .max_ratio_to_exponential(z_near, z_near + EDGE, rate)
+                                * math::exp(-rate * z_near);
+                        (component, ratio)
+                    })
+                    .collect();
+                let [ox, oy, oz] = cell(c).origin().to_array();
+                let plane_z = if oz < 0 { -COLUMN_EDGE_I32 } else { 0 };
+                let direct: Vec<f64> = column_boxes(ox, oy, plane_z)
+                    .map(|column| {
+                        ratios.iter().fold(0.0, |sum, (component, ratio)| {
+                            sum + component.bound(&column) * ratio
+                        }) * factor
+                            * (1.0 + BOUND_MARGIN)
+                    })
+                    .collect();
+                let alone = DiscColumns::new(&galaxy, cell(c), [process]);
+                for columns in [&all, &alone] {
+                    let proposal = proposal(&galaxy, process, cell(c), columns);
+                    let term = proposal.terms[0].as_ref().expect("a disc proposal's term");
+                    let bounds = &term.columns.as_ref().expect("a column proposal").bounds;
+                    assert_eq!(bounds.len(), direct.len());
+                    for (&shared, &one) in bounds.iter().zip(&direct) {
+                        assert_same_bits(shared, one);
+                        compared += 1;
+                    }
+                }
+            }
+        }
+        assert!(compared > 10_000, "{compared} column bounds compared");
+    }
+
+    /// A cell made through each process is the whole cell's counts and features up to it, in
+    /// order, and holds no process after it (P09.T40.a).
+    #[test]
+    fn a_cell_made_through_a_process_is_the_whole_cell_up_to_it() {
+        let galaxy = milky_way(0);
+        for &c in &CELLS {
+            let whole = FeatureCatalogue::cell(&galaxy, cell(c));
+            assert!(FeatureProcess::ALL.iter().all(|&p| whole.holds(p)));
+            for last in FeatureProcess::ALL {
+                let part = FeatureCatalogue::cell_through(&galaxy, cell(c), last);
+                let upto = last.index();
+                let held: Vec<FeatureRecord> = whole
+                    .features()
+                    .iter()
+                    .filter(|f| f.process().index() <= upto)
+                    .copied()
+                    .collect();
+                assert_eq!(part.features(), held.as_slice(), "{c:?} through {last}");
+                assert_eq!(part.counts()[..=upto], whole.counts()[..=upto]);
+                assert_eq!(
+                    part.counts()[upto + 1..],
+                    vec![0; 7 - upto],
+                    "{c:?} through {last}"
+                );
+                for process in FeatureProcess::ALL {
+                    assert_eq!(part.holds(process), process.index() <= upto);
+                }
+            }
+            assert_eq!(
+                FeatureCatalogue::cell_through(&galaxy, cell(c), FeatureProcess::Cloud),
+                whole
+            );
+        }
+    }
+
+    /// Every nursery reaches its process's farthest, and no cloud past its own (P09.T40.a).
+    #[test]
+    fn no_record_reaches_past_its_process_s_farthest() {
+        let galaxy = milky_way(0);
+        let (mut clouds, mut nurseries) = (0, 0);
+        for &c in &CELLS {
+            for f in FeatureCatalogue::cell(&galaxy, cell(c)).features() {
+                let farthest = farthest_reach(&galaxy, f.process()).value();
+                assert!(f.reach().value() <= farthest, "{:?}", f.id());
+                match f.process() {
+                    FeatureProcess::Nursery => {
+                        assert_same_bits(f.reach().value(), farthest);
+                        nurseries += 1;
+                    }
+                    FeatureProcess::Cloud => clouds += 1,
+                    FeatureProcess::Globular | FeatureProcess::OldOpenCluster(_) => {}
+                }
+            }
+        }
+        assert!(clouds > 100 && nurseries > 100, "{clouds} {nurseries}");
+        // The heaviest cloud's reach, which bounds every cloud's (`CloudMarks::core_radius`).
+        let heaviest = CloudMarks::new(CLOUD_MASS_MAX, 1.0);
+        let reach = CLOUD_REACH_CORES * heaviest.core_radius().value();
+        let farthest = farthest_reach(&galaxy, FeatureProcess::Cloud).value();
+        assert!(reach < farthest && farthest < reach * (1.0 + 1e-5));
+    }
+
+    /// `near` finds, in the same order, what it finds over whole cells, at points and radii where
+    /// it reads some cells only through the clusters or the nurseries (P09.T40.a).
+    #[test]
+    fn near_finds_what_whole_cells_hold() {
+        /// Whole cells only, through the trait's default.
+        struct Whole;
+        impl FeatureCellCache for Whole {
+            fn contents(&self, galaxy: &Galaxy, cell: FeatureCell) -> Arc<FeatureCellContents> {
+                Arc::new(FeatureCatalogue::cell(galaxy, cell))
+            }
+        }
+        /// Every lookup's cell as `NoFeatureCache` makes it, counting those made in part.
+        #[derive(Default)]
+        struct Parts(std::sync::atomic::AtomicUsize);
+        impl FeatureCellCache for Parts {
+            fn contents(&self, galaxy: &Galaxy, cell: FeatureCell) -> Arc<FeatureCellContents> {
+                NoFeatureCache.contents(galaxy, cell)
+            }
+            fn contents_through(
+                &self,
+                galaxy: &Galaxy,
+                cell: FeatureCell,
+                last: FeatureProcess,
+            ) -> Arc<FeatureCellContents> {
+                self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                NoFeatureCache.contents_through(galaxy, cell, last)
+            }
+        }
+        let galaxy = milky_way(0);
+        let mut partial = 0;
+        for (centre, radius) in [
+            ([0.0, 26_000.0, 0.0], 50.0),
+            ([100.0, 26_000.0, 20.0], 300.0),
+            ([-3_000.0, 8_000.0, 150.0], 1_000.0),
+            ([4_000.0, -30_000.0, -2_000.0], 5.0),
+        ] {
+            let centre = GalacticPosition::from_light_years(centre).unwrap();
+            let radius = LightYears::new(radius);
+            let parts = Parts::default();
+            let found: Vec<FeatureRecord> =
+                FeatureCatalogue::near(&galaxy, &centre, radius, &parts).collect();
+            let whole: Vec<FeatureRecord> =
+                FeatureCatalogue::near(&galaxy, &centre, radius, &Whole).collect();
+            assert_eq!(found, whole, "{centre:?} {radius:?}");
+            partial += parts.0.into_inner();
+        }
+        assert!(partial > 20, "{partial} cells read in part");
+    }
+
     #[test]
     fn no_record_reaches_past_the_catalogue_s_reach() {
         let galaxy = milky_way(0);
@@ -1708,6 +2329,44 @@ mod tests {
         a.sort();
         b.sort();
         assert_eq!(a, b);
-        assert!(!a.is_empty());
+        assert_ne!(a, []);
+    }
+
+    /// A nursery's and a cloud's gas words read back as the record, bit for bit, about the
+    /// Sun-like point, and none of them cut short reads; a cluster's, which no gas index holds,
+    /// read as none (perf-sky-tables-on-disk).
+    #[test]
+    fn gas_features_read_back_from_their_words_and_clusters_are_refused() {
+        use crate::words::testing::Words;
+
+        let galaxy = milky_way(0);
+        let (mut gas, mut clusters) = (0, 0);
+        for c in [[0, 6, 0], [0, 6, -1]] {
+            for feature in FeatureCatalogue::cell(&galaxy, cell(c)).features() {
+                let mut words = Words::default();
+                feature.write_gas_words(&mut words);
+                let back = FeatureRecord::read_gas_words(&mut words.cut(words.len()), &galaxy);
+                match feature.marks() {
+                    FeatureMarks::Nursery(_) | FeatureMarks::Cloud(_) => {
+                        assert_eq!(back.as_ref(), Some(feature));
+                        let short = words.cut(words.len() - 1);
+                        assert_eq!(
+                            FeatureRecord::read_gas_words(&mut short.cut(short.len()), &galaxy),
+                            None,
+                            "cut short"
+                        );
+                        gas += 1;
+                    }
+                    FeatureMarks::Globular(_) | FeatureMarks::OpenCluster(_) => {
+                        assert_eq!((back, words.len()), (None, 1), "{feature:?}");
+                        clusters += 1;
+                    }
+                }
+            }
+        }
+        assert!(
+            gas > 10 && clusters > 10,
+            "{gas} with gas, {clusters} clusters"
+        );
     }
 }

@@ -10,15 +10,20 @@
 //! way out, and a bearing's view holds no host, distance, light age or position.
 //!
 //! The store is per universe until sessions exist, and [`PersistedKnowledge`] keeps it in versioned
-//! JSON lines in the universe's reserved `knowledge/` directory. Nothing else of the brainstorm's
-//! Knowledge overlay is built: no degraded body records, no per-console views, no sensor model.
+//! JSON lines in the universe's reserved `knowledge/` directory. Beside it, [`surveys`] keeps what
+//! the ship has surveyed of each body's surface (plan R09, R09.T18): survey passes in a log of
+//! their own, folded on load into each body's coverage. Nothing else of the brainstorm's Knowledge
+//! overlay is built: no degraded body records, no per-console views, no sensor model.
 
+mod jsonl;
 mod persist;
 mod record;
 mod store;
+pub mod surveys;
 #[cfg(test)]
 mod testing;
 
+pub(crate) use persist::ChangedContacts;
 pub use persist::{KNOWLEDGE_FORMAT, LoadKnowledgeError, PersistedKnowledge, SaveKnowledgeError};
 pub use record::{
     Acknowledgement, BearingContact, ContactId, ContactView, KnowledgeLevel, ResolvedContact,

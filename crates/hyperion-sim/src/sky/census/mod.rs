@@ -6,6 +6,8 @@
 //!   [`Completeness`] a census of some of its shells reaches.
 //! - [`cell`]: one cell's stars, each at its retarded time, each record's light bounded star by
 //!   star first ([`StarBounds`]), and the census's tallies.
+//! - [`features`]: plan 09's feature members, which the census takes shell by shell wherever the
+//!   galaxy's field gives them up (R06.T16.a), through the [`SkySource`]s a [`SkyContext`] holds.
 //! - [`merge`]: the parts merged in a total order and cut at `n_max`, the [`SkyCensus`], whole or
 //!   to the shells done.
 //! - [`cache`]: the cell cache's trait, which [`SkyContext`] holds, its blocks of cells keyed by
@@ -13,6 +15,7 @@
 
 pub mod cache;
 pub mod cell;
+pub mod features;
 pub mod merge;
 pub mod query;
 
@@ -24,6 +27,10 @@ pub use cell::{
     LayerTally, PairTally, RecordLight, SkyStar, StarBounds, StarLight, cell_floor,
     cell_offset_bound, census_cell, census_cell_with_cost, census_record, flux_bound,
     star_offset_bound,
+};
+pub use features::{
+    MemberPart, SkyMember, SkySource, census_members, streams_seen, streams_seen_in,
+    streams_seen_in_with, takes_class_hosts, takes_feature_members, takes_hosts_of,
 };
 pub use merge::{SkyCensus, merge_census, merge_shells, sky_order};
 pub use query::{

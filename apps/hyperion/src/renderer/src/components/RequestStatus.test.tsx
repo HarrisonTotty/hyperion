@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { RequestState } from "../lib/useServerRequest";
 import { aUniverseList } from "../test/galaxyFixtures";
 import { RequestStatus } from "./RequestStatus";
+import { describedText } from "../test/statusLine";
 
 describe("RequestStatus", () => {
   it.each<[string, RequestState<RequestKind>, string, boolean]>([
@@ -38,6 +39,12 @@ describe("RequestStatus", () => {
       "refused for an unknown system",
       { kind: "rejected", code: "unknown_system", reason: "no system 0200080020000000" },
       "REJECTED: no system 0200080020000000",
+      false,
+    ],
+    [
+      "refused for an unknown feature",
+      { kind: "rejected", code: "unknown_feature", reason: "no feature e842000280000000" },
+      "REJECTED: no feature e842000280000000",
       false,
     ],
     [
@@ -101,9 +108,32 @@ describe("RequestStatus", () => {
     );
 
     // As the census's RETRY is, so that a RETRY reached by Tab says what it retries everywhere.
-    expect(screen.getByRole("button", { name: "RETRY" })).toHaveAccessibleDescription(
-      "REJECTED: busy",
+    expect(describedText(screen.getByRole("button", { name: "RETRY" }))).toBe("REJECTED: busy");
+  });
+
+  it("names what the request is for before its state, where one is given", () => {
+    render(<RequestStatus state={{ kind: "pending" }} subject="EXTINCTION" />);
+
+    expect(screen.getByRole("status")).toHaveTextContent(/^EXTINCTION PENDING$/);
+  });
+
+  it("names what the request is for before a rejection and its reason", () => {
+    render(
+      <RequestStatus
+        state={{ kind: "rejected", code: "unknown_universe", reason: "no such universe" }}
+        subject="EXTINCTION"
+      />,
     );
+
+    expect(screen.getByRole("status")).toHaveTextContent(/^EXTINCTION REJECTED: no such universe$/);
+  });
+
+  it("names no subject before the link's state, which is the link's", () => {
+    render(
+      <RequestStatus state={{ kind: "link_down", reason: "NO CARRIER" }} subject="EXTINCTION" />,
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent(/^NO CARRIER$/);
   });
 
   it("offers no RETRY when the caller cannot send again", () => {

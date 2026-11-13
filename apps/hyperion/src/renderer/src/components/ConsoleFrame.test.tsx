@@ -4,6 +4,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { GraphicsLaunchMode } from "../../../preload/api";
 import { DISPLAYS, type DisplayId } from "../lib/displays";
+import { FakeAdapter, FakeGpu, SWIFTSHADER_INFO } from "../test/fakeGpu";
+import { requestAdapterOutcome } from "../view/engine/platform";
 import {
   type GraphicsEvent,
   GraphicsStatusContext,
@@ -126,6 +128,32 @@ describe("ConsoleFrame", () => {
     expect(
       within(screen.getByRole("banner")).queryByRole("status", { name: "Graphics mode" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("shows the check's MEASUREMENT banner alone on SwiftShader in the software mode (R01.T16)", async () => {
+    const outcome = await requestAdapterOutcome(
+      new FakeGpu([new FakeAdapter({ info: SWIFTSHADER_INFO, features: [] })]),
+    );
+    render(
+      <GraphicsStatusContext
+        value={graphicsStore("software", [{ kind: "adapter-outcome", outcome }])}
+      >
+        <ConsoleFrame
+          displays={DISPLAYS}
+          activeDisplay="view"
+          onSelectDisplay={() => {}}
+          linkStatus="connected"
+          modeBanner="MEASUREMENT"
+        >
+          <p>Work area</p>
+        </ConsoleFrame>
+      </GraphicsStatusContext>,
+    );
+    const strip = within(screen.getByRole("banner"));
+    expect([
+      strip.getByRole("status", { name: "Mode" }).textContent,
+      strip.queryByRole("status", { name: "Graphics mode" }),
+    ]).toEqual(["MEASUREMENT", null]);
   });
 
   it("shows the same banner on every display", () => {

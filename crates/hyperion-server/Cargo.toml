@@ -9,6 +9,8 @@ publish.workspace = true
 [dependencies]
 hyperion-protocol.workspace = true
 hyperion-sim.workspace = true
+# R09's coarse-field cells and resolution codes, for the survey coverage (R09.T18).
+hyperion-surface.workspace = true
 
 anyhow.workspace = true
 axum.workspace = true
@@ -16,6 +18,8 @@ base64.workspace = true
 clap.workspace = true
 # `sink` for splitting a WebSocket into its reading and writing halves.
 futures-util = { workspace = true, features = ["sink"] }
+# The CPU pool's bulk and background jobs at a lower OS priority (rendering plan R06, R06.T11.k).
+gdt-cpus.workspace = true
 getrandom.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -26,6 +30,9 @@ tracing-subscriber.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
+# The coarse pass's reference worlds (`planetary::surface::reference`), which the surface
+# service's tests compute fields from (rendering plan R09, R09.T17).
+hyperion-sim = { workspace = true, features = ["testing"] }
 # The golden-file harness of plan 01, for the pinned `galaxy_parameters` response.
 hyperion-testkit.workspace = true
 tempfile.workspace = true
@@ -36,7 +43,23 @@ tokio-tungstenite.workspace = true
 serde_json.workspace = true
 
 [[bench]]
+name = "awd_scan_cold"
+harness = false
+
+[[bench]]
 name = "density_map"
+harness = false
+
+[[bench]]
+name = "feature_range_query"
+harness = false
+
+[[bench]]
+name = "global_list_pool"
+harness = false
+
+[[bench]]
+name = "oneshot_scan_galaxy"
 harness = false
 
 [[bench]]
@@ -44,7 +67,19 @@ name = "range_query"
 harness = false
 
 [[bench]]
+name = "served_bake"
+harness = false
+
+[[bench]]
+name = "served_readout"
+harness = false
+
+[[bench]]
 name = "sky"
+harness = false
+
+[[bench]]
+name = "stream_warmup"
 harness = false
 
 [lints]

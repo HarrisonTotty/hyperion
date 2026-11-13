@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { dot, normalise } from "../../geometry/vec3";
+import { cross, dot, norm, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
+import type { CameraPose } from "../camera/pose";
+import { lookAlong } from "../camera/quaternion";
 import { rotateToBody } from "../coords/rotation";
+import { keptTime } from "../scenes/kept";
+import { terrainStar, terrainSystem, terrainTestGolden } from "../scenes/terrainScene";
+import { MAX_BLOCK_BYTES } from "../terrain/coarseFieldStore";
+import { vertexSpacing, type Xyz } from "../terrain/cube";
 import { isDescending } from "../terrain/grounded";
 import { spheroidNormal, spheroidPoint } from "../terrain/planet";
 import { datumDirection, DescentProfile, landingSiteOf } from "./descentProfile";
@@ -10,22 +16,56 @@ import {
   cameraElevationDeg,
   contactRule,
   GROUNDED_CLEARANCE_M,
+  groundedClearanceM,
+  ORBIT_INSTRUMENT_RADII,
+  orbitInstrumentPose,
+  postSyntheticField,
   siteDirection,
   SPIKE_CRAFT,
   SPIKE_CRAFT_RADIUS_M,
   SPIKE_PLANET,
+  spikeCameraAt,
   spikeContactAt,
   spikeScene,
   sunDirectionBody,
   SYNTHETIC_FIELD_BYTES,
-  syntheticField,
+  syntheticFieldBlocks,
   TEST_PLANET_FIGURE,
 } from "./spikeScene";
+import { terrainTestWorld } from "./spikeWorld";
+
+/** A triple as a vector. */
+function vecOf([x, y, z]: Xyz) {
+  return vec3(x, y, z);
+}
 
 const PROFILE = new DescentProfile(TEST_PLANET_FIGURE, landingSiteOf(5n), {
   siteHeightM: 812.5,
   trackMaxHeightM: 1_400,
 });
+
+/**
+ * T13.b's sun over the test planet, as `sunDirectionBody` computed it before worlds: the site at the
+ * script's end in the planet's axes, its x and y with z = 0, normalised.
+ */
+function t13bSunDirection(profile: DescentProfile): Vec3 {
+  const end = profile.durationS;
+  const s = rotateToBody(testPlanetRotationAt(end), profile.poseAt(end).groundPointM);
+  return normalise(vec3(s.x, s.y, 0));
+}
+
+/** T13.b's orbit instrument over the test planet, as `orbitInstrumentPose` built it with pole +z. */
+function t13bOrbitPose(profile: DescentProfile, tS: number): CameraPose {
+  const out = normalise(spikeCameraAt(profile, tS).positionM);
+  const pole = vec3(0, 0, 1);
+  const up = Math.abs(dot(out, pole)) > 0.99 ? t13bSunDirection(profile) : pole;
+  const forward = scale(out, -1);
+  return {
+    frame: { kind: "body", body: SPIKE_PLANET },
+    positionM: scale(out, ORBIT_INSTRUMENT_RADII * TEST_PLANET_FIGURE.equatorialRadiusM),
+    orientation: lookAlong(forward, normalise(sub(up, scale(forward, dot(up, forward))))),
+  };
+}
 
 describe("the craft as a contact", () => {
   const rule = contactRule(PROFILE);
@@ -193,13 +233,180 @@ describe("the camera's elevation", () => {
   });
 });
 
+describe("the scene over TERRAIN TEST's moon (R10.T14.c)", () => {
+  const world = terrainTestWorld();
+  const golden = terrainTestGolden();
+  // A site in the survey's middle rows, 28° N, 45° E (`terrainScene.ts`' track), approached from
+  // the south-west.
+  const site = {
+    latitudeRad: (28 * Math.PI) / 180,
+    longitudeRad: (45 * Math.PI) / 180,
+    azimuthRad: (40 * Math.PI) / 180,
+  };
+  const profile = new DescentProfile(world.figure, site, { siteHeightM: 1_900 });
+  const kept = spikeScene(profile, world);
+
+  it("holds the star and the moon, with the golden's IDs, seed and the moon's figure", () => {
+    const scene = kept.sceneAt(600);
+    expect(scene.bodies.map((body) => body.id)).toEqual([terrainStar(), golden.body]);
+    expect(scene.system).toBe(terrainSystem());
+    const moon = scene.bodies[1];
+    expect(moon?.kind).toBe("moon");
+    expect(moon?.parent).toBe(terrainStar());
+    expect(moon?.designation).toBe("TEST MOON");
+    expect(moon?.detailSeed).toBe(golden.seed);
+    expect(moon?.radiusM).toBe(golden.header.equatorial_radius_m);
+    expect(moon?.hillRadiusM).toBe(world.hillRadiusM);
+    expect(moon?.appearance).toBe(world.appearance);
+    expect(moon?.rotation).toEqual(world.rotationAt(600));
+    expect(scene.hostDiscs).toBe(world.hostDiscs);
+  });
+
+  it("holds the craft in TEST MOON's fixed frame, and its camera in the moon's frame", () => {
+    const t = 1_000;
+    const scene = kept.sceneAt(t);
+    const craft = scene.craft.find((each) => each.id === SPIKE_CRAFT);
+    expect(craft?.pose.position).toEqual({
+      kind: "body_fixed",
+      body: golden.body,
+      m: profile.poseAt(t).positionM,
+    });
+    expect(craft?.predictedPath?.[0]?.position).toEqual({
+      kind: "body_fixed",
+      body: golden.body,
+      m: profile.positionAt(t),
+    });
+    expect(scene.ownShip).toBe(SPIKE_CRAFT);
+    const camera = spikeCameraAt(profile, t, world);
+    expect(camera.frame).toEqual({ kind: "body", body: golden.body });
+    expect(camera.positionM).toEqual(
+      rotateToBody(world.rotationAt(t), profile.poseAt(t).positionM),
+    );
+    expect(kept.cameraAt(t)).toEqual(camera);
+    const orbit = orbitInstrumentPose(profile, t, world);
+    expect(orbit.frame).toEqual({ kind: "body", body: golden.body });
+    expect(norm(orbit.positionM)).toBeCloseTo(
+      ORBIT_INSTRUMENT_RADII * golden.header.equatorial_radius_m,
+      3,
+    );
+  });
+
+  it("stands the sun on the great circle through the site at the end and the track's start, lighting both", () => {
+    const end = profile.durationS;
+    const siteBody = rotateToBody(world.rotationAt(end), profile.siteDir);
+    const startBody = rotateToBody(world.rotationAt(0), profile.poseAt(0).groundDir);
+    const sun = sunDirectionBody(profile, world);
+    expect(norm(sun)).toBeCloseTo(1, 14);
+    expect(dot(sun, normalise(cross(siteBody, startBody)))).toBeCloseTo(0, 14);
+    // On the arc between them, nearer the site: T13.b's noon over the site left the start at −35°
+    // (the owner's request; `siteLight.ts`).
+    const elevationDeg = (t: number, dir: Vec3): number => {
+      const up = rotateToBody(
+        world.rotationAt(t),
+        vecOf(spheroidNormal(world.figure, [dir.x, dir.y, dir.z])),
+      );
+      return (Math.asin(dot(normalise(up), sun)) * 180) / Math.PI;
+    };
+    expect(Math.round(elevationDeg(end, profile.poseAt(end).groundDir))).toBe(20);
+    expect(Math.round(elevationDeg(0, profile.poseAt(0).groundDir))).toBe(10);
+  });
+
+  it("stands a served world at its own distance from a star of its own radius (R10.T15.b)", () => {
+    const epoch = { seconds: 234, nanos: 500_000_000 };
+    const served = {
+      ...world,
+      name: "served",
+      starDistanceM: 2.2e11,
+      starRadiusM: 5e8,
+      epoch,
+    } as const;
+    const scene = spikeScene(profile, served).sceneAt(0);
+    expect(scene.bodies[0]?.radiusM).toBe(5e8);
+    // Its clock counts the script's seconds from the scene's time it was read at.
+    expect(spikeScene(profile, served).sceneAt(10.25).time).toEqual({
+      seconds: 244,
+      nanos: 750_000_000,
+    });
+    expect(spikeScene(profile, world).sceneAt(10).time).toEqual(keptTime(10));
+    expect(norm(scene.bodies[1]?.centreM ?? vec3(0, 0, 0))).toBeCloseTo(2.2e11, 0);
+    // Every other world stands 1 au from a star of the Sun's radius.
+    const atAu = spikeScene(profile, world).sceneAt(0);
+    expect(atAu.bodies[0]?.radiusM).toBe(6.957e8);
+    expect(norm(atAu.bodies[1]?.centreM ?? vec3(0, 0, 0))).toBeCloseTo(149_597_870_700, 0);
+  });
+
+  it("stands the test planet's sun at its site's x and y with z 0, bit for bit, as T13.b did", () => {
+    const sun = sunDirectionBody(PROFILE);
+    expect(sun).toStrictEqual(t13bSunDirection(PROFILE));
+    expect(Object.is(sun.z, 0)).toBe(true);
+  });
+
+  it("builds the test planet's orbit pose about the pole +z, bit for bit, as T13.b did", () => {
+    const times = [0, 600, 1_100, PROFILE.durationS];
+    expect(times.map((t) => orbitInstrumentPose(PROFILE, t))).toStrictEqual(
+      times.map((t) => t13bOrbitPose(PROFILE, t)),
+    );
+  });
+
+  it("grounds the test planet's craft at T13.b's clearance, to the last bit", () => {
+    // TEST HULL's √(4² + 2.5² + 10²) = 11.057 m plus 64 of WGS 84's largest vertex spacings at its
+    // finest level, 19: 20.741 m. Computed once (2026-10-20) and pinned.
+    expect(GROUNDED_CLEARANCE_M).toBe(31.797_310_506_748_033);
+  });
+
+  it("gives the test planet's scene no host disc and its planet no detail seed", () => {
+    const scene = spikeScene(PROFILE).sceneAt(700);
+    expect(["hostDiscs" in scene, scene.bodies.some((body) => "detailSeed" in body)]).toEqual([
+      false,
+      false,
+    ]);
+  });
+
+  it("reads the elevation of view on the moon's spheroid, the nadir in the hover", () => {
+    expect(cameraElevationDeg(profile.poseAt(profile.durationS), world.figure)).toBeCloseTo(-90, 6);
+  });
+
+  it("grounds the craft within its bounding radius and one of the moon's finest patches", () => {
+    // TEST MOON's finest level is 17 (a = 1,738 km): one patch is 64 vertex spacings at most.
+    const patchM = 64 * vertexSpacing(world.figure.equatorialRadiusM, 17).maxM;
+    expect(groundedClearanceM(world.figure)).toBeCloseTo(SPIKE_CRAFT_RADIUS_M + patchM, 9);
+    expect(groundedClearanceM(TEST_PLANET_FIGURE)).toBe(GROUNDED_CLEARANCE_M);
+  });
+});
+
 describe("the synthetic field", () => {
-  it("is the brainstorm's 15 MB, every page written", () => {
-    const field = new Uint8Array(syntheticField());
-    expect(field.length).toBe(SYNTHETIC_FIELD_BYTES);
+  it("is the brainstorm's 15 MB in pieces of at most 1 MiB, every page written", () => {
+    const blocks = syntheticFieldBlocks();
+    expect(blocks.every((b) => b.byteLength <= MAX_BLOCK_BYTES)).toBe(true);
+    const field = new Uint8Array(SYNTHETIC_FIELD_BYTES);
+    let at = 0;
+    for (const block of blocks) {
+      field.set(new Uint8Array(block), at);
+      at += block.byteLength;
+    }
+    expect(at).toBe(SYNTHETIC_FIELD_BYTES);
     expect(SYNTHETIC_FIELD_BYTES).toBe(15_000_000);
     for (let page = 0; page < field.length; page += 4096) {
       expect(field.subarray(page, page + 4096).some((b) => b !== 0)).toBe(true);
     }
+  });
+
+  it("reaches the workers as the test planet's stand-in field: one field_init, then its chunks", () => {
+    const calls: string[] = [];
+    let bytes = 0;
+    postSyntheticField({
+      fieldInit: (body, block, form) => {
+        calls.push(`init ${body} ${String(form)}`);
+        bytes += block.byteLength;
+      },
+      fieldChunk: (body, block) => {
+        calls.push(`chunk ${body}`);
+        bytes += block.byteLength;
+      },
+    });
+    expect(calls[0]).toBe(`init ${SPIKE_PLANET} stand-in`);
+    expect(calls.slice(1).every((c) => c === `chunk ${SPIKE_PLANET}`)).toBe(true);
+    expect(calls).toHaveLength(Math.ceil(SYNTHETIC_FIELD_BYTES / MAX_BLOCK_BYTES));
+    expect(bytes).toBe(SYNTHETIC_FIELD_BYTES);
   });
 });

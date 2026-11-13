@@ -16,23 +16,44 @@
 //!
 //! [`SharedBriefCache`] holds what a range query's row needs instead: each system's
 //! [`BriefModel`] (plan 06, P06.T38.e), its primary alone by the cheapest exact route and its star
-//! count, under the same key and the same rules. It is a cache of its own because its entries are a
-//! few kilobytes where a system's stars can be tens, and a 20,000-row answer would otherwise evict
-//! every system the `SYSTEM` display is looking at.
+//! count, or, for a system whose pair can have changed its primary, its whole `SystemStars`
+//! (plan 11, P11.T11.a), under the same key and the same rules. It is a cache of its own because
+//! most of its entries are a few kilobytes where a system's stars can be tens, and a 20,000-row
+//! answer would otherwise evict every system the `SYSTEM` display is looking at; a paired entry
+//! is charged its system's bytes, about 90 kB on average.
+//!
+//! An observed range query reads each system's brief when its light left it, which needs the
+//! system's stars (plan 12, P12.T3): [`SharedSystemCache::handle`] lends the same cache to it as the
+//! sim's [`StarsCache`], so that an observed query asks for no stars the `SYSTEM` display has
+//! built, and builds none twice (P12.T6).
 
 use std::sync::Arc;
 
 use hyperion_sim::galaxy::Galaxy;
-use hyperion_sim::galaxy::features::members::{NoInteriorCache, resolve_member};
+use hyperion_sim::galaxy::catalogue_classes::{CatalogueSystem, system_of};
+use hyperion_sim::galaxy::features::members::source::FeatureInteriorCache;
+use hyperion_sim::galaxy::features::members::{MemberRecord, NoInteriorCache, resolve_member};
+use hyperion_sim::galaxy::global_list::members::GlobalMemberRecord;
 use hyperion_sim::galaxy::placement::{
-    ResolveSystemError, SystemKind, SystemOrigin, SystemRecord, resolve,
+    ResolveSystemError, SystemKind, SystemOrigin, SystemRecord, resolve, resolve_list_member_with,
 };
 use hyperion_sim::id::{SystemId, SystemIdKind};
+use hyperion_sim::observe::{StarsCache, stars_of};
 use hyperion_sim::stellar::brief::BriefModel;
 use hyperion_sim::stellar::system::SystemStars;
 
-use super::GalaxyKey;
+use super::{GalaxyKey, Listing, SharedClusterModelCache};
 use crate::cache::{HeapBytes, LruCounters, SharedByteLru};
+
+/// A system as resolved for its stars: a feature member, a catalogue class's system and a member of
+/// the global list bring their own (plan 09, P09.T10 and P09.T33.a; plan 10, P10.T10.b), every
+/// other record the stellar stage's of its own marks.
+enum Resolved {
+    Member(MemberRecord),
+    Catalogue(CatalogueSystem),
+    Listed(GlobalMemberRecord),
+    Placed(SystemRecord),
+}
 
 /// What names a system in the cache: the galaxy it belongs to, and the system itself.
 type SystemEntryKey = (GalaxyKey, SystemId);
@@ -49,21 +70,37 @@ impl HeapBytes for SystemStars {
 #[derive(Debug)]
 pub struct SharedSystemCache {
     systems: SharedByteLru<SystemEntryKey, SystemStars>,
+    interiors: FeatureInteriors,
 }
 
 impl SharedSystemCache {
-    /// An empty cache that holds at most `budget_bytes` of charged systems.
+    /// An empty cache that holds at most `budget_bytes` of charged systems, and resolves a feature
+    /// member through no interior cache, building its feature's interior each time.
     ///
     /// A budget of zero caches nothing: every system is generated, answered from and dropped.
     #[must_use]
     pub fn new(budget_bytes: usize) -> Self {
         Self {
             systems: SharedByteLru::new(budget_bytes),
+            interiors: FeatureInteriors(None),
+        }
+    }
+
+    /// This cache, resolving a feature member through the server's feature interiors
+    /// `interiors` (plan 09, P09.T40.a), so that a feature's members share one build of its
+    /// interior. The stars are the same either way.
+    #[must_use]
+    pub fn with_interiors(self, interiors: Arc<SharedClusterModelCache>) -> Self {
+        Self {
+            interiors: FeatureInteriors(Some(interiors)),
+            ..self
         }
     }
 
     /// The stars of the system `id` names in `galaxy`, the galaxy `key` names: the cache's, or
-    /// resolved and generated, then stored.
+    /// resolved and generated, then stored. A stream's or a dwarf core's member is resolved
+    /// through `listing`, its galaxy's list ([`Listing::Listed`]), and generated through its
+    /// member record, at its class and composition (plan 10, P10.T10.b).
     ///
     /// Generation is the whole of plan 06's and plan 11's system stage
     /// ([`SystemStars::generate`]), which builds a track for every star, so this belongs on a
@@ -75,9 +112,13 @@ impl SharedSystemCache {
     ///
     /// # Errors
     ///
-    /// - The [`ResolveSystemError`] of plan 03's [`resolve`] if `id` names no system of `galaxy`.
+    /// - The [`ResolveSystemError`] of plan 03's [`resolve`] if `id` names no system of `galaxy`,
+    ///   or of plan 10's [`resolve_list_member_with`] for a list member's ID.
+    /// - [`ResolveSystemError::KindNotGenerated`] for a list member's ID with
+    ///   [`Listing::Unlisted`], as [`resolve`] answers it.
     /// - [`ResolveSystemError::KindNotGenerated`] for a member of the galactic centre, whose system
-    ///   stage is not generated yet (plan 09, P09.T27).
+    ///   stage is not generated yet (plan 09, P09.T27), and for a catalogue system whose class
+    ///   models no stars; a core collapse's are its class's (P09.T33.a).
     /// - [`ResolveSystemError::LayerNotGenerated`] for a rogue planet, which has no stars: its state
     ///   is plan 14's (plan 13, P13.T5.d). A free-floating brown dwarf is generated as a single
     ///   object through the stellar stage (P13.T5.a).
@@ -92,27 +133,51 @@ impl SharedSystemCache {
         key: GalaxyKey,
         galaxy: &Galaxy,
         id: SystemId,
+        listing: &Listing,
     ) -> Result<Arc<SystemStars>, ResolveSystemError> {
         assert_eq!(
             galaxy.seed().get(),
             key.seed(),
             "a system cache entry is of one galaxy, and this is another's"
         );
+        // Refused unlisted before the cache is read, so that a list member's stars kept for a
+        // listed caller are never lent to one that cannot resolve it: the answer depends on the
+        // listing alone, never on what is held.
+        if matches!(
+            id.kind(),
+            SystemIdKind::Stream(_) | SystemIdKind::DwarfCore(_)
+        ) && matches!(listing, Listing::Unlisted)
+        {
+            return Err(ResolveSystemError::KindNotGenerated);
+        }
         let entry_key = (key, id);
         if let Some(stars) = self.systems.get(&entry_key) {
             return Ok(stars);
         }
-        // A feature member is resolved once, here, rather than through `resolve` and again for its
-        // stars: its feature's interior is the costly part.
-        let member = match id.kind() {
-            SystemIdKind::FeatureMember(member) => {
-                Some(resolve_member(galaxy, &NoInteriorCache, member)?)
+        // A feature member is resolved once, here, rather than through `resolve` and again for
+        // its stars: its feature's interior is the costly part. So is a catalogue class's system, whose
+        // stars are its class's (plan 09, P09.T33.a).
+        let resolved = match id.kind() {
+            SystemIdKind::FeatureMember(member) => Resolved::Member(
+                self.interiors
+                    .lend(key, |interiors| resolve_member(galaxy, interiors, member))?,
+            ),
+            SystemIdKind::Catalogue(system) => Resolved::Catalogue(system_of(galaxy, system)?),
+            SystemIdKind::Stream(_) | SystemIdKind::DwarfCore(_) => match listing {
+                Listing::Listed(tubes) => {
+                    Resolved::Listed(resolve_list_member_with(galaxy, id, tubes)?)
+                }
+                Listing::Unlisted => unreachable!("an unlisted list member is refused above"),
+            },
+            SystemIdKind::Grid(_) | SystemIdKind::Centre(_) | SystemIdKind::Pinned(_) => {
+                Resolved::Placed(resolve(galaxy, id)?)
             }
-            _ => None,
         };
-        let record = match &member {
-            Some(member) => *member.record(),
-            None => resolve(galaxy, id)?,
+        let record = match &resolved {
+            Resolved::Member(member) => *member.record(),
+            Resolved::Catalogue(system) => *system.record(),
+            Resolved::Listed(member) => *member.record(),
+            Resolved::Placed(record) => *record,
         };
         // The galactic centre's members resolve since plan 09's P09.T27, but their stars take the
         // centre's composition and its black hole is no star: not generated here yet.
@@ -122,14 +187,64 @@ impl SharedSystemCache {
         if record.kind() == SystemKind::RoguePlanet {
             return Err(ResolveSystemError::LayerNotGenerated(record.layer()));
         }
-        let stars = Arc::new(match member {
-            Some(member) => member.stars(galaxy),
-            None => SystemStars::generate(galaxy, &record),
+        let stars = Arc::new(match resolved {
+            Resolved::Member(member) => member.stars(galaxy),
+            Resolved::Catalogue(system) => system
+                .stars(galaxy)
+                .ok_or(ResolveSystemError::KindNotGenerated)?,
+            Resolved::Listed(member) => member.stars(galaxy),
+            Resolved::Placed(record) => SystemStars::generate(galaxy, &record),
         });
         // A system larger than the whole budget is handed back and still answered from; nothing
         // else needs doing with it.
         let _ = self.systems.insert(entry_key, Arc::clone(&stars));
         Ok(stars)
+    }
+
+    /// The stars of `record`'s system in `galaxy`, the galaxy `key` names: the cache's, or built
+    /// by the sim's [`stars_of`] and stored.
+    ///
+    /// The record is a range query's hit, so it needs no resolving; the entry is the one
+    /// [`get_or_generate`](Self::get_or_generate) stores for its ID, since both build a grid
+    /// system through [`SystemStars::generate`] and a feature member through its member record.
+    ///
+    /// # Panics
+    ///
+    /// - If `galaxy`'s seed is not the seed of `key`, as [`get_or_generate`](Self::get_or_generate).
+    /// - For a rogue planet, which has no stars, and for a member of the galactic centre, whose
+    ///   stars are not generated yet, as [`stars_of`]: an observed query asks for neither.
+    /// - For a catalogue system whose class does not model its stars, a Type Ia's, which
+    ///   [`stars_of`] refuses: an observed query refuses every catalogue system's motion first.
+    pub fn get_or_build(
+        &self,
+        key: GalaxyKey,
+        galaxy: &Galaxy,
+        record: &SystemRecord,
+    ) -> Arc<SystemStars> {
+        assert_eq!(
+            galaxy.seed().get(),
+            key.seed(),
+            "a system cache entry is of one galaxy, and this is another's"
+        );
+        let entry_key = (key, record.id());
+        if let Some(stars) = self.systems.get(&entry_key) {
+            return stars;
+        }
+        let stars = Arc::new(
+            self.interiors
+                .lend(key, |interiors| stars_of(galaxy, interiors, record))
+                .expect("an observed query asks for no catalogue system's stars"),
+        );
+        // A system larger than the whole budget is handed back and still answered from.
+        let _ = self.systems.insert(entry_key, Arc::clone(&stars));
+        stars
+    }
+
+    /// One query's view of the cache, as the sim's [`StarsCache`] for the galaxy `key` names
+    /// (plan 12, P12.T6).
+    #[must_use]
+    pub fn handle(&self, key: GalaxyKey) -> SystemStarsHandle<'_> {
+        SystemStarsHandle { cache: self, key }
     }
 
     /// The systems held, the bytes they are charged, and the hits, misses, evictions and refusals
@@ -140,9 +255,85 @@ impl SharedSystemCache {
     }
 }
 
+/// One observed query's view of the [`SharedSystemCache`]: plan 12's [`StarsCache`], over the
+/// cache the `SYSTEM` display shares (P12.T6).
+///
+/// Without it an observed 50 ly query builds every system's stars, 25 times the plain query's cost
+/// (P12.T3 as built: 240 ms against 9.45 ms cold); with it a repeated query builds none.
+#[derive(Debug, Clone, Copy)]
+pub struct SystemStarsHandle<'a> {
+    cache: &'a SharedSystemCache,
+    key: GalaxyKey,
+}
+
+impl SystemStarsHandle<'_> {
+    /// Which galaxy's systems this handle lends.
+    #[must_use]
+    pub fn galaxy(&self) -> GalaxyKey {
+        self.key
+    }
+
+    /// Calls `f` with the stars of the system `id` of `galaxy`: the cache's, or those `build`
+    /// makes, then kept; `None` if `build` makes none, which is not kept.
+    ///
+    /// For a system whose stars its caller resolves itself (plan 10, P10.T10.b's registration
+    /// member): a stream's or a dwarf core's member, from its member record, and a catalogue
+    /// class's host, from its class. `build` must make what
+    /// [`SharedSystemCache::get_or_generate`] makes for `id`, under whose key they are kept.
+    ///
+    /// # Panics
+    ///
+    /// If `galaxy` is not the handle's.
+    pub fn with_stars_of<R>(
+        &mut self,
+        galaxy: &Galaxy,
+        id: SystemId,
+        build: impl FnOnce() -> Option<SystemStars>,
+        f: impl FnOnce(Option<&SystemStars>) -> R,
+    ) -> R {
+        assert_eq!(
+            galaxy.seed().get(),
+            self.key.seed(),
+            "a system cache entry is of one galaxy, and this is another's"
+        );
+        let entry_key = (self.key, id);
+        if let Some(stars) = self.cache.systems.get(&entry_key) {
+            return f(Some(&stars));
+        }
+        let Some(stars) = build().map(Arc::new) else {
+            return f(None);
+        };
+        // A system larger than the whole budget is handed back and still answered from.
+        let _ = self.cache.systems.insert(entry_key, Arc::clone(&stars));
+        f(Some(&stars))
+    }
+}
+
+impl StarsCache for SystemStarsHandle<'_> {
+    /// Lends the stars of `record`'s system, building them if the cache has not got them
+    /// ([`SharedSystemCache::get_or_build`]).
+    ///
+    /// `f` runs with no lock held, on stars this call holds an `Arc` of, so the cache may evict
+    /// anything meanwhile without touching what `f` sees.
+    ///
+    /// # Panics
+    ///
+    /// As [`SharedSystemCache::get_or_build`]: if `galaxy` is not the handle's, and for a rogue
+    /// planet, a member of the galactic centre or a catalogue system whose class does not model its
+    /// stars, which the observed query never asks for.
+    fn with_stars<R>(
+        &mut self,
+        galaxy: &Galaxy,
+        record: &SystemRecord,
+        f: impl FnOnce(&SystemStars) -> R,
+    ) -> R {
+        f(&self.cache.get_or_build(self.key, galaxy, record))
+    }
+}
+
 impl HeapBytes for BriefModel {
-    /// The sim's own count of what the model owns on the heap: its primary's track, if it has one
-    /// ([`BriefModel::heap_bytes`]).
+    /// The sim's own count of what the model owns on the heap: its primary's track, if it has one,
+    /// or for a paired model its system's stars and timelines ([`BriefModel::heap_bytes`]).
     fn heap_bytes(&self) -> usize {
         Self::heap_bytes(self)
     }
@@ -153,16 +344,29 @@ impl HeapBytes for BriefModel {
 #[derive(Debug)]
 pub struct SharedBriefCache {
     briefs: SharedByteLru<SystemEntryKey, BriefModel>,
+    interiors: FeatureInteriors,
 }
 
 impl SharedBriefCache {
-    /// An empty cache that holds at most `budget_bytes` of charged models.
+    /// An empty cache that holds at most `budget_bytes` of charged models, and builds a feature
+    /// member's model through no interior cache, building its feature's interior each time.
     ///
     /// A budget of zero caches nothing: every model is built, answered from and dropped.
     #[must_use]
     pub fn new(budget_bytes: usize) -> Self {
         Self {
             briefs: SharedByteLru::new(budget_bytes),
+            interiors: FeatureInteriors(None),
+        }
+    }
+
+    /// This cache, building a feature member's model through the server's feature interiors
+    /// `interiors` (plan 09, P09.T40.a). The models are the same either way.
+    #[must_use]
+    pub fn with_interiors(self, interiors: Arc<SharedClusterModelCache>) -> Self {
+        Self {
+            interiors: FeatureInteriors(Some(interiors)),
+            ..self
         }
     }
 
@@ -170,10 +374,16 @@ impl SharedBriefCache {
     /// built and stored.
     ///
     /// The record comes from a range query's hit, so a grid system needs no resolving. Building
-    /// one costs its primary's main sequence or its track ([`BriefModel::new`]), so this belongs
-    /// on a pool job. A catalogue feature's member is routed through its member record
-    /// ([`BriefModel::of_record`]), at its cluster's composition; the server keeps no feature
-    /// interiors yet, so each member's miss builds its feature's interior again.
+    /// one costs its primary's main sequence or its track, or for a system whose pair can have
+    /// changed its primary its stars and the binary engine ([`BriefModel::new`], P11.T11.a), so
+    /// this belongs on a pool job. A catalogue feature's member is routed through its member record
+    /// ([`BriefModel::of_record`]), at its cluster's composition, and its feature's interior
+    /// through the cache's feature interiors ([`with_interiors`](Self::with_interiors)).
+    ///
+    /// # Errors
+    ///
+    /// [`ResolveSystemError::KindNotGenerated`] for a catalogue system whose class does not model
+    /// its stars, a Type Ia's, as [`BriefModel::of_record`]; nothing is stored.
     ///
     /// # Panics
     ///
@@ -187,7 +397,7 @@ impl SharedBriefCache {
         key: GalaxyKey,
         galaxy: &Galaxy,
         record: &SystemRecord,
-    ) -> Arc<BriefModel> {
+    ) -> Result<Arc<BriefModel>, ResolveSystemError> {
         assert_eq!(
             galaxy.seed().get(),
             key.seed(),
@@ -195,9 +405,39 @@ impl SharedBriefCache {
         );
         let entry_key = (key, record.id());
         if let Some(model) = self.briefs.get(&entry_key) {
+            return Ok(model);
+        }
+        let model = Arc::new(self.interiors.lend(key, |interiors| {
+            BriefModel::of_record(galaxy, interiors, record)
+        })?);
+        // A model larger than the whole budget is handed back and still answered from.
+        let _ = self.briefs.insert(entry_key, Arc::clone(&model));
+        Ok(model)
+    }
+
+    /// The brief model of the global list's member `member` of `galaxy`, the galaxy `key` names:
+    /// the cache's, or built from its member record and stored ([`BriefModel::of_global_member`],
+    /// plan 10, P10.T10.b's registration member), under its ID as every system's.
+    ///
+    /// # Panics
+    ///
+    /// If `galaxy`'s seed is not the seed of `key`, as [`SharedBriefCache::get_or_build`].
+    pub fn get_or_build_listed(
+        &self,
+        key: GalaxyKey,
+        galaxy: &Galaxy,
+        member: &GlobalMemberRecord,
+    ) -> Arc<BriefModel> {
+        assert_eq!(
+            galaxy.seed().get(),
+            key.seed(),
+            "a brief cache entry is of one galaxy, and this is another's"
+        );
+        let entry_key = (key, member.record().id());
+        if let Some(model) = self.briefs.get(&entry_key) {
             return model;
         }
-        let model = Arc::new(BriefModel::of_record(galaxy, &NoInteriorCache, record));
+        let model = Arc::new(BriefModel::of_global_member(galaxy, member));
         // A model larger than the whole budget is handed back and still answered from.
         let _ = self.briefs.insert(entry_key, Arc::clone(&model));
         model
@@ -211,10 +451,26 @@ impl SharedBriefCache {
     }
 }
 
+/// The feature interiors a system or brief cache resolves members through: the server's shared
+/// cache, or none.
+#[derive(Debug)]
+struct FeatureInteriors(Option<Arc<SharedClusterModelCache>>);
+
+impl FeatureInteriors {
+    /// `f` with the interiors of the galaxy `key` names.
+    fn lend<R>(&self, key: GalaxyKey, f: impl FnOnce(&dyn FeatureInteriorCache) -> R) -> R {
+        match &self.0 {
+            Some(cache) => f(&cache.handle(key)),
+            None => f(&NoInteriorCache),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use hyperion_sim::galaxy::placement::{CellKey, candidate_count, generate_cell};
     use hyperion_sim::id::Layer;
+    use hyperion_sim::stellar::brief::BriefRoute;
     use hyperion_sim::{GENERATOR_VERSION, Seed};
 
     use super::*;
@@ -255,10 +511,14 @@ mod tests {
     fn a_system_is_generated_once_and_then_lent() {
         let cache = SharedSystemCache::new(64 << 20);
         let id = systems(1)[0];
-        let first = cache.get_or_generate(key(), galaxy(), id).unwrap();
+        let first = cache
+            .get_or_generate(key(), galaxy(), id, &Listing::Unlisted)
+            .unwrap();
         let expected = SystemStars::generate(galaxy(), &resolve(galaxy(), id).unwrap());
         assert_eq!(*first, expected);
-        let second = cache.get_or_generate(key(), galaxy(), id).unwrap();
+        let second = cache
+            .get_or_generate(key(), galaxy(), id, &Listing::Unlisted)
+            .unwrap();
         assert!(
             Arc::ptr_eq(&first, &second),
             "the second lookup is the cache's"
@@ -274,6 +534,104 @@ mod tests {
         );
     }
 
+    /// A core-collapse entry's ID (plan 09, P09.T33.a) and a luminous-blue-variable host's
+    /// (P09.T43) are served their class's stars and stored; a Type Ia's members, whose stars the
+    /// stellar stage does not model (P09.T34.a), are refused as not generated by both caches and
+    /// not stored; an ID of the class never placed under the prefix names no system, and is not
+    /// stored either.
+    #[test]
+    fn a_catalogue_system_is_served_its_class_s_stars() {
+        use hyperion_sim::galaxy::catalogue_classes::core_collapse::CoreCollapseProcess;
+        use hyperion_sim::galaxy::catalogue_classes::lbv::LbvProcess;
+        use hyperion_sim::galaxy::catalogue_classes::type_ia::TypeIaProcess;
+        use hyperion_sim::galaxy::catalogue_classes::{
+            CatalogueCellKey, CatalogueClassCell, ClassId, system_of,
+        };
+        use hyperion_sim::id::CatalogueSystemId;
+        let cache = SharedSystemCache::new(64 << 20);
+        let process = CoreCollapseProcess::new(galaxy());
+        let entry = (8..28)
+            .flat_map(|y| {
+                let key = CatalogueCellKey::new(ClassId::CORE_COLLAPSE, [0, y, 0])
+                    .expect("a cell of the root cube");
+                CatalogueClassCell::generate(galaxy(), &process, key).into_entries()
+            })
+            .next()
+            .expect("the inner disc has recent deaths");
+        let id = SystemId::from(entry.id());
+        let stars = cache
+            .get_or_generate(key(), galaxy(), id, &Listing::Unlisted)
+            .unwrap();
+        let expected = system_of(galaxy(), entry.id())
+            .unwrap()
+            .stars(galaxy())
+            .expect("a core collapse's stars are the stellar stage's");
+        assert_eq!(*stars, expected);
+        assert_eq!(cache.counters().entries(), 1);
+        let lbv = LbvProcess::new(galaxy());
+        let entry = (1..8)
+            .flat_map(|y| [[0, y, 0], [0, y, -1]])
+            .flat_map(|cell| {
+                let key = CatalogueCellKey::new(ClassId::LUMINOUS_BLUE_VARIABLE, cell)
+                    .expect("a cell of the root cube");
+                CatalogueClassCell::generate(galaxy(), &lbv, key).into_entries()
+            })
+            .next()
+            .expect("the disc has luminous-blue-variable hosts");
+        let stars = cache
+            .get_or_generate(
+                key(),
+                galaxy(),
+                SystemId::from(entry.id()),
+                &Listing::Unlisted,
+            )
+            .unwrap();
+        let expected = system_of(galaxy(), entry.id())
+            .unwrap()
+            .stars(galaxy())
+            .expect("a host's stars are the stellar stage's");
+        assert_eq!(*stars, expected);
+        assert_eq!(stars.lbv_window(), Some(entry.value().window()));
+        assert_eq!(cache.counters().entries(), 2);
+        let ia = TypeIaProcess::new(galaxy());
+        let entry = (0..28)
+            .flat_map(|y| {
+                let key = CatalogueCellKey::new(ClassId::TYPE_IA, [0, y, 0])
+                    .expect("a cell of the root cube");
+                CatalogueClassCell::generate(galaxy(), &ia, key).into_entries()
+            })
+            .find(|entry| entry.members() == 2)
+            .expect("the inner disc has a recent Type Ia with a survivor");
+        let briefs = SharedBriefCache::new(64 << 20);
+        for member in 0..entry.members() {
+            let id = SystemId::from(entry.member_id(member).unwrap());
+            assert_eq!(
+                cache.get_or_generate(key(), galaxy(), id, &Listing::Unlisted),
+                Err(ResolveSystemError::KindNotGenerated)
+            );
+            let record = resolve(galaxy(), id).unwrap();
+            assert!(matches!(
+                briefs.get_or_build(key(), galaxy(), &record),
+                Err(ResolveSystemError::KindNotGenerated)
+            ));
+        }
+        assert_eq!(cache.counters().entries(), 2);
+        assert_eq!(briefs.counters().entries(), 0);
+        let unplaced =
+            CatalogueSystemId::new(ClassId::TIDAL_DISRUPTION_VICTIM.value(), [0, 16, 0], 0, 0)
+                .unwrap();
+        assert_eq!(
+            cache.get_or_generate(
+                key(),
+                galaxy(),
+                SystemId::from(unplaced),
+                &Listing::Unlisted
+            ),
+            Err(ResolveSystemError::NoSuchSystem)
+        );
+        assert_eq!(cache.counters().entries(), 2);
+    }
+
     #[test]
     fn an_id_that_names_no_system_is_refused_and_not_stored() {
         let cache = SharedSystemCache::new(64 << 20);
@@ -283,7 +641,7 @@ mod tests {
             .candidate_id(candidate_count(galaxy(), cell))
             .expect("a cell at the solar circle has room for another index");
         assert_eq!(
-            cache.get_or_generate(key(), galaxy(), beyond),
+            cache.get_or_generate(key(), galaxy(), beyond, &Listing::Unlisted),
             Err(ResolveSystemError::NoSuchSystem)
         );
         assert_eq!(cache.counters().entries(), 0);
@@ -309,7 +667,7 @@ mod tests {
                     records.first().copied()
                 })
                 .expect("the solar circle holds free-floating objects");
-            let answer = cache.get_or_generate(key(), galaxy(), found.id());
+            let answer = cache.get_or_generate(key(), galaxy(), found.id(), &Listing::Unlisted);
             if layer == Layer::BrownDwarf {
                 let stars = answer.expect("a brown dwarf takes the stellar stage");
                 assert_eq!(stars.star_count(), 1);
@@ -335,12 +693,20 @@ mod tests {
         let none = SharedSystemCache::new(0);
         for _ in 0..2 {
             for &id in &ids {
-                let expected = roomy.get_or_generate(key(), galaxy(), id).unwrap();
+                let expected = roomy
+                    .get_or_generate(key(), galaxy(), id, &Listing::Unlisted)
+                    .unwrap();
                 assert_eq!(
-                    tight.get_or_generate(key(), galaxy(), id).unwrap(),
+                    tight
+                        .get_or_generate(key(), galaxy(), id, &Listing::Unlisted)
+                        .unwrap(),
                     expected
                 );
-                assert_eq!(none.get_or_generate(key(), galaxy(), id).unwrap(), expected);
+                assert_eq!(
+                    none.get_or_generate(key(), galaxy(), id, &Listing::Unlisted)
+                        .unwrap(),
+                    expected
+                );
             }
         }
         assert!(tight.counters().evictions() > 0 || tight.counters().refused() > 0);
@@ -356,30 +722,75 @@ mod tests {
             GalaxyKey::new(SEED + 1, GENERATOR_VERSION),
             galaxy(),
             systems(1)[0],
+            &Listing::Unlisted,
         );
     }
 
     #[test]
     fn a_brief_model_is_built_once_and_every_cache_answers_the_same() {
-        let records: Vec<SystemRecord> = systems(6)
+        let mut records: Vec<SystemRecord> = systems(6)
             .into_iter()
             .map(|id| resolve(galaxy(), id).unwrap())
             .collect();
+        // A system whose pair can have changed its primary, whose model holds its whole system
+        // (P11.T11.a), another than the six (from 29 one of them is paired).
+        records.push(
+            systems(400)
+                .into_iter()
+                .skip(6)
+                .map(|id| resolve(galaxy(), id).unwrap())
+                .find(|record| BriefModel::new(galaxy(), record).route() == BriefRoute::Paired)
+                .expect("a paired system among 400 of layer C"),
+        );
         let roomy = SharedBriefCache::new(64 << 20);
         let none = SharedBriefCache::new(0);
         for _ in 0..2 {
             for record in &records {
                 let expected = BriefModel::new(galaxy(), record);
-                assert_eq!(*roomy.get_or_build(key(), galaxy(), record), expected);
-                assert_eq!(*none.get_or_build(key(), galaxy(), record), expected);
+                assert_eq!(
+                    *roomy.get_or_build(key(), galaxy(), record).unwrap(),
+                    expected
+                );
+                assert_eq!(
+                    *none.get_or_build(key(), galaxy(), record).unwrap(),
+                    expected
+                );
             }
         }
         let counters = roomy.counters();
         assert_eq!(
             (counters.misses(), counters.hits(), counters.entries()),
-            (6, 6, 6)
+            (7, 7, 7)
         );
         assert_eq!(none.counters().entries(), 0);
+    }
+
+    /// The observed query's handle lends what the cache stores for the system's ID, and stores
+    /// what it builds under it, so that the handle and `system_summary` share every entry.
+    #[test]
+    fn the_stars_handle_shares_the_entries_of_the_systems_ids() {
+        let cache = SharedSystemCache::new(64 << 20);
+        let [first, second] = systems(2)[..] else {
+            unreachable!("two systems asked for")
+        };
+        let summarised = cache
+            .get_or_generate(key(), galaxy(), first, &Listing::Unlisted)
+            .unwrap();
+        let record = resolve(galaxy(), first).unwrap();
+        let mut handle = cache.handle(key());
+        assert_eq!(handle.galaxy(), key());
+        let lent = handle.with_stars(galaxy(), &record, SystemStars::clone);
+        assert_eq!(lent, *summarised);
+        assert_eq!(cache.counters().hits(), 1);
+
+        let other = resolve(galaxy(), second).unwrap();
+        let built = handle.with_stars(galaxy(), &other, SystemStars::clone);
+        assert_eq!(built, SystemStars::generate(galaxy(), &other));
+        let stored = cache
+            .get_or_generate(key(), galaxy(), second, &Listing::Unlisted)
+            .unwrap();
+        assert_eq!(*stored, built);
+        assert_eq!((cache.counters().hits(), cache.counters().misses()), (2, 2));
     }
 
     /// A catalogue feature's member, one of each stellar band a feature near the Sun has, is
@@ -419,12 +830,12 @@ mod tests {
             let Some(member) = found else { continue };
             let record = member.record();
             let stars = systems
-                .get_or_generate(key, &galaxy, record.id())
+                .get_or_generate(key, &galaxy, record.id(), &Listing::Unlisted)
                 .expect("a member resolves");
             assert_eq!(*stars, member.stars(&galaxy));
             assert_eq!(stars.primary().composition(), member.composition());
             assert_eq!(
-                *briefs.get_or_build(key, &galaxy, record),
+                *briefs.get_or_build(key, &galaxy, record).unwrap(),
                 BriefModel::of_member(&galaxy, &member)
             );
             checked += 1;

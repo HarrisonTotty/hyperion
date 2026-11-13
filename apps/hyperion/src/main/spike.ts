@@ -12,16 +12,30 @@
 
 import type { IpcMainInvokeEvent, TraceConfig } from "electron";
 
-import type { DescentSpikeReport, SpikeEnd, SpikeResultsAnswer } from "../preload/api";
+import type {
+  DescentSpikeReport,
+  SpikeEnd,
+  SpikeLaunch,
+  SpikeReportPart,
+  SpikeResultsAnswer,
+} from "../preload/api";
 
+import { SOFTWARE_WAIT_FACTOR } from "./graphics/softwareMode";
 import {
   type ChromiumSwitch,
+  type GraphicsLaunchMode,
   type GraphicsLaunchOptions,
   graphicsSwitches,
   LIST_SWITCHES,
   mergeSwitchValue,
 } from "./graphics/switches";
-import { readDescentSpikeReport, readSpikeCapture, type SpikeCaptureFiles } from "./spikeReport";
+import {
+  type RejectedSizes,
+  readSpikeCapture,
+  readSpikeReport,
+  readSpikeReportPart,
+  type SpikeCaptureFiles,
+} from "./spikeReport";
 import type { TraceFormat, TraceSettings } from "./traceWindows";
 
 /** Whether Dawn's safety checks stay on for a spike run (`--dawn-safety`, T13.c). */
@@ -77,7 +91,7 @@ function consolidate(switches: ReadonlyArray<ChromiumSwitch>): ReadonlyArray<Chr
  * @param spike - The spike's options, or `undefined` for an ordinary launch, which gets exactly
  * R01's {@link graphicsSwitches}.
  * @returns For a spike run, R01's switches with `gpuTiming` on, as `--hyperion-gpu-timing` sets it
- * (R01 applies it only in its Linux `vulkan` mode), and, when `dawnSafety` is `off` and the mode
+ * (R01 applies it in every mode but `safe`), and, when `dawnSafety` is `off` and the mode
  * draws with WebGPU at all (not `safe`), Design note 22's safety toggles merged into one
  * `--enable-dawn-features` and one `--disable-dawn-features`. Never `--enable-unsafe-webgpu`.
  */
@@ -98,6 +112,82 @@ export function launchSwitches(
     { name: "disable-dawn-features", value: DAWN_SAFETY_OFF_DISABLED.join(",") },
   ]);
 }
+
+/**
+ * The renderer's hold of a generated world's field before its measurement, at most, ms (plan R10,
+ * R10.T14.c; `bodyDescent.ts`' constant of the same name, which this project cannot import).
+ */
+export const FIELD_HOLD_TIMEOUT_MS = 120_000;
+
+/**
+ * The renderer's hold of a served world's field, at most, ms (R10.T15.b; `bodyDescent.ts`'
+ * constant of the same name): the server computes the body's coarse field before its first answer.
+ */
+export const SERVED_FIELD_HOLD_TIMEOUT_MS = 600_000;
+
+/**
+ * The renderer's wait for one site's bakes in a generated world's measurement, at most, ms, an
+ * attempt (R10.T14.c; `bodyDescent.ts`' constant of the same name).
+ */
+export const MEASURE_TIMEOUT_MS = 600_000;
+
+/** The room past those waits for the site's reading and the session's own start, ms. */
+export const MEASUREMENT_MARGIN_MS = 60_000;
+
+/**
+ * How long a spike run may take before the main process ends it with status 3: the smoke's 10 s
+ * from its first worker bake, which it waits a minute of script for (the renderer's
+ * `smokeBakeLimitS`), and the descent's 20.5 minutes, each with room for building the scene and
+ * writing the results; and over a generated world (R10.T14.c) 13 minutes more, its measurement's
+ * longest for one site: the field's hold at its 120 s limit, then the site's bakes at their 600 s
+ * limit, and a minute's margin, against some 40 s in a typical run on three workers; over a served
+ * world (R10.T15.b) 21 minutes more, its field's hold at its 600 s limit, since the server computes
+ * the body's coarse field before its first answer (about a minute natively at level 8, R09.T16.a).
+ *
+ * @remarks
+ * A site whose floors the profile refuses is measured afresh at the next candidate, each attempt's
+ * bakes within their own 600 s. Past one attempt at its limit this watchdog is the backstop: it ends
+ * the run, rather than the renderer's own timeouts. The spike's script (`descentSpike.sh`) keeps its
+ * limit above this one, so that the watchdog ends a run first. In the check-only software mode
+ * (plan R01, R01.T16; main's ruling for the spike, 2026-11-01) every part is
+ * {@link SOFTWARE_WAIT_FACTOR} times as long, as the views check's is, and the script's limit with
+ * it; a GPU launch's is unchanged.
+ */
+export function spikeWatchdogMs(
+  launch: Pick<SpikeLaunch, "smoke" | "world">,
+  mode: GraphicsLaunchMode,
+): number {
+  let measurementMs: number;
+  switch (launch.world) {
+    case "test-planet":
+      measurementMs = 0;
+      break;
+    case "terrain-test":
+      measurementMs = FIELD_HOLD_TIMEOUT_MS + MEASURE_TIMEOUT_MS + MEASUREMENT_MARGIN_MS;
+      break;
+    case "served":
+      measurementMs = SERVED_FIELD_HOLD_TIMEOUT_MS + MEASURE_TIMEOUT_MS + MEASUREMENT_MARGIN_MS;
+      break;
+  }
+  const ms = (launch.smoke ? 180_000 : 45 * 60_000) + measurementMs;
+  return mode === "software" ? ms * SOFTWARE_WAIT_FACTOR : ms;
+}
+
+/**
+ * Where a spike run's results go, from the repository's root unless `--out` names a directory:
+ * `docs/measurements/descent-spike/`, or under `target/` in the software mode, whose figures are
+ * SwiftShader's and never a GPU's, as a software views check's are (main's ruling, 2026-10-29: the
+ * main process refuses an `--out` outside the repository's `target/` with the switch).
+ */
+export function spikeResultsDir(out: string | null, mode: GraphicsLaunchMode): string {
+  return out ?? (mode === "software" ? SOFTWARE_SPIKE_RESULTS_DIR : SPIKE_RESULTS_DIR);
+}
+
+/** A spike run's results directory, from the repository's root. */
+export const SPIKE_RESULTS_DIR = "docs/measurements/descent-spike";
+
+/** A software-mode spike run's results directory, from the repository's root. */
+export const SOFTWARE_SPIKE_RESULTS_DIR = "target/descent-spike/results";
 
 /**
  * The trace categories of every spike run (Design note 18): the timeline's frames, tasks and the
@@ -367,6 +457,7 @@ export const SPIKE_CHANNELS = {
   stopTrace: "hyperion:spike:stop-trace",
   memory: "hyperion:spike:memory",
   writeResults: "hyperion:spike:write-results",
+  writePart: "hyperion:spike:write-part",
   writeCapture: "hyperion:spike:write-capture",
   end: "hyperion:spike:end",
 } as const;
@@ -392,9 +483,19 @@ export interface SpikeHandlerDeps<E = IpcMainInvokeEvent> {
   readonly rendererMemory: (bytes: number) => void;
   /**
    * Builds and writes the results file from a checked report, or, for a smoke, checks the trace's
-   * windows against it and writes nothing.
+   * windows against it and writes nothing; with `rejectedSizes`, the report's `sizes` block that
+   * its check refused (R10.T14.b), left out of `report`, whose problems are logged and which is
+   * written beside the results.
    */
-  readonly writeResults: (report: DescentSpikeReport) => Promise<SpikeResultsAnswer>;
+  readonly writeResults: (
+    report: DescentSpikeReport,
+    rejectedSizes?: RejectedSizes,
+  ) => Promise<SpikeResultsAnswer>;
+  /**
+   * Takes a checked part of the report as the run flies, from which the finished segments are
+   * written (R14's Mac measurements).
+   */
+  readonly writePart: (part: SpikeReportPart) => Promise<void>;
   /** Writes a checked capture, returning its directory. */
   readonly writeCapture: (capture: SpikeCaptureFiles) => Promise<string>;
   /** Ends the run with an exit status, and a reason for a failure. */
@@ -443,11 +544,23 @@ export function registerSpikeHandlers<E>(deps: SpikeHandlerDeps<E>): void {
     deps.rendererMemory(bytes);
   });
   guarded(SPIKE_CHANNELS.writeResults, async ([value]) => {
-    const report = readDescentSpikeReport(value);
-    if (report === null) {
+    const reading = readSpikeReport(value);
+    if (reading === null) {
       throw new SpikeCallRefused(`${SPIKE_CHANNELS.writeResults} refused: not a spike report`);
     }
-    return deps.writeResults(report);
+    // A malformed `sizes` block (R10.T14.b) alone loses the run nothing: the results go without it,
+    // and it goes beside them with its problems.
+    const { report, rejectedSizes } = reading;
+    return rejectedSizes === null
+      ? deps.writeResults(report)
+      : deps.writeResults(report, rejectedSizes);
+  });
+  guarded(SPIKE_CHANNELS.writePart, async ([value]) => {
+    const part = readSpikeReportPart(value);
+    if (part === null) {
+      throw new SpikeCallRefused(`${SPIKE_CHANNELS.writePart} refused: not a part of a report`);
+    }
+    await deps.writePart(part);
   });
   guarded(SPIKE_CHANNELS.writeCapture, async ([value]) => {
     const capture = readSpikeCapture(value);

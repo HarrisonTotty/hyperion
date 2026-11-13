@@ -9,15 +9,32 @@
  * device, whose capabilities it reports; R01's fake itself, the `ResilientEngine`'s inner engine,
  * is left alone. Bytes follow the engine's own rules: a buffer its `bytes`, a texture
  * {@link textureBytes}. Readbacks resolve to zeros of no length; packed cubes and splats are not
- * faked.
+ * faked. A depth-layer target (plan R10, R10.T9.b) makes the texture the engine makes, through
+ * `createTexture`, refuses the passes the engine refuses, and records each render; a material with
+ * `unclippedDepth` is refused without `depth-clip-control`, as the engine refuses it.
  *
  * Creations are held to the device's limits as WebGPU's validation would hold them: a buffer above
  * `maxBufferSize`, a storage buffer above `maxStorageBufferBindingSize` (every binding here spans
  * its whole buffer), or a 2D texture above `maxTextureDimension2D` or 256 layers throws
  * {@link LimitExceeded}, where the device would raise a validation error and draw nothing.
+ *
+ * A mesh raises a `created` event for each of its buffers, its attributes' then its indices', at
+ * the bytes R01's `MeshRecord` makes them with (category `other`), and `releaseMesh` their
+ * `destroyed` events (plan R10, R10.T16; the batch review's S11). A device loss can be modelled
+ * as a window ({@link CountingRenderEngine.loseDevice} to {@link CountingRenderEngine.restore}) in
+ * which every creation throws `EngineUnavailable` and every write is dropped, as `ResilientEngine`
+ * does while it has no device, and a material's compilation can be made to fail
+ * ({@link CountingRenderEngine.failMaterials}).
  */
 
+import {
+  assertDepthLayerPasses,
+  assertDepthLayersFit,
+  assertMaterialSupported,
+  depthLayersTexture,
+} from "../view/engine/depthLayers";
 import { BUFFER_USAGE } from "../view/engine/gpuFlags";
+import { EngineUnavailable } from "../view/engine/resilientEngine";
 import type { KernelPair } from "../view/engine/kernels";
 import {
   type AllocationEvent,
@@ -31,8 +48,12 @@ import { type GpuCapabilities, MAX_TEXTURE_ARRAY_LAYERS } from "../view/engine/p
 import type { GraphicsFault } from "../view/engine/status";
 import type {
   BufferHandle,
+  CompileEvent,
   ComputeBindings,
   ComputeHandle,
+  DepthLayerPass,
+  DepthLayersSpec,
+  DepthLayerTarget,
   FrameSubmission,
   IndirectArgs,
   MaterialHandle,
@@ -41,10 +62,13 @@ import type {
   PassTimes,
   PointSplatHandle,
   PostProcessHandle,
+  PreparedTarget,
   RenderEngine,
   RenderTarget,
+  RenderTargetFormat,
   RenderTargetSpec,
   RenderView,
+  TargetRender,
   TextureHandle,
   WgslMaterialSpec,
   WgslPostProcessSpec,
@@ -61,6 +85,10 @@ export interface EngineCounts {
   postProcesses: number;
   kernels: number;
   renderTargets: number;
+  /** Depth-layer targets made (R10.T9.b). */
+  depthLayerTargets: number;
+  /** Passes their renders drew, whose draws `draws` counts too. */
+  depthLayerPasses: number;
   bufferWrites: number;
   textureWrites: number;
   dispatches: number;
@@ -79,6 +107,18 @@ export interface RecordedDispatch {
    * length then), which orders it among them as the queue does (R07.T8.d).
    */
   readonly framesBefore: number;
+  /** The buffer writes made before it ({@link CountingRenderEngine.writes}' length then). */
+  readonly writesBefore: number;
+}
+
+/** The names a dispatch binds, every group of its bindings together, sorted. */
+export function boundNames(bindings: ComputeBindings): string[] {
+  return [
+    ...Object.keys(bindings.uniforms),
+    ...Object.keys(bindings.buffers),
+    ...Object.keys(bindings.sampled),
+    ...Object.keys(bindings.storage),
+  ].toSorted();
 }
 
 /** One recorded buffer write. */
@@ -90,6 +130,15 @@ export interface RecordedWrite {
   readonly data: Uint8Array;
 }
 
+/** One outermost staged scope (`RenderEngine.stagedWrites`; lane perf-page-long-tasks). */
+export interface RecordedStagedScope {
+  readonly label: string;
+  /** The buffer writes made inside it: {@link CountingRenderEngine.writes}' indices, end excluded. */
+  readonly writes: readonly [from: number, to: number];
+  /** The texture writes made inside it, as {@link RecordedStagedScope.writes}. */
+  readonly textureWrites: readonly [from: number, to: number];
+}
+
 /** One recorded texture write. */
 export interface RecordedTextureWrite {
   readonly texture: string;
@@ -97,6 +146,39 @@ export interface RecordedTextureWrite {
   readonly size: GPUExtent3D;
   /** A copy of the data written, as bytes. */
   readonly data: Uint8Array;
+}
+
+/**
+ * One material asked of `createMaterialAsync`, with the targets and the meshes' names it was asked
+ * to compile for (R10.T14.d), whether or not it compiled.
+ */
+export interface RecordedCompile {
+  readonly name: string;
+  readonly targets: ReadonlyArray<RenderTargetFormat>;
+  readonly meshes: ReadonlyArray<string>;
+}
+
+/** One material asked of `prepareMaterial`, with its targets and meshes' names (R10.T14.d). */
+export interface RecordedPrepare {
+  readonly name: string;
+  readonly targets: ReadonlyArray<PreparedTarget>;
+  readonly meshes: ReadonlyArray<string>;
+}
+
+/** One render of a depth-layer target, with the passes it was given (R10.T9.b). */
+export interface RecordedDepthLayerRender {
+  readonly target: string;
+  /** The view the render named as drawing it. */
+  readonly owner: string;
+  readonly passes: ReadonlyArray<DepthLayerPass>;
+}
+
+/** How many of each kind of handle are live: made and neither released nor lost (R10.T16.b). */
+export interface LiveHandles {
+  readonly buffers: number;
+  readonly textures: number;
+  readonly meshes: number;
+  readonly materials: number;
 }
 
 /** A creation the device's limits would refuse with a validation error. */
@@ -116,6 +198,8 @@ function zeroCounts(): EngineCounts {
     postProcesses: 0,
     kernels: 0,
     renderTargets: 0,
+    depthLayerTargets: 0,
+    depthLayerPasses: 0,
     bufferWrites: 0,
     textureWrites: 0,
     dispatches: 0,
@@ -145,10 +229,33 @@ export class CountingRenderEngine implements RenderEngine {
   readonly writes: RecordedWrite[] = [];
   /** Every texture write, first first. */
   readonly textureWritten: RecordedTextureWrite[] = [];
+  /** Every outermost staged scope, first first: its label and the writes made inside it. */
+  readonly staged: RecordedStagedScope[] = [];
+  #stagedDepth = 0;
   /** Every texture made, render targets' included, first first. */
   readonly textureSpecs: TextureSpec[] = [];
   /** Every frame submitted to a render target, first first (views record their own). */
   readonly targetFrames: FrameSubmission[] = [];
+  /**
+   * The frames of {@link CountingRenderEngine.targetFrames} that `renderTargets` drew after the
+   * first of their submission, which take no pass-time resolve of their own, as the engine chains
+   * them (plan R14): a target of several mips ends its submission.
+   */
+  chainedTargetFrames = 0;
+  /** Each render target's mips, by which `renderTargets` ends a submission. */
+  readonly #targetMips = new WeakMap<RenderTarget, number>();
+  /** Every depth-layer target's render, first first (R10.T9.b). */
+  readonly depthLayerRenders: RecordedDepthLayerRender[] = [];
+  /** Every material asked of `createMaterialAsync`, first first, refused ones too (R10.T14.d). */
+  readonly compiles: RecordedCompile[] = [];
+  /** Every material asked of `prepareMaterial`, first first, refused ones too (R10.T14.d). */
+  readonly prepares: RecordedPrepare[] = [];
+  /**
+   * Every kernel asked of `createCompute` or `createComputeAsync`, first first (plan R01, R01.T15):
+   * a test reads from it the distinct kernels an owner makes, which are the records a device's
+   * cache holds.
+   */
+  readonly kernelPairs: KernelPair[] = [];
   readonly #allocationListeners = new Set<(event: AllocationEvent) => void>();
   readonly #restoredListeners = new Set<() => void>();
   /** What each buffer and texture was made with, so that a release raises its bytes (R06.T13.h). */
@@ -156,7 +263,21 @@ export class CountingRenderEngine implements RenderEngine {
     BufferHandle | TextureHandle,
     { bytes: number; category: MemoryCategory }
   >();
+  /** The meshes made and not released or lost (R10.T16.b), each with its buffers' names and bytes. */
+  readonly #meshes = new Map<MeshHandle, ReadonlyArray<{ name: string; bytes: number }>>();
+  /** The materials made and not released or lost (R10.T16.b). */
+  readonly #materials = new Set<MaterialHandle>();
+  /** The kernels' handles made and not released or lost (R01.T15). */
+  readonly #kernels = new Set<ComputeHandle>();
+  /** The handles a modelled loss took ({@link CountingRenderEngine.loseHandles}), whose release is dropped. */
+  readonly #lost = new WeakSet<
+    BufferHandle | TextureHandle | MeshHandle | MaterialHandle | ComputeHandle
+  >();
   #capabilities: GpuCapabilities;
+  /** Inside a modelled loss's window ({@link CountingRenderEngine.loseDevice}). */
+  #unavailable = false;
+  /** Which materials' asynchronous compilation rejects, by name; none by default. */
+  #failsMaterial: (name: string) => boolean = () => false;
 
   constructor(device: GPUDevice) {
     this.inner = new FakeRenderEngine(device);
@@ -166,6 +287,91 @@ export class CountingRenderEngine implements RenderEngine {
   /** The device's capabilities: the first device's, or the one the last restore rebuilt onto. */
   get capabilities(): GpuCapabilities {
     return this.#capabilities;
+  }
+
+  /**
+   * The handles live now, by kind: made, and neither released nor taken by a modelled loss, so that
+   * a test holds an owner's teardown to "nothing left" (R10.T16.b; render targets' textures, which
+   * their targets own, count while the engine lives).
+   */
+  get live(): LiveHandles {
+    let buffers = 0;
+    let textures = 0;
+    for (const handle of this.#made.keys()) {
+      if (handle.kind === "buffer") {
+        buffers += 1;
+      } else {
+        textures += 1;
+      }
+    }
+    return { buffers, textures, meshes: this.#meshes.size, materials: this.#materials.size };
+  }
+
+  /**
+   * Models a device loss's end of every handle made so far, as `ResilientEngine`'s lost engine
+   * disposes of them (R10.T16.b): each buffer, texture and mesh buffer raises its `destroyed`
+   * event, every handle leaves the live tallies, and a later release of one is dropped, as the
+   * resilient engine drops it, once: a second release of it throws, as the resilient engine's does,
+   * having forgotten its maker at the first. A test follows it with
+   * {@link CountingRenderEngine.restore}.
+   */
+  loseHandles(): void {
+    for (const [handle, made] of this.#made) {
+      this.#lost.add(handle);
+      this.#emit({ kind: "destroyed", name: handle.name, ...made });
+    }
+    this.#made.clear();
+    for (const [mesh, buffers] of this.#meshes) {
+      this.#lost.add(mesh);
+      for (const buffer of buffers) {
+        this.#emit({ kind: "destroyed", ...buffer, category: "other" });
+      }
+    }
+    this.#meshes.clear();
+    for (const material of this.#materials) {
+      this.#lost.add(material);
+    }
+    this.#materials.clear();
+    for (const kernel of this.#kernels) {
+      this.#lost.add(kernel);
+    }
+    this.#kernels.clear();
+  }
+
+  /**
+   * Models a device loss's window, as `ResilientEngine` behaves with no device: every handle ends
+   * ({@link CountingRenderEngine.loseHandles}), and until {@link CountingRenderEngine.restore}
+   * every creation throws `EngineUnavailable`, an asynchronous one rejects with it, and every write
+   * is dropped.
+   */
+  loseDevice(): void {
+    this.loseHandles();
+    this.#unavailable = true;
+  }
+
+  /** Whether the engine is inside a modelled loss's window. */
+  get unavailable(): boolean {
+    return this.#unavailable;
+  }
+
+  /** How many restore listeners are subscribed ({@link CountingRenderEngine.onRestored}) now. */
+  get restoredListenerCount(): number {
+    return this.#restoredListeners.size;
+  }
+
+  /**
+   * Makes `createMaterialAsync` reject, with an `Error` naming the material, for each material whose
+   * name `fails` holds, as a compilation the device refuses; `() => false` restores every one.
+   */
+  failMaterials(fails: (name: string) => boolean): void {
+    this.#failsMaterial = fails;
+  }
+
+  /** Throws `EngineUnavailable` for `member` inside a modelled loss's window. */
+  #available(member: string): void {
+    if (this.#unavailable) {
+      throw new EngineUnavailable(member);
+    }
   }
 
   /** Zeroes {@link CountingRenderEngine.counts}; the recorded lists are kept. */
@@ -178,6 +384,7 @@ export class CountingRenderEngine implements RenderEngine {
    * `device` when given (a lesser adapter's, say), whose capabilities hold from then on.
    */
   restore(device?: GPUDevice): void {
+    this.#unavailable = false;
     if (device !== undefined) {
       this.#capabilities = new FakeRenderEngine(device).capabilities;
     }
@@ -202,6 +409,7 @@ export class CountingRenderEngine implements RenderEngine {
   }
 
   createRenderTarget(spec: RenderTargetSpec): RenderTarget {
+    this.#available("createRenderTarget");
     this.counts.renderTargets += 1;
     const colour = this.createTexture({
       name: `${spec.name} colour`,
@@ -225,13 +433,15 @@ export class CountingRenderEngine implements RenderEngine {
       : null;
     // A resize remakes the target's textures, as the adapter's does: new handles, same names.
     const handles = { colour, depth };
-    return {
+    const shared = spec.depthOf;
+    const target: RenderTarget = {
       name: spec.name,
       get colour(): TextureHandle {
         return handles.colour;
       },
+      // A target drawn with another's depth (plan R14, R14.T2.b) has that target's.
       get depth(): TextureHandle | null {
-        return handles.depth;
+        return shared?.depth ?? handles.depth;
       },
       resize: (): void => {
         handles.colour = { ...handles.colour };
@@ -244,30 +454,158 @@ export class CountingRenderEngine implements RenderEngine {
       },
       dispose: (): void => undefined,
     };
+    this.#targetMips.set(target, spec.mips);
+    return target;
+  }
+
+  /**
+   * A depth-layer target whose texture is made, and counted, as the engine makes it (R10.T9.b):
+   * its renders are checked as the engine checks them and recorded; its disposal releases the
+   * texture, raising its `destroyed` event.
+   *
+   * @throws Error naming the target where its size or layer count does not fit the device, as the
+   *   engine refuses it.
+   */
+  /** Each target's own `render`, in order, as the engine's one submission draws them (plan R14). */
+  renderTargets(renders: ReadonlyArray<TargetRender>): void {
+    let first = true;
+    for (const { target, frame } of renders) {
+      if (!first) {
+        this.chainedTargetFrames += 1;
+      }
+      target.render(frame);
+      first = (this.#targetMips.get(target) ?? 1) > 1;
+    }
+  }
+
+  createDepthLayers(spec: DepthLayersSpec): DepthLayerTarget {
+    this.#available("createDepthLayers");
+    assertDepthLayersFit(spec, this.#capabilities);
+    this.counts.depthLayerTargets += 1;
+    const depth = this.createTexture(depthLayersTexture(spec));
+    let disposed = false;
+    const target: DepthLayerTarget = {
+      name: spec.name,
+      sizePx: spec.sizePx,
+      layers: spec.layers,
+      depth,
+      render: (owner: string, passes: ReadonlyArray<DepthLayerPass>): void => {
+        // A target a modelled loss took draws nothing, as one a lost engine made.
+        if (disposed || passes.length === 0 || this.#lost.has(depth)) {
+          return;
+        }
+        assertDepthLayerPasses(target, passes);
+        this.counts.depthLayerPasses += passes.length;
+        for (const pass of passes) {
+          this.counts.draws += pass.draws.length;
+        }
+        this.depthLayerRenders.push({ target: spec.name, owner, passes });
+      },
+      dispose: (): void => {
+        if (disposed) {
+          return;
+        }
+        disposed = true;
+        this.#release(depth);
+      },
+    };
+    return target;
   }
 
   createMesh(spec: MeshSpec): MeshHandle {
+    this.#available("createMesh");
     this.counts.meshes += 1;
-    return { kind: "mesh", name: spec.name };
+    const mesh: MeshHandle = { kind: "mesh", name: spec.name };
+    // `MeshRecord`'s buffers: one an attribute, the positions first, then the indices', each a
+    // whole number of words, at least one.
+    const arrays: Array<readonly [string, ArrayBufferView]> = [
+      ["position", spec.positions],
+      ...Object.entries(spec.attributes).map(([name, { data }]) => [name, data] as const),
+      ...Object.entries(spec.instanceAttributes ?? {}).map(
+        ([name, { data }]) => [name, data] as const,
+      ),
+      ...(spec.indices === null ? [] : [["indices", spec.indices] as const]),
+    ];
+    const buffers = arrays.map(([name, data]) => ({
+      name: `${spec.name}:${name}`,
+      bytes: Math.max(4, Math.ceil(data.byteLength / 4) * 4),
+    }));
+    for (const buffer of buffers) {
+      this.#emit({ kind: "created", ...buffer, category: "other" });
+    }
+    this.#meshes.set(mesh, buffers);
+    return mesh;
   }
 
+  /**
+   * A handle with nothing behind it, counted.
+   *
+   * @throws Error for a material with `unclippedDepth` on a device without `depth-clip-control`,
+   *   as the engine refuses it.
+   */
   createMaterial(spec: WgslMaterialSpec): MaterialHandle {
+    this.#available("createMaterial");
+    assertMaterialSupported(spec, this.#capabilities);
     this.counts.materials += 1;
-    return { kind: "material", name: spec.name };
+    const material: MaterialHandle = { kind: "material", name: spec.name };
+    this.#materials.add(material);
+    return material;
   }
 
-  createMaterialAsync(spec: WgslMaterialSpec): Promise<MaterialHandle> {
-    return Promise.resolve(this.createMaterial(spec));
+  createMaterialAsync(
+    spec: WgslMaterialSpec,
+    targets: ReadonlyArray<RenderTargetFormat> = [],
+    meshes: ReadonlyArray<MeshHandle> = [],
+  ): Promise<MaterialHandle> {
+    this.compiles.push({ name: spec.name, targets, meshes: meshes.map((mesh) => mesh.name) });
+    if (this.#unavailable) {
+      return Promise.reject(new EngineUnavailable("createMaterialAsync"));
+    }
+    if (this.#failsMaterial(spec.name)) {
+      return Promise.reject(new Error(`material ${spec.name} could not be compiled`));
+    }
+    // The engine's refusal of a material is a rejection here, as its own is.
+    try {
+      return Promise.resolve(this.createMaterial(spec));
+    } catch (error: unknown) {
+      return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+    }
+  }
+
+  /**
+   * Records the preparation and resolves, as the engine's pipelines made (R10.T14.d); rejects with
+   * `EngineUnavailable` inside a modelled loss's window, and for a material not live.
+   */
+  prepareMaterial(
+    material: MaterialHandle,
+    targets: ReadonlyArray<PreparedTarget>,
+    meshes: ReadonlyArray<MeshHandle>,
+  ): Promise<void> {
+    this.prepares.push({ name: material.name, targets, meshes: meshes.map((mesh) => mesh.name) });
+    if (this.#unavailable) {
+      return Promise.reject(new EngineUnavailable("prepareMaterial"));
+    }
+    if (!this.#materials.has(material)) {
+      return Promise.reject(
+        new Error(`material ${material.name} was not made by this engine, or was released`),
+      );
+    }
+    return Promise.resolve();
   }
 
   createPostProcess(spec: WgslPostProcessSpec): PostProcessHandle {
+    this.#available("createPostProcess");
     this.counts.postProcesses += 1;
     return { kind: "post-process", name: spec.name };
   }
 
   createCompute(pair: KernelPair): ComputeHandle {
+    this.#available("createCompute");
     this.counts.kernels += 1;
-    return { kind: "compute", name: pair.name, path: "reference" };
+    this.kernelPairs.push(pair);
+    const kernel: ComputeHandle = { kind: "compute", name: pair.name, path: "reference" };
+    this.#kernels.add(kernel);
+    return kernel;
   }
 
   createComputeAsync(pair: KernelPair): Promise<ComputeHandle> {
@@ -275,6 +613,7 @@ export class CountingRenderEngine implements RenderEngine {
   }
 
   createBuffer(spec: BufferSpec): BufferHandle {
+    this.#available("createBuffer");
     const { maxBufferSize, maxStorageBufferBindingSize } = this.#capabilities;
     if (spec.bytes > maxBufferSize) {
       throw new LimitExceeded(`buffer ${spec.name} of ${spec.bytes} B exceeds ${maxBufferSize} B`);
@@ -292,6 +631,7 @@ export class CountingRenderEngine implements RenderEngine {
   }
 
   createTexture(spec: TextureSpec): TextureHandle {
+    this.#available("createTexture");
     const { width, height, depthOrArrayLayers } = extentOf(spec.size);
     const most = this.#capabilities.maxTextureDimension2D;
     if (
@@ -341,7 +681,48 @@ export class CountingRenderEngine implements RenderEngine {
     this.#release(texture);
   }
 
+  /**
+   * Forgets a mesh, raising its buffers' `destroyed` events, as the engine destroys them
+   * (R10.T16.b); a lost one is dropped.
+   */
+  releaseMesh(mesh: MeshHandle): void {
+    if (this.#lost.delete(mesh)) {
+      return;
+    }
+    const buffers = this.#meshes.get(mesh);
+    if (buffers === undefined) {
+      throw new Error(`mesh ${mesh.name} was not made by this engine, or was released`);
+    }
+    this.#meshes.delete(mesh);
+    for (const buffer of buffers) {
+      this.#emit({ kind: "destroyed", ...buffer, category: "other" });
+    }
+  }
+
+  /** Forgets a material, as the engine forgets its record (R10.T16.b); a lost one is dropped. */
+  releaseMaterial(material: MaterialHandle): void {
+    if (this.#lost.delete(material)) {
+      return;
+    }
+    if (!this.#materials.delete(material)) {
+      throw new Error(`material ${material.name} was not made by this engine, or was released`);
+    }
+  }
+
+  /** Forgets a kernel's handle, as the engine lets it go (R01.T15); a lost one is dropped. */
+  releaseCompute(kernel: ComputeHandle): void {
+    if (this.#lost.delete(kernel)) {
+      return;
+    }
+    if (!this.#kernels.delete(kernel)) {
+      throw new Error(`kernel ${kernel.name} was not made by this engine, or was released`);
+    }
+  }
+
   #release(handle: BufferHandle | TextureHandle): void {
+    if (this.#lost.delete(handle)) {
+      return;
+    }
     const made = this.#made.get(handle);
     if (made === undefined) {
       throw new Error(`${handle.name} was not made by this engine, or was released`);
@@ -363,10 +744,33 @@ export class CountingRenderEngine implements RenderEngine {
       workgroups,
       pass,
       framesBefore: this.targetFrames.length,
+      writesBefore: this.writes.length,
     });
   }
 
+  stagedWrites<T>(label: string, write: () => T): T {
+    const outermost = this.#stagedDepth === 0;
+    const writesFrom = this.writes.length;
+    const textureWritesFrom = this.textureWritten.length;
+    this.#stagedDepth += 1;
+    try {
+      return write();
+    } finally {
+      this.#stagedDepth -= 1;
+      if (outermost) {
+        this.staged.push({
+          label,
+          writes: [writesFrom, this.writes.length],
+          textureWrites: [textureWritesFrom, this.textureWritten.length],
+        });
+      }
+    }
+  }
+
   writeBuffer(buffer: BufferHandle, offsetBytes: number, data: ArrayBufferView): void {
+    if (this.#unavailable) {
+      return;
+    }
     this.counts.bufferWrites += 1;
     this.writes.push({
       buffer: buffer.name,
@@ -383,6 +787,9 @@ export class CountingRenderEngine implements RenderEngine {
     size: GPUExtent3D,
     data: ArrayBufferView,
   ): void {
+    if (this.#unavailable) {
+      return;
+    }
     this.counts.textureWrites += 1;
     this.textureWritten.push({ texture: texture.name, origin, size, data: copyOf(data) });
     this.#emit({ kind: "uploaded", name: texture.name, bytes: data.byteLength });
@@ -410,6 +817,10 @@ export class CountingRenderEngine implements RenderEngine {
     return () => {
       this.#allocationListeners.delete(listener);
     };
+  }
+
+  onCompile(listener: (event: CompileEvent) => void): () => void {
+    return this.inner.onCompile(listener);
   }
 
   onFault(listener: (fault: GraphicsFault) => void): () => void {

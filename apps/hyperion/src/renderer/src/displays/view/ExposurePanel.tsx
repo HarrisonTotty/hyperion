@@ -1,5 +1,6 @@
 import { type ReactNode, type Ref, useId, useRef, useState } from "react";
 
+import { StatusText } from "../../components/StatusText";
 import { formatNumber, formatSignificant } from "../../lib/format";
 import { isEmptyEntry, showSelected } from "../../lib/textEntry";
 import {
@@ -18,8 +19,10 @@ import {
   VIEW_CAMERA,
 } from "../../view/photometry/exposure";
 import { type Metering, meterStatus } from "../../view/post/autoExposure";
+import { ENABLE_KEY, INHIBIT_KEY } from "./displayKeys";
 import { readingParts, unbrokenRuns } from "./ViewLabelBlock";
 import { exposureReading } from "./viewRun";
+import { WhiteBalanceControl, type WhiteBalanceControlProps } from "./WhiteBalanceControl";
 
 /** Props of {@link ExposurePanel}. */
 export interface ExposurePanelProps {
@@ -45,6 +48,11 @@ export interface ExposurePanelProps {
    * column, to which the focus goes when the meter's panel goes (R07.T16.b's ruling), or none.
    */
   readonly inhibitRef?: Ref<HTMLButtonElement> | undefined;
+  /**
+   * The photorealistic style's `WHITE BALANCE`, its reading and its choice, after the commands,
+   * while a photorealistic image is drawn (the owner's report, 2026-11-05); none otherwise.
+   */
+  readonly whiteBalance?: WhiteBalanceControlProps | undefined;
 }
 
 /** The decimals a `MAN` entry keeps and shows: one, the reading's precision. */
@@ -97,6 +105,42 @@ function notMeteredWords(metering: Metering): string {
 /** A refusal's words; `not_metered` by the meter's cause. */
 function refusalWords(reason: RefusalReason, metering: Metering): string {
   return reason === "not_metered" ? notMeteredWords(metering) : REFUSAL_WORDS[reason];
+}
+
+/** The exposure's congruent pair: `ENABLE` and `INHIBIT`, pressed or keyed. */
+export type ExposureCommandName = "enable" | "inhibit";
+
+/** The pair's names, as their buttons carry them and a keyed refusal names them. */
+export const EXPOSURE_COMMAND_NAMES: Readonly<Record<ExposureCommandName, string>> = {
+  enable: "ENABLE",
+  inhibit: "INHIBIT",
+};
+
+/**
+ * What `command` does to the exposure as it stands, whether pressed or keyed (`ENABLE_KEY`,
+ * `INHIBIT_KEY`): `ENABLE` takes the meter's value, and neither acts where its button is held back.
+ */
+export function exposureCommandResult(
+  command: ExposureCommandName,
+  exposure: ExposureControl,
+  metering: Metering,
+): ExposureCommandResult {
+  return command === "enable"
+    ? enable(exposure, metering.kind === "metered" ? metering.ev100 : null)
+    : inhibit(exposure);
+}
+
+/**
+ * Why `command` is held back, in its button's words (`NOT AVAILABLE: the exposure is AUTO`), or
+ * `null` where it acts.
+ */
+export function exposureCommandRefusal(
+  command: ExposureCommandName,
+  exposure: ExposureControl,
+  metering: Metering,
+): string | null {
+  const result = exposureCommandResult(command, exposure, metering);
+  return result.kind === "refused" ? refusalWords(result.reason, metering) : null;
 }
 
 /**
@@ -171,6 +215,8 @@ const INHIBIT_CONSEQUENCE = `Then ${ENABLE_ONLY}`;
 
 interface ExposureCommandProps {
   readonly label: string;
+  /** Its single key, shown before its label and named by `aria-keyshortcuts`. */
+  readonly commandKey: string;
   readonly result: ExposureCommandResult;
   /** The meter as it stands, which words a refusal for want of a metered value. */
   readonly metering: Metering;
@@ -190,6 +236,7 @@ interface ExposureCommandProps {
  */
 function ExposureCommand({
   label,
+  commandKey,
   result,
   metering,
   consequence,
@@ -208,13 +255,14 @@ function ExposureCommand({
         // Held back rather than disabled, so that it keeps focus and can say why.
         aria-disabled={refused ? "true" : undefined}
         aria-describedby={note === undefined ? undefined : noteId}
+        aria-keyshortcuts={commandKey}
         onClick={() => {
           if (result.kind === "accepted") {
             onChange(result.control);
           }
         }}
       >
-        {label}
+        <span className="control__key">{commandKey}</span> {label}
       </button>
       {note === undefined ? null : (
         <span
@@ -225,7 +273,7 @@ function ExposureCommand({
           }
           id={noteId}
         >
-          {exposureNote(note)}
+          {refused ? <StatusText text={note} renderPart={exposureNote} /> : exposureNote(note)}
         </span>
       )}
     </div>
@@ -476,7 +524,7 @@ function ManualEntry({ exposure, onChange }: ManualEntryProps) {
       )}
       {refused ? (
         <p className="form-field__error view-exposure__man-error" id={errorId}>
-          {REFUSAL_WORDS.invalid_ev100}
+          <StatusText text={REFUSAL_WORDS.invalid_ev100} />
         </p>
       ) : null}
     </div>
@@ -510,6 +558,7 @@ export function ExposurePanel({
   id,
   hidden,
   inhibitRef,
+  whiteBalance,
 }: ExposurePanelProps) {
   const titleId = useId();
   // `INHIBIT` shuts the automation down under `AUTO` and takes a system inhibit over, whatever its
@@ -537,25 +586,30 @@ export function ExposurePanel({
       {standing === null ? null : (
         // A live region: the status comes, and goes, by itself.
         <p className="view-exposure__reason">
-          <output>{exposureNote(standing)}</output>
+          <output>
+            <StatusText text={standing} renderPart={exposureNote} />
+          </output>
         </p>
       )}
       <div className="view-exposure__commands">
         <ExposureCommand
-          label="ENABLE"
-          result={enable(exposure, metering.kind === "metered" ? metering.ev100 : null)}
+          label={EXPOSURE_COMMAND_NAMES.enable}
+          commandKey={ENABLE_KEY}
+          result={exposureCommandResult("enable", exposure, metering)}
           metering={metering}
           onChange={onChange}
         />
         <ExposureCommand
-          label="INHIBIT"
-          result={inhibit(exposure)}
+          label={EXPOSURE_COMMAND_NAMES.inhibit}
+          commandKey={INHIBIT_KEY}
+          result={exposureCommandResult("inhibit", exposure, metering)}
           metering={metering}
           consequence={inhibitStates ? INHIBIT_CONSEQUENCE : undefined}
           onChange={onChange}
           buttonRef={inhibitRef}
         />
       </div>
+      {whiteBalance === undefined ? null : <WhiteBalanceControl {...whiteBalance} />}
     </section>
   );
 }

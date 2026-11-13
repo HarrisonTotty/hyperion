@@ -1,0 +1,1911 @@
+//! Synthetic coarse fields for tests: the worlds R09's synthesis (T3 to T9) and R10 test on,
+//! built directly rather than by the coarse pass, which only the sim runs (plan R09, T2; feature
+//! `testing`, and this crate's own tests).
+//!
+//! [`synthetic_field`] builds one of six [`SyntheticWorld`]s: an Earth-, a Mars-, a Moon- and a
+//! Ceres-like field, a flat field and a single crater. [`FieldBuilder`] builds any other: the caller
+//! gives the body, its palette, the plates or the crust, and the elevation, ice, climate and runoff
+//! as functions of position, and the builder derives what depends on them (the plates' boundaries,
+//! the water, each cell's substances, the flow, drainage and catchment runoff, the craters'
+//! morphology, relief and reach, the header's realised figures and steps), so that every field it
+//! returns is valid by construction. [`liquid_water`], [`liquid_methane_titan`] and
+//! [`basaltic_melt`] are liquid records for a palette's entries, each with its sources and basis
+//! (decision-r11-palette-liquids §1).
+//!
+//! These are test inputs, not generated worlds: nothing here draws from a stream, the values are
+//! illustrative ones near the real bodies', and the coarse pass's physics (R09.T10–T16) is
+//! replaced by closed forms. Every value is a pure function of the builder's inputs, computed in
+//! cell-index order, so a world built twice is the same to the bit. Where the pass would do more,
+//! the builder says so: the header's realised `σ_h` and relief are the cells' (their area-weighted
+//! RMS about the mean, and their range), not the reconstructed field's, which needs R09.T4's
+//! interpolant; the reference temperature is the climate layer's area-weighted mean; flow follows
+//! steepest descent with no depression filling; and a crater's relief is held as R09.T12.d's
+//! contract has the coarse pass smooth it in, its kept relief times its rim filleted over the
+//! coarse band (`synth::craters::rims::CoarseRims::coarse_profile`, R09.T7.c), but sampled at each
+//! cell's centre rather than smoothed to the cell.
+
+mod liquids;
+mod terrain_test;
+mod worlds;
+
+pub use liquids::{
+    LIQUID_METHANE_TITAN_DENSITY_KG_M3, LIQUID_WATER_DENSITY_KG_M3, basaltic_melt,
+    liquid_methane_titan, liquid_water,
+};
+// `TERRAIN TEST`'s fields and their text: `worker::golden` blesses the patch's, and the views
+// check's whole-body run reads the whole body's (`examples/whole_terrain_test.rs`).
+#[cfg(test)]
+pub(crate) use terrain_test::payload_cover;
+pub use terrain_test::{
+    TERRAIN_TEST_SEED, TerrainTestFixture, TerrainTestPayload, terrain_test_fixture,
+    terrain_test_lines, terrain_test_text, whole_terrain_test_fixture,
+};
+#[cfg(test)]
+pub(crate) use worlds::pluto_like;
+// R10.T1.c's tests and the bake's bench weather and vary the Moon-like world
+// (`material/maturity.rs`, `material/golden.rs`, `bake/tests.rs`, `benches/bake.rs`).
+#[cfg(test)]
+pub(crate) use worlds::two_crusts;
+pub use worlds::{
+    SyntheticWorld, mars_like_without_its_epoch, moon_like_builder, moon_like_crater_params,
+    synthetic_field,
+};
+#[cfg(test)]
+pub(crate) use worlds::{one_crater_builder, one_crater_centre};
+
+use hyperion_base::math;
+use hyperion_base::units::{
+    Gigayears, Kelvin, Metres, MetresPerSecond, MetresPerSecondSquared, Pascals,
+    PerSquareKilometre, Radians, SquareMetres,
+};
+
+use crate::craters::{
+    CraterParams, CraterParamsParts, CraterShape, LUNAR_PROJECTILE_DENSITY, LUNAR_TARGET,
+    SOLAR_SYSTEM_AGE, Screening, crater_shape,
+};
+use crate::cube::{Edge, PatchKey, st_to_uv};
+use crate::field::{
+    BodyRef, BoundaryKind, ClimateCell, ClimateModelKind, CoarseCrater, CoarseField, CoarseLevel,
+    Cover, Crust, FieldHeader, FieldHeaderParts, FlowDirection, LogArea, LogIncision,
+    LogPrecipitation, LogRunoff, LogSteepness, MaterialPalette, PaletteRole, PrecipitationSource,
+    SurfaceClass, SynthesisCell, Wind, boundary_diameter, cell_at_index, cell_index, coarse_level,
+};
+use crate::spheroid::Spheroid;
+use crate::synth::craters::CraterProfile;
+use crate::synth::craters::rims::CoarseRims;
+use crate::synth::relief::H_REF;
+use crate::synth::{BandSpectrum, SpectrumShape};
+
+/// A plate of a mobile-lid world: its seed, its crust and its motion.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PlateSpec {
+    /// The seed, a unit vector in the body-fixed frame: each cell takes the plate whose seed is
+    /// nearest its centre, ties to the lower plate.
+    pub seed: [f64; 3],
+    /// The plate's crust, [`Crust::Continental`] or [`Crust::Oceanic`].
+    pub crust: Crust,
+    /// The plate's angular velocity in the body-fixed frame, radians per million years: its
+    /// surface moves at ω × p.
+    pub rotation_rad_per_myr: [f64; 3],
+}
+
+/// What the builder's functions know of a cell: its centre and its tectonic setting.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CellSite {
+    /// The cell's centre, a unit vector in the body-fixed frame.
+    pub dir: [f64; 3],
+    /// The cell's plate, 0 on a stagnant lid.
+    pub plate: u8,
+    /// The crust under the cell.
+    pub crust: Crust,
+    /// The kind of the nearest plate boundary, [`BoundaryKind::Absent`] on a stagnant lid.
+    pub boundary: BoundaryKind,
+    /// The signed great-circle distance to the nearest boundary, negative on a subducting plate,
+    /// or `None` on a stagnant lid.
+    pub boundary_distance: Option<Metres>,
+    /// The obliquity of the relative motion at the nearest boundary, 0 to π ÷ 2.
+    pub boundary_obliquity: Radians,
+}
+
+/// A climate cell's climate, in SI units, which the builder quantises.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ClimateSample {
+    /// The annual mean surface temperature reduced to sea level.
+    pub sea_level_temperature: Kelvin,
+    /// Each month's mean temperature less the annual mean, kelvin (none is read in a one-month
+    /// year, which has no anomaly).
+    pub month_anomaly_k: [f64; 12],
+    /// Each month's precipitation rate, kg m⁻² s⁻¹ (only the first is read in a one-month year).
+    pub month_precipitation_kg_m2_s: [f64; 12],
+    /// Each month's 10 m wind: its mean speed and the direction its resultant blows towards,
+    /// clockwise from local north (only the first is read in a one-month year, whose eleven later
+    /// winds are calm).
+    pub wind: [(MetresPerSecond, Radians); 12],
+}
+
+impl ClimateSample {
+    /// A climate with no seasons, no precipitation and no wind, at `temperature`.
+    #[must_use]
+    pub const fn still(temperature: Kelvin) -> Self {
+        Self {
+            sea_level_temperature: temperature,
+            month_anomaly_k: [0.0; 12],
+            month_precipitation_kg_m2_s: [0.0; 12],
+            wind: [(MetresPerSecond::ZERO, Radians::ZERO); 12],
+        }
+    }
+}
+
+/// An oceanic cell's sea floor, in SI units, which the builder quantises into the cell's
+/// [`SynthesisCell::seafloor`] byte (`decision-r09-t5.md` item 5).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SeafloorSample {
+    /// The draped abyssal-hill relief H: positive, since every oceanic cell has hills, however
+    /// buried.
+    pub hill_relief: Metres,
+    /// The ponded (turbidite) sediment's thickness `S_t`: zero or positive.
+    pub ponded_sediment: Metres,
+}
+
+impl SeafloorSample {
+    /// The reference hills, [`H_REF`] with no ponded sediment: the sea floor of
+    /// the reference style, amplitude 1 to within the hill code's step.
+    pub const REFERENCE: Self = Self {
+        hill_relief: H_REF,
+        ponded_sediment: Metres::ZERO,
+    };
+}
+
+/// How the builder routes water.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Routing {
+    /// Not at all: every cell is terminal, with no drainage and no runoff, as on a world with no
+    /// fluvial step.
+    None,
+    /// Each dry cell to its edge neighbour of steepest descent, if any is lower, accumulating
+    /// downstream the geometric drainage area and, beside it, the equivalent area of the
+    /// builder's [`runoff`](FieldBuilder::runoff), whose ratio is each cell's catchment runoff; a
+    /// cell under water is terminal.
+    SteepestDescent,
+}
+
+/// A crater the builder places: its centre, diameter, age and degradation code.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct CraterSpec {
+    centre: [f64; 3],
+    diameter: Metres,
+    age: Gigayears,
+    degradation: u8,
+}
+
+/// A function of a cell's site.
+type SiteFn<T> = Box<dyn Fn(&CellSite) -> T>;
+
+/// A function of a direction.
+type DirFn<T> = Box<dyn Fn([f64; 3]) -> T>;
+
+/// The share of a cell under ice, from its site and its elevation.
+type IceFn = Box<dyn Fn(&CellSite, Metres) -> f64>;
+
+/// The palette index of a cell's ice, from its site.
+type IceEntryFn = Box<dyn Fn(&CellSite) -> u8>;
+
+/// Builds a [`CoarseField`] that is valid by construction (see the module documentation).
+///
+/// [`FieldBuilder::new`] starts from a dry, airless, flat sphere with a one-month year on a
+/// circular orbit, a still climate at 250 K, no fine relief, no craters, coarse or small (a
+/// crater density of zero), and a lid of the Moon-like world's feldspathic crust, its palette's one
+/// entry, since every cell's crust names an entry (`BuildFieldError::CrustWithoutEntry`,
+/// R09.T10.c): every other part is optional, but a world with ice or a sea names their substances
+/// in its palette, and a world that names its own palette names its crusts' entries in it.
+pub struct FieldBuilder {
+    body: BodyRef,
+    radius: Metres,
+    figure: Option<Spheroid>,
+    sea: Option<Metres>,
+    lapse_rate_k_per_m: f64,
+    spectrum: Option<BandSpectrum>,
+    crater_params: CraterParams,
+    climate_model: ClimateModelKind,
+    months: u8,
+    season_eccentricity: f64,
+    surface_age: Gigayears,
+    surface_pressure: Pascals,
+    palette: MaterialPalette,
+    crust_palette: [Option<u8>; 4],
+    main_liquid: Option<u8>,
+    maturity: Option<f64>,
+    organic_cover: Option<f64>,
+    weathering_rate: Option<f64>,
+    ice_entry: Option<IceEntryFn>,
+    plates: Vec<PlateSpec>,
+    crust: DirFn<Crust>,
+    elevation: SiteFn<Metres>,
+    ice: IceFn,
+    climate: DirFn<ClimateSample>,
+    seafloor: SiteFn<SeafloorSample>,
+    routing: Routing,
+    runoff_m_per_year: DirFn<f64>,
+    epoch_m0_1: Option<f64>,
+    craters: Vec<CraterSpec>,
+}
+
+impl std::fmt::Debug for FieldBuilder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FieldBuilder")
+            .field("body", &self.body)
+            .field("radius", &self.radius)
+            .field("plates", &self.plates.len())
+            .field("craters", &self.craters.len())
+            .finish_non_exhaustive()
+    }
+}
+
+impl FieldBuilder {
+    /// A dry, airless, flat sphere of volumetric radius `radius`, with a one-month year on a
+    /// circular orbit, a still climate at 250 K, no fine relief (a silicate crust's spectrum
+    /// anchored at zero), the reference hills on any oceanic crust ([`SeafloorSample::REFERENCE`]),
+    /// a lid of feldspathic crust, its palette's one entry ([`palette`](Self::palette)), and no
+    /// craters: no coarse crater, and a crater density of zero, so that the synthesis draws
+    /// no small ones either (at the Moon's gravity, `k_target` 1, on the lunar target, in a system of
+    /// the Solar System's age, with no impact velocity). The radius is checked by
+    /// [`build`](Self::build).
+    ///
+    /// # Panics
+    ///
+    /// Never: its default crater contract is valid, and its default palette names its one
+    /// substance.
+    #[must_use]
+    pub fn new(radius: Metres) -> Self {
+        let (palette, crust_palette) = worlds::default_crust();
+        Self {
+            body: BodyRef::default(),
+            radius,
+            figure: None,
+            sea: None,
+            lapse_rate_k_per_m: 0.0,
+            spectrum: None,
+            crater_params: CraterParams::new(CraterParamsParts {
+                n_1km: PerSquareKilometre::ZERO,
+                screening: Screening::None,
+                gravity: MetresPerSecondSquared::new(1.62),
+                k_target: 1.0,
+                impact_velocity: None,
+                projectile_density: LUNAR_PROJECTILE_DENSITY,
+                target: LUNAR_TARGET,
+                system_age: SOLAR_SYSTEM_AGE,
+            })
+            .expect("the default crater contract is valid"),
+            climate_model: ClimateModelKind::RadiativeEquilibrium,
+            months: 1,
+            season_eccentricity: 0.0,
+            surface_age: Gigayears::new(4.0),
+            surface_pressure: Pascals::ZERO,
+            palette,
+            crust_palette,
+            main_liquid: None,
+            maturity: None,
+            organic_cover: None,
+            weathering_rate: None,
+            ice_entry: None,
+            plates: Vec::new(),
+            crust: Box::new(|_| Crust::Lid),
+            elevation: Box::new(|_| Metres::ZERO),
+            ice: Box::new(|_, _| 0.0),
+            climate: Box::new(|_| ClimateSample::still(Kelvin::new(250.0))),
+            seafloor: Box::new(|_| SeafloorSample::REFERENCE),
+            routing: Routing::None,
+            runoff_m_per_year: Box::new(|_| 0.0),
+            epoch_m0_1: None,
+            craters: Vec::new(),
+        }
+    }
+
+    /// The body the field is of.
+    #[must_use]
+    pub fn body(mut self, body: BodyRef) -> Self {
+        self.body = body;
+        self
+    }
+
+    /// The datum, whose volumetric radius must be the builder's radius; a sphere otherwise.
+    #[must_use]
+    pub fn figure(mut self, figure: Spheroid) -> Self {
+        self.figure = Some(figure);
+        self
+    }
+
+    /// A sea whose surface lies at `level` above the datum: every cell below it is under water.
+    /// Without one the world is dry, and the header's sea level is its lowest elevation.
+    #[must_use]
+    pub fn sea(mut self, level: Metres) -> Self {
+        self.sea = Some(level);
+        self
+    }
+
+    /// The lapse rate, kelvin per metre.
+    #[must_use]
+    pub fn lapse_rate(mut self, k_per_m: f64) -> Self {
+        self.lapse_rate_k_per_m = k_per_m;
+        self
+    }
+
+    /// The spectrum of the structural relief finer than the cells: a silicate crust's anchored at
+    /// zero, no such relief, by default.
+    #[must_use]
+    pub fn spectrum(mut self, spectrum: BandSpectrum) -> Self {
+        self.spectrum = Some(spectrum);
+        self
+    }
+
+    /// The sea floor of each oceanic cell, from its site ([`SeafloorSample::REFERENCE`] by
+    /// default); a cell of any other crust has none.
+    #[must_use]
+    pub fn seafloor(mut self, seafloor: impl Fn(&CellSite) -> SeafloorSample + 'static) -> Self {
+        self.seafloor = Box::new(seafloor);
+        self
+    }
+
+    /// The crater contract.
+    #[must_use]
+    pub fn crater_params(mut self, params: CraterParams) -> Self {
+        self.crater_params = params;
+        self
+    }
+
+    /// The climate model the header names.
+    #[must_use]
+    pub fn climate_model(mut self, model: ClimateModelKind) -> Self {
+        self.climate_model = model;
+        self
+    }
+
+    /// The months of the year, 1 or 12.
+    #[must_use]
+    pub fn months(mut self, months: u8) -> Self {
+        self.months = months;
+        self
+    }
+
+    /// The eccentricity of the seasonal orbit, whose twelve equal spans of eccentric anomaly are
+    /// the months (0 by default; 0 in a one-month year).
+    #[must_use]
+    pub fn season_eccentricity(mut self, eccentricity: f64) -> Self {
+        self.season_eccentricity = eccentricity;
+        self
+    }
+
+    /// The surface age, at most the crater contract's system age ([`build`](Self::build)
+    /// refuses an older one).
+    #[must_use]
+    pub fn surface_age(mut self, age: Gigayears) -> Self {
+        self.surface_age = age;
+        self
+    }
+
+    /// The mean surface pressure.
+    #[must_use]
+    pub fn surface_pressure(mut self, pressure: Pascals) -> Self {
+        self.surface_pressure = pressure;
+        self
+    }
+
+    /// The body's palette, in place of the default's feldspathic crust, whose entries the crusts
+    /// name by [`crust_palette`](Self::crust_palette): a cell with ice names its first
+    /// [`PaletteRole::Ice`] entry unless [`ice_entry`](Self::ice_entry) says otherwise.
+    #[must_use]
+    pub fn palette(mut self, palette: MaterialPalette) -> Self {
+        self.palette = palette;
+        self
+    }
+
+    /// The palette entry of each crust, in [`Crust`]'s code order (by default the lid's alone,
+    /// entry 0): every crust a cell has names one.
+    #[must_use]
+    pub fn crust_palette(mut self, entries: [Option<u8>; 4]) -> Self {
+        self.crust_palette = entries;
+        self
+    }
+
+    /// The palette entry of the main liquid, which every cell under water names (none by
+    /// default).
+    #[must_use]
+    pub fn main_liquid(mut self, entry: u8) -> Self {
+        self.main_liquid = Some(entry);
+        self
+    }
+
+    /// The ground's space-weathering maturity, a reserved part of the header from +0 to 1
+    /// (absent by default; [`build`](Self::build) panics on one outside it, or on one without a
+    /// [`weathering_rate`](Self::weathering_rate)).
+    #[must_use]
+    pub fn maturity(mut self, maturity: f64) -> Self {
+        self.maturity = Some(maturity);
+        self
+    }
+
+    /// The organic cover, a reserved part of the header from +0 to 1 (absent by default;
+    /// [`build`](Self::build) panics on one outside it).
+    #[must_use]
+    pub fn organic_cover(mut self, cover: f64) -> Self {
+        self.organic_cover = Some(cover);
+        self
+    }
+
+    /// The weathering rate relative to the Moon's, a reserved part of the header, finite and at
+    /// least +0 (absent by default; [`build`](Self::build) panics on one outside it, or on one
+    /// without a [`maturity`](Self::maturity)).
+    #[must_use]
+    pub fn weathering_rate(mut self, rate: f64) -> Self {
+        self.weathering_rate = Some(rate);
+        self
+    }
+
+    /// The palette index of the ice of each cell that has ice, from its site: for a world with
+    /// more than one ice.
+    #[must_use]
+    pub fn ice_entry(mut self, entry: impl Fn(&CellSite) -> u8 + 'static) -> Self {
+        self.ice_entry = Some(Box::new(entry));
+        self
+    }
+
+    /// Mobile-lid plates, at most 256: their crusts replace [`crust`](Self::crust)'s, and their
+    /// boundaries are classed by the plates' relative motion.
+    #[must_use]
+    pub fn plates(mut self, plates: Vec<PlateSpec>) -> Self {
+        self.plates = plates;
+        self
+    }
+
+    /// A stagnant lid's crust at each cell's centre ([`Crust::Lid`] by default).
+    #[must_use]
+    pub fn crust(mut self, crust: impl Fn([f64; 3]) -> Crust + 'static) -> Self {
+        self.crust = Box::new(crust);
+        self
+    }
+
+    /// The elevation at each cell's centre, before the craters' relief is added.
+    #[must_use]
+    pub fn elevation(mut self, elevation: impl Fn(&CellSite) -> Metres + 'static) -> Self {
+        self.elevation = Box::new(elevation);
+        self
+    }
+
+    /// The share of each cell under ice, 0 to 1 (clamped), from its site and its elevation.
+    #[must_use]
+    pub fn ice(mut self, ice: impl Fn(&CellSite, Metres) -> f64 + 'static) -> Self {
+        self.ice = Box::new(ice);
+        self
+    }
+
+    /// The climate at each climate cell's centre.
+    #[must_use]
+    pub fn climate(mut self, climate: impl Fn([f64; 3]) -> ClimateSample + 'static) -> Self {
+        self.climate = Box::new(climate);
+        self
+    }
+
+    /// How water is routed.
+    #[must_use]
+    pub fn routing(mut self, routing: Routing) -> Self {
+        self.routing = routing;
+        self
+    }
+
+    /// The erosive runoff a dry cell sheds of its own, as a function of its centre, metres of
+    /// liquid a Julian year, finite and non-negative: what [`Routing::SteepestDescent`]
+    /// accumulates downstream beside the geometric area (science-r09-drainage.md §1). None by
+    /// default; a cell under liquid sheds none of its own, and a world not routed has none.
+    #[must_use]
+    pub fn runoff(mut self, m_per_year: impl Fn([f64; 3]) -> f64 + 'static) -> Self {
+        self.runoff_m_per_year = Box::new(m_per_year);
+        self
+    }
+
+    /// A world dry now's past wet epoch, as the coarse pass's erosion leaves its cells' channel
+    /// incision ([`SynthesisCell::epoch_incision`]; R09.T6.c): `psi_m0_1` Ψ = K t (r̄ ÷ 1 m a⁻¹)^m,
+    /// m^0.1, finite and positive, so that each routed dry cell with a channel was cut Ψ `k_s`
+    /// deep, the short-time regime's K t (r̄ A)^m S with m = θ (`k_s` its steepness code's value),
+    /// and every other cell, under liquid or without a channel, [`LogIncision::UNCUT`]. None by
+    /// default: every cell [`LogIncision::NONE`], R09.T6.b's steady state.
+    ///
+    /// # Panics
+    ///
+    /// If `psi_m0_1` is not finite and positive; and [`build`](Self::build) panics if the body is
+    /// airless (a surface pressure of 0 Pa, the default), since an airless body has no wet epoch
+    /// (`BuildFieldError::IncisionWithoutAir`).
+    #[must_use]
+    pub fn epoch(mut self, psi_m0_1: f64) -> Self {
+        assert!(
+            psi_m0_1.is_finite() && psi_m0_1 > 0.0,
+            "an epoch's K t r^m must be finite and positive, got {psi_m0_1} m^0.1"
+        );
+        self.epoch_m0_1 = Some(psi_m0_1);
+        self
+    }
+
+    /// A crater of `diameter` (at least the field's boundary diameter) centred on the unit vector
+    /// `centre`, formed `age` ago, of degradation code `degradation` (255ths of its relief lost).
+    /// Its morphology and fresh shape are [`crater_shape`]'s for its diameter on the builder's
+    /// crater contract, and the elevation holds it as R09.T12.d's contract has the coarse pass
+    /// smooth it in: its kept relief times its rim filleted over the coarse band
+    /// ([`CoarseRims::coarse_profile`]), sampled at each cell's centre at the chord between the
+    /// spheroid points in rim radii, so that the synthesis's sharpening (R09.T7.c) refines that
+    /// one profile.
+    #[must_use]
+    pub fn crater(
+        mut self,
+        centre: [f64; 3],
+        diameter: Metres,
+        age: Gigayears,
+        degradation: u8,
+    ) -> Self {
+        self.craters.push(CraterSpec {
+            centre,
+            diameter,
+            age,
+            degradation,
+        });
+        self
+    }
+
+    /// The field.
+    ///
+    /// # Panics
+    ///
+    /// If an input is out of its range:
+    /// - a radius that is not finite and positive, a figure of another radius, months other than
+    ///   1 or 12, or a season eccentricity outside [0, 1) or not 0 in a one-month year;
+    /// - exactly one plate or more than 256, two plates with one seed, or a plate whose crust is
+    ///   neither continental nor oceanic;
+    /// - a crater whose centre is not a finite unit vector, whose age is not finite and
+    ///   non-negative, or which is narrower than the boundary diameter, or two craters of one
+    ///   centre cell and diameter;
+    /// - an elevation beyond ±2,147 km, a climate whose temperatures, anomalies, rates or winds
+    ///   no code can hold, or a routed world's runoff, or a catchment's mean of it, that no code
+    ///   can hold;
+    /// - an oceanic cell's sea floor whose hill relief is not finite and positive, or whose ponded
+    ///   sediment is not finite and non-negative;
+    /// - a maturity or an organic cover that is not finite or not within +0 to 1, a weathering rate
+    ///   that is not finite or below +0, or a maturity without a weathering rate or a weathering
+    ///   rate without a maturity;
+    /// - a crust's palette entry or a main liquid the header refuses, a cell whose crust names no
+    ///   entry (R09.T10.c), a cell with ice and no ice entry to name (none in the palette, or
+    ///   [`ice_entry`](Self::ice_entry)'s not an `Ice` entry), or a cell under water and no main
+    ///   liquid;
+    /// - a surface age above the crater contract's system age
+    ///   ([`CraterParams::system_age`]);
+    /// - an [`epoch`](Self::epoch), or a routed world's runoff, on an airless body.
+    #[must_use]
+    pub fn build(self) -> CoarseField {
+        self.check_plates();
+        for spec in &self.craters {
+            let norm = norm(spec.centre);
+            assert!(
+                spec.centre.iter().all(|c| c.is_finite()) && (norm - 1.0).abs() < 1e-12,
+                "a crater's centre must be a finite unit vector, got {:?}",
+                spec.centre
+            );
+            let age = spec.age.value();
+            assert!(
+                age.is_finite() && age >= 0.0,
+                "a crater's age must be finite and non-negative, got {age} Gyr"
+            );
+        }
+        let level = coarse_level(self.radius);
+        let r = self.radius.value();
+        let d_b = boundary_diameter(level, self.radius);
+        let grid = Grid::new(level.get());
+        let sites: Vec<CellSite> = grid.centres.iter().map(|&dir| self.site(dir, r)).collect();
+        let figure = self.figure.unwrap_or_else(|| Spheroid::sphere(r));
+        let craters = self.prepare_all(level, d_b, figure);
+        let elevation_mm: Vec<i32> = sites
+            .iter()
+            .map(|site| {
+                let mut h = (self.elevation)(site).value();
+                for crater in &craters {
+                    h += crater.relief(&figure, site.dir);
+                }
+                SynthesisCell::quantise_height(Metres::new(h))
+                    .expect("a synthetic elevation is within ±2,147 km")
+            })
+            .collect();
+        let lowest_mm = elevation_mm.iter().copied().min().unwrap_or(0);
+        let (sea_level, water_mm): (Metres, Vec<i32>) = match self.sea {
+            Some(level) => {
+                let sea_mm =
+                    SynthesisCell::quantise_height(level).expect("a sea level is within range");
+                (level, elevation_mm.iter().map(|&e| e.max(sea_mm)).collect())
+            }
+            None => (
+                Metres::new(f64::from(lowest_mm) / 1e3),
+                elevation_mm.clone(),
+            ),
+        };
+        let routes = self.routes(&grid, &sites, &elevation_mm, &water_mm, r);
+        let synthesis: Vec<SynthesisCell> = (0..sites.len())
+            .map(|n| self.record(&sites[n], elevation_mm[n], water_mm[n], routes[n]))
+            .collect();
+        let (sigma_h, relief) = grid.hypsometry(&elevation_mm);
+        let climate_grid = Grid::new(level.climate_level());
+        let samples: Vec<ClimateSample> = climate_grid
+            .centres
+            .iter()
+            .map(|&dir| (self.climate)(dir))
+            .collect();
+        let (reference, temperature_step, anomaly_step) =
+            climate_steps(&climate_grid, &samples, self.months);
+        let header = FieldHeader::new(FieldHeaderParts {
+            body: self.body,
+            radius: self.radius,
+            figure,
+            sea_level,
+            lapse_rate_k_per_m: self.lapse_rate_k_per_m,
+            spectrum: self.header_spectrum(),
+            craters: self.crater_params,
+            climate_model: self.climate_model,
+            precipitation: PrecipitationSource::Heuristic,
+            realised_sigma_h: sigma_h,
+            realised_relief: relief,
+            months: self.months,
+            season_eccentricity: self.season_eccentricity,
+            reference_temperature: reference,
+            temperature_step,
+            anomaly_step,
+            surface_age: self.surface_age,
+            surface_pressure: self.surface_pressure,
+            albedo_scale: None,
+            palette: self.palette,
+            crust_palette: self.crust_palette,
+            main_liquid: self.main_liquid,
+            maturity: self.maturity,
+            organic_cover: self.organic_cover,
+            weathering_rate: self.weathering_rate,
+        })
+        .expect("the builder's header parts are valid");
+        let climate: Vec<ClimateCell> = samples
+            .iter()
+            .map(|sample| quantise_climate(&header, sample))
+            .collect();
+        let figure = header.figure();
+        let smallest_radius_m = crate::num::min(figure.equatorial_radius_m, figure.polar_radius_m);
+        let mut listed: Vec<(u32, CoarseCrater)> = craters
+            .iter()
+            .map(|crater| crater.listed(&grid, level, smallest_radius_m))
+            .collect();
+        listed.sort_by(|(a, x), (b, y)| a.cmp(b).then_with(|| x.diameter.total_cmp(&y.diameter)));
+        let craters = listed.into_iter().map(|(_, crater)| crater).collect();
+        CoarseField::new(header, synthesis, climate, craters)
+            .expect("a built field is valid by construction")
+    }
+
+    /// Every cell's route on `grid`, a body of radius `r` metres: none on a world not routed, and
+    /// otherwise steepest descent with each dry cell's own runoff, a cell under liquid shedding
+    /// none.
+    #[must_use]
+    fn routes(
+        &self,
+        grid: &Grid,
+        sites: &[CellSite],
+        elevation_mm: &[i32],
+        water_mm: &[i32],
+        r: f64,
+    ) -> Vec<Route> {
+        match self.routing {
+            Routing::None => vec![Route::TERMINAL; elevation_mm.len()],
+            Routing::SteepestDescent => {
+                let own_runoff_m_per_year: Vec<f64> = (0..sites.len())
+                    .map(|n| {
+                        if water_mm[n] > elevation_mm[n] {
+                            0.0
+                        } else {
+                            (self.runoff_m_per_year)(sites[n].dir)
+                        }
+                    })
+                    .collect();
+                grid.route(elevation_mm, water_mm, &own_runoff_m_per_year, r)
+            }
+        }
+    }
+
+    /// The synthesis record of the cell at `site`, with its quantised elevation and water surface
+    /// and its route.
+    fn record(
+        &self,
+        site: &CellSite,
+        elevation_mm: i32,
+        water_mm: i32,
+        route: Route,
+    ) -> SynthesisCell {
+        let elevation = Metres::new(f64::from(elevation_mm) / 1e3);
+        let ice = SynthesisCell::quantise_ice((self.ice)(site, elevation).clamp(0.0, 1.0))
+            .expect("an ice share is 0 to 1");
+        let ice_entry = (ice > 0).then(|| self.ice_entry_at(site));
+        let liquid_entry = if water_mm > elevation_mm {
+            Some(
+                self.main_liquid
+                    .expect("a world with a sea names its liquid in its palette"),
+            )
+        } else {
+            None
+        };
+        SynthesisCell {
+            elevation_mm,
+            boundary_distance_km: SynthesisCell::quantise_boundary_distance(site.boundary_distance)
+                .expect("a synthetic boundary distance is finite"),
+            plate: site.plate,
+            crust: site.crust,
+            boundary: site.boundary,
+            boundary_obliquity: SynthesisCell::quantise_obliquity(site.boundary_obliquity)
+                .expect("an obliquity is 0 to π ÷ 2"),
+            flow: route.flow,
+            drainage: route.drainage,
+            steepness: route.steepness,
+            runoff: route.runoff,
+            catchment_runoff: route.catchment_runoff,
+            epoch_incision: self.epoch_incision(route, water_mm > elevation_mm),
+            water_surface_mm: water_mm,
+            ice,
+            substances: SynthesisCell::pack_substances(ice_entry, liquid_entry)
+                .expect("a palette's indices are below 15"),
+            class: SurfaceClass::UNCLASSIFIED,
+            crater_state: 0,
+            seafloor: self.seafloor_at(site),
+        }
+    }
+
+    /// The epoch's incision code of a cell of `route`, `wet` where it is under liquid
+    /// ([`epoch`](Self::epoch)).
+    #[must_use]
+    fn epoch_incision(&self, route: Route, wet: bool) -> LogIncision {
+        match self.epoch_m0_1 {
+            None => LogIncision::NONE,
+            Some(_) if wet || route.steepness == LogSteepness::ZERO => LogIncision::UNCUT,
+            Some(psi) => LogIncision::from_metres(Metres::new(psi * route.steepness.index_m0_9()))
+                .expect("a finite, non-negative incision has a code, the last saturating"),
+        }
+    }
+
+    /// The header's spectrum: [`spectrum`](Self::spectrum)'s, or a silicate crust's anchored at
+    /// zero on the builder's body, no structural relief.
+    #[must_use]
+    fn header_spectrum(&self) -> BandSpectrum {
+        self.spectrum.unwrap_or_else(|| {
+            BandSpectrum::anchored(SpectrumShape::SILICATE, self.radius, Metres::ZERO)
+        })
+    }
+
+    /// The sea floor byte of the cell at `site`: its [`seafloor`](Self::seafloor) quantised on
+    /// oceanic crust, and none on any other.
+    #[must_use]
+    fn seafloor_at(&self, site: &CellSite) -> u8 {
+        match site.crust {
+            Crust::Oceanic => {
+                let sample = (self.seafloor)(site);
+                let h = sample.hill_relief.value();
+                assert!(
+                    h.is_finite() && h > 0.0,
+                    "an oceanic cell's hill relief must be finite and positive, got {h} m"
+                );
+                let hill = SynthesisCell::quantise_hill_relief(sample.hill_relief)
+                    .expect("a positive hill relief has a code");
+                let ponded = SynthesisCell::quantise_ponded_sediment(sample.ponded_sediment)
+                    .unwrap_or_else(|e| panic!("an oceanic cell's ponded sediment: {e}"));
+                SynthesisCell::pack_seafloor(hill, ponded).expect("a code is a nibble")
+            }
+            Crust::Continental | Crust::Lid | Crust::Province => SynthesisCell::NO_SEAFLOOR,
+        }
+    }
+
+    /// The palette index of the ice of the cell at `site`, which has ice: [`ice_entry`]'s, or the
+    /// palette's first `Ice` entry.
+    ///
+    /// [`ice_entry`]: Self::ice_entry
+    #[must_use]
+    fn ice_entry_at(&self, site: &CellSite) -> u8 {
+        let entry = match &self.ice_entry {
+            Some(entry) => entry(site),
+            None => (0_u8..)
+                .zip(self.palette.entries())
+                .find_map(|(k, e)| (e.role == PaletteRole::Ice).then_some(k))
+                .expect("a world with ice names its ice in its palette"),
+        };
+        assert!(
+            self.palette.has_role(entry, PaletteRole::Ice),
+            "a cell's ice entry {entry} is not an Ice entry of the palette"
+        );
+        entry
+    }
+
+    /// Asserts the plates are none or between two and 256, with distinct seeds and mobile-lid
+    /// crusts.
+    fn check_plates(&self) {
+        let count = self.plates.len();
+        assert!(
+            count != 1 && count <= 256,
+            "a field has no plates or two to 256, not {count}"
+        );
+        for (k, plate) in self.plates.iter().enumerate() {
+            assert!(
+                matches!(plate.crust, Crust::Continental | Crust::Oceanic),
+                "plate {k}'s crust is {:?}, not continental or oceanic",
+                plate.crust
+            );
+            for other in &self.plates[..k] {
+                assert!(
+                    norm(sub(plate.seed, other.seed)) > 0.0,
+                    "plate {k} shares its seed with another"
+                );
+            }
+        }
+    }
+
+    /// The site of the cell centred on `dir`, on a body of radius `r` metres.
+    fn site(&self, dir: [f64; 3], r: f64) -> CellSite {
+        if self.plates.is_empty() {
+            return CellSite {
+                dir,
+                plate: 0,
+                crust: (self.crust)(dir),
+                boundary: BoundaryKind::Absent,
+                boundary_distance: None,
+                boundary_obliquity: Radians::ZERO,
+            };
+        }
+        // The nearest seed, ties to the lower plate.
+        let mut own = 0;
+        for (k, plate) in self.plates.iter().enumerate().skip(1) {
+            if dot(dir, plate.seed) > dot(dir, self.plates[own].seed) {
+                own = k;
+            }
+        }
+        let a = self.plates[own];
+        // The nearest boundary: the bisecting great circle closest to the centre, whose
+        // half-spaces' intersection is the plate's cell.
+        let mut nearest: Option<(usize, f64, [f64; 3])> = None;
+        for (k, b) in self.plates.iter().enumerate() {
+            if k == own {
+                continue;
+            }
+            let normal = unit(sub(a.seed, b.seed));
+            let angle = math::asin(dot(dir, normal).clamp(-1.0, 1.0));
+            if nearest.is_none_or(|(_, best, _)| angle < best) {
+                nearest = Some((k, angle, normal));
+            }
+        }
+        let (other, angle, normal) =
+            nearest.expect("check_plates leaves no world with exactly one plate");
+        let b = self.plates[other];
+        // The boundary's normal at the centre, pointing from this plate into the other.
+        let towards = unit(scale(sub(normal, scale(dir, dot(normal, dir))), -1.0));
+        let relative = cross(sub(a.rotation_rad_per_myr, b.rotation_rad_per_myr), dir);
+        let closing = dot(relative, towards);
+        let sliding = norm(sub(relative, scale(towards, closing)));
+        let direction = math::atan2(sliding, closing);
+        let (boundary, subducts) = if direction < core::f64::consts::FRAC_PI_3 {
+            // Two continents collide; otherwise the oceanic plate subducts beneath the continental
+            // one, and of two oceanic plates the higher-numbered. `check_plates` admits no other
+            // crust on a plate.
+            match (a.crust, b.crust) {
+                (Crust::Continental, Crust::Continental) => (BoundaryKind::Collision, false),
+                (Crust::Oceanic, Crust::Continental) => (BoundaryKind::Subduction, true),
+                (Crust::Continental, Crust::Oceanic) => (BoundaryKind::Subduction, false),
+                (Crust::Oceanic, Crust::Oceanic) => (BoundaryKind::Subduction, own > other),
+                (Crust::Lid | Crust::Province, _) | (_, Crust::Lid | Crust::Province) => {
+                    unreachable!("check_plates admits only continental and oceanic plates")
+                }
+            }
+        } else if direction > 2.0 * core::f64::consts::FRAC_PI_3 {
+            (BoundaryKind::Divergent, false)
+        } else {
+            (BoundaryKind::Transform, false)
+        };
+        let distance = angle * r;
+        CellSite {
+            dir,
+            plate: u8::try_from(own).expect("at most 256 plates"),
+            crust: a.crust,
+            boundary,
+            boundary_distance: Some(Metres::new(if subducts { -distance } else { distance })),
+            boundary_obliquity: Radians::new(math::atan2(sliding, closing.abs())),
+        }
+    }
+
+    /// Every crater prepared ([`prepare`](Self::prepare)) on a field of `level` and boundary
+    /// diameter `d_b` on `figure`.
+    fn prepare_all(
+        &self,
+        level: CoarseLevel,
+        d_b: Metres,
+        figure: Spheroid,
+    ) -> Vec<PreparedCrater> {
+        let rims = CoarseRims::for_body(self.crater_params, figure, level);
+        self.craters
+            .iter()
+            .map(|spec| self.prepare(spec, d_b, &rims))
+            .collect()
+    }
+
+    /// `spec` with its fresh shape on the builder's crater contract (Design notes 12 and 13), and
+    /// the profile the coarse elevation holds of it (R09.T12.d's contract, through `rims`).
+    fn prepare(&self, spec: &CraterSpec, d_b: Metres, rims: &CoarseRims) -> PreparedCrater {
+        let d = spec.diameter.value();
+        assert!(
+            d.is_finite() && d >= d_b.value(),
+            "a coarse crater of {d} m is narrower than the boundary diameter {} m",
+            d_b.value()
+        );
+        PreparedCrater {
+            spec: *spec,
+            shape: crater_shape(&self.crater_params, spec.diameter),
+            coarse: rims.coarse_profile(spec.diameter),
+        }
+    }
+}
+
+/// A crater with its fresh shape and the profile the coarse elevation holds of it.
+struct PreparedCrater {
+    spec: CraterSpec,
+    shape: CraterShape,
+    coarse: CraterProfile,
+}
+
+impl PreparedCrater {
+    /// The share of its fresh relief the crater keeps, g = 1 − degradation ÷ 255: R09.T7.c's
+    /// `kept_relief` of the listed crater, through the one expression for it.
+    fn kept_relief(&self) -> f64 {
+        crate::synth::craters::rims::kept_relief_of(self.spec.degradation)
+    }
+
+    /// The crater's relief in the coarse elevation at the unit vector `dir` on `figure`: its kept
+    /// relief times its coarse profile ([`CoarseRims::coarse_profile`]) at the chord from its
+    /// centre's spheroid point in rim radii (R09.T12.d's contract).
+    fn relief(&self, figure: &Spheroid, dir: [f64; 3]) -> f64 {
+        let (p, c) = (figure.point(dir), figure.point(self.spec.centre));
+        let gap = [0, 1, 2].map(|k| p[k] - c[k]);
+        let chord = (gap[0] * gap[0] + gap[1] * gap[1] + gap[2] * gap[2]).sqrt();
+        let x = chord / (0.5 * self.spec.diameter.value());
+        self.kept_relief() * self.coarse.at(x).height_m
+    }
+
+    /// The crater as the field lists it, with the index of its centre's cell: its reach is every
+    /// cell whose nearest point may lie within the shape's [`reach`](CraterShape::reach), 1 + a rim
+    /// radii, of the centre, by the angle to the cell's centre less the cell's circumradius, with
+    /// the centre's own cell.
+    ///
+    /// The reach is a chord between spheroid points, as the synthesis measures it (R09.T7.b and
+    /// T7.c). On a figure of smallest radius `smallest_radius_m` the chord between the points of
+    /// two directions an angle ψ apart is at least that radius times 2 sin(ψ ÷ 2), so every point
+    /// within the reach lies within 2 asin(reach ÷ (2 × that radius)) of the centre, the angle
+    /// taken.
+    fn listed(
+        &self,
+        grid: &Grid,
+        level: CoarseLevel,
+        smallest_radius_m: f64,
+    ) -> (u32, CoarseCrater) {
+        let spec = &self.spec;
+        let half_chord = 0.5 * self.shape.reach().value() / smallest_radius_m;
+        let reach_angle = 2.0 * math::asin(crate::num::min(half_chord, 1.0));
+        let centre_cell = cell_index(
+            PatchKey::containing(level.get(), spec.centre).expect("a coarse level is valid"),
+        );
+        let touched = (0_u32..).zip(&grid.centres).filter_map(|(n, &c)| {
+            let slack =
+                grid.circumradii_rad[usize::try_from(n).expect("a cell index fits a usize")];
+            (arc(spec.centre, c) - slack <= reach_angle || n == centre_cell).then_some(n)
+        });
+        let crater = CoarseCrater {
+            centre: spec.centre,
+            diameter: spec.diameter,
+            morphology: self.shape.morphology(),
+            age: spec.age,
+            degradation: spec.degradation,
+            reach: Cover::from_cells(touched),
+        };
+        (centre_cell, crater)
+    }
+}
+
+/// One cell's flow, drainage, steepness and runoffs.
+#[derive(Debug, Clone, Copy)]
+struct Route {
+    flow: FlowDirection,
+    drainage: LogArea,
+    steepness: LogSteepness,
+    runoff: LogRunoff,
+    catchment_runoff: LogRunoff,
+}
+
+impl Route {
+    const TERMINAL: Self = Self {
+        flow: FlowDirection::Terminal,
+        drainage: LogArea::ZERO,
+        steepness: LogSteepness::ZERO,
+        runoff: LogRunoff::NONE,
+        catchment_runoff: LogRunoff::NONE,
+    };
+}
+
+/// The cells of one level in cell-index order, with their centres, solid angles and
+/// circumradii.
+struct Grid {
+    cells: Vec<PatchKey>,
+    centres: Vec<[f64; 3]>,
+    solid_angles_sr: Vec<f64>,
+    circumradii_rad: Vec<f64>,
+}
+
+impl Grid {
+    fn new(level: u8) -> Self {
+        let count = 6_u32 << (2 * level);
+        let cells: Vec<PatchKey> = (0..count)
+            .map(|n| cell_at_index(level, n).expect("every index below the count is a cell"))
+            .collect();
+        // Vertex (32, 32) of a cell's patch is its centre, s = (i + ½) ÷ 2ᴸ.
+        let centres: Vec<[f64; 3]> = cells.iter().map(|c| c.vertex_dir(32, 32)).collect();
+        let solid_angles_sr = cells.iter().map(|&c| solid_angle(c)).collect();
+        let circumradii_rad = cells
+            .iter()
+            .zip(&centres)
+            .map(|(c, &centre)| {
+                [(0, 0), (64, 0), (0, 64), (64, 64)]
+                    .into_iter()
+                    .map(|(x, y)| arc(centre, c.vertex_dir(x, y)))
+                    .fold(0.0, crate::num::max)
+            })
+            .collect();
+        Self {
+            cells,
+            centres,
+            solid_angles_sr,
+            circumradii_rad,
+        }
+    }
+
+    /// Steepest descent to an edge neighbour from each dry cell, ties to the first edge of
+    /// [`Edge::ALL`], and the geometric drainage area accumulated downstream in order of falling
+    /// elevation, with, beside it, the equivalent area of the cells' own runoffs,
+    /// `own_runoff_m_per_year` metres a Julian year: Hergarten's ∫ r dA ÷ (1 m a⁻¹) (Hergarten
+    /// 2021, Earth Surf. Dynam. 9, 937, eqs. 16 and 20), whose ratio to the geometric area is the
+    /// catchment's area-weighted mean runoff (science-r09-drainage.md §1).
+    fn route(
+        &self,
+        elevation_mm: &[i32],
+        water_mm: &[i32],
+        own_runoff_m_per_year: &[f64],
+        r: f64,
+    ) -> Vec<Route> {
+        let n = self.cells.len();
+        let mut receivers: Vec<Option<(usize, Edge, f64)>> = vec![None; n];
+        for (k, &cell) in self.cells.iter().enumerate() {
+            if water_mm[k] > elevation_mm[k] {
+                continue;
+            }
+            for edge in Edge::ALL {
+                let next = usize::try_from(cell_index(cell.edge_neighbour(edge)))
+                    .expect("a cell index fits a usize");
+                // Exact: any two i32 values and their difference are f64 integers.
+                let drop_mm = f64::from(elevation_mm[k]) - f64::from(elevation_mm[next]);
+                if drop_mm <= 0.0 {
+                    continue;
+                }
+                let slope = drop_mm / 1e3 / (arc(self.centres[k], self.centres[next]) * r);
+                if receivers[k].is_none_or(|(_, _, best)| slope > best) {
+                    receivers[k] = Some((next, edge, slope));
+                }
+            }
+        }
+        let mut order: Vec<usize> = (0..n).collect();
+        order.sort_by_key(|&k| (std::cmp::Reverse(elevation_mm[k]), k));
+        let mut area: Vec<f64> = self.solid_angles_sr.iter().map(|w| w * r * r).collect();
+        // m² × m a⁻¹ ÷ (1 m a⁻¹): each cell's own share, accumulated in the same order.
+        let mut equivalent: Vec<f64> = area
+            .iter()
+            .zip(own_runoff_m_per_year)
+            .map(|(a, q)| a * q)
+            .collect();
+        for &k in &order {
+            if let Some((next, _, _)) = receivers[k] {
+                area[next] += area[k];
+                equivalent[next] += equivalent[k];
+            }
+        }
+        (0..n)
+            .map(|k| {
+                let drainage = LogArea::from_area(SquareMetres::new(area[k]))
+                    .expect("a drainage area has a code");
+                let runoff = LogRunoff::from_metres_per_year(own_runoff_m_per_year[k])
+                    .expect("a synthetic runoff is finite, non-negative and under about 235 m a⁻¹");
+                let catchment_runoff = LogRunoff::from_metres_per_year(equivalent[k] / area[k])
+                    .expect("an area-weighted mean of runoffs that have codes has a code");
+                match receivers[k] {
+                    None => Route {
+                        flow: FlowDirection::Terminal,
+                        drainage,
+                        steepness: LogSteepness::ZERO,
+                        runoff,
+                        catchment_runoff,
+                    },
+                    Some((_, edge, slope)) => Route {
+                        flow: FlowDirection::from(edge),
+                        drainage,
+                        steepness: LogSteepness::from_index_m0_9(
+                            slope * math::powf(area[k], LogSteepness::THETA),
+                        )
+                        .expect("a steepness index has a code"),
+                        runoff,
+                        catchment_runoff,
+                    },
+                }
+            })
+            .collect()
+    }
+
+    /// The area-weighted standard deviation of the elevations and their range, metres.
+    fn hypsometry(&self, elevation_mm: &[i32]) -> (Metres, Metres) {
+        let heights: Vec<f64> = elevation_mm.iter().map(|&e| f64::from(e) / 1e3).collect();
+        let total: f64 = self.solid_angles_sr.iter().sum();
+        let mean = heights
+            .iter()
+            .zip(&self.solid_angles_sr)
+            .map(|(h, w)| h * w)
+            .sum::<f64>()
+            / total;
+        let variance = heights
+            .iter()
+            .zip(&self.solid_angles_sr)
+            .map(|(h, w)| (h - mean) * (h - mean) * w)
+            .sum::<f64>()
+            / total;
+        let lowest = elevation_mm.iter().copied().min().unwrap_or(0);
+        let highest = elevation_mm.iter().copied().max().unwrap_or(0);
+        (
+            Metres::new(variance.sqrt()),
+            Metres::new((f64::from(highest) - f64::from(lowest)) / 1e3),
+        )
+    }
+}
+
+/// The header's reference temperature, the area-weighted mean of the sea-level temperatures, and
+/// the finest temperature and anomaly steps that hold the samples.
+fn climate_steps(grid: &Grid, samples: &[ClimateSample], months: u8) -> (Kelvin, u8, u8) {
+    let total: f64 = grid.solid_angles_sr.iter().sum();
+    let mean = samples
+        .iter()
+        .zip(&grid.solid_angles_sr)
+        .map(|(s, w)| s.sea_level_temperature.value() * w)
+        .sum::<f64>()
+        / total;
+    let largest_departure = samples
+        .iter()
+        .map(|s| (s.sea_level_temperature.value() - mean).abs())
+        .fold(0.0, crate::num::max);
+    let largest_anomaly = if months == 1 {
+        0.0
+    } else {
+        samples
+            .iter()
+            .flat_map(|s| s.month_anomaly_k)
+            .map(f64::abs)
+            .fold(0.0, crate::num::max)
+    };
+    (
+        Kelvin::new(mean),
+        FieldHeader::temperature_step_for(largest_departure)
+            .expect("a synthetic climate's temperatures have a step"),
+        FieldHeader::anomaly_step_for(largest_anomaly)
+            .expect("a synthetic climate's anomalies have a step"),
+    )
+}
+
+/// `sample` quantised in `header`'s steps; past the header's months, and every anomaly of a
+/// one-month year, zero, and every wind past them calm.
+fn quantise_climate(header: &FieldHeader, sample: &ClimateSample) -> ClimateCell {
+    let months = usize::from(header.months());
+    let mut cell = ClimateCell {
+        sea_level_temperature: header
+            .quantise_sea_level_temperature(sample.sea_level_temperature)
+            .expect("the step holds every temperature"),
+        month_anomaly: [0; 12],
+        month_precipitation: [LogPrecipitation::NONE; 12],
+        wind: [Wind::CALM; 12],
+    };
+    for month in 0..months {
+        if months > 1 {
+            cell.month_anomaly[month] = header
+                .quantise_month_anomaly(sample.month_anomaly_k[month])
+                .expect("the step holds every anomaly");
+        }
+        cell.month_precipitation[month] =
+            LogPrecipitation::from_rate(sample.month_precipitation_kg_m2_s[month])
+                .expect("a synthetic rate has a code");
+        let (speed, azimuth) = sample.wind[month];
+        cell.wind[month] =
+            Wind::from_velocity(speed, azimuth).expect("a synthetic wind has a code");
+    }
+    cell
+}
+
+/// The solid angle of `cell`, steradians, in closed form: F(u, v) = atan2(uv, √(1 + u² + v²))
+/// differenced over the cell's corners in face coordinates (the gnomonic projection's rectangle).
+fn solid_angle(cell: PatchKey) -> f64 {
+    let side = f64::from(1_u32 << cell.level());
+    let (u0, u1) = (
+        st_to_uv(f64::from(cell.i()) / side),
+        st_to_uv(f64::from(cell.i() + 1) / side),
+    );
+    let (v0, v1) = (
+        st_to_uv(f64::from(cell.j()) / side),
+        st_to_uv(f64::from(cell.j() + 1) / side),
+    );
+    let f = |u: f64, v: f64| math::atan2(u * v, (1.0 + u * u + v * v).sqrt());
+    f(u1, v1) - f(u0, v1) - f(u1, v0) + f(u0, v0)
+}
+
+fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
+fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+
+fn sub(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+
+fn scale(a: [f64; 3], k: f64) -> [f64; 3] {
+    [a[0] * k, a[1] * k, a[2] * k]
+}
+
+fn norm(a: [f64; 3]) -> f64 {
+    dot(a, a).sqrt()
+}
+
+fn unit(a: [f64; 3]) -> [f64; 3] {
+    scale(a, 1.0 / norm(a))
+}
+
+/// The angle between two unit vectors, radians, by atan2 of the cross and dot products, accurate
+/// at every angle.
+fn arc(a: [f64; 3], b: [f64; 3]) -> f64 {
+    math::atan2(norm(cross(a, b)), dot(a, b))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::field::FieldView;
+    use crate::field::MechanicsFamily;
+    use crate::field::Morphology;
+    use hyperion_testkit::float::assert_same_bits;
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    use wasm_bindgen_test::wasm_bindgen_test as test;
+
+    /// The cells' closed-form solid angles sum to 4π, 2π ÷ 3 a face.
+    #[test]
+    fn field_cells_tile_the_sphere() {
+        let grid = Grid::new(5);
+        let total: f64 = grid.solid_angles_sr.iter().sum();
+        assert!(
+            (total - 4.0 * core::f64::consts::PI).abs() < 1e-12,
+            "4π against {total}"
+        );
+    }
+
+    /// The builder's craters are [`crater_shape`]'s (R09.T7.a) held as R09.T12.d's contract has the
+    /// coarse pass smooth them in: every listed crater's morphology is its shape's, and every cell
+    /// of the flat `OneCrater` world holds the crater's kept relief times its coarse profile at the
+    /// chord from its centre, to the millimetre (R09.T8, after T7.c's rims).
+    #[test]
+    fn a_built_crater_is_its_crater_shape_at_the_coarse_band() {
+        for &world in SyntheticWorld::ALL {
+            let field = synthetic_field(world);
+            for crater in field.craters() {
+                let shape = crater_shape(field.header().craters(), crater.diameter);
+                assert_eq!(crater.morphology, shape.morphology(), "{world:?}");
+            }
+        }
+        let one = synthetic_field(SyntheticWorld::OneCrater);
+        let header = one.header();
+        let crater = &one.craters()[0];
+        let rims = CoarseRims::new(header);
+        let profile = rims.coarse_profile(crater.diameter);
+        let kept = crate::synth::craters::rims::kept_relief(crater);
+        let figure = header.figure();
+        let centre = figure.point(crater.centre);
+        let grid = Grid::new(header.level().get());
+        let mut inside = 0_u32;
+        for (cell, &dir) in one.synthesis().iter().zip(&grid.centres) {
+            let p = figure.point(dir);
+            let chord = norm([0, 1, 2].map(|k| p[k] - centre[k]));
+            let x = chord / (crater.diameter.value() / 2.0);
+            let height = Metres::new(kept * profile.at(x).height_m);
+            let expected = SynthesisCell::quantise_height(height).unwrap();
+            assert_eq!(cell.elevation_mm, expected, "at {x} rim radii");
+            if x < 1.0 {
+                inside += 1;
+            }
+        }
+        assert!(inside > 10, "only {inside} cells lie inside the crater");
+        // The coarse band fillets the rim: the crest is below the fresh shape's.
+        let shape = crater_shape(header.craters(), crater.diameter);
+        assert!(profile.at(1.0).height_m < shape.relief(1.0).value());
+        // A degraded crater keeps its share of the relief, as the sharpening reads it: the crater
+        // alone on the flat field, at half its relief.
+        let worn = worlds::flat_builder(6)
+            .crater(crater.centre, crater.diameter, crater.age, 128)
+            .build();
+        let listed = &worn.craters()[0];
+        let kept = crate::synth::craters::rims::kept_relief(listed);
+        assert!((kept - 127.0 / 255.0).abs() < 1e-15);
+        for (cell, &dir) in worn.synthesis().iter().zip(&grid.centres) {
+            let p = figure.point(dir);
+            let chord = norm([0, 1, 2].map(|k| p[k] - centre[k]));
+            let x = chord / (crater.diameter.value() / 2.0);
+            let height = Metres::new(kept * profile.at(x).height_m);
+            assert_eq!(
+                cell.elevation_mm,
+                SynthesisCell::quantise_height(height).unwrap()
+            );
+        }
+    }
+
+    /// A field built twice is the same to the bit: its header, every record and every crater.
+    fn assert_fields_identical(a: &CoarseField, b: &CoarseField) {
+        assert_eq!(a.header(), b.header());
+        if let Some(n) = (0..a.synthesis().len()).find(|&n| a.synthesis()[n] != b.synthesis()[n]) {
+            panic!("synthesis cell {n} differs");
+        }
+        assert_eq!(a.climate_layer(), b.climate_layer());
+        assert_eq!(a.craters(), b.craters());
+        for (x, y) in a.craters().iter().zip(b.craters()) {
+            for (p, q) in x.centre.into_iter().zip(y.centre) {
+                assert_same_bits(p, q);
+            }
+            assert_same_bits(x.diameter.value(), y.diameter.value());
+            assert_same_bits(x.age.value(), y.age.value());
+        }
+        let (h, k) = (a.header().parts(), b.header().parts());
+        for (p, q) in [
+            (h.realised_sigma_h.value(), k.realised_sigma_h.value()),
+            (h.realised_relief.value(), k.realised_relief.value()),
+            (h.sea_level.value(), k.sea_level.value()),
+            (
+                h.reference_temperature.value(),
+                k.reference_temperature.value(),
+            ),
+        ] {
+            assert_same_bits(p, q);
+        }
+        assert_eq!(a, b);
+    }
+
+    /// Every synthetic world is built twice with identical values, and each is the world its name
+    /// says: its level, its sea, its plates or lid, its craters.
+    #[test]
+    fn every_synthetic_field_is_built_twice_alike() {
+        for &world in SyntheticWorld::ALL {
+            let first = synthetic_field(world);
+            let second = synthetic_field(world);
+            assert_fields_identical(&first, &second);
+        }
+    }
+
+    fn ocean_fraction(field: &CoarseField) -> f64 {
+        let grid = Grid::new(field.header().level().get());
+        let total: f64 = grid.solid_angles_sr.iter().sum();
+        let wet: f64 = field
+            .synthesis()
+            .iter()
+            .zip(&grid.solid_angles_sr)
+            .filter(|(c, _)| c.is_under_water())
+            .map(|(_, w)| w)
+            .sum();
+        wet / total
+    }
+
+    /// The keys of `field`'s palette, in its order.
+    fn keys(field: &CoarseField) -> Vec<(&str, PaletteRole)> {
+        field
+            .header()
+            .palette()
+            .entries()
+            .iter()
+            .map(|e| (e.substance.as_str(), e.role))
+            .collect()
+    }
+
+    /// The palette entry `entry` of `field`, as its key and role.
+    fn named(field: &CoarseField, entry: Option<u8>) -> Option<(&str, PaletteRole)> {
+        let e = field.header().palette().get(entry?)?;
+        Some((e.substance.as_str(), e.role))
+    }
+
+    /// Each synthetic world carries its palette (decision-composition §1.7), each crust names its
+    /// lithology, and each cell names the ice and the liquid it holds: an Earth's water as ice and
+    /// as its sea, a Mars's water ice in the north and CO₂ ice in the south, none on the Moon.
+    #[test]
+    fn the_synthetic_fields_carry_their_palettes() {
+        use PaletteRole::{Deposit, Ice, Liquid, PrimaryCrust, Province, SecondaryCrust};
+        let earth = synthetic_field(SyntheticWorld::EarthLike);
+        assert_eq!(
+            keys(&earth),
+            [
+                ("basalt", SecondaryCrust),
+                ("granite", PaletteRole::TertiaryCrust),
+                ("H2O", Ice),
+                ("H2O", Liquid)
+            ]
+        );
+        let lithology = |field: &CoarseField, crust| {
+            field
+                .header()
+                .crust_entry(crust)
+                .map(|e| e.substance.as_str().to_owned())
+        };
+        assert_eq!(
+            lithology(&earth, Crust::Continental).as_deref(),
+            Some("granite")
+        );
+        assert_eq!(lithology(&earth, Crust::Oceanic).as_deref(), Some("basalt"));
+        assert_eq!(
+            named(&earth, earth.header().main_liquid()),
+            Some(("H2O", Liquid))
+        );
+        let (mut wet, mut icy) = (0, 0);
+        for c in earth.synthesis() {
+            if c.is_under_water() {
+                assert_eq!(named(&earth, c.liquid_entry()), Some(("H2O", Liquid)));
+                wet += 1;
+            } else {
+                assert_eq!(c.liquid_entry(), None);
+            }
+            if c.ice > 0 {
+                assert_eq!(named(&earth, c.ice_entry()), Some(("H2O", Ice)));
+                icy += 1;
+            } else {
+                assert_eq!(c.ice_entry(), None);
+            }
+        }
+        assert!(wet > 0 && icy > 0, "{wet} wet and {icy} icy cells");
+
+        let mars = synthetic_field(SyntheticWorld::MarsLike);
+        assert_eq!(
+            keys(&mars),
+            [
+                ("basalt_fe", SecondaryCrust),
+                ("CO2", Ice),
+                ("H2O", Ice),
+                ("mars_dust", Deposit)
+            ]
+        );
+        assert_eq!(lithology(&mars, Crust::Lid).as_deref(), Some("basalt_fe"));
+        assert_eq!(
+            lithology(&mars, Crust::Province).as_deref(),
+            Some("basalt_fe")
+        );
+        let level = mars.header().level().get();
+        let mut caps = std::collections::BTreeSet::new();
+        for (n, c) in (0_u32..).zip(mars.synthesis()) {
+            assert_eq!(c.liquid_entry(), None);
+            if c.ice > 0 {
+                let north = cell_at_index(level, n).unwrap().vertex_dir(32, 32)[2] > 0.0;
+                let expected = if north { "H2O" } else { "CO2" };
+                assert_eq!(named(&mars, c.ice_entry()), Some((expected, Ice)));
+                caps.insert(expected);
+            }
+        }
+        assert_eq!(caps.len(), 2, "Mars-like caps {caps:?}");
+
+        // The Moon carries its cold traps' water ice, which no cell names until R09.T13.f places
+        // it (science-r09-drainage.md §4).
+        let moon = synthetic_field(SyntheticWorld::MoonLike);
+        assert_eq!(
+            keys(&moon),
+            [
+                ("feldspathic", PrimaryCrust),
+                ("basalt_fe", Province),
+                ("H2O", Ice)
+            ]
+        );
+        assert!(
+            moon.synthesis()
+                .iter()
+                .all(|c| c.substances == SynthesisCell::NO_SUBSTANCES)
+        );
+
+        let ceres = synthetic_field(SyntheticWorld::CeresLike);
+        assert_eq!(
+            keys(&ceres),
+            [
+                ("phyllosilicate", PrimaryCrust),
+                ("H2O", Ice),
+                ("Na2CO3", Deposit)
+            ]
+        );
+    }
+
+    /// The flat field and the single crater take the builder's default palette, its feldspathic
+    /// crust their lid's one entry, so that every cell's crust names one (R09.T10.c).
+    #[test]
+    fn the_flat_fields_name_their_lid_s_entry() {
+        for world in [SyntheticWorld::Flat, SyntheticWorld::OneCrater] {
+            let field = synthetic_field(world);
+            let lid = [("feldspathic", PaletteRole::PrimaryCrust)];
+            assert_eq!(keys(&field), lid, "{world:?}");
+            assert_eq!(
+                field.header().crust_palette(),
+                [None, None, Some(0), None],
+                "{world:?}"
+            );
+            assert!(
+                field.synthesis().iter().all(|c| c.crust == Crust::Lid),
+                "{world:?}"
+            );
+        }
+    }
+
+    /// The entry of `key` in `role` of `field`'s palette, which it must have.
+    fn entry<'a>(
+        field: &'a CoarseField,
+        key: &str,
+        role: PaletteRole,
+    ) -> &'a crate::field::PaletteEntry {
+        let palette = field.header().palette();
+        let index = palette
+            .find(role, crate::substance_key::SubstanceKey::new(key).unwrap())
+            .unwrap_or_else(|| panic!("no {key} as {role:?}"));
+        palette.get(index).unwrap()
+    }
+
+    /// The synthetic palettes take the drainage ruling's rows (science-r09-drainage.md §2, §3 and
+    /// §5): basalt's solidus is Wright and Okamura's 980 °C, the basalt's, the highlands' and the
+    /// dust's densities are their grains', and Ceres's crust is primary, its lid's and its
+    /// provinces' alike, with no oceanic crust.
+    #[test]
+    fn the_synthetic_fields_palettes_take_the_drainage_rulings_rows() {
+        let earth = synthetic_field(SyntheticWorld::EarthLike);
+        let basalt = entry(&earth, "basalt", PaletteRole::SecondaryCrust);
+        assert_same_bits(basalt.transition.value(), 1_253.15);
+        assert_same_bits(basalt.grain_density_kg_m3, 3_010.0);
+        let mars = synthetic_field(SyntheticWorld::MarsLike);
+        let dust = entry(&mars, "mars_dust", PaletteRole::Deposit);
+        assert_same_bits(dust.grain_density_kg_m3, 2_600.0);
+        let moon = synthetic_field(SyntheticWorld::MoonLike);
+        let highlands = entry(&moon, "feldspathic", PaletteRole::PrimaryCrust);
+        assert_same_bits(highlands.grain_density_kg_m3, 2_900.0);
+        entry(&moon, "H2O", PaletteRole::Ice);
+        let ceres = synthetic_field(SyntheticWorld::CeresLike);
+        assert_eq!(
+            ceres.header().crust_palette(),
+            [None, None, Some(0), Some(0)]
+        );
+        assert_eq!(
+            named(&ceres, Some(0)),
+            Some(("phyllosilicate", PaletteRole::PrimaryCrust))
+        );
+    }
+
+    /// The synthetic palettes carry each `FeO_T` their substances' documentation cites
+    /// (decision-p14-t51d-weathering §1.2 and §1.3): the highlands' 0.05, the iron-rich basalt's
+    /// 0.20 and the tholeiite's 0.110; 0 on every ice and on the salt; and none, not modelled, on
+    /// the granite, the phyllosilicate, the dust and the sea.
+    #[test]
+    fn the_synthetic_fields_palettes_carry_their_feo_mass_fractions() {
+        use PaletteRole::{Deposit, Ice, Liquid, PrimaryCrust, Province, SecondaryCrust};
+        let earth = synthetic_field(SyntheticWorld::EarthLike);
+        let mars = synthetic_field(SyntheticWorld::MarsLike);
+        let moon = synthetic_field(SyntheticWorld::MoonLike);
+        let ceres = synthetic_field(SyntheticWorld::CeresLike);
+        let expected: [(&CoarseField, &str, PaletteRole, Option<f64>); 14] = [
+            (&earth, "basalt", SecondaryCrust, Some(0.110)),
+            (&earth, "granite", PaletteRole::TertiaryCrust, None),
+            (&earth, "H2O", Ice, Some(0.0)),
+            (&earth, "H2O", Liquid, None),
+            (&mars, "basalt_fe", SecondaryCrust, Some(0.20)),
+            (&mars, "CO2", Ice, Some(0.0)),
+            (&mars, "H2O", Ice, Some(0.0)),
+            (&mars, "mars_dust", Deposit, None),
+            (&moon, "feldspathic", PrimaryCrust, Some(0.05)),
+            (&moon, "basalt_fe", Province, Some(0.20)),
+            (&moon, "H2O", Ice, Some(0.0)),
+            (&ceres, "phyllosilicate", PrimaryCrust, None),
+            (&ceres, "H2O", Ice, Some(0.0)),
+            (&ceres, "Na2CO3", Deposit, Some(0.0)),
+        ];
+        for (field, key, role, feo) in expected {
+            let held = entry(field, key, role).feo_mass_fraction;
+            match (held, feo) {
+                (Some(held), Some(feo)) => assert_same_bits(held, feo),
+                (held, feo) => assert_eq!(held, feo, "{key} as {role:?}"),
+            }
+        }
+        // Every entry of the four palettes is listed above.
+        let entries: usize = [&earth, &mars, &moon, &ceres]
+            .iter()
+            .map(|f| f.header().palette().len())
+            .sum();
+        assert_eq!(entries, expected.len());
+    }
+
+    /// The synthetic palettes take the crust ruling's rows (science-composition-crusts.md §2–§4
+    /// and §7): the iron-rich basalt, 3,310 kg m⁻³ and 1,050 °C, is the Mars-like world's crust and
+    /// the Moon-like world's maria; the highlands are `feldspathic`, 2,900 kg m⁻³ and the
+    /// plagioclase rock's 1,260 °C; the phyllosilicate's residue melts at the chondritic
+    /// 1,150 °C and the dust at the iron-rich basalt's; `Na2CO3` is 2,540 kg m⁻³ and melts at
+    /// 850 °C; and each water ice is ice Ih's density where it lies, within 0.1 kg m⁻³ of IAPWS
+    /// R10-06's Gibbs function there (the ruling's script, recomputed): the Earth-like and
+    /// Mars-like caps at their coldest zones, 253 K and 180 K, the Moon-like and Ceres-like cold
+    /// traps at 110 K.
+    #[test]
+    fn the_synthetic_fields_palettes_take_the_crust_rulings_rows() {
+        let mars = synthetic_field(SyntheticWorld::MarsLike);
+        let moon = synthetic_field(SyntheticWorld::MoonLike);
+        let iron_rich = [
+            entry(&mars, "basalt_fe", PaletteRole::SecondaryCrust),
+            entry(&moon, "basalt_fe", PaletteRole::Province),
+        ];
+        for basalt in iron_rich {
+            assert_same_bits(basalt.grain_density_kg_m3, 3_310.0);
+            assert_same_bits(basalt.transition.value(), 1_323.15);
+            assert_eq!(basalt.mechanics, MechanicsFamily::Silicate);
+        }
+        let dust = entry(&mars, "mars_dust", PaletteRole::Deposit);
+        assert_same_bits(dust.transition.value(), 1_323.15);
+        let highlands = entry(&moon, "feldspathic", PaletteRole::PrimaryCrust);
+        assert_same_bits(highlands.grain_density_kg_m3, 2_900.0);
+        assert_same_bits(highlands.transition.value(), 1_533.15);
+        // The Moon-like lid is its highlands, and its provinces its maria.
+        assert_eq!(moon.header().crust_entry(Crust::Lid), Some(highlands));
+        assert_eq!(
+            moon.header().crust_entry(Crust::Province),
+            Some(iron_rich[1])
+        );
+        let ceres = synthetic_field(SyntheticWorld::CeresLike);
+        let shell = entry(&ceres, "phyllosilicate", PaletteRole::PrimaryCrust);
+        assert_same_bits(shell.transition.value(), 1_423.15);
+        let salt = entry(&ceres, "Na2CO3", PaletteRole::Deposit);
+        assert_same_bits(salt.grain_density_kg_m3, 2_540.0);
+        assert_same_bits(salt.transition.value(), 1_123.15);
+        let earth = synthetic_field(SyntheticWorld::EarthLike);
+        // IAPWS R10-06's ρ at 1 atm: 919.586 at 253 K, 928.151 at 180 K, 932.728 at 110 K.
+        for (field, iapws) in [
+            (&earth, 919.586),
+            (&mars, 928.151),
+            (&moon, 932.728),
+            (&ceres, 932.728),
+        ] {
+            let ice = entry(field, "H2O", PaletteRole::Ice);
+            assert!(
+                (ice.grain_density_kg_m3 - iapws).abs() < 0.1,
+                "{} kg m⁻³ against {iapws}",
+                ice.grain_density_kg_m3
+            );
+            assert_same_bits(ice.transition.value(), 273.15);
+            assert_eq!(ice.mechanics, MechanicsFamily::WaterIce);
+        }
+        // The liquid keeps its own density, its record's.
+        assert_same_bits(
+            entry(&earth, "H2O", PaletteRole::Liquid).grain_density_kg_m3,
+            997.047,
+        );
+    }
+
+    /// The Earth-like world's sea carries liquid water's record at 25 °C, measured, its normal
+    /// albedo the record's Fresnel reflectance to the row's four places (which follow the record
+    /// when `water.json` moves its index); no other entry of any synthetic world carries one
+    /// (decision-r11-palette-liquids §1.3, §2 item 7 and §4).
+    #[test]
+    fn the_synthetic_sea_carries_its_liquid_record() {
+        let earth = synthetic_field(SyntheticWorld::EarthLike);
+        let sea = entry(&earth, "H2O", PaletteRole::Liquid);
+        assert_eq!(sea.liquid.as_ref(), Some(&liquid_water()));
+        let record = liquid_water();
+        assert_eq!(record.basis, crate::field::LiquidBasis::Measured);
+        assert_same_bits(record.density_kg_m3, sea.grain_density_kg_m3);
+        for (held, fresnel) in sea
+            .normal_albedo_bvr
+            .iter()
+            .zip(record.fresnel_normal_albedo_bvr())
+        {
+            assert!((held - fresnel).abs() < 5e-5, "{held} against {fresnel}");
+        }
+        let others = [
+            SyntheticWorld::MarsLike,
+            SyntheticWorld::MoonLike,
+            SyntheticWorld::CeresLike,
+        ]
+        .map(synthetic_field);
+        for field in std::iter::once(&earth).chain(&others) {
+            for e in field.header().palette().entries() {
+                assert_eq!(
+                    e.liquid.is_some(),
+                    e.role == PaletteRole::Liquid,
+                    "{}",
+                    e.substance.as_str()
+                );
+            }
+        }
+    }
+
+    /// The bound on the relative error of a quantised runoff times a quantised area: half a
+    /// runoff step, 2^(1 ÷ 24) − 1, and half an area step, 2^(1 ÷ 2,048) − 1, compounded.
+    fn runoff_area_half_step() -> f64 {
+        math::exp2(1.0 / 24.0) * math::exp2(1.0 / 2_048.0) - 1.0
+    }
+
+    /// On each routed synthetic world, every cell's catchment runoff times its drainage area is its
+    /// own runoff times its own area plus each donor's catchment runoff times its drainage area,
+    /// to the codes' steps: the equivalent area adds up at every confluence
+    /// (science-r09-drainage.md §1.5 (f)). A cell under the sea sheds none of its own, and a world
+    /// not routed has no runoff at all.
+    #[test]
+    fn the_synthetic_fields_runoffs_add_up_at_every_confluence() {
+        let e = runoff_area_half_step();
+        for world in [SyntheticWorld::EarthLike, SyntheticWorld::MarsLike] {
+            let field = synthetic_field(world);
+            let grid = Grid::new(field.header().level().get());
+            let r = field.header().radius().value();
+            let cells = field.synthesis();
+            let equivalent = |c: &SynthesisCell| {
+                c.catchment_runoff.metres_per_year() * c.drainage.area().value()
+            };
+            let mut inflow = vec![0.0; cells.len()];
+            for (k, c) in cells.iter().enumerate() {
+                if let Some(edge) = c.flow.edge() {
+                    let next = usize::try_from(cell_index(grid.cells[k].edge_neighbour(edge)))
+                        .expect("a cell index fits a usize");
+                    inflow[next] += equivalent(c);
+                }
+            }
+            let mut with_donors = 0;
+            for (k, c) in cells.iter().enumerate() {
+                let own = c.runoff.metres_per_year() * grid.solid_angles_sr[k] * r * r;
+                let (lhs, rhs) = (equivalent(c), own + inflow[k]);
+                // Every term is positive and each within e of its true value, so the two sides,
+                // equal before quantisation, differ by at most e ÷ (1 − e) of their sum.
+                assert!(
+                    (lhs - rhs).abs() <= e / (1.0 - e) * (lhs + rhs),
+                    "{world:?} cell {k}: {lhs} m³ a⁻¹ against {rhs}"
+                );
+                if inflow[k] > 0.0 {
+                    with_donors += 1;
+                }
+                if c.is_under_water() {
+                    assert_eq!(c.runoff, LogRunoff::NONE, "{world:?} cell {k}");
+                }
+            }
+            assert!(
+                with_donors > 1_000,
+                "{world:?}: {with_donors} cells with donors"
+            );
+        }
+        for world in [
+            SyntheticWorld::MoonLike,
+            SyntheticWorld::CeresLike,
+            SyntheticWorld::Flat,
+            SyntheticWorld::OneCrater,
+        ] {
+            assert!(
+                synthetic_field(world).synthesis().iter().all(|c| {
+                    c.runoff == LogRunoff::NONE && c.catchment_runoff == LogRunoff::NONE
+                }),
+                "{world:?}"
+            );
+        }
+    }
+
+    /// The Mars-like world's wet epoch sheds 0.1 m a⁻¹ everywhere, so every cell's catchment
+    /// runoff is its own, code 121; the Earth-like world's dry belts drain its rain bands, so some
+    /// dry cell's catchment runoff is at least three times its own (science-r09-drainage.md
+    /// §1.5 (f)).
+    #[test]
+    fn the_synthetic_fields_runoffs_are_uniform_on_mars_and_not_on_earth() {
+        let mars = synthetic_field(SyntheticWorld::MarsLike);
+        for (k, c) in mars.synthesis().iter().enumerate() {
+            assert_eq!(c.runoff, LogRunoff::new(121), "cell {k}");
+            assert_eq!(c.catchment_runoff, c.runoff, "cell {k}");
+        }
+        let earth = synthetic_field(SyntheticWorld::EarthLike);
+        let wetter = earth
+            .synthesis()
+            .iter()
+            .filter(|c| {
+                !c.is_under_water()
+                    && c.runoff != LogRunoff::NONE
+                    && c.catchment_runoff.metres_per_year() >= 3.0 * c.runoff.metres_per_year()
+            })
+            .count();
+        assert!(
+            wetter > 0,
+            "no Earth-like cell drains a catchment three times as wet"
+        );
+        // The Earth-like runoff weights its months as the header's month shares do.
+        let edges = crate::field::month_edges(earth.header().season_eccentricity()).unwrap();
+        for (k, span) in (0_u8..).zip(edges.windows(2)) {
+            assert_same_bits(
+                crate::field::month_share(earth.header(), k).unwrap(),
+                (span[1].value() - span[0].value()) / core::f64::consts::TAU,
+            );
+        }
+    }
+
+    #[test]
+    fn the_synthetic_fields_are_the_worlds_they_name() {
+        let earth = synthetic_field(SyntheticWorld::EarthLike);
+        assert_eq!(earth.header().level().get(), 8);
+        let ocean = ocean_fraction(&earth);
+        assert!((0.4..0.85).contains(&ocean), "Earth-like ocean {ocean}");
+        for kind in [
+            BoundaryKind::Subduction,
+            BoundaryKind::Collision,
+            BoundaryKind::Divergent,
+            BoundaryKind::Transform,
+        ] {
+            assert!(
+                earth.synthesis().iter().any(|c| c.boundary == kind),
+                "the Earth-like world has no {kind:?} boundary"
+            );
+        }
+        let sigma = earth.header().realised_sigma_h().value();
+        assert!(
+            (1_500.0..4_000.0).contains(&sigma),
+            "Earth-like σ_h {sigma} m"
+        );
+        assert!(earth.synthesis().iter().any(|c| c.ice == 255));
+        assert_eq!(earth.header().months(), 12);
+        assert_same_bits(earth.header().season_eccentricity(), 0.016_711_23);
+        // Its winds turn with the rain band: the trades between the band's places in the year's
+        // first and seventh months blow from opposite hemispheres.
+        assert!(earth.climate_layer().iter().any(|c| c.wind[0] != c.wind[6]));
+
+        let mars = synthetic_field(SyntheticWorld::MarsLike);
+        assert_eq!(mars.header().level().get(), 7);
+        assert!((ocean_fraction(&mars)).abs() < 1e-12);
+        assert!(
+            mars.synthesis()
+                .iter()
+                .all(|c| c.boundary == BoundaryKind::Absent)
+        );
+        assert!(mars.synthesis().iter().any(|c| c.crust == Crust::Province));
+        assert!(mars.craters().len() >= 20);
+
+        let moon = synthetic_field(SyntheticWorld::MoonLike);
+        assert_eq!(moon.header().level().get(), 6);
+        assert!(moon.craters().len() >= 40);
+        assert!(
+            moon.synthesis()
+                .iter()
+                .all(|c| c.flow == FlowDirection::Terminal)
+        );
+        assert!(
+            moon.craters()
+                .iter()
+                .any(|c| c.morphology == Morphology::MultiRingBasin)
+        );
+
+        let ceres = synthetic_field(SyntheticWorld::CeresLike);
+        assert_eq!(ceres.header().level().get(), 5);
+        assert!(ceres.craters().len() >= 25);
+
+        let flat = synthetic_field(SyntheticWorld::Flat);
+        assert!(flat.synthesis().iter().all(|c| c.elevation_mm == 0));
+        assert_eq!(flat.craters(), []);
+        assert_eq!(flat.header().months(), 1);
+
+        let one = synthetic_field(SyntheticWorld::OneCrater);
+        assert_eq!(one.craters().len(), 1);
+        let faces: std::collections::BTreeSet<u8> = one.craters()[0]
+            .reach
+            .cells()
+            .map(|n| cell_at_index(6, n).unwrap().face().index())
+            .collect();
+        assert!(faces.len() >= 2, "the one crater's reach spans {faces:?}");
+    }
+}

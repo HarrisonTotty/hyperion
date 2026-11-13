@@ -1,0 +1,3411 @@
+//! The surface service: a body's coarse field, computed once on the pool through a single flight
+//! and kept in the [`FieldCache`] (the [module](super) documentation).
+
+use std::collections::HashMap;
+use std::error::Error;
+use std::fmt;
+use std::num::NonZeroUsize;
+use std::panic::AssertUnwindSafe;
+use std::pin::pin;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::Instant;
+
+use futures_util::FutureExt;
+use futures_util::future::BoxFuture;
+use futures_util::stream::{FuturesUnordered, StreamExt};
+use hyperion_protocol::SeedHex;
+use hyperion_sim::Seed;
+use hyperion_sim::coords::SystemPosition;
+use hyperion_sim::planetary::derive::figure::BodyFigure;
+use hyperion_sim::planetary::derive::photometry::BodyPhotometry;
+use hyperion_sim::planetary::hooks::{DetailSeed, SurfaceSeed, detail_seed, surface_seed};
+use hyperion_sim::planetary::record::{BodyRecord, RecordSection, Section};
+use hyperion_sim::planetary::surface::{
+    CoarseInputs, ReadCoarseInputsError, SurfaceInputsError, coarse_pass_spread,
+};
+use hyperion_sim::planetary::viewer::is_viewer_system;
+use hyperion_sim::planetary::{BodyIndex, ResolveBodyError};
+use hyperion_sim::time::UniverseTime;
+use hyperion_sim::units::Metres;
+use hyperion_surface::field::{CoarseField, CoarseLevel, FieldView, coarse_level};
+use hyperion_surface::material::{
+    GroundExposure, SolveAlbedoScaleError, THIN_ATMOSPHERE_PRESSURE, class_fractions,
+    exposed_albedo_scale, haloed_albedo_scale, maturity_mix,
+};
+use hyperion_surface::synth::{SynthCache, Synthesiser};
+use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore, watch};
+use tokio::task::{AbortHandle, JoinSet};
+
+use super::spread::PoolSpread;
+use super::{FieldCache, FieldKey, InputsSource};
+use crate::cache::LruCounters;
+use crate::compute::sky::{promotable, queued};
+use crate::compute::{
+    CancelOnDrop, CancelToken, ComputeError, CpuPool, Flight, GalaxyKey, GeneratedSystem, JobError,
+    Priority, Promotion, SingleFlight, SubmitJobError, panic_message,
+};
+use crate::knowledge::LoadKnowledgeError;
+use crate::knowledge::surveys::{RaisedRevisions, ScratchSurveyLog, SurveyLog};
+use crate::universe::{UniverseId, UniverseStore};
+
+/// The time at which the service reads a body's record for its inputs: the sim's, at which
+/// `CoarseInputs::from_record` reads the record's spin and seasonal orbit (R09.T10.e), the epoch.
+///
+/// It is the same whoever asks and whenever, so that the field kept is a function of its key (the
+/// [module](super) documentation). P14.T54.a, which settles the time the record's surface section
+/// is read at, settles this one with it, being one constant.
+pub use hyperion_sim::planetary::surface::RECORD_TIME;
+
+/// Why a body's coarse field could not be had.
+///
+/// The name is the plan's Provides', which R09.T19 consumes.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SurfaceJobError {
+    /// The key's body index is not in plan 14's layout, or its system holds no body there.
+    Body(ResolveBodyError),
+    /// The body's inputs cannot be had: in [`ReadCoarseInputsError::Section`], it has no solid
+    /// surface (a giant, a ring, a belt or the halo), or a section of its record that the pass
+    /// reads is not modelled or is withheld; in every other variant, the server's own reading of
+    /// its records failed (a moon's planet's record not given or not its planet's, a record not
+    /// taken at [`RECORD_TIME`], or inputs the builder refuses), which a request answers
+    /// `internal` (decision-backlog-2 §3.3).
+    Inputs(ReadCoarseInputsError),
+    /// The pass's pool job could not be queued, or did not finish: it was cancelled, panicked or
+    /// was dropped with the pool, or a worker's floating-point mode flushes subnormals.
+    Compute(ComputeError),
+}
+
+impl fmt::Display for SurfaceJobError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Body(_) => "the body does not resolve",
+            Self::Inputs(_) => "the body's coarse-pass inputs cannot be had",
+            Self::Compute(_) => "the body's coarse pass did not run",
+        })
+    }
+}
+
+impl Error for SurfaceJobError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Body(source) => Some(source),
+            Self::Inputs(source) => Some(source),
+            Self::Compute(source) => Some(source),
+        }
+    }
+}
+
+impl From<ComputeError> for SurfaceJobError {
+    fn from(error: ComputeError) -> Self {
+        Self::Compute(error)
+    }
+}
+
+/// The surface service's counters: the cache's size and use, and the passes that filled it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct SurfaceCounters {
+    cache: LruCounters,
+    computed: u64,
+}
+
+impl SurfaceCounters {
+    /// The fields held, the bytes they are charged, the budget, and the hits, misses, evictions
+    /// and refusals so far.
+    ///
+    /// A request that has to compute its field counts two misses, one before its flight and one
+    /// inside it, which looks again in case another flight finished meanwhile; one that joins a
+    /// flight in progress counts one.
+    #[must_use]
+    pub fn cache(&self) -> LruCounters {
+        self.cache
+    }
+
+    /// Coarse passes run to their end so far.
+    ///
+    /// Callers that ask for one body's field at once count one pass between them. A refused body
+    /// (no solid surface, inputs not modelled) runs none.
+    #[must_use]
+    pub fn computed(&self) -> u64 {
+        self.computed
+    }
+}
+
+/// The level of a body's coarse field, which its survey passes index, and whether the field can be
+/// computed now ([`SurfaceService::field_level`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum FieldLevel {
+    /// The service's source gives the body's inputs: its field is at this level, the one their
+    /// radius gives, and can be computed.
+    Modelled(CoarseLevel),
+    /// The source answers that a section of the record the coarse pass reads is not modelled, so
+    /// the body has no field yet. Its passes are still Knowledge, kept at the level of the
+    /// record's figure, whose volumetric radius is the one the inputs will read once the section
+    /// is modelled (R09.T19.a, ruled 2026-10-13).
+    NotModelled {
+        /// The level the figure's radius gives.
+        level: CoarseLevel,
+        /// The section the pass needs.
+        section: RecordSection,
+    },
+}
+
+impl FieldLevel {
+    /// The level the body's cells are indexed at.
+    #[must_use]
+    pub(crate) const fn level(self) -> CoarseLevel {
+        match self {
+            Self::Modelled(level) | Self::NotModelled { level, .. } => level,
+        }
+    }
+}
+
+/// What makes and keeps the fields: shared by the service and the tasks its prefetches run.
+#[derive(Debug, Clone)]
+struct Fields {
+    pool: Arc<CpuPool>,
+    /// Where every field's inputs come from.
+    source: Arc<dyn InputsSource>,
+    held: Arc<FieldCache>,
+    flights: Arc<SingleFlight<FieldKey, CoarseField, SurfaceJobError>>,
+    /// The coarse passes allowed to run at once, a permit each (rendering plan R09, R09.T17.a): a
+    /// pass takes its permit in its flight, before its bulk job is queued, or a system's prefetch
+    /// takes it before the flight ([`prefetch_permit`]), and the job holds it until it ends,
+    /// however it ends. Never closed.
+    passes: Arc<Semaphore>,
+    /// The permits `passes` was made with.
+    bound: usize,
+    /// Woken whenever a pass's permit is freed ([`PassPermit`]), for the prefetches waiting to
+    /// take one.
+    released: Arc<Notify>,
+    /// The promotions of the prefetched passes in flight, by key ([`Registered`]): an asked request
+    /// that joins one raises it, so that its job moves from the background queue to the bulk queue
+    /// (R09.T17).
+    promotions: Arc<Mutex<HashMap<FieldKey, Promotion>>>,
+    computed: Arc<AtomicU64>,
+}
+
+/// Every body's coarse field, computed once on the CPU pool and kept in one byte budget (the
+/// [module](super) documentation).
+pub struct SurfaceService {
+    fields: Fields,
+    /// The passes started by [`prefetch`](Self::prefetch), each waited on by a task of its own so
+    /// that its flight lives with no request waiting, and the systems' prefetches
+    /// ([`prefetch_system`](Self::prefetch_system)); aborted by
+    /// [`stop_prefetching`](Self::stop_prefetching), at the server's shutdown, or when the service
+    /// is dropped, and a system's when its [`SystemPrefetch`] is dropped.
+    prefetching: Mutex<JoinSet<()>>,
+    /// Each universe's survey log, opened once ([`survey_log`](Self::survey_log)).
+    surveys: Arc<Mutex<HashMap<UniverseId, SurveyLog>>>,
+    /// The survey logs being opened, so that two first requests of a universe open its log once.
+    opening: SingleFlight<UniverseId, SurveyLog, Arc<LoadKnowledgeError>>,
+    /// Each universe's raised revisions, made by the first of its scene subscriptions or its log's
+    /// opening, whichever comes first, and given to the log when it opens
+    /// ([`watch_surveys`](Self::watch_surveys)).
+    raised: Arc<Mutex<HashMap<UniverseId, watch::Sender<RaisedRevisions>>>>,
+    /// Each universe's scratch survey log, the passes of training, made on its first use
+    /// ([`scratch_surveys`](Self::scratch_surveys)).
+    scratch: Mutex<HashMap<UniverseId, ScratchSurveyLog>>,
+}
+
+impl SurfaceService {
+    /// A service that computes its fields on `pool` from the inputs `source` gives, keeping at
+    /// most `budget_bytes` of them and running at most `passes` coarse passes at once.
+    ///
+    /// A budget of zero keeps nothing: every request computes its field, though requests made at
+    /// once still share one pass.
+    ///
+    /// The server gives `passes` from
+    /// [`ServerConfig::surface_passes`](crate::ServerConfig::surface_passes), by default the lesser
+    /// of 4 and the pool's workers less one, at least 1 (rendering plan R09, R09.T17.a;
+    /// decision-r09-pass-cost §C): a level-8 pass peaks at 408 MB (R09.T16), so four at once hold
+    /// about 1.6 GB, and on a pool of two workers or more one stays free for the interactive jobs
+    /// that the displays' requests wait on. A pass past the bound waits for a permit before its job
+    /// is queued. A bound above [`Semaphore::MAX_PERMITS`] is taken as that many, which bounds
+    /// nothing either.
+    #[must_use]
+    pub fn new(
+        pool: Arc<CpuPool>,
+        source: Arc<dyn InputsSource>,
+        budget_bytes: usize,
+        passes: NonZeroUsize,
+    ) -> Self {
+        // `Semaphore::new` panics above its count's limit, and a bound past it bounds nothing.
+        let bound = passes.get().min(Semaphore::MAX_PERMITS);
+        Self {
+            fields: Fields {
+                pool,
+                source,
+                held: Arc::new(FieldCache::new(budget_bytes)),
+                flights: Arc::new(SingleFlight::new()),
+                passes: Arc::new(Semaphore::new(bound)),
+                bound,
+                released: Arc::new(Notify::new()),
+                promotions: Arc::new(Mutex::new(HashMap::new())),
+                computed: Arc::new(AtomicU64::new(0)),
+            },
+            prefetching: Mutex::new(JoinSet::new()),
+            surveys: Arc::new(Mutex::new(HashMap::new())),
+            opening: SingleFlight::new(),
+            raised: Arc::new(Mutex::new(HashMap::new())),
+            scratch: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// The coarse field of the body `key` names, whose planetary system is `system`: the one held,
+    /// or computed as one bulk job on the pool.
+    ///
+    /// The job reads the body's record at [`RECORD_TIME`], and a moon's planet's with it, takes
+    /// its inputs from the service's source and runs the coarse pass under the body's surface
+    /// seed. Callers that ask for one field at once share the job; if every one of them gives up,
+    /// a job still queued is skipped and nothing is kept.
+    ///
+    /// At most the service's bound of passes run at once ([`new`](Self::new)): past it, the pass
+    /// waits for a permit before its job is queued, and if every caller gives up meanwhile it
+    /// never runs, as a queued job is skipped.
+    ///
+    /// # Errors
+    ///
+    /// - [`SurfaceJobError::Body`] if the key's body index is not in plan 14's layout
+    ///   ([`ResolveBodyError::MalformedIndex`]) or the system holds no body there
+    ///   ([`ResolveBodyError::NoSuchBody`]);
+    /// - [`SurfaceJobError::Inputs`] with [`SurfaceInputsError::NoSolidSurface`] for a body with
+    ///   no surface seed (a ring, a belt or the halo) or none the source finds, and with the
+    ///   source's [`SurfaceInputsError::NotModelled`] or [`SurfaceInputsError::NotResolved`], each
+    ///   in [`ReadCoarseInputsError::Section`]. The record is read at full detail, so
+    ///   `NotResolved` is a bug, which a request answers `internal` (the plan's Risks, T10's
+    ///   record), as is the source's every other [`ReadCoarseInputsError`] and
+    ///   [`ReadCoarseInputsError::PlanetMissing`] for a moon whose planet's record cannot be had;
+    /// - [`SurfaceJobError::Compute`] if the pool is shutting down or faulted, or the job was
+    ///   cancelled, panicked, was dropped with the pool or ran on a worker whose floating-point
+    ///   mode flushes subnormals, which is logged.
+    ///
+    /// None of these is kept: the next request asks again.
+    ///
+    /// # Panics
+    ///
+    /// If `system` is not the planetary system of the key's body in the key's universe, since its
+    /// field would then be kept under another body's key, or if the key's generator version is not
+    /// one this build generates. The server takes both from the request's own universe and body,
+    /// and the registry refuses a universe of another version, so a mismatch is a bug.
+    pub async fn field(
+        &self,
+        key: FieldKey,
+        system: &Arc<GeneratedSystem>,
+    ) -> Result<Arc<CoarseField>, SurfaceJobError> {
+        check_system(key, system);
+        if let Some(field) = self.fields.held.get(&key) {
+            return Ok(field);
+        }
+        self.fields.clone().flight(key, system, Turn::Asked).await
+    }
+
+    /// Starts the field of the body `key` names, whose planetary system is `system`, unless it is
+    /// held, and returns at once whether it started or joined a pass.
+    ///
+    /// The pass runs on the pool at bulk priority through the service's single flight, waited on
+    /// by a task the service owns, and a request made meanwhile joins it. It waits for a permit of
+    /// the service's bound of passes as a requested pass does ([`field`](Self::field)), so a
+    /// prefetch never runs a pass past the bound: it is an asked pass, which `survey_pass` calls
+    /// for a body whose inputs are modelled (R09.T19.a). A scene's ship entering a system starts
+    /// [`prefetch_system`](Self::prefetch_system) instead, which yields to asked passes. It looks
+    /// for the field as a request does, so it counts a hit when the field is held; otherwise a
+    /// miss, and one more inside the flight where it starts the pass, but none there where it
+    /// joins a pass already in flight. A pass that fails is logged (a refused body at `debug`, a
+    /// job that did not run at `warn`), and the next request asks again.
+    ///
+    /// # Panics
+    ///
+    /// As [`field`](Self::field), if `system` is not the key's body's; and outside a Tokio
+    /// runtime, where the task that waits on the pass cannot be spawned.
+    pub fn prefetch(&self, key: FieldKey, system: &Arc<GeneratedSystem>) -> bool {
+        check_system(key, system);
+        if self.fields.held.get(&key).is_some() {
+            return false;
+        }
+        let flight = self.fields.clone().flight(key, system, Turn::Asked);
+        // A body prefetched again during its pass adds one more task awaiting the same flight:
+        // the field is still computed once.
+        self.spawn_prefetch(async move {
+            if let Err(error) = flight.await {
+                log_prefetch_failure(key, error);
+            }
+        });
+        true
+    }
+
+    /// Starts the coarse fields of the bodies of `system`, in the universe of `galaxy`, whose
+    /// inputs the service's source gives, nearest `near` at `t` first, and returns at once the
+    /// prefetch, which is given up when it is dropped (rendering plan R09, R09.T17).
+    ///
+    /// A scene calls it as it enters a system, `near` the ship's place in the system's frame, and
+    /// drops it as the ship leaves or the scene ends (the scene's topic). One bulk job reads the
+    /// plan, as `field_level` reads each body: every body with a surface seed present at `t` (so
+    /// no ring, belt or halo) whose level is `FieldLevel::Modelled` (so no giant, and nothing below
+    /// the serve gate's version with [`RecordInputs`](super::RecordInputs)), by its distance from
+    /// `near`. Each body's field is then had in turn, through the service's single flight, so that
+    /// a request for a body joins its prefetched pass and the prefetch joins an asked one:
+    ///
+    /// - **Its permit.** A prefetched pass takes a permit of the service's bound only while two or
+    ///   more are free (`prefetch_permit`): so it never takes the last one an asked pass could
+    ///   use, or one an asked pass is waiting for, and at most the bound less one run at once.
+    ///   With a bound of one, nothing is prefetched.
+    /// - **Its bytes.** It starts a pass only while the fields it has had, and its passes running
+    ///   at the most bytes a cell it has seen, fit the field cache's budget, the first pass alone
+    ///   until a field's size is known (`PrefetchBudget`), so that its fields never evict one
+    ///   another; it stops at the first that would not fit.
+    /// - **Given up.** Dropped, it gives up its passes: one still waiting for a permit or queued
+    ///   never runs, and none it alone waits on is kept, as a request given up keeps nothing.
+    /// - **Nothing to do.** Under a bound of one, or from a source that models no body
+    ///   ([`InputsSource::models_any_body`], [`RecordInputs`](super::RecordInputs) below the serve
+    ///   gate), it starts nothing and reads no record.
+    ///
+    /// A field held already counts a hit and becomes the most recently used. A pass that fails is
+    /// logged as [`prefetch`](Self::prefetch) logs it.
+    ///
+    /// # Panics
+    ///
+    /// As [`field`](Self::field), if `system` is not a system of the universe of `galaxy` or the
+    /// version is not one this build generates; and outside a Tokio runtime.
+    pub fn prefetch_system(
+        &self,
+        galaxy: GalaxyKey,
+        system: &Arc<GeneratedSystem>,
+        near: SystemPosition,
+        t: UniverseTime,
+    ) -> SystemPrefetch {
+        let planets = &system.1;
+        let surfaced = planets
+            .indices()
+            .into_iter()
+            .find(|&index| matches!(planets.surface_seed(index), Ok(Some(_))))
+            .unwrap_or(BodyIndex::PRIMARY);
+        check_system(
+            FieldKey::new(galaxy, surfaced.body_id(planets.system())),
+            system,
+        );
+        // No permit would ever be left over for a prefetched pass under a bound of one, and no
+        // body's inputs come from a source that models none.
+        if self.fields.bound < 2 || !self.fields.source.models_any_body() {
+            return SystemPrefetch { task: None };
+        }
+        let task = self.spawn_prefetch(prefetch_nearest(
+            self.fields.clone(),
+            galaxy,
+            Arc::clone(system),
+            near,
+            t,
+        ));
+        SystemPrefetch { task: Some(task) }
+    }
+
+    /// Spawns `prefetch` in the service's set of prefetches, reaping those finished first, so that
+    /// the set holds only the prefetches still running.
+    fn spawn_prefetch(&self, prefetch: impl Future<Output = ()> + Send + 'static) -> AbortHandle {
+        let mut tasks = lock(&self.prefetching);
+        while let Some(finished) = tasks.try_join_next() {
+            if let Err(error) = finished
+                && error.is_panic()
+            {
+                tracing::error!(%error, "a coarse pass started by a prefetch panicked");
+            }
+        }
+        tasks.spawn(prefetch)
+    }
+
+    /// The level of the coarse field of the body `key` names, whose planetary system is `system`,
+    /// and whether the field can be computed now, read as one interactive job on the pool.
+    ///
+    /// The job reads what [`field`](Self::field)'s pass reads before it runs: the body's surface
+    /// seed, its record at [`RECORD_TIME`] with a moon's planet's, and its inputs from the
+    /// service's source, so that a survey pass is checked against the field's own cells and a body
+    /// with no field is answered without a bulk slot. Where the source gives inputs, the level is
+    /// their radius's; where it answers [`SurfaceInputsError::NotModelled`], the record's figure's
+    /// ([`FieldLevel::NotModelled`]).
+    ///
+    /// # Errors
+    ///
+    /// - [`SurfaceJobError::Body`] and [`SurfaceJobError::Inputs`], as [`field`](Self::field)
+    ///   gives them, except that a source's [`SurfaceInputsError::NotModelled`] is answered from
+    ///   the record's figure ([`level_from`]): an error naming [`RecordSection::Figure`] only where
+    ///   the figure gives no level either;
+    /// - [`SurfaceJobError::Compute`] if the interactive queue is full or the pool is shutting down
+    ///   or faulted, or the job was cancelled through `token`, panicked or was dropped with the
+    ///   pool.
+    ///
+    /// # Panics
+    ///
+    /// As [`field`](Self::field), if `system` is not the key's body's or the key's generator
+    /// version is not one this build generates.
+    pub(crate) async fn field_level(
+        &self,
+        key: FieldKey,
+        system: &Arc<GeneratedSystem>,
+        token: CancelToken,
+    ) -> Result<FieldLevel, SurfaceJobError> {
+        check_system(key, system);
+        let (source, system) = (Arc::clone(&self.fields.source), Arc::clone(system));
+        let receiver = self
+            .fields
+            .pool
+            .try_submit(Priority::Interactive, token, move |_: &CancelToken| {
+                level_of(source.as_ref(), key, &system)
+            })
+            .map_err(|error| SurfaceJobError::Compute(error.into()))?;
+        receiver
+            .await
+            .unwrap_or_else(|closed| Err(JobError::from(closed)))
+            .map_err(|error| SurfaceJobError::Compute(error.into()))?
+    }
+
+    /// Universe `universe`'s survey log, opened from `store` on its first use and kept, so that its
+    /// file has one writer (R09.T18's record).
+    ///
+    /// Callers that ask at once while it is being opened share one open. The service keeps the log
+    /// until P12.T8's holder of a universe's Knowledge exists and takes it over.
+    ///
+    /// # Errors
+    ///
+    /// [`LoadKnowledgeError`], shared between the callers that waited on the open, as
+    /// [`SurveyLog::open`] gives it; nothing is kept, and the next call opens the log again.
+    pub(crate) async fn survey_log(
+        &self,
+        store: &UniverseStore,
+        universe: UniverseId,
+    ) -> Result<SurveyLog, Arc<LoadKnowledgeError>> {
+        if let Some(log) = lock(&self.surveys).get(&universe) {
+            return Ok(log.clone());
+        }
+        let (surveys, store) = (Arc::clone(&self.surveys), store.clone());
+        let raised = raised_sender(&self.raised, universe);
+        let opened = self
+            .opening
+            .run(universe, move || async move {
+                // As in `flight`: a caller can arrive just after another open has finished and
+                // left the registry, and the log it opened is the one to share.
+                if let Some(log) = lock(&surveys).get(&universe) {
+                    return Ok(Arc::new(log.clone()));
+                }
+                let log = SurveyLog::open_announcing(&store, universe, raised)
+                    .await
+                    .map_err(Arc::new)?;
+                let log = lock(&surveys).entry(universe).or_insert(log).clone();
+                Ok(Arc::new(log))
+            })
+            .await?;
+        Ok(SurveyLog::clone(&opened))
+    }
+
+    /// Universe `universe`'s scratch survey log, the passes of training (`VIEW`'s body
+    /// inspection's; the owner's delegated call, 2026-11-01): made empty on its first use and kept
+    /// while the server runs, never written, and never read for a live request.
+    #[must_use]
+    pub(crate) fn scratch_surveys(&self, universe: UniverseId) -> ScratchSurveyLog {
+        lock(&self.scratch).entry(universe).or_default().clone()
+    }
+
+    /// A receiver of universe `universe`'s [`RaisedRevisions`]: woken whenever a survey pass of one
+    /// of its bodies is recorded, the body's revision raised in it (R09.T19.b).
+    ///
+    /// It holds the revisions raised since the universe's log was opened; the scene topic reads
+    /// what it holds when a subscription opens as already told, and tells its subscriber of each
+    /// body raised past that. The channel is made here if the universe has none yet, and the log
+    /// is given it when it opens, so a scene subscribed before the universe's first survey pass is
+    /// told of it.
+    #[must_use]
+    pub(crate) fn watch_surveys(&self, universe: UniverseId) -> watch::Receiver<RaisedRevisions> {
+        raised_sender(&self.raised, universe).subscribe()
+    }
+
+    /// Stops waiting on the passes [`prefetch`](Self::prefetch) and the systems' prefetches
+    /// ([`prefetch_system`](Self::prefetch_system)) started.
+    ///
+    /// Each is given up unless a request waits on it too, and its job, if still queued, is
+    /// skipped. For the server's shutdown, before its pool stops. It does not wait for the waiters
+    /// to end: each is aborted at its next poll.
+    pub(crate) fn stop_prefetching(&self) {
+        lock(&self.prefetching).abort_all();
+    }
+
+    /// The fields held, the bytes they are charged, their use, and the passes computed so far.
+    #[must_use]
+    pub fn counters(&self) -> SurfaceCounters {
+        SurfaceCounters {
+            cache: self.fields.held.counters(),
+            computed: self.fields.computed.load(Ordering::Relaxed),
+        }
+    }
+
+    /// The fields whose passes someone still waits on, for the tests of the service's callers.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn computing(&self) -> usize {
+        self.fields.flights.len()
+    }
+}
+
+impl Fields {
+    /// The pass of `key`'s field, joined if one is in progress: it looks for the field once more
+    /// inside the flight, has a permit of the bound of passes as `turn` says, then computes the
+    /// field as one bulk job, which holds the permit, and keeps it. A flight joined, or one that
+    /// finds the field held, drops a permit `turn` brings, which frees it.
+    ///
+    /// A prefetched pass's job waits in the background queue under a promotion registered for
+    /// `key` while its flight lives. An asked flight raises the promotion registered for its key,
+    /// so that a prefetched pass it joins, still queued, moves to the bulk queue (R09.T17).
+    fn flight(
+        self,
+        key: FieldKey,
+        system: &Arc<GeneratedSystem>,
+        turn: Turn,
+    ) -> Flight<CoarseField, SurfaceJobError> {
+        let Self {
+            pool,
+            source,
+            held,
+            flights,
+            passes,
+            bound: _,
+            released,
+            promotions,
+            computed,
+        } = self;
+        let system = Arc::clone(system);
+        // Registered before the flight exists, so that no asked request can join it unseen; a
+        // flight that joins another drops it at once, which removes it.
+        let registered =
+            matches!(turn, Turn::Prefetched(_)).then(|| Registered::new(&promotions, key));
+        let asked_pool = matches!(turn, Turn::Asked).then(|| Arc::clone(&pool));
+        let flight = flights.run(key, move || async move {
+            // As in `SkyTablesService::flight`: a caller can arrive just after another flight has
+            // finished and left the registry, and the field it computed is worth more than a
+            // second pass. The look is counted, since `SharedByteLru` has no uncounted lookup.
+            if let Some(field) = held.get(&key) {
+                return Ok(field);
+            }
+            let token = CancelToken::new();
+            // Cancels the pass's queued job once every waiter on this flight has gone.
+            let _cancel_on_drop = CancelOnDrop::new(token.clone());
+            let asked = Instant::now();
+            // Waited for before the job is queued, so that a pass past the bound holds no place in
+            // the bulk queue (R09.T17.a), and counted in `waited_ms`. Tokio's acquire is
+            // cancel-safe: a flight whose every waiter goes while it waits drops the wait, and its
+            // pass never runs, as a queued job is skipped. A prefetched pass is queued behind every
+            // asked one, in the background queue (R09.T17).
+            let (permit, priority) = match turn {
+                Turn::Asked => (
+                    PassPermit::new(
+                        passes
+                            .acquire_owned()
+                            .await
+                            .expect("the service never closes its passes' semaphore"),
+                        released,
+                    ),
+                    Priority::Bulk,
+                ),
+                Turn::Prefetched(permit) => (permit, Priority::Background),
+            };
+            let helpers = Arc::clone(&pool);
+            let job = move |_: &CancelToken| {
+                // The job holds the permit, not the flight, so that it is freed when the job ends
+                // however it ends: run to its end, or panicked (dropped as the pool's
+                // `catch_unwind` unwinds), or dropped unrun (cancelled, refused, or with the pool).
+                // A flight given up while its job runs leaves the job, and its pass's memory, still
+                // counted.
+                let _permit = permit;
+                let started = Instant::now();
+                compute(source.as_ref(), key, &system, (&helpers, priority))
+                    .map(|field| (field, started.elapsed()))
+            };
+            let done = match &registered {
+                Some(registered) => {
+                    promotable(&pool, registered.promotion.clone(), &token, job).await
+                }
+                None => queued(&pool, priority, &token, job).await,
+            };
+            let (field, pass) = done.inspect_err(|error| log_refusal(key, *error))??;
+            let field = Arc::new(field);
+            computed.fetch_add(1, Ordering::Relaxed);
+            tracing::info!(
+                seed = %SeedHex::from_u64(key.galaxy().seed()),
+                generator_version = %key.galaxy().generator_version(),
+                body = %key.body(),
+                level = field.header().level().get(),
+                pass_ms = pass.as_secs_f64() * 1e3,
+                waited_ms = asked.elapsed().saturating_sub(pass).as_secs_f64() * 1e3,
+                heap_mib = field.heap_bytes() / (1 << 20),
+                "computed a body's coarse field"
+            );
+            // A field larger than the whole budget is handed back and not kept; the waiters get it
+            // either way.
+            drop(held.insert(key, Arc::clone(&field)));
+            Ok(field)
+        });
+        if let Some(pool) = asked_pool {
+            let registered = lock(&promotions).get(&key).cloned();
+            if let Some(promotion) = registered {
+                pool.promote(&promotion);
+            }
+        }
+        flight
+    }
+}
+
+/// A prefetched flight's promotion, registered under its key in [`Fields::promotions`] while it
+/// lives, and removed when it is dropped, with the flight or in place of one that joins another.
+struct Registered {
+    promotions: Arc<Mutex<HashMap<FieldKey, Promotion>>>,
+    key: FieldKey,
+    promotion: Promotion,
+}
+
+impl Registered {
+    /// Registers a new promotion under `key` in `promotions`.
+    #[must_use]
+    fn new(promotions: &Arc<Mutex<HashMap<FieldKey, Promotion>>>, key: FieldKey) -> Self {
+        let promotion = Promotion::new();
+        lock(promotions).insert(key, promotion.clone());
+        Self {
+            promotions: Arc::clone(promotions),
+            key,
+            promotion,
+        }
+    }
+}
+
+impl Drop for Registered {
+    /// Removes the promotion, unless another flight's has taken its key since.
+    fn drop(&mut self) {
+        let mut promotions = lock(&self.promotions);
+        if promotions
+            .get(&self.key)
+            .is_some_and(|held| held.same_as(&self.promotion))
+        {
+            promotions.remove(&self.key);
+        }
+    }
+}
+
+impl fmt::Debug for SurfaceService {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let prefetching = lock(&self.prefetching).len();
+        f.debug_struct("SurfaceService")
+            .field("source", &self.fields.source)
+            .field("counters", &self.counters())
+            .field("computing", &self.fields.flights.len())
+            .field("passes_free", &self.fields.passes.available_permits())
+            .field("prefetching", &prefetching)
+            .field("survey_logs", &lock(&self.surveys).len())
+            .field("scratch_survey_logs", &lock(&self.scratch).len())
+            .finish_non_exhaustive()
+    }
+}
+
+/// A system's prefetch of its bodies' coarse fields ([`SurfaceService::prefetch_system`]): given
+/// up when dropped.
+#[derive(Debug)]
+#[must_use = "a system's prefetch is given up when it is dropped"]
+pub struct SystemPrefetch {
+    /// The prefetch's task, or `None` where it has nothing to do.
+    task: Option<AbortHandle>,
+}
+
+impl Drop for SystemPrefetch {
+    /// Aborts the prefetch's task at its next poll, which drops its waits: a pass still waiting
+    /// for a permit or queued is then skipped, unless a request waits on it too.
+    fn drop(&mut self) {
+        if let Some(task) = &self.task {
+            task.abort();
+        }
+    }
+}
+
+/// How a flight's pass has its permit of the service's bound.
+enum Turn {
+    /// Asked for (a request's [`SurfaceService::field`], or `survey_pass`'s
+    /// [`SurfaceService::prefetch`]): the flight waits for its permit in the semaphore's queue.
+    Asked,
+    /// Started by a system's prefetch with the permit it took ([`prefetch_permit`]); its job is
+    /// queued at [`Priority::Background`], behind every asked pass's.
+    Prefetched(PassPermit),
+}
+
+/// A coarse pass's permit of the service's bound, which wakes the prefetches waiting to take one
+/// when it is freed.
+struct PassPermit {
+    permit: Option<OwnedSemaphorePermit>,
+    released: Arc<Notify>,
+}
+
+impl PassPermit {
+    #[must_use]
+    fn new(permit: OwnedSemaphorePermit, released: Arc<Notify>) -> Self {
+        Self {
+            permit: Some(permit),
+            released,
+        }
+    }
+}
+
+impl Drop for PassPermit {
+    fn drop(&mut self) {
+        // Freed before the prefetches are woken, so that the one that looks finds it free.
+        drop(self.permit.take());
+        self.released.notify_waiters();
+    }
+}
+
+/// A permit of `passes` for a prefetched pass, taken only while two or more are free (rendering
+/// plan R09, R09.T17).
+///
+/// So a prefetch never takes the last permit an asked pass could use, nor one an asked pass waits
+/// for: Tokio's semaphore is fair, and gives each permit freed to the passes waiting in its queue
+/// before any is free. At most the bound less one prefetched passes then hold permits at once, and
+/// none under a bound of one. Cancel-safe: dropped while it waits, it holds nothing.
+async fn prefetch_permit(passes: &Arc<Semaphore>, released: &Arc<Notify>) -> PassPermit {
+    loop {
+        let freed = released.notified();
+        let mut freed = pin!(freed);
+        // Waiting before the look, so that a permit freed after it wakes this prefetch.
+        freed.as_mut().enable();
+        if let Ok(mut two) = Arc::clone(passes).try_acquire_many_owned(2) {
+            // The second was taken only to know that it was free, and goes back at once.
+            let spare = two.split(1).expect("two permits split into one and one");
+            drop(PassPermit::new(spare, Arc::clone(released)));
+            return PassPermit::new(two, Arc::clone(released));
+        }
+        freed.await;
+    }
+}
+
+/// What a system's prefetch may still start: the field cache's budget, less the fields it has had
+/// and an estimate of each pass it has running, so that its own fields never evict one another
+/// (rendering plan R09, R09.T17).
+///
+/// A field's size is known only once it is computed, so a pass is estimated at the most bytes a
+/// cell of any field the prefetch has had so far, over its level's cells; until it has had one,
+/// its first pass runs alone.
+#[derive(Debug)]
+struct PrefetchBudget {
+    budget: usize,
+    /// The bytes the fields it has had are charged in the cache.
+    had: usize,
+    /// The estimates of its passes running.
+    reserved: usize,
+    running: usize,
+    /// The field with the most bytes charged a cell so far: its charge and its cells.
+    densest: Option<(usize, u32)>,
+}
+
+/// Whether a system's prefetch starts its next body's pass ([`PrefetchBudget::admits`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Admission {
+    /// Now, its field estimated at this many bytes.
+    Start(usize),
+    /// Once a pass running ends: its size, or the bytes it frees from the estimates, decide.
+    AfterRunning,
+    /// Never: it would not fit with nothing running.
+    Stop,
+}
+
+impl PrefetchBudget {
+    #[must_use]
+    fn new(budget: usize) -> Self {
+        Self {
+            budget,
+            had: 0,
+            reserved: 0,
+            running: 0,
+            densest: None,
+        }
+    }
+
+    /// Whether the pass of a field at `level` may start.
+    #[must_use]
+    fn admits(&self, level: CoarseLevel) -> Admission {
+        let Some((charge, cells)) = self.densest else {
+            return if self.running == 0 {
+                Admission::Start(0)
+            } else {
+                Admission::AfterRunning
+            };
+        };
+        let estimate = charge
+            .saturating_mul(usize::try_from(level.cell_count()).unwrap_or(usize::MAX))
+            .div_ceil(usize::try_from(cells).unwrap_or(usize::MAX).max(1));
+        if self
+            .had
+            .saturating_add(self.reserved)
+            .saturating_add(estimate)
+            <= self.budget
+        {
+            Admission::Start(estimate)
+        } else if self.running > 0 {
+            Admission::AfterRunning
+        } else {
+            Admission::Stop
+        }
+    }
+
+    /// A pass estimated at `estimate` bytes has started, or a flight in progress been joined.
+    fn started(&mut self, estimate: usize) {
+        self.running += 1;
+        self.reserved = self.reserved.saturating_add(estimate);
+    }
+
+    /// A pass estimated at `estimate` has ended, with `field` if it gave one.
+    fn ended(&mut self, estimate: usize, field: Option<&CoarseField>) {
+        self.running -= 1;
+        self.reserved = self.reserved.saturating_sub(estimate);
+        if let Some(field) = field {
+            self.had_field(field);
+        }
+    }
+
+    /// The prefetch has had `field`, computed or held: kept unless it is larger than the whole
+    /// budget, which the cache refuses.
+    fn had_field(&mut self, field: &CoarseField) {
+        let charge = FieldCache::charge(field);
+        if charge <= self.budget {
+            self.had = self.had.saturating_add(charge);
+        }
+        let cells = field.header().level().cell_count();
+        let denser = self.densest.is_none_or(|(most, of)| {
+            charge.saturating_mul(usize::try_from(of).unwrap_or(usize::MAX))
+                > most.saturating_mul(usize::try_from(cells).unwrap_or(usize::MAX))
+        });
+        if denser {
+            self.densest = Some((charge, cells));
+        }
+    }
+}
+
+/// A system's prefetch ([`SurfaceService::prefetch_system`]): its plan, on one bulk job, then each
+/// body's field in the plan's order, as its budget and its permits allow.
+async fn prefetch_nearest(
+    fields: Fields,
+    galaxy: GalaxyKey,
+    system: Arc<GeneratedSystem>,
+    near: SystemPosition,
+    t: UniverseTime,
+) {
+    let token = CancelToken::new();
+    // Cancels the plan's job, if still queued, once the prefetch is given up.
+    let _cancel_on_drop = CancelOnDrop::new(token.clone());
+    let (source, planned) = (Arc::clone(&fields.source), Arc::clone(&system));
+    let plan = match queued(
+        &fields.pool,
+        Priority::Background,
+        &token,
+        move |token: &CancelToken| {
+            nearest_modelled(source.as_ref(), galaxy, &planned, near, t, token)
+        },
+    )
+    .await
+    {
+        Ok(plan) => plan,
+        Err(error) => {
+            tracing::warn!(
+                system = %system.1.system(),
+                ?error,
+                "a system's coarse fields were not prefetched"
+            );
+            return;
+        }
+    };
+    let mut budget = PrefetchBudget::new(fields.held.counters().budget());
+    let mut running = FuturesUnordered::<BoxFuture<'static, Awaited>>::new();
+    let mut next = plan.iter().copied().peekable();
+    while let Some(&(key, level)) = next.peek() {
+        if let Some(field) = fields.held.get(&key) {
+            budget.had_field(&field);
+            next.next();
+            continue;
+        }
+        let estimate = match budget.admits(level) {
+            Admission::Start(estimate) => estimate,
+            Admission::AfterRunning => {
+                let Some((estimate, field)) = running.next().await else {
+                    break;
+                };
+                budget.ended(estimate, field.as_deref());
+                continue;
+            }
+            Admission::Stop => break,
+        };
+        // A pass in flight, asked for or another scene's, is joined without a permit.
+        let flight = if let Some(flight) = fields.flights.join(&key) {
+            flight
+        } else {
+            let permit = tokio::select! {
+                permit = prefetch_permit(&fields.passes, &fields.released) => permit,
+                Some((estimate, field)) = running.next(), if !running.is_empty() => {
+                    budget.ended(estimate, field.as_deref());
+                    continue;
+                }
+            };
+            fields
+                .clone()
+                .flight(key, &system, Turn::Prefetched(permit))
+        };
+        budget.started(estimate);
+        running.push(awaited(key, estimate, flight).boxed());
+        next.next();
+    }
+    while let Some((estimate, field)) = running.next().await {
+        budget.ended(estimate, field.as_deref());
+    }
+    tracing::debug!(
+        system = %system.1.system(),
+        planned = plan.len(),
+        had_mib = budget.had / (1 << 20),
+        "prefetched a system's coarse fields"
+    );
+}
+
+/// What a system's prefetch had of one body's pass: its estimate, with its field, or `None` with
+/// the failure logged.
+type Awaited = (usize, Option<Arc<CoarseField>>);
+
+/// The wait of a system's prefetch on one body's pass.
+async fn awaited(
+    key: FieldKey,
+    estimate: usize,
+    flight: Flight<CoarseField, SurfaceJobError>,
+) -> Awaited {
+    // A flight's waiters panic with its computation, a bug, which should not end the system's
+    // prefetch with it.
+    let field = match AssertUnwindSafe(flight).catch_unwind().await {
+        Ok(Ok(field)) => Some(field),
+        Ok(Err(error)) => {
+            log_prefetch_failure(key, error);
+            None
+        }
+        Err(payload) => {
+            tracing::error!(
+                body = %key.body(),
+                panic = %panic_message(payload.as_ref()),
+                "a coarse pass started by a prefetch panicked"
+            );
+            None
+        }
+    };
+    (estimate, field)
+}
+
+/// The bodies of `system`, in the universe of `galaxy`, whose fields its prefetch has, with their
+/// levels, nearest `near` at `t` first (by index where two are as near): each body with a surface
+/// seed present at `t` whose level [`level_of`] reads from `source` as [`FieldLevel::Modelled`],
+/// a body it refuses logged. It reads no further once `token` is cancelled.
+#[must_use]
+fn nearest_modelled(
+    source: &dyn InputsSource,
+    galaxy: GalaxyKey,
+    system: &GeneratedSystem,
+    near: SystemPosition,
+    t: UniverseTime,
+    token: &CancelToken,
+) -> Vec<(FieldKey, CoarseLevel)> {
+    let (ctx, planets) = system;
+    let mut by_distance: Vec<(f64, BodyIndex)> = planets
+        .indices()
+        .into_iter()
+        .filter(|&index| matches!(planets.surface_seed(index), Ok(Some(_))))
+        .filter_map(|index| {
+            let position = planets.position_at(ctx, index, t).ok().flatten()?;
+            Some((near.displacement_to(&position).length().value(), index))
+        })
+        .collect();
+    by_distance.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+    by_distance
+        .into_iter()
+        .take_while(|_| !token.is_cancelled())
+        .filter_map(|(_, index)| {
+            let key = FieldKey::new(galaxy, index.body_id(planets.system()));
+            match level_of(source, key, system) {
+                Ok(FieldLevel::Modelled(level)) => Some((key, level)),
+                Ok(FieldLevel::NotModelled { .. }) => None,
+                Err(error) => {
+                    log_prefetch_failure(key, error);
+                    None
+                }
+            }
+        })
+        .collect()
+}
+
+/// Logs a prefetch's body that has no field: refused for its own state at `debug`, a fault of the
+/// server's reading of its records at `error`, and a job that did not run at `warn`.
+fn log_prefetch_failure(key: FieldKey, error: SurfaceJobError) {
+    match error {
+        SurfaceJobError::Body(_) | SurfaceJobError::Inputs(ReadCoarseInputsError::Section(_)) => {
+            tracing::debug!(
+                body = %key.body(),
+                ?error,
+                "a prefetched body has no coarse field"
+            );
+        }
+        SurfaceJobError::Inputs(
+            ReadCoarseInputsError::PlanetMissing(_)
+            | ReadCoarseInputsError::NotItsPlanet { .. }
+            | ReadCoarseInputsError::NotAtRecordTime
+            | ReadCoarseInputsError::SeasonalOrbit(_)
+            | ReadCoarseInputsError::Build(_),
+        ) => {
+            tracing::error!(
+                body = %key.body(),
+                ?error,
+                "a prefetched body's coarse-pass inputs could not be read from its records"
+            );
+        }
+        SurfaceJobError::Compute(_) => {
+            tracing::warn!(
+                body = %key.body(),
+                ?error,
+                "a prefetched body's coarse field was not computed"
+            );
+        }
+    }
+}
+
+/// Panics unless `system` is the planetary system of `key`'s body in `key`'s universe: its system
+/// ID is the body's, and where the body has a surface seed, it is the one the key's universe draws
+/// for the body, so the system was generated from that universe's seed (a viewer system's, from
+/// its own inputs' seed, rendering plan R15); and unless the key's
+/// generator version is one this build generates, as the galaxy cache requires, so that no field
+/// is kept under another version's key.
+fn check_system(key: FieldKey, system: &GeneratedSystem) {
+    assert!(
+        key.galaxy().generator_version().is_supported(),
+        "asked for a coarse field of generator version {}, which this build cannot generate",
+        key.galaxy().generator_version()
+    );
+    let planets = &system.1;
+    assert_eq!(
+        planets.system(),
+        key.body().system(),
+        "a body's coarse field is computed from its own system, and this is another's"
+    );
+    // A viewer system's streams are its inputs' seed's (rendering plan R15); every other's the
+    // universe's.
+    let seed = if is_viewer_system(planets.system()) {
+        planets.seed()
+    } else {
+        Seed::new(key.galaxy().seed())
+    };
+    if let Ok(index) = BodyIndex::try_from(key.body().body_index())
+        && let Ok(Some(drawn)) = planets.surface_seed(index)
+    {
+        assert_eq!(
+            drawn,
+            surface_seed(seed, key.body()),
+            "a body's coarse field is computed from its own universe's system, and this is another \
+             universe's"
+        );
+    }
+}
+
+/// The coarse field of `key`'s body in `system`, on the pool: the body's surface seed and its
+/// record at [`RECORD_TIME`] with a moon's planet's, the inputs `source` reads from them, the
+/// pass, its independent tasks spread over `pool`'s free workers at `priority` ([`PoolSpread`]),
+/// and the albedo scale on its classes ([`field_albedo_scale`], R10.T10.a), from the record's
+/// photometry and the body's detail seed.
+///
+/// # Errors
+///
+/// [`SurfaceJobError::Body`] and [`SurfaceJobError::Inputs`], as [`SurfaceService::field`] gives
+/// them; and [`SurfaceJobError::Compute`] with [`JobError::FloatingPointMode`] where a worker that
+/// ran one of the pass's tasks flushes subnormals, which is logged.
+fn compute(
+    source: &dyn InputsSource,
+    key: FieldKey,
+    system: &GeneratedSystem,
+    (pool, priority): (&Arc<CpuPool>, Priority),
+) -> Result<CoarseField, SurfaceJobError> {
+    let (seed, record, planet) = surface_record(key, system)?;
+    let inputs = source
+        .inputs(&record, planet.as_ref(), &system.0)
+        .map_err(SurfaceJobError::Inputs)?;
+    let spread = PoolSpread::new(Arc::clone(pool), priority);
+    let field = coarse_pass_spread(seed, &inputs, &spread);
+    if spread.flushed() {
+        let error = ComputeError::Job(JobError::FloatingPointMode);
+        log_refusal(key, error);
+        return Err(SurfaceJobError::Compute(error));
+    }
+    // The seed the client synthesises the ground with, from the record's hooks section, which
+    // carries it to the client (R09.T1.b); a body with a surface has one, and where it is not given
+    // it is the same derivation.
+    let detail = match record.hooks() {
+        Section::Ok(hooks) => hooks.detail_seed(),
+        Section::NotModelled | Section::NotResolved | Section::NotApplicable => {
+            detail_seed(system.1.seed(), key.body())
+        }
+    };
+    let scale = field_albedo_scale(&field, record.photometry(), detail);
+    Ok(field
+        .with_albedo_scale(scale)
+        .expect("a solved albedo scale is finite and positive"))
+}
+
+/// The albedo scale `FieldHeader::albedo_scale` carries for `field`, whose body's photometry is
+/// `photometry` and detail seed `detail` (rendering plan R10, T10.a; Design note 8): the one scale
+/// on its class albedos ([`exposed_albedo_scale`]) that makes its materials' area fractions over
+/// every cell ([`class_fractions`]) give the body's geometric albedo, fitted in V; or `None`,
+/// which means the palette entries' albedos as resolved, unscaled.
+///
+/// It is `None` (main's rulings, 2026-10-14), never fitting the ground to a cloud deck's p:
+/// - where the photometry is not `Ok` (not modelled, withheld or not applicable): there is no p to
+///   fit;
+/// - where the field's surface pressure is at or above [`THIN_ATMOSPHERE_PRESSURE`], 30 kPa, the
+///   photometry's own threshold below which the gas cannot hide the ground: above it plan 14's p is
+///   the cloudy disc's (Earth's template), whose reflectance R08.T16.b computes from the medium
+///   over the ground, so a scale fitted to it would make the ground stand in for the clouds;
+/// - where the photometry's law has no ground term, its Lommel–Seeliger share
+///   ([`BodyPhotometry::lunar_lambert_share`]) 0, at any pressure: Venus's template, which a
+///   runaway greenhouse takes whatever its pressure, Earth's and the giants', each a cloud deck's
+///   (plan 14's templates, P14.T47.b; R07's Design note 5);
+/// - where the palette names no substance for any of the ground, so nothing has an albedo to
+///   scale.
+///
+/// So the scale is solved for the Mercury, Moon, airless-ice, Mars, thin magma-ocean and snowball
+/// templates below 30 kPa. A photometry whose p is not positive, or a material past the palette, is
+/// a bug, logged at `error`, and gives `None` too.
+///
+/// The materials' albedos are those the ground exposes at the header's maturity and organic cover
+/// ([`exposed_albedo_scale`] at [`GroundExposure::of_header`], R10.T1.c's shared function): where
+/// the header carries the ground's space-weathering maturity, the scale is solved on the albedos
+/// weathered to it (R10.T1.d's law, `Melt` kept fresh), blended with the cover where an entry takes
+/// one, so that the scale never undoes the weathering: R10 draws c × the weathered albedo
+/// (decision-p14-t51d-weathering §1.5), and the worker's photometry draws the same function's
+/// albedos at the same exposure. Without either, it is solved on the palette's albedos as they
+/// are, as before.
+///
+/// Where the header carries a maturity and a weathering rate, the scale is solved over the body's
+/// maturity mix ([`maturity_mix`], from the field's [`Synthesiser`]: its young craters' haloes,
+/// the coarse list's and the small craters' octaves', in closed form), each material a term at
+/// each of the mix's maturities ([`haloed_albedo_scale`]; decision-r10-t1c-halo R1), so that the
+/// body's drawn mean brightness, its ground drawn at each point's own maturity, stays its p: at
+/// `m_body` alone a young body would be drawn about 5% brighter (5.2% and 5.7% on the testing
+/// Moon-like world at 3.5 and 1 Gyr, plan R10's Risks). Where no crater leaves a
+/// deficit, or a material's albedo does not move with the maturity, the solve is the halo-free one
+/// to the bit; without a maturity it is [`exposed_albedo_scale`] as above.
+///
+/// It reads every cell, about 20 µs each (provisional: R10's Risks, "Deviations in T10.a, as
+/// built"), and the mix some tens of milliseconds more (R10's Risks, "Deviations in T1.c's halo
+/// follow-up, as built"), and runs on the pool with the pass.
+///
+/// # Panics
+///
+/// Never: a coarse field holds every cell its classes read. The synthesis panics on a height that
+/// is not finite, a bug.
+#[must_use]
+pub fn field_albedo_scale(
+    field: &CoarseField,
+    photometry: &Section<BodyPhotometry>,
+    detail: DetailSeed,
+) -> Option<f64> {
+    let Section::Ok(photometry) = photometry else {
+        return None;
+    };
+    let header = field.header();
+    if header.surface_pressure().value() >= THIN_ATMOSPHERE_PRESSURE.value()
+        || photometry.lunar_lambert_share() <= 0.0
+    {
+        return None;
+    }
+    let p = photometry.geometric_albedo();
+    let synth = Synthesiser::new(field, detail);
+    let fractions = class_fractions(&synth, &mut SynthCache::new())
+        .expect("a coarse field holds every cell its classes read");
+    let (palette, exposure, target) = (
+        header.palette(),
+        GroundExposure::of_header(header),
+        [p.b, p.v, p.r],
+    );
+    let solved = match maturity_mix(&synth) {
+        Some(mix) => haloed_albedo_scale(&fractions, palette, exposure, &mix, target),
+        None => exposed_albedo_scale(&fractions, palette, exposure, target),
+    };
+    match solved {
+        Ok(scale) => Some(scale.scale()),
+        Err(SolveAlbedoScaleError::NoNamedGround) => None,
+        Err(
+            error @ (SolveAlbedoScaleError::GeometricAlbedo { .. }
+            | SolveAlbedoScaleError::Properties(_)),
+        ) => {
+            tracing::error!(
+                body = ?header.body(),
+                %error,
+                "the albedo scale of a body's coarse field could not be solved"
+            );
+            None
+        }
+    }
+}
+
+/// The level of the field of `key`'s body in `system`, on the pool, as
+/// [`SurfaceService::field_level`] gives it.
+///
+/// # Errors
+///
+/// As [`SurfaceService::field_level`], but for a pool job's failure.
+fn level_of(
+    source: &dyn InputsSource,
+    key: FieldKey,
+    system: &GeneratedSystem,
+) -> Result<FieldLevel, SurfaceJobError> {
+    let (_, record, planet) = surface_record(key, system)?;
+    level_from(
+        source.inputs(&record, planet.as_ref(), &system.0),
+        record.figure(),
+    )
+}
+
+/// The level of a body's field from what the source answered for it, `inputs`, and its record's
+/// figure section, `figure`.
+///
+/// Inputs give the level of their radius. A section the inputs need that is not modelled gives the
+/// level of the figure's volumetric radius, the radius the inputs will read once the section is
+/// modelled ([`FieldLevel::NotModelled`]).
+///
+/// # Errors
+///
+/// The source's [`SurfaceInputsError::NoSolidSurface`] and [`SurfaceInputsError::NotResolved`],
+/// and its every other [`ReadCoarseInputsError`] (a fault of the server's reading); and where the
+/// source answers [`SurfaceInputsError::NotModelled`], by the figure's state:
+/// [`SurfaceInputsError::NotModelled`] naming [`RecordSection::Figure`] for a figure not
+/// modelled, [`SurfaceInputsError::NotResolved`] naming it for one withheld, which full records
+/// never are, and [`SurfaceInputsError::NoSolidSurface`] for one not applicable, a body absent at
+/// the record's time; each [`SurfaceInputsError`] in [`ReadCoarseInputsError::Section`].
+fn level_from(
+    inputs: Result<CoarseInputs, ReadCoarseInputsError>,
+    figure: &Section<BodyFigure>,
+) -> Result<FieldLevel, SurfaceJobError> {
+    let section = match inputs {
+        Ok(inputs) => return Ok(FieldLevel::Modelled(coarse_level(inputs.radius()))),
+        Err(ReadCoarseInputsError::Section(SurfaceInputsError::NotModelled(section))) => section,
+        Err(
+            error @ (ReadCoarseInputsError::Section(
+                SurfaceInputsError::NoSolidSurface | SurfaceInputsError::NotResolved(_),
+            )
+            | ReadCoarseInputsError::PlanetMissing(_)
+            | ReadCoarseInputsError::NotItsPlanet { .. }
+            | ReadCoarseInputsError::NotAtRecordTime
+            | ReadCoarseInputsError::SeasonalOrbit(_)
+            | ReadCoarseInputsError::Build(_)),
+        ) => {
+            return Err(SurfaceJobError::Inputs(error));
+        }
+    };
+    let error = match figure {
+        Section::Ok(figure) => {
+            return Ok(FieldLevel::NotModelled {
+                level: coarse_level(Metres::new(figure.spheroid().volumetric_radius_m())),
+                section,
+            });
+        }
+        Section::NotModelled => SurfaceInputsError::NotModelled(RecordSection::Figure),
+        Section::NotResolved => SurfaceInputsError::NotResolved(RecordSection::Figure),
+        Section::NotApplicable => SurfaceInputsError::NoSolidSurface,
+    };
+    Err(SurfaceJobError::Inputs(error.into()))
+}
+
+/// The surface seed of `key`'s body in `system`, its record at [`RECORD_TIME`], and the record of
+/// the planet it orbits if it is a moon, the one [`CoarseInputs::planet_of`] names, at the same
+/// time: what the coarse pass reads before its inputs, the two records from one place at one time
+/// (decision-backlog-2 §3.3).
+///
+/// A moon's record already derives its planet's and drops it, so the second fetch repeats that
+/// part; a fetch of both at once is a deferred efficiency (R09's Risks).
+///
+/// # Errors
+///
+/// [`SurfaceJobError::Body`] for an index outside plan 14's layout or one at which the system
+/// holds no body; [`SurfaceJobError::Inputs`] with [`SurfaceInputsError::NoSolidSurface`] (in
+/// [`ReadCoarseInputsError::Section`]) for a body with no surface seed (a ring, a belt or the
+/// halo), and with [`ReadCoarseInputsError::PlanetMissing`] for a moon whose planet does not
+/// resolve, which a moon's own record rules out, so a fault of the server's, logged.
+fn surface_record(
+    key: FieldKey,
+    system: &GeneratedSystem,
+) -> Result<(SurfaceSeed, BodyRecord, Option<BodyRecord>), SurfaceJobError> {
+    let (ctx, planets) = system;
+    let index = BodyIndex::try_from(key.body().body_index())
+        .map_err(|error| SurfaceJobError::Body(ResolveBodyError::MalformedIndex(error)))?;
+    let seed = planets
+        .surface_seed(index)
+        .map_err(SurfaceJobError::Body)?
+        .ok_or(SurfaceJobError::Inputs(ReadCoarseInputsError::Section(
+            SurfaceInputsError::NoSolidSurface,
+        )))?;
+    let record = planets
+        .body_at(ctx, index, RECORD_TIME)
+        .map_err(SurfaceJobError::Body)?;
+    let planet = CoarseInputs::planet_of(&record)
+        .map(|planet| {
+            planets.body_at(ctx, planet, RECORD_TIME).map_err(|error| {
+                tracing::error!(
+                    body = %key.body(),
+                    %error,
+                    "a moon's planet does not resolve in its own system"
+                );
+                SurfaceJobError::Inputs(ReadCoarseInputsError::PlanetMissing(
+                    planet.body_id(planets.system()),
+                ))
+            })
+        })
+        .transpose()?;
+    Ok((seed, record, planet))
+}
+
+/// Universe `universe`'s raised-revisions channel in `raised`, made empty if it has none yet.
+///
+/// A universe's channel is kept for the service's life: it is a few bytes a body surveyed, and a
+/// log opened again after it was dropped (P12.T8's holder) keeps telling the same subscriptions.
+fn raised_sender(
+    raised: &Mutex<HashMap<UniverseId, watch::Sender<RaisedRevisions>>>,
+    universe: UniverseId,
+) -> watch::Sender<RaisedRevisions> {
+    lock(raised).entry(universe).or_default().clone()
+}
+
+/// Takes the survey logs' lock whether or not a holder panicked: each critical section is one map
+/// operation, which leaves the map whole.
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Logs a pass the pool refused or did not finish where it means the server cannot generate at
+/// all: a worker's floating-point mode flushes subnormals (plan R04, Design note 15), which a
+/// request then answers `internal`. The other causes are the requests' own (a cancellation, a
+/// shutdown) or are logged by the pool (a panic).
+fn log_refusal(key: FieldKey, error: ComputeError) {
+    if matches!(
+        error,
+        ComputeError::Job(JobError::FloatingPointMode)
+            | ComputeError::Submit(SubmitJobError::Faulted)
+    ) {
+        tracing::error!(
+            body = %key.body(),
+            %error,
+            "refused a body's coarse field: a cpu worker's floating-point mode flushes subnormals"
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::{Condvar, OnceLock, mpsc};
+    use std::time::Duration;
+
+    use futures_util::FutureExt;
+    use futures_util::future::join3;
+    use hyperion_protocol::{ErrorCode, RequestError};
+    use hyperion_sim::galaxy::Galaxy;
+    use hyperion_sim::galaxy::placement::{CellKey, generate_cell};
+    use hyperion_sim::id::{BodyId, Layer, SystemId};
+    use hyperion_sim::planetary::derive::atmosphere::{RunawayDeck, SurfaceMaterial, SurfaceState};
+    use hyperion_sim::planetary::derive::photometry::{PhaseTemplate, PhotometryInputs};
+    use hyperion_sim::planetary::placement::OrbitHost;
+    use hyperion_sim::planetary::record::{BodyKind, BodyRecord};
+    use hyperion_sim::planetary::surface::{CoarseInputs, coarse_pass, reference};
+    use hyperion_sim::planetary::{DecodeBodyIndexError, SystemContext, generate};
+    use hyperion_sim::time::UniverseTime;
+    use hyperion_sim::units::{
+        Gigayears, Kelvin, MetresPerSecondSquared, Pascals, PerSquareKilometre,
+    };
+    use hyperion_sim::{GENERATOR_VERSION, Seed};
+    use hyperion_surface::craters::{
+        CraterParams, CraterParamsParts, LUNAR_PROJECTILE_DENSITY, LUNAR_TARGET, SOLAR_SYSTEM_AGE,
+        Screening,
+    };
+    use hyperion_surface::field::{
+        Cover, CoverRange, MaterialPalette, MechanicsFamily, PaletteEntry, PaletteRole,
+        ResolutionCode,
+    };
+    use hyperion_surface::material::{Material, MaterialClass, albedo_scale, exposed_properties};
+    use hyperion_surface::substance_key::SubstanceKey;
+    use hyperion_surface::testing::{FieldBuilder, SyntheticWorld, synthetic_field};
+    use hyperion_surface::wire::encode_payload;
+    use tokio::time::timeout;
+
+    use super::*;
+    use crate::compute::sky::bulk;
+    use crate::compute::{FlushProbe, GalaxyKey, JobReceiver, Priority, TwinPriority};
+    use crate::limits::{BULK_QUEUE_CAPACITY, INTERACTIVE_QUEUE_CAPACITY};
+    use crate::testing::WAIT;
+
+    /// The seed of the universe these tests compute fields in, the integration tests' own.
+    const SEED: u64 = 0x4d2;
+
+    fn galaxy() -> &'static Galaxy {
+        static GALAXY: OnceLock<Galaxy> = OnceLock::new();
+        GALAXY.get_or_init(|| Galaxy::new(Seed::new(SEED)))
+    }
+
+    /// The first system of the layer-C cell at the solar circle with three bodies or more that
+    /// have a surface seed (planets and moons), with those bodies.
+    fn system() -> &'static (Arc<GeneratedSystem>, Vec<BodyId>) {
+        static SYSTEM: OnceLock<(Arc<GeneratedSystem>, Vec<BodyId>)> = OnceLock::new();
+        SYSTEM.get_or_init(|| {
+            let mut cell = Vec::new();
+            generate_cell(
+                galaxy(),
+                CellKey::new(Layer::C, [0, 812, 0]).expect("a cell of the grid"),
+                &mut cell,
+            );
+            cell.iter()
+                .find_map(|record| {
+                    let ctx = SystemContext::for_system(galaxy(), record.id()).ok()?;
+                    let planets = generate(Seed::new(SEED), &ctx);
+                    let bodies: Vec<BodyId> = planets
+                        .bodies()
+                        .iter()
+                        .filter(|body| matches!(planets.surface_seed(body.index()), Ok(Some(_))))
+                        .map(|body| body.index().body_id(planets.system()))
+                        .collect();
+                    (bodies.len() >= 3).then(|| (Arc::new((ctx, planets)), bodies))
+                })
+                .expect("a system of the cell has three bodies with a surface seed")
+        })
+    }
+
+    fn key(body: BodyId) -> FieldKey {
+        FieldKey::new(GalaxyKey::new(SEED, GENERATOR_VERSION), body)
+    }
+
+    /// The record of `body` of [`system`] at [`RECORD_TIME`].
+    fn record_of(body: BodyId) -> BodyRecord {
+        let (ctx, planets) = system().0.as_ref();
+        let index = BodyIndex::try_from(body.body_index()).unwrap();
+        planets.body_at(ctx, index, RECORD_TIME).unwrap()
+    }
+
+    /// The field of body `n` of [`system`].
+    fn nth(n: usize) -> FieldKey {
+        key(system().1[n])
+    }
+
+    /// A pool of one worker, which takes its jobs in order.
+    fn one_worker() -> Arc<CpuPool> {
+        workers(1)
+    }
+
+    /// A source that gives every body the reference Ceres, a level-5 field, counting its calls.
+    #[derive(Debug, Default)]
+    struct Counted {
+        calls: AtomicUsize,
+    }
+
+    impl Counted {
+        fn calls(&self) -> usize {
+            self.calls.load(Ordering::SeqCst)
+        }
+    }
+
+    impl InputsSource for Counted {
+        fn inputs(
+            &self,
+            _: &BodyRecord,
+            _: Option<&BodyRecord>,
+            _: &SystemContext,
+        ) -> Result<CoarseInputs, ReadCoarseInputsError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(reference::ceres_like())
+        }
+    }
+
+    /// A service of `budget` bytes on `pool`, its source counted, running one pass at a time, the
+    /// default bound on a pool of one worker.
+    fn service(pool: &Arc<CpuPool>, budget: usize) -> (SurfaceService, Arc<Counted>) {
+        let source = Arc::new(Counted::default());
+        let service = SurfaceService::new(
+            Arc::clone(pool),
+            Arc::clone(&source) as Arc<dyn InputsSource>,
+            budget,
+            NonZeroUsize::MIN,
+        );
+        (service, source)
+    }
+
+    /// Holds the pool's one worker on a job until the sender returned is sent to, so that the jobs
+    /// queued meanwhile wait.
+    async fn hold(pool: &CpuPool) -> (mpsc::Sender<()>, JobReceiver<()>) {
+        let (release, gate) = mpsc::channel::<()>();
+        let held = pool
+            .submit(
+                Priority::Bulk,
+                CancelToken::new(),
+                move |_: &CancelToken| {
+                    gate.recv().expect("the gate is released");
+                },
+            )
+            .await
+            .unwrap();
+        (release, held)
+    }
+
+    /// Waits until the one worker has run every job queued before now.
+    async fn drain(pool: &CpuPool) {
+        let token = CancelToken::new();
+        timeout(WAIT, bulk(pool, &token, |_: &CancelToken| ()))
+            .await
+            .expect("timed out draining the pool")
+            .unwrap();
+    }
+
+    /// How often [`until`] looks again: short beside every state it waits for, a pass entering, a
+    /// job queued or a field held, and long enough that the looking costs nothing measurable. It
+    /// yielded at once before, which spun the test's runtime thread beside the pool's workers: the
+    /// 8.4 s prefetch test took 21.4 CPU-s spinning and 14.8 polling (pod, 2026-11-06).
+    const UNTIL_POLL: Duration = Duration::from_millis(1);
+
+    /// Waits until `ready` holds, looking every [`UNTIL_POLL`].
+    async fn until(what: &str, ready: impl Fn() -> bool) {
+        timeout(WAIT, async {
+            while !ready() {
+                tokio::time::sleep(UNTIL_POLL).await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("timed out waiting until {what}"));
+    }
+
+    /// The whole field as the wire carries it, every cell surveyed: the encoder writes each value's
+    /// bits, so two fields that encode alike are one field, bit for bit.
+    fn payload(field: &CoarseField) -> Vec<u8> {
+        let cells = field.header().level().cell_count();
+        let all = Cover::from_ranges([CoverRange::new(0, cells, ResolutionCode::new(1)).unwrap()])
+            .unwrap();
+        encode_payload(field, &all, None)
+    }
+
+    /// Asserts that `a` and `b` are one field, bit for bit, naming the first byte of their payloads
+    /// that differs, since a field is too large to print.
+    fn assert_same_bits(a: &CoarseField, b: &CoarseField, what: &str) {
+        let (a, b) = (payload(a), payload(b));
+        assert_eq!(a.len(), b.len(), "{what}: the payloads' lengths");
+        assert_eq!(
+            a.iter().zip(&b).position(|(x, y)| x != y),
+            None,
+            "{what}: the payloads' first differing byte"
+        );
+    }
+
+    async fn field(
+        service: &SurfaceService,
+        key: FieldKey,
+    ) -> Result<Arc<CoarseField>, SurfaceJobError> {
+        timeout(WAIT, service.field(key, &system().0))
+            .await
+            .expect("timed out computing a field")
+    }
+
+    /// Two requests for one body's field at once share one pass: one call of the source, one field
+    /// computed and kept, and it is the sim's own pass of the body's surface seed and its inputs.
+    /// The first request looks before its flight and again inside it, the second joins the flight,
+    /// so the three lookups miss; a third request is a hit and computes nothing.
+    #[tokio::test]
+    async fn two_requests_for_one_surface_at_once_compute_it_once() {
+        let pool = one_worker();
+        let (service, source) = service(&pool, 64 << 20);
+        let key = nth(0);
+        let (release, held) = hold(&pool).await;
+        // `join3` polls in order: the first queues the pass behind the held worker, the second
+        // joins its flight, and only then is the worker released.
+        let (one, other, ()) = timeout(
+            WAIT,
+            join3(
+                service.field(key, &system().0),
+                service.field(key, &system().0),
+                async {
+                    release.send(()).unwrap();
+                },
+            ),
+        )
+        .await
+        .expect("timed out computing the field");
+        let (one, other) = (one.unwrap(), other.unwrap());
+        assert!(Arc::ptr_eq(&one, &other), "one pass, shared");
+        timeout(WAIT, held).await.unwrap().unwrap().unwrap();
+        assert_eq!(source.calls(), 1);
+        let counters = service.counters();
+        assert_eq!(counters.computed(), 1, "{counters:?}");
+        assert_eq!(
+            (
+                counters.cache().misses(),
+                counters.cache().hits(),
+                counters.cache().entries(),
+                counters.cache().bytes()
+            ),
+            (3, 0, 1, FieldCache::charge(&one)),
+            "{counters:?}"
+        );
+        let own = coarse_pass(
+            surface_seed(Seed::new(SEED), key.body()),
+            &reference::ceres_like(),
+        );
+        let scale = field_albedo_scale(
+            &own,
+            record_of(key.body()).photometry(),
+            detail_seed(Seed::new(SEED), key.body()),
+        );
+        // Whether this body has a scale is its photometry's (the gate's test, below); the field
+        // served carries the one its record gives.
+        assert_eq!(
+            one.header().albedo_scale().map(f64::to_bits),
+            scale.map(f64::to_bits)
+        );
+        let own = own.with_albedo_scale(scale).unwrap();
+        assert_same_bits(
+            &one,
+            &own,
+            "the field is the sim's pass of the body's seed, with its albedo scale",
+        );
+
+        let again = field(&service, key).await.unwrap();
+        assert!(Arc::ptr_eq(&one, &again), "held");
+        assert_eq!(
+            (
+                service.counters().computed(),
+                service.counters().cache().hits(),
+                source.calls()
+            ),
+            (1, 1, 1)
+        );
+        timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
+    }
+
+    /// The cache holds no more than its budget: with room for two fields, a third body's evicts
+    /// the least recently used, which is computed again when it is asked for again.
+    #[tokio::test]
+    async fn surface_fields_past_the_budget_are_evicted() {
+        let pool = one_worker();
+        let (roomy, _) = service(&pool, 64 << 20);
+        let charge = FieldCache::charge(&field(&roomy, nth(0)).await.unwrap());
+        let budget = 2 * charge + charge / 2;
+        let (service, source) = service(&pool, budget);
+        let first = field(&service, nth(0)).await.unwrap();
+        for n in 1..3 {
+            field(&service, nth(n)).await.unwrap();
+            let cache = service.counters().cache();
+            assert!(
+                cache.bytes() <= budget,
+                "{} bytes held against {budget}",
+                cache.bytes()
+            );
+        }
+        let counters = service.counters();
+        assert_eq!(
+            (
+                counters.computed(),
+                counters.cache().entries(),
+                counters.cache().evictions()
+            ),
+            (3, 2, 1),
+            "{counters:?}"
+        );
+        // The first body's was the least recently used; computed again, it is the same field, bit
+        // for bit.
+        let again = field(&service, nth(0)).await.unwrap();
+        assert_eq!(
+            (service.counters().computed(), source.calls()),
+            (4, 4),
+            "evicted, and computed again"
+        );
+        assert!(!Arc::ptr_eq(&first, &again));
+        assert_same_bits(&first, &again, "computed again");
+        timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
+    }
+
+    /// A budget of nought keeps no field: each request computes its own.
+    #[tokio::test]
+    async fn a_surface_budget_of_nought_keeps_no_field() {
+        let pool = one_worker();
+        let (service, _) = service(&pool, 0);
+        for computed in 1..=2 {
+            field(&service, nth(0)).await.unwrap();
+            let counters = service.counters();
+            assert_eq!(
+                (
+                    counters.computed(),
+                    counters.cache().entries(),
+                    counters.cache().refused()
+                ),
+                (computed, 0, computed),
+                "{counters:?}"
+            );
+        }
+        timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
+    }
+
+    /// A pass every request has given up is given up too: its job, still queued, is skipped, the
+    /// source is never called, and nothing is computed or kept.
+    #[tokio::test]
+    async fn a_cancelled_surface_pass_keeps_nothing() {
+        let pool = one_worker();
+        let (service, source) = service(&pool, 64 << 20);
+        let (release, held) = hold(&pool).await;
+        let mut asking = Box::pin(service.field(nth(0), &system().0));
+        assert!(
+            (&mut asking).now_or_never().is_none(),
+            "the pass waits behind the held worker"
+        );
+        drop(asking);
+        release.send(()).unwrap();
+        timeout(WAIT, held).await.unwrap().unwrap().unwrap();
+        drain(&pool).await;
+        assert_eq!(pool.counters().cancelled(), 1, "{:?}", pool.counters());
+        let counters = service.counters();
+        assert_eq!(
+            (
+                counters.computed(),
+                counters.cache().entries(),
+                source.calls()
+            ),
+            (0, 0, 0),
+            "{counters:?}"
+        );
+        timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
+    }
+
+    /// A source that blocks until released, so that a pass can be given up while it runs.
+    #[derive(Debug)]
+    struct Gated {
+        entered: AtomicUsize,
+        gate: Mutex<mpsc::Receiver<()>>,
+    }
+
+    impl InputsSource for Gated {
+        fn inputs(
+            &self,
+            _: &BodyRecord,
+            _: Option<&BodyRecord>,
+            _: &SystemContext,
+        ) -> Result<CoarseInputs, ReadCoarseInputsError> {
+            self.entered.fetch_add(1, Ordering::SeqCst);
+            self.gate
+                .lock()
+                .unwrap()
+                .recv_timeout(WAIT)
+                .expect("the test releases the pass");
+            Ok(reference::ceres_like())
+        }
+    }
+
+    /// A pass given up while it runs runs to its end, and its field is dropped, not kept: a
+    /// cancelled request leaves nothing behind.
+    #[tokio::test]
+    async fn a_surface_pass_given_up_while_it_runs_keeps_nothing() {
+        let pool = one_worker();
+        let (release, gate) = mpsc::channel::<()>();
+        let source = Arc::new(Gated {
+            entered: AtomicUsize::new(0),
+            gate: Mutex::new(gate),
+        });
+        let service = SurfaceService::new(
+            Arc::clone(&pool),
+            Arc::clone(&source) as Arc<dyn InputsSource>,
+            64 << 20,
+            NonZeroUsize::MIN,
+        );
+        let mut asking = Box::pin(service.field(nth(0), &system().0));
+        assert!((&mut asking).now_or_never().is_none());
+        until("the pass is running", || {
+            source.entered.load(Ordering::SeqCst) == 1
+        })
+        .await;
+        drop(asking);
+        release.send(()).unwrap();
+        drain(&pool).await;
+        let counters = service.counters();
+        assert_eq!(
+            (counters.computed(), counters.cache().entries()),
+            (0, 0),
+            "{counters:?}"
+        );
+        assert!(service.fields.flights.is_empty());
+        timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
+    }
+
+    /// A pass started by a prefetch, with no request waiting, is joined by a request made
+    /// meanwhile: one pass between them. Once the field is held, a prefetch starts nothing and
+    /// counts a hit.
+    #[tokio::test]
+    async fn a_surface_prefetch_is_joined_by_a_request() {
+        let pool = one_worker();
+        let (service, source) = service(&pool, 64 << 20);
+        let key = nth(0);
+        let (release, held) = hold(&pool).await;
+        assert!(
+            service.prefetch(key, &system().0),
+            "the prefetch starts the pass"
+        );
+        until(
+            "the prefetch's pass is queued behind the held worker",
+            || {
+                let counters = pool.counters();
+                (counters.running(), counters.queued_bulk()) == (1, 1)
+            },
+        )
+        .await;
+        let mut asking = Box::pin(service.field(key, &system().0));
+        assert!((&mut asking).now_or_never().is_none());
+        release.send(()).unwrap();
+        let first = timeout(WAIT, asking).await.unwrap().unwrap();
+        timeout(WAIT, held).await.unwrap().unwrap().unwrap();
+        let counters = service.counters();
+        assert_eq!(
+            (
+                counters.computed(),
+                counters.cache().misses(),
+                source.calls()
+            ),
+            (1, 3, 1),
+            "{counters:?}"
+        );
+        assert!(!service.prefetch(key, &system().0), "held: nothing starts");
+        assert_eq!(service.counters().cache().hits(), 1);
+        let again = field(&service, key).await.unwrap();
+        assert!(Arc::ptr_eq(&first, &again));
+        timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
+    }
+
+    /// A pass started by a prefetch runs to its end and is kept with no request ever made.
+    #[tokio::test]
+    async fn a_surface_prefetch_needs_no_request() {
+        let pool = one_worker();
+        let (service, _) = service(&pool, 64 << 20);
+        assert!(service.prefetch(nth(1), &system().0));
+        until("the field is held", || {
+            service.counters().cache().entries() == 1
+        })
+        .await;
+        assert_eq!(service.counters().computed(), 1);
+        timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
+    }
+
+    /// The passes prefetches started are given up when the service stops prefetching, as at the
+    /// server's shutdown: a queued one is skipped, and nothing is computed or kept.
+    #[tokio::test]
+    async fn surface_prefetches_are_given_up_at_shutdown() {
+        let pool = one_worker();
+        let (service, source) = service(&pool, 64 << 20);
+        let (release, held) = hold(&pool).await;
+        assert!(service.prefetch(nth(0), &system().0));
+        until(
+            "the prefetch's pass is queued behind the held worker",
+            || {
+                let counters = pool.counters();
+                (counters.running(), counters.queued_bulk()) == (1, 1)
+            },
+        )
+        .await;
+        service.stop_prefetching();
+        until("the pass is given up", || service.fields.flights.is_empty()).await;
+        release.send(()).unwrap();
+        timeout(WAIT, held).await.unwrap().unwrap().unwrap();
+        drain(&pool).await;
+        assert_eq!(pool.counters().cancelled(), 1, "{:?}", pool.counters());
+        let counters = service.counters();
+        assert_eq!(
+            (
+                counters.computed(),
+                counters.cache().entries(),
+                source.calls()
+            ),
+            (0, 0, 0),
+            "{counters:?}"
+        );
+        timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
+    }
+
+    /// A pool of two workers, so that a job can run beside a pass.
+    fn two_workers() -> Arc<CpuPool> {
+        workers(2)
+    }
+
+    /// A source that holds each body's pass in its inputs until the test opens the body's gate,
+    /// counting each body's entries, and panics for the bodies it is told to, so that a test can
+    /// tell which passes run and when.
+    #[derive(Debug, Default)]
+    struct Turnstile {
+        gates: Mutex<Gates>,
+        opened: Condvar,
+        /// Whether each body's first entry goes through at once: a system prefetch's plan reads
+        /// every body's level before its passes.
+        plans_free: bool,
+    }
+
+    /// What a [`Turnstile`] knows of each body, by its index.
+    #[derive(Debug, Default)]
+    struct Gates {
+        entered: HashMap<BodyIndex, usize>,
+        open: HashSet<BodyIndex>,
+        panics: HashSet<BodyIndex>,
+    }
+
+    impl Turnstile {
+        fn index(key: FieldKey) -> BodyIndex {
+            BodyIndex::try_from(key.body().body_index()).unwrap()
+        }
+
+        /// Lets the passes of `key`'s body through, those waiting and those to come.
+        fn open(&self, key: FieldKey) {
+            lock(&self.gates).open.insert(Self::index(key));
+            self.opened.notify_all();
+        }
+
+        /// Makes the passes of `key`'s body panic as they enter.
+        fn panic_on(&self, key: FieldKey) {
+            lock(&self.gates).panics.insert(Self::index(key));
+        }
+
+        /// How many passes of `key`'s body have entered.
+        fn entered(&self, key: FieldKey) -> usize {
+            lock(&self.gates)
+                .entered
+                .get(&Self::index(key))
+                .copied()
+                .unwrap_or(0)
+        }
+    }
+
+    impl InputsSource for Turnstile {
+        fn inputs(
+            &self,
+            record: &BodyRecord,
+            _: Option<&BodyRecord>,
+            _: &SystemContext,
+        ) -> Result<CoarseInputs, ReadCoarseInputsError> {
+            let index = record.index();
+            let mut gates = lock(&self.gates);
+            let entered = gates.entered.entry(index).or_default();
+            *entered += 1;
+            if self.plans_free && *entered == 1 {
+                return Ok(reference::ceres_like());
+            }
+            if gates.panics.contains(&index) {
+                drop(gates);
+                panic!("the test makes this body's pass panic");
+            }
+            let timed_out = self
+                .opened
+                .wait_timeout_while(gates, WAIT, |gates| !gates.open.contains(&index))
+                .unwrap()
+                .1
+                .timed_out();
+            assert!(!timed_out, "the test opens the body's gate");
+            Ok(reference::ceres_like())
+        }
+    }
+
+    /// A service on `pool` that runs one pass at a time, its source a [`Turnstile`].
+    fn one_pass_at_a_time(pool: &Arc<CpuPool>) -> (SurfaceService, Arc<Turnstile>) {
+        let source = Arc::new(Turnstile::default());
+        let service = SurfaceService::new(
+            Arc::clone(pool),
+            Arc::clone(&source) as Arc<dyn InputsSource>,
+            64 << 20,
+            NonZeroUsize::MIN,
+        );
+        (service, source)
+    }
+
+    /// With one permit on a two-worker pool, a second body's pass waits for the first's permit
+    /// rather than taking the free worker: while the first runs, the second's job is never queued
+    /// and its source never entered, and a survey's level read, an interactive job, runs at once
+    /// beside the first. Once the first ends, the second runs, and both fields arrive (rendering
+    /// plan R09, R09.T17.a).
+    #[tokio::test]
+    async fn a_second_surface_pass_waits_for_the_first_s_permit_while_interactive_jobs_run() {
+        let pool = two_workers();
+        let (service, source) = one_pass_at_a_time(&pool);
+        let (first, second, read) = (nth(0), nth(1), nth(2));
+        let mut running = Box::pin(service.field(first, &system().0));
+        assert!((&mut running).now_or_never().is_none());
+        until("the first pass is running", || source.entered(first) == 1).await;
+        let mut waiting = Box::pin(service.field(second, &system().0));
+        assert!(
+            (&mut waiting).now_or_never().is_none(),
+            "the second pass waits"
+        );
+        source.open(read);
+        let level = timeout(
+            WAIT,
+            service.field_level(read, &system().0, CancelToken::new()),
+        )
+        .await
+        .expect("timed out reading a level beside a pass");
+        assert_eq!(
+            level,
+            Ok(FieldLevel::Modelled(coarse_level(
+                reference::ceres_like().radius()
+            )))
+        );
+        assert!(
+            (&mut waiting).now_or_never().is_none(),
+            "the second pass still waits"
+        );
+        let counters = pool.counters();
+        assert_eq!(
+            (
+                source.entered(second),
+                counters.running(),
+                counters.queued_bulk(),
+                service.fields.passes.available_permits()
+            ),
+            (0, 1, 0, 0),
+            "the second pass holds no place in the queue and no worker: {counters:?}"
+        );
+        source.open(first);
+        let one = timeout(WAIT, running)
+            .await
+            .expect("timed out computing the first field")
+            .unwrap();
+        source.open(second);
+        let other = timeout(WAIT, waiting)
+            .await
+            .expect("timed out computing the second field")
+            .unwrap();
+        assert!(!Arc::ptr_eq(&one, &other));
+        assert_eq!(
+            (
+                source.entered(first),
+                source.entered(second),
+                service.counters().computed(),
+                service.fields.passes.available_permits()
+            ),
+            (1, 1, 2, 1)
+        );
+        timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
+    }
+
+    /// A pass waiting for its permit is given up with its askers, as a queued pass is: a request
+    /// dropped while it waits, and a prefetch that joined it stopped, leave no flight, and once the
+    /// running pass ends the given-up pass never runs, nor is its job ever queued. Its place is not
+    /// lost: a third body's pass then takes the one permit and runs.
+    #[tokio::test]
+    async fn a_surface_pass_whose_askers_give_up_while_it_waits_for_its_permit_never_runs() {
+        let pool = two_workers();
+        let (service, source) = one_pass_at_a_time(&pool);
+        let (first, given_up, later) = (nth(0), nth(1), nth(2));
+        let mut running = Box::pin(service.field(first, &system().0));
+        assert!((&mut running).now_or_never().is_none());
+        until("the first pass is running", || source.entered(first) == 1).await;
+        let mut asking = Box::pin(service.field(given_up, &system().0));
+        assert!(
+            (&mut asking).now_or_never().is_none(),
+            "the pass waits for a permit"
+        );
+        assert!(service.prefetch(given_up, &system().0));
+        drop(asking);
+        assert_eq!(
+            service.fields.flights.len(),
+            2,
+            "the prefetch keeps the pass"
+        );
+        service.stop_prefetching();
+        until("the waiting pass is given up", || {
+            service.fields.flights.len() == 1
+        })
+        .await;
+        source.open(given_up);
+        source.open(first);
+        timeout(WAIT, running).await.unwrap().unwrap();
+        source.open(later);
+        field(&service, later).await.unwrap();
+        let counters = pool.counters();
+        assert_eq!(
+            (
+                source.entered(given_up),
+                source.entered(later),
+                service.counters().computed(),
+                counters.completed(),
+                counters.cancelled()
+            ),
+            (0, 1, 2, 2, 0),
+            "{counters:?}"
+        );
+        timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
+    }
+
+    /// A prefetched pass waits for its permit as a requested one does: while another body's pass
+    /// holds the one permit, the prefetch queues no job and enters no source, though a worker is
+    /// free; once that pass ends, the prefetched pass runs and its field is kept, no request made.
+    #[tokio::test]
+    async fn a_prefetched_surface_pass_waits_for_its_permit_as_a_requested_one_does() {
+        let pool = two_workers();
+        let (service, source) = one_pass_at_a_time(&pool);
+        let (first, prefetched) = (nth(0), nth(1));
+        let mut running = Box::pin(service.field(first, &system().0));
+        assert!((&mut running).now_or_never().is_none());
+        until("the first pass is running", || source.entered(first) == 1).await;
+        assert!(service.prefetch(prefetched, &system().0));
+        // A job on the free worker, waited for, during which the prefetch's task is polled.
+        let token = CancelToken::new();
+        timeout(WAIT, bulk(&pool, &token, |_: &CancelToken| ()))
+            .await
+            .expect("timed out running a job beside a pass")
+            .unwrap();
+        let counters = pool.counters();
+        assert_eq!(
+            (
+                source.entered(prefetched),
+                counters.running(),
+                counters.queued_bulk()
+            ),
+            (0, 1, 0),
+            "the prefetched pass holds no place in the queue and no worker: {counters:?}"
+        );
+        source.open(prefetched);
+        source.open(first);
+        timeout(WAIT, running).await.unwrap().unwrap();
+        until("the prefetched field is held", || {
+            service.counters().cache().entries() == 2
+        })
+        .await;
+        assert_eq!(
+            (source.entered(prefetched), service.counters().computed()),
+            (1, 2)
+        );
+        timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
+    }
+
+    /// A pass that panics frees its permit: its askers are answered that the job panicked, and the
+    /// next body's pass then takes the one permit and runs.
+    #[tokio::test]
+    async fn a_surface_pass_that_panics_frees_its_permit() {
+        let pool = two_workers();
+        let (service, source) = one_pass_at_a_time(&pool);
+        let (panicking, next) = (nth(0), nth(1));
+        source.panic_on(panicking);
+        assert_eq!(
+            field(&service, panicking).await.unwrap_err(),
+            SurfaceJobError::Compute(ComputeError::Job(JobError::Panicked))
+        );
+        assert_eq!(
+            service.fields.passes.available_permits(),
+            1,
+            "the permit is freed before the job's answer is sent"
+        );
+        source.open(next);
+        field(&service, next).await.unwrap();
+        assert_eq!(
+            (
+                source.entered(panicking),
+                source.entered(next),
+                service.counters().computed(),
+                pool.counters().panicked()
+            ),
+            (1, 1, 1, 1)
+        );
+        timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
+    }
+
+    /// A bound of passes past the most a semaphore counts is taken as that many, which bounds
+    /// nothing either, rather than refused or panicking.
+    #[tokio::test]
+    async fn a_surface_pass_bound_past_a_semaphore_s_count_is_taken_as_its_most() {
+        let pool = one_worker();
+        let service = SurfaceService::new(
+            Arc::clone(&pool),
+            Arc::new(Counted::default()),
+            0,
+            NonZeroUsize::MAX,
+        );
+        assert_eq!(
+            service.fields.passes.available_permits(),
+            Semaphore::MAX_PERMITS
+        );
+        timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
+    }
+
+    /// A pool of `n` workers, its twins at their workers' priority, so that its passes do not
+    /// wait on the neighbouring tests' threads ([`TwinPriority`]).
+    fn workers(n: usize) -> Arc<CpuPool> {
+        Arc::new(
+            CpuPool::with_twins(
+                NonZeroUsize::new(n).unwrap(),
+                INTERACTIVE_QUEUE_CAPACITY,
+                BULK_QUEUE_CAPACITY,
+                TwinPriority::Workers,
+                None,
+            )
+            .unwrap(),
+        )
+    }
+
+    /// A bound of `n` passes.
+    fn passes(n: usize) -> NonZeroUsize {
+        NonZeroUsize::new(n).unwrap()
+    }
+
+    /// The first system of the layer-C cell at the solar circle with six bodies or more that have
+    /// a surface seed and are present at the epoch, with those bodies' fields nearest the
+    /// barycentre first: the order a system's prefetch from the barycentre at the epoch has them
+    /// in where every one is modelled.
+    fn crowded() -> &'static (Arc<GeneratedSystem>, Vec<FieldKey>) {
+        static CROWDED: OnceLock<(Arc<GeneratedSystem>, Vec<FieldKey>)> = OnceLock::new();
+        CROWDED.get_or_init(|| {
+            let mut cell = Vec::new();
+            generate_cell(
+                galaxy(),
+                CellKey::new(Layer::C, [0, 812, 0]).expect("a cell of the grid"),
+                &mut cell,
+            );
+            cell.iter()
+                .find_map(|record| {
+                    let ctx = SystemContext::for_system(galaxy(), record.id()).ok()?;
+                    let planets = generate(Seed::new(SEED), &ctx);
+                    let mut near: Vec<(f64, BodyIndex)> = planets
+                        .indices()
+                        .into_iter()
+                        .filter(|&index| matches!(planets.surface_seed(index), Ok(Some(_))))
+                        .filter_map(|index| {
+                            let at = planets
+                                .position_at(&ctx, index, UniverseTime::EPOCH)
+                                .ok()??;
+                            Some((at.distance_from_origin().value(), index))
+                        })
+                        .collect();
+                    near.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+                    let order: Vec<FieldKey> = near
+                        .iter()
+                        .map(|&(_, index)| key(index.body_id(planets.system())))
+                        .collect();
+                    (order.len() >= 6).then(|| (Arc::new((ctx, planets)), order))
+                })
+                .expect("a system of the cell has six bodies with a surface seed")
+        })
+    }
+
+    /// Runs a job on a free worker and waits for it, so that the tasks woken meanwhile have run.
+    async fn settle(pool: &CpuPool) {
+        let token = CancelToken::new();
+        timeout(WAIT, bulk(pool, &token, |_: &CancelToken| ()))
+            .await
+            .expect("timed out running a job on a free worker")
+            .unwrap();
+    }
+
+    /// A system's prefetch reads its plan, then runs its nearest body's pass alone until a field's
+    /// size is known, then at most the bound less one at once, leaving the last permit to asked
+    /// passes: with three permits on four workers, two prefetched passes run and the third waits;
+    /// an asked pass of another body takes the permit left at once, and one asked once every
+    /// permit is held is served before the prefetch's next as a pass ends. Each body is read once
+    /// for the plan and computed once, the asked ones joined or found held (rendering plan R09,
+    /// R09.T17).
+    #[tokio::test]
+    async fn a_system_prefetch_runs_at_most_the_bound_less_one_and_yields_to_asked_passes() {
+        let pool = workers(4);
+        let source = Arc::new(Turnstile {
+            plans_free: true,
+            ..Turnstile::default()
+        });
+        let service = Arc::new(SurfaceService::new(
+            Arc::clone(&pool),
+            Arc::clone(&source) as Arc<dyn InputsSource>,
+            64 << 20,
+            passes(3),
+        ));
+        let (system, order) = crowded();
+        let galaxy = GalaxyKey::new(SEED, GENERATOR_VERSION);
+        let prefetch =
+            service.prefetch_system(galaxy, system, SystemPosition::ORIGIN, UniverseTime::EPOCH);
+        until("the nearest body's pass runs", || {
+            source.entered(order[0]) == 2
+        })
+        .await;
+        assert!(
+            order.iter().all(|&key| source.entered(key) >= 1),
+            "the plan"
+        );
+        settle(&pool).await;
+        assert!(
+            order[1..].iter().all(|&key| source.entered(key) == 1),
+            "the first pass runs alone"
+        );
+        source.open(order[0]);
+        until("two prefetched passes run", || {
+            source.entered(order[1]) == 2 && source.entered(order[2]) == 2
+        })
+        .await;
+        settle(&pool).await;
+        assert_eq!(
+            (
+                source.entered(order[3]),
+                service.fields.passes.available_permits()
+            ),
+            (1, 1),
+            "the third waits, and one permit is left"
+        );
+        let ask = |key: FieldKey| {
+            let service = Arc::clone(&service);
+            tokio::spawn(async move { service.field(key, &crowded().0).await })
+        };
+        let first_asked = ask(order[4]);
+        until("the asked pass runs", || source.entered(order[4]) == 2).await;
+        let second_asked = ask(order[5]);
+        settle(&pool).await;
+        assert_eq!(
+            (source.entered(order[5]), pool.counters().running()),
+            (1, 3),
+            "every permit held, the second asked pass waits"
+        );
+        source.open(order[1]);
+        until("the second asked pass runs", || {
+            source.entered(order[5]) == 2
+        })
+        .await;
+        settle(&pool).await;
+        assert_eq!(
+            source.entered(order[3]),
+            1,
+            "the prefetch's next still waits"
+        );
+        for &key in order {
+            source.open(key);
+        }
+        for asked in [first_asked, second_asked] {
+            timeout(WAIT, asked).await.unwrap().unwrap().unwrap();
+        }
+        until("every field is held", || {
+            service.counters().cache().entries() == order.len()
+        })
+        .await;
+        assert_eq!(
+            service.counters().computed(),
+            u64::try_from(order.len()).unwrap()
+        );
+        assert!(
+            order.iter().all(|&key| source.entered(key) == 2),
+            "each body read once for the plan and once for its pass"
+        );
+        drop(prefetch);
+        timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
+    }
+
+    /// With every worker busy, an asked pass queued after a prefetched one is taken first: the
+    /// prefetched pass waits in the background queue, and the first worker freed takes the asked
+    /// pass from the bulk queue (rendering plan R09, R09.T17).
+    #[tokio::test]
+    async fn an_asked_pass_queued_after_a_prefetched_one_runs_first_with_every_worker_busy() {
+        let pool = two_workers();
+        let source = Arc::new(Turnstile {
+            plans_free: true,
+            ..Turnstile::default()
+        });
+        let service = Arc::new(SurfaceService::new(
+            Arc::clone(&pool),
+            Arc::clone(&source) as Arc<dyn InputsSource>,
+            64 << 20,
+            passes(3),
+        ));
+        let (system, order) = crowded();
+        let (release, held) = hold(&pool).await;
+        let galaxy = GalaxyKey::new(SEED, GENERATOR_VERSION);
+        let prefetch =
+            service.prefetch_system(galaxy, system, SystemPosition::ORIGIN, UniverseTime::EPOCH);
+        until("the nearest body's pass runs", || {
+            source.entered(order[0]) == 2
+        })
+        .await;
+        source.open(order[0]);
+        until(
+            "a prefetched pass runs and the next waits in the background queue",
+            || source.entered(order[1]) == 2 && pool.counters().queued_background() == 1,
+        )
+        .await;
+        let asked = order[5];
+        let asking = {
+            let service = Arc::clone(&service);
+            tokio::spawn(async move { service.field(asked, &crowded().0).await })
+        };
+        until("the asked pass is queued", || {
+            pool.counters().queued_bulk() == 1
+        })
+        .await;
+        release.send(()).unwrap();
+        timeout(WAIT, held).await.unwrap().unwrap().unwrap();
+        until("the asked pass runs", || source.entered(asked) == 2).await;
+        let counters = pool.counters();
+        assert_eq!(
+            (
+                source.entered(order[2]),
+                counters.queued_background(),
+                counters.running()
+            ),
+            (1, 1, 2),
+            "the prefetched pass still waits: {counters:?}"
+        );
+        for &key in order {
+            source.open(key);
+        }
+        timeout(WAIT, asking).await.unwrap().unwrap().unwrap();
+        until("the prefetched pass runs", || source.entered(order[2]) == 2).await;
+        drop(prefetch);
+        timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
+    }
+
+    /// With every worker busy, an asked request that joins a prefetched pass still queued moves
+    /// that pass to the bulk queue: the first worker freed takes it before a bulk job queued after
+    /// the ask, which would otherwise run first, the pass waiting in the background queue
+    /// (rendering plan R09, R09.T17).
+    #[tokio::test]
+    async fn an_asked_request_joining_a_queued_prefetched_pass_promotes_it_with_every_worker_busy()
+    {
+        let pool = two_workers();
+        let source = Arc::new(Turnstile {
+            plans_free: true,
+            ..Turnstile::default()
+        });
+        let service = Arc::new(SurfaceService::new(
+            Arc::clone(&pool),
+            Arc::clone(&source) as Arc<dyn InputsSource>,
+            64 << 20,
+            passes(3),
+        ));
+        let (system, order) = crowded();
+        let (release, held) = hold(&pool).await;
+        let galaxy = GalaxyKey::new(SEED, GENERATOR_VERSION);
+        let prefetch =
+            service.prefetch_system(galaxy, system, SystemPosition::ORIGIN, UniverseTime::EPOCH);
+        until("the nearest body's pass runs", || {
+            source.entered(order[0]) == 2
+        })
+        .await;
+        source.open(order[0]);
+        until(
+            "a prefetched pass runs and the next waits in the background queue",
+            || source.entered(order[1]) == 2 && pool.counters().queued_background() == 1,
+        )
+        .await;
+        let joined = order[2];
+        let asking = {
+            let service = Arc::clone(&service);
+            tokio::spawn(async move { service.field(joined, &crowded().0).await })
+        };
+        until("the joined pass is promoted", || {
+            let counters = pool.counters();
+            (counters.queued_bulk(), counters.queued_background()) == (1, 0)
+        })
+        .await;
+        let after = Arc::new(AtomicUsize::new(0));
+        let later = {
+            let after = Arc::clone(&after);
+            pool.submit(
+                Priority::Bulk,
+                CancelToken::new(),
+                move |_: &CancelToken| {
+                    after.fetch_add(1, Ordering::SeqCst);
+                },
+            )
+            .await
+            .unwrap()
+        };
+        release.send(()).unwrap();
+        timeout(WAIT, held).await.unwrap().unwrap().unwrap();
+        until("the joined pass runs", || source.entered(joined) == 2).await;
+        assert_eq!(
+            (after.load(Ordering::SeqCst), pool.counters().queued_bulk()),
+            (0, 1),
+            "the bulk job queued after the ask still waits"
+        );
+        for &key in order {
+            source.open(key);
+        }
+        timeout(WAIT, asking).await.unwrap().unwrap().unwrap();
+        timeout(WAIT, later).await.unwrap().unwrap().unwrap();
+        drop(prefetch);
+        until("the prefetch's passes end", || {
+            service.fields.flights.is_empty() && pool.counters().running() == 0
+        })
+        .await;
+        assert!(lock(&service.fields.promotions).is_empty());
+        timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
+    }
+
+    /// A system's prefetch dropped gives up its passes: one queued is skipped and one running is
+    /// not kept, so that only the field it had before stays, and the next body is never read past
+    /// the plan (rendering plan R09, R09.T17).
+    #[tokio::test]
+    async fn a_system_prefetch_dropped_gives_up_its_passes_and_keeps_nothing_of_them() {
+        let pool = two_workers();
+        let source = Arc::new(Turnstile {
+            plans_free: true,
+            ..Turnstile::default()
+        });
+        let service = SurfaceService::new(
+            Arc::clone(&pool),
+            Arc::clone(&source) as Arc<dyn InputsSource>,
+            64 << 20,
+            passes(3),
+        );
+        let (system, order) = crowded();
+        let (release, held) = hold(&pool).await;
+        let galaxy = GalaxyKey::new(SEED, GENERATOR_VERSION);
+        let prefetch =
+            service.prefetch_system(galaxy, system, SystemPosition::ORIGIN, UniverseTime::EPOCH);
+        until("the nearest body's pass runs", || {
+            source.entered(order[0]) == 2
+        })
+        .await;
+        source.open(order[0]);
+        until(
+            "one pass runs and one is queued behind the held worker",
+            || source.entered(order[1]) == 2 && pool.counters().queued_background() == 1,
+        )
+        .await;
+        drop(prefetch);
+        until("the passes are given up", || {
+            service.fields.flights.is_empty()
+        })
+        .await;
+        source.open(order[1]);
+        release.send(()).unwrap();
+        timeout(WAIT, held).await.unwrap().unwrap().unwrap();
+        until("the running pass ends and frees its permit", || {
+            pool.counters().running() == 0 && service.fields.passes.available_permits() == 3
+        })
+        .await;
+        let counters = service.counters();
+        assert_eq!(
+            (
+                counters.computed(),
+                counters.cache().entries(),
+                pool.counters().cancelled(),
+                source.entered(order[2])
+            ),
+            (1, 1, 1, 1),
+            "{counters:?}"
+        );
+        assert!(service.fields.held.get(&order[0]).is_some());
+        timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
+    }
+
+    /// A system's prefetch stops at the field cache's budget: with room for two of its fields and
+    /// a half, it computes two and stops, evicting none, the third body read only for the plan
+    /// (rendering plan R09, R09.T17).
+    #[tokio::test]
+    async fn a_system_prefetch_stops_at_the_field_cache_s_budget() {
+        let pool = workers(3);
+        let (system, order) = crowded();
+        let (measuring, _) = service(&pool, 64 << 20);
+        let charge = FieldCache::charge(&field(&measuring, order[0]).await.unwrap());
+        let source = Arc::new(Counted::default());
+        let service = SurfaceService::new(
+            Arc::clone(&pool),
+            Arc::clone(&source) as Arc<dyn InputsSource>,
+            charge * 5 / 2,
+            passes(2),
+        );
+        let galaxy = GalaxyKey::new(SEED, GENERATOR_VERSION);
+        let _prefetch =
+            service.prefetch_system(galaxy, system, SystemPosition::ORIGIN, UniverseTime::EPOCH);
+        until("the prefetch ends", || {
+            lock(&service.prefetching)
+                .try_join_next()
+                .is_some_and(|ended| ended.is_ok())
+        })
+        .await;
+        let counters = service.counters();
+        assert_eq!(
+            (
+                counters.computed(),
+                counters.cache().entries(),
+                counters.cache().evictions(),
+                source.calls()
+            ),
+            (2, 2, 0, order.len() + 2),
+            "{counters:?}"
+        );
+        timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
+    }
+
+    /// A source that models no body, as the records below the serve gate, counting its calls.
+    #[derive(Debug, Default)]
+    struct ModelsNone(Counted);
+
+    impl InputsSource for ModelsNone {
+        fn inputs(
+            &self,
+            record: &BodyRecord,
+            planet: Option<&BodyRecord>,
+            ctx: &SystemContext,
+        ) -> Result<CoarseInputs, ReadCoarseInputsError> {
+            self.0.inputs(record, planet, ctx)
+        }
+
+        fn models_any_body(&self) -> bool {
+            false
+        }
+    }
+
+    /// A system's prefetch with nothing to do starts no task, reads no record and queues no job:
+    /// under a bound of one pass, where no permit is ever left over for a prefetched pass, and from
+    /// a source that models no body, as the records below the serve gate (rendering plan R09,
+    /// R09.T17).
+    #[tokio::test]
+    async fn a_system_prefetch_with_nothing_to_do_reads_nothing() {
+        let pool = workers(3);
+        let galaxy = GalaxyKey::new(SEED, GENERATOR_VERSION);
+        let bounded = Arc::new(Counted::default());
+        let unmodelled = Arc::new(ModelsNone::default());
+        for (source, calls, bound) in [
+            (
+                Arc::clone(&bounded) as Arc<dyn InputsSource>,
+                Box::new(|| bounded.calls()) as Box<dyn Fn() -> usize>,
+                1,
+            ),
+            (
+                Arc::clone(&unmodelled) as Arc<dyn InputsSource>,
+                Box::new(|| unmodelled.0.calls()),
+                3,
+            ),
+        ] {
+            let service = SurfaceService::new(Arc::clone(&pool), source, 64 << 20, passes(bound));
+            let prefetch = service.prefetch_system(
+                galaxy,
+                &crowded().0,
+                SystemPosition::ORIGIN,
+                UniverseTime::EPOCH,
+            );
+            settle(&pool).await;
+            assert!(lock(&service.prefetching).is_empty(), "bound {bound}");
+            assert_eq!(
+                (calls(), service.counters().computed()),
+                (0, 0),
+                "bound {bound}"
+            );
+            drop(prefetch);
+        }
+        assert_eq!(
+            pool.counters().completed(),
+            2,
+            "the two settling jobs alone"
+        );
+        timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
+    }
+
+    /// A prefetch's budget starts its first pass alone, then estimates each at the densest field
+    /// it has had over the level's cells, and stops at the first that does not fit with nothing
+    /// running.
+    #[test]
+    fn a_prefetch_budget_estimates_at_its_densest_field() {
+        let field = synthetic_field(SyntheticWorld::CeresLike);
+        let (charge, level) = (FieldCache::charge(&field), field.header().level());
+        let mut budget = PrefetchBudget::new(charge * 3);
+        assert_eq!(budget.admits(level), Admission::Start(0));
+        budget.started(0);
+        assert_eq!(budget.admits(level), Admission::AfterRunning);
+        budget.ended(0, Some(&field));
+        assert_eq!(budget.admits(level), Admission::Start(charge));
+        budget.started(charge);
+        assert_eq!(budget.admits(level), Admission::Start(charge));
+        budget.started(charge);
+        assert_eq!(budget.admits(level), Admission::AfterRunning);
+        budget.ended(charge, None);
+        budget.ended(charge, Some(&field));
+        assert_eq!(budget.admits(level), Admission::Start(charge));
+        budget.had_field(&field);
+        assert_eq!(budget.admits(level), Admission::Stop);
+        let finer = CoarseLevel::new(level.get() + 1).unwrap();
+        let cells = |level: CoarseLevel| usize::try_from(level.cell_count()).unwrap();
+        assert_eq!(
+            PrefetchBudget {
+                densest: Some((charge, level.cell_count())),
+                ..PrefetchBudget::new(usize::MAX)
+            }
+            .admits(finer),
+            Admission::Start((charge * cells(finer)).div_ceil(cells(level)))
+        );
+    }
+
+    /// Passes for its worker's start and its twin's, then flushes: the probe after the first job
+    /// fails.
+    fn flushes_after_the_first_job() -> FlushProbe {
+        static CALLS: AtomicUsize = AtomicUsize::new(0);
+        if CALLS.fetch_add(1, Ordering::SeqCst) < 2 {
+            FlushProbe::KEEPS_SUBNORMALS
+        } else {
+            FlushProbe::FLUSHES_OUTPUTS
+        }
+    }
+
+    /// A pass on a worker whose floating-point mode is found to flush subnormals is withheld, and
+    /// nothing is kept; a request answers it `internal`, as every job's refusal of the kind. The
+    /// next request finds the pool faulted, and is refused the same way.
+    #[tokio::test]
+    async fn a_surface_pass_on_a_flushing_worker_is_refused() {
+        let pool = Arc::new(
+            CpuPool::with_probe(
+                NonZeroUsize::MIN,
+                INTERACTIVE_QUEUE_CAPACITY,
+                BULK_QUEUE_CAPACITY,
+                flushes_after_the_first_job,
+            )
+            .unwrap(),
+        );
+        let (service, _) = service(&pool, 64 << 20);
+        let withheld = ComputeError::Job(JobError::FloatingPointMode);
+        assert_eq!(
+            field(&service, nth(0)).await.unwrap_err(),
+            SurfaceJobError::Compute(withheld)
+        );
+        assert_eq!(
+            field(&service, nth(0)).await.unwrap_err(),
+            SurfaceJobError::Compute(ComputeError::Submit(SubmitJobError::Faulted))
+        );
+        let counters = service.counters();
+        assert_eq!(
+            (counters.computed(), counters.cache().entries()),
+            (0, 0),
+            "{counters:?}"
+        );
+        let refusal = RequestError::from(withheld);
+        assert_eq!(refusal.code, ErrorCode::Internal);
+        assert!(
+            refusal.message.contains("flushes subnormals"),
+            "{}",
+            refusal.message
+        );
+        timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
+    }
+
+    /// A key whose body index is not in plan 14's layout, or names no body of the system (the
+    /// primary star's index among them), is refused as the body's, and the source is never called.
+    #[tokio::test]
+    async fn a_surface_of_no_body_is_refused() {
+        let pool = one_worker();
+        let (service, source) = service(&pool, 64 << 20);
+        let planets = &system().0.1;
+        let system_id = planets.system();
+        assert_eq!(
+            field(&service, key(BodyId::new(system_id, 0xf000)))
+                .await
+                .unwrap_err(),
+            SurfaceJobError::Body(ResolveBodyError::MalformedIndex(
+                DecodeBodyIndexError::ReservedSlot { raw: 0xf000 }
+            ))
+        );
+        let unused = (0x0100..0x1000_u16)
+            .step_by(0x100)
+            .find(|&raw| BodyIndex::try_from(raw).is_ok_and(|index| planets.body(index).is_none()))
+            .expect("a planet slot the system leaves empty");
+        for raw in [0, unused] {
+            assert_eq!(
+                field(&service, key(BodyId::new(system_id, raw)))
+                    .await
+                    .unwrap_err(),
+                SurfaceJobError::Body(ResolveBodyError::NoSuchBody),
+                "{raw:#06x}"
+            );
+        }
+        assert_eq!((service.counters().computed(), source.calls()), (0, 0));
+        timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
+    }
+
+    /// Each error says what failed and keeps its cause.
+    #[test]
+    fn a_surface_job_error_keeps_its_cause() {
+        let inputs = SurfaceJobError::Inputs(SurfaceInputsError::NoSolidSurface.into());
+        assert_eq!(
+            inputs.to_string(),
+            "the body's coarse-pass inputs cannot be had"
+        );
+        assert_eq!(
+            inputs.source().map(ToString::to_string).as_deref(),
+            Some("the body has no solid surface")
+        );
+        let body = SurfaceJobError::Body(ResolveBodyError::NoSuchBody);
+        assert_eq!(body.to_string(), "the body does not resolve");
+        assert_eq!(
+            body.source().map(ToString::to_string).as_deref(),
+            Some("the system holds no such body")
+        );
+        let compute = SurfaceJobError::from(ComputeError::Job(JobError::Cancelled));
+        assert_eq!(compute.to_string(), "the body's coarse pass did not run");
+        assert_eq!(
+            compute.source().map(ToString::to_string).as_deref(),
+            Some("the computation did not finish")
+        );
+    }
+
+    /// Two first asks for a universe's survey log at once share one open, so that its file has one
+    /// writer: a pass recorded through either is the other's too, and a later ask is the same log.
+    /// A universe with no survey file yet gets a log with no coverage, and nothing is written.
+    #[tokio::test]
+    async fn two_first_asks_for_a_survey_log_open_it_once() {
+        use crate::knowledge::surveys::{SurveyPass, SurveyPassParts, SurveySource};
+        use crate::universe::{SavedUniverse, UniverseId, UniverseStore};
+
+        let dir = tempfile::tempdir().unwrap();
+        let store = UniverseStore::new(dir.path());
+        let universe = UniverseId::new(0xab);
+        store
+            .write(&SavedUniverse::new(
+                universe,
+                "Kepler Reach".parse().unwrap(),
+                SEED,
+                GENERATOR_VERSION,
+            ))
+            .unwrap();
+        let pool = one_worker();
+        let (service, _) = service(&pool, 0);
+        let (one, other) = timeout(
+            WAIT,
+            futures_util::future::join(
+                service.survey_log(&store, universe),
+                service.survey_log(&store, universe),
+            ),
+        )
+        .await
+        .expect("timed out opening the survey log");
+        let (one, other) = (one.unwrap(), other.unwrap());
+        let body = system().1[0];
+        assert_eq!(other.coverage(body), None);
+        assert!(!store.knowledge_dir(universe).exists(), "nothing written");
+
+        let level = hyperion_surface::field::coarse_level(reference::ceres_like().radius());
+        let pass = SurveyPass::new(SurveyPassParts {
+            body,
+            from: UniverseTime::EPOCH,
+            to: UniverseTime::EPOCH,
+            source: SurveySource::Orbital,
+            resolution: hyperion_sim::units::Metres::new(500.0),
+            level,
+            cells: std::iter::once(0..6).collect(),
+        })
+        .unwrap();
+        assert_eq!(one.record(pass).await.unwrap().get(), 1);
+        let later = service.survey_log(&store, universe).await.unwrap();
+        for log in [&other, &later] {
+            let coverage = log.coverage(body).expect("the pass is the shared log's");
+            assert_eq!((coverage.revision().get(), coverage.surveyed()), (1, 6));
+        }
+        timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
+    }
+
+    /// A body's level: its inputs' where the source gives them; where it answers a section not
+    /// modelled, the figure's, or a refusal by the figure's state; the source's other refusals
+    /// as they are.
+    #[test]
+    fn a_field_s_level_comes_from_the_inputs_or_else_the_figure() {
+        let ceres = coarse_level(reference::ceres_like().radius());
+        let not_modelled = || {
+            Err(ReadCoarseInputsError::Section(
+                SurfaceInputsError::NotModelled(RecordSection::Surface),
+            ))
+        };
+        assert_eq!(
+            level_from(Ok(reference::ceres_like()), &Section::NotModelled),
+            Ok(FieldLevel::Modelled(ceres))
+        );
+        for (figure, refusal) in [
+            (
+                Section::NotModelled,
+                SurfaceInputsError::NotModelled(RecordSection::Figure),
+            ),
+            (
+                Section::NotResolved,
+                SurfaceInputsError::NotResolved(RecordSection::Figure),
+            ),
+            (Section::NotApplicable, SurfaceInputsError::NoSolidSurface),
+        ] {
+            assert_eq!(
+                level_from(not_modelled(), &figure),
+                Err(SurfaceJobError::Inputs(refusal.into())),
+                "{figure:?}"
+            );
+        }
+        // A fault of the server's reading is passed on as it is, whatever the figure.
+        let planet = record_of(system().1[0]);
+        let planet_id = planet.index().body_id(planet.identity().system());
+        for refusal in [
+            SurfaceInputsError::NoSolidSurface.into(),
+            SurfaceInputsError::NotResolved(RecordSection::Bulk).into(),
+            ReadCoarseInputsError::PlanetMissing(planet_id),
+            ReadCoarseInputsError::NotAtRecordTime,
+        ] {
+            assert_eq!(
+                level_from(Err(refusal), &Section::NotModelled),
+                Err(SurfaceJobError::Inputs(refusal))
+            );
+        }
+        // A figure that is modelled: the first body of `system` with one.
+        let (ctx, planets) = system().0.as_ref();
+        let record = system()
+            .1
+            .iter()
+            .find_map(|body| {
+                let index = BodyIndex::try_from(body.body_index()).ok()?;
+                let record = planets.body_at(ctx, index, RECORD_TIME).ok()?;
+                matches!(record.figure(), Section::Ok(_)).then_some(record)
+            })
+            .expect("a body of the system has a figure");
+        let Section::Ok(figure) = record.figure() else {
+            panic!("the record found has a figure");
+        };
+        let level = coarse_level(Metres::new(figure.spheroid().volumetric_radius_m()));
+        assert_eq!(
+            level_from(not_modelled(), record.figure()),
+            Ok(FieldLevel::NotModelled {
+                level,
+                section: RecordSection::Surface,
+            })
+        );
+    }
+
+    /// The first system of the layer-C cell at the solar circle with a moon, by its record's kind
+    /// and parent, with the moon and the planet it orbits.
+    fn moon_system() -> &'static (Arc<GeneratedSystem>, BodyId, BodyId) {
+        static SYSTEM: OnceLock<(Arc<GeneratedSystem>, BodyId, BodyId)> = OnceLock::new();
+        SYSTEM.get_or_init(|| {
+            let mut cell = Vec::new();
+            generate_cell(
+                galaxy(),
+                CellKey::new(Layer::C, [0, 812, 0]).expect("a cell of the grid"),
+                &mut cell,
+            );
+            cell.iter()
+                .find_map(|record| {
+                    let ctx = SystemContext::for_system(galaxy(), record.id()).ok()?;
+                    let planets = generate(Seed::new(SEED), &ctx);
+                    let (moon, planet) = planets.bodies().iter().find_map(|body| {
+                        let record = planets.body_at(&ctx, body.index(), RECORD_TIME).ok()?;
+                        match (record.identity().kind(), record.identity().parent()) {
+                            (BodyKind::Moon(_), Some(OrbitHost::Body(planet))) => {
+                                Some((body.index(), planet))
+                            }
+                            _ => None,
+                        }
+                    })?;
+                    let id = planets.system();
+                    Some((
+                        Arc::new((ctx, planets)),
+                        moon.body_id(id),
+                        planet.body_id(id),
+                    ))
+                })
+                .expect("a system of the cell has a moon")
+        })
+    }
+
+    /// A source that keeps each body it is asked for, with the planet's record it is given, and
+    /// answers that the surface is not modelled, so that no pass runs.
+    #[derive(Debug, Default)]
+    struct Capturing {
+        asked: Mutex<Vec<(BodyIndex, Option<BodyRecord>)>>,
+    }
+
+    impl InputsSource for Capturing {
+        fn inputs(
+            &self,
+            record: &BodyRecord,
+            planet: Option<&BodyRecord>,
+            _: &SystemContext,
+        ) -> Result<CoarseInputs, ReadCoarseInputsError> {
+            lock(&self.asked).push((record.index(), planet.cloned()));
+            Err(SurfaceInputsError::NotModelled(RecordSection::Surface).into())
+        }
+    }
+
+    /// R09.T10.f: the service gives a moon's source its planet's record at the record's time, the
+    /// planet `CoarseInputs::planet_of` names, and a planet's source none, on the pass's path and
+    /// the level's alike.
+    #[tokio::test]
+    async fn a_moon_s_source_is_given_its_planet_s_record() {
+        let (system, moon, planet) = moon_system();
+        let (ctx, planets) = system.as_ref();
+        let record_at = |body: BodyId| {
+            let index = BodyIndex::try_from(body.body_index()).unwrap();
+            planets.body_at(ctx, index, RECORD_TIME).unwrap()
+        };
+        let (moon_record, planet_record) = (record_at(*moon), record_at(*planet));
+        assert_eq!(
+            CoarseInputs::planet_of(&moon_record),
+            Some(planet_record.index())
+        );
+        assert_eq!(CoarseInputs::planet_of(&planet_record), None);
+        let pool = one_worker();
+        let source = Arc::new(Capturing::default());
+        let service = SurfaceService::new(
+            Arc::clone(&pool),
+            Arc::clone(&source) as Arc<dyn InputsSource>,
+            64 << 20,
+            NonZeroUsize::MIN,
+        );
+        let not_modelled =
+            ReadCoarseInputsError::Section(SurfaceInputsError::NotModelled(RecordSection::Surface));
+        for body in [*moon, *planet] {
+            let field = timeout(WAIT, service.field(key(body), system))
+                .await
+                .unwrap();
+            assert_eq!(field.unwrap_err(), SurfaceJobError::Inputs(not_modelled));
+            let level = timeout(
+                WAIT,
+                service.field_level(key(body), system, CancelToken::new()),
+            )
+            .await
+            .unwrap();
+            assert!(
+                matches!(
+                    level,
+                    Ok(FieldLevel::NotModelled {
+                        section: RecordSection::Surface,
+                        ..
+                    })
+                ),
+                "{body}: {level:?}"
+            );
+        }
+        let (moon_index, planet_index) = (moon_record.index(), planet_record.index());
+        assert_eq!(
+            *lock(&source.asked),
+            [
+                (moon_index, Some(planet_record.clone())),
+                (moon_index, Some(planet_record)),
+                (planet_index, None),
+                (planet_index, None),
+            ]
+        );
+        assert_eq!(service.counters().computed(), 0);
+        timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
+    }
+
+    /// A small field at surface pressure `pressure`, every crust a silicate of normal albedo 0.1.
+    fn small_field(pressure: Pascals) -> CoarseField {
+        let builder = FieldBuilder::new(Metres::new(300e3)).surface_pressure(pressure);
+        let crust = PaletteEntry {
+            substance: SubstanceKey::new("basalt").unwrap(),
+            role: PaletteRole::PrimaryCrust,
+            normal_albedo_bvr: [0.1; 3],
+            phase_row: 0,
+            grain_density_kg_m3: 3_000.0,
+            transition: Kelvin::new(1_250.0),
+            mechanics: MechanicsFamily::Silicate,
+            liquid: None,
+            feo_mass_fraction: None,
+        };
+        builder
+            .palette(MaterialPalette::new(vec![crust]).unwrap())
+            .crust_palette([Some(0); 4])
+            .build()
+    }
+
+    /// The photometry plan 14 derives (P14.T47.b) for a rocky body of the system's first solid
+    /// body's bulk in surface state `state` at surface pressure `pressure`, of its state's Bond
+    /// albedo.
+    fn photometry_in(state: SurfaceState, pressure: Pascals) -> BodyPhotometry {
+        let record = record_of(system().1[0]);
+        let Section::Ok(bulk) = record.bulk() else {
+            panic!("a solid body's bulk is modelled");
+        };
+        let material = SurfaceMaterial::Rock;
+        BodyPhotometry::derive(&PhotometryInputs {
+            state,
+            runaway_deck: RunawayDeck::Kept,
+            material,
+            surface_pressure: Some(pressure),
+            cloud_fraction: 0.0,
+            surface_temperature: bulk.equilibrium_temperature(),
+            equilibrium_temperature: bulk.equilibrium_temperature(),
+            surface_gravity: bulk.surface_gravity(),
+            class: bulk.class(),
+            fractions: bulk.fractions(),
+            bond: state.albedo(material),
+            band_albedo: None,
+        })
+    }
+
+    /// The albedo scale (R10.T10.a; main's rulings of 2026-10-14) is solved only where the ground
+    /// is what the body's p measures: below 30 kPa, and under a template whose law has a ground
+    /// term (an airless rock's, a thin-aired Mars's, a thin snowball's). There it is
+    /// `albedo_scale` of the field's class fractions under the body's detail seed, for the
+    /// photometry's geometric albedo. It is `None` from 30 kPa up (an Earth, and a thick snowball,
+    /// whose template is the ground's: recorded for plan 14), under a cloud deck's template at any
+    /// pressure (a runaway greenhouse at 1 kPa takes Venus's), and where the photometry is not
+    /// modelled, withheld or not applicable. A palette that names no substance has no field, since
+    /// every cell's crust names an entry (R09.T10.c).
+    #[test]
+    fn a_field_s_albedo_scale_is_solved_only_where_the_ground_is_what_p_measures() {
+        let detail = detail_seed(Seed::new(SEED), system().1[0]);
+        let thin = THIN_ATMOSPHERE_PRESSURE.value();
+        for (state, pressure, template, scaled) in [
+            (SurfaceState::Airless, 0.0, PhaseTemplate::Mercury, true),
+            (SurfaceState::Temperate, 600.0, PhaseTemplate::Mars, true),
+            (
+                SurfaceState::Temperate,
+                thin - 1.0,
+                PhaseTemplate::Mars,
+                true,
+            ),
+            (
+                SurfaceState::Snowball,
+                1_000.0,
+                PhaseTemplate::Snowball,
+                true,
+            ),
+            (SurfaceState::Temperate, thin, PhaseTemplate::Earth, false),
+            (
+                SurfaceState::Temperate,
+                98_550.0,
+                PhaseTemplate::Earth,
+                false,
+            ),
+            (
+                SurfaceState::Snowball,
+                98_550.0,
+                PhaseTemplate::Snowball,
+                false,
+            ),
+            (
+                SurfaceState::RunawayGreenhouse,
+                1_000.0,
+                PhaseTemplate::Venus,
+                false,
+            ),
+        ] {
+            let at = format!("{state:?} at {pressure} Pa");
+            let photometry = photometry_in(state, Pascals::new(pressure));
+            assert_eq!(photometry.template(), template, "{at}");
+            let field = small_field(Pascals::new(pressure));
+            let scale = field_albedo_scale(&field, &Section::Ok(photometry), detail);
+            if scaled {
+                let p = photometry.geometric_albedo();
+                let synth = Synthesiser::new(&field, detail);
+                let fractions = class_fractions(&synth, &mut SynthCache::new()).unwrap();
+                let want = albedo_scale(&fractions, field.header().palette(), [p.b, p.v, p.r])
+                    .unwrap()
+                    .scale();
+                assert_eq!(scale.map(f64::to_bits), Some(want.to_bits()), "{at}");
+            } else {
+                assert_eq!(
+                    scale.map(f64::to_bits),
+                    None,
+                    "{at}: the ground is not what p measures"
+                );
+            }
+        }
+        let field = small_field(Pascals::ZERO);
+        for section in [
+            Section::NotModelled,
+            Section::NotResolved,
+            Section::NotApplicable,
+        ] {
+            assert_eq!(
+                field_albedo_scale(&field, &section, detail).map(f64::to_bits),
+                None,
+                "{section:?}"
+            );
+        }
+    }
+
+    /// A small airless field whose one crust is an iron-bearing basalt (`FeO_T` 0.16), at
+    /// `maturity` with the Moon's weathering rate, or with neither; it has no crater.
+    fn weathering_field(maturity: Option<f64>) -> CoarseField {
+        let builder = weathering_builder();
+        match maturity {
+            Some(m) => builder.maturity(m).weathering_rate(1.0).build(),
+            None => builder.build(),
+        }
+    }
+
+    /// [`weathering_field`] weathered as the Moon is, at maturity 1 and the Moon's rate, on a
+    /// young surface, 1 Gyr old, cratered at the lunar chronology's N(>1 km) there, 8.4 × 10⁻⁴ per
+    /// km², so that its young small craters' haloes leave deficits.
+    fn cratered_weathering_field() -> CoarseField {
+        let craters = CraterParams::new(CraterParamsParts {
+            n_1km: PerSquareKilometre::new(8.4e-4),
+            screening: Screening::None,
+            gravity: MetresPerSecondSquared::new(1.62),
+            k_target: 1.0,
+            impact_velocity: None,
+            projectile_density: LUNAR_PROJECTILE_DENSITY,
+            target: LUNAR_TARGET,
+            system_age: SOLAR_SYSTEM_AGE,
+        })
+        .unwrap();
+        weathering_builder()
+            .crater_params(craters)
+            .surface_age(Gigayears::new(1.0))
+            .maturity(1.0)
+            .weathering_rate(1.0)
+            .build()
+    }
+
+    /// The builder of [`weathering_field`], with neither a maturity nor craters.
+    fn weathering_builder() -> FieldBuilder {
+        let crust = PaletteEntry {
+            substance: SubstanceKey::new("basalt_fe").unwrap(),
+            role: PaletteRole::PrimaryCrust,
+            normal_albedo_bvr: [0.1, 0.11, 0.12],
+            phase_row: 0,
+            grain_density_kg_m3: 3_310.0,
+            transition: Kelvin::new(1_323.15),
+            mechanics: MechanicsFamily::Silicate,
+            liquid: None,
+            feo_mass_fraction: Some(0.16),
+        };
+        FieldBuilder::new(Metres::new(300e3))
+            .surface_pressure(Pascals::ZERO)
+            .palette(MaterialPalette::new(vec![crust]).unwrap())
+            .crust_palette([Some(0); 4])
+    }
+
+    /// The scale is solved on the albedos the header's exposure gives (R10.T1.c's shared solve,
+    /// `exposed_albedo_scale` at `GroundExposure::of_header`; decision-p14-t51d-weathering §1.5):
+    /// at maturity 1 and the Moon's rate it is that solve, bit for bit, and larger than the fresh
+    /// solve, since the weathered ground is darker; at maturity 0 it is the fresh solve exactly, as
+    /// it is with no maturity, which is `albedo_scale` itself.
+    #[test]
+    fn a_field_s_albedo_scale_is_solved_on_its_weathered_albedos() {
+        let detail = detail_seed(Seed::new(SEED), system().1[0]);
+        let photometry = photometry_in(SurfaceState::Airless, Pascals::ZERO);
+        let p = photometry.geometric_albedo();
+        let section = Section::Ok(photometry);
+        let solved = |field: &CoarseField, exposure| {
+            let synth = Synthesiser::new(field, detail);
+            let fractions = class_fractions(&synth, &mut SynthCache::new()).unwrap();
+            let palette = field.header().palette();
+            let shared = exposed_albedo_scale(&fractions, palette, exposure, [p.b, p.v, p.r])
+                .unwrap()
+                .scale();
+            let fresh = albedo_scale(&fractions, palette, [p.b, p.v, p.r])
+                .unwrap()
+                .scale();
+            (shared, fresh)
+        };
+        let none_field = weathering_field(None);
+        let fresh = field_albedo_scale(&none_field, &section, detail)
+            .expect("an airless field of named ground has a scale");
+        let (none_shared, none_fresh) =
+            solved(&none_field, GroundExposure::of_header(none_field.header()));
+        assert_eq!(fresh.to_bits(), none_shared.to_bits());
+        assert_eq!(fresh.to_bits(), none_fresh.to_bits());
+        let mature_field = weathering_field(Some(1.0));
+        let mature = field_albedo_scale(&mature_field, &section, detail)
+            .expect("a mature field of named ground has a scale");
+        let exposure = GroundExposure::of_header(mature_field.header());
+        assert_eq!(
+            exposure.maturity().map(f64::to_bits),
+            Some(1.0_f64.to_bits())
+        );
+        let (want, unweathered) = solved(&mature_field, exposure);
+        assert_eq!(mature.to_bits(), want.to_bits());
+        assert_eq!(unweathered.to_bits(), fresh.to_bits());
+        assert_ne!(mature.to_bits(), fresh.to_bits());
+        // The weathered regolith is darker in every band than its fresh entry, so the scale rises.
+        let palette = mature_field.header().palette();
+        let regolith = Material::new(MaterialClass::Regolith, 0).unwrap();
+        let darker = exposed_properties(regolith, palette, exposure).unwrap();
+        let entry = &palette.entries()[0];
+        assert!(
+            (0..3).all(|band| darker.normal_albedo_bvr()[band] < entry.normal_albedo_bvr[band]),
+            "{:?} against {:?}",
+            darker.normal_albedo_bvr(),
+            entry.normal_albedo_bvr
+        );
+        assert!(mature > fresh, "{mature} against {fresh}");
+        let young_field = weathering_field(Some(0.0));
+        let young = field_albedo_scale(&young_field, &section, detail);
+        assert_eq!(young.map(f64::to_bits), Some(fresh.to_bits()));
+        let (young_shared, _) = solved(
+            &young_field,
+            GroundExposure::of_header(young_field.header()),
+        );
+        assert_eq!(young_shared.to_bits(), fresh.to_bits());
+    }
+
+    /// The scale counts the young craters' haloes (decision-r10-t1c-halo R1): on a cratered,
+    /// weathered field it is `haloed_albedo_scale` over the field's maturity mix on the same
+    /// fractions, to the bit, and below `exposed_albedo_scale`'s, since the haloes' fresher ground
+    /// is brighter; with no maturity, and with a maturity but no crater, it is the halo-free solve
+    /// to the bit.
+    #[test]
+    fn a_field_s_albedo_scale_counts_its_young_craters_haloes() {
+        let detail = detail_seed(Seed::new(SEED), system().1[0]);
+        let photometry = photometry_in(SurfaceState::Airless, Pascals::ZERO);
+        let p = photometry.geometric_albedo();
+        let target = [p.b, p.v, p.r];
+        let section = Section::Ok(photometry);
+        let field = cratered_weathering_field();
+        let synth = Synthesiser::new(&field, detail);
+        let fractions = class_fractions(&synth, &mut SynthCache::new()).unwrap();
+        let mix = maturity_mix(&synth).expect("the field carries a maturity and a rate");
+        assert!(mix.nodes().len() > 1, "{:?}", mix.nodes());
+        let (palette, exposure) = (
+            field.header().palette(),
+            GroundExposure::of_header(field.header()),
+        );
+        let haloed = haloed_albedo_scale(&fractions, palette, exposure, &mix, target).unwrap();
+        let halo_free = exposed_albedo_scale(&fractions, palette, exposure, target).unwrap();
+        let served = field_albedo_scale(&field, &section, detail)
+            .expect("a weathered airless field of named ground has a scale");
+        assert_eq!(served.to_bits(), haloed.scale().to_bits());
+        assert!(haloed.halo_excess_v() > 0.0, "{haloed:?}");
+        assert!(
+            served < halo_free.scale(),
+            "{served} against {}",
+            halo_free.scale()
+        );
+        // No maturity: no mix, and the fresh solve.
+        let none = weathering_field(None);
+        let synth = Synthesiser::new(&none, detail);
+        assert!(maturity_mix(&synth).is_none());
+        let fractions = class_fractions(&synth, &mut SynthCache::new()).unwrap();
+        let fresh = albedo_scale(&fractions, none.header().palette(), target).unwrap();
+        assert_eq!(
+            field_albedo_scale(&none, &section, detail).map(f64::to_bits),
+            Some(fresh.scale().to_bits())
+        );
+        // A maturity but no crater: one node, and the halo-free solve.
+        let bare = weathering_field(Some(1.0));
+        let synth = Synthesiser::new(&bare, detail);
+        let mix = maturity_mix(&synth).unwrap();
+        assert_eq!(mix.nodes().len(), 1);
+        let fractions = class_fractions(&synth, &mut SynthCache::new()).unwrap();
+        let halo_free = exposed_albedo_scale(
+            &fractions,
+            bare.header().palette(),
+            GroundExposure::of_header(bare.header()),
+            target,
+        )
+        .unwrap();
+        assert_eq!(
+            field_albedo_scale(&bare, &section, detail).map(f64::to_bits),
+            Some(halo_free.scale().to_bits())
+        );
+    }
+
+    /// A field of a generator version this build does not generate is refused.
+    #[tokio::test]
+    #[should_panic(expected = "which this build cannot generate")]
+    async fn another_versions_surface_is_refused() {
+        let pool = one_worker();
+        let (service, _) = service(&pool, 64 << 20);
+        let later = hyperion_sim::GeneratorVersion::new(GENERATOR_VERSION.get() + 1);
+        let key = FieldKey::new(GalaxyKey::new(SEED, later), system().1[0]);
+        drop(service.field(key, &system().0).await);
+    }
+
+    /// A field is kept under its own body's key alone: another system's is refused.
+    #[tokio::test]
+    #[should_panic(expected = "computed from its own system")]
+    async fn another_systems_surface_is_refused() {
+        let pool = one_worker();
+        let (service, _) = service(&pool, 64 << 20);
+        let other = SystemId::from_raw(0x0200_0800_2000_0000).unwrap();
+        assert_ne!(other, system().0.1.system());
+        drop(
+            service
+                .field(key(BodyId::new(other, 0x0100)), &system().0)
+                .await,
+        );
+    }
+}

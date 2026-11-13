@@ -6,7 +6,7 @@ import {
   sphereIrradianceBruteForce,
   UNIFORM_DISC,
 } from "./oracle";
-import { howellViewFactor, sphereIrradianceFactor } from "./sphereIrradiance";
+import { atanTail, howellViewFactor, sphereIrradianceFactor } from "./sphereIrradiance";
 
 const RAD_PER_DEG = Math.PI / 180;
 
@@ -140,6 +140,57 @@ describe("sphereIrradianceFactor", () => {
     const phi = 91 * RAD_PER_DEG;
     expect(sphereIrradianceFactor(3, phi, -0.2)).toBe(sphereIrradianceFactor(3, phi));
   });
+
+  // R07.T6.d: the partial branch as z + H² (arctan z − z) in the band's coordinate is an identity,
+  // so it meets Howell's form as transcribed (T6.a's, below) to f64's rounding of that form, which
+  // loses about H² ε of 1/H, and to the series' truncation, under 4 × 10⁻¹⁰ of B.
+  it.each([1.01, 1.5, 3, 11.5, H_EARTH])(
+    "meets Howell's form as written across the band at H = %f, nothing cancelling",
+    (h) => {
+      const rho = Math.asin(1 / h);
+      let worst = 0;
+      for (let k = -100; k <= 100; k += 1) {
+        const phi = Math.PI / 2 + (k / 100) * 0.999 * rho;
+        worst = Math.max(worst, Math.abs(sphereIrradianceFactor(h, phi) - howellAsWritten(h, phi)));
+      }
+      expect(worst * h).toBeLessThan(1e-10);
+    },
+  );
+
+  it("is finite for a point star, H infinite: the hard step, half on the plane", () => {
+    const h = Number.POSITIVE_INFINITY;
+    expect(sphereIrradianceFactor(h, 60 * RAD_PER_DEG)).toBe(Math.cos(60 * RAD_PER_DEG));
+    expect(sphereIrradianceFactor(h, 91 * RAD_PER_DEG)).toBe(0);
+    expect(sphereIrradianceFactor(h, Math.PI / 2)).toBeCloseTo(0, 15);
+    // Through a 5° horizon: up at 6° and down at 4°.
+    const horizon = 5 * RAD_PER_DEG;
+    expect(sphereIrradianceFactor(h, 84 * RAD_PER_DEG, horizon)).toBeCloseTo(
+      Math.cos(84 * RAD_PER_DEG),
+      15,
+    );
+    expect(sphereIrradianceFactor(h, 86 * RAD_PER_DEG, horizon)).toBe(0);
+    // Its centre on a horizon of 1 rad, π/2 − 1 + 1 being π/2 exactly in f64: half.
+    expect(sphereIrradianceFactor(h, Math.PI / 2 - 1, 1)).toBeCloseTo(0.5 * Math.sin(1), 15);
+  });
+});
+
+describe("atanTail", () => {
+  it("is (arctan z − z) ÷ z³ to 10⁻⁹ of itself from 10⁻⁶ to 10⁴, and −1/3 at 0", () => {
+    expect(atanTail(0)).toBeCloseTo(-1 / 3, 15);
+    let worst = 0;
+    for (let k = -60; k <= 40; k += 1) {
+      const z = 10 ** (k / 10);
+      // Below 0.05 the series to z¹⁰ (the next term under 2 × 10⁻¹⁷); above, the difference loses
+      // no more than log₂(3 ÷ z²) of f64's bits.
+      const exact =
+        z < 0.05
+          ? -1 / 3 +
+            z * z * (1 / 5 + z * z * (-1 / 7 + z * z * (1 / 9 + z * z * (-1 / 11 + (z * z) / 13))))
+          : (Math.atan(z) - z) / z ** 3;
+      worst = Math.max(worst, Math.abs(atanTail(z) / exact - 1));
+    }
+    expect(worst).toBeLessThan(1e-9);
+  });
 });
 
 describe("howellViewFactor", () => {
@@ -157,4 +208,26 @@ describe("howellViewFactor", () => {
     expect(howellViewFactor(h, edge + 1e-9)).toBeCloseTo(howellViewFactor(h, edge - 1e-9), 9);
     expect(howellViewFactor(h, Math.PI - edge - 1e-9)).toBeCloseTo(0, 9);
   });
+
+  it("is zero for a point star, H infinite", () => {
+    expect(howellViewFactor(Number.POSITIVE_INFINITY, 0.3)).toBe(0);
+  });
 });
+
+/** Howell's partial branch as T6.a wrote it, H² F (the identity's other side). */
+function howellAsWritten(h: number, phi: number): number {
+  const edge = Math.acos(1 / h);
+  if (phi <= edge) {
+    return Math.cos(phi);
+  }
+  if (phi >= Math.PI - edge) {
+    return 0;
+  }
+  const x = Math.sqrt(h * h - 1);
+  const y = -x / Math.tan(phi);
+  const root = Math.sqrt(Math.max(0, 1 - y * y));
+  return (
+    (Math.cos(phi) * Math.acos(y) - x * Math.sin(phi) * root) / Math.PI +
+    (h * h * Math.atan((Math.sin(phi) * root) / x)) / Math.PI
+  );
+}

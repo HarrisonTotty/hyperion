@@ -38,7 +38,7 @@ use crate::units::{SolarMasses, Years};
 
 use super::BinaryParams;
 use super::evolve::{Engine, roche_lobe};
-use super::star::{G, Kind, Member, moment_of_inertia, positive};
+use super::star::{G, Kind, Member, engine_track_age_years, moment_of_inertia, positive};
 use super::timeline::BinaryInput;
 
 /// Peters's (1964) (32/5) G³ M☉³ ÷ (c⁵ R☉⁴) in yr⁻¹: the coefficient of BSE equations 48 and 49,
@@ -104,10 +104,16 @@ pub(super) enum Stop {
     Until,
     /// A member reached the end of a phase (not its death).
     Boundary,
+    /// Member `i`'s carried main sequence reaches its end, τ = 1, where the step that lands there
+    /// takes it ([`main_sequence_end_landed`], P11.T4.o), and is acted on as a [`Stop::Boundary`].
+    MainSequenceEnd(usize),
     /// Member `i`'s own track dies.
     Death(usize),
     /// The primary's pinned death (design note 16).
     Pinned,
+    /// The pinned primary's own track's main sequence ends while member 0 holds a hydrogen main
+    /// sequence that outlasts it (P11.T4.n; [`Engine::end_pinned_main_sequence`]).
+    PinnedMainSequenceEnd,
     /// Member `i` fills its Roche lobe.
     Roche(usize),
     /// The stars touch at periastron.
@@ -116,6 +122,12 @@ pub(super) enum Stop {
     Stripped(usize),
     /// The orbit can hold no angular momentum left: the stars spiral together.
     Coalescence,
+    /// Member `i`, a white dwarf a wind feeds, reaches its collapse mass (P11.T4's dwarf limit;
+    /// [`Engine::collapse_fed_dwarf`]).
+    Chandrasekhar(usize),
+    /// Member `i`'s core, a white dwarf's, reaches its limit with its envelope on (P11.T4's swollen
+    /// dwarf and dwarf limit; [`Engine::core_limit_age`]).
+    CoreLimit(usize),
 }
 
 /// The limits on one step: its length from the rates, and the events it may land on, of which
@@ -202,15 +214,18 @@ impl Engine {
         let stop = self.integrate();
         match stop {
             Stop::Until => {}
-            Stop::Boundary => {
+            Stop::Boundary | Stop::MainSequenceEnd(_) => {
                 self.close_segment();
                 self.after_boundary();
             }
             Stop::Death(i) => self.die(i),
             Stop::Pinned => self.pinned_collapse(),
+            Stop::PinnedMainSequenceEnd => self.end_pinned_main_sequence(),
             Stop::Roche(i) => self.roche_onset(i),
             Stop::Collision | Stop::Coalescence => self.collide(),
             Stop::Stripped(i) => self.strip(i),
+            Stop::Chandrasekhar(i) => self.collapse_fed_dwarf(i),
+            Stop::CoreLimit(i) => self.reach_core_limit(i),
         }
     }
 
@@ -254,9 +269,10 @@ impl Engine {
             };
             let rates = self.rates(&start, &structures);
             let (dt, stop) = self.step_limit(&start, &structures, &rates);
-            let Some(next) = self.step_from(&start, &structures, &rates, dt) else {
+            let Some(mut next) = self.step_from(&start, &structures, &rates, dt) else {
                 return Stop::Coalescence;
             };
+            let stop = main_sequence_end_landed(stop, &start, &mut next);
             let Some(next_structures) = self.structures(&next) else {
                 return Stop::Coalescence;
             };
@@ -528,8 +544,7 @@ impl Engine {
         let Member::MainSequence { helium, .. } = &self.members[i] else {
             return tau;
         };
-        let lifetime =
-            crate::stellar::sse::main_sequence_lifetime(self.ctx.coeffs(), *helium, mass);
+        let lifetime = self.main_sequence_lifetime(*helium, mass);
         if (1.0 - tau).max(0.0) * lifetime <= MAIN_SEQUENCE_END_REACHED * age.abs() {
             1.0
         } else {
@@ -571,11 +586,7 @@ impl Engine {
             };
             r.inertia[i] = moment_of_inertia(st);
             if let Member::MainSequence { helium, .. } = &self.members[i] {
-                let lifetime = crate::stellar::sse::main_sequence_lifetime(
-                    self.ctx.coeffs(),
-                    *helium,
-                    s.masses[i],
-                );
+                let lifetime = self.main_sequence_lifetime(*helium, s.masses[i]);
                 r.tau[i] = 1.0 / lifetime;
             }
         }
@@ -711,6 +722,43 @@ impl Engine {
         r
     }
 
+    /// The time, years, in which member `i`, a carbon–oxygen or oxygen–neon white dwarf a wind
+    /// feeds at `rates` from `s`, reaches its collapse mass ([`Engine::collapse_mass`]: the
+    /// Chandrasekhar mass, and an oxygen–neon dwarf's capture mass under the default recipe), at
+    /// which it stops (P11.T4's dwarf limit, [`Stop::Chandrasekhar`]); `None` for any other member,
+    /// and for a pinned primary whose pin is pending (`Engine::pin_pending`).
+    #[must_use]
+    fn to_the_dwarf_limit(&self, i: usize, s: &Snapshot, rates: &Rates) -> Option<f64> {
+        if self.pin_pending(i) {
+            return None;
+        }
+        let Member::Remnant { phase, .. } = &self.members[i] else {
+            return None;
+        };
+        // An oxygen–neon dwarf's is the capture mass (P11.T4's kept-core endings).
+        let limit = self.collapse_mass(*phase).value();
+        // A helium dwarf is left out: it ignites at 0.7 M☉ (BSE section 2.6.6), far below the
+        // limit.
+        let dwarf = matches!(
+            phase,
+            Phase::CarbonOxygenWhiteDwarf | Phase::OxygenNeonWhiteDwarf
+        );
+        (dwarf && rates.mass[i] > 0.0).then(|| ((limit - s.masses[i]) / rates.mass[i]).max(0.0))
+    }
+
+    /// Adds to `limits` the events of member `i`'s white dwarf, or of its core that is one's, from
+    /// `s` at `rates` (P11.T4's dwarf limit and swollen dwarf): a dwarf a wind
+    /// feeds at the Chandrasekhar mass ([`Stop::Chandrasekhar`]), and a dwarf's core at its limit
+    /// ([`Stop::CoreLimit`]).
+    fn dwarf_limits(&self, i: usize, s: &Snapshot, rates: &Rates, limits: &mut StepLimit) {
+        if let Some(dt) = self.to_the_dwarf_limit(i, s, rates) {
+            limits.event(dt, Stop::Chandrasekhar(i));
+        }
+        if let Some(at) = self.core_limit_age(i) {
+            limits.event((at - s.age).max(0.0), Stop::CoreLimit(i));
+        }
+    }
+
     /// The step's length from `s` and the event it lands on, if its limit is one (BSE section
     /// 2.8's limits; see the module documentation).
     #[must_use]
@@ -727,6 +775,10 @@ impl Engine {
             if at > s.age {
                 limits.event(at - s.age, Stop::Pinned);
             }
+        }
+        let phase = structures[0].as_ref().map(|st| st.state.phase());
+        if let Some(at) = self.own_main_sequence_end_after(s.age, phase) {
+            limits.event(at - s.age, Stop::PinnedMainSequenceEnd);
         }
         for (i, structure) in structures.iter().enumerate() {
             match &self.members[i] {
@@ -753,12 +805,8 @@ impl Engine {
                     }
                 }
                 Member::MainSequence { helium, .. } => {
-                    let lifetime = crate::stellar::sse::main_sequence_lifetime(
-                        self.ctx.coeffs(),
-                        *helium,
-                        s.masses[i],
-                    );
-                    limits.event((1.0 - s.taus[i]) * lifetime, Stop::Boundary);
+                    let lifetime = self.main_sequence_lifetime(*helium, s.masses[i]);
+                    limits.event((1.0 - s.taus[i]) * lifetime, Stop::MainSequenceEnd(i));
                     limits.length(MAIN_SEQUENCE_STEP * lifetime);
                 }
                 Member::Cooling { .. }
@@ -783,6 +831,7 @@ impl Engine {
                     }
                 }
             }
+            self.dwarf_limits(i, s, rates, &mut limits);
             if rates.braking[i] > 0.0 {
                 limits.length(BRAKING_STEP * s.spins[i] / rates.braking[i]);
             }
@@ -810,9 +859,19 @@ impl Engine {
         let floor = (1e-9 * s.age).max(1e-3);
         let (dt, stop) = limits.resolve();
         if dt < floor && stop.is_none() {
-            (floor, None)
+            self.floored(s.age, floor)
         } else {
             (dt.max(0.0), stop)
+        }
+    }
+
+    /// The step's length at `age`, years, held at its `floor`, and the event it lands on: the
+    /// pinned primary's collapse where it falls inside the floor, which the engine would otherwise
+    /// step past and never act on (P11.T10's fix; `collapses.rs`'s leans), else none.
+    fn floored(&self, age: f64, floor: f64) -> (f64, Option<Stop>) {
+        match self.pin.as_ref().map(|pin| pin.death.age().value() - age) {
+            Some(to_pin) if to_pin > 0.0 && to_pin <= floor => (to_pin, Some(Stop::Pinned)),
+            _ => (floor, None),
         }
     }
 
@@ -860,6 +919,42 @@ const fn phase_step(kind: Kind) -> f64 {
         | Kind::NeutronStar
         | Kind::BlackHole
         | Kind::Massless => 1.0,
+    }
+}
+
+/// The event a step from `start` to `end` lands on, given its limit `stop`: a carried main
+/// sequence's end that the step takes, with τ set to 1 in `end`, or none where it falls short.
+///
+/// Only a limit of member `i`'s main-sequence end ([`Stop::MainSequenceEnd`]; finding F18,
+/// P11.T4.o) is decided here; any other passes as it is. The end is taken where τ has reached 1
+/// at `end`, or where the member was fed over the step (its mass at the end above its mass at the
+/// start) and aged (τ at the end above τ at the start). Otherwise the step lands on nothing, and
+/// the phase goes on with no segment closed: a fed member that did not age keeps its main
+/// sequence, and an unfed one, which lands short only as its own loss of mass lengthens its
+/// lifetime (HPT section 7.1), lands on the end at a later step, as before.
+///
+/// A fed accretor's rejuvenation lowers its τ over the step that aims at the end (BSE section
+/// 2.6.6, `Engine::rejuvenated_tau`), so the step lands short of τ = 1. The boundary closed a
+/// segment whether reached or not, and the next step, shorter by about τ Ṁ `t_MS` ÷ m, landed
+/// short again, to the cap on segments. So a fed main sequence ends early by at most the last
+/// step's rejuvenation, under that step's own increment of τ. BSE's floor on the evolution step
+/// it aims at the end, 10⁻⁷ Myr during transfer (`evolv2.f` 1960; 10⁻⁷ of the age when detached,
+/// 908), is not taken: it would still close a segment at every landing that falls short.
+#[must_use]
+pub(super) fn main_sequence_end_landed(
+    stop: Option<Stop>,
+    start: &Snapshot,
+    end: &mut Snapshot,
+) -> Option<Stop> {
+    let Some(Stop::MainSequenceEnd(i)) = stop else {
+        return stop;
+    };
+    let fed = end.masses[i] > start.masses[i];
+    if end.taus[i] >= 1.0 || (fed && end.taus[i] > start.taus[i]) {
+        end.taus[i] = 1.0;
+        stop
+    } else {
+        None
     }
 }
 
@@ -1025,24 +1120,101 @@ fn damping(
 const DECAY_PIECES: u32 = 4;
 
 /// The factor on the decay that [`decay_reaches`] bounds (ruling p11-channels, section 3.1, item
-/// 6): for the midpoint integrator, and for the drawn masses standing for the stars' own, which
-/// only lose mass.
+/// 6): for the midpoint integrator, and for the masses at the span's start standing for the
+/// stars' own, which only lose mass.
 pub(super) const DECAY_SAFETY: f64 = 1.25;
+
+/// The spin a locked star's wind takes beyond its own inertia's share, per unit of mass lost and
+/// of R² Ω: 2/3 − k′₂ (P11.T4.l, the orchestrator's ruling of 2026-10-06 on P11.T4.j's open
+/// question). The wind carries 2/3 ṁ R² Ω (HPT equation 110, a thin shell at the surface), and the
+/// envelope it leaves held k′₂ ṁ R² Ω of it ([`ENVELOPE_GYRATION`], BSE equation 35), so a star the
+/// tides keep at its spin draws the difference from the orbit.
+pub(super) const WIND_SPIN_SHARE: f64 = 2.0 / 3.0 - ENVELOPE_GYRATION;
+
+/// The orbit [`decay_reaches`] and the lobe test ask of (plan 11, design note 7), with the stars'
+/// masses on it: the drawn orbit from the first arrival, or the orbit a passed-over pair's collapse
+/// leaves, from the collapse (P11.T4.l).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct TestedOrbit {
+    /// The orbit's elements.
+    pub(super) elements: KeplerElements,
+    /// Each star's mass at the span's start, M☉, primary first: the largest it has over the span,
+    /// since a star on its own track only loses mass.
+    pub(super) masses_msun: [f64; 2],
+    /// Each star's ratio mᵢ ÷ mⱼ for its Roche lobe (Eggleton 1983): the drawn masses' on the
+    /// drawn orbit, and after a collapse its least living mass over the span against the other's
+    /// at the start, where its lobe is smallest.
+    pub(super) lobe_ratios: [f64; 2],
+    /// The mass each star's wind takes over the span, M☉: from its mass at the start to its least
+    /// living mass by the span's end ([`wind_loss_msun`]).
+    pub(super) wind_loss_msun: [f64; 2],
+}
+
+impl TestedOrbit {
+    /// The drawn orbit of `input`, for the stars of `members` on their own forms from zero age,
+    /// run to the engine's age `until_years`.
+    #[must_use]
+    pub(super) fn drawn(input: &BinaryInput, members: &[Member; 2], until_years: f64) -> Self {
+        let m = input.masses().map(SolarMasses::value);
+        Self {
+            elements: *input.orbit(),
+            masses_msun: m,
+            lobe_ratios: [m[0] / m[1], m[1] / m[0]],
+            wind_loss_msun: core::array::from_fn(|i| {
+                wind_loss_msun(&members[i], m[i], until_years)
+            }),
+        }
+    }
+}
+
+/// The mass, M☉, that a star of `member` loses to its wind from `at_start_msun` to its least living
+/// mass by the engine's age `until_years`: for a star on its own track, its mass at `until_years`,
+/// or, where it dies before then, its death's progenitor mass (helium core plus envelope), the
+/// mass it has at its last living instant, since a single star only loses mass; nothing for any
+/// other form.
+#[must_use]
+pub(super) fn wind_loss_msun(member: &Member, at_start_msun: f64, until_years: f64) -> f64 {
+    let least = match member {
+        Member::Track { track, offset } => match track.death() {
+            Some(death) if death.age().value() + offset <= until_years => {
+                let p = death.progenitor();
+                p.helium_core_mass().value() + p.envelope_mass().value()
+            }
+            Some(_) | None => track.mass_at(engine_track_age_years(track, *offset, until_years)),
+        },
+        Member::Shaped { .. }
+        | Member::MainSequence { .. }
+        | Member::Cooling { .. }
+        | Member::Frozen { .. }
+        | Member::Remnant { .. }
+        | Member::Gone => return 0.0,
+    };
+    (at_start_msun - least).max(0.0)
+}
+
+/// Eggleton's (1983) Roche-lobe radius over the separation for a star of mass ratio `q`, its mass
+/// ÷ its companion's, as [`roche_lobe`] reads it for positive masses.
+#[must_use]
+pub(super) fn lobe_fraction(q: f64) -> f64 {
+    crate::orbit::roche_lobe_radius(q, crate::units::Metres::new(1.0)).value()
+}
 
 /// Whether the engine's own sinks of orbital angular momentum can bring a pair into design note
 /// 7's lobe test by `until_years`: the pre-test's bound (P11.T4.j, ruling p11-channels of
 /// 2026-10-06, section 3.1).
 ///
-/// `members` are the stars on their own forms from zero age (`evolve.rs`'s `own_members`),
-/// stepped from `start_years` (the first arrival), and `radii_rsun` their largest radii up to
-/// `until_years` as the lobe test reads them, R☉. The bound is the engine's, term by term, so that
-/// a pair it passes over shows no interaction before `until_years` in a run to any later age.
+/// `tested` is the orbit asked of: the drawn one, or the one a passed-over pair's collapse leaves
+/// (P11.T4.l). `members` are the stars on their own forms from zero age (`evolve.rs`'s
+/// `own_members`), stepped from `start_years` (the first arrival, or the collapse), and
+/// `radii_rsun` their largest radii up to `until_years` as the lobe test reads them, R☉. The bound
+/// is the engine's, term by term, so that a pair it passes over shows no interaction before
+/// `until_years` in a run to any later age.
 ///
-/// In the semi-latus rectum p = a (1 − e²), with the drawn orbit's p₀ and e₀, the drawn masses m₁
-/// and m₂ (M = m₁ + m₂, μ = m₁ m₂ ÷ M) and the engine's units (R☉, M☉, yr):
+/// In the semi-latus rectum p = a (1 − e²), with the tested orbit's p₀ and e₀, the stars' masses
+/// m₁ and m₂ at the span's start (M = m₁ + m₂, μ = m₁ m₂ ÷ M) and the engine's units (R☉, M☉, yr):
 ///
-/// 1. The lobe test passes at the periastron `r_c` = maxᵢ Rᵢ ÷ `f_L`(mᵢ ÷ mⱼ) (Eggleton 1983), or
-///    `p_c` = `r_c` (1 + e₀).
+/// 1. The lobe test passes at the periastron `r_c` = maxᵢ Rᵢ ÷ `f_L`(qᵢ) (Eggleton 1983), qᵢ the
+///    orbit's lobe ratio ([`TestedOrbit::lobe_ratios`]), or `p_c` = `r_c` (1 + e₀).
 /// 2. Tides spin no star past its equilibrium Φ √(G M ÷ p³) (BSE equation 34), Φ = f₂(e) ÷ f₅(e)
 ///    (Hut 1981), taken at e₀: e falls under gravitational radiation, and under tides while no
 ///    star spins faster than about 1.3 times its equilibrium (Hut 1981; BSE equation 25 and section
@@ -1054,9 +1226,12 @@ pub(super) const DECAY_SAFETY: f64 = 1.25;
 ///    `p_c` and Iᵢ bounding BSE equation 35's k′₂ (M − Mc) R² + k′₃ Mc Rc² over the span: k′₂ mᵢ
 ///    Rᵢ² ([`ENVELOPE_GYRATION`]), plus k′₃ Mc Rc² ([`CORE_GYRATION`]) at their largest
 ///    ([`largest_core`]), which is zero on the main sequence, and no more than k′₃ mᵢ Rᵢ². That is
-///    the Darwin instability's spin-up and a star's growth at a locked spin. Taken first, it leaves
-///    J′ = J₀ − S of the orbit's J₀ = μ √(G M p₀): the pair can interact if J′ ≤ 0, and otherwise
-///    starts from p′ = p₀ (J′ ÷ J₀)².
+///    the Darwin instability's spin-up and a star's growth at a locked spin. S also holds the spin
+///    a locked star's wind takes beyond its inertia's share, which the tides restore from the
+///    orbit (P11.T4.l): `Ω_c` Σᵢ [`WIND_SPIN_SHARE`] `ΔMᵢ` Rᵢ², `ΔMᵢ` the mass its wind takes
+///    over the span ([`TestedOrbit::wind_loss_msun`]), with the wind's spin switch and the tides
+///    on. Taken first, S leaves J′ = J₀ − S of the orbit's J₀ = μ √(G M p₀): the pair can interact
+///    if J′ ≤ 0, and otherwise starts from p′ = p₀ (J′ ÷ J₀)².
 /// 4. Braking, B = 10 K (G M ÷ μ) Φ³ Σᵢ ∫ (`M_env` ÷ M)ᵢ Rᵢ³ dt over the span, of each star above
 ///    [`MAGNETIC_BRAKING_FLOOR`] (no remnant brakes), bounded piece by piece
 ///    ([`braking_integral`]).
@@ -1071,17 +1246,19 @@ pub(super) const DECAY_SAFETY: f64 = 1.25;
 /// The bound is conservative in each term it holds: circularisation keeps p; a super-synchronous
 /// star spins the orbit up, and a sub-synchronous one brakes more weakly than at equilibrium, its
 /// spin-up being the reservoir's; every term is at its largest. Winds widen the orbit by the mass
-/// they take and are left out, but the spin a locked star's wind carries off (HPT equation 110),
-/// which the tides restore from the orbit, is not bounded here (ruling p11-channels' reservoir, as
-/// ruled): the slack of the reservoir and the zero-miss gate guard it. Before
-/// the pair's first interaction every star keeps its track's mass, so the braking floor read on
-/// the drawn mass is the engine's. The bound widens with `until_years` as `p_c`, B and W grow,
-/// though `Ω_c` falls with `p_c`: tested (`the_pre_test_only_widens_with_age`), not proven. A term
-/// whose [`BinaryParams`](super::BinaryParams) switch is off is left out: braking and the spins'
+/// they take and are left out; the spin a locked star's wind carries off beyond its inertia's
+/// share is in the reservoir, at the star's largest radius and `Ω_c`, which bound R and Ω until
+/// the orbit reaches `p_c` (P11.T4.l; before it, the slack of the reservoir and the zero-miss gate
+/// guarded it). Before the pair's first interaction every star keeps its track's mass, so the
+/// braking floor read on the mass at the span's start is the engine's. The bound widens with
+/// `until_years` as `p_c`, B, W and the winds' `ΔMᵢ` grow, though `Ω_c` falls with `p_c`:
+/// tested (`the_pre_test_only_widens_with_age`), not proven. A term whose
+/// [`BinaryParams`](super::BinaryParams) switch is off is left out: braking and the spins'
 /// reservoir reach the orbit through the tides.
 #[must_use]
 pub(super) fn decay_reaches(
-    input: &BinaryInput,
+    params: &BinaryParams,
+    tested: &TestedOrbit,
     members: &[Member; 2],
     start_years: f64,
     until_years: f64,
@@ -1089,21 +1266,27 @@ pub(super) fn decay_reaches(
 ) -> bool {
     let (start, until, radii) = (start_years, until_years, radii_rsun);
     let span = until - start;
-    let m = input.masses().map(SolarMasses::value);
-    let orbit = input.orbit();
+    let m = tested.masses_msun;
+    let orbit = &tested.elements;
     let e0 = orbit.eccentricity().value();
     let e2 = e0 * e0;
     let p0 = orbit.semi_major_axis().value() / SOLAR_RADIUS_M * (1.0 - e2);
     // 1. The critical orbit.
     let p_c = (0..2)
-        .map(|i| radii[i] / roche_lobe(m[i], m[1 - i], 1.0))
+        .map(|i| radii[i] / lobe_fraction(tested.lobe_ratios[i]))
         .fold(0.0, f64::max)
         * (1.0 + e0);
     if !(positive(span) && positive(p_c) && positive(p0)) {
         return false;
     }
     // 2, 5 and 6: the pair-wide terms.
-    let decay = Decay::new(input.params(), m, e2, p0, p_c, span);
+    let decay = Decay::new(params, m, e2, p0, p_c, span);
+    // 3. The spin the winds take from a locked star beyond its inertia's share.
+    let wind = if params.tides && params.wind_angular_momentum {
+        WIND_SPIN_SHARE * both(|i| tested.wind_loss_msun[i] * radii[i] * radii[i])
+    } else {
+        0.0
+    };
     let brakes = |i: usize| decay.brakes(m[i]);
     let track_of = |i: usize| match &members[i] {
         Member::Track { track, offset } => Some((&**track, *offset)),
@@ -1134,7 +1317,7 @@ pub(super) fn decay_reaches(
             0.0
         }
     });
-    if !decay.reaches(both(inertia_bound), coarse_braking) {
+    if !decay.reaches(both(inertia_bound) + wind, coarse_braking) {
         return false;
     }
     // 3. The core read from the track, and the coarse test again with it: with no star past its
@@ -1146,13 +1329,13 @@ pub(super) fn decay_reaches(
                 (envelope_inertia(i) + CORE_GYRATION * mc * rc * rc).min(inertia_bound(i))
             }
             None => envelope_inertia(i),
-        });
+        }) + wind;
         if !decay.reaches(read, coarse_braking) {
             return false;
         }
         read
     } else {
-        both(envelope_inertia)
+        both(envelope_inertia) + wind
     };
     // 4. Braking, piece by piece.
     let braking = both(|i| match track_of(i) {
@@ -1170,9 +1353,9 @@ fn both(f: impl Fn(usize) -> f64) -> f64 {
 
 /// The pair-wide terms of [`decay_reaches`]'s test.
 struct Decay {
-    /// J₀, the drawn orbit's angular momentum, M☉ R☉² yr⁻¹.
+    /// J₀, the tested orbit's angular momentum, M☉ R☉² yr⁻¹.
     j0: f64,
-    /// p₀, the drawn orbit's semi-latus rectum, R☉.
+    /// p₀, the tested orbit's semi-latus rectum, R☉.
     p0_rsun: f64,
     /// `p_c`⁵, the lobe test's semi-latus rectum to the fifth, R☉⁵.
     p_c5: f64,
@@ -1185,8 +1368,8 @@ struct Decay {
 }
 
 impl Decay {
-    /// The terms for the drawn masses `masses_msun`, e₀² `e2`, p₀ and `p_c` (`p0_rsun`,
-    /// `p_c_rsun`) and the span's length `span_years`, under `params`.
+    /// The terms for the masses at the span's start `masses_msun`, e₀² `e2`, p₀ and `p_c`
+    /// (`p0_rsun`, `p_c_rsun`) and the span's length `span_years`, under `params`.
     #[must_use]
     fn new(
         params: &BinaryParams,
@@ -1231,16 +1414,16 @@ impl Decay {
         }
     }
 
-    /// Whether a star of drawn mass `mass_msun` brakes the orbit: above BSE's floor, with braking
-    /// and tides on.
+    /// Whether a star of mass `mass_msun` at the span's start brakes the orbit: above BSE's floor,
+    /// with braking and tides on.
     #[must_use]
     fn brakes(&self, mass_msun: f64) -> bool {
         mass_msun > MAGNETIC_BRAKING_FLOOR && positive(self.braking)
     }
 
     /// Items 3 and 6: whether the orbit, less the spins' reservoir of the moments of inertia
-    /// `inertia` (M☉ R☉²), reaches `p_c` under the braking integral `braking` (R☉³ yr) and
-    /// gravitational radiation.
+    /// `inertia` (M☉ R☉², the winds' share included), reaches `p_c` under the braking integral
+    /// `braking` (R☉³ yr) and gravitational radiation.
     #[must_use]
     fn reaches(&self, inertia: f64, braking: f64) -> bool {
         let j = self.j0 - self.omega_c * inertia;

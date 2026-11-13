@@ -1,0 +1,112 @@
+# generator_version = 31
+pal5.cartesian_knots 25
+pal5.tracers 64 64
+pal5.mass = 0x40e3e509fa884306  # 40744.31183255282
+pal5.trailing.mass = 0x40d3e509fa884306  # 20372.15591627641
+pal5.length = 0x410b1ea61c5e3874  # 222164.76385158638
+pal5.knots.digest = 0x3ee4dbe4fc4e2b4c
+pal5.knot.0.centre.x = 0x40db96ec2e67abea  # 28251.69033233441
+pal5.knot.0.centre.y = 0x40c13ef0ee16bddb  # 8829.882265894606
+pal5.knot.0.centre.z = 0x40d13022029cd337  # 17600.53140946032
+pal5.knot.0.width.normal = 0x40944529caa4e241  # 1297.2908120883078
+pal5.knot.0.width.binormal = 0x4072ab1136cc51e0  # 298.69170265018874
+pal5.knot.0.psi = 0xc003c37a6e539dc0  # -2.470448362280621
+pal5.knot.255.centre.x = 0xc0e6bcb85c1794f6  # -46565.761241713466
+pal5.knot.255.centre.y = 0x40c6f1af3e334b7e  # 11747.369085704671
+pal5.knot.255.centre.z = 0x40df5d3fa48a864d  # 32116.994417792466
+pal5.knot.255.width.normal = 0x40763b97340ca78a  # 355.72441487258095
+pal5.knot.255.width.binormal = 0x406f19dddd2e90e7  # 248.80833300681044
+pal5.knot.255.psi = 0xbf425c3ae7018e00  # -0.0005603110894409347
+pal5.knot.256.centre.x = 0xc0e611326afb6c27  # -45193.5755593407
+pal5.knot.256.centre.y = 0x40c6e83291e0da55  # 11728.395076853378
+pal5.knot.256.centre.z = 0x40df9ae22865d59a  # 32363.53371568546
+pal5.knot.256.width.normal = 0x40727fc27535889c  # 295.98497506057333
+pal5.knot.256.width.binormal = 0x406c7dd7fba71b47  # 227.93261511457442
+pal5.knot.256.psi = 0x3f4d96d6e0cbc600  # 0.0009029912194746248
+pal5.knot.511.centre.x = 0x40ce206dcb953f8f  # 15424.85777536014
+pal5.knot.511.centre.y = 0xc0c733b5512a65a0  # -11879.416539477941
+pal5.knot.511.centre.z = 0xc0dba720978540ea  # -28316.50924807872
+pal5.knot.511.width.normal = 0x40b855931a8a6292  # 6229.574623726907
+pal5.knot.511.width.binormal = 0x4081c0806f68ada5  # 568.0627124956123
+pal5.knot.511.psi = 0x400b4e34d3b4f2c0  # 3.413186696967699
+pal5.along_cells 1024
+pal5.noise.0 = 0x3ff06dedfea399c8  # 1.0268382975424277
+pal5.noise.341 = 0x3ff4a9e8d1f84cd6  # 1.2914818002653212
+pal5.noise.512 = 0x3ff4f8f528125792  # 1.3107806744860437
+pal5.noise.1023 = 0x3ff94a3d88c999ad  # 1.5806250899564518
+pal5.touched 718
+pal5.touched.digest = 0x38921361a07be889
+gd1.cartesian_knots 0
+gd1.tracers 64 64
+gd1.mass = 0x40bb580000000000  # 7000.0
+gd1.trailing.mass = 0x40ab580000000000  # 3500.0
+gd1.length = 0x40fab704e7e45179  # 109424.30661422563
+gd1.knots.digest = 0x2a002b514dcb0351
+gd1.knot.0.centre.x = 0xc0e5c0f30ec7f81e  # -44551.595554337124
+gd1.knot.0.centre.y = 0x40c9a4f731699296  # 13129.931195446563
+gd1.knot.0.centre.z = 0xc0dbd3df39b5e8d7  # -28495.487897374518
+gd1.knot.0.width.normal = 0x406e9a94bee610ee  # 244.83065743384162
+gd1.knot.0.width.binormal = 0x405d64af495d1195  # 117.57319864357699
+gd1.knot.0.psi = 0xbff281ba2081a540  # -1.1566716451437316
+gd1.knot.255.centre.x = 0xc0d215b082851d88  # -18518.757966307487
+gd1.knot.255.centre.y = 0x40e4555627d4962d  # 41642.69236211139
+gd1.knot.255.centre.z = 0x407e2bf5987dff29  # 482.74745988099545
+gd1.knot.255.width.normal = 0x40632d5d5ce06f88  # 153.41764682612506
+gd1.knot.255.width.binormal = 0x404897ebd5709307  # 49.186884574859555
+gd1.knot.255.psi = 0xbfb96a73581e1c00  # -0.09928055669125513
+gd1.knot.256.centre.x = 0xc0bf61367a4bc922  # -8033.212803589444
+gd1.knot.256.centre.y = 0x40e5cf2b943cb195  # 44665.36184534725
+gd1.knot.256.centre.z = 0x40c2a45f1ba93ee9  # 9544.743031650274
+gd1.knot.256.width.normal = 0x4064ae87ce52ae36  # 165.45407787464654
+gd1.knot.256.width.binormal = 0x4043ed997ae7dfd6  # 39.85624634096136
+gd1.knot.256.psi = 0x3fb74dc6dab99600  # 0.09103052940334777
+gd1.knot.511.centre.x = 0x40dc6e08b5710ddc  # 29112.13607431749
+gd1.knot.511.centre.y = 0x40e2642f68b7d314  # 37665.48153296686
+gd1.knot.511.centre.z = 0x40e0991bed8e9a03  # 33992.87274866181
+gd1.knot.511.width.normal = 0x4066d8b69a6fc7b7  # 182.7722904380041
+gd1.knot.511.width.binormal = 0x404ae9952faac856  # 53.82486530150406
+gd1.knot.511.psi = 0x3ff0ea41cd544fc0  # 1.0571916599919717
+gd1.along_cells 256
+gd1.noise.0 = 0x3ff44560115e053c  # 1.2669373205574876
+gd1.noise.85 = 0x3ff3e51719ee4dd6  # 1.243430234234315
+gd1.noise.128 = 0x3ff144efad37344f  # 1.0793301359401715
+gd1.noise.255 = 0x3ff709fe80654177  # 1.43993997721199
+gd1.touched 756
+gd1.touched.digest = 0x5df63074141b5193
+sagittarius.cartesian_knots 104
+sagittarius.tracers 64 64
+sagittarius.mass = 0x419811f0ffffffff  # 100957247.99999999
+sagittarius.trailing.mass = 0x418811f0ffffffff  # 50478623.99999999
+sagittarius.length = 0x4129ea1b059c270c  # 849165.5109569742
+sagittarius.knots.digest = 0x99547ee5cde9ca53
+sagittarius.knot.0.centre.x = 0xc0d68bae6fbbdb0d  # -23086.725569690625
+sagittarius.knot.0.centre.y = 0xc1007441ff499171  # -134792.24965203882
+sagittarius.knot.0.centre.z = 0xc10ac1896dbfdc05  # -219185.1785885991
+sagittarius.knot.0.width.normal = 0x40abf70c7a521d11  # 3579.524370733307
+sagittarius.knot.0.width.binormal = 0x40bdd902993f9e29  # 7641.010150886644
+sagittarius.knot.0.psi = 0xc0068f05d3e9def2  # -2.8198353343722085
+sagittarius.knot.255.centre.x = 0x40ce3541541eecb5  # 15466.510379663066
+sagittarius.knot.255.centre.y = 0x40dcafc67855f367  # 29375.101094711015
+sagittarius.knot.255.centre.z = 0x40f6a34e8ec18c90  # 92724.90985255153
+sagittarius.knot.255.width.normal = 0x40c7d96dfd67b857  # 12210.859295811662
+sagittarius.knot.255.width.binormal = 0x409e571365a38b9a  # 1941.768942408939
+sagittarius.knot.255.psi = 0xbf9931e5169d6460  # -0.024604396348284374
+sagittarius.knot.256.centre.x = 0x40c824cc227dd44c  # 12361.594802597676
+sagittarius.knot.256.centre.y = 0xc0a5260ad7f39479  # -2707.021178829073
+sagittarius.knot.256.centre.z = 0x40e666fab2772905  # 45879.83428533565
+sagittarius.knot.256.width.normal = 0x40b3b216fd4e1ca4  # 5042.0898026294635
+sagittarius.knot.256.width.binormal = 0x40a23cd5bcf53141  # 2334.4174572584748
+sagittarius.knot.256.psi = 0x3fa5359865dbc6d0  # 0.041424524721049516
+sagittarius.knot.511.centre.x = 0xc0df19530a13006d  # -31845.297489881912
+sagittarius.knot.511.centre.y = 0x40d8a53add3ece92  # 25236.919753743867
+sagittarius.knot.511.centre.z = 0xc0f71faeff147885  # -94714.93727538183
+sagittarius.knot.511.width.normal = 0x40df1748f96a5e1f  # 31837.140223113933
+sagittarius.knot.511.width.binormal = 0x40b636cef264e8f5  # 5686.808386141657
+sagittarius.knot.511.psi = 0x4011de56692f970c  # 4.467126506356873
+sagittarius.along_cells 16384
+sagittarius.noise.0 = 0x3fec3803ea555641  # 0.8818378044913474
+sagittarius.noise.5461 = 0x3fe78b68145fd6d4  # 0.7357674024521779
+sagittarius.noise.8192 = 0x3fed6bea8a0fafcf  # 0.9194233604916863
+sagittarius.noise.16383 = 0x3fef4470886d1baa  # 0.9771044411253247
+sagittarius.touched 20987
+sagittarius.touched.digest = 0xed9c8600f6ae8cdd

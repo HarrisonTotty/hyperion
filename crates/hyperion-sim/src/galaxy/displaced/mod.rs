@@ -11,10 +11,22 @@
 //! plan 09's shared test ([`site`], P08.T13).
 //!
 //! What exists so far: P08.T1's layout (the class indices and kinds below, and the galaxy's scales,
-//! [`scales`]), the binarity seam and the kick bins (P08.T8), the forms (P08.T10) and their bounds
-//! (P08.T11). The class table, the marks and the runaway model are built by the tasks named in
-//! their modules, and nothing generated reads a displaced class until P08.T12 switches them on
-//! with its version bump.
+//! [`scales`]), the binarity seam and the kick bins (P08.T8), the class table (P08.T9), the forms
+//! (P08.T10) and their bounds (P08.T11), the explosion-site hook (P08.T13): the interval predicate
+//! [`death_in_interval`] and [`explosion_site`], which plan 03's carve-out hook asks for every
+//! layer-E record once plan 09's P09.T35 gives its claim, and for none before (P08.T13.b); and the
+//! classes as placement reads them ([`fields`], P08.T12.a–b).
+//!
+//! # The build
+//!
+//! P08.T12 replaces layers D and E from generator version 27: its field of the galaxy's rules,
+//! `DisplacedRules`, is matched once, where the galaxy is built. Under `DisplacedRules::Displaced`,
+//! every version's, the build makes the class table from the field galaxy and installs the
+//! classes ([`DisplacedFields`], in the galaxy's
+//! [`Fields`](crate::galaxy::fields::Fields)) and the stay shares and class counts (in its
+//! [`ShareMatrix`](crate::galaxy::shares::ShareMatrix)); every reader of layers D and E (the layer
+//! densities and bounds, the census's expected counts, the index headroom, the map, the candidate
+//! evaluation and the sky's shares) goes through those two values.
 //!
 //! Speeds are in units of the galaxy's circular speed `v_c` and times in units of `R_d ÷ v_c`
 //! ([`GalaxyScales`]), as plan 15's form table has them.
@@ -22,14 +34,37 @@
 pub mod binarity;
 pub mod bound;
 pub mod class_table;
+pub(crate) mod envelope;
+pub mod fields;
 pub mod forms;
 pub mod kick_bins;
 pub mod marks;
 pub mod runaway;
 pub mod scales;
 pub mod site;
+pub mod survivors;
 
+pub use fields::{DisplacedClass, DisplacedFields, DisplacedForm};
 pub use scales::GalaxyScales;
+pub use site::{ExplosionSite, death_in_interval, explosion_site};
+pub(crate) use site::{
+    death_and_kick_by_end, death_in_interval_knowing, death_in_interval_under, outside_interval,
+};
+
+/// Whether layers D and E hold plan 08's displaced classes (P08.T12, on the record from generator
+/// version 27 with plan 15's production form table): every version's do. The galaxy's build
+/// matches it once (E4′ of decision-stellar-holds, lean of 2026-10-31).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum DisplacedRules {
+    /// Layers D and E hold the field components alone, each at its population's whole band share,
+    /// which no version takes: the field the tests install the classes over (`hold`'s
+    /// `field_only_rules`).
+    #[cfg(test)]
+    FieldOnly,
+    /// Every version's: layers D and E hold the field components at their stay shares and, after
+    /// them, the displaced classes (P08.T12).
+    Displaced,
+}
 
 /// The number of speed bins of the class table: edges at 0.25, 0.5, 0.85, 1.3, 1.75, 2.2 and 2.8
 /// `v_c` (brainstorm, "Displaced objects: kicks and runaways"; plan 08, P08.T9.a).
@@ -176,6 +211,9 @@ pub enum PlacementClass {
         kind: DisplacedKind,
     },
 }
+
+#[cfg(test)]
+pub(crate) mod hold;
 
 #[cfg(test)]
 mod tests {

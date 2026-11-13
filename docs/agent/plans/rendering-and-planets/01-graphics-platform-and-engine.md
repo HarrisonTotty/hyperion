@@ -98,9 +98,9 @@ TypeScript paths are under `apps/hyperion/src/`. Signatures are sketches.
 ```ts
 /**
  * How this launch runs the GPU: Chromium's own path off Linux (no switches, never relaunched), the
- * forced Vulkan path on Linux, or the declared safe mode.
+ * forced Vulkan path on Linux, the declared safe mode, or the check-only software mode (T16).
  */
-export type GraphicsLaunchMode = "default" | "vulkan" | "safe";
+export type GraphicsLaunchMode = "default" | "vulkan" | "safe" | "software";
 /** One Chromium switch; `value` absent for a bare flag. */
 export interface ChromiumSwitch {
   readonly name: string;
@@ -118,8 +118,18 @@ export function applyGraphicsSwitches(
   commandLine: Electron.CommandLine,
   switches: ReadonlyArray<ChromiumSwitch>,
 ): void;
-/** The launch's mode: `default` off Linux, else `safe` with the switch and `vulkan` without. */
-export function launchModeOf(platform: NodeJS.Platform, safeSwitch: boolean): GraphicsLaunchMode;
+/**
+ * The launch's mode: `default` off Linux, else `safe` with its switch, `software` with its own
+ * (T16), and `vulkan` with neither; the safe switch wins.
+ */
+export interface LaunchModeSwitches {
+  readonly safe: boolean;
+  readonly software: boolean;
+}
+export function launchModeOf(
+  platform: NodeJS.Platform,
+  switches: LaunchModeSwitches,
+): GraphicsLaunchMode;
 
 // x11Relaunch.ts
 /**
@@ -133,7 +143,22 @@ export function x11RelaunchArgs(
 ): readonly string[] | undefined;
 
 export const SAFE_MODE_SWITCH = "hyperion-graphics-safe";
+export const SOFTWARE_MODE_SWITCH = "hyperion-graphics-software"; // T16
 export const GPU_TIMING_SWITCH = "hyperion-gpu-timing";
+
+// softwareMode.ts (T16)
+/** The views checks' waits, watchdog and limit in the software mode: five times, fixed. */
+export const SOFTWARE_WAIT_FACTOR = 5;
+/**
+ * The software switch's refusal, one usage line, in a packaged build, without `--views-check` or
+ * with `--out`; `null` where the launch may take it.
+ */
+export function softwareModeRefusal(launch: {
+  readonly software: boolean;
+  readonly packaged: boolean;
+  readonly viewsCheck: boolean;
+  readonly out: boolean;
+}): string | null;
 
 // featureStatus.ts
 /**
@@ -159,7 +184,7 @@ export type GpuProcessEvent =
       readonly webgpu: string;
     };
 export type CrashLoopDecision = "none" | "relaunch-safe";
-/** Always `none` in `default` and `safe` modes (Design note 6). */
+/** Always `none` in `default`, `safe` and `software` modes (Design note 6, T16). */
 export function crashLoopDecision(
   history: ReadonlyArray<GpuProcessEvent>,
   mode: GraphicsLaunchMode,
@@ -219,8 +244,7 @@ export type AdapterOutcome =
       readonly adapter: GPUAdapter;
       readonly summary: AdapterSummary;
       readonly capabilities: GpuCapabilities;
-      readonly styles: StyleAvailability;
-    };
+    }; // T16: no `styles`, which the status derives with the launch's mode
 export function summariseAdapter(adapter: GPUAdapter): {
   readonly summary: AdapterSummary;
   readonly capabilities: GpuCapabilities;
@@ -232,7 +256,12 @@ export function featuresNotEnabled(
   requested: ReadonlyArray<GPUFeatureName>,
   enabled: ReadonlySet<string>,
 ): ReadonlyArray<GPUFeatureName>;
-export function styleAvailability(summary: AdapterSummary): StyleAvailability;
+/** T16: whether a launch takes a fallback adapter as a hardware one: `software` alone. */
+export function takesFallbackAdapter(launchMode: GraphicsLaunchMode): boolean;
+export function styleAvailability(
+  summary: AdapterSummary,
+  launchMode: GraphicsLaunchMode, // T16
+): StyleAvailability;
 export function requestAdapterOutcome(gpu: GPU | undefined): Promise<AdapterOutcome>;
 /** Optional features requested whenever present; never required. */
 export const WANTED_FEATURES: ReadonlyArray<GPUFeatureName>;
@@ -760,6 +789,10 @@ commands in their acceptance lines.
    relaunched client loads a dead `ELECTRON_RENDERER_URL`. In development the `client` recipe
    therefore puts `--ozone-platform=x11` on the command line itself when `XDG_SESSION_TYPE` is
    `wayland`, and the crash-loop relaunch is checked by hand on a built client (T2.b).
+   _Resolved 2026-10-09 (the brainstorm sign-off, `signoff-brainstorm.md`, row 574):_ the
+   brainstorm now says the switch "cannot be appended" and that "the packaged launcher and
+   `.desktop` entry put it on the real command line, and a Wayland session launched without it
+   relaunches once with it".
 
 4. **Timing is quantized, and one narrow switch lifts it for measurement.** The brainstorm's step 3
    says GPU time per pass is available uncoarsened on Linux under the forced switches. Researched
@@ -772,7 +805,9 @@ commands in their acceptance lines.
    runs of R05 and R12 pass; shipping launches keep the quantization. The main process passes the
    flag on to the preload as `graphics.gpuTiming`, as it passes the safe switch, and
    `GraphicsStatus.timer` states `quantized` or `full`, so a recorded figure says whether its timer
-   was coarse; every `PassTimes` carries the same field.
+   was coarse; every `PassTimes` carries the same field. _Resolved 2026-10-08 (R05.T19, row 581;
+   kept by the brainstorm sign-off of 2026-10-09):_ step 3 now reads "quantised to 65.5 µs unless
+   Dawn's `timestamp_quantization` toggle is disabled, as the measurement runs do".
 
 5. **The safe mode has no WebGPU, and says so.** The brainstorm's declared mode is "without the
    photorealistic style", implying the wireframe survives. Researched 2026-09-29 by probe of eight
@@ -785,7 +820,10 @@ commands in their acceptance lines.
    entered once, that does not pretend to draw), and the notes file reports the difference. It is
    still worth relaunching into rather than leaving Chromium to its own fallback, because the probe
    saw that fallback take the page through an adapter that vanishes after three crashes and software
-   compositing after six, undeclared.
+   compositing after six, undeclared. _Resolved 2026-10-09 (the brainstorm sign-off,
+   `signoff-brainstorm.md`, row 575):_ the brainstorm now relaunches "into a declared safe mode
+   that has no views: without the `Vulkan` feature X11 gives WebGPU no adapter at all, so the
+   consoles stay and every view states the mode instead of a picture".
 
 6. **What a crash loop is.** Researched 2026-09-29 by probe (SIGKILL of the GPU process every 4 s):
    each crash fires `app.on("child-process-gone")` with `type: "GPU"`, then `gpu-info-update`; after
@@ -844,7 +882,11 @@ overrides)`, `WANTED_FEATURES` intersected with the adapter's own less what the 
    undefined. Without the unsafe flag Chromium never hands out a CPU adapter, so in the client the
    refusal is a guard; the harness, which does set the flag, is where it is exercised. The wireframe
    stays available on a software adapter, as the brainstorm confines the refusal to the
-   photorealistic style.
+   photorealistic style. _Excepted by T16 (the owner's ruling, 2026-10-29): the check-only software
+   mode, a views check's on Linux under `viewsCheck.sh --software`, takes a fallback adapter as a
+   hardware one and draws both styles. It is chosen only by its switch, refused without
+   `--views-check` and in a packaged build, and named on the panel (`SOFTWARE`) and in the record
+   (`launchMode`), so no launch falls back to it silently; every other mode refuses as above._
 
 9. _Amended by Design note 24 (marked in RM1 validation, 2026-10-02): there is no Babylon, so
    `doNotHandleContextLost` and `engine._device` are gone. The engine watches its own device's
@@ -1028,7 +1070,11 @@ overrides)`, `WANTED_FEATURES` intersected with the adapter's own less what the 
     failed), 2 (no adapter, a setup error) or 3 (watchdog). It loads a second renderer input,
     `smoke.html`, which imports the real `view/engine/` modules and never the bridge client, so no
     test switch can reach the client's main process; a test asserts that `graphicsSwitches` never
-    returns the unsafe flag or the adapter override. Frames are read back from an offscreen
+    returns the unsafe flag or the adapter override. _Excepted by T16 (the owner's ruling,
+    2026-10-29): `viewsCheck.sh --software` puts the harness's adapter and headless switches on the
+    client's own command line for a views check. The client still never sets them, and its main
+    process refuses the software switch without `--views-check`, with `--out` and in a packaged
+    build (`softwareModeRefusal`)._ Frames are read back from an offscreen
     `rgba16float` target, where a non-finite texel can exist, and from each view's canvas texture
     (configured with `COPY_SRC`, taken immediately before encoding, since it expires once the task
     yields). The network assertion is `session.defaultSession.webRequest.onBeforeRequest` over
@@ -1100,7 +1146,11 @@ overrides)`, `WANTED_FEATURES` intersected with the adapter's own less what the 
     frame's, each post-process, dispatches, splats, mip chains; the one-off rounding probe is
     untimed) carries `timestampWrites`, so nothing is `bracketed`, and the query set and a
     ring of resolve buffers are made through the one creation path (`timing.ts`; RM1 validation
-    m5). **Offscreen targets, asynchronous pipelines, indirect work and per-pass time.** Asked by
+    m5). _R10.T14.d adds `prepareMaterial(material, targets, meshes)`: a material's pipelines
+    made ahead with `createRenderPipelineAsync` and kept in its record; for a `createMaterial`
+    material none is marked pending, so a draw before one is made still makes it synchronously and
+    draws on its first frame (plan R10, T14.d's record)._
+    **Offscreen targets, asynchronous pipelines, indirect work and per-pass time.** Asked by
     R07 and R11 at review (R07's HDR target and bloom chain, R11's stills and GPU-culled scatter, R05's,
     R07's, R11's and R12's per-pass benchmarks). Checked 2026-09-29 in `@babylonjs/core` 9.28.0:
     - _Offscreen targets._ `createRenderTarget` builds a Babylon `RenderTargetTexture` of the given
@@ -1214,8 +1264,10 @@ overrides)`, `WANTED_FEATURES` intersected with the adapter's own less what the 
       double the bandwidth of a bandwidth-bound GPU for no visible gain" (Luminance in physical
       units). A splat target is a per-arrival bake scratch, held one face at a time and never
       presented or drawn into each frame, so that reason does not reach it. `ColourTargetFormat`
-      and `RenderTargetSpec` still exclude `rgba32float`, and the README should say so beside the
-      brainstorm's Decision ("Light").
+      and `RenderTargetSpec` still exclude `rgba32float`. _Resolved 2026-10-09 (the brainstorm
+      sign-off, `signoff-brainstorm.md`, row 582):_ the reading stands, and the brainstorm's
+      Decision ("Light") now says "`rgba32float` is not used for per-frame colour targets, only
+      for a bake's scratch", as its Luminance paragraph does.
 
 22. **How the adapter rounds a colour write is probed, not assumed.** Asked by R07 (its Design
     note 12). R07's probe of 2026-09-29 found that Gen9's colour-attachment writes round toward
@@ -1267,7 +1319,8 @@ T1 and T2 are the main process and can run in parallel. T3 needs nothing. T4 fol
 preload fields) and T3; T5 follows T4. T6 (the interface, the memory types and kernel selection)
 follows T3 and T4; T7 (dependency and chunk) follows T6; T8 (the Babylon engine) follows T4 and T7,
 its subtasks in order; T9 (harness) follows T8; T10 (the toy kernel pairs)
-follows T9. T11–T13 are by hand, after T9. T14 closes.
+follows T9. T11–T13 are by hand, after T9. T14 closes. T15, added 2026-10-27, follows it. T16,
+added 2026-10-30, follows T2, T4 and T5, and nothing waits on it.
 
 Paths are under `apps/hyperion/` unless given in full.
 
@@ -1671,7 +1724,7 @@ break headless Ozone (it already segfaults without `offscreen`) and so block unr
 `view/engine/`, `src/smoke/` or a catalogued shader runs it as part of its own gate, and the
 `validate` skill's check plan gains it for those paths. Measure the recipe's wall time, build
 included, over ten runs, and record it with the pass count; after one Electron upgrade with no
-harness failure, propose moving it into `ci` to the owner.
+harness failure, propose moving it into `ci` to the sign-off queue (`signoff-12.md`, item 31).
 
 - Acceptance: the recorded figures; the `validate` skill's routing names the recipe for those paths.
 
@@ -1811,6 +1864,125 @@ the three-canvas figures.
   safe mode) on a built client on the RTX 3080, and the Risks entries that took the UHD 620 for
   this machine rewritten from T11's and T12's records.
 
+### R01.T15 The engine's kernel records: released, and compiled once per device
+
+New, 2026-10-27, from R08.T11.d's finding (main's brief, 2026-10-27). It follows T14, and nothing
+waits on it.
+
+- **The defect.** `webgpu/engine.ts` kept each kernel's uniform buffers in `#kernelUniforms`, a
+  `Map` keyed by the kernel's record, written at every dispatch and cleared only at `dispose`. So
+  every kernel ever dispatched kept its record, with its pipeline and its uniform buffers, for
+  the engine's lifetime: a leak of CPU and GPU memory that grows over a long `VIEW` session.
+- **The waste.** The smoke and `VIEW` compiled the same kernel sources many times on one device.
+  R08.T11.d counted 41 compute compiles a variant in part 8, of which 30 were distinct. Its scratch
+  prototype of a per-device cache took part 8 from 129–139 s to 112–118 s and the compiles from 41
+  to 30. The GPU process's peak barely moved: the cache saves time and compiles, and the release
+  saves memory over a session.
+- **Release.** `RenderEngine.releaseCompute(kernel)`, after `releaseMesh` and `releaseMaterial`
+  (R10.T16.b):
+  - The handles over a record are counted. The last release destroys the record's uniform
+    buffers, one `destroyed` event each, and the engine forgets the record.
+  - A released handle is refused by a dispatch and by a second release.
+  - `ResilientEngine` forwards the release, and drops it for a handle a lost engine made. The
+    probed, fake and counting engines follow.
+  - A handle dropped unreleased keeps its record until a device loss or the engine's disposal. No
+    finalizer releases it, so no `destroyed` event lands at a time the garbage collector chooses
+    (main's acceptance of the lane's leans, 2026-10-27). The records held are so bounded by the
+    distinct kernels made.
+- **Cache.** One record a device for each distinct kernel, under `createCompute` and
+  `createComputeAsync` (`webgpu/kernelCache.ts`).
+  - _The key_ (`kernelKey`) is everything that shapes the pipeline: the name, both sources, the
+    entry point, the override constants and the layout. It also takes the readback class, which
+    the readback guard reads from the record's pair.
+  - _Complete by construction._ `prepareKernel` returns them as a `KernelPipelineSpec` (`main`,
+    no constants and `auto` for every kernel today), and `createKernel` compiles from that alone.
+  - _Sharing._ Each call returns a new handle over the one record. Concurrent asynchronous creates
+    of a key share one compile. A compile that rejects is not kept. A record made synchronously
+    serves a later asynchronous create.
+  - _Clearing._ The cache is cleared at a device loss and at disposal.
+  - _Safe to share._ A pipeline is immutable. Each dispatch writes its uniforms through the queue
+    just before its own submission, so a record's shared uniform buffers hold each dispatch's own
+    values.
+- **Bounded per device.** `VIEW`'s kernel sources are module constants; none bakes a value of a
+  medium, body or setting into its WGSL. So the records a device holds for `VIEW` are bounded by
+  their count, however many bodies a session visits. A test drives the photorealistic renderer
+  over 50 bodies' air and shows the count stops growing (main's binding check, 2026-10-27).
+- **No behaviour change.** Every read-back is byte-identical. The full `test-render` runs on both
+  variants in the gate.
+- **Measured.** Part 8 and one other heavy part, three runs each on both variants, base against
+  tip, at a 1-minute load under 8: the wall times, the GPU process's peak RSS (VmHWM) and the
+  compile counts, in this plan's Risks.
+- **Tests:**
+  - the key, each part of it alone;
+  - the cache: one pipeline a key, distinct pipelines for an entry point or a constant alone, one
+    compile for concurrent creates, a rejected compile, the last release, and clearing;
+  - the engine: N distinct kernels dispatched and released, its buffers and events back where
+    they started; each dispatch's uniforms written before its own submission; refusals; loss;
+    disposal;
+  - `ResilientEngine`'s forwarding and dropped releases;
+  - the 50-body bound.
+- **Files:** `view/engine/{types,resilientEngine}.ts`,
+  `view/engine/webgpu/{compute,engine,kernelCache}.ts`, `displays/view/check/probedEngine.ts`,
+  `test/{countingRenderEngine,fakeRenderEngine}.ts`, their tests, and
+  `view/photoreal/renderer.test.ts`.
+- **Acceptance:** `pnpm test` and `just test-render`, and the measurements recorded.
+
+### R01.T16 The check-only software launch mode
+
+New, 2026-10-30, from the research lane's advice on running `VIEW`'s checks in a pod (main's brief,
+2026-10-29). It follows T2, T4 and T5, and nothing waits on it.
+
+- **The ruling.** The owner's (2026-10-29): a check-only software mode is allowed, as a test-tool
+  exception to Design note 8. It is chosen only by an explicit switch from the views check's
+  script, refused in packaged and player launches, and named on the panel and in the record.
+  Main's rulings on the advice's leans: the panel's word is `SOFTWARE`, with a guide row beside
+  `DEFAULT`, `VULKAN` and `SAFE MODE`, and no banner of its own; a software run's records go under
+  `target/` only, never `docs/measurements/`; its waits stretch five times, fixed, not a variable.
+- **The mode.** `GraphicsLaunchMode` gains `software`, from `SOFTWARE_MODE_SWITCH`
+  (`hyperion-graphics-software`), on Linux only, as the safe mode: `launchModeOf(platform,
+{ safe, software })`, the safe switch winning. `graphicsArguments` and `graphicsLaunchFromArgv`
+  carry it to the preload; it has no timing. `graphicsSwitches` gives nothing for it and
+  `crashLoopDecision` `none`. The `GRAPHICS` panel's `Mode` reads `SOFTWARE`.
+- **The fallback gate.** `takesFallbackAdapter(launchMode)` holds in `software` mode alone.
+  `styleAvailability(summary, launchMode)` then offers the photorealistic style on a fallback
+  adapter, `conditionOf` takes the adapter as `nominal` with both styles, and `styleRefusals`
+  offers both. The mode reaches them from `window.hyperion.graphics.launchMode` through the status.
+  Every other mode refuses as before (`GRAPHICS SOFTWARE ADAPTER`).
+- **The launch** (`src/main/index.ts`). With the switch, `prepareGraphics` asks for no X11
+  relaunch, applies no switch and no timing toggle. `softwareModeRefusal` refuses it, exit 2 and one
+  usage line, without `--views-check`, with `--out` and in a packaged build. `viewsCheckDirs`
+  writes a software run under the smoke's directory, a full run's included;
+  `viewsCheckWatchdogMs` is five times as long.
+- **The waits.** `check/softwareTiming.ts`: in `software` mode the views check's `waitMs`, the
+  atmosphere run's `waitMs` and `settleMaxMs`, the terrain run's `waitMs` and `restoreMs` and the
+  hand-over check's `waitMs` and `overrunMs` are five times as long; the measured windows, settles,
+  holds and script times are not. `ViewsCheckRunner` takes the launch's mode.
+- **The script.** `viewsCheck.sh --software`: Linux only (exit 2 elsewhere), implying `--hidden`,
+  in `testRender.sh`'s environment (`DISPLAY`, `WAYLAND_DISPLAY` and `XDG_SESSION_TYPE` unset, the
+  session's D-Bus out of reach), with `testRender.sh`'s adapter and headless switches,
+  `--hyperion-graphics-software`, `--ozone-override-screen-size=1920,1080` and
+  `--disable-gpu-watchdog`, never `--ozone-platform=x11`, and each launch's limit five times as
+  long.
+- **Judged (the advice's F1).** In `software` mode a GPU-process exit, or a phase whose primary was
+  not drawn in the style it asks for, fails the several-views check (`softwareViewsCheckFailures`).
+  The atmosphere run (R08.T10.g), the terrain run and the hand-over check already judge both on
+  every machine. Hardware runs of the several-views check stay recorded, not judged.
+- **Tests:** the mode, its switch and its hand-off, and `vulkan`, `safe` and `default` as before;
+  no switch and no relaunch decision for it; the fallback gate both ways, in the status, the
+  styles, the refusals, the panel and the header strip; the refusal; the directories and the
+  watchdog; the waits' factor, through the runner and alone; the judgement and the session's end;
+  the script's arguments, environment, limit and refusal off Linux with the stand-in Electron, and
+  its SwiftShader switches held equal to `testRender.sh`'s.
+- **Files:** `preload/{api,graphicsLaunch}.ts`, `main/graphics/{switches,crashLoop,softwareMode}.ts`,
+  `main/{index,viewsCheck,viewsCheckResults}.ts`, `smoke/main.ts`,
+  `renderer/src/view/engine/{platform,status}.ts`, `renderer/src/smoke/page.ts`,
+  `renderer/src/displays/view/styleRefusals.ts`, `renderer/src/displays/view/check/{ViewsCheckRunner.tsx,softwareTiming.ts}`,
+  `renderer/src/components/GraphicsPanel.tsx`, `renderer/src/App.tsx`, `scripts/viewsCheck.sh`,
+  their tests, and the guide's mode rows.
+- **Acceptance:** `pnpm test`; in a pod, `just views-check --atmosphere --software --smoke`,
+  `just views-check --software --smoke` and `just views-check --terrain --software --smoke` pass,
+  each run's time, exit and faults recorded, and their captures looked at by eye.
+
 ## Verification
 
 - **Platform, automatic:** the switch builder's tests (no unsafe flag, merged values, safe mode),
@@ -1824,7 +1996,9 @@ the three-canvas figures.
 - **By hand, recorded:** on the development machine (RTX 3080), the adapter (T1.b), the crash-loop
   relaunch (T2.b), the three canvases' GPU time with no copies (T11), the soak (T12) and child
   windows (T13); on the UHD 620, by the owner, the adapter, the three canvases with the rounding
-  probe, and the soak.
+  probe, and the soak; in a pod with no GPU, the views checks in the software mode (T16:
+  `just views-check --atmosphere --software --smoke`, `--software --smoke` and
+  `--terrain --software --smoke`), their times, exits and faults.
 - **By eye:** the `GRAPHICS` panel in each condition, and the header banner in safe mode (T5.b).
 
 ## Generator version
@@ -1832,8 +2006,8 @@ the three-canvas figures.
 No change to generated output and no bump: nothing here touches `hyperion-sim`. Nothing on the wire
 changes and `PROTOCOL_VERSION` stays at 2. The plan reserves the `view/engine/` directory, the
 `WGSL_CATALOGUE` into which later plans register every shader so that the offline test covers it,
-the `GRAPHICS` nomenclature family, and the switch names `hyperion-graphics-safe` and
-`hyperion-gpu-timing`.
+the `GRAPHICS` nomenclature family, and the switch names `hyperion-graphics-safe`,
+`hyperion-graphics-software` (T16) and `hyperion-gpu-timing`.
 
 ## Risks and open points
 
@@ -1888,11 +2062,15 @@ the `GRAPHICS` nomenclature family, and the switch names `hyperion-graphics-safe
 - _Closed by Design notes 23 and 24 (2026-09-30): no Babylon code remains._ **Babylon's generated depth texture may lack `COPY_SRC`.** Then an offscreen target makes its own
   `depth32float` (Design note 19, T8.f), and a canvas view's depth is not read back at all; the
   depth checks run on offscreen targets (T9.f).
-- **An `rgba32float` bake target.** R06's splat renders into `rgba32float` (Design note 21), which
-  the brainstorm's Decision ("Light") excludes from colour targets for frame bandwidth. R01 reads
-  the exclusion as covering per-frame targets only and keeps `rgba32float` out of
-  `ColourTargetFormat`; the README should record the reading, or the owner may rule otherwise, in
-  which case R06's compute-splat fallback becomes its only path.
+- _Resolved 2026-10-09 (the brainstorm sign-off, `signoff-brainstorm.md`, row 582): the reading
+  stands._ **An `rgba32float` bake target.** R06's splat renders into `rgba32float` (Design note
+  21), which the brainstorm's Decision ("Light") excluded from colour targets for frame bandwidth.
+  R01 reads the exclusion as covering per-frame targets only and keeps `rgba32float` out of
+  `ColourTargetFormat`. The brainstorm now says so: "`rgba32float` is not used for per-frame
+  colour targets, only for a bake's scratch" (Decisions, "Light"), and its Luminance paragraph
+  adds that the star splat's face is "held one face at a time while a bake runs and never
+  presented, which the bandwidth reason does not reach". R06's compute splat stays the fallback
+  for an adapter without `float32-blendable`.
 - **Relaunch in development.** `electron-vite dev` exits when its Electron does (Design note 3), so
   the crash-loop relaunch is checked on a built client and the `client` recipe puts the X11 flag on
   the command line itself.
@@ -1902,9 +2080,9 @@ the `GRAPHICS` nomenclature family, and the switch names `hyperion-graphics-safe
 - _Closed by Design notes 23 and 24 (2026-09-30): no Babylon code remains._ **Babylon's unawaited effect preparation** means a WGSL compile error may also surface only as an
   unhandled rejection; the backstop reports it, and `onEffectErrorObservable` covers the ordinary
   case. If an upgrade awaits it, layer (c) becomes redundant, not wrong.
-- **The safe mode draws nothing.** A reading forced by the probe (Design note 5); if the owner wants
-  a view in safe mode, the only candidate is a Canvas 2D wireframe, a second renderer the WebGPU
-  ruling declined, so it is not planned.
+- **The safe mode draws nothing.** A reading forced by the probe (Design note 5); a view in safe
+  mode would need a Canvas 2D wireframe, a second renderer the WebGPU ruling declined, so none is
+  planned (ruled 2026-10-19, `signoff-12.md`, item 32).
 - **The harness stays outside `just ci`** (T9.e), so it guards only the tasks that run it; the
   `validate` routing is what keeps it from rotting. Headless Ozone is the fragile part: an Electron
   upgrade that breaks it falls back to a hidden X11 window, which needs a display. SwiftShader
@@ -2295,6 +2473,8 @@ RESTARTED: re-acquiring` would stand in caution text for the launch while nothin
     `writePackedCubeLevel` raises one `uploaded` event; a kernel's uniforms are written each
     dispatch into a buffer of the kernel's own per uniform name, made once through the same path
     (`<kernel>:<uniform>`, category `other`, 16-byte multiples), so their uploads are counted too.
+    _Amended by R01.T15:_ the buffers are the kernel's record's, shared by every handle of its key,
+    and destroyed at its last release.
   - `textureBytes` (with `extentOf` and `bytesPerTexel`, in `memory.ts`) counts every mip and
     layer; a 3D texture's depth halves with its mips, a cube is six faces at every level, and
     depth-stencil formats count 4 + 1 bytes; a compressed format throws.
@@ -2719,7 +2899,11 @@ RESTARTED: re-acquiring` would stand in caution text for the launch while nothin
     resize is untested. That choice therefore waits for the owner's on-screen soak.
   - **Open question 14, for the brainstorm's next revision:** on the recommended machine the
     forced Vulkan path holds for thirty minutes of three canvases, video, DOM and a second
-    window, hidden. Gen9.5 (the question as asked) remains the owner's.
+    window, hidden. Gen9.5 (the question as asked) remains the owner's. _Applied 2026-10-09 (the
+    brainstorm sign-off, `signoff-brainstorm.md`, source 4b): open question 14 now reads
+    "**Open,** on the UHD 620 alone", with "On the development machine's RTX 3080 it is answered
+    (R01.T12, 2026-10-02, hidden and offscreen)", the hidden-resize hazard, and
+    `--disable-vulkan-surface` waiting on the owner's on-screen soak._
   - **Pending by hand for the owner:** the soak on screen, with window resizes by `xdotool` and
     the display blanked and restored (`xset dpms`), on this machine and on the UHD 620.
 - **T13, as built (2026-10-01, RTX 3080, Electron 44.4.3, a scratch prototype, not merged).** Run
@@ -2764,9 +2948,9 @@ RESTARTED: re-acquiring` would stand in caution text for the launch while nothin
 - **T14, as built (2026-10-02, RTX 3080, Electron 44.4.3).**
   - **Gates:** `just ci` passes on the branch (T14's commit) and `just test-render` passes
     headless: both variants, 62 checks each, with an empty cancelled list. _Dated (RM1 validation,
-    m8): 62 was T14's branch. The integration branch at 964665b ran 75 a variant (R02.T14.c added
-    13), and after the RM1 validation fixes 82 (`default`) and 80 (`no-subgroups`): M2's path
-    and `subgroup_size` checks, m1's two and the mip check._
+    m8): 62 was T14's branch. The integration branch at 964665b, now 506a937a, ran 75 a variant
+    (R02.T14.c added 13), and after the RM1 validation fixes 82 (`default`) and 80 (`no-subgroups`):
+    M2's path and `subgroup_size` checks, m1's two and the mip check._
   - **Harness times (T9.e), on a quiet machine (load average 2.0 to 2.3):** ten runs of
     `just test-render`, build included, passed 10 of 10 in 3,043 to 3,290 ms (median 3,065 ms).
     Each of the two harness runs took 1,192 to 1,396 ms. These replace T9.e's provisional
@@ -2915,7 +3099,8 @@ path`). On the subgroup path each u32 twin checks that `subgroup_size` is a powe
     Scope bullets and the Non-goals' CSP sentence no longer describe a Babylon implementation.
   - **m8, T14's records.** The chunk figures and the 62-check count are dated as T14's branch, with
     a re-measure on this branch (no `loadEngine` chunk; `styles-*.js` reaches `engine-*.js` only
-    by `import()`; not minified) and the counts 75 (964665b) and 82 and 80 (after these fixes).
+    by `import()`; not minified) and the counts 75 (964665b, now 506a937a) and 82 and
+    80 (after these fixes).
   - **Hardware, after these fixes (2026-10-02, RTX 3080, hidden and offscreen, the client's
     Vulkan switches with `--disable-vulkan-surface` and the timing toggle):** both variants pass,
     82 checks (`default`) and 80 (`no-subgroups`), `uncaptured GPU errors 0`, no request out. The
@@ -2999,6 +3184,135 @@ src/renderer/src/view` passes; `just test-render` (SwiftShader, headless) passes
   number, so it reads as a gap; `TIMING_FRAMES_IN_FLIGHT` raised for R07's several views (to 135,
   three frames of a photorealistic primary with two photorealistic instruments; see R07's Risks).
   Append-only, in `types.ts`, `webgpu/timing.ts`, `webgpu/engine.ts` and `resilientEngine.ts`.
-- **Device limits requested by R05.T11.a** (decisions-r06-r07.md item 7, 2026-10-02): `createWebGpuEngine` requests the adapter's `maxStorageBufferBindingSize` and `maxBufferSize`, capped at 1 GiB, through `requiredLimits` in `platform.ts`; `GpuCapabilities` carries both, read from the device; `CapabilityOverrides.defaultLimits` keeps the defaults for the harness. Additive; defaults otherwise unchanged.
+- **Device limits requested by R05.T11.a** (decisions-r06-r07.md item 7, 2026-10-02): `createWebGpuEngine` requests the adapter's `maxStorageBufferBindingSize` and `maxBufferSize`, capped at 1 GiB, through `requiredLimits` in `platform.ts`; `GpuCapabilities` carries both, read from the device; `CapabilityOverrides.defaultLimits` keeps the defaults for the harness. Additive; defaults otherwise unchanged. No binding-count limit is raised (main's ruling for R10.T10.b, 2026-10-15); materials may declare a storage binding's stages (R10.T10.c).
 - **Extended by R06** (append-only, approved 2026-10-03): `releaseBuffer`, `releaseTexture`, `createPackedCube`'s optional `name` and `createPointSplatAsync` (R06.T13.h); `writePackedCubeLevelFromBuffer`'s optional `face`, the buffer then holding that one face (R06.T13.g); `MemoryCategory` gains `sky-cube` and `sky-scratch`; `WGSL_CATALOGUE` takes a `point-splat` kind. Existing callers unchanged; recorded in R06's Risks.
+- **Extended by R10.T16.b** (decision-r10-t16-contracts §1, append-only): `releaseMesh(mesh)`, which
+  destroys the mesh's vertex and index buffers at once (one `destroyed` allocation event each, with
+  the bytes made), and `releaseMaterial(material)`, which forgets the material's record and clears
+  the draw path's bind-group cache; each refuses a handle the engine did not make or has released,
+  and a released handle is refused by every later call. `ResilientEngine` forwards them and drops a
+  lost engine's handles; the fake, counting and probed engines follow. As `releaseBuffer`'s, a
+  caller never releases a handle a frame not yet submitted holds. Recorded in R10's Risks. _As
+  built:_ `MeshRecord` keeps its buffers' handles (`buffers`); a released mesh or material is
+  refused as "was released"; `FakeRenderEngine` makes mesh and material handles and records their
+  releases; `CountingRenderEngine` gains `live` (the handles of each kind made and not released)
+  and `loseHandles()` (a loss's end of every handle, whose later release is dropped, as
+  `ResilientEngine` drops it), its meshes still raising no allocation events.
+- **Extended by R01.T15** (main's brief, 2026-10-27, append-only): `releaseCompute(kernel)`, as
+  R10.T16.b's releases are; and `createCompute` and `createComputeAsync` now return a new handle
+  over the device's one record of each distinct kernel (`webgpu/kernelCache.ts`), whose uniform
+  buffers go at its last release. Existing callers are unchanged. See R01.T15 and its record,
+  "Deviations in R01.T15, as built".
 - **A `2d-array` binding takes a single-layer 2D texture** (R05.T11.a, approved by the orchestrator 2026-10-03): `drawing.ts`'s `viewDimensionBinds` lets a material declaring `viewDimension: "2d-array"` bind a 2D texture of one layer, viewed as a one-layer array, so that R05's layered normals atlas binds whatever its layer count; every other mismatch is refused as before (`engine.test.ts`). `platform.ts` gains `MAX_TEXTURE_ARRAY_LAYERS` (256, WebGPU's default, never raised). Additive.
+- **A compute binding takes the view dimension its kernel declares** (R08.T0;
+  `decision-r08-design.md` item 1, 2026-10-09). `kernelBindings` reads each texture binding's
+  view dimension from its WGSL type. `resolveKernelResources` views a sampled or storage texture
+  at that dimension, checked by `viewDimensionBinds`, which moves to `resources.ts`. So a kernel
+  declaring `texture_2d_array` or `texture_storage_2d_array` binds a one-layer 2D texture as a
+  one-layer array, as R05.T11.a's rule lets a material. A cube's storage view stays a six-layer
+  `2d-array`, and any other mismatch throws, naming the kernel and the binding, where WebGPU
+  would refuse the submission. `ComputeBindings` is unchanged. Additive.
+- **Deferred from R10.T16 (decision-r10-t16-contracts §1, 2026-10-19).** R01-1: objects disposed
+  while the engine lives still leave their small meshes and materials, once an instrument's
+  lifetime: `PhotorealRenderer`'s sprite quad and triangle, the wireframe's, the bodies', the sky's
+  and the bloom chain's; their owners adopt `releaseMesh` and `releaseMaterial` when they next touch
+  them. R01-2 (R10.T14): each terrain hand-over compiles the terrain material afresh and allocates a
+  whole cache budget (64–400 MB), so a pass made and dropped at an instrument's zoom churns both;
+  R10.T14 measures it and decides whether passes share a material or a cache. _R01.T15:_ kernels
+  need no owner to adopt `releaseCompute` for the session's memory to stay bounded: the device's
+  cache holds one record a distinct kernel, and `VIEW`'s are 17 module constants.
+- **Deviations in R01.T15, as built** (2026-10-27; lane `r01-t15` from e004c7f1, merged with
+  a295699b, R08.T11.d's landing; main's acceptance of the lane's leans, 2026-10-27).
+  - _The release_ is `releaseCompute`, ref-counted by handle over the shared record, with no
+    finalizer: a GC-timed release would raise `destroyed` events at random times into the smoke's
+    allocation tallies (`frameTiming.ts`'s tables build, `depthLayers.ts`). A WeakMap keyed by
+    record would not have freed the uniform buffers, which the registry holds strongly.
+  - _The key_ (`kernelKey`) is the name, the readback class, the path, the compiled module's label
+    and code, the source not compiled, the entry point, the constants in name order (an override
+    of `-0` held apart from `0`) and the layout. The compiled source is keyed as the module's code,
+    so that each source is keyed once (the march is some 190 kB of WGSL) and a spec of any other
+    code keys a record of its own. `KernelPair` gains no entry point or constant: none exists in
+    the catalogue, so the tests of an entry point or a constant alone run on the cache over specs
+    that differ there (main's ruling). The layout is the literal `auto`, which no test varies.
+  - _Clearing._ A compile still running at a loss or a disposal ends in a record the cache does not
+    keep, its handle's alone; a handle made before the clear still dispatches over its record and
+    releases it. A compile that ends after a clear leaves one begun since in the cache's compiles,
+    for the next create to join.
+  - _Sync and async._ A synchronous create while an asynchronous compile of its key runs compiles
+    again, since it cannot wait; the asynchronous result then goes unused. A record made by
+    `createCompute` serves a later `createComputeAsync` of its key, which so does not reject for
+    broken WGSL, and T9.b's catalogue check of a kernel made earlier on the device reads "compiled"
+    from its record. The synchronous creation raised the uncaptured validation error, once a key
+    and a device, and that fails a smoke run (`src/smoke/result.ts`).
+  - _Uniforms._ A record's uniform buffers are shared by its handles and sized by the first
+    dispatch of any of them, so the "grew" refusal holds across the owners of one key; every
+    kernel's uniforms are fixed WGSL structs. They are destroyed through the registry alone: no
+    draw's bind group holds them, so the draw path's bind-group cache is kept.
+  - _No owner releases a kernel yet._ The atmosphere's tables, `HillaireAtmosphere`,
+    `PhotorealRenderer` and the sky bake keep their handles and drop them, which the cache bounds
+    by `VIEW`'s kernels; a release at each atmosphere's disposal would have the next one compile
+    again.
+  - _Test engines._ `FakeRenderEngine` makes kernel handles (frozen, no pipeline) and records
+    `releaseCompute` in `released`. `CountingRenderEngine` gains `kernelPairs`, every pair asked of
+    either create, and its `loseHandles` ends its kernel handles too; `live` does not count kernels,
+    so that its tests' exact tallies stand.
+  - _The bound._ `VIEW`'s kernels are 17 module constants since R08.T11.d: the renderer's histogram
+    and disc cells; the atmosphere's sky view, aerial perspective, the two marches' centre and
+    footprint entry points and the march's fill; the tables' transmittance, multiple scattering,
+    slot depths and irradiance; and the sky bake's four. None bakes a value of a medium, body or
+    setting into its WGSL (term counts, slices, bands and light slots are uniforms). The smoke's
+    kernel arm adds ten (`withKernelArmFormat`), its probes more. The 50-body test runs on the
+    counting engine: it counts the distinct `kernelKey`s of the pairs the renderer and the tables
+    ask, through `prepareKernel`, which with no release are the records the cache holds. Over 11
+    kinds of air (R05's Earth with and without its ozone as an absorber, four column absorbers
+    under one to three lights, a line absorber, five line slots, a Venus-class deck, a Titan-class
+    methane air, an oblate ice giant and an oblate Saturn-class air), each body's medium its own,
+    Earth-like kinds on WGS 84's figure every second turn, the count is 11 at the first body and 12
+    from the second to the 50th, over 186 handles: all but the bake's four and the fill, which no
+    frame asks.
+  - _The bound's condition._ Once `createCompute` takes override constants (plan 08's "an
+    `override` constant, which R01's `createCompute` does not yet take"), the records stay bounded
+    only while each constant takes a bounded set of values; a value per medium needs its owners to
+    release their kernels. The 50-body test is the tripwire.
+  - _Measured_ (2026-10-27, 13:22–14:25; desktop, RTX 3080 machine, SwiftShader as the gate runs
+    it, both variants at once). Base a295699b against tip (a295699b with this change), each built
+    with a probe that logs every pipeline compiled. Each run started with the heavy-test lock free
+    and the 1-minute load under 8, held the lock through `just _locked`, and was capped at 8 GB and
+    800% CPU, R08.T11.d's figures. The GPU processes' peak RSS (VmHWM) was read from `/proc`. Other
+    lanes' single tests ran beside some runs, so the loads at the ends reach 15. Wall times are the
+    harness's, default and no-subgroups.
+    - _Part 8_ (four rounds each; round 4 replaces tip round 1, whose load rose from 8.0 to 21.4,
+      166.6 and 157.6 s):
+      - wall time: base 123.2–135.8 s, median 129.4; tip 111.1–114.2 s, median 112.3 (−13%);
+      - GPU VmHWM: base 959–1,056 MB, median 1,017; tip 1,003–1,016 MB, median 1,008 (−1%);
+      - compute compiles a variant: base 27, of 16 distinct kernels; tip 16;
+      - render compiles: 14 a variant in both.
+    - _Part 6_ (three rounds each):
+      - wall time: base 97.0–111.0 s, median 106.6; tip 70.2–74.2 s, median 71.6 (−33%);
+      - GPU VmHWM: base 864–883 MB, median 881; tip 848–856 MB, median 852 (−3%);
+      - compute compiles a variant: base 27, of 6 distinct kernels; tip 6;
+      - render compiles: 12 a variant in both.
+    - _As R08.T11.d found_, the cache saves time and compiles, and leaves the GPU process's peak
+      about where it was. The base compiles 27 a variant in part 8 since R08.T11.d landed, where
+      its lane counted 41 before its review's fixes, among them the shared-read march made at its
+      first use (94cc4df5). The leak's growth over a session is the release's to bound, and no
+      smoke part runs long enough to show it.
+    - The logs and the harness are in the lane's scratch, which its handoff
+      (`handoff-r01-t15.md`) names.
+- **R01.T16, as built** (2026-10-30), for the tasks that consume it:
+  - `launchModeOf(platform, { safe, software })` replaces `(platform, safeSwitch)`; safe wins.
+  - `AdapterOutcome` has no `styles`; the status derives them with
+    `styleAvailability(summary, launchMode)`, and `takesFallbackAdapter(launchMode)` holds in
+    `software` alone. R05's and R07's notes that call `styleAvailability(summary)` hold outside
+    the software mode.
+  - `viewsCheckDirs` and `viewsCheckWatchdogMs` are in `main/viewsCheck.ts` and take the launch
+    mode; `softwareModeRefusal` (a packaged build, no `--views-check`, or `--out`: exit 2) and
+    `SOFTWARE_WAIT_FACTOR` are in `main/graphics/softwareMode.ts`. The factor of five is held in
+    the main process, in `check/softwareTiming.ts` and in `viewsCheck.sh`, each pinned by a test.
+  - `ViewsCheckRunner` takes `launchMode`; `softwareViewsCheckFailures(results, gpuProcessExits)`
+    judges a software several-views run.
+  - Left undone: the terrain run does not pass in software mode (its script advances at most
+    0.25 s a frame, so high outlasts the ×5 watchdog and low fails the 500 ms stall bound and the
+    mid-stream loss); the hand-over check was not run in software mode; the brainstorm's
+    fallback and testing sentences are not amended (main's text pending); the justfile's
+    `views-check` comment is not edited, since a justfile edit plans the full `just ci`.

@@ -6,6 +6,11 @@
 /// scope. That is what makes it safe for a cell's word (an ID with its index zeroed) to equal the
 /// ID of the cell's candidate 0, and for body index 0 to share its system's word: the two are
 /// never opened under the same tag.
+///
+/// The two surface scopes are different: their tags are opened from a body's surface or detail
+/// seed, never from the universe seed, so [`Stream::open`](super::Stream::open) refuses them, and
+/// only [`SurfaceSeed::stream`](super::SurfaceSeed::stream) and
+/// [`DetailSeed::stream`](super::DetailSeed::stream) open them (plan R09, Design note 2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TagScope {
     /// The galaxy as a whole, or a numbered item of a galaxy-wide list.
@@ -22,6 +27,12 @@ pub enum TagScope {
     Event,
     /// Tests and golden files only; never opened by a generator.
     SelfTest,
+    /// The server's coarse surface pass: opened only from a body's
+    /// [`SurfaceSeed`](super::SurfaceSeed), on a cube-sphere cell or a numbered item.
+    SurfaceCoarse,
+    /// The local surface synthesis, which clients run too: opened only from a body's
+    /// [`DetailSeed`](super::DetailSeed), on a cube-sphere cell or a numbered item.
+    SurfaceDetail,
 }
 
 /// A domain tag: a registered name, its 64-bit hash, and the scope of the objects it keys.
@@ -177,25 +188,104 @@ const fn same_str(a: &str, b: &str) -> bool {
 /// const _: () = hyperion_base::rng::assert_tag_names(&["mass"]);
 /// ```
 ///
+/// Each name is hashed once and compared only with the earlier names in its hash's bucket, about
+/// one, so the check's steps grow linearly with the registry. That keeps it within rustc's limit
+/// on a `const`'s evaluation (the deny-by-default `long_running_const_eval`), which a check that
+/// hashed every earlier name again for each name passed at about 190 names.
+///
 /// # Panics
 ///
 /// On the first malformed name, duplicate name or hash collision.
-pub const fn assert_tag_names(names: &[&str]) {
+pub const fn assert_tag_names<const N: usize>(names: &[&str; N]) {
+    let mut hashes = [0_u64; N];
     let mut i = 0;
-    while i < names.len() {
-        assert!(
-            is_valid_tag_name(names[i]),
-            "a domain tag name must match [a-z][a-z0-9_]*(.[a-z][a-z0-9_]*)+"
-        );
-        let hash = hash_tag_name(names[i]);
-        let mut j = 0;
-        while j < i {
-            assert!(!same_str(names[i], names[j]), "duplicate domain tag name");
-            assert!(hash != hash_tag_name(names[j]), "domain tag hash collision");
-            j += 1;
-        }
+    while i < N {
+        hashes[i] = hash_tag_name(names[i]);
         i += 1;
     }
+    if let Some(fault) = first_name_fault(names, &hashes) {
+        panic!("{}", fault.message());
+    }
+}
+
+/// Why [`assert_tag_names`] refuses a registry's names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NameFault {
+    /// A name that is not well-formed ([`is_valid_tag_name`]).
+    Malformed,
+    /// A name equal to an earlier one.
+    Duplicate,
+    /// A name whose hash an earlier, different name has.
+    Collision,
+}
+
+impl NameFault {
+    /// The panic message of [`assert_tag_names`] for this fault.
+    #[must_use]
+    const fn message(self) -> &'static str {
+        match self {
+            Self::Malformed => "a domain tag name must match [a-z][a-z0-9_]*(.[a-z][a-z0-9_]*)+",
+            Self::Duplicate => "duplicate domain tag name",
+            Self::Collision => "domain tag hash collision",
+        }
+    }
+}
+
+/// The first fault of a registry's names, given each name's hash, or `None` if there is none.
+///
+/// Names are taken in order. Name `i` is checked first for its form, then against the earlier
+/// name with its hash, if there is one. Every earlier name passed, so no two of them share a hash,
+/// and that name is the only earlier one equal to name `i` or sharing its hash: the fault found is
+/// the one that comparing each name with every earlier name, in order, would find first. Equal
+/// hashes share a bucket, so that name is found by walking name `i`'s bucket, which holds about
+/// one name with `N` buckets.
+///
+/// `hashes[i]` is the hash of `names[i]`, and equal names have equal hashes; the hashes are a
+/// parameter so that tests can give names colliding ones.
+#[must_use]
+const fn first_name_fault<const N: usize>(
+    names: &[&str; N],
+    hashes: &[u64; N],
+) -> Option<NameFault> {
+    // Separate chaining: `head[b]` is the latest name in bucket `b` and `next[i]` the one before
+    // name `i` in its bucket, the index `N` ending a chain.
+    let mut head = [N; N];
+    let mut next = [N; N];
+    let mut i = 0;
+    while i < N {
+        if !is_valid_tag_name(names[i]) {
+            return Some(NameFault::Malformed);
+        }
+        let bucket = bucket_of(hashes[i], N);
+        let mut j = head[bucket];
+        while j < N {
+            if hashes[j] == hashes[i] {
+                return Some(if same_str(names[i], names[j]) {
+                    NameFault::Duplicate
+                } else {
+                    NameFault::Collision
+                });
+            }
+            j = next[j];
+        }
+        next[i] = head[bucket];
+        head[bucket] = i;
+        i += 1;
+    }
+    None
+}
+
+/// The bucket of a hash among `buckets` buckets, `buckets` > 0: the hash modulo `buckets`.
+///
+/// It is the same on every target, since the remainder is taken in `u64` and is below `buckets`,
+/// and it decides only which names are compared, never the check's outcome.
+#[must_use]
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "a usize widens to u64 losslessly, and the remainder is below `buckets`, a usize"
+)]
+const fn bucket_of(hash: u64, buckets: usize) -> usize {
+    (hash % buckets as u64) as usize
 }
 
 /// Panics if two registries share a tag name or a tag hash.
@@ -313,6 +403,159 @@ mod tests {
             assert!(!is_valid_tag_name(bad), "{bad}");
         }
     }
+
+    #[test]
+    fn each_fault_keeps_its_panic_message() {
+        assert_eq!(
+            NameFault::Malformed.message(),
+            "a domain tag name must match [a-z][a-z0-9_]*(.[a-z][a-z0-9_]*)+"
+        );
+        assert_eq!(NameFault::Duplicate.message(), "duplicate domain tag name");
+        assert_eq!(NameFault::Collision.message(), "domain tag hash collision");
+    }
+
+    #[test]
+    fn each_fault_is_found() {
+        assert_eq!(first_name_fault(&[], &[]), None);
+        assert_eq!(
+            first_name_fault(&["star.mass", "moon.count"], &[1, 2]),
+            None
+        );
+        assert_eq!(
+            first_name_fault(&["star.mass", "Moon.count"], &[1, 2]),
+            Some(NameFault::Malformed)
+        );
+        assert_eq!(
+            first_name_fault(&["star.mass", "moon.count", "star.mass"], &[1, 2, 1]),
+            Some(NameFault::Duplicate)
+        );
+        // No two real names are known to share a 64-bit FNV-1a hash, so this one is given.
+        assert_eq!(
+            first_name_fault(&["star.mass", "moon.count", "planet.orbits"], &[1, 2, 1]),
+            Some(NameFault::Collision)
+        );
+    }
+
+    /// Names of every fault: two pairs share [`last_byte_mod_3`] (`star.mass` and
+    /// `planet.orbits`, `moon.count` and `a.b`), and two are malformed.
+    const POOL: [&str; 6] = [
+        "star.mass",
+        "moon.count",
+        "planet.orbits",
+        "a.b",
+        "Star.mass",
+        "mass",
+    ];
+
+    /// A hash under which many of [`POOL`]'s names collide.
+    fn last_byte_mod_3(name: &str) -> u64 {
+        u64::from(name.as_bytes().last().copied().unwrap_or(0) % 3)
+    }
+
+    /// [`last_byte_mod_3`] times 60, a multiple of every `N` up to 5: every name falls in bucket
+    /// 0, so a chain is walked past names of other hashes.
+    fn last_byte_mod_3_in_one_bucket(name: &str) -> u64 {
+        last_byte_mod_3(name) * 60
+    }
+
+    /// The check as it was before it hashed each name once: each name, in order, for its form and
+    /// then against every earlier name, in order.
+    fn first_fault_pairwise(names: &[&str], hash: fn(&str) -> u64) -> Option<NameFault> {
+        for (i, &name) in names.iter().enumerate() {
+            if !is_valid_tag_name(name) {
+                return Some(NameFault::Malformed);
+            }
+            for &earlier in &names[..i] {
+                if name == earlier {
+                    return Some(NameFault::Duplicate);
+                }
+                if hash(name) == hash(earlier) {
+                    return Some(NameFault::Collision);
+                }
+            }
+        }
+        None
+    }
+
+    /// Asserts that [`first_name_fault`] finds the fault [`first_fault_pairwise`] finds, for every
+    /// list of `N` names drawn from [`POOL`] with repetition.
+    fn assert_agrees_with_pairwise<const N: usize>(hash: fn(&str) -> u64) {
+        let mut digits = [0_usize; N];
+        loop {
+            let names: [&str; N] = std::array::from_fn(|k| POOL[digits[k]]);
+            assert_eq!(
+                first_name_fault(&names, &names.map(hash)),
+                first_fault_pairwise(&names, hash),
+                "{names:?}"
+            );
+            // The next list, counting in base `POOL.len()`.
+            let mut k = 0;
+            loop {
+                if k == N {
+                    return;
+                }
+                digits[k] += 1;
+                if digits[k] < POOL.len() {
+                    break;
+                }
+                digits[k] = 0;
+                k += 1;
+            }
+        }
+    }
+
+    #[test]
+    fn the_first_fault_is_the_pairwise_check_s() {
+        for hash in [
+            hash_tag_name as fn(&str) -> u64,
+            last_byte_mod_3,
+            last_byte_mod_3_in_one_bucket,
+        ] {
+            assert_agrees_with_pairwise::<0>(hash);
+            assert_agrees_with_pairwise::<1>(hash);
+            assert_agrees_with_pairwise::<2>(hash);
+            assert_agrees_with_pairwise::<3>(hash);
+            assert_agrees_with_pairwise::<4>(hash);
+            assert_agrees_with_pairwise::<5>(hash);
+        }
+    }
+
+    /// The size of [`SCALE_NAMES`], about five times the sim's registry of 193 tags.
+    const SCALE: usize = 1_000;
+
+    /// The bytes of [`SCALE_NAMES`]: `selftest.scale.` and three letters, `aaa` for name 0
+    /// counting up in base 26.
+    static SCALE_BYTES: [[u8; 18]; SCALE] = {
+        const LETTERS: &[u8; 26] = b"abcdefghijklmnopqrstuvwxyz";
+        let mut bytes = [*b"selftest.scale.aaa"; SCALE];
+        let mut i = 0;
+        while i < SCALE {
+            bytes[i][15] = LETTERS[i / 676];
+            bytes[i][16] = LETTERS[i / 26 % 26];
+            bytes[i][17] = LETTERS[i % 26];
+            i += 1;
+        }
+        bytes
+    };
+
+    /// A registry of [`SCALE`] distinct well-formed names.
+    const SCALE_NAMES: [&str; SCALE] = {
+        let mut names = [""; SCALE];
+        let mut i = 0;
+        while i < SCALE {
+            names[i] = match core::str::from_utf8(&SCALE_BYTES[i]) {
+                Ok(name) => name,
+                Err(_) => panic!("the names are ASCII"),
+            };
+            i += 1;
+        }
+        names
+    };
+
+    // A registry of a thousand names passes the check within rustc's limit on a `const`'s
+    // evaluation (`long_running_const_eval`, deny by default): the check is linear in the
+    // registry, where one that hashed every earlier name again for each name failed at about 190.
+    const _: () = assert_tag_names(&SCALE_NAMES);
 
     #[test]
     fn disjoint_registries_pass() {

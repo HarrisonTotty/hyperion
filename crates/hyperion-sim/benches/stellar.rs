@@ -18,6 +18,14 @@
 //! path. Plan 06's budget for those briefs is 15 ms per 1,600 rows; the results are recorded
 //! under P06.T38.a.
 //!
+//! The `stellar/briefs` group also times P11.T11.a's gate alone (`BriefModel::certifies`) over the
+//! 50 ly query, against `decision-observed-class-findings.md` §A.3's bounds: the gate at most 5 µs a
+//! row, the query's briefs cold at most 300 ms on one thread (ceiling 500 ms), and warm at most
+//! 1.5 µs a row. `stellar/briefs_elsewhere` times the cold briefs of the thick disc's 200 ly query,
+//! the bulge's 50 ly query and the bulge at the 20,000-row cap, which §A.3 records and does not
+//! bound. Each setup prints its rows' routes and the heap bytes of its paired models. The results
+//! are recorded in plan 11's Risks, "P11.T11.a as built".
+//!
 //! The `stellar/hierarchy_bound` group is plan 11's P11.T16 bench: per stellar layer near the
 //! Sun, the census's `hierarchy_bound` beside `draw_hierarchy_of_composition` over the same
 //! attempts the bound lists, the draws it repeats. Its gate is relative: the bound costs at most
@@ -25,6 +33,7 @@
 //! are recorded in plan 11's Risks, "Deviations in P11.T16, as built".
 
 use std::hint::black_box;
+use std::num::NonZeroU32;
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use hyperion_sim::Seed;
@@ -32,10 +41,10 @@ use hyperion_sim::coords::GalacticPosition;
 use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::params::GalaxyParams;
 use hyperion_sim::galaxy::placement::{CellKey, NoCache, SystemRecord, generate_cell};
-use hyperion_sim::galaxy::query::{MassFloor, RangeQuery, range_query};
+use hyperion_sim::galaxy::query::{DEFAULT_CENSUS_LIMIT, MassFloor, RangeQuery, range_query};
 use hyperion_sim::id::{BodyId, Layer};
 use hyperion_sim::math;
-use hyperion_sim::stellar::brief::{BriefModel, range_brief};
+use hyperion_sim::stellar::brief::{BriefModel, BriefRoute, range_brief};
 use hyperion_sim::stellar::classify::{ClassExtras, classify};
 use hyperion_sim::stellar::draws::{StandardNormal, StarDraws};
 use hyperion_sim::stellar::fates::FittedFates;
@@ -316,6 +325,51 @@ fn systems(c: &mut Criterion) {
     group.finish();
 }
 
+/// P11.T11.a's gate alone over the 50 ly query (`BriefModel::certifies`), beside what every row
+/// read before it (P06.T38.e): its metallicity and its first attempt's star count, the hierarchy
+/// drawn in full for a multiple. The gate's own cost is the difference, against
+/// `decision-observed-class-findings.md` §A.3's 5 µs a row.
+fn gate(c: &mut Criterion) {
+    let Fixture { galaxy, local, .. } = fixture();
+    let mut group = c.benchmark_group("stellar/briefs");
+    group.sample_size(10);
+    group.bench_function(
+        format!("50 ly query, {} rows, the gate alone", local.len()),
+        |b| {
+            b.iter(|| {
+                local
+                    .iter()
+                    .filter(|record| BriefModel::certifies(&galaxy, black_box(record)))
+                    .count()
+            });
+        },
+    );
+    group.bench_function(
+        format!(
+            "50 ly query, {} rows, metallicity and star count alone",
+            local.len()
+        ),
+        |b| {
+            b.iter(|| {
+                local
+                    .iter()
+                    .map(|record| {
+                        let composition = draw_metallicity(&galaxy, black_box(record));
+                        black_box(composition);
+                        usize::from(draw_star_count(
+                            &galaxy,
+                            record,
+                            grid_multiplicity(record),
+                            RedrawAttempt::FIRST,
+                        ))
+                    })
+                    .sum::<usize>()
+            });
+        },
+    );
+    group.finish();
+}
+
 /// P06.T38.b and T38.e: the routed brief of the same 50 ly query, cold and from built models, the
 /// count-only hierarchy, the main-sequence fast path, and a brief model of each exemplar.
 fn routed(c: &mut Criterion) {
@@ -342,6 +396,7 @@ fn routed(c: &mut Criterion) {
         .iter()
         .map(|record| BriefModel::new(&galaxy, record))
         .collect();
+    print_routes("50 ly query about the Sun-like point", &models);
     group.bench_function(
         format!("50 ly query, {} rows, routed, warm", local.len()),
         |b| {
@@ -392,6 +447,125 @@ fn routed(c: &mut Criterion) {
         group.bench_function(format!("BriefModel::new ({name})"), |b| {
             b.iter(|| BriefModel::new(&galaxy, black_box(record)));
         });
+    }
+    group.finish();
+}
+
+/// The routes `models` take, and the mean heap bytes of the paired ones (P11.T11.a's records).
+fn print_routes(name: &str, models: &[BriefModel]) {
+    let mut routes = [0_usize; 4];
+    let mut paired_bytes = 0_usize;
+    for model in models {
+        let k = match model.route() {
+            BriefRoute::MainSequence => 0,
+            BriefRoute::Table => 1,
+            BriefRoute::Exact => 2,
+            BriefRoute::Paired => 3,
+        };
+        routes[k] += 1;
+        if model.route() == BriefRoute::Paired {
+            paired_bytes += size_of::<BriefModel>() + model.heap_bytes();
+        }
+    }
+    let paired = routes[3].max(1);
+    println!(
+        "{name}: {} rows; main sequence {}, table {}, exact {}, paired {} ({:.1}%); \
+         {} bytes a paired model on average",
+        models.len(),
+        routes[0],
+        routes[1],
+        routes[2],
+        routes[3],
+        percent(routes[3], models.len()),
+        paired_bytes / paired
+    );
+}
+
+/// `n` as a percentage of `of`.
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "counts of at most 20,000 rows, which an f64 holds exactly"
+)]
+fn percent(n: usize, of: usize) -> f64 {
+    100.0 * n as f64 / of.max(1) as f64
+}
+
+/// The records of a query of `radius` about `centre`, its census limit `limit` expected systems.
+fn records_about(
+    galaxy: &Galaxy,
+    centre: GalacticPosition,
+    radius: LightYears,
+    limit: NonZeroU32,
+) -> Vec<SystemRecord> {
+    let query = RangeQuery::builder(centre, radius)
+        .limit(limit)
+        .build()
+        .expect("a query inside the root cube");
+    range_query(galaxy, &mut NoCache::new(), &[], &query)
+        .systems()
+        .iter()
+        .map(|hit| *hit.record())
+        .collect()
+}
+
+/// P11.T11.a's recorded figures (`decision-observed-class-findings.md` §A.3, item 4): the cold
+/// briefs of the thick disc's 200 ly query (3,000 ly above the Sun-like point), the bulge's 50 ly
+/// query (2,000 ly out on the +y axis and 300 ly above the plane, the hierarchy bound's bulge
+/// point) at the default census limit, and the same query at the 20,000-row cap, with each one's
+/// routes and paired models' heap bytes. Plan 06's P06.T38.e measured the bulge's dead rows at
+/// 148 ms per 1,600 before P11.T11.a.
+fn routed_elsewhere(c: &mut Criterion) {
+    let Fixture { galaxy, .. } = fixture();
+    // The server's largest census limit (`hyperion_server::limits::MAX_CENSUS_LIMIT`).
+    let cap = NonZeroU32::new(20_000).expect("positive");
+    let bulge = GalacticPosition::from_light_years([0.0, 2_000.0, 300.0]);
+    let queries = [
+        (
+            "thick disc, 200 ly",
+            GalacticPosition::from_light_years([0.0, 26_000.0, 3_000.0]),
+            LightYears::new(200.0),
+            DEFAULT_CENSUS_LIMIT,
+        ),
+        (
+            "bulge, 50 ly",
+            bulge,
+            LightYears::new(50.0),
+            DEFAULT_CENSUS_LIMIT,
+        ),
+        (
+            "bulge, 50 ly, the 20,000-row cap",
+            bulge,
+            LightYears::new(50.0),
+            cap,
+        ),
+    ];
+    let mut group = c.benchmark_group("stellar/briefs_elsewhere");
+    group.sample_size(10);
+    for (name, centre, radius, limit) in queries {
+        let records = records_about(
+            &galaxy,
+            centre.expect("inside the root cube"),
+            radius,
+            limit,
+        );
+        let models: Vec<BriefModel> = records
+            .iter()
+            .map(|record| BriefModel::new(&galaxy, record))
+            .collect();
+        print_routes(name, &models);
+        group.bench_function(
+            format!("{name}, {} rows, routed, cold", records.len()),
+            |b| {
+                b.iter(|| {
+                    records
+                        .iter()
+                        .filter_map(|record| {
+                            range_brief(&galaxy, black_box(record), UniverseTime::EPOCH)
+                        })
+                        .count()
+                });
+            },
+        );
     }
     group.finish();
 }
@@ -526,6 +700,8 @@ criterion_group!(
     systems,
     system_full,
     routed,
+    gate,
+    routed_elsewhere,
     hierarchy_bounds,
     exp_after
 );

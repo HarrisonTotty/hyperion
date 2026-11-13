@@ -1,26 +1,61 @@
-import { galacticPositionFromLy } from "@hyperion/protocol";
-import { Activity, type ReactElement, useCallback, useMemo, useState } from "react";
+import { galacticPositionFromLy, type RequestClient } from "@hyperion/protocol";
+import { Activity, type ReactElement, useCallback, useEffect, useMemo, useState } from "react";
 
 import { ConnectionPanel } from "./components/ConnectionPanel";
 import { ConsoleFrame } from "./components/ConsoleFrame";
 import { GraphicsPanel } from "./components/GraphicsPanel";
 import { UniverseProvider } from "./components/UniverseProvider";
 import { GalaxyDisplay } from "./displays/galaxy/GalaxyDisplay";
+import { PlanetViewerDisplay } from "./displays/planet/PlanetViewerDisplay";
+import { opensInViewer, type PlanetViewerOpening } from "./displays/planet/usePlanetViewer";
 import { SystemDisplay } from "./displays/system/SystemDisplay";
-import { ViewSceneProvider } from "./displays/view/ViewSceneProvider";
+import {
+  type InspectionOpening,
+  inspectionOption,
+  ViewSceneProvider,
+} from "./displays/view/ViewSceneProvider";
 import { ViewDisplay } from "./displays/view/ViewDisplay";
-import { ViewsCheckRunner } from "./displays/view/check/ViewsCheckRunner";
+import { type CheckedRun, ViewsCheckRunner } from "./displays/view/check/ViewsCheckRunner";
+import { placedAtmosphere } from "./displays/view/check/atmospherePlaces";
+import { countedEngineSource, GpuCallCounter } from "./displays/view/check/gpuCallCounter";
+import { handoverApproachFor } from "./displays/view/check/handoverGeometry";
+import {
+  handoverRangeAtM,
+  HandoverScenes,
+  type HandoverWorld,
+  terrainTestHandoverWorld,
+} from "./displays/view/check/handoverScenes";
+import { readServedHandoverWorld } from "./displays/view/check/servedHandover";
+import { terrainProbeOptions } from "./displays/view/check/terrainCheckRun";
+import { InspectionClusters } from "./displays/view/check/inspectionClusters";
+import { TerrainProbe } from "./displays/view/check/terrainProbe";
 import { ViewsProbe } from "./displays/view/check/viewsProbe";
+import { wholeLookSceneOptions } from "./displays/view/check/wholeLooks";
 import type { ViewEngineSource } from "./displays/view/useViewEngine";
+import type { SceneOption } from "./displays/view/viewRun";
+import type { BodyInspection } from "./view/scenes/inspectionScene";
+import { surveyInspected } from "./view/scenes/inspectionSurvey";
+import type { TerrainSession } from "./view/terrain/session";
+import type { WorkerLike } from "./view/terrain/workers/pool";
 import type { SystemOpening, SystemTarget } from "./displays/system/systemTarget";
 import { type ConnectionState, useServerConnection } from "./lib/connection";
+import { openLinkSocket } from "./lib/linkSocket";
 import type { SystemPlace } from "./lib/scene/model";
-import { DISPLAYS, type DisplayId } from "./lib/displays";
+import { type DisplayId, stationDisplays } from "./lib/displays";
 import { ServerLinkContext, useServerLinkValue } from "./lib/serverLink";
 import { useDisplayKeys } from "./lib/useDisplayKeys";
 import { GraphicsStatusProvider } from "./view/engine/GraphicsStatusProvider";
 import { navigatorGpu } from "./view/engine/status";
 import type { QualitySetting } from "./view/quality/qualitySetting";
+import { selectionViewport } from "./view/terrain/handover";
+import type {
+  AtmosphereLeversOverride,
+  FramePacingName,
+  GeometryOverride,
+  GraphicsLaunchMode,
+  ServedWorldNames,
+  ViewsCheckLaunch,
+} from "../../preload/api";
 import { useSurfaceModuleCheck } from "./wasm/useSurfaceModuleCheck";
 
 /** What `App` hands the displays besides the server link and the universe, which are contexts. */
@@ -29,12 +64,219 @@ interface DisplayInputs {
   readonly serverUrl: string;
   readonly systemOpening: SystemOpening | null;
   readonly openSystem: (target: SystemTarget) => void;
-  /** `VIEW`'s engine on a `--views-check` launch (R07.T20), else `null`. */
-  readonly checkedView: { readonly engineSource: ViewEngineSource } | null;
+  /** Opens a body in `VIEW`'s body inspection, from `SYSTEM`'s `VIEW BODY` (the owner's request). */
+  readonly viewBody: (inspection: BodyInspection) => void;
+  /**
+   * Opens a body in the `PLANET VIEWER`, from `SYSTEM`'s `OPEN IN PLANET VIEWER` (plan R15, T5),
+   * where the launch offers the viewer; else `undefined`.
+   */
+  readonly planetViewer: ((inspection: BodyInspection) => void) | undefined;
+  /**
+   * Opens `VIEW`'s body inspection's planet in the `PLANET VIEWER`, from its `SCENE` bar, where the
+   * launch offers the viewer and the inspection is of a planet or a moon; else `undefined`.
+   */
+  readonly inspectionToViewer: (() => void) | undefined;
+  /** The latest planet handed over to the `PLANET VIEWER`, or `null` before the first. */
+  readonly planetOpening: PlanetViewerOpening | null;
+  /** `VIEW`'s engine on a `--views-check` launch (R07.T20), and its terrain run's seam, else `null`. */
+  readonly checkedView: CheckedView | null;
   /** The quality setting `VIEW` draws at, the launch's `--setting` (R07.T17). */
   readonly setting: QualitySetting;
+  /** How `VIEW` paces its views, the launch's `--frame-pacing` (R07.T19). */
+  readonly framePacing: FramePacingName;
   /** The platform the client runs on, whose primary modifier `VIEW`'s rate chord takes (R07.T19.f). */
   readonly platform: string;
+  /**
+   * The machine's performance cores' threads with a third of its efficiency cores', which `VIEW`'s
+   * height workers' count reads.
+   */
+  readonly performanceThreads: number | null;
+  /** The launch's geometry override (`--geometry`, plan R14), which `VIEW`'s terrain draws with. */
+  readonly geometry: GeometryOverride | undefined;
+  /**
+   * A frame profile's atmosphere levers over the setting's (`--march-cover`, `--limb-rays`; plan
+   * R08, R08.T8.d), which `VIEW`'s atmospheres draw with; none on any other launch.
+   */
+  readonly atmosphereLevers: AtmosphereLeversOverride | undefined;
+}
+
+/**
+ * The terrain run's seam a `--terrain` check launch hands `VIEW` (R10.T16.d): its counted height
+ * workers and its watch of the terrain session, together, beside its kept scenes with
+ * `TERRAIN TEST`'s paced fixture (`CheckedView.sceneOptions`).
+ */
+interface TerrainSeam {
+  readonly heightWorkers: () => WorkerLike;
+  readonly watchTerrain: (session: TerrainSession) => () => void;
+}
+
+/**
+ * What a `--views-check` launch hands `VIEW`: its probe's engine source (R07.T20), the terrain
+ * run's seam on a `--terrain` launch, `null` on T20's (the batch review's D-C), and the kept scenes
+ * it offers: the terrain probe's on a `--terrain` launch, and `VIEW`'s own with the places' on a
+ * software `--atmosphere` one (`atmospherePlaces.ts`), `undefined` for `VIEW`'s own alone.
+ */
+interface CheckedView {
+  readonly engineSource: ViewEngineSource;
+  readonly terrain: TerrainSeam | null;
+  readonly sceneOptions: ReadonlyArray<SceneOption> | undefined;
+  /**
+   * The watch of `VIEW`'s terrain session: the terrain run's seam's, or the inspection run's for its
+   * frame profile's cluster counters (plan R14); `undefined` for none.
+   */
+  readonly watchTerrain: ((session: TerrainSession) => () => void) | undefined;
+}
+
+/**
+ * The probes of a `--views-check` launch: the views probe, and its run's own (`CheckedRun`): the
+ * terrain run's probe on a `--terrain` one, and on a `--handover` one also the hand-over check's
+ * looks (R10.T10.g), offered among the terrain probe's kept scenes on that launch alone; none of its
+ * own on an `--atmosphere` one (R08.T10.b); on an `--inspection` one, the link's request client,
+ * through which its run asks what it opens (the owner's request).
+ */
+interface CheckProbes {
+  readonly views: ViewsProbe;
+  readonly run: CheckedRun;
+}
+
+/**
+ * The served world a `--handover` launch names (`--universe`, `--body`; plan R10, R10.T15.b), or
+ * `null` for `TERRAIN TEST`'s.
+ */
+function servedHandoverOf(launch: ViewsCheckLaunch): ServedWorldNames | null {
+  return launch.run === "handover" ? (launch.served ?? null) : null;
+}
+
+/**
+ * A `--views-check` launch's probes, by its options and graphics mode (an `--atmosphere` run's
+ * places in the software mode alone); a `--handover` launch's looks on `served`, the served world
+ * read from the server, where it names one, else on `TERRAIN TEST`'s.
+ */
+function checkProbesOf(
+  launch: ViewsCheckLaunch,
+  launchMode: GraphicsLaunchMode,
+  requests: RequestClient,
+  served: HandoverWorld | null = null,
+): CheckProbes {
+  // An inspection profile's `--count-gpu-calls` counts its engine's device's calls (plan R14).
+  const calls = launch.countGpuCalls === true ? new GpuCallCounter() : null;
+  // An inspection profile's `--composite-probe` makes VIEW's composite under it (the owner's
+  // priority, 2026-11-01), its `--march-probe` VIEW's march (plan R08, R08.T8.d), and its
+  // `--lit-probe` VIEW's lit materials and kernels (R08.T9.b).
+  const views = new ViewsProbe(
+    calls === null ? undefined : countedEngineSource(calls),
+    undefined,
+    launch.compositeProbe ?? null,
+    launch.marchProbe ?? null,
+    launch.litProbe ?? null,
+  );
+  // A `--weathered` launch's probe serves `TEST MOON` weathered's field in TERRAIN TEST's place.
+  const terrainProbe = (checkScenes: ReadonlyArray<SceneOption>): TerrainProbe =>
+    new TerrainProbe(views, {
+      ...terrainProbeOptions(launch.smoke),
+      checkScenes,
+      fixture: launch.fixture,
+    });
+  let run: CheckedRun;
+  switch (launch.run) {
+    case "several-views":
+      run = { kind: "several-views" };
+      break;
+    case "atmosphere":
+      run = {
+        kind: "atmosphere",
+        placed: launchMode === "software" ? placedAtmosphere(launch.smoke) : null,
+      };
+      break;
+    case "planet-viewer":
+      run = { kind: "planet-viewer", requests };
+      break;
+    case "inspection":
+      run = {
+        kind: "inspection",
+        requests,
+        served: launch.served ?? null,
+        calls,
+        clusters: new InspectionClusters(),
+      };
+      break;
+    case "terrain":
+      // A `--whole` launch's looks at the whole body (plan R10, R10.T14.c), offered after the kept
+      // scenes; none on any other.
+      run = {
+        kind: "terrain",
+        terrain: terrainProbe(
+          launch.fixture === "terrain-test-whole" ? wholeLookSceneOptions() : [],
+        ),
+      };
+      break;
+    case "handover": {
+      const world = served ?? terrainTestHandoverWorld(launch.fixture);
+      // A look chosen by hand before the run measures the primary is drawn at the range of a
+      // canvas the window's width, at its selection's CSS px, and measures nothing
+      // (`HandoverScenes`).
+      const windowPx = Math.max(1, Math.round(window.innerWidth * window.devicePixelRatio));
+      const selection = selectionViewport(
+        { widthPx: windowPx, heightPx: windowPx },
+        window.devicePixelRatio,
+      );
+      const scenes = new HandoverScenes(
+        world,
+        handoverApproachFor(launch.look, launch.smoke),
+        handoverRangeAtM(world, launch.setting, selection.widthPx).rangeM,
+      );
+      run = { kind: "handover", terrain: terrainProbe(scenes.sceneOptions), scenes };
+      break;
+    }
+  }
+  return { views, run };
+}
+
+/** The view a check launch hands `VIEW`, from its probes. */
+function checkedViewOf(probes: CheckProbes): CheckedView {
+  const { run } = probes;
+  // T20's run, the atmosphere run (R08.T10.b) and the inspection run draw through the views probe
+  // alone; the inspection run watches the terrain session for its profile's counters (plan R14).
+  if (run.kind === "several-views") {
+    return {
+      engineSource: probes.views.source,
+      terrain: null,
+      sceneOptions: undefined,
+      watchTerrain: undefined,
+    };
+  }
+  if (run.kind === "inspection") {
+    return {
+      engineSource: probes.views.source,
+      terrain: null,
+      sceneOptions: undefined,
+      watchTerrain: run.clusters.watchTerrain,
+    };
+  }
+  if (run.kind === "atmosphere") {
+    return {
+      engineSource: probes.views.source,
+      terrain: null,
+      sceneOptions: run.placed?.sceneOptions,
+      watchTerrain: undefined,
+    };
+  }
+  // The planet viewer run (plan R15, T6) draws through the views probe, in the PLANET VIEWER's VIEW.
+  if (run.kind === "planet-viewer") {
+    return {
+      engineSource: probes.views.source,
+      terrain: null,
+      sceneOptions: undefined,
+      watchTerrain: undefined,
+    };
+  }
+  const { terrain } = run;
+  return {
+    engineSource: terrain.source,
+    terrain: { heightWorkers: terrain.heightWorkers, watchTerrain: terrain.watchTerrain },
+    sceneOptions: terrain.sceneOptions,
+    watchTerrain: terrain.watchTerrain,
+  };
 }
 
 function displayContent(id: DisplayId, inputs: DisplayInputs): ReactElement {
@@ -56,14 +298,42 @@ function displayContent(id: DisplayId, inputs: DisplayInputs): ReactElement {
       content = <GalaxyDisplay onOpenSystem={inputs.openSystem} />;
       break;
     case "system":
-      content = <SystemDisplay opening={inputs.systemOpening} />;
+      content = (
+        <SystemDisplay
+          opening={inputs.systemOpening}
+          onViewBody={inputs.viewBody}
+          onPlanetViewer={inputs.planetViewer}
+        />
+      );
       break;
     case "view":
       content = (
         <ViewDisplay
           engineSource={inputs.checkedView?.engineSource}
+          heightWorkers={inputs.checkedView?.terrain?.heightWorkers}
+          sceneOptions={inputs.checkedView?.sceneOptions}
+          watchTerrain={inputs.checkedView?.watchTerrain}
           setting={inputs.setting}
+          framePacing={inputs.framePacing}
           platform={inputs.platform}
+          performanceThreads={inputs.performanceThreads}
+          geometry={inputs.geometry}
+          atmosphereLevers={inputs.atmosphereLevers}
+          onPlanetViewer={inputs.inspectionToViewer}
+        />
+      );
+      break;
+    case "planet":
+      content = (
+        <PlanetViewerDisplay
+          setting={inputs.setting}
+          framePacing={inputs.framePacing}
+          platform={inputs.platform}
+          performanceThreads={inputs.performanceThreads}
+          geometry={inputs.geometry}
+          atmosphereLevers={inputs.atmosphereLevers}
+          opening={inputs.planetOpening}
+          engineSource={inputs.checkedView?.engineSource}
         />
       );
       break;
@@ -95,32 +365,153 @@ function displayContent(id: DisplayId, inputs: DisplayInputs): ReactElement {
  * display state, and switches to the display. The callback is stable, so the memoised `GALAXY`
  * display is not rendered again for it.
  *
+ * `VIEW BODY` on the `SYSTEM` display's orbit map opens its body in `VIEW`'s body inspection (the
+ * owner's request, 2026-11-01): `App` makes its kept scene as it is pressed and keeps the latest
+ * opening, counted as a system's opening is, hands it to `ViewSceneProvider`, which shows it, and
+ * switches to `VIEW`; the callback is stable.
+ *
  * `VIEW` and the `LINK` display's `Graphics` panel take the launch's quality setting (`--setting`,
  * R07.T17), which holds for the run.
+ *
+ * The `PLANET VIEWER` (plan R15), a development tool, follows `VIEW` on `F5` where the launch offers
+ * it (`window.hyperion.planetViewer`): it holds `VIEW`'s display of its own, and its planet, a kept
+ * scene of a generated system, stands under the `TRAINING` banner whenever it is shown.
  *
  * The header strip's `TRAINING` banner stands while `VIEW` is shown drawing a kept test scene, and
  * not over the server's scene (R02.T17; the guide's training banner): `ViewSceneProvider` holds the
  * display's scene and its `SCENE` choice above the frame, so the banner is computed during render
  * from what `VIEW` draws. The system last opened on `SYSTEM` is handed to it with its designation
- * and position, which the server's scene does not carry.
+ * and position, which the server's scene does not carry. A `--views-check` launch, T20's or the
+ * terrain run's, is a measurement run, flown by script and wanting no input: its banner reads
+ * `MEASUREMENT` in place of `TRAINING` on every display for the whole launch (plan R10, R10.T16.e;
+ * decision-r10-t16-leans §11).
  */
 export function App() {
   const serverUrl = window.hyperion.serverUrl;
-  const connection = useServerConnection(serverUrl, __APP_VERSION__);
+  // Read on a worker's thread, so that a long task of the page's never leaves the server's frames
+  // unread past its write timeout (fix-night-sky-stars).
+  const connection = useServerConnection(serverUrl, __APP_VERSION__, openLinkSocket);
   useSurfaceModuleCheck(connection.serverGeneratorVersion);
   const link = useServerLinkValue(connection);
   const viewsCheck = window.hyperion.viewsCheck;
-  // A `--views-check` launch opens on `VIEW`, whose engine its probe watches (R07.T20).
-  const [probe] = useState(() => (viewsCheck === undefined ? null : new ViewsProbe()));
+  // A `--views-check` launch opens on `VIEW`, whose engine its probe watches (R07.T20); a
+  // `--terrain` one also its terrain run's (R10.T16.d). A hand-over check of a served world
+  // (R10.T15.b) makes them once the world is read from the server.
+  const [probes, setProbes] = useState((): CheckProbes | null =>
+    viewsCheck === undefined || servedHandoverOf(viewsCheck.launch) !== null
+      ? null
+      : checkProbesOf(viewsCheck.launch, window.hyperion.graphics.launchMode, connection.requests),
+  );
+  const awaitingServed =
+    probes === null && viewsCheck !== undefined && servedHandoverOf(viewsCheck.launch) !== null;
+  const connected = connection.status === "connected";
+  const requests = connection.requests;
+  useEffect(() => {
+    // `awaitingServed` is true only on a views check's launch, by which TypeScript narrows `viewsCheck`.
+    if (!awaitingServed || !connected) {
+      return undefined;
+    }
+    const target = servedHandoverOf(viewsCheck.launch);
+    if (target === null) {
+      return undefined;
+    }
+    const abort = new AbortController();
+    /** Ends the run failed with `reason`, which the main process writes. */
+    const fail = (reason: string): void => {
+      viewsCheck.end({ status: "fail", reason }).catch((error: unknown) => {
+        console.error("views check: the run could not be ended:", error);
+      });
+    };
+    readServedHandoverWorld(requests, target.universe, target.body, abort.signal)
+      .then((read) => {
+        if (abort.signal.aborted) {
+          return undefined;
+        }
+        switch (read.kind) {
+          case "read":
+            setProbes(
+              checkProbesOf(
+                viewsCheck.launch,
+                window.hyperion.graphics.launchMode,
+                requests,
+                read.world,
+              ),
+            );
+            break;
+          case "not served":
+            fail(
+              `the server serves no surface for ${target.body}: its field is not modelled (${read.section})`,
+            );
+            break;
+          case "failed":
+            fail(`the hand-over check's served world could not be read: ${read.message}`);
+            break;
+        }
+        return undefined;
+      })
+      .catch((error: unknown) => {
+        // A bug in reading the world: the run ends failed, the error in the log.
+        console.error("views check: the hand-over check's served world could not be read:", error);
+        if (!abort.signal.aborted) {
+          fail(error instanceof Error ? error.message : String(error));
+        }
+      });
+    return () => {
+      abort.abort();
+    };
+  }, [awaitingServed, connected, requests, viewsCheck]);
+  // A views check opens on VIEW, whose engine its probe watches; the planet viewer run opens on
+  // GALAXY, where it opens a universe, so that VIEW never draws beside the viewer (plan R15, T6).
   const [activeDisplay, setActiveDisplay] = useState<DisplayId>(
-    viewsCheck === undefined ? "link" : "view",
+    viewsCheck === undefined
+      ? "link"
+      : viewsCheck.launch.run === "planet-viewer"
+        ? "galaxy"
+        : "view",
   );
   const [systemOpening, setSystemOpening] = useState<SystemOpening | null>(null);
-  useDisplayKeys(DISPLAYS, setActiveDisplay);
+  // A launch's displays hold for the launch: the PLANET VIEWER's offer is the preload's (plan R15).
+  const [displays] = useState(() => stationDisplays(window.hyperion.planetViewer));
+  useDisplayKeys(displays, setActiveDisplay);
   const openSystem = useCallback((target: SystemTarget): void => {
     setSystemOpening((previous) => ({ target, sequence: (previous?.sequence ?? 0) + 1 }));
     setActiveDisplay("system");
   }, []);
+  const [inspection, setInspection] = useState<InspectionOpening | null>(null);
+  // The body VIEW's inspection shows, which its OPEN IN PLANET VIEWER hands over (plan R15, T5).
+  const [inspected, setInspected] = useState<BodyInspection | null>(null);
+  const [planetOpening, setPlanetOpening] = useState<PlanetViewerOpening | null>(null);
+  const viewerOffered = displays.some(({ id }) => id === "planet");
+  const openInViewer = useCallback((body: BodyInspection): void => {
+    setPlanetOpening((previous) => ({ inspection: body, sequence: (previous?.sequence ?? 0) + 1 }));
+    setActiveDisplay("planet");
+  }, []);
+  const inspectionToViewer = useMemo(
+    () =>
+      viewerOffered && inspected !== null && opensInViewer(inspected)
+        ? () => {
+            openInViewer(inspected);
+          }
+        : undefined,
+    [viewerOffered, inspected, openInViewer],
+  );
+  const viewBody = useCallback(
+    (body: BodyInspection): void => {
+      // Made here, as the operator opens it, not in a render.
+      const option = inspectionOption(body);
+      // The body surveyed whole as it opens, so that its ground is drawn at once.
+      const survey = surveyInspected(requests, body).then((outcome) => {
+        if (outcome.kind === "refused") {
+          console.warn(`the inspection's survey of ${outcome.body} was refused: ${outcome.reason}`);
+        }
+        return outcome;
+      });
+      setInspection((previous) => ({ option, sequence: (previous?.sequence ?? 0) + 1, survey }));
+      setInspected(body);
+      setActiveDisplay("view");
+    },
+    [requests],
+  );
   const target = systemOpening?.target ?? null;
   const knownSystem = useMemo(
     (): SystemPlace | null =>
@@ -143,30 +534,55 @@ export function App() {
     serverUrl,
     systemOpening,
     openSystem,
-    checkedView: viewsCheck === undefined || probe === null ? null : { engineSource: probe.source },
+    viewBody,
+    planetViewer: viewerOffered ? openInViewer : undefined,
+    inspectionToViewer,
+    planetOpening,
+    checkedView: probes === null ? null : checkedViewOf(probes),
     setting: window.hyperion.setting,
+    framePacing: window.hyperion.framePacing,
     platform: window.hyperion.platform,
+    performanceThreads: window.hyperion.performanceThreads,
+    geometry: window.hyperion.geometry,
+    atmosphereLevers: viewsCheck?.launch.atmosphereLevers,
   };
   return (
     <GraphicsStatusProvider graphics={window.hyperion.graphics} gpu={navigatorGpu()}>
-      {viewsCheck === undefined || probe === null ? null : (
-        <ViewsCheckRunner api={viewsCheck} probe={probe} />
+      {viewsCheck === undefined || probes === null ? null : (
+        <ViewsCheckRunner
+          api={viewsCheck}
+          probe={probes.views}
+          run={probes.run}
+          launchMode={window.hyperion.graphics.launchMode}
+          openSystem={openSystem}
+        />
       )}
       <ServerLinkContext value={link}>
         <UniverseProvider>
-          <ViewSceneProvider active={activeDisplay === "view"} knownSystem={knownSystem}>
+          <ViewSceneProvider
+            active={activeDisplay === "view"}
+            knownSystem={knownSystem}
+            inspection={inspection}
+          >
             {(sceneProvenance) => (
               <ConsoleFrame
-                displays={DISPLAYS}
+                displays={displays}
                 activeDisplay={activeDisplay}
                 onSelectDisplay={setActiveDisplay}
                 linkStatus={connection.status}
-                // Training is a kept test scene on VIEW; the server's scene is live operation.
+                // A views check measures for the whole launch, on every display; training is a
+                // kept test scene on VIEW; the server's scene is live operation.
+                // The PLANET VIEWER's planet is a kept scene too, never the live scene (plan R15).
                 modeBanner={
-                  activeDisplay === "view" && sceneProvenance === "kept" ? "TRAINING" : null
+                  viewsCheck !== undefined
+                    ? "MEASUREMENT"
+                    : (activeDisplay === "view" && sceneProvenance === "kept") ||
+                        activeDisplay === "planet"
+                      ? "TRAINING"
+                      : null
                 }
               >
-                {DISPLAYS.map(({ id }) => (
+                {displays.map(({ id }) => (
                   <Activity key={id} mode={id === activeDisplay ? "visible" : "hidden"}>
                     {displayContent(id, inputs)}
                   </Activity>

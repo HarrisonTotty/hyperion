@@ -1,6 +1,8 @@
 //! The displaced form table (plan 15, P15.T6.c–f): the committed table declares the task's items
-//! and is provisional, and the task's smoke run goes end to end through the command line from
-//! freshly made smoke histograms, the same bytes on one thread and on three.
+//! and is the production run's, not provisional, and the task's smoke run goes end to end through
+//! the command line from freshly made smoke histograms, the same bytes on one thread and on three.
+
+mod common;
 
 use std::fs;
 use std::num::NonZeroUsize;
@@ -18,26 +20,23 @@ use hyperion_fit::tasks::displaced_forms::{self, RunParams};
 /// The table the sim compiles, as committed.
 const COMMITTED: &str = include_str!("../../hyperion-sim/src/tables/displaced_forms.rs");
 
-/// The declared items of a table, in order: every `pub const` of its body.
-fn declared(body: &str) -> Vec<String> {
-    body.lines()
-        .filter_map(|l| l.strip_prefix("pub const "))
-        .filter_map(|l| l.split(':').next())
-        .map(str::to_owned)
-        .collect()
-}
-
+/// The committed table is fitted to the production run's histograms (dataset `displaced`) since
+/// generator version 26, so it is generated, not provisional.
 #[test]
-fn the_committed_table_is_provisional_and_declares_the_items() {
+fn the_committed_table_is_the_production_fit_and_declares_the_items() {
     let committed = TableText::of_file(COMMITTED);
     let header = committed.header().unwrap();
+    assert_eq!(header.kind, Some(HeaderKind::Generated), "{header:?}");
     assert!(
-        matches!(header.kind, Some(HeaderKind::Provisional { .. })),
+        header
+            .acceptance
+            .as_deref()
+            .is_some_and(|a| a.starts_with("on the production orbit run's histograms")),
         "{header:?}"
     );
     assert_eq!(header.task.as_deref(), Some("displaced_forms"));
     assert_eq!(
-        declared(&committed.body),
+        common::declared(&committed.body),
         find("displaced_forms").unwrap().items()
     );
 }
@@ -105,7 +104,7 @@ fn the_smoke_fit_runs_end_to_end_on_fresh_smoke_histograms() {
         "{header:?}"
     );
     assert_eq!(
-        declared(&split.body),
+        common::declared(&split.body),
         find("displaced_forms").unwrap().items()
     );
 }

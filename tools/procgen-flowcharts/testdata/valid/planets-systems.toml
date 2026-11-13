@@ -1,0 +1,144 @@
+# Test fixture: a cut-down planetary-systems part, shaped like the real data (not the real data).
+
+[meta]
+stage = "planets"
+part = "planets-systems"
+prefix = "ps"
+title = "Planetary Systems"
+snapshot = "a6d3f6dd"
+
+[[cluster]]
+id = "ps.disc"
+label = "Protoplanetary disc"
+
+[[cluster]]
+id = "ps.architecture"
+label = "Architecture"
+
+[[node]]
+id = "ps.stream"
+label = "Planet stream"
+kind = "seed"
+summary = "hash(system id, PLANETS) → architecture draw words"
+status = "built"
+
+[[node]]
+id = "ps.disc_mass"
+label = "Disc mass"
+kind = "draw"
+cluster = "ps.disc"
+summary = "Log-normal around 1% of M★, σ = 0.5 dex, × 10^[Fe/H]"
+cite = ["Andrews et al. 2013"]
+source = ["crates/hyperion-sim/src/planetary/disc.rs"]
+status = "built"
+
+[[node]]
+id = "ps.snow_line"
+label = "Snow line"
+kind = "model"
+cluster = "ps.disc"
+summary = "a_snow ≈ 2.7 AU × (L★ / L☉)^½ at the disc's age"
+source = ["crates/hyperion-sim/src/planetary/disc.rs"]
+status = "built"
+
+[[node]]
+id = "ps.count"
+label = "Planet count"
+kind = "draw"
+cluster = "ps.architecture"
+summary = "Poisson in the disc's solid mass, 0 to 10 planets"
+source = ["crates/hyperion-sim/src/planetary/architecture.rs"]
+status = "built"
+
+[[node]]
+id = "ps.spacing"
+label = "Orbital spacing"
+kind = "draw"
+cluster = "ps.architecture"
+summary = "Period ratios from the peas-in-a-pod fit, P₂/P₁ ≈ 1.3–4"
+detail = ["inner edge at the dust sublimation radius, ≈ 0.05 AU"]
+cite = ["Weiss et al. 2018"]
+source = ["crates/hyperion-sim/src/planetary/architecture.rs"]
+status = "built"
+
+[[node]]
+id = "ps.stable"
+label = "Hill-stable?"
+kind = "decision"
+cluster = "ps.architecture"
+summary = "Mutual Hill spacing Δ ≥ 10 keeps the pair, else redraw"
+detail = ["at most 8 redraws, then the outer planet is dropped"]
+cite = ["Chambers et al. 1996"]
+status = "built"
+
+[[node]]
+id = "ps.orbit"
+label = "Planet orbit record"
+kind = "entity"
+summary = "a, e, i, Ω, ω, M₀ and the planet's mass class"
+source = ["crates/hyperion-sim/src/planetary/record.rs"]
+status = "built"
+
+[[edge]]
+from = "s.system"
+to = "ps.stream"
+kind = "seed"
+label = "system id"
+
+[[edge]]
+from = "s.star"
+to = "ps.disc_mass"
+label = "M★"
+
+[[edge]]
+from = "g.metallicity"
+to = "ps.disc_mass"
+label = "[Fe/H] at position"
+
+[[edge]]
+from = "ps.stream"
+to = "ps.disc_mass"
+kind = "seed"
+
+[[edge]]
+from = "s.star"
+to = "ps.snow_line"
+label = "L★ at the disc's age"
+
+[[edge]]
+from = "ps.disc_mass"
+to = "ps.count"
+
+[[edge]]
+from = "ps.stream"
+to = "ps.count"
+kind = "seed"
+
+[[edge]]
+from = "ps.count"
+to = "ps.spacing"
+
+[[edge]]
+from = "ps.stream"
+to = "ps.spacing"
+kind = "seed"
+
+[[edge]]
+from = "ps.spacing"
+to = "ps.stable"
+
+[[edge]]
+from = "ps.stable"
+to = "ps.spacing"
+kind = "constraint"
+label = "no: redraw the ratio"
+
+[[edge]]
+from = "ps.stable"
+to = "ps.orbit"
+label = "yes"
+
+[[edge]]
+from = "ps.snow_line"
+to = "ps.orbit"
+label = "rocky or icy side"

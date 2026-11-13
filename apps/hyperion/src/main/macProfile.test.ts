@@ -1,0 +1,754 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { afterEach, describe, expect, it } from "vitest";
+
+import { INSPECTION_TIMING_SCHEMA } from "./inspectionTiming";
+import { measured, missing } from "./measured";
+import {
+  batchIn,
+  batchOut,
+  cargoExecutable,
+  cpuTimeSeconds,
+  isCounted,
+  type KeptRun,
+  keptRunsIn,
+  leversOf,
+  MAC_PROFILE_BODY_LEVERS,
+  MAC_PROFILE_DEFAULTS,
+  MAC_PROFILE_LEVERS,
+  MAC_PROFILE_RUN_SCHEMA,
+  type MacProfileMatrixOptions,
+  type MacProfileRun,
+  type MacProfileRunRecord,
+  type MacProfileSample,
+  macProfileMatrix,
+  macProfileSummaryLines,
+  median,
+  NO_SKIES,
+  pairFigures,
+  type ProfiledWindow,
+  serverCoresOver,
+  skiesBetween,
+  skiesInFlight,
+  skyEventOf,
+  tallied,
+  thermalText,
+} from "./macProfile";
+
+/** The pod's dry run: one pair, limb rays at low, one round. */
+const DRY_RUN: MacProfileMatrixOptions = {
+  settings: [],
+  ratios: [1],
+  levers: ["limb-rays"],
+  pairSetting: "low",
+  rounds: 1,
+  counted: false,
+};
+
+/** A sample at `at` (s past a minute) with the server's CPU time so far. */
+function sampleAt(atS: number, serverCpuS: number | null): MacProfileSample {
+  return {
+    at: new Date(Date.UTC(2026, 10, 5, 12, 0, atS)).toISOString(),
+    load1: 1.5,
+    serverCpuPercent: 12,
+    serverCpuS,
+    thermal: null,
+  };
+}
+
+/** Thirty times whose median is `ms` and p95 `p95`, summarised. */
+function summary(ms: number, p95: number): ProfiledWindow["frame"]["gpuMs"] {
+  return { count: 30, medianMs: ms, p95Ms: p95, meanMs: ms, maxMs: p95 };
+}
+
+/** A window whose draws came every `intervalMs` (p95 a fifth more), the GPU's frame `gpuMs`. */
+function windowOf(
+  name: ProfiledWindow["name"],
+  intervalMs: number,
+  gpuMs: number,
+  passes: Readonly<Record<string, number>>,
+): ProfiledWindow {
+  return {
+    name,
+    frame: { intervalMs: summary(intervalMs, 1.2 * intervalMs), gpuMs: summary(gpuMs, gpuMs) },
+    passes: Object.entries(passes).map(([label, ms]) => ({
+      label,
+      medianMs: ms,
+      shareOfGpu: ms / gpuMs,
+    })),
+  };
+}
+
+/** The run `id` of `matrix`, kept with `windows`. */
+function keptAs(
+  matrix: ReadonlyArray<MacProfileRun>,
+  id: string,
+  windows: ReadonlyArray<ProfiledWindow>,
+): KeptRun {
+  const run = matrix.find((each) => each.id === id);
+  if (run === undefined) {
+    throw new Error(`the matrix has no run ${id}`);
+  }
+  const record: MacProfileRunRecord = {
+    schema: MAC_PROFILE_RUN_SCHEMA,
+    version: 1,
+    id,
+    argv: ["--inspection"],
+    exit: 0,
+    failure: null,
+    before: sampleAt(0, 10),
+    after: sampleAt(50, 30),
+    skies: { started: 1, kept: 1, final: 0, unfinished: 0 },
+    timing: `${id}.json`,
+    files: [`${id}.json`, "run.json"],
+  };
+  return { run, record, timing: { run: { timer: "full" }, windows } };
+}
+
+/** `kept` as a run whose views check wrote its timing file and then failed with `failure`. */
+function failedAfter(kept: KeptRun, failure: string): KeptRun {
+  return { ...kept, record: { ...kept.record, exit: 1, failure } };
+}
+
+describe("the Mac batch's matrix", () => {
+  it("runs each setting at both ratios, then every pair at high as A B A B", () => {
+    const matrix = macProfileMatrix(MAC_PROFILE_DEFAULTS);
+    expect(matrix.slice(0, 4).map((run) => run.id)).toEqual([
+      "high-dpr1",
+      "high-dpr2",
+      "low-dpr1",
+      "low-dpr2",
+    ]);
+    expect(matrix.slice(4, 8).map((run) => run.id)).toEqual([
+      "limb-rays-high-dpr1-a1",
+      "limb-rays-high-dpr1-b1",
+      "limb-rays-high-dpr1-a2",
+      "limb-rays-high-dpr1-b2",
+    ]);
+    // Four own runs, sixteen pairs at DPR 1 (the terrain's four probes among them) and the two
+    // shading pairs at 1 and 2, four runs each;
+    // then two counted settings and the occlusion's, figure-shading's and both shading pairs' two
+    // counted sides each.
+    expect(matrix).toHaveLength(4 + 16 * 4 + 2 * 2 * 4 + 2 + 4 * 2);
+    expect(new Set(matrix.map((run) => run.id)).size).toBe(matrix.length);
+  });
+
+  it("leaves the decked air's ground out of the defaults, whose body has no deck, and runs it when named (R08)", () => {
+    expect(MAC_PROFILE_BODY_LEVERS).toEqual(["decked-air-surface"]);
+    expect(MAC_PROFILE_DEFAULTS.levers).toEqual(
+      MAC_PROFILE_LEVERS.map((lever) => lever.name).filter((name) => name !== "decked-air-surface"),
+    );
+    expect(
+      macProfileMatrix(MAC_PROFILE_DEFAULTS).some(
+        (run) => run.place.kind === "pair" && run.place.lever === "decked-air-surface",
+      ),
+    ).toBe(false);
+    expect([
+      leversOf(""),
+      leversOf("all"),
+      leversOf("none"),
+      leversOf("decked-air-surface,limb-rays"),
+    ]).toEqual([
+      MAC_PROFILE_DEFAULTS.levers,
+      MAC_PROFILE_LEVERS.map((lever) => lever.name),
+      [],
+      ["decked-air-surface", "limb-rays"],
+    ]);
+    const named = macProfileMatrix({ ...MAC_PROFILE_DEFAULTS, levers: ["decked-air-surface"] });
+    expect(named.filter((run) => run.place.kind === "pair").map((run) => run.id)).toEqual([
+      "decked-air-surface-high-dpr1-a1",
+      "decked-air-surface-high-dpr1-b1",
+      "decked-air-surface-high-dpr1-a2",
+      "decked-air-surface-high-dpr1-b2",
+    ]);
+  });
+
+  it("gives each run its ratio and its side's switches", () => {
+    const matrix = macProfileMatrix(MAC_PROFILE_DEFAULTS);
+    const args = (id: string): ReadonlyArray<string> | undefined =>
+      matrix.find((run) => run.id === id)?.args;
+    expect(args("high-dpr1")).toEqual([]);
+    expect(args("low-dpr2")).toEqual(["--device-pixel-ratio", "2"]);
+    expect(args("limb-rays-high-dpr1-a2")).toEqual([]);
+    expect(args("limb-rays-high-dpr1-b2")).toEqual(["--limb-rays", "per-texel"]);
+    expect(args("occlusion-high-dpr1-b1")).toEqual(["--geometry", "occlusion=hzb"]);
+    expect(args("shading-high-dpr2-a1")).toEqual([
+      "--device-pixel-ratio",
+      "2",
+      "--geometry",
+      "shading=forward",
+    ]);
+    expect(args("shading-high-dpr2-b2")).toEqual([
+      "--device-pixel-ratio",
+      "2",
+      "--geometry",
+      "shading=visibility",
+    ]);
+    // The visibility buffer with the occlusion, which neither pair draws (R14.T2.d).
+    expect(args("shading-occlusion-high-dpr1-a1")).toEqual([
+      "--geometry",
+      "shading=forward,occlusion=off",
+    ]);
+    expect(args("shading-occlusion-high-dpr2-b2")).toEqual([
+      "--device-pixel-ratio",
+      "2",
+      "--geometry",
+      "shading=visibility,occlusion=hzb",
+    ]);
+    // The pacing pair (R07.T19): both sides on a 120 Hz offscreen clock, counted against by rate.
+    expect([args("pacing-120-high-dpr1-a1"), args("pacing-120-high-dpr1-b2")]).toEqual([
+      ["--frame-rate", "120", "--frame-pacing", "display"],
+      ["--frame-rate", "120", "--frame-pacing", "rate"],
+    ]);
+  });
+
+  it("pairs a drawn surface's lobes and a decked air's ground, each the setting's way (A) against the way back (B) at DPR 1 (R08)", () => {
+    const matrix = macProfileMatrix({
+      ...DRY_RUN,
+      levers: ["decked-air-surface", "surface-lobes"],
+    });
+    expect(matrix.map((run) => [run.id, run.args])).toEqual([
+      ["surface-lobes-low-dpr1-a1", []],
+      ["surface-lobes-low-dpr1-b1", ["--surface-lobes", "extinguished"]],
+      ["decked-air-surface-low-dpr1-a1", []],
+      ["decked-air-surface-low-dpr1-b1", ["--decked-air-surface", "uniform"]],
+    ]);
+  });
+
+  it("counts no side of the lobes' or the decked ground's pair, which split no pass (R08)", () => {
+    expect(
+      macProfileMatrix({ ...MAC_PROFILE_DEFAULTS, levers: ["surface-lobes", "decked-air-surface"] })
+        .filter(isCounted)
+        .map((run) => run.id),
+    ).toEqual(["counted-high-dpr1", "counted-low-dpr1"]);
+  });
+
+  it("makes the dry run's two runs, the levers in their own order whatever the order given", () => {
+    expect(macProfileMatrix(DRY_RUN).map((run) => run.id)).toEqual([
+      "limb-rays-low-dpr1-a1",
+      "limb-rays-low-dpr1-b1",
+    ]);
+    const both = macProfileMatrix({ ...DRY_RUN, levers: ["strides", "limb-rays"] });
+    expect(both.map((run) => (run.place.kind === "pair" ? run.place.lever : null))).toEqual([
+      "limb-rays",
+      "limb-rays",
+      "strides",
+      "strides",
+    ]);
+  });
+
+  it("counts each setting's own way and each side of a pass-splitting pair last, at DPR 1, apart from the pairs (R14.T2.e)", () => {
+    const matrix = macProfileMatrix(MAC_PROFILE_DEFAULTS);
+    const counted = matrix.filter(isCounted);
+    expect(matrix.slice(-10)).toEqual(counted);
+    expect(counted.map((run) => [run.id, run.setting, run.ratio, run.args, run.place])).toEqual([
+      ["counted-high-dpr1", "high", 1, ["--count-gpu-calls"], { kind: "counted" }],
+      ["counted-low-dpr1", "low", 1, ["--count-gpu-calls"], { kind: "counted" }],
+      [
+        "counted-occlusion-high-dpr1-a",
+        "high",
+        1,
+        ["--count-gpu-calls"],
+        { kind: "counted side", lever: "occlusion", side: "a" },
+      ],
+      [
+        "counted-occlusion-high-dpr1-b",
+        "high",
+        1,
+        ["--count-gpu-calls", "--geometry", "occlusion=hzb"],
+        { kind: "counted side", lever: "occlusion", side: "b" },
+      ],
+      [
+        "counted-figure-shading-high-dpr1-a",
+        "high",
+        1,
+        ["--count-gpu-calls"],
+        { kind: "counted side", lever: "figure-shading", side: "a" },
+      ],
+      [
+        "counted-figure-shading-high-dpr1-b",
+        "high",
+        1,
+        ["--count-gpu-calls", "--geometry", "figureShading=screen"],
+        { kind: "counted side", lever: "figure-shading", side: "b" },
+      ],
+      [
+        "counted-shading-high-dpr1-a",
+        "high",
+        1,
+        ["--count-gpu-calls", "--geometry", "shading=forward"],
+        { kind: "counted side", lever: "shading", side: "a" },
+      ],
+      [
+        "counted-shading-high-dpr1-b",
+        "high",
+        1,
+        ["--count-gpu-calls", "--geometry", "shading=visibility"],
+        { kind: "counted side", lever: "shading", side: "b" },
+      ],
+      [
+        "counted-shading-occlusion-high-dpr1-a",
+        "high",
+        1,
+        ["--count-gpu-calls", "--geometry", "shading=forward,occlusion=off"],
+        { kind: "counted side", lever: "shading-occlusion", side: "a" },
+      ],
+      [
+        "counted-shading-occlusion-high-dpr1-b",
+        "high",
+        1,
+        ["--count-gpu-calls", "--geometry", "shading=visibility,occlusion=hzb"],
+        { kind: "counted side", lever: "shading-occlusion", side: "b" },
+      ],
+    ]);
+    expect(macProfileMatrix({ ...MAC_PROFILE_DEFAULTS, counted: false }).some(isCounted)).toBe(
+      false,
+    );
+    expect(
+      macProfileMatrix({ ...MAC_PROFILE_DEFAULTS, settings: [], levers: ["limb-rays"] }).filter(
+        isCounted,
+      ),
+    ).toEqual([]);
+  });
+
+  it("refuses a lever it does not know", () => {
+    expect(() => macProfileMatrix({ ...DRY_RUN, levers: ["bloom"] })).toThrow(/bloom/u);
+  });
+});
+
+/** A line of the server's log, as its sky handler writes `message`. */
+function line(message: string): string {
+  return `2026-11-05T07:21:19.065222Z  INFO hyperion_server::requests::sky: ${message} wall_s=1.5`;
+}
+
+describe("the server's skies, from its log", () => {
+  it("reads each sky line's event and leaves every other line", () => {
+    expect(skyEventOf(line("a sky started universe=8160ee7f2970b1b5"))).toBe("started");
+    expect(skyEventOf(line("a sky is answered with its kept final reply"))).toBe("kept");
+    expect(skyEventOf(line("a sky is answered with its final reply kept on disk"))).toBe("kept");
+    expect(skyEventOf(line("a sky's final reply is made listed=7089"))).toBe("final");
+    expect(skyEventOf(line("a sky ended without its final reply code=Busy"))).toBe("unfinished");
+    expect(skyEventOf(line("a sky was given up before its final reply"))).toBe("unfinished");
+    expect(skyEventOf(line("a sky's first reply is made listed=7089"))).toBeNull();
+    expect(skyEventOf("2026-11-05T07:21:06Z  INFO hyperion_server: listening")).toBeNull();
+  });
+
+  it("reads a line a terminal's colours run through", () => {
+    expect(
+      skyEventOf(
+        "\u001b[2m2026-11-05T07:21:19Z\u001b[0m \u001b[32m INFO\u001b[0m " +
+          "\u001b[2mhyperion_server::requests::sky\u001b[0m\u001b[2m:\u001b[0m a sky started",
+      ),
+    ).toBe("started");
+  });
+
+  it("counts the skies in flight and those of a span", () => {
+    const started = tallied(tallied(NO_SKIES, "started"), "started");
+    const later = tallied(started, "final");
+    expect(skiesInFlight(started)).toBe(2);
+    expect(skiesInFlight(later)).toBe(1);
+    expect(skiesBetween(started, tallied(later, "kept"))).toEqual({
+      started: 0,
+      kept: 1,
+      final: 1,
+      unfinished: 0,
+    });
+  });
+});
+
+describe("the samples' arithmetic", () => {
+  it("reads ps's CPU time in macOS's and procps' forms", () => {
+    expect(cpuTimeSeconds("0:01.57")).toBeCloseTo(1.57, 9);
+    expect(cpuTimeSeconds("123:03.27")).toBeCloseTo(7383.27, 9);
+    expect(cpuTimeSeconds("01:02:03")).toBe(3723);
+    expect(cpuTimeSeconds("1-02:03:04")).toBe(93_784);
+    expect(cpuTimeSeconds(" 0:00.00\n")).toBe(0);
+    expect(cpuTimeSeconds("-")).toBeNull();
+  });
+
+  it("gives the server's mean cores over a run from its CPU time", () => {
+    expect(serverCoresOver(sampleAt(0, 100), sampleAt(40, 280))).toBeCloseTo(4.5, 12);
+    expect(serverCoresOver(sampleAt(0, null), sampleAt(40, 280))).toBeNull();
+    expect(serverCoresOver(sampleAt(40, 100), sampleAt(40, 280))).toBeNull();
+  });
+
+  it("says nominal for an Apple silicon Mac's notes and gives a limit's lines otherwise", () => {
+    expect(
+      thermalText(
+        "Note: No thermal warning level has been recorded\n" +
+          "Note: No performance warning level has been recorded\n" +
+          "Note: No CPU power status has been recorded\n",
+      ),
+    ).toBe("nominal");
+    expect(
+      thermalText(
+        "Note: No thermal warning level has been recorded\n" +
+          "CPU_Scheduler_Limit \t= 100\nCPU_Speed_Limit \t= 76\n",
+      ),
+    ).toBe("CPU_Scheduler_Limit = 100; CPU_Speed_Limit = 76");
+    expect(thermalText(null)).toBe("—");
+  });
+
+  it("takes the middle of an odd count and the mean of the two middles of an even one", () => {
+    expect(median([5, 1, 3])).toBe(3);
+    expect(median([44, 40])).toBe(42);
+    expect(median([])).toBeNull();
+  });
+});
+
+/**
+ * `each` with three compiles, the thick march's `longestMs` long, and its first frame with air
+ * `intervalMs` after the draw before it.
+ */
+function compiled(each: KeptRun, longestMs: number, intervalMs: number): KeptRun {
+  return {
+    ...each,
+    timing: {
+      ...each.timing,
+      compiles: {
+        count: 3,
+        totalMs: 200 + longestMs,
+        each: [
+          { name: "terrain lit", ms: 100 },
+          { name: "atmosphere ray march, thick", ms: longestMs },
+          { name: "composite", ms: 100 },
+        ],
+      },
+      firstFrames: [
+        { kind: "drawn", intervalMs: null, sinceEngineMs: 2_000 },
+        { kind: "air", intervalMs, sinceEngineMs: 9_000 },
+      ],
+    },
+  };
+}
+
+describe("a lever's pair", () => {
+  const matrix = macProfileMatrix(MAC_PROFILE_DEFAULTS);
+  const kept = [
+    keptAs(matrix, "march-sources-high-dpr1-a1", [
+      windowOf("orbit", 40, 38, { march: 12, bodies: 10 }),
+      windowOf("close", 90, 85, { bodies: 50 }),
+    ]),
+    keptAs(matrix, "march-sources-high-dpr1-b1", [
+      windowOf("orbit", 50, 47, { march: 20, bodies: 10 }),
+    ]),
+    keptAs(matrix, "march-sources-high-dpr1-a2", [
+      windowOf("orbit", 44, 40, { march: 14, bodies: 11 }),
+    ]),
+    keptAs(matrix, "march-sources-high-dpr1-b2", [
+      windowOf("orbit", 54, 51, { march: 22, bodies: 11 }),
+    ]),
+    // Another lever's run, which the pair leaves out.
+    failedAfter(
+      keptAs(matrix, "occlusion-high-dpr1-b1", [windowOf("orbit", 10, 9, { bodies: 5 })]),
+      "views check: the CAMERA line reads no FREE rate",
+    ),
+  ];
+
+  it("gives each side the median of its runs and B less A by window", () => {
+    const [orbit, close] = pairFigures(kept, "march-sources", 1);
+    expect(orbit?.window).toBe("orbit");
+    expect(orbit?.a.runs).toBe(2);
+    expect(orbit?.a.intervalMedianMs).toBe(42);
+    expect(orbit?.b.intervalMedianMs).toBe(52);
+    expect(orbit?.deltaMs).toBe(10);
+    expect(orbit?.deltaShare).toBeCloseTo(10 / 42, 12);
+    expect(orbit?.a.intervalP95Ms).toBeCloseTo(1.2 * 42, 12);
+    expect(orbit?.gpuDeltaMs).toBe(49 - 39);
+    expect(orbit?.a.passMs.get("march")).toBe(13);
+    expect(orbit?.b.passMs.get("march")).toBe(21);
+    // A window only one side measured has no delta.
+    expect(close?.b.runs).toBe(0);
+    expect(close?.deltaMs).toBeNull();
+  });
+
+  it("gives each run's compiles and first frame with air, and each side's medians, apart from its steady frames (R08)", () => {
+    const [a1, b1, a2, b2] = kept;
+    if (a1 === undefined || b1 === undefined || a2 === undefined || b2 === undefined) {
+      throw new Error("the pair keeps four runs");
+    }
+    const lines = macProfileSummaryLines({
+      machine: "pod, 48 vCPU",
+      tree: "e9966e0",
+      body: "42002cae00000004.0300",
+      options: { ...MAC_PROFILE_DEFAULTS, levers: ["march-sources"] },
+      kept: [
+        compiled(a1, 4_000, 3_000),
+        compiled(b1, 6_000, 5_000),
+        compiled(a2, 5_000, 4_000),
+        { ...b2, timing: { ...b2.timing } },
+      ],
+      sweep: { table: null, runs: [], flown: true },
+    });
+    expect(lines).toContain(
+      "| march-sources-high-dpr1-a1 | 3 | 4200 | atmosphere ray march, thick 4000 | 2.0 | 9.0 | 3000.0 | orbit 40.0, close 90.0 |",
+    );
+    // A file before version 10 recorded none.
+    expect(lines).toContain(
+      "| march-sources-high-dpr1-b2 | not recorded | — | — | — | — | — | orbit 54.0 |",
+    );
+    expect(lines).toContain("| A | 2 | 3 | 4700 | 4500 | 9.0 | 3500.0 |");
+    expect(lines).toContain("| B | 2 | 3 | 6200 | 6000 | 9.0 | 5000.0 |");
+  });
+
+  it("has no windows where none of its runs is kept", () => {
+    expect(pairFigures(kept, "march-sources", 2)).toEqual([]);
+    expect(pairFigures(kept, "strides", 1)).toEqual([]);
+  });
+
+  it("writes the runs, their windows, the pairs and the sweep into the summary", () => {
+    const lines = macProfileSummaryLines({
+      machine: "Apple M5, 16 GiB",
+      tree: "e9966e0",
+      body: "41ffecb200000002.0400",
+      options: MAC_PROFILE_DEFAULTS,
+      kept,
+      sweep: { table: null, runs: [], flown: true },
+    });
+    const text = lines.join("\n");
+    expect(lines[0]).toBe("# The Mac batch: Apple M5, 16 GiB");
+    expect(text).toContain("Tree e9966e0, body 41ffecb200000002.0400; 5 of 94 runs kept");
+    expect(text).toContain("| high-dpr1 | high | 1 | — | not kept |");
+    // A run kept with its windows though its views check failed after them.
+    expect(text).toContain(
+      "| occlusion-high-dpr1-b1 | high | 1 | occlusion B1 | 1: views check: the CAMERA line reads no FREE rate |",
+    );
+    // 20 s of the server's CPU over 50 s of the run: 40% of a core; one sky, from the kept reply.
+    expect(text).toMatch(
+      /\| march-sources-high-dpr1-a1 \| high \| 1 \| march-sources A1 \| 0 \| 50 s \| [^\n]* \| 40% \| 0, 1 \| — → — \|/u,
+    );
+    expect(text).toContain(
+      "| march-sources-high-dpr1-b2 | orbit | 54.0 | 64.8 | 18.5 | not recorded | 51.0 | march 22.0 (43%), bodies 11.0 (22%) |",
+    );
+    expect(text).toContain("| orbit | 2, 2 | 42.0 | 52.0 | +10.0 | +23.8% | 23.8 | 19.2 |");
+    expect(text).toContain("| orbit | march | 13.0 | 21.0 | +8.0 |");
+    expect(text).toContain("### shading, high at DPR 2: R14.T2.e");
+    expect(text).toContain("### shading-occlusion, high at DPR 2: R14.T2.d");
+    expect(text).toContain("No counted run of the pair is kept.");
+    // A timing file before version 7 holds no reads.
+    expect(text).toContain("| orbit | not recorded | not recorded |");
+    expect(text).toContain("## The height-worker sweep\n\nNot written yet.");
+  });
+
+  it("says the sweep was not run under --no-sweep, not that it is not written yet", () => {
+    const text = macProfileSummaryLines({
+      machine: "pod",
+      tree: "e9966e0",
+      body: "41ffecb200000002.0400",
+      options: MAC_PROFILE_DEFAULTS,
+      kept,
+      sweep: { table: null, runs: [], flown: false },
+    }).join("\n");
+    expect(text).toContain("## The height-worker sweep\n\nNot run (--no-sweep).");
+    expect(text).not.toContain("Not written yet.");
+  });
+
+  it("writes each window's callbacks, draws and measured vsync where its file holds them (R07.T19)", () => {
+    const window = (
+      callbacks: number,
+      draws: number,
+      vsync: NonNullable<ProfiledWindow["measuredVsyncMs"]>,
+    ): ProfiledWindow => ({
+      ...windowOf("orbit", 1000 / 60, 5, { bodies: 4 }),
+      callbacks,
+      draws,
+      measuredVsyncMs: vsync,
+    });
+    const text = macProfileSummaryLines({
+      machine: "pod",
+      tree: "e9966e0",
+      body: "41ffecb200000002.0400",
+      options: MAC_PROFILE_DEFAULTS,
+      kept: [
+        keptAs(matrix, "pacing-120-high-dpr1-a1", [window(240, 240, measured(1000 / 120))]),
+        keptAs(matrix, "pacing-120-high-dpr1-b1", [
+          window(20, 10, missing("fewer than 30 animation frames measured")),
+        ]),
+      ],
+      sweep: { table: null, runs: [], flown: true },
+    }).join("\n");
+    expect([
+      text.includes(
+        "| pacing-120-high-dpr1-a1 | orbit | 16.7 | 20.0 | 60.0 | 240 for 240 draws, vsync 8.33 ms |",
+      ),
+      text.includes(
+        "| pacing-120-high-dpr1-b1 | orbit | 16.7 | 20.0 | 60.0 | 20 for 10 draws, vsync — |",
+      ),
+    ]).toEqual([true, true]);
+  });
+});
+
+describe("the counted runs (R14.T2.e)", () => {
+  const matrix = macProfileMatrix(MAC_PROFILE_DEFAULTS);
+  /** A window counted, its passes' bytes a draw, its air thick. */
+  const counted = (
+    name: ProfiledWindow["name"],
+    passes: ReadonlyArray<readonly [string, number, number]>,
+  ): ProfiledWindow => ({
+    ...windowOf(name, 400, 380, {}),
+    atmosphereReads: [
+      {
+        air: 1,
+        read: "thick",
+        thermal: false,
+        frames: 30,
+        kernels: ["atmosphere sky view, thick"],
+      },
+    ],
+    attachments: {
+      bytesLoadedPerDraw: passes.reduce((sum, [, loaded]) => sum + loaded, 0),
+      bytesStoredPerDraw: passes.reduce((sum, [, , stored]) => sum + stored, 0),
+      passes: passes.map(([label, bytesLoadedPerDraw, bytesStoredPerDraw]) => ({
+        label,
+        passesPerDraw: 1,
+        bytesLoadedPerDraw,
+        bytesStoredPerDraw,
+        attachments: [
+          {
+            label,
+            attachment: "colour 0",
+            view: { format: "rgba16float", widthPx: 1280, heightPx: 720, sampleCount: 1 },
+            loadOp: bytesLoadedPerDraw > 0 ? "load" : "clear",
+            storeOp: "store",
+            passes: 30,
+            bytesLoaded: 30 * bytesLoadedPerDraw,
+            bytesStored: 30 * bytesStoredPerDraw,
+          },
+        ],
+      })),
+    },
+  });
+  const MIB = 1_048_576;
+  const kept = [
+    keptAs(matrix, "counted-shading-high-dpr1-a", [counted("orbit", [["bodies", 0, 7 * MIB]])]),
+    keptAs(matrix, "counted-shading-high-dpr1-b", [
+      counted("orbit", [
+        ["terrain id raster", 0, 3.5 * MIB],
+        ["terrain resolve", 3.5 * MIB, 7 * MIB],
+      ]),
+    ]),
+    keptAs(matrix, "shading-high-dpr1-a1", [windowOf("orbit", 40, 38, { bodies: 10 })]),
+  ];
+  const text = macProfileSummaryLines({
+    machine: "Apple M5, 16 GiB",
+    tree: "e9966e0",
+    body: "41ffecb200000002.0400",
+    options: MAC_PROFILE_DEFAULTS,
+    kept,
+    sweep: { table: null, runs: [], flown: true },
+  }).join("\n");
+
+  it("reads a pair side's runs drawn alike as one read, whatever their frames", () => {
+    const thick = (frames: number): ProfiledWindow => ({
+      ...windowOf("orbit", 40, 38, {}),
+      atmosphereReads: [{ air: 1, read: "thick", thermal: false, frames, kernels: [] }],
+    });
+    const [orbit] = pairFigures(
+      [
+        keptAs(matrix, "shading-high-dpr1-a1", [thick(118)]),
+        keptAs(matrix, "shading-high-dpr1-a2", [thick(120)]),
+      ],
+      "shading",
+      1,
+    );
+    expect([orbit?.a.reads, orbit?.b.reads]).toEqual([["air 1: thick"], []]);
+  });
+
+  it("gives the shading pair's counted sides' bytes by pass beside its deltas", () => {
+    const pair = text.slice(text.indexOf("### shading, high at DPR 1"));
+    expect(pair).toContain("| orbit | terrain resolve | — | — | 3.50 | 7.00 |");
+    expect(pair).toContain("| orbit | bodies | 0.00 | 7.00 | — | — |");
+    expect(pair.indexOf("terrain resolve")).toBeLessThan(
+      pair.indexOf("### shading, high at DPR 2"),
+    );
+  });
+
+  it("lists each counted run's windows by their bytes and reads, and says which are not kept", () => {
+    expect(text).toContain("| counted-shading-high-dpr1-b | high | 1 | counted, shading B | 0 |");
+    expect(text).toContain(
+      "- **orbit:** 3.50 MiB loaded, 10.50 MiB stored a draw; atmosphere read air 1: thick, 30 frames",
+    );
+    expect(text).toContain(
+      "| terrain resolve | 1.0 | 3.50 | 7.00 | colour 0 rgba16float 1280 × 720 load/store |",
+    );
+    expect(text).toContain("### counted-low-dpr1 (counted)\n\nNot kept.");
+  });
+});
+
+describe("the batch's files", () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("reads a kept run with its record and timing file, and none half written", () => {
+    const runs = mkdtempSync(join(tmpdir(), "mac-profile-"));
+    dirs.push(runs);
+    const matrix = macProfileMatrix(DRY_RUN);
+    const [a, b] = matrix;
+    if (a === undefined || b === undefined) {
+      throw new Error("the dry run's matrix has two runs");
+    }
+    const { record } = keptAs(matrix, a.id, []);
+    mkdirSync(join(runs, a.id));
+    writeFileSync(join(runs, a.id, "run.json"), JSON.stringify(record));
+    writeFileSync(
+      join(runs, a.id, record.timing),
+      JSON.stringify({ schema: INSPECTION_TIMING_SCHEMA, run: { timer: "full" }, windows: [] }),
+    );
+    // B's directory, as a stop part way through moving its files leaves it: no record yet.
+    mkdirSync(join(runs, b.id));
+    writeFileSync(join(runs, b.id, `${b.id}.json`), "{");
+    const kept = keptRunsIn(runs, matrix);
+    expect(kept.map((each) => each.run.id)).toEqual([a.id]);
+    expect(kept[0]?.record.after.serverCpuS).toBe(30);
+  });
+
+  it("reads the batch's commit and body, a batch that recorded no body the default's", () => {
+    const out = mkdtempSync(join(tmpdir(), "mac-profile-"));
+    dirs.push(out);
+    expect(batchIn(out)).toBeNull();
+    writeFileSync(join(out, "batch.json"), JSON.stringify({ tree: "24aef3e" }));
+    expect(batchIn(out)).toEqual({ tree: "24aef3e", body: null });
+    writeFileSync(
+      join(out, "batch.json"),
+      JSON.stringify({ tree: "24aef3e", body: "41ffecb200000002.0300" }),
+    );
+    expect(batchIn(out)).toEqual({ tree: "24aef3e", body: "41ffecb200000002.0300" });
+  });
+
+  it("makes a relative --out absolute against the shell's directory, once", () => {
+    const app = join(tmpdir(), "repo", "apps", "hyperion");
+    expect(batchOut(join("..", "..", "target", "mac-profile"), app)).toBe(
+      join(tmpdir(), "repo", "target", "mac-profile"),
+    );
+    const elsewhere = join(tmpdir(), "elsewhere", "batch");
+    expect(batchOut(elsewhere, app)).toBe(elsewhere);
+  });
+
+  it("finds the binary cargo built among its messages", () => {
+    const messages = [
+      "",
+      JSON.stringify({ reason: "build-script-executed", package_id: "x" }),
+      JSON.stringify({
+        reason: "compiler-artifact",
+        target: { name: "hyperion_server", kind: ["lib"] },
+        executable: null,
+      }),
+      JSON.stringify({
+        reason: "compiler-artifact",
+        target: { name: "hyperion-server", kind: ["bin"] },
+        executable: "/repo/target/release/hyperion-server",
+      }),
+      JSON.stringify({ reason: "build-finished", success: true }),
+    ].join("\n");
+    expect(cargoExecutable(messages, "hyperion-server")).toBe(
+      "/repo/target/release/hyperion-server",
+    );
+    expect(cargoExecutable("", "hyperion-server")).toBeNull();
+  });
+});

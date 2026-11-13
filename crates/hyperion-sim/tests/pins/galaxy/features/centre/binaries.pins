@@ -1,0 +1,2 @@
+# Pinned figures (hyperion_testkit::pins): re-pin them by test name with `just repin <test>`.
+the_centre_s_binary_entries_are_pinned.digest = 5914201317335924528

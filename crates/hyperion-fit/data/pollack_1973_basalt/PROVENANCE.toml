@@ -1,0 +1,20 @@
+# A terrestrial basalt's optical constants of Pollack, Toon and Khare (1973), as the Aerosol
+# Refractive Index Archive distributes them: the regolith's infrared index beyond 780 nm (plan 14,
+# P14.T49.i), the file rendering plan R08's basalt.json was reduced from. The paper gives n at a few
+# wavelengths and k at many, so n is read from the rows that give n and k from the rows that give k.
+# Reduced by `reduce.py` from the archive's file (git-ignored, `data/cache/pollack_1973_basalt/basalt_R_Pollack_1973.ri`) to its rows
+# over 0.5-5 µm, and committed as measured values with the citation. Reproduced from the raw by hand
+# on 2026-10-16: `python3 -I crates/hyperion-fit/data/pollack_1973_basalt/reduce.py <raw>
+# crates/hyperion-fit/data/pollack_1973_basalt/nk.csv`, from outside the raw's directory. Read by
+# `run substance_albedos`.
+dataset = "pollack_1973_basalt"
+class = "committed"
+citation = "J. B. Pollack, O. B. Toon and B. N. Khare (1973), Icarus 19, 372-389, DOI 10.1016/0019-1035(73)90115-2: optical properties of some terrestrial rocks and glasses; the basalt's n and k over 0.5-5 µm, no temperature stated; via the Aerosol Refractive Index Archive (ARIA, University of Oxford)"
+url = "https://eodg.atm.ox.ac.uk/ARIA/data_files/Rocks_and_Conglomerates/Basalt/Basalt_(Pollack_et_al_1973)/original/basalt_R_Pollack_1973.ri"
+retrieved = "2026-10-16"
+release = "basalt_R_Pollack_1973.ri as served on the retrieval date (sha256 ad8730a5ce91fb05dc12374cba25ffd16af070ec003ae49cf0cb3ab134f91d2d, the file R08's basalt.json was reduced from), reduced by reduce.py"
+licence = "none stated (ARIA's front page, https://eodg.atm.ox.ac.uk/ARIA/, read 2026-10-16: \"If you use these data, please acknowledge the source publications\"); only the measured constants over the range read, facts, are committed, with the citation (decision-r08-licences.md)"
+
+[[files]]
+name = "nk.csv"
+sha256 = "90a1cadd2f7dde642cedf3fdb3e02f0c3e0a765f92de479c3a2cac7ed0595e0d"

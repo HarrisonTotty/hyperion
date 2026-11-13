@@ -21,13 +21,21 @@
  * It is typed with the worker's library, not the DOM's (`tsconfig.worker.json`).
  */
 
-import init, { bakePatch, testPlanetVersion } from "../../../generated/surface/hyperion_surface";
+import init, {
+  bakePatch,
+  SurfaceFields,
+  testPlanetVersion,
+} from "../../../generated/surface/hyperion_surface";
 import wasmUrl from "../../../generated/surface/hyperion_surface_bg.wasm?url";
 import { describeLoadFailure } from "../../../wasm/handleRequest";
-import { answerRequest, type HeightModule, staleModuleMessage } from "./heightBake";
+import { answerRequest, type HeightModule, staleModuleMessage, WorkerFields } from "./heightBake";
 import type { HeightWorkerRequest } from "./messages";
 
-const module: HeightModule = { bakePatch, testPlanetVersion };
+const module: HeightModule = {
+  bakePatch,
+  testPlanetVersion,
+  createFields: () => new SurfaceFields(),
+};
 
 /** Loads the module, once; `null` once it can serve, or the error saying why it cannot. */
 async function load(): Promise<Error | null> {
@@ -46,14 +54,11 @@ async function load(): Promise<Error | null> {
 const loaded = load();
 
 /**
- * The coarse field the pool posted, held for the worker's life (Design note 11's 15 MB a worker
- * at rest); the test planet does not read it, R09 copies it into the module.
+ * The coarse fields the pool posted, each body's field until it is released (Design note 11's 15 MB
+ * a worker at rest): a payload's in the module (R10.T6.b), a stand-in's undecoded. Made once the
+ * module has loaded, since its fields live in the module's memory.
  */
-const held: { field: ArrayBuffer | null } = { field: null };
-
-function holdField(bytes: ArrayBuffer): void {
-  held.field = bytes;
-}
+let fields: WorkerFields | null = null;
 
 /** Answers one request once the module's load has settled. */
 async function answer(request: HeightWorkerRequest): Promise<void> {
@@ -62,7 +67,8 @@ async function answer(request: HeightWorkerRequest): Promise<void> {
     reportError(failure);
     return;
   }
-  const { reply, transfer } = answerRequest(module, request, holdField);
+  fields ??= new WorkerFields(module);
+  const { reply, transfer } = answerRequest(module, request, fields);
   postMessage(reply, transfer);
 }
 

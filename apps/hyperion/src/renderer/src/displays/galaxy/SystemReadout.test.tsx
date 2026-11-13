@@ -1,3 +1,4 @@
+import type { SystemRecord } from "@hyperion/protocol";
 import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
@@ -7,8 +8,16 @@ import { toChartResult } from "../../lib/galaxy/wire";
 import { localFrameAt } from "../../geometry/frame";
 import { vec3 } from "../../geometry/vec3";
 import { formatSigned } from "../../lib/format";
-import { aSystemsInRange, ROGUE_PLANET_FE_H_DEX } from "../../test/galaxyFixtures";
+import {
+  anUnknownLayer,
+  anUnknownPopulation,
+  aSystemsInRange,
+  ROGUE_PLANET_FE_H_DEX,
+  withRowFields,
+} from "../../test/galaxyFixtures";
 import { SystemReadout } from "./SystemReadout";
+import type { LineExtinction } from "./useExtinction";
+import { distanceUnitFor } from "./chartModel";
 
 const CENTRE = [26_000, 0, 0] as const;
 const FRAME = localFrameAt(vec3(CENTRE[0], CENTRE[1], CENTRE[2]));
@@ -29,8 +38,9 @@ function aSystem(
 
 function renderReadout(
   system: ChartSystem | null,
-  { timeYr = 0, driveRangeLy = 50 } = {},
+  { timeYr = 0, driveRangeLy = 50, stale = false, starsStale = false } = {},
   stars: SystemModel | null = null,
+  extinction: LineExtinction | null = null,
 ) {
   render(
     <SystemReadout
@@ -38,9 +48,11 @@ function renderReadout(
       frame={FRAME}
       driveRangeLy={driveRangeLy}
       timeYr={timeYr}
-      distanceDecimals={2}
+      distanceUnit={distanceUnitFor(50)}
       stars={stars}
-      starsStale={false}
+      stale={stale}
+      starsStale={starsStale}
+      extinction={extinction}
     />,
   );
   return screen.getByRole("status", { name: "Selected system" });
@@ -131,7 +143,7 @@ describe("SystemReadout", () => {
   it("reads an age of 4,600 Myr in gigayears, at the chart time", () => {
     const readout = renderReadout(aSystem([1, 0, 0]), { timeYr: 12.5 });
 
-    expect(valueOf(readout, "AGE")).toBe("4.60 GyrAT UT +12.50 yr");
+    expect(valueOf(readout, "AGE")).toBe("4.60 Gyr· AT UT +12.50 yr");
   });
 
   it("names the population in upper case", () => {
@@ -255,5 +267,210 @@ describe("SystemReadout's unformed planet (ruling 134.2)", () => {
     expect(valueOf(readout, "KIND")).toBe("PLANET");
     expect(valueOf(readout, "STATE")).toBe("NOT YET FORMED");
     expect(within(readout).queryByText("BULK")).toBeNull();
+  });
+
+  describe("the extinction from the chart's centre (plan 07, P07.T11.c)", () => {
+    it("reads A(V), E(B−V) and A(K) in mag to two decimals and N(H) in /cm² in E notation", () => {
+      const readout = renderReadout(aSystem([1, 0, 0]), {}, null, {
+        aVMag: 0.8449,
+        eBVMag: 0.2714,
+        aKMag: 0.0851,
+        hydrogenColumnPerCm2: 1.574e21,
+      });
+
+      expect(within(readout).getByText("FROM CHART CENTRE")).toBeInTheDocument();
+      expect(valueOf(readout, "A(V)")).toBe("0.84 mag");
+      expect(valueOf(readout, "E(B−V)")).toBe("0.27 mag");
+      expect(valueOf(readout, "A(K)")).toBe("0.09 mag");
+      expect(valueOf(readout, "N(H)")).toBe("1.57E21 /cm²");
+    });
+
+    it("shows the missing state, never zero, until the figures arrive", () => {
+      const readout = renderReadout(aSystem([1, 0, 0]));
+
+      for (const label of ["A(V)", "E(B−V)", "A(K)", "N(H)"]) {
+        expect(valueOf(readout, label)).toBe("—");
+      }
+    });
+  });
+});
+
+/** A free-floating planet 1 ly from the centre, formed, as the adapter builds it. */
+function aFreeFloatingPlanet(): ChartSystem {
+  const [planet] = toChartResult(
+    aSystemsInRange({
+      centreLy: CENTRE,
+      radiusLy: 10,
+      minLayer: "rogue_planet",
+      systems: [{ relLy: [1, 0, 0], layer: "rogue_planet" }],
+    }),
+  ).systems;
+  if (planet === undefined) {
+    throw new Error("the fixture built no planet");
+  }
+  return planet;
+}
+
+describe("SystemReadout's stale marks (plan 05, P05.T14)", () => {
+  const EXTINCTION: LineExtinction = {
+    aVMag: 0.8449,
+    eBVMag: 0.2714,
+    aKMag: 0.0851,
+    hydrogenColumnPerCm2: 1.574e21,
+  };
+
+  /** The chart's readings of a system of stars, the offsets' and the velocity's alike. */
+  const CHART_READINGS: ReadonlyArray<readonly [string, number]> = [
+    ["DESIG", 0],
+    ["ID", 0],
+    ["DIST", 0],
+    ["DRIVE RANGE", 0],
+    ["NORTH", 0],
+    ["COREWARD", 0],
+    ["SPINWARD", 0],
+    ["INIT MASS", 0],
+    ["POPULATION", 0],
+    ["VEL", 0],
+    ["COREWARD", 1],
+    ["SPINWARD", 1],
+    ["NORTH", 1],
+    ["RADIUS", 0],
+    ["ANGLE", 0],
+    ["HEIGHT", 0],
+    ["A(V)", 0],
+    ["E(B−V)", 0],
+    ["A(K)", 0],
+    ["N(H)", 0],
+  ];
+
+  it("marks each of the chart's readings with its S when the chart's answer is stale", () => {
+    const readout = renderReadout(aSystem([1, 0, 0]), { stale: true }, null, EXTINCTION);
+
+    for (const [label, nth] of CHART_READINGS) {
+      expect([label, valueOf(readout, label, nth)]).toEqual([
+        label,
+        expect.stringMatching(/\S S\s*stale$/u),
+      ]);
+    }
+    // A word read from the answer's distance is a value, and marked as one.
+    expect(valueOf(readout, "DRIVE RANGE")).toBe("IN RANGE Sstale");
+  });
+
+  it("leaves the chart's readings unmarked while only the summary lags the chart", () => {
+    const readout = renderReadout(aSystem([1, 0, 0]), { starsStale: true }, null, EXTINCTION);
+
+    for (const [label, nth] of CHART_READINGS) {
+      expect([label, valueOf(readout, label, nth)]).toEqual([
+        label,
+        expect.not.stringMatching(/stale/u),
+      ]);
+    }
+  });
+
+  it("gives AGE two marks when stale, the age's after its unit and the time's after its own", () => {
+    const readout = renderReadout(aSystem([1, 0, 0]), { stale: true });
+
+    expect(valueOf(readout, "AGE")).toMatch(/^[\d.,]+ [MG]yr Sstale· AT UT \+0\.00 yr Sstale$/u);
+    // The time's mark stays inside the part kept whole, so that it never wraps away from it.
+    expect(
+      within(readout)
+        .getByText("AGE", { exact: true })
+        .nextElementSibling?.querySelector(".system-readout__whole"),
+    ).toHaveTextContent(/^UT \+0\.00 yr S\s*stale$/u);
+  });
+
+  it.each([
+    ["a system of stars", () => aSystem([1, 0, 0])],
+    ["a free-floating planet", aFreeFloatingPlanet],
+    ["a planet not yet formed", () => ({ ...aFreeFloatingPlanet(), ageMyr: -0.002 })],
+  ] as const)(
+    "keeps an empty slot after every value of %s while the answer is live",
+    (_, system) => {
+      const readout = renderReadout(system(), {}, null, EXTINCTION);
+
+      // A reading that forgot its flag, and with it its slot and its mark, fails here.
+      const values = readout.querySelectorAll("dd");
+      expect(values.length).toBeGreaterThan(0);
+      for (const value of values) {
+        const slots = value.querySelectorAll(".stale-slot");
+        expect([value.previousElementSibling?.textContent, slots.length > 0]).toEqual([
+          value.previousElementSibling?.textContent,
+          true,
+        ]);
+        for (const slot of slots) {
+          expect(slot).toBeEmptyDOMElement();
+        }
+      }
+      expect(within(readout).queryByText("stale")).not.toBeInTheDocument();
+    },
+  );
+
+  it("puts no S after the em dash, which has no last value, nor after a heading", () => {
+    const readout = renderReadout(null, { stale: true });
+
+    for (const label of ["DESIG", "DIST", "MASS", "AGE", "[Fe/H]", "VEL", "A(V)"]) {
+      expect([label, valueOf(readout, label)]).toEqual([label, "—"]);
+    }
+    for (const heading of ["GALACTIC", "FROM CHART CENTRE"]) {
+      expect(within(readout).getByRole("heading", { name: heading })).toHaveTextContent(
+        new RegExp(`^${heading}$`, "u"),
+      );
+    }
+  });
+
+  it("marks a free-floating planet's kind and metallicity, and not the status of its bulk", () => {
+    const readout = renderReadout(aFreeFloatingPlanet(), { stale: true });
+
+    expect(valueOf(readout, "KIND")).toBe("PLANET Sstale");
+    // Its metallicity comes with its row, so it is stale with the chart.
+    expect(valueOf(readout, "[Fe/H]")).toBe(`${formatSigned(ROGUE_PLANET_FE_H_DEX, 2)} dex Sstale`);
+    expect(valueOf(readout, "BULK")).toBe("NOT YET MODELLED");
+  });
+
+  it("marks neither a free-floating planet's metallicity nor its STATE while only a summary lags", () => {
+    const unformed = renderReadout(
+      { ...aFreeFloatingPlanet(), ageMyr: -0.002 },
+      { starsStale: true },
+    );
+
+    expect(valueOf(unformed, "[Fe/H]")).not.toMatch(/stale/u);
+    expect(valueOf(unformed, "STATE")).toBe("NOT YET FORMED");
+  });
+
+  it("keeps the status STATE NOT YET FORMED unmarked, its slot kept, while the chart is stale", () => {
+    const readout = renderReadout({ ...aFreeFloatingPlanet(), ageMyr: -0.002 }, { stale: true });
+    const state = within(readout).getByText("STATE", { exact: true }).nextElementSibling;
+
+    expect(state).toHaveTextContent(/^NOT YET FORMED$/u);
+    expect(state?.querySelector(".stale-slot")).toBeEmptyDOMElement();
+    // Muted with the answer it is read from, as a value is, though it takes no mark.
+    expect(state?.querySelector(".stale")).not.toBeNull();
+  });
+});
+
+describe("SystemReadout's growing enums (plan 04's reserved list)", () => {
+  /** {@link aSystem}'s row as a newer server sends it, with `fields` in strings this build lacks. */
+  function aNewerSystem(fields: Partial<Pick<SystemRecord, "layer" | "population">>): ChartSystem {
+    const response = aSystemsInRange({
+      centreLy: CENTRE,
+      systems: [{ relLy: [1, 0, 0], layer: "c" }],
+    });
+    const [system] = toChartResult(withRowFields(response, fields)).systems;
+    if (system === undefined) {
+      throw new Error("the fixture built no system");
+    }
+    return system;
+  }
+
+  it("reads a population this build does not know as Missing", () => {
+    const readout = renderReadout(aNewerSystem({ population: anUnknownPopulation() }));
+
+    expect(valueOf(readout, "POPULATION")).toBe("—");
+  });
+
+  it("reads the initial mass of a layer this build does not know as Missing, with no unit", () => {
+    const readout = renderReadout(aNewerSystem({ layer: anUnknownLayer() }));
+
+    expect(valueOf(readout, "INIT MASS")).toBe("—");
   });
 });

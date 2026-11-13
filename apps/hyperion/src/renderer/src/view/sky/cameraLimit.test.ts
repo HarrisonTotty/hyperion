@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 
+import { FOV_STEPS_DEG } from "../camera/projection";
 import { type ExposureTriple, programTriple, VIEW_CAMERA } from "../photometry/exposure";
 import fixture from "../../../../../../../packages/protocol/fixtures/camera_eta_sun.json" with { type: "json" };
 import { cameraLimitParts, cameraLimitV, DEFAULT_VIEW_CAMERA } from "./cameraLimit";
-import { DARK_SKY_CD_M2 } from "./viewSky";
 
 /** A sky of surface brightness μ, mag arcsec⁻², as a luminance: B = 10^((12.58 − μ) ÷ 2.5). */
 function skyOf(mu: number): number {
@@ -85,6 +85,18 @@ describe("cameraLimitV", () => {
     );
   });
 
+  it("takes a black sky 0.095 mag deeper than μ 24 at every field of view, at high gain", () => {
+    const deeper = FOV_STEPS_DEG.map(
+      (fov) =>
+        Math.round(
+          (cameraLimitV(DEFAULT_VIEW_CAMERA, HIGH_GAIN, fov, 0) -
+            cameraLimitV(DEFAULT_VIEW_CAMERA, HIGH_GAIN, fov, skyOf(24))) *
+            1e3,
+        ) / 1e3,
+    );
+    expect(deeper).toEqual(FOV_STEPS_DEG.map(() => 0.095));
+  });
+
   it("refuses a field of view or an exposure out of range", () => {
     expect(() => cameraLimitV(DEFAULT_VIEW_CAMERA, HIGH_GAIN, 0, 1e-4)).toThrow(RangeError);
     expect(() =>
@@ -117,7 +129,7 @@ describe("cameraLimitV", () => {
 
 /** The limit at 60° in a dark sky (μ 24) at the view camera's triple for an EV100. */
 function limitAt(ev100: number): number {
-  return cameraLimitV(DEFAULT_VIEW_CAMERA, programTriple(VIEW_CAMERA, ev100), 60, DARK_SKY_CD_M2);
+  return cameraLimitV(DEFAULT_VIEW_CAMERA, programTriple(VIEW_CAMERA, ev100), 60, skyOf(24));
 }
 
 describe("the view camera's limit through its program", () => {

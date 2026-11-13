@@ -346,8 +346,18 @@ Each is a decision the brainstorm leaves open.
     behaviour the protocol crate gains.
 15. **`PROTOCOL_VERSION` goes to 2** although the change is additive, because a version 1 server
     cannot serve this client at all. From here on, adding a request kind or an optional field does
-    not bump it, since an older server answers `unsupported`; removing or changing one does. The
-    client compares the welcome's version with its own and shows `incompatible`.
+    not bump it, since an older server answers `unsupported`; removing or changing one does. A wire
+    type's shape is frozen from the first build that sends a value of it. Until then its task may
+    give it a shape, or reshape it, without a bump: filling an uninhabited section type, as
+    P14.T35.e fills `BodySurfaceDto`, adds an `ok` arm that no older server can produce and that an
+    older client passes through unread (decision-p14-t35e-wire), as `partial_response` was first
+    sent only to clients built to receive it. This holds because both readers ignore what they do
+    not know: no wire type is `deny_unknown_fields`, and the client's decoder trusts the generated
+    types while its adapters read named fields only. Making a wire type refuse unknown fields, or
+    adding a client check that refuses an unknown key, would end it, and so bumps. The enums the
+    reserved list names as growing take a new string without a bump; every other enum carries all
+    its variants from the first build that sends a value of it (decision-gg-port-d0 §1). The client
+    compares the welcome's version with its own and shows `incompatible`.
 
 ### Universes
 
@@ -428,6 +438,7 @@ Later plans add a request by adding a variant to `RequestBody` and `ResponseBody
   | 14   | `system_bodies`, `body_detail`, `body_events`                                         |
   | R03  | `scene_ship`, `scene_cameras`                                                         |
   | R06  | `sky` (size class large, `is_large`)                                                  |
+  | R09  | `surface_field` (size class large, `is_large`), `survey_pass`                         |
 
   Plans 08, 11 and 13 add fields to existing kinds and no kind of their own. `galaxy_features` (plan
   09: the features drawn on the galaxy map) and `global_features` (plan 10: the entries of the
@@ -445,6 +456,31 @@ Later plans add a request by adding a variant to `RequestBody` and `ResponseBody
   `is_large` returns true for it, as that rule requires before the kind is built. Its stars and
   band travel as one bulk payload on R03's binary frames, announced by R03's `BulkManifestDto` in
   the terminal response.
+
+  Row R09 is the rendering plan R09's (the surface generator), drafted by R09.T0.a (2026-10-09) for
+  this plan's owner and accepted with amendments 2026-10-10 by the sign-off agent (owner's
+  delegation, `signoff-3.md`). `surface_field` answers a body's coarse field: the surveyed cells
+  with their margin, as one bulk payload on R03's binary frames. That is about 15.1 MB for an Earth
+  at R09's 26-byte synthesis cell (R09.T6.c's byte), about 3.7% inside R03's 15 MiB check. The payload is announced by
+  R03's `BulkManifestDto` in the terminal response's `Ready` arm, and a `NotModelled` answer carries
+  no bulk. So the kind is in the large size class, and `is_large` returns true for it before the
+  kind is built. It is answered whole, never in parts.
+
+  `survey_pass` records one survey pass and answers small. Its cell ranges are capped at R09's
+  `MAX_SURVEY_RANGES` (256), at most 38 bytes each, so that the request stays under
+  `MAX_INBOUND_FRAME_BYTES`; a longer pass is sent as several requests sharing its time span. It is
+  a stand-in: until a sensors plan records passes from the ship's instruments, it lets an honest
+  client grant its ship coverage. That plan replaces its caller, not `SurveyLog::record`. The kind
+  string stays R09's and is never reused, and withdrawing the kind would be a change under Design
+  note 15.
+
+  Both kinds name a body by `BodyIdHex`, which goes through the sim's `resolve` before use, as the
+  rule below requires. Both refuse as `body_detail` does (`unknown_system`, `unknown_body` or
+  `bad_request`, naming `body`). A body with no solid surface, whose surface section is
+  `not_applicable` (P14.T48.e), is `bad_request` naming `body`. A field outside its range is
+  `bad_request` naming that field: more than 256 ranges, an inverted range or one beyond the field's
+  cells, `from` after `to`, or a resolution that is not finite and positive. Neither moves
+  `PROTOCOL_VERSION`.
 
 - Server message type `notification`, for pushes. A subscription is opened by an ordinary request
   whose response carries a `subscription: u32`; pushes name it; it ends with `unsubscribe`, the
@@ -465,8 +501,22 @@ Later plans add a request by adding a variant to `RequestBody` and `ResponseBody
   frame.
 - Any `SystemIdHex` or body ID arriving from a client goes through the sim's `resolve` before use,
   as the brainstorm requires of IDs read from the protocol. M1 has no such inbound field.
-- `MassLayer`, `Population`, `LayerStatus`, `Unit` and `ErrorCode` will grow. TypeScript switches
-  over them are exhaustive with no `default`, so a new value is a compile error where it matters.
+- `MassLayer`, `Population`, `LayerStatus`, `Unit`, `ErrorCode`, `SystemOriginWire`,
+  `CatalogueClassWire` and `MemberClassWire` will grow, and so will plan 14's `PopulationDto`
+  (its disc arms from generator version 26, P14.T28.a and T28.d), `HabitabilityLimitDto`
+  (P14.T25's limits, named before any build sent one; a client reads one it does not know as
+  Missing), `SurfaceStateDto` (named before any build sent `desert`, 27's label; lean,
+  2026-11-01) and `DestructionCauseDto` (named before any build sent `evaporated`, 28's cause,
+  P14.T55.b.a; a client reads one it does not know as Missing). TypeScript switches over them are
+  exhaustive with no `default`, so a new value is a compile error where it matters. The
+  `PARAMETERS` page reads a unit it does not know as Missing (P07.T10.b). `SystemOriginWire`,
+  `CatalogueClassWire` and `MemberClassWire` are plan 09's (P09.T39), named here before any build
+  sent a value of any of them (ruled 2026-10-30): plan 10's P10.T10.a adds the `stream` and
+  `dwarf_core` origins and pinned content (prefix `110`) one more, a catalogue class registered
+  after plan 09's nine takes one of the registry's free values 9–63 (plan 09's design note 16),
+  and a member class of plan 10's own would be one more tag. A system readout reads an origin, a
+  catalogue class or a member class it does not know as Missing, from P09.T41.c, the first build
+  that reads any of them.
 - Optional request fields `region` (density map) and `include_substellar` (range query).
 
 ## Tasks
@@ -1900,7 +1950,11 @@ directory's reserved names; hex forms for every 64-bit value; a time on every po
       clap's implicit `false` reaches `Ignore`. `tests/cli.rs` still clears a fixed list of
       variables, which leaves out the new one, as it already left out the three cache variables. Its
       `run` should take the names from the parser, as `tests/stop.rs` does. Both are left for a
-      follow-up, since they need a test run while the machine is held quiet for timings.
+      follow-up, since they need a test run while the machine is held quiet for timings. _Settled
+      2026-10-20 for `tests/cli.rs` (decision-test-robustness): its `run` has started the server
+      through `common::process::server_binary()` since 99f33a85 (R06.T11.b), and `server_binary()`
+      clears every variable the parser names, `HYPERION_STOP_ON_STDIN_CLOSE` and the cache variables
+      included. The off-value test is still open._
   - _Other platforms._ Linux runs every test here. On macOS the signal tests and the stdin tests
     compile under cross-clippy. On Windows the stdin tests do, without the signal tests. Both will
     run once a runner exists.
@@ -1908,3 +1962,47 @@ directory's reserved names; hex forms for every 64-bit value; a time on every po
     `HYPERION_STOP_ON_STDIN_CLOSE=1`) and an explicit `--data-dir`, as this task's contract says.
     Its last step is corrected above. A SIGTERM after the server has seen stdin end is a second
     request, and forces exit 1 rather than stopping gracefully.
+- **Deviations in T17.d, as built.** None from the task's text. The twins sit beside their Unix
+  tests in `config.rs`'s tests, under `#[cfg(windows)]`, with the same names and assertions, and
+  build the value with `OsString::from_wide(&[0x66, 0x6F, 0xD800])` through
+  `std::os::windows::ffi::OsStringExt`, imported inside each test as the Unix ones import theirs.
+  Each has a one-line doc comment naming the value. They compile under the Windows Clippy with
+  `--all-targets` (`just smart-ci`'s `_cross-clippy-for` step for `x86_64-pc-windows-msvc`), and
+  `cargo test -p hyperion-server config` on Linux selects as many tests as before. They run once a
+  Windows runner exists, and are untested until then, as the ruling accepts: the Windows run is
+  still owed.
+- **Amended 2026-10-20: the process tests wait under the harness's patience** (issue #59; main's
+  ruling of 2026-10-20).
+  - `tests/common/process.rs`'s `START_TIMEOUT` (30 s) and `EXIT_TIMEOUT` (10 s) are gone, and so
+    is `tests/stop.rs`'s `ANSWER_TIMEOUT` (10 s).
+  - The start, the exit, a run in `tests/cli.rs` that exits before serving, and `/healthz` now wait
+    under `tests/common`'s `patiently`. So `HYPERION_TEST_PATIENCE_SECS` sets them, and they are
+    180 s by default.
+  - T17.a's "within `tokio::time::timeout(10 s)`" and its record's "allows 30 s to reach
+    `listening`" now read as that patience. They were guards against a hang, not contracts:
+    - T17.a's ruling states no time;
+    - the server's shutdown contract is still P04.T15's 20 s with work queued, `tests/abuse.rs`'s
+      `SHUTDOWN_WITH_WORK_QUEUED`, unchanged;
+    - T17.c's 10 s in the launch contract is the launcher's wait before `kill()`, which no server
+      test asserts.
+- **Amended 2026-10-30: the client reads the growing enums' unknown strings as Missing** (the
+  client pass the gg-port d0 ruling deferred; no task ID).
+  - `RequestFailure` gains `UnknownRequestError` (`code: "unknown"`, with the server's
+    `serverCode`, `message` and `field`): every exhaustive switch over a failure's code needs its
+    arm. It reads `REJECTED: <message>` as a fault (`isRefusal`). A subscription's end with an
+    unknown code was already read as `internal`.
+  - `lib/galaxy/model.ts` adds `ChartLayer`, `ChartPopulation`, `ChartLayerStatus` (each with
+    `unknown`), `ChartLayerLine` for `ChartResult.layers`, and `ChartKind`'s `unknown`;
+    `wire.ts` narrows each through an `Object.hasOwn` table. `layerLetter` returns `null` for
+    `unknown`. P09.T41.c's origin and catalogue class can follow the same pattern.
+  - (lean, 2026-10-30) An object of an unknown layer is listed and selectable, its masses
+    Missing, and `OPEN SYSTEM` is offered for it. It is drawn neither on the chart nor on the HR
+    diagram: the HR diagram counts it as `UNLISTED LAYER` under `NOT PLOTTED`, and the chart's
+    legend names it before `LIST ONLY` (a guide row drafted on `UNLISTED MATERIAL`'s). Its census
+    line reads its letter and band Missing and stands by its band. `layerBands` ignores it, so the
+    answer still charts, and where it is the lightest included, `COMPLETE ABOVE` reads its edge
+    Missing.
+  - _Ruled 2026-11-13 (the owner's delegated UX call, ux-calls-and-checklist-gaps):_ amended. A
+    reading that names an unknown layer reads `UNLISTED LAYER` (`wire.ts`'s `UNLISTED_LAYER`), never
+    Missing: the census line's row header across its `LAYER` and `BAND` cells (its band not shown)
+    and a `MEMBER CLASS`'s band (`featureWords.ts`'s `bandLetter`). Its masses stay Missing.

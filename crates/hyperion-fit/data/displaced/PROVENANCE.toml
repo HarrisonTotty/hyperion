@@ -1,0 +1,29 @@
+# P15.T6.b's production orbit run: the histograms of `manifests/displaced_orbits.toml`, which the
+# displaced form table is fitted to. Generated, not downloaded: the run's `displaced_orbits.txt`
+# (1,545,897 bytes, SHA-256 0e8f9a27480b55b072ffb9847cb972cb0e8aab8c752b2aebd0f7912b3bd7a303) is
+# committed cut at class lines into the four files below, each under 500 kB, which the task joins
+# in this order. It is made again in about four hours on 14–16 threads, in resumable parts, by
+# `hyperion-fit orbits --threads 16`, into `crates/hyperion-fit/data/cache/displaced/`.
+dataset = "displaced"
+class = "committed"
+citation = "hyperion-fit orbits (plan 15, P15.T6.a–b and P15.T6.g): orbits in the Milky Way fixture's own potential"
+url = "generated: hyperion-fit orbits"
+retrieved = "2026-11-01"
+release = "the production manifest displaced_orbits.toml, manifest-sha256 68eaf1deb54d6e7e171960a3f12ff3e197b840a138f8b7026f88f337344d2fa0, run on train 26's tree before its bump (GENERATOR_VERSION 25 with 26's stellar holds folded and their tables refitted), whose GalaxyScales probes are GENERATOR_VERSION 26's to the bit"
+licence = "HYPERION's own output"
+
+[[files]]
+name = "displaced_orbits.1.txt"
+sha256 = "a4e9f348f184b970fe768b226340cfb9abd3704de5c2b4bc6f21021b0031f6a2"
+
+[[files]]
+name = "displaced_orbits.2.txt"
+sha256 = "817b80948888be977f4edef88809d21b6b06088948507c6a13dc14c1dd80dd2d"
+
+[[files]]
+name = "displaced_orbits.3.txt"
+sha256 = "2de92e6cef38f250c38eec7362022cd609df61cefe776aa9483a4cbb3a771460"
+
+[[files]]
+name = "displaced_orbits.4.txt"
+sha256 = "0babf27850c39e0aa9d45eb62da5cc8b618e61aefd967bc593ea2be7c47c4ff1"

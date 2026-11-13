@@ -134,7 +134,7 @@ export function gridSpacing(queryRadius: number): number {
 
 function radiusSteps(): number[] {
   const steps: number[] = [];
-  for (let exponent = -2; exponent <= 2; exponent += 1) {
+  for (let exponent = -3; exponent <= 2; exponent += 1) {
     for (const mantissa of MANTISSAS) {
       steps.push(step(mantissa, exponent));
     }
@@ -143,10 +143,10 @@ function radiusSteps(): number[] {
 }
 
 /**
- * The query radii a chart offers, 0.01 ly to 500 ly in 1-2-5 steps.
+ * The query radii a chart offers, 0.001 ly to 500 ly in 1-2-5 steps.
  *
  * @remarks
  * Down to a few hundredths of a light-year, the scale near the central black hole (brainstorm,
- * "The local chart in 3D", Controls).
+ * "The local chart in 3D", Controls), and on to 0.001 ly, about 63 AU (plan 09, P09.T42).
  */
 export const RADIUS_STEPS_LY: ReadonlyArray<number> = radiusSteps();

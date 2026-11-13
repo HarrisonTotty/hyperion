@@ -11,7 +11,7 @@ use hyperion_protocol::{
 
 use crate::convert::{NewUniverse, universe_list};
 use crate::universe::{Universe, UniverseId};
-use crate::{AppState, SkyService};
+use crate::{AppState, GlobalListWarmUp, SkyService};
 
 /// Creates a universe from the name and the seed asked for, or a drawn seed, and saves it.
 ///
@@ -53,6 +53,11 @@ pub(crate) fn list(state: &AppState) -> ResponseBody {
 /// would otherwise wait 12 s for, and which a sky asked meanwhile joins (rendering plan R06,
 /// R06.T11.g; decided 2026-10-08, `decision-r06-t11d-first-sky.md` §2).
 ///
+/// Unless its configuration turns it off, the open starts the galaxy's global list too, then warms
+/// each of its streams' tube tables, all at bulk priority, and does not wait for them either
+/// ([`GlobalListService::prefetch`](crate::compute::GlobalListService::prefetch); plan 10,
+/// P10.T10.b): a stream's track is `ready` once its table is.
+///
 /// # Errors
 ///
 /// Those of [`openable_universe`], and those of
@@ -70,12 +75,20 @@ pub(crate) async fn open(
         SkyService::Served => state.sky_tables.prefetch(universe.key(), &galaxy),
         SkyService::Unsupported => false,
     };
+    let global_list = match state.global_list_warm_up {
+        GlobalListWarmUp::AtOpen => {
+            state.global_lists.prefetch(universe.key());
+            true
+        }
+        GlobalListWarmUp::Off => false,
+    };
     tracing::info!(
         id = %universe.id(),
         name = %universe.name(),
         seed = %SeedHex::from_u64(universe.seed()),
         generator_version = %universe.generator_version(),
         sky_tables_started = sky_tables,
+        global_list_warming = global_list,
         "opened a universe"
     );
     Ok(ResponseBody::OpenUniverse(UniverseInfo::from(

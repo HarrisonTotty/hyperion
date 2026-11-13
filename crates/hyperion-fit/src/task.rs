@@ -18,14 +18,19 @@
 //!    order;
 //! 3. `manifests/<name>.toml`, and `manifests/<name>.smoke.toml` if the task is slow;
 //! 4. `just fit <name>`, which writes the table, its `tables.lock` entry and its row of
-//!    `tables::MANIFEST`, and the `pub mod` line of the table in the sim's `tables/mod.rs`.
+//!    `tables::MANIFEST`, and the `pub mod` line of the table in its crate's `tables/mod.rs`.
+//!
+//! A table lives in the `src/tables/` of the crate that reads it, which the task names
+//! ([`FitTask::table_crate`]; the sim's unless it says otherwise), and that crate's
+//! `tables::MANIFEST` lists it. `tables.lock` stays one file, whose entries name a table's file
+//! alone, found in its task's crate.
 
 use std::error::Error;
 use std::num::NonZeroUsize;
 
 use crate::data::LoadDatasetError;
 use crate::emit::RustTable;
-use crate::manifest::{Manifest, ManifestParamError, SimFingerprint};
+use crate::manifest::{LockEntry, Manifest, ManifestParamError, SimFingerprint};
 use crate::parallel::BuildThreadPoolError;
 use crate::tasks;
 
@@ -45,6 +50,50 @@ impl TaskClass {
         match self {
             Self::Fast => "fast",
             Self::Slow => "slow",
+        }
+    }
+
+    /// A full run's time as the class bounds it, for `hyperion-fit list`: `< 1 min` for a fast
+    /// task, and none for a slow one, which bounds no time (`equipartition`'s run takes about half
+    /// a minute, `displaced_forms`' hours). Neither a header nor a lock entry records a measured
+    /// time (P15.T12).
+    #[must_use]
+    pub const fn runtime(self) -> Option<&'static str> {
+        match self {
+            Self::Fast => Some("< 1 min"),
+            Self::Slow => None,
+        }
+    }
+}
+
+/// The crate whose `src/tables/` holds a table, and whose `tables::MANIFEST` lists it.
+///
+/// A table is the sim's unless its task says otherwise. The crate split moves the sky's twelve,
+/// with their `MANIFEST` rows, into `hyperion-sky` (CS.T2), and their tasks then name
+/// [`TableCrate::Sky`]. The surface crate's tables, which its `cold_trap` reads for the sim and
+/// which no export of the client's module reaches, name [`TableCrate::Surface`] (R09.T7.f).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+pub enum TableCrate {
+    /// `hyperion-sim`, which also holds every table no registered task makes.
+    #[default]
+    Sim,
+    /// `hyperion-sky`.
+    Sky,
+    /// `hyperion-surface`.
+    Surface,
+}
+
+impl TableCrate {
+    /// Every crate that holds tables, in the order the check reports them.
+    pub const ALL: [Self; 3] = [Self::Sim, Self::Sky, Self::Surface];
+
+    /// The crate's name in Rust paths: `hyperion_sim`, `hyperion_sky` or `hyperion_surface`.
+    #[must_use]
+    pub const fn rust_name(self) -> &'static str {
+        match self {
+            Self::Sim => "hyperion_sim",
+            Self::Sky => "hyperion_sky",
+            Self::Surface => "hyperion_surface",
         }
     }
 }
@@ -73,8 +122,21 @@ pub trait FitTask: Sync + std::fmt::Debug {
     /// Whether CI may rerun it.
     fn class(&self) -> TaskClass;
 
-    /// Its table's file, relative to `crates/hyperion-sim/src/tables/`.
+    /// The crate whose `src/tables/` holds its table: the sim's unless the task says otherwise.
+    fn table_crate(&self) -> TableCrate {
+        TableCrate::Sim
+    }
+
+    /// Its table's file, relative to its crate's `src/tables/` ([`FitTask::table_crate`]).
     fn table_path(&self) -> &'static str;
+
+    /// Whether its table is one block of a file that holds code of its own besides, so that the
+    /// emitter rewrites only the task's block even while no other registered task writes the file
+    /// ([`Placement::Block`](crate::emit::Placement::Block)): `tables/binary.rs`, whose shapes and
+    /// scratch tables are plan 11's (P15.T10.b). False unless the task says otherwise.
+    fn shares_its_file(&self) -> bool {
+        false
+    }
 
     /// Its revision, bumped by hand when the algorithm changes: the inputs hash covers it and not
     /// the source code.
@@ -96,27 +158,52 @@ pub trait FitTask: Sync + std::fmt::Debug {
 }
 
 /// Every task, in name order. A new task is one more entry (see the module's documentation).
-pub static REGISTRY: [&dyn FitTask; 32] = [
+pub static REGISTRY: [&dyn FitTask; 63] = [
+    &tasks::binary_classes::BinaryAwdTask,
+    &tasks::binary_cooling_floor::BinaryCoolingFloorTask,
+    &tasks::binary_classes::mergers::BinaryMergerTask,
+    &tasks::binary_classes::mergers::BinaryNsmTask,
     &tasks::binary_pair_light::C_TASK,
     &tasks::binary_pair_light::D_TASK,
     &tasks::binary_pair_light::E_TASK,
     &tasks::binary_reach::BinaryReachTask,
+    &tasks::binary_wind_reach::BinaryWindReachTask,
+    &tasks::binary_classes::xrb::BinaryXrbTask,
+    &tasks::bowl_permanent_shadow::BowlPermanentShadowTask,
     &tasks::chabrier::ChabrierTask,
+    &tasks::class_boundaries::ClassBoundariesTask,
     &tasks::cluster_bh::ClusterBhTask,
     &tasks::cluster_retention::ClusterRetentionTask,
+    &tasks::condensate_extinction::TASK_1,
+    &tasks::condensate_extinction::TASK_2,
+    &tasks::condensate_extinction::TASK_3,
+    &tasks::condensate_extinction::TASK_4,
+    &tasks::condensate_extinction::TASK_5,
+    &tasks::condensate_extinction::TASK_6,
+    &tasks::condensate_extinction::TASK_7,
+    &tasks::condensate_extinction::TASK_8,
     &tasks::displaced_forms::DisplacedFormsTask,
+    &tasks::dwarf_sequence::DwarfSequenceTask,
     &tasks::equipartition::EquipartitionTask,
     &tasks::giant_cooling::GiantCoolingTask,
+    &tasks::helium::HeliumTask,
+    &tasks::kick_defaults::KickDefaultsTask,
     &tasks::kick_rank::KickRankTask,
+    &tasks::lbv::LbvTask,
+    &tasks::lifetime_bracket::LifetimeBracketTask,
     &tasks::limb_darkening::LimbDarkeningTask,
+    &tasks::liquid_optics::LiquidOpticsTask,
     &tasks::mge::MgeTask,
     &tasks::period_correction::PeriodCorrectionTask,
     &tasks::pulsars::PulsarsTask,
+    &tasks::rough_plains_cold_traps::RoughPlainsColdTrapsTask,
+    &tasks::saturation_curves::SaturationCurvesTask,
     &tasks::sky_binary_light::C_TASK,
     &tasks::sky_binary_light::D_TASK,
     &tasks::sky_binary_light::E_TASK,
     &tasks::sky_envelope::SkyEnvelopeTask,
     &tasks::sky_phase_envelope::SkyPhaseEnvelopeTask,
+    &tasks::space_weathering::SpaceWeatheringTask,
     &tasks::star_colour::StarColourTask,
     &tasks::star_colour::REDDENING_TASK,
     &tasks::star_colour::REDDENING_AV02_05_TASK,
@@ -126,8 +213,14 @@ pub static REGISTRY: [&dyn FitTask; 32] = [
     &tasks::stellar_fates::HIGH_TASK,
     &tasks::stellar_fates::LOW_TASK,
     &tasks::stellar_fates::MID_TASK,
+    &tasks::streams::StreamsTask,
     &tasks::stripping::StrippingTask,
+    &tasks::stripping_helium::StrippingHeliumTask,
+    &tasks::substance_albedos::SubstanceAlbedosTask,
+    &tasks::thermo_equilibrium::ThermoEquilibriumTask,
+    &tasks::thermo_equilibrium::ThermoEquilibrium27Task,
     &tasks::type_ia_delay::TypeIaDelayTask,
+    &tasks::type_ia_yield::TypeIaYieldTask,
     &tasks::wd_cooling::WdCoolingTask,
 ];
 
@@ -141,6 +234,17 @@ pub fn registry() -> &'static [&'static dyn FitTask] {
 #[must_use]
 pub fn find(name: &str) -> Option<&'static dyn FitTask> {
     registry().iter().copied().find(|task| task.name() == name)
+}
+
+/// The crate of the table that lock entry `entry` names: its task's crate, or the sim's for an
+/// entry that no task of `tasks` makes.
+#[must_use]
+pub fn table_crate_of(tasks: &[&'static dyn FitTask], entry: &LockEntry) -> TableCrate {
+    entry
+        .task
+        .as_deref()
+        .and_then(|name| tasks.iter().find(|task| task.name() == name))
+        .map_or(TableCrate::Sim, |task| task.table_crate())
 }
 
 /// Checks that `manifest` is `task`'s.
@@ -200,26 +304,51 @@ mod tests {
         assert_eq!(
             names,
             [
+                "binary_awd",
+                "binary_cooling_floor",
+                "binary_merger",
+                "binary_nsm",
                 "binary_pair_light_c",
                 "binary_pair_light_d",
                 "binary_pair_light_e",
                 "binary_reach",
+                "binary_wind_reach",
+                "binary_xrb",
+                "bowl_permanent_shadow",
                 "chabrier",
+                "class_boundaries",
                 "cluster_bh",
                 "cluster_retention",
+                "condensate_extinction",
+                "condensate_extinction_2",
+                "condensate_extinction_3",
+                "condensate_extinction_4",
+                "condensate_extinction_5",
+                "condensate_extinction_6",
+                "condensate_extinction_7",
+                "condensate_extinction_8",
                 "displaced_forms",
+                "dwarf_sequence",
                 "equipartition",
                 "giant_cooling",
+                "helium",
+                "kick_defaults",
                 "kick_rank",
+                "lbv",
+                "lifetime_bracket",
                 "limb_darkening",
+                "liquid_optics",
                 "mge",
                 "period_correction",
                 "pulsars",
+                "rough_plains_cold_traps",
+                "saturation_curves",
                 "sky_binary_light_c",
                 "sky_binary_light_d",
                 "sky_binary_light_e",
                 "sky_envelope",
                 "sky_phase_envelope",
+                "space_weathering",
                 "star_colour",
                 "star_colour_reddening",
                 "star_colour_reddening_av02_05",
@@ -229,12 +358,43 @@ mod tests {
                 "stellar_fates_high",
                 "stellar_fates_low",
                 "stellar_fates_mid",
+                "streams",
                 "stripping",
+                "stripping_helium",
+                "substance_albedos",
+                "thermo_equilibrium",
+                "thermo_equilibrium_27",
                 "type_ia_delay",
+                "type_ia_yield",
                 "wd_cooling"
             ]
         );
         assert_eq!(find("mge").map(FitTask::table_path), Some("mge.rs"));
         assert!(find("kicks").is_none());
+    }
+
+    /// Each task names the crate its table lives in: the sky's for the tasks listed here, which
+    /// are none until the crate split's move (CS.T2) gives it the sky's twelve, the surface
+    /// crate's for the bowl's permanent shadow, the rough plains' cold traps and the
+    /// space-weathering law, and the sim's for
+    /// every other.
+    #[test]
+    fn each_task_names_its_tables_crate() {
+        let sky: [&str; 0] = [];
+        let surface = [
+            "bowl_permanent_shadow",
+            "rough_plains_cold_traps",
+            "space_weathering",
+        ];
+        for task in registry() {
+            let expected = if sky.contains(&task.name()) {
+                TableCrate::Sky
+            } else if surface.contains(&task.name()) {
+                TableCrate::Surface
+            } else {
+                TableCrate::Sim
+            };
+            assert_eq!(task.table_crate(), expected, "{}", task.name());
+        }
     }
 }

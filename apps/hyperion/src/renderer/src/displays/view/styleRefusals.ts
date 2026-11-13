@@ -43,6 +43,10 @@ const NO_VIEWS = "GRAPHICS NOT AVAILABLE";
  * software adapter's refusal of the photorealistic style, `GRAPHICS ACQUIRING ADAPTER` before the
  * answer, the graphics' annunciation for both styles where no view can be drawn, and
  * {@link PHOTOREAL_NOT_CREATED} where the photorealistic view failed to make its pipelines.
+ *
+ * @remarks
+ * In the check-only software mode a software adapter's condition is `nominal`, with both styles
+ * (R01.T16), so that only {@link PHOTOREAL_NOT_CREATED} holds the photorealistic style back there.
  */
 export function styleRefusals(status: GraphicsStatus, photoreal: PhotorealStatus): StyleRefusals {
   const { condition } = status;
@@ -76,6 +80,34 @@ export function styleRefusals(status: GraphicsStatus, photoreal: PhotorealStatus
     }
   }
   return refusals;
+}
+
+/**
+ * Whether a view's `GRID` row stands, and its key acts (the owner's requests, 2026-10-31 and
+ * 2026-11-01): while its style is `PHOTOREALISTIC` and that style is offered, so that a style asked
+ * for and held back, which draws the wireframe, has no grid to set.
+ *
+ * @param photorealisticRefusal - Why the view's photorealistic style is held back
+ *   (`StyleRefusals.photorealistic`), `null` where it is offered.
+ */
+export function gridRowStands(style: RenderStyle, photorealisticRefusal: string | null): boolean {
+  return style === "photorealistic" && photorealisticRefusal === null;
+}
+
+/**
+ * A view's `GRID` as it opens: `OFF`, so that its photorealistic image opens as the picture alone
+ * (the owner's request, 2026-11-05).
+ */
+export const GRID_AT_OPEN = false;
+
+/**
+ * A view's `GRID` once a command has moved its style from `before` to `after` (the owner's request,
+ * 2026-11-05): `OFF` each time it enters `PHOTOREALISTIC`, by its buttons or its key alike, so that
+ * the image opens bare however it is reached; otherwise as it was, an `ON` lasting while the view
+ * stays in the style.
+ */
+export function gridAfterStyle(before: RenderStyle, after: RenderStyle, grid: boolean): boolean {
+  return after === "photorealistic" && before !== "photorealistic" ? GRID_AT_OPEN : grid;
 }
 
 /** The styles a view may switch to: those with no refusal. */

@@ -20,7 +20,7 @@ import {
   type UniverseTime,
 } from "@hyperion/protocol";
 
-import { add, norm, scale, vec3, type Vec3 } from "../../geometry/vec3";
+import { add, norm, scale, sub, vec3, type Vec3 } from "../../geometry/vec3";
 import { KM_PER_RSUN } from "../../lib/format";
 import {
   type SceneFrame,
@@ -34,6 +34,7 @@ import type {
   SceneCraft,
   SceneKinematics,
   SceneModel,
+  SceneParts,
   ScenePosition,
   SystemPlace,
 } from "../../lib/scene/model";
@@ -100,7 +101,7 @@ export function serverSceneGap(model: SceneModel): ServerSceneGap | null {
  * first frame for a view starting on the server's scene, before its drawing loop reads
  * `useScene`'s `frameAt`; `null` while the scene cannot be drawn.
  */
-export function serverSceneAtPush(model: SceneModel, place: SystemPlace): ViewScene | null {
+export function serverSceneAtPush(model: SceneParts, place: SystemPlace): ViewScene | null {
   const time = model.clock.time;
   const observer = shipObserver(model, time);
   const frame = observer === null ? null : sceneAt(model, observer, time, null);
@@ -182,6 +183,32 @@ function viewKind(body: SystemBody): ViewBodyKind | null {
   return kind;
 }
 
+/**
+ * Whether a served body has no solid surface for a view's survey line to speak of (plan R10,
+ * R10.T12): its bulk section's class an envelope's, a sub-Neptune, an ice giant or a gas giant
+ * (plan 14's `PlanetClass`), which is the gas-envelope state, whose record's `surface` section is
+ * `not_applicable` and whose field the server refuses (P14.T35.e); a body whose bulk is not sent is
+ * taken to have one, as its survey's state then says. The body inspection surveys no such body.
+ */
+export function surfaceless(body: SystemBody): boolean {
+  if (body.bulk.state !== "ok") {
+    return false;
+  }
+  let none: boolean;
+  switch (body.bulk.value.planetClass) {
+    case "sub_neptune":
+    case "ice_giant":
+    case "gas_giant":
+      none = true;
+      break;
+    case "rocky":
+    case "icy":
+      none = false;
+      break;
+  }
+  return none;
+}
+
 /** A body's own symbol from the ship-wide set: a giant's larger triangle, a dwarf's smaller one. */
 function symbolOf(body: SystemBody, kind: ViewBodyKind): BodyMarkSymbol {
   return bodySymbol(body) ?? bodyKindSymbol(kind);
@@ -221,14 +248,20 @@ function parentOf(
 
 /**
  * A body's rotation from body-fixed to body axes at `time` from its rotation section, through
- * `rotation3FromRows` (decision-p14-phase-j), or `null` where the section is not `ok`.
+ * `rotation3FromRows` (decision-p14-phase-j), or `null` where the section is not `ok`: where the
+ * rotation is not modelled or not resolved, which `ViewBody.rotationNotResolved` tells apart.
+ * Exported for the served worlds that turn a body at times of their own (plan R10, R10.T15.b;
+ * `servedBody.ts`).
  *
  * @remarks
  * The rows are the transpose of the simulation's `FrameRotation` rows (meridian, east, pole): the
  * body-fixed axes are R's columns, as R02's `BodyFixedRotation` holds them. `toSystemBodiesModel`
  * accepted only axes whose turn by any W passes the check.
  */
-function rotationAt(section: Section<SystemBodyRotation>, time: UniverseTime): Rotation3 | null {
+export function bodyRotationAt(
+  section: Section<SystemBodyRotation>,
+  time: UniverseTime,
+): Rotation3 | null {
   if (section.state !== "ok") {
     return null;
   }
@@ -346,14 +379,22 @@ function standInAttitude(velocityMPerS: Vec3): CraftPose["attitude"] {
  * camera's frame selection measures to these drawn centres (Design note 6, as amended), while `sceneAt` chooses the local body on geometric positions. A body's rotation
  * is its rotation section's law at the time it is drawn at (R07.T2.b), the frame's for the local
  * body and its light's emission for every other, and `null` without the section, when its pole
- * stands as its orbit's normal (Design note 14); its figure and photometry are its sections'
+ * stands as its orbit's normal (Design note 14), with `rotationNotResolved` where the granted
+ * detail level withholds the section; its figure and photometry are its sections'
  * (`heldAppearanceOf`, made once a record), and its radius its figure's equatorial one. Rings are drawn
- * about their planet, in its orbital plane (plan 14's convention for this generator version);
+ * about their planet, each in the plane its normal gives, its planet's local Laplace plane (plan
+ * 14, P14.T56.a and T56.b), or in the planet's orbital plane where an older server sends no normal;
  * orbits are every placed planet's and moon's about the body or star it orbits, or about the barycentre for the root, and one about a pair below the root is not drawn.
- * The ship stand-in is the own ship, in the system frame at the observer's present position.
+ * The ship stand-in is the own ship, at the observer's present position, held in the frame of
+ * `sceneAt`'s local body, the sim's body-frame rule over geometric present positions with its
+ * hysteresis (R02 Design notes 6 and 22, R03 Design note 7; decision-r10-ship-frame), and its
+ * velocity against that body's present velocity, so that a stand-in at rest in its body's frame
+ * reads exactly zero; in the system frame where the frame has no local body, or the scene draws
+ * none for it. Its attitude stays the barycentric velocity's ({@link standInAttitude}), so that its
+ * nose does not swing as its frame changes.
  */
 export function viewSceneFromServer(
-  model: SceneModel,
+  model: SceneParts,
   frame: SceneFrame,
   place: SystemPlace,
 ): ViewScene | null {
@@ -400,6 +441,10 @@ export function viewSceneFromServer(
     // the distance: 1.6 µrad for an Earth, 42 µrad for a Jupiter, under a pixel but in a field
     // narrower than about 4.6° across 1,920 px on a fast giant.
     let drawnAt: UniverseTime;
+    // The present velocity of the body drawn at the present, the local body alone, which the
+    // terrain session's contacts chain a craft's frame through (R10.T14.c;
+    // decision-r10-t14c-leans §5): the velocity the own ship's is held against below.
+    let presentVelocityMPerS: Vec3 | null = null;
     switch (seen.kind) {
       case "placed":
         // The local body is drawn at the present, but lit, like every body, at its retarded time:
@@ -408,6 +453,7 @@ export function viewSceneFromServer(
         centreM = seen.id === frame.localBody ? seen.geometricM : seen.apparentM;
         retarded = seenRetarded(seen);
         drawnAt = seen.id === frame.localBody ? frame.time : seen.emitted;
+        presentVelocityMPerS = seen.id === frame.localBody ? frame.localBodyVelocityMPerS : null;
         break;
       case "contact":
         centreM = seen.apparentM;
@@ -425,10 +471,16 @@ export function viewSceneFromServer(
       hillRadiusM: seen.kind === "placed" ? seen.hillRadiusM : null,
       centreM,
       retarded,
-      rotation: rotationAt(record.rotation, drawnAt),
+      ...(presentVelocityMPerS === null ? {} : { presentVelocityMPerS }),
+      rotation: bodyRotationAt(record.rotation, drawnAt),
+      // A rotation the granted detail level withholds, which the view states as such rather than
+      // as one not modelled (rotation-not-resolved).
+      ...(record.rotation.state === "not_resolved" ? { rotationNotResolved: true as const } : {}),
       appearance,
       orbitNormal: record.orbit.state === "ok" ? orbitNormal(record.orbit.value.orbit) : null,
       symbol: symbolOf(record, kind),
+      // A giant's or a sub-Neptune's FRAME states no survey line (R10.T12).
+      ...(surfaceless(record) ? { surfaceless: true as const } : {}),
     });
   }
   const drawn = new Set<string>(bodies.map((body) => body.id));
@@ -452,7 +504,7 @@ export function viewSceneFromServer(
       body: planet.id,
       innerRadiusM: record.population.value.innerEdgeM,
       outerRadiusM: record.population.value.outerEdgeM,
-      normal: planet.orbitNormal ?? GALACTIC_NORTH,
+      normal: record.population.value.normal ?? planet.orbitNormal ?? GALACTIC_NORTH,
     });
   }
 
@@ -470,16 +522,25 @@ export function viewSceneFromServer(
     }
   }
 
+  // The own ship in its local body's frame (decision-r10-ship-frame §2): the body is drawn at its
+  // geometric centre, so the ship resolves to the observer's position.
+  const local = frame.localBody === null ? undefined : byId.get(frame.localBody);
+  const localVelocity = frame.localBodyVelocityMPerS;
+  const held = local !== undefined && localVelocity !== null;
   const ownShip: ViewCraft = {
     id: SERVER_OWN_SHIP,
     designation: SERVER_OWN_SHIP_DESIGNATION,
     hull: TEST_HULL,
     pose: {
-      position: { kind: "system", system: systemId, m: frame.observer.positionM },
+      position: held
+        ? { kind: "body", body: local.id, m: sub(frame.observer.positionM, local.centreM) }
+        : { kind: "system", system: systemId, m: frame.observer.positionM },
       attitude: standInAttitude(frame.observer.velocityMPerS),
     },
     predictedPath: null,
-    velocityMPerS: frame.observer.velocityMPerS,
+    velocityMPerS: held
+      ? sub(frame.observer.velocityMPerS, localVelocity)
+      : frame.observer.velocityMPerS,
   };
   const craft = [
     ownShip,
@@ -513,7 +574,8 @@ export function viewSceneFromServer(
 
 /**
  * A position in its body's non-rotating frame where it is held in the body's fixed one: turned by
- * the body's rotation as the scene holds it (none, where the rotation is not modelled).
+ * the body's rotation as the scene holds it (none, where the rotation is not modelled or not
+ * resolved).
  */
 function inBodyFrame(position: ViewPosition, origins: FrameOrigins): ViewPosition {
   if (position.kind !== "body_fixed") {

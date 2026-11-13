@@ -1,24 +1,171 @@
+import { CLUSTER_CULL_KERNEL } from "../clusters/cull";
+import { VISIBILITY_IDS_TEXTURE } from "../clusters/resolve";
+import {
+  VISIBILITY_LATE_RASTER_LABEL,
+  VISIBILITY_RASTER_LABEL,
+  VISIBILITY_RESOLVE_LABEL,
+} from "../clusters/visibility";
+import {
+  DEPTH_PYRAMID_KERNEL,
+  DEPTH_PYRAMID_LABEL,
+  type FrameOcclusion,
+  pyramidLevels,
+} from "../clusters/hzb";
 import { describe, expect, it, vi } from "vitest";
 
 import { vec3 } from "../../geometry/vec3";
 import { sphereFootprint } from "../bodies/regime";
-import { countingRenderEngine } from "../../test/countingRenderEngine";
+import {
+  earthBody,
+  fiveLineSlotMedium,
+  fourAbsorberMedium,
+  iceGiantMethaneBody,
+  lineAbsorberMedium,
+  r05EarthWithOzoneAbsorber,
+  SATURN_SPHEROID,
+  saturnBody,
+  saturnClassMedium,
+  titanClassMethaneMedium,
+  venusClassMedium,
+  WGS84_SPHEROID,
+} from "../../test/atmosphereFixtures";
+import { countingRenderEngine, type RecordedDispatch } from "../../test/countingRenderEngine";
+import { microtasks } from "../../test/opticsFakes";
+import { lavaWorldSurface } from "../../test/thermalSurfaces";
+import { DISC_LAYER_VALUES } from "../atmosphere/discTable";
+import { surfaceTemperatureFieldOf } from "../atmosphere/thermal";
 import { aHostDisc, aLitBody } from "../../test/litFixtures";
 import {
+  BODY_DISC_CELLS_AIR_KERNEL,
+  BODY_DISC_CELLS_EMISSIVE_AIR_KERNEL,
+  BODY_DISC_CELLS_EMISSIVE_KERNEL,
   BODY_DISC_CELLS_KERNEL,
+  BODY_DISC_CELLS_PACKED_AIR_KERNEL,
+  BODY_DISC_CELLS_PACKED_EMISSIVE_AIR_KERNEL,
+  BODY_DISC_CELLS_PACKED_EMISSIVE_KERNEL,
+  BODY_DISC_CELLS_PACKED_KERNEL,
   type BodyFramePlan,
   DISC_CELLS_PASS,
   type LitBodyInput,
 } from "../bodies/draw";
+import { LIMB_SAMPLES } from "../bodies/discShading";
+import { packClassMap } from "../bodies/discSurface";
+import { rotationColumns } from "../bodies/smoothMesh";
 import { IDENTITY_QUATERNION } from "../camera/quaternion";
 import type { Viewport } from "../camera/projection";
+import { rotation3FromRows } from "../coords/rotation";
 import { TIMING_FRAMES_IN_FLIGHT } from "../engine/webgpu/timing";
-import type { DrawItem, FrameSubmission, RenderView } from "../engine/types";
+import type {
+  DrawItem,
+  FrameSubmission,
+  RenderView,
+  TextureHandle,
+  ViewSize,
+} from "../engine/types";
 import { AU_M } from "../scenes/kept";
 import { BloomChain } from "../post/bloomChain";
-import { histogramParams, histogramWorkgroups } from "../post/histogram";
-import type { QualitySetting } from "../quality/qualitySetting";
-import { type PhotorealFrame, PhotorealRenderer } from "./renderer";
+import { HISTOGRAM_KERNEL, histogramParams, histogramWorkgroups } from "../post/histogram";
+import {
+  GEOMETRY_BEFORE_R14,
+  type GeometrySettings,
+  QUALITY_SETTINGS,
+  type QualitySetting,
+  SETTINGS,
+} from "../quality/qualitySetting";
+import { limbDistanceM, pixelAngleRad } from "../terrain/handover";
+import { OUTSIDE_VIEW_MARGIN_PX, type SurveyedDatumFrame } from "../wireframe/submit";
+import type { OverlayHider } from "./overlay";
+import {
+  AERIAL_PERSPECTIVE_BELOW_DECK_KERNEL,
+  AERIAL_PERSPECTIVE_KERNEL,
+  ATMOSPHERE_BEHIND_PASS,
+  ATMOSPHERE_COMPOSITE_PASS,
+  AtmosphereRetired,
+  type AtmosphereSettings,
+  COMPOSITE_BEHIND_KERNEL,
+  LIMB_KERNELS,
+  MARCH_TABLE_ONLY_KERNELS,
+  RAY_MARCH_BELOW_DECK_KERNEL,
+  RAY_MARCH_CENTRE_KERNEL,
+  RAY_MARCH_CENTRE_ONE_BAND_KERNEL,
+  RAY_MARCH_CENTRE_SPECIAL_KERNEL,
+  RAY_MARCH_LIMB_SPECIAL_KERNEL,
+  RAY_MARCH_PACKED_SPECIAL_KERNEL,
+  RAY_MARCH_SLOTS_CENTRE_ONE_BAND_KERNEL,
+  RAY_MARCH_SLOTS_CENTRE_SPECIAL_KERNEL,
+  RAY_MARCH_DECK_KERNEL,
+  RAY_MARCH_DECK_SPECIAL_KERNEL,
+  RAY_MARCH_DECK_THERMAL_KERNEL,
+  RAY_MARCH_FILL_KERNEL,
+  RAY_MARCH_KERNEL,
+  RAY_MARCH_ONE_BAND_KERNEL,
+  RAY_MARCH_SLOTS_CENTRE_KERNEL,
+  RAY_MARCH_SLOTS_DECK_KERNEL,
+  RAY_MARCH_SLOTS_DECK_SPECIAL_KERNEL,
+  RAY_MARCH_SLOTS_DECK_THERMAL_KERNEL,
+  RAY_MARCH_SLOTS_KERNEL,
+  RAY_MARCH_SLOTS_ONE_BAND_KERNEL,
+  AERIAL_PERSPECTIVE_THERMAL_KERNEL,
+  AERIAL_PERSPECTIVE_THICK_KERNEL,
+  AERIAL_PERSPECTIVE_THICK_THERMAL_KERNEL,
+  RAY_MARCH_SLOTS_THERMAL_KERNEL,
+  RAY_MARCH_SLOTS_THICK_THERMAL_KERNEL,
+  RAY_MARCH_THERMAL_KERNEL,
+  RAY_MARCH_THICK_THERMAL_KERNEL,
+  SKY_VIEW_THERMAL_KERNEL,
+  SKY_VIEW_THICK_THERMAL_KERNEL,
+  RAY_MARCH_SLOTS_SPECIAL_KERNEL,
+  RAY_MARCH_SPECIAL_KERNEL,
+  RAY_MARCH_THICK_SPECIAL_KERNEL,
+  RAY_MARCH_THICK_ROW_KERNEL,
+  RAY_MARCH_THICK_ROW_SPECIAL_KERNEL,
+  RAY_MARCH_SLOTS_THICK_ROW_KERNEL,
+  RAY_MARCH_SLOTS_THICK_ROW_SPECIAL_KERNEL,
+  RAY_MARCH_THICK_TABLE_KERNEL,
+  RAY_MARCH_THICK_TABLE_SPECIAL_KERNEL,
+  THICK_LIMB_KERNELS,
+  SKY_VIEW_BELOW_DECK_KERNEL,
+  SKY_VIEW_KERNEL,
+  SKY_VIEW_THICK_KERNEL,
+  tableRadiusM,
+} from "../atmosphere/hillaire";
+import { EngineUnavailable } from "../engine/resilientEngine";
+import {
+  EARTH_SLAB_REFERENCE,
+  EARTH_SLAB_REFERENCE_CURVES,
+  R05_EARTH_REFERENCE,
+} from "../atmosphere/earth";
+import type { AtmosphereMedium } from "../atmosphere/medium";
+import {
+  type AbsorberCurveSlots,
+  type AtmosphereBody,
+  AtmosphereTables,
+  IRRADIANCE_KERNEL,
+  IRRADIANCE_THICK_KERNEL,
+  kernelMedium,
+  MULTI_SCATTERING_KERNEL,
+  SLOT_DEPTHS_KERNEL,
+  SOURCE_TRANSMITTANCE_KERNEL,
+  TRANSMITTANCE_KERNEL,
+} from "../atmosphere/tables";
+import { tableOnlyKernel } from "../atmosphere/surfaceLighting";
+import type { KernelPair } from "../engine/kernels";
+import { kernelKey, prepareKernel } from "../engine/webgpu/compute";
+import { BAKE_KERNELS } from "../sky/bake";
+import { between, seededRandom } from "../../test/seededRandom";
+import type { AtmosphereLeversOverride } from "../../../../preload/api";
+import { patternedDeckTables, patternedThickBake } from "../../test/thickTables";
+import {
+  type FrameAtmosphere,
+  type FrameTerrain,
+  type PhotorealFrame,
+  lostDevice,
+  type PhotorealOverlay,
+  PhotorealRenderer,
+} from "./renderer";
+import { TONEMAP_PASS } from "../post/tonemap";
+import { whiteBalanceRows } from "../post/whiteBalance";
+import { starColour } from "../photometry/starColour";
 import { PHOTOREAL_PASS_LABELS, SKY_PASS_LABEL } from "./passes";
 
 const VIEWPORT = { widthPx: 64, heightPx: 36 };
@@ -37,11 +184,29 @@ class RecordingView implements RenderView {
   dispose(): void {}
 }
 
+/** A cluster draw of the material `name`. */
+function drawOfName(name: string): DrawItem {
+  return {
+    mesh: { kind: "mesh", name: "terrain clusters" },
+    material: { kind: "material", name },
+    offsetFromCameraM: new Float32Array(3),
+    uniforms: {},
+    textures: {},
+  };
+}
+
+/** The high setting's geometry, its mesh bodies' figures shaded forward, the way back (plan R07). */
+const FORWARD_FIGURES: GeometrySettings = { ...SETTINGS.high.geometry, figureShading: "forward" };
+
+/** The high setting's geometry, its mesh bodies' figures shaded once a pixel (plan R07). */
+const SCREEN_FIGURES: GeometrySettings = { ...SETTINGS.high.geometry, figureShading: "screen" };
+
 function frameWith(sky: ReadonlyArray<DrawItem>): PhotorealFrame {
   const lit = aLitBody();
   return {
     camera: { orientation: IDENTITY_QUATERNION, fovXRad: Math.PI / 3 },
     viewport: VIEWPORT,
+    presentedPx: VIEWPORT,
     role: "eye",
     setting: "high",
     exposureScale: 1e-4,
@@ -103,6 +268,23 @@ describe("the photorealistic renderer", () => {
     renderer.dispose();
   });
 
+  it("tones under the frame's white balance only where it has one (the owner's report, 2026-11-05)", async () => {
+    const engine = await countingRenderEngine();
+    const view = new RecordingView();
+    const renderer = new PhotorealRenderer(engine, "test view");
+    const camera = { orientation: IDENTITY_QUATERNION, fovXRad: Math.PI / 3 };
+    await renderer.prepare(VIEWPORT, "high", "eye", camera);
+    const rows = whiteBalanceRows(starColour(3_000));
+    renderer.render(view, frameWith([]));
+    renderer.render(view, { ...frameWith([]), whiteBalance: { rows, star: 0, teffK: 3_000 } });
+    const tones = view.frames.map((f) => f.draws[0]?.uniforms ?? {});
+    expect(tones.map((u) => Array.from(u["balance"] ?? []))).toEqual([[0], [1]]);
+    expect(Array.from(tones[1]?.["balanceRow2"] ?? [])).toEqual(
+      Array.from(new Float32Array([...rows[2], 0])),
+    );
+    renderer.dispose();
+  });
+
   it("draws mesh bodies with depth in the bodies pass, between the sky and the painter's sequence", async () => {
     const engine = await countingRenderEngine();
     const view = new RecordingView();
@@ -130,9 +312,627 @@ describe("the photorealistic renderer", () => {
     ]);
     expect(passes.slice(0, 3)).toEqual([
       [SKY_PASS_LABEL, "clear", ["sky:starSpriteHdr"]],
-      [PHOTOREAL_PASS_LABELS.bodies, "load", ["bodies:smoothMesh"]],
+      // The figure on the cluster path (plan R14, R14.T4.a): its stride-1 blocks' and strips' buckets.
+      [
+        PHOTOREAL_PASS_LABELS.bodies,
+        "load",
+        ["bodies:smoothMeshCluster", "bodies:smoothMeshCluster"],
+      ],
       [PHOTOREAL_PASS_LABELS.discs, "load", ["bodies:discLimb"]],
     ]);
+    renderer.dispose();
+  });
+
+  it.each([
+    [
+      "the frame's geometry with the figures' lever off",
+      { ...SETTINGS.high.geometry, figureClusters: false },
+    ],
+    ["the way back", GEOMETRY_BEFORE_R14],
+    [
+      "the cluster path off, the figures' lever on",
+      { ...SETTINGS.high.geometry, clusterPath: false },
+    ],
+  ] as const)(
+    "draws a mesh body's figure by its instanced draw with %s (plan R14, R14.T4.a)",
+    async (_, geometry) => {
+      const engine = await countingRenderEngine();
+      const renderer = new PhotorealRenderer(engine, "test view");
+      const camera = { orientation: IDENTITY_QUATERNION, fovXRad: Math.PI / 3 };
+      await renderer.prepare(VIEWPORT, "high", "eye", camera);
+      const frame = frameWith([]);
+      const [planet] = frame.bodies;
+      if (planet === undefined) {
+        throw new Error("no body");
+      }
+      const writer = sphereFootprint(
+        planet.centreM,
+        planet.figure.equatorialRadiusM,
+        camera,
+        VIEWPORT,
+      );
+      renderer.render(new RecordingView(), {
+        ...frame,
+        geometry,
+        depthWriters: writer === null ? [] : [writer],
+      });
+      expect(
+        engine.targetFrames
+          .find((f) => f.label === PHOTOREAL_PASS_LABELS.bodies)
+          ?.draws.map((draw) => draw.material.name),
+      ).toEqual(["bodies:smoothMesh"]);
+      renderer.dispose();
+    },
+  );
+
+  it("draws a body handed over as a mesh, and its terrain after its figure in the bodies pass where the frame has one (R10.T10.e)", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new PhotorealRenderer(engine, "test view");
+    const camera = { orientation: IDENTITY_QUATERNION, fovXRad: Math.PI / 3 };
+    await renderer.prepare(VIEWPORT, "high", "eye", camera);
+    const frame = frameWith([]);
+    // The planet's relief subtends 4 px at its limb, 10⁸ m off: handed over.
+    const bodies = frame.bodies.map((body) => ({
+      ...body,
+      handoverReliefM:
+        4 * limbDistanceM(1e8, body.figure.equatorialRadiusM) * pixelAngleRad(camera, VIEWPORT),
+    }));
+    const terrainDraw: DrawItem = {
+      mesh: { kind: "mesh", name: "terrain patches" },
+      material: { kind: "material", name: "terrain-lit-baked-offsets" },
+      offsetFromCameraM: new Float32Array(3),
+      uniforms: {},
+      textures: {},
+    };
+    const asked: BodyFramePlan[] = [];
+    const terrain = {
+      surveyCoverage: () => null,
+      surveyedWhole: () => false,
+      draws: (plan: BodyFramePlan) => {
+        asked.push(plan);
+        return plan.meshes.some((mesh) => mesh.role.kind === "handed-over") ? [terrainDraw] : [];
+      },
+      symbologyDepth: () => [],
+      sceneDepth: () => false,
+      lateDraws: () => [],
+      visibility: () => null,
+      opaqueDraws: () => [],
+    };
+    const bodiesPass = (from: number): ReadonlyArray<string> | undefined =>
+      engine.targetFrames
+        .slice(from)
+        .find((f) => f.label === PHOTOREAL_PASS_LABELS.bodies)
+        ?.draws.map((draw) => draw.material.name);
+    // Without a terrain the body is drawn as a mesh body is.
+    const bare = renderer.render(new RecordingView(), { ...frame, bodies });
+    expect(bare?.regimes.get(bodies[0]?.id ?? "")).toBe("terrain");
+    expect(bodiesPass(0)).toEqual(["bodies:smoothMeshCluster", "bodies:smoothMeshCluster"]);
+    const from = engine.targetFrames.length;
+    const plan = renderer.render(new RecordingView(), {
+      ...frame,
+      bodies,
+      previousRegimes: bare?.regimes ?? new Map(),
+      terrain,
+    });
+    expect(asked).toEqual([plan]);
+    expect(bodiesPass(from)).toEqual([
+      "bodies:smoothMeshCluster",
+      "bodies:smoothMeshCluster",
+      "terrain-lit-baked-offsets",
+    ]);
+    renderer.dispose();
+  });
+
+  /** A frame of `frameWith`'s planet handed over to a terrain, and its renderer, prepared. */
+  async function handedOver(): Promise<{
+    readonly engine: Awaited<ReturnType<typeof countingRenderEngine>>;
+    readonly renderer: PhotorealRenderer;
+    readonly frame: PhotorealFrame;
+  }> {
+    const engine = await countingRenderEngine();
+    const renderer = new PhotorealRenderer(engine, "test view");
+    const camera = { orientation: IDENTITY_QUATERNION, fovXRad: Math.PI / 3 };
+    await renderer.prepare(VIEWPORT, "high", "eye", camera);
+    const frame = frameWith([]);
+    // The planet's relief subtends 4 px at its limb, 10⁸ m off: handed over.
+    const bodies = frame.bodies.map((body) => ({
+      ...body,
+      handoverReliefM:
+        4 * limbDistanceM(1e8, body.figure.equatorialRadiusM) * pixelAngleRad(camera, VIEWPORT),
+    }));
+    const bare = renderer.render(new RecordingView(), { ...frame, bodies });
+    return {
+      engine,
+      renderer,
+      frame: { ...frame, bodies, previousRegimes: bare?.regimes ?? new Map() },
+    };
+  }
+
+  it("draws the bodies pass opaque first: the terrain that never discards, the figures, then the rest of the terrain (R14.T2.e)", async () => {
+    const { engine, renderer, frame } = await handedOver();
+    const [opaque, rest] = [drawOfName("opaque terrain"), drawOfName("fins")];
+    const terrain: FrameTerrain = {
+      surveyCoverage: () => null,
+      surveyedWhole: () => false,
+      draws: () => [opaque, rest],
+      symbologyDepth: () => [],
+      sceneDepth: () => false,
+      lateDraws: () => [],
+      visibility: () => null,
+      opaqueDraws: () => [opaque],
+    };
+    const from = engine.targetFrames.length;
+    renderer.render(new RecordingView(), { ...frame, geometry: FORWARD_FIGURES, terrain });
+    expect(
+      engine.targetFrames
+        .slice(from)
+        .find((f) => f.label === PHOTOREAL_PASS_LABELS.bodies)
+        ?.draws.map((draw) => draw.material.name),
+    ).toEqual(["opaque terrain", "bodies:smoothMeshCluster", "bodies:smoothMeshCluster", "fins"]);
+    renderer.dispose();
+  });
+
+  it("shades the figures once a pixel: the bodies pass's opaque terrain, the figures' raster into the view's figure IDs with the scene's depth, then their resolve and the rest of the terrain (plan R07, `figureShading` `screen`)", async () => {
+    const { engine, renderer, frame } = await handedOver();
+    // The screen path's pipelines asked for by a frame that takes it, and prepared off it.
+    renderer.render(new RecordingView(), { ...frame, geometry: SCREEN_FIGURES });
+    await microtasks();
+    const [opaque, rest] = [drawOfName("opaque terrain"), drawOfName("fins")];
+    const terrain: FrameTerrain = {
+      surveyCoverage: () => null,
+      surveyedWhole: () => false,
+      draws: () => [opaque, rest],
+      symbologyDepth: () => [],
+      sceneDepth: () => false,
+      lateDraws: () => [],
+      visibility: () => null,
+      opaqueDraws: () => [opaque],
+    };
+    const from = engine.targetFrames.length;
+    renderer.render(new RecordingView(), { ...frame, geometry: SCREEN_FIGURES, terrain });
+    const frames = engine.targetFrames.slice(from);
+    const pass = (label: string) => frames.find((f) => f.label === label);
+    const names = (label: string): string[] | undefined =>
+      pass(label)?.draws.map((draw) => draw.material.name);
+    const labels = frames.map((f) => f.label);
+    const ids = engine.textureSpecs.find((spec) => spec.name === "test view figures:ids colour");
+    expect([
+      SCREEN_FIGURES.figureShading,
+      labels.indexOf(PHOTOREAL_PASS_LABELS.bodies) <
+        labels.indexOf(PHOTOREAL_PASS_LABELS.figureIds),
+      labels.indexOf(PHOTOREAL_PASS_LABELS.figureIds) <
+        labels.indexOf(PHOTOREAL_PASS_LABELS.figureResolve),
+      names(PHOTOREAL_PASS_LABELS.bodies),
+      names(PHOTOREAL_PASS_LABELS.figureIds),
+      pass(PHOTOREAL_PASS_LABELS.figureIds)?.colourLoad,
+      names(PHOTOREAL_PASS_LABELS.figureResolve),
+      pass(PHOTOREAL_PASS_LABELS.figureResolve)?.colourLoad,
+      Object.keys(pass(PHOTOREAL_PASS_LABELS.figureResolve)?.draws[0]?.textures ?? {}).includes(
+        "figureIds",
+      ),
+      ids?.format,
+    ]).toEqual([
+      "screen",
+      true,
+      true,
+      ["opaque terrain"],
+      ["bodies:smoothMeshIdsCluster", "bodies:smoothMeshIdsCluster"],
+      undefined,
+      ["bodies:figureResolve", "fins"],
+      "load",
+      true,
+      "r32uint",
+    ]);
+    renderer.dispose();
+  });
+
+  it("draws the figures forward until the pipelines that shade them once a pixel are prepared, and lets the view's figure IDs go at a frame that draws them forward (plan R07)", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new PhotorealRenderer(engine, "test view");
+    const camera = { orientation: IDENTITY_QUATERNION, fovXRad: Math.PI / 3 };
+    await renderer.prepare(VIEWPORT, "high", "eye", camera);
+    const frame = frameWith([]);
+    const bodies = frame.bodies.map((body) => ({
+      ...body,
+      handoverReliefM:
+        4 * limbDistanceM(1e8, body.figure.equatorialRadiusM) * pixelAngleRad(camera, VIEWPORT),
+    }));
+    const bare = renderer.render(new RecordingView(), { ...frame, bodies });
+    const handed = {
+      ...frame,
+      bodies,
+      previousRegimes: bare?.regimes ?? new Map(),
+      geometry: SCREEN_FIGURES,
+    };
+    const labelsOf = (drawn: PhotorealFrame): string[] => {
+      const from = engine.targetFrames.length;
+      renderer.render(new RecordingView(), drawn);
+      return engine.targetFrames.slice(from).map((f) => f.label);
+    };
+    const first = labelsOf(handed);
+    await microtasks();
+    const second = labelsOf(handed);
+    const forward = labelsOf({ ...handed, geometry: FORWARD_FIGURES });
+    // Let go at the forward frame, the figure IDs are made again at the next frame by them.
+    const again = labelsOf(handed);
+    expect([
+      first.includes(PHOTOREAL_PASS_LABELS.figureIds),
+      second.includes(PHOTOREAL_PASS_LABELS.figureIds),
+      forward.includes(PHOTOREAL_PASS_LABELS.figureIds),
+      again.includes(PHOTOREAL_PASS_LABELS.figureIds),
+      engine.textureSpecs.filter((spec) => spec.name === "test view figures:ids colour").length,
+    ]).toEqual([false, true, false, true, 2]);
+    renderer.dispose();
+  });
+
+  it("resolves an emitting figure by the resolve's emissive form (plan R07, R08.T18.a)", async () => {
+    const { engine, renderer, frame } = await handedOver();
+    await renderer.prepareEmissive();
+    const field = surfaceTemperatureFieldOf(lavaWorldSurface());
+    const [planet] = frame.bodies;
+    if (planet === undefined) {
+      throw new Error("the frame has its planet");
+    }
+    const glowing = { ...frame, bodies: [{ ...planet, thermal: field }], geometry: SCREEN_FIGURES };
+    renderer.render(new RecordingView(), glowing);
+    await microtasks();
+    const from = engine.targetFrames.length;
+    renderer.render(new RecordingView(), glowing);
+    expect(
+      engine.targetFrames
+        .slice(from)
+        .find((f) => f.label === PHOTOREAL_PASS_LABELS.figureResolve)
+        ?.draws.map((draw) => draw.material.name),
+    ).toEqual(["bodies:figureResolveEmissive"]);
+    renderer.dispose();
+  });
+
+  it("draws the terrain by the visibility buffer: its ID raster into the view's IDs with the scene's depth, then the resolve over them, the figures and the rest (R14.T2.c–e)", async () => {
+    const { engine, renderer, frame } = await handedOver();
+    const raster = drawOfName("id raster");
+    const resolve = drawOfName("resolve");
+    const fins = drawOfName("fins");
+    const terrain: FrameTerrain = {
+      surveyCoverage: () => null,
+      surveyedWhole: () => false,
+      draws: () => [drawOfName("forward")],
+      symbologyDepth: () => [],
+      sceneDepth: () => false,
+      lateDraws: () => [],
+      visibility: () => ({ raster: [raster], resolve: [resolve], forward: [fins] }),
+      opaqueDraws: () => [],
+    };
+    const from = engine.targetFrames.length;
+    renderer.render(new RecordingView(), { ...frame, geometry: BY_IDS, terrain });
+    const frames = engine.targetFrames.slice(from);
+    const at = (label: string): number => frames.findIndex((f) => f.label === label);
+    const resolvePass = frames[at(VISIBILITY_RESOLVE_LABEL)];
+    const idTarget = engine.textureSpecs.find((spec) => spec.name === "test view:ids colour");
+    expect([
+      at(PHOTOREAL_PASS_LABELS.bodies),
+      at(VISIBILITY_RASTER_LABEL) >= 0 &&
+        at(VISIBILITY_RASTER_LABEL) < at(VISIBILITY_RESOLVE_LABEL),
+      frames[at(VISIBILITY_RASTER_LABEL)]?.draws,
+      resolvePass?.colourLoad,
+      resolvePass?.draws.map((draw) => draw.material.name),
+      Object.keys(resolvePass?.draws[0]?.textures ?? {}),
+      idTarget?.format,
+    ]).toEqual([
+      -1,
+      true,
+      [raster],
+      "load",
+      ["resolve", "bodies:smoothMeshCluster", "bodies:smoothMeshCluster", "fins"],
+      [VISIBILITY_IDS_TEXTURE],
+      "r32uint",
+    ]);
+    renderer.dispose();
+  });
+
+  it("shades the figures once a pixel by the visibility buffer: their raster after the terrain's, their resolve after the terrain's in its pass (plan R07)", async () => {
+    const { engine, renderer, frame } = await handedOver();
+    renderer.render(new RecordingView(), { ...frame, geometry: SCREEN_FIGURES });
+    await microtasks();
+    const terrain: FrameTerrain = {
+      surveyCoverage: () => null,
+      surveyedWhole: () => false,
+      draws: () => [drawOfName("forward")],
+      symbologyDepth: () => [],
+      sceneDepth: () => false,
+      lateDraws: () => [],
+      visibility: () => ({
+        raster: [drawOfName("id raster")],
+        resolve: [drawOfName("resolve")],
+        forward: [drawOfName("fins")],
+      }),
+      opaqueDraws: () => [],
+    };
+    const from = engine.targetFrames.length;
+    renderer.render(new RecordingView(), {
+      ...frame,
+      geometry: { ...SCREEN_FIGURES, shading: "visibility" },
+      terrain,
+    });
+    const labels = engine.targetFrames.slice(from).map((f) => f.label);
+    const resolvePass = engine.targetFrames
+      .slice(from)
+      .find((f) => f.label === VISIBILITY_RESOLVE_LABEL);
+    expect([
+      labels.filter((label) =>
+        [
+          VISIBILITY_RASTER_LABEL,
+          PHOTOREAL_PASS_LABELS.figureIds,
+          VISIBILITY_RESOLVE_LABEL,
+          PHOTOREAL_PASS_LABELS.figureResolve,
+        ].includes(label),
+      ),
+      resolvePass?.draws.map((draw) => draw.material.name),
+    ]).toEqual([
+      [VISIBILITY_RASTER_LABEL, PHOTOREAL_PASS_LABELS.figureIds, VISIBILITY_RESOLVE_LABEL],
+      ["resolve", "bodies:figureResolve", "fins"],
+    ]);
+    renderer.dispose();
+  });
+
+  /** A terrain by IDs of one raster, resolve and forward draw each, for `handedOver`'s frame. */
+  function byIdsTerrain(): FrameTerrain {
+    const by = { raster: [drawOfName("id raster")], resolve: [drawOfName("resolve")], forward: [] };
+    return {
+      surveyCoverage: () => null,
+      surveyedWhole: () => false,
+      draws: () => [drawOfName("forward")],
+      symbologyDepth: () => [],
+      sceneDepth: () => false,
+      lateDraws: () => [],
+      visibility: () => by,
+      opaqueDraws: () => [],
+    };
+  }
+
+  /** The high setting's geometry shading by the visibility buffer, its figures forward. */
+  const BY_IDS = {
+    ...SETTINGS.high.geometry,
+    shading: "visibility" as const,
+    figureShading: "forward" as const,
+  };
+
+  it("keeps a resolve's draw with the view's IDs bound from frame to frame (R14.T2.d)", async () => {
+    const { engine, renderer, frame } = await handedOver();
+    const terrain = byIdsTerrain();
+    const resolved = (): DrawItem | undefined => {
+      renderer.render(new RecordingView(), { ...frame, geometry: BY_IDS, terrain });
+      return engine.targetFrames.findLast((f) => f.label === VISIBILITY_RESOLVE_LABEL)?.draws[0];
+    };
+    const first = resolved();
+    expect(resolved()).toBe(first);
+    renderer.dispose();
+  });
+
+  it("resizes the view's IDs with its scene target, the resolve bound to the resized IDs (R14.T2.c)", async () => {
+    const { engine, renderer, frame } = await handedOver();
+    const terrain = byIdsTerrain();
+    const idsBound = (viewport: ViewSize): TextureHandle | undefined => {
+      renderer.render(new RecordingView(), {
+        ...frame,
+        viewport,
+        presentedPx: viewport,
+        geometry: BY_IDS,
+        terrain,
+      });
+      return engine.targetFrames.findLast((f) => f.label === VISIBILITY_RESOLVE_LABEL)?.draws[0]
+        ?.textures[VISIBILITY_IDS_TEXTURE];
+    };
+    const before = idsBound(VIEWPORT);
+    const kept = idsBound(VIEWPORT);
+    // The counting engine remakes a target's textures at a resize, as the adapter does.
+    const resized = idsBound({ widthPx: VIEWPORT.widthPx / 2, heightPx: VIEWPORT.heightPx / 2 });
+    expect([kept === before, resized === before, resized?.name]).toEqual([
+      true,
+      false,
+      "test view:ids colour",
+    ]);
+    renderer.dispose();
+  });
+
+  it("draws forward a frame whose terrain gives none by IDs (R14.T2.c)", async () => {
+    const { engine, renderer, frame } = await handedOver();
+    const terrain = { ...byIdsTerrain(), visibility: () => null };
+    const from = engine.targetFrames.length;
+    renderer.render(new RecordingView(), { ...frame, geometry: BY_IDS, terrain });
+    const frames = engine.targetFrames.slice(from);
+    expect([
+      frames.some((f) => f.label === VISIBILITY_RASTER_LABEL),
+      frames
+        .find((f) => f.label === PHOTOREAL_PASS_LABELS.bodies)
+        ?.draws.map((draw) => draw.material.name)
+        .at(-1),
+    ]).toEqual([false, "forward"]);
+    renderer.dispose();
+  });
+
+  it("lets the view's IDs go at a frame whose setting shades forward, and makes them again after (R14.T2.c)", async () => {
+    const { engine, renderer, frame } = await handedOver();
+    let ids = true;
+    const terrain: FrameTerrain = {
+      surveyCoverage: () => null,
+      surveyedWhole: () => false,
+      draws: () => [drawOfName("forward")],
+      symbologyDepth: () => [],
+      sceneDepth: () => false,
+      lateDraws: () => [],
+      visibility: () =>
+        ids ? { raster: [drawOfName("id raster")], resolve: [], forward: [] } : null,
+      opaqueDraws: () => [],
+    };
+    const made = (): number =>
+      engine.textureSpecs.filter((spec) => spec.name === "test view:ids colour").length;
+    const byIds = {
+      ...frame,
+      geometry: { ...SETTINGS.high.geometry, shading: "visibility" as const },
+    };
+    renderer.render(new RecordingView(), { ...byIds, terrain });
+    ids = false;
+    renderer.render(new RecordingView(), { ...frame, terrain });
+    // Let go at the forward frame, the view's IDs are made again at the next frame by them.
+    ids = true;
+    renderer.render(new RecordingView(), { ...byIds, terrain });
+    expect(made()).toBe(2);
+    renderer.dispose();
+  });
+
+  it("splits the bodies pass around the view's depth pyramid with the two-pass occlusion, and draws it whole without (R14.T3.d)", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new PhotorealRenderer(engine, "test view");
+    const camera = { orientation: IDENTITY_QUATERNION, fovXRad: Math.PI / 3 };
+    await renderer.prepare(VIEWPORT, "high", "eye", camera);
+    const given: Array<FrameOcclusion | undefined> = [];
+    const terrain: FrameTerrain = {
+      surveyCoverage: () => null,
+      surveyedWhole: () => false,
+      draws: (_plan, _bodies, occlusion) => {
+        given.push(occlusion);
+        return [drawOfName("early")];
+      },
+      symbologyDepth: () => [],
+      sceneDepth: () => false,
+      lateDraws: () => [drawOfName("late")],
+      visibility: () => null,
+      opaqueDraws: () => [],
+    };
+    const occluded = { ...SETTINGS.high.geometry, occlusion: "hzb" as const };
+    const passes = (): Array<readonly [string, string]> => {
+      const from = engine.targetFrames.length;
+      const dispatched = engine.dispatched.length;
+      renderer.render(new RecordingView(), { ...frameWith([]), geometry: occluded, terrain });
+      const frames = engine.targetFrames.slice(from).map((f, n) => [f.label, n] as const);
+      const pyramid = engine.dispatched
+        .slice(dispatched)
+        .filter((d) => d.pass === DEPTH_PYRAMID_LABEL)
+        .map((d) => [d.pass ?? "", d.framesBefore - from] as const);
+      return [...frames, ...pyramid]
+        .toSorted((a, b) => a[1] - b[1] || (a[0] === DEPTH_PYRAMID_LABEL ? -1 : 1))
+        .map(([label]) => [label, label === DEPTH_PYRAMID_LABEL ? "dispatch" : "frame"] as const)
+        .filter(
+          ([label], n, all) =>
+            label !== DEPTH_PYRAMID_LABEL || all[n - 1]?.[0] !== DEPTH_PYRAMID_LABEL,
+        );
+    };
+    const first = passes();
+    const late = engine.targetFrames.find((f) => f.label === PHOTOREAL_PASS_LABELS.bodiesLate);
+    const pyramid = engine.dispatched.find((d) => d.pass === DEPTH_PYRAMID_LABEL);
+    expect([
+      first.slice(1, 4),
+      [late?.colourLoad, late?.draws.map((draw) => draw.material.name)],
+      engine.dispatched.filter((d) => d.pass === DEPTH_PYRAMID_LABEL).length,
+      pyramid?.bindings.sampled["depth"]?.name,
+    ]).toEqual([
+      [
+        [PHOTOREAL_PASS_LABELS.bodies, "frame"],
+        [DEPTH_PYRAMID_LABEL, "dispatch"],
+        [PHOTOREAL_PASS_LABELS.bodiesLate, "frame"],
+      ],
+      ["load", ["late"]],
+      pyramidLevels(VIEWPORT).length,
+      "test view:hdr depth",
+    ]);
+    // The view's first frame drops the visibility, the next keeps it, a cut drops it again.
+    passes();
+    renderer.dropHistograms();
+    passes();
+    renderer.render(new RecordingView(), {
+      ...frameWith([]),
+      geometry: occluded,
+      terrain,
+      present: false,
+    });
+    passes();
+    // Without the occlusion, one bodies pass and no pyramid.
+    const from = engine.targetFrames.length;
+    const dispatched = engine.dispatched.length;
+    renderer.render(new RecordingView(), { ...frameWith([]), terrain });
+    expect([
+      given.map((occlusion) => occlusion?.fresh),
+      engine.targetFrames.slice(from).filter((f) => f.label.startsWith("bodies")).length,
+      engine.dispatched.slice(dispatched).some((d) => d.pass === DEPTH_PYRAMID_LABEL),
+    ]).toEqual([[true, false, true, true, false, undefined], 1, false]);
+    renderer.dispose();
+  });
+
+  it("by the visibility buffer with the two-pass occlusion, draws the ID raster, the pyramid of its depth, the late raster into the same IDs, then the one resolve (R14.T2.d)", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new PhotorealRenderer(engine, "test view");
+    const camera = { orientation: IDENTITY_QUATERNION, fovXRad: Math.PI / 3 };
+    await renderer.prepare(VIEWPORT, "high", "eye", camera);
+    const raster = drawOfName("id raster");
+    const lateRaster = drawOfName("late id raster");
+    const terrain: FrameTerrain = {
+      ...byIdsTerrain(),
+      visibility: () => ({ raster: [raster], resolve: [drawOfName("resolve")], forward: [] }),
+      lateDraws: () => [lateRaster],
+    };
+    const geometry = { ...BY_IDS, occlusion: "hzb" as const };
+    const from = engine.targetFrames.length;
+    const dispatched = engine.dispatched.length;
+    renderer.render(new RecordingView(), { ...frameWith([]), geometry, terrain });
+    const frames = engine.targetFrames.slice(from);
+    const at = (label: string): number => frames.findIndex((f) => f.label === label);
+    const pyramid = engine.dispatched
+      .slice(dispatched)
+      .filter((d) => d.pass === DEPTH_PYRAMID_LABEL)
+      .map((d) => d.framesBefore - from);
+    const late = frames[at(VISIBILITY_LATE_RASTER_LABEL)];
+    expect([
+      [at(VISIBILITY_RASTER_LABEL) + 1, at(VISIBILITY_RESOLVE_LABEL) - 1],
+      new Set(pyramid),
+      [late?.colourLoad, late?.draws],
+      frames[at(VISIBILITY_RASTER_LABEL)]?.colourLoad,
+      frames.filter((f) => f.label.startsWith("bodies")).length,
+      pyramid.length,
+    ]).toEqual([
+      [at(VISIBILITY_LATE_RASTER_LABEL), at(VISIBILITY_LATE_RASTER_LABEL)],
+      new Set([at(VISIBILITY_RASTER_LABEL) + 1]),
+      ["load", [lateRaster]],
+      undefined,
+      0,
+      pyramidLevels(VIEWPORT).length,
+    ]);
+    renderer.dispose();
+  });
+
+  it("drops the two-pass occlusion's visibility at a change of internal scale and after a restore (R14.T3.d)", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new PhotorealRenderer(engine, "test view");
+    const camera = { orientation: IDENTITY_QUATERNION, fovXRad: Math.PI / 3 };
+    await renderer.prepare(VIEWPORT, "high", "eye", camera);
+    const given: Array<boolean | undefined> = [];
+    const terrain: FrameTerrain = {
+      surveyCoverage: () => null,
+      surveyedWhole: () => false,
+      draws: (_plan, _bodies, occlusion) => {
+        given.push(occlusion?.fresh);
+        return [drawOfName("early")];
+      },
+      symbologyDepth: () => [],
+      sceneDepth: () => false,
+      lateDraws: () => [],
+      visibility: () => null,
+      opaqueDraws: () => [],
+    };
+    const geometry = { ...SETTINGS.high.geometry, occlusion: "hzb" as const };
+    // Drawn at an internal scale of 1.5, its presented size kept, then again after a restore at it.
+    const scaled = { widthPx: VIEWPORT.widthPx * 1.5, heightPx: VIEWPORT.heightPx * 1.5 };
+    const render = (viewport: typeof VIEWPORT): void => {
+      renderer.render(new RecordingView(), { ...frameWith([]), viewport, geometry, terrain });
+    };
+    render(VIEWPORT);
+    render(VIEWPORT);
+    render(scaled);
+    render(scaled);
+    engine.restore();
+    await renderer.prepare(VIEWPORT, "high", "eye", camera);
+    render(scaled);
+    render(scaled);
+    expect(given).toEqual([true, false, true, false, true, false]);
     renderer.dispose();
   });
 
@@ -223,6 +1023,1141 @@ describe("the photorealistic renderer", () => {
   });
 });
 
+/** Earth's mean radius, m: R05's spherical Earth, on which R05's medium's tables are built. */
+const EARTH_RADIUS_M = 6.371e6;
+
+/** A body of the frame at `centreM` from the camera, with `id`. */
+function bodyAt(id: string, centreM: ReturnType<typeof vec3>): LitBodyInput {
+  const lit = aLitBody();
+  return { id, centreM, figure: lit.figure, photometry: lit.photometry, lighting: undefined };
+}
+
+/**
+ * A body's atmosphere in the frame over `tables`, its camera from the body's centre along the
+ * galactic axes, which are its body-fixed ones here.
+ */
+function airOf(body: LitBodyInput, tables: AtmosphereTables): FrameAtmosphere {
+  return {
+    id: body.id,
+    tables,
+    camera: {
+      positionM: vec3(-body.centreM.x, -body.centreM.y, -body.centreM.z),
+      orientation: IDENTITY_QUATERNION,
+      fovXRad: Math.PI / 3,
+      viewport: VIEWPORT,
+    },
+    toBodyFixed: IDENTITY_QUATERNION,
+  };
+}
+
+/** A prepared renderer on the counting engine, with a view recording its canvas frames. */
+async function preparedRenderer(): Promise<{
+  readonly engine: Awaited<ReturnType<typeof countingRenderEngine>>;
+  readonly view: RecordingView;
+  readonly renderer: PhotorealRenderer;
+}> {
+  const engine = await countingRenderEngine();
+  const view = new RecordingView();
+  const renderer = new PhotorealRenderer(engine, "test view");
+  await renderer.prepare(VIEWPORT, "high", "eye", {
+    orientation: IDENTITY_QUATERNION,
+    fovXRad: Math.PI / 3,
+  });
+  return { engine, view, renderer };
+}
+
+describe("the photorealistic renderer's atmosphere (R08.T10.b)", () => {
+  it("submits no atmosphere for a view whose bodies have no medium", async () => {
+    const { engine, view, renderer } = await preparedRenderer();
+    renderer.render(view, frameWith([]));
+    expect(engine.targetFrames.map((f) => f.label)).not.toContain(ATMOSPHERE_COMPOSITE_PASS);
+    expect(engine.dispatched.map((d) => d.kernel)).not.toContain("atmosphere ray march");
+    renderer.dispose();
+  });
+
+  it("draws a body's composite after the discs, over the scene target, for the passes after to read", async () => {
+    const { engine, view, renderer } = await preparedRenderer();
+    const planet = bodyAt("0200080020000000.0300", vec3(0, 0, -3e7));
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_RADIUS_M);
+    renderer.render(view, {
+      ...frameWith([]),
+      bodies: [planet],
+      atmospheres: [airOf(planet, tables)],
+    });
+    const labels = engine.targetFrames.map((f) => f.label);
+    const at = labels.indexOf(ATMOSPHERE_COMPOSITE_PASS);
+    expect(labels.slice(at - 1, at + 1)).toEqual([
+      PHOTOREAL_PASS_LABELS.discs,
+      ATMOSPHERE_COMPOSITE_PASS,
+    ]);
+    const composite = engine.targetFrames[at]?.draws[0];
+    const scene = engine.targetFrames[0]?.draws;
+    expect(composite?.material.name).toBe("atmosphere composite");
+    expect(scene).toBeDefined();
+    // The tone-mapping pass reads the composite's target, not the scene target the sky drew in.
+    const tonemapped = view.frames[0]?.draws[0]?.textures["hdrColour"];
+    expect(tonemapped).not.toBe(composite?.textures["sceneColour"]);
+    renderer.dispose();
+    tables.dispose();
+  });
+
+  it.each([
+    ["at low's sizes, the march at half resolution", "low", 1, 1],
+    ["at high's, the march at full resolution", "high", 0, 0],
+  ] as const)(
+    "takes its setting's levers: what lies behind the sky from above at the march's resolution %s (the owner's priority)",
+    async (_, atmosphereSetting, dispatches, lever) => {
+      const { engine, view, renderer } = await preparedRenderer();
+      const planet = bodyAt("0200080020000000.0300", vec3(0, 0, -3e7));
+      const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_RADIUS_M);
+      renderer.render(view, {
+        ...frameWith([]),
+        atmosphereSetting,
+        bodies: [planet],
+        atmospheres: [airOf(planet, tables)],
+      });
+      const composite = engine.targetFrames.find((f) => f.label === ATMOSPHERE_COMPOSITE_PASS);
+      expect({
+        dispatches: engine.dispatched.filter((d) => d.pass === ATMOSPHERE_BEHIND_PASS).length,
+        lever: composite?.draws[0]?.uniforms["levers"]?.[0],
+      }).toEqual({ dispatches, lever });
+      renderer.dispose();
+      tables.dispose();
+    },
+  );
+
+  it("draws its atmospheres with a frame profile's levers over its setting's, the cull's made up front and the packed limb's at its first frame (R08.T8.d)", async () => {
+    vi.useFakeTimers();
+    const engine = await countingRenderEngine();
+    const view = new RecordingView();
+    const renderer = new PhotorealRenderer(engine, "test view");
+    const levers = { marchCover: "tiles", limbRays: "packed" } as const;
+    await renderer.prepare(
+      VIEWPORT,
+      "high",
+      "eye",
+      { orientation: IDENTITY_QUATERNION, fovXRad: Math.PI / 3 },
+      levers,
+    );
+    const ahead = new Set(engine.kernelPairs.map((pair) => pair.name));
+    const planet = bodyAt("0200080020000000.0300", vec3(0, 0, -3e7));
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_RADIUS_M);
+    const frame: PhotorealFrame = {
+      ...frameWith([]),
+      atmosphereLevers: levers,
+      bodies: [planet],
+      atmospheres: [airOf(planet, tables)],
+    };
+    const marches = (): string[] =>
+      engine.dispatched
+        .map((d) => d.kernel)
+        .filter((name) => name.startsWith("atmosphere ray march"));
+    renderer.render(view, frame);
+    const first = marches();
+    // The packed limb's kernels made in the background, its next frame packs.
+    await vi.advanceTimersByTimeAsync(0);
+    engine.dispatched.length = 0;
+    renderer.render(view, frame);
+    expect({
+      ahead: [
+        ahead.has(RAY_MARCH_CENTRE_SPECIAL_KERNEL.name),
+        LIMB_KERNELS.some((pair) => ahead.has(pair.name)),
+      ],
+      first,
+      next: marches(),
+    }).toEqual({
+      ahead: [true, false],
+      first: [RAY_MARCH_CENTRE_SPECIAL_KERNEL.name, RAY_MARCH_SPECIAL_KERNEL.name],
+      next: [
+        RAY_MARCH_CENTRE_SPECIAL_KERNEL.name,
+        RAY_MARCH_PACKED_SPECIAL_KERNEL.name,
+        "atmosphere ray march's limb dispatch",
+        RAY_MARCH_LIMB_SPECIAL_KERNEL.name,
+        "atmosphere ray march's limb resolve",
+      ],
+    });
+    renderer.dispose();
+    tables.dispose();
+    vi.useRealTimers();
+  });
+
+  it("lights a body with air through its sources' table, the setting's lever (R08.T9.b)", async () => {
+    const { engine, view, renderer } = await preparedRenderer();
+    const planet = bodyAt("0200080020000000.0300", vec3(0, 0, -3e7));
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_RADIUS_M);
+    renderer.render(view, {
+      ...frameWith([]),
+      bodies: [planet],
+      atmospheres: [airOf(planet, tables)],
+    });
+    const bound = [
+      ...engine.targetFrames.flatMap((frame) =>
+        frame.draws.flatMap((draw) => draw.textures["atmosphereSourceTable"] ?? []),
+      ),
+      ...engine.dispatched.flatMap((d) => d.bindings.sampled["atmosphere_source_table"] ?? []),
+    ];
+    const table = tables.sourceTransmittance();
+    // The frame's other lit body has no air, and binds the airless defaults.
+    expect({
+      table: bound.includes(table),
+      perFragment: bound.some((texture) => texture.name.endsWith("per fragment")),
+      built: engine.dispatched.some((d) => d.kernel === SOURCE_TRANSMITTANCE_KERNEL.name),
+    }).toEqual({ table: true, perFragment: false, built: true });
+    renderer.dispose();
+    tables.dispose();
+  });
+
+  it("marches a body with air from its sources' table, the setting's lever, and per step under a frame profile's way back (R08.T8.e's table)", async () => {
+    const { engine, view, renderer } = await preparedRenderer();
+    const planet = bodyAt("0200080020000000.0300", vec3(0, 0, -3e7));
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_RADIUS_M);
+    const frame: PhotorealFrame = {
+      ...frameWith([]),
+      bodies: [planet],
+      atmospheres: [airOf(planet, tables)],
+    };
+    const bound = (): ReadonlyArray<unknown> =>
+      engine.dispatched
+        .filter((d) => d.kernel.startsWith("atmosphere ray march"))
+        .flatMap((d) => d.bindings.sampled["atmosphere_source_table"] ?? []);
+    renderer.render(view, frame);
+    const table = bound();
+    engine.dispatched.length = 0;
+    renderer.render(view, { ...frame, atmosphereLevers: { marchSourceTransmittance: "per-step" } });
+    const perStep = bound();
+    expect({
+      table: table.length > 0 && table.every((t) => t === tables.sourceTransmittance()),
+      perStep:
+        perStep.length > 0 && perStep.every((t) => t === tables.perFragmentSourceTransmittance),
+    }).toEqual({ table: true, perStep: true });
+    renderer.dispose();
+    tables.dispose();
+  });
+
+  it.each([
+    ["the setting's", undefined, 1],
+    ["extinguished under a frame profile's lever", { surfaceLobes: "extinguished" }, 0],
+    ["kept beside the decked ground's lever", { deckedAirSurface: "uniform" }, 1],
+  ] as const)(
+    "marches a drawn surface's forward lobes %s (R08)",
+    async (_, levers: AtmosphereLeversOverride | undefined, w) => {
+      const { engine, view, renderer } = await preparedRenderer();
+      const planet = bodyAt("0200080020000000.0300", vec3(0, 0, -3e7));
+      const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_RADIUS_M);
+      const frame: PhotorealFrame = {
+        ...frameWith([]),
+        bodies: [planet],
+        atmospheres: [airOf(planet, tables)],
+      };
+      // The setting's first, so that the lever's frame must make its atmosphere again.
+      renderer.render(view, frame);
+      renderer.render(view, levers === undefined ? frame : { ...frame, atmosphereLevers: levers });
+      // The march's view is the composite's Draw's first members, its forward.w among them.
+      const composites = engine.targetFrames.filter((f) => f.label === ATMOSPHERE_COMPOSITE_PASS);
+      expect(composites.at(-1)?.draws[0]?.uniforms["forward"]?.[3]).toBe(w);
+      renderer.dispose();
+      tables.dispose();
+    },
+  );
+
+  /** A renderer prepared for the test's view under a frame profile's `levers`. */
+  async function preparedWith(levers: AtmosphereLeversOverride | undefined): Promise<{
+    readonly engine: Awaited<ReturnType<typeof countingRenderEngine>>;
+    readonly renderer: PhotorealRenderer;
+  }> {
+    const engine = await countingRenderEngine();
+    const renderer = new PhotorealRenderer(engine, "test view");
+    await renderer.prepare(
+      VIEWPORT,
+      "high",
+      "eye",
+      { orientation: IDENTITY_QUATERNION, fovXRad: Math.PI / 3 },
+      levers,
+    );
+    return { engine, renderer };
+  }
+
+  it("makes the thick read's march from the table ahead on the settings' levers (perf-thick-march)", async () => {
+    const { engine, renderer } = await preparedWith(undefined);
+    expect(engine.kernelPairs.some((pair) => pair.name === RAY_MARCH_THICK_TABLE_KERNEL.name)).toBe(
+      true,
+    );
+    renderer.dispose();
+  });
+
+  it("makes no thick march from the table ahead under a frame profile's `per-step` (perf-thick-march)", async () => {
+    const { engine, renderer } = await preparedWith({ marchSourceTransmittance: "per-step" });
+    expect(engine.kernelPairs.some((pair) => pair.name === RAY_MARCH_THICK_TABLE_KERNEL.name)).toBe(
+      false,
+    );
+    renderer.dispose();
+  });
+
+  it.each([
+    [
+      "from the table on the settings' levers",
+      undefined,
+      RAY_MARCH_THICK_TABLE_SPECIAL_KERNEL.name,
+    ],
+    [
+      "per step under a frame profile's `per-step`",
+      { marchSourceTransmittance: "per-step" } as const,
+      RAY_MARCH_THICK_SPECIAL_KERNEL.name,
+    ],
+  ] as const)(
+    "marches a thick body of one band over the shared read %s (perf-thick-march)",
+    async (_way, levers, march) => {
+      const { engine, renderer } = await preparedWith(levers);
+      const view = new RecordingView();
+      const planet = bodyAt("0200080020000000.0300", vec3(0, 0, -3e7));
+      const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_RADIUS_M);
+      tables.setThickTables(patternedThickBake(tables.plan.bands, kernelMedium(tables.medium), 1));
+      renderer.render(view, {
+        ...frameWith([]),
+        ...(levers === undefined ? {} : { atmosphereLevers: levers }),
+        bodies: [planet],
+        atmospheres: [airOf(planet, tables)],
+      });
+      expect(
+        engine.dispatched
+          .map((d) => d.kernel)
+          .filter((name) => name.startsWith("atmosphere ray march")),
+      ).toEqual([march]);
+      renderer.dispose();
+      tables.dispose();
+    },
+  );
+
+  it("draws a far body's composite over its air's area alone, over a copy of the colour it reads (R08.T16.a.2)", async () => {
+    const { engine, view, renderer } = await preparedRenderer();
+    // Some 8 px across the test's 64 px view.
+    const planet = bodyAt("0200080020000000.0300", vec3(0, 0, -1e8));
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_RADIUS_M);
+    renderer.render(view, {
+      ...frameWith([]),
+      bodies: [planet],
+      atmospheres: [airOf(planet, tables)],
+    });
+    const composite = engine.targetFrames.find((f) => f.label === ATMOSPHERE_COMPOSITE_PASS);
+    const [x0 = 0, y0 = 0, x1 = 0, y1 = 0] = composite?.draws[0]?.uniforms["marchArea"] ?? [];
+    expect(composite?.colourFrom).toBeDefined();
+    expect(composite?.colourFrom).toBe(composite?.draws[0]?.textures["sceneColour"]);
+    // The march's area, its tiles about the view's centre, and two pixels more each side.
+    expect([x1 - x0, y1 - y0]).toEqual([16, 16]);
+    expect(composite?.scissor).toEqual({ x: x0 - 2, y: y0 - 2, width: 20, height: 20 });
+    renderer.dispose();
+    tables.dispose();
+  });
+
+  it("draws the composite over the whole frame from inside the air (R08.T16.a.2)", async () => {
+    const { engine, view, renderer } = await preparedRenderer();
+    // The camera 2 m over the ground, under the air's top.
+    const planet = bodyAt("0200080020000000.0300", vec3(0, -(EARTH_RADIUS_M + 2), 0));
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_RADIUS_M);
+    renderer.render(view, {
+      ...frameWith([]),
+      bodies: [planet],
+      atmospheres: [airOf(planet, tables)],
+    });
+    const composite = engine.targetFrames.find((f) => f.label === ATMOSPHERE_COMPOSITE_PASS);
+    expect(composite).toBeDefined();
+    expect([composite?.colourFrom, composite?.scissor]).toEqual([undefined, undefined]);
+    renderer.dispose();
+    tables.dispose();
+  });
+
+  it("draws a body past 1.1 × 10⁹ m by its disc table, with no composite, once the air forms are prepared, and by its full passes until then (R08.T16.b)", async () => {
+    const { engine, view, renderer } = await preparedRenderer();
+    // Some 7 px across the test's 64 px view.
+    const planet = {
+      ...bodyAt("0200080020000000.0300", vec3(0, 0, -1.5e9)),
+      figure: { equatorialRadiusM: 1e8, polarRadiusM: 1e8, pole: null },
+    };
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, 1e8);
+    tables.setDiscReflectance({
+      bands: 1,
+      slots: 1,
+      sunFloor: -0.18,
+      values: new Float32Array(DISC_LAYER_VALUES),
+    });
+    const frame = { ...frameWith([]), bodies: [planet], atmospheres: [airOf(planet, tables)] };
+    const before = renderer.render(view, frame);
+    expect([
+      before?.tabled.size,
+      engine.targetFrames.map((f) => f.label).includes(ATMOSPHERE_COMPOSITE_PASS),
+    ]).toEqual([0, true]);
+    await renderer.prepareAir();
+    engine.targetFrames.length = 0;
+    const after = renderer.render(view, { ...frame, previousTabled: before?.tabled });
+    const discs = engine.targetFrames.find((f) => f.label === PHOTOREAL_PASS_LABELS.discs);
+    expect([
+      [...(after?.tabled ?? [])],
+      after?.regimes.get(planet.id),
+      engine.targetFrames.map((f) => f.label).includes(ATMOSPHERE_COMPOSITE_PASS),
+      discs?.draws.map((draw) => draw.material.name),
+      discs?.draws[0]?.textures["discReflectance"],
+    ]).toEqual([
+      [planet.id],
+      "disc",
+      false,
+      ["bodies:discAir", "bodies:discLimbAir"],
+      tables.discReflectance?.texture,
+    ]);
+    renderer.dispose();
+    tables.dispose();
+  });
+
+  it("lights a body with air through its tables and draws it with depth, as a mesh", async () => {
+    const { engine, view, renderer } = await preparedRenderer();
+    const planet = bodyAt("0200080020000000.0300", vec3(0, 0, -3e7));
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_RADIUS_M);
+    const plan = renderer.render(view, {
+      ...frameWith([]),
+      bodies: [planet],
+      atmospheres: [airOf(planet, tables)],
+    });
+    expect(plan?.regimes.get(planet.id)).toBe("mesh");
+    expect(plan?.discs[0]?.atmosphere?.transmittance).toBe(tables.transmittance);
+    renderer.dispose();
+    tables.dispose();
+  });
+
+  it("draws an air body's mesh in the bodies pass before its composite (decision-r08-t10b-depth §6)", async () => {
+    const { engine, view, renderer } = await preparedRenderer();
+    const planet = bodyAt("0200080020000000.0300", vec3(0, 0, -3e7));
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_RADIUS_M);
+    renderer.render(view, {
+      ...frameWith([]),
+      bodies: [planet],
+      atmospheres: [airOf(planet, tables)],
+    });
+    const passes = engine.targetFrames.map((f) => [
+      f.label,
+      f.draws.map((draw) => draw.material.name),
+    ]);
+    const bodies = passes.findIndex(([label]) => label === PHOTOREAL_PASS_LABELS.bodies);
+    const composite = passes.findIndex(([label]) => label === ATMOSPHERE_COMPOSITE_PASS);
+    expect(passes[bodies]?.[1]).toContain("bodies:smoothMeshCluster");
+    expect(bodies).toBeGreaterThanOrEqual(0);
+    expect(bodies).toBeLessThan(composite);
+    renderer.dispose();
+    tables.dispose();
+  });
+
+  it("submits no composite for an air body drawn as a point", async () => {
+    const { engine, view, renderer } = await preparedRenderer();
+    // 6,371 km at 1.5 × 10¹¹ m spans well under 3 px of a 64 px view.
+    const planet = bodyAt("0200080020000000.0300", vec3(0, 0, -1.5e11));
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_RADIUS_M);
+    const plan = renderer.render(view, {
+      ...frameWith([]),
+      bodies: [planet],
+      atmospheres: [airOf(planet, tables)],
+    });
+    expect(plan?.regimes.get(planet.id)).toBe("point");
+    expect(engine.targetFrames.map((f) => f.label)).not.toContain(ATMOSPHERE_COMPOSITE_PASS);
+    renderer.dispose();
+    tables.dispose();
+  });
+
+  it("lays a handed-over body's air over its terrain, which takes its record's tables (R10.T16.c's binding)", async () => {
+    const { engine, view, renderer } = await preparedRenderer();
+    const camera = { orientation: IDENTITY_QUATERNION, fovXRad: Math.PI / 3 };
+    const planet = {
+      ...bodyAt("0200080020000000.0300", vec3(0, 0, -1e8)),
+      handoverReliefM: 4 * limbDistanceM(1e8, 6.371e6) * pixelAngleRad(camera, VIEWPORT),
+    };
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_RADIUS_M);
+    const terrainDraw: DrawItem = {
+      mesh: { kind: "mesh", name: "terrain patches" },
+      material: { kind: "material", name: "terrain-lit-baked-offsets" },
+      offsetFromCameraM: new Float32Array(3),
+      uniforms: {},
+      textures: {},
+    };
+    const lit: BodyFramePlan[] = [];
+    const terrain = {
+      surveyCoverage: () => null,
+      surveyedWhole: () => false,
+      draws: (plan: BodyFramePlan) => {
+        lit.push(plan);
+        return plan.meshes.some((mesh) => mesh.role.kind === "handed-over") ? [terrainDraw] : [];
+      },
+      symbologyDepth: () => [],
+      sceneDepth: () => false,
+      lateDraws: () => [],
+      visibility: () => null,
+      opaqueDraws: () => [],
+    };
+    const air = { ...frameWith([]), bodies: [planet], atmospheres: [airOf(planet, tables)] };
+    const first = renderer.render(view, air);
+    const from = engine.targetFrames.length;
+    renderer.render(view, { ...air, previousRegimes: first?.regimes ?? new Map(), terrain });
+    const labels = engine.targetFrames.slice(from).map((f) => f.label);
+    const bodiesAt = labels.indexOf(PHOTOREAL_PASS_LABELS.bodies);
+    expect(engine.targetFrames[from + bodiesAt]?.draws.map((d) => d.material.name)).toContain(
+      "terrain-lit-baked-offsets",
+    );
+    expect(bodiesAt).toBeLessThan(labels.indexOf(ATMOSPHERE_COMPOSITE_PASS));
+    const record = lit.at(-1)?.discs.find((each) => each.body === planet.id);
+    expect(record?.atmosphere?.transmittance).toBe(tables.transmittance);
+    renderer.dispose();
+    tables.dispose();
+  });
+
+  it("draws three bodies' composites, none into the target it reads", async () => {
+    const { engine, view, renderer } = await preparedRenderer();
+    const bodies = [
+      bodyAt("0200080020000000.0300", vec3(-3e7, 0, -6e7)),
+      bodyAt("0200080020000000.0400", vec3(0, 0, -8e7)),
+      bodyAt("0200080020000000.0500", vec3(3e7, 0, -1e8)),
+    ];
+    const tables = bodies.map(
+      () => new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_RADIUS_M),
+    );
+    renderer.render(view, {
+      ...frameWith([]),
+      bodies,
+      atmospheres: bodies.map((body, i) => {
+        const own = tables[i];
+        if (own === undefined) {
+          throw new Error("a body without its tables");
+        }
+        return airOf(body, own);
+      }),
+    });
+    const composites = engine.targetFrames.filter((f) => f.label === ATMOSPHERE_COMPOSITE_PASS);
+    expect(composites).toHaveLength(3);
+    // Each composite reads the colour the one before it drew, the first the scene's.
+    const reads = composites.map((f) => f.draws[0]?.textures["sceneColour"]?.name);
+    expect(new Set(reads.slice(1)).size).toBe(2);
+    expect(reads[1]).not.toBe(reads[0]);
+    expect(reads[2]).not.toBe(reads[1]);
+    renderer.dispose();
+    for (const each of tables) {
+      each.dispose();
+    }
+  });
+
+  it("draws two bodies' composites farthest first, the nearer over the farther", async () => {
+    const { engine, view, renderer } = await preparedRenderer();
+    const near = bodyAt("0200080020000000.0300", vec3(-2e7, 0, -4e7));
+    const far = bodyAt("0200080020000000.0400", vec3(2e7, 0, -8e7));
+    const nearTables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_RADIUS_M);
+    const farTables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_RADIUS_M);
+    renderer.render(view, {
+      ...frameWith([]),
+      bodies: [near, far],
+      atmospheres: [airOf(near, nearTables), airOf(far, farTables)],
+    });
+    const composites = engine.targetFrames.filter((f) => f.label === ATMOSPHERE_COMPOSITE_PASS);
+    expect(composites).toHaveLength(2);
+    const [first, second] = composites;
+    expect(first?.draws[0]?.textures["transmittance"]).toBe(farTables.transmittance);
+    expect(second?.draws[0]?.textures["transmittance"]).toBe(nearTables.transmittance);
+    // The nearer composite reads what the farther one drew.
+    expect(second?.draws[0]?.textures["sceneColour"]).not.toBe(
+      first?.draws[0]?.textures["sceneColour"],
+    );
+    renderer.dispose();
+    nearTables.dispose();
+    farTables.dispose();
+  });
+
+  it("lets a body's atmosphere go when the frame no longer draws it, and never disposes the cache's tables", async () => {
+    const { engine, view, renderer } = await preparedRenderer();
+    const released: string[] = [];
+    engine.onAllocation((event) => {
+      if (event.kind === "destroyed") {
+        released.push(event.name);
+      }
+    });
+    const planet = bodyAt("0200080020000000.0300", vec3(0, 0, -3e7));
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_RADIUS_M);
+    renderer.render(view, {
+      ...frameWith([]),
+      bodies: [planet],
+      atmospheres: [airOf(planet, tables)],
+    });
+    renderer.render(view, { ...frameWith([]), bodies: [planet] });
+    expect(released).toEqual(
+      expect.arrayContaining(["atmosphere sky view", "atmosphere aerial perspective"]),
+    );
+    renderer.dispose();
+    expect(released).not.toContain(tables.transmittance.name);
+    expect(() => {
+      tables.setMedium(R05_EARTH_REFERENCE, EARTH_RADIUS_M);
+    }).not.toThrow();
+    tables.dispose();
+  });
+
+  it("releases the atmospheres' composite and its triangle with the view", async () => {
+    const { engine, view, renderer } = await preparedRenderer();
+    const materials = vi.spyOn(engine, "releaseMaterial");
+    const meshes = vi.spyOn(engine, "releaseMesh");
+    const planet = bodyAt("0200080020000000.0300", vec3(0, 0, -3e7));
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_RADIUS_M);
+    renderer.render(view, {
+      ...frameWith([]),
+      bodies: [planet],
+      atmospheres: [airOf(planet, tables)],
+    });
+    renderer.dispose();
+    tables.dispose();
+    expect([
+      materials.mock.calls.filter(([material]) => material.name === "atmosphere composite").length,
+      meshes.mock.calls.filter(([mesh]) => mesh.name === "atmosphere composite triangle").length,
+    ]).toEqual([1, 1]);
+  });
+
+  describe("a body's air that throws as it is drawn (decision-r08-t10b-leans §2)", () => {
+    it("reports the body once over several frames, and draws the other body's air and the frame's passes", async () => {
+      const { engine, view, renderer } = await preparedRenderer();
+      const broken = bodyAt("0200080020000000.0300", vec3(-2e7, 0, -4e7));
+      const sound = bodyAt("0200080020000000.0400", vec3(2e7, 0, -8e7));
+      const brokenTables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_RADIUS_M);
+      const soundTables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_RADIUS_M);
+      // A view wider than the device's textures: its ray march's target cannot be made.
+      const tooWide = airOf(broken, brokenTables);
+      const wide = {
+        ...tooWide,
+        camera: { ...tooWide.camera, viewport: { widthPx: 1e6, heightPx: 36 } },
+      };
+      const reported: Array<readonly [string, boolean, string]> = [];
+      for (let frame = 0; frame < 3; frame += 1) {
+        // The frame's tables are the cache's, which holds a reported body failed and hands none.
+        const failed = new Set(reported.map(([body]) => body));
+        renderer.render(view, {
+          ...frameWith([]),
+          bodies: [broken, sound],
+          atmospheres: [wide, airOf(sound, soundTables)].filter((air) => !failed.has(air.id)),
+          onAtmosphereFailed: (body, error, viewName) => {
+            reported.push([body, error instanceof Error, viewName]);
+          },
+        });
+      }
+      expect(reported).toEqual([[broken.id, true, "test view"]]);
+      const composites = engine.targetFrames.filter((f) => f.label === ATMOSPHERE_COMPOSITE_PASS);
+      expect(composites.map((f) => f.draws[0]?.textures["transmittance"])).toEqual(
+        Array.from({ length: 3 }, () => soundTables.transmittance),
+      );
+      // Each frame is still tone-mapped onto the canvas.
+      expect(view.frames.filter((f) => f.label === TONEMAP_PASS)).toHaveLength(3);
+      renderer.dispose();
+      brokenTables.dispose();
+      soundTables.dispose();
+    });
+
+    it("reports nothing for a lost device's throw, which the graphics fault covers", async () => {
+      const { engine, view, renderer } = await preparedRenderer();
+      const seen = bodyAt("0200080020000000.0300", vec3(-2e7, 0, -4e7));
+      const next = bodyAt("0200080020000000.0400", vec3(2e7, 0, -8e7));
+      const seenTables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_RADIUS_M);
+      const nextTables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_RADIUS_M);
+      const failed = vi.fn<(body: string, error: unknown, viewName: string) => void>();
+      const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      // The first frame makes everything the second takes but the next body's ray march target,
+      // whose view is too wide for the device's textures.
+      const tooWide = airOf(next, nextTables);
+      renderer.render(view, {
+        ...frameWith([]),
+        bodies: [seen, next],
+        atmospheres: [
+          airOf(seen, seenTables),
+          { ...tooWide, camera: { ...tooWide.camera, viewport: { widthPx: 1e6, heightPx: 36 } } },
+        ],
+        onAtmosphereFailed: failed,
+      });
+      const before = failed.mock.calls.length;
+      // That target is made inside the loss's window, where every creation throws.
+      engine.loseDevice();
+      renderer.render(view, {
+        ...frameWith([]),
+        bodies: [seen, next],
+        atmospheres: [airOf(seen, seenTables), airOf(next, nextTables)],
+        onAtmosphereFailed: failed,
+      });
+      expect([before, failed.mock.calls.length, logged.mock.calls.length]).toEqual([1, 1, 0]);
+      engine.restore();
+      renderer.dispose();
+      seenTables.dispose();
+      nextTables.dispose();
+    });
+
+    it("tells a lost device's throws by their type", () => {
+      expect([
+        lostDevice(new EngineUnavailable("createTexture")),
+        lostDevice(new AtmosphereRetired()),
+        lostDevice(new RangeError("the device has no device")),
+      ]).toEqual([true, true, false]);
+    });
+  });
+
+  describe("a body's air whose figure is off the view (decision-r08-t10b-leans §3)", () => {
+    /**
+     * A body beside the view's right edge at 3 × 10⁷ m ahead, its centre `beyondM` past the edge's
+     * plane, the margin `sphereOutsideView` allows included.
+     */
+    function besideView(beyondM: number): LitBodyInput {
+      const tanHalf = Math.tan(Math.PI / 6);
+      const tanX = tanHalf + (OUTSIDE_VIEW_MARGIN_PX * 2 * tanHalf) / VIEWPORT.widthPx;
+      const aheadM = 3e7;
+      return bodyAt(
+        "0200080020000000.0300",
+        vec3(tanX * aheadM + beyondM * Math.hypot(1, tanX), 0, -aheadM),
+      );
+    }
+
+    /** The composites drawn for a body `beyondM` past the view's edge. */
+    async function compositesBeside(beyondM: number): Promise<number> {
+      const { engine, view, renderer } = await preparedRenderer();
+      const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_RADIUS_M);
+      const planet = besideView(beyondM);
+      renderer.render(view, {
+        ...frameWith([]),
+        bodies: [planet],
+        atmospheres: [airOf(planet, tables)],
+      });
+      const count = engine.targetFrames.filter((f) => f.label === ATMOSPHERE_COMPOSITE_PASS).length;
+      renderer.dispose();
+      tables.dispose();
+      return count;
+    }
+
+    it("draws its composite while its shell meets the view", async () => {
+      const topM = R05_EARTH_REFERENCE.topHeightM;
+      expect(await compositesBeside(EARTH_RADIUS_M + topM / 2)).toBe(1);
+    });
+
+    it("draws none once its shell is off the view too", async () => {
+      const topM = R05_EARTH_REFERENCE.topHeightM;
+      expect(await compositesBeside(EARTH_RADIUS_M + 2 * topM)).toBe(0);
+    });
+  });
+});
+
+/** A draw of `material`, by its name alone. */
+function drawOf(material: string): DrawItem {
+  return {
+    mesh: { kind: "mesh", name: "mesh" },
+    material: { kind: "material", name: material },
+    offsetFromCameraM: new Float32Array(3),
+    uniforms: {},
+    textures: {},
+  };
+}
+
+/** An empty symbology pass, as `overlaySubmission` labels it. */
+const SYMBOLOGY: FrameSubmission = {
+  label: PHOTOREAL_PASS_LABELS.symbology,
+  viewRotation: new Float32Array(16),
+  projection: new Float32Array(16),
+  draws: [],
+  postProcesses: [],
+};
+
+/** A coverage mask's handle, as `CoverageMask.texture` gives it. */
+const MASK: TextureHandle = { kind: "texture", name: "coverage mask" };
+
+/** A rotation with no axis in common with the galactic ones but z: a quarter turn about it. */
+const QUARTER_TURN = rotation3FromRows([vec3(0, 1, 0), vec3(-1, 0, 0), vec3(0, 0, 1)]);
+
+/**
+ * The frame's planet, oblate (a ÷ c = 1.0034) and turning by {@link QUARTER_TURN}, its relief 4 px
+ * at its limb 10⁸ m off, so that it is handed over to terrain; with its survey's mask in that
+ * rotation unless `coverage` is false.
+ */
+function handedOverFrame(coverage = true): PhotorealFrame {
+  const frame = frameWith([]);
+  const [planet] = frame.bodies;
+  if (planet === undefined) {
+    throw new Error("no body");
+  }
+  const { equatorialRadiusM } = planet.figure;
+  const body: LitBodyInput = {
+    ...planet,
+    figure: { ...planet.figure, polarRadiusM: equatorialRadiusM / 1.0034 },
+    rotation: QUARTER_TURN,
+    handoverReliefM:
+      4 * limbDistanceM(1e8, equatorialRadiusM) * pixelAngleRad(frame.camera, VIEWPORT),
+  };
+  return {
+    ...frame,
+    bodies: [
+      coverage
+        ? { ...body, surveyCoverage: { mask: MASK, rotation: QUARTER_TURN, whole: false } }
+        : body,
+    ],
+  };
+}
+
+/**
+ * Renders `frame` with an overlay that records the datums the renderer builds it with, and gives
+ * the plan, whether the overlay was drawn, and the datums.
+ */
+async function overlayDatums(
+  frame: PhotorealFrame,
+  prepared = true,
+): Promise<{
+  readonly plan: BodyFramePlan | null;
+  readonly symbology: boolean;
+  readonly given: ReadonlyArray<ReadonlyMap<string, SurveyedDatumFrame>>;
+}> {
+  const engine = await countingRenderEngine();
+  const view = new RecordingView();
+  const renderer = new PhotorealRenderer(engine, "test view");
+  if (prepared) {
+    await renderer.prepare(VIEWPORT, "high", "eye", frame.camera);
+  }
+  const given: Array<ReadonlyMap<string, SurveyedDatumFrame>> = [];
+  const overlay: PhotorealOverlay = (surveyed) => {
+    given.push(surveyed);
+    return SYMBOLOGY;
+  };
+  const plan = renderer.render(view, { ...frame, overlay });
+  renderer.dispose();
+  return {
+    plan,
+    symbology: view.frames.some((f) => f.label === PHOTOREAL_PASS_LABELS.symbology),
+    given,
+  };
+}
+
+/**
+ * Every kernel VIEW makes on a device (plan R01, R01.T15): the photorealistic renderer's histogram
+ * and disc cells, and since R08.T18.a the disc cells' emissive form, for a body above the thermal
+ * emission's visibility cut (`withDiscEmission`), and since R08.T16.b their air form, for a body
+ * drawn by its disc table beyond the 10⁹ m boundary (`withDiscAir`), and since R08.T18.b their form
+ * for both (`withDiscEmissionAndAir`); the atmosphere's per-frame kernels, its sky view,
+ * aerial perspective, its two marches' footprint entry points, each general, specialised for one band
+ * and no layer edge (R08.T11.d) and for one band, edged (R08.T11.g), their centre ray's entry points
+ * under R08.T11.d's tile cull and the march's fill, and since the owner's priority (2026-11-01) what
+ * lies behind the sky at the march's resolution, and since R08.T8.d the cull's centre ray in the
+ * specialised forms and the far limb's packed kernels (`LIMB_KERNELS`), each a setting's lever's; since R08.T14.c the sky view, the
+ * aerial perspective and both marches' footprints,
+ * general and specialised, reading the thick table (`withThickRead`), for a body whose tables hold
+ * one; since R08.T18.b the sky view, the aerial perspective and both marches' footprints of each
+ * read in their thermal forms (`withThermalSource`), for a self-luminous body; since R08.T15.a.2
+ * both marches' footprints, general and specialised, reading a cloud deck at their ground
+ * (`withDeckRead`), for a body whose tables hold one; since R08.T15.b.2 the sky view, the aerial
+ * perspective and the march beneath a deck (`belowDeckKernel`), for a camera under a deck over a
+ * surface, and both deck marches' footprints in their thermal forms, for a self-luminous body over
+ * a deck; its per-planet tables' four, and since
+ * R08.T14.d.4 the sky's irradiance over the thick table; since R08.T9.b's lever the sources'
+ * transmittance, which the lit passes read on both settings, and the `disc cells` kernels' eight
+ * table-only twins, which the app's engine makes for a body of one band (`SourceTableEngine`), and
+ * since R08.T8.e's table the thin read's marches' twenty-four table-only twins, made likewise;
+ * since perf-thick-march the thick read's shared read's marches from the sources' table alone,
+ * general and specialised, and its packed limb's twelve kernels, per step and from the table;
+ * since plan R14's T4.a the cluster cull,
+ * the mesh bodies' figures' (`LitBodyRenderer.cullFigures`), made with the renderer; since R14.T3.d
+ * the depth pyramid's, made with the renderer; since perf-body-shading the `disc cells` kernel's
+ * four packed forms (`GeometrySettings.discCells`), its plain one made at the first frame with a
+ * disc; and the sky bake's four. Each is a module constant,
+ * its WGSL fixed text with no value of a medium, a body or a
+ * setting in it (term counts, slices, bands and light slots are uniforms; the specialised and
+ * one-band marches, the thick read and the deck read are variants of fixed text, chosen from the
+ * tables), so the records a device's cache holds for VIEW are bounded by this list's length, 119,
+ * however many bodies a session visits. The smoke's kernel
+ * arm (`withKernelArmFormat`, twenty more) and its probes are the smoke's alone.
+ */
+const VIEW_KERNELS: ReadonlyArray<KernelPair> = [
+  HISTOGRAM_KERNEL,
+  DEPTH_PYRAMID_KERNEL,
+  BODY_DISC_CELLS_KERNEL,
+  BODY_DISC_CELLS_EMISSIVE_KERNEL,
+  BODY_DISC_CELLS_AIR_KERNEL,
+  BODY_DISC_CELLS_EMISSIVE_AIR_KERNEL,
+  BODY_DISC_CELLS_PACKED_KERNEL,
+  BODY_DISC_CELLS_PACKED_EMISSIVE_KERNEL,
+  BODY_DISC_CELLS_PACKED_AIR_KERNEL,
+  BODY_DISC_CELLS_PACKED_EMISSIVE_AIR_KERNEL,
+  SKY_VIEW_KERNEL,
+  AERIAL_PERSPECTIVE_KERNEL,
+  RAY_MARCH_CENTRE_KERNEL,
+  RAY_MARCH_KERNEL,
+  RAY_MARCH_SLOTS_CENTRE_KERNEL,
+  RAY_MARCH_SLOTS_KERNEL,
+  RAY_MARCH_SPECIAL_KERNEL,
+  RAY_MARCH_SLOTS_SPECIAL_KERNEL,
+  RAY_MARCH_ONE_BAND_KERNEL,
+  RAY_MARCH_SLOTS_ONE_BAND_KERNEL,
+  RAY_MARCH_FILL_KERNEL,
+  COMPOSITE_BEHIND_KERNEL,
+  RAY_MARCH_CENTRE_SPECIAL_KERNEL,
+  RAY_MARCH_SLOTS_CENTRE_SPECIAL_KERNEL,
+  RAY_MARCH_CENTRE_ONE_BAND_KERNEL,
+  RAY_MARCH_SLOTS_CENTRE_ONE_BAND_KERNEL,
+  ...LIMB_KERNELS,
+  SKY_VIEW_THICK_KERNEL,
+  AERIAL_PERSPECTIVE_THICK_KERNEL,
+  RAY_MARCH_THICK_ROW_KERNEL,
+  RAY_MARCH_SLOTS_THICK_ROW_KERNEL,
+  RAY_MARCH_THICK_ROW_SPECIAL_KERNEL,
+  RAY_MARCH_SLOTS_THICK_ROW_SPECIAL_KERNEL,
+  SKY_VIEW_THERMAL_KERNEL,
+  AERIAL_PERSPECTIVE_THERMAL_KERNEL,
+  RAY_MARCH_THERMAL_KERNEL,
+  RAY_MARCH_SLOTS_THERMAL_KERNEL,
+  SKY_VIEW_THICK_THERMAL_KERNEL,
+  AERIAL_PERSPECTIVE_THICK_THERMAL_KERNEL,
+  RAY_MARCH_THICK_THERMAL_KERNEL,
+  RAY_MARCH_SLOTS_THICK_THERMAL_KERNEL,
+  RAY_MARCH_DECK_KERNEL,
+  RAY_MARCH_SLOTS_DECK_KERNEL,
+  RAY_MARCH_DECK_SPECIAL_KERNEL,
+  RAY_MARCH_SLOTS_DECK_SPECIAL_KERNEL,
+  RAY_MARCH_DECK_THERMAL_KERNEL,
+  RAY_MARCH_SLOTS_DECK_THERMAL_KERNEL,
+  SKY_VIEW_BELOW_DECK_KERNEL,
+  AERIAL_PERSPECTIVE_BELOW_DECK_KERNEL,
+  RAY_MARCH_BELOW_DECK_KERNEL,
+  TRANSMITTANCE_KERNEL,
+  MULTI_SCATTERING_KERNEL,
+  SLOT_DEPTHS_KERNEL,
+  IRRADIANCE_KERNEL,
+  IRRADIANCE_THICK_KERNEL,
+  SOURCE_TRANSMITTANCE_KERNEL,
+  ...[
+    BODY_DISC_CELLS_KERNEL,
+    BODY_DISC_CELLS_EMISSIVE_KERNEL,
+    BODY_DISC_CELLS_AIR_KERNEL,
+    BODY_DISC_CELLS_EMISSIVE_AIR_KERNEL,
+    BODY_DISC_CELLS_PACKED_KERNEL,
+    BODY_DISC_CELLS_PACKED_EMISSIVE_KERNEL,
+    BODY_DISC_CELLS_PACKED_AIR_KERNEL,
+    BODY_DISC_CELLS_PACKED_EMISSIVE_AIR_KERNEL,
+  ].flatMap((pair) => tableOnlyKernel(pair) ?? []),
+  ...MARCH_TABLE_ONLY_KERNELS,
+  RAY_MARCH_THICK_TABLE_KERNEL,
+  RAY_MARCH_THICK_TABLE_SPECIAL_KERNEL,
+  ...THICK_LIMB_KERNELS,
+  CLUSTER_CULL_KERNEL,
+  ...BAKE_KERNELS,
+];
+
+/** A body's air as the optics pool builds it, for the app's tables factory. */
+interface SessionAir {
+  readonly medium: AtmosphereMedium;
+  readonly bottomRadiusM: number;
+  readonly curves: AbsorberCurveSlots;
+  readonly body: AtmosphereBody | null;
+}
+
+/** A kind of air, and whether it stands on an Earth-sized ground that WGS 84's figure may slice. */
+interface AirKind {
+  readonly air: SessionAir;
+  readonly earthLike: boolean;
+}
+
+/** Air on an Earth-sized ground, WGS 84's mean radius, with no figure of its own. */
+function onEarth(medium: AtmosphereMedium, curves: AbsorberCurveSlots): AirKind {
+  return {
+    air: { medium, bottomRadiusM: tableRadiusM(WGS84_SPHEROID), curves, body: null },
+    earthLike: true,
+  };
+}
+
+/**
+ * The fixtures' kinds of air, each built once (their curves of growth are most of a build's cost):
+ * R05's Earth, with and without its ozone as an absorber, four column absorbers under one, two and
+ * three seeded lights, a line absorber, five line slots, the slab Earth (layer edges and one band,
+ * R08.T11.g), a Venus-class deck, a Titan-class methane air, an oblate ice giant and an oblate
+ * Saturn-class air; so they differ in their terms, absorbers, light slots, layer edges, slices and
+ * bands.
+ */
+function airKinds(random: () => number): AirKind[] {
+  const ozone = r05EarthWithOzoneAbsorber();
+  const lines = lineAbsorberMedium();
+  const slots = fiveLineSlotMedium();
+  const venus = venusClassMedium();
+  const titan = titanClassMethaneMedium();
+  const iceGiant = iceGiantMethaneBody();
+  return [
+    onEarth(R05_EARTH_REFERENCE, []),
+    onEarth(ozone.medium, ozone.curves),
+    ...[1, 2, 3].map((count) => {
+      const lightsK = Array.from({ length: count }, () => between(random, 3_000, 7_000));
+      const { medium, curves } = fourAbsorberMedium(lightsK);
+      return onEarth(medium, curves);
+    }),
+    onEarth(lines.medium, lines.curves),
+    onEarth(slots.medium, slots.curves),
+    onEarth(EARTH_SLAB_REFERENCE, EARTH_SLAB_REFERENCE_CURVES),
+    {
+      air: { medium: venus.medium, bottomRadiusM: venus.radiusM, curves: [], body: null },
+      earthLike: false,
+    },
+    {
+      air: { medium: titan.medium, bottomRadiusM: titan.radiusM, curves: titan.curves, body: null },
+      earthLike: false,
+    },
+    {
+      air: {
+        medium: iceGiant.medium,
+        bottomRadiusM: tableRadiusM(iceGiant.body.figure),
+        curves: iceGiant.curves,
+        body: iceGiant.body,
+      },
+      earthLike: false,
+    },
+    {
+      air: {
+        medium: saturnClassMedium(),
+        bottomRadiusM: tableRadiusM(SATURN_SPHEROID),
+        curves: [],
+        body: saturnBody(),
+      },
+      earthLike: false,
+    },
+  ];
+}
+
+/**
+ * `count` bodies' air, as a session meets them: `kinds` in turn, each body's medium its own (its
+ * name and a seeded grey ground albedo), and an Earth-like kind on WGS 84's figure and gravity
+ * every second turn.
+ */
+function sessionAirs(
+  kinds: ReadonlyArray<AirKind>,
+  count: number,
+  random: () => number,
+): SessionAir[] {
+  return Array.from({ length: count }, (_, i) => {
+    const kind = kinds[i % kinds.length];
+    if (kind === undefined) {
+      throw new Error("no kind of air");
+    }
+    const albedo = between(random, 0.05, 0.5);
+    const sliced = kind.earthLike && Math.floor(i / kinds.length) % 2 === 1;
+    return {
+      ...kind.air,
+      medium: {
+        ...kind.air.medium,
+        name: `${kind.air.medium.name} ${i}`,
+        groundAlbedo: [albedo, albedo, albedo],
+      },
+      body: sliced ? earthBody() : kind.air.body,
+    };
+  });
+}
+
+/** Whether both settings leave an atmosphere lever off: none takes it (R08.T8.d). */
+function leverOff(taken: (levers: AtmosphereSettings) => boolean): boolean {
+  return QUALITY_SETTINGS.every((each) => !taken(SETTINGS[each].atmosphereLevers));
+}
+
+describe("the device's kernels over a session's bodies (R01.T15)", () => {
+  it("stay within VIEW's fixed set, and stop growing after the first of each kind of air, thin, thick and over a deck, over 50 bodies", async () => {
+    const { engine, view, renderer } = await preparedRenderer();
+    const keyOf = (pair: KernelPair): string =>
+      kernelKey(pair, prepareKernel(pair, engine.capabilities));
+    // The distinct kernels made so far, read incrementally: a key holds the whole WGSL text.
+    const distinct = new Set<string>();
+    let counted = 0;
+    const count = (): number => {
+      for (const pair of engine.kernelPairs.slice(counted)) {
+        distinct.add(keyOf(pair));
+      }
+      counted = engine.kernelPairs.length;
+      return distinct.size;
+    };
+    const random = seededRandom(15);
+    const kinds = airKinds(random);
+    const airs = sessionAirs(kinds, 50, random);
+    const held: number[] = [];
+    for (const [i, air] of airs.entries()) {
+      const planet = bodyAt(
+        `0200080020000000.${String(300 + i).padStart(4, "0")}`,
+        vec3(0, 0, -3e7),
+      );
+      // The app's factory's construction (`atmosphereTablesOn`), and its eviction's disposal.
+      const tables = new AtmosphereTables(
+        engine,
+        air.medium,
+        air.bottomRadiusM,
+        air.curves,
+        air.body,
+      );
+      // The second pass over the kinds has its bodies' thick bakes landed (R08.T14.c), the third
+      // a cloud deck's 1 km up (R08.T15.a.2).
+      const pass = Math.floor(i / kinds.length);
+      if (pass === 1) {
+        tables.setThickTables(
+          patternedThickBake(
+            tables.plan.bands,
+            kernelMedium(tables.medium),
+            Math.max(1, air.curves.length),
+          ),
+        );
+      } else if (pass === 2) {
+        tables.setDeckTables(
+          patternedDeckTables(
+            tables.plan.bands,
+            kernelMedium(tables.medium),
+            Math.max(1, air.curves.length),
+            1_000,
+          ),
+        );
+      }
+      renderer.render(view, {
+        ...frameWith([]),
+        bodies: [planet],
+        atmospheres: [airOf(planet, tables)],
+      });
+      tables.dispose();
+      held.push(count());
+    }
+    const bound = new Set(VIEW_KERNELS.map(keyOf));
+    expect(bound.size).toBe(VIEW_KERNELS.length);
+    expect([...distinct].filter((key) => !bound.has(key))).toEqual([]);
+    // Every kind of air has been met by its first body thin, by its first thick (the second pass)
+    // and by its first over a deck (the third); none after adds a kernel. The thin first pass makes
+    // 21: the view's, made up front with both reads' one-band marches among them (R08.T11.g, which
+    // the slab Earth takes by slot and the deck over the shared read), what lies behind the sky at
+    // the march's resolution (the owner's priority) and, since the correction is routed
+    // (R08.T14.d.4), the thick read's six, made ahead; and the tables' five, the sources'
+    // transmittance among them (R08.T9.b's lever). The thick pass makes
+    // one more, the sky's irradiance over the thick table (R08.T14.d.4), and the deck's pass its four
+    // marches, 27 in all, bounded however many bodies follow. All but fifty-eight are made: the sky bake's four are the sky's, the `disc cells` kernels' eight twins and the marches' twenty-four the app's engine's (this test's engine makes none), the march's fill
+    // a reader's, which no frame asks, the tile cull's two centre ray's kernels its own cover's,
+    // which a view takes only under a setting's `tiles` (R08.T11.d, R08.T8.d), the disc cells' emissive forms, per cell and packed, a body's above the
+    // thermal cut, which none of these is (R08.T18.a), their air form a body's drawn by its disc
+    // table, which none of these has (R08.T16.b), and their form for both and the per-frame
+    // kernels' ten thermal forms (two over a deck, R08.T15.b.2) a glowing or self-luminous body's,
+    // which none of these is (R08.T18.b), and the three beneath a deck a camera's under one, which
+    // none of these frames is (R08.T15.b.2). Since R08.T8.d the cull's centre ray takes its six
+    // forms up front (its two general among the twenty-seven) where a setting takes `tiles`, and none
+    // where both leave it off; and under `packed` the first frame of each read and form from above
+    // the top makes that pair of the packed limb's fourteen, with the resolve and the dispatches, in
+    // the background, so that the thin first pass makes the pairs its kinds of air meet, and the
+    // rest stay unmade. Since perf-thick-march the thick read's two marches from the sources' table
+    // are made ahead too where a setting takes the table, and the thick pass makes the thick read's
+    // packed pairs its kinds of air meet, per step or from the table, as the thin pass the thin
+    // read's.
+    const made = new Set(engine.kernelPairs.map((pair) => pair.name));
+    const limbMade = LIMB_KERNELS.filter((pair) => made.has(pair.name)).length;
+    expect(limbMade > 0).toBe(!leverOff((levers) => levers.limbRays === "packed"));
+    const thickLimbMade = THICK_LIMB_KERNELS.filter((pair) => made.has(pair.name)).length;
+    expect(thickLimbMade > 0).toBe(!leverOff((levers) => levers.limbRays === "packed"));
+    const unmade =
+      54 +
+      (leverOff((levers) => levers.marchCover === "tiles") ? 4 : -2) +
+      (LIMB_KERNELS.length - limbMade) +
+      (leverOff((levers) => levers.marchSourceTransmittance === "table") ? 2 : 0) +
+      (THICK_LIMB_KERNELS.length - thickLimbMade);
+    expect([held[kinds.length - 1], held[2 * kinds.length - 1]]).toEqual([
+      VIEW_KERNELS.length - BAKE_KERNELS.length - unmade - 1 - 4 - thickLimbMade,
+      VIEW_KERNELS.length - BAKE_KERNELS.length - unmade - 4,
+    ]);
+    expect(new Set(held.slice(3 * kinds.length - 1))).toEqual(new Set([held.at(-1)]));
+    expect(held.at(-1)).toBe(VIEW_KERNELS.length - BAKE_KERNELS.length - unmade);
+    // Each body's tables made their own handles all the while.
+    expect(engine.counts.kernels).toBeGreaterThan(2 * airs.length);
+    renderer.dispose();
+  });
+});
+
 describe("the photorealistic renderer's overlay", () => {
   it("loads the tone-mapped image for the symbology", async () => {
     const engine = await countingRenderEngine();
@@ -232,19 +2167,188 @@ describe("the photorealistic renderer's overlay", () => {
       orientation: IDENTITY_QUATERNION,
       fovXRad: Math.PI / 3,
     });
-    const overlay = {
-      label: PHOTOREAL_PASS_LABELS.symbology,
-      viewRotation: new Float32Array(16),
-      projection: new Float32Array(16),
-      draws: [],
-      postProcesses: [],
-    };
+    const overlay = (): FrameSubmission => SYMBOLOGY;
     renderer.render(view, { ...frameWith([]), overlay });
     expect(view.frames.map((f) => [f.label, f.colourLoad])).toEqual([
       ["tonemap", undefined],
       ["symbology", "load"],
     ]);
     renderer.dispose();
+  });
+
+  it("draws the terrain's depth into the symbology's pass before its marks (R10.T16.c)", async () => {
+    const engine = await countingRenderEngine();
+    const view = new RecordingView();
+    const renderer = new PhotorealRenderer(engine, "test view");
+    await renderer.prepare(VIEWPORT, "high", "eye", {
+      orientation: IDENTITY_QUATERNION,
+      fovXRad: Math.PI / 3,
+    });
+    const overlay = (): FrameSubmission => ({
+      ...SYMBOLOGY,
+      draws: [drawOf("occluderSphere"), drawOf("lines")],
+    });
+    const terrain = {
+      surveyCoverage: () => null,
+      surveyedWhole: () => false,
+      draws: () => [],
+      symbologyDepth: () => [drawOf("terrain-depth-baked-offsets")],
+      sceneDepth: () => false,
+      lateDraws: () => [],
+      visibility: () => null,
+      opaqueDraws: () => [],
+    };
+    renderer.render(view, { ...frameWith([]), overlay, terrain });
+    expect(
+      view.frames
+        .find((f) => f.label === PHOTOREAL_PASS_LABELS.symbology)
+        ?.draws.map((draw) => draw.material.name),
+    ).toEqual(["terrain-depth-baked-offsets", "occluderSphere", "lines"]);
+    renderer.dispose();
+  });
+
+  it("gives the overlay each body handed over with a whole mask, with its terrain's inner radius, and draws none of the terrain's depth where the overlay says no mark tests it (hiddenMarks)", async () => {
+    const engine = await countingRenderEngine();
+    const view = new RecordingView();
+    const renderer = new PhotorealRenderer(engine, "test view");
+    const handed = handedOverFrame();
+    await renderer.prepare(VIEWPORT, "high", "eye", handed.camera);
+    const [planet] = handed.bodies;
+    if (planet?.surveyCoverage === undefined) {
+      throw new Error("the frame hands over no body with a mask");
+    }
+    const whole: PhotorealFrame = {
+      ...handed,
+      bodies: [{ ...planet, surveyCoverage: { ...planet.surveyCoverage, whole: true } }],
+    };
+    const terrain: FrameTerrain = {
+      surveyCoverage: () => MASK,
+      surveyedWhole: () => true,
+      innerRadiusM: () => 6.3e6,
+      draws: () => [],
+      symbologyDepth: () => [drawOf("terrain-depth-baked-offsets")],
+      sceneDepth: () => false,
+      lateDraws: () => [],
+      visibility: () => null,
+      opaqueDraws: () => [],
+    };
+    const given: Array<ReadonlyArray<OverlayHider>> = [];
+    const symbology = (frame: PhotorealFrame, depthTested: boolean): ReadonlyArray<string> => {
+      view.frames.length = 0;
+      const overlay: PhotorealOverlay = (_surveyed, hiders) => {
+        given.push(hiders);
+        return { ...SYMBOLOGY, draws: [drawOf("lines")], depthTested };
+      };
+      renderer.render(view, { ...frame, overlay, terrain });
+      return (
+        view.frames
+          .find((f) => f.label === PHOTOREAL_PASS_LABELS.symbology)
+          ?.draws.map((draw) => draw.material.name) ?? []
+      );
+    };
+    const drawn = { ...SETTINGS.high.geometry, hiddenMarks: "drawn" as const };
+    expect([
+      symbology(whole, false),
+      symbology(whole, true),
+      symbology({ ...whole, geometry: drawn }, true),
+      symbology(handed, true),
+    ]).toEqual([
+      ["lines"],
+      ["terrain-depth-baked-offsets", "lines"],
+      ["terrain-depth-baked-offsets", "lines"],
+      ["terrain-depth-baked-offsets", "lines"],
+    ]);
+    expect(given).toEqual([
+      [{ body: planet.id, innerRadiusM: 6.3e6 }],
+      [{ body: planet.id, innerRadiusM: 6.3e6 }],
+      [],
+      [],
+    ]);
+    renderer.dispose();
+  });
+
+  it("draws the scene's depth in the terrain's place where the terrain asks it and the scene's size is the canvas's, else the terrain's (R14.T1.e)", async () => {
+    const engine = await countingRenderEngine();
+    const view = new RecordingView();
+    const renderer = new PhotorealRenderer(engine, "test view");
+    await renderer.prepare(VIEWPORT, "high", "eye", {
+      orientation: IDENTITY_QUATERNION,
+      fovXRad: Math.PI / 3,
+    });
+    const overlay = (): FrameSubmission => ({ ...SYMBOLOGY, draws: [drawOf("lines")] });
+    const terrain = (asks: boolean): FrameTerrain => ({
+      surveyCoverage: () => null,
+      surveyedWhole: () => false,
+      draws: () => [],
+      symbologyDepth: () => [drawOf("terrain-depth-baked-offsets")],
+      sceneDepth: () => asks,
+      lateDraws: () => [],
+      visibility: () => null,
+      opaqueDraws: () => [],
+    });
+    const symbology = (frame: PhotorealFrame): ReadonlyArray<string> | undefined => {
+      view.frames.length = 0;
+      renderer.render(view, frame);
+      return view.frames
+        .find((f) => f.label === PHOTOREAL_PASS_LABELS.symbology)
+        ?.draws.map((draw) => draw.material.name);
+    };
+    const larger = { widthPx: 2 * VIEWPORT.widthPx, heightPx: 2 * VIEWPORT.heightPx };
+    expect([
+      symbology({ ...frameWith([]), overlay, terrain: terrain(true) }),
+      symbology({ ...frameWith([]), overlay, terrain: terrain(false) }),
+      symbology({ ...frameWith([]), presentedPx: larger, overlay, terrain: terrain(true) }),
+    ]).toEqual([
+      ["overlay scene depth", "lines"],
+      ["terrain-depth-baked-offsets", "lines"],
+      ["terrain-depth-baked-offsets", "lines"],
+    ]);
+    const sceneDraw = (() => {
+      view.frames.length = 0;
+      renderer.render(view, { ...frameWith([]), overlay, terrain: terrain(true) });
+      return view.frames.find((f) => f.label === PHOTOREAL_PASS_LABELS.symbology)?.draws[0];
+    })();
+    expect(Object.keys(sceneDraw?.textures ?? {})).toEqual(["sceneDepth"]);
+    renderer.dispose();
+  });
+
+  it("builds the symbology from its plan, a body handed over with its mask giving way in the plan's rotation and figure (R10.T16.f)", async () => {
+    const frame = handedOverFrame();
+    const { plan, symbology, given } = await overlayDatums(frame);
+    const [planet] = frame.bodies;
+    const role = plan?.meshes[0]?.role;
+    expect([
+      role?.kind,
+      role?.kind === "handed-over" ? role.coverage?.mask : null,
+      symbology,
+    ]).toEqual(["handed-over", MASK, true]);
+    expect(given).toEqual([
+      new Map([
+        [
+          planet?.id,
+          {
+            mask: MASK,
+            axes: rotationColumns(QUARTER_TURN),
+            stretch: 6.371e6 / (6.371e6 / 1.0034),
+          },
+        ],
+      ]),
+    ]);
+  });
+
+  it("gives no datum for a body drawn whole: a disc, or one handed over without a mask (R10.T16.f)", async () => {
+    const disc = await overlayDatums(frameWith([]));
+    const unmasked = await overlayDatums(handedOverFrame(false));
+    expect([
+      disc.plan?.meshes.length,
+      unmasked.plan?.meshes[0]?.role,
+      [...disc.given.map((each) => each.size), ...unmasked.given.map((each) => each.size)],
+    ]).toEqual([0, { kind: "handed-over", coverage: null, detailShare: 1 }, [0, 0]]);
+  });
+
+  it("builds no symbology while its pipelines are being made (R10.T16.f)", async () => {
+    const { plan, symbology, given } = await overlayDatums(handedOverFrame(), false);
+    expect([plan, symbology, given]).toEqual([null, false, []]);
   });
 });
 
@@ -302,7 +2406,48 @@ describe("the photorealistic renderer's histogram", () => {
       engine.dispatched
         .filter((d) => d.pass === PHOTOREAL_PASS_LABELS.histogram)
         .map((d) => [d.pass, Array.from(d.bindings.uniforms["params"] ?? [])]),
-    ).toEqual([["histogram", Array.from(histogramParams(VIEWPORT, "lit", 1))]]);
+    ).toEqual([["histogram", Array.from(histogramParams(VIEWPORT, "lit", 1, 0))]]);
+    renderer.dispose();
+  });
+
+  /** One frame drawn with two Sun-like glare sources, and its histogram's dispatch. */
+  async function withSources(): Promise<{
+    readonly engine: Awaited<ReturnType<typeof countingRenderEngine>>;
+    readonly histogram: RecordedDispatch | undefined;
+  }> {
+    const { engine, renderer } = await ready();
+    const sun = {
+      direction: vec3(0, 0, -1),
+      angularRadiusRad: 0.0047,
+      excessLuminance: [1e9, 1e9, 1e9],
+      luminance: [2e9, 2e9, 2e9],
+    } as const;
+    renderer.render(new RecordingView(), { ...frameWith([]), glareSources: [sun, sun] });
+    renderer.dispose();
+    const histogram = engine.dispatched.find((d) => d.pass === PHOTOREAL_PASS_LABELS.histogram);
+    return { engine, histogram };
+  }
+
+  it("binds the tone-mapping pass's glare sources with their count (fix-view-light)", async () => {
+    const { histogram } = await withSources();
+    expect([
+      Array.from(histogram?.bindings.uniforms["params"] ?? []),
+      histogram?.bindings.buffers["glareSources"]?.name,
+    ]).toEqual([Array.from(histogramParams(VIEWPORT, "average", 1, 2)), "test view glare sources"]);
+  });
+
+  it("writes the frame's glare sources before it is dispatched (fix-view-light)", async () => {
+    const { engine, histogram } = await withSources();
+    const written = engine.writes.findIndex((w) => w.buffer === "test view glare sources");
+    expect(written >= 0 && written < (histogram?.writesBefore ?? -1)).toBe(true);
+  });
+
+  it("is taken of a frame held back, which draws nothing onto the view (fix-view-light)", async () => {
+    const { engine, renderer } = await ready();
+    const view = new RecordingView();
+    renderer.render(view, { ...frameWith([]), present: false });
+    const histograms = engine.dispatched.filter((d) => d.pass === PHOTOREAL_PASS_LABELS.histogram);
+    expect([histograms.length, view.frames.length]).toEqual([1, 0]);
     renderer.dispose();
   });
 
@@ -323,6 +2468,20 @@ describe("the photorealistic renderer's histogram", () => {
       1e-4,
       undefined,
     ]);
+    renderer.dispose();
+  });
+
+  it("is dropped at a cut, arrived or in flight, and the next frame's handed over (fix-view-light)", async () => {
+    const { renderer } = await ready();
+    renderer.render(new RecordingView(), frameWith([]));
+    await settled();
+    renderer.render(new RecordingView(), frameWith([]));
+    renderer.dropHistograms();
+    await settled();
+    const dropped = renderer.takeHistogram();
+    renderer.render(new RecordingView(), { ...frameWith([]), exposureScale: 2e-4 });
+    await settled();
+    expect([dropped, renderer.takeHistogram()?.preExposure]).toEqual([undefined, 2e-4]);
     renderer.dispose();
   });
 
@@ -379,7 +2538,7 @@ describe("the photorealistic renderer at each quality setting (R07.T17)", () => 
           .map((d) => [Array.from(d.bindings.uniforms["params"] ?? []), d.workgroups]),
       ).toEqual([
         [
-          Array.from(histogramParams(VIEWPORT, "average", stride)),
+          Array.from(histogramParams(VIEWPORT, "average", stride, 0)),
           histogramWorkgroups(VIEWPORT, stride),
         ],
       ]);
@@ -447,6 +2606,7 @@ function frameOfDiscs(bodies: ReadonlyArray<LitBodyInput>, viewport = VIEWPORT):
   return {
     ...frameWith([]),
     viewport,
+    presentedPx: viewport,
     bodies,
     previousRegimes: new Map(bodies.map((body) => [body.id, "disc"])),
   };
@@ -460,6 +2620,131 @@ function smallDiscs(viewport: Viewport = VIEWPORT): LitBodyInput[] {
     bodyAcross(13, -third, "0200080020000000.0402", viewport),
   ];
 }
+
+describe("the photorealistic renderer's emissive cells (R08.T18.a)", () => {
+  it("asks for the disc cells' emissive form at the first frame with an emitting record, once, and shades that record's cells with it once made", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new PhotorealRenderer(engine, "test view");
+    await renderer.prepare(VIEWPORT, "high", "eye", frameWith([]).camera);
+    const emissiveMade = (): number =>
+      engine.kernelPairs.filter((pair) => pair.name === BODY_DISC_CELLS_PACKED_EMISSIVE_KERNEL.name)
+        .length;
+    renderer.render(new RecordingView(), frameOfDiscs(smallDiscs()));
+    expect(emissiveMade()).toBe(0);
+    const field = surfaceTemperatureFieldOf(lavaWorldSurface());
+    const [small, larger] = smallDiscs();
+    if (small === undefined || larger === undefined) {
+      throw new Error("two small discs");
+    }
+    const bodies = [small, { ...larger, thermal: field }];
+    const first = engine.dispatched.length;
+    renderer.render(new RecordingView(), frameOfDiscs(bodies));
+    // Until it is made, and the emissive draws prepared, the frame is drawn as before.
+    expect(
+      engine.dispatched
+        .slice(first)
+        .filter((d) => d.pass === DISC_CELLS_PASS)
+        .map((d) => d.kernel),
+    ).toEqual([BODY_DISC_CELLS_KERNEL.name]);
+    await microtasks();
+    const second = engine.dispatched.length;
+    renderer.render(new RecordingView(), frameOfDiscs(bodies));
+    expect(emissiveMade()).toBe(1);
+    expect(
+      engine.dispatched
+        .slice(second)
+        .filter((d) => d.pass === DISC_CELLS_PASS)
+        .map((d) => d.kernel),
+    ).toEqual([BODY_DISC_CELLS_PACKED_KERNEL.name, BODY_DISC_CELLS_PACKED_EMISSIVE_KERNEL.name]);
+    renderer.dispose();
+  });
+});
+
+describe("the photorealistic renderer's emissive forms prepared ahead (R08.T18.a)", () => {
+  it("shades an emitting record's cells by the emissive kernel at its first frame once prepared", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new PhotorealRenderer(engine, "test view");
+    await renderer.prepare(VIEWPORT, "high", "eye", frameWith([]).camera);
+    await renderer.prepareEmissive();
+    const [small, larger] = smallDiscs();
+    if (small === undefined || larger === undefined) {
+      throw new Error("two small discs");
+    }
+    const bodies = [small, { ...larger, thermal: surfaceTemperatureFieldOf(lavaWorldSurface()) }];
+    const before = engine.dispatched.length;
+    renderer.render(new RecordingView(), frameOfDiscs(bodies));
+    expect(
+      engine.dispatched
+        .slice(before)
+        .filter((d) => d.pass === DISC_CELLS_PASS)
+        .map((d) => d.kernel),
+    ).toEqual([BODY_DISC_CELLS_KERNEL.name, BODY_DISC_CELLS_PACKED_EMISSIVE_KERNEL.name]);
+    renderer.dispose();
+  });
+});
+
+describe("the photorealistic renderer's emissive cells after a device loss (R08.T18.a)", () => {
+  it("asks for the disc cells' emissive form again on the device a restore makes", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new PhotorealRenderer(engine, "test view");
+    await renderer.prepare(VIEWPORT, "high", "eye", frameWith([]).camera);
+    const [small, larger] = smallDiscs();
+    if (small === undefined || larger === undefined) {
+      throw new Error("two small discs");
+    }
+    const bodies = [small, { ...larger, thermal: surfaceTemperatureFieldOf(lavaWorldSurface()) }];
+    const asked = (): number =>
+      engine.kernelPairs.filter((pair) => pair.name === BODY_DISC_CELLS_PACKED_EMISSIVE_KERNEL.name)
+        .length;
+    renderer.render(new RecordingView(), frameOfDiscs(bodies));
+    await microtasks();
+    expect(asked()).toBe(1);
+    engine.loseDevice();
+    engine.restore();
+    await renderer.prepare(VIEWPORT, "high", "eye", frameWith([]).camera);
+    renderer.render(new RecordingView(), frameOfDiscs(bodies));
+    await microtasks();
+    expect(asked()).toBe(2);
+    renderer.dispose();
+  });
+});
+
+describe("the photorealistic renderer's packed cells (plan R07, the owner's Mac)", () => {
+  it("shades the cells by the packed kernel once made, the per-cell kernel standing in until then, and by the per-cell kernel on the way back", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new PhotorealRenderer(engine, "test view");
+    await renderer.prepare(VIEWPORT, "high", "eye", frameWith([]).camera);
+    const kernels = (frame: PhotorealFrame): string[] => {
+      const before = engine.dispatched.length;
+      renderer.render(new RecordingView(), frame);
+      return engine.dispatched
+        .slice(before)
+        .filter((d) => d.pass === DISC_CELLS_PASS)
+        .map((d) => d.kernel);
+    };
+    const packed = frameOfDiscs(smallDiscs());
+    const perCell: PhotorealFrame = {
+      ...packed,
+      geometry: { ...SETTINGS.high.geometry, discCells: "per-cell" },
+    };
+    const first = kernels(packed);
+    await microtasks();
+    expect([
+      SETTINGS.high.geometry.discCells,
+      first,
+      kernels(packed),
+      kernels(perCell),
+      engine.kernelPairs.filter((pair) => pair.name === BODY_DISC_CELLS_PACKED_KERNEL.name).length,
+    ]).toEqual([
+      "packed",
+      [BODY_DISC_CELLS_KERNEL.name],
+      [BODY_DISC_CELLS_PACKED_KERNEL.name],
+      [BODY_DISC_CELLS_KERNEL.name],
+      1,
+    ]);
+    renderer.dispose();
+  });
+});
 
 describe("the photorealistic renderer's cell pass (R07.T8.d)", () => {
   it("shades the small discs' cells once, after the sky and before the discs", async () => {
@@ -478,7 +2763,7 @@ describe("the photorealistic renderer's cell pass (R07.T8.d)", () => {
     renderer.dispose();
   });
 
-  it("dispatches nothing where every disc is 32 px or more", async () => {
+  it("dispatches a disc of 32 px or more once, for its limb (R07.T8.f)", async () => {
     const engine = await countingRenderEngine();
     const renderer = new PhotorealRenderer(engine, "test view");
     await renderer.prepare(VIEWPORT, "high", "eye", frameWith([]).camera);
@@ -486,10 +2771,70 @@ describe("the photorealistic renderer's cell pass (R07.T8.d)", () => {
       new RecordingView(),
       frameOfDiscs([bodyAcross(34, 0, "0200080020000000.0403")]),
     );
+    const cells = engine.dispatched.filter((d) => d.pass === DISC_CELLS_PASS);
+    expect([plan?.discs.map((disc) => disc.interiorSamples), cells.length]).toEqual([[1], 1]);
+    renderer.dispose();
+  });
+
+  it("takes the setting's floor cells on a large disc's limb only at the floor's lowest step, a small disc's as before (R07.T8.i)", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new PhotorealRenderer(engine, "test view");
+    await renderer.prepare(VIEWPORT, "high", "eye", frameWith([]).camera);
+    const discs = [bodyAcross(40, 0, "0200080020000000.0403"), ...smallDiscs()];
+    const samples = (floorLowest?: boolean): number[][] =>
+      (
+        renderer.render(new RecordingView(), {
+          ...frameOfDiscs(discs),
+          ...(floorLowest === undefined ? {} : { floorLowest }),
+        })?.discs ?? []
+      ).map((disc) => [disc.interiorSamples, disc.limbSamples]);
+    const floor = SETTINGS.high.photoreal.floorLimbSamples;
+    // The plan's discs in its painter's order, the small ones first.
+    expect([samples(), samples(false), samples(true)]).toEqual([
+      [
+        [8, 8],
+        [4, 4],
+        [1, LIMB_SAMPLES],
+      ],
+      [
+        [8, 8],
+        [4, 4],
+        [1, LIMB_SAMPLES],
+      ],
+      [
+        [8, 8],
+        [4, 4],
+        [1, floor],
+      ],
+    ]);
+    renderer.dispose();
+  });
+
+  it("dispatches nothing where every body is a point", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new PhotorealRenderer(engine, "test view");
+    await renderer.prepare(VIEWPORT, "high", "eye", frameWith([]).camera);
+    const plan = renderer.render(new RecordingView(), {
+      ...frameOfDiscs([]),
+      bodies: [bodyAcross(1.5, 0, "0200080020000000.0404")],
+    });
     expect([
       plan?.discs.length,
       engine.dispatched.filter((d) => d.pass === DISC_CELLS_PASS).length,
-    ]).toEqual([1, 0]);
+    ]).toEqual([0, 0]);
+    renderer.dispose();
+  });
+
+  it("dispatches once a set of textures: a plain disc and a larger one's limb, and a class map's disc (R07.T8.e)", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new PhotorealRenderer(engine, "test view");
+    await renderer.prepare(VIEWPORT, "high", "eye", frameWith([]).camera);
+    renderer.render(new RecordingView(), frameOfDiscs(severalSets()));
+    const cells = engine.dispatched.filter((d) => d.pass === DISC_CELLS_PASS);
+    expect(new Set(cells.map((d) => d.bindings.sampled["class_weights"]?.name))).toEqual(
+      new Set(["bodies:no class map", "test class map"]),
+    );
+    expect(cells).toHaveLength(2);
     renderer.dispose();
   });
 
@@ -530,7 +2875,7 @@ describe("the photorealistic renderer's cell pass (R07.T8.d)", () => {
   });
 
   it("keeps three frames of a photorealistic primary and two instruments in the timer's resolves", async () => {
-    // Each render resolves its own pass times; a dispatch's wait for the next render's.
+    // Each submission resolves its own pass times; a dispatch's wait for the next render's.
     const engine = await countingRenderEngine();
     const views = [
       { name: "primary", viewport: { widthPx: 1920, heightPx: 1080 }, role: "eye" as const },
@@ -545,13 +2890,7 @@ describe("the photorealistic renderer's cell pass (R07.T8.d)", () => {
         return { viewport, role, renderer, canvas: new RecordingView() };
       }),
     );
-    const overlay = {
-      label: PHOTOREAL_PASS_LABELS.symbology,
-      viewRotation: new Float32Array(16),
-      projection: new Float32Array(16),
-      draws: [],
-      postProcesses: [],
-    };
+    const overlay = (): FrameSubmission => SYMBOLOGY;
     for (const view of drawn) {
       view.renderer.render(view.canvas, {
         ...frameOfDiscs(smallDiscs(view.viewport), view.viewport),
@@ -560,12 +2899,189 @@ describe("the photorealistic renderer's cell pass (R07.T8.d)", () => {
         overlay,
       });
     }
+    // A chain's later frames ride its first's resolve, bloom's levels among them (plan R14).
     const resolves =
-      engine.targetFrames.length + drawn.reduce((sum, view) => sum + view.canvas.frames.length, 0);
+      engine.targetFrames.length -
+      engine.chainedTargetFrames +
+      drawn.reduce((sum, view) => sum + view.canvas.frames.length, 0);
     expect(engine.dispatched.filter((d) => d.pass === DISC_CELLS_PASS)).toHaveLength(3);
     expect(3 * resolves).toBeLessThanOrEqual(TIMING_FRAMES_IN_FLIGHT);
     for (const view of drawn) {
       view.renderer.dispose();
     }
   });
+
+  it("keeps three frames of three views in the timer's resolves with a dispatch a set of textures (R07.T8.e–f)", async () => {
+    // A dispatch's times wait for the next render's resolve, so its sets add none.
+    const engine = await countingRenderEngine();
+    const views = [
+      { name: "primary", viewport: { widthPx: 1920, heightPx: 1080 }, role: "eye" as const },
+      { name: "instrument 1", viewport: { widthPx: 480, heightPx: 360 }, role: "camera" as const },
+      { name: "instrument 2", viewport: { widthPx: 480, heightPx: 360 }, role: "camera" as const },
+    ];
+    const camera = frameWith([]).camera;
+    const drawn = await Promise.all(
+      views.map(async ({ name, viewport, role }) => {
+        const renderer = new PhotorealRenderer(engine, name);
+        await renderer.prepare(viewport, "high", role, camera);
+        return { viewport, role, renderer, canvas: new RecordingView() };
+      }),
+    );
+    const overlay = (): FrameSubmission => SYMBOLOGY;
+    for (const view of drawn) {
+      view.renderer.render(view.canvas, {
+        ...frameOfDiscs(severalSets(view.viewport), view.viewport),
+        role: view.role,
+        meter: view.role === "eye" ? "average" : null,
+        overlay,
+      });
+    }
+    // A chain's later frames ride its first's resolve, bloom's levels among them (plan R14).
+    const resolves =
+      engine.targetFrames.length -
+      engine.chainedTargetFrames +
+      drawn.reduce((sum, view) => sum + view.canvas.frames.length, 0);
+    expect(engine.dispatched.filter((d) => d.pass === DISC_CELLS_PASS)).toHaveLength(6);
+    expect(3 * resolves).toBeLessThanOrEqual(TIMING_FRAMES_IN_FLIGHT);
+    for (const view of drawn) {
+      view.renderer.dispose();
+    }
+  });
+
+  it("keeps three frames of three views in the timer's resolves with the terrain's two rasters (R14.T3.d)", async () => {
+    // The bodies pass and its late half resolve each; the pyramid's dispatches add none.
+    const engine = await countingRenderEngine();
+    const views = [
+      { name: "primary", viewport: { widthPx: 1920, heightPx: 1080 }, role: "eye" as const },
+      { name: "instrument 1", viewport: { widthPx: 480, heightPx: 360 }, role: "camera" as const },
+      { name: "instrument 2", viewport: { widthPx: 480, heightPx: 360 }, role: "camera" as const },
+    ];
+    const camera = frameWith([]).camera;
+    const drawn = await Promise.all(
+      views.map(async ({ name, viewport, role }) => {
+        const renderer = new PhotorealRenderer(engine, name);
+        await renderer.prepare(viewport, "high", role, camera);
+        return { viewport, role, renderer, canvas: new RecordingView() };
+      }),
+    );
+    const terrain: FrameTerrain = {
+      surveyCoverage: () => null,
+      surveyedWhole: () => false,
+      draws: () => [drawOfName("early")],
+      symbologyDepth: () => [],
+      sceneDepth: () => false,
+      lateDraws: () => [drawOfName("late")],
+      visibility: () => null,
+      opaqueDraws: () => [],
+    };
+    const geometry = { ...SETTINGS.high.geometry, occlusion: "hzb" as const };
+    const overlay = (): FrameSubmission => SYMBOLOGY;
+    for (const view of drawn) {
+      view.renderer.render(view.canvas, {
+        ...frameOfDiscs(smallDiscs(view.viewport), view.viewport),
+        role: view.role,
+        meter: view.role === "eye" ? "average" : null,
+        overlay,
+        geometry,
+        terrain,
+      });
+    }
+    // A chain's later frames ride its first's resolve, bloom's levels among them (plan R14).
+    const resolves =
+      engine.targetFrames.length -
+      engine.chainedTargetFrames +
+      drawn.reduce((sum, view) => sum + view.canvas.frames.length, 0);
+    expect(
+      engine.targetFrames.filter((f) => f.label === PHOTOREAL_PASS_LABELS.bodiesLate),
+    ).toHaveLength(3);
+    expect(3 * resolves).toBeLessThanOrEqual(TIMING_FRAMES_IN_FLIGHT);
+    for (const view of drawn) {
+      view.renderer.dispose();
+    }
+  });
+
+  it("keeps three frames of three views in the timer's resolves by the visibility buffer with the two-pass occlusion (R14.T2.d)", async () => {
+    // Its ID raster, late raster and resolve in the bodies pass's place: one render more.
+    const engine = await countingRenderEngine();
+    const views = [
+      { name: "primary", viewport: { widthPx: 1920, heightPx: 1080 }, role: "eye" as const },
+      { name: "instrument 1", viewport: { widthPx: 480, heightPx: 360 }, role: "camera" as const },
+      { name: "instrument 2", viewport: { widthPx: 480, heightPx: 360 }, role: "camera" as const },
+    ];
+    const camera = frameWith([]).camera;
+    const drawn = await Promise.all(
+      views.map(async ({ name, viewport, role }) => {
+        const renderer = new PhotorealRenderer(engine, name);
+        await renderer.prepare(viewport, "high", role, camera);
+        return { viewport, role, renderer, canvas: new RecordingView() };
+      }),
+    );
+    const terrain: FrameTerrain = {
+      surveyCoverage: () => null,
+      surveyedWhole: () => false,
+      draws: () => [drawOfName("early")],
+      symbologyDepth: () => [],
+      sceneDepth: () => false,
+      lateDraws: () => [drawOfName("late id raster")],
+      visibility: () => ({
+        raster: [drawOfName("id raster")],
+        resolve: [drawOfName("resolve")],
+        forward: [],
+      }),
+      opaqueDraws: () => [],
+    };
+    const geometry = {
+      ...SETTINGS.high.geometry,
+      shading: "visibility" as const,
+      occlusion: "hzb" as const,
+    };
+    const overlay = (): FrameSubmission => SYMBOLOGY;
+    for (const view of drawn) {
+      view.renderer.render(view.canvas, {
+        ...frameOfDiscs(smallDiscs(view.viewport), view.viewport),
+        role: view.role,
+        meter: view.role === "eye" ? "average" : null,
+        overlay,
+        geometry,
+        terrain,
+      });
+    }
+    // A chain's later frames ride its first's resolve, bloom's levels among them (plan R14).
+    const resolves =
+      engine.targetFrames.length -
+      engine.chainedTargetFrames +
+      drawn.reduce((sum, view) => sum + view.canvas.frames.length, 0);
+    expect(
+      engine.targetFrames.filter((f) => f.label === VISIBILITY_LATE_RASTER_LABEL),
+    ).toHaveLength(3);
+    expect(3 * resolves).toBeLessThanOrEqual(TIMING_FRAMES_IN_FLIGHT);
+    for (const view of drawn) {
+      view.renderer.dispose();
+    }
+  });
 });
+
+/**
+ * Bodies of two sets of textures on `viewport` (R07.T8.e–f): a 13 px disc and a 40 px one, whose
+ * limb takes the pass, and a 13 px disc of a one-class map.
+ */
+function severalSets(viewport: Viewport = VIEWPORT): LitBodyInput[] {
+  const third = viewport.widthPx / 4;
+  const law = aLitBody().photometry.law;
+  return [
+    bodyAcross(13, third, "0200080020000000.0411", viewport),
+    bodyAcross(40, 0, "0200080020000000.0412", viewport),
+    {
+      ...bodyAcross(13, -third, "0200080020000000.0413", viewport),
+      surface: {
+        kind: "class-map",
+        weights: { kind: "texture", name: "test class map" },
+        texels: packClassMap(1, 1, () => [1]),
+        laws: [law],
+        elsewhere: law,
+        normals: null,
+      },
+      rotation: rotation3FromRows([vec3(1, 0, 0), vec3(0, 1, 0), vec3(0, 0, 1)]),
+    },
+  ];
+}

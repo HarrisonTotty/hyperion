@@ -1,0 +1,21 @@
+# Crystalline ammonia ice's optical constants of Martonchik, Orton and Appleby (1984), as optool's
+# lnk_data copies their Table I: the frost `NH3`'s infrared index from their measured infrared at
+# 1.462 µm (plan 14, P14.T49.i), and its n from 0.668 µm; the source of rendering plan R08's
+# ammonia-ice.json. Reduced by `reduce.py` from optool's file (git-ignored,
+# `data/cache/martonchik_1984_nh3/nh3-m-Martonchik1983.lnk`) to its rows over 0.668-5 µm, rows
+# sharing a printed wavelength merged, and committed as measured values with the citation.
+# Reproduced from the raw by hand on 2026-10-16: `python3 -I
+# crates/hyperion-fit/data/martonchik_1984_nh3/reduce.py <raw>
+# crates/hyperion-fit/data/martonchik_1984_nh3/nk.csv`, from outside the raw's directory. Read by
+# `run substance_albedos`.
+dataset = "martonchik_1984_nh3"
+class = "committed"
+citation = "J. V. Martonchik, G. S. Orton and J. F. Appleby (1984), Appl. Opt. 23, 541-547, DOI 10.1364/AO.23.000541: optical properties of NH3 ice from the far infrared to the near ultraviolet; n and k over 0.668-5 µm; via optool's lnk_data (C. Dominik, M. Min and R. Tazaki, ascl:2104.010)"
+url = "https://raw.githubusercontent.com/cdominik/optool/0b1fa6df95e3a694dc64abdbf8e36dad127165ab/lnk_data/nh3-m-Martonchik1983.lnk"
+retrieved = "2026-10-16"
+release = "lnk_data/nh3-m-Martonchik1983.lnk at optool's commit 0b1fa6df (sha256 14a5b66bb35101a89cacb07cd80585413ee4aa8986d966138d866ffd4fb9babd), the file R08's ammonia-ice.json was reduced from, reduced by reduce.py"
+licence = "none stated for the data (optool's MIT licence covers its software); only the measured constants over the range read, facts, are committed, with the citation (decision-r08-licences.md)"
+
+[[files]]
+name = "nk.csv"
+sha256 = "c3064549843220e67a590be4881f369f7391d1f2eeeb84892b0a78fc88fa4f98"

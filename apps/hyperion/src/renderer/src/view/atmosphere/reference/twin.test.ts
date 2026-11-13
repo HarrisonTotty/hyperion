@@ -1,0 +1,1121 @@
+import { describe, expect, it } from "vitest";
+
+import { normalise, type Vec3 } from "../../../geometry/vec3";
+import {
+  sweepGeometries,
+  sweepMedium,
+  type SweepGeometry,
+  type SweepPoint,
+} from "../../../test/atmosphereSweep";
+import { belowPatternAt, belowPatternDepth, patternedDeckTables } from "../../../test/thickTables";
+import { DEFAULT_FOV_DEG } from "../../camera/projection";
+import { lookAlong } from "../../camera/quaternion";
+import { EARTH_SLAB_REFERENCE, EARTH_SLAB_REFERENCE_CURVES } from "../earth";
+import {
+  type AtmosphereCamera,
+  type SunState,
+  type SurfaceTransmittance,
+  TABLE_SIZES,
+} from "../hillaire";
+import { MARCH_TOLERANCE } from "../marchSteps";
+import { type AtmosphereMedium, columnLengthM, densityAt } from "../medium";
+import { bodyGravity } from "../oblate";
+import { kernelMedium } from "../tables";
+import {
+  aerialPerspectiveTwin,
+  mediumMarchEdgesM,
+  MULTI_SCATTERING_KERNEL_OPTIONS,
+  multiScatteringTwin,
+  planetTwin,
+  rayMarchRayAlongTwin,
+  rayMarchTargetTexelsTwin,
+  rayMarchTargetTexelTwin,
+  rayMarchTexelsTwin,
+  skyViewReadTwin,
+  skyViewTexelsTwin,
+  slicedSunTransmittance,
+  tableSources,
+  transmittanceTablesTwin,
+  twinView,
+  type TwinRgb,
+} from "../tablesCpu";
+import type { DeckSlot, DeckTables } from "../thick/deck";
+import { upperMediumOf } from "../thick/deckRead";
+import {
+  EARTH_REFERENCE_RADIUS_M,
+  SATURN_OBLATE_GRAVITY,
+  SATURN_OBLATE_GROUND_ALBEDO,
+  SATURN_OBLATE_REFERENCE,
+} from "./cases";
+import {
+  geodeticPoint,
+  localDirectionVector,
+  REFERENCE_DETECTOR_HALF_ANGLE_DEG,
+  type ReferenceGeometry,
+} from "./geometries";
+import {
+  AERIAL_FROXEL_SCALE,
+  groundConeShare,
+  groundDistanceM,
+  referenceTwin,
+  spheroidGroundDistanceM,
+  TWIN_VIEWPORT,
+  type TwinFigure,
+  twinGeometryKind,
+  type ReferenceTwin,
+  type TwinDeck,
+} from "./twin";
+
+const RADIUS_M = EARTH_REFERENCE_RADIUS_M;
+const FIGURE = { kind: "sphere", radiusM: RADIUS_M } as const;
+const SPHERE = { equatorialRadiusM: RADIUS_M, polarRadiusM: RADIUS_M };
+const GEOMETRIES = sweepGeometries();
+
+function geometryNamed(name: string): SweepGeometry {
+  const found = GEOMETRIES.find((g) => g.name === name);
+  if (found === undefined) {
+    throw new Error(`the sweep has no geometry ${name}`);
+  }
+  return found;
+}
+
+/** A middling point: an absorbing aerosol of g 0.5 at τ ½. */
+const POINT: SweepPoint = {
+  singleScatteringAlbedo: 0.9,
+  asymmetry: 0.5,
+  tau: 0.5,
+  groundAlbedo: 0.3,
+};
+
+/**
+ * The limit of a test that builds a twin, ms. A twin's tables take about 4 s alone and the first
+ * test's, with `planetTwin`'s beside it, 6.7 s (2026-10-26, one file alone on a quiet laptop):
+ * CPU-bound work, ten times over and rounded up (`vitest.config.mts`'s `testTimeout`).
+ */
+const TWIN_TIMEOUT_MS = 120_000;
+
+const twins = new Map<string, ReferenceTwin>();
+
+/** The twin of a sweep point, built once a test file. */
+function twinOf(point: SweepPoint): ReferenceTwin {
+  const key = JSON.stringify(point);
+  let twin = twins.get(key);
+  if (twin === undefined) {
+    twin = referenceTwin(sweepMedium(point), FIGURE);
+    twins.set(key, twin);
+  }
+  return twin;
+}
+
+function observerOf(geometry: ReferenceGeometry): Vec3 {
+  return geodeticPoint(SPHERE, geometry.observer.latitudeDeg, geometry.observer.heightM);
+}
+
+function axisOf(geometry: ReferenceGeometry): Vec3 {
+  return localDirectionVector(geometry.observer.latitudeDeg, geometry.view);
+}
+
+function sunOf(geometry: ReferenceGeometry): Vec3 {
+  return localDirectionVector(geometry.observer.latitudeDeg, geometry.sun);
+}
+
+function sunStateOf(geometry: ReferenceGeometry): SunState {
+  return { directionBodyFixed: sunOf(geometry), illuminanceLx: [1, 1, 1], angularRadiusRad: 0 };
+}
+
+/** The twin's camera at a geometry's observer looking along `direction`. */
+function cameraAlong(geometry: ReferenceGeometry, direction: Vec3): AtmosphereCamera {
+  const originM = observerOf(geometry);
+  return {
+    positionM: originM,
+    orientation: lookAlong(direction, normalise(originM)),
+    fovXRad: (DEFAULT_FOV_DEG * Math.PI) / 180,
+    viewport: TWIN_VIEWPORT,
+  };
+}
+
+describe("the reference twin's tables", { timeout: TWIN_TIMEOUT_MS }, () => {
+  it("builds the march's tables as planetTwin builds them, once a medium", () => {
+    const medium = sweepMedium(POINT);
+    const own = planetTwin(kernelMedium(medium), RADIUS_M);
+    const { planet } = twinOf(POINT);
+    expect(planet.bottomRadiusM).toBe(own.bottomRadiusM);
+    expect(planet.transmittance.texels).toEqual(own.transmittance.texels);
+    expect(planet.multiScattering.texels).toEqual(own.multiScattering.texels);
+  });
+
+  it("lights the ground by the sliced sun's lookup, the table's at the ground, and the sky", () => {
+    const twin = twinOf(POINT);
+    const point = { x: RADIUS_M, y: 0, z: 0 };
+    const sun = { x: Math.cos(Math.PI / 6), y: 0, z: Math.sin(Math.PI / 6) };
+    const latitude = 0;
+    const azimuth = 0;
+    const transmitted = twin.surfaceLighting.sunTransmittance(0, sun.x, latitude, azimuth, 0);
+    const sky = twin.surfaceLighting.skyIrradiance(0, sun.x, latitude, 0);
+    const table: TwinRgb = [0, 0, 0];
+    tableSources(twin.planet).sunTransmittance(0, sun.x, table, 0);
+    expect(transmitted[1]).toBeCloseTo(table[1], 12);
+    expect(sky[1]).toBeGreaterThan(0);
+    const lit = twin.litGroundRadiance(point, sun);
+    expect(lit[1]).toBeCloseTo((0.3 * (sun.x * transmitted[1] + sky[1])) / Math.PI, 14);
+  });
+});
+
+describe("the reference twin's options", { timeout: TWIN_TIMEOUT_MS }, () => {
+  const names = ["ground-s30-v60-a90", "disc-p30", "limb-1H", "aerial-10km"];
+
+  it("scales every radiance and its surface's part by the sun's irradiance", () => {
+    const unit = twinOf(POINT);
+    const bright = referenceTwin(sweepMedium(POINT), FIGURE, { sunIrradiance: [2, 3, 5] });
+    for (const name of names) {
+      const geometry = geometryNamed(name);
+      const [r, g, b] = unit.radiance(geometry);
+      const [sr, sg, sb] = unit.surfaceRadiance(geometry);
+      expect(bright.radiance(geometry)).toEqual([2 * r, 3 * g, 5 * b]);
+      expect(bright.surfaceRadiance(geometry)).toEqual([2 * sr, 3 * sg, 5 * sb]);
+    }
+  });
+
+  // One twin of a cone of zero width, built once for the two tests that read it.
+  let narrowBuilt: ReferenceTwin | undefined;
+  const narrowTwin = (): ReferenceTwin => {
+    narrowBuilt ??= referenceTwin(sweepMedium(POINT), FIGURE, { detectorHalfAngleDeg: 0 });
+    return narrowBuilt;
+  };
+
+  it("takes its cone where a geometry gives none", () => {
+    const narrow = narrowTwin();
+    for (const name of names) {
+      const geometry = geometryNamed(name);
+      expect(narrow.radiance(geometry)).toEqual(
+        narrow.radianceAlong(geometry, axisOf(geometry)).total,
+      );
+    }
+  });
+
+  it("takes a geometry's own cone over its own", () => {
+    const narrow = narrowTwin();
+    const own = REFERENCE_DETECTOR_HALF_ANGLE_DEG;
+    for (const name of names) {
+      const geometry = geometryNamed(name);
+      expect(narrow.radiance({ ...geometry, detectorHalfAngleDeg: own })).toEqual(
+        twinOf(POINT).radiance(geometry),
+      );
+    }
+  });
+});
+
+describe("the reference twin's cone", { timeout: TWIN_TIMEOUT_MS }, () => {
+  it("is its axis's radiance at a cone of zero width", () => {
+    const twin = twinOf(POINT);
+    const geometry = { ...geometryNamed("ground-s30-v60-a90"), detectorHalfAngleDeg: 0 };
+    expect(twin.radiance(geometry)).toEqual(twin.radianceAlong(geometry, axisOf(geometry)).total);
+  });
+
+  it("averages the reads over the cone, close to its axis's for a smooth sky", () => {
+    const twin = twinOf(POINT);
+    const geometry = geometryNamed("ground-s30-v60-a90");
+    const cone = twin.radiance(geometry);
+    const axis = twin.radianceAlong(geometry, axisOf(geometry)).total;
+    expect(cone[1]).not.toBe(axis[1]);
+    expect(Math.abs(cone[1] / axis[1] - 1)).toBeLessThan(0.01);
+  });
+
+  it("gives each geometry's share of the cone that meets the ground", () => {
+    const twin = twinOf(POINT);
+    const share = (name: string): number => twin.groundConeShare(geometryNamed(name));
+    expect([share("ground-s30-v85-a90"), share("limb-10H"), share("disc-p60")]).toEqual([0, 0, 1]);
+    expect(share("aerial-1km")).toBeGreaterThan(0.2);
+    expect(share("aerial-1km")).toBeLessThan(share("aerial-32km"));
+    expect(share("aerial-32km")).toBeLessThan(0.5);
+    expect(share("limb-0.1H")).toBeGreaterThan(share("limb-3H"));
+  });
+
+  it("keeps the drawn surface's part apart, none where no ray meets the ground", () => {
+    const twin = twinOf(POINT);
+    for (const name of ["ground-s60-v30-a0", "limb-10H"]) {
+      expect(twin.surfaceRadiance(geometryNamed(name))).toEqual([0, 0, 0]);
+    }
+    for (const name of ["disc-p30", "aerial-10km", "limb-0.3H"]) {
+      const surface = twin.surfaceRadiance(geometryNamed(name))[1];
+      expect(surface).toBeGreaterThan(0);
+      expect(surface).toBeLessThan(twin.radiance(geometryNamed(name))[1]);
+    }
+  });
+});
+
+describe("the reference twin's reads", { timeout: TWIN_TIMEOUT_MS }, () => {
+  it("reads a ground view from the sky view built at its observer for its sun", () => {
+    const twin = twinOf(POINT);
+    const geometry = geometryNamed("ground-s60-v75-a180");
+    const view = twinView(cameraAlong(geometry, axisOf(geometry)), sunStateOf(geometry), SPHERE, 1);
+    const sizes = TABLE_SIZES.high;
+    const texelAt = skyViewTexelsTwin(twin.planet, view, sizes.skyView, sizes.skyViewSamples);
+    const direction = axisOf(geometry);
+    expect(twin.radianceAlong(geometry, direction).total).toEqual(
+      skyViewReadTwin(texelAt, sizes.skyView, twin.planet.medium, view, direction),
+    );
+  });
+
+  it("reads a limb from orbit as the ray march's texel at the centre of a camera along it", () => {
+    const twin = twinOf(POINT);
+    const geometry = geometryNamed("limb-1H");
+    const direction = axisOf(geometry);
+    const view = twinView(cameraAlong(geometry, direction), sunStateOf(geometry), SPHERE, 1);
+    const texel = rayMarchTargetTexelTwin(twin.planet, view, TABLE_SIZES.high, 960, 540, 0);
+    expect(twin.radianceAlong(geometry, direction).total).toEqual([texel[0], texel[1], texel[2]]);
+  });
+
+  it("draws the disc's lit ground behind the march's transmittance to it", () => {
+    const twin = twinOf(POINT);
+    const geometry = geometryNamed("disc-p30");
+    const direction = axisOf(geometry);
+    const groundM = groundDistanceM(observerOf(geometry), direction, RADIUS_M);
+    if (groundM === null) {
+      throw new Error("the disc looks down at the ground");
+    }
+    const view = twinView(cameraAlong(geometry, direction), sunStateOf(geometry), SPHERE, 1);
+    const { light, transmittance } = rayMarchTargetTexelsTwin(
+      twin.planet,
+      view,
+      TABLE_SIZES.high,
+      960,
+      540,
+      1 / groundM,
+    );
+    const lit = twin.litGroundRadiance({ x: RADIUS_M, y: 0, z: 0 }, sunOf(geometry));
+    const drawn = twin.radianceAlong(geometry, direction);
+    for (const c of [0, 1, 2] as const) {
+      const t = transmittance[c];
+      expect(drawn.total[c]).toBeCloseTo(light[c] + lit[c] * t, 12);
+      expect(drawn.surface[c]).toBeCloseTo(lit[c] * t, 12);
+    }
+  });
+
+  it("dims it by less than the march's mean throughput where its lobe keeps its in-lobe light (fix-r08-decked-air-opacity)", () => {
+    const twin = twinOf(POINT);
+    const geometry = geometryNamed("disc-p30");
+    const direction = axisOf(geometry);
+    const groundM = groundDistanceM(observerOf(geometry), direction, RADIUS_M);
+    if (groundM === null) {
+      throw new Error("the disc looks down at the ground");
+    }
+    const view = twinView(cameraAlong(geometry, direction), sunStateOf(geometry), SPHERE, 1);
+    const { light, transmittance } = rayMarchTargetTexelsTwin(
+      twin.planet,
+      view,
+      TABLE_SIZES.high,
+      960,
+      540,
+      1 / groundM,
+    );
+    // The point's lobe, g 0.5: the second target above the throughput's mean, the first's alpha.
+    expect(transmittance[1]).toBeGreaterThan(light[3]);
+  });
+
+  it("reads aerial perspective at the target's distance where the ray clears the ground", () => {
+    const twin = twinOf(POINT);
+    const up = { ...geometryNamed("aerial-1km"), view: { zenithDeg: 85, azimuthDeg: 90 } };
+    const far = { ...up, maxDistanceM: 10_000 };
+    const direction = axisOf(up);
+    const at1km = twin.radianceAlong(up, direction);
+    const at10km = twin.radianceAlong(far, direction);
+    expect(at10km.total[1]).toBeGreaterThan(at1km.total[1]);
+    expect(at1km.surface).toEqual([0, 0, 0]);
+    expect(groundDistanceM(observerOf(up), direction, RADIUS_M)).toBeNull();
+  });
+
+  it("reads aerial perspective as the client's volume's four central froxels at its camera", () => {
+    const twin = twinOf(POINT);
+    const geometry = {
+      ...geometryNamed("aerial-1km"),
+      view: { zenithDeg: 85, azimuthDeg: 90 },
+      maxDistanceM: 10_500,
+    };
+    const direction = axisOf(geometry);
+    const view = twinView(cameraAlong(geometry, direction), sunStateOf(geometry), SPHERE, 1);
+    const sizes = TABLE_SIZES.high;
+    const size = sizes.aerialPerspective;
+    const reachM = sizes.aerialPerspectiveReachM;
+    const volume = aerialPerspectiveTwin(
+      twin.planet,
+      view,
+      size,
+      sizes.aerialPerspectiveSamplesPerSlice,
+      reachM,
+    );
+    const { widthTexels: w, heightTexels: h, slices } = size;
+    // The 2 × 2 volume's corners stand at the client's central froxels only for its 32 wide.
+    expect(AERIAL_FROXEL_SCALE).toBe(1 / (w - 1));
+    const centre = (slice: number, channel: number): number => {
+      let sum = 0;
+      for (const [x, y] of [
+        [w / 2 - 1, h / 2 - 1],
+        [w / 2, h / 2 - 1],
+        [w / 2 - 1, h / 2],
+        [w / 2, h / 2],
+      ] as const) {
+        sum += volume.texels[((slice * h + y) * w + x) * 4 + channel] ?? Number.NaN;
+      }
+      return sum / 4;
+    };
+    // 10.5 km of 32 km over 32 slices: the slice axis at 10 − ½, halfway between slices 9 and 10.
+    expect((10_500 / reachM - 0.5 / slices) * slices - 0.5).toBeCloseTo(9.5, 12);
+    const read = [0, 1, 2].map((c) => (centre(9, c) + centre(10, c)) / 2);
+    const drawn = twin.radianceAlong(geometry, direction).total;
+    for (const [c, expected] of read.entries()) {
+      expect(drawn[c] ?? Number.NaN).toBeCloseTo(expected, 12);
+    }
+  });
+
+  it("draws the lit ground behind the air where the ray meets it before its target", () => {
+    const twin = twinOf(POINT);
+    const geometry = geometryNamed("aerial-10km");
+    const originM = observerOf(geometry);
+    const below = localDirectionVector(0, { zenithDeg: 90.3, azimuthDeg: 90 });
+    const groundM = groundDistanceM(originM, below, RADIUS_M) ?? Number.NaN;
+    expect(groundM).toBeLessThan(1_000);
+    const lit = twin.litGroundRadiance(
+      {
+        x: originM.x + groundM * below.x,
+        y: originM.y + groundM * below.y,
+        z: originM.z + groundM * below.z,
+      },
+      sunOf(geometry),
+    );
+    const drawn = twin.radianceAlong(geometry, below);
+    expect(drawn.surface[1]).toBeGreaterThan(0.5 * lit[1]);
+    expect(drawn.surface[1]).toBeLessThan(lit[1]);
+    expect(drawn.total[1]).toBeGreaterThan(drawn.surface[1]);
+  });
+});
+
+describe(
+  "the reference twin's drawn surface per channel (R08.T9.c)",
+  { timeout: TWIN_TIMEOUT_MS },
+  () => {
+    const curves = EARTH_SLAB_REFERENCE_CURVES;
+    // The slab Earth, whose air reddens what it passes, as the composite draws it and as the grey way
+    // back does, each built once for the tests that read it.
+    const built = new Map<SurfaceTransmittance, ReferenceTwin>();
+    const twinUnder = (surfaceTransmittance: SurfaceTransmittance): ReferenceTwin => {
+      let twin = built.get(surfaceTransmittance);
+      if (twin === undefined) {
+        twin = referenceTwin(EARTH_SLAB_REFERENCE, FIGURE, { curves, surfaceTransmittance });
+        built.set(surfaceTransmittance, twin);
+      }
+      return twin;
+    };
+
+    it.each([
+      ["per channel by default", "channels", [0, 1, 2]],
+      ["by the mean, the way back", "grey", [3, 3, 3]],
+    ] as const)(
+      "dims the disc's lit ground from orbit by the march's second target %s",
+      (_, surfaceTransmittance, channels) => {
+        const twin = twinUnder(surfaceTransmittance);
+        const geometry = geometryNamed("disc-p30");
+        const direction = axisOf(geometry);
+        const groundM = groundDistanceM(observerOf(geometry), direction, RADIUS_M);
+        if (groundM === null) {
+          throw new Error("the disc looks down at the ground");
+        }
+        const view = twinView(cameraAlong(geometry, direction), sunStateOf(geometry), SPHERE, 1);
+        const { transmittance } = rayMarchTargetTexelsTwin(
+          twin.planet,
+          view,
+          TABLE_SIZES.high,
+          960,
+          540,
+          1 / groundM,
+        );
+        const lit = twin.litGroundRadiance({ x: RADIUS_M, y: 0, z: 0 }, sunOf(geometry));
+        const drawn = twin.radianceAlong(geometry, direction);
+        for (const [c, t] of channels.entries()) {
+          expect(drawn.surface[c]).toBeCloseTo((lit[c] ?? Number.NaN) * transmittance[t], 12);
+        }
+      },
+    );
+
+    /** The share of the lit ground's light that reaches the observer short of an aerial target. */
+    const passedShortOfTarget = (surfaceTransmittance: SurfaceTransmittance): number[] => {
+      const twin = twinUnder(surfaceTransmittance);
+      const geometry = geometryNamed("aerial-10km");
+      const originM = observerOf(geometry);
+      const below = localDirectionVector(0, { zenithDeg: 90.3, azimuthDeg: 90 });
+      const groundM = groundDistanceM(originM, below, RADIUS_M) ?? Number.NaN;
+      const lit = twin.litGroundRadiance(
+        {
+          x: originM.x + groundM * below.x,
+          y: originM.y + groundM * below.y,
+          z: originM.z + groundM * below.z,
+        },
+        sunOf(geometry),
+      );
+      const { surface } = twin.radianceAlong(geometry, below);
+      return [0, 1, 2].map((c) => (surface[c] ?? Number.NaN) / (lit[c] ?? Number.NaN));
+    };
+
+    it("dims the lit ground short of an aerial target per channel by default, the red passing more than the blue", () => {
+      const [red = Number.NaN, , blue = Number.NaN] = passedShortOfTarget("channels");
+      expect(red).toBeGreaterThan(blue);
+    });
+
+    it("dims the lit ground short of an aerial target by the mean, the way back, every channel alike", () => {
+      const [red = Number.NaN, , blue = Number.NaN] = passedShortOfTarget("grey");
+      expect(red).toBeCloseTo(blue, 12);
+    });
+  },
+);
+
+describe("the reference twin's media", { timeout: TWIN_TIMEOUT_MS }, () => {
+  it("keeps a grey medium's three channels equal", () => {
+    const twin = twinOf(POINT);
+    for (const name of ["ground-s0-v30-a0", "disc-p60", "limb-0.3H", "aerial-32km"]) {
+      const [r, g, b] = twin.radiance(geometryNamed(name));
+      expect([r, b]).toEqual([expect.closeTo(g, 12), expect.closeTo(g, 12)]);
+    }
+  });
+
+  it("scatters nothing into the sky of a medium of ω 0", () => {
+    const twin = twinOf({ ...POINT, singleScatteringAlbedo: 0 });
+    // The cones of the limbs to 3 H, ±32 km in tangent height from 3,700 km, take in the lit ground.
+    for (const name of ["ground-s30-v0-a0", "ground-s80-v85-a180", "limb-10H"]) {
+      expect(twin.radiance(geometryNamed(name))).toEqual([0, 0, 0]);
+    }
+  });
+
+  // At the setting's count, and since R08.T11.b at the bare ground's, which the disc's drawn ground
+  // takes from orbit (20 steps at this depth, `decision-r08-t11-frame.md` §2): 0.64% off, within
+  // R05.T12.e's 2% (2026-10-27).
+  it("shows the disc of a medium of ω 0 as the ground's direct light through the air both ways", () => {
+    const point = { ...POINT, singleScatteringAlbedo: 0 };
+    const geometry = { ...geometryNamed("disc-p60"), detectorHalfAngleDeg: 0 };
+    const tau = POINT.tau;
+    const expected = (0.3 / Math.PI) * 0.5 * Math.exp(-tau / 0.5) * Math.exp(-tau);
+    const atTheSetting = referenceTwin(sweepMedium(point), FIGURE, {
+      sizes: { ...TABLE_SIZES.high, marchDepthSteps: null },
+    });
+    expect(atTheSetting.radiance(geometry)[1] / expected).toBeCloseTo(1, 2);
+    const shipped = twinOf(point).radiance(geometry)[1] / expected;
+    expect(Math.abs(shipped - 1)).toBeLessThan(MARCH_TOLERANCE);
+  });
+});
+
+describe("the reference twin's geometry", () => {
+  it("meets the ground straight down at the observer's height and not looking up", () => {
+    const origin = { x: RADIUS_M + 1_000, y: 0, z: 0 };
+    expect(groundDistanceM(origin, { x: -1, y: 0, z: 0 }, RADIUS_M)).toBeCloseTo(1_000, 6);
+    expect(groundDistanceM(origin, { x: 1, y: 0, z: 0 }, RADIUS_M)).toBeNull();
+  });
+
+  it("draws the ground's observers on the sky view, orbit's on the march, paths on the volume", () => {
+    const medium = sweepMedium(POINT);
+    const pairs = new Set(GEOMETRIES.map((g) => `${g.kind}:${twinGeometryKind(g, medium)}`));
+    expect([...pairs].toSorted()).toEqual([
+      "aerial:aerial",
+      "disc:orbit",
+      "ground:ground",
+      "limb:orbit",
+    ]);
+  });
+
+  it("refuses an observer inside the air in the march band", () => {
+    const geometry = {
+      ...geometryNamed("ground-s30-v0-a0"),
+      observer: { heightM: 40_000, latitudeDeg: 0 },
+    };
+    expect(() => twinGeometryKind(geometry, sweepMedium(POINT))).toThrow(RangeError);
+  });
+});
+
+/** A copy of a medium with every tabulated term's layer edges dropped: R05's one piece a ray. */
+function withoutEdges(medium: AtmosphereMedium): AtmosphereMedium {
+  return {
+    ...medium,
+    terms: medium.terms.map((term) =>
+      term.density.kind === "tabulated"
+        ? { ...term, density: { ...term.density, edgesM: [] } }
+        : term,
+    ),
+  };
+}
+
+/** Earth's sphere as a level spheroid with no spin: a = c = R, s ≡ 1 everywhere. */
+const STILL_GRAVITY = bodyGravity(
+  {
+    figure: SPHERE,
+    massKg: 5.972e24,
+    angularVelocityRadS: 0,
+    bulkGravityMS2: 9.806_65,
+    figureLaw: null,
+  },
+  RADIUS_M,
+);
+
+/** Saturn's level spheroid, as `saturn-oblate` stands on it. */
+const SATURN_FIGURE = { kind: "spheroid", gravity: SATURN_OBLATE_GRAVITY } as const;
+
+describe("the reference twin's ground on a spheroid (R08.T13.c1)", () => {
+  it("meets a spheroid of equal radii where it meets the sphere", () => {
+    const origin = { x: RADIUS_M + 1_000_000, y: 0, z: 0 };
+    const direction = normalise({ x: -1, y: 0.1, z: 0.05 });
+    const sphere = groundDistanceM(origin, direction, RADIUS_M) ?? Number.NaN;
+    expect(spheroidGroundDistanceM(origin, direction, SPHERE)).toBeCloseTo(sphere, 6);
+  });
+
+  it("meets an oblate spheroid's pole at c straight down", () => {
+    const datum = SATURN_OBLATE_GRAVITY.spheroid;
+    const above = { x: 0, y: 0, z: datum.polarRadiusM + 5_000 };
+    expect(spheroidGroundDistanceM(above, { x: 0, y: 0, z: -1 }, datum)).toBeCloseTo(5_000, 6);
+  });
+
+  it("does not meet an oblate spheroid looking up from above it", () => {
+    const datum = SATURN_OBLATE_GRAVITY.spheroid;
+    const above = { x: 0, y: 0, z: datum.polarRadiusM + 5_000 };
+    expect(spheroidGroundDistanceM(above, { x: 0, y: 0, z: 1 }, datum)).toBeNull();
+  });
+});
+
+describe("the reference twin's spheroid (R08.T13.c1)", { timeout: TWIN_TIMEOUT_MS }, () => {
+  // Earth's sphere as a still level spheroid, and the sweep point's twin on it, built once.
+  const stillFigure = (): TwinFigure => {
+    const spheroid = STILL_GRAVITY.spheroid;
+    if (spheroid === null) {
+      throw new Error("a body with a rotation section has its level spheroid");
+    }
+    return { kind: "spheroid", gravity: { ...STILL_GRAVITY, spheroid } };
+  };
+  let stillBuilt: ReferenceTwin | undefined;
+  const stillTwin = (): ReferenceTwin => {
+    stillBuilt ??= referenceTwin(sweepMedium(POINT), stillFigure());
+    return stillBuilt;
+  };
+  const stillNames = ["ground-s30-v60-a90", "disc-p30", "limb-1H", "aerial-10km"];
+
+  it("reads a spheroid of a sphere's radii through the oblate twins as the sphere", () => {
+    for (const name of stillNames) {
+      const geometry = geometryNamed(name);
+      const sphere = twinOf(POINT).radiance(geometry);
+      const oblate = stillTwin().radiance(geometry);
+      for (const c of [0, 1, 2] as const) {
+        expect(Math.abs(oblate[c] / sphere[c] - 1)).toBeLessThan(1e-6);
+      }
+    }
+  });
+
+  it("gives a spheroid of a sphere's radii the sphere's transmittance along a view", () => {
+    for (const name of stillNames) {
+      const geometry = geometryNamed(name);
+      for (const direction of [sunOf(geometry), axisOf(geometry)]) {
+        const sphere = twinOf(POINT).transmittanceAlong(geometry, direction);
+        const oblate = stillTwin().transmittanceAlong(geometry, direction);
+        for (const c of [0, 1, 2] as const) {
+          expect(Math.abs(oblate[c] - sphere[c])).toBeLessThan(1e-6);
+        }
+      }
+    }
+  });
+
+  it("gives a spheroid of a sphere's radii the sphere's share of a cone meeting the ground", () => {
+    for (const name of stillNames) {
+      const geometry = geometryNamed(name);
+      expect(groundConeShare(geometry, stillFigure())).toBeCloseTo(
+        groundConeShare(geometry, FIGURE),
+        12,
+      );
+    }
+  });
+
+  // One twin of Saturn's figure of one slice and one band, built once for the tests that read it.
+  let oneSliceBuilt: ReferenceTwin | undefined;
+  const oneSliceTwin = (): ReferenceTwin => {
+    oneSliceBuilt ??= referenceTwin(SATURN_OBLATE_REFERENCE, SATURN_FIGURE, { slicing: "single" });
+    return oneSliceBuilt;
+  };
+
+  it("builds one slice and one band on Saturn's spheroid where asked", () => {
+    const { oblate } = oneSliceTwin();
+    expect([[...oblate.kappa], oblate.bands.map((band) => band.gravityRatio)]).toEqual([[1], [1]]);
+  });
+
+  it("reads Saturn's sun through its one slice by the unsliced lookup", () => {
+    const datum = SATURN_OBLATE_GRAVITY.spheroid;
+    const ground = geodeticPoint(datum, 45, 1);
+    const sun = localDirectionVector(45, { zenithDeg: 60, azimuthDeg: 30 });
+    expect(slicedSunTransmittance(oneSliceTwin().oblate, ground, sun).ray.fit).toBe("single");
+  });
+
+  it("lights a spheroid's ground by its geodetic normal and latitude", () => {
+    const twin = oneSliceTwin();
+    const datum = SATURN_OBLATE_GRAVITY.spheroid;
+    const latitudeRad = (60 * Math.PI) / 180;
+    const ground = geodeticPoint(datum, 60, 0);
+    const overhead = localDirectionVector(60, { zenithDeg: 0, azimuthDeg: 0 });
+    const transmitted = twin.surfaceLighting.sunTransmittance(0, 1, latitudeRad, 0, 0);
+    const sky = twin.surfaceLighting.skyIrradiance(0, 1, latitudeRad, 0);
+    const lit = twin.litGroundRadiance(ground, overhead);
+    const expected = (SATURN_OBLATE_GROUND_ALBEDO * (transmitted[1] + sky[1])) / Math.PI;
+    expect(lit[1]).toBeCloseTo(expected, 12);
+  });
+
+  it("refuses the steps' options on a medium with layer edges over several slices", () => {
+    expect(() =>
+      referenceTwin(EARTH_SLAB_REFERENCE, SATURN_FIGURE, { transmittanceSteps: "equal" }),
+    ).toThrow(RangeError);
+  });
+});
+
+describe("the reference twin's steps (R08.T13.c1)", { timeout: TWIN_TIMEOUT_MS }, () => {
+  const curves = EARTH_SLAB_REFERENCE_CURVES;
+
+  // The slab Earth's tables as the kernels build them, and its twins under each steps' option,
+  // each built once for the tests that read it.
+  let splitBuilt: ReturnType<typeof transmittanceTablesTwin> | undefined;
+  const splitTables = (): ReturnType<typeof transmittanceTablesTwin> => {
+    splitBuilt ??= transmittanceTablesTwin(kernelMedium(EARTH_SLAB_REFERENCE), RADIUS_M, curves);
+    return splitBuilt;
+  };
+  let equalBuilt: ReferenceTwin | undefined;
+  const equalTwin = (): ReferenceTwin => {
+    equalBuilt ??= referenceTwin(EARTH_SLAB_REFERENCE, FIGURE, {
+      curves,
+      transmittanceSteps: "equal",
+    });
+    return equalBuilt;
+  };
+  let placedBuilt: ReferenceTwin | undefined;
+  const placedTwin = (): ReferenceTwin => {
+    placedBuilt ??= referenceTwin(EARTH_SLAB_REFERENCE, FIGURE, { curves, marchSteps: "placed" });
+    return placedBuilt;
+  };
+
+  it("reads a medium with no layer edge the same under every steps' option, to the bit", () => {
+    const options = { transmittanceSteps: "equal", marchSteps: "placed" } as const;
+    const other = referenceTwin(sweepMedium(POINT), FIGURE, options);
+    for (const name of ["ground-s30-v60-a90", "disc-p30", "limb-1H", "aerial-10km"]) {
+      const geometry = geometryNamed(name);
+      expect(other.radiance(geometry)).toEqual(twinOf(POINT).radiance(geometry));
+    }
+  });
+
+  it("builds the transmittance in R05's equal steps where asked", () => {
+    const edgeless = withoutEdges(kernelMedium(EARTH_SLAB_REFERENCE));
+    const equal = transmittanceTablesTwin(edgeless, RADIUS_M, curves);
+    expect(equalTwin().planet.transmittance.texels).toEqual(equal.transmittance.texels);
+  });
+
+  it("builds the slab's transmittance in equal steps unlike its split one", () => {
+    expect(equalTwin().planet.transmittance.texels).not.toEqual(splitTables().transmittance.texels);
+  });
+
+  it("keeps the marches cut at the layer edges under equal transmittance steps", () => {
+    expect(mediumMarchEdgesM(equalTwin().planet.medium).length).toBeGreaterThan(0);
+  });
+
+  it("builds the multiple scattering by R05.T12.e's placement where asked", () => {
+    const placed = multiScatteringTwin(
+      withoutEdges(kernelMedium(EARTH_SLAB_REFERENCE)),
+      RADIUS_M,
+      splitTables(),
+      { ...MULTI_SCATTERING_KERNEL_OPTIONS, placement: "placed" },
+    );
+    expect(placedTwin().planet.multiScattering.texels).toEqual(placed.texels);
+  });
+
+  it("drops the per-frame marches' layer edges under R05.T12.e's placement", () => {
+    expect(mediumMarchEdgesM(placedTwin().planet.medium)).toEqual([]);
+  });
+
+  it("keeps the transmittance split under R05.T12.e's placement", () => {
+    expect(placedTwin().planet.transmittance.texels).toEqual(splitTables().transmittance.texels);
+  });
+});
+
+describe(
+  "the reference twin's transmittance along a view (R08.T13.c1)",
+  { timeout: TWIN_TIMEOUT_MS },
+  () => {
+    it("gives the vertical column's from the ground towards the zenith", () => {
+      const twin = twinOf(POINT);
+      const geometry = geometryNamed("ground-s0-v30-a0");
+      const up = normalise(observerOf(geometry));
+      expect(twin.transmittanceAlong(geometry, up)[1]).toBeCloseTo(Math.exp(-POINT.tau), 3);
+    });
+
+    it("gives 1 from orbit along a ray that misses the air", () => {
+      const twin = twinOf(POINT);
+      const geometry = geometryNamed("disc-p30");
+      const up = normalise(observerOf(geometry));
+      expect(twin.transmittanceAlong(geometry, up)).toEqual([1, 1, 1]);
+    });
+  },
+);
+
+/** The sky's irradiance a twin's lit ground reads, at the ground under a sun at 60°, green. */
+function groundSkyIrradiance(twin: ReferenceTwin): number {
+  return twin.surfaceLighting.skyIrradiance(0, 0.5, 0, 0)[1];
+}
+
+describe(
+  "the reference twin's zeroed multiple scattering (R08.T13.c2)",
+  { timeout: TWIN_TIMEOUT_MS },
+  () => {
+    const zeroed = new Map<string, ReferenceTwin>();
+    /** The twin of a sweep point with its multiple scattering zeroed, built once a test file. */
+    const zeroedTwinOf = (point: SweepPoint): ReferenceTwin => {
+      const key = JSON.stringify(point);
+      let twin = zeroed.get(key);
+      if (twin === undefined) {
+        twin = referenceTwin(sweepMedium(point), FIGURE, { multipleScattering: "zeroed" });
+        zeroed.set(key, twin);
+      }
+      return twin;
+    };
+    // A ground view under each sun, the disc with its lit ground, a limb and a path to the ground.
+    const SAMPLED = [
+      "ground-s0-v60-a0",
+      "ground-s30-v75-a180",
+      "ground-s80-v85-a90",
+      "disc-p0",
+      "disc-p60",
+      "limb-0.3H",
+      "aerial-1km",
+    ].map(geometryNamed);
+    const conservative: SweepPoint = { ...POINT, singleScatteringAlbedo: 1 };
+
+    it("reads a medium of ω 0 as drawn, at a sample of every kind of geometry", () => {
+      const point = { ...POINT, singleScatteringAlbedo: 0 };
+      expect(SAMPLED.map((g) => zeroedTwinOf(point).radiance(g))).toEqual(
+        SAMPLED.map((g) => twinOf(point).radiance(g)),
+      );
+    });
+
+    it("reads a medium of ω 1 no brighter than drawn at every sampled geometry", () => {
+      const brighter = SAMPLED.filter(
+        (g) =>
+          zeroedTwinOf(conservative).radiance(g)[1] >
+          twinOf(conservative).radiance(g)[1] * (1 + 1e-12),
+      );
+      expect(brighter.map((g) => g.name)).toEqual([]);
+    });
+
+    it.each(["ground-s30-v75-a180", "disc-p0"])(
+      "reads a medium of ω 1 dimmer than drawn by over 5% at %s",
+      (name) => {
+        const g = geometryNamed(name);
+        const share =
+          1 - zeroedTwinOf(conservative).radiance(g)[1] / twinOf(conservative).radiance(g)[1];
+        expect(share).toBeGreaterThan(0.05);
+      },
+    );
+
+    it("zeroes the multiple-scattering term of the sky's irradiance the lit ground reads", () => {
+      const drawn = groundSkyIrradiance(twinOf(conservative));
+      const single = groundSkyIrradiance(zeroedTwinOf(conservative));
+      expect([single > 0, single < drawn]).toEqual([true, true]);
+    });
+
+    it("keeps the transmittance tables, so the drawn beam, as drawn", () => {
+      const geometry = geometryNamed("ground-s30-v75-a180");
+      const sun = sunOf(geometry);
+      expect(zeroedTwinOf(conservative).transmittanceAlong(geometry, sun)).toEqual(
+        twinOf(conservative).transmittanceAlong(geometry, sun),
+      );
+    });
+  },
+);
+
+describe("the reference twin's ground observers (R08.T13.c1)", { timeout: TWIN_TIMEOUT_MS }, () => {
+  it("refuses a ground view whose cone meets the ground", () => {
+    const twin = twinOf(POINT);
+    const geometry = {
+      ...geometryNamed("ground-s30-v85-a90"),
+      view: { zenithDeg: 95, azimuthDeg: 90 },
+    };
+    expect(() => twin.radiance(geometry)).toThrow(RangeError);
+  });
+});
+
+describe("a twin over a cloud deck (R08.T15.a.2)", () => {
+  /** The split: 3 km over the sweep's Earth-sized sphere, in its air and under its aerosol's top. */
+  const SPLIT_M = 3_000;
+  const medium = sweepMedium(POINT);
+  const upper = kernelMedium(upperMediumOf(medium, SPLIT_M));
+  const ONE_BAND = [
+    { gravityRatio: 1, latitudeRad: 0, bottomRadiusM: RADIUS_M, coefficientFactor: 1 },
+  ];
+  /** The patterned deck over the upper medium, its light scaled by `scale` (0 for none). */
+  const deckOf = (scale: number): TwinDeck => ({
+    tables: patternedDeckTables(ONE_BAND, upper, 1, SPLIT_M).map((band) => scaledDeck(band, scale)),
+    polarisation: null,
+  });
+  /** From orbit straight down at the deck, the sun 30° up. */
+  const NADIR: ReferenceGeometry = {
+    name: "nadir",
+    image: "disc-p60",
+    observer: { heightM: 2_000_000, latitudeDeg: 0 },
+    view: { zenithDeg: 180, azimuthDeg: 0 },
+    sun: { zenithDeg: 60, azimuthDeg: 0 },
+  };
+
+  it(
+    "draws the deck's own light at its ground from orbit, nothing of it with its light 0",
+    { timeout: TWIN_TIMEOUT_MS },
+    () => {
+      const lit = referenceTwin(medium, FIGURE, { deck: deckOf(1) }).radiance(NADIR);
+      const dark = referenceTwin(medium, FIGURE, { deck: deckOf(0) }).radiance(NADIR);
+      // The deck's patterned light is of the order of the air's above it: the nadir's radiance
+      // measured 1.9 to 2.1 times the dark deck's by channel (2026-10-30).
+      expect([0, 1, 2].every((c) => (lit[c] ?? 0) > 1.5 * (dark[c] ?? 0))).toBe(true);
+    },
+  );
+
+  it(
+    "refuses a deck beside a thick bake of its own, a deck of other bands, and an observer below the split",
+    { timeout: TWIN_TIMEOUT_MS },
+    () => {
+      const tables = deckOf(1).tables;
+      expect(() =>
+        referenceTwin(medium, FIGURE, {
+          deck: deckOf(1),
+          thick: tables.map((band) => band.above),
+        }),
+      ).toThrow(/takes no thick bake of its own/u);
+      expect(() =>
+        referenceTwin(medium, FIGURE, {
+          deck: { tables: [...tables, ...tables], polarisation: null },
+        }),
+      ).toThrow(/a deck of 2 bands for a twin of 1/u);
+      const twin = referenceTwin(medium, FIGURE, { deck: deckOf(1) });
+      expect(() =>
+        twin.radiance({ ...NADIR, name: "under", observer: { heightM: 100, latitudeDeg: 0 } }),
+      ).toThrow(/below a deck's split/u);
+    },
+  );
+});
+
+describe("a twin beneath a cloud deck (R08.T15.b.2)", () => {
+  /** The split: 3 km over the sweep's Earth-sized sphere, in its air and under its aerosol's top. */
+  const SPLIT_M = 3_000;
+  const medium = sweepMedium(POINT);
+  const upper = kernelMedium(upperMediumOf(medium, SPLIT_M));
+  const ONE_BAND = [
+    { gravityRatio: 1, latitudeRad: 0, bottomRadiusM: RADIUS_M, coefficientFactor: 1 },
+  ];
+  /** The patterned deck over a surface, with its patterned table below. */
+  const deck: TwinDeck = {
+    tables: patternedDeckTables(ONE_BAND, upper, 1, SPLIT_M, true),
+    polarisation: null,
+  };
+  const twin = (): ReferenceTwin => referenceTwin(medium, FIGURE, { deck });
+  /** The pattern's altitude rows, the deck's 17 from the ground to the split. */
+  const altitudeAt = (a: number): number => (a * SPLIT_M) / 16;
+  /** A ground observer at row 4's height, 750 m, looking up; the sun 60° up. */
+  const UP: ReferenceGeometry = {
+    name: "up",
+    image: "ground-s30",
+    observer: { heightM: altitudeAt(4), latitudeDeg: 0 },
+    view: { zenithDeg: 0, azimuthDeg: 0 },
+    sun: { zenithDeg: 30, azimuthDeg: 0 },
+  };
+
+  it(
+    "draws a ground observer's sky beneath from the table below, through the sky view's read, to 10⁻⁶",
+    { timeout: TWIN_TIMEOUT_MS },
+    () => {
+      // Straight up, the light travels straight down: μ −1, the modes past 0 nil. Its sun
+      // cosine cos 30° lies between rows 27 and 28 of the pattern, (s + ½) ÷ 32.
+      const mu0 = Math.cos(Math.PI / 6);
+      const x = mu0 * 32 - 0.5;
+      const s0 = Math.floor(x);
+      const fs = x - s0;
+      const radiance = twin().radiance(UP);
+      for (let c = 0; c < 3; c += 1) {
+        // The travel cosine −1 lies beyond the last cell, −15/16, which the read holds.
+        const at = (s: number): number => belowPatternAt(4, s, 0, 0, 0, 0, c).radiance;
+        const expected = (1 - fs) * at(s0) + fs * at(s0 + 1);
+        // Measured 2026-11-01: 2.3 × 10⁻⁸; the sky view's zenith texels are the read's own.
+        expect(Math.abs((radiance[c] ?? Number.NaN) / expected - 1)).toBeLessThan(1e-6);
+      }
+    },
+  );
+
+  it(
+    "lights the ground beneath by the table's sky and beam, heights above the case's own datum",
+    { timeout: TWIN_TIMEOUT_MS },
+    () => {
+      const lighting = twin().surfaceLighting;
+      const mu0 = (20 + 0.5) / 32;
+      const sky = lighting.skyIrradiance(0, mu0, 0, 0);
+      const beam = lighting.sunTransmittance(0, mu0, 0, 0, 0);
+      for (let c = 0; c < 3; c += 1) {
+        expect(sky[c]).toBeCloseTo(Math.fround(belowPatternAt(0, 20, 0, 0, 0, 0, c).irradiance), 7);
+        expect(
+          (beam[c] ?? Number.NaN) / Math.exp(-belowPatternDepth(0, SPLIT_M, 0, c) / mu0),
+        ).toBeCloseTo(1, 6);
+      }
+    },
+  );
+
+  it(
+    "draws aerial perspective beneath as I(h_obs) − T I(h_target), T of the column's own extinction, to 0.2%",
+    { timeout: TWIN_TIMEOUT_MS },
+    () => {
+      // A level path of 2 km from 840 m, inside the interval between rows 4 and 5 (750 and
+      // 937.5 m), so that the cone's rays' targets (±17 m about the axis's) stay within it: the
+      // light I(h) − T I(h_t), T = e^(−σ d), σ the kernels' own extinction there.
+      const heightM = 840;
+      const level: ReferenceGeometry = {
+        ...UP,
+        name: "level",
+        observer: { heightM, latitudeDeg: 0 },
+        view: { zenithDeg: 90, azimuthDeg: 90 },
+        maxDistanceM: 2_000,
+      };
+      const radiance = twin().radiance(level);
+      const mu0 = Math.cos(Math.PI / 6);
+      const x = mu0 * 32 - 0.5;
+      const s0 = Math.floor(x);
+      const fs = x - s0;
+      for (let c = 0; c < 3; c += 1) {
+        // Level, the light travels at μ 0, between travel cells 7 and 8, its azimuth 90° from
+        // the sun's: Σ_m Iᵐ cos mΔφ, m = 0 and 2, the m = 2 term −I² at Δφ 90°.
+        const at = (a: number, s: number, m: number): number =>
+          0.5 *
+          (belowPatternAt(a, s, 7, 0, 0, m, c).radiance +
+            belowPatternAt(a, s, 8, 0, 0, m, c).radiance);
+        const sines = Math.sqrt(1 - mu0 * mu0) * Math.sqrt(1 - (0.5 / 8) ** 2);
+        const field = (a: number, s: number): number => at(a, s, 0) - at(a, s, 2) * sines ** 2;
+        const skyAt = (a: number): number => (1 - fs) * field(a, s0) + fs * field(a, s0 + 1);
+        const skyHere = (h: number): number => {
+          const f = (h - altitudeAt(4)) / (altitudeAt(5) - altitudeAt(4));
+          return (1 - f) * skyAt(4) + f * skyAt(5);
+        };
+        // The target 2 km on, risen t² ÷ (√(r² + t²) + r) on the sphere.
+        const r = RADIUS_M + heightM;
+        const rise = 2_000 ** 2 / (Math.sqrt(r * r + 2_000 ** 2) + r);
+        // T of the kernels' own extinction at the path's height (`packBelowDeckTable`'s column).
+        const t = Math.exp(-2_000 * kernelExtinctionAt(medium, heightM + rise / 2, c));
+        const expected = skyHere(heightM) - t * skyHere(heightM + rise);
+        // Measured 2026-11-01: 1.1 × 10⁻³ in red, the column's extinction read geometrically
+        // between the rows where the aerosol's profile is not exponential.
+        expect(Math.abs((radiance[c] ?? Number.NaN) / expected - 1)).toBeLessThan(2e-3);
+      }
+    },
+  );
+
+  it(
+    "dims what lies beyond the air from beneath by the vertical depth's green channel, e^(−τ ÷ μ), and hides it below the horizontal",
+    { timeout: TWIN_TIMEOUT_MS },
+    () => {
+      const t = twin();
+      const up = t.transmittanceAlong(UP, axisOf(UP));
+      const down = t.transmittanceAlong(UP, { x: -1, y: 0, z: 0 });
+      const expected = Math.exp(-kernelDepthAt(medium, altitudeAt(4), 1));
+      expect([up[0] / expected, up[1] / expected, up[2] / expected, ...down]).toEqual([
+        expect.closeTo(1, 6),
+        expect.closeTo(1, 6),
+        expect.closeTo(1, 6),
+        0,
+        0,
+        0,
+      ]);
+    },
+  );
+});
+
+describe("a twin above a cloud deck over a surface (research-leans-33 §4(c))", () => {
+  /** The split: 5 km over the sweep's Earth-sized sphere, the cache tests' fixtures' deck top. */
+  const SPLIT_M = 5_000;
+  const medium = sweepMedium(POINT);
+  const upper = kernelMedium(upperMediumOf(medium, SPLIT_M));
+  const ONE_BAND = [
+    { gravityRatio: 1, latitudeRad: 0, bottomRadiusM: RADIUS_M, coefficientFactor: 1 },
+  ];
+  /** The patterned deck over a surface, with its patterned table below. */
+  const deck: TwinDeck = {
+    tables: patternedDeckTables(ONE_BAND, upper, 1, SPLIT_M, true),
+    polarisation: null,
+  };
+  const DECK_DATUM = { equatorialRadiusM: RADIUS_M + SPLIT_M, polarRadiusM: RADIUS_M + SPLIT_M };
+  /** From 1 km over the deck's top, looking down `zenithDeg` from the zenith; an aerial target 30 km on. */
+  const down = (zenithDeg: number): ReferenceGeometry => ({
+    name: `down-${zenithDeg}`,
+    image: "aerial",
+    observer: { heightM: SPLIT_M + 1_000, latitudeDeg: 0 },
+    view: { zenithDeg, azimuthDeg: 90 },
+    sun: { zenithDeg: 30, azimuthDeg: 0 },
+    maxDistanceM: 30_000,
+  });
+
+  it.each([180, 150, 120, 110])(
+    "reads the march's deck where the ray meets it before the ground within the volume's reach, %s° from the zenith, not the volume over that ground",
+    { timeout: TWIN_TIMEOUT_MS },
+    (zenithDeg) => {
+      const twin = referenceTwin(medium, FIGURE, { deck });
+      const geometry = down(zenithDeg);
+      const direction = axisOf(geometry);
+      const originM = observerOf(geometry);
+      // The ground drawn beneath the deck, 6 to 20 km on.
+      const groundM = groundDistanceM(originM, direction, RADIUS_M) ?? Number.NaN;
+      expect([groundM >= 6_000, groundM <= 20_000]).toEqual([true, true]);
+      // The march along the ray to that ground, which reads the deck at its datum's hit before it
+      // (R08.T16.b.2) and lets none of the ground through.
+      const view = twinView(cameraAlong(geometry, direction), sunStateOf(geometry), DECK_DATUM, 1);
+      const marched = rayMarchTexelsTwin(
+        twin.planet,
+        view,
+        TABLE_SIZES.high,
+        rayMarchRayAlongTwin(twin.planet.medium, view, originM, direction, groundM),
+      );
+      expect([...marched.transmittance]).toEqual([0, 0, 0, 0]);
+      const drawn = twin.radianceAlong(geometry, direction);
+      expect(drawn.surface).toEqual([0, 0, 0]);
+      for (let c = 0; c < 3; c += 1) {
+        // The camera's centre ray stands an ulp or so off the axis.
+        expect(
+          Math.abs((drawn.total[c] ?? Number.NaN) / (marched.light[c] ?? Number.NaN) - 1),
+        ).toBeLessThan(1e-9);
+      }
+    },
+  );
+});
+
+/** The kernels' extinction of `medium` at h*, channel `c`, m⁻¹: each term's, its forward delta out. */
+function kernelExtinctionAt(medium: AtmosphereMedium, heightM: number, c: number): number {
+  return kernelMedium(medium).terms.reduce(
+    (sum, term) =>
+      sum +
+      ((term.scattering[c] ?? 0) + (term.absorption[c] ?? 0)) * densityAt(term.density, heightM),
+    0,
+  );
+}
+
+/** The kernels' vertical optical depth of `medium` from its top to h*, channel `c`. */
+function kernelDepthAt(medium: AtmosphereMedium, heightM: number, c: number): number {
+  return kernelMedium(medium).terms.reduce(
+    (sum, term) =>
+      sum +
+      ((term.scattering[c] ?? 0) + (term.absorption[c] ?? 0)) *
+        (columnLengthM(term.density, medium.topHeightM) - columnLengthM(term.density, heightM)),
+    0,
+  );
+}
+
+/** A deck band whose own light is scaled by `scale`: its series, G and G_β. */
+function scaledDeck(band: DeckTables, scale: number): DeckTables {
+  const by = (values: Float32Array): Float32Array => values.map((value) => value * scale);
+  return {
+    ...band,
+    slots: band.slots.map((slot): DeckSlot => ({
+      reflectance: by(slot.reflectance),
+      beamReflection: by(slot.beamReflection),
+      diffuse: by(slot.diffuse),
+      singleGeometry: by(slot.singleGeometry),
+      singleBeamGeometry: by(slot.singleBeamGeometry),
+      phase: slot.phase,
+      solves: slot.solves,
+    })),
+  };
+}

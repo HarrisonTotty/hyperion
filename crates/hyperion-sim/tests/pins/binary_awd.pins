@@ -1,0 +1,2 @@
+# Pinned figures (hyperion_testkit::pins): re-pin them by test name with `just repin <test>`.
+the_local_density_at_the_sun_like_point.ratio = 1.099765

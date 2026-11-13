@@ -1,19 +1,34 @@
 /**
  * The `GALAXY` display's readout of the selected system's stars, from `system_summary` at the
- * chart's time (plan 06, P06.T36), and its star list (plan 11, P11.T14), through `App`.
+ * chart's time (plan 06, P06.T36), and its star list (plan 11, P11.T14), through `App`; and how it
+ * reads each kind of star, through `SystemReadout` itself.
  */
-import { type SystemSummaryDto, universeTimeFromYears } from "@hyperion/protocol";
+import {
+  decodeServerMessage,
+  type RequestKind,
+  type ResponseBody,
+  type ResponseFor,
+  type ServerMessage,
+  type SystemSummaryDto,
+  universeTimeFromYears,
+} from "@hyperion/protocol";
 import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "../../App";
+import { localFrameAt } from "../../geometry/frame";
+import { vec3 } from "../../geometry/vec3";
+import { toChartResult } from "../../lib/galaxy/wire";
+import { toSystemModel } from "../../lib/system/wire";
 import { FakeWebSocket } from "../../test/FakeWebSocket";
 import {
   anOpenedUniverse,
+  anUnknownLayer,
   aSystemsInRange,
   aUniverse,
   aUniverseList,
+  withRowFields,
 } from "../../test/galaxyFixtures";
 import { stubCanvas } from "../../test/RecordingContext2D";
 import {
@@ -28,9 +43,24 @@ import {
   aTripleSummary,
   aWhiteDwarf,
 } from "../../test/systemFixtures";
+import { DEFAULT_DRIVE_RANGE_LY, distanceUnitFor } from "./chartModel";
+import { SystemReadout } from "./SystemReadout";
+import { statusLine } from "../../test/statusLine";
 
 /** The chart's time, at which the stars are asked about. */
 const CHART_TIME_YR = 12.5;
+
+/** The chart's answer: two systems, 10 and 20 ly from the centre. */
+function aChartAnswer(): ResponseFor<"systems_in_range"> {
+  return aSystemsInRange({
+    centreLy: [26_000, 0, 0],
+    timeYr: CHART_TIME_YR,
+    systems: [
+      { relLy: [0, 0, 10], layer: "c" },
+      { relLy: [0, 0, 20], layer: "c" },
+    ],
+  });
+}
 
 async function server(play: () => void): Promise<void> {
   await act(async () => {
@@ -39,8 +69,11 @@ async function server(play: () => void): Promise<void> {
   });
 }
 
-/** Renders the console, opens SURVEY 1 and charts two systems, 10 and 20 ly from the centre. */
-async function renderCharted() {
+/**
+ * Renders the console, opens SURVEY 1 and charts `answer`: by default two systems, 10 and 20 ly
+ * from the centre.
+ */
+async function renderCharted(answer: () => ResponseFor<"systems_in_range"> = aChartAnswer) {
   const user = userEvent.setup();
   stubCanvas();
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
@@ -63,18 +96,74 @@ async function renderCharted() {
   await user.type(screen.getByRole("textbox", { name: "X" }), "26000");
   await user.click(screen.getByRole("button", { name: "C CENTRE CHART" }));
   await server(() => {
-    socket.serverAnswers("systems_in_range", () =>
-      aSystemsInRange({
-        centreLy: [26_000, 0, 0],
-        timeYr: CHART_TIME_YR,
-        systems: [
-          { relLy: [0, 0, 10], layer: "c" },
-          { relLy: [0, 0, 20], layer: "c" },
-        ],
-      }),
-    );
+    socket.serverAnswers("systems_in_range", answer);
   });
   return { user, socket };
+}
+
+function isResponseOf<K extends RequestKind>(body: ResponseBody, kind: K): body is ResponseFor<K> {
+  return body.kind === kind;
+}
+
+/** `body` as the client reads it: sent in a response frame and decoded, as the console's are. */
+function throughTheWire<K extends RequestKind>(body: ResponseFor<K>, kind: K): ResponseFor<K> {
+  const frame: ServerMessage = { type: "response", id: 1, body };
+  const message = decodeServerMessage(JSON.stringify(frame));
+  if (message.type !== "response" || !isResponseOf(message.body, kind)) {
+    throw new Error(`the frame is not a ${kind} response`);
+  }
+  return message.body;
+}
+
+/**
+ * Renders the readout as the console shows it once `summary` answers for the chart's first system
+ * at the time asked, without the console: `SystemReadout` given what `SystemsPanel` gives it, from
+ * the chart's answer and `summary`, each sent and decoded as a frame and read by `toChartResult`
+ * and `toSystemModel`.
+ *
+ * @remarks
+ * For the tests of how the readout reads each kind of star. That the console asks, and hands the
+ * answer on to the readout, is the business of the tests through `App`, the living star's
+ * ({@link selectAnswered}) and the request's, refusal's, stale and superseded answers'.
+ */
+function renderAnswered(
+  summary: SystemSummaryDto,
+  { stale = false, starsStale = false }: { stale?: boolean; starsStale?: boolean } = {},
+): void {
+  const chart = toChartResult(throughTheWire(aChartAnswer(), "systems_in_range"));
+  const system = chart.systems.find(({ designation }) => designation === "H7K 4C0RFZ C-1");
+  if (system === undefined) {
+    throw new Error("the chart has no H7K 4C0RFZ C-1");
+  }
+  const answer = toSystemModel(
+    throughTheWire(
+      aSummaryResponse({
+        ...summary,
+        universe: aUniverse().id,
+        system: system.id,
+        time: universeTimeFromYears(chart.timeYr),
+      }),
+      "system_summary",
+    ),
+    system.designation,
+  );
+  if (answer.kind !== "ok") {
+    throw new Error(`the answer cannot be read: ${answer.fault}`);
+  }
+  const [x, y, z] = chart.centreLy;
+  render(
+    <SystemReadout
+      system={system}
+      frame={localFrameAt(vec3(x, y, z))}
+      driveRangeLy={DEFAULT_DRIVE_RANGE_LY}
+      timeYr={chart.timeYr}
+      distanceUnit={distanceUnitFor(chart.radiusLy)}
+      stars={answer.model}
+      stale={stale}
+      starsStale={starsStale}
+      extinction={null}
+    />,
+  );
 }
 
 /** Selects the chart's first system and answers its stars with `summary`, at the time asked. */
@@ -170,8 +259,8 @@ describe("the GALAXY readout's stars", () => {
     expect(within(readout()).getByRole("heading", { name: "STAR A" })).toBeInTheDocument();
   });
 
-  it("reads what this generator version does not model as the em dash, never a zero", async () => {
-    await selectAnswered(aSingleStarSummary(aSunlikeStar()));
+  it("reads what this generator version does not model as the em dash, never a zero", () => {
+    renderAnswered(aSingleStarSummary(aSunlikeStar()));
 
     for (const label of ["ROTATION", "VARIABILITY", "NEBULA RADIUS", "EVENTS"]) {
       expect(valueOf(label)).toBe("—");
@@ -179,9 +268,9 @@ describe("the GALAXY readout's stars", () => {
     expect(valuesOf("DIES IN")).toEqual([]);
   });
 
-  it("reads a death inside the clock window as DIES IN, from the answer's time", async () => {
+  it("reads a death inside the clock window as DIES IN, from the answer's time", () => {
     const at = universeTimeFromYears(CHART_TIME_YR);
-    await selectAnswered(
+    renderAnswered(
       aSingleStarSummary(
         aSunlikeStar({ death_time: { seconds: at.seconds + 312 * 31_557_600, nanos: at.nanos } }),
       ),
@@ -190,8 +279,85 @@ describe("the GALAXY readout's stars", () => {
     expect(valueOf("DIES IN")).toBe("312 yr");
   });
 
-  it("reads a white dwarf's remnant and cooling age", async () => {
-    await selectAnswered(aSingleStarSummary(aWhiteDwarf()));
+  it("sets a stale death's S after its unit and before AGO (plan 05, P05.T14)", () => {
+    const at = universeTimeFromYears(CHART_TIME_YR);
+    renderAnswered(
+      aSingleStarSummary(
+        aSunlikeStar({ death_time: { seconds: at.seconds - 312 * 31_557_600, nanos: at.nanos } }),
+      ),
+      { starsStale: true },
+    );
+
+    expect(valueOf("DIED")).toBe("312 yr SstaleAGO");
+  });
+
+  it("marks the summary's readings with the chart's answer once the link no longer backs it", () => {
+    renderAnswered(aSingleStarSummary(aSunlikeStar()), { stale: true });
+
+    for (const [label, value] of [
+      ["KIND", "DWARF Sstale"],
+      ["PHASE", "MAIN SEQUENCE Sstale"],
+      ["CLASS", "G2V Sstale"],
+      ["MASS", "1.00 M Sstale"],
+      ["[Fe/H]", "-0.13 dex Sstale"],
+      ["T EFF", "5772 K Sstale"],
+      // The em dash has no last value, and takes none.
+      ["ROTATION", "—"],
+    ] as const) {
+      expect([label, valueOf(label)]).toEqual([label, value]);
+    }
+    // The star list's captions are marked with the summary's values, and the heading is not.
+    expect(within(readout()).getByRole("table", { name: "STARS stale" })).toBeInTheDocument();
+    expect(within(readout()).getByRole("heading", { name: "STAR A" })).toBeInTheDocument();
+  });
+
+  it("marks the summary's readings, and not the chart's, while only the summary lags the chart", () => {
+    renderAnswered(aSingleStarSummary(aSunlikeStar()), { starsStale: true });
+
+    expect(valueOf("CLASS")).toBe("G2V Sstale");
+    expect(valueOf("MASS")).toBe("1.00 M Sstale");
+    expect(valueOf("DIST")).not.toMatch(/stale/u);
+    expect(valueOf("INIT MASS")).not.toMatch(/stale/u);
+  });
+
+  it.each([
+    ["a living star", aSunlikeStar],
+    ["a white dwarf", aWhiteDwarf],
+  ] as const)(
+    "keeps an empty slot after every value of %s's readout while live (plan 05, P05.T14)",
+    (_, star) => {
+      renderAnswered(aSingleStarSummary(star()));
+
+      // Every reading, the summary's and the primary's em dashes among them, keeps its slot, so a
+      // reading that forgot its flag, and with it its slot and its mark, fails here.
+      const values = readout().querySelectorAll("dd");
+      expect(values.length).toBeGreaterThan(0);
+      for (const value of values) {
+        const slots = value.querySelectorAll(".stale-slot");
+        expect([value.previousElementSibling?.textContent, slots.length > 0]).toEqual([
+          value.previousElementSibling?.textContent,
+          true,
+        ]);
+        for (const slot of slots) {
+          expect(slot).toBeEmptyDOMElement();
+        }
+      }
+    },
+  );
+
+  it.each([
+    ["the link no longer backs the chart", { stale: true }],
+    ["the summary alone lags the chart", { starsStale: true }],
+  ] as const)("reads STARS NOT YET FORMED, a status, muted with no mark while %s", (_, flags) => {
+    renderAnswered(aNotYetBornSummary(), flags);
+
+    expect(valueOf("STARS")).toBe("NOT YET FORMED");
+    // Muted with its source, so that a stale answer's words never read as live.
+    expect(within(readout()).getByText("NOT YET FORMED").closest(".stale")).not.toBeNull();
+  });
+
+  it("reads a white dwarf's remnant and cooling age", () => {
+    renderAnswered(aSingleStarSummary(aWhiteDwarf()));
 
     expect(valueOf("KIND")).toBe("WHITE DWARF");
     expect(valueOf("REMNANT")).toBe("WHITE DWARF");
@@ -200,16 +366,16 @@ describe("the GALAXY readout's stars", () => {
     expect(valueOf("KICK")).toBe("—");
   });
 
-  it("reads a neutron star's radius in km and its pulsar as not modelled", async () => {
-    await selectAnswered(aSingleStarSummary(aNeutronStar()));
+  it("reads a neutron star's radius in km and its pulsar as not modelled", () => {
+    renderAnswered(aSingleStarSummary(aNeutronStar()));
 
     expect(valueOf("KIND")).toBe("NEUTRON STAR");
     expect(valuesOf("RADIUS")[1]).toBe("12.2 km");
     expect(valueOf("PULSAR PERIOD")).toBe("—");
   });
 
-  it("reads a black hole's light as missing, with the reason", async () => {
-    await selectAnswered(aSingleStarSummary(aBlackHole()));
+  it("reads a black hole's light as missing, with the reason", () => {
+    renderAnswered(aSingleStarSummary(aBlackHole()));
 
     expect(valueOf("KIND")).toBe("BLACK HOLE");
     expect(valueOf("LUM")).toBe("—NO LIGHT");
@@ -217,8 +383,35 @@ describe("the GALAXY readout's stars", () => {
     expect(valueOf("SPIN")).toBe("—");
   });
 
-  it("reads a star that left no remnant with no light or size, and its mass as the em dash", async () => {
-    await selectAnswered(
+  it.each([
+    ["neutron star", aNeutronStar],
+    ["black hole", aBlackHole],
+  ] as const)(
+    "reads no planetary nebula's radius under STAR A for a %s, which never lights one (P09.T44)",
+    (_, remnant) => {
+      renderAnswered(aSingleStarSummary(remnant()));
+
+      expect(valuesOf("NEBULA RADIUS")).toEqual([]);
+    },
+  );
+
+  it.each([
+    ["neutron star", aNeutronStar],
+    ["black hole", aBlackHole],
+  ] as const)("still reads EVENTS under STAR A for a %s (P09.T44)", (_, remnant) => {
+    renderAnswered(aSingleStarSummary(remnant()));
+
+    expect(valueOf("EVENTS")).toBe("—");
+  });
+
+  it("keeps a white dwarf's nebula radius, the remnant a planetary nebula leaves (P09.T44)", () => {
+    renderAnswered(aSingleStarSummary(aWhiteDwarf()));
+
+    expect(valueOf("NEBULA RADIUS")).toBe("—");
+  });
+
+  it("reads a star that left no remnant with no light or size, and its mass as the em dash", () => {
+    renderAnswered(
       aSingleStarSummary(
         aBlackHole({
           kind: "no_remnant",
@@ -242,8 +435,8 @@ describe("the GALAXY readout's stars", () => {
     expect(within(stars).getAllByRole("row")[1]?.textContent).toBe("ANONE—NO REMNANT");
   });
 
-  it("reads NOT YET FORMED for a system not yet born", async () => {
-    await selectAnswered(aNotYetBornSummary());
+  it("reads NOT YET FORMED for a system not yet born", () => {
+    renderAnswered(aNotYetBornSummary());
 
     expect(valueOf("STARS")).toBe("NOT YET FORMED");
     expect(within(readout()).queryByRole("heading", { name: "STAR A" })).not.toBeInTheDocument();
@@ -259,7 +452,7 @@ describe("the GALAXY readout's stars", () => {
     });
 
     expect(
-      screen.getByText("REJECTED: no system 0200080020000000 in this universe"),
+      screen.getByText(statusLine("REJECTED: no system 0200080020000000 in this universe")),
     ).toBeInTheDocument();
     expect(within(readout()).queryByText(/REJECTED/)).not.toBeInTheDocument();
     expect(valuesOf("CLASS")).toEqual([]);
@@ -286,7 +479,7 @@ describe("the GALAXY readout's stars", () => {
     await selectAnswered(aSystemSummary({ stars: [], existence: "exists" }));
 
     expect(
-      within(systemsPanel()).getByText("SYSTEM DATA INVALID: star list empty"),
+      within(systemsPanel()).getByText(statusLine("SYSTEM DATA INVALID: star list empty")),
     ).toBeInTheDocument();
     expect(within(systemsPanel()).getByRole("button", { name: "RETRY" })).toBeInTheDocument();
     expect(valuesOf("CLASS")).toEqual([]);
@@ -313,7 +506,8 @@ describe("the GALAXY readout's stars", () => {
     });
 
     expect(valueOf("CLASS")).toBe("G2V Sstale");
-    expect(within(readout()).getByRole("heading", { name: "STAR A stale" })).toBeInTheDocument();
+    // A heading, which takes no mark: its readings carry their own (plan 05, P05.T14).
+    expect(within(readout()).getByRole("heading", { name: "STAR A" })).toBeInTheDocument();
     expect(within(readout()).getByRole("table", { name: "STARS stale" })).toBeInTheDocument();
 
     await server(() => {
@@ -347,8 +541,8 @@ describe("the GALAXY readout's stars", () => {
     expect(valueOf("DESIG")).toBe("H7K 4C0RFZ C-2");
   });
 
-  it("lists a single star alone, with no orbits", async () => {
-    await selectAnswered(aSingleStarSummary(aSunlikeStar()));
+  it("lists a single star alone, with no orbits", () => {
+    renderAnswered(aSingleStarSummary(aSunlikeStar()));
 
     const stars = within(readout()).getByRole("table", { name: "STARS" });
     expect(within(stars).getAllByRole("row")).toHaveLength(2);
@@ -365,8 +559,8 @@ describe("the GALAXY readout's stars", () => {
     expect(within(systemsPanel()).getByText(/^1-\d+ of \d+$/)).toBeInTheDocument();
   });
 
-  it("lists every star of a triple and each orbit that holds them", async () => {
-    await selectAnswered(aTripleSummary());
+  it("lists every star of a triple and each orbit that holds them", () => {
+    renderAnswered(aTripleSummary());
 
     const stars = within(readout()).getByRole("table", { name: "STARS" });
     expect(
@@ -382,8 +576,8 @@ describe("the GALAXY readout's stars", () => {
     ).toEqual(["AB–C", "A–B"]);
   });
 
-  it("reads the stars of the pinned binary with its white dwarf first", async () => {
-    await selectAnswered(aSystemSummary());
+  it("reads the stars of the pinned binary with its white dwarf first", () => {
+    renderAnswered(aSystemSummary());
 
     const stars = within(readout()).getByRole("table", { name: "STARS" });
     const rows = within(stars).getAllByRole("row").slice(1);
@@ -445,8 +639,8 @@ const BROWN_DWARF = aSunlikeStar({
   mass_loss_rate_msun_per_yr: 0,
 });
 
-describe("the GALAXY readout's free-floating objects (plan 13, P13.T8.d)", () => {
-  it("asks nothing of a planet's stars, and holds OPEN SYSTEM back saying its bodies are not modelled", async () => {
+describe("the GALAXY readout's free-floating objects (plan 13, P13.T8.d; plan 14, P14.T27)", () => {
+  it("asks nothing of a planet's stars, and offers OPEN SYSTEM for its bodies", async () => {
     const { user, socket } = await renderFreeFloating();
 
     await user.click(screen.getByRole("option", { name: /^H7K 4C0RFZ G-1, PLANET,/ }));
@@ -455,8 +649,7 @@ describe("the GALAXY readout's free-floating objects (plan 13, P13.T8.d)", () =>
     expect(valueOf("KIND")).toBe("PLANET");
     expect(valueOf("BULK")).toBe("NOT YET MODELLED");
     const open = within(systemsPanel()).getByRole("button", { name: "OPEN SYSTEM" });
-    expect(open).toHaveAttribute("aria-disabled", "true");
-    expect(open).toHaveAccessibleDescription("BODIES NOT YET MODELLED");
+    expect(open).not.toHaveAttribute("aria-disabled", "true");
   });
 
   it("reads a brown dwarf's kind, class and temperature from its summary, as a system of one", async () => {
@@ -480,6 +673,19 @@ describe("the GALAXY readout's free-floating objects (plan 13, P13.T8.d)", () =>
     expect(valueOf("T EFF")).toMatch(/^1,?100 K$/u);
     expect(valueOf("MASS")).toBe("0.050 M");
     const open = within(systemsPanel()).getByRole("button", { name: "OPEN SYSTEM" });
-    expect(open).toHaveAccessibleDescription("BODIES NOT YET MODELLED");
+    expect(open).not.toHaveAttribute("aria-disabled", "true");
+  });
+});
+
+describe("the GALAXY readout's objects of a layer this build does not know (plan 04's reserved list)", () => {
+  it("offers OPEN SYSTEM for one, leaving the server to answer for what it has", async () => {
+    const { user } = await renderCharted(() =>
+      withRowFields(aChartAnswer(), { layer: anUnknownLayer() }, 1),
+    );
+
+    await user.click(screen.getByRole("option", { name: /^H7K 4C0RFZ C-1,/u }));
+
+    const open = within(systemsPanel()).getByRole("button", { name: "OPEN SYSTEM" });
+    expect(open).not.toHaveAttribute("aria-disabled", "true");
   });
 });

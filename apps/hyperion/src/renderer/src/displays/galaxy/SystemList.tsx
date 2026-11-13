@@ -11,11 +11,14 @@ import {
 
 import { EarthMassUnit } from "../../components/EarthMassUnit";
 import { SolarMassUnit } from "../../components/SolarMassUnit";
-import { formatLengthLy, formatListPosition, formatSubstellarMass } from "../../lib/format";
+import { StaleSlot } from "../../components/StaleSlot";
+import { formatListPosition, formatSubstellarMass } from "../../lib/format";
 import { type ChartSystem, isFormedPlanet } from "../../lib/galaxy/model";
+import { placedOriginWords, placementLabel } from "../../lib/galaxy/wire";
 import { objectKindLabel } from "../../lib/system/words";
 import { useScrollMetrics } from "../../lib/useScrollMetrics";
 import { windowRange } from "../../lib/windowRange";
+import { type ChartDistanceUnit, formatChartDistance } from "./chartModel";
 
 /** Height of a row, in `rem`: also the guide's smallest pointer target. */
 const ROW_REM = 2;
@@ -61,16 +64,33 @@ const PLANET_WORDS = "PLANET";
 
 /**
  * What a row's primary is, for its accessible name: the kind in words and the class, a
- * free-floating planet's kind, or that the system is not yet formed at the chart's time.
+ * free-floating planet's kind, or that the system is not yet formed at the chart's time; `null`,
+ * which leaves it out, for a row with no brief of a layer this build does not know.
  */
-function starName(system: ChartSystem): string {
+function starName(system: ChartSystem): string | null {
   if (isFormedPlanet(system)) {
     return PLANET_WORDS;
   }
   if (system.star === null) {
-    return "NOT YET FORMED";
+    // Without its layer, an object with no brief is not known to be a system not yet formed.
+    return system.kind === "unknown" ? null : "NOT YET FORMED";
   }
   return `${objectKindLabel(system.star.kind)} ${system.star.spectralClass}`;
+}
+
+/**
+ * A grid system's `ORIGIN` for its row's accessible name, as the readout reads it, where its row
+ * says how it was placed (plan 08, P08.T15.a): `OLD THIN DISC · DISPLACED REMNANT`, or the
+ * placement alone where this build does not know the population, since the name leaves a Missing
+ * part out, as it does a mass; `null`, which leaves it out, for a row with no placement.
+ */
+function originName(system: ChartSystem): string | null {
+  if (system.placement === null) {
+    return null;
+  }
+  return system.population === "unknown"
+    ? placementLabel(system.placement)
+    : placedOriginWords(system.population, system.placement);
 }
 
 interface SystemListProps {
@@ -79,8 +99,16 @@ interface SystemListProps {
   readonly onSelect: (id: SystemIdHex) => void;
   /** The range a system counts as in (plan 05, design note D9). */
   readonly driveRangeLy: number;
-  /** Decimals every distance on this chart is written with (plan 05, design note D21). */
-  readonly distanceDecimals: number;
+  /**
+   * The unit and decimals every distance on this chart is written with (plan 05, design note D21;
+   * plan 09, P09.T42).
+   */
+  readonly distanceUnit: ChartDistanceUnit;
+  /**
+   * Whether the chart is a snapshot the link no longer backs: each row then trails one `S` and is
+   * named stale.
+   */
+  readonly stale: boolean;
 }
 
 /**
@@ -100,20 +128,39 @@ interface SystemListProps {
  * of what a star is (plan 06, design note 17); a system not yet formed at the chart's time has no
  * class, an em dash, and is named `NOT YET FORMED`. The `STARS` column counts the system's stars,
  * the primary included, one digit right-aligned, and the em dash where the row has no brief; the
- * row's name says `1 star` or `3 stars` (plan 11, P11.T14; the orchestrator's ruling 115.5).
+ * row's name says `1 star` or `3 stars` (plan 11, P11.T14; the orchestrator's ruling 115.5). A grid
+ * system's name repeats its readout's `ORIGIN`, its population and placement
+ * (`OLD THIN DISC · DISPLACED REMNANT`), where its row carries a placement (plan 08, P08.T15.a): no
+ * column has room for it at 1280 × 720.
  *
  * A free-floating brown dwarf is a row like a star's, its class its own (`T4`), one star, and its
  * mass in M☉ to three decimals (`0.052`). A free-floating planet has no class and no star: its
  * `CLASS` says `PLANET` and its `STARS` the em dash, and its mass is in Earth masses (plan 13,
  * design note 14; P13.T8.d). So every mass cell draws its own unit, `M☉` or `M⊕`, and the digits
  * of both line up at the unit.
+ *
+ * A row the chart was answered in observed mode carries its present distance as an Estimated
+ * value, `~2.00`, as the readout does (plan 12, P12.T11), and its class and stars are its brief's,
+ * the primary when the light left; the `DIST` column is as wide as that reading with its `~`. The
+ * column's unit is the chart's, in its header: `DIST ly`, or `DIST AU` on a chart of the centre's
+ * fine steps (plan 09, P09.T42).
+ *
+ * A chart the link no longer backs is muted, as its panel has it, and each row trails one `S`, at
+ * the right edge of its `DRIVE RANGE` cell, which stands for each of the row's values: the
+ * designation, the class, the stars, the distance, the mass and the range. One slot to a row,
+ * kept while the chart is live ({@link StaleSlot}), so that the mark moves nothing and the marks
+ * line up down the list: a slot after each value would take 4 × 2 ch of the class column's 76.2 px
+ * at 1280 × 720 and cut `He-sdO3`, while one fits in the range cell beside `OUT` with no column
+ * changed (plan 05, P05.T14). A stale row's accessible name, which stands for its content, ends
+ * `, stale`.
  */
 export function SystemList({
   systems,
   selectedId,
   onSelect,
   driveRangeLy,
-  distanceDecimals,
+  distanceUnit,
+  stale,
 }: SystemListProps) {
   const baseId = useId();
   const { ref: measureRef, metrics } = useScrollMetrics();
@@ -225,7 +272,7 @@ export function SystemList({
         <span>DESIG</span>
         <span>CLASS</span>
         <span>STARS</span>
-        <span>DIST ly</span>
+        <span>{`DIST ${distanceUnit.symbol}`}</span>
         {/* The unit is in every cell, since a planet's is M⊕ and a star's M☉ (plan 13). */}
         <span>INIT MASS</span>
         {/*
@@ -266,9 +313,16 @@ export function SystemList({
               return null;
             }
             const inRange = system.distanceLy <= driveRangeLy;
-            const distance = formatLengthLy(system.distanceLy, distanceDecimals);
-            const mass = formatSubstellarMass(system.initialMassMsun, system.layer);
-            const massName = mass.unit === "mearth" ? "Earth masses" : "solar masses";
+            // The present distance of a system read as observed is Estimated, as the readout's is
+            // (plan 12, P12.T11; § Data states: each state looks the same everywhere).
+            const distance = `${system.observed === null ? "" : "~"}${formatChartDistance(system.distanceLy, distanceUnit)}`;
+            // The unit a mass is read in is its layer's, so an object of a layer this build does not
+            // know has its mass Missing.
+            const mass =
+              system.layer === "unknown"
+                ? null
+                : formatSubstellarMass(system.initialMassMsun, system.layer);
+            const massName = mass?.unit === "mearth" ? "Earth masses" : "solar masses";
             return (
               <div
                 key={system.id}
@@ -282,10 +336,13 @@ export function SystemList({
                 aria-label={[
                   system.designation,
                   starName(system),
+                  originName(system),
                   starCountName(system),
-                  `${distance} ly`,
-                  `${mass.value} ${massName}`,
+                  `${distance} ${distanceUnit.symbol}`,
+                  mass === null ? null : `${mass.value} ${massName}`,
                   rangeName(inRange),
+                  // The name hides the row's content, its `S` and that mark's word with it.
+                  stale ? "stale" : null,
                 ]
                   .filter((part) => part !== null)
                   .join(", ")}
@@ -309,10 +366,17 @@ export function SystemList({
                   <span className="system-list__number">{system.star.starCount}</span>
                 )}
                 <span className="system-list__number">{distance}</span>
-                <span className="system-list__number">
-                  {mass.value} {mass.unit === "mearth" ? <EarthMassUnit /> : <SolarMassUnit />}
+                {mass === null ? (
+                  <span className="system-list__number readout__missing">—</span>
+                ) : (
+                  <span className="system-list__number">
+                    {mass.value} {mass.unit === "mearth" ? <EarthMassUnit /> : <SolarMassUnit />}
+                  </span>
+                )}
+                <span className="system-list__range">
+                  {rangeWords(inRange)}
+                  <StaleSlot stale={stale} />
                 </span>
-                <span className="system-list__range">{rangeWords(inRange)}</span>
               </div>
             );
           })}

@@ -21,7 +21,6 @@ use std::fmt::Write as _;
 use std::num::NonZeroUsize;
 
 use hyperion_sim::id::Layer;
-use hyperion_sim::sky::photometry::absolute_v_of_state;
 use hyperion_sim::stellar::binary::BinaryInput;
 use hyperion_sim::stellar::binary::pair_light::{
     AGE_BINS, AGE_STEP_DEX, CORNER_SAMPLES, CellRows, ETA_EXTREME, FAINT_FROM_MAG,
@@ -31,6 +30,7 @@ use hyperion_sim::stellar::binary::pair_light::{
     PackedPairLight, PairGrid, PairLightCells, PairLightTable, PairRows, Q_EDGES,
     SAMPLES_PER_PHASE, SEGMENT_SPLITS, UNSEEN_MAG, assemble, from_cmag, pair_rows, sample_input,
 };
+use hyperion_sim::stellar::photometry::absolute_v_of_state;
 
 use crate::emit::{RustTable, TableItem};
 use crate::manifest::{Manifest, ManifestParamError, SimFingerprint};
@@ -47,7 +47,7 @@ pub const MAX_SAMPLES_PER_CELL: u32 = 4_096;
 const LINE_CHARS: usize = 96;
 
 /// A sample's rows as the fit reads them: through the sky's photometry
-/// (`sky::photometry::absolute_v_of_state`, R06's interims for protostars and white dwarfs).
+/// ([`absolute_v_of_state`], R06's interims for protostars and white dwarfs).
 #[must_use]
 pub fn rows(input: &BinaryInput) -> PairRows {
     pair_rows(input, &absolute_v_of_state)

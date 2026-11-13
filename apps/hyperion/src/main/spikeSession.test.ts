@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 
 import type {
   DescentSpikeReport,
+  SpikeGeometryReport,
   SpikeLaunch,
+  SpikeReportPart,
   SpikeResultsAnswer,
   SpikeResultsPaths,
 } from "../preload/api";
@@ -12,7 +14,13 @@ import { FakeDebugger, memoryWriter } from "./fixtures/debugger";
 import { measured, type MemorySample, type RunDescription, validateResults } from "./results";
 import type { TraceFigures } from "./reduceTrace";
 import { SpikeTrace, type TraceWindowStop } from "./spike";
-import { SpikeSession, type SpikeSessionDeps, traceWindowFileName } from "./spikeSession";
+import {
+  rejectedSizesPath,
+  SpikeSession,
+  type SpikeSessionDeps,
+  traceWindowFileName,
+} from "./spikeSession";
+import { sizesReportOf } from "./fixtures/sizesReport";
 import { smallReport } from "./fixtures/spikeReport";
 import { callbackStartsOf, PROFILED, UNPROFILED, windowTrace } from "./fixtures/traces";
 import { LOST_DATA_REASON, type TraceSettings } from "./traceWindows";
@@ -29,6 +37,8 @@ const LAUNCH: SpikeLaunch = {
   dawnSafety: "on",
   capture: "/capture",
   traceProfile: "off",
+  world: "test-planet",
+  style: null,
 };
 
 const RUN: RunDescription = {
@@ -47,10 +57,13 @@ const RUN: RunDescription = {
   launchMode: "vulkan",
   setting: "low",
   seed: DEFAULT_SPIKE_SEED,
+  world: "test-planet",
+  style: null,
   options: { setting: "low", seed: DEFAULT_SPIKE_SEED },
   switches: [],
   shown: false,
   displayHz: null,
+  framePacing: "display",
   nvidiaBaselineBytes: null,
 };
 
@@ -241,6 +254,32 @@ function pathsOf(answer: SpikeResultsAnswer): SpikeResultsPaths {
   return answer.paths;
 }
 
+/** A generated world's geometry settings, every lever on (plan R14). */
+const GEOMETRY_SETTINGS = {
+  clusterPath: true,
+  casterDepthCull: true,
+  casterStrideCap: 8,
+  overlayDepth: "cluster",
+  litClusters: true,
+  farCascadeRate: 4,
+  figureClusters: true,
+  hullClusters: true,
+  wireClusters: true,
+  pageBytes: 128 * 2 ** 20,
+  meshTolerancePx: { camera: 1, wireframeOccluder: 0.5 },
+  finClusters: true,
+  strides: "off",
+  occlusion: "off",
+  shading: "forward",
+  terrainBudget: "patches",
+  standInStrides: "off",
+  hiddenMarks: "drawn",
+  edgeStandIns: "off",
+  discCells: "packed",
+  figureShading: "screen",
+  terrainPlanetshine: "record",
+} as const;
+
 /** A smoke's report: 10 s of frames at 60 Hz from 1,000 ms, its trace in three windows. */
 function smokeReport(): DescentSpikeReport {
   const scriptStartMs = 1000;
@@ -298,6 +337,35 @@ function smokeTrace(k: number, skew = false): TraceFigures {
 /** The window index of a smoke's window file. */
 function windowOf(path: string): number {
   return [0, 1, 2].findIndex((k) => path.endsWith(traceWindowFileName(k)));
+}
+
+/** A segment of the geometry block that no frame sampled. */
+const UNSAMPLED = {
+  interiorPatches: null,
+  edgePatches: null,
+  finPatches: null,
+  drawnTriangles: null,
+  litClusterTriangles: null,
+  casterTriangles: null,
+  overlayTriangles: null,
+} as const;
+
+/** The log of a smoke whose report carries a geometry block of `segments`, every lever on. */
+async function smokeGeometryLogs(
+  segments: SpikeGeometryReport["segments"],
+): Promise<ReadonlyArray<string>> {
+  const { session, logs } = sessionOf(
+    (path) => Promise.resolve(smokeTrace(windowOf(path))),
+    undefined,
+    { ...LAUNCH, smoke: true },
+  );
+  const ops = session.operations();
+  await ops.startMeasuring();
+  await ops.cycleTrace();
+  await ops.cycleTrace();
+  await ops.stopMeasuring();
+  await ops.writeResults({ ...smokeReport(), geometry: { settings: GEOMETRY_SETTINGS, segments } });
+  return logs;
 }
 
 describe("a spike run's session", () => {
@@ -560,6 +628,143 @@ describe("a spike run's session", () => {
     );
   });
 
+  it("logs how long a smoke flew and its geometry block, since it writes no results file", async () => {
+    const { session, logs } = sessionOf(
+      (path) => Promise.resolve(smokeTrace(windowOf(path))),
+      undefined,
+      { ...LAUNCH, smoke: true },
+    );
+    const ops = session.operations();
+    await ops.startMeasuring();
+    await ops.cycleTrace();
+    await ops.cycleTrace();
+    await ops.stopMeasuring();
+    const geometry = {
+      settings: GEOMETRY_SETTINGS,
+      segments: [
+        {
+          segment: "orbit coast",
+          interiorPatches: { frames: 3, p50: 59, max: 61 },
+          edgePatches: { frames: 3, p50: 33, max: 33 },
+          finPatches: null,
+          drawnTriangles: { frames: 3, p50: 868_352, max: 880_000 },
+          litClusterTriangles: null,
+          casterTriangles: null,
+          overlayTriangles: null,
+        },
+      ],
+    } as const;
+    await ops.writeResults({ ...smokeReport(), geometry });
+    expect(logs).toContain("descent spike: the smoke flew 10.0 s of script in 600 frames");
+    expect(logs).toContain("descent spike: ## Geometry (plan R14)");
+    expect(logs.some((line) => line.startsWith("descent spike: | orbit coast | 59 (61) |"))).toBe(
+      true,
+    );
+  });
+
+  it("says no segment sampled drawn terrain where a smoke's lit pass drew no patch, printing no zeros", async () => {
+    const { session, logs } = sessionOf(
+      (path) => Promise.resolve(smokeTrace(windowOf(path))),
+      undefined,
+      { ...LAUNCH, smoke: true },
+    );
+    const ops = session.operations();
+    await ops.startMeasuring();
+    await ops.cycleTrace();
+    await ops.cycleTrace();
+    await ops.stopMeasuring();
+    const none = { frames: 1130, p50: 0, max: 0 };
+    // The software smoke's block over TEST MOON (2026-11-02): no lit pass in the orbit coast, and
+    // one that selects no patch early in the descent arc.
+    const geometry = {
+      settings: GEOMETRY_SETTINGS,
+      segments: [
+        { segment: "orbit coast", ...UNSAMPLED },
+        {
+          segment: "descent arc",
+          interiorPatches: none,
+          edgePatches: none,
+          finPatches: none,
+          drawnTriangles: none,
+          litClusterTriangles: null,
+          casterTriangles: none,
+          overlayTriangles: none,
+        },
+        { segment: "approach and flare", ...UNSAMPLED },
+      ],
+    };
+    await ops.writeResults({ ...smokeReport(), geometry });
+    expect(logs).toContainEqual(
+      expect.stringMatching(/^descent spike: Geometry \(plan R14\): cluster path on, /u),
+    );
+    expect(logs).toContain(
+      "descent spike: No segment sampled drawn terrain: the lit pass drew no patch in its frames (descent arc 1,130), and the other segments had none.",
+    );
+    expect(logs.filter((line) => line.includes("|") || line.includes("0 (0)"))).toEqual([]);
+  });
+
+  it("says no frame had the lit pass's counts where none of a smoke's segments sampled one", async () => {
+    const logs = await smokeGeometryLogs([{ segment: "orbit coast", ...UNSAMPLED }]);
+    expect(logs).toContain(
+      "descent spike: No segment sampled drawn terrain: no frame had the lit pass's counts.",
+    );
+  });
+
+  it("names no other segments where every segment of a smoke's block had frames of none drawn", async () => {
+    const none = { frames: 4, p50: 0, max: 0 };
+    const logs = await smokeGeometryLogs([
+      {
+        segment: "descent arc",
+        interiorPatches: none,
+        edgePatches: none,
+        finPatches: none,
+        drawnTriangles: none,
+        litClusterTriangles: null,
+        casterTriangles: null,
+        overlayTriangles: null,
+      },
+    ]);
+    expect(logs).toContain(
+      "descent spike: No segment sampled drawn terrain: the lit pass drew no patch in its frames (descent arc 4).",
+    );
+  });
+
+  it("shows a smoke's geometry table where a segment drew edge patches alone", async () => {
+    const edges = { frames: 4, p50: 12, max: 20 };
+    const none = { frames: 4, p50: 0, max: 0 };
+    const logs = await smokeGeometryLogs([
+      {
+        segment: "descent arc",
+        interiorPatches: none,
+        edgePatches: edges,
+        finPatches: none,
+        drawnTriangles: edges,
+        litClusterTriangles: null,
+        casterTriangles: null,
+        overlayTriangles: null,
+      },
+    ]);
+    expect(logs).toContain("descent spike: ## Geometry (plan R14)");
+    expect(
+      logs.some((line) => line.startsWith("descent spike: | descent arc | 0 (0) | 12 (20) |")),
+    ).toBe(true);
+  });
+
+  it("says a smoke's report holds no geometry block over the test planet", async () => {
+    const { session, logs } = sessionOf(
+      (path) => Promise.resolve(smokeTrace(windowOf(path))),
+      undefined,
+      { ...LAUNCH, smoke: true },
+    );
+    const ops = session.operations();
+    await ops.startMeasuring();
+    await ops.cycleTrace();
+    await ops.cycleTrace();
+    await ops.stopMeasuring();
+    await ops.writeResults(smokeReport());
+    expect(logs).toContain("descent spike: the report holds no geometry block");
+  });
+
   it("logs a run's clocks after the warm-up beside its results file", async () => {
     const { session, logs } = sessionOf(
       () => Promise.resolve(goodTrace()),
@@ -701,5 +906,139 @@ describe("a spike run's session", () => {
     session.operations().end(0, null);
     expect(exits).toEqual([1, 0]);
     expect(session.ended).toBe(true);
+  });
+});
+
+describe("a spike run's finished segments (R14's Mac measurements)", () => {
+  /** A session whose finished segments' sink records what it was given. */
+  function partialSession(launch: SpikeLaunch = LAUNCH): ReturnType<typeof depsOf> & {
+    readonly session: SpikeSession;
+    readonly names: string[];
+    readonly added: SpikeReportPart[];
+    readonly closes: boolean[];
+  } {
+    const trace = fakeTrace();
+    const made = depsOf(
+      trace,
+      () => Promise.reject(new Error("bad")),
+      () => Promise.resolve(4096),
+      launch,
+    );
+    const names: string[] = [];
+    const added: SpikeReportPart[] = [];
+    const closes: boolean[] = [];
+    const session = new SpikeSession({
+      ...made.deps,
+      partials: (start) => {
+        names.push(start.name);
+        return {
+          add: (each) => {
+            added.push(each);
+          },
+          close: (written) => {
+            closes.push(written);
+            return Promise.resolve();
+          },
+        };
+      },
+    });
+    return { ...made, session, names, added, closes };
+  }
+
+  it("go to the sink as the run flies, under the name its results take, and are removed once those are written", async () => {
+    const { session, written, names, added, closes } = partialSession();
+    // A stopped run's finished segments hold the day's first name, which no later run takes.
+    written.set("/out/2026-10-03-devbox-low-partial.json", "{}");
+    const ops = session.operations();
+    await ops.startMeasuring();
+    const part: SpikeReportPart = { fromFrame: 0, throughS: 10, report: smallReport() };
+    await ops.writePart(part);
+    await ops.stopMeasuring();
+    const paths = pathsOf(await ops.writeResults(smallReport()));
+    expect([names, added, paths.json, closes]).toEqual([
+      ["2026-10-03-devbox-low-2"],
+      [part],
+      "/out/2026-10-03-devbox-low-2.json",
+      [true],
+    ]);
+  });
+
+  it("are none on a smoke, which writes no results", async () => {
+    const { session, names } = partialSession({ ...LAUNCH, smoke: true });
+    const ops = session.operations();
+    await ops.startMeasuring();
+    await ops.writePart({ fromFrame: 0, throughS: 10, report: smallReport() });
+    expect(names).toEqual([]);
+  });
+});
+
+describe("a measured run's load (R10.T14.b)", () => {
+  it("reads the load from the measuring's start to its stop, into the file's sizes block", async () => {
+    const trace = fakeTrace();
+    const { deps, written } = depsOf(
+      trace,
+      () => Promise.resolve(goodTrace()),
+      () => Promise.resolve(4096),
+      { ...LAUNCH, world: "terrain-test", style: "wireframe", sizes: "on" },
+    );
+    const calls: string[] = [];
+    const readings = [
+      { tS: 0, oneMinute: 0.4 },
+      { tS: 60, oneMinute: 0.5 },
+    ];
+    const session = new SpikeSession({
+      ...deps,
+      load: {
+        start: () => {
+          calls.push("start");
+        },
+        stop: () => {
+          calls.push("stop");
+          return measured(readings);
+        },
+      },
+    });
+    const ops = session.operations();
+    await ops.startMeasuring();
+    await ops.stopMeasuring();
+    const paths = pathsOf(await ops.writeResults({ ...smallReport(), sizes: sizesReportOf() }));
+    const results: unknown = JSON.parse(String(written.get(paths.json)));
+    expect([calls, validateResults(results)]).toEqual([["start", "stop"], []]);
+    expect(results).toMatchObject({ sizes: { load: { value: readings, reason: null } } });
+  });
+
+  it("writes the results without a refused sizes block, and the block with its problems beside them", async () => {
+    const trace = fakeTrace();
+    const { deps, written, logs } = depsOf(
+      trace,
+      () => Promise.resolve(goodTrace()),
+      () => Promise.resolve(4096),
+      { ...LAUNCH, world: "terrain-test", style: "wireframe", sizes: "on" },
+    );
+    const ops = new SpikeSession(deps).operations();
+    await ops.startMeasuring();
+    await ops.stopMeasuring();
+    const rejected = { block: { readouts: 1 }, problems: ["sizes.segments is missing"] };
+    const paths = pathsOf(await ops.writeResults(smallReport(), rejected));
+    const results: unknown = JSON.parse(String(written.get(paths.json)));
+    const beside = rejectedSizesPath(paths.json);
+    expect([validateResults(results), String(written.get(paths.json)).includes('"sizes"')]).toEqual(
+      [[], false],
+    );
+    expect(beside).toBe(paths.json.replace(/\.json$/u, "-sizes-rejected.json"));
+    expect(JSON.parse(String(written.get(beside)))).toEqual({
+      problems: rejected.problems,
+      sizes: rejected.block,
+    });
+    expect(logs.some((line) => line.includes("sizes.segments is missing"))).toBe(true);
+  });
+
+  it("reads no load where the run measures no sizes", async () => {
+    const { session, written } = sessionOf(() => Promise.resolve(goodTrace()));
+    const ops = session.operations();
+    await ops.startMeasuring();
+    await ops.stopMeasuring();
+    const paths = pathsOf(await ops.writeResults(smallReport()));
+    expect(String(written.get(paths.json))).not.toContain('"sizes"');
   });
 });

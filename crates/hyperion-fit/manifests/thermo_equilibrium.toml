@@ -1,0 +1,10 @@
+# The gases' thermochemistry (plan 14, P14.T49.d): NASA's CEA records of every substance-registry
+# gas row and of the elements' reference states, re-emitted to 6,000 K for
+# `hyperion_sim::substance::formation`. The record lists and the reference states are constants of
+# `src/tasks/thermo_equilibrium.rs`; the one parameter is recorded here so that the inputs hash
+# covers it, and the task refuses a manifest that disagrees with its code.
+task = "thermo_equilibrium"
+datasets = ["nasa_cea_thermo"]
+
+[params]
+upper_temperature_k = 6000.0

@@ -2,22 +2,37 @@
 //! Design note 10).
 //!
 //! - **Count**: Poisson with mean `max(0, k × expected globulars − living globulars with a tube)`,
-//!   `k` the streams per globular of [`tables::streams`](crate::tables::streams), 1.5, and the
-//!   expected globulars plan 02's untruncated count; so most globular streams are orphans.
+//!   `k` the streams per globular of [`tables::streams`](crate::tables::streams), from version 27
+//!   P15.T11.b's fit to the known streams ([`ORPHAN_STREAMS_PER_GLOBULAR_27`]); the expected
+//!   globulars are plan 02's untruncated count, so most globular streams are orphans.
 //! - **Marks**, on `stream.orphan.marks` keyed by the orphan's place among the orphans: the mass,
 //!   log-normal about 10⁴ M☉ with the known thin streams' 0.5 dex of scatter, cut to 10³–10⁵ M☉
 //!   by inverse transform ([`MASS_LAW`]); the dissolution time as a uniform share of the
 //!   stripping time, which leaves the gap; the age and [Fe/H] by the accreted globulars' laws of
 //!   plan 09 (P09.T12.b: ages uniform on 10.5–13 Gyr, [Fe/H] `N(−1.55, 0.35)`), since an orphan
 //!   is a destroyed cluster of the same system.
-//! - **Orbit**, on `stream.orphan.orbit`, redrawn on that one stream until the pericentre lies
-//!   outside the bar's corotation and the apocentre inside 10⁶ ly ([`APOCENTRE_LIMIT_LY`]): a radius
-//!   from the metal-poor globulars' law `(1 + r² ÷ r_c²)^(−7/4)` (P09.T12.a, the core
-//!   [`GLOBULAR_CORE`]) out to that limit, an isotropic direction, and a velocity from the
-//!   globular-born debris component's law there (plan 08). The turning points are plan 09's
-//!   (P09.T13), so the test is the living globulars'. Attempt `a` reads its own block of
-//!   [`ORBIT_WORDS`] words. An orphan whose [`ORBIT_ATTEMPTS`] attempts all fail is dropped; at
-//!   the Milky Way's parameters none is.
+//! - **Orbit**, on `stream.orphan.orbit`: a radius from the metal-poor globulars' law
+//!   `(1 + r² ÷ r_c²)^(−7/4)` (P09.T12.a, the core [`GLOBULAR_CORE`]) out to 10⁶ ly
+//!   ([`APOCENTRE_LIMIT_LY`]), an isotropic direction, and a velocity from the globular-born
+//!   debris component's law there (plan 08), redrawn on that one stream until the pericentre lies
+//!   outside the bar's corotation and the apocentre inside that limit. The radius is the first
+//!   drawn outside corotation, since no pericentre inside it clears corotation, and is kept while
+//!   only the direction and the velocity are redrawn. The turning points are plan 09's (P09.T13),
+//!   so the test is the living globulars'. Attempt `a` reads its own block of [`ORBIT_WORDS`]
+//!   words, its radius word first whether or not it keeps that radius. An orphan whose
+//!   [`ORBIT_ATTEMPTS`] attempts all fail is dropped: about 1%, kept just outside corotation,
+//!   which no velocity drawn there clears (2 of 259 in the Milky Way fixture).
+//!
+//! Keeping the radius keeps the orphans on the radial law outside corotation, half of which lies
+//! inside 65,000 ly. Redrawn with the velocity, as P10.T3.b first built it, a radius stayed only
+//! where a radially biased velocity happened to clear corotation, mostly far out, and a quarter of
+//! the orphans' tube mass lay inside 65,000 ly, against half now (plan 10's records, "P10.T3.b's
+//! orphans keep their radius").
+//!
+//! The law is the `r^−3.5` that the Harris 2010 catalogue measures over 3–40 kpc (plan 09's
+//! records), extrapolated beyond: it puts 0.18 of its mass beyond 40 kpc, where the catalogue has
+//! 7 of its 105 clusters of [Fe/H] < −1 (0.07), so the orphans may still sit somewhat far out (a
+//! finding: plan 10's records, "P10.T3.d.a's globular part").
 //!
 //! The stripping time is Design note 5's with the tidal radius at the orphan's mass, and stops at
 //! the cluster's age.
@@ -25,16 +40,17 @@
 use crate::coords::GalacticPosition;
 use crate::galaxy::Galaxy;
 use crate::galaxy::PointLy;
+use crate::galaxy::features::interior::counts::CANONICAL_SLOPE;
 use crate::galaxy::features::kinds::globular::{
-    ACCRETED_AGES, GLOBULAR_CORE, METALLICITY_LAWS, orbit as turning_points,
+    ACCRETED_AGES, GLOBULAR_CORE, METALLICITY_LAWS, RadialMotion,
 };
 use crate::galaxy::fields::ComponentId;
 use crate::galaxy::kinematics::{ESCAPE_CUT_ATTEMPTS, VELOCITY_WORDS_PER_ATTEMPT, draw_on_from};
 use crate::galaxy::params::HaloComponentKind;
 use crate::galaxy::quad::gl16;
 use crate::math;
-use crate::rng::{ObjectKey, Stream, tags};
-use crate::tables::streams::ORPHAN_STREAMS_PER_GLOBULAR;
+use crate::rng::{ObjectKey, Seed, Stream, tags};
+use crate::tables::streams::ORPHAN_STREAMS_PER_GLOBULAR_27;
 use crate::units::{Dex, LightYears, SolarMasses, Years};
 
 use super::spec::{ClusterStars, MassLoss, SphericalOrbit, StreamSpec, stripping_time};
@@ -63,6 +79,29 @@ pub struct MassLaw {
     pub range_solar_masses: (f64, f64),
 }
 
+impl MassLaw {
+    /// The law's mean mass, M☉, in closed form.
+    ///
+    /// With `z = (log₁₀ M − log₁₀ M̃) ÷ σ` a standard normal cut to `[a, b]` and `t = σ ln 10`,
+    /// `E[M] = M̃ e^(t² ÷ 2) (Φ(b − t) − Φ(a − t)) ÷ (Φ(b) − Φ(a))`, the cut normal's
+    /// moment-generating function. [`MASS_LAW`]'s is 1.63 × 10⁴ M☉, the mass plan 10's Design
+    /// note 1 gives every globular tube (P10.T3.d.a).
+    #[must_use]
+    pub fn mean_solar_masses(&self) -> f64 {
+        let (lo, hi) = self.range_solar_masses;
+        let centre = math::log10(self.median_solar_masses);
+        let sigma = self.scatter_dex;
+        let cdf = |x: f64| 0.5 * math::erfc(-x * core::f64::consts::FRAC_1_SQRT_2);
+        let (a, b) = (
+            (math::log10(lo) - centre) / sigma,
+            (math::log10(hi) - centre) / sigma,
+        );
+        let t = sigma * core::f64::consts::LN_10;
+        self.median_solar_masses * math::exp(0.5 * t * t) * (cdf(b - t) - cdf(a - t))
+            / (cdf(b) - cdf(a))
+    }
+}
+
 /// The largest apocentre an orphan's progenitor may have, ly (P10.T3.b).
 pub const APOCENTRE_LIMIT_LY: f64 = 1e6;
 
@@ -78,87 +117,170 @@ pub const ORBIT_WORDS: u64 = 3 + VELOCITY_WORDS_PER_ATTEMPT * ESCAPE_CUT_ATTEMPT
 const RADIAL_KNOTS: u32 = 512;
 
 /// The expected number of orphans in a galaxy of `globulars` expected globulars with `living`
-/// living ones given tubes (Design note 10).
+/// living ones given tubes, at `streams_per_globular` streams per globular (Design note 10).
 #[must_use]
-pub(crate) fn expected_count(globulars: f64, living: u32) -> f64 {
-    (ORPHAN_STREAMS_PER_GLOBULAR * globulars - f64::from(living)).max(0.0)
+pub(crate) fn expected_count(streams_per_globular: f64, globulars: f64, living: u32) -> f64 {
+    (streams_per_globular * globulars - f64::from(living)).max(0.0)
 }
 
-/// The orphan streams of `galaxy`, given `living` living globulars with tubes, at most `room`
-/// of them, in their order, numbered 0 until the list numbers them (module documentation).
-///
-/// # Panics
-///
-/// If `galaxy` holds no kinematic tables ([`Galaxy::with_full_potential`]).
-#[must_use]
-pub(crate) fn orphans(galaxy: &Galaxy, living: u32, room: usize) -> Vec<StreamSpec> {
-    let seed = galaxy.seed();
-    let params = galaxy.params();
-    let tables = galaxy.potential();
-    let mean = expected_count(f64::from(params.accretion().globular_count()), living);
-    let count = Stream::open(seed, tags::STREAM_ORPHAN_COUNT, ObjectKey::galaxy()).poisson(mean);
-    let Some(debris) = debris_component(galaxy) else {
-        return Vec::new();
-    };
-    let radial = RadialLaw::new();
-    let corotation = tables.bar_corotation().value();
-    let last_merger = params.accretion().last_major_merger();
-    (0..count)
-        .filter_map(|k| {
-            let key = ObjectKey::galaxy_item(k);
-            let mut marks = Stream::open(seed, tags::STREAM_ORPHAN_MARKS, key);
-            let mass = mass_quantile(marks.uniform());
-            let dissolved = marks.uniform();
-            let age = Years::new(marks.uniform_in(ACCRETED_AGES.0, ACCRETED_AGES.1));
-            let (fe_h_mean, fe_h_sigma) = METALLICITY_LAWS.1;
-            let fe_h = Dex::new(marks.normal(fe_h_mean, fe_h_sigma));
-            let mut stream = Stream::open(seed, tags::STREAM_ORPHAN_ORBIT, key);
-            let (position, velocity, orbit) = (0..ORBIT_ATTEMPTS).find_map(|attempt| {
-                let first = u64::from(attempt) * ORBIT_WORDS;
-                stream.seek(first);
-                let r = radial.quantile(stream.uniform());
-                let cos_theta = stream.uniform_in(-1.0, 1.0);
-                let azimuth = stream.uniform_in(0.0, 2.0 * core::f64::consts::PI);
-                let sin_theta = (1.0 - cos_theta * cos_theta).max(0.0).sqrt();
-                let (sin_phi, cos_phi) = math::sin_cos(azimuth);
-                let at = GalacticPosition::from_light_years([
-                    r * sin_theta * cos_phi,
-                    r * sin_theta * sin_phi,
-                    r * cos_theta,
-                ])
-                .expect("a radius under 10⁶ ly fits the i32 light-year cells");
-                let velocity = draw_on_from(galaxy, debris, &at, &mut stream, first + 3).velocity();
-                let (peri, apo) = turning_points(galaxy, &at, Some(velocity));
-                let accepted = peri.value() > corotation && apo.value() < APOCENTRE_LIMIT_LY;
-                let orbit = SphericalOrbit::between(tables, peri, apo).filter(|_| accepted)?;
-                Some((
-                    GalacticPosition::ORIGIN.displacement_to(&at),
-                    velocity,
-                    orbit,
-                ))
-            })?;
-            let tidal = LightYears::from(
-                tables.tidal_radius(mass, &PointLy::new(orbit.pericentre().value(), 0.0, 0.0)),
-            );
-            let window = stripping_time(&orbit, tidal, [last_merger, age]);
-            Some(StreamSpec {
-                number: StreamNumber(0),
-                origin: StreamOrigin::Orphan,
-                position,
+/// The orphans' draw in one galaxy before any orphan is drawn: how many attempts at an orphan it
+/// makes, and what each reads (module documentation). Orphan `k` is a pure function of the galaxy
+/// and `k` ([`orphan`](Self::orphan)), its every draw keyed by `k`, so a caller's pool may draw
+/// them in any order and gather them by `k` (P10.T5.b).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct OrphanDraw {
+    /// The seed of the galaxy drawn in.
+    seed: Seed,
+    /// The orphans drawn: none if the galaxy has no globular-born debris.
+    count: u64,
+    /// The component whose velocity law the progenitors follow.
+    debris: Option<ComponentId>,
+    radial: RadialLaw,
+    /// The bar's corotation radius, ly, inside which no pericentre is kept.
+    corotation: f64,
+    last_merger: Years,
+}
+
+impl OrphanDraw {
+    /// The draw in `galaxy` given `living` living globulars with tubes.
+    #[must_use]
+    pub(crate) fn new(galaxy: &Galaxy, living: u32) -> Self {
+        let seed = galaxy.seed();
+        let params = galaxy.params();
+        let mean = expected_count(
+            ORPHAN_STREAMS_PER_GLOBULAR_27,
+            f64::from(params.accretion().globular_count()),
+            living,
+        );
+        let count =
+            Stream::open(seed, tags::STREAM_ORPHAN_COUNT, ObjectKey::galaxy()).poisson(mean);
+        let debris = debris_component(galaxy);
+        Self {
+            seed,
+            count: if debris.is_some() { count } else { 0 },
+            debris,
+            radial: RadialLaw::new(),
+            corotation: galaxy.potential().bar_corotation().value(),
+            last_merger: params.accretion().last_major_merger(),
+        }
+    }
+
+    /// The attempts at an orphan the draw makes: orphan `k` for each `k` below it.
+    #[must_use]
+    pub(crate) const fn count(&self) -> u64 {
+        self.count
+    }
+
+    /// Orphan `k`'s stream, numbered 0 until the list numbers it, or `None` if none of its
+    /// attempts gave an orbit that clears corotation inside [`APOCENTRE_LIMIT_LY`]: a pure
+    /// function of `galaxy` and `k` (module documentation).
+    ///
+    /// # Panics
+    ///
+    /// If `galaxy`'s seed is not that of the galaxy the draw was made in, if `k` is not below
+    /// [`count`](Self::count), or if `galaxy` holds no kinematic tables
+    /// ([`Galaxy::with_full_potential`]).
+    #[must_use]
+    pub(crate) fn orphan(&self, galaxy: &Galaxy, k: u64) -> Option<StreamSpec> {
+        assert!(k < self.count, "orphan {k} of {}", self.count);
+        self.orphan_at(galaxy, k)
+    }
+
+    /// Orphan `k`'s stream for any `k`, the count aside.
+    ///
+    /// It is what a draw of more orphans, under a larger multiplier, would give as its orphan `k`,
+    /// since every draw of an orphan is keyed by `k` alone and the multiplier sets only how many
+    /// there are (plan 15's fit of it, P15.T11.b). `None` for a galaxy with no globular-born
+    /// debris, which draws none, or for an orphan none of whose attempts finds an orbit.
+    ///
+    /// # Panics
+    ///
+    /// If `galaxy`'s seed is not that of the galaxy the draw was made in, or if `galaxy` holds no
+    /// kinematic tables ([`Galaxy::with_full_potential`]).
+    #[must_use]
+    pub(crate) fn orphan_at(&self, galaxy: &Galaxy, k: u64) -> Option<StreamSpec> {
+        assert_eq!(
+            galaxy.seed(),
+            self.seed,
+            "an orphan is drawn in the galaxy its draw was made in"
+        );
+        let debris = self.debris?;
+        let (seed, tables) = (self.seed, galaxy.potential());
+        let (radial, corotation, last_merger) = (&self.radial, self.corotation, self.last_merger);
+        let key = ObjectKey::galaxy_item(k);
+        let mut marks = Stream::open(seed, tags::STREAM_ORPHAN_MARKS, key);
+        let mass = mass_quantile(marks.uniform());
+        let dissolved = marks.uniform();
+        let age = Years::new(marks.uniform_in(ACCRETED_AGES.0, ACCRETED_AGES.1));
+        let (fe_h_mean, fe_h_sigma) = METALLICITY_LAWS.1;
+        let fe_h = Dex::new(marks.normal(fe_h_mean, fe_h_sigma));
+        let mut stream = Stream::open(seed, tags::STREAM_ORPHAN_ORBIT, key);
+        // The first radius drawn outside corotation, inside which no pericentre clears it;
+        // later attempts redraw only the direction and the velocity (module documentation).
+        let mut kept = None;
+        let (position, velocity, orbit) = (0..ORBIT_ATTEMPTS).find_map(|attempt| {
+            let first = u64::from(attempt) * ORBIT_WORDS;
+            stream.seek(first);
+            // Every attempt reads its radius word, kept or not, so that each block's words
+            // keep their places.
+            let drawn = radial.quantile(stream.uniform());
+            if kept.is_none() && drawn > corotation {
+                kept = Some(drawn);
+            }
+            let r = kept?;
+            let cos_theta = stream.uniform_in(-1.0, 1.0);
+            let azimuth = stream.uniform_in(0.0, 2.0 * core::f64::consts::PI);
+            let sin_theta = (1.0 - cos_theta * cos_theta).max(0.0).sqrt();
+            let (sin_phi, cos_phi) = math::sin_cos(azimuth);
+            let at = GalacticPosition::from_light_years([
+                r * sin_theta * cos_phi,
+                r * sin_theta * sin_phi,
+                r * cos_theta,
+            ])
+            .expect("a radius under 10⁶ ly fits the i32 light-year cells");
+            let velocity = draw_on_from(galaxy, debris, &at, &mut stream, first + 3).velocity();
+            let motion = RadialMotion::new(galaxy, &at, velocity);
+            let peri = motion.pericentre();
+            // Only an attempt whose pericentre clears corotation pays for its apocentre's
+            // search, and only an accepted one for the orbit's quadrature. Most attempts fall
+            // inside corotation: searching both turning points of every attempt cost the
+            // Milky Way fixture's debris 158 ms against 110 (P10.T4's list bench, pod, 16
+            // vCPU).
+            let apo = (peri.value() > corotation)
+                .then(|| motion.apocentre())
+                .filter(|apo| apo.value() < APOCENTRE_LIMIT_LY)?;
+            let orbit = SphericalOrbit::between(tables, peri, apo)?;
+            Some((
+                GalacticPosition::ORIGIN.displacement_to(&at),
                 velocity,
                 orbit,
-                stripping_time: window,
-                mass,
-                progenitor_mass: SolarMasses::new(0.0),
-                tidal_radius: tidal,
-                mass_loss: MassLoss::Dissolved {
-                    ago: Years::new(dissolved * window.value()),
-                },
-                stars: Some(ClusterStars { fe_h, age }),
-            })
+            ))
+        })?;
+        let tidal = LightYears::from(
+            tables.tidal_radius(mass, &PointLy::new(orbit.pericentre().value(), 0.0, 0.0)),
+        );
+        let window = stripping_time(&orbit, tidal, [last_merger, age]);
+        Some(StreamSpec {
+            number: StreamNumber(0),
+            origin: StreamOrigin::Orphan,
+            position,
+            velocity,
+            orbit,
+            stripping_time: window,
+            mass,
+            progenitor_mass: SolarMasses::new(0.0),
+            tidal_radius: tidal,
+            mass_loss: MassLoss::Dissolved {
+                ago: Years::new(dissolved * window.value()),
+            },
+            stars: Some(ClusterStars {
+                fe_h,
+                age,
+                kept: 0.0,
+                depleted_slope: CANONICAL_SLOPE,
+            }),
         })
-        .take(room)
-        .collect()
+    }
 }
 
 /// The component whose velocity law the orphans' progenitors follow: the globular-born debris.
@@ -191,6 +313,7 @@ fn mass_quantile(u: f64) -> SolarMasses {
 
 /// The metal-poor globulars' radial law out to [`APOCENTRE_LIMIT_LY`], tabulated as its cumulative
 /// function in `t = ln(1 + r ÷ r_c)`.
+#[derive(Debug, Clone, PartialEq)]
 struct RadialLaw {
     /// The cumulative share at knot `k`, `t = k × step`.
     cdf: Vec<f64>,
@@ -245,6 +368,7 @@ mod tests {
     use hyperion_testkit::stats::{ALPHA, assert_p_value, ks_one_sample};
 
     use super::*;
+    use crate::galaxy::params::GalaxyParams;
     use crate::rng::Seed;
 
     #[test]
@@ -314,8 +438,38 @@ mod tests {
     }
 
     #[test]
+    fn the_mass_law_s_mean_is_its_quantile_s_average() {
+        // The quantile averaged over u by a midpoint rule of 2²⁰ points: the mean to the rule's
+        // error, which the law's steep ends keep near 10⁻⁷.
+        let n = 1_u32 << 20;
+        let sum = (0..n)
+            .map(|k| mass_quantile((f64::from(k) + 0.5) / f64::from(n)).value())
+            .fold(0.0, |s, m| s + m);
+        let average = sum / f64::from(n);
+        let mean = MASS_LAW.mean_solar_masses();
+        assert!((average / mean - 1.0).abs() < 1e-6, "{average} {mean}");
+        assert!((mean - 16_284.3).abs() < 0.1, "{mean}");
+    }
+
+    #[test]
     fn the_orphan_count_makes_up_the_streams_per_globular() {
-        assert!((expected_count(160.0, 40) - 200.0).abs() < 1e-12);
-        assert!(expected_count(10.0, 40).abs() < 1e-12);
+        assert!((expected_count(1.5, 160.0, 40) - 200.0).abs() < 1e-12);
+        assert!(expected_count(1.5, 10.0, 40).abs() < 1e-12);
+        assert!((expected_count(2.0, 160.0, 40) - 280.0).abs() < 1e-12);
+    }
+
+    /// A galaxy's orphans are drawn at the fitted streams per globular: the count is the Poisson
+    /// draw of the galaxy's count stream at that mean.
+    #[test]
+    fn the_orphans_count_is_drawn_at_the_fitted_streams_per_globular() {
+        let seed = Seed::new(0x0f11_b000_0000_0001);
+        let galaxy = Galaxy::from_params(seed, GalaxyParams::milky_way_like())
+            .expect("the Milky Way fixture builds");
+        let draw = OrphanDraw::new(&galaxy, 40);
+        let globulars = f64::from(galaxy.params().accretion().globular_count());
+        let k = ORPHAN_STREAMS_PER_GLOBULAR_27;
+        let mean = expected_count(k, globulars, 40);
+        let want = Stream::open(seed, tags::STREAM_ORPHAN_COUNT, ObjectKey::galaxy()).poisson(mean);
+        assert_eq!(draw.count(), want, "k {k}");
     }
 }

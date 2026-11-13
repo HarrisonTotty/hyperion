@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { FakeAdapter, type FakeDevice, INTEL_UHD_620_INFO } from "../../../test/fakeGpu";
 import { BUFFER_USAGE, TEXTURE_USAGE } from "../gpuFlags";
 import type { AllocationEvent } from "../memory";
-import { packedCubeSpec, ResourceRegistry, viewDimensionOf } from "./resources";
+import { packedCubeSpec, ResourceRegistry, viewDimensionBinds, viewDimensionOf } from "./resources";
 
 async function device(): Promise<FakeDevice> {
   const adapter = new FakeAdapter({ info: INTEL_UHD_620_INFO, features: [] });
@@ -235,6 +235,43 @@ describe("a packed cube level from a kernel's buffer", () => {
     );
   });
 
+  it("copies a region of one face from a buffer that holds it alone (R06's tiled bake)", async () => {
+    const { resources, cube, packed } = await cubeAndBuffer(256 + 4, BUFFER_USAGE.COPY_SRC);
+    const copies: unknown[] = [];
+    resources.encodePackedCubeLevelFromBuffer(
+      { copyBufferToTexture: (...args: unknown[]) => void copies.push(args) },
+      cube,
+      0,
+      packed,
+      2,
+      { x: 2, y: 2, width: 1, height: 2 },
+    );
+    expect(copies).toEqual([
+      [
+        expect.objectContaining({ bytesPerRow: 256, rowsPerImage: 2 }),
+        expect.objectContaining({ mipLevel: 0, origin: [2, 2, 2] }),
+        [1, 2, 1],
+      ],
+    ]);
+    const encoder = { copyBufferToTexture: () => undefined };
+    expect(() =>
+      resources.encodePackedCubeLevelFromBuffer(encoder, cube, 0, packed, 2, {
+        x: 3,
+        y: 0,
+        width: 2,
+        height: 1,
+      }),
+    ).toThrow(/outside level 0/u);
+    expect(() =>
+      resources.encodePackedCubeLevelFromBuffer(encoder, cube, 0, packed, undefined, {
+        x: 0,
+        y: 0,
+        width: 1,
+        height: 1,
+      }),
+    ).toThrow(/on one face/u);
+  });
+
   it("is refused from a buffer too small for the padded layout", async () => {
     const { resources, cube, packed } = await cubeAndBuffer(NEEDED - 1, BUFFER_USAGE.COPY_SRC);
     const encoder = { copyBufferToTexture: () => undefined };
@@ -265,6 +302,17 @@ describe("a layered 2D texture", () => {
         category: "other",
       }),
     ).toBe("2d-array");
+  });
+});
+
+describe("a texture binding's view dimension", () => {
+  it("binds a single-layer 2D texture where an array is declared, and nothing else across kinds", () => {
+    expect(viewDimensionBinds("2d", "2d")).toBe(true);
+    expect(viewDimensionBinds("2d-array", "2d-array")).toBe(true);
+    expect(viewDimensionBinds("2d-array", "2d")).toBe(true);
+    expect(viewDimensionBinds("2d", "2d-array")).toBe(false);
+    expect(viewDimensionBinds("cube", "2d")).toBe(false);
+    expect(viewDimensionBinds("3d", "2d-array")).toBe(false);
   });
 });
 

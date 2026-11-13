@@ -4,6 +4,8 @@
  */
 import type { BodyIdHex } from "@hyperion/protocol";
 
+import type { NormalMapTexels } from "../bodies/discNormals";
+import type { ClassMapTexels } from "../bodies/discSurface";
 import type { LitRegime } from "../bodies/regime";
 import type { TextureHandle } from "../engine/types";
 import type { AppearanceLabel, BodyFigure, BodyPhotometry, WireAppearance } from "./fromWire";
@@ -38,16 +40,48 @@ export interface UniformDiscSurface {
  * @remarks
  * The texture's layout is `bodies/discSurface.ts`' (`classMapSurface` makes it): R05's cube-sphere
  * faces, a texel per cell, each class's weight in one channel. Its owner makes it again after a
- * device loss.
+ * device loss. The texels it was made from travel with it (R10.T10.f), which the point regime
+ * integrates on the CPU, so that a point and the disc it becomes read one map. The field's own
+ * shading normals over its surveyed cells may travel with it too (R10.T10.g), in a texture of their
+ * own with its CPU copy, so that the disc and the terrain share their cell-scale slopes.
  */
 export interface ClassMapDiscSurface {
   readonly kind: "class-map";
   /** R10's coarse class weights, surveyed cells only (`CLASS_MAP_FORMAT`, a 2D array). */
   readonly weights: TextureHandle;
+  /** The texture's texels, its CPU copy: the map the point regime integrates (R10.T10.f). */
+  readonly texels: ClassMapTexels;
   /** One law per class, in the map's channel order. */
   readonly laws: ReadonlyArray<PhotometricLaw>;
   /** The law of unsurveyed texels: the uniform `lawFor(p, q, template)`. */
   readonly elsewhere: PhotometricLaw;
+  /**
+   * The field's shading normals over its surveyed cells, at the field's level (R10.T10.g,
+   * `bodies/discNormals.ts`), or `null` where the surface has none: the datum's normal then shades
+   * everywhere, as before.
+   */
+  readonly normals: DiscNormalMap | null;
+  /**
+   * Whether each class's form is `Melt` (plan R08, R08.T18.a), which emits at no less than its
+   * melt's temperature where its body's ground is drawn emitting; absent, none is.
+   */
+  readonly meltClasses?: ReadonlyArray<boolean>;
+}
+
+/**
+ * A disc's normal map as its surface carries it (R10.T10.g): the texture R07's disc samples and the
+ * texels it was made from, its CPU copy, which the point regime and the disc's CPU twin read.
+ *
+ * @remarks
+ * The layout is `bodies/discNormals.ts`' (`normalMapTexture` makes one): R05's cube-sphere faces at
+ * the field's level, a texel per cell, each the octahedral pair of a body-fixed unit normal, `rg16float`
+ * in a 2D array of six layers. Its owner makes it again after a device loss, with the class map.
+ */
+export interface DiscNormalMap {
+  /** The normals (`NORMAL_MAP_FORMAT`, a 2D array of six layers). */
+  readonly texture: TextureHandle;
+  /** The texture's texels, its CPU copy. */
+  readonly texels: NormalMapTexels;
 }
 
 /**

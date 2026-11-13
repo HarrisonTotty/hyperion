@@ -1,6 +1,12 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
 import {
+  type BodyFigureDto,
+  type BodyRecordDto,
   type BodySummaryDto,
   type ClientMessage,
+  decodeServerMessage,
   type DetailLevelDto,
   galacticPositionFromLy,
   type RequestBody,
@@ -15,21 +21,29 @@ import {
 import { CommanderError } from "commander";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import planetaryFixture from "../../../../packages/protocol/fixtures/planetary.json" with { type: "json" };
+
 import {
   AU_M,
   askThrough,
   bodyKinematics,
+  canBeSurveyed,
   DEFAULT_BODY_DISTANCE_AU,
+  DEFAULT_HILL_FRACTION,
   DEFAULT_NEAR_LY,
   DEFAULT_SEED,
   DEFAULT_UNIVERSE,
+  defaultBodyDistanceM,
   describePlacement,
+  GRAVITATIONAL_CONSTANT_M3_PER_KG_S2,
   nearestFirst,
   type PlaceShipOptions,
   parsePlaceShipArgs,
   main,
+  pericentreHillRadiusM,
   placeShip,
 } from "./placeShip";
+import { COARSE_LEVELS, coarseLevel, MAX_MEAN_CELL_M } from "../renderer/src/lib/wholeBodySurvey";
 
 const UNIVERSE: UniverseInfo = {
   id: "00000000000000aa",
@@ -83,6 +97,112 @@ function planetAt(seconds: number): BodySummaryDto {
 }
 
 /**
+ * The Earth's and the Sun's masses, kg, and the Earth's orbit's semi-major axis, m, and
+ * eccentricity: NASA's Earth and Sun fact sheets (5.9722 × 10²⁴ kg, 1.988 50 × 10³⁰ kg,
+ * 149.598 × 10⁶ km, 0.0167), whose Hill radius at pericentre is 1.472 × 10⁹ m.
+ */
+const EARTH = { massKg: 5.9722e24, sunKg: 1.9885e30, aM: 1.49598e11, e: 0.0167 } as const;
+
+/** `body` with the Earth's mass and orbit, and a mean radius of `radiusM`. */
+function withEarthsOrbit(body: BodySummaryDto, radiusM: number): BodySummaryDto {
+  return {
+    ...body,
+    mass_kg: { state: "ok", value: EARTH.massKg },
+    orbit: {
+      state: "ok",
+      value: {
+        parent: { type: "star", body_index: 0 },
+        orbit: {
+          period_s: 31_558_150,
+          semi_major_axis_m: EARTH.aM,
+          eccentricity: EARTH.e,
+          inclination_rad: 0,
+          ascending_node_rad: 0,
+          argument_of_periapsis_rad: 0,
+          mean_anomaly_at_epoch_rad: 0,
+          mu_m3_s2: GRAVITATIONAL_CONSTANT_M3_PER_KG_S2 * (EARTH.sunKg + EARTH.massKg),
+        },
+        valid_until: null,
+      },
+    },
+    bulk: {
+      state: "ok",
+      value: {
+        radius_m: radiusM,
+        density_kg_m3: 5_513,
+        surface_gravity_m_s2: 9.8,
+        class: "rocky",
+        mass_fractions: { iron: 0.32, rock: 0.68, water: 0, envelope: 0 },
+        equilibrium_temperature_k: 255,
+        effective_temperature_k: null,
+      },
+    },
+  };
+}
+
+/** The Earth's Hill radius at pericentre, a (1 − e) (m ÷ 3M)^⅓, m. */
+const EARTH_HILL_M = EARTH.aM * (1 - EARTH.e) * Math.cbrt(EARTH.massKg / (3 * EARTH.sunKg));
+
+/**
+ * The planet's equatorial and polar radii, m: the Moon's, NASA's Moon fact sheet's 1,738.1 and
+ * 1,736.0 km, whose volumetric radius, 1,737.4 km, puts its coarse field at level 6.
+ */
+const PLANET_FIGURE_M = { a: 1_738_100, c: 1_736_000 } as const;
+
+/** The planet's figure, {@link PLANET_FIGURE_M}'s. */
+function figureOk(): BodyFigureDto {
+  return {
+    equatorial_radius_m: PLANET_FIGURE_M.a,
+    polar_radius_m: PLANET_FIGURE_M.c,
+    flattening: 1 - PLANET_FIGURE_M.c / PLANET_FIGURE_M.a,
+    pole: [0, 0, 1],
+    moment_of_inertia_factor: 0.393,
+    law: "rotational",
+    datum: "solid_surface",
+  };
+}
+
+/**
+ * A solid surface, `ok`: the shared wire fixture's Earth's (`packages/protocol/fixtures/
+ * planetary.json`'s `body_detail_response`, illustrative values), decoded as the client decodes it.
+ */
+function solidSurface(): BodyRecordDto["surface"] {
+  const message = decodeServerMessage(JSON.stringify(planetaryFixture.body_detail_response));
+  if (
+    message.type !== "response" ||
+    message.body.kind !== "body_detail" ||
+    message.body.record.surface.state !== "ok"
+  ) {
+    throw new Error("the fixture's body_detail_response holds no solid surface");
+  }
+  return message.body.record.surface;
+}
+
+/**
+ * The record at the `full` level of the planet `body` asks for, at its position at the time: its
+ * figure `ok`, its surface `ok` but for a giant's, `not_applicable`, its other sections not
+ * modelled.
+ */
+function planetDetail(
+  body: Extract<RequestBody, { kind: "body_detail" }>,
+  summary: BodySummaryDto,
+  giant: boolean,
+): ResponseBody {
+  return {
+    kind: "body_detail",
+    universe: body.universe,
+    time: body.time,
+    granted: body.detail,
+    record: {
+      ...summary,
+      figure: { state: "ok", value: figureOk() },
+      surface: giant ? { state: "not_applicable" } : solidSurface(),
+      hooks: { state: "not_modelled" },
+    },
+  };
+}
+
+/**
  * A server answering the tool's requests from fixed data, recording what it was sent.
  *
  * @remarks
@@ -92,6 +212,14 @@ function planetAt(seconds: number): BodySummaryDto {
 class FakeServer {
   readonly universes: UniverseInfo[] = [UNIVERSE];
   readonly requests: RequestBody[] = [];
+  /** The planet `NEAR` lists at a time, s: {@link planetAt}, with no mass or orbit, by default. */
+  planetOf: (seconds: number) => BodySummaryDto = planetAt;
+  /**
+   * Whether that first planet is a giant, whose surface is not applicable, with a second planet,
+   * `.0200` 2 au out with a solid surface, listed after it (a giant at v29 and v30: the owner's Mac
+   * batch, 2026-11-07).
+   */
+  giantFirst = false;
 
   answer(body: RequestBody): ResponseBody | RequestError {
     this.requests.push(body);
@@ -148,16 +276,42 @@ class FakeServer {
           kind: "scene_ship",
           clock: { time: body.ship.time, time_rate: body.time_rate, state: "running" },
         };
+      case "body_detail": {
+        const planet = this.#bodies(body.time.seconds, "bulk").find(
+          (each) => each.id === body.body && each.kind.type === "planet",
+        );
+        if (planet !== undefined) {
+          return planetDetail(body, planet, this.giantFirst && body.body === `${NEAR}.0100`);
+        }
+        return { code: "unknown_body", message: `no body ${body.body}`, field: "body" };
+      }
+      case "survey_pass":
+        return { kind: "survey_pass", revision: 1 };
       case "open_universe":
       case "galaxy_parameters":
       case "density_map":
       case "system_summary":
-      case "body_detail":
       case "body_events":
       case "subscribe":
       case "unsubscribe":
       case "scene_cameras":
       case "sky":
+      case "surface_field":
+      case "extinction_map":
+      case "extinction":
+      case "resolve_system":
+      case "features_in_range":
+      case "galaxy_features":
+      case "feature_detail":
+      case "black_hole_state":
+      case "alerts_observer":
+      case "alerts_acknowledge":
+      case "global_features":
+      case "stream_track":
+      case "viewer_planet":
+      case "viewer_randomize":
+      case "viewer_inputs":
+      case "host_discs":
         break;
     }
     return { code: "unsupported", message: `not faked: ${body.kind}`, field: null };
@@ -167,8 +321,11 @@ class FakeServer {
   #bodies(seconds: number, detail: DetailLevelDto): BodySummaryDto[] {
     const bodies = [
       aBody(`${NEAR}.0001`, "ring", [0, 0, 0]),
-      planetAt(seconds),
+      this.planetOf(seconds),
       aBody(`${NEAR}.0101`, "moon", null),
+      ...(this.giantFirst
+        ? [aBody(`${NEAR}.0200`, "planet", [2 * AU_M, 21_000 * seconds, 0])]
+        : []),
     ];
     if (detail === "contact") {
       for (const listed of bodies) {
@@ -205,6 +362,20 @@ class FakeServer {
     }
     return request;
   }
+
+  /** The `survey_pass` requests it was sent, first first. */
+  surveyPasses(): Array<Extract<RequestBody, { kind: "survey_pass" }>> {
+    return this.requests.flatMap((sent) => (sent.kind === "survey_pass" ? [sent] : []));
+  }
+}
+
+/** The ship's offset from the body it was placed at, m. */
+function offsetOf(server: FakeServer): readonly [number, number, number] {
+  const { position } = server.sceneShip().ship;
+  if (position.frame !== "body") {
+    throw new Error(`the ship was placed in the ${position.frame} frame, not a body's`);
+  }
+  return position.offset_m;
 }
 
 function options(args: readonly string[]): PlaceShipOptions {
@@ -238,6 +409,19 @@ describe("place-ship's command line", () => {
       distanceAu: null,
       timeS: 0,
       rate: 1,
+      survey: null,
+      json: false,
+    });
+  });
+
+  it("reads a survey's source and resolution (R10.T16.d)", () => {
+    expect(options(["--survey", "close_range", "2.5"]).survey).toEqual({
+      source: "close_range",
+      resolutionM: 2.5,
+    });
+    expect(options(["--survey", "orbital", "50", "--rate", "10"])).toMatchObject({
+      survey: { source: "orbital", resolutionM: 50 },
+      rate: 10,
     });
   });
 
@@ -270,6 +454,12 @@ describe("place-ship's command line", () => {
     [["--seed", "xyz"]],
     [["--time", "1.5"]],
     [["stray"]],
+    [["--survey", "orbital"]],
+    [["--survey", "orbital", "50", "60"]],
+    [["--survey", "sonar", "50"]],
+    [["--survey", "orbital", "0"]],
+    [["--survey", "orbital", "fine"]],
+    [["--survey", "orbital", "50", "--look-at", "barycentre"]],
   ])("refuses %j", (args) => {
     expect(() => options(args)).toThrow(CommanderError);
   });
@@ -336,6 +526,49 @@ describe("placing the ship", () => {
     expect(ship.velocity_m_s).toEqual([0, 0, 0]);
   });
 
+  it("stands half the planet's Hill radius at pericentre behind it, inside the entry ratio (R10.T12)", async () => {
+    const server = new FakeServer();
+    server.planetOf = (seconds) => withEarthsOrbit(planetAt(seconds), 6_371_000);
+    const placement = await placeShip(askThrough(server.client()), options(["-u", "Survey"]));
+    expect(Math.hypot(...offsetOf(server))).toBeCloseTo(DEFAULT_HILL_FRACTION * EARTH_HILL_M, 3);
+    // Inside the frame's entry ratio of 0.9, where 0.01 au stood at 1.017 of it.
+    expect(placement.hillRadiusM).toBeCloseTo(EARTH_HILL_M, 3);
+    expect((DEFAULT_BODY_DISTANCE_AU * AU_M) / EARTH_HILL_M).toBeGreaterThan(1);
+    expect(describePlacement(placement)).toContain("0.500 of its Hill radius at pericentre");
+    // The body is listed at `bulk`, which states its radius.
+    expect(server.requests).toContainEqual(expect.objectContaining({ detail: "bulk" }));
+  });
+
+  it("takes the distance asked over the Hill radius's default", async () => {
+    const server = new FakeServer();
+    server.planetOf = (seconds) => withEarthsOrbit(planetAt(seconds), 6_371_000);
+    const placement = await placeShip(
+      askThrough(server.client()),
+      options(["-u", "Survey", "--distance", "0.002"]),
+    );
+    expect(placement.distanceM).toBe(0.002 * AU_M);
+    expect(Math.hypot(...offsetOf(server))).toBeCloseTo(0.002 * AU_M, 3);
+  });
+
+  it("refuses a default inside the body, where half its Hill radius is within its radius", async () => {
+    const server = new FakeServer();
+    // An Earth's mass and orbit on a body of 800,000 km: half its Hill radius, 736,000 km, is inside.
+    server.planetOf = (seconds) => withEarthsOrbit(planetAt(seconds), 8e8);
+    await expect(placeShip(askThrough(server.client()), options(["-u", "Survey"]))).rejects.toThrow(
+      "is within its radius of 800000000 m: give --distance",
+    );
+  });
+
+  it("takes the system of the body it is asked to look at, with no search", async () => {
+    const server = new FakeServer();
+    const placement = await placeShip(
+      askThrough(server.client()),
+      options(["-u", "Survey", "--look-at", `${NEAR}.0100`]),
+    );
+    expect([placement.system, placement.body]).toEqual([NEAR, `${NEAR}.0100`]);
+    expect(server.requests.some((sent) => sent.kind === "systems_in_range")).toBe(false);
+  });
+
   it("refuses a body that is not there to look at", async () => {
     const server = new FakeServer();
     await expect(
@@ -363,6 +596,146 @@ describe("placing the ship", () => {
     const placement = await placeShip(askThrough(server.client()), options(["-u", "Survey"]));
     expect(describePlacement(placement)).toContain("F2, open Survey, then F4 (VIEW)");
   });
+
+  it("sends no survey_pass unless asked", async () => {
+    const server = new FakeServer();
+    const placement = await placeShip(askThrough(server.client()), options(["-u", "Survey"]));
+    expect([placement.survey, server.surveyPasses()]).toEqual([null, []]);
+  });
+
+  it("surveys every cell of the target body's coarse field after placing the ship (R10.T16.d)", async () => {
+    const server = new FakeServer();
+    const placement = await placeShip(
+      askThrough(server.client()),
+      options(["-u", "Survey", "--time", "3600", "--survey", "orbital", "50"]),
+    );
+    const time = { seconds: 3600, nanos: 0 };
+    // The Moon-sized figure's field is at level 6: 6 · 4⁶ cells, in one run.
+    expect(server.surveyPasses()).toEqual([
+      {
+        kind: "survey_pass",
+        universe: UNIVERSE.id,
+        body: `${NEAR}.0100`,
+        from: time,
+        to: time,
+        source: "orbital",
+        resolution_m: 50,
+        cells: [{ start: 0, end: 24_576 }],
+      },
+    ]);
+    expect(server.requests.map((sent) => sent.kind).slice(-3)).toEqual([
+      "scene_ship",
+      "body_detail",
+      "survey_pass",
+    ]);
+    expect(placement.survey).toEqual({
+      source: "orbital",
+      resolutionM: 50,
+      level: 6,
+      revision: 1,
+    });
+    expect(describePlacement(placement)).toContain(
+      "orbital at 50 m over all 24576 cells of level 6, revision 1",
+    );
+  });
+
+  it("refuses to survey a body with no figure to give its field's level", async () => {
+    const server = new FakeServer();
+    const answer = server.answer.bind(server);
+    vi.spyOn(server, "answer").mockImplementation((body) => {
+      const given = answer(body);
+      return body.kind === "body_detail" && "kind" in given && given.kind === "body_detail"
+        ? { ...given, record: { ...given.record, figure: { state: "not_modelled" } } }
+        : given;
+    });
+    await expect(
+      placeShip(
+        askThrough(server.client()),
+        options(["-u", "Survey", "--look-at", `${NEAR}.0100`, "--survey", "landed", "0.5"]),
+      ),
+    ).rejects.toThrow(`body ${NEAR}.0100 has no figure to give its coarse field's level`);
+    expect(server.surveyPasses()).toEqual([]);
+  });
+
+  it("surveys the first planet with a solid surface by default, passing over a giant (the Mac batch's sweep)", async () => {
+    const server = new FakeServer();
+    server.giantFirst = true;
+    const placement = await placeShip(
+      askThrough(server.client()),
+      options(["-u", "Survey", "--survey", "orbital", "50"]),
+    );
+    expect([placement.body, server.surveyPasses().map((pass) => pass.body)]).toEqual([
+      `${NEAR}.0200`,
+      [`${NEAR}.0200`],
+    ]);
+  });
+
+  it("looks at the first planet, a giant or not, with no survey", async () => {
+    const server = new FakeServer();
+    server.giantFirst = true;
+    const placement = await placeShip(askThrough(server.client()), options(["-u", "Survey"]));
+    expect(placement.body).toBe(`${NEAR}.0100`);
+  });
+
+  it("passes over a system with no planet to survey, saying so where none has one", async () => {
+    const server = new FakeServer();
+    const answer = server.answer.bind(server);
+    vi.spyOn(server, "answer").mockImplementation((body) => {
+      const given = answer(body);
+      return body.kind === "body_detail" && "kind" in given && given.kind === "body_detail"
+        ? { ...given, record: { ...given.record, surface: { state: "not_applicable" } } }
+        : given;
+    });
+    await expect(
+      placeShip(
+        askThrough(server.client()),
+        options(["-u", "Survey", "--survey", "orbital", "50"]),
+      ),
+    ).rejects.toThrow(/has a planet with a solid surface to survey; try another --near/u);
+    expect(server.surveyPasses()).toEqual([]);
+  });
+
+  it("can survey a record whose surface and figure are both ok, and no other", () => {
+    const figure = { state: "not_modelled" } as const;
+    expect([
+      canBeSurveyed({ surface: solidSurface(), figure: { state: "ok", value: figureOk() } }),
+      canBeSurveyed({ surface: solidSurface(), figure }),
+      canBeSurveyed({
+        surface: { state: "not_applicable" },
+        figure: { state: "ok", value: figureOk() },
+      }),
+      canBeSurveyed({
+        surface: { state: "not_modelled" },
+        figure: { state: "ok", value: figureOk() },
+      }),
+    ]).toEqual([true, false, false, false]);
+  });
+});
+
+describe("the default distance from a body", () => {
+  it("is half the Hill radius at pericentre, a (1 − e) (m ÷ 3M)^⅓", () => {
+    const earth = withEarthsOrbit(planetAt(0), 6_371_000);
+    expect(pericentreHillRadiusM(earth)).toBeCloseTo(EARTH_HILL_M, 3);
+    expect(pericentreHillRadiusM(earth)).toBeCloseTo(1.472e9, -7);
+    expect(defaultBodyDistanceM(earth)).toBeCloseTo(0.5 * EARTH_HILL_M, 3);
+  });
+
+  it("is 0.01 au where the server states no Hill radius", () => {
+    expect(pericentreHillRadiusM(planetAt(0))).toBeNull();
+    expect(defaultBodyDistanceM(planetAt(0))).toBe(DEFAULT_BODY_DISTANCE_AU * AU_M);
+  });
+
+  it("takes the client's constant of gravitation (a tripwire)", async () => {
+    // The node project's compiler does not reach the renderer's modules (a project of their own),
+    // so the client's module is loaded at run time and its constant narrowed.
+    const url = new URL("../renderer/src/lib/system/constants.ts", import.meta.url).href;
+    const client: unknown = await import(/* @vite-ignore */ url);
+    const g: unknown =
+      typeof client === "object" && client !== null
+        ? Reflect.get(client, "GRAVITATIONAL_CONSTANT_M3_PER_KG_S2")
+        : undefined;
+    expect(g).toBe(GRAVITATIONAL_CONSTANT_M3_PER_KG_S2);
+  });
 });
 
 describe("the geometry", () => {
@@ -381,6 +754,90 @@ describe("the geometry", () => {
       "no velocity",
     );
   });
+});
+
+/**
+ * R09's level rule as `crates/hyperion-surface/src/field.rs` states it, read from the source, so
+ * that a change there fails the tripwire below (decision-r10-t16d-part1, Q5): its widest mean cell,
+ * its levels' bounds and the three switch radii its own test pins.
+ */
+interface RustLevelRule {
+  readonly maxMeanCellM: number;
+  readonly min: number;
+  readonly max: number;
+  readonly switches: ReadonlyArray<readonly [level: number, largestM: number]>;
+}
+
+/** A Rust literal's number, its digit separators dropped. */
+function rustNumber(digits: string): number {
+  return Number(digits.replaceAll("_", ""));
+}
+
+/** `field.rs`'s level rule, each item found or an error naming the file and the item. */
+function rustLevelRule(): RustLevelRule {
+  const source = readFileSync(
+    fileURLToPath(new URL("../../../../crates/hyperion-surface/src/field.rs", import.meta.url)),
+    "utf8",
+  );
+  const found = (pattern: RegExp, item: string, from = 0): string => {
+    const value = pattern.exec(source.slice(from))?.[1];
+    if (value === undefined) {
+      throw new Error(`crates/hyperion-surface/src/field.rs no longer states ${item}`);
+    }
+    return value;
+  };
+  const level = source.indexOf("impl CoarseLevel {");
+  const pinned = source.indexOf("fn the_level_rule_switches_at_pinned_radii()");
+  if (level === -1 || pinned === -1) {
+    throw new Error(
+      "crates/hyperion-surface/src/field.rs no longer has `impl CoarseLevel` or its pinned radii",
+    );
+  }
+  const pairs = source.slice(pinned, source.indexOf("] {", pinned));
+  const switches = [...pairs.matchAll(/\((\d+), ([0-9_.]+)\)/gu)].map(
+    ([, at, largest]): readonly [number, number] => [
+      rustNumber(at ?? ""),
+      rustNumber(largest ?? ""),
+    ],
+  );
+  if (switches.length === 0) {
+    throw new Error("crates/hyperion-surface/src/field.rs pins no switch radius");
+  }
+  return {
+    maxMeanCellM: rustNumber(found(/const MAX_MEAN_CELL_M: f64 = ([0-9_.]+);/u, "MAX_MEAN_CELL_M")),
+    min: rustNumber(found(/pub const MIN: Self = Self\((\d+)\);/u, "CoarseLevel::MIN", level)),
+    max: rustNumber(found(/pub const MAX: Self = Self\((\d+)\);/u, "CoarseLevel::MAX", level)),
+    switches,
+  };
+}
+
+/** The next `f64` above a positive finite `x`, through its bits, as Rust's `next_up`. */
+function nextUp(x: number): number {
+  const view = new DataView(new ArrayBuffer(8));
+  view.setFloat64(0, x);
+  view.setBigUint64(0, view.getBigUint64(0) + 1n);
+  return view.getFloat64(0);
+}
+
+// The shared level rule's (`lib/wholeBodySurvey.ts`) tripwire stands here, in Node, which reads the
+// Rust source.
+describe("the level rule's tie to R09's source (a tripwire)", () => {
+  const rule = rustLevelRule();
+
+  it("takes field.rs's widest mean cell", () => {
+    expect(MAX_MEAN_CELL_M).toBe(rule.maxMeanCellM);
+  });
+
+  it("takes field.rs's bounds of a coarse field's levels", () => {
+    expect([COARSE_LEVELS.min, COARSE_LEVELS.max]).toEqual([rule.min, rule.max]);
+  });
+
+  it.each(rule.switches)(
+    "switches from level %i to the next at R09's pinned radius %f m, to the bit",
+    (level, largestM) => {
+      expect([coarseLevel(largestM), coarseLevel(nextUp(largestM))]).toEqual([level, level + 1]);
+    },
+  );
 });
 
 /** Whether a message the client sent is a request, as the fake socket recorded it. */
@@ -487,6 +944,21 @@ describe("the tool's run", () => {
     expect(socket.sent[0]).toEqual({ type: "hello", client_version: "place-ship" });
     expect(AnsweringSocket.server.sceneShip().universe).toBe(UNIVERSE.id);
     expect(socket.closed).toBe(true);
+  });
+
+  it("prints the placement as one line of JSON with --json", async () => {
+    const write = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    const run = main(["-u", "Survey", "--json"]);
+    AnsweringSocket.latest().serverWelcomes();
+    await expect(run).resolves.toBe(0);
+    const printed = write.mock.calls.map(([chunk]) => String(chunk)).join("");
+    expect(printed.endsWith("\n")).toBe(true);
+    const placement: unknown = JSON.parse(printed);
+    expect(placement).toMatchObject({
+      universe: { id: UNIVERSE.id },
+      system: NEAR,
+      body: `${NEAR}.0100`,
+    });
   });
 
   it("exits 1 and closes the socket when the server never welcomes it", async () => {

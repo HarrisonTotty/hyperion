@@ -22,6 +22,7 @@ import {
   placeIsRight,
   placeIsUpper,
   SIZE_CLASS_REM,
+  squareBoxPx,
 } from "./symbols";
 import { vec3 } from "../geometry/vec3";
 import { stylesheetRule } from "../test/stylesheet";
@@ -248,19 +249,32 @@ describe("placeLabels", () => {
     expect((label?.leftPx ?? 0) + (label?.widthPx ?? 0)).toBeCloseTo(380 - 6 - OFFSET_AT_TWO_PX, 9);
   });
 
-  it("keeps a label whole and 0.25 rem inside a view too narrow for it on either side of its mark", () => {
+  it("draws no label for a mark in a view too narrow for it on either side, rather than hold it back across the mark", () => {
+    // "9FG 567Z04 B-3", 121.52 px wide, its box 14.75 px from its mark's centre: at the right it
+    // would end at 216.27 px, past 156, and at the left start at -56.27, short of 4 (P12.T11.e).
+    const narrow: Viewport = { widthPx: 160, heightPx: 100, remPx: 16 };
+
+    expect(
+      placeLabels([mark("a", 1, "9FG 567Z04 B-3")], [anchor("a", 80, 50)], narrow, AT_TWO, null),
+    ).toEqual([]);
+  });
+
+  it("holds a label 0.25 rem inside the top edge beside its mark, where one side has room", () => {
     const narrow: Viewport = { widthPx: 160, heightPx: 100, remPx: 16 };
     const [label] = placeLabels(
       [mark("a", 1, "9FG 567Z04 B-3")],
-      [anchor("a", 80, 4)],
+      [anchor("a", 10, 4)],
       narrow,
       AT_TWO,
       null,
     );
 
-    expect(label?.leftPx).toBeGreaterThanOrEqual(4);
+    expect([label?.side, label?.leftPx, label?.topPx]).toEqual([
+      "right",
+      10 + 6 + OFFSET_AT_TWO_PX,
+      4,
+    ]);
     expect((label?.leftPx ?? 0) + (label?.widthPx ?? 0)).toBeLessThanOrEqual(156);
-    expect(label?.topPx).toBe(4);
   });
 
   it("drops a lesser label that overlaps one already placed", () => {
@@ -925,4 +939,363 @@ describe("placeLabels apart and off the edges (R07.T16.j; addendum D, D4 and D5)
       expect(label?.side).toBe(side);
     },
   );
+});
+
+describe("placeLabels off the observer's eye (plan 12, P12.T11.c)", () => {
+  /** The eye's 1 rem box about a point, as `observerBoxPx` gives it. */
+  function eyeAt(xPx: number, yPx: number): BoxPx {
+    const halfPx = VIEWPORT.remPx / 2;
+    return { leftPx: xPx - halfPx, topPx: yPx - halfPx, widthPx: 2 * halfPx, heightPx: 2 * halfPx };
+  }
+
+  // `SOL-1` beside a mark at (100, 100) runs from 114.75 to 158.15 px across at a ratio of 2.
+  const COVERED_EYE = eyeAt(136, 100);
+
+  it("drops a label that would cover the eye, as one over the core arrow is", () => {
+    const placed = placeLabels(
+      [mark("a", 1, "SOL-1"), mark("b", 0, "SOL-2")],
+      [anchor("a", 100, 100), anchor("b", 100, 200)],
+      VIEWPORT,
+      AT_TWO,
+      null,
+      { observer: COVERED_EYE },
+    );
+
+    expect(placed.map((label) => label.id)).toEqual(["b"]);
+  });
+
+  it("keeps the label of the mark the eye stands on, which starts outside the eye's box", () => {
+    const chosen = [mark("a", 1, "SOL-1")];
+    const anchors = [anchor("a", 100, 100)];
+
+    expect(
+      placeLabels(chosen, anchors, VIEWPORT, AT_TWO, null, { observer: eyeAt(100, 100) }),
+    ).toEqual(placeLabels(chosen, anchors, VIEWPORT, AT_TWO, null));
+  });
+
+  it("puts the selection's label on its other side where it would cover the eye", () => {
+    const [label] = placeLabels(
+      [mark("a", 1, "SOL-1")],
+      [anchor("a", 100, 100)],
+      VIEWPORT,
+      AT_TWO,
+      null,
+      { pinnedIds: ["a"], observer: COVERED_EYE },
+    );
+
+    expect(label?.side).toBe("left");
+    expect((label?.leftPx ?? 0) + (label?.widthPx ?? 0)).toBeCloseTo(100 - 6 - OFFSET_AT_TWO_PX, 9);
+  });
+
+  it("draws no label for the selection where its other side is not clear either", () => {
+    // At 20 px across, the left side would be held inside the view back across the bracket.
+    const placed = placeLabels(
+      [mark("a", 1, "SOL-1")],
+      [anchor("a", 20, 100)],
+      VIEWPORT,
+      AT_TWO,
+      null,
+      { pinnedIds: ["a"], observer: eyeAt(56, 100) },
+    );
+
+    expect(placed).toEqual([]);
+  });
+
+  it("moves the destination's label off the eye to another of its places", () => {
+    const at = anchor("d", 200, 150);
+    const chosen = [mark("d", 1, "DEST")];
+    const [first] = placeLabels(chosen, [at], VIEWPORT, AT_TWO, "d", { pinnedIds: ["d"] });
+    if (first === undefined) {
+      throw new Error("the destination has no label to move");
+    }
+    const eye = eyeAt(first.leftPx + first.widthPx / 2, first.topPx + first.heightPx / 2);
+
+    const [moved] = placeLabels(chosen, [at], VIEWPORT, AT_TWO, "d", {
+      pinnedIds: ["d"],
+      observer: eye,
+    });
+
+    expect(moved).toBeDefined();
+    expect(boxGapPx(moved ?? first, eye)).toBeGreaterThan(0);
+  });
+
+  it("places every label as before where no eye is drawn", () => {
+    const chosen = [mark("a", 2, "SOL-1"), mark("b", 1, "SOL-2"), mark("c", 0, "SOL-3")];
+    const anchors = [anchor("a", 100, 100), anchor("b", 130, 108), anchor("c", 380, 200)];
+
+    expect(
+      placeLabels(chosen, anchors, VIEWPORT, AT_TWO, "b", { pinnedIds: ["a"], observer: null }),
+    ).toEqual(placeLabels(chosen, anchors, VIEWPORT, AT_TWO, "b", { pinnedIds: ["a"] }));
+  });
+});
+
+describe("placeLabels on the compact chart's 256 px stage (plan 12, P12.T11.e)", () => {
+  /** The compact `LOCAL CHART`'s stage at 1280 × 720 and 100%. */
+  const STAGE: Viewport = { widthPx: 256, heightPx: 262, remPx: 16 };
+  const AT_ONE = reticleStrokesCssPx(1);
+  /** A 16-character designation, 138.88 px wide at 0.62 em a character. */
+  const DESIGNATION = "GDG 0E0V00 E-141";
+  /** A class-4 symbol's radius, 0.5 rem: its label's box starts 18 px from its centre at 1. */
+  const RADIUS_PX = 8;
+
+  /** The selection's bracket's box about `at` at a ratio of 1, to its line's outer edge. */
+  function bracketBoxAbout(at: Anchor): BoxPx {
+    return squareBoxPx(at, bracketPx(AT_ONE, at) + AT_ONE.markStrokePx / 2);
+  }
+
+  it("draws no label for a centred selection whose label fits on neither side, and none over its bracket", () => {
+    // Held inside the stage its label would run from 4 to 142.88 px across, over the mark at 128.
+    const at = anchor("s", 128, 131, RADIUS_PX);
+    const placed = placeLabels(
+      [mark("s", 1, DESIGNATION), mark("n", 0, "N1")],
+      [at, anchor("n", 40, 40)],
+      STAGE,
+      AT_ONE,
+      null,
+      { pinnedIds: ["s"] },
+    );
+
+    expect([
+      placed.map((label) => label.id),
+      placed.every((label) => boxGapPx(label, bracketBoxAbout(at)) > 0),
+    ]).toEqual([["n"], true]);
+  });
+
+  it("draws no label for an unselected mark at the stage's middle", () => {
+    expect(
+      placeLabels(
+        [mark("m", 1, DESIGNATION)],
+        [anchor("m", 128, 131, RADIUS_PX)],
+        STAGE,
+        AT_ONE,
+        null,
+      ),
+    ).toEqual([]);
+  });
+
+  it.each([
+    [1, 95, "right"],
+    [1, 96, null],
+    [1, 128, null],
+    [1, 160, null],
+    [1, 161, "left"],
+    [1.5, 96, "right"],
+    [1.5, 97, null],
+    [1.5, 159, null],
+    [1.5, 160, "left"],
+  ] as const)(
+    "at a ratio of %s labels a 16-character designation about a class-4 mark %s px across on its side with room: %s",
+    (ratio, xPx, side) => {
+      // Its box starts 18 px out at 1 and 16.75 at 1.5, so it has no side from 95.12 to 160.88 px
+      // across at 1 and from 96.37 to 159.63 at 1.5.
+      const [label] = placeLabels(
+        [mark("m", 1, DESIGNATION)],
+        [anchor("m", xPx, 131, RADIUS_PX)],
+        STAGE,
+        reticleStrokesCssPx(ratio),
+        null,
+      );
+
+      expect(label?.side ?? null).toBe(side);
+    },
+  );
+
+  it.each([
+    ["top", -2],
+    ["top", -13],
+    ["bottom", 263],
+    ["bottom", 275],
+  ] as const)(
+    "draws no label for a selection just past the %s edge, at %s px, whose held label would stand within 0.25 rem of what is drawn of its bracket",
+    (_, yPx) => {
+      // At (128, -2) the held label would stand from 4 to 142.88 px across and 4 to 21.5 px down,
+      // over the bracket's box, from 114 to 142 px across and -16 to 12 px down, and the symbol;
+      // at -13 and 275 the bracket's box still reaches 1 px into the view, 3 px from the label.
+      expect(
+        placeLabels(
+          [mark("s", 1, DESIGNATION)],
+          [anchor("s", 128, yPx, RADIUS_PX)],
+          STAGE,
+          AT_ONE,
+          null,
+          { pinnedIds: ["s"] },
+        ),
+      ).toEqual([]);
+    },
+  );
+
+  it.each([
+    ["top", -14, 4],
+    ["top", -15, 4],
+    ["bottom", 276, 262 - 4 - 17.5],
+    ["bottom", 277, 262 - 4 - 17.5],
+  ] as const)(
+    "holds the selection's label 0.25 rem inside the %s edge once its bracket lies wholly outside the view, at %s px",
+    (_, yPx, topPx) => {
+      // The bracket reaches 14 px from the mark's centre, so 14 px past the edge its box meets the
+      // view's edge, the held label 0.25 rem clear of it, and 15 px past it 5 px clear.
+      const placed = placeLabels(
+        [mark("s", 1, DESIGNATION)],
+        [anchor("s", 128, yPx, RADIUS_PX)],
+        STAGE,
+        AT_ONE,
+        null,
+        { pinnedIds: ["s"] },
+      );
+
+      expect(placed.map((label) => [label.leftPx, label.topPx])).toEqual([[4, topPx]]);
+    },
+  );
+
+  it("keeps the selection's label on the right 2 rem from the left edge, as before", () => {
+    const [label] = placeLabels(
+      [mark("s", 1, DESIGNATION)],
+      [anchor("s", 32, 131, RADIUS_PX)],
+      STAGE,
+      AT_ONE,
+      null,
+      { pinnedIds: ["s"] },
+    );
+
+    expect([label?.side, label?.leftPx]).toEqual(["right", 32 + 18]);
+  });
+
+  it("draws no label for a selection held back on both sides, and places the destination's as with no selection", () => {
+    // The selection's label, held inside, would stand far from the destination's, so only the
+    // hold's refusal drops it.
+    const points = [mark("d", 0, "DEST"), mark("s", -1, DESIGNATION)];
+    const anchors = [anchor("d", 60, 60), anchor("s", 128, 131, RADIUS_PX)];
+    const placed = (selectedId: string | null): ReadonlyArray<PlacedLabel> =>
+      placeLabels(chooseLabels(points, selectedId, "d", 0), anchors, STAGE, AT_ONE, "d", {
+        pinnedIds: [selectedId, "d"].filter((id): id is string => id !== null),
+        unselectedIds: new Set(chooseLabels(points, null, "d", 0).map((point) => point.id)),
+      });
+
+    const selected = placed("s");
+
+    expect([selected.map((label) => label.id), labelOf(selected, "d")]).toEqual([
+      ["d"],
+      labelOf(placed(null), "d"),
+    ]);
+  });
+
+  it("takes no account of a chosen label that would be held back across its own mark, which is never drawn", () => {
+    // Held inside, the label of the mark at (140, 100) would run from 4 to 142.88 px across and
+    // 91.25 to 108.75 px down, over both of the destination's upper places, from 97.31 to 114.81 px
+    // down; it is not drawn, and the destination keeps the upper right.
+    const at = anchor("a", 60, 140);
+    const placed = placeLabels(
+      [mark("m", 9, DESIGNATION), mark("a", 1, "DEST")],
+      [anchor("m", 140, 100, 0), at],
+      STAGE,
+      AT_ONE,
+      "a",
+      { pinnedIds: ["a"] },
+    );
+
+    expect([placed.map((label) => label.id), placeOf(labelOf(placed, "a"), at)]).toEqual([
+      ["a"],
+      "upper-right",
+    ]);
+  });
+});
+
+/** A text box over the view from its edges, as `SpatialView` gives `texts`. */
+function textBox(leftPx: number, topPx: number, rightPx: number, bottomPx: number): BoxPx {
+  return { leftPx, topPx, widthPx: rightPx - leftPx, heightPx: bottomPx - topPx };
+}
+
+describe("placeLabels: the selection's label off the other text over the view (plan 12, P12.T11.e)", () => {
+  it("draws no label for a selection whose one side lies over the core arrow's label, on the compact stage at 150%", () => {
+    // Main's landing look at #79 to #81, 1920 x 1080 at 150%, OBSERVED: the 256.67 x 232 px stage,
+    // `GDG 75DY08 A-3` selected at (145.5, 47.7) beside `CORE 8914.7 ly` (4 to 128.6 px across,
+    // 37 to 54.5 px down). Its right side has no room, and its left ran across the core label.
+    const stage: Viewport = { widthPx: 256.66668701171875, heightPx: 232, remPx: 16 };
+    const strokes = reticleStrokesCssPx(1.5);
+    const chosen = [mark("s", 1, "GDG 75DY08 A-3")];
+    const anchors = [anchor("s", 145.5, 47.7, 4)];
+    const core = textBox(4, 37, 128.6, 54.5);
+
+    const alone = placeLabels(chosen, anchors, stage, strokes, null, { pinnedIds: ["s"] });
+    const beside = placeLabels(chosen, anchors, stage, strokes, null, {
+      pinnedIds: ["s"],
+      texts: [core],
+    });
+
+    expect([alone.map((label) => label.side), beside]).toEqual([["left"], []]);
+  });
+
+  it("puts the selection's label on its other side where it would lie over other text", () => {
+    // `SOL-1` beside a mark at (200, 150) runs from 214.75 to 258.15 px across on its right.
+    const [label] = placeLabels(
+      [mark("a", 1, "SOL-1")],
+      [anchor("a", 200, 150)],
+      VIEWPORT,
+      AT_TWO,
+      null,
+      { pinnedIds: ["a"], texts: [textBox(230, 140, 300, 160)] },
+    );
+
+    expect(label?.side).toBe("left");
+    expect((label?.leftPx ?? 0) + (label?.widthPx ?? 0)).toBeCloseTo(200 - 6 - OFFSET_AT_TWO_PX, 9);
+  });
+
+  it("keeps the selection's label between two lines whose boxes it overlaps by their leading alone", () => {
+    // Main's landing look, the orbit map at 1280 x 720 (787.33 x 184 px): `GDG 75DX08 A-7 /256`
+    // selected at (393.8, 92.1), its line box from 83.35 to 100.85 px down, between
+    // `HABITABLE ZONE` (70.7 to 88.2) and `SNOW LINE` (96.3 to 113.8), with `BELT 1` and
+    // `OPTIMISTIC` to its left. The boxes overlap by about 5 px; the capitals' ink does not.
+    const orbit: Viewport = { widthPx: 787.328125, heightPx: 184, remPx: 16 };
+    const texts = [
+      textBox(401.9, 70.7, 538.4, 88.2),
+      textBox(402.2, 96.3, 492.5, 113.8),
+      textBox(338.8, 63.7, 392.7, 81.2),
+      textBox(285.4, 95.9, 377.1, 113.4),
+    ];
+    const [label] = placeLabels(
+      [mark("p", 1, "GDG 75DX08 A-7 /256")],
+      [anchor("p", 393.8, 92.1, 5)],
+      orbit,
+      reticleStrokesCssPx(1),
+      null,
+      { pinnedIds: ["p"], texts },
+    );
+
+    expect([label?.side, label?.leftPx]).toEqual(["right", 393.8 + 5 + 0.5 * 16 + 2]);
+  });
+
+  it.each([
+    ["7.6 px, within their leading, keeps its side", 7.6, "right"],
+    ["7.8 px, across their capitals, takes its other side", 7.8, "left"],
+  ] as const)(
+    "of the selection's label under other text whose box it overlaps by %s",
+    (_, overlapPx, side) => {
+      // `SOL-1`'s line box at (200, 150) runs from 141.25 to 158.75 px down; the ink band of each
+      // box lies 0.275 em, 3.85 px, inside its top and bottom at 0.875 rem.
+      const above = textBox(210, 141.25 + overlapPx - 17.5, 300, 141.25 + overlapPx);
+      const [label] = placeLabels(
+        [mark("a", 1, "SOL-1")],
+        [anchor("a", 200, 150)],
+        VIEWPORT,
+        AT_TWO,
+        null,
+        { pinnedIds: ["a"], texts: [above] },
+      );
+
+      expect(label?.side).toBe(side);
+    },
+  );
+
+  it("draws no label for the selection where both of its sides lie over other text", () => {
+    const chosen = [mark("a", 1, "SOL-1")];
+    const anchors = [anchor("a", 200, 150)];
+    const texts = [textBox(230, 140, 300, 160), textBox(100, 140, 170, 160)];
+
+    const [free] = placeLabels(chosen, anchors, VIEWPORT, AT_TWO, null, { pinnedIds: ["a"] });
+
+    expect([
+      free?.side,
+      placeLabels(chosen, anchors, VIEWPORT, AT_TWO, null, { pinnedIds: ["a"], texts }),
+    ]).toEqual(["right", []]);
+  });
 });

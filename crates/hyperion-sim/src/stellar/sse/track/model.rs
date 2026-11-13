@@ -7,6 +7,8 @@
 //! current mass on each evaluation unless the segment holds its mass fixed; every other phase keeps
 //! the mass it was entered with and is built once.
 
+use std::cell::OnceCell;
+
 use crate::stellar::Phase;
 use crate::stellar::premain::{Contraction, Protostar};
 use crate::stellar::remnant::structure::{
@@ -14,16 +16,16 @@ use crate::stellar::remnant::structure::{
 };
 use crate::stellar::remnant::white_dwarf::{self, WhiteDwarfCore};
 use crate::stellar::remnant::{RemnantRecipe, neutron_star};
-use crate::units::{Megayears, MetalFraction, SolarLuminosities, SolarMasses, Years};
+use crate::units::{Megayears, MetalFraction, SolarLuminosities, SolarMasses, SolarRadii, Years};
 
 use super::super::PhasePoint;
 use super::super::agb::{EarlyAgb, ThermallyPulsingAgb};
-use super::super::cheb::CoreHeliumBurning;
+use super::super::cheb::{BurningAt, CoreHeliumBurning};
 use super::super::coeffs::ZCoeffs;
 use super::super::envelope::{self, CoreRemnant};
-use super::super::gb::FirstGiantBranch;
+use super::super::gb::{BranchAt, FirstGiantBranch};
 use super::super::helium::{self, HeliumStar};
-use super::super::hg::HertzsprungGap;
+use super::super::hg::{GapAt, HertzsprungGap};
 use super::super::ms::MainSequence;
 use super::super::wind;
 use super::Bridges;
@@ -310,6 +312,183 @@ impl Model {
 }
 
 impl Model {
+    /// What the radius of [`Model::point`] at coordinate `coord` and age `age` (years since the
+    /// onset of collapse) reads of those alone, for the radius at any current mass
+    /// ([`PreparedRadius::radius`]).
+    #[must_use]
+    pub(super) fn prepared_radius(&self, coord: f64, age: f64) -> PreparedRadius<'_> {
+        PreparedRadius(match self {
+            Self::HertzsprungGap { gap, core, span } => {
+                let at = gap.prepared(span.at(coord));
+                Prepared::Gap {
+                    gap,
+                    giant: GiantAt::new(*core, at.luminosity(), at.core_mass()),
+                    at,
+                }
+            }
+            Self::FirstGiantBranch { branch, core, span } => {
+                let at = branch.prepared(span.at(coord));
+                Prepared::Branch {
+                    giant: GiantAt::new(*core, at.luminosity(), at.core_mass()),
+                    at,
+                }
+            }
+            Self::CoreHeliumBurning { phase, span } => Prepared::Burning {
+                phase,
+                at: phase.prepared(span.at(coord)),
+                coord,
+                remnant: OnceCell::new(),
+            },
+            Self::Protostar(_)
+            | Self::PreMainSequence(_)
+            | Self::MainSequence { .. }
+            | Self::FlashBridge { .. }
+            | Self::EarlyAgb { .. }
+            | Self::ThermallyPulsingAgb { .. }
+            | Self::HeliumMainSequence { .. }
+            | Self::HeliumShellBurning { .. }
+            | Self::PostAgb { .. }
+            | Self::Remnant { .. } => Prepared::Whole {
+                model: self,
+                coord,
+                age,
+            },
+        })
+    }
+}
+
+/// What the radius of a model's point at one coordinate and age reads of them alone
+/// ([`Model::prepared_radius`]), so that the radius at each current mass reads only what the mass
+/// moves, or a radius that no mass moves ([`PreparedRadius::fixed`]).
+///
+/// A step of the binary engine's stable transfer finds its rate by bisection, and each trial reads
+/// its donor's radius at the step's end at the trial's mass. On the Hertzsprung gap, the first
+/// giant branch and core helium burning, the luminosity (but core helium burning's from `τ_x`),
+/// the core and the remnant the core would become do not follow the current mass (HPT section
+/// 7.1), and were most of each read (R06.T16.a's cost).
+#[derive(Debug)]
+pub(super) struct PreparedRadius<'a>(Prepared<'a>);
+
+/// See [`PreparedRadius`].
+#[derive(Debug)]
+enum Prepared<'a> {
+    Gap {
+        gap: &'a HertzsprungGap,
+        at: GapAt,
+        giant: GiantAt,
+    },
+    Branch {
+        at: BranchAt,
+        giant: GiantAt,
+    },
+    Burning {
+        phase: &'a CoreHeliumBurning,
+        at: BurningAt,
+        coord: f64,
+        /// The helium main-sequence star of the core at `coord`, once a mass asks for it.
+        remnant: OnceCell<CoreRemnant>,
+    },
+    /// A radius the current mass does not move.
+    Fixed(SolarRadii),
+    /// Any other model, whose point is evaluated whole at each mass.
+    Whole {
+        model: &'a Model,
+        coord: f64,
+        /// Years since the onset of collapse.
+        age: f64,
+    },
+}
+
+/// What [`giant`] reads of the age alone: the core's kind and mass, the luminosity's factor in µ
+/// and, once a mass asks for it, the remnant the core would become.
+#[derive(Debug)]
+struct GiantAt {
+    core: HeliumCore,
+    core_mass: SolarMasses,
+    factor: f64,
+    remnant: OnceCell<CoreRemnant>,
+}
+
+impl GiantAt {
+    /// The giant of kind `core` with `luminosity` and core `core_mass`.
+    #[must_use]
+    fn new(core: HeliumCore, luminosity: SolarLuminosities, core_mass: SolarMasses) -> Self {
+        Self {
+            core,
+            core_mass,
+            factor: wind::small_envelope_factor(luminosity),
+            remnant: OnceCell::new(),
+        }
+    }
+
+    /// [`giant`]'s radius of the phase's `radius` at current mass `mt`, bit for bit.
+    #[must_use]
+    fn radius(&self, radius: SolarRadii, mt: SolarMasses, phys: &Physics<'_>) -> SolarRadii {
+        let mu = wind::small_envelope_mu_of(mt, self.core_mass, self.factor);
+        if mu >= 1.0 {
+            return radius;
+        }
+        let remnant = *self.remnant.get_or_init(|| match self.core {
+            HeliumCore::NonDegenerate => CoreRemnant {
+                luminosity: helium::zams_luminosity(self.core_mass),
+                radius: helium::zams_radius(self.core_mass),
+            },
+            HeliumCore::Degenerate => {
+                white_dwarf_remnant(self.core_mass, WhiteDwarfCore::Helium, phys)
+            }
+        });
+        envelope::perturb_radius(radius, mt, mu, remnant)
+    }
+}
+
+impl PreparedRadius<'_> {
+    /// `radius` (R☉) at every mass: a remnant's, which keeps its own mass.
+    #[must_use]
+    pub(super) const fn fixed(radius: SolarRadii) -> Self {
+        Self(Prepared::Fixed(radius))
+    }
+
+    /// The radius of [`Model::point`] at the coordinate and age prepared for and current mass
+    /// `mt`, bit for bit, under the track's `phys`.
+    #[must_use]
+    pub(super) fn radius(&self, phys: &Physics<'_>, mt: SolarMasses) -> SolarRadii {
+        let c = phys.coeffs;
+        match &self.0 {
+            Prepared::Gap { gap, at, giant } => {
+                giant.radius(gap.at_prepared(at, mt, c).radius, mt, phys)
+            }
+            Prepared::Branch { at, giant } => giant.radius(at.at_mass(mt, c).radius, mt, phys),
+            Prepared::Burning {
+                phase,
+                at,
+                coord,
+                remnant,
+            } => {
+                // `core_helium_burning`'s, its remnant kept.
+                let point = phase.at_prepared(at, mt, c);
+                let mu = wind::small_envelope_mu(mt, point.core_mass, point.luminosity);
+                let radius = if mu < 1.0 {
+                    let remnant = *remnant.get_or_init(|| {
+                        let (luminosity, radius) =
+                            helium::main_sequence_point(at.core_mass(), *coord);
+                        CoreRemnant { luminosity, radius }
+                    });
+                    envelope::perturb_radius(point.radius, mt, mu, remnant)
+                } else {
+                    point.radius
+                };
+                // The helium excess's shift reads the radius, the mass and the core alone.
+                horizontal_branch(PhasePoint { radius, ..point }, mt, phys).radius
+            }
+            Prepared::Fixed(radius) => *radius,
+            Prepared::Whole { model, coord, age } => {
+                model.point(phys, *coord, mt, *age).point.radius
+            }
+        }
+    }
+}
+
+impl Model {
     /// Whether the model is one of the stages before the main sequence (P06.T15), which the
     /// track's maxima leave out.
     #[must_use]
@@ -545,16 +724,18 @@ fn perturb_to_white_dwarf(
     if mu >= 1.0 {
         return point;
     }
-    let mc = point.core_mass;
-    envelope::perturb(
-        point,
-        mt,
-        mu,
-        CoreRemnant {
-            luminosity: white_dwarf::formation_luminosity(phys.remnant, core, mc, phys.z),
-            radius: white_dwarf_radius(phys.remnant, mc),
-        },
-    )
+    let remnant = white_dwarf_remnant(point.core_mass, core, phys);
+    envelope::perturb(point, mt, mu, remnant)
+}
+
+/// The white dwarf of a core of mass `mc` and kind `core` at its formation, the remnant of
+/// [`perturb_to_white_dwarf`].
+#[must_use]
+fn white_dwarf_remnant(mc: SolarMasses, core: WhiteDwarfCore, phys: &Physics<'_>) -> CoreRemnant {
+    CoreRemnant {
+        luminosity: white_dwarf::formation_luminosity(phys.remnant, core, mc, phys.z),
+        radius: white_dwarf_radius(phys.remnant, mc),
+    }
 }
 
 /// A remnant of `phase` and `mass`, `years_since_birth` after its formation (a negative span

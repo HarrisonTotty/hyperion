@@ -1,34 +1,69 @@
 import type {
+  AbsorberDto,
+  AerosolInventoryDto,
+  AerosolModeDto,
+  BodyEnvelopeDto,
   BodyFigureDto,
   BodyPhotometryDto,
+  BodyRecordDto,
   BodyRotationDto,
   BodyStateDto,
   BodySummaryDto,
+  BodySurfaceDto,
+  CondensateDeckDto,
+  DestructionCauseDto,
   OrbitDriftDto,
+  ResourceAbundancesDto,
+  ResponseFor,
   SectionDto,
+  SubsurfaceOceanDto,
+  SurfaceCondensateDto,
+  SurfaceModifiersDto,
   UniverseTime,
+  VerticalStructureDto,
 } from "@hyperion/protocol";
 import { describe, expect, it } from "vitest";
 
 import {
+  anUnknownDestructionCause,
+  anUnknownHabitabilityLimit,
+  anUnknownSurfaceState,
+  crustResources,
   earthContact,
   earthDetail,
+  earthDetailOfAnOlderServer,
   earthMassAndOrbit,
+  earthUnderASupercriticalEnvelope,
+  earthWithHooks,
   FIXTURE_EARTH,
+  FIXTURE_RING_NORMAL,
   FIXTURE_SYSTEM,
+  hotJupiterDetail,
+  jupiterDetail,
+  lavaWorldDetail,
+  MARS_HABITABILITY,
   populatedBodies,
   populatedBodiesWith,
   sliceBodies,
   sliceBodiesWith,
+  tiltedPole,
+  titanDetail,
+  withoutRingNormal,
+  withRingNormal,
 } from "../../test/planetaryFixture";
 import { GOLDEN_SYSTEMS, GOLDEN_TIMES, goldenSystemBodies } from "../../test/inSystemGolden";
+import { vec3 } from "../../geometry/vec3";
 import {
+  bodyDetailSeed,
+  bodyRecordOrbit,
+  bodyRecordSeasons,
   EARTH_MASS_KG,
   toBodiesRequest,
   toBodyDetail,
   toBodyDetailRequest,
   toSystemBodiesModel,
 } from "./bodiesWire";
+import type { AerosolInventory, AerosolMode, Modelled, Section, SurfaceCondensate } from "./model";
 
 const DESIGNATION = "H7K 4C0RFZ D-7";
 
@@ -43,6 +78,14 @@ function bodiesOf(response = sliceBodies()) {
 function faultOf(response = sliceBodies()): string {
   const result = toSystemBodiesModel(response, DESIGNATION);
   return result.kind === "fault" ? result.fault : "no fault";
+}
+
+/** The plane's normal of the populated answer's ring as `response` reads, if it reads a ring. */
+function ringNormalOf(response: ResponseFor<"system_bodies">) {
+  const ring = bodiesOf(response).bodies.bodies.find((body) => body.bodyIndex === 0x0180);
+  return ring?.population.state === "ok" && ring.population.value.kind === "ring"
+    ? ring.population.value.normal
+    : undefined;
 }
 
 /** The slice's answer with its first body in `state`, and so with no orbit. */
@@ -80,6 +123,11 @@ function withValidUntil(validUntil: UniverseTime) {
       ? { ...body, orbit: { state: "ok", value: { ...body.orbit.value, valid_until: validUntil } } }
       : body,
   );
+}
+
+/** A record's hooks section, `ok`, carrying `detailSeed`. */
+function withHooks(detailSeed: SectionDto<string>): Pick<BodyRecordDto, "hooks"> {
+  return { hooks: { state: "ok", value: { detail_seed: detailSeed } } };
 }
 
 /** The fixture's Earth with a hooks section that is `ok` and carries `detailSeed`, read. */
@@ -215,6 +263,83 @@ describe("toSystemBodiesModel", () => {
     expect(population(0x0100)).toEqual({ state: "not_applicable" });
   });
 
+  it("reads a protoplanetary disc's population, its masses in Earth masses (P14.T28.a)", () => {
+    const disc = populatedBodiesWith((body) =>
+      body.kind.type === "protoplanetary_disc"
+        ? {
+            ...body,
+            state: { type: "present" },
+            population: {
+              state: "ok",
+              value: {
+                type: "protoplanetary_disc",
+                host: { type: "star", body_index: 0 },
+                inner_edge_m: 1.5e9,
+                outer_edge_m: 1.346e13,
+                snow_line_m: 4.04e11,
+                characteristic_radius_m: 4.488e12,
+                gas_mass_kg: 1.9e28,
+                solid_mass_kg: 1.5e26,
+                gaps: [{ giant: `${FIXTURE_SYSTEM}.0100`, radius_m: 7.78e11 }],
+              },
+            },
+          }
+        : body,
+    );
+    const { bodies } = bodiesOf(disc);
+    const section = bodies.bodies.find(
+      (body) => body.kind.kind === "protoplanetary_disc",
+    )?.population;
+
+    expect(section).toEqual({
+      state: "ok",
+      value: {
+        kind: "protoplanetary_disc",
+        host: { kind: "star", bodyIndex: 0 },
+        innerEdgeM: 1.5e9,
+        outerEdgeM: 1.346e13,
+        snowLineM: 4.04e11,
+        characteristicRadiusM: 4.488e12,
+        gasMassMearth: 1.9e28 / EARTH_MASS_KG,
+        solidMassMearth: 1.5e26 / EARTH_MASS_KG,
+        gaps: [{ giant: `${FIXTURE_SYSTEM}.0100`, radiusM: 7.78e11 }],
+      },
+    });
+  });
+
+  it("reads a white dwarf's debris disc's population (P14.T28.d)", () => {
+    const disc = populatedBodiesWith((body) =>
+      body.kind.type === "debris_disc"
+        ? {
+            ...body,
+            state: { type: "present" },
+            population: {
+              state: "ok",
+              value: {
+                type: "debris_disc",
+                host: { type: "star", body_index: 0 },
+                inner_edge_m: 7.0e7,
+                outer_edge_m: 6.0e8,
+              },
+            },
+          }
+        : body,
+    );
+    const section = bodiesOf(disc).bodies.bodies.find(
+      (body) => body.kind.kind === "debris_disc",
+    )?.population;
+
+    expect(section).toEqual({
+      state: "ok",
+      value: {
+        kind: "debris_disc",
+        host: { kind: "star", bodyIndex: 0 },
+        innerEdgeM: 7.0e7,
+        outerEdgeM: 6.0e8,
+      },
+    });
+  });
+
   it("refuses a population whose edges are reversed", () => {
     const reversed = populatedBodiesWith((body) =>
       body.population.state === "ok" && body.population.value.type === "ring"
@@ -226,6 +351,37 @@ describe("toSystemBodiesModel", () => {
     );
 
     expect(faultOf(reversed)).toBe("ring edges unusable");
+  });
+
+  it("reads a ring's plane's normal", () => {
+    expect(ringNormalOf(populatedBodies())).toEqual(FIXTURE_RING_NORMAL);
+    expect(ringNormalOf(populatedBodiesWith(withRingNormal([0, -0.6, 0.8])))).toEqual(
+      vec3(0, -0.6, 0.8),
+    );
+  });
+
+  it("reads a ring's plane's normal as none where an older server leaves it out", () => {
+    expect(ringNormalOf(populatedBodiesWith(withoutRingNormal))).toBeNull();
+  });
+
+  it("holds the fixture's ring normal as A b's pole at the slice Earth's obliquity", () => {
+    const { pole } = tiltedPole(populatedBodies(), `${FIXTURE_SYSTEM}.0100`, 0.409);
+    const error = Math.max(
+      Math.abs(pole.x - FIXTURE_RING_NORMAL.x),
+      Math.abs(pole.y - FIXTURE_RING_NORMAL.y),
+      Math.abs(pole.z - FIXTURE_RING_NORMAL.z),
+    );
+
+    expect(error).toBeLessThanOrEqual(1e-12);
+  });
+
+  it("refuses a ring normal that is not of unit length", () => {
+    expect(faultOf(populatedBodiesWith(withRingNormal([0, -0.6, 0.9])))).toBe(
+      "ring normal unusable",
+    );
+    expect(faultOf(populatedBodiesWith(withRingNormal([0, Number.NaN, 1])))).toBe(
+      "ring normal unusable",
+    );
   });
 
   it("refuses a belt about a star the system does not have", () => {
@@ -334,7 +490,7 @@ describe("toSystemBodiesModel", () => {
 });
 
 describe("toBodyDetail", () => {
-  it("reads the Earth's whole record, its surface and hooks not modelled", () => {
+  it("reads the Earth's whole record, its hooks not modelled", () => {
     const result = toBodyDetail(earthDetail(), FIXTURE_SYSTEM, DESIGNATION);
     if (result.kind !== "ok") {
       throw new Error(result.fault);
@@ -342,7 +498,8 @@ describe("toBodyDetail", () => {
 
     expect(result.detail.granted).toBe("full");
     expect(result.detail.record.designation).toBe(`${DESIGNATION} /768`);
-    expect(result.detail.record.surface).toEqual({ state: "not_modelled" });
+    expect(result.detail.record.surface.state).toBe("ok");
+    expect(result.detail.record.envelope).toEqual({ state: "not_applicable" });
     expect(result.detail.record.hooks).toEqual({ state: "not_modelled" });
   });
 
@@ -359,12 +516,16 @@ describe("toBodyDetail", () => {
     expect(contact.detail.record.orbit).toEqual({ state: "not_resolved" });
   });
 
-  it("reads a hooks section with its detail seed", () => {
+  it("reads a hooks section with its detail seed, an older server's, without the other hooks", () => {
     const result = earthWithDetailSeed({ state: "ok", value: "0123456789abcdef" });
 
     expect(result.kind === "ok" ? result.detail.record.hooks : result.fault).toEqual({
       state: "ok",
-      value: { detailSeed: { state: "ok", value: "0123456789abcdef" } },
+      value: {
+        detailSeed: { state: "ok", value: "0123456789abcdef" },
+        habitability: { state: "not_modelled" },
+        resources: { state: "not_modelled" },
+      },
     });
   });
 
@@ -373,8 +534,155 @@ describe("toBodyDetail", () => {
 
     expect(result.kind === "ok" ? result.detail.record.hooks : result.fault).toEqual({
       state: "ok",
-      value: { detailSeed: { state: "not_modelled" } },
+      value: {
+        detailSeed: { state: "not_modelled" },
+        habitability: { state: "not_modelled" },
+        resources: { state: "not_modelled" },
+      },
     });
+  });
+
+  it("reads a hooks section's habitability and resources (P14.T25–T26)", () => {
+    const result = toBodyDetail(
+      earthWithHooks({
+        detail_seed: { state: "ok", value: "0123456789abcdef" },
+        habitability: { state: "ok", value: MARS_HABITABILITY },
+        resources: { state: "ok", value: crustResources() },
+      }),
+      FIXTURE_SYSTEM,
+      DESIGNATION,
+    );
+
+    expect(result.kind === "ok" ? result.detail.record.hooks : result.fault).toEqual({
+      state: "ok",
+      value: {
+        detailSeed: { state: "ok", value: "0123456789abcdef" },
+        habitability: {
+          state: "ok",
+          value: { habitabilityClass: "marginal", limits: ["frozen_surface"] },
+        },
+        resources: {
+          state: "ok",
+          value: {
+            ironGroup: 0.0684,
+            lightLithophiles: 0.281,
+            rareEarths: 1.52e-5,
+            platinumGroup: 2.35e-8,
+            radioactives: 1.28e-7,
+            silicates: 0.648,
+            waterIce: 2.5e-4,
+            otherIces: 0,
+            hydrocarbons: 0,
+            helium3: { kind: "not_modelled" },
+            deuterium: 7.8e-8,
+            radioisotopes: {
+              uranium238: 2.01e-8,
+              uranium235: 1.46e-10,
+              thorium232: 7.95e-8,
+              potassium40: 2.82e-8,
+            },
+          },
+        },
+      },
+    });
+  });
+
+  it("reads a surface state this build does not know as unknown, and a desert as one", () => {
+    const stateOf = (state: BodySurfaceDto["state"]) =>
+      okSection(recordOf(earthWithSurface({ ...earthSurface(), state })).surface).state;
+
+    expect(stateOf(anUnknownSurfaceState())).toBe("unknown");
+    expect(stateOf("desert")).toBe("desert");
+    expect(stateOf("temperate")).toBe("temperate");
+  });
+
+  it("reads a habitability limit this build does not know as unknown, and the rest as they are", () => {
+    const result = toBodyDetail(
+      earthWithHooks({
+        detail_seed: { state: "ok", value: "0123456789abcdef" },
+        habitability: {
+          state: "ok",
+          value: { class: "marginal", limits: [anUnknownHabitabilityLimit(), "frozen_surface"] },
+        },
+        resources: { state: "not_modelled" },
+      }),
+      FIXTURE_SYSTEM,
+      DESIGNATION,
+    );
+
+    expect(
+      result.kind === "ok" && result.detail.record.hooks.state === "ok"
+        ? result.detail.record.hooks.value.habitability
+        : result,
+    ).toEqual({
+      state: "ok",
+      value: { habitabilityClass: "marginal", limits: ["unknown", "frozen_surface"] },
+    });
+  });
+
+  it("reads a gas layer's helium-3 as its value, and one the server leaves off as not modelled", () => {
+    const read = (resources: ResourceAbundancesDto) => {
+      const result = toBodyDetail(
+        earthWithHooks({
+          detail_seed: { state: "ok", value: "0123456789abcdef" },
+          habitability: { state: "ok", value: MARS_HABITABILITY },
+          resources: { state: "ok", value: resources },
+        }),
+        FIXTURE_SYSTEM,
+        DESIGNATION,
+      );
+      return result.kind === "ok" &&
+        result.detail.record.hooks.state === "ok" &&
+        result.detail.record.hooks.value.resources.state === "ok"
+        ? result.detail.record.hooks.value.resources.value.helium3
+        : result;
+    };
+
+    expect([read({ ...crustResources(), helium_3: 2.9e-5 }), read(crustResources())]).toEqual([
+      { kind: "value", value: 2.9e-5 },
+      { kind: "not_modelled" },
+    ]);
+  });
+
+  it.each([
+    ["below 0", { iron_group: -1e-9 }],
+    ["a helium-3 above 1", { helium_3: 1.5 }],
+    ["above 1", { silicates: 1.5 }],
+    ["not finite", { deuterium: Number.NaN }],
+  ])("refuses resources with a fraction %s", (_, fraction) => {
+    const resources = { ...crustResources(), ...fraction };
+    expect(
+      toBodyDetail(
+        earthWithHooks({
+          detail_seed: { state: "ok", value: "0123456789abcdef" },
+          habitability: { state: "ok", value: MARS_HABITABILITY },
+          resources: { state: "ok", value: resources },
+        }),
+        FIXTURE_SYSTEM,
+        DESIGNATION,
+      ),
+    ).toEqual({ kind: "fault", fault: "resources unusable" });
+  });
+
+  it("refuses resources with an isotope's fraction outside 0 to 1", () => {
+    const resources = crustResources();
+    expect(
+      toBodyDetail(
+        earthWithHooks({
+          detail_seed: { state: "ok", value: "0123456789abcdef" },
+          habitability: { state: "ok", value: MARS_HABITABILITY },
+          resources: {
+            state: "ok",
+            value: {
+              ...resources,
+              radioisotopes: { ...resources.radioisotopes, potassium_40: -1 },
+            },
+          },
+        }),
+        FIXTURE_SYSTEM,
+        DESIGNATION,
+      ),
+    ).toEqual({ kind: "fault", fault: "resources unusable" });
   });
 
   it("refuses a detail seed that is not 16 lower-case hexadecimal digits", () => {
@@ -384,11 +692,1404 @@ describe("toBodyDetail", () => {
     });
   });
 
+  it("gives a record's detail seed alone, for the terrain session (R10.T16.a)", () => {
+    expect(bodyDetailSeed(withHooks({ state: "ok", value: "0123456789abcdef" }))).toBe(
+      "0123456789abcdef",
+    );
+  });
+
+  it("gives no detail seed where the hooks or the seed are not ok, or the seed is malformed", () => {
+    expect([
+      bodyDetailSeed(withHooks({ state: "not_modelled" })),
+      bodyDetailSeed(withHooks({ state: "ok", value: "0123456789ABCDEF" })),
+      bodyDetailSeed({ hooks: { state: "not_applicable" } }),
+      bodyDetailSeed(earthDetail().record),
+    ]).toEqual([null, null, null, null]);
+  });
+
+  it("gives a record's own orbit alone, for the terrain readout's season (R10.T12)", () => {
+    const { orbit } = earthDetail().record;
+    if (orbit.state !== "ok") {
+      throw new Error("the fixture's Earth has an orbit");
+    }
+    const { orbit: elements } = orbit.value;
+    expect(bodyRecordOrbit(earthDetail().record)).toEqual({
+      semiMajorAxisM: elements.semi_major_axis_m,
+      eccentricity: elements.eccentricity,
+      inclinationRad: elements.inclination_rad,
+      ascendingNodeRad: elements.ascending_node_rad,
+      argumentOfPeriapsisRad: elements.argument_of_periapsis_rad,
+      meanAnomalyAtEpochRad: elements.mean_anomaly_at_epoch_rad,
+      periodS: elements.period_s,
+    });
+  });
+
+  it("gives no orbit where the section is not ok or the orbit cannot be propagated", () => {
+    const { orbit } = earthDetail().record;
+    if (orbit.state !== "ok") {
+      throw new Error("the fixture's Earth has an orbit");
+    }
+    const open = {
+      state: "ok",
+      value: { ...orbit.value, orbit: { ...orbit.value.orbit, eccentricity: 0.99995 } },
+    } as const;
+    expect([
+      bodyRecordOrbit({ orbit: { state: "not_applicable" } }),
+      bodyRecordOrbit({ orbit: open }),
+    ]).toEqual([null, null]);
+  });
+
+  it("takes a moon's seasons from its planet, and every other body's from its own orbit", () => {
+    const { record } = earthDetail();
+    const planet = `${FIXTURE_SYSTEM}.0100`;
+    const moonOf = (parent: (typeof record)["parent"]) => ({
+      ...record,
+      kind: { type: "moon", origin: "captured" } as const,
+      parent,
+    });
+    expect([
+      bodyRecordSeasons(moonOf({ type: "body", id: planet })),
+      bodyRecordSeasons({ ...record, parent: { type: "body", id: planet } }),
+      bodyRecordSeasons(moonOf({ type: "star", body_index: 0 })),
+      bodyRecordSeasons({ ...record, orbit: { state: "not_applicable" } }),
+    ]).toEqual([
+      { kind: "planet", planet },
+      { kind: "own", orbit: bodyRecordOrbit(record) },
+      { kind: "own", orbit: bodyRecordOrbit(record) },
+      { kind: "none" },
+    ]);
+  });
+
   it("refuses a record of another system", () => {
     expect(toBodyDetail(earthDetail(), "0200080020000001", DESIGNATION)).toEqual({
       kind: "fault",
       fault: `body ${FIXTURE_EARTH} of another system`,
     });
+  });
+});
+
+/** The fixture's Earth's surface, which the shared fixture carries `ok`. */
+function earthSurface(): BodySurfaceDto {
+  const surface = earthDetail().record.surface;
+  if (surface.state !== "ok") {
+    throw new Error("the fixture's Earth carries its surface");
+  }
+  return surface.value;
+}
+
+/** The fixture's Jupiter's envelope, which the shared fixture carries `ok`. */
+function jupiterEnvelope(): BodyEnvelopeDto {
+  const envelope = jupiterDetail().record.envelope;
+  if (envelope?.state !== "ok") {
+    throw new Error("the fixture's Jupiter carries its envelope");
+  }
+  return envelope.value;
+}
+
+/** The fixture's Jupiter's ammonia deck and its mode, and its first haze. */
+function jupiterAmmoniaAndHaze(): {
+  readonly deck: CondensateDeckDto;
+  readonly mode: AerosolModeDto;
+  readonly haze: AerosolModeDto;
+} {
+  const envelope = jupiterEnvelope();
+  const deck = envelope.condensate_decks.find((listed) => listed.condensate === "NH3");
+  const mode = envelope.decks.find((listed) => listed.deck === "NH3");
+  const [haze] = envelope.hazes;
+  if (deck === undefined || mode === undefined || haze === undefined) {
+    throw new Error("the fixture's Jupiter has its ammonia deck, its mode and a haze");
+  }
+  return { deck, mode, haze };
+}
+
+/** The fixture's Earth with its surface `surface`, read. */
+function earthWithSurface(surface: BodySurfaceDto) {
+  const detail = earthDetail();
+  return toBodyDetail(
+    { ...detail, record: { ...detail.record, surface: { state: "ok", value: surface } } },
+    FIXTURE_SYSTEM,
+    DESIGNATION,
+  );
+}
+
+/** The fixture's Jupiter with its envelope `envelope`, read. */
+function jupiterWithEnvelope(envelope: BodyEnvelopeDto) {
+  const detail = jupiterDetail();
+  return toBodyDetail(
+    { ...detail, record: { ...detail.record, envelope: { state: "ok", value: envelope } } },
+    FIXTURE_SYSTEM,
+    DESIGNATION,
+  );
+}
+
+/** The value of a read record's section that must be `ok`. */
+function okSection<T>(section: Section<T>): T {
+  if (section.state !== "ok") {
+    throw new Error(`expected an ok section, got ${section.state}`);
+  }
+  return section.value;
+}
+
+/** The record a `body_detail` answer reads as, which must be usable. */
+function recordOf(result: ReturnType<typeof toBodyDetail>) {
+  if (result.kind !== "ok") {
+    throw new Error(result.fault);
+  }
+  return result.detail.record;
+}
+
+/** A water cloud's droplets, illustrative, as a mode of an aerosol inventory, every member modelled. */
+const DROPLETS: AerosolModeDto = {
+  material: "H2O",
+  phase: "liquid",
+  deck: "H2O",
+  shape: "sphere",
+  size_distribution: { type: "gamma", effective_radius_m: 1e-5, effective_variance: 0.1 },
+  column_mass_kg_m2: 0.05,
+  tau_550: 7.5,
+  tau_basis: "sphere",
+  base_pa: 85_000,
+  top_pa: 60_000,
+  f_sed: 1,
+  coverage: 0.67,
+  temperature_k: 281.5,
+};
+
+/** The water deck {@link DROPLETS} belong to, illustrative. */
+const WATER_DECK: CondensateDeckDto = {
+  condensate: "H2O",
+  phase: "liquid",
+  base_pa: 85_000,
+  base_temperature_k: 281.5,
+  top_pa: 60_000,
+  vapour_mole_fraction_below: 0.0131,
+  vapour_mole_fraction_above: 3e-6,
+  f_sed: 1,
+  extrapolated: false,
+};
+
+/**
+ * A Titan-like haze of fractal aggregates, illustrative: its τ(550) a rule's, its column mass and
+ * temperature not modelled.
+ */
+const HAZE: AerosolModeDto = {
+  material: "tholin",
+  phase: "solid",
+  deck: null,
+  shape: "aggregate",
+  size_distribution: {
+    type: "aggregate",
+    monomer_radius_m: 5e-8,
+    monomer_count: 3_000,
+    fractal_dimension: 2,
+    fractal_prefactor: 1.6666666666666667,
+  },
+  tau_550: 0.4,
+  tau_basis: "rule",
+  base_pa: 20_000,
+  top_pa: 10,
+  f_sed: 0,
+  coverage: 1,
+  not_modelled: { type: "no_mass_extinction" },
+};
+
+const { not_modelled: _hazeReason, ...HAZE_WITHOUT_REASON } = HAZE;
+const { tau_basis: _dropletsBasis, ...DROPLETS_WITHOUT_BASIS } = DROPLETS;
+const { tau_550: _dropletsDepth, ...DROPLETS_WITHOUT_DEPTH } = DROPLETS;
+const { tau_550: _depth, tau_basis: _basis, ...DROPLETS_WITHOUT_OPTICS } = DROPLETS;
+const { size_distribution: _dropletsSize, ...DROPLETS_WITHOUT_OPTICS_OR_SIZE } =
+  DROPLETS_WITHOUT_OPTICS;
+
+/** A surface's inventory of the modes `modes` over the water deck, with no absorber. */
+function inventoryOf(modes: ReadonlyArray<AerosolModeDto>): AerosolInventoryDto {
+  return { modes: [...modes], decks: [WATER_DECK], absorbers: [], not_formed: [] };
+}
+
+/** The read inventory of the Earth whose surface's inventory is `inventory`, which must be usable. */
+function inventoryRead(inventory: AerosolInventoryDto): AerosolInventory {
+  const { aerosols } = okSection(
+    recordOf(earthWithSurface({ ...earthSurface(), aerosols: inventory })).surface,
+  );
+  if (aerosols.kind !== "value") {
+    throw new Error(`expected an inventory, got ${aerosols.kind}`);
+  }
+  return aerosols.value;
+}
+
+/** The mode `mode` reads as, the one mode of an inventory over the water deck. */
+function modeRead(mode: AerosolModeDto): AerosolMode {
+  const [read] = inventoryRead(inventoryOf([mode])).modes;
+  if (read === undefined) {
+    throw new Error("the inventory reads its mode");
+  }
+  return read;
+}
+
+/** Earth's ozone on a profile of three nodes, illustrative. */
+const OZONE: AbsorberDto = {
+  species: "O3",
+  column_m2: 8.06e22,
+  base_pa: 30_000,
+  top_pa: 30,
+  profile: [
+    { pressure_pa: 30_000, relative_mixing_ratio: 0.05 },
+    { pressure_pa: 1_000, relative_mixing_ratio: 1 },
+    { pressure_pa: 30, relative_mixing_ratio: 0.2 },
+  ],
+};
+
+/** Europa's ocean as P14.T17.b's flag gives it, illustrative. */
+const EUROPA_OCEAN: SubsurfaceOceanDto = {
+  shell_thickness_m: 12_800,
+  thickness_m: 124_200,
+  floor: "rock",
+  liquid: "H2O",
+  solute_mass_fraction: 0,
+  base_temperature_k: 273.15,
+};
+
+/** An Earth's vertical structure, illustrative: its moist α and two nodes. */
+const EARTH_STRUCTURE: VerticalStructureDto = {
+  alpha: 0.6,
+  skin_temperature_k: 214.5,
+  adiabat: [
+    { pressure_pa: 101_325, temperature_k: 287.9 },
+    { pressure_pa: 14_000, temperature_k: 214.5 },
+  ],
+};
+
+/** An Earth's ocean as a surface condensate, illustrative: its mass and its 2.6 km layer. */
+const OCEAN: SurfaceCondensateDto = {
+  substance: "H2O",
+  phase: "liquid",
+  reservoir_kg_m2: 2_652_000,
+  reservoir_gel_m: 2_600,
+  area_fraction: 0.71,
+  seasonal: false,
+};
+
+/** A seasonal cap of carbon dioxide ice, illustrative: 320 kg m⁻², a 0.2 m layer. */
+const DRY_ICE: SurfaceCondensateDto = {
+  substance: "CO2",
+  phase: "solid",
+  reservoir_kg_m2: 320,
+  reservoir_gel_m: 0.2,
+  area_fraction: 0.02,
+  seasonal: true,
+};
+
+/**
+ * A seasonal argon frost, illustrative, with no layer, as a version-23 server sent argon's, whose
+ * density it had not read (P14.T49.n reads it from generator version 24).
+ */
+const ARGON_FROST: SurfaceCondensateDto = {
+  substance: "Ar",
+  phase: "solid",
+  reservoir_kg_m2: 15,
+  area_fraction: 0.01,
+  seasonal: true,
+};
+
+/** The fault the Earth reads as with its surface changed by `change`. */
+function surfaceFault(change: Partial<BodySurfaceDto>): string {
+  const result = earthWithSurface({ ...earthSurface(), ...change });
+  return result.kind === "fault" ? result.fault : "no fault";
+}
+
+/** A surface's condensates, which must be on the record. */
+function condensatesIn(
+  condensates: Modelled<ReadonlyArray<SurfaceCondensate>>,
+): ReadonlyArray<SurfaceCondensate> {
+  if (condensates.kind !== "value") {
+    throw new Error(`expected condensates, got ${condensates.kind}`);
+  }
+  return condensates.value;
+}
+
+/** The condensates the Earth reads as with its surface's list `condensates`, which must be usable. */
+function condensatesOf(
+  condensates: ReadonlyArray<SurfaceCondensateDto>,
+): ReadonlyArray<SurfaceCondensate> {
+  return condensatesIn(
+    okSection(
+      recordOf(earthWithSurface({ ...earthSurface(), condensates: [...condensates] })).surface,
+    ).condensates,
+  );
+}
+
+/** The fault the Jupiter reads as with its envelope changed by `change`. */
+function envelopeFault(change: Partial<BodyEnvelopeDto>): string {
+  const result = jupiterWithEnvelope({ ...jupiterEnvelope(), ...change });
+  return result.kind === "fault" ? result.fault : "no fault";
+}
+
+describe("the surface section and the gas envelope (P14.T35.e)", () => {
+  it("reads the Earth's surface in the display's units, every substance by its key", () => {
+    const surface = okSection(
+      recordOf(toBodyDetail(earthDetail(), FIXTURE_SYSTEM, DESIGNATION)).surface,
+    );
+
+    expect(surface.state).toBe("temperate");
+    expect(surface.material).toBe("rock");
+    expect(surface.meanSurfaceTemperatureK).toBe(287.9);
+    expect(surface.surfacePressurePa).toBe(101_325);
+    expect(surface.gases.map((gas) => gas.species)).toEqual(["N2", "H2O", "Ar", "CO2"]);
+    expect(surface.gases[0]?.moleFraction).toBe(0.9805);
+    expect(surface.climateRegime).toEqual({
+      thermal: "efficient",
+      forcing: "seasonal",
+      condensable: "H2O",
+      model: "energy_balance",
+    });
+    expect(surface.surfaceLiquids).toEqual([{ substance: "H2O", areaFraction: 0.71 }]);
+    expect(surface.tectonicRegime).toBe("mobile_lid");
+    expect(surface.craters.screening).toEqual({ kind: "atmosphere", columnMassKgM2: 10_318 });
+    expect(surface.wetEpoch?.liquid).toBe("H2O");
+  });
+
+  it("reads every member of a later task left out as not modelled, never as none", () => {
+    const surface = okSection(
+      recordOf(toBodyDetail(earthDetail(), FIXTURE_SYSTEM, DESIGNATION)).surface,
+    );
+    const later = [
+      surface.subsurfaceOcean,
+      surface.verticalStructure,
+      surface.aerosols,
+      surface.modifiers,
+      surface.taxonomicClass,
+      surface.biosphere,
+      surface.silicateVapour,
+    ];
+
+    expect(later).toEqual(Array.from({ length: later.length }, () => ({ kind: "not_modelled" })));
+  });
+
+  it("reads the Earth's crust as the server sends it, its melt area 0 (P14.T54.a)", () => {
+    const surface = okSection(
+      recordOf(toBodyDetail(earthDetail(), FIXTURE_SYSTEM, DESIGNATION)).surface,
+    );
+
+    expect(surface.crust).toEqual({
+      kind: "value",
+      value: {
+        primary: "ultramafic",
+        secondary: "basalt",
+        tertiary: "granite",
+        bulk: null,
+        lid: "secondary",
+        provinces: "basalt",
+        redox: "oxidised",
+        mantleRedoxIw: 3.55,
+        meltAreaFraction: 0,
+      },
+    });
+  });
+
+  it("reads a locked lava world's crust, whose dayside pool holds melt (P14.T54.a)", () => {
+    const surface = okSection(
+      recordOf(toBodyDetail(lavaWorldDetail(), FIXTURE_SYSTEM, DESIGNATION)).surface,
+    );
+    if (surface.crust.kind !== "value") {
+      throw new Error(`expected the lava world's crust, got ${surface.crust.kind}`);
+    }
+
+    expect(surface.state).toBe("airless");
+    expect(surface.crust.value.meltAreaFraction).toBeGreaterThan(0);
+    expect(surface.silicateVapour).toEqual({ kind: "not_modelled" });
+  });
+
+  it("reads a Titan's lakes as its one condensate, a ch4_c2h6_n2 liquid, and its surface liquid (P14.T54.a)", () => {
+    const surface = okSection(
+      recordOf(toBodyDetail(titanDetail(), FIXTURE_SYSTEM, DESIGNATION)).surface,
+    );
+    const lakes = condensatesIn(surface.condensates);
+
+    expect(lakes.map(({ substance, phase }) => [substance, phase])).toEqual([
+      ["ch4_c2h6_n2", "liquid"],
+    ]);
+    expect(lakes[0]?.areaFraction).toBe(0.01);
+    expect(surface.surfaceLiquids).toEqual([{ substance: "ch4_c2h6_n2", areaFraction: 0.01 }]);
+  });
+
+  it("reads a Titan's crust as an H2O lid whose melt area is 0 (P14.T54.a)", () => {
+    const surface = okSection(
+      recordOf(toBodyDetail(titanDetail(), FIXTURE_SYSTEM, DESIGNATION)).surface,
+    );
+    if (surface.crust.kind !== "value") {
+      throw new Error(`expected the Titan's crust, got ${surface.crust.kind}`);
+    }
+
+    expect(surface.crust.value.primary).toBe("H2O");
+    expect(surface.crust.value.lid).toBe("primary");
+    expect(surface.crust.value.meltAreaFraction).toBe(0);
+  });
+
+  it("reads the Earth's condensates in the display's units, in the server's order (P14.T54.a)", () => {
+    const surface = okSection(
+      recordOf(toBodyDetail(earthDetail(), FIXTURE_SYSTEM, DESIGNATION)).surface,
+    );
+
+    expect(surface.condensates).toEqual({
+      kind: "value",
+      value: [
+        {
+          substance: "H2O",
+          phase: "liquid",
+          reservoirKgM2: 2_652_000,
+          reservoirGelM: { kind: "value", value: 2_600 },
+          areaFraction: 0.71,
+          trappedAreaFraction: { kind: "not_modelled" },
+          seasonal: false,
+        },
+        {
+          substance: "H2O",
+          phase: "solid",
+          reservoirKgM2: 53_100,
+          reservoirGelM: { kind: "value", value: 57.9 },
+          areaFraction: 0.03,
+          trappedAreaFraction: { kind: "value", value: 0 },
+          seasonal: false,
+        },
+      ],
+    });
+  });
+
+  it("reads a later member's null as none", () => {
+    const none = okSection(
+      recordOf(
+        earthWithSurface({
+          ...earthSurface(),
+          subsurface_ocean: null,
+          aerosols: null,
+          taxonomic_class: null,
+          silicate_vapour: null,
+        }),
+      ).surface,
+    );
+
+    expect([none.subsurfaceOcean, none.aerosols, none.taxonomicClass, none.silicateVapour]).toEqual(
+      [{ kind: "none" }, { kind: "none" }, { kind: "none" }, { kind: "none" }],
+    );
+  });
+
+  it("reads a newer server's silicate vapour as a value, never as a fault", () => {
+    const result = earthWithSurface({
+      ...earthSurface(),
+      // @ts-expect-error -- SilicateVapourDto has no members until P14.T55.b, and a newer server's value must still read.
+      silicate_vapour: { vapour_pressure_pa: 10 },
+    });
+
+    expect(result.kind).toBe("ok");
+    expect(okSection(recordOf(result).surface).silicateVapour).toEqual({
+      kind: "value",
+      value: { vapour_pressure_pa: 10 },
+    });
+  });
+
+  it("reads a later member's value in the display's units", () => {
+    const valued = okSection(
+      recordOf(
+        earthWithSurface({
+          ...earthSurface(),
+          subsurface_ocean: EUROPA_OCEAN,
+          vertical_structure: EARTH_STRUCTURE,
+          aerosols: {
+            modes: [DROPLETS, HAZE],
+            decks: [WATER_DECK],
+            absorbers: [OZONE],
+            not_formed: [{ condensate: "N2", reason: { type: "bulk_gas" } }],
+          },
+          modifiers: {
+            maturity: 0.8,
+            weathering_rate: 1,
+            organic_cover: 0.1,
+            resurfacing_m_per_yr: 0.01,
+            volcanic_deposits: [{ substance: "SO2", area_fraction: 0.27 }],
+            weathering_deposits: [],
+          },
+          taxonomic_class: "cgh",
+        }),
+      ).surface,
+    );
+
+    expect(valued.subsurfaceOcean).toEqual({
+      kind: "value",
+      value: {
+        shellThicknessM: 12_800,
+        thicknessM: 124_200,
+        floor: "rock",
+        liquid: "H2O",
+        soluteMassFraction: 0,
+        baseTemperatureK: 273.15,
+      },
+    });
+    expect(valued.verticalStructure).toEqual({
+      kind: "value",
+      value: {
+        alpha: 0.6,
+        skinTemperatureK: 214.5,
+        adiabat: [
+          { pressurePa: 101_325, temperatureK: 287.9 },
+          { pressurePa: 14_000, temperatureK: 214.5 },
+        ],
+      },
+    });
+    const aerosols = valued.aerosols.kind === "value" ? valued.aerosols.value : null;
+    expect(
+      aerosols?.modes.map((mode) =>
+        mode.sizeDistribution.kind === "value" ? mode.sizeDistribution.value.kind : null,
+      ),
+    ).toEqual(["gamma", "aggregate"]);
+    expect(aerosols?.absorbers[0]?.columnPerM2).toBe(8.06e22);
+    expect(aerosols?.notFormed).toEqual([{ condensate: "N2", reason: { kind: "bulk_gas" } }]);
+    expect(valued.modifiers).toEqual({
+      kind: "value",
+      value: {
+        maturity: 0.8,
+        weatheringRate: 1,
+        organicCover: 0.1,
+        resurfacingMPerYr: 0.01,
+        volcanicDeposits: [{ substance: "SO2", areaFraction: 0.27 }],
+        weatheringDeposits: [],
+      },
+    });
+    expect(valued.taxonomicClass).toEqual({ kind: "value", value: "cgh" });
+  });
+
+  it("reads a Jupiter's envelope, its surface not applicable, at the generator's values (P14.T54.b.i)", () => {
+    const record = recordOf(toBodyDetail(jupiterDetail(), FIXTURE_SYSTEM, DESIGNATION));
+    const envelope = okSection(record.envelope);
+    const wire = jupiterEnvelope();
+
+    expect(record.surface).toEqual({ state: "not_applicable" });
+    expect(envelope.composition.slice(0, 4).map((gas) => gas.species)).toEqual([
+      "H2",
+      "He",
+      "CH4",
+      "NH3",
+    ]);
+    expect(envelope.adiabat[0]?.pressurePa).toBe(envelope.joinPressurePa);
+    // Generator version 27's record: κ₁ 2.92 × 10⁻³ m² kg⁻¹, refitted at the giants' own Bond
+    // albedos (P14.T24.h.b; 2.87 × 10⁻³ before).
+    expect([
+      envelope.profile.thermalOpacityM2PerKg,
+      envelope.profile.opticalDepthExponent,
+      envelope.profile.opacityRatio,
+      envelope.profile.redistributionFactor,
+    ]).toEqual([0.00292, 2, 0.4, 0.25]);
+    // One inventory (R08's C1): the deck modes, each naming a listed deck, then the hazes. From 27
+    // two name the NH₃ deck, its cloud's haze the second (P14.T24.h.b part 6).
+    expect(envelope.aerosols.modes.map((mode) => [mode.material, mode.deck])).toEqual([
+      ...wire.decks.map((mode) => [mode.material, mode.deck]),
+      ...wire.hazes.map((haze) => [haze.material, null]),
+    ]);
+    expect(envelope.aerosols.decks.map((deck) => deck.condensate)).toContain("NH3");
+    expect(envelope.aerosols.modes.filter((mode) => mode.deck === "NH3")).toHaveLength(2);
+    expect(envelope.aerosols.modes.at(-1)).toMatchObject({ material: "chromophore", deck: null });
+    expect(envelope.aerosols.notFormed.map((entry) => entry.condensate)).toContain("SiO2");
+  });
+
+  it("reads a hot Jupiter's envelope: its alkalis among its absorbers, no ammonia deck and no haze (P14.T54.b.i)", () => {
+    const record = recordOf(toBodyDetail(hotJupiterDetail(), FIXTURE_SYSTEM, DESIGNATION));
+    const envelope = okSection(record.envelope);
+
+    expect(record.surface).toEqual({ state: "not_applicable" });
+    expect(envelope.aerosols.absorbers.map((absorber) => absorber.species)).toEqual(
+      expect.arrayContaining(["Na", "K"]),
+    );
+    expect(envelope.aerosols.decks.map((deck) => deck.condensate)).not.toContain("NH3");
+    expect(envelope.aerosols.decks.map((deck) => deck.condensate)).toContain("MgSiO3");
+    expect(envelope.aerosols.modes.every((mode) => mode.deck !== null)).toBe(true);
+    expect(envelope.hazeTau550).toBe(0);
+  });
+
+  it("reads an envelope's supercritical condensable by its key", () => {
+    const envelope = okSection(
+      recordOf(jupiterWithEnvelope({ ...jupiterEnvelope(), supercritical: "H2O" })).envelope,
+    );
+
+    expect(envelope.supercritical).toBe("H2O");
+  });
+
+  it("reads an H2/He envelope's supercritical condensable as null", () => {
+    const envelope = okSection(
+      recordOf(toBodyDetail(jupiterDetail(), FIXTURE_SYSTEM, DESIGNATION)).envelope,
+    );
+
+    expect(envelope.supercritical).toBeNull();
+  });
+
+  it("reads a solid planet under a supercritical envelope, its surface not applicable and its envelope not modelled", () => {
+    // P14.T53.b part 2: from generator version 24 a rocky body may send the pair a giant sends.
+    const record = recordOf(
+      toBodyDetail(earthUnderASupercriticalEnvelope(), FIXTURE_SYSTEM, DESIGNATION),
+    );
+
+    expect([record.surface, record.envelope]).toEqual([
+      { state: "not_applicable" },
+      { state: "not_modelled" },
+    ]);
+  });
+
+  it("reads an older server's record, which has no envelope, as its envelope not modelled", () => {
+    const record = recordOf(
+      toBodyDetail(earthDetailOfAnOlderServer(), FIXTURE_SYSTEM, DESIGNATION),
+    );
+
+    expect("envelope" in earthDetailOfAnOlderServer().record).toBe(false);
+    expect([record.surface, record.envelope]).toEqual([
+      { state: "not_modelled" },
+      { state: "not_modelled" },
+    ]);
+  });
+
+  it("reads the withheld envelope of a mass-and-orbit record as not resolved", () => {
+    const record = recordOf(toBodyDetail(earthMassAndOrbit(), FIXTURE_SYSTEM, DESIGNATION));
+
+    expect([record.surface, record.envelope]).toEqual([
+      { state: "not_resolved" },
+      { state: "not_resolved" },
+    ]);
+  });
+
+  it("passes a record with a key it does not know, and a surface with a member it does not know", () => {
+    // Decision-p14-t35e-wire §1.5 item 3: what a newer server adds is ignored, never refused.
+    const detail = earthDetail();
+    const surface = { ...earthSurface(), lightning_rate_per_s: 44 };
+    const record = {
+      ...detail.record,
+      albedo_map: { state: "not_modelled" },
+      surface: { state: "ok" as const, value: surface },
+    };
+    const newer: BodyRecordDto = record;
+
+    expect(toBodyDetail({ ...detail, record: newer }, FIXTURE_SYSTEM, DESIGNATION).kind).toBe("ok");
+  });
+
+  it("passes a surface and an envelope whose every substance is a key it does not know", () => {
+    const unknown = "Xe";
+    const surface = earthSurface();
+    const envelope = jupiterEnvelope();
+    const surfaceResult = earthWithSurface({
+      ...surface,
+      gases: surface.gases.map((gas) => ({ species: unknown, mole_fraction: gas.mole_fraction })),
+      climate_regime: { ...surface.climate_regime, condensable: unknown },
+      surface_liquids: surface.surface_liquids.map((area) => ({
+        substance: unknown,
+        area_fraction: area.area_fraction,
+      })),
+      surface_ices: surface.surface_ices.map((area) => ({
+        substance: unknown,
+        area_fraction: area.area_fraction,
+      })),
+      wet_epoch: surface.wet_epoch === null ? null : { ...surface.wet_epoch, liquid: unknown },
+      subsurface_ocean: { ...EUROPA_OCEAN, liquid: unknown },
+      aerosols: {
+        modes: [{ ...DROPLETS, material: unknown, deck: unknown }],
+        decks: [{ ...WATER_DECK, condensate: unknown }],
+        absorbers: [
+          { species: unknown, column_m2: 1e19, base_pa: 5_000, top_pa: 1_000, profile: null },
+        ],
+        not_formed: [
+          { condensate: unknown, reason: { type: "displaced", by: unknown } },
+          { condensate: unknown, reason: { type: "bulk_gas" } },
+        ],
+      },
+      condensates: [
+        {
+          substance: unknown,
+          phase: "solid",
+          reservoir_kg_m2: 320,
+          reservoir_gel_m: 0.2,
+          area_fraction: 0.02,
+          seasonal: true,
+        },
+      ],
+      crust: {
+        primary: unknown,
+        secondary: unknown,
+        tertiary: null,
+        bulk: null,
+        lid: "secondary",
+        provinces: unknown,
+        redox: "intermediate",
+        mantle_redox_iw: -1.5,
+        melt_area_fraction: 0,
+      },
+      biosphere: { fluxes: [{ species: unknown, flux_earth: 1 }] },
+    });
+    const ammonia = jupiterAmmoniaAndHaze();
+    const envelopeResult = jupiterWithEnvelope({
+      ...envelope,
+      supercritical: unknown,
+      composition: envelope.composition.map((gas) => ({
+        species: unknown,
+        mole_fraction: gas.mole_fraction,
+      })),
+      decks: [{ ...ammonia.mode, material: unknown, deck: unknown }],
+      hazes: [{ ...ammonia.haze, material: unknown }],
+      condensate_decks: [{ ...ammonia.deck, condensate: unknown }],
+      absorbers: [{ species: unknown, column_m2: 1e19, base_pa: 1_000, top_pa: 1, profile: null }],
+      not_formed: [{ condensate: unknown, reason: { type: "displaced", by: unknown } }],
+    });
+
+    expect([surfaceResult.kind, envelopeResult.kind]).toEqual(["ok", "ok"]);
+    expect(okSection(recordOf(surfaceResult).surface).gases[0]?.species).toBe(unknown);
+  });
+
+  it("refuses an aerosol mode that is a vapour or a supercritical fluid", () => {
+    for (const phase of ["vapour", "supercritical"] as const) {
+      const mode = { ...DROPLETS, phase };
+
+      expect(
+        earthWithSurface({
+          ...earthSurface(),
+          aerosols: inventoryOf([mode]),
+        }),
+      ).toEqual({ kind: "fault", fault: "aerosol phase unusable" });
+      expect(jupiterWithEnvelope({ ...jupiterEnvelope(), decks: [mode] })).toEqual({
+        kind: "fault",
+        fault: "aerosol phase unusable",
+      });
+    }
+  });
+
+  it("refuses surface gases that do not sum to 1", () => {
+    const short = earthSurface().gases.map((gas) => ({
+      species: gas.species,
+      mole_fraction: gas.mole_fraction / 2,
+    }));
+
+    expect(surfaceFault({ gases: short })).toBe("surface gases unusable");
+  });
+
+  it("refuses surface gases that are not largest first", () => {
+    expect(surfaceFault({ gases: earthSurface().gases.toReversed() })).toBe(
+      "surface gases unusable",
+    );
+  });
+
+  it("refuses an envelope's composition that does not sum to 1", () => {
+    expect(envelopeFault({ composition: [{ species: "H2", mole_fraction: 0.5 }] })).toBe(
+      "envelope composition unusable",
+    );
+  });
+
+  it.each<[string, Partial<BodySurfaceDto>]>([
+    ["a mean temperature of 0 K", { mean_surface_temperature_k: 0 }],
+    ["a negative day–night contrast", { day_night_contrast_k: -1 }],
+    ["a negative pressure", { surface_pressure_pa: -1 }],
+    ["a negative stellar flux", { stellar_flux_w_m2: -1 }],
+    ["a mean molar mass of 0", { mean_molar_mass_g_per_mol: 0 }],
+  ])("refuses a surface with %s", (_, change) => {
+    expect(surfaceFault(change)).toBe("surface conditions unusable");
+  });
+
+  it.each<[string, Partial<BodySurfaceDto>]>([
+    ["a negative σ_h", { sigma_h_m: -1 }],
+    ["a negative heat flow", { heat_flow_w_m2: -0.01 }],
+    ["a negative volcanism level", { volcanism_level: -1 }],
+    ["a negative outgassing", { outgassing_earth: -1 }],
+    ["a negative surface age", { surface_age_s: -1 }],
+  ])("refuses global figures with %s", (_, change) => {
+    expect(surfaceFault(change)).toBe("global figures unusable");
+  });
+
+  it("refuses a subsurface ocean of no depth", () => {
+    expect(surfaceFault({ subsurface_ocean: { ...EUROPA_OCEAN, thickness_m: 0 } })).toBe(
+      "subsurface ocean unusable",
+    );
+  });
+
+  it("refuses a crater contract with a target of no density", () => {
+    expect(surfaceFault({ craters: { ...earthSurface().craters, target_density_kg_m3: 0 } })).toBe(
+      "crater contract unusable",
+    );
+  });
+
+  it("refuses a crater screening by a negative column mass", () => {
+    expect(
+      surfaceFault({
+        craters: {
+          ...earthSurface().craters,
+          screening: { type: "atmosphere", column_mass_kg_m2: -1 },
+        },
+      }),
+    ).toBe("crater contract unusable");
+  });
+
+  it("refuses a wet epoch that ends before it starts", () => {
+    const epoch = earthSurface().wet_epoch;
+    if (epoch === null) {
+      throw new Error("the fixture's Earth has its wet epoch");
+    }
+
+    expect(surfaceFault({ wet_epoch: { ...epoch, end_ago_s: epoch.start_ago_s * 2 } })).toBe(
+      "wet epoch unusable",
+    );
+  });
+
+  it("refuses a vertical structure whose adiabat rises in pressure", () => {
+    expect(
+      surfaceFault({
+        vertical_structure: { ...EARTH_STRUCTURE, adiabat: EARTH_STRUCTURE.adiabat.toReversed() },
+      }),
+    ).toBe("vertical structure unusable");
+  });
+
+  it("refuses an aggregate above the model's fractal dimension of 2.5", () => {
+    const haze: AerosolModeDto = {
+      ...HAZE,
+      size_distribution: {
+        type: "aggregate",
+        monomer_radius_m: 5e-8,
+        monomer_count: 3_000,
+        fractal_dimension: 2.8,
+        fractal_prefactor: 1.6666666666666667,
+      },
+    };
+
+    expect(surfaceFault({ aerosols: inventoryOf([haze]) })).toBe("aerosol mode unusable");
+  });
+
+  it("refuses an aerosol mode whose base lies above its top", () => {
+    expect(
+      surfaceFault({
+        aerosols: inventoryOf([{ ...DROPLETS, base_pa: 50_000 }]),
+      }),
+    ).toBe("aerosol mode unusable");
+  });
+
+  it("refuses an absorber whose profile's pressures do not descend", () => {
+    const profile = OZONE.profile?.toReversed() ?? null;
+
+    expect(
+      surfaceFault({
+        aerosols: { modes: [], decks: [], absorbers: [{ ...OZONE, profile }], not_formed: [] },
+      }),
+    ).toBe("absorber unusable");
+  });
+
+  it.each([
+    [
+      "a vapour below that is not a fraction",
+      { vapour_mole_fraction_below: 1.5 },
+      "condensate deck unusable",
+    ],
+    [
+      "a vapour above that is not a fraction",
+      { vapour_mole_fraction_above: 2 },
+      "condensate deck unusable",
+    ],
+    ["a base above its top", { base_pa: 50_000 }, "condensate deck unusable"],
+    ["a base of no temperature", { base_temperature_k: 0 }, "condensate deck unusable"],
+    ["a negative f_sed, which a mode takes", { f_sed: -0.5 }, "condensate deck unusable"],
+    ["the vapour phase", { phase: "vapour" }, "aerosol phase unusable"],
+    ["the supercritical phase", { phase: "supercritical" }, "aerosol phase unusable"],
+  ] satisfies ReadonlyArray<[string, Partial<CondensateDeckDto>, string]>)(
+    "refuses a condensate deck with %s",
+    (_, change, fault) => {
+      expect(surfaceFault({ aerosols: inventoryOf([]) })).toBe("no fault");
+      expect(
+        surfaceFault({
+          aerosols: { ...inventoryOf([]), decks: [{ ...WATER_DECK, ...change }] },
+        }),
+      ).toBe(fault);
+    },
+  );
+
+  it("refuses an inventory with two decks of one condensate (R08's S3)", () => {
+    expect(
+      surfaceFault({
+        aerosols: { ...inventoryOf([]), decks: [WATER_DECK, { ...WATER_DECK, top_pa: 70_000 }] },
+      }),
+    ).toBe("condensate deck unusable");
+  });
+
+  it("reads a modelled aerosol mode's coverage, temperature and optical depth with its basis (P14.T54.b.b)", () => {
+    expect(modeRead(DROPLETS)).toEqual({
+      material: "H2O",
+      phase: "liquid",
+      deck: "H2O",
+      shape: "sphere",
+      sizeDistribution: {
+        kind: "value",
+        value: { kind: "gamma", effectiveRadiusM: 1e-5, effectiveVariance: 0.1 },
+      },
+      columnMassKgM2: { kind: "value", value: 0.05 },
+      opticalDepth: { kind: "value", value: { tau550: 7.5, basis: "sphere" } },
+      basePa: 85_000,
+      topPa: 60_000,
+      fSed: 1,
+      coverage: 0.67,
+      temperatureK: { kind: "value", value: 281.5 },
+      notModelled: null,
+    });
+  });
+
+  it("reads an aggregate's mode with its rule's optical depth, and no column mass or temperature", () => {
+    const haze = modeRead(HAZE);
+
+    expect(haze.notModelled).toEqual({ kind: "no_mass_extinction" });
+    expect(haze.opticalDepth).toEqual({ kind: "value", value: { tau550: 0.4, basis: "rule" } });
+    expect([haze.columnMassKgM2, haze.temperatureK]).toEqual([
+      { kind: "not_modelled" },
+      { kind: "not_modelled" },
+    ]);
+  });
+
+  it("reads a haze whose mixing ratio rises aloft, its negative f_sed kept (R08.T17)", () => {
+    expect(modeRead({ ...HAZE, f_sed: -0.83 }).fSed).toBe(-0.83);
+  });
+
+  it("reads an inventory's condensate deck with its phase, base, top, vapours, f_sed and extrapolation", () => {
+    expect(inventoryRead(inventoryOf([DROPLETS])).decks).toEqual([
+      {
+        condensate: "H2O",
+        phase: "liquid",
+        basePa: 85_000,
+        baseTemperatureK: 281.5,
+        topPa: 60_000,
+        vapourMoleFractionBelow: 0.0131,
+        vapourMoleFractionAbove: 3e-6,
+        fSed: 1,
+        extrapolated: false,
+      },
+    ]);
+  });
+
+  it("reads a condensable displaced by another, with the condensate that displaces it", () => {
+    const inventory = inventoryRead({
+      ...inventoryOf([]),
+      not_formed: [{ condensate: "SiO2", reason: { type: "displaced", by: "MgSiO3" } }],
+    });
+
+    expect(inventory.notFormed).toEqual([
+      { condensate: "SiO2", reason: { kind: "displaced", by: "MgSiO3" } },
+    ]);
+  });
+
+  it("reads a condensable past its critical point as not formed, labelled supercritical (P14.T52.f)", () => {
+    const inventory = inventoryRead({
+      ...inventoryOf([]),
+      not_formed: [
+        { condensate: "CH4", reason: { type: "bulk_gas" } },
+        { condensate: "N2", reason: { type: "supercritical" } },
+      ],
+    });
+
+    expect(inventory.notFormed).toEqual([
+      { condensate: "CH4", reason: { kind: "bulk_gas" } },
+      { condensate: "N2", reason: { kind: "supercritical" } },
+    ]);
+  });
+
+  it("reads a deck's mode whose size is not modelled for want of a grain density, with its phase and temperature", () => {
+    expect(
+      modeRead({
+        ...DROPLETS_WITHOUT_OPTICS_OR_SIZE,
+        not_modelled: { type: "no_grain_density", phase: "liquid", temperature_k: 281.5 },
+      }),
+    ).toEqual({
+      material: "H2O",
+      phase: "liquid",
+      deck: "H2O",
+      shape: "sphere",
+      sizeDistribution: { kind: "not_modelled" },
+      columnMassKgM2: { kind: "value", value: 0.05 },
+      opticalDepth: { kind: "not_modelled" },
+      basePa: 85_000,
+      topPa: 60_000,
+      fSed: 1,
+      coverage: 0.67,
+      temperatureK: { kind: "value", value: 281.5 },
+      notModelled: { kind: "no_grain_density", phase: "liquid", temperatureK: 281.5 },
+    });
+  });
+
+  it("reads an aerosol mode's member sent as null as not modelled, as the server reads it", () => {
+    const mode = modeRead({
+      ...DROPLETS_WITHOUT_OPTICS,
+      not_modelled: { type: "optics_not_modelled" },
+      // @ts-expect-error -- the binding leaves an absent member out, but the server reads null as absent, and an older or hand-written frame may send it.
+      column_mass_kg_m2: null,
+    });
+
+    expect(mode.columnMassKgM2).toEqual({ kind: "not_modelled" });
+  });
+
+  it("refuses a grain density's reason in the vapour phase", () => {
+    expect(
+      surfaceFault({
+        aerosols: inventoryOf([
+          {
+            ...DROPLETS_WITHOUT_OPTICS,
+            not_modelled: { type: "no_grain_density", phase: "vapour", temperature_k: 281.5 },
+          },
+        ]),
+      }),
+    ).toBe("aerosol phase unusable");
+  });
+
+  it.each([
+    ["no reason for its absent column mass", HAZE_WITHOUT_REASON],
+    [
+      "a reason with every member present",
+      { ...DROPLETS, not_modelled: { type: "no_condensate" } },
+    ],
+    ["an optical depth with no basis", DROPLETS_WITHOUT_BASIS],
+    [
+      "a basis with no optical depth",
+      { ...DROPLETS_WITHOUT_DEPTH, not_modelled: { type: "optics_not_modelled" } },
+    ],
+    ["an aggregate's reason beside a temperature", { ...HAZE, temperature_k: 150 }],
+    [
+      "a size's reason beside a size",
+      { ...DROPLETS_WITHOUT_OPTICS, not_modelled: { type: "no_size_distribution" } },
+    ],
+    ["a coverage beyond the sky", { ...DROPLETS, coverage: 1.5 }],
+    ["an f_sed of -1, at which its share above a level is singular", { ...HAZE, f_sed: -1 }],
+    ["a temperature of 0 K", { ...DROPLETS, temperature_k: 0 }],
+    [
+      "a grain density's reason of no temperature",
+      {
+        ...DROPLETS_WITHOUT_OPTICS,
+        not_modelled: { type: "no_grain_density", phase: "liquid", temperature_k: 0 },
+      },
+    ],
+    [
+      "a grain density's reason beside an optical depth",
+      {
+        ...DROPLETS,
+        not_modelled: { type: "no_grain_density", phase: "liquid", temperature_k: 281.5 },
+      },
+    ],
+    [
+      "the optics' reason with no size",
+      {
+        ...DROPLETS_WITHOUT_OPTICS_OR_SIZE,
+        not_modelled: { type: "optics_not_modelled" },
+      },
+    ],
+  ] satisfies ReadonlyArray<[string, AerosolModeDto]>)(
+    "refuses an aerosol mode with %s (P14.T54.b.b)",
+    (_, mode) => {
+      expect(surfaceFault({ aerosols: inventoryOf([mode]) })).toBe("aerosol mode unusable");
+    },
+  );
+
+  it("refuses an aerosol mode whose deck the inventory does not list", () => {
+    expect(surfaceFault({ aerosols: inventoryOf([{ ...DROPLETS, deck: "NH3" }]) })).toBe(
+      "aerosol mode unusable",
+    );
+    expect(surfaceFault({ aerosols: inventoryOf([DROPLETS, HAZE]) })).toBe("no fault");
+  });
+
+  it("refuses a surface condensate that is a vapour", () => {
+    expect(surfaceFault({ condensates: [{ ...DRY_ICE, phase: "vapour" }] })).toBe(
+      "condensate unusable",
+    );
+  });
+
+  it("reads a condensate's layer where the server sends one (P14.T54.a)", () => {
+    const [ocean] = condensatesOf([OCEAN]);
+
+    expect(ocean?.reservoirGelM).toEqual({ kind: "value", value: 2_600 });
+  });
+
+  it("reads a condensate's absent layer as not modelled, never as none (P14.T54.a)", () => {
+    const [frost] = condensatesOf([ARGON_FROST]);
+
+    expect(frost?.reservoirGelM).toEqual({ kind: "not_modelled" });
+  });
+
+  it("reads a condensate's layer sent as null as not modelled, as the server reads it", () => {
+    const [frost] = condensatesOf([
+      {
+        ...ARGON_FROST,
+        // @ts-expect-error -- the binding leaves an absent layer out, but the server reads null as absent, and an older or hand-written frame may send it.
+        reservoir_gel_m: null,
+      },
+    ]);
+
+    expect(frost?.reservoirGelM).toEqual({ kind: "not_modelled" });
+  });
+
+  it("reads a condensate's trapped area where the server sends one (P14.T54.b)", () => {
+    const [ice] = condensatesOf([{ ...DRY_ICE, trapped_area_fraction: 0.005 }]);
+
+    expect(ice?.trappedAreaFraction).toEqual({ kind: "value", value: 0.005 });
+  });
+
+  it("reads a condensate's absent trapped area as not modelled, never as none", () => {
+    const [ice] = condensatesOf([DRY_ICE]);
+
+    expect(ice?.trappedAreaFraction).toEqual({ kind: "not_modelled" });
+  });
+
+  it("reads a condensate's trapped area sent as null as not modelled, as the server reads it", () => {
+    const [ice] = condensatesOf([
+      {
+        ...DRY_ICE,
+        // @ts-expect-error -- the binding leaves an absent trapped area out, but the server reads null as absent, and an older or hand-written frame may send it.
+        trapped_area_fraction: null,
+      },
+    ]);
+
+    expect(ice?.trappedAreaFraction).toEqual({ kind: "not_modelled" });
+  });
+
+  it.each<[string, SurfaceCondensateDto]>([
+    ["whose mass is negative", { ...DRY_ICE, reservoir_kg_m2: -320 }],
+    ["whose layer is negative", { ...DRY_ICE, reservoir_gel_m: -0.2 }],
+    ["whose trapped area is larger than its area", { ...DRY_ICE, trapped_area_fraction: 0.03 }],
+    ["whose trapped area is negative", { ...DRY_ICE, trapped_area_fraction: -0.005 }],
+    ["whose trapped area is not finite", { ...DRY_ICE, trapped_area_fraction: Number.NaN }],
+  ])("refuses a surface condensate %s", (_, condensate) => {
+    expect(surfaceFault({ condensates: [condensate] })).toBe("condensate unusable");
+  });
+
+  it.each<[string, Partial<SurfaceModifiersDto>]>([
+    ["whose maturity is not a fraction", { maturity: 1.5 }],
+    ["whose weathering rate is negative", { weathering_rate: -1 }],
+    [
+      "whose deposits cover more than the surface",
+      {
+        volcanic_deposits: [
+          { substance: "SO2", area_fraction: 0.6 },
+          { substance: "S8", area_fraction: 0.6 },
+        ],
+      },
+    ],
+    [
+      "whose deposit's share is negative, which only the deposit's own check catches",
+      { volcanic_deposits: [{ substance: "SO2", area_fraction: -0.2 }] },
+    ],
+    [
+      "whose weathering deposit's share is negative",
+      { weathering_deposits: [{ substance: "ferric", area_fraction: -0.2 }] },
+    ],
+    [
+      "whose volcanic and weathering deposits together cover more than the surface",
+      {
+        volcanic_deposits: [{ substance: "SO2", area_fraction: 0.8 }],
+        weathering_deposits: [{ substance: "ferric", area_fraction: 0.3 }],
+      },
+    ],
+  ])("refuses surface modifiers %s", (_, change) => {
+    const modifiers: SurfaceModifiersDto = {
+      maturity: 0.8,
+      weathering_rate: 1,
+      organic_cover: 0,
+      resurfacing_m_per_yr: 0,
+      volcanic_deposits: [],
+      weathering_deposits: [],
+      ...change,
+    };
+    expect(surfaceFault({ modifiers })).toBe("surface modifiers unusable");
+  });
+
+  it("accepts surface modifiers whose deposits sum to 1 within the tolerance", () => {
+    const modifiers: SurfaceModifiersDto = {
+      maturity: 0.8,
+      weathering_rate: 1,
+      organic_cover: 0,
+      resurfacing_m_per_yr: 0,
+      volcanic_deposits: [
+        { substance: "SO2", area_fraction: 0.4 },
+        { substance: "S8", area_fraction: 0.6 + 5e-10 },
+      ],
+      weathering_deposits: [],
+    };
+    const surface = okSection(recordOf(earthWithSurface({ ...earthSurface(), modifiers })).surface);
+
+    expect(surface.modifiers).toEqual({
+      kind: "value",
+      value: {
+        maturity: 0.8,
+        weatheringRate: 1,
+        organicCover: 0,
+        resurfacingMPerYr: 0,
+        volcanicDeposits: [
+          { substance: "SO2", areaFraction: 0.4 },
+          { substance: "S8", areaFraction: 0.6 + 5e-10 },
+        ],
+        weatheringDeposits: [],
+      },
+    });
+  });
+
+  it("reads an oxidised surface's ferric deposit (plan 14's P14.T51.j)", () => {
+    const modifiers: SurfaceModifiersDto = {
+      maturity: 0,
+      weathering_rate: 2.2e-248,
+      organic_cover: 0,
+      resurfacing_m_per_yr: 0,
+      volcanic_deposits: [],
+      weathering_deposits: [{ substance: "ferric", area_fraction: 0.3069 }],
+    };
+    const surface = okSection(recordOf(earthWithSurface({ ...earthSurface(), modifiers })).surface);
+
+    expect(surface.modifiers).toEqual({
+      kind: "value",
+      value: {
+        maturity: 0,
+        weatheringRate: 2.2e-248,
+        organicCover: 0,
+        resurfacingMPerYr: 0,
+        volcanicDeposits: [],
+        weatheringDeposits: [{ substance: "ferric", areaFraction: 0.3069 }],
+      },
+    });
+  });
+
+  it("refuses a biosphere flux that is not finite", () => {
+    expect(
+      surfaceFault({ biosphere: { fluxes: [{ species: "O2", flux_earth: Number.NaN }] } }),
+    ).toBe("biosphere unusable");
+  });
+
+  it.each<[string, Partial<BodyEnvelopeDto>]>([
+    ["a negative internal temperature", { internal_temperature_k: -1 }],
+    ["an internal temperature of 0", { internal_temperature_k: 0 }],
+    ["a join at no pressure", { join_pressure_pa: 0 }],
+    ["an adiabat starting above its join", { join_pressure_pa: 1e6 }],
+    ["a mean molar mass of 0", { mean_molar_mass_g_per_mol: 0 }],
+    ["a negative haze", { haze_tau_550: -1 }],
+    [
+      "an optical depth's exponent below 1",
+      { profile: { ...jupiterEnvelope().profile, optical_depth_exponent: 0.5 } },
+    ],
+    [
+      "an optical depth's exponent that is not finite",
+      {
+        profile: { ...jupiterEnvelope().profile, optical_depth_exponent: Number.POSITIVE_INFINITY },
+      },
+    ],
+  ])("refuses an envelope with %s", (_, change) => {
+    expect(envelopeFault(change)).toBe("envelope unusable");
+  });
+
+  it.each<[string, string | null]>([
+    ["names no listed deck", "CH4"],
+    ["names no deck", null],
+  ])("refuses an envelope's deck mode that %s (R08's S4)", (_, deck) => {
+    const { mode } = jupiterAmmoniaAndHaze();
+
+    expect(envelopeFault({ decks: [{ ...mode, deck }] })).toBe("aerosol mode unusable");
+  });
+
+  it("refuses an envelope's haze that names a deck (R08's S4)", () => {
+    const { haze } = jupiterAmmoniaAndHaze();
+
+    expect(envelopeFault({ hazes: [{ ...haze, deck: "NH3" }] })).toBe("aerosol mode unusable");
+  });
+
+  it("refuses an envelope with two decks of one condensate", () => {
+    const { deck } = jupiterAmmoniaAndHaze();
+
+    expect(
+      envelopeFault({
+        condensate_decks: [
+          ...jupiterEnvelope().condensate_decks,
+          { ...deck, top_pa: deck.top_pa / 2 },
+        ],
+      }),
+    ).toBe("condensate deck unusable");
+  });
+
+  it("reads an envelope mode's coverage as the fraction it is, refusing none below 1", () => {
+    const { mode } = jupiterAmmoniaAndHaze();
+    const envelope = okSection(
+      recordOf(jupiterWithEnvelope({ ...jupiterEnvelope(), decks: [{ ...mode, coverage: 0.6 }] }))
+        .envelope,
+    );
+
+    expect(envelope.aerosols.modes[0]?.coverage).toBe(0.6);
+  });
+
+  it("reads an airless body's empty gases with no mixture figures", () => {
+    const airless = okSection(
+      recordOf(
+        earthWithSurface({
+          ...earthSurface(),
+          state: "airless",
+          surface_pressure_pa: 0,
+          gases: [],
+          mean_molar_mass_g_per_mol: null,
+          heat_capacity_over_r: null,
+        }),
+      ).surface,
+    );
+
+    expect([airless.gases, airless.meanMolarMassGPerMol, airless.heatCapacityOverR]).toEqual([
+      [],
+      null,
+      null,
+    ]);
+  });
+
+  it("reads a tenuous body's air: its pressure, its gases and their mixture figures", () => {
+    // P14.T53.c's `tenuous` state's air members, as the server sends them from 24 (P14.T54.b.h):
+    // a Pluto-like 1 Pa of nitrogen with a trace of methane, on the fixture's other members.
+    const tenuous = okSection(
+      recordOf(
+        earthWithSurface({
+          ...earthSurface(),
+          state: "tenuous",
+          surface_pressure_pa: 1,
+          gases: [
+            { species: "N2", mole_fraction: 0.995 },
+            { species: "CH4", mole_fraction: 0.005 },
+          ],
+          mean_molar_mass_g_per_mol: 27.95,
+          heat_capacity_over_r: 3.5,
+        }),
+      ).surface,
+    );
+
+    expect(tenuous.state).toBe("tenuous");
+    expect(tenuous.gases).toEqual([
+      { species: "N2", moleFraction: 0.995 },
+      { species: "CH4", moleFraction: 0.005 },
+    ]);
+    expect([
+      tenuous.surfacePressurePa,
+      tenuous.meanMolarMassGPerMol,
+      tenuous.heatCapacityOverR,
+    ]).toEqual([1, 27.95, 3.5]);
+  });
+
+  it("refuses a cloud fraction above 1", () => {
+    expect(surfaceFault({ cloud_fraction: 1.2 })).toBe("surface cover unusable");
+  });
+
+  it("refuses liquids that do not sum to the ocean fraction", () => {
+    expect(surfaceFault({ ocean_fraction: 0.5 })).toBe("surface cover unusable");
+  });
+
+  it("refuses a crust whose lid names an absent crust", () => {
+    expect(
+      surfaceFault({
+        crust: {
+          primary: null,
+          secondary: "basalt",
+          tertiary: null,
+          bulk: null,
+          lid: "primary",
+          provinces: "basalt",
+          redox: "intermediate",
+          mantle_redox_iw: -1.5,
+          melt_area_fraction: 0,
+        },
+      }),
+    ).toBe("crust unusable");
+  });
+
+  it("refuses an envelope whose adiabat does not rise in pressure from its join", () => {
+    expect(envelopeFault({ adiabat: jupiterEnvelope().adiabat.toReversed() })).toBe(
+      "envelope unusable",
+    );
   });
 });
 
@@ -416,9 +2117,11 @@ describe("body-state times beyond 2^53 s (P14.T35.d)", () => {
     const { bodies } = bodiesOf(goldenAnswer("wide_binary", "epoch"));
     const moon = bodies.bodies.find((body) => body.id === "41ffecae00000004.0401");
 
+    // Re-pinned at generator version 27, as its re-blessed golden gives it: 56 kyr later than
+    // 26's -67,192,167,787,324,024 s.
     expect(moon?.state).toEqual({
       kind: "unbound",
-      at: { seconds: -67_192_088_818_403_264, nanos: 0 },
+      at: { seconds: -67_190_388_769_518_040, nanos: 0 },
     });
   });
 
@@ -427,6 +2130,23 @@ describe("body-state times beyond 2^53 s (P14.T35.d)", () => {
 
     expect(faultOf(withFirstState({ type: "unbound", at }))).toBe("no fault");
     expect(faultOf(withFirstState({ type: "destroyed", cause: "engulfed", at }))).toBe("no fault");
+  });
+
+  it("reads a destruction cause this build does not know as unknown, and the rest as they are", () => {
+    const at = { seconds: LONG_AGO_S, nanos: 0 };
+    const first = sliceBodies().bodies[0]?.id;
+    const causeOf = (cause: DestructionCauseDto) =>
+      bodiesOf(withFirstState({ type: "destroyed", cause, at })).bodies.bodies.find(
+        (body) => body.id === first,
+      )?.state;
+
+    expect(causeOf(anUnknownDestructionCause())).toEqual({
+      kind: "destroyed",
+      cause: "unknown",
+      at,
+    });
+    expect(causeOf("collided")).toEqual({ kind: "destroyed", cause: "collided", at });
+    expect(causeOf("evaporated")).toEqual({ kind: "destroyed", cause: "evaporated", at });
   });
 
   it("refuses a state time that is not whole seconds and nanoseconds", () => {

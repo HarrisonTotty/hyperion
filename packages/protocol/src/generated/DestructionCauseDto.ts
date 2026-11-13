@@ -4,5 +4,9 @@
  * What destroyed a body.
  *
  * A moon destroyed with its planet takes its planet's cause.
+ *
+ * It grows (galaxy plan 04's growing enums, named so before any build sent a new string): a later
+ * generator version may add a cause, as 28 adds a small hot body's evaporation (plan 14,
+ * P14.T55.b.a), with no bump, and a client that does not know it reads it as Missing.
  */
-export type DestructionCauseDto = "dispersed" | "engulfed" | "tidally_disrupted" | "collided";
+export type DestructionCauseDto = "dispersed" | "engulfed" | "tidally_disrupted" | "collided" | "evaporated";

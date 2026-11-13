@@ -10,9 +10,11 @@
  */
 
 import { COLOUR_WRITE_ALL } from "../gpuFlags";
+import { assertFragmentOutputFits } from "./fragmentOutput";
 import {
   POST_PROCESS_BINDINGS,
   type SamplerSpec,
+  type ShaderStageName,
   type StorageBufferSpec,
   type TextureBindingSpec,
   type WgslMaterialSpec,
@@ -50,7 +52,10 @@ export const INPUT_SAMPLER: SamplerSpec = {
   binding: POST_PROCESS_BINDINGS["hdr-colour-sampler"],
 };
 
-/** The descriptor of a sampler of `spec`: its filter between mips too. */
+/**
+ * The descriptor of a sampler of `spec`: its filter between mips too, and its comparison, where it
+ * has one (plan R10, R10.T9.b).
+ */
 export function samplerDescriptor(spec: SamplerSpec): GPUSamplerDescriptor {
   return {
     label: spec.name,
@@ -60,7 +65,41 @@ export function samplerDescriptor(spec: SamplerSpec): GPUSamplerDescriptor {
     addressModeU: spec.address,
     addressModeV: spec.address,
     addressModeW: spec.address,
+    ...(spec.compare === undefined ? {} : { compare: spec.compare }),
   };
+}
+
+/** The layout's binding type of a sampler of `spec`. */
+export function samplerBindingType(spec: SamplerSpec): GPUSamplerBindingType {
+  if (spec.compare !== undefined) {
+    return "comparison";
+  }
+  return spec.filter === "linear" ? "filtering" : "non-filtering";
+}
+
+/**
+ * A pipeline's colour output: a colour format, or none at all, for a depth-only pass into a
+ * `DepthLayerTarget` (plan R10, R10.T9.b), which always has depth.
+ */
+export type PipelineColour = GPUTextureFormat | "depth-only";
+
+/**
+ * Checks that `spec`'s fragment output is one each colour format of `formats` takes, before any
+ * pipeline of it is made, or where none is (plan R14, R14.T2.b's finding); `depth-only` has no
+ * colour target, and takes any output.
+ *
+ * @throws Error naming the material, the format and the two types, as
+ *   {@link assertFragmentOutputFits} does.
+ */
+export function assertOutputsFit(
+  spec: WgslMaterialSpec,
+  formats: ReadonlyArray<PipelineColour>,
+): void {
+  for (const format of formats) {
+    if (format !== "depth-only") {
+      assertFragmentOutputFits(spec, ENTRY_POINTS.fragment, format);
+    }
+  }
 }
 
 /** What a specification binds in `@group(2)`. */
@@ -94,15 +133,60 @@ export function postProcessBindings(spec: WgslPostProcessSpec): ResourceBindings
   };
 }
 
+/** The visibility flags of `stages`, both stages where none is named. */
+export function stageVisibility(stages: ReadonlyArray<ShaderStageName> | undefined): number {
+  if (stages === undefined) {
+    return SHADER_STAGE.VERTEX | SHADER_STAGE.FRAGMENT;
+  }
+  let flags = 0;
+  for (const stage of stages) {
+    switch (stage) {
+      case "vertex":
+        flags |= SHADER_STAGE.VERTEX;
+        break;
+      case "fragment":
+        flags |= SHADER_STAGE.FRAGMENT;
+        break;
+    }
+  }
+  return flags;
+}
+
 /**
- * The `@group(2)` layout entries of `bindings`, visible to both stages.
+ * The storage buffers `bindings` makes visible to each stage, by their declared stages: what
+ * WebGPU counts against `maxStorageBuffersPerShaderStage` (R10's decision-r10-t10b-r09-t2e §5).
+ */
+export function storageBuffersPerStage(
+  bindings: Pick<ResourceBindings, "storageBuffers">,
+): Readonly<Record<ShaderStageName, number>> {
+  let vertex = 0;
+  let fragment = 0;
+  for (const buffer of bindings.storageBuffers) {
+    const flags = stageVisibility(buffer.stages);
+    vertex += (flags & SHADER_STAGE.VERTEX) === 0 ? 0 : 1;
+    fragment += (flags & SHADER_STAGE.FRAGMENT) === 0 ? 0 : 1;
+  }
+  return { vertex, fragment };
+}
+
+/**
+ * The `@group(2)` layout entries of `bindings`: textures and samplers visible to both stages, each
+ * storage buffer to its declared stages ({@link StorageBufferSpec.stages}).
  *
- * @throws Error naming the owner when two resources share a binding.
+ * @throws Error naming the owner when two resources share a binding, or a storage buffer names no
+ * stage.
  */
 export function resourceLayoutEntries(
   bindings: ResourceBindings,
 ): ReadonlyArray<GPUBindGroupLayoutEntry> {
   const visibility = SHADER_STAGE.VERTEX | SHADER_STAGE.FRAGMENT;
+  for (const buffer of bindings.storageBuffers) {
+    if (stageVisibility(buffer.stages) === 0) {
+      throw new Error(
+        `${bindings.owner} declares storage buffer ${buffer.name} visible to no stage`,
+      );
+    }
+  }
   const entries: GPUBindGroupLayoutEntry[] = [
     ...bindings.textures.map((texture) => ({
       binding: texture.binding,
@@ -115,11 +199,11 @@ export function resourceLayoutEntries(
     ...bindings.samplers.map((sampler) => ({
       binding: sampler.binding,
       visibility,
-      sampler: { type: sampler.filter === "linear" ? "filtering" : "non-filtering" } as const,
+      sampler: { type: samplerBindingType(sampler) },
     })),
     ...bindings.storageBuffers.map((buffer) => ({
       binding: buffer.binding,
-      visibility,
+      visibility: stageVisibility(buffer.stages),
       buffer: { type: "read-only-storage" } as const,
     })),
   ];
@@ -133,16 +217,35 @@ export function resourceLayoutEntries(
   return entries.toSorted((a, b) => a.binding - b.binding);
 }
 
-/** The depth bias of a pipeline for a bias away from the camera, negated for reversed depth. */
+/**
+ * The depth bias of a pipeline for a bias away from the camera, negated for reversed depth: its
+ * constant, its slope scale and its clamp.
+ *
+ * @remarks
+ * WebGPU bounds a bias by a positive `depthBiasClamp` from above and by a negative one from below
+ * (§10.3.6, "biased fragment depth"). Under reversed depth a bias away is negative, so its clamp is
+ * negated too, to bound it from below: its size is then at most the clamp, as asked (plan R10,
+ * R10.T9.b). A clamp of 0 or none bounds nothing.
+ */
 export function depthBiasOf(
   bias: WgslMaterialSpec["depthBiasAway"],
   topology: GPUPrimitiveTopology,
-): { readonly depthBias: number; readonly depthBiasSlopeScale: number } {
+): {
+  readonly depthBias: number;
+  readonly depthBiasSlopeScale: number;
+  readonly depthBiasClamp: number;
+} {
   // WebGPU takes a bias on triangles only.
   if (bias === undefined || topology !== "triangle-list") {
-    return { depthBias: 0, depthBiasSlopeScale: 0 };
+    return { depthBias: 0, depthBiasSlopeScale: 0, depthBiasClamp: 0 };
   }
-  return { depthBias: -bias.constant, depthBiasSlopeScale: -bias.slopeScale };
+  const clamp = bias.clamp ?? 0;
+  return {
+    depthBias: -bias.constant,
+    depthBiasSlopeScale: -bias.slopeScale,
+    // Not -0, which a descriptor's reader would compare unequal to 0.
+    depthBiasClamp: clamp === 0 ? 0 : -clamp,
+  };
 }
 
 /** The modules of a material, one when both stages are the same source. */
@@ -151,17 +254,38 @@ export interface MaterialModules {
   readonly fragment: GPUShaderModule;
 }
 
-/** The render pipeline of a material drawing a mesh of `buffers` into these attachments. */
+/**
+ * The render pipeline of a material drawing a mesh of `buffers` into these attachments.
+ *
+ * @remarks
+ * Into `depth-only` (plan R10, R10.T9.b) the pipeline has no colour target, whatever `hasDepth`
+ * says, and keeps its fragment stage, so that a material may `discard`; its depth state is the
+ * material's, as into any target with depth. A material with `unclippedDepth` takes
+ * `primitive.unclippedDepth`, which the engine refuses earlier without `depth-clip-control`. Into
+ * an integer format (an ID target's `r32uint`, plan R14, R14.T2.b) no material blends, and into
+ * any colour format the fragment's output must be one the format takes ({@link assertOutputsFit}).
+ *
+ * @throws Error naming the material and the format for a blending material into an integer
+ *   format, or naming the material, the format and the two types for a fragment output the format
+ *   does not take, whose pipeline the device would refuse.
+ */
 export function materialPipelineDescriptor(
   spec: WgslMaterialSpec,
   modules: MaterialModules,
   layout: GPUPipelineLayout,
   buffers: ReadonlyArray<GPUVertexBufferLayout>,
   topology: GPUPrimitiveTopology,
-  colourFormat: GPUTextureFormat,
+  colourFormat: PipelineColour,
   hasDepth: boolean,
 ): GPURenderPipelineDescriptor {
   const blend = BLEND_STATES[spec.blend];
+  const depthOnly = colourFormat === "depth-only";
+  if (blend !== undefined && colourFormat.endsWith("int")) {
+    throw new Error(
+      `material ${spec.name} blends ${spec.blend} into ${colourFormat}, which no blend takes`,
+    );
+  }
+  assertOutputsFit(spec, [colourFormat]);
   return {
     label: spec.name,
     layout,
@@ -169,16 +293,23 @@ export function materialPipelineDescriptor(
     fragment: {
       module: modules.fragment,
       entryPoint: ENTRY_POINTS.fragment,
-      targets: [
-        {
-          format: colourFormat,
-          ...(blend === undefined ? {} : { blend }),
-          writeMask: spec.colourWrites ? COLOUR_WRITE_ALL : 0,
-        },
-      ],
+      targets: depthOnly
+        ? []
+        : [
+            {
+              format: colourFormat,
+              ...(blend === undefined ? {} : { blend }),
+              writeMask: spec.colourWrites ? COLOUR_WRITE_ALL : 0,
+            },
+          ],
     },
-    primitive: { topology, cullMode: spec.cullMode, frontFace: "ccw" },
-    ...(hasDepth
+    primitive: {
+      topology,
+      cullMode: spec.cullMode,
+      frontFace: "ccw",
+      ...(spec.unclippedDepth === true ? { unclippedDepth: true } : {}),
+    },
+    ...(hasDepth || depthOnly
       ? {
           depthStencil: {
             format: "depth32float",

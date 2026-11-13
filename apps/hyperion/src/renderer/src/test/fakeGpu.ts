@@ -7,7 +7,9 @@
  * buffers, textures, samplers, shader modules (whose compile errors the test chooses), layouts,
  * pipelines and bind groups, each recording its descriptor, and command encoders whose passes
  * record every command, so that a test reads what a frame encoded, and error scopes, whose errors
- * the test queues. Nothing is executed, so a mapped buffer reads zeros. What the engine never calls
+ * the test queues. Nothing is executed, so a mapped buffer reads zeros; a device can hold its
+ * buffers' mappings until the test settles them, and its loss aborts those still held, as WebGPU's
+ * does ({@link FakeDevice.holdMaps}). What the engine never calls
  * (render bundles, external textures) throws, naming itself, so that a test that strays there fails
  * loudly rather than passing on a stub.
  */
@@ -88,29 +90,87 @@ function notFaked(member: string): Error {
   return new Error(`FakeDevice does not fake ${member}`);
 }
 
-/** A buffer that records its destruction, and maps to zeros, since nothing ran on it. */
+/** A mapping its device holds until the test settles it, or its loss aborts it. */
+interface HeldMap {
+  settle(): void;
+  abort(): void;
+}
+
+/** A device's held mappings ({@link FakeDevice.holdMaps}), shared with its buffers. */
+interface HeldMaps {
+  readonly held: () => boolean;
+  /** Whether the device is lost, after which a held device's mappings abort at once. */
+  readonly lost: () => boolean;
+  readonly waiting: Set<HeldMap>;
+}
+
+/** WebGPU's error for a mapping its device's loss cuts short or refuses (`mapAsync`'s map failure). */
+function mappingAborted(label: string): DOMException {
+  return new DOMException(`${label}: the device was lost`, "AbortError");
+}
+
+/**
+ * A buffer that records its destruction, and maps to zeros, since nothing ran on it: one range a
+ * buffer, which keeps what is written into it, so that a test may read what a buffer mapped at its
+ * creation was given.
+ */
 export class FakeBuffer implements GPUBuffer {
   readonly size: number;
   readonly usage: GPUFlagsConstant;
-  readonly mapState: GPUBufferMapState = "unmapped";
+  mapState: GPUBufferMapState = "unmapped";
   label: string;
   destroyed = false;
+  readonly #maps: HeldMaps | null;
+  #range: ArrayBuffer | null = null;
 
-  constructor(descriptor: GPUBufferDescriptor) {
+  constructor(descriptor: GPUBufferDescriptor, maps: HeldMaps | null = null) {
     this.size = descriptor.size;
     this.usage = descriptor.usage;
     this.label = descriptor.label ?? "";
+    this.#maps = maps;
+    if (descriptor.mappedAtCreation === true) {
+      this.mapState = "mapped";
+    }
   }
 
   mapAsync(): Promise<undefined> {
-    return this.destroyed
-      ? Promise.reject(new Error(`${this.label} is destroyed`))
-      : Promise.resolve(undefined);
+    if (this.destroyed) {
+      return Promise.reject(new Error(`${this.label} is destroyed`));
+    }
+    const maps = this.#maps;
+    if (maps === null || !maps.held()) {
+      return Promise.resolve(undefined);
+    }
+    if (maps.lost()) {
+      return Promise.reject(mappingAborted(this.label));
+    }
+    this.mapState = "pending";
+    return new Promise((resolve, reject) => {
+      const map: HeldMap = {
+        settle: () => {
+          maps.waiting.delete(map);
+          this.mapState = "mapped";
+          resolve(undefined);
+        },
+        abort: () => {
+          maps.waiting.delete(map);
+          this.mapState = "unmapped";
+          reject(mappingAborted(this.label));
+        },
+      };
+      maps.waiting.add(map);
+    });
   }
   getMappedRange(): ArrayBuffer {
-    return new ArrayBuffer(this.size);
+    this.#range ??= new ArrayBuffer(this.size);
+    return this.#range;
+  }
+  /** What was written into its mapped range, or zeros where nothing was. */
+  get mappedBytes(): Uint8Array {
+    return new Uint8Array(this.getMappedRange());
   }
   unmap(): undefined {
+    this.mapState = "unmapped";
     return undefined;
   }
   destroy(): undefined {
@@ -541,8 +601,35 @@ export class FakeDevice extends EventTarget implements GPUDevice {
     });
   }
 
-  /** Resolves `lost`, as a GPU-process crash does with reason `unknown`. */
+  /**
+   * Whether a buffer's `mapAsync` waits for {@link FakeDevice.settleMaps} rather than resolving at
+   * once; off by default. The device's loss aborts every mapping still waiting, and any asked for
+   * after it.
+   */
+  holdMaps = false;
+  #lost = false;
+  readonly #maps: HeldMaps = {
+    held: () => this.holdMaps,
+    lost: () => this.#lost,
+    waiting: new Set(),
+  };
+
+  /** Resolves every mapping waiting, in the order they were asked for. */
+  settleMaps(): void {
+    for (const map of this.#maps.waiting) {
+      map.settle();
+    }
+  }
+
+  /**
+   * Resolves `lost`, as a GPU-process crash does with reason `unknown`, after rejecting every
+   * mapping still waiting with an `AbortError`, as WebGPU does, so that their handlers run first.
+   */
   loseDevice(reason: GPUDeviceLostReason = "unknown", message = "fake loss"): void {
+    this.#lost = true;
+    for (const map of this.#maps.waiting) {
+      map.abort();
+    }
     this.#resolveLost({ reason, message });
   }
 
@@ -582,7 +669,7 @@ export class FakeDevice extends EventTarget implements GPUDevice {
     return layout;
   }
   createBuffer(descriptor: GPUBufferDescriptor): GPUBuffer {
-    const buffer = new FakeBuffer(descriptor);
+    const buffer = new FakeBuffer(descriptor, this.#maps);
     this.buffers.push(buffer);
     return buffer;
   }

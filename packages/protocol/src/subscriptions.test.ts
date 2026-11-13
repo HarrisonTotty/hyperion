@@ -95,6 +95,60 @@ function notification(subscription: number, sequence: number): ServerMessage {
   return { type: "notification", subscription, body: { topic: "scene", ...body } };
 }
 
+describe("an alerts subscription", () => {
+  it("opens with its contacts and hears each notification of the alerts topic", async () => {
+    const { client, sent } = recordingClient();
+    const pending = client.subscribe(UNIVERSE, {
+      topic: "alerts",
+      observer: { cell_ly: [0, 26_000, 20], offset_m: [0, 0, 0] },
+      time: { seconds: 0, nanos: 0 },
+      sensor: { bands: [{ band: "v", detect_w_m2: 1e-12, resolve_w_m2: 1e-10 }] },
+    });
+    const id = lastRequestId(sent);
+    const bearing = {
+      level: "bearing",
+      contact: 1,
+      kind: "unclassified",
+      first_seen: { seconds: 0, nanos: 0 },
+      last_seen: { seconds: 0, nanos: 0 },
+      bearing: { azimuth_deg: 180, elevation_deg: 0, frame: "local" },
+      flux_w_m2: 1e-11,
+      band: "v",
+      phase: "onset",
+      acknowledged: false,
+    } as const;
+    expect(
+      client.handleServerMessage({
+        type: "response",
+        id,
+        body: {
+          kind: "subscribe",
+          subscription: 4,
+          state: { topic: "alerts", census: [], contacts: [bearing] },
+        },
+      }),
+    ).toBe(true);
+    const outcome = await pending.outcome;
+    if (!outcome.ok) {
+      throw new Error(`the subscription failed: ${outcome.error.message}`);
+    }
+    const seen: Array<NotificationOf<"alerts">> = [];
+    outcome.subscription.onNotification((body) => seen.push(body));
+    const acknowledged = { ...bearing, acknowledged: true };
+    expect(
+      client.handleServerMessage({
+        type: "notification",
+        subscription: 4,
+        body: { topic: "alerts", sequence: 1, contacts: [acknowledged], census: [] },
+      }),
+    ).toBe(true);
+    expect(seen).toEqual([{ topic: "alerts", sequence: 1, contacts: [acknowledged], census: [] }]);
+    const [contact] = seen[0]?.contacts ?? [];
+    // A bearing names no host, in its type as on the wire.
+    expect(contact !== undefined && "host" in contact).toBe(false);
+  });
+});
+
 describe("RequestClient.subscribe", () => {
   it("sends a subscribe request and opens with the topic's whole state", async () => {
     const { client, sent } = recordingClient();

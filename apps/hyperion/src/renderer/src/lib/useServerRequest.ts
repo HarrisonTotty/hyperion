@@ -110,6 +110,7 @@ function settledState<K extends RequestKind>(
     case "hello_required":
     case "unknown_universe":
     case "unknown_system":
+    case "unknown_feature":
     case "unknown_body":
     case "generator_version_mismatch":
     case "unsupported_save_format":
@@ -120,6 +121,8 @@ function settledState<K extends RequestKind>(
     case "cancelled":
     case "storage_failed":
     case "internal":
+    // A code this build does not know reads as a failed system, as `isRefusal` reads it.
+    case "unknown":
       state = { kind: "rejected", code: error.code, reason: error.message };
       break;
   }
@@ -214,10 +217,11 @@ function sameJson(a: unknown, b: unknown): boolean {
  * `link_down`. A request still unanswered after `timeoutMs` is cancelled and reported as
  * `timed_out`. With the link down nothing is sent and the state is `link_down`; a request that
  * never got its answer is sent again when the link returns. An `ok` answer stays through a link
- * loss and is not fetched again, since requests are stateless and it is a snapshot, not a live
- * value. A rejection or a timeout stays until `generation` changes: hiding and showing the display
- * that holds the hook sends nothing. Unmounting cancels the request in flight. States are shared
- * objects, so an unchanged state keeps its identity across renders.
+ * loss and is not fetched again, since requests are stateless: it is kept, and a display marks it
+ * stale while the link is down (plan 05's T11 ruling (8)). A rejection or a timeout stays until
+ * `generation` changes: hiding and showing the display that holds the hook sends nothing.
+ * Unmounting cancels the request in flight. States are shared objects, so an unchanged state
+ * keeps its identity across renders.
  *
  * @param body - The request to make, or `null` for none (`idle`). Compared by value, so it may be
  *   built afresh on every render.

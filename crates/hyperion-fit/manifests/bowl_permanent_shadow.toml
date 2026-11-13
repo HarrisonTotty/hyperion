@@ -1,0 +1,18 @@
+# A spherical bowl's permanent shadow by exact ray geometry (rendering plan R09, R09.T7.f;
+# science-r09-drainage.md §8.12): the table `hyperion_surface::cold_trap` reads. Axes: ln(d/D) at
+# 17 nodes over 0.02–0.5, the colatitude over the rim's slope at 41 nodes on [0, 1] and δ + α over
+# the rim's slope at 26 nodes on [0, ½]. Each share is counted on a lattice of 256 points to the
+# rim's radius, the rim scanned at 48 points and refined by 24 golden-section steps, and rounded to
+# four places; the pole's row is eq. 6 in full.
+task = "bowl_permanent_shadow"
+
+[params]
+depth_ratio_min = 0.02
+depth_ratio_max = 0.5
+depth_ratio_nodes = 17
+colatitude_nodes = 41
+limb_nodes = 26
+grid = 256
+scan = 48
+refine = 24
+decimals = 4

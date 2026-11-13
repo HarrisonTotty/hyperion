@@ -10,6 +10,7 @@
  */
 
 import type { GraphicsFault } from "../status";
+import { errorText } from "./errorText";
 
 /**
  * Reports `device`'s loss once, unless the engine disposed it first.
@@ -32,7 +33,7 @@ export function watchDeviceLoss(
       return undefined;
     })
     .catch((error: unknown) => {
-      console.error("watching the device for loss failed:", error);
+      console.error(`watching the device for loss failed: ${errorText(error)}`);
     });
   return () => {
     watching = false;

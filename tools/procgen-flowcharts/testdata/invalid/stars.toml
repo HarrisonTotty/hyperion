@@ -1,0 +1,15 @@
+# Test fixture: a second file, for problems between files.
+
+[meta]
+stage = "stellar"
+part = "stellar"
+prefix = "g"
+title = "Star Systems"
+snapshot = "a6d3f6dd"
+
+[[node]]
+id = "g.imf"
+label = "Initial mass function"
+kind = "draw"
+summary = "declared in galaxy.toml too"
+status = "built"

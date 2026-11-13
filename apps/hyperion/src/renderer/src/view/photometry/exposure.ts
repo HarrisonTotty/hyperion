@@ -9,6 +9,7 @@
  */
 
 import type { MeterMode } from "../post/meter";
+import { log2, pow } from "../../lib/pinnedMath";
 
 /**
  * A camera's aperture, shutter, sensitivity and neutral-density filter: the view camera's setting
@@ -33,6 +34,19 @@ export interface ExposureTriple {
  * settings"; the value Canon, Nikon and Sekonic use under ISO 2720).
  */
 export const METER_CALIBRATION_K = 12.5;
+
+/**
+ * The incident-light meter's calibration constant C for a flat receptor, lx s ISO: 250, within
+ * ISO 2720:1974's range for a flat receptor, 240 to 400 (the value commonly used; quoted from
+ * memory, not read in the pod, ux-calls-view's findings). The `INCIDENT` meter's
+ * (ux-calls-view, item 3b).
+ *
+ * @remarks
+ * It renders a body's albedo as it is: a body of reflectance ρ lit at E, seen face-on, has the
+ * luminance ρ E ÷ π, and at EV100 = log₂(E × 100 ÷ C) a reflected meter's K gives the grey it
+ * puts at its average a reflectance of π K ÷ C = 0.157.
+ */
+export const INCIDENT_CALIBRATION_C = 250;
 
 /**
  * The lens and vignetting attenuation q of the saturation-based sensitivity: 0.65 (Filament,
@@ -116,7 +130,7 @@ export const VIEW_CAMERA: ExposureProgram = {
   minShutterS: VIEW_MIN_SHUTTER_S,
   baseIso: 100,
   maxIso: 409_600,
-  maxNdEv: MAN_EV100_MAX - Math.log2((VIEW_APERTURE * VIEW_APERTURE) / VIEW_MIN_SHUTTER_S),
+  maxNdEv: MAN_EV100_MAX - log2((VIEW_APERTURE * VIEW_APERTURE) / VIEW_MIN_SHUTTER_S),
 };
 
 /**
@@ -141,15 +155,15 @@ export function programTriple(program: ExposureProgram, ev100: number): Exposure
   }
   const { aperture, frameShutterS, minShutterS, baseIso } = program;
   const squared = aperture * aperture;
-  const iso = 100 * (squared / frameShutterS) * 2 ** -ev100;
+  const iso = 100 * (squared / frameShutterS) * pow(2, -ev100);
   if (iso >= baseIso) {
     return { aperture, shutterS: frameShutterS, iso };
   }
-  const shutterS = ((squared * 100) / baseIso) * 2 ** -ev100;
+  const shutterS = ((squared * 100) / baseIso) * pow(2, -ev100);
   if (shutterS >= minShutterS) {
     return { aperture, shutterS, iso: baseIso };
   }
-  const ndEv = ev100 - (Math.log2(squared / minShutterS) - Math.log2(baseIso / 100));
+  const ndEv = ev100 - (log2(squared / minShutterS) - log2(baseIso / 100));
   // At the join itself rounding can leave no attenuation: the filter is then clear, and absent.
   return ndEv > 0
     ? { aperture, shutterS: minShutterS, iso: baseIso, ndEv }
@@ -185,7 +199,7 @@ export function ev100FromTriple(triple: ExposureTriple): number {
     );
   }
   const { aperture, shutterS, iso, ndEv } = triple;
-  return Math.log2((aperture * aperture) / shutterS) - Math.log2(iso / 100) + (ndEv ?? 0);
+  return log2((aperture * aperture) / shutterS) - log2(iso / 100) + (ndEv ?? 0);
 }
 
 /**
@@ -195,7 +209,17 @@ export function ev100FromTriple(triple: ExposureTriple): number {
  * @param averageCdPerM2 - The metered average luminance, cd/m², positive.
  */
 export function ev100FromAverageLuminance(averageCdPerM2: number): number {
-  return Math.log2((averageCdPerM2 * 100) / METER_CALIBRATION_K);
+  return log2((averageCdPerM2 * 100) / METER_CALIBRATION_K);
+}
+
+/**
+ * The exposure value at ISO 100 that an incident reading calls for: EV100 = log₂(E × S ÷ C) with
+ * S = 100 and C = {@link INCIDENT_CALIBRATION_C} (ISO 2720's incident-light form).
+ *
+ * @param illuminanceLx - The illuminance on the meter's flat receptor, lx, positive.
+ */
+export function ev100FromIlluminance(illuminanceLx: number): number {
+  return log2((illuminanceLx * 100) / INCIDENT_CALIBRATION_C);
 }
 
 /**
@@ -209,7 +233,7 @@ export function ev100FromAverageLuminance(averageCdPerM2: number): number {
  * bruop.github.io/exposure.
  */
 export function exposureScale(ev100: number): number {
-  return 1 / ((SATURATION_CONSTANT / (LENS_ATTENUATION_Q * 100)) * 2 ** ev100);
+  return 1 / ((SATURATION_CONSTANT / (LENS_ATTENUATION_Q * 100)) * pow(2, ev100));
 }
 
 /**
@@ -221,12 +245,14 @@ export const NO_IMAGE_TO_METER = "NO IMAGE TO METER";
 /**
  * Each meter's own status where a drawn image holds nothing it weighs (plan R07, R07.T16.b;
  * decision-r07-t8a-meter, item 1): `NO LIT SIDE` under `LIT`, `NO DARK SIDE` under `DARK`, and
- * `STAR DISC ONLY` under `AVG`, which weighs everything but a star's disc.
+ * `STAR DISC ONLY` under `AVG`, which weighs everything but a star's disc; and `NO LIGHT` under
+ * `INCIDENT` where no host disc reaches its body (ux-calls-view, item 3b).
  */
 export const NOTHING_WEIGHED_STATUS: Readonly<Record<MeterMode, string>> = {
   average: "STAR DISC ONLY",
   lit: "NO LIT SIDE",
   dark: "NO DARK SIDE",
+  incident: "NO LIGHT",
 };
 
 /**
@@ -264,6 +290,32 @@ export type ExposureControl =
 
 /** A new view's exposure: `MAN` at the default triple. */
 export const DEFAULT_EXPOSURE: ExposureControl = { kind: "manual", triple: DEFAULT_MAN_TRIPLE };
+
+/**
+ * Whether a view that opens at its meter (a kept scene's `startExposure`, the body inspection's;
+ * the owner's request, 2026-11-01) may take `AUTO` over `control`: the display's own default `MAN`,
+ * `AUTO`, or a system inhibit, which returns to `AUTO` by itself; never a level the operator set,
+ * `MAN` entered or `INHIBITED · OPERATOR`, which only `ENABLE` leaves.
+ *
+ * @remarks
+ * The default is told by its identity, {@link DEFAULT_EXPOSURE} itself, so that `MAN` entered at
+ * the default's own value is the operator's.
+ */
+export function yieldsToMeter(control: ExposureControl): boolean {
+  let yields: boolean;
+  switch (control.kind) {
+    case "manual":
+      yields = control === DEFAULT_EXPOSURE;
+      break;
+    case "auto":
+      yields = true;
+      break;
+    case "inhibited":
+      yields = control.reason !== "operator";
+      break;
+  }
+  return yields;
+}
 
 /** An exposure command's outcome: the new control, or why it was refused. */
 export type ExposureCommandResult =

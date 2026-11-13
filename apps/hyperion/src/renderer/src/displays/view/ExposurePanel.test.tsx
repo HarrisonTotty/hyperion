@@ -11,6 +11,7 @@ import {
 } from "../../view/photometry/exposure";
 import type { Metering } from "../../view/post/autoExposure";
 import { ExposurePanel } from "./ExposurePanel";
+import { describedText, statusLine } from "../../test/statusLine";
 
 /** A meter holding EV100 3. */
 const METERED: Metering = { kind: "metered", ev100: 3 };
@@ -138,18 +139,18 @@ describe("ExposurePanel", () => {
         onChange={() => undefined}
       />,
     );
-    const enable = screen.getByRole("button", { name: "ENABLE" });
+    const enable = screen.getByRole("button", { name: "7 ENABLE" });
     expect(enable).toHaveAttribute("aria-disabled", "true");
-    expect(enable).toHaveAccessibleDescription("NOT AVAILABLE: the exposure is AUTO");
+    expect(describedText(enable)).toBe("NOT AVAILABLE: the exposure is AUTO");
   });
 
   it("holds INHIBIT back under MAN, saying the exposure is MAN", () => {
     render(
       <ExposurePanel exposure={DEFAULT_EXPOSURE} metering={METERED} onChange={() => undefined} />,
     );
-    const inhibit = screen.getByRole("button", { name: "INHIBIT" });
+    const inhibit = screen.getByRole("button", { name: "8 INHIBIT" });
     expect(inhibit).toHaveAttribute("aria-disabled", "true");
-    expect(inhibit).toHaveAccessibleDescription("NOT AVAILABLE: the exposure is MAN");
+    expect(describedText(inhibit)).toBe("NOT AVAILABLE: the exposure is MAN");
   });
 });
 
@@ -192,12 +193,15 @@ function renderEntry(initial: ExposureControl, metering: Metering = METERED) {
 
 /**
  * The note or line whose whole text is `text`: a paragraph or a span, which may hold a status phrase
- * in a run of its own.
+ * in a run of its own; never one of a status's parts (`StatusText`), which a status upper case
+ * whole fills alone.
  */
 function noteOf(text: string): HTMLElement {
   return screen.getByText(
     (_, element) =>
-      (element?.tagName === "P" || element?.tagName === "SPAN") && element.textContent === text,
+      (element?.tagName === "P" || element?.tagName === "SPAN") &&
+      !element.matches(".status-text__state, .status-text__sentence") &&
+      element.textContent === text,
   );
 }
 
@@ -282,7 +286,7 @@ describe("ExposurePanel's MAN field (R07.T13.d)", () => {
       0,
       "EV100 9.6 AUTO",
     ]);
-    expect(field).toHaveAccessibleDescription(`EV100 -14.0 to 42.0 ${CONSEQUENCE} ${REFUSAL}`);
+    expect(describedText(field)).toBe(`EV100 -14.0 to 42.0 ${CONSEQUENCE} ${REFUSAL}`);
   });
 
   it("refuses an entry that is not a number, keeping what was typed", async () => {
@@ -295,7 +299,7 @@ describe("ExposurePanel's MAN field (R07.T13.d)", () => {
       "true",
       0,
     ]);
-    expect(screen.getByText(REFUSAL)).toBeInTheDocument();
+    expect(screen.getByText(statusLine(REFUSAL))).toBeInTheDocument();
   });
 
   it("takes the span's ends, -14.0 and 42.0", async () => {
@@ -317,7 +321,7 @@ describe("ExposurePanel's MAN field (R07.T13.d)", () => {
     await user.click(field);
     await user.keyboard("2{Enter}");
     expect(reading()).toBe("EV100 2.0 MAN");
-    expect(screen.getByRole("button", { name: "ENABLE" })).toHaveAccessibleDescription(
+    expect(screen.getByRole("button", { name: "7 ENABLE" })).toHaveAccessibleDescription(
       "NO IMAGE TO METER",
     );
   });
@@ -336,14 +340,14 @@ describe("ExposurePanel's MAN field (R07.T13.d)", () => {
     await user.keyboard("99");
     await user.tab();
     const refused = [field.value, field.getAttribute("aria-invalid")];
-    await user.click(screen.getByRole("button", { name: "ENABLE" }));
+    await user.click(screen.getByRole("button", { name: "7 ENABLE" }));
     expect([refused, field.value, field.getAttribute("aria-invalid"), reading()]).toEqual([
       ["99", "true"],
       "—",
       null,
       "EV100 3.0 AUTO",
     ]);
-    expect(screen.queryByText(REFUSAL)).toBeNull();
+    expect(screen.queryByText(statusLine(REFUSAL))).toBeNull();
   });
 
   it("keeps the fill selected when a press focuses the field, and lets a later press place the caret", async () => {
@@ -373,7 +377,7 @@ describe("ExposurePanel's MAN field (R07.T13.d)", () => {
     );
     const iso = screen.getAllByRole("term").at(-1);
     const notAvailable = noteOf("AUTO NOT AVAILABLE: NO IMAGE TO METER");
-    const enable = screen.getByRole("button", { name: "ENABLE" });
+    const enable = screen.getByRole("button", { name: "7 ENABLE" });
     expect([
       iso?.textContent,
       iso !== undefined && follows(iso, field),
@@ -397,7 +401,10 @@ describe("ExposurePanel's MAN field, its way out (R07.T13.d's follow-up)", () =>
       "9.6",
       [0, 3],
     ]);
-    expect([field.getAttribute("aria-invalid"), screen.queryByText(REFUSAL)]).toEqual([null, null]);
+    expect([field.getAttribute("aria-invalid"), screen.queryByText(statusLine(REFUSAL))]).toEqual([
+      null,
+      null,
+    ]);
     expect(field).toHaveFocus();
     await user.tab();
     expect([field.value, onChange.mock.calls.length, reading()]).toEqual([
@@ -428,7 +435,10 @@ describe("ExposurePanel's MAN field, its way out (R07.T13.d's follow-up)", () =>
     await user.clear(field);
     await user.tab();
     expect([refused, field.value, field.getAttribute("aria-invalid")]).toEqual(["true", "—", null]);
-    expect([screen.queryByText(REFUSAL), onChange.mock.calls.length]).toEqual([null, 0]);
+    expect([screen.queryByText(statusLine(REFUSAL)), onChange.mock.calls.length]).toEqual([
+      null,
+      0,
+    ]);
   });
 
   it("takes the fill again, selected, when the emptied field is entered", async () => {
@@ -481,11 +491,11 @@ describe("ExposurePanel's MAN field, its way out (R07.T13.d's follow-up)", () =>
       "EV100 -15.3 AUTO",
     ]);
     await user.tab();
-    expect([field.value, field.getAttribute("aria-invalid"), screen.queryByText(REFUSAL)]).toEqual([
-      "—",
-      null,
-      null,
-    ]);
+    expect([
+      field.value,
+      field.getAttribute("aria-invalid"),
+      screen.queryByText(statusLine(REFUSAL)),
+    ]).toEqual(["—", null, null]);
     expect(onChange).not.toHaveBeenCalled();
   });
 
@@ -503,7 +513,7 @@ const INHIBIT_CONSEQUENCE = "Then AUTO resumes only on ENABLE";
 /** Renders the panel at a control and returns its `INHIBIT` button. */
 function inhibitAt(exposure: ExposureControl, metering: Metering = METERED): HTMLElement {
   render(<ExposurePanel exposure={exposure} metering={metering} onChange={() => undefined} />);
-  return screen.getByRole("button", { name: "INHIBIT" });
+  return screen.getByRole("button", { name: "8 INHIBIT" });
 }
 
 describe("ExposurePanel's INHIBIT consequence (R07.T13.d's follow-up)", () => {
@@ -525,7 +535,7 @@ describe("ExposurePanel's INHIBIT consequence (R07.T13.d's follow-up)", () => {
 
   it("gives way to the held-back reason alone under MAN", () => {
     const inhibit = inhibitAt(DEFAULT_EXPOSURE);
-    expect(inhibit).toHaveAccessibleDescription("NOT AVAILABLE: the exposure is MAN");
+    expect(describedText(inhibit)).toBe("NOT AVAILABLE: the exposure is MAN");
     expect(screen.queryByText(INHIBIT_CONSEQUENCE)).toBeNull();
   });
 
@@ -548,18 +558,18 @@ describe("ExposurePanel's INHIBIT under the operator's own inhibit (R07.T19.d)",
       inhibit.getAttribute("aria-disabled"),
       screen.queryByText(INHIBIT_CONSEQUENCE),
     ]).toEqual(["true", null]);
-    expect(inhibit).toHaveAccessibleDescription(OPERATOR_HELD);
+    expect(describedText(inhibit)).toBe(OPERATOR_HELD);
   });
 
   it("changes nothing when the held-back INHIBIT is pressed", async () => {
     const { user, onChange } = renderEntry(OPERATOR);
-    await user.click(screen.getByRole("button", { name: "INHIBIT" }));
+    await user.click(screen.getByRole("button", { name: "8 INHIBIT" }));
     expect([onChange.mock.calls.length, reading()]).toEqual([0, "EV100 4.0 INHIBITED · OPERATOR"]);
   });
 
   it("offers ENABLE there beside a metered value, with nothing beside it", () => {
     inhibitAt(OPERATOR);
-    const enable = screen.getByRole("button", { name: "ENABLE" });
+    const enable = screen.getByRole("button", { name: "7 ENABLE" });
     expect([enable.getAttribute("aria-disabled"), enable.getAttribute("aria-describedby")]).toEqual(
       [null, null],
     );
@@ -567,7 +577,7 @@ describe("ExposurePanel's INHIBIT under the operator's own inhibit (R07.T19.d)",
 
   it("holds ENABLE back there by NO IMAGE TO METER while nothing is metered", () => {
     inhibitAt(OPERATOR, NO_IMAGE);
-    const enable = screen.getByRole("button", { name: "ENABLE" });
+    const enable = screen.getByRole("button", { name: "7 ENABLE" });
     expect(enable).toHaveAttribute("aria-disabled", "true");
     expect(enable).toHaveAccessibleDescription("NO IMAGE TO METER");
   });
@@ -580,11 +590,42 @@ describe("ExposurePanel's INHIBIT under the operator's own inhibit (R07.T19.d)",
   it("holds NO IMAGE TO METER unbroken in AUTO NOT AVAILABLE and beside ENABLE", () => {
     inhibitAt({ kind: "inhibited", ev100: 4, reason: "no_image_to_meter" }, NO_IMAGE);
     // ENABLE's row: the button and the reason beside it.
-    const enableRow = screen.getByRole("button", { name: "ENABLE" }).parentElement;
+    const enableRow = screen.getByRole("button", { name: "7 ENABLE" }).parentElement;
     expect([
       runsOf(noteOf("AUTO NOT AVAILABLE: NO IMAGE TO METER")),
       enableRow === null ? null : runsOf(enableRow),
     ]).toEqual([["NO IMAGE TO METER"], ["NO IMAGE TO METER"]]);
+  });
+
+  it("tracks INHIBIT's NOT AVAILABLE: and keeps INHIBITED · OPERATOR unbroken in its sentence", () => {
+    inhibitAt(OPERATOR);
+    const state = screen.getByText("NOT AVAILABLE:");
+    expect([
+      state.className,
+      state.nextElementSibling?.className,
+      state.nextElementSibling?.querySelector(".view-label__run")?.textContent,
+      state.parentElement?.className,
+    ]).toEqual([
+      "status-text__state",
+      "status-text__sentence",
+      "INHIBITED · OPERATOR",
+      "view-exposure__reason",
+    ]);
+  });
+
+  it("tracks AUTO NOT AVAILABLE: NO IMAGE TO METER whole, as one state, its run unbroken in it", () => {
+    inhibitAt({ kind: "inhibited", ev100: 4, reason: "no_image_to_meter" }, NO_IMAGE);
+    const line = noteOf("AUTO NOT AVAILABLE: NO IMAGE TO METER");
+    const parts = [...line.querySelectorAll(".status-text__state, .status-text__sentence")];
+    expect(
+      parts.map((part) => [
+        part.className,
+        part.textContent,
+        part.querySelector(".view-label__run")?.textContent,
+      ]),
+    ).toEqual([
+      ["status-text__state", "AUTO NOT AVAILABLE: NO IMAGE TO METER", "NO IMAGE TO METER"],
+    ]);
   });
 });
 
@@ -609,7 +650,7 @@ function standingLine(): string | null {
 
 /** The `ENABLE` button. */
 function enableButton(): HTMLElement {
-  return screen.getByRole("button", { name: "ENABLE" });
+  return screen.getByRole("button", { name: "7 ENABLE" });
 }
 
 describe("ExposurePanel with a meter that weighs nothing (R07.T16.b)", () => {
@@ -650,7 +691,7 @@ describe("ExposurePanel with a meter that weighs nothing (R07.T16.b)", () => {
 
   it("takes the inhibit over on INHIBIT, as the operator's", async () => {
     const { user, onChange } = renderEntry(weighedNothing("lit"), nothingWeighed("lit"));
-    await user.click(screen.getByRole("button", { name: "INHIBIT" }));
+    await user.click(screen.getByRole("button", { name: "8 INHIBIT" }));
     expect([onChange.mock.calls.at(-1)?.[0], reading()]).toEqual([
       { kind: "inhibited", ev100: 11.7, reason: "operator" },
       "EV100 11.7 INHIBITED · OPERATOR",
@@ -659,7 +700,7 @@ describe("ExposurePanel with a meter that weighs nothing (R07.T16.b)", () => {
 
   it("holds each meter's status unbroken in AUTO NOT AVAILABLE and beside ENABLE", () => {
     inhibitAt(weighedNothing("average"), nothingWeighed("average"));
-    const enableRow = screen.getByRole("button", { name: "ENABLE" }).parentElement;
+    const enableRow = screen.getByRole("button", { name: "7 ENABLE" }).parentElement;
     expect([
       runsOf(noteOf("AUTO NOT AVAILABLE: STAR DISC ONLY")),
       enableRow === null ? null : runsOf(enableRow),
@@ -677,13 +718,13 @@ describe("ExposurePanel before the first histogram (R07.T16.b)", () => {
       standingLine(),
       screen.queryByText(/NO IMAGE TO METER/u),
     ]).toEqual(["true", null, null]);
-    expect(enableButton()).toHaveAccessibleDescription("NOT AVAILABLE: not yet metered");
+    expect(describedText(enableButton())).toBe("NOT AVAILABLE: not yet metered");
   });
 
   it("keeps a system inhibit's reading as it stands, with no status beside it", () => {
     inhibitAt(weighedNothing("lit"), ACQUIRING);
     expect([reading(), standingLine()]).toEqual(["EV100 11.7 INHIBITED · NO LIT SIDE", null]);
-    expect(enableButton()).toHaveAccessibleDescription("NOT AVAILABLE: not yet metered");
+    expect(describedText(enableButton())).toBe("NOT AVAILABLE: not yet metered");
   });
 
   it("never holds the MAN field back", async () => {

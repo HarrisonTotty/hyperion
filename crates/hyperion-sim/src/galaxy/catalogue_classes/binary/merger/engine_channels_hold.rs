@@ -1,0 +1,626 @@
+//! The tests of P11.T8.c's missing channel, from generator version 27: the stellar merger class
+//! adds the engine's dynamical main-sequence mergers, a low-mass main-sequence donor at its lobe
+//! that the engine merges dynamically, by `MERGER_SAMPLER_31`'s `EngineChannel` weights, and draws an
+//! evolved donor's companion by its donor's kind's mark. These hold it under every 27 hold.
+//!
+//! - Each of the three channels' share against its weight (χ², α = 10⁻³).
+//! - Every dynamical main-sequence pair is a low-mass donor on its main sequence at its lobe
+//!   beside a lighter companion on its main sequence inside its own, detached before T; the
+//!   engine, built at T on the pair rebuilt from the entry, merges it dynamically from a detached
+//!   history and leaves the entry's merged star bit for bit, of both stars' mass.
+//! - Every evolved donor's companion lies inside its donor's kind's mark.
+//! - Every entry is its class at every age, under one candidate in ten fails, the scan keeps
+//!   exactly the cells' entries without stepping the engine, and the cells do not depend on the
+//!   order they are generated in.
+//! - Slow: the class against the engine's own mergers at 48,000 members, an effective 1,236 (17
+//!   times P11.T8.c's 73), by chi-square per degree of freedom by mark under every 27 hold, pinned
+//!   as measured, with the engine's channel split and its donors' mass ratios by kind printed.
+
+use std::sync::OnceLock;
+
+use super::reference::{decile_chi_square, members_as};
+use super::*;
+use crate::Seed;
+use crate::galaxy::catalogue_classes::grid::candidate_count;
+use crate::galaxy::catalogue_classes::{CatalogueClassCell, CatalogueEntry};
+use crate::galaxy::params::GalaxyParams;
+use crate::galaxy::rules::GalaxyRules;
+use crate::stellar::binary::BinaryInput;
+use crate::stellar::binary::class_merger::{donor_onset_merger, onset_segment_kinds};
+use crate::stellar::binary::scan::{engine_calls, scan_merger_cell};
+use crate::stellar::binary::testing::MergerMember;
+use crate::tables::binary::{MERGER_SAMPLER_31, MergerChannel, MergerMark, MergerPick};
+use crate::time::{CLOCK_WINDOW_H, SourceHorizon};
+
+/// The seed of the Milky Way fixture, P11.T8.c's tests'.
+const SEED: u64 = 0x0b17_08c0_0000_0001;
+
+/// The phases an evolved donor is in at its merger.
+const EVOLVED: [Phase; 5] = [
+    Phase::HertzsprungGap,
+    Phase::FirstGiantBranch,
+    Phase::CoreHeliumBurning,
+    Phase::EarlyAgb,
+    Phase::ThermallyPulsingAgb,
+];
+
+/// The fixture built under every 27 hold, with its kinematic tables: built so, since the field
+/// share and the carve-out are read when a galaxy is built; built once.
+fn galaxy() -> &'static Galaxy {
+    static GALAXY: OnceLock<Galaxy> = OnceLock::new();
+    GALAXY.get_or_init(|| {
+        let params = GalaxyParams::milky_way_like();
+        Galaxy::from_params_with_rules(
+            Seed::new(SEED),
+            params,
+            GalaxyRules::of_version(crate::GENERATOR_VERSION),
+        )
+        .expect("the Milky Way fixture's gas is mostly neutral")
+        .with_full_potential()
+    })
+}
+
+/// P11.T8.c's sample cells: a run along x through the solar circle, in and just below the plane.
+fn sample_cells() -> Vec<CatalogueCellKey> {
+    (-2..2)
+        .flat_map(|x| {
+            [0, -1].map(|z| {
+                CatalogueCellKey::new(ClassId::STELLAR_MERGER, [x, 6, z])
+                    .expect("a cell of the root cube")
+            })
+        })
+        .collect()
+}
+
+/// The sample cells' entries under every 27 hold, generated once.
+fn entries() -> &'static [(CatalogueCellKey, Vec<CatalogueEntry<MergerEntry>>)] {
+    type Cells = Vec<(CatalogueCellKey, Vec<CatalogueEntry<MergerEntry>>)>;
+    static CELLS: OnceLock<Cells> = OnceLock::new();
+    CELLS.get_or_init(|| {
+        let galaxy = galaxy();
+        let process = StellarMergers::new(galaxy);
+        sample_cells()
+            .into_iter()
+            .map(|key| {
+                let cell = CatalogueClassCell::generate(galaxy, &process, key);
+                (key, cell.into_entries())
+            })
+            .collect()
+    })
+}
+
+/// Every sample entry under every 27 hold.
+fn all_entries() -> impl Iterator<Item = &'static MergerEntry> {
+    entries()
+        .iter()
+        .flat_map(|(_, cell)| cell.iter().map(CatalogueEntry::value))
+}
+
+/// Each channel's share of the entries is its weight, by χ² at α = 10⁻³: the channel's word is the
+/// scan's first on its stream, and the engine refuses few enough candidates of any channel that
+/// the shares stay the weights'.
+#[test]
+fn each_channel_s_share_is_its_weight_under_every_27_hold() {
+    use hyperion_testkit::stats::{ALPHA, assert_p_value, chi_square_gof};
+    let mut counts = [0_u64; 3];
+    for entry in all_entries() {
+        let k = MergerChannel::ALL
+            .iter()
+            .position(|&c| c == entry.scan().channel())
+            .expect("a channel of the choice");
+        counts[k] += 1;
+    }
+    let n: u64 = counts.iter().sum();
+    let weights = MERGER_SAMPLER_31.pick(MergerPick::EngineChannel).weights();
+    #[expect(clippy::cast_precision_loss, reason = "counts of some hundreds")]
+    let expected: Vec<f64> = weights.iter().map(|w| w * n as f64).collect();
+    println!(
+        "{counts:?} of {n} (contact, evolved donor, dynamical main sequence) against {weights:?}"
+    );
+    assert!(n > 200, "{n}");
+    assert_p_value(
+        "the channels' shares",
+        chi_square_gof(&counts, &expected).p_value,
+        ALPHA,
+    );
+}
+
+/// Every dynamical main-sequence pair: its donor, the primary, a low-mass (BSE's k = 0) star on its
+/// main sequence filling its Roche lobe on its circular orbit, beside a lighter companion on its
+/// main sequence inside its own; detached before T; and the engine, built at T on the pair rebuilt
+/// from the entry's own marks (with the entry's angles, which no onset reads), finds the onset
+/// dynamical, merges the pair after a detached history and leaves the entry's merged star bit for
+/// bit, a main-sequence star of both stars' mass (P11.T4.d's rule, every 26 hold's).
+#[test]
+fn every_dynamical_pair_merges_as_the_engine_merges_it() {
+    let galaxy = galaxy();
+    let mut checked = 0;
+    for entry in all_entries() {
+        if entry.scan().channel() != MergerChannel::DynamicalMainSequence {
+            continue;
+        }
+        let pair = entry.pair();
+        let [donor, companion] = pair.stars();
+        let (md, mc) = (donor.mass().value(), companion.mass().value());
+        assert_eq!(donor.phase(), Phase::MainSequence);
+        assert_eq!(companion.phase(), Phase::MainSequence);
+        assert!(
+            md < 0.7 && mc <= md,
+            "{:?}: {md} and {mc}",
+            entry.scan().id()
+        );
+        assert_eq!(pair.before(), SegmentKind::Detached);
+        let a = pair.orbit().semi_major_axis();
+        let lobe = roche_lobe_radius(md / mc, a).value();
+        let fill = donor.radius().value() * SOLAR_RADIUS_M / lobe;
+        assert!(
+            (fill - 1.0).abs() < 1e-12,
+            "{:?}: {fill}",
+            entry.scan().id()
+        );
+        let own = roche_lobe_radius(mc / md, a).value();
+        let inside = companion.radius().value() * SOLAR_RADIUS_M / own;
+        assert!(inside < 1.0, "{:?}: {inside}", entry.scan().id());
+        let t = entry.scan().merger_age();
+        let before = entry
+            .timeline()
+            .state_at(Years::new(t.value() * (1.0 - 1e-9)));
+        assert_eq!(before.kind(), SegmentKind::Detached);
+        assert_eq!(before.stars(), pair.stars());
+        let system = entry.record().id();
+        let draws = [0, 1].map(|b| StarDraws::for_star(galaxy.seed(), BodyId::new(system, b)));
+        let input = BinaryInput::new(
+            entry.scan().primary_mass(),
+            entry.scan().secondary_mass(),
+            *entry.scan().composition(),
+            *pair.orbit(),
+            draws,
+            entry.scan().age_at_epoch(),
+        )
+        .unwrap()
+        .with_rules(galaxy.rules().stellar);
+        let until = Years::new(
+            t.value().max(entry.scan().age_at_epoch().value())
+                + CLOCK_WINDOW_H.as_julian_years_f64(),
+        );
+        let rebuilt = donor_onset_merger(&input, t, until).expect("the entry's pair merges");
+        assert_eq!(&rebuilt, entry.product());
+        let (kinds, after) = onset_segment_kinds(&input, t, until);
+        assert_eq!(
+            (kinds.first(), after),
+            (Some(&SegmentKind::Detached), SegmentKind::Merged),
+            "{:?}: {kinds:?}",
+            entry.scan().id()
+        );
+        assert!(
+            !kinds.contains(&SegmentKind::CommonEnvelope),
+            "{:?}: {kinds:?}",
+            entry.scan().id()
+        );
+        let product = entry.product();
+        assert_eq!(product.phase(), Phase::MainSequence);
+        assert!(
+            (product.mass().value() / (md + mc) - 1.0).abs() < 1e-9,
+            "{} against {}",
+            product.mass().value(),
+            md + mc
+        );
+        checked += 1;
+    }
+    // From 31 the fitted channel weights give the dynamical channel some 3.5% of the entries.
+    assert!(checked >= 5, "{checked}");
+}
+
+/// Every evolved donor's companion lies inside its donor's kind's mark's limits: a gap donor's
+/// below 0.25 of it, a helium-burning donor's below a third, an asymptotic-giant-branch donor's and
+/// a giant branch's anywhere in 0.05–1 (the scan's own unstable ratio holds the first two whatever
+/// their mark; `scan::merger`'s `an_evolved_companion_s_mark_follows_its_donor_s_kind_from_27`
+/// holds which mark each kind takes).
+#[test]
+fn every_evolved_companion_lies_inside_its_donor_s_kind_s_mark() {
+    let mut kinds = [0_u32; 5];
+    for entry in all_entries() {
+        if entry.scan().channel() != MergerChannel::EvolvedDonor {
+            continue;
+        }
+        let donor = entry.pair().stars()[0].phase();
+        let k = EVOLVED
+            .iter()
+            .position(|&p| p == donor)
+            .expect("an evolved donor");
+        kinds[k] += 1;
+        let mark = [
+            MergerMark::GapMassRatio,
+            MergerMark::EvolvedMassRatio,
+            MergerMark::HeliumBurningMassRatio,
+            MergerMark::AgbMassRatio,
+            MergerMark::AgbMassRatio,
+        ][k];
+        let (lo, hi) = MERGER_SAMPLER_31.mark(mark).limits();
+        let q = entry.scan().secondary_mass().value() / entry.scan().primary_mass().value();
+        let floor =
+            crate::stellar::sse::MIN_INITIAL_MASS.value() / entry.scan().primary_mass().value();
+        assert!(
+            q <= hi + 1e-12 && q >= lo.min(floor) - 1e-12,
+            "{:?}: {donor:?}, q {q}",
+            entry.scan().id()
+        );
+    }
+    println!(
+        "evolved donors by kind (gap, giant, helium burning, early and pulsing AGB): {kinds:?}"
+    );
+    assert!(kinds.iter().sum::<u32>() > 100, "{kinds:?}");
+}
+
+/// Every entry passes the shared test with its own class at every age of the source horizon:
+/// before T its pair as marked, contact or detached, and from T the merged star.
+#[test]
+fn every_entry_is_its_class_at_every_age_under_every_27_hold() {
+    let start = SourceHorizon::START.since_epoch().as_julian_years_f64();
+    let end = SourceHorizon::END.since_epoch().as_julian_years_f64();
+    for entry in all_entries() {
+        let now = entry.record().age_at_epoch();
+        let timeline = entry.timeline();
+        let t = entry.scan().merger_age();
+        assert_eq!(
+            carved_class(timeline, now),
+            Some(CarvedClass::StellarMerger)
+        );
+        assert_eq!(timeline.merger_age(), Some(t));
+        for k in 0..=16 {
+            let age = Years::new(now.value() + start + (end - start) * f64::from(k) / 16.0);
+            let state = timeline.state_at(age);
+            if age < t {
+                assert_eq!(state.kind(), entry.pair().before());
+                assert_eq!(state.stars(), entry.pair().stars());
+            } else {
+                assert_eq!(state.kind(), SegmentKind::Merged);
+                assert_eq!(state.stars()[0], *entry.product());
+                assert_eq!(state.stars()[1].phase(), Phase::NoRemnant);
+            }
+        }
+    }
+}
+
+/// Under one candidate in ten that the site's thinning keeps fails the scan's checks or the
+/// class's test, and the scan keeps exactly the cells' entries without running the engine.
+#[test]
+fn under_one_in_ten_fails_and_the_scan_keeps_the_entries_under_every_27_hold() {
+    let galaxy = galaxy();
+    let process = StellarMergers::new(galaxy);
+    let before = engine_calls();
+    let (mut thinned, mut failed) = (0_u32, 0_u32);
+    for (key, cell) in entries() {
+        let bound = process.bound(galaxy, key);
+        for index in 0..candidate_count(galaxy.seed(), key, bound) {
+            let id = key.candidate_id(index, 0).unwrap();
+            let site = process
+                .hosts()
+                .site(galaxy, key, id, bound, tags::CLASS_MERGER_SITE);
+            if site.is_none() {
+                continue;
+            }
+            thinned += 1;
+            let kept = process
+                .candidate(galaxy, key, id, bound)
+                .and_then(StellarMergers::test);
+            failed += u32::from(kept.is_none());
+        }
+        let mut scanned = Vec::new();
+        scan_merger_cell(galaxy, &process, *key, &mut scanned);
+        let kept: Vec<_> = cell.iter().map(|e| *e.value().scan()).collect();
+        assert_eq!(scanned, kept, "{key:?}");
+    }
+    println!("{failed} of {thinned} thinned candidates failed");
+    assert!(
+        f64::from(failed) < 0.1 * f64::from(thinned),
+        "{failed} of {thinned}"
+    );
+    assert_eq!(engine_calls(), before);
+}
+
+/// The cells under every 27 hold do not depend on the order they are generated in, nor on what was
+/// resolved between them.
+#[test]
+fn the_27_cells_do_not_depend_on_order() {
+    use hyperion_testkit::order::assert_order_independent;
+    let galaxy = galaxy();
+    let process = StellarMergers::new(galaxy);
+    let cells: Vec<CatalogueCellKey> = sample_cells().into_iter().take(4).collect();
+    assert_order_independent(&cells, |key| {
+        let stray =
+            CatalogueSystemId::new(ClassId::CORE_COLLAPSE.value(), key.fine_cell(), 0, 0).unwrap();
+        // Whether the stray ID names a system is beside the point: only asking it could disturb
+        // what follows.
+        let _ = crate::galaxy::placement::resolve(galaxy, crate::id::SystemId::from(stray));
+        CatalogueClassCell::generate(galaxy, &process, *key).into_entries()
+    });
+}
+
+/// The engine members the slow test measures the class against: 48,000, an effective 1,236 under
+/// these weights, 17 times P11.T8.c's 3,000 (an effective 73).
+const REFERENCE_MEMBERS: usize = 48_000;
+
+/// The class's entries the slow test draws per arm: 10,000, so that the deciles' own noise adds
+/// about an eighth of the reference's effective number to a chi-square per degree of freedom.
+const CATALOGUE_ENTRIES: usize = 10_000;
+
+/// The catalogue cells about the reference's place: x in −1–0, y 6 and z in −1–0 (4,096 ly
+/// cells), the 8,000 by 4,000 ly about the point 26,000 ly out along +y that the engine's members
+/// are drawn from, in the plane.
+fn reference_cells() -> [CatalogueCellKey; 4] {
+    [[-1, 6, -1], [0, 6, -1], [-1, 6, 0], [0, 6, 0]].map(|at| {
+        CatalogueCellKey::new(ClassId::STELLAR_MERGER, at).expect("a cell of the root cube")
+    })
+}
+
+/// The marks the slow test compares, of a pair of masses `a` and `b` (M☉) whose primary began at
+/// `m1`: log₁₀ of the total mass, the mass ratio and log₁₀ of the primary's initial mass.
+fn compared_marks(a: f64, b: f64, m1: f64) -> [f64; 3] {
+    use crate::math;
+    [math::log10(a + b), a.min(b) / a.max(b), math::log10(m1)]
+}
+
+/// The compared marks and channel of the first [`CATALOGUE_ENTRIES`] entries of the class's own
+/// candidates in [`reference_cells`] in `galaxy`, past each cell's count as well as inside it:
+/// every candidate index is a draw of the same process, its site thinned on the class's
+/// intensity, its marks on streams of its own ID, and its test the class's. Drawn in 16 runs, each
+/// of indices across the four cells in turn, one thread each (on WebAssembly, which has no
+/// threads, in turn), and joined in the runs' order.
+fn catalogue(galaxy: &Galaxy) -> Vec<([f64; 3], MergerChannel)> {
+    let process = StellarMergers::new(galaxy);
+    let cells = reference_cells();
+    let per_thread = CATALOGUE_ENTRIES.div_ceil(16);
+    let run = |thread: u32| {
+        let bounds = cells.map(|key| process.bound(galaxy, &key));
+        let mut marks = Vec::with_capacity(per_thread);
+        let mut index = thread << 20;
+        while marks.len() < per_thread {
+            for (key, bound) in cells.iter().zip(bounds) {
+                let id = key.candidate_id(index, 0).expect("an index under 2^24");
+                let entry = process
+                    .candidate(galaxy, key, id, bound)
+                    .and_then(StellarMergers::test);
+                if let Some(entry) = entry {
+                    let scan = entry.scan();
+                    let (m1, m2) = (scan.primary_mass().value(), scan.secondary_mass().value());
+                    marks.push((compared_marks(m1, m2, m1), scan.channel()));
+                }
+            }
+            index += 1;
+        }
+        marks.truncate(per_thread);
+        marks
+    };
+    let mut out = Vec::with_capacity(CATALOGUE_ENTRIES + 16);
+    #[cfg(not(target_family = "wasm"))]
+    std::thread::scope(|scope| {
+        let run = &run;
+        let handles: Vec<_> = (0..16_u32)
+            .map(|thread| scope.spawn(move || run(thread)))
+            .collect();
+        for handle in handles {
+            out.extend(handle.join().expect("a thread's candidates finish"));
+        }
+    });
+    #[cfg(target_family = "wasm")]
+    for thread in 0..16_u32 {
+        out.extend(run(thread));
+    }
+    out.truncate(CATALOGUE_ENTRIES);
+    out
+}
+
+/// The weighted shares of `observed` in `expected`'s deciles, `decile_chi_square`'s cells.
+fn decile_shares(expected: &[f64], observed: &[(f64, f64)]) -> [f64; 10] {
+    let mut sorted = expected.to_vec();
+    sorted.sort_by(f64::total_cmp);
+    let edges: Vec<f64> = (1..10).map(|k| sorted[k * sorted.len() / 10]).collect();
+    let mut shares = [0.0_f64; 10];
+    for &(v, w) in observed {
+        shares[edges.partition_point(|&e| e <= v)] += w;
+    }
+    let total: f64 = shares.iter().sum();
+    shares.map(|s| s / total)
+}
+
+/// The weighted quantiles at `ranks` of the weighted values `v`.
+fn weighted_quantiles(v: &mut [(f64, f64)], ranks: &[f64]) -> Vec<f64> {
+    v.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let total: f64 = v.iter().map(|x| x.1).sum();
+    ranks
+        .iter()
+        .map(|r| {
+            let mut sum = 0.0;
+            v.iter()
+                .find(|(_, w)| {
+                    sum += w;
+                    sum >= r * total
+                })
+                .map_or(f64::NAN, |x| x.0)
+        })
+        .collect()
+}
+
+/// The weighted shares of `masses` (M☉, with their weights) by the layer of their mass, A–E.
+fn layer_shares(masses: impl Iterator<Item = (f64, f64)>) -> [f64; 5] {
+    use crate::galaxy::imf::MassBand;
+    let mut shares = [0.0_f64; 5];
+    for (m, w) in masses {
+        let band = MassBand::ALL.iter().rposition(|b| b.lo() <= m).unwrap_or(0);
+        shares[band] += w;
+    }
+    let total: f64 = shares.iter().sum();
+    shares.map(|s| s / total)
+}
+
+/// An engine merger as the reference reads it: its pair just before it merged, its weight in the
+/// source horizon and its primary's initial mass.
+struct BeforeMerging {
+    /// The pair's stars' phases, in the engine's order.
+    phases: [Phase; 2],
+    /// The pair's stars' masses, M☉, in the engine's order.
+    masses_msun: [f64; 2],
+    /// Its weight as a merger in the source horizon (`MergerMember::weight`).
+    weight: f64,
+    /// The primary's initial mass, M☉.
+    primary_initial_msun: f64,
+}
+
+/// The engine's own mergers in `galaxy`, [`REFERENCE_MEMBERS`] of them with their pre-main-sequence
+/// ones left out: each one's compared marks, its weight and whether the class's channels cover it
+/// (two main-sequence stars, or an evolved donor beside a main-sequence star); with the split
+/// among those and the others, the layers of its primaries, and its mass ratios by kind, printed.
+fn engine_reference(galaxy: &Galaxy) -> Vec<([f64; 3], f64, bool)> {
+    let mut split = [0.0_f64; 3];
+    let mut by_kind: [Vec<(f64, f64)>; 5] = Default::default();
+    let mut main_sequence: Vec<(f64, f64)> = Vec::new();
+    // Each member as it is drawn (`members_as`), so that no member's timeline is held past its
+    // stream.
+    let before_merging = |m: MergerMember| {
+        let t = m.merger_age().value();
+        let before = m.timeline().state_at(Years::new(t * (1.0 - 1e-9)));
+        BeforeMerging {
+            phases: before.stars().map(|s| s.phase()),
+            masses_msun: before.stars().map(|s| s.mass().value()),
+            weight: m.weight(),
+            primary_initial_msun: m.record().primary_initial_mass().value(),
+        }
+    };
+    let engine: Vec<([f64; 3], f64, bool)> = members_as(galaxy, REFERENCE_MEMBERS, before_merging)
+        .into_iter()
+        .filter_map(|member| {
+            let BeforeMerging {
+                phases,
+                masses_msun: [a, b],
+                weight,
+                primary_initial_msun: primary_initial,
+            } = member;
+            if phases
+                .iter()
+                .any(|p| matches!(p, Phase::Protostar | Phase::PreMainSequence))
+            {
+                return None;
+            }
+            let heavier = phases[usize::from(b > a)];
+            let lighter = phases[usize::from(b <= a)];
+            let q = a.min(b) / a.max(b);
+            let covered = if phases.iter().all(|p| *p == Phase::MainSequence) {
+                split[0] += weight;
+                main_sequence.push((q, weight));
+                true
+            } else if let Some(k) = EVOLVED.iter().position(|&p| p == heavier)
+                && lighter == Phase::MainSequence
+            {
+                split[1] += weight;
+                by_kind[k].push((q, weight));
+                true
+            } else {
+                split[2] += weight;
+                false
+            };
+            let marks = compared_marks(a, b, primary_initial);
+            Some((marks, weight, covered))
+        })
+        .collect();
+    let total: f64 = split.iter().sum();
+    println!(
+        "engine (weighted, pre-main-sequence left out): two main-sequence stars {:.3}, an evolved \
+         donor beside a main-sequence star {:.3}, others {:.3}",
+        split[0] / total,
+        split[1] / total,
+        split[2] / total
+    );
+    println!(
+        "  by the primary's layer, A–E: {:.3?}",
+        layer_shares(
+            engine
+                .iter()
+                .map(|(m, w, _)| (crate::math::exp10(m[2]), *w))
+        )
+    );
+    let ranks = [0.05, 0.25, 0.5, 0.75, 0.95];
+    println!(
+        "  two main-sequence stars' q at 5, 25, 50, 75, 95%: {:.3?}",
+        weighted_quantiles(&mut main_sequence, &ranks)
+    );
+    for (phase, values) in EVOLVED.iter().zip(&mut by_kind) {
+        if !values.is_empty() {
+            println!(
+                "  {phase:?} donors' q: {:.3?}",
+                weighted_quantiles(values, &ranks)
+            );
+        }
+    }
+    engine
+}
+
+/// The class against the engine under every 27 hold (P11.T8.c's missing channel): the pair's total
+/// mass, mass ratio and primary's initial mass of the engine's own mergers, 48,000 members weighted
+/// as mergers in the horizon (an effective 1,236), in the deciles of 10,000 of the class's entries
+/// in the same place ([`catalogue`]), by chi-square per degree of freedom, pinned as measured (a
+/// miss of P15.T10.b's 3.1 is a finding); with the same against the engine's mergers the class's
+/// channels cover, the engine's shares of the class's deciles, and the engine's channel split and
+/// its donors' mass ratios by kind ([`engine_reference`]), printed against the class's.
+#[test]
+#[ignore = "slow: 48,000 grid pairs run through the binary engine and 20,000 entries"]
+fn the_engine_channels_against_the_engine_under_every_27_hold() {
+    let galaxy = galaxy();
+    let engine = engine_reference(galaxy);
+    let mut measured = [0.0; 3];
+    let entries = catalogue(galaxy);
+    let shares: Vec<usize> = MergerChannel::ALL
+        .iter()
+        .map(|c| entries.iter().filter(|(_, e)| e == c).count())
+        .collect();
+    println!(
+        "every 27 hold: {} entries, by channel {shares:?}, by the primary's layer {:.3?}",
+        entries.len(),
+        layer_shares(entries.iter().map(|(m, _)| (crate::math::exp10(m[2]), 1.0)))
+    );
+    for (k, mark) in ["log total mass", "mass ratio", "log primary mass"]
+        .iter()
+        .enumerate()
+    {
+        let expected: Vec<f64> = entries.iter().map(|(m, _)| m[k]).collect();
+        let observed: Vec<(f64, f64)> = engine.iter().map(|(m, w, _)| (m[k], *w)).collect();
+        let (per_dof, effective) = decile_chi_square(&expected, &observed);
+        let covered: Vec<(f64, f64)> = engine
+            .iter()
+            .filter(|(_, _, c)| *c)
+            .map(|(m, w, _)| (m[k], *w))
+            .collect();
+        let (covered_per_dof, covered_effective) = decile_chi_square(&expected, &covered);
+        println!(
+            "  {mark}: chi2/dof {per_dof:.2} (effective {effective:.0}); against the engine's \
+             mergers the class's channels cover, {covered_per_dof:.2} (effective \
+             {covered_effective:.0}); the engine's shares of the class's deciles {:.3?}",
+            decile_shares(&expected, &observed)
+        );
+        measured[k] = per_dof;
+    }
+    for (m, p) in measured.iter().zip(PINNED_CHI_SQUARE) {
+        assert!((m / p - 1.0).abs() < 1e-6, "{measured:?}");
+    }
+}
+
+/// The chi-square per degree of freedom of the total mass, the mass ratio and the primary's mass
+/// under every 27 hold, as measured (2026-11-01, re-measured once every 27 hold took P15.T11.b's
+/// orphan streams, whose galaxy draws this reference, and again once it took P11.T4's neutron-star
+/// accretion and P11.T6's Type Ia explosion together, and P11.T4's heavy donors; at generator
+/// versions 25 and 26, measured again; on 2026-11-04 once the heavy donors' white dwarfs blew
+/// their excess off rather than swell and merge, which the engine's reference reads; and at 27 on
+/// the landed tree, 0.1% higher, none of it the engine's raised segment cap, under which the
+/// pairs give the same bits at 64), all over P15.T10.b's 3.1: a finding, for P15.T10.b's fit.
+/// Version 26's two channels read 187, 153 and 289 here, and 14.2, 12.1 and 16.0 at an effective
+/// 73: the dynamical channel takes the mass ratio's from 153 to 62 (167 to 68 at 25, 170 to 61 at
+/// 24); the masses' stay high, the engine holding 13% of its primaries in layers D and E against
+/// the class's 1.3% and (at 24) its giant-branch donors heavier (median 1.69 M☉) than the class's
+/// at the turn-off. Re-pinned at 30 on v30's refitted binary rows (landing round 4): 211.96, 62.83
+/// and 311.25 (211.75, 62.80 and 310.99 at 29), and at 31 on the fitted merger sampler
+/// (`MERGER_SAMPLER_31`, P15.T10.b): 231.00, 143.08 and 253.08.
+const PINNED_CHI_SQUARE: [f64; 3] = [
+    231.003_033_942_612_94,
+    143.084_337_337_703_18,
+    253.079_954_405_918_41,
+];

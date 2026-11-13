@@ -1,0 +1,10 @@
+# Test fixture: a prefix that is not snake_case, a part with no steps, and edges that are not tables.
+
+edge = [1, 2]
+
+[meta]
+stage = "planets"
+part = "planets"
+prefix = "9bad"
+title = "Planets"
+snapshot = "a6d3f6dd"

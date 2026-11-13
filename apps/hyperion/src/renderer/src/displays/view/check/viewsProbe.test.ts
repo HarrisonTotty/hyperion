@@ -1,9 +1,33 @@
 import { describe, expect, it } from "vitest";
 
 import { GraphicsStatusStore, initialGraphicsStatus } from "../../../view/engine/status";
-import type { FrameSubmission, RenderEngine } from "../../../view/engine/types";
+import type { AllocationEvent } from "../../../view/engine/memory";
+import type {
+  ComputeBindings,
+  FrameSubmission,
+  RenderEngine,
+  TextureHandle,
+} from "../../../view/engine/types";
+import { fakeViewEngineSource } from "../../../test/fakeViewEngine";
 import { timedEngineSource } from "../../../test/viewDisplayHarness";
-import { viewOf, ViewsProbe } from "./viewsProbe";
+import {
+  AERIAL_PERSPECTIVE_THICK_KERNEL,
+  LIMB_RESOLVE_KERNEL,
+  RAY_MARCH_BELOW_DECK_KERNEL,
+  RAY_MARCH_DECK_KERNEL,
+  RAY_MARCH_DECK_THERMAL_KERNEL,
+  RAY_MARCH_FILL_KERNEL,
+  RAY_MARCH_KERNEL,
+  RAY_MARCH_PACKED_KERNEL,
+  RAY_MARCH_SLOTS_DECK_SPECIAL_KERNEL,
+  RAY_MARCH_THICK_ROW_SPECIAL_KERNEL,
+  RAY_MARCH_THICK_TABLE_KERNEL,
+  SKY_VIEW_KERNEL,
+  SKY_VIEW_THERMAL_KERNEL,
+  SKY_VIEW_THICK_KERNEL,
+  THICK_LIMB_KERNELS,
+} from "../../../view/atmosphere/hillaire";
+import { atmosphereReadOf, viewOf, ViewsProbe } from "./viewsProbe";
 
 /** A frame with nothing in it, whose label names it. */
 function frame(label: string): FrameSubmission {
@@ -57,6 +81,22 @@ async function probed(): Promise<{
   return { probe, page, engine, timed };
 }
 
+/** A dispatch's bindings, the body's tables' figure bound as an atmosphere's kernel binds it. */
+function airBindings(oblateBody: TextureHandle | null): ComputeBindings {
+  return {
+    buffers: {},
+    sampled: oblateBody === null ? {} : { oblateBody },
+    uniforms: {},
+    storage: {},
+  };
+}
+
+/** A kernel's read in words, `none` for a kernel of no read. */
+function readText(name: string): string {
+  const of = atmosphereReadOf(name);
+  return of === null ? "none" : `${of.read}${of.thermal ? ", thermal" : ""}`;
+}
+
 /** Draws `draw` from the page's next animation frame at `timeMs`, taking `costMs` of the clock. */
 function inFrame(page: FakePage, timeMs: number, draw: () => void, costMs = 0): void {
   page.requestAnimationFrame(() => {
@@ -97,10 +137,16 @@ describe("the views probe", () => {
       primary.render(frame("tonemap"));
     });
     timed.deliver((name) => (name === "instrument-1" ? 0.5 : 1));
-    const record = probe.phase("photoreal-two-wireframe", 0, 200, [
-      { name: "view", style: "photorealistic" },
-      { name: "instrument-1", style: "wireframe" },
-    ]);
+    const record = probe.phase(
+      "photoreal-two-wireframe",
+      0,
+      200,
+      [
+        { name: "view", style: "photorealistic" },
+        { name: "instrument-1", style: "wireframe" },
+      ],
+      [],
+    );
     expect(record.frameGpuMs).toEqual([2.5, 1]);
     expect(record.frameIntervalsMs).toEqual([16]);
     expect(record.primaryIntervalsMs).toEqual([16]);
@@ -114,13 +160,249 @@ describe("the views probe", () => {
     expect(probe.timer()).toBe("quantized");
   });
 
+  it("gives each pass label's time in each frame timed in full, 0 where a frame has none (the owner's report)", async () => {
+    const { probe, page, engine, timed } = await probed();
+    const primary = engine.createView(document.createElement("canvas"), "view");
+    const instrument = engine.createView(document.createElement("canvas"), "instrument-1");
+    const target = engine.createRenderTarget({
+      name: "view:hdr",
+      size: { widthPx: 100, heightPx: 50 },
+      format: "rgba16float",
+      mips: 1,
+      depth: true,
+      category: "render-targets",
+    });
+    inFrame(page, 100, () => {
+      target.render(frame("discs"));
+      primary.render(frame("tonemap"));
+      instrument.render(frame("view:wireframe"));
+    });
+    inFrame(page, 116, () => {
+      primary.render(frame("tonemap"));
+    });
+    timed.deliver((name) => (name === "instrument-1" ? 0.5 : 1));
+    // A frame whose resolve never reports is left out, as the window's GPU times leave it.
+    inFrame(page, 133, () => {
+      primary.render(frame("tonemap"));
+    });
+    expect(probe.passTimes(0, 200)).toEqual([
+      { label: "view:hdr", ms: [1, 0], kernels: [], workgroups: [] },
+      { label: "view", ms: [1, 1], kernels: [], workgroups: [] },
+      { label: "instrument-1", ms: [0.5, 0], kernels: [], workgroups: [] },
+    ]);
+    expect(probe.window(0, 200, [{ name: "view", style: "photorealistic" }]).frameGpuMs).toEqual([
+      2.5, 1,
+    ]);
+  });
+
+  it("numbers a label its frame repeats, in the frame's order (the owner's report)", async () => {
+    const { probe, page, engine, timed } = await probed();
+    const target = engine.createRenderTarget({
+      name: "view:hdr",
+      size: { widthPx: 100, heightPx: 50 },
+      format: "rgba16float",
+      mips: 1,
+      depth: true,
+      category: "render-targets",
+    });
+    inFrame(page, 100, () => {
+      target.render(frame("atmosphere view"));
+      target.render(frame("atmosphere view"));
+      target.render(frame("atmosphere view"));
+    });
+    timed.deliver(() => 2);
+    expect(probe.passTimes(0, 200).map((pass) => pass.label)).toEqual([
+      "view:hdr",
+      "view:hdr #2",
+      "view:hdr #3",
+    ]);
+  });
+
+  it("carries a dispatched label's kernels and workgroups, numbered as its passes are (main's ask)", async () => {
+    const { probe, page, engine, timed } = await probed();
+    const primary = engine.createView(document.createElement("canvas"), "view");
+    const kernel = { kind: "compute", name: "atmosphere ray march", path: "reference" } as const;
+    const bindings = { buffers: {}, sampled: {}, uniforms: {}, storage: {} };
+    inFrame(page, 100, () => {
+      engine.dispatch(kernel, bindings, [4, 2, 1], "atmosphere view");
+      engine.dispatch(kernel, bindings, [10, 10, 1], "atmosphere view");
+      primary.render(frame("tonemap"));
+    });
+    // The render's resolve holds the dispatches' passes before its own, as R01's timer encodes them.
+    timed.engines[0]?.reportPassTimes({
+      frame: engine.passTimesFrame,
+      timer: "quantized",
+      passes: [
+        { label: "atmosphere view", ns: 2e6, bracketed: false },
+        { label: "atmosphere view", ns: 5e6, bracketed: false },
+        { label: "tonemap", ns: 1e6, bracketed: false },
+      ],
+    });
+    expect(probe.passTimes(0, 200)).toEqual([
+      { label: "atmosphere view", ms: [2], kernels: ["atmosphere ray march"], workgroups: [8] },
+      {
+        label: "atmosphere view #2",
+        ms: [5],
+        kernels: ["atmosphere ray march"],
+        workgroups: [100],
+      },
+      { label: "tonemap", ms: [1], kernels: [], workgroups: [] },
+    ]);
+  });
+
+  it("names each body's atmosphere read from the kernels its frames dispatched against its tables", async () => {
+    const { probe, page, engine } = await probed();
+    const near: TextureHandle = { kind: "texture", name: "near oblate body" };
+    const far: TextureHandle = { kind: "texture", name: "far oblate body" };
+    const dispatch = (name: string, air: TextureHandle | null): void => {
+      engine.dispatch(
+        { kind: "compute", name, path: "reference" },
+        airBindings(air),
+        [1, 1, 1],
+        "atmosphere view",
+      );
+    };
+    inFrame(page, 100, () => {
+      dispatch(SKY_VIEW_THICK_KERNEL.name, near);
+      dispatch(SKY_VIEW_KERNEL.name, far);
+      dispatch(RAY_MARCH_DECK_KERNEL.name, near);
+      dispatch(RAY_MARCH_FILL_KERNEL.name, null);
+    });
+    inFrame(page, 120, () => {
+      dispatch(SKY_VIEW_THICK_KERNEL.name, near);
+    });
+    inFrame(page, 300, () => {
+      dispatch(SKY_VIEW_KERNEL.name, near);
+    });
+    expect(probe.atmosphereReads(0, 200)).toEqual([
+      {
+        air: 1,
+        read: "deck",
+        thermal: false,
+        frames: 1,
+        kernels: [SKY_VIEW_THICK_KERNEL.name, RAY_MARCH_DECK_KERNEL.name],
+      },
+      { air: 1, read: "thick", thermal: false, frames: 1, kernels: [SKY_VIEW_THICK_KERNEL.name] },
+      { air: 2, read: "thin", thermal: false, frames: 1, kernels: [SKY_VIEW_KERNEL.name] },
+    ]);
+  });
+
+  it("sums the engine's writes, allocations and releases within a window, by resource (the owner's report)", async () => {
+    const { probe, page, timed } = await probed();
+    const engine = timed.engines[0];
+    const report = (atMs: number, event: AllocationEvent): void => {
+      page.nowMs = atMs;
+      engine?.reportAllocation(event);
+    };
+    report(50, { kind: "created", name: "early", bytes: 64, category: "other" });
+    report(100, { kind: "created", name: "view star sprites", bytes: 256, category: "other" });
+    report(110, { kind: "uploaded", name: "view star sprites", bytes: 64 });
+    report(120, { kind: "uploaded", name: "view star sprites", bytes: 32 });
+    report(130, { kind: "destroyed", name: "early", bytes: 64, category: "other" });
+    report(300, { kind: "uploaded", name: "view star sprites", bytes: 16 });
+    expect(probe.memoryTraffic(100, 200)).toEqual({
+      uploaded: { count: 2, bytes: 96 },
+      created: { count: 1, bytes: 256 },
+      destroyed: { count: 1, bytes: 64 },
+      uploads: [{ name: "view star sprites", count: 2, bytes: 96 }],
+    });
+  });
+
+  it("times each pipeline compile as it settles, and when the engine was made (R08)", async () => {
+    const { probe, page, timed } = await probed();
+    page.nowMs = 250;
+    timed.engines[0]?.reportCompile({
+      name: RAY_MARCH_THICK_TABLE_KERNEL.name,
+      lane: "ahead",
+      waitedMs: 40,
+      ms: 200,
+    });
+    page.nowMs = 300;
+    timed.engines[0]?.reportCompile({ name: "terrain lit", lane: "draw", waitedMs: 0, ms: 20 });
+    expect([probe.engineAtMs(), probe.compiles()]).toEqual([
+      0,
+      [
+        {
+          name: RAY_MARCH_THICK_TABLE_KERNEL.name,
+          lane: "ahead",
+          readyAtMs: 250,
+          waitedMs: 40,
+          ms: 200,
+        },
+        { name: "terrain lit", lane: "draw", readyAtMs: 300, waitedMs: 0, ms: 20 },
+      ],
+    ]);
+  });
+
+  it("gives the primary's first draw and its first with a body's air apart from the frames after them (R08)", async () => {
+    const { probe, page, engine, timed } = await probed();
+    const primary = engine.createView(document.createElement("canvas"), "view");
+    const oblate: TextureHandle = { kind: "texture", name: "oblate body" };
+    const withAir = (): void => {
+      primary.render(frame("view:photoreal"));
+      engine.dispatch(
+        { kind: "compute", name: SKY_VIEW_THICK_KERNEL.name, path: "reference" },
+        airBindings(oblate),
+        [1, 1, 1],
+        "atmosphere view",
+      );
+    };
+    expect(probe.firstFrames("view")).toEqual([]);
+    inFrame(page, 100, () => primary.render(frame("view:photoreal")), 5);
+    timed.deliver(() => 4);
+    inFrame(page, 150, withAir, 900);
+    inFrame(page, 1_100, withAir, 30);
+    expect(probe.firstFrames("view")).toEqual([
+      {
+        kind: "drawn",
+        atMs: 100,
+        intervalMs: null,
+        mainThreadMs: 5,
+        submitMs: 0,
+        gpuMs: 4,
+      },
+      {
+        kind: "air",
+        atMs: 150,
+        intervalMs: 50,
+        mainThreadMs: 900,
+        submitMs: 0,
+        gpuMs: null,
+      },
+    ]);
+  });
+
+  it("gives a first frame no GPU time where the engine has no pass timer (R08)", async () => {
+    const plain = fakeViewEngineSource();
+    const page = new FakePage();
+    const probe = new ViewsProbe(plain.source, () => page.nowMs);
+    const outcome = await probe.source.requestAdapter();
+    if (outcome.kind !== "adapter") {
+      throw new Error("the fake gave no adapter");
+    }
+    const engine = await probe.source.load(
+      outcome,
+      new GraphicsStatusStore(initialGraphicsStatus("vulkan", false)),
+    );
+    probe.installFrameClock(page);
+    const primary = engine.createView(document.createElement("canvas"), "view");
+    inFrame(page, 100, () => primary.render(frame("view:photoreal")));
+    expect(probe.firstFrames("view").map((each) => each.gpuMs)).toEqual([null]);
+  });
+
   it("counts a resolve that never reports as a drop, and leaves its frame untimed", async () => {
     const { probe, page, engine } = await probed();
     const primary = engine.createView(document.createElement("canvas"), "view");
     inFrame(page, 100, () => {
       primary.render(frame("view:wireframe"));
     });
-    const record = probe.phase("wireframe-alone", 0, 200, [{ name: "view", style: "wireframe" }]);
+    const record = probe.phase(
+      "wireframe-alone",
+      0,
+      200,
+      [{ name: "view", style: "wireframe" }],
+      [],
+    );
     expect(record).toMatchObject({ droppedResolves: 1, untimedFrames: 1, frameGpuMs: [] });
     expect(probe.timer()).toBe("absent");
   });
@@ -136,7 +418,13 @@ describe("the views probe", () => {
       },
       3,
     );
-    const record = probe.phase("wireframe-alone", 0, 200, [{ name: "view", style: "wireframe" }]);
+    const record = probe.phase(
+      "wireframe-alone",
+      0,
+      200,
+      [{ name: "view", style: "wireframe" }],
+      [],
+    );
     expect(record.mainThreadMs).toEqual([3]);
   });
 
@@ -163,7 +451,13 @@ describe("the views probe", () => {
       primary.render(frame("view:wireframe"));
     });
     timed.deliver(() => 1);
-    const record = probe.phase("wireframe-alone", 80, 200, [{ name: "view", style: "wireframe" }]);
+    const record = probe.phase(
+      "wireframe-alone",
+      80,
+      200,
+      [{ name: "view", style: "wireframe" }],
+      [],
+    );
     expect(record.frameGpuMs).toEqual([2]);
     expect(record.unattributedGpuMs).toBeCloseTo(0.2);
   });
@@ -183,9 +477,13 @@ describe("the views probe", () => {
     });
     page.nowMs = 120;
     target.resize({ widthPx: 800, heightPx: 640 });
-    const record = probe.phase("photoreal-two-wireframe", 100, 200, [
-      { name: "view", style: "photorealistic" },
-    ]);
+    const record = probe.phase(
+      "photoreal-two-wireframe",
+      100,
+      200,
+      [{ name: "view", style: "photorealistic" }],
+      [],
+    );
     expect(record.views[0]?.scales).toEqual([1, 0.8]);
     expect(probe.canvasOf("view")).toEqual({ widthPx: 1000, heightPx: 800 });
     expect(probe.canvasOf("instrument-2")).toEqual({ widthPx: 0, heightPx: 0 });
@@ -206,6 +504,168 @@ describe("the views probe", () => {
     expect(probe.faults()).toEqual(["device-lost (destroyed): fake loss"]);
   });
 
+  it("keeps every fault and restore with its time, for the terrain run (R10.T16.d)", async () => {
+    const { probe, page, timed } = await probed();
+    page.nowMs = 40;
+    timed.engines[0]?.loseDevice("destroyed");
+    page.nowMs = 90;
+    timed.engines[0]?.raiseRestored();
+    expect(probe.timedFaults()).toEqual([
+      { atMs: 40, fault: { kind: "device-lost", reason: "destroyed", message: "fake loss" } },
+    ]);
+    expect(probe.restoresAtMs()).toEqual([90]);
+  });
+
+  it("tells a watcher of each submission in its animation frame, and each target made", async () => {
+    const { probe, page, engine } = await probed();
+    const seen: Array<readonly [string, string, number | null]> = [];
+    const targets: string[] = [];
+    const unwatch = probe.watch({
+      submitted: (owner, submission, frameMs) => {
+        seen.push([owner, submission.label, frameMs]);
+      },
+      madeTarget: (spec) => {
+        targets.push(spec.name);
+      },
+    });
+    const primary = engine.createView(document.createElement("canvas"), "view");
+    const target = engine.createRenderTarget({
+      name: "view:hdr",
+      size: { widthPx: 8, heightPx: 4 },
+      format: "rgba16float",
+      mips: 1,
+      depth: true,
+      category: "render-targets",
+    });
+    inFrame(page, 100, () => {
+      target.render(frame("discs"));
+      primary.render(frame("tonemap"));
+    });
+    primary.render(frame("outside"));
+    unwatch();
+    inFrame(page, 116, () => {
+      primary.render(frame("tonemap"));
+    });
+    expect(targets).toEqual(["view:hdr"]);
+    expect(seen).toEqual([
+      ["view:hdr", "discs", 100],
+      ["view", "tonemap", 100],
+      ["view", "outside", null],
+    ]);
+  });
+
+  it("gives every animation frame's time, and a view's draws', within a window", async () => {
+    const { probe, page, engine } = await probed();
+    const primary = engine.createView(document.createElement("canvas"), "view");
+    inFrame(page, 100, () => {
+      primary.render(frame("tonemap"));
+    });
+    inFrame(page, 116, () => undefined);
+    inFrame(page, 133, () => {
+      primary.render(frame("tonemap"));
+    });
+    expect(probe.frameTimes(0, 200)).toEqual([100, 116, 133]);
+    expect(probe.drawTimes("view", 0, 200)).toEqual([100, 133]);
+    expect(probe.drawTimes("view", 110, 200)).toEqual([133]);
+    const { name, statements, ...window } = probe.phase(
+      "wireframe-alone",
+      0,
+      200,
+      [{ name: "view", style: "wireframe" }],
+      ["IMAGE: DETAIL LIMITED"],
+    );
+    expect([name, statements]).toEqual(["wireframe-alone", ["IMAGE: DETAIL LIMITED"]]);
+    expect(probe.window(0, 200, [{ name: "view", style: "wireframe" }])).toEqual(window);
+  });
+
+  it("gives each view's draws within a window, each frame once, from its own times (lane perf-render-thread-ground)", async () => {
+    const { probe, page, engine } = await probed();
+    const primary = engine.createView(document.createElement("canvas"), "view");
+    const instrument = engine.createView(document.createElement("canvas"), "instrument-1");
+    for (let k = 0; k < 40; k += 1) {
+      inFrame(page, 100 + 16 * k, () => {
+        if (k % 2 === 0) {
+          primary.render(frame("tonemap"));
+          primary.render(frame("tonemap"));
+        }
+        if (k % 3 === 0) {
+          instrument.render(frame("tonemap"));
+        }
+      });
+    }
+    expect([
+      probe.drawTimes("view", 0, Number.POSITIVE_INFINITY).length,
+      probe.drawTimes("view", 132, 228),
+      probe.drawTimes("instrument-1", 148, 244),
+      probe.drawTimes("instrument-1", 244, 244),
+      probe.drawTimes("nothing", 0, 1_000),
+    ]).toEqual([20, [132, 164, 196], [148, 196], [], []]);
+  });
+
+  it("summarises a window of more resolves than an argument list takes (a terrain run's minutes)", async () => {
+    const { probe, page } = await probed();
+    // Two hundred renders of a thousand resolves each: some 10⁵ resolves in a window, as a
+    // terrain run's minutes hold, which an argument spread over them could not take.
+    inFrame(page, 100, () => {
+      for (let render = 0; render < 200; render += 1) {
+        probe.rendered("view:hdr", render * 1_000, (render + 1) * 1_000, 0);
+      }
+    });
+    const record = probe.window(0, 200, [{ name: "view", style: "photorealistic" }]);
+    expect([record.droppedResolves, record.unattributedGpuMs]).toEqual([200_000, 0]);
+  });
+
+  it("counts each preparation until it settles, failed or not (R10.T14.d)", async () => {
+    const { probe, page } = await probed();
+    const settles: Array<() => void> = [];
+    probe.preparing(
+      new Promise<void>((resolve) => {
+        settles.push(resolve);
+      }),
+    );
+    probe.preparing(
+      new Promise<void>((_, reject) => {
+        settles.push(() => {
+          reject(new Error("refused"));
+        });
+      }),
+    );
+    const before = probe.preparations();
+    page.nowMs = 40;
+    for (const settle of settles) {
+      settle();
+    }
+    await Promise.resolve();
+    await Promise.resolve();
+    expect([before, probe.preparations()]).toEqual([
+      { seen: 2, inFlight: 2, lastSettledAtMs: null },
+      { seen: 2, inFlight: 0, lastSettledAtMs: 40 },
+    ]);
+  });
+
+  it("is told of each preparation its probed engine passes on (R10.T14.d)", async () => {
+    const { probe, engine } = await probed();
+    const material = engine.createMaterial({
+      name: "prepared",
+      displayName: "PREPARED",
+      vertexWgsl: "",
+      fragmentWgsl: "",
+      uniforms: [],
+      samplers: [],
+      cullMode: "none",
+      depthWrite: false,
+      colourWrites: true,
+      blend: "none",
+    });
+    const prepared = engine.prepareMaterial(material, ["rgba16float"], []);
+    const during = probe.preparations();
+    await prepared;
+    expect([during.inFlight, probe.preparations()]).toEqual([
+      1,
+      { seen: 1, inFlight: 0, lastSettledAtMs: 0 },
+    ]);
+  });
+
   it("gives the page's own requestAnimationFrame back", () => {
     const probe = new ViewsProbe();
     const page = new FakePage();
@@ -214,5 +674,47 @@ describe("the views probe", () => {
     expect(page.requestAnimationFrame).not.toBe(own);
     restore();
     expect(page.requestAnimationFrame).toBe(own);
+  });
+});
+
+describe("atmosphereReadOf", () => {
+  it("reads each read's and each thermal form's kernels by their names, and no read of the rest", () => {
+    expect(
+      [
+        SKY_VIEW_KERNEL,
+        RAY_MARCH_KERNEL,
+        RAY_MARCH_PACKED_KERNEL,
+        AERIAL_PERSPECTIVE_THICK_KERNEL,
+        RAY_MARCH_THICK_TABLE_KERNEL,
+        RAY_MARCH_THICK_ROW_SPECIAL_KERNEL,
+        RAY_MARCH_DECK_KERNEL,
+        RAY_MARCH_SLOTS_DECK_SPECIAL_KERNEL,
+        RAY_MARCH_BELOW_DECK_KERNEL,
+        SKY_VIEW_THERMAL_KERNEL,
+        RAY_MARCH_DECK_THERMAL_KERNEL,
+        RAY_MARCH_FILL_KERNEL,
+        LIMB_RESOLVE_KERNEL,
+      ].map((kernel) => readText(kernel.name)),
+    ).toEqual([
+      "thin",
+      "thin",
+      "thin",
+      "thick",
+      "thick",
+      "thick",
+      "deck",
+      "deck",
+      "beneath a deck",
+      "thin, thermal",
+      "deck, thermal",
+      "none",
+      "none",
+    ]);
+  });
+
+  it("reads the thick read's packed limb as the thick read, where its kernel is of a read", () => {
+    expect(
+      new Set(THICK_LIMB_KERNELS.flatMap((kernel) => atmosphereReadOf(kernel.name)?.read ?? [])),
+    ).toEqual(new Set(["thick"]));
   });
 });

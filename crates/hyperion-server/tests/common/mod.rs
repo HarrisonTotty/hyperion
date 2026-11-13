@@ -6,11 +6,17 @@
     reason = "each test binary compiles this module and uses its own subset of the helpers"
 )]
 
+pub mod alerts;
+pub mod bodies;
+pub mod origins;
 pub mod process;
 pub mod scene;
+pub mod surface;
+pub mod viewer;
 
 use std::future::IntoFuture;
 use std::net::SocketAddr;
+use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, OnceLock};
@@ -20,10 +26,13 @@ use axum::serve::ListenerExt;
 use futures_util::{SinkExt, StreamExt};
 use hyperion_protocol::{
     ClientMessage, CreateUniverseRequest, NotificationBody, RequestBody, RequestError, RequestId,
-    ResponseBody, SeedHex, ServerMessage, UniverseInfo,
+    ResponseBody, SeedHex, ServerMessage, UniverseIdHex, UniverseInfo,
 };
+use hyperion_server::compute::TwinPriority;
 use hyperion_server::universe::SequenceEntropy;
-use hyperion_server::{Server, ServerConfig, ServerConfigBuilder, ServerStats};
+use hyperion_server::{
+    GlobalListWarmUp, Server, ServerConfig, ServerConfigBuilder, ServerStats, SkyService,
+};
 use tempfile::TempDir;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::oneshot;
@@ -38,17 +47,18 @@ pub const PATIENCE_ENV: &str = "HYPERION_TEST_PATIENCE_SECS";
 /// [`patience`] when [`PATIENCE_ENV`] is not set.
 ///
 /// Every wait here is on work that a loaded machine only makes slower, never wrong: a galaxy build,
-/// a query, a band of a map, a teardown. `open_universe` always builds a galaxy (plan 04, design
-/// note 6), about 130 ms in a release build (plan 02, Risks, R19), but these tests run under
-/// `just test`, where `hyperion-sim` is `opt-level = 2` with debug assertions and overflow checks
-/// still on, and `cargo test` runs a binary's tests in parallel, so as many galaxies are built at
-/// once as the binary has tests. Measured over a loopback socket on eight cores at load average 14
-/// (2026-09-22): one cold `open_universe` took 0.85–0.93 s on its own and up to 2.04 s with twelve
-/// running together. At load average 20–22 with other worktrees building (2026-09-29), the nine
-/// tests of `system_bodies` each waited over 20 s for their first answers, and two runs in six
-/// failed at the 20 s this bound once was. The longest job the server cannot abort, which a
-/// teardown waits for, is one band of 16 rows of a 1,024-pixel edge-on map, about 13 s on an idle
-/// machine (plan 04, "Measured map costs"), and so the longest wait here.
+/// a query, a band of a map, a teardown, a server process's start, its answer to `/healthz` and its
+/// exit. `open_universe` always builds a galaxy (plan 04, design note 6), about 130 ms in a release
+/// build (plan 02, Risks, R19), but these tests run under `just test`, where `hyperion-sim` is
+/// `opt-level = 2` with debug assertions and overflow checks still on, and `cargo test` runs a
+/// binary's tests in parallel, so as many galaxies are built at once as the binary has tests.
+/// Measured over a loopback socket on eight cores at load average 14 (2026-09-22): one cold
+/// `open_universe` took 0.85–0.93 s on its own and up to 2.04 s with twelve running together. At
+/// load average 20–22 with other worktrees building (2026-09-29), the nine tests of `system_bodies`
+/// each waited over 20 s for their first answers, and two runs in six failed at the 20 s this bound
+/// once was. The longest job the server cannot abort, which a teardown waits for, is one band of 16
+/// rows of a 1,024-pixel edge-on map, about 13 s on an idle machine (plan 04, "Measured map
+/// costs"), and so the longest wait here.
 ///
 /// Three minutes is some six times the worst of those under the load that failed, and still turns
 /// a hung server into a failed test rather than a hung suite. No assertion depends on it: a test of
@@ -56,7 +66,7 @@ pub const PATIENCE_ENV: &str = "HYPERION_TEST_PATIENCE_SECS";
 pub const DEFAULT_PATIENCE: Duration = Duration::from_secs(180);
 
 /// Upper bound on any single wait of the harness: a message, a connection, a state of the server's
-/// counters, a teardown.
+/// counters, a teardown, a server process's start, its answer to `/healthz` and its exit.
 ///
 /// This is the harness's patience and not a property of the server, so it can be raised for a
 /// machine slower or busier than any it was measured on: [`PATIENCE_ENV`] gives it in whole
@@ -93,6 +103,17 @@ pub async fn patiently<T>(what: &str, future: impl Future<Output = T>) -> T {
     })
 }
 
+/// The CPU pool's workers in a server on [`TestServer::config`], unless the test sets its own.
+///
+/// A fixed count, not the server's default of the machine's parallelism less one: nextest runs
+/// several tests at once, each with a server of its own, and caps only how many tests run, not the
+/// threads each one starts. Two rather than one: a worker takes interactive work first but finishes
+/// the job in hand, so on one worker a query or a galaxy build waits out a whole band of a map or a
+/// surface pass. On two, the coarse surface passes run at once fall to one
+/// ([`ServerConfig::surface_passes`]), which leaves a worker for them. A test that needs work
+/// queued behind a single job sets one worker itself.
+const TEST_SERVER_WORKERS: NonZeroUsize = NonZeroUsize::new(2).expect("2 is not zero");
+
 /// How often [`TestServer::stats_until`] looks at the server's counters again.
 ///
 /// Short beside every state it waits for (a job reaching a worker, a connection closing, a queue
@@ -103,6 +124,51 @@ const STATS_POLL: Duration = Duration::from_millis(5);
 /// universe IDs, as they are drawn.
 pub fn test_entropy() -> impl Iterator<Item = u64> {
     (1..=256).map(|n| 0x5eed_0000_0000_0000 | n)
+}
+
+/// The workers of the server [`envelopes_kept`] answers its query on: four, about 50 s of them in
+/// a test build for the 121 tables a galaxy's first query near the Sun builds (pod, 16 vCPU,
+/// 2026-11-05), and the slots each of the server's sky tests takes (`.config/nextest.toml`).
+pub const ENVELOPE_WORKERS: NonZeroUsize = NonZeroUsize::new(4).expect("4 is not zero");
+
+/// A universe named `name` of `seed`, created over `data_dir` by a server of [`ENVELOPE_WORKERS`]
+/// workers, which answers `query`'s range query in it and then stops, so that the data directory
+/// keeps the envelope of every stream's tube table the query built (P10.T10.b,
+/// perf-range-envelopes-on-disk).
+///
+/// From generator version 27 a galaxy's first range query builds the table of every stream whose
+/// shell meets its sphere: 121 near the Sun, of which it may touch 10, some 190 s on one worker in
+/// a test build (pod, 16 vCPU, 2026-11-05), past [`DEFAULT_PATIENCE`] in one wait. A server
+/// launched over the data directory after this one, as a relaunched server is, reads the envelopes
+/// back and builds only the tables a sphere may touch, and answers as a fresh one does, byte for
+/// byte (`systems_in_range`'s relaunch test).
+///
+/// # Panics
+///
+/// If the query is not answered with the systems in range, or builds no table.
+pub async fn envelopes_kept(
+    data_dir: &Path,
+    (name, seed): (&str, u64),
+    query: impl FnOnce(&UniverseIdHex) -> RequestBody,
+) -> UniverseInfo {
+    let config = TestServer::config(data_dir)
+        .workers(ENVELOPE_WORKERS)
+        .build();
+    let server = TestServer::start_with(config).await;
+    let mut client = server.connected().await;
+    let universe = client.create_universe(name, seed).await;
+    match client.request(query(&universe.id)).await {
+        Ok(ResponseBody::SystemsInRange(_)) => {}
+        other => panic!("expected the systems in range, got {other:?}"),
+    }
+    assert!(
+        server.stats().tube_tables().entries() > 0,
+        "the query built its streams' tables"
+    );
+    client.close().await;
+    // Its shutdown waits for the envelopes still queued to be written.
+    server.stop().await;
+    universe
 }
 
 /// A server listening on `127.0.0.1` at a port the OS chose.
@@ -141,10 +207,30 @@ impl TestServer {
     }
 
     /// The configuration [`TestServer::start`] uses, over `data_dir`, for tests to adjust.
+    ///
+    /// It keeps the sky off ([`SkyService::Unsupported`]), though the server's default serves it
+    /// since rendering plan R13's R13.T2: served, every open would start its galaxy's sky tables on
+    /// the pool (R06.T11.g), 31 CPU-s built serially and 47 on 15 workers (R06's Risks,
+    /// "Deviations in T11.g, as built"), which a test of something else would share its workers
+    /// with. The sky's own tests turn it on. It turns the global list's warm-up off
+    /// ([`GlobalListWarmUp::Off`]) for the same reason: an open would start its galaxy's list and
+    /// every tube table, some minutes of CPU (plan 10, P10.T10.b).
+    ///
+    /// Its pool has [`TEST_SERVER_WORKERS`] workers, not the server's default, which is sized from
+    /// the machine; a test's own [`workers`](ServerConfigBuilder::workers) after it wins. Its
+    /// workers' twins run the bulk and background jobs at the workers' own priority
+    /// ([`TwinPriority::Workers`]), not lowered as the server's are: lowered, they take about a
+    /// tenth of a core they share with a neighbouring test's thread, and under a gate's load the
+    /// galaxy walks, coarse passes and sky tables a test waits on ran past [`DEFAULT_PATIENCE`]
+    /// (pod, 2026-11-06). It changes no answer, nor the order the workers take jobs in.
     pub fn config(data_dir: &Path) -> ServerConfigBuilder {
         ServerConfig::builder()
             .data_dir(data_dir)
+            .workers(TEST_SERVER_WORKERS)
+            .twin_priority(TwinPriority::Workers)
             .entropy(SequenceEntropy::new(test_entropy()))
+            .sky_service(SkyService::Unsupported)
+            .global_list_warm_up(GlobalListWarmUp::Off)
     }
 
     /// A server with `config`, listening on port 0 whatever its address says.
@@ -255,6 +341,20 @@ impl TestServer {
                 self.stats()
             )
         })
+    }
+
+    /// Waits until the running server's pool is idle, no job running and none queued, and returns
+    /// the snapshot that was: for a test that counts the pool's jobs from a query on, after one
+    /// that read layer-E cells in part, which background jobs then keep whole (P08.T12).
+    pub async fn pool_idle(&self) -> ServerStats {
+        self.stats_until("the pool is idle", |stats| {
+            let pool = stats.pool();
+            pool.running() == 0
+                && pool.queued_interactive() == 0
+                && pool.queued_bulk() == 0
+                && pool.queued_background() == 0
+        })
+        .await
     }
 
     /// Stops the serving task and waits for it, which every teardown here does first. Serving ends
@@ -444,6 +544,16 @@ pub enum Frame {
     Binary(BinaryHeader, Vec<u8>),
 }
 
+/// A frame from the server, of either kind, as it arrived: for a test that pins an answer byte for
+/// byte rather than through a decoder.
+#[derive(Debug)]
+pub enum RawFrame {
+    /// A text frame's text.
+    Text(String),
+    /// A bulk frame: its header, read and checked, and its payload.
+    Binary(BinaryHeader, Vec<u8>),
+}
+
 /// A WebSocket client speaking `hyperion-protocol`.
 #[derive(Debug)]
 pub struct TestClient {
@@ -541,6 +651,26 @@ impl TestClient {
                 Message::Binary(bytes) => {
                     let (header, payload) = BinaryHeader::split(&bytes);
                     return Frame::Binary(header, payload);
+                }
+                Message::Ping(_) | Message::Pong(_) => {}
+                other => panic!("unexpected frame {other:?}"),
+            }
+        }
+    }
+
+    /// The next frame from the server as it arrived, a text or a bulk frame, skipping WebSocket
+    /// pings and pongs.
+    pub async fn next_raw_frame(&mut self) -> RawFrame {
+        loop {
+            let frame = patiently("waiting for a frame", self.socket.next())
+                .await
+                .expect("the server closed the connection")
+                .expect("the connection is healthy");
+            match frame {
+                Message::Text(text) => return RawFrame::Text(text.to_string()),
+                Message::Binary(bytes) => {
+                    let (header, payload) = BinaryHeader::split(&bytes);
+                    return RawFrame::Binary(header, payload);
                 }
                 Message::Ping(_) | Message::Pong(_) => {}
                 other => panic!("unexpected frame {other:?}"),

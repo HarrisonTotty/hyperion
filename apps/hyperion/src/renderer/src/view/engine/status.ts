@@ -23,6 +23,8 @@ import {
   type GpuCapabilities,
   requestAdapterOutcome,
   type StyleAvailability,
+  styleAvailability,
+  takesFallbackAdapter,
 } from "./platform";
 
 /** A fault the console reports about its own graphics, current until it clears. */
@@ -53,7 +55,10 @@ export type GraphicsCondition =
       readonly summary: AdapterSummary;
       readonly styles: StyleAvailability;
     }
-  /** A software adapter: the wireframe only (R01 Design note 8). */
+  /**
+   * A software adapter: the wireframe only (R01 Design note 8), in every launch mode but the
+   * check-only software mode, which takes it as nominal (R01.T16).
+   */
   | { readonly kind: "software-adapter"; readonly summary: AdapterSummary }
   /** `navigator.gpu` is absent. */
   | { readonly kind: "no-webgpu" }
@@ -168,7 +173,11 @@ function timerOf(capabilities: GpuCapabilities | null, gpuTiming: boolean): GpuT
   return gpuTiming ? "full" : "quantized";
 }
 
-function conditionOf(outcome: AdapterOutcome): GraphicsCondition {
+/**
+ * The condition an adapter's answer gives the launch: a fallback adapter is `software-adapter`, but
+ * in the check-only software mode, where it is `nominal` with both styles (R01.T16).
+ */
+function conditionOf(outcome: AdapterOutcome, launchMode: GraphicsLaunchMode): GraphicsCondition {
   let condition: GraphicsCondition;
   switch (outcome.kind) {
     case "no-webgpu":
@@ -178,9 +187,14 @@ function conditionOf(outcome: AdapterOutcome): GraphicsCondition {
       condition = { kind: "no-adapter" };
       break;
     case "adapter":
-      condition = outcome.summary.fallback
-        ? { kind: "software-adapter", summary: outcome.summary }
-        : { kind: "nominal", summary: outcome.summary, styles: outcome.styles };
+      condition =
+        outcome.summary.fallback && !takesFallbackAdapter(launchMode)
+          ? { kind: "software-adapter", summary: outcome.summary }
+          : {
+              kind: "nominal",
+              summary: outcome.summary,
+              styles: styleAvailability(outcome.summary, launchMode),
+            };
       break;
   }
   return condition;
@@ -190,7 +204,7 @@ function withOutcome(status: GraphicsStatus, outcome: AdapterOutcome): GraphicsS
   const capabilities = outcome.kind === "adapter" ? outcome.capabilities : null;
   return {
     ...status,
-    condition: conditionOf(outcome),
+    condition: conditionOf(outcome, status.launchMode),
     capabilities,
     timer: timerOf(capabilities, status.gpuTiming),
   };

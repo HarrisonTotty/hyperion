@@ -73,7 +73,7 @@ fn through_the_death<'a>(
         .map(|&body| BodyFate::begin(body, host, deaths.clone()))
         .collect();
     for fate in &mut fates {
-        fate.live_to(Some((at, 0)));
+        fate.live_to(Some((at, super::super::Sudden::Death(0))));
     }
     let passes = scatter(&mut fates, at);
     (fates, passes)

@@ -1,0 +1,38 @@
+# H. Nicholls and L. Soucasse's SOCRATES spectral files `Dayspring`, fitted to the DACE opacity
+# database (its H2O, H2, CO2, CO, CH4 and N2 lines and nine collision-induced pairs): the 48-band and
+# the 256-band sets, each a `.sf` (bands and k-term weights) and a `.sf_k` (each term's k by pressure
+# and temperature). A fetched dataset (plan 15, Design note 12): only this file, `urls.txt` and the
+# reduction's scripts are committed. The raw files are downloaded into
+# `crates/hyperion-fit/data/cache/nicholls_2025_dayspring/48/` and `.../256/`, which git ignores.
+#
+# How they are used (CC BY 4.0 asks that changes be indicated): `reduce.py` beside this file shares
+# each band's k-terms of CH4 (the 256-band set over 851-1,024 nm, the 48-band set beyond), H2O and CO
+# (the 48-band set), and H2-H2's collision-induced terms, out over the optics' twelve bins by each
+# band's overlap with the bin, uniform in wavelength, sorts them by k at a reference state and
+# averages them into eight g-points at six pressures and six temperatures, written as the sim's
+# `planetary/derive/photometry/envelope_bond/opacity.rs` (P14.T24.h.b part 5) with Karkoschka and
+# Tomasko 2010's CH4 and the alkali wings from the client's tables and the particles' Mie tables.
+# Nothing here computes a value the generator reads at run time; the reduced table is committed.
+dataset = "nicholls_2025_dayspring"
+class = "fetched"
+citation = "H. Nicholls (2025), spectral_files/Dayspring/48 (Zenodo, DOI 10.5281/zenodo.15721749; with L. Soucasse) and spectral_files/Dayspring/256 (Zenodo, DOI 10.5281/zenodo.15799474): SOCRATES spectral files fitted to DACE opacities (Grimm et al. 2021, ApJS 253, 30), as the PROTEUS framework (Nicholls et al.) distributes them"
+url = "https://zenodo.org/records/15721749"
+retrieved = "2026-11-01"
+release = "Dayspring.sf and Dayspring.sf_k of each record as Zenodo served them on that date"
+licence = "CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/), each Zenodo record's; reduced values with their citation, the raw files not committed"
+
+[[files]]
+name = "256/Dayspring.sf"
+sha256 = "ce9fdb94c776ddc664c83e5c21ede9dae9009a2fc630176edbbce20adcce2b58"
+
+[[files]]
+name = "256/Dayspring.sf_k"
+sha256 = "3a3fd2df34649b4a844663c64c89d37461962dfa76732086a4d376670d907787"
+
+[[files]]
+name = "48/Dayspring.sf"
+sha256 = "fd799365252718a7daafb601567e8e64fc8f1b647dca8e1f2c227c4487a4410b"
+
+[[files]]
+name = "48/Dayspring.sf_k"
+sha256 = "32cb857b6bfa31b66ceb1c55485c61970687be9bd8b00f56631a75d1ff3310a5"

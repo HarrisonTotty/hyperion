@@ -1,5 +1,6 @@
 import { useContext, useEffect, useState } from "react";
 
+import { launchCompileBudget } from "../../view/engine/launchCompileBudget";
 import { loadRenderEngine } from "../../view/engine/loadEngine";
 import { type AdapterOutcome, requestAdapterOutcome } from "../../view/engine/platform";
 import {
@@ -30,7 +31,7 @@ export interface ViewEngineSource {
 /** R01's own: `navigator.gpu`'s adapter, and the engine by its lazy import. */
 export const DEFAULT_ENGINE_SOURCE: ViewEngineSource = {
   requestAdapter: () => requestAdapterOutcome(navigatorGpu()),
-  load: (outcome, status) => loadRenderEngine(outcome, status),
+  load: (outcome, status) => loadRenderEngine(outcome, status, launchCompileBudget()),
 };
 
 /** Whether the graphics' standing condition rules out a view, so that no adapter is asked for. */

@@ -14,7 +14,9 @@
  * 21's criteria at 60 Hz. Each is a finding here with its verdict.
  *
  * The frame rows are Design note 21's, read from presentation times (the trace's), against T the
- * display's vsync period, or twice it for the low setting's 30 Hz photorealistic primary. A hidden
+ * display's vsync period times the vsyncs the launch's pacing draws the primary's rate on
+ * (`periodVsyncs`): under `display` once, or twice for the low setting's 30 Hz photorealistic
+ * primary; under `rate` k of them, 2 and 4 on a 120 Hz panel. A hidden
  * run has no window, so T and the presentation figures are missing with "no window shown"; such a
  * run proves the harness and the file, not the criterion, as the descent spike's hidden runs do.
  *
@@ -32,6 +34,7 @@
  */
 
 import type {
+  FramePacingName,
   SpikePassTimer,
   ViewsCheckPhaseName,
   ViewsCheckPhaseRecord,
@@ -50,10 +53,12 @@ import {
   type MachineDescription,
   type Measured,
   measured,
+  measuredVsyncOf,
   missing,
   nearestRank,
   ofPeriod,
   overallOf,
+  periodVsyncs,
   type ResultsFiles,
   row,
   type SpikeSetting,
@@ -66,8 +71,18 @@ import { join } from "node:path";
 /** The file's schema name. */
 export const VIEWS_CHECK_SCHEMA = "hyperion.views-check.results";
 
-/** The schema's version; bumped with any change to the file's shape. */
-export const VIEWS_CHECK_VERSION = 1;
+/**
+ * The schema's version; bumped with any change to the file's shape: 2 with each phase's
+ * `imageLimited` (fix-retina-frame), 3 with the run's `framePacing` and `frameRateHz` and each
+ * phase's `measuredVsyncMs`, its T the vsyncs the pacing draws its rate on (R07.T19).
+ */
+export const VIEWS_CHECK_VERSION = 3;
+
+/**
+ * The primary label block's statement while its image stands below its setting's resolution or air
+ * (the renderer's `viewBudget.ts` `IMAGE_DETAIL_LIMITED`, the guide's row).
+ */
+const IMAGE_DETAIL_LIMITED = "IMAGE: DETAIL LIMITED";
 
 /** The reason every figure read against T or from presentation is missing in a hidden run. */
 export const NO_WINDOW_REASON = "no window shown";
@@ -143,6 +158,10 @@ export interface ViewsCheckRunInput {
   readonly shown: boolean;
   /** The display's refresh rate (`Display.displayFrequency`), Hz; `null` hidden. */
   readonly displayHz: number | null;
+  /** How the launch paced `VIEW` (`--frame-pacing`, R07.T19). */
+  readonly framePacing: FramePacingName;
+  /** A hidden run's offscreen frame clock (`--frame-rate`), Hz; `null` shown. */
+  readonly frameRateHz: number | null;
   /**
    * The window's content size when the run ended, DIP; times the record's device-pixel ratio, in
    * pixels. A tiling window manager sizes it to its tile.
@@ -234,8 +253,16 @@ export interface PhaseFigures {
   readonly held: boolean;
   /** The primary's rate: 30 Hz for a photorealistic primary on the low setting, else 60 Hz. */
   readonly rateHz: 60 | 30;
-  /** T for this phase: the vsync period, or twice it at 30 Hz. */
+  /**
+   * T for this phase: the vsync period times the vsyncs the pacing draws {@link rateHz} on, so
+   * twice it at 30 Hz under `display`.
+   */
   readonly periodMs: Measured<number>;
+  /**
+   * The vsync period its animation frames measure by the renderer's rule (`vsyncPeriodOf`), the P
+   * a `rate` pacing draws by, or why it is missing.
+   */
+  readonly measuredVsyncMs: Measured<number>;
   readonly windowS: number;
   readonly views: ReadonlyArray<ViewFigures>;
   /** Intervals between animation frames and between the primary's draws, from their timestamps. */
@@ -250,6 +277,8 @@ export interface PhaseFigures {
   readonly untimedFrames: number;
   readonly droppedResolves: number;
   readonly unattributedGpuMs: number;
+  /** Whether the primary stated `IMAGE: DETAIL LIMITED` as the window ended (fix-retina-frame). */
+  readonly imageLimited: boolean;
   /**
    * The GPU process's main thread per primary draw, R05's slices of it per primary draw, and its
    * copy slices per primary draw.
@@ -304,6 +333,10 @@ export interface ViewsCheckResults {
     readonly displayHz: Measured<number>;
     /** The display's vsync period, ms. */
     readonly vsyncMs: Measured<number>;
+    /** How the launch paced `VIEW` (`--frame-pacing`, R07.T19). */
+    readonly framePacing: FramePacingName;
+    /** A hidden run's offscreen frame clock (`--frame-rate`), Hz; `null` shown. */
+    readonly frameRateHz: number | null;
     readonly captures: Measured<string>;
     readonly quiet: { readonly provisional: boolean; readonly note: string | null };
   };
@@ -422,13 +455,14 @@ function phaseFigures(
   trace: PhaseTraceFigures | undefined,
   vsyncMs: Measured<number>,
   setting: SpikeSetting,
+  pacing: FramePacingName,
 ): PhaseFigures {
   const expected = PHASE_VIEWS[record.name];
   const held =
     record.views.length === expected.length &&
     record.views.every((view, i) => view.style === expected[i]);
   const rateHz = setting === "low" && expected[0] === "photorealistic" ? 30 : 60;
-  const periodMs = ofPeriod(vsyncMs, (t) => (rateHz === 30 ? 2 * t : t));
+  const periodMs = ofPeriod(vsyncMs, (t) => periodVsyncs(pacing, rateHz, t) * t);
   const period = periodMs.value;
   const primaryDrawCount = record.views[0]?.draws ?? 0;
   const presentation: PhaseFigures["presentation"] =
@@ -490,6 +524,7 @@ function phaseFigures(
     held,
     rateHz,
     periodMs,
+    measuredVsyncMs: measuredVsyncOf(record.frameIntervalsMs),
     windowS: (record.endMs - record.startMs) / 1000,
     views: record.views.map(viewFigures),
     animationFrames: frameStats(record.frameIntervalsMs, vsyncMs.value),
@@ -500,6 +535,7 @@ function phaseFigures(
     untimedFrames: record.untimedFrames,
     droppedResolves: record.droppedResolves,
     unattributedGpuMs: record.unattributedGpuMs,
+    imageLimited: record.statements.includes(IMAGE_DETAIL_LIMITED),
     gpuProcess,
     // A phase that did not hold its configuration measured something else.
     criteria: { rows, overall: held ? overallOf(rows) : "not-measured" },
@@ -517,6 +553,24 @@ function gpuProcessPerFrame(phase: PhaseFigures | undefined): Measured<number> {
         : measured(phase.gpuProcess.value.busyMsPerFrame);
 }
 
+/**
+ * Why a pair's two phases did not draw their primary alike, or `null` where they did: its scene
+ * target's scale held one value over both phases, the same in each (a wireframe primary has none),
+ * and neither stated `IMAGE: DETAIL LIMITED` as its window ended (fix-retina-frame;
+ * research-frame-leans §3). A photorealistic primary's scale below its max states that line, and
+ * so does its frame-rate floor's stepped air, so a pair held so drew at the scale's max and the
+ * setting's air in both phases; otherwise its difference would count the primary's own change, as
+ * the controller holding the primary to its budget with instruments open would on a slow GPU.
+ */
+function unpairedReason(alone: PhaseFigures, opened: PhaseFigures): string | null {
+  if (alone.imageLimited || opened.imageLimited) {
+    return `the primary stated ${IMAGE_DETAIL_LIMITED} within the pair`;
+  }
+  const [a, b] = [alone.views[0]?.scale ?? null, opened.views[0]?.scale ?? null];
+  const held = a === null ? b === null : b !== null && a.min === a.max && b.min === b.max;
+  return held && a?.max === b?.max ? null : "the primary's scale moved within the pair";
+}
+
 function overheadPair(
   phases: ReadonlyArray<PhaseFigures>,
   without: ViewsCheckPhaseName,
@@ -527,14 +581,19 @@ function overheadPair(
   const extraCanvases = Math.max(0, (opened?.views.length ?? 1) - (alone?.views.length ?? 1));
   const a = gpuProcessPerFrame(alone);
   const b = gpuProcessPerFrame(opened);
+  // A phase that did not run is missing by its own reason first.
+  const unpaired =
+    alone === undefined || opened === undefined ? null : unpairedReason(alone, opened);
   const perCanvasMs: Measured<number> =
     a.value === null
       ? missing(a.reason)
       : b.value === null
         ? missing(b.reason)
-        : extraCanvases === 0
-          ? missing("no canvas was added")
-          : measured((b.value - a.value) / extraCanvases);
+        : unpaired !== null
+          ? missing(unpaired)
+          : extraCanvases === 0
+            ? missing("no canvas was added")
+            : measured((b.value - a.value) / extraCanvases);
   return {
     without,
     with: withInstruments,
@@ -629,7 +688,7 @@ export function buildViewsCheckResults(input: ViewsCheckInput): ViewsCheckResult
   const vsyncMs: Measured<number> =
     displayHz.value === null ? missing(displayHz.reason) : measured(1000 / displayHz.value);
   const phases = record.phases.map((phase) =>
-    phaseFigures(phase, input.traces.get(phase.name), vsyncMs, run.setting),
+    phaseFigures(phase, input.traces.get(phase.name), vsyncMs, run.setting, run.framePacing),
   );
   const copyPasses = [
     ...new Set(
@@ -685,6 +744,8 @@ export function buildViewsCheckResults(input: ViewsCheckInput): ViewsCheckResult
       timer: record.timer,
       displayHz,
       vsyncMs,
+      framePacing: run.framePacing,
+      frameRateHz: run.frameRateHz,
       captures: run.captures,
       quiet: { provisional, note: provisional ? `provisional: ${quietNote}` : null },
     },
@@ -755,6 +816,39 @@ export function buildViewsCheckResults(input: ViewsCheckInput): ViewsCheckResult
       },
     },
   };
+}
+
+/**
+ * Why a several-views check in the check-only software mode fails (plan R01, R01.T16), as one
+ * line, or `null` where it passes: an exit of the GPU process over the run, or a phase whose
+ * primary was not drawn in the style the phase asks for when it ended, its capture's moment.
+ *
+ * @param gpuProcessExits - The GPU process's exits by the run's end, which may pass the count its
+ * results were written with: the larger is judged.
+ * @remarks
+ * A hardware run is recorded, not judged (R07.T20), and stays so. On SwiftShader a lost GPU
+ * process takes the photorealistic primary back to the wireframe, which a run recorded alone
+ * passed (the research lane's F1, 2026-10-29), so a software run is judged on both.
+ */
+export function softwareViewsCheckFailures(
+  results: ViewsCheckResults,
+  gpuProcessExits: number,
+): string | null {
+  const reasons: string[] = [];
+  const exits = Math.max(results.findings.faults.gpuProcessExits, gpuProcessExits);
+  if (exits > 0) {
+    reasons.push(`${String(exits)} exits of the GPU process`);
+  }
+  for (const phase of results.phases) {
+    const asked = PHASE_VIEWS[phase.name][0];
+    const drawn = phase.views.find((view) => view.slot === "PRIMARY")?.style;
+    if (drawn !== asked) {
+      reasons.push(
+        `${phase.name}'s primary was drawn ${drawn ?? "in no style"}, not ${asked ?? ""}`,
+      );
+    }
+  }
+  return reasons.length === 0 ? null : reasons.join("; ");
 }
 
 /** A figure's text, or its reason in brackets. */
@@ -833,7 +927,7 @@ export function viewsCheckMarkdown(results: ViewsCheckResults): string {
     "",
     `- **Machine:** ${run.machine.cpu}, ${String(run.machine.logicalCores)} threads; GPU ${textOf(run.machine.gpu, (gpu) => gpu.description ?? `${String(gpu.vendorId)}:${String(gpu.deviceId)}`)}; governor ${textOf(run.machine.governor, (governor) => governor)}; load average ${keepsLoadAverage(run.platform) ? run.machine.loadAverage.map((value) => value.toFixed(2)).join(", ") : "none"}${run.quiet.note === null ? "" : ` (${run.quiet.note})`}`,
     `- **Versions:** app ${run.versions.app}, Electron ${run.versions.electron}, Chromium ${run.versions.chromium}`,
-    `- **Launch:** ${run.platform}, ${run.launchMode} mode, timer ${run.timer}, setting ${run.setting}, window ${run.shown ? "shown" : "hidden"} ${String(run.window.widthDip)} × ${String(run.window.heightDip)} DIP (${String(Math.round(run.window.widthDip * run.devicePixelRatio))} × ${String(Math.round(run.window.heightDip * run.devicePixelRatio))} px at a device-pixel ratio of ${String(run.devicePixelRatio)}), vsync ${textOf(run.vsyncMs, (value) => `${ms(value)} ms`)}`,
+    `- **Launch:** ${run.platform}, ${run.launchMode} mode, timer ${run.timer}, setting ${run.setting}, window ${run.shown ? "shown" : "hidden"} ${String(run.window.widthDip)} × ${String(run.window.heightDip)} DIP (${String(Math.round(run.window.widthDip * run.devicePixelRatio))} × ${String(Math.round(run.window.heightDip * run.devicePixelRatio))} px at a device-pixel ratio of ${String(run.devicePixelRatio)}), vsync ${textOf(run.vsyncMs, (value) => `${ms(value)} ms`)}, pacing ${run.framePacing}${run.frameRateHz === null ? "" : `, offscreen frame clock ${String(run.frameRateHz)} Hz`}`,
     `- **Captures (not committed):** ${textOf(run.captures, (dir) => `\`${dir}\``)}`,
     "",
     "## T20's checks",
@@ -860,11 +954,11 @@ export function viewsCheckMarkdown(results: ViewsCheckResults): string {
     "",
     "Intervals as p50 / p95 / p99 ms; durations as p50 / p95 ms.",
     "",
-    "| Phase | Held | T | Primary's draws | Presented (dropped) | Main thread | GPU frame | GPU process a frame | Verdict |",
-    "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    "| Phase | Held | T | Measured vsync | Primary's draws | Presented (dropped) | Main thread | GPU frame | GPU process a frame | Verdict |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ...phases.map(
       (phase) =>
-        `| ${phase.name} | ${phase.held ? "yes" : "NO"} | ${textOf(phase.periodMs, (value) => `${ms(value)} ms`)} | ${intervals(phase.primaryDraws)} | ${textOf(phase.presentation, (stats) => `${intervals(stats)} (${String(stats.dropped)})`)} | ${durations(phase.mainThreadMs)} | ${durations(phase.frameGpuMs)} | ${textOf(phase.gpuProcess, (value) => `${ms(value.busyMsPerFrame)} ms (${value.slicesMsPerFrame.map((slice) => `${slice.name} ${ms(slice.ms)}`).join(", ")})`)} | ${phase.criteria.overall} |`,
+        `| ${phase.name} | ${phase.held ? "yes" : "NO"} | ${textOf(phase.periodMs, (value) => `${ms(value)} ms`)} | ${textOf(phase.measuredVsyncMs, (value) => `${ms(value)} ms`)} | ${intervals(phase.primaryDraws)} | ${textOf(phase.presentation, (stats) => `${intervals(stats)} (${String(stats.dropped)})`)} | ${durations(phase.mainThreadMs)} | ${durations(phase.frameGpuMs)} | ${textOf(phase.gpuProcess, (value) => `${ms(value.busyMsPerFrame)} ms (${value.slicesMsPerFrame.map((slice) => `${slice.name} ${ms(slice.ms)}`).join(", ")})`)} | ${phase.criteria.overall} |`,
     ),
     "",
     "## Views",

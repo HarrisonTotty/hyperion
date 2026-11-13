@@ -13,7 +13,10 @@
 //!   companion before it dies and does not merge; one whose innermost orbit lies in the merger band
 //!   merges.
 //! - The stripped share per exploding star (ruling 137): hydrogen-poor core collapses over all core
-//!   collapses, companions' included, in 0.28–0.40.
+//!   collapses, companions' included, printed; and over the collapses that leave a neutron star,
+//!   the supernovae that Sana et al.'s (2012) share counts, in 0.28–0.40 (the research on
+//!   P11.T4.l's questions, 2026-10-29: the share over every collapse also counts the direct
+//!   collapses to black holes).
 
 use hyperion_sim::Seed;
 use hyperion_sim::coords::GalacticPosition;
@@ -31,6 +34,7 @@ use hyperion_sim::stellar::multiplicity::{
     stripped_mark_min_mass,
 };
 use hyperion_sim::stellar::photometry::absolute_magnitude_v;
+use hyperion_sim::stellar::remnant::RemnantKind;
 use hyperion_sim::stellar::system::{StarModel, SystemStars, SystemState, draw_metallicity};
 use hyperion_sim::stellar::{Phase, StarState};
 use hyperion_sim::time::UniverseTime;
@@ -484,6 +488,9 @@ struct MarkTally {
     merger_band_merged: u64,
     collapses: u64,
     stripped_collapses: u64,
+    /// The collapses that leave a neutron star, and the hydrogen-poor among them.
+    supernovae: u64,
+    stripped_supernovae: u64,
 }
 
 fn merge_marks(t: &mut MarkTally, p: MarkTally) {
@@ -494,6 +501,8 @@ fn merge_marks(t: &mut MarkTally, p: MarkTally) {
     t.merger_band_merged += p.merger_band_merged;
     t.collapses += p.collapses;
     t.stripped_collapses += p.stripped_collapses;
+    t.supernovae += p.supernovae;
+    t.stripped_supernovae += p.stripped_supernovae;
 }
 
 /// Whether `phase` is a naked helium star's: hydrogen-poor.
@@ -544,10 +553,11 @@ fn binary_system_stripped_marks_and_the_share_per_exploding_star() {
     );
     println!("{tally:?}");
     let share = count_f64(tally.stripped_collapses) / count_f64(tally.collapses);
+    let per_supernova = count_f64(tally.stripped_supernovae) / count_f64(tally.supernovae);
     println!(
         "marked primaries stripped and not merged before their deaths: {} of {}; merged {}; \
-         merger band merged {} of {}; hydrogen-poor share of core collapses {share:.3} \
-         (ruling 137: 0.28-0.40)",
+         merger band merged {} of {}; hydrogen-poor share of core collapses {share:.3}; of those \
+         that leave a neutron star {per_supernova:.3} (ruling 137: 0.28-0.40)",
         tally.marked_stripped,
         tally.marked,
         tally.marked_merged,
@@ -555,6 +565,11 @@ fn binary_system_stripped_marks_and_the_share_per_exploding_star() {
         tally.merger_band
     );
     assert!(tally.marked > 500 && tally.collapses > 2_000, "{tally:?}");
+    assert!(
+        (0.28..=0.40).contains(&per_supernova),
+        "the hydrogen-poor share of the collapses that leave a neutron star, {per_supernova:.3}, \
+         outside ruling 137's 0.28-0.40: {tally:?}"
+    );
 }
 
 /// What `record`'s system adds to the marks' tally.
@@ -621,7 +636,12 @@ fn tally_marks(galaxy: &Galaxy, record: &SystemRecord, acc: &mut MarkTally) {
                     acc.collapses += 1;
                     let just_before = Years::new((sn.age().value() - 1.0).max(0.0));
                     let phase = timeline.state_at(just_before).stars()[c].phase();
-                    acc.stripped_collapses += u64::from(is_helium_star(phase));
+                    let stripped = u64::from(is_helium_star(phase));
+                    acc.stripped_collapses += stripped;
+                    if sn.remnant().kind() == RemnantKind::NeutronStar {
+                        acc.supernovae += 1;
+                        acc.stripped_supernovae += stripped;
+                    }
                 }
             }
             None => {
@@ -631,7 +651,15 @@ fn tally_marks(galaxy: &Galaxy, record: &SystemRecord, acc: &mut MarkTally) {
                     acc.collapses += 1;
                     // A hydrogen-poor progenitor keeps under a tenth of a solar mass of envelope.
                     let envelope = model.death().expect("dies").progenitor().envelope_mass();
-                    acc.stripped_collapses += u64::from(envelope.value() < 0.1);
+                    let stripped = u64::from(envelope.value() < 0.1);
+                    acc.stripped_collapses += stripped;
+                    if model
+                        .remnant()
+                        .is_some_and(|r| r.kind() == RemnantKind::NeutronStar)
+                    {
+                        acc.supernovae += 1;
+                        acc.stripped_supernovae += stripped;
+                    }
                 }
             }
         }

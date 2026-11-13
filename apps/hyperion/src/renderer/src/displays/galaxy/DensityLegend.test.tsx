@@ -1,3 +1,4 @@
+import type { MapPopulation } from "@hyperion/protocol";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
@@ -7,9 +8,16 @@ import { DensityLegend } from "./DensityLegend";
 // The guide's --surface-0 and --text; literals are allowed in tests only.
 const RAMP = buildRamp(parseHexColour("#05080d"), parseHexColour("#c8d6e5"));
 
-function renderLegend(floorLog10PerLy2: number, ceilingLog10PerLy2: number): void {
+function renderLegend(
+  floorLog10PerLy2: number,
+  ceilingLog10PerLy2: number,
+  population: MapPopulation = "all",
+  statesCount = true,
+): void {
   render(
     <DensityLegend
+      population={population}
+      statesCount={statesCount}
       ramp={RAMP}
       floorLog10PerLy2={floorLog10PerLy2}
       ceilingLog10PerLy2={ceilingLog10PerLy2}
@@ -129,5 +137,35 @@ describe("DensityLegend", () => {
     expect(screen.getByRole("img")).toHaveAccessibleName(
       "Column density legend, log scale: no systems in the map",
     );
+  });
+
+  it("states what the REMNANTS map counts, in words and in the bar's name (plan 08, P08.T15.b)", () => {
+    renderLegend(-6, -1, "layer_e_remnants");
+
+    expect(screen.getByText(/^DISPLACED · INIT MASS ABOVE 8/u)).toContainElement(
+      screen.getByRole("img", { name: "solar masses" }),
+    );
+    expect(
+      screen.getByRole("img", {
+        name: /, displaced remnants of stars of initial mass above 8 solar masses$/u,
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("leaves the REMNANTS line to the page's other view, its bar's name stating it still", () => {
+    renderLegend(-6, -1, "layer_e_remnants", false);
+
+    expect(screen.queryByText(/DISPLACED/u)).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("img", {
+        name: /, displaced remnants of stars of initial mass above 8 solar masses$/u,
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("states nothing more of a map of every system", () => {
+    renderLegend(-6, -1);
+
+    expect(screen.queryByText(/DISPLACED/u)).not.toBeInTheDocument();
   });
 });

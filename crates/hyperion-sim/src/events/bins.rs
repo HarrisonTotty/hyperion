@@ -280,8 +280,11 @@ impl PoissonBins {
     ///
     /// Every bin the window touches is generated in full and its events outside the window are
     /// dropped, so the listing over a window is exactly the union of the listings over any
-    /// partition of it. The cost is proportional to the number of bins the window touches. Bins
-    /// beyond the 40-bit bin numbers hold no events.
+    /// partition of it. A candidate outside the window takes its thinning word unread, without
+    /// asking `rate`, so that the bin's later candidates draw the words they would have: a model
+    /// whose rate is costly, a star's state, pays only for the candidates in the window (plan 12,
+    /// P12.T5.e). The cost is proportional to the number of bins the window touches. Bins beyond
+    /// the 40-bit bin numbers hold no events.
     ///
     /// # Panics
     ///
@@ -307,11 +310,14 @@ impl PoissonBins {
         let begin = out.len();
         for k in first..=last {
             let bin = EventBin::new(k).expect("clamped to the 40-bit bin numbers");
-            self.visit_bin(series, bin, rate, |event| {
-                if window.contains(event.time) {
+            let Some(mut open) = self.open_bin(series, bin, rate) else {
+                continue;
+            };
+            for j in 0..open.count {
+                if let Some(event) = open.candidate_within(series, bin, j, rate, window) {
                     out.push(event);
                 }
-            });
+            }
         }
         out[begin..].sort_by(|a, b| a.time.cmp(&b.time).then(a.id.cmp(&b.id)));
     }
@@ -419,24 +425,6 @@ impl PoissonBins {
         open.candidate(series, bin, j, rate)
     }
 
-    /// Emits every accepted event of bin `bin`, in candidate order.
-    fn visit_bin(
-        &self,
-        series: &EventSeries,
-        bin: EventBin,
-        rate: &impl RateModel,
-        mut emit: impl FnMut(BinEvent),
-    ) {
-        let Some(mut open) = self.open_bin(series, bin, rate) else {
-            return;
-        };
-        for j in 0..open.count {
-            if let Some(event) = open.candidate(series, bin, j, rate) {
-                emit(event);
-            }
-        }
-    }
-
     /// Bin `bin`'s stream after its count has been drawn, or `None` if the clock cannot hold the
     /// bin.
     #[must_use]
@@ -506,12 +494,48 @@ impl OpenBin {
         j: u8,
         rate: &impl RateModel,
     ) -> Option<BinEvent> {
+        let time = self.next_time();
+        self.decided(series, bin, j, rate, time)
+    }
+
+    /// Candidate `j` if its time lies in `window`, from the same two words as
+    /// [`candidate`](Self::candidate): one outside the window takes its decision's word unread,
+    /// without asking `rate`, so that the bin's later candidates draw the words they would have.
+    fn candidate_within(
+        &mut self,
+        series: &EventSeries,
+        bin: EventBin,
+        j: u8,
+        rate: &impl RateModel,
+        window: TimeWindow,
+    ) -> Option<BinEvent> {
+        let time = self.next_time();
+        if !window.contains(time) {
+            let _decision = self.stream.next_u64();
+            return None;
+        }
+        self.decided(series, bin, j, rate, time)
+    }
+
+    /// The next candidate's time, from the stream's next word.
+    fn next_time(&mut self) -> UniverseTime {
         // The word's top 53 bits as a fraction of the bin, `uniform()` in exact integer arithmetic:
         // 53 + 75 bits at most, so the product fits in 128.
         let fraction = u128::from(self.stream.next_u64() >> 11);
         let offset = i128::try_from((fraction * self.bin_nanos) >> 53)
             .expect("an offset below the bin's length fits in i128");
-        let time = from_nanos(self.start_nanos + offset).expect("inside a bin the clock holds");
+        from_nanos(self.start_nanos + offset).expect("inside a bin the clock holds")
+    }
+
+    /// Candidate `j` at `time`, kept or thinned by the stream's next word.
+    fn decided(
+        &mut self,
+        series: &EventSeries,
+        bin: EventBin,
+        j: u8,
+        rate: &impl RateModel,
+        time: UniverseTime,
+    ) -> Option<BinEvent> {
         let accepted = self
             .stream
             .decide(Threshold::from_ratio(rate.rate(time).value(), self.bound));
@@ -626,6 +650,61 @@ mod tests {
         }
     }
 
+    /// A model that records every time it is asked its rate.
+    struct Asked<'a, R> {
+        inner: R,
+        times: &'a std::cell::RefCell<Vec<UniverseTime>>,
+    }
+
+    impl<R: RateModel> RateModel for Asked<'_, R> {
+        fn bound(&self, bin: TimeWindow) -> EventsPerSecond {
+            self.inner.bound(bin)
+        }
+
+        fn rate(&self, t: UniverseTime) -> EventsPerSecond {
+            self.times.borrow_mut().push(t);
+            self.inner.rate(t)
+        }
+    }
+
+    /// A window that cuts its first and last bins lists what the whole bins list inside it, bit for
+    /// bit, and asks the model no rate outside it: a candidate outside takes its thinning word
+    /// unread.
+    #[test]
+    fn a_window_asks_no_rate_outside_itself_and_lists_its_part_of_the_whole_bins() {
+        let rate = Sinusoid {
+            mean: EventsPerSecond::per_day(6.0),
+            depth: 0.8,
+            period_seconds: 9 * 3_600,
+        };
+        let times = std::cell::RefCell::new(Vec::new());
+        let asked = Asked {
+            inner: rate,
+            times: &times,
+        };
+        let cut = TimeWindow::new(at(3 * DAY + 41_017, 3), at(6 * DAY + 7_211, 999)).unwrap();
+        let cut_list = list(daily(), &flares(), cut, &asked);
+        assert!(times.borrow().iter().all(|&t| cut.contains(t)));
+        let in_cut = times.borrow().len();
+        times.borrow_mut().clear();
+        let whole = list(daily(), &flares(), days(3, 7), &asked);
+        assert!(
+            times.borrow().len() > in_cut,
+            "the whole bins ask more candidates"
+        );
+        let inside: Vec<BinEvent> = whole
+            .into_iter()
+            .filter(|e| cut.contains(e.time()))
+            .collect();
+        // Some events, and fewer than the four bins' 6 a day at the sinusoid's peak of 1.8 times.
+        assert!(
+            !inside.is_empty() && inside.len() < 4 * 6 * 2,
+            "{}",
+            inside.len()
+        );
+        assert_eq!(cut_list, inside);
+    }
+
     #[test]
     fn bins_are_between_16_seconds_and_2_to_the_44() {
         assert_eq!(
@@ -680,7 +759,7 @@ mod tests {
         assert!(events.len() > 100, "{} events", events.len());
         assert!(events.iter().all(|e| w.contains(e.time())));
         assert!(events.windows(2).all(|p| p[0].time() <= p[1].time()));
-        assert!(list(daily(), &flares(), days(0, 0), &per_day(20.0)).is_empty());
+        assert_eq!(list(daily(), &flares(), days(0, 0), &per_day(20.0)), []);
     }
 
     /// The window, rate and cut sets of the partition tests.
@@ -810,7 +889,7 @@ mod tests {
             &rate,
         );
         assert_eq!(active, expected);
-        assert!(!active.is_empty());
+        assert_ne!(active, []);
         // An event exactly at t is active at t.
         let onset = active.last().unwrap().time();
         let mut at_onset = Vec::new();
@@ -975,7 +1054,7 @@ mod tests {
             assert_eq!(short.event(&series, e.id(), &rate).as_ref(), Some(e));
         }
         let past = TimeWindow::new(at(edge, 0), at(edge + 1_000, 0)).unwrap();
-        assert!(listing(past).is_empty());
+        assert_eq!(listing(past), []);
     }
 
     /// Pinned keys: a star's flares and a system's self-test events, with each event's time and

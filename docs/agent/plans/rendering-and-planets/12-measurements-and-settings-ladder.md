@@ -301,8 +301,13 @@ built, T0 changes only the call sites here.
   main-process `main/spike.ts`, `main/fdinfo.ts` (summing distinct client IDs) and
   `main/reduceTrace.ts`; its results files
   `docs/measurements/descent-spike/<date>-<machine>-<setting>.json`; the pass criterion of Design
-  note 21 and its pacing; open question 2's rule (Design note 22); `HeightWorkerPool` and
-  `postField`; `PatchCache` and its budget; `terrainAnnunciation`.
+  note 21 and its pacing; open question 2's rule (Design note 22); `HeightWorkerPool` and its
+  per-body calls (`fieldInit`, `fieldChunk`, `fieldRelease`, `fieldResidentBytes`; R10.T7, which
+  replaced R05's `postField`), and R10.T16's `TerrainSession` with its memory report (the workers'
+  copies, the pool's kept blocks and its GPU bytes by category), for Design note 6's line, read
+  beside the engine's tally by category (in `VIEW`, `height-cache` is the terrain passes' alone,
+  R10.T16.b's question; `TerrainPass.gpuBytes` is the lever if another owner ever allocates under
+  it; decision-r10-t16-leans §13); `PatchCache` and its budget; `terrainAnnunciation`.
 - **R06:** the sky request and its census as arrival work on the server's bulk priority; the star
   cubemap bake and the sprite budget, with their settings.
 - **R07:** `photorealisticPasses(setting)` and its `PassList`, whose labels are the
@@ -320,7 +325,10 @@ built, T0 changes only the call sites here.
 - **R09:** the coarse pass on the server as arrival work, the coarse-field chunks and their request,
   the height function's bench (µs a point with its gradient).
 - **R10:** terrain on generated worlds, the wireframe's depth-only terrain at 4 px with contours,
-  horizon-map shadows, the height-texture cache sizes.
+  horizon-map shadows, the high setting's shadow cascades (R10.T9.b) and their pass label
+  `terrain shadows` (`TERRAIN_SHADOW_PASS_LABEL`, the cascades' four caster passes, submitted
+  before `bodies` on the high setting), which `PASS_ROWS` maps to `shadows`, the height-texture
+  cache sizes.
 - **R11:** the ladder entries R11.T1 adds to R05's `ViewSettings` (`decoration`,
   `scatterDensity`, `clouds`, `cloudShadows`, `oceanComponents`, `oceanRefraction`, `whitecaps`,
   `rings` and `ringShadowOnBody`, Design note 18); its pass labels (`decoration`, `rocks`,
@@ -370,8 +378,8 @@ throttling in 35,900 s of uptime.
    with `source: "descent-spike"`, and the other plans' benchmarks recorded in their "as built"
    notes become `plan-benchmark` records by hand, each citing its plan and task (T8.a). The
    directory is not in `.claude/CLAUDE.md`'s documentation layout, and adding it is the owner's
-   decision (README, "Awaiting the owner"): T1.c drafts the line and the owner signs off; nothing
-   in this plan edits `.claude/`.
+   decision (README, "Awaiting the owner"): T1.c drafts the line, ruled 2026-10-19
+   (`signoff-12.md`, item 34), and the owner applies it; nothing in this plan edits `.claude/`.
 
 2. **What "replaced" means for the brainstorm.** The brainstorm says the implementing plan should
    replace its estimates with measured figures and keep them under version control. The record and
@@ -457,7 +465,7 @@ throttling in 35,900 s of uptime.
    `nvidia-smi` documentation). CPU memory is each process's from `app.getAppMetrics()`, which does
    not hold GEM pages (163 MB before and 166 MB after 256 MiB became resident), and each height
    worker reports its WebAssembly memory's byte length and its coarse-field copy, so the field in
-   three workers (about 12 MB each for an Earth, R09 Design note 17) is a line of its own. On the
+   three workers (15.1 MB each for an Earth, R09 Design note 17) is a line of its own. On the
    UHD 620 GPU and CPU memory are one pool, so the two are reported apart and never summed into a
    "free" figure.
 
@@ -536,8 +544,8 @@ throttling in 35,900 s of uptime.
      across the 10⁹ m boundary and the slab-to-particle criterion, which lights the rings row and
      the gas giant's atmosphere.
    - `arrival-memory`: arrival at the pinned Earth-sized world, fully surveyed first through R09's
-     explicit survey request, so that its whole coarse field (about 12 MB for an Earth at level 8,
-     R09 Design note 17, against the brainstorm's 2 to 15 MB) is posted to three workers; then the
+     explicit survey request, so that its whole coarse field (15.1 MB for an Earth at level 8,
+     R09 Design note 17, against the brainstorm's 4 to 15 MB) is posted to three workers; then the
      descent's deepest pose (1 m) held for a minute once the field and its patches are resident: the
      resident memory's peak against the ceiling. The record states the field's measured bytes, and
      the field's and the sky's transfer bytes and times over R03's binary frames.
@@ -766,11 +774,11 @@ outcome in the task it falls on.
   a `virtual` record; `budget.md` agrees with `runs.v1.jsonl` (the sync test, in the package's
   suite, which `pnpm test` runs). Acceptance: `pnpm test`, `just ci`, and `just perf-table` leaves
   the tree unchanged.
-- **R12.T1.c The documentation layout, for the owner.** Draft the line `docs/measurements/` —
+- **R12.T1.c The documentation layout.** Draft the line `docs/measurements/` —
   recorded measurements of the product, one directory per run family — for `.claude/CLAUDE.md`'s
-  "Documentation Layout", in this plan's Risks and in the commit message of T1.b, and put it to the
-  owner. This plan does not edit `.claude/`. Acceptance: the drafted line is in Risks; the owner
-  signs off.
+  "Documentation Layout", in this plan's Risks and in the commit message of T1.b, ruled 2026-10-19
+  (`signoff-12.md`, item 34). This plan does not edit `.claude/`; the owner applies the line.
+  Acceptance: the line is in Risks as ruled.
 
 Files: `packages/perf/**`, `apps/hyperion/package.json`, the root `package.json`,
 `pnpm-lock.yaml`, `docs/measurements/rendering/*`, `justfile`, this plan's Risks.
@@ -815,7 +823,7 @@ battery. Acceptance: `pnpm test`, `just ci`.
   `rg11b10ufloat`, `rgba16float`, `depth32float`, cube layers, mip chains); `MEMORY_ITEMS`
   (`@hyperion/perf`) filled for every `MemoryCategory` by its owner's name, including the five its
   owners took from this plan (`height-cache`, `atmosphere-tables` and `atmosphere-view` by
-  R05.T11.a, T12.b and T12.c; `coarse-field-gpu` and `shadows` by R10.T7 and T9.a); where one of
+  R05.T11.a, T12.b and T12.c; `coarse-field-gpu` and `shadows` by R10.T7 and T9.b); where one of
   those tasks has not landed, T3.a adds the member to R01's union in `view/engine/memory.ts` under
   the same name. Tests, which also re-check the brainstorm's memory table as arithmetic from
   formats: a 1,024² `rgb9e5ufloat` cubemap with mips is 6 × 4 B × 1,024² × 4⁄3 ≈ 33.6 MB ("34 MB
@@ -1111,17 +1119,20 @@ generator version it ran at. The plan reserves nothing in the generator.
   sustained share the GPU gets is lower, estimated at 70–80% of peak for the whole machine and not
   measured here, since no benchmark runs on the shared machine.
 - **The documentation layout** (T1.c): the drafted line for `.claude/CLAUDE.md`,
-  `docs/measurements/` — recorded measurements of the product, one directory per run family — awaits
-  the owner.
+  `docs/measurements/` — recorded measurements of the product, one directory per run family — is
+  ruled (`signoff-12.md`, item 34) and left for the owner to apply to `.claude/CLAUDE.md`.
 - **Memory categories named by their owners.** The five names this plan asked for are now in the
   owning plans' tasks: `height-cache` (R05.T11.a), `atmosphere-tables` (R05.T12.b) and
   `atmosphere-view` (R05.T12.c), which R08 keeps for its widened, per-sun and thick tables (R08
-  Consumes R05); and `coarse-field-gpu` (R10.T7, T10.d) and `shadows` (R10.T9.a). The coarse
-  field's GPU copy is R10's coverage mask and class map, and R09 allocates nothing on the GPU, so
-  R09 names none. T3.a only checks that `MEMORY_ITEMS` maps them.
+  Consumes R05); and `coarse-field-gpu` (R10.T7, T10.d, T10.g) and `shadows` (R10.T9.b). The
+  coarse field's GPU copy is R10's coverage mask, class map and, since R10.T10.g, the disc's normal
+  map (1,597,536 B, about 1.52 MiB, at level 8), and R09 allocates nothing on the GPU, so R09 names
+  none. The normal map's CPU copy on the render thread, as large, is not counted under
+  `coarse-field-gpu` (R10's Risks, "Deferred findings (2026-10-13 rule) (R10.T10.g)"). T3.a only
+  checks that `MEMORY_ITEMS` maps them.
 - **R05's memory run and R12's differ on purpose.** R05's criterion row keeps the brainstorm's 15 MB
-  synthetic field (R05 Risks, "The coarse field's size"); `arrival-memory` measures a real field,
-  about 12 MB for an Earth (R09 Design note 17).
+  synthetic field (R05 Risks, "The coarse field's size"); `arrival-memory` measures a real
+  field, 15.1 MB for an Earth (R09 Design note 17).
 - **Ask of R07, open.** The instrument panels' sizes in the cockpit layout (README, "Between
   rendering plans"). Until R07 designs them, T5.a takes the sizes from R07's code as built. R07's
   stable pass labels (`PHOTOREAL_PASS_LABELS`, R07.T7) and the controller's bounds as a setting

@@ -33,7 +33,9 @@ use hyperion_sim::planetary::placement::classes::tides::{
 };
 use hyperion_sim::planetary::placement::{PlacedPlanet, PlacementHost, mutual_hill_radius, place};
 use hyperion_sim::stellar::draws::{StarDraws, UnitUniform};
-use hyperion_sim::stellar::multiplicity::{HierarchyNode, MultiplicityContext};
+use hyperion_sim::stellar::multiplicity::{
+    HierarchyNode, MultiplicityContext, NodeIndex, SlotKind, SystemHierarchy,
+};
 use hyperion_sim::stellar::sse::{ZCoeffs, zams};
 use hyperion_sim::stellar::system::draw_metallicity;
 use hyperion_sim::stellar::{Composition, evolve};
@@ -1519,7 +1521,7 @@ fn blend_statistics(galaxy: &Galaxy, fgk: &[System], early_m: f64, report: &mut 
         "small planets per star of 0.65-0.75 M_sun inside 200 days (ruling 87.3)",
         blend,
         (fgk.min(early_m), fgk.max(early_m)),
-        (1.07, 1.13),
+        (1.08, 1.14),
     );
 }
 
@@ -1607,7 +1609,10 @@ fn metallicity_statistics(galaxy: &Galaxy, report: &mut Report) {
     );
 }
 
-/// P14.T9.c's close-binary suppression, on the FGK sample.
+/// Design note 10's suppression on the FGK sample, which the truncated zones make
+/// (decision-p14-d10-bd-companions §2): close-binary hosts against single stars of the same mass
+/// (P14.T9.c's test (c)), and close planets by the separation of the primary's nearest stellar
+/// companion against Moe and Kratter's (2021, MNRAS 507, 3593, §2.2) compilation.
 fn close_binary_statistics(fgk: &[System], report: &mut Report) {
     // Close binaries against single stars of the same mass (P14.T9.c).
     let per_host = |systems: &[System], wanted: HostMultiplicity| {
@@ -1628,12 +1633,75 @@ fn close_binary_statistics(fgk: &[System], report: &mut Report) {
     };
     let suppression = per_host(fgk, HostMultiplicity::CloseBinary)
         / per_host(fgk, HostMultiplicity::SingleOrWide);
-    report.finding(
-        "close-binary hosts' planets against single stars' (Kraus et al. 2016)",
+    report.check(
+        "close-binary hosts' planets against single stars' (Kraus et al. 2016; P14.T9.c)",
         suppression,
         (0.25, 0.5),
-        (0.09, 0.12),
     );
+    // Close planets, of 1 M⊕ or more inside 300 days, each weighted by its transit probability
+    // (∝ 1 ÷ a), per system whose primary's nearest companion is a star at a semi-major axis in
+    // the bin, against single stars'. Moe and Kratter's binaries are stellar, so systems with a
+    // brown dwarf are left out. Their §2.2, from Wang et al. (2014b): under 7% at 1–3.2 au,
+    // 14 (+11 −8)% at 3.2–10 au, 29 (+19 −10)% at 10–32 au, 62 ± 23% at 32–100 au and
+    // 87 ± 22% at 100–320 au, each window 1σ.
+    let close_planets = |s: &System| -> f64 {
+        primary_planets(s)
+            .filter(|(_, p)| period_days(p) < 300.0 && p.mass().value() >= 1.0)
+            .map(|(_, p)| 1.0 / AstronomicalUnits::from(p.orbit().semi_major_axis()).value())
+            .sum()
+    };
+    let mean = |systems: &[&System]| {
+        let n = u32::try_from(systems.len()).expect("a sample's size fits a u32");
+        systems.iter().map(|&s| close_planets(s)).sum::<f64>() / f64::from(n)
+    };
+    let singles: Vec<&System> = fgk
+        .iter()
+        .filter(|s| s.hierarchy.stars().len() == 1)
+        .collect();
+    let single = mean(&singles);
+    for (lo, hi, window) in [
+        (1.0, 3.2, (0.0, 0.07)),
+        (3.2, 10.0, (0.06, 0.25)),
+        (10.0, 32.0, (0.19, 0.48)),
+        (32.0, 100.0, (0.39, 0.85)),
+        (100.0, 320.0, (0.65, 1.09)),
+    ] {
+        let binaries: Vec<&System> = fgk
+            .iter()
+            .filter(|s| nearest_stellar_companion_au(s).is_some_and(|a| (lo..hi).contains(&a)))
+            .collect();
+        report.check(
+            &format!(
+                "close planets of FGK primaries with a stellar companion at {lo}-{hi} au against \
+                 single stars' (Moe and Kratter 2021, §2.2)"
+            ),
+            mean(&binaries) / single,
+            window,
+        );
+    }
+}
+
+/// The semi-major axis, au, of the closest pair that holds the primary of `s`, when `s` has more
+/// than one star and no brown dwarf; `None` otherwise.
+fn nearest_stellar_companion_au(s: &System) -> Option<f64> {
+    let h = &s.hierarchy;
+    if h.stars().len() < 2 || h.stars().iter().any(|x| x.kind() == SlotKind::BrownDwarf) {
+        return None;
+    }
+    h.pairs()
+        .filter(|(index, _)| holds_primary(h, *index))
+        .map(|(_, orbit)| AstronomicalUnits::from(orbit.semi_major_axis()).value())
+        .reduce(f64::min)
+}
+
+/// Whether node `index` of `h` holds the primary, star 0.
+fn holds_primary(h: &SystemHierarchy, index: NodeIndex) -> bool {
+    match h.node(index) {
+        HierarchyNode::Star(star) => star.get() == 0,
+        HierarchyNode::Pair { inner, outer, .. } => {
+            holds_primary(h, *inner) || holds_primary(h, *outer)
+        }
+    }
 }
 
 /// Ruling 55.3's anchors, and ruling 55.1's correlation, on placed single Suns at \[Fe/H\] = 0.
@@ -1780,6 +1848,14 @@ fn anchor_statistics(galaxy: &Galaxy, report: &mut Report, ranks: &mut Lcg) {
 ///   inside 200 days, b < 1 over sixteen isotropic lines of sight each) showing one planet in
 ///   0.58–0.76 of cases: Ballard and Johnson's (2016, §2) 71 of 106 hosts, 0.670 ± 0.046, with
 ///   their 17 doubles (0.16) reported beside it;
+/// - (P14.T9.c, decision-p14-d10-bd-companions §2) close-binary hosts of 0.7–1.3 M☉ have planets
+///   a quarter to a half as often as single stars (Kraus et al. 2016, AJ 152, 8: `S_bin` = 0.34
+///   (+0.14 −0.15) inside 47 au). By the separation of the primary's nearest stellar companion,
+///   close planets (1 M⊕ or more inside 300 days, weighted by transit probability) fall as Moe and
+///   Kratter (2021, MNRAS 507, 3593, §2.2) compile them from Wang et al. (2014b): under 7% of
+///   single stars' at 1–3.2 au, 14 (+11 −8)% at 3.2–10 au, 29 (+19 −10)% at 10–32 au, 62 ± 23% at
+///   32–100 au and 87 ± 22% at 100–320 au. The truncated zones make all of it, and no factor is
+///   applied on top;
 /// - (87.4) the outer planet of a pair is the larger in Weiss et al.'s 65.4% with the ±2.1%
 ///   sampling spread of their 504 pairs (a re-run of their cuts gives 64.5%), 0.633–0.675: a
 ///   finding at 0.640 until ruling 94.4's taper let the outer members of chains centred near the
@@ -1805,8 +1881,10 @@ fn anchor_statistics(galaxy: &Galaxy, report: &mut Report, ranks: &mut Lcg) {
 ///   median of 2 (mean 2.06) against He, Ford and Ragozzine's (2019, MNRAS 490, 4575) three
 ///   ([`cluster_statistics`]; ruling 116.5), since groups straddle the 300-day cut;
 /// - (87.3) small planets per star inside 200 days about primaries of 0.65–0.75 M☉, which ruling
-///   85.4's blend reaches, are 1.09 (1.15 before ruling 106.2's rocky groups), between the FGK
-///   stars' 0.66 and the early M dwarfs' 2.02;
+///   85.4's blend reaches, are 1.11, between the FGK stars' 0.67 and the early M dwarfs' 2.13. They
+///   were 1.07 before decision-p14-d10-bd-companions §2 took the close-binary factor off, 1.09
+///   before P11.T2.d's brown-dwarf companions, whose zone limits cut their hosts' discs, and 1.15
+///   before ruling 106.2's rocky groups;
 /// - (87.2, 102.4) small planets per early M dwarf that is single or whose nearest companion is
 ///   over 200 au away, inside 200 days, are 2.57 against 3.6 (Dressing and Charbonneau's 2.47 per
 ///   Kepler target ÷ 0.68, the share of Moe and Kratter's (2021, MNRAS 507, 3593, §4 and Fig. 6)
@@ -1820,12 +1898,9 @@ fn anchor_statistics(galaxy: &Galaxy, report: &mut Report, ranks: &mut Lcg) {
 ///   five or more: with one or two planets at the half-normal 0.3 the pair's outer planet is
 ///   scaled as often as an FGK star's (0.25);
 /// - (102.5) Pascucci et al.'s (2018, Table 1) mass-ratio slope above the break for K and G hosts,
-///   −2.9 ± 0.4, is −0.36 here (dN ÷ d log q over (2.8–8) × 10⁻⁵; [`pascucci_statistics`]), and
+///   −2.9 ± 0.4, is −0.39 here (dN ÷ d log q over (2.8–8) × 10⁻⁵; [`pascucci_statistics`]), and
 ///   0.067 of their window's planets lie above q = 6 × 10⁻⁵ against about 0.02: the taper stays on
 ///   the members (plan 14's ruling 102 note);
-/// - close-binary hosts have planets 0.13 as often as single stars: `CLOSE_BINARY_SUPPRESSION`'s
-///   0.34 compounds with their truncated discs, whose budgets now build no chain at all where they
-///   cannot build its first planet (ruling 66), under Kraus et al.'s 1σ (0.19–0.48);
 /// - small pairs are at 10 mutual Hill radii or more in 99.3% of pairs measured as Weiss et al.
 ///   measure them, from masses their mass–radius relation gives each radius, and in all of them by
 ///   their own masses, the floor of design note 7 by construction, against Weiss et al.'s 93%; the

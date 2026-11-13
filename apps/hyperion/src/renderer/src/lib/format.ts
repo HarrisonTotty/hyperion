@@ -6,8 +6,9 @@
  * Each function returns the value without its unit, except where it chooses one, when it returns
  * the unit beside the value or with it ({@link formatScaleLength}, {@link formatAge},
  * {@link formatSubstellarMass}, {@link formatPeriod}, {@link formatBodyDistance},
- * {@link formatPressure}), or where the unit is
- * written against the digits (the degree sign, the `yr` inside {@link formatUniverseTimeDhms}). A
+ * {@link formatSurfaceRange}, {@link formatPressure}, {@link formatBearingCapacity}), or where the
+ * unit is written against the digits (the degree sign, the `yr` inside
+ * {@link formatUniverseTimeDhms}). A
  * missing value is the caller's em dash: every formatter here requires a finite number and throws
  * on anything else, since a `NaN` reaching the screen is a bug upstream.
  */
@@ -42,15 +43,28 @@ type SignStyle = "negative" | "always";
 const numberFormats = new Map<string, Intl.NumberFormat>();
 
 // Building an `Intl.NumberFormat` costs far more than formatting with one, and lists and readouts
-// format many values a render, so each distinct format is built once.
+// format many values a render, so each distinct format is built once. The cache is keyed by the
+// caller's name and the options both: two formats of one name whose options differ (a grouping, a
+// sign) would otherwise share whichever was built first.
 function numberFormat(key: string, options: Intl.NumberFormatOptions): Intl.NumberFormat {
-  const cached = numberFormats.get(key);
+  const cacheKey = `${key}|${optionsKey(options)}`;
+  const cached = numberFormats.get(cacheKey);
   if (cached !== undefined) {
     return cached;
   }
   const created = new Intl.NumberFormat("en-US", options);
-  numberFormats.set(key, created);
+  numberFormats.set(cacheKey, created);
   return created;
+}
+
+// The options as text, each `name=value` in the order of the names, so that the same options
+// written in another order are one format.
+function optionsKey(options: Intl.NumberFormatOptions): string {
+  const entries: ReadonlyArray<readonly [string, unknown]> = Object.entries(options);
+  return entries
+    .map(([name, value]) => `${name}=${String(value)}`)
+    .toSorted()
+    .join(",");
 }
 
 function requireFinite(value: number, what: string): void {
@@ -166,6 +180,28 @@ export function formatBearingDeg(angleDeg: number, decimals = 0): string {
 /** Formats a signed whole angle with at least two digits: `+30°`, `-05°`, `+00°`. */
 export function formatSignedDeg(angleDeg: number): string {
   return `${fixed(angleDeg, 0, "always", 2)}°`;
+}
+
+/**
+ * What a direction's azimuth runs from: `local`, the observer's `COREWARD` through `SPINWARD`, or,
+ * within a light-year of the galactic axis, `galactic_x`, galactic +x through +y (plan 12, Design
+ * note 12).
+ */
+export type BearingFrom = "local" | "galactic_x";
+
+/**
+ * Formats a direction from the ship as an azimuth and a signed elevation, `047° +12°`, and
+ * `047° +12° FROM +X` where the azimuth runs from galactic +x (plan 12, P12.T12).
+ *
+ * @remarks
+ * The guide's direction: the azimuth by the bearing rule ({@link formatBearingDeg}), the elevation
+ * signed and zero-padded to two digits ({@link formatSignedDeg}), positive north.
+ *
+ * @param elevationDeg - From -90 to +90.
+ */
+export function formatBearing(azimuthDeg: number, elevationDeg: number, from: BearingFrom): string {
+  const direction = `${formatBearingDeg(azimuthDeg)} ${formatSignedDeg(elevationDeg)}`;
+  return from === "galactic_x" ? `${direction} FROM +X` : direction;
 }
 
 /** Unit of an age as {@link formatAge} writes it. */
@@ -501,6 +537,69 @@ function distanceIn(distanceKm: number, band: DistanceBand): string {
     : significantOrSci(inUnit, 0, band.unit === "AU" ? 1_000_000 : Number.POSITIVE_INFINITY);
 }
 
+/**
+ * Unit of a range to the ground as {@link formatSurfaceRange} writes it: metres, then a planetary
+ * system's distance units.
+ */
+export type SurfaceRangeUnit = "m" | BodyDistanceUnit;
+
+/** A range to the ground split into its digits and unit, so that the unit can be set apart. */
+export interface FormattedSurfaceRange {
+  readonly value: string;
+  readonly unit: SurfaceRangeUnit;
+}
+
+/** Ranges below this many metres, after rounding, are read in `m`. */
+const SURFACE_RANGE_METRES_BELOW_M = 1_000;
+
+/**
+ * Formats a range from the ship or the camera to a body's ground in `SLANT RANGE`'s units: `m`
+ * below 1 km, then {@link formatBodyDistance}'s `km`, `Mm`, `Gm` and `AU`, to three significant
+ * figures, the unit switching with {@link DISTANCE_HYSTERESIS} at every boundary (the guide's
+ * Views and its `SLANT RANGE` row; decision-r10-t16-review §1).
+ *
+ * @remarks
+ * The view list's `SURVEY EDGE` notes read it (plan R10, R10.T16.c), and R10.T12's `SLANT RANGE`
+ * takes the same units and precision before rounding by its uncertainty, so that the same quantity
+ * reads alike in both. The unit is decided after rounding, so 999.6 m reads `1.00 km`. A range shown
+ * in `m` keeps it up to 5% past 1 km (`1020 m`), and one shown in `km` keeps it down to 5% under
+ * (`0.960 km`); above 1 km the switches are {@link formatBodyDistance}'s. Below 0.01 m the value is
+ * in E notation (`5.00E-3 m`). A view's list keeps its target ranges in {@link formatBodyDistance}'s
+ * units (signoff-12, "Seen, not ruled", 1).
+ *
+ * @param rangeM - The range, m.
+ * @param previous - The unit this range was last shown in, which the caller keeps; `null` for the
+ *   first showing.
+ * @throws Error for a range that is not finite.
+ */
+export function formatSurfaceRange(
+  rangeM: number,
+  previous: SurfaceRangeUnit | null,
+): FormattedSurfaceRange {
+  requireFinite(rangeM, "range");
+  const magnitudeM = Math.abs(rangeM);
+  const metresBelowM = SURFACE_RANGE_METRES_BELOW_M;
+  let metres: boolean;
+  switch (previous) {
+    case "m":
+      metres = magnitudeM < metresBelowM * (1 + DISTANCE_HYSTERESIS);
+      break;
+    case "km":
+      metres = magnitudeM < metresBelowM * (1 - DISTANCE_HYSTERESIS);
+      break;
+    case null:
+    case "Mm":
+    case "Gm":
+    case "AU":
+      metres = roundSignificant(magnitudeM, 3) < metresBelowM;
+      break;
+  }
+  if (metres) {
+    return { value: significantOrSci(rangeM, 0.01, Number.POSITIVE_INFINITY), unit: "m" };
+  }
+  return formatBodyDistance(rangeM / 1_000, previous === "m" ? null : previous);
+}
+
 /** What joins a span's two ends: a spaced en dash, which both B612 faces draw (ruling 113.3). */
 export const SPAN_JOIN = " – ";
 
@@ -677,6 +776,162 @@ export function formatPressure(pressurePa: number): FormattedPressure {
   return { value: significantOrSci(pressurePa / 1_000_000, 0, 10_000), unit: "MPa" };
 }
 
+/** Unit of a mass fraction as {@link formatMassFraction} writes it. */
+export type MassFractionUnit = "%" | "ppm" | "ppb";
+
+/** A mass fraction split into its digits and unit, so that the unit can be set apart. */
+export interface FormattedMassFraction {
+  readonly value: string;
+  readonly unit: MassFractionUnit;
+}
+
+/**
+ * Formats a mass fraction, kg per kg, to three significant figures in `%` from 0.01 %, in `ppm`
+ * from 1 ppm and in `ppb` below it (plan 14, P14.T26's resources; research's ruling of
+ * 2026-11-01): `28.1 %`, `0.0250 %`, `15.2 ppm`, `23.5 ppb`; below 0.001 ppb in E notation,
+ * `4.20E-6 ppb`.
+ *
+ * @remarks
+ * A scaled ladder, as a pressure's is, so that a platinum-group metal's few parts per billion and a
+ * rock's silicates read on one display without a run of zeros. `ppm` is 10⁻⁶ and `ppb` 10⁻⁹, the
+ * short scale's billion. The switch is made after rounding, so 99.996 ppm reads `0.0100 %`. A record's
+ * fraction does not change with the display time, so no hysteresis is needed. The label names the
+ * quantity, a mass fraction, since `%`, `ppm` and `ppb` alone do not say of what. A fraction of 0
+ * reads `0.00 ppb`, which a readout that reads it `NONE` does not call this for.
+ *
+ * @throws RangeError for a fraction below 0 or above 1.
+ */
+export function formatMassFraction(fraction: number): FormattedMassFraction {
+  requireFinite(fraction, "fraction");
+  if (fraction < 0 || fraction > 1) {
+    throw new RangeError(`a mass fraction cannot be ${fraction}`);
+  }
+  if (roundSignificant(fraction * 100, 3) >= 0.01) {
+    return { value: significant(fraction * 100), unit: "%" };
+  }
+  if (roundSignificant(fraction * 1e6, 3) >= 1) {
+    return { value: significant(fraction * 1e6), unit: "ppm" };
+  }
+  return { value: significantOrSci(fraction * 1e9, 0.001, 1_000), unit: "ppb" };
+}
+
+/** A pressure band of {@link formatBearingCapacity}'s ladder: its unit, and where it ends. */
+interface PressureBand {
+  readonly unit: PressureUnit;
+  readonly paPerUnit: number;
+  /** Where the band ends and the next begins, Pa. */
+  readonly belowPa: number;
+}
+
+// Each band ends at 1,000 of its unit, as formatPressure's do; MPa runs on.
+const PRESSURE_BANDS: ReadonlyArray<PressureBand> = [
+  { unit: "Pa", paPerUnit: 1, belowPa: 1_000 },
+  { unit: "kPa", paPerUnit: 1_000, belowPa: 1_000_000 },
+  { unit: "MPa", paPerUnit: 1_000_000, belowPa: Number.POSITIVE_INFINITY },
+];
+
+function pressureBandOf(unit: PressureUnit): PressureBand {
+  const band = PRESSURE_BANDS.find((candidate) => candidate.unit === unit);
+  if (band === undefined) {
+    throw new Error(`no pressure band for ${unit}`);
+  }
+  return band;
+}
+
+// Two significant figures, digits grouped from five, as a two-figure quantity is read.
+function twoSignificant(value: number): string {
+  return numberFormat("significant:2", {
+    minimumSignificantDigits: 2,
+    maximumSignificantDigits: 2,
+    useGrouping: "min2",
+    signDisplay: "negative",
+  }).format(value);
+}
+
+/**
+ * A value to two significant figures, or in E notation with two where it lies outside
+ * `[low, high)` in magnitude and is not zero, as {@link significantOrSci} is for three.
+ */
+function twoFiguresOrSci(value: number, low: number, high: number): string {
+  const magnitude = Math.abs(roundSignificant(value, 2));
+  return value !== 0 && (magnitude < low || magnitude >= high)
+    ? formatSci(value, "reading", 2)
+    : twoSignificant(value);
+}
+
+/**
+ * Formats a value to two significant figures, without its unit, digits grouped from five:
+ * `0.010`, `2.0`, `410`, `36,000`; below 0.001 and from 1,000,000 in magnitude in E notation with
+ * two figures, `2.0E-4`.
+ *
+ * @remarks
+ * For a quantity whose precision is two figures, such as a survey's resolution (the guide's
+ * `FINEST` and `RESOLUTION`) or a pad's width (`PAD WIDTH 1.0 m`).
+ */
+export function formatTwoFigures(value: number): string {
+  requireFinite(value, "value");
+  return twoFiguresOrSci(value, 0.001, 1_000_000);
+}
+
+/**
+ * Formats an ultimate bearing capacity to two significant figures in the console's pressure units,
+ * `Pa` below 1,000 Pa, `kPa` below 1,000 kPa and `MPa` from there, switching unit with
+ * {@link DISTANCE_HYSTERESIS} as a view's ranges do (the guide's `ULTIMATE BEARING CAPACITY` row;
+ * plan R10, R10.T12): `5.4 MPa`, `210 kPa`.
+ *
+ * @remarks
+ * It is {@link formatPressure}'s ladder at the two figures the capacity's source holds it to (the
+ * Lunar Sourcebook's 3,000–11,000 kPa about its 6,000; plan R10, T12's Draft 1), and, unlike a
+ * body's surface pressure, it changes as the line of sight moves, so it takes the hysteresis that
+ * {@link formatBodyDistance} and {@link formatSurfaceRange} take. Without a previous unit, or once
+ * the capacity has left the previous unit's band by more than {@link DISTANCE_HYSTERESIS} of
+ * either edge, the band it falls in is taken, decided after rounding so that 999.6 kPa reads
+ * `1.0 MPa`. Inside that margin the previous unit is kept: a capacity shown in `kPa` reads up to
+ * 5% past 1,000 kPa in it (`1000 kPa`), and one shown in `MPa` down to 5% under (`0.96 MPa`).
+ * Below 0.01 Pa and from 10,000 MPa the value is in E notation, as {@link formatPressure}'s is.
+ *
+ * @param previous - The unit this capacity was last shown in, which the caller keeps; `null` for
+ *   the first showing.
+ * @throws RangeError for a capacity that is not finite or is negative.
+ */
+export function formatBearingCapacity(
+  capacityPa: number,
+  previous: PressureUnit | null,
+): FormattedPressure {
+  requireFinite(capacityPa, "bearing capacity");
+  if (capacityPa < 0) {
+    throw new RangeError(`a bearing capacity cannot be ${capacityPa} Pa`);
+  }
+  const nominal =
+    PRESSURE_BANDS.find(
+      (band) => roundSignificant(capacityPa / band.paPerUnit, 2) * band.paPerUnit < band.belowPa,
+    ) ?? pressureBandOf("MPa");
+  let chosen = nominal;
+  if (previous !== null) {
+    const kept = pressureBandOf(previous);
+    const index = PRESSURE_BANDS.indexOf(kept);
+    const abovePa = index > 0 ? (PRESSURE_BANDS[index - 1]?.belowPa ?? 0) : 0;
+    const inMargin =
+      capacityPa >= abovePa * (1 - DISTANCE_HYSTERESIS) &&
+      capacityPa < kept.belowPa * (1 + DISTANCE_HYSTERESIS);
+    chosen = inMargin ? kept : nominal;
+  }
+  const inUnit = capacityPa / chosen.paPerUnit;
+  let value: string;
+  switch (chosen.unit) {
+    case "Pa":
+      value = twoFiguresOrSci(inUnit, 0.01, Number.POSITIVE_INFINITY);
+      break;
+    case "kPa":
+      value = twoSignificant(inUnit);
+      break;
+    case "MPa":
+      value = twoFiguresOrSci(inUnit, 0, 10_000);
+      break;
+  }
+  return { value, unit: chosen.unit };
+}
+
 /**
  * Formats a surface gravity in m/s² to three significant figures, without the unit: `9.81`,
  * `24.8`, `0.284`; below 0.01 m/s², as a small moon's, in E notation: `5.70E-3`.
@@ -736,6 +991,27 @@ export function formatUniverseTimeDhms(time: UniverseTime): string {
   const sign = seconds < 0 ? "-" : "+";
   const clock = [hours, minutes, secondsLeft].map(twoDigits).join(":");
   return `${sign}${formatNumber(years, 0)} yr ${String(days).padStart(3, "0")}/${clock}`;
+}
+
+/**
+ * Formats a countdown from the display time `now` to an event at `event`, in the guide's `T-` form
+ * with {@link formatUniverseTimeDhms}'s span of years, days and the time of day: `T-12 yr
+ * 183/14:08:33` before the event, `T+0 yr 000/00:00:30` after it, and `T+0 yr 000/00:00:00` at it.
+ *
+ * @remarks
+ * The guide's countdown is negative before the event and positive after it, so the sign is that
+ * of `now` less `event`. The difference is taken in whole seconds, each instant's rounded towards
+ * negative infinity as the wire gives them, with integer arithmetic alone; the nanoseconds are not
+ * shown.
+ *
+ * @throws RangeError when either time's seconds are not a whole number that a JavaScript number
+ *   holds exactly.
+ */
+export function formatCountdown(now: UniverseTime, event: UniverseTime): string {
+  if (!Number.isSafeInteger(now.seconds) || !Number.isSafeInteger(event.seconds)) {
+    throw new RangeError(`${String(now.seconds)} or ${String(event.seconds)} is not whole`);
+  }
+  return `T${formatUniverseTimeDhms({ seconds: now.seconds - event.seconds, nanos: 0 })}`;
 }
 
 /**

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import fixture from "../fixtures/planetary.json" with { type: "json" };
+import type { BodyEnvelopeDto } from "./generated/BodyEnvelopeDto";
 import type { BodyKindDto } from "./generated/BodyKindDto";
 import type { BodyStateDto } from "./generated/BodyStateDto";
 import type { BodySummaryDto } from "./generated/BodySummaryDto";
@@ -33,6 +34,15 @@ function response<K extends RequestKind>(name: FixtureName, kind: K): ResponseFo
     throw new Error(`the fixture's ${name} is not a ${kind} response`);
   }
   return message.body;
+}
+
+/** The `ok` envelope of the fixture's `body_detail` message `name`. */
+function envelopeOf(name: FixtureName): BodyEnvelopeDto {
+  const { envelope } = response(name, "body_detail").record;
+  if (envelope?.state !== "ok") {
+    throw new Error(`the fixture's ${name} carries no envelope`);
+  }
+  return envelope.value;
 }
 
 /** The value of a section that must be `ok`. */
@@ -193,7 +203,7 @@ describe("system_bodies", () => {
 });
 
 describe("body_detail", () => {
-  it("decodes a whole record, with the surface and hooks not yet modelled", () => {
+  it("decodes a whole record, with its surface, no envelope and the hooks not yet modelled", () => {
     const detail = response("body_detail_response", "body_detail");
 
     expect(detail.universe).toBe(UNIVERSE);
@@ -206,10 +216,166 @@ describe("body_detail", () => {
       water: 0,
       envelope: 0,
     });
-    expect([detail.record.surface.state, detail.record.hooks.state]).toEqual([
-      "not_modelled",
-      "not_modelled",
+    expect([
+      detail.record.surface.state,
+      detail.record.envelope,
+      detail.record.hooks.state,
+    ]).toEqual(["ok", { state: "not_applicable" }, "not_modelled"]);
+  });
+
+  it("decodes an Earth's surface, every substance a registry key (P14.T35.e)", () => {
+    const surface = okValue(response("body_detail_response", "body_detail").record.surface);
+    const sum = surface.gases.reduce((total, gas) => total + gas.mole_fraction, 0);
+
+    expect(surface.state).toBe("temperate");
+    expect(surface.gases.map((gas) => gas.species)).toEqual(["N2", "H2O", "Ar", "CO2"]);
+    expect(Math.abs(sum - 1)).toBeLessThanOrEqual(1e-9);
+    expect(surface.climate_regime.condensable).toBe("H2O");
+    expect(surface.craters.screening).toEqual({ type: "atmosphere", column_mass_kg_m2: 10_318 });
+    expect(surface.wet_epoch?.liquid).toBe("H2O");
+    // The members of later tasks are absent, which reads not modelled, never null.
+    for (const member of [
+      "subsurface_ocean",
+      "vertical_structure",
+      "aerosols",
+      "modifiers",
+      "taxonomic_class",
+      "biosphere",
+      "silicate_vapour",
+    ]) {
+      expect(member in surface).toBe(false);
+    }
+  });
+
+  it("decodes an Earth's condensates, its ice's trapped area sent and its ocean's absent (P14.T54.a)", () => {
+    const surface = okValue(response("body_detail_response", "body_detail").record.surface);
+
+    expect(surface.condensates).toEqual([
+      {
+        substance: "H2O",
+        phase: "liquid",
+        reservoir_kg_m2: 2_652_000,
+        reservoir_gel_m: 2_600,
+        area_fraction: 0.71,
+        seasonal: false,
+      },
+      {
+        substance: "H2O",
+        phase: "solid",
+        reservoir_kg_m2: 53_100,
+        reservoir_gel_m: 57.9,
+        area_fraction: 0.03,
+        trapped_area_fraction: 0,
+        seasonal: false,
+      },
     ]);
+  });
+
+  it("decodes an Earth's crust as the server sends it, its melt area 0 (P14.T54.a)", () => {
+    const surface = okValue(response("body_detail_response", "body_detail").record.surface);
+
+    expect(surface.crust).toEqual({
+      primary: "ultramafic",
+      secondary: "basalt",
+      tertiary: "granite",
+      bulk: null,
+      lid: "secondary",
+      provinces: "basalt",
+      redox: "oxidised",
+      mantle_redox_iw: 3.55,
+      melt_area_fraction: 0,
+    });
+  });
+
+  it("decodes a locked lava world: airless, no volatile air, its crust's dayside pool above 0 (P14.T54.a)", () => {
+    const surface = okValue(response("body_detail_lava_world", "body_detail").record.surface);
+
+    expect([surface.state, surface.surface_pressure_pa, surface.gases]).toEqual(["airless", 0, []]);
+    expect(surface.crust?.melt_area_fraction).toBeGreaterThan(0);
+    // A world locked 1:1 whose night lies below its lid's solidus melts its dayside at most, half
+    // the surface (the sim's eyeball, `SurfaceConditions::cold_area`).
+    expect(surface.crust?.melt_area_fraction).toBeLessThanOrEqual(0.5);
+    // Every server before P14.T55.b leaves the melt's own vapour out.
+    expect("silicate_vapour" in surface).toBe(false);
+  });
+
+  it("reads a melt's own vapour absent as not modelled and null as none (P14.T35.f)", () => {
+    const absent = okValue(response("body_detail_response", "body_detail").record.surface);
+    const frame = fixture.body_detail_response;
+    const { record } = frame.body;
+    const computedNone = {
+      ...frame,
+      body: {
+        ...frame.body,
+        record: {
+          ...record,
+          surface: { ...record.surface, value: { ...record.surface.value, silicate_vapour: null } },
+        },
+      },
+    };
+    const message = decodeServerMessage(JSON.stringify(computedNone));
+    if (message.type !== "response" || !isResponseOf(message.body, "body_detail")) {
+      throw new Error("the frame with the vapour computed as none is not a body_detail response");
+    }
+    const surface = okValue(message.body.record.surface);
+    // The binding admits no value until P14.T55.b gives the vapour its members: this line stops
+    // compiling if the type does.
+    const vapour: null | undefined = surface.silicate_vapour;
+
+    expect(absent.silicate_vapour).toBeUndefined();
+    expect("silicate_vapour" in surface).toBe(true);
+    expect(surface.silicate_vapour).toBeNull();
+    expect(vapour).toBeNull();
+  });
+
+  it("decodes a Jupiter's envelope, its surface not applicable, at the generator's values (P14.T35.e, P14.T54.b.i)", () => {
+    const envelope = envelopeOf("body_detail_jupiter");
+    const { record } = response("body_detail_jupiter", "body_detail");
+
+    expect(record.surface).toEqual({ state: "not_applicable" });
+    expect(okValue(record.bulk).class).toBe("gas_giant");
+    // An H2/He envelope names no supercritical condensable, and says so with null (P14.T54.b.d).
+    expect(envelope.supercritical).toBeNull();
+    expect(envelope.composition.slice(0, 4).map((gas) => gas.species)).toEqual([
+      "H2",
+      "He",
+      "CH4",
+      "NH3",
+    ]);
+    expect(envelope.composition.reduce((sum, gas) => sum + gas.mole_fraction, 0)).toBeCloseTo(1, 9);
+    // The volatile decks above the refractory ones, hottest base first, the modes naming them:
+    // from generator version 27 the ammonia deck carries a second mode (P14.T24.h.b).
+    expect(envelope.condensate_decks.slice(-3).map((deck) => deck.condensate)).toEqual([
+      "H2O",
+      "NH4SH",
+      "NH3",
+    ]);
+    expect(envelope.decks.map((mode) => mode.deck)).toEqual([
+      ...envelope.condensate_decks.map((deck) => deck.condensate),
+      "NH3",
+    ]);
+    expect(envelope.hazes.map((haze) => [haze.material, haze.deck])).toEqual([
+      ["chromophore", null],
+    ]);
+    // The adiabat from the join, at 1.009 bar, to 100 bar, evenly in ln p.
+    const pressures = envelope.adiabat.map((node) => node.pressure_pa);
+    expect(pressures[0]).toBe(envelope.join_pressure_pa);
+    expect(pressures.at(-1)).toBe(1e7);
+    expect(envelope.profile).toEqual({
+      thermal_opacity_m2_per_kg: 0.00292,
+      optical_depth_exponent: 2,
+      opacity_ratio: 0.4,
+      redistribution_factor: 0.25,
+    });
+  });
+
+  it("keeps a record as a server before P14.T35.e wrote it, with no envelope key", () => {
+    const { record } = response("body_detail_contact", "body_detail");
+
+    expect("envelope" in record).toBe(false);
+    expect(response("body_detail_mass_and_orbit", "body_detail").record.envelope).toEqual({
+      state: "not_resolved",
+    });
   });
 
   it("carries a ring's, a belt's and a halo's extent as their population", () => {
@@ -227,6 +393,22 @@ describe("body_detail", () => {
     expect(halo?.type === "cometary_halo" && halo.comets).toBeGreaterThan(0);
     const planet = bodies.find((body) => body.kind.type === "planet");
     expect(planet?.population).toEqual({ state: "not_applicable" });
+  });
+
+  it("carries the ring's plane's normal as a unit vector", () => {
+    const { bodies } = response("system_bodies_populated", "system_bodies");
+    const ring = bodies.flatMap((body) =>
+      body.population.state === "ok" && body.population.value.type === "ring"
+        ? [body.population.value]
+        : [],
+    )[0];
+    // As every server from the 22 → 23 batch sends it.
+    const normal = ring?.normal;
+    if (normal === undefined) {
+      throw new Error("the populated answer's ring lost its plane's normal");
+    }
+
+    expect(Math.hypot(...normal)).toBeCloseTo(1, 12);
   });
 
   it("holds the same body in the list and in its whole record", () => {
@@ -351,13 +533,210 @@ describe("body_detail", () => {
   });
 });
 
+/**
+ * Jupiter's mass, kg: the nominal Jovian mass parameter over the constant of gravitation, GM_J ÷ G
+ * (IAU 2015 Resolution B3's 1.266 865 3 × 10¹⁷ m³ s⁻²; CODATA 2018's 6.674 30 × 10⁻¹¹ m³ kg⁻¹ s⁻²),
+ * as `hyperion-base` takes it; and its nominal equatorial radius, m (IAU 2015 Resolution B3).
+ */
+const JUPITER_MASS_KG = 1.266_865_3e17 / 6.674_3e-11;
+const JUPITER_RADIUS_M = 7.1492e7;
+
+/**
+ * HD 209458 b's measured mass and radius, in Jupiter's, and its zero-albedo equilibrium
+ * temperature, K, T_eff (R★ ÷ 2a)^½, each with its uncertainty: 0.685 (+0.015, −0.014) Jupiter
+ * masses, 1.359 (+0.016, −0.019) Jupiter radii and 1,449 ± 12 K, at 0.04707 au (Torres, Winn and
+ * Holman 2008, ApJ 677, 1324, Table 5) about its own star of 1.622 L☉ (their Table 3).
+ */
+const HD_209458_B = { massJupiters: 0.685, radiusJupiters: 1.359, equilibriumK: 1_449 };
+
+/**
+ * The nominal solar luminosity, W (IAU 2015 Resolution B3), and the Stefan–Boltzmann constant,
+ * W m⁻² K⁻⁴ (CODATA 2018), as `hyperion-base` takes them.
+ */
+const SOLAR_LUMINOSITY_W = 3.828e26;
+const STEFAN_BOLTZMANN = 5.670_374_419e-8;
+
+describe("body_detail's hot Jupiter, an HD 209458 b (P14.T54.b.i)", () => {
+  const record = () => response("body_detail_hot_jupiter", "body_detail").record;
+
+  it("is a gas giant at HD 209458 b's measured mass, radius and equilibrium temperature", () => {
+    const bulk = okValue(record().bulk);
+
+    expect(okValue(record().mass_kg) / JUPITER_MASS_KG).toBeCloseTo(HD_209458_B.massJupiters, 12);
+    expect(bulk.radius_m / JUPITER_RADIUS_M).toBeCloseTo(HD_209458_B.radiusJupiters, 12);
+    expect(bulk.equilibrium_temperature_k).toBe(HD_209458_B.equilibriumK);
+    expect(bulk.class).toBe("gas_giant");
+    expect(record().surface).toEqual({ state: "not_applicable" });
+  });
+
+  it("is placed where the slice's Sun-like host gives it HD 209458 b's equilibrium temperature", () => {
+    const [host] = response("system_bodies_response", "system_bodies").hosts.stars;
+    if (host === undefined) {
+      throw new Error("the slice's system lost its star");
+    }
+    const a = okValue(record().orbit).orbit.semi_major_axis_m;
+    // T_eq = (L★ ÷ 16πσa²)^¼ at zero albedo, about the fixture's 1 L☉ host rather than HD 209458's
+    // own 1.622 L☉, which puts it at 0.04707 au.
+    const luminosityW = host.luminosity_lsun * SOLAR_LUMINOSITY_W;
+    const equilibriumK = (luminosityW / (16 * Math.PI * STEFAN_BOLTZMANN * a * a)) ** 0.25;
+
+    expect(host.luminosity_lsun).toBe(1);
+    expect(equilibriumK).toBeCloseTo(HD_209458_B.equilibriumK, 9);
+    expect(a / METRES_PER_AU).toBeCloseTo(0.036896, 6);
+  });
+
+  it("holds the generator's envelope: alkali absorbers, silicate decks below its photosphere, no ammonia deck and no haze", () => {
+    const envelope = envelopeOf("body_detail_hot_jupiter");
+
+    expect(envelope.supercritical).toBeNull();
+    expect(envelope.absorbers.map((absorber) => absorber.species)).toEqual(
+      expect.arrayContaining(["Na", "K"]),
+    );
+    expect(envelope.condensate_decks.map((deck) => deck.condensate)).toEqual(
+      expect.arrayContaining(["MgSiO3", "Mg2SiO4"]),
+    );
+    expect(envelope.condensate_decks.map((deck) => deck.condensate)).not.toContain("NH3");
+    expect([envelope.hazes, envelope.haze_tau_550]).toEqual([[], 0]);
+    // Its internal heat is stated, 558 K, its bulk's effective temperature its equilibrium's
+    // with it: (T_eq⁴ + T_int⁴)^¼.
+    expect(envelope.internal_temperature_k).toBeCloseTo(558, 0);
+  });
+});
+
+/**
+ * Titan's surface at the Huygens landing site, K and Pa, with their uncertainties: "At the surface,
+ * the temperature was 93.65 ± 0.25 K, and the pressure was 1,467 ± 1 hPa" (Fulchignoni et al. 2005,
+ * Nature 438, 785, abstract; the Huygens Atmospheric Structure Instrument).
+ */
+const HUYGENS_SURFACE_K = 93.65;
+const HUYGENS_SURFACE_K_ERROR = 0.25;
+const HUYGENS_SURFACE_PA = 146_700;
+const HUYGENS_SURFACE_PA_ERROR = 100;
+
+/**
+ * Titan's methane mole fraction near the surface, with its uncertainty: "(5.65 ± 0.18) × 10⁻² near
+ * the surface (6.7 km to the surface)", against (1.48 ± 0.09) × 10⁻² in the lower stratosphere
+ * (Niemann et al. 2010, JGR 115, E12006, abstract; the Huygens Gas Chromatograph Mass
+ * Spectrometer).
+ */
+const NEAR_SURFACE_CH4_MOLE_FRACTION = 0.0565;
+const NEAR_SURFACE_CH4_MOLE_FRACTION_ERROR = 0.0018;
+
+/**
+ * The share of Titan's surface under liquid, its lakes and seas alone: 0.85–1.07% (Hayes 2016,
+ * Annu. Rev. Earth Planet. Sci. 44, 57, as Birch, Hayes and Perron 2025, "Titan's fluvial and
+ * lacustrine landscapes", in _Titan After Cassini-Huygens_, Elsevier, 287, cite it; read through
+ * decision-p14-t51a-part2's table). Lacustrine terrain, filled and empty, covers about 1.1%.
+ */
+const LAKES_AREA_FRACTION = { min: 0.0085, max: 0.0107 };
+
+describe("body_detail's Titan, with its lakes (P14.T54.a)", () => {
+  const titan = () => response("body_detail_titan", "body_detail").record;
+
+  it("is a regular moon, icy, of a planet of the fixture's system", () => {
+    const record = titan();
+
+    expect(parseBodyId(record.id)).toEqual({ system: SYSTEM, bodyIndex: 0x0601 });
+    expect(record.kind).toEqual({ type: "moon", origin: "regular" });
+    expect(record.parent).toEqual({
+      type: "body",
+      id: formatBodyId({ system: SYSTEM, bodyIndex: 0x0600 }),
+    });
+    expect(okValue(record.bulk).class).toBe("icy");
+  });
+
+  it("holds the Huygens site's measured surface temperature and pressure", () => {
+    const surface = okValue(titan().surface);
+
+    expect(Math.abs(surface.mean_surface_temperature_k - HUYGENS_SURFACE_K)).toBeLessThanOrEqual(
+      HUYGENS_SURFACE_K_ERROR,
+    );
+    expect(Math.abs(surface.surface_pressure_pa - HUYGENS_SURFACE_PA)).toBeLessThanOrEqual(
+      HUYGENS_SURFACE_PA_ERROR,
+    );
+  });
+
+  it("holds an air of N2 with the measured near-surface CH4, summing to 1", () => {
+    const { gases } = okValue(titan().surface);
+    const methane = gases.find((gas) => gas.species === "CH4")?.mole_fraction ?? Number.NaN;
+    const sum = gases.reduce((total, gas) => total + gas.mole_fraction, 0);
+
+    expect(gases.map((gas) => gas.species)).toEqual(["N2", "CH4"]);
+    expect(Math.abs(methane - NEAR_SURFACE_CH4_MOLE_FRACTION)).toBeLessThanOrEqual(
+      NEAR_SURFACE_CH4_MOLE_FRACTION_ERROR,
+    );
+    expect(Math.abs(sum - 1)).toBeLessThanOrEqual(1e-9);
+  });
+
+  it("holds its lakes as a ch4_c2h6_n2 liquid condensate on the measured share of the surface", () => {
+    const surface = okValue(titan().surface);
+    const [lakes, ...others] = surface.condensates ?? [];
+
+    expect(others).toEqual([]);
+    expect([lakes?.substance, lakes?.phase]).toEqual(["ch4_c2h6_n2", "liquid"]);
+    const area = lakes?.area_fraction ?? Number.NaN;
+    expect(area).toBeGreaterThanOrEqual(LAKES_AREA_FRACTION.min);
+    expect(area).toBeLessThanOrEqual(LAKES_AREA_FRACTION.max);
+    expect(surface.surface_liquids).toEqual([{ substance: "ch4_c2h6_n2", area_fraction: area }]);
+    expect(surface.ocean_fraction).toBe(area);
+    expect(surface.climate_regime.condensable).toBe("CH4");
+  });
+
+  it("holds an H2O lid whose melt area is 0, its liquid a condensate and not a melt", () => {
+    const surface = okValue(titan().surface);
+
+    expect([surface.state, surface.material]).toEqual(["snowball", "ice"]);
+    expect(surface.crust?.lid).toBe("primary");
+    expect(surface.crust?.primary).toBe("H2O");
+    expect(surface.crust?.melt_area_fraction).toBe(0);
+  });
+
+  it("holds no melted-rock crust under its ice, as its moment of inertia implies", () => {
+    const { crust } = okValue(titan().surface);
+
+    // "The inferred moment of inertia factor is about 0.34, implying incomplete differentiation"
+    // (Iess et al. 2010, Science 327, 1367, abstract; Cassini's gravity field): the rock never
+    // melted to a crust of its own, so the server's form is a regular icy moon's whose rock did
+    // not melt, an `H2O` primary crust and no other.
+    expect([crust?.secondary, crust?.tertiary, crust?.bulk]).toEqual([null, null, null]);
+  });
+});
+
 describe("body_events", () => {
-  it("decodes an answer, which holds no event before its generator lands", () => {
+  it("decodes an answer with no event, a quiet century", () => {
     const events = response("body_events_response", "body_events");
 
     expect([events.universe, events.system]).toEqual([UNIVERSE, SYSTEM]);
     expect(events.to.seconds - events.from.seconds).toBe(3_155_760_000);
     expect(events.events).toEqual([]);
+  });
+
+  it("decodes one event of each kind, each tagged by its type, in time order", () => {
+    const { events } = response("body_events_populated", "body_events");
+
+    expect(events.map((event) => event.type)).toEqual([
+      "comet",
+      "eruption",
+      "impact",
+      "dust_storm",
+      "storm",
+    ]);
+    const [comet, eruption, impact, dustStorm, storm] = events;
+    if (comet?.type !== "comet" || storm?.type !== "storm" || impact?.type !== "impact") {
+      throw new Error("the fixture's kinds are in time order");
+    }
+    // A comet is the system's event and carries its orbit and the server's track.
+    expect(comet.id).toBe(`${SYSTEM}:0404ffffffffce00`);
+    expect(comet.halo).toBe(formatBodyId({ system: SYSTEM, bodyIndex: 0xef00 }));
+    expect(comet.host).toEqual({ type: "star", body_index: 0 });
+    expect(comet.track.map((point) => point.time)).toEqual([
+      comet.listed_from,
+      comet.perihelion_time,
+      comet.listed_to,
+    ]);
+    expect(storm.band).toBe("mid_latitude");
+    expect(impact.body).toBe(formatBodyId({ system: SYSTEM, bodyIndex: 0x0500 }));
+    expect([eruption?.type, dustStorm?.type]).toEqual(["eruption", "dust_storm"]);
   });
 });
 

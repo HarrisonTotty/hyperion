@@ -3,8 +3,12 @@
  * catalogue's probe kernel on the run's adapter. `body_brdf` equals `view/appearance/brdf.ts` at
  * five pinned geometries to 10⁻⁵ relative, one of them with a law built per texel;
  * `sphere_irradiance` and `eclipse_visible` equal their TypeScript twins (themselves checked
- * against the `f64` oracles) at five points each; the R08 and R11 stubs return 1, 1 and 0; and
- * `planetshine_irradiance` equals `planetshineIrradiance` at four points (T11).
+ * against the `f64` oracles) at five points each, and the horizon term at six more, the smooth
+ * terminator, a terrain shadow's edge and a point star (T6.d); R11's stub and R08's lookups (plan R08's
+ * `surfaceLighting.wgsl` since R08.T9.b) return 1, 1 and 0 on a body without an atmosphere, its
+ * one-texel tables bound; and `planetshine_irradiance` equals `planetshineIrradiance` at four
+ * points (T11). R08.T9.b's own group holds the lookups against a body's tables' twin
+ * ({@link probeSurfaceLighting}, `smoke/atmosphere.ts`).
  */
 
 import {
@@ -18,10 +22,23 @@ import {
   packPhaseFactorRows,
 } from "../view/appearance/litBodyProbe";
 import { type Vec3, vec3 } from "../geometry/vec3";
-import { PHASE_TABLE_SAMPLES, type PhotometricLaw } from "../view/appearance/law";
-import { lawFor } from "../view/appearance/phase";
+import {
+  AIRLESS_LIGHTING,
+  createAirlessTables,
+  surfaceLightingKernelTextures,
+  type SurfaceLightingTables,
+} from "../view/atmosphere/surfaceLighting";
+import {
+  PHASE_TABLE_SAMPLES,
+  type PhaseTemplateId,
+  type PhotometricLaw,
+} from "../view/appearance/law";
+import { geometricAlbedo, lawFor, withTemplateCurve } from "../view/appearance/phase";
+import { shapeGeometricAlbedo } from "../view/appearance/shapes";
 import { BUFFER_USAGE, TEXTURE_USAGE } from "../view/engine/gpuFlags";
 import type { RenderEngine } from "../view/engine/types";
+import { PHASE_LAW, TerrainPhaseRows } from "../view/terrain/terrainMaterial";
+import type { Rgb } from "../view/photometry/toneCurve";
 import type { Checks } from "./harness";
 
 /** The agreement T4.c asks of the twins, relative. */
@@ -63,11 +80,38 @@ function probeCases(): BrdfProbeCase[] {
 }
 
 /**
- * The lighting terms' agreement with their twins, absolute on factors of order one: WGSL's `f32`
- * `acos` and `atan` are allowed some 10⁻⁴ of error (WGSL §17.5.3's accuracy table), and both terms
- * call them.
+ * The eclipse term's agreement with its twin, absolute on factors of order one: it calls WGSL's
+ * `f32` `acos`, allowed the worse of 6.77 × 10⁻⁵ and atan2's 4,096 ULP (WGSL §15.7.4.1's accuracy
+ * table), which a correctly rounded implementation such as SwiftShader comes far inside.
  */
-const LIGHTING_TOLERANCE = 2e-4;
+const ECLIPSE_TOLERANCE = 2e-4;
+
+/**
+ * The horizon term's agreement with its twin, absolute, for a star's and planetshine's (R07.T6.d).
+ * Neither calls WGSL's trigonometry. At the star's points here the term, emulated in `f32` at
+ * WGSL's bounds, meets the twin within 4 × 10⁻⁷ of face-on (`lighting/horizonPrecision.test.ts`);
+ * planetshine's angle and inverse square are not emulated, and rest on this check alone.
+ */
+const HORIZON_TOLERANCE = 2e-6;
+
+/** The agreement a lighting case's term is held to; 0 for those that must return a value exactly. */
+function lightingTolerance(probe: LightingProbeCase): number {
+  let tolerance: number;
+  switch (probe.kind) {
+    case "sphere":
+    case "planetshine":
+      tolerance = HORIZON_TOLERANCE;
+      break;
+    case "eclipse":
+      tolerance = ECLIPSE_TOLERANCE;
+      break;
+    case "hooks":
+    case "atmosphere":
+      tolerance = 0;
+      break;
+  }
+  return tolerance;
+}
 
 /** One AU over the Sun's radius: H at 1 au. */
 const H_AT_1_AU = 1.495_978_707e11 / 6.957e8;
@@ -100,8 +144,11 @@ function lightingTermName(probe: LightingProbeCase): string {
     case "eclipse":
       name = "T6.c eclipse_visible";
       break;
-    case "stubs":
-      name = "T6.c the stubs";
+    case "hooks":
+      name = "T6.c the hooks";
+      break;
+    case "atmosphere":
+      name = `R08.T9.b the ${probe.lookup} lookup`;
       break;
     case "planetshine":
       name = "T11 planetshine_irradiance";
@@ -110,13 +157,26 @@ function lightingTermName(probe: LightingProbeCase): string {
   return name;
 }
 
-/** T6.c: five horizon factors, five eclipse terms and the stubs; T11: four planetshine factors. */
+/**
+ * T6.c: five horizon factors, five eclipse terms and the stubs; T6.d: six more horizon factors;
+ * T11: four planetshine factors.
+ */
 const LIGHTING_CASES: ReadonlyArray<LightingProbeCase> = [
   { kind: "sphere", h: 3, phiRad: 0.4, horizonRad: 0 },
   { kind: "sphere", h: 3, phiRad: 100 * RAD_PER_DEG, horizonRad: 0 },
   { kind: "sphere", h: 11.5, phiRad: 90 * RAD_PER_DEG, horizonRad: 0 },
   { kind: "sphere", h: H_AT_1_AU, phiRad: 89.9 * RAD_PER_DEG, horizonRad: 0 },
   { kind: "sphere", h: 11.5, phiRad: 70 * RAD_PER_DEG, horizonRad: 5 * RAD_PER_DEG },
+  // T6.d: the smooth terminator at 1 au, at 90° and half the Sun's radius sunward of it, where
+  // Mesa's `atan` took the old form to −4.4 × 10⁻⁴ and 1.28 × 10⁻³ against 9.87 × 10⁻⁴ and
+  // 2.51 × 10⁻³; a flat element with the Sun's centre on a 1° horizon; and a point star, H 10³⁰,
+  // whose H² overflows f32, wholly up, then up through a 5° horizon, then down behind it.
+  { kind: "sphere", h: H_AT_1_AU, phiRad: Math.PI / 2, horizonRad: 0 },
+  { kind: "sphere", h: H_AT_1_AU, phiRad: Math.PI / 2 - 0.5 / H_AT_1_AU, horizonRad: 0 },
+  { kind: "sphere", h: H_AT_1_AU, phiRad: 89 * RAD_PER_DEG, horizonRad: RAD_PER_DEG },
+  { kind: "sphere", h: 1e30, phiRad: 60 * RAD_PER_DEG, horizonRad: 0 },
+  { kind: "sphere", h: 1e30, phiRad: 80 * RAD_PER_DEG, horizonRad: 5 * RAD_PER_DEG },
+  { kind: "sphere", h: 1e30, phiRad: 88 * RAD_PER_DEG, horizonRad: 5 * RAD_PER_DEG },
   ...[
     [0.3, 0],
     [0.3, 0.8],
@@ -133,36 +193,142 @@ const LIGHTING_CASES: ReadonlyArray<LightingProbeCase> = [
     occluderRadiusRad: ratio * 4.65e-3,
     separationRad: separation * 4.65e-3,
   })),
-  { kind: "stubs" },
+  { kind: "hooks" },
   // T11: a neighbour 30 of its radii off, wholly up, then cut by the horizon, then at Earth from the
   // Moon's scale (in lunar radii) in its soft band, then behind a local horizon of 3°.
   planetshineCase(vec3(30, 0.5, 0), 1, 30, 40, 0),
   planetshineCase(vec3(30, 0.5, 0), 1, 30, 91, 0),
   planetshineCase(vec3(221.25, 0.6, 0), 3.667, 221.25, 90.5, 0),
   planetshineCase(vec3(30, 0.5, 0), 1, 30, 80, 3),
+  // R08.T9.b: R08's three lookups on a body without an atmosphere, a source below the horizon
+  // among them, read through the one-texel defaults as R07's stubs: 1, 0 and 1.
+  ...(["sun", "sky", "source"] as const).flatMap((lookup) =>
+    [0.4, -0.2].map((mu): LightingProbeCase => ({
+      kind: "atmosphere",
+      lookup,
+      altitudeM: 3_000,
+      mu,
+      latitudeRad: 0.7,
+      azimuthRad: -2.1,
+      angularRadiusRad: 0.1,
+      curve: 1,
+    })),
+  ),
 ];
 
-/** T6.c: `sphere_irradiance`, `eclipse_visible` and the stubs; T11: `planetshine_irradiance`. */
+/**
+ * T6.c: `sphere_irradiance`, `eclipse_visible` and the hooks; T11: `planetshine_irradiance`;
+ * R08.T9.b: R08's lookups on a body without an atmosphere, which return R07's stubs' values to the
+ * bit, as the hooks do.
+ */
 function checkLighting(checks: Checks, gpu: Float32Array): void {
-  const expected = expectedLighting(LIGHTING_CASES);
+  const expected = expectedLighting(LIGHTING_CASES, AIRLESS_LIGHTING);
   LIGHTING_CASES.forEach((probe, index) => {
     const reference = expected[index] ?? [];
     const read = reference.map((_, c) => gpu[4 * index + c] ?? Number.NaN);
     const worst = Math.max(
       ...reference.map((value, c) => Math.abs((read[c] ?? Number.NaN) - value)),
     );
-    const exact = probe.kind === "stubs";
+    const tolerance = lightingTolerance(probe);
+    let name = `${lightingTermName(probe)} equals its reference to ${tolerance} at point ${index + 1}`;
+    if (probe.kind === "hooks") {
+      name = "T6.c the hooks on a body without an atmosphere return 1, 1 and 0";
+    } else if (probe.kind === "atmosphere") {
+      name = `R08.T9.b the ${probe.lookup} lookup on a body without an atmosphere returns R07's stub at point ${index + 1}`;
+    }
     checks.check(
-      exact
-        ? "T6.c the stubs return 1, 1 and 0"
-        : `${lightingTermName(probe)} equals its reference to ${LIGHTING_TOLERANCE} at point ${index + 1}`,
-      exact ? worst === 0 : worst <= LIGHTING_TOLERANCE,
+      name,
+      worst <= tolerance,
       `GPU ${read.map((value) => value.toPrecision(7)).join(", ")} against ${reference.map((value) => value.toPrecision(7)).join(", ")}, off by ${worst.toExponential(2)}`,
     );
   });
 }
 
-/** T4.c: `body_brdf` against `brdf`; T6.c: the lighting terms and stubs. */
+/**
+ * R08.T9.b: the probe's lighting `cases` run with a body's atmosphere `tables` bound, their results
+ * read back, one `vec4f` a case (r, g, b of an R08 lookup), for `smoke/atmosphere.ts` to hold
+ * against the tables' twin. It makes and releases its own buffers and phase table.
+ */
+export async function probeSurfaceLighting(
+  engine: RenderEngine,
+  cases: ReadonlyArray<LightingProbeCase>,
+  tables: SurfaceLightingTables,
+): Promise<Float32Array> {
+  const kernel = await engine.createComputeAsync(LIT_BODY_PROBE);
+  // One BRDF case and one law: the kernel's other half, which this run does not read.
+  const brdfBytes = packBrdfProbeCases(probeCases().slice(0, 1));
+  const brdf = engine.createBuffer({
+    name: "surface lighting probe brdf case",
+    bytes: brdfBytes.byteLength,
+    usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
+    category: "other",
+  });
+  engine.writeBuffer(brdf, 0, new Uint8Array(brdfBytes));
+  const brdfResults = engine.createBuffer({
+    name: "surface lighting probe brdf result",
+    bytes: 16,
+    usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_SRC,
+    category: "other",
+  });
+  const table = engine.createTexture({
+    name: "surface lighting probe phase table",
+    size: { width: PHASE_TABLE_SAMPLES, height: LAWS.length },
+    dimension: "2d",
+    format: "rgba32float",
+    mips: 1,
+    usage: TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_DST,
+    category: "other",
+  });
+  engine.writeTexture(
+    table,
+    { x: 0, y: 0 },
+    { width: PHASE_TABLE_SAMPLES, height: LAWS.length },
+    packPhaseFactorRows(LAWS),
+  );
+  const bytes = packLightingProbeCases(cases);
+  const input = engine.createBuffer({
+    name: "surface lighting probe cases",
+    bytes: bytes.byteLength,
+    usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
+    category: "other",
+  });
+  engine.writeBuffer(input, 0, new Uint8Array(bytes));
+  const results = engine.createBuffer({
+    name: "surface lighting probe results",
+    bytes: cases.length * 16,
+    usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_SRC,
+    category: "other",
+  });
+  try {
+    engine.dispatch(
+      kernel,
+      {
+        uniforms: {},
+        buffers: {
+          cases: brdf,
+          results: brdfResults,
+          lighting_cases: input,
+          lighting_results: results,
+        },
+        sampled: { phase_factor_table: table, ...surfaceLightingKernelTextures(tables) },
+        storage: {},
+      },
+      [Math.ceil(cases.length / 8), 1, 1],
+      LIT_BODY_PROBE.name,
+    );
+    return new Float32Array(await engine.readBuffer(results));
+  } finally {
+    for (const buffer of [brdf, brdfResults, input, results]) {
+      engine.releaseBuffer(buffer);
+    }
+    engine.releaseTexture(table);
+  }
+}
+
+/**
+ * T4.c: `body_brdf` against `brdf`; T6.c: the lighting terms and hooks; R08.T9.b: R08's lookups on a
+ * body without an atmosphere.
+ */
 export async function checkLitBody(engine: RenderEngine, checks: Checks): Promise<void> {
   const cases = probeCases();
   const kernel = await engine.createComputeAsync(LIT_BODY_PROBE);
@@ -208,6 +374,8 @@ export async function checkLitBody(engine: RenderEngine, checks: Checks): Promis
     usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_SRC,
     category: "other",
   });
+  // R08's tables of a body without an atmosphere (R08.T9.b), which the hooks read through.
+  const airless = createAirlessTables(engine, "lit body probe: no atmosphere");
   engine.dispatch(
     kernel,
     {
@@ -218,13 +386,17 @@ export async function checkLitBody(engine: RenderEngine, checks: Checks): Promis
         lighting_cases: lightingInput,
         lighting_results: lightingResults,
       },
-      sampled: { phase_factor_table: table },
+      sampled: { phase_factor_table: table, ...surfaceLightingKernelTextures(airless) },
       storage: {},
     },
     [Math.ceil(Math.max(cases.length, LIGHTING_CASES.length) / 8), 1, 1],
     LIT_BODY_PROBE.name,
   );
-  checkLighting(checks, new Float32Array(await engine.readBuffer(lightingResults)));
+  try {
+    checkLighting(checks, new Float32Array(await engine.readBuffer(lightingResults)));
+  } finally {
+    engine.releaseTexture(airless.body);
+  }
   const gpu = new Float32Array(await engine.readBuffer(results));
   const expected = expectedBrdf(cases);
   expected.forEach((reference, index) => {
@@ -243,4 +415,196 @@ export async function checkLitBody(engine: RenderEngine, checks: Checks): Promis
       `GPU ${read.map((value) => value.toPrecision(7)).join(", ")} against ${reference.map((value) => value.toPrecision(7)).join(", ")}, worst ${worst.toExponential(2)}`,
     );
   });
+}
+
+/**
+ * R10.T10.e's seam's tolerance, stops: surveyed ground against unsurveyed of the same albedo.
+ */
+const SEAM_TOLERANCE_STOPS = 0.02;
+
+/** A served body's law: its template at its own L and s = 1, as plan 14 states it, at p. */
+function servedLaw(template: PhaseTemplateId, share: number, p: Rgb): PhotometricLaw {
+  const k = shapeGeometricAlbedo(share);
+  return withTemplateCurve({
+    a: [p[0] / k, p[1] / k, p[2] / k],
+    lommelSeeligerShare: share,
+    template,
+    phaseExponent: [1, 1, 1],
+  });
+}
+
+/**
+ * The seam's bodies: the Moon-like world's p on Mercury's template and plan 14's Mars row's on
+ * Mars's (R10.T10.a's table).
+ */
+const SEAM_BODIES: ReadonlyArray<readonly [string, PhotometricLaw]> = [
+  ["a Mercury-like", servedLaw("mercury", 1, [0.172, 0.142, 0.105])],
+  ["a Mars-like", servedLaw("mars", 0.5, [0.288, 0.17, 0.088])],
+];
+
+/** The seam's phases, deg, each at i = e and at up to two geometries off it in the phase plane. */
+const SEAM_PHASES_DEG = [0, 30, 60, 90] as const;
+
+/** The seam's cases at phase α: (i, e) in the phase plane, deg, those lit and seen. */
+function seamGeometries(alphaDeg: number): ReadonlyArray<readonly [number, number]> {
+  const pairs: ReadonlyArray<readonly [number, number]> = [
+    [alphaDeg / 2, alphaDeg / 2],
+    [alphaDeg / 2 + 20, alphaDeg / 2 - 20],
+    [alphaDeg + 20, 20],
+  ];
+  return pairs.filter(([i, e]) => Math.abs(i) < 85 && Math.abs(e) < 85);
+}
+
+/** One body's case pair: its unsurveyed ground's and its surveyed regolith's at one geometry. */
+interface SeamPair {
+  readonly name: string;
+  readonly unsurveyed: BrdfProbeCase;
+  readonly surveyed: BrdfProbeCase;
+}
+
+/**
+ * R10.T10.e: `body_brdf` on the rows the terrain's `TerrainPhaseRows` makes, which the disc's
+ * class laws equal, for a Regolith class on its body's curve on a Mercury-like and a Mars-like
+ * body: each result equals `brdf` to 10⁻⁵, and the class at the body's p (A = p at the particulate
+ * rule's L(0) of 1) draws as the body's own law, surveyed ground against unsurveyed, to 0.02 stop
+ * at 0°, 30°, 60° and 90° of phase.
+ */
+export async function checkClassCurveSeam(engine: RenderEngine, checks: Checks): Promise<void> {
+  const laws: PhotometricLaw[] = [];
+  const pairs: SeamPair[] = [];
+  for (const [name, body] of SEAM_BODIES) {
+    const rows = new TerrainPhaseRows(body);
+    const regolith = rows.rowOf(PHASE_LAW.regolith, 1);
+    const first = laws.length;
+    laws.push(...rows.laws);
+    const row = rows.laws[regolith];
+    if (row === undefined) {
+      throw new Error(`${name} body's rows hold no Regolith row`);
+    }
+    const p = geometricAlbedo(body);
+    const surveyedLaw: PhotometricLaw = { ...row, a: [p[0], p[1], p[2]] };
+    for (const alphaDeg of SEAM_PHASES_DEG) {
+      for (const [i, e] of seamGeometries(alphaDeg)) {
+        const at = {
+          mu0: Math.cos(i * RAD_PER_DEG),
+          mu: Math.cos(e * RAD_PER_DEG),
+          phaseRad: alphaDeg * RAD_PER_DEG,
+          perTexel: null,
+        };
+        pairs.push({
+          name: `${name} body at ${String(alphaDeg)}°, i ${String(i)}°, e ${String(e)}°`,
+          unsurveyed: { law: body, row: first, ...at },
+          surveyed: { law: surveyedLaw, row: first + regolith, ...at },
+        });
+      }
+    }
+  }
+  const cases = pairs.flatMap((pair) => [pair.unsurveyed, pair.surveyed]);
+  const kernel = await engine.createComputeAsync(LIT_BODY_PROBE);
+  const bytes = packBrdfProbeCases(cases);
+  const input = engine.createBuffer({
+    name: "class curve probe cases",
+    bytes: bytes.byteLength,
+    usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
+    category: "other",
+  });
+  engine.writeBuffer(input, 0, new Uint8Array(bytes));
+  const results = engine.createBuffer({
+    name: "class curve probe results",
+    bytes: cases.length * 16,
+    usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_SRC,
+    category: "other",
+  });
+  const table = engine.createTexture({
+    name: "class curve probe phase table",
+    size: { width: PHASE_TABLE_SAMPLES, height: laws.length },
+    dimension: "2d",
+    format: "rgba32float",
+    mips: 1,
+    usage: TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_DST,
+    category: "other",
+  });
+  engine.writeTexture(
+    table,
+    { x: 0, y: 0 },
+    { width: PHASE_TABLE_SAMPLES, height: laws.length },
+    packPhaseFactorRows(laws),
+  );
+  // One lighting case, the hooks': the kernel's other half, which this run does not read.
+  const lightingBytes = packLightingProbeCases([{ kind: "hooks" }]);
+  const lightingInput = engine.createBuffer({
+    name: "class curve probe lighting case",
+    bytes: lightingBytes.byteLength,
+    usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
+    category: "other",
+  });
+  engine.writeBuffer(lightingInput, 0, new Uint8Array(lightingBytes));
+  const lightingResults = engine.createBuffer({
+    name: "class curve probe lighting result",
+    bytes: 16,
+    usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_SRC,
+    category: "other",
+  });
+  const airless = createAirlessTables(engine, "class curve probe: no atmosphere");
+  try {
+    engine.dispatch(
+      kernel,
+      {
+        uniforms: {},
+        buffers: {
+          cases: input,
+          results,
+          lighting_cases: lightingInput,
+          lighting_results: lightingResults,
+        },
+        sampled: { phase_factor_table: table, ...surfaceLightingKernelTextures(airless) },
+        storage: {},
+      },
+      [Math.ceil(cases.length / 8), 1, 1],
+      LIT_BODY_PROBE.name,
+    );
+    const gpu = new Float32Array(await engine.readBuffer(results));
+    const expected = expectedBrdf(cases);
+    const read = (index: number): Rgb => [
+      gpu[4 * index] ?? Number.NaN,
+      gpu[4 * index + 1] ?? Number.NaN,
+      gpu[4 * index + 2] ?? Number.NaN,
+    ];
+    let worstTwin = 0;
+    const seams = pairs.map((pair, n) => {
+      for (const index of [2 * n, 2 * n + 1]) {
+        const reference = expected[index] ?? [Number.NaN, Number.NaN, Number.NaN];
+        const value = read(index);
+        worstTwin = Math.max(
+          worstTwin,
+          ...reference.map((r, c) => Math.abs((value[c] ?? Number.NaN) - r) / Math.abs(r)),
+        );
+      }
+      const unsurveyed = read(2 * n);
+      const stops = Math.max(
+        ...read(2 * n + 1).map((x, c) => Math.abs(Math.log2(x / (unsurveyed[c] ?? Number.NaN)))),
+      );
+      return { name: pair.name, stops };
+    });
+    // A NaN step fails the check: it is never within the tolerance, and it heads the list.
+    const worst = seams.toSorted((a, b) =>
+      Number.isNaN(a.stops) ? -1 : Number.isNaN(b.stops) ? 1 : b.stops - a.stops,
+    )[0];
+    checks.check(
+      "R10.T10.e body_brdf equals brdf to 10⁻⁵ on the Regolith rows on their bodies' curves",
+      worstTwin <= BRDF_TOLERANCE,
+      `${String(cases.length)} cases, worst ${worstTwin.toExponential(2)}`,
+    );
+    checks.check(
+      "R10.T10.e surveyed regolith of the body's p draws as its unsurveyed ground in the kernel, on a Mercury-like and a Mars-like body at 0°, 30°, 60° and 90°, to 0.02 stop",
+      seams.every((seam) => seam.stops <= SEAM_TOLERANCE_STOPS),
+      `${String(pairs.length)} pairs, worst ${worst?.stops.toExponential(2) ?? "none"} stop (${worst?.name ?? "no pair"})`,
+    );
+  } finally {
+    for (const buffer of [input, results, lightingInput, lightingResults]) {
+      engine.releaseBuffer(buffer);
+    }
+    engine.releaseTexture(table);
+    engine.releaseTexture(airless.body);
+  }
 }

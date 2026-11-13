@@ -1,0 +1,22 @@
+# Plan 11's cooling floor (P11.T17.b; decision-test-coverage.md §3.2, N7): per metallicity interval
+# and age bin of the pair-light tables, the brightest V a star on P06.T13's cooling fits of
+# 0.08-0.1 M_sun can have, brightened by the tables' margin, which the pair-light reader takes for a
+# pair whose lighter star lies below 0.1 M_sun. The parameters are constants of the code
+# (`hyperion_sim::stellar::binary::pair_light` and `stellar::substellar::MAX_MASS`), recorded here so
+# that the inputs hash covers them; the task refuses a manifest that disagrees with the code.
+task = "binary_cooling_floor"
+
+[params]
+fe_h_edges = [-2.301029995663981, -1.0, -0.5, -0.15, 0.17609125905568124]
+first_age_edge_years = 1.0e5
+age_step_dex = 0.1
+last_age_years = 1.5e10
+age_bins = 53
+# The cooling fits' masses, from the lightest companion to the fits' top, in even steps; each
+# interval's metallicities and each bin's ages in even steps too, edges included.
+lowest_mass = 0.08
+highest_mass = 0.1
+mass_steps = 64
+fe_h_steps = 8
+age_steps = 8
+margin_mag = 0.3

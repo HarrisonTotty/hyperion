@@ -2,8 +2,9 @@
 //! P12.T2; Design note 4).
 
 use super::error::{CurvatureError, curvature_error};
-use super::retarded::{Drift, Observer, Retardation, TraceMotionError, retarded};
+use super::retarded::{Drift, Observer, Retardation, TraceMotionError, Trajectory, retarded};
 use crate::galaxy::Galaxy;
+use crate::galaxy::features::members::source::{FeatureInteriorCache, NoInteriorCache};
 use crate::galaxy::placement::SystemRecord;
 use crate::galaxy::query::SystemHit;
 use crate::stellar::system::{StellarBrief, SystemExistence, SystemStars, SystemSummary};
@@ -45,6 +46,10 @@ impl ObservedSystem {
 
     /// Its brief when the light left it, or `None` if it was not yet born, or if it is a rogue
     /// planet, which has no stars.
+    ///
+    /// It is the summary's at the emitted time ([`SystemStars::brief_at`]), so that the row and
+    /// [`summary_observed`] read one state: a primary its companion had stripped by then is the
+    /// stripped star in both, not its single-star track's supergiant.
     #[must_use]
     pub const fn brief_then(&self) -> Option<StellarBrief> {
         self.brief_then
@@ -60,6 +65,9 @@ impl ObservedSystem {
 /// What `observer` sees of the system `hit`, whose stars are `stars`: its retardation, its
 /// existence and brief at the emitted time, and the stated error (plan 12's Provides).
 ///
+/// The brief is the summary's ([`SystemStars::brief_at`]), whose primary is the one its pair has
+/// made of it, so that it is [`summary_observed`]'s first star at the same instant.
+///
 /// `observer`'s time must be the time the search was made at. The present is taken from the
 /// system's own line, not from the hit, whose position plan 03's drift rounds differently by up to
 /// a few metres, so that this and [`retarded`] give the same bits for the same system. The system
@@ -70,7 +78,9 @@ impl ObservedSystem {
 ///
 /// # Errors
 ///
-/// [`TraceMotionError::CentreOrbitNotBuilt`] for a member of the galactic centre.
+/// [`TraceMotionError::CentreOrbitNotBuilt`] for a member of the galactic centre, and
+/// [`TraceMotionError::CatalogueMotionNotTraced`] for a catalogue system, whose line breaks at its
+/// explosion (plan 09, P09.T33.a).
 ///
 /// # Panics
 ///
@@ -109,22 +119,50 @@ pub fn observe_hit(
     stars: &SystemStars,
     observer: &Observer,
 ) -> Result<ObservedSystem, TraceMotionError> {
-    let line = Drift::of_record(galaxy, hit.record())?;
-    Ok(observe_on_line(galaxy, hit, &line, Some(stars), observer))
+    observe_hit_in(galaxy, &NoInteriorCache, hit, stars, observer)
 }
 
-/// [`observe_hit`] for a hit whose line the caller has traced already, as the observed range
-/// query does with its interior cache (P12.T3). `stars` is `None` for a system that has none, a
-/// rogue planet, which then has no brief at the emitted time either.
+/// [`observe_hit`] with a feature member's interior from `interiors`
+/// ([`Drift::of_record_in`]), the same whatever the cache holds: what a server that keeps
+/// interiors calls.
+///
+/// # Errors
+///
+/// As [`observe_hit`].
+///
+/// # Panics
+///
+/// As [`observe_hit`].
+pub fn observe_hit_in(
+    galaxy: &Galaxy,
+    interiors: &dyn FeatureInteriorCache,
+    hit: &SystemHit,
+    stars: &SystemStars,
+    observer: &Observer,
+) -> Result<ObservedSystem, TraceMotionError> {
+    let line = Drift::of_record_in(galaxy, interiors, hit.record())?;
+    Ok(observe_hit_on(galaxy, hit, &line, Some(stars), observer))
+}
+
+/// [`observe_hit`] for a hit whose path the caller has traced already: as the observed range query
+/// does with its interior cache (P12.T3), and as a server does for a system whose path its own
+/// caches give, a member of the galactic centre on its orbit
+/// ([`CentrePath`](crate::galaxy::features::centre::CentrePath)), a stream's or a dwarf core's
+/// member on its line ([`Drift::of_global_member`]) and a catalogue system on its broken line
+/// ([`CatalogueMotion`](crate::galaxy::catalogue_classes::CatalogueMotion); plan 10, P10.T10.b's
+/// registration member). `stars` is `None` for a system whose stars are not given, a rogue planet
+/// or a centre member, which then has no brief at the emitted time either.
+///
+/// `path` must be the hit's system's, defined back to the source horizon, as a [`Trajectory`] is.
 ///
 /// # Panics
 ///
 /// In debug builds, if `stars` are not `hit`'s system's.
 #[must_use]
-pub(crate) fn observe_on_line(
+pub fn observe_hit_on(
     galaxy: &Galaxy,
     hit: &SystemHit,
-    line: &Drift,
+    path: &impl Trajectory,
     stars: Option<&SystemStars>,
     observer: &Observer,
 ) -> ObservedSystem {
@@ -132,7 +170,7 @@ pub(crate) fn observe_on_line(
         stars.is_none_or(|stars| stars.record().id() == hit.id()),
         "the stars given are not the hit's system's"
     );
-    let retardation = retarded(observer, line);
+    let retardation = retarded(observer, path);
     let emitted = retardation.emitted();
     ObservedSystem {
         hit: *hit,
@@ -148,8 +186,8 @@ pub(crate) fn observe_on_line(
 ///
 /// # Errors
 ///
-/// [`TraceMotionError::CentreOrbitNotBuilt`] for a member of the galactic centre, as
-/// [`observe_hit`].
+/// [`TraceMotionError::CentreOrbitNotBuilt`] for a member of the galactic centre and
+/// [`TraceMotionError::CatalogueMotionNotTraced`] for a catalogue system, as [`observe_hit`].
 ///
 /// # Panics
 ///
@@ -161,14 +199,47 @@ pub fn summary_observed(
     stars: &SystemStars,
     observer: &Observer,
 ) -> Result<(SystemSummary, Retardation), TraceMotionError> {
-    let line = Drift::of_record(galaxy, record)?;
+    summary_observed_in(galaxy, &NoInteriorCache, record, stars, observer)
+}
+
+/// [`summary_observed`] with a feature member's interior from `interiors`
+/// ([`Drift::of_record_in`]), the same whatever the cache holds: what a server that keeps
+/// interiors calls.
+///
+/// # Errors
+///
+/// As [`summary_observed`].
+///
+/// # Panics
+///
+/// As [`summary_observed`].
+pub fn summary_observed_in(
+    galaxy: &Galaxy,
+    interiors: &dyn FeatureInteriorCache,
+    record: &SystemRecord,
+    stars: &SystemStars,
+    observer: &Observer,
+) -> Result<(SystemSummary, Retardation), TraceMotionError> {
+    let line = Drift::of_record_in(galaxy, interiors, record)?;
     debug_assert_eq!(
         stars.record().id(),
         record.id(),
         "the stars given are not the record's system's"
     );
-    let retardation = retarded(observer, &line);
-    Ok((stars.summary_at(retardation.emitted()), retardation))
+    Ok(summary_observed_on(stars, &line, observer))
+}
+
+/// [`summary_observed`] for a system whose path the caller has traced already, as
+/// [`observe_hit_on`] takes it: the summary of `stars` at the retarded time on `path`, with the
+/// retardation.
+#[must_use]
+pub fn summary_observed_on(
+    stars: &SystemStars,
+    path: &impl Trajectory,
+    observer: &Observer,
+) -> (SystemSummary, Retardation) {
+    let retardation = retarded(observer, path);
+    (stars.summary_at(retardation.emitted()), retardation)
 }
 
 #[cfg(test)]
@@ -190,6 +261,11 @@ mod tests {
     use crate::units::consts::METRES_PER_LIGHT_YEAR;
     use crate::units::{LightYears, Years};
 
+    /// The Milky Way fixture with its kinematic tables, built once per process.
+    ///
+    /// The build takes some 5 s in a test build, and nextest runs each test in a process of its
+    /// own, so the properties that read it run in one test,
+    /// [`observed_systems_are_seen_as_their_light_shows_them`].
     fn galaxy() -> &'static Galaxy {
         static GALAXY: OnceLock<Galaxy> = OnceLock::new();
         GALAXY.get_or_init(|| {
@@ -197,6 +273,16 @@ mod tests {
                 .expect("the Milky Way fixture's gas is mostly neutral")
                 .with_full_potential()
         })
+    }
+
+    /// A system as its light shows it (P12.T2), each property below on one build of the fixture
+    /// ([`galaxy`]), in turn.
+    #[test]
+    fn observed_systems_are_seen_as_their_light_shows_them() {
+        observed_system_is_a_supergiant_until_its_death_arrives();
+        observed_system_born_a_century_ago_is_not_yet_born_from_afar();
+        observed_extrapolated_jump_lands_on_the_star();
+        observed_centre_member_is_refused_until_its_orbit_is_built();
     }
 
     fn years(y: i64) -> UniverseTime {
@@ -224,7 +310,12 @@ mod tests {
     ///
     /// A supernova falls in a given 40,000 years in about one layer-E cell in 3,000 at the solar
     /// circle, so rather than search for one the test takes a real record and changes only its age
-    /// at the epoch, which moves its death on the clock and nothing else.
+    /// at the epoch, which moves its death on the clock. From generator version 27 a system's age
+    /// at the epoch can move its stars too, its pairs and their timelines following the age it is
+    /// given (0x81d8b2e000000002's merger at 23.16 Myr is at 23.01 Myr re-aged, its death 137,706
+    /// years from the target; 0x81d8b2e000000007's single star is a pair re-aged), so the test
+    /// re-ages it again at the lifetime its re-aged stars give, until its death lands on the
+    /// target.
     fn dying_supergiant() -> (SystemRecord, SystemStars, UniverseTime) {
         let galaxy = galaxy();
         let mut cell = Vec::new();
@@ -241,23 +332,35 @@ mod tests {
                 else {
                     continue;
                 };
-                // Lifetime = T + age at the epoch; the new age puts T at the target.
-                let lifetime =
+                // Lifetime = T + age at the epoch; the new age puts T at the target. The lifetime
+                // the re-aged stars give is taken again, at most four times, until it does.
+                let mut lifetime =
                     death.since_epoch().as_julian_years_f64() + grown.age_at_epoch().value();
-                let record = SystemRecord::from_parts(
-                    grown.id(),
-                    *grown.epoch_position(),
-                    grown.origin(),
-                    grown.population(),
-                    grown.primary_initial_mass(),
-                    Years::new(lifetime + 20_000.0),
-                );
-                let stars = SystemStars::generate(galaxy, &record);
-                let ClockDeath::At(death, _) = stars.death_time() else {
+                let mut landed = None;
+                for _ in 0..4 {
+                    let record = SystemRecord::from_parts(
+                        grown.id(),
+                        *grown.epoch_position(),
+                        grown.origin(),
+                        grown.population(),
+                        grown.primary_initial_mass(),
+                        Years::new(lifetime + 20_000.0),
+                    );
+                    let stars = SystemStars::generate(galaxy, &record);
+                    let ClockDeath::At(death, _) = stars.death_time() else {
+                        break;
+                    };
+                    let off = death.checked_since(target).unwrap().as_julian_years_f64();
+                    if off.abs() < 1.0 {
+                        landed = Some((record, stars, death));
+                        break;
+                    }
+                    lifetime += off;
+                }
+                let Some((record, stars, death)) = landed else {
                     continue;
                 };
-                let off = death.checked_since(target).unwrap().as_julian_years_f64();
-                assert!(off.abs() < 1.0, "re-aged death {off} yr from the target");
+                // As observed mode reads it: a primary its companion stripped is no supergiant.
                 let kind = |t| stars.brief_at(t).map(|b| b.kind());
                 let century = Span::from_julian_years(100).unwrap();
                 let before = kind(death.checked_sub(century).unwrap());
@@ -274,7 +377,9 @@ mod tests {
 
     /// P12.T2: a layer-E system that dies at T, seen from d, is a living supergiant for
     /// t < T + d ÷ c and a remnant of age t − d ÷ c − T after it, with one ID throughout.
-    #[test]
+    ///
+    /// Run on its one build of the fixture by
+    /// [`observed_systems_are_seen_as_their_light_shows_them`].
     fn observed_system_is_a_supergiant_until_its_death_arrives() {
         let galaxy = galaxy();
         let (record, stars, death) = dying_supergiant();
@@ -331,7 +436,9 @@ mod tests {
 
     /// P12.T2: a system born 100 years ago is not yet born seen from 5,000 ly, and is found all the
     /// same; seen from 50 ly it exists.
-    #[test]
+    ///
+    /// Run on its one build of the fixture by
+    /// [`observed_systems_are_seen_as_their_light_shows_them`].
     fn observed_system_born_a_century_ago_is_not_yet_born_from_afar() {
         let galaxy = galaxy();
         let mut cell = Vec::new();
@@ -363,12 +470,14 @@ mod tests {
         assert!(seen.brief_then().is_some());
         let (summary, _) = summary_observed(galaxy, &young, &stars, &far).unwrap();
         assert_eq!(summary.existence(), SystemExistence::NotYetBorn);
-        assert!(summary.stars().is_empty());
+        assert_eq!(summary.stars(), []);
     }
 
     /// P12.T2: an extrapolated jump lands on the star. Observe from `x_o`, extrapolate, place a
     /// second observer there at the same time, and the star is under a metre away.
-    #[test]
+    ///
+    /// Run on its one build of the fixture by
+    /// [`observed_systems_are_seen_as_their_light_shows_them`].
     fn observed_extrapolated_jump_lands_on_the_star() {
         let galaxy = galaxy();
         let mut cell = Vec::new();
@@ -419,7 +528,9 @@ mod tests {
     /// A member of the galactic centre is refused with a typed error until plan 09's P09.T28
     /// builds its Kepler regime: the black hole, member zero, which resolves without the centre's
     /// model.
-    #[test]
+    ///
+    /// Run on its one build of the fixture by
+    /// [`observed_systems_are_seen_as_their_light_shows_them`].
     fn observed_centre_member_is_refused_until_its_orbit_is_built() {
         use crate::galaxy::placement::resolve;
         use crate::id::{CentreMemberId, SystemId};

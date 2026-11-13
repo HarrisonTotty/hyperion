@@ -5,7 +5,8 @@
 //!
 //! - [`math`]: every transcendental function, on the exactly pinned `libm`.
 //! - [`units`]: unit newtypes over `f64` and the physical constants between them.
-//! - [`version`]: [`GENERATOR_VERSION`], half of what identifies a universe.
+//! - [`version`]: [`GENERATOR_VERSION`], half of what identifies a universe, and the record by
+//!   which a fitted table belongs to it.
 //! - [`rng`]: random streams keyed by seed, domain tag and object, the samplers and decisions,
 //!   raw event keys, and the foundation's own registry of domain tags, with the
 //!   [`domain_tags!`] macro every registry is declared with.

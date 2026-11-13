@@ -1,0 +1,5321 @@
+{
+  "schema": "hyperion.views-check.handover-results",
+  "version": 1,
+  "run": {
+    "startedAt": "2026-10-22T14:29:17.737Z",
+    "machine": {
+      "name": "effect",
+      "cpu": "AMD Ryzen 7 3700X 8-Core Processor",
+      "logicalCores": 16,
+      "memoryBytes": 33554927616,
+      "governor": {
+        "value": "schedutil",
+        "reason": null
+      },
+      "loadAverage": [5.31, 4.9, 5.04],
+      "gpu": {
+        "value": {
+          "vendorId": 4318,
+          "deviceId": 8710,
+          "driverVersion": "615.78.08",
+          "description": null
+        },
+        "reason": null
+      }
+    },
+    "versions": {
+      "app": "0.1.0",
+      "electron": "44.4.3",
+      "chromium": "152.0.7977.130",
+      "node": "24.21.0",
+      "v8": "15.2.124.28-electron.0"
+    },
+    "platform": "linux",
+    "launchMode": "vulkan",
+    "setting": "low",
+    "smoke": false,
+    "fixture": "terrain-test-weathered",
+    "switches": [
+      "--use-angle=vulkan",
+      "--enable-features=Vulkan,VulkanFromANGLE,DefaultANGLEVulkan",
+      "--enable-dawn-features=enable_subgroups_intel_gen9",
+      "--disable-dawn-features=timestamp_quantization"
+    ],
+    "shown": false,
+    "window": {
+      "widthDip": 1286,
+      "heightDip": 724
+    },
+    "devicePixelRatio": 1,
+    "captures": {
+      "value": "target/views-check/terrain/captures-20261022T142917",
+      "reason": null
+    },
+    "provisional": "provisional: load average 5.31 at the start; a shared machine; a hidden run: no presentation"
+  },
+  "world": "TERRAIN TEST WEATHERED",
+  "canvas": {
+    "widthPx": 822,
+    "heightPx": 474
+  },
+  "target": {
+    "widthPx": 822,
+    "heightPx": 474
+  },
+  "reliefM": 15812.216,
+  "tauPx": 2,
+  "radPerPx": 0.0014047451805100383,
+  "rangeM": 5628143.8866580995,
+  "cellLevel": 6,
+  "approach": {
+    "ratePerS": 0.01,
+    "startRatio": 3,
+    "closestRatio": 0.85,
+    "holdS": 12,
+    "endRatio": 1.25
+  },
+  "bounds": {
+    "stops": 0.3333333333333333,
+    "minSharedPixels": 2,
+    "missLimit": 0.05
+  },
+  "looks": [
+    {
+      "name": "handover-30",
+      "scene": "HAND-OVER 30°",
+      "judged": true,
+      "nominal": {
+        "incidenceDeg": 14.999999999999998,
+        "emissionDeg": 14.999999999999998,
+        "phaseDeg": 29.999999999999996
+      },
+      "atRange": {
+        "incidenceDeg": 15.00000000000003,
+        "emissionDeg": 15.000004222459859,
+        "phaseDeg": 29.9999950649529
+      },
+      "exposure": {
+        "lockedEv100": 14.6,
+        "lockedReading": "EV100 14.6 INHIBITED · OPERATOR",
+        "endReading": "EV100 14.6 INHIBITED · OPERATOR",
+        "held": true
+      },
+      "surveyedCells": 48,
+      "mappingMismatches": 0,
+      "switchesS": {
+        "figure": 119.39529999999813,
+        "terrain": 119.56189999999812,
+        "disc": 164.92680000000567
+      },
+      "comparisons": [
+        {
+          "name": "disc-to-figure",
+          "before": {
+            "atMs": 120611.1,
+            "scriptS": 119.36199999999815,
+            "regime": "disc",
+            "rangeRatio": 0.9093659220187762,
+            "target": {
+              "widthPx": 822,
+              "heightPx": 508
+            },
+            "bodyPixels": 182180,
+            "bodyMisses": 0,
+            "surveyPixels": 2110,
+            "angles": {
+              "incidenceDeg": 15.00000000000003,
+              "emissionDeg": 15.572085623164188,
+              "phaseDeg": 30.572074533998983
+            }
+          },
+          "after": {
+            "atMs": 120644.4,
+            "scriptS": 119.39529999999813,
+            "regime": "figure",
+            "rangeRatio": 0.9090631535804867,
+            "target": {
+              "widthPx": 822,
+              "heightPx": 508
+            },
+            "bodyPixels": 182286,
+            "bodyMisses": 0,
+            "surveyPixels": 2107,
+            "angles": {
+              "incidenceDeg": 15.00000000000003,
+              "emissionDeg": 15.574236470849765,
+              "phaseDeg": 30.574225374271773
+            }
+          },
+          "framesApart": 1,
+          "beforeWasLast": true,
+          "afterWasFirst": true,
+          "body": {
+            "own": {
+              "pixelsBefore": 182180,
+              "pixelsAfter": 182286,
+              "meanBefore": 0.11356398247701352,
+              "meanAfter": 0.11357056302384205,
+              "log2": 0.00008359558214801708
+            },
+            "shared": {
+              "pixels": 182170,
+              "meanBefore": 0.11357021643262032,
+              "meanAfter": 0.11357851703297217,
+              "log2": 0.00010543959269889809
+            }
+          },
+          "survey": {
+            "own": {
+              "pixelsBefore": 2110,
+              "pixelsAfter": 2107,
+              "meanBefore": 0.1157098963327035,
+              "meanAfter": 0.11570758731106644,
+              "log2": -0.00002878964901649327
+            },
+            "shared": {
+              "pixels": 2088,
+              "meanBefore": 0.11571211846352651,
+              "meanAfter": 0.11571082936678354,
+              "log2": -0.00001607250703328347
+            }
+          },
+          "texels": [
+            {
+              "texel": 3326,
+              "sharedPixels": 49,
+              "meanBefore": 0.11664906615505413,
+              "meanAfter": 0.11664906615505413,
+              "log2": 0,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3327,
+              "sharedPixels": 42,
+              "meanBefore": 0.11577300691888445,
+              "meanAfter": 0.11577300691888445,
+              "log2": 0,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3389,
+              "sharedPixels": 49,
+              "meanBefore": 0.1167447383002359,
+              "meanAfter": 0.1167435776822421,
+              "log2": -0.000014342626242367682,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3390,
+              "sharedPixels": 44,
+              "meanBefore": 0.11666554449634119,
+              "meanAfter": 0.11666455238380215,
+              "log2": -0.000012268591658138949,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3391,
+              "sharedPixels": 42,
+              "meanBefore": 0.11602771548288209,
+              "meanAfter": 0.11602782032319478,
+              "log2": 0.0000013035896659427847,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3453,
+              "sharedPixels": 52,
+              "meanBefore": 0.11657767055126336,
+              "meanAfter": 0.11657406905522713,
+              "log2": -0.00004457063438967935,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3454,
+              "sharedPixels": 43,
+              "meanBefore": 0.1166941792119381,
+              "meanAfter": 0.116690736870433,
+              "log2": -0.000042558440383950255,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3455,
+              "sharedPixels": 45,
+              "meanBefore": 0.11629702283276452,
+              "meanAfter": 0.11629702283276452,
+              "log2": 0,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3518,
+              "sharedPixels": 43,
+              "meanBefore": 0.11670919836953629,
+              "meanAfter": 0.11670544674230177,
+              "log2": -0.000046376301747295056,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3519,
+              "sharedPixels": 49,
+              "meanBefore": 0.11645412581915758,
+              "meanAfter": 0.11645217559167317,
+              "log2": -0.00002416064746539729,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3582,
+              "sharedPixels": 46,
+              "meanBefore": 0.11647690395298212,
+              "meanAfter": 0.11647690395298212,
+              "log2": 0,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3583,
+              "sharedPixels": 45,
+              "meanBefore": 0.11649854100412793,
+              "meanAfter": 0.11649776846170426,
+              "log2": -0.000009567045298477382,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3646,
+              "sharedPixels": 50,
+              "meanBefore": 0.116095020622015,
+              "meanAfter": 0.11609118700027465,
+              "log2": -0.00004764061681862326,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3647,
+              "sharedPixels": 42,
+              "meanBefore": 0.11634676158428192,
+              "meanAfter": 0.11634292080998421,
+              "log2": -0.00004762622885531298,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3709,
+              "sharedPixels": 44,
+              "meanBefore": 0.11529793048446829,
+              "meanAfter": 0.11529772999611768,
+              "log2": -0.0000025086642878082333,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3710,
+              "sharedPixels": 49,
+              "meanBefore": 0.11557929993283991,
+              "meanAfter": 0.11557831919314909,
+              "log2": -0.000012241935123764869,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3711,
+              "sharedPixels": 42,
+              "meanBefore": 0.116009671241045,
+              "meanAfter": 0.1160093563653174,
+              "log2": -0.000003915796522335132,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3773,
+              "sharedPixels": 42,
+              "meanBefore": 0.11517203670172464,
+              "meanAfter": 0.11517193168401718,
+              "log2": -0.0000013154980945945678,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3774,
+              "sharedPixels": 49,
+              "meanBefore": 0.1152316543216608,
+              "meanAfter": 0.11523094484392478,
+              "log2": -0.00000888265614544077,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3775,
+              "sharedPixels": 42,
+              "meanBefore": 0.11557536164209956,
+              "meanAfter": 0.11557266506410781,
+              "log2": -0.00003366102451031243,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3838,
+              "sharedPixels": 45,
+              "meanBefore": 0.11503814193937513,
+              "meanAfter": 0.11503717187378142,
+              "log2": -0.00001216565826379091,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3839,
+              "sharedPixels": 39,
+              "meanBefore": 0.11514546741277744,
+              "meanAfter": 0.1151415589146125,
+              "log2": -0.00004897167687077398,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3902,
+              "sharedPixels": 41,
+              "meanBefore": 0.11493335046419283,
+              "meanAfter": 0.11493335046419283,
+              "log2": 0,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3903,
+              "sharedPixels": 34,
+              "meanBefore": 0.11486891328411944,
+              "meanAfter": 0.1148681500378777,
+              "log2": -0.000009586015874139323,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7360,
+              "sharedPixels": 47,
+              "meanBefore": 0.11499202742855599,
+              "meanAfter": 0.1149943432909377,
+              "log2": 0.00002905461887277206,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7361,
+              "sharedPixels": 42,
+              "meanBefore": 0.11463201453997976,
+              "meanAfter": 0.11463035714058649,
+              "log2": -0.00002085926153475332,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7424,
+              "sharedPixels": 48,
+              "meanBefore": 0.11519504059106112,
+              "meanAfter": 0.11519504059106112,
+              "log2": 0,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7425,
+              "sharedPixels": 42,
+              "meanBefore": 0.11476504323737961,
+              "meanAfter": 0.11476483337935947,
+              "log2": -0.000002638097744942545,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7426,
+              "sharedPixels": 49,
+              "meanBefore": 0.11458132096699306,
+              "meanAfter": 0.11457900946237604,
+              "log2": -0.000029104481057714203,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7488,
+              "sharedPixels": 44,
+              "meanBefore": 0.11546789905564352,
+              "meanAfter": 0.11546917869286104,
+              "log2": 0.000015988132229652758,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7489,
+              "sharedPixels": 42,
+              "meanBefore": 0.1148968127866586,
+              "meanAfter": 0.11489577343066533,
+              "log2": -0.000013050671145616098,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7490,
+              "sharedPixels": 43,
+              "meanBefore": 0.11464754977198534,
+              "meanAfter": 0.11464744736981947,
+              "log2": -0.0000012886028803084325,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7552,
+              "sharedPixels": 42,
+              "meanBefore": 0.11584885205541338,
+              "meanAfter": 0.11584895689572607,
+              "log2": 0.0000013056023263809895,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7553,
+              "sharedPixels": 43,
+              "meanBefore": 0.11512625026841496,
+              "meanAfter": 0.11512736802877382,
+              "log2": 0.000014007053079652933,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7616,
+              "sharedPixels": 42,
+              "meanBefore": 0.11620025336742401,
+              "meanAfter": 0.11619870098573822,
+              "log2": -0.000019273867784277365,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7617,
+              "sharedPixels": 42,
+              "meanBefore": 0.11556394628825642,
+              "meanAfter": 0.11556519550226983,
+              "log2": 0.000015595046545840515,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7680,
+              "sharedPixels": 42,
+              "meanBefore": 0.11634602592814536,
+              "meanAfter": 0.11634477689152672,
+              "log2": -0.00001548818357904412,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7681,
+              "sharedPixels": 43,
+              "meanBefore": 0.11598034393648769,
+              "meanAfter": 0.11598094760678536,
+              "log2": 0.000007509116189180133,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7744,
+              "sharedPixels": 42,
+              "meanBefore": 0.11619901710322925,
+              "meanAfter": 0.11619247975093978,
+              "log2": -0.00008116825149551695,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7745,
+              "sharedPixels": 43,
+              "meanBefore": 0.11612923044797986,
+              "meanAfter": 0.11612720007813254,
+              "log2": -0.00002522388295845247,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7746,
+              "sharedPixels": 45,
+              "meanBefore": 0.11585767848624123,
+              "meanAfter": 0.11585767848624123,
+              "log2": 0,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7808,
+              "sharedPixels": 38,
+              "meanBefore": 0.1158213268377279,
+              "meanAfter": 0.11581546715215633,
+              "log2": -0.0000729913341612257,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7809,
+              "sharedPixels": 39,
+              "meanBefore": 0.11591507838322566,
+              "meanAfter": 0.11591363449891408,
+              "log2": -0.000017970895063583403,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7810,
+              "sharedPixels": 41,
+              "meanBefore": 0.11584194967659509,
+              "meanAfter": 0.11584068362305804,
+              "log2": -0.000015767510351527118,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7872,
+              "sharedPixels": 36,
+              "meanBefore": 0.11530456091794702,
+              "meanAfter": 0.11529805759588878,
+              "log2": -0.00008137210709645661,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7873,
+              "sharedPixels": 42,
+              "meanBefore": 0.11543528114755948,
+              "meanAfter": 0.11543392744802293,
+              "log2": -0.000016918458898258673,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7936,
+              "sharedPixels": 41,
+              "meanBefore": 0.11490251269282364,
+              "meanAfter": 0.1149011394236146,
+              "log2": -0.000017242621337605832,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7937,
+              "sharedPixels": 42,
+              "meanBefore": 0.11494929999822662,
+              "meanAfter": 0.11494764277622813,
+              "log2": -0.000020799458488381242,
+              "dark": null,
+              "judged": true,
+              "over": false
+            }
+          ],
+          "judgedTexels": 48,
+          "texelsOver": 0,
+          "darkTexels": 0,
+          "worst": {
+            "texel": 7872,
+            "sharedPixels": 36,
+            "meanBefore": 0.11530456091794702,
+            "meanAfter": 0.11529805759588878,
+            "log2": -0.00008137210709645661,
+            "dark": null,
+            "judged": true,
+            "over": false
+          },
+          "verdict": "pass",
+          "reasons": []
+        },
+        {
+          "name": "disc-to-terrain",
+          "before": {
+            "atMs": 120611.1,
+            "scriptS": 119.36199999999815,
+            "regime": "disc",
+            "rangeRatio": 0.9093659220187762,
+            "target": {
+              "widthPx": 822,
+              "heightPx": 508
+            },
+            "bodyPixels": 182180,
+            "bodyMisses": 0,
+            "surveyPixels": 2110,
+            "angles": {
+              "incidenceDeg": 15.00000000000003,
+              "emissionDeg": 15.572085623164188,
+              "phaseDeg": 30.572074533998983
+            }
+          },
+          "after": {
+            "atMs": 120811,
+            "scriptS": 119.56189999999812,
+            "regime": "terrain",
+            "rangeRatio": 0.9075499152441626,
+            "target": {
+              "widthPx": 822,
+              "heightPx": 508
+            },
+            "bodyPixels": 182926,
+            "bodyMisses": 0,
+            "surveyPixels": 2109,
+            "angles": {
+              "incidenceDeg": 15.00000000000003,
+              "emissionDeg": 15.585013303749806,
+              "phaseDeg": 30.585002170014466
+            }
+          },
+          "framesApart": 7,
+          "beforeWasLast": true,
+          "afterWasFirst": true,
+          "body": {
+            "own": {
+              "pixelsBefore": 182180,
+              "pixelsAfter": 182926,
+              "meanBefore": 0.11356398247701352,
+              "meanAfter": 0.11358701201524408,
+              "log2": 0.0002925331741319942
+            },
+            "shared": {
+              "pixels": 182106,
+              "meanBefore": 0.11361012996568176,
+              "meanAfter": 0.1136574078809776,
+              "log2": 0.0006002407169194182
+            }
+          },
+          "survey": {
+            "own": {
+              "pixelsBefore": 2110,
+              "pixelsAfter": 2109,
+              "meanBefore": 0.1157098963327035,
+              "meanAfter": 0.1156832830862956,
+              "log2": -0.0003318576535430537
+            },
+            "shared": {
+              "pixels": 2021,
+              "meanBefore": 0.11571492981727852,
+              "meanAfter": 0.11569221293436661,
+              "log2": -0.0002832543026722267
+            }
+          },
+          "texels": [
+            {
+              "texel": 3326,
+              "sharedPixels": 47,
+              "meanBefore": 0.11663996570921958,
+              "meanAfter": 0.11664246926282315,
+              "log2": 0.000030965592150382716,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3327,
+              "sharedPixels": 42,
+              "meanBefore": 0.11577300691888445,
+              "meanAfter": 0.11577570154553368,
+              "log2": 0.00003357845983988192,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3389,
+              "sharedPixels": 49,
+              "meanBefore": 0.1167447383002359,
+              "meanAfter": 0.11653904039032605,
+              "log2": -0.002544192597722541,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3390,
+              "sharedPixels": 43,
+              "meanBefore": 0.11666156420874041,
+              "meanAfter": 0.11665659224571184,
+              "log2": -0.00006148708283047295,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3391,
+              "sharedPixels": 42,
+              "meanBefore": 0.11602771548288209,
+              "meanAfter": 0.1160303054466134,
+              "log2": 0.000032203393069082664,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3453,
+              "sharedPixels": 52,
+              "meanBefore": 0.11657767055126336,
+              "meanAfter": 0.11645800777925895,
+              "log2": -0.0014816349510088714,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3454,
+              "sharedPixels": 43,
+              "meanBefore": 0.1166941792119381,
+              "meanAfter": 0.11667776229076607,
+              "log2": -0.0002029773643576501,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3455,
+              "sharedPixels": 45,
+              "meanBefore": 0.11629702283276452,
+              "meanAfter": 0.11629672745863597,
+              "log2": -0.000003664198113176318,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3518,
+              "sharedPixels": 43,
+              "meanBefore": 0.11670919836953629,
+              "meanAfter": 0.11655322046473969,
+              "log2": -0.0019294028108094276,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3519,
+              "sharedPixels": 44,
+              "meanBefore": 0.11644064347175034,
+              "meanAfter": 0.11642737077041106,
+              "log2": -0.00016445762621757797,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3582,
+              "sharedPixels": 45,
+              "meanBefore": 0.11647578279177348,
+              "meanAfter": 0.1163532801800304,
+              "log2": -0.0015181431777494935,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3583,
+              "sharedPixels": 41,
+              "meanBefore": 0.11650040473152952,
+              "meanAfter": 0.11648679579176553,
+              "log2": -0.00016853758393159095,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3646,
+              "sharedPixels": 50,
+              "meanBefore": 0.116095020622015,
+              "meanAfter": 0.11600237548351287,
+              "log2": -0.0011517465617534063,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3647,
+              "sharedPixels": 41,
+              "meanBefore": 0.11634416205853951,
+              "meanAfter": 0.11633128254878812,
+              "log2": -0.00015971779830693458,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3709,
+              "sharedPixels": 43,
+              "meanBefore": 0.11529852484547815,
+              "meanAfter": 0.11518088468285494,
+              "log2": -0.0014727466918782897,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3710,
+              "sharedPixels": 44,
+              "meanBefore": 0.11560536514629018,
+              "meanAfter": 0.11557704548944127,
+              "log2": -0.0003534579346898735,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3711,
+              "sharedPixels": 41,
+              "meanBefore": 0.11600352496635623,
+              "meanAfter": 0.11603984454782998,
+              "log2": 0.0004516231652465632,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3773,
+              "sharedPixels": 42,
+              "meanBefore": 0.11517203670172464,
+              "meanAfter": 0.11511084135799181,
+              "log2": -0.0007667632240043896,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3774,
+              "sharedPixels": 42,
+              "meanBefore": 0.11524592375471479,
+              "meanAfter": 0.11523379828958284,
+              "log2": -0.00015179945788995375,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3775,
+              "sharedPixels": 42,
+              "meanBefore": 0.11557536164209956,
+              "meanAfter": 0.11565034960707028,
+              "log2": 0.0009357503402016595,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3838,
+              "sharedPixels": 42,
+              "meanBefore": 0.11502763185472716,
+              "meanAfter": 0.11499122725356192,
+              "log2": -0.0004566646248811579,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3839,
+              "sharedPixels": 39,
+              "meanBefore": 0.11514546741277744,
+              "meanAfter": 0.11523284189976178,
+              "log2": 0.0010943282420352908,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3902,
+              "sharedPixels": 37,
+              "meanBefore": 0.11490941933683448,
+              "meanAfter": 0.11488102638238185,
+              "log2": -0.00035651939022310504,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3903,
+              "sharedPixels": 32,
+              "meanBefore": 0.11487065977416933,
+              "meanAfter": 0.11489477450959384,
+              "log2": 0.00030283240336386174,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7360,
+              "sharedPixels": 46,
+              "meanBefore": 0.11499426659682523,
+              "meanAfter": 0.11499208098520404,
+              "log2": -0.000027420506307726808,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7361,
+              "sharedPixels": 42,
+              "meanBefore": 0.11463201453997976,
+              "meanAfter": 0.11462297663092613,
+              "log2": -0.00011375060156234558,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7424,
+              "sharedPixels": 44,
+              "meanBefore": 0.11515503173524683,
+              "meanAfter": 0.11515631137246435,
+              "log2": 0.00001603157050763657,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7425,
+              "sharedPixels": 42,
+              "meanBefore": 0.11476504323737961,
+              "meanAfter": 0.11475756161269687,
+              "log2": -0.00009405350587113673,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7426,
+              "sharedPixels": 48,
+              "meanBefore": 0.11457845475524664,
+              "meanAfter": 0.11456874090557297,
+              "log2": -0.00012231546382341128,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7488,
+              "sharedPixels": 41,
+              "meanBefore": 0.1154421388012607,
+              "meanAfter": 0.11545593327865368,
+              "log2": 0.00017238103350909742,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7489,
+              "sharedPixels": 41,
+              "meanBefore": 0.11489636977998222,
+              "meanAfter": 0.11489456455882002,
+              "log2": -0.00002266741832919285,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7490,
+              "sharedPixels": 42,
+              "meanBefore": 0.11464646902112734,
+              "meanAfter": 0.1146387890690849,
+              "log2": -0.0000966466734261956,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7552,
+              "sharedPixels": 41,
+              "meanBefore": 0.11584760775653327,
+              "meanAfter": 0.11585141954625525,
+              "log2": 0.00004746890993304037,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7553,
+              "sharedPixels": 43,
+              "meanBefore": 0.11512625026841496,
+              "meanAfter": 0.11513204560723415,
+              "log2": 0.00007262197910989395,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7616,
+              "sharedPixels": 42,
+              "meanBefore": 0.11620025336742401,
+              "meanAfter": 0.11619672711406435,
+              "log2": -0.0000437811904848062,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7617,
+              "sharedPixels": 42,
+              "meanBefore": 0.11556394628825642,
+              "meanAfter": 0.11556923265258472,
+              "log2": 0.0000659932220639442,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7680,
+              "sharedPixels": 42,
+              "meanBefore": 0.11634602592814536,
+              "meanAfter": 0.11633253345886867,
+              "log2": -0.00016731682186726588,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7681,
+              "sharedPixels": 42,
+              "meanBefore": 0.11597655216852824,
+              "meanAfter": 0.11597623764759019,
+              "log2": -0.000003912501314968511,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7744,
+              "sharedPixels": 42,
+              "meanBefore": 0.11619901710322925,
+              "meanAfter": 0.11617909229937054,
+              "log2": -0.00024740209705628095,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7745,
+              "sharedPixels": 43,
+              "meanBefore": 0.11612923044797986,
+              "meanAfter": 0.11611625621485155,
+              "log2": -0.00016119031703895585,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7746,
+              "sharedPixels": 45,
+              "meanBefore": 0.11585767848624123,
+              "meanAfter": 0.11585001962052452,
+              "log2": -0.000095373677116932,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7808,
+              "sharedPixels": 38,
+              "meanBefore": 0.1158213268377279,
+              "meanAfter": 0.11579738812226999,
+              "log2": -0.00029821654269447363,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7809,
+              "sharedPixels": 36,
+              "meanBefore": 0.11592699483864838,
+              "meanAfter": 0.11590812272495693,
+              "log2": -0.00023487990240656298,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7810,
+              "sharedPixels": 36,
+              "meanBefore": 0.11583123583760527,
+              "meanAfter": 0.11581865346266164,
+              "log2": -0.00015672383877636084,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7872,
+              "sharedPixels": 35,
+              "meanBefore": 0.115310956963471,
+              "meanAfter": 0.11529006340673992,
+              "log2": -0.00026143015947250274,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7873,
+              "sharedPixels": 39,
+              "meanBefore": 0.11542367820556347,
+              "meanAfter": 0.11540658485430938,
+              "log2": -0.00021366776439645622,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7936,
+              "sharedPixels": 36,
+              "meanBefore": 0.11490185372531414,
+              "meanAfter": 0.11488456175559097,
+              "log2": -0.00021713240934366696,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7937,
+              "sharedPixels": 42,
+              "meanBefore": 0.11494929999822662,
+              "meanAfter": 0.1149395274974051,
+              "log2": -0.00012265701325611222,
+              "dark": null,
+              "judged": true,
+              "over": false
+            }
+          ],
+          "judgedTexels": 48,
+          "texelsOver": 0,
+          "darkTexels": 0,
+          "worst": {
+            "texel": 3389,
+            "sharedPixels": 49,
+            "meanBefore": 0.1167447383002359,
+            "meanAfter": 0.11653904039032605,
+            "log2": -0.002544192597722541,
+            "dark": null,
+            "judged": true,
+            "over": false
+          },
+          "verdict": "pass",
+          "reasons": []
+        },
+        {
+          "name": "terrain-to-disc",
+          "before": {
+            "atMs": 166142.6,
+            "scriptS": 164.89350000000567,
+            "regime": "terrain",
+            "rangeRatio": 1.1110270439344088,
+            "target": {
+              "widthPx": 822,
+              "heightPx": 508
+            },
+            "bodyPixels": 121893,
+            "bodyMisses": 0,
+            "surveyPixels": 1258,
+            "angles": {
+              "incidenceDeg": 15.00000000000003,
+              "emissionDeg": 14.452650996619745,
+              "phaseDeg": 29.45264359972001
+            }
+          },
+          "after": {
+            "atMs": 166175.9,
+            "scriptS": 164.92680000000567,
+            "regime": "disc",
+            "rangeRatio": 1.111397077547216,
+            "target": {
+              "widthPx": 822,
+              "heightPx": 508
+            },
+            "bodyPixels": 121822,
+            "bodyMisses": 0,
+            "surveyPixels": 1257,
+            "angles": {
+              "incidenceDeg": 15.00000000000003,
+              "emissionDeg": 14.451048769039271,
+              "phaseDeg": 29.45104137714711
+            }
+          },
+          "framesApart": 1,
+          "beforeWasLast": true,
+          "afterWasFirst": true,
+          "body": {
+            "own": {
+              "pixelsBefore": 121893,
+              "pixelsAfter": 121822,
+              "meanBefore": 0.11114093180976556,
+              "meanAfter": 0.1111366286717078,
+              "log2": -0.000055859133270297814
+            },
+            "shared": {
+              "pixels": 121812,
+              "meanBefore": 0.11115453911053366,
+              "meanAfter": 0.1111457522893498,
+              "log2": -0.00011405026303757902
+            }
+          },
+          "survey": {
+            "own": {
+              "pixelsBefore": 1258,
+              "pixelsAfter": 1257,
+              "meanBefore": 0.11679729710322685,
+              "meanAfter": 0.11722710787325315,
+              "log2": 0.005299332466715685
+            },
+            "shared": {
+              "pixels": 1251,
+              "meanBefore": 0.11679792661461041,
+              "meanAfter": 0.11722720007030227,
+              "log2": 0.005292691336859437
+            }
+          },
+          "texels": [
+            {
+              "texel": 3326,
+              "sharedPixels": 27,
+              "meanBefore": 0.11739334464073181,
+              "meanAfter": 0.1180114017592536,
+              "log2": 0.00757563305213893,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3327,
+              "sharedPixels": 27,
+              "meanBefore": 0.11682606019355633,
+              "meanAfter": 0.11729127417008083,
+              "log2": 0.0057335590470829825,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3389,
+              "sharedPixels": 32,
+              "meanBefore": 0.11802498996257782,
+              "meanAfter": 0.11793366866186261,
+              "log2": -0.0011167108256630585,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3390,
+              "sharedPixels": 28,
+              "meanBefore": 0.11773343410875116,
+              "meanAfter": 0.1179716597710337,
+              "log2": 0.0029162466788985766,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3391,
+              "sharedPixels": 22,
+              "meanBefore": 0.11681116541678255,
+              "meanAfter": 0.11744942109693181,
+              "log2": 0.00786142130634187,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3453,
+              "sharedPixels": 28,
+              "meanBefore": 0.1175649022417409,
+              "meanAfter": 0.11771780465330396,
+              "log2": 0.0018751193818447522,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3454,
+              "sharedPixels": 28,
+              "meanBefore": 0.1179339060825961,
+              "meanAfter": 0.11799779773822852,
+              "log2": 0.0007813801663411596,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3455,
+              "sharedPixels": 26,
+              "meanBefore": 0.11694664221543533,
+              "meanAfter": 0.11770680604072717,
+              "log2": 0.009347302803862484,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3518,
+              "sharedPixels": 28,
+              "meanBefore": 0.11831673846713134,
+              "meanAfter": 0.11800774133631162,
+              "log2": -0.0037726847653858403,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3519,
+              "sharedPixels": 27,
+              "meanBefore": 0.11722534370643121,
+              "meanAfter": 0.11790667888191012,
+              "log2": 0.008360933735665696,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3582,
+              "sharedPixels": 28,
+              "meanBefore": 0.11761889686541897,
+              "meanAfter": 0.117792491668037,
+              "log2": 0.0021277169963304977,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3583,
+              "sharedPixels": 27,
+              "meanBefore": 0.11764093184912647,
+              "meanAfter": 0.11795798882290169,
+              "log2": 0.00388301269440065,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3646,
+              "sharedPixels": 27,
+              "meanBefore": 0.11643839599909606,
+              "meanAfter": 0.1174068194296625,
+              "log2": 0.011949337218086697,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3647,
+              "sharedPixels": 27,
+              "meanBefore": 0.11804569733363611,
+              "meanAfter": 0.11779755409117099,
+              "log2": -0.0030358736599431107,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3709,
+              "sharedPixels": 28,
+              "meanBefore": 0.11602058713989598,
+              "meanAfter": 0.11651260645261832,
+              "log2": 0.006105234877213592,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3710,
+              "sharedPixels": 28,
+              "meanBefore": 0.11600127257406712,
+              "meanAfter": 0.11690200758831841,
+              "log2": 0.011159073553168888,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3711,
+              "sharedPixels": 27,
+              "meanBefore": 0.11736412953447413,
+              "meanAfter": 0.11747105833556917,
+              "log2": 0.0013138206682613662,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3773,
+              "sharedPixels": 28,
+              "meanBefore": 0.11587103216775826,
+              "meanAfter": 0.11636133438774518,
+              "log2": 0.0060918091892037795,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3774,
+              "sharedPixels": 27,
+              "meanBefore": 0.11591899974478616,
+              "meanAfter": 0.11655401907585285,
+              "log2": 0.007881701911570052,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3775,
+              "sharedPixels": 28,
+              "meanBefore": 0.1161653074835028,
+              "meanAfter": 0.11703240738383361,
+              "log2": 0.010728805744018381,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3838,
+              "sharedPixels": 25,
+              "meanBefore": 0.11601956367492676,
+              "meanAfter": 0.11638794243335723,
+              "log2": 0.004573506785001624,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3839,
+              "sharedPixels": 25,
+              "meanBefore": 0.11596045732498168,
+              "meanAfter": 0.11661664932966233,
+              "log2": 0.008140848225429579,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3902,
+              "sharedPixels": 28,
+              "meanBefore": 0.11577251101178783,
+              "meanAfter": 0.1162956426186221,
+              "log2": 0.006504301787857703,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3903,
+              "sharedPixels": 22,
+              "meanBefore": 0.11599369922822172,
+              "meanAfter": 0.11634299396113916,
+              "log2": 0.004337895592217085,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7360,
+              "sharedPixels": 26,
+              "meanBefore": 0.11601744506221551,
+              "meanAfter": 0.11660097568080975,
+              "log2": 0.007238106877601605,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7361,
+              "sharedPixels": 27,
+              "meanBefore": 0.11604328453540802,
+              "meanAfter": 0.11638388672360668,
+              "log2": 0.004228296002647972,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7424,
+              "sharedPixels": 27,
+              "meanBefore": 0.11623066222226178,
+              "meanAfter": 0.11680886922059236,
+              "log2": 0.007159112239071892,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7425,
+              "sharedPixels": 27,
+              "meanBefore": 0.11607638663715786,
+              "meanAfter": 0.11650397876898448,
+              "log2": 0.005304710413125257,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7426,
+              "sharedPixels": 27,
+              "meanBefore": 0.11606558826234606,
+              "meanAfter": 0.11645330212734363,
+              "log2": 0.0048112511442509704,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7488,
+              "sharedPixels": 22,
+              "meanBefore": 0.11667013405398889,
+              "meanAfter": 0.11706891147927805,
+              "log2": 0.004922710031283517,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7489,
+              "sharedPixels": 28,
+              "meanBefore": 0.11611163004168443,
+              "meanAfter": 0.11665330507925578,
+              "log2": 0.006714699538192938,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7490,
+              "sharedPixels": 28,
+              "meanBefore": 0.11611628425972802,
+              "meanAfter": 0.11647882764892918,
+              "log2": 0.004497428763596138,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7552,
+              "sharedPixels": 22,
+              "meanBefore": 0.11685670844533226,
+              "meanAfter": 0.11745933917435733,
+              "log2": 0.007420868438224153,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7553,
+              "sharedPixels": 27,
+              "meanBefore": 0.11643176856968138,
+              "meanAfter": 0.1168969828221533,
+              "log2": 0.005752940264301061,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7616,
+              "sharedPixels": 22,
+              "meanBefore": 0.11704883080991832,
+              "meanAfter": 0.11781288547949358,
+              "log2": 0.009386815262049162,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7617,
+              "sharedPixels": 28,
+              "meanBefore": 0.11678347204412733,
+              "meanAfter": 0.11733011741723333,
+              "log2": 0.0067372765840545065,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7680,
+              "sharedPixels": 22,
+              "meanBefore": 0.11739090118895877,
+              "meanAfter": 0.11794284223155542,
+              "log2": 0.006767274879345787,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7681,
+              "sharedPixels": 28,
+              "meanBefore": 0.11709471366235188,
+              "meanAfter": 0.11772184765764646,
+              "log2": 0.00770614518063017,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7744,
+              "sharedPixels": 22,
+              "meanBefore": 0.11783855002034795,
+              "meanAfter": 0.11778616939078677,
+              "log2": -0.000641437587196025,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7745,
+              "sharedPixels": 28,
+              "meanBefore": 0.11752163964722838,
+              "meanAfter": 0.11784759030810424,
+              "log2": 0.003995829894365437,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7746,
+              "sharedPixels": 30,
+              "meanBefore": 0.11712926949063937,
+              "meanAfter": 0.11768653467297555,
+              "log2": 0.006847624479244647,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7808,
+              "sharedPixels": 20,
+              "meanBefore": 0.11751561947166919,
+              "meanAfter": 0.11741524450480938,
+              "log2": -0.0012327922630381415,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7809,
+              "sharedPixels": 27,
+              "meanBefore": 0.11795725701031862,
+              "meanAfter": 0.11762390368514591,
+              "log2": -0.004082902967771082,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7810,
+              "sharedPixels": 22,
+              "meanBefore": 0.11751372976736589,
+              "meanAfter": 0.11755974692377177,
+              "log2": 0.0005648338138786297,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7872,
+              "sharedPixels": 21,
+              "meanBefore": 0.11582325257006146,
+              "meanAfter": 0.1169293313508942,
+              "log2": 0.013711954191164237,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7873,
+              "sharedPixels": 24,
+              "meanBefore": 0.11635210706541936,
+              "meanAfter": 0.11715361413856347,
+              "log2": 0.009904124104827612,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7936,
+              "sharedPixels": 26,
+              "meanBefore": 0.11589543206187394,
+              "meanAfter": 0.11651113256812096,
+              "log2": 0.007644105462783139,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7937,
+              "sharedPixels": 22,
+              "meanBefore": 0.11580037224021825,
+              "meanAfter": 0.11669415506449612,
+              "log2": 0.011092410779879021,
+              "dark": null,
+              "judged": true,
+              "over": false
+            }
+          ],
+          "judgedTexels": 48,
+          "texelsOver": 0,
+          "darkTexels": 0,
+          "worst": {
+            "texel": 7872,
+            "sharedPixels": 21,
+            "meanBefore": 0.11582325257006146,
+            "meanAfter": 0.1169293313508942,
+            "log2": 0.013711954191164237,
+            "dark": null,
+            "judged": true,
+            "over": false
+          },
+          "verdict": "pass",
+          "reasons": []
+        }
+      ],
+      "failures": [],
+      "verdict": "pass",
+      "reasons": []
+    },
+    {
+      "name": "handover-90",
+      "scene": "HAND-OVER 90°",
+      "judged": true,
+      "nominal": {
+        "incidenceDeg": 45,
+        "emissionDeg": 45,
+        "phaseDeg": 90
+      },
+      "atRange": {
+        "incidenceDeg": 45.00000000000003,
+        "emissionDeg": 45.000010560165855,
+        "phaseDeg": 90.00000663768752
+      },
+      "exposure": {
+        "lockedEv100": 13.1,
+        "lockedReading": "EV100 13.1 INHIBITED · OPERATOR",
+        "endReading": "EV100 13.1 INHIBITED · OPERATOR",
+        "held": true
+      },
+      "surveyedCells": 48,
+      "mappingMismatches": 0,
+      "switchesS": {
+        "figure": 119.41179999999821,
+        "terrain": 119.57859999999825,
+        "disc": 164.9267000000063
+      },
+      "comparisons": [
+        {
+          "name": "disc-to-figure",
+          "before": {
+            "atMs": 296937.4,
+            "scriptS": 119.37859999999826,
+            "regime": "disc",
+            "rangeRatio": 0.9092149798042705,
+            "target": {
+              "widthPx": 822,
+              "heightPx": 508
+            },
+            "bodyPixels": 182495,
+            "bodyMisses": 0,
+            "surveyPixels": 1353,
+            "angles": {
+              "incidenceDeg": 45.00000000000003,
+              "emissionDeg": 46.43183682155512,
+              "phaseDeg": 91.4318320452683
+            }
+          },
+          "after": {
+            "atMs": 296970.6,
+            "scriptS": 119.41179999999821,
+            "regime": "figure",
+            "rangeRatio": 0.9089131705340869,
+            "target": {
+              "widthPx": 822,
+              "heightPx": 508
+            },
+            "bodyPixels": 182602,
+            "bodyMisses": 0,
+            "surveyPixels": 1353,
+            "angles": {
+              "incidenceDeg": 45.00000000000003,
+              "emissionDeg": 46.43712933098577,
+              "phaseDeg": 91.43712455142389
+            }
+          },
+          "framesApart": 1,
+          "beforeWasLast": true,
+          "afterWasFirst": true,
+          "body": {
+            "own": {
+              "pixelsBefore": 182495,
+              "pixelsAfter": 182602,
+              "meanBefore": 0.05955919276986661,
+              "meanAfter": 0.05955536997926644,
+              "log2": -0.00009260196093286895
+            },
+            "shared": {
+              "pixels": 182493,
+              "meanBefore": 0.05955984549838518,
+              "meanAfter": 0.05954138956008424,
+              "log2": -0.0004471203151128591
+            }
+          },
+          "survey": {
+            "own": {
+              "pixelsBefore": 1353,
+              "pixelsAfter": 1353,
+              "meanBefore": 0.14758854513025602,
+              "meanAfter": 0.1475881548696153,
+              "log2": -0.00000381484779125189
+            },
+            "shared": {
+              "pixels": 1321,
+              "meanBefore": 0.1475707320080482,
+              "meanAfter": 0.14754318414900358,
+              "log2": -0.0002693411429983591
+            }
+          },
+          "texels": [
+            {
+              "texel": 3326,
+              "sharedPixels": 30,
+              "meanBefore": 0.14774669806162516,
+              "meanAfter": 0.14774787823359173,
+              "log2": 0.000011523922130277979,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3327,
+              "sharedPixels": 28,
+              "meanBefore": 0.1467461053814207,
+              "meanAfter": 0.14676214488489286,
+              "log2": 0.00015767946638406673,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3389,
+              "sharedPixels": 35,
+              "meanBefore": 0.14488779093538012,
+              "meanAfter": 0.14486212815557206,
+              "log2": -0.00025555531043788826,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3390,
+              "sharedPixels": 29,
+              "meanBefore": 0.14779918923460203,
+              "meanAfter": 0.1477787715607676,
+              "log2": -0.00019931443301803814,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3391,
+              "sharedPixels": 29,
+              "meanBefore": 0.1476956641879575,
+              "meanAfter": 0.14770783689515343,
+              "log2": 0.00011889841692020742,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3453,
+              "sharedPixels": 28,
+              "meanBefore": 0.14414772976722037,
+              "meanAfter": 0.1441091224551201,
+              "log2": -0.00038645102527664927,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3454,
+              "sharedPixels": 35,
+              "meanBefore": 0.14779520971434457,
+              "meanAfter": 0.14773893186024256,
+              "log2": -0.0005494578837737945,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3455,
+              "sharedPixels": 28,
+              "meanBefore": 0.14900477549859456,
+              "meanAfter": 0.14899698378784315,
+              "log2": -0.00007544292685101399,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3518,
+              "sharedPixels": 28,
+              "meanBefore": 0.14792469250304358,
+              "meanAfter": 0.1479060293308326,
+              "log2": -0.00018203157444116017,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3519,
+              "sharedPixels": 26,
+              "meanBefore": 0.14987664325879171,
+              "meanAfter": 0.14985667226406243,
+              "log2": -0.00019225126876488573,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3582,
+              "sharedPixels": 27,
+              "meanBefore": 0.14680642275898545,
+              "meanAfter": 0.14678383425430017,
+              "log2": -0.00022199867316026453,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3583,
+              "sharedPixels": 29,
+              "meanBefore": 0.149902887385467,
+              "meanAfter": 0.14985885394030604,
+              "log2": -0.0004238488417030198,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3646,
+              "sharedPixels": 26,
+              "meanBefore": 0.14495619443746713,
+              "meanAfter": 0.14492048151217973,
+              "log2": -0.0003554812424949977,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3647,
+              "sharedPixels": 33,
+              "meanBefore": 0.14923624965277585,
+              "meanAfter": 0.14917312788240839,
+              "log2": -0.0006103391735987735,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3709,
+              "sharedPixels": 33,
+              "meanBefore": 0.13850988267046033,
+              "meanAfter": 0.13848994807763534,
+              "log2": -0.00020765022262088565,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3710,
+              "sharedPixels": 27,
+              "meanBefore": 0.14270863654436888,
+              "meanAfter": 0.1426553875207901,
+              "log2": -0.0005384147731487124,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3711,
+              "sharedPixels": 28,
+              "meanBefore": 0.14749218097754888,
+              "meanAfter": 0.14743446026529586,
+              "log2": -0.0005647057589392297,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3773,
+              "sharedPixels": 33,
+              "meanBefore": 0.1380245965538603,
+              "meanAfter": 0.13799647625648614,
+              "log2": -0.00029395591646169634,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3774,
+              "sharedPixels": 25,
+              "meanBefore": 0.14123077273368836,
+              "meanAfter": 0.1411704272031784,
+              "log2": -0.0006165710269724484,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3775,
+              "sharedPixels": 26,
+              "meanBefore": 0.14534300221846655,
+              "meanAfter": 0.14528218026344591,
+              "log2": -0.0006038536194086649,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3838,
+              "sharedPixels": 28,
+              "meanBefore": 0.14053507149219513,
+              "meanAfter": 0.14051469468644687,
+              "log2": -0.00020919794421753404,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3839,
+              "sharedPixels": 25,
+              "meanBefore": 0.1437015062570572,
+              "meanAfter": 0.14365778744220734,
+              "log2": -0.0004389829683397838,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3902,
+              "sharedPixels": 29,
+              "meanBefore": 0.140112053217559,
+              "meanAfter": 0.1400900899336256,
+              "log2": -0.0002261675840228999,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3903,
+              "sharedPixels": 25,
+              "meanBefore": 0.142719349861145,
+              "meanAfter": 0.14267036616802214,
+              "log2": -0.0004952423151751796,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7360,
+              "sharedPixels": 31,
+              "meanBefore": 0.14607895333920756,
+              "meanAfter": 0.1460763196791372,
+              "log2": -0.000026010609247249794,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7361,
+              "sharedPixels": 25,
+              "meanBefore": 0.14740675687789917,
+              "meanAfter": 0.1473887938261032,
+              "log2": -0.00017581816086072326,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7424,
+              "sharedPixels": 24,
+              "meanBefore": 0.1468341127038002,
+              "meanAfter": 0.14684009614090124,
+              "log2": 0.0000587881044663101,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7425,
+              "sharedPixels": 28,
+              "meanBefore": 0.1478529375578676,
+              "meanAfter": 0.14782944268413953,
+              "log2": -0.00022927262596706148,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7426,
+              "sharedPixels": 28,
+              "meanBefore": 0.14999565428921155,
+              "meanAfter": 0.14997496296252524,
+              "log2": -0.00019902798961163678,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7488,
+              "sharedPixels": 25,
+              "meanBefore": 0.1482679718732834,
+              "meanAfter": 0.14828715085983277,
+              "log2": 0.00018660563720917101,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7489,
+              "sharedPixels": 30,
+              "meanBefore": 0.14846966663996378,
+              "meanAfter": 0.14844714750846227,
+              "log2": -0.00021883731642352458,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7490,
+              "sharedPixels": 27,
+              "meanBefore": 0.1501169326128783,
+              "meanAfter": 0.15009594239570476,
+              "log2": -0.00020174006375947543,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7552,
+              "sharedPixels": 32,
+              "meanBefore": 0.15006027603521943,
+              "meanAfter": 0.15007458627223969,
+              "log2": 0.00013757354170722627,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7553,
+              "sharedPixels": 26,
+              "meanBefore": 0.1494433696453388,
+              "meanAfter": 0.1494515692958465,
+              "log2": 0.00007915553986516379,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7616,
+              "sharedPixels": 27,
+              "meanBefore": 0.15172891705124467,
+              "meanAfter": 0.15172327227062649,
+              "log2": -0.000053673674418963695,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7617,
+              "sharedPixels": 27,
+              "meanBefore": 0.15149166021082136,
+              "meanAfter": 0.15151152732195677,
+              "log2": 0.00018918733486803695,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7680,
+              "sharedPixels": 26,
+              "meanBefore": 0.15250559265796954,
+              "meanAfter": 0.15247442859869736,
+              "log2": -0.00029484051930455096,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7681,
+              "sharedPixels": 26,
+              "meanBefore": 0.15355731203005865,
+              "meanAfter": 0.1535526170180394,
+              "log2": -0.00004411104895638403,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7744,
+              "sharedPixels": 24,
+              "meanBefore": 0.1518816656122605,
+              "meanAfter": 0.1518359643717607,
+              "log2": -0.00043417271188784997,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7745,
+              "sharedPixels": 23,
+              "meanBefore": 0.15428675840730252,
+              "meanAfter": 0.15425345236840454,
+              "log2": -0.000311469660408956,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7746,
+              "sharedPixels": 22,
+              "meanBefore": 0.15578186579725958,
+              "meanAfter": 0.1557663990692659,
+              "log2": -0.00014324439780237836,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7808,
+              "sharedPixels": 26,
+              "meanBefore": 0.14936911658598825,
+              "meanAfter": 0.14929756694115126,
+              "log2": -0.0006912342450745726,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7809,
+              "sharedPixels": 27,
+              "meanBefore": 0.15285544925265843,
+              "meanAfter": 0.15279348415357094,
+              "log2": -0.0005849635488022001,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7810,
+              "sharedPixels": 27,
+              "meanBefore": 0.1553964697652393,
+              "meanAfter": 0.15536821992309005,
+              "log2": -0.0002622943251870095,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7872,
+              "sharedPixels": 27,
+              "meanBefore": 0.14731429627648107,
+              "meanAfter": 0.14724347436869586,
+              "log2": -0.00069374789803093,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7873,
+              "sharedPixels": 27,
+              "meanBefore": 0.1507200852588371,
+              "meanAfter": 0.15064548673453154,
+              "log2": -0.0007142350239912188,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7936,
+              "sharedPixels": 24,
+              "meanBefore": 0.14565266047914824,
+              "meanAfter": 0.14559056361516318,
+              "log2": -0.0006152029072066369,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7937,
+              "sharedPixels": 22,
+              "meanBefore": 0.14838595349680295,
+              "meanAfter": 0.14833623780445618,
+              "log2": -0.0004834460352268793,
+              "dark": null,
+              "judged": true,
+              "over": false
+            }
+          ],
+          "judgedTexels": 48,
+          "texelsOver": 0,
+          "darkTexels": 0,
+          "worst": {
+            "texel": 7873,
+            "sharedPixels": 27,
+            "meanBefore": 0.1507200852588371,
+            "meanAfter": 0.15064548673453154,
+            "log2": -0.0007142350239912188,
+            "dark": null,
+            "judged": true,
+            "over": false
+          },
+          "verdict": "pass",
+          "reasons": []
+        },
+        {
+          "name": "disc-to-terrain",
+          "before": {
+            "atMs": 296937.4,
+            "scriptS": 119.37859999999826,
+            "regime": "disc",
+            "rangeRatio": 0.9092149798042705,
+            "target": {
+              "widthPx": 822,
+              "heightPx": 508
+            },
+            "bodyPixels": 182495,
+            "bodyMisses": 0,
+            "surveyPixels": 1353,
+            "angles": {
+              "incidenceDeg": 45.00000000000003,
+              "emissionDeg": 46.43183682155512,
+              "phaseDeg": 91.4318320452683
+            }
+          },
+          "after": {
+            "atMs": 297137.4,
+            "scriptS": 119.57859999999825,
+            "regime": "terrain",
+            "rangeRatio": 0.9073983670629409,
+            "target": {
+              "widthPx": 822,
+              "heightPx": 508
+            },
+            "bodyPixels": 183239,
+            "bodyMisses": 0,
+            "surveyPixels": 1346,
+            "angles": {
+              "incidenceDeg": 45.00000000000003,
+              "emissionDeg": 46.46375183920623,
+              "phaseDeg": 91.46374704315706
+            }
+          },
+          "framesApart": 7,
+          "beforeWasLast": true,
+          "afterWasFirst": true,
+          "body": {
+            "own": {
+              "pixelsBefore": 182495,
+              "pixelsAfter": 183239,
+              "meanBefore": 0.05955919276986661,
+              "meanAfter": 0.059548616319772096,
+              "log2": -0.0002562148067083026
+            },
+            "shared": {
+              "pixels": 182491,
+              "meanBefore": 0.05956049824121084,
+              "meanAfter": 0.05945287099323744,
+              "log2": -0.002609342803125902
+            }
+          },
+          "survey": {
+            "own": {
+              "pixelsBefore": 1353,
+              "pixelsAfter": 1346,
+              "meanBefore": 0.14758854513025602,
+              "meanAfter": 0.14748865796632257,
+              "log2": -0.0009767391045283679
+            },
+            "shared": {
+              "pixels": 1170,
+              "meanBefore": 0.14766337610462793,
+              "meanAfter": 0.1473847686352893,
+              "log2": -0.0027246111592415232
+            }
+          },
+          "texels": [
+            {
+              "texel": 3326,
+              "sharedPixels": 26,
+              "meanBefore": 0.14771656634715888,
+              "meanAfter": 0.14774442234864602,
+              "log2": 0.00027203398662497695,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3327,
+              "sharedPixels": 26,
+              "meanBefore": 0.14668800968390244,
+              "meanAfter": 0.1467607502753918,
+              "log2": 0.0007152355510171843,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3389,
+              "sharedPixels": 29,
+              "meanBefore": 0.14494990017907372,
+              "meanAfter": 0.14387719333171844,
+              "log2": -0.010716418227963426,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3390,
+              "sharedPixels": 28,
+              "meanBefore": 0.1478120061968054,
+              "meanAfter": 0.1476412857217448,
+              "log2": -0.0016672524347942992,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3391,
+              "sharedPixels": 26,
+              "meanBefore": 0.14767668912043938,
+              "meanAfter": 0.14771875681785437,
+              "log2": 0.0004109126236507976,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3453,
+              "sharedPixels": 26,
+              "meanBefore": 0.1441388147381636,
+              "meanAfter": 0.14317711156148177,
+              "log2": -0.009658006802673095,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3454,
+              "sharedPixels": 26,
+              "meanBefore": 0.1481446360166256,
+              "meanAfter": 0.14789557858155325,
+              "log2": -0.0024274675772327677,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3455,
+              "sharedPixels": 28,
+              "meanBefore": 0.14900477549859456,
+              "meanAfter": 0.14897443833095686,
+              "log2": -0.00029376063447021736,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3518,
+              "sharedPixels": 28,
+              "meanBefore": 0.14792469250304358,
+              "meanAfter": 0.14715464359947614,
+              "log2": -0.0075298275441354895,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3519,
+              "sharedPixels": 24,
+              "meanBefore": 0.14994003561635813,
+              "meanAfter": 0.1497786014030377,
+              "log2": -0.0015541266557569406,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3582,
+              "sharedPixels": 27,
+              "meanBefore": 0.14680642275898545,
+              "meanAfter": 0.1460470524099138,
+              "log2": -0.00748184594041061,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3583,
+              "sharedPixels": 22,
+              "meanBefore": 0.150295227766037,
+              "meanAfter": 0.15000758929686112,
+              "log2": -0.0027637084727453708,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3646,
+              "sharedPixels": 25,
+              "meanBefore": 0.1449176561832428,
+              "meanAfter": 0.14415891766548156,
+              "log2": -0.007573293096613516,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3647,
+              "sharedPixels": 25,
+              "meanBefore": 0.1497318035364151,
+              "meanAfter": 0.14940282702445984,
+              "log2": -0.003173239907535555,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3709,
+              "sharedPixels": 26,
+              "meanBefore": 0.1386770187662198,
+              "meanAfter": 0.13799471121567947,
+              "log2": -0.007115752051391819,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3710,
+              "sharedPixels": 25,
+              "meanBefore": 0.14262833952903747,
+              "meanAfter": 0.14194679856300355,
+              "log2": -0.006910355264067636,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3711,
+              "sharedPixels": 21,
+              "meanBefore": 0.14791532925197057,
+              "meanAfter": 0.14770493053254627,
+              "log2": -0.00205358888864033,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3773,
+              "sharedPixels": 30,
+              "meanBefore": 0.1380597104628881,
+              "meanAfter": 0.13760026395320893,
+              "log2": -0.004809126288646686,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3774,
+              "sharedPixels": 24,
+              "meanBefore": 0.14123168028891087,
+              "meanAfter": 0.1407518076399962,
+              "log2": -0.00491029148020415,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3775,
+              "sharedPixels": 20,
+              "meanBefore": 0.1455546014010906,
+              "meanAfter": 0.145392507314682,
+              "log2": -0.0016075248855119792,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3838,
+              "sharedPixels": 24,
+              "meanBefore": 0.14054277477165064,
+              "meanAfter": 0.1401460568110148,
+              "log2": -0.004078134582859452,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3839,
+              "sharedPixels": 24,
+              "meanBefore": 0.14365012074510256,
+              "meanAfter": 0.14351322563985983,
+              "log2": -0.0013755091442056472,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3902,
+              "sharedPixels": 24,
+              "meanBefore": 0.1401538848876953,
+              "meanAfter": 0.13982687952617803,
+              "log2": -0.0033700117142675054,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3903,
+              "sharedPixels": 23,
+              "meanBefore": 0.14278740079506583,
+              "meanAfter": 0.14256705149360324,
+              "log2": -0.002228084441083776,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7360,
+              "sharedPixels": 25,
+              "meanBefore": 0.1460467940568924,
+              "meanAfter": 0.14599798560142518,
+              "log2": -0.00048222548195493096,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7361,
+              "sharedPixels": 25,
+              "meanBefore": 0.14740675687789917,
+              "meanAfter": 0.14729032099246978,
+              "log2": -0.0011400281566784035,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7424,
+              "sharedPixels": 24,
+              "meanBefore": 0.1468341127038002,
+              "meanAfter": 0.14686099253594875,
+              "log2": 0.0002640793118922797,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7425,
+              "sharedPixels": 23,
+              "meanBefore": 0.14793031954247018,
+              "meanAfter": 0.14775108837563058,
+              "log2": -0.0017490172889984917,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7426,
+              "sharedPixels": 24,
+              "meanBefore": 0.1501312032341957,
+              "meanAfter": 0.1499872418741385,
+              "log2": -0.0013840692536496288,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7488,
+              "sharedPixels": 22,
+              "meanBefore": 0.1481595838611776,
+              "meanAfter": 0.1482736732472073,
+              "log2": 0.0011105110214405778,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7489,
+              "sharedPixels": 25,
+              "meanBefore": 0.14853781819343567,
+              "meanAfter": 0.14842798352241515,
+              "log2": -0.0010671797325400507,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7490,
+              "sharedPixels": 26,
+              "meanBefore": 0.15011545901115125,
+              "meanAfter": 0.15001084483586824,
+              "log2": -0.00100575228539044,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7552,
+              "sharedPixels": 25,
+              "meanBefore": 0.1499997055530548,
+              "meanAfter": 0.1500971406698227,
+              "log2": 0.0009368253380741576,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7553,
+              "sharedPixels": 26,
+              "meanBefore": 0.1494433696453388,
+              "meanAfter": 0.1495291808476815,
+              "log2": 0.0008281656578032314,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7616,
+              "sharedPixels": 25,
+              "meanBefore": 0.1517376869916916,
+              "meanAfter": 0.15171276271343231,
+              "log2": -0.00023699508607221957,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7617,
+              "sharedPixels": 26,
+              "meanBefore": 0.1514512185867016,
+              "meanAfter": 0.15155799973469514,
+              "log2": 0.001016818167455328,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7680,
+              "sharedPixels": 26,
+              "meanBefore": 0.15250559265796954,
+              "meanAfter": 0.15226996116913283,
+              "log2": -0.002230785533059739,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7681,
+              "sharedPixels": 26,
+              "meanBefore": 0.15355731203005865,
+              "meanAfter": 0.15352563216136053,
+              "log2": -0.0002976680437221191,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7744,
+              "sharedPixels": 24,
+              "meanBefore": 0.1518816656122605,
+              "meanAfter": 0.15148080699145794,
+              "log2": -0.0038127133917240717,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7745,
+              "sharedPixels": 23,
+              "meanBefore": 0.15428675840730252,
+              "meanAfter": 0.15403384812500165,
+              "log2": -0.002366838181889144,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7746,
+              "sharedPixels": 19,
+              "meanBefore": 0.15584532994973033,
+              "meanAfter": 0.1557127629455767,
+              "log2": -0.0012277246226707,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7808,
+              "sharedPixels": 19,
+              "meanBefore": 0.14987008822591683,
+              "meanAfter": 0.14936966801944532,
+              "log2": -0.004825257394292711,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7809,
+              "sharedPixels": 19,
+              "meanBefore": 0.1532857857252422,
+              "meanAfter": 0.15289773125397532,
+              "log2": -0.003656921617277782,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7810,
+              "sharedPixels": 22,
+              "meanBefore": 0.15552361648191104,
+              "meanAfter": 0.15510823171247134,
+              "log2": -0.003858418945877854,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7872,
+              "sharedPixels": 22,
+              "meanBefore": 0.14755681969902731,
+              "meanAfter": 0.14715933867476202,
+              "log2": -0.003891501934685093,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7873,
+              "sharedPixels": 25,
+              "meanBefore": 0.150759174823761,
+              "meanAfter": 0.15040722072124482,
+              "log2": -0.0033719742772383016,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7936,
+              "sharedPixels": 23,
+              "meanBefore": 0.14571646309417227,
+              "meanAfter": 0.14536366061024045,
+              "log2": -0.003497227064132418,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7937,
+              "sharedPixels": 19,
+              "meanBefore": 0.1486150677266874,
+              "meanAfter": 0.14836467018252925,
+              "log2": -0.0024328082673529816,
+              "dark": null,
+              "judged": true,
+              "over": false
+            }
+          ],
+          "judgedTexels": 48,
+          "texelsOver": 0,
+          "darkTexels": 0,
+          "worst": {
+            "texel": 3389,
+            "sharedPixels": 29,
+            "meanBefore": 0.14494990017907372,
+            "meanAfter": 0.14387719333171844,
+            "log2": -0.010716418227963426,
+            "dark": null,
+            "judged": true,
+            "over": false
+          },
+          "verdict": "pass",
+          "reasons": []
+        },
+        {
+          "name": "terrain-to-disc",
+          "before": {
+            "atMs": 342452.2,
+            "scriptS": 164.8934000000063,
+            "regime": "terrain",
+            "rangeRatio": 1.1110259329079273,
+            "target": {
+              "widthPx": 822,
+              "heightPx": 508
+            },
+            "bodyPixels": 122066,
+            "bodyMisses": 0,
+            "surveyPixels": 858,
+            "angles": {
+              "incidenceDeg": 45.00000000000003,
+              "emissionDeg": 43.600085935640216,
+              "phaseDeg": 88.60008278347212
+            }
+          },
+          "after": {
+            "atMs": 342485.5,
+            "scriptS": 164.9267000000063,
+            "regime": "disc",
+            "rangeRatio": 1.1113959661507011,
+            "target": {
+              "widthPx": 822,
+              "heightPx": 508
+            },
+            "bodyPixels": 121989,
+            "bodyMisses": 0,
+            "surveyPixels": 852,
+            "angles": {
+              "incidenceDeg": 45.00000000000003,
+              "emissionDeg": 43.59594159896891,
+              "phaseDeg": 88.5959384489827
+            }
+          },
+          "framesApart": 1,
+          "beforeWasLast": true,
+          "afterWasFirst": true,
+          "body": {
+            "own": {
+              "pixelsBefore": 122066,
+              "pixelsAfter": 121989,
+              "meanBefore": 0.060913009530334794,
+              "meanAfter": 0.060928003557841455,
+              "log2": 0.0003550825569771571
+            },
+            "shared": {
+              "pixels": 121988,
+              "meanBefore": 0.06090598838763077,
+              "meanAfter": 0.06092850301683379,
+              "log2": 0.0005332109798132619
+            }
+          },
+          "survey": {
+            "own": {
+              "pixelsBefore": 858,
+              "pixelsAfter": 852,
+              "meanBefore": 0.14868543486356178,
+              "meanAfter": 0.14923543365838382,
+              "log2": 0.005326793246560961
+            },
+            "shared": {
+              "pixels": 833,
+              "meanBefore": 0.14870031589434213,
+              "meanAfter": 0.14926973895794776,
+              "log2": 0.005514009321987076
+            }
+          },
+          "texels": [
+            {
+              "texel": 3326,
+              "sharedPixels": 18,
+              "meanBefore": 0.1475615749756495,
+              "meanAfter": 0.14946012530061933,
+              "log2": 0.018443544293473235,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3327,
+              "sharedPixels": 21,
+              "meanBefore": 0.14751121117955163,
+              "meanAfter": 0.14838824243772597,
+              "log2": 0.00855217768476319,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3389,
+              "sharedPixels": 22,
+              "meanBefore": 0.14774272319945422,
+              "meanAfter": 0.14649596403945575,
+              "log2": -0.012226155839636165,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3390,
+              "sharedPixels": 21,
+              "meanBefore": 0.14959563031083062,
+              "meanAfter": 0.14947599243550075,
+              "log2": -0.001154245107327408,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3391,
+              "sharedPixels": 17,
+              "meanBefore": 0.14771609271273894,
+              "meanAfter": 0.14940383855034323,
+              "log2": 0.01639020801372813,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3453,
+              "sharedPixels": 20,
+              "meanBefore": 0.14383302852511406,
+              "meanAfter": 0.1450046867132187,
+              "log2": 0.011704529152333302,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3454,
+              "sharedPixels": 21,
+              "meanBefore": 0.15090995743161156,
+              "meanAfter": 0.14946087485268003,
+              "log2": -0.013920129684584392,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3455,
+              "sharedPixels": 15,
+              "meanBefore": 0.14854709506034852,
+              "meanAfter": 0.15074494282404582,
+              "log2": 0.02118921098649737,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3518,
+              "sharedPixels": 19,
+              "meanBefore": 0.1511160417606956,
+              "meanAfter": 0.14955793791695646,
+              "log2": -0.014952333503175265,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3519,
+              "sharedPixels": 20,
+              "meanBefore": 0.15014067739248277,
+              "meanAfter": 0.15164702013134956,
+              "log2": 0.014402252080074491,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3582,
+              "sharedPixels": 16,
+              "meanBefore": 0.14980296418070793,
+              "meanAfter": 0.14847394358366728,
+              "log2": -0.01285640331716627,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3583,
+              "sharedPixels": 20,
+              "meanBefore": 0.15204299613833427,
+              "meanAfter": 0.1517784006893635,
+              "log2": -0.00251286211284553,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3646,
+              "sharedPixels": 15,
+              "meanBefore": 0.1428043395280838,
+              "meanAfter": 0.1467213531335195,
+              "log2": 0.039039028773933795,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3647,
+              "sharedPixels": 20,
+              "meanBefore": 0.15342307165265084,
+              "meanAfter": 0.1509007640182972,
+              "log2": -0.023915340289568994,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3709,
+              "sharedPixels": 21,
+              "meanBefore": 0.13942037948540278,
+              "meanAfter": 0.14027686417102814,
+              "log2": 0.008835625654553023,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3710,
+              "sharedPixels": 15,
+              "meanBefore": 0.14184475541114808,
+              "meanAfter": 0.1444609006245931,
+              "log2": 0.02636626065355046,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3711,
+              "sharedPixels": 21,
+              "meanBefore": 0.14989507127375828,
+              "meanAfter": 0.14934776439553216,
+              "log2": -0.0052773046194030645,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3773,
+              "sharedPixels": 19,
+              "meanBefore": 0.1388041282954969,
+              "meanAfter": 0.1397087597533276,
+              "log2": 0.00937200369324061,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3774,
+              "sharedPixels": 15,
+              "meanBefore": 0.14157402316729228,
+              "meanAfter": 0.1430162211259206,
+              "log2": 0.01462221348675116,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3775,
+              "sharedPixels": 19,
+              "meanBefore": 0.1446369502105211,
+              "meanAfter": 0.14734429905289098,
+              "log2": 0.026755078979064213,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3838,
+              "sharedPixels": 18,
+              "meanBefore": 0.14172695494360393,
+              "meanAfter": 0.1420160854856173,
+              "log2": 0.002940176737895984,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3839,
+              "sharedPixels": 14,
+              "meanBefore": 0.14365350135735103,
+              "meanAfter": 0.14508349980626786,
+              "log2": 0.014290295530779996,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3902,
+              "sharedPixels": 19,
+              "meanBefore": 0.14083912419645409,
+              "meanAfter": 0.1417488494985982,
+              "log2": 0.009288864623583162,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3903,
+              "sharedPixels": 15,
+              "meanBefore": 0.1439605623483658,
+              "meanAfter": 0.14429415663083395,
+              "log2": 0.003339234365706601,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7360,
+              "sharedPixels": 13,
+              "meanBefore": 0.14660322551543897,
+              "meanAfter": 0.1476099812067472,
+              "log2": 0.009873432456621726,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7361,
+              "sharedPixels": 18,
+              "meanBefore": 0.14921626779768202,
+              "meanAfter": 0.14899390025271309,
+              "log2": -0.0021515605315430794,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7424,
+              "sharedPixels": 20,
+              "meanBefore": 0.14748341217637062,
+              "meanAfter": 0.14854200035333634,
+              "log2": 0.010318211603405677,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7425,
+              "sharedPixels": 15,
+              "meanBefore": 0.14912840922673543,
+              "meanAfter": 0.14959449768066407,
+              "log2": 0.004501991854053875,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7426,
+              "sharedPixels": 20,
+              "meanBefore": 0.1518397480249405,
+              "meanAfter": 0.15163785219192505,
+              "log2": -0.0019195760071322708,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7488,
+              "sharedPixels": 20,
+              "meanBefore": 0.1492229714989662,
+              "meanAfter": 0.1499093972146511,
+              "log2": 0.006621180572673438,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7489,
+              "sharedPixels": 15,
+              "meanBefore": 0.14936807056268056,
+              "meanAfter": 0.15007992287476857,
+              "log2": 0.0068592059894149494,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7490,
+              "sharedPixels": 20,
+              "meanBefore": 0.15183342322707177,
+              "meanAfter": 0.15169168189167975,
+              "log2": -0.00134743079287404,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7552,
+              "sharedPixels": 16,
+              "meanBefore": 0.1503759454935789,
+              "meanAfter": 0.15176532417535782,
+              "log2": 0.013268388426136117,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7553,
+              "sharedPixels": 15,
+              "meanBefore": 0.1504156619310379,
+              "meanAfter": 0.15120885769526163,
+              "log2": 0.007587859467430881,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7616,
+              "sharedPixels": 15,
+              "meanBefore": 0.15144116183122,
+              "meanAfter": 0.15345826844374338,
+              "log2": 0.019088997051287342,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7617,
+              "sharedPixels": 15,
+              "meanBefore": 0.15208548605442046,
+              "meanAfter": 0.15322118997573853,
+              "log2": 0.01073335175001615,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7680,
+              "sharedPixels": 15,
+              "meanBefore": 0.15298404494921367,
+              "meanAfter": 0.15414210657278696,
+              "log2": 0.010879813855944434,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7681,
+              "sharedPixels": 15,
+              "meanBefore": 0.15360976954301198,
+              "meanAfter": 0.15521466334660847,
+              "log2": 0.014994883362629713,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7744,
+              "sharedPixels": 16,
+              "meanBefore": 0.15509310271590948,
+              "meanAfter": 0.15353802684694529,
+              "log2": -0.014538515499802928,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7745,
+              "sharedPixels": 16,
+              "meanBefore": 0.15564785804599524,
+              "meanAfter": 0.15590424928814173,
+              "log2": 0.002374527075037917,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7746,
+              "sharedPixels": 16,
+              "meanBefore": 0.15659372229129076,
+              "meanAfter": 0.15747733786702156,
+              "log2": 0.008117851877229727,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7808,
+              "sharedPixels": 16,
+              "meanBefore": 0.15352183859795332,
+              "meanAfter": 0.15168143343180418,
+              "log2": -0.017399391373740785,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7809,
+              "sharedPixels": 16,
+              "meanBefore": 0.15815945621579885,
+              "meanAfter": 0.15487093105912209,
+              "log2": -0.030313437131424655,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7810,
+              "sharedPixels": 16,
+              "meanBefore": 0.1587238134816289,
+              "meanAfter": 0.1571791274473071,
+              "log2": -0.014108945210292061,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7872,
+              "sharedPixels": 17,
+              "meanBefore": 0.14537936186089234,
+              "meanAfter": 0.14902348641087027,
+              "log2": 0.035717242377499354,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7873,
+              "sharedPixels": 16,
+              "meanBefore": 0.15009078197181225,
+              "meanAfter": 0.15252217929810286,
+              "log2": 0.023183675515628784,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7936,
+              "sharedPixels": 16,
+              "meanBefore": 0.14561304077506065,
+              "meanAfter": 0.14706619177013636,
+              "log2": 0.014326065727086588,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7937,
+              "sharedPixels": 15,
+              "meanBefore": 0.1471346437931061,
+              "meanAfter": 0.14999481936295828,
+              "log2": 0.027775694298223373,
+              "dark": null,
+              "judged": true,
+              "over": false
+            }
+          ],
+          "judgedTexels": 48,
+          "texelsOver": 0,
+          "darkTexels": 0,
+          "worst": {
+            "texel": 3646,
+            "sharedPixels": 15,
+            "meanBefore": 0.1428043395280838,
+            "meanAfter": 0.1467213531335195,
+            "log2": 0.039039028773933795,
+            "dark": null,
+            "judged": true,
+            "over": false
+          },
+          "verdict": "pass",
+          "reasons": []
+        }
+      ],
+      "failures": [],
+      "verdict": "pass",
+      "reasons": []
+    },
+    {
+      "name": "handover-terminator",
+      "scene": "HAND-OVER TERMINATOR",
+      "judged": false,
+      "nominal": {
+        "incidenceDeg": 78,
+        "emissionDeg": 12,
+        "phaseDeg": 90
+      },
+      "atRange": {
+        "incidenceDeg": 78.00000000000001,
+        "emissionDeg": 12.000003427829965,
+        "phaseDeg": 89.99998173116937
+      },
+      "exposure": {
+        "lockedEv100": 12.8,
+        "lockedReading": "EV100 12.8 INHIBITED · OPERATOR",
+        "endReading": "EV100 12.8 INHIBITED · OPERATOR",
+        "held": true
+      },
+      "surveyedCells": 48,
+      "mappingMismatches": 0,
+      "switchesS": {
+        "figure": 119.39529999999809,
+        "terrain": 119.5452999999981,
+        "disc": 164.92670000000615
+      },
+      "comparisons": [
+        {
+          "name": "disc-to-figure",
+          "before": {
+            "atMs": 473130.3,
+            "scriptS": 119.36189999999806,
+            "regime": "disc",
+            "rangeRatio": 0.9093668313851537,
+            "target": {
+              "widthPx": 822,
+              "heightPx": 508
+            },
+            "bodyPixels": 182458,
+            "bodyMisses": 0,
+            "surveyPixels": 2130,
+            "angles": {
+              "incidenceDeg": 78.00000000000001,
+              "emissionDeg": 12.461507858939472,
+              "phaseDeg": 90.46148111496213
+            }
+          },
+          "after": {
+            "atMs": 473163.7,
+            "scriptS": 119.39529999999809,
+            "regime": "figure",
+            "rangeRatio": 0.9090631535804873,
+            "target": {
+              "widthPx": 822,
+              "heightPx": 508
+            },
+            "bodyPixels": 182562,
+            "bodyMisses": 0,
+            "surveyPixels": 2130,
+            "angles": {
+              "incidenceDeg": 78.00000000000001,
+              "emissionDeg": 12.46324930446078,
+              "phaseDeg": 90.46322254077465
+            }
+          },
+          "framesApart": 1,
+          "beforeWasLast": true,
+          "afterWasFirst": true,
+          "body": {
+            "own": {
+              "pixelsBefore": 182458,
+              "pixelsAfter": 182562,
+              "meanBefore": 0.04810359340368275,
+              "meanAfter": 0.04809652046877792,
+              "log2": -0.00021214295325331384
+            },
+            "shared": {
+              "pixels": 182458,
+              "meanBefore": 0.04810359340368275,
+              "meanAfter": 0.04807819335284898,
+              "log2": -0.0007619847678819592
+            }
+          },
+          "survey": {
+            "own": {
+              "pixelsBefore": 2130,
+              "pixelsAfter": 2130,
+              "meanBefore": 0.05858537019208563,
+              "meanAfter": 0.05857359115996271,
+              "log2": -0.0002900939218196182
+            },
+            "shared": {
+              "pixels": 2114,
+              "meanBefore": 0.05855045168393608,
+              "meanAfter": 0.05854214549543955,
+              "log2": -0.0002046806930821566
+            }
+          },
+          "texels": [
+            {
+              "texel": 3326,
+              "sharedPixels": 50,
+              "meanBefore": 0.05886060267686844,
+              "meanAfter": 0.05885912172496319,
+              "log2": -0.000036299133054759186,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3327,
+              "sharedPixels": 43,
+              "meanBefore": 0.057249635371357896,
+              "meanAfter": 0.057254864292782405,
+              "log2": 0.00013176318897013028,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3389,
+              "sharedPixels": 45,
+              "meanBefore": 0.05380717400047514,
+              "meanAfter": 0.05380039496554269,
+              "log2": -0.00018177308875156053,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3390,
+              "sharedPixels": 50,
+              "meanBefore": 0.058742599189281465,
+              "meanAfter": 0.058733142018318175,
+              "log2": -0.0002322830831080918,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3391,
+              "sharedPixels": 42,
+              "meanBefore": 0.058863025602130664,
+              "meanAfter": 0.0588693054659026,
+              "log2": 0.00015390722748169684,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3453,
+              "sharedPixels": 48,
+              "meanBefore": 0.05213285074569285,
+              "meanAfter": 0.052122943879415594,
+              "log2": -0.00027418306950435545,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3454,
+              "sharedPixels": 47,
+              "meanBefore": 0.05877279846909198,
+              "meanAfter": 0.058758377474039156,
+              "log2": -0.0003540353950320956,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3455,
+              "sharedPixels": 43,
+              "meanBefore": 0.06080891001363133,
+              "meanAfter": 0.06080682844270107,
+              "log2": -0.00004938624057636863,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3518,
+              "sharedPixels": 43,
+              "meanBefore": 0.058730423623739286,
+              "meanAfter": 0.05872281207594761,
+              "log2": -0.00018698747978290563,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3519,
+              "sharedPixels": 42,
+              "meanBefore": 0.062091088809427764,
+              "meanAfter": 0.06208377686284837,
+              "log2": -0.00016990409491346358,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3582,
+              "sharedPixels": 44,
+              "meanBefore": 0.05689348500560631,
+              "meanAfter": 0.05688371687111529,
+              "log2": -0.0002477199120930023,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3583,
+              "sharedPixels": 42,
+              "meanBefore": 0.06204632669687271,
+              "meanAfter": 0.06203149170393035,
+              "log2": -0.0003449830296404815,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3646,
+              "sharedPixels": 43,
+              "meanBefore": 0.053702660771303395,
+              "meanAfter": 0.05369116487198098,
+              "log2": -0.0003088646280549114,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3647,
+              "sharedPixels": 47,
+              "meanBefore": 0.06077688686708187,
+              "meanAfter": 0.060755238412542545,
+              "log2": -0.0005139730464725018,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3709,
+              "sharedPixels": 44,
+              "meanBefore": 0.043194991536438465,
+              "meanAfter": 0.04318935280157761,
+              "log2": -0.00018834373044176024,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3710,
+              "sharedPixels": 43,
+              "meanBefore": 0.049732903581719064,
+              "meanAfter": 0.049715419494828515,
+              "log2": -0.0005072826756855316,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3711,
+              "sharedPixels": 43,
+              "meanBefore": 0.05772339994477671,
+              "meanAfter": 0.05770474654990573,
+              "log2": -0.00046628420064951965,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3773,
+              "sharedPixels": 43,
+              "meanBefore": 0.04222493566745936,
+              "meanAfter": 0.042255210495272345,
+              "log2": 0.0010340262843581884,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3774,
+              "sharedPixels": 42,
+              "meanBefore": 0.04733266548386642,
+              "meanAfter": 0.04731787723444757,
+              "log2": -0.00045081483234825565,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3775,
+              "sharedPixels": 42,
+              "meanBefore": 0.054335491731762886,
+              "meanAfter": 0.05431749378996236,
+              "log2": -0.0004779535784429702,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3838,
+              "sharedPixels": 42,
+              "meanBefore": 0.04644183779046649,
+              "meanAfter": 0.04643270949877444,
+              "log2": -0.0002835941941616838,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3839,
+              "sharedPixels": 42,
+              "meanBefore": 0.05149736548108714,
+              "meanAfter": 0.051483980513044765,
+              "log2": -0.0003750276700992799,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3902,
+              "sharedPixels": 40,
+              "meanBefore": 0.04602587129920721,
+              "meanAfter": 0.04601982682943344,
+              "log2": -0.00018947819957368275,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3903,
+              "sharedPixels": 39,
+              "meanBefore": 0.04995423030012693,
+              "meanAfter": 0.049941327613897815,
+              "log2": -0.0003726820677337403,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7360,
+              "sharedPixels": 48,
+              "meanBefore": 0.05626227481601139,
+              "meanAfter": 0.05625773500651121,
+              "log2": -0.0001164159275558617,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7361,
+              "sharedPixels": 42,
+              "meanBefore": 0.058420619882998015,
+              "meanAfter": 0.05841449816666898,
+              "log2": -0.00015118347882272587,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7424,
+              "sharedPixels": 48,
+              "meanBefore": 0.057423131462807454,
+              "meanAfter": 0.05742512169914941,
+              "log2": 0.0000500017026286798,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7425,
+              "sharedPixels": 42,
+              "meanBefore": 0.059091023213806604,
+              "meanAfter": 0.05908064686116718,
+              "log2": -0.0002533587369018613,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7426,
+              "sharedPixels": 51,
+              "meanBefore": 0.06243655143999586,
+              "meanAfter": 0.06242736670024255,
+              "log2": -0.0002122435162248878,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7488,
+              "sharedPixels": 49,
+              "meanBefore": 0.05953900744112171,
+              "meanAfter": 0.05954888212133427,
+              "log2": 0.00023925442390550678,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7489,
+              "sharedPixels": 43,
+              "meanBefore": 0.05980670772666155,
+              "meanAfter": 0.05980066955089569,
+              "log2": -0.00014566402907747748,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7490,
+              "sharedPixels": 50,
+              "meanBefore": 0.06250867918133736,
+              "meanAfter": 0.062499835640192035,
+              "log2": -0.00020412262306705484,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7552,
+              "sharedPixels": 50,
+              "meanBefore": 0.0624251052737236,
+              "meanAfter": 0.06243282191455364,
+              "log2": 0.00017832683471025046,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7553,
+              "sharedPixels": 43,
+              "meanBefore": 0.06145262345671654,
+              "meanAfter": 0.06145921384179315,
+              "log2": 0.0001547111504580526,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7616,
+              "sharedPixels": 45,
+              "meanBefore": 0.06506352209382588,
+              "meanAfter": 0.06506381067964766,
+              "log2": 0.000006398983596628635,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7617,
+              "sharedPixels": 43,
+              "meanBefore": 0.06481420993804932,
+              "meanAfter": 0.06482003594553748,
+              "log2": 0.00012967487194018423,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7680,
+              "sharedPixels": 42,
+              "meanBefore": 0.0662822819181851,
+              "meanAfter": 0.06626884710221063,
+              "log2": -0.00029245080884981973,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7681,
+              "sharedPixels": 44,
+              "meanBefore": 0.06816594217988578,
+              "meanAfter": 0.06816224025731737,
+              "log2": -0.00007835130252648152,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7744,
+              "sharedPixels": 43,
+              "meanBefore": 0.06501765029374944,
+              "meanAfter": 0.06499409138463265,
+              "log2": -0.0005228500331552543,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7745,
+              "sharedPixels": 42,
+              "meanBefore": 0.06934859177895955,
+              "meanAfter": 0.0693340285548142,
+              "log2": -0.0003029981879562015,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7746,
+              "sharedPixels": 45,
+              "meanBefore": 0.07191240588823954,
+              "meanAfter": 0.07190339581833946,
+              "log2": -0.00018076988794911295,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7808,
+              "sharedPixels": 42,
+              "meanBefore": 0.06114507271420388,
+              "meanAfter": 0.0611181960751613,
+              "log2": -0.0006342836220724065,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7809,
+              "sharedPixels": 42,
+              "meanBefore": 0.06713845314724105,
+              "meanAfter": 0.06711304436127345,
+              "log2": -0.000546096403071179,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7810,
+              "sharedPixels": 43,
+              "meanBefore": 0.07122777367747107,
+              "meanAfter": 0.0712138793842737,
+              "log2": -0.00028145177376430973,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7872,
+              "sharedPixels": 42,
+              "meanBefore": 0.057543180528141204,
+              "meanAfter": 0.05751958019321873,
+              "log2": -0.0005918176553381373,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7873,
+              "sharedPixels": 42,
+              "meanBefore": 0.06326827965676785,
+              "meanAfter": 0.06325167453005201,
+              "log2": -0.0003786933730380971,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7936,
+              "sharedPixels": 42,
+              "meanBefore": 0.05484736675307864,
+              "meanAfter": 0.05482701398432255,
+              "log2": -0.0005354548380838325,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7937,
+              "sharedPixels": 42,
+              "meanBefore": 0.05993080014983813,
+              "meanAfter": 0.05991834455302784,
+              "log2": -0.00029987077269126523,
+              "dark": null,
+              "judged": true,
+              "over": false
+            }
+          ],
+          "judgedTexels": 48,
+          "texelsOver": 0,
+          "darkTexels": 0,
+          "worst": {
+            "texel": 3773,
+            "sharedPixels": 43,
+            "meanBefore": 0.04222493566745936,
+            "meanAfter": 0.042255210495272345,
+            "log2": 0.0010340262843581884,
+            "dark": null,
+            "judged": true,
+            "over": false
+          },
+          "verdict": "recorded",
+          "reasons": []
+        },
+        {
+          "name": "disc-to-terrain",
+          "before": {
+            "atMs": 473130.3,
+            "scriptS": 119.36189999999806,
+            "regime": "disc",
+            "rangeRatio": 0.9093668313851537,
+            "target": {
+              "widthPx": 822,
+              "heightPx": 508
+            },
+            "bodyPixels": 182458,
+            "bodyMisses": 0,
+            "surveyPixels": 2130,
+            "angles": {
+              "incidenceDeg": 78.00000000000001,
+              "emissionDeg": 12.461507858939472,
+              "phaseDeg": 90.46148111496213
+            }
+          },
+          "after": {
+            "atMs": 473313.7,
+            "scriptS": 119.5452999999981,
+            "regime": "terrain",
+            "rangeRatio": 0.9077005810350078,
+            "target": {
+              "widthPx": 822,
+              "heightPx": 508
+            },
+            "bodyPixels": 183139,
+            "bodyMisses": 0,
+            "surveyPixels": 2139,
+            "angles": {
+              "incidenceDeg": 78.00000000000001,
+              "emissionDeg": 12.471081030339807,
+              "phaseDeg": 90.47105417795882
+            }
+          },
+          "framesApart": 7,
+          "beforeWasLast": true,
+          "afterWasFirst": true,
+          "body": {
+            "own": {
+              "pixelsBefore": 182458,
+              "pixelsAfter": 183139,
+              "meanBefore": 0.04810359340368275,
+              "meanAfter": 0.04809710919940995,
+              "log2": -0.00019448359751045804
+            },
+            "shared": {
+              "pixels": 182456,
+              "meanBefore": 0.04810412069347759,
+              "meanAfter": 0.04797106961571421,
+              "log2": -0.003995875567214747
+            }
+          },
+          "survey": {
+            "own": {
+              "pixelsBefore": 2130,
+              "pixelsAfter": 2139,
+              "meanBefore": 0.05858537019208563,
+              "meanAfter": 0.05846595818498192,
+              "log2": -0.0029435833428711243
+            },
+            "shared": {
+              "pixels": 2069,
+              "meanBefore": 0.05850143386379655,
+              "meanAfter": 0.058366083445944836,
+              "log2": -0.0033417234902924212
+            }
+          },
+          "texels": [
+            {
+              "texel": 3326,
+              "sharedPixels": 50,
+              "meanBefore": 0.05886060267686844,
+              "meanAfter": 0.05886574521660805,
+              "log2": 0.00012604003636182632,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3327,
+              "sharedPixels": 42,
+              "meanBefore": 0.05721890243391196,
+              "meanAfter": 0.05725168924601305,
+              "log2": 0.000826437110599724,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3389,
+              "sharedPixels": 44,
+              "meanBefore": 0.053819832307371224,
+              "meanAfter": 0.052425249479711056,
+              "log2": -0.03787607402254234,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3390,
+              "sharedPixels": 50,
+              "meanBefore": 0.058742599189281465,
+              "meanAfter": 0.05869384251534939,
+              "log2": -0.0011979418775395936,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3391,
+              "sharedPixels": 42,
+              "meanBefore": 0.058863025602130664,
+              "meanAfter": 0.058893063327386266,
+              "log2": 0.000736017620824718,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3453,
+              "sharedPixels": 48,
+              "meanBefore": 0.05213285074569285,
+              "meanAfter": 0.05121033204098543,
+              "log2": -0.025757838655729674,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3454,
+              "sharedPixels": 44,
+              "meanBefore": 0.05898270713673397,
+              "meanAfter": 0.058910948393697087,
+              "log2": -0.0017562606747382982,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3455,
+              "sharedPixels": 43,
+              "meanBefore": 0.06080891001363133,
+              "meanAfter": 0.06080900609146717,
+              "log2": 0.0000022794506229043353,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3518,
+              "sharedPixels": 43,
+              "meanBefore": 0.058730423623739286,
+              "meanAfter": 0.0578106997837854,
+              "log2": -0.022771508145298183,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3519,
+              "sharedPixels": 42,
+              "meanBefore": 0.062091088809427764,
+              "meanAfter": 0.062049911313113715,
+              "log2": -0.0009570822185834942,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3582,
+              "sharedPixels": 44,
+              "meanBefore": 0.05689348500560631,
+              "meanAfter": 0.055996286174790424,
+              "log2": -0.022932308997513997,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3583,
+              "sharedPixels": 42,
+              "meanBefore": 0.06204632669687271,
+              "meanAfter": 0.0619809627532959,
+              "log2": -0.0015206370533395932,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3646,
+              "sharedPixels": 43,
+              "meanBefore": 0.053702660771303395,
+              "meanAfter": 0.05308347247367681,
+              "log2": -0.01673082207865063,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3647,
+              "sharedPixels": 47,
+              "meanBefore": 0.06077688686708187,
+              "meanAfter": 0.06079283515189556,
+              "log2": 0.00037852371727574305,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3709,
+              "sharedPixels": 44,
+              "meanBefore": 0.043194991536438465,
+              "meanAfter": 0.042503313246098434,
+              "log2": -0.023288733910536163,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3710,
+              "sharedPixels": 42,
+              "meanBefore": 0.0497271806179058,
+              "meanAfter": 0.049494308996058646,
+              "log2": -0.006771987644587107,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3711,
+              "sharedPixels": 43,
+              "meanBefore": 0.05772339994477671,
+              "meanAfter": 0.058031373419040855,
+              "log2": 0.0076767953408914775,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3773,
+              "sharedPixels": 42,
+              "meanBefore": 0.042235455608793666,
+              "meanAfter": 0.041935534083417485,
+              "log2": -0.01028138388719955,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3774,
+              "sharedPixels": 42,
+              "meanBefore": 0.04733266548386642,
+              "meanAfter": 0.04727980201797826,
+              "log2": -0.001612173744775653,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3775,
+              "sharedPixels": 42,
+              "meanBefore": 0.054335491731762886,
+              "meanAfter": 0.05485539173796063,
+              "log2": 0.01373856140869477,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3838,
+              "sharedPixels": 42,
+              "meanBefore": 0.04644183779046649,
+              "meanAfter": 0.04610287788368407,
+              "log2": -0.010568252541699642,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3839,
+              "sharedPixels": 42,
+              "meanBefore": 0.05149736548108714,
+              "meanAfter": 0.05200715646857307,
+              "log2": 0.014211531302183698,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3902,
+              "sharedPixels": 40,
+              "meanBefore": 0.04602587129920721,
+              "meanAfter": 0.04567377604544163,
+              "log2": -0.011078964588615195,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3903,
+              "sharedPixels": 39,
+              "meanBefore": 0.04995423030012693,
+              "meanAfter": 0.05007373407865182,
+              "log2": 0.003447187828781013,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7360,
+              "sharedPixels": 47,
+              "meanBefore": 0.05624810962917957,
+              "meanAfter": 0.056233184927321496,
+              "log2": -0.0003828510965959953,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7361,
+              "sharedPixels": 41,
+              "meanBefore": 0.058426839004202584,
+              "meanAfter": 0.05839028218533934,
+              "log2": -0.0009029557049389878,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7424,
+              "sharedPixels": 48,
+              "meanBefore": 0.057423131462807454,
+              "meanAfter": 0.05744632581869761,
+              "log2": 0.0005826158400332077,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7425,
+              "sharedPixels": 42,
+              "meanBefore": 0.059091023213806604,
+              "meanAfter": 0.059032971128111796,
+              "log2": -0.0014180262588376047,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7426,
+              "sharedPixels": 51,
+              "meanBefore": 0.06243655143999586,
+              "meanAfter": 0.06238323654614243,
+              "log2": -0.001232451022174479,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7488,
+              "sharedPixels": 48,
+              "meanBefore": 0.059505886087814965,
+              "meanAfter": 0.05955751038466891,
+              "log2": 0.0012510666407035396,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7489,
+              "sharedPixels": 42,
+              "meanBefore": 0.05979587678753194,
+              "meanAfter": 0.05976763935316177,
+              "log2": -0.0006814454543599672,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7490,
+              "sharedPixels": 50,
+              "meanBefore": 0.06250867918133736,
+              "meanAfter": 0.06246018685400486,
+              "log2": -0.0011196331677568868,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7552,
+              "sharedPixels": 42,
+              "meanBefore": 0.06237678353985151,
+              "meanAfter": 0.06242357096856549,
+              "log2": 0.0010817276090254121,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7553,
+              "sharedPixels": 42,
+              "meanBefore": 0.06142111415309565,
+              "meanAfter": 0.06145711030278887,
+              "log2": 0.0008452509526233764,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7616,
+              "sharedPixels": 42,
+              "meanBefore": 0.06515029392072133,
+              "meanAfter": 0.06514945910090492,
+              "log2": -0.000018486457284218496,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7617,
+              "sharedPixels": 42,
+              "meanBefore": 0.06477408306229682,
+              "meanAfter": 0.06481132035454114,
+              "log2": 0.0008291374941805414,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7680,
+              "sharedPixels": 42,
+              "meanBefore": 0.0662822819181851,
+              "meanAfter": 0.06620628475433304,
+              "log2": -0.0016550974350426119,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7681,
+              "sharedPixels": 43,
+              "meanBefore": 0.06812975261100503,
+              "meanAfter": 0.06811982358610907,
+              "log2": -0.00021026935133936994,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7744,
+              "sharedPixels": 42,
+              "meanBefore": 0.06512518138402984,
+              "meanAfter": 0.06499590760185606,
+              "log2": -0.0028666022898086846,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7745,
+              "sharedPixels": 42,
+              "meanBefore": 0.06934859177895955,
+              "meanAfter": 0.06925751109208379,
+              "log2": -0.001896044567561108,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7746,
+              "sharedPixels": 45,
+              "meanBefore": 0.07191240588823954,
+              "meanAfter": 0.07187032120095359,
+              "log2": -0.0008445433273912944,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7808,
+              "sharedPixels": 35,
+              "meanBefore": 0.061666879164321085,
+              "meanAfter": 0.061515915606703074,
+              "log2": -0.00353611858492589,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7809,
+              "sharedPixels": 37,
+              "meanBefore": 0.06750850178099968,
+              "meanAfter": 0.06738047623956525,
+              "log2": -0.0027385761521266623,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7810,
+              "sharedPixels": 39,
+              "meanBefore": 0.07143421757679719,
+              "meanAfter": 0.07137008508046468,
+              "log2": -0.0012958102650592017,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7872,
+              "sharedPixels": 39,
+              "meanBefore": 0.05766222912531633,
+              "meanAfter": 0.05767049038639435,
+              "log2": 0.00020667995100779417,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7873,
+              "sharedPixels": 42,
+              "meanBefore": 0.06326827965676785,
+              "meanAfter": 0.0631741193078813,
+              "log2": -0.002148720597059133,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7936,
+              "sharedPixels": 42,
+              "meanBefore": 0.05484736675307864,
+              "meanAfter": 0.05475604995375588,
+              "log2": -0.0024039820650511097,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7937,
+              "sharedPixels": 42,
+              "meanBefore": 0.05993080014983813,
+              "meanAfter": 0.059859425184272584,
+              "log2": -0.001719210741334898,
+              "dark": null,
+              "judged": true,
+              "over": false
+            }
+          ],
+          "judgedTexels": 48,
+          "texelsOver": 0,
+          "darkTexels": 0,
+          "worst": {
+            "texel": 3389,
+            "sharedPixels": 44,
+            "meanBefore": 0.053819832307371224,
+            "meanAfter": 0.052425249479711056,
+            "log2": -0.03787607402254234,
+            "dark": null,
+            "judged": true,
+            "over": false
+          },
+          "verdict": "recorded",
+          "reasons": []
+        },
+        {
+          "name": "terrain-to-disc",
+          "before": {
+            "atMs": 518661.8,
+            "scriptS": 164.89340000000615,
+            "regime": "terrain",
+            "rangeRatio": 1.1110259329079257,
+            "target": {
+              "widthPx": 822,
+              "heightPx": 508
+            },
+            "bodyPixels": 122081,
+            "bodyMisses": 0,
+            "surveyPixels": 1264,
+            "angles": {
+              "incidenceDeg": 78.00000000000001,
+              "emissionDeg": 11.558972061358517,
+              "phaseDeg": 89.5589548361137
+            }
+          },
+          "after": {
+            "atMs": 518695.1,
+            "scriptS": 164.92670000000615,
+            "regime": "disc",
+            "rangeRatio": 1.1113959661506996,
+            "target": {
+              "widthPx": 822,
+              "heightPx": 508
+            },
+            "bodyPixels": 122006,
+            "bodyMisses": 0,
+            "surveyPixels": 1264,
+            "angles": {
+              "incidenceDeg": 78.00000000000001,
+              "emissionDeg": 11.557681774339276,
+              "phaseDeg": 89.55766456163305
+            }
+          },
+          "framesApart": 1,
+          "beforeWasLast": true,
+          "afterWasFirst": true,
+          "body": {
+            "own": {
+              "pixelsBefore": 122081,
+              "pixelsAfter": 122006,
+              "meanBefore": 0.05012680512824892,
+              "meanAfter": 0.05013997376453312,
+              "log2": 0.000378955554003305
+            },
+            "shared": {
+              "pixels": 122006,
+              "meanBefore": 0.05011384791500043,
+              "meanAfter": 0.05013997376453312,
+              "log2": 0.0007519241417753925
+            }
+          },
+          "survey": {
+            "own": {
+              "pixelsBefore": 1264,
+              "pixelsAfter": 1264,
+              "meanBefore": 0.05890883454062705,
+              "meanAfter": 0.058984313531531184,
+              "log2": 0.0018473199253342058
+            },
+            "shared": {
+              "pixels": 1260,
+              "meanBefore": 0.05891142055274002,
+              "meanAfter": 0.058990676961247886,
+              "log2": 0.0019396235885047765
+            }
+          },
+          "texels": [
+            {
+              "texel": 3326,
+              "sharedPixels": 28,
+              "meanBefore": 0.05672065754021917,
+              "meanAfter": 0.05922485874699695,
+              "log2": 0.062328595331004946,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3327,
+              "sharedPixels": 26,
+              "meanBefore": 0.05705289442378741,
+              "meanAfter": 0.05757686882638014,
+              "log2": 0.0131892540940231,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3389,
+              "sharedPixels": 28,
+              "meanBefore": 0.05925228646291154,
+              "meanAfter": 0.054062070191970894,
+              "log2": -0.13225406880219107,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3390,
+              "sharedPixels": 28,
+              "meanBefore": 0.060081878144826205,
+              "meanAfter": 0.059090495109558105,
+              "log2": -0.024003824783794293,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3391,
+              "sharedPixels": 27,
+              "meanBefore": 0.057450469583272934,
+              "meanAfter": 0.05922100334255784,
+              "log2": 0.0437902482715887,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3453,
+              "sharedPixels": 29,
+              "meanBefore": 0.05158835726565328,
+              "meanAfter": 0.05225867328458819,
+              "log2": 0.01862499144020392,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3454,
+              "sharedPixels": 28,
+              "meanBefore": 0.0620027200451919,
+              "meanAfter": 0.058954768548054357,
+              "log2": -0.07272299748290009,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3455,
+              "sharedPixels": 28,
+              "meanBefore": 0.05852745260511126,
+              "meanAfter": 0.061126508350883214,
+              "log2": 0.06268467324487073,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3518,
+              "sharedPixels": 27,
+              "meanBefore": 0.06454888137954252,
+              "meanAfter": 0.05890200907985369,
+              "log2": -0.13207525053934985,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3519,
+              "sharedPixels": 27,
+              "meanBefore": 0.0606342000817811,
+              "meanAfter": 0.062411751598119736,
+              "log2": 0.041685941567604974,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3582,
+              "sharedPixels": 28,
+              "meanBefore": 0.05750331242701837,
+              "meanAfter": 0.05706674938223192,
+              "log2": -0.010994676586335716,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3583,
+              "sharedPixels": 28,
+              "meanBefore": 0.0639974247398121,
+              "meanAfter": 0.062340336585683484,
+              "log2": -0.03784790781514895,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3646,
+              "sharedPixels": 22,
+              "meanBefore": 0.04917303388091651,
+              "meanAfter": 0.05410858548500321,
+              "log2": 0.1379901572634792,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3647,
+              "sharedPixels": 27,
+              "meanBefore": 0.06679513884915246,
+              "meanAfter": 0.060694845876208055,
+              "log2": -0.1381691014995489,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3709,
+              "sharedPixels": 28,
+              "meanBefore": 0.04330666310020855,
+              "meanAfter": 0.04372265149972269,
+              "log2": 0.013791880917137735,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3710,
+              "sharedPixels": 22,
+              "meanBefore": 0.046818622133948586,
+              "meanAfter": 0.05044152367521416,
+              "log2": 0.10752937872886892,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3711,
+              "sharedPixels": 27,
+              "meanBefore": 0.05913370902891512,
+              "meanAfter": 0.05797333808408843,
+              "log2": -0.028591211873623203,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3773,
+              "sharedPixels": 27,
+              "meanBefore": 0.04251113906502724,
+              "meanAfter": 0.04274615203892743,
+              "log2": 0.007953640242425506,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3774,
+              "sharedPixels": 22,
+              "meanBefore": 0.04650873640044169,
+              "meanAfter": 0.04775157638571479,
+              "log2": 0.03804661680707204,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3775,
+              "sharedPixels": 25,
+              "meanBefore": 0.05018145978450775,
+              "meanAfter": 0.05467378571629524,
+              "log2": 0.12369483440422238,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3838,
+              "sharedPixels": 22,
+              "meanBefore": 0.047347782349044625,
+              "meanAfter": 0.046766860579902474,
+              "log2": -0.01781026997132953,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3839,
+              "sharedPixels": 27,
+              "meanBefore": 0.05038988714416822,
+              "meanAfter": 0.05185383944599717,
+              "log2": 0.04131659018134766,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3902,
+              "sharedPixels": 22,
+              "meanBefore": 0.04556471837515181,
+              "meanAfter": 0.046239483254877006,
+              "log2": 0.021208124664813643,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 3903,
+              "sharedPixels": 25,
+              "meanBefore": 0.05085086166858673,
+              "meanAfter": 0.05029243305325508,
+              "log2": -0.01593087080245571,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7360,
+              "sharedPixels": 27,
+              "meanBefore": 0.05532959462315948,
+              "meanAfter": 0.05658368338589315,
+              "log2": 0.03233474004036734,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7361,
+              "sharedPixels": 26,
+              "meanBefore": 0.059412554193001524,
+              "meanAfter": 0.058813674232134454,
+              "log2": -0.014616190523246335,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7424,
+              "sharedPixels": 27,
+              "meanBefore": 0.05667384976038226,
+              "meanAfter": 0.0577810514304373,
+              "log2": 0.02791325092809237,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7425,
+              "sharedPixels": 28,
+              "meanBefore": 0.05958892484860761,
+              "meanAfter": 0.05952491385063955,
+              "log2": -0.0015505899101087926,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7426,
+              "sharedPixels": 27,
+              "meanBefore": 0.06331097334623337,
+              "meanAfter": 0.06296735505263011,
+              "log2": -0.007851507665471684,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7488,
+              "sharedPixels": 27,
+              "meanBefore": 0.05971715944232764,
+              "meanAfter": 0.059993107699685626,
+              "log2": 0.006651223776807824,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7489,
+              "sharedPixels": 27,
+              "meanBefore": 0.05931327436809187,
+              "meanAfter": 0.060225441637966365,
+              "log2": 0.022018050450018808,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7490,
+              "sharedPixels": 28,
+              "meanBefore": 0.06348144129983016,
+              "meanAfter": 0.06307965610176325,
+              "log2": -0.009160089031688088,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7552,
+              "sharedPixels": 27,
+              "meanBefore": 0.061394366401213187,
+              "meanAfter": 0.06287817891549181,
+              "log2": 0.03445315595787626,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7553,
+              "sharedPixels": 28,
+              "meanBefore": 0.06152704092008727,
+              "meanAfter": 0.06194255940083947,
+              "log2": 0.009710385603236458,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7616,
+              "sharedPixels": 27,
+              "meanBefore": 0.0629139628123354,
+              "meanAfter": 0.06541438179987448,
+              "log2": 0.056227619772666784,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7617,
+              "sharedPixels": 28,
+              "meanBefore": 0.0641543786706669,
+              "meanAfter": 0.06534731042172227,
+              "log2": 0.026580122865658796,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7680,
+              "sharedPixels": 27,
+              "meanBefore": 0.06584784595502748,
+              "meanAfter": 0.06643075633932043,
+              "log2": 0.0127150929885054,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7681,
+              "sharedPixels": 27,
+              "meanBefore": 0.0666719236307674,
+              "meanAfter": 0.06864088083858844,
+              "log2": 0.04198871381296859,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7744,
+              "sharedPixels": 27,
+              "meanBefore": 0.06921393065540879,
+              "meanAfter": 0.0650832875183335,
+              "log2": -0.08877531068545497,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7745,
+              "sharedPixels": 28,
+              "meanBefore": 0.07024375854858331,
+              "meanAfter": 0.06975925527513027,
+              "log2": -0.00998540304595852,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7746,
+              "sharedPixels": 23,
+              "meanBefore": 0.07153694590796596,
+              "meanAfter": 0.07249284891978554,
+              "log2": 0.019150159663539102,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7808,
+              "sharedPixels": 28,
+              "meanBefore": 0.06622678879648447,
+              "meanAfter": 0.06199864431151322,
+              "log2": -0.09517823728547915,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7809,
+              "sharedPixels": 25,
+              "meanBefore": 0.07401504009962082,
+              "meanAfter": 0.06799617797136306,
+              "log2": -0.12236480538051143,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7810,
+              "sharedPixels": 24,
+              "meanBefore": 0.07538856969525416,
+              "meanAfter": 0.0717231264958779,
+              "log2": -0.07190742240187017,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7872,
+              "sharedPixels": 27,
+              "meanBefore": 0.05350647935712779,
+              "meanAfter": 0.05831986955470509,
+              "log2": 0.1242738877826577,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7873,
+              "sharedPixels": 22,
+              "meanBefore": 0.06099171191453934,
+              "meanAfter": 0.06384016708894209,
+              "log2": 0.06585121751571801,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7936,
+              "sharedPixels": 25,
+              "meanBefore": 0.05380178093910217,
+              "meanAfter": 0.05564039885997772,
+              "log2": 0.048478832458955505,
+              "dark": null,
+              "judged": true,
+              "over": false
+            },
+            {
+              "texel": 7937,
+              "sharedPixels": 22,
+              "meanBefore": 0.057617044245654885,
+              "meanAfter": 0.06043498031795025,
+              "log2": 0.06888818421961936,
+              "dark": null,
+              "judged": true,
+              "over": false
+            }
+          ],
+          "judgedTexels": 48,
+          "texelsOver": 0,
+          "darkTexels": 0,
+          "worst": {
+            "texel": 3647,
+            "sharedPixels": 27,
+            "meanBefore": 0.06679513884915246,
+            "meanAfter": 0.060694845876208055,
+            "log2": -0.1381691014995489,
+            "dark": null,
+            "judged": true,
+            "over": false
+          },
+          "verdict": "recorded",
+          "reasons": []
+        }
+      ],
+      "failures": [],
+      "verdict": "pass",
+      "reasons": []
+    }
+  ],
+  "findings": {
+    "looks": {
+      "verdict": "pass",
+      "reasons": []
+    },
+    "faults": {
+      "verdict": "pass",
+      "reasons": [],
+      "record": [],
+      "gpuProcessExits": 0
+    },
+    "consoleErrors": {
+      "count": 0,
+      "first": []
+    }
+  },
+  "overall": "pass"
+}

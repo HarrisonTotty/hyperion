@@ -14,9 +14,9 @@
   plan 06, through R06, for each host's radius and absolute V. Phase
   C also depends on **the single-player sessions, ship state and closed-loop commands, for which no
   plan exists yet** (Design note 21). Phase C does not start until that plan is written and built.
-  Re-validated at `ce7aeb3` (2026-10-02): still no sessions plan (only the brainstorm
-  `single-player-experience.md`), so **Phase C (T22–T28) is out of scope for RM3**; RM3 is Phases A
-  and B.
+  Re-validated at `ce7aeb3`, now `2b75d16c` (2026-10-02): still no sessions plan (only
+  the brainstorm `single-player-experience.md`), so **Phase C (T22–T28) is out of scope
+  for RM3**; RM3 is Phases A and B.
 - **Brainstorm sections covered** (by heading, in
   [the brainstorm](../../brainstorming/rendering-and-planets.md)): step 5 of "Suggested order of
   attack"; the three regimes of "The scales the view spans"; the shading sentences of "Luminance in
@@ -334,6 +334,9 @@ export function painterOrder(
 ): PainterEntry[]; // back to front by tangent power, meshes excluded, Design note 2
 ```
 
+_R10.T10.e adds `terrain`, the mesh regime handed to R05's quadtree, and `drawnAsMesh` (R10's
+Risks, "Deviations in T10.e, as built")._
+
 `shaders/bodyDisc.wgsl` (the analytic disc, spheroid by axis scaling), point bodies as sprite
 records through R06's `SKY_SPRITE_HDR_MATERIAL` (`POINT SPRITES HDR`), R02's `starSprite.wgsl` with
 the identity tone step, the sprite row's `z` carrying depth (decision-r07-t8a, item 2),
@@ -354,7 +357,7 @@ export function photorealisticPasses(setting: QualitySetting): PassList; // Desi
  * chosen so that the derived label is the one recorded in `PassList`.
  */
 export const PHOTOREAL_PASS_LABELS = {
-  discCells: "disc cells", // R07.T8.d: the small discs' cells, a dispatch before `bodies`
+  discCells: "disc cells", // R07.T8.d–f: the small discs' and large limbs' cells, a dispatch a set of textures before `bodies`
   bodies: "bodies", // mesh bodies, opaque with depth
   discs: "discs", // host discs, disc bodies and point bodies in painter order
   histogram: "histogram",
@@ -598,9 +601,10 @@ where a name has changed by the time this plan runs, only the call sites here ch
   Design note 12 reads; and blend modes that all keep the destination alpha, `"additive"` and
   `"premultiplied"` (R01 Design note 21, R01.T8.i), so that every blended pass of R06, R08 and R11
   leaves `METER_CLASS` intact (Design note 10). _As built (`view/engine/types.ts`, re-checked at
-  `ce7aeb3`):_ `createView(canvas, name)` takes a name; `createMaterialAsync(spec, targets,
-meshes?)`; `createComputeAsync(pair)`; `dispatch(kernel, bindings, workgroups, pass?)`;
-  `readBuffer(buffer, access?)` makes a new staging buffer per call (no ring, no partial range);
+  `ce7aeb3`, now `2b75d16c`):_ `createView(canvas, name)` takes a name;
+  `createMaterialAsync(spec, targets, meshes?)`; `createComputeAsync(pair)`;
+  `dispatch(kernel, bindings, workgroups, pass?)`; `readBuffer(buffer, access?)`
+  makes a new staging buffer per call (no ring, no partial range);
   `createRenderTarget({ name, size, format, mips, depth, category })` with `RenderTarget.colour`
   sampled by later passes (sampling a target while rendering into it throws `ColourSelfSample`);
   post-processes are full-screen draws, `PostProcessItem { postProcess, uniforms, textures? }`,
@@ -625,14 +629,15 @@ meshes?)`; `createComputeAsync(pair)`; `dispatch(kernel, bindings, workgroups, p
   `starSprite.wgsl`, `ViewDisplay`, `ViewCanvas`, `ViewMarkList`, `ViewLabelBlock`, the
   `ExposureControl` panel, `CameraControls`, and the nine guide drafts (R02.T2), items 2, 3, 4, 6
   and 9 above all; `CameraPreset`, a union left open to this plan's Phase C member `slaved`
-  (R07.T25). _As built (re-checked at `ce7aeb3`):_ `Viewport` is `{ widthPx, heightPx }` and the
-  field of view `ProjectionCamera.fovXRad` (`CameraState.fovDeg` in degrees); `graticule` is in
-  `view/wireframe/bodies.ts`; `ExposureControl` is `manual { triple }` | `auto { ev100 }` |
-  `inhibited { ev100, reason: "operator" | "no_image_to_meter" }`, driven by `setManual`, `setAuto`
-  (refused with `no_image_to_meter` until a photorealistic view meters), `inhibit`, `enable` and
-  `onMetering(control, ev100 | null)`, which this plan's meter feeds (_R07.T16.b: `inhibited` also
-  takes `nothing_weighed` with its meter, `setAuto` refuses with `not_metered`, and `onMetering`
-  takes `number | SystemInhibitCause`; see "Deviations in T16.b, as built"_); the panel is
+  (R07.T25). _As built (re-checked at `ce7aeb3`, now `2b75d16c`):_ `Viewport` is
+  `{ widthPx, heightPx }` and the field of view `ProjectionCamera.fovXRad` (`CameraState.fovDeg` in
+  degrees); `graticule` is in `view/wireframe/bodies.ts`; `ExposureControl` is `manual { triple }` |
+  `auto { ev100 }` | `inhibited { ev100, reason: "operator" | "no_image_to_meter" }`,
+  driven by `setManual`, `setAuto` (refused with `no_image_to_meter` until a photorealistic
+  view meters), `inhibit`, `enable` and `onMetering(control, ev100 | null)`, which
+  this plan's meter feeds (_R07.T16.b: `inhibited` also takes `nothing_weighed`
+  with its meter, `setAuto` refuses with `not_metered`, and `onMetering` takes
+  `number | SystemInhibitCause`; see "Deviations in T16.b, as built"_); the panel is
   `ExposurePanel`;
   `buildWireframeDrawList(scene, camera: DrawCamera, viewport, tokens, options: DrawOptions)` with
   `CASING_PX` = 1, lines `premultiplied`, screen symbology at depth 1; `agx`, `agxSigmoid` and
@@ -647,12 +652,12 @@ meshes?)`; `createComputeAsync(pair)`; `dispatch(kernel, bindings, workgroups, p
   `emitted` and `hillRadiusM`), bodies as plan 14's `BodySummaryDto` inside R03's
   `SceneBodyDto` and `SceneSystemDto`, each with its granted `level`, `SceneClockDto`,
   `KinematicsDto`, `CameraReporter`, the two-clients-agree test, and the optional `main_screen`
-  field its Design note 4 reserves. _As built (re-checked at `ce7aeb3`):_ `sceneAt(model, observer,
-time, previous)` with `previous` required; a body's entry is `SceneBodyFrame`, and a `contact`
-  entry has no `geometricM` or `hillRadiusM`; levels come per body through `SceneSystemDto.grants`
-  (`BodyGrantDto { body, level, seen }`), not on each body; `main_screen` is room left by R03's
-  Design note 4, not a field (Phase C adds it); the two-clients test is
-  `crates/hyperion-server/tests/scene_agree.rs`. _R07.T10.a adds `emittedM` and
+  field its Design note 4 reserves. _As built (re-checked at `ce7aeb3`, now `2b75d16c`):_
+  `sceneAt(model, observer, time, previous)` with `previous` required; a body's entry is
+  `SceneBodyFrame`, and a `contact` entry has no `geometricM` or `hillRadiusM`; levels come
+  per body through `SceneSystemDto.grants` (`BodyGrantDto { body, level, seen }`), not on
+  each body; `main_screen` is room left by R03's Design note 4, not a field (Phase C adds it); the
+  two-clients test is `crates/hyperion-server/tests/scene_agree.rs`. _R07.T10.a adds `emittedM` and
   `emittedVelocityMPerS` to `placed` entries and to `SceneStarFrame`, the retarded centres lighting
   takes._
 - **R05:** `selectPatches`, `PlanetGeometry`, `PatchCache` and the patch geometry with per-patch
@@ -661,11 +666,11 @@ time, previous)` with `previous` required; a body's entry is `SceneBodyFrame`, a
   priority of secondary views; `BodyFigure`, which this plan re-exports; and, asked of R05 and met
   there, a `PlanetGeometry` of a reference spheroid drawn at zero height with no height worker,
   `planetGeometry(figure, null)` (R05.T7.a; Design notes 3 and 19), which R07.T9 uses. _Not built
-  at `ce7aeb3`_ (no `view/terrain/` or `view/quality/`); R05's Provides still match these names:
-  `BodyFigure` and `planetGeometry` from R05.T7.a (`view/terrain/planet.ts`, `pole: Vec3 | null`),
-  `QualitySetting`, `ViewSettings` and `SETTINGS` from R05.T7.b (`view/quality/`), the 0.25
-  secondary-view weight from R05.T7.d, `PatchCache` from R05.T8, the patch's `originM` from
-  R05.T10 and the terrain pass from R05.T11.
+  at `ce7aeb3`, now `2b75d16c`_ (no `view/terrain/` or `view/quality/`); R05's Provides still
+  match these names: `BodyFigure` and `planetGeometry` from R05.T7.a (`view/terrain/planet.ts`,
+  `pole: Vec3 | null`), `QualitySetting`, `ViewSettings` and `SETTINGS` from R05.T7.b
+  (`view/quality/`), the 0.25 secondary-view weight from R05.T7.d, `PatchCache` from R05.T8,
+  the patch's `originM` from R05.T10 and the terrain pass from R05.T11.
 - **R06:** `HostDiscDto` on `SkyResponse.hosts`: its radius, `mean_luminance_cd_m2` per channel
   (the disc mean, which E = π L̄ sin²ρ uses, never `central_luminance_cd_m2`), the power-2
   coefficients per channel, and the host's `teff_k`, `log_g`, `chroma` and `lux_per_v0`, since the
@@ -679,13 +684,14 @@ GlareSource[]` returns one `GlareSource` per disc, `excessLuminance` per channel
   65,504, in eye views also for a disc up to 45° outside the frame. Where this plan's `post/`
   module is absent, R06.T13.e declares `METER_CLASS` and `GlareSource` there under this plan's
   names, and this plan extends that file, so that R06 depends on nothing of R07 at build time.
-  _Not built at `ce7aeb3`_ (no `view/sky/`, `view/post/` or `sky` protocol module). Providers:
-  `HostDiscDto` R06.T10 (filled by R06.T11.c; its radius and coefficient field names are fixed
-  there, not yet in R06's text), `cameraLimitV` and `DEFAULT_VIEW_CAMERA` (N = 1.4, t = 1/30 s,
-  R06 Design note 18, the N and t of whose Design note this plan's `VIEW_CAMERA` holds with the
-  camera's ranges, T13.c) R06.T13.a, `HostDiscLayer`, `glareSources`, `DEFAULT_EYE_OBSERVER` and the
-  meter class R06.T13.e (`view/post/{meter,glare}.ts` if this plan's are absent). `angular_radius`
-  is Rust only (`sky::disc`); the client computes asin(R ÷ d) itself (T3).
+  _Not built at `ce7aeb3`, now `2b75d16c`_ (no `view/sky/`, `view/post/` or `sky` protocol
+  module). Providers: `HostDiscDto` R06.T10 (filled by R06.T11.c; its radius and coefficient
+  field names are fixed there, not yet in R06's text), `cameraLimitV` and `DEFAULT_VIEW_CAMERA`
+  (N = 1.4, t = 1/30 s, R06 Design note 18, the N and t of whose Design note this plan's
+  `VIEW_CAMERA` holds with the camera's ranges, T13.c) R06.T13.a, `HostDiscLayer`, `glareSources`,
+  `DEFAULT_EYE_OBSERVER` and the meter class R06.T13.e (`view/post/{meter,glare}.ts`
+  if this plan's are absent). `angular_radius` is Rust only (`sky::disc`); the client
+  computes asin(R ÷ d) itself (T3).
 - **R08:** `DiscReflectanceTable`, baked by R08's `bakeDiscReflectance(medium, appearance:
 BodyAppearance)`, for a body with an atmosphere, which replaces the albedo-only disc shading;
   R08.T16.b adds its read path to this plan's `shaders/bodyDisc.wgsl`. It reads `BodyAppearance`
@@ -710,9 +716,9 @@ BodyAppearance)`, for a body with an atmosphere, which replaces the albedo-only 
   radius; the `SurfaceState` and Bond albedo of P14.T13.c once carried; `body_fixed_at` (P14.T14.c)
   through R02's `BodyFixedRotation`; the surface pressure and cloud fraction of `Atmosphere`
   (`planetary/derive/atmosphere.rs`) that choose the law (Design note 5); the photometric section
-  and flattening asked for in R07.T1. _Re-checked on `main` at `ce7aeb3` (`GENERATOR_VERSION`
-  19):_ none of R07.T1's asks is drafted in plan 14 or built — no photometry section, no
-  flattening, no spheroid datum; `radius_m` on `BulkPropertiesDto` is the mean radius.
+  and flattening asked for in R07.T1. _Re-checked on `main` at `ce7aeb3`, now `2b75d16c`
+  (`GENERATOR_VERSION` 19):_ none of R07.T1's asks is drafted in plan 14 or built — no photometry
+  section, no flattening, no spheroid datum; `radius_m` on `BulkPropertiesDto` is the mean radius.
   `SurfaceState` (`atmosphere.rs:699`: `GasEnvelope`, `MagmaOcean`, `Airless`,
   `RunawayGreenhouse`, `Temperate`, `Snowball`), `Atmosphere::surface_pressure` and
   `cloud_fraction` exist in the sim only and are read by plan 14's section, never by the client;
@@ -735,8 +741,8 @@ BodyAppearance)`, for a body with an atmosphere, which replaces the albedo-only 
   replay log; the simulation, training, replay and pause modes; and ship alerts in the guide's four
   classes. None of it exists: `ClientMessage` has `Hello { client_version }`, `Ping`, `Request` and
   `Cancel` only (`crates/hyperion-protocol/src/envelope.rs:34`), and nothing identifies a station.
-  Still so at `ce7aeb3`: `Hello { client_version }` (`envelope.rs:41`), `PROTOCOL_VERSION` 2
-  (`lib.rs:108`), one ship stand-in per open universe, and no sessions plan in
+  Still so at `ce7aeb3`, now `2b75d16c`: `Hello { client_version }` (`envelope.rs:41`),
+  `PROTOCOL_VERSION` 2 (`lib.rs:108`), one ship stand-in per open universe, and no sessions plan in
   `docs/agent/plans/`.
 
 ## Design notes
@@ -751,11 +757,11 @@ client's command line takes `--address` and `--port` only (`apps/hyperion/src/ma
 `planetary/derive/rotation.rs` or `planetary/frames.rs`; no geometric albedo, phase integral or
 flattening anywhere; `usePrefersReducedMotion.ts` and the annunciation component
 `components/StatusLine.tsx` exist, the latter unrelated to the main screen's status line.
-Re-checked at `ce7aeb3` (RM1 merged): R01's engine, R02's `view/` and wireframe `VIEW` and R03's
-scene exist as the Consumes' "as built" notes give them; `lib/displays.ts` gains `view`; R05's and
-R06's modules and everything of plan 14 named above as absent are still absent, save rotation,
-which exists sim-side only; `PROTOCOL_VERSION` is still 2 and the command line still `--address`
-and `--port`.
+Re-checked at `ce7aeb3`, now `2b75d16c` (RM1 merged): R01's engine, R02's `view/` and wireframe
+`VIEW` and R03's scene exist as the Consumes' "as built" notes give them; `lib/displays.ts`
+gains `view`; R05's and R06's modules and everything of plan 14 named above as absent are
+still absent, save rotation, which exists sim-side only; `PROTOCOL_VERSION` is still 2 and
+the command line still `--address` and `--port`.
 
 1. **Three regimes, chosen per view per frame on the CPU.** A body is a `point` while its angular
    diameter is under 3 px of the view's own pixels (brainstorm, "The scales the view spans"): its
@@ -877,9 +883,21 @@ and `--port`.
    shadow cones and are usually empty. At 1 au the soft terminator is 59.3 km wide on an Earth-sized
    body and lies below 0.5% of peak irradiance, black under a day-side exposure. Mandel and Agol
    2002 and Agol, Luger and Foreman-Mackey 2020 are the `f64` oracles' cross-checks; Maxted and Gill
-   2019's qpower2 is validated only below a radius ratio of 0.2 and is not used.
+   2019's qpower2 is validated only below a radius ratio of 0.2 and is not used. _Resolved
+   2026-10-09 (the brainstorm sign-off, `signoff-brainstorm.md`, row 622): the brainstorm's
+   "sampled at a handful of points" is gone. It now says "Visibility sampled at a handful of points
+   across the disc would be 13–26% wrong for small occluders at four to eight samples, and would
+   band. Instead a lit point's visibility is the product of two closed forms", Howell's horizon
+   and the annuli "each eclipsed by an exact circle–circle overlap, which never bands"._ _In
+   `f32` the horizon term's partial branch is the identity z + H² (arctan z − z) of Howell's
+   H² arctan z − X sin φ √(1 − Y²), whose two terms, each about H ÷ π of face-on, cancel to under
+   1 ÷ H of it, and its WGSL calls none of WGSL's trigonometry (R07.T6.d; decision-r10-t8b §2)._
 7. **Planetshine is included** (researched 2026-09-29; figures computed from Design note 5's
-   albedos). The brainstorm does not mention it; the realism ruling decides. It is the dominant
+   albedos). The brainstorm did not mention it; the realism ruling decides. _Resolved 2026-10-09
+   (the brainstorm sign-off, `signoff-brainstorm.md`, row 624): the brainstorm now says
+   "**Planetshine** is the dominant light on a moon's night side: earthshine on the Moon at full
+   Earth is about 8 lx, some 3 × 10⁴ times the integrated starlight, and Jupiter-shine on Io about
+   70 lx"._ It is the dominant
    night-side light of every moon: earthshine on the Moon at full Earth is about 8 lx (7.7 lx with
    the `earth` template, Robinson 2026's fit; 8.1 lx at his physical model's p;
    decision-r07-earth-albedo), 14 stops below sunlight but some 3 × 10⁴ times the integrated
@@ -907,7 +925,10 @@ and `--port`.
    wireframe has none; decisions-r06-r07, item 1).** In order:
    R06's sky; the small discs' cells (a compute pass, R07.T8.d); mesh bodies (opaque, depth); host
    discs, disc bodies and point bodies in one painter order (Design note 2); R08's,
-   R10's and R11's passes in their places when they exist; the histogram; bloom of the light above
+   R10's and R11's passes in their places when they exist (_as built, R10's two: `terrain shadows`,
+   the shadow cascades' four depth-only caster passes, between the small discs' cells and mesh
+   bodies, which `FrameTerrain.draws` submits on the high setting alone (R10.T9.b), and `terrain`
+   after mesh bodies; `photoreal/passes.ts`_); the histogram; bloom of the light above
    the display's range; the tone-mapping pass with the analytic glare, upscale, encoding and
    dither; symbology cased over the result; DOM readouts on plates. A style owns no scene, camera or
    projection, so switching is a change of pass list, and a body projects to the same pixel in both
@@ -1016,7 +1037,10 @@ and `--port`.
     sampling, so the guide's flash limit holds.
 13. **The tone-mapping pass encodes and dithers** (researched 2026-09-29; probes on the UHD 620).
     AgX's formed image spans 16.5 stops, −10 to +6.5 about 0.18, about 9.2 below and 7.3 above the
-    metered average; the brainstorm's "roughly 25 stops" is AgX Log's encoding. The canvas is
+    metered average; the brainstorm's "roughly 25 stops" is AgX Log's encoding. _Resolved
+    2026-10-09 (the brainstorm sign-off, `signoff-brainstorm.md`, row 617): the brainstorm now says
+    "a frame's formed image spans about 16.5 stops around its metered exposure, from 10 below AgX's
+    middle grey to 6.5 above it (AgX's log encoding spans some 25)"._ The canvas is
     `rgba8unorm`, `getPreferredCanvasFormat()` on the probed UHD 620, written through a non-sRGB
     view with the encoding in the pass, so that the dither is applied in the encoded domain:
     triangular (TPDF) noise of ±1 LSB from a static blue-noise tile, never animated. Whether
@@ -1135,9 +1159,14 @@ and `--port`.
     over one tick: about 60 ms typical and 102 ms worst with a game-mode display, the worst 16.7 ms
     more for a gamepad (about 119 ms), which the Gamepad API polls only on animation frames. The
     requirement is therefore met typically and at the 95th percentile T28 records, not in the worst
-    case, which T28 records as a finding against 100 ms (Risks). This departs from the brainstorm's
+    case, which T28 records as a finding against 100 ms (Risks). This departed from the brainstorm's
     "the main screen interpolates between poses" (notes), is safe because the camera is presentation
-    only, and keeps interpolation as the fallback R07.T28 compares. Only the flyer has a control
+    only, and keeps interpolation as the fallback R07.T28 compares. _Resolved 2026-10-09 (the
+    brainstorm sign-off, `signoff-brainstorm.md`, rows 608 and 609): the brainstorm now leans to
+    extrapolation, "The main screen extrapolates the pose from the last one and its angular and
+    linear rates, blending each correction over one tick", with interpolation "the fallback a
+    measurement compares", and counts the 100 ms "to the display of the result as MIL-STD-1472H
+    counts it (§5.12.1.4.1.1), the display device included"._ Only the flyer has a control
     loop, so the flying station also draws a local predicted view of the camera, integrated from its
     own input at display rate, whose loop is some 30–50 ms. Since the camera is ship state and the
     guide forbids showing it as if the ship had obeyed, that view is labelled `PREDICTED` in its
@@ -1190,8 +1219,8 @@ TypeScript paths follow the rule at the head of Provides. Every task that adds o
 registered in `WGSL_CATALOGUE`, or anything under `view/engine/`, runs `just test-render` in its
 acceptance, and gives each material and post-process a `displayName`.
 
-Waits on R05 and R06 (re-validated at `ce7aeb3`, neither built): T2.a on R05.T7.a (`BodyFigure`);
-T3 on R06.T10 (`HostDiscDto`'s field names); T5 on T2.a and R06.T10; T7 on R05.T7.b
+Waits on R05 and R06 (re-validated at `ce7aeb3`, now `2b75d16c`, neither built): T2.a on R05.T7.a
+(`BodyFigure`); T3 on R06.T10 (`HostDiscDto`'s field names); T5 on T2.a and R06.T10; T7 on R05.T7.b
 (`QualitySetting`); T8.a on T3, T7 and R06.T13.e (the host-disc pass it is ordered with); T9 on
 R05.T7.a–b, T8 and T11; T10 on T9 and R06.T13.e, except T10.b, on T6.b, T8.a and T11; T11 on T8.a;
 T14.b's injected sources on R06.T13.e's `glareSources` (synthetic sources in its tests until then);
@@ -1227,11 +1256,12 @@ Saturn-like, ice giant) defined by a criterion on plan 14's
 composition classes for its owner to set, and the six-planet check; and the spheroid as the
 reference figure that heights are measured from (Design note 19). Both subtasks are plan 14's to
 build; the edit ends in plan 14's owner accepting them. Draft them against plan 14 as built
-(re-validated at `ce7aeb3`, `GENERATOR_VERSION` 19): the law's inputs are the sim's `SurfaceState`
-and `Atmosphere::{surface_pressure, cloud_fraction}` (`planetary/derive/atmosphere.rs`) and its
-iterated Bond albedo, none of them on the wire, so the section is computed server-side and is
-the only photometric thing the client reads; P14.T14.b's moments of inertia are already per
-class as built (`params.rs`: rocky 0.33, icy 0.34, sub-Neptune and ice giant 0.23, gas giant 0.25,
+(re-validated at `ce7aeb3`, now `2b75d16c`, `GENERATOR_VERSION` 19): the law's inputs
+are the sim's `SurfaceState` and `Atmosphere::{surface_pressure, cloud_fraction}`
+(`planetary/derive/atmosphere.rs`) and its iterated Bond albedo, none of them on
+the wire, so the section is computed server-side and is the only photometric thing
+the client reads; P14.T14.b's moments of inertia are already per class as built
+(`params.rs`: rocky 0.33, icy 0.34, sub-Neptune and ice giant 0.23, gas giant 0.25,
 provisional), so the flattening draft reuses those constants and asks only for what they lack
 (a Saturn-like 0.21 inside `GasGiant`, by a criterion for the owner, and the six-planet check);
 and, since rotation reaches no DTO yet, the drafts name the pole and rotation on the wire (the
@@ -1398,6 +1428,25 @@ run src/renderer/src/view/lighting`.
   the stubs, which take R08.T9.b's full signatures (latitude and sun azimuth included, R08 Design
   note 17) and ignore them, return 1, 1 and 0 in the smoke harness. Acceptance: `pnpm test`,
   `just test-render`.
+- **R07.T6.d The horizon term's arithmetic in `f32`** (a correction to T6.c; decision-r10-t8b §2,
+  decision-r08-f32 §9; main's deferred list, "R07's `litBody.wgsl` trigonometry"). It follows
+  T6.c and R10.T8.b, and lands before the owner's UHD 620 sunset (R10.T8.b's by-hand run).
+  `litBody.wgsl`'s horizon term calls none of WGSL's `sin`, `cos`, `tan`, `asin`, `acos` or
+  `atan`, and takes `preciseTrig.wgsl`'s forms (R08 Design note 18). Howell's partial branch,
+  whose terms h² atan z and x sin φ √(1 − y²) are each about H ÷ π of face-on and cancel to under
+  1 ÷ H of it, becomes the identity z + h² (atan z − z), since x sin φ √(1 − y²) = x² z =
+  (h² − 1) z, with atan z − z by its series, accurate for every z the branch reaches. The η = 0
+  return is clamped at 0. The term is finite at ρ = 0, a star at infinite distance, where it was
+  ∞ × 0. The angle from the normal that `bodyDisc.wgsl` and `planetshine_irradiance` pass is
+  `preciseAtan2` of the cross and dot products. The TypeScript twin takes the same form. Tests: in
+  an `f32` emulation against the twin, with Mesa's lowerings (`nir_atan`'s −2.07 × 10⁻⁵) and at
+  WGSL's bounds, across the band at H = 3, 11.5 and 215, the smooth terminator never goes negative
+  sunward of 90°, a flat element's error under 1° and 5° horizons is far below the 8% and 1.6% of
+  its light that Mesa gave the old form, and nothing changes beyond `f32` noise where the old form
+  was accurate; the rewrite meets Howell's form as written, in `f64`. Acceptance: `pnpm --filter
+hyperion exec vitest run src/renderer/src/view/lighting src/renderer/src/view/terrain/shadows`,
+  `just test-render`. _As built (2026-10-16, lane r07-trig): see Risks, "Deviations in T6.d, as
+  built"._
 
 #### R07.T7 The photorealistic style
 
@@ -1513,6 +1562,28 @@ src/renderer/src/view/scenes src/renderer/src/view/lighting`.
     - A bound missed is recorded and goes to the orchestrator for a ruling. It does not fail
       silently.
   - _As built (2026-10-06, the shading lane): see Risks, "Deviations in T8.d, as built"._
+- **R07.T8.e Every record through the cells pass** (`decision-r08-t11-frame.md`). A record with
+  air binds its surface-lighting tables, and a class map its textures, one `disc cells` dispatch
+  per bound set per view. Tests: G11 for a 13 px air body and a 13 px class-map body; the
+  dispatch counts; a device loss. Acceptance: `pnpm test`, `just test-render`, `just ci`.
+  - _As built (2026-10-27, the desktop lane): see Risks, "Deviations in R07.T8.e and R07.T8.f,
+    as built"._
+- **R07.T8.f A large disc's limb through the pass.** The limb pixels of a disc of 32 px or more,
+  one invocation a cell, summed in `pixel_sum`'s order; the limb draw reads the sums. Tests: G11
+  for a large airless limb and a large air body's limb; G10. Acceptance: as T8.e, and by hand on
+  the RTX 3080 with R08.T11's group, the `discs` pass at 10⁷ m x4 at most 2.6 ms.
+  - _As built (2026-10-27, the desktop lane): see Risks, "Deviations in R07.T8.e and R07.T8.f,
+    as built"._
+- **R07.T8.g The face's near-limb band, and the hoisting (c),** only if R08.T11.c leaves a high
+  row over 15.67 ms. Acceptance: G10, G11, and R08.T11's QW30.
+  - _As built (2026-10-27, the desktop lane): see Risks, "Deviations in R07.T8.g, as built"._
+- **R07.T8.h No jobs for sums no draw reads** (the owner's priority). The limb's spans trimmed at
+  their ends to the pixels the limb draw may read, and no jobs for a body handed over under a
+  coverage mask of every cell surveyed. Acceptance: test-render, both variants, and the atmosphere
+  run's captures byte-identical; `pnpm test`. Built (2026-11-01); see Risks, "R07.T8.h, as built".
+- **R07.T8.i The limb at 2 × 2 cells at the floor's lowest step** (the owner's priority; a lean
+  behind a setting). Acceptance: within 1/3 stop of 4 × 4 on ≥ 99.5% of limb pixels; `pnpm test`.
+  Built (2026-11-02); see Risks, "R07.T8.i, as built".
 
 #### R07.T9 Mesh bodies
 
@@ -1560,6 +1631,8 @@ By hand, recorded: the occultation. Acceptance: `just ci`, `just test-render`.
   uneclipsed. Tests:
   - against a brute-force f64 surface integral (10⁶ points) to 10⁻³ absolute, over radius
     ratios 0.02–30, separations across the penumbra, phases 0°, 60° and 120°, and L 0 and 1;
+    _2.5 × 10⁵ points since decision-test-coverage R5 (2026-10-11); see "Deviations in T10.b, as
+    built"._
   - a body wholly in the umbra gives exactly 0, and one clear of every penumbra exactly 1;
   - Earth's light towards the Moon in a central solar eclipse is the oracle's 0.892 at 1 au
     (0.893 in parallel light) of clear (uniform Sun, Lambert);
@@ -1960,7 +2033,8 @@ src/renderer/src/view/wireframe src/renderer/src/view/photoreal src/renderer/src
   Every kind T16.d reads still passes at its floor.
   **By hand, hidden:** T16.d's `VIEW` harness (`.git/rm23-scratch/r07-views/t16d/shots/`) at
   0.78125 and 2, the field of view set so that a planet stands 8 to 16 device px across (its limb
-  alone) and 64 to 128 px across (its 30° graticule), against f57f2b1 and 924b06a.
+  alone) and 64 to 128 px across (its 30° graticule), against f57f2b1 (landed as 4560dd25) and
+  924b06a.
   **Acceptance:** `pnpm --filter hyperion exec vitest run src/renderer/src/view/wireframe
 src/renderer/src/displays/view src/renderer/src/smoke src/renderer/src/lib`, `just test-render`,
   the console-ux skill's scripts, `just ci`.
@@ -2571,10 +2645,11 @@ and frame follow-ups are two subtasks (decision-r07-t19-layout).
 - **R07.T19.b `VIEW` at both sizes.** `ViewDisplay.tsx`, `styles.css`, `ViewLabelBlock.tsx`,
   `InstrumentView.tsx`, `ViewMarkList.tsx`, `viewRun.ts` (decision-r07-t19-layout, items 1–3 and
   5). Two layouts, chosen from the `.view` box's size alone and never from what it shows:
-  **full** where the box is at least 98.5rem wide (a 50.5rem stage, two slots' room beside the
-  primary's least label block, then 26rem and 20rem columns and their gaps) and as tall as
-  column A's tallest state with the list at two rows (about 52rem; the measured figure recorded),
-  which 1920×1080 at 100% is; **compact** otherwise, as 1280×720 and 1920×1080 at 125% and 150%
+  **full** where the box is at least 99rem wide (a 51rem stage, two slots' room beside the
+  primary's least label block, then 26rem and 20rem columns and their gaps; raised from 98.5rem by
+  R06.T13.j, 2026-10-13, so that the primary keeps the 14.5rem label block it has at 1280 × 720)
+  and as tall as column A's tallest state with the list at two rows (about 52rem; the measured
+  figure recorded), which 1920×1080 at 100% is; **compact** otherwise, as 1280×720 and 1920×1080 at 125% and 150%
   are. Full: column A, 26rem, holds `Instruments`, `Targets` (flex), `Camera` and `Style`; column
   B, 20rem, `Exposure` and `Exposure meter`; focus runs through A before B. Compact: one 26rem
   column in the same order, its panels at `0.5rem` block padding: `Instruments` folds to its
@@ -2839,7 +2914,8 @@ and frame follow-ups are two subtasks (decision-r07-t19-layout).
     the legend is one line, and both instruments still open. The camera's worst state (`PHASE TEST`,
     `FOV` at its narrowest, the rate at its lowest, reduced motion), with `CONTROLS` on `PRIMARY` and
     on `INSTRUMENT 1`, at 1280 × 720 and 1920 × 1080 at 150%: the column's `scrollHeight` equal to
-    its `clientHeight` with the 0.5 rem probe. At the full layout's least height, a 732 px box,
+    its `clientHeight` with the 0.5 rem probe. At the full layout's least height, a 732 px box
+    then (792 px, 49.5 rem, since R10.T12.a),
     column A's worst fits with the list at two rows.
   - **Acceptance.** `pnpm --filter hyperion` lint, typecheck and tests; the console-ux skill's
     scripts; `just ci`.
@@ -2881,6 +2957,10 @@ Recorded in this plan. Acceptance: the record.
   it. Before T8.d it could not: lowering the scale does not shorten a chain, and can push a disc
   into the 8 × 8 band. A miss whose `discs` pass holds a disc of 32 px or more is the residual
   (a large disc's 4 × 4 limb, 0.47–0.54 M cycles) and is recorded as a finding.
+- **Extended by R10.T16.e: `MEASUREMENT` on a views-check launch** (decision-r10-t16-leans §11).
+  Every `--views-check` launch, this task's and R10.T16.d's terrain run, shows `MEASUREMENT` in
+  place of `TRAINING` on every display for the whole launch: it is flown by script, records, and
+  wants no input while it measures, and its closing question is asked after its phases.
 
 #### R07.T21 A child window on a second monitor
 
@@ -2919,8 +2999,8 @@ is available. Acceptance: the record.
 ### Phase C: the main screen (gated on the sessions plan)
 
 Each task begins by fitting its names to the sessions plan as built. **Out of scope for RM3**
-(re-validated at `ce7aeb3`: no sessions plan exists); these tasks were not re-validated against
-the code and are re-validated when that plan is built.
+(re-validated at `ce7aeb3`, now `2b75d16c`: no sessions plan exists); these tasks were not
+re-validated against the code and are re-validated when that plan is built.
 
 #### R07.T22 The client role
 
@@ -3046,9 +3126,9 @@ additive: optional sections parsed by the client, a defaulted `role` and `reduce
 `Hello`, R03's reserved
 optional field and new commands in the sessions plan's envelope, none of which moves
 `PROTOCOL_VERSION` by the brainstorm's rule. The plan reserves nothing in the generator.
-Re-validated at `ce7aeb3` (`GENERATOR_VERSION` 19): Phases A and B change no protocol type and
-generate nothing; T2.b only parses bindings that plan 14's subtasks generate, and those subtasks
-(T1's drafts) carry plan 14's own bump, coordinated through the orchestrator, and its
+Re-validated at `ce7aeb3`, now `2b75d16c` (`GENERATOR_VERSION` 19): Phases A and B change no
+protocol type and generate nothing; T2.b only parses bindings that plan 14's subtasks generate, and
+those subtasks (T1's drafts) carry plan 14's own bump, coordinated through the orchestrator, and its
 `just gen-protocol`.
 
 ## Risks and open points
@@ -3145,6 +3225,9 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   and collision is spherical; both are R02's and the flight model's to take up once plan 14 sends f.
   For an Earth-like rotator, collision against a sphere is up to 21 km wrong at low altitude, so the
   flight model needs the spheroid (or R10's terrain on it) before landings on such worlds.
+  _The graticule's part is built: since R02.T19 (2026-10-27) a body's limb, graticule and
+  occluder are drawn on its spheroid, in both styles (plan 02's Risks, "Deviations in R02.T19, as
+  built"). Collision is still spherical, the flight model's to take up._
 - **The datum across plans.** The spheroid of Design note 19 is the one height datum for R05's
   vertex formation, R09's coarse elevations and R10 (the coordinator's ruling of 2026-09-29, on
   this plan's research; not an owner decision). Until each plan's text is built to it, a height
@@ -3159,8 +3242,11 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
 - **The main screen is gated** on a plan that does not exist. Its task list is written against the
   brainstorm and will be re-fitted (T22–T28 each begin so); the sessions plan may choose a command
   envelope that reshapes `MainScreenCommand`, and must accept input sent on change.
-- **Extrapolating the main screen's camera** departs from the brainstorm's interpolation (Design
-  note 22); T28 compares both, and the owner may keep interpolation at the cost of about 16 ms.
+- _Resolved 2026-10-09 (the brainstorm sign-off, `signoff-brainstorm.md`, row 609): no longer a
+  departure._ **Extrapolating the main screen's camera** departed from the brainstorm's
+  interpolation (Design note 22). The brainstorm now leans to extrapolation, with interpolation
+  "the fallback a measurement compares"; T28 still compares both, and its record may keep
+  interpolation at the cost of about 16 ms.
 - **The loop's worst case** is about 102 ms with a keyboard and 119 ms with a gamepad against the
   100 ms requirement (Design note 22). If T28's record confirms it, the cuts in order are the render
   and present term (25–33 ms, through the main screen's internal scale) and the animation-frame
@@ -3181,11 +3267,11 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   item 12). R02 draws hull edges uncased in the wireframe, since a casing would widen a 1.5 px
   edge past the 2 px that its occluder's slope bias covers. This plan's overlay (T16) must case them
   over the photorealistic image and raise the occluder's slope scale to 3 so that the casing is
-  covered (R02's Risks, T13 as built). As built at `ce7aeb3` the sphere occluder's `SLOPE_SCALE`
-  is already 3 (RM1 validation, for graticule strokes); the one to raise is the hull faces'
-  `occluder.wgsl` depth bias, `slopeScale` 2. _Built by T16.a (2026-10-06): cased over the image,
-  `slopeScale` 3 in both styles; see "Deviations in T16.a, as built"._ _The slope term moves into
-  the fragment and follows the strokes' scale in T16.d (decision-r07-t16a, items 1 and 2)._
+  covered (R02's Risks, T13 as built). As built at `ce7aeb3`, now `2b75d16c`, the sphere occluder's
+  `SLOPE_SCALE` is already 3 (RM1 validation, for graticule strokes); the one to raise is the hull
+  faces' `occluder.wgsl` depth bias, `slopeScale` 2. _Built by T16.a (2026-10-06): cased over the
+  image, `slopeScale` 3 in both styles; see "Deviations in T16.a, as built"._ _The slope term moves
+  into the fragment and follows the strokes' scale in T16.d (decision-r07-t16a, items 1 and 2)._
 - **The camera's local state, decided 2026-09-30 by a delegated decision** (the UX decisions,
   item 14). R02's `CameraState` keeps `free` (`FreeFlight`) and `move` (`EasedMove`), a local
   view's integration state. This plan moves them into a local wrapper, so that the server-held
@@ -3213,9 +3299,9 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   bounds are the setting value `ViewSettings.internalScaleBounds` (Design note 14, T17, T18). Not
   yet designed here: the instrument panels' sizes in the cockpit layout, which R12 needs for its
   runs.
-- **Re-validated at `ce7aeb3`** (2026-10-02, RM3; RM1 merged, R05 and R06 not built, `main`
-  equal to the integration branch). Consumes swept against R01–R04 as built and their Risks: the
-  "as built" notes in Consumes (R01's engine calls, `createView`'s name, per-call readback,
+- **Re-validated at `ce7aeb3`**, now `2b75d16c` (2026-10-02, RM3; RM1 merged, R05 and R06 not built,
+  `main` equal to the integration branch). Consumes swept against R01–R04 as built and their Risks:
+  the "as built" notes in Consumes (R01's engine calls, `createView`'s name, per-call readback,
   post-process labels and bindings, the canvas's sRGB view, per-format rounding, the timing
   switch's home; R02's `Viewport` without `fovXRad`, `ExposureControl`'s union and
   `onMetering`, `ExposurePanel`, `graticule`'s module, no client `BodyFixedRotation`; R03's
@@ -3229,10 +3315,10 @@ generate nothing; T2.b only parses bindings that plan 14's subtasks generate, an
   14 as built; `pnpm exec prettier`; Phase C out of scope for RM3. RM1's decisions and follow-ups
   for this plan (UX items 12 and 14, the kept scene's `TRAINING`, hardware item 6's HDR and EDID,
   the hidden-window OUT_OF_DATE restart, Babylon dropped) were already folded in by the RM1-close
-  pass (`ca9b2ae`) and are kept. Brainstorm drift since `899db5e`: only the CSP ruling and
-  Babylon wording, neither touching this plan. **Pending re-validation:** T2.a waits on
-  R05.T7.a; T3 on R06.T10 (`HostDiscDto`'s field names); T5 on R06.T10; T7, T17 and T18 on
-  R05.T7.b; T8.a and T10 on R06.T13.e; T9 on R05.T7.a–b, T8 and T11; T19 on R05.T7.d; T2.b on
+  pass (`ca9b2ae`, now `e9023721`) and are kept. Brainstorm drift since `899db5e`, now `9d955b26`:
+  only the CSP ruling and Babylon wording, neither touching this plan. **Pending re-validation:**
+  T2.a waits on R05.T7.a; T3 on R06.T10 (`HostDiscDto`'s field names); T5 on R06.T10; T7, T17 and
+  T18 on R05.T7.b; T8.a and T10 on R06.T13.e; T9 on R05.T7.a–b, T8 and T11; T19 on R05.T7.d; T2.b on
   plan 14's subtasks from T1; T22–T28 on the sessions plan. **Missing galaxy work** (plan 14 on
   `main`): the photometry section (T2.b, T8.a's modelled albedos, T11's neighbours' p); the
   flattening and the Saturn-like moment of inertia (T8.a's and T9's oblate figures); rotation and
@@ -3551,9 +3637,9 @@ DARK`; the source shows the raw view id upper-cased until T7 names views as the 
   The CPU twin of the last step holds where the pass draws at the internal resolution; upscaled,
   the pass tents U₁ to the canvas's pixels and thresholds the interpolated colour. `just
 test-render` (SwiftShader, `default` and `no-subgroups`, 2026-10-02, merged with origin at
-  `7cb5d33`): every R07.T12, T14.b and T15 check passed but the T15 twin check, which failed on the
-  harness's half-float encoder for subnormal inputs; fixed in `3e51ef3`, to be re-run with the
-  owner's integrated `just ci` and `just test-render`.
+  `7cb5d33`, now `a40e50d2`): every R07.T12, T14.b and T15 check passed but the T15 twin check,
+  which failed on the harness's half-float encoder for subnormal inputs; fixed in `3e51ef3`, now
+  `19dd75e4`, to be re-run with the owner's integrated `just ci` and `just test-render`.
 - **Deviations in T4.c, as built.**
   - **`LunarLambert`'s last field is `table_row`, not `template`:** `template` is a reserved word in
     WGSL. It is the row of `phase_factor_table` that holds the law's f, one row per tabulated law
@@ -3577,8 +3663,9 @@ test-render` (SwiftShader, `default` and `no-subgroups`, 2026-10-02, merged with
     rename, review found the per-texel case's reference re-tabulating f with the per-texel L while
     the kernel reads the borrowed row; `expectedBrdf` now reads the borrowed row (fixed with
     T6.c). `just test-render` (SwiftShader, `default` and `no-subgroups`, 2026-10-03, with T6.c's
-    working tree over e641995): all five `body_brdf` checks pass, worst 1.3 × 10⁻⁷ relative; T6.c's
-    horizon factors within 9 × 10⁻⁵, eclipse terms within 2.3 × 10⁻⁵, and the stubs exact.
+    working tree over e641995, now 9404b64c): all five `body_brdf` checks pass, worst
+    1.3 × 10⁻⁷ relative; T6.c's horizon factors within 9 × 10⁻⁵, eclipse terms within
+    2.3 × 10⁻⁵, and the stubs exact.
 - **Deviations in T6.a, as built.**
   - **`sphereIrradianceFactor(h, phiRad, horizonRad = 0)`** returns H² F, Howell's view factor
     over that of the sphere face-on, so it is cos φ wherever the whole disc is up; `howellViewFactor`
@@ -3652,11 +3739,161 @@ count }`, at most four), not c and α.
 altitude_m, mu_sun, latitude_rad, sun_azimuth_rad) -> vec3f` (1) and
     `atmosphere_sky_irradiance(altitude_m, mu_sun, latitude_rad) -> vec3f` (0), with R08.T9.b's
     and R11's full signatures. The lit point's lighting, which calls them, is T8.a's.
+    _Since R07.T6.d `howell_irradiance` (H² F, no H² formed) and `atan_tail` replace
+    `howell_view_factor`, and the horizon term calls no WGSL trigonometry ("Deviations in T6.d,
+    as built")._
   - **The probe.** `LIT_BODY_PROBE` gains a second case array, `LightingCase` (kind, annuli, six
     values and the annuli's edges and fluxes, 64 bytes), so one kernel holds the whole library (an `auto` layout binds only what the entry
     point uses, and the engine binds every declared binding). The smoke harness checks five
     horizon factors and five eclipse terms against their TypeScript twins to 2 × 10⁻⁴ absolute
     (WGSL's `f32` `acos` and `atan` are allowed some 10⁻⁴), and the stubs' 1, 1 and 0 exactly.
+    _Since R07.T6.d the horizon term and planetshine are held to 2 × 10⁻⁶, at eleven and four
+    points ("Deviations in T6.d, as built")._
+- **Deviations in T6.d, as built** (2026-10-16; lane r07-trig, on `rendering-and-planets` at
+  969d40ea). `sphere_irradiance(h, phi, horizon)` and `sphereIrradianceFactor(h, phiRad,
+horizonRad)` keep their signatures and their model; only the arithmetic changes. No server or
+  generator change.
+  - **The form.** In the band, |c| < 1 for c = H cos φ, with q = 1 ÷ H = sin ρ and
+    u = √(1 − c²) ÷ cos ρ (so z = q u, Y = −c cos ρ ÷ sin φ and √(1 − Y²) = √(1 − c²) ÷ sin φ),
+    the identity reads H² F = (q ÷ π) [c arccos Y + u (1 + u² B(q u))], with
+    B(z) = (atan z − z) ÷ z³ and arccos Y = atan2(√(1 − c²), −c cos ρ).
+    - As written, Howell's two terms are each about H ÷ π of face-on and cancel to about
+      2 ÷ (3H²) of themselves at 90°, 1.4 × 10⁻⁵ at 1 au, so a relative error ε in `atan` arrived
+      as (H ÷ π) ε of face-on. (decision-r10-t8b §2's "68 times the result" and the deferred
+      list's "1/68 of themselves" are this gain, in units of face-on.)
+    - The bracket's terms are of order one. 1 + u² B lies in (0, 1): about 2/3 for H ≫ 1, and
+      0.19 at H = 1.01. Only at the band's far edge, c → −1, do its two parts cancel, to order
+      (1 − c²)^(5/2), where the term is under 3 × 10⁻⁸ of face-on off and the clamp at 0 takes the
+      rounding.
+    - The branches are chosen by cos φ ≥ q and cos φ ≤ −q, in place of φ against arccos(1 ÷ H).
+      That is the same point, where the branches meet continuously.
+    - No H² is formed. So the term is finite at every finite H, H = 10³⁰ included (its H²
+      overflows `f32`), and the hard step at H = ∞ wherever infinities are kept (the twin, and
+      IEEE hardware).
+    - φ + η is clamped to [0, π], `preciseSinCos`'s domain, in the WGSL and the twin. Past π both
+      terms were already 0, so no value moves.
+  - **B(z)** (`atan_tail`, `atanTail`).
+    - Three halvings, atan z − z = 2 (atan t − t) − z³ ÷ (1 + √(1 + z²))², take any z ≥ 0 to
+      t ≤ tan(π ÷ 16) = 0.199.
+    - There the series −1/3 + t²/5 − t⁴/7 + t⁶/9 − t⁸/11 truncates at under t¹⁰/13 = 7.5 × 10⁻⁹,
+      2.3 × 10⁻⁸ of itself.
+    - Each halving, B(z) = (2 B(t) − p) ÷ p³ with p = 1 + √(1 + z²), sums two negative terms and
+      carries a relative error in B(t) at under a quarter. So B(z) is truncated by under
+      4 × 10⁻¹⁰ of itself.
+    - This goes beyond the lever's "the series where z is small, and `preciseAtan(z) − z` above
+      about 0.2": one form for every z, which grows without bound as H → 1. `preciseAtan(z) − z`
+      cancels by about 3 ÷ z², 77-fold at z = 0.2, so its 5 × 10⁻⁷ absolute bound would leave about
+      2 × 10⁻⁴ of B there.
+  - **The built-ins replaced.**
+    - `cos` and `sin` by `preciseSinCos`.
+    - arccos Y, the share's arccos(−x) and ρ = asin(1 ÷ H) by `preciseAtan2`.
+    - The WGSL's `howell_view_factor` (F) gives way to `howell_irradiance` (H² F). Its only
+      caller was `sphere_irradiance`. The twin's `howellViewFactor` (F) stays, 0 at H = ∞.
+    - `atanTail` is exported beyond Provides, for its test.
+  - **The angle passed in.** `bodyDisc.wgsl`'s horizon call and `planetshine_irradiance` took
+    φ = acos(μ₀).
+    - WGSL bounds `acos` by the worse of 6.77 × 10⁻⁵ and atan2's 4,096 ULP, which near μ₀ = 0 is
+      4.9 × 10⁻⁴ rad, 10% of the Sun's angular radius at 1 au.
+    - Mesa's `acos` is π ÷ 2 less A&S 4.4.45 times `fsign(x)`, without `asin`'s Taylor branch. It
+      is exact at μ₀ = 0 itself, and 6.75 × 10⁻⁵ low just above and as much high just below, a
+      step of 1.35 × 10⁻⁴ rad across the terminator. 6.75 × 10⁻⁵ is 1.45% of the Sun's angular
+      radius at 1 au. Behind the new form it would still be 3.4 × 10⁻⁵ of face-on at the
+      terminator, 3.4% of its value there.
+    - Both now take `preciseAtan2(|n × d|, n · d)`, decision-r08-f32 §9's lean. R10's terrain
+      already did.
+  - **Scope.** decision-r08-f32 §9 item 1 lists the lune area beside the horizon term. T6.d builds
+    decision-r10-t8b §2's lever, which names the horizon term alone; the eclipse term is deferred
+    (below).
+  - **ρ = 0.**
+    - Above a horizon, the visible share is the step for ρ = 0, ½ on the cut.
+    - R10.T8.b's cap (`MAX_STAR_DISTANCE_RADII`, `terrain_star_distance_radii`, H at most 10¹⁸) is
+      kept. R07's term no longer needs it. But on the GPU a point star's d ÷ 0 is no value WGSL
+      defines (its finite-math assumption, §15.7.2), and the cap keeps 1 ÷ H inside WGSL's
+      division bound (a divisor up to 2¹²⁶).
+    - Its comments and its test, which asserted R07's NaN at H = ∞, now say so. These are R10's
+      code.
+  - **For main's docs batch** (other plans and records, not edited here):
+    - plan 10's Risks: "Deviations in T8.b, as built" ("At ρ = 0, H infinite, R07's term alone is
+      ∞ × 0, NaN …"), and two of "Deferred findings (R10.T8.b)", "R07's horizon term in WGSL's
+      trigonometry" and "R07's horizon term is NaN for a point star", which T6.d settles;
+    - main's deferred list, the entry "R07's `litBody.wgsl` trigonometry" (built here), and its
+      "cancel to 1/68 of themselves";
+    - decision-r10-t8b §2's "each about H ÷ π ≈ 68 times the result" (of face-on, not of the
+      result).
+  - **The emulation** (`lighting/horizonPrecision.test.ts`). `preciseTrig.wgsl`'s `f32` emulation
+    moves into a shared test helper, `test/preciseTrigF32.ts`, which R08's
+    `atmosphere/precision.test.ts` now imports in place of its own copy, with the same correctly
+    rounded arithmetic. The helper adds corners of WGSL's bounds for +, −, ×, ÷ and `sqrt`: each
+    sum, difference and product rounded to one neighbour (WGSL names no rounding mode), each
+    quotient 2 ULP off, and `sqrt` as 1 ÷ `inverseSqrt` with each step 2 ULP off, up, down and by
+    three seeded signs.
+  - **Measured** (errors against the twin on the same `f32` inputs, of face-on unless stated).
+    "Before" is T6.c's form on correctly rounded arithmetic, with its built-ins correctly rounded,
+    as Mesa lowers them, and at one corner of WGSL's bounds (`acos` and `asin` at their bounds'
+    absolute terms, so this understates the old form). "After" is the worst over correctly rounded
+    arithmetic and the five corners; the new form calls no built-in trigonometry, so Mesa's
+    lowerings do not reach it.
+
+    | Case | Before: rounded | Before: Mesa | Before: WGSL corner | After |
+    | --- | --- | --- | --- | --- |
+    | Smooth terminator at 90°, 1 au (exact 9.868 × 10⁻⁴) | 9.851 × 10⁻⁴ | −4.360 × 10⁻⁴ | −2.731 × 10⁻² | 9.868–9.869 × 10⁻⁴ |
+    | Smooth band, worst: H = 3 | 1.3 × 10⁻⁷ | 6.4 × 10⁻⁶ | 7.7 × 10⁻⁴ | 2.2 × 10⁻⁷ |
+    | H = 11.5 | 7.0 × 10⁻⁷ | 5.9 × 10⁻⁵ | 1.7 × 10⁻³ | 1.7 × 10⁻⁷ |
+    | H = 215 (1 au) | 9.4 × 10⁻⁶ | 1.42 × 10⁻³ | 2.85 × 10⁻² | 1.6 × 10⁻⁷ |
+    | Flat element under 1°, of its light | 0.055% | 8.15% | 99.6% | 0.0028% |
+    | Under 5° | 0.012% | 1.63% | 33.5% | 0.0022% |
+    | Under 30° | 0.0026% | 0.25% | 5.5% | 0.0014% |
+
+    - On Mesa the old terminator is 0 or below from 0.16ρ sunward of 90°, at worst −1.04 × 10⁻³.
+      The new one, unclamped, is positive sunward of 90° at every corner.
+    - The flat element's errors of face-on: 1.42, 1.42 and 1.23 × 10⁻³ on Mesa before; 4.9 × 10⁻⁷,
+      1.9 × 10⁻⁶ and 7.2 × 10⁻⁶ after.
+    - Elsewhere on the smooth figure, after (Mesa before): 3.3 × 10⁻⁶ at H = 1.01 (1.5 × 10⁻⁵),
+      4.5 × 10⁻⁷ at 1.5 (7.1 × 10⁻⁶), 1.9 × 10⁻⁷ at 2,150 (1.42 × 10⁻²), 1.7 × 10⁻⁷ at 10⁵ (0.66).
+    - Wholly lit, the two forms differ by at most 1.8 × 10⁻⁷ on correctly rounded arithmetic,
+      `preciseSinCos`'s error against a correctly rounded `cos`, about 3 ULP of 1.
+    - At the smoke's eleven points the new form is within 3.9 × 10⁻⁷ at every corner.
+    - B(z): 2.7 × 10⁻⁷ of itself correctly rounded, 1.4 × 10⁻⁶ at the corners.
+    - The twin against Howell's form as written, in `f64`: within 10⁻¹⁰ ÷ H, the series'
+      truncation (the written form itself loses about H² ε of 1 ÷ H).
+    - A 60-digit check in the lane's scratch: with B exact, the identity meets Howell's form to
+      under 6 × 10⁻¹⁶ of 1 ÷ H from H = 1.01 to 10⁷. The science check confirmed it exact to 50
+      digits.
+  - **What remains.** The share's x = (π ÷ 2 − φ − η) ÷ ρ takes two `f32` roundings, as T6.c's
+    did: `f32`'s π ÷ 2, 4.4 × 10⁻⁸ rad off (up to 6.0 × 10⁻⁶ sin η of face-on at 1 au), and the
+    sum φ + η, up to 6 × 10⁻⁸ rad near 90° (up to 8.2 × 10⁻⁶ sin η). Together they are the flat
+    element's measured 1.4 × 10⁻⁵ sin η, the largest error left. A two-part π ÷ 2 is not used:
+    WGSL lets an implementation reassociate (§15.7.5) and fold its parts back together.
+  - **Smoke.** The horizon term and planetshine are held to 2 × 10⁻⁶, from 2 × 10⁻⁴, at six more
+    points: the 1 au terminator at 90° and 0.5ρ sunward, a flat element on a 1° horizon, and a
+    point star (H 10³⁰) up, up through a 5° horizon and behind it. The tolerance is chosen per
+    kind by an exhaustive switch; the eclipse term keeps 2 × 10⁻⁴. Planetshine's angle and
+    inverse square are not emulated, and rest on the smoke check.
+  - **Not run on Mesa.** No Mesa device was used; the emulation stands in. The owner's UHD 620
+    sunset (R10.T8.b's by-hand run) is the hardware check.
+  - **Reviewed.** TypeScript, plan conformance and the science check. None asked for a change to
+    the shader's or the twin's arithmetic; the science check's must-fix items, in comments, this
+    record and the test's bounds, are applied with every should-fix: the cancellation's ratio, Mesa's `acos` at 0 and WGSL's `acos` bound restated; the
+    bound corners made faithful (directed +, −, ×; `sqrt` through `inverseSqrt`) and the After
+    column re-measured; the shared emulation helper; the tolerance's exhaustive switch; units in
+    the test's names, read-only data, one reason per test; the unclamped terminator asserted;
+    "What remains" given both roundings; the older T6.c and T11 text annotated; the eclipse
+    finding corrected.
+  - **Gate:** `just smart-ci --hook-checks rendering-and-planets` on the committed tree; its log
+    and verdict are in the lane's handoff (`handoff-r07-trig.md`).
+  - **Deferred findings (2026-10-13 rule).**
+    - The eclipse term still takes WGSL's built-ins: `circle_overlap_area`'s `acos`, and
+      `bodyDisc.wgsl`'s `asin` of the star's and occluders' radii and `atan2` of their separation.
+      Its occluder's segment k² arccos(d₂ ÷ k) − d₂ √(k² − d₂²) cancels as Howell's branch did, by
+      about k, the occluder's radius in the star's. With Mesa's `acos` a uniform disc's hidden
+      share errs by up to 4 × 10⁻⁵ at k ≤ 1, 3.1 × 10⁻⁵ at k = 3.7, 4.8 × 10⁻⁴ at k = 30 and
+      3.6 × 10⁻³ at k = 190 (Jupiter over the Sun, seen from Io), about 1.6–1.9 × 10⁻⁵ k; at the
+      absolute term of WGSL's `acos` bound, about 2.2 × 10⁻⁵ k², 0.78 at k = 190 (`f64` estimates
+      in the lane's scratch, `lune.py`, not measured in `f32`). Lean: the same cure, the segment
+      as k² (θ − sin θ cos θ) with θ − sin θ cos θ by a series where θ is small.
+    - The phase angle's `acos` and the limb's `atan2` and `asin` in `bodyDisc.wgsl` are on the
+      built-ins too. R06's sky layers and R07's other shaders are still not audited
+      (decision-r08-f32 §9).
 - **Deviations in T3, as built.**
   - **`starIlluminance(disc, distanceM)`** returns E_c = π L̄_c sin²ρ in display order (r, g, b)
     from `HostDiscDto`'s B, V, R; inside the star sin ρ is held at 1. R06 builds the channels as
@@ -3671,7 +3908,11 @@ altitude_m, mu_sun, latitude_rad, sun_azimuth_rad) -> vec3f` (1) and
     illustrative warm white of unit luminance. The Sun at 1 au gives 1.287 × 10⁵ lx (the
     brainstorm's 1.28 to 0.6%), and the disc form agrees with the magnitude form. The light-time
     direction error is v ÷ c for the Sun's reflex speed about the Sun–Jupiter barycentre,
-    4.16 × 10⁻⁸ rad.
+    4.16 × 10⁻⁸ rad. _R08.T6.j re-baselined the reference Sun from R06's fixture: the disc now
+    takes R06's Sun, `hostDisc.ts`'s `SUN_COLOUR_RGB`, `SUN_LUX_PER_V0` (1.0367468662789598) and
+    `SUN_BAKE_SPECTRUM`, in place of the warm white, `lux_per_v0` 1 and a bake spectrum of ones, so
+    the Sun at 1 au gives 133,462 lx, E-490's 133,318 lx to 0.11% (plan 08's Risks, "Deviations in
+    T6.j, as built")._
 - **Deviations in T2.a, as built.**
   - **A thirteenth template, `lambert`** (approved by the coordinator, 2026-10-03): Φ_t is Lambert's
     closed form to 179° (f held at 1 beyond, where Φ_L reaches 0), L = 0, provisional and labelled.
@@ -3953,7 +4194,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
   the label lines also break at spaces, and two slots fit only while each holds at most one
   statement, so that a line appearing in an open slot without room (the moment of
   `LIGHTING: PENDING`) sets `INSTRUMENT 2` under `INSTRUMENT 1`, its foot past the stage's, until
-  it clears.
+  it clears. _Superseded (decision-r10-view-block-room §3): a slot the stage cannot hold whole is
+  held, and none stands past the stage; built by R10.T12.b._
 - **Deviations in T19.b, as built** (2026-10-05).
   - **Files.** Beyond the task's list: `displays/view/viewLayout.ts` (`ViewLayout`, `viewLayout`,
     `FULL_MIN_WIDTH_REM` 98.5, `FULL_MIN_HEIGHT_REM` 55.25, `FoldPanel`, `DEFAULT_FOLD`,
@@ -4091,6 +4333,9 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     tallest state, which then passes 732 px. T19.d re-measures and raises `FULL_MIN_HEIGHT_REM`,
     within 52.5 rem. Re-measured by T19.d: the note adds 3 px, and the least height stays
     45.75 rem (see "Deviations in T19.d, as built").
+    _Raised since: to 47 rem by P05.T13, and to 49.5 rem by R10.T12.a's `BASELINE` row (galaxy
+    plan 05's "P05.T13" record; R10's Risks, "Deviations in R10.T12.a, as built"), within the
+    52.5 rem bound; `FULL_MIN_HEIGHT_REM`'s TSDoc gives the parts._
   - **Targets' floor in the full layout.** `.view-targets`' 10 rem floor is under two rows when
     the head takes two lines (173 px). From the least height up, the list keeps two rows by
     construction: at the least height, `Targets` stands at 176 px in the camera's worst. Below it
@@ -4194,7 +4439,10 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
   row, and the Views bullet's first sentence and its statements clause). The stated limits: at
   1280 × 720 two slots cover most of the primary's image; they fit there only while each holds
   one statement, beyond which the second `OPEN` is held back; and a statement appearing without
-  room sets `INSTRUMENT 2` under `INSTRUMENT 1`. The ruling gives the steps.
+  room sets `INSTRUMENT 2` under `INSTRUMENT 1`. The ruling gives the steps. _Signed off
+  2026-10-09 by the sign-off agent (owner's delegation), on R06.T11.f's hidden captures with both
+  slots open at 1280 × 720 and 1920 × 1080: the limits are accepted, and the row states the
+  fallback under `INSTRUMENT 1` (`signoff-ux-guide.md`)._
 - **Deviations in T19.d, as built** (2026-10-06; decision-r07-owner-ux-signoff).
   - **Files.** Within the ruling's list, `exposure.ts`'s `enable` TSDoc takes item 3's verb,
     "sets". Beyond it:
@@ -4975,9 +5223,9 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     at least 8: they read 12 over the image at 0.78125.
   - **Captures.** decision-thin-line-contrast retires the brief's "captures at 0.78125 do not move":
     every line at a ratio under 2 is now at least 2 device px.
-    - **`just test-render --captures`.** Before (at f57f2b1) and after, 98 of the 110 captures are
-      byte-identical. The 12 that move are R05 spike's `craft` and `orbit` instruments, at its
-      three shots on both variants. They are the only captures drawn through
+    - **`just test-render --captures`.** Before (at f57f2b1, landed as 4560dd25) and after, 98 of
+      the 110 captures are byte-identical. The 12 that move are R05 spike's `craft` and `orbit`
+      instruments, at its three shots on both variants. They are the only captures drawn through
       `buildWireframeDrawList`: their lines go from 1 to 2 device px, and their outlines from 1.5 to
       2.
     - **Hidden captures of `VIEW`'s canvas** (`.git/rm23-scratch/r07-views/t16d/shots/`): PRECISION
@@ -5200,6 +5448,7 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       `occluderMeshes` and of the silhouette check's sphere, and a Windows views check recording
       its load average as none.
     - **UX:** no breach beyond the ruled exception, which waits on the owner's sign-off (T16.c).
+      _Signed off 2026-10-09 by the sign-off agent (owner's delegation)._
       Its two points for T16.c are above. Asked whether the silhouette must itself reach the
       guide's contrast, it judged the rulings settle it as a ground, not a mark (above), and its
       consider, a test that the outline encloses the silhouette, is taken.
@@ -5317,8 +5566,9 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     - with the narrower exclusion more of each stroke is read: the target's ticks 16 points at
       0.78125 where T16.d read 12, now that the craft's hull no longer blocks their inner ends.
   - **Captures.**
-    - **`just test-render --captures`**, on the merged base (65fdb004) and after: all 110 are
-      byte-identical. No capture holds a planet at a graticule threshold, or a destination.
+    - **`just test-render --captures`**, on the merged base (65fdb004, landed as 8d43709c) and
+      after: all 110 are byte-identical. No capture holds a planet at a graticule threshold, or a
+      destination.
     - **Hidden captures of `VIEW`'s canvas** (`.git/rm23-scratch/r07-views/t16g/canvas/`, T16.d's
       harness with its own flow), at 0.78125 and 2:
       - `PRECISION TEST` from `CHASE` at 60°, its planet about 29 and 35 device px across:
@@ -5331,9 +5581,9 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
         and about 134 px at 2, from 128 up, byte-identical.
     - **The two builds the subtask names** are stood in for, not built: the merged base (T16.d and
       T16.e as built, 924b06a's graticule rule), and the base with the view's strokes at 1 CSS px
-      in `viewFrameDrawer.ts` (f57f2b1's lines and thresholds). T16.e changes only the craft, not
-      the planets these captures compare. Against the second, every capture moves at its strokes,
-      0.14% to 1.43% of the pixels, as T16.d's did.
+      in `viewFrameDrawer.ts` (f57f2b1's lines and thresholds; it landed as 4560dd25). T16.e changes
+      only the craft, not the planets these captures compare. Against the second, every capture
+      moves at its strokes, 0.14% to 1.43% of the pixels, as T16.d's did.
   - **For T16.c** (the UX review's considers): the view-label sentence could say that a view's
     marks and their labels cut, never eased; and the destination's cue above waits on its ruling.
   - **Gate.** No `just ci` (the Day 2 protocol).
@@ -6029,6 +6279,17 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       note no longer fits;
     - T16.h's crops for the chevrons and raised labels (`.git/rm23-scratch/r07-views/t16h/` and
       `t16h-fu/crops/`) and T16.e's silhouettes (`t16e/`), for the look the drafts describe.
+  - **Signed off 2026-10-09 by the sign-off agent (owner's delegation)** (`signoff-ux-guide.md` in
+    the RM4/RM5 orchestration directory). T16.c's draft is accepted, with T17's, T10.c's, T16.k's,
+    T2.c's, T19's and T19.f's drafts. Of the open points, the open ends, the kept reading,
+    `SELECT` and the looks are accepted. `NOT YET MODELLED`'s row gains the console's own case, a
+    craft's light. `SCENE CLOCK ×100` is rejected for a unit rate, `SCENE CLOCK 100 s/s`, as
+    `RUN 1 d/s` is, in a row of its own. Amended beside them:
+    - the Colour bullet's wording, with `⌘` beside `☉` and `⊕`;
+    - "except" in the `NO IMAGE TO METER` row;
+    - the `ECLIPSE TEST` row's clock;
+    - the star's graticule called a reference grid about `NORTH`, and a new `ROTATION` row;
+    - the `INSTRUMENT 1`, `INSTRUMENT 2` row's fallback under `INSTRUMENT 1`.
 - **Deviations in T16.i, as built** (2026-10-07; the views lane; decision-r07-quality-and-destination,
   Q6 (a) and addenda B and C).
   - **Files.** Those the bullet lists, and:
@@ -6367,7 +6628,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     - the triad's labels stand 0.125 rem apart (Q6 (b)), not D4's 0.5 rem; the tier avoids the
       `OBLIQUE` stack, but not every stack;
     - curve labels do not count the selection's bracket or the destination's chevrons as ink (the
-      UX review's consider: count every mark's bracket place);
+      UX review's consider: count every mark's bracket place); _annulus labels count every mark's
+      bracket's place since P14.T42.d (plan 14)_;
     - a ring that is a point on screen has no other places; its label crosses a stalk at the last
       resort;
     - P05's labels have no hysteresis: a curve label can jump round its ring as a drag turns the
@@ -6418,7 +6680,9 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     script's camera.
   - **The form** stays the draft's `×100`, rendered in B612 Mono (`crops/final-*`). Two choices
     stay open for the owner with T16.c's draft: `×100` or a unit rate beside `RUN 1 d/s`, and
-    whether `SCENE CLOCK` takes a row of its own.
+    whether `SCENE CLOCK` takes a row of its own. _Signed off 2026-10-09 by the sign-off agent
+    (owner's delegation): a unit rate, `SCENE CLOCK 100 s/s`, in a row of its own; the reading
+    changes in `sceneClockReading` (`signoff-ux-guide.md`, C1 and C2)._
   - **Gate.** No `just ci` (the Day 2 protocol).
     - The acceptance's vitest (`src/renderer/src/displays/view`): 21 files, 406 tests, all pass.
       The app's: 339 files, 7,913 tests, all pass.
@@ -6442,6 +6706,14 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     `VIEW`'s `TIME` would run so with nothing on the block saying so, the gap T16.k closes for
     kept scenes. The plan and the guide limit the line to kept scenes, so it is built as
     specified.
+  - **The reading after the sign-off** (2026-10-09; `signoff-ux-guide.md`, C1 and C2):
+    `sceneClockReading` reads `formatNumber(rate, 0)` with the unit `s/s` (`100 s/s`, `1000 s/s`,
+    `86,400 s/s`), a unit rate as `RUN 1 d/s` is, and `ViewLabelBlock`'s `UNBREAKABLE` keeps `s/s`
+    with its number, so the line never breaks inside `100 s/s`. The tests above follow, and
+    `ViewLabelBlock.test.tsx` gains the unbroken case. The block's height was not measured again.
+    By the faces' advance widths the line is about 187 px (`SCENE CLOCK` in B612 with its letter
+    spacing, the 0.5 rem gap, `100 s/s` in B612 Mono 64 px wide against `×100`'s 36 px), inside the
+    narrowest block's 208 px (232 px less its padding), so it stays one line, as `×100` was.
 - **Deviations in T16.i's follow-up, as built** (2026-10-07; the views lane;
   decision-r07-quality-and-destination, addendum D, D3 to D5).
   - **Files.** Those the bullet lists, and:
@@ -6838,14 +7110,22 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     `packClassMap`, `classWeightsAt`, `surfaceShares`, `discSurfaceLaws`, `classMapTextureSpec`
     and `classMapSurface`, the construction R10.T10.d calls), with `ClassMapDiscSurface` beside
     `UniformDiscSurface` in `appearance/bodyAppearance.ts`, Provides' shape unchanged (`weights`,
-    `laws`, `elsewhere`).
+    `laws`, `elsewhere`). _R10.T10.f adds `texels`, the texture's CPU copy, which `classMapSurface`
+    and R10's store set and the point integrates (R10's Risks, "Deviations in T10.f, as built")._
+    _R10.T10.g adds `normals` (`DiscNormalMap`), the field's shading normals over its surveyed cells
+    (`bodies/discNormals.ts`, `rg16float`), which `bodyDisc.wgsl` binds at 14, flagged by row 24's
+    w: the disc takes μ₀, μ, each star's horizon term and planetshine on the map's normal, and the
+    hit, the limb, the projected area and R08's lookups on the datum's (R10's Risks, "Deviations in
+    T10.g, as built")._
   - **The map's layout**, which the plan left open: a 2D array of `rgba8unorm`, N × N texels a face
     of R05's cube sphere. Texel (i, j) of face f is the cell s ∈ [i ÷ N, (i + 1) ÷ N),
     t ∈ [j ÷ N, (j + 1) ÷ N) of `xyzToFaceUv`'s (u, v) under `uvToSt`, so with N = 2^L it is the
     quadtree's cell (f, L, i, j), tested against `vertexDir` at level 2. Class k's weight is
     channel k mod 4 of layer f + 6 ⌊k ÷ 4⌋, and the shader reads N by `textureDimensions`. At
     most 16 laws per body (R10.T1's fifteen `MaterialClass`es; a body carrying all three
-    `FrostSpecies` would need 17), 24 layers.
+    `FrostSpecies` would need 17), 24 layers. _Changed by R10.T10.d: (N + 2) × (N + 2) texels a
+    layer, a one-texel gutter from the neighbouring faces, N = dim − 2, read by a survey-masked
+    bilinear reconstruction (R10's Risks, "Deviations in T10.d, as built")._
   - **Weights and shares.** An unsurveyed texel holds no weight. Each shaded sample takes each
     class's weight as its share and gives `elsewhere` 1 − Σ w; weights summing past 1 are scaled
     down to 1. `packClassMap` rounds a texel's weights to bytes that keep their sum (largest
@@ -6919,7 +7199,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       R10.T10.d or a follow-up.
     - _Ruled 2026-10-04 (decision-r07-t8b):_ The point integrates the class map in a new R10.T10.f,
       to T8.a's 1%. The Iapetus figures are about 1.4× and 0.28× against the area mean (calibrated
-      to Iapetus's V range of 10.2–11.9, from a secondary source: to verify).
+      to Iapetus's V range of 10.2–11.9, from a secondary source: to verify). _Built by R10.T10.f
+      (`bodies/classMapPoint.ts`; R10's Risks, "Deviations in T10.f, as built")._
   - **Tests** (`bodies/discSurface.test.ts`, on a synthetic two-class map with half its cells
     surveyed, i + j even, the pole tilted 55° and turned 30°):
     - At 40° of phase, each pixel of a 64 px, 10% oblate disc within 70% of its polar radius (one
@@ -7032,14 +7313,21 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       same warm white of `sunLikeHostDisc` (T4.d's science check). It is the closed form
       E★ p (R ÷ Δ)² to 10⁻⁹, inside the task's 7.7 lx ± 15%. T11 built it with a local copy of
       decision-r07-earth-albedo's photometry; R07.T4.d moved the fixture's row to the same values
-      and pointed the test back at `planetPhotometry("Earth")`.
+      and pointed the test back at `planetPhotometry("Earth")`. _R08.T6.j re-baselined the
+      reference Sun from R06's fixture (its colour, `lux_per_v0` and bake spectrum in place of the
+      warm white, 1 and ones), and re-pinned this at 7.959 lx (7.96 to 0.005), +3.79%, inside the
+      task's 7.7 lx ± 15% (plan 08's Risks, "Deviations in T6.j, as built")._
     - The full Moon is 0.3140 lx against 0.3168 lx from V = −12.74 (−0.9%), with p_V 0.12 (NASA's
       fact sheet, without the opposition surge; Krisciunas and Schaefer 1991, p. 1035). Earth is
-      left out as an occluder there, because at zero phase the Moon is in its shadow.
+      left out as an occluder there, because at zero phase the Moon is in its shadow. _Since
+      R08.T6.j, 0.3255 lx (+2.73%, inside the test's 5%); with the Sun's own correction (× 1.037)
+      V = −12.74 is about 0.328 lx, which it is about 0.9% under (the same record)._
     - Jupiter-shine on Io at inferior conjunction is 66.7 lx, in Io's own shadow transit, with
       Jupiter 6.5% oblate. That is within 10⁻³ of the closed form over √(a c) and 6.16 stops below
       the sunlight. The plan's 70 lx ± 10% is kept. _R07.T10.b: Io's own shadow now takes 0.104%
-      of it, and the closed form is met by the clear light._
+      of it, and the closed form is met by the clear light._ _Since R08.T6.j, 69.00 lx (69.07 clear
+      of Io's shadow), 6.160 stops under the sunlight at Io, which moves from 4,759 to 4,934 lx (the
+      same record)._
     - A neighbour at new phase gives under 10⁻¹² of full.
     - The `view/bodies` tests: a lunar disc's night-side pixel equals E (Δ ÷ d)² × exposure ÷ π ×
       `brdf` to 10⁻⁶, and the night side keeps `unlitBody`.
@@ -7061,7 +7349,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     rounding of sin π, and the occluder beyond the star some 10⁻¹⁰ of the sunlight.
   - **Smoke checks.** The probe's `LightingCase` gains kind 4: `planetshine_irradiance` against
     its twin at four points (wholly up, cut by the horizon, at Earth-from-the-Moon scale in the
-    soft band, and behind a 3° horizon), to 2 × 10⁻⁴. `smoke/bodies.ts`' `checkPlanetshine` draws a
+    soft band, and behind a 3° horizon), to 2 × 10⁻⁴ (_to 2 × 10⁻⁶ since R07.T6.d, its angle by
+    `preciseAtan2`_). `smoke/bodies.ts`' `checkPlanetshine` draws a
     Moon 20 px across at 150°, pre-exposed at 0.05, its night side lit by a full Earth, against
     the CPU rasteriser. `just test-render` (SwiftShader, `default` and `no-subgroups`, 2026-10-04):
     every check passes (456, none failing), T8.a's and T8.b's figures unchanged. The four
@@ -7312,7 +7601,11 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     (about EV100 3.3 after `ENABLE`) is an artefact of its fixed histogram, and its cull's identity
     is not observable through the fake engine. `InThreadSkyWorker` moves from
     `ViewDisplay.test.tsx` to `test/skyFixtures.ts`, and `autoAt` and `manualAt` are a new
-    `test/exposureFixtures.ts`.
+    `test/exposureFixtures.ts`. _Since R06.T13.i (2026-10-13) a camera view culls by its band
+    texel's limit and asks the black-sky limit, V 10.15 at 60°, so the request's 10.06 and the
+    cull's μ 24 figures here and in "The limits, before and after" are superseded, the 13° cases
+    are gone, and the default exposure's `V 10.1 mag CAM` lines read V 9.6 in the hook's test and
+    V 9.5, the eye's cut, in the instrument's (R06's "Deviations in T13.i, as built")._
   - **Off the frame's centre (science check, 2026-10-05).** The ruling's 3.4–5.0 and 1.4–3.0 EV
     below AgX's floor are for a Sun-coloured star at the frame's centre, whose pixel has the largest
     solid angle. At a 16:9 corner at 60° (cos³θ = 0.579) a star is 0.79 EV brighter. As a bound,
@@ -7571,7 +7864,18 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       optional `BodyFrameOptions.depthWriters`; the new required `BodyFrameOptions.setting` goes
       to selection. `BodyFramePlan` gains `meshes` (`MeshBodyPlan`: the record's index, the figure,
       the limb's depths); its `order` is the order the steps follow, a mesh body in it as a disc
-      for its limb, while `painterOrder` still leaves meshes out.
+      for its limb, while `painterOrder` still leaves meshes out. _R10.T10.c gives
+      `SMOOTH_MESH_MATERIAL` the coverage mask (binding 13) and `coverageAxes`, with
+      `LitBodyInput.surveyCoverage` (the mask with the axes it is read in, `MeshBodyCoverage`) and
+      the mesh plan's coverage; R10.T10.e reads the mask only for a body handed over (the mesh
+      plan's `role`, `MeshBodyRole`: `promoted`, or `handed-over` with its coverage) and adds
+      `LitBodyInput.handoverReliefM` and `PhotorealFrame.terrain`, drawn in the `bodies` pass after
+      the figures (R10's Risks, T10.c and T10.e as built)._ _R10.T10.g adds the required
+      `BodyFrameOptions.presentedPx`, with `PhotorealInputs.presentedPx` and
+      `PhotorealFrame.presentedPx`, the canvas's device pixels: `planLitBodies` measures the
+      hand-over to terrain, both ways, at the presented width's centre pixel, so that neither the
+      resolution controller's scale nor low's 720-row cap moves it; R07's 3 px switch stays on the
+      frame's own pixels (R10's Risks, "Deviations in T10.g, as built")._
     - `PhotorealFrame` gains `depthWriters`. The view passes none: nothing in a view writes depth
       yet (R10's terrain, lit craft), so the live client never promotes and draws as before. This
       replaces T8.a part 2's "Promotion … is not called".
@@ -7579,6 +7883,10 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       `discs`, only on a frame with a mesh body. `LitBodyRenderer.meshDraws(plan)` is one
       instanced draw a body (its `firstInstance` in its `Draw`); a plan's records are written once
       for both calls, and again after a device loss.
+      _R10.T14.d: `LitBodyRenderer` prepares `SMOOTH_MESH_MATERIAL`, `bodies:disc` and
+      `bodies:discLimb` for the scene target through R01's `prepareMaterial` as it makes its
+      resources and at each restore, so that a regime's first draw in a running view compiles
+      nothing (plan R10, T14.d)._
   - **Known limits.**
     - A mesh body behind a host star shows over the star's disc: R06's disc lies at depth 0, which
       the figure's depth hides (a disc body is ordered by the painter). It needs the body beyond a
@@ -7819,6 +8127,11 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       Over radius ratios 0.02–30, three separations, 0°, 60° and 120° and L 0 and 1, the worst error
       is 4.9 × 10⁻⁵ in V. Wherever the eclipse takes over a thousandth of the light, the error is
       within 0.25% of what it takes (tested at 1%). Each channel is pinned to its own law to 10⁻⁶.
+      _decision-test-coverage R5 (2026-10-11): the cases' oracle takes 500 × 500 points, not
+      1,000 × 1,000. Measured that day at every case, separation, phase and L, it is within
+      4.4 × 10⁻⁶ of 2,000 × 2,000, absolute and as a share of what the eclipse takes, against the
+      ruling's limit of a quarter of the case's least margin (2.0 × 10⁻⁴ and 0.22%). The central
+      solar eclipse keeps 10⁶ points for its 10⁻⁵._
     - **The central solar eclipse.** A full Lambert Earth keeps 0.8922 of its light towards the
       Moon, under a uniform Sun at 1 au; the oracle agrees to 3 × 10⁻⁷, and so does the science
       check's own (0.89220). The ruling's 0.893 matches the same eclipse in parallel light, 0.89272
@@ -8043,6 +8356,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
         moon and Jupiter-sized giant …".
 
       _Drafted by R07.T16.c, as written here, each tagged T10.c's (the orchestrator's ruling)._
+      _Signed off 2026-10-09 by the sign-off agent (owner's delegation); the `ECLIPSE TEST` row
+      reads "its clock at 100 s/s"._
     - The label block does not state a kept scene's clock rate: `TIME` runs a hundred times fast
       here with nothing saying so. _Ruled by the orchestrator (2026-10-06): drafted in T16.c,
       `SCENE CLOCK ×100`; the line is split off as R07.T16.k._ _Built by R07.T16.k (2026-10-07):
@@ -8344,7 +8659,9 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       (`build-variants.sh`, logs, `cycles-sd1.txt`), with `cost-t19/`'s instrumentation.
 - **Deviations in T8.c, as built** (2026-10-06; the shading lane, after T19.e). Built as
   decision-r07-small-disc-cost rules it: the constants, `discSamples` and `discRecordOf`'s counts,
-  with no hysteresis and no shader change.
+  with no hysteresis and no shader change. _R10.T10.f: under a class map the 8 × 8 cells at 3 px
+  miss a pattern's edge in the near-limb band; the disc is 1.7–2.6% under the point facing an
+  Iapetus's leading side (R10's "Deferred findings (R10.T10.f)")._
   - **`discSamples(diameterPx)`** returns `DiscSamples` (`{ interior, limb }`): 8 × 8 below
     `FINE_DISC_PX`, 4 × 4 below `SMALL_DISC_PX`, one inside and `LIMB_SAMPLES` on the limb above.
     NaN, and +∞ (which `angularDiameterPx` gives for a camera inside the body), take the large
@@ -8522,6 +8839,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       `bodies:disc cell sums` (category `other`, 4,096 bytes, doubling, remade after a loss).
     - Its frame is the `discs` pass's own (`DiscCellFrame`), packed by `discCellFrameBlock`,
       which is tested equal to the adapter's `packFrame`. Its workgroups are `cellWorkgroups(J)`.
+      _Since R07.T8.g, `cellWorkgroups(G)` for a set's G workgroups, each a run of up to
+      ⌊64 ÷ n²⌋ pixels, with a third buffer, `bodies:disc cell groups`._
     - It is called for a plan before `meshDraws` and `draws`, and writes the records with row
       51. A plan whose records those wrote first is drawn in-fragment, and nothing is
       dispatched. That is how a test asks for the in-fragment path: the smoke harness's earlier
@@ -8660,7 +8979,7 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       (decision-r07-quality-and-destination, Q1): the `PRIMARY` view's block alone, as built; an
       instrument in a window of its own and the main screen's view state it on their own blocks;
       no banner. The `QUALITY` row is redrafted as a `Setting` and the `GRAPHICS` row adopted, for
-      T16.c._
+      T16.c._ _Signed off 2026-10-09 by the sign-off agent (owner's delegation), as drafted._
   - **The views check.** `LOW_BEFORE_T17` is gone. A low-setting record is provisional only as a
     high one is (`viewsCheckResults.ts` and its test, `docs/measurements/several-views/README.md`).
   - **Tests (Vitest).**
@@ -8827,9 +9146,9 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       - T8.b's per-class law evaluations, since no class map is drawn before R10;
       - the UHD 620 (the owner's, by hand: RESUME, "Owner by hand: R07.T17 UHD 620 benchmarks",
         with the kit in `.git/rm23-scratch/r07-shading/t17/owner-uhd620/`).
-    - **The RTX smoke run's failure** (lane C, at 0c57be5 and after). `smoke/bodies.ts`'
-      "T8.a a photorealistic frame tones a lit planet onto the canvas over a black sky" fails
-      on the hidden RTX run: "planned true; lit side 0, sky 0 (green codes)".
+    - **The RTX smoke run's failure** (lane C, at 0c57be5, which landed as 28479b9, and after).
+      `smoke/bodies.ts`' "T8.a a photorealistic frame tones a lit planet onto the canvas over a
+      black sky" fails on the hidden RTX run: "planned true; lit side 0, sky 0 (green codes)".
       - The frame was planned, and the canvas read back zero everywhere.
       - It does not touch these figures: the app's own frames on the RTX draw the lit planets and
         their glare (offscreen captures, `page-r1-*.png`).
@@ -8865,7 +9184,7 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
 - **T8.a's canvas check on the RTX 3080, fixed** (2026-10-07; the shading lane, after T17, from
   lane C's report). `smoke/bodies.ts`' "T8.a a photorealistic frame tones a lit planet onto the
   canvas over a black sky" read 0 everywhere on every hidden RTX smoke run lane C made (before
-  and after its 0c57be5, and for R05.T12.e), and passed on SwiftShader.
+  and after its 0c57be5, which landed as 28479b9, and for R05.T12.e), and passed on SwiftShader.
   - **The cause is the check, not the renderer.**
     - The check read the canvas back only after its wait for the histogram (`pause(25)` polls,
       about 50 ms on the RTX). `WebGpuView.readBack` asks for a read in the task that drew the
@@ -9186,7 +9505,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     `photorealFrame.test.ts` (the lit bodies' sections and labels; no note with every lit body's
     section `ok`, one flagged, as the ruling asks), `ViewDisplay.test.tsx` (the
     loop reports a finding once), `bodyAppearance.test.ts`.
-  - **Gate**, on the committed code (b66fce86, b70a170b, on the merge 3df09359).
+  - **Gate**, on the committed code (b66fce86 and b70a170b on the merge 3df09359; they landed as
+    f4c5a898 and 9594eef0).
     - The app's vitest: 7,967 tests in 341 files, all passing (84 s at 4 workers). Two earlier
       runs each failed only `SystemDisplay.test.tsx`'s "starts afresh at the chart's time", a
       `waitFor` timing out under load, which passes alone and which the views lane records as a
@@ -9242,7 +9562,11 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     - the star graticule's `NORTH` pole is a convention stated in the guide, not on the view;
     - the guide's nomenclature list has `ROTATION` only as the `GALAXY` display's group heading,
       not as a star's reading, which the draft row names. Should it have its own entry?
-  - **Gate**, on the committed code (7047ea34, 486ca64f, on the merge 78b9ea26).
+    _Signed off 2026-10-09 by the sign-off agent (owner's delegation): the convention stays in the
+    guide, whose row calls a star's graticule a reference grid about `NORTH` rather than the star's
+    own axis; `ROTATION` gains its own row (`signoff-ux-guide.md`)._
+  - **Gate**, on the committed code (7047ea34 and 486ca64f on the merge 78b9ea26; they landed as
+    9fa70720 and eb115709).
     - The app's vitest: 8,009 tests in 341 files, all passing (149 s at 4 workers);
       `src/renderer/src/displays/view` with `view/coords` beforehand, 428.
     - `just check lint` from a clean tsc cache, Prettier on the guide, this plan and the roadmap,
@@ -9376,6 +9700,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     - the Views bullet's `POSITION`, `POINTING` and `LOOK`;
     - the nomenclature rows `POSITION`, `POINTING`, `LOOK`, and `CTRL`, `⌘` (a new kind, `Key`);
     - the legend row, now `FOCUSED VIEW`, `MOVE`, `TURN`, `ROLL`, `RATE`.
+
+    _Signed off 2026-10-09 by the sign-off agent (owner's delegation), as drafted._
   - Scratch: `.git/rm23-scratch/r07-views/t19f/` (the page harness, its logs and captures, and
     `tools/textwidth.py`, which estimates a string's width in B612 from the shipped font).
 - **Deviations in T19.f's follow-up, as built** (2026-10-08; the views lane;
@@ -9443,3 +9769,487 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     - the turntable on a drag and on `ArrowRight` in the DOM harness.
   - Scratch: `t19f/page/` (`SHOT_FLOW=worst|measure`, `SHOT_CONTROLS=instrument`, `SHOT_OUT` for
     the base), `t19f/tools/probes.py <run-logs>`.
+- **Deviations in R07.T8.e and R07.T8.f, as built** (2026-10-27; the desktop lane, after
+  R08.T11.a; `decision-r08-t11-frame.md` §2, lever B, and §7). Built as the ruling says. `shade`,
+  `cell_sum` and the twin are unchanged, and so is every pixel: G11 holds at 0 ulp.
+  - **T8.e, one dispatch a set of textures.**
+    - `drawnThroughCells` takes every record whose interior and limb counts are equal, a whole
+      number from 1 to 8, whatever its surface or air.
+    - `discCellJobs` lays the jobs by the textures a record binds beyond the frame's
+      (`boundTexturesOf`): its class map, its normal map and its seven surface-lighting tables,
+      compared by identity, `null` where the renderer binds its default. There is one
+      `DiscCellSet` (first, count, record) a set, in the order of its first record, and each set's
+      records stay in their order.
+    - `LitBodyRenderer.dispatchCells` dispatches once a set, binding the set's record's textures
+      through `#classWeights`, `#surfaceNormals` and its tables (or `noAtmosphere`), with
+      `cell_pass` (count, first). The kernel's `CellPass` gains `first`. One jobs buffer and one
+      sums buffer serve every set. _Since R07.T8.g, `cell_pass` is (groups, first group) over the
+      workgroups' runs in `cell_groups`._
+    - This replaces T8.d's "one dispatch a view" by one dispatch a set a view. It closes plan 10's
+      "Class-map discs and R07's cell pass" and `decision-r08-t10b-depth.md` §5's deferred
+      dispatch, and supersedes plan 08's T9.b record ("a disc with an atmosphere sums its own
+      cells").
+  - **T8.f, the limb's list, made on the CPU.**
+    - `limbThroughCells` takes a record whose interior count differs from its limb's, the limb's
+      from 1 to 8: every disc of 32 px or more.
+    - `limbSpans(record, frame)` gives two spans a pixel row, a superset of the limb draw's pixels.
+      Each such pixel has a corner within the cone of half-angle λ + (0.75 + m) G about the scaled
+      centre and is not wholly within the cone of λ − (10⁻³ + m) G, with
+      G = max(a ÷ c, c ÷ a) √(k_x² + k_y²) and m = 0.1 px (`LIMB_SPAN_MARGIN_PX`). Each cone meets
+      a line of pixel corners in one interval, solved as a quadratic (`coneInterval`).
+    - The spans' rows follow the records in `discs`, two a pixel row (first sum, start, end, 0).
+      Row 51 holds (first span row, rows, ⌊top⌋, −1), its w −1 marking the form; a rectangle's row
+      51 is T8.d's. _Since R07.T8.g, four a pixel row: the limb's two, then the face band's two._
+    - `bodyDisc.wgsl`'s `cell_sums_index` finds a pixel's sums. A pixel outside the spans, and the
+      interior draw at its one cell, sum their own cells through `pixel_cells`' one `pixel_sum`
+      call. The kernel takes n from row 3's y, the limb's count, which equals x for a rectangle.
+      _Since R07.T8.g, the face's near-limb band reads the pass too, and the kernel takes n from
+      its workgroup's run._
+    - It takes no limb without the pass's frame (T8.d's unit tests call it so), none whose outer
+      cone reaches π ÷ 2 (a camera within about 10 m of the ground at 320 px across 60°), and none
+      whose span rows would end past row 2²⁴ of `discs`.
+    - The spans hold 2.1 to 2.6 times the limb draw's pixels in the unit tests' cases. Most of the
+      rest lie outside the limb, where a cell shades nothing. One workgroup takes one pixel, so 48
+      of its 64 invocations idle, as in T8.d. Packing was not needed for the bound. _Since
+      R07.T8.g, a workgroup takes four 4 × 4 pixels._ _Since R07.T8.h, the spans are trimmed to 1.13–1.17
+      times the drawn pixels._
+  - **T8.d's tests that the ruling supersedes.** Four changed, each because T8.e or T8.f takes what
+    the test said it left:
+    - `discCells.test.ts`: a class map's disc is now taken;
+    - `discCells.test.ts`: "dispatches nothing" now holds limbs of 16 × 16, past the pass's 8 × 8;
+    - `renderer.test.ts`: a 34 px disc dispatches once, for its limb, and a frame of points
+      dispatches nothing;
+    - `draw.test.ts`: R08.T9.b's disc with air is now taken.
+    - Two T8.d tests were renamed to say what still holds: no limb without the frame, and the
+      texel of no weight for uniform discs.
+  - **Tests added.**
+    - `discCells.test.ts`: the sets' order and runs, and one dispatch a set binding its own air or
+      map, two airs and two maps among them; a normal map bound; a device loss; `shade` reached
+      from one call site in each of the four entry points (`inlinedCopies`); the spans holding every
+      pixel of the limb draw (in `f64`) for a 40 px, a 300 px clipped, a 160 px f = 0.2 tilted and a
+      view-filling 400 km Earth, in order and within 3 times; the limb's jobs, row 51 and span rows.
+      _Since R07.T8.h, within 1.25 times (1.13–1.17)._
+    - `renderer.test.ts`: a set each in one view, and `TIMING_FRAMES_IN_FLIGHT` with three views of
+      two sets each.
+  - **G11 on the GPU** (`smoke/cellPass.ts`, the group "R07.T8.e–f the cell pass for every
+    record", in part 8: 21 s a variant, part 8 90 s at a load of about 6).
+    - Six plans, each drawn through the pass, in-fragment and under a sentinel: a 13 px air body
+      as a disc and as the mesh the view draws, a 13 px two-class map, a 220 px airless limb, a
+      96 px air body's limb as a mesh, and four bodies of three sets and two limbs in one plan.
+    - Both variants on SwiftShader, and the RTX 3080 hidden: 0 ulp apart, every alpha equal.
+    - Every pixel the draws must take from the pass shows the sentinel (165, 165, 165, 1,016, 441,
+      and 178 + 170 + 211 + 185).
+    - G10: the map's 162 pixels within 0.110 of the twin's tolerance, and the 220 px disc's 45,740
+      within 0.377.
+    - T8.d's G11 is unchanged at 0 ulp on both.
+  - **The kernel's compile.** On SwiftShader 2.2 to 2.3 s, as before. On the RTX 3080 1.4 to 1.8 s
+    cold, a new source (the base's 0.1 to 0.4 s were the driver's cache), and 0.1 s warm.
+  - **The frame** (R08.T11's group, untimed and hidden on the RTX 3080, 2026-10-27 02:10, load 5 to
+    7, not a quiet window). Before is R08.T11's untimed run 3 (2026-10-26 23:00, the same code). The
+    measured Earth at high, median / p95, ms; the limb's shading is `discs` before, and `disc
+    cells` + `discs` after:
+
+    | Row | Limb before | Limb after | Frame before | Frame after |
+    | --- | --- | --- | --- | --- |
+    | 400 km x2 | 4.43 / 4.81 | 0.95 / 1.12 | 20.59 / 21.10 | 17.16 / 17.35 |
+    | 400 km x4 | 6.62 / 7.46 | 1.14 / 1.31 | 23.47 / 24.40 | 18.00 / 18.14 |
+    | 10⁷ m x2 | 5.92 / 6.70 | 1.21 / 1.26 | 22.68 / 23.63 | 17.86 / 18.04 |
+    | 10⁷ m x4 | 10.55 / 11.72 | 1.47 / 1.50 | 28.31 / 29.61 | 19.09 / 20.64 |
+    | 1.54 × 10⁷ m x2 | 6.09 / 6.73 | 1.00 / 1.20 | 20.58 / 23.84 | 15.55 / 15.75 |
+    | 1.54 × 10⁷ m x4 | 12.83 / 14.40 | 1.49 / 1.52 | 28.34 / 29.91 | 16.86 / 17.01 |
+    | 2.55 × 10⁷ m x2 | 4.12 / 4.58 | 0.73 / 0.90 | 14.56 / 15.09 | 11.26 / 11.44 |
+    | 2.55 × 10⁷ m x4 | 8.27 / 8.80 | 1.09 / 3.03 | 19.61 / 20.17 | 12.52 / 14.27 |
+    | 10⁸ m x2 | 1.71 / 1.81 | 0.26 / 0.36 | 5.90 / 5.99 | 4.48 / 4.62 |
+    | 10⁸ m x4 | 2.94 / 3.49 | 0.53 / 0.58 | 7.52 / 8.13 | 5.19 / 5.28 |
+
+    - The acceptance's bound holds: 1.47 ms at 10⁷ m x4, against 2.6 ms. The slab Earth's rows are
+      within 0.1 ms of these. A p95 is summed from the passes' p95s, so it is an upper bound.
+    - The small air bodies' `discs` fell from 0.49–0.51 ms to 0.01 ms, with 0.06 ms in `disc cells`;
+      their frames from 3.11–3.38 ms to 2.60–2.78 ms. What is left is the full-frame march.
+    - The control without air at 10⁷ m x4: `discs` 7.90 ms before, and `disc cells` 0.95 + `discs`
+      2.00 after, the face's one cell a pixel.
+    - The rows still over 16.67 ms (400 km and 10⁷ m at x2 and x4, 1.54 × 10⁷ m at x4) wait for
+      R08.T11.b, lever A, and QW29 judges them.
+  - **V7, measured and not landed** (a scratch `cell_samples` taking one shade for one cell, the
+    face's near-limb band at one shade; `.git/rm45-scratch/r07-t8ef/v7.patch`). The air body's face
+    (`bodies`) at x4: 3.42 → 3.08 ms at 400 km, 3.62 → 2.96 at 10⁷ m, 3.16 → 2.49 at
+    1.54 × 10⁷ m, 2.08 → 1.53 at 2.55 × 10⁷ m and 0.72 → 0.30 at 10⁸ m; at x2, 0.27–0.44 ms. So the
+    band costs 0.34–0.67 ms at x4, over R07.T8.g's 0.3 ms, should QW29 leave a row over 15.67 ms. The
+    airless face (`discs`, the control) moves by 0.04 ms at most.
+  - **The timer.** Each set's dispatch is a timed pass, resolved with the next render's. A view of
+    more than about 60 sets would pass `PASSES_PER_FRAME` (64), and the rest would go untimed, with
+    a warning.
+  - **Files beyond the ruling's list:** `smoke/cellPass.ts` (new) and `smoke/page.ts`;
+    `photoreal/passes.ts`' comments; plan 08's T9.b record and plan 10's Risks, each a note.
+    `test/fakeViewEngine.ts` and `test/countingRenderEngine.ts` are unchanged.
+- **Deferred findings (2026-10-13 rule)**, from R07.T8.e and R07.T8.f.
+  - _R08.T6.f's Earth twins on the RTX 3080._ Part 8 run hidden on the RTX 3080 fails four of
+    R08.T6.f's Earth checks ("the ray march, the stored arm, agrees with the CPU twin to 10⁻³",
+    from 400 km and 3.56 × 10⁷ m, the sun at 20° and −2°): 2 channels of about 5,600 over the
+    bound in each, relative errors 1.1 to 12.4 × 10⁻³, on texels of 10⁻⁶ to 2 × 10⁻³ of the
+    largest. SwiftShader passes them. This change touches none of their code, and no base RTX run
+    of part 8 is on record.
+- **Deviations in R07.T8.g, as built** (2026-10-27; the desktop lane, after QW29;
+  `decision-r08-t11-frame.md` §2, "Then, only if QW29 leaves a high row over 15.67 ms"). The face's
+  near-limb band goes through the `disc cells` pass, exactly. The hoisting (c) was measured in its
+  ruled form and in two exact forms; none saves time on the RTX 3080, so none is landed.
+  `shade`, `cell_sum` and the twin are unchanged, and so is every pixel: G11 holds at 0 ulp.
+  - **The band, its list made on the CPU** (`faceBandSpans`).
+    - The band is the interior draw's pixels of one cell that `cell_samples` shades at up to nine
+      points: the centre's depth, less half the pixel's extent across the limb's normal, within
+      `NEAR_LIMB_CELLS` (2 px). V7 put it at 0.34–0.67 ms of `bodies` at x4.
+    - `faceBandSpans(record, frame)` gives two spans a pixel row, on the limb's rows, a superset of
+      the band: each pixel with its four corners within the cone of half-angle λ + m G′ and its
+      centre outside the one of λ − (2 + √2 ÷ 2 + m) G′, with m = 0.25 px (`BAND_SPAN_MARGIN_PX`).
+    - G′ = s max(k_x, k_y) bounds the forward-difference slope. It is up to √2 tighter than the
+      limb's √(k_x² + k_y²), which bounds the corners' gradient.
+    - The margin takes up to 9% of error in the slope. The shader's is about 2% for Earth's limb
+      from 400 km at 60° across 1080p, and grows at a narrower field or a wider view (about 23% at
+      10° across 4K). A band pixel the spans miss there sums its own cell: exact, only slower.
+    - The spans hold 1.28 to 1.58 times the band's pixels in the unit tests' four cases.
+    - Only a face of one cell takes a band (every disc of 32 px or more); any other sums its own.
+  - **The ranges, rows and jobs.**
+    - A limb range carries its `band` (`DiscCellLimb.band`). Its jobs follow the limb's in the
+      range, and its sums follow the limb's.
+    - Each pixel row takes `LIMB_SPAN_ROWS` (4) rows past the records: the limb draw's two spans,
+      then the band's two, empty without a band. `spanRows` counts 4 a row, not 2.
+    - `cell_sums_index` picks the list by the draw's cells: the limb's count for the limb draw's
+      spans, the interior's for the band's. The two differ for every record with a limb's spans.
+      A face fragment off the band now reads its row's two band spans before it sums its own.
+  - **Workgroups of ⌊64 ÷ n²⌋ pixels (a deviation the band needs).**
+    - One workgroup a job would leave 63 of 64 invocations idle on a one-cell band pixel, so a
+      workgroup now takes a run of one range's jobs of one cell count n: 64 band pixels, 16 of
+      2 × 2, 7 of 3 × 3, 4 of 4 × 4, 2 of 5 × 5, and one of 6 × 6 to 8 × 8 (`pixelsPerGroup`).
+    - This extends `decision-r07-small-disc-cost.md` §1.2's allowance for packing four 4 × 4 pixels
+      a workgroup, each pixel's order kept. It holds for every n, so a limb's and a small disc's
+      4 × 4 pixels now go four a workgroup, where T8.d's left 48 of 64 idle.
+    - `DiscCellJobs.groups` holds four `u32` a workgroup: the first job, the jobs, n and 0. Each
+      range's runs (a rectangle's, or a limb's and then its band's) are cut into workgroups in the
+      jobs' order. `DiscCellSet` gains `firstGroup` and `groups`.
+    - The kernel binds `cell_groups` at `@group(1) @binding(2)`. `CellPass` is (groups, first
+      group), and `cellWorkgroups` takes the set's workgroups. Each pixel's first invocation sums
+      its n² cells in `pixel_sum`'s order, and n comes from the group, no longer from row 3's y.
+    - One dispatch a set stays, so T8.e's counts hold. `LitBodyRenderer` gains the buffer
+      `bodies:disc cell groups`, made again after a device loss and released with the renderer.
+  - **The hoisting (c), measured and not landed.** Three variants, each built on the band and run
+    as the frame below. The logs are `h1.log`, `h3.log` and `v8.log`, compared with `band1.log`
+    over the 78 high rows.
+    - _V8, the ruled form, timing only_ (`wip-v8.patch`). The record's per-draw rows (the centre,
+      the pole, the class map's axes, the lights, the occluders and the planetshine sources) were
+      turned into the view's axes on the CPU, and every `to_view` of them was dropped from
+      `body_of` and `shade`. `bodies` moved by −0.01 to +0.08 ms, and the frame by −0.04 to
+      +0.16 ms, within the runs' noise. On the RTX 3080 the per-draw rotations cost nothing
+      measurable. The ruling's 10–20% was R07's estimate from before R08's air, and it does not
+      stand here.
+    - _H1, exact_ (`wip-h1-full.patch`). The air's per-point values were formed once a shade, not
+      once a lookup: the body's table and the place, that is the latitude's sine and cosine, s, h*
+      and the local scale height (`SurfaceAir`, `atmosphere_surface_air` and the lookups' `_at`
+      forms). At x4 a shade had formed them eight times. `bodies` was slower by 0.00 to 0.37 ms
+      in every row, and `disc cells` by 0.00 to 0.06 ms. This was taken as register pressure: the
+      hoisted air stays live across the shade's source loops, where each lookup's place had been
+      short-lived.
+    - _H3, exact_ (`wip-h3.patch`). The limb's half-angle was formed once an invocation, not once
+      a `limb_angle`, and each mesh fragment formed one `body_of` for both its survey test and its
+      pixel. `bodies` moved by −0.02 to +0.19 ms: the compiler already shares them.
+  - **Tests.**
+    - `discCells.test.ts`, on the four limb cases: the band's spans hold every face pixel shaded at
+      more than one point (in `f64`); they lie in order within the rectangle, on the limb's rows;
+      and they take at most twice those pixels.
+    - Also: no band for a face of two cells; `pixelsPerGroup`; each run cut into full workgroups,
+      the last the rest, in the jobs' order; each set's run of the workgroups over its own jobs;
+      the groups written to the buffer bound; and the groups' buffer remade after a device loss.
+    - Changed to the new layout: the limb's jobs, row 51's span rows (four a row), the dispatches'
+      `cell_pass` and workgroups, the bound buffers, the sets' fields, and `draw.test.ts`'s
+      released buffers.
+  - **G11 on the GPU** (`smoke/cellPass.ts`, part 8; the check and its group are renamed
+    "R07.T8.e–g").
+    - The sentinel now also holds each band pixel, by `cell_samples`' test in `f64` with
+      `SENTINEL_SPARE_PX` to spare. All read the pass: 2,511 pixels of the 220 px disc (1,016
+      before), 1,067 of the 96 px mesh (441), and 178 + 404 + 499 + 185 in the four-body plan
+      (178 + 170 + 211 + 185).
+    - The RTX 3080, hidden (`band1-part8.log`): six plans at 0 ulp, every alpha equal. G10: the
+      map's 162 pixels are within 0.210 of the twin's tolerance and the 220 px disc's 45,740 within
+      0.238, both as at the base on the RTX.
+    - Part 8's other failures there are T8.f's four deferred R08.T6.f Earth twins, and no others.
+    - Both variants on SwiftShader are the gate's `just test-render`
+      (`.git/rm45-scratch/r07-t8g/smart-ci-final.log`).
+    - The band is decided by `depth − half_extent > 2` in both the kernel and the fragment, as
+      T8.f's limb cells are. A driver that contracted that arithmetic differently in the two
+      stages could shade a pixel at the band's edge at one point in one and nine in the other.
+      G11 is the check against it.
+  - **The frame** (R08.T11's group with QW29's rows, e9f531d6 applied for the run and not
+    committed; untimed and hidden on the RTX 3080, 2026-10-27 06:48 and 07:03, load 5 to 10, P0
+    busy at 1,965 MHz, not a quiet window). Medians in ms, before → after, with `bodies` and `disc
+    cells`. The p95s of an untimed run at that load carry tails of up to 20.4 ms, so only medians
+    are compared; QW30 takes the p95s.
+
+    | Row | Frame | `bodies` | `disc cells` |
+    | --- | --- | --- | --- |
+    | measured 10⁷ m x4 | 16.06 → 15.50 | 3.54 → 2.91 | 1.23 → 1.34 |
+    | measured 400 km x4 | 14.55 → 14.17 | 3.39 → 3.03 | 1.03 → 1.14 |
+    | measured 1.54 × 10⁷ m x4 | 14.52 → 13.80 | 3.13 → 2.45 | 1.26 → 1.24 |
+    | slab 10⁷ m x2 | 16.17 → 15.84 | 2.67 → 2.17 | 1.00 → 1.15 |
+    | slab 10⁷ m x4 | 17.36 → 16.79 | 3.55 → 2.89 | 1.23 → 1.34 |
+    | slab 400 km x4 | 16.08 → 15.87 | 3.39 → 3.01 | 1.00 → 1.15 |
+    | slab 1.54 × 10⁷ m x4 | 15.66 → 14.94 | 3.15 → 2.44 | 1.26 → 1.25 |
+    | R10's smoke map 400 km x4 | 16.37 → 16.16 | 4.99 → 4.64 | 1.43 → 1.59 |
+    | R10's smoke map 10⁷ m x2 | 15.94 → 15.70 | 3.65 → 3.01 | 1.09 → 1.52 |
+    | R10's smoke map 10⁷ m x4 | 17.64 → 17.10 | 4.81 → 4.14 | 1.54 → 1.70 |
+    | TEST SATURN 9.45 × 10⁷ m x2 | 16.20 → 15.82 | 2.95 → 2.41 | 1.06 → 1.25 |
+    | generated palette's map 400 km x4 (recorded) | 17.19 → 16.08 | | |
+    | generated palette's map 10⁷ m x2 (recorded) | 17.68 → 16.40 | | |
+    | generated palette's map 10⁷ m x4 (recorded) | 19.47 → 17.62 | | |
+
+    - The base run's medians are QW29's to within 0.15 ms.
+    - Every one of the 148 rows of both settings is faster, by 0.04 to 1.85 ms.
+    - Of the judged rows, two keep a median over 16.67 ms: the slab's 10⁷ m x4 (16.79) and R10's
+      smoke map's 10⁷ m x4 (17.10). Five have a median between 15.67 and 16.67 ms: the slab's
+      400 km x4 and 10⁷ m x2, the smoke map's 400 km x4 and 10⁷ m x2, and TEST SATURN's
+      9.45 × 10⁷ m x2. QW30 judges them after R08.T11.d.
+    - Logs: `.git/rm45-scratch/r07-t8g/base1.log` and `band1.log`. `rows.py` and `allrows.py`
+      print the comparison.
+  - **The kernel's compile.** On the RTX 3080, 0.1 to 0.2 s in every run, its new source's first
+    included, as at the base. It has one more binding, and its shading is unchanged.
+- **Deferred findings (2026-10-13 rule)**, from R07.T8.g.
+  - _The latitude's and azimuth's round trips._ `local_frame` takes the latitude by
+    `preciseAtan2`, and `local_azimuth` takes each source's azimuth. The lookups turn both back
+    into a sine and cosine (`atmosphereSinCos`): once a lookup for the latitude, eight times a
+    shade at x4, and once a source for the azimuth. Passing the cosines through would keep the
+    picture within G10, but not bit for bit. Not measured. H1's exact hoist of the latitude's side
+    was slower.
+- **The view's light (fix-view-light, 2026-11-01: the owner's white frame and slow dimming).**
+  - _The meter holds the veil._ `histogram.wgsl` and `cpuHistogram` add every glare source's veil
+    at each weighed texel (`meteredVeil`, through `glare_per_unit`), reversing Design note 12's "the
+    veil is drawn but not metered"; Design note 10's disc rule holds (the disc's texels weigh 0).
+    It spreads the source's whole light, the new `GlareSource.luminance`, packed in
+    `GlareSourceGpu.inside.w`, since the excess the image draws vanishes at the exposure it calls
+    for. `HistogramRequest.glare` and `histogramParams`' fourth argument, the sources' count, are
+    new; the renderer writes the sources before the histogram's dispatch.
+  - _The cut._ `AutoExposure.cut()` snaps to the next reading; `readingRange` and
+    `CLIPPED_TOP_FRACTION` make a clipped reading a bound. `HistogramReader.dropInFlight` and
+    `PhotorealRenderer.dropHistograms` drop the histograms of frames before an in-scene cut. VIEW
+    cuts at each stage's start, a system jump, an uneased preset or target (`commandCutsImage`),
+    the inspection's framing, the image coming to be drawn and AUTO entered from another level.
+    A cut's frames are held back until a reading lies inside the range (`AutoExposure.holds`,
+    at most `CUT_HOLD_MAX_S`, 0.15 s): drawn and metered but not presented
+    (`PhotorealFrame.present`, `ViewFrameInputs.present`, `InstrumentsFrame.present`), the view
+    keeping its last presented frame's marks and style; the instruments draw at the primary's
+    applied exposure. Main's ruling (2026-11-02): the guide's flash rule over the brief's frames
+    at the old exposure.
+  - _The speeds, settled._ `SMOOTHING_SPEED_EV_PER_S` is one number, 24 EV/s either way (was
+    `{ brighten: 3, darken: 1 }`), a camera's AE; the eye's adaptation is not modelled.
+  - _The inspection's opening at its meter_ (owner-view-body's `opensAtMeter`) is a cut's first
+    reading: a clipped one is a bound the next readings snap past. This lane's own VIEW BODY lean
+    was dropped for it.
+  - _R07.T14's glare, a host disc's in closed form alone._ A host disc's texels (meter class 0)
+    stay out of the bloom chain (`bloom_excess_of`, `bloomExcessOf`), and
+    `GlareSource.excessLuminance` is the disc's light above the bloom threshold
+    (`discLuminanceAboveRgb`), not above 65,504: the Provides' "cd/m² above 65,504" changes.
+    `discExcessLuminanceRgb` is gone. An eye view's sources fade over the reach's last 10°
+    (`EYE_GLARE_FADE_RAD`, `eyeGlareShare`); each source takes the share of its disc the frame's
+    bodies leave the camera (`glareSources`' `occluders` and `annuli`).
+  - _The glare through the air between_ (2026-11-02, the setting Sun's halo). A host disc's glare
+    sources take its light as the air between dims it, through every atmosphere the frame draws
+    (`frameGlareAir`, `glareSources`' new `air`, `GlareAirOf`, `NO_AIR`): `view/post/glareAir.ts`
+    marches the tables' oracle (`opticalDepth.ts`, whose `amountAlong` is now exported) along each
+    line of sight, each absorber through the star's light slot's curves, slot 0's for a star
+    outside the body's lights as the composite reads it, on the tables' figure, to the star or the
+    air's top, 0 where the line meets the datum (`glareLineAir`). Where the two limbs' optical
+    depths differ by over 0.05 or the ground cuts the disc, the disc is integrated across, 16
+    Gauss–Legendre lines along the body's vertical on the span that clears the ground and 8 points
+    along each chord (`glareDiscAir`, `discLightThroughAir`), within 1% of a 48 × 48 brute force
+    from 5° to −0.1°; its excess is the dimmed disc's above the threshold
+    (`discLuminanceAboveThroughRgb` where the air is the same across it). The science check
+    (2026-11-02) found the first form, one line through the centre raised by the disc's radius
+    where it met the ground, at 0.45/0.33/0.15 of the disc's light at 0° and 2.6 to 5.5 times it
+    just below. Its second check found the occluder spheres of radius √(ac) at odds with the
+    datum near an oblate ground (a camera 2 m up past about 45° of latitude inside the sphere, so
+    no glare; the sphere's horizon 3.3° low at the equator): a body whose air the frame draws and
+    that looks 5° or more in radius (`GLARE_NEAR_BODY_RAD`) now hides the disc by its lines alone
+    (`GroundBy` `"lines"`, the light over the whole disc's), left out of `glareOccluders`, which
+    puts every other near body on the sphere of the datum's radius towards the camera and a far
+    one on √(ac) (`"occluders"`, the light over the part they leave). Not taken: a cloud deck's
+    table, the gravity bands' scale heights and refraction, as the composite takes none of them
+    for the disc.
+  - _The captures' settle_ (fix-view-light-bloom, 2026-11-04): `smoke/viewLight.ts` drains each
+    frame and waits up to 10 s for its histogram, as `viewLightAir.ts` does. Its 1 s wait let a
+    cut's hold run out before any reading on a slower or loaded pod, so (a) presented at EV100 −1.
+  - _Pending: the owner's RTX run_ of the histogram's added cost, 1080p, high, a star in frame.
+- **Retina (lean, 2026-11-01; lane fix-retina-frame).**
+  - Design note 18: high's `terrain.renderHeightPx` is 1080 (was `null`), low's 720 its twin; a
+    canvas over 1,080 rows renders at 1,080 and is upscaled, and `aloneScaleBounds` floors at 720.
+  - The views check's `--device-pixel-ratio 1|2|3`, hidden runs only
+    (`ClientArgs.viewsCheckPixelRatio`): the window N times its setting's size at zoom N; a software
+    launch's headless screen is N times 1920 × 1080. Pending: the owner's Mac profile at
+    `--device-pixel-ratio 2`.
+- **The inspection run's lighting (lane fix-retina-frame, after the owner's Mac profile).**
+  `runInspectionCheck` waits out `LIGHTING: PENDING` (`hostLights.ts` `LIGHTING_PENDING`) within
+  `drawWaitMs` before AUTO settles, before the close capture and before each profile window. It
+  fails on `LIGHTING: NOT RECEIVED`, and where a capture's or a window's frames drew no lit body
+  larger than a point (`LitBodyDraws`, through `ViewsProbe.watch`; its `views` dependency now
+  includes `watch`). The windows' `statements` already held the plate's. Pending: the owner's Mac
+  low orbit window, re-run.
+- **T20's overhead pair, judged honestly (R07.T20; lane fix-retina-frame).**
+  `ViewsCheckPhaseRecord.statements` holds the primary's statements as each window ends
+  (`ViewsCheckDeps.primaryStatements`; `ViewsProbe.phase` takes them as its fifth argument). The
+  results, now version 2, add `PhaseFigures.imageLimited`. A pair's `perCanvasMs` is `missing(…)`
+  unless both phases' primary scale held one value, the same in each, and neither stated
+  `IMAGE: DETAIL LIMITED`. The atmosphere run's captures record `primaryScale` and `airSetting`
+  (results version 5; `AtmosphereCheckDeps.setting`).
+- **The inspection profile's low window (main's ask, 2026-11-01; lane fix-retina-frame).** With
+  `--timing`, after the close window the camera closes in to `LOW_HEIGHT_M` (4 km) above the ground
+  at its line of sight (`slantRangeM` of `SLANT RANGE FROM CAMERA`) and a third window, `low`
+  (`InspectionTimingWindowName`), is measured there, where the cascades' weight is above 0 and
+  `terrain shadows` draws on high. The timing file's shape is unchanged (version 1). Pending: the
+  owner's Mac profile, for R14.T6.b's gain.
+- **VIEW's primary is a camera (ux-calls-view, item 3a, the owner's delegated call, 2026-11-01).**
+  `startRun` and `startServerRun` now make the `camera` role, so the primary takes the camera's
+  glare, no host disc's from outside its frame, and the camera's sky (`camera_limit_v`, `STARS V …
+  mag CAM`), as the instruments do. `eye` is kept for a view through a ship's window, which no
+  display offers yet. T13.e's "Who asks a camera's limit" is superseded: the primary sends
+  `camera_limit_v`. Pending: the owner's RTX and M5 runs of the deeper sky's reply and the frame's
+  cost, 1080p high.
+- **R07.T8.h, as built** (2026-11-01, perf-disc-cells).
+  - `limbSpans` trims each span's ends by `limbUnread`, the limb draw's test in f64 with a 0.1 px
+    margin (`READ_MARGIN_PX`): 1.13–1.17 times the drawn pixels, re-measured from 1.92–2.13.
+  - Still unread but shaded: a row's middle where its two spans met; the face band (trimming it
+    saves 9% of its jobs for 0.33 ms of CPU a frame); a small disc's rectangle corners (T8.d's
+    index); a partial mask's surveyed pixels.
+  - New: `discCellJobs`' `discarded` (record indices), `MeshBodyCoverage.whole`,
+    `FrameTerrain.surveyedWhole`, `FrameTerrainSource.coverageWhole`,
+    `TerrainSession.coverageWhole` and `CoverageMask.whole`.
+  - No kernel lever: `cell_samples` places points only inside the limb. The cells with none, 62% of
+    the pass's cells on the inspection's orbit window at high, already shade nothing.
+- **R07.T8.i, as built** (2026-11-02, perf-disc-cells; a lean, kept: ruled 2026-11-13,
+  ux-calls-and-checklist-gaps, since the twin's misses are corner slivers at black and the floor
+  holds 2 only at its lowest step on high).
+  - Built because the pass stayed at 17% of SwiftShader's GPU time after T8.h (the brief's 8%).
+  - `PhotorealSettings.floorLimbSamples` (2 on both settings; 4 is the way back) is a large disc's
+    limb cells while `BudgetedScale.atLowestStep` (the floor's scale at its bounds' min) holds.
+    It reaches `planLitBodies` as `BodyFrameOptions.limbSamples` through `floorLowest` on
+    `ViewFrameInputs`, `PhotorealInputs` and `PhotorealFrame`; `discSamples` takes it. The low
+    setting never steps its floor, so it never takes it.
+  - Within 1/3 stop of 4 × 4, or under one 8-bit code at black apart in luminance with the limb's
+    brightest pixel at white: every twin limb pixel of the four cases. By 1/3 stop alone,
+    99.15–99.74%.
+- **`INCIDENT`, a fourth meter (ux-calls-view, item 3b, the owner's delegated call, 2026-11-01).**
+  `MeterMode` adds `incident`; the histogram paths take `HistogramMeter` (`histogramMeterOf`), so
+  an `INCIDENT` frame takes no histogram. `AutoExposure.step(h, dtS, incidentLx?)` meters
+  `incidentIlluminanceLx` (`view/lighting/incident.ts`, at `incidentBodyOf`'s FRAME-else-selected
+  body) at `ev100FromIlluminance`, C = `INCIDENT_CALIBRATION_C` 250; 0 lx is `NO LIGHT`.
+  `KeptScene.startMeter` opens `BODY INSPECTION` on it until the operator chooses a meter in that
+  opening, kept apart from the display's own (`meterChoice.ts`). Leans (2026-11-01): no body to
+  read at reads `NO LIGHT`; only a shadow as wide as the body counts (`shadowsWhole`); a scene lit
+  by its sky reads `null`, not yet metered, until its sky is held; the remedy is `choose AVG`.
+- **The photorealistic view opens bare (the owner's request, 2026-11-05; photoreal-clean-view).**
+  - `GRID` is `OFF` as a view opens and each time its style becomes `PHOTOREALISTIC`
+    (`GRID_AT_OPEN`, `gridAfterStyle` in `styleRefusals.ts`), the primary's and each instrument's
+    own; `ViewFrameInputs.grid` still defaults to `ON` where absent (the descent spike's views).
+  - At `OFF` `overlayDrawList` keeps only `LineBatch.keptAtGridOff` batches (hull edges, a ring's
+    two edges, survey edges), which replaces `LineBatch.grid`; `overlayDrawsAt` skips the symbology
+    pass where none stands; `ViewFrameDrawn.anchors` drops bodies drawn as symbols and every label.
+  - The views check's inspection now captures `-grid-on` in place of `-grid-off`; its first
+    capture, and its profile's orbit window, are at `GRID OFF`.
+- **R07.T8.a, an air body's point (2026-11-06, fix-r07-air-point-switch).**
+  - `pointFlux` takes each star's term of a body given `LitBodyInput.air` as its tabled disc
+    reflects it (`bodies/airPoint.ts`' `airPointReflection`): the airless term times that disc's
+    sum over the airless disc's, 32 × 64 samples, or the sum itself under a class map.
+  - Ratios are held per table and light and found only in the frames' slices (`stepAirPoints`,
+    after `stepClassMapPoints` in `TerrainSession.step`; `warmAirPoint` for a disc in the band).
+    A star with none held draws airless; planetshine and eclipses as before; no air, bit for bit.
+  - The sum lights the ground airless, as this task's CPU raster does; the GPU lights it through
+    R08.T9.b's tables, which the CPU cannot read: the point stands up to 10% over a raster lit by
+    their twin on thin airs (a finding). TEST VENUS at 150° is pinned at 4% at 3 px: its raster
+    takes 3.2% under its own exact flux.
+  - `ClassMapStore` drops a map's air ratios with it (`cancelAirPointsOf`). The six cases' tables
+    are fixtures (`view/atmosphere/fixtures/air-switch/`), baked by hand by
+    `airSwitchCases.test.ts` (`HYPERION_AIR_SWITCH=1`); the served class map is synthetic.
+  - The smoke harness's 3 px check holds no air body, and its page steps no air ratio.
+- **`WHITE BALANCE` (the owner's report, 2026-11-05; planet-variety-white-balance).**
+  - `view/post/whiteBalance.ts`: `D65` or `HOST`, `HOST` as a view opens (the UX ruling,
+    2026-11-06). Under `HOST` one linear Bradford 3 × 3 (`whiteBalanceRows`) adapts the light to
+    the host's white at its own luminance in `tonemap.wgsl`, after the glare, before AgX. Under
+    `D65` the step is skipped (`balance` 0), so the image is today's to the bit.
+  - The display finds its `BalancedWhite` each primary frame from the primary's lights
+    (`framePlacedLights`, `frameWhiteBalance`; the brightest host at the camera, held against
+    another until it is 1.25 times brighter). Every view takes it as `ViewFrameInputs.white`,
+    then `PhotorealInputs.white`, then `PhotorealFrame.whiteBalance`. The meter and histogram
+    read the light before it.
+  - The control is in the `Exposure` panel and the line on the primary's block, after `METER`,
+    while any view draws photorealistic. An instrument's block states neither (no room at
+    1280 × 720).
+  - The camera's glare was checked against a camera's veiling glare and kept as it is (the
+    figures are in the lane's outbox). `--views-check --planet-viewer --randomize <N>` captures
+    `RANDOMIZE`'s first N draws under both balances.
+- **A new system lit at once (feat-host-discs-at-once, 2026-11-06).**
+  - `useHostDiscs` (above the stage, kept by universe and system) asks `host_discs` once a served
+    scene's system is known; `sceneHostDiscs(scene, sky, asked)` and `heldHostDiscs` take the held
+    sky's `hosts` where its request left the scene's system out, else those discs. The meter's
+    `incidentReadingLx` takes `(run, selection, sky, asked)`; `ViewFrameInputs`,
+    `PhotorealInputs` and `InstrumentsFrame` carry `hostDiscs`.
+  - `LIGHTING: PENDING` stands while no discs of the system are held and the sky or the discs are
+    asked; discs answered empty read `NOT RECEIVED`, as the meter does. A busy answer is asked
+    again after `FIELD_RETRY_DELAY_MS`, doubling. The inspection run waits out `STARS` `PENDING`
+    too (`starsPending`), since lighting no longer waits on the sky; the planet-viewer run's
+    `warmedUp` (`skyAnswered`, R15.T6's, landed beside) already does.
+- **The disc cells packed** (2026-11-05, perf-body-shading, the owner's Mac; a lean).
+  - `GeometrySettings.discCells`: `per-cell` the way back (`GEOMETRY_BEFORE_R14`), `packed` on both
+    settings; `--geometry discCells=…`, the smoke's `geometry-discCells`, the Mac pair `disc-cells`.
+  - `BODY_DISC_CELLS_PACKED_KERNEL` and its three forms (`shaders/bodyDiscCellsPacked.wgsl`) take
+    the per-cell kernel's bindings, jobs and workgroups; their sums are its bits. The renderer
+    dispatches the per-cell plain kernel until the packed one is made; `prepareEmissive`,
+    `prepareAir` and `prepareEmissiveAir` take the way (`packed` unless told).
+  - Catalogue `PACKED_CELL_ENTRIES` (with twins), the smoke's part 24 (its lane's part 20).
+  - Catalogue `PACKED_CELL_ENTRIES` (with twins), the smoke's part 20.
+- **The figure shaded once a pixel** (2026-11-05, perf-body-shading, the owner's Mac; a lean).
+  - Measured first: from orbit the figure's 2 × 2 quads ran 1.89 (high) and 2.33 (low) lanes a
+    covered pixel, its level-0 triangles 4–6 px; closed in 1.10–1.58.
+  - `GeometrySettings.figureShading`: `forward` the way back and on both settings until the owner's
+    Mac pair (SwiftShader: `screen` 7% and 70% slower from orbit at low and high, 20% faster closed
+    in at high), `screen` the lever;
+    `--geometry figureShading=…`, the smoke's `geometry-figureShading`, the Mac pair
+    `figure-shading` (counted sides).
+  - `SMOOTH_MESH_IDS_MATERIAL` (and its cluster form) writes each record into the view's `r32uint`
+    figure IDs (`Resources.figureIds`, a `VisibilityBuffer` on the scene's depth) with the forward
+    draw's discards; `FIGURE_RESOLVE_MATERIALS` (four forms) shade each ID's pixels over the disc's
+    rectangle at depth 1. `LitBodyRenderer.meshDraws(plan, "ids")`, `screenReady(plan)`,
+    `figureResolveDraws(plan, ids)`; passes `figure id raster` and `figure resolve`
+    (`PHOTOREAL_PASS_LABELS.figureIds`, `figureResolve`). Forward until the screen pipelines are
+    prepared, the same bits.
+- **R07.T19, pacing by rate (fix-frame-pacing-rate, 2026-11-06; the owner's frame rate).**
+  - The switch: `--frame-pacing rate|display` on any launch (`cli.ts`; `preload/framePacingLaunch.ts`,
+    `HyperionApi.framePacing`, `ViewDisplay`'s `framePacing`). `display`, today's frame counting,
+    stays the default (`DEFAULT_FRAME_PACING`, the one constant to flip) until the owner rules: the
+    lane's brief, as `rate` halves low on a 120 Hz Mac and the owner's frame rate comes first.
+  - The rule: `lib/vsyncPacing.ts` (pure, shared with the main process) holds `VsyncClock`,
+    `vsyncsPerDraw` and `drawsNow`; `framePacing.ts`'s `FramePacer` joins them with the mode.
+  - As built: one beat per rate, not a last draw per view, so the instruments and `publish` share
+    frames; `InstrumentsFrame.draws(rateHz)` replaces `frame`. A beat asked only in the primary's
+    frames keeps to its grid (k a multiple of the primary's): an instrument at 36 Hz on 144 Hz.
+  - `--frame-rate <HZ>` (1–240, 60 by default) sets a hidden check's `webContents.setFrameRate`;
+    refused on a shown run. `MAC_PROFILE_LEVERS` gains `pacing-120`.
+  - Results record the mode and P: spike v9 (`run.pacing`), views check v3, inspection timing v9
+    (each window's `callbacks`, `frameIntervalsMs`), terrain v6 (phases v2), hand-over and
+    atmosphere v6 (mode only: their records hold no frame intervals). T is `periodVsyncs` × vsync.
+  - As built: P is `vsyncPeriodOf` over each phase's or window's recorded intervals, in main; T's k
+    reads the reported `displayHz`. The spike draws every callback; its pacing sets only its T.
+  - Pending: the owner's runs, the Mac's `pacing-120` pairs and the shown runs (advice §4).
+- (fix-mac-batch-tools, 2026-11-08) `discRecordOf` gives no record only for a camera within the
+  body's figure (`insideFigure`, the spheroid about its pole), not within its equatorial sphere,
+  so a camera low over an oblate world's high latitudes still draws its disc, mesh and terrain.
+- **The bodies pass near the ground** (2026-11-08, perf-bodies-near-ground, the owner's Mac).
+  - A discarded fragment forms no light: WGSL's `discard` demotes to a helper that runs on (Tint
+    emulates it so on Metal), so `smoothMesh.wgsl`, `smoothMeshIds.wgsl`, `figureResolve.wgsl`,
+    `bodyDiscDraw.wgsl` and `resolveTerrain.wgsl` shade only kept fragments, in a loop of at most
+    one pass; the same bits. Not done for `terrainLitShade.wgsl`'s survey discard, whose text
+    `withoutSurveyDiscard` splits on.
+  - `GeometrySettings.terrainPlanetshine`: `record` on both settings and the way back,
+    `brightest` the lever (a lean, 2026-11-08); `--geometry terrainPlanetshine=…`, the smoke's
+    `geometry-terrainPlanetshine`, the Mac pair `terrain-planetshine`.
+  - Check-only `--lit-probe` forms `terrain-unshaded|terrain-no-cascades|terrain-no-horizon|
+    terrain-no-maturity` (`LIT_PROBE` 5 to 8, read in `terrainLit.wgsl` and `terrainLitShade.wgsl`),
+    each a Mac pair of its own name, for the batch to split the terrain fragment's time.
+- **`LIGHTING: NOT RECEIVED` on a lost link, ruled (2026-11-13, the owner's delegated UX call,
+  ux-calls-and-checklist-gaps):** amended. Discs held keep lighting the scene through a lost link
+  (as built); an ask the link cut off reads `PENDING`, not `NOT RECEIVED`, since it is asked again
+  when the link returns: `useHostDiscs`' `pending` no longer needs the link up.

@@ -2,32 +2,53 @@
 //!
 //! A [`Galaxy`] is where a universe's seed becomes a model: the drawn and derived parameters, the
 //! mass model with its potential tables in the plane, the density fields and the layer shares.
-//! Building one costs about 130 ms and about 1.4 MiB of heap (plan 02, Risks, R19), so it is built
-//! once per universe on the CPU pool and then kept. Because a `Galaxy` is fixed-size, bounding the
-//! entries bounds the bytes, so this cache holds [`GALAXY_CACHE_ENTRIES`] galaxies rather than a
-//! budget in bytes (plan 04, design note 23): four of them, about 5.5 MiB, which is a bridge's worth
-//! of universes open at once.
+//! Building one costs about 130 ms and about 1.4 MiB of heap (plan 02, Risks, R19), from generator
+//! version 27 about 2.9 MiB with plan 08's displaced classes and their class table (P08.T12), so it
+//! is built once per universe on the CPU pool and then kept. Because a `Galaxy` is fixed-size,
+//! bounding the entries bounds the bytes, so this cache holds [`GALAXY_CACHE_ENTRIES`] galaxies
+//! rather than a budget in bytes (plan 04, design note 23): four of them, about 12 MiB, which is a
+//! bridge's worth of universes open at once.
 //!
 //! The key is a [`GalaxyKey`], `(seed, generator_version)`, so two saves of one seed share one
 //! galaxy. Callers that ask for one key at once share one build through a [`SingleFlight`], and if
 //! every one of them gives up, the build is given up too: a job still queued is skipped.
+//!
+//! **On the pool's workers** (perf-galaxy-build-start). A played galaxy has its full potential, and
+//! at generator version 28 its build took some 4.6 s on one worker, before a relaunched server's
+//! first range query could start: [`Galaxy::new`] 0.8 s, the potential's (R, |z|) grid 3.45 s, its
+//! kinematic tables 0.13 s, and the checks and query tables below 0.25 s (release, pod, 16 vCPU,
+//! 2026-11-05). The grid's points are pure functions of the galaxy's mass model and their indices,
+//! so they are made on the other workers beside [`Galaxy::new`] ([`full_galaxy_on`]); the two
+//! headroom checks and the query tables then run side by side. On eight workers the galaxy and its
+//! global list then took 0.95 s and 0.14 s, against 4.7 s for the two before.
 
 use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Instant;
 
 use hyperion_protocol::SeedHex;
+use std::num::NonZeroUsize;
+
 use hyperion_sim::Seed;
 use hyperion_sim::galaxy::Galaxy;
+use hyperion_sim::galaxy::features::members::check_feature_list_headroom;
 use hyperion_sim::galaxy::placement::check_index_headroom;
+use hyperion_sim::galaxy::potential::GRID_POINTS;
 
-use super::{
-    CancelOnDrop, CancelToken, ComputeError, CpuPool, GalaxyKey, JobError, Priority, SingleFlight,
-};
+use super::global_list::{dealt, queue, reply};
+use super::{CancelOnDrop, CancelToken, ComputeError, CpuPool, GalaxyKey, Priority, SingleFlight};
 use crate::limits::GALAXY_CACHE_ENTRIES;
 
-/// How a galaxy is built from its seed: [`Galaxy::new`], or a test's double.
-type Build = Arc<dyn Fn(Seed) -> Galaxy + Send + Sync>;
+/// How a galaxy is built from its seed.
+#[derive(Clone)]
+enum Build {
+    /// [`Galaxy::new`] with its full potential ([`Galaxy::with_full_potential`]), its grid made on
+    /// the pool's workers beside it ([`full_galaxy_on`]).
+    Full,
+    /// A test's double, in one job.
+    #[cfg(test)]
+    Double(Arc<dyn Fn(Seed) -> Galaxy + Send + Sync>),
+}
 
 /// A snapshot of the galaxy cache's contents and use.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
@@ -152,13 +173,12 @@ impl GalaxyCache {
     ///
     /// The full potential's (R, z) grid and the kinematic tables it feeds are what give systems
     /// their velocities, so that a range query away from the epoch finds them where they have
-    /// moved (plan 08, P08.T7.a). They add about 2 s to a galaxy's build, once per universe.
+    /// moved (plan 08, P08.T7.a). They add some 3.6 CPU-s to a galaxy's build, once per universe,
+    /// the grid's made on the pool's other workers beside the rest of the galaxy (module
+    /// documentation).
     #[must_use]
     pub fn new(pool: Arc<CpuPool>) -> Self {
-        Self::with_build(
-            pool,
-            Arc::new(|seed| Galaxy::new(seed).with_full_potential()),
-        )
+        Self::with_build(pool, Build::Full)
     }
 
     /// An empty cache whose galaxies come from `build` rather than [`Galaxy::new`], so that a test
@@ -169,7 +189,7 @@ impl GalaxyCache {
         pool: Arc<CpuPool>,
         build: impl Fn(Seed) -> Galaxy + Send + Sync + 'static,
     ) -> Self {
-        Self::with_build(pool, Arc::new(build))
+        Self::with_build(pool, Build::Double(Arc::new(build)))
     }
 
     fn with_build(pool: Arc<CpuPool>, build: Build) -> Self {
@@ -190,10 +210,13 @@ impl GalaxyCache {
     /// # Errors
     ///
     /// [`ComputeError::Submit`] if the pool's interactive queue is full or the pool is shutting
-    /// down, and [`ComputeError::Job`] if the build was cancelled, the pool stopped before it ran, or
-    /// it panicked, which would be a bug in [`Galaxy::new`]. A galaxy that is built and then fails
-    /// [`check_index_headroom`] is [`ComputeError::UnplayableGalaxy`] and is not held: nothing may be
-    /// generated in it, so no request naming that universe can be served.
+    /// down, and [`ComputeError::Job`] if one of the build's jobs was cancelled, the pool stopped
+    /// before it ran, or it panicked, which would be a bug in the sim: in [`Galaxy::new`], its
+    /// grid's plan and points, its kinematic tables, the checks below or its query tables
+    /// ([`Galaxy::make_query_tables`]). A galaxy that is built and then fails
+    /// [`check_index_headroom`] is [`ComputeError::UnplayableGalaxy`], and one that fails
+    /// [`check_feature_list_headroom`] is [`ComputeError::UnplayableCentre`], and neither is held:
+    /// nothing may be generated in it, so no request naming that universe can be served.
     ///
     /// # Panics
     ///
@@ -209,7 +232,7 @@ impl GalaxyCache {
             return Ok(galaxy);
         }
         let pool = Arc::clone(&self.pool);
-        let build = Arc::clone(&self.build);
+        let build = self.build.clone();
         let held = Arc::clone(&self.held);
         self.flights
             .run(key, move || async move {
@@ -220,7 +243,7 @@ impl GalaxyCache {
                     return Ok(galaxy);
                 }
                 let galaxy = build_on_pool(&pool, build, key).await?;
-                // The galaxy it replaces or evicts is dropped outside the lock: freeing 1.4 MiB is
+                // The galaxy it replaces or evicts is dropped outside the lock: freeing 2.9 MiB is
                 // not the business of a critical section every request passes through.
                 let dropped = lock(&held).insert(key, Arc::clone(&galaxy));
                 drop(dropped);
@@ -236,46 +259,203 @@ impl GalaxyCache {
     }
 }
 
-/// Runs one galaxy build on the pool as interactive work and logs what it cost.
+/// Runs one galaxy build on the pool as interactive work, checks the galaxy and makes its query
+/// tables, and logs what it cost.
 async fn build_on_pool(
     pool: &CpuPool,
     build: Build,
     key: GalaxyKey,
 ) -> Result<Arc<Galaxy>, ComputeError> {
     let token = CancelToken::new();
-    // Cancels the build once every waiter on the flight this runs in has gone.
+    // Cancels the build's jobs still queued once every waiter on the flight this runs in has gone.
     let _cancel_on_drop = CancelOnDrop::new(token.clone());
-    let receiver = pool.try_submit(Priority::Interactive, token, move |_| {
-        let started = Instant::now();
-        let galaxy = build(Seed::new(key.seed()));
-        // Checked once, here, because this is where a galaxy is built for play: a galaxy whose
-        // densest cell could draw more candidates than its layer's IDs can number is not played at
-        // all, and placement panics rather than generate a short cell (plan 03, design note 6).
-        let headroom = check_index_headroom(&galaxy);
-        tracing::info!(
-            seed = %SeedHex::from_u64(key.seed()),
-            generator_version = %key.generator_version(),
-            build_ms = started.elapsed().as_secs_f64() * 1e3,
-            heap_kib = galaxy.heap_bytes() / 1024,
-            "built a galaxy"
-        );
-        match headroom {
-            Ok(()) => Ok(galaxy),
-            Err(error) => {
-                tracing::error!(
-                    seed = %SeedHex::from_u64(key.seed()),
-                    generator_version = %key.generator_version(),
-                    %error,
-                    "refusing a galaxy whose systems cannot be numbered"
-                );
-                Err(error)
-            }
+    let started = Instant::now();
+    let seed = Seed::new(key.seed());
+    let (galaxy, headroom) = match build {
+        Build::Full => {
+            let galaxy = Arc::new(full_galaxy_on(pool, seed, &token).await?);
+            let headroom = checked_on(pool, &galaxy, &token).await?;
+            (galaxy, headroom)
         }
+        // A test's double is built, checked and given its query tables in one job, as every galaxy
+        // was before perf-galaxy-build-start, so that a test that counts the pool's jobs counts one
+        // a build.
+        #[cfg(test)]
+        Build::Double(build) => {
+            let job = move |_: &CancelToken| {
+                let galaxy = build(seed);
+                let headroom = headroom_of(&galaxy);
+                if headroom.is_ok() {
+                    galaxy.make_query_tables();
+                }
+                (Arc::new(galaxy), headroom)
+            };
+            reply(pool.try_submit(Priority::Interactive, token.clone(), job)?).await?
+        }
+    };
+    tracing::info!(
+        seed = %SeedHex::from_u64(key.seed()),
+        generator_version = %key.generator_version(),
+        build_ms = started.elapsed().as_secs_f64() * 1e3,
+        heap_kib = galaxy.heap_bytes() / 1024,
+        "built a galaxy"
+    );
+    match headroom {
+        Ok(()) => Ok(galaxy),
+        Err(error) => {
+            tracing::error!(
+                seed = %SeedHex::from_u64(key.seed()),
+                generator_version = %key.generator_version(),
+                %error,
+                "refusing a galaxy whose systems cannot be numbered"
+            );
+            Err(error)
+        }
+    }
+}
+
+/// Whether a test's double `galaxy` may be played: the checks of [`checked_on`], in turn.
+///
+/// # Errors
+///
+/// As [`checked_on`]'s inner error.
+#[cfg(test)]
+fn headroom_of(galaxy: &Galaxy) -> Result<(), ComputeError> {
+    check_index_headroom(galaxy)
+        .map_err(ComputeError::from)
+        .and_then(|()| check_feature_list_headroom(galaxy).map_err(ComputeError::from))
+}
+
+/// Whether `galaxy` may be played, checked once, where it is built for play, and its query tables
+/// made, on `pool`'s workers at interactive priority behind `token`.
+///
+/// A galaxy whose densest cell could draw more candidates than its layer's IDs can number is not
+/// played at all, and placement panics rather than generate a short cell (plan 03, design note 6);
+/// nor is one whose centre's feature-level list could not number plan 11's carved classes, whose
+/// list asserts its bound (P11.T8.e–f). A galaxy to be played builds now what its range queries
+/// would build at their first reading, so that the first query's cell jobs do not wait on one
+/// another (P09.T37). The three read the built galaxy alone, so they run side by side, one job
+/// each. The tables are waited for only once the galaxy has passed both checks, and a refused
+/// galaxy's are dropped with it, so that a refusal is the checks' whatever the tables' job does.
+///
+/// # Errors
+///
+/// The outer error as [`full_galaxy_on`]'s, for a job of these. The inner one, for a galaxy
+/// refused, is [`ComputeError::UnplayableGalaxy`] or [`ComputeError::UnplayableCentre`], as
+/// [`GalaxyCache::get`] gives them.
+async fn checked_on(
+    pool: &CpuPool,
+    galaxy: &Arc<Galaxy>,
+    token: &CancelToken,
+) -> Result<Result<(), ComputeError>, ComputeError> {
+    let index = queue(
+        pool,
+        Priority::Interactive,
+        token,
+        reading(Arc::clone(galaxy), check_index_headroom),
+    )
+    .await?;
+    let centre = queue(
+        pool,
+        Priority::Interactive,
+        token,
+        reading(Arc::clone(galaxy), check_feature_list_headroom),
+    )
+    .await?;
+    let tables = queue(
+        pool,
+        Priority::Interactive,
+        token,
+        reading(Arc::clone(galaxy), Galaxy::make_query_tables),
+    )
+    .await?;
+    let (index, centre) = (reply(index).await?, reply(centre).await?);
+    let headroom = index
+        .map_err(ComputeError::from)
+        .and_then(|()| centre.map_err(ComputeError::from));
+    if headroom.is_ok() {
+        reply(tables).await?;
+    }
+    Ok(headroom)
+}
+
+/// A job that runs `read` on `galaxy`.
+fn reading<R: 'static>(
+    galaxy: Arc<Galaxy>,
+    read: fn(&Galaxy) -> R,
+) -> impl FnOnce(&CancelToken) -> R + Send + 'static {
+    move |_: &CancelToken| read(&galaxy)
+}
+
+/// [`Galaxy::new`]'s galaxy of `seed` with its full potential, made on `pool`'s workers at
+/// interactive priority behind `token`: [`Galaxy::with_full_potential`]'s, bit for bit
+/// (perf-galaxy-build-start).
+///
+/// One job builds the galaxy, some 0.8 s. Beside it one makes the grid's plan
+/// ([`Galaxy::potential_grid_plan`], some 0.11 s), and the grid's points, some 3.45 CPU-s, are then
+/// made in shares of their indices dealt out in turn, one share fewer than the pool has workers,
+/// which leaves the galaxy's worker to it: on eight workers the grid is made before the galaxy is
+/// (release, pod, 16 vCPU, 2026-11-05). A last job gives the galaxy its grid and builds its
+/// kinematic tables, some 0.13 s. One worker builds it all in turn, as the serial build does.
+///
+/// As for the global list ([`global_list_on`](super::global_list_on)), every point is a pure
+/// function of the plan and its index, gathered by index, so the galaxy is the serial build's at
+/// any number of workers and in any shares; and no job waits on another, since the caller's task
+/// queues them all and awaits their replies on the runtime. The first job is queued as the build
+/// always was, refused at once if the interactive queue is full; the rest wait for room behind it.
+///
+/// # Errors
+///
+/// [`ComputeError::Submit`] if the interactive queue is full or the pool is shutting down or
+/// faulted, and [`ComputeError::Job`] if one of the build's jobs is cancelled, panics, is lost with
+/// the pool or leaves its worker's floating-point mode flushing subnormals.
+async fn full_galaxy_on(
+    pool: &CpuPool,
+    seed: Seed,
+    token: &CancelToken,
+) -> Result<Galaxy, ComputeError> {
+    let built = pool.try_submit(Priority::Interactive, token.clone(), move |_| {
+        Galaxy::new(seed)
     })?;
-    let galaxy = receiver
-        .await
-        .unwrap_or_else(|closed| Err(JobError::from(closed)))??;
-    Ok(Arc::new(galaxy))
+    let planned = queue(
+        pool,
+        Priority::Interactive,
+        token,
+        move |_: &CancelToken| Arc::new(Galaxy::potential_grid_plan(seed)),
+    )
+    .await?;
+    let plan = reply(planned).await?;
+    let shares = NonZeroUsize::new(pool.workers().get() - 1).unwrap_or(NonZeroUsize::MIN);
+    let count = u64::try_from(GRID_POINTS).expect("the grid's 4,096 points fit a u64");
+    let mut making = Vec::with_capacity(shares.get());
+    for share in dealt(count, shares) {
+        let plan = Arc::clone(&plan);
+        let job = move |_: &CancelToken| {
+            share
+                .into_iter()
+                .map(|k| {
+                    plan.point(usize::try_from(k).expect("an index below the grid's 4,096 points"))
+                })
+                .collect::<Vec<_>>()
+        };
+        making.push(queue(pool, Priority::Interactive, token, job).await?);
+    }
+    // Each point carries its index, which the finish places it by.
+    let mut points = Vec::with_capacity(GRID_POINTS);
+    for receiver in making {
+        points.extend(reply(receiver).await?);
+    }
+    let galaxy = reply(built).await?;
+    let full = queue(
+        pool,
+        Priority::Interactive,
+        token,
+        move |_: &CancelToken| {
+            galaxy.with_full_potential_grid(Arc::unwrap_or_clone(plan).finish(points))
+        },
+    )
+    .await?;
+    reply(full).await
 }
 
 impl fmt::Debug for GalaxyCache {
@@ -308,8 +488,10 @@ mod tests {
     use hyperion_sim::{GENERATOR_VERSION, GeneratorVersion};
     use tokio::time::timeout;
 
+    use hyperion_sim::galaxy::global_list::GlobalList;
+
     use super::*;
-    use crate::compute::SubmitJobError;
+    use crate::compute::{SharedSprayForces, Shares, SubmitJobError, global_list_on};
     use crate::limits::{BULK_QUEUE_CAPACITY, INTERACTIVE_QUEUE_CAPACITY};
 
     /// Upper bound on any wait: generous, because a galaxy build is 130 ms optimised and several
@@ -371,9 +553,11 @@ mod tests {
         let counters = cache.counters();
         assert_eq!((counters.builds(), counters.entries()), (1, 1));
         assert_eq!(counters.bytes(), first.heap_bytes(), "the galaxy held");
+        // From 27 a galaxy holds plan 08's displaced classes and their class table (P08.T12),
+        // which take it from about 1.4 MiB to about 2.9 MiB (3,048,066 bytes, measured at 27).
         assert!(
-            (1 << 20..2 << 20).contains(&counters.bytes()),
-            "a galaxy is about 1.4 MiB, not {} bytes",
+            (2 << 20..4 << 20).contains(&counters.bytes()),
+            "a galaxy is about 2.9 MiB, not {} bytes",
             counters.bytes()
         );
 
@@ -448,6 +632,60 @@ mod tests {
             u64::try_from(GALAXY_CACHE_ENTRIES.get()).unwrap() + 2
         );
         pool.shutdown().await.unwrap();
+    }
+
+    /// perf-galaxy-build-start: a galaxy built on the pool, its grid's points made in shares beside
+    /// [`Galaxy::new`], is the serial build's, [`Galaxy::with_full_potential`]'s: its potential's
+    /// `Debug` text, which prints every double's shortest round trip, its kinematic tables' and
+    /// the galaxy's, on one worker, where the grid is one share made after the galaxy, and on four,
+    /// where it is three made beside it. The global list the server makes over it on four workers
+    /// is [`GlobalList::build`]'s over the serial galaxy, by its `Debug` text.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_galaxy_built_on_the_pool_is_the_serial_build() {
+        let serial =
+            tokio::task::spawn_blocking(|| Galaxy::new(Seed::new(0x4d2)).with_full_potential());
+        let mut built = Vec::new();
+        let mut list = None;
+        for workers in [1, 4] {
+            let pool = pool(workers);
+            let cache = GalaxyCache::new(Arc::clone(&pool));
+            let galaxy = get(&cache, 0x4d2).await;
+            if workers == 4 {
+                let (forces, token) = (Arc::new(SharedSprayForces::new(0)), CancelToken::new());
+                let shares = Shares::for_workers(pool.workers());
+                let made = global_list_on(
+                    &pool,
+                    &forces,
+                    (&galaxy, key(0x4d2)),
+                    (Priority::Bulk, shares),
+                    &token,
+                );
+                list = Some(timeout(WAIT, made).await.unwrap().unwrap());
+            }
+            built.push((workers, galaxy));
+            pool.shutdown().await.unwrap();
+        }
+        let serial = Arc::new(serial.await.unwrap());
+        for (workers, galaxy) in built {
+            assert_eq!(
+                format!("{:?}", galaxy.potential()),
+                format!("{:?}", serial.potential()),
+                "{workers} workers"
+            );
+            assert_eq!(
+                format!("{:?}", galaxy.kinematics()),
+                format!("{:?}", serial.kinematics()),
+                "{workers} workers"
+            );
+            assert_eq!(*galaxy, *serial, "{workers} workers");
+        }
+        let serial_list = tokio::task::spawn_blocking(move || GlobalList::build(&serial))
+            .await
+            .unwrap();
+        assert_eq!(
+            format!("{:?}", list.expect("the list over four workers' galaxy")),
+            format!("{serial_list:?}")
+        );
     }
 
     #[tokio::test]

@@ -135,8 +135,8 @@ pub fn vertex_spacing(radius_m: f64, level: u8) -> SpacingRange;   // min, mean,
 pub struct Spheroid { pub equatorial_radius_m: f64, pub polar_radius_m: f64 }  // the datum, DN 5
 pub struct TestPlanet { /* figure: Spheroid, seed, octave table (DN 12), rotation (DN 14) */ }
 pub const TEST_PLANET: TestPlanet;                          // WGS 84's figure, hand-parameterised
-// HeightSample and LatticeCache move to `hyperion_surface::height` in R09.T4, and `test_planet`
-// re-exports them from there
+// R09.T4 moved only HeightSample, to `hyperion_surface::height`, and `test_planet` re-exports it
+// from there; LatticeCache already lived in `noise`, which `test_planet` re-exports it from
 pub struct HeightSample { pub height_m: f64, pub gradient: [f64; 3] }  // above the spheroid, DN 5
 pub struct LatticeCache { /* per bake, keyed by u64 lattice keys, order-independent */ }
 impl TestPlanet {
@@ -152,7 +152,10 @@ impl TestPlanet {
 ```rust
 // noise: 3D improved Perlin gradient noise (DN 12) with its analytic gradient
 pub fn gradient_noise(p: [f64; 3], octave: &Octave, cache: &mut LatticeCache)
-    -> (f64, [f64; 3]);             // value and gradient; `Octave` holds k, offset, rotation, seed
+    -> (f64, [f64; 3]);             // value and gradient; `Octave`: k, λ, rotation, offset, key
+// R09.T5 replaced the `Seed` an `Octave` held with a `NoiseKey`, the test planet's `Seed` or a
+// body's `DetailSeed`: `Octave::new(index, spacing, rotation, offset, key)`, and R05's rotation
+// formula is `noise::rotation`
 pub const NOISE_BOUND: f64;          // B, the certified maximum, pinned (DN 15)
 pub const NOISE_RMS: f64;            // σ_noise, measured and pinned (DN 15)
 // num (src/num.rs): signed-zero-exact min and max (DN 13)
@@ -468,8 +471,8 @@ its first task.
   (`buildCommand`, `parseClientArgs`, `ClientArgs` of `address` and `port` only, each option read
   by hand), which gains the spike flag; the justfile's `ci` recipe, which gains nothing of the
   spike's (Design note 20).
-- **As built, re-validated 2026-10-02 at ce7aeb3** (the call sites below, and the tasks, use these
-  names; the sketches above are otherwise unchanged):
+- **As built, re-validated 2026-10-02 at ce7aeb3**, now 2b75d16c (the call sites below, and the
+  tasks, use these names; the sketches above are otherwise unchanged):
   - _R01._ The engine is our own WebGPU adapter in `view/engine/webgpu/` (`createWebGpuEngine`),
     Babylon having been dropped (R01 Design notes 23–24); shaders are standard WGSL: `@group(0)`
     `Frame` from `view/shaders/frame.wgsl`, concatenated as a `?raw` import (as
@@ -692,7 +695,9 @@ re-checked against the cited source in that task, as the galaxy README's Figures
    agree. The forced-finest region (Design note 9) extends at least one finest patch beyond the
    ramp's end, so that wherever a finest patch meets a coarser neighbour the morph is already 1, as
    CDLOD's crack-freedom requires (researched 2026-09-29; no published precedent for the hold was
-   found, and it adds one term to CDLOD's own mechanism). Neighbouring patches differ by at most
+   found, and it adds one term to CDLOD's own mechanism). _As built by R10.T8.c: k is also held
+   at 0 and at 1 on the edges and corners where drawn patches of two levels meet, from the draw set,
+   alike in every view (plan 10's Risks, "Deviations in T8.c, as built")._ Neighbouring patches differ by at most
    one level, enforced across face edges. `finest_surface_height` is the collision interpolant: the
    finest level's vertex heights, interpolated on the mesh's own triangle diagonal, which is
    exactly what is drawn wherever the morph is zero.
@@ -749,6 +754,16 @@ re-checked against the cited source in that task, as the galaxy README's Figures
    was resident before contact: `TERRAIN: STREAMING` showed for 0.45 s in the vertical descent (the
    summary rounds it to 0.5 s) and not at all in the hover and touchdown, with 1.1 and 0 patches a
    second requested. 30 s remains the upper bound that R11 consumes.
+
+   _From R10.T16 (decision-r10-t16-contracts §2): a patch with no surveyed cell is never forced;
+   the rule binds every setting and style over surveyed ground, and off the survey the reference
+   surface stands and the forced region holds nothing._
+
+   _From R10.T14.c (decision-r10-t14c-leans §2): "above the spheroid under it" reads "above the
+   ground under it where the client holds it, the drawn ground of the resident bakes
+   (`heldGroundUnder`), and above the spheroid elsewhere"; its speed is along the spheroid's normal
+   there. A craft held in another body's frame is judged against the body it nears (§5 of that
+   ruling)._
 
 10. **The patch cache, and who owns its layout.** Patches are cached by patch, not by view, in one
     cache per body. R10 owns the cache's sizes, formats and slot layout per setting (its Design note
@@ -986,8 +1001,11 @@ STREAMING`. The cache counts the GPU bytes it holds, which the metrics read (Des
 
     _Decided 2026-10-06 by a delegated decision (`decision-r05-high-atmosphere.md`):_ the sky view
     and the ray march place their steps quadratically toward each ray's lowest point (the camera,
-    the ground or a limb's tangent point), not evenly. A ray from a camera inside the atmosphere
-    that falls to its lowest point and climbs out again places its camera side toward the camera
+    the ground or a limb's tangent point), not evenly (since R08.T8 the ray march's two-sided sky
+    segments, from inside and outside, take the sun-aware warp; "Deviations in T12.e, as
+    built"). A ray from a camera inside the atmosphere that falls to its lowest point and climbs
+    out again places
+    its camera side toward the camera
     instead, since the view's own attenuation puts that side's light there (addendum A). The counts
     are those above, except the high setting's sky view, which takes 75 steps (addendum B: from
     60–100 km, a limb ray's narrow source at its tangent point needs them), and each term's density
@@ -1219,6 +1237,11 @@ STREAMING`. The cache counts the GPU bytes it holds, which the metrics read (Des
     _As built (2026-10-08):_ the judged run was on a standard 1080p monitor at 60.00 Hz, so T =
     16.67 ms, which the frame clock measured as 16.666 ms; the projector's 16.68 ms stands for
     R12's runs on it.
+
+    - _Ruled by the owner 2026-11-08:_ pacing stays `display` (R07.T19's `DEFAULT_FRAME_PACING`),
+      so the low setting paces to the display's refresh divided by a whole number (60 on a 120 Hz
+      Mac, 30 on the UHD 620's 60 Hz), not to a fixed 60 or 30; `--frame-pacing rate` stays the
+      opt-in for fixed 60/30.
 
 22. **Open question 2's rule, operationalised** (researched 2026-09-29). The verdict (T19) applies
     the brainstorm's rule in order. A failure on the UHD 620 alone redesigns the low setting and
@@ -1960,8 +1983,10 @@ a side; a one-sided segment gives all its steps to its side. Each side is placed
 toward t\*, t_k = t\* ± L_side·(k ÷ n_side)². The exception is the camera side of a two-sided
 segment that starts at a camera inside the atmosphere, which is placed quadratically toward the
 camera, t_k = t_start + L_side·(k ÷ n_side)² (lane C's V1, adopted in addendum A of
-`decision-r05-high-atmosphere.md`). Each step is sampled at its midpoint. Its in-scattering is
-throughput · S · Δt · g(x) per channel, with x = σ_t·Δt and g(x) = (1 − e^(−x)) ÷ x, computed as 1 −
+`decision-r05-high-atmosphere.md`) (since R08.T8 the ray march's two-sided sky segments, from
+inside and outside, take the sun-aware warp; "Deviations in T12.e, as built"). Each step is
+sampled at its midpoint. Its in-scattering is throughput · S · Δt · g(x) per channel, with x = σ_t·Δt and g(x) =
+(1 − e^(−x)) ÷ x, computed as 1 −
 x·(1/2 − x/6) below x = 0.01 and directly from 0.01 up. The helper is in `common.wgsl`, and the
 step's transmittance stays e^(−x). One WGSL helper and one TypeScript twin hold the rule. Another
 placement may replace it only if it passes the gate below at no more steps. High takes 75 sky-view
@@ -1979,8 +2004,11 @@ passes, and the task refers back above 90 (sky view) or 48 (march).
   - **The quadrature gate,** with no GPU:
     - an `f64` twin of the two kernels' quadrature: Earth's terms on a sphere of WGS 84's a, single
       scattering, and a Lambertian ground of 0.15 lit through `opticalDepth.ts`'s sun transmittance;
-    - against 4,096 placed steps, themselves within 0.05% of 8,192;
-    - over the decision's march rays: from 400 km, the disc and R08's limb heights; to terrain
+    - against 4,096 placed steps, themselves within 0.05% of 8,192; _since decision-test-coverage
+      R3(b) (2026-10-11), the coarsest of 2,048, 4,096 or 8,192 placed steps within 0.05% of
+      twice its steps ("Deviations in T12.e, as built", the reference)_;
+    - over the decision's march rays: from 400 km, the disc and R08's limb heights (_since R08.T8,
+      the limb from 400 km and 101 km with the sun at 90–105° at the tangent point_); to terrain
       beyond 32 km from 20 and 60 km; and, near level, from 0.5–5 km to terrain at 40–150 km. Over
       its sky rays: from 2 m, 1 km, 10 km and 50 km; and, from cameras at 0.5–50 km, the band
       between the local and the visible horizon (0.2, 0.5, 0.8 and 0.98 of the dip, and 0.01° either
@@ -3605,6 +3633,29 @@ them. No wire type changes: the spike's IPC is the preload's, not the protocol's
 
   On Earth each is a single table and s ≈ 1 ± 0.3%, so T12.b and T12.c are built as written.
 
+- **The atmosphere's kernels in `f32` near the ground** (found in R08.T6.b, 2026-10-10;
+  `decision-r08-f32.md`, R08 Design note 18).
+  - _The defect._ Design note 16's kernels formed heights as |p| − R, and ground tests and distances
+    from r²(μ² − 1) + R², in `f32`. At Earth's radius that loses 0.25 m of a radius, and about a
+    sixth of r² − R² from 2 m. They also took WGSL's `cos`, `sin` and `acos`, which WGSL bounds only
+    to 2⁻¹¹.
+  - _Its size._ From 2 m the sky view and the march were 17% and 14% off their `f64` twin.
+  - _Why the smoke missed it._ R05.T12.c's and T12.e's smoke views at 2 m checked finiteness and
+    step convergence on the same arithmetic, not agreement with a twin.
+  - _The correction._ R08.T6.b and T6.g correct the kernels in place (R08.T6 widens R05's kernels).
+    No R05 task reopens.
+- **The tables' texel mapping** (found in R08.T6.b, 2026-10-10; `decision-r08-remap.md`, R08
+  Design note 19).
+  - _The defect._ Design note 16's multiple-scattering table and sky view were read through
+    sebh's `fromUnitToSubUvs`, which does not invert his write: up to 0.015 texel on the 32² table.
+    The transmittance table took no texel mapping, so the clamp held its outer half texels. Row 0
+    stood 6.15 m up, and column 0 held the ray 11.5° from the zenith.
+  - _Its size_ (estimated). From a camera below 6 m the sun's disc on the horizon was 21–39% too
+    dark, and 3–7% at 2° up.
+  - _Why no check saw it._ The twin shared the mapping, and R05.T12.b's oracle texels were taken
+    at the table's own texel parameters.
+  - _The correction._ R08.T6.g corrects it in place (R08.T6 widens R05's kernels). No R05 task
+    reopens.
 - **The coarse field's size** (researched 2026-09-29). The spike's synthetic field keeps the
   brainstorm's 15 MB, the top of its 2–15 MB range. R09 Design note 17's layout gives 11.6 MB for
   an Earth at level 8: 393,216 cells × 21 B = 8.26 MB, plus 98,304 groups of four × 34 B =
@@ -3614,6 +3665,10 @@ them. No wire type changes: the spike's IPC is the preload's, not the protocol's
   three workers. The size is one named constant, `SYNTHETIC_FIELD_BYTES`, in `spikeScene.ts`,
   citing the brainstorm for its value and R09 Design note 17 for the current estimate, so that a
   larger R09 layout changes one line.
+  _After R09.T6.c (2026-10-22) the Earth is 15,141,470 bytes, 141,470 more than this stand-in,
+  so 15 MB is no longer an upper bound; the gap, 0.42 MB across three workers, is immaterial
+  against this plan's measured 0.636 GB, and R12's `arrival-memory` run measures the real field
+  (`signoff-r09-t6c-brainstorm.md`)._
 - **Measurement switches in a shipped binary.** The timestamp and Dawn-toggle switches are set only
   when the spike flag is given; T14.b's test holds that the ordinary launch sets exactly R01's
   switches.
@@ -3648,9 +3703,9 @@ them. No wire type changes: the spike's IPC is the preload's, not the protocol's
   T15.b) and `view/quality/qualitySetting.ts` (T7.b, T12.c, then R06, R07, R08 and R12). Each is
   appended to, never reordered; a conflict keeps both sides, and `tags.golden` is re-blessed after
   a merge rather than merged by hand.
-- **Re-validated at ce7aeb3** (2026-10-02, after RM1 merged). Swept every Consumes item against
-  the code and folded in R01's, R02's and R04's as-built deviations and RM1's decision records
-  (Babylon dropped and the WGSL binding convention, the hardware decisions, the protocol
+- **Re-validated at ce7aeb3**, now 2b75d16c (2026-10-02, after RM1 merged). Swept every Consumes
+  item against the code and folded in R01's, R02's and R04's as-built deviations and RM1's decision
+  records (Babylon dropped and the WGSL binding convention, the hardware decisions, the protocol
   decision dropping the post-process `depth` input, the CSP ruled unchanged, `height.worker.ts`).
   The brainstorm has changed since the plan was written only in the CSP passages, which the plan
   already carried. What changed here: Consumes gained an "As built" entry with the real names;
@@ -3702,8 +3757,10 @@ them. No wire type changes: the spike's IPC is the preload's, not the protocol's
   `noise_rms_measured` under `just test-slow`. The gradient index is the corner word's top four
   bits; the object word packs i and j as 32-bit two's complements and the draw number is
   (octave << 32) | k; the octave offsets read words 2⁴⁰ + 4n + axis of object 0. `Octave` holds
-  the index, spacing, rotation, offset and seed; `LatticeCache::cover(octave, centre, radius)`
-  sets an octave's dense box (capped at 2²² corners). `num::max` and `min` refuse NaN.
+  the index, spacing, rotation, offset and seed (since R09.T5 a `NoiseKey` in place of the seed,
+  and R05's rotation formula is `noise::rotation`: R09's "Deviations in T5, as built"; corrected
+  2026-10-30); `LatticeCache::cover(octave, centre, radius)` sets an octave's dense box (capped at
+  2²² corners). `num::max` and `min` refuse NaN.
 - **Deviations in T3.b, as built.** `Spheroid` lives in `hyperion_surface::spheroid` (P14.T46.e's
   module), with R05's `point`, `normal`, `surface_point`, `curvature_radii_m`,
   `section_radius_m` and `WGS84`; `test_planet` re-exports it. σ_h is Earth2014's TBI layer,
@@ -3801,17 +3858,18 @@ skirtM)` bakes the test planet (with the ridges switch) and returns a `BakedPatc
   Ruled: T13.a also records the patch counts and demand under min(hard, 4σ_n) for the ridged
   planet, and T19 judges a ridged run's streaming failure caused only by that over-refinement as
   "ours to fix", never a fired rule.
-- **Review fixes to T1–T6** (43c1613 and the commit after it). `LatticeCache` boxes serve only
-  the identical octave (a cache reused across planets or seeds never returns another's
+- **Review fixes to T1–T6** (43c1613, now 3e7630c5, and the commit after it). `LatticeCache` boxes
+  serve only the identical octave (a cache reused across planets or seeds never returns another's
   gradients); every height is asserted finite in the normals and the collision interpolant too;
   `cube::SampleGrid` (`Mesh`, `Double`) replaces `sample_dir`'s raw quads; the wasm exports take
   `VertexPath`, `NormalScale` and `Ridges` enums, and `testPlanetVersion()` is exported so a stale
   module is caught when the test planet changes; `Octave::new` refuses a rotation that is not
   orthonormal; `Spheroid::sphere` refuses a non-positive radius; `HeightSource::Error` is bounded
   by `std::error::Error + Send + Sync`; `test_planet` re-exports `LatticeCache` (its home is
-  `noise`), the path R09.T4 moves it from; `spheroid` also carries P14.T46.e's
-  `from_volumetric`, `flattening`, `volumetric_radius_m` and `BuildSpheroidError`, written by this
-  lane to the API the orchestrator gave (P14.T46.e adds no second copy). The `FaceDifferences`
+  `noise`, where it stays: R09.T4 moved only `HeightSample`, corrected 2026-10-09); `spheroid` also
+  carries P14.T46.e's `from_volumetric`, `flattening`, `volumetric_radius_m` and
+  `BuildSpheroidError`, written by this lane to the API the orchestrator gave (P14.T46.e adds no
+  second copy). The `FaceDifferences`
   formula forms a face-edge vertex from its own face's (u, v), not the canonical face's (an ulp
   the skirts cover), and `vertex_f32.golden` prints vertices x, y ∈ {0, 1, 31, 32, 33, 63, 64} of
   each patch. T3.c's quiet-machine bench is re-measured in a quiet window the orchestrator
@@ -4023,7 +4081,10 @@ skirtM)` bakes the test planet (with the ridges switch) and returns a `BakedPatc
   - The coarse field is held as the worker's own copy in JavaScript (the structured clone it
     receives), replaced by the next, for the worker's life, not copied into the module's memory:
     the test planet does not read it, and the memory at rest is the same, which Design note 21's
-    memory row measures. R09 adds the export that copies it in.
+    memory row measures. R10 adds the exports that copy it in, with the client that feeds them:
+    `field_init` and `field_chunk`, a `PartialField` per body (R10.T6.b, R10's Design note 16),
+    fed by `CoarseFieldStore` (R10.T7). R09 builds no client code (R09's Risks, "Re-validated at
+    `bce2aef5`"). _Corrected 2026-10-09: this note first named R09._
   - `BakeSettings` gains `ridges: TestPlanetRidges` (`"off" | "on"`, Design note 12); `BakedPatch`
     gains `originHeightM` and `skirtDepthM` for T11.a (approved by the orchestrator).
   - `TerrainNormals` and `TerrainVertexPath` moved to `view/quality/terrainKinds.ts`, a file with
@@ -5710,6 +5771,11 @@ medium, sizes, figure)`.
         process logs any image it rejects or fails to save, without losing the judged checks.
   - _Left as found._ At half resolution, a far-surface pixel whose four nearest ray-march texels
     are all sky gets no haze: a one-pixel fringe on silhouettes, on the low setting only.
+  - _R08.T8.b (2026-10-21, `decision-r08-t8-leans.md` §6.2)._ The upsample's pick kept the first
+    of the four candidates wherever their depths tie (every sky and limb pixel, whose depths are
+    all 0), so low's whole march layer stood one output pixel down and right of the scene. Since
+    R08.T8.b a tie goes to the texel whose centre is nearest the pixel's; surfaces whose depths
+    differ pick as before. Plan 08's Risks, "Deviations in T8.b, as built", has the check.
   - _By hand, for the owner._ The comparison with Hillaire 2020's published images (CGF 39(4), DOI
     10.1111/cgf.14050) confirms the work but blocks nothing (decisions-r05.md item 7). The images
     are kept local and untracked (decisions-r05.md item 4).
@@ -5988,6 +6054,15 @@ medium, sizes, figure)`.
 
       The worst over the set is then 2.3 × 10⁻⁴.
 
+      _decision-test-coverage R3(b) (2026-10-11): the reference is now the coarsest of 2,048,
+      4,096 or 8,192 placed steps within 0.05% of twice its steps, the bound unchanged. A ray
+      starts at 2,048, confirmed against 4,096, and each of two levels doubles the steps of the rays
+      not yet converged. Measured that day over the 1,046 rays: 1,044 converge at 2,048, the same
+      two twilight rays take 8,192 (by way of 4,096), and the worst over the set is
+      4.6 × 10⁻⁴. No scheme's e moves by more than 0.046 percentage points (a twilight ray past the
+      visible horizon from 2 km, the sun at 90°/180°), and every scheme fails the same rays as
+      before. The twin's gate takes 6.6 s, not 14.3 s._
+
     - _The rays:_ 1,046, all gated:
       - 40 disc, 30 limb, 20 inside and 108 near-level for the march;
       - 120 sky, 336 band, 224 past the visible horizon, 72 high limb and 96 high band for the sky
@@ -6105,9 +6180,9 @@ medium, sizes, figure)`.
       17.4% (the 80 km limb). As built: 51.5% and 83.7%.
     - _The run's other checks._ One FAIL: R07.T8.a's "a photorealistic frame tones a lit planet
       onto the canvas over a black sky" (`smoke/bodies.ts`). It touches no atmosphere code, and it
-      failed the same way on lane C's RTX runs at 0c57be5, before and after. _Fixed in 6673319f
-      (f11d4b9a on the shading lane's branch): the check read the canvas back after its texture
-      was destroyed (R07's Risks, "T8.a's canvas check on the RTX 3080, fixed")._
+      failed the same way on lane C's RTX runs at 0c57be5 (landed as 28479b9), before and after.
+      _Fixed in 6673319f (f11d4b9a on the shading lane's branch): the check read the canvas back
+      after its texture was destroyed (R07's Risks, "T8.a's canvas check on the RTX 3080, fixed")._
   - _Option 1's largest difference_ (the same run).
     - _The variant._ 28479b9's even steps and step form, with the densities once, against 28479b9's
       kernels as built.
@@ -6122,9 +6197,9 @@ medium, sizes, figure)`.
       inside both locks, at a load of 2.0–2.7 (at most 3.2 during a run) with 28–29 GB free. The
       telemetry sampler (`crash-telemetry`, every 2 s) was active throughout.
     - _The builds._ Before is 28479b9's instrumented build (`laneC/t14diag/out-instrumented/`).
-      After is the head's (12023f3), with lane D's two instruments (`t12e/out-after/`). The order
-      was high and low before, then high and low after. Figures are after the 10 s warm-up, from
-      `t12e/timing/analyse2.py`.
+      After is the head's (12023f3, landed as 657c1091), with lane D's two instruments
+      (`t12e/out-after/`). The order was high and low before, then high and low after. Figures are
+      after the 10 s warm-up, from `t12e/timing/analyse2.py`.
 
     | ms, p50 / p95        | High, before  | High, after   | Low, before   | Low, after    |
     | -------------------- | ------------- | ------------- | ------------- | ------------- |
@@ -6172,6 +6247,23 @@ medium, sizes, figure)`.
     - _High's atmosphere row against its 1 ms estimate_ (a finding for T19 and R12): 2.62 / 3.37
       ms p50 / p95 at the driver's clocks, against 2.66 / 3.87 before. The march's 18% saving pays
       for the sky view's 2.5 times the steps.
+
+  - _R08.T8 (2026-10-21, `decision-r08-t8-leans.md` §2 and §4)._ Since R08.T8 the ray march also
+    draws the sky from inside the air, in each setting's march band. Every two-sided sky segment it
+    marches (nothing drawn along it), from inside or outside the air, takes the sun-aware warp
+    (`decision-r08-t8-leans.md` §5.4): even steps where the Sun is ahead or across the ray, R05's
+    one-sided placement from the segment's start where it is behind (`marchEvenStep`, cut at layer
+    edges by `marchWalkEvenStep`). One-sided segments and drawn
+    surfaces keep this task's placement, and `marchSplit` takes `shell.x <= 0 && depth > 0`. The sky
+    view and the multiple-scattering kernel are unchanged. The placement from outside had failed the
+    night-side and terminator limb (sun 90–105° at the tangent point; 12.19% at high), which the gate
+    now samples. Even steps from inside alone stepped by 13–36% (high) and 67–164% (low) at the top.
+    The limb from orbit moves: the gate's limb family at high to 0.47% / 4.35% (from 1.05% /
+    1.16%), and its march families under the warp to 0.45% / 4.69%. At low its worst twilight ray
+    is 23.94% (it was 5.87%), and `LOW_TWIN_WORST.rayMarch` is re-measured (0.036 / 0.240). The
+    gate gains the night-side limb and the camera's last light (1,641 rays). No reference, drawn
+    surface or sky-view texel moves. The figures are in plan 08's Risks,
+    "Deviations in T8.a, as built".
 - **Deviations in T11.a, as built** (2026-10-02 and 2026-10-03).
   - _Device limits_ (decisions-r06-r07.md item 7). `createWebGpuEngine` requests
     `requiredLimits(adapter, overrides)` (`platform.ts`): the adapter's
@@ -6658,7 +6750,9 @@ medium, sizes, figure)`.
   `box: OrientedBox` (the centre's spheroid normal and two tangents, with half-extents) beside its
   sphere, whose centre is the box's; the bounds sample the patch's boundary at every fourth vertex
   and the centre vertex at both ends of the level's height range and pad by the largest chord
-  between neighbouring samples (about a sixteenth of the patch). Added beside the Provides names:
+  between neighbouring samples (about a sixteenth of the patch). _The normal's margin amended by
+  R10.T14.e_ (plan 10: the normal's half-extent takes the chord's sagitta; the tangents and the
+  sphere keep the chord). Added beside the Provides names:
   in `planet.ts` `LEVEL_TABLE_STRIDE`, `levelBoundM`, `levelHeightRangeM`, `lowestHeightM`,
   `spheroidPoint`, `spheroidNormal` and `surfacePoint`; in `bounds.ts` `OrientedBox`,
   `boxCorners`, `relativeBounds`, `distanceToBoxM` (selection's distance to the nearest point)
@@ -6671,6 +6765,44 @@ medium, sizes, figure)`.
   the module itself. `planetGeometry` refuses a figure not 0 < c ≤ a and a table not 100 finite
   entries. Shared test fixtures: `src/test/terrainFixtures.ts` (`UNIT_BOUNDS`, `WGS84_FIGURE`,
   `goldenLevelTable`, `selectionOf`).
+  - _A gap closed by R09.T8.d_ (2026-10-20; decision-r09-t8d-reach §7 and follow-up 1). Selection
+    drops a node and its whole subtree when no view sees its box. Its box with nothing baked above
+    took the level's own row, and the baked range's clamp took it too, so neither held the finer
+    levels' ground nor the skirts, which hang ε_n and an `f32` step below the edge vertices. On the
+    test planet a finer level adds octaves; on a generated world the old ±150 km rows hid it at
+    every level but 0. Both now take `subtreeHeightRangeM` (`planet.ts`): the rows from the node's
+    parent's to the deepest, each low less that level's skirt depth, the bake's margin taken off at
+    the call. `patchBounds`' default keeps the level's own range for callers that do not prune; the
+    count model (`cacheBudget.ts`), which prunes, takes the subtree's. Re-pinned with it, each
+    move stated in its test:
+    - `select.test.ts`' digests: one view with no ranges and the 1.5 km pose with no budget,
+      12,721 → 12,722 patches; under the budgets of 981 and 1,952 the same counts, with every
+      box's bounds moved; the approach still 38,746 patches over its 48 frames, its bounds moved.
+      Every other digest is as it was.
+    - The count model's own table (`cacheBudget.test.ts`): the wire column's greatest frustum peak
+      at 400 km, 32 → 33 on the boxes' horizon and 24 → 25 on the exact one. No other figure moved.
+    - The descent's replay (`cache.test.ts`): low lit past its slots in 110 frames, from 107.
+    - `demandRecord.test.ts`' fourteen windows did not move.
+
+    A test keeps a node with nothing baked where a finer row rises above the horizon and its own
+    row does not, and fails without the union (checked by hand). Another holds every vertex and
+    skirt bottom of level-0 to level-5 bakes over the Moon-like fixture inside its own level's box
+    and every coarser one's.
+
+  - _The widening, by the same task_ (decision-r09-t8d-reach follow-up 2). The bake hangs a
+    level-m patch's skirts from its own heights and its morph targets, its parent level's, by ε_m
+    and an `f32` step over both, so each level's skirt bottom in the union is the lower of its row's
+    low and its parent row's, less that. A baked range widened by ε_k + ε_{n−1} and hung its skirt
+    by ε_n, which held only while ε never rose with the level: it widens by ε_k + ε*\_n, ε*_n the
+    largest ε_m over m ≥ n − 1, and hangs the deepest skirt from level n on, the largest ε_m over
+    m ≥ n, both built in `tablesOf`. Every union and maximum stops at the planet's finest level
+    drawn, beneath which no patch is: the test planet's ε rises from 0 at level 19 to 0.037 m at
+    20, which moved two demand windows and the approach until the maxima stopped there. No pin
+    moved where ε does not rise. Tests: a non-monotone ε table whose baked range must hold every
+    finer level's vertices and skirts, which fails without the suffix maxima (checked by hand:
+    −132 m against −1,112 m); a table whose ε rises under a deeper parent row; and the Moon-like
+    fixture's bakes of levels 0 to 3 inside the range inherited from their own bake or their
+    parent's, which fails on the old clamp at levels 0 to 2 (checked by hand).
 - **Deviations in T7.b's selection, as built (2026-10-03).** `selectPatches` charges a level
   `selectionErrorM` = ε_n + `chordSagittaM`, the flat triangles' sag below the datum, which ε_n, a
   bound on heights, leaves out; without it a zero-height spheroid (R07's `mesh` regime) never
@@ -7322,7 +7454,8 @@ SCRIPTED`; `VIEW, WIREFRAME, CRAFT, CHASE`), and points with `aria-details` to t
         with hysteresis at 9.5 and 10.5 km;
       - the ground speed, whole from 100 m/s; the vertical speed, signed, to 0.01 m/s;
       - `CAMERA ELV`, signed;
-      - `SITE HEIGHT`, signed whole metres;
+      - `SITE HEIGHT`, signed whole metres (renamed `SITE ELEVATION`, in `ELEVATION`'s form, by
+        R10.T12; signoff-9);
       - `FINEST TERRAIN HELD` `YES`/`NO`;
       - the patch counts, which break only at their `·`.
 
@@ -8148,3 +8281,39 @@ SCRIPTED`; `VIEW, WIREFRAME, CRAFT, CHASE`), and points with `aria-details` to t
     - the low setting with `baked-offsets` throws;
     - a high variant of `face-differences` with mesh normals reaches the pool, the material and
       `terrainSlotLayout`'s slot count, and keeps them through a restore.
+- **R05.T18's worker count, raised (lean, 2026-11-01; lane perf-terrain-bakes).**
+  `defaultHeightWorkers` is clamp(max(⌊t ÷ 4⌋, t − 8), 1, 8), t the hardware threads: eight at 16,
+  Design note 11's two at eight; the spike's default follows it. Pending: the owner's sweep at 16
+  threads (`scripts/workerSweep.mjs --workers 3,4,6,8`), which confirms or lowers it.
+- **The worker count by performance cores (lean, 2026-11-01; lane perf-terrain-bakes).** Where
+  macOS names its performance level's processors (`hw.perflevel0.logicalcpu`, Apple silicon), the
+  main process hands them to `HyperionApi.performanceThreads` (`main/performanceThreads.ts`,
+  `preload/machineLaunch.ts`), and `defaultHeightWorkers` takes clamp(P − 2, 1, 8) of them; `null`
+  elsewhere. Pending: the owner's Mac run of the same sweep.
+- **An Apple chip's efficiency cores counted at a third (lean, 2026-11-01; lane
+  perf-terrain-bakes-2).** clamp(P − 2 + ⌊E ÷ 3⌋, 1, 8), E from `hw.perflevel1.logicalcpu`: 4 on
+  the M5, 3 on an M1, unchanged where E ≤ 2. The owner's `workerSweep.mjs` on the Mac decides it.
+- **The server's pool beside them on Apple silicon (lean, 2026-11-03; lane
+  fix-session-load-spike).** `hyperion-server`'s default `--num-workers` there is min(P + ⌊E ÷ 3⌋
+  − 2, cores − 1), at least 1 (`config.rs` `workers_for`, read through gdt-cpus's
+  `hw.perflevelN`): 4 on the M5, where it was 9, so that the pool and the height workers stay
+  within about 2P. Elsewhere unchanged. The brief's "at a session's start" read as the pool's size
+  at the server's start: the server never hears of a fixture's terrain session.
+- **R05.T18's first draws after the batched bake (2026-11-01; lane perf-terrain-bakes-2).** About
+  97 high drafts a second at eight workers on the pod's stream, against 94 before and 129.9 asked:
+  the batching cut the double normals (the refinements) by a fifth, but a cold draft is mostly the
+  class weights' steepness quadrature (libm's `exp`, a quarter of it in wasm) and the horizon's far
+  field, neither batched. Figures in the lane's outbox.
+- **The selection at CSS px (lean, 2026-11-01; lane fix-retina-frame).** A view's terrain selects,
+  hands over and is judged `DETAIL LIMITED` (Design notes 7 and 23) at its presented size ÷ max(1,
+  DPR) (`handover.ts` `selectionViewport`): `selectionPx` beside `presentedPx` on
+  `TerrainViewReport`, `PhotorealInputs`, `PhotorealFrame`, `BodyFrameOptions`,
+  `LiveFrameTerrainInput` and `WireframeTerrainInput`, absent meaning `presentedPx`;
+  `TerrainView.viewport` and `ViewSelectionInput.viewport` carry it. Bit for bit at DPR 1. The
+  views check's `terrainHandover` and `handoverRangeAtM` take the selection's width. The descent
+  spike still selects at its canvas's device px.
+- **The smoke waits for its first worker bake (2026-11-02; lane fix-spike-smoke).** A smoke's 10 s
+  of script run from its first worker bake; one with none by `smokeBakeLimitS` (60 s on a GPU,
+  300 s in the software mode) fails there. Its log says how long it flew and shows its geometry block,
+  or, where no segment drew a patch, the settings and "No segment sampled drawn terrain"
+  (`geometrySmokeLines`): TEST MOON's surveyed cells come into view only below about 275 km.

@@ -22,6 +22,7 @@ import type {
   SceneStateDto,
   SceneSystemDto,
   SeenPositionDto,
+  SurfaceRevisionDto,
   SystemIdHex,
   SystemPlaceDto,
   UniverseTime,
@@ -31,6 +32,7 @@ import { METRES_PER_LIGHT_YEAR, SECONDS_PER_JULIAN_YEAR } from "@hyperion/protoc
 import { norm, vec3, type Vec3 } from "../../geometry/vec3";
 import { CLOCK_WINDOW_YR } from "../galaxy/model";
 import { toSystemBodiesModel } from "../system/bodiesWire";
+import { GRAVITATIONAL_CONSTANT_M3_PER_KG_S2 } from "../system/constants";
 import { SPEED_OF_LIGHT_M_PER_S } from "./lightTime";
 import type {
   BodyGrant,
@@ -58,12 +60,20 @@ export type SceneModelResult =
  * A notification applied, or why it could not be.
  *
  * @remarks
- * `sequence` is a gap or a step back in the notifications' numbering, which the socket never
- * causes: the server's bug, after which `useScene` resubscribes (Design note 4). `fault` is a
- * scene the display cannot use.
+ * `ok` carries the scene after it and the notification's `surface_revisions` (R09.T19.b), each
+ * body whose surveyed coverage grew with its latest revision, empty where it named none: they are
+ * events for the bodies' fields (plan R10, R10.T16.a), not part of the scene, so the model keeps
+ * none of them. `sequence` is a gap or a step back in the notifications' numbering, which the
+ * socket never causes: the server's bug, after which `useScene` resubscribes (Design note 4).
+ * `fault` is a scene the display cannot use.
  */
 export type SceneUpdate =
-  | SceneModelResult
+  | {
+      readonly kind: "ok";
+      readonly model: SceneModel;
+      readonly surfaceRevisions: ReadonlyArray<SurfaceRevisionDto>;
+    }
+  | { readonly kind: "fault"; readonly fault: string }
   | { readonly kind: "sequence"; readonly expected: number; readonly received: number };
 
 function toVec3([x, y, z]: readonly [number, number, number]): Vec3 {
@@ -272,19 +282,14 @@ function toSystem(
 }
 
 /**
- * The simulation's constant of gravitation, m³ kg⁻¹ s⁻² (CODATA 2018,
- * `units::consts::GRAVITATIONAL_CONSTANT`), by which a primary's mass is read from an orbit's μ.
- */
-const GRAVITATIONAL_CONSTANT = 6.674_3e-11;
-
-/**
  * Every body's Hill radius at pericentre, m, where its record holds its mass and a bound orbit:
  * plan 14's `hill_radius`, a (1 − e) (m ÷ 3M)^⅓, operation for operation.
  *
  * @remarks
- * The primary's mass M is the orbit's μ ÷ G less the body's own, since μ = G (M + m); the kilograms
- * are the wire's, not the model's Earth masses, so that no conversion stands between the two sides.
- * A body below `mass_and_orbit`, whose mass and orbit are withheld, has none.
+ * The primary's mass M is the orbit's μ ÷ G less the body's own, since μ = G (M + m), G being the
+ * simulation's ({@link GRAVITATIONAL_CONSTANT_M3_PER_KG_S2}); the kilograms are the wire's, not the
+ * model's Earth masses, so that no conversion stands between the two sides. A body below
+ * `mass_and_orbit`, whose mass and orbit are withheld, has none.
  */
 function hillRadii(bodies: ReadonlyArray<BodySummaryDto>): ReadonlyMap<BodyIdHex, number> {
   const radii = new Map<BodyIdHex, number>();
@@ -294,7 +299,7 @@ function hillRadii(bodies: ReadonlyArray<BodySummaryDto>): ReadonlyMap<BodyIdHex
     }
     const massKg = body.mass_kg.value;
     const orbit = body.orbit.value.orbit;
-    const primaryKg = orbit.mu_m3_s2 / GRAVITATIONAL_CONSTANT - massKg;
+    const primaryKg = orbit.mu_m3_s2 / GRAVITATIONAL_CONSTANT_M3_PER_KG_S2 - massKg;
     const e = orbit.eccentricity;
     if (massKg > 0 && primaryKg > 0 && e >= 0 && e < 1) {
       radii.set(body.id, orbit.semi_major_axis_m * (1 - e) * Math.cbrt(massKg / (3 * primaryKg)));
@@ -392,14 +397,47 @@ function withBody(system: SceneSystemDto, body: SceneBodyDto): SceneSystemDto {
 }
 
 /**
- * Applies one notification to the scene, giving the scene after it.
+ * A notification's `surface_revisions`, checked: none where it names none, and `null` where the
+ * list is not one of bodies, each with a whole revision of at least 1 (R09.T19.b's
+ * `SurfaceRevisionDto`), which the protocol does not check beyond the envelope's tags.
+ */
+function surfaceRevisionsOf(
+  revisions: SceneNotificationDto["surface_revisions"],
+): ReadonlyArray<SurfaceRevisionDto> | null {
+  if (revisions === undefined) {
+    return [];
+  }
+  // Read as the server's, unchecked: the wire's types promise more than the protocol holds.
+  const sent: unknown = revisions;
+  return Array.isArray(sent) && sent.every(isSurfaceRevision) ? revisions : null;
+}
+
+/** Whether a part of a message is a body with a whole revision of at least 1. */
+function isSurfaceRevision(value: unknown): boolean {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "body" in value &&
+    typeof value.body === "string" &&
+    "revision" in value &&
+    typeof value.revision === "number" &&
+    Number.isSafeInteger(value.revision) &&
+    value.revision >= 1
+  );
+}
+
+/**
+ * Applies one notification to the scene, giving the scene after it, with the notification's
+ * surface revisions.
  *
  * @remarks
  * The notification's `sequence` must be the model's plus one; anything else is a `sequence` error
  * and the model is unchanged. An arrival replaces the system and every body before it, and its
  * tidal radius replaces the one held; leaving for the galactic frame clears both. Re-sent bodies replace their
  * records and grants by ID, the latest winning. The clock always, and the ship and the craft when
- * sent, replace what was held. A body re-sent while the scene has no system is a fault.
+ * sent, replace what was held. A body re-sent while the scene has no system is a fault, as is a
+ * `surface_revisions` list that is not one of bodies with their revisions. The revisions are kept
+ * on the update alone, in the order sent, and never on the model (plan R10, R10.T16.a).
  *
  * @param designate - Names a system, as for {@link toSceneModel}.
  */
@@ -414,6 +452,10 @@ export function applySceneNotification(
   }
   if (!isPresent(notification.clock) || !Array.isArray(notification.bodies)) {
     return { kind: "fault", fault: "clock or bodies missing" };
+  }
+  const surfaceRevisions = surfaceRevisionsOf(notification.surface_revisions);
+  if (surfaceRevisions === null) {
+    return { kind: "fault", fault: "surface revisions unusable" };
   }
   let system = model.wire.system;
   let tidalRadiusM = model.wire.tidal_radius_m;
@@ -445,5 +487,6 @@ export function applySceneNotification(
     ...(system === null || tidalRadiusM === undefined ? {} : { tidal_radius_m: tidalRadiusM }),
     craft: notification.craft ?? model.wire.craft,
   };
-  return build(wire, designate, model);
+  const built = build(wire, designate, model);
+  return built.kind === "ok" ? { ...built, surfaceRevisions } : built;
 }

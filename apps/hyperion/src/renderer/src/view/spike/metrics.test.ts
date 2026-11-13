@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import type { PassTimes } from "../engine/types";
+import { SETTINGS } from "../quality/qualitySetting";
 import {
   type FrameSample,
   SpikeMetrics,
   type SpikeMetricsOptions,
   TIMED_PASSES_A_FRAME,
 } from "./metrics";
+import type { SpikeGeometrySample } from "./spikeRun";
 
 const OPTIONS: SpikeMetricsOptions = {
   warmupS: 10,
@@ -169,6 +171,15 @@ describe("the spike's metrics", () => {
     expect(metrics.report(EXTRA).untimedPasses).toBe(3);
   });
 
+  it("counts no untimed pass of a frame that counts none, and records the frame", () => {
+    const metrics = new SpikeMetrics(OPTIONS);
+    metrics.frame(sample(1, 0, { passesSubmitted: null }));
+    metrics.frame(sample(2, 0.1, { passesSubmitted: TIMED_PASSES_A_FRAME + 2 }));
+    const report = metrics.report(EXTRA);
+    expect(report.untimedPasses).toBe(2);
+    expect(report.frames.scriptTimesS).toEqual([0, 0.1]);
+  });
+
   it("keeps each segment's streaming figures to its own frames and events", () => {
     const metrics = new SpikeMetrics(OPTIONS);
     metrics.frame(sample(1, 0.0, { patchesHard: 100, patchesCalibrated: 40 }));
@@ -248,5 +259,120 @@ describe("the spike's metrics", () => {
       canvas: { widthPx: 1280, heightPx: 720 },
       latePipelines: [],
     });
+  });
+
+  it("gives a generated world's geometry by segment, each count's median and largest, null where no frame had it (plan R14, R14.T1.f)", () => {
+    const metrics = new SpikeMetrics(OPTIONS);
+    const settings = SETTINGS.low.geometry;
+    const counts = (
+      interior: number,
+      drawnTriangles: number,
+      overlayTriangles: number | null,
+    ): SpikeGeometrySample => ({
+      settings,
+      counts: {
+        patches: { interior, edge: 2, fins: 0, edgeStandIns: 0 },
+        drawnTriangles,
+        litClusterTriangles: drawnTriangles - 1,
+        casterTriangles: null,
+        overlayTriangles,
+      },
+    });
+    metrics.frame(sample(1, 0, { geometry: counts(10, 100, null) }));
+    metrics.frame(sample(2, 0.5, { geometry: counts(12, 300, 90) }));
+    metrics.frame(sample(3, 1, { geometry: counts(11, 200, 80) }));
+    metrics.frame(sample(4, 2.5, { geometry: { settings, counts: null } }));
+    const geometry = metrics.report(EXTRA).geometry;
+    expect(geometry).toEqual({
+      settings,
+      segments: [
+        {
+          segment: "orbit coast",
+          interiorPatches: { frames: 3, p50: 11, max: 12 },
+          edgePatches: { frames: 3, p50: 2, max: 2 },
+          finPatches: { frames: 3, p50: 0, max: 0 },
+          drawnTriangles: { frames: 3, p50: 200, max: 300 },
+          litClusterTriangles: { frames: 3, p50: 199, max: 299 },
+          casterTriangles: null,
+          overlayTriangles: { frames: 2, p50: 85, max: 90 },
+        },
+        {
+          segment: "descent arc",
+          interiorPatches: null,
+          edgePatches: null,
+          finPatches: null,
+          drawnTriangles: null,
+          litClusterTriangles: null,
+          casterTriangles: null,
+          overlayTriangles: null,
+        },
+      ],
+    });
+    // The test planet's frames carry none, and its report no geometry.
+    const planet = new SpikeMetrics(OPTIONS);
+    planet.frame(sample(1, 0));
+    expect(planet.report(EXTRA).geometry).toBeUndefined();
+  });
+});
+
+describe("the spike's report in parts (R14's Mac measurements)", () => {
+  /** Five frames over the two segments, numbering resolves 1 to 7, with times for some. */
+  function flown(): SpikeMetrics {
+    const metrics = new SpikeMetrics({ ...OPTIONS, firstEngineFrame: 0 });
+    for (const [engineFrame, scriptTimeS] of [
+      [1, 0],
+      [3, 1],
+      [4, 2],
+      [6, 3],
+      [7, 3.5],
+    ] as const) {
+      metrics.frame(sample(engineFrame, scriptTimeS));
+    }
+    metrics.passTimes(times(1, [["terrain", 1e6]]));
+    metrics.passTimes(times(3, [["terrain", 2e6]]));
+    // A label first timed in the fourth frame.
+    metrics.passTimes(times(5, [["atmosphere view", 3e5]]));
+    return metrics;
+  }
+
+  it("counts the frames before a script time", () => {
+    const metrics = flown();
+    expect([0, 1, 2.5, 3.5, 9].map((s) => metrics.framesBefore(s))).toEqual([0, 1, 3, 4, 5]);
+  });
+
+  it("gives each frame's figures in a part as the whole report gives them", () => {
+    const metrics = flown();
+    const inFlight = { ...EXTRA, inFlightResolves: [6] };
+    const whole = metrics.report(inFlight).frames;
+    const parts = [
+      metrics.reportPart(inFlight, 0, 2),
+      metrics.reportPart(inFlight, 2, 3),
+      metrics.reportPart(inFlight, 3, 5),
+    ].map((part) => part.frames);
+    const joined = (key: Exclude<keyof typeof whole, "passes">): ReadonlyArray<number> =>
+      parts.flatMap((frames) => frames[key]);
+    expect([
+      joined("scriptTimesS"),
+      joined("missingResolves"),
+      joined("inFlightResolves"),
+      whole.passes.map(({ label }) => [
+        label,
+        parts.flatMap((frames) => frames.passes.find((each) => each.label === label)?.gpuMs ?? []),
+      ]),
+    ]).toEqual([
+      whole.scriptTimesS,
+      whole.missingResolves,
+      whole.inFlightResolves,
+      whole.passes.map(({ label, gpuMs }) => [label, gpuMs]),
+    ]);
+  });
+
+  it("leaves the geometry block to the whole report", () => {
+    const metrics = new SpikeMetrics(OPTIONS);
+    metrics.frame(sample(1, 0, { geometry: { settings: SETTINGS.low.geometry, counts: null } }));
+    expect([
+      metrics.report(EXTRA).geometry === undefined,
+      metrics.reportPart(EXTRA, 0, 1).geometry,
+    ]).toEqual([false, undefined]);
   });
 });

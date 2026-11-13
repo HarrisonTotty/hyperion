@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import fixture from "../fixtures/density_map_4x2.json" with { type: "json" };
-import { decodeDensityMap } from "./densityMap";
+import extinctionFixture from "../fixtures/extinction_map_4x2.json" with { type: "json" };
+import { decodeDensityMap, decodeExtinctionMap } from "./densityMap";
 import type { DensityMap } from "./generated/DensityMap";
+import type { ExtinctionMap } from "./generated/ExtinctionMap";
 
 /** The fixture's map, checked into the generated type. */
 function fixtureMap(): DensityMap {
@@ -130,5 +132,59 @@ describe("decodeDensityMap", () => {
 
   it("throws on a depth other than 8 or 16 bits", () => {
     expect(() => decodeDensityMap({ ...fixtureMap(), bits: 12 })).toThrow(/12 bits/);
+  });
+});
+
+/** The extinction fixture's map, checked into the generated type. */
+function extinctionFixtureMap(): ExtinctionMap {
+  const { map } = extinctionFixture;
+  const [centreX, centreY] = map.centre_ly;
+  if (map.view !== "face_on") {
+    throw new Error("the extinction fixture is no longer a face-on map");
+  }
+  if (centreX === undefined || centreY === undefined) {
+    throw new Error("the extinction fixture's centre lost a coordinate");
+  }
+  return { ...map, view: map.view, centre_ly: [centreX, centreY] };
+}
+
+describe("decodeExtinctionMap", () => {
+  it("decodes the shared 8-bit fixture", () => {
+    const decoded = decodeExtinctionMap(extinctionFixtureMap());
+
+    expect(decoded.widthPx).toBe(4);
+    expect(decoded.heightPx).toBe(2);
+    expect(decoded.maxCode).toBe(255);
+    expect(decoded.codes).toBeInstanceOf(Uint8Array);
+    expect([...decoded.codes]).toEqual(extinctionFixture.codes);
+  });
+
+  it("recovers the fixture's extinctions to within half a code, and none at the floor", () => {
+    const decoded = decodeExtinctionMap(extinctionFixtureMap());
+    const { floor_log10_mag: floor, ceiling_log10_mag: ceiling } = extinctionFixture.map;
+    const halfStep = (ceiling - floor) / (decoded.maxCode - 1) / 2;
+    const values = [...decoded.codes].map((code) => decoded.log10Mag(code));
+    const raw = extinctionFixture.log10_mag;
+
+    expect(floor).toBe(-2);
+    expect(values.map((value) => value === null)).toEqual(
+      raw.map((value) => value === null || value <= floor),
+    );
+    const errors = raw.flatMap((value, index) =>
+      value === null || value <= floor ? [] : [Math.abs((values[index] ?? Number.NaN) - value)],
+    );
+    expect(Math.max(...errors)).toBeLessThanOrEqual(halfStep);
+    expect(decoded.log10Mag(1)).toBeCloseTo(floor, 12);
+    expect(decoded.log10Mag(255)).toBeCloseTo(ceiling, 12);
+  });
+
+  it("names the extinction map in its byte-count error", () => {
+    expect(() => decodeExtinctionMap({ ...extinctionFixtureMap(), height_px: 3 })).toThrow(
+      /extinction map holds 8 bytes where 4 × 3 pixels at 8 bits need 12/,
+    );
+  });
+
+  it("refuses a code above the map's depth", () => {
+    expect(() => decodeExtinctionMap(extinctionFixtureMap()).log10Mag(256)).toThrow(RangeError);
   });
 });

@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
 
-import { type CatalogueEntry, WGSL_CATALOGUE } from "./catalogue";
+import { type CatalogueEntry, TABLE_ONLY_ENTRIES, WGSL_CATALOGUE } from "./catalogue";
+import { fragmentOutputAt } from "./webgpu/fragmentOutput";
+import {
+  assertOutputsFit,
+  ENTRY_POINTS,
+  materialBindings,
+  storageBuffersPerStage,
+} from "./webgpu/materials";
+import { TERRAIN_CLUSTER_ID_PRIMITIVE_MATERIALS } from "../terrain/terrainMaterial";
+import { pipelineOutputs } from "./webgpu/pipelineOutputs";
 
 /**
  * An effect's display name (decided 2026-10-02): upper case, at most three words, no colon and no
@@ -25,9 +34,12 @@ function displayNameOf(entry: CatalogueEntry): string | null {
   return name;
 }
 
-/** Every material's and post-process's display name. */
+/**
+ * Every material's and post-process's display name but the table-only twins' (R08.T9.b's lever),
+ * which a refusal names by their originals' effects.
+ */
 const DISPLAY_NAMES: ReadonlyArray<string> = WGSL_CATALOGUE.flatMap((entry) => {
-  const name = displayNameOf(entry);
+  const name = TABLE_ONLY_ENTRIES.includes(entry) ? null : displayNameOf(entry);
   return name === null ? [] : [name];
 });
 
@@ -87,5 +99,63 @@ describe("the catalogue's compute kernels", () => {
       entry.kind === "compute" ? [entry.spec.name] : [],
     );
     expect(names).toContain("BODY DISC CELLS");
+  });
+});
+
+describe("the catalogue's materials' outputs (plan R14, R14.T2.b's finding)", () => {
+  const materials = WGSL_CATALOGUE.flatMap((entry) => (entry.kind === "material" ? [entry] : []));
+
+  it("reads every material's fragment output from its WGSL", () => {
+    expect(
+      materials
+        .filter(
+          ({ spec }) =>
+            fragmentOutputAt(spec.fragmentWgsl, ENTRY_POINTS.fragment, 0).kind === "unread",
+        )
+        .map(({ spec }) => spec.name),
+    ).toEqual([]);
+  });
+
+  it("writes into each of its targets an output the target's format takes, on either canvas format", () => {
+    const refused: string[] = [];
+    for (const { spec, targets } of materials) {
+      // `getPreferredCanvasFormat` returns one of these two (W3C WebGPU, §4.2).
+      for (const preferred of ["bgra8unorm", "rgba8unorm"] as const) {
+        const outputs = (targets ?? ["rgba16float"]).flatMap((target) =>
+          pipelineOutputs(target, preferred),
+        );
+        try {
+          assertOutputsFit(
+            spec,
+            outputs.map(([format]) => format),
+          );
+        } catch (error: unknown) {
+          refused.push(error instanceof Error ? error.message : String(error));
+        }
+      }
+    }
+    expect(refused).toEqual([]);
+  });
+});
+
+/** WebGPU's default `maxStorageBuffersPerShaderStage`, which the engine never raises. */
+const DEFAULT_STORAGE_BUFFERS_PER_STAGE = 8;
+
+describe("the catalogue's materials' storage bindings (plan R14, R14.T2.c)", () => {
+  it("count at most WebGPU's default eight storage buffers in each stage of every material", () => {
+    const specs = [
+      ...WGSL_CATALOGUE.flatMap((entry) => (entry.kind === "material" ? [entry.spec] : [])),
+      // The ID raster's `primitive_index` forms, which the catalogue leaves out (SwiftShader has no
+      // `primitive-index`).
+      ...TERRAIN_CLUSTER_ID_PRIMITIVE_MATERIALS,
+    ];
+    const over = specs.flatMap((spec) => {
+      const counts = storageBuffersPerStage(materialBindings(spec));
+      return Math.max(counts.vertex, counts.fragment) > DEFAULT_STORAGE_BUFFERS_PER_STAGE
+        ? [`${spec.name}: ${String(counts.vertex)} vertex, ${String(counts.fragment)} fragment`]
+        : [];
+    });
+    expect(over).toEqual([]);
+    expect(specs.length).toBeGreaterThan(100);
   });
 });

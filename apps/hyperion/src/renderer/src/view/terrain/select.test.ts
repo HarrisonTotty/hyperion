@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { normalise, type Vec3, vec3 } from "../../geometry/vec3";
+import { add, normalise, scale, type Vec3, vec3 } from "../../geometry/vec3";
 import type { Quaternion } from "../camera/pose";
 import { NEAR_PLANE_M } from "../camera/projection";
 import { lookAlong, multiply, quaternionFromAxisAngle } from "../camera/quaternion";
+import { memoised } from "../../test/memo";
 import { seededRandom } from "../../test/seededRandom";
 import { goldenLevelTable, UNIT_BOUNDS, WGS84_FIGURE } from "../../test/terrainFixtures";
 import { distanceToBoxM, type PatchBounds, patchBounds, relativeBounds } from "./bounds";
+import { fieldCellIndex } from "./coverage";
 import { aboveHorizon, frustumOf, horizonCone, inFrustum } from "./cull";
 import { PATCH_QUADS, vertexDir, vertexSpacing, type Xyz } from "./cube";
 import {
@@ -15,12 +17,16 @@ import {
   EDGES,
   FACES,
   edgeNeighbour,
+  MAX_LEVEL,
   parentKey,
   type PatchKey,
   patchKeyString,
   rootKey,
+  sameKey,
 } from "./patchKey";
 import type { GroundContact } from "./grounded";
+import { lookaheadInput } from "./lookahead";
+import { joinDemand } from "./priority";
 import {
   levelBoundM,
   levelHeightRangeM,
@@ -28,19 +34,28 @@ import {
   planetGeometry,
   surfacePoint,
 } from "./planet";
+import { terrainClusterMesh } from "../clusters/templates";
 import {
   type HeightRangeLookup,
   inheritedHeightRangeM,
+  PATCH_LIT_TRIANGLES,
+  patchLitTriangles,
   PatchLeafSet,
   pruneSelectionMemo,
   SAGITTA_FACTOR,
+  type SelectedPatch,
   type Selection,
   type SelectionInput,
   selectionErrorM,
   selectPatches,
   screenSpaceErrorPx,
+  splitKeysOf,
+  type StrideErrorsM,
+  type SurveyLookup,
+  type TriangleBudget,
   type ViewSelectionInput,
 } from "./select";
+import { SurveyedCells } from "./surveyLookup";
 
 const PLANET = planetGeometry(WGS84_FIGURE, goldenLevelTable("off"));
 const HD = { widthPx: 1920, heightPx: 1080 };
@@ -345,13 +360,15 @@ function levelGaps(keys: readonly PatchKey[]): number {
     patches: new Map(
       keys.map((k) => [
         patchKeyString(k),
-        { key: k, bounds: UNIT_BOUNDS, forced: false, seen: true },
+        { key: k, bounds: UNIT_BOUNDS, forced: false, seen: true, views: 1 },
       ]),
     ),
     demand: [],
     limited: false,
     limitExcess: 0,
     hiddenBaked: [],
+    nearestSurveyM: Number.POSITIVE_INFINITY,
+    nearestSurveyByViewM: [Number.POSITIVE_INFINITY],
   };
   let gaps = 0;
   for (const k of keys) {
@@ -654,6 +671,45 @@ describe("selection under a patch budget", () => {
     expect([capped.limited, overTau]).toEqual([true, true]);
   });
 
+  describe("its hold on the last selection's splits (R10.T16.i)", () => {
+    const budgeted = (more: Partial<SelectionInput> = {}): Selection =>
+      selectPatches({
+        planet: PLANET,
+        views: [pose()],
+        setting: "high",
+        grounded: [],
+        maxPatches: 300,
+        ...more,
+      });
+
+    it("makes again every split the last selection made, at its pose", () => {
+      const before = budgeted();
+      const again = budgeted({
+        budgetHold: { split: splitKeysOf(before.patches.values()), margin: 0.2 },
+      });
+      expect([...again.patches.keys()].toSorted()).toEqual([...before.patches.keys()].toSorted());
+    });
+
+    it("refuses a split the last selection did not make past its share, within the budget", () => {
+      const free = budgeted();
+      const unheld = budgeted({ budgetHold: { split: new Set(), margin: 0.2 } });
+      expect({
+        free: free.patches.size > 240 && free.patches.size <= 300,
+        unheld: unheld.patches.size <= 240,
+        limited: unheld.limited,
+      }).toEqual({ free: true, unheld: true, limited: true });
+    });
+
+    it("moves no split where the budget does not bind", () => {
+      const free = select([pose()]);
+      const roomy = budgeted({
+        maxPatches: 2 * free.patches.size,
+        budgetHold: { split: new Set(), margin: 0.2 },
+      });
+      expect([...roomy.patches.keys()].toSorted()).toEqual([...free.patches.keys()].toSorted());
+    });
+  });
+
   it("keeps every forced patch whatever the budget", () => {
     const site = above(5);
     const contact: GroundContact = { positionM: site, radiusM: 20 };
@@ -675,6 +731,235 @@ describe("selection under a patch budget", () => {
       maxPatches: 10,
     });
     expect(forced.filter((k) => tight.patches.get(k)?.forced !== true)).toEqual([]);
+  });
+});
+
+/** A triangle budget of `patches` whole grids, every patch's errors `errorsM` (plan R14, R14.T3.e). */
+function trianglesBudget(
+  patches: number,
+  errorsM?: StrideErrorsM,
+  tolerancesPx: ReadonlyArray<number> = [],
+  fadingTriangles: TriangleBudget["fadingTriangles"] = () => 0,
+): TriangleBudget {
+  return {
+    maxTriangles: patches * PATCH_LIT_TRIANGLES[0],
+    bandFraction: 0.002,
+    moveFraction: 0,
+    tolerancesPx,
+    strideErrorsM: () => errorsM,
+    fadingTriangles,
+  };
+}
+
+/**
+ * A patch's reckoning at `distanceM` of E_L 10 m and e₂, e₄, e₈ 1, 2 and 4 m at τ 1 mrad, its
+ * bands 11,022, 12,024 and 14,028 m, `standIn` levels from its baked ancestor.
+ */
+function reckonedAt(distanceM: number, standIn: number | null = 0): number {
+  return patchLitTriangles(10, [1, 2, 4], distanceM, 1e-3, 0.002, standIn);
+}
+
+describe("selection under a triangle budget (plan R14, R14.T3.e)", () => {
+  const pose = (): ViewSelectionInput => view(LOW, lookingDown(LOW, 1.2));
+  const selected = (more: Partial<SelectionInput>): Selection =>
+    selectPatches({ planet: PLANET, views: [pose()], setting: "high", grounded: [], ...more });
+
+  it("counts a patch's 64 blocks and 32 strips at each stride, as the cluster mesh's templates draw them, and a mask one to three levels down at stride 1 as a whole patch at stride 2^levels", () => {
+    const strided = terrainClusterMesh().templates.filter((t) => !t.mayDiscard);
+    const at = (shape: string, stride: number): number =>
+      strided.find((t) => t.shape === shape && t.stride === stride)?.triangles ?? Number.NaN;
+    // A mask l levels down: (8 ÷ 2^l)² blocks and 4 × 8 ÷ 2^l strips at stride 1 (`terrainMaskCluster`).
+    const mask = (l: number): number =>
+      (8 / 2 ** l) ** 2 * at("terrain-block", 1) + 4 * (8 / 2 ** l) * at("terrain-skirt", 1);
+    expect([
+      [1, 2, 4, 8].map((s) => 64 * at("terrain-block", s) + 32 * at("terrain-skirt", s)),
+      [1, 2, 3].map(mask),
+    ]).toEqual([[...PATCH_LIT_TRIANGLES], PATCH_LIT_TRIANGLES.slice(1)]);
+  });
+
+  it("reckons a measured patch at the coarsest stride whose every band its nearest point is past, a stand-in as its mask or its whole grid draws, and an unmeasured patch its whole grid", () => {
+    const at = reckonedAt;
+    expect([
+      at(11_000),
+      at(11_023),
+      at(13_000),
+      at(14_029),
+      at(14_029, 1),
+      at(14_029, 2),
+      at(14_029, 3),
+      at(14_029, 4),
+      at(14_029, null),
+      patchLitTriangles(10, undefined, 1e9, 1e-3, 0.002, 0),
+      patchLitTriangles(10, [1, 2, Infinity], 1e9, 1e-3, 0.002, 0),
+    ]).toEqual([8_704, 2_304, 640, 192, 2_304, 640, 192, 8_704, 0, 8_704, 640]);
+  });
+
+  it("selects as the patch budget alone where every patch reckons its whole grid and the budget is that many grids", () => {
+    const patches = selected({ maxPatches: 300 });
+    const both = selected({ maxPatches: 300, triangleBudget: trianglesBudget(300) });
+    expect([[...both.patches.keys()], both.limited, both.limitExcess]).toEqual([
+      [...patches.patches.keys()],
+      patches.limited,
+      patches.limitExcess,
+    ]);
+  });
+
+  it("holds each view to the budget alone, so that a second view seeing the same patches binds no sooner, and reports each view's reckoning (research-leans-42)", () => {
+    const both = [pose(), pose()];
+    const patches = selected({ views: both, maxPatches: 300 });
+    const triangles = selected({
+      views: both,
+      maxPatches: 300,
+      triangleBudget: trianglesBudget(300),
+    });
+    const seen = [...triangles.patches.values()].filter((patch) => patch.seen).length;
+    expect([[...triangles.patches.keys()], triangles.litTriangles, patches.litTriangles]).toEqual([
+      [...patches.patches.keys()],
+      [seen * PATCH_LIT_TRIANGLES[0], seen * PATCH_LIT_TRIANGLES[0]],
+      undefined,
+    ]);
+  });
+
+  it("stops at the triangle budget where it binds before the patches, and says so", () => {
+    const patches = selected({ maxPatches: 100 });
+    const triangles = selected({ maxPatches: 300, triangleBudget: trianglesBudget(100) });
+    expect([[...triangles.patches.keys()], triangles.limited]).toEqual([
+      [...patches.patches.keys()],
+      true,
+    ]);
+  });
+
+  it("selects more patches at the same triangles where the patches stride, within the budget", () => {
+    const v = pose();
+    const tauRad = (2 * Math.tan(v.fovXRad / 2) * v.tauPx) / v.viewport.widthPx;
+    const smooth = selected({
+      maxPatches: 10_000,
+      triangleBudget: trianglesBudget(300, [0, 0, 0]),
+    });
+    const reckoned = [...smooth.patches.values()]
+      .filter((patch) => patch.seen)
+      .reduce(
+        (sum, patch) =>
+          sum +
+          patchLitTriangles(
+            selectionErrorM(PLANET, patch.key.level),
+            [0, 0, 0],
+            distanceToBoxM(relativeBounds(patch.bounds, v.camera.positionM)),
+            tauRad,
+            0.002,
+            0,
+          ),
+        0,
+      );
+    expect({
+      more: smooth.patches.size > 300,
+      within: reckoned <= 300 * PATCH_LIT_TRIANGLES[0] * (1 + 1e-9),
+    }).toEqual({ more: true, within: true });
+  });
+
+  it("reckons a seen patch at the least its fades draw whole at stride 1, whatever its strides (R14.T3.e's reckoning)", () => {
+    const v = pose();
+    const tauRad = (2 * Math.tan(v.fovXRad / 2) * v.tauPx) / v.viewport.widthPx;
+    const budgetOf = (fading: TriangleBudget["fadingTriangles"]): TriangleBudget =>
+      trianglesBudget(10_000, [0, 0, 0], [], fading);
+    const plain = selected({ maxPatches: 10_000, triangleBudget: budgetOf(() => 0) });
+    const [fadingPatch, coarsenPatch] = [...plain.patches.values()].filter((patch) => patch.seen);
+    if (fadingPatch === undefined || coarsenPatch === undefined) {
+      throw new Error("the test's pose sees fewer than two patches");
+    }
+    // Each patch's reckoning at its strides, as `patchLitTriangles` gives it.
+    const strided = (patch: SelectedPatch): number =>
+      patchLitTriangles(
+        selectionErrorM(PLANET, patch.key.level),
+        [0, 0, 0],
+        distanceToBoxM(relativeBounds(patch.bounds, v.camera.positionM)),
+        tauRad,
+        0.002,
+        0,
+      );
+    const asked: boolean[] = [];
+    const fades = selected({
+      maxPatches: 10_000,
+      triangleBudget: budgetOf((key, resident) => {
+        asked.push(resident);
+        return sameKey(key, fadingPatch.key)
+          ? PATCH_LIT_TRIANGLES[0]
+          : sameKey(key, coarsenPatch.key)
+            ? 4 * PATCH_LIT_TRIANGLES[0]
+            : 0;
+      }),
+    });
+    expect([
+      [...fades.patches.keys()],
+      (fades.litTriangles?.[0] ?? 0) - (plain.litTriangles?.[0] ?? 0),
+      // No baked ranges: every patch is drawn as its own.
+      asked.length > 0 && asked.every((resident) => resident),
+    ]).toEqual([
+      [...plain.patches.keys()],
+      PATCH_LIT_TRIANGLES[0] -
+        strided(fadingPatch) +
+        4 * PATCH_LIT_TRIANGLES[0] -
+        strided(coarsenPatch),
+      true,
+    ]);
+  });
+
+  it("reckons each patch's strides at its nearest point less the camera's approach before the next selection, its selection unchanged (R14.T3.e's reckoning)", () => {
+    const at = (moveFraction: number): Selection =>
+      selected({
+        maxPatches: 10_000,
+        triangleBudget: { ...trianglesBudget(10_000, [0, 0, 0]), moveFraction },
+      });
+    const [still, closing] = [at(0), at(0.1)];
+    expect([
+      [...closing.patches.keys()],
+      (closing.litTriangles?.[0] ?? 0) > (still.litTriangles?.[0] ?? 0),
+    ]).toEqual([[...still.patches.keys()], true]);
+  });
+
+  it("reckons each view's strides at its own tolerance, so that a view whose strides take a laxer τ′ reckons fewer triangles and selects more", () => {
+    // Rough ground, each stride's error 5 m: at τ few patches stride; at 8 τ most do.
+    const rough = selected({ maxPatches: 10_000, triangleBudget: trianglesBudget(150, [5, 5, 5]) });
+    const lax = selected({
+      maxPatches: 10_000,
+      triangleBudget: trianglesBudget(150, [5, 5, 5], [8]),
+    });
+    expect([rough.limited, lax.patches.size > rough.patches.size]).toEqual([true, true]);
+  });
+
+  it("keeps every forced patch whatever the triangle budget", () => {
+    const contact: GroundContact = { positionM: above(5), radiusM: 20 };
+    const free = selected({ grounded: [contact] });
+    const forced = [...free.patches.values()]
+      .filter((p) => p.forced)
+      .map((p) => patchKeyString(p.key));
+    const tight = selected({ grounded: [contact], triangleBudget: trianglesBudget(10) });
+    expect([
+      forced.length > 4,
+      forced.filter((k) => tight.patches.get(k)?.forced !== true),
+    ]).toEqual([true, []]);
+  });
+
+  it("weighs its leaves through every split and undo, as their own weights sum", () => {
+    const tree = new PatchLeafSet<PatchKey>(
+      () => true,
+      2,
+      (key, weight) => (weight === 0 ? key.level + 1 : 1),
+    );
+    const sum = (): number => [...tree.values()].reduce((total, key) => total + key.level + 1, 0);
+    for (const face of FACES) {
+      tree.addRoot(rootKey(face), rootKey(face));
+    }
+    const weights = [tree.weight === sum()];
+    tree.splitBalanced(rootKey(0), (child) => child);
+    weights.push(tree.weight === sum());
+    tree.begin();
+    tree.splitBalanced({ face: 0, level: 1, i: 0, j: 0 }, (child) => child);
+    tree.splitBalanced({ face: 0, level: 2, i: 0, j: 0 }, (child) => child);
+    weights.push(tree.weight === sum());
+    tree.rollback();
+    weights.push(tree.weight === sum(), tree.weight === 6 + 4 * 2 - 1, tree.weightOf(1) === 9);
+    expect(weights).toEqual([true, true, true, true, true, true]);
   });
 });
 
@@ -858,13 +1143,85 @@ function underBudget(c: BudgetCase): Selection {
   return selectPatches({ ...c.free, maxPatches: c.budget });
 }
 
+describe("the lookahead's selection (R10.T14.b)", () => {
+  // Baked to level 14, about 0.6 km wide, so that the level below is asked for a move of 1.5 km.
+  const heightRanges = bakedToDepth(14);
+  const inputAt = (positionM: Vec3): SelectionInput => ({
+    planet: PLANET,
+    views: [view(positionM, lookingDown(positionM, 1.2))],
+    setting: "high",
+    grounded: [],
+    heightRanges,
+    maxPatches: 2_000,
+  });
+  const up = normalise(LOW);
+  const east = normalise(vec3(-up.y, up.x, 0));
+  // Along the ground at 1.5 km a second, from 1.5 km up: about eleven times m ÷ (1 + m) of it.
+  const motion = { velocityMps: scale(east, 1_500), nearestM: 1_500 };
+
+  it("is selection's own pure function at the pose v × L on, at half the view's weight", () => {
+    const own = inputAt(LOW);
+    const ahead = lookaheadInput(own, [motion], 1);
+    if (ahead === null) {
+      throw new Error("a camera at 1.5 km/s selects ahead");
+    }
+    const ownView = own.views[0];
+    if (ownView === undefined) {
+      throw new Error("the input has its view");
+    }
+    const byHand = selectPatches({
+      ...own,
+      views: [
+        {
+          ...ownView,
+          camera: {
+            positionM: add(LOW, scale(motion.velocityMps, 1)),
+            orientation: ownView.camera.orientation,
+          },
+          weight: 0.5,
+        },
+      ],
+    });
+    const selected = selectPatches(ahead);
+    expect(selected).toEqual(byHand);
+    expect(selectPatches(ahead)).toEqual(selected);
+    // Ahead of the camera it asks for what its own pose does not.
+    const asked = new Set(selectPatches(own).demand.map((r) => patchKeyString(r.key)));
+    expect(selected.demand.some((r) => !asked.has(patchKeyString(r.key)))).toBe(true);
+  });
+
+  it("asks nothing more of a still camera, or of one with no motion yet, and selects ahead of a slow one", () => {
+    const own = inputAt(LOW);
+    const still = { velocityMps: vec3(0, 0, 0), nearestM: 1_500 };
+    // Closing at 8% of its height a second, as TERRAIN TEST's descent does at its fastest.
+    const slow = { velocityMps: scale(up, -0.08 * 1_500), nearestM: 1_500 };
+    expect(lookaheadInput(own, [still], 2)).toBeNull();
+    expect(lookaheadInput(own, [null], 2)).toBeNull();
+    expect(lookaheadInput(own, [slow], 2)).not.toBeNull();
+    // At the camera's own pose its demand, at half the weight, joins nothing to the selection's.
+    const here = lookaheadInput(own, [motion], 0);
+    if (here === null) {
+      throw new Error("a fast camera selects ahead");
+    }
+    const demand = selectPatches(own).demand;
+    expect(joinDemand(demand, selectPatches(here).demand, () => 0)).toEqual(
+      demand.map(({ key, priority, forced }) => ({ key, priority, forced, needS: 0 })),
+    );
+  });
+});
+
 describe("the budget's limit excess", () => {
   const primary = view(LOW, lookingDown(LOW, 1.2));
   // A secondary view at the wireframe's tolerance, looking more steeply down.
   const secondary = view(LOW, lookingDown(LOW, 0.4), { weight: 0.25, tauPx: 4 });
   // The digests were recorded from selection before `limitExcess` was added (2026-10-04), and
   // guard the work on selection's cost (decision-r05-high-bound.md, item 4): re-record them only
-  // when selection's output is meant to change.
+  // when selection's output is meant to change. Re-recorded 2026-10-20 for R10.T14.e's normal
+  // margin, which culls coarse patches below the horizon that R05's chord let pass (patches with no
+  // budget, then under it: 12,731 to 12,721 and 300 to 299; 287 to 251 and 198 to 198; 13,220 to
+  // 13,210 and 1,998 to 2,000). Re-recorded 2026-10-20 for R09.T8.d's boxes, over the subtree's
+  // range with its skirts, which keep a coarse patch whose finer ground can be seen: the first
+  // case's free selection, 12,721 to 12,722; every other digest as it was.
   const cases: readonly BudgetCase[] = [
     budgetCase({
       name: "one view and no baked ranges",
@@ -872,8 +1229,8 @@ describe("the budget's limit excess", () => {
       budget: 300,
       bakedDepth: null,
       digests: {
-        free: "12731 98452de7 1 84bfd6f6 false",
-        budgeted: "300 e43ad952 3 3a5eda2e true",
+        free: "12722 98bd76ce 1 84bfd6f6 false",
+        budgeted: "299 3f3f0074 3 3a5eda2e true",
       },
     }),
     budgetCase({
@@ -882,8 +1239,8 @@ describe("the budget's limit excess", () => {
       budget: 200,
       bakedDepth: 7,
       digests: {
-        free: "287 5d6b78f0 159 ea8fbb82 false",
-        budgeted: "198 187cb71c 84 7a9121f2 true",
+        free: "251 c07cb76 126 2ab89143 false",
+        budgeted: "198 a0d6d2df 87 8744afdf true",
       },
     }),
     // The refused split is one only the secondary view wants, its weighted excess under 1.
@@ -896,14 +1253,24 @@ describe("the budget's limit excess", () => {
       budget: 2000,
       bakedDepth: null,
       digests: {
-        free: "13220 d29cc345 1 84bfd6f6 false",
-        budgeted: "1998 1bfeb10d 1 84bfd6f6 true",
+        free: "13210 679b4a70 1 84bfd6f6 false",
+        budgeted: "2000 a7ee9cb7 3 3a5eda2e true",
       },
     }),
   ];
 
+  // Each case's selections with no budget and under its budget, made once for the tests that read
+  // them: a selection is a pure function of the case, whose input is built once above, and no test
+  // writes to one.
+  // The cases' names are distinct.
+  const freeOf = memoised(
+    (c: BudgetCase): Selection => selectPatches(c.free),
+    (c) => c.name,
+  );
+  const budgetedOf = memoised(underBudget, (c) => c.name);
+
   it.each(cases)("is 0 with no budget, or one not reached, with $name", (c) => {
-    const free = selectPatches(c.free);
+    const free = freeOf(c);
     const roomy = selectPatches({ ...c.free, maxPatches: 2 * free.patches.size });
     expect([free.limited, free.limitExcess, roomy.limited, roomy.limitExcess]).toEqual([
       false,
@@ -914,7 +1281,7 @@ describe("the budget's limit excess", () => {
   });
 
   it.each(cases)("bounds every baked leaf's ρ by τ × max(1, excess ÷ w), with $name", (c) => {
-    const sel = underBudget(c);
+    const sel = budgetedOf(c);
     expect(sel.limited).toBe(true);
     expect(sel.limitExcess).toBeGreaterThan(0);
     const over: string[] = [];
@@ -940,7 +1307,7 @@ describe("the budget's limit excess", () => {
   it.each(cases)(
     "equals the largest weighted excess of a leaf still wanting a split, with $name",
     (c) => {
-      const sel = underBudget(c);
+      const sel = budgetedOf(c);
       expect(sel.limited).toBe(true);
       // The greedy splits the largest weighted excess first, so the refused patch is the leaf that
       // most wants a split, and stays one.
@@ -965,7 +1332,7 @@ describe("the budget's limit excess", () => {
   it.each(cases)(
     "is at most the weighted excess of every split the balance did not make, with $name",
     (c) => {
-      const sel = underBudget(c);
+      const sel = budgetedOf(c);
       expect(sel.limited).toBe(true);
       // Every split patch: every ancestor of a selected one.
       const split = new Map<string, PatchKey>();
@@ -1000,11 +1367,11 @@ describe("the budget's limit excess", () => {
   );
 
   it.each(cases)("leaves the selection with no budget as recorded, with $name", (c) => {
-    expect(selectionDigest(selectPatches(c.free))).toBe(c.digests.free);
+    expect(selectionDigest(freeOf(c))).toBe(c.digests.free);
   });
 
   it.each(cases)("leaves the selection under the budget as recorded, with $name", (c) => {
-    expect(selectionDigest(underBudget(c))).toBe(c.digests.budgeted);
+    expect(selectionDigest(budgetedOf(c))).toBe(c.digests.budgeted);
   });
 });
 
@@ -1257,12 +1624,16 @@ function approachDigest(): string {
 describe("selection's output, bit for bit", () => {
   // Recorded from selection before R05.T7 perf (c) (2026-10-04, with F3's `hiddenBaked`), with
   // every number it returns: the work on selection's cost changes none of them. Re-record only when
-  // the output is meant to change.
+  // the output is meant to change. Re-recorded 2026-10-20 for R10.T14.e's normal margin (patches
+  // 981 to 980, 1,952 to 1,952 and 12,731 to 12,721; along the approach 38,823 to 38,746 over its
+  // 48 frames). Re-recorded 2026-10-20 for R09.T8.d's boxes, over the subtree's range with its
+  // skirts: patches 980 to 980, 1,952 to 1,952 and 12,721 to 12,722, every box's bounds moving;
+  // along the approach still 38,746 over its 48 frames, the bounds alone moving.
   const pose = view(LOW, lookingDown(LOW, 1.2));
   it.each([
-    { label: "a budget of 981", budget: 981, digest: "981 3 d2f846a9" },
-    { label: "a budget of 1,952", budget: 1952, digest: "1952 3 cd0bdca9" },
-    { label: "no budget", budget: undefined, digest: "12731 1 36f86306" },
+    { label: "a budget of 981", budget: 981, digest: "980 3 c6b9db7c" },
+    { label: "a budget of 1,952", budget: 1952, digest: "1952 3 3bc9345c" },
+    { label: "no budget", budget: undefined, digest: "12722 1 903e4ada" },
   ])("is as recorded at the 1.5 km pose with $label", ({ budget, digest }) => {
     const sel = selectPatches({
       planet: PLANET,
@@ -1275,7 +1646,7 @@ describe("selection's output, bit for bit", () => {
   });
 
   it("is as recorded frame by frame along an approach, its bakes following its demand", () => {
-    expect(approachDigest()).toBe("48 8a892427");
+    expect(approachDigest()).toBe("48 584de8a8");
   });
 });
 
@@ -1315,5 +1686,330 @@ describe("the bounds memo", () => {
       ([k, p]) => p.bounds !== first.patches.get(k)?.bounds,
     );
     expect(rebuilt.length).toBeGreaterThan(again.patches.size / 2);
+  });
+});
+
+/** The survey's cells at the field's level 8: a 2 × 2 block under {@link SITE}. */
+const SURVEY_LEVEL = 8;
+const SURVEY_CELLS: ReadonlyArray<PatchKey> = [
+  { face: 0, level: SURVEY_LEVEL, i: 146, j: 97 },
+  { face: 0, level: SURVEY_LEVEL, i: 147, j: 97 },
+  { face: 0, level: SURVEY_LEVEL, i: 146, j: 98 },
+  { face: 0, level: SURVEY_LEVEL, i: 147, j: 98 },
+];
+
+/** A survey of `cells`, as the session's lookup holds a block's (R10.T16.b). */
+function surveyOf(cells: ReadonlyArray<PatchKey>): SurveyedCells {
+  const survey = new SurveyedCells();
+  const indices = cells.map(fieldCellIndex).toSorted((a, b) => a - b);
+  survey.add({
+    fieldLevel: SURVEY_LEVEL,
+    newlySurveyed: Uint32Array.from(indices.flatMap((index) => [index, index + 1])),
+  });
+  return survey;
+}
+
+/** The keys of a selection's forced patches. */
+function forcedOf(sel: Selection): string[] {
+  return [...sel.patches.values()].filter((p) => p.forced).map((p) => patchKeyString(p.key));
+}
+
+/** A two-view mask with its views swapped. */
+function swap(mask: number): number {
+  return ((mask & 1) << 1) | ((mask & 2) >> 1);
+}
+
+/** A lookup that calls every patch surveyed. */
+const ALL_SURVEYED: SurveyLookup = { surveyedUnder: () => true };
+
+/** What a selection gives, its patches' every field and the rest, for comparing two. */
+function outcome(sel: Selection): unknown {
+  return {
+    patches: [...sel.patches.entries()].map(([k, p]) => [k, p.bounds, p.forced, p.seen, p.views]),
+    demand: sel.demand,
+    limited: sel.limited,
+    limitExcess: sel.limitExcess,
+    hiddenBaked: sel.hiddenBaked,
+  };
+}
+
+describe("selection over a survey (R10.T16.b; decision-r10-t16-contracts §2–3)", () => {
+  const survey = surveyOf(SURVEY_CELLS);
+  const low = (): ViewSelectionInput => view(LOW, lookingDown(LOW, 1.2));
+  const orbit = (): ViewSelectionInput => view(ORBIT, lookingDown(ORBIT, 0.3), { weight: 0.25 });
+
+  it.each([
+    ["two views", { views: [low(), orbit()] }],
+    ["a budget", { views: [low()], maxPatches: 300 }],
+    ["a contact", { views: [low()], grounded: [{ positionM: above(5), radiusM: 20 }] }],
+    ["baked ranges", { views: [low()], heightRanges: bakedToDepth(6) }],
+  ] as const)(
+    "gives R05's selection, bit for bit, with no lookup and with one that calls everything surveyed: %s",
+    (_name, given) => {
+      const input: SelectionInput = { planet: PLANET, setting: "high", grounded: [], ...given };
+      const plain = selectPatches(input);
+      const surveyed = selectPatches({ ...input, survey: ALL_SURVEYED });
+      expect(outcome(surveyed)).toEqual(outcome(plain));
+      expect(plain.nearestSurveyM).toBe(Number.POSITIVE_INFINITY);
+    },
+  );
+
+  it("never refines, asks for or draws a patch with no surveyed cell", () => {
+    const plain = select([low()]);
+    const sel = selectPatches({
+      planet: PLANET,
+      views: [low()],
+      setting: "high",
+      grounded: [],
+      survey,
+    });
+    const bare = (key: PatchKey): boolean => !survey.surveyedUnder(key);
+    expect([...sel.patches.values()].filter((p) => bare(p.key))).toEqual([]);
+    expect(sel.demand.filter((r) => bare(r.key))).toEqual([]);
+    // The camera sees bare ground too, which R05's selection refines.
+    expect([...plain.patches.values()].some((p) => bare(p.key))).toBe(true);
+    expect(sel.patches.size).toBeGreaterThan(0);
+    expect(sel.patches.size).toBeLessThan(plain.patches.size);
+  });
+
+  it("selects nothing over bare ground alone, and asks for nothing", () => {
+    const far = above(1_500, { face: 0, level: 19, i: 100_001, j: 400_003 });
+    const sel = selectPatches({
+      planet: PLANET,
+      views: [view(far, lookingDown(far))],
+      setting: "high",
+      grounded: [],
+      survey,
+    });
+    expect([sel.patches.size, sel.demand.length, sel.limited]).toEqual([0, 0, false]);
+  });
+
+  it("forces nothing for a contact over unsurveyed ground", () => {
+    const site = above(5, { face: 0, level: 19, i: 100_001, j: 400_003 });
+    const input: SelectionInput = {
+      planet: PLANET,
+      views: [low()],
+      setting: "high",
+      grounded: [{ positionM: site, radiusM: 20 }],
+    };
+    expect([...selectPatches(input).patches.values()].some((p) => p.forced)).toBe(true);
+    const sel = selectPatches({ ...input, survey });
+    expect([...sel.patches.values()].some((p) => p.forced)).toBe(false);
+    expect(sel.demand.some((r) => r.forced)).toBe(false);
+  });
+
+  it("forces exactly the surveyed patches of a contact astride the survey's edge, at the finest level", () => {
+    // On the low-i edge of the survey's first cell, half way along it.
+    const edge = vertexDir({ face: 0, level: SURVEY_LEVEL, i: 146, j: 97 }, 0, 32);
+    const [x, y, z] = surfacePoint(WGS84_FIGURE, edge, 5);
+    const input: SelectionInput = {
+      planet: PLANET,
+      views: [low()],
+      setting: "high",
+      grounded: [{ positionM: vec3(x, y, z), radiusM: 20 }],
+    };
+    const everywhere = forcedOf(selectPatches(input));
+    const sel = selectPatches({ ...input, survey });
+    const surveyedOnes = everywhere.filter((k) => {
+      const key = sel.patches.get(k)?.key ?? selectPatches(input).patches.get(k)?.key;
+      return key !== undefined && survey.surveyedUnder(key);
+    });
+    expect(forcedOf(sel).toSorted()).toEqual(surveyedOnes.toSorted());
+    // The edge splits the region: some of its patches lie over bare ground.
+    expect(surveyedOnes.length).toBeGreaterThan(0);
+    expect(surveyedOnes.length).toBeLessThan(everywhere.length);
+    expect(
+      [...sel.patches.values()]
+        .filter((p) => p.forced)
+        .every((p) => p.key.level === PLANET.finestLevel),
+    ).toBe(true);
+  });
+
+  it("marks each patch with the views that see it, a patch only the instrument sees bit 1 alone", () => {
+    const sel = selectPatches({
+      planet: PLANET,
+      views: [low(), orbit()],
+      setting: "high",
+      grounded: [],
+    });
+    const masks = new Set([...sel.patches.values()].map((p) => p.views));
+    expect([...masks].every((m) => m > 0 && (m & ~0b11) === 0)).toBe(true);
+    expect(masks.has(0b10)).toBe(true);
+    expect(masks.has(0b01) || masks.has(0b11)).toBe(true);
+  });
+
+  it("gives the same selection with two views and a survey, in any order, called twice", () => {
+    const a = low();
+    const b = orbit();
+    const run = (views: ViewSelectionInput[]): Selection =>
+      selectPatches({ planet: PLANET, views, setting: "high", grounded: [], survey });
+    const first = run([a, b]);
+    const swapped = run([b, a]);
+    select([view(ORBIT, lookingDown(ORBIT))]);
+    const after = run([a, b]);
+    expect([...swapped.patches.keys()]).toEqual([...first.patches.keys()]);
+    expect(outcome(after)).toEqual(outcome(first));
+    // The views' bits follow their order.
+    expect([...swapped.patches.values()].map((p) => p.views)).toEqual(
+      [...first.patches.values()].map((p) => swap(p.views)),
+    );
+  });
+
+  it("measures the nearest surveyed ground from the cameras: no nearer than its cells, never under a finest patch, +∞ with none", () => {
+    const far = above(1_500, { face: 0, level: 19, i: 100_001, j: 400_003 });
+    const input: SelectionInput = {
+      planet: PLANET,
+      views: [view(far, lookingDown(far))],
+      setting: "high",
+      grounded: [],
+    };
+    expect(selectPatches(input).nearestSurveyM).toBe(Number.POSITIVE_INFINITY);
+    expect(selectPatches({ ...input, survey: new SurveyedCells() }).nearestSurveyM).toBe(
+      Number.POSITIVE_INFINITY,
+    );
+    const nearest = selectPatches({ ...input, survey }).nearestSurveyM;
+    // The survey's nearest corner, on the datum, bounds it from above; its cells' boxes, from below.
+    const corners = SURVEY_CELLS.flatMap((cell) =>
+      [0, 64].flatMap((s) =>
+        [0, 64].map((t) => {
+          const [cx, cy, cz] = surfacePoint(WGS84_FIGURE, vertexDir(cell, s, t), 0);
+          return Math.hypot(cx - far.x, cy - far.y, cz - far.z);
+        }),
+      ),
+    );
+    expect(nearest).toBeLessThanOrEqual(Math.min(...corners));
+    expect(nearest).toBeGreaterThan(0.5 * Math.min(...corners));
+    // Over the survey it is clamped to one finest patch.
+    const over = selectPatches({ ...input, views: [low()], survey }).nearestSurveyM;
+    expect(over).toBeCloseTo(
+      PATCH_QUADS * vertexSpacing(PLANET.figure.equatorialRadiusM, PLANET.finestLevel).maxM,
+      6,
+    );
+  });
+});
+
+/** A sphere of the Moon's radius whose rows to level `flatTo` reach no height and every finer one `reliefM`. */
+function steppedPlanet(flatTo: number, reliefM: number): PlanetGeometry {
+  const radiusM = 1_737_400;
+  const table = new Float64Array(4 * (MAX_LEVEL + 1));
+  for (let level = 0; level <= MAX_LEVEL; level += 1) {
+    table[4 * level + 2] = level <= flatTo ? 0 : reliefM;
+    table[4 * level + 3] = vertexSpacing(radiusM, level).maxM;
+  }
+  return planetGeometry({ equatorialRadiusM: radiusM, polarRadiusM: radiusM, pole: null }, table);
+}
+
+describe("a box that prunes its subtree", () => {
+  it("keeps a node with nothing baked where a finer row rises above the horizon and its own row does not", () => {
+    // Rows to level 7 are flat and every finer one reaches 30 km. A camera 10 m above a level-7
+    // patch, about 21 km across, looks along the face at another five patches off, some 100 km:
+    // that patch's own row puts its box below the horizon, but its subtree's ground rises 30 km
+    // above it, in view from there, so selection keeps it, and its ancestors (R09.T8.d;
+    // decision-r09-t8d-reach, follow-up 1).
+    const planet = steppedPlanet(7, 30_000);
+    const own: PatchKey = { face: 0, level: 7, i: 40, j: 64 };
+    const target: PatchKey = { face: 0, level: 7, i: 45, j: 64 };
+    const [cx, cy, cz] = surfacePoint(planet.figure, vertexDir(own, 32, 32), 10);
+    const camera = vec3(cx, cy, cz);
+    const [tx, ty, tz] = surfacePoint(planet.figure, vertexDir(target, 32, 32), 0);
+    const forward = normalise(vec3(tx - cx, ty - cy, tz - cz));
+    const orientation = lookAlong(forward, normalise(camera));
+    const horizon = horizonCone(planet, camera);
+    const boxAbove = (range: readonly [number, number]): boolean =>
+      aboveHorizon(relativeBounds(patchBounds(planet, target, range), camera), horizon);
+    // The case discriminates: below the horizon by its own row, above it by its subtree's.
+    expect(boxAbove(levelHeightRangeM(planet, target.level))).toBe(false);
+    expect(boxAbove(inheritedHeightRangeM(planet, target, null))).toBe(true);
+    const selection = selectPatches({
+      planet,
+      views: [view(camera, orientation)],
+      setting: "high",
+      grounded: [],
+    });
+    const [inside] = childKeys(target);
+    expect(coveringLeaf(selection, inside)).not.toBeNull();
+  });
+
+  it("widens a baked range by the largest ε and skirt of the levels beneath, where ε rises", () => {
+    // ε is 10 m but at level 9, where it rises to 500 m, on rows wide enough that no clamp binds.
+    // From a level-6 bake, a level-8 patch's subtree reaches level 9's ground, within ε₉ of the
+    // finest, and its skirts, ε₉ deeper again: ε₆ + ε₇ and ε₈ alone held neither
+    // (decision-r09-t8d-reach, follow-up 2).
+    const radiusM = 1_737_400;
+    const table = new Float64Array(4 * (MAX_LEVEL + 1));
+    for (let level = 0; level <= MAX_LEVEL; level += 1) {
+      table.set([level === 9 ? 500 : 10, -1e6, 1e6, vertexSpacing(radiusM, level).maxM], 4 * level);
+    }
+    const planet = planetGeometry(
+      { equatorialRadiusM: radiusM, polarRadiusM: radiusM, pole: null },
+      table,
+    );
+    const key: PatchKey = { face: 0, level: 8, i: 100, j: 100 };
+    const baked = { level: 6, lowM: -100, highM: 100 };
+    const skirtM = 2;
+    const [low, high] = inheritedHeightRangeM(planet, key, baked, skirtM);
+    const bound = (m: number): number => levelBoundM(planet, m);
+    for (let m = key.level; m <= planet.finestLevel; m += 1) {
+      // A level-m vertex or morph target lies within the larger of ε_m and ε_{m−1} of the finest
+      // ground, itself within ε₆ of the bake's; its skirt hangs ε_m and the margin below.
+      const reach = bound(baked.level) + Math.max(bound(m), bound(m - 1));
+      expect(low).toBeLessThanOrEqual(baked.lowM - reach - bound(m) - skirtM);
+      expect(high).toBeGreaterThanOrEqual(baked.highM + reach);
+    }
+  });
+});
+
+/** The levels of the patches a selection's views see. */
+function seenLevels(sel: Selection): number[] {
+  return [...sel.patches.values()].filter((p) => p.seen).map((p) => p.key.level);
+}
+
+describe("the surveyed floor (lane fix-coast-class-map; the hand-over's HANDOVER_AT_CELLS)", () => {
+  /** A view 30,000 km out over the site, where R05's selection keeps coarse patches. */
+  const FAR = above(3e7);
+  const far = (): ViewSelectionInput => view(FAR, lookingDown(FAR));
+  const input = (given: Partial<SelectionInput> = {}): SelectionInput => ({
+    planet: PLANET,
+    views: [far()],
+    setting: "high",
+    grounded: [],
+    survey: ALL_SURVEYED,
+    ...given,
+  });
+  it("refines every seen patch over surveyed ground to the floor, which the error alone does not", () => {
+    const plain = selectPatches(input());
+    const floored = selectPatches(input({ surveyedFloorLevel: 2 }));
+    expect([Math.min(...seenLevels(plain)) < 2, Math.min(...seenLevels(floored))]).toEqual([
+      true,
+      2,
+    ]);
+  });
+
+  it("gives R05's selection, bit for bit, with no floor or a floor of 0", () => {
+    expect(outcome(selectPatches(input({ surveyedFloorLevel: 0 })))).toEqual(
+      outcome(selectPatches(input())),
+    );
+  });
+
+  it("splits no bare ground for the floor, pinning none of its bakes beyond what no floor does", () => {
+    const survey = surveyOf(SURVEY_CELLS);
+    const floored = (level: number): Selection =>
+      selectPatches(input({ survey, surveyedFloorLevel: level, heightRanges: bakedToDepth(4) }));
+    expect([floored(3).hiddenBaked, seenLevels(floored(3))]).toEqual([floored(0).hiddenBaked, [3]]);
+  });
+
+  it("refuses a split the floor alone asks for past maxPatches without calling the selection limited", () => {
+    const sel = selectPatches(input({ surveyedFloorLevel: 2, maxPatches: 30 }));
+    expect([
+      sel.patches.size <= 30,
+      Math.min(...seenLevels(sel)),
+      sel.limited,
+      sel.limitExcess,
+    ]).toEqual([true, 1, false, 0]);
+  });
+
+  it("keeps the streaming gate: with only the roots baked it reaches their children alone", () => {
+    const sel = selectPatches(input({ surveyedFloorLevel: 3, heightRanges: bakedToDepth(0) }));
+    expect(Math.max(...seenLevels(sel))).toBe(1);
   });
 });

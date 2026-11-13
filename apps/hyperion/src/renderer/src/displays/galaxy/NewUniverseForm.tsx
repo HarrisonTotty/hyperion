@@ -4,6 +4,7 @@ import { type FormEvent, useId, useLayoutEffect, useRef, useState } from "react"
 import { DisclosureGlyph } from "../../components/DisclosureGlyph";
 import { RequestStatus } from "../../components/RequestStatus";
 import { StatusLine } from "../../components/StatusLine";
+import { StatusText } from "../../components/StatusText";
 import { parseSeedHex } from "../../lib/seed";
 import type { UniverseCommandState } from "../../lib/universe";
 
@@ -194,7 +195,7 @@ export function NewUniverseForm({
             />
             {errors.name ? (
               <p className="form-field__error" id={nameErrorId}>
-                NAME INVALID: enter 1 to 48 printable characters
+                <StatusText text="NAME INVALID: enter 1 to 48 printable characters" />
               </p>
             ) : null}
           </div>
@@ -254,7 +255,7 @@ export function NewUniverseForm({
             />
             {errors.seed ? (
               <p className="form-field__error" id={seedErrorId}>
-                SEED INVALID: enter 1 to 16 hexadecimal digits (0-9, A-F)
+                <StatusText text="SEED INVALID: enter 1 to 16 hexadecimal digits (0-9, A-F)" />
               </p>
             ) : null}
           </div>

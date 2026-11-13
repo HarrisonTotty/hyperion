@@ -9,26 +9,115 @@
  * launch. Each phase is one trace window, started at its measured window and stopped at its end,
  * reduced by R05's reducer for the presentations and the GPU process's main thread, and scanned
  * for the GPU process's slices named as copies; the trace file is removed once read.
+ *
+ * A `--terrain` launch (plan R10, R10.T16.d; decision-r10-t16-contracts §6) runs the terrain run
+ * through the same channels: its phases take no trace (each lasts minutes, and a hidden run has no
+ * presentation to read), each ends with a capture of the page, the run may capture named moments
+ * between ({@link ViewsCheckSession.capture}), and its record goes through its own narrow writer,
+ * judged here (`terrainCheckResults.ts`): a run whose checks fail ends with 1. Each phase's record
+ * comes too as it ends, and the run's finished phases are written, unjudged, beside where its
+ * results go (`<name>-partial.json`), so that a run stopped part-way keeps them; its results take
+ * their place (R14's Mac measurements). Each handler refuses
+ * a phase that is not of the launch's run. A `--handover` launch (R10.T10.g) runs the terrain run's
+ * hand-over check in its place: no phases (a start or end of one refused), its captures named for
+ * its looks, and its record through
+ * a writer of its own (`handoverCheckResults.ts`), the terrain run's refused; it ends with 1 unless
+ * that record was written and its verdict passes. Either run's results take the launch's field
+ * (`ViewsCheckLaunch.fixture`), which a `--weathered` launch's record and name (R10.T1.c).
+ *
+ * An `--atmosphere` launch (plan R08, R08.T10.b) runs the atmosphere run on `ATMOSPHERE TEST`, as
+ * the hand-over check runs: no phases (a start or end of one refused), its captures named for its
+ * fixtures and the night, and its record through a writer of its own
+ * (`atmosphereCheckResults.ts`), every other run's refused; it ends with 1 unless that record was
+ * written and its captures pass.
+ *
+ * An `--inspection` launch (the owner's request, 2026-11-01) opens a served body from `SYSTEM` in
+ * `VIEW`'s body inspection and captures it: no phases and no record, every writer refused; it ends
+ * with 1 unless its capture was saved. With `--timing` (the owner's report, 2026-11-01) it also
+ * profiles a window of frames from orbit, another closed in and a third low over the ground, each a
+ * trace with V8's CPU profiler (`inspectionTiming.ts`), and writes them through a writer of its
+ * own, under `target/views-check/timing/`; it then ends with 1 unless that file was written too.
+ * The profile's channels are refused on every other launch.
  */
 
 import type { ContentTracing, IpcMainInvokeEvent, TraceConfig } from "electron";
 
 import type {
+  AtmosphereCheckRecord,
+  CheckPhaseName,
+  GraphicsLaunchMode,
+  HandoverCheckRecord,
+  InspectionTimingRecord,
+  InspectionTimingWindowName,
   SpikeResultsPaths,
+  TerrainCheckPhaseName,
+  TerrainCheckPhaseRecord,
+  TerrainCheckPhaseUpdate,
+  TerrainCheckRecord,
   ViewsCheckLaunch,
   ViewsCheckPhaseName,
   ViewsCheckRecord,
+  ViewsCheckRunKind,
   ViewsCheckWindow,
 } from "../preload/api";
+import {
+  type AtmosphereCheckResults,
+  atmosphereFailures,
+  buildAtmosphereCheckResults,
+  writeAtmosphereResults,
+} from "./atmosphereCheckResults";
+import {
+  buildHandoverCheckResults,
+  type HandoverCheckResults,
+  handoverFailures,
+  writeHandoverResults,
+} from "./handoverCheckResults";
+import { SOFTWARE_WAIT_FACTOR } from "./graphics/softwareMode";
+import {
+  buildInspectionTimingResults,
+  inspectionTimingTraceConfig,
+  type InspectionTimingResults,
+  profileFigures,
+  type ProfileTraceFigures,
+  type ReducedProfile,
+  writeInspectionTimingResults,
+} from "./inspectionTiming";
+import type { PageProfiler } from "./pageProfile";
 import { type Measured, measured, missing } from "./measured";
-import { readTraceEvents, recordedGpuSlices, TraceReducer, type TraceFigures } from "./reduceTrace";
+import {
+  readTraceFileEvents,
+  recordedGpuSlices,
+  TraceReducer,
+  type TraceFigures,
+} from "./reduceTrace";
 import { readSpikeEnd } from "./spike";
-import { readViewsCheckRecord } from "./viewsCheckRecord";
+import {
+  buildTerrainCheckResults,
+  buildTerrainPhases,
+  type TerrainCheckResults,
+  type TerrainCheckRunInput,
+  terrainFailures,
+  TerrainResultsWriter,
+} from "./terrainCheckResults";
+import {
+  CAPTURE_LABEL,
+  isCaptureLabel,
+  readAtmosphereCheckRecord,
+  readHandoverCheckRecord,
+  inspectionTimingRecordProblem,
+  leftOutTimingWindows,
+  readInspectionTimingRecord,
+  readTerrainCheckRecord,
+  readTerrainPhaseUpdate,
+  readTimingWindowName,
+  readViewsCheckRecord,
+} from "./viewsCheckRecord";
 import {
   buildViewsCheckResults,
   type NamedSlice,
   NO_WINDOW_REASON,
   type PhaseTraceFigures,
+  softwareViewsCheckFailures,
   type ViewsCheckResults,
   type ViewsCheckRunInput,
   writeViewsCheckResults,
@@ -40,6 +129,15 @@ export const VIEWS_CHECK_CHANNELS = {
   endPhase: "hyperion:views-check:end-phase",
   askRightWayUp: "hyperion:views-check:ask-right-way-up",
   writeResults: "hyperion:views-check:write-results",
+  writeTerrainResults: "hyperion:views-check:write-terrain-results",
+  writeTerrainPhase: "hyperion:views-check:write-terrain-phase",
+  writeHandoverResults: "hyperion:views-check:write-handover-results",
+  writeAtmosphereResults: "hyperion:views-check:write-atmosphere-results",
+  startProfile: "hyperion:views-check:start-profile",
+  endProfile: "hyperion:views-check:end-profile",
+  writeTimingResults: "hyperion:views-check:write-timing-results",
+  capture: "hyperion:views-check:capture",
+  wholeField: "hyperion:views-check:whole-field",
   end: "hyperion:views-check:end",
 } as const;
 
@@ -62,6 +160,121 @@ export const VIEWS_CHECK_TRACE_CATEGORIES: ReadonlyArray<string> = [
  * buffer stops recording when full rather than dropping the window's start.
  */
 export const VIEWS_CHECK_TRACE_BUFFER_KB = 512 * 1024;
+
+/**
+ * Where a views check writes, from the repository's root: T20's under `target/views-check/` for a
+ * smoke and `docs/measurements/several-views/` otherwise, the terrain run's (R10.T16.d;
+ * decision-r10-t16-contracts §6), and its hand-over check's beside it (R10.T10.g), under
+ * `target/views-check/terrain/` and `docs/measurements/terrain-check/`, and the atmosphere run's
+ * (plan R08, R08.T10.b) under `target/views-check/atmosphere/` and
+ * `docs/measurements/atmosphere-flight/`, and the inspection run's captures, its only output, under
+ * `target/views-check/inspection/`, as the planet viewer run's are under
+ * `target/views-check/planet-viewer/` (plan R15, T6); the captures under the smoke's directory either
+ * way.
+ *
+ * @remarks
+ * A run in the check-only software mode (plan R01, R01.T16) writes under the smoke's directory, a
+ * full run's included: its frame times are SwiftShader's and its file names carry a test machine's
+ * name, so it never writes under `docs/measurements/` (main's ruling, 2026-10-29); the main
+ * process refuses `--out` with it (`softwareModeRefusal`).
+ */
+export function viewsCheckDirs(
+  launch: ViewsCheckLaunch,
+  launchMode: GraphicsLaunchMode,
+): {
+  readonly out: string;
+  readonly captures: string;
+} {
+  let dirs: { readonly smoke: string; readonly full: string };
+  switch (launch.run) {
+    case "several-views":
+      dirs = { smoke: "target/views-check", full: "docs/measurements/several-views" };
+      break;
+    case "terrain":
+    case "handover":
+      dirs = { smoke: "target/views-check/terrain", full: "docs/measurements/terrain-check" };
+      break;
+    case "atmosphere":
+      dirs = {
+        smoke: "target/views-check/atmosphere",
+        full: "docs/measurements/atmosphere-flight",
+      };
+      break;
+    case "inspection":
+      dirs = { smoke: "target/views-check/inspection", full: "target/views-check/inspection" };
+      break;
+    case "planet-viewer":
+      dirs = {
+        smoke: "target/views-check/planet-viewer",
+        full: "target/views-check/planet-viewer",
+      };
+      break;
+  }
+  const kept = launch.smoke || launchMode === "software";
+  return { out: kept ? dirs.smoke : dirs.full, captures: dirs.smoke };
+}
+
+/**
+ * Where the inspection run's frame profile (`--timing`; the owner's report, 2026-11-01) writes its
+ * timing file, from the repository's root: under `target/`, never `docs/measurements/`, since a
+ * profile is no measurement held to a budget and its file names its machine.
+ */
+export const INSPECTION_TIMING_DIR = "target/views-check/timing";
+
+/**
+ * How long a views check may take before the main process ends it with status 3: T20's smoke 4
+ * minutes and its full run 20; the terrain run's smoke, whose loss phase plays its script to the
+ * field's revision rise at 120 s, 8 minutes, and its full run, three phases of about five minutes
+ * each, 30; its hand-over check (R10.T10.g), three looks of about 3.5 minutes (a smoke's about one),
+ * takes the same, and 15 minutes more on a served world (R10.T15.b), whose body's coarse field the
+ * server computes, about a minute at level 8 (R09.T16.a), and sends whole, some 15 MB, once to read
+ * the world and once to each look's session; the atmosphere run's (plan R08, R08.T10.b), its media
+ * awaited and a flight to eight air fixtures and the seat's night, 8 and 15, and its full run's 30
+ * in the software mode, which takes each of its 22 places from a stage of its own whose pipelines
+ * SwiftShader makes afresh (R08.T17's by-eye list, 2 to 4 minutes a place in a pod); the inspection run's,
+ * one body opened, its first photorealistic frames, its atmosphere and its surveyed ground awaited,
+ * and a close look flown to and its terrain streamed, 8 and 15, and 30 more with its frame profile
+ * (`--timing`; the owner's report): 10 for its orbit and close windows, each up to two minutes,
+ * and 20 for its low window, flown down to by up to 40 holds of three draws each (on SwiftShader at
+ * the high setting, draws of some 50 s, the step outlasted 125 minutes; perf-frame-encoding,
+ * 2026-11-04); the planet viewer run's (plan R15, T6), one planet generated and taken from orbit
+ * to its surface and a moon then opened from orbit, 8 and 20, and 4 more for each of its
+ * `--randomize` draws, each awaited lit, its air and terrain, and captured four times. Each is
+ * {@link SOFTWARE_WAIT_FACTOR} times as long in the check-only software mode (plan R01, R01.T16),
+ * as the renderer's waits are.
+ */
+export function viewsCheckWatchdogMs(
+  launch: ViewsCheckLaunch,
+  launchMode: GraphicsLaunchMode,
+): number {
+  let ms: number;
+  switch (launch.run) {
+    case "several-views":
+      ms = launch.smoke ? 240_000 : 20 * 60_000;
+      break;
+    case "terrain":
+    case "handover":
+      ms =
+        (launch.smoke ? 8 * 60_000 : 30 * 60_000) + (launch.served === undefined ? 0 : 15 * 60_000);
+      break;
+    case "atmosphere":
+      ms = launch.smoke ? 8 * 60_000 : launchMode === "software" ? 30 * 60_000 : 15 * 60_000;
+      break;
+    case "inspection":
+      // A profile's orbit and close windows, each at most two minutes and a trace's reduction, 10
+      // more, and its low window's descent and window 20.
+      ms = (launch.smoke ? 8 * 60_000 : 15 * 60_000) + (launch.timing === true ? 30 * 60_000 : 0);
+      break;
+    case "planet-viewer":
+      // One planet generated and opened, its first photorealistic frames and surveyed ground
+      // awaited, then zoomed down to low orbit and the surface, its terrain streamed: as the
+      // inspection run's, and 5 minutes more for a moon opened and drawn from orbit last (R15.T5's
+      // follow-up), by which a run in a pod's software mode outlasted the inspection run's 15.
+      ms = (launch.smoke ? 8 * 60_000 : 20 * 60_000) + (launch.randomize ?? 0) * 4 * 60_000;
+      break;
+  }
+  return launchMode === "software" ? ms * SOFTWARE_WAIT_FACTOR : ms;
+}
 
 /** The tracing configuration of a phase's window. */
 export function viewsCheckTraceConfig(): TraceConfig {
@@ -190,11 +403,18 @@ export interface ReducedWindow {
   readonly scan: WindowScan;
 }
 
-/** Reads a trace file once, through R05's reducer and the check's scan. */
+/**
+ * Reads a trace file once, through R05's reducer and the check's scan.
+ *
+ * @remarks
+ * The file is told by its first byte (`readTraceFileEvents`): Electron 45's
+ * `contentTracing.stopRecording` writes a Perfetto protobuf trace only, where Electron 44's wrote
+ * Chromium's JSON.
+ */
 export async function reduceWindowFile(path: string): Promise<ReducedWindow> {
   const reducer = new TraceReducer({ categories: VIEWS_CHECK_TRACE_CATEGORIES });
   const scan = new WindowScan();
-  for await (const event of readTraceEvents(path)) {
+  for await (const event of readTraceFileEvents(path)) {
     reducer.add(event);
     scan.add(event);
   }
@@ -259,11 +479,31 @@ export interface ViewsCheckSessionDeps {
   /** Where a phase's trace is written. */
   readonly tracePath: (phase: ViewsCheckPhaseName) => string;
   readonly reduce: (path: string) => Promise<ReducedWindow>;
+  /** Where a profiled window's trace is written (the inspection run's `--timing`). */
+  readonly profilePath: (name: InspectionTimingWindowName) => string;
+  /** Reads a profiled window's trace: `inspectionTiming.ts`' `reduceProfileFile`. */
+  readonly reduceProfile: (path: string) => Promise<ReducedProfile>;
+  /**
+   * The page's CPU profile over an `--inspection --timing` run (lane perf-page-long-tasks), started
+   * as the page loaded and stopped as the timing file is written, which names what ran in each of
+   * the page's long tasks; absent on every other launch.
+   */
+  readonly pageProfile?: Pick<PageProfiler, "stop">;
+  /** Where the inspection run's timing file goes ({@link INSPECTION_TIMING_DIR}, resolved). */
+  readonly timingDir: string;
   readonly removeFile: (path: string) => Promise<void>;
   /** Where the captures go, or `null` for none. */
   readonly capturesDir: string | null;
+  /**
+   * The captures' directory as a terrain run's, a hand-over check's or an atmosphere run's results
+   * record it, from the repository's root, so that no committed results file names a checkout's
+   * own path (the batch review's D-C); the directory itself where absent.
+   */
+  readonly capturesRecordedAs?: string;
   /** Saves the page as a PNG at `path`. */
   readonly capture: (path: string) => Promise<void>;
+  /** Reads a text file whole, UTF-8: the whole body's field (`ViewsCheckLaunch.wholeField`). */
+  readonly readText: (path: string) => Promise<string>;
   /** Asks the person whether every view is the right way up; `null` when unanswered. */
   readonly ask: (() => Promise<"yes" | "no" | null>) | null;
   readonly outDir: string;
@@ -272,8 +512,41 @@ export interface ViewsCheckSessionDeps {
     dir: string,
     results: ViewsCheckResults,
   ) => Promise<{ readonly json: string; readonly markdown: string }>;
+  /**
+   * Writes a terrain run's finished phases as each ends, then its results, under one name: a
+   * {@link TerrainResultsWriter} into `outDir` by default.
+   */
+  readonly terrainWriter?: Pick<TerrainResultsWriter, "writePhases" | "writeResults">;
+  /** Writes a hand-over check's results: {@link writeHandoverResults} by default (R10.T10.g). */
+  readonly writeHandover?: (
+    dir: string,
+    results: HandoverCheckResults,
+  ) => Promise<{ readonly json: string; readonly markdown: string }>;
+  /** Writes an atmosphere run's results: {@link writeAtmosphereResults} by default (R08.T10.b). */
+  readonly writeAtmosphere?: (
+    dir: string,
+    results: AtmosphereCheckResults,
+  ) => Promise<{ readonly json: string; readonly markdown: string }>;
+  /** Writes the inspection run's timing file: `writeInspectionTimingResults` by default. */
+  readonly writeTiming?: (
+    dir: string,
+    results: InspectionTimingResults,
+  ) => Promise<{ readonly json: string; readonly markdown: string }>;
   readonly exit: (code: number) => void;
   readonly log: (line: string) => void;
+}
+
+/** The terrain run's phases (`TerrainCheckPhaseName`), which the handlers take on a terrain launch. */
+const TERRAIN_PHASE_NAMES: ReadonlyArray<TerrainCheckPhaseName> = [
+  "terrain-alone",
+  "terrain-photoreal-wireframe",
+  "terrain-wireframe",
+  "terrain-loss",
+];
+
+/** Whether `name` is one of the terrain run's phases. */
+function isTerrainPhase(name: CheckPhaseName): name is TerrainCheckPhaseName {
+  return TERRAIN_PHASE_NAMES.some((each) => each === name);
 }
 
 /** One run's state in the main process, from its start to its results. */
@@ -281,8 +554,26 @@ export class ViewsCheckSession {
   readonly #deps: ViewsCheckSessionDeps;
   readonly #run: Promise<Omit<ViewsCheckRunInput, "captures" | "window">>;
   readonly #traces = new Map<ViewsCheckPhaseName, PhaseTraceFigures>();
-  #recording: ViewsCheckPhaseName | null = null;
+  readonly #consoleErrors: string[] = [];
+  #recording: CheckPhaseName | null = null;
   #captured = false;
+  /** T20's results once written, judged in the check-only software mode alone (R01.T16). */
+  #viewsResults: ViewsCheckResults | null = null;
+  /** A terrain run's results once written, judged. */
+  #terrainResults: TerrainCheckResults | null = null;
+  /** A terrain run's phases as each ended, and where they and its results are written. */
+  readonly #terrainPhases: TerrainCheckPhaseRecord[] = [];
+  readonly #terrainWriter: Pick<TerrainResultsWriter, "writePhases" | "writeResults">;
+  /** A hand-over check's results once written, judged (R10.T10.g). */
+  #handoverResults: HandoverCheckResults | null = null;
+  /** An atmosphere run's results once written, judged (R08.T10.b). */
+  #atmosphereResults: AtmosphereCheckResults | null = null;
+  /** The profiled window recording, the inspection run's (`--timing`), or `null`. */
+  #profiling: InspectionTimingWindowName | null = null;
+  /** Each profiled window's trace once reduced, or why it could not be. */
+  readonly #profiles = new Map<InspectionTimingWindowName, Measured<ProfileTraceFigures>>();
+  /** Whether the inspection run's timing file was written. */
+  #timingWritten = false;
   #rightWayUp: Measured<"yes" | "no">;
   #passTimerDrops = 0;
   #untimedPasses = 0;
@@ -291,6 +582,7 @@ export class ViewsCheckSession {
 
   constructor(deps: ViewsCheckSessionDeps) {
     this.#deps = deps;
+    this.#terrainWriter = deps.terrainWriter ?? new TerrainResultsWriter(deps.outDir);
     // Read at the start, for the load average then; a failure surfaces where it is awaited.
     this.#run = deps.describe();
     this.#run.catch(() => undefined);
@@ -314,21 +606,31 @@ export class ViewsCheckSession {
     }
   }
 
+  /** Keeps a console error of the page, which a terrain run's results list. */
+  consoleError(message: string): void {
+    this.#consoleErrors.push(message);
+  }
+
   /** Counts an exit of the GPU process. */
   gpuProcessGone(): void {
     this.#gpuProcessExits += 1;
   }
 
   /**
-   * Starts a phase's trace window.
+   * Starts a phase's trace window; a terrain run's phase is marked alone, with no trace.
    *
    * @throws Error if another phase's window is still recording.
    */
-  async startPhase(name: ViewsCheckPhaseName): Promise<void> {
-    if (this.#recording !== null) {
-      throw new Error(`the trace of ${this.#recording} is still recording`);
+  async startPhase(name: CheckPhaseName): Promise<void> {
+    if (this.#recording !== null || this.#profiling !== null) {
+      throw new Error(
+        `the trace of ${this.#recording ?? this.#profiling ?? ""} is still recording`,
+      );
     }
     this.#recording = name;
+    if (isTerrainPhase(name)) {
+      return;
+    }
     try {
       await this.#deps.tracing.startRecording(viewsCheckTraceConfig());
     } catch (error: unknown) {
@@ -343,11 +645,57 @@ export class ViewsCheckSession {
    *
    * @throws Error if `name` is not the phase recording.
    */
-  async endPhase(name: ViewsCheckPhaseName, window: ViewsCheckWindow): Promise<void> {
+  async endPhase(name: CheckPhaseName, window: ViewsCheckWindow): Promise<void> {
     if (this.#recording !== name) {
       throw new Error(`${name} is not the phase recording`);
     }
     this.#recording = null;
+    if (!isTerrainPhase(name)) {
+      await this.#endTrace(name, window);
+    }
+    await this.#capture(name);
+  }
+
+  /**
+   * Saves a picture of the page as `<phase>-<label>.png` among the captures, `<phase>` the phase
+   * recording or `between` (a terrain run's looks at moments of its script, R10.T16.d; the
+   * hand-over check's and the atmosphere run's, which have no phases, all `between`).
+   *
+   * @throws Error for a label {@link isCaptureLabel} refuses.
+   */
+  async capture(label: string): Promise<void> {
+    if (!CAPTURE_LABEL.test(label)) {
+      throw new Error(`${label} is not a capture's label`);
+    }
+    await this.#capture(`${this.#recording ?? "between"}-${label}`);
+  }
+
+  /**
+   * The whole body's field (plan R10, R10.T14.c's whole-body run): the text of the file `--whole`
+   * named (`ViewsCheckLaunch.wholeField`), which the native tool writes.
+   *
+   * @throws {@link ViewsCheckCallRefused} on a launch with no whole-body field, and Error where the
+   * file cannot be read or is not a terrain golden, naming it and the remedy.
+   */
+  async wholeField(): Promise<string> {
+    const path = this.#deps.launch.wholeField;
+    if (path === undefined) {
+      throw new ViewsCheckCallRefused("the launch serves no whole-body field: give --whole");
+    }
+    const remedy = "run `just views-check --terrain --whole`, whose tool writes it";
+    let text: string;
+    try {
+      text = await this.#deps.readText(path);
+    } catch (error: unknown) {
+      throw new Error(`the whole-body field ${path} was not read (${remedy})`, { cause: error });
+    }
+    if (!text.startsWith(GOLDEN_HEADER)) {
+      throw new Error(`the whole-body field ${path} is not a terrain golden (${remedy})`);
+    }
+    return text;
+  }
+
+  async #endTrace(name: ViewsCheckPhaseName, window: ViewsCheckWindow): Promise<void> {
     const path = await this.#deps.tracing.stopRecording(this.#deps.tracePath(name));
     const shown = (await this.#run).shown;
     try {
@@ -360,6 +708,99 @@ export class ViewsCheckSession {
         this.#deps.log(`views check: the trace ${path} was not removed: ${String(error)}`);
       });
     }
+  }
+
+  /**
+   * Starts a profiled window of the inspection run's frame (`--timing`): a trace of
+   * `inspectionTiming.ts`' categories, V8's CPU profiler among them.
+   *
+   * @throws Error if the launch profiles nothing, or a phase or another window is recording.
+   */
+  async startProfile(name: InspectionTimingWindowName): Promise<void> {
+    if (this.#deps.launch.timing !== true) {
+      throw new Error("the launch profiles no frame");
+    }
+    if (this.#recording !== null || this.#profiling !== null) {
+      throw new Error(
+        `the trace of ${this.#recording ?? this.#profiling ?? ""} is still recording`,
+      );
+    }
+    this.#profiling = name;
+    try {
+      await this.#deps.tracing.startRecording(inspectionTimingTraceConfig());
+    } catch (error: unknown) {
+      this.#profiling = null;
+      throw new Error(`the profile of ${name} did not start`, { cause: error });
+    }
+  }
+
+  /**
+   * Ends a profiled window: its trace stopped, reduced over the measured `window` and removed; a
+   * trace that does not reduce is recorded as missing, with why.
+   *
+   * @throws Error if `name` is not the window recording.
+   */
+  async endProfile(name: InspectionTimingWindowName, window: ViewsCheckWindow): Promise<void> {
+    if (this.#profiling !== name) {
+      throw new Error(`${name} is not the profile recording`);
+    }
+    this.#profiling = null;
+    const path = await this.#deps.tracing.stopRecording(this.#deps.profilePath(name));
+    try {
+      this.#profiles.set(name, profileFigures(await this.#deps.reduceProfile(path), window));
+    } catch (error: unknown) {
+      this.#profiles.set(
+        name,
+        missing(
+          `the trace did not reduce: ${error instanceof Error ? error.message : String(error)}`,
+        ),
+      );
+    } finally {
+      await this.#deps.removeFile(path).catch((error: unknown) => {
+        this.#deps.log(`views check: the trace ${path} was not removed: ${String(error)}`);
+      });
+    }
+  }
+
+  /**
+   * Builds the inspection run's timing file from its renderer's record and the windows' traces,
+   * and writes it.
+   *
+   * @param leftOut - The windows the record left out, as `<name>: <why>`, each logged.
+   * @throws Error if the launch profiles nothing.
+   */
+  async writeTimingResults(
+    record: InspectionTimingRecord,
+    leftOut: ReadonlyArray<string> = [],
+  ): Promise<SpikeResultsPaths> {
+    if (this.#deps.launch.timing !== true) {
+      throw new Error("the launch profiles no frame");
+    }
+    for (const each of leftOut) {
+      this.#deps.log(`views check: the timing file leaves out the window ${each}`);
+    }
+    const run = await this.#run;
+    const pageProfile = (await this.#deps.pageProfile?.stop()) ?? null;
+    const results = buildInspectionTimingResults({
+      run: { ...run, window: this.#deps.windowSize() },
+      served: this.#deps.launch.served ?? null,
+      compositeProbe: this.#deps.launch.compositeProbe ?? null,
+      marchProbe: this.#deps.launch.marchProbe ?? null,
+      atmosphereLevers: this.#deps.launch.atmosphereLevers ?? null,
+      litProbe: this.#deps.launch.litProbe ?? null,
+      record,
+      traces: this.#profiles,
+      pageProfile,
+    });
+    const write = this.#deps.writeTiming ?? writeInspectionTimingResults;
+    const paths = await write(this.#deps.timingDir, results);
+    this.#timingWritten = true;
+    this.#deps.log(`views check: wrote ${paths.json} and ${paths.markdown}`);
+    return paths;
+  }
+
+  /** Saves the page as `<name>.png` among the captures, if the run keeps any; never rejects. */
+  async #capture(name: string): Promise<void> {
     const dir = this.#deps.capturesDir;
     if (dir !== null) {
       try {
@@ -404,12 +845,197 @@ export class ViewsCheckSession {
     });
     const write = this.#deps.write ?? writeViewsCheckResults;
     const paths = await write(this.#deps.outDir, results);
+    this.#viewsResults = results;
     this.#deps.log(`views check: wrote ${paths.json} and ${paths.markdown}`);
     return paths;
   }
 
-  /** Ends the run with an exit status, and a reason for a failure. */
+  /** Builds a hand-over check's results from its renderer's record (R10.T10.g), judges and writes them. */
+  async writeHandoverResults(record: HandoverCheckRecord): Promise<SpikeResultsPaths> {
+    const run = await this.#run;
+    const dir = this.#deps.capturesDir;
+    const { served, look } = this.#deps.launch;
+    const results = buildHandoverCheckResults({
+      run: {
+        ...run,
+        fixture: this.#deps.launch.fixture,
+        // The served world a `--universe --body` launch named (plan R10, R10.T15.b).
+        ...(served === undefined ? {} : { served }),
+        // The one look a `--look` launch asked (R10.T15.b.2).
+        ...(look === undefined ? {} : { look }),
+        window: this.#deps.windowSize(),
+        captures:
+          dir === null
+            ? missing("no capture directory")
+            : this.#captured
+              ? measured(this.#deps.capturesRecordedAs ?? dir)
+              : missing("no capture was saved"),
+      },
+      record,
+      gpuProcessExits: this.#gpuProcessExits,
+      consoleErrors: this.#consoleErrors,
+    });
+    const write = this.#deps.writeHandover ?? writeHandoverResults;
+    const paths = await write(this.#deps.outDir, results);
+    this.#handoverResults = results;
+    this.#deps.log(`views check: wrote ${paths.json} and ${paths.markdown}`);
+    return paths;
+  }
+
+  /**
+   * Builds an atmosphere run's results from its renderer's record (R08.T10.b), judges them by its
+   * captures and its faults (R08.T10.g) and writes them.
+   */
+  async writeAtmosphereResults(record: AtmosphereCheckRecord): Promise<SpikeResultsPaths> {
+    const run = await this.#run;
+    const dir = this.#deps.capturesDir;
+    const results = buildAtmosphereCheckResults({
+      run: {
+        ...run,
+        window: this.#deps.windowSize(),
+        captures:
+          dir === null
+            ? missing("no capture directory")
+            : this.#captured
+              ? measured(this.#deps.capturesRecordedAs ?? dir)
+              : missing("no capture was saved"),
+      },
+      record,
+      gpuProcessExits: this.#gpuProcessExits,
+      consoleErrors: this.#consoleErrors,
+    });
+    const write = this.#deps.writeAtmosphere ?? writeAtmosphereResults;
+    const paths = await write(this.#deps.outDir, results);
+    this.#atmosphereResults = results;
+    this.#deps.log(`views check: wrote ${paths.json} and ${paths.markdown}`);
+    return paths;
+  }
+
+  /** A terrain run's description as its files record it. */
+  async #terrainRun(): Promise<TerrainCheckRunInput> {
+    const run = await this.#run;
+    const dir = this.#deps.capturesDir;
+    return {
+      ...run,
+      fixture: this.#deps.launch.fixture,
+      window: this.#deps.windowSize(),
+      captures:
+        dir === null
+          ? missing("no capture directory")
+          : this.#captured
+            ? measured(this.#deps.capturesRecordedAs ?? dir)
+            : missing("no capture was saved"),
+    };
+  }
+
+  /**
+   * Writes a terrain run's finished phases as each ends (R14's Mac measurements), so that a run
+   * stopped part-way keeps them: the phase just ended added to those before, unjudged.
+   */
+  async writeTerrainPhase(update: TerrainCheckPhaseUpdate): Promise<SpikeResultsPaths> {
+    this.#terrainPhases.push(update.phase);
+    const paths = await this.#terrainWriter.writePhases(
+      buildTerrainPhases({
+        run: await this.#terrainRun(),
+        timer: update.timer,
+        devicePixelRatio: update.devicePixelRatio,
+        phases: this.#terrainPhases,
+      }),
+    );
+    this.#deps.log(`views check: ${update.phase.name} ended; its phases so far in ${paths.json}`);
+    return paths;
+  }
+
+  /**
+   * Builds a terrain run's results from its renderer's record, judges and writes them, in place of
+   * its finished phases' files.
+   */
+  async writeTerrainResults(record: TerrainCheckRecord): Promise<SpikeResultsPaths> {
+    const results = buildTerrainCheckResults({
+      run: await this.#terrainRun(),
+      record,
+      gpuProcessExits: this.#gpuProcessExits,
+      consoleErrors: this.#consoleErrors,
+    });
+    const paths = await this.#terrainWriter.writeResults(results);
+    this.#terrainResults = results;
+    this.#deps.log(`views check: wrote ${paths.json} and ${paths.markdown}`);
+    return paths;
+  }
+
+  /**
+   * Ends the run with an exit status, and a reason for a failure; a terrain run, a hand-over
+   * check or an atmosphere run that would end with 0 ends with 1 unless its results were written
+   * and pass, and so does T20's in the check-only software mode (R01.T16) when its results fail
+   * {@link softwareViewsCheckFailures}.
+   */
   end(code: number, reason: string | null): void {
+    // Why a run that would end with 0 fails: no results written, or results that fail.
+    let failure: string | null = null;
+    if (code === 0) {
+      switch (this.#deps.launch.run) {
+        case "several-views": {
+          // The renderer ends with 0 only once its results are written; an exit of the GPU process
+          // since then counts too.
+          const results = this.#viewsResults;
+          const failures =
+            results?.run.launchMode === "software"
+              ? softwareViewsCheckFailures(results, this.#gpuProcessExits)
+              : null;
+          failure =
+            failures === null ? null : `the software run's views were not as asked: ${failures}`;
+          break;
+        }
+        case "terrain": {
+          const results = this.#terrainResults;
+          failure =
+            results === null
+              ? "the terrain run ended with no results written"
+              : results.overall === "pass"
+                ? null
+                : `the terrain run's checks failed: ${terrainFailures(results)}`;
+          break;
+        }
+        case "handover": {
+          const results = this.#handoverResults;
+          failure =
+            results === null
+              ? "the hand-over check ended with no results written"
+              : results.overall === "pass"
+                ? null
+                : `the hand-over check's verdict failed: ${handoverFailures(results)}`;
+          break;
+        }
+        case "atmosphere": {
+          const results = this.#atmosphereResults;
+          failure =
+            results === null
+              ? "the atmosphere run ended with no results written"
+              : results.overall === "pass"
+                ? null
+                : `the atmosphere run's checks failed: ${atmosphereFailures(results)}`;
+          break;
+        }
+        case "planet-viewer":
+          failure = this.#captured ? null : "the planet viewer run ended with no capture saved";
+          break;
+        case "inspection":
+          failure = !this.#captured
+            ? "the inspection run ended with no capture saved"
+            : this.#deps.launch.timing === true && !this.#timingWritten
+              ? "the inspection run ended with no timing file written"
+              : null;
+          break;
+      }
+    }
+    if (failure === null) {
+      this.#finish(code, reason);
+    } else {
+      this.#finish(1, failure);
+    }
+  }
+
+  #finish(code: number, reason: string | null): void {
     this.#ended = true;
     this.#deps.log(
       code === 0 ? "views check: PASS the run is recorded" : `views check: FAIL ${reason ?? ""}`,
@@ -417,6 +1043,9 @@ export class ViewsCheckSession {
     this.#deps.exit(code);
   }
 }
+
+/** The first line's start of every terrain golden: the testkit's `GoldenWriter::header`. */
+const GOLDEN_HEADER = "# generator_version = ";
 
 /** Thrown back to the renderer for a call the main process refuses. */
 export class ViewsCheckCallRefused extends Error {}
@@ -432,8 +1061,32 @@ export interface ViewsCheckHandlerDeps<E = IpcMainInvokeEvent> {
   readonly isSender: (event: E) => boolean;
   readonly session: Pick<
     ViewsCheckSession,
-    "startPhase" | "endPhase" | "askRightWayUp" | "writeResults" | "end"
+    | "startPhase"
+    | "endPhase"
+    | "askRightWayUp"
+    | "writeResults"
+    | "writeTerrainResults"
+    | "writeTerrainPhase"
+    | "writeHandoverResults"
+    | "writeAtmosphereResults"
+    | "startProfile"
+    | "endProfile"
+    | "writeTimingResults"
+    | "capture"
+    | "wholeField"
+    | "end"
   >;
+  /**
+   * The launch's run (`ViewsCheckLaunch.run`): its handlers take its phases, its record and, for
+   * the terrain run, its hand-over check and the atmosphere run, its captures alone, and refuse
+   * every other run's.
+   */
+  readonly run: ViewsCheckRunKind;
+  /**
+   * Whether the launch profiles the inspection run's frame (`ViewsCheckLaunch.timing`): its
+   * profile's channels are refused on every other launch.
+   */
+  readonly timing: boolean;
 }
 
 const PHASE_NAMES: ReadonlyArray<ViewsCheckPhaseName> = [
@@ -444,8 +1097,58 @@ const PHASE_NAMES: ReadonlyArray<ViewsCheckPhaseName> = [
   "wireframe-alone",
 ];
 
-function readPhaseName(value: unknown): ViewsCheckPhaseName | null {
-  return PHASE_NAMES.find((name) => name === value) ?? null;
+/**
+ * The phases of each run: the hand-over check (R10.T10.g), the atmosphere run (R08.T10.b) and the
+ * inspection run have none.
+ */
+function phasesOf(run: ViewsCheckRunKind): ReadonlyArray<CheckPhaseName> {
+  let phases: ReadonlyArray<CheckPhaseName>;
+  switch (run) {
+    case "several-views":
+      phases = PHASE_NAMES;
+      break;
+    case "terrain":
+      phases = TERRAIN_PHASE_NAMES;
+      break;
+    case "handover":
+    case "atmosphere":
+    case "inspection":
+    case "planet-viewer":
+      phases = [];
+      break;
+  }
+  return phases;
+}
+
+/** A run as the handlers' refusals name it. */
+function runWords(run: ViewsCheckRunKind): string {
+  let words: string;
+  switch (run) {
+    case "several-views":
+      words = "T20's run";
+      break;
+    case "terrain":
+      words = "the terrain run";
+      break;
+    case "handover":
+      words = "the hand-over check";
+      break;
+    case "atmosphere":
+      words = "the atmosphere run";
+      break;
+    case "inspection":
+      words = "the inspection run";
+      break;
+    case "planet-viewer":
+      words = "the planet viewer run";
+      break;
+  }
+  return words;
+}
+
+/** `value` as a phase of `run`, or `null`. */
+function readPhaseName(value: unknown, run: ViewsCheckRunKind): CheckPhaseName | null {
+  return phasesOf(run).find((name) => name === value) ?? null;
 }
 
 /** `value` as a measured window, or `null`: two finite times, the end not before the start. */
@@ -480,32 +1183,121 @@ export function registerViewsCheckHandlers<E>(deps: ViewsCheckHandlerDeps<E>): v
       return run(args);
     });
   };
+  const run = runWords(deps.run);
   guarded(VIEWS_CHECK_CHANNELS.startPhase, async ([value]) => {
-    const name = readPhaseName(value);
+    const name = readPhaseName(value, deps.run);
     if (name === null) {
-      throw new ViewsCheckCallRefused(`${VIEWS_CHECK_CHANNELS.startPhase} refused: not a phase`);
+      throw new ViewsCheckCallRefused(
+        `${VIEWS_CHECK_CHANNELS.startPhase} refused: not a phase of ${run}`,
+      );
     }
     await deps.session.startPhase(name);
   });
   guarded(VIEWS_CHECK_CHANNELS.endPhase, async ([value, span]) => {
-    const name = readPhaseName(value);
+    const name = readPhaseName(value, deps.run);
     const window = readWindow(span);
     if (name === null || window === null) {
       throw new ViewsCheckCallRefused(
-        `${VIEWS_CHECK_CHANNELS.endPhase} refused: not a phase and its window`,
+        `${VIEWS_CHECK_CHANNELS.endPhase} refused: not a phase of ${run} and its window`,
       );
     }
     await deps.session.endPhase(name, window);
   });
   guarded(VIEWS_CHECK_CHANNELS.askRightWayUp, () => deps.session.askRightWayUp());
+  // Each run writes its own record alone (the batch review's D-C).
   guarded(VIEWS_CHECK_CHANNELS.writeResults, async ([value]) => {
-    const record = readViewsCheckRecord(value);
+    const record = deps.run === "several-views" ? readViewsCheckRecord(value) : null;
     if (record === null) {
       throw new ViewsCheckCallRefused(
         `${VIEWS_CHECK_CHANNELS.writeResults} refused: not the check's record`,
       );
     }
     return deps.session.writeResults(record);
+  });
+  guarded(VIEWS_CHECK_CHANNELS.writeTerrainResults, async ([value]) => {
+    const record = deps.run === "terrain" ? readTerrainCheckRecord(value) : null;
+    if (record === null) {
+      throw new ViewsCheckCallRefused(
+        `${VIEWS_CHECK_CHANNELS.writeTerrainResults} refused: not the terrain run's record`,
+      );
+    }
+    return deps.session.writeTerrainResults(record);
+  });
+  guarded(VIEWS_CHECK_CHANNELS.writeTerrainPhase, async ([value]) => {
+    const update = deps.run === "terrain" ? readTerrainPhaseUpdate(value) : null;
+    if (update === null) {
+      throw new ViewsCheckCallRefused(
+        `${VIEWS_CHECK_CHANNELS.writeTerrainPhase} refused: not a terrain run's phase`,
+      );
+    }
+    return deps.session.writeTerrainPhase(update);
+  });
+  guarded(VIEWS_CHECK_CHANNELS.writeHandoverResults, async ([value]) => {
+    const record = deps.run === "handover" ? readHandoverCheckRecord(value) : null;
+    if (record === null) {
+      throw new ViewsCheckCallRefused(
+        `${VIEWS_CHECK_CHANNELS.writeHandoverResults} refused: not the hand-over check's record`,
+      );
+    }
+    return deps.session.writeHandoverResults(record);
+  });
+  guarded(VIEWS_CHECK_CHANNELS.writeAtmosphereResults, async ([value]) => {
+    const record = deps.run === "atmosphere" ? readAtmosphereCheckRecord(value) : null;
+    if (record === null) {
+      throw new ViewsCheckCallRefused(
+        `${VIEWS_CHECK_CHANNELS.writeAtmosphereResults} refused: not the atmosphere run's record`,
+      );
+    }
+    return deps.session.writeAtmosphereResults(record);
+  });
+  // The inspection run's frame profile alone (the owner's report, 2026-11-01).
+  const profiles = deps.run === "inspection" && deps.timing;
+  guarded(VIEWS_CHECK_CHANNELS.startProfile, async ([value]) => {
+    const name = profiles ? readTimingWindowName(value) : null;
+    if (name === null) {
+      throw new ViewsCheckCallRefused(
+        `${VIEWS_CHECK_CHANNELS.startProfile} refused: not a profiled window of the launch`,
+      );
+    }
+    await deps.session.startProfile(name);
+  });
+  guarded(VIEWS_CHECK_CHANNELS.endProfile, async ([value, span]) => {
+    const name = profiles ? readTimingWindowName(value) : null;
+    const window = readWindow(span);
+    if (name === null || window === null) {
+      throw new ViewsCheckCallRefused(
+        `${VIEWS_CHECK_CHANNELS.endProfile} refused: not a profiled window of the launch and its span`,
+      );
+    }
+    await deps.session.endProfile(name, window);
+  });
+  guarded(VIEWS_CHECK_CHANNELS.writeTimingResults, async ([value]) => {
+    const record = profiles ? readInspectionTimingRecord(value) : null;
+    if (record === null) {
+      const problem = profiles
+        ? inspectionTimingRecordProblem(value)
+        : "the launch profiles nothing";
+      throw new ViewsCheckCallRefused(
+        `${VIEWS_CHECK_CHANNELS.writeTimingResults} refused: not the inspection run's timing record (${problem ?? "unknown"})`,
+      );
+    }
+    return deps.session.writeTimingResults(record, leftOutTimingWindows(value));
+  });
+  guarded(VIEWS_CHECK_CHANNELS.capture, async ([value]) => {
+    if (deps.run === "several-views" || !isCaptureLabel(value)) {
+      throw new ViewsCheckCallRefused(
+        `${VIEWS_CHECK_CHANNELS.capture} refused: not a terrain run's capture label`,
+      );
+    }
+    await deps.session.capture(value);
+  });
+  guarded(VIEWS_CHECK_CHANNELS.wholeField, async () => {
+    if (deps.run !== "terrain") {
+      throw new ViewsCheckCallRefused(
+        `${VIEWS_CHECK_CHANNELS.wholeField} refused: the whole body's field is the terrain run's`,
+      );
+    }
+    return deps.session.wholeField();
   });
   guarded(VIEWS_CHECK_CHANNELS.end, async ([value]) => {
     const end = readSpikeEnd(value);

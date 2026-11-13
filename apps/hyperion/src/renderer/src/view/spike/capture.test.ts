@@ -22,6 +22,7 @@ import { PipelineTally, spikeDeviceWrapper, wrapGpu } from "./pipelineShim";
 const UNIFORM = 0x40;
 const COPY_DST = 0x8;
 const COPY_SRC = 0x4;
+const MAP_WRITE = 0x2;
 const RENDER_ATTACHMENT = 0x10;
 
 function adapter(): FakeAdapter {
@@ -115,6 +116,40 @@ describe("the capture", () => {
     expect(span).toBeDefined();
     const bytes = data.slice(span?.offset ?? 0, (span?.offset ?? 0) + (span?.length ?? 0));
     expect([...new Float32Array(bytes.buffer)]).toEqual([2, 3]);
+  });
+
+  it("logs a buffer mapped at its creation as a copy source written with its mapped bytes, so that a staged upload replays them (lane perf-page-long-tasks)", async () => {
+    const capture = new GpuCapture({ contexts: null, meta: {} });
+    const device = await capturedDevice(capture);
+    const heights = device.createBuffer({ label: "heights", size: 8, usage: COPY_DST });
+    await capture.startSpan();
+    const staging = device.createBuffer({
+      label: "terrain upload staging",
+      size: 8,
+      usage: MAP_WRITE | COPY_SRC,
+      mappedAtCreation: true,
+    });
+    new Uint8Array(staging.getMappedRange()).set([1, 2, 3, 4, 5, 6, 7, 8]);
+    staging.unmap();
+    const encoder = device.createCommandEncoder({ label: "terrain upload" });
+    encoder.copyBufferToBuffer(staging, 0, heights, 0, 8);
+    device.queue.submit([encoder.finish()]);
+    staging.destroy();
+    capture.endSpan();
+    const { file, data } = capture.result();
+    const span = file.calls.slice(file.spanStart);
+    expect(span.map(({ target, op }) => [target, op]).slice(0, 2)).toEqual([
+      [DEVICE_ID, "createBuffer"],
+      [QUEUE_ID, "writeBuffer"],
+    ]);
+    expect(span[0]?.args[0]).toEqual({ label: "terrain upload staging", size: 8, usage: COPY_SRC });
+    const blob = span[1]?.args[2];
+    const index =
+      typeof blob === "object" && blob !== null && !Array.isArray(blob) ? blob["$blob"] : undefined;
+    const bytes = typeof index === "number" ? file.blobs[index] : undefined;
+    expect(data.slice(bytes?.offset ?? 0, (bytes?.offset ?? 0) + (bytes?.length ?? 0))).toEqual(
+      Uint8Array.from([1, 2, 3, 4, 5, 6, 7, 8]),
+    );
   });
 
   it("logs only creations before the span, the snapshot at its start, and every call after", async () => {

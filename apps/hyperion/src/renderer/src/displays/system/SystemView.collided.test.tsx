@@ -1,14 +1,21 @@
 /**
  * A body lost to the scattering after a supernova (the orchestrator's rulings 71 and 80): listed as
  * `DESTROYED`, not drawn, and read with its cause, `COLLIDED`, in the body readout (plan 14,
- * P14.T28.c and T43.a–b).
+ * P14.T28.c and T43.a–b); one whose rock evaporated, read `EVAPORATED` (P14.T55.b.a); and one
+ * destroyed by a cause this build does not know, which reads Missing (galaxy plan 04's growing
+ * enums).
  */
+import type { DestructionCauseDto } from "@hyperion/protocol";
 import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { FakeWebSocket } from "../../test/FakeWebSocket";
-import { FIXTURE_EARTH, sliceBodiesWith } from "../../test/planetaryFixture";
+import {
+  anUnknownDestructionCause,
+  FIXTURE_EARTH,
+  sliceBodiesWith,
+} from "../../test/planetaryFixture";
 import { stubCanvas } from "../../test/RecordingContext2D";
 import { ServerLinkHarness } from "../../test/ServerLinkHarness";
 import {
@@ -29,7 +36,7 @@ async function server(play: () => void): Promise<void> {
   });
 }
 
-async function renderCollided() {
+async function renderDestroyed(cause: DestructionCauseDto) {
   const user = userEvent.setup();
   stubCanvas();
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
@@ -37,7 +44,7 @@ async function renderCollided() {
   );
   render(
     <ServerLinkHarness>
-      <SystemView target={aSystemTarget()} />
+      <SystemView target={aSystemTarget()} onViewBody={() => undefined} />
     </ServerLinkHarness>,
   );
   const socket = FakeWebSocket.latest();
@@ -48,7 +55,7 @@ async function renderCollided() {
     body.id === FIXTURE_EARTH
       ? {
           ...body,
-          state: { type: "destroyed", cause: "collided", at: COLLIDED_AT },
+          state: { type: "destroyed", cause, at: COLLIDED_AT },
           position_m: null,
         }
       : body,
@@ -77,7 +84,7 @@ beforeEach(() => {
 
 describe("a body that collided", () => {
   it("is listed as DESTROYED and not drawn", async () => {
-    await renderCollided();
+    await renderDestroyed("collided");
 
     const tree = screen.getByRole("tree", { name: "Bodies" });
     expect(
@@ -90,7 +97,7 @@ describe("a body that collided", () => {
   });
 
   it("reads COLLIDED as its cause, and since when", async () => {
-    const { user } = await renderCollided();
+    const { user } = await renderDestroyed("collided");
 
     await user.click(
       within(screen.getByRole("tree", { name: "Bodies" })).getByRole("treeitem", {
@@ -100,6 +107,38 @@ describe("a body that collided", () => {
 
     expect(readingOf("STATE")).toBe("DESTROYED");
     expect(readingOf("CAUSE")).toBe("COLLIDED");
+    expect(readingOf("SINCE")).toBe("UT -300 yr 000/00:00:00");
+  });
+});
+
+describe("a body that evaporated", () => {
+  it("reads EVAPORATED as its cause, and since when", async () => {
+    const { user } = await renderDestroyed("evaporated");
+
+    await user.click(
+      within(screen.getByRole("tree", { name: "Bodies" })).getByRole("treeitem", {
+        name: /\/768, PLANET, DESTROYED$/,
+      }),
+    );
+
+    expect(readingOf("STATE")).toBe("DESTROYED");
+    expect(readingOf("CAUSE")).toBe("EVAPORATED");
+    expect(readingOf("SINCE")).toBe("UT -300 yr 000/00:00:00");
+  });
+});
+
+describe("a body destroyed by a cause this build does not know", () => {
+  it("reads its cause Missing, and its state and time as they are", async () => {
+    const { user } = await renderDestroyed(anUnknownDestructionCause());
+
+    await user.click(
+      within(screen.getByRole("tree", { name: "Bodies" })).getByRole("treeitem", {
+        name: /\/768, PLANET, DESTROYED$/,
+      }),
+    );
+
+    expect(readingOf("STATE")).toBe("DESTROYED");
+    expect(readingOf("CAUSE")).toBe("—");
     expect(readingOf("SINCE")).toBe("UT -300 yr 000/00:00:00");
   });
 });

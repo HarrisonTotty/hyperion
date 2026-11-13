@@ -15,6 +15,7 @@ import {
   type MapPopulation,
   type MapView,
   type MassLayer,
+  type ObservedDto,
   type Parameter,
   type ParameterGroup,
   type Population,
@@ -23,10 +24,62 @@ import {
   type StellarBriefDto,
   type SystemRecord,
   u64ToHex,
+  type Unit,
   type UniverseIdHex,
   type UniverseInfo,
   universeTimeFromYears,
 } from "@hyperion/protocol";
+
+/**
+ * A unit this build does not know, typed as a `Unit` as the decoder types it.
+ *
+ * @remarks
+ * `Unit` is one of the enums galaxy plan 04 names as growing, so a newer server may send a string
+ * this build lacks without a protocol bump (`decision-gg-port-d0.md` §1), and the decoder, which
+ * trusts the generated types, hands it on as a `Unit`.
+ */
+export function anUnknownUnit(name = "furlongs"): Unit {
+  // The decoder's own trust at the wire (`decodeServerMessage`), made where the test plays the
+  // server.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+  return name as Unit;
+}
+
+/** A mass layer this build does not know, typed as the decoder types it, as {@link anUnknownUnit} is. */
+export function anUnknownLayer(name = "planetesimal"): MassLayer {
+  // The decoder's own trust at the wire, made where the test plays a newer server.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+  return name as MassLayer;
+}
+
+/** A stellar population this build does not know, typed as the decoder types it. */
+export function anUnknownPopulation(name = "outer_halo"): Population {
+  // The decoder's own trust at the wire, made where the test plays a newer server.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+  return name as Population;
+}
+
+/** A layer status this build does not know, typed as the decoder types it. */
+export function anUnknownLayerStatus(name = "over_time_budget"): LayerStatus {
+  // The decoder's own trust at the wire, made where the test plays a newer server.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+  return name as LayerStatus;
+}
+
+/**
+ * A census line of a layer this build does not know ({@link anUnknownLayer}), lighter than every
+ * layer it knows: 1.0E-9 to 1.0E-6 M☉, 2 of 2.4 expected returned.
+ */
+export function anUnknownLayerLine(status: LayerStatus = "included"): LayerCensus {
+  return {
+    layer: anUnknownLayer(),
+    mass_min_msun: 1e-9,
+    mass_max_msun: 1e-6,
+    expected: 2.4,
+    returned: status === "included" ? 2 : 0,
+    status,
+  };
+}
 
 /** The stellar layers from the lightest, as the census lists them. */
 export const LAYERS: ReadonlyArray<MassLayer> = ["a", "b", "c", "d", "e"];
@@ -329,6 +382,7 @@ export function everyGalaxyParameter(
         aNumber("halo.dominant_merger.flattening", 0.7, "none", "drawn"),
         aNumber("halo.dominant_merger.break_radius", 62_000, "ly", "drawn"),
         aNumber("halo.dominant_merger.break_steepening", 1.5, "none", "drawn"),
+        aNumber("halo.discrete_share", 0.085, "none", "drawn"),
       ],
     },
     {
@@ -368,6 +422,29 @@ export function everyGalaxyParameter(
           origin: "derived",
           value: { type: "text", value: "no" },
         },
+      ],
+    },
+    {
+      key: "gas",
+      parameters: [
+        aNumber("gas.scale_height", 700, "ly", "fixed"),
+        aNumber("gas.hole_scale", 17_609.3, "ly", "drawn"),
+        aNumber("gas.warm_density", 0.0335, "per_cm3", "drawn"),
+        aNumber("gas.warm_height", 3_122.6, "ly", "drawn"),
+        aNumber("gas.warm_fraction", 0.157, "none", "derived"),
+        aNumber("gas.molecular_mass", 2.5e6, "msun", "drawn"),
+        aNumber("gas.molecular_length", 290, "ly", "derived"),
+        aNumber("gas.molecular_height", 58, "ly", "drawn"),
+        aNumber("gas.molecular_fraction", 3.0e-4, "none", "derived"),
+        aNumber("gas.neutral_fraction", 0.843, "none", "derived"),
+        aNumber("gas.corona_density", 6.0e-4, "per_cm3", "drawn"),
+        aNumber("gas.pressure_floor", 400, "k_per_cm3", "drawn"),
+        aNumber("gas.pressure_height", 1_500, "ly", "fixed"),
+        aNumber("gas.pressure_speed", 5.15, "km_per_s", "fixed"),
+        aNumber("gas.sigma_ln", 1.2, "none", "drawn"),
+        aNumber("gas.lane_offset", 450, "ly", "drawn"),
+        aNumber("gas.lane_width", 200, "ly", "drawn"),
+        aNumber("gas.lane_fraction", 0.12, "none", "drawn"),
       ],
     },
   ];
@@ -426,6 +503,121 @@ export function aDensityMap({
     floor_log10_per_ly2: floorLog10PerLy2,
     ceiling_log10_per_ly2: ceilingLog10PerLy2,
     data_base64: btoa(binary),
+  };
+}
+
+/** What {@link anExtinctionMap} builds. */
+export interface ExtinctionMapSpec {
+  /** One code per pixel of the map's depth, row by row from the top. */
+  readonly codes: ReadonlyArray<number>;
+  readonly widthPx?: number;
+  readonly heightPx?: number;
+  readonly view?: MapView;
+  readonly floorLog10Mag?: number;
+  readonly ceilingLog10Mag?: number;
+  /** Bits per code, as the protocol offers them: 8 unless told otherwise. */
+  readonly bits?: 8 | 16;
+  readonly universe?: UniverseIdHex;
+}
+
+/**
+ * The answer to `extinction_map`: a small map, 8 × 4 pixels at 8 bits unless told otherwise,
+ * spanning the M1 extent of 131,072 ly across, from the floor of 0.01 mag to 10 mag unless told
+ * otherwise.
+ *
+ * @remarks
+ * At 16 bits each code takes two bytes, the low byte first, as the server's `CodeDepth::Sixteen`
+ * writes them and the protocol's decoder reads them.
+ *
+ * @throws Error when the codes do not fill the map or one is not a code of its depth: a byte at 8
+ *   bits, a whole number from 0 to 65,535 at 16.
+ */
+export function anExtinctionMap({
+  codes,
+  widthPx = 8,
+  heightPx = 4,
+  view = "face_on",
+  floorLog10Mag = -2,
+  ceilingLog10Mag = 1,
+  bits = 8,
+  universe = UNIVERSE_ID,
+}: ExtinctionMapSpec): ResponseFor<"extinction_map"> {
+  const dataBase64 =
+    bits === 16
+      ? sixteenBitBase64(codes, widthPx, heightPx)
+      : aDensityMap({ codes, widthPx, heightPx, view, universe }).data_base64;
+  return {
+    kind: "extinction_map",
+    universe,
+    view,
+    width_px: widthPx,
+    height_px: heightPx,
+    centre_ly: [0, 0],
+    ly_per_px: 131_072 / widthPx,
+    bits,
+    floor_log10_mag: floorLog10Mag,
+    ceiling_log10_mag: ceilingLog10Mag,
+    data_base64: dataBase64,
+  };
+}
+
+/**
+ * A map's 16-bit codes as the wire carries them: two bytes each, little-endian, in base64.
+ *
+ * @throws Error when the codes do not fill the map or one is not a 16-bit code.
+ */
+function sixteenBitBase64(codes: ReadonlyArray<number>, widthPx: number, heightPx: number): string {
+  if (codes.length !== widthPx * heightPx) {
+    throw new Error(`${codes.length} codes do not fill a ${widthPx} × ${heightPx} map`);
+  }
+  let binary = "";
+  for (const code of codes) {
+    if (!Number.isInteger(code) || code < 0 || code > 0xffff) {
+      throw new Error(`${code} is not a 16-bit code`);
+    }
+    binary += String.fromCharCode(code & 0xff, code >> 8);
+  }
+  return btoa(binary);
+}
+
+/** What {@link anExtinctionResult} answers for its one target. */
+export interface ExtinctionReading {
+  readonly aVMag: number;
+  readonly eBVMag: number;
+  readonly aKMag: number;
+  readonly hydrogenColumnPerCm2: number;
+}
+
+/**
+ * The answer to an `extinction` request for one system target from the chart's centre at the
+ * epoch: the line's figures, or `no_such_system` for `null`.
+ */
+export function anExtinctionResult(
+  request: RequestOf<"extinction">,
+  reading: ExtinctionReading | null = {
+    aVMag: 0.84,
+    eBVMag: 0.27,
+    aKMag: 0.085,
+    hydrogenColumnPerCm2: 1.57e21,
+  },
+): ResponseFor<"extinction"> {
+  return {
+    kind: "extinction",
+    universe: request.universe,
+    origin: request.origin,
+    time: request.time,
+    targets: request.targets.map(() =>
+      reading === null
+        ? { status: "no_such_system" }
+        : {
+            status: "ok",
+            a_v_mag: reading.aVMag,
+            e_b_v_mag: reading.eBVMag,
+            a_k_mag: reading.aKMag,
+            hydrogen_column_per_cm2: reading.hydrogenColumnPerCm2,
+            neutral_hydrogen_column_per_cm2: 0.8 * reading.hydrogenColumnPerCm2,
+          },
+    ),
   };
 }
 
@@ -493,6 +685,7 @@ export function aStellarBrief(
     case "subgiant":
     case "wolf_rayet":
     case "hot_subdwarf":
+    case "stripped_helium_star":
       brief = { ...dwarf, kind };
       break;
   }
@@ -521,10 +714,50 @@ export interface SystemRecordSpec {
    * ROGUE_PLANET_FE_H_DEX} when absent, and none when `null`. Other layers' rows never carry one.
    */
   readonly feHDex?: number | null;
+  /** What the observer receives, for a row answered in observed mode; none when absent. */
+  readonly observed?: ObservedDto;
 }
 
 /** The metallicity a free-floating planet's row carries unless a test gives another, dex. */
 export const ROGUE_PLANET_FE_H_DEX = -0.25;
+
+/** What {@link anObservation} builds. */
+export interface ObservationSpec {
+  /** Where the observer sees the system, in the `GALACTIC` frame. */
+  readonly apparentLy: readonly [number, number, number];
+  /** The light's age, Julian years. */
+  readonly lightAgeYr: number;
+  /** The query's time, years from the epoch, from which the emitted time is the light age back. */
+  readonly timeYr?: number;
+  /**
+   * The stated curvature bound, ly; when absent 1.8E-4 ly, about plan 12's ½·a·Δ² for a disc star
+   * at the solar circle whose light is 4,000 years old (a = v_c² ÷ R, 230 km/s at 26,000 ly): a
+   * fixture's figure, not the sim's.
+   */
+  readonly boundLy?: number;
+  /** The same bound as an angle at the observer, arcsec; 9.3E-3″, the above's from 4,000 ly, when absent. */
+  readonly boundArcsec?: number;
+}
+
+/**
+ * What an observer receives from a system, as an observed row or summary carries it (plan 12,
+ * P12.T6): its light left the light age before the query's time.
+ */
+export function anObservation({
+  apparentLy,
+  lightAgeYr,
+  timeYr = 0,
+  boundLy = 1.8e-4,
+  boundArcsec = 9.3e-3,
+}: ObservationSpec): ObservedDto {
+  return {
+    emitted: universeTimeFromYears(timeYr - lightAgeYr),
+    light_age_yr: lightAgeYr,
+    apparent_position: galacticPositionFromLy(apparentLy),
+    curvature_error_ly: boundLy,
+    curvature_error_arcsec: boundArcsec,
+  };
+}
 
 /** One system of a range query's answer, as a query with `include_stellar` returns it. */
 export function aSystemRecord({
@@ -537,6 +770,7 @@ export function aSystemRecord({
   stellar,
   velocityKmS = [-231.25, 12.5, -7],
   feHDex,
+  observed,
 }: SystemRecordSpec): SystemRecord {
   const [low, high] = BANDS_MSUN[layer];
   const record: SystemRecord = {
@@ -548,6 +782,8 @@ export function aSystemRecord({
     age_myr: ageMyr,
     population,
     velocity_km_s: [...velocityKmS],
+    // Written only in observed mode, as the server writes it.
+    ...(observed === undefined ? {} : { observed }),
   };
   // A row without a brief leaves the key out, as the server writes it; a free-floating planet's
   // never has one unless a test gives it, and carries its metallicity instead.
@@ -642,9 +878,14 @@ export interface RangeRequestSpec {
   readonly minLayer?: MassLayer;
   readonly limit?: number;
   readonly universe?: UniverseIdHex;
+  /** The observer, for a query asked in observed mode; none, in `now`, when absent. */
+  readonly observerLy?: readonly [number, number, number];
 }
 
-/** A `systems_in_range` request, for comparing with what the client sends: with the briefs. */
+/**
+ * A `systems_in_range` request, for comparing with what the client sends: with the briefs, and
+ * with `mode` only when it is observed, as the client writes it.
+ */
 export function aRangeRequest({
   centreLy = [26_000, 0, 0],
   radiusLy = 50,
@@ -652,8 +893,9 @@ export function aRangeRequest({
   minLayer = "a",
   limit = 4_000,
   universe = UNIVERSE_ID,
+  observerLy,
 }: RangeRequestSpec = {}): RequestOf<"systems_in_range"> {
-  return {
+  const request: RequestOf<"systems_in_range"> = {
     kind: "systems_in_range",
     universe,
     centre: galacticPositionFromLy(centreLy),
@@ -663,6 +905,12 @@ export function aRangeRequest({
     limit,
     include_stellar: true,
   };
+  return observerLy === undefined
+    ? request
+    : {
+        ...request,
+        mode: { type: "observed", observer: galacticPositionFromLy(observerLy) },
+      };
 }
 
 /** One system of {@link aSystemsInRange}, placed relative to the centre. */
@@ -676,6 +924,19 @@ export interface RelativeSystemSpec {
   readonly velocityKmS?: readonly [number, number, number];
   /** A free-floating planet's metallicity, as {@link SystemRecordSpec.feHDex} has it. */
   readonly feHDex?: number | null;
+  /** Its age at the query's time, Myr; {@link aSystemRecord}'s default if absent. */
+  readonly ageMyr?: number;
+  /**
+   * What the observer receives, for an answer in observed mode: its light's age and where it shows
+   * the system, as an offset from the centre (the bound's {@link anObservation}'s defaults); none
+   * when absent.
+   */
+  readonly observed?: {
+    readonly lightAgeYr: number;
+    readonly apparentRelLy: readonly [number, number, number];
+    readonly boundLy?: number;
+    readonly boundArcsec?: number;
+  };
 }
 
 /** What {@link aSystemsInRange} builds. */
@@ -710,15 +971,33 @@ export function aSystemsInRange({
   universe = UNIVERSE_ID,
 }: SystemsInRangeSpec = {}): ResponseFor<"systems_in_range"> {
   const returned: Partial<Record<MassLayer, number>> = {};
-  const records = systems.map(({ relLy, layer, stellar, velocityKmS, feHDex }, position) => {
+  const records = systems.map((system, position) => {
+    const { relLy, layer, stellar, velocityKmS, feHDex, ageMyr, observed } = system;
     returned[layer] = (returned[layer] ?? 0) + 1;
+    const offset = (rel: readonly [number, number, number]): [number, number, number] => [
+      centreLy[0] + rel[0],
+      centreLy[1] + rel[1],
+      centreLy[2] + rel[2],
+    ];
     return aSystemRecord({
-      positionLy: [centreLy[0] + relLy[0], centreLy[1] + relLy[1], centreLy[2] + relLy[2]],
+      positionLy: offset(relLy),
       layer,
       index: position + 1,
       ...(stellar === undefined ? {} : { stellar }),
       ...(velocityKmS === undefined ? {} : { velocityKmS }),
       ...(feHDex === undefined ? {} : { feHDex }),
+      ...(ageMyr === undefined ? {} : { ageMyr }),
+      ...(observed === undefined
+        ? {}
+        : {
+            observed: anObservation({
+              apparentLy: offset(observed.apparentRelLy),
+              lightAgeYr: observed.lightAgeYr,
+              timeYr,
+              ...(observed.boundLy === undefined ? {} : { boundLy: observed.boundLy }),
+              ...(observed.boundArcsec === undefined ? {} : { boundArcsec: observed.boundArcsec }),
+            }),
+          }),
     });
   });
   return {
@@ -729,5 +1008,43 @@ export function aSystemsInRange({
     time: universeTimeFromYears(timeYr),
     census: aCensus({ minLayer, overLimit, overCellBudget, returned, limit }),
     systems: records,
+  };
+}
+
+/**
+ * `response` as a newer server might send it, with `fields` on its first `count` rows, every row
+ * when absent: strings this build does not know, such as {@link anUnknownLayer}'s.
+ */
+export function withRowFields(
+  response: ResponseFor<"systems_in_range">,
+  fields: Partial<Pick<SystemRecord, "layer" | "population" | "placement">>,
+  count = response.systems.length,
+): ResponseFor<"systems_in_range"> {
+  const systems: SystemRecord[] = [];
+  for (const [index, row] of response.systems.entries()) {
+    systems.push(index < count ? { ...row, ...fields } : row);
+  }
+  return { ...response, systems };
+}
+
+/**
+ * `response` as a newer server might send it, with `line` after its census's own lines and, where
+ * `line` is included and lighter than every layer before it, the census complete above `line`'s
+ * lower edge.
+ */
+export function withCensusLine(
+  response: ResponseFor<"systems_in_range">,
+  line: LayerCensus,
+): ResponseFor<"systems_in_range"> {
+  const { census } = response;
+  const lighter =
+    line.status === "included" && line.mass_min_msun < (census.complete_above_msun ?? Infinity);
+  return {
+    ...response,
+    census: {
+      ...census,
+      complete_above_msun: lighter ? line.mass_min_msun : census.complete_above_msun,
+      layers: [...census.layers, line],
+    },
   };
 }

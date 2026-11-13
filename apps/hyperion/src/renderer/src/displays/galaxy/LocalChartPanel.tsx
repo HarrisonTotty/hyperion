@@ -1,24 +1,26 @@
 import { useLayoutEffect, useRef, useState } from "react";
 
-import {
-  AU_PER_LY,
-  formatBearingDeg,
-  formatLengthLy,
-  formatScaleLength,
-  formatSigned,
-  formatUniverseTimeYr,
-  SCALE_AU_BELOW_LY,
-  TIME_SYSTEM_LABEL,
-} from "../../lib/format";
+import { AU_PER_LY, formatScaleLength, SCALE_AU_BELOW_LY } from "../../lib/format";
 import { StatusLine } from "../../components/StatusLine";
+import { StatusText } from "../../components/StatusText";
 import { useElementSize } from "../../lib/useElementSize";
-import { AXIS_TOLERANCE_LY, cylindrical } from "../../geometry/frame";
+import { cylindrical } from "../../geometry/frame";
 import type { SpatialQuantity, SpatialReading } from "../../spatial/Reading";
 import type { ScaleUnit } from "../../spatial/scale";
 import { SpatialView } from "../../spatial/SpatialView";
 import { vec3 } from "../../geometry/vec3";
+import { alertLegendOf } from "./alertMarks";
 import { CensusReadout } from "./CensusReadout";
 import { chartLayout, controlsGiveWay } from "./chartLayout";
+import { answeredMode } from "./chartModel";
+import {
+  CHART_FRAME_NAME,
+  modeReading,
+  placePrecisionFor,
+  placeReadings,
+  radiusReading,
+  timeReading,
+} from "./chartReadings";
 import { ChartControls } from "./ChartControls";
 import { usePageTabFocus } from "./pageTabFocus";
 import { SymbolLegend } from "./SymbolLegend";
@@ -32,15 +34,6 @@ const SCALE_UNITS: ReadonlyArray<ScaleUnit> = [
   { perSceneUnit: 1, minSceneLength: SCALE_AU_BELOW_LY },
   { perSceneUnit: AU_PER_LY, minSceneLength: 0 },
 ];
-
-/** Room for the longest value of each of the centre's coordinates, in characters. */
-const RADIUS_WIDTH_CH = 9;
-const ANGLE_WIDTH_CH = 6;
-const HEIGHT_WIDTH_CH = 9;
-const TIME_WIDTH_CH = 9;
-
-/** The precision the centre's radius is read at, which the core arrow's distance shares. */
-const CENTRE_DECIMALS = 1;
 
 interface LocalChartPanelProps {
   readonly chart: LocalChartState;
@@ -66,9 +59,11 @@ interface LocalChartPanelProps {
  * in `--text-muted` with a trailing `S`.
  *
  * A page too short for all that, as at 1280 × 720, is laid out `compact` (the orchestrator's ruling
- * 134.9): the camera's angles and keys and what the chart is asked for stand in a column beside the
- * chart, the census line beside the chart's frame, centre, time and scale, and the legend across
- * the page under both, on show in every state, so that the chart keeps 15 rem of height. The census
+ * 134.9): the camera's angles and keys stand at the end of the preset views' row, as the stacked
+ * page sets them, and what the chart is asked for in a column beside the chart; the census line
+ * beside the chart's frame, centre, time and scale, and the legend across the page under both, on
+ * show in every state, so that the chart keeps at least 14 rem of height (ruling 134.9's 15 rem,
+ * lowered for the legend's seventh line by P06.T24.c's ruling of 2026-10-21). The census
  * table, shown, takes the query controls' place in the column, whose settings the page shows
  * elsewhere (`QUERY EDGE`, the census line, the count line, `UT`, the range label); their single
  * keys stay live, and folding the table brings them back (ruling 149.1). The page's parts, and so
@@ -93,34 +88,21 @@ export function LocalChartPanel({ chart }: LocalChartPanelProps) {
       focusPageTab?.();
     }
   }, [fault, focusPageTab]);
-  const centre = result === null ? null : cylindrical(vec3(...result.centreLy));
-  const onAxis = centre !== null && !(centre.radiusLy > AXIS_TOLERANCE_LY);
-  const radiusText = centre === null ? null : formatLengthLy(centre.radiusLy, CENTRE_DECIMALS);
+  // The place's step scales with the answer's radius, so that a fine chart can be placed, and the
+  // angle's with its step along the arc at the answer's centre: one precision for the answer.
+  const precision = result === null ? null : placePrecisionFor(result.radiusLy, result.centreLy);
   const centreReadings: ReadonlyArray<SpatialReading> =
-    centre === null
-      ? []
-      : [
-          { label: "RADIUS", value: radiusText, unit: "ly", widthCh: RADIUS_WIDTH_CH },
-          {
-            label: "ANGLE",
-            value: onAxis ? null : formatBearingDeg(centre.angleDeg, CENTRE_DECIMALS),
-            unit: "",
-            widthCh: ANGLE_WIDTH_CH,
-          },
-          {
-            label: "HEIGHT",
-            value: formatSigned(centre.heightLy, CENTRE_DECIMALS),
-            unit: "ly",
-            widthCh: HEIGHT_WIDTH_CH,
-          },
-        ];
-  const time: SpatialReading = {
-    label: TIME_SYSTEM_LABEL,
-    value: result === null ? null : formatUniverseTimeYr(result.timeYr),
-    unit: "yr",
-    widthCh: TIME_WIDTH_CH,
-  };
+    result === null || precision === null ? [] : placeReadings(result.centreLy, precision);
+  // The core arrow's distance is the centre's `RADIUS`, written the same way, in light-years.
+  const radiusText =
+    result === null || precision === null
+      ? null
+      : radiusReading(cylindrical(vec3(...result.centreLy)).radiusLy, precision.place);
   const coreDistance: SpatialQuantity = { value: radiusText ?? "", unit: "ly" };
+  // The mode the answer on show was given in, which the furniture and the legend state.
+  const answered = result === null ? null : answeredMode(result);
+  // What the chart draws of the sensor detections, which the legend names (plan 12, P12.T12).
+  const alertLegend = alertLegendOf(scene);
 
   return (
     <div
@@ -132,7 +114,9 @@ export function LocalChartPanel({ chart }: LocalChartPanelProps) {
       ].join(" ")}
     >
       {hasCentre ? null : (
-        <p className="panel__empty local-chart__empty">NO CENTRE: pick on the map and press C</p>
+        <p className="panel__empty local-chart__empty">
+          <StatusText text="NO CENTRE: pick on the map and press C" />
+        </p>
       )}
       {fault === null ? null : (
         <StatusLine
@@ -141,19 +125,20 @@ export function LocalChartPanel({ chart }: LocalChartPanelProps) {
           action={{ label: "RETRY", onAction: chart.retry }}
         />
       )}
-      {scene === null || result === null ? null : (
+      {scene === null || result === null || precision === null ? null : (
         <SpatialView
           scene={scene}
           fitRadius={result.radiusLy}
           formatLength={formatScaleLength}
           scaleUnits={SCALE_UNITS}
-          frameName="GALACTIC"
+          frameName={CHART_FRAME_NAME}
           centre={centreReadings}
-          time={time}
+          time={timeReading(result.timeYr)}
+          mode={modeReading(answered ?? result.mode, precision)}
           coreDistance={coreDistance}
           accessibleName="Local chart"
           stale={stale}
-          onSelect={chart.select}
+          onSelect={chart.selectMark}
         />
       )}
       <ChartControls
@@ -171,6 +156,13 @@ export function LocalChartPanel({ chart }: LocalChartPanelProps) {
         onStarFilter={chart.chooseStarFilter}
         heldBack={heldBack}
         hidden={controlsGiveWay(layout, censusShown, result !== null)}
+        modes={{
+          mode: chart.displayMode,
+          onMode: chart.chooseMode,
+          observedHeldBack: chart.observedHeldBack,
+          moveHeldBack: chart.observerMoveHeldBack,
+          onMoveObserver: chart.moveObserverToCentre,
+        }}
       />
       <CensusReadout
         result={result}
@@ -190,6 +182,12 @@ export function LocalChartPanel({ chart }: LocalChartPanelProps) {
           result?.layers.find((line) => line.layer === "brown_dwarf" && line.status === "included")
             ?.mass_min_msun ?? null
         }
+        observed={answered?.kind === "observed"}
+        // Of the systems the `STARS` filter shows, as the list and the HR diagram read them.
+        unlistedLayer={chart.systems.some((system) => system.kind === "unknown")}
+        features={(chart.features?.features.length ?? 0) > 0}
+        transients={alertLegend.transients}
+        bearings={alertLegend.bearings}
       />
     </div>
   );

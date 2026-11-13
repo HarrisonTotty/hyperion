@@ -4,9 +4,12 @@
  * @remarks
  * The client requests its own adapter and hands it to the engine (R01 Design note 24), so that
  * every adapter the engine sees has been summarised and, if it is a software one, refused the
- * photorealistic style (Design note 8). An adapter is consumed by its first `requestDevice`, so a
- * rebuild after a device loss asks for a fresh one here and never reuses the old one.
+ * photorealistic style (Design note 8) in every launch mode but the check-only software mode
+ * (R01.T16). An adapter is consumed by its first `requestDevice`, so a rebuild after a device loss
+ * asks for a fresh one here and never reuses the old one.
  */
+
+import type { GraphicsLaunchMode } from "../../../../preload/api";
 
 /** Who made the adapter and whether it is a software one. */
 export interface AdapterSummary {
@@ -30,6 +33,17 @@ export interface GpuCapabilities {
   readonly rg11b10Renderable: boolean;
   /** R10's shadow cascades. */
   readonly depthClipControl: boolean;
+  /**
+   * WGSL's `@builtin(primitive_index)` (plan R14, R14.T2.c): the visibility buffer's ID raster takes
+   * its triangle from it, and draws de-indexed without it.
+   */
+  readonly primitiveIndex: boolean;
+  /**
+   * Bits of the rasteriser's sub-pixel grid, to which it snaps a triangle's corners before it covers
+   * and interpolates (plan R14, R14.T2.d): the visibility buffer's resolve snaps its corners alike,
+   * so that its barycentrics are the rasteriser's. WebGPU reports none ({@link subpixelBitsOf}).
+   */
+  readonly subpixelBits: number;
   /** Pixels on a side. */
   readonly maxTextureDimension2D: number;
   /** Invocations in the smallest subgroup, or `null` without the `subgroups` feature. */
@@ -46,7 +60,13 @@ export interface StyleAvailability {
   readonly photorealistic: boolean;
 }
 
-/** What asking for an adapter gave. */
+/**
+ * What asking for an adapter gave.
+ *
+ * @remarks
+ * The styles it may draw are the launch's to decide from its summary ({@link styleAvailability}),
+ * since the check-only software mode draws both on a fallback adapter (R01.T16).
+ */
 export type AdapterOutcome =
   /** `navigator.gpu` is absent. */
   | { readonly kind: "no-webgpu" }
@@ -57,7 +77,6 @@ export type AdapterOutcome =
       readonly adapter: GPUAdapter;
       readonly summary: AdapterSummary;
       readonly capabilities: GpuCapabilities;
-      readonly styles: StyleAvailability;
     };
 
 /**
@@ -72,6 +91,7 @@ export const WANTED_FEATURES: ReadonlyArray<GPUFeatureName> = [
   "float32-blendable",
   "rg11b10ufloat-renderable",
   "depth-clip-control",
+  "primitive-index",
 ];
 
 /**
@@ -86,11 +106,40 @@ export interface CapabilityOverrides {
   readonly withholdShaderF16: boolean;
   readonly withholdFloat32Blendable?: boolean;
   /**
+   * Withholds `depth-clip-control` (plan R10, R10.T9.b), so that the shadow cascades' casters take
+   * the pulled-back near plane, not `unclippedDepth`, on an adapter that offers the feature, as
+   * SwiftShader turned out to (T9.a's deferred finding; decision-r10-t9b-design D2).
+   */
+  readonly withholdDepthClipControl?: boolean;
+  /**
+   * Withholds `primitive-index` (plan R14, R14.T2.c), so that the visibility buffer's ID raster
+   * draws de-indexed on an adapter that offers the feature, as every adapter without it does.
+   */
+  readonly withholdPrimitiveIndex?: boolean;
+  /**
    * Requests WebGPU's default limits rather than {@link requiredLimits}' raised ones, so that the
    * harness runs R05's `FaceDifferences` fallback for the high setting (decisions-r06-r07.md
    * item 7).
    */
   readonly defaultLimits?: boolean;
+}
+
+/**
+ * SwiftShader's sub-pixel bits: snapped to its grid, R14.T2.d's place probe met its interpolants to
+ * 2 ulps at the 99th percentile and 5 at the most, and unsnapped to a median of 1,200 (test-render
+ * part 18, 2026-11-05).
+ */
+const SWIFTSHADER_SUBPIXEL_BITS = 4;
+
+/**
+ * Every other adapter's: Direct3D's 16.8 fixed point, which desktop Vulkan parts' 8
+ * `subPixelPrecisionBits` match (recalled; Metal's are taken alike, unmeasured).
+ */
+const SUBPIXEL_BITS = 8;
+
+/** The sub-pixel bits of the adapter `info` names ({@link GpuCapabilities}' `subpixelBits`). */
+export function subpixelBitsOf(info: Pick<GPUAdapterInfo, "architecture">): number {
+  return info.architecture === "swiftshader" ? SWIFTSHADER_SUBPIXEL_BITS : SUBPIXEL_BITS;
 }
 
 /** The adapter's identity and capabilities. */
@@ -115,6 +164,8 @@ export function summariseAdapter(adapter: GPUAdapter): {
       float32Blendable: features.has("float32-blendable"),
       rg11b10Renderable: features.has("rg11b10ufloat-renderable"),
       depthClipControl: features.has("depth-clip-control"),
+      primitiveIndex: features.has("primitive-index"),
+      subpixelBits: subpixelBitsOf(info),
       maxTextureDimension2D: limits.maxTextureDimension2D,
       subgroupMinSize: subgroups ? info.subgroupMinSize : null,
       maxStorageBufferBindingSize: limits.maxStorageBufferBindingSize,
@@ -141,6 +192,8 @@ export function deviceCapabilities(device: GPUDevice): GpuCapabilities {
     float32Blendable: features.has("float32-blendable"),
     rg11b10Renderable: features.has("rg11b10ufloat-renderable"),
     depthClipControl: features.has("depth-clip-control"),
+    primitiveIndex: features.has("primitive-index"),
+    subpixelBits: subpixelBitsOf(adapterInfo),
     maxTextureDimension2D: limits.maxTextureDimension2D,
     subgroupMinSize: subgroups ? adapterInfo.subgroupMinSize : null,
     maxStorageBufferBindingSize: limits.maxStorageBufferBindingSize,
@@ -164,13 +217,31 @@ export function featuresNotEnabled(
 }
 
 /**
- * The styles an adapter may draw.
+ * Whether a launch takes a fallback adapter as it takes a hardware one: only the check-only
+ * software mode does (R01.T16).
  *
- * @returns The wireframe always; the photorealistic style only on a hardware adapter, since the
- * brainstorm confines the software adapter's refusal to that style (R01 Design note 8).
+ * @remarks
+ * The owner's test-tool exception to R01 Design note 8 (2026-10-29). The mode comes from the main
+ * process's own switch, which it refuses without `--views-check` or `--descent-spike` and in a
+ * packaged build, never from the adapter, so a failed hardware path never draws the photorealistic
+ * style on SwiftShader.
  */
-export function styleAvailability(summary: AdapterSummary): StyleAvailability {
-  return { wireframe: true, photorealistic: !summary.fallback };
+export function takesFallbackAdapter(launchMode: GraphicsLaunchMode): boolean {
+  return launchMode === "software";
+}
+
+/**
+ * The styles an adapter may draw in a launch.
+ *
+ * @returns The wireframe always; the photorealistic style on a hardware adapter, since the
+ * brainstorm confines the software adapter's refusal to that style (R01 Design note 8), and on a
+ * fallback one only where {@link takesFallbackAdapter}.
+ */
+export function styleAvailability(
+  summary: AdapterSummary,
+  launchMode: GraphicsLaunchMode,
+): StyleAvailability {
+  return { wireframe: true, photorealistic: !summary.fallback || takesFallbackAdapter(launchMode) };
 }
 
 /**
@@ -190,7 +261,7 @@ export async function requestAdapterOutcome(gpu: GPU | undefined): Promise<Adapt
     return { kind: "no-adapter" };
   }
   const { summary, capabilities } = summariseAdapter(adapter);
-  return { kind: "adapter", adapter, summary, capabilities, styles: styleAvailability(summary) };
+  return { kind: "adapter", adapter, summary, capabilities };
 }
 
 /**
@@ -210,7 +281,10 @@ export const MAX_REQUESTED_BUFFER_BYTES = 2 ** 30;
  * @remarks
  * A pure function of the adapter, so a rebuild after a device loss asks the same of the same
  * hardware and less of a lesser adapter, and `requestDevice` cannot reject on limits. With the
- * harness's `defaultLimits` override, nothing is raised.
+ * harness's `defaultLimits` override, nothing is raised. No binding-count limit is raised:
+ * `maxStorageBuffersPerShaderStage` stays WebGPU's eight, which Metal's adapters exceed by two under
+ * Dawn, and a material that reads more storage buffers across its stages declares each one's own
+ * stages instead (`StorageBufferSpec.stages`; R10's decision-r10-t10b-r09-t2e §5).
  */
 export function requiredLimits(
   adapter: GPUAdapter,
@@ -246,6 +320,12 @@ export function requiredFeatures(
   }
   if (overrides?.withholdFloat32Blendable === true) {
     withheld.add("float32-blendable");
+  }
+  if (overrides?.withholdDepthClipControl === true) {
+    withheld.add("depth-clip-control");
+  }
+  if (overrides?.withholdPrimitiveIndex === true) {
+    withheld.add("primitive-index");
   }
   return WANTED_FEATURES.filter(
     (feature) => adapter.features.has(feature) && !withheld.has(feature),

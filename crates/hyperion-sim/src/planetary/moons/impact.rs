@@ -26,10 +26,15 @@
 //! # Frame
 //!
 //! The moon forms in the equatorial plane of the debris disc, which after the impact is its
-//! parent's equator, so its orbit is circular and on the parent's equator, and its inclination to
-//! the parent's orbital plane is the parent's new obliquity, which P14.T14.a draws. Plan 14's
-//! phase D gives "the rest" of the moons' orbits relative to the parent's orbital plane; this one
-//! is relative to the equator until T14 places it (a deviation, recorded in the plan).
+//! parent's equator, so its orbit is circular and on the parent's equator, and it follows the
+//! parent's Laplace surface adiabatically as it recedes (Goldreich 1965, AJ 70, 5): it lies on the
+//! parent's Laplace surface at its present distance, the equator while it is well inside the
+//! Laplace radius (P14.T56.a, [`laplace`](crate::planetary::laplace)). Its elements here are
+//! relative to that plane, which P14.T22.a orients; about a parent with no Laplace frame it is the
+//! parent's orbital plane.
+//! One that recedes through the eccentricity band of a parent tilted beyond 68.875° keeps its
+//! circular orbit: what the transition does to it is not modelled (Ćuk et al. 2016, Nature 539,
+//! 402).
 //!
 //! # Draws
 //!
@@ -117,6 +122,15 @@ impl ImpactMoon {
     #[must_use]
     pub const fn density(&self) -> KilogramsPerCubicMetre {
         self.density
+    }
+
+    /// The same moon at the mass `mass`, its density and orbit kept: as its record derives it once
+    /// its rock's evaporation has left it that much (P14.T55.b.a's follow-up), its radius shrunk at
+    /// its density. Its orbit is read from the moon as it formed, whose recession its wind does
+    /// not move.
+    #[must_use]
+    pub(crate) const fn with_mass(self, mass: EarthMasses) -> Self {
+        Self { mass, ..self }
     }
 
     /// The moon's orbit as it formed, circular on the parent's equator at a₀.
@@ -488,7 +502,7 @@ mod tests {
     #[test]
     fn the_orbit_is_monotone_and_continuous_in_time() {
         let moons = moons_of(400, |i| earth(planet_id(i, 3)));
-        assert!(!moons.is_empty());
+        assert_ne!(moons, []);
         for (parent, moon) in &moons {
             let mut last = moon.formed().semi_major_axis();
             assert_eq!(moon.semi_major_axis_at(Years::new(0.0)), last);
@@ -517,7 +531,7 @@ mod tests {
         use crate::planetary::drift::{DRIFT_TOLERANCE, drift_cell};
         use crate::time::ClockWindow;
         let moons = moons_of(400, |i| earth(planet_id(i, 3)));
-        assert!(!moons.is_empty());
+        assert_ne!(moons, []);
         let age = 4.57e9;
         for (parent, moon) in moons.iter().take(20) {
             let anchored = moon.orbit_at(parent, Years::new(age));
@@ -575,7 +589,7 @@ mod tests {
                     0.0,
                 )
             });
-            assert!(!moons.is_empty());
+            assert_ne!(moons, []);
             for (_, moon) in moons {
                 let lost = moon.lost_at().value();
                 assert!(lost < 1e9, "{mass} M⊕: lost at {lost} yr");
@@ -644,7 +658,7 @@ mod tests {
                 0.25,
             )
         });
-        assert!(!dwarfs.is_empty());
+        assert_ne!(dwarfs, []);
         assert!(
             dwarfs
                 .iter()

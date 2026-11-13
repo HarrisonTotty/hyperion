@@ -89,22 +89,21 @@ pub struct WindowCaps {
 }
 
 impl WindowCaps {
-    /// The caps of `galaxy`'s gas.
+    /// The caps of `galaxy`'s gas: [`from_gas_params`](Self::from_gas_params) of its gas
+    /// parameters, which the galaxy computes once when it is built and holds
+    /// ([`Galaxy::window_caps`]), so this costs a copy (P09.T17).
+    #[must_use]
+    pub const fn from_galaxy(galaxy: &Galaxy) -> Self {
+        *galaxy.window_caps()
+    }
+
+    /// The caps of gas with the parameters `params`: a fixed scan of some 5,000 windows, 3.7 ms in
+    /// a test build (P09.T17's measurement), which [`Galaxy`] runs once.
     ///
     /// # Panics
     ///
     /// If a cap exceeds [`SHELL_WINDOW_CAP`]: a finding against the brainstorm's 2–4 Myr, never
     /// met by the galaxies the parameters allow.
-    #[must_use]
-    pub fn from_galaxy(galaxy: &Galaxy) -> Self {
-        Self::from_gas_params(galaxy.gas().params())
-    }
-
-    /// The caps of gas with the parameters `params`.
-    ///
-    /// # Panics
-    ///
-    /// As [`from_galaxy`](Self::from_galaxy).
     #[must_use]
     pub fn from_gas_params(params: &GasParams) -> Self {
         Self::at_floor(params.pressure_floor())
@@ -114,7 +113,7 @@ impl WindowCaps {
     ///
     /// # Panics
     ///
-    /// As [`from_galaxy`](Self::from_galaxy), and if `floor` is not positive and finite.
+    /// As [`from_gas_params`](Self::from_gas_params), and if `floor` is not positive and finite.
     #[must_use]
     pub fn at_floor(floor: KelvinPerCm3) -> Self {
         let field = floor_supremum(floor);
@@ -290,6 +289,31 @@ mod tests {
             high.value()
         );
         assert!(high < low && low <= SHELL_WINDOW_CAP);
+    }
+
+    /// P09.T17: the caps a galaxy holds are the scan of its gas's parameters, bit for bit, for a
+    /// drawn galaxy and the fixture, so the precomputed path cannot split from the direct one.
+    #[test]
+    fn a_galaxy_holds_the_scan_of_its_gas_bit_for_bit() {
+        use hyperion_testkit::float::assert_same_bits;
+
+        for galaxy in [
+            Galaxy::new(Seed::new(0x0917_0f01)),
+            Galaxy::from_params(Seed::new(0x0917_0f02), GalaxyParams::milky_way_like()).unwrap(),
+        ] {
+            let scanned = WindowCaps::from_gas_params(galaxy.gas().params());
+            let held = WindowCaps::from_galaxy(&galaxy);
+            for environment in ShellEnvironment::ALL {
+                assert_same_bits(
+                    held.cap(environment).value(),
+                    scanned.cap(environment).value(),
+                );
+                assert_same_bits(
+                    galaxy.window_caps().cap(environment).value(),
+                    scanned.cap(environment).value(),
+                );
+            }
+        }
     }
 
     #[test]

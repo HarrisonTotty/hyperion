@@ -10,11 +10,14 @@ import { angularDiameterPx } from "../wireframe/bodies";
 import { OUTSIDE_VIEW_MARGIN_PX, sphereOutsideView, sphereScreenRect } from "../wireframe/submit";
 import { type DiscRecord, rasteriseDisc } from "./discShading";
 import {
+  drawnAsMesh,
+  drawnByTable,
   type LitRegime,
   type LitSphere,
   litRegimes,
   GAS_GIANT_FULL_PASS_BOUNDARY_M,
   POINT_BELOW_PX,
+  REGIME_HYSTERESIS,
   promoteOverlapping,
   type ScreenCircle,
   sphereFootprint,
@@ -81,6 +84,12 @@ describe("litRegimes", () => {
     expect(regimeOf(atBoundary, viewport, "disc")).toBe("disc");
   });
 
+  it("keeps a body that was handed over to terrain on the disc side of the switch (R10.T10.e)", () => {
+    const viewport = HD;
+    expect(regimeOf(sphereOf(2.99, viewport), viewport, "terrain")).toBe("disc");
+    expect(regimeOf(sphereOf(2.69, viewport), viewport, "terrain")).toBe("point");
+  });
+
   it("starts a new body as a point, so it must clear 3.3 px", () => {
     const viewport = HD;
     expect(regimeOf(sphereOf(3.2, viewport), viewport)).toBe("point");
@@ -143,6 +152,24 @@ describe("the brainstorm's figures, re-derived", () => {
   );
 });
 
+describe("drawnByTable (plan R08, R08.T16.b)", () => {
+  it("draws a body by its table past (1 + h) × 10⁹ m and keeps it there down to (1 − h) × 10⁹ m", () => {
+    const b = GAS_GIANT_FULL_PASS_BOUNDARY_M;
+    const h = REGIME_HYSTERESIS;
+    expect([b, h]).toEqual([1e9, 0.1]);
+    expect([
+      drawnByTable(b * (1 + h) * 0.999, false),
+      drawnByTable(b * (1 + h) * 1.001, false),
+    ]).toEqual([false, true]);
+    expect([
+      drawnByTable(b * (1 - h) * 1.001, true),
+      drawnByTable(b * (1 - h) * 0.999, true),
+    ]).toEqual([true, false]);
+    // Between the two, a body keeps the side it was on.
+    expect([drawnByTable(b, false), drawnByTable(b, true)]).toEqual([false, true]);
+  });
+});
+
 describe("promoteOverlapping", () => {
   const FIRST: BodyIdHex = "0200080020000000.0100";
   const SECOND: BodyIdHex = "0200080020000000.0200";
@@ -186,6 +213,25 @@ describe("promoteOverlapping", () => {
       [SECOND, "point"],
     ]);
     expect(promoteOverlapping(regimes, footprints, []).get(SECOND)).toBe("point");
+  });
+
+  it("promotes a disc overlapping a body handed over to terrain, which keeps its regime (R10.T10.e)", () => {
+    const regimes = new Map<BodyIdHex, LitRegime>([
+      [FIRST, "terrain"],
+      [SECOND, "disc"],
+      [THIRD, "disc"],
+    ]);
+    const promoted = promoteOverlapping(regimes, footprints, []);
+    expect([...promoted.values()]).toEqual(["terrain", "mesh", "disc"]);
+  });
+
+  it("draws as meshes the bodies promoted and those handed over to terrain alone (R10.T10.e)", () => {
+    expect((["point", "disc", "mesh", "terrain"] as const).map(drawnAsMesh)).toEqual([
+      false,
+      false,
+      true,
+      true,
+    ]);
   });
 });
 

@@ -7,13 +7,16 @@ import {
   formatBodyDistance,
   formatBodySpan,
   formatGravity,
+  formatMassFraction,
   formatMassMearth,
   formatNumber,
   formatPeriod,
+  formatPressure,
   formatRadiusKm,
   formatSci,
   formatSignificant,
   formatTemperatureK,
+  type MassFractionUnit,
   TIME_SYSTEM_LABEL,
 } from "../../lib/format";
 import {
@@ -21,22 +24,41 @@ import {
   beltSiteLabel,
   bodyKindLabel,
   bodyStateLabel,
+  crustLidLabel,
   destructionCauseLabel,
   detailLevelLabel,
+  envelopeLabel,
+  habitabilityClassLabel,
+  habitabilityLimitLabel,
   moonOriginLabel,
   planetClassLabel,
+  redoxClassLabel,
   ringKindLabel,
   ringMaterialLabel,
   sectionStateLabel,
+  surfaceStateLabel,
 } from "../../lib/system/bodyWords";
 import type {
+  BodyEnvelope,
+  BodyHooks,
   BodyRecord,
+  BodySurface,
   BulkProperties,
+  CrustComposition,
+  DestructionCause,
+  GasShare,
+  Habitability,
+  Modelled,
   Population,
+  ResourceAbundances,
   Section,
+  SilicateVapour,
+  SubstanceArea,
+  SurfaceCondensate,
   SystemBody,
 } from "../../lib/system/model";
 import { formatBodyIdHex } from "../../lib/seed";
+import { substanceName } from "../../lib/substances";
 import { BodyIdRow } from "./BodyIdRow";
 import { formatEventTime } from "./displayTime";
 import { MISSING, ReadoutRow, type Shown, shown as value } from "./ReadoutRow";
@@ -104,6 +126,164 @@ function detailSeedRow(seed: Section<string>): ReactNode {
   return <ReadoutRow label="DETAIL SEED" shown={reading} wide />;
 }
 
+/**
+ * The `CAUSE` row of a destroyed body: its cause in words, and the guide's Missing state, the em
+ * dash, for a cause this build does not know, as a newer server's may be.
+ */
+function causeRow(cause: DestructionCause): ReactNode {
+  const label = destructionCauseLabel(cause);
+  return <ReadoutRow label="CAUSE" shown={label === null ? MISSING : value(label)} wide />;
+}
+
+/**
+ * A body's habitability as one reading: its class, then each of its limits, in words, joined by
+ * middle dots (`MARGINAL · FROZEN SURFACE`, plan 14, P14.T25). A limit this build does not know, as a
+ * newer server's may be, is a part that reads Missing, the em dash, as an unknown part of a
+ * system's origin does; the class alone reads for a body with none.
+ */
+function habitabilityReading(habitability: Habitability): string {
+  return [
+    habitabilityClassLabel(habitability.habitabilityClass),
+    ...habitability.limits.map((limit) => habitabilityLimitLabel(limit) ?? "—"),
+  ].join(PART_JOIN);
+}
+
+/**
+ * The `HABITABILITY` row: its reading; the section's name and state, once, where it is withheld or
+ * not modelled, as an older server's absent field reads; and no row where it does not apply.
+ */
+function habitabilityRow(habitability: Section<Habitability>): ReactNode {
+  return sectionRows("HABITABILITY", habitability, (assessed) => (
+    <ReadoutRow label="HABITABILITY" shown={value(habitabilityReading(assessed))} wide />
+  ));
+}
+
+/** A mass fraction's figure, and its unit, `null` for `NONE`. */
+interface MassFractionReading {
+  readonly figure: string;
+  readonly unit: MassFractionUnit | null;
+}
+
+/**
+ * A resource's mass fraction: three significant figures in `%`, `ppm` or `ppb` by
+ * {@link formatMassFraction}'s ladder, `ABOVE 99.9 %` for a fraction below the whole whose figure
+ * would round to it, as a share does, and `NONE` for 0, which is data.
+ */
+function massFractionReading(fraction: number): MassFractionReading {
+  if (fraction === 0) {
+    return { figure: "NONE", unit: null };
+  }
+  const formatted = formatMassFraction(fraction);
+  return {
+    figure:
+      formatted.unit === "%" ? sharePercentage(fraction, significantPercent) : formatted.value,
+    unit: formatted.unit,
+  };
+}
+
+/** A resource's mass fraction as its row reads it ({@link massFractionReading}). */
+function massFractionShown(fraction: number): Shown {
+  const { figure, unit } = massFractionReading(fraction);
+  return unit === null ? value(figure) : value(figure, unit);
+}
+
+/**
+ * The four radioactive isotopes as one reading, each its symbol and mass number and its fraction,
+ * joined by middle dots: `U-238 20.1 ppb · U-235 0.146 ppb · Th-232 79.5 ppb · K-40 28.2 ppb`; `NONE`
+ * where all four are 0. Each part keeps its figure and unit with no-break spaces, as a share does.
+ */
+function radioisotopesShown(resources: ResourceAbundances): Shown {
+  const { radioisotopes } = resources;
+  const isotopes: ReadonlyArray<readonly [string, number]> = [
+    ["U-238", radioisotopes.uranium238],
+    ["U-235", radioisotopes.uranium235],
+    ["Th-232", radioisotopes.thorium232],
+    ["K-40", radioisotopes.potassium40],
+  ];
+  if (isotopes.every(([, fraction]) => fraction === 0)) {
+    return value("NONE");
+  }
+  return value(
+    isotopes
+      .map(([name, fraction]) => {
+        const { figure, unit } = massFractionReading(fraction);
+        return [name, figure, ...(unit === null ? [] : [unit])].join(NO_BREAK_SPACE);
+      })
+      .join(PART_JOIN),
+  );
+}
+
+/**
+ * The resources' labels that are an isotope's symbol, which keep their case against the readout's
+ * upper-case labels, as `[Fe/H]` does: `He-3` is helium's, never `HE-3`.
+ */
+const SYMBOL_LABELS: ReadonlySet<string> = new Set(["He-3", "H-2"]);
+
+/**
+ * The rows of a body's resources (plan 14, P14.T26): `MASS FRACTION OUTER LAYERS`, which names
+ * their quantity once, as `MOLE FRACTION` names a mixture's (research's ruling of 2026-11-01), the
+ * mass fraction of the body's accessible outer layers; then each of the plan's eleven, in its
+ * order, with the four radioactive isotopes after `RADIOACTIVES`. Withheld or not modelled, as every
+ * server before generator version 27 sends them, `RESOURCES` reads its state once in their place.
+ *
+ * @remarks
+ * A solid layer's `He-3`, which the generator does not compute, reads Missing, the em dash, never
+ * `NONE`. Water is `H2O`, in any phase, as the guide names a substance; `OTHER ICES` are CO2, NH3 and CH4,
+ * planetary science's ices whatever their phase; the isotopes take their mass numbers after a
+ * hyphen, `He-3` and `H-2`, as the guide writes every isotope.
+ */
+function resourcesRows(resources: Section<ResourceAbundances>): ReactNode {
+  return sectionRows("RESOURCES", resources, (abundances) => {
+    const rows: ReadonlyArray<readonly [string, Shown]> = [
+      ["IRON GROUP", massFractionShown(abundances.ironGroup)],
+      ["LIGHT LITHOPHILES", massFractionShown(abundances.lightLithophiles)],
+      ["RARE EARTHS", massFractionShown(abundances.rareEarths)],
+      ["PLATINUM GROUP", massFractionShown(abundances.platinumGroup)],
+      ["RADIOACTIVES", massFractionShown(abundances.radioactives)],
+    ];
+    // A helium-3 the generator does not compute, a solid layer's, is Missing, never NONE.
+    const helium3 =
+      abundances.helium3.kind === "value" ? massFractionShown(abundances.helium3.value) : MISSING;
+    const after: ReadonlyArray<readonly [string, Shown]> = [
+      ["SILICATES", massFractionShown(abundances.silicates)],
+      ["H2O", massFractionShown(abundances.waterIce)],
+      ["OTHER ICES", massFractionShown(abundances.otherIces)],
+      ["HYDROCARBONS", massFractionShown(abundances.hydrocarbons)],
+      ["He-3", helium3],
+      ["H-2", massFractionShown(abundances.deuterium)],
+    ];
+    const row = ([label, shown]: readonly [string, Shown]) => (
+      <ReadoutRow
+        key={label}
+        label={SYMBOL_LABELS.has(label) ? <span className="readout__symbol">{label}</span> : label}
+        shown={shown}
+      />
+    );
+    return (
+      <>
+        <ReadoutRow label="MASS FRACTION" shown={value("OUTER LAYERS")} wide />
+        {rows.map(row)}
+        <ReadoutRow label="RADIOISOTOPES" shown={radioisotopesShown(abundances)} wide />
+        {after.map(row)}
+      </>
+    );
+  });
+}
+
+/**
+ * The rows of a body's hooks: `DETAIL SEED`, `HABITABILITY` and the resources' rows, each from its
+ * own state.
+ */
+function hooksRows(hooks: BodyHooks): ReactNode {
+  return (
+    <>
+      {detailSeedRow(hooks.detailSeed)}
+      {habitabilityRow(hooks.habitability)}
+      {resourcesRows(hooks.resources)}
+    </>
+  );
+}
+
 /** A count of bodies, or `NONE` for an empty list, which is data. */
 function countOf(ids: ReadonlyArray<string>): string {
   return ids.length === 0 ? "NONE" : formatNumber(ids.length, 0);
@@ -112,6 +292,442 @@ function countOf(ids: ReadonlyArray<string>): string {
 /** A mass fraction as a percentage, without its unit: `32.3`. */
 function percent(fraction: number): string {
   return formatNumber(fraction * 100, PERCENT_DECIMALS);
+}
+
+/**
+ * A fraction as a percentage to the guide's three significant figures, without its unit: a mole
+ * fraction's `0.934`, a share of the surface's `71.0`, and `1.00E-4` below 0.001 %.
+ */
+function significantPercent(fraction: number): string {
+  return formatSignificant(fraction * 100);
+}
+
+/** What joins the parts of a reading of several, as the guide's Voice joins them. */
+const PART_JOIN = " · ";
+
+/** The no-break space (U+00A0), which both B612 faces hold, inside each part of such a reading. */
+const NO_BREAK_SPACE = "\u00A0";
+
+/** One part of a reading of shares: what it is, in words or by its formula, and its percentage. */
+interface Share {
+  readonly name: string;
+  readonly percentage: string;
+}
+
+/**
+ * Shares as one reading, each its name and its percentage with its `%`, joined by middle dots:
+ * `N2 78.1 % · O2 20.9 % · Ar 0.934 %`. The quantity is named once, in the row's label, never on
+ * the `%` (the guide's Voice and nomenclature; decision-substance-names).
+ *
+ * @remarks
+ * A part's figure keeps its `%` across a no-break space, as the guide's `±` reading keeps its parts
+ * together, and so does a name of one word, a formula's or a layer's, its figure: a narrow column
+ * breaks such a reading only after a middle dot. A name of several words (`UNLISTED MATERIAL`) may
+ * break between its words and before its figure, since bound whole it is wider than the column at
+ * 1280 × 720 and would scroll the readings sideways.
+ */
+function sharesReading(shares: ReadonlyArray<Share>): string {
+  return shares
+    .map(({ name, percentage }) => {
+      const nameJoin = name.includes(" ") ? " " : NO_BREAK_SPACE;
+      return `${name}${nameJoin}${percentage}${NO_BREAK_SPACE}%`;
+    })
+    .join(PART_JOIN);
+}
+
+/**
+ * A share's percentage as its part of a reading of shares reads it, without its unit: its figure,
+ * or `ABOVE 99.9` for a share below the whole whose figure rounds to the whole's, so that no part
+ * claims the whole beside another, as the guide's survey coverage reads (signoff-11, item 21;
+ * signoff-12, item 43).
+ *
+ * @remarks
+ * Ruled on the figure as shown, not on a threshold of the fraction, so that the rule and the
+ * reading agree at every rounding edge, against the same formatter's figure for the whole. `99.9`
+ * is the last figure below the whole at both precisions the readout reads shares to, three
+ * significant figures and one decimal; a share read to another would need its own. `ABOVE` keeps
+ * its figure across a no-break space, as `%` does.
+ *
+ * @param fraction - The share, from 0 to 1.
+ * @param figure - The share's percentage as shown, without its unit, from its fraction.
+ */
+function sharePercentage(fraction: number, figure: (fraction: number) => string): string {
+  const shown = figure(fraction);
+  return fraction < 1 && shown === figure(1) ? `ABOVE${NO_BREAK_SPACE}99.9` : shown;
+}
+
+/**
+ * A mixture's gases as their reading, in the order the wire gives them, largest first: each named
+ * by {@link substanceName} in a label's case, never by its key, with its mole fraction to the
+ * guide's three significant figures (`Ar 0.934 %`), in E notation below 0.001 % (`1.00E-4 %`);
+ * `NONE` for no gas, which is data.
+ *
+ * @remarks
+ * A gas below the whole whose three figures round to `100` reads `ABOVE 99.9 %`, as the guide's
+ * survey coverage does, so that no part claims the whole beside another; only a gas that is the
+ * whole reads `100 %` (signoff-11, item 21).
+ */
+function gasesShown(gases: ReadonlyArray<GasShare>): Shown {
+  return gases.length === 0
+    ? value("NONE")
+    : value(
+        sharesReading(
+          gases.map((gas) => ({
+            name: substanceName(gas.species, "upper"),
+            percentage: sharePercentage(gas.moleFraction, significantPercent),
+          })),
+        ),
+      );
+}
+
+/**
+ * A surface pressure with its unit (`101 kPa`, `9.20 MPa`), or `NONE` for an airless body's zero,
+ * which is data: no air, never a reading of `0.00 Pa`.
+ */
+function pressureShown(pressurePa: number): Shown {
+  if (pressurePa === 0) {
+    return value("NONE");
+  }
+  const pressure = formatPressure(pressurePa);
+  return value(pressure.value, pressure.unit);
+}
+
+/**
+ * Whether a surface holds melt, where a vapour of its own, the melt's silicate vapour, lies over
+ * it, as the wire states it: the state `magma_ocean` (P14.T35.f), or a crust whose
+ * `melt_area_fraction` is above 0 (P14.T54.a), as a locked lava world's dayside pool is under the
+ * state `airless`.
+ *
+ * @remarks
+ * A crust not modelled, as every server before P14.T54.a sends it, adds no melt, and an ice lid's
+ * melt area is 0, since its liquid is a condensate, not a melt of the crust. No surface is ever
+ * `steam_envelope`: such a body's air is its envelope section (P14.T53.b part 3, P14.T53.f).
+ */
+function holdsMelt(surface: BodySurface): boolean {
+  return (
+    surface.state === "magma_ocean" ||
+    (surface.crust.kind === "value" && surface.crust.value.meltAreaFraction > 0)
+  );
+}
+
+/** What a melt's own vapour, as the wire sends it, lets its surface's rows read. */
+interface VapourReading {
+  /** Whether an empty volatile air reads Missing, the em dash, rather than `NONE`. */
+  readonly emptyAirMissing: boolean;
+  /** Whether the `SILICATE VAPOUR NOT YET MODELLED` row stands. */
+  readonly notModelledRow: boolean;
+}
+
+/**
+ * How a melt's own vapour reads: not modelled, Missing air and its row; computed as none, `NONE`
+ * and no row (decision-backlog-2 §2.4); a value, Missing air and no row.
+ */
+function vapourReading(vapour: Modelled<SilicateVapour>): VapourReading {
+  let reading: VapourReading;
+  switch (vapour.kind) {
+    case "not_modelled":
+      reading = { emptyAirMissing: true, notModelledRow: true };
+      break;
+    case "none":
+      reading = { emptyAirMissing: false, notModelledRow: false };
+      break;
+    case "value":
+      // `NOT YET MODELLED` would be false, and this client has no figures to read: P14.T55.b, which
+      // gives the vapour its members, adds its row (plan 14, P14.T43.e's record).
+      reading = { emptyAirMissing: true, notModelledRow: false };
+      break;
+  }
+  return reading;
+}
+
+/**
+ * The registry key of the crust that lies at the surface, the member its lid names.
+ *
+ * @throws Error where the lid names a member that is `null`, which the wire's contract forbids and
+ * the decoder (`bodiesWire.ts`'s `toCrust`) refuses, so that only a broken client reaches it.
+ */
+function lidSubstance(crust: CrustComposition): string {
+  let key: string | null;
+  switch (crust.lid) {
+    case "primary":
+      key = crust.primary;
+      break;
+    case "secondary":
+      key = crust.secondary;
+      break;
+    case "bulk":
+      key = crust.bulk;
+      break;
+  }
+  if (key === null) {
+    throw new Error(`the crust's lid names its ${crust.lid} member, which is null`);
+  }
+  return key;
+}
+
+/**
+ * The melt's share of the surface as `MELT COVER` reads it: its percentage to three significant
+ * figures with its unit (`25.0 %`), in E notation below 0.001 %, `ABOVE 99.9 %` for a share below
+ * the whole that would round to it, `100 %` only for the whole, and `NONE` for 0, which is data.
+ */
+function meltCoverShown(meltAreaFraction: number): Shown {
+  return meltAreaFraction === 0
+    ? value("NONE")
+    : value(sharePercentage(meltAreaFraction, significantPercent), "%");
+}
+
+/**
+ * The rows of a surface's crust: `CRUST`, which crust lies at the surface and its substance, joined
+ * by a middle dot as the view's `MATERIAL` reading is (`SECONDARY · REDUCED BASALT`); then
+ * `MANTLE REDOX` and `MELT COVER`. A crust not modelled reads `CRUST NOT YET MODELLED`, and one
+ * computed as none `CRUST NONE`, once, in place of the three.
+ */
+function crustRows(crust: Modelled<CrustComposition>): ReactNode {
+  let rows: ReactNode;
+  switch (crust.kind) {
+    case "not_modelled":
+      rows = <ReadoutRow label="CRUST" shown={value(sectionStateLabel("not_modelled"))} wide />;
+      break;
+    case "none":
+      rows = <ReadoutRow label="CRUST" shown={value("NONE")} wide />;
+      break;
+    case "value": {
+      const composition = crust.value;
+      const substance = substanceName(lidSubstance(composition), "upper");
+      rows = (
+        <>
+          <ReadoutRow
+            label="CRUST"
+            shown={value(`${crustLidLabel(composition.lid)}${PART_JOIN}${substance}`)}
+            wide
+          />
+          <ReadoutRow label="MANTLE REDOX" shown={value(redoxClassLabel(composition.redox))} wide />
+          <ReadoutRow
+            label="MELT COVER"
+            shown={meltCoverShown(composition.meltAreaFraction)}
+            wide
+          />
+        </>
+      );
+      break;
+    }
+  }
+  return rows;
+}
+
+/**
+ * A cover by substance, the surface's liquids or its ices, as one reading of shares: largest first,
+ * ties in the wire's order, each named by {@link substanceName} in a label's case with no phase
+ * word, since the row's label names the phase, and its share at `MELT COVER`'s precision; a part at
+ * 0 left out, and `NONE` where no part is above 0, which is data.
+ *
+ * @remarks
+ * Sorted here, by a stable sort, since the wire orders the cover by the reservoirs' mass, not by
+ * area.
+ */
+function coverShown(areas: ReadonlyArray<SubstanceArea>): Shown {
+  const parts = areas
+    .filter((area) => area.areaFraction > 0)
+    .toSorted((a, b) => b.areaFraction - a.areaFraction);
+  return parts.length === 0
+    ? value("NONE")
+    : value(
+        sharesReading(
+          parts.map((area) => ({
+            name: substanceName(area.substance, "upper"),
+            percentage: sharePercentage(area.areaFraction, significantPercent),
+          })),
+        ),
+      );
+}
+
+/**
+ * Whether the wire states the ice in a surface's cold traps: some condensate carries its trapped
+ * share, which no server sends before P14.T54.b.
+ */
+function coldTrapsKnown(condensates: Modelled<ReadonlyArray<SurfaceCondensate>>): boolean {
+  return (
+    condensates.kind === "value" &&
+    condensates.value.some((condensate) => condensate.trappedAreaFraction.kind === "value")
+  );
+}
+
+/**
+ * What `SUBSURFACE OCEAN`, the ocean under a body's ice, reads (plan 14, P14.T43.i,
+ * decision-p14-t43h-review §4; P14.T51.g.b, decision-p14-t51gb-ice-ii §3 and
+ * decision-ux-ocean-row §1): the liquid of {@link BodySurface.subsurfaceOcean}, the member, where
+ * it is a value, on any surface; `NONE` where the member is computed as none; `NOT YET MODELLED`
+ * where it is not modelled.
+ *
+ * @remarks
+ * The member is the generator's own statement of the ocean, not an item of the cover, so it stands
+ * whatever the condensates are. It has the wire's three states, each with its reading: a value, the
+ * ocean, reads its liquid; `none`, the wire's `null`, a body computed to hold none, reads `NONE`,
+ * which is data, as `MELT COVER`'s is; and `not_modelled`, the wire's absent key, an ocean the
+ * generator does not compute, as one whose floor would be ice II (Triton's), reads
+ * `NOT YET MODELLED`, as `EXOSPHERE` and `COLD TRAPS` do, so that an ocean the generator does not
+ * compute is never read as none (the guide's Data states). The reading follows the member's state
+ * alone, never the surface's state, its temperature, the body's kind or the generator version,
+ * since a state is the server's to set. To generator version 23 a server appended a Snowball's
+ * ocean to its cover, and the row read that item before the member (P14.T43.i's rule 5); from
+ * version 24 no server appends it, and the rule went with the bump (P14.T54.b.l;
+ * decision-ux-ocean-row §4).
+ */
+function subsurfaceOceanShown(surface: BodySurface): Shown {
+  const member = surface.subsurfaceOcean;
+  let reading: Shown;
+  switch (member.kind) {
+    case "value":
+      reading = value(substanceName(member.value.liquid, "upper"));
+      break;
+    case "none":
+      reading = value("NONE");
+      break;
+    case "not_modelled":
+      reading = value(sectionStateLabel("not_modelled"));
+      break;
+  }
+  return reading;
+}
+
+/**
+ * The rows of a surface section (plan 14, P14.T43.b, _Amended for T35.e_): its state in words under
+ * the section's own name, so that `SURFACE` keeps its place whether the section is shown or stands
+ * in; the mean surface temperature; the surface pressure; the air's gases by mole fraction; and then
+ * the ground's crust and cover (P14.T43.g).
+ *
+ * @remarks
+ * The temperature and the pressure take a line each, so that `SURFACE PRESSURE`, the section's
+ * longest label but `SUBSURFACE OCEAN`, which takes a line of its own too, stays in the first label
+ * track rather than widening the second.
+ *
+ * An airless body's air is computed, with none in it: its pressure and its gases read `NONE`
+ * unless it holds melt (below), and its exosphere, a quantity of its own that the generator does
+ * not yet compute (P14.T55.c), reads `NOT YET MODELLED`, so that `NONE` is never read as a body
+ * known to be clear of gas (the guide's Data states). The note follows the `airless` state, as the
+ * view's `EXOSPHERE: NOT YET MODELLED` does (rendering plan R08, R08.T10.a).
+ *
+ * A surface holding melt, the state `magma_ocean` (P14.T35.f) or a crust's melt area above 0
+ * (P14.T54.a), has a vapour of its own, the melt's silicate vapour, which no rule computes before
+ * P14.T55.b. While the wire leaves it out, its row reads `SILICATE VAPOUR NOT YET MODELLED`, and an
+ * empty volatile air reads its pressure and gases Missing, the em dash, never `NONE`, since the
+ * pressure over a melt is at least the melt's own vapour pressure (the guide's Data states;
+ * decision-backlog-2 §2.4, decision-triton-and-e101 §2.3). A volatile air it holds, a young magma
+ * ocean's steam and CO2, reads its figures beside the row; a vapour computed as none reads `NONE` as
+ * an airless body's air does. A locked lava world, `airless` with a dayside pool, reads both notes,
+ * `EXOSPHERE` and `SILICATE VAPOUR` each on its own line, as the view does (rendering plan R08,
+ * Design note 12). `SILICATE VAPOUR` is signed off (signoff-12, item 27), as one name with the
+ * view's `SILICATE VAPOUR: NOT YET MODELLED` note, which R08.T10.a adds.
+ *
+ * A vapour the wire sends as a value, which no server does before P14.T55.b, reads its empty
+ * volatile air as Missing too, and has no row: its figures are T55.b's to read.
+ *
+ * After the air's rows come the ground's, in this order (P14.T43.g, decision-ux-23-surface-rows):
+ * the crust's rows ({@link crustRows}), `CRUST`, `MANTLE REDOX`, the mantle's class and not the
+ * ground's, which may be more oxidised, and `MELT COVER`, the crust's melt area; then the cover by
+ * substance, `LIQUID COVER` and `ICE COVER` ({@link coverShown}), each `NOT YET MODELLED` where the
+ * condensates are not modelled, as every server before P14.T54.a sends them, whose cover lists hold
+ * its water alone, so that a lake or an ice the generator does not compute is never read as none
+ * (the guide's Data states; plan 14, P14.T43.g's record); and, on an `airless` surface,
+ * `COLD TRAPS NOT YET MODELLED` unless a condensate carries its trapped share
+ * ({@link coldTrapsKnown}), as T54.a labels an airless body's cold traps, so that its `ICE COVER` is
+ * never read as all the ice it holds.
+ *
+ * The ocean under a body's ice, which covers none of the surface, reads in a row of its own, the
+ * last of the section's, `SUBSURFACE OCEAN`, its liquid named with no share
+ * (`SUBSURFACE OCEAN H2O`), and `LIQUID COVER` reads the liquids on the surface alone, as the wire
+ * lists them. The row stands on every shown surface section, once, in that place
+ * ({@link subsurfaceOceanShown}). It reads the ocean under any surface's ice that the wire states
+ * ({@link BodySurface.subsurfaceOcean}, the wire's `subsurface_ocean`; P14.T43.i):
+ * `SUBSURFACE OCEAN NaCl BRINE`. A member computed as none reads `SUBSURFACE OCEAN NONE`, as the
+ * section's other rows read a quantity computed and empty (decision-ux-ocean-row §1), and one not
+ * modelled `SUBSURFACE OCEAN NOT YET MODELLED`, as `EXOSPHERE` and `COLD TRAPS` read theirs, so that
+ * an ocean the generator does not compute, as Triton's, is never read as none (the guide's Data
+ * states; P14.T51.g.b, decision-p14-t51gb-ice-ii §3).
+ *
+ * The section's other members are on the wire and not yet read here: its material, climate regime
+ * and global figures; the ocean's shell, depth, floor, solute fraction and base temperature
+ * ({@link BodySurface.subsurfaceOcean}); the crusts that do not lie at the surface and the crust's
+ * provinces, which the view's `MATERIAL` reading names point by point once the terrain is served;
+ * the mantle's redox figure ({@link CrustComposition.mantleRedoxIw}), which waits on a name the
+ * guide does not have; and the condensates' own figures, their reservoirs, layers and seasons.
+ */
+function surfaceRows(surface: BodySurface): ReactNode {
+  const vapour = holdsMelt(surface) ? vapourReading(surface.silicateVapour) : null;
+  // Ruled on the empty gases, not on the pressure (decision-backlog-2 §2.4): only a vapour computed
+  // as none lets the volatile air's zero read as `NONE` over a melt.
+  const airMissing = vapour !== null && vapour.emptyAirMissing && surface.gases.length === 0;
+  // A server that models no condensates, as every one before P14.T54.a, sends its water alone in
+  // the cover's lists, so they are not the whole cover and never read as it.
+  const coverModelled = surface.condensates.kind !== "not_modelled";
+  const notModelled = value(sectionStateLabel("not_modelled"));
+  // A state this build does not know, from a newer server, reads Missing (plan 04's growing enums).
+  const state = surfaceStateLabel(surface.state);
+  return (
+    <>
+      <ReadoutRow label="SURFACE" shown={state === null ? MISSING : value(state)} wide />
+      <ReadoutRow
+        label="T SURF"
+        shown={value(formatTemperatureK(surface.meanSurfaceTemperatureK), "K")}
+        wide
+      />
+      <ReadoutRow
+        label="SURFACE PRESSURE"
+        shown={airMissing ? MISSING : pressureShown(surface.surfacePressurePa)}
+        wide
+      />
+      <ReadoutRow
+        label="MOLE FRACTION"
+        shown={airMissing ? MISSING : gasesShown(surface.gases)}
+        wide
+      />
+      {surface.state === "airless" ? (
+        <ReadoutRow label="EXOSPHERE" shown={notModelled} wide />
+      ) : null}
+      {vapour?.notModelledRow === true ? (
+        <ReadoutRow label="SILICATE VAPOUR" shown={notModelled} wide />
+      ) : null}
+      {crustRows(surface.crust)}
+      <ReadoutRow
+        label="LIQUID COVER"
+        shown={coverModelled ? coverShown(surface.surfaceLiquids) : notModelled}
+        wide
+      />
+      <ReadoutRow
+        label="ICE COVER"
+        shown={coverModelled ? coverShown(surface.surfaceIces) : notModelled}
+        wide
+      />
+      {surface.state === "airless" && !coldTrapsKnown(surface.condensates) ? (
+        <ReadoutRow label="COLD TRAPS" shown={notModelled} wide />
+      ) : null}
+      <ReadoutRow label="SUBSURFACE OCEAN" shown={subsurfaceOceanShown(surface)} wide />
+    </>
+  );
+}
+
+/**
+ * The rows of a body's `envelope` section, the air of a giant or a sub-Neptune, or of a solid body
+ * under a supercritical envelope, whose surface section does not apply. It reads as `ATMOSPHERE`,
+ * as the view's notes name the same air (`ATMOSPHERE: NOT YET MODELLED`), since the `BULK`
+ * section's `ENVELOPE` is the structure model's layer, which is modelled: its lead row under the
+ * section's own name as `SURFACE`'s state is ({@link envelopeLabel}), then its composition by mole
+ * fraction, as a surface's gases read.
+ *
+ * @remarks
+ * Its other figures (the Guillot profile's temperatures and parameters, the adiabat, the decks,
+ * the hazes, the absorbers and the condensables not formed) are on the wire and not yet read here.
+ * Every server sends the section `not_modelled` until generator version 24 (P14.T54.b.i), and a
+ * solid body's under a supercritical envelope until 26 (P14.T53.f), which {@link sectionRows}
+ * reads as `ATMOSPHERE NOT YET MODELLED` with no `SURFACE` section.
+ */
+function envelopeRows(envelope: BodyEnvelope): ReactNode {
+  return (
+    <>
+      <ReadoutRow label="ATMOSPHERE" shown={value(envelopeLabel(envelope.supercritical))} wide />
+      <ReadoutRow label="MOLE FRACTION" shown={gasesShown(envelope.composition)} wide />
+    </>
+  );
 }
 
 /** Props of {@link SpanRow}. */
@@ -149,7 +765,9 @@ function gapRow(resonance: readonly [number, number], radiusM: number): ReactNod
  * The rows of a population section: a ring's kind, material, edges from its planet's centre,
  * optical depth and gaps; a belt's site, edges from its host (the belt proper's and a scattered
  * component's apart), composition, size slope, largest body, mean eccentricity and inclination,
- * dust luminosity, gaps and members; the halo's edges, comets and comet rate.
+ * dust luminosity, gaps and members; the halo's edges, comets and comet rate; a protoplanetary
+ * disc's edges, snow line, taper radius, gas and solid masses, and the gap each giant has opened,
+ * numbered inside out; a debris disc's edges.
  */
 function populationRows(population: Population): ReactNode {
   let rows: ReactNode;
@@ -239,13 +857,67 @@ function populationRows(population: Population): ReactNode {
         </>
       );
       break;
+    case "protoplanetary_disc": {
+      const snowLine = formatBodyDistance(population.snowLineM * KM_PER_M, null);
+      const taper = formatBodyDistance(population.characteristicRadiusM * KM_PER_M, null);
+      rows = (
+        <>
+          <SpanRow label="EDGES" innerM={population.innerEdgeM} outerM={population.outerEdgeM} />
+          <ReadoutRow label="SNOW LINE" shown={value(snowLine.value, snowLine.unit)} />
+          <ReadoutRow label="TAPER RADIUS" shown={value(taper.value, taper.unit)} />
+          <ReadoutRow
+            label="GAS MASS"
+            shown={value(formatMassMearth(population.gasMassMearth), <EarthMassUnit />)}
+          />
+          <ReadoutRow
+            label="SOLID MASS"
+            shown={value(formatMassMearth(population.solidMassMearth), <EarthMassUnit />)}
+          />
+          {population.gaps.map((gap, k) => {
+            const at = formatBodyDistance(gap.radiusM * KM_PER_M, null);
+            const label = `GAP ${k + 1}`;
+            return <ReadoutRow key={gap.giant} label={label} shown={value(at.value, at.unit)} />;
+          })}
+        </>
+      );
+      break;
+    }
+    case "debris_disc":
+      rows = (
+        <SpanRow label="EDGES" innerM={population.innerEdgeM} outerM={population.outerEdgeM} />
+      );
+      break;
   }
   return rows;
 }
 
-/** The rows of a bulk section. */
+/**
+ * The rows of a bulk section.
+ *
+ * @remarks
+ * The layers of the structure model are one reading under `MASS FRACTION`, which names their
+ * quantity once (signoff-5, item 8): `IRON 32.3 % · ROCK 67.7 % · WATER 0.0 % · ENVELOPE 0.0 %`.
+ * A layer is not a substance and keeps its word, and the layers keep the model's order, from the
+ * core out, so that each stands in the same place for every body.
+ *
+ * A layer below the whole whose one-decimal figure rounds to `100.0` reads `ABOVE 99.9 %`, as
+ * `MOLE FRACTION`'s gases do, so that no layer claims the whole beside another: a rock at 0.99996
+ * reads `IRON 0.0 % · ROCK ABOVE 99.9 % · WATER 0.0 % · ENVELOPE 0.0 %`. Only a body of one layer
+ * alone reads `100.0 %`, and a layer that rounds to `0.0 %` keeps it, as a rounded share does
+ * (signoff-12, item 43).
+ */
 function bulkRows(bulk: BulkProperties): ReactNode {
   const { massFractions: fractions } = bulk;
+  const layer = (name: string, fraction: number): Share => ({
+    name,
+    percentage: sharePercentage(fraction, percent),
+  });
+  const layers: ReadonlyArray<Share> = [
+    layer("IRON", fractions.iron),
+    layer("ROCK", fractions.rock),
+    layer("WATER", fractions.water),
+    layer("ENVELOPE", fractions.envelope),
+  ];
   return (
     <>
       <ReadoutRow label="CLASS" shown={value(planetClassLabel(bulk.planetClass))} />
@@ -262,10 +934,7 @@ function bulkRows(bulk: BulkProperties): ReactNode {
           shown={value(formatTemperatureK(bulk.effectiveTemperatureK), "K")}
         />
       )}
-      <ReadoutRow label="IRON" shown={value(percent(fractions.iron), "%")} />
-      <ReadoutRow label="ROCK" shown={value(percent(fractions.rock), "%")} />
-      <ReadoutRow label="WATER" shown={value(percent(fractions.water), "%")} />
-      <ReadoutRow label="ENVELOPE" shown={value(percent(fractions.envelope), "%")} />
+      <ReadoutRow label="MASS FRACTION" shown={value(sharesReading(layers))} wide />
     </>
   );
 }
@@ -296,19 +965,30 @@ export interface BodyRecordReadingsProps {
  * destroyed it and since when in universe time; what it orbits; the detail level its record holds.
  * Then each section as its tag says: the mass in `M⊕` (ruling 64.3); the orbit's semi-major axis,
  * period, eccentricity and inclination, and the distance from what it orbits now; the bulk's class,
- * radius in `km`, density, gravity, equilibrium temperature and composition by mass; its moons and
- * rings, counted; for a ring, a belt or the cometary halo, what the population is and where it
- * lies; and, from the whole record only, its surface and its hooks, whose detail seed is the one
- * hook the wire carries, the em dash until the server derives it. A section withheld or not
- * modelled reads so, once, in place of its rows; one that does not apply is left out.
+ * radius in `km`, density, gravity, equilibrium temperature and its layers' mass fractions; its
+ * moons and rings, counted; for a ring, a belt or the cometary halo, what the population is and
+ * where it lies; and, from the whole record only, its surface (its state, mean temperature,
+ * pressure and gases, and, over a melt, its own vapour's state; then the crust at the surface, the
+ * mantle's redox class, the melt's share of the surface, the liquids and ices that cover it by
+ * substance and, beside them, an airless body's cold traps' state and the ocean under a body's ice,
+ * `NONE` where the generator computes that it holds none, or its state where the generator does
+ * not compute it, which on an airless moon follows the cold traps' state), a gas-envelope body's
+ * envelope, or a solid body's supercritical envelope, in the surface's place, read as its
+ * `ATMOSPHERE` (what it is and its gases), and its hooks: its detail seed, the em dash until the
+ * server derives it, its habitability, its class and limits in words, and its resources, each
+ * resource's mass fraction of its outer layers (P14.T25–T26). A section
+ * withheld or not modelled reads so, once, in place of its rows; one that does not apply is left
+ * out. A server since P14.T35.e sends one of `surface` and `envelope` as not applicable for every
+ * planet it resolves to the `surface` level, so the planet's air is read from the other; an older
+ * server sends no envelope, which reads `ATMOSPHERE NOT YET MODELLED`.
  *
  * The distance is the one reading the display derives: from the server's elements at the display
  * time, by the solver that agrees with the server's to 10⁻⁹ (P14.T39), since the answer is up to a
  * year old; it keeps its unit with `formatBodyDistance`'s hysteresis as the time moves. The
  * inclination of a planet is to the plane the map is drawn on, the angle between the two normals the
- * server gives; a moon's is to its planet's equator, taken in this generator version to be the
- * planet's orbital plane, since a satellite's elements are in its planet's body frame, whose axes
- * are the galactic axes.
+ * server gives; a moon's is to its planet's equator, the plane normal to the planet's pole, or to
+ * the planet's orbit normal where its rotation is not modelled (P14.T56.b), since a satellite's
+ * elements are in its planet's body frame, whose axes are the galactic axes.
  */
 export function BodyRecordReadings({
   body,
@@ -339,9 +1019,7 @@ export function BodyRecordReadings({
         <ReadoutRow label="ORIGIN" shown={value(moonOriginLabel(body.kind.origin))} wide />
       ) : null}
       <ReadoutRow label="STATE" shown={value(bodyStateLabel(state))} wide />
-      {state.kind === "destroyed" ? (
-        <ReadoutRow label="CAUSE" shown={value(destructionCauseLabel(state.cause))} wide />
-      ) : null}
+      {state.kind === "destroyed" ? causeRow(state.cause) : null}
       {state.kind === "destroyed" || state.kind === "unbound" ? (
         <ReadoutRow
           label="SINCE"
@@ -390,8 +1068,9 @@ export function BodyRecordReadings({
       {sectionRows("SMALL BODIES", body.population, populationRows)}
       {whole === null ? null : (
         <>
-          {sectionRows("SURFACE", whole.surface, () => null)}
-          {sectionRows("GENERATOR INPUTS", whole.hooks, (hooks) => detailSeedRow(hooks.detailSeed))}
+          {sectionRows("SURFACE", whole.surface, surfaceRows)}
+          {sectionRows("ATMOSPHERE", whole.envelope, envelopeRows)}
+          {sectionRows("GENERATOR INPUTS", whole.hooks, hooksRows)}
         </>
       )}
     </>

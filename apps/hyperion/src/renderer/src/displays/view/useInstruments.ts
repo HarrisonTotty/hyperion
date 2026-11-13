@@ -5,12 +5,18 @@
  *
  * @remarks
  * Each instrument follows the scene its primary drew in the same frame (`followRun`), at its own
- * rate: its budget's 30 Hz, in frames the primary draws (`drawsInFrame`), so that its passes are
+ * rate: its budget's 30 Hz, in frames the primary draws (`FramePacer.draws`), so that its passes are
  * counted in the primary's frame, and it draws through the primary's own frame path
  * (`ViewFrameDrawer`) but for the histogram, which it does not take. It draws at the primary's
  * exposure, which its label block says (`SOURCE PRIMARY`, Design note 11), and culls the sky for
  * its own camera. Its camera is reported to the server's scene while it is open, as the primary's
- * is. Its readouts change at most four times a second.
+ * is, and what it drew to the stage's terrain session each frame it draws, its lit bodies taking
+ * the session's class maps and reliefs (plan R10, R10.T16.a), and its photorealistic frame the
+ * terrain of the bodies it hands over, drawn from its own camera at its own τ and weight through
+ * the same session, with the surveys' edges in either style and the terrain's annunciation on its
+ * label block (R10.T16.c). Its readouts change at most four times a second. While its `GROUND`
+ * page shows (plan R10, R10.T12.d) it asks its own terrain readout at its own `BASELINE`, its
+ * `FRAME` body wanted by the session, and draws its tripod where the page states the readout.
  */
 import {
   type RefObject,
@@ -26,7 +32,6 @@ import { type ElementSize, useElementSize } from "../../lib/useElementSize";
 import { type ColourTokens, readTokens } from "../../spatial/paint";
 import type { SceneKinematics } from "../../lib/scene/model";
 import type { ViewBudget, ViewSpec } from "../../view/budget/viewBudget";
-import { drawsInFrame } from "../../view/budget/framePacing";
 import {
   flightKey,
   flightKeyAction,
@@ -43,17 +48,53 @@ import type { StyleAvailability } from "../../view/engine/platform";
 import { useGraphicsStatus } from "../../view/engine/status";
 import type { RenderView } from "../../view/engine/types";
 import type { ExposureControl } from "../../view/photometry/exposure";
+import type { BalancedWhite } from "../../view/post/whiteBalance";
 import type { PhotorealStatus } from "../../view/photoreal/renderer";
-import type { QualitySetting } from "../../view/quality/qualitySetting";
+import type { GeometrySettings, QualitySetting } from "../../view/quality/qualitySetting";
 import { cameraKinematics } from "../../view/scene/fromServer";
 import type { ViewStar } from "../../view/scene/model";
-import type { DrawAnchor } from "../../view/wireframe/drawList";
-import { availabilityOf, styleRefusals } from "./styleRefusals";
+import type { TerrainAnnunciation } from "../../view/terrain/annunciation";
+import type { TerrainSession } from "../../view/terrain/session";
+import type { PoseIntervals } from "../../view/terrain/poseInterval";
+import type { DrawAnchor, DrawnSurveyEdge, LineOfSightPoint } from "../../view/wireframe/drawList";
+import {
+  GROUND_READOUT_OPTIONS,
+  GroundReadouts,
+  type GroundSnapshot,
+  readoutBodyOf,
+} from "./groundReadout";
+import type { SlopeBaselineM } from "../../view/terrain/workers/messages";
+import { orbitGroundOf } from "./orbitGround";
+import { NONE_OPENED, toggledNote } from "./reasonFolds";
+import { availabilityOf, GRID_AT_OPEN, gridAfterStyle, styleRefusals } from "./styleRefusals";
+import type { SystemHostDiscs } from "../../view/lighting/hostLights";
 import type { SkyModel } from "../../view/sky/model";
-import { type CulledViewSky, cullViewSky, type DrawnSky, viewSkyLabel } from "./useViewSky";
+import {
+  type CulledViewSky,
+  cullViewSky,
+  type DrawnSky,
+  type SkyLineReading,
+  viewSkyLabel,
+} from "./useViewSky";
 import type { ViewEngineState } from "./useViewEngine";
 import { type DragKind, dragKindOf } from "./useViewDrag";
-import { makeViewFrameDrawer, type ViewFrameDrawer } from "./viewFrameDrawer";
+import {
+  atmosphereShownOf,
+  NO_ATMOSPHERE_SHOWN,
+  ViewAtmosphereHandle,
+  type ViewAtmosphereShown,
+} from "./viewAtmosphere";
+import type {
+  AtmosphereCache,
+  AtmosphereScene,
+  AtmosphereViewReport,
+} from "../../view/atmosphere/AtmosphereCache";
+import {
+  makeViewFrameDrawer,
+  terrainReportOf,
+  type ViewFrameDrawer,
+  type ViewFrameInputs,
+} from "./viewFrameDrawer";
 import {
   INSTRUMENT_SLOTS,
   type InstrumentSlot,
@@ -76,8 +117,51 @@ export interface InstrumentShown {
   readonly anchors: ReadonlyArray<DrawAnchor>;
   /** The style it was drawn in, which its label block states. */
   readonly drawnStyle: RenderStyle;
+  /** Whether it drew the kept scene's own stars, its `STARS` line `SCENE TEST FIELD` (R08.T10.b). */
+  readonly sceneStars: boolean;
   /** Its photorealistic renderer's standing. */
   readonly photoreal: PhotorealStatus;
+  /**
+   * The terrain's annunciation of the bodies its last frame handed over (plan R10, R10.T16.c), its
+   * own, for its label block; `null` with none.
+   */
+  readonly terrain: TerrainAnnunciation | null;
+  /**
+   * Whether its last frame drew decoration (`ViewFrameDrawn.decoration`; plan R11, R11.T1), which
+   * its label block states as `DECORATION ON`: its survey line stands on its `GROUND` page, which
+   * may be closed.
+   */
+  readonly decoration: boolean;
+  /**
+   * The survey edges its last frame marked, for its list's notes (plan R10, R10.T16.c;
+   * decision-r10-t16-review §1); none before it draws.
+   */
+  readonly surveyEdges: ReadonlyArray<DrawnSurveyEdge>;
+  /**
+   * The contour interval its last frame drew its wireframe terrain at, m, for its label block's
+   * `CONTOUR INTERVAL` (plan R10, R10.T12.b); `null` while it draws none.
+   */
+  readonly contourIntervalM: number | null;
+  /**
+   * What its last frame said of its bodies' atmospheres (plan R08, R08.T10.b), its own, for its
+   * label block's notes and fault lines.
+   */
+  readonly atmosphere: ViewAtmosphereShown;
+  /**
+   * What its `GROUND` page's terrain lines are made from (plan R10, R10.T12.d; `GroundReadouts`),
+   * published only while the page shows; `null` otherwise.
+   */
+  readonly ground: GroundSnapshot | null;
+}
+
+/**
+ * The instrument whose `GROUND` page shows, which the loop asks a terrain readout for (plan R10,
+ * R10.T12.d), and its tripod's point as the page states the readout, or none.
+ */
+export interface InstrumentGround {
+  readonly slot: InstrumentSlot;
+  /** What the page's readout reads of its line of sight, absent while the page states none. */
+  readonly lineOfSightPoint: LineOfSightPoint | undefined;
 }
 
 /** One slot's standing, as the display renders it. */
@@ -89,14 +173,34 @@ export interface Instrument {
   /** The style its camera asks for. */
   readonly style: RenderStyle;
   readonly selection: CameraTarget | null;
+  /**
+   * Its `GRID` (the owner's requests, 2026-10-31 and 2026-11-05): whether its photorealistic image
+   * takes the symbology over it, `OFF` as it opens and each time its style becomes
+   * `PHOTOREALISTIC`.
+   */
+  readonly grid: boolean;
+  /**
+   * The baseline its terrain readout reads `SLOPE` over, m: its own, `2 m` as it opens (plan R10,
+   * R10.T12.d), which the `BASELINE` row sets while `CONTROLS` names it.
+   */
+  readonly slopeBaselineM: SlopeBaselineM;
+  /**
+   * The notes whose reasons stand opened on its plate (`reasonFolds.ts`; the owner's request,
+   * 2026-11-01): none as it opens, and kept while it is held for the stage's room, so that it
+   * returns as it was.
+   */
+  readonly reasonsOpened: ReadonlySet<string>;
   /** What it last drew, or `null` while it is closed. */
   readonly shown: InstrumentShown | null;
   /** Whether the engine refused its canvas, so that it draws nothing until it is opened again. */
   readonly refused: boolean;
   /** Its stage as laid out, or `null` before it is. */
   readonly size: ElementSize | null;
-  /** Its `STARS` reading of its own cull of the sky, or `null` while the interim field stands. */
-  readonly skyLabel: string | null;
+  /**
+   * Its `STARS` reading of its own cull of the sky, its limit in its field and stale with the sky
+   * (R06.T13.j), or `null` while the interim field stands.
+   */
+  readonly skyLabel: SkyLineReading | null;
   /** Its canvas while mounted, by which a key pressed on it is told to act on it. */
   readonly canvas: HTMLCanvasElement | null;
   /** Receive its canvas and its stage, which the display measures. */
@@ -115,8 +219,12 @@ export interface Instrument {
 export interface InstrumentsFrame {
   /** The animation frame's timestamp, ms. */
   readonly nowMs: number;
-  /** The animation frame's index since the loop started, by which each rate is paced. */
-  readonly frame: number;
+  /**
+   * Whether the views at a rate draw in this frame, by the primary's loop's pacing (R07.T19;
+   * `FramePacer.draws`): asked only in frames the primary draws, every instrument at one rate in
+   * the same frames.
+   */
+  readonly draws: (rateHz: 60 | 30) => boolean;
   /** Whether the readouts change in this frame (4 Hz), the primary's with them. */
   readonly publish: boolean;
   /** The primary's run as it drew this frame. */
@@ -124,11 +232,53 @@ export interface InstrumentsFrame {
   readonly budgets: ReadonlyMap<ViewId, ViewBudget>;
   /** The quality setting `VIEW` is given, at which each instrument draws (R07.T17). */
   readonly setting: QualitySetting;
+  /**
+   * How each instrument draws its geometry (plan R14, Design note 17): a launch's `--geometry` over
+   * the setting's; the setting's where absent.
+   */
+  readonly geometry: GeometrySettings | undefined;
   /** The primary view's exposure, which each instrument draws at. */
   readonly exposure: ExposureControl;
+  /**
+   * The display's white, found from the primary view's lights (`frameWhiteBalance`), which each
+   * instrument's photorealistic frames take as they take its exposure; `null` under `D65`.
+   */
+  readonly white: BalancedWhite | null;
+  /**
+   * Whether the primary's frame is presented: an instrument holds its photorealistic frames back
+   * while the primary's exposure awaits a cut's reading (`AutoExposure.holds`; fix-view-light).
+   */
+  readonly present: boolean;
   readonly stars: ReadonlyArray<ViewStar>;
+  /**
+   * The scene's system's discs on their own (`host_discs`; plans R06 and R07), as the primary's frame
+   * reads them, which light a served scene until a sky that names its system is held; or `null`.
+   */
+  readonly hostDiscs: SystemHostDiscs | null;
   /** Reports each instrument's camera to the server's scene, or `null` for a kept scene. */
   readonly reportCamera: ((view: ViewId, pose: SceneKinematics) => void) | null;
+  /**
+   * The stage's terrain session as the primary's frame stepped it (plan R10, R10.T16.a), or `null`
+   * with none: each instrument tells it what it drew, its lit bodies take its class maps and
+   * reliefs, and its photorealistic frame its terrain; with none every disc is uniform and none
+   * hands over. Given with the frame, as the class maps and reliefs were, so that an instrument
+   * reads the session the primary stepped (the batch review's C3).
+   */
+  readonly terrain: TerrainSession | null;
+  /**
+   * The stage's holder of the contour interval each pose states (plan R10, R10.T12.b), through
+   * which an instrument at a pose another view has stated this frame states the same interval.
+   */
+  readonly intervals: PoseIntervals;
+  /**
+   * The stage's atmosphere cache and the server's scene as its requests take it, `null` for a kept
+   * scene's (plan R08, R08.T10.b): each instrument notes its own frame with it through its own
+   * handle and draws the air of the bodies it holds tables for.
+   */
+  readonly atmosphere: {
+    readonly cache: AtmosphereCache | null;
+    readonly scene: AtmosphereScene | null;
+  };
 }
 
 /** What `useInstruments` reads. */
@@ -154,6 +304,11 @@ export interface InstrumentsInput {
   readonly setting: QualitySetting;
   /** The platform's primary modifier, whose chord with the arrows steps the rate (R07.T19.f). */
   readonly modifier: PrimaryModifier;
+  /**
+   * The instrument whose `GROUND` page shows, or `null` (plan R10, R10.T12.d), read by the loop each
+   * frame: the display sets it after each commit, as the page stands.
+   */
+  readonly ground: RefObject<InstrumentGround | null>;
 }
 
 /** The instruments, their commands and their loop. */
@@ -175,6 +330,12 @@ export interface Instruments {
   ) => void;
   /** Selects a mark of a slot, from its list or a pick on its canvas. */
   readonly select: (slot: InstrumentSlot, target: CameraTarget) => void;
+  /** Sets a slot's `GRID`, which its next frame draws by (the owner's request, 2026-10-31). */
+  readonly setGrid: (slot: InstrumentSlot, on: boolean) => void;
+  /** Sets a slot's `BASELINE`, which its next readout asks at once (plan R10, R10.T12.d). */
+  readonly setBaseline: (slot: InstrumentSlot, baselineM: SlopeBaselineM) => void;
+  /** Opens a note's reasons on a slot's plate, or folds them where they stand opened. */
+  readonly foldReasons: (slot: InstrumentSlot, note: string) => void;
   /**
    * A key pressed on a slot's canvas: a flight key held, or its rate stepped.
    *
@@ -198,6 +359,9 @@ interface SlotState {
   readonly open: boolean;
   readonly style: RenderStyle;
   readonly selection: CameraTarget | null;
+  readonly grid: boolean;
+  readonly slopeBaselineM: SlopeBaselineM;
+  readonly reasonsOpened: ReadonlySet<string>;
   readonly shown: InstrumentShown | null;
   readonly refused: boolean;
 }
@@ -206,6 +370,9 @@ const CLOSED: SlotState = {
   open: false,
   style: "wireframe",
   selection: null,
+  grid: GRID_AT_OPEN,
+  slopeBaselineM: GROUND_READOUT_OPTIONS.slopeBaselineM,
+  reasonsOpened: NONE_OPENED,
   shown: null,
   refused: false,
 };
@@ -233,6 +400,10 @@ interface SlotInputs {
   readonly availability: StyleAvailability;
   /** Its own cull of the sky, or `null`. */
   readonly sky: DrawnSky | null;
+  /** Its `GRID`, which its photorealistic frame draws by. */
+  readonly grid: boolean;
+  /** Its `BASELINE`, which its terrain readout asks (R10.T12.d). */
+  readonly slopeBaselineM: SlopeBaselineM;
 }
 
 /** A slot's drawer and its loop's clock, while its canvas is mounted. */
@@ -241,6 +412,42 @@ interface SlotLoop {
   lastMs: number | null;
   anchors: ReadonlyArray<DrawAnchor>;
   drawnStyle: RenderStyle;
+  /** Whether its last frame drew the kept scene's own stars (R08.T10.b). */
+  sceneStars: boolean;
+  /** The terrain's annunciation of its last frame drawn (R10.T16.c). */
+  terrain: TerrainAnnunciation | null;
+  /** Whether its last frame drawn drew decoration (plan R11, R11.T1). */
+  decoration: boolean;
+  /** The survey edges its last frame drawn marked (R10.T16.c). */
+  surveyEdges: ReadonlyArray<DrawnSurveyEdge>;
+  /** The terrain session it last told what it drew, which forgets it when it goes; or `null`. */
+  reportedTo: TerrainSession | null;
+  /** The contour interval of its last frame drawn (R10.T12.b). */
+  contourIntervalM: number | null;
+  /** The interval holder it last stated its interval through, which forgets it when it goes. */
+  intervals: PoseIntervals | null;
+  /** Its handle on the stage's atmosphere cache (R08.T10.b), closed when it goes. */
+  readonly air: ViewAtmosphereHandle;
+  /** What the cache said of its last frame drawn (R08.T10.b), or `null`. */
+  atmosphere: AtmosphereViewReport | null;
+  /**
+   * Its terrain readout's asks while its `GROUND` page shows (R10.T12.d), made afresh each time the
+   * page shows again, so that whatever was asked before is let go; `null` otherwise.
+   */
+  grounds: GroundReadouts | null;
+}
+
+/** Has the terrain session and the interval holder `loop` last told of slot `slot`'s view forget it. */
+function forgetSlot(loop: SlotLoop | undefined, slot: InstrumentSlot): void {
+  if (loop === undefined) {
+    return;
+  }
+  loop.reportedTo?.forgetView(instrumentViewId(slot));
+  loop.reportedTo = null;
+  loop.intervals?.forget(instrumentViewId(slot));
+  loop.intervals = null;
+  loop.air.close();
+  loop.atmosphere = null;
 }
 
 /**
@@ -272,9 +479,25 @@ function useSlotDrawer(
     }
     // Opened during a device loss, the view waits and its drawer is made at the restore.
     const release = makeViewFrameDrawer(engine, view, name, (drawer) => {
-      loops.set(slot, { drawer, lastMs: null, anchors: [], drawnStyle: "wireframe" });
+      loops.set(slot, {
+        drawer,
+        lastMs: null,
+        anchors: [],
+        drawnStyle: "wireframe",
+        sceneStars: false,
+        terrain: null,
+        decoration: false,
+        surveyEdges: [],
+        reportedTo: null,
+        contourIntervalM: null,
+        intervals: null,
+        air: new ViewAtmosphereHandle(),
+        atmosphere: null,
+        grounds: null,
+      });
     });
     return () => {
+      forgetSlot(loops.get(slot), slot);
       loops.delete(slot);
       release();
     };
@@ -307,7 +530,7 @@ function useSlotSky(
   );
   return drawn === null || role === null || fovDeg === null
     ? null
-    : { drawn, labelValue: viewSkyLabel(drawn.model, role, exposure, fovDeg, "instrument").value };
+    : { drawn, label: viewSkyLabel(drawn.model, role, exposure, fovDeg, "instrument") };
 }
 
 /** The instruments of a `VIEW` stage. */
@@ -322,6 +545,7 @@ export function useInstruments(input: InstrumentsInput): Instruments {
     exposure,
     setting,
     modifier,
+    ground,
   } = input;
   const graphics = useGraphicsStatus();
   const [slots, setSlots] = useState<Slots>([CLOSED, CLOSED]);
@@ -368,6 +592,8 @@ export function useInstruments(input: InstrumentsInput): Instruments {
             tokens: canvas === null || !canvas.isConnected ? null : readTokens(canvas),
             availability: availability(slot),
             sky: skies[slot - 1] ?? null,
+            grid: state.grid,
+            slopeBaselineM: state.slopeBaselineM,
           },
         ];
       }),
@@ -418,7 +644,25 @@ export function useInstruments(input: InstrumentsInput): Instruments {
           open: true,
           style: run.camera.style,
           selection: null,
-          shown: { run, anchors: [], drawnStyle: "wireframe", photoreal: "idle" },
+          // Its own GRID, OFF as it opens (the owner's request, 2026-11-05).
+          grid: GRID_AT_OPEN,
+          // Its own BASELINE, 2 m as it opens (R10.T12.d).
+          slopeBaselineM: GROUND_READOUT_OPTIONS.slopeBaselineM,
+          // Every note's reasons folded as it opens (the owner's request, 2026-11-01).
+          reasonsOpened: NONE_OPENED,
+          shown: {
+            run,
+            anchors: [],
+            drawnStyle: "wireframe",
+            sceneStars: false,
+            photoreal: "idle",
+            terrain: null,
+            decoration: false,
+            surveyEdges: [],
+            contourIntervalM: null,
+            atmosphere: NO_ATMOSPHERE_SHOWN,
+            ground: null,
+          },
           refused: false,
         })),
       );
@@ -431,6 +675,7 @@ export function useInstruments(input: InstrumentsInput): Instruments {
       runs.current.delete(slot);
       held.current.delete(slot);
       turns.current.delete(slot);
+      forgetSlot(loopsRef.current.get(slot), slot);
       removeCamera?.(instrumentViewId(slot));
       setSlots((previous) => withSlot(previous, slot, () => CLOSED));
     },
@@ -452,6 +697,7 @@ export function useInstruments(input: InstrumentsInput): Instruments {
         withSlot(previous, slot, (state) => ({
           ...state,
           style: result.run.camera.style,
+          grid: gridAfterStyle(run.camera.style, result.run.camera.style, state.grid),
           selection: action.kind === "target" ? result.run.camera.target : state.selection,
           shown: state.shown === null ? null : { ...state.shown, run: result.run },
         })),
@@ -462,6 +708,25 @@ export function useInstruments(input: InstrumentsInput): Instruments {
 
   const select = useCallback((slot: InstrumentSlot, target: CameraTarget): void => {
     setSlots((previous) => withSlot(previous, slot, (state) => ({ ...state, selection: target })));
+  }, []);
+
+  const setGrid = useCallback((slot: InstrumentSlot, on: boolean): void => {
+    setSlots((previous) => withSlot(previous, slot, (state) => ({ ...state, grid: on })));
+  }, []);
+
+  const setBaseline = useCallback((slot: InstrumentSlot, baselineM: SlopeBaselineM): void => {
+    setSlots((previous) =>
+      withSlot(previous, slot, (state) => ({ ...state, slopeBaselineM: baselineM })),
+    );
+  }, []);
+
+  const foldReasons = useCallback((slot: InstrumentSlot, note: string): void => {
+    setSlots((previous) =>
+      withSlot(previous, slot, (state) => ({
+        ...state,
+        reasonsOpened: toggledNote(state.reasonsOpened, note),
+      })),
+    );
   }, []);
 
   const keyDown = useCallback(
@@ -518,75 +783,170 @@ export function useInstruments(input: InstrumentsInput): Instruments {
     [],
   );
 
-  const frame = useCallback((each: InstrumentsFrame): void => {
-    for (const slot of INSTRUMENT_SLOTS) {
-      const loop = loopsRef.current.get(slot);
-      const run = runs.current.get(slot);
-      const inputs = inputsRef.current.get(slot);
-      const budget = each.budgets.get(instrumentViewId(slot));
-      if (
-        loop === undefined ||
-        run === undefined ||
-        inputs?.open !== true ||
-        budget === undefined ||
-        !drawsInFrame(each.frame, budget.rateHz)
-      ) {
-        continue;
-      }
-      const dtS = loop.lastMs === null ? 0 : (each.nowMs - loop.lastMs) / 1000;
-      loop.lastMs = each.nowMs;
-      let next = followRun(run, each.primary, {
-        dtS,
-        held: held.current.get(slot) ?? new Set(),
-        reducedMotion: reducedMotionRef.current,
-        turn: turns.current.get(slot) ?? NO_TURN,
-      });
-      turns.current.delete(slot);
-      // Where its pipelines could not be made, the view returns to the wireframe and its control
-      // holds the style back with the reason.
-      const failed =
-        next.camera.style === "photorealistic" && loop.drawer.photorealStatus === "failed";
-      if (failed) {
-        next = { ...next, camera: { ...next.camera, style: "wireframe" } };
-      }
-      runs.current.set(slot, next);
-      if (next.source.kind === "server") {
-        each.reportCamera?.(instrumentViewId(slot), cameraKinematics(runPose(next), next.scene));
-      }
-      const drawn = loop.drawer.draw({
-        run: next,
-        size: inputs.size,
-        tokens: inputs.tokens,
-        exposure: each.exposure,
-        stars: each.stars,
-        sky: inputs.sky,
-        selection: inputs.selection,
-        style: budget.style,
-        setting: each.setting,
-        renderScale: budget.renderScale,
-        availability: inputs.availability,
-        // The primary is the exposure's source: an instrument meters nothing (Design note 11).
-        meter: null,
-      });
-      if (drawn !== null) {
-        loop.anchors = drawn.anchors;
-        loop.drawnStyle = drawn.drawnStyle;
-      }
-      if (failed || each.publish) {
-        const shown: InstrumentShown = {
+  const frame = useCallback(
+    (each: InstrumentsFrame): void => {
+      for (const slot of INSTRUMENT_SLOTS) {
+        const loop = loopsRef.current.get(slot);
+        const run = runs.current.get(slot);
+        const inputs = inputsRef.current.get(slot);
+        const budget = each.budgets.get(instrumentViewId(slot));
+        if (
+          loop === undefined ||
+          run === undefined ||
+          inputs?.open !== true ||
+          budget === undefined ||
+          !each.draws(budget.rateHz)
+        ) {
+          continue;
+        }
+        const dtS = loop.lastMs === null ? 0 : (each.nowMs - loop.lastMs) / 1000;
+        loop.lastMs = each.nowMs;
+        let next = followRun(run, each.primary, {
+          dtS,
+          held: held.current.get(slot) ?? new Set(),
+          reducedMotion: reducedMotionRef.current,
+          turn: turns.current.get(slot) ?? NO_TURN,
+          // The ground drawn under an ORBIT camera, its floor (plan R15, T4).
+          orbitGround: orbitGroundOf(run, each.terrain),
+        });
+        turns.current.delete(slot);
+        // Where its pipelines could not be made, the view returns to the wireframe and its control
+        // holds the style back with the reason.
+        const failed =
+          next.camera.style === "photorealistic" && loop.drawer.photorealStatus === "failed";
+        if (failed) {
+          next = { ...next, camera: { ...next.camera, style: "wireframe" } };
+        }
+        runs.current.set(slot, next);
+        if (next.source.kind === "server") {
+          each.reportCamera?.(instrumentViewId(slot), cameraKinematics(runPose(next), next.scene));
+        }
+        const session = each.terrain;
+        // Its terrain readout is asked only while its GROUND page shows; a page shown again asks
+        // afresh, whatever was out before let go (R10.T12.d).
+        const paged = ground.current?.slot === slot ? ground.current : null;
+        if (paged === null) {
+          loop.grounds = null;
+        } else {
+          loop.grounds ??= new GroundReadouts(instrumentViewId(slot));
+        }
+        const frameInputs: ViewFrameInputs = {
           run: next,
-          anchors: loop.anchors,
-          drawnStyle: loop.drawnStyle,
-          photoreal: loop.drawer.photorealStatus,
+          size: inputs.size,
+          tokens: inputs.tokens,
+          exposure: each.exposure,
+          white: each.white,
+          stars: each.stars,
+          sky: inputs.sky,
+          hostDiscs: each.hostDiscs,
+          selection: inputs.selection,
+          style: budget.style,
+          setting: each.setting,
+          geometry: each.geometry,
+          renderScale: budget.renderScale,
+          availability: inputs.availability,
+          // The primary is the exposure's source: an instrument meters nothing (Design note 11).
+          meter: null,
+          present: each.present,
+          // The terrain session's class maps, as the primary's frame reads them (R10.T16.a), and
+          // the instrument's own reliefs, by which it hands its bodies over (HANDOVER_AT_CELLS).
+          classMaps: session?.classMaps,
+          reliefs: session?.reliefsFor(instrumentViewId(slot)),
+          // Its own terrain of the session's passes, from its own camera, and its survey edges
+          // (R10.T16.c).
+          terrain:
+            session === null
+              ? undefined
+              : {
+                  source: session,
+                  view: instrumentViewId(slot),
+                  nowMs: each.nowMs,
+                  intervals: each.intervals,
+                },
+          // Its own handle on the stage's atmosphere cache (R08.T10.b).
+          atmosphere: loop.air.inputFor(each.atmosphere.cache, each.atmosphere.scene, each.nowMs),
+          // Its own symbology over its photorealistic image, or none (the owner's requests).
+          grid: inputs.grid,
+          // Its tripod, while its page states the readout with its point (R10.T12.d).
+          lineOfSightPoint: paged?.lineOfSightPoint,
         };
-        setSlots((previous) =>
-          withSlot(previous, slot, (state) =>
-            state.open ? { ...state, style: next.camera.style, shown } : state,
-          ),
-        );
+        loop.intervals = each.intervals;
+        const drawn = loop.drawer.draw(frameInputs);
+        loop.atmosphere = drawn?.atmosphere ?? null;
+        loop.terrain = drawn?.terrain ?? null;
+        loop.decoration = drawn?.decoration ?? false;
+        loop.contourIntervalM = drawn?.contourIntervalM ?? null;
+        if (drawn !== null) {
+          // A frame held back leaves the slot showing the last one presented, with its marks.
+          if (!(drawn.drawnStyle === "photorealistic" && !each.present)) {
+            loop.anchors = drawn.anchors;
+            loop.drawnStyle = drawn.drawnStyle;
+            loop.sceneStars = drawn.sceneStars;
+          }
+          loop.surveyEdges = drawn.surveyEdges;
+          // What it drew, for the terrain session's next step (R10.T16.a).
+          if (loop.reportedTo !== session) {
+            forgetSlot(loop, slot);
+            loop.reportedTo = session;
+          }
+          const report =
+            session === null
+              ? null
+              : terrainReportOf(
+                  frameInputs,
+                  loop.drawer.regimes,
+                  budget.streamPriority,
+                  drawn.drawnStyle,
+                  loop.drawer.regimesFromM,
+                );
+          if (session !== null && report !== null) {
+            // Its FRAME body, whose readout its page states, is wanted wherever its camera is
+            // (R10.T12.d), as the primary's is.
+            session.noteView(
+              instrumentViewId(slot),
+              paged === null ? report : { ...report, readoutBody: readoutBodyOf(next) },
+            );
+          }
+        }
+        const baselineM = inputs.slopeBaselineM;
+        if (failed || each.publish) {
+          const shown: InstrumentShown = {
+            run: next,
+            anchors: loop.anchors,
+            drawnStyle: loop.drawnStyle,
+            sceneStars: loop.sceneStars,
+            photoreal: loop.drawer.photorealStatus,
+            terrain: loop.terrain,
+            decoration: loop.decoration,
+            surveyEdges: loop.surveyEdges,
+            contourIntervalM: loop.contourIntervalM,
+            atmosphere:
+              loop.atmosphere === null
+                ? NO_ATMOSPHERE_SHOWN
+                : atmosphereShownOf(loop.atmosphere, next.scene),
+            ground: loop.grounds?.publish(session, next, each.nowMs, baselineM) ?? null,
+          };
+          setSlots((previous) =>
+            withSlot(previous, slot, (state) =>
+              state.open ? { ...state, style: next.camera.style, shown } : state,
+            ),
+          );
+        } else if (loop.grounds?.due(baselineM) === true) {
+          // A choice of its BASELINE is asked at once, and its answer stands as it comes, out of the
+          // readouts' turn (R10.T12.c's rule, per view).
+          const groundShown = loop.grounds.publish(session, next, each.nowMs, baselineM);
+          setSlots((previous) =>
+            withSlot(previous, slot, (state) =>
+              state.open && state.shown !== null
+                ? { ...state, shown: { ...state.shown, ground: groundShown } }
+                : state,
+            ),
+          );
+        }
       }
-    }
-  }, []);
+    },
+    [ground],
+  );
 
   return {
     slots: INSTRUMENT_SLOTS.map((slot) => {
@@ -598,10 +958,13 @@ export function useInstruments(input: InstrumentsInput): Instruments {
         open: state.open,
         style: state.style,
         selection: state.selection,
+        grid: state.grid,
+        slopeBaselineM: state.slopeBaselineM,
+        reasonsOpened: state.reasonsOpened,
         shown: state.shown,
         refused: state.refused,
         size: slot === 1 ? stageOne.size : stageTwo.size,
-        skyLabel: (slot === 1 ? skyOne : skyTwo)?.labelValue ?? null,
+        skyLabel: (slot === 1 ? skyOne : skyTwo)?.label ?? null,
         canvas: slot === 1 ? canvasOne : canvasTwo,
         canvasRef: slot === 1 ? setCanvasOne : setCanvasTwo,
         stageRef: slot === 1 ? stageOne.ref : stageTwo.ref,
@@ -619,6 +982,9 @@ export function useInstruments(input: InstrumentsInput): Instruments {
     close,
     command,
     select,
+    setGrid,
+    setBaseline,
+    foldReasons,
     keyDown,
     keyUp,
     releaseKeys,

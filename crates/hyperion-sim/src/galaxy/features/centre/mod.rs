@@ -13,14 +13,27 @@
 //! [`CentreClasses`] says what the cluster holds and on which profile ([`classes`]).
 //!
 //! [`members`] places the members on the twelve-level grid under the centre's member IDs
-//! (P09.T27), and plan 03's `resolve` dispatches a centre ID there; nothing else reads the centre
-//! until the Kepler regime (P09.T28.b) and its range query (P09.T29).
+//! (P09.T27), and plan 03's `resolve` dispatches a centre ID there. [`source`] is the centre's
+//! source for the range query (P09.T29): its members on their orbits about the black hole
+//! (P09.T28), which plan 09's P09.T37 merges into the query. The galaxy holds the model and builds
+//! it when first read ([`Galaxy::centre`], Design note 15).
+//!
+//! [`events`] holds the black hole's own events, its X-ray flares and its tidal disruptions, on
+//! its own ID as their subject (P09.T30.a), each disruption's victim, the first class of the
+//! centre's feature-level list, and the black hole's luminosity (P09.T30.b).
 
+pub(crate) mod binaries;
 pub mod classes;
 pub mod df;
+pub mod events;
 pub mod marks;
 pub mod members;
+#[cfg(test)]
+mod over_time;
+pub mod path;
 pub mod profile;
+pub(crate) mod recent;
+pub mod source;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 
@@ -28,7 +41,12 @@ pub use classes::{CentreClass, CentreClassKind, CentreClasses, CentreTracer};
 pub use df::{DistributionFunction, EnergyGrid};
 pub use marks::{LossCone, OrbitMarks};
 pub use members::ExceedCentreIndexError;
+pub use path::CentrePath;
 pub use profile::{BuildCentreError, CentreProfile, SlopeBreak, TracerProfile, TracerShape};
+pub use source::{
+    CentreCellOrbits, CentreMemberLight, CentreMemberSource, CentreOrbitCache, KeepCentreOrbits,
+    NoCentreOrbitCache,
+};
 
 use crate::galaxy::Galaxy;
 use crate::galaxy::imf::MassFunction;
@@ -61,6 +79,8 @@ pub struct CentreModel {
     loss_cone: LossCone,
     acceptance: [f64; 4],
     classes: CentreClasses,
+    /// Each band's bound at each corner radius of the grid, made when first read.
+    corner_bounds: members::CornerBounds,
 }
 
 impl CentreModel {
@@ -70,7 +90,10 @@ impl CentreModel {
     ///
     /// [`BuildCentreError`] if the black hole's or the cluster's mass is not valid, or a profile
     /// has no isotropic distribution function in the potential (P09.T24.b), which no galaxy the
-    /// builder allows does (`no_drawn_centre_fails_its_inversion`).
+    /// builder allows does: 16 drawn seeds per commit (`members::tests`'
+    /// `no_seed_s_centre_overflows_its_index`), 64 in the slow
+    /// `no_drawn_centre_of_64_fails_its_inversion`, and the extreme black hole to cluster ratios
+    /// in `no_drawn_centre_fails_its_inversion`.
     pub fn new(galaxy: &Galaxy) -> Result<Self, BuildCentreError> {
         let params = galaxy.params();
         let profile = CentreProfile::new(params.nuclear_cluster(), params.black_hole().mass())?
@@ -90,7 +113,15 @@ impl CentreModel {
         Self::from_parts(CentreProfile::from_params(params)?, imf.as_ref())
     }
 
-    fn from_parts(
+    /// The centre of `profile`, the galaxy's ([`CentreProfile::in_galaxy`]), whose mass function
+    /// is `mass_function`: what [`new`](Self::new) builds from the profile it builds itself, for
+    /// a galaxy that holds the profile already ([`Galaxy::centre`] reads its
+    /// [`centre_motion`](Galaxy::centre_motion)'s, P09.T29).
+    ///
+    /// # Errors
+    ///
+    /// As [`new`](Self::new), but for the profile's own errors, which its builder has returned.
+    pub(crate) fn from_parts(
         profile: CentreProfile,
         mass_function: &dyn MassFunction,
     ) -> Result<Self, BuildCentreError> {
@@ -110,6 +141,7 @@ impl CentreModel {
             loss_cone,
             acceptance,
             classes,
+            corner_bounds: members::CornerBounds::default(),
         })
     }
 
@@ -155,6 +187,33 @@ impl CentreModel {
         &self.marks[tracer.index()]
     }
 
+    /// The bytes it owns on the heap, about 0.9 MiB, most of it the four distribution functions'
+    /// panels and the grid's corner bounds, made or not: what [`Galaxy::heap_bytes`] adds once the
+    /// galaxy has built its centre (P09.T29).
+    #[must_use]
+    pub(crate) fn heap_bytes(&self) -> usize {
+        self.profile.heap_bytes()
+            + self
+                .tracers
+                .iter()
+                .map(TracerProfile::heap_bytes)
+                .sum::<usize>()
+            + self
+                .distributions
+                .iter()
+                .map(DistributionFunction::heap_bytes)
+                .sum::<usize>()
+            + self.classes.heap_bytes()
+            + self.corner_bounds.heap_bytes()
+    }
+
+    /// Each band's bound at each corner radius of the grid ([`members::CornerBounds`]), which the
+    /// placement reads.
+    #[must_use]
+    pub(crate) fn corner_bounds(&self) -> &members::CornerBounds {
+        &self.corner_bounds
+    }
+
     /// The stars' profile and the potential.
     #[must_use]
     pub fn profile(&self) -> &CentreProfile {
@@ -198,10 +257,31 @@ impl CentreModel {
         self.profile.enclosed_mass(r.value())
     }
 
-    /// Where the stars inside weigh as much as the black hole.
+    /// Where the cluster's stars inside weigh as much as the black hole
+    /// ([`CentreProfile::influence_radius`]): the cluster alone, 10⁴ ly where the black hole
+    /// outweighs the whole cluster; the Kepler regime's edge is
+    /// [`CentreMotion::influence_radius`](crate::galaxy::motion::CentreMotion::influence_radius).
     #[must_use]
     pub fn influence_radius(&self) -> LightYears {
         self.profile.influence_radius()
+    }
+
+    /// The centre's entry on plan 10's global list, its first
+    /// ([`GlobalList::build`](crate::galaxy::global_list::GlobalList::build)).
+    ///
+    /// It holds the entry's kind, the mass inside the reach, the black hole's and the cluster's
+    /// stars there ([`enclosed_mass`](Self::enclosed_mass)), and the shell its members lie in, the
+    /// reach about the origin, 128 ly ([`CentreProfile::reach`]). It reads no motion (plan 10's
+    /// P10.T4, `decision-galaxy-25-train` §2.2).
+    #[must_use]
+    pub fn as_global_entry(&self) -> crate::galaxy::global_list::GlobalEntry {
+        use crate::galaxy::global_list::{BoundingShell, GlobalEntry, GlobalEntryKind};
+        let reach = self.profile.reach();
+        GlobalEntry::new(
+            GlobalEntryKind::Centre,
+            self.enclosed_mass(reach),
+            BoundingShell::new(LightYears::ZERO, reach),
+        )
     }
 }
 
@@ -270,24 +350,21 @@ mod tests {
         golden!("galaxy/features/centre", w.as_str());
     }
 
-    /// P09.T24.b and ruling 144.1: no drawn galaxy's centre fails its inversions (f positive at
-    /// every node, for every tracer), over 64 seeds; nor does a centre at the extreme black hole
-    /// to cluster ratios the draws allow in practice, in the Milky Way's potential: black holes
-    /// 1.5 dex either side of the Milky Way's (±4σ of the M–σ scatter's 0.38 dex), about clusters
-    /// from 10⁶ M☉ to plan 02's cap (ruling 144.5b).
+    /// P09.T24.b and ruling 144.1: no centre at the extreme black hole to cluster ratios the draws
+    /// allow in practice fails its inversions (f positive at every node, for every tracer), in the
+    /// Milky Way's potential: black holes 1.5 dex either side of the Milky Way's (±4σ of the M–σ
+    /// scatter's 0.38 dex), about clusters from 10⁶ M☉ to plan 02's cap (ruling 144.5b).
+    ///
+    /// Drawn galaxies' centres are inverted per commit by `members::tests`'
+    /// `no_seed_s_centre_overflows_its_index` (16 seeds of family `0x0927`, through
+    /// `CentreModel::from_params`), and the 64 seeds of family `0x0924` this test once swept by
+    /// [`no_drawn_centre_of_64_fails_its_inversion`], in the slow pass (`decision-test-coverage.md`,
+    /// N3).
     #[test]
     fn no_drawn_centre_fails_its_inversion() {
         use crate::galaxy::imf::MassFunctionKind;
         use crate::galaxy::params::NuclearClusterParams;
         use crate::galaxy::potential::MassModel;
-        for n in 0..64_u64 {
-            let params =
-                GalaxyParams::from_seed(Seed::new(0x0924_0000 | n), MassFunctionKind::default());
-            let profile = CentreProfile::from_params(&params).unwrap();
-            if let Err(e) = CentreModel::invert(&profile) {
-                panic!("seed {n}: {e}");
-            }
-        }
         let model = MassModel::new(&GalaxyParams::milky_way_like());
         let cap = NuclearClusterParams::mass_cap(MassFunctionKind::Chabrier).value();
         for cluster in [1e6, 2.5e7, cap] {
@@ -303,6 +380,24 @@ mod tests {
                 if let Err(e) = CentreModel::invert(&profile) {
                     panic!("cluster {cluster:e}, black hole {black_hole:e}: {e}");
                 }
+            }
+        }
+    }
+
+    /// P09.T24.b and ruling 144.1: no drawn galaxy's centre fails its inversions (f positive at
+    /// every node, for every tracer), over 64 seeds of family `0x0924`. A slow test since
+    /// `decision-test-coverage.md`'s N3, which moved it out of [`no_drawn_centre_fails_its_inversion`]:
+    /// it runs in the slow pass beside `members::tests`' 512-seed sweep.
+    #[test]
+    #[ignore = "slow: 64 drawn centres"]
+    fn no_drawn_centre_of_64_fails_its_inversion() {
+        use crate::galaxy::imf::MassFunctionKind;
+        for n in 0..64_u64 {
+            let params =
+                GalaxyParams::from_seed(Seed::new(0x0924_0000 | n), MassFunctionKind::default());
+            let profile = CentreProfile::from_params(&params).unwrap();
+            if let Err(e) = CentreModel::invert(&profile) {
+                panic!("seed {n}: {e}");
             }
         }
     }

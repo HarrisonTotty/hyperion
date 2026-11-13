@@ -1,0 +1,45 @@
+# generator_version = 31
+streams 360 (living globulars 4, orphans 355, dwarfs 1), cores 1, beyond the limit 0
+entry.0.kind Centre
+entry.0.mass = 0x417bba31ed9d8c86  # 29074206.85096409
+entry.0.shell.inner = 0x0000000000000000  # 0.0
+entry.0.shell.outer = 0x4060000000000000  # 128.0
+entry.1.kind Stream(StreamNumber(0))
+entry.1.mass = 0x40c73738e24274da  # 11886.444404894883
+entry.1.shell.inner = 0x40d2b4f25ba223f9  # 19155.78684285653
+entry.1.shell.outer = 0x40ef46b1aa4978a8  # 64053.55203698698
+entry.2.kind Stream(StreamNumber(1))
+entry.2.mass = 0x40ccd674ed0b1707  # 14764.91348398804
+entry.2.shell.inner = 0x40d3fb126a6ca757  # 20460.287745631616
+entry.2.shell.outer = 0x40e917376634faa7  # 51385.73122643428
+entry.3.kind Stream(StreamNumber(2))
+entry.3.mass = 0x40ce83d296a3332f  # 15623.645222091667
+entry.3.shell.inner = 0x40d347086f11ae4b  # 19740.131779117783
+entry.3.shell.outer = 0x40e1cc4cbcc54dd2  # 36450.39804330062
+entry.4.kind Stream(StreamNumber(3))
+entry.4.mass = 0x40c5e0fefbba1c16  # 11201.992057098116
+entry.4.shell.inner = 0x40e02131cc7a470e  # 33033.55621065023
+entry.4.shell.outer = 0x40f006a7abf9a3be  # 65642.47948612177
+entry.5.kind Stream(StreamNumber(4))
+entry.5.mass = 0x40be25c4c507f104  # 7717.768631454794
+entry.5.shell.inner = 0x40e737f6d9f41eb5  # 47551.714105663275
+entry.5.shell.outer = 0x40fbb67ae8584caa  # 113511.68172483394
+entry.6.kind Stream(StreamNumber(5))
+entry.6.mass = 0x40a1f896ee859781  # 2300.2947885272447
+entry.6.shell.inner = 0x40dd068ce39be730  # 29722.20139215066
+entry.6.shell.outer = 0x40e69c78bbe60515  # 46307.77293683045
+entry.7.kind Stream(StreamNumber(6))
+entry.7.mass = 0x40ecf0e03185f1dd  # 59271.00604531516
+entry.7.shell.inner = 0x40ea68264bf96ae3  # 54081.19677420498
+entry.7.shell.outer = 0x40fbb67ae8584caa  # 113511.68172483394
+entry.8.kind Stream(StreamNumber(7))
+entry.8.mass = 0x409e0c6696e9470c  # 1923.1001850556959
+entry.8.shell.inner = 0x40e60666a34f1e19  # 45107.207435187134
+entry.8.shell.outer = 0x40f7cc5f0600dfa3  # 97477.93896567686
+entry.9.kind Stream(StreamNumber(8))
+entry.9.mass = 0x40b2a8ff21043f94  # 4776.996597543261
+entry.9.shell.inner = 0x40e92744968e9841  # 51514.14337854135
+entry.9.shell.outer = 0x40f30ef2c28197cb  # 78063.17248687071
+entries 362
+entries.digest = 0xadf6203b5c030a74
+orphans.digest = 0x5efc83ea2f795017

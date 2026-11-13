@@ -32,19 +32,28 @@
  * - The rest of the frame (decision-r05-high-atmosphere.md): terrain and atmosphere are judged as
  *   one row, each frame's passes of both summed, against their estimates' sum. Each pass row's own
  *   percentiles are recorded against its estimate in `gpu.rows`, a finding that enters no verdict.
+ * - The measured sizes (plan R10, R10.T14.b; decision-r10-t14b-measure §6(g)): a `--sizes on`
+ *   run's file carries an optional `sizes` block (`sizesResults.ts`), and its summary a "Sizes"
+ *   section; the version stays 6, and a file without the block reads as before.
  */
 
-import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { cpus, hostname, loadavg, totalmem } from "node:os";
 import { join } from "node:path";
 
 import type { ProcessMetric } from "electron";
 
+import { VSYNC_SEEN_FRAMES, vsyncPeriodOf, vsyncsPerDraw } from "../renderer/src/lib/vsyncPacing";
 import type {
   DescentSpikeReport,
+  FramePacingName,
+  SpikeGeometryReport,
   GraphicsLaunchMode,
+  SpikeLaunch,
   SpikePassRow,
   SpikePassTimer,
+  SpikeStyleName,
+  SpikeWorldName,
 } from "../preload/api";
 import type { DrmMemoryReading, NvidiaReading } from "./fdinfo";
 import type { GpuClockReadings, GpuClockSample, GpuClockSource } from "./gpuClocks";
@@ -59,6 +68,14 @@ import {
 } from "./machineLoad";
 import { type Measured, measured, missing } from "./measured";
 import { GPU_PROCESS_SLICES, type GpuProcessFigures, recordedGpuSlices } from "./reduceTrace";
+import {
+  buildSizesResults,
+  type LoadReading,
+  type SizesResults,
+  sizesResultsProblems,
+  sizesSummaryLines,
+} from "./sizesResults";
+import { geometryResultsProblems, geometrySummaryLines } from "./geometryResults";
 import {
   type EngineFigures,
   FULL_BUFFER_PERCENT,
@@ -96,8 +113,23 @@ export const RESULTS_SCHEMA = "hyperion.descent-spike.results";
  * both against their estimates' sum, and adds `gpu.rows`, each pass row's per-frame sum against
  * its estimate. It also records `run.machine.loadAverage` as a `Measured`, none with the reason on
  * Windows, where version 5 wrote zeros (R05.T20, decision-cross-platform-server.md item 6).
+ * Version 7 (plan R14, R14.T1.f) adds the `geometry` block over a generated world, its main view's
+ * lit pass's geometry settings and counts by segment (`geometryResults.ts`); a version 6 file, R05's
+ * recorded runs' and the native replay's, which holds none, is still read
+ * ({@link RESULTS_VERSIONS_READ}). Version 8 (plan R14, R14.T6.b) adds `farCascadeRate` to the
+ * geometry block's settings; a version 7 file's, without it, reads as rate 1. Version 9 (plan R07,
+ * R07.T19) adds `run.pacing`: the launch's `--frame-pacing` and the vsync period the run's
+ * animation frames measure (`lib/vsyncPacing.ts`); and takes T as the vsyncs the pacing draws the
+ * setting's rate on times the display's period. A version 8 file, and the native replay's, holds
+ * none, and its T is the period, doubled on `low`.
  */
-export const RESULTS_VERSION = 6;
+export const RESULTS_VERSION = 9;
+
+/**
+ * The versions {@link validateResults} reads: version 9's, version 8's without its pacing, version
+ * 7's with its geometry's four settings, and version 6's without its geometry.
+ */
+export const RESULTS_VERSIONS_READ: ReadonlyArray<number> = [6, 7, 8, RESULTS_VERSION];
 
 /**
  * The largest file the repository accepts as added, bytes: pre-commit's `check-added-large-files`
@@ -141,6 +173,14 @@ const ESTIMATED_ROWS: ReadonlyArray<EstimatedRow> = Object.keys(ESTIMATE_OF).fil
 
 /** The finding a pass row over its estimate carries (decision-r05-high-atmosphere.md). */
 export const OVER_ESTIMATE_FINDING = "over its estimate: a finding for T19 and R12";
+
+/**
+ * Why a generated world's run states no untimed passes (plan R10, R10.T14.c): its main view's
+ * drawer submits its passes over many of the timer's resolves, and neither it nor the engine counts
+ * them as they are made (the renderer's `SpikeFrameSample.passesSubmitted` `null`), so that its
+ * report's count is of nothing, not a measurement of 0.
+ */
+export const UNTIMED_NOT_COUNTED = "no pass counted over a generated world";
 
 /** Frame intervals summarised as Design note 21 reads them. */
 export interface FrameStats {
@@ -271,6 +311,13 @@ export interface RunDescription {
   readonly setting: SpikeSetting;
   /** The spike's seed, a u64 in decimal. */
   readonly seed: string;
+  /** The world flown (`--world`, plan R10, R10.T14.c). */
+  readonly world: SpikeWorldName;
+  /**
+   * The style its main view was asked to draw in over a generated world (`--style`, R10.T14.c), or
+   * `null` over the test planet, which takes none: its main view is `SPIKE LIT`.
+   */
+  readonly style: SpikeStyleName | null;
   /** Every option of the spike flag as given (T13.c). */
   readonly options: Readonly<Record<string, string | number | boolean>>;
   /** The Chromium switches the launch applied, as `--name=value`. */
@@ -279,8 +326,29 @@ export interface RunDescription {
   readonly shown: boolean;
   /** The display's refresh rate (`Display.displayFrequency`), Hz, or `null` without one. */
   readonly displayHz: number | null;
+  /** How the launch paced `VIEW` (`--frame-pacing`, R07.T19), by which T is read. */
+  readonly framePacing: FramePacingName;
   /** `nvidia-smi`'s device memory used before the launch, bytes, or `null` off NVIDIA. */
   readonly nvidiaBaselineBytes: number | null;
+}
+
+/**
+ * A launch's options as its run records them ({@link RunDescription.options}): every option it
+ * holds, those it holds as `null` left out. An unmeasured launch holds no `sizes` (R10.T14.b), so
+ * that its options are as they were before the option, and a `--sizes on` launch's say `on`. A
+ * served world's launch (R10.T15.b) records its universe and body as the options `universe` and
+ * `body`, as the command line gave them.
+ */
+export function runOptionsOf(launch: SpikeLaunch): RunDescription["options"] {
+  const { served, ...flat } = launch;
+  return {
+    ...Object.fromEntries(
+      Object.entries(flat).filter(
+        (entry): entry is [string, string | number | boolean] => entry[1] !== null,
+      ),
+    ),
+    ...(served === undefined ? {} : { universe: served.universe, body: served.body }),
+  };
 }
 
 /** Memory at one instant of a run (Design note 18). */
@@ -822,7 +890,7 @@ export interface PassFigures {
 /** The results file of one run. */
 export interface DescentResults {
   readonly schema: typeof RESULTS_SCHEMA;
-  readonly version: typeof RESULTS_VERSION;
+  readonly version: 6 | 7 | 8 | typeof RESULTS_VERSION;
   readonly run: {
     readonly startedAt: string;
     readonly machine: RecordedMachine;
@@ -832,11 +900,32 @@ export interface DescentResults {
     readonly launchMode: GraphicsLaunchMode | "native-replay";
     readonly setting: SpikeSetting;
     readonly seed: string;
+    /**
+     * The world flown and its main view's style over a generated world (R10.T14.c), the style
+     * `null` over the test planet; a file without them, written before them, is the test planet's
+     * ({@link worldOfRun}).
+     */
+    readonly world: SpikeWorldName;
+    readonly style: SpikeStyleName | null;
     readonly options: RunDescription["options"];
     readonly switches: ReadonlyArray<string>;
     readonly timer: SpikePassTimer;
     readonly shown: boolean;
-    /** T, the period the criterion is read against, ms: the vsync period, doubled on `low`. */
+    /**
+     * How the launch paced `VIEW` (`--frame-pacing`, R07.T19), and the vsync period the run's
+     * animation frames after the warm-up measure, ms (`vsyncPeriodOf`), or why it is missing;
+     * absent from a file before version 9 and from the native replay's. The spike's own loop draws
+     * in every callback whatever the pacing, which sets only its T.
+     */
+    readonly pacing?: {
+      readonly framePacing: FramePacingName;
+      readonly measuredVsyncMs: Measured<number>;
+    };
+    /**
+     * T, the period the criterion is read against, ms: the display's vsync period times the vsyncs
+     * the pacing draws the setting's rate on ({@link periodVsyncs}), so doubled on `low` under
+     * `display`.
+     */
     readonly periodMs: Measured<number>;
     readonly warmupS: number;
     readonly canvas: DescentSpikeReport["canvas"];
@@ -876,7 +965,12 @@ export interface DescentResults {
     readonly timer: SpikePassTimer;
     /** The tolerance of one pass's time, ms: the quantum on a `quantized` timer, else 0. */
     readonly tolerancePerPassMs: number;
-    readonly untimedPasses: number;
+    /**
+     * Passes beyond the timer's 64 a frame, untimed, over the run; missing over a generated world
+     * ({@link UNTIMED_NOT_COUNTED}), where none is counted. A file written before R10.T14.c, and a
+     * native replay's (`tools/gpu-replay`), holds the bare count, which is read as it is.
+     */
+    readonly untimedPasses: Measured<number>;
     /** Each pass's times over every frame they arrived for, complete or not. */
     readonly passes: Measured<ReadonlyArray<PassFigures>>;
     /** The sum of a frame's timed passes, at the 95th percentile, over the complete frames, ms. */
@@ -939,6 +1033,18 @@ export interface DescentResults {
     /** `fail` if any row fails, else `not-measured` if any is, else `marginal` if any is. */
     readonly overall: Verdict;
   };
+  /**
+   * The measured sizes of a `--sizes on` run (plan R10, R10.T14.b; `sizesResults.ts`): absent from
+   * every other run's file, which reads as before; the schema's version stays 6.
+   */
+  readonly sizes?: SizesResults;
+  /**
+   * A generated world's main view's lit pass's geometry by segment (plan R14, R14.T1.f;
+   * `geometryResults.ts`): version 7's and 8's, absent over the test planet and from every version
+   * 6 file. A version 7 file's settings lack `farCascadeRate`: read them through
+   * `readGeometryReport` at the file's version, which takes them at rate 1.
+   */
+  readonly geometry?: SpikeGeometryReport;
 }
 
 /** Everything a results file is built from. */
@@ -948,6 +1054,11 @@ export interface ResultsInput {
   /** The trace's windows, each reduced, or why there is no trace. */
   readonly trace: Measured<TraceRecording>;
   readonly memory: ReadonlyArray<MemorySample>;
+  /**
+   * The machine's 1-minute load at the start, each minute and the end of a `--sizes on` run
+   * (R10.T14.b; `LoadSampler`), for its `sizes` block; absent, its block says none was read.
+   */
+  readonly load?: Measured<ReadonlyArray<LoadReading>>;
 }
 
 /**
@@ -1161,6 +1272,23 @@ export function ofPeriod(
   return periodMs.value === null ? missing(periodMs.reason) : measured(limit(periodMs.value));
 }
 
+/**
+ * The vsyncs a view at `rateHz` draws on under `pacing` (plan R07, T19), by which T is read: the
+ * counted frames' 1 at 60 Hz and 2 at 30 under `display`; under `rate`, `vsyncsPerDraw` of the
+ * display's period, the renderer's rule (2 and 4 at 120 Hz, as 1 and 2 at 60).
+ */
+export function periodVsyncs(pacing: FramePacingName, rateHz: 60 | 30, vsyncMs: number): number {
+  return pacing === "display" ? 60 / rateHz : vsyncsPerDraw(rateHz, vsyncMs);
+}
+
+/** The vsync period `intervalsMs` measure by the renderer's rule, or why it is missing. */
+export function measuredVsyncOf(intervalsMs: ReadonlyArray<number>): Measured<number> {
+  const periodMs = vsyncPeriodOf(intervalsMs);
+  return periodMs === null
+    ? missing(`fewer than ${String(VSYNC_SEEN_FRAMES)} animation frames measured`)
+    : measured(periodMs);
+}
+
 /** The frame rows of Design note 21 for one set of intervals. */
 export function frameRows(
   stats: Measured<FrameStats>,
@@ -1313,7 +1441,7 @@ export function buildResults(input: ResultsInput): DescentResults {
     ? missing("no window shown")
     : vsyncMs === null
       ? missing("the display reports no refresh rate")
-      : measured(setting === "low" ? 2 * vsyncMs : vsyncMs);
+      : measured(periodVsyncs(run.framePacing, setting === "low" ? 30 : 60, vsyncMs) * vsyncMs);
   const t = periodMs.value;
 
   // Frames: presentation times from the trace, else the rAF timestamps; the frames at the trace's
@@ -1488,6 +1616,23 @@ export function buildResults(input: ResultsInput): DescentResults {
         ? measured({ bytes: drmResidentPeakBytes.value, source: "drm-fdinfo" })
         : measured({ bytes: report.adapterPeakBytes, source: "adapter-tally" });
 
+  const lastSample = memory.at(-1) ?? null;
+  const sizes =
+    report.sizes === undefined
+      ? undefined
+      : buildSizesResults(report.sizes, input.load ?? missing("the run read no load average"), {
+          nvidiaBaselineBytes: run.nvidiaBaselineBytes,
+          peakLessBaselineBytes: nvidiaLessBaseline,
+          gpuProcessPeakBytes: columnPeakBytes(series.nvidiaGpuProcessKiB),
+          last:
+            lastSample === null
+              ? null
+              : {
+                  deviceBytes: lastSample.nvidiaDeviceBytes,
+                  gpuProcessBytes: lastSample.nvidiaGpuProcessBytes,
+                },
+        });
+
   const criterionStats = source === "presentation" ? presentationWhole : rafWhole;
   const headroomLimit = ofPeriod(periodMs, (period) => 0.8 * period);
   const memoryValue: Measured<number> =
@@ -1554,10 +1699,16 @@ export function buildResults(input: ResultsInput): DescentResults {
       launchMode: run.launchMode,
       setting,
       seed: run.seed,
+      world: run.world,
+      style: run.style,
       options: run.options,
       switches: run.switches,
       timer: report.timer,
       shown: run.shown,
+      pacing: {
+        framePacing: run.framePacing,
+        measuredVsyncMs: measuredVsyncOf(pick(frames.rafIntervalsMs, warm)),
+      },
       periodMs,
       warmupS: report.warmupS,
       canvas: report.canvas,
@@ -1576,7 +1727,8 @@ export function buildResults(input: ResultsInput): DescentResults {
     gpu: {
       timer: report.timer,
       tolerancePerPassMs,
-      untimedPasses: report.untimedPasses,
+      untimedPasses:
+        run.world === "test-planet" ? measured(report.untimedPasses) : missing(UNTIMED_NOT_COUNTED),
       passes,
       sumP95Ms,
       rows,
@@ -1614,6 +1766,8 @@ export function buildResults(input: ResultsInput): DescentResults {
       adapterPeakBytes: report.adapterPeakBytes,
     },
     criteria: { whole, segments: segmentCriteria, overall },
+    ...(sizes === undefined ? {} : { sizes }),
+    ...(report.geometry === undefined ? {} : { geometry: report.geometry }),
   };
 }
 
@@ -1741,7 +1895,9 @@ const VERDICTS: ReadonlySet<string> = new Set(["pass", "fail", "marginal", "not-
  * impossible; each clock column must be as long as the times; and terrain and atmosphere must be
  * one criterion row, whose limit is their estimates' sum, with each one's figures in `gpu.rows`,
  * percentiles in order and `overEstimate` true exactly when its 95th percentile is above its
- * estimate.
+ * estimate. A `sizes` block, where there is one (R10.T14.b), holds exactly its fields, each of its
+ * kind, and its samples' columns are whole (`sizesResultsProblems`); a file without one, written
+ * before it or by any other run, is checked as before.
  */
 export function validateResults(value: unknown): string[] {
   const problems: string[] = [];
@@ -1751,8 +1907,11 @@ export function validateResults(value: unknown): string[] {
   if (value["schema"] !== RESULTS_SCHEMA) {
     problems.push(`schema is not ${RESULTS_SCHEMA}`);
   }
-  if (value["version"] !== RESULTS_VERSION) {
-    problems.push(`version is not ${RESULTS_VERSION}`);
+  if (
+    !RESULTS_VERSIONS_READ.includes(Number(value["version"])) ||
+    typeof value["version"] !== "number"
+  ) {
+    problems.push(`version is not ${RESULTS_VERSIONS_READ.join(" or ")}`);
   }
   const run = value["run"];
   if (isRecord(run)) {
@@ -1767,7 +1926,20 @@ export function validateResults(value: unknown): string[] {
     if (!["full", "quantized", "absent"].includes(String(run["timer"]))) {
       problems.push("run.timer is not full, quantized or absent");
     }
+    if (worldOfRun(run) === null) {
+      problems.push(
+        "run.world is not test-planet, terrain-test or served, or run.style not its world's: none on test-planet, photorealistic or wireframe on a generated world",
+      );
+    }
     checkLoadAverage(run, problems);
+    const pacing = run["pacing"];
+    if (
+      value["version"] === RESULTS_VERSION &&
+      (!isRecord(pacing) ||
+        (pacing["framePacing"] !== "rate" && pacing["framePacing"] !== "display"))
+    ) {
+      problems.push("run.pacing.framePacing is neither rate nor display");
+    }
     if (!Array.isArray(run["switches"])) {
       problems.push("run.switches is not a list");
     }
@@ -1800,9 +1972,57 @@ export function validateResults(value: unknown): string[] {
   checkGpuSlices(value, trace, problems);
   checkIncompleteFrames(value, problems);
   checkClocks(value, problems);
+  checkUntimedPasses(value, problems);
   checkRestOfFrame(value, problems);
+  // The measured sizes (R10.T14.b), where a `--sizes on` run wrote them: every other file has none.
+  if (value["sizes"] !== undefined) {
+    problems.push(...sizesResultsProblems(value["sizes"]));
+  }
+  // A generated world's geometry (plan R14), in a version 7, 8 or 9 file alone.
+  problems.push(...geometryResultsProblems(value["geometry"], value["version"]));
   // A whole-run null column without a reason is found by both checks.
   return [...new Set(problems)];
+}
+
+/**
+ * A results file's world and its main view's style (`run.world`, `run.style`; plan R10,
+ * R10.T14.c), or `null` where the world is not one of its choices or the style not its world's:
+ * none (`null`) over the test planet, whose main view is the spike's own lit view, and
+ * `photorealistic` or `wireframe` over a generated world, the terrain world or the served one
+ * (R10.T15.b).
+ *
+ * @remarks
+ * A file with neither, written before them, is the test planet's with no style, as it was flown.
+ */
+export function worldOfRun(run: Readonly<Record<string, unknown>>): {
+  readonly world: SpikeWorldName;
+  readonly style: SpikeStyleName | null;
+} | null {
+  const world = run["world"] ?? "test-planet";
+  const style = run["style"] ?? null;
+  if (world === "test-planet") {
+    return style === null ? { world, style } : null;
+  }
+  return (world === "terrain-test" || world === "served") &&
+    (style === "photorealistic" || style === "wireframe")
+    ? { world, style }
+    : null;
+}
+
+/**
+ * `gpu.untimedPasses`: a figure of a count, missing with its reason over a generated world
+ * ({@link UNTIMED_NOT_COUNTED}), or the bare count of a file written before R10.T14.c and of a
+ * native replay's, which stays valid as it is.
+ */
+function checkUntimedPasses(value: Readonly<Record<string, unknown>>, problems: string[]): void {
+  if (!isRecord(value["gpu"])) {
+    return;
+  }
+  const untimed = childAt(value, ["gpu", "untimedPasses"]);
+  const figure = isRecord(untimed) ? untimed["value"] : untimed;
+  if (!(isWhole(figure, 0) || (isRecord(untimed) && figure === null))) {
+    problems.push("gpu.untimedPasses is not a count");
+  }
 }
 
 /**
@@ -2608,6 +2828,13 @@ function textOr<T>(figure: Measured<T>, show: (value: T) => string): string {
   return figure.value === null ? `— (${figure.reason})` : show(figure.value);
 }
 
+/** The summary's untimed passes: `3 untimed passes`, or none claimed, with the reason. */
+function untimedPassesText(figure: Measured<number>): string {
+  return figure.value === null
+    ? `untimed passes — (${figure.reason})`
+    : `${figure.value} untimed passes`;
+}
+
 /** The intervals a file's criterion reads, and where they come from, in words. */
 function intervalsOf(frames: DescentResults["frames"]): {
   readonly source: string;
@@ -2774,8 +3001,8 @@ export function summaryMarkdown(results: DescentResults): string {
     `- **Overall:** ${criteria.overall}${run.quiet.provisional ? (load.value === null ? ` (provisional: ${load.reason})` : " (provisional: not a quiet machine)") : ""}`,
     `- **Machine:** ${run.machine.cpu}, ${run.machine.logicalCores} threads; GPU ${textOr(run.machine.gpu, (gpu) => gpu.description ?? `${gpu.vendorId}:${gpu.deviceId}`)}; governor ${textOr(run.machine.governor, (governor) => governor)}; load average ${load.value === null ? `none (${load.reason})` : load.value.map((average) => average.toFixed(2)).join(", ")}`,
     `- **Versions:** app ${run.versions.app}, Electron ${run.versions.electron}, Chromium ${run.versions.chromium}`,
-    `- **Launch:** ${run.platform}, ${run.launchMode} mode, timer ${run.timer}, seed ${run.seed}, window ${run.shown ? "shown" : "hidden"}, canvas ${run.canvas.widthPx} × ${run.canvas.heightPx} px`,
-    `- **T:** ${textOr(run.periodMs, (period) => `${formatMs(period)} ms`)}; warm-up ${run.warmupS} s`,
+    `- **Launch:** ${run.platform}, ${run.launchMode} mode, timer ${run.timer}, seed ${run.seed}, world ${run.world}${typeof run.options["body"] === "string" ? ` (body ${run.options["body"]} of universe ${String(run.options["universe"])})` : ""}${run.style === null ? "" : `, style ${run.style}`}${typeof run.options["sizes"] === "string" ? `, sizes ${run.options["sizes"]}` : ""}${run.options["horizon"] === "off" ? ", horizon map off (the A/B's)" : ""}, window ${run.shown ? "shown" : "hidden"}, canvas ${run.canvas.widthPx} × ${run.canvas.heightPx} px`,
+    `- **T:** ${textOr(run.periodMs, (period) => `${formatMs(period)} ms`)}; warm-up ${run.warmupS} s${run.pacing === undefined ? "" : `; pacing ${run.pacing.framePacing}, measured vsync ${textOr(run.pacing.measuredVsyncMs, (period) => `${formatMs(period)} ms`)}`}`,
     `- **Trace:** ${textOr(run.trace, describeTrace)}`,
     `- **Incomplete pass times:** ${textOr(results.gpu.incompleteFrames, describeIncomplete)}`,
     `- **GPU clocks:** ${textOr(results.gpu.clocks, (clocks) => describeClocks(clocks, memory.series.tMs, run.warmupS))}`,
@@ -2833,8 +3060,10 @@ export function summaryMarkdown(results: DescentResults): string {
     `- nvidia-smi less its baseline: ${mibOr(memory.peakNvidiaDeviceLessBaselineBytes)}; the GPU process alone: ${mibOr(memory.peakNvidiaGpuProcessBytes)}`,
     `- Adapter tally: ${mib(memory.adapterPeakBytes)}`,
     "",
-    `Uploads ${mib(results.uploads.bytes)}; ${results.pipelines.late.length} pipelines created after warm-up; ${results.gpu.untimedPasses} untimed passes.`,
+    `Uploads ${mib(results.uploads.bytes)}; ${results.pipelines.late.length} pipelines created after warm-up; ${untimedPassesText(results.gpu.untimedPasses)}.`,
     "",
+    ...(results.sizes === undefined ? [] : sizesSummaryLines(results.sizes, run.setting)),
+    ...(results.geometry === undefined ? [] : geometrySummaryLines(results.geometry)),
   ].join("\n");
 }
 
@@ -2940,15 +3169,81 @@ const NODE_RESULTS_FILES: ResultsFiles = {
 };
 
 /**
- * Writes a results file and its summary into `dir` as `<date>-<machine>-<setting>.json` and
- * `.md`, adding `-2`, `-3` and so on when a run of the same day, machine and setting is there. A
- * profiled run's are `<date>-<machine>-<setting>-profiled.json` and `.md`, numbered the same way.
+ * The suffix, after a run's results' name, of its finished phases' files, which it writes as each
+ * phase ends and removes once its results are written, so that a run stopped part-way keeps them
+ * (R14's Mac measurements).
+ */
+export const PARTIAL_SUFFIX = "-partial";
+
+/** The file system calls of a writer of finished phases, which removes them too. */
+export interface PartialResultsFiles extends ResultsFiles {
+  /** Removes a file; one already gone is no failure. */
+  remove(path: string): Promise<void>;
+}
+
+/** Node's file system, for a writer of finished phases. */
+export const NODE_PARTIAL_FILES: PartialResultsFiles = {
+  ...NODE_RESULTS_FILES,
+  remove: (path) => rm(path, { force: true }),
+};
+
+/**
+ * The first of `stem`, `stem-2`, `stem-3` and so on that names in `dir` neither a results file
+ * (`<name>.json`) nor a stopped run's finished phases (`<name>-partial.json`).
+ *
+ * @throws Error if the day's names are used up.
+ */
+export async function freeResultsName(
+  dir: string,
+  stem: string,
+  files: Pick<ResultsFiles, "exists">,
+): Promise<string> {
+  const candidates = Array.from({ length: MAX_RUNS_A_DAY }, (_, i) =>
+    i === 0 ? stem : `${stem}-${String(i + 1)}`,
+  );
+  const taken = await Promise.all(
+    candidates.map(async (candidate) => {
+      const [results, partial] = await Promise.all([
+        files.exists(join(dir, `${candidate}.json`)),
+        files.exists(join(dir, `${candidate}${PARTIAL_SUFFIX}.json`)),
+      ]);
+      return results || partial;
+    }),
+  );
+  const name = candidates[taken.indexOf(false)];
+  if (name === undefined) {
+    throw new Error(`${dir} already holds ${String(MAX_RUNS_A_DAY)} runs named ${stem}`);
+  }
+  return name;
+}
+
+/**
+ * The name a spike run's files are given before a repeat's `-2` or a stopped run's `-partial`:
+ * `<date>-<machine>-<setting>`, with `-profiled` for a run whose trace recorded V8's profiler.
+ */
+export function resultsStem(run: {
+  readonly startedAt: Date;
+  readonly machine: Pick<MachineDescription, "name">;
+  readonly setting: SpikeSetting;
+  readonly profiled: boolean;
+}): string {
+  return `${run.startedAt.toISOString().slice(0, 10)}-${run.machine.name}-${run.setting}${run.profiled ? "-profiled" : ""}`;
+}
+
+/**
+ * Writes a results file and its summary into `dir` as `<name>.json` and `.md`: by default
+ * `<date>-<machine>-<setting>` ({@link resultsStem}), with `-2`, `-3` and so on added when a run of
+ * the same day, machine and setting, or a stopped run's finished segments, is there
+ * ({@link freeResultsName}); a profiled run's `<date>-<machine>-<setting>-profiled`, numbered the
+ * same way.
  *
  * @remarks
  * A file that Prettier would format to more than {@link ADDED_FILE_LIMIT_BYTES} is still written
  * in full, with a warning that names its size: the series is never thinned or split
  * (decision-r05-results-size.md). Such a run is a finding.
  *
+ * @param name - The name to write under, taken already: a run's, chosen as it started, or its
+ *   finished segments' (`<name>-partial`, R14's Mac measurements).
  * @returns The paths written.
  * @throws Error if the results do not match their schema, naming each problem, or if the day's
  * names are used up.
@@ -2957,24 +3252,20 @@ export async function writeResults(
   dir: string,
   results: DescentResults,
   files: ResultsFiles = NODE_RESULTS_FILES,
+  name: string | null = null,
 ): Promise<{ readonly json: string; readonly markdown: string }> {
   const problems = validateResults(results);
   if (problems.length > 0) {
     throw new Error(`the results do not match their schema: ${problems.join("; ")}`);
   }
   await files.mkdir(dir);
-  const profiled = results.run.trace.value?.profiled === true ? "-profiled" : "";
-  const stem = `${results.run.startedAt.slice(0, 10)}-${results.run.machine.name}-${results.run.setting}${profiled}`;
-  const candidates = Array.from({ length: MAX_RUNS_A_DAY }, (_, i) =>
-    i === 0 ? stem : `${stem}-${i + 1}`,
-  );
-  const taken = await Promise.all(
-    candidates.map((candidate) => files.exists(join(dir, `${candidate}.json`))),
-  );
-  const name = candidates[taken.indexOf(false)];
-  if (name === undefined) {
-    throw new Error(`${dir} already holds ${MAX_RUNS_A_DAY} runs named ${stem}`);
-  }
+  const stem = resultsStem({
+    startedAt: new Date(results.run.startedAt),
+    machine: results.run.machine,
+    setting: results.run.setting,
+    profiled: results.run.trace.value?.profiled === true,
+  });
+  name ??= await freeResultsName(dir, stem, files);
   const json = join(dir, `${name}.json`);
   const markdown = join(dir, `${name}.md`);
   const text = `${JSON.stringify(results, null, 2)}\n`;

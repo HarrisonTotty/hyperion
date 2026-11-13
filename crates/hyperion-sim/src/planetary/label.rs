@@ -25,9 +25,9 @@
 use std::fmt;
 use std::num::NonZeroU8;
 
-use crate::planetary::index::{BodyIndex, BodySub, STELLAR_SUB_END};
+use crate::planetary::index::{BodyIndex, BodySlot, BodySub, STELLAR_SUB_END};
 use crate::planetary::record::BodyKind;
-use crate::planetary::system::PlanetarySystem;
+use crate::planetary::system::{PlanetarySystem, WhiteDwarfSystem};
 
 /// A body's label for people: host letters, planets lettered from `b` by semi-major axis, moons in
 /// Roman numerals, belts numbered (design note 22), such as `A b` or `A d II`.
@@ -102,6 +102,26 @@ impl BodyLabel {
     #[must_use]
     pub fn halo() -> Self {
         Self("HALO".to_owned())
+    }
+
+    /// The label of a rogue planet, its system's one object at body `0x0000` (P14.T27.b): `A`,
+    /// the letter of the stellar level's first component, as a planet's host is named by its
+    /// components' letters, so that its moons are `A I` onwards and its rings `A RING 1`.
+    #[must_use]
+    pub fn rogue_planet() -> Self {
+        Self(host_letters([0]))
+    }
+
+    /// The label of a system's protoplanetary disc: `DISC`.
+    #[must_use]
+    pub fn protoplanetary_disc() -> Self {
+        Self("DISC".to_owned())
+    }
+
+    /// The label of a white dwarf's debris disc: `DEBRIS DISC`.
+    #[must_use]
+    pub fn debris_disc() -> Self {
+        Self("DEBRIS DISC".to_owned())
     }
 
     /// The label's text.
@@ -186,9 +206,10 @@ fn roman_numeral(number: NonZeroU8) -> String {
 }
 
 /// Every body of `system` with its label, in index order: its planets, moons, rings, belts,
-/// belt members and halo.
+/// belt members, halo and discs.
 ///
-/// - Each planet is lettered among its host's planets by primordial semi-major axis
+/// - Each planet is lettered among its host's planets by primordial semi-major axis, a
+///   second-generation planet's after every primordial one (P14.T28.e)
 ///   ([`Body::orbit`](crate::planetary::system::Body::orbit)), ties broken by body index, after its host's letters ([`host_letters`] of
 ///   its zone's members).
 /// - Each moon takes its parent's label and a Roman numeral from `I` by its semi-major axis as it
@@ -198,7 +219,8 @@ fn roman_numeral(number: NonZeroU8) -> String {
 /// - Belts are numbered from 1 through the system in index order, host by host and inside out:
 ///   `BELT 1`. A belt's member is its belt's label and its sub-index, its rank by size from the
 ///   largest: `BELT 1-3` (this lane's form, where design note 22 names none).
-/// - The cometary halo is `HALO`.
+/// - The cometary halo is `HALO`, the protoplanetary disc `DISC` (P14.T28.a) and a white dwarf's
+///   debris disc `DEBRIS DISC` (P14.T28.d; this lane's forms, where design note 22 names none).
 ///
 /// Labels are unique within a system: two hosts' letters differ, since their members do, a host's
 /// planets take distinct letters, a parent's moons distinct numerals, and the rest distinct
@@ -217,7 +239,15 @@ pub fn labels(system: &PlanetarySystem) -> Vec<(BodyIndex, BodyLabel)> {
                 .filter(|body| body.host() == zone.host())
                 .filter_map(|body| Some((body.orbit()?.semi_major_axis().value(), body.index()))),
         );
-        order.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+        // A second-generation planet is lettered after its host's primordial ones, which keep
+        // theirs (P14.T28.e): its slot is above every primordial planet's.
+        order.sort_by(|a, b| {
+            let second = |index: &BodyIndex| matches!(index.slot(), BodySlot::SecondGeneration(_));
+            second(&a.1)
+                .cmp(&second(&b.1))
+                .then(a.0.total_cmp(&b.0))
+                .then(a.1.cmp(&b.1))
+        });
         labelled.extend(
             order
                 .iter()
@@ -245,6 +275,15 @@ pub fn labels(system: &PlanetarySystem) -> Vec<(BodyIndex, BodyLabel)> {
     }
     if let Some(halo) = system.halo() {
         labelled.push((halo.index(), BodyLabel::halo()));
+    }
+    if system.rogue_planet().is_some() {
+        labelled.push((BodyIndex::PRIMARY, BodyLabel::rogue_planet()));
+    }
+    if let Some(disc) = system.protoplanetary_disc() {
+        labelled.push((disc.index(), BodyLabel::protoplanetary_disc()));
+    }
+    if let Some(index) = system.white_dwarf().and_then(WhiteDwarfSystem::debris_disc) {
+        labelled.push((index, BodyLabel::debris_disc()));
     }
     // Satellites, parent by parent, once their parents are labelled.
     labelled.sort_by_key(|(index, _)| *index);

@@ -7,9 +7,18 @@
 //! It also holds the search for plan 14's golden systems (P14.T32.a, [`find_system`]) and the
 //! helpers plan 13's substellar tests share ([`reference_density_point`], [`WarmCellCache`],
 //! [`objects_in_block`], [`usize_as_f64`]), and, in [`sky`], the sky census's oracle (rendering
-//! plan R06, R06.T8.e).
+//! plan R06, R06.T8.e), in `surface_worlds` (with the `testing` feature), R10's sample worlds
+//! (rendering plan R09, R09.T16), in [`observe`], the one-shot alerts' oracle (plan 12,
+//! P12.T5.b), in `binaries` (with the `testing` feature), the binary classes' prior members
+//! (plan 11, P11.T8.a), and, in `channels`, the channels' world tests' helpers.
 
+#[cfg(feature = "testing")]
+pub mod binaries;
+pub mod channels;
+pub mod observe;
 pub mod sky;
+#[cfg(feature = "testing")]
+pub mod surface_worlds;
 
 use std::cell::OnceCell;
 use std::collections::BTreeMap;
@@ -454,9 +463,39 @@ pub fn for_each_box_midpoint(
     }
 }
 
-/// The integral of a layer's density over the box of whole light-years from `min_ly` with edge
-/// `size_ly`, by a midpoint sum of `steps³` points: the expected number of systems the grid places
-/// there (plan 03, P03.T8.a).
+/// The density of a layer the grid places at `point`, systems per cubic light-year: each
+/// component's density times its field share in the band (`Galaxy::field_component_share`, plan
+/// 09, P09.T2.c), summed in component order, and, where the build has installed them, plan 08's
+/// displaced classes' (P08.T12.a), the part of `Fields::layer_density` past its components. Where
+/// no rogue planet density saturates, it is the density the grid places.
+#[must_use]
+pub fn field_layer_density(galaxy: &Galaxy, band: MassBand, point: &PointLy) -> f64 {
+    let fields = galaxy.fields();
+    let mut densities = [0.0; MAX_COMPONENTS];
+    fields.densities(point, &mut densities);
+    let field = fields
+        .component_ids()
+        .zip(densities)
+        .fold(0.0, |sum, (id, density)| {
+            sum + galaxy.field_component_share(band, id) * density
+        });
+    let displaced = fields.displaced().map_or(0.0, |_| {
+        let shares = galaxy.shares();
+        let components = fields
+            .components()
+            .iter()
+            .zip(densities)
+            .fold(0.0, |sum, (component, density)| {
+                sum + shares.component_share(band, component) * density
+            });
+        fields.layer_density(shares, band, point) - components
+    });
+    field + displaced
+}
+
+/// The integral of a layer's field density ([`field_layer_density`]) over the box of whole
+/// light-years from `min_ly` with edge `size_ly`, by a midpoint sum of `steps³` points: the
+/// expected number of systems the grid places there (plan 03, P03.T8.a).
 ///
 /// The sum shares no point with the thinning and none with `expected_counts`'s Gauss–Legendre rule.
 /// Its relative error is about `(h ÷ L)² ÷ 24` for a density of scale `L`, with `h = size ÷ steps`,
@@ -469,10 +508,9 @@ pub fn reference_box_integral(
     size_ly: u32,
     steps: u32,
 ) -> f64 {
-    let (fields, shares) = (galaxy.fields(), galaxy.shares());
     let mut total = 0.0;
     for_each_box_midpoint(min_ly, size_ly, steps, |point, weight, _| {
-        total += weight * fields.layer_density(shares, band, point);
+        total += weight * field_layer_density(galaxy, band, point);
     });
     total
 }
@@ -570,8 +608,9 @@ fn collect_hits(
     }
 }
 
-/// The integral of a layer's density over a sphere, by a midpoint sum in height, radius and azimuth:
-/// an independent reference for `expected_counts`, whose Gauss–Legendre rule it shares no node with.
+/// The integral of a layer's field density ([`field_layer_density`]) over a sphere, by a midpoint
+/// sum in height, radius and azimuth: an independent reference for `expected_counts`, whose
+/// Gauss–Legendre rule it shares no node with.
 ///
 /// `steps` is the number of midpoints in height; the radius takes half as many and the azimuth a
 /// quarter, so the cost is `steps³ ÷ 8`. The sum covers the sphere exactly, with no boundary error,
@@ -584,7 +623,6 @@ pub fn reference_sphere_integral(
     radius: LightYears,
     steps: u32,
 ) -> f64 {
-    let (fields, shares) = (galaxy.fields(), galaxy.shares());
     let [x0, y0, z0] = centre.to_light_years_f64();
     let r = radius.value();
     let (nz, nr, na) = (steps, (steps / 2).max(1), (steps / 4).max(4));
@@ -606,7 +644,7 @@ pub fn reference_sphere_integral(
                 let theta = (f64::from(ia) + 0.5) * da;
                 let (sin, cos) = math::sin_cos(theta);
                 let point = PointLy::new(x0 + radius_here * cos, y0 + radius_here * sin, z);
-                total += weight * fields.layer_density(shares, band, &point);
+                total += weight * field_layer_density(galaxy, band, &point);
             }
         }
     }

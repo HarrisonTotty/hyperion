@@ -10,20 +10,29 @@ import type { ExposureControl } from "../../view/photometry/exposure";
 import { styleName } from "../../view/photoreal/style";
 import { cameraSceneOf } from "../../view/scene/model";
 import { SKY_PENDING } from "../../view/sky/label";
+import { DECORATION_ON } from "../../view/surface/decoration/decorationSetting";
 import type { Instrument } from "./useInstruments";
+import type { SkyLineReading } from "./useViewSky";
 import type { DragKind } from "./useViewDrag";
 import { ViewCanvas } from "./ViewCanvas";
+import { terrainStatementOf } from "./viewFaults";
 import { ViewLabelBlock } from "./ViewLabelBlock";
 import { PRIMARY_NAME } from "./viewNames";
+import { LabelStatements } from "./LabelStatements";
+import type { ReasonFolds } from "./reasonFolds";
 import {
+  CONTOUR_INTERVAL_LABEL,
+  instrumentPhotorealStatements,
   type LabelLine,
+  type LabelStatement,
   labelLines,
+  withGridLine,
   labelStatements,
   photorealStatements,
-  PHOTOREAL_PREPARING,
-  POSITIONS_FROM_SHIP,
+  positionsStatement,
   PRESET_NAMES,
   targetKey,
+  withSceneStarsLine,
 } from "./viewRun";
 
 /** Props of {@link InstrumentView}. */
@@ -42,14 +51,23 @@ export interface InstrumentViewProps {
    * The photorealistic style's statements the `PRIMARY` view's block shows, which the instrument
    * does not repeat (decision-r07-t19-layout, item 5).
    */
-  readonly primaryPhotorealStatements: ReadonlyArray<string>;
+  readonly primaryPhotorealStatements: ReadonlyArray<LabelStatement>;
   /**
    * Whether the display's sky is asked and none of its replies is held, so that the `STARS` line
    * reads `PENDING` until its first (R06.T11.f), as the primary's does.
    */
   readonly skyAwaiting: boolean;
-  /** A graphics fault standing for this view (its own `GRAPHICS VIEW REFUSED`), or `null`. */
-  readonly fault: string | null;
+  /**
+   * The faults standing for this view, graphics first (its own `GRAPHICS VIEW REFUSED`), then the
+   * terrain's while it hands a body over once every height worker is lost or a guarded computation
+   * has kept failing (plan R10, R10.T16.b and R10.T16.e); each its own fault line.
+   */
+  readonly faults: ReadonlyArray<string>;
+  /**
+   * Which of its notes' reasons stand opened, held in its slot's state so that it returns from a
+   * hold as it was (the owner's request, 2026-11-01).
+   */
+  readonly folds: ReasonFolds;
   /** The ID of the text describing the canvases' keys. */
   readonly legendId: string;
   readonly onKeyDown: (event: KeyboardEvent<HTMLCanvasElement>) => void;
@@ -70,8 +88,9 @@ export interface InstrumentViewProps {
 /**
  * The lines of an instrument's label block (decision-r07-t19, item 2b): every line of the
  * primary's but `SCENE` and its `SCENE CLOCK` (R07.T16.k), which describe the display's scene, for
- * which the header shows its `TRAINING` banner, and `METER`, the primary's own (R07.T19.b); and the
- * exposure's `SOURCE`, the primary view, before `STARS`.
+ * which the header shows its `TRAINING` banner, and `METER`, the primary's own (R07.T19.b); its own
+ * `CONTOUR INTERVAL` after its `FOV` while its wireframe draws contours (plan R10, R10.T12.b;
+ * decision-r10-view-block-room §6); and the exposure's `SOURCE`, the primary view, before `STARS`.
  */
 const INSTRUMENT_LINES: ReadonlyArray<string> = [
   "FRAME",
@@ -79,6 +98,7 @@ const INSTRUMENT_LINES: ReadonlyArray<string> = [
   "STYLE",
   "CAMERA",
   "FOV",
+  CONTOUR_INTERVAL_LABEL,
   "EXPOSURE",
   "SOURCE",
   "STARS",
@@ -93,14 +113,14 @@ const NOT_MADE = "GRAPHICS NOT AVAILABLE: views could not be made, relaunch to r
 function instrumentLines(
   lines: ReadonlyArray<LabelLine>,
   drawn: RenderStyle,
-  skyLabel: string | null,
+  skyLabel: SkyLineReading | null,
 ): ReadonlyArray<LabelLine> {
   const byLabel = new Map<string, LabelLine>(lines.map((line) => [line.label, line]));
   byLabel.set("SOURCE", { label: "SOURCE", value: PRIMARY_NAME });
   byLabel.set("STYLE", { label: "STYLE", value: styleName(drawn) });
   const stars = byLabel.get("STARS");
   if (skyLabel !== null && stars !== undefined) {
-    byLabel.set("STARS", { ...stars, value: skyLabel });
+    byLabel.set("STARS", { ...stars, ...skyLabel });
   }
   return INSTRUMENT_LINES.flatMap((label) => {
     const line = byLabel.get(label);
@@ -119,18 +139,26 @@ function instrumentLines(
  * order, since a plate over so small a picture would hide most of it. It states the drawn style,
  * the camera and field of view, the primary's exposure with its `SOURCE`, since an instrument
  * meters no image of its own (Design note 11), and the stars of its own cull of the sky, at its
- * camera's limit, with what the sky leaves out, or `PENDING` until the sky's first reply; never
- * the stars-arriving note, which stands on the primary's line alone, since the display's views
- * draw one sky (decision-r06-t11f-stars-line); and its graphics fault (decision-r07-t19, item
- * 2b). Its statements run the slot's width under its label block and canvas, while they hold:
- * `POSITIONS AS SEEN FROM SHIP`,
+ * camera's limit, stale with the sky while the link is down (R06.T13.j), with what the sky leaves
+ * out, or `PENDING` until the sky's first reply; never the stars-arriving note, which stands on
+ * the primary's line alone, since the display's views draw one sky
+ * (decision-r06-t11f-stars-line); and its faults, the graphics' (decision-r07-t19, item 2b) and then
+ * the terrain's (R10.T16.b), each on a fault line of its own. Its
+ * statements run the slot's width under its label block and canvas, while they hold:
+ * where its positions are seen from (`POSITIONS AS SEEN FROM SHIP`, or the inspected body's
+ * `POSITIONS AS SEEN FROM <designation>`), its own terrain's `TERRAIN: STREAMING` or
+ * `TERRAIN: DETAIL LIMITED` (R10.T16.c),
  * `PHOTOREALISTIC: PREPARING`, and each photorealistic statement that holds for its picture
  * (`LIGHTING: …`, `BODY PHOTOMETRY: NOT YET MODELLED`, `CRAFT PHOTOMETRY: NOT YET MODELLED` or the
  * two composed, R07.T16.e) unless the primary's block shows the same line
- * (decision-r07-t19-layout, item 5). `ROTATION: NOT YET MODELLED`, about the scene's bodies, is
- * the primary's alone. Its list and its camera and style controls are the side column's while
- * `CONTROLS` points at it, and so are its `POSITION` and `POINTING` (R07.T19.f): at 1280 × 720 the
- * slot has no room for another line.
+ * (decision-r07-t19-layout, item 5), save `ATMOSPHERE: APPROXIMATE` straight above a reason line of
+ * its own, which never stands without its note (`viewRun.ts`' `instrumentPhotorealStatements`;
+ * plan R08, R08.T10.d). `ROTATION: NOT YET MODELLED` and `ROTATION: NOT RESOLVED`,
+ * about the scene's bodies, are the primary's alone. While its wireframe draws a body's contours,
+ * its block states its own `CONTOUR INTERVAL` after its `FOV` (plan R10, R10.T12.b), the interval
+ * the primary's states where the two stand at one pose. Its list and its camera and style controls
+ * are the side column's while `CONTROLS` points at it, and so are its `POSITION` and `POINTING`
+ * (R07.T19.f): at 1280 × 720 the slot has no room for another line.
  */
 export function InstrumentView({
   instrument,
@@ -141,7 +169,8 @@ export function InstrumentView({
   litLabels,
   primaryPhotorealStatements,
   skyAwaiting,
-  fault,
+  faults,
+  folds,
   legendId,
   onKeyDown,
   onKeyUp,
@@ -158,21 +187,32 @@ export function InstrumentView({
   const { shown, name, panelRef } = instrument;
   const drawn = shown?.drawnStyle ?? "wireframe";
   const run = shown?.run ?? null;
-  const statements =
+  const statements: ReadonlyArray<LabelStatement> =
     run === null
       ? []
       : [
-          ...labelStatements(run).filter((statement) => statement === POSITIONS_FROM_SHIP),
-          // Its own preparing, and the photorealistic style's statements about its picture that
-          // the primary's block does not show already.
-          ...photorealStatements(
-            { ...run, camera: { ...run.camera, style: budgetStyle } },
-            lighting,
-            drawn,
-            litLabels,
+          // Its own terrain annunciation, of the bodies its frame hands over (R10.T16.c), and its
+          // `DECORATION ON` (R11.T1), its survey line standing on a page that may be closed.
+          ...labelStatements(
+            run,
+            terrainStatementOf(shown?.terrain ?? null, faults),
+            shown?.decoration === true,
           ).filter(
             (statement) =>
-              statement === PHOTOREAL_PREPARING || !primaryPhotorealStatements.includes(statement),
+              statement === positionsStatement(run) ||
+              statement === shown?.terrain ||
+              statement === DECORATION_ON,
+          ),
+          // Drawn at its own budget's style, not the primary's.
+          ...instrumentPhotorealStatements(
+            photorealStatements(
+              { ...run, camera: { ...run.camera, style: budgetStyle } },
+              lighting,
+              drawn,
+              litLabels,
+              shown?.atmosphere,
+            ),
+            primaryPhotorealStatements,
           ),
         ];
   const describedBy = [
@@ -215,14 +255,22 @@ export function InstrumentView({
           {run === null ? null : (
             <ViewLabelBlock
               id={labelId}
-              lines={instrumentLines(
-                labelLines(run, exposure, stale),
+              lines={withGridLine(
+                withSceneStarsLine(
+                  instrumentLines(
+                    labelLines(run, exposure, stale, shown?.contourIntervalM ?? null),
+                    drawn,
+                    instrument.skyLabel ?? (skyAwaiting ? { value: SKY_PENDING } : null),
+                  ),
+                  shown?.sceneStars === true,
+                ),
+                instrument.grid,
                 drawn,
-                instrument.skyLabel ?? (skyAwaiting ? SKY_PENDING : null),
               )}
               statements={[]}
+              folds={folds}
               countLine={null}
-              fault={fault}
+              faults={faults}
             />
           )}
         </div>
@@ -254,11 +302,7 @@ export function InstrumentView({
       </div>
       {statements.length === 0 ? null : (
         <div className="view-instrument__statements" id={statementsId}>
-          {statements.map((statement) => (
-            <p className="view-label__statement" key={statement}>
-              {statement}
-            </p>
-          ))}
+          <LabelStatements statements={statements} folds={folds} />
         </div>
       )}
     </section>

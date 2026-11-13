@@ -36,14 +36,24 @@
 //! - **Black holes (T9.c)** are [`ClusterModel::black_hole_count`], unscaled, a compact Plummer
 //!   class of scale `(0.1 + 0.2 f ÷ f_max) r_h`, `f_max` = 0.06 (ours: the plan's 0.1–0.3 `r_h`,
 //!   "correlated with f").
-//! - **Binaries (T9.e)** are the living stars' and neutron stars' share `b` by kind and population
-//!   (scratch: 5% of a globular's first population, 1% of its second, 30% in open clusters),
-//!   profiled by their system mass, 1.5 times the primary's (ours).
+//! - **Binaries (T9.e)** are the living stars' and neutron stars' share `b` by kind and population,
+//!   profiled by their system mass, 1.5 times the primary's (ours): 5% of a globular's first
+//!   population and 1% of its second ([`BINARY_FRACTIONS`]), and in an open cluster, from
+//!   generator version 27, plan 11's multiple fraction at the band's mean living mass restricted
+//!   to pairs inside the cluster's hard–soft boundary at its half-mass radius
+//!   ([`open_cluster_binary_fraction`], P11.T8.f), 30% before it.
 //! - **Runaways (T9.f)**: a cluster under 100 Myr has lost `f_ej(M)` of its band-E stars to close
 //!   encounters, 15% rising log-linearly to 38% at 10^3.5 M☉ and falling back to 15% at 10^4.5,
 //!   and 3% of band D. The peak at 10^3.5 M☉ is Oh, Kroupa and Pflamm-Altenburg's (2015, ApJ 805,
 //!   92); the amplitudes are ours (provisional): their 15% and "up to 38%" are O-star shares over a
 //!   whole population of embedded clusters, varying with the models, not the ends of `f_ej(M)`.
+//!   From generator version 27 (P09.T33.b; research-leans-21) a
+//!   cluster of an ejecting source has lost instead, at each living mass of bands D and E, plan
+//!   08's `RunawayModel` share ejected by its age, as a runaway or a walkaway by either channel
+//!   (`ClassTable::ejected_by`), integrated over the band as its other counts are: the grid's
+//!   runaway and walkaway classes hold every living ejected star at the whole budget, a feature's
+//!   with the field's, so the cluster holds the rest. Its age takes the place of the 100 Myr step,
+//!   and the cluster's mass no longer enters.
 //! - **Tails (T9.g; ruling 139.4)**: a tail is as long as its oldest escaper has drifted and holds
 //!   what the cluster lost in that time ([`tail_window`]). Escapers drift along the tail at Küpper,
 //!   Macleod and Heggie's (2008, MNRAS 387, 1248, eq. 5's secular term) mean speed `v_drift = 2Ω
@@ -68,14 +78,19 @@
 //!
 //! A core-collapsed cluster's classes all take its cusp.
 
-use crate::galaxy::Galaxy;
+use crate::galaxy::catalogue_classes::core_collapse::ejecting_table;
+use crate::galaxy::displaced::BirthSource;
+use crate::galaxy::displaced::class_table::ClassTable;
+use crate::galaxy::features::members::hard_soft_separation;
 use crate::galaxy::imf::{MASS_BAND_EDGES, MassBand, MassFunction};
 use crate::galaxy::quad::gl_log_panels;
+use crate::galaxy::{Galaxy, PointLy};
 use crate::math;
-use crate::units::{LightYears, SolarMasses, Years};
+use crate::stellar::multiplicity::MultiplicityModel;
+use crate::units::consts::SECONDS_PER_DAY;
+use crate::units::{GravitationalParameter, LightYears, SolarMasses, Years};
 
 use super::super::cluster::{ClusterKind, ClusterModel};
-use super::abundances::first_population_share;
 use super::profile::ProfileShape;
 use super::{ClassKind, Generation, MemberClass, Multiplicity};
 
@@ -97,9 +112,37 @@ pub const NEUTRON_STAR_MASS: f64 = 1.35;
 /// A binary's system mass over its primary's (ours).
 pub const BINARY_MASS_FACTOR: f64 = 1.5;
 
-/// The binary fractions (scratch; plan 11 replaces the numbers): a globular's first population,
-/// its second, an open cluster.
+/// The binary fractions: a globular's first population, its second, and an open cluster's before
+/// generator version 27, from which plan 11's model gives an open cluster's
+/// ([`open_cluster_binary_fraction`], P11.T8.f).
+///
+/// A globular's are kept by plan 11 (P11.T8.f): Lucatello et al.'s (2015, A&A 584, A52) radial
+/// velocity binaries among ten globulars' red giants, 4.9% ± 1.3% of the first population and 1.2%
+/// ± 0.4% of the second, rounded; and of the order of Milone et al.'s (2012, A&A 540, A16)
+/// photometric main-sequence binaries of the ACS survey's 59 globulars, whose fraction is a few
+/// per cent in the massive clusters and above ten only in some of the least massive, falling with
+/// the cluster's luminosity (both recalled, not read at source: the pod that checked them reaches
+/// no literature).
 pub const BINARY_FRACTIONS: (f64, f64, f64) = (0.05, 0.01, 0.30);
+
+/// The binary fraction of an open cluster's living stars of mean mass `mass` (plan 11, P11.T8.f):
+/// plan 11's multiple fraction there ([`MultiplicityModel::multiple_fraction`]) times the share of
+/// its period law below the period of a pair of `mass` times [`BINARY_MASS_FACTOR`] at the
+/// cluster's hard–soft boundary at its half-mass radius ([`hard_soft_separation`]): the pairs that
+/// encounters harden rather than unbind (Heggie 1975).
+#[must_use]
+pub fn open_cluster_binary_fraction(model: &ClusterModel, mass: SolarMasses) -> f64 {
+    let multiplicity = MultiplicityModel::default_v1();
+    let system = SolarMasses::new(mass.value() * BINARY_MASS_FACTOR);
+    let separation = hard_soft_separation(model, model.half_mass_radius(), system);
+    let mu = GravitationalParameter::from_solar_masses(system).value();
+    let a = separation.value();
+    let period_days = std::f64::consts::TAU * (a * a * a / mu).sqrt() / SECONDS_PER_DAY;
+    multiplicity.multiple_fraction(mass)
+        * multiplicity
+            .period_distribution(mass)
+            .cdf(math::log10(period_days))
+}
 
 /// The second population's core over the cluster's (scratch).
 pub const SECOND_POPULATION_CORE_FACTOR: f64 = 0.7;
@@ -168,29 +211,18 @@ impl TailWindow {
 pub fn tail_window(galaxy: &Galaxy, model: &ClusterModel, reach: LightYears) -> TailWindow {
     use super::super::kinds::open_cluster::{disruption_survival, evolution_survival};
     use crate::galaxy::consts::LIGHT_YEARS_PER_YEAR_PER_KM_S;
-    let p = model.position();
-    let r = LightYears::new((p.x * p.x + p.y * p.y + p.z * p.z).sqrt());
-    let r_t = model.tidal_radius().value();
     let age = model.age().value().max(0.0);
-    let (omega, kappa) = if r.value() > 0.0 {
-        (
-            galaxy.potential().omega(r).value(),
-            galaxy.potential().kappa(r).value(),
-        )
-    } else {
-        (0.0, 0.0)
-    };
-    // ly per year.
-    let drift = if kappa > 0.0 {
-        2.0 * omega * (4.0 * omega * omega / (kappa * kappa) - 1.0).abs() * r_t
-    } else {
-        0.0
-    };
-    let length = if drift > 0.0 {
-        ((reach.value().min(r_t + drift * age)) - r_t).max(0.0)
-    } else {
-        0.0
-    };
+    let TailReach {
+        drift_ly_per_year: drift,
+        length,
+    } = TailReach::of(
+        galaxy,
+        &model.position(),
+        model.tidal_radius(),
+        model.age(),
+        reach,
+    );
+    let length = length.value();
     let tau = if drift > 0.0 { length / drift } else { 0.0 };
     let m0 = model.initial_mass();
     let (mass, lost) = match model.kind() {
@@ -221,6 +253,70 @@ pub fn tail_window(galaxy: &Galaxy, model: &ClusterModel, reach: LightYears) -> 
     }
 }
 
+/// How far a cluster's tail runs: [`tail_window`]'s drift and length, which a bound on the tail's
+/// reach reads without the cluster model (P09.T40.a).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct TailReach {
+    /// The escapers' mean drift along the tail, ly per year.
+    pub(crate) drift_ly_per_year: f64,
+    /// How far the tail runs beyond the tidal radius on each side.
+    pub(crate) length: LightYears,
+}
+
+impl TailReach {
+    /// The tail of a cluster at `position` (ly from the galactic centre) of tidal radius `tidal`
+    /// and age `age`, cut at `reach` from the cluster's centre.
+    #[must_use]
+    pub(crate) fn of(
+        galaxy: &Galaxy,
+        position: &PointLy,
+        tidal: LightYears,
+        age: Years,
+        reach: LightYears,
+    ) -> Self {
+        let (drift, length) = tail_drift_and_length(galaxy, position, tidal, age, reach);
+        Self {
+            drift_ly_per_year: drift,
+            length: LightYears::new(length),
+        }
+    }
+}
+
+/// [`TailReach::of`]'s drift, ly per year, and length, ly.
+#[must_use]
+fn tail_drift_and_length(
+    galaxy: &Galaxy,
+    position: &PointLy,
+    tidal: LightYears,
+    age: Years,
+    reach: LightYears,
+) -> (f64, f64) {
+    let p = position;
+    let r = LightYears::new((p.x * p.x + p.y * p.y + p.z * p.z).sqrt());
+    let r_t = tidal.value();
+    let age = age.value().max(0.0);
+    let (omega, kappa) = if r.value() > 0.0 {
+        (
+            galaxy.potential().omega(r).value(),
+            galaxy.potential().kappa(r).value(),
+        )
+    } else {
+        (0.0, 0.0)
+    };
+    // ly per year.
+    let drift = if kappa > 0.0 {
+        2.0 * omega * (4.0 * omega * omega / (kappa * kappa) - 1.0).abs() * r_t
+    } else {
+        0.0
+    };
+    let length = if drift > 0.0 {
+        ((reach.value().min(r_t + drift * age)) - r_t).max(0.0)
+    } else {
+        0.0
+    };
+    (drift, length)
+}
+
 /// Every class of a cluster (module documentation).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClassCounts {
@@ -230,7 +326,9 @@ pub struct ClassCounts {
     pub tails: [Option<TailCount>; 5],
     /// The depleted slope over 0.2–0.8 M☉.
     pub depleted_slope: f64,
-    /// The runaway share of band E, `f_ej`, for a young cluster; 0 otherwise.
+    /// The runaway share of band E, `f_ej`, for a young cluster, 0 otherwise; from generator
+    /// version 27 the share of band E's living systems its ejected stars take (module
+    /// documentation).
     pub runaway_share: f64,
     /// Each band's living systems born, net of the runaways (module documentation).
     pub born: [f64; 5],
@@ -304,6 +402,82 @@ pub fn runaway_share(mass: SolarMasses) -> f64 {
     }
 }
 
+/// How a cluster's living counts net out its ejected stars (module documentation, T9.f).
+#[derive(Debug, Clone, Copy)]
+enum Netting<'g> {
+    /// Before generator version 27: `ejected` of band E and [`RUNAWAY_BAND_D_SHARE`] of band D in a
+    /// `young` cluster.
+    Encounters { young: bool, ejected: f64 },
+    /// From 27: `RunawayModel`'s share of `source`'s stars ejected by the cluster's `age`, mass by
+    /// mass, in bands D and E.
+    Model {
+        table: &'g ClassTable,
+        source: BirthSource,
+        age: Years,
+    },
+}
+
+impl<'g> Netting<'g> {
+    /// The netting of `model` in `galaxy`: `RunawayModel`'s where the core-collapse class follows
+    /// the runaways and walkaways, from 27 (`ejecting_table`), the encounters' before.
+    #[must_use]
+    fn of(galaxy: &'g Galaxy, model: &ClusterModel) -> Self {
+        if let Some(table) = ejecting_table(galaxy) {
+            // A cluster without a density component is a test's or a named one: the thin disc's.
+            return Self::Model {
+                table,
+                source: model
+                    .parameters()
+                    .component
+                    .map_or(BirthSource::ThinDisc, |c| table.component_source(c)),
+                age: model.age(),
+            };
+        }
+        let young = model.age().value() < RUNAWAY_AGE_LIMIT;
+        Self::Encounters {
+            young,
+            ejected: if young {
+                runaway_share(model.mass())
+            } else {
+                0.0
+            },
+        }
+    }
+
+    /// The share of `band`'s living stars of initial mass `m` the cluster keeps: 1 before 27,
+    /// whose share is the band's scalar ([`band_share`](Self::band_share)).
+    #[must_use]
+    fn kept(&self, band: MassBand, m: f64) -> f64 {
+        match *self {
+            Self::Model { table, source, age } if matches!(band, MassBand::D | MassBand::E) => {
+                1.0 - table.ejected_by(source, SolarMasses::new(m), age)
+            }
+            Self::Encounters { .. } | Self::Model { .. } => 1.0,
+        }
+    }
+
+    /// The share of `band`'s living stars the cluster keeps, whatever their mass: before 27,
+    /// `1 − f_ej` of band E and `1 − 3%` of band D in a young cluster; 1 otherwise and from 27,
+    /// whose share is each mass's ([`kept`](Self::kept)).
+    #[must_use]
+    fn band_share(&self, band: MassBand) -> f64 {
+        match (*self, band) {
+            (Self::Encounters { ejected, .. }, MassBand::E) => 1.0 - ejected,
+            (Self::Encounters { young: true, .. }, MassBand::D) => 1.0 - RUNAWAY_BAND_D_SHARE,
+            (
+                Self::Encounters { .. } | Self::Model { .. },
+                MassBand::A
+                | MassBand::B
+                | MassBand::C
+                | MassBand::D
+                | MassBand::E
+                | MassBand::BrownDwarf
+                | MassBand::RoguePlanet,
+            ) => 1.0,
+        }
+    }
+}
+
 /// Kalirai et al. 2008's white-dwarf mass for a progenitor of `m`, M☉.
 #[must_use]
 pub fn white_dwarf_mass(m: f64) -> f64 {
@@ -327,7 +501,12 @@ pub fn band_depletion(f: &dyn MassFunction, alpha: f64) -> [f64; 5] {
 
 /// `∫ φ w(m) dm` and `∫ m φ w(m) dm` over `[lo, hi]` for the normalised mass function φ and weight
 /// `w`, by 32-node Gauss–Legendre panels in `ln m` split at the depletion's kinks.
-fn moments(f: &dyn MassFunction, lo: f64, hi: f64, w: impl Fn(f64) -> f64) -> (f64, f64) {
+pub(crate) fn moments(
+    f: &dyn MassFunction,
+    lo: f64,
+    hi: f64,
+    w: impl Fn(f64) -> f64,
+) -> (f64, f64) {
     if hi <= lo {
         return (0.0, 0.0);
     }
@@ -393,19 +572,15 @@ pub fn class_counts(galaxy: &Galaxy, model: &ClusterModel, reach: LightYears) ->
     let f = galaxy.mass_function();
     let m_to = model.turn_off_mass().value();
     let alpha = depleted_slope(model);
-    let young = model.age().value() < RUNAWAY_AGE_LIMIT;
-    let ejected = if young {
-        runaway_share(model.mass())
-    } else {
-        0.0
+    let netting = Netting::of(galaxy, model);
+    let mut ejected = match netting {
+        Netting::Encounters { ejected, .. } => ejected,
+        Netting::Model { .. } => 0.0,
     };
     let retention = *model.retention();
     let (ns_per_primary, _) = model.remnants_per_primary();
     let bh_count = model.black_hole_count();
-    let first_share = match model.kind() {
-        ClusterKind::Globular => first_population_share(model.initial_mass()),
-        ClusterKind::Open => 1.0,
-    };
+    let first_share = model.first_population_share();
     let core = model.profile_core_radius().value();
     let cusp = model.cusp_slope();
     let shape_for = |mass: f64, generation: Generation| {
@@ -419,7 +594,10 @@ pub fn class_counts(galaxy: &Galaxy, model: &ClusterModel, reach: LightYears) ->
             ProfileShape::cored(c, mass / m_to, model.half_mass_radius().value())
         }
     };
-    let binary_fraction = |generation: Generation| match (model.kind(), generation) {
+    let binary_fraction = |generation: Generation, mean: f64| match (model.kind(), generation) {
+        (ClusterKind::Open, _) if mean > 0.0 => {
+            open_cluster_binary_fraction(model, SolarMasses::new(mean))
+        }
         (ClusterKind::Open, _) => BINARY_FRACTIONS.2,
         (ClusterKind::Globular, Generation::First) => BINARY_FRACTIONS.0,
         (ClusterKind::Globular, Generation::Second) => BINARY_FRACTIONS.1,
@@ -434,19 +612,24 @@ pub fn class_counts(galaxy: &Galaxy, model: &ClusterModel, reach: LightYears) ->
             MASS_BAND_EDGES[band.index()],
             MASS_BAND_EDGES[band.index() + 1],
         );
-        let runaway = match band {
-            MassBand::E => 1.0 - ejected,
-            MassBand::D if young => 1.0 - RUNAWAY_BAND_D_SHARE,
-            MassBand::A
-            | MassBand::B
-            | MassBand::C
-            | MassBand::D
-            | MassBand::BrownDwarf
-            | MassBand::RoguePlanet => 1.0,
-        };
+        let runaway = netting.band_share(band);
         let live_hi = hi.min(m_to);
-        let (n_live, m_live) = moments(f, lo, live_hi, |m| depletion(m, alpha));
-        let (n_canon, m_canon) = moments(f, lo, live_hi, |_| 1.0);
+        let (n_live, m_live) = moments(f, lo, live_hi, |m| {
+            depletion(m, alpha) * netting.kept(band, m)
+        });
+        if let (Netting::Model { .. }, MassBand::E) = (netting, band) {
+            let (all, _) = moments(f, lo, live_hi, |m| depletion(m, alpha));
+            ejected = if all > 0.0 { 1.0 - n_live / all } else { 0.0 };
+        }
+        // The mass a band's binary fraction is read at: its living stars' mean, or for a band with
+        // none, its primaries' at birth.
+        let fraction_mass = if n_live > 0.0 {
+            m_live / n_live
+        } else {
+            let (n, m) = moments(f, lo, hi, |_| 1.0);
+            if n > 0.0 { m / n } else { 0.0 }
+        };
+        let (n_canon, m_canon) = moments(f, lo, live_hi, |m| netting.kept(band, m));
         let wd_lo = lo.max(m_to);
         let wd_hi = hi.min(WHITE_DWARF_PROGENITOR_MAX);
         let (n_wd, m_wd_initial) = moments(f, wd_lo, wd_hi, |_| 1.0);
@@ -463,7 +646,7 @@ pub fn class_counts(galaxy: &Galaxy, model: &ClusterModel, reach: LightYears) ->
             if share <= 0.0 {
                 continue;
             }
-            let b = binary_fraction(generation);
+            let b = binary_fraction(generation, fraction_mass);
             born[band.index()] += n_canon * share * runaway;
             born_mass[band.index()] +=
                 m_canon * share * runaway * (1.0 - b + b * BINARY_MASS_FACTOR);
@@ -653,6 +836,88 @@ mod tests {
         let (canonical, _) = moments(f.as_ref(), lo, hi, |_| 1.0);
         let ratio = depleted / canonical;
         assert!((ratio - 0.386).abs() <= 0.01, "{ratio}");
+    }
+
+    /// P09.T9.f from 27 (research-leans-21): a young nursery of the young disc nets, at each of the
+    /// class table's mass nodes of bands D and E below its turn-off, `RunawayModel`'s share of its
+    /// stars ejected by its age, both kinds and both channels, to 10⁻¹²; so does an old open
+    /// cluster, whose every ejection has passed, past the 100 Myr step; and the counts take it:
+    /// band E's living systems fall by about its share.
+    #[test]
+    fn from_27_a_cluster_nets_the_runaway_model_s_ejected_stars() {
+        use crate::Seed;
+        use crate::galaxy::ages::SubDisc;
+        use crate::galaxy::displaced::runaway::Ejected;
+        use crate::galaxy::features::catalogue::FeatureCatalogue;
+        use crate::galaxy::features::ids::FeatureProcess;
+        use crate::galaxy::params::GalaxyParams;
+        use crate::galaxy::rules::GalaxyRules;
+
+        let galaxy = Galaxy::from_params_with_rules(
+            Seed::new(0x0909_f000_0000_0027),
+            GalaxyParams::milky_way_like(),
+            GalaxyRules::of_version(crate::GENERATOR_VERSION),
+        )
+        .unwrap();
+        let table = ejecting_table(&galaxy).expect("every 27 hold follows the runaways");
+        let models = |process: FeatureProcess| {
+            FeatureCatalogue::walk_process(&galaxy, process)
+                .filter_map(|feature| ClusterModel::from_record(&galaxy, &feature))
+                .filter(|model| model.parameters().component.is_some())
+        };
+        let nursery = models(FeatureProcess::Nursery)
+            .find(|model| model.age().value() < 1.5e7)
+            .expect("a young bound nursery");
+        let old = models(FeatureProcess::OldOpenCluster(SubDisc::First))
+            .find(|model| model.age().value() > 2e8)
+            .expect("an old open cluster");
+        for model in [&nursery, &old] {
+            let netting = Netting::of(&galaxy, model);
+            let Netting::Model { source, age, .. } = netting else {
+                panic!("from 27 a cluster reads the runaway model");
+            };
+            assert_eq!(age, model.age());
+            let runaways = table.runaway_model();
+            let m_to = model.turn_off_mass().value();
+            let mut checked = 0;
+            for band in [MassBand::D, MassBand::E] {
+                for &m in table.nodes(band).masses().iter().filter(|&&m| m < m_to) {
+                    let mass = SolarMasses::new(m);
+                    let ejected = [
+                        (Ejected::Runaway, runaways.runaway_share(mass)),
+                        (Ejected::Walkaway, runaways.walkaway_share(mass)),
+                    ]
+                    .into_iter()
+                    .fold(0.0, |sum, (kind, share)| {
+                        let before = table
+                            .ejection_ages(source, kind, mass)
+                            .into_iter()
+                            .filter(|&(t, _)| t < age)
+                            .fold(0.0, |s, (_, w)| s + w);
+                        sum + share * before
+                    });
+                    let netted = 1.0 - netting.kept(band, m);
+                    assert!(
+                        (netted - ejected).abs() <= 1e-12,
+                        "{band:?} at {m} M☉, {age:?}: {netted} netted against {ejected}"
+                    );
+                    checked += 1;
+                }
+            }
+            assert!(checked > 5, "{checked} nodes below the turn-off");
+            // An old cluster's ejections have all passed: each mass's whole lifetime share.
+            if model.age().value() > 2e8 {
+                let m = SolarMasses::new(5.0);
+                let lifetime = runaways.runaway_share(m) + runaways.walkaway_share(m);
+                assert!((1.0 - netting.kept(MassBand::D, 5.0) - lifetime).abs() <= 1e-12);
+            }
+        }
+        let counts = class_counts(&galaxy, &nursery, LightYears::new(400.0));
+        assert!(
+            (0.05..0.6).contains(&counts.runaway_share),
+            "{}",
+            counts.runaway_share
+        );
     }
 
     #[test]

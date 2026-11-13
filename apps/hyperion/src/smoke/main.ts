@@ -8,13 +8,29 @@
  * @remarks
  * Its switches come from the `just test-render` recipe's command line, never from the client's
  * `graphicsSwitches`, which a test keeps free of the unsafe flag and the adapter override. The
- * page's variant and fixture arrive as `--smoke-variant=` and `--smoke-fixture=`;
+ * page's variant and fixture arrive as `--smoke-variant=` and `--smoke-fixture=`, and the part of
+ * its groups to run as `--smoke-part=1` to `24` (every group without it), and
+ * `--smoke-twin-workers=<n>` the atmosphere twins' workers, at most 4 (a quarter of the hardware
+ * threads, at most 4, without it);
  * `--smoke-gpu-timing=1` says the run lifted timestamp quantization (the hardware runs of T11),
  * and `--smoke-soak=<seconds>` runs T11's and T12's soak scene instead of the checks, hidden and
  * offscreen unless `--smoke-show=1`. They reach the page in the query string. The main process
  * makes no request itself (Node's `fetch` would bypass Chromium's `webRequest`).
+ * `--smoke-watchdog-scale=<k>`, which stays in the main process, stretches the watchdog's
+ * allowances k times, a whole number from 1 to {@link SMOKE_WATCHDOG_SCALE_MAX}, for a machine
+ * much slower than the development one (`scripts/testRender.sh`'s `HYPERION_SMOKE_WATCHDOG_SCALE`).
  * `--smoke-captures=<dir>` asks the page for R05.T12.c's atmosphere comparison frames, which are
- * saved there as PNGs, for a person to look at.
+ * saved there as PNGs, for a person to look at. `--smoke-geometry=<field>=<value>[,…]` is the page's
+ * lit terrain's geometry over its setting's (plan R14, Design note 17;
+ * `preload/geometryLaunch.ts`), checked here, a setup error where it is not one, and handed to the
+ * page as `geometry-<field>` (`renderer/src/smoke/geometry.ts`).
+ *
+ * `--smoke-transfer=<ws URL>` runs R03.T15's transfer check instead (plan R10, R10.T15.b;
+ * `smoke/transfer.ts` on the page): `--smoke-transfer-universe=<ID>`'s
+ * `--smoke-transfer-body=<ID>` field asked of the server at that loopback WebSocket, the one
+ * request beside `file:` and `data:` it lets out (`transferSocketUrl`); a URL that is not a
+ * loopback server's is a setup error (exit 2). `scripts/transferCheck.sh` starts the server and
+ * surveys the body first.
  *
  * `--smoke-child=<seconds>` runs R07.T21's child window instead (`childWindow.ts`): on the client's
  * own graphics switches, shown, the child on a second display, refused with a setup error (exit 2)
@@ -36,8 +52,12 @@ import {
   judgeSmokeRun,
   readSmokeImages,
   readSmokeResult,
+  readWatchdogScale,
   SMOKE_EXIT,
   SMOKE_RESULT_CHANNEL,
+  SMOKE_WATCHDOG_SCALE_MAX,
+  smokeWatchdogMs,
+  transferSocketUrl,
 } from "./result";
 import { isOwnPage } from "../main/ipcSender";
 import { describeMachine, nodeMachineSources } from "../main/results";
@@ -55,6 +75,7 @@ import {
   refusalLine,
   withGpuExits,
 } from "./childWindow";
+import { geometryValueText, parseGeometryOverride } from "../preload/geometryLaunch";
 import { startSoak } from "./soak";
 
 /** The value of `--<name>=value` on the command line, or `fallback`. */
@@ -65,7 +86,16 @@ function argument(name: string, fallback: string): string {
 
 const variant = argument("smoke-variant", "default");
 const fixture = argument("smoke-fixture", "none");
+/** The part of the page's groups to run, each its own run under its own watchdog, or `all`. */
+const part = argument("smoke-part", "all");
+/** The twin workers the page starts, or "" for its default (`twinPool.ts`). */
+const twinWorkers = argument("smoke-twin-workers", "");
 const gpuTiming = argument("smoke-gpu-timing", "0");
+/**
+ * Whether the frame's timings also draw the measured Earth through the thick read, its bake
+ * forced on (plan R08, R08.T14.c's frame record): a smoke-only override, the route staying gated.
+ */
+const thickRead = argument("smoke-thick-read", "0");
 /** The soak's length in seconds (T11, T12); 0 runs the checks. */
 const soakSeconds = Number(argument("smoke-soak", "0"));
 const show = argument("smoke-show", "0") === "1";
@@ -74,12 +104,23 @@ const video = argument("smoke-video", "");
 const capturePath = argument("smoke-capture", "");
 /** Where R05.T12.c's comparison frames are saved, or "" for none. */
 const capturesDir = argument("smoke-captures", "");
+/** The page's geometry override as given (plan R14), or "" for its settings' own. */
+const geometryText = argument("smoke-geometry", "");
 /** R07.T21's child-window run's length in seconds; 0 runs the checks. */
 const childSeconds = Number(argument("smoke-child", "0"));
 /** Whether the child is offscreen on the main display: the harness's proof on one display. */
 const childHidden = argument("smoke-child-hidden", "0") === "1";
 /** Where the child-window run's record goes, or "" for none. */
 const outDir = argument("smoke-out", "");
+/** The watchdog's factor (`scripts/testRender.sh`'s `HYPERION_SMOKE_WATCHDOG_SCALE`), as given. */
+const watchdogScaleText = argument("smoke-watchdog-scale", "1");
+const watchdogScale = readWatchdogScale(watchdogScaleText);
+/** The transfer check's server, as given, or "" for the checks (plan R10, R10.T15.b). */
+const transferAsked = argument("smoke-transfer", "");
+/** The server's WebSocket the transfer check may reach, or `null` with none asked or allowed. */
+const transferUrl = transferAsked === "" ? null : transferSocketUrl(transferAsked);
+const transferUniverse = argument("smoke-transfer-universe", "");
+const transferBody = argument("smoke-transfer-body", "");
 const cancelled: CancelledRequest[] = [];
 /** The page's uncaptured GPU errors, as the engine logged them. */
 const gpuErrors: string[] = [];
@@ -144,9 +185,29 @@ app.on("window-all-closed", () => {
 if (!Number.isFinite(soakSeconds) || soakSeconds < 0) {
   finish([`SETUP --smoke-soak must be a number of seconds, not ${soakSeconds}`], SMOKE_EXIT.setup);
 }
+if (transferAsked !== "" && transferUrl === null) {
+  finish(
+    [`SETUP --smoke-transfer must be a loopback server's ws://host:port/ws, not ${transferAsked}`],
+    SMOKE_EXIT.setup,
+  );
+}
+if (transferUrl !== null && (transferUniverse === "" || transferBody === "")) {
+  finish(
+    ["SETUP --smoke-transfer needs --smoke-transfer-universe and --smoke-transfer-body"],
+    SMOKE_EXIT.setup,
+  );
+}
 if (!Number.isFinite(childSeconds) || childSeconds < 0) {
   finish(
     [`SETUP --smoke-child must be a number of seconds, not ${String(childSeconds)}`],
+    SMOKE_EXIT.setup,
+  );
+}
+if (watchdogScale === null) {
+  finish(
+    [
+      `SETUP --smoke-watchdog-scale must be a whole number from 1 to ${SMOKE_WATCHDOG_SCALE_MAX}, not ${watchdogScaleText}`,
+    ],
     SMOKE_EXIT.setup,
   );
 }
@@ -156,15 +217,27 @@ const childSwitches =
   childSeconds > 0
     ? graphicsSwitches({
         platform: process.platform,
-        mode: launchModeOf(process.platform, false),
+        mode: launchModeOf(process.platform, { safe: false, software: false }),
         gpuTiming: true,
       })
     : [];
 // Before `ready`: Chromium reads its switches when the GPU process starts.
 applyGraphicsSwitches(app.commandLine, childSwitches);
 
-/** How long a run may take before the watchdog ends it. */
-const WATCHDOG_MS = 180_000 + (soakSeconds + childSeconds) * 1000;
+/**
+ * How long a run may take before the watchdog ends it: part 1's grows with the captures and with
+ * the GPU timings, and every run's with the scale.
+ */
+const WATCHDOG_MS = smokeWatchdogMs({
+  part,
+  captures: capturesDir !== "",
+  gpuTiming: gpuTiming === "1",
+  thickRead: thickRead === "1",
+  soakSeconds,
+  childSeconds,
+  scale: watchdogScale ?? 1,
+  transfer: transferUrl !== null,
+});
 
 /** A display as the child-window run records it. */
 function displayInfo(display: Electron.Display): DisplayInfo {
@@ -223,7 +296,8 @@ void app
     session.defaultSession.webRequest.onBeforeRequest(
       { urls: ["<all_urls>"] },
       (details, reply) => {
-        if (isOfflineUrl(details.url)) {
+        // The transfer check's one socket, to the server it was given.
+        if (isOfflineUrl(details.url) || details.url === transferUrl) {
           reply({});
           return;
         }
@@ -362,8 +436,11 @@ void app
       query: {
         variant,
         fixture,
+        part,
+        ...(twinWorkers === "" ? {} : { twinWorkers }),
         // The child-window run lifts the quantization with the client's own timing switch.
         gpuTiming: child === null ? gpuTiming : "1",
+        ...(thickRead === "1" ? { thickRead } : {}),
         soak: String(soakSeconds),
         child: String(childSeconds),
         ...(child === null
@@ -375,7 +452,19 @@ void app
               childHidden: childHidden ? "1" : "0",
             }),
         captures: capturesDir === "" ? "0" : "1",
+        // Throws, a setup error, for one that is not an override.
+        ...(geometryText === ""
+          ? {}
+          : Object.fromEntries(
+              Object.entries(parseGeometryOverride(geometryText)).map(([field, value]) => [
+                `geometry-${field}`,
+                geometryValueText(value),
+              ]),
+            )),
         ...(video === "" ? {} : { video: pathToFileURL(video).href }),
+        ...(transferUrl === null
+          ? {}
+          : { transfer: transferUrl, universe: transferUniverse, body: transferBody }),
       },
     });
     return undefined;

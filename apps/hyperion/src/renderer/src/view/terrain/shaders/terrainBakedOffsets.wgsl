@@ -1,6 +1,6 @@
 // The `BakedOffsets` vertex path (plan R05, Design note 4): each vertex's own-level offset q₀ and
-// morph target q₁ from its patch origin, formed in f64 by the bake and narrowed once. Composed
-// after terrain.wgsl.
+// morph target q₁ from its patch origin, formed in f64 by the bake and narrowed once. Composed with
+// terrainPatch.wgsl and a terrain material (R05's terrain.wgsl, R10's terrainLit.wgsl).
 
 // q₀ then q₁ per vertex, slot by slot (the bake's `offsets` layout).
 @group(2) @binding(5) var<storage, read> offsets : array<f32>;

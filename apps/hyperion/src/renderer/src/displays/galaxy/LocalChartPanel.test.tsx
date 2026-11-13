@@ -17,7 +17,10 @@ import {
 import { type RecordingContext2D, stubCanvas } from "../../test/RecordingContext2D";
 import { ServerLinkHarness } from "../../test/ServerLinkHarness";
 import { stubMatchMedia } from "../../test/stubMatchMedia";
+import { RADIUS_STEPS_LY } from "../../spatial/scale";
+import { formatQueryRadius } from "./chartModel";
 import { GalaxyDisplay } from "./GalaxyDisplay";
+import { statusLine } from "../../test/statusLine";
 
 /** The chart centre every test uses, off the galactic axis so that the directions are defined. */
 const CENTRE = [26_000, 0, 0] as const;
@@ -176,7 +179,8 @@ function reading(label: string): string {
   return term?.nextElementSibling?.textContent ?? "";
 }
 
-describe("LocalChartPanel", () => {
+// M2 worst 1.07 s, desktop 24.1 s under load (2026-10-15): 100× M2
+describe("LocalChartPanel", { timeout: 120_000 }, () => {
   beforeEach(() => {
     FakeWebSocket.instances = [];
     vi.stubGlobal("WebSocket", FakeWebSocket);
@@ -207,7 +211,7 @@ describe("LocalChartPanel", () => {
     await user.click(screen.getByRole("tab", { name: "LOCAL CHART" }));
 
     expect(
-      within(chartPage()).getByText("NO CENTRE: pick on the map and press C"),
+      within(chartPage()).getByText(statusLine("NO CENTRE: pick on the map and press C")),
     ).toBeInTheDocument();
     expect(socket.requestsOfKind("systems_in_range")).toHaveLength(0);
   });
@@ -361,6 +365,108 @@ describe("LocalChartPanel", () => {
     expect(labels).toContain("QUERY EDGE 80 ly");
   });
 
+  it("asks at every query radius from 500 ly down to 0.001 ly, its census line shown at each", async () => {
+    const { user, socket } = await renderChart();
+
+    for (const step of RADIUS_STEPS_LY.toReversed()) {
+      // Each step is chosen and answered before the next, as an operator's are.
+      // oxlint-disable-next-line no-await-in-loop
+      await user.selectOptions(
+        within(chartPage()).getByRole("combobox", { name: "QUERY RADIUS" }),
+        String(step),
+      );
+      expect(socket.requestsOfKind("systems_in_range").at(-1)?.body.radius_ly).toBe(step);
+      // oxlint-disable-next-line no-await-in-loop
+      await answerQuery(socket, step);
+
+      const labels = within(chartPage())
+        .getAllByText(/^QUERY EDGE/u)
+        .map((element) => element.textContent);
+      expect(labels).toEqual([`QUERY EDGE ${formatQueryRadius(step)}`]);
+      expect(within(chartPage()).getByText(/^COMPLETE ABOVE/u)).toHaveTextContent(
+        "COMPLETE ABOVE 0.08",
+      );
+    }
+  });
+
+  it("reads a chart of the finest step in AU: its scale bar, query edge, list and readout", async () => {
+    const { user, socket } = await renderChart();
+
+    await user.selectOptions(
+      within(chartPage()).getByRole("combobox", { name: "QUERY RADIUS" }),
+      "63.2 AU",
+    );
+    await server(() => {
+      socket.serverAnswers("systems_in_range", (body) =>
+        aSystemsInRange({
+          centreLy: CENTRE,
+          radiusLy: body.radius_ly,
+          minLayer: body.min_layer,
+          // At the centre, then 0.0005 ly (31.6 AU) north and 0.0008 ly (50.6 AU) along x.
+          systems: [
+            { relLy: [0, 0, 0], layer: "c" },
+            { relLy: [0, 0, 0.0005], layer: "a" },
+            { relLy: [0.0008, 0, 0], layer: "e" },
+          ],
+        }),
+      );
+    });
+
+    expect(within(chartPage()).getByRole("img", { name: /^Scale bar/u })).toHaveAccessibleName(
+      /^Scale bar, \d+ AU$/u,
+    );
+    // The curve label is one span whose figures are set apart, so it is read as a whole.
+    expect(within(chartPage()).getByText(/^QUERY EDGE/u)).toHaveTextContent("QUERY EDGE 63.2 AU");
+    expect(within(chartPage()).getByText(/^COMPLETE ABOVE/u)).toBeInTheDocument();
+    // The furniture's place steps 0.00001 ly on this chart, a hundredth of its radius.
+    expect(within(chartPage()).getByText("RADIUS").nextElementSibling).toHaveTextContent(
+      "26,000.00000 ly",
+    );
+    expect(within(chartPage()).getByText("HEIGHT").nextElementSibling).toHaveTextContent(
+      "+0.00000 ly",
+    );
+    // At the Sun's radius the angle's step along the arc is capped at the place's five decimals.
+    expect(within(chartPage()).getByText("ANGLE").nextElementSibling).toHaveTextContent(
+      "000.00000°",
+    );
+    const systems = within(screen.getByRole("region", { name: /^Systems/u }));
+    expect(systems.getByText("DIST AU")).toBeInTheDocument();
+    expect(options()[1]).toHaveAccessibleName(/, 31\.6 AU,/u);
+    expect(options()[2]).toHaveAccessibleName(/, 50\.6 AU,/u);
+
+    await user.click(options()[1] ?? canvas());
+
+    expect(reading("DIST")).toBe("31.6 AU");
+    expect(reading("NORTH")).toBe("+31.6 AU");
+    expect(reading("COREWARD")).toBe("+0.0 AU");
+  });
+
+  it("reads a finest chart at the central black hole's ANGLE to one decimal, its RADIUS to five", async () => {
+    const { user, socket } = await renderChart();
+
+    await user.selectOptions(
+      within(chartPage()).getByRole("combobox", { name: "QUERY RADIUS" }),
+      "63.2 AU",
+    );
+    // The answer's centre is the chart's, 0.0003 ly from the axis: a degree's tenth steps there
+    // 5.2E-7 ly along the arc, finer than the place's 1E-5 ly.
+    await server(() => {
+      socket.serverAnswers("systems_in_range", (body) =>
+        aSystemsInRange({
+          centreLy: [0.0003, 0, 0.0001],
+          radiusLy: body.radius_ly,
+          minLayer: body.min_layer,
+        }),
+      );
+    });
+
+    const value = (label: string): Element | null =>
+      within(chartPage()).getByText(label).nextElementSibling;
+    expect(value("RADIUS")).toHaveTextContent("0.00030 ly");
+    expect(value("ANGLE")).toHaveTextContent(/^000\.0°/u);
+    expect(value("HEIGHT")).toHaveTextContent("+0.00010 ly");
+  });
+
   it("says what its symbols mean, and that they are not to scale", async () => {
     await renderChart();
 
@@ -438,22 +544,71 @@ describe("LocalChartPanel", () => {
   });
 
   it("marks the chart stale when the link no longer backs it", async () => {
-    const { socket } = await renderChart();
+    const { user, socket } = await renderChart();
     expect(
       within(chartPage()).getByRole("application", { name: "Local chart" }),
     ).toBeInTheDocument();
+    await user.click(options()[1] ?? canvas());
 
     await act(async () => {
       socket.close();
       await Promise.resolve();
     });
 
-    // The guide's stale state: named so, muted, and marked with a trailing S in each block.
+    // The guide's stale state: named so, muted, and marked with a trailing S, in the furniture after
+    // each value (P12.T11.d), and in the panel beside it each row once and each reading after its
+    // value, so that the panel's title takes none (plan 05, P05.T14).
     expect(
       within(chartPage()).getByRole("application", { name: "Local chart, stale" }),
     ).toBeInTheDocument();
-    expect(within(chartPage()).getAllByText("stale").length).toBeGreaterThan(0);
-    expect(screen.getByRole("region", { name: "Systems stale" })).toBeInTheDocument();
+    for (const label of ["RADIUS", "ANGLE", "HEIGHT", "UT"]) {
+      expect(
+        within(chartPage()).getByText(label, { selector: ".spatial-view__furniture dt" })
+          .nextElementSibling,
+      ).toHaveTextContent(/S\s*stale$/u);
+    }
+    expect(
+      within(chartPage()).getByText("FRAME", { selector: ".spatial-view__furniture dt" })
+        .nextElementSibling,
+    ).toHaveTextContent(/^GALACTIC$/u);
+    expect(screen.getByRole("region", { name: "Systems" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Systems" })).toHaveTextContent(/^Systems$/u);
+    expect(options()[1]).toHaveAccessibleName(/^H7K 4C0RFZ A-2, .*, stale$/u);
+    expect(options()[1]?.querySelector(".system-list__range")).toHaveTextContent(/S\s*stale$/u);
+    expect(reading("DESIG")).toBe("H7K 4C0RFZ A-2 Sstale");
+  });
+
+  it("reads the same stale SYSTEMS count on the census and the HR page under a STARS filter", async () => {
+    const { user, socket } = await renderChart({ answered: false });
+    await server(() => {
+      socket.serverAnswers("systems_in_range", (body) =>
+        aSystemsInRange({
+          centreLy: CENTRE,
+          radiusLy: 80,
+          minLayer: body.min_layer,
+          systems: [
+            { relLy: [1, 0, 0], layer: "c" },
+            { relLy: [2, 0, 0], layer: "c", stellar: aStellarBrief("c", "white_dwarf") },
+            { relLy: [3, 0, 0], layer: "a" },
+          ],
+        }),
+      );
+    });
+    // LIVING, then REMNANTS, which the white dwarf alone passes.
+    await user.keyboard("kk");
+    await act(async () => {
+      socket.close();
+      await Promise.resolve();
+    });
+
+    // The S after the figure and before the filter's words, the console's own (plan 05, P05.T14).
+    const census = within(chartPage()).getByText("SYSTEMS", { selector: "dt" }).nextElementSibling;
+    expect(census).toHaveTextContent(/^1 OF 3 S\s*stale SHOWN: REMNANTS$/u);
+    await user.click(screen.getByRole("tab", { name: "HR DIAGRAM" }));
+    const hr = within(screen.getByRole("tabpanel", { name: "HR DIAGRAM" })).getByText("SYSTEMS", {
+      selector: "dt",
+    }).nextElementSibling;
+    expect(hr?.textContent).toBe(census?.textContent);
   });
 
   it("reports a census it cannot read as a fault and asks again on RETRY", async () => {
@@ -473,14 +628,14 @@ describe("LocalChartPanel", () => {
     });
 
     expect(
-      within(chartPage()).getByText("CHART DATA INVALID: census incomplete"),
+      within(chartPage()).getByText(statusLine("CHART DATA INVALID: census incomplete")),
     ).toBeInTheDocument();
     expect(
       within(chartPage()).queryByRole("application", { name: "Local chart" }),
     ).not.toBeInTheDocument();
     expect(
       within(screen.getByRole("region", { name: "Systems" })).getByText(
-        "CHART DATA INVALID: retry on the LOCAL CHART page",
+        statusLine("CHART DATA INVALID: retry on the LOCAL CHART page"),
       ),
     ).toBeInTheDocument();
 

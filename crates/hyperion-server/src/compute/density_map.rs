@@ -3,8 +3,12 @@
 //!
 //! A map is computed once per galaxy, view, population and resolution as a [`RawDensityMap`] of
 //! log₁₀ column densities, and that raw grid is what the cache keeps (plan 04, design note 12).
+//! The raw and quantised types, [`RawMap`] and [`QuantisedMap`], are shared with the extinction
+//! map (plan 07, P07.T10.a), each carrying the unit its values are the log₁₀ of as a marker type:
+//! [`PerLy2`] here, so that a density map can be neither quantised nor answered as an extinction
+//! map.
 //! [`DensityMapService`] owns that cache: it renders a map's rows in bands of [`BAND_ROWS`] as bulk
-//! jobs on the CPU pool, from plan 02's [`render_rows`], and hands out the assembled grid.
+//! jobs on the CPU pool, from plan 02's [`render_row_ranges`], and hands out the assembled grid.
 //! Each response quantises it to the bit depth its request asks for with [`quantise_map`], one
 //! pass over the grid and cheap next to computing it, and base64-encodes the codes with
 //! [`QuantisedMap::to_base64`]. The encoding, the orientation and the decode formula are those
@@ -14,14 +18,16 @@
 
 use std::error::Error;
 use std::fmt;
+use std::marker::PhantomData;
 use std::mem;
+use std::ops::Range;
 use std::sync::Arc;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use hyperion_protocol::{MapPopulation, MapView};
 use hyperion_sim::galaxy::Galaxy;
-use hyperion_sim::galaxy::map::{MapSelection, MapSpec, MapView as SpecView, render_rows};
+use hyperion_sim::galaxy::map::{MapSelection, MapSpec, MapView as SpecView, render_row_ranges};
 use hyperion_sim::math;
 
 use super::{
@@ -40,26 +46,37 @@ const FACE_ON_SPAN_DEX: f64 = 5.0;
 /// magnitude edge-on, and one decade more, as face-on.
 const EDGE_ON_SPAN_DEX: f64 = 7.0;
 
-/// A density map as computed: log₁₀ of the column density of every pixel, before quantisation.
+/// Systems per square light-year along a pixel's line of sight: the unit of a density map (plan
+/// 04, design note 12), as the marker of the [`RawMap`] and [`QuantisedMap`] that hold its log₁₀.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+pub struct PerLy2;
+
+/// A density map as computed: log₁₀ of the column density of every pixel, in systems per square
+/// light-year, before quantisation.
+pub type RawDensityMap = RawMap<PerLy2>;
+
+/// A map as computed: log₁₀ of every pixel's value, in the unit `U` marks, before quantisation.
 ///
-/// Pixels run row by row from the top and left to right within a row, in the orientation of the
-/// map's view (see [`DensityMap`](hyperion_protocol::DensityMap)). Each value is log₁₀ of systems
-/// per square light-year along the pixel's line of sight, held as `f32`, which is far finer than
-/// the 16-bit codes it becomes; a pixel with no systems at all holds [`f32::NEG_INFINITY`].
+/// One representation serves both rasters: a density map's ([`RawDensityMap`], [`PerLy2`]) and an
+/// extinction map's ([`RawExtinctionMap`](super::RawExtinctionMap), [`Mag`](super::Mag); plan 07,
+/// P07.T10.a). Pixels run row by row from the top and left to right within a row, in the
+/// orientation of the map's view (see [`DensityMap`](hyperion_protocol::DensityMap)). Each value
+/// is held as `f32`, which is far finer than the 16-bit codes it becomes; a pixel with nothing
+/// along its line of sight (no systems, or no dust) holds [`f32::NEG_INFINITY`].
 #[derive(Debug, Clone, PartialEq)]
-pub struct RawDensityMap {
+pub struct RawMap<U> {
     width_px: u16,
     height_px: u16,
     centre_ly: [f64; 2],
     ly_per_px: f64,
     log10: Vec<f32>,
+    unit: PhantomData<U>,
 }
 
-impl RawDensityMap {
+impl<U> RawMap<U> {
     /// A map of `width_px` × `height_px` pixels, each `ly_per_px` light-years square, centred on
     /// `centre_ly` (horizontal, vertical: (x, y) face-on, (x, z) edge-on, in light-years in the
-    /// `GALACTIC` frame), with `log10` holding every pixel's log₁₀ column density in systems per
-    /// square light-year.
+    /// `GALACTIC` frame), with `log10` holding every pixel's log₁₀ value in the unit `U` marks.
     ///
     /// # Errors
     ///
@@ -101,6 +118,7 @@ impl RawDensityMap {
             centre_ly,
             ly_per_px,
             log10,
+            unit: PhantomData,
         })
     }
 
@@ -129,15 +147,15 @@ impl RawDensityMap {
         self.ly_per_px
     }
 
-    /// log₁₀ of every pixel's column density in systems per square light-year, row by row from
-    /// the top; [`f32::NEG_INFINITY`] for an empty pixel.
+    /// log₁₀ of every pixel's value in the unit `U` marks, row by row from the top;
+    /// [`f32::NEG_INFINITY`] for an empty pixel.
     #[must_use]
     pub fn log10(&self) -> &[f32] {
         &self.log10
     }
 }
 
-impl HeapBytes for RawDensityMap {
+impl<U> HeapBytes for RawMap<U> {
     fn heap_bytes(&self) -> usize {
         // A `Vec`'s allocation never exceeds `isize::MAX` bytes, so this cannot overflow.
         self.log10.capacity() * mem::size_of::<f32>()
@@ -263,33 +281,36 @@ impl fmt::Display for ParseCodeDepthError {
 
 impl Error for ParseCodeDepthError {}
 
-/// A density map quantised for the wire: its codes, and the floor and ceiling they span.
+/// A map quantised for the wire: its codes, and the floor and ceiling they span, as log₁₀ of
+/// values in the unit `U` marks, as its [`RawMap`]'s: systems per square light-year for a density
+/// map ([`PerLy2`]), magnitudes for an extinction map ([`Mag`](super::Mag); plan 07, P07.T10.a).
 #[derive(Debug, Clone, PartialEq)]
-pub struct QuantisedMap {
+pub struct QuantisedMap<U> {
     depth: CodeDepth,
-    floor_log10_per_ly2: f64,
-    ceiling_log10_per_ly2: f64,
+    floor_log10: f64,
+    ceiling_log10: f64,
     bytes: Vec<u8>,
+    unit: PhantomData<U>,
 }
 
-impl QuantisedMap {
+impl<U> QuantisedMap<U> {
     /// The bit depth of the codes.
     #[must_use]
     pub fn depth(&self) -> CodeDepth {
         self.depth
     }
 
-    /// log₁₀ of the column density, in systems per square light-year, that code 1 stands for.
+    /// log₁₀ of the value that code 1 stands for, in the unit `U` marks.
     #[must_use]
-    pub fn floor_log10_per_ly2(&self) -> f64 {
-        self.floor_log10_per_ly2
+    pub fn floor_log10(&self) -> f64 {
+        self.floor_log10
     }
 
-    /// log₁₀ of the column density, in systems per square light-year, that the largest code
-    /// stands for: the map's maximum.
+    /// log₁₀ of the value that the largest code stands for, in the unit `U` marks: the map's
+    /// maximum, or the floor if nothing lies above it.
     #[must_use]
-    pub fn ceiling_log10_per_ly2(&self) -> f64 {
-        self.ceiling_log10_per_ly2
+    pub fn ceiling_log10(&self) -> f64 {
+        self.ceiling_log10
     }
 
     /// The codes as bytes: one per code at 8 bits, two little-endian at 16, row by row from the
@@ -306,7 +327,7 @@ impl QuantisedMap {
     }
 }
 
-/// Quantises a raw map to codes of `depth` bits for `view`, by plan 04's design note 12.
+/// Quantises a raw density map to codes of `depth` bits for `view`, by plan 04's design note 12.
 ///
 /// The ceiling is the map's largest value and the floor lies 5 dex below it face-on and 7 dex
 /// edge-on. With `max = 2^bits − 1`, a pixel at or below the floor, an empty one included, gets
@@ -320,24 +341,37 @@ impl QuantisedMap {
 /// formula on [`DensityMap`](hyperion_protocol::DensityMap), to within half a step. A map with no
 /// systems at all has floor and ceiling 0 and every code 0.
 #[must_use]
-pub fn quantise_map(map: &RawDensityMap, view: MapView, depth: CodeDepth) -> QuantisedMap {
+pub fn quantise_map(map: &RawDensityMap, view: MapView, depth: CodeDepth) -> QuantisedMap<PerLy2> {
+    let floor = ceiling_of(map).map_or(0.0, |ceiling| ceiling - span_dex(view));
+    quantise_map_with_floor(map, floor, depth)
+}
+
+/// Quantises a raw map to codes of `depth` bits above the fixed floor `floor_log10` (plan 07,
+/// P07.T10.a), by [`quantise_map`]'s rule.
+///
+/// The ceiling is the map's largest value, or the floor itself if no pixel lies above it, in which
+/// case every code is 0. An extinction map's floor is 0.01 mag (its design note 19), where a
+/// density map's lies a number of decades below its ceiling.
+#[must_use]
+pub fn quantise_map_with_floor<U>(
+    map: &RawMap<U>,
+    floor_log10: f64,
+    depth: CodeDepth,
+) -> QuantisedMap<U> {
     let len = map.log10.len() * depth.bytes_per_code();
-    let Some(ceiling) = map
-        .log10
-        .iter()
-        .copied()
-        .filter(|value| value.is_finite())
-        .max_by(f32::total_cmp)
-    else {
-        return QuantisedMap {
-            depth,
-            floor_log10_per_ly2: 0.0,
-            ceiling_log10_per_ly2: 0.0,
-            bytes: vec![0; len],
-        };
+    let ceiling = match ceiling_of(map) {
+        Some(ceiling) if ceiling > floor_log10 => ceiling,
+        Some(_) | None => {
+            return QuantisedMap {
+                depth,
+                floor_log10,
+                ceiling_log10: floor_log10,
+                bytes: vec![0; len],
+                unit: PhantomData,
+            };
+        }
     };
-    let ceiling = f64::from(ceiling);
-    let floor = ceiling - span_dex(view);
+    let floor = floor_log10;
     let span = ceiling - floor;
     let max = depth.max_code();
     let mut bytes = Vec::with_capacity(len);
@@ -351,10 +385,22 @@ pub fn quantise_map(map: &RawDensityMap, view: MapView, depth: CodeDepth) -> Qua
     }
     QuantisedMap {
         depth,
-        floor_log10_per_ly2: floor,
-        ceiling_log10_per_ly2: ceiling,
+        floor_log10: floor,
+        ceiling_log10: ceiling,
         bytes,
+        unit: PhantomData,
     }
+}
+
+/// The largest finite value of `map`, or `None` if every pixel is empty.
+#[must_use]
+fn ceiling_of<U>(map: &RawMap<U>) -> Option<f64> {
+    map.log10
+        .iter()
+        .copied()
+        .filter(|value| value.is_finite())
+        .max_by(f32::total_cmp)
+        .map(f64::from)
 }
 
 /// How far the floor lies below the ceiling in `view`, in dex.
@@ -395,7 +441,7 @@ pub const MAP_WIDTH_LY: f64 = 131_072.0;
 /// A band is the unit of bulk work, so it is what bounds how long an interactive job can wait behind
 /// a map (design note 21) and how much of a cancelled map runs on. Sixteen rows of a 1,024-pixel
 /// edge-on map are some seconds; see the plan's Risks for the measured cost.
-const BAND_ROWS: u16 = 16;
+pub(crate) const BAND_ROWS: u16 = 16;
 
 /// How wide a map is, in pixels: the four resolutions a request may ask for.
 ///
@@ -559,7 +605,7 @@ impl MapKey {
 
 /// The view the sim renders, from the view the wire names.
 #[must_use]
-fn spec_view(view: MapView) -> SpecView {
+pub(super) fn spec_view(view: MapView) -> SpecView {
     match view {
         MapView::FaceOn => SpecView::FaceOn,
         MapView::EdgeOn => SpecView::EdgeOn,
@@ -572,6 +618,9 @@ fn spec_selection(population: MapPopulation) -> MapSelection {
     match population {
         MapPopulation::All => MapSelection::AllSystems,
         MapPopulation::Young => MapSelection::YoungOnly,
+        // Every map of a galaxy that holds no displaced class, every one below version 26, is
+        // empty under it: the sim's map is 0 everywhere (P08.T15.b).
+        MapPopulation::LayerERemnants => MapSelection::LayerERemnants,
     }
 }
 
@@ -656,71 +705,165 @@ impl fmt::Debug for DensityMapService {
     }
 }
 
-/// Renders every band of `key`'s raster on the pool and assembles them in row order.
-///
-/// Each band is one bulk job over [`BAND_ROWS`] rows of the one [`MapSpec`], so the values do not
-/// depend on how the rows were split or on how many workers ran them (plan 02, P02.T10: the rasters
-/// of band sizes 1 to 13 are identical bit for bit).
+/// Renders every band of `key`'s raster on the pool and assembles them in row order: an edge-on
+/// map's in mirrored halves ([`Banding::Mirrored`]).
 async fn render(
     pool: &CpuPool,
     galaxy: &Arc<Galaxy>,
     key: MapKey,
 ) -> Result<RawDensityMap, ComputeError> {
-    let spec = key.spec();
-    let (width_px, height_px) = (
-        key.resolution().width_px(),
-        key.resolution().height_px(key.view()),
-    );
+    let banding = match key.view() {
+        MapView::FaceOn => Banding::Consecutive,
+        MapView::EdgeOn => Banding::Mirrored,
+    };
+    render_bands(
+        pool,
+        galaxy,
+        key.spec(),
+        key.resolution(),
+        key.view(),
+        banding,
+        |galaxy, spec, ranges, values| render_row_ranges(galaxy.fields(), spec, ranges, values),
+    )
+    .await
+}
+
+/// How a raster's rows are split into the pool's bulk jobs, each of at most [`BAND_ROWS`] rows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Banding {
+    /// Bands of [`BAND_ROWS`] consecutive rows, from the top.
+    Consecutive,
+    /// Half-bands from the top, each with its mirror in the plane from the bottom as one job: an
+    /// edge-on density map's, whose displaced classes share each height's line of sight between a
+    /// row and its mirror ([`render_row_ranges`]), which halves the remnants map's cost (lane
+    /// `perf-remnants-map`, 2026-11-01). The middle row of an odd number of rows is a job alone.
+    Mirrored,
+}
+
+impl Banding {
+    /// The jobs of a raster `height_px` rows tall, from the top: each the row ranges one job
+    /// renders as one band, in the order its values come.
+    #[must_use]
+    fn jobs(self, height_px: u32) -> Vec<Vec<Range<u32>>> {
+        let band = u32::from(BAND_ROWS);
+        let mut jobs = Vec::new();
+        match self {
+            Self::Consecutive => {
+                let mut first = 0;
+                while first < height_px {
+                    let end = (first + band).min(height_px);
+                    jobs.push(std::iter::once(first..end).collect());
+                    first = end;
+                }
+            }
+            Self::Mirrored => {
+                let (half, step) = (height_px / 2, (band / 2).max(1));
+                let mut first = 0;
+                while first < half {
+                    let end = (first + step).min(half);
+                    jobs.push(vec![first..end, height_px - end..height_px - first]);
+                    first = end;
+                }
+                if height_px % 2 == 1 {
+                    jobs.push(std::iter::once(half..half + 1).collect());
+                }
+            }
+        }
+        jobs
+    }
+}
+
+/// Fills `values` with each of `ranges` in turn, rendered by `render` one range at a time: a
+/// renderer of one range of rows as [`Banding`]'s jobs call it.
+pub(super) fn each_range(
+    ranges: &[Range<u32>],
+    values: &mut Vec<f64>,
+    mut render: impl FnMut(Range<u32>, &mut Vec<f64>),
+) {
+    values.clear();
+    let mut part = Vec::new();
+    for rows in ranges {
+        render(rows.clone(), &mut part);
+        values.extend_from_slice(&part);
+    }
+}
+
+/// Renders every band of `spec`'s raster on the pool with `render_band` and assembles the log₁₀ of
+/// its values in row order, in the unit `U` marks: the banding both map services share (plan 07,
+/// P07.T10.a).
+///
+/// Each job is one bulk job over at most [`BAND_ROWS`] rows of the one [`MapSpec`], split as
+/// `banding` says, so the values do not depend on how the rows were split or on how many workers
+/// ran them (plan 02, P02.T10: the rasters of band sizes 1 to 13 are identical bit for bit).
+/// `render_band` follows plan 02's `render_row_ranges` contract: it clears its output and fills it
+/// with the job's ranges' values in turn, row by row, each 0 or more, 0 for an empty pixel.
+pub(super) async fn render_bands<U>(
+    pool: &CpuPool,
+    galaxy: &Arc<Galaxy>,
+    spec: MapSpec,
+    resolution: MapResolution,
+    view: MapView,
+    banding: Banding,
+    render_band: fn(&Galaxy, &MapSpec, &[Range<u32>], &mut Vec<f64>),
+) -> Result<RawMap<U>, ComputeError> {
+    let (width_px, height_px) = (resolution.width_px(), resolution.height_px(view));
     let token = CancelToken::new();
     // Cancels the bands still queued once every waiter on this map has gone.
     let _cancel_on_drop = CancelOnDrop::new(token.clone());
-    let mut bands = Vec::with_capacity(usize::from(height_px).div_ceil(usize::from(BAND_ROWS)));
-    let mut first_row = 0;
-    while first_row < u32::from(height_px) {
-        let rows = first_row..(first_row + u32::from(BAND_ROWS)).min(u32::from(height_px));
-        first_row = rows.end;
+    let jobs = banding.jobs(u32::from(height_px));
+    let mut bands = Vec::with_capacity(jobs.len());
+    for ranges in jobs {
         let galaxy = Arc::clone(galaxy);
-        bands.push(
+        let rendered = ranges.clone();
+        bands.push((
+            ranges,
             pool.submit(Priority::Bulk, token.clone(), move |token| {
                 if token.is_cancelled() {
                     return None;
                 }
                 let mut values = Vec::new();
-                render_rows(galaxy.fields(), &spec, rows, &mut values);
+                render_band(&galaxy, &spec, &rendered, &mut values);
                 Some(to_log10(&values))
             })
             .await?,
-        );
+        ));
     }
-    let mut log10 = Vec::with_capacity(usize::from(width_px) * usize::from(height_px));
-    for band in bands {
+    let width = usize::from(width_px);
+    let mut log10 = vec![f32::NEG_INFINITY; width * usize::from(height_px)];
+    for (ranges, band) in bands {
         let values = band
             .await
             .unwrap_or_else(|closed| Err(JobError::from(closed)))?
             .ok_or(JobError::Cancelled)?;
-        log10.extend_from_slice(&values);
+        let mut read = 0;
+        for rows in ranges {
+            let start = usize::try_from(rows.start).expect("a row of the raster") * width;
+            let end = usize::try_from(rows.end).expect("a row of the raster") * width;
+            log10[start..end].copy_from_slice(&values[read..read + (end - start)]);
+            read += end - start;
+        }
     }
-    Ok(RawDensityMap::new(
+    Ok(RawMap::new(
         width_px,
         height_px,
         [0.0, 0.0],
-        key.resolution().ly_per_px(),
+        resolution.ly_per_px(),
         log10,
     )
-    .expect("a raster of the key's size, whose values are finite or −∞"))
+    .expect("a raster of `resolution`'s size in `view`, whose values are finite or −∞"))
 }
 
-/// log₁₀ of every pixel's column density, as `f32`: `−∞` where there are no systems at all.
+/// log₁₀ of every pixel's value, as `f32`: `−∞` where it is 0 (no systems, or no dust).
 ///
 /// The logarithm is the sim's ([`math::log10`]), not the platform's, so that a map's codes are the
 /// same on every machine, as the golden file that pins them assumes.
 #[must_use]
 #[expect(
     clippy::cast_possible_truncation,
-    reason = "a column density's logarithm lies well inside f32's range, and f32 is far finer than \
-              the 16-bit codes it becomes (see RawDensityMap)"
+    reason = "the logarithm of a column density or of an extinction lies well inside f32's range, \
+              and f32 is far finer than the 16-bit codes it becomes (see RawMap)"
 )]
-fn to_log10(values: &[f64]) -> Vec<f32> {
+pub(super) fn to_log10(values: &[f64]) -> Vec<f32> {
     values
         .iter()
         .map(|&density| {
@@ -741,6 +884,7 @@ mod tests {
     use std::time::Duration;
 
     use hyperion_protocol::{DensityMap, UniverseIdHex};
+    use hyperion_sim::galaxy::map::render_rows;
     use hyperion_sim::{GENERATOR_VERSION, Seed};
     use hyperion_testkit::golden;
     use hyperion_testkit::golden::GoldenWriter;
@@ -772,6 +916,14 @@ mod tests {
 
     /// A pool of `workers` workers and a service over it, with room for every map.
     fn service(workers: usize) -> (Arc<CpuPool>, DensityMapService) {
+        service_of(galaxy, workers)
+    }
+
+    /// [`service`] over the galaxy `galaxy` gives.
+    fn service_of(
+        galaxy: fn() -> &'static Galaxy,
+        workers: usize,
+    ) -> (Arc<CpuPool>, DensityMapService) {
         let pool = Arc::new(
             CpuPool::new(
                 NonZeroUsize::new(workers).expect("a test asks for at least one worker"),
@@ -780,11 +932,53 @@ mod tests {
             )
             .expect("the pool starts"),
         );
-        let galaxies = Arc::new(GalaxyCache::with_builder(Arc::clone(&pool), |_| {
+        let galaxies = Arc::new(GalaxyCache::with_builder(Arc::clone(&pool), move |_| {
             galaxy().clone()
         }));
         let service = DensityMapService::new(Arc::clone(&pool), galaxies, ROOMY);
         (pool, service)
+    }
+
+    /// The test galaxy's seed under the rules of generator version `version`.
+    fn galaxy_at(version: u32) -> Galaxy {
+        use hyperion_sim::GeneratorVersion;
+        use hyperion_sim::galaxy::imf::MassFunctionKind;
+        use hyperion_sim::galaxy::params::GalaxyParams;
+        let seed = Seed::new(SEED);
+        Galaxy::from_params_at_version(
+            seed,
+            GalaxyParams::from_seed(seed, MassFunctionKind::default()),
+            GeneratorVersion::new(version),
+        )
+        .expect("a drawn galaxy builds")
+    }
+
+    /// The test galaxy's seed under version 24's rules, the version before the one in force, built
+    /// by its version so that a bump does not change it unseen.
+    fn galaxy_24() -> &'static Galaxy {
+        static GALAXY: OnceLock<Galaxy> = OnceLock::new();
+        GALAXY.get_or_init(|| galaxy_at(24))
+    }
+
+    /// The test galaxy's seed under version 25's rules, the version in force: [`galaxy`]'s, with
+    /// no displaced class yet.
+    fn galaxy_25() -> &'static Galaxy {
+        static GALAXY: OnceLock<Galaxy> = OnceLock::new();
+        GALAXY.get_or_init(|| galaxy_at(25))
+    }
+
+    /// The test galaxy's seed under version 26's rules, every hold at 26 in force: no displaced
+    /// class yet, plan 08's P08.T12 riding 27.
+    fn galaxy_26() -> &'static Galaxy {
+        static GALAXY: OnceLock<Galaxy> = OnceLock::new();
+        GALAXY.get_or_init(|| galaxy_at(26))
+    }
+
+    /// The test galaxy's seed under version 27's rules, every hold at 27 in force, so that it
+    /// holds plan 08's displaced classes.
+    fn galaxy_27() -> &'static Galaxy {
+        static GALAXY: OnceLock<Galaxy> = OnceLock::new();
+        GALAXY.get_or_init(|| galaxy_at(27))
     }
 
     /// The key of a 128-pixel map of the test galaxy.
@@ -874,6 +1068,42 @@ mod tests {
                 assert_eq!(spec.height_px(), u32::from(resolution.height_px(view)));
             }
         }
+    }
+
+    /// Each banding covers every row once, in jobs of at most a band's rows, and a mirrored job's
+    /// two halves are each other's reflection in the plane, for the four served heights and odd
+    /// ones.
+    #[test]
+    fn a_banding_covers_every_row_once_in_jobs_of_a_band_at_most() {
+        for height in [64, 128, 256, 512, 1, 2, 15, 17, 33] {
+            for banding in [Banding::Consecutive, Banding::Mirrored] {
+                let jobs = banding.jobs(height);
+                let mut rows: Vec<u32> = jobs.iter().flatten().flat_map(Clone::clone).collect();
+                for job in &jobs {
+                    let size: u32 = job.iter().map(|rows| rows.end - rows.start).sum();
+                    assert!(
+                        size >= 1 && size <= u32::from(BAND_ROWS),
+                        "{banding:?}: {job:?}"
+                    );
+                    if let [top, mirror] = job.as_slice() {
+                        assert_eq!(banding, Banding::Mirrored);
+                        assert_eq!(
+                            (mirror.start, mirror.end),
+                            (height - top.end, height - top.start)
+                        );
+                    }
+                }
+                rows.sort_unstable();
+                assert_eq!(
+                    rows,
+                    (0..height).collect::<Vec<_>>(),
+                    "{banding:?} of {height}"
+                );
+            }
+        }
+        assert_eq!(Banding::Mirrored.jobs(64)[0], [0..8, 56..64]);
+        let second = &Banding::Consecutive.jobs(64)[1];
+        assert_eq!((second.len(), &second[0]), (1, &(16..32)));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1032,6 +1262,130 @@ mod tests {
         pool.shutdown().await.unwrap();
     }
 
+    #[test]
+    fn each_population_is_the_sims_selection() {
+        assert_eq!(spec_selection(MapPopulation::All), MapSelection::AllSystems);
+        assert_eq!(
+            spec_selection(MapPopulation::Young),
+            MapSelection::YoungOnly
+        );
+        assert_eq!(
+            spec_selection(MapPopulation::LayerERemnants),
+            MapSelection::LayerERemnants
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn under_every_27_hold_the_remnants_map_counts_some_of_every_systems_column() {
+        // Face-on alone: the edge-on remnants map integrates each class across a pixel, 117 s for
+        // 128 pixels on 16 workers (2026-11-01), too long for the fast suite.
+        let (pool, service) = service_of(galaxy_27, 4);
+        let remnants = get(
+            &service,
+            key(MapView::FaceOn, MapPopulation::LayerERemnants),
+        )
+        .await;
+        let all = get(&service, key(MapView::FaceOn, MapPopulation::All)).await;
+        for (&part, &whole) in remnants.log10().iter().zip(all.log10()) {
+            assert!(part.is_finite(), "every column holds some remnant");
+            assert!(part < whole, "{part} of {whole}");
+        }
+        pool.shutdown().await.unwrap();
+    }
+
+    /// FNV-1a digests of a map: of its raw log₁₀ values, bit for bit, and of its 16-bit codes.
+    fn digests(map: &RawDensityMap, view: MapView) -> [u64; 2] {
+        let quantised = quantise_map(map, view, CodeDepth::Sixteen);
+        let codes: Vec<f64> = codes(&quantised).into_iter().map(f64::from).collect();
+        [golden::f32_digest(map.log10()), golden::f64_digest(&codes)]
+    }
+
+    /// A 128-pixel map's view, population and its two [`digests`].
+    type Pinned = (MapView, MapPopulation, [u64; 2]);
+
+    /// The maps of `pinned`, computed over `galaxy`, whose digests are not theirs, each as the
+    /// line that would pin it, labelled `label`.
+    async fn moved(galaxy: fn() -> &'static Galaxy, label: &str, pinned: &[Pinned]) -> Vec<String> {
+        let (pool, service) = service_of(galaxy, 4);
+        let mut moved = Vec::new();
+        for &(view, population, expected) in pinned {
+            let map = get(&service, key(view, population)).await;
+            let actual = digests(&map, view);
+            if actual != expected {
+                let [raw, quantised] = actual;
+                moved.push(format!(
+                    "{label}: (MapView::{view:?}, MapPopulation::{population:?}, \
+                     [{raw:#018x}, {quantised:#018x}])"
+                ));
+            }
+        }
+        pool.shutdown().await.unwrap();
+        moved
+    }
+
+    /// The remnants maps under every 27 hold, face-on and edge-on, are the bits they were before
+    /// the edge-on view shared its work along a column (lane `perf-remnants-map`, 2026-11-01): the
+    /// digests are BASE's, the tree the work started from (at generator version 25, measured again
+    /// there), re-pinned at 26, whose refitted tables every version reads.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn under_every_27_hold_the_remnants_maps_are_the_pinned_ones() {
+        let moved = moved(
+            galaxy_27,
+            "27",
+            &[
+                (
+                    MapView::FaceOn,
+                    MapPopulation::LayerERemnants,
+                    [0x4462_b64f_8617_956d, 0xd06d_7221_e8fa_f5f5],
+                ),
+                (
+                    MapView::EdgeOn,
+                    MapPopulation::LayerERemnants,
+                    [0x0246_5a06_79c1_0295, 0xc6a2_f3e0_233c_f84d],
+                ),
+            ],
+        )
+        .await;
+        assert!(moved.is_empty(), "moved:\n{}", moved.join("\n"));
+    }
+
+    /// Every other map is unchanged at 24 to 27 by the remnants map's work: each population's
+    /// digests, both views, are BASE's (lane `perf-remnants-map`, 2026-11-01; at generator version
+    /// 25, measured again there), re-pinned at 26, whose refitted tables every version reads.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn the_other_maps_are_the_pinned_ones_at_24_to_27() {
+        let all_and_young = |pinned: [[u64; 2]; 4]| -> Vec<Pinned> {
+            let maps = [
+                (MapView::FaceOn, MapPopulation::All),
+                (MapView::FaceOn, MapPopulation::Young),
+                (MapView::EdgeOn, MapPopulation::All),
+                (MapView::EdgeOn, MapPopulation::Young),
+            ];
+            maps.into_iter()
+                .zip(pinned)
+                .map(|((view, population), digests)| (view, population, digests))
+                .collect()
+        };
+        // The edge-on view keeps the field's picture for every system and the young disc (lean,
+        // 2026-10-31), so only the face-on maps move at 27: the young disc's as the displaced
+        // classes moved it at 26 before they rode 27, and every system's, which 27's other holds
+        // move too, as measured (2026-11-01). From 27 a galaxy of every version holds the
+        // displaced classes, which the build reads at every version (P08.T12), so 24's to 26's
+        // maps are 27's (re-pinned at 27; below it they were the field's alone).
+        let at_27 = all_and_young([
+            [0x67ee_098e_33c7_e281, 0x93af_5b4a_58a3_a369],
+            [0x7983_a2b3_48a4_17ad, 0x0a05_9b07_aaea_486d],
+            [0xc47b_e078_1812_156d, 0xa490_3c53_7e32_c7ed],
+            [0x6100_71ec_88ba_0635, 0xb229_d6bf_983c_12dd],
+        ]);
+        let (at_24, at_25, at_26) = (at_27.clone(), at_27.clone(), at_27.clone());
+        let mut all = moved(galaxy_24, "24", &at_24).await;
+        all.extend(moved(galaxy_25, "25", &at_25).await);
+        all.extend(moved(galaxy_26, "26", &at_26).await);
+        all.extend(moved(galaxy_27, "27", &at_27).await);
+        assert!(all.is_empty(), "moved:\n{}", all.join("\n"));
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn an_edge_on_map_is_symmetric_in_z() {
         let (pool, service) = service(4);
@@ -1065,8 +1419,8 @@ mod tests {
             map.height_px(),
             map.ly_per_px()
         ));
-        golden.f64("floor_log10_per_ly2", quantised.floor_log10_per_ly2());
-        golden.f64("ceiling_log10_per_ly2", quantised.ceiling_log10_per_ly2());
+        golden.f64("floor_log10_per_ly2", quantised.floor_log10());
+        golden.f64("ceiling_log10_per_ly2", quantised.ceiling_log10());
         golden.line(&format!(
             "code_sum = {}",
             codes.iter().map(|&code| u64::from(code)).sum::<u64>()
@@ -1096,7 +1450,7 @@ mod tests {
     }
 
     /// The codes of a quantised map, read back from its bytes.
-    fn codes(map: &QuantisedMap) -> Vec<u16> {
+    fn codes(map: &QuantisedMap<PerLy2>) -> Vec<u16> {
         match map.depth() {
             CodeDepth::Eight => map.bytes().iter().copied().map(u16::from).collect(),
             CodeDepth::Sixteen => map
@@ -1124,8 +1478,8 @@ mod tests {
         // Ceiling 0, floor −5; codes 1 + round((v + 5) ÷ 5 × 254).
         let map = raw(3, &[0.0, -2.5, -1.0, -4.0, -6.0, EMPTY]);
         let quantised = quantise_map(&map, MapView::FaceOn, CodeDepth::Eight);
-        assert_same_bits(quantised.ceiling_log10_per_ly2(), 0.0);
-        assert_same_bits(quantised.floor_log10_per_ly2(), -5.0);
+        assert_same_bits(quantised.ceiling_log10(), 0.0);
+        assert_same_bits(quantised.floor_log10(), -5.0);
         // 254 × 0.5 = 127; 254 × 0.8 = 203.2; 254 × 0.2 = 50.8.
         assert_eq!(quantised.bytes(), [255, 128, 204, 52, 0, 0]);
     }
@@ -1135,8 +1489,8 @@ mod tests {
         // Ceiling 3, floor −4; codes 1 + round((v + 4) ÷ 7 × 65,534).
         let map = raw(2, &[3.0, -0.5, -4.0, 1.0, EMPTY, -3.0]);
         let quantised = quantise_map(&map, MapView::EdgeOn, CodeDepth::Sixteen);
-        assert_same_bits(quantised.ceiling_log10_per_ly2(), 3.0);
-        assert_same_bits(quantised.floor_log10_per_ly2(), -4.0);
+        assert_same_bits(quantised.ceiling_log10(), 3.0);
+        assert_same_bits(quantised.floor_log10(), -4.0);
         // 65,534 × 3.5 ÷ 7 = 32,767; × 5 ÷ 7 = 46,810; × 1 ÷ 7 = 9,362.
         assert_eq!(codes(&quantised), [65_535, 32_768, 0, 46_811, 0, 9_363]);
     }
@@ -1148,7 +1502,7 @@ mod tests {
         for view in [MapView::FaceOn, MapView::EdgeOn] {
             for depth in [CodeDepth::Eight, CodeDepth::Sixteen] {
                 let quantised = quantise_map(&map, view, depth);
-                assert_same_bits(quantised.ceiling_log10_per_ly2(), f64::from(ceiling));
+                assert_same_bits(quantised.ceiling_log10(), f64::from(ceiling));
                 let codes = codes(&quantised);
                 assert_eq!(codes[1], depth.max_code(), "{view:?} at {depth:?}");
                 assert!(codes[0] < codes[3] && codes[3] < codes[1], "{codes:?}");
@@ -1165,7 +1519,7 @@ mod tests {
             let map = raw(3, &[ceiling, floor, floor.next_up()]);
             for depth in [CodeDepth::Eight, CodeDepth::Sixteen] {
                 let quantised = quantise_map(&map, view, depth);
-                assert_same_bits(quantised.floor_log10_per_ly2(), f64::from(floor));
+                assert_same_bits(quantised.floor_log10(), f64::from(floor));
                 assert_eq!(
                     codes(&quantised),
                     [depth.max_code(), 0, 1],
@@ -1191,19 +1545,20 @@ mod tests {
         let map = raw(2, &[EMPTY; 4]);
         for (depth, len) in [(CodeDepth::Eight, 4), (CodeDepth::Sixteen, 8)] {
             let quantised = quantise_map(&map, MapView::FaceOn, depth);
-            assert_same_bits(quantised.floor_log10_per_ly2(), 0.0);
-            assert_same_bits(quantised.ceiling_log10_per_ly2(), 0.0);
+            assert_same_bits(quantised.floor_log10(), 0.0);
+            assert_same_bits(quantised.ceiling_log10(), 0.0);
             assert_eq!(quantised.bytes(), vec![0; len]);
         }
     }
 
     #[test]
     fn codes_encode_as_standard_base64_with_padding() {
-        let quantised = QuantisedMap {
+        let quantised = QuantisedMap::<PerLy2> {
             depth: CodeDepth::Eight,
-            floor_log10_per_ly2: 0.0,
-            ceiling_log10_per_ly2: 0.0,
+            floor_log10: 0.0,
+            ceiling_log10: 0.0,
             bytes: vec![0, 1, 2, 0xff],
+            unit: PhantomData,
         };
         assert_eq!(quantised.to_base64(), "AAEC/w==");
     }
@@ -1250,8 +1605,8 @@ mod tests {
             centre_ly: raw.centre_ly(),
             ly_per_px: raw.ly_per_px(),
             bits: quantised.depth().bits(),
-            floor_log10_per_ly2: quantised.floor_log10_per_ly2(),
-            ceiling_log10_per_ly2: quantised.ceiling_log10_per_ly2(),
+            floor_log10_per_ly2: quantised.floor_log10(),
+            ceiling_log10_per_ly2: quantised.ceiling_log10(),
             data_base64: quantised.to_base64(),
         };
         assert_eq!(map, expected);

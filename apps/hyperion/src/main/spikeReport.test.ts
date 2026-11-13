@@ -1,8 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import type { DescentSpikeReport } from "../preload/api";
+import { sizesReportOf } from "./fixtures/sizesReport";
 import { smallReport } from "./fixtures/spikeReport";
-import { readDescentSpikeReport, readSpikeCapture } from "./spikeReport";
+import {
+  readDescentSpikeReport,
+  readSpikeCapture,
+  readSpikeReport,
+  readSpikeReportPart,
+} from "./spikeReport";
 
 describe("the spike report's check", () => {
   it("passes a valid report through unchanged", () => {
@@ -135,6 +141,138 @@ describe("the spike report's check", () => {
     ["a guard that is not finite", (r) => ({ ...r, traceGuardS: Number.NaN })],
   ])("refuses %s", (_, broken) => {
     expect(readDescentSpikeReport(broken(smallReport()))).toBeNull();
+  });
+
+  it("passes a generated world's geometry through, and refuses a report whose geometry is malformed (plan R14, R14.T1.f)", () => {
+    const geometry = {
+      settings: {
+        clusterPath: false,
+        casterDepthCull: false,
+        casterStrideCap: 1,
+        overlayDepth: "redraw",
+        litClusters: false,
+        farCascadeRate: 1,
+        figureClusters: false,
+        hullClusters: false,
+        wireClusters: false,
+        pageBytes: 0,
+        meshTolerancePx: { camera: 0, wireframeOccluder: 0 },
+        finClusters: false,
+        strides: "off",
+        occlusion: "off",
+        shading: "forward",
+        terrainBudget: "patches",
+        standInStrides: "off",
+        hiddenMarks: "drawn",
+        edgeStandIns: "off",
+        discCells: "per-cell",
+        figureShading: "forward",
+        terrainPlanetshine: "record",
+      },
+      segments: [
+        {
+          segment: "orbit coast",
+          interiorPatches: { frames: 1, p50: 0, max: 0 },
+          edgePatches: { frames: 1, p50: 40, max: 40 },
+          finPatches: { frames: 1, p50: 0, max: 0 },
+          drawnTriangles: { frames: 1, p50: 430_080, max: 430_080 },
+          litClusterTriangles: null,
+          casterTriangles: null,
+          overlayTriangles: null,
+        },
+      ],
+    } as const;
+    const withGeometry = { ...smallReport(), geometry };
+    // A report from before plan R14's T4 lacks its consumers' levers, which read as off, the page
+    // pool's bytes (T5.b), which read as 0, the meshes' tolerance (T5.f), 0 px, the edge patches'
+    // lever (T1.g), off, the camera's strides (T3.c), off, the occlusion (T3.d), off, the lit
+    // selection's budget (T3.e), its patches, the stand-ins' strides (T3.c's stand-ins), off, and
+    // the overlay's hidden marks (R10.T16.c), drawn, the edge bakes' stand-ins (T3.c's edge
+    // stand-ins), off, plan R07's disc cells, per cell, its figure's shading, forward, and the terrain's
+    // planetshine, every source the record carries.
+    const {
+      figureClusters: _figureClusters,
+      hullClusters: _hullClusters,
+      wireClusters: _wireClusters,
+      pageBytes: _pageBytes,
+      meshTolerancePx: _meshTolerancePx,
+      finClusters: _finClusters,
+      strides: _strides,
+      occlusion: _occlusion,
+      terrainBudget: _terrainBudget,
+      standInStrides: _standInStrides,
+      hiddenMarks: _hiddenMarks,
+      edgeStandIns: _edgeStandIns,
+      discCells: _discCells,
+      figureShading: _figureShading,
+      terrainPlanetshine: _terrainPlanetshine,
+      ...beforeT4
+    } = geometry.settings;
+    expect([
+      readDescentSpikeReport(withGeometry),
+      readDescentSpikeReport({ ...withGeometry, geometry: { ...geometry, segments: [{}] } }),
+      readDescentSpikeReport({ ...withGeometry, geometry: { settings: geometry.settings } }),
+      readDescentSpikeReport({ ...withGeometry, geometry: { ...geometry, settings: beforeT4 } }),
+      readDescentSpikeReport({
+        ...withGeometry,
+        geometry: { ...geometry, settings: { ...geometry.settings, unknown: true } },
+      }),
+    ]).toEqual([withGeometry, null, null, withGeometry, null]);
+  });
+
+  it("passes a report with well-formed measured sizes through unchanged (R10.T14.b)", () => {
+    const report: DescentSpikeReport = { ...smallReport(), sizes: sizesReportOf() };
+    expect(readDescentSpikeReport(report)).toEqual(report);
+  });
+
+  it("reads a report whose measured sizes alone are malformed without them", () => {
+    const sizes = sizesReportOf();
+    expect(
+      readDescentSpikeReport({
+        ...smallReport(),
+        sizes: { ...sizes, readouts: { ...sizes.readouts, publishes: -1 } },
+      }),
+    ).toEqual(smallReport());
+    expect(readDescentSpikeReport({ ...smallReport(), sizes: null })).toEqual(smallReport());
+  });
+
+  it("gives a malformed sizes block beside the report, with its problems", () => {
+    const sizes = sizesReportOf();
+    const block = { ...sizes, readouts: { ...sizes.readouts, publishes: -1 } };
+    expect(readSpikeReport({ ...smallReport(), sizes: block })).toEqual({
+      report: smallReport(),
+      rejectedSizes: { block, problems: ["sizes.readouts.publishes is not a whole count"] },
+    });
+  });
+
+  it("gives no rejected block where the sizes are well formed or absent", () => {
+    const report: DescentSpikeReport = { ...smallReport(), sizes: sizesReportOf() };
+    expect([readSpikeReport(report), readSpikeReport(smallReport())]).toEqual([
+      { report, rejectedSizes: null },
+      { report: smallReport(), rejectedSizes: null },
+    ]);
+  });
+
+  it("still refuses a report whose other parts are malformed, whatever its sizes", () => {
+    expect(readSpikeReport({ ...smallReport(), uploadBytes: -1, sizes: null })).toBeNull();
+  });
+});
+
+describe("a report's part's check (R14's Mac measurements)", () => {
+  it("passes a part through unchanged, and refuses one with no count before it, a report or a time", () => {
+    const part = { fromFrame: 120, throughS: 61.5, report: smallReport() };
+    expect([
+      readSpikeReportPart(structuredClone(part)),
+      readSpikeReportPart({ ...part, fromFrame: -1 }),
+      readSpikeReportPart({ ...part, fromFrame: 1.5 }),
+      readSpikeReportPart({ ...part, throughS: Number.NaN }),
+      readSpikeReportPart({ ...part, report: { frames: 1 } }),
+    ]).toEqual([part, null, null, null, null]);
+  });
+
+  it("refuses a part with the sizes block, which only the whole report carries", () => {
+    const report = { ...smallReport(), sizes: sizesReportOf() };
+    expect(readSpikeReportPart({ fromFrame: 0, throughS: 1, report })).toBeNull();
   });
 });
 

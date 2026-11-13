@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { FakeTexture } from "../../../test/fakeGpu";
 import type { TextureSpec } from "../memory";
 import type { TextureHandle } from "../types";
-import { chainSteps, pipelineKey, viewDimensionBinds } from "./drawing";
+import { chainSteps, pipelineKey } from "./drawing";
 import { Intermediates } from "./intermediates";
 
 describe("a post-process chain", () => {
@@ -29,6 +29,19 @@ describe("a pipeline's key", () => {
       pipelineKey("a", "rgba16float", false),
     ]);
     expect(keys.size).toBe(4);
+  });
+
+  it("keeps an ID target's pipeline apart from a colour one's (plan R14, R14.T2.b)", () => {
+    expect(pipelineKey("a", "r32uint", true)).not.toBe(pipelineKey("a", "rgba16float", true));
+  });
+
+  it("keeps a depth-only pipeline apart from every colour one (R10.T9.b)", () => {
+    const depthOnly = pipelineKey("a", "depth-only", true);
+    expect([
+      pipelineKey("a", "rgba16float", true),
+      pipelineKey("a", "bgra8unorm", true),
+      pipelineKey("b", "depth-only", true),
+    ]).not.toContain(depthOnly);
   });
 });
 
@@ -73,16 +86,5 @@ describe("a chain's intermediates", () => {
     expect(made).toHaveLength(4);
     intermediates.release();
     expect(destroyed).toHaveLength(4);
-  });
-});
-
-describe("a texture binding's view dimension", () => {
-  it("binds a single-layer 2D texture where an array is declared, and nothing else across kinds", () => {
-    expect(viewDimensionBinds("2d", "2d")).toBe(true);
-    expect(viewDimensionBinds("2d-array", "2d-array")).toBe(true);
-    expect(viewDimensionBinds("2d-array", "2d")).toBe(true);
-    expect(viewDimensionBinds("2d", "2d-array")).toBe(false);
-    expect(viewDimensionBinds("cube", "2d")).toBe(false);
-    expect(viewDimensionBinds("3d", "2d-array")).toBe(false);
   });
 });

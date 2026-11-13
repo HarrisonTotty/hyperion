@@ -30,29 +30,47 @@
 //! the pair-light tables ([`pair_light`]), sampled through the engine, whether a star of the pair
 //! may depart from its own model or a product live, and how bright it can be.
 
+pub(crate) mod awd_donors;
 pub(crate) mod carve;
+pub(crate) mod class_merger;
 mod classify;
+pub(crate) mod co_chandrasekhar;
+pub(crate) mod collapses;
 mod common_envelope;
 mod detached;
+pub(crate) mod dwarf_limit;
+pub mod events;
 mod evolve;
+pub(crate) mod heavy_donor;
+pub mod ia;
 mod light;
+pub mod light_curves;
 mod marks;
+pub(crate) mod merged_capture;
+pub(crate) mod ns_accretion;
 pub mod pair_light;
 mod params;
+pub(crate) mod pinned_white_dwarfs;
 pub mod reach;
 mod recycling;
 mod rlof;
 pub(crate) use rlof::{CODE_Q, GAP_Q};
+pub mod sampler;
+pub mod scan;
 mod star;
 mod supernova;
 mod timeline;
+pub(crate) mod wind_accretion;
+pub mod wind_reach;
+pub(crate) mod xrb_class;
 
-#[cfg(test)]
-mod testing;
+#[cfg(any(test, feature = "testing"))]
+pub mod testing;
 #[cfg(test)]
 mod tests;
 
 pub use crate::stellar::multiplicity::{DRAWS_PER_ATTEMPT, MAX_REDRAWS, RedrawAttempt};
+pub(crate) use classify::is_be_donor;
 pub use classify::{
     AGE_OF_UNIVERSE, BEX_MAX_PERIOD, BinaryClass, CarvedClass, ClassContext, CvKind,
     HMXB_MIN_DONOR_MASS, HOT_SUBDWARF_MASSES, HmxbKind, MAGNETIC_CV_SHARE, MIN_DETONATABLE_MASS,
@@ -60,13 +78,19 @@ pub use classify::{
     carved_class, classify,
 };
 #[cfg(test)]
+pub(crate) use classify::{nova_recurrence_period, nova_recurrence_under};
+#[cfg(test)]
+pub(crate) use classify::{wind_fed_luminosity, xrb_line};
+#[cfg(test)]
 pub(crate) use evolve::lobe_reached;
 pub use evolve::{MAX_SEGMENTS, can_interact, evolve};
 pub(crate) use evolve::{can_interact_with_tracks, evolve_with_tracks};
+pub(crate) use light::pair_keeps_own_models;
 pub use light::{PairLight, RUN_HORIZON_PAST_WINDOW_YEARS, pair_light_bound};
 pub use marks::{BinaryMarks, BuildBinaryMarksError, MarkedMerger, MarkedPhase};
 pub use params::{BinaryParams, WindSpeedFactor};
 pub use reach::{ReachBound, largest_radius_bound};
+pub(crate) use recycling::pulsar_at;
 pub use recycling::{MILLISECOND_PULSAR_MAX_PERIOD, PulsarAt, is_millisecond_pulsar};
 pub use timeline::{
     BinaryInput, BinaryState, BinaryTimeline, BuildBinaryInputError, Component, IaPoolChannel,
@@ -74,7 +98,11 @@ pub use timeline::{
 };
 
 /// What becomes of a merged binary in a cluster (plan 11, design note 14): the fourth of the kick
-/// law's defaults that the brainstorm's "Open questions" lists, which P15.T5.c reviews.
+/// law's defaults that the brainstorm's "Open questions" lists, which P15.T5.c reviewed.
+///
+/// Cluster retention ([`retention`](crate::galaxy::features::interior::retention)) reads only
+/// [`StaysJudgedOnPairVelocity`](Self::StaysJudgedOnPairVelocity), for every low-mode neutron
+/// star; the other branches have no reader yet (plan 11).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum MergedBinaryFate {
     /// The merged pair stays a member, judged on the pair's velocity.
@@ -86,6 +114,16 @@ pub enum MergedBinaryFate {
 }
 
 /// The generator's default for a merged binary in a cluster (plan 11, design note 14): it stays a
-/// member and is judged on the pair's velocity, until P15.T5.c's review.
+/// member and is judged on the pair's velocity.
+///
+/// P15.T5.c's review (decision-p15-revalidation Q4) found cluster retention as built to be this
+/// reading, applied to every low-mode neutron star, merged or not, on the pair's systemic speed
+/// (a Maxwellian of
+/// [`PAIR_SYSTEMIC_SIGMA`](crate::galaxy::features::interior::retention::PAIR_SYSTEMIC_SIGMA),
+/// 12 km/s), and that it passes all four of ruling 137.3's bands at the fixture's low-mode share
+/// of 0.2675 (31.4%, 28.6%, 16.2% and 0.43% against 26–34%, 24–34%, 10–22% and under 1%). So no
+/// alternative was measured. A `const` assertion in
+/// [`retention`](crate::galaxy::features::interior::retention) holds the default to this branch:
+/// changing it fails to build until a reader of the other branches exists.
 pub const CLUSTER_MERGED_BINARY_FATE: MergedBinaryFate =
     MergedBinaryFate::StaysJudgedOnPairVelocity;

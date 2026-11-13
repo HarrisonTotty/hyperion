@@ -4,6 +4,7 @@ import type { SceneArrivalDto } from "./SceneArrivalDto";
 import type { SceneBodyDto } from "./SceneBodyDto";
 import type { SceneClockDto } from "./SceneClockDto";
 import type { SceneCraftDto } from "./SceneCraftDto";
+import type { SurfaceRevisionDto } from "./SurfaceRevisionDto";
 
 /**
  * What changed in a scene since the last push. Every notification carries the clock; the other
@@ -36,4 +37,11 @@ bodies: Array<SceneBodyDto>,
 /**
  * The whole craft list, when it changed.
  */
-craft?: Array<SceneCraftDto>, };
+craft?: Array<SceneCraftDto>, 
+/**
+ * The bodies whose surveyed coverage grew since the last notification, each once with its
+ * latest revision (rendering plan R09, R09.T19.b): a client keeping a body's field asks
+ * `surface_field` with the revision it holds for the new cells. Omitted when none grew. A
+ * body of any system may be named, not only the scene's.
+ */
+surface_revisions?: Array<SurfaceRevisionDto>, };

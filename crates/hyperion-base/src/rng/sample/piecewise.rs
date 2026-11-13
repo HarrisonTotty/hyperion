@@ -32,8 +32,14 @@ fn pick_segment(thresholds: &Thresholds, stream: &mut Stream) -> usize {
 }
 
 /// The running sums `[0, m₀, m₀ + m₁, …]` of segment integrals, in index order.
+///
+/// Reserved whole first: a list grown by pushes reallocates, and glibc's `realloc` serialises
+/// threads, so that a density built per record (plan 08's progenitor masses) cost 0.4 µs on one
+/// thread and 87 µs a call on each of 31 (pod, glibc 2.41, 2026-11-05).
 fn running_sums(masses: impl IntoIterator<Item = f64>) -> Vec<f64> {
-    let mut sums = vec![0.0];
+    let masses = masses.into_iter();
+    let mut sums = Vec::with_capacity(masses.size_hint().0 + 1);
+    sums.push(0.0);
     let mut sum = 0.0;
     for mass in masses {
         sum += mass;

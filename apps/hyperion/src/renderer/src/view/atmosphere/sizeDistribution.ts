@@ -1,0 +1,1038 @@
+/**
+ * The optics of an aerosol mode of spheres over its size distribution (plan R08, R08.T5.b; Design
+ * note 6): T5.a's Mie, summed by Gauss–Legendre quadrature in ln r, with the mode's scattering
+ * matrix on the phase tables' angles.
+ *
+ * @remarks
+ * A mode's distribution is Hansen and Travis 1974's standard gamma distribution or a log-normal,
+ * each given by its effective radius and effective variance (J. E. Hansen and L. D. Travis, "Light
+ * scattering in planetary atmospheres", Space Sci. Rev. 16, 527–610, eqs. (2.53)–(2.61)). The
+ * quadrature runs in y = ln r over the interval where every weight the optics need lies above
+ * {@link SIZE_WEIGHT_FLOOR} of its own peak: the geometric cross-section's weight r²n(r) at the
+ * small end, which large particles' extinction follows, and the Rayleigh scattering weight r⁶n(r)
+ * at the large end, which small particles' scattering follows. For a log-normal that is ±5.3σ
+ * about each weight's centre. The rule is composite: Gauss–Legendre of order
+ * {@link SIZE_PANEL_ORDER} on panels no wider than {@link SIZE_PANEL_SIZE_PARAMETER} in size
+ * parameter and {@link SIZE_PANEL_LN_RADIUS} in ln r, every panel halved, so the node count doubles,
+ * until two successive refinements each change the mean scattering and extinction efficiencies by
+ * under {@link SIZE_CONVERGENCE} of themselves and the asymmetry by under {@link SIZE_CONVERGENCE}
+ * (R08.T5.f). A lossless sphere's narrowest resonances, of high partial-wave order, are narrower
+ * than any panel the cap allows (P. Chýlek, J. T. Kiehl and M. K. W. Ko, "Narrow resonance
+ * structure in the Mie scattering characteristics", Appl. Opt. 17, 3019–3021, 1978; M. I.
+ * Mishchenko, L. D. Travis and A. A. Lacis 2002, "Scattering, Absorption, and Emission of Light by
+ * Small Particles", Cambridge, §9.1, pp. 241–245), and in this rule they make one change fall
+ * under the tolerance by chance (decision-r08-t6d-findings.md §4). Past {@link SIZE_NODES_MAX} the
+ * finest level within it is taken, marked unconverged ({@link SizeConvergence}).
+ *
+ * Past x = {@link GEOMETRIC_OPTICS_SIZE_PARAMETER} the spheres take the large-particle limit
+ * (`geometricOptics.ts`, R08.T16.a): there the panels are bounded in ln r alone, since the limit has
+ * no ripple, the first ends at that size, and its spheres' diffraction, past
+ * `DIFFRACTION_DELTA_SIZE_PARAMETER`, is the matrix's forward peak. A distribution that lies wholly
+ * below it is summed as before, node for node.
+ *
+ * The matrix is block-diagonal (a₁, a₂, a₃, a₄, b₁, b₂; J. W. Hovenier, C. van der Mee and H.
+ * Domke 2004, "Transfer of polarized light in planetary atmospheres", Kluwer), normalised so that
+ * ∫ a₁ dΩ ÷ 4π = 1. From T5.a's amplitudes (S₁ perpendicular, S₂ parallel to the scattering plane,
+ * time factor e^(+iωt) and index n − ik, Wiscombe's and Hansen and Travis's convention), with
+ * Stokes Q = I_∥ − I_⊥ and V as Hansen and Travis's (1.4) defines it:
+ *
+ * - a₁ = a₂ ∝ ½(|S₁|² + |S₂|²);
+ * - b₁ ∝ ½(|S₂|² − |S₁|²), so that −b₁ ÷ a₁ is the degree of linear polarisation, positive when the
+ *   light is polarised perpendicular to the scattering plane;
+ * - a₃ = a₄ ∝ Re(S₁S₂*);
+ * - b₂ ∝ −Im(S₁S₂*) = Im(S₂S₁*).
+ *
+ * These are W. A. de Rooij and C. C. A. H. van der Stap 1984's (13)–(16) (Astron. Astrophys. 131,
+ * 237–248), whose S₁ acts on the perpendicular field with m = n − ik, as T5.a's does; Hansen and
+ * Travis's (2.33) and their Fig. 16 agree (their printed (2.36) and (2.41) swap S₁ and S₂ in the
+ * 1–2 block). A sphere of x = 10⁻³ gives their Rayleigh matrix (2.15) with δ = 0. R08.T12.c's
+ * sphere cases (Kokhanovsky et al. 2010, IPRT) check b₂ against published matrices. The medium
+ * around the particle is taken as index 1, a relative error of 3 × 10⁻⁴ in air at the surface and
+ * less above.
+ */
+
+import { substanceName } from "../../lib/substances";
+import { gaussLegendre } from "../lighting/quadrature";
+import {
+  type MaterialForm,
+  type MaterialProvenance,
+  type ResolvedMaterial,
+  type ShapeClass,
+  resolveMaterial,
+  indexAt,
+} from "./materials/materials";
+import {
+  addGeometricSphere,
+  GEOMETRIC_OPTICS_SIZE_PARAMETER,
+  type GeometricLimit,
+  geometricLimit,
+  geometricMatrix,
+  type GeometricMatrixSums,
+  geometricMatrixSums,
+  geometricSphere,
+} from "./geometricOptics";
+import {
+  type ComplexIndex,
+  MIE_MIN_SIZE_PARAMETER,
+  mieScratch,
+  mieSphere,
+  type MieResult,
+} from "./mie";
+import { cos, exp, log, log1p, pow } from "../../lib/pinnedMath";
+
+/**
+ * A size distribution of spheres, by effective radius r_eff = ⟨r³⟩ ÷ ⟨r²⟩ and effective variance
+ * v_eff = ⟨(r − r_eff)² r²⟩ ÷ (r_eff² ⟨r²⟩) (Hansen and Travis 1974, (2.53) and (2.54)).
+ *
+ * - `gamma`: the standard gamma distribution n(r) ∝ r^((1 − 3b) ÷ b) e^(−r ÷ ab), a = r_eff and
+ *   b = v_eff (their (2.56)); 0 < v_eff < 0.5, the range in which it can be normalised.
+ * - `logNormal`: n(r) ∝ r⁻¹ exp(−(ln r − ln r_g)² ÷ 2σ²), with σ² = ln(1 + v_eff) and
+ *   r_g = r_eff (1 + v_eff)^(−5/2) (their (2.60) on p. 557, with the relations of their Fig. 14's footnote, p. 558); v_eff > 0.
+ */
+export type SizeDistribution =
+  | {
+      readonly kind: "gamma";
+      readonly effectiveRadiusUm: number;
+      readonly effectiveVariance: number;
+    }
+  | {
+      readonly kind: "logNormal";
+      readonly effectiveRadiusUm: number;
+      readonly effectiveVariance: number;
+    };
+
+/**
+ * The fraction of its own peak at which a quadrature weight is cut, the ends of the ln r interval
+ * (±5.26σ for a Gaussian weight).
+ */
+export const SIZE_WEIGHT_FLOOR = 1e-6;
+
+/** The Gauss–Legendre order of each panel of the composite rule. */
+export const SIZE_PANEL_ORDER = 8;
+
+/**
+ * The widest a panel may be in size parameter x = 2πr ÷ λ at the coarsest level.
+ *
+ * @remarks
+ * Mie's ripple repeats every Δx ≈ arctan(√(m² − 1)) ÷ √(m² − 1) (P. Chýlek, "Partial-wave
+ * resonances and the ripple structure in the Mie normalized extinction cross section", J. Opt.
+ * Soc. Am. 66, 285–287, 1976), 0.82 at m = 1.33 and 0.66 at m = 1.8, at every x. A global rule in
+ * ln r spaces its nodes as x and so starves the large particles' ripple; panels of fixed width in x
+ * give the ripple the same number of nodes everywhere.
+ */
+export const SIZE_PANEL_SIZE_PARAMETER = 2;
+
+/** The widest a panel may be in ln r at the coarsest level, so the distribution's own shape is resolved. */
+export const SIZE_PANEL_LN_RADIUS = 0.5;
+
+/**
+ * The node count past which the quadrature stops, unconverged: 2²⁰ (R08.T5.f; ruled 2026-10-13
+ * over decision-r08-t6d-findings.md §4's 2¹⁸).
+ *
+ * @remarks
+ * Set by `aerosol.test.ts`'s lossless TiO₂ stand-in (n 2.65, k 0, gamma r_eff 0.5 µm, v_eff 0.1),
+ * whose level-to-level changes stay erratic near 10⁻⁴ to about 140,000 nodes. At every 0.125 nm
+ * from 430 to 437 nm and at the fitted channels and bake bins (74 wavelengths), two successive
+ * changes fall under {@link SIZE_CONVERGENCE} by 566,904 nodes at the worst, on the last level the
+ * cap admits there; at 2¹⁸ nine had not, and at 2¹⁹ three. A wavelength between those that needs
+ * one level more is marked unconverged. That worst case costs about 9 s for the efficiencies alone
+ * (Node 26.10, Ryzen 7 3700X, load 15), and a matrix at 256 angles would add about 33 s; most modes
+ * stop at a few hundred to some tens of thousands of nodes (plan R08's Risks, "Deviations in T5.f,
+ * as built").
+ */
+export const SIZE_NODES_MAX = 1_048_576;
+
+/**
+ * The finest refinement {@link sizeQuadrature} gives, and the last {@link sphereModeOptics} tries:
+ * its panels 2⁻²⁰ of the coarsest's. The default {@link SIZE_NODES_MAX} usually stops refinement
+ * first; this bound holds the loop finite for a very narrow distribution, whose few panels stay
+ * few for many levels, and under a larger cap.
+ */
+export const SIZE_LEVEL_MAX = 20;
+
+/**
+ * The convergence tolerance on the mean efficiencies (relative) and the asymmetry (absolute), which
+ * two successive refinements must each meet.
+ */
+export const SIZE_CONVERGENCE = 1e-4;
+
+/** The number of phase-table angles, on u = √(θ ÷ π) (Design note 6). */
+export const PHASE_TABLE_SIZE = 256;
+
+/** The phase tables' abscissae u = √(θ ÷ π), from 0 (forward) to 1 (backward), evenly spaced. */
+export const PHASE_TABLE_U: Float64Array = Float64Array.from(
+  { length: PHASE_TABLE_SIZE },
+  (_, i) => i / (PHASE_TABLE_SIZE - 1),
+);
+
+/** The cosines of the phase tables' scattering angles, cos(π u²), from 1 to −1; shared, so never written (each matrix holds its own copy). */
+export const PHASE_TABLE_MU: Float64Array = PHASE_TABLE_U.map((u) => cos(Math.PI * u * u));
+
+/**
+ * A scattering matrix's six elements at a set of scattering-angle cosines, block-diagonal and
+ * normalised so that ∫ a₁ dΩ ÷ 4π = 1 − {@link ScatteringMatrix.forwardPeak} (the module's remarks
+ * give each element's form).
+ */
+export interface ScatteringMatrix {
+  /** The cosines the elements are given at. */
+  readonly mu: Float64Array;
+  /**
+   * The share of the scattering in a forward peak narrower than the source's angles resolve, held
+   * as a delta at θ = 0 with the identity's matrix (a₂ = a₃ = a₄ = a₁, b₁ = b₂ = 0, as diffraction
+   * scatters): 0 for Mie and the MMF, which are sampled at the cosines asked; a phase file's
+   * unresolved diffraction peak for the tabulated models (`nonSpherical.ts`).
+   */
+  readonly forwardPeak: number;
+  readonly a1: Float64Array;
+  readonly a2: Float64Array;
+  readonly a3: Float64Array;
+  readonly a4: Float64Array;
+  readonly b1: Float64Array;
+  readonly b2: Float64Array;
+}
+
+/** The ends of a size distribution's quadrature interval, µm. */
+export interface SizeRange {
+  readonly fromUm: number;
+  readonly toUm: number;
+}
+
+/** A Gauss–Legendre rule in ln r over a distribution's range. */
+export interface SizeQuadrature {
+  /** The nodes' radii, µm. */
+  readonly radiiUm: Float64Array;
+  /** Each node's share of the distribution's geometric cross-section, r² n(r) dr, summing to 1. */
+  readonly areaWeights: Float64Array;
+  /**
+   * The first node past x = {@link GEOMETRIC_OPTICS_SIZE_PARAMETER}, which with every node after
+   * it takes the large-particle limit; the node count where none does.
+   */
+  readonly limitFrom: number;
+}
+
+/** The bulk optics of a mode at one wavelength, per particle and per unit geometric cross-section. */
+export interface ModeBulkOptics {
+  readonly wavelengthNm: number;
+  /** The area-weighted mean extinction efficiency, ⟨σ_ext⟩ ÷ ⟨πr²⟩. */
+  readonly qExt: number;
+  /** The area-weighted mean scattering efficiency, ⟨σ_sca⟩ ÷ ⟨πr²⟩. */
+  readonly qSca: number;
+  /** The single-scattering albedo, ⟨σ_sca⟩ ÷ ⟨σ_ext⟩. */
+  readonly singleScatteringAlbedo: number;
+  /** The asymmetry parameter, the mean cosine of the scattering angle. */
+  readonly asymmetry: number;
+  /** The mean geometric cross-section per particle, ⟨πr²⟩, m². */
+  readonly geometricCrossSectionM2: number;
+  /** The mean extinction cross-section per particle, m². */
+  readonly extinctionCrossSectionM2: number;
+  /** The mean scattering cross-section per particle, m². */
+  readonly scatteringCrossSectionM2: number;
+  /** The mean volume per particle, (4/3)π⟨r³⟩, m³. */
+  readonly volumeM3: number;
+}
+
+/**
+ * How a mode's size quadrature ended (R08.T5.f): at the first level whose change and its
+ * predecessor's were both under {@link SIZE_CONVERGENCE}, or, past the cap
+ * ({@link sphereModeOptics}' `nodesMax`, {@link SIZE_NODES_MAX} by default), at the finest level
+ * within it.
+ */
+export interface SizeConvergence {
+  /** Whether two successive refinements agreed before the cap; false marks the optics approximate. */
+  readonly converged: boolean;
+  /** The node count of the level the optics are from. */
+  readonly nodes: number;
+  /**
+   * That level's change from the level before: the largest of the relative changes in the mean
+   * extinction and scattering efficiencies and the absolute change in the asymmetry; infinite
+   * where no finer level than the coarsest fitted under the cap.
+   */
+  readonly lastChange: number;
+}
+
+/** The optics of a mode of spheres at one wavelength, as {@link sphereModeOptics} gives them. */
+export interface SphereModeOptics extends ModeBulkOptics {
+  /** The mode's matrix, summed once at the level taken (not itself a convergence test). */
+  readonly matrix: ScatteringMatrix;
+  /** How the quadrature ended, and its node count. */
+  readonly sizeConvergence: SizeConvergence;
+}
+
+/** A mode of aerosol particles by its registry material (decision-composition §1.9). */
+export interface AerosolMode {
+  /** The sim's material key (P14.T49.b), never narrowed: an unknown key takes the generic stand-in. */
+  readonly material: string;
+  /** The phase or variant the mode is in, where its material has several files. */
+  readonly form?: MaterialForm;
+  /** The particles' shape class, where the mode states it; otherwise its material file's. */
+  readonly shape?: ShapeClass;
+  readonly sizes: SizeDistribution;
+}
+
+/**
+ * What a mode's phase function rests on (R08.T5.c; science-r08-nonspherical.md):
+ *
+ * - `model`: a published model inside its range: Mie for spheres, the MMF for an aggregate inside
+ *   its phase-shift gate with |m − 1| < 2, a TAMUdust2020 kernel for a non-spherical mineral, Yang
+ *   et al. 2013 for water ice;
+ * - `analogue`: a table stands in past its validated range: the k-floor rule exceeded, a mineral
+ *   whose n lies past the longwave kernel's edge drawn on the edge's table (R08.T5.d), another ice
+ *   on water ice's table, water ice's crystals below the table's smallest size, or an aggregate
+ *   whose own term 2kR_c|m_MG − 1| is below 1 past Tazaki and Tanaka's (9) or their (7),
+ *   |m − 1| ≥ 2 (the MMF table kept, science-r08-mmf.md);
+ * - `fallback`: the Henyey–Greenstein phase from Mie's or the MMF's g, or, for a small grain of a
+ *   mineral no kernel covers (or one past the kernel-edge rule), the sphere's own Mie table.
+ *
+ * An `analogue` or `fallback` mode with less than `CLOUD_DECK_SPLIT_OPTICAL_DEPTH` above it at
+ * 550 nm gives `atmosphereApproximate` (Design note 12; `aerosol.ts`).
+ */
+export type PhaseBasis = "model" | "analogue" | "fallback";
+
+/**
+ * The model a mode's phase function and matrix come from: Mie's for spheres, the MMF's for
+ * aggregates (`aggregate.ts`), TAMUdust2020's irregular hexahedra and Yang et al. 2013's roughened
+ * column aggregate (`nonSpherical.ts`), or Henyey–Greenstein's from g, which has no matrix.
+ */
+export type PhaseModel = "mie" | "mmf" | "tamudust2020" | "yang2013" | "henyeyGreenstein";
+
+/**
+ * A mode's optics at one wavelength, the shape class they hold for, where its index came from, and
+ * what its phase function rests on.
+ *
+ * @remarks
+ * From {@link modeOptics}, every field is Mie's. For a `sphere` that is the model; for any other
+ * shape only the cross-sections are (Design note 6), so ω and g are the spheres' values, the phase
+ * is Henyey–Greenstein's from that g (`phaseBasis` `fallback`), and `matrix` is undefined, a total
+ * depolariser, since a sphere's matrix is not the particle's (decision-r08-vector.md). R08.T5.c's
+ * `nonSphericalModeOptics` and `aggregateOptics` give the published models' optics in the same type.
+ */
+export interface ModeOptics extends ModeBulkOptics {
+  readonly matrix: ScatteringMatrix | undefined;
+  readonly shape: ShapeClass;
+  readonly provenance: MaterialProvenance;
+  readonly phaseBasis: PhaseBasis;
+  readonly phaseModel: PhaseModel;
+  /** Why an `analogue` or `fallback` is one, for the label's reasons; undefined for a `model`. */
+  readonly phaseNote: string | undefined;
+  /**
+   * How the Mie size quadrature that any of these optics rest on ended (R08.T5.f): undefined where
+   * none do (a phase file's own sizes, the MMF). An unconverged one is a reason R08.T10.a's
+   * `atmosphereApproximate` takes.
+   */
+  readonly sizeConvergence: SizeConvergence | undefined;
+}
+
+/** A distribution's weights in y = ln(r ÷ 1 µm), for the quadrature and its interval. */
+interface LogWeight {
+  /** ln(r n(r)) up to a constant, at y = ln(r ÷ 1 µm): the number weight per unit y. */
+  readonly logNumberPerY: (y: number) => number;
+  /**
+   * One end, in y, of where the weight rᵖ n(r) dr lies above {@link SIZE_WEIGHT_FLOOR} of its peak:
+   * below the peak for side −1, above it for +1.
+   */
+  readonly cut: (p: number, side: -1 | 1) => number;
+  /** ⟨r²⟩ over the whole distribution, µm². */
+  readonly meanSquareRadiusUm2: number;
+}
+
+const LOG_FLOOR = -log(SIZE_WEIGHT_FLOOR);
+
+/** No scattering angles: Mie then sums the efficiencies alone. */
+const NO_ANGLES = new Float64Array(0);
+
+/** Why a distribution's law cannot take its effective radius or variance, or `null` where it can. */
+function sizesRefusal(sizes: SizeDistribution): string | null {
+  const { effectiveRadiusUm: a, effectiveVariance: b } = sizes;
+  if (!(a > 0 && Number.isFinite(a))) {
+    return `effective radius ${a} µm must be finite and > 0`;
+  }
+  let refusal: string | null;
+  switch (sizes.kind) {
+    case "gamma":
+      refusal =
+        b > 0 && b < 0.5
+          ? null
+          : `a gamma distribution's effective variance ${b} must lie in (0, 0.5)`;
+      break;
+    case "logNormal":
+      refusal =
+        b > 0 && Number.isFinite(b)
+          ? null
+          : `a log-normal's effective variance ${b} must be finite and > 0`;
+      break;
+  }
+  return refusal;
+}
+
+function checkSizes(sizes: SizeDistribution): void {
+  const refusal = sizesRefusal(sizes);
+  if (refusal !== null) {
+    throw new RangeError(refusal);
+  }
+}
+
+/**
+ * Whether a distribution's law takes its effective radius and variance: a radius finite and above
+ * 0, and a gamma's variance in (0, 0.5) or a log-normal's finite and above 0, where
+ * {@link sizeRange} and every optics over the distribution throw otherwise. The wire takes any
+ * positive variance (`lib/system/bodiesWire.ts`), so a gamma's at 0.5 or more reaches here legally
+ * (R08.T10.b).
+ */
+export function sizesInRange(sizes: SizeDistribution): boolean {
+  return sizesRefusal(sizes) === null;
+}
+
+/**
+ * Why {@link sphereModeOptics} refuses a distribution at a wavelength, as its `RangeError` says it,
+ * or `null` where it takes it: its law refusing its sizes, or the whole of it below
+ * {@link MIE_MIN_SIZE_PARAMETER}. No size is too large: past
+ * {@link GEOMETRIC_OPTICS_SIZE_PARAMETER} the large-particle limit takes it (R08.T16.a).
+ *
+ * @param wavelengthNm - The vacuum wavelength, nm, finite and > 0.
+ */
+function sphereRangeRefusal(sizes: SizeDistribution, wavelengthNm: number): string | null {
+  const bad = sizesRefusal(sizes);
+  if (bad !== null) {
+    return bad;
+  }
+  const wavelengthUm = wavelengthNm / 1000;
+  const full = sizeRange(sizes);
+  const smallestUm = (MIE_MIN_SIZE_PARAMETER * wavelengthUm) / (2 * Math.PI);
+  if (full.toUm <= smallestUm) {
+    return `the distribution lies below Mie's x = ${MIE_MIN_SIZE_PARAMETER} at ${wavelengthNm} nm`;
+  }
+  return null;
+}
+
+/**
+ * Whether {@link sphereModeOptics} takes a distribution at a wavelength rather than throwing for its
+ * sizes (plan R08, R08.T10.b): the bound its refusal takes, so that a screen on it and the throw
+ * cannot drift. Since R08.T16.a only a law that refuses its sizes, or a distribution wholly below
+ * Mie's smallest size, is out of range.
+ *
+ * @param wavelengthNm - The vacuum wavelength, nm, finite and > 0.
+ */
+export function sphereModeInRange(sizes: SizeDistribution, wavelengthNm: number): boolean {
+  return sphereRangeRefusal(sizes, wavelengthNm) === null;
+}
+
+/**
+ * The standard gamma distribution's weights: n(r) ∝ r^(α − 1) e^(−r/θ) with α = (1 − 2b) ÷ b and
+ * θ = ab, so rᵖ r n(r) in y is e^((α + p)y − e^y/θ), whose peak is at e^y = (α + p)θ; and
+ * ⟨r²⟩ = a²(1 − b)(1 − 2b).
+ */
+function gammaWeight(a: number, b: number): LogWeight {
+  const alpha = (1 - 2 * b) / b;
+  const theta = a * b;
+  return {
+    logNumberPerY: (y) => alpha * y - exp(y) / theta,
+    cut: (p, side) => gammaCut(alpha + p, theta, side),
+    meanSquareRadiusUm2: a * a * (1 - b) * (1 - 2 * b),
+  };
+}
+
+/**
+ * The log-normal's weights: r n(r) in y is a Gaussian of mean ln r_g and variance σ², so rᵖ r n(r)
+ * is one of mean ln r_g + pσ²; and ⟨r²⟩ = r_g² e^(2σ²) = r_eff² (1 + v_eff)⁻³.
+ */
+function logNormalWeight(a: number, b: number): LogWeight {
+  const sigma2 = log1p(b);
+  const sigma = Math.sqrt(sigma2);
+  const mu = log(a) - 2.5 * sigma2;
+  return {
+    logNumberPerY: (y) => -((y - mu) ** 2) / (2 * sigma2),
+    cut: (p, side) => mu + p * sigma2 + side * sigma * Math.sqrt(2 * LOG_FLOOR),
+    meanSquareRadiusUm2: (a * a) / pow(1 + b, 3),
+  };
+}
+
+function logWeight(sizes: SizeDistribution): LogWeight {
+  checkSizes(sizes);
+  let weight: LogWeight;
+  switch (sizes.kind) {
+    case "gamma":
+      weight = gammaWeight(sizes.effectiveRadiusUm, sizes.effectiveVariance);
+      break;
+    case "logNormal":
+      weight = logNormalWeight(sizes.effectiveRadiusUm, sizes.effectiveVariance);
+      break;
+  }
+  return weight;
+}
+
+/**
+ * The y = ln r where e^(cy − e^y/θ) falls to {@link SIZE_WEIGHT_FLOOR} of its peak on one side: with
+ * z = e^y ÷ θ, z − c − c ln(z ÷ c) = ln(1 ÷ floor), solved by bisection in ln z.
+ */
+function gammaCut(c: number, theta: number, side: -1 | 1): number {
+  const peak = log(c);
+  const excess = (lnZ: number): number => exp(lnZ) - c - c * (lnZ - peak) - LOG_FLOOR;
+  let inner = peak;
+  let outer = peak + side;
+  while (excess(outer) < 0) {
+    outer += side * (Math.abs(outer - peak) + 1);
+  }
+  for (let i = 0; i < 200; i += 1) {
+    const middle = 0.5 * (inner + outer);
+    if (excess(middle) < 0) {
+      inner = middle;
+    } else {
+      outer = middle;
+    }
+  }
+  return 0.5 * (inner + outer) + log(theta);
+}
+
+/**
+ * The interval a distribution's quadrature covers: from where its geometric-cross-section weight
+ * r² n(r) falls to {@link SIZE_WEIGHT_FLOOR} of its peak below, to where its Rayleigh scattering
+ * weight r⁶ n(r) does above.
+ *
+ * @throws RangeError for an effective radius or variance outside the distribution's range.
+ */
+export function sizeRange(sizes: SizeDistribution): SizeRange {
+  const weight = logWeight(sizes);
+  return { fromUm: exp(weight.cut(2, -1)), toUm: exp(weight.cut(6, 1)) };
+}
+
+/**
+ * A distribution's number density per unit ln r, ln(r n(r)) up to a constant, as a function of
+ * ln(r ÷ 1 µm): R08.T5.c's tables integrate a mode over their own size nodes with it.
+ *
+ * @throws RangeError for an effective radius or variance outside the distribution's range.
+ */
+export function logNumberPerLnRadius(sizes: SizeDistribution): (lnRadiusUm: number) => number {
+  return logWeight(sizes).logNumberPerY;
+}
+
+const PANEL_RULE = gaussLegendre(SIZE_PANEL_ORDER);
+
+/**
+ * The panels' ends in y = ln r at one level: each panel spans at most
+ * {@link SIZE_PANEL_SIZE_PARAMETER} ÷ 2^level in size parameter and
+ * {@link SIZE_PANEL_LN_RADIUS} ÷ 2^level in ln r.
+ */
+function panelEnds(low: number, high: number, wavenumberPerUm: number, level: number): number[] {
+  const dx = SIZE_PANEL_SIZE_PARAMETER / pow(2, level);
+  const dy = SIZE_PANEL_LN_RADIUS / pow(2, level);
+  const ends = [low];
+  let y = low;
+  while (y < high) {
+    const x = wavenumberPerUm * exp(y);
+    y = Math.min(high, y + Math.min(dy, log1p(dx / x)));
+    ends.push(y);
+  }
+  return ends;
+}
+
+/** A range's panels' ends at one level, and the first node of the large-particle limit's. */
+interface RangePanels {
+  readonly ends: ReadonlyArray<number>;
+  readonly limitFrom: number;
+}
+
+/**
+ * A range's panels at one level: {@link panelEnds}'s below x = `limitSizeParameter`, the
+ * large-particle limit's past it, each at most {@link SIZE_PANEL_LN_RADIUS} ÷ 2^level in ln r, the
+ * first starting at that size. A range wholly below it keeps {@link panelEnds}'s alone.
+ */
+function rangePanels(
+  range: SizeRange,
+  wavenumberPerUm: number,
+  level: number,
+  limitSizeParameter: number,
+): RangePanels {
+  const low = log(range.fromUm);
+  const high = log(range.toUm);
+  const limitY = log(limitSizeParameter / wavenumberPerUm);
+  if (high <= limitY) {
+    const ends = panelEnds(low, high, wavenumberPerUm, level);
+    return { ends, limitFrom: (ends.length - 1) * SIZE_PANEL_ORDER };
+  }
+  const ends = low < limitY ? panelEnds(low, limitY, wavenumberPerUm, level) : [low];
+  const limitFrom = (ends.length - 1) * SIZE_PANEL_ORDER;
+  const dy = SIZE_PANEL_LN_RADIUS / pow(2, level);
+  let y = ends[ends.length - 1] ?? low;
+  while (y < high) {
+    y = Math.min(high, y + dy);
+    ends.push(y);
+  }
+  return { ends, limitFrom };
+}
+
+/** A level's node count from its panels alone, so that a level past a cap is never built. */
+function levelNodes(
+  range: SizeRange,
+  wavenumberPerUm: number,
+  level: number,
+  limitSizeParameter: number,
+): number {
+  const { ends } = rangePanels(range, wavenumberPerUm, level, limitSizeParameter);
+  return (ends.length - 1) * SIZE_PANEL_ORDER;
+}
+
+function quadratureOn(
+  sizes: SizeDistribution,
+  range: SizeRange,
+  wavenumberPerUm: number,
+  level: number,
+  limitSizeParameter: number,
+): SizeQuadrature {
+  const weight = logWeight(sizes);
+  const { ends, limitFrom } = rangePanels(range, wavenumberPerUm, level, limitSizeParameter);
+  const nodes = (ends.length - 1) * SIZE_PANEL_ORDER;
+  const radiiUm = new Float64Array(nodes);
+  const logArea = new Float64Array(nodes);
+  let peak = -Infinity;
+  for (let p = 0; p + 1 < ends.length; p += 1) {
+    const from = ends[p] ?? Number.NaN;
+    const half = 0.5 * ((ends[p + 1] ?? Number.NaN) - from);
+    for (let i = 0; i < SIZE_PANEL_ORDER; i += 1) {
+      const y = from + half * (1 + (PANEL_RULE.x[i] ?? 0));
+      const node = p * SIZE_PANEL_ORDER + i;
+      radiiUm[node] = exp(y);
+      logArea[node] = log(half * (PANEL_RULE.w[i] ?? 0)) + weight.logNumberPerY(y) + 2 * y;
+      peak = Math.max(peak, logArea[node] ?? -Infinity);
+    }
+  }
+  const areaWeights = logArea.map((l) => exp(l - peak));
+  const total = areaWeights.reduce((sum, w) => sum + w, 0);
+  return { radiiUm, areaWeights: areaWeights.map((w) => w / total), limitFrom };
+}
+
+/**
+ * The composite Gauss–Legendre rule in ln r over {@link sizeRange}, at one wavelength and level of
+ * refinement: {@link sphereModeOptics}'s, which also leaves out the radii below Mie's smallest size
+ * parameter.
+ *
+ * @param wavelengthNm - The vacuum wavelength, nm, finite and > 0, which sets the panels' widths
+ *   in size parameter.
+ * @param level - The refinement, an integer in 0–{@link SIZE_LEVEL_MAX}, 0 the coarsest; each level
+ *   halves every panel.
+ * @throws RangeError for an effective radius or variance outside the distribution's range, a bad
+ *   wavelength or a bad level.
+ */
+export function sizeQuadrature(
+  sizes: SizeDistribution,
+  wavelengthNm: number,
+  level = 0,
+): SizeQuadrature {
+  if (!(wavelengthNm > 0 && Number.isFinite(wavelengthNm))) {
+    throw new RangeError(`wavelength ${wavelengthNm} nm must be finite and > 0`);
+  }
+  if (!(Number.isInteger(level) && level >= 0 && level <= SIZE_LEVEL_MAX)) {
+    throw new RangeError(`level ${level} must be an integer in 0–${SIZE_LEVEL_MAX}`);
+  }
+  return quadratureOn(
+    sizes,
+    sizeRange(sizes),
+    (2 * Math.PI * 1000) / wavelengthNm,
+    level,
+    GEOMETRIC_OPTICS_SIZE_PARAMETER,
+  );
+}
+
+/**
+ * One sphere's scattering matrix at the cosines its amplitudes were computed at, normalised as
+ * {@link ScatteringMatrix} is.
+ *
+ * @param result - {@link mieSphere}'s result.
+ * @param sizeParameter - The size parameter it was computed at.
+ * @param mu - The cosines it was computed at.
+ */
+export function sphereScatteringMatrix(
+  result: MieResult,
+  sizeParameter: number,
+  mu: Float64Array,
+): ScatteringMatrix {
+  const matrix = emptyMatrix(mu);
+  accumulate(matrix, result, 1);
+  return finishMatrix(matrix, sizeParameter * sizeParameter * result.qSca);
+}
+
+interface MutableMatrix {
+  readonly mu: Float64Array;
+  readonly a1: Float64Array;
+  readonly a3: Float64Array;
+  readonly b1: Float64Array;
+  readonly b2: Float64Array;
+}
+
+function emptyMatrix(mu: Float64Array): MutableMatrix {
+  const length = mu.length;
+  return {
+    mu,
+    a1: new Float64Array(length),
+    a3: new Float64Array(length),
+    b1: new Float64Array(length),
+    b2: new Float64Array(length),
+  };
+}
+
+/** Adds one sphere's |S|² terms, weighted, to the sums of a mode's matrix. */
+function accumulate(matrix: MutableMatrix, result: MieResult, weight: number): void {
+  const { s1, s2 } = result;
+  for (let j = 0; j < matrix.mu.length; j += 1) {
+    const s1Re = s1[2 * j] ?? 0;
+    const s1Im = s1[2 * j + 1] ?? 0;
+    const s2Re = s2[2 * j] ?? 0;
+    const s2Im = s2[2 * j + 1] ?? 0;
+    const s1Sq = s1Re * s1Re + s1Im * s1Im;
+    const s2Sq = s2Re * s2Re + s2Im * s2Im;
+    // S₁S₂* = (s1Re s2Re + s1Im s2Im) + i (s1Im s2Re − s1Re s2Im), and b₂ takes −Im(S₁S₂*).
+    matrix.a1[j] = (matrix.a1[j] ?? 0) + weight * 0.5 * (s1Sq + s2Sq);
+    matrix.b1[j] = (matrix.b1[j] ?? 0) + weight * 0.5 * (s2Sq - s1Sq);
+    matrix.a3[j] = (matrix.a3[j] ?? 0) + weight * (s1Re * s2Re + s1Im * s2Im);
+    matrix.b2[j] = (matrix.b2[j] ?? 0) + weight * (s1Re * s2Im - s1Im * s2Re);
+  }
+}
+
+/**
+ * Normalises the sums: with F = Σ wᵢ ½(|S₁|² + |S₂|²) and the scattering sum Σ wᵢ xᵢ² Q_sca,ᵢ,
+ * a₁ = 4 F ÷ Σ wᵢ xᵢ² Q_sca,ᵢ, so that ∫ a₁ dΩ ÷ 4π = 1 (since ∫₋₁¹ (|S₁|² + |S₂|²) dμ = x² Q_sca),
+ * or 1 less the forward peak, whose share of the scattering sum is `forwardPeakSum`'s.
+ */
+function finishMatrix(
+  matrix: MutableMatrix,
+  scatteringSum: number,
+  forwardPeakSum = 0,
+): ScatteringMatrix {
+  const scale = 4 / scatteringSum;
+  const a1 = matrix.a1.map((v) => v * scale);
+  const a3 = matrix.a3.map((v) => v * scale);
+  return {
+    mu: matrix.mu.slice(),
+    forwardPeak: forwardPeakSum / scatteringSum,
+    a1,
+    a2: a1.slice(),
+    a3,
+    a4: a3.slice(),
+    b1: matrix.b1.map((v) => v * scale),
+    b2: matrix.b2.map((v) => v * scale),
+  };
+}
+
+interface Sums {
+  readonly area: number;
+  readonly ext: number;
+  readonly sca: number;
+  readonly scaG: number;
+}
+
+/**
+ * The area-weighted efficiency sums at one node count; with `matrix`, the angular sums too. The
+ * nodes from `limitFrom` on take `limit`, and add their angular sums to `geometric`.
+ *
+ * @throws Error for a quadrature that reaches the large-particle limit's sizes with no limit.
+ */
+function sumNodes(
+  quadrature: SizeQuadrature,
+  index: ComplexIndex,
+  wavelengthUm: number,
+  mu: Float64Array,
+  matrix: MutableMatrix | undefined,
+  limit: GeometricLimit | undefined,
+  geometric: GeometricMatrixSums | undefined,
+): Sums {
+  let ext = 0;
+  let sca = 0;
+  let scaG = 0;
+  let area = 0;
+  const wavenumber = (2 * Math.PI) / wavelengthUm;
+  const scratch = mieScratch();
+  for (let i = 0; i < quadrature.radiiUm.length; i += 1) {
+    const x = wavenumber * (quadrature.radiiUm[i] ?? 0);
+    const w = quadrature.areaWeights[i] ?? 0;
+    if (i >= quadrature.limitFrom) {
+      if (limit === undefined) {
+        throw new Error("a quadrature past the large-particle limit's size needs the limit");
+      }
+      const sphere = geometricSphere(limit, x);
+      area += w;
+      ext += w * sphere.qExt;
+      sca += w * sphere.qSca;
+      scaG += w * sphere.qScaAsymmetry;
+      if (geometric !== undefined) {
+        addGeometricSphere(geometric, x, w);
+      }
+      continue;
+    }
+    const result = mieSphere(x, index, matrix === undefined ? NO_ANGLES : mu, scratch);
+    area += w;
+    ext += w * result.qExt;
+    sca += w * result.qSca;
+    scaG += w * result.qSca * result.asymmetry;
+    if (matrix !== undefined) {
+      // The area weight is x² n(r) dr up to a constant, and the matrix sums take n(r) dr.
+      accumulate(matrix, result, w / (x * x));
+    }
+  }
+  return { area, ext, sca, scaG };
+}
+
+function relative(a: number, b: number): number {
+  return Math.abs(a - b) / Math.abs(b);
+}
+
+/**
+ * One refinement's change: the largest of the relative changes in the mean extinction and
+ * scattering efficiencies and the absolute change in the asymmetry (NaN, which never converges, if
+ * any is undefined: `Math.max` propagates it).
+ */
+function levelChange(coarse: Sums, fine: Sums): number {
+  return Math.max(
+    relative(coarse.ext / coarse.area, fine.ext / fine.area),
+    relative(coarse.sca / coarse.area, fine.sca / fine.area),
+    Math.abs(coarse.scaG / coarse.sca - fine.scaG / fine.sca),
+  );
+}
+
+/**
+ * The optics of a mode of homogeneous spheres of one index at one wavelength, over its size
+ * distribution.
+ *
+ * @remarks
+ * The radii below the one at {@link MIE_MIN_SIZE_PARAMETER} are left out of the interval: their
+ * weight in scattering, r⁶, is about 5 × 10⁻²⁶ of a 1 nm particle's at 380 nm.
+ *
+ * A level is taken once its change and its predecessor's are both under {@link SIZE_CONVERGENCE},
+ * so the coarsest it can take is level 2. Past the cap, the finest level within it is taken with
+ * its last change, marked unconverged ({@link SphereModeOptics.sizeConvergence}): a mode inside
+ * Mie's range never throws for want of convergence.
+ *
+ * The spheres past x = {@link GEOMETRIC_OPTICS_SIZE_PARAMETER} take the large-particle limit (the
+ * module's remarks), so no size is too large.
+ *
+ * @param wavelengthNm - The vacuum wavelength, nm.
+ * @param mu - The cosines to give the matrix at; the phase tables' by default.
+ * @param nodesMax - The node count past which no finer level is tried, {@link SIZE_NODES_MAX} by
+ *   default; a positive integer. A smaller cap trades accuracy for time.
+ * @param limitSizeParameter - The size parameter past which the spheres take the large-particle
+ *   limit, {@link GEOMETRIC_OPTICS_SIZE_PARAMETER} by default; `Infinity` for Mie alone, which
+ *   throws past `mie.ts`'s `MIE_MAX_SIZE_PARAMETER` (a test's reference).
+ * @throws RangeError for a distribution wholly below {@link MIE_MIN_SIZE_PARAMETER} at this
+ *   wavelength, or for a bad distribution, index or cap.
+ */
+export function sphereModeOptics(
+  sizes: SizeDistribution,
+  index: ComplexIndex,
+  wavelengthNm: number,
+  mu: Float64Array = PHASE_TABLE_MU,
+  nodesMax: number = SIZE_NODES_MAX,
+  limitSizeParameter: number = GEOMETRIC_OPTICS_SIZE_PARAMETER,
+): SphereModeOptics {
+  if (!(wavelengthNm > 0 && Number.isFinite(wavelengthNm))) {
+    throw new RangeError(`wavelength ${wavelengthNm} nm must be finite and > 0`);
+  }
+  if (!(Number.isInteger(nodesMax) && nodesMax > 0)) {
+    throw new RangeError(`node cap ${nodesMax} must be a positive integer`);
+  }
+  if (!(limitSizeParameter > 0)) {
+    throw new RangeError(`the limit's size parameter ${limitSizeParameter} must be > 0`);
+  }
+  const refusal = sphereRangeRefusal(sizes, wavelengthNm);
+  if (refusal !== null) {
+    throw new RangeError(refusal);
+  }
+  const wavelengthUm = wavelengthNm / 1000;
+  const full = sizeRange(sizes);
+  const smallestUm = (MIE_MIN_SIZE_PARAMETER * wavelengthUm) / (2 * Math.PI);
+  const range = { fromUm: Math.max(full.fromUm, smallestUm), toUm: full.toUm };
+  const wavenumberPerUm = (2 * Math.PI) / wavelengthUm;
+  // The large-particle limit's rays are traced once, for every level, where the range reaches it.
+  const limit =
+    wavenumberPerUm * range.toUm > limitSizeParameter
+      ? geometricLimit(index, mu.length > 0)
+      : undefined;
+  // The coarsest level is always taken, so a cap below its node count gives it, unconverged.
+  let quadrature = quadratureOn(sizes, range, wavenumberPerUm, 0, limitSizeParameter);
+  let sums = sumNodes(quadrature, index, wavelengthUm, mu, undefined, limit, undefined);
+  let change = Number.POSITIVE_INFINITY;
+  let converged = false;
+  for (let level = 1; level <= SIZE_LEVEL_MAX && !converged; level += 1) {
+    if (levelNodes(range, wavenumberPerUm, level, limitSizeParameter) > nodesMax) {
+      break;
+    }
+    const finer = quadratureOn(sizes, range, wavenumberPerUm, level, limitSizeParameter);
+    const finerSums = sumNodes(finer, index, wavelengthUm, mu, undefined, limit, undefined);
+    const finerChange = levelChange(sums, finerSums);
+    converged = finerChange < SIZE_CONVERGENCE && change < SIZE_CONVERGENCE;
+    quadrature = finer;
+    sums = finerSums;
+    change = finerChange;
+  }
+  const matrix = emptyMatrix(mu);
+  const geometric =
+    limit !== undefined && mu.length > 0 ? geometricMatrixSums(limit, mu) : undefined;
+  // With no angles to sum the matrix at, a second pass would repeat `sums`, node for node in the
+  // same order, and add nothing to the matrix.
+  const final =
+    mu.length === 0
+      ? sums
+      : sumNodes(quadrature, index, wavelengthUm, mu, matrix, limit, geometric);
+  if (geometric !== undefined) {
+    const large = geometricMatrix(geometric);
+    for (let j = 0; j < mu.length; j += 1) {
+      matrix.a1[j] = (matrix.a1[j] ?? 0) + (large.a1[j] ?? 0);
+      matrix.a3[j] = (matrix.a3[j] ?? 0) + (large.a3[j] ?? 0);
+      matrix.b1[j] = (matrix.b1[j] ?? 0) + (large.b1[j] ?? 0);
+      matrix.b2[j] = (matrix.b2[j] ?? 0) + (large.b2[j] ?? 0);
+    }
+  }
+  return finish(
+    sizes,
+    wavelengthNm,
+    final,
+    matrix,
+    { converged, nodes: quadrature.radiiUm.length, lastChange: change },
+    geometric?.forwardPeakWeight ?? 0,
+  );
+}
+
+/**
+ * The mode's optics from the sums of the level taken. The matrix sums took each area weight
+ * w ∝ x² n(r) dr divided by x², so the scattering sum that normalises them is Σ w Q_sca.
+ */
+function finish(
+  sizes: SizeDistribution,
+  wavelengthNm: number,
+  sums: Sums,
+  matrix: MutableMatrix,
+  end: SizeConvergence,
+  forwardPeakSum: number,
+): SphereModeOptics {
+  const weight = logWeight(sizes);
+  const qExt = sums.ext / sums.area;
+  const qSca = sums.sca / sums.area;
+  const geometricUm2 = Math.PI * weight.meanSquareRadiusUm2;
+  return {
+    wavelengthNm,
+    qExt,
+    qSca,
+    singleScatteringAlbedo: sums.sca / sums.ext,
+    asymmetry: sums.scaG / sums.sca,
+    geometricCrossSectionM2: geometricUm2 * 1e-12,
+    extinctionCrossSectionM2: qExt * geometricUm2 * 1e-12,
+    scatteringCrossSectionM2: qSca * geometricUm2 * 1e-12,
+    volumeM3: (4 / 3) * Math.PI * sizes.effectiveRadiusUm * weight.meanSquareRadiusUm2 * 1e-18,
+    matrix: finishMatrix(matrix, sums.sca, forwardPeakSum),
+    sizeConvergence: end,
+  };
+}
+
+/**
+ * A mode's material resolved for its shape: a mode declared a non-spherical mineral or a crystal,
+ * with no phase given, is a solid (water ice, not water; solid methane, not liquid), since
+ * `resolveMaterial`'s default file is a key's first, its liquid where it has one.
+ */
+export function resolveModeMaterial(mode: AerosolMode): ResolvedMaterial {
+  const solidShape = mode.shape === "nonSphericalMineral" || mode.shape === "crystal";
+  const form: MaterialForm | undefined =
+    solidShape && mode.form?.phase === undefined ? { ...mode.form, phase: "solid" } : mode.form;
+  return resolveMaterial(mode.material, form);
+}
+
+/**
+ * A mode's shape class: its own where it states one; a `sphere` if it is a liquid, whatever its
+ * file says (a droplet: liquid iron is Mie, solid iron a `nonSphericalMineral`, Visscher et al.
+ * 2010; science-r08-nonspherical.md §2.2); else its material file's; else a `sphere`, the generic
+ * stand-in's convention (decision-composition §1.9).
+ */
+export function modeShape(mode: AerosolMode, material: ResolvedMaterial): ShapeClass {
+  if (mode.shape !== undefined) {
+    return mode.shape;
+  }
+  if ((mode.form?.phase ?? material.file?.phase) === "liquid") {
+    return "sphere";
+  }
+  return material.file?.shape ?? "sphere";
+}
+
+/** A shape class in words, for a note the operator reads. */
+const SHAPE_WORDS: Readonly<Record<ShapeClass, string>> = {
+  sphere: "a sphere",
+  nonSphericalMineral: "a non-spherical mineral",
+  crystal: "a crystal",
+  aggregate: "an aggregate",
+};
+
+/**
+ * A mode's optics at one wavelength, over its size distribution, with its material's index from
+ * the registry.
+ *
+ * @remarks
+ * Every mode goes through sphere Mie here. For a non-spherical mineral or a crystal, only the
+ * cross-sections are to be used, since a sphere's rainbow and glory are spurious for them (Design
+ * note 6): the result says so by its `shape`, carries no matrix, and is a `fallback` whose phase is
+ * Henyey–Greenstein's from this g. The published models for those classes are R08.T5.c's
+ * `nonSphericalModeOptics`, which `aerosol.ts`'s `aerosolModeOptics` routes them to.
+ *
+ * A quadrature that has not converged by {@link SIZE_NODES_MAX} nodes gives its finest level's
+ * optics, marked by {@link ModeOptics.sizeConvergence} (R08.T5.f), never a throw.
+ *
+ * @param wavelengthNm - The vacuum wavelength, nm, in 380–780.
+ * @param mu - The cosines to give the matrix at; the phase tables' by default.
+ * @throws RangeError as {@link sphereModeOptics} does, for a wavelength outside the files' range,
+ *   or for an aggregate, whose optics are R08.T5.c's `aggregateOptics`.
+ */
+export function modeOptics(
+  mode: AerosolMode,
+  wavelengthNm: number,
+  mu: Float64Array = PHASE_TABLE_MU,
+): ModeOptics {
+  const material = resolveModeMaterial(mode);
+  return modeOpticsWithIndex(mode, indexAt(material, wavelengthNm), wavelengthNm, mu);
+}
+
+/**
+ * A mode's optics at one wavelength as {@link modeOptics} gives them, but at `index` in place of its
+ * material's: for a fit that varies a material's index (plan R08, R08.T5.e's ultraviolet absorber),
+ * the mode's shape and provenance still its material's.
+ *
+ * @param wavelengthNm - The vacuum wavelength, nm.
+ * @param mu - The cosines to give the matrix at; the phase tables' by default.
+ * @throws RangeError as {@link modeOptics} does but for the wavelength's range.
+ */
+export function modeOpticsWithIndex(
+  mode: AerosolMode,
+  index: ComplexIndex,
+  wavelengthNm: number,
+  mu: Float64Array = PHASE_TABLE_MU,
+): ModeOptics {
+  const material = resolveModeMaterial(mode);
+  const shape = modeShape(mode, material);
+  let keepsMatrix: boolean;
+  switch (shape) {
+    case "sphere":
+      keepsMatrix = true;
+      break;
+    case "nonSphericalMineral":
+    case "crystal":
+      // A sphere's matrix is not the particle's, so its amplitudes are not summed.
+      keepsMatrix = false;
+      break;
+    case "aggregate":
+      throw new RangeError(`a mode of ${mode.material} aggregates takes aggregateOptics, not Mie`);
+  }
+  const optics = sphereModeOptics(mode.sizes, index, wavelengthNm, keepsMatrix ? mu : NO_ANGLES);
+  return {
+    wavelengthNm: optics.wavelengthNm,
+    qExt: optics.qExt,
+    qSca: optics.qSca,
+    singleScatteringAlbedo: optics.singleScatteringAlbedo,
+    asymmetry: optics.asymmetry,
+    geometricCrossSectionM2: optics.geometricCrossSectionM2,
+    extinctionCrossSectionM2: optics.extinctionCrossSectionM2,
+    scatteringCrossSectionM2: optics.scatteringCrossSectionM2,
+    volumeM3: optics.volumeM3,
+    matrix: keepsMatrix ? optics.matrix : undefined,
+    shape,
+    provenance: material.provenance,
+    phaseBasis: keepsMatrix ? "model" : "fallback",
+    phaseModel: keepsMatrix ? "mie" : "henyeyGreenstein",
+    phaseNote: keepsMatrix
+      ? undefined
+      : `${SHAPE_WORDS[shape]} of ${substanceName(mode.material)} through sphere Mie: Henyey–Greenstein from Mie's g, a fallback`,
+    sizeConvergence: optics.sizeConvergence,
+  };
+}

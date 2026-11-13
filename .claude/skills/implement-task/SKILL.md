@@ -1,6 +1,6 @@
 ---
 name: implement-task
-description: Implements one task or subtask of a HYPERION action plan (IDs like P02.T5, P05.T1.a or R04.T3.c, plans under docs/agent/plans/) end to end. It gathers the task, the design notes it cites and the brainstorm sections it touches, builds the task under the project rules, validates, reviews, and records deviations in the plan. Use whenever the user asks to implement, start, continue or finish a plan task, a milestone step or "the next task", even if they give only the ID.
+description: Implements one task or subtask of a HYPERION action plan (IDs like P02.T5, P05.T1.a, R04.T3.c or P14.T54.b.l, plans under docs/agent/plans/) end to end. It gathers the task, the design notes it cites and the brainstorm sections it touches, builds the task under the project rules, validates, reviews, and records deviations in the plan's records (its Risks, or the task's record file once the plan is split). Use whenever the user asks to implement, start, continue or finish a plan task, a milestone step or "the next task", even if they give only the ID.
 argument-hint: "<task-id> [--feature <plan-set>]"
 ---
 
@@ -31,18 +31,25 @@ Task <id>:
 
 ## 1. Load the task
 
-Plans are long. Run the extractor from the repository root instead of paging through them. It
-prints the plan header, the ordering notes, the task (with its phase intro, and for a subtask the
-parent intro and the paragraphs shared by all subtasks), the design notes the task cites, and the
-other lines in the plan set that mention the task. `--context` adds the plan's Generator version
-and Risks sections. It works from headings and labels, so if a section looks cut short, read the
-plan around the lines it names:
+Plans are long. Run the extractor from the repository root instead of paging through them. It prints
+the plan header, the ordering notes, the task (with its phase intro, and for a subtask the parent
+intro and the paragraphs shared by all subtasks; a sub-subtask such as P14.T54.b.l, a bullet nested
+in its subtask's entry, comes inside its subtask's own text, without its siblings'), the design
+notes the task cites, and the other lines in the plan set that mention the task. `--context` adds
+the plan's Generator version and Risks sections and, in a split plan, the task's record files. It
+works from headings and labels, so if a section looks cut short, read the plan around the lines it
+names:
 
 ```bash
 python3 .claude/skills/implement-task/scripts/plan_task.py P02.T5.a --context     # the task in context
 python3 .claude/skills/implement-task/scripts/plan_task.py P02.T5.a --acceptance  # acceptance criteria and commands
-python3 .claude/skills/implement-task/scripts/plan_task.py --list P02             # IDs and titles; [commit] if a subject names one
+python3 .claude/skills/implement-task/scripts/plan_task.py P02.T5.a --records     # its records as built, and its record file
+python3 .claude/skills/implement-task/scripts/plan_task.py --list P02             # IDs and titles; [commit], [records]
 ```
+
+A plan's as-built records are either inline, as bullets of its **Risks and open points**, or
+split, one file per task under `<plan-dir>/<plan-stem>/records/` (the roadmap's "Records as
+built"). The extractor reads both alike.
 
 Plan numbers repeat across plan sets, and the ID's prefix picks the set: `P` for
 `galaxy-generation`, `R` for `rendering-and-planets`. For any other set, add
@@ -56,8 +63,9 @@ Then read:
   grep for the names in Provides.
 - The brainstorm sections that the plan header lists and this task touches, and no others. Find
   them with `grep -n '^#' <brainstorm>` rather than reading the whole brainstorm.
-- The plan's **Risks and open points** (printed by `--context`), especially what earlier tasks
-  recorded as built. It says where the code differs from the plan text.
+- The plan's **Risks and open points** and the records of this task and of the tasks it builds
+  on: `--context` prints Risks and the task's record files, `--records <ID>` any task's, with the
+  other records that name it. They say where the code differs from the plan text.
 - The "Mentioned elsewhere" lines. Later tasks and plans that check or consume this task's output
   tell you what it must not break.
 
@@ -111,13 +119,22 @@ matching files, and they override habits from other codebases. In addition:
 - Write the task's tests with the code. Iterate with the narrowest command:
   `cargo test -p <crate> <filter>`, or `pnpm --filter hyperion exec vitest run <path>`.
 - Stay inside the task. Work that belongs to a later task or plan waits for it, even when it is
-  convenient now. The roadmap wants each task to leave `just ci` green on its own.
+  convenient now. The roadmap wants each task to leave `just ci` green on its own: the task's gate
+  is `just smart-ci`, and integration runs the full `just ci`.
 
 ## 5. Validate
 
 Invoke the `validate` skill with the task ID. It runs in its own context, picks the checks for
-the changed files, runs the task's acceptance commands and the CI gate, and returns a verdict with
-excerpts of any failures:
+the changed files, runs the task's acceptance commands and the gate, and returns a verdict with
+excerpts of any failures. The gate is `just smart-ci`: the steps of `just ci` that the change
+reaches, chosen from its diff against the integration branch (`just smart-ci --plan` shows them
+and why), with `just test-render` where a shader, the engine or the smoke harness changed. A
+`just ci` in the acceptance criteria is met by it; the full `just ci` is integration's, run when
+the task is integrated. smart-ci runs the tests, in any crate, that reach the changed code; when
+the task changes what other crates use (a public item's name or signature), run
+`just smart-ci --dependents`, so that their Clippy runs too.
+
+The verdict:
 
 - **PASS** or **PASS WITH SKIPS**: go on, and name the skipped checks in the report.
 - **FAIL**: fix the cause and validate again.
@@ -143,10 +160,34 @@ reason, which goes in the report. Validate again after fixing.
 
 ## 7. Record as built
 
-The plan is the record the next task reads. Under **Risks and open points**, record what was
-built differently, in the style that section already uses. In galaxy-generation, plan 01 uses
-`**Deviations in T<n>, as built.**` bullets and plan 02 numbered items tagged with the task, such
-as `**R11. D4 re-checked (P02.T4).**`. If the plan has no such records yet, use the first form.
+The plan's records are what the next task reads. Record what was built differently, in the style
+the records already use. In galaxy-generation, plan 01 uses `**Deviations in T<n>, as built.**`
+bullets and plan 02 numbered items tagged with the task, such as `**R11. D4 re-checked
+(P02.T4).**`. If the plan has no such records yet, use the first form. Name the task in the bold
+title, by its full ID (`**Deviations in P14.T53.b, as built (…).**`), and a deferred finding in
+its first sentence (`**Deferred findings (2026-10-13 rule)**, from P14.T53.b:`): the split files
+a record by the task its title, or else its first sentence, names. Where it goes:
+
+- **A split plan** (it has `<plan-dir>/<plan-stem>/records/`, and its Risks section opens with a
+  `Task records as built:` line): at the end of the task's record file, which
+  `plan_task.py <ID> --records` names (`<KEY>.md`, KEY the ID cut to one subtask letter, so
+  P14.T54.b.i writes in P14.T54.b's). If the task has no file yet, append the record at the end of
+  the plan's Risks and run
+  `python3 -I .claude/skills/implement-task/scripts/plan_split.py <plan> --write`: it moves the
+  record into a new file with its header, adds the `Records:` line to the task's entry, and checks
+  that nothing else changed. `--check` writes nothing and says whether a record is still in Risks
+  to be filed. The run moves every bullet of Risks that names one task, so read its `kept` and
+  `moved` lines: a bullet that names a task but must stay (an open point it raised) is kept with
+  `--keep '<its first words>'`, which gives the bullet a keep mark, a last line
+  `<!-- plan-split: keep -->` indented as the bullet's text, so that every later run keeps it too;
+  and a bullet the rule leaves in Risks or files elsewhere is filed with
+  `--assign '<its first words>=<ID>'`, which gives it a file mark,
+  `<!-- plan-split: file under <ID> -->`, that moves with it. `--verify <rev>` reads both marks
+  back, so it needs no flags.
+- **An inline plan**: at the end of the plan's **Risks and open points**.
+- In either layout, an open point, or a finding or ruling that binds several tasks or the whole
+  plan, goes in Risks.
+
 Keep entries terse and factual, each deviation with its reason. Cover renamed or added public
 items, changed files or acceptance commands, and discoveries that affect later tasks. The
 plan-conformance reviewer's output lists candidates. Don't rewrite the task text itself, except

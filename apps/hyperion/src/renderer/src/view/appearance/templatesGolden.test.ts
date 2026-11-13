@@ -143,6 +143,20 @@ function bvr(rgb: Rgb): [number, number, number] {
 
 const TEMPLATES = goldenTemplates();
 
+/** Whether the client's template of a golden name carries an L(α) curve (R10.T10.b). */
+function curved(name: string): boolean {
+  return PHASE_TEMPLATES[clientTemplate(name)].lommelSeeligerCurve !== undefined;
+}
+
+/** A template's block at its own L. */
+function ownShare(template: GoldenTemplate): GoldenShare {
+  const own = template.shares.find(({ share }) => share === template.rowShare);
+  if (own === undefined) {
+    throw new Error(`${template.name}'s own L is pinned`);
+  }
+  return own;
+}
+
 /**
  * The whole degrees at which a template's fit changes piece (Mallama and Hilton 2018, eqs. 8–9 and
  * 11–12, `templates.ts`); Venus's join, 163.7°, falls on no whole degree.
@@ -256,11 +270,8 @@ describe("the client's templates against the generator's photometry/templates.go
   });
 
   it("recover each template's exponents from its q at its own L through lawFor", () => {
-    for (const template of TEMPLATES) {
-      const own = template.shares.find(({ share }) => share === template.rowShare);
-      if (own === undefined) {
-        throw new Error(`${template.name}'s own L is pinned`);
-      }
+    for (const template of TEMPLATES.filter(({ name }) => !curved(name))) {
+      const own = ownShare(template);
       const [qB, qV, qR] = own.q;
       const law = lawFor([0.2, 0.2, 0.2], [qR, qV, qB], clientTemplate(template.name));
       const [sR, sV, sB] = law.phaseExponent;
@@ -270,6 +281,35 @@ describe("the client's templates against the generator's photometry/templates.go
         expect.closeTo(goldenB, 6),
         expect.closeTo(goldenV, 6),
         expect.closeTo(goldenR, 6),
+      ]);
+    }
+  });
+
+  // The five airless templates carry McEwen's L(α) (plan R10, R10.T10.b), which the generator's
+  // constant-L q does not: its held tail past the range lowers q at the golden's s, so lawFor,
+  // which solves s under the curve, meets the golden's q at an s lower by the measured 1.4 × 10⁻⁴
+  // (the Moon), 2.6 × 10⁻⁴ (airless ice), 4.3 × 10⁻⁴ (a snowball) and 9 × 10⁻⁷ (Mercury, magma).
+  it("meet each curved template's q through lawFor, at its exponent less the curve's shift", () => {
+    const shifts: Readonly<Record<string, number>> = {
+      moon: -1.38e-4,
+      mercury: -9.1e-7,
+      airless_ice: -2.58e-4,
+      snowball: -4.32e-4,
+      magma: -9.1e-7,
+    };
+    const named = TEMPLATES.filter(({ name }) => curved(name));
+    expect(named.map(({ name }) => name).toSorted()).toEqual(Object.keys(shifts).toSorted());
+    for (const template of named) {
+      const [qB, qV, qR] = ownShare(template).q;
+      const law = lawFor([0.2, 0.2, 0.2], [qR, qV, qB], clientTemplate(template.name));
+      const ours = bvr(lawPhaseIntegral(law));
+      for (const [band, q] of [qB, qV, qR].entries()) {
+        expect(Math.abs((ours[band] ?? Number.NaN) / q - 1)).toBeLessThan(Q_TOLERANCE);
+      }
+      const shift = law.phaseExponent[1] - template.exponents[1];
+      expect([template.name, shift]).toEqual([
+        template.name,
+        expect.closeTo(shifts[template.name] ?? Number.NaN, 6),
       ]);
     }
   });

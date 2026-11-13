@@ -1,0 +1,6 @@
+# generator_version = 31
+Nova Some(ClassId(6)) Onset in Photometric(V)
+event e54e0007f0000001.0000:0300000000000100
+host = 0xe54e0007f0000001
+arrival -9309081892 s 595476613 ns
+flux = 0x3f95800637ee96ef  # 0.020996186412637504

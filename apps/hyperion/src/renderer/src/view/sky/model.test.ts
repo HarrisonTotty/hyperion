@@ -1,11 +1,24 @@
 import { describe, expect, it } from "vitest";
 
+import type { SkyResponse } from "@hyperion/protocol";
+
 import { vec3 } from "../../geometry/vec3";
 import { galacticTranslated } from "../coords/position";
-import { decodedSky, skyPayload, skyRequest, skyResponse } from "../../test/skyFixtures";
 import {
+  decodedSky,
+  nearestFirstCensus,
+  skyPayload,
+  skyRequest,
+  skyResponse,
+} from "../../test/skyFixtures";
+import {
+  asCompleteAs,
   bakedBeyondM,
+  keepsHeldSky,
   PARALLAX_BASELINE_M,
+  PARALLAX_HOLD_PX,
+  PARALLAX_THRESHOLD_PX,
+  parallaxShiftPx,
   type SkyCamera,
   type SkyModel,
   skyRequestReason,
@@ -28,6 +41,24 @@ function heldSky(years: number, distancesLy: ReadonlyArray<number>): SkyModel {
     ...decodedSky(payload, stars.length),
     stale: false,
   };
+}
+
+/**
+ * A reply near the Sun whose layers C, D and E are complete to `edgesLy`, final where `null`, and
+ * the reply final only where all three are (R06.T11.d).
+ */
+function replyAt(edgesLy: readonly [number | null, number | null, number | null]): SkyResponse {
+  const request = skyRequest(0);
+  return {
+    ...skyResponse(request, skyPayload([], 2, null), 0, 2),
+    census: nearestFirstCensus(edgesLy),
+    final: edgesLy.every((edge) => edge === null),
+  };
+}
+
+/** A sky held at a reply complete to `edgesLy`, with a star 20 ly away. */
+function heldAt(edgesLy: readonly [number | null, number | null, number | null]): SkyModel {
+  return { ...heldSky(0, [20]), response: replyAt(edgesLy) };
 }
 
 const OBSERVER = skyRequest(0).observer;
@@ -119,4 +150,108 @@ describe("skyRequestReason", () => {
       }),
     ).toBeNull();
   });
+
+  it("asks a reply that is not final, and stands for another time, again for that time", () => {
+    const held = heldSky(10, [100]);
+    const partial = { ...held, response: { ...held.response, final: false } };
+    expect([
+      skyRequestReason(partial, { request: skyRequest(11.5), cameras: [CAMERA] }),
+      skyRequestReason(partial, { request: skyRequest(9), cameras: [CAMERA] }),
+      skyRequestReason(partial, { request: skyRequest(10.5), cameras: [CAMERA] }),
+    ]).toEqual(["expired", "jump", "partial"]);
+  });
+});
+
+/** One pixel's angle at {@link CAMERA}, rad. */
+const PIXEL_RAD = Math.PI / 3 / 1_920;
+
+/** The camera moved so that a star 20 ly away shifts by `px` pixels. */
+function shiftedBy(px: number): SkyCamera {
+  return movedBy(px * PIXEL_RAD * 20 * LIGHT_YEAR_M);
+}
+
+describe("parallaxShiftPx", () => {
+  it("measures the nearest baked star's shift in pixels for a camera's move", () => {
+    const held = heldSky(0, [20, 400]);
+    expect(parallaxShiftPx(held, shiftedBy(0.5))).toBeCloseTo(0.5, 9);
+    expect(parallaxShiftPx(held, CAMERA)).toBe(0);
+  });
+});
+
+describe("asCompleteAs (R06.T12.b)", () => {
+  it("counts a final reply as complete as any sky", () => {
+    expect(asCompleteAs(replyAt([null, null, null]), replyAt([null, null, null]))).toBe(true);
+    expect(asCompleteAs(replyAt([null, null, null]), replyAt([500, 500, 500]))).toBe(true);
+  });
+
+  it("counts a reply complete at least as far in every layer as complete", () => {
+    const held = replyAt([500, 500, 500]);
+    expect([
+      asCompleteAs(replyAt([500, 500, 500]), held),
+      asCompleteAs(replyAt([1_000, 500, 2_000]), held),
+      asCompleteAs(replyAt([null, 500, 500]), held),
+    ]).toEqual([true, true, true]);
+  });
+
+  it("counts a reply short in any one layer as less complete", () => {
+    const held = replyAt([500, 500, 500]);
+    expect([
+      asCompleteAs(replyAt([250, 250, 250]), held),
+      asCompleteAs(replyAt([1_000, 250, 1_000]), held),
+    ]).toEqual([false, false]);
+  });
+
+  it("counts a layer the held sky has final as short in a reply where it is not", () => {
+    expect(asCompleteAs(replyAt([4_000, 4_000, 4_000]), replyAt([null, 500, 500]))).toBe(false);
+  });
+
+  it("counts a layer the held sky states and the reply does not as short", () => {
+    const reply = replyAt([1_000, 1_000, 1_000]);
+    const withoutE = { ...reply, census: reply.census.filter((layer) => layer.layer !== "e") };
+    expect(asCompleteAs(withoutE, replyAt([500, 500, 500]))).toBe(false);
+  });
+});
+
+describe("keepsHeldSky (R06.T12.b)", () => {
+  const FINAL = heldAt([null, null, null]);
+  const FIRST = replyAt([125, 125, 125]);
+
+  it("holds to one pixel, ten times the re-ask threshold", () => {
+    expect([PARALLAX_HOLD_PX, PARALLAX_HOLD_PX / PARALLAX_THRESHOLD_PX]).toEqual([1, 10]);
+  });
+
+  it.each(["partial", "limits", "parallax"] as const)(
+    "keeps the held sky through a re-ask for %s until a reply is final",
+    (reason) => {
+      expect([
+        keepsHeldSky(reason, FINAL, FIRST, [CAMERA]),
+        keepsHeldSky(reason, FINAL, replyAt([1_000, 1_000, 1_000]), [CAMERA]),
+        keepsHeldSky(reason, FINAL, replyAt([null, null, null]), [CAMERA]),
+      ]).toEqual([true, true, false]);
+    },
+  );
+
+  it("gives way to a reply as complete as the held sky in every layer, before the final", () => {
+    const held = heldAt([500, 500, 500]);
+    expect([
+      keepsHeldSky("partial", held, replyAt([250, 250, 250]), [CAMERA]),
+      keepsHeldSky("partial", held, replyAt([500, 500, 500]), [CAMERA]),
+    ]).toEqual([true, false]);
+  });
+
+  it("gives way when the held sky's parallax for any open camera reaches a pixel", () => {
+    expect([
+      keepsHeldSky("parallax", FINAL, FIRST, [shiftedBy(0.5)]),
+      keepsHeldSky("parallax", FINAL, FIRST, [shiftedBy(0.999)]),
+      keepsHeldSky("parallax", FINAL, FIRST, [shiftedBy(1.001)]),
+      keepsHeldSky("limits", FINAL, FIRST, [CAMERA, shiftedBy(1.001)]),
+    ]).toEqual([true, true, false, false]);
+  });
+
+  it.each(["expired", "jump", "arrival"] as const)(
+    "holds each reply as it comes through a re-ask for %s",
+    (reason) => {
+      expect(keepsHeldSky(reason, FINAL, FIRST, [CAMERA])).toBe(false);
+    },
+  );
 });

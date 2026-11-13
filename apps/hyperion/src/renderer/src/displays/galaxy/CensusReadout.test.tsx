@@ -6,10 +6,16 @@ import { useState } from "react";
 import type { ChartResult } from "../../lib/galaxy/model";
 import { toChartResult } from "../../lib/galaxy/wire";
 import { PENDING, type RequestState } from "../../lib/useServerRequest";
-import { aSystemsInRange } from "../../test/galaxyFixtures";
+import {
+  anUnknownLayerLine,
+  anUnknownLayerStatus,
+  aSystemsInRange,
+  withCensusLine,
+} from "../../test/galaxyFixtures";
 import { announcements } from "../../test/liveRegions";
 import { CensusReadout } from "./CensusReadout";
 import { filterSystems, type StarFilter } from "./chartModel";
+import { describedText, statusLine } from "../../test/statusLine";
 
 const CENTRE = [26_000, 0, 0] as const;
 
@@ -94,9 +100,18 @@ describe("CensusReadout", () => {
   it("says what to do when nothing fits, as a limit reached", () => {
     renderReadout(aChart({ overLimit: ["a", "b", "c", "d", "e"] }));
 
-    expect(screen.getByText("NOTHING FITS: reduce radius")).toHaveClass(
+    expect(screen.getByText(statusLine("NOTHING FITS: reduce radius"))).toHaveClass(
       "census-readout__line--caution",
     );
+  });
+
+  it("tracks NOTHING FITS: as a state, and leaves what to do after it untracked", () => {
+    renderReadout(aChart({ overLimit: ["a", "b", "c", "d", "e"] }));
+
+    expect([
+      screen.getByText("NOTHING FITS:").className,
+      screen.getByText("reduce radius").className,
+    ]).toEqual(["status-text__state", "status-text__sentence"]);
   });
 
   it("counts the systems returned and those within the drive range", () => {
@@ -119,8 +134,35 @@ describe("CensusReadout", () => {
     renderReadout(aChart({ overLimit: ["a"] }));
 
     expect(
-      screen.getByText("DENSE REGION: reduce radius before raising MIN MASS"),
+      screen.getByText(statusLine("DENSE REGION: reduce radius before raising MIN MASS")),
     ).toBeInTheDocument();
+  });
+
+  it("stands the hint in the census row after CENSUS BY LAYER, outside the announced region (P12.T11.g)", () => {
+    renderReadout(aChart({ overLimit: ["a"] }));
+    const hint = screen.getByText(
+      statusLine("DENSE REGION: reduce radius before raising MIN MASS"),
+    );
+    const toggle = screen.getByRole("button", { name: "CENSUS BY LAYER" });
+    const row = toggle.closest(".census-readout__row");
+
+    // A child of the row itself, as the stylesheet's `> .census-readout__hint` rules need, in
+    // either layout: the component renders the same DOM in both, the layout being the page's.
+    expect([
+      row !== null && hint.parentElement === row,
+      (toggle.compareDocumentPosition(hint) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
+      summary().contains(hint),
+    ]).toEqual([true, true, false]);
+  });
+
+  it("gives RETRY its own class, for the compact census row's column (P12.T11.g)", () => {
+    renderReadout(TWO_SYSTEMS, {
+      kind: "rejected",
+      code: "queue_full",
+      reason: "the queue is full",
+    });
+
+    expect(screen.getByRole("button", { name: "RETRY" })).toHaveClass("census-readout__retry");
   });
 
   it("folds the census table, and shows a line for every layer once asked", async () => {
@@ -256,7 +298,7 @@ describe("CensusReadout", () => {
     });
 
     // Outside the region, so the words are not read with it unless it names them itself.
-    expect(screen.getByRole("button", { name: "RETRY" })).toHaveAccessibleDescription(
+    expect(describedText(screen.getByRole("button", { name: "RETRY" }))).toBe(
       "REJECTED: the queue is full",
     );
   });
@@ -309,15 +351,20 @@ describe("CensusReadout", () => {
     renderReadout(TWO_SYSTEMS, { kind: "link_down", reason: "NO CARRIER" });
 
     // Exactly the plain class, so that a renamed caution class cannot pass unseen.
-    expect(within(summary()).getByText("NO CARRIER")).toHaveClass("census-readout__state", {
-      exact: true,
-    });
+    expect(within(summary()).getByText(statusLine("NO CARRIER"))).toHaveClass(
+      "census-readout__state",
+      {
+        exact: true,
+      },
+    );
   });
 
   it("reads a timeout in caution, as a failed system", () => {
     renderReadout(TWO_SYSTEMS, { kind: "timed_out" });
 
-    expect(within(summary()).getByText("TIMED OUT")).toHaveClass("census-readout__state--fault");
+    expect(within(summary()).getByText(statusLine("TIMED OUT"))).toHaveClass(
+      "census-readout__state--fault",
+    );
   });
 
   it("reads a refusal in plain text, since nothing failed", () => {
@@ -327,10 +374,25 @@ describe("CensusReadout", () => {
       reason: "no such universe",
     });
 
-    expect(within(summary()).getByText("REJECTED: no such universe")).toHaveClass(
+    expect(within(summary()).getByText(statusLine("REJECTED: no such universe"))).toHaveClass(
       "census-readout__state",
       { exact: true },
     );
+  });
+
+  it("sets a refusal's state and the server's reason as two parts in the census region", () => {
+    renderReadout(TWO_SYSTEMS, {
+      kind: "rejected",
+      code: "unknown_universe",
+      reason: "no such universe",
+    });
+
+    const state = within(summary()).getByText("REJECTED:");
+    expect([
+      state.className,
+      state.nextElementSibling?.className,
+      state.parentElement?.className,
+    ]).toEqual(["status-text__state", "status-text__sentence", "census-readout__state"]);
   });
 
   it("reads the census layer by layer with its position and total, the head kept in view", async () => {
@@ -356,11 +418,40 @@ describe("CensusReadout", () => {
     expect(rowText(rows, 2)).toEqual(["C", "0.75 – 2.5", "1.4", "1", "INCLUDED"]);
   });
 
-  it("marks the answer stale once the link no longer backs it", () => {
+  it("marks the answer stale once the link no longer backs it, one S after each value", () => {
     renderReadout(TWO_SYSTEMS, undefined, { stale: true });
 
-    expect(screen.getByText("IN RANGE").nextElementSibling).toHaveTextContent("1 S");
-    expect(screen.getByText("stale")).toBeInTheDocument();
+    // After the complete line's mass and its drawn unit, whose letter is `M` before the drawn sign,
+    // and after each count (plan 05, P05.T14).
+    expect(screen.getByText(/COMPLETE ABOVE/u)).toHaveTextContent(
+      /^COMPLETE ABOVE [\d.]+ M S\s*stale$/u,
+    );
+    expect(screen.getByText("SYSTEMS").nextElementSibling).toHaveTextContent(/^2 S\s*stale$/u);
+    expect(screen.getByText("IN RANGE").nextElementSibling).toHaveTextContent(/^1 S\s*stale$/u);
+    expect(within(summary()).getAllByText("stale")).toHaveLength(3);
+  });
+
+  it("sets a stale filtered count's S after its figure and before the filter's words", () => {
+    renderReadout(TWO_SYSTEMS, undefined, { stale: true, starFilter: "remnants" });
+
+    expect(screen.getByText("SYSTEMS").nextElementSibling).toHaveTextContent(
+      /^0 OF 2 S\s*stale SHOWN: REMNANTS$/u,
+    );
+  });
+
+  it("puts no S after NOTHING FITS, a caution and not a value", () => {
+    renderReadout(aChart({ overLimit: ["a", "b", "c", "d", "e"] }), undefined, { stale: true });
+
+    expect(screen.getByText(statusLine("NOTHING FITS: reduce radius"))).not.toHaveTextContent(
+      /stale/u,
+    );
+  });
+
+  it("puts no S anywhere while the answer is live", () => {
+    renderReadout(TWO_SYSTEMS, undefined, { starFilter: "remnants" });
+
+    expect(within(summary()).queryByText("stale")).not.toBeInTheDocument();
+    expect(within(summary()).queryByText("S")).not.toBeInTheDocument();
   });
 
   it("shows no census before the first answer", () => {
@@ -402,5 +493,76 @@ describe("CensusReadout's substellar layers (plan 13, P13.T8.c)", () => {
     expect(
       planets && within(planets).getByRole("img", { name: "Earth masses" }),
     ).toBeInTheDocument();
+  });
+});
+
+describe("CensusReadout's growing enums (plan 04's reserved list)", () => {
+  /** The census table's rows, below its head, once opened. */
+  async function tableRows(result: ChartResult): Promise<ReadonlyArray<HTMLElement>> {
+    const user = userEvent.setup();
+    renderReadout(result);
+    await user.click(screen.getByRole("button", { name: "CENSUS BY LAYER" }));
+    return within(screen.getByRole("table")).getAllByRole("row").slice(1);
+  }
+
+  it("names a layer this build does not know UNLISTED LAYER, never Missing, placed by its band", async () => {
+    // Its band, 1.0E-9 to 1.0E-6 M☉, starts below layer A's, so it is listed first.
+    const rows = await tableRows(
+      toChartResult(withCensusLine(aSystemsInRange({ centreLy: CENTRE }), anUnknownLayerLine())),
+    );
+
+    expect(rows).toHaveLength(6);
+    expect(rowText(rows, 0)).toEqual(["UNLISTED LAYER", "2.4", "2", "INCLUDED"]);
+    expect(rowText(rows, 1)[0]).toBe("A");
+    expect(
+      within(screen.getByRole("table")).getByRole("rowheader", { name: "UNLISTED LAYER" }),
+    ).toBeInTheDocument();
+    expect(rows[0] && within(rows[0]).queryByText("—")).toBeNull();
+  });
+
+  it("lists a layer this build does not know after a lighter known one", async () => {
+    const heavy = { ...anUnknownLayerLine(), mass_min_msun: 150, mass_max_msun: 300 };
+    const rows = await tableRows(
+      toChartResult(withCensusLine(aSystemsInRange({ centreLy: CENTRE }), heavy)),
+    );
+
+    expect(rows.map((_, index) => rowText(rows, index)[0])).toEqual([
+      "A",
+      "B",
+      "C",
+      "D",
+      "E",
+      "UNLISTED LAYER",
+    ]);
+  });
+
+  it("reads a status this build does not know as Missing", async () => {
+    const line = anUnknownLayerLine(anUnknownLayerStatus());
+    const rows = await tableRows(
+      toChartResult(withCensusLine(aSystemsInRange({ centreLy: CENTRE }), line)),
+    );
+    const [status] = rows[0] === undefined ? [] : within(rows[0]).getAllByRole("cell").slice(-1);
+
+    expect(rowText(rows, 0)[3]).toBe("—");
+    expect(status && within(status).getByText("—")).toHaveClass("readout__missing");
+  });
+
+  it("reads the census's edge as Missing where such a layer is the lightest included", () => {
+    renderReadout(
+      toChartResult(withCensusLine(aSystemsInRange({ centreLy: CENTRE }), anUnknownLayerLine())),
+    );
+
+    expect(summary()).toHaveTextContent("COMPLETE ABOVE —");
+    expect(within(summary()).getByText("—")).toHaveClass("readout__missing");
+  });
+
+  it("puts no S after a Missing edge, which has no last value", () => {
+    renderReadout(
+      toChartResult(withCensusLine(aSystemsInRange({ centreLy: CENTRE }), anUnknownLayerLine())),
+      undefined,
+      { stale: true },
+    );
+
+    expect(screen.getByText(/COMPLETE ABOVE/u)).toHaveTextContent(/^COMPLETE ABOVE —$/u);
   });
 });

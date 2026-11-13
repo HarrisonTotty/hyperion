@@ -8,8 +8,8 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run"
+    "typecheck": "node ../../tools/node-floor/check.cjs && tsc --noEmit -p tsconfig.json",
+    "test": "node ../../tools/node-floor/check.cjs && vitest run"
   },
   "devDependencies": {
     "vitest": "^5.0.1"

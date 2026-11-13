@@ -1,0 +1,4 @@
+# Pinned figures (hyperion_testkit::pins): re-pin them by test name with `just repin <test>`.
+the_plains_cold_traps_follow_the_ray_traces.co2.sigma_11_3deg = 0.000448
+the_plains_cold_traps_follow_the_ray_traces.co2.sigma_16_7deg = 0.000409
+the_plains_cold_traps_follow_the_ray_traces.water.sigma_26_6deg = 0.0348

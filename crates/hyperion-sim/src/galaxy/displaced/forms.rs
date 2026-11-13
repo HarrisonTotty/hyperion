@@ -8,8 +8,10 @@
 //! speed `v_c` ([`GalaxyScales`]). [`FlaredLayerParams`] and [`CoredPowerLawParams`] are one row
 //! of it each; the density types here carry them into light-years for one galaxy.
 //!
-//! - [`FlaredLayer`]: `exp(−R ÷ h_R) × exp(−(|z| ÷ h)^β) ÷ h` with `h = h₀ exp(R ÷ r_flare)`, the
-//!   disc-born classes' layer. Its vertical integral is `2Γ(1 + 1 ÷ β)` at every radius.
+//! - [`FlaredLayer`]: `exp(−R_h ÷ R − R ÷ h_R) × exp(−(|z| ÷ h)^β) ÷ h` with `h = h₀ exp(R ÷
+//!   r_flare)`, the disc-born classes' layer, with the thin disc's own central hole `R_h` (none at
+//!   0; [`fields::disc`](crate::galaxy::fields::disc)). Its vertical integral is `2Γ(1 + 1 ÷ β)` at
+//!   every radius.
 //! - [`CoredPowerLaw`]: `(1 + (R² + z² ÷ q²) ÷ a²)^(−γ ÷ 2)`, the spheroid of every class.
 //! - [`BallisticLayer`]: for the two youngest age bins (τ < 0.3 `R_d ÷ v_c`) the brainstorm's
 //!   analytic form replaces the fitted layer: the young disc's own envelope, its height widened to
@@ -40,8 +42,8 @@ use crate::coords::ROOT_HALF_WIDTH_LY;
 use crate::galaxy::PointLy;
 use crate::galaxy::Population;
 use crate::galaxy::bounds::{ScalarRange, UnimodalFactor};
-use crate::galaxy::fields::arms::SharpArm;
-use crate::galaxy::fields::disc::ExponentialDisc;
+use crate::galaxy::fields::arms::{ArmGeometry, ArmPoint, SharpArm};
+use crate::galaxy::fields::disc::{ExponentialDisc, radial_exponent};
 use crate::galaxy::fields::{BuildFieldError, Fields, Shape};
 use crate::math;
 use crate::tables::gauss_legendre::{GL8_NODES, GL8_WEIGHTS};
@@ -119,8 +121,9 @@ impl From<BuildFieldError> for BuildFormError {
     }
 }
 
-/// One flared layer of plan 15's table, dimensionless: `weight × exp(−R ÷ h_r) × exp(−(|z| ÷
-/// h)^β) ÷ h` with `h = h_0 exp(R ÷ r_flare)`, lengths in `R_d` (P15.T6's `FlaredLayer`).
+/// One flared layer of plan 15's table, dimensionless: `weight × exp(−hole ÷ R − R ÷ h_r) ×
+/// exp(−(|z| ÷ h)^β) ÷ h` with `h = h_0 exp(R ÷ r_flare)`, lengths in `R_d` (P15.T6's
+/// `FlaredLayer`, with P15.T6.c's central hole).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FlaredLayerParams {
     /// The layer's share of the class's bound members inside the cube, 0–1.
@@ -133,6 +136,9 @@ pub struct FlaredLayerParams {
     pub r_flare: f64,
     /// The vertical profile's exponent β.
     pub beta: f64,
+    /// The central hole `R_h`, `R_d`: the thin disc's own form of hole, `exp(−R_h ÷ R)` on the
+    /// radial factor (plan 02, ruling 32), which the remnants born in it keep; 0 for none.
+    pub hole: f64,
 }
 
 /// One cored power law of plan 15's table, dimensionless: `weight × (1 + (R² + z² ÷ q²) ÷
@@ -148,6 +154,11 @@ pub struct CoredPowerLawParams {
     /// The slope γ of the density's fall, far out.
     pub gamma: f64,
 }
+
+/// How deep in `(|z| ÷ h)^β` the cube's face must lie for a flared layer's column through the
+/// cube to take the closed form through the whole of z: 40, past which the profile's tail is under
+/// `e^−40`, some 4 × 10⁻¹⁸ of the column (the map's face-on view, P08.T12.a).
+const CLOSED_COLUMN_DEPTH: f64 = 40.0;
 
 /// The cube's half-width L, ly.
 fn half_width() -> f64 {
@@ -236,10 +247,12 @@ fn inverse(integral: f64, quantity: &'static str) -> Result<f64, BuildFormError>
 /// # fn main() -> Result<(), hyperion_sim::galaxy::displaced::forms::BuildFormError> {
 /// let params = GalaxyParams::milky_way_like();
 /// let scales = GalaxyScales::new(&params, &PotentialTables::in_plane(&MassModel::new(&params)));
-/// let row = FlaredLayerParams { weight: 1.0, h_r: 1.2, h_0: 0.05, r_flare: 4.0, beta: 1.3 };
+/// let row = FlaredLayerParams { weight: 1.0, h_r: 1.2, h_0: 0.05, r_flare: 4.0, beta: 1.3, hole: 0.5 };
 /// let layer = FlaredLayer::new(&row, &scales)?;
 /// // The layer flares: it is taller at the Sun than at the centre.
 /// assert!(layer.scale_height(26_000.0) > layer.scale_height(0.0));
+/// // And it has a central hole: nothing on the axis.
+/// assert_eq!(layer.radial(0.0), 0.0);
 /// # Ok(())
 /// # }
 /// ```
@@ -247,6 +260,8 @@ fn inverse(integral: f64, quantity: &'static str) -> Result<f64, BuildFormError>
 pub struct FlaredLayer {
     /// `1 ÷ h_R`, ly⁻¹.
     inv_h_r: f64,
+    /// The central hole `R_h`, ly; +0 for none.
+    hole_ly: f64,
     /// `h₀`, ly.
     h_0: f64,
     /// `1 ÷ r_flare`, ly⁻¹.
@@ -261,16 +276,24 @@ impl FlaredLayer {
     ///
     /// # Errors
     ///
-    /// [`BuildFormError`] if a length or β is not positive and finite, or the layer's integral over
-    /// the cube is not.
+    /// [`BuildFormError`] if a length or β is not positive and finite, the hole is negative or not
+    /// finite, or the layer's integral over the cube is not positive and finite.
     pub fn new(row: &FlaredLayerParams, scales: &GalaxyScales) -> Result<Self, BuildFormError> {
         BuildFormError::check_positive("radial scale", row.h_r)?;
         BuildFormError::check_positive("scale height", row.h_0)?;
         BuildFormError::check_positive("flare radius", row.r_flare)?;
         BuildFormError::check_positive("beta", row.beta)?;
+        if !(row.hole.is_finite() && row.hole >= 0.0) {
+            return Err(BuildFormError {
+                quantity: "hole",
+                value: row.hole,
+            });
+        }
         let r_d = scales.r_d().value();
         let mut layer = Self {
             inv_h_r: 1.0 / (row.h_r * r_d),
+            // −0 is no hole, stored as +0, so that the bound's peak is never −0.
+            hole_ly: if row.hole > 0.0 { row.hole * r_d } else { 0.0 },
             h_0: row.h_0 * r_d,
             inv_r_flare: 1.0 / (row.r_flare * r_d),
             beta: row.beta,
@@ -286,10 +309,36 @@ impl FlaredLayer {
         self.h_0 * math::exp(r * self.inv_r_flare)
     }
 
-    /// The radial envelope `exp(−R ÷ h_R)` at `r` (ly).
+    /// The radial envelope `exp(−R_h ÷ R − R ÷ h_R)` at `r` (ly, not negative): 0 on the axis for a
+    /// holed layer, `exp(−R ÷ h_R)` bit for bit for one without a hole.
     #[must_use]
     pub fn radial(&self, r: f64) -> f64 {
-        math::exp(-r * self.inv_h_r)
+        math::exp(-radial_exponent(r, self.inv_h_r, self.hole_ly))
+    }
+
+    /// The radial envelope's supremum over the radii `range` (ly): its value at the range's radius
+    /// nearest its peak, `√(R_h h_R)`, since it rises to the peak and falls beyond it; at
+    /// `range.lo` for a layer without a hole, bit for bit.
+    #[must_use]
+    pub fn radial_sup(&self, range: ScalarRange) -> f64 {
+        if self.hole_ly <= 0.0 {
+            return self.radial(range.lo);
+        }
+        let peak = (self.hole_ly / self.inv_h_r).sqrt();
+        let at = if peak < range.lo {
+            range.lo
+        } else if peak > range.hi {
+            range.hi
+        } else {
+            peak
+        };
+        self.radial(at)
+    }
+
+    /// The central hole `R_h`, ly; 0 for none.
+    #[must_use]
+    pub fn hole_ly(&self) -> f64 {
+        self.hole_ly
     }
 
     /// The vertical factor `exp(−(|z| ÷ h)^β) ÷ h` at height `z` for scale height `h` (ly), ly⁻¹.
@@ -323,8 +372,8 @@ impl FlaredLayer {
     }
 
     /// The unnormalised form's column through the whole of z at radius `r` (ly), by quadrature
-    /// over the vertical factor from 0 to 256 scale heights: `exp(−R ÷ h_R) × 2Γ(1 + 1 ÷ β)` to
-    /// the quadrature's accuracy (module documentation).
+    /// over the vertical factor from 0 to 256 scale heights: [`radial`](Self::radial)`(r) × 2Γ(1 +
+    /// 1 ÷ β)` to the quadrature's accuracy (module documentation).
     #[must_use]
     pub fn column(&self, r: f64) -> f64 {
         let h = self.scale_height(r);
@@ -337,13 +386,48 @@ impl FlaredLayer {
     /// The density at `p`, ly⁻³: unit integral over the root cube.
     #[must_use]
     pub fn density(&self, p: &PointLy) -> f64 {
-        self.norm * self.shape(math::hypot(p.x, p.y), p.z)
+        self.density_at_radius(math::hypot(p.x, p.y), p.z)
+    }
+
+    /// [`density`](Self::density) at the cylindrical radius `r` (ly) and height `z` (ly), for a
+    /// caller that has the radius already ([`FormPoint`]).
+    #[must_use]
+    fn density_at_radius(&self, r: f64, z: f64) -> f64 {
+        self.norm * self.shape(r, z)
+    }
+
+    /// [`density`](Self::density) at the height `z` (ly) over a radius whose radial envelope
+    /// ([`radial`](Self::radial)) is `radial` and whose scale height
+    /// ([`scale_height`](Self::scale_height)) is `h` (ly), bit for bit: for a quadrature that takes
+    /// many heights over each radius and finds those two once (the map's edge-on view).
+    #[must_use]
+    pub(crate) fn density_from(&self, radial: f64, h: f64, z: f64) -> f64 {
+        self.norm * (radial * self.vertical(h, z))
     }
 
     /// The normalisation, the inverse of the unnormalised form's integral over the cube, ly⁻³.
     #[must_use]
     pub fn norm(&self) -> f64 {
         self.norm
+    }
+
+    /// The normalised density's column through the root cube, `|z| ≤ L`, at radius `r` (ly), ly⁻²
+    /// (the map's face-on view, P08.T12.a). Where the cube's face is past [`CLOSED_COLUMN_DEPTH`]
+    /// of the profile's `(|z| ÷ h)^β`, it is the column through the whole of z in closed form,
+    /// `norm × exp(−R ÷ h_R) × 2Γ(1 + 1 ÷ β)`, since the vertical factor's integral is `2Γ(1 + 1 ÷
+    /// β)` at every radius and what lies beyond is under `e^−40` of it. A layer that flares to
+    /// within that of the face takes [`gl32`](crate::galaxy::quad::gl32) over `[0, L]` instead,
+    /// where `(z ÷ h)^β` is then at most 40 and the integrand smooth.
+    #[must_use]
+    pub(crate) fn normalised_column(&self, r: f64) -> f64 {
+        let l = half_width();
+        let h = self.scale_height(r);
+        let vertical = if math::powf_positive(l / h, self.beta) > CLOSED_COLUMN_DEPTH {
+            2.0 * math::gamma(1.0 + 1.0 / self.beta)
+        } else {
+            2.0 * crate::galaxy::quad::gl32(|z| self.vertical(h, z), 0.0, l)
+        };
+        self.norm * self.radial(r) * vertical
     }
 
     /// The flare factor over the heights `h(R)` of a cell's radii: [`FlareFactor`] at the cell's
@@ -408,13 +492,46 @@ impl CoredPowerLaw {
     /// The density at `p`, ly⁻³: unit integral over the root cube.
     #[must_use]
     pub fn density(&self, p: &PointLy) -> f64 {
-        self.norm * self.shape(math::hypot(p.x, p.y), p.z)
+        self.density_at_radius(math::hypot(p.x, p.y), p.z)
+    }
+
+    /// [`density`](Self::density) at the cylindrical radius `r` (ly) and height `z` (ly), for a
+    /// caller that has the radius already ([`FormPoint`]).
+    #[must_use]
+    pub(crate) fn density_at_radius(&self, r: f64, z: f64) -> f64 {
+        self.norm * self.shape(r, z)
     }
 
     /// The normalisation, ly⁻³.
     #[must_use]
     pub fn norm(&self) -> f64 {
         self.norm
+    }
+
+    /// The scale on which the spheroid falls in z on the axis, `q a`, ly.
+    #[must_use]
+    pub(crate) fn vertical_scale(&self) -> f64 {
+        1.0 / (self.inv_a_sq * self.inv_q_sq).sqrt()
+    }
+
+    /// The normalised density's column through the root cube, `|z| ≤ L`, at radius `r` (ly), ly⁻²:
+    /// `2 ∫₀^L` by [`gl32`](crate::galaxy::quad::gl32) in `u` with `z = s u ÷ (1 − c u)`, `s = q
+    /// √(a² + R²)` and `c = 1 − s ÷ L`, the substitution plan 02's map takes for a halo
+    /// component's chord (`map.rs`, `halo_face_on`), here over the cube's height.
+    #[must_use]
+    pub(crate) fn normalised_column(&self, r: f64) -> f64 {
+        let l = half_width();
+        let scale = (self.inv_a_sq.recip() + r * r).sqrt() / self.inv_q_sq.sqrt();
+        let bend = 1.0 - scale / l;
+        let column = crate::galaxy::quad::gl32(
+            |u| {
+                let rest = 1.0 - bend * u;
+                self.shape(r, scale * u / rest) * scale / (rest * rest)
+            },
+            0.0,
+            1.0,
+        );
+        2.0 * self.norm * column
     }
 }
 
@@ -555,17 +672,55 @@ impl BallisticLayer {
     /// arm's azimuthal mean.
     #[must_use]
     pub fn density(&self, p: &PointLy) -> f64 {
-        let envelope = self.norm * self.envelope(math::hypot(p.x, p.y), p.z);
+        self.density_at(&FormPoint::new(p, None))
+    }
+
+    /// [`density`](Self::density), bit for bit, at the point `at` with what it shares.
+    #[must_use]
+    fn density_at(&self, at: &FormPoint<'_>) -> f64 {
+        let envelope = self.norm * self.envelope(at.r, at.p.z);
         match &self.arm {
-            Some(arm) => envelope * arm.factor(&arm.geometry().point(p.x, p.y)),
+            Some(arm) => envelope * arm.factor(&at.arm_point(arm.geometry())),
             None => envelope,
         }
+    }
+
+    /// The radius's part of the normalised envelope at the cylindrical radius `r` (ly): the young
+    /// disc's `R ÷ L`, with its hole's `R_h ÷ R`, for [`envelope_from`](Self::envelope_from).
+    #[must_use]
+    pub(crate) fn radial_exponent(&self, r: f64) -> f64 {
+        radial_exponent(r, 1.0 / self.disc.length().value(), self.disc.hole_ly())
+    }
+
+    /// The height's part of the normalised envelope at `z` (ly, either side of the plane): the
+    /// young disc's vertical exponent at the squeezed height, for
+    /// [`envelope_from`](Self::envelope_from).
+    #[must_use]
+    pub(crate) fn height_exponent(&self, z: f64) -> f64 {
+        self.disc.profile().exponent(z * self.squeeze)
+    }
+
+    /// The normalised envelope, [`density`](Self::density) without the arm factor, bit for bit,
+    /// from its radius's part `radial` ([`radial_exponent`](Self::radial_exponent)) and its
+    /// height's `height` ([`height_exponent`](Self::height_exponent)), ly⁻³: for a quadrature that
+    /// takes many heights over each radius and finds each part once (the map's edge-on view).
+    #[must_use]
+    pub(crate) fn envelope_from(&self, radial: f64, height: f64) -> f64 {
+        self.norm * (self.squeeze * (self.disc.n0() * math::exp(-(radial + height))))
     }
 
     /// The normalisation, ly⁻³.
     #[must_use]
     pub fn norm(&self) -> f64 {
         self.norm
+    }
+
+    /// The normalised envelope's column through the whole of z at radius `r` (ly), ly⁻², without
+    /// the arm: the young disc's own column, `2 h_young` times its envelope in the plane, since the
+    /// stretch keeps the column (the map's face-on view, P08.T12.a).
+    #[must_use]
+    pub(crate) fn normalised_column(&self, r: f64) -> f64 {
+        self.norm * (2.0 * self.disc.height().value() * self.disc.envelope(r, 0.0))
     }
 
     /// An upper bound on the normalised envelope (no arm) over radii `r_min` to `r_max` at heights
@@ -575,6 +730,51 @@ impl BallisticLayer {
     pub(crate) fn envelope_sup(&self, r_min: f64, r_max: f64, z_min: f64) -> f64 {
         let height = crate::galaxy::fields::vertical::locate(z_min * self.squeeze);
         self.norm * (self.squeeze * self.disc.envelope_sup(r_min, r_max, height))
+    }
+}
+
+/// What every class's form reads alike at one point (P08.T12's census, which takes every
+/// class's form at each of its nodes): the point, its cylindrical radius, and its arm point on one
+/// geometry, which the young disc's arm and every arm blurred from it share. A form whose arm has
+/// another geometry finds its own point, so a form's density at a `FormPoint` is its density at
+/// the point, bit for bit.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct FormPoint<'p> {
+    p: &'p PointLy,
+    r: f64,
+    arm: Option<(ArmGeometry, ArmPoint)>,
+}
+
+impl<'p> FormPoint<'p> {
+    /// The point `p`, with its arm point on `geometry` found once, if one is given.
+    #[must_use]
+    pub(crate) fn new(p: &'p PointLy, geometry: Option<&ArmGeometry>) -> Self {
+        Self {
+            p,
+            r: math::hypot(p.x, p.y),
+            arm: geometry.map(|g| (*g, g.point(p.x, p.y))),
+        }
+    }
+
+    /// The point's cylindrical radius, ly.
+    #[must_use]
+    pub(crate) const fn radius(&self) -> f64 {
+        self.r
+    }
+
+    /// The point's height, ly.
+    #[must_use]
+    pub(crate) const fn z(&self) -> f64 {
+        self.p.z
+    }
+
+    /// The point's arm point on `geometry`: the shared one where it is that geometry's.
+    #[must_use]
+    fn arm_point(&self, geometry: &ArmGeometry) -> ArmPoint {
+        match &self.arm {
+            Some((shared, point)) if shared == geometry => *point,
+            Some(_) | None => geometry.point(self.p.x, self.p.y),
+        }
     }
 }
 
@@ -644,8 +844,14 @@ impl DiscBornForm {
     /// The density at `p`, ly⁻³.
     #[must_use]
     pub fn density(&self, p: &PointLy) -> f64 {
+        self.density_at(&FormPoint::new(p, None))
+    }
+
+    /// [`density`](Self::density), bit for bit, at the point `at` with what it shares.
+    #[must_use]
+    pub(crate) fn density_at(&self, at: &FormPoint<'_>) -> f64 {
         match self {
-            Self::Ballistic(layer) => layer.density(p),
+            Self::Ballistic(layer) => layer.density_at(at),
             Self::Fitted {
                 layer,
                 arm,
@@ -654,11 +860,22 @@ impl DiscBornForm {
                 let flat = layer.as_ref().map_or(0.0, |(w, l)| {
                     let arm_factor = arm
                         .as_ref()
-                        .map_or(1.0, |a| a.factor(&a.geometry().point(p.x, p.y)));
-                    w * l.density(p) * arm_factor
+                        .map_or(1.0, |a| a.factor(&at.arm_point(a.geometry())));
+                    w * l.density_at_radius(at.r, at.p.z) * arm_factor
                 });
-                flat + spheroid.as_ref().map_or(0.0, |(w, s)| w * s.density(p))
+                flat + spheroid
+                    .as_ref()
+                    .map_or(0.0, |(w, s)| w * s.density_at_radius(at.r, at.p.z))
             }
+        }
+    }
+
+    /// The geometry of its arm, if it keeps one.
+    #[must_use]
+    pub(crate) fn arm_geometry(&self) -> Option<&ArmGeometry> {
+        match self {
+            Self::Ballistic(layer) => layer.arm.as_ref().map(SharpArm::geometry),
+            Self::Fitted { arm, .. } => arm.as_ref().map(SharpArm::geometry),
         }
     }
 

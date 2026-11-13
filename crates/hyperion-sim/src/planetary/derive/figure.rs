@@ -113,21 +113,24 @@ pub enum FigureLaw {
 /// What a body's heights are measured from (P14.T46.e).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Datum {
-    /// The solid or liquid surface.
+    /// The solid or liquid surface, or, under a supercritical envelope (P14.T53.b), the top of its
+    /// liquid-like reservoir.
     SolidSurface,
     /// The 1-bar level of a hydrogen and helium envelope, which its radius is quoted at.
     OneBar,
 }
 
 impl Datum {
-    /// The datum of a body of class `class`: [`OneBar`](Self::OneBar) for a sub-Neptune, an ice
-    /// giant or a gas giant, whose radius is its envelope's, [`SolidSurface`](Self::SolidSurface)
-    /// otherwise.
+    /// The datum of a body of class `class`: [`SolidSurface`](Self::SolidSurface) for a class
+    /// with a solid surface ([`PlanetClass::has_solid_surface`], P14.T48.e), and
+    /// [`OneBar`](Self::OneBar) for a sub-Neptune, an ice giant or a gas giant, whose radius is
+    /// its envelope's.
     #[must_use]
     pub const fn of(class: PlanetClass) -> Self {
-        match class {
-            PlanetClass::Rocky | PlanetClass::Icy => Self::SolidSurface,
-            PlanetClass::SubNeptune | PlanetClass::IceGiant | PlanetClass::GasGiant => Self::OneBar,
+        if class.has_solid_surface() {
+            Self::SolidSurface
+        } else {
+            Self::OneBar
         }
     }
 }
@@ -171,6 +174,8 @@ impl BodyFigure {
     #[must_use]
     pub fn derive(inputs: &FigureInputs) -> Self {
         let moment_factor = moment_of_inertia_factor(inputs.class, &inputs.fractions);
+        // The interior's rheology sets the threshold, so it reads the bulk, not the published
+        // surface: an ice bulk under its heated shell's rock lag (P14.T56.g) is still ice inside.
         let threshold = match SurfaceMaterial::of(&inputs.fractions) {
             SurfaceMaterial::Ice => HYDROSTATIC_RADIUS_ICE,
             SurfaceMaterial::Rock => HYDROSTATIC_RADIUS_ROCK,

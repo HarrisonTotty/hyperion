@@ -230,10 +230,24 @@ fn member_lines(w: &mut GoldenWriter) {
             id_line(w, &format!("dwarf core {number} {slot:?}"), id.into());
         }
     }
+    // A dwarf core's index in a cell is 24 bits (P10.T7.b).
+    for index in [8_192, DwarfCoreMemberId::INDEX_LIMIT - 1] {
+        let slot = MemberSlot::InCell {
+            band: Layer::RoguePlanet,
+            level: 7,
+            cell: [15, 0, 15],
+            index,
+        };
+        let id = DwarfCoreMemberId::new(3, slot).unwrap();
+        id_line(w, &format!("dwarf core 3 {slot:?}"), id.into());
+    }
     w.line("");
     for slot in [
         MemberSlot::FeatureLevel { index: 0 },
         MemberSlot::FeatureLevel { index: 1 },
+        // The centre's list index is 16 bits (P11.T8.e.b).
+        MemberSlot::FeatureLevel { index: 8_192 },
+        MemberSlot::FeatureLevel { index: 65_535 },
         MemberSlot::InCell {
             band: Layer::A,
             level: 9,
@@ -339,8 +353,8 @@ fn id_layouts_are_pinned() {
 fn domain_tags_are_pinned() {
     let mut w = writer();
     // The foundation's registry, the surface crate's, then the sim's (plan R04, Design note 4):
-    // today's order byte for byte, since `selftest.stream`, the foundation's one tag, was the single
-    // registry's first, and the surface crate's registry is empty until R05 and R09.
+    // the single registry's order byte for byte, since `selftest.stream`, the foundation's one tag,
+    // was its first, with the surface crate's tags (R05's, then R09's) after it.
     let registries = [
         hyperion_base::rng::tags::ALL,
         hyperion_surface::tags::ALL,

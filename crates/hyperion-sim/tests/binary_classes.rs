@@ -25,8 +25,8 @@ use hyperion_sim::id::{BodyId, Layer, SystemId};
 use hyperion_sim::math;
 use hyperion_sim::orbit::{Eccentricity, KeplerElements, Orientation, peters_merger_time};
 use hyperion_sim::stellar::binary::{
-    AGE_OF_UNIVERSE, BinaryClass, BinaryInput, BinaryTimeline, Component, SupernovaRecord,
-    can_interact, evolve,
+    AGE_OF_UNIVERSE, BinaryClass, BinaryInput, BinaryTimeline, Component, SegmentKind,
+    SupernovaRecord, can_interact, evolve,
 };
 use hyperion_sim::stellar::draws::StarDraws;
 use hyperion_sim::stellar::multiplicity::{MultiplicityModel, stripped_mark_min_mass};
@@ -440,4 +440,311 @@ fn pulsars_recycled_beside_heavy_companions_are_mildly_recycled() {
         (10.0..=50.0).contains(&period),
         "median period {period:.1} ms beside heavy companions, outside 10–50 ms"
     );
+}
+
+/// P11.T4.l (ruling p11-supernova-pins of 2026-10-06), as P11.T10's fix leaves it: a kicked wide
+/// pair whose new orbit can interact. Layer-E prior pair 17367 (12.18 + 10.23 M☉ at 36,708 d,
+/// e 0.77) is passed over by the pre-test to the age of the universe, its drawn periastron out of
+/// the giants' reach. From 27 the engine runs it from its start, since its primary dies by the age
+/// it is run to (P11.T10's fix): every segment before the collapse is detached. Its primary's
+/// neutron star, born at 21.46 Myr, is kicked onto an orbit of e 0.975, whose periastron the
+/// companion reaches as a giant: a common envelope at 28.01 Myr from the companion's early AGB,
+/// after which its helium star feeds the neutron star. A run to 25 Myr, before the giant, is the
+/// full run's to then, bit for bit, states and record. (Until 27 the test read pair 35928, which
+/// P11.T4.l's closed form ran from its collapse on its drawn orbit: from 27 the engine's orbit,
+/// widened by the winds before the collapse, leaves it unbound by its kick. The ruling's pair 6441,
+/// at version 21, went the same way; a search of 10⁵ layer-E prior pairs found seven such pairs at
+/// version 23, 17367 among them, and three at 27, 4236, 17367 and 57273, of which 17367 alone is
+/// fed after its envelope.)
+#[test]
+fn a_kicked_wide_pair_that_closes_is_run_from_its_collapse() {
+    let (lo, hi, _) = LAYERS[4];
+    let input = prior_pair(4, 17_367, (lo, hi));
+    assert!(!can_interact(&input, AGE_OF_UNIVERSE));
+    let timeline = evolve(&input, AGE_OF_UNIVERSE);
+    let record = timeline.supernovae()[0];
+    assert_eq!(record.component(), Component::Primary);
+    assert_eq!(record.remnant().kind(), RemnantKind::NeutronStar);
+    assert!(record.bound(), "bound by the kick");
+    assert!(record.kick().is_some_and(|k| k.speed().value() > 0.0));
+    let collapse = record.age();
+    assert!((collapse.value() - 21.46e6).abs() < 1.0e4, "{collapse:?}");
+    let segments = timeline.segments();
+    assert!(
+        segments
+            .iter()
+            .filter(|s| s.end() <= collapse)
+            .all(|s| s.kind() == SegmentKind::Detached),
+        "detached to the collapse"
+    );
+    let after = *timeline.state_at(collapse).orbit().expect("bound");
+    assert!(after.eccentricity().value() > 0.97, "{after:?}");
+    let envelope = segments
+        .iter()
+        .find(|s| s.kind() == SegmentKind::CommonEnvelope)
+        .expect("the engine runs the pair to a common envelope");
+    assert!(
+        envelope.start() > collapse && (envelope.start().value() - 28.01e6).abs() < 1.0e5,
+        "{:?}",
+        envelope.start()
+    );
+    let giant = timeline.state_at(Years::new(envelope.start().value() * (1.0 - 1e-9)));
+    assert_eq!(giant.stars()[1].phase(), Phase::EarlyAgb);
+    assert!(segments.iter().any(|s| s.kind()
+        == SegmentKind::StableTransfer {
+            donor: Component::Secondary
+        }));
+    let until = Years::new(2.5e7);
+    let early = evolve(&input, until);
+    for k in 0..=32_u32 {
+        let age = Years::new(until.value() * f64::from(k) / 32.0);
+        assert_eq!(early.state_at(age), timeline.state_at(age), "at {age:?}");
+    }
+    assert_eq!(early.supernovae(), &timeline.supernovae()[..1]);
+}
+
+/// P11.T4.l (ruling p11-supernova-pins of 2026-10-06, section 3.4): the double-neutron-star class
+/// shown agrees with the double neutron stars the records leave. Every one of the census's 12,000
+/// layer-E prior pairs is run, as `run_pairs` runs a pair that can interact by +H or holds a
+/// remnant by then (every layer-E primary leaves one), and the pairs that ever show the class are
+/// within 15 of those whose two neutron-star records leave them bound (the ruling's probe: 126
+/// against 112). At version 23 a pair the pre-test passed over kept its drawn orbit through both
+/// collapses and showed the class with no record (282 against 115, plan 11's Risks, "Version 21
+/// limit").
+#[test]
+#[ignore = "slow: 12,000 layer-E prior pairs run through the engine or its closed form"]
+fn the_shown_double_neutron_stars_are_the_recorded_ones() {
+    const BAND: usize = 4;
+    const AGREEMENT: usize = 15;
+    let (lo, hi, _) = LAYERS[BAND];
+    let pairs: Vec<u64> = (0..DNS_PAIRS).collect();
+    let counts = shared_out(&pairs, |&index, counts: &mut [usize; 3]| {
+        let input = prior_pair(BAND, index, (lo, hi));
+        let timeline = evolve(&input, AGE_OF_UNIVERSE);
+        let shown = classes_of(&timeline).contains(&BinaryClass::DoubleNeutronStar);
+        let recorded = matches!(
+            two_neutron_stars(&timeline),
+            Some(TwoNeutronStars::Bound { .. })
+        );
+        counts[0] += usize::from(shown);
+        counts[1] += usize::from(recorded);
+        counts[2] += usize::from(!can_interact(&input, AGE_OF_UNIVERSE) && shown);
+    });
+    let [shown, recorded, passed_over] = counts
+        .iter()
+        .fold([0; 3], |[a, b, c], [d, e, f]| [a + d, b + e, c + f]);
+    println!(
+        "{shown} of {DNS_PAIRS} layer-E prior pairs show a double neutron star ({passed_over} of \
+         them passed over by the pre-test), {recorded} leave one by their records"
+    );
+    assert!(
+        shown.abs_diff(recorded) <= AGREEMENT,
+        "{shown} shown against {recorded} recorded"
+    );
+}
+
+/// The layer-E prior pairs whose kicked collapse leaves an orbit the engine takes over (P11.T4.l):
+/// the seven a search of 10⁵ of them found at version 23.
+const TAKEN_OVER: [u64; 7] = [17_367, 29_814, 35_423, 35_928, 57_273, 68_325, 80_075];
+
+/// P11.T4.l, pinned bit for bit (the determinism audit): the closed form's collapses and the
+/// engine's takeovers after them. The seven pairs of [`TAKEN_OVER`] and the first sixteen
+/// layer-E prior pairs the pre-test passes over with a collapse, each run to the age of the
+/// universe, and pair 35928 to 60 Myr too: every segment's kind and bounds, with the stars'
+/// phases and masses and the orbit's axis and eccentricity at its start, and every record's age,
+/// remnant, kick, bound and velocities.
+#[test]
+fn passed_over_collapses_are_pinned() {
+    use hyperion_sim::GENERATOR_VERSION;
+    use hyperion_testkit::golden;
+    use hyperion_testkit::golden::GoldenWriter;
+
+    let (lo, hi, _) = LAYERS[4];
+    let first: Vec<u64> = (0..)
+        .filter(|&index| {
+            let input = prior_pair(4, index, (lo, hi));
+            !can_interact(&input, AGE_OF_UNIVERSE)
+                && !evolve(&input, AGE_OF_UNIVERSE).supernovae().is_empty()
+        })
+        .take(16)
+        .collect();
+    let runs = TAKEN_OVER
+        .iter()
+        .chain(&first)
+        .map(|&index| (index, AGE_OF_UNIVERSE))
+        .chain([(35_928, Years::new(6.0e7))]);
+    let mut w = GoldenWriter::new();
+    w.header(GENERATOR_VERSION.get());
+    for (index, until) in runs {
+        let input = prior_pair(4, index, (lo, hi));
+        let timeline = evolve(&input, until);
+        let [m1, m2] = input.masses().map(SolarMasses::value);
+        w.line(&format!(
+            "pair {index} to {:.4e} yr: {m1:.4} + {m2:.4} M☉, P {:.1} d, e {:.3}, {} segments",
+            until.value(),
+            input.orbit().period().value() / 86_400.0,
+            input.orbit().eccentricity().value(),
+            timeline.segments().len()
+        ));
+        for (k, segment) in timeline.segments().iter().enumerate() {
+            let state = timeline.state_at(segment.start());
+            let [a, b] = state.stars();
+            w.line(&format!(
+                "  segment {k}: {:?}, {:?} | {:?}",
+                segment.kind(),
+                a.phase(),
+                b.phase()
+            ));
+            w.f64(&format!("  segment {k} start, yr"), segment.start().value());
+            w.f64(&format!("  segment {k} end, yr"), segment.end().value());
+            w.f64(&format!("  segment {k} primary, M☉"), a.mass().value());
+            w.f64(&format!("  segment {k} secondary, M☉"), b.mass().value());
+            match state.orbit() {
+                Some(orbit) => {
+                    w.f64(
+                        &format!("  segment {k} axis, m"),
+                        orbit.semi_major_axis().value(),
+                    );
+                    w.f64(&format!("  segment {k} e"), orbit.eccentricity().value());
+                }
+                None => w.line(&format!("  segment {k}: unbound")),
+            }
+        }
+        for (k, record) in timeline.supernovae().iter().enumerate() {
+            w.line(&format!(
+                "  supernova {k}: {:?} into a {:?}, bound {}",
+                record.component(),
+                record.remnant().kind(),
+                record.bound()
+            ));
+            w.f64(&format!("  supernova {k} age, yr"), record.age().value());
+            w.f64(
+                &format!("  supernova {k} remnant, M☉"),
+                record.remnant().mass().value(),
+            );
+            w.f64(
+                &format!("  supernova {k} kick, m/s"),
+                record.kick().map_or(0.0, |kick| kick.speed().value()),
+            );
+            for (c, velocity) in record.velocities().iter().enumerate() {
+                for (axis, v) in velocity.metres_per_second().iter().enumerate() {
+                    w.f64(&format!("  supernova {k} velocity {c}.{axis}, m/s"), *v);
+                }
+            }
+        }
+    }
+    golden!("stellar/passed_over_collapses", w.as_str());
+}
+
+/// The ages at which to read a timeline's stars: every segment's start and middle, and 64 even
+/// ages between, short of `until`.
+fn sample_ages(timeline: &BinaryTimeline, until: Years) -> Vec<Years> {
+    let mut ages: Vec<f64> = timeline
+        .segments()
+        .iter()
+        .flat_map(|s| {
+            let end = s.end().value().min(until.value());
+            [s.start().value(), f64::midpoint(s.start().value(), end)]
+        })
+        .collect();
+    ages.extend((0..64).map(|k| until.value() * f64::from(k) / 64.0));
+    ages.into_iter()
+        .filter(|&age| age < until.value())
+        .map(Years::new)
+        .collect()
+}
+
+/// P11.T4.m (ruling p11-c2-swell of 2026-10-06, §1.2 and §3.4): layer-E prior pairs 1723 (8.84 +
+/// 4.90 M☉ at 696 d) and 8002 (8.61 + 2.69 M☉ at 1,605 d), whose stripped primaries are fed
+/// about 10⁻¹² M☉ yr⁻¹ of hydrogen by their main-sequence companions against winds of 10⁻⁹ M☉
+/// yr⁻¹. Before P11.T4.m every step swelled the helium star into a giant whose envelope was the
+/// placement's miss, which a common envelope or T4.g's strip took off again, until the timeline's
+/// 64 segments capped it short of the pin. Now BSE's gate (`evolv2.f` 1480) refuses the swell: the
+/// helium star stays a helium star from its strip to its pin, where plan 06's neutron star is born
+/// bound, and the timeline is not capped: 10 and 12 segments at 27 (16 and 18 until 27, whose
+/// engine moves both histories).
+#[test]
+fn a_helium_star_fed_less_than_its_wind_stays_a_helium_star() {
+    let (lo, hi, _) = LAYERS[4];
+    for (index, born, remnant, segments) in
+        [(1_723, 36.342e6, 1.188, 10), (8_002, 37.709e6, 1.208, 12)]
+    {
+        let input = prior_pair(4, index, (lo, hi));
+        let timeline = evolve(&input, AGE_OF_UNIVERSE);
+        assert!(!timeline.hit_segment_cap(), "pair {index}");
+        let record = timeline
+            .supernovae()
+            .iter()
+            .find(|r| r.component() == Component::Primary)
+            .unwrap_or_else(|| panic!("pair {index}: the primary's pin is recorded"));
+        let pin = record.age().value();
+        eprintln!(
+            "pair {index}: {} segments, the primary's {:?} of {} M☉ at {pin} yr, bound {}",
+            timeline.segments().len(),
+            record.remnant().kind(),
+            record.remnant().mass().value(),
+            record.bound()
+        );
+        assert!((pin / born - 1.0).abs() < 1e-4, "pair {index}: {pin} yr");
+        assert_eq!(
+            record.remnant().kind(),
+            RemnantKind::NeutronStar,
+            "pair {index}"
+        );
+        assert!(
+            (record.remnant().mass().value() - remnant).abs() < 1e-3,
+            "pair {index}: {:?}",
+            record.remnant().mass()
+        );
+        assert!(record.bound(), "pair {index}");
+        assert!(
+            timeline.segments().len().abs_diff(segments) <= 2,
+            "pair {index}: {} segments",
+            timeline.segments().len()
+        );
+        let helium = |phase: Phase| {
+            matches!(
+                phase,
+                Phase::HeliumMainSequence | Phase::HeliumHertzsprungGap | Phase::HeliumGiantBranch
+            )
+        };
+        let mut ages = sample_ages(&timeline, Years::new(pin));
+        ages.sort_by(|a, b| a.value().total_cmp(&b.value()));
+        let stripped = ages
+            .iter()
+            .position(|&age| helium(timeline.state_at(age).stars()[0].phase()))
+            .unwrap_or_else(|| panic!("pair {index}: a helium star"));
+        for &age in &ages[stripped..] {
+            let primary = timeline.state_at(age).stars()[0];
+            assert!(
+                helium(primary.phase()),
+                "pair {index}: a {:?} primary at {age:?}, stripped by {:?}",
+                primary.phase(),
+                ages[stripped]
+            );
+        }
+    }
+}
+
+/// P11.T4.m (ruling p11-c2-swell of 2026-10-06, §1.4; finding F15): layer-D prior pair 6695
+/// (4.29 + 2.91 M☉ at 4.19 d, Z = 0.0024). Both stars are stripped, and the 1.21 M☉ helium star
+/// feeds helium onto the 0.73 M☉ one near the end of its helium main sequence. Counted as
+/// convectively mixed, the accretor's τ fell by m₀ ÷ m₁ at each step, so each step landed short of
+/// the end and closed a segment, until the timeline's 64 segments capped it at 183.1 Myr. Its
+/// fraction burnt is now kept (BSE `evolv2.f` 1889–1900), and the timeline is not capped.
+#[test]
+fn a_helium_accretor_fed_to_its_end_is_not_capped() {
+    let (lo, hi, _) = LAYERS[3];
+    let input = prior_pair(3, 6_695, (lo, hi));
+    let timeline = evolve(&input, AGE_OF_UNIVERSE);
+    eprintln!(
+        "pair 6695: {} segments, records {:?}",
+        timeline.segments().len(),
+        timeline
+            .supernovae()
+            .iter()
+            .map(|r| (r.component(), r.age().value(), r.remnant().kind()))
+            .collect::<Vec<_>>()
+    );
+    assert!(!timeline.hit_segment_cap());
 }

@@ -429,7 +429,7 @@ fn the_hazard_density_applies_holes_and_clouds_by_the_point_rule() {
     );
     let mut none = Vec::new();
     NoModifiers.modifiers_near_segment(&inside, &outside, &mut none);
-    assert!(none.is_empty());
+    assert_eq!(none, []);
     for p in [inside, outside, centre] {
         assert_same_bits(
             gas.density_with(&p, &none, &mut cache).value(),
@@ -981,9 +981,23 @@ fn a_point_is_nothing_and_the_corona_takes_no_steps() {
 /// P07.T8.b: the realised line keeps the mean. Over 256 seeds the mean extinction of a fixed
 /// 3,000 ly in-plane segment at the Sun's radius agrees with the mean mode's within four standard
 /// errors, at full quality and at a budget of 64 steps; a budget is never exceeded; and a warm
-/// cache changes nothing.
+/// cache changes nothing, on every seed, nor does a cache of no slots against the shared one, on
+/// the last seed of each sixteen.
+///
+/// The fresh cache's line is drawn on 16 seeds at each quality (`decision-test-coverage.md`, N4):
+/// by each of them the shared cache has served at least 15 other seeds, so a cache key that dropped
+/// the seed would still show.
 #[test]
 fn the_realised_line_keeps_the_mean_over_256_seeds() {
+    /// The seeds are this `| n` for n below 256: its low byte is nought, so `seed − SEED_BASE` is
+    /// the seed's index n.
+    const SEED_BASE: u64 = 0x0708_b000_0000_0000;
+    const {
+        assert!(
+            SEED_BASE.trailing_zeros() >= 8,
+            "a seed's index is its low byte"
+        );
+    }
     let fields = milky_way_fields();
     let (a, b) = (
         at([-1_500.0, 26_000.0, 10.0]),
@@ -1007,17 +1021,20 @@ fn the_realised_line_keeps_the_mean_over_256_seeds() {
                 let cold = sightline(&gas, &a, &b, NoiseMode::Realised, quality, &[], &mut cache);
                 let warm = sightline(&gas, &a, &b, NoiseMode::Realised, quality, &[], &mut cache);
                 assert_eq!(cold, warm, "a warm cache changed the line");
-                let fresh = &mut NoiseCache::with_capacity(0);
-                assert_eq!(
-                    cold,
-                    sightline(&gas, &a, &b, NoiseMode::Realised, quality, &[], fresh)
-                );
+                let n = seed.get() - SEED_BASE;
+                if n % 16 == 15 {
+                    let fresh = &mut NoiseCache::with_capacity(0);
+                    assert_eq!(
+                        cold,
+                        sightline(&gas, &a, &b, NoiseMode::Realised, quality, &[], fresh)
+                    );
+                }
                 if let Quality::Budget(steps) = quality {
                     assert!(cold.steps() <= steps.get());
                 }
                 cold.a_v().value()
             },
-            (0..256_u64).map(|n| Seed::new(0x0708_b000_0000_0000 | n)),
+            (0..256_u64).map(|n| Seed::new(SEED_BASE | n)),
         );
         assert!(
             (realised.mean - mean_line.a_v().value()).abs() < 4.0 * realised.standard_error,
@@ -1706,7 +1723,8 @@ fn a_sightline_does_not_depend_on_the_order_of_its_clouds() {
 
 /// P07.T8's integral, bit for bit: eight lines through the fixture's gas — in the plane, to the
 /// centre, out of the disc, through a hole and a cloud — in both modes, at full quality and at 64
-/// steps, and the visual and K horizons from the Sun. P07.T12's `sightlines.golden` is its own.
+/// steps, and the visual and K horizons from the Sun; then two through a hole lined by a wall (plan
+/// 09, P09.T5), across it and ending in its wall. P07.T12's `sightlines.golden` is its own.
 #[test]
 fn gas_extinction_is_pinned() {
     let fields = milky_way_fields();
@@ -1780,5 +1798,48 @@ fn gas_extinction_is_pinned() {
             w.f64(&format!("horizon.{}.{mode:?}", band.name()), reach.value());
         }
     }
+    write_walled_lines(&mut w, &gas, hole, &mut cache);
     golden!("gas/extinction", w.as_str());
+}
+
+/// `gas_extinction_is_pinned`'s two lines through `hole` lined by a wall (plan 09, P09.T5), across
+/// it and ending in its wall, in both modes and at both qualities.
+fn write_walled_lines(
+    w: &mut GoldenWriter,
+    gas: &GasField,
+    hole: GasModifier,
+    cache: &mut NoiseCache,
+) {
+    let sixty_four = Quality::Budget(NonZeroU32::new(64).expect("sixty-four"));
+    let bubble = [
+        hole,
+        GasModifier::Wall {
+            centre: at([0.0, 26_000.0, 50.0]),
+            inner: LightYears::new(180.0),
+            outer: LightYears::new(200.0),
+            density: HydrogenPerCm3::new(2.7),
+            dust_per_hydrogen: 0.95,
+        },
+    ];
+    for (i, (a, b)) in [
+        ([-1_500.0, 26_030.0, 0.0], [1_500.0, 26_030.0, 0.0]),
+        ([-1_500.0, 26_000.0, 50.0], [190.0, 26_000.0, 50.0]),
+    ]
+    .iter()
+    .enumerate()
+    {
+        for (mode_name, mode) in [("mean", NoiseMode::Mean), ("realised", NoiseMode::Realised)] {
+            for (quality_name, quality) in [("full", Quality::Full), ("budget64", sixty_four)] {
+                let line = sightline(gas, &at(*a), &at(*b), mode, quality, &bubble, cache);
+                let label = |name: &str| format!("walled{i}.{mode_name}.{quality_name}.{name}");
+                w.f64(&label("a_v"), line.a_v().value());
+                w.f64(&label("hydrogen_column"), line.hydrogen_column().value());
+                w.f64(
+                    &label("neutral_column"),
+                    line.neutral_hydrogen_column().value(),
+                );
+                w.line(&format!("{} = {}", label("steps"), line.steps()));
+            }
+        }
+    }
 }

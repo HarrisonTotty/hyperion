@@ -10,12 +10,26 @@
  * 2026-10-02). Solar spectral irradiance values derived from ASTM E490-00a(2019), obtained from the
  * U.S. DOE National Laboratory of the Rockies (NLR, formerly NREL); credit DOE/NLR/Alliance. The
  * matching functions: CIE 2019, DOI 10.25039/CIE.DS.xvudnb9b, CC BY-SA 4.0 (see `NOTICE`).
- * R08.T6.d replaces the factors with R07's `starIlluminance` and keeps this file as a 1%
- * luminance check.
+ * Since R08.T6.d the atmosphere draws none of it: a `SunState` carries the sun's per-channel
+ * illuminance from R07's `starIlluminance` through R06's colour, and the tables hold light per
+ * unit of it. This file is kept as the check of that Sun (`solar.test.ts`): the two agree in
+ * luminance but for R06's photopic factor of the Sun's spectrum, 1.037, which puts R06's Sun at
+ * E-490's own {@link E490_ILLUMINANCE_LX} to 0.11%, and the 0.002 mag between R07's Sun (M_V 4.81 at
+ * 1 au, V −26.762) and {@link SUN_APPARENT_V}; their chromaticity difference is recorded in plan
+ * R08's Risks.
  *
- * The tables hold radiance per unit solar spectral irradiance at each channel's wavelength. A
- * table value T_c becomes Rec. 709 luminance as T_c × {@link skyLuminanceScale}()_c; the Sun's own
- * disc as {@link sunIlluminanceRgb}()_c ÷ its solid angle.
+ * Its V-scaled factors take R02's zero point, 2.54 µlx for a V = 0 star whatever its spectrum
+ * (Allen's, Cox 2000; Crumey 2014, §2), which `decision-r08-t6d-findings.md` §5 calls Vega's: a hot
+ * star's lux per unit of V flux, within 0.6% of an A0 spectrum's by R06's table (`lux_per_v0`
+ * 1.006 at 9,500–9,750 K), not the Sun's. Its Sun, 128,479 lx at 1 au, is so 3.7% under R06's
+ * (133,462 lx) and 3.6% under E-490's own (plan R08, R08.T6.j). R06's is right, and the reference
+ * Sun takes it; R05's terrain smoke check (`smoke/terrain.ts`), which draws no atmosphere, keeps
+ * this one, as R08.T6.d left it.
+ *
+ * Under R05 the tables held radiance per unit solar spectral irradiance at each channel's
+ * wavelength (680, 550 and 440 nm): a table value T_c became Rec. 709 luminance as T_c ×
+ * {@link skyLuminanceScale}()_c, and the Sun's own disc {@link sunIlluminanceRgb}()_c ÷ its solid
+ * angle.
  */
 
 import { illuminanceLx } from "../photometry/magnitude";
@@ -46,9 +60,10 @@ export const SKY_SPECTRAL_TO_LUMINANCE: Rgb = [114_566.5, 70_725.83, 69_767.03];
  * E-490's photopic illuminance at 1 au, lx: 683 lm W⁻¹ × ∫ ȳ E dλ over 360–830 nm (generated).
  *
  * @remarks
- * 4% above the 1.28 × 10⁵ lx that R02's V-magnitude photometry gives for V = −26.76;
- * {@link sunIlluminanceRgb} is scaled to the latter, so that the Sun in the atmosphere and the Sun
- * as a star agree.
+ * 3.8% above the 1.28 × 10⁵ lx that R02's V-magnitude photometry gives for V = −26.76 at its
+ * spectrum-blind zero point; {@link sunIlluminanceRgb} is scaled to the latter, so that under R05
+ * the Sun in the atmosphere and the Sun as a star agreed. R06's Sun, which R07's
+ * `sunLikeHostDisc` takes since R08.T6.j, is this to 0.11%.
  */
 export const E490_ILLUMINANCE_LX = 133_318.3;
 

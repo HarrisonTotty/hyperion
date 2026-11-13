@@ -1,0 +1,2 @@
+# Pinned figures (hyperion_testkit::pins): re-pin them by test name with `just repin <test>`.
+the_heavy_donor_transfers_at_its_thermal_rate.figures = [[6.321814151637319e-8, 2926307.766916454], [6.321814151637319e-8, 2926307.766916454]]

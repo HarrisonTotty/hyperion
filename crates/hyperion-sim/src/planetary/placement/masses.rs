@@ -132,7 +132,7 @@
 //! 1–10 days, structurally empty. Above the ceiling a drift-fed member's law now falls as Pascucci
 //! et al.'s (2018, Table 1) mass-ratio function does above its break, dN ÷ d log q ∝ q^−2.9
 //! ([`MASS_TAPER_INDEX`]), never above the member's own law and continuous with it at the ceiling
-//! ([`tapered_log_mass`]), and ends at a giant's
+//! (`tapered_log_mass`), and ends at a giant's
 //! mass, so that a chain's planets stay small planets ([`taper_limit`]). The taper starts at the
 //! ceiling, not at Pascucci et al.'s break (q ≈ 2.8 × 10⁻⁵, 9.3 M⊕ × M★): here the break is the
 //! law's median, Wu's 7.7 M⊕ × M★, which their forward-modelled 7.7 ± 1.7 M⊕ confirms, and the
@@ -234,8 +234,7 @@ use crate::planetary::architecture::template::{
     GroupRole, MassLaw, MassRange, PlanetGroup, ROCKY_MASS_FLOOR,
 };
 use crate::planetary::architecture::{
-    ClassConstraints, DiscCapacity, HostMultiplicity, SUBSTELLAR_LIMIT, ZoneLimit,
-    early_m_dwarf_share,
+    ClassConstraints, DiscCapacity, SUBSTELLAR_LIMIT, ZoneLimit, early_m_dwarf_share,
 };
 use crate::planetary::derive::m_dwarfs::rocky_host_share;
 use crate::planetary::disc::{Disc, DiscProfile};
@@ -1347,7 +1346,7 @@ impl GiantCore {
 /// ```
 #[must_use]
 pub fn giant_core(disc: &Disc, zone: ZoneLimit) -> GiantCore {
-    let capacity = ClassConstraints::new(disc, zone, HostMultiplicity::SingleOrWide).capacity();
+    let capacity = ClassConstraints::new(disc, zone).capacity();
     let profile = match (capacity, disc) {
         (DiscCapacity::None, _) | (_, Disc::None) => return GiantCore::NoDisc,
         (DiscCapacity::SmallPlanets, _) => return GiantCore::TooFewSolids,
@@ -1882,7 +1881,7 @@ mod tests {
         // One still poorer forms none: its budget is under even the innermost member.
         let none = group_masses_from(chain(), &poor(-3.0), &draws);
         assert_eq!(none.cap(), GroupCap::Truncated);
-        assert!(none.masses().is_empty());
+        assert_eq!(none.masses(), []);
         assert!(drift_budget(&poor(-3.0)) < whole.masses()[0]);
         // An ice giant group, drawn from its law, is scaled down whole.
         let ice = &template(ArchitectureClass::SolarLike).groups()[2];
@@ -2063,7 +2062,7 @@ mod tests {
         }];
         let low = group_masses_from(chain(), &disc, &near).masses()[0].value();
         assert!(low > 1.0 && low < 1.001, "{low}");
-        assert!(group_masses_from(chain(), &disc, &[]).masses().is_empty());
+        assert_eq!(group_masses_from(chain(), &disc, &[]).masses(), []);
         assert_eq!(
             group_masses_from(chain(), &disc, &[]).characteristic(),
             None
@@ -2190,8 +2189,7 @@ mod tests {
             giant_core(&disc, ZoneLimit::Unbounded),
             GiantCore::TooFewSolids
         );
-        let constraints =
-            ClassConstraints::new(&disc, ZoneLimit::Unbounded, HostMultiplicity::SingleOrWide);
+        let constraints = ClassConstraints::new(&disc, ZoneLimit::Unbounded);
         let weights = class_weights(SolarMasses::new(0.3), Dex::new(0.0));
         assert_same_bits(weights.constrained(&constraints).giant_total(), 0.0);
         // A solar disc cut inside its snow line likewise, and no disc at all.

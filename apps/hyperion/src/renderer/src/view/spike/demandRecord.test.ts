@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
+import { memoised } from "../../test/memo";
 import { goldenLevelTable } from "../../test/terrainFixtures";
-import { TERRAIN_SETTINGS } from "../quality/qualitySetting";
+import { type QualitySetting, TERRAIN_SETTINGS } from "../quality/qualitySetting";
 import { levelHeightRangeM, planetGeometry } from "../terrain/planet";
 import { SELECTION_MARGIN } from "../terrain/selectionTolerance";
 import { TEST_PLANET_FIGURE } from "./testPlanetFigure";
@@ -9,6 +10,7 @@ import ridgesOffRanges from "./fixtures/descentRanges.txt?raw";
 import {
   DEMAND_RECORD_SCHEMA,
   DEMAND_RECORD_VERSION,
+  type DemandCell,
   type DemandRecordFile,
   demandSummary,
   fixtureRangeOf,
@@ -49,26 +51,30 @@ const SOURCE = {
  * with the orbit coast flown level, which moved high's coast alone. 2026-10-05: selected at
  * τ ÷ 1.1 (decision-r05-record-tau.md); every window moved but high's vertical descent and hover,
  * whose selections are the same at either tolerance. Before re-pinning, the 14 windows run at the
- * setting's τ reproduced the hashes pinned before, and the fixture, byte for byte.
+ * setting's τ reproduced the hashes pinned before, and the fixture, byte for byte. 2026-10-20:
+ * R10.T14.e's normal margin (the boxes' normal half-extent takes the boundary's sagitta in place of
+ * the ring's chord, so fewer coarse patches below the horizon pass), and all 14 moved, none kept:
+ * every window's selected bounds changed, and its mean patches a frame by −15.7 to +1 (plan 10,
+ * T14.e's record). No window asked a key the fixture lacks, so the fixture is as it was.
  */
 const PINNED: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   high: {
-    "orbit coast": "df104b5501ce5e0b",
-    "descent arc": "a4180564c215ffe6",
-    "approach and flare": "f77246a34f435036",
-    "low fast pass": "fcc42d115d7da663",
-    slowdown: "64e24061df5b2400",
-    "vertical descent": "7f86f5753748ba08",
-    "hover and touchdown": "3815401074eed29e",
+    "orbit coast": "fd7ae3382c240021",
+    "descent arc": "439ea3210155af6a",
+    "approach and flare": "d9f6c5ae43da617b",
+    "low fast pass": "4b2c37f5cc7985e4",
+    slowdown: "ecd8036c19cc835e",
+    "vertical descent": "dfa26af3b11f1944",
+    "hover and touchdown": "91cd09b8651bf057",
   },
   low: {
-    "orbit coast": "3674ed69e62032f9",
-    "descent arc": "2c266fb1ea0c57d8",
-    "approach and flare": "7e583e2ae02512d0",
-    "low fast pass": "1f9f60c3def409b7",
-    slowdown: "03e68d9fca900571",
-    "vertical descent": "e2a6afd03bee7c06",
-    "hover and touchdown": "927a1d8e235bfa8e",
+    "orbit coast": "c9a36f3ba4350b99",
+    "descent arc": "7a8c9c94761b778e",
+    "approach and flare": "a0cd1a2fc860e35f",
+    "low fast pass": "bf701119d8e01aad",
+    slowdown: "132bd06205d34c0e",
+    "vertical descent": "2688e84fbcec3b10",
+    "hover and touchdown": "ba06af3a7ea9e6d5",
   },
 };
 
@@ -76,17 +82,50 @@ const PINNED: Readonly<Record<string, Readonly<Record<string, string>>>> = {
  * The windows where the measured demand lies within a factor of two of the per-level D. The
  * others miss, recorded as findings in the plan's Risks (T13.a, as built), never by a looser test.
  * At τ ÷ 1.1 (2026-10-05) high's descent arc missed (0.49) and high's slowdown came within (0.61).
+ * After R10.T14.e's normal margin (2026-10-20) both descent arcs came within, high's at 0.93 and
+ * low's at 1.64 (from no demand at all).
  */
 const WITHIN_TWO: ReadonlyArray<string> = [
+  "high/descent arc",
   "high/approach and flare",
   "high/low fast pass",
   "high/slowdown",
+  "low/descent arc",
   "low/approach and flare",
   "low/low fast pass",
   "low/slowdown",
 ];
 
 const PROFILE = recordProfile();
+
+/**
+ * The cell of a setting's window as the pins run it: calibrated, ridges off, over the fixture at
+ * 64 Hz. A cell is a pure function of the setting and the window (its clock reads 0, it has no
+ * deadline, and both name constants of this file), so the tests that read one window's cell
+ * share one run of it.
+ */
+const windowCell = memoised(
+  ([setting, segment]: readonly [QualitySetting, string]): DemandCell => {
+    const settingView = SETTING_VIEWS.find((s) => s.setting === setting);
+    const window = testWindows(PROFILE).find((w) => w.segment === segment);
+    if (settingView === undefined || window === undefined) {
+      throw new Error(`no window ${setting}/${segment}`);
+    }
+    return runCell({
+      rule: "calibrated",
+      ridges: "off",
+      settingView,
+      source: SOURCE,
+      rateHz: 64,
+      fromS: window.fromS,
+      toS: window.toS,
+      measureFromS: window.measureFromS,
+      nowMs: () => 0,
+      deadlineMs: Infinity,
+    });
+  },
+  ([setting, segment]) => `${setting}/${segment}`,
+);
 
 describe("the ranges fixture", () => {
   it("holds the module's ridges-off level table, as the golden pins it", () => {
@@ -99,18 +138,7 @@ describe("the descent's fixed-step windows", () => {
   for (const settingView of SETTING_VIEWS) {
     for (const window of testWindows(PROFILE)) {
       it(`pins ${settingView.setting}'s ${window.segment} selection sequence`, () => {
-        const cell = runCell({
-          rule: "calibrated",
-          ridges: "off",
-          settingView,
-          source: SOURCE,
-          rateHz: 64,
-          fromS: window.fromS,
-          toS: window.toS,
-          measureFromS: window.measureFromS,
-          nowMs: () => 0,
-          deadlineMs: Infinity,
-        });
+        const cell = windowCell([settingView.setting, window.segment]);
         expect(cell.hash).toBe(PINNED[settingView.setting]?.[window.segment]);
         expect(cell.segments[0]?.segment).toBe(window.segment);
       });
@@ -122,24 +150,10 @@ describe("the measured demand", () => {
   for (const entry of WITHIN_TWO) {
     const [setting, segment] = entry.split("/");
     it(`lies within a factor of two of D in ${setting}'s ${segment}`, () => {
-      const settingView = SETTING_VIEWS.find((s) => s.setting === setting);
-      const window = testWindows(PROFILE).find((w) => w.segment === segment);
-      if (settingView === undefined || window === undefined) {
+      if ((setting !== "high" && setting !== "low") || segment === undefined) {
         throw new Error(`no window ${entry}`);
       }
-      const cell = runCell({
-        rule: "calibrated",
-        ridges: "off",
-        settingView,
-        source: SOURCE,
-        rateHz: 64,
-        fromS: window.fromS,
-        toS: window.toS,
-        measureFromS: window.measureFromS,
-        nowMs: () => 0,
-        deadlineMs: Infinity,
-      });
-      const [figures] = cell.segments;
+      const [figures] = windowCell([setting, segment]).segments;
       const ratio = (figures?.demandPerS ?? NaN) / (figures?.predictedPerS ?? NaN);
       expect(ratio).toBeGreaterThanOrEqual(0.5);
       expect(ratio).toBeLessThanOrEqual(2);
@@ -196,10 +210,11 @@ describe("the demand record", () => {
         nowMs: () => 0,
         deadlineMs: Infinity,
       });
-    expect(cellOf("calibrated", "on").note).toBe(RIDGED_CALIBRATED_NOTE);
+    const ridgedCalibrated = cellOf("calibrated", "on");
+    expect(ridgedCalibrated.note).toBe(RIDGED_CALIBRATED_NOTE);
     expect(cellOf("calibrated", "off").note).toBeNull();
     expect(cellOf("hard", "on").note).toBeNull();
-    expect(demandSummary([cellOf("calibrated", "on")], "2026-10-03T00:00:00Z")).toContain(
+    expect(demandSummary([ridgedCalibrated], "2026-10-03T00:00:00Z")).toContain(
       RIDGED_CALIBRATED_NOTE,
     );
   });
@@ -225,29 +240,39 @@ function fileOf(startedAt: string, cells: RecordedCell[]): DemandRecordFile {
 
 describe("the record's file (version 4)", () => {
   const [high] = SETTING_VIEWS;
+  /**
+   * A short orbit-coast cell of a rule, under a budget of patches, as the script records it: a
+   * pure function of the two (its clock reads 0 and it has no deadline), so this block's tests
+   * share one run of each of the three they read.
+   */
+  const recorded = memoised(
+    ([rule, maxPatches]: readonly ["hard" | "calibrated", number]): RecordedCell => {
+      if (high === undefined) {
+        throw new Error("no high setting");
+      }
+      const planet = planetGeometry(TEST_PLANET_FIGURE, goldenLevelTable("off"));
+      const cell = runCell({
+        rule,
+        ridges: "off",
+        settingView: { ...high, maxPatches },
+        source: {
+          ...SOURCE,
+          rangeOf: (key) => levelHeightRangeM(planet, key.level),
+        },
+        rateHz: 16,
+        fromS: 10,
+        toS: 12,
+        measureFromS: 11,
+        nowMs: () => 0,
+        deadlineMs: Infinity,
+      });
+      return { ...cell, capHours: 0.5, wallCapHours: null, wallS: 1, loadAverage: [1, 2, 3] };
+    },
+    ([rule, maxPatches]) => `${rule} ${String(maxPatches)}`,
+  );
   /** A short orbit-coast cell of `rule`, under a budget of `maxPatches`, as the script records it. */
-  const cellOf = (rule: "hard" | "calibrated", maxPatches: number): RecordedCell => {
-    if (high === undefined) {
-      throw new Error("no high setting");
-    }
-    const planet = planetGeometry(TEST_PLANET_FIGURE, goldenLevelTable("off"));
-    const cell = runCell({
-      rule,
-      ridges: "off",
-      settingView: { ...high, maxPatches },
-      source: {
-        ...SOURCE,
-        rangeOf: (key) => levelHeightRangeM(planet, key.level),
-      },
-      rateHz: 16,
-      fromS: 10,
-      toS: 12,
-      measureFromS: 11,
-      nowMs: () => 0,
-      deadlineMs: Infinity,
-    });
-    return { ...cell, capHours: 0.5, wallCapHours: null, wallS: 1, loadAverage: [1, 2, 3] };
-  };
+  const cellOf = (rule: "hard" | "calibrated", maxPatches: number): RecordedCell =>
+    recorded([rule, maxPatches]);
 
   /** Two records, the hard cell's started later, merged in that order. */
   const merged = (): DemandRecordFile =>
@@ -415,23 +440,7 @@ describe("the record's file (version 4)", () => {
 
 describe("the forced region's bakes", () => {
   it("are part of the demand in high's approach, where the craft descends", () => {
-    const [high] = SETTING_VIEWS;
-    const window = testWindows(PROFILE).find((w) => w.segment === "approach and flare");
-    if (high === undefined || window === undefined) {
-      throw new Error("no approach window");
-    }
-    const [figures] = runCell({
-      rule: "calibrated",
-      ridges: "off",
-      settingView: high,
-      source: SOURCE,
-      rateHz: 64,
-      fromS: window.fromS,
-      toS: window.toS,
-      measureFromS: window.measureFromS,
-      nowMs: () => 0,
-      deadlineMs: Infinity,
-    }).segments;
+    const [figures] = windowCell(["high", "approach and flare"]).segments;
     expect(figures?.forcedDemandPerS).toBeGreaterThan(0);
     expect(figures?.forcedDemandPerS).toBeLessThanOrEqual(figures?.demandPerS ?? 0);
   });

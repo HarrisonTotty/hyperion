@@ -13,12 +13,14 @@ import {
   formatNumber,
   formatSignedDeg,
   formatSignificant,
+  formatTemperatureK,
   formatUniverseTimeDhms,
 } from "../../lib/format";
 import { norm, sub } from "../../geometry/vec3";
 import { flightInput, type ViewKeyAction } from "../../view/camera/keys";
 import {
   changeFreeRate,
+  type FreeCameraInput,
   FREE_ROTATION_RATE_DEG_PER_S,
   freeRateMPerS,
   MAX_FREE_STEP_S,
@@ -32,10 +34,18 @@ import {
   NO_TURN,
   type ViewTurn,
 } from "../../view/camera/look";
+import {
+  coRotated,
+  orbitDragged,
+  orbitLooked,
+  orbitRadiusM,
+  orbitZoomed,
+} from "../../view/camera/orbit";
 import type { CameraFrame, CameraPose } from "../../view/camera/pose";
 import {
   advanceEasedMove,
   type CameraPreset,
+  type CameraScene,
   type CameraState,
   type CameraTarget,
   type CutDestination,
@@ -47,11 +57,17 @@ import {
   newCameraState,
   nextTarget,
   onSystemChange,
+  type OrbitBody,
   stepFov,
   targetPosition,
   turnLook,
 } from "../../view/camera/state";
 import type { AppearanceLabel } from "../../view/appearance/fromWire";
+import {
+  ATMOSPHERE_STATEMENTS,
+  type AtmosphereNote,
+  atmosphereNotes,
+} from "../../view/atmosphere/labels";
 import { relativeToCamera } from "../../view/coords/relative";
 import { differenceM, type ViewPosition } from "../../view/coords/position";
 import {
@@ -63,35 +79,81 @@ import {
   cameraSceneOf,
   isLitKind,
   sceneOrigins,
+  type ViewBody,
   type ViewBodyKind,
   type ViewScene,
+  type ViewStar,
 } from "../../view/scene/model";
 import { ECLIPSE_SCENE_NAME, eclipseScene } from "../../view/scenes/eclipseScene";
+import {
+  ATMOSPHERE_SCENE_NAME,
+  atmosphereScene,
+  prepareAtmosphereScene,
+} from "../../view/scenes/atmosphereScene";
 import { FRAME_CHANGE_SCENE_NAME, frameChangeScene } from "../../view/scenes/frameChange";
 import type { KeptScene } from "../../view/scenes/kept";
 import { otherStyle, styleName, withStyle } from "../../view/photoreal/style";
+import { type WhiteBalance, whiteBalanceName } from "../../view/post/whiteBalance";
 import type { StyleAvailability } from "../../view/engine/platform";
 import { PHASE_SCENE_NAME, phaseScene } from "../../view/scenes/phaseScene";
 import { PRECISION_SCENE_NAME, precisionScene } from "../../view/scenes/precision";
+import {
+  TERRAIN_SCENE_NAME,
+  terrainScene,
+  terrainSceneFixture,
+} from "../../view/scenes/terrainScene";
 import type { TerrainAnnunciation } from "../../view/terrain/annunciation";
+import type { BodyFixedVec3 } from "../../view/terrain/planet";
+import { rotateToBodyFixed } from "../../view/coords/rotation";
+import { DECORATION_ON } from "../../view/surface/decoration/decorationSetting";
+import { type SurveyEdgeNote, surveyEdgeNote } from "../../view/terrain/surveyEdge";
+import {
+  CONTOUR_FIELD_CH,
+  contourIntervalReading,
+  contourLengthReading,
+} from "../../view/terrain/terrainWire";
 import { type LightingState, lightingStatement } from "../../view/lighting/hostLights";
+import type { DrawnSurveyEdge } from "../../view/wireframe/drawList";
 import { closureRateMPerS } from "../../view/wireframe/symbology";
+import type { TerrainFixture } from "./useTerrainSession";
+import { NO_ATMOSPHERE_SHOWN, type ViewAtmosphereShown } from "./viewAtmosphere";
 
 /** A kept scene the `SCENE` selector offers, by the name it shows. */
 export interface SceneOption {
   readonly name: string;
   readonly make: () => KeptScene;
+  /**
+   * Its terrain fixture, for which `VIEW` makes a terrain session over the fixture's link (plan R10,
+   * R10.T16.a; `TERRAIN TEST`'s, R10.T16.d); absent, as for every kept scene before it, the scene
+   * has no terrain session.
+   */
+  readonly terrain?: TerrainFixture;
+  /**
+   * Starts what the scene loads for itself, called from `VIEW`'s effect when the scene is chosen,
+   * never as it is made, which is in render: `ATMOSPHERE TEST`'s media (plan R08, R08.T10.b;
+   * `prepareAtmosphereScene`). Absent, the scene loads nothing.
+   */
+  readonly prepare?: () => void;
 }
 
 /**
- * The kept scenes: `PRECISION TEST`, `FRAME CHANGE TEST`, `PHASE TEST` (R07.T8.a) and
- * `ECLIPSE TEST` (R07.T10.c).
+ * The kept scenes: `PRECISION TEST`, `FRAME CHANGE TEST`, `PHASE TEST` (R07.T8.a),
+ * `ECLIPSE TEST` (R07.T10.c), `TERRAIN TEST` (R10.T16.d), the one with a terrain fixture, and
+ * `ATMOSPHERE TEST` (R08.T10.b), whose media load lazily once `VIEW` chooses it (`prepare`).
  */
 export const SCENE_OPTIONS: ReadonlyArray<SceneOption> = [
   { name: PRECISION_SCENE_NAME, make: precisionScene },
   { name: FRAME_CHANGE_SCENE_NAME, make: frameChangeScene },
   { name: PHASE_SCENE_NAME, make: phaseScene },
   { name: ECLIPSE_SCENE_NAME, make: eclipseScene },
+  { name: TERRAIN_SCENE_NAME, make: terrainScene, terrain: terrainSceneFixture() },
+  {
+    name: ATMOSPHERE_SCENE_NAME,
+    make: () => atmosphereScene(),
+    prepare: () => {
+      prepareAtmosphereScene();
+    },
+  },
 ];
 
 /** The `SCENE` selector's name for the server's scene of the open universe (R02.T17). */
@@ -111,29 +173,86 @@ export interface ViewRun {
   readonly tS: number;
   readonly scene: ViewScene;
   readonly camera: CameraState;
+  /**
+   * The drawn ground under an `ORBIT` camera as its last frame had it ({@link FrameInput}'s), which
+   * a wheel's zoom between frames holds its floor over; none for the datum.
+   */
+  readonly orbitGround?: OrbitGround | undefined;
 }
 
-/** A run at the start of `kept`'s script, its camera at the seat (or free, with no own ship). */
+/**
+ * The drawn ground an `ORBIT` camera's floor stands over (plan R15, T4), handed to the run each
+ * frame (`orbitGround.ts`), so that the camera code reads no pass.
+ */
+export interface OrbitGround {
+  readonly body: BodyIdHex;
+  /**
+   * The drawn surface's height above `body`'s datum under a body-fixed point, m: the terrain pass's
+   * resident ground there (`heldGroundUnder` of `TerrainPass.heights`), 0 where none is resident,
+   * or a sea's surface where the ground lies under it. It is one along the point's line from the
+   * centre, whose parametric direction is one.
+   */
+  readonly groundAboveDatumM: (positionM: BodyFixedVec3) => number;
+}
+
+/**
+ * A run at the start of `kept`'s script, its camera at the seat (or free, with no own ship), in the
+ * scene's start style (`KeptScene.startStyle`; the wireframe unless it gives one).
+ *
+ * @remarks
+ * The camera is of R02's `camera` role: a console view is a ship's camera feed, not a window
+ * (ux-calls-view, item 3a, the owner's delegated call).
+ */
 export function startRun(kept: KeptScene): ViewRun {
   const scene = kept.sceneAt(0);
-  return {
-    source: { kind: "kept", kept },
-    tS: 0,
-    scene,
-    camera: newCameraState(cameraSceneOf(scene), "eye"),
-  };
+  const fresh = newCameraState(cameraSceneOf(scene), "camera");
+  const camera = kept.startStyle === undefined ? fresh : { ...fresh, style: kept.startStyle };
+  const run: ViewRun = { source: { kind: "kept", kept }, tS: 0, scene, camera };
+  if (kept.startPreset === undefined) {
+    return run;
+  }
+  // A scene that opens in `ORBIT` (plan R15, T4) cuts to it at once, as its key would.
+  const orbit = commandRun(
+    run,
+    { kind: "preset", preset: kept.startPreset },
+    { easedMoves: false, reducedMotion: true },
+  );
+  return orbit.kind === "done" ? orbit.run : run;
+}
+
+/**
+ * `run` with its free camera framed for its view's `aspect`, width over height, where its kept scene
+ * frames one (`KeptScene.framedPoseFor`, `VIEW`'s body inspection's; the owner's request,
+ * 2026-11-01); `run` itself for any other scene or camera.
+ */
+export function framedRun(run: ViewRun, aspect: number): ViewRun {
+  const framed =
+    run.source.kind === "kept" && (run.camera.preset === "free" || run.camera.preset === "orbit")
+      ? run.source.kept.framedPoseFor?.(aspect)
+      : undefined;
+  // An `ORBIT` camera takes the framed pose only where it is about the framed body, in its frame.
+  const pose =
+    framed !== undefined &&
+    run.camera.preset === "orbit" &&
+    (framed.frame.kind !== run.camera.pose.frame.kind ||
+      (framed.frame.kind === "body" &&
+        run.camera.pose.frame.kind === "body" &&
+        framed.frame.body !== run.camera.pose.frame.body))
+      ? undefined
+      : framed;
+  return pose === undefined ? run : { ...run, camera: { ...run.camera, pose } };
 }
 
 /**
  * A run of the server's scene from `scene`, its first frame, the camera at the seat of the ship
- * stand-in; each step takes the scene its frame brings.
+ * stand-in, of the `camera` role as {@link startRun}'s; each step takes the scene its frame brings.
  */
 export function startServerRun(scene: ViewScene): ViewRun {
   return {
     source: { kind: "server" },
     tS: 0,
     scene,
-    camera: newCameraState(cameraSceneOf(scene), "eye"),
+    camera: newCameraState(cameraSceneOf(scene), "camera"),
   };
 }
 
@@ -157,6 +276,8 @@ export interface FrameInput {
    * `dragTurn`), none where absent.
    */
   readonly turn?: ViewTurn;
+  /** The drawn ground under an `ORBIT` camera's body (plan R15, T4), none for the datum. */
+  readonly orbitGround?: OrbitGround | undefined;
 }
 
 /** Whether every frame a camera's pose refers to is in `scene`: its system, body or craft. */
@@ -206,7 +327,129 @@ export function stepRun(run: ViewRun, input: FrameInput): ViewRun {
       camera = onSystemChange(camera, cameraSceneOf(scene));
     }
   }
-  return { ...run, tS, scene, camera: flyCamera(camera, scene, dtS, input) };
+  camera = withGround(camera, run.scene, scene);
+  return {
+    ...run,
+    tS,
+    scene,
+    camera: flyCamera(camera, scene, dtS, input),
+    orbitGround: input.orbitGround,
+  };
+}
+
+/**
+ * `run` with its `ORBIT` camera zoomed `steps` steps about its body (plan R15, T4), or refused
+ * outside `ORBIT`, so that a wheel never moves another camera unseen.
+ */
+function orbitZoomRun(run: ViewRun, steps: number, scene: CameraScene): CommandResult {
+  const body = orbitHeldBody(run.camera, scene);
+  if (body === null) {
+    return { kind: "refused", reason: "not_orbit" };
+  }
+  const { pose } = run.camera;
+  const surfaceM = groundAboveDatumM(pose, run.scene, run.orbitGround);
+  return {
+    kind: "done",
+    run: {
+      ...run,
+      camera: {
+        ...run.camera,
+        pose: orbitZoomed(pose, steps, orbitRadiusM(body, pose.positionM), surfaceM),
+      },
+    },
+  };
+}
+
+/**
+ * The drawn ground's height above the datum under `pose`'s body-centred position, m, along its line
+ * from the centre (plan R15, T4): `ground`'s there, in the body's fixed axes; 0, the datum, where
+ * `ground` is none or another body's, or the scene gives the body no spin.
+ */
+function groundAboveDatumM(
+  pose: CameraPose,
+  scene: ViewScene,
+  ground: OrbitGround | undefined,
+): number {
+  const frame = pose.frame;
+  if (ground === undefined || frame.kind !== "body" || ground.body !== frame.body) {
+    return 0;
+  }
+  const rotation = sceneOrigins(scene).bodyFixedRotation(frame.body);
+  return rotation === null
+    ? 0
+    : ground.groundAboveDatumM(rotateToBodyFixed(rotation, pose.positionM));
+}
+
+/** The body an `ORBIT` camera is held about, its pose's frame's, or `null` outside `ORBIT`. */
+function orbitHeldBody(camera: CameraState, scene: CameraScene): OrbitBody | null {
+  const frame = camera.pose.frame;
+  if (camera.preset !== "orbit" || frame.kind !== "body") {
+    return null;
+  }
+  return scene.orbitBodies.find((body) => body.id === frame.body) ?? null;
+}
+
+/** An `ORBIT` camera's turn about its body under the arrows, rad/s before its altitude's share. */
+const ORBIT_ARROW_RAD_PER_S = 0.5;
+
+/** An `ORBIT` camera's zoom under `W` and `S`, steps a second. */
+const ORBIT_ZOOM_STEPS_PER_S = 4;
+
+/** An `ORBIT` camera's tilt under `R` and `F` and its heading under `Q` and `E`, rad/s. */
+const ORBIT_LOOK_RAD_PER_S = Math.PI / 4;
+
+/**
+ * An `ORBIT` camera one frame on (plan R15, T4): turned about its body by the frame's drag and by
+ * the arrows, which move it over the ground the way they point; zoomed by `W` (in) and `S` (out);
+ * tilted towards the horizon by `R` and back by `F`; turned in heading by `Q` and `E`. Each is the
+ * operator's own motion, which reduced motion leaves as it is.
+ */
+function flyOrbit(
+  camera: CameraState,
+  scene: ViewScene,
+  dtS: number,
+  keys: FreeCameraInput,
+  dragged: ViewTurn,
+  ground: OrbitGround | undefined,
+): CameraState {
+  const body = orbitHeldBody(camera, cameraSceneOf(scene));
+  if (body === null) {
+    return camera;
+  }
+  const arrows: ViewTurn = {
+    yawRad: -keys.rotate.y * ORBIT_ARROW_RAD_PER_S * dtS,
+    pitchRad: -keys.rotate.x * ORBIT_ARROW_RAD_PER_S * dtS,
+  };
+  // The datum's radius along the camera's line, which a frame's turn moves by too little to matter.
+  const radiusM = orbitRadiusM(body, camera.pose.positionM);
+  let pose = orbitDragged(camera.pose, addTurns(dragged, arrows), radiusM);
+  // The surface where the turn brought it, whose floor the zoom holds every frame, even at no step,
+  // so that ground drawn since, or higher ground the turn came over, lifts the camera to it at once
+  // along its line from the centre (plan R15, T4's lean: a jump, not a camera in rock).
+  const surfaceM = groundAboveDatumM(pose, scene, ground);
+  pose = orbitZoomed(pose, -keys.translate.z * ORBIT_ZOOM_STEPS_PER_S * dtS, radiusM, surfaceM);
+  pose = orbitLooked(
+    pose,
+    keys.translate.y * ORBIT_LOOK_RAD_PER_S * dtS,
+    keys.rotate.z * ORBIT_LOOK_RAD_PER_S * dtS,
+  );
+  return { ...camera, pose };
+}
+
+/**
+ * `camera` turned with its body's spin from `before`'s scene to `after`'s, where it is an `ORBIT`
+ * camera and both scenes give the body's rotation: it hovers over one place of the ground.
+ */
+function withGround(camera: CameraState, before: ViewScene, after: ViewScene): CameraState {
+  const frame = camera.pose.frame;
+  if (camera.preset !== "orbit" || frame.kind !== "body") {
+    return camera;
+  }
+  const from = sceneOrigins(before).bodyFixedRotation(frame.body);
+  const to = sceneOrigins(after).bodyFixedRotation(frame.body);
+  return from === null || to === null
+    ? camera
+    : { ...camera, pose: coRotated(camera.pose, from, to) };
 }
 
 /** The free camera's full rotation rate, rad/s, at which the arrows turn a look offset too. */
@@ -226,7 +469,7 @@ function flyCamera(
   camera: CameraState,
   scene: ViewScene,
   dtS: number,
-  input: Pick<FrameInput, "held" | "reducedMotion" | "turn">,
+  input: Pick<FrameInput, "held" | "reducedMotion" | "turn" | "orbitGround">,
 ): CameraState {
   const cameraScene = cameraSceneOf(scene);
   const keys = flightInput(input.held);
@@ -238,6 +481,9 @@ function flyCamera(
           yawRad: keys.rotate.y * ARROW_TURN_RAD_PER_S * dtS,
           pitchRad: keys.rotate.x * ARROW_TURN_RAD_PER_S * dtS,
         };
+  if (camera.preset === "orbit") {
+    return advanceEasedMove(flyOrbit(camera, scene, dtS, keys, dragged, input.orbitGround), dtS);
+  }
   const looked = turnLook(camera, addTurns(dragged, arrows), cameraScene);
   const following = turnFreeCamera(followPreset(looked, cameraScene), dragged);
   const flown = stepFreeCamera(following, keys, dtS, input.reducedMotion, cameraScene).state;
@@ -260,7 +506,7 @@ function flyCamera(
 export function followRun(
   run: ViewRun,
   primary: ViewRun,
-  input: Pick<FrameInput, "dtS" | "held" | "reducedMotion" | "turn">,
+  input: Pick<FrameInput, "dtS" | "held" | "reducedMotion" | "turn" | "orbitGround">,
 ): ViewRun {
   const dtS = Math.min(Math.max(input.dtS, 0), MAX_FREE_STEP_S);
   const { scene } = primary;
@@ -273,6 +519,7 @@ export function followRun(
     tS: primary.tS,
     scene,
     camera: flyCamera(camera, scene, dtS, input),
+    orbitGround: input.orbitGround,
   };
 }
 
@@ -305,7 +552,10 @@ export const WIREFRAME_ONLY: StyleAvailability = { wireframe: true, photorealist
  */
 export type CommandResult =
   | { readonly kind: "done"; readonly run: ViewRun }
-  | { readonly kind: "refused"; readonly reason: "no_own_ship" | "not_free" };
+  | {
+      readonly kind: "refused";
+      readonly reason: "no_own_ship" | "no_body" | "not_free" | "not_orbit";
+    };
 
 function cut(run: ViewRun, to: CutDestination, options: CutOptions): CommandResult {
   const result = cutTo(run.camera, to, cameraSceneOf(run.scene), options);
@@ -358,6 +608,9 @@ export function commandRun(
             }
           : { kind: "refused", reason: "not_free" };
       break;
+    case "zoom":
+      result = orbitZoomRun(run, action.steps, cameraScene);
+      break;
     case "style": {
       const style = action.style === "toggle" ? otherStyle(run.camera.style) : action.style;
       result = {
@@ -370,6 +623,14 @@ export function commandRun(
   return result;
 }
 
+/**
+ * Whether a camera command's outcome cuts the view's image, so that its exposure snaps to it
+ * (fix-view-light, `AutoExposure.cut`): a preset's or a target's change that is not an eased move.
+ */
+export function commandCutsImage(action: ViewKeyAction, after: ViewRun): boolean {
+  return (action.kind === "preset" || action.kind === "target") && after.camera.move === null;
+}
+
 /** The pose the run draws from: the camera's, blended through an eased move. */
 export function runPose(run: ViewRun): CameraPose {
   return displayPose(run.camera, sceneOrigins(run.scene));
@@ -380,11 +641,17 @@ export const PRESET_NAMES: Readonly<Record<CameraPreset, string>> = {
   seat: "SEAT",
   chase: "CHASE",
   free: "FREE",
+  orbit: "ORBIT",
 };
 
 /** A body's frame's name: `BODY <designation>`. */
 function bodyFrameName(body: BodyIdHex, scene: ViewScene): string {
-  return `BODY ${scene.bodies.find((b) => b.id === body)?.designation ?? body}`;
+  return `BODY ${bodyDesignationIn(body, scene)}`;
+}
+
+/** A body's designation as the view labels it, or its ID where the scene draws no such body. */
+function bodyDesignationIn(body: BodyIdHex, scene: ViewScene): string {
+  return scene.bodies.find((b) => b.id === body)?.designation ?? body;
 }
 
 /** The name of the frame a position is in; a body-fixed position is in its body's frame. */
@@ -428,8 +695,163 @@ export function frameName(frame: CameraFrame, scene: ViewScene): string {
   return name;
 }
 
+/** The body a position is held to: a body frame's, or a body-fixed point's; else `null`. */
+function positionBody(position: ViewPosition): BodyIdHex | null {
+  let body: BodyIdHex | null;
+  switch (position.kind) {
+    case "body":
+    case "body_fixed":
+      body = position.body;
+      break;
+    case "system":
+    case "galactic":
+      body = null;
+      break;
+  }
+  return body;
+}
+
+/**
+ * The body whose `FRAME` the view names ({@link frameName}), whose survey line and terrain readout
+ * its label block states (plan R10, R10.T12): a body frame's body, and for a camera held to a
+ * craft, the body of the frame the craft's position is in, as {@link frameName} names it; `null`
+ * for a system or galactic frame, or a body the scene does not hold.
+ */
+export function frameBody(frame: CameraFrame, scene: ViewScene): ViewBody | null {
+  let id: BodyIdHex | null;
+  switch (frame.kind) {
+    case "galactic":
+    case "system":
+      id = null;
+      break;
+    case "body":
+      id = frame.body;
+      break;
+    case "craft": {
+      const position = scene.craft.find((c) => c.id === frame.craft)?.pose.position;
+      id = position === undefined ? null : positionBody(position);
+      break;
+    }
+  }
+  return id === null ? null : (scene.bodies.find((b) => b.id === id) ?? null);
+}
+
+/**
+ * Whether a view's `SLANT RANGE` reads `SLANT RANGE FROM CAMERA` (the guide's `FROM CAMERA` row):
+ * the range is always the camera's, and is so labelled whenever the camera is off the hull, in
+ * `CHASE` or `FREE`, or there is no own ship whose hull it could be on ({@link rangesFromCamera}).
+ */
+export function slantRangeFromCamera(camera: CameraState, scene: ViewScene): boolean {
+  return camera.preset !== "seat" || rangesFromCamera(scene);
+}
+
 /** The star source's reading until R06's sky (Design note 16). */
 export const STAR_SOURCE = "RANGE QUERY · VOLUME-LIMITED · NO EXTINCTION";
+
+/**
+ * The `STARS` line's reading while a kept scene's own star field is drawn in the interim field's
+ * place, as `ATMOSPHERE TEST`'s is with no server: `STARS: SCENE TEST FIELD`, a fixed test pattern,
+ * not a sky, with no count line (plan R08, R08.T10.b; `decision-r08-t10b-ux.md`, item 1; the
+ * guide's row).
+ */
+export const SCENE_TEST_FIELD = "SCENE TEST FIELD";
+
+/**
+ * Whether a frame draws the kept scene's own stars in the interim field's place: where the scene
+ * carries some, the interim field is empty (no server, or before its answer) and no sky is drawn
+ * (plan R08, R08.T10.b; `decision-r08-t10b-ux.md`, item 1).
+ */
+export function sceneStarsStandIn(
+  sceneStars: ReadonlyArray<ViewStar>,
+  interim: ReadonlyArray<ViewStar>,
+  skyDrawn: boolean,
+): boolean {
+  return sceneStars.length > 0 && interim.length === 0 && !skyDrawn;
+}
+
+/**
+ * `lines` with the `STARS` line reading {@link SCENE_TEST_FIELD} where the frame drew the kept
+ * scene's own stars ({@link sceneStarsStandIn}), in place of any other reading; as they are
+ * otherwise.
+ */
+export function withSceneStarsLine(
+  lines: ReadonlyArray<LabelLine>,
+  sceneStars: boolean,
+): ReadonlyArray<LabelLine> {
+  return sceneStars
+    ? lines.map((line) =>
+        line.label === "STARS" ? { label: "STARS", value: SCENE_TEST_FIELD } : line,
+      )
+    : lines;
+}
+
+/**
+ * `lines` with `GRID OFF` after `STYLE` while the view draws `PHOTOREALISTIC` with its `GRID` at
+ * `OFF` (the owner's request, 2026-10-31), as the label block states the view's other settings; as
+ * they are otherwise.
+ */
+export function withGridLine(
+  lines: ReadonlyArray<LabelLine>,
+  grid: boolean,
+  drawn: RenderStyle,
+): ReadonlyArray<LabelLine> {
+  return grid || drawn !== "photorealistic"
+    ? lines
+    : lines.flatMap((line) =>
+        line.label === "STYLE" ? [line, { label: "GRID", value: "OFF" }] : [line],
+      );
+}
+
+/** The label of the photorealistic style's white balance line, and its control's. */
+export const WHITE_BALANCE_LABEL = "WHITE BALANCE";
+
+/**
+ * The white balance's reading (the owner's report, 2026-11-05; the UX ruling, 2026-11-06): `D65`,
+ * or `HOST` with the effective temperature of the star whose white the display adapts to after a
+ * middle dot, `HOST · T EFF 3444 K` (the star's, never a black body's colour temperature), missing
+ * (`HOST · —`) while no host light is drawn and nothing is adapted.
+ *
+ * @param balancedTeffK - The star's effective temperature, K (`BalancedWhite.teffK`), or `null`
+ *   where nothing is adapted.
+ */
+export function whiteBalanceReading(balance: WhiteBalance, balancedTeffK: number | null): string {
+  const name = whiteBalanceName(balance);
+  let reading: string;
+  switch (balance) {
+    case "d65":
+      reading = name;
+      break;
+    case "host":
+      reading =
+        balancedTeffK === null
+          ? `${name} · ${MISSING_READING}`
+          : `${name} · T EFF ${formatTemperatureK(balancedTeffK)} K`;
+      break;
+  }
+  return reading;
+}
+
+/**
+ * `lines` with `WHITE BALANCE` after `METER` (or after `EXPOSURE` where no `METER` stands) while
+ * it `stands`: while any view of the display draws `PHOTOREALISTIC`, whose tone step it sets
+ * ({@link whiteBalanceReading}); as they are while every view draws the wireframe, which takes none.
+ */
+export function withWhiteBalanceLine(
+  lines: ReadonlyArray<LabelLine>,
+  balance: WhiteBalance,
+  balancedTeffK: number | null,
+  stands: boolean,
+): ReadonlyArray<LabelLine> {
+  if (!stands) {
+    return lines;
+  }
+  const after = lines.some((line) => line.label === "METER") ? "METER" : "EXPOSURE";
+  const line: LabelLine = {
+    label: WHITE_BALANCE_LABEL,
+    value: whiteBalanceReading(balance, balancedTeffK),
+  };
+  return lines.flatMap((each) => (each.label === after ? [each, line] : [each]));
+}
 
 /**
  * The star source's reading where the scene's system has no known position (a server scene's
@@ -439,11 +861,15 @@ export const STARS_WITHOUT_POSITION = "NOT AVAILABLE: the system's position is n
 
 /**
  * A value within a reading that is set in a field of its own: right-aligned in a fixed width, and
- * stale apart from the rest of the reading. The sky's edge in the stars-arriving note,
- * `BEYOND 2000 ly: STREAMING`, is one (R06.T11.f).
+ * stale apart from the rest of the reading. The sky's limit before its kind, `V 9.5 mag` in
+ * `V 9.5 mag CAM` (R06.T13.j), and its edge in the stars-arriving note,
+ * `BEYOND 2000 ly: STREAMING` (R06.T11.f), are two.
  */
 export interface LabelField {
-  /** Its text as it stands in the reading, a run that never breaks: `2000 ly`. */
+  /**
+   * Its text as it stands in the reading: a run that never breaks, `2000 ly`, or the start of one
+   * before a space, `V 9.5 mag`, whose rest stays on its line after the field.
+   */
   readonly text: string;
   /** Its width, ch: its longest reading's with its stale mark, so that the line never moves. */
   readonly widthCh: number;
@@ -457,8 +883,14 @@ export interface LabelLine {
   readonly value: string;
   /** Set on a reading of the server's scene while the scene is stale: muted, with its `S`. */
   readonly stale?: true;
-  /** A value of the reading set in a field of its own, or none. */
-  readonly field?: LabelField;
+  /** The values of the reading set in fields of their own, in the reading's order, or none. */
+  readonly fields?: ReadonlyArray<LabelField>;
+  /**
+   * Set where each middle dot of the reading leads the part after it rather than standing between
+   * the parts (`readingParts`' `dotsLead`): on the sky's `STARS` readings (R06.T13.j) and the
+   * wireframe's `CONTOUR INTERVAL` (R10.T11).
+   */
+  readonly dotsLead?: true;
 }
 
 /**
@@ -506,22 +938,20 @@ export function cameraReading(camera: CameraState): string {
 }
 
 /**
- * A kept scene's clock rate as the label block reads it (R07.T16.k; the guide's `SCENE` row):
- * `×` and its seconds a second as a whole number, `×100`, grouped in threes from five digits as
- * any number is.
+ * A kept scene's clock rate as the label block reads it (R07.T16.k; the guide's `SCENE CLOCK`
+ * row): its seconds a second as a whole number with the unit `s/s`, `100 s/s`, a unit rate as the
+ * display time's `RUN 1 d/s` is, grouped in threes from five digits as any number is.
  *
  * @remarks
  * Every kept scene's rate is a whole number of seconds a second (`ECLIPSE TEST`'s 100, the rest
  * 1), so the reading is exact; the label block's tests hold every scene of {@link SCENE_OPTIONS}
- * to it, so that a kept scene at 2.5 never reads `×3`. Whether the rate reads so, or as a unit rate
- * beside the display time's `RUN 1 d/s`, is the owner's, in T16.c's draft; this is the form
- * drafted.
+ * to it, so that a kept scene at 2.5 never reads `3 s/s`.
  *
  * @param secondsPerSecond - The scene's simulation seconds a real second,
  *   {@link ViewScene.timeRate}.
  */
 export function sceneClockReading(secondsPerSecond: number): string {
-  return `×${formatNumber(secondsPerSecond, 0)}`;
+  return `${formatNumber(secondsPerSecond, 0)} s/s`;
 }
 
 /**
@@ -529,10 +959,11 @@ export function sceneClockReading(secondsPerSecond: number): string {
  * style, the camera preset ({@link cameraReading}), the field of view and the exposure with its
  * level, and the star source;
  * the scene's name in a kept scene, and after it, while that scene's clock runs at other than one
- * second a second, its rate, `SCENE CLOCK ×100` ({@link sceneClockReading}, R07.T16.k), so that a
- * `TIME` that runs fast says so. `POSITIONS AS SEEN FROM SHIP` while the camera is off the hull and
- * `ROTATION: NOT YET MODELLED` while a body other than a star, with a radius, has no rotation
- * (decision-r07-rotation-note) are statements ({@link labelStatements}).
+ * second a second, its rate, `SCENE CLOCK 100 s/s` ({@link sceneClockReading}, R07.T16.k), so
+ * that a `TIME` that runs fast says so. Where its positions are seen from
+ * ({@link positionsStatement}), `ROTATION: NOT YET MODELLED` while a body other than a star, with a radius, has no
+ * rotation (decision-r07-rotation-note), and `ROTATION: NOT RESOLVED` while the granted detail
+ * level withholds one's (rotation-not-resolved) are statements ({@link labelStatements}).
  *
  * @remarks
  * `SCENE` and `SCENE CLOCK` describe the display's scene, not one view's picture, so an
@@ -540,13 +971,23 @@ export function sceneClockReading(secondsPerSecond: number): string {
  * them stand on the `PRIMARY` view's block alone. The server's scene names neither: its time is
  * the simulation's own, not a kept scene's script.
  *
+ * While the view draws a body's surveyed terrain in the wireframe, the contour interval it draws it
+ * at stands directly after `FOV`, `CONTOUR INTERVAL 200 m · INDEX 1 km` (plan R10, R10.T11; the
+ * guide's Views; decision-r10-view-block-room §5), the wireframe's statement of vertical scale
+ * beside `FOV`'s angular one; it is a statement of the picture drawn, not of the server's data, so
+ * it does not go stale. An instrument's block states its own after its `FOV` (R10.T12.b;
+ * decision-r10-view-block-room §6), the stage's views at one pose stating one interval.
+ *
  * @param stale - Whether the server's scene is stale (`useScene`'s `stale`): its time, held where
  *   the scene went stale, then reads as the guide's stale value.
+ * @param contourIntervalM - The contour interval the view's last frame drew its wireframe terrain
+ *   at, m (`ViewFrameDrawn.contourIntervalM`), or `null` while it draws none.
  */
 export function labelLines(
   run: ViewRun,
   exposure: ExposureControl,
   stale = false,
+  contourIntervalM: number | null = null,
 ): ReadonlyArray<LabelLine> {
   const { scene, camera } = run;
   const time = `UT ${formatUniverseTimeDhms(scene.time)}`;
@@ -556,6 +997,7 @@ export function labelLines(
     { label: "STYLE", value: styleName(camera.style) },
     { label: "CAMERA", value: cameraReading(camera) },
     { label: "FOV", value: `${String(camera.fovDeg)}°` },
+    ...(contourIntervalM === null ? [] : [contourIntervalLine(contourIntervalM)]),
     { label: "EXPOSURE", value: exposureReading(exposure) },
     {
       label: "STARS",
@@ -571,8 +1013,57 @@ export function labelLines(
   return lines;
 }
 
+/** The label of the wireframe's contour interval's line (plan R10, R10.T11; the guide's row). */
+export const CONTOUR_INTERVAL_LABEL = "CONTOUR INTERVAL";
+
+/**
+ * The wireframe's `CONTOUR INTERVAL` line at `intervalM`, m: `200 m · INDEX 1 km`, the interval in
+ * a field of {@link CONTOUR_FIELD_CH}, so that `· INDEX` never moves as the interval steps (the
+ * guide's "Numbers"), and its middle dot leading the index's part, as the sky's `STARS` line's
+ * lead theirs (decision-r10-view-block-room §5).
+ *
+ * @remarks
+ * The index ends the line with no field: nothing follows it for it to move, and where this line is
+ * its plate's widest the plate is a character narrower or wider as the index changes unit. Beside
+ * an open slot at 1280 × 720 the block sets the line on three rows, `500 m`, `· INDEX` and
+ * `2.5 km` (seen in R10.T11's look), the index's part breaking where its column, about 114 px, is
+ * narrower than its 128: the leading dot keeps `INTERVAL` and `INDEX`, side by side on the second
+ * row, from reading as one label.
+ */
+export function contourIntervalLine(intervalM: number): LabelLine {
+  const interval: LabelField = {
+    text: contourLengthReading(intervalM),
+    widthCh: CONTOUR_FIELD_CH,
+    stale: false,
+  };
+  return {
+    label: CONTOUR_INTERVAL_LABEL,
+    value: contourIntervalReading(intervalM),
+    fields: [interval],
+    dotsLead: true,
+  };
+}
+
+/** The head of the statement of where a view's positions are seen from (the guide's Views). */
+const POSITIONS_SEEN_FROM = "POSITIONS AS SEEN FROM";
+
 /** The statement of a view whose camera is off the hull: positions are as the ship sees them. */
-export const POSITIONS_FROM_SHIP = "POSITIONS AS SEEN FROM SHIP";
+export const POSITIONS_FROM_SHIP = `${POSITIONS_SEEN_FROM} SHIP`;
+
+/**
+ * The statement of where the view's positions are seen from, while that is not its camera, or
+ * `null`: {@link POSITIONS_FROM_SHIP} while the camera is off the hull; and in the body inspection,
+ * a kept scene of served bodies seen from one body's centre ({@link ViewScene.served}), that body
+ * by its designation as the view labels it, `POSITIONS AS SEEN FROM GPF 001B3Z C-17 /1024`, in its
+ * place, on the same line and set the same way (the owner's delegated call, 2026-11-01).
+ */
+export function positionsStatement(run: ViewRun): string | null {
+  const { scene, camera } = run;
+  if (scene.served !== undefined) {
+    return `${POSITIONS_SEEN_FROM} ${bodyDesignationIn(scene.served.seenFrom, scene)}`;
+  }
+  return camera.preset !== "seat" && scene.ownShip !== null ? POSITIONS_FROM_SHIP : null;
+}
 
 /**
  * The statement the `PRIMARY` view's block carries while the `EASED CAMERA MOVES` setting is on
@@ -582,31 +1073,102 @@ export const POSITIONS_FROM_SHIP = "POSITIONS AS SEEN FROM SHIP";
 export const EASED_MOVES_STATEMENT = "EASED CAMERA MOVES";
 
 /**
+ * The statement while the rotation of a body other than a star, with a radius, is not modelled:
+ * this generator version does not compute it, or a kept scene sets none
+ * (decision-r07-rotation-note).
+ */
+export const ROTATION_NOT_MODELLED = "ROTATION: NOT YET MODELLED";
+
+/**
+ * The statement while the detail level granted to the console withholds the rotation of a body
+ * other than a star, with a radius (`ViewBody.rotationNotResolved`; rotation-not-resolved): never
+ * read as "none" or as not modelled.
+ */
+export const ROTATION_NOT_RESOLVED = "ROTATION: NOT RESOLVED";
+
+/**
  * The steady statements under the label block's lines, each while its condition holds, as
  * {@link labelLines} states them.
  *
+ * @remarks
+ * {@link ROTATION_NOT_RESOLVED} stands directly after {@link ROTATION_NOT_MODELLED} where both
+ * hold, from two bodies, as the guide's "Data states" places a `NOT RESOLVED` note after its
+ * `NOT YET MODELLED` one, and both before the terrain annunciation. `DECORATION ON` stands after
+ * the terrain's annunciation where the view drew decoration and no survey line of its states it
+ * (plan R11, R11.T1; `decorationStatement`).
+ *
  * @param terrain - The view's debounced terrain annunciation (plan R05, T9), or `null` while
  *   neither condition holds or the view draws no terrain.
+ * @param decoration - Whether `DECORATION ON` stands among the statements; not unless given.
  */
 export function labelStatements(
   run: ViewRun,
   terrain: TerrainAnnunciation | null = null,
+  decoration = false,
 ): ReadonlyArray<string> {
   const statements: string[] = [];
-  if (run.camera.preset !== "seat" && run.scene.ownShip !== null) {
-    statements.push(POSITIONS_FROM_SHIP);
+  const positions = positionsStatement(run);
+  if (positions !== null) {
+    statements.push(positions);
   }
-  if (
-    run.scene.bodies.some(
-      (body) => body.kind !== "star" && body.radiusM > 0 && body.rotation === null,
-    )
-  ) {
-    statements.push("ROTATION: NOT YET MODELLED");
+  // The bodies whose graticule turns with their rotation: a star's is a reference grid, and a body
+  // with no radius is its symbol at any range.
+  const drawn = run.scene.bodies.filter((body) => body.kind !== "star" && body.radiusM > 0);
+  if (drawn.some((body) => body.rotation === null && body.rotationNotResolved !== true)) {
+    statements.push(ROTATION_NOT_MODELLED);
+  }
+  if (drawn.some((body) => body.rotationNotResolved === true)) {
+    statements.push(ROTATION_NOT_RESOLVED);
   }
   if (terrain !== null) {
     statements.push(terrain);
   }
+  if (decoration) {
+    statements.push(DECORATION_ON);
+  }
   return statements;
+}
+
+/**
+ * A statement of the label block that is a request's status, set as every request's `REJECTED` is
+ * (the guide's survey line; `StatusLine`): `refused` in `--text` where the server refused what
+ * was asked, `fault` in `--status-caution` for its own failure (`ATMOSPHERE REJECTED`'s, plan R08,
+ * R08.T10.b).
+ */
+export interface StatusStatement {
+  readonly text: string;
+  readonly standing: "refused" | "fault";
+}
+
+/**
+ * A statement of the label block that is a description, not a state: one of `ATMOSPHERE:
+ * APPROXIMATE`'s reasons.
+ *
+ * @remarks
+ * It is set whole as a sentence in its own case with no letter spacing, its head included, and is
+ * never tracked as an annunciation, colon or not (`decision-r08-approximate-plate.md` §6,
+ * 2026-10-27; plan R08, R08.T10.d): `Multiple scattering: drawn by the thin-atmosphere method
+ * beyond its checked range, for KX 4417 /2`, `e− scattering: left out, …`.
+ */
+export interface SentenceStatement {
+  readonly text: string;
+  readonly standing: "sentence";
+}
+
+/**
+ * A statement of the label block: a steady note's text, a request's {@link StatusStatement}, or a
+ * {@link SentenceStatement}.
+ */
+export type LabelStatement = string | StatusStatement | SentenceStatement;
+
+/** A statement's text. */
+export function statementText(statement: LabelStatement): string {
+  return typeof statement === "string" ? statement : statement.text;
+}
+
+/** Whether a statement is a {@link SentenceStatement}, one of a note's reasons. */
+function isSentence(statement: LabelStatement): statement is SentenceStatement {
+  return typeof statement !== "string" && statement.standing === "sentence";
 }
 
 /** The statement while the photorealistic style is chosen and its image is not yet drawn. */
@@ -641,15 +1203,25 @@ const BODY_PHOTOMETRY_LABEL: AppearanceLabel = "BODY PHOTOMETRY: NOT YET MODELLE
  * Scene-level, as the bodies' labels are (`litLabelsOf`): a craft's note stands with the scene's
  * craft, whether or not one is in the picture, and with no lit body as well.
  *
+ * The atmosphere's notes come after the others, the lit bodies' labels among them (plan R08,
+ * R08.T10.b; `labels.ts`'s `atmosphereNotes`), so that `ATMOSPHERE: NOT RESOLVED` stands after
+ * every `NOT YET MODELLED` note: its bodies' labels in their order, with each `ATMOSPHERE REJECTED`
+ * line after `ATMOSPHERE: NOT RESOLVED` and before the annunciations, a {@link StatusStatement}
+ * standing as every request's `REJECTED` does, and each of `ATMOSPHERE: APPROXIMATE`'s reasons
+ * straight after it, naming its bodies (R08.T10.c), a {@link SentenceStatement} (R08.T10.d).
+ *
  * @param drawn - The style the view's last frame was drawn in.
  * @param labels - The appearance labels of the bodies the photorealistic frame lights.
+ * @param atmosphere - What the view's last frame said of its bodies' atmospheres
+ *   (`atmosphereShownOf`); none where absent.
  */
 export function photorealStatements(
   run: ViewRun,
   lighting: LightingState,
   drawn: RenderStyle,
   labels: ReadonlyArray<AppearanceLabel>,
-): ReadonlyArray<string> {
+  atmosphere: ViewAtmosphereShown = NO_ATMOSPHERE_SHOWN,
+): ReadonlyArray<LabelStatement> {
   if (run.camera.style !== "photorealistic") {
     return [];
   }
@@ -670,7 +1242,96 @@ export function photorealStatements(
         )
       : [...bodyNotes, CRAFT_PHOTOMETRY_STATEMENT];
   }
-  return [...(line === null ? [] : [line]), ...notes];
+  const air: ReadonlyArray<LabelStatement> = atmosphereNotes(
+    atmosphere.labels,
+    atmosphere.plate,
+    atmosphere.approximate,
+  ).map(atmosphereNoteStatement);
+  return [...(line === null ? [] : [line]), ...notes, ...air];
+}
+
+/**
+ * An atmosphere note as the label block sets it: a `note` as its text, a `reason` as a
+ * {@link SentenceStatement} (plan R08, R08.T10.d), and a `refused` or `fault` line as a
+ * {@link StatusStatement} (R08.T10.b).
+ */
+export function atmosphereNoteStatement(note: AtmosphereNote): LabelStatement {
+  let statement: LabelStatement;
+  switch (note.standing) {
+    case "note":
+      statement = note.statement;
+      break;
+    case "reason":
+      statement = { text: note.statement, standing: "sentence" };
+      break;
+    case "refused":
+    case "fault":
+      statement = { text: note.statement, standing: note.standing };
+      break;
+  }
+  return statement;
+}
+
+/**
+ * An instrument view's photorealistic statements, less those the `PRIMARY` view's block shows
+ * already.
+ *
+ * @remarks
+ * Each statement the primary's block shows is dropped (decision-r07-t19-layout, item 5), save
+ * `PHOTOREAL_PREPARING`, the instrument's own, and save `ATMOSPHERE: APPROXIMATE` where one of the
+ * instrument's own reasons stands, since a reason line never stands without its note
+ * (`decision-r08-approximate-plate.md` §6, item 4, 2026-10-27; plan R08, R08.T10.d). The note's
+ * reasons are the sentences straight after it, so it stays straight above the first that stands.
+ * Where none of its reasons stands, the note is dropped as any statement is, where the primary
+ * shows it.
+ *
+ * @param own - {@link photorealStatements} of the instrument's own picture.
+ * @param primary - The photorealistic statements the primary's block shows.
+ */
+export function instrumentPhotorealStatements(
+  own: ReadonlyArray<LabelStatement>,
+  primary: ReadonlyArray<LabelStatement>,
+): ReadonlyArray<LabelStatement> {
+  const shown = new Set(primary.map(statementText));
+  const fresh = (statement: LabelStatement): boolean => !shown.has(statementText(statement));
+  // The note's reasons are the sentences straight after it (`atmosphereNotes`' order).
+  const note = own.indexOf(ATMOSPHERE_STATEMENTS.atmosphereApproximate);
+  const after = note < 0 ? [] : own.slice(note + 1);
+  const firstOther = after.findIndex((statement) => !isSentence(statement));
+  const reasons = firstOther < 0 ? after : after.slice(0, firstOther);
+  const reasonStands = reasons.some(fresh);
+  return own.filter(
+    (statement, i) =>
+      statement === PHOTOREAL_PREPARING || fresh(statement) || (i === note && reasonStands),
+  );
+}
+
+/**
+ * A note with the reasons that follow it, `ATMOSPHERE: APPROXIMATE` and its sentences, which the
+ * plate folds behind the note (`LabelStatements`); any other statement with none.
+ */
+export interface StatementGroup {
+  readonly statement: LabelStatement;
+  readonly reasons: ReadonlyArray<SentenceStatement>;
+}
+
+/**
+ * The statements in order as the plate sets them, each sentence with the note before it, whose
+ * reasons the plate folds behind it (`LabelStatements`; the owner's request, 2026-11-01).
+ */
+export function statementGroups(
+  statements: ReadonlyArray<LabelStatement>,
+): ReadonlyArray<StatementGroup> {
+  const groups: StatementGroup[] = [];
+  for (const statement of statements) {
+    const last = groups.at(-1);
+    if (isSentence(statement) && last !== undefined && typeof last.statement === "string") {
+      groups[groups.length - 1] = { ...last, reasons: [...last.reasons, statement] };
+    } else {
+      groups.push({ statement, reasons: [] });
+    }
+  }
+  return groups;
 }
 
 /**
@@ -737,6 +1398,64 @@ export function rangeText(row: MarkRow): string {
 /** Whether a scene's ranges are from the camera: it has no own ship to measure from. */
 export function rangesFromCamera(scene: ViewScene): boolean {
   return !scene.craft.some((craft) => craft.id === scene.ownShip);
+}
+
+/**
+ * A note of a view's list (plan R10, R10.T16.c; decision-r10-t16-review §1): a body's survey edge
+ * in the view's picture, with its range, set after the list's options and never one of them.
+ */
+export interface SurveyEdgeListNote extends SurveyEdgeNote {
+  /** The note's key, its body's: the next showing keeps its unit within its hysteresis by it. */
+  readonly key: string;
+  /** The body's designation, as the list's option for it names it (`MarkRow.name`). */
+  readonly designation: string;
+  /** The range to the edge's nearest point seen, m, by which the notes are ordered. */
+  readonly rangeM: number;
+  /** Whether the range is from the camera, there being no own ship: `FROM CAMERA` follows it. */
+  readonly fromCamera: boolean;
+}
+
+/**
+ * The view list's survey-edge notes (the guide's Views; decision-r10-t16-review §1): one for each
+ * body whose edge has a point seen in the frame's picture, nearest first by its range, ties by its
+ * designation, each range from the own ship where there is one, else from the camera
+ * (`FROM CAMERA`), its unit kept within its hysteresis from the note `previous` gave it.
+ *
+ * @param edges - The frame's survey edges (`WireframeDrawList.surveyEdges`); one with no point seen
+ *   has no note, and a body's unit is dropped while it has none.
+ * @param previous - The notes last shown in this view, whose units the new ones keep.
+ */
+export function surveyEdgeNotes(
+  scene: ViewScene,
+  edges: ReadonlyArray<DrawnSurveyEdge>,
+  previous: ReadonlyArray<SurveyEdgeListNote> = [],
+): ReadonlyArray<SurveyEdgeListNote> {
+  const fromCamera = rangesFromCamera(scene);
+  const notes: SurveyEdgeListNote[] = [];
+  for (const edge of edges) {
+    const body = scene.bodies.find((each) => each.id === edge.body);
+    if (edge.nearestRangeM === null || body === undefined) {
+      continue;
+    }
+    const key = `survey-edge:${edge.body}`;
+    const unit = previous.find((note) => note.key === key)?.unit ?? null;
+    notes.push({
+      ...surveyEdgeNote(body.designation, edge.nearestRangeM, fromCamera, unit),
+      key,
+      designation: body.designation,
+      rangeM: edge.nearestRangeM,
+      fromCamera,
+    });
+  }
+  return notes.toSorted((a, b) => {
+    if (a.rangeM !== b.rangeM) {
+      return a.rangeM - b.rangeM;
+    }
+    if (a.designation === b.designation) {
+      return 0;
+    }
+    return a.designation < b.designation ? -1 : 1;
+  });
 }
 
 /** A target's key, stable from frame to frame. */

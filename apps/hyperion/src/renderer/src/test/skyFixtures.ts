@@ -25,11 +25,19 @@ export interface FixtureStar {
   readonly vMag: number;
 }
 
-/** A payload of `stars` and a band of `faceTexels`² faces whose eye limits are `eyeLimitMag`. */
+/** The luminance of a fixture band's texels unless a payload is given its own, cd/m²: μ 21.6. */
+export const FIXTURE_BAND_CD_M2 = 2.5e-4;
+
+/**
+ * A payload of `stars` and a band of `faceTexels`² faces whose eye limits are `eyeLimitMag`, each
+ * texel lit at {@link FIXTURE_BAND_CD_M2}, or at `luminanceOf` its index (face after face, rows
+ * from the top) where that is given.
+ */
 export function skyPayload(
   stars: ReadonlyArray<FixtureStar>,
   faceTexels: number,
   eyeLimitMag: number | null,
+  luminanceOf?: (texel: number) => number,
 ): Uint8Array {
   const texels = 6 * faceTexels * faceTexels;
   const bytes = new Uint8Array(stars.length * SKY_STAR_BYTES + texels * SKY_TEXEL_BYTES);
@@ -46,7 +54,7 @@ export function skyPayload(
   });
   for (let texel = 0; texel < texels; texel += 1) {
     const at = stars.length * SKY_STAR_BYTES + texel * SKY_TEXEL_BYTES;
-    view.setFloat32(at, 2.5e-4, true);
+    view.setFloat32(at, luminanceOf?.(texel) ?? FIXTURE_BAND_CD_M2, true);
     view.setUint16(at + 4, 21_845, true);
     view.setUint16(at + 6, 21_845, true);
     view.setInt16(at + 8, eyeLimitMag === null ? -32_768 : Math.round(eyeLimitMag * 1_000), true);
@@ -69,7 +77,14 @@ export function skyRequest(years: number, system = "0200080020000000"): SkyReque
   };
 }
 
-/** The response to `request` whose payload is `payload` with `stars` stars, valid for a year. */
+/** The eye's cut a fixture reply states, V. */
+const FIXTURE_EYE_CUT_V = 9.5;
+
+/**
+ * The response to `request` whose payload is `payload` with `stars` stars, valid for a year, cut
+ * as the server cuts it: at the deeper of the eye's ({@link FIXTURE_EYE_CUT_V}) and the request's
+ * camera limit, at the camera's alone where the eye is not asked.
+ */
 export function skyResponse(
   request: SkyRequest,
   payload: Uint8Array,
@@ -83,7 +98,10 @@ export function skyResponse(
     time: request.time,
     observer: request.observer,
     valid_until: { seconds: request.time.seconds + 31_557_600, nanos: 0 },
-    cut_v: 9.5,
+    cut_v:
+      request.eye === null
+        ? (request.camera_limit_v ?? FIXTURE_EYE_CUT_V)
+        : Math.max(FIXTURE_EYE_CUT_V, request.camera_limit_v ?? Number.NEGATIVE_INFINITY),
     census: [],
     listed: stars,
     overflow: 0,

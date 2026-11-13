@@ -87,9 +87,18 @@ mod model;
 mod phases;
 mod post_agb;
 
+use core::error::Error;
+use core::fmt;
+
+use crate::GENERATOR_VERSION;
 use crate::stellar::draws::{StarDraws, UnitUniform};
-use crate::stellar::remnant::collapse::RemnantDraws;
-use crate::stellar::remnant::{CompactRemnant, Death, RemnantRecipe, SupernovaType};
+use crate::stellar::remnant::collapse::{
+    COMPANION_STRIPPED_WINDOW, RemnantDraws, SINGLE_STAR_WINDOW,
+};
+use crate::stellar::remnant::{
+    CompactRemnant, Death, ProgenitorAtDeath, RemnantRecipe, SupernovaType,
+};
+use crate::stellar::rules::StellarRules;
 use crate::stellar::{Composition, Phase, StarState, StarStateParts};
 use crate::units::{
     Megayears, SolarLuminosities, SolarMasses, SolarMassesPerYear, SolarRadii, Years,
@@ -100,15 +109,19 @@ use super::wind::{self, ReimersEta, WindRecipe};
 
 // Plan 11's hooks: the helium star of ruling 34.1 and a star whose mass a companion sets.
 pub(crate) use binary::{
-    CORE_GYRATION, ConvectiveEnvelope, ENVELOPE_GYRATION, NewStar, Remains, Structure,
-    giant_radius_exponent, lightest_helium_star, main_sequence_lifetime, main_sequence_radius,
-    main_sequence_structure, new_star_mass,
+    CORE_GYRATION, ConvectiveEnvelope, ENVELOPE_GYRATION, NewStar, RadiusAtAge, Remains, Structure,
+    bare_core_light, degenerate_giant_mass, giant_radius_exponent, lightest_helium_star,
+    main_sequence_lifetime, main_sequence_radius, main_sequence_structure, new_star_mass,
+    pulsing_agb_helium_core,
 };
 #[cfg(test)]
 pub(crate) use binary::{early_agb_core_radius_bound, helium_zams_radius};
 use build::Builder;
 pub(crate) use build::Resolution;
 pub(crate) use excess::{HeliumHook, HeliumTable};
+// P15.T7.b's tracks under a candidate helium table, for `hyperion-fit`'s fit of `tables::helium`.
+#[cfg(any(test, feature = "testing"))]
+pub use excess::{CandidateHeliumTable, track_with_helium_table};
 use interp::Interval;
 use model::{Model, Physics};
 pub(crate) use post_agb::bridged_origin;
@@ -150,11 +163,142 @@ pub enum Bridges {
     Instant,
 }
 
-/// The choices a track is built with: the wind and remnant recipes and the bridges.
+/// The widths of the two electron-capture windows of [`RemnantRecipe::MandelMuller2020`], M☉ of
+/// the mass the early AGB's `m_c_bagb` reads (plan 06, design note 12; P15.T5.d): a single star's,
+/// and that of a star whose companion-stripped mark is set. Each is finite and positive.
 ///
-/// The default is the generator's: [`WindRecipe::Modern`], [`RemnantRecipe::MandelMuller2020`]
-/// and [`Bridges::Physical`]. [`TrackOptions::hurley2000`] is the published SSE code's, for the
-/// validation of P06.T12.b.
+/// The window of width w is [`m_cc` − w, `m_cc`), below the lowest initial mass that makes an iron
+/// core ([`ElectronCaptureWindows::window`](crate::stellar::remnant::collapse::ElectronCaptureWindows::window)).
+/// The default, [`CaptureWindowWidths::DEFAULT`], is the generator's:
+/// [`SINGLE_STAR_WINDOW`](crate::stellar::remnant::collapse::SINGLE_STAR_WINDOW), 0.1 M☉, and
+/// [`COMPANION_STRIPPED_WINDOW`](crate::stellar::remnant::collapse::COMPANION_STRIPPED_WINDOW),
+/// 1.0 M☉. Other widths are for plan 15's review of the kick law's defaults (P15.T5.b), through the
+/// kick-law tests' reference population; the generator builds every track at the default.
+///
+/// # Examples
+///
+/// A track whose single-star window is half the generator's:
+///
+/// ```
+/// use hyperion_sim::stellar::remnant::collapse::{COMPANION_STRIPPED_WINDOW, SINGLE_STAR_WINDOW};
+/// use hyperion_sim::stellar::sse::{
+///     BuildCaptureWindowWidthsError, CaptureWindowWidths, TrackOptions,
+/// };
+/// use hyperion_sim::units::SolarMasses;
+///
+/// let narrow = CaptureWindowWidths::new(SolarMasses::new(0.05), COMPANION_STRIPPED_WINDOW)?;
+/// let options = TrackOptions::default().with_capture_windows(narrow);
+/// assert_eq!(options.capture_windows().single(), SolarMasses::new(0.05));
+/// assert_eq!(TrackOptions::default().capture_windows().single(), SINGLE_STAR_WINDOW);
+/// let zero = CaptureWindowWidths::new(SolarMasses::new(0.0), COMPANION_STRIPPED_WINDOW);
+/// assert_eq!(zero, Err(BuildCaptureWindowWidthsError::Single));
+/// # Ok::<(), hyperion_sim::stellar::sse::BuildCaptureWindowWidthsError>(())
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+pub struct CaptureWindowWidths {
+    single: SolarMasses,
+    companion_stripped: SolarMasses,
+}
+
+impl CaptureWindowWidths {
+    /// The generator's widths: `collapse`'s
+    /// [`SINGLE_STAR_WINDOW`](crate::stellar::remnant::collapse::SINGLE_STAR_WINDOW) and
+    /// [`COMPANION_STRIPPED_WINDOW`](crate::stellar::remnant::collapse::COMPANION_STRIPPED_WINDOW).
+    pub const DEFAULT: Self = Self {
+        single: SINGLE_STAR_WINDOW,
+        companion_stripped: COMPANION_STRIPPED_WINDOW,
+    };
+
+    /// The widths `single` for a single star's window and `companion_stripped` for a
+    /// companion-stripped star's, M☉ of the mass `m_c_bagb` reads.
+    ///
+    /// # Errors
+    ///
+    /// [`BuildCaptureWindowWidthsError::Single`] or
+    /// [`BuildCaptureWindowWidthsError::CompanionStripped`] for a width that is not finite and
+    /// positive, the single star's checked first.
+    pub const fn new(
+        single: SolarMasses,
+        companion_stripped: SolarMasses,
+    ) -> Result<Self, BuildCaptureWindowWidthsError> {
+        const fn valid(width: SolarMasses) -> bool {
+            width.value().is_finite() && width.value() > 0.0
+        }
+        if !valid(single) {
+            return Err(BuildCaptureWindowWidthsError::Single);
+        }
+        if !valid(companion_stripped) {
+            return Err(BuildCaptureWindowWidthsError::CompanionStripped);
+        }
+        Ok(Self {
+            single,
+            companion_stripped,
+        })
+    }
+
+    /// A single star's window width, M☉. A star whose own wind stripped it counts as single.
+    #[must_use]
+    pub const fn single(&self) -> SolarMasses {
+        self.single
+    }
+
+    /// A companion-stripped star's window width, M☉.
+    #[must_use]
+    pub const fn companion_stripped(&self) -> SolarMasses {
+        self.companion_stripped
+    }
+}
+
+impl Default for CaptureWindowWidths {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+
+/// Why [`CaptureWindowWidths::new`] refused its widths.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum BuildCaptureWindowWidthsError {
+    /// The single star's width is not finite and positive.
+    Single,
+    /// The companion-stripped star's width is not finite and positive.
+    CompanionStripped,
+}
+
+impl fmt::Display for BuildCaptureWindowWidthsError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let which = match self {
+            Self::Single => "a single star's",
+            Self::CompanionStripped => "a companion-stripped star's",
+        };
+        write!(
+            f,
+            "{which} electron-capture window width is not finite and positive"
+        )
+    }
+}
+
+impl Error for BuildCaptureWindowWidthsError {}
+
+/// The choices a track is built with: the wind and remnant recipes, the bridges, the widths of
+/// the electron-capture windows the remnant recipe reads, and the stellar stage's rules.
+///
+/// The default is the generator's: [`WindRecipe::Modern`], [`RemnantRecipe::MandelMuller2020`],
+/// [`Bridges::Physical`], [`CaptureWindowWidths::DEFAULT`] and the generator version's rules.
+/// [`TrackOptions::hurley2000`] is the published SSE code's, for the validation of P06.T12.b; its
+/// remnant recipe reads no window.
+///
+/// The rules (`stellar::rules`) carry the stellar stage's holds down to the track: the helium
+/// table a star with a helium excess reads (P15.T7.b's swap) and the modern winds' treatment of
+/// the Humphreys–Davidson limit (P06.T42.b's swap), both held until version 26. A star
+/// generated in a galaxy takes the galaxy's, which its model, its pair's engine and the brief
+/// set; every other track takes the version's.
+///
+/// The options are not `Eq`, `Ord` or `Hash`, since the windows' widths are floats, which the sim
+/// never hashes (P15.T5.d). Their `Debug` names the windows only where they are not the
+/// generator's, [`CaptureWindowWidths::DEFAULT`], and the rules only where they are not the
+/// version's, so that a track's `Debug`, which the binary timelines' golden digests
+/// (`stellar::binary`'s `a_thousand_timelines_are_pinned`), reads as it did before the windows and
+/// the rules became options.
 ///
 /// # Examples
 ///
@@ -167,21 +311,55 @@ pub enum Bridges {
 /// assert_eq!(sse.bridges(), Bridges::Instant);
 /// assert_eq!(TrackOptions::default().with_bridges(Bridges::Instant).wind(), WindRecipe::Modern);
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+#[derive(Clone, Copy, PartialEq, PartialOrd)]
 pub struct TrackOptions {
     wind: WindRecipe,
     remnant: RemnantRecipe,
     bridges: Bridges,
+    capture_windows: CaptureWindowWidths,
+    rules: StellarRules,
+}
+
+impl fmt::Debug for TrackOptions {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut options = f.debug_struct("TrackOptions");
+        options
+            .field("wind", &self.wind)
+            .field("remnant", &self.remnant)
+            .field("bridges", &self.bridges);
+        if self.capture_windows != CaptureWindowWidths::DEFAULT {
+            options.field("capture_windows", &self.capture_windows);
+        }
+        if self.rules != StellarRules::of_version(GENERATOR_VERSION) {
+            options.field("rules", &self.rules);
+        }
+        options.finish()
+    }
+}
+
+impl Default for TrackOptions {
+    fn default() -> Self {
+        Self {
+            wind: WindRecipe::default(),
+            remnant: RemnantRecipe::default(),
+            bridges: Bridges::default(),
+            capture_windows: CaptureWindowWidths::DEFAULT,
+            rules: StellarRules::of_version(GENERATOR_VERSION),
+        }
+    }
 }
 
 impl TrackOptions {
-    /// The recipes of HPT and the published SSE code, with no bridges.
+    /// The recipes of HPT and the published SSE code, with no bridges. The windows' widths are the
+    /// generator's, which HPT's remnant recipe never reads.
     #[must_use]
     pub const fn hurley2000() -> Self {
         Self {
             wind: WindRecipe::Hurley2000,
             remnant: RemnantRecipe::Hurley2000,
             bridges: Bridges::Instant,
+            capture_windows: CaptureWindowWidths::DEFAULT,
+            rules: StellarRules::of_version(GENERATOR_VERSION),
         }
     }
 
@@ -203,6 +381,15 @@ impl TrackOptions {
         Self { bridges, ..self }
     }
 
+    /// These options with the electron-capture windows' widths `capture_windows`.
+    #[must_use]
+    pub const fn with_capture_windows(self, capture_windows: CaptureWindowWidths) -> Self {
+        Self {
+            capture_windows,
+            ..self
+        }
+    }
+
     /// The wind recipe.
     #[must_use]
     pub const fn wind(&self) -> WindRecipe {
@@ -219,6 +406,27 @@ impl TrackOptions {
     #[must_use]
     pub const fn bridges(&self) -> Bridges {
         self.bridges
+    }
+
+    /// The electron-capture windows' widths.
+    #[must_use]
+    pub const fn capture_windows(&self) -> CaptureWindowWidths {
+        self.capture_windows
+    }
+
+    /// These options under the stellar stage's `rules` in place of the generator version's: what
+    /// a star generated in a galaxy is built with, from `galaxy.rules().stellar`
+    /// (`stellar::rules`).
+    #[must_use]
+    pub(crate) const fn with_rules(self, rules: StellarRules) -> Self {
+        Self { rules, ..self }
+    }
+
+    /// The stellar stage's rules, whose holds the track's builders read: the helium table
+    /// ([`HeliumTable::of`]) and the winds' Humphreys–Davidson limit (`wind::rate`).
+    #[must_use]
+    pub(crate) const fn rules(&self) -> StellarRules {
+        self.rules
     }
 }
 
@@ -248,7 +456,7 @@ impl TrackOptions {
 /// assert_eq!(sun.state_at(Years::new(1.3e10)).phase(), Phase::CarbonOxygenWhiteDwarf);
 /// # Ok::<(), &str>(())
 /// ```
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct Track {
     coeffs: ZCoeffs,
     composition: Composition,
@@ -262,6 +470,34 @@ pub struct Track {
     helium: Option<HeliumHook>,
     /// The planetary nebula's expansion-speed rank, [`StarDraws::nebula`] (P06.T16.b).
     nebula: UnitUniform,
+    /// Whether the build read the star's companion-stripped mark, and its verdict
+    /// ([`Track::companion_mark_read`]).
+    companion_mark_read: Option<bool>,
+}
+
+/// Written by hand to leave out `companion_mark_read`, a record of what the build read rather
+/// than a part of the track, so that a track prints as it did before plan 08's guard (P08.T12.c):
+/// the binary engine's pinned timelines hash the print (`a_thousand_timelines_are_pinned`).
+#[expect(
+    clippy::missing_fields_in_debug,
+    reason = "companion_mark_read is left out of the print on purpose, so that every pinned print \
+              of a track is the same bits"
+)]
+impl fmt::Debug for Track {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Track")
+            .field("coeffs", &self.coeffs)
+            .field("composition", &self.composition)
+            .field("options", &self.options)
+            .field("initial_mass", &self.initial_mass)
+            .field("eta", &self.eta)
+            .field("segments", &self.segments)
+            .field("fate", &self.fate)
+            .field("built_until", &self.built_until)
+            .field("helium", &self.helium)
+            .field("nebula", &self.nebula)
+            .finish()
+    }
 }
 
 /// Samples per living segment in [`Track::window_where`], both ends included.
@@ -384,6 +620,36 @@ pub(crate) struct IronCore {
     pub(crate) co_core: SolarMasses,
 }
 
+/// The collapse at `age` of an iron core whose carbon–oxygen core is `co_core`, from `progenitor`,
+/// whose envelopes make the supernova `supernova`, under `recipe` with the remnant draws `draws`:
+/// plan 06's seam ([`phases::iron_core_fate`], P06.T18.d) for a star with no track of its own, a
+/// merger's product that no star can hold (plan 11, P11.T4's dwarf limit, `Engine::finish_merger`).
+#[must_use]
+pub(crate) fn iron_core_fate(
+    recipe: RemnantRecipe,
+    age: Years,
+    supernova: SupernovaType,
+    co_core: SolarMasses,
+    progenitor: ProgenitorAtDeath,
+    draws: RemnantDraws,
+) -> Fate {
+    phases::iron_core_fate(recipe, age.value(), supernova, co_core, progenitor, draws)
+}
+
+/// The electron-capture supernova at `age` of an oxygen–neon core `co_core` from `progenitor`,
+/// under `recipe`: plan 06's ([`phases::oxygen_neon_capture_fate`]) for a star with no track of its
+/// own, a merger's helium-giant product that no star holds (P11.T4's kept-core endings,
+/// `Engine::capture_collapse`).
+#[must_use]
+pub(crate) fn oxygen_neon_capture_fate(
+    recipe: RemnantRecipe,
+    age: Years,
+    co_core: SolarMasses,
+    progenitor: ProgenitorAtDeath,
+) -> Fate {
+    phases::oxygen_neon_capture_fate(recipe, age.value(), co_core.value(), progenitor)
+}
+
 impl Track {
     /// The star's track built until it covers `age_max`: every segment up to the one that holds
     /// that age, which are bit for bit the same segments as those of [`Track::full`] (design note
@@ -471,12 +737,12 @@ impl Track {
             options,
             resolution,
             age_max,
-            HeliumHook::of(comp, &HeliumTable::COMMITTED),
+            HeliumHook::of(comp, &HeliumTable::of(options.rules())),
         )
     }
 
-    /// [`Track::build`] with the helium-excess correction `helium` in place of the committed
-    /// table's (P06.T17's tests build tracks from a table that is not the identity).
+    /// [`Track::build`] with the helium-excess correction `helium` in place of the one its
+    /// options' rules choose (P06.T17's tests build tracks from a table that is not the identity).
     #[must_use]
     pub(crate) fn build_with_helium(
         m0: SolarMasses,
@@ -500,7 +766,7 @@ impl Track {
             build::Keep::Track,
         )
         .with_helium(helium)
-        .stripped_by_companion(is_companion_stripped(m0, comp, draws))
+        .with_companion_mark(m0, draws)
         .run(m0.value(), age_max);
         Self {
             coeffs,
@@ -513,7 +779,25 @@ impl Track {
             built_until: outcome.built_until,
             helium,
             nebula: draws.nebula(),
+            companion_mark_read: outcome.companion_mark_read,
         }
+    }
+
+    /// Whether the build read the star's provisional companion-stripped mark, and its verdict:
+    /// `Some` where the mark decided the star's death, in the band of initial masses inside
+    /// [`STRIPPED_WINDOW`](crate::stellar::fates::STRIPPED_WINDOW) where the single star's and the
+    /// companion-stripped star's electron-capture windows disagree (plan 06, design note 11), and
+    /// `None` wherever the track would be the same under either value. Plan 08's kick loop keeps
+    /// the track's mark where it is `Some` (P08.T12.c; ruling 93.2, amended 2026-11-01).
+    ///
+    /// It holds because the build asks the mark at one place only, where the two windows disagree
+    /// (`Builder::by_companion_mark`, from `captures_electrons`), on a builder of its own: a build
+    /// that asked it anywhere else would make it `Some` where the mark decides nothing, and the
+    /// kick loop would keep a mark it could redraw. It is part of the track's equality, and two
+    /// builds of one star to its death agree on it.
+    #[must_use]
+    pub(crate) const fn companion_mark_read(&self) -> Option<bool> {
+        self.companion_mark_read
     }
 
     /// The star's state at `age` (years since the onset of collapse).
@@ -585,6 +869,51 @@ impl Track {
         })
     }
 
+    /// This track with `fate` in place of its own, a fate [`fate_with`](Self::fate_with) gave
+    /// it for another star's remnant draws: its remnant segment laid out again for the new remnant
+    /// as the build lays one out, every segment before it kept (plan 08's kick loop, P08.T12.c,
+    /// which keeps the attempt whose kick its record's speed bin holds). For the track's own fate
+    /// it is the track, bit for bit.
+    #[must_use]
+    pub(crate) fn with_fate(mut self, fate: Fate) -> Self {
+        let physics_track = &self;
+        let replaced = physics_track.segments.last().and_then(|last| {
+            let Model::Remnant {
+                birth,
+                origin,
+                knee,
+                ..
+            } = last.model
+            else {
+                return None;
+            };
+            let max_before = last.max_before;
+            let mut segment = remnant_segment(RemnantModel {
+                phase: fate.phase,
+                mass: fate.remnant.mass(),
+                birth,
+                origin,
+                knee,
+            });
+            segment.max_before = max_before;
+            let p = segment
+                .evaluate(&physics_track.physics(), birth)
+                .point
+                .point;
+            segment.samples.push(Sample {
+                age: birth,
+                max_radius: max_before[0].max(p.radius.value()),
+                max_luminosity: max_before[1].max(p.luminosity.value()),
+            });
+            Some(segment)
+        });
+        if let (Some(segment), Some(last)) = (replaced, self.segments.last_mut()) {
+            *last = segment;
+        }
+        self.fate = Some(fate);
+        self
+    }
+
     /// The largest radius the star has had up to `age` since its arrival on the main sequence:
     /// non-decreasing in age from the arrival and never below [`StarState::radius`] at `age`
     /// (plans 11 and 14).
@@ -622,8 +951,8 @@ impl Track {
     /// [`PhasePredicate::Lbv`] gives the window in which the star is a luminous blue variable,
     /// which plan 09's catalogue class tests against the source horizon. The interval runs from
     /// the first age at which the predicate holds to the last: each living segment is sampled at
-    /// [`WINDOW_SAMPLES`] even ages, both ends included, and each change of the predicate between
-    /// neighbours is bisected to [`WINDOW_BISECTIONS`] steps. Where a track leaves and re-enters
+    /// `WINDOW_SAMPLES` even ages, both ends included, and each change of the predicate between
+    /// neighbours is bisected to `WINDOW_BISECTIONS` steps. Where a track leaves and re-enters
     /// the region, the interval spans the gap; the LBV window of the generator's tracks has none
     /// in the plan's test.
     ///
@@ -787,7 +1116,10 @@ impl Track {
     /// Each segment's start and end age, years (the remnant's end infinite), with its knots' ages,
     /// in the segments' order: the phases rendering plan R06's luminosity function cuts a life
     /// into (its Design note 7).
-    pub(crate) fn segment_ages(
+    ///
+    /// `pub` for `hyperion-sky` alone (the crate split, CS.T1); not part of the sim's API.
+    #[doc(hidden)]
+    pub fn segment_ages(
         &self,
     ) -> impl Iterator<Item = (f64, f64, impl Iterator<Item = f64> + '_)> + '_ {
         self.segments.iter().map(|segment| {
@@ -811,6 +1143,18 @@ impl Track {
         self.segments
             .get(last + 1)
             .map(|next| Years::new(next.start))
+    }
+
+    /// The age at which the main sequence ends, whether or not the track is built past it: the end
+    /// of its last main-sequence segment, which a track built to an age on its main sequence holds
+    /// whole ([`Track::to_age`]); `None` for a track that does not reach its main sequence or has
+    /// none. Plan 14's habitability assessment reads it (P14.T25).
+    #[must_use]
+    pub(crate) fn main_sequence_ends(&self) -> Option<Years> {
+        self.segments
+            .iter()
+            .rfind(|segment| matches!(segment.model, Model::MainSequence { .. }))
+            .map(|segment| Years::new(segment.end))
     }
 
     /// The age at which the star leaves `stage`, if the track has been built past it: the start of
@@ -896,21 +1240,55 @@ impl Track {
         self.options
     }
 
-    /// The number of thermal pulses since the start of the thermally pulsing AGB at `age`, the
-    /// integral of 1 ÷ `τ_ip`(Mc, `M_env`) (P06.T8.b's interpulse period) over the phase, or `None`
-    /// outside it (for P06.T24.b and T28.f).
+    /// The thermally pulsing AGB's segment, if the track is built to it.
     #[must_use]
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "P06.T24.b and T28.f are the first callers")
-    )]
-    pub(crate) fn pulse_phase_at(&self, age: Years) -> Option<f64> {
-        let age = self.checked_age(age);
-        let segment = self.segment_at(age);
-        match segment.model {
-            Model::ThermallyPulsingAgb { .. } => Some(segment.pulse_phase(age)),
-            _ => None,
+    fn pulsing_agb_segment(&self) -> Option<&Segment> {
+        self.segments
+            .iter()
+            .find(|segment| matches!(segment.model, Model::ThermallyPulsingAgb { .. }))
+    }
+
+    /// The ages of the thermally pulsing AGB, from its start, the first pulse, to its end, if the
+    /// track is built to it (for P06.T28.f's pulse clock).
+    #[must_use]
+    pub(crate) fn pulsing_agb(&self) -> Option<AgeInterval> {
+        self.pulsing_agb_segment().map(|segment| AgeInterval {
+            start: Years::new(segment.start),
+            end: Years::new(segment.end),
+        })
+    }
+
+    /// λ, the fraction of the core's growth that third dredge-up returns to the envelope on the
+    /// thermally pulsing AGB (HPT equation 73), as the track's phase was built with, if the track
+    /// is built to it (for P06.T24.b's carbon).
+    #[must_use]
+    pub(crate) fn pulsing_agb_dredge_up(&self) -> Option<f64> {
+        let segment = self.pulsing_agb_segment()?;
+        if let Model::ThermallyPulsingAgb { phase, .. } = &segment.model {
+            Some(phase.dredge_up())
+        } else {
+            None
         }
+    }
+
+    /// The number of thermal pulses since the start of the thermally pulsing AGB at the age
+    /// `base_years + offset_years`, the integral of 1 ÷ `τ_ip`(Mc, `M_env`) (P06.T8.b's interpulse
+    /// period) over the phase, or `None` where that age lies outside the phase, its ends included
+    /// (for P06.T28.f's pulse clock, whose pulse number P06.T24.b reads).
+    ///
+    /// The segment's knots hold the count and its rate, and the monotone cubic between two of them
+    /// is read at the age's two parts, as [`Track::mass_at_split`] reads the mass: with
+    /// `base_years` the star's age at the epoch and `offset_years` the Julian years since, the
+    /// interval's fraction is (`base_years` − the knot's age) + `offset_years`, so that the count
+    /// follows an offset finer than the summed age can hold. With the offset zero it is the count
+    /// at the age `base_years`. The interval is chosen at the summed age; a segment without knots
+    /// has no pulses.
+    #[must_use]
+    pub(crate) fn pulse_phase_at(&self, base_years: f64, offset_years: f64) -> Option<f64> {
+        let segment = self.pulsing_agb_segment()?;
+        let age = base_years + offset_years;
+        (segment.start <= age && age <= segment.end)
+            .then(|| segment.pulse_phase_at_split(base_years, offset_years))
     }
 
     /// The ages at which the track's state may step, with what steps there: every sudden death,
@@ -1065,10 +1443,41 @@ pub(crate) fn fate_of(
     draws: &StarDraws,
     options: TrackOptions,
 ) -> Fate {
+    lifetime_build(m0, comp, draws, options, None)
+        .expect("a build with no age to stop at runs to the star's death")
+}
+
+/// The fate of [`Track::to_age_with`]'s track of the same arguments, if that build reaches the
+/// death: the build stops at the same segment, and the fate is [`Track::fate_with`] of the
+/// star's own remnant draws, bit for bit, from a build that keeps no segment (the cost of
+/// [`lifetime_of`] for a star that dies by `age_max`, less for one that does not).
+#[must_use]
+pub(crate) fn fate_to_age(
+    m0: SolarMasses,
+    comp: &Composition,
+    draws: &StarDraws,
+    options: TrackOptions,
+    age_max: Years,
+) -> Option<Fate> {
+    lifetime_build(m0, comp, draws, options, Some(age_max.value().max(0.0)))
+}
+
+/// The mass, M☉, with which the main sequence of the star of initial mass `m0`, `comp` and `draws`
+/// under `options` ends: the initial mass its giant branches and its early AGB read, which the
+/// main sequence's wind has lowered (HPT section 7.1), from a build of the main sequence alone by
+/// [`lifetime_build`]'s builder (P09.T10's member draws, whose clusters bound the main sequence's
+/// loss).
+#[must_use]
+pub(crate) fn main_sequence_end_mass(
+    m0: SolarMasses,
+    comp: &Composition,
+    draws: &StarDraws,
+    options: TrackOptions,
+) -> SolarMasses {
     let coeffs = ZCoeffs::new(comp.z_fit());
     let m0 = checked_initial_mass(m0);
     let eta = reimers_eta(draws.eta().value());
-    let outcome = Builder::new(
+    let built = Builder::new(
         &coeffs,
         comp,
         options,
@@ -1077,11 +1486,45 @@ pub(crate) fn fate_of(
         Resolution::GENERATOR,
         build::Keep::Lifetime,
     )
-    .stripped_by_companion(is_companion_stripped(m0, comp, draws))
-    .run(m0.value(), None);
-    outcome
-        .fate
-        .expect("a build with no age to stop at runs to the star's death")
+    .with_companion_mark(m0, draws)
+    .zero_age_main_sequence_segment(m0.value());
+    SolarMasses::new(built.end_mass)
+}
+
+/// The carbon–oxygen and helium cores, M☉, with which the early AGB of a star whose main sequence
+/// ended with `m0` and whose metallicity has `coeffs` collapses an iron core at its end: its
+/// `Mc,SN`, held to its floor, and its `Mc,BAGB` (HPT equations 66 and 75; the early AGB's own).
+#[must_use]
+pub(crate) fn early_agb_cores(m0: SolarMasses, coeffs: &ZCoeffs) -> (SolarMasses, SolarMasses) {
+    let phase = super::agb::EarlyAgb::new(m0, coeffs);
+    (phase.mc_sn(), phase.mc_bagb())
+}
+
+/// [`Track::build`]'s build at the generator's resolution, keeping only the fate: `None` if it
+/// stops at the segment holding `age_max` before the star's death.
+#[must_use]
+fn lifetime_build(
+    m0: SolarMasses,
+    comp: &Composition,
+    draws: &StarDraws,
+    options: TrackOptions,
+    age_max: Option<f64>,
+) -> Option<Fate> {
+    let coeffs = ZCoeffs::new(comp.z_fit());
+    let m0 = checked_initial_mass(m0);
+    let eta = reimers_eta(draws.eta().value());
+    Builder::new(
+        &coeffs,
+        comp,
+        options,
+        eta,
+        RemnantDraws::of(draws),
+        Resolution::GENERATOR,
+        build::Keep::Lifetime,
+    )
+    .with_companion_mark(m0, draws)
+    .run(m0.value(), age_max)
+    .fate
 }
 
 /// Whether the companion-stripped mark of `draws` is set for a star of initial mass `m0` and
@@ -1095,9 +1538,33 @@ pub(crate) fn is_companion_stripped(
     comp: &Composition,
     draws: &StarDraws,
 ) -> bool {
+    is_companion_stripped_under(m0, comp, draws, StellarRules::of_version(GENERATOR_VERSION))
+}
+
+/// [`is_companion_stripped`] for a track built under the stellar stage's `rules`: the share's
+/// exact path, which a star with a helium excess takes, builds its own track under them.
+#[must_use]
+fn is_companion_stripped_under(
+    m0: SolarMasses,
+    comp: &Composition,
+    draws: &StarDraws,
+    rules: StellarRules,
+) -> bool {
+    is_companion_stripped_by(draws.stripped(), m0, comp, rules)
+}
+
+/// [`is_companion_stripped_under`] of the companion-stripped mark `mark` alone, for a caller that
+/// reads no other draw (`StarDraws::stripped_for_attempt`; P09.T10's white-dwarf members).
+#[must_use]
+pub(crate) fn is_companion_stripped_by(
+    mark: crate::rng::Mark,
+    m0: SolarMasses,
+    comp: &Composition,
+    rules: StellarRules,
+) -> bool {
     let (lo, hi) = crate::stellar::fates::STRIPPED_WINDOW;
     (lo..=hi).contains(&m0.value())
-        && crate::galaxy::displaced::binarity::is_stripped(draws.stripped(), m0, comp)
+        && crate::galaxy::displaced::binarity::is_stripped_under(mark, m0, comp, rules)
 }
 
 /// The state at `age` of a star of initial mass `m0`, `comp` and `draws` under `options`, if its
@@ -1152,7 +1619,7 @@ impl Track {
             Resolution::GENERATOR,
             build::Keep::Track,
         )
-        .stripped_by_companion(is_companion_stripped(m0, comp, draws))
+        .with_companion_mark(m0, draws)
         .zero_age_main_sequence_segment(m0.value())
         .segment;
         if !segment.knots.is_empty() {
@@ -1168,8 +1635,10 @@ impl Track {
             segments: vec![segment],
             fate: None,
             built_until: end,
-            helium: HeliumHook::of(comp, &HeliumTable::COMMITTED),
+            helium: HeliumHook::of(comp, &HeliumTable::of(options.rules())),
             nebula: draws.nebula(),
+            // A main sequence reaches no electron-capture window.
+            companion_mark_read: None,
         })
     }
 }
@@ -1242,8 +1711,9 @@ impl Track {
             segments: vec![remnant_segment(remnant)],
             fate: None,
             built_until: f64::INFINITY,
-            helium: HeliumHook::of(comp, &HeliumTable::COMMITTED),
+            helium: HeliumHook::of(comp, &HeliumTable::of(options.rules())),
             nebula: UnitUniform::HALF,
+            companion_mark_read: None,
         }
     }
 
@@ -1305,7 +1775,7 @@ pub(crate) fn remnant_of(
         Resolution::GENERATOR,
         build::Keep::Remnant,
     )
-    .stripped_by_companion(is_companion_stripped(m0, comp, draws))
+    .with_companion_mark(m0, draws)
     .run(m0.value(), None);
     let fate = outcome
         .fate
@@ -1543,6 +2013,14 @@ impl Segment {
         }
     }
 
+    /// The factor [`Segment::finish_point`] puts on the radius at coordinate `coord`, the junction's
+    /// offset where the segment's ramp has not yet reached 1, or `None` where it has.
+    #[must_use]
+    pub(crate) fn junction_radius_factor(&self, coord: f64) -> Option<f64> {
+        let ramp = build::ramp(self.ramp_coordinate(coord));
+        (ramp < 1.0).then(|| crate::math::exp10(self.junction.log_r * (1.0 - ramp)))
+    }
+
     /// The coordinate and the mass at `age`: interpolated between the knots, or from the
     /// segment's constant mass and linear coordinate where it has none.
     #[must_use]
@@ -1601,13 +2079,14 @@ impl Segment {
         .at_offset((base - a.age) + offset)
     }
 
-    /// The thermal pulses at `age`, interpolated between the knots (zero without them).
+    /// The thermal pulses at the age `base_years + offset_years`, interpolated between the knots
+    /// at the age's two parts (see [`Track::pulse_phase_at`]; zero without knots).
     #[must_use]
-    pub(crate) fn pulse_phase(&self, age: f64) -> f64 {
+    pub(crate) fn pulse_phase_at_split(&self, base_years: f64, offset_years: f64) -> f64 {
         if self.knots.len() < 2 {
             return 0.0;
         }
-        let (a, b) = self.knot_interval(age);
+        let (a, b) = self.knot_interval(base_years + offset_years);
         Interval {
             x0: a.age,
             x1: b.age,
@@ -1616,7 +2095,7 @@ impl Segment {
             d0: a.pulse_rate,
             d1: b.pulse_rate,
         }
-        .at(age)
+        .at_offset((base_years - a.age) + offset_years)
     }
 
     /// The two knots around `age`: the interval whose start is the last knot at or before it.
@@ -1689,6 +2168,8 @@ impl Segment {
     }
 }
 
+#[cfg(test)]
+mod lifetime_sweep;
 #[cfg(test)]
 mod stages_tests;
 #[cfg(test)]

@@ -5,14 +5,29 @@
 //! cannot be used becomes a [`ConvertRequestError`], answered `bad_request` with the field named.
 //! Answers are built here too, by `From` from the server's types to the wire's, as are the request
 //! errors that the server's own errors become. The `system_summary` request and its answer are in
-//! [`stellar`], plan 14's `system_bodies` and `body_detail` in [`planetary`], and the scene's
-//! requests (rendering plan R03) in [`scene`].
+//! [`stellar`], plan 14's `system_bodies` and `body_detail` in [`planetary`], plan 07's
+//! `extinction_map` and `extinction` in [`extinction`], plan 12's query mode, observed rows and
+//! `resolve_system` in [`observe`], the scene's requests (rendering plan R03) in [`scene`], and the
+//! surface's (rendering plan R09) in [`surface`]. Where a system a client names is, by its origin,
+//! is in [`motion`] (P07.T10.c). Plan 09's features' wire forms are in [`features`], and its four
+//! feature requests and their answers in [`feature_answers`] (P09.T40).
 
+mod alerts;
+mod events;
+mod extinction;
+mod feature_answers;
+mod features;
+mod global_answers;
+mod motion;
+mod observe;
+mod placement;
 mod planetary;
 mod scene;
 #[cfg(test)]
 mod scene_fixture;
 mod stellar;
+mod surface;
+mod viewer;
 
 use std::error::Error;
 use std::fmt;
@@ -21,16 +36,24 @@ use std::sync::Arc;
 
 use hyperion_protocol::{
     CreateUniverseRequest, DensityMap, DensityMapRequest, ErrorCode, GalaxyParameters, LayerCensus,
-    LayerStatus, MassLayer, Parameter, ParameterGroup, ParameterOrigin, ParameterValue,
-    RequestError, SeedHex, StellarBriefDto, SystemIdHex, SystemPlaceDto, SystemsInRange,
-    SystemsInRangeRequest, Unit, UniverseInfo, UniverseList,
+    LayerStatus, MassLayer, ObservedDto, Parameter, ParameterGroup, ParameterOrigin,
+    ParameterValue, RequestError, SeedHex, StellarBriefDto, SystemIdHex, SystemPlaceDto,
+    SystemsInRange, SystemsInRangeRequest, Unit, UniverseInfo, UniverseList,
 };
-use hyperion_sim::coords::{GalacticPosition, LyCell};
+use hyperion_sim::coords::{GalacticPosition, GalacticVelocity, LyCell};
+use hyperion_sim::galaxy::catalogue_classes::system_of_record;
+use hyperion_sim::galaxy::features::centre::members::resolve_centre_member;
+use hyperion_sim::galaxy::features::centre::{CentreOrbitCache, CentrePath};
+use hyperion_sim::galaxy::features::members::resolve_member;
+use hyperion_sim::galaxy::features::members::source::FeatureInteriorCache;
+use hyperion_sim::galaxy::gas::params::GasParams;
+use hyperion_sim::galaxy::global_list::GlobalListSource;
 use hyperion_sim::galaxy::imf::MassFunctionKind;
+use hyperion_sim::galaxy::motion::StateAt;
 use hyperion_sim::galaxy::params::{
     ArmParams, GalaxyParams, HaloComponentKind, HaloComponentParams, HaloParams,
 };
-use hyperion_sim::galaxy::placement::{SystemKind, SystemRecord, layer_spec};
+use hyperion_sim::galaxy::placement::{SystemKind, SystemOrigin, SystemRecord, layer_spec};
 use hyperion_sim::galaxy::potential::PotentialTables;
 use hyperion_sim::galaxy::query::{
     BuildRangeQueryError, Census, CensusStop, MassFloor, RangeQuery, RangeResult,
@@ -38,7 +61,7 @@ use hyperion_sim::galaxy::query::{
 };
 use hyperion_sim::galaxy::substellar::SubstellarAbundance;
 use hyperion_sim::galaxy::{Galaxy, POPULATIONS, Population};
-use hyperion_sim::id::Layer;
+use hyperion_sim::id::{Layer, SystemIdKind};
 use hyperion_sim::stellar::system::draw_metallicity;
 use hyperion_sim::time::{CLOCK_WINDOW_H, ClockWindow, UniverseTime};
 use hyperion_sim::units::{
@@ -47,15 +70,50 @@ use hyperion_sim::units::{
 };
 use hyperion_sim::{GENERATOR_VERSION, GeneratorVersion};
 
+pub(crate) use self::alerts::{
+    AlertsAsked, acknowledge_refusal, census_dto, contact_dto, observer, open_contacts_refusal,
+    pending_census,
+};
+pub(crate) use self::events::{EventsRequest, body_events};
+pub(crate) use self::extinction::{
+    ExtinctionMapQuery, ExtinctionQuery, LineEnd, extinction_map, extinction_result,
+    target_extinction,
+};
+pub(crate) use self::feature_answers::{
+    FeatureRangeQuery, black_hole_state, black_hole_time, centre_not_built, detail_of,
+    feature_detail_target, features_in_range, galaxy_features, galaxy_features_time,
+};
+#[cfg(test)]
+pub(crate) use self::features::system_origin;
+pub(crate) use self::global_answers::{
+    global_features, stream_track, stream_track_number, tube_not_built,
+};
+#[cfg(test)]
+pub(crate) use self::motion::origins;
+pub(crate) use self::motion::{ListMembers, MotionReads, SystemLine, system_motion};
+pub(crate) use self::observe::{
+    ResolveRequest, observed_dto, resolved_system, untraced, untraced_system,
+};
+use self::placement::grid_placement;
 pub(crate) use self::planetary::{
     BodiesRequest, DetailRequest, ListedBody, body_detail, body_refusal, detail_level,
-    hosts_request, scene_body, scene_system, system_bodies,
+    hosts_request, scene_body, scene_system, system_bodies, unknown_body_system,
 };
-pub(crate) use self::scene::{ShipRequest, unknown_frame_body, unknown_frame_system};
+pub(crate) use self::scene::{
+    ShipRequest, unknown_frame_body, unknown_frame_system, untraced_frame_system,
+};
 pub(crate) use self::stellar::{
-    SummaryRequest, brief_dto, system_summary, unknown_system, wire_time,
+    SummaryRequest, brief_dto, starless_summary, starless_summary_observed, system_summary,
+    system_summary_observed, unknown_system, viewer_summary, wire_time,
 };
-use crate::compute::{CodeDepth, GalaxyKey, MapKey, MapResolution, QuantisedMap, RawDensityMap};
+pub(crate) use self::surface::{
+    FieldRequest, SurveyRequest, cover_dto, open_surveys_refusal, record_section,
+    record_survey_refusal, surface_header, surface_refusal, surface_revision,
+};
+pub(crate) use self::viewer::{generate_refusal, inputs_dto, planet_inputs, viewer_planet};
+use crate::compute::{
+    CodeDepth, GalaxyKey, MapKey, MapResolution, PerLy2, QuantisedMap, RawDensityMap,
+};
 use crate::limits::{MAX_CENSUS_LIMIT, MAX_QUERY_CELLS, MAX_QUERY_RADIUS_LY};
 use crate::universe::{
     CreateUniverseError, OpenUniverseError, ParseUniverseNameError, Universe, UniverseName,
@@ -211,7 +269,7 @@ impl TryFrom<&DensityMapRequest> for MapRequest {
 pub(crate) fn density_map(
     request: DensityMapRequest,
     raw: &RawDensityMap,
-    quantised: &QuantisedMap,
+    quantised: &QuantisedMap<PerLy2>,
 ) -> DensityMap {
     DensityMap {
         universe: request.universe,
@@ -222,8 +280,8 @@ pub(crate) fn density_map(
         centre_ly: raw.centre_ly(),
         ly_per_px: raw.ly_per_px(),
         bits: quantised.depth().bits(),
-        floor_log10_per_ly2: quantised.floor_log10_per_ly2(),
-        ceiling_log10_per_ly2: quantised.ceiling_log10_per_ly2(),
+        floor_log10_per_ly2: quantised.floor_log10(),
+        ceiling_log10_per_ly2: quantised.ceiling_log10(),
         data_base64: quantised.to_base64(),
     }
 }
@@ -232,7 +290,9 @@ pub(crate) fn density_map(
 ///
 /// Every field is checked here, in design note 24's order, so that the answer names the first field
 /// at fault: the universe (by `requests::universe::openable_universe`, before this), then `time`,
-/// `centre`, `radius_ly` and `limit`. The query carries the server's cell budget,
+/// `centre`, `radius_ly` and `limit`, and last plan 12's `mode`, whose observer must lie in the root
+/// cube (P12.T6). The query's time is checked against the clock window and the light's emission
+/// time never is: it may lie back to the source horizon. The query carries the server's cell budget,
 /// [`MAX_QUERY_CELLS`], rather than plan 03's own default, which is sized for a caller with no
 /// clients to protect.
 #[derive(Debug, Clone, PartialEq)]
@@ -249,18 +309,21 @@ impl RangeRequest {
 impl TryFrom<&SystemsInRangeRequest> for RangeRequest {
     type Error = ConvertRequestError;
 
-    /// Checks `time`, `centre`, `radius_ly` and `limit`, in that order, and builds the query.
+    /// Checks `time`, `centre`, `radius_ly`, `limit` and `mode`, in that order, and builds the
+    /// query.
     fn try_from(request: &SystemsInRangeRequest) -> Result<Self, Self::Error> {
         let time = query_time(&request.time)?;
         let centre = query_centre(&request.centre)?;
         let radius = query_radius(request.radius_ly)?;
         let limit = query_limit(request.limit)?;
+        let mode = observe::query_mode(&request.mode)?;
         let (floor, substellar) = mass_floor(request.min_layer);
         let query = RangeQuery::builder(centre, radius)
             .time(time)
             .limit(limit)
             .mass_floor(floor)
             .substellar(substellar)
+            .mode(mode)
             .cell_budget(MAX_QUERY_CELLS)
             .build()
             .map_err(refused_query)?;
@@ -272,11 +335,20 @@ impl TryFrom<&SystemsInRangeRequest> for RangeRequest {
 pub(crate) fn query_time(
     time: &hyperion_protocol::UniverseTime,
 ) -> Result<UniverseTime, ConvertRequestError> {
+    clock_time("time", time)
+}
+
+/// A well-formed time inside the clock window, refused naming `field`: a query's `time`, a survey
+/// pass's `from` and `to`.
+pub(crate) fn clock_time(
+    field: &'static str,
+    time: &hyperion_protocol::UniverseTime,
+) -> Result<UniverseTime, ConvertRequestError> {
     let t = UniverseTime::new(time.seconds, time.nanos)
-        .map_err(|error| ConvertRequestError::new("time", error))?;
+        .map_err(|error| ConvertRequestError::new(field, error))?;
     if !ClockWindow::contains(t) {
         return Err(ConvertRequestError::new(
-            "time",
+            field,
             format!(
                 "{t} lies outside the {} Julian years either side of the epoch where positions are \
                  guaranteed",
@@ -377,7 +449,7 @@ fn refused_query(error: BuildRangeQueryError) -> ConvertRequestError {
         BuildRangeQueryError::TimeOutsideClockWindow(_) => "time",
         BuildRangeQueryError::SubstellarNotRequested
         | BuildRangeQueryError::SubstellarBelowFloor => "min_layer",
-        // No request sets an observed mode until plan 12's P12.T6 adds the wire's `mode`.
+        // The observer is the wire's `mode` (plan 12, P12.T6).
         BuildRangeQueryError::ObserverOutsideRootCube => "mode",
     };
     ConvertRequestError::new(field, error)
@@ -389,12 +461,17 @@ fn refused_query(error: BuildRangeQueryError) -> ConvertRequestError {
 /// the job that ran the query owns it and moves them into the answer. The records are in
 /// [`RangeResult`]'s order, nearest first, and each is the system at the query's time. With
 /// `briefs`, which the handler builds when the request sets `include_stellar`, row k carries brief
-/// k, and a rogue planet's row its metallicity; without, no row carries either, and every row is
-/// plan 04's.
+/// k, and a rogue planet's row its metallicity; without, no row carries either. With `observed`,
+/// which the handler builds in observed mode (plan 12, P12.T6), row k carries observation k; the
+/// briefs are then each primary's when its light left it. Without either, every row is plan 04's.
+///
+/// `origins` says whether each row carries what placed it ([`RowOrigins`]): not while P09.T40.a's
+/// gate holds the feature members back, when every row is a grid system's and plan 04's.
 ///
 /// # Panics
 ///
-/// If `briefs` does not hold one brief per system found, which only a handler bug can cause.
+/// If `briefs` or `observed` does not hold one entry per system found, which only a handler bug
+/// can cause, and as [`RowOrigins`] says for a row whose origin cannot be sent.
 #[must_use]
 pub(crate) fn systems_in_range(
     galaxy: &Galaxy,
@@ -402,23 +479,54 @@ pub(crate) fn systems_in_range(
     query: &RangeQuery,
     result: &RangeResult,
     briefs: Option<Vec<Option<StellarBriefDto>>>,
+    observed: Option<Vec<ObservedDto>>,
+    origins: RowOrigins<'_>,
 ) -> SystemsInRange {
     let hits = result.systems();
-    let systems = match briefs {
-        Some(briefs) => {
-            assert_eq!(briefs.len(), hits.len(), "one brief per system found");
-            hits.iter()
-                .zip(briefs)
-                .map(|(hit, brief)| {
-                    system_record(galaxy, hit, query.time(), RowStellar::Asked(brief))
-                })
-                .collect()
-        }
-        None => hits
-            .iter()
-            .map(|hit| system_record(galaxy, hit, query.time(), RowStellar::NotAsked))
-            .collect(),
-    };
+    if let Some(briefs) = &briefs {
+        assert_eq!(briefs.len(), hits.len(), "one brief per system found");
+    }
+    if let Some(observed) = &observed {
+        assert_eq!(
+            observed.len(),
+            hits.len(),
+            "one observation per system found"
+        );
+    }
+    let mut briefs = briefs.map(Vec::into_iter);
+    let mut observed = observed.map(Vec::into_iter);
+    let systems = hits
+        .iter()
+        .map(|hit| {
+            let stellar = briefs.as_mut().map_or(RowStellar::NotAsked, |briefs| {
+                RowStellar::Asked(
+                    briefs
+                        .next()
+                        .expect("one brief per system found, checked above"),
+                )
+            });
+            let observed = observed.as_mut().and_then(Iterator::next);
+            match origins {
+                RowOrigins::Unsent => system_record(galaxy, hit, query.time(), stellar, observed),
+                RowOrigins::Sent(placers) => {
+                    let (velocity, origin, member_class) =
+                        placed_by(galaxy, placers, hit, query.time());
+                    hyperion_protocol::SystemRecord {
+                        origin: Some(origin),
+                        member_class,
+                        ..system_record_moving(
+                            galaxy,
+                            hit,
+                            velocity,
+                            query.time(),
+                            stellar,
+                            observed,
+                        )
+                    }
+                }
+            }
+        })
+        .collect();
     SystemsInRange {
         universe: request.universe,
         centre: request.centre,
@@ -426,6 +534,150 @@ pub(crate) fn systems_in_range(
         time: request.time,
         census: census(query, result),
         systems,
+    }
+}
+
+/// Whether a range answer's rows carry what placed them (plan 09, P09.T40.a).
+#[derive(Clone, Copy)]
+pub(crate) enum RowOrigins<'a> {
+    /// No row carries an origin: P09.T40.a's gate holds the feature members back, so every row is
+    /// a grid system's, with plan 08's velocity, and the answer is the bytes it was before P09.T40.
+    Unsent,
+    /// Every row carries its origin, as the growing [`SystemOriginWire`] gives it, and a member's
+    /// row its class and its own velocity ([`placed_by`]), resolved again through the
+    /// [`RowPlacers`], since a range hit carries its record alone.
+    ///
+    /// A system of an origin the sim adds later panics: no source the server registers places one
+    /// yet ([`system_origin`]).
+    ///
+    /// [`SystemOriginWire`]: hyperion_protocol::SystemOriginWire
+    /// [`system_origin`]: features::system_origin
+    Sent(RowPlacers<'a>),
+}
+
+impl fmt::Debug for RowOrigins<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Unsent => f.write_str("Unsent"),
+            Self::Sent(_) => f.write_str("Sent"),
+        }
+    }
+}
+
+/// What a range answer's member rows are resolved through again ([`RowOrigins::Sent`]): the
+/// server's feature interiors, the centre's orbits the query read, and the global list's source if
+/// the query took it (plan 10, P10.T10.b), whose tables, band shares and cores' models resolve a
+/// stream's or a dwarf core's member without planning the galaxy's debris again.
+#[derive(Clone, Copy)]
+pub(crate) struct RowPlacers<'a> {
+    interiors: &'a dyn FeatureInteriorCache,
+    orbits: &'a dyn CentreOrbitCache,
+    list: Option<&'a GlobalListSource<'a>>,
+}
+
+impl<'a> RowPlacers<'a> {
+    /// The placers of a query whose members are resolved through `interiors`, the centre's on
+    /// their paths through `orbits`, and its list's members through `list`, the source it took.
+    #[must_use]
+    pub(crate) fn new(
+        interiors: &'a dyn FeatureInteriorCache,
+        orbits: &'a dyn CentreOrbitCache,
+        list: Option<&'a GlobalListSource<'a>>,
+    ) -> Self {
+        Self {
+            interiors,
+            orbits,
+            list,
+        }
+    }
+}
+
+/// The velocity `hit`'s row carries at the query's time `t`, what placed it, and its member class
+/// if it is a member ([`RowOrigins::Sent`]).
+///
+/// - A grid system moves at plan 08's epoch velocity, and has no class.
+/// - A catalogue feature's member, and a stream's or a dwarf core's, at its member record's
+///   velocity, its cluster's or its tube's motion and its own, with its member class.
+/// - A member of the galactic centre at its velocity on its path at `t` ([`CentrePath`], through
+///   the query's orbits), as [`system_motion`](self::motion::system_motion) places it: its orbit
+///   turns its velocity, so its epoch's is not what moved it to its row's position (research-leans-30
+///   §3; plan 10's P10.T10.b). Centre rows exist from generator version 27 alone, where the query
+///   takes the list's source, so this is held there with them. A member of the centre's grid
+///   carries its centre class, a tidal disruption's victim, on the centre's feature-level list,
+///   the list's class, and the black hole none.
+/// - A catalogue class's host at its class's velocity at `t`, which is its remnant's after its
+///   explosion as its place is, and no member class: it is not a feature's member.
+///
+/// # Panics
+///
+/// For an origin the sim adds later, which no registered source places yet; for a member that
+/// does not resolve in `galaxy`, which only a hit of another galaxy can be; and for a list member
+/// of a query that took no list, which no registered source places.
+#[must_use]
+fn placed_by(
+    galaxy: &Galaxy,
+    placers: RowPlacers<'_>,
+    hit: &SystemHit,
+    t: UniverseTime,
+) -> (
+    GalacticVelocity,
+    hyperion_protocol::SystemOriginWire,
+    Option<hyperion_protocol::MemberClassWire>,
+) {
+    let record = hit.record();
+    let origin = features::system_origin(record);
+    match record.origin() {
+        SystemOrigin::Grid(_) => (epoch_velocity(galaxy, record), origin, None),
+        SystemOrigin::FeatureMember { .. } => {
+            let SystemIdKind::FeatureMember(id) = record.id().kind() else {
+                unreachable!("a feature member's record is built with a member ID")
+            };
+            let member = resolve_member(galaxy, placers.interiors, id)
+                .expect("a feature member found by the range query resolves in its galaxy");
+            (
+                member.velocity(),
+                origin,
+                Some(features::member_class(member.class())),
+            )
+        }
+        SystemOrigin::CentreMember { .. } => {
+            let SystemIdKind::Centre(id) = record.id().kind() else {
+                unreachable!("a centre member's record is built with a centre ID")
+            };
+            let member = resolve_centre_member(galaxy, id)
+                .expect("a centre member found by the range query resolves in its galaxy");
+            let path = CentrePath::of(galaxy, placers.orbits, id)
+                .expect("a centre member found by the range query has its path in its galaxy");
+            let StateAt::Exists(state) = path.state_at(t) else {
+                unreachable!("the centre's source returns a member only while it is a system")
+            };
+            (
+                state.velocity(),
+                origin,
+                features::centre_member_class(id, &member),
+            )
+        }
+        SystemOrigin::GlobalListMember { .. } => {
+            let list = placers
+                .list
+                .expect("only the global list's source places a list member, and it is the rows'");
+            let member = list
+                .member(galaxy, record.id())
+                .expect("a list member found by the range query resolves through its source");
+            (
+                member.velocity(),
+                origin,
+                Some(features::member_class(member.class())),
+            )
+        }
+        SystemOrigin::CatalogueSystem(_) => (
+            system_of_record(galaxy, record).motion().velocity_at(t),
+            origin,
+            None,
+        ),
+        other => unreachable!(
+            "no source the server registers places a range row of origin {other:?} (P09.T40.a)"
+        ),
     }
 }
 
@@ -449,16 +701,40 @@ enum RowStellar {
 /// sent. A brief of a system not yet formed at the query's time is `None` too, and such a row has
 /// none either: it has no star to describe. With `include_stellar`, a rogue planet's row, which
 /// never has a brief, carries its metallicity instead, the one [`draw_metallicity`] gives it and
-/// its stars would share (plan 13, P13.T5.d); `system_summary` refuses it, so no other answer does.
+/// its stars would share (plan 13, P13.T5.d); its summary and its bodies' hosts, a starless
+/// summary (P14.T27.b), state it again.
+/// In observed mode the row carries `observed` (plan 12, P12.T6), its brief, when asked for, is the
+/// one when the light left it, and it is otherwise the present's.
+///
+/// # Panics
+///
+/// If `hit` is not a grid system, whose velocity is plan 08's draw: [`system_record_moving`] takes
+/// another's.
 #[must_use]
 fn system_record(
     galaxy: &Galaxy,
     hit: &SystemHit,
     time: UniverseTime,
     stellar: RowStellar,
+    observed: Option<ObservedDto>,
+) -> hyperion_protocol::SystemRecord {
+    let velocity = epoch_velocity(galaxy, hit.record());
+    system_record_moving(galaxy, hit, velocity, time, stellar, observed)
+}
+
+/// [`system_record`] for a system whose epoch velocity the caller has: a feature member's is its
+/// cluster's and its own, which plan 08's draw is not (plan 12, P12.T6's `resolve_system`).
+#[must_use]
+fn system_record_moving(
+    galaxy: &Galaxy,
+    hit: &SystemHit,
+    velocity: GalacticVelocity,
+    time: UniverseTime,
+    stellar: RowStellar,
+    observed: Option<ObservedDto>,
 ) -> hyperion_protocol::SystemRecord {
     let record = hit.record();
-    let velocity = epoch_velocity(galaxy, record).metres_per_second();
+    let velocity = velocity.metres_per_second();
     let (brief, fe_h_dex) = match stellar {
         RowStellar::NotAsked => (None, None),
         RowStellar::Asked(brief) => (
@@ -475,9 +751,15 @@ fn system_record(
         initial_mass_msun: record.primary_initial_mass().value(),
         age_myr: Megayears::from(record.age_at(time)).value(),
         population: wire_population(record.population()),
+        placement: grid_placement(galaxy, record),
         velocity_km_s: velocity.map(|v| KilometresPerSecond::from(MetresPerSecond::new(v)).value()),
         stellar: brief,
         fe_h_dex,
+        observed,
+        // Plan 09's P09.T40 says what placed each row; until then every row is plan 04's.
+        origin: None,
+        member_class: None,
+        supernova: None,
     }
 }
 
@@ -647,8 +929,10 @@ const ROTATION_RADIUS: LightYears = LightYears::new(26_000.0);
 /// The galaxy parameters M1 does not send, each with the reason (plan 04, P04.T14.b).
 ///
 /// Every quantity `GalaxyParams` and the potential tables expose is accounted for: it appears once
-/// in [`galaxy_parameters`], or here. Whoever adds a getter to plan 02's parameters sends it or adds
-/// it to this list, and raises [`PARAMETERS_ACCOUNTED_FOR`]; a test holds the two to each other.
+/// in [`galaxy_parameters`], or here, but for the accreted progenitors' list, which
+/// `global_features` sends beside the global list (plan 10, P10.T10.a). Whoever adds a getter to
+/// plan 02's parameters sends it or adds it to this list, and raises
+/// [`PARAMETERS_ACCOUNTED_FOR`]; a test holds the two to each other.
 ///
 /// Compiled for the tests alone, because the test is what enforces it: nothing on the wire depends
 /// on the list.
@@ -673,25 +957,12 @@ const EXCLUDED_PARAMETERS: &[(&str, &str)] = &[
          gives is sent",
     ),
     (
-        "accretion.progenitors",
-        "the per-progenitor list is plan 10's to display; the lesser progenitors' combined halo \
-         share is sent",
-    ),
-    (
         "halo.<component>.ages",
         "the components' age distributions; the `history` group stands for them in M1",
     ),
     (
-        "halo.discrete_share",
-        "held at zero until plan 10, which places the streams and dwarf cores it counts",
-    ),
-    (
         "dark_halo.scale_radius",
         "r200 divided by c200, both of which are sent",
-    ),
-    (
-        "gas.scale_height",
-        "a constant of the generator, the same for every seed",
     ),
     (
         "nuclear_cluster.inner_slope",
@@ -725,7 +996,7 @@ const EXCLUDED_PARAMETERS: &[(&str, &str)] = &[
 ///
 /// Raised by whoever adds a parameter, which is what makes them decide whether it is sent.
 #[cfg(test)]
-const PARAMETERS_ACCOUNTED_FOR: usize = 99;
+const PARAMETERS_ACCOUNTED_FOR: usize = 115;
 
 /// The galaxy's parameters as the wire carries them: grouped, keyed, and in display units.
 ///
@@ -760,6 +1031,7 @@ pub(crate) fn galaxy_parameters(universe: &Universe, galaxy: &Galaxy) -> GalaxyP
         group("history", history(params)),
         group("rotation", rotation(galaxy.potential())),
         group("substellar", substellar(galaxy.substellar())),
+        group("gas", gas(galaxy.gas().params())),
     ];
     GalaxyParameters {
         universe: universe.id().into(),
@@ -936,6 +1208,7 @@ fn halo(halo: &HaloParams) -> Vec<Parameter> {
         derived("halo.dominant_merger.share", Unit::None, dominant.share()),
         derived("halo.lesser.share", Unit::None, lesser),
         derived("halo.globular_debris.share", Unit::None, debris.share()),
+        drawn("halo.discrete_share", Unit::None, halo.discrete_share()),
         drawn("halo.in_situ.slope", Unit::None, in_situ.slope()),
         drawn("halo.dominant_merger.slope", Unit::None, dominant.slope()),
         drawn("halo.globular_debris.slope", Unit::None, debris.slope()),
@@ -1008,6 +1281,48 @@ fn rotation(potential: &PotentialTables) -> Vec<Parameter> {
             Unit::KmPerS,
             km_per_s(potential.galactic_escape_speed_in_plane(ROTATION_RADIUS)),
         ),
+    ]
+}
+
+/// The `gas` group (plan 07, P07.T10.b): what the gas field draws, derives and fixes beyond plan
+/// 02's gas disc, whose mass and scale length are sent in `mass` and `discs` (its design note 3).
+///
+/// The neutral layer's height, `gas.scale_height`, is sent as `fixed`: it is a constant of the
+/// generator, and the gas field reads it.
+#[must_use]
+fn gas(gas: &GasParams) -> Vec<Parameter> {
+    let (molecular, lane) = (gas.molecular_disc(), gas.lane());
+    vec![
+        fixed("gas.scale_height", Unit::Ly, ly(gas.neutral_height())),
+        drawn("gas.hole_scale", Unit::Ly, ly(gas.hole_scale())),
+        drawn("gas.warm_density", Unit::PerCm3, gas.warm_density().value()),
+        drawn("gas.warm_height", Unit::Ly, ly(gas.warm_height())),
+        derived("gas.warm_fraction", Unit::None, gas.warm_fraction()),
+        drawn("gas.molecular_mass", Unit::Msun, msun(molecular.mass())),
+        derived("gas.molecular_length", Unit::Ly, ly(molecular.length())),
+        drawn("gas.molecular_height", Unit::Ly, ly(molecular.height())),
+        derived("gas.molecular_fraction", Unit::None, molecular.fraction()),
+        derived("gas.neutral_fraction", Unit::None, gas.neutral_fraction()),
+        drawn(
+            "gas.corona_density",
+            Unit::PerCm3,
+            gas.corona_density().value(),
+        ),
+        drawn(
+            "gas.pressure_floor",
+            Unit::KPerCm3,
+            gas.pressure_floor().value(),
+        ),
+        fixed("gas.pressure_height", Unit::Ly, ly(gas.pressure_height())),
+        fixed(
+            "gas.pressure_speed",
+            Unit::KmPerS,
+            km_per_s(gas.pressure_speed()),
+        ),
+        drawn("gas.sigma_ln", Unit::None, gas.sigma_ln()),
+        drawn("gas.lane_offset", Unit::Ly, ly(lane.offset())),
+        drawn("gas.lane_width", Unit::Ly, ly(lane.width())),
+        drawn("gas.lane_fraction", Unit::None, lane.fraction()),
     ]
 }
 
@@ -1220,7 +1535,8 @@ mod tests {
     use hyperion_sim::galaxy::placement::{NoCache, SystemKind};
     use hyperion_sim::galaxy::query::range_query;
     use hyperion_sim::stellar::brief::range_brief;
-    use hyperion_sim::stellar::system::SystemStars;
+    use hyperion_sim::stellar::multiplicity::{RedrawAttempt, draw_star_count};
+    use hyperion_sim::stellar::system::{SystemStars, grid_multiplicity};
     use hyperion_testkit::float::assert_same_bits;
 
     use super::*;
@@ -1477,7 +1793,7 @@ mod tests {
     /// independently of the builder. The parameters panel shows groups and keys in this order, so
     /// the order is part of the contract with plan 05's glossary (ruling 11 of 2026-09-22), and a
     /// golden blessed from the builder would not catch a key moved within its group.
-    const PLAN_TABLE: [(&str, &[&str]); 13] = [
+    const PLAN_TABLE: [(&str, &[&str]); 14] = [
         ("identity", &["seed", "generator_version", "mass_function"]),
         (
             "mass",
@@ -1570,6 +1886,7 @@ mod tests {
                 "halo.dominant_merger.share",
                 "halo.lesser.share",
                 "halo.globular_debris.share",
+                "halo.discrete_share",
                 "halo.in_situ.slope",
                 "halo.dominant_merger.slope",
                 "halo.globular_debris.slope",
@@ -1618,7 +1935,154 @@ mod tests {
                 "substellar.rogue_planets_capped",
             ],
         ),
+        // Plan 07, P07.T10.b.
+        (
+            "gas",
+            &[
+                "gas.scale_height",
+                "gas.hole_scale",
+                "gas.warm_density",
+                "gas.warm_height",
+                "gas.warm_fraction",
+                "gas.molecular_mass",
+                "gas.molecular_length",
+                "gas.molecular_height",
+                "gas.molecular_fraction",
+                "gas.neutral_fraction",
+                "gas.corona_density",
+                "gas.pressure_floor",
+                "gas.pressure_height",
+                "gas.pressure_speed",
+                "gas.sigma_ln",
+                "gas.lane_offset",
+                "gas.lane_width",
+                "gas.lane_fraction",
+            ],
+        ),
     ];
+
+    /// The gas group's rows as design note 3 orders them, with each one's origin, unit and value.
+    fn gas_rows(gas: &GasParams) -> [(&'static str, ParameterOrigin, Unit, f64); 18] {
+        use ParameterOrigin::{Derived, Drawn, Fixed};
+
+        let (molecular, lane) = (gas.molecular_disc(), gas.lane());
+        [
+            (
+                "gas.scale_height",
+                Fixed,
+                Unit::Ly,
+                gas.neutral_height().value(),
+            ),
+            ("gas.hole_scale", Drawn, Unit::Ly, gas.hole_scale().value()),
+            (
+                "gas.warm_density",
+                Drawn,
+                Unit::PerCm3,
+                gas.warm_density().value(),
+            ),
+            (
+                "gas.warm_height",
+                Drawn,
+                Unit::Ly,
+                gas.warm_height().value(),
+            ),
+            (
+                "gas.warm_fraction",
+                Derived,
+                Unit::None,
+                gas.warm_fraction(),
+            ),
+            (
+                "gas.molecular_mass",
+                Drawn,
+                Unit::Msun,
+                molecular.mass().value(),
+            ),
+            (
+                "gas.molecular_length",
+                Derived,
+                Unit::Ly,
+                molecular.length().value(),
+            ),
+            (
+                "gas.molecular_height",
+                Drawn,
+                Unit::Ly,
+                molecular.height().value(),
+            ),
+            (
+                "gas.molecular_fraction",
+                Derived,
+                Unit::None,
+                molecular.fraction(),
+            ),
+            (
+                "gas.neutral_fraction",
+                Derived,
+                Unit::None,
+                gas.neutral_fraction(),
+            ),
+            (
+                "gas.corona_density",
+                Drawn,
+                Unit::PerCm3,
+                gas.corona_density().value(),
+            ),
+            (
+                "gas.pressure_floor",
+                Drawn,
+                Unit::KPerCm3,
+                gas.pressure_floor().value(),
+            ),
+            (
+                "gas.pressure_height",
+                Fixed,
+                Unit::Ly,
+                gas.pressure_height().value(),
+            ),
+            (
+                "gas.pressure_speed",
+                Fixed,
+                Unit::KmPerS,
+                gas.pressure_speed().value(),
+            ),
+            ("gas.sigma_ln", Drawn, Unit::None, gas.sigma_ln()),
+            ("gas.lane_offset", Drawn, Unit::Ly, lane.offset().value()),
+            ("gas.lane_width", Drawn, Unit::Ly, lane.width().value()),
+            ("gas.lane_fraction", Drawn, Unit::None, lane.fraction()),
+        ]
+    }
+
+    /// Plan 07, P07.T10.b: the gas group reads the gas field's own parameters, each with its unit
+    /// and its origin, in design note 3's order with each layer's derived share beside it.
+    #[test]
+    fn the_gas_group_is_the_gas_fields_parameters() {
+        let response = fixture();
+        let gas = milky_way().gas().params();
+        let molecular = gas.molecular_disc();
+        let group = response
+            .groups
+            .iter()
+            .find(|group| group.key == "gas")
+            .expect("the gas group is sent");
+        let expected = gas_rows(gas);
+        assert_eq!(group.parameters.len(), expected.len());
+        for (parameter, (key, origin, unit, value)) in group.parameters.iter().zip(expected) {
+            assert_eq!(
+                (parameter.key.as_str(), parameter.origin),
+                (key, origin),
+                "{key}"
+            );
+            assert_eq!(
+                parameter.value,
+                ParameterValue::Number { value, unit },
+                "{key}"
+            );
+        }
+        // The shares of the gas the three layers take add up to the whole.
+        let shares = gas.warm_fraction() + molecular.fraction() + gas.neutral_fraction();
+        assert!((shares - 1.0).abs() < 1e-12, "{shares}");
+    }
 
     /// Plan 13, P13.T7: the substellar group reads the galaxy's own abundances, as numbers with no
     /// unit, and says whether its densest cells saturate.
@@ -1892,6 +2356,7 @@ mod tests {
             min_layer,
             limit,
             include_stellar: false,
+            mode: hyperion_protocol::QueryModeDto::Now,
         }
     }
 
@@ -1919,7 +2384,15 @@ mod tests {
                 })
                 .collect()
         });
-        systems_in_range(milky_way(), request.clone(), &query, &result, briefs)
+        systems_in_range(
+            milky_way(),
+            request.clone(),
+            &query,
+            &result,
+            briefs,
+            None,
+            RowOrigins::Unsent,
+        )
     }
 
     #[test]
@@ -1941,8 +2414,8 @@ mod tests {
             .zip(&plain.systems)
             .zip(result.systems())
         {
-            // The brief is the sim's range brief, of the full system's kind and class, and the
-            // rest of the row is plan 04's.
+            // The brief is the sim's range brief, of the full system's kind and class, its
+            // summary's primary's (P11.T11.a), and the rest of the row is plan 04's.
             let expected =
                 range_brief(milky_way(), hit.record(), query.time()).map(|b| brief_dto(&b));
             let full = SystemStars::generate(milky_way(), hit.record())
@@ -1951,9 +2424,18 @@ mod tests {
             assert!(expected.is_some(), "every system here has formed");
             assert_eq!(row.stellar, expected);
             assert_eq!(
-                expected.map(|b| (b.kind, b.class, b.star_count)),
-                full.map(|b| (b.kind, b.class, b.star_count))
+                expected.as_ref().map(|b| (b.kind, b.class.clone())),
+                full.map(|b| (b.kind, b.class))
             );
+            // The row counts the first attempt's stars (plan 11's Risks, "Deviations in P11.T7,
+            // as built"), the full brief the kept attempt's.
+            let first = draw_star_count(
+                milky_way(),
+                hit.record(),
+                grid_multiplicity(hit.record()),
+                RedrawAttempt::FIRST,
+            );
+            assert_eq!(expected.map(|b| b.star_count), Some(first));
             assert_eq!(
                 hyperion_protocol::SystemRecord {
                     stellar: None,
@@ -2202,7 +2684,7 @@ mod tests {
         let request = range_request([0, 0, 0], 50.0, 5_000, MassLayer::A);
         let answer = answer(&request);
         assert_eq!(answer.census.complete_above_msun, None);
-        assert!(answer.systems.is_empty());
+        assert_eq!(answer.systems, []);
         for line in &answer.census.layers {
             assert_eq!(line.status, LayerStatus::OverLimit, "{line:?}");
             assert_eq!(line.returned, 0);
@@ -2220,7 +2702,7 @@ mod tests {
         assert_eq!(answer.centre, request.centre);
         assert_same_bits(answer.radius_ly, request.radius_ly);
         assert_eq!(answer.time, request.time);
-        assert!(!answer.systems.is_empty());
+        assert_ne!(answer.systems, []);
         let query = RangeRequest::try_from(&request).unwrap().into_query();
         let galaxy = milky_way();
         for record in &answer.systems {

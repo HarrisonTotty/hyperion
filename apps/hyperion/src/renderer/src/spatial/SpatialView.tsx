@@ -24,30 +24,41 @@ import {
   type Viewport,
   zoomLimits,
 } from "./camera";
-import { StaleMark } from "../components/StaleMark";
+import { StatusText } from "../components/StatusText";
 import { AxisTriad } from "./AxisTriad";
 import { AXIS_FALLBACK_MESSAGE, CoreArrow } from "./CoreArrow";
-import { buildDrawList, type ScreenPoint } from "./drawList";
+import {
+  buildDrawList,
+  type CurveLabel,
+  observerBoxPx,
+  type RingLabel,
+  type ScreenPoint,
+} from "./drawList";
+import { FrameReading } from "./FrameReading";
 import {
   type BoxPx,
   coreArrowBoxes,
   coreArrowLayout,
   coreLabelText,
+  curveInksPx,
   markInksPx,
+  placeAnnulusLabels,
   placeCurveLabels,
+  tickInksPx,
   TRIAD_BOX_REM,
   triadBoxRem as triadBoxOf,
   triadFootprintPx,
   triadLayout,
   triadShiftRem,
 } from "./furniture";
-import { chooseLabels, markLabelTransform, placeLabels } from "./labels";
+import { bracketBoxPx, chooseLabels, markLabelTransform, placeLabels } from "./labels";
 import type { LocalFrame } from "../geometry/frame";
 import type { SpatialScene } from "./marks";
+import { ModeReading, type SpatialMode } from "./ModeReading";
 import { type ColourTokens, paint, readTokens, sameTokens, staleTokens } from "./paint";
 import { pick } from "./pick";
 import { PRESET_CONTROLS, PresetButtons } from "./PresetButtons";
-import { Reading, type SpatialQuantity, type SpatialReading } from "./Reading";
+import { Reading, sourceState, type SpatialQuantity, type SpatialReading } from "./Reading";
 import type { ScaleUnit } from "./scale";
 import { ScaleBar } from "./ScaleBar";
 import { type CameraMove, useOrbitCamera } from "./useOrbitCamera";
@@ -71,7 +82,7 @@ const ZOOM_STEP = 1.25;
  * The view's keys, shown above it and describing its canvas. The preset views' keys are shown on
  * their buttons, and are not repeated here.
  */
-const KEY_LEGEND: ReadonlyArray<string> = ["ARROWS ROTATE", "+/− ZOOM", "Z FIT"];
+const KEY_LEGEND: ReadonlyArray<string> = ["ARROWS ROTATE", "+/- ZOOM", "Z FIT"];
 
 /** The shortest time between two changes of the azimuth and elevation readouts: 4 Hz. */
 const READOUT_INTERVAL_MS = 250;
@@ -124,6 +135,11 @@ function Figures({ text }: FiguresProps) {
 /** A `transform` that moves an element from the top left to a point given in `rem`. */
 function translateRem(leftRem: number, topRem: number): string {
   return `translate(${leftRem}rem, ${topRem}rem)`;
+}
+
+/** Whether a curve label is an annulus's, placed by `placeAnnulusLabels` (plan 14, P14.T42.d). */
+function isAnnulusLabel(label: CurveLabel): label is RingLabel {
+  return label.placement === "ring" && label.yieldsToMarks === true;
 }
 
 /** The preset a letter key chooses, `T`, `S`, `F` or `O`, or `null` for any other key. */
@@ -187,6 +203,20 @@ export interface SpatialViewProps {
   /** The time the scene shows, labelled with its time system: `UT +0.00 yr`. */
   readonly time: SpatialReading;
   /**
+   * Whether {@link time} is one the console keeps itself, as the orbit map's display time is, which
+   * `RUN` and `HOLD` move, rather than the time the scene's source gave: it is then never stale,
+   * taking no slot and no `S`, and its value stays in `--text` while the view is stale (plan 12,
+   * P12.T11.d). The source's time when absent, as on the star chart.
+   */
+  readonly timeIsOwn?: boolean | undefined;
+  /**
+   * The display's mode, shown after the frame, the centre, the time and the scale bar, as the guide
+   * asks of a display with more than one (plan 12, P12.T11 and P12.T11.d): `NOW`, or
+   * `OBSERVED FROM` and the observer's coordinates. None when absent, as on a display with the one
+   * mode.
+   */
+  readonly mode?: SpatialMode | undefined;
+  /**
    * The distance from the view centre to the galactic axis, for the core arrow: the same quantity
    * as the centre's `RADIUS`, written the same way (`26,000.0 ly`).
    */
@@ -202,7 +232,10 @@ export interface SpatialViewProps {
   readonly accessibleName: string;
   /**
    * Whether the scene is a snapshot its source no longer backs, as after the link is lost: it is
-   * then drawn in `--text-muted` with a trailing `S`, the guide's stale state.
+   * then drawn and read in `--text-muted`, the guide's stale state, and each value of the furniture
+   * the source gave, the centre's, the time's and the observer's, trails its `S` in a slot it keeps
+   * while live (plan 12, P12.T11.d). The frame's and the mode's names and the scale bar, which is
+   * the camera's, take none.
    */
   readonly stale: boolean;
   /** Called with the mark the operator picks on the canvas. */
@@ -236,11 +269,16 @@ export interface SpatialViewProps {
  *
  * Around the canvas, as the guide's 3D conventions require: the azimuth and elevation (`AZM 030°`,
  * `ELV +30°`), changing at most four times a second and not announced as they change; over the
- * canvas, the axis triad, the core arrow, a 1-2-5 scale bar, and the labels of the chosen marks
- * and of the spheres and rings, all DOM text, since the canvas carries none (D15); and below it,
- * in the same place on every spatial view, the frame, the centre and the time. The labels are
- * hidden from assistive technology, since the list and the readout beside the view carry the same
- * text. The canvas takes focus and is described by the visible key legend.
+ * canvas, the axis triad, the core arrow, and the labels of the chosen marks and of the spheres and
+ * rings, all DOM text, since the canvas carries none (D15); and below it, in the same place on
+ * every spatial view, the frame, the centre and the time, then a 1-2-5 scale bar, on the galactic
+ * axis the note that the centre's directions are undefined (plan 12, P12.T11.g), and after them
+ * the mode where the display has one (`MODE NOW`, or `MODE OBSERVED FROM` and where from), in a
+ * `dl` of its own (plan 12, P12.T11.d). While the view is stale each value there that the scene's
+ * source gave, the centre's, the time's and the observer's, trails its own `S`, in a slot each
+ * keeps while live, so that nothing moves as the marks come. The labels are hidden from assistive
+ * technology, since the list and the readout beside the view carry the same text. The canvas takes
+ * focus and is described by the visible key legend.
  *
  * The camera, the plane, the grid, the stalks, the fill rule and the preset views all follow
  * `scene.frame`. The triad and the core arrow follow `axes` where it is given, and so does the
@@ -256,6 +294,8 @@ export function SpatialView({
   frameName,
   centre,
   time,
+  timeIsOwn = false,
+  mode,
   coreDistance,
   axes,
   accessibleName,
@@ -341,9 +381,11 @@ export function SpatialView({
   // label stands where it does whatever is selected (decision-r07-quality-and-destination, addendum
   // C, C1; R07.T16.j).
   const { chosenMarks, unselectedIds } = useMemo(() => {
-    const chosen = chooseLabels(scene.points, scene.selectedId, scene.destinationId);
+    // A feature's mark is labelled as a system's is (plan 09, P09.T41.a).
+    const marks = [...scene.points, ...(scene.features ?? [])];
+    const chosen = chooseLabels(marks, scene.selectedId, scene.destinationId);
     const unselected =
-      scene.selectedId === null ? chosen : chooseLabels(scene.points, null, scene.destinationId);
+      scene.selectedId === null ? chosen : chooseLabels(marks, null, scene.destinationId);
     return { chosenMarks: chosen, unselectedIds: new Set(unselected.map((mark) => mark.id)) };
   }, [scene]);
   const pinnedIds = [scene.selectedId, scene.destinationId].filter(
@@ -380,38 +422,93 @@ export function SpatialView({
           [triadBox],
           shownAxes,
         );
-  // The curve labels keep clear of the marks' stalks and symbols as well (R07.T16.j).
+  const furniture =
+    viewport === null || triadBox === null || coreArrow === null
+      ? []
+      : [triadBox, ...coreArrowBoxes(coreArrow, viewport.remPx)];
+  const marksInks = drawList === null ? [] : markInksPx(drawList.ops, pixelRatio);
+  const strokes = reticleStrokesCssPx(pixelRatio);
+  // The curve labels that do not give way to the marks', the spheres', the plane rings', the
+  // paths' and the observer's, keep clear of the marks' stalks and symbols as well (R07.T16.j).
   const curveLabels =
     drawList === null || viewport === null || triadBox === null || coreArrow === null
       ? []
-      : placeCurveLabels(
-          drawList.curveLabels,
-          viewport,
-          [triadBox, ...coreArrowBoxes(coreArrow, viewport.remPx)],
-          markInksPx(drawList.ops, pixelRatio),
-        );
-  // Marks' labels, placed last, keep off the core arrow and 0.5 rem from the other text: the triad,
-  // the core arrow's label and the curve labels (decision-r07-quality-and-destination, addendum D,
-  // D4; R07.T16.j).
-  const coreLabel = coreArrow === null || coreArrow.kind === "undefined" ? [] : [coreArrow.label];
-  const markLabels =
+      : placeCurveLabels(drawList.curveLabels, viewport, furniture, marksInks);
+  // The annuli's labels, and what both of their passes measure for them, once: every mark's
+  // bracket's box with its mark's ID, which they keep 0.25 rem outside but a ring's label its own
+  // planet's while no reticle is drawn about it, the marks the selection's bracket or the
+  // destination's chevrons are drawn about, as the draw list's own reticle ops say, the ticks,
+  // which they never cross, and the orbits and edges, which they prefer a place clear of. A view
+  // that labels no annulus, as the star chart, measures none of them (plan 14, P14.T42.d, T42.e,
+  // T42.f, T42.g; main's ruling on issue #96).
+  const annuli =
     drawList === null || viewport === null || triadBox === null || coreArrow === null
       ? []
-      : placeLabels(
-          chosenMarks,
-          drawList.anchors,
-          viewport,
-          reticleStrokesCssPx(pixelRatio),
-          scene.destinationId,
-          {
-            pinnedIds,
-            obstacles: coreArrowBoxes(coreArrow, viewport.remPx).filter(
-              (box) => !coreLabel.includes(box),
+      : drawList.curveLabels.filter(isAnnulusLabel);
+  const annulusInks =
+    drawList === null || viewport === null || annuli.length === 0
+      ? null
+      : {
+          marks: marksInks,
+          brackets: drawList.anchors.map((anchor) => ({
+            id: anchor.id,
+            box: bracketBoxPx(anchor, viewport.remPx, strokes),
+          })),
+          reticledIds: new Set(
+            drawList.ops.flatMap((op) =>
+              op.kind === "reticle" || op.kind === "chevrons" ? [op.id] : [],
             ),
-            texts: [triadBox, ...coreLabel, ...curveLabels],
-            unselectedIds,
-          },
-        );
+          ),
+          curves: curveInksPx(drawList.ops, pixelRatio),
+          ticks: tickInksPx(drawList.ops, pixelRatio),
+        };
+  // A selected belt's, ring's or halo's label is the selection's: placed next, before the marks'
+  // labels, which give way to it, by the annuli's rules, 0.5 rem from what stands before it, 0.25 rem
+  // outside every mark's bracket's box but a ring's its own planet's, crossed by no tick and
+  // preferring a place no orbit or edge crosses, or not drawn, with no last resort, as the
+  // selection's label has none (plan 14, P14.T42.e, T42.f, T42.g). A scene that selects an annulus
+  // selects no mark, so the two never compete, and the selection's bracket is drawn about no mark.
+  const selectedAnnuli = annuli.filter((label) => label.selected === true);
+  const selectedAnnulusLabels =
+    viewport === null || annulusInks === null || selectedAnnuli.length === 0
+      ? []
+      : placeAnnulusLabels(selectedAnnuli, viewport, {
+          standing: [...furniture, ...curveLabels],
+          ...annulusInks,
+        });
+  // Marks' labels, placed after those, keep off the core arrow and 0.5 rem from the other text:
+  // the triad, the core arrow's label, those curve labels and a selected annulus's
+  // (decision-r07-quality-and-destination, addendum D, D4; R07.T16.j; plan 14, P14.T42.e); in
+  // observed mode they keep off the observer's eye too (plan 12, P12.T11.c).
+  const coreLabel = coreArrow === null || coreArrow.kind === "undefined" ? [] : [coreArrow.label];
+  const markLabels =
+    drawList === null ||
+    camera === null ||
+    viewport === null ||
+    triadBox === null ||
+    coreArrow === null
+      ? []
+      : placeLabels(chosenMarks, drawList.anchors, viewport, strokes, scene.destinationId, {
+          pinnedIds,
+          obstacles: coreArrowBoxes(coreArrow, viewport.remPx).filter(
+            (box) => !coreLabel.includes(box),
+          ),
+          texts: [triadBox, ...coreLabel, ...curveLabels, ...selectedAnnulusLabels],
+          unselectedIds,
+          observer: observerBoxPx(scene, camera, viewport),
+        });
+  // The other annuli's labels, placed last, give way to every body's and to a selected annulus's:
+  // 0.5 rem from everything placed, 0.25 rem outside every mark's bracket's box but a ring's its
+  // own planet's while no reticle is drawn about it, preferring a place no curve crosses, or not
+  // drawn (plan 14, P14.T42.d, T42.g); the zones' first, in the scene's order.
+  const otherAnnuli = annuli.filter((label) => label.selected !== true);
+  const annulusLabels =
+    viewport === null || annulusInks === null || otherAnnuli.length === 0
+      ? []
+      : placeAnnulusLabels(otherAnnuli, viewport, {
+          standing: [...furniture, ...curveLabels, ...selectedAnnulusLabels, ...markLabels],
+          ...annulusInks,
+        });
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [tokens, setTokens] = useState<ColourTokens | null>(null);
@@ -554,7 +651,7 @@ export function SpatialView({
           <div className="spatial-view__labels" aria-hidden="true">
             {viewport === null
               ? null
-              : curveLabels.map((label) => (
+              : [...curveLabels, ...selectedAnnulusLabels, ...annulusLabels].map((label) => (
                   <span
                     key={label.key}
                     className="spatial-label spatial-label--curve"
@@ -598,13 +695,11 @@ export function SpatialView({
       </div>
       <div className="spatial-view__furniture">
         <dl className="spatial-view__readings">
-          <div className="field spatial-reading">
-            <dt className="field__label">FRAME</dt> <dd>{frameName}</dd>
-          </div>
+          <FrameReading frameName={frameName} />
           {centre.map((reading) => (
-            <Reading key={reading.label} reading={reading} />
+            <Reading key={reading.label} reading={reading} state={sourceState(stale)} />
           ))}
-          <Reading reading={time} />
+          <Reading reading={time} state={timeIsOwn ? "own" : sourceState(stale)} />
         </dl>
         {camera === null || viewport === null ? null : (
           <ScaleBar
@@ -614,10 +709,22 @@ export function SpatialView({
             units={scaleUnits}
           />
         )}
-        {stale ? <StaleMark /> : null}
+        {/* Why the centre's directions are undefined, beside the centre's readings, after the scale
+            bar and before the mode, so that on the compact chart it shares the time's and the
+            bar's line and observed mode keeps three lines on the axis (plan 12, P12.T11.g). */}
         {shownAxes.onAxis ? (
-          <p className="spatial-view__axis-note">{AXIS_FALLBACK_MESSAGE}</p>
+          <p className="spatial-view__axis-note">
+            <StatusText text={AXIS_FALLBACK_MESSAGE} />
+          </p>
         ) : null}
+        {/* After the scale bar, and the axis note where there is one, so that on the compact chart
+            the time and the bar share a line, which observed mode's long reading then follows on a
+            line of its own (plan 12, P12.T11.d's ruling; P12.T11.g). */}
+        {mode === undefined ? null : (
+          <dl className="spatial-view__readings">
+            <ModeReading mode={mode} state={sourceState(stale)} />
+          </dl>
+        )}
       </div>
     </div>
   );

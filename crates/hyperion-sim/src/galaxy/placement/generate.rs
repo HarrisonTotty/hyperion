@@ -1,11 +1,14 @@
 //! Generating a whole cell: every system a generation cell holds, and what one costs to keep (plan
 //! 03, P03.T6).
 
-use super::candidate::candidate_id;
-use super::cell::{candidate_count_from_bound, layer_bound};
+use super::candidate::{Visited, candidate_id, visit_candidate};
+use super::cell::{CellBound, candidate_count_from_bound};
 use super::record::candidate_mass;
 use super::{CandidateOutcome, CellKey, SystemRecord, evaluate_candidate_from_bound};
+use crate::coords::GalacticPosition;
 use crate::galaxy::Galaxy;
+use crate::galaxy::imf::MassBand;
+use crate::galaxy::query::SpeedCut;
 use crate::units::SolarMasses;
 
 /// Places every system of one generation cell into `out`, in candidate-index order.
@@ -47,8 +50,8 @@ use crate::units::SolarMasses;
 /// ```
 pub fn generate_cell(galaxy: &Galaxy, key: CellKey, out: &mut Vec<SystemRecord>) {
     out.clear();
-    let bound = layer_bound(galaxy, key);
-    let candidates = candidate_count_from_bound(galaxy.seed(), key, bound);
+    let bound = CellBound::of(galaxy, key);
+    let candidates = candidate_count_from_bound(galaxy.seed(), key, bound.total());
     // Most candidates are accepted, so the count is the right order for the reservation; a cache
     // that keeps the buffer should shrink it, since `cell_heap_bytes` counts records and not spare
     // capacity.
@@ -57,7 +60,7 @@ pub fn generate_cell(galaxy: &Galaxy, key: CellKey, out: &mut Vec<SystemRecord>)
     );
     for index in 0..candidates {
         if let CandidateOutcome::Accepted(system) =
-            evaluate_candidate_from_bound(galaxy, key, index, bound)
+            evaluate_candidate_from_bound(galaxy, key, index, &bound)
         {
             out.push(system);
         }
@@ -71,13 +74,17 @@ pub fn generate_cell(galaxy: &Galaxy, key: CellKey, out: &mut Vec<SystemRecord>)
 /// It is cheaper because it draws each candidate's mass first. The mass is one word on the
 /// candidate's own mass stream, keyed by its ID and read through the layer's band, so it depends on
 /// neither the candidate's position, nor its acceptance mark, nor the component the thinning picks.
+/// That does not hold in layers D and E of a galaxy that holds plan 08's displaced classes, whose
+/// conditional marks draw the mass after the pick (P08.T12.c): there every candidate is evaluated
+/// whole and `keep` sees the masses of the accepted ones.
 /// A candidate whose mass `keep` refuses is dropped before its position is drawn or the density
 /// evaluated at it; one that `keep` accepts is evaluated whole, as [`generate_cell`] evaluates it,
 /// which draws its mass a second time from the same word. So the records kept are the very records
 /// [`generate_cell`] makes, and in the same order; nothing here opens a stream the generator does
 /// not, or draws a word it would not, so no generated output depends on it.
 ///
-/// `keep` sees the mass of every candidate of the cell, thinned or not, in index order; the sky's
+/// `keep` sees the mass of every candidate of the cell, thinned or not, in index order (but in layers
+/// D and E under the displaced classes, above); the sky's
 /// census passes a mass floor. What it returns is part of a cell, so it must never be stored where
 /// a whole cell is expected, such as a [`CellCache`](super::CellCache). `out` is cleared first and reserved as [`generate_cell`] reserves it.
 ///
@@ -110,19 +117,55 @@ pub fn generate_cell_where(
     out: &mut Vec<SystemRecord>,
 ) {
     out.clear();
-    let bound = layer_bound(galaxy, key);
-    let candidates = candidate_count_from_bound(galaxy.seed(), key, bound);
+    let bound = CellBound::of(galaxy, key);
+    let candidates = candidate_count_from_bound(galaxy.seed(), key, bound.total());
     out.reserve(
         usize::try_from(candidates).expect("usize is at least 32 bits, so a u32 count fits"),
     );
+    // Plan 08's conditional marks draw layer D's and E's masses after the pick (P08.T12.c), so
+    // there the mass is read from the record instead.
+    let mass_first =
+        !(galaxy.fields().displaced().is_some() && matches!(key.band(), MassBand::D | MassBand::E));
     for index in 0..candidates {
-        if !keep(candidate_mass(galaxy, key, candidate_id(key, index))) {
+        if mass_first && !keep(candidate_mass(galaxy, key, candidate_id(key, index))) {
             continue;
         }
         if let CandidateOutcome::Accepted(system) =
-            evaluate_candidate_from_bound(galaxy, key, index, bound)
+            evaluate_candidate_from_bound(galaxy, key, index, &bound)
+            && (mass_first || keep(system.primary_initial_mass()))
         {
             out.push(system);
+        }
+    }
+}
+
+/// Hands `visit` every system of one generation cell, in candidate-index order: whole, as
+/// [`generate_cell`] places it, where `reads` asks for it by its epoch position and what bounds its
+/// speed ([`SpeedCut`]), and otherwise by its ID alone (plan 12's lens walk, ruling 143.3; the
+/// range query's walk of a layer-E cell its cache does not hold, P08.T12).
+///
+/// A walk that reads only the systems near what it looks for, and counts the rest, pays for the
+/// rest no more than decides that they are systems: no record outside the black hole's Kepler
+/// regime but in layer E, where the catalogue's claims read the record, and there no track (the
+/// candidate evaluation's `accepts_unread`, which gives the whole evaluation's answer bit for
+/// bit). The systems, read or not, are [`generate_cell`]'s, in its order. What it hands over is
+/// part of a cell, so it is never stored where a whole cell is expected, such as a
+/// [`CellCache`](super::CellCache).
+///
+/// # Panics
+///
+/// As [`generate_cell`].
+pub(crate) fn visit_cell(
+    galaxy: &Galaxy,
+    key: CellKey,
+    mut reads: impl FnMut(&GalacticPosition, SpeedCut) -> bool,
+    mut visit: impl FnMut(Visited),
+) {
+    let bound = CellBound::of(galaxy, key);
+    let candidates = candidate_count_from_bound(galaxy.seed(), key, bound.total());
+    for index in 0..candidates {
+        if let Some(system) = visit_candidate(galaxy, key, index, &bound, &mut reads) {
+            visit(system);
         }
     }
 }
@@ -142,8 +185,9 @@ pub fn cell_heap_bytes(systems: &[SystemRecord]) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::coords::GalacticPosition;
+    use crate::galaxy::displaced::hold::held;
     use crate::galaxy::params::GalaxyParams;
+    use crate::id::SystemId;
     use hyperion_testkit::float::assert_same_bits;
 
     use crate::galaxy::placement::{
@@ -157,6 +201,17 @@ mod tests {
 
     fn galaxy() -> Galaxy {
         Galaxy::from_params(Seed::new(SEED), GalaxyParams::milky_way_like())
+            .expect("the Milky Way fixture's gas is mostly neutral")
+    }
+
+    /// The fixture without plan 08's displaced classes (the tests' field alone,
+    /// `DisplacedRules::FieldOnly`): plan 03's field components alone in every layer.
+    fn field_only() -> Galaxy {
+        let rules = crate::galaxy::rules::GalaxyRules {
+            displaced: crate::galaxy::displaced::DisplacedRules::FieldOnly,
+            ..crate::galaxy::rules::GalaxyRules::of_version(crate::GENERATOR_VERSION)
+        };
+        Galaxy::from_params_with_rules(Seed::new(SEED), GalaxyParams::milky_way_like(), rules)
             .expect("the Milky Way fixture's gas is mostly neutral")
     }
 
@@ -180,7 +235,9 @@ mod tests {
             let one_at_a_time: Vec<_> = (0..candidate_count(&galaxy, key))
                 .filter_map(|index| match evaluate_candidate(&galaxy, key, index) {
                     CandidateOutcome::Accepted(system) => Some(system),
-                    CandidateOutcome::Thinned | CandidateOutcome::ClaimedByCatalogue => None,
+                    CandidateOutcome::Thinned
+                    | CandidateOutcome::ClaimedByCatalogue
+                    | CandidateOutcome::InLossCone => None,
                 })
                 .collect();
             assert_eq!(cell, one_at_a_time, "{:?}", spec.layer());
@@ -250,9 +307,12 @@ mod tests {
         );
     }
 
+    /// Plan 03's field alone ([`field_only`]), whose marks give the mass before the predicate;
+    /// with plan 08's displaced classes it is `marks_hold`'s
+    /// `generate_cell_where_is_generate_cell_filtered_under_every_26_hold`.
     #[test]
     fn generate_cell_where_sees_every_candidate_once_in_index_order() {
-        let galaxy = galaxy();
+        let galaxy = field_only();
         let key = CellKey::containing(Layer::E, &sunlike()).unwrap();
         let seen = std::cell::RefCell::new(Vec::new());
         let mut kept = Vec::new();
@@ -265,20 +325,102 @@ mod tests {
             },
             &mut kept,
         );
-        assert!(kept.is_empty());
+        assert_eq!(kept, []);
         let seen = seen.into_inner();
         let count = candidate_count(&galaxy, key);
         assert_eq!(seen.len(), usize::try_from(count).unwrap());
         let accepted: Vec<_> = (0..count)
             .filter_map(|index| match evaluate_candidate(&galaxy, key, index) {
                 CandidateOutcome::Accepted(system) => Some((index, system.primary_initial_mass())),
-                CandidateOutcome::Thinned | CandidateOutcome::ClaimedByCatalogue => None,
+                CandidateOutcome::Thinned
+                | CandidateOutcome::ClaimedByCatalogue
+                | CandidateOutcome::InLossCone => None,
             })
             .collect();
-        assert!(!accepted.is_empty());
+        assert_ne!(accepted, []);
         for (index, mass) in accepted {
             assert_same_bits(seen[usize::try_from(index).unwrap()].value(), mass.value());
         }
+    }
+
+    /// The systems `visit_cell` hands over with `reads`, each its ID, and its record and speed
+    /// cut where it was read.
+    fn visited(
+        galaxy: &Galaxy,
+        key: CellKey,
+        reads: impl FnMut(&GalacticPosition, SpeedCut) -> bool,
+    ) -> Vec<(SystemId, Option<(SystemRecord, SpeedCut)>)> {
+        let mut out = Vec::new();
+        visit_cell(galaxy, key, reads, |system| {
+            out.push(match system {
+                Visited::Read(record, cut) => (record.id(), Some((record, cut))),
+                Visited::Counted(id) => (id, None),
+            });
+        });
+        out
+    }
+
+    /// Plan 12's lens walk (ruling 143.3): `visit_cell` hands over `generate_cell`'s systems, in
+    /// its order, whichever it reads, and the records it reads bit for bit, with the speed cut of
+    /// their placement. The cells run through the bulge, where layer E's dead records are counted
+    /// without their tracks, and the Sun-like point, where the young disc's are alive; the
+    /// predicates read none, every one, and about half by position, in every layer.
+    #[test]
+    fn visit_cell_hands_over_generate_cell_s_systems_whichever_it_reads() {
+        visit_cell_hands_over_in(held());
+    }
+
+    /// [`visit_cell_hands_over_generate_cell_s_systems_whichever_it_reads`] in `galaxy`.
+    fn visit_cell_hands_over_in(galaxy: &Galaxy) {
+        let baade = GalacticPosition::from_light_years([0.0, 0.0, -1_770.0]).unwrap();
+        let mut cell = Vec::new();
+        let (mut read, mut counted) = (0_usize, 0_usize);
+        for spec in STELLAR_LAYERS.iter().chain(&SUBSTELLAR_LAYERS) {
+            let layer = spec.layer();
+            let cells = if layer == Layer::E { 3 } else { 2 };
+            let keys = [in_the_bulge(), baade, sunlike()]
+                .iter()
+                .flat_map(|at| {
+                    let first = CellKey::containing(layer, at).unwrap();
+                    let [x, y, z] = first.gen_cell().to_array();
+                    (0..cells).map(move |dx| CellKey::new(layer, [x + dx, y, z]).unwrap())
+                })
+                .collect::<Vec<_>>();
+            for key in keys {
+                generate_cell(galaxy, key, &mut cell);
+                let whole: Vec<_> = cell.iter().map(SystemRecord::id).collect();
+                let half = |p: &GalacticPosition, _: SpeedCut| {
+                    let [x, y, z] = p.to_light_years_f64();
+                    (x + y + z).rem_euclid(2.0) < 1.0
+                };
+                for systems in [
+                    visited(galaxy, key, |_, _| false),
+                    visited(galaxy, key, |_, _| true),
+                    visited(galaxy, key, half),
+                ] {
+                    let ids: Vec<_> = systems.iter().map(|(id, _)| *id).collect();
+                    assert_eq!(ids, whole, "layer {} {key:?}", layer.letter());
+                    for ((_, seen), record) in systems.iter().zip(&cell) {
+                        if let Some((seen, cut)) = seen {
+                            assert_eq!(seen, record, "{:?}", record.id());
+                            assert_eq!(
+                                *cut,
+                                SpeedCut::of_record(galaxy, record),
+                                "{:?}",
+                                record.id()
+                            );
+                            read += 1;
+                        } else {
+                            counted += 1;
+                        }
+                    }
+                }
+            }
+        }
+        assert!(
+            read > 10_000 && counted > 10_000,
+            "{read} read, {counted} counted"
+        );
     }
 
     #[test]
@@ -289,7 +431,7 @@ mod tests {
         let mut cell = Vec::new();
         generate_cell(&galaxy, dense, &mut cell);
         let expected = cell.clone();
-        assert!(!expected.is_empty());
+        assert_ne!(expected, []);
         generate_cell(&galaxy, sparse, &mut cell);
         generate_cell(&galaxy, dense, &mut cell);
         assert_eq!(cell, expected);
@@ -304,7 +446,7 @@ mod tests {
             CellKey::containing(Layer::D, &sunlike()).unwrap(),
             &mut cell,
         );
-        assert!(!cell.is_empty());
+        assert_ne!(cell, []);
         assert_eq!(
             cell_heap_bytes(&cell),
             cell.len() * size_of::<SystemRecord>()

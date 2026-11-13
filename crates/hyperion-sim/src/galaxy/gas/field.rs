@@ -34,7 +34,7 @@ use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::{PointLy, Population};
 use crate::math;
 use crate::units::consts::METRES_PER_LIGHT_YEAR;
-use crate::units::{HydrogenPerCm3, Kelvin, KelvinPerCm3, MetresPerSecond, Years};
+use crate::units::{Dex, HydrogenPerCm3, Kelvin, KelvinPerCm3, MetresPerSecond, Years};
 
 /// The adiabatic index of a monatomic gas, 5 ÷ 3, which a thermal sound speed is taken with.
 const ADIABATIC_INDEX: f64 = 5.0 / 3.0;
@@ -232,6 +232,19 @@ impl GasField {
         self.zeta(Site::of(p).r)
     }
 
+    /// The gas's metallicity at `p`, `[M/H]` in dex: the young thin disc's mean at the epoch at
+    /// `p`'s cylindrical radius (Design note 13), at most +0.5 dex and the same all along a
+    /// vertical line. [`dust_per_hydrogen`](Self::dust_per_hydrogen) is `10^` this, bit for bit.
+    ///
+    /// Plan 09's supernova test reads it as the ζ of the gas a shell sweeps up (P09.T17, ruling
+    /// 136.9): Cioffi, McKee and Bertschinger (1988, ApJ 334, 252, p. 259) scale the cooling by a
+    /// metallicity factor, "`ζ_m` = 1 for solar abundances", and the gas that cools is the
+    /// ambient's.
+    #[must_use]
+    pub fn metallicity_at(&self, p: &GalacticPosition) -> Dex {
+        self.metallicity_at_radius(Site::of(p).r)
+    }
+
     /// The gas at `p` as a site reads it: the parcel's density with the noise at `scale`, its
     /// pressure and its split into four phases, and the phase the point lies in, with that
     /// phase's density, temperature and sound speed (ruling 103 of 2026-09-22). Plan 09's
@@ -403,7 +416,13 @@ impl GasField {
     /// `ζ = 10^[M/H]` at cylindrical radius `r` (ly).
     #[must_use]
     pub(crate) fn zeta(&self, r: f64) -> f64 {
-        math::exp10(self.metallicity.at(r, Years::ZERO).mean().value())
+        math::exp10(self.metallicity_at_radius(r).value())
+    }
+
+    /// `[M/H]` at cylindrical radius `r` (ly): the young thin disc's mean at the epoch.
+    #[must_use]
+    fn metallicity_at_radius(&self, r: f64) -> Dex {
+        self.metallicity.at(r, Years::ZERO).mean()
     }
 }
 

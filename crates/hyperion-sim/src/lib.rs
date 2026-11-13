@@ -44,17 +44,25 @@
 //! - [`observe`]: readings at the retarded time, the apparent position and the light's age, the
 //!   stated error from neglected curvature, and bearings.
 //! - [`lensing`]: microlensing along one monitored line of sight.
-//! - [`alerts`]: transients seen from a distance; so far only the bands a detection is made in.
+//! - [`alerts`]: transients seen from a distance: the bands, sensors and queries, the registry of
+//!   transient kinds, and reach and flux (plan 12, P12.T5.a).
 //!
 //! Planetary systems (plan 14):
 //!
 //! - [`planetary`]: the body index, and so far the protoplanetary disc, the Hill-spacing floor and
 //!   the Roche, Hill and satellite-stability limits.
+//! - [`substance`]: the substance registry, one row for each gas, ice, liquid, mineral or rock a
+//!   body can hold, with its key, its stoichiometry and its gas and phase data.
 //!
 //! The sky (rendering plan R06):
 //!
 //! - [`sky`]: the naked eye's threshold and glare; later the census of the stars an observer
 //!   sees, the unresolved band and the host stars' discs.
+//!
+//! And for a caller that keeps a built table beyond its process:
+//!
+//! - [`words`]: a table's words, written to the caller's sink and read back from its source, for
+//!   the server's sky tables on disk.
 //!
 //! [`math`], [`units`], [`version`] and the mechanism of [`rng`] live in `hyperion-base`, beneath
 //! this crate, and are re-exported here at their old paths. This crate's runtime dependencies are
@@ -73,8 +81,10 @@ pub mod planetary;
 pub mod rng;
 pub mod sky;
 pub mod stellar;
+pub mod substance;
 pub mod tables;
 pub mod time;
+pub mod words;
 
 pub use hyperion_base::{GENERATOR_VERSION, GeneratorVersion, math, units, version};
 pub use rng::Seed;

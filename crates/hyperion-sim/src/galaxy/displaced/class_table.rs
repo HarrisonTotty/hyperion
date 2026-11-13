@@ -5,7 +5,8 @@
 //!
 //! Remnants of the thin disc take 56 classes, eight speed bins by seven age bins; the thick disc,
 //! the halo, the bulge, the bar and the nuclear disc eight speed bins each; and the hypervelocity
-//! survivors one more, registered at zero weight (Design note 25): 97 in all, in that order
+//! survivors one more, registered at zero weight (Design note 25) and weighted from generator
+//! version 27 by their own count ([`Survivors`], plan 09's P09.T34.b): 97 in all, in that order
 //! ([`ClassKey::id`]). Runaways and walkaways join the thin disc's and the nuclear disc's classes of
 //! their speed and time since ejection as further kinds ([`runaway`](super::runaway)).
 //!
@@ -22,7 +23,7 @@
 //!   each age bin (age in `L` plus the bin's edges in `R_d ÷ v_c`), exactly, through the age
 //!   distribution's CDF;
 //! - for the dead of layer E, plan 06's kick law in each speed bin by remnant kind and mode,
-//!   through [`kick_bins::speed_bin_shares`], and the share leaving nothing, which is gone;
+//!   through [`super::kick_bins::speed_bin_shares`], and the share leaving nothing, which is gone;
 //! - for the living of the thin disc and the nuclear disc, the runaway and walkaway shares by
 //!   speed bin and time since ejection ([`RunawayModel`]), which leave the field.
 //!
@@ -55,10 +56,13 @@ use super::runaway::{
     ENCOUNTER_MAX_AGE, Ejected, RELEASE_Q_RANGE, RELEASING_MIN_MASS, RunawayModel,
     WALKAWAY_CALIBRATION_MASS, WALKAWAY_PRESENT_SHARE, gl16,
 };
+use super::survivors::Survivors;
 use super::{
     AGE_BINS, AgeBin, BirthSource, DisplacedClassId, DisplacedKind, GalaxyScales, SPEED_BINS,
     SPEED_EDGES, SpeedBin,
 };
+use crate::galaxy::ages::AgeDistribution;
+use crate::galaxy::field_share::{BANDS, FieldShare};
 use crate::galaxy::fields::{Component, ComponentId};
 use crate::galaxy::imf::{MASS_BAND_EDGES, MassBand};
 use crate::galaxy::{Galaxy, PointLy, Population};
@@ -130,7 +134,8 @@ pub(crate) fn ejects(source: BirthSource) -> bool {
     matches!(source, BirthSource::ThinDisc | BirthSource::NuclearDisc)
 }
 
-/// The hypervelocity survivors' class, registered at zero weight (Design note 25).
+/// The hypervelocity survivors' class, registered at zero weight (Design note 25) and weighted
+/// from generator version 27 by its own count, [`ClassTable::survivors`] (plan 09, P09.T34.b).
 ///
 /// # Panics
 ///
@@ -186,12 +191,14 @@ pub const SURVIVOR_POPULATIONS: [SurvivorPopulation; 2] = [
 ];
 
 /// The Milky Way's Type Ia rate, per year: 0.54 ± 0.12 per century (Li et al. 2011, MNRAS 412,
-/// 1473, Table 11). Plan 09's P09.T34 replaces it with the galaxy's own when it gives the class
-/// weight.
+/// 1473, Table 11). The class's weight takes the galaxy's own instead (plan 09, P09.T34.b,
+/// [`Survivors::rate_per_year`]); this stays the reference of [`ClassTable::hypervelocity_count`].
 pub const MILKY_WAY_IA_RATE_PER_YEAR: f64 = 0.0054;
 
 /// The odds of each of [`SURVIVOR_POPULATIONS`] among the survivors inside the cube: `shareᵢ ÷
-/// v_eff,ᵢ`, normalised (the speed mark's first draw, ruling 128.1).
+/// v_eff,ᵢ`, normalised (ruling 128.1). The weighted class draws its members' populations by its
+/// own counts instead, which leave out the Type Ia class's interval ([`Survivors::count`], plan
+/// 09's P09.T34.b).
 #[must_use]
 pub fn survivor_odds() -> [f64; 2] {
     let raw = SURVIVOR_POPULATIONS.map(|p| p.share / p.effective_speed_km_s());
@@ -664,6 +671,13 @@ pub struct ClassTable {
     sources: Vec<SourceEntry>,
     components: Vec<ComponentEntry>,
     classes: Vec<ClassEntry>,
+    /// From generator version 26 (plan 09, P09.T2.c), per component and band by
+    /// [`MassBand::index`], the share of its budget that stays in the field ([`field_stays`]);
+    /// `None` before it, where the field is the budget.
+    field: Option<Vec<[f64; BANDS]>>,
+    /// From generator version 27 (plan 09, P09.T34.b), the hypervelocity survivors, the class's
+    /// count.
+    survivors: Survivors,
 }
 
 /// The log-mean speed of kicks in bin `s`, in units of the speed scale.
@@ -896,7 +910,101 @@ struct Accumulator<'a> {
     remnants: [[f64; 4]; 3],
 }
 
+/// What one field component's terms read ([`Accumulator::add_component`]).
+struct ComponentTerms<'a> {
+    component: &'a Component,
+    source: BirthSource,
+    /// The component's place among its source's.
+    within: usize,
+    /// `[D, E]`: the component's band budget over its source's.
+    relative: [f64; 2],
+    src: &'a SourceEntry,
+    nodes: &'a [MassNodes; 2],
+    /// The source's kick shares at band E's nodes.
+    kicks: &'a [KickBinShares],
+    /// The source's speed scale.
+    v_ref: KilometresPerSecond,
+}
+
+/// From generator version 26 (plan 09, P09.T2.c), each component's share of its budget that stays
+/// in the field, by band: its stay share over the field's ages, `stay_over(id, ages)` where they
+/// are not the budget's (the young disc's) and its own stay share elsewhere, times its field
+/// factor; the field factor alone outside bands D and E.
+fn field_stays(
+    galaxy: &Galaxy,
+    share: &FieldShare,
+    components: &[ComponentEntry],
+    mut stay_over: impl FnMut(ComponentId, &AgeDistribution) -> [f64; 2],
+) -> Vec<[f64; BANDS]> {
+    galaxy
+        .fields()
+        .component_ids()
+        .zip(components)
+        .map(|(id, entry)| {
+            let stay = share
+                .ages(id)
+                .map_or(entry.stay, |ages| stay_over(id, ages));
+            let mut stays = [0.0; BANDS];
+            for band in MassBand::ALL.into_iter().chain(MassBand::SUBSTELLAR) {
+                let kept = band_slot(band).map_or(1.0, |b| stay[b]);
+                stays[band.index()] = kept * share.factor(id, band);
+            }
+            stays
+        })
+        .collect()
+}
+
 impl Accumulator<'_> {
+    /// Adds one component's terms over every mass node of layers D and E: its stay, alive and stay
+    /// marks into this accumulator's, its classes into the classes, and its source's gone and
+    /// remnants into the accumulator's.
+    fn add_component(&mut self, terms: &ComponentTerms<'_>) {
+        let (component, source, src) = (terms.component, terms.source, terms.src);
+        for (band, band_nodes) in terms.nodes.iter().enumerate() {
+            for (node, kick) in terms.kicks.iter().enumerate() {
+                let at = Node {
+                    component,
+                    source,
+                    within: terms.within,
+                    band,
+                    index: node,
+                    m: band_nodes.masses()[node],
+                    weight: band_nodes.weights()[node],
+                    pdf: band_nodes.pdf()[node],
+                    life: src.lifetimes[band][node],
+                    relative: terms.relative[band],
+                    v_ref: terms.v_ref,
+                };
+                // Layer D outside the ejecting sources: every star stays.
+                let alive = if band == 1 || ejects(source) {
+                    born_below(component, at.life)
+                } else {
+                    1.0
+                };
+                let ejected = if ejects(source) {
+                    self.eject(&at, &src.lifetimes[1], terms.nodes[1].masses())
+                } else {
+                    0.0
+                };
+                let staying = alive - ejected;
+                self.stay[band] += at.weight * staying;
+                self.alive[band] += at.weight * alive;
+                if band == 0 {
+                    // Layer D's dead are white dwarfs, which stay where they are.
+                    self.stay[0] += at.weight * (1.0 - alive);
+                } else {
+                    self.stay_marks.add(
+                        StayCategory::Alive,
+                        node,
+                        at.weight * staying,
+                        at.pdf * staying,
+                    );
+                    self.dead(&at, alive, kick);
+                }
+            }
+        }
+    }
+
     /// Adds `part` of a star at `at` to class `class` as `kind`, its kick or ejection in speed bin
     /// `origin` at a mean `u τ` of `ut`.
     fn place(
@@ -1068,9 +1176,11 @@ fn members_of(galaxy: &Galaxy) -> Vec<Vec<ComponentId>> {
     members
 }
 
-/// Component `c`'s budgets in layers D and E, systems.
+/// Component `c`'s budgets in layers D and E, systems: its count times its population's whole
+/// band share, the budget's share (Design note 15), which the stay shares the build installs into
+/// the share matrix do not touch (P08.T12.a).
 fn budget_of(galaxy: &Galaxy, c: &Component) -> [f64; 2] {
-    [MassBand::D, MassBand::E].map(|band| c.count() * galaxy.shares().component_share(band, c))
+    [MassBand::D, MassBand::E].map(|band| c.count() * galaxy.shares().share(band, c.population()))
 }
 
 /// Each source's reference composition, budgets and node lifetimes, and the kick shares at band
@@ -1083,7 +1193,7 @@ fn source_entries(
     nodes: &[MassNodes; 2],
 ) -> (Vec<SourceEntry>, Vec<Vec<KickBinShares>>, Vec<usize>) {
     let fields = galaxy.fields();
-    let law = StandardKickLaw::default();
+    let law = StandardKickLaw::under(galaxy.rules().stellar);
     let mut sources: Vec<SourceEntry> = Vec::with_capacity(SOURCES.len());
     let mut kicks: Vec<KickSet> = Vec::with_capacity(SOURCES.len());
     let mut kick_of = Vec::with_capacity(SOURCES.len());
@@ -1246,10 +1356,7 @@ impl ClassTable {
     pub fn build(galaxy: &Galaxy, forms: &FormTable) -> Self {
         let scales = GalaxyScales::new(galaxy.params(), galaxy.potential());
         let mf = galaxy.mass_function();
-        let nodes = [
-            MassNodes::of(MassBand::D, mf),
-            MassNodes::of(MassBand::E, mf),
-        ];
+        let nodes = [MassBand::D, MassBand::E].map(|band| MassNodes::of(band, mf));
         let fields = galaxy.fields();
         let members = members_of(galaxy);
         let (mut sources, kicks, kick_of) = source_entries(galaxy, &members, &scales, &nodes);
@@ -1278,50 +1385,17 @@ impl ClassTable {
             acc.stay_marks = StayMarks::empty(nodes[1].masses());
             acc.gone = src.gone[1];
             acc.remnants = src.remnants;
-            for (band, band_nodes) in nodes.iter().enumerate() {
-                let source_kicks = &kicks[kick_of[s_index]];
-                for (node, kick) in source_kicks.iter().enumerate() {
-                    let at = Node {
-                        component,
-                        source,
-                        within,
-                        band,
-                        index: node,
-                        m: band_nodes.masses()[node],
-                        weight: band_nodes.weights()[node],
-                        pdf: band_nodes.pdf()[node],
-                        life: src.lifetimes[band][node],
-                        relative: relative[band],
-                        v_ref: KilometresPerSecond::new(source_speed(source, &scales)),
-                    };
-                    // Layer D outside the ejecting sources: every star stays.
-                    let alive = if band == 1 || ejects(source) {
-                        born_below(component, at.life)
-                    } else {
-                        1.0
-                    };
-                    let ejected = if ejects(source) {
-                        acc.eject(&at, &src.lifetimes[1], nodes[1].masses())
-                    } else {
-                        0.0
-                    };
-                    let staying = alive - ejected;
-                    acc.stay[band] += at.weight * staying;
-                    acc.alive[band] += at.weight * alive;
-                    if band == 0 {
-                        // Layer D's dead are white dwarfs, which stay where they are.
-                        acc.stay[0] += at.weight * (1.0 - alive);
-                    } else {
-                        acc.stay_marks.add(
-                            StayCategory::Alive,
-                            node,
-                            at.weight * staying,
-                            at.pdf * staying,
-                        );
-                        acc.dead(&at, alive, kick);
-                    }
-                }
-            }
+            let terms = ComponentTerms {
+                component,
+                source,
+                within,
+                relative,
+                src,
+                nodes: &nodes,
+                kicks: &kicks[kick_of[s_index]],
+                v_ref: KilometresPerSecond::new(source_speed(source, &scales)),
+            };
+            acc.add_component(&terms);
             let src = &mut sources[s_index];
             src.gone[1] = acc.gone;
             src.remnants = acc.remnants;
@@ -1336,6 +1410,39 @@ impl ClassTable {
                 ),
             });
         }
+        // From version 26 (P09.T2.c), the field's stays: the young disc's are its terms again over
+        // the young field's ages, into a scratch accumulator whose classes are dropped, since the
+        // class weights are the budget's.
+        let field = galaxy.field_share().map(|share| {
+            let mut scratch = Accumulator {
+                forms,
+                scales: &scales,
+                model,
+                classes: empty_classes(&members, &nodes),
+                stay: [0.0; 2],
+                alive: [0.0; 2],
+                stay_marks: StayMarks::empty(nodes[1].masses()),
+                gone: 0.0,
+                remnants: [[0.0; 4]; 3],
+            };
+            field_stays(galaxy, share, &components, |id, ages| {
+                let component = fields.component(id).clone().with_ages(ages.clone());
+                let source = source_of(component.population());
+                let s_index = source_index(source);
+                scratch.stay = [0.0; 2];
+                scratch.add_component(&ComponentTerms {
+                    component: &component,
+                    source,
+                    within: members[s_index].iter().take_while(|&&m| m != id).count(),
+                    relative: [1.0; 2],
+                    src: &sources[s_index],
+                    nodes: &nodes,
+                    kicks: &kicks[kick_of[s_index]],
+                    v_ref: KilometresPerSecond::new(source_speed(source, &scales)),
+                });
+                scratch.stay
+            })
+        });
         let mut classes = acc.classes;
         classes.iter_mut().for_each(ClassEntry::finish);
         Self {
@@ -1345,18 +1452,27 @@ impl ClassTable {
             sources,
             components,
             classes,
+            field,
+            survivors: Survivors::of(galaxy, forms),
         }
     }
 
-    /// The hypervelocity class's count inside the cube once it is given weight, at the Milky Way's
-    /// Type Ia rate, by survivor population ([`survivors_inside`]); the class itself stays at zero
-    /// weight until P09.T34 (Design note 25).
+    /// The hypervelocity class's count inside the cube at the Milky Way's Type Ia rate, by survivor
+    /// population ([`survivors_inside`]): Design note 25's reference figure. The class's own count,
+    /// from generator version 27, is [`survivors`](Self::survivors)' (plan 09, P09.T34.b).
     #[must_use]
     pub fn hypervelocity_count(&self, forms: &FormTable) -> [f64; 2] {
         survivors_inside(
             MILKY_WAY_IA_RATE_PER_YEAR,
             forms.rows().hypervelocity_mean_exit_ly,
         )
+    }
+
+    /// The hypervelocity survivors, from generator version 27 (plan 09, P09.T34.b): the class's
+    /// count and what its members' flights are drawn from.
+    #[must_use]
+    pub fn survivors(&self) -> &Survivors {
+        &self.survivors
     }
 
     /// The runaway model the table was built with, its walkaway scale W solved for the galaxy
@@ -1399,6 +1515,22 @@ impl ClassTable {
         )
     }
 
+    /// The bytes the table owns on the heap: its sources, components and classes, with each
+    /// class's conditional marks.
+    #[must_use]
+    pub(crate) fn heap_bytes(&self) -> usize {
+        self.sources.capacity() * size_of::<SourceEntry>()
+            + self.components.capacity() * size_of::<ComponentEntry>()
+            + self.classes.capacity() * size_of::<ClassEntry>()
+            + self
+                .classes
+                .iter()
+                .flat_map(|class| class.marks.iter())
+                .map(ConditionalMarks::heap_bytes)
+                .sum::<usize>()
+            + size_of_val(self.survivors.births_per_year())
+    }
+
     /// The galaxy's scales the table was built at.
     #[must_use]
     pub fn scales(&self) -> &GalaxyScales {
@@ -1424,11 +1556,35 @@ impl ClassTable {
     /// The share of component `c`'s `band` budget that stays in the field: alive (less the
     /// runaways and walkaways) and retained. 1 outside bands D and E.
     ///
+    /// From generator version 26 (plan 09, P09.T2.c) the field is the budget less the features'
+    /// share: the stay share is then taken over the field's ages, which are the budget's but for
+    /// the young disc's, times the component's field factor, and outside bands D and E it is the
+    /// field factor. The class weights, the stay marks and the [`closure`](Self::closure) stay the
+    /// budget's: a feature's star dies, and is kicked, as a field star does.
+    ///
     /// # Panics
     ///
     /// If `c` is not a component of the galaxy the table was built for.
     #[must_use]
     pub fn stay_share(&self, band: MassBand, c: ComponentId) -> f64 {
+        match &self.field {
+            None => self.budget_stay_share(band, c),
+            Some(stays) => stays[c.index()][band.index()],
+        }
+    }
+
+    /// The share of component `c`'s `band` budget that stays, over the budget's ages and before
+    /// any field factor: [`stay_share`](Self::stay_share) until generator version 26.
+    ///
+    /// From version 26 placement's thinning already keeps only the field's share (plan 09,
+    /// P09.T2.c), so a per-component stay factor applied after it, plan 08's P08.T12.a's, reads
+    /// this one, or φ is taken twice.
+    ///
+    /// # Panics
+    ///
+    /// If `c` is not a component of the galaxy the table was built for.
+    #[must_use]
+    pub fn budget_stay_share(&self, band: MassBand, c: ComponentId) -> f64 {
         band_slot(band).map_or(1.0, |b| self.components[c.index()].stay[b])
     }
 
@@ -1444,14 +1600,17 @@ impl ClassTable {
         band_slot(band).map_or(1.0, |b| self.components[c.index()].alive[b])
     }
 
-    /// Class `id`'s weight in `band`, a share of its source's `band` budget (Design note 15).
+    /// Class `id`'s weight in `band`, a share of its source's `band` budget (Design note 15): 0 for
+    /// the hypervelocity class, which has no source, and whose count is its own
+    /// ([`class_count`](Self::class_count)).
     #[must_use]
     pub fn class_weight(&self, band: MassBand, id: DisplacedClassId) -> f64 {
         self.classes[id.index()].weight(band)
     }
 
     /// Class `id`'s expected systems in `band` over the whole galaxy: its weight times its
-    /// source's band budget.
+    /// source's band budget, or for the hypervelocity class in layer D its survivors inside the
+    /// cube from generator version 27 ([`Survivors::total`], plan 09, P09.T34.b).
     #[must_use]
     pub fn class_count(&self, band: MassBand, id: DisplacedClassId) -> f64 {
         let class = &self.classes[id.index()];
@@ -1459,6 +1618,7 @@ impl ClassTable {
             (Some(source), Some(b)) => {
                 class.weight[b] * self.sources[source_index(source)].budget[b]
             }
+            (None, Some(_)) if band == MassBand::D => self.survivors.total(),
             (None, _) | (_, None) => 0.0,
         }
     }
@@ -1546,6 +1706,81 @@ impl ClassTable {
             &self.sources[source_index(source)].lifetimes[b],
             m.value(),
         ))
+    }
+
+    /// `source`'s reference site, at which its reference composition was read: 3 `R_d` in the
+    /// plane for the discs and the halo, the centre for the bulge, the bar and the nuclear disc. A
+    /// displaced record's formation site (plan 08, P08.T12.c).
+    #[must_use]
+    pub(crate) fn reference_site(&self, source: BirthSource) -> PointLy {
+        reference_site(source, &self.scales)
+    }
+
+    /// The speed scale of `source`'s kicks and ejections, against which its speed bins are cut:
+    /// `v_c`, or the nuclear disc's own circular speed for its classes (Design note 13).
+    #[must_use]
+    pub(crate) fn speed_scale(&self, source: BirthSource) -> KilometresPerSecond {
+        KilometresPerSecond::new(source_speed(source, &self.scales))
+    }
+
+    /// The ages, years, at which a star of `source` of initial mass `m` is ejected as `kind`, with
+    /// their weights, both channels': what the quadrature integrated a runaway's or a walkaway's
+    /// ages over (`ejection_ages`), for its conditional marks (plan 08, P08.T12.c).
+    #[must_use]
+    pub(crate) fn ejection_ages(
+        &self,
+        source: BirthSource,
+        kind: Ejected,
+        m: SolarMasses,
+    ) -> Vec<(Years, f64)> {
+        ejection_ages(
+            self.model,
+            kind,
+            m.value(),
+            &self.sources[source_index(source)].lifetimes[1],
+            self.nodes[1].masses(),
+            EjectionChannel::Both,
+        )
+        .into_iter()
+        .map(|(t, w)| (Years::new(t), w))
+        .collect()
+    }
+
+    /// The share of `source`'s stars of initial mass `m` ejected by age `age`, as a runaway or a
+    /// walkaway by either channel: each kind's lifetime share × the weight of its ejection ages
+    /// ([`ejection_ages`](Self::ejection_ages)) below `age`; 0 for a source that ejects none.
+    ///
+    /// It is what a young feature's living counts net out from generator version 27 (plan 09,
+    /// P09.T9.f; research-leans-21), since the grid's runaway and walkaway classes hold every
+    /// living ejected star at the whole budget, a feature's with the field's.
+    #[must_use]
+    pub(crate) fn ejected_by(&self, source: BirthSource, m: SolarMasses, age: Years) -> f64 {
+        if !ejects(source) {
+            return 0.0;
+        }
+        [Ejected::Runaway, Ejected::Walkaway]
+            .into_iter()
+            .fold(0.0, |sum, kind| {
+                let share = match kind {
+                    Ejected::Runaway => self.model.runaway_share(m),
+                    Ejected::Walkaway => self.model.walkaway_share(m),
+                };
+                if share <= 0.0 {
+                    return sum;
+                }
+                let before = ejection_ages(
+                    self.model,
+                    kind,
+                    m.value(),
+                    &self.sources[source_index(source)].lifetimes[1],
+                    self.nodes[1].masses(),
+                    EjectionChannel::Both,
+                )
+                .into_iter()
+                .filter(|&(t, _)| t < age.value())
+                .fold(0.0, |s, (_, w)| s + w);
+                sum + share * before
+            })
     }
 
     /// Class `id`'s marks in `band` (D or E).

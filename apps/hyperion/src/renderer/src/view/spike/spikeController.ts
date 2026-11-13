@@ -24,10 +24,12 @@
 
 import type {
   DescentSpikeReport,
+  GraphicsLaunchMode,
   SpikeApi,
   SpikeLaunch,
   SpikeTraceWindow,
 } from "../../../../preload/api";
+import { SOFTWARE_WAIT_FACTOR } from "../../displays/view/check/softwareTiming";
 import type { AllocationEvent } from "../engine/memory";
 import type { PassTimes, RenderEngine } from "../engine/types";
 import {
@@ -38,6 +40,8 @@ import {
 import type { SelectionInput } from "../terrain/select";
 import type { GpuCapture } from "./capture";
 import type { PipelineTally } from "./pipelineShim";
+import type { SpikeGeometrySample } from "./spikeRun";
+import type { SpikeSizes } from "./spikeSizes";
 import {
   type RecordedDescent,
   type ResolveCounter,
@@ -46,8 +50,28 @@ import {
 } from "./spikeHarness";
 import { TRACE_BOUNDARY_GUARD_S, traceBoundaries } from "./traceWindows";
 
-/** How long `--smoke` runs, script seconds. */
+/**
+ * How long `--smoke` runs from its first patch baked in a worker, script seconds (R05.T18): 10 s of
+ * script where one is baked before its first frame, its trace's last window running to the end.
+ */
 export const SMOKE_S = 10;
+
+/**
+ * The script time by which a smoke run's first patch must be baked in a worker on a GPU, script
+ * seconds (R05.T18, R14.T1.f's finding): a smoke with none baked by then fails there, within the
+ * main process's three minutes for a smoke.
+ */
+export const SMOKE_BAKE_LIMIT_S = 60;
+
+/**
+ * A smoke's limit for its first worker bake, script seconds: {@link SMOKE_BAKE_LIMIT_S}, and
+ * {@link SOFTWARE_WAIT_FACTOR} times as long in the check-only software mode, as the main process's
+ * watchdog is (plan R01, R01.T16). On SwiftShader a generated world's first bake lands 74 to 82 s
+ * into the script, after its 10 s (`TERRAIN TEST`, pod, high and low, 2026-11-02).
+ */
+export function smokeBakeLimitS(launchMode: GraphicsLaunchMode): number {
+  return launchMode === "software" ? SMOKE_BAKE_LIMIT_S * SOFTWARE_WAIT_FACTOR : SMOKE_BAKE_LIMIT_S;
+}
 
 /**
  * Where a smoke run cycles its trace, script seconds: three windows in its 10 s, so that the smoke
@@ -55,6 +79,21 @@ export const SMOKE_S = 10;
  * T14.i), where the descent's first boundary, at 120 s, is beyond it.
  */
 export const SMOKE_TRACE_BOUNDARIES_S: ReadonlyArray<number> = [3, 6];
+
+/**
+ * How often a full run hands the main process the frames it has settled, script seconds, from
+ * which the finished segments' results are written (R14's Mac measurements): a part this short
+ * is copied across in well under a millisecond, where the whole report at a segment's end took
+ * 45 to 70 ms (pod, 16 vCPU), a hitch inside the measured frames.
+ */
+export const PART_INTERVAL_S = 10;
+
+/**
+ * How long a frame waits before it is handed over, script seconds: its pass times' reads end
+ * within a few frames, so that a part's frames are as complete as the whole report's. A part is
+ * handed over this long after each segment's end too, so that the segment's results follow it.
+ */
+export const PART_SETTLE_S = 2;
 
 /** How many frames a capture spans (T15.a's fixed span). */
 export const CAPTURE_FRAMES = 120;
@@ -78,9 +117,12 @@ export interface ControllerFrame {
   /** The callback's start, `performance.now()` ms: its `spike.frame` span's start. */
   readonly callbackStartMs: number;
   readonly callbackMs: number;
-  readonly passesSubmitted: number;
+  /** `null` over a generated world, whose frames count no passes (`SpikeFrameSample`'s). */
+  readonly passesSubmitted: number | null;
   readonly patchesHard: number;
   readonly streaming: boolean;
+  /** A generated world's terrain geometry (`SpikeFrameSample`'s, plan R14); absent elsewhere. */
+  readonly geometry?: SpikeGeometrySample | null;
 }
 
 /** The capture's span controls and its result (`GpuCapture`'s). */
@@ -104,6 +146,13 @@ export interface SpikeControllerDeps {
   /** `performance.now()`, ms: the clock the trace's window times are read on. */
   readonly nowMs: () => number;
   readonly log: (message: string, error?: unknown) => void;
+  /**
+   * The measured sizes of `--sizes on` (plan R10, R10.T14.b), told of the engine's allocations and
+   * whose block the report carries; absent, nothing is forwarded and the report is as before.
+   */
+  readonly sizes?: Pick<SpikeSizes, "report" | "noteAllocation">;
+  /** A smoke's limit for its first worker bake (`smokeBakeLimitS`), script seconds; absent, a GPU's. */
+  readonly smokeBakeLimitS?: number;
 }
 
 /** The terrain variant `launch`'s `--vertex-path` and `--normals` ask for (nulls left out). */
@@ -143,8 +192,11 @@ interface CaptureSpan {
 export class SpikeController {
   readonly #deps: SpikeControllerDeps;
   readonly #launch: SpikeLaunch;
+  readonly #bakeLimitS: number;
   #recorder: SpikeRecorder | null = null;
   #durationS = Infinity;
+  /** The last frame's script time, s, at which a smoke's first bake starts its 10 s. */
+  #lastScriptS = 0;
   #ended = false;
   #lastMemoryMs = Number.NEGATIVE_INFINITY;
   #measuring: Promise<void> | null = null;
@@ -162,10 +214,18 @@ export class SpikeController {
   #cycled: Promise<void> = Promise.resolve();
   /** Why the trace ended before the run, or `null`. */
   #traceEnded: string | null = null;
+  /** The frames handed to the main process so far, and when the next part is due, script s. */
+  #partFrom = 0;
+  #nextPartS = PART_INTERVAL_S;
+  /** The segments' ends, script s, the next whose part is still due, and whether one was refused. */
+  #segmentEndsS: ReadonlyArray<number> = [];
+  #nextSegment = 0;
+  #partRefused = false;
 
   constructor(deps: SpikeControllerDeps) {
     this.#deps = deps;
     this.#launch = deps.spike.launch;
+    this.#bakeLimitS = deps.smokeBakeLimitS ?? SMOKE_BAKE_LIMIT_S;
   }
 
   /** Whether the run has ended (its end sent or being sent). */
@@ -173,13 +233,18 @@ export class SpikeController {
     return this.#ended;
   }
 
-  /** The engine the run draws on: its pass times and allocations go to the recorder. */
+  /**
+   * The engine the run draws on: its pass times and allocations go to the recorder once the descent
+   * is prepared, and under `--sizes on` its allocations go to the measured sizes from now on.
+   */
   engine(engine: Pick<RenderEngine, "onPassTimes" | "onAllocation">): () => void {
     const offTimes = engine.onPassTimes((times: PassTimes) => {
       this.#recorder?.passTimes(times);
     });
+    const sizes = this.#deps.sizes;
     const offAllocation = engine.onAllocation((event: AllocationEvent) => {
       this.#recorder?.allocation(event);
+      sizes?.noteAllocation(event);
     });
     return () => {
       offTimes();
@@ -207,7 +272,9 @@ export class SpikeController {
       return;
     }
     this.#recorder = new SpikeRecorder(descent, this.#launch.setting, this.#deps.gpu);
-    this.#durationS = this.#launch.smoke ? SMOKE_S : descent.profile.durationS;
+    this.#segmentEndsS = descent.profile.segmentSpans().map(({ endS }) => endS);
+    // A smoke ends `SMOKE_S` after its first bake (`patch`), or fails at the bake's limit.
+    this.#durationS = this.#launch.smoke ? this.#bakeLimitS : descent.profile.durationS;
     if (this.#deps.capture !== null) {
       const pass = descent.profile.segmentSpans().find(({ name }) => name === "low fast pass");
       // The smoke's span starts at 5 s; a full run's in the low fast pass, where demand peaks.
@@ -299,9 +366,17 @@ export class SpikeController {
     this.#recorder?.select(input);
   }
 
-  /** A patch's progress. */
+  /** A patch's progress: a smoke's first bake starts its {@link SMOKE_S}. */
   patch(event: "requested" | "baked" | "resident"): void {
-    this.#recorder?.patch(event);
+    const recorder = this.#recorder;
+    if (recorder === null) {
+      return;
+    }
+    const first = event === "baked" && recorder.bakedPatches === 0;
+    recorder.patch(event);
+    if (first && this.#launch.smoke) {
+      this.#durationS = this.#lastScriptS + SMOKE_S;
+    }
   }
 
   /** A frame of the run. */
@@ -311,6 +386,7 @@ export class SpikeController {
       return;
     }
     recorder.frame(sample);
+    this.#lastScriptS = sample.scriptTimeS;
     if (!this.#launch.smoke && sample.rafTimestampMs - this.#lastMemoryMs >= MEMORY_INTERVAL_MS) {
       this.#lastMemoryMs = sample.rafTimestampMs;
       this.#deps.spike.sampleMemory().catch((error: unknown) => {
@@ -319,9 +395,58 @@ export class SpikeController {
     }
     this.#captureFrame(sample.scriptTimeS);
     this.#traceFrame(sample.scriptTimeS);
+    this.#partFrame(recorder, sample);
     if (sample.scriptTimeS >= this.#durationS) {
       void this.#finish(recorder, sample.scriptStartMs);
     }
+  }
+
+  /**
+   * Hands the main process the frames settled since the last part, every {@link PART_INTERVAL_S}
+   * and {@link PART_SETTLE_S} after each segment's end, on a full run before its end (R14's Mac
+   * measurements); a smoke writes no results, and the end's report holds every frame.
+   */
+  #partFrame(recorder: SpikeRecorder, sample: ControllerFrame): void {
+    const nowS = sample.scriptTimeS;
+    // After a refused part no later one could follow those before it.
+    if (this.#launch.smoke || this.#partRefused || nowS >= this.#durationS) {
+      return;
+    }
+    let segmentDue = false;
+    while ((this.#segmentEndsS[this.#nextSegment] ?? Infinity) + PART_SETTLE_S <= nowS) {
+      this.#nextSegment += 1;
+      segmentDue = true;
+    }
+    if (!segmentDue && nowS < this.#nextPartS) {
+      return;
+    }
+    this.#nextPartS = nowS + PART_INTERVAL_S;
+    const throughS = nowS - PART_SETTLE_S;
+    const fromFrame = this.#partFrom;
+    const { report, toFrame } = recorder.reportPart(this.#deps.canvas(), fromFrame, throughS);
+    this.#partFrom = toFrame;
+    const terrain = this.#terrain;
+    this.#deps.spike
+      .writePart({
+        fromFrame,
+        throughS,
+        report: {
+          ...report,
+          scriptStartMs: sample.scriptStartMs,
+          traceWindows: [],
+          traceGuardS: TRACE_BOUNDARY_GUARD_S,
+          ...(terrain === null
+            ? {}
+            : { terrain: { vertexPath: terrain.vertexPath, normals: terrain.normals } }),
+        },
+      })
+      .catch((error: unknown) => {
+        // The finished segments are a stopped run's keepsake: the run goes on without them.
+        if (!this.#partRefused) {
+          this.#partRefused = true;
+          this.#deps.log("a part of the report was refused; no later segment is written", error);
+        }
+      });
   }
 
   /** Ends the run as failed, once. */
@@ -417,6 +542,7 @@ export class SpikeController {
         failure: window.failure,
       }));
       const terrain = this.#terrain;
+      const sizes = this.#deps.sizes;
       const answer = await spike.writeResults({
         ...recorder.report(this.#deps.canvas()),
         scriptStartMs,
@@ -425,6 +551,7 @@ export class SpikeController {
         ...(terrain === null
           ? {}
           : { terrain: { vertexPath: terrain.vertexPath, normals: terrain.normals } }),
+        ...(sizes === undefined ? {} : { sizes: sizes.report() }),
       });
       if (this.#launch.smoke) {
         // A trace that ended early has a failed last window, which the check names first.
@@ -435,7 +562,10 @@ export class SpikeController {
             ? { status: "fail", reason: failure }
             : recorder.bakedPatches > 0
               ? { status: "pass" }
-              : { status: "fail", reason: "no patch was baked in a worker" },
+              : {
+                  status: "fail",
+                  reason: `no patch was baked in a worker by ${String(this.#bakeLimitS)} s of script`,
+                },
         );
         return;
       }

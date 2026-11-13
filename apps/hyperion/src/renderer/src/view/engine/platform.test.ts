@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import type { GraphicsLaunchMode } from "../../../../preload/api";
 import { FakeAdapter, FakeGpu, INTEL_UHD_620_INFO, SWIFTSHADER_INFO } from "../../test/fakeGpu";
 import {
   type AdapterOutcome,
@@ -10,9 +11,13 @@ import {
   requiredFeatures,
   requiredLimits,
   styleAvailability,
+  subpixelBitsOf,
   summariseAdapter,
+  takesFallbackAdapter,
   WANTED_FEATURES,
 } from "./platform";
+
+const MODES: ReadonlyArray<GraphicsLaunchMode> = ["default", "vulkan", "safe", "software"];
 
 /** The UHD 620's features under the forced switches (probes of 2026-09-29). */
 const INTEL_FEATURES: ReadonlyArray<GPUFeatureName> = [
@@ -25,12 +30,17 @@ const INTEL_FEATURES: ReadonlyArray<GPUFeatureName> = [
   "texture-compression-bc",
 ];
 
-/** SwiftShader's, which lack `shader-f16` (R01 Design note 17). */
+/**
+ * SwiftShader's, which lack `shader-f16` (R01 Design note 17). `depth-clip-control` is among them:
+ * `just test-render`'s SwiftShader offers it, as R10.T9.b's depth-layers group logs, and as R01's
+ * record of its engine task ("no `shader-f16`, the rest present") says.
+ */
 const SWIFTSHADER_FEATURES: ReadonlyArray<GPUFeatureName> = [
   "subgroups",
   "timestamp-query",
   "float32-filterable",
   "float32-blendable",
+  "depth-clip-control",
 ];
 
 async function outcomeOf(adapter: FakeAdapter): Promise<AdapterOutcome> {
@@ -56,10 +66,11 @@ describe("adapter acquisition", () => {
     const outcome = await outcomeOf(
       new FakeAdapter({ info: INTEL_UHD_620_INFO, features: INTEL_FEATURES }),
     );
-    expect(outcome.kind === "adapter" ? outcome.styles : undefined).toEqual({
-      wireframe: true,
-      photorealistic: true,
-    });
+    for (const mode of MODES) {
+      expect(
+        outcome.kind === "adapter" ? styleAvailability(outcome.summary, mode) : undefined,
+      ).toEqual({ wireframe: true, photorealistic: true });
+    }
     expect(outcome.kind === "adapter" ? outcome.summary : undefined).toEqual({
       vendor: "intel",
       architecture: "gen-9",
@@ -68,14 +79,28 @@ describe("adapter acquisition", () => {
     });
   });
 
-  it("offers the wireframe only on SwiftShader", async () => {
+  it("offers the wireframe only on SwiftShader, in every mode but the software one", async () => {
     const outcome = await outcomeOf(
       new FakeAdapter({ info: SWIFTSHADER_INFO, features: SWIFTSHADER_FEATURES }),
     );
-    expect(outcome.kind === "adapter" ? outcome.styles : undefined).toEqual({
-      wireframe: true,
-      photorealistic: false,
-    });
+    for (const mode of ["default", "vulkan", "safe"] as const) {
+      expect(
+        outcome.kind === "adapter" ? styleAvailability(outcome.summary, mode) : undefined,
+      ).toEqual({ wireframe: true, photorealistic: false });
+    }
+  });
+
+  it("offers both styles on SwiftShader in the check-only software mode (R01.T16)", async () => {
+    const outcome = await outcomeOf(
+      new FakeAdapter({ info: SWIFTSHADER_INFO, features: SWIFTSHADER_FEATURES }),
+    );
+    expect(
+      outcome.kind === "adapter" ? styleAvailability(outcome.summary, "software") : undefined,
+    ).toEqual({ wireframe: true, photorealistic: true });
+  });
+
+  it("takes a fallback adapter as a hardware one in the software mode alone", () => {
+    expect(MODES.filter((mode) => takesFallbackAdapter(mode))).toEqual(["software"]);
   });
 
   it("offers the wireframe only on either software signal alone", () => {
@@ -88,7 +113,7 @@ describe("adapter acquisition", () => {
       features: [],
     });
     for (const adapter of [flagged, named]) {
-      expect(styleAvailability(summariseAdapter(adapter).summary)).toEqual({
+      expect(styleAvailability(summariseAdapter(adapter).summary, "vulkan")).toEqual({
         wireframe: true,
         photorealistic: false,
       });
@@ -113,6 +138,8 @@ describe("the capability summary", () => {
       float32Blendable: false,
       rg11b10Renderable: true,
       depthClipControl: true,
+      primitiveIndex: false,
+      subpixelBits: 8,
       maxTextureDimension2D: 16_384,
       subgroupMinSize: 8,
       maxStorageBufferBindingSize: 134_217_728,
@@ -126,7 +153,17 @@ describe("the capability summary", () => {
     );
     expect(capabilities.shaderF16).toBe(false);
     expect(capabilities.float32Blendable).toBe(true);
+    expect(capabilities.depthClipControl).toBe(true);
     expect(capabilities.subgroupMinSize).toBe(4);
+  });
+
+  it("reads SwiftShader's sub-pixel grid as 4 bits, and every other adapter's as 8 (R14.T2.d)", () => {
+    const fallback = { ...INTEL_UHD_620_INFO, isFallbackAdapter: true };
+    expect([
+      subpixelBitsOf(SWIFTSHADER_INFO),
+      subpixelBitsOf(INTEL_UHD_620_INFO),
+      subpixelBitsOf(fallback),
+    ]).toEqual([4, 8, 8]);
   });
 
   it("gives no subgroup size without subgroups", () => {
@@ -165,7 +202,47 @@ describe("the required features", () => {
       withholdShaderF16: false,
       withholdFloat32Blendable: true,
     });
-    expect(required).toEqual(["subgroups", "timestamp-query", "float32-filterable"]);
+    expect(required).toEqual([
+      "subgroups",
+      "timestamp-query",
+      "float32-filterable",
+      "depth-clip-control",
+    ]);
+  });
+
+  it("leave out depth-clip-control when withheld, and keep it otherwise (R10.T9.b)", () => {
+    const withheld = requiredFeatures(intel, {
+      withholdSubgroups: false,
+      withholdShaderF16: false,
+      withholdDepthClipControl: true,
+    });
+    const kept = requiredFeatures(intel, { withholdSubgroups: false, withholdShaderF16: false });
+    expect([withheld.includes("depth-clip-control"), kept.includes("depth-clip-control")]).toEqual([
+      false,
+      true,
+    ]);
+    expect(withheld).toEqual(kept.filter((feature) => feature !== "depth-clip-control"));
+  });
+
+  it("ask primitive-index where the adapter has it, and leave it out when withheld (R14.T2.c)", async () => {
+    const adapter = new FakeAdapter({
+      info: INTEL_UHD_620_INFO,
+      features: [...INTEL_FEATURES, "primitive-index"],
+    });
+    const withheld = requiredFeatures(adapter, {
+      withholdSubgroups: false,
+      withholdShaderF16: false,
+      withholdPrimitiveIndex: true,
+    });
+    const kept = requiredFeatures(adapter, undefined);
+    const device = await adapter.requestDevice({ requiredFeatures: [...withheld] });
+    expect([
+      kept.includes("primitive-index"),
+      withheld.includes("primitive-index"),
+      summariseAdapter(adapter).capabilities.primitiveIndex,
+      deviceCapabilities(device).primitiveIndex,
+      requiredFeatures(intel, undefined).includes("primitive-index"),
+    ]).toEqual([true, false, true, false, false]);
   });
 });
 
@@ -183,6 +260,20 @@ describe("the device's capabilities", () => {
       shaderF16: false,
       subgroupMinSize: null,
     });
+  });
+
+  it("read depth-clip-control as absent where it was withheld (R10.T9.b)", async () => {
+    const intel = new FakeAdapter({ info: INTEL_UHD_620_INFO, features: INTEL_FEATURES });
+    const device = await intel.requestDevice({
+      requiredFeatures: [
+        ...requiredFeatures(intel, {
+          withholdSubgroups: false,
+          withholdShaderF16: false,
+          withholdDepthClipControl: true,
+        }),
+      ],
+    });
+    expect(deviceCapabilities(device).depthClipControl).toBe(false);
   });
 
   it("equal the adapter's when nothing is withheld", async () => {

@@ -3,6 +3,7 @@ import { useId } from "react";
 import { annunciation, RequestStatus } from "../../components/RequestStatus";
 import { StaleMark } from "../../components/StaleMark";
 import { StatusLine } from "../../components/StatusLine";
+import { StatusText } from "../../components/StatusText";
 import { formatAge, formatSigned } from "../../lib/format";
 import { architectureLabel, detailLevelLabel } from "../../lib/system/bodyWords";
 import { formatHex64 } from "../../lib/seed";
@@ -131,7 +132,9 @@ export function BodiesPanel({ view }: BodiesPanelProps) {
           {detailStatus}
         </>
       ) : (
-        <p className="panel__empty">{empty}</p>
+        <p className="panel__empty">
+          <StatusText text={empty} />
+        </p>
       )}
     </section>
   );

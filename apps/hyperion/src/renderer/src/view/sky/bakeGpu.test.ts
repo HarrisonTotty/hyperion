@@ -8,15 +8,18 @@ import type {
   ComputeHandle,
   PointSplatHandle,
   RenderEngine,
+  TexelRect,
   TextureHandle,
 } from "../engine/types";
-import { bakeSkyCube } from "./bake";
+import { BAKE_TILE_PX, bakeSkyCube, bakeTiling } from "./bake";
 
 /** What the recording engine saw of a GPU bake. */
 interface Seen {
   readonly made: Array<{ name: string; category: MemoryCategory }>;
+  /** Each scratch texture's side and levels, and each buffer's bytes, by name. */
+  readonly sizes: Map<string, string>;
   readonly released: string[];
-  readonly copies: Array<{ level: number; face: number | undefined }>;
+  readonly copies: Array<{ level: number; face: number | undefined; region?: TexelRect }>;
   readonly dispatches: string[];
   splats: number;
 }
@@ -34,7 +37,14 @@ async function gpuEngine(
   if (device === undefined) {
     throw new Error("the fake adapter made no device");
   }
-  const seen: Seen = { made: [], released: [], copies: [], dispatches: [], splats: 0 };
+  const seen: Seen = {
+    made: [],
+    sizes: new Map(),
+    released: [],
+    copies: [],
+    dispatches: [],
+    splats: 0,
+  };
   const engine = Object.assign(new FakeRenderEngine(device), {
     createCompute: (pair: { readonly name: string }): ComputeHandle => ({
       kind: "compute",
@@ -49,6 +59,7 @@ async function gpuEngine(
     }),
     createBuffer: (spec: BufferSpec): BufferHandle => {
       seen.made.push({ name: spec.name, category: spec.category });
+      seen.sizes.set(spec.name, `${spec.bytes} B`);
       return { kind: "buffer", name: spec.name, bytes: spec.bytes };
     },
     createTexture: (spec: TextureSpec): TextureHandle => {
@@ -56,6 +67,7 @@ async function gpuEngine(
         throw new Error(`out of memory for ${spec.name}`);
       }
       seen.made.push({ name: spec.name, category: spec.category });
+      seen.sizes.set(spec.name, `${JSON.stringify(spec.size)} × ${spec.mips}`);
       return { kind: "texture", name: spec.name };
     },
     createPackedCube: (
@@ -76,8 +88,9 @@ async function gpuEngine(
       level: number,
       _packed: BufferHandle,
       face?: number,
+      region?: TexelRect,
     ): void => {
-      seen.copies.push({ level, face });
+      seen.copies.push(region === undefined ? { level, face } : { level, face, region });
     },
     releaseBuffer: (buffer: BufferHandle): void => {
       seen.released.push(buffer.name);
@@ -126,5 +139,64 @@ describe("bakeSkyCube on the GPU", () => {
     const { engine, seen } = await gpuEngine("sky cube: test face levels");
     expect(() => bakeSkyCube(engine, INPUT)).toThrow(/out of memory/);
     expect(seen.made.map((made) => made.name).toSorted()).toEqual(seen.released.toSorted());
+  });
+});
+
+/** A 48² face, 3 × 2⁴, baked in nine tiles of 16². */
+const TILED = { ...INPUT, faceSizePx: 48, tilePx: 16 } as const;
+
+/** The square of side `side` at (x, y). */
+function square(x: number, y: number, side: number): TexelRect {
+  return { x, y, width: side, height: side };
+}
+
+describe("bakeSkyCube on the GPU, a tile at a time (the owner's priority)", () => {
+  it("tiles the high setting's face in nine and bakes the low setting's whole", () => {
+    expect(bakeTiling(3_072)).toEqual({ tilePx: 1_024, tilesPerSide: 3, upperLevel: 3 });
+    expect(bakeTiling(1_024)).toEqual({ tilePx: 1_024, tilesPerSide: 1, upperLevel: 0 });
+    expect(BAKE_TILE_PX).toBe(1_024);
+  });
+
+  it("refuses a tiling whose tiles shrink below a texel before the levels baked whole", () => {
+    expect(() => bakeTiling(48, 4)).toThrow(/no tiling/);
+  });
+
+  it("copies each tile's first levels into their places, then the face's last levels whole", async () => {
+    const { engine, seen } = await gpuEngine();
+    bakeSkyCube(engine, TILED);
+    // Each face's nine tiles, splatted in the peak pass and again.
+    expect(seen.splats).toBe(2 * 6 * 9);
+    expect(seen.dispatches.filter((name) => name === "sky bake peak")).toHaveLength(6 * 9);
+    // Each tile's levels 0–2, then the face's 6², 3² and 1² whole.
+    expect(seen.copies).toHaveLength(6 * (9 * 3 + 3));
+    expect(seen.copies.slice(0, 6)).toEqual([
+      { level: 0, face: 0, region: square(0, 0, 16) },
+      { level: 1, face: 0, region: square(0, 0, 8) },
+      { level: 2, face: 0, region: square(0, 0, 4) },
+      { level: 0, face: 0, region: square(16, 0, 16) },
+      { level: 1, face: 0, region: square(8, 0, 8) },
+      { level: 2, face: 0, region: square(4, 0, 4) },
+    ]);
+    expect(seen.copies.slice(24, 30)).toEqual([
+      { level: 0, face: 0, region: square(32, 32, 16) },
+      { level: 1, face: 0, region: square(16, 16, 8) },
+      { level: 2, face: 0, region: square(8, 8, 4) },
+      { level: 3, face: 0 },
+      { level: 4, face: 0 },
+      { level: 5, face: 0 },
+    ]);
+    expect(seen.copies.at(-1)).toEqual({ level: 5, face: 5 });
+  });
+
+  it("makes a tile's scratch and the face's last levels, and solid angles below the diagonal", async () => {
+    const { engine, seen } = await gpuEngine();
+    bakeSkyCube(engine, TILED);
+    expect(seen.sizes.get("sky cube: test tile levels")).toBe("[16,16] × 3");
+    expect(seen.sizes.get("sky cube: test face levels")).toBe("[6,6] × 3");
+    // A 16-texel row padded to 64 texels, 16 rows.
+    expect(seen.sizes.get("sky cube: test staging")).toBe(`${64 * 16 * 4} B`);
+    expect(seen.sizes.get("sky cube: test solid angles")).toBe(`${((48 * 49) / 2) * 4} B`);
+    const kept = seen.made.filter((made) => !seen.released.includes(made.name));
+    expect(kept.map((made) => made.name)).toEqual(["sky cube: test peak", "sky cube: test"]);
   });
 });

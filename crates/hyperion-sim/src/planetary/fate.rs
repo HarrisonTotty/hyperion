@@ -44,6 +44,12 @@
 //!    This is the one step in which a body's history depends on another's; pairs that come
 //!    within 2√3 Hill radii under slow mass loss stay as they are (ruling 71.2), since their
 //!    instability takes up to gigayears.
+//! 6. From generator version 28 (P14.T55.b.a, `evaporation`), in each segment, the first time
+//!    a rocky body below 10⁻³ M⊕ ([`Evaporation::Rock`]) has lost its whole radius to its rock's
+//!    free-streaming vapour in its hosts' light, integrated along its history from its
+//!    formation: the body is `Destroyed { Evaporated }` then, if that comes before any engulfment
+//!    or crossing. A moon, which has no history of its own, is followed along its planet's
+//!    (`BodyFate::moon_evaporation`).
 //!
 //! [`BodyFate::at`] then reads the history at any time, so every query of one body agrees with
 //! every other, whatever their order: the history depends on the host's bodies and the host alone,
@@ -57,8 +63,35 @@
 //! - [`FateHost`]: the [`StarModel`]s of the stars the body orbits (ruling 34), from the context:
 //!   one star for a planet of a star, and every star below the pair for a circumbinary planet,
 //!   which orbits the pair's total mass. A companion's planets have their own star alone as host,
-//!   so they see its mass loss and not their companion's: until P11.T4's post-explosion binary
-//!   orbits, plan 14's T28.c treats a companion's planets as a single star's.
+//!   so they see its mass loss and not their companion's. A star of a pair the binary engine ran is
+//!   read from its pair's timeline (`FateHost::evolved`; P14.T28.g, from generator version 27), as
+//!   the next section says.
+//!
+//! # Hosts of a pair the engine ran
+//!
+//! From generator version 27 (P14.T28.g; research-binary-hosts R3–R5) a paired star's mass, which
+//! a body's orbit widens or shrinks with by a M = constant (Veras et al. 2011, eq. 18), and its
+//! largest radius, which engulfs, are its pair's timeline's, and the pair's own events replace its
+//! stars' single-star deaths as the host's sudden events:
+//!
+//! - a common envelope (Hurley, Tout and Pols 2002, MNRAS 329, 897, §2.7.1), and the coalescence
+//!   that ends a pair without one (their §§2.6.4–2.6.6), engulfs a planet of either star
+//!   (`Destroyed { Engulfed }`): the envelope engulfs the binary's orbit (Paczyński 1976; Ivanova
+//!   et al. 2013, A&ARv 21, 59, §1), and every S-type orbit lies inside 0.43 of it (Holman and
+//!   Wiegert 1999, AJ 117, 621, eq. 1);
+//! - for a circumbinary planet the same events are a sudden loss of the pair's mass with no kick,
+//!   the supernova's step (lean, 2026-11-02: BSE ejects the envelope at once, and over about a year
+//!   a planet at 3–100 au is in Veras et al.'s non-adiabatic regime); a planet inside its reach of
+//!   the larger star before the envelope is engulfed by the search, as before any death; a
+//!   coalesced pair's product is a single star after it, not a further step at each of its
+//!   segments: its white dwarf's birth is adiabatic,
+//!   Ψ ≪ 1 (Veras et al. 2011, eq. 15), so a M stays constant (eq. 18), and its supernova is the
+//!   one below;
+//! - a supernova of a star moves its own planets as a single star's does, with the remnant's natal
+//!   kick, and its companion's not at all; a circumbinary planet takes the pair's mass loss with
+//!   the pair's recoil (their eq. A14), and is `Unbound` where the explosion, or a white dwarf's
+//!   birth, unbinds the pair (lean, 2026-11-02: the stars separate at about their orbital speed);
+//! - a host the engine leaves with no mass unbinds its planets, by the step.
 //! - [`FateBody`]: its [`Formation`] (drawn with the body from its seed, ID, mass and its disc's
 //!   lifetime, P14.T30.a), its primordial elements about its host's initial mass, its mass, its
 //!   bulk density for the Roche test, and T8.e's circularisation time.
@@ -81,19 +114,26 @@ use crate::Seed;
 use crate::coords::SystemVelocity;
 use crate::id::BodyId;
 use crate::orbit::KeplerElements;
+use crate::planetary::context::SystemContext;
 use crate::planetary::drift::{DriftingOrbit, EvolvingLaw, composite_excess, drift_cell};
+use crate::planetary::fate::evaporation::FREE_STREAMING_MASS;
 use crate::planetary::hosts::evolved::{
     Aftermath, Circularisation, circularised, circularised_axis, engulfment_reach, expanded,
-    expanded_axis, first_engulfment, supernova,
+    expanded_axis, first_crossing, first_engulfment, supernova,
 };
 use crate::planetary::hosts::young::Formation;
+use crate::planetary::placement::OrbitZone;
+use crate::planetary::placement::zones::{PairBound, ZONE_EDGE_TOLERANCE};
 use crate::planetary::record::BodyOrbit;
 use crate::stellar::Phase;
-use crate::stellar::system::StarModel;
+use crate::stellar::binary::{BinaryTimeline, Component as PairComponent, SegmentKind};
+use crate::stellar::remnant::NatalKick;
+use crate::stellar::system::{StarModel, pair_of};
 use crate::time::{ClockWindow, SourceHorizon, Span, UniverseTime};
 use crate::units::consts::SECONDS_PER_JULIAN_YEAR;
 use crate::units::{
-    EarthMasses, GravitationalParameter, KilogramsPerCubicMetre, Metres, SolarMasses, Years,
+    EarthMasses, GravitationalParameter, KilogramsPerCubicMetre, Metres, SolarLuminosities,
+    SolarMasses, Years,
 };
 
 /// A body's state at a time: a prefix of not yet formed → present → destroyed or unbound
@@ -147,8 +187,12 @@ pub enum DestructionCause {
     TidallyDisrupted,
     /// The body collided with a heavier neighbour whose orbit its own crossed after a supernova,
     /// and merged into it (P14.T28.c's scattering step, ruling 71): the heavier's Safronov number
-    /// was under 1, too small to eject it (Ford and Rasio 2008; [`scatter`]).
+    /// was under 1, too small to eject it (Ford and Rasio 2008; `scatter`).
     Collided,
+    /// The body's rock evaporated in its hosts' light: a planet, a moon or a belt member below
+    /// 10⁻³ M⊕ whose rock's free-streaming vapour took its whole radius (Perez-Becker and Chiang
+    /// 2013, MNRAS 433, 2294; P14.T55.b.a, `evaporation`), from generator version 28.
+    Evaporated,
 }
 
 /// A [`FateBody`] could not be built from the values given.
@@ -202,8 +246,31 @@ pub enum ScatterDraws {
     },
 }
 
+/// Which generation of its host's bodies a body is (design note 11).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Generation {
+    /// Formed in its host's primordial disc: it never forms at or after one of its host stars'
+    /// deaths, and its orbit is about the host's initial mass.
+    Primordial,
+    /// Formed after its host's death, in a fallback disc about the remnant (P14.T28.e): its orbit
+    /// is about the host's mass at its formation, and only later deaths reach it.
+    Second,
+}
+
+/// Whether the fate transform follows a body's rock evaporating in its hosts' light (P14.T55.b.a,
+/// `evaporation`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Evaporation {
+    /// It does not: a body built by hand, as in a test, and a belt's stand-in, which is no body.
+    Ignored,
+    /// It does, from generator version 28: a planet or a belt member, which evaporates below
+    /// 10⁻³ M⊕ as its rock's free-streaming vapour takes its radius.
+    Rock,
+}
+
 /// What the fate transform reads of a body: its formation, its primordial orbit, its mass, its
-/// bulk density, how its orbit circularises, and the draws of the ejections it survives.
+/// bulk density, how its orbit circularises, the draws of the ejections it survives, its
+/// generation, and whether its rock evaporates.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FateBody {
     formation: Formation,
@@ -212,6 +279,8 @@ pub struct FateBody {
     density: KilogramsPerCubicMetre,
     circularisation: Circularisation,
     scatter: ScatterDraws,
+    generation: Generation,
+    evaporation: Evaporation,
 }
 
 impl FateBody {
@@ -247,7 +316,41 @@ impl FateBody {
             density,
             circularisation: Circularisation::NONE,
             scatter: ScatterDraws::Median,
+            generation: Generation::Primordial,
+            evaporation: Evaporation::Ignored,
         })
+    }
+
+    /// The same body as a second-generation one (P14.T28.e): formed when `formation` says, after
+    /// its host's death, on `orbit` about the host's mass then, its remnant's.
+    #[must_use]
+    pub const fn second_generation(self) -> Self {
+        Self {
+            generation: Generation::Second,
+            ..self
+        }
+    }
+
+    /// Which generation of its host's bodies it is.
+    #[must_use]
+    pub const fn generation(&self) -> Generation {
+        self.generation
+    }
+
+    /// The same body as one whose rock evaporates in its hosts' light ([`Evaporation::Rock`],
+    /// P14.T55.b.a), as the generator gives every planet and belt member.
+    #[must_use]
+    pub const fn evaporating(self) -> Self {
+        Self {
+            evaporation: Evaporation::Rock,
+            ..self
+        }
+    }
+
+    /// Whether the fate transform follows its rock evaporating.
+    #[must_use]
+    pub const fn evaporation(&self) -> Evaporation {
+        self.evaporation
     }
 
     /// The same body, circularising as `circularisation` says (P14.T8.e).
@@ -277,7 +380,8 @@ impl FateBody {
         &self.formation
     }
 
-    /// The primordial orbit, about the host's initial mass.
+    /// The orbit it forms on: about the host's initial mass for a primordial body, and about the
+    /// host's mass at its formation for a second-generation one.
     #[must_use]
     pub const fn orbit(&self) -> &KeplerElements {
         &self.orbit
@@ -341,13 +445,90 @@ impl Error for BuildFateHostError {}
 #[derive(Debug, Clone, PartialEq)]
 pub struct FateHost<'a> {
     stars: Vec<&'a StarModel>,
+    /// For each of `stars`, in order, the engine's run of it (P14.T28.g): its pair, by its index
+    /// in `timelines`, and its component there; `None` for a star the engine ran in no pair, and
+    /// for every star of a host built from its models alone.
+    paired: Vec<Option<(usize, PairComponent)>>,
+    /// The timelines of the pairs `paired` names.
+    timelines: Vec<&'a BinaryTimeline>,
+    /// The pairs' sudden events the host's bodies feel, by time ([`PairEvent`]).
+    events: Vec<PairEvent>,
+    /// The zone a pair the engine ran bounds, with how ([`ZoneBound`], P14.T9.d); `None` for a
+    /// host built from its models alone, and for a zone no such pair bounds.
+    bound: Option<ZoneBound>,
+    /// The first time one of the host's stars leaves the system, a supernova having released it
+    /// (P11.T10), which unbinds the host's bodies (P14.T9.d): a star's planets go with it, and a
+    /// circumbinary planet of the broken pair is left unbound. `None` for a host built from its
+    /// models alone, and for one whose stars all stay.
+    departure: Option<UniverseTime>,
+}
+
+/// A zone that a pair the binary engine ran bounds at its evaluated state (P14.T9.d): the zone at
+/// birth, its pair by its index in the host's timelines, how the pair bounds it, and the clock
+/// times of the pair's timeline's knots ([`BinaryTimeline::knot_ages`]), ascending, at which the
+/// zone's search looks.
+#[derive(Debug, Clone, PartialEq)]
+struct ZoneBound {
+    zone: OrbitZone,
+    pair: usize,
+    bound: PairBound,
+    knots: Vec<UniverseTime>,
+}
+
+/// A sudden event of a pair the binary engine ran, as a host's bodies feel it (P14.T28.g; the
+/// [module documentation](self)).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct PairEvent {
+    /// The event's clock time.
+    at: UniverseTime,
+    /// Its age on its pair's timeline, Julian years: the start of the segment it opens, or the
+    /// supernova's own.
+    age: f64,
+    /// Its pair, by its index in the host's timelines.
+    pair: usize,
+    /// What it does to the host's bodies.
+    effect: PairEffect,
+}
+
+/// What a [`PairEvent`] does to a host's bodies.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum PairEffect {
+    /// Every body is `Destroyed { Engulfed }`: a star's planets at its pair's common envelope or
+    /// coalescence.
+    Engulf,
+    /// Every body takes the sudden step from the host's mass just before the event to just after
+    /// it, its centre moving off at `kick`, m s⁻¹ along the system frame's axes: a circumbinary
+    /// body at a common envelope or a coalescence (no kick) and at a supernova that leaves its pair
+    /// bound (the pair's recoil), and a star's planets at its own supernova (its natal kick).
+    Step {
+        /// The velocity the host's centre takes.
+        kick: SystemVelocity,
+    },
+    /// Every body is `Unbound`: a circumbinary body when its pair is unbound.
+    Unbind,
+}
+
+/// Which of a pair's stars a host holds, for its events.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PairShare {
+    /// One star, the host's own: an S-type zone.
+    Star(PairComponent),
+    /// Both: a circumbinary zone, or one above it.
+    Both,
 }
 
 impl<'a> FateHost<'a> {
     /// The single star `star`.
     #[must_use]
     pub fn star(star: &'a StarModel) -> Self {
-        Self { stars: vec![star] }
+        Self {
+            stars: vec![star],
+            paired: vec![None],
+            timelines: Vec::new(),
+            events: Vec::new(),
+            bound: None,
+            departure: None,
+        }
     }
 
     /// The stars `stars`, which a circumbinary body orbits together.
@@ -371,7 +552,142 @@ impl<'a> FateHost<'a> {
         {
             return Err(BuildFateHostError::NotCoeval { first, other });
         }
-        Ok(Self { stars })
+        Ok(Self {
+            paired: vec![None; stars.len()],
+            stars,
+            timelines: Vec::new(),
+            events: Vec::new(),
+            bound: None,
+            departure: None,
+        })
+    }
+
+    /// The stars the bodies of `zone`, a zone of `ctx`, orbit: [`FateHost::stars`] of the zone's
+    /// members in body order, and from generator version 27 (P14.T28.g) each star of a pair the
+    /// binary engine ran read from its pair's timeline, with the pair's events in place of its
+    /// single-star deaths (the [module documentation](self)).
+    ///
+    /// # Panics
+    ///
+    /// If `zone` is not a zone of `ctx`'s stars.
+    #[must_use]
+    pub(crate) fn evolved(ctx: &'a SystemContext, zone: &OrbitZone) -> Self {
+        let stars = ctx.stars();
+        let mut host = Self::stars(zone.members().map(|member| &stars[usize::from(member)]))
+            .expect("a zone has a component, and a system's stars are coeval");
+        host.departure = zone
+            .members()
+            .filter_map(|member| ctx.departure(usize::from(member)))
+            .filter_map(|age| clock_time(host.stars[0], age))
+            .min();
+        let members: Vec<u8> = zone.members().collect();
+        for (k, &member) in members.iter().enumerate() {
+            let Some((pair, component)) = pair_of(ctx.pairs(), member) else {
+                continue;
+            };
+            let timeline = pair.timeline();
+            let index = host
+                .timelines
+                .iter()
+                .position(|&t| core::ptr::eq(t, timeline))
+                .unwrap_or_else(|| {
+                    let both = pair.stars().iter().all(|s| members.contains(&s.get()));
+                    let share = if both {
+                        PairShare::Both
+                    } else {
+                        PairShare::Star(component)
+                    };
+                    host.timelines.push(timeline);
+                    let index = host.timelines.len() - 1;
+                    let first = host.stars[0];
+                    host.events
+                        .extend(pair_events(timeline, first, index, share));
+                    index
+                });
+            host.paired[k] = Some((index, component));
+        }
+        // By time, and at one time in the order found: the pairs' depth-first order, each pair's
+        // events by their kind's order in `pair_events`.
+        host.events.sort_by_key(|event| event.at);
+        // A star's own zone, which its pair bounds from outside, and the pair's own zone.
+        let bound = match *host.paired.as_slice() {
+            [Some((pair, component))] => Some((pair, PairBound::Star(component))),
+            [Some((first, _)), Some((second, _))] if first == second => {
+                Some((first, PairBound::Pair))
+            }
+            _ => None,
+        };
+        host.bound = bound.map(|(pair, bound)| {
+            let timeline = host.timelines[pair];
+            let first = host.stars[0];
+            let mut knots: Vec<UniverseTime> = timeline
+                .knot_ages(0.0, timeline.until().value())
+                .into_iter()
+                .filter_map(|age| clock_time(first, Years::new(age)))
+                .collect();
+            knots.dedup();
+            ZoneBound {
+                zone: *zone,
+                pair,
+                bound,
+                knots,
+            }
+        });
+        host
+    }
+
+    /// The host's mass at `t`, M☉, as [`BodyFate::host_mass`] reads it: its stars' masses then,
+    /// a paired star's from its pair's timeline.
+    ///
+    /// # Panics
+    ///
+    /// As [`BodyFate::host_mass`], at a time before the host has formed.
+    #[must_use]
+    pub(crate) fn mass_at(&self, t: UniverseTime) -> SolarMasses {
+        self.stars.iter().zip(&self.paired).zip(self.deaths()).fold(
+            SolarMasses::ZERO,
+            |sum, ((model, paired), death)| {
+                sum + match paired {
+                    Some((pair, component)) => self.paired_mass(*pair, *component, t),
+                    None => star_mass(model, death, t),
+                }
+            },
+        )
+    }
+
+    /// The limits at `t` of `zone`, the zone at birth whose bodies the host holds, m (P14.T9.d):
+    /// its birth limits widened as its bodies' orbits are, by its mass at birth over
+    /// [`mass_at`](Self::mass_at) `t`, and where a pair the engine ran bounds it, those
+    /// [`OrbitZone::limits_at`] gives on the pair's state then: a star's outer limit intersected
+    /// with Holman and Wiegert's fit, the pair's own inner limit their fit alone.
+    ///
+    /// # Panics
+    ///
+    /// As [`mass_at`](Self::mass_at).
+    #[must_use]
+    pub(crate) fn limits_at(
+        &self,
+        zone: &OrbitZone,
+        t: UniverseTime,
+    ) -> (Option<Metres>, Option<Metres>) {
+        let mass = self.mass_at(t).value();
+        let widening = if mass > 0.0 {
+            zone.host_mass().value() / mass
+        } else {
+            1.0
+        };
+        let birth = (
+            zone.inner().map(|r| r * widening),
+            zone.outer().map(|r| r * widening),
+        );
+        match &self.bound {
+            Some(bound) => {
+                let age = Years::new(self.pair_age(bound.pair, t));
+                let state = self.timelines[bound.pair].state_at(age);
+                zone.limits_at(&state, bound.bound, widening)
+            }
+            None => birth,
+        }
     }
 
     /// The stars, in the order given.
@@ -394,6 +710,144 @@ impl<'a> FateHost<'a> {
     fn first(&self) -> &'a StarModel {
         self.stars[0]
     }
+
+    /// The age on the timeline of pair `pair` at `t`, Julian years: its stars' age then, held on
+    /// the side of each of the pair's events that `t` is on, so that the clock's rounding of an
+    /// event's age never reads the state across it, and inside the ages the timeline was run to.
+    #[must_use]
+    fn pair_age(&self, pair: usize, t: UniverseTime) -> f64 {
+        let mut age = self.first().age_at(t).value();
+        for event in self.events.iter().filter(|event| event.pair == pair) {
+            age = if t >= event.at {
+                age.max(event.age)
+            } else {
+                age.min(event.age.next_down())
+            };
+        }
+        age.clamp(0.0, self.timelines[pair].until().value())
+    }
+
+    /// The mass at `t` of the star the engine ran as `component` of pair `pair`, M☉: its state's
+    /// on the pair's timeline then.
+    #[must_use]
+    fn paired_mass(&self, pair: usize, component: PairComponent, t: UniverseTime) -> SolarMasses {
+        let age = Years::new(self.pair_age(pair, t));
+        self.timelines[pair].state_at(age).stars()[component.index()].mass()
+    }
+
+    /// The largest radius by `t` of the star the engine ran as `component` of pair `pair`, m.
+    #[must_use]
+    fn paired_radius(&self, pair: usize, component: PairComponent, t: UniverseTime) -> f64 {
+        let age = Years::new(self.pair_age(pair, t));
+        Metres::from(self.timelines[pair].max_radius_until(component, age)).value()
+    }
+
+    /// Each star's death, if it has died by the end of the clock window ([`death_of`]): none for a
+    /// star the engine ran in a pair, whose pair's events stand in for its deaths (P14.T28.g).
+    #[must_use]
+    fn deaths(&self) -> Vec<Option<StarDeath>> {
+        self.stars
+            .iter()
+            .zip(&self.paired)
+            .map(|(star, paired)| match paired {
+                Some(_) => None,
+                None => death_of(star),
+            })
+            .collect()
+    }
+
+    /// Whether the star the engine ran as `component` of pair `pair` has not exploded by `t`.
+    #[must_use]
+    fn paired_lives_at(&self, pair: usize, component: PairComponent, t: UniverseTime) -> bool {
+        self.timelines[pair].supernovae().iter().all(|sn| {
+            sn.component() != component
+                || clock_time(self.first(), sn.age()).is_none_or(|at| at > t)
+        })
+    }
+}
+
+/// The events of `timeline`, the host's pair `pair`, that a host holding `share` of its stars
+/// feels (P14.T28.g; the [module documentation](self)), each at its clock time on `first`'s clock,
+/// in the timeline's order: its segments' events, then its supernovae. An event off the clock is
+/// left out.
+#[must_use]
+fn pair_events(
+    timeline: &BinaryTimeline,
+    first: &StarModel,
+    pair: usize,
+    share: PairShare,
+) -> Vec<PairEvent> {
+    let merged = timeline.merger_age().map(Years::value);
+    let mut events = Vec::new();
+    let mut push = |age: f64, effect: PairEffect| {
+        if let Some(at) = clock_time(first, Years::new(age)) {
+            events.push(PairEvent {
+                at,
+                age,
+                pair,
+                effect,
+            });
+        }
+    };
+    let segments = timeline.segments();
+    for (before, segment) in segments.iter().zip(segments.iter().skip(1)) {
+        let effect = match (segment.kind(), share) {
+            // A common envelope that ends in a coalescence is one event, the envelope's.
+            (SegmentKind::Merged, _) if before.kind() == SegmentKind::CommonEnvelope => None,
+            // A coalesced pair's product changes its form as a single star does: its white
+            // dwarf's birth is adiabatic, and its supernova steps below, once (P14.T28.g's
+            // follow-up).
+            (SegmentKind::Merged, _) if before.kind() == SegmentKind::Merged => None,
+            (SegmentKind::CommonEnvelope | SegmentKind::Merged, PairShare::Star(_)) => {
+                Some(PairEffect::Engulf)
+            }
+            (SegmentKind::CommonEnvelope | SegmentKind::Merged, PairShare::Both) => {
+                Some(PairEffect::Step {
+                    kick: SystemVelocity::ZERO,
+                })
+            }
+            (SegmentKind::Disrupted { .. }, PairShare::Both) => Some(PairEffect::Unbind),
+            (SegmentKind::Disrupted { .. }, PairShare::Star(_))
+            | (
+                SegmentKind::Detached | SegmentKind::StableTransfer { .. } | SegmentKind::Contact,
+                _,
+            ) => None,
+        };
+        if let Some(effect) = effect {
+            push(segment.start().value(), effect);
+        }
+    }
+    for sn in timeline.supernovae() {
+        let natal = sn.kick().map_or(SystemVelocity::ZERO, kick_velocity);
+        let effect = match share {
+            PairShare::Star(own) if sn.component() == own => Some(PairEffect::Step { kick: natal }),
+            PairShare::Star(_) => None,
+            // A coalesced pair's product explodes as a single star, with its own kick.
+            PairShare::Both if merged.is_some_and(|age| age <= sn.age().value()) => {
+                Some(PairEffect::Step { kick: natal })
+            }
+            PairShare::Both => Some(
+                sn.recoil()
+                    .map_or(PairEffect::Unbind, |kick| PairEffect::Step { kick }),
+            ),
+        };
+        if let Some(effect) = effect {
+            push(sn.age().value(), effect);
+        }
+    }
+    events
+}
+
+/// A host's sudden change, by where the host keeps it: a single star's sudden death, by the star's
+/// index, or a pair's event, by its index in the host's events.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Sudden {
+    /// The sudden death of the host's star of this index.
+    Death(usize),
+    /// The host's pair event of this index.
+    Event(usize),
+    /// A host star's leaving the system ([`FateHost`]'s `departure`).
+    Departure,
 }
 
 /// A body's state and orbit at a time: what [`state_at`] and [`BodyFate::at`] return.
@@ -456,8 +910,9 @@ impl FateAt {
     }
 
     /// The body's mass at the time, M⊕: its own, plus that of every neighbour that collided with
-    /// it and merged into it by then (ruling 71). A body not yet formed has its own mass, and a
-    /// body gone the mass it had when it went.
+    /// it and merged into it by then (ruling 71), less, from generator version 28, what its rock
+    /// has evaporated by then (P14.T55.b.a). A body not yet formed has its own mass, and a body
+    /// gone the mass it had when it went, an evaporated one the mass it formed with.
     #[must_use]
     pub const fn mass(&self) -> EarthMasses {
         self.mass
@@ -627,6 +1082,27 @@ pub struct BodyFate<'a> {
     ending: Option<BodyState>,
     /// How many ejections the body has survived so far, which picks the words of its next draw.
     recoils: u64,
+    /// How much of its radius it has lost to evaporation so far, and to when (P14.T55.b.a).
+    evaporated: Evaporated,
+}
+
+/// What the evaporation step reads of a body (P14.T55.b.a): its mass and the bulk density of its
+/// evaporating rock.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Evaporating {
+    mass: EarthMasses,
+    density: KilogramsPerCubicMetre,
+}
+
+/// A body's evaporation so far (P14.T55.b.a): the radius it has lost, m, the time it has been
+/// followed to, `None` before it is, and the parts of its history the step integrated, in time
+/// order, each part's `before` counted from its formation, from which the radius it has lost by
+/// any time is read ([`evaporation::lost_by`]).
+#[derive(Debug, Clone, PartialEq, Default)]
+struct Evaporated {
+    radius_lost_m: f64,
+    until: Option<UniverseTime>,
+    parts: Vec<evaporation::LossPart>,
 }
 
 impl<'a> BodyFate<'a> {
@@ -651,7 +1127,7 @@ impl<'a> BodyFate<'a> {
 
     /// The histories of `bodies`, every body of one host in slot order, on `host`: each as
     /// [`BodyFate::resolve`] would have it alone, but for the scattering step after each of the
-    /// host's sudden deaths (P14.T28.c, ruling 71, [`scatter`]).
+    /// host's sudden deaths (P14.T28.c, ruling 71, `scatter`).
     ///
     /// A supernova gives each survivor its own eccentricity, and orbits that cross, or come within
     /// 2√3 mutual Hill radii, scatter within a few orbits. So at each sudden death the bodies it
@@ -723,11 +1199,18 @@ impl<'a> BodyFate<'a> {
     /// ```
     #[must_use]
     pub fn resolve_all(bodies: &[&'a FateBody], host: &'a FateHost<'a>) -> Vec<Self> {
-        let deaths: Vec<Option<StarDeath>> = host.stars.iter().map(|star| death_of(star)).collect();
-        let mut sudden: Vec<(UniverseTime, usize)> = deaths
+        let deaths = host.deaths();
+        let mut sudden: Vec<(UniverseTime, Sudden)> = deaths
             .iter()
             .enumerate()
-            .filter_map(|(k, death)| death.filter(|d| d.sudden).map(|d| (d.at, k)))
+            .filter_map(|(k, death)| death.filter(|d| d.sudden).map(|d| (d.at, Sudden::Death(k))))
+            .chain(
+                host.events
+                    .iter()
+                    .enumerate()
+                    .map(|(k, event)| (event.at, Sudden::Event(k))),
+            )
+            .chain(host.departure.map(|at| (at, Sudden::Departure)))
             .collect();
         sudden.sort_unstable();
         let mut fates: Vec<Self> = bodies
@@ -757,10 +1240,12 @@ impl<'a> BodyFate<'a> {
     #[must_use]
     pub fn resolve_among(bodies: &[&'a FateBody], index: usize, host: &'a FateHost<'a>) -> Self {
         let body = bodies[index];
-        let sudden = host
-            .stars
-            .iter()
-            .any(|star| death_of(star).is_some_and(|death| death.sudden));
+        let sudden = !host.events.is_empty()
+            || host.departure.is_some()
+            || host
+                .deaths()
+                .iter()
+                .any(|death| death.is_some_and(|death| death.sudden));
         if sudden {
             Self::resolve_all(bodies, host).swap_remove(index)
         } else {
@@ -769,9 +1254,22 @@ impl<'a> BodyFate<'a> {
     }
 
     /// The body's formation and its first segment, before any of its life is followed.
+    ///
+    /// A primordial body never forms at or after a host star's death, which ends its disc; a
+    /// second-generation one forms after its host's death, and its first segment is about the
+    /// host's mass then, without circularisation (P14.T28.e).
     fn begin(body: &'a FateBody, host: &'a FateHost<'a>, deaths: Vec<Option<StarDeath>>) -> Self {
-        let formed_at = clock_time(host.first(), Years::from(body.formation.formed_at()))
-            .filter(|formed| deaths.iter().flatten().all(|death| death.at > *formed));
+        let formed_at =
+            clock_time(host.first(), Years::from(body.formation.formed_at())).filter(|formed| {
+                match body.generation {
+                    Generation::Primordial => {
+                        deaths.iter().flatten().all(|death| death.at > *formed)
+                            && host.events.iter().all(|event| event.at > *formed)
+                            && host.departure.is_none_or(|at| at > *formed)
+                    }
+                    Generation::Second => true,
+                }
+            });
         let mut fate = Self {
             body,
             host,
@@ -780,13 +1278,18 @@ impl<'a> BodyFate<'a> {
             segments: Vec::new(),
             ending: None,
             recoils: 0,
+            evaporated: Evaporated::default(),
         };
         if let Some(formed) = formed_at {
+            let (reference, circularises) = match body.generation {
+                Generation::Primordial => (host.initial_mass(), true),
+                Generation::Second => (fate.host_mass(formed), false),
+            };
             fate.segments.push(Segment {
                 start: formed,
                 orbit: body.orbit,
-                reference: host.initial_mass(),
-                circularises: true,
+                reference,
+                circularises,
                 mass: body.mass,
             });
         }
@@ -855,8 +1358,45 @@ impl<'a> BodyFate<'a> {
             // Before `START` a moon's drifting record holds until its planet's change there too,
             // as `holds_until` states a cell's end there (RM1 validation, 2026-10-02).
             changes_at: next.filter(|&next| t < ClockWindow::START || ClockWindow::contains(next)),
-            mass: segment.mass,
+            mass: self.mass_in(segment, t),
         }
+    }
+
+    /// The body's mass at `t` on `segment`, a time it is present, M⊕: the segment's, less what its
+    /// rock has evaporated by then from generator version 28 (P14.T55.b.a), its radius
+    /// R(t) = R₀ − ∫ rate dt ([`evaporation::mass_left`]), and the segment's alone where nothing
+    /// has.
+    #[must_use]
+    fn mass_in(&self, segment: &Segment, t: UniverseTime) -> EarthMasses {
+        if self.evaporated.parts.is_empty() {
+            return segment.mass;
+        }
+        let density = self.body.density;
+        let lost = evaporation::lost_by(&self.evaporated.parts, t, |at| {
+            evaporation::radius_rate(self.substellar_temperature(segment, at), density)
+        });
+        evaporation::mass_left(segment.mass, density, lost)
+    }
+
+    /// The body's orbit at `t`, [`BodyFate::at`]'s bit for bit, without the trajectory and the
+    /// validity it also finds; `None` where the body is not present then. P14.T48.b's water window
+    /// reads it at past ages.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, as [`BodyFate::at`].
+    #[must_use]
+    pub(crate) fn orbit_at(&self, t: UniverseTime) -> Option<KeplerElements> {
+        let formed = self.formed_at?;
+        let ended = self
+            .ending
+            .and_then(|ending| ending.ended_at())
+            .is_some_and(|at| t >= at);
+        if t < formed || ended {
+            return None;
+        }
+        let (segment, _) = self.segment_at(t);
+        Some(self.orbit_in(segment, t, self.host_mass(t)))
     }
 
     /// The segment holding `t`, a time at or after the body's formation, and the segment's next
@@ -947,8 +1487,18 @@ impl<'a> BodyFate<'a> {
     fn breaks(&self, segment: &Segment, last: UniverseTime) -> Vec<UniverseTime> {
         let inside = |at: &UniverseTime| segment.start < *at && *at < last;
         let mut breaks: Vec<UniverseTime> = Vec::new();
-        for star in &self.host.stars {
+        for (star, paired) in self.host.stars.iter().zip(&self.host.paired) {
             breaks.extend(star.mass_breaks(segment.start, last));
+            // A paired star's mass is its timeline's, which turns at the timeline's segments.
+            if let Some((pair, _)) = paired {
+                breaks.extend(
+                    self.host.timelines[*pair]
+                        .segments()
+                        .iter()
+                        .filter_map(|s| clock_time(self.host.first(), s.start()))
+                        .filter(inside),
+                );
+            }
         }
         breaks.extend(
             self.deaths
@@ -958,6 +1508,7 @@ impl<'a> BodyFate<'a> {
                 .map(|death| death.at)
                 .filter(inside),
         );
+        breaks.extend(self.host.events.iter().map(|event| event.at).filter(inside));
         let circularisation = self.body.circularisation;
         let e0 = segment.orbit.eccentricity().value();
         if segment.circularises && circularisation.timescale().is_some() && e0 > 0.0 {
@@ -980,7 +1531,7 @@ impl<'a> BodyFate<'a> {
     /// stars, and through it, or with `None` to the end of its host's known history
     /// ([`BodyFate::known_until`]): the engulfment search on the segment, then the death's
     /// aftermath. A body not formed, not formed by then, or gone already is left as it is.
-    fn live_to(&mut self, next: Option<(UniverseTime, usize)>) {
+    fn live_to(&mut self, next: Option<(UniverseTime, Sudden)>) {
         let (Some(formed), None) = (self.formed_at, self.ending) else {
             return;
         };
@@ -989,22 +1540,78 @@ impl<'a> BodyFate<'a> {
         if formed > self.known_until() {
             return;
         }
+        // A pair's event or a star's leaving before a body forms, which only a second-generation
+        // body outlives, is none of its history.
+        if let Some((at, Sudden::Event(_) | Sudden::Departure)) = next
+            && at <= formed
+        {
+            return;
+        }
         let segment = *self.segments.last().expect("a formed body has a segment");
         let end = next.map_or(self.known_until(), |(at, _)| {
             at.checked_sub(Span::new(0, 1).expect("0 s and 1 ns is a normalised span"))
                 .expect("a death after a formation is not the clock's first instant")
         });
-        if let Some(at) = self.engulfment(&segment, end, engulfment_reach(segment.mass)) {
-            self.ending = Some(BodyState::Destroyed {
+        let engulfed = self.engulfment(&segment, end, engulfment_reach(segment.mass));
+        // From P14.T9.d's hold at 27, the first time the body leaves its zone at its pair's
+        // evaluated state, if that comes before any engulfment.
+        let ending = match (engulfed, self.crossing(&segment, end)) {
+            (Some(engulfed), Some(crossed)) if crossed < engulfed => {
+                Some(BodyState::Unbound { at: crossed })
+            }
+            (Some(at), _) => Some(BodyState::Destroyed {
                 cause: DestructionCause::Engulfed,
                 at,
-            });
+            }),
+            (None, Some(at)) => Some(BodyState::Unbound { at }),
+            (None, None) => None,
+        };
+        // From generator version 28 (P14.T55.b.a), the time its rock has evaporated, if that comes
+        // first.
+        let ending = match (ending, self.evaporation_in(&segment, end)) {
+            (Some(ending), Some(at)) if ending.ended_at().is_some_and(|ended| ended <= at) => {
+                Some(ending)
+            }
+            (_, Some(at)) => Some(BodyState::Destroyed {
+                cause: DestructionCause::Evaporated,
+                at,
+            }),
+            (ending, None) => ending,
+        };
+        if ending.is_some() {
+            self.ending = ending;
             return;
         }
-        let Some((at, star)) = next else {
+        let Some((at, sudden)) = next else {
             return;
         };
-        let (aftermath, reference) = self.explode(&segment, at, star);
+        let (aftermath, reference) = match sudden {
+            Sudden::Death(star) => self.explode(&segment, at, star),
+            Sudden::Departure => {
+                self.ending = Some(BodyState::Unbound { at });
+                return;
+            }
+            Sudden::Event(k) => {
+                let event = self.host.events[k];
+                match event.effect {
+                    PairEffect::Engulf => {
+                        self.ending = Some(BodyState::Destroyed {
+                            cause: DestructionCause::Engulfed,
+                            at,
+                        });
+                        return;
+                    }
+                    PairEffect::Unbind => {
+                        self.ending = Some(BodyState::Unbound { at });
+                        return;
+                    }
+                    PairEffect::Step { kick } => match self.step(&segment, event, kick) {
+                        Some(stepped) => stepped,
+                        None => return,
+                    },
+                }
+            }
+        };
         let after = |orbit| Segment {
             start: at,
             orbit,
@@ -1039,6 +1646,213 @@ impl<'a> BodyFate<'a> {
             .unwrap_or(ClockWindow::END)
     }
 
+    /// The first time in `segment` up to `end` by which the body has lost its whole radius to its
+    /// rock's free-streaming vapour, followed on from where its last segment left it
+    /// ([`evaporate`](Self::evaporate)): `None` for a body the transform does not follow ([`Evaporation::Ignored`]), and for one from 10⁻³ M⊕.
+    fn evaporation_in(&mut self, segment: &Segment, end: UniverseTime) -> Option<UniverseTime> {
+        match self.body.evaporation {
+            Evaporation::Rock if segment.mass < FREE_STREAMING_MASS => {
+                let body = Evaporating {
+                    mass: segment.mass,
+                    density: self.body.density,
+                };
+                let mut so_far = core::mem::take(&mut self.evaporated);
+                let at = self.evaporate(segment, end, body, &mut so_far);
+                self.evaporated = so_far;
+                at
+            }
+            Evaporation::Rock | Evaporation::Ignored => None,
+        }
+    }
+
+    /// The first time in `segment` from the end of `so_far` up to `end` by which `body` has lost
+    /// its whole radius to its rock's free-streaming vapour, the radius lost before it counted
+    /// (P14.T55.b.a, [`evaporation::first_loss`]): `None` if it has not by then, with the radius
+    /// lost added to `so_far`, which is followed to `end` either way.
+    ///
+    /// The rate is [`evaporation::radius_rate`] at the substellar temperature of the segment's
+    /// orbit about the host's light at each time ([`substellar_temperature`](Self::substellar_temperature)),
+    /// between the segment's break points ([`BodyFate::breaks`]). Its bound at a time t is the rate
+    /// at the hosts' brightest by t (each star's light at the stretch's start or its peak by t,
+    /// whichever is more, [`StarModel::max_luminosity_until`]) on the orbit's least axis and its
+    /// largest eccentricity in the stretch: the segment's base axis at `end`, about the most mass
+    /// the host can hold then, and its eccentricity at the start, since circularisation only
+    /// shrinks both.
+    fn evaporate(
+        &self,
+        segment: &Segment,
+        end: UniverseTime,
+        body: Evaporating,
+        so_far: &mut Evaporated,
+    ) -> Option<UniverseTime> {
+        let from = so_far
+            .until
+            .map_or(segment.start, |until| until.max(segment.start));
+        so_far.until = Some(end.max(from));
+        if end <= from {
+            return None;
+        }
+        let left = evaporation::radius_of(body.mass, body.density) - so_far.radius_lost_m;
+        let breaks = || {
+            let mut breaks = self.breaks(segment, end);
+            breaks.retain(|&at| at > from);
+            breaks
+        };
+        let lit_from: Vec<f64> = (0..self.host.stars.len())
+            .map(|k| self.member_luminosity(k, from).value())
+            .collect();
+        let least_axis = Metres::new(
+            self.base_axis(segment, end).value() * segment.reference.value()
+                / self.mass_cap(from, end).value(),
+        );
+        let eccentricity = self.base_orbit(segment, from).eccentricity().value();
+        let bound = |t: UniverseTime| {
+            let brightest = lit_from.iter().enumerate().fold(0.0, |sum, (k, &lit)| {
+                sum + lit.max(self.member_peak_luminosity(k, t).value())
+            });
+            evaporation::radius_rate(
+                evaporation::substellar_temperature(
+                    SolarLuminosities::new(brightest),
+                    least_axis,
+                    eccentricity,
+                ),
+                body.density,
+            )
+        };
+        let rate = |t: UniverseTime| {
+            evaporation::radius_rate(self.substellar_temperature(segment, t), body.density)
+        };
+        let (base, first) = (so_far.radius_lost_m, so_far.parts.len());
+        let outcome =
+            evaporation::first_loss(from, end, breaks, left, (bound, rate), &mut so_far.parts);
+        for part in &mut so_far.parts[first..] {
+            part.before += base;
+        }
+        match outcome {
+            evaporation::Loss::Gone(at) => Some(at),
+            evaporation::Loss::Part(lost) => {
+                so_far.radius_lost_m += lost;
+                None
+            }
+        }
+    }
+
+    /// The substellar zero-albedo temperature at `t` of the body on `segment` about its host's
+    /// light then, K ([`evaporation::substellar_temperature`]).
+    fn substellar_temperature(&self, segment: &Segment, t: UniverseTime) -> f64 {
+        let orbit = self.orbit_in(segment, t, self.host_mass(t));
+        let light = (0..self.host.stars.len()).fold(SolarLuminosities::ZERO, |sum, k| {
+            sum + self.member_luminosity(k, t)
+        });
+        evaporation::substellar_temperature(
+            light,
+            orbit.semi_major_axis(),
+            orbit.eccentricity().value(),
+        )
+    }
+
+    /// The luminosity of host star `k` at `t`, L☉: its pair's timeline's for a star the engine ran
+    /// in a pair, as its mass is ([`BodyFate::member_mass`]), and otherwise its model's; none
+    /// before it forms.
+    fn member_luminosity(&self, k: usize, t: UniverseTime) -> SolarLuminosities {
+        match self.host.paired[k] {
+            Some((pair, component)) => {
+                let age = Years::new(self.host.pair_age(pair, t));
+                self.host.timelines[pair].state_at(age).stars()[component.index()].luminosity()
+            }
+            None => self.host.stars[k]
+                .state_at(t)
+                .map_or(SolarLuminosities::ZERO, |state| state.luminosity()),
+        }
+    }
+
+    /// The largest luminosity host star `k` has had by `t`, L☉, read as
+    /// [`member_luminosity`](Self::member_luminosity) reads its light.
+    fn member_peak_luminosity(&self, k: usize, t: UniverseTime) -> SolarLuminosities {
+        match self.host.paired[k] {
+            Some((pair, component)) => {
+                let age = Years::new(self.host.pair_age(pair, t));
+                self.host.timelines[pair].max_luminosity_until(component, age)
+            }
+            None => self.host.stars[k].max_luminosity_until(t),
+        }
+    }
+
+    /// The most mass the host can hold from `from` to `end`, M☉: each single star's mass at
+    /// `from`, which only falls, and each star of a pair the engine ran at the largest its pair's
+    /// timeline gives it by `end` (`BinaryTimeline::max_mass_until`), an accretor's included.
+    fn mass_cap(&self, from: UniverseTime, end: UniverseTime) -> SolarMasses {
+        (0..self.host.stars.len()).fold(SolarMasses::ZERO, |cap, k| {
+            cap + match self.host.paired[k] {
+                Some((pair, component)) => {
+                    let age = Years::new(self.host.pair_age(pair, end));
+                    self.host.timelines[pair].max_mass_until(component, age)
+                }
+                None => self.member_mass(k, from),
+            }
+        })
+    }
+
+    /// When the moon of mass `mass` of this planet has lost its whole radius to its rock's
+    /// free-streaming vapour (P14.T55.b.a): its planet's history's evaporation step
+    /// ([`evaporate`](Self::evaporate)) on the moon's own mass, its rock at
+    /// [`evaporation::MOON_EVAPORATING_ROCK_DENSITY`], along each of its planet's segments from
+    /// its formation to its ending, since a moon is as far from its hosts as its planet. `None`
+    /// for a moon from 10⁻³ M⊕, and for one that outlasts its planet's history.
+    #[must_use]
+    pub(crate) fn moon_evaporation(&self, mass: EarthMasses) -> Option<UniverseTime> {
+        self.moon_history(mass).and_then(|(gone, _)| gone)
+    }
+
+    /// The mass at `t` of the present moon of mass `mass` of this planet, M⊕: `mass`, less what
+    /// its rock has evaporated by then from generator version 28 (P14.T55.b.a), along its planet's
+    /// history as [`moon_evaporation`](Self::moon_evaporation) follows it, its radius
+    /// R(t) = R₀ − ∫ rate dt ([`evaporation::mass_left`]).
+    #[must_use]
+    pub(crate) fn moon_mass_at(&self, mass: EarthMasses, t: UniverseTime) -> EarthMasses {
+        let Some((_, evaporated)) = self.moon_history(mass) else {
+            return mass;
+        };
+        if evaporated.parts.is_empty() || self.formed_at.is_none_or(|formed| t < formed) {
+            return mass;
+        }
+        let (segment, _) = self.segment_at(t);
+        let density = evaporation::MOON_EVAPORATING_ROCK_DENSITY;
+        let lost = evaporation::lost_by(&evaporated.parts, t, |at| {
+            evaporation::radius_rate(self.substellar_temperature(segment, at), density)
+        });
+        evaporation::mass_left(mass, density, lost)
+    }
+
+    /// The evaporation of the moon of mass `mass` of this planet along its history (P14.T55.b.a):
+    /// when its rock is gone, if it goes, and what it has evaporated; `None` where the step does
+    /// not follow it.
+    #[must_use]
+    fn moon_history(&self, mass: EarthMasses) -> Option<(Option<UniverseTime>, Evaporated)> {
+        if mass >= FREE_STREAMING_MASS || self.formed_at? > self.known_until() {
+            return None;
+        }
+        let body = Evaporating {
+            mass,
+            density: evaporation::MOON_EVAPORATING_ROCK_DENSITY,
+        };
+        let last = self
+            .ending
+            .and_then(|ending| ending.ended_at())
+            .unwrap_or_else(|| self.known_until());
+        let one_nanosecond = Span::new(0, 1).expect("0 s and 1 ns is a normalised span");
+        let mut so_far = Evaporated::default();
+        let gone = self.segments.iter().enumerate().find_map(|(k, segment)| {
+            let end = self.segments.get(k + 1).map_or(last, |next| {
+                next.start
+                    .checked_sub(one_nanosecond)
+                    .expect("a segment after the first starts after the clock's first instant")
+            });
+            self.evaporate(segment, end.min(last), body, &mut so_far)
+        });
+        Some((gone, so_far))
+    }
+
     /// The first time in `segment` up to `end` at which the body is engulfed, if any.
     fn engulfment(&self, segment: &Segment, end: UniverseTime, reach: f64) -> Option<UniverseTime> {
         // The orbit only shrinks by circularisation and only widens by mass loss, and the largest
@@ -1064,11 +1878,11 @@ impl<'a> BodyFate<'a> {
     ) -> (Aftermath, SolarMasses) {
         let death = self.deaths[star].expect("a star that explodes has a death");
         let (mut before, mut after) = (SolarMasses::ZERO, SolarMasses::ZERO);
-        for (k, model) in self.host.stars.iter().enumerate() {
+        for k in 0..self.host.stars.len() {
             let (b, a) = if k == star {
                 (death.before, death.after)
             } else {
-                let m = star_mass(model, self.deaths[k], at);
+                let m = self.member_mass(k, at);
                 (m, m)
             };
             before = before + b;
@@ -1140,25 +1954,162 @@ impl<'a> BodyFate<'a> {
     /// [`BodyFate::at`].
     #[must_use]
     pub fn host_mass(&self, t: UniverseTime) -> SolarMasses {
-        self.host
-            .stars
-            .iter()
-            .zip(&self.deaths)
-            .fold(SolarMasses::ZERO, |sum, (model, death)| {
-                sum + star_mass(model, *death, t)
-            })
+        (0..self.host.stars.len()).fold(SolarMasses::ZERO, |sum, k| sum + self.member_mass(k, t))
+    }
+
+    /// The mass of host star `k` at `t`, M☉: its pair's timeline's for a star the engine ran in a
+    /// pair (P14.T28.g), and otherwise [`star_mass`]'s.
+    #[must_use]
+    fn member_mass(&self, k: usize, t: UniverseTime) -> SolarMasses {
+        match self.host.paired[k] {
+            Some((pair, component)) => self.host.paired_mass(pair, component, t),
+            None => star_mass(self.host.stars[k], self.deaths[k], t),
+        }
     }
 
     /// The largest radius any of the host's stars has had by `t`, among those that had not died
-    /// by the segment's start, m.
+    /// by the segment's start, m: a paired star's from its pair's timeline (P14.T28.g), not
+    /// counted once it has exploded.
     fn largest_radius(&self, segment: &Segment, t: UniverseTime) -> f64 {
         self.host
             .stars
             .iter()
             .zip(&self.deaths)
-            .filter(|(_, death)| death.is_none_or(|d| d.at > segment.start))
-            .map(|(model, _)| Metres::from(model.max_radius_until(t)).value())
+            .zip(&self.host.paired)
+            .filter(|((_, death), paired)| {
+                death.is_none_or(|d| d.at > segment.start)
+                    && paired.is_none_or(|(pair, component)| {
+                        self.host.paired_lives_at(pair, component, segment.start)
+                    })
+            })
+            .map(|((model, _), paired)| match paired {
+                Some((pair, component)) => self.host.paired_radius(*pair, *component, t),
+                None => Metres::from(model.max_radius_until(t)).value(),
+            })
             .fold(0.0, f64::max)
+    }
+
+    /// The first time in `segment` up to `end` at which the body's orbit leaves its zone at its
+    /// pair's evaluated state (P14.T9.d, [`FateHost::limits_at`]), its apocentre beyond the outer
+    /// limit or its pericentre inside the inner by more than [`ZONE_EDGE_TOLERANCE`] of it, if
+    /// any: `None` for a zone no pair the engine ran bounds.
+    ///
+    /// The scan's points are the segment's ends and every knot of the pair's timeline between
+    /// them ([`BinaryTimeline::knot_ages`]), where the pair's orbit or its stars' masses may
+    /// turn; the first crossing is bisected to within a second ([`first_crossing`]).
+    fn crossing(&self, segment: &Segment, end: UniverseTime) -> Option<UniverseTime> {
+        let bound = self.host.bound.as_ref()?;
+        let mut points = vec![segment.start];
+        if end > segment.start {
+            let from = bound.knots.partition_point(|&t| t <= segment.start);
+            let to = bound.knots.partition_point(|&t| t < end);
+            points.extend_from_slice(&bound.knots[from..to.max(from)]);
+            points.push(end);
+        }
+        first_crossing(&points, |t| {
+            self.zone_clearance(segment, t).unwrap_or(f64::INFINITY)
+        })
+    }
+
+    /// How far inside its zone at its pair's evaluated state the body's orbit on `segment` lies
+    /// at `t`, m: the least of the outer limit less its apocentre and its pericentre less the inner
+    /// limit, each limit eased by [`ZONE_EDGE_TOLERANCE`] of it (the outer outwards, the inner
+    /// inwards) so that a body on a limit counts inside, infinite where neither is set; `None` for
+    /// a zone no pair the engine ran bounds, and a host with no mass then.
+    fn zone_clearance(&self, segment: &Segment, t: UniverseTime) -> Option<f64> {
+        let bound = self.host.bound.as_ref()?;
+        let state =
+            self.host.timelines[bound.pair].state_at(Years::new(self.host.pair_age(bound.pair, t)));
+        // Every star of a bounded zone is its pair's, so its mass is `host_mass`'s from this state,
+        // summed in the same order.
+        let mass = self
+            .host
+            .paired
+            .iter()
+            .flatten()
+            .fold(SolarMasses::ZERO, |sum, &(_, component)| {
+                sum + state.stars()[component.index()].mass()
+            });
+        if mass.value() <= 0.0 {
+            return None;
+        }
+        let widening = bound.zone.host_mass().value() / mass.value();
+        let (inner, outer) = bound.zone.limits_at(&state, bound.bound, widening);
+        let orbit = self.orbit_in(segment, t, mass);
+        let outside = outer.map_or(f64::INFINITY, |r| {
+            r.value() * (1.0 + ZONE_EDGE_TOLERANCE) - orbit.apoapsis().value()
+        });
+        let inside = inner.map_or(f64::INFINITY, |r| {
+            orbit.periapsis().value() - r.value() * (1.0 - ZONE_EDGE_TOLERANCE)
+        });
+        Some(outside.min(inside))
+    }
+
+    /// How far inside its zone at its pair's evaluated state the body lies at `t`, m, as the
+    /// fate's zone search reads it (P14.T9.d): `None` where the body is not present then, for a
+    /// zone no pair the engine ran bounds, and for a host built from its models alone. The census
+    /// of the binary hosts reads it.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn zone_clearance_at(&self, t: UniverseTime) -> Option<f64> {
+        if self.at(t).state() != BodyState::Present {
+            return None;
+        }
+        let (segment, _) = self.segment_at(t);
+        self.zone_clearance(segment, t)
+    }
+
+    /// What pair event `event` leaves of the body on `segment`, with the mass the body orbits
+    /// afterwards, its host's centre moving off at `kick`, the pair's share of it where the host
+    /// holds other stars too (P14.T28.g): the supernova's step from the host's mass just before the
+    /// event to just after it, or `None` where neither the mass nor the centre moves, which leaves
+    /// the segment as it is.
+    fn step(
+        &self,
+        segment: &Segment,
+        event: PairEvent,
+        kick: SystemVelocity,
+    ) -> Option<(Aftermath, SolarMasses)> {
+        let (mut before, mut after, mut paired_after) =
+            (SolarMasses::ZERO, SolarMasses::ZERO, SolarMasses::ZERO);
+        for k in 0..self.host.stars.len() {
+            let (b, a) = match self.host.paired[k] {
+                Some((pair, component)) if pair == event.pair => {
+                    let timeline = self.host.timelines[pair];
+                    let mass = |age: f64| {
+                        timeline.state_at(Years::new(age)).stars()[component.index()].mass()
+                    };
+                    let a = mass(event.age);
+                    paired_after = paired_after + a;
+                    (mass(event.age.next_down().max(0.0)), a)
+                }
+                Some(_) | None => {
+                    let m = self.member_mass(k, event.at);
+                    (m, m)
+                }
+            };
+            before = before + b;
+            after = after + a;
+        }
+        let k = kick.metres_per_second();
+        let still = k.iter().all(|v| v.total_cmp(&0.0).is_eq());
+        if still && before.total_cmp(&after).is_eq() {
+            return None;
+        }
+        let orbit = self.orbit_in(segment, event.at, before);
+        let mu_per_solar_mass =
+            self.body.orbit.gravitational_parameter().value() / self.host.initial_mass().value();
+        let mu_after = GravitationalParameter::new(mu_per_solar_mass * after.value());
+        let share = if after.value() > 0.0 {
+            paired_after.value() / after.value()
+        } else {
+            0.0
+        };
+        let kick = SystemVelocity::new([k[0] * share, k[1] * share, k[2] * share]);
+        Some((
+            supernova(&orbit, event.at, mu_after, kick, self.body.density),
+            after,
+        ))
     }
 }
 
@@ -1187,11 +2138,9 @@ fn death_of(star: &StarModel) -> Option<StarDeath> {
     let remnant = star.remnant()?;
     let at = clock_time(star, death.age())?;
     let progenitor = death.progenitor();
-    let kick = star.natal_kick().map_or(SystemVelocity::ZERO, |kick| {
-        let [x, y, z] = kick.direction().components();
-        let speed = kick.speed().value();
-        SystemVelocity::new([x * speed, y * speed, z * speed])
-    });
+    let kick = star
+        .natal_kick()
+        .map_or(SystemVelocity::ZERO, kick_velocity);
     Some(StarDeath {
         at,
         sudden: death.kind().is_sudden(),
@@ -1199,6 +2148,15 @@ fn death_of(star: &StarModel) -> Option<StarDeath> {
         after: remnant.mass(),
         kick,
     })
+}
+
+/// The velocity a natal kick gives its remnant, m s⁻¹ along the system frame's axes, which are the
+/// galactic axes' (the vertical slice's note).
+#[must_use]
+fn kick_velocity(kick: NatalKick) -> SystemVelocity {
+    let [x, y, z] = kick.direction().components();
+    let speed = kick.speed().value();
+    SystemVelocity::new([x * speed, y * speed, z * speed])
 }
 
 /// The clock time at which `star` is `age` old, in the arithmetic of plan 06's clock deaths, or
@@ -1272,7 +2230,10 @@ impl BodyFate<'_> {
     }
 }
 
+pub(crate) mod evaporation;
 mod scatter;
 
+#[cfg(test)]
+mod binary_host_tests;
 #[cfg(test)]
 mod tests;

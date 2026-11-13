@@ -1,20 +1,45 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { FakeAdapter, type FakeDevice, FakeGpu, INTEL_UHD_620_INFO } from "../../../test/fakeGpu";
+import {
+  FakeAdapter,
+  FakeCommandBuffer,
+  type FakeDevice,
+  FakeGpu,
+  FakeShaderModule,
+  FakeTextureView,
+  INTEL_UHD_620_INFO,
+} from "../../../test/fakeGpu";
 import { BUFFER_USAGE, TEXTURE_USAGE } from "../gpuFlags";
+import { ID_NONE } from "../idTarget";
 import type { KernelPair } from "../kernels";
 import type { AllocationEvent, TextureSpec } from "../memory";
-import { GraphicsStatusStore, initialGraphicsStatus } from "../status";
+import { type GraphicsFault, GraphicsStatusStore, initialGraphicsStatus } from "../status";
 import {
+  type CompileBudgetSize,
+  ColourSelfSample,
+  type DepthLayerPass,
+  DepthSelfSample,
+  type FrameSubmission,
+  type DrawItem,
   Float32BlendUnavailable,
+  type MaterialHandle,
+  type MeshHandle,
   type PassTimes,
   PresentationOnlyReadback,
+  type RenderTarget,
+  type RenderTargetSpec,
+  type TexelRect,
   type TextureHandle,
+  type WgslMaterialSpec,
 } from "../types";
-import { WebGpuRenderEngine } from "./engine";
+import { samplerKey, WebGpuRenderEngine } from "./engine";
+import { pipelineOutputs } from "./pipelineOutputs";
 
-/** An engine over a fake device with `features`. */
-async function engineOn(features: ReadonlyArray<GPUFeatureName> = []): Promise<{
+/** An engine over a fake device with `features`, and its compile budget, the default's unless given. */
+async function engineOn(
+  features: ReadonlyArray<GPUFeatureName> = [],
+  compileBudget?: CompileBudgetSize,
+): Promise<{
   readonly engine: WebGpuRenderEngine;
   readonly gpu: FakeDevice;
   readonly status: GraphicsStatusStore;
@@ -26,7 +51,7 @@ async function engineOn(features: ReadonlyArray<GPUFeatureName> = []): Promise<{
     throw new Error("the fake adapter made no device");
   }
   const status = new GraphicsStatusStore(initialGraphicsStatus("vulkan", false));
-  return { engine: new WebGpuRenderEngine(gpu, status), gpu, status };
+  return { engine: new WebGpuRenderEngine(gpu, status, compileBudget), gpu, status };
 }
 
 /** A storage texture of `mips` levels the CPU can read back. */
@@ -191,6 +216,31 @@ describe("the readback guard", () => {
     engine.writePackedCubeLevelFromBuffer(cube, 0, packed);
     engine.writePackedCubeLevel(cube, 1, new Uint32Array(2 * 2 * 6));
     await expect(engine.readTexture(cube)).rejects.toBeInstanceOf(PresentationOnlyReadback);
+  });
+});
+
+describe("staged writes (lane perf-page-long-tasks)", () => {
+  it("submits a scope's writes with the engine's next submission, inside the scope or after it", async () => {
+    const { engine, gpu } = await engineOn();
+    const usage = BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_SRC | BUFFER_USAGE.COPY_DST;
+    const heights = engine.createBuffer({ name: "heights", bytes: 64, usage, category: "other" });
+    const counts = engine.createBuffer({ name: "counts", bytes: 16, usage, category: "other" });
+    const read = engine.stagedWrites("terrain upload", () => {
+      engine.writeBuffer(heights, 0, new Float32Array(16).fill(2));
+      const reading = engine.readBuffer(counts);
+      engine.writeBuffer(heights, 0, new Float32Array(4).fill(3));
+      return reading;
+    });
+    await read;
+    const submitted = (): string[] => gpu.queue.submitted.map((buffer) => buffer.label);
+    expect([gpu.queue.writes, submitted()]).toEqual([[], ["terrain upload", "counts readback"]]);
+    await engine.readBuffer(counts);
+    expect(submitted()).toEqual([
+      "terrain upload",
+      "counts readback",
+      "terrain upload",
+      "counts readback",
+    ]);
   });
 });
 
@@ -380,12 +430,93 @@ describe("the engine's pass times", () => {
     ]).toEqual([0, 1, 2, [1, 2]]);
   });
 
+  it("resolve a frame's times at its own command buffer's end, one submission a frame (plan R14)", async () => {
+    const { engine, gpu } = await engineOn(["timestamp-query"]);
+    const submitted = vi.spyOn(gpu.queue, "submit");
+    renderEmptyFrame(engine, "frame");
+    const buffers = submitted.mock.calls.flatMap(([each]) => Array.from(each));
+    const [only] = buffers;
+    const ops = only instanceof FakeCommandBuffer ? only.commands.map(({ op }) => op) : [];
+    expect([buffers.length, only?.label, ops.slice(-2)]).toEqual([
+      1,
+      "frame",
+      ["resolveQuerySet", "copyBufferToBuffer"],
+    ]);
+    expect(gpu.encoders.map(({ label }) => label)).not.toContain("pass times");
+  });
+
   it("stay at frame 0 without timestamp-query (R07.T19)", async () => {
     const { engine } = await engineOn();
     renderEmptyFrame(engine, "frame");
     expect(engine.passTimesFrame).toBe(0);
   });
+
+  it("drop the reads their device's loss cuts short, with no error or warning", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { engine, gpu } = await engineOn(["timestamp-query"]);
+    const times = vi.fn<(times: PassTimes) => void>();
+    engine.onPassTimes(times);
+    const faults = vi.fn<(fault: GraphicsFault) => void>();
+    engine.onFault(faults);
+    // The terrain run's forced loss, as the owner's Mac met it: frames' reads still in flight.
+    gpu.holdMaps = true;
+    renderEmptyFrame(engine, "first");
+    renderEmptyFrame(engine, "second");
+    gpu.destroy();
+    await vi.waitFor(() => {
+      expect(faults).toHaveBeenCalledOnce();
+    });
+    await macrotask();
+    renderEmptyFrame(engine, "after the loss");
+    await macrotask();
+    expect([
+      vi.mocked(console.error).mock.calls,
+      vi.mocked(console.warn).mock.calls,
+      times.mock.calls,
+    ]).toEqual([[], [], []]);
+    expect(engine.passTimesFrame).toBe(3);
+  });
 });
+
+describe("the engine's log lines of a failure (R14's Mac measurements)", () => {
+  it("name a compile check's DOMException by its name and message", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.spyOn(FakeShaderModule.prototype, "getCompilationInfo").mockRejectedValue(
+      new DOMException("the device was lost", "OperationError"),
+    );
+    const { engine } = await engineOn();
+    engine.createMaterial(SYNC_TILED);
+    await vi.waitFor(() => {
+      expect(console.error).toHaveBeenCalledExactlyOnceWith(
+        `the compile check of material ${SYNC_TILED.name} failed: OperationError: the device was lost`,
+      );
+    });
+  });
+
+  it("name a pipeline's DOMException by its name and message", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.stubGlobal("navigator", { gpu: new FakeGpu([]) });
+    const { engine, gpu } = await engineOn();
+    const mesh = indexedTriangle(engine);
+    const material = await engine.createMaterialAsync(SYNC_TILED, []);
+    gpu.createRenderPipelineAsync = () =>
+      Promise.reject(new DOMException("the layout does not match", "OperationError"));
+    drawEach(outTarget(engine), mesh, [material], engine.createTexture(sampled("tiles", 1)));
+    await vi.waitFor(() => {
+      expect(console.error).toHaveBeenCalledExactlyOnceWith(
+        `the pipeline of material ${SYNC_TILED.name} could not be made: OperationError: the layout does not match`,
+      );
+    });
+  });
+});
+
+/** Runs every microtask queued before it: a read's mapping, its report or failure and its end. */
+function macrotask(): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, 0);
+  });
+}
 
 /** Renders a frame with no draws into a small target, which resolves the pending pass times. */
 function renderEmptyFrame(engine: WebGpuRenderEngine, label: string): void {
@@ -507,3 +638,1314 @@ describe("a texture bound where a 2d-array is declared", () => {
     ).rejects.toThrow(/declares tiles as 2d, but layers is 2d-array/u);
   });
 });
+
+/** A material with one sampled texture, `tiles`, whose pipelines for `meshes` are made. */
+function tiledMaterial(
+  engine: WebGpuRenderEngine,
+  name: string,
+  meshes: ReadonlyArray<MeshHandle>,
+): Promise<MaterialHandle> {
+  return engine.createMaterialAsync(
+    {
+      name,
+      displayName: name.toUpperCase(),
+      vertexWgsl: "",
+      fragmentWgsl: "",
+      uniforms: [],
+      samplers: [],
+      textures: [{ name: "tiles", binding: 0 }],
+      cullMode: "none",
+      depthWrite: false,
+      colourWrites: true,
+      blend: "none",
+    },
+    ["rgba16float"],
+    meshes,
+  );
+}
+
+/** One frame drawing `mesh` with each of `materials`, its texture `tiles`, into `target`. */
+function drawEach(
+  target: RenderTarget,
+  mesh: MeshHandle,
+  materials: ReadonlyArray<MaterialHandle>,
+  tiles: TextureHandle,
+): void {
+  target.render({
+    label: "releases",
+    viewRotation: new Float32Array(16),
+    projection: new Float32Array(16),
+    draws: materials.map((material) => ({
+      mesh,
+      material,
+      offsetFromCameraM: new Float32Array(3),
+      uniforms: {},
+      textures: { tiles },
+    })),
+    postProcesses: [],
+  });
+}
+
+/** A triangle with indices: a position buffer and an index buffer. */
+function indexedTriangle(engine: WebGpuRenderEngine): MeshHandle {
+  return engine.createMesh({
+    name: "triangle",
+    positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+    indices: new Uint32Array([0, 1, 2]),
+    topology: "triangle-list",
+    attributes: {},
+  });
+}
+
+/** A small target to draw into. */
+function outTarget(engine: WebGpuRenderEngine): RenderTarget {
+  return engine.createRenderTarget({
+    name: "out",
+    size: { widthPx: 4, heightPx: 4 },
+    format: "rgba16float",
+    mips: 1,
+    depth: false,
+    category: "render-targets",
+  });
+}
+
+describe("mesh and material releases (R10.T16.b)", () => {
+  beforeEach(() => {
+    vi.stubGlobal("navigator", { gpu: new FakeGpu([]) });
+  });
+
+  it("destroy a mesh's buffers at once, one destroyed event each with the bytes it was made with", async () => {
+    const { engine, gpu } = await engineOn();
+    const events: AllocationEvent[] = [];
+    engine.onAllocation((event) => events.push(event));
+    const mesh = indexedTriangle(engine);
+    const created = events.flatMap((event) =>
+      event.kind === "created" ? [[event.name, event.bytes, event.category]] : [],
+    );
+    engine.releaseMesh(mesh);
+    const destroyed = events.flatMap((event) =>
+      event.kind === "destroyed" ? [[event.name, event.bytes, event.category]] : [],
+    );
+    expect(created.map(([name]) => name)).toEqual(["triangle:position", "triangle:indices"]);
+    expect(destroyed).toEqual(created);
+    expect(
+      gpu.buffers.filter((b) => b.label.startsWith("triangle:")).map((b) => b.destroyed),
+    ).toEqual([true, true]);
+  });
+
+  it("refuse a released mesh in a draw, in createMaterialAsync's meshes and in a second release", async () => {
+    const { engine } = await engineOn();
+    const mesh = indexedTriangle(engine);
+    const tiles = engine.createTexture(sampled("tiles", 1));
+    const material = await tiledMaterial(engine, "flat", [mesh]);
+    engine.releaseMesh(mesh);
+    expect(() => {
+      drawEach(outTarget(engine), mesh, [material], tiles);
+    }).toThrow(/mesh triangle was released/u);
+    await expect(tiledMaterial(engine, "later", [mesh])).rejects.toThrow(
+      /mesh triangle was released/u,
+    );
+    expect(() => {
+      engine.releaseMesh(mesh);
+    }).toThrow(/mesh triangle was released/u);
+  });
+
+  it("refuse a released material in a draw and in a second release", async () => {
+    const { engine } = await engineOn();
+    const mesh = indexedTriangle(engine);
+    const tiles = engine.createTexture(sampled("tiles", 1));
+    const material = await tiledMaterial(engine, "flat", [mesh]);
+    engine.releaseMaterial(material);
+    expect(() => {
+      drawEach(outTarget(engine), mesh, [material], tiles);
+    }).toThrow(/material flat was released/u);
+    expect(() => {
+      engine.releaseMaterial(material);
+    }).toThrow(/material flat was released/u);
+  });
+
+  it("refuse the release of a mesh or material another engine made", async () => {
+    const { engine } = await engineOn();
+    const other = (await engineOn()).engine;
+    const mesh = indexedTriangle(other);
+    expect(() => {
+      engine.releaseMesh(mesh);
+    }).toThrow(/mesh triangle was not made by this engine/u);
+    const material = await tiledMaterial(other, "flat", []);
+    expect(() => {
+      engine.releaseMaterial(material);
+    }).toThrow(/material flat was not made by this engine/u);
+  });
+
+  it("leave no cached bind group of a released material: the draw path's cache is cleared", async () => {
+    const { engine, gpu } = await engineOn();
+    const mesh = indexedTriangle(engine);
+    const tiles = engine.createTexture(sampled("tiles", 1));
+    const released = await tiledMaterial(engine, "released", [mesh]);
+    const kept = await tiledMaterial(engine, "kept", [mesh]);
+    const target = outTarget(engine);
+    drawEach(target, mesh, [released, kept], tiles);
+    const made = gpu.bindGroups.length;
+    // Cached: the same frame again makes no bind group.
+    drawEach(target, mesh, [kept], tiles);
+    expect(gpu.bindGroups).toHaveLength(made);
+    engine.releaseMaterial(released);
+    // Every cached group is gone, the released material's among them: the kept one's is made again.
+    drawEach(target, mesh, [kept], tiles);
+    expect(gpu.bindGroups.length).toBeGreaterThan(made);
+  });
+});
+
+/** A `widthPx` × 4 `rgba16float` target named `name`, without depth. */
+function targetOf(engine: WebGpuRenderEngine, name: string, widthPx = 4): RenderTarget {
+  return engine.createRenderTarget({
+    name,
+    size: { widthPx, heightPx: 4 },
+    format: "rgba16float",
+    mips: 1,
+    depth: false,
+    category: "render-targets",
+  });
+}
+
+/** `draws` into `target` over a copy of `from`'s colour, under `scissor`. */
+function over(
+  target: RenderTarget,
+  from: TextureHandle,
+  scissor: TexelRect,
+  draws: ReadonlyArray<DrawItem>,
+): void {
+  target.render({
+    label: "over part",
+    viewRotation: IDENTITY_4,
+    projection: IDENTITY_4,
+    draws,
+    postProcesses: [],
+    colourFrom: from,
+    scissor,
+  });
+}
+
+/** The texture of a copy's source or destination. */
+function copiedTexture(info: unknown): unknown {
+  return typeof info === "object" && info !== null && "texture" in info ? info.texture : null;
+}
+
+describe("a frame over part of a target (R08.T16.a.2)", () => {
+  beforeEach(() => {
+    vi.stubGlobal("navigator", { gpu: new FakeGpu([]) });
+  });
+
+  it("copies the other target's colour in, loads it, and draws under the scissor", async () => {
+    const { engine, gpu } = await engineOn();
+    const mesh = indexedTriangle(engine);
+    const material = engine.createMaterial(SYNC_TILED);
+    const tiles = engine.createTexture(sampled("tiles", 1));
+    const scene = targetOf(engine, "scene");
+    const out = targetOf(engine, "out");
+    over(out, scene.colour, { x: 1, y: 2, width: 3, height: 2 }, [
+      drawItem(mesh, material, { tiles }),
+    ]);
+    const [buffer] = submittedAs(gpu, "over part");
+    const ops = buffer?.commands.map(({ op }) => op) ?? [];
+    const copy = buffer?.commands.find(({ op }) => op === "copyTextureToTexture")?.args ?? [];
+    expect({
+      first: ops.slice(0, 2),
+      copy: [copiedTexture(copy[0]), copiedTexture(copy[1]), copy[2]],
+      load: renderPasses(buffer ?? new FakeCommandBuffer("", [])).map((pass) =>
+        Array.from(pass.colorAttachments, (attachment) => attachment?.loadOp),
+      ),
+      scissor: buffer?.commands.find(({ op }) => op === "setScissorRect")?.args,
+      drawn: ops.indexOf("drawIndexed") > ops.indexOf("setScissorRect"),
+    }).toEqual({
+      first: ["copyTextureToTexture", "beginRenderPass"],
+      copy: [engine.gpuTextureOf(scene.colour), engine.gpuTextureOf(out.colour), [4, 4]],
+      load: [["load"]],
+      scissor: [1, 2, 3, 2],
+      drawn: true,
+    });
+  });
+
+  it("makes each target's colour a copy's destination", async () => {
+    const { engine } = await engineOn();
+    const out = targetOf(engine, "out");
+    expect(engine.gpuTextureOf(out.colour).usage & TEXTURE_USAGE.COPY_DST).toBe(
+      TEXTURE_USAGE.COPY_DST,
+    );
+  });
+
+  it("refuses a copy of its own colour, a scissor outside it and a source of another size, submitting nothing", async () => {
+    const { engine, gpu } = await engineOn();
+    const out = targetOf(engine, "out");
+    const wide = targetOf(engine, "wide", 8);
+    const whole = { x: 0, y: 0, width: 4, height: 4 };
+    expect(() => {
+      over(out, out.colour, whole, []);
+    }).toThrow(ColourSelfSample);
+    expect(() => {
+      over(out, wide.colour, { x: 2, y: 0, width: 3, height: 4 }, []);
+    }).toThrow(RangeError);
+    expect(() => {
+      over(out, wide.colour, whole, []);
+    }).toThrow(/wide:colour \(8 × 4, rgba16float\) is not the output's 4 × 4 rgba16float/u);
+    expect(submittedAs(gpu, "over part")).toEqual([]);
+  });
+});
+
+/** A material of `createMaterial` reading one sampled texture, `tiles`. */
+const SYNC_TILED: WgslMaterialSpec = {
+  name: "prepared",
+  displayName: "PREPARED",
+  vertexWgsl: "",
+  fragmentWgsl: "",
+  uniforms: [],
+  samplers: [],
+  textures: [{ name: "tiles", binding: 0 }],
+  cullMode: "none",
+  depthWrite: false,
+  colourWrites: true,
+  blend: "none",
+};
+
+/** Every pipeline a frame's passes set, in the order the queue took them. */
+function pipelinesSet(gpu: FakeDevice): unknown[] {
+  return gpu.queue.submitted.flatMap((buffer) =>
+    buffer instanceof FakeCommandBuffer
+      ? buffer.commands.filter(({ op }) => op === "setPipeline").map(({ args }) => args[0])
+      : [],
+  );
+}
+
+describe("prepareMaterial (R10.T14.d)", () => {
+  beforeEach(() => {
+    vi.stubGlobal("navigator", { gpu: new FakeGpu([]) });
+  });
+
+  it("makes a synchronous material's pipelines asynchronously, its first draw making none", async () => {
+    const { engine, gpu } = await engineOn();
+    const asked: string[] = [];
+    const make = gpu.createRenderPipelineAsync.bind(gpu);
+    gpu.createRenderPipelineAsync = (descriptor) => {
+      asked.push(descriptor.label ?? "");
+      return make(descriptor);
+    };
+    const mesh = indexedTriangle(engine);
+    const material = engine.createMaterial(SYNC_TILED);
+    await engine.prepareMaterial(material, ["rgba16float"], [mesh]);
+    const made = gpu.renderPipelines.length;
+    drawEach(outTarget(engine), mesh, [material], engine.createTexture(sampled("tiles", 1)));
+    expect([asked, gpu.renderPipelines.length - made]).toEqual([["prepared", "prepared"], 0]);
+  });
+
+  it("lets a draw before the pipelines are made make its own, and keeps it once they are", async () => {
+    const { engine, gpu } = await engineOn();
+    const landings: Array<() => void> = [];
+    gpu.createRenderPipelineAsync = (descriptor) =>
+      new Promise((resolve) => {
+        landings.push(() => {
+          resolve(gpu.createRenderPipeline(descriptor));
+        });
+      });
+    const mesh = indexedTriangle(engine);
+    const material = engine.createMaterial(SYNC_TILED);
+    const tiles = engine.createTexture(sampled("tiles", 1));
+    const target = outTarget(engine);
+    // The draw's own output, its preparation asked for once the compile check has answered.
+    const prepared = engine.prepareMaterial(
+      material,
+      [{ colour: "rgba16float", depth: false }],
+      [mesh],
+    );
+    await vi.waitFor(() => {
+      expect(landings).toHaveLength(1);
+    });
+    drawEach(target, mesh, [material], tiles);
+    for (const land of landings) {
+      land();
+    }
+    await prepared;
+    drawEach(target, mesh, [material], tiles);
+    const [first, second] = pipelinesSet(gpu);
+    expect([first !== undefined, second]).toEqual([true, first]);
+  });
+
+  it("leaves none of a prepared material's draws out, before or after its pipelines are made", async () => {
+    const { engine, gpu } = await engineOn();
+    const landings: Array<() => void> = [];
+    gpu.createRenderPipelineAsync = (descriptor) =>
+      new Promise((resolve) => {
+        landings.push(() => {
+          resolve(gpu.createRenderPipeline(descriptor));
+        });
+      });
+    const mesh = indexedTriangle(engine);
+    const material = engine.createMaterial(SYNC_TILED);
+    const tiles = engine.createTexture(sampled("tiles", 1));
+    const target = outTarget(engine);
+    const prepared = engine.prepareMaterial(material, ["rgba16float"], [mesh]);
+    drawEach(target, mesh, [material], tiles);
+    // The preparation asks once the material's compile check has answered, for the one pipeline
+    // the draw did not make: the target's with depth.
+    await vi.waitFor(() => {
+      expect(landings).toHaveLength(1);
+    });
+    for (const land of landings) {
+      land();
+    }
+    await prepared;
+    drawEach(target, mesh, [material], tiles);
+    const draws = gpu.queue.submitted.flatMap((buffer) =>
+      buffer instanceof FakeCommandBuffer
+        ? buffer.commands.filter(({ op }) => op === "drawIndexed")
+        : [],
+    );
+    expect(draws).toHaveLength(2);
+  });
+
+  it("prepares only the outputs asked for, a colour format with depth alone", async () => {
+    const { engine, gpu } = await engineOn();
+    const depths: boolean[] = [];
+    const make = gpu.createRenderPipelineAsync.bind(gpu);
+    gpu.createRenderPipelineAsync = (descriptor) => {
+      depths.push(descriptor.depthStencil !== undefined);
+      return make(descriptor);
+    };
+    const material = engine.createMaterial(SYNC_TILED);
+    await engine.prepareMaterial(
+      material,
+      [{ colour: "rgba16float", depth: true }],
+      [indexedTriangle(engine)],
+    );
+    expect(depths).toEqual([true]);
+  });
+
+  it("prepares nothing of a material whose shaders failed, which its check reports once", async () => {
+    const { engine, gpu } = await engineOn();
+    gpu.shaderErrors = (code) => (code.includes("oops") ? ["unresolved value 'oops'"] : []);
+    const asked: string[] = [];
+    const make = gpu.createRenderPipelineAsync.bind(gpu);
+    gpu.createRenderPipelineAsync = (descriptor) => {
+      asked.push(descriptor.label ?? "");
+      return make(descriptor);
+    };
+    const broken = engine.createMaterial({ ...SYNC_TILED, name: "broken", vertexWgsl: "oops" });
+    await engine.prepareMaterial(broken, ["rgba16float"], [indexedTriangle(engine)]);
+    expect(asked).toEqual([]);
+  });
+
+  it("asks the device for no more pipelines at once than its compile budget (plan R14)", async () => {
+    const { engine, gpu } = await engineOn([], 1);
+    const landings: Array<() => void> = [];
+    gpu.createRenderPipelineAsync = (descriptor) =>
+      new Promise((resolve) => {
+        landings.push(() => {
+          resolve(gpu.createRenderPipeline(descriptor));
+        });
+      });
+    const material = engine.createMaterial(SYNC_TILED);
+    // A colour target's two outputs, with depth and without: two pipelines, one at a time.
+    const prepared = engine.prepareMaterial(material, ["rgba16float"], [indexedTriangle(engine)]);
+    await vi.waitFor(() => {
+      expect(landings).toHaveLength(1);
+    });
+    landings[0]?.();
+    await vi.waitFor(() => {
+      expect(landings).toHaveLength(2);
+    });
+    landings[1]?.();
+    await prepared;
+    expect([landings.length, engine.compiles.mostRunning]).toEqual([2, 1]);
+  });
+
+  it("asks every pipeline at once with an unlimited budget, as before it (plan R14)", async () => {
+    const { engine, gpu } = await engineOn([], "unlimited");
+    const landings: Array<() => void> = [];
+    gpu.createRenderPipelineAsync = (descriptor) =>
+      new Promise((resolve) => {
+        landings.push(() => {
+          resolve(gpu.createRenderPipeline(descriptor));
+        });
+      });
+    const material = engine.createMaterial(SYNC_TILED);
+    const prepared = engine.prepareMaterial(material, ["rgba16float"], [indexedTriangle(engine)]);
+    await vi.waitFor(() => {
+      expect(landings).toHaveLength(2);
+    });
+    for (const land of landings) {
+      land();
+    }
+    await prepared;
+    expect(engine.compiles.mostRunning).toBe(2);
+  });
+
+  it("rejects for a released material", async () => {
+    const { engine } = await engineOn();
+    const mesh = indexedTriangle(engine);
+    const material = engine.createMaterial(SYNC_TILED);
+    engine.releaseMaterial(material);
+    await expect(engine.prepareMaterial(material, ["rgba16float"], [mesh])).rejects.toThrow(
+      /material prepared was released/u,
+    );
+  });
+});
+
+describe("a material's pipelines by its mesh's layout (R10.T14.d)", () => {
+  beforeEach(() => {
+    vi.stubGlobal("navigator", { gpu: new FakeGpu([]) });
+  });
+
+  /** A material compiled for a mesh of the triangle's layout, that mesh released after. */
+  async function compiledOnAnother(engine: WebGpuRenderEngine): Promise<MaterialHandle> {
+    const compiledFor = indexedTriangle(engine);
+    const material = await tiledMaterial(engine, "shared", [compiledFor]);
+    engine.releaseMesh(compiledFor);
+    return material;
+  }
+
+  it("draw any mesh of the layout they were compiled for, making no pipeline", async () => {
+    const { engine, gpu } = await engineOn();
+    const material = await compiledOnAnother(engine);
+    const tiles = engine.createTexture(sampled("tiles", 1));
+    const made = gpu.renderPipelines.length;
+    drawEach(outTarget(engine), indexedTriangle(engine), [material], tiles);
+    expect(gpu.renderPipelines).toHaveLength(made);
+  });
+
+  it("make one for a mesh of another layout", async () => {
+    const { engine, gpu } = await engineOn();
+    const material = await compiledOnAnother(engine);
+    const tiles = engine.createTexture(sampled("tiles", 1));
+    const made = gpu.renderPipelines.length;
+    const coloured = engine.createMesh({
+      name: "coloured",
+      positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+      indices: null,
+      topology: "triangle-list",
+      attributes: { colour: { data: new Float32Array(9), size: 3 } },
+    });
+    drawEach(outTarget(engine), coloured, [material], tiles);
+    expect(gpu.renderPipelines).toHaveLength(made + 1);
+  });
+});
+
+/** A depth-only caster: no colour, depth written, both sides (R10.T9.b). */
+const CASTER: WgslMaterialSpec = {
+  name: "caster",
+  displayName: "CASTER",
+  vertexWgsl: "",
+  fragmentWgsl: "",
+  uniforms: [],
+  samplers: [],
+  cullMode: "none",
+  depthWrite: true,
+  colourWrites: false,
+  blend: "none",
+};
+
+/** A 64² set of four layers under `shadows`. */
+const LAYERS = { name: "cascades", sizePx: 64, layers: 4, category: "shadows" } as const;
+
+const IDENTITY_4 = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+
+/** A pass of `draws` into `layer`, its projection's depth translation `depth` (clip z there). */
+function layerPass(layer: number, draws: ReadonlyArray<DrawItem>, depth = 0.5): DepthLayerPass {
+  const projection = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, depth, 1]);
+  return { label: `view:shadow ${layer}`, layer, viewRotation: IDENTITY_4, projection, draws };
+}
+
+/** A draw of `mesh` with `material`, binding `textures`. */
+function drawItem(
+  mesh: MeshHandle,
+  material: MaterialHandle,
+  textures: Readonly<Record<string, TextureHandle>> = {},
+): DrawItem {
+  return { mesh, material, offsetFromCameraM: new Float32Array(3), uniforms: {}, textures };
+}
+
+/** The command buffers the queue took whose encoder is labelled `label`. */
+function submittedAs(gpu: FakeDevice, label: string): FakeCommandBuffer[] {
+  return gpu.queue.submitted.filter(
+    (buffer): buffer is FakeCommandBuffer =>
+      buffer instanceof FakeCommandBuffer && buffer.label === label,
+  );
+}
+
+/** Whether a recorded command's argument is a render pass's descriptor. */
+function isRenderPassDescriptor(value: unknown): value is GPURenderPassDescriptor {
+  return typeof value === "object" && value !== null && "colorAttachments" in value;
+}
+
+/** The descriptor of each render pass a command buffer began. */
+function renderPasses(buffer: FakeCommandBuffer): GPURenderPassDescriptor[] {
+  return buffer.commands
+    .filter(({ op }) => op === "beginRenderPass")
+    .map(({ args }) => args[0])
+    .filter(isRenderPassDescriptor);
+}
+
+/** The texture, dimension and layers of a depth attachment's view. */
+function layerOf(
+  attachment: GPURenderPassDepthStencilAttachment | undefined,
+): ReadonlyArray<unknown> | null {
+  const view = attachment?.view;
+  if (!(view instanceof FakeTextureView)) {
+    return null;
+  }
+  const { dimension, baseArrayLayer, arrayLayerCount } = view.descriptor ?? {};
+  return [view.texture.label, dimension, baseArrayLayer, arrayLayerCount];
+}
+
+describe("depth-layer targets (R10.T9.b)", () => {
+  beforeEach(() => {
+    vi.stubGlobal("navigator", { gpu: new FakeGpu([]) });
+  });
+
+  it("tally the layers' bytes under their category, and release them at disposal", async () => {
+    const { engine, gpu } = await engineOn();
+    const events: AllocationEvent[] = [];
+    engine.onAllocation((event) => events.push(event));
+    const target = engine.createDepthLayers(LAYERS);
+    const texture = gpu.textures.find((t) => t.label === "cascades");
+    expect(texture?.descriptor).toMatchObject({
+      size: { width: 64, height: 64, depthOrArrayLayers: 4 },
+      dimension: "2d",
+      format: "depth32float",
+      mipLevelCount: 1,
+      usage: TEXTURE_USAGE.RENDER_ATTACHMENT | TEXTURE_USAGE.TEXTURE_BINDING,
+    });
+    target.dispose();
+    expect(events).toEqual([
+      { kind: "created", name: "cascades", bytes: 4 * 64 * 64 * 4, category: "shadows" },
+      { kind: "destroyed", name: "cascades", bytes: 4 * 64 * 64 * 4, category: "shadows" },
+    ]);
+    expect(texture?.destroyed).toBe(true);
+  });
+
+  it("encode each pass in a submission of its own, onto its layer, cleared to 0 and stored", async () => {
+    const { engine, gpu } = await engineOn();
+    const mesh = indexedTriangle(engine);
+    const caster = engine.createMaterial(CASTER);
+    const target = engine.createDepthLayers(LAYERS);
+    target.render("view", [layerPass(2, [drawItem(mesh, caster)]), layerPass(0, [])]);
+    const buffers = [
+      ...submittedAs(gpu, "view view:shadow 2"),
+      ...submittedAs(gpu, "view view:shadow 0"),
+    ];
+    const passes = buffers.flatMap(renderPasses);
+    const depths = passes.map(({ depthStencilAttachment }) => depthStencilAttachment);
+    expect({
+      submissions: buffers.length,
+      labels: passes.map(({ label }) => label),
+      colour: passes.map(({ colorAttachments }) => Array.from(colorAttachments)),
+      ops: depths.map((d) => [d?.depthLoadOp, d?.depthStoreOp, d?.depthClearValue]),
+      layers: depths.map(layerOf),
+      draws: buffers.map((b) => b.commands.filter(({ op }) => op === "drawIndexed").length),
+    }).toEqual({
+      submissions: 2,
+      labels: ["view:shadow 2", "view:shadow 0"],
+      colour: [[], []],
+      ops: [
+        ["clear", "store", 0],
+        ["clear", "store", 0],
+      ],
+      layers: [
+        ["cascades", "2d", 2, 1],
+        ["cascades", "2d", 0, 1],
+      ],
+      draws: [1, 0],
+    });
+  });
+
+  it("write each pass's own Frame before its submission: its matrices and the layers' size", async () => {
+    const { engine, gpu } = await engineOn();
+    // Copied as each is written, as the queue copies it: the blocks' staging is reused (plan R14).
+    const frames: Float32Array[] = [];
+    vi.spyOn(gpu.queue, "writeBuffer").mockImplementation(
+      (buffer, _bufferOffset, data, offset = 0, size = 0) => {
+        if (buffer.label === "frame uniforms" && data instanceof ArrayBuffer) {
+          frames.push(new Float32Array(data.slice(offset, offset + size)));
+        }
+        return undefined;
+      },
+    );
+    const target = engine.createDepthLayers(LAYERS);
+    target.render("view", [layerPass(1, [], 0.25), layerPass(3, [], 0.75)]);
+    // The projection's depth translation, then the viewport's width and height.
+    expect(frames.map((frame) => [frame[16 + 14], frame[32], frame[33]])).toEqual([
+      [0.25, 64, 64],
+      [0.75, 64, 64],
+    ]);
+  });
+
+  it("draw through each material's depth-only pipeline: no colour target, the material's depth state", async () => {
+    const { engine, gpu } = await engineOn();
+    const mesh = indexedTriangle(engine);
+    const caster = await engine.createMaterialAsync(CASTER, ["depth-only"], [mesh]);
+    const made = gpu.renderPipelines.filter((p) => p.label === "caster");
+    engine.createDepthLayers(LAYERS).render("view", [layerPass(0, [drawItem(mesh, caster)])]);
+    expect({
+      made: made.map((p) => [
+        Array.from(p.descriptor.fragment?.targets ?? []),
+        p.descriptor.depthStencil?.depthCompare,
+        p.descriptor.depthStencil?.depthWriteEnabled,
+      ]),
+      afterDraw: gpu.renderPipelines.filter((p) => p.label === "caster").length,
+      drawnWith: pipelinesSet(gpu).includes(made[0]),
+    }).toEqual({ made: [[[], "greater-equal", true]], afterDraw: 1, drawnWith: true });
+  });
+
+  it("make a material's pipelines for depth-only ahead, with depth and no colour", () => {
+    expect(pipelineOutputs("depth-only", "bgra8unorm")).toEqual([["depth-only", true]]);
+  });
+
+  it("refuse a layer outside the target, or named twice, submitting nothing", async () => {
+    const { engine, gpu } = await engineOn();
+    const target = engine.createDepthLayers(LAYERS);
+    const before = gpu.queue.submitted.length;
+    expect(() => {
+      target.render("view", [layerPass(0, []), layerPass(4, [])]);
+    }).toThrow(/layer 4 of cascades, which has layers 0 to 3/u);
+    expect(() => {
+      target.render("view", [layerPass(1, []), layerPass(1, [])]);
+    }).toThrow(/layer 1 of cascades again/u);
+    expect(gpu.queue.submitted).toHaveLength(before);
+  });
+
+  it("refuse a draw that samples the layers it writes, submitting nothing", async () => {
+    const { engine, gpu } = await engineOn();
+    const mesh = indexedTriangle(engine);
+    const caster = engine.createMaterial(CASTER);
+    const target = engine.createDepthLayers(LAYERS);
+    const before = gpu.queue.submitted.length;
+    expect(() => {
+      target.render("view", [layerPass(0, [drawItem(mesh, caster, { cascades: target.depth })])]);
+    }).toThrow(DepthSelfSample);
+    expect(gpu.queue.submitted).toHaveLength(before);
+  });
+
+  it("refuse the release of the layers' texture, which the target releases", async () => {
+    const { engine } = await engineOn();
+    const target = engine.createDepthLayers(LAYERS);
+    expect(() => {
+      engine.releaseTexture(target.depth);
+    }).toThrow(/belongs to a depth-layer target/u);
+  });
+
+  it("refuse layers that do not fit the device, naming the target", async () => {
+    const { engine } = await engineOn();
+    expect(() => engine.createDepthLayers({ ...LAYERS, sizePx: 8193 })).toThrow(
+      /depth layers cascades of 8193 px a side/u,
+    );
+  });
+
+  it("draw nothing once disposed, or once their engine is", async () => {
+    const { engine, gpu } = await engineOn();
+    const disposed = engine.createDepthLayers(LAYERS);
+    disposed.dispose();
+    const kept = engine.createDepthLayers({ ...LAYERS, name: "kept" });
+    engine.dispose();
+    const before = gpu.queue.submitted.length;
+    disposed.render("view", [layerPass(0, [])]);
+    kept.render("view", [layerPass(0, [])]);
+    expect({
+      submitted: gpu.queue.submitted.length - before,
+      keptDestroyed: gpu.textures.find((t) => t.label === "kept")?.destroyed,
+    }).toEqual({ submitted: 0, keptDestroyed: true });
+  });
+
+  it("bind the layers where a material declares a depth 2d-array, through a comparison sampler", async () => {
+    const { engine, gpu } = await engineOn();
+    const mesh = indexedTriangle(engine);
+    const receiver = engine.createMaterial({
+      ...SYNC_TILED,
+      name: "receiver",
+      samplers: [
+        {
+          name: "cascadesSampler",
+          filter: "linear",
+          address: "clamp-to-edge",
+          binding: 1,
+          compare: "greater-equal",
+        },
+      ],
+      textures: [{ name: "cascades", binding: 0, sampleType: "depth", viewDimension: "2d-array" }],
+    });
+    const target = engine.createDepthLayers(LAYERS);
+    outTarget(engine).render({
+      label: "receiver",
+      viewRotation: new Float32Array(16),
+      projection: new Float32Array(16),
+      draws: [drawItem(mesh, receiver, { cascades: target.depth })],
+      postProcesses: [],
+    });
+    expect({
+      views: gpu.textures.find((t) => t.label === "cascades")?.views,
+      layout: gpu.bindGroupLayouts.find((l) => l.label === "material receiver")?.descriptor.entries,
+      samplers: gpu.samplers.map(({ descriptor }) => descriptor.compare),
+    }).toEqual({
+      views: [
+        { label: "cascades layer 0", dimension: "2d", baseArrayLayer: 0, arrayLayerCount: 1 },
+        { label: "cascades layer 1", dimension: "2d", baseArrayLayer: 1, arrayLayerCount: 1 },
+        { label: "cascades layer 2", dimension: "2d", baseArrayLayer: 2, arrayLayerCount: 1 },
+        { label: "cascades layer 3", dimension: "2d", baseArrayLayer: 3, arrayLayerCount: 1 },
+        { dimension: "2d-array", aspect: "depth-only" },
+      ],
+      layout: [
+        { binding: 0, visibility: 3, texture: { sampleType: "depth", viewDimension: "2d-array" } },
+        { binding: 1, visibility: 3, sampler: { type: "comparison" } },
+      ],
+      samplers: ["greater-equal"],
+    });
+  });
+
+  it("take no resolve of their own: their passes ride the next render's", async () => {
+    const { engine } = await engineOn(["timestamp-query"]);
+    const times = vi.fn<(times: PassTimes) => void>();
+    engine.onPassTimes(times);
+    engine.createDepthLayers(LAYERS).render("view", [layerPass(0, []), layerPass(1, [])]);
+    const afterShadows = engine.passTimesFrame;
+    renderEmptyFrame(engine, "view:bodies");
+    await vi.waitFor(() => {
+      expect(times).toHaveBeenCalledOnce();
+    });
+    expect({
+      frames: [afterShadows, engine.passTimesFrame],
+      labels: times.mock.calls[0]?.[0].passes.map(({ label }) => label),
+    }).toEqual({ frames: [0, 1], labels: ["view:shadow 0", "view:shadow 1", "view:bodies"] });
+  });
+});
+
+describe("unclippedDepth (R10.T9.b)", () => {
+  beforeEach(() => {
+    vi.stubGlobal("navigator", { gpu: new FakeGpu([]) });
+  });
+
+  const UNCLIPPED: WgslMaterialSpec = { ...CASTER, name: "unclipped", unclippedDepth: true };
+
+  it("is refused without depth-clip-control, by createMaterial and createMaterialAsync alike", async () => {
+    const { engine, gpu } = await engineOn();
+    expect(() => engine.createMaterial(UNCLIPPED)).toThrow(
+      /material unclipped asks for unclippedDepth, which needs depth-clip-control/u,
+    );
+    await expect(engine.createMaterialAsync(UNCLIPPED, ["depth-only"])).rejects.toThrow(
+      /material unclipped .* depth-clip-control/u,
+    );
+    expect(gpu.shaderModules.filter((m) => m.label === "unclipped")).toEqual([]);
+  });
+
+  it("takes primitive.unclippedDepth with the feature", async () => {
+    const { engine, gpu } = await engineOn(["depth-clip-control"]);
+    await engine.createMaterialAsync(UNCLIPPED, ["depth-only"], [indexedTriangle(engine)]);
+    expect(
+      gpu.renderPipelines
+        .filter((p) => p.label === "unclipped")
+        .map((p) => p.descriptor.primitive?.unclippedDepth),
+    ).toEqual([true]);
+  });
+});
+
+/** A bit-exact kernel with a uniform, `params`, and a storage buffer, `values`. */
+const SCALER: KernelPair = {
+  name: "scaler",
+  reference: [
+    "@group(0) @binding(0) var<uniform> params : vec4u;",
+    "@group(0) @binding(1) var<storage, read_write> values : array<u32>;",
+  ].join("\n"),
+  subgroup: null,
+  readback: "bit-exact",
+};
+
+/** A storage buffer for {@link SCALER}'s `values`. */
+function valuesBuffer(engine: WebGpuRenderEngine): ReturnType<WebGpuRenderEngine["createBuffer"]> {
+  return engine.createBuffer({
+    name: "values",
+    bytes: 16,
+    usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_SRC,
+    category: "other",
+  });
+}
+
+/** Dispatches `kernel`, a {@link SCALER}, with `params` filled with `value`. */
+function scale(
+  engine: WebGpuRenderEngine,
+  kernel: ReturnType<WebGpuRenderEngine["createCompute"]>,
+  values: ReturnType<WebGpuRenderEngine["createBuffer"]>,
+  value: number,
+): void {
+  engine.dispatch(
+    kernel,
+    {
+      ...NO_BINDINGS,
+      uniforms: { params: new Uint32Array(4).fill(value) },
+      buffers: { values },
+      storage: {},
+    },
+    [1, 1, 1],
+    "scale",
+  );
+}
+
+/** The fake device's buffers not destroyed. */
+function liveBuffers(gpu: FakeDevice): number {
+  return gpu.buffers.filter((buffer) => !buffer.destroyed).length;
+}
+
+describe("the kernel cache (R01.T15)", () => {
+  it("makes one pipeline for kernels of one name and sources, a new handle each, sync or async", async () => {
+    const { engine, gpu } = await engineOn();
+    const handles = [
+      engine.createCompute(SCALER),
+      engine.createCompute({ ...SCALER }),
+      await engine.createComputeAsync(SCALER),
+    ];
+    expect(gpu.computePipelines).toHaveLength(1);
+    expect(new Set(handles).size).toBe(3);
+    expect(new Set(handles.map((handle) => engine.kernelOf(handle))).size).toBe(1);
+  });
+
+  it("tells its compile listeners of a kernel made in the background, by its name, ahead of its first draw (R08)", async () => {
+    const { engine } = await engineOn();
+    const heard: string[] = [];
+    engine.onCompile((event) => heard.push(`${event.name} ${event.lane}`));
+    await engine.createComputeAsync(SCALER);
+    expect(heard).toEqual([`${SCALER.name} ahead`]);
+  });
+
+  it("tells no compile listener once disposed (R08)", async () => {
+    const { engine } = await engineOn();
+    const heard: string[] = [];
+    engine.onCompile((event) => heard.push(event.name));
+    engine.dispose();
+    await engine.compiles.run("after the engine", async () => "pipeline");
+    expect(heard).toEqual([]);
+  });
+
+  it("makes a pipeline of its own for a kernel that differs in its name, a source or its readback", async () => {
+    const { engine, gpu } = await engineOn();
+    engine.createCompute(SCALER);
+    engine.createCompute({ ...SCALER, name: "scaler 2" });
+    engine.createCompute({ ...SCALER, reference: `${SCALER.reference}\n` });
+    engine.createCompute({ ...SCALER, subgroup: "enable subgroups;" });
+    engine.createCompute({ ...SCALER, readback: "presentation-only" });
+    expect(gpu.computePipelines).toHaveLength(5);
+  });
+
+  it("shares one compile among concurrent asynchronous creates of a kernel", async () => {
+    const { engine, gpu } = await engineOn();
+    const compiles = vi.spyOn(gpu, "createComputePipelineAsync");
+    const handles = await Promise.all([
+      engine.createComputeAsync(SCALER),
+      engine.createComputeAsync(SCALER),
+      engine.createComputeAsync({ ...SCALER }),
+    ]);
+    expect(compiles).toHaveBeenCalledOnce();
+    expect(new Set(handles.map((handle) => engine.kernelOf(handle))).size).toBe(1);
+  });
+
+  it("writes each dispatch's uniforms before its own submission, through every handle of a shared record", async () => {
+    const { engine, gpu } = await engineOn();
+    const values = valuesBuffer(engine);
+    const first = engine.createCompute(SCALER);
+    const second = engine.createCompute(SCALER);
+    const order: string[] = [];
+    vi.spyOn(gpu.queue, "writeBuffer").mockImplementation((buffer, _offset, data) => {
+      if (buffer.label === "scaler:params" && data instanceof ArrayBuffer) {
+        order.push(`write ${new Uint32Array(data)[0]}`);
+      }
+      return undefined;
+    });
+    vi.spyOn(gpu.queue, "submit").mockImplementation(() => {
+      order.push("submit");
+      return undefined;
+    });
+    scale(engine, first, values, 2);
+    scale(engine, second, values, 3);
+    scale(engine, first, values, 5);
+    expect(order).toEqual(["write 2", "submit", "write 3", "submit", "write 5", "submit"]);
+    // The one record's one uniform buffer, written by each dispatch in turn.
+    expect(gpu.buffers.filter((buffer) => buffer.label === "scaler:params")).toHaveLength(1);
+  });
+
+  it("keeps a steady dispatch's layout and bind group, forgotten as a buffer is destroyed (plan R14)", async () => {
+    const { engine, gpu } = await engineOn();
+    const values = valuesBuffer(engine);
+    const kernel = engine.createCompute(SCALER);
+    const layouts = vi.spyOn(engine.kernelOf(kernel).pipeline, "getBindGroupLayout");
+    const made = (): number => gpu.bindGroups.filter(({ label }) => label === "scaler:0").length;
+    scale(engine, kernel, values, 2);
+    scale(engine, kernel, values, 3);
+    expect([made(), layouts.mock.calls.length]).toEqual([1, 1]);
+    engine.releaseBuffer(valuesBuffer(engine));
+    scale(engine, kernel, values, 5);
+    expect([made(), layouts.mock.calls.length]).toEqual([2, 1]);
+  });
+
+  it("views a dispatch's storage texture once at each level it is bound at (plan R14)", async () => {
+    const { engine, gpu } = await engineOn();
+    const image = engine.createTexture(storageTexture("image"));
+    splat(engine, image);
+    splat(engine, image);
+    expect(gpu.textures.find(({ label }) => label === "image")?.views).toEqual([
+      { label: "image level 0", dimension: "2d", baseMipLevel: 0, mipLevelCount: 1 },
+    ]);
+  });
+
+  it("returns to its first buffers and events once N distinct kernels' handles are released", async () => {
+    const { engine, gpu } = await engineOn();
+    const values = valuesBuffer(engine);
+    const before = liveBuffers(gpu);
+    const events: AllocationEvent[] = [];
+    engine.onAllocation((event) => events.push(event));
+    const kernels = Array.from({ length: 6 }, (_, i) =>
+      engine.createCompute({ ...SCALER, name: `scaler ${i}` }),
+    );
+    for (const kernel of kernels) {
+      scale(engine, kernel, values, 1);
+    }
+    expect(liveBuffers(gpu)).toBe(before + 6);
+    for (const kernel of kernels) {
+      engine.releaseCompute(kernel);
+    }
+    expect(liveBuffers(gpu)).toBe(before);
+    const tally = (kind: "created" | "destroyed"): string[] =>
+      events.flatMap((event) => (event.kind === kind ? [`${event.name} ${event.bytes}`] : []));
+    expect(tally("destroyed")).toEqual(tally("created"));
+    expect(tally("created")).toHaveLength(6);
+    // Released, each record is forgotten: a kernel made again is compiled again.
+    engine.createCompute({ ...SCALER, name: "scaler 0" });
+    expect(gpu.computePipelines).toHaveLength(7);
+  });
+
+  it("keeps a shared record's uniform buffer until its last handle is released", async () => {
+    const { engine, gpu } = await engineOn();
+    const values = valuesBuffer(engine);
+    const first = engine.createCompute(SCALER);
+    const second = engine.createCompute(SCALER);
+    scale(engine, first, values, 1);
+    const params = (): ReadonlyArray<boolean> =>
+      gpu.buffers.filter((buffer) => buffer.label === "scaler:params").map((b) => b.destroyed);
+    engine.releaseCompute(first);
+    expect(params()).toEqual([false]);
+    scale(engine, second, values, 2);
+    engine.releaseCompute(second);
+    expect(params()).toEqual([true]);
+  });
+
+  it("refuses a released kernel in a dispatch and in a second release, and one another engine made", async () => {
+    const { engine } = await engineOn();
+    const { engine: other } = await engineOn();
+    const values = valuesBuffer(engine);
+    const kernel = engine.createCompute(SCALER);
+    engine.releaseCompute(kernel);
+    expect(() => {
+      scale(engine, kernel, values, 1);
+    }).toThrow("kernel scaler was released");
+    expect(() => {
+      engine.releaseCompute(kernel);
+    }).toThrow("kernel scaler was released");
+    expect(() => {
+      engine.releaseCompute(other.createCompute(SCALER));
+    }).toThrow("kernel scaler was not made by this engine");
+  });
+
+  it("forgets every record at a device loss: a kernel made after it is compiled again", async () => {
+    const { engine, gpu } = await engineOn();
+    engine.createCompute(SCALER);
+    const lost = new Promise<void>((resolve) => {
+      engine.onFault(() => {
+        resolve();
+      });
+    });
+    gpu.loseDevice();
+    await lost;
+    engine.createCompute(SCALER);
+    expect(gpu.computePipelines).toHaveLength(2);
+  });
+
+  it("destroys the records' uniform buffers with the rest at its disposal", async () => {
+    const { engine, gpu } = await engineOn();
+    const values = valuesBuffer(engine);
+    scale(engine, engine.createCompute(SCALER), values, 1);
+    engine.dispose();
+    expect(
+      gpu.buffers.filter((buffer) => buffer.label === "scaler:params").map((b) => b.destroyed),
+    ).toEqual([true]);
+    expect(() => engine.createCompute(SCALER)).toThrow(/disposed/u);
+  });
+});
+
+describe("the sampler cache (R10.T9.b)", () => {
+  it("keys a sampler by its filter, its address mode and its comparison", () => {
+    const plain = { filter: "linear", address: "clamp-to-edge" } as const;
+    expect([samplerKey(plain), samplerKey({ ...plain, compare: "greater-equal" })]).toEqual([
+      "linear:clamp-to-edge:none",
+      "linear:clamp-to-edge:greater-equal",
+    ]);
+  });
+});
+
+/** An empty frame named `label`, with `draws`. */
+function frameOf(label: string, draws: ReadonlyArray<DrawItem> = []): FrameSubmission {
+  return { label, viewRotation: IDENTITY_4, projection: IDENTITY_4, draws, postProcesses: [] };
+}
+
+/** A 4 × 4 scene target of `engine` with a depth of its own, and an ID target drawn with it. */
+function idTargets(
+  engine: WebGpuRenderEngine,
+  idWidthPx = 4,
+): { readonly scene: RenderTarget; readonly ids: RenderTarget } {
+  const scene = engine.createRenderTarget({
+    name: "scene",
+    size: { widthPx: 4, heightPx: 4 },
+    format: "rgba16float",
+    mips: 1,
+    depth: true,
+    category: "render-targets",
+  });
+  const ids = engine.createRenderTarget({
+    name: "ids",
+    size: { widthPx: idWidthPx, heightPx: 4 },
+    format: "r32uint",
+    mips: 1,
+    depth: false,
+    depthOf: scene,
+    category: "render-targets",
+  });
+  return { scene, ids };
+}
+
+/** A material of `spec`'s state whose `ids` binding is `sampleType`'s. */
+function idsReader(sampleType: "uint" | "float"): WgslMaterialSpec {
+  return {
+    ...SYNC_TILED,
+    name: `reads ids as ${sampleType}`,
+    textures: [{ name: "ids", binding: 0, sampleType }],
+  };
+}
+
+describe("the engine's ID target (plan R14, R14.T2.b)", () => {
+  beforeEach(() => {
+    vi.stubGlobal("navigator", { gpu: new FakeGpu([]) });
+  });
+
+  it("draws an r32uint target with another target's depth, loaded and stored", async () => {
+    const { engine, gpu } = await engineOn();
+    const { scene, ids } = idTargets(engine);
+    ids.render(frameOf("ids"));
+    const [pass] = submittedAs(gpu, "ids").flatMap(renderPasses);
+    const depth = pass?.depthStencilAttachment;
+    expect([
+      ids.depth === scene.depth,
+      [depth?.depthLoadOp, depth?.depthStoreOp],
+      layerOf(depth)?.[0],
+    ]).toEqual([true, ["load", "store"], "scene:depth"]);
+  });
+
+  it("clears an ID target's colour to none each frame, 0xffff_ffff", async () => {
+    const { engine, gpu } = await engineOn();
+    const { ids } = idTargets(engine);
+    ids.render(frameOf("ids"));
+    const [pass] = submittedAs(gpu, "ids").flatMap(renderPasses);
+    expect(
+      Array.from(pass?.colorAttachments ?? [], (attachment) => [
+        attachment?.loadOp,
+        attachment?.clearValue,
+      ]),
+    ).toEqual([["clear", { r: ID_NONE, g: 0, b: 0, a: 0 }]]);
+  });
+
+  it("refuses a draw into the ID target that samples the depth it shares", async () => {
+    const { engine } = await engineOn();
+    const { scene, ids } = idTargets(engine);
+    const draw = drawItem(indexedTriangle(engine), engine.createMaterial(SYNC_TILED), {
+      tiles: scene.depth ?? scene.colour,
+    });
+    expect(() => {
+      ids.render(frameOf("ids", [draw]));
+    }).toThrow(DepthSelfSample);
+  });
+
+  it("binds an ID target's colour as a uint texture", async () => {
+    const { engine, gpu } = await engineOn();
+    const { ids } = idTargets(engine);
+    const draw = drawItem(indexedTriangle(engine), engine.createMaterial(idsReader("uint")), {
+      ids: ids.colour,
+    });
+    outTarget(engine).render(frameOf("uint", [draw]));
+    expect(pipelinesSet(gpu)).toHaveLength(1);
+  });
+
+  it("refuses an ID target's colour bound as a float", async () => {
+    const { engine } = await engineOn();
+    const { ids } = idTargets(engine);
+    const draw = drawItem(indexedTriangle(engine), engine.createMaterial(idsReader("float")), {
+      ids: ids.colour,
+    });
+    expect(() => {
+      outTarget(engine).render(frameOf("float", [draw]));
+    }).toThrow("declares ids as float, but ids:colour is r32uint");
+  });
+
+  it("refuses a float texture bound as a uint", async () => {
+    const { engine } = await engineOn();
+    const out = outTarget(engine);
+    const scene = targetOf(engine, "scene");
+    const draw = drawItem(indexedTriangle(engine), engine.createMaterial(idsReader("uint")), {
+      ids: scene.colour,
+    });
+    expect(() => {
+      out.render(frameOf("uint", [draw]));
+    }).toThrow("declares ids as uint, but scene:colour is rgba16float");
+  });
+
+  it("refuses a post-process into an ID target", async () => {
+    const { engine } = await engineOn();
+    const { ids } = idTargets(engine);
+    const postProcess = engine.createPostProcess({
+      name: "tone",
+      displayName: "TONE",
+      fragmentWgsl: "",
+      uniforms: [],
+    });
+    expect(() => {
+      ids.render({ ...frameOf("ids"), postProcesses: [{ postProcess, uniforms: {} }] });
+    }).toThrow("an r32uint target takes no post-process");
+  });
+
+  it("refuses to draw with a depth of another size", async () => {
+    const { engine } = await engineOn();
+    const { ids } = idTargets(engine, 8);
+    expect(() => {
+      ids.render(frameOf("ids"));
+    }).toThrow("ids of 8 × 4 draws with scene's depth of 4 × 4");
+  });
+
+  it("refuses a target drawn with another engine's target's depth", async () => {
+    const { engine } = await engineOn();
+    const { scene } = idTargets((await engineOn()).engine);
+    expect(() => engine.createRenderTarget(idSpec(scene))).toThrow(
+      "texture scene:depth was not made by this engine",
+    );
+  });
+
+  it("refuses a target drawn with the depth of a target that has none", async () => {
+    const { engine } = await engineOn();
+    expect(() => engine.createRenderTarget(idSpec(outTarget(engine)))).toThrow(
+      "target ids draws with out's depth, which has none",
+    );
+  });
+
+  it("refuses a target drawn with a disposed target's depth", async () => {
+    const { engine } = await engineOn();
+    const { scene } = idTargets(engine);
+    scene.dispose();
+    expect(() => engine.createRenderTarget(idSpec(scene))).toThrow(
+      "texture scene:depth was released",
+    );
+  });
+
+  it("prepares a material's pipeline into an ID target with depth, which its draws take", async () => {
+    const { engine, gpu } = await engineOn();
+    const { ids } = idTargets(engine);
+    const mesh = indexedTriangle(engine);
+    const material = engine.createMaterial(SYNC_TILED);
+    await engine.prepareMaterial(material, [{ colour: "r32uint", depth: true }], [mesh]);
+    const made = gpu.renderPipelines.length;
+    drawEach(ids, mesh, [material], engine.createTexture(sampled("tiles", 1)));
+    expect([
+      gpu.renderPipelines.map((pipeline) => pipeline.descriptor.fragment?.targets[0]?.format),
+      gpu.renderPipelines.length - made,
+    ]).toEqual([["r32uint"], 0]);
+  });
+});
+
+/** A material with no resources writing `type` at `@location(0)`. */
+function writerOf(name: string, type: "vec4f" | "u32"): WgslMaterialSpec {
+  return {
+    ...SYNC_TILED,
+    name,
+    textures: [],
+    fragmentWgsl: `@fragment fn fragmentMain() -> @location(0) ${type} { return ${type}(); }`,
+  };
+}
+
+describe("a material's output against its target's format (plan R14, R14.T2.b's finding)", () => {
+  beforeEach(() => {
+    vi.stubGlobal("navigator", { gpu: new FakeGpu([]) });
+  });
+
+  it("refuses to prepare a vec4f output into an r32uint target, making no pipeline", async () => {
+    const { engine, gpu } = await engineOn();
+    const material = engine.createMaterial(writerOf("colours", "vec4f"));
+    const made = gpu.renderPipelines.length;
+    await expect(
+      engine.prepareMaterial(
+        material,
+        [{ colour: "r32uint", depth: true }],
+        [indexedTriangle(engine)],
+      ),
+    ).rejects.toThrow("material colours writes vec4f at @location(0), but r32uint takes u32");
+    expect(gpu.renderPipelines.length - made).toBe(0);
+  });
+
+  it("refuses to prepare a u32 output into an rgba16float target", async () => {
+    const { engine } = await engineOn();
+    const material = engine.createMaterial(writerOf("ids", "u32"));
+    await expect(
+      engine.prepareMaterial(material, ["rgba16float"], [indexedTriangle(engine)]),
+    ).rejects.toThrow("material ids writes u32 at @location(0), but rgba16float takes vec4f");
+  });
+
+  it("prepares a u32 output into r32uint and a vec4f output into rgba16float", async () => {
+    const { engine, gpu } = await engineOn();
+    const mesh = indexedTriangle(engine);
+    const made = gpu.renderPipelines.length;
+    await engine.prepareMaterial(
+      engine.createMaterial(writerOf("ids", "u32")),
+      [{ colour: "r32uint", depth: true }],
+      [mesh],
+    );
+    await engine.prepareMaterial(
+      engine.createMaterial(writerOf("colours", "vec4f")),
+      [{ colour: "rgba16float", depth: true }],
+      [mesh],
+    );
+    expect(
+      gpu.renderPipelines
+        .slice(made)
+        .map((pipeline) => pipeline.descriptor.fragment?.targets[0]?.format),
+    ).toEqual(["r32uint", "rgba16float"]);
+  });
+
+  it("refuses a vec4f output compiled for r32uint with no mesh, as the catalogue compiles it", async () => {
+    const { engine } = await engineOn();
+    await expect(
+      engine.createMaterialAsync(writerOf("colours", "vec4f"), ["r32uint"]),
+    ).rejects.toThrow("material colours writes vec4f at @location(0), but r32uint takes u32");
+  });
+
+  it("refuses a draw of a vec4f output into an ID target", async () => {
+    const { engine } = await engineOn();
+    const { ids } = idTargets(engine);
+    const draw = drawItem(
+      indexedTriangle(engine),
+      engine.createMaterial(writerOf("colours", "vec4f")),
+    );
+    expect(() => {
+      ids.render(frameOf("ids", [draw]));
+    }).toThrow("material colours writes vec4f at @location(0), but r32uint takes u32");
+  });
+});
+
+/** A 4 × 4 ID target's spec, drawn with `owner`'s depth. */
+function idSpec(owner: RenderTarget): RenderTargetSpec {
+  return {
+    name: "ids",
+    size: { widthPx: 4, heightPx: 4 },
+    format: "r32uint",
+    mips: 1,
+    depth: false,
+    depthOf: owner,
+    category: "render-targets",
+  };
+}

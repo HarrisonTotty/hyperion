@@ -65,14 +65,19 @@ pub struct SpacingRange {
 }
 
 /// The largest arc rate over a face, per unit of s on the unit sphere, (4 ÷ 3) · √(1 + 3u*) ÷
-/// (1 + u*²) at u* = (√31 − 2) ÷ 9.
-fn max_rate() -> f64 {
+/// (1 + u*²) at u* = (√31 − 2) ÷ 9: S2's `kMaxEdge` derivative for the quadratic warp, 1.704 897,
+/// which also gives a coarse field's largest cell edge and its boundary diameter (plan R09, Design
+/// note 4).
+pub(crate) fn max_rate() -> f64 {
     let u = (31.0_f64.sqrt() - 2.0) / 9.0;
     4.0 / 3.0 * (1.0 + 3.0 * u).sqrt() / (1.0 + u * u)
 }
 
-/// The smallest arc rate over a face, 2√2 ÷ 3, at an edge's midpoint.
-fn min_rate() -> f64 {
+/// The smallest arc rate over a face, 2√2 ÷ 3, at an edge's midpoint: S2's `kMinEdge` and
+/// `kMinWidth` derivative for the quadratic warp (`s2metrics.cc`), which also bounds the small
+/// craters' octave search (R09.T7.b).
+#[must_use]
+pub(crate) fn min_rate() -> f64 {
     2.0 * 2.0_f64.sqrt() / 3.0
 }
 

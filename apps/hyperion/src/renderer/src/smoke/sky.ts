@@ -28,6 +28,7 @@ import {
 import { BandLayer } from "../view/sky/band";
 import { METER_CLASS } from "../view/post/meter";
 import { HostDiscLayer, rasteriseHostDisc } from "../view/sky/disc";
+import { mipSizes } from "../view/sky/mips";
 import { packRgb9e5, unpackRgb9e5 } from "../view/sky/pack";
 import { SPLAT_POINT_FLOATS, splatCpu } from "../view/sky/splatCpu";
 import { type Checks, frameOf, halfTexels, show, texel } from "./harness";
@@ -325,7 +326,8 @@ function bakeStars(count: number, faceSizePx: number): BakeInput {
 /**
  * R06.T13.g: the bake on the GPU against its TypeScript references: the packer bit for bit, the
  * splat to 10⁻⁶, the whole bake to one mantissa step of the CPU bake, every texel finite, and both
- * memory categories in the allocation events.
+ * memory categories in the allocation events; and the tiled bake against the whole face's, bit for
+ * bit.
  */
 export async function checkSkyBake(engine: RenderEngine, checks: Checks): Promise<void> {
   if (!engine.capabilities.float32Blendable) {
@@ -373,7 +375,8 @@ export async function checkSkyBake(engine: RenderEngine, checks: Checks): Promis
   engine.dispatch(
     engine.createCompute(BAKE_PACK_KERNEL),
     {
-      uniforms: { params: Uint32Array.of(side, stride, 0, 0) },
+      // Off level 0 the solid angles' origin, the second four, is not read.
+      uniforms: { params: Uint32Array.of(side, stride, 0, 0, 0, 0, 0, 0) },
       buffers: { peak, omega, packed },
       sampled: {},
       storage: { level: { texture: level, level: 0 } },
@@ -407,6 +410,8 @@ export async function checkSkyBake(engine: RenderEngine, checks: Checks): Promis
   const count = input.directions.length / 3;
   const points = new Float32Array(4 + count * SPLAT_POINT_FLOATS);
   points[1] = size;
+  // The whole face is the splat's one tile.
+  points[2] = size;
   for (let star = 0; star < count; star += 1) {
     const at = 4 + star * SPLAT_POINT_FLOATS;
     points.set(input.directions.subarray(star * 3, star * 3 + 3), at);
@@ -448,7 +453,7 @@ export async function checkSkyBake(engine: RenderEngine, checks: Checks): Promis
       },
       [size / 8, size / 8, 1],
     );
-    engine.writeBuffer(pointBuffer, 0, Float32Array.of(face, size, 0, 0));
+    engine.writeBuffer(pointBuffer, 0, Float32Array.of(face, size, size, 0));
     splat.draw(scratch, pointBuffer, count);
     // The harness's checks run in order: each reads the GPU back before the next draws.
     // oxlint-disable-next-line no-await-in-loop
@@ -524,4 +529,45 @@ export async function checkSkyBake(engine: RenderEngine, checks: Checks): Promis
   );
   releaseBakedCube(engine, gpu);
   releaseBakedCube(engine, cpu);
+
+  // The tiled bake (the owner's priority, 2026-11-01) against the whole face's, bit for bit at
+  // every level: a face of 3 × 2ⁿ in nine tiles, with the 3,072² face's 3 → 1 step, and a face of
+  // 2ⁿ in sixteen; enough stars that texels hold several.
+  const differences: string[] = [];
+  for (const [faceSizePx, tilePx] of [
+    [96, 32],
+    [64, 16],
+  ] as const) {
+    const stars = { ...bakeStars(20_000, faceSizePx), name: `sky cube: smoke ${faceSizePx}` };
+    const whole = bakeSkyCube(engine, { ...stars, tilePx: faceSizePx });
+    const tiled = bakeSkyCube(engine, { ...stars, name: `${stars.name} tiled`, tilePx });
+    const sizes = mipSizes(faceSizePx);
+    // The harness's checks run in order: each reads the GPU back before the next draws.
+    // oxlint-disable-next-line no-await-in-loop
+    const reads = await Promise.all([
+      engine.readBuffer(whole.peak, "tolerance"),
+      engine.readBuffer(tiled.peak, "tolerance"),
+      ...sizes.flatMap((_, levelIndex) => [
+        engine.readTexture(whole.cube, levelIndex),
+        engine.readTexture(tiled.cube, levelIndex),
+      ]),
+    ]);
+    let differing = 0;
+    for (let pair = 0; pair < reads.length; pair += 2) {
+      const a = new Uint32Array(reads[pair] ?? new ArrayBuffer(0));
+      const b = new Uint32Array(reads[pair + 1] ?? new ArrayBuffer(0));
+      differing += a.length === b.length ? a.filter((bits, i) => bits !== b[i]).length : a.length;
+    }
+    differences.push(`${faceSizePx}² in ${tilePx}² tiles: ${differing} words differ`);
+    if (differing > 0 || reads.length !== 2 + 2 * sizes.length) {
+      differences.push("FAILED");
+    }
+    releaseBakedCube(engine, whole);
+    releaseBakedCube(engine, tiled);
+  }
+  checks.check(
+    "R06.T13.g the tiled bake equals the whole face's bit for bit, its peak and every level",
+    !differences.includes("FAILED"),
+    differences.filter((text) => text !== "FAILED").join("; "),
+  );
 }

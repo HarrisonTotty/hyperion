@@ -1,0 +1,878 @@
+/**
+ * A body's coarse class map for R07's disc (plan R10, T10.d; Design note 8): the classes' weights
+ * over the survey, from the height workers' field, as R07's `class-map` surface draws them.
+ *
+ * @remarks
+ * - **The map.** A worker answers it (`HeightWorkerPool.classMap`, the surface crate's
+ *   `WorkerFields::class_map`): a texel a cell of {@link CLASS_MAP_LEVEL}, 64 × 64 a face, its
+ *   weights `weights_at` at band level 0 at its centre, byte ÷ 255 (a texel of band level n is a
+ *   cell of quadtree level n + 6, R10.T2; inside Design note 8's "level 4 or shallower", and of its
+ *   "a few hundred kilobytes": 418 KB at 16 classes with R07's gutter). A texel the survey touches
+ *   in part (a field finer than level 6) takes its surveyed share, its weights `weights_at` at its
+ *   centre where the centre's field cell is surveyed and otherwise their mean at its surveyed
+ *   cells' centres, times that share, so that `elsewhere` takes the rest of it; an unsurveyed texel
+ *   is `null`, no weight ({@link classMapTexelsOf}, through R07's `packClassMap`). Where the answer
+ *   refines texels to the field's level (lane fix-coast-class-map, R10.T15.b.2), a coast's or
+ *   another bound's, their cells go in the map's fine page (`ClassMapFine`), byte ÷ 255 a cell, a
+ *   cell of no weight unsurveyed.
+ * - **The laws** are one per class, the body's (form, entry) pairs, at most 16: the class's
+ *   photometry as the worker resolves it (R10.T10.a's c A_N, its law's L(0)) on its law's row law
+ *   on the body (`classRowLaw` with `elsewhere`: a Regolith class's the body's curve on a regolith
+ *   template, R10.T10.e), a full `PhotometricLaw` of its own; a class whose palette names no
+ *   substance shades with `elsewhere`, as the lit terrain's law 0 takes such a slot
+ *   ({@link classMapLawsOf}). `elsewhere` is R07's uniform `lawFor(p, q, template)`, the body's
+ *   photometry's law, which the frame gives, so the store holds each class's photometry and makes
+ *   its laws on each `elsewhere` it is asked with. R07's disc scales every law's A for its figure
+ *   (`oblateAlbedoScale`), the classes' included, as it did.
+ * - **The maturity** (R10.T1.c's client half; decision-r10-t1c-client-scope §2.3) comes in the same
+ *   answer where the body's header carries one: each texel's band-0 code and each class's band-0
+ *   albedo nodes. The texels carry both ({@link classMapTexelsOf}), so that the disc draws each
+ *   named class's A from its nodes at the texels' codes and the point folds them into its elements'
+ *   shares; the class's law takes its node K − 1, its albedo at the body's background maturity
+ *   ({@link classMapLawsOf}).
+ * - **The melt** (plan R08, R08.T18.a): the surface says which classes' form is `Melt`
+ *   ({@link MELT_CLASS_CODE}), which R07's disc draws emitting at its melt's temperature where its
+ *   body's ground is drawn emitting ({@link classMapMeltOf}).
+ * - **The normal map** (R10.T10.g; decision-r10-t16-leans §1, remedy 1) comes in the same answer:
+ *   each surveyed cell of the field's own level with the shading normal the coarsest terrain gives
+ *   its centre, packed as R07's disc reads it (`bodies/discNormals.ts`' `packNormalMap`,
+ *   {@link normalMapTexelsOf}), so that the disc and the terrain share their cell-scale slopes at
+ *   the hand-over. The surface carries it beside the class map, texture and texels.
+ * - **The store** ({@link ClassMapStore}) owns each body's two textures, both under
+ *   `coarse-field-gpu`: it asks the pool for the maps when a body is wanted and again after each
+ *   block that surveys cells or brings what an incomplete map lacked (the pool's `onFieldChange`,
+ *   the workers' coverage), a map being complete only where its classes and its normals both are;
+ *   it remakes both textures after a device loss and releases both with the body.
+ * - **The point's elements** (R10.T14.f): as it takes a map the store queues the point integral's
+ *   elements for the frames' slices (`bodies/classMapPoint.ts`' `queueClassMapPoint`), the map it
+ *   replaces standing in for the point until they are made, and cancels a map's unfinished build as
+ *   it drops the map.
+ */
+import type { BodyIdHex, DetailSeedHex } from "@hyperion/protocol";
+
+import type { ClassMapDiscSurface } from "../appearance/bodyAppearance";
+import type { PhotometricLaw } from "../appearance/law";
+import { cancelAirPointsOf } from "../bodies/airPoint";
+import {
+  CLASS_MAP_POINT_SLICE_MS,
+  cancelClassMapPoint,
+  queueClassMapPoint,
+} from "../bodies/classMapPoint";
+import { type NormalMapTexels, normalMapTexture, packNormalMapSteps } from "../bodies/discNormals";
+import {
+  type ClassMapFineSource,
+  type ClassMapTexels,
+  type ClassMapTexelSlot,
+  type ClassMapTexelSource,
+  classMapSurface,
+  finishedSteps,
+  MAX_DISC_CLASSES,
+  packClassMapSteps,
+} from "../bodies/discSurface";
+import { EngineUnavailable } from "../engine/resilientEngine";
+import type { RenderEngine, TextureHandle } from "../engine/types";
+import type { Rgb } from "../photometry/toneCurve";
+import { fieldCellGridIndex } from "./coverage";
+import { MATURITY_NODES } from "./maturityNodes";
+import type { Face } from "./patchKey";
+import {
+  type ClassPhotometry,
+  classPhotometryOf,
+  classRowLaw,
+  MELT_CLASS_CODE,
+  PHASE_LAW,
+} from "./terrainMaterial";
+import type { ClassMapAnswer, ClassMapMaturityAnswer } from "./workers/messages";
+import { PHOTOMETRY_STRIDE } from "./workers/messages";
+import type { FieldChange, HeightWorkerPool } from "./workers/pool";
+
+/**
+ * The class map's quadtree level: 2⁶ = 64 texels along a face's side, each the cell (f, 6, i, j),
+ * its weights at band level 0 (the surface crate's `CLASS_MAP_LEVEL`).
+ */
+export const CLASS_MAP_LEVEL = 6;
+
+/** The texels along a face's side of the class map, N = 2^{@link CLASS_MAP_LEVEL}. */
+export const CLASS_MAP_FACE_TEXELS = 2 ** CLASS_MAP_LEVEL;
+
+/** The largest weight byte. */
+const BYTE_MAX = 255;
+
+/** The law the texture's construction is given for each class until a frame gives `elsewhere`. */
+const STAND_IN_LAW: PhotometricLaw = classRowLaw(PHASE_LAW.lambert, 0);
+
+/** The classes an answer holds: two bytes each. */
+function classCount(answer: ClassMapAnswer): number {
+  return answer.classes.length / 2;
+}
+
+/** A class's law before its body's: its photometry, and the A it draws (R10.T10.e). */
+interface ClassLawSource {
+  readonly photometry: ClassPhotometry;
+  readonly a: Rgb;
+}
+
+/**
+ * An answered map's classes' photometries and A, one per class in its order, `null` for a class
+ * whose palette names no substance (law code 0); with a maturity, a class's A is its node K − 1.
+ *
+ * @throws Error for photometry that is not five values a class, nodes that are not K × 3 a class,
+ *   or a law code no law has.
+ */
+function classLawSourcesOf(answer: ClassMapAnswer): ReadonlyArray<ClassLawSource | null> {
+  const classes = classCount(answer);
+  if (answer.photometry.length !== classes * PHOTOMETRY_STRIDE) {
+    throw new Error(
+      `a class map of ${String(classes)} classes has ${String(answer.photometry.length)} photometry values`,
+    );
+  }
+  const nodes = answer.maturity === undefined ? null : displayNodesOf(answer.maturity, classes);
+  return Array.from({ length: classes }, (_, k): ClassLawSource | null => {
+    const photometry = classPhotometryOf(answer.photometry, k);
+    if (photometry === null) {
+      return null;
+    }
+    // With a maturity, A is the class's albedo at the body's background maturity, its node K − 1
+    // (R10.T1.c's client half), which its nodes' factors are taken against at the point.
+    const at = 3 * (MATURITY_NODES * k + MATURITY_NODES - 1);
+    const a: Rgb =
+      nodes === null
+        ? photometry.a
+        : [nodes[at] ?? Number.NaN, nodes[at + 1] ?? Number.NaN, nodes[at + 2] ?? Number.NaN];
+    return { photometry, a };
+  });
+}
+
+/** The classes' laws on a body of uniform law `elsewhere`, each a distinct object. */
+function lawsOnBody(
+  sources: ReadonlyArray<ClassLawSource | null>,
+  elsewhere: PhotometricLaw,
+): ReadonlyArray<PhotometricLaw | null> {
+  return sources.map((source) =>
+    source === null
+      ? null
+      : {
+          ...classRowLaw(source.photometry.code, source.photometry.l0, elsewhere),
+          a: source.a,
+        },
+  );
+}
+
+/**
+ * The laws of an answered map's classes on a body of uniform law `elsewhere`, one per class in its
+ * order: each class's photometry on its law's row law on the body (`classRowLaw`; R10.T10.e), a
+ * distinct object, or `null` for a class whose palette names no substance (law code 0), which
+ * shades with `elsewhere`. Where the map carries its maturity (R10.T1.c's client half), a class's A
+ * is its node K − 1, T₀(m_body), the albedo at the body's background maturity from which its
+ * texels' nodes draw it; its row and L(0) are its photometry's either way.
+ *
+ * @throws Error for photometry that is not five values a class, nodes that are not K × 3 a class,
+ *   or a law code no law has.
+ */
+export function classMapLawsOf(
+  answer: ClassMapAnswer,
+  elsewhere: PhotometricLaw,
+): ReadonlyArray<PhotometricLaw | null> {
+  return lawsOnBody(classLawSourcesOf(answer), elsewhere);
+}
+
+/** Whether each class of an answered map has the `Melt` form ({@link MELT_CLASS_CODE}), in its order. */
+export function classMapMeltOf(answer: ClassMapAnswer): ReadonlyArray<boolean> {
+  return Array.from(
+    { length: classCount(answer) },
+    (_, k) => answer.classes[2 * k] === MELT_CLASS_CODE,
+  );
+}
+
+/**
+ * An answered map's nodes in the display channels, as its texels carry them: each class's K nodes,
+ * node j of class c at 3 (K c + j), the module's B, V and R turned to r, g and b as
+ * `classPhotometryOf` turns a law's A.
+ *
+ * @throws Error for nodes that are not K × 3 a class.
+ */
+function displayNodesOf(maturity: ClassMapMaturityAnswer, classes: number): Float32Array {
+  const values = 3 * MATURITY_NODES * classes;
+  if (maturity.nodes.length !== values) {
+    throw new Error(
+      `a class map of ${String(classes)} classes has ${String(values)} node values, not ${String(maturity.nodes.length)}`,
+    );
+  }
+  const out = new Float32Array(values);
+  for (let at = 0; at < values; at += 3) {
+    out[at] = maturity.nodes[at + 2] ?? 0;
+    out[at + 1] = maturity.nodes[at + 1] ?? 0;
+    out[at + 2] = maturity.nodes[at] ?? 0;
+  }
+  return out;
+}
+
+/**
+ * An answered map packed as R07's disc reads it (`packClassMap`, with its gutter): each texel the
+ * survey touches its weights byte ÷ 255 times its surveyed share, every other texel `null`; `null`
+ * for a map of no class, which draws as the uniform law. Where the answer carries its maturity
+ * (R10.T1.c's client half), each texel's code and the classes' nodes in the display channels, a
+ * class drawn from its nodes where its palette names a substance (a law of its own). It is
+ * {@link classMapTexelsSteps} run to its end.
+ *
+ * @throws Error for an answer at another level than {@link CLASS_MAP_LEVEL}, of more than
+ *   `MAX_DISC_CLASSES` classes, or whose texels, shares, weights and maturity codes do not agree in
+ *   number, or whose nodes are not K × 3 a class; and for a refinement whose texel is past the
+ *   answer's or not surveyed, or given twice, whose cells a side are not 2 or 4, or whose weights or
+ *   codes are not r² cells a refined texel.
+ */
+export function classMapTexelsOf(answer: ClassMapAnswer): ClassMapTexels | null {
+  return finishedSteps(classMapTexelsSteps(answer));
+}
+
+/** The answer's texels a step of {@link classMapTexelsSteps}' index takes before it yields. */
+const INDEX_STEP = 4096;
+
+/**
+ * {@link classMapTexelsOf} as steps (lane perf-main-thread; R10.T14.f's slices), for the store's
+ * take in the frames' slices: R07's `packClassMapSteps` reading the answer's bytes where they are,
+ * with no array or object a texel or a refined texel's reading. Run to its end, the same texels.
+ *
+ * @throws Error as {@link classMapTexelsOf} does, at the step that meets it.
+ */
+export function* classMapTexelsSteps(
+  answer: ClassMapAnswer,
+): Generator<void, ClassMapTexels | null, undefined> {
+  const classes = classCount(answer);
+  if (answer.level !== CLASS_MAP_LEVEL) {
+    throw new Error(
+      `a class map is at level ${String(CLASS_MAP_LEVEL)}, not ${String(answer.level)}`,
+    );
+  }
+  if (!Number.isInteger(classes) || classes > MAX_DISC_CLASSES) {
+    throw new Error(`a class map holds at most ${String(MAX_DISC_CLASSES)} classes`);
+  }
+  const count = answer.texels.length;
+  if (answer.fractions.length !== count || answer.weights.length !== count * classes) {
+    throw new Error(
+      `a class map's ${String(count)} texels have ${String(answer.fractions.length)} shares and ${String(answer.weights.length)} weights over ${String(classes)} classes`,
+    );
+  }
+  if (classes === 0) {
+    return null;
+  }
+  const n = CLASS_MAP_FACE_TEXELS;
+  // Each face texel's place among the answer's texels, (face · N + j) · N + i, −1 for none; a texel
+  // given twice is its later place.
+  const byTexel = new Int32Array(6 * n * n).fill(-1);
+  for (let t = 0; t < count; t += 1) {
+    byTexel[fieldCellGridIndex(CLASS_MAP_LEVEL, answer.texels[t] ?? 0)] = t;
+    if ((t + 1) % INDEX_STEP === 0) {
+      yield;
+    }
+  }
+  yield;
+  const { maturity } = answer;
+  const source: ClassMapTexelSource = {
+    weightsInto: (face, i, j, out) => {
+      const t = byTexel[(face * n + j) * n + i] ?? -1;
+      if (t < 0) {
+        return -1;
+      }
+      const share = answer.fractions[t] ?? 0;
+      for (let k = 0; k < classes; k += 1) {
+        out[k] = ((answer.weights[t * classes + k] ?? 0) / BYTE_MAX) * share;
+      }
+      return classes;
+    },
+    codeAt: (face, i, j) => maturity?.codes[byTexel[(face * n + j) * n + i] ?? -1] ?? Number.NaN,
+  };
+  const fine = fineSourceOf(answer, classes, source);
+  if (maturity === undefined) {
+    return yield* packClassMapSteps(n, classes, source, undefined, fine);
+  }
+  if (maturity.codes.length !== count) {
+    throw new Error(
+      `a class map's ${String(count)} texels have ${String(maturity.codes.length)} maturity codes`,
+    );
+  }
+  return yield* packClassMapSteps(
+    n,
+    classes,
+    source,
+    {
+      nodes: displayNodesOf(maturity, classes),
+      drawn: Array.from(
+        { length: classes },
+        (_, k) => classPhotometryOf(answer.photometry, k) !== null,
+      ),
+    },
+    fine,
+  );
+}
+
+/**
+ * An answered map's refined texels as R07's fine page takes them (lane fix-coast-class-map;
+ * `packClassMap`'s `fine`), read from the answer's bytes where they are (lane perf-main-thread):
+ * each refined texel's r² cells, byte ÷ 255, a cell of no weight not surveyed, and their codes under
+ * a maturity; or under the answer's `corners` its cells' survey and the (r + 1)² corners of its
+ * cells, a corner of no weight not surveyed; `undefined` where the answer refines none.
+ *
+ * @throws Error for a refined texel past the answer's texels, or a survey, weights or codes that
+ *   are not a refined texel's cells or corners.
+ */
+function fineSourceOf(
+  answer: ClassMapAnswer,
+  classes: number,
+  source: ClassMapTexelSource,
+): ClassMapFineSource | undefined {
+  const { refinement } = answer;
+  if (refinement === undefined || refinement.texels.length === 0) {
+    return undefined;
+  }
+  const cells = refinement.side * refinement.side;
+  const values = refinement.corners ? (refinement.side + 1) ** 2 : cells;
+  const refinedCount = refinement.texels.length;
+  const coded = answer.maturity !== undefined;
+  if (
+    refinement.surveyed.length !== refinedCount * cells ||
+    refinement.weights.length !== refinedCount * values * classes ||
+    refinement.codes.length !== (coded ? refinedCount * values : 0)
+  ) {
+    throw new Error(
+      `a class map's ${String(refinedCount)} refined texels of ${String(cells)} cells and ${String(values)} readings have ${String(refinement.surveyed.length)} cells, ${String(refinement.weights.length)} weights over ${String(classes)} classes and ${String(refinement.codes.length)} codes`,
+    );
+  }
+  // Each refined texel's place on the faces' grid, (face · N + j) · N + i.
+  const n = CLASS_MAP_FACE_TEXELS;
+  const grid = new Int32Array(refinedCount);
+  for (let k = 0; k < refinedCount; k += 1) {
+    const t = refinement.texels[k] ?? 0;
+    const index = answer.texels[t];
+    if (index === undefined) {
+      throw new Error(
+        `a class map's refined texel ${String(t)} is past its ${String(answer.texels.length)} texels`,
+      );
+    }
+    grid[k] = fieldCellGridIndex(CLASS_MAP_LEVEL, index);
+  }
+  const texelInto = (k: number, out: ClassMapTexelSlot): void => {
+    const at = grid[k] ?? 0;
+    const face = Math.floor(at / (n * n));
+    const j = Math.floor((at - face * n * n) / n);
+    out.face = faceAt(face);
+    out.i = at - face * n * n - j * n;
+    out.j = j;
+  };
+  const texel: ClassMapTexelSlot = { face: 0, i: 0, j: 0 };
+  return {
+    side: refinement.side,
+    corners: refinement.corners,
+    count: refinedCount,
+    texelInto,
+    ownInto: (k, out) => {
+      texelInto(k, texel);
+      return source.weightsInto(texel.face, texel.i, texel.j, out);
+    },
+    // The answer's lengths, checked above, are r² cells or (r + 1)² corners a refined texel.
+    checkReadings: () => undefined,
+    readingInto: (k, c, out) => {
+      const at = (k * values + c) * classes;
+      let any = false;
+      for (let q = 0; q < classes; q += 1) {
+        any ||= (refinement.weights[at + q] ?? 0) > 0;
+      }
+      if (!any) {
+        return -1;
+      }
+      for (let q = 0; q < classes; q += 1) {
+        out[q] = (refinement.weights[at + q] ?? 0) / BYTE_MAX;
+      }
+      return classes;
+    },
+    codeAt: (k, c) => refinement.codes[k * values + c] ?? Number.NaN,
+    surveyedAt: (k, c) => (refinement.surveyed[k * cells + c] ?? 0) > 0,
+  };
+}
+
+/** Face `n` of the cube, 0 to 5. */
+function faceAt(n: number): Face {
+  switch (n) {
+    case 0:
+    case 1:
+    case 2:
+    case 3:
+    case 4:
+    case 5:
+      return n;
+    default:
+      throw new Error(`a face is 0 to 5, not ${String(n)}`);
+  }
+}
+
+/**
+ * An answered normal map packed as R07's disc reads it (`packNormalMap`, with its gutter, at the
+ * field's level): each surveyed cell answered its pair, every other texel `NO_NORMAL`; `null` for a
+ * map of no cell, under which the datum's normal shades everywhere. It is
+ * {@link normalMapTexelsSteps} run to its end.
+ *
+ * @throws Error for a level outside 5 to 8, pairs that are not two a cell, a cell past the level's,
+ *   or a pair coordinate outside [−1, 1].
+ */
+export function normalMapTexelsOf(answer: ClassMapAnswer): NormalMapTexels | null {
+  return finishedSteps(normalMapTexelsSteps(answer));
+}
+
+/**
+ * {@link normalMapTexelsOf} as steps (lane perf-main-thread), R07's `packNormalMapSteps`.
+ *
+ * @throws Error as {@link normalMapTexelsOf} does, at the step that meets it.
+ */
+export function* normalMapTexelsSteps(
+  answer: ClassMapAnswer,
+): Generator<void, NormalMapTexels | null, undefined> {
+  if (answer.normalCells.length === 0 && answer.normalPairs.length === 0) {
+    return null;
+  }
+  return yield* packNormalMapSteps(answer.normalLevel, answer.normalCells, answer.normalPairs);
+}
+
+/**
+ * What a frame's lit bodies take their class maps from (R10.T10.d): `litBodiesOf`'s optional
+ * source, absent where no view feeds one, every disc then uniform.
+ */
+export interface ClassMapSource {
+  /**
+   * The class-map surface of `body`, its unsurveyed ground and its classes of no named substance
+   * shading with `elsewhere`; `null` where it has none.
+   */
+  classMapOf(body: BodyIdHex, elsewhere: PhotometricLaw): ClassMapDiscSurface | null;
+}
+
+/** What the store asks of the height workers (`HeightWorkerPool`'s). */
+export type ClassMapPool = Pick<HeightWorkerPool, "classMap" | "onFieldChange">;
+
+/** A body's map as the store holds it. */
+interface HeldMap {
+  readonly texels: ClassMapTexels;
+  /** Each class's photometry and A, whose laws each `elsewhere` makes (R10.T10.e). */
+  readonly sources: ReadonlyArray<ClassLawSource | null>;
+  /** Whether each class's form is `Melt` (R08.T18.a). */
+  readonly meltClasses: ReadonlyArray<boolean>;
+  /** The normal map's texels, `null` for none (no surveyed cell answered). */
+  readonly normals: NormalMapTexels | null;
+  /** Whether every texel the survey touched, and every surveyed cell's normal, was answered. */
+  readonly complete: boolean;
+  /** Whether the module read it at its refined texels' cells' corners (`ClassMapAnswer.cellCorners`). */
+  readonly cellCorners: boolean;
+  /** Its texture, `null` while the device is lost. */
+  texture: TextureHandle | null;
+  /** The normal map's texture, `null` while the device is lost or where it has none. */
+  normalTexture: TextureHandle | null;
+  /** The surface last handed out, with its `elsewhere`; `null` after each upload. */
+  surface: ClassMapDiscSurface | null;
+  /**
+   * The surface last handed out, kept across uploads: the point's stand-in once the map is
+   * replaced, whose point integral reads its texels and laws alone (R10.T14.f).
+   */
+  handedOut: ClassMapDiscSurface | null;
+}
+
+/** An answer being taken in the frames' slices ({@link ClassMapStore.step}): its body and steps. */
+interface PendingTake {
+  readonly held: HeldBody;
+  readonly steps: Generator<void, void, undefined>;
+}
+
+/** A body the store is asked for. */
+interface HeldBody {
+  readonly detailSeed: DetailSeedHex;
+  /**
+   * Whether a query is out, its answer not yet taken (lane perf-main-thread), and whether a change
+   * came since it was posted.
+   */
+  asking: boolean;
+  again: boolean;
+  map: HeldMap | null;
+}
+
+/**
+ * The bodies' class maps and normal maps on one engine, fed from a height-worker pool (R10.T10.d,
+ * R10.T10.g): two textures a body under `coarse-field-gpu`, the class map's and the normal map's,
+ * remade after a device loss and released with their body.
+ *
+ * @remarks
+ * {@link ClassMapStore.want} asks the pool for a body's map, and the store asks again after each of
+ * the body's blocks the workers take that surveys a cell, brings a cell while the map lacked one
+ * (its classes or its normals), or starts the field afresh; an answer to an older query than the
+ * body's latest is dropped. A map of no class, or none (no field held yet), leaves the body
+ * uniform; a map of no normal leaves its surface without one. A query refused by the module is
+ * reported once a body, with `console.error`, and asked again after the next block.
+ *
+ * An answer is taken in the frames' slices ({@link ClassMapStore.step}; lane perf-main-thread): its
+ * texels and normals packed a few rows a step, then its textures made, the body's map until then
+ * the one it held. The body's query is out until its answer is taken, so that the blocks meanwhile
+ * ask again once, after it, as they did while a query was out: no take is begun again and no queue
+ * grows. An answer that cannot be packed is reported as a refused query is.
+ */
+export class ClassMapStore implements ClassMapSource {
+  readonly #engine: Pick<
+    RenderEngine,
+    "createTexture" | "writeTexture" | "releaseTexture" | "onRestored"
+  >;
+  readonly #pool: ClassMapPool;
+  readonly #name: string;
+  readonly #bodies = new Map<BodyIdHex, HeldBody>();
+  /** The answers being taken in the frames' slices, a body's latest, the oldest first. */
+  readonly #takes = new Map<BodyIdHex, PendingTake>();
+  readonly #reported = new Set<BodyIdHex>();
+  readonly #unsubscribe: ReadonlyArray<() => void>;
+  #disposed = false;
+
+  /**
+   * Feeds from `pool` onto `engine`, its class maps' textures named `<name> <body>` and its normal
+   * maps' `<name> normals <body>`.
+   */
+  constructor(
+    engine: Pick<RenderEngine, "createTexture" | "writeTexture" | "releaseTexture" | "onRestored">,
+    pool: ClassMapPool,
+    name = "class map",
+  ) {
+    this.#engine = engine;
+    this.#pool = pool;
+    this.#name = name;
+    this.#unsubscribe = [
+      pool.onFieldChange((change) => {
+        this.#changed(change);
+      }),
+      engine.onRestored(() => {
+        this.#restored();
+      }),
+    ];
+  }
+
+  /** The bodies asked for, in the order first asked. */
+  get bodies(): ReadonlyArray<BodyIdHex> {
+    return [...this.#bodies.keys()];
+  }
+
+  /**
+   * Asks for `body`'s map with its detail seed (`BodyHooksDto.detail_seed`), now and after each
+   * block that changes it; a body asked for again with the same seed is left as it is, and with
+   * another starts afresh.
+   */
+  want(body: BodyIdHex, detailSeed: DetailSeedHex): void {
+    this.#assertLive();
+    const held = this.#bodies.get(body);
+    if (held?.detailSeed === detailSeed) {
+      return;
+    }
+    this.release(body);
+    this.#bodies.set(body, { detailSeed, asking: false, again: false, map: null });
+    this.#ask(body);
+  }
+
+  /** Drops `body`'s map and releases its textures; a body not asked for is no error. */
+  release(body: BodyIdHex): void {
+    const held = this.#bodies.get(body);
+    if (held === undefined) {
+      return;
+    }
+    this.#takes.delete(body);
+    this.#drop(held);
+    this.#bodies.delete(body);
+    this.#reported.delete(body);
+  }
+
+  /**
+   * The normal map `body`'s disc shades with, its texels as the class map's surface carries them
+   * (R10.T10.g); `null` where the body has no map, its map no normal, or its textures are not made
+   * (the device lost). The hand-over check reads it for its μ floor (plan R10, R10.T15.b).
+   */
+  /**
+   * Whether `body`'s map was read at its refined texels' cells' corners (lane fix-coast-class-map;
+   * `ClassMapAnswer.cellCorners`), on which its terrain draws the field's cells near the hand-over
+   * range (`TerrainFrameInput.classSets`); `false` where the body holds no map.
+   */
+  readsCellCorners(body: BodyIdHex): boolean {
+    return this.#bodies.get(body)?.map?.cellCorners === true;
+  }
+
+  normalMapOf(body: BodyIdHex): NormalMapTexels | null {
+    const map = this.#bodies.get(body)?.map ?? null;
+    return map === null || map.texture === null || map.normalTexture === null ? null : map.normals;
+  }
+
+  classMapOf(body: BodyIdHex, elsewhere: PhotometricLaw): ClassMapDiscSurface | null {
+    const map = this.#bodies.get(body)?.map ?? null;
+    if (map === null || map.texture === null) {
+      return null;
+    }
+    if (
+      map.surface?.elsewhere !== elsewhere ||
+      map.surface.weights !== map.texture ||
+      (map.surface.normals?.texture ?? null) !== map.normalTexture
+    ) {
+      map.surface = {
+        kind: "class-map",
+        weights: map.texture,
+        texels: map.texels,
+        laws: lawsOnBody(map.sources, elsewhere).map((law) => law ?? elsewhere),
+        elsewhere,
+        normals:
+          map.normals === null || map.normalTexture === null
+            ? null
+            : { texture: map.normalTexture, texels: map.normals },
+        ...(map.meltClasses.includes(true) ? { meltClasses: map.meltClasses } : {}),
+      };
+      map.handedOut = map.surface;
+    }
+    return map.surface;
+  }
+
+  /**
+   * The frame's slice of the answers' takes (lane perf-main-thread; R10.T14.f's slices): their
+   * packing's steps, the oldest answer's first, until a step ends past `budgetMs`, and each answer's
+   * textures made as its last step; a body whose answer is taken asks again if a block came
+   * meanwhile. An answer that cannot be packed is reported once a body, as a refused query is, and
+   * the body keeps the map it held.
+   *
+   * @param budgetMs - The slice's length, ms.
+   * @param now - A monotonic clock, ms.
+   * @returns Whether an answer remains to be taken.
+   */
+  step(
+    budgetMs: number = CLASS_MAP_POINT_SLICE_MS,
+    now: () => number = () => globalThis.performance.now(),
+  ): boolean {
+    if (this.#takes.size === 0) {
+      return false;
+    }
+    const startMs = now();
+    for (const [body, take] of this.#takes) {
+      for (;;) {
+        if (!(now() - startMs < budgetMs)) {
+          return true;
+        }
+        try {
+          if (take.steps.next().done === true) {
+            this.#takes.delete(body);
+            this.#answered(body, take.held);
+            break;
+          }
+        } catch (error: unknown) {
+          this.#takes.delete(body);
+          this.#refused(body, error);
+          this.#answered(body, take.held);
+          break;
+        }
+      }
+    }
+    return false;
+  }
+
+  /** Whether an answer for `body` is being taken in the frames' slices ({@link ClassMapStore.step}). */
+  taking(body: BodyIdHex): boolean {
+    return this.#takes.has(body);
+  }
+
+  /** Releases every texture and stops listening; the store cannot be used afterwards. */
+  dispose(): void {
+    if (this.#disposed) {
+      return;
+    }
+    for (const body of this.#bodies.keys()) {
+      this.release(body);
+    }
+    for (const unsubscribe of this.#unsubscribe) {
+      unsubscribe();
+    }
+    this.#disposed = true;
+  }
+
+  #assertLive(): void {
+    if (this.#disposed) {
+      throw new Error("the class-map store was disposed");
+    }
+  }
+
+  /** Posts a query for `body`, or marks it to be asked again once the one out is answered. */
+  #ask(body: BodyIdHex): void {
+    const held = this.#bodies.get(body);
+    if (held === undefined) {
+      return;
+    }
+    if (held.asking) {
+      held.again = true;
+      return;
+    }
+    held.asking = true;
+    held.again = false;
+    void this.#query(body, held).catch((error: unknown) => {
+      console.error(`the class map of ${body} could not be asked again:`, error);
+    });
+  }
+
+  /**
+   * Asks the pool for `body`'s map and, if `held` is still the body's, queues the answer's take for
+   * the frames' slices, the query out until it is taken; otherwise ends the query at once.
+   */
+  async #query(body: BodyIdHex, held: HeldBody): Promise<void> {
+    try {
+      const answer = await this.#pool.classMap(body, held.detailSeed);
+      if (this.#bodies.get(body) === held && !this.#disposed && answer !== null) {
+        this.#takes.set(body, { held, steps: this.#takeSteps(body, held, answer) });
+        return;
+      }
+    } catch (error: unknown) {
+      this.#refused(body, error);
+    }
+    this.#answered(body, held);
+  }
+
+  /** Ends `held`'s query, its answer taken or none, and asks again if a change came meanwhile. */
+  #answered(body: BodyIdHex, held: HeldBody): void {
+    held.asking = false;
+    if (held.again && this.#bodies.get(body) === held) {
+      this.#ask(body);
+    }
+  }
+
+  /** Reports a query refused or an answer that could not be taken, once a body. */
+  #refused(body: BodyIdHex, error: unknown): void {
+    if (!this.#reported.has(body)) {
+      this.#reported.add(body);
+      console.error(`the class map of ${body} could not be made:`, error);
+    }
+  }
+
+  /**
+   * Takes an answer for `body` in place of the map it held, as steps for the frames' slices: its
+   * texels and normals packed, then the new map's point elements queued for the slices, the old
+   * map's point standing in meanwhile (R10.T14.f), and its textures made.
+   */
+  *#takeSteps(
+    body: BodyIdHex,
+    held: HeldBody,
+    answer: ClassMapAnswer,
+  ): Generator<void, void, undefined> {
+    const texels = yield* classMapTexelsSteps(answer);
+    yield;
+    const normals = yield* normalMapTexelsSteps(answer);
+    yield;
+    if (this.#bodies.get(body) !== held || this.#disposed) {
+      return;
+    }
+    if (texels !== null) {
+      // Before the old map is dropped, which would cancel its build and forget its stand-in.
+      const previous = held.map;
+      queueClassMapPoint(
+        texels,
+        normals,
+        previous === null ? null : { texels: previous.texels, surface: previous.handedOut },
+      );
+    }
+    this.#drop(held);
+    if (texels === null) {
+      return;
+    }
+    const map: HeldMap = {
+      texels,
+      sources: classLawSourcesOf(answer),
+      meltClasses: classMapMeltOf(answer),
+      normals,
+      complete: answer.complete && answer.normalsComplete,
+      cellCorners: answer.cellCorners === true,
+      texture: null,
+      normalTexture: null,
+      surface: null,
+      handedOut: null,
+    };
+    held.map = map;
+    // In the step that installs the map, so that no frame meets the body with neither map's.
+    this.#upload(body, map);
+  }
+
+  /**
+   * Makes `map`'s textures, or leaves them `null` while the device is lost, for the restore: both or
+   * neither, the class map's released again where the normal map's cannot be made.
+   */
+  #upload(body: BodyIdHex, map: HeldMap): void {
+    try {
+      // R07's construction; the laws it is given stand in, `classMapOf` giving each frame's.
+      const placeholder = lawsOnBody(map.sources, STAND_IN_LAW).map((law) => law ?? STAND_IN_LAW);
+      const weights = classMapSurface(
+        this.#engine,
+        `${this.#name} ${body}`,
+        map.texels,
+        placeholder,
+        STAND_IN_LAW,
+      ).weights;
+      try {
+        map.normalTexture =
+          map.normals === null
+            ? null
+            : normalMapTexture(this.#engine, `${this.#name} normals ${body}`, map.normals).texture;
+      } catch (error: unknown) {
+        this.#engine.releaseTexture(weights);
+        throw error;
+      }
+      map.texture = weights;
+    } catch (error: unknown) {
+      if (!(error instanceof EngineUnavailable)) {
+        throw error;
+      }
+    }
+    map.surface = null;
+  }
+
+  /**
+   * Releases `held`'s textures, cancels its point's unfinished build and its air points' ratios on
+   * it (R08.T16.b), and forgets its map.
+   */
+  #drop(held: HeldBody): void {
+    if (held.map !== null) {
+      this.#release(held.map);
+      cancelClassMapPoint(held.map.texels);
+      cancelAirPointsOf(held.map.texels);
+    }
+    held.map = null;
+  }
+
+  /** Releases `map`'s textures, those it holds, and forgets them. */
+  #release(map: HeldMap): void {
+    if (map.texture !== null) {
+      this.#engine.releaseTexture(map.texture);
+      map.texture = null;
+    }
+    if (map.normalTexture !== null) {
+      this.#engine.releaseTexture(map.normalTexture);
+      map.normalTexture = null;
+    }
+  }
+
+  /** Asks again for a body whose block surveyed cells, brought what its map lacked, or started. */
+  #changed(change: FieldChange): void {
+    const held = this.#bodies.get(change.body);
+    if (held === undefined) {
+      return;
+    }
+    const incomplete = held.map !== null && !held.map.complete;
+    if (
+      change.sequence === 0 ||
+      change.newlySurveyed.length > 0 ||
+      (incomplete && change.newlyHeld.length > 0) ||
+      held.map === null
+    ) {
+      this.#ask(change.body);
+    }
+  }
+
+  /** Makes every map's textures again on the restored device. */
+  #restored(): void {
+    for (const [body, held] of this.#bodies) {
+      const map = held.map;
+      if (map === null) {
+        continue;
+      }
+      // The lost device's handles: the resilient engine drops their release.
+      this.#release(map);
+      this.#upload(body, map);
+    }
+  }
+}

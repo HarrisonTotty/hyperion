@@ -19,8 +19,14 @@ export type DepthPolicy = "reversed-z-float";
 /**
  * The colour formats a render target may have. `rgba32float` is kept out: it would double the
  * bandwidth of a bandwidth-bound GPU for no visible gain (the brainstorm's Decision "Light").
+ *
+ * @remarks
+ * `r32uint` is an ID target (plan R14, R14.T2.b; an ask of R01): a render attachment that is never
+ * blended, has no mips and is never filtered, cleared to `0xffff_ffff`, none (Design note 9), and
+ * written by a material's `u32` output; a later draw reads it as a `texture_2d<u32>` by `textureLoad` (a binding of
+ * `sampleType` `uint`). It takes the scene's depth through {@link RenderTargetSpec.depthOf}.
  */
-export type ColourTargetFormat = "rgba16float" | "rg11b10ufloat" | "rgba8unorm";
+export type ColourTargetFormat = "rgba16float" | "rg11b10ufloat" | "rgba8unorm" | "r32uint";
 
 /** A size in device pixels. */
 export interface ViewSize {
@@ -68,9 +74,20 @@ export interface TextureHandle {
 
 /**
  * A render target's colour format, or a view's canvas: `canvas` through its `-srgb` view, and
- * `canvas-in-pass` through its own format, for a submission with `encoding` `"in-pass"` (R07.T15).
+ * `canvas-in-pass` through its own format, for a submission with `encoding` `"in-pass"` (R07.T15);
+ * or `depth-only`, a {@link DepthLayerTarget}'s passes, which have a `depth32float` attachment and
+ * no colour target at all (plan R10, R10.T9.b).
  */
-export type RenderTargetFormat = ColourTargetFormat | "canvas" | "canvas-in-pass";
+export type RenderTargetFormat = ColourTargetFormat | "canvas" | "canvas-in-pass" | "depth-only";
+
+/**
+ * What a material's pipelines are prepared for ({@link RenderEngine.prepareMaterial}; plan R10,
+ * R10.T14.d): a {@link RenderTargetFormat} as `createMaterialAsync` takes it, a colour format both
+ * with and without depth, or a colour format with depth or without it alone, as a pass that always
+ * draws one way into it needs.
+ */
+export type PreparedTarget =
+  RenderTargetFormat | { readonly colour: ColourTargetFormat; readonly depth: boolean };
 
 /** An offscreen colour target to create. */
 export interface RenderTargetSpec {
@@ -81,6 +98,13 @@ export interface RenderTargetSpec {
   readonly mips: number;
   /** Whether it has a `depth32float` of its own, with `COPY_SRC` and `TEXTURE_BINDING`. */
   readonly depth: boolean;
+  /**
+   * Drawn with another target's depth, loaded and stored, in place of a depth of its own (plan
+   * R14, R14.T2.b): an ID target tested against, and writing, the scene target's depth. The other
+   * target is of the same engine, has a depth and is this one's size at each render; `depth` is
+   * then `false`.
+   */
+  readonly depthOf?: RenderTarget;
   /** `render-targets` unless a later plan names another. */
   readonly category: MemoryCategory;
 }
@@ -89,17 +113,26 @@ export interface RenderTargetSpec {
 export interface RenderTarget {
   readonly name: string;
   readonly colour: TextureHandle;
+  /** The depth it draws with: its own, {@link RenderTargetSpec.depthOf}'s, or `null` for none. */
   readonly depth: TextureHandle | null;
   resize(size: ViewSize): void;
   /**
    * Renders into level 0; a chain of levels is one target per level.
    *
-   * @throws {@link DepthSelfSample} when a draw samples the target's own depth, and
-   * {@link ColourSelfSample} when the pass that writes its colour (the draws', or the last
-   * post-process's) samples it.
+   * @throws {@link DepthSelfSample} when a draw samples the depth the target draws with, its own
+   * or {@link RenderTargetSpec.depthOf}'s, and {@link ColourSelfSample} when the pass that writes
+   * its colour (the draws', or the last post-process's) samples it.
+   * @throws Error for an `r32uint` target's frame with post-processes, or a `depthOf` target whose
+   *   depth is gone or of another size (plan R14, R14.T2.b).
    */
   render(frame: FrameSubmission): void;
   dispose(): void;
+}
+
+/** One render of {@link RenderEngine.renderTargets}: a target and the frame drawn into it. */
+export interface TargetRender {
+  readonly target: RenderTarget;
+  readonly frame: FrameSubmission;
 }
 
 /** The GPU-side arguments of an indirect draw or dispatch, in WebGPU's layout. */
@@ -107,6 +140,80 @@ export interface IndirectArgs {
   /** Created with `GPUBufferUsage.INDIRECT`. */
   readonly buffer: BufferHandle;
   readonly offsetBytes: number;
+}
+
+/**
+ * A depth-only target of square array layers to create (plan R10, R10.T9.b): the terrain's shadow
+ * cascades, each layer drawn by a pass of its own and the whole sampled as one
+ * `texture_depth_2d_array`.
+ */
+export interface DepthLayersSpec {
+  /** Its name, and its texture's in allocation events. */
+  readonly name: string;
+  /** Texels on a side of each layer, at most the device's `maxTextureDimension2D`. */
+  readonly sizePx: number;
+  /** Array layers, 1 to 256 (WebGPU's default `maxTextureArrayLayers`). */
+  readonly layers: number;
+  /** `shadows` for the cascades. */
+  readonly category: MemoryCategory;
+}
+
+/**
+ * One pass of a {@link DepthLayerTarget}'s render: its draws into one layer, depth only.
+ *
+ * @remarks
+ * The layer is cleared to 0, reversed depth's far, before the draws, and stored. The `Frame` the
+ * draws read is this pass's own, from its matrices and the layers' size, as a
+ * {@link FrameSubmission}'s is: each pass is a submission of its own.
+ */
+export interface DepthLayerPass {
+  /** The pass's label in {@link PassTimes}, stable across frames (R12 keys its records on it). */
+  readonly label: string;
+  /** The layer it draws into, 0 to `layers` − 1. */
+  readonly layer: number;
+  /** As {@link FrameSubmission.viewRotation}: the light's axes, for a cascade. */
+  readonly viewRotation: Float32Array;
+  /** As {@link FrameSubmission.projection}: reversed depth, WebGPU clip space, column-major. */
+  readonly projection: Float32Array;
+  /** Encoded in order, each through its material's pipeline for `depth-only`. */
+  readonly draws: ReadonlyArray<DrawItem>;
+}
+
+/**
+ * A depth-only target of array layers (plan R10, R10.T9.b): one `depth32float` 2D-array texture,
+ * each layer rendered as its own attachment, sampled by later passes as a `texture_depth_2d_array`,
+ * through a comparison sampler ({@link SamplerSpec.compare}) for shadows.
+ */
+export interface DepthLayerTarget {
+  readonly name: string;
+  /** Texels on a side of each layer. */
+  readonly sizePx: number;
+  readonly layers: number;
+  /**
+   * The layers, `depth32float`, with `RENDER_ATTACHMENT` and `TEXTURE_BINDING`, made through the
+   * engine's one creation path under the spec's category. A material binds it with `sampleType`
+   * `depth` and `viewDimension` `2d-array`; the target owns it and releases it at its disposal.
+   */
+  readonly depth: TextureHandle;
+  /**
+   * Encodes and submits every pass, in order, each a submission of its own, and each timed under
+   * its label.
+   *
+   * @remarks
+   * The passes take no resolve of their own: their times ride the engine's next one, as a
+   * dispatch's do, which is the same view's next render's (decision-r10-t9b-design D1). A layer no
+   * pass names keeps what it holds. A render of no passes submits nothing; a disposed target, or
+   * one whose engine was lost or disposed, draws nothing.
+   *
+   * @param owner - The view drawing them, which names their command encoders, and through which the
+   *   views check counts their main-thread time (`<owner>:shadows`).
+   * @throws Error naming the target and the layer for a pass's layer outside 0 to `layers` − 1, or
+   *   a layer two passes name, whose second clear would lose the first's draws.
+   * @throws {@link DepthSelfSample} when a draw samples the target's own depth. Both are checked
+   *   before any pass is encoded, so nothing is submitted.
+   */
+  render(owner: string, passes: ReadonlyArray<DepthLayerPass>): void;
+  dispose(): void;
 }
 
 /** One frame's GPU time per labelled pass. */
@@ -150,13 +257,23 @@ export interface MeshSpec {
   readonly instanceAttributes?: Readonly<Record<string, VertexAttribute>>;
 }
 
+/** A shader stage a `@group(2)` binding may be visible to. */
+export type ShaderStageName = "vertex" | "fragment";
+
 /**
- * A storage buffer a material reads, read-only in the vertex and fragment stages, at
- * `@group(2) @binding(binding)` (Design note 23).
+ * A storage buffer a material reads, read-only, at `@group(2) @binding(binding)` (Design note 23).
+ *
+ * @remarks
+ * Visible to both stages unless {@link stages} names fewer. WebGPU counts a storage buffer against
+ * `maxStorageBuffersPerShaderStage` in each stage its entry is visible to, and the engine never
+ * raises that limit from its default of eight (R10's decision-r10-t10b-r09-t2e §5), so a material
+ * that reads more than eight across its two stages declares each binding's own stages.
  */
 export interface StorageBufferSpec {
   readonly name: string;
   readonly binding: number;
+  /** The stages that read it, both by default; the composed WGSL must read it in no other. */
+  readonly stages?: ReadonlyArray<ShaderStageName>;
 }
 
 /**
@@ -169,7 +286,8 @@ export interface TextureBindingSpec {
   /**
    * `float` by default; `depth` for a `RenderTarget.depth` read as `texture_depth_2d` with
    * `textureLoad` (R05); `unfilterable-float` for an `rgba32float` read without
-   * `float32-filterable`.
+   * `float32-filterable`; `uint` for an ID target's `r32uint` read as `texture_2d<u32>` with
+   * `textureLoad` (plan R14, R14.T2.b), which takes no other format and no other takes it.
    */
   readonly sampleType?: "float" | "unfilterable-float" | "depth" | "uint" | "sint";
   /**
@@ -241,11 +359,23 @@ export interface UniformSpec {
 /** A sampler a material or post-process declares. */
 export interface SamplerSpec {
   readonly name: string;
-  /** `linear` binds as a filtering sampler, `nearest` as a non-filtering one. */
+  /**
+   * `linear` binds as a filtering sampler, `nearest` as a non-filtering one; a comparison sampler
+   * binds as `comparison` either way.
+   */
   readonly filter: "nearest" | "linear";
   readonly address: "clamp-to-edge" | "repeat";
   /** Its `@group(2)` binding (Design note 23). */
   readonly binding: number;
+  /**
+   * `greater-equal` makes it a comparison sampler (plan R10, R10.T9.b), declared
+   * `sampler_comparison` and read by `textureSampleCompare` or `textureSampleCompareLevel` from a
+   * texture bound with `sampleType` `depth`: a texel's comparison gives 1 where the reference is at
+   * least the stored depth (under reversed depth, a receiver as near the light as the nearest
+   * caster, or nearer) and 0 elsewhere. With `filter` `linear` the four nearest texels' results
+   * are filtered bilinearly: 2 × 2 PCF.
+   */
+  readonly compare?: "greater-equal";
 }
 
 /** One view: a canvas with its own context and depth, drawn by the engine's one device. */
@@ -311,6 +441,19 @@ export interface FrameSubmission {
    * expires once the task yields.
    */
   readonly colourLoad?: "clear" | "load";
+  /**
+   * A texture of the output's size and format whose level 0 is copied into the output's colour
+   * before the draws, whose pass then loads colour and depth as `colourLoad: "load"` does: with
+   * {@link FrameSubmission.scissor}, a pass over part of a frame whose rest keeps an earlier pass's
+   * colour (R08.T16.a.2's composite over the air's area). A target's only: a view refuses it.
+   * Ignored where the frame has post-processes.
+   */
+  readonly colourFrom?: TextureHandle;
+  /**
+   * The output's pixels the draws may write, from its top left; the whole output where absent.
+   * Ignored where the frame has post-processes.
+   */
+  readonly scissor?: TexelRect;
 }
 
 /** One post-process in a frame, with its per-frame values, shaped like a {@link DrawItem}. */
@@ -349,6 +492,10 @@ export interface DrawItem {
  * `Frame` from `view/shaders/frame.wgsl` included by string concatenation. The two sources may be
  * the same module. A texture bound per draw is a `DrawItem.textures` entry named in
  * {@link WgslMaterialSpec.textures}.
+ *
+ * The one exception to `@location(0)` is a material drawn into a `depth-only` target, a
+ * {@link DepthLayerTarget}'s passes (plan R10, R10.T9.b): its `fragmentMain` writes no location.
+ * Its pipelines have no colour target and keep the fragment stage, so that it may `discard`.
  */
 export interface WgslMaterialSpec {
   readonly name: string;
@@ -378,9 +525,29 @@ export interface WgslMaterialSpec {
   readonly storageBuffers?: ReadonlyArray<StorageBufferSpec>;
   /**
    * Positive is away from the camera, whatever the depth direction (R02's hull occluder faces;
-   * never set on a line pass).
+   * never set on a line pass; the shadow cascades' casters, plan R10, R10.T9.b).
+   *
+   * @remarks
+   * WebGPU's `depthBias` (a whole number of the depth format's least resolvable differences),
+   * `depthBiasSlopeScale` and `depthBiasClamp`, each negated for reversed depth. `clamp`, in depth
+   * units and positive, bounds the bias's size; 0 or absent bounds it not at all.
    */
-  readonly depthBiasAway?: { readonly constant: number; readonly slopeScale: number };
+  readonly depthBiasAway?: {
+    readonly constant: number;
+    readonly slopeScale: number;
+    readonly clamp?: number;
+  };
+  /**
+   * `primitive.unclippedDepth` (plan R10, R10.T9.b): a fragment's depth outside [0, 1] is clamped
+   * to the range rather than the primitive clipped there, so that a caster nearer the light than a
+   * cascade's near plane is still stored, at the near plane ("pancaking").
+   *
+   * @remarks
+   * Only on a device with `depth-clip-control` ({@link GpuCapabilities.depthClipControl});
+   * creating a material with it on any other throws, since there the cascades pull their near
+   * plane back instead (decision-r10-t9-split §5(e) and (g)).
+   */
+  readonly unclippedDepth?: boolean;
 }
 
 /**
@@ -431,9 +598,45 @@ export interface RenderEngine {
    * `ResilientEngine` makes a view while there is no device too: it draws from the restore on.
    */
   createView(canvas: HTMLCanvasElement, name: string): RenderView;
-  /** An offscreen colour target with its own depth: HDR, bloom chains, stills, the harness. */
+  /**
+   * An offscreen colour target with its own depth or another's: HDR, bloom chains, stills, the
+   * harness, an ID target.
+   *
+   * @throws Error naming the target when it does not fit the device, or its
+   *   {@link RenderTargetSpec.depthOf} has no depth or is not this engine's live target's.
+   */
   createRenderTarget(spec: RenderTargetSpec): RenderTarget;
+  /**
+   * Renders each frame into its target, in order, in one submission (plan R14, the owner's Mac): a
+   * chain of targets, each sampling the ones before, such as bloom's levels, draws exactly as each
+   * target's own `render` in turn would, in one command buffer and one write of its uniforms
+   * rather than one a target; a disposed target's render is left out, as its `render` draws
+   * nothing.
+   *
+   * @throws as each target's `render` does, before anything is encoded, so that nothing of the
+   *   chain is submitted; Error for a target another engine made.
+   */
+  renderTargets(renders: ReadonlyArray<TargetRender>): void;
+  /**
+   * A depth-only target of array layers (plan R10, R10.T9.b): the terrain's shadow cascades, one
+   * set for the engine, drawn again for each view.
+   *
+   * @remarks
+   * As a render target's, its texture belongs to the lost device after a loss, and its owner makes
+   * it again at {@link RenderEngine.onRestored}; `releaseTexture` refuses its depth, which its
+   * disposal releases.
+   *
+   * @throws Error naming the target for a size that is not a whole number of texels from 1 to the
+   *   device's `maxTextureDimension2D`, or a layer count that is not a whole number from 1 to 256.
+   */
+  createDepthLayers(spec: DepthLayersSpec): DepthLayerTarget;
   createMesh(spec: MeshSpec): MeshHandle;
+  /**
+   * A material, its pipelines made as its draws need them.
+   *
+   * @throws Error naming the material and `depth-clip-control` for a material with
+   *   {@link WgslMaterialSpec.unclippedDepth} on a device without that feature.
+   */
   createMaterial(spec: WgslMaterialSpec): MaterialHandle;
   /**
    * Resolves once the material's shaders are compiled and its pipelines for `meshes` into
@@ -443,13 +646,40 @@ export interface RenderEngine {
    * A pipeline depends on the mesh's vertex layout as well; a mesh not named here has its pipeline
    * made asynchronously at its first draw, which is left out until it is ready.
    *
-   * @throws Error, as a rejection, naming the material and the compiler's messages.
+   * @throws Error, as a rejection, naming the material and the compiler's messages; naming the
+   *   material and `depth-clip-control`, as {@link RenderEngine.createMaterial} throws it; or naming
+   *   the material, a target's format and the two types, for a fragment output the format does not
+   *   take, `meshes` or none (plan R14, R14.T2.b's finding).
    */
   createMaterialAsync(
     spec: WgslMaterialSpec,
     targets: ReadonlyArray<RenderTargetFormat>,
     meshes?: ReadonlyArray<MeshHandle>,
   ): Promise<MaterialHandle>;
+  /**
+   * Makes a material's pipelines for `meshes` into `targets` ahead of their first draws, by
+   * `createRenderPipelineAsync`, and resolves once they are made (plan R10, R10.T14.d).
+   *
+   * @remarks
+   * A material of {@link RenderEngine.createMaterial} makes a missing pipeline synchronously at the
+   * draw that needs it, on the GPU process's main thread, which stops every view of the page for
+   * as long as the driver compiles it (R07's smooth mesh 1.5 s on a cold shader cache, at a body's
+   * hand-over to the terrain). Prepared, its draws find their pipelines made. A draw before one is
+   * made still makes it synchronously, as without the preparation, so that nothing is left
+   * undrawn, and a pipeline already made is kept. For a material of `createMaterialAsync`, whose
+   * draws wait for their pipelines, it makes them as that does. A material whose shaders failed to
+   * compile, already reported, is not prepared.
+   *
+   * @throws Error, as a rejection, where a pipeline could not be made, or the material or a mesh
+   *   was released; a draw then makes the pipeline itself. A fragment output a target's format
+   *   does not take is refused by name, the material, the format and the two types (plan R14,
+   *   R14.T2.b's finding), and again by a draw that would make the pipeline.
+   */
+  prepareMaterial(
+    material: MaterialHandle,
+    targets: ReadonlyArray<PreparedTarget>,
+    meshes: ReadonlyArray<MeshHandle>,
+  ): Promise<void>;
   createPostProcess(spec: WgslPostProcessSpec): PostProcessHandle;
   /** The variant is chosen by `selectKernel` against {@link RenderEngine.capabilities}. */
   createCompute(pair: KernelPair): ComputeHandle;
@@ -476,12 +706,17 @@ export interface RenderEngine {
    *
    * @param face - One face, 0–5, which the buffer then holds alone (R06.T13.g, so that the bake's
    *   staging is one face of one level); all six, face after face, when absent.
+   * @param region - Texels of that face's level, which the buffer then holds alone, its rows
+   *   padded to its width (R06's tiled bake, the owner's priority of 2026-11-01); the whole level
+   *   when absent.
+   * @throws Error for a region without a face, or outside the level.
    */
   writePackedCubeLevelFromBuffer(
     cube: TextureHandle,
     level: number,
     packed: BufferHandle,
     face?: number,
+    region?: TexelRect,
   ): void;
   /**
    * An additive `point-list` pass into a 2D `rgba32float` bake target (R06's sky splat).
@@ -517,6 +752,46 @@ export interface RenderEngine {
    */
   releaseTexture(texture: TextureHandle): void;
   /**
+   * Destroys a mesh this engine made, at once: its vertex and index buffers, each raising its
+   * `destroyed` allocation event with the bytes it was made with (plan R10, R10.T16.b;
+   * decision-r10-t16-contracts §1).
+   *
+   * @remarks
+   * The handle is refused by every later call: a draw of it, `createMaterialAsync`'s `meshes`, and a
+   * second release. As {@link RenderEngine.releaseBuffer}'s, a caller never releases a mesh a frame
+   * not yet submitted holds. `ResilientEngine` drops the release of a mesh a lost engine made.
+   * @throws Error for a handle this engine did not make or has released.
+   */
+  releaseMesh(mesh: MeshHandle): void;
+  /**
+   * Forgets a material this engine made (R10.T16.b): its record, with its shader modules, layouts
+   * and pipelines, which WebGPU cannot destroy and which go with their last reference, and every
+   * bind group the draw path keeps, so that none of the material's is held.
+   *
+   * @remarks
+   * The handle is refused by every later call: a draw of it and a second release. A caller never
+   * releases a material a frame not yet submitted draws. `ResilientEngine` drops the release of a
+   * material a lost engine made.
+   * @throws Error for a handle this engine did not make or has released.
+   */
+  releaseMaterial(material: MaterialHandle): void;
+  /**
+   * Lets a kernel's handle go (plan R01, R01.T15).
+   *
+   * @remarks
+   * Each `createCompute` or `createComputeAsync` returns a new handle over the device's one record
+   * of its kernel, by name, readback class, sources, entry point, constants and layout. The last
+   * handle released over a record destroys its uniform buffers, each raising its `destroyed`
+   * allocation event with the bytes it was made with, and the engine forgets the record, with its
+   * pipeline, which WebGPU cannot destroy and which goes with its last reference. A handle dropped
+   * unreleased keeps its record until the device is lost or the engine disposed, so the records
+   * held are bounded by the distinct kernels made. The handle is refused by every later call: a
+   * dispatch of it and a second release. A caller never releases a kernel a dispatch not yet made
+   * needs. `ResilientEngine` drops the release of a kernel a lost engine made.
+   * @throws Error for a handle this engine did not make or has released.
+   */
+  releaseCompute(kernel: ComputeHandle): void;
+  /**
    * Dispatches a kernel.
    *
    * @param workgroups - Workgroup counts, or GPU-written ones (an indirect dispatch).
@@ -528,6 +803,21 @@ export interface RenderEngine {
     workgroups: readonly [number, number, number] | IndirectArgs,
     pass?: string,
   ): void;
+  /**
+   * Runs `write` with its buffer and texture writes staged (lane perf-page-long-tasks): their
+   * bytes copied, as each is made, into one buffer mapped at its creation, and copied from it on
+   * the GPU in the order made, submitted with the engine's next submission (a frame's) or before
+   * its next destruction or write outside a scope, so that each takes effect before anything that
+   * could read it, as a queue write does; a scope inside another joins it.
+   *
+   * @remarks
+   * A queue write passes its bytes through the GPU process's command stream, which the page's
+   * thread waits on once it is full, until a GPU frame of the GPU process's ends: behind frames of
+   * seconds, a patch's uploads stopped the page's thread for up to 48 s (`stagedWrites.ts`). A
+   * mapped buffer's bytes go through shared memory, so a staged write never waits. It is for the
+   * bulk uploads outside the frame (a baked patch, a coverage mask, an atmosphere's tables).
+   */
+  stagedWrites<T>(label: string, write: () => T): T;
   writeBuffer(buffer: BufferHandle, offsetBytes: number, data: ArrayBufferView): void;
   /** Each write raises an `uploaded` event. */
   writeTexture(
@@ -575,6 +865,12 @@ export interface RenderEngine {
   /** Every creation, destruction and upload, with its byte size and category. */
   onAllocation(listener: (event: AllocationEvent) => void): () => void;
   /**
+   * Every asynchronous pipeline compile the device's budget ran (`webgpu/compileBudget.ts`), as it
+   * settles: an inspection profile's create-to-ready times (plan R08, fix-r08-decked-air-route).
+   * `ResilientEngine` reports the current engine's, a restored device's among them.
+   */
+  onCompile(listener: (event: CompileEvent) => void): () => void;
+  /**
    * Every fault, as it happens. The engine `loadRenderEngine` returns has already told the status
    * store of a lost device; a listener does not dispatch it again.
    */
@@ -585,11 +881,39 @@ export interface RenderEngine {
    * @remarks
    * Views survive a rebuild, re-created at their sizes; every other handle belonged to the lost
    * device and is made again by the caller here. Only the engine `loadRenderEngine` returns fires
-   * it. Between the loss and the restore, a creation throws `EngineUnavailable`
+   * it, calling its listeners in the order they were added, each once a restore: so an owner of
+   * handles others take from it (the terrain session's materials, R10.T14.d) makes them again before
+   * any of those added after it asks. Between the loss and the restore, a creation throws `EngineUnavailable`
    * (`resilientEngine.ts`), a view draws nothing, and writes and dispatches are dropped.
    */
   onRestored(listener: () => void): () => void;
   dispose(): void;
+}
+
+/**
+ * How many of a device's pipeline compiles run at once (`webgpu/compileBudget.ts`): a whole number
+ * from 1, or `unlimited`, each asked at once, as before the budget.
+ */
+export type CompileBudgetSize = number | "unlimited";
+
+/**
+ * Where a compile waits in the device's budget: `draw`, a pipeline a draw is waiting for now, ahead
+ * of every other; `ahead`, one made ahead of its first draw, in the order asked.
+ */
+export type CompileLane = "draw" | "ahead";
+
+/**
+ * One asynchronous pipeline compile the device's budget ran, as it settled
+ * ({@link RenderEngine.onCompile}; plan R08, fix-r08-decked-air-route).
+ */
+export interface CompileEvent {
+  /** The pipeline's owner: its kernel's, material's, post pass's or splat's name. */
+  readonly name: string;
+  readonly lane: CompileLane;
+  /** Its wait for a place in the budget, from its asking to its create call, ms. */
+  readonly waitedMs: number;
+  /** From its create call to its pipeline's being ready, or its failure, wall-clock ms. */
+  readonly ms: number;
 }
 
 /** The WebGPU module's one export, `createWebGpuEngine`, which only `loadEngine.ts` imports. */
@@ -597,6 +921,7 @@ export type CreateWebGpuEngine = (
   outcome: AdapterOutcome & { readonly kind: "adapter" },
   status: GraphicsStatusStore,
   overrides: CapabilityOverrides | undefined,
+  compileBudget?: CompileBudgetSize,
 ) => Promise<RenderEngine>;
 
 /** How `loadRenderEngine` loads the engine. */
@@ -607,6 +932,11 @@ export interface LoadEngineOptions {
   readonly importEngine?: () => Promise<{ readonly createWebGpuEngine: CreateWebGpuEngine }>;
   /** `navigator.gpu`, from which a rebuild asks for a fresh adapter; a test passes a fake. */
   readonly gpu?: GPU;
+  /**
+   * The device's compiles in flight, the default (`DEFAULT_COMPILE_BUDGET`) where absent; the
+   * launch's `--compile-budget` (`HyperionApi.compileBudget`), for an A/B.
+   */
+  readonly compileBudget?: CompileBudgetSize;
 }
 
 /** Thrown by `createPointSplat` when the device lacks `float32-blendable` (Design note 21). */

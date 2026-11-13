@@ -1,0 +1,452 @@
+{
+  "type": "response",
+  "id": 1,
+  "body": {
+    "kind": "body_detail",
+    "universe": "1e4cf7d817f82e60",
+    "time": {
+      "seconds": 0,
+      "nanos": 0
+    },
+    "granted": "full",
+    "record": {
+      "id": "42002cae00000004.0300",
+      "kind": {
+        "type": "planet"
+      },
+      "label": {
+        "state": "ok",
+        "value": "A d"
+      },
+      "parent": {
+        "type": "star",
+        "body_index": 0
+      },
+      "state": {
+        "type": "present"
+      },
+      "position_m": [-60659887780.03952, 85057684884.30771, -64777419463.17668],
+      "mass_kg": {
+        "state": "ok",
+        "value": 1.952872517036626e24
+      },
+      "orbit": {
+        "state": "ok",
+        "value": {
+          "parent": {
+            "type": "star",
+            "body_index": 0
+          },
+          "orbit": {
+            "period_s": 23441470.487697244,
+            "semi_major_axis_m": 119515395869.24272,
+            "eccentricity": 0.09688301682076282,
+            "inclination_rad": 2.0062611901617995,
+            "ascending_node_rad": 5.624529762824357,
+            "argument_of_periapsis_rad": 1.8006849566579144,
+            "mean_anomaly_at_epoch_rad": 1.7770999253196225,
+            "mu_m3_s2": 122648317966472970000
+          },
+          "valid_until": {
+            "seconds": 33554432,
+            "nanos": 0
+          },
+          "drift": {
+            "reference": {
+              "seconds": 0,
+              "nanos": 0
+            },
+            "semi_major_axis_rate_m_per_s": 0,
+            "eccentricity_rate_per_s": -1.2821299494571929e-23,
+            "mean_motion_rate_rad_per_s2": 0
+          }
+        }
+      },
+      "moons": {
+        "state": "ok",
+        "value": ["42002cae00000004.0301"]
+      },
+      "rings": {
+        "state": "ok",
+        "value": []
+      },
+      "population": {
+        "state": "not_applicable"
+      },
+      "bulk": {
+        "state": "ok",
+        "value": {
+          "radius_m": 4220443.417327381,
+          "density_kg_m3": 6201.704054690911,
+          "surface_gravity_m_s2": 7.317512162753638,
+          "class": "rocky",
+          "mass_fractions": {
+            "iron": 0.6718100707986616,
+            "rock": 0.3281899292013384,
+            "water": 0,
+            "envelope": 0
+          },
+          "equilibrium_temperature_k": 244.9661409499384,
+          "effective_temperature_k": null
+        }
+      },
+      "rotation": {
+        "state": "ok",
+        "value": {
+          "pole": [-0.9762005045689142, -0.14258646868221087, -0.16340646813432544],
+          "equator_node": [0.08130485910319449, 0.45789982509719995, -0.8852780749923514],
+          "equator_quarter": [0.20105246769340365, -0.8774946433595425, -0.43540906755567493],
+          "obliquity_rad": 0.7771816386853102,
+          "initial_rate_rad_s": 0.00014997244751148908,
+          "locked_rate_rad_s": 2.6803716560687533e-7,
+          "age_at_epoch_s": 161355874764623330,
+          "locking_age_s": 1847179653768131600,
+          "locks_at": {
+            "seconds": 1685823779003508200,
+            "nanos": 0
+          },
+          "resonance": "synchronous",
+          "clock_period_s": 23441470.487697244,
+          "clock_mean_anomaly_at_epoch_rad": 1.7770999253196225,
+          "sub_primary_angle_rad": 0.3297350618180084,
+          "phase_at_epoch_rad": 3.01981358707543,
+          "capture_phase_rad": -1.9389680329301093
+        }
+      },
+      "figure": {
+        "state": "ok",
+        "value": {
+          "equatorial_radius_m": 4235359.47201683,
+          "polar_radius_m": 4190768.716666217,
+          "flattening": 0.010528210331431307,
+          "pole": [-0.9762005045689142, -0.14258646868221087, -0.16340646813432544],
+          "moment_of_inertia_factor": 0.33,
+          "law": "rotational",
+          "datum": "solid_surface"
+        }
+      },
+      "photometry": {
+        "state": "ok",
+        "value": {
+          "geometric_albedo": {
+            "b": 0.26459665904989343,
+            "v": 0.2163052535959205,
+            "r": 0.21127489886113165
+          },
+          "phase_template": "earth",
+          "phase_exponent": {
+            "b": 1,
+            "v": 1,
+            "r": 1
+          },
+          "lunar_lambert_share": 0,
+          "bond_albedo": 0.2957848584055843,
+          "bond_ratio": 0.959143419155373,
+          "provisional": false
+        }
+      },
+      "surface": {
+        "state": "ok",
+        "value": {
+          "state": "temperate",
+          "material": "rock",
+          "mean_surface_temperature_k": 278.80141635662335,
+          "equator_pole_contrast_k": 11.720761865828706,
+          "day_night_contrast_k": 0.15416266858920835,
+          "surface_pressure_pa": 179698.82422686173,
+          "gases": [
+            {
+              "species": "N2",
+              "mole_fraction": 0.994653524883357
+            },
+            {
+              "species": "H2O",
+              "mole_fraction": 0.003912078044970067
+            },
+            {
+              "species": "Ar",
+              "mole_fraction": 0.0012065244630754851
+            },
+            {
+              "species": "CO2",
+              "mole_fraction": 0.000227872608597507
+            }
+          ],
+          "mean_molar_mass_g_per_mol": 27.992929029994134,
+          "heat_capacity_over_r": 3.501878619939008,
+          "stellar_flux_w_m2": 1159.8200487025902,
+          "radiation_class": "quiet",
+          "liquid_water": true,
+          "climate_regime": {
+            "thermal": "efficient",
+            "forcing": "seasonal",
+            "condensable": "H2O",
+            "model": "energy_balance"
+          },
+          "ocean_fraction": 0.49295814059380705,
+          "ice_fraction": 0,
+          "cloud_fraction": 0.67,
+          "surface_liquids": [
+            {
+              "substance": "H2O",
+              "area_fraction": 0.49295814059380705
+            }
+          ],
+          "surface_ices": [
+            {
+              "substance": "H2O",
+              "area_fraction": 0
+            }
+          ],
+          "sigma_h_m": 2552.2733796520347,
+          "continental_fraction": 0.49789616446230867,
+          "heat_flow_w_m2": 0.07040301887428072,
+          "tectonic_regime": "mobile_lid",
+          "volcanism_level": 0.003823801216508058,
+          "outgassing_earth": 0.672160227523434,
+          "magnetic_field_class": "strong",
+          "surface_age_s": 4487469069451742.5,
+          "subsurface_ocean": null,
+          "craters": {
+            "lunar_equivalent_n_1km_per_km2": 1.329279020045331e-5,
+            "screening": {
+              "type": "atmosphere",
+              "column_mass_kg_m2": 24557.365977679445
+            },
+            "projectile_density_kg_m3": 3000,
+            "k_target": 1,
+            "target_class": "non_porous",
+            "target_density_kg_m3": 2550,
+            "system_age_s": 161355874764623330,
+            "impact_velocity_m_s": 11105.62070989309
+          },
+          "wet_epoch": {
+            "liquid": "H2O",
+            "start_ago_s": 161027719416664420,
+            "end_ago_s": 0,
+            "effective_flow_yr": 5102660513.368076,
+            "runoff_m_per_yr": 0.29,
+            "paleo_inventory_kg_m2": 938984.2999461241
+          },
+          "vertical_structure": {
+            "alpha": 0.6,
+            "skin_temperature_k": 206.00890343637997,
+            "adiabat": [
+              {
+                "pressure_pa": 179698.82422686173,
+                "temperature_k": 278.80141635662335
+              },
+              {
+                "pressure_pa": 160923.5561471293,
+                "temperature_k": 273.57938229690564
+              },
+              {
+                "pressure_pa": 144109.96306990433,
+                "temperature_k": 268.45493703960295
+              },
+              {
+                "pressure_pa": 129053.08553473491,
+                "temperature_k": 263.4262934401884
+              },
+              {
+                "pressure_pa": 115569.37862760261,
+                "temperature_k": 258.4916914479601
+              },
+              {
+                "pressure_pa": 103494.4745491986,
+                "temperature_k": 253.6493984714909
+              },
+              {
+                "pressure_pa": 92681.17895423618,
+                "temperature_k": 248.89770964042464
+              },
+              {
+                "pressure_pa": 82997.67663696657,
+                "temperature_k": 244.23494797249847
+              },
+              {
+                "pressure_pa": 74325.92469001614,
+                "temperature_k": 239.65946445459699
+              },
+              {
+                "pressure_pa": 66560.21354898321,
+                "temperature_k": 235.16963804652374
+              },
+              {
+                "pressure_pa": 59605.87838177742,
+                "temperature_k": 230.7638756158783
+              },
+              {
+                "pressure_pa": 53378.14511440242,
+                "temperature_k": 226.44061181209105
+              },
+              {
+                "pressure_pa": 47801.097026115836,
+                "temperature_k": 222.19830888721972
+              },
+              {
+                "pressure_pa": 42806.749316652815,
+                "temperature_k": 218.03545647065772
+              },
+              {
+                "pressure_pa": 38334.220364390916,
+                "temperature_k": 213.9505713043602
+              },
+              {
+                "pressure_pa": 34328.98957300664,
+                "temperature_k": 209.94219694468396
+              },
+              {
+                "pressure_pa": 30742.23275969638,
+                "temperature_k": 206.00890343637997
+              }
+            ]
+          },
+          "aerosols": {
+            "modes": [
+              {
+                "material": "H2O",
+                "phase": "liquid",
+                "deck": "H2O",
+                "shape": "sphere",
+                "size_distribution": {
+                  "type": "log_normal",
+                  "effective_radius_m": 4.5044136337055263e-5,
+                  "effective_variance": 0.6168066722416747
+                },
+                "column_mass_kg_m2": 0.051520466020897944,
+                "tau_550": 1.7159848963439404,
+                "tau_basis": "geometric_limit",
+                "base_pa": 160816.8562015782,
+                "top_pa": 29948.83761700717,
+                "f_sed": 2.79045534814923,
+                "coverage": 0.67,
+                "temperature_k": 273.5482748452637
+              },
+              {
+                "material": "H2SO4",
+                "phase": "liquid",
+                "deck": null,
+                "shape": "sphere",
+                "size_distribution": {
+                  "type": "log_normal",
+                  "effective_radius_m": 1.4974986824071056e-7,
+                  "effective_variance": 0.2850220644575292
+                },
+                "column_mass_kg_m2": 8.364526082016377e-7,
+                "tau_550": 0.0024519610844190107,
+                "tau_basis": "sphere",
+                "base_pa": 30742.23275969638,
+                "top_pa": 6148.446551939276,
+                "f_sed": 0,
+                "coverage": 1,
+                "temperature_k": 206.00890343637997
+              }
+            ],
+            "decks": [
+              {
+                "condensate": "H2O",
+                "phase": "liquid",
+                "base_pa": 160816.8562015782,
+                "base_temperature_k": 273.5482748452637,
+                "top_pa": 29948.83761700717,
+                "vapour_mole_fraction_below": 0.003912078044970067,
+                "vapour_mole_fraction_above": 1.3294320975677073e-5,
+                "f_sed": 803.9550933466643,
+                "extrapolated": false
+              }
+            ],
+            "absorbers": [
+              {
+                "species": "SO2",
+                "column_m2": 1556400450035062000,
+                "base_pa": 179698.82422686173,
+                "top_pa": 30742.23275969638,
+                "profile": null
+              }
+            ],
+            "not_formed": [
+              {
+                "condensate": "N2",
+                "reason": {
+                  "type": "bulk_gas"
+                }
+              }
+            ]
+          },
+          "condensates": [
+            {
+              "substance": "H2O",
+              "phase": "liquid",
+              "reservoir_kg_m2": 938922.4733671964,
+              "reservoir_gel_m": 938.933338593555,
+              "area_fraction": 0.49295814059380705,
+              "trapped_area_fraction": 0,
+              "seasonal": false
+            }
+          ],
+          "crust": {
+            "primary": "ultramafic",
+            "secondary": "basalt",
+            "tertiary": "granite",
+            "bulk": null,
+            "lid": "secondary",
+            "provinces": "basalt",
+            "redox": "intermediate",
+            "mantle_redox_iw": -0.011563755514960361,
+            "melt_area_fraction": 0
+          },
+          "modifiers": {
+            "maturity": 0,
+            "weathering_rate": 0,
+            "organic_cover": 0,
+            "resurfacing_m_per_yr": 1.4064765466497378e-6,
+            "volcanic_deposits": [],
+            "weathering_deposits": []
+          },
+          "taxonomic_class": null
+        }
+      },
+      "envelope": {
+        "state": "not_applicable"
+      },
+      "hooks": {
+        "state": "ok",
+        "value": {
+          "detail_seed": {
+            "state": "ok",
+            "value": "a228fad7a79c02a3"
+          },
+          "habitability": {
+            "state": "ok",
+            "value": {
+              "class": "temperate",
+              "limits": []
+            }
+          },
+          "resources": {
+            "state": "ok",
+            "value": {
+              "iron_group": 0.0013716854648101388,
+              "light_lithophiles": 0.25002365022822803,
+              "rare_earths": 2.5817792529115787e-5,
+              "platinum_group": 2.893867427217593e-8,
+              "radioactives": 1.1926156081533453e-7,
+              "silicates": 0.7485786983141975,
+              "water_ice": 0,
+              "other_ices": 0,
+              "hydrocarbons": 0,
+              "deuterium": 0,
+              "radioisotopes": {
+                "uranium_238": 1.8652616727708744e-8,
+                "uranium_235": 8.501520970332872e-11,
+                "thorium_232": 7.791915052786746e-8,
+                "potassium_40": 2.2604778350054982e-8
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

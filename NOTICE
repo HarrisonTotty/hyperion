@@ -44,11 +44,14 @@ Illumination (CIE), Vienna, AT, DOI: 10.25039/CIE.DS.gr6w4b5g
 CIE 2022, CIE standard illuminant D65, International Commission on Illumination (CIE), Vienna, AT,
 DOI: 10.25039/CIE.DS.hjfjmt59
 
-Licensed under Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0). The
+Licensed under Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0), and
+provided as is, without warranties (the licence's Section 5). Dataset page of the colour-matching
+functions: https://cie.co.at/datatable/cie-1931-colour-matching-functions-2-degree-observer. The
 tables are kept unmodified in crates/hyperion-fit/data/cie_cmf/ (a tool input, not shipped). The
 values of crates/hyperion-sim/src/tables/star_colour.rs are computed from them (integrated against
 model stellar spectra); to the extent they are adapted material they are offered under CC BY-SA
-4.0.
+4.0. One adaptation ships in the app, apps/hyperion/src/renderer/src/view/atmosphere/
+colourMatching.json, under CC BY-SA 4.0 ("Data", below).
 
 --------------------------------------------------------------------------------
 Data: optical constants of silicon
@@ -60,6 +63,20 @@ DOI: 10.1016/j.solmat.2008.06.009; as tabulated by the refractiveindex.info data
 (M. N. Polyanskiy, Sci. Data 11, 94 (2024)), which is dedicated to the public domain (CC0 1.0).
 Kept unmodified in crates/hyperion-fit/data/green2008_si/ (a tool input, not shipped); the
 camera band terms of crates/hyperion-sim/src/tables/star_colour.rs are computed from it.
+
+--------------------------------------------------------------------------------
+Data: optical constants of iron
+https://creativecommons.org/publicdomain/zero/1.0/
+
+P. B. Johnson and R. W. Christy, "Optical constants of transition metals: Ti, V, Cr, Mn, Fe, Co,
+Ni, and Pd", Phys. Rev. B 9, 5056-5070 (1974), DOI: 10.1103/PhysRevB.9.5056; M. A. Ordal,
+R. J. Bell, R. W. Alexander, L. A. Newquist and M. R. Querry, "Optical properties of Al, Fe, Ti,
+Ta, W, and Mo at submillimeter wavelengths", Appl. Opt. 27, 1203-1209 (1988), DOI:
+10.1364/AO.27.001203; both as tabulated by the refractiveindex.info database (M. N. Polyanskiy,
+Sci. Data 11, 94 (2024); commit c5c2f188), which is dedicated to the public domain (CC0 1.0). Kept
+unmodified in crates/hyperion-fit/data/johnson_christy_1974_fe/ and
+crates/hyperion-fit/data/ordal_1988_fe/ (tool inputs, not shipped); the nanophase iron's
+absorption in crates/hyperion-surface/src/tables/space_weathering.rs is computed from them.
 
 --------------------------------------------------------------------------------
 Bevy
@@ -170,22 +187,935 @@ shaders/common.wgsl and shaders/medium.wgsl, and the Earth constants of Applicat
 (SetupEarthAtmosphere) as HILLAIRE_REFERENCE in
 apps/hyperion/src/renderer/src/view/atmosphere/earth.ts. Master branch, fetched 2026-10-02.
 
+--------------------------------------------------------------------------------
+OpTool (the modified mean-field theory of fractal aggregates)
+https://github.com/cdominik/optool
+
+OpTool:      Copyright (c) 2020-2022 Carsten Dominik, Michiel Min, Ryo Tazaki
+OpacityTool: Copyright (c) 2015 Michiel Min
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
+associated documentation files (the "Software"), to deal in the Software without restriction,
+including without limitation the rights to use, copy, modify, merge, publish, distribute,
+sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or
+substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT
+NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT
+OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+apps/hyperion/src/renderer/src/view/atmosphere/aggregate.ts re-implements in TypeScript the
+modified mean-field theory as optool's optool_fractal.f90 (R. Tazaki's OPACFRACTAL v3.0) builds it,
+for its -mmf option: the translation coefficients and the mean-field system, the geometric-optics
+absorption, and Tazaki 2021's geometric cross-section, with its own numerical methods. Release
+1.9.14, commit 21aecb46, fetched 2026-10-10.
+
+--------------------------------------------------------------------------------
+CoolProp (thermophysical property fluid files)
+https://github.com/CoolProp/CoolProp
+
+MIT License
+
+Copyright (c) 2012-2018 Ian H. Bell and other CoolProp developers
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
+associated documentation files (the "Software"), to deal in the Software without restriction,
+including without limitation the rights to use, copy, modify, merge, publish, distribute,
+sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or
+substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT
+NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT
+OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+From the fluid files dev/fluids/{Krypton, Xenon, NitrousOxide, CarbonMonoxide, SulfurDioxide,
+HydrogenSulfide, Ethane}.json (master, fetched 2026-10-14), these values are copied into
+crates/hyperion-sim/src/substance/rows/diagrams.rs: the critical and triple points, the
+coefficients of the ancillary vapour-pressure (pS) and saturated-liquid-density (rhoL) equations,
+the triple-point states' pressures and the enthalpy of vaporisation they give, and ethane's
+melting equation. The equations of state they rest on are Lemmon and Span 2006, Gao et al. 2016 and
+Bücker and Wagner 2006, cited in that file.
+
+From the same fetch's dev/fluids/{Methane, Nitrogen, Ethane, Ammonia, CarbonDioxide}.json, the
+residual Helmholtz energies' coefficients and exponents of Setzmann and Wagner 1991, Span et al.
+2000, Bücker and Wagner 2006, Gao et al. 2023 and Span and Wagner 1996 are copied into
+crates/hyperion-sim/src/substance/rows/equations.rs, and their surface_tension ancillaries'
+coefficients (Mulero, Cachadiña and Parra 2012) into crates/hyperion-sim/src/substance/rows/
+liquids.rs (galaxy plan 14, P14.T49.h's second step), each cited there.
+
+From the same five files, the ideal-gas parts' coefficients (alpha0: the logarithmic, power and
+Planck-Einstein terms) of the same equations are copied into
+crates/hyperion-sim/src/substance/rows/equations.rs, for the saturated liquids' specific heats
+(rendering plan R09, R09.T13.i), each cited there.
+
+--------------------------------------------------------------------------------
+CEA – Chemical Equilibrium with Applications (NASA's thermodynamic data, data/thermo.inp)
+https://github.com/nasa/cea
+
+CEA – Chemical Equilibrium with Applications
+
+Copyright (c) 2025, United States Government as represented by the Administrator of the National
+Aeronautics and Space Administration
+Licensed under the Apache License, Version 2.0.
+
+Data: NASA CEA thermodynamic and transport databases (data/thermo.inp, data/trans.inp,
+data/thermo.lib, data/trans.lib); source and references: NASA TP-2002-211556,
+https://ntrs.nasa.gov/api/citations/20020085330/downloads/20020085330.pdf (the repository's
+NOTICE.txt, as of commit 2f79a647e85737742fb08a127da00d1ea1d069da).
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not use these files except
+in compliance with the License. You may obtain a copy of the License at
+
+     http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software distributed under the License
+is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+implied. See the License for the specific language governing permissions and limitations under the
+License.
+
+The 124 species records of data/thermo.inp that galaxy plan 14's P14.T49.d, P14.T52.a and
+P14.T52.e read (B. J. McBride, M. J. Zehe and S. Gordon 2002, NASA Glenn Coefficients for Calculating
+Thermodynamic Properties of Individual Species, NASA/TP-2002-211556) are kept verbatim, with the
+file's header and CRLF line ends, in crates/hyperion-fit/data/nasa_cea_thermo/thermo.inp (a tool
+input, not shipped), beside the repository's LICENSE.txt;
+crates/hyperion-fit/data/nasa_cea_thermo/reduce.py extracts them.
+Changes: only the selection of records. Their coefficients are re-emitted interval by interval,
+unmodified, into crates/hyperion-sim/src/tables/thermo.rs, and the reference states' switches to
+their gases are computed from them there.
+
+--------------------------------------------------------------------------------
+libm (pure-Rust maths library, the port of musl's and FreeBSD's)
+https://github.com/rust-lang/compiler-builtins
+
+rust-lang/libm as a whole is available for use under the MIT license:
+
+Copyright (c) 2018 Jorge Aparicio
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
+associated documentation files (the "Software"), to deal in the Software without restriction,
+including without limitation the rights to use, copy, modify, merge, publish, distribute,
+sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or
+substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT
+NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES
+OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Its src/math/pow.rs carries the notice of the FreeBSD source it ports
+(origin: FreeBSD /usr/src/lib/msun/src/e_pow.c), which the ported file keeps:
+
+  ====================================================
+  Copyright (C) 2004 by Sun Microsystems, Inc. All rights reserved.
+
+  Permission to use, copy, modify, and distribute this
+  software is freely granted, provided that this notice
+  is preserved.
+  ====================================================
+
+Ported from src/math/pow.rs (pow) and src/math/mod.rs (the word helpers get_high_word,
+get_low_word, with_set_high_word and with_set_low_word), libm 0.2.16 as published on crates.io,
+the version the workspace pins, into:
+
+  crates/hyperion-base/src/math/pow_base.rs
+
+Changes: pow is split where its logarithm stage ends, so that the stage, which reads the base alone,
+runs once for a base raised to several powers, and the rest of pow once a power; every input
+outside the shared stage's domain is passed to libm's pow itself. Otherwise line for line: the
+same constants, the same operations in the same order and the same reinterpretations of the bits,
+written with Rust's cast_signed, cast_unsigned and From in place of `as` where those give the same
+value.
+
+Ported from src/math/exp.rs, log.rs, log2.rs, log1p.rs, expm1.rs, sin.rs, cos.rs, tan.rs, k_sin.rs,
+k_cos.rs, k_tan.rs, rem_pio2.rs, rem_pio2_large.rs, asin.rs, acos.rs, atan.rs, atan2.rs, cbrt.rs,
+pow.rs, generic/scalbn.rs and mod.rs (the word helpers), libm 0.2.16 as published on crates.io,
+into TypeScript (plan R08, R08.T20):
+
+  apps/hyperion/src/renderer/src/lib/pinnedMath.ts
+
+Changes: none to the arithmetic. The same constants (their decimal literals as Prettier writes
+them), the same operations in the same order, and the same reinterpretations of a double's two
+32-bit words, with JavaScript's integer operators where Rust's u32 and i32 ones stand; the
+remainder of rem_pio2 is returned through module state rather than a tuple; the fused
+multiply-adds of cbrt.rs are Dekker's exact product error, which equals them on cbrt's arguments;
+the paths no f64 argument reaches (rem_pio2_large's other precisions, cbrt's directed roundings)
+and the force_eval! calls, which raise exception flags and change no value, are left out. The file
+keeps the FreeBSD sources' Sun Microsystems notices: the 2004 notice quoted above, which e_exp.c
+and e_pow.c carry; k_tan.c's, worded
+
+  ====================================================
+  Copyright 2004 Sun Microsystems, Inc.  All Rights Reserved.
+
+  Permission to use, copy, modify, and distribute this
+  software is freely granted, provided that this notice
+  is preserved.
+  ====================================================
+
+and this one, which the others carry (with "SunSoft" for "SunPro" in e_log.c, e_log2.c, e_asin.c,
+e_acos.c, e_atan2.c, k_sin.c, k_cos.c and k_rem_pio2.c):
+
+  ====================================================
+  Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+
+  Developed at SunPro, a Sun Microsystems, Inc. business.
+  Permission to use, copy, modify, and distribute this
+  software is freely granted, provided that this notice
+  is preserved.
+  ====================================================
+
+Its cbrt is the CORE-MATH project's
+(https://core-math.gitlabpages.inria.fr/, core-math/src/binary64/cbrt/cbrt.c), Copyright (c)
+2021-2022 Alexei Sibidanov, available under the MIT licence quoted above, and ported to Rust in
+2025 by Trevor Gross. libm's LICENSE.txt also credits musl libc (Copyright (c) 2005-2020 Rich
+Felker, et al.), whose forms of the FreeBSD sources several of these files take.
+
 ================================================================================
 Data
 
-Values derived from the following data sets are committed as constants with their citations; the
-data sets themselves are not committed (plan R05, R05.T12.d, ruled 2026-10-02).
+Values derived from the following data sets are committed as constants or reduced tables with
+their citations. The data sets themselves are not committed, except the CIE's, which are kept
+unmodified in a tool path (the CIE entry above) (plan R05, R05.T12.d, ruled 2026-10-02; plan R08,
+ruled 2026-10-09 and 2026-10-10).
 
 - Solar spectral irradiance values derived from ASTM E490-00a(2019), obtained from the U.S. DOE
   National Laboratory of the Rockies (NLR, formerly NREL); credit DOE/NLR/Alliance. In
   apps/hyperion/src/renderer/src/view/atmosphere/solar.ts.
 
 - CIE 2019, Colour-matching functions of CIE 1931 standard colorimetric observer, International
-  Commission on Illumination (CIE), Vienna, AT, DOI: 10.25039/CIE.DS.xvudnb9b, licensed under
-  CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0/). The values in
-  apps/hyperion/src/renderer/src/view/atmosphere/solar.ts are computed from it, integrated against
-  E-490; to the extent they are adapted material they are offered under CC BY-SA 4.0.
+  Commission on Illumination (CIE), Vienna, AT, DOI: 10.25039/CIE.DS.xvudnb9b
+  (https://cie.co.at/datatable/cie-1931-colour-matching-functions-2-degree-observer), licensed
+  under CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0/).
+  - apps/hyperion/src/renderer/src/view/atmosphere/colourMatching.json is adapted material: the
+    CIE's table, 360-830 nm at 1 nm, with x_bar, y_bar and z_bar taken to linear Rec. 709 r, g
+    and b by the matrix the file records (apps/hyperion/scripts/atmosphereData.mjs matching; plan
+    R08, R08.T4.a). It ships in the app and is offered under CC BY-SA 4.0.
+  - The values in apps/hyperion/src/renderer/src/view/atmosphere/solar.ts are computed from the
+    CIE's table, integrated against E-490 (plan R05). The fitted channel wavelengths in
+    apps/hyperion/src/renderer/src/view/atmosphere/channels.json (R08.T4.a) and the test record
+    apps/hyperion/src/renderer/src/view/atmosphere/absorbers/curves.json (R08.T4.b) are computed
+    with colourMatching.json. To the extent these are adapted material they are offered under
+    CC BY-SA 4.0.
 
-- Ozone absorption cross-sections at 233 K: Serdyuchenko et al., Atmos. Meas. Tech. 7 (2014) 625;
-  Gorshelev et al., Atmos. Meas. Tech. 7 (2014) 609 (IUP Bremen), as binned by Bruneton 2017. In
-  apps/hyperion/src/renderer/src/view/atmosphere/earth.ts.
+- Ozone absorption cross-sections: Serdyuchenko et al., Atmos. Meas. Tech. 7 (2014) 625;
+  Gorshelev et al., Atmos. Meas. Tech. 7 (2014) 609 (IUP Bremen, file
+  serdyuchenkogorshelev5digits.dat, fetched 2026-10-10). At 233 K, as binned by Bruneton 2017, in
+  apps/hyperion/src/renderer/src/view/atmosphere/earth.ts; at 193-293 K, binned to 1 nm, in
+  apps/hyperion/src/renderer/src/view/atmosphere/absorbers/crossSections.json.
+
+- Earth's ozone profile: the U.S. Standard model's ozone mixing ratio by pressure, 0-120 km, from
+  G. P. Anderson, S. A. Clough, F. X. Kneizys, J. H. Chetwynd and E. P. Shettle, "AFGL
+  Atmospheric Constituent Profiles (0-120 km)", AFGL-TR-86-0110, Environmental Research Papers
+  No. 954, Air Force Geophysics Laboratory, Hanscom AFB, 15 May 1986, Table 1f (DTIC ADA175173;
+  approved for public release, distribution unlimited; a work of the U.S. Government), which
+  follows the U.S. Standard Atmosphere 1976's mid-latitude ozone model (A. J. Krueger and R. A.
+  Minzner, J. Geophys. Res. 81(24) (1976) 4477-4481) to 2% from 2 to 50 km. Read from the
+  report, not taken from a redistribution, and committed reduced (pressure and mixing ratio) in
+  apps/hyperion/src/renderer/src/view/atmosphere/earth.ts (plan R08, R08.T6.h).
+
+- Methane absorption cross-sections at 100, 198 and 296 K: E. Karkoschka and M. G. Tomasko,
+  "Methane absorption coefficients for the jovian planets from laboratory, Huygens, and HST
+  data", Icarus 205 (2010) 674-694, DOI: 10.1016/j.icarus.2009.07.044, as converted to
+  cross-sections by NASA's Planetary Spectrum Generator (G. L. Villanueva et al., J. Quant.
+  Spectrosc. Radiat. Transfer 217 (2018) 86-104; https://psg.gsfc.nasa.gov, file
+  data/linelists/xuv/data/ch4.txt, fetched 2026-10-09). Resampled values in
+  apps/hyperion/src/renderer/src/view/atmosphere/absorbers/crossSections.json, and their
+  k-distributions on the optics' bins in
+  crates/hyperion-sim/src/planetary/derive/photometry/envelope_bond/opacity.rs (plan 14,
+  P14.T24.h.b part 5).
+
+- k-terms of CH4, H2O and CO lines and of H2-H2 collision-induced absorption from H. Nicholls's
+  SOCRATES spectral files Dayspring/48 (with L. Soucasse; Zenodo, DOI 10.5281/zenodo.15721749) and
+  Dayspring/256 (Zenodo, DOI 10.5281/zenodo.15799474), fitted to the DACE opacity database
+  (S. L. Grimm et al., ApJS 253 (2021) 30), licensed under CC BY 4.0
+  (https://creativecommons.org/licenses/by/4.0/); fetched 2026-11-01. Shared out over the
+  optics' bins and reduced to eight g-points, a modification, in
+  crates/hyperion-sim/src/planetary/derive/photometry/envelope_bond/opacity.rs by
+  crates/hyperion-fit/data/nicholls_2025_dayspring/reduce.py (plan 14, P14.T24.h.b part 5); the
+  files themselves are not committed. The same module holds the alkali doublets' far wings of
+  apps/hyperion/src/renderer/src/view/atmosphere/absorbers/alkaliPairs.json and Mie tables of the
+  client's material index files with hyperion-fit's infrared sets, each reduced onto the bins
+  (their sources' entries in this section).
+
+- Sulphur dioxide absorption cross-sections at 298, 318, 338 and 358 K: C. Hermans, A. C.
+  Vandaele and S. Fally, J. Quant. Spectrosc. Radiat. Transfer 110 (2009) 756-765, DOI:
+  10.1016/j.jqsrt.2009.01.031; A. C. Vandaele, C. Hermans and S. Fally, J. Quant. Spectrosc.
+  Radiat. Transfer 110 (2009) 2115-2126, DOI: 10.1016/j.jqsrt.2009.05.006; as held in the
+  MPI-Mainz UV/VIS Spectral Atlas of Gaseous Molecules' snapshot of 2013-06-24 (H. Keller-Rudek,
+  G. K. Moortgat, R. Sander and R. Sorensen, Earth Syst. Sci. Data 5 (2013) 365-373, DOI:
+  10.5194/essd-5-365-2013; Zenodo, DOI: 10.5281/zenodo.6951), licensed under CC BY 4.0
+  (https://creativecommons.org/licenses/by/4.0/); fetched 2026-10-10. Binned to 1 nm, a
+  modification, in apps/hyperion/src/renderer/src/view/atmosphere/absorbers/crossSections.json.
+
+- Collision-induced absorption of O2-O2, O2-N2, O2-CO2 and H2-He, from the HITRAN2024 database's
+  collision-induced absorption section (I. E. Gordon et al., J. Quant. Spectrosc. Radiat.
+  Transfer 353 (2026) 109807, DOI: 10.1016/j.jqsrt.2026.109807; J. Terragni et al., J. Quant.
+  Spectrosc. Radiat. Transfer 347 (2025) 109631, DOI: 10.1016/j.jqsrt.2025.109631; T. Karman et
+  al., Icarus 328 (2019) 160-175, DOI: 10.1016/j.icarus.2019.02.034; https://hitran.org/cia/,
+  files O2-O2_2024.cia, O2-N2_2024.cia, O2-CO2_2024.cia and H2-He_2011.cia, fetched 2026-10-10
+  and 2026-10-11, and the alternate files O2-O2_theory_temp_2018.cia and
+  O2-N2_theory_temp_2018.cia, fetched 2026-10-12, the computed A- and B-band sets of T. Karman et
+  al., Nature Chem. 10 (2018) 549-554, DOI: 10.1038/s41557-018-0015-x), from the measurements and
+  calculations of H. Finkenzeller and R. Volkamer, J.
+  Quant. Spectrosc. Radiat. Transfer 279 (2022) 108063; R. Thalman and R. Volkamer, Phys. Chem.
+  Chem. Phys. 15 (2013) 15371; F. R. Spiering et al., Phys. Chem. Chem. Phys. 13 (2011) 9616; H.
+  Tran, C. Boulet and J.-M. Hartmann, J. Geophys. Res. 111 (2006) D15210; M. Vangvichith, H. Tran
+  and J.-M. Hartmann, J. Quant. Spectrosc. Radiat. Transfer 110 (2009) 2212-2216, DOI:
+  10.1016/j.jqsrt.2009.06.002; and M. Abel, L. Frommhold, X. Li and K. L. C. Hunt, J. Chem. Phys.
+  136 (2012) 044319. Binned to 1 nm in
+  apps/hyperion/src/renderer/src/view/atmosphere/absorbers/crossSections.json (H2-He) and
+  apps/hyperion/src/renderer/src/view/atmosphere/absorbers/oxygenPairs.json (O2's pairs; plan R08,
+  R08.T4.d).
+
+- The negative hydrogen and helium ions' continuous absorption: T. L. John, "Continuous absorption
+  by the negative hydrogen ion reconsidered", Astron. Astrophys. 193 (1988) 189-192, his fits'
+  coefficients (Eqs. 3-6, Tables 2, 3a and 3b), in
+  apps/hyperion/src/renderer/src/view/atmosphere/absorbers/hMinus.ts; and T. L. John, "Absorption
+  coefficients of the negative helium ion", Mon. Not. R. Astron. Soc. 269 (1994) 871-878, his
+  Table 2's free-free values over 506-911 nm, in
+  apps/hyperion/src/renderer/src/view/atmosphere/absorbers/heliumMinus.ts (plan R08, R08.T4.c).
+
+- Atomic line data: R. L. Kurucz, atomic line lists, http://kurucz.harvard.edu/linelists/gfall/
+  (the files named in each value's source, fetched 2026-10-11, and 2026-10-16 and 2026-10-19; R. L.
+  Kurucz, "Including all the lines", Can. J. Phys. 89 (2011) 417, DOI: 10.1139/p10-104). The bounds
+  of the atoms and ions in apps/hyperion/src/renderer/src/view/atmosphere/absorbers/bounds.json
+  (plan R08, R08.T4.c) and atomicBounds.json (plan R08, R08.T4.h) are computed from them, with
+  P. S. Barklem and R. Collet's partition functions, Astron. Astrophys. 588 (2016) A96, via CDS
+  VizieR (DOI: 10.26093/cds/vizier), catalogue J/A+A/588/A96, whose ionisation energies and H2
+  equilibrium constant and dissociation energy, with M. Asplund, N. Grevesse, A. J. Sauval and P. Scott's solar
+  abundances, Annu. Rev. Astron. Astrophys. 47 (2009) 481 (Table 1, in
+  apps/hyperion/src/tools/atomicLines.ts), also give the reference columns of R08.T4.h's stated
+  nones. Zn II's lines, which Kurucz's list lacks in the range, are the transitions NIST's Atomic
+  Spectra Database v5.12 lists (as below), at W. C. Martin and V. Kaufman's levels, J. Res. Natl.
+  Bur. Stand. 74A (1970) 11, with D. K. Nandy and B. K. Sahoo's computed transition probabilities,
+  Mon. Not. R. Astron. Soc. 447 (2015) 3812, and R. Kisielius et al.'s computed line strength,
+  Astrophys. J. 804 (2015) 76; seven lines' transition probabilities are ASD's values (a stated
+  exception, their primary paper, R. Mayo, M. Ortiz and J. Campos, Eur. Phys. J. D 37 (2006) 181,
+  being closed). The forbidden
+  [Fe II] lines Kurucz lacks are N. C. Deb and A. Hibbert's, "Radiative transition rates for the
+  forbidden lines in Fe II", Astron. Astrophys. 536 (2011) A74, DOI: 10.1051/0004-6361/201118059,
+  via CDS VizieR, catalogue J/A+A/536/A74 (fetched 2026-10-11); the forbidden
+  [Ti II] lines' are NIST's Atomic Spectra Database v5.12 values (A. Kramida, Yu. Ralchenko, J.
+  Reader and NIST ASD Team, 2024, DOI: 10.18434/T4W30F; a stated exception, Kurucz lacking them
+  and their primary papers being closed), which ASD attributes to N. C. Deb, A. Hibbert, Z.
+  Felfli and A. Z. Msezane, J. Phys. B 42 (2009) 015701, and H. Hartman et al., Mon. Not. R.
+  Astron. Soc. 361 (2005) 206. The reduced line lists in
+  apps/hyperion/src/renderer/src/view/atmosphere/absorbers/lines/ are selected from them, and the
+  atoms' and ions' k-distribution tables in absorbers/kDistributions/ reduced from them (R08.T4.e).
+
+- Broadening of metallic lines by neutral hydrogen: P. S. Barklem, N. Piskunov and B. J. O'Mara,
+  "A list of data for the broadening of metallic lines by neutral hydrogen collisions", Astron.
+  Astrophys. Suppl. Ser. 142 (2000) 467, via CDS VizieR (DOI: 10.26093/cds/vizier), catalogue
+  J/A+AS/142/467, table1.dat.gz (fetched 2026-10-19). Its widths (log Gamma and the temperature
+  exponent) are taken for the lines it holds into the reduced line lists in
+  apps/hyperion/src/renderer/src/view/atmosphere/absorbers/lines/ and the atoms' k-distribution
+  tables in absorbers/kDistributions/ (plan R08, R08.T4.e); the table itself is not committed.
+  The Balmer lines' self-broadening is P. S. Barklem, N. Piskunov and B. J. O'Mara, "Self-broadening
+  in Balmer line wing formation in stellar atmospheres", Astron. Astrophys. 363 (2000) 1091 (Table
+  3's p-d component; open copy arXiv:astro-ph/0010022), its three cross-sections and velocity
+  parameters in apps/hyperion/src/tools/atomicKDistributions.ts.
+
+- Stark broadening of the Balmer lines: C. Stehle and R. Hutcheon, "Extensive tabulations of
+  Stark broadened hydrogen line profiles", Astron. Astrophys. Suppl. Ser. 140 (1999) 93, via CDS
+  VizieR, catalogue VI/98A (its H3-H10 profiles' headers at 1e10-1e15 cm-3, fetched 2026-10-19).
+  Their Stark half widths enter H I's k-distribution table in
+  apps/hyperion/src/renderer/src/view/atmosphere/absorbers/kDistributions/ (plan R08, R08.T4.e);
+  the profiles themselves are not committed.
+
+- Sodium perturbed by molecular hydrogen: N. F. Allard, F. Spiegelman, T. Leininger and P.
+  Molliere, "New study of the line profiles of sodium perturbed by H2", Astron. Astrophys. 628
+  (2019) A120, DOI: 10.1051/0004-6361/201935593, via CDS VizieR, catalogue J/A+A/628/A120
+  (opacity.tar.gz's tables 2017, fetched 2026-10-19; read as data, the deposit's readers not run).
+  Its D lines' one-perturber far wings, reduced to 1 nm cell means per (Na, H2) pair, are in
+  apps/hyperion/src/renderer/src/view/atmosphere/absorbers/alkaliPairs.json, and its impact half
+  widths for the D lines in apps/hyperion/src/tools/atomicKDistributions.ts and Na I's
+  k-distribution table in absorbers/kDistributions/ (plan R08, R08.T4.e); the tables themselves
+  are not committed.
+
+- H2-H2 collision-induced absorption: A. Borysow, "Collision-induced absorption coefficients of H2
+  pairs at temperatures from 60 K to 1000 K", Astron. Astrophys. 390 (2002) 779-782, DOI
+  10.1051/0004-6361:20020555, from the tables at http://www.astro.ku.dk/~aborysow/programs/
+  (fetched 2026-10-11). Above 1000 K: A. Borysow, U. G. Jorgensen and Y. Fu, J. Quant. Spectrosc.
+  Radiat. Transfer 68 (2001) 235-255, from the same page. Reduced to 1 nm cell means in
+  apps/hyperion/src/renderer/src/view/atmosphere/absorbers/crossSections.json (plan R08,
+  R08.T4.c); the tables themselves are not committed.
+
+- Water vapour continuum: the Clough-Kneizys-Davies continuum as tabulated in LOWTRAN 7
+  (F. X. Kneizys et al., "Users Guide to LOWTRAN 7", AFGL-TR-88-0177, Air Force Geophysics
+  Laboratory, 1988; formulation in "Atmospheric Transmittance/Radiance: Computer Code LOWTRAN 6",
+  AFGL-TR-83-0187, 1983), from lowtran7.f at https://github.com/space-physics/lowtran (fetched
+  2026-10-12). Reduced to 1 nm cell means in
+  apps/hyperion/src/renderer/src/view/atmosphere/absorbers/crossSections.json (plan R08,
+  R08.T4.d); the tables themselves are not committed.
+
+- Molecular lines' k-distributions, reduced from the HITRAN2024 line lists (I. E. Gordon et al.,
+  as above; https://hitran.org/lbl/, fetched 2026-10-12) of O2, H2O, CO2, CO, HCN and H2, and of
+  HCl (fetched 2026-10-19; R08.T4.h), and
+  from the anchor bands of the stated overtone-ladder estimates of C2H2, C2H4, C2H6, CH3OH and PH3,
+  with HITRAN's partition sums (TIPS; R. R. Gamache et al., J. Quant. Spectrosc. Radiat. Transfer
+  271 (2021) 107713, DOI: 10.1016/j.jqsrt.2021.107713), to 16-bit k-distributions per 1 nm cell in
+  apps/hyperion/src/renderer/src/view/atmosphere/absorbers/kDistributions/ (plan R08, R08.T4.d);
+  the line lists themselves are not committed. HITRAN2024's four N2O bands (fetched 2026-10-12 and
+  2026-10-13) enter N2O's merged table with ExoMol's TYM list, in
+  apps/hyperion/src/renderer/src/view/atmosphere/absorbers/exomol/kDistributions/ (plan R08,
+  R08.T4.g; the ExoMol entry below). CO2's far wings take the CO2-CO2 and CO2-N2 chi
+  factors and line shape of SpeCT: G. Chaverot, M. Turbet, H. Tran, J.-M. Hartmann, A. Campargue,
+  D. Mondelain and E. Bolmont, Astron. Astrophys. 702 (2025) A137, DOI:
+  10.1051/0004-6361/202555762, licensed under CC BY 4.0 (Tables 2 and 3, Eq. 11), as reduced
+  values with their citation; CO2-N2's B2 alpha is taken as 0.00167, correcting the table's
+  printed 0.0167 from the authors' own code (gitlab.com/ChaverotG/spect-public commit
+  e7c4579c08, which states no licence: one number read as evidence, no code used). That set
+  adapts M. Y. Perrin and J. M. Hartmann, J. Quant. Spectrosc. Radiat. Transfer 42 (1989)
+  311-317, DOI: 10.1016/0022-4073(89)90077-0. The check against SpeCT's laboratory compilation
+  (Zenodo, DOI: 10.5281/zenodo.15564294, CC BY 4.0) used it as data only. The line-by-line reference
+  curves in apps/hyperion/src/renderer/src/view/atmosphere/absorbers/earthLineReference.json,
+  lineReferencesO2.json and lineReferencesH2O.json are computed from the same lines.
+
+- Cross-sections of the pending molecules (1 nm cell means), derived from the HITRAN2024 line
+  lists (I. E. Gordon et al., as above; https://hitran.org), with the stated overtone-ladder and
+  band-model estimates, in apps/hyperion/src/renderer/src/view/atmosphere/absorbers/bounds.json,
+  HCl's 8-0 band and its overtone-ladder estimate among them (R08.T4.h).
+
+- Cross-sections of the pending absorbers, and the k-distributions of NH3, N2O and the hot
+  molecules, derived from the ExoMol database (J. Tennyson et al., the ExoMol database and the
+  line lists each file names, https://www.exomol.com; J. Tennyson et al., J. Quant. Spectrosc.
+  Radiat. Transf. 326 (2024) 109083, DOI: 10.1016/j.jqsrt.2024.109083), licensed under CC BY-SA 4.0
+  (https://creativecommons.org/licenses/by-sa/4.0/). The values in
+  apps/hyperion/src/renderer/src/view/atmosphere/absorbers/exomol/ are reduced from those line
+  lists, a modification: bounds.json's cell means (plan R08, R08.T4.c); and (plan R08, R08.T4.g)
+  the k-distributions in its kDistributions/ directory, the reference curves
+  lineReferencesNH3.json and lineReferencesN2O.json, and n2oMerge.json, from the C2018 list of
+  14NH3 (P. A. Coles, R. I. Ovsyannikov, O. L. Polyansky, S. N. Yurchenko and J. Tennyson,
+  J. Quant. Spectrosc. Radiat. Transf. 219 (2018) 199-212, DOI: 10.1016/j.jqsrt.2018.07.022), with
+  its H2 and He broadening files, and the TYM list of 14N2-16O (S. N. Yurchenko, T. M. Mellor and
+  J. Tennyson, Mon. Not. R. Astron. Soc. 534 (2024) 1364-1375, DOI: 10.1093/mnras/stae2201), N2O's
+  merged with HITRAN2024's bands (I. E. Gordon et al., as above); and (plan R08, R08.T4.f) the hot
+  molecules' k-distributions in its kDistributions/ directory and their reference curves
+  lineReferencesHot.json, each list fetched from the database's archive on Zenodo (its record's DOI
+  in the sidecar; the records licensed CC BY 4.0): MoLLIST's FeH as ExoMol carries it (M. Dulick et
+  al., Astrophys. J. 594 (2003) 651, DOI: 10.1086/376791; S. Wende, A. Reiners, A. Seifahrt and P.
+  F. Bernath, Astron. Astrophys. 523 (2010) A58, DOI: 10.1051/0004-6361/201015220; P. F. Bernath, J.
+  Quant. Spectrosc. Radiat. Transf. 240 (2020) 106687); Toto's TiO, its five Ti isotopologues (L. K.
+  McKemmish et al., Mon. Not. R. Astron. Soc. 488 (2019) 2836-2854, DOI: 10.1093/mnras/stz1818);
+  WCCRMT's 14N2, its triplet system (C. M. Western, L. Carter-Blatchford, P. Crozet, A. J. Ross, J.
+  Morville and D. W. Tokaryk, J. Quant. Spectrosc. Radiat. Transf. 219 (2018) 127-141, DOI:
+  10.1016/j.jqsrt.2018.07.017; its partition function from P. S. Barklem and R. Collet, Astron.
+  Astrophys. 588 (2016) A96, DOI: 10.1051/0004-6361/201526961); Li2015's 12C16O, its bands from v' -
+  v'' = 8 left out and its intensities scaled by 2.05 to HITRAN2024's 7-0 band (G. Li, I. E. Gordon,
+  L. S. Rothman, Y. Tan, S.-M. Hu, S. Kassi, A. Campargue and E. S. Medvedev, Astrophys. J. Suppl.
+  Ser. 216 (2015) 15, DOI: 10.1088/0067-0049/216/1/15); SiOUVenIR's 28Si16O (S. N. Yurchenko et al.,
+  Mon. Not. R. Astron. Soc. 510 (2022) 903-919, DOI: 10.1093/mnras/stab3267); AYT2's H2-32S, its
+  transitions of 13000-27000 cm-1 (A. A. A. Azzam, J. Tennyson, S. N. Yurchenko and O. V. Naumenko,
+  Mon. Not. R. Astron. Soc. 460 (2016) 4063-4074, DOI: 10.1093/mnras/stw1133); and Harris's H12C14N
+  (G. J. Harris et al., Mon. Not. R. Astron. Soc. 367 (2006) 400-406, DOI:
+  10.1111/j.1365-2966.2005.09960.x; R. J. Barber et al., Mon. Not. R. Astron. Soc. 437 (2014)
+  1828-1835, DOI: 10.1093/mnras/stt2011). Hot H2O's k-distributions and reference curves are
+  reduced from POKAZATEL's 1H2-16O (O. L. Polyansky, A. A. Kyuberis, N. F. Zobov, J. Tennyson, S.
+  N. Yurchenko and L. Lodi, Mon. Not. R. Astron. Soc. 480 (2018) 2597-2608, DOI:
+  10.1093/mnras/sty1877), not from the database's archive, which holds POKAZATEL's opacities but
+  not its transitions, but from its transitions of 13100-26400 cm-1 and its MARVELised states as
+  fetched from ExoMol's own site (https://www.exomol.com/db/H2O/1H2-16O/POKAZATEL/, 2026-10-29),
+  under CC BY-SA 4.0 as above. VO's k-distributions and reference curves are reduced
+  from HyVO's 51V16O (C. A. Bowesman, Q. Qu, L. K. McKemmish, S. N. Yurchenko and J. Tennyson,
+  Mon. Not. R. Astron. Soc. 529 (2024) 1321-1332, DOI: 10.1093/mnras/stae542), not from the
+  database's archive but from its strong lines as P. E. Cubillos repacked them ("Repacked ExoMol
+  Opacity Line Lists", version 3, 2025-09-20, Zenodo, DOI: 10.5281/zenodo.14266247, licensed under
+  CC BY 4.0, https://creativecommons.org/licenses/by/4.0/; HyVO's lines less those under 0.01 of a
+  stronger line at its centre at both 100 and 3500 K, by the method of P. E. Cubillos, Astrophys.
+  J. 850 (2017) 32, DOI: 10.3847/1538-4357/aa9228), its .def and .pf fetched from ExoMol's own
+  site; the lines remain ExoMol's, under CC BY-SA 4.0 as above. All this
+  adapted material is offered under CC BY-SA 4.0 (its README.md beside it); the line lists' files
+  are not committed.
+
+- Refractive indices of 75 and 84.5 wt% sulphuric acid at 300 K: K. F. Palmer and D. Williams,
+  "Optical constants of sulfuric acid; application to the clouds of Venus?", Appl. Opt. 14
+  (1975) 208-219, DOI: 10.1364/AO.14.000208, as distributed by the Aerosol Refractive Index
+  Archive (ARIA), University of Oxford, https://eodg.atm.ox.ac.uk/ARIA/. Reduced to 360-780 nm
+  in apps/hyperion/src/renderer/src/view/atmosphere/materials/sulphuric-acid-75.json and to the
+  visible in sulphuric-acid-84.json. The 75 wt% values, with an added ultraviolet absorber whose
+  a-priori decay length is the bound from J. Spacek, P. B. Rimmer, J. J. Petkowski and Y. J. Lee,
+  Astrobiology 26 (2026) 727-739, DOI: 10.1177/15311074261477502 (two values read from the
+  preprint, arXiv:2505.00880v3, licensed under CC BY 4.0), in sulphuric-acid-uv-absorber.json
+  (plan R08, R08.T5.d).
+
+- Refractive indices of basalt and basaltic glass: J. B. Pollack, O. B. Toon and B. N. Khare,
+  "Optical properties of some terrestrial rocks and glasses", Icarus 19 (1973) 372-389, DOI:
+  10.1016/0019-1035(73)90115-2, as distributed by ARIA (as above). Reduced to the visible in
+  apps/hyperion/src/renderer/src/view/atmosphere/materials/basalt.json and basaltic-glass.json
+  (plan R08, R08.T5.d).
+
+- Refractive indices of FeS, CaTiO3, ZnS, MnS and Na2S, from the compilation of D. Kitzmann and
+  K. Heng, "Optical properties of potential condensates in exoplanetary atmospheres", Mon. Not. R.
+  Astron. Soc. 475 (2018) 94-107, DOI: 10.1093/mnras/stx3141 (the LX-MIE repository,
+  https://github.com/NewStrangeWorlds/LX-MIE, commit 38cc6d97, compilation/), the only
+  machine-readable copy found of each primary: J. B. Pollack, D. Hollenbach, S. Beckwith,
+  D. P. Simonelli, T. Roush and W. Fong, Astrophys. J. 421 (1994) 615, DOI: 10.1086/173677 (FeS);
+  K. Ueda, H. Yanagi, R. Noshiro, H. Hosono and H. Kawazoe, J. Phys.: Condens. Matter 10 (1998)
+  3669-3677, DOI: 10.1088/0953-8984/10/16/018 (CaTiO3); E. D. Palik and A. Addamiano, "Zinc
+  sulfide (ZnS)", in E. D. Palik (ed.), Handbook of Optical Constants of Solids, Academic Press
+  (1985) (ZnS); D. R. Huffman and R. L. Wild, Phys. Rev. 156 (1967) 989-997, DOI:
+  10.1103/PhysRev.156.989 (MnS); H. Khachai et al., J. Phys.: Condens. Matter 21 (2009) 095404,
+  DOI: 10.1088/0953-8984/21/9/095404 (Na2S, a computed index). The repository's GPL-3.0 covers
+  its code and arrangement; only reduced visible values of each material are committed, cited to
+  their primary and to Kitzmann and Heng, in
+  apps/hyperion/src/renderer/src/view/atmosphere/materials/iron-sulphide.json,
+  calcium-titanate.json, zinc-sulphide.json, manganese-sulphide.json and sodium-sulphide.json. No
+  compilation file and none of LX-MIE's code is included (plan R08, R08.T5.d).
+
+- The dielectric functions of graphite: B. T. Draine, "Scattering by interstellar dust grains.
+  II. X-rays", Astrophys. J. 598 (2003) 1026-1037, DOI: 10.1086/379123, from
+  https://www.astro.princeton.edu/~draine/dust/diel/ (callindex.out_CpaD03_0.01 and
+  callindex.out_CpeD03_0.01, fetched 2026-10-14). Averaged for randomly oriented grains and
+  reduced to the visible in apps/hyperion/src/renderer/src/view/atmosphere/materials/graphite.json
+  (plan R08, R08.T5.d).
+
+- Retrieved refractive indices, licensed under CC BY 4.0
+  (https://creativecommons.org/licenses/by/4.0/): A. S. Braude, P. G. J. Irwin, G. S. Orton and
+  L. N. Fletcher, "Colour and tropospheric cloud structure of Jupiter from MUSE/VLT: Retrieving a
+  universal chromophore", Icarus 338 (2020) 113589, DOI: 10.1016/j.icarus.2019.113589 (preprint
+  arXiv:1912.00918v1); P. G. J. Irwin, N. A. Teanby, L. N. Fletcher et al., "Hazy blue worlds: A
+  holistic aerosol model for Uranus and Neptune, including dark spots", J. Geophys. Res. Planets
+  127 (2022) e2022JE007189, DOI: 10.1029/2022JE007189 (preprint arXiv:2201.04516v2); J.
+  Martikainen, O. Muñoz, T. Jardiel et al., "Optical constants of Martian dust analogs at
+  UV-visible-near-infrared wavelengths", Astrophys. J. Suppl. 268 (2023) 47, DOI:
+  10.3847/1538-4365/acf0be. Reduced to the visible, a modification (the first solution of Braude
+  et al., extrapolated below 450 nm; the geometric mean of Irwin et al.'s two planets' extended
+  haze; Martikainen et al.'s MGS-1 sample from their Table 6), in
+  apps/hyperion/src/renderer/src/view/atmosphere/materials/jovian-chromophore.json,
+  ice-giant-haze.json and mars-regolith-simulant.json; these files are offered under CC BY 4.0
+  (plan R08, R08.T5.d).
+
+- Refractive indices of Martian dust: M. J. Wolff et al., "Wavelength dependence of dust
+  aerosol single scattering albedo as observed by the Compact Reconnaissance Imaging
+  Spectrometer", J. Geophys. Res. 114 (2009) E00D04, DOI: 10.1029/2009JE003350, as
+  distributed by NASA Ames's Mars Climate Modeling Group (Dust_Refractive_Indicies.txt) and
+  kept in S. Ranjan's ranjanwordsworthsasselov2017b repository (commit 1e67a481). Reduced to the
+  visible in apps/hyperion/src/renderer/src/view/atmosphere/materials/mars-dust.json; and, for the
+  infrared (galaxy plan 14, P14.T49.i), to 148 of the table's rows, 0.7-5.5 um (its 146 infrared
+  rows over 0.8-4.9946 um and the rows at 0.7 and 5.5 um), as the table prints them, in
+  crates/hyperion-fit/data/wolff_2009_mars_dust/nk.csv, a tool input (not shipped) from which
+  crates/hyperion-sim/src/tables/substance_albedo.rs is computed. Wolff et al. retrieved the dust's
+  indices over CRISM's 440-2920 nm; the table's rows beyond 2.92 um lie outside that retrieval and
+  are the distributed table's, with no stated primary.
+
+- Refractive indices of Titan tholin: B. N. Khare et al., "Optical constants of organic tholins
+  produced in a simulated Titanian atmosphere: From soft x-ray to microwave frequencies",
+  Icarus 60 (1984) 127-137, DOI: 10.1016/0019-1035(84)90142-8, as distributed in the HITRAN2024
+  aerosol compilation (I. E. Gordon et al., J. Quant. Spectrosc. Radiat. Transfer 353 (2026)
+  109807; https://hitran.org/aerosols/). Reduced to the visible in
+  apps/hyperion/src/renderer/src/view/atmosphere/materials/tholin.json.
+
+- Refractive indices of amorphous Mg2SiO4: C. Jaeger, J. Dorschner, H. Mutschke, Th. Posch and
+  Th. Henning, "Steps toward interstellar silicate mineralogy. VII. Spectral properties and
+  crystallization behaviour of magnesium silicates produced by the sol-gel method", Astron.
+  Astrophys. 408 (2003) 193-204, DOI: 10.1051/0004-6361:20030916, as distributed in the
+  HITRAN2024 aerosol compilation (as above). Reduced to the visible in
+  apps/hyperion/src/renderer/src/view/atmosphere/materials/forsterite-amorphous.json.
+
+- Refractive indices of ammonia ice and of amorphous MgSiO3: J. V. Martonchik, G. S. Orton and
+  J. F. Appleby, "Optical properties of NH3 ice from the far infrared to the near ultraviolet",
+  Appl. Opt. 23 (1984) 541-547, DOI: 10.1364/AO.23.000541; J. Dorschner, B. Begemann,
+  Th. Henning, C. Jaeger and H. Mutschke, "Steps toward interstellar silicate mineralogy. II.
+  Study of Mg-Fe-silicate glasses of variable composition", Astron. Astrophys. 300 (1995)
+  503-520; as distributed in optool's lnk_data (C. Dominik, M. Min and R. Tazaki, ascl:2104.010;
+  https://github.com/cdominik/optool, commit 0b1fa6df). Reduced to the visible in
+  apps/hyperion/src/renderer/src/view/atmosphere/materials/ammonia-ice.json and
+  enstatite-glass.json. Since R08.T5.i ammonia-ice.json takes only the real index from it, its
+  visible imaginary index being a fill between the table's rows, not a measurement; eleven rows of
+  the paper's Table I (6840 to 50000 per cm), read from the journal's abstract page
+  (https://opg.optica.org/ao/abstract.cfm?uri=ao-23-4-541), are held in
+  apps/hyperion/src/tools/materials.ts as that evidence, cited to the paper, and no file is reduced
+  from them (plan R08, R08.T5.i).
+
+- Refractive indices of water ice, liquid and solid methane, iron and soot, from the
+  refractiveindex.info database (M. N. Polyanskiy, Sci. Data 11, 94 (2024); commit c5c2f188),
+  which is dedicated to the public domain (CC0 1.0): S. G. Warren and R. E. Brandt, J. Geophys.
+  Res. 113 (2008) D14220, DOI: 10.1029/2007JD009744; J. V. Martonchik and G. S. Orton, Appl. Opt.
+  33 (1994) 8306-8317, DOI: 10.1364/AO.33.008306; P. B. Johnson and R. W. Christy, Phys. Rev. B 9
+  (1974) 5056-5070, DOI: 10.1103/PhysRevB.9.5056; W. H. Dalzell and A. F. Sarofim, J. Heat
+  Transfer 91 (1969) 100-104, DOI: 10.1115/1.3580063. Reduced to the visible in
+  apps/hyperion/src/renderer/src/view/atmosphere/materials/water-ice.json, methane-liquid.json,
+  methane-ice.json, iron.json and soot.json. Recorded in water.json as a check (plan R08,
+  R08.T5.h): M. Daimon and A. Masumura's formula for distilled water at 24.0 C, Appl. Opt. 46
+  (2007) 3811-3820, DOI: 10.1364/AO.46.003811. From the same database (plan
+  R08, R08.T5.d): chromium, Johnson and Christy (as above); KCl and NaCl, H. H. Li, J. Phys. Chem.
+  Ref. Data 5 (1976) 329-528, DOI: 10.1063/1.555536; crystalline SiO2, G. Ghosh, Opt. Commun. 163
+  (1999) 95-102, DOI: 10.1016/S0030-4018(99)00091-7; crystalline Al2O3, I. H. Malitson and
+  M. J. Dodge, J. Opt. Soc. Am. 62 (1972) 1405, with M. J. Dodge's formula in the Handbook of Laser
+  Science and Technology, vol. IV (CRC Press, 1986); TiO2, T. Siefke et al., Adv. Opt. Mater. 4
+  (2016) 1780-1786, DOI: 10.1002/adom.201600250; solid argon, A. C. Sinnock and B. L. Smith,
+  Phys. Rev. 181 (1969) 1297-1307, DOI: 10.1103/PhysRev.181.1297. Reduced to the visible in
+  chromium.json, potassium-chloride.json, sodium-chloride.json, silicon-dioxide.json,
+  aluminium-oxide.json, titanium-dioxide.json and argon-ice.json.
+
+- The refractive index of CO2 ice: a two-term Cauchy fit to S. G. Warren, "Optical constants of
+  carbon dioxide ice", Appl. Opt. 25 (1986) 2650-2674, DOI: 10.1364/AO.25.002650, Table I, with
+  the imaginary index from G. B. Hansen, "Ultraviolet to near-infrared absorption spectrum of
+  carbon dioxide ice from 0.174 to 1.8 um", J. Geophys. Res. 110 (2005) E11003,
+  DOI: 10.1029/2005JE002531. Derived values in
+  apps/hyperion/src/renderer/src/view/atmosphere/materials/carbon-dioxide-ice.json.
+
+- Constants of the stated stand-ins (plan R08, R08.T5.d): crystalline S8's principal refractive
+  indices, from C. Palache, H. Berman and C. Frondel, Dana's System of Mineralogy, 7th edition,
+  vol. I (1944) 140-144, as the Handbook of Mineralogy (J. W. Anthony, R. A. Bideaux,
+  K. W. Bladh and M. C. Nichols, Mineral Data Publishing) gives them, in
+  apps/hyperion/src/renderer/src/view/atmosphere/materials/sulphur.json; and the crystal cells of
+  beta-N2 (A. F. Schuch and R. L. Mills, J. Chem. Phys. 52 (1970) 6000-6008), gamma-O2 (D. E.
+  Cox, E. J. Samuelsen and K. H. Beckurts, Phys. Rev. B 7 (1973) 3102-3111), alpha-CO (L. Vegard,
+  Z. Phys. 61 (1930) 185-190), H2S phase I (L. Vegard and L. Sinding-Oseroed, Avh. Nor.
+  Vidensk.-Akad. Oslo, 1942) and solid argon (E. R. Dobbs et al., Nature 178 (1956) 483), from
+  the Crystallography Open Database (https://www.crystallography.net/cod/; the alpha-CO, H2S and
+  argon entries placed in the public domain by their contributors, the beta-N2 and gamma-O2
+  entries from the American Mineralogist Crystal Structure Database, used with attribution to
+  their journal articles), with the gas dispersions view/atmosphere/rayleigh.ts cites, for the
+  Lorentz-Lorenz estimates in hydrogen-sulphide-ice.json, nitrogen-ice.json,
+  carbon-monoxide-ice.json and oxygen-ice.json.
+
+- Pure water's refractive index and absorption coefficient (plan R08, R08.T5.g and R08.T5.h), in
+  apps/hyperion/src/renderer/src/view/atmosphere/materials/water.json and seawater.json. The real
+  index from IAPWS R9-97, Release on the Refractive Index of Ordinary Water Substance as a
+  Function of Wavelength, Temperature and Pressure (International Association for the Properties
+  of Water and Steam, Erlangen, 1997), whose publication in whole or in part is allowed provided
+  that attribution is given to the International Association for the Properties of Water and
+  Steam, as it is here; with the density from IAPWS-95 (W. Wagner and A. Pruss, J. Phys. Chem.
+  Ref. Data 31 (2002) 387-535) as the NIST Chemistry WebBook gives it. The absorption coefficient,
+  reduced to the visible as the imaginary index: over 380-495 nm from J. D. Mason, M. T. Cone and
+  E. S. Fry, "Ultraviolet (250-550 nm) absorption spectrum of pure water", Appl. Opt. 55 (2016)
+  7163-7172, DOI: 10.1364/AO.55.007163, Table 2, as R. Roettgers's WOPP v3 compilation gives it,
+  with two rows from J. D. Mason's dissertation (Texas A&M University, 2016, hdl 1969.1/174273);
+  over 500-725 nm from R. M. Pope and E. S. Fry, "Absorption spectrum (380-700 nm) of pure water.
+  II. Integrating cavity measurements", Appl. Opt. 36 (1997) 8710-8723, DOI:
+  10.1364/AO.36.008710, as S. Prahl's omlc.org transcribes the table
+  (https://omlc.org/spectra/water/); and over 730-780 nm from L. Kou, D. Labrie and P. Chylek,
+  Appl. Opt. 32 (1993) 3531-3540, DOI: 10.1364/AO.32.003531, as A. R. Neeley and A. Mannino
+  (eds.), IOCCG Protocol Series vol. 1.0 (2018), DOI: 10.25607/OBP-119, lists it in Table 1.1.
+  Seawater's salinity terms: X. Quan and E. S. Fry, "Empirical equation for the index of
+  refraction of seawater", Appl. Opt. 34 (1995) 3477-3480, DOI: 10.1364/AO.34.003477, their
+  coefficients as the Ocean Optics Web Book gives them (https://www.oceanopticsbook.info/,
+  CC BY), in seawater.json.
+
+- Liquid water's thermophysical properties in the substance registry's liquid columns (galaxy
+  plan 14, P14.T49.h; rendering plan R09, R09.T13.i), in
+  crates/hyperion-sim/src/substance/rows/liquids.rs: the Helmholtz energy of IAPWS R6-95(2018),
+  Revised Release on the IAPWS Formulation 1995 for the Thermodynamic Properties of Ordinary Water
+  Substance for General and Scientific Use (after W. Wagner and A. Pruss, J. Phys. Chem. Ref. Data
+  31 (2002) 387-535), its Table 1's ideal-gas and Table 2's residual coefficients;
+  the viscosity of IAPWS R12-08, Release on the IAPWS Formulation 2008 for the Viscosity of
+  Ordinary Water Substance (after M. L. Huber et al., J. Phys. Chem. Ref. Data 38 (2009) 101), its
+  Tables 1 and 2; and the surface tension of IAPWS R1-76(2014), Revised Release on Surface Tension
+  of Ordinary Water Substance. Each release allows publication in whole or in part provided that
+  attribution is given to the International Association for the Properties of Water and Steam, as
+  it is here. The pure liquid's scattering follows the method of X. Zhang, L. Hu and M.-X. He,
+  "Scattering by pure seawater: effect of salinity", Opt. Express 17 (2009) 5698-5710, DOI:
+  10.1364/OE.17.005698, re-implemented from its equations as its published code
+  (betasw_ZHH2009.m) states them, at zero salinity; no code of it is copied.
+
+- Refractive indices of the cryogenic liquids and molten sulphur (plan R08, R08.T5.g): liquid
+  nitrogen's, H. Augustin, Ann. Phys. 351 (1915) 419-445, DOI: 10.1002/andp.19153510307 (the
+  article's scan on Zenodo, record 1514490, CC0), as a Cauchy fit in nitrogen-liquid.json; liquid
+  ammonia's at 632.8 nm, L. Y. Wong and A. Anderson, J. Opt. Soc. Am. 62 (1972) 219-222,
+  DOI: 10.1364/JOSA.62.000219, in ammonia-liquid.json; liquid ethane's at 670 nm and 94 K
+  (R08.T5.h), A. Hagermann, J. C. Zarnecki, M. C. Towner, P. D. Rosenberg, R. D. Lorenz,
+  M. R. Leese, B. Hathi and A. J. Ball, Mon. Not. R. Astron. Soc. 359 (2005) 637-642, DOI:
+  10.1111/j.1365-2966.2005.08935.x, one value from its Table 3, with its Table 2's measured
+  mixtures (after J. Badoz et al., Rev. Sci. Instrum. 63 (1992) 2967, DOI: 10.1063/1.1142594) as
+  checks, the level of a Cauchy line whose slope is a Lorentz-Lorenz estimate from the gas
+  dispersion view/atmosphere/rayleigh.ts cites, in ethane-liquid.json, beside which ethane's
+  measured Lorentz-Lorenz function is recorded from Burton, "The Lorentz-Lorenz function of
+  ethane", University of British Columbia thesis, DOI: 10.14288/1.0084897, licensed CC BY as
+  OpenAlex records it (no version stated), one value from its abstract;
+  molten sulphur's at the sodium D lines, H. Becquerel, Ann. Chim. Phys. (5) 12 (1877) 5-87
+  (public domain), a stated stand-in in sulphur-liquid.json. The liquids' densities are the NIST Chemistry
+  WebBook's fluid properties (NIST Standard Reference Database 69), after R. Span et al., J. Phys.
+  Chem. Ref. Data 29 (2000) 1361 (nitrogen), K. Gao et al., J. Phys. Chem. Ref. Data 52 (2023)
+  013102 (ammonia), D. Buecker and W. Wagner, J. Phys. Chem. Ref. Data 35 (2006) 205 (ethane), and,
+  for the estimates' checks on measured liquids, Ch. Tegeler, R. Span and W. Wagner, J. Phys.
+  Chem. Ref. Data 28 (1999) 779 (argon) and U. Setzmann and W. Wagner, J. Phys. Chem. Ref. Data
+  20 (1991) 1061 (methane), with liquid argon's measured index from A. C. Sinnock and B. L. Smith
+  1969 through refractiveindex.info (as above).
+
+- Refractive indices of nine more liquids (plan R08, R08.T5.k), each the gas dispersion
+  view/atmosphere/rayleigh.ts cites scaled to the liquid, or a measured table: liquid argon,
+  krypton and xenon, A. C. Sinnock and B. L. Smith, Phys. Rev. 181 (1969) 1297-1307,
+  DOI: 10.1103/PhysRev.181.1297, their liquid tables through the refractiveindex.info database
+  (CC0 1.0, as above), in argon-liquid.json, krypton-liquid.json and xenon-liquid.json; liquid
+  oxygen's at 546.1 nm, H. E. Johns and J. O. Wilhelm, Can. J. Res. 15a (1937) 101-108,
+  DOI: 10.1139/cjr37a-013 (one value from its abstract), with G. D. Liveing and J. Dewar, Phil.
+  Mag. (5) 34 (1892) 205-209, DOI: 10.1080/14786449208620308, and (5) 40 (1895) 268-272,
+  DOI: 10.1080/14786449508620770 (public domain), as checks, in oxygen-liquid.json; liquid nitrous
+  oxide's, Liveing and Dewar 1892 (as above), in nitrous-oxide-liquid.json; liquid sulphur
+  dioxide's, L. Bleekrode, Proc. R. Soc. Lond. 37 (1884) 339-362, DOI: 10.1098/rspl.1884.0039
+  (public domain), with E. Ketteler's (1865) and Bichat's (J. Phys. 9 (1880) 279) values as he
+  quotes them, in sulphur-dioxide-liquid.json; liquid carbon dioxide's density law, P. Phillips,
+  Proc. R. Soc. Lond. A 97 (1920) 225-240, DOI: 10.1098/rspa.1920.0029 (public domain), with
+  Bleekrode 1884's values as checks, in carbon-dioxide-liquid.json; and, recorded against the
+  Lorentz-Lorenz estimates in carbon-monoxide-liquid.json and hydrogen-sulphide-liquid.json,
+  liquid carbon monoxide's, R. E. Gagnon, P. H. Gammon, H. Kiefte and M. J. Clouter, Appl. Opt. 18
+  (1979) 1237-1239, DOI: 10.1364/AO.18.001237 (two values from its abstract), and liquid hydrogen
+  sulphide's, Bleekrode 1884 (as above). The noble-gas files cite as checks A. C. Sinnock, J.
+  Phys. C 13 (1980) 2375, DOI: 10.1088/0022-3719/13/12/018 (its abstract), and G. M. Seidel,
+  R. E. Lanou and W. Yao, "Rayleigh scattering in rare-gas liquids", arXiv:hep-ex/0111054
+  (three pairs of values from its Table II), and record E. Grace, A. Butcher, J. Monroe and
+  J. A. Nikkel, arXiv:1502.04213 (two values from its Table 2) as not used. Liquid oxygen's
+  imaginary index is reduced from the collision-induced absorption of O2-O2 of R. Thalman and
+  R. Volkamer, Phys. Chem. Chem. Phys. 15 (2013) 15371, DOI: 10.1039/c3cp50968k, as the HITRAN2024
+  file O2-O2_2024.cia gives it (as above), at the liquid's number density squared. The liquids'
+  densities are the NIST Chemistry WebBook's fluid properties (NIST Standard Reference Database
+  69), after R. Schmidt and W. Wagner, Fluid Phase Equilib. 19 (1985) 175 (oxygen), Ch. Tegeler,
+  R. Span and W. Wagner (as above; argon), E. W. Lemmon and R. Span, J. Chem. Eng. Data 51 (2006)
+  785 (krypton, xenon, carbon monoxide, nitrous oxide and hydrogen sulphide), R. Span and
+  W. Wagner, J. Phys. Chem. Ref. Data 25 (1996) 1509 (carbon dioxide) and K. Gao, J. Wu, P. Zhang
+  and E. W. Lemmon, J. Chem. Eng. Data 61 (2016) 2859 (sulphur dioxide).
+
+- Liquid methane's visible absorption (plan R08, R08.T5.j): J. V. Martonchik and G. S. Orton,
+  Appl. Opt. 33 (1994) 8306-8317, DOI: 10.1364/AO.33.008306, its Fig. 3 best-estimate curve and
+  its Table 2, read from the reprint in NASA's Technical Reports Server (19960016949,
+  NASA-CR-200337; public use permitted), the curve's vertices held in
+  apps/hyperion/src/tools/materials.ts; and E. Karkoschka, "Methane, ammonia, and temperature
+  measurements of the jovian planets and Titan from CCD-spectrophotometry", Icarus 133 (1998)
+  134-146, DOI: 10.1006/icar.1998.5913, its methane absorption coefficients as NASA's Planetary
+  Data System distributes them (volume GBAT_0001, data set ESO-J/S/N/U-SPECTROPHOTOMETER-4-V2.0,
+  DOI 10.17189/2bp8-k793; https://pds-atmospheres.nmsu.edu/PDS/data/gbat_0001/data/1995low.tab),
+  dedicated to the public domain (CC0 1.0), their rows over 377.2-782.8 nm held in
+  apps/hyperion/src/tools/materials.ts. Reduced to the visible in
+  apps/hyperion/src/renderer/src/view/atmosphere/materials/methane-liquid.json.
+
+- Single-scattering properties of irregular hexahedral particles: M. Saito, TAMUdust2020
+  Database, version 1.0.0, Zenodo, DOI 10.5281/zenodo.4711247, licensed under CC BY 4.0
+  (https://creativecommons.org/licenses/by/4.0/), described in M. Saito, P. Yang, J. Ding and
+  X. Liu, "A comprehensive database of the optical properties of irregular aerosol particles for
+  radiative transfer simulations", J. Atmos. Sci. 78 (2021) 2089-2111, DOI
+  10.1175/JAS-D-20-0338.1. The scattering properties are obtained from TAMUdust2020. Interpolated
+  to each material's refractive index (past the longwave kernel's range in n, to its nearer edge)
+  and resampled in size and angle in
+  apps/hyperion/src/renderer/src/view/atmosphere/materials/phase/; these reduced tables are
+  offered under CC BY 4.0. Three test fixtures are adapted from the same data and offered under
+  CC BY 4.0: raw records, quantised, in
+  apps/hyperion/src/renderer/src/view/atmosphere/fixtures/tamudust-excerpt.json, and reduced
+  tables at MGS-1 M's index in fixtures/mgs1m-phase.json and at Frattin et al.'s enstatite's in
+  fixtures/enstatite-sample-phase.json. The reduced tables' extinction and scattering
+  cross-sections are adapted again, integrated over size distributions at 550 nm, into the
+  extinction efficiencies and single-scattering albedos of
+  crates/hyperion-sim/src/tables/condensate_extinction*.rs (galaxy plan 14, P14.T49.e), offered
+  under CC BY 4.0. The archive's GPL-3.0 code was read for its record layout only; none of it is
+  included.
+
+- Single-scattering properties of severely roughened ice crystals: P. Yang, L. Bi, B. A. Baum,
+  K.-N. Liou, G. W. Kattawar, M. I. Mishchenko and B. Cole, "Spectrally consistent scattering,
+  absorption, and polarization properties of atmospheric ice crystals at wavelengths from 0.2 to
+  100 um", J. Atmos. Sci. 70 (2013) 330-347, DOI 10.1175/JAS-D-12-039.1, in its version 2
+  (L. Bi and P. Yang, J. Quant. Spectrosc. Radiat. Transfer 189 (2017) 228-237), Zenodo record
+  5348402, licensed under CC BY 4.0. The 8-column aggregate, severely roughened, resampled in size
+  and angle in apps/hyperion/src/renderer/src/view/atmosphere/materials/phase/; offered under
+  CC BY 4.0. Its extinction and scattering cross-sections are adapted again, integrated over size
+  distributions at 550 nm, into water ice's entry in
+  crates/hyperion-sim/src/tables/condensate_extinction_7.rs (galaxy plan 14, P14.T49.e), offered
+  under CC BY 4.0.
+
+- The infrared optical constants of the condensed optics' frosts and regoliths (galaxy plan 14,
+  P14.T49.i), tool inputs in crates/hyperion-fit/data/ (not shipped), each with its
+  PROVENANCE.toml, a reduced one with its reduce.py; the values of
+  crates/hyperion-sim/src/tables/substance_albedo.rs are computed from them:
+  - committed unmodified from the refractiveindex.info database (M. N. Polyanskiy, Sci. Data 11,
+    94 (2024); commit c5c2f188), which is dedicated to the public domain (CC0 1.0): S. G. Warren
+    and R. E. Brandt, J. Geophys. Res. 113 (2008) D14220, DOI: 10.1029/2007JD009744 (ice Ih);
+    J. V. Martonchik and G. S. Orton, Appl. Opt. 33 (1994) 8306-8317, DOI: 10.1364/AO.33.008306
+    (methane ice's real index);
+  - reduced, with their citations: W. M. Grundy and B. Schmitt, J. Geophys. Res. 103 (1998)
+    25809-25822, DOI: 10.1029/98JE00738 (H2O ice at 100 K); W. M. Grundy, B. Schmitt and
+    E. Quirico, Icarus 155 (2002) 486-496, DOI: 10.1006/icar.2001.6726 (CH4 ice at 40 K), and
+    Icarus 105 (1993) 254-258, DOI: 10.1006/icar.1993.1122 (beta-N2 ice at 41 K), from the first
+    author's pages; S. G. Warren, Appl. Opt. 25 (1986) 2650-2674, DOI: 10.1364/AO.25.002650 (CO2
+    ice), J. V. Martonchik, G. S. Orton and J. F. Appleby, Appl. Opt. 23 (1984) 541-547, DOI:
+    10.1364/AO.23.000541 (NH3 ice), and J. Dorschner et al., Astron. Astrophys. 300 (1995)
+    503-520 (MgSiO3 glass), as distributed in optool's lnk_data (commit 0b1fa6df);
+    P. A. Gerakines, C. K. Materese and R. L. Hudson, Mon. Not. R. Astron. Soc. 522 (2023)
+    3145-3162, DOI: 10.1093/mnras/stad1164 (alpha-CO ice at 25 K), optical constants data
+    retrieved from the Optical Constants database (OCdb, NASA), distributed under NASA's Open
+    Access Data Policy; B. N. Khare et al., Icarus 60 (1984) 127-137 (Titan tholin), and C. Jaeger
+    et al., Astron. Astrophys. 408 (2003) 193-204 (amorphous Mg2SiO4), as distributed in the
+    HITRAN2024 aerosol compilation (I. E. Gordon et al., J. Quant. Spectrosc. Radiat. Transfer 353
+    (2026) 109807); J. B. Pollack, O. B. Toon and B. N. Khare, Icarus 19 (1973) 372-389, DOI:
+    10.1016/0019-1035(73)90115-2 (basalt and basaltic glass), through the Aerosol Refractive
+    Index Archive; and E. D. Palik and A. Addamiano, in E. D. Palik (ed.), Handbook of Optical
+    Constants of Solids (1985) (cubic ZnS), as compiled by D. Kitzmann and K. Heng, Mon. Not. R.
+    Astron. Soc. 475 (2018) 94-107, DOI: 10.1093/mnras/stx3141, a reduced subset of one material,
+    no file of the compilation included.
+  - reduced, with its citation: M. J. Wolff et al., J. Geophys. Res. 114 (2009) E00D04, DOI:
+    10.1029/2009JE003350 (Mars's dust), as distributed by NASA Ames's Mars Climate Modeling Group
+    (Dust_Refractive_Indicies.txt), its rows over 0.7-5.5 um.
+
+- The laboratory spectra of the condensed optics' rows without an index file (galaxy plan 14,
+  P14.T49.i), tool inputs in crates/hyperion-fit/data/usgs_splib07a/ (not shipped), committed
+  unmodified with its PROVENANCE.toml: forty spectra and two wavelength files of the USGS Spectral
+  Library Version 7 (R. F. Kokaly et al., U.S. Geological Survey Data Series 1035 (2017), DOI:
+  10.3133/ds1035; data release DOI: 10.5066/F7RR1WDJ), in the public domain in the United States.
+  Each spectrum is inverted for a single-scattering albedo by Hapke's model at its own geometry,
+  taken to a regolith's grains or held, and mixed at cited modes; the values of
+  crates/hyperion-sim/src/tables/substance_albedo.rs are computed from them. Courtesy of the U.S.
+  Geological Survey, which has not reviewed or endorsed the derived values.
+
+- White-dwarf synthetic photometry: the V-band bolometric corrections of the pure-hydrogen grid
+  of P. Bergeron et al., "Synthetic Colors and Evolutionary Sequences of Hydrogen- and
+  Helium-Atmosphere White Dwarfs", http://www.astro.umontreal.ca/~bergeron/CoolingModels
+  (release of 2021-01-13), with Bédard et al., Astrophys. J. 901 (2020) 93; Holberg and Bergeron,
+  Astron. J. 132 (2006) 1221; Tremblay, Bergeron and Gianninas, Astrophys. J. 730 (2011) 128;
+  Bergeron et al., Astrophys. J. 737 (2011) 28; Blouin et al., Astrophys. J. 863 (2018) 184;
+  Kowalski and Saumon, Astrophys. J. 651 (2006) L137; and Bergeron, Wesemael and Beauchamp,
+  Publ. Astron. Soc. Pac. 107 (1995) 1047. The grid's BC_V column, at its own nodes, with its
+  M_bol and V columns for the tests only, in
+  crates/hyperion-sim/src/stellar/photometry/montreal_da.rs (galaxy plan 6, P06.T43.a).
+
+- Cool stars' bolometric corrections: G. Worthey and H.-c. Lee, Astrophys. J. Suppl. Ser. 193
+  (2011) 1, from the authors' color-temperature table (http://astro.wsu.edu/models/, mash2.out
+  of 2010-09-15), [Fe/H] = 0, log g 0.0-5.5, V - K from 1.1, T_eff and BC_V at each row, in
+  crates/hyperion-sim/src/stellar/photometry/wl11.rs (galaxy plan 6, P06.T43.a). Not taken from
+  CDS's copy of the same table, which CDS offers under CC BY-NC.
+
+- The luminosity classes' boundaries: V. Straižys and G. Kuriliene, "Fundamental stellar
+  parameters derived from the evolutionary tracks", Astrophys. Space Sci. 80 (1981) 353-368, DOI:
+  10.1007/BF00652936, Tables III, IV and VII (with Table VI to check their transcription). Reduced
+  to the six boundaries between classes, V/IV and IV/III in log g and III/II to Iab/Ia in M_bol,
+  each the points halfway between two classes in (log T_eff, value) at the spectral types that give
+  both, in crates/hyperion-sim/src/tables/class_boundaries.rs (galaxy plan 6, P06.T23.b). The
+  tables themselves are not committed.
+
+- The mean dwarf sequence: M. J. Pecaut and E. E. Mamajek, Astrophys. J. Suppl. Ser. 208 (2013) 9,
+  Table 5, in E. Mamajek's maintained version 2022.04.16, "A Modern Mean Dwarf Stellar Color and
+  Effective Temperature Sequence",
+  https://www.pas.rochester.edu/~emamajek/EEM_dwarf_UBVIJHK_colors_Teff.txt. Reduced to the
+  spectral type, BC_V and B - V against effective temperature, each resampled onto an even grid
+  in log T_eff from O3V to its coolest tabulated row, in
+  crates/hyperion-sim/src/tables/dwarf_sequence.rs (galaxy plan 6, P06.T23.a), and 26 effective
+  temperatures, B0-F5, as the giant scale's nodes in
+  crates/hyperion-sim/src/stellar/classify/scales.rs.
+
+================================================================================
+Test data (not shipped)
+
+Values quoted from the following benchmarks are committed in tests, each with its table or figure
+cited; the benchmark tables themselves are not committed (plan R08, R08.T12.c, ruled 2026-10-09).
+Garcia and Siewert 1985 (Transport Theory Stat. Phys. 14, 437) and Loughman et al. 2004 (J.
+Geophys. Res. 109, D06303) join this list when their values are quoted; neither is yet.
+
+- V. Natraj, K.-F. Li and Y. L. Yung, Astrophys. J. 691 (2009) 1909-1920,
+  DOI: 10.1088/0004-637X/691/2/1909; V. Natraj and J. W. Hovenier, Astrophys. J. 748 (2012) 28,
+  DOI: 10.1088/0004-637X/748/1/28; tables at
+  https://web.gps.caltech.edu/~vijay/Rayleigh_Scattering_Tables/.
+
+- A. A. Kokhanovsky et al., "Benchmark results in vector atmospheric radiative transfer",
+  J. Quant. Spectrosc. Radiat. Transfer 111 (2010) 1931-1946, DOI: 10.1016/j.jqsrt.2010.03.005.
+
+- IPRT polarized radiative transfer model intercomparison, Phase A (C. Emde et al., J. Quant.
+  Spectrosc. Radiat. Transfer 164 (2015) 8-36, DOI: 10.1016/j.jqsrt.2015.05.007), results and
+  the optical properties of cases A3, A4 and A5 from https://www.libradtran.org/iprt/, licensed
+  under CC BY-SA 3.0 (https://creativecommons.org/licenses/by-sa/3.0/). The values in
+  crates/hyperion-fit/data/iprt_phase_a/ are selected rows of those results, case A4's phase
+  matrix less its Legendre moments, and the phase matrices of A3 and A5 at selected angles,
+  reformatted; that adapted material is offered under CC BY-SA 3.0. The sphere cases' matrices
+  in crates/hyperion-fit/src/atmosphere/sphere_matrices/ are computed by the client's Mie from the
+  size distributions that Kokhanovsky et al. and IPRT state (plan R08, R08.T12.e), not copied.
+
+- Measured scattering matrices from the Granada-Amsterdam Light Scattering Database
+  (https://scattering.iaa.es/; O. Muñoz et al., J. Quant. Spectrosc. Radiat. Transfer 331 (2025)
+  109252): J. Martikainen et al., Astrophys. J. Suppl. Ser. 273 (2024) 28 (MGS-1 M), and
+  E. Frattin et al., Mon. Not. R. Astron. Soc. 484 (2019) 2198-2211 (enstatite); computed optical
+  properties from J. Martikainen et al., Mon. Not. R. Astron. Soc. 537 (2025) 1489-1503. The two
+  samples' size distributions are committed as values in
+  apps/hyperion/src/renderer/src/view/atmosphere/fixtures/granada-amsterdam.json, under the
+  database's request of citation. The enstatite test's index, 1.594 + 4.5e-4i at 520 nm, is
+  interpolated to the sample's iron from J. Dorschner et al., Astron. Astrophys. 300 (1995)
+  503-520's pyroxene glasses (two values, cited).
+
+- RRTMG_SW, Atmospheric and Environmental Research (https://github.com/AER-RC/RRTMG_SW,
+  BSD 3-Clause License, Copyright (c) 2020): two band-24 water vapour continuum means computed from
+  data/rrtmg_sw.nc are asserted in a test (plan R08, R08.T4.d).
+
+- H. Chen-Chen, S. Pérez-Hoyos and A. Sánchez-Lavega, Icarus 330 (2019) 16-29; E. Järvinen et
+  al., Atmos. Chem. Phys. 18 (2018) 15767-15781.
+
+- A Titan-like aggregate's optical properties computed offline with optool 1.9.14 (C. Dominik,
+  M. Min and R. Tazaki, ascl:2104.010; MIT licence, above), in
+  apps/hyperion/src/renderer/src/view/atmosphere/fixtures/optool-titan.json.
+
+- The molecular ices' Lorentz-Lorenz checks (plan R08, R08.T5.d): A. C. Sinnock and B. L. Smith,
+  Phys. Rev. 181 (1969) 1297 (solid argon, as above); and Y. Y. Yarnall and R. L. Hudson,
+  Astrophys. J. Lett. 931 (2022) L4, DOI: 10.3847/2041-8213/ac6b32, licensed under CC BY 4.0
+  (https://creativecommons.org/licenses/by/4.0/), Table 1's index and density of amorphous H2S
+  ice at 19 K (two values, cited).
+
+- Earth's land share by 2.5° band (72 values) and by 2.5° × 5° box (72 × 72 values), computed from
+  Natural Earth's 1:110m land polygons (ne_110m_land; public domain,
+  https://www.naturalearthdata.com/about/terms-of-use/), in the climate step's tests (plan R09,
+  R09.T13.a and R09.T13.e). Made with Natural Earth. Only these derived shares are committed; no
+  polygon is.
+
+- Earth's land hypsometry by 2.5° band (72 bands × 8 equal-area quantiles of the surface height,
+  ice sheets included), computed from Earth2014's SUR2014 5-arcmin grid (C. Hirt and M. Rexer,
+  Int. J. Appl. Earth Obs. Geoinf. 39 (2015) 103-112, DOI: 10.1016/j.jag.2015.03.001), in the
+  climate step's tests (plan R09, R09.T13.g); and each 2.5° × 5° box's median land surface height
+  (72 × 72 values), which places each band's quantiles in longitude (R09.T13.e). Earth2014 is
+  composed of SRTM V4.1 (A. Jarvis, H. I. Reuter, A. Nelson and E. Guevara, Hole-filled SRTM for
+  the globe Version 4, CGIAR-CSI, 2008; CIAT acknowledged as its source), SRTM30_PLUS v9 (J. J.
+  Becker et al., Marine Geodesy 32 (2009) 355-371), Bedmap2 (P. Fretwell et al., The Cryosphere 7
+  (2013) 375-393) and GBT v3 (J. L. Bamber et al., The Cryosphere 7 (2013) 499-510). Only these
+  derived statistics are committed; no grid is.
+
+- The annual zonal-mean precipitation of GPCP v2.3 over 1991-2020 by 2.5° band (72 values), computed
+  from NOAA PSL's long-term monthly means (precip.mon.ltm.1991-2020.nc,
+  https://psl.noaa.gov/data/gridded/data.gpcp.html), printed beside the model in the climate step's
+  tests (plan R09, R09.T13.e). Global Precipitation Climatology Project (GPCP) Monthly Analysis
+  Product data provided by the NOAA PSL, Boulder, Colorado, USA, from their website at
+  https://psl.noaa.gov. GPCP's papers: R. F. Adler et al., J. Hydrometeor. 4 (2003) 1147-1167
+  (version 2), and R. F. Adler et al., Atmosphere 9 (2018) 138, DOI: 10.3390/atmos9040138 (version
+  2.3). Only these derived means are committed; no grid is.
+
+- The annual zonal-mean 10 m meridional wind of the NCEP/NCAR Reanalysis 1 over 1991-2020 in four 5°
+  bins of the trades (4 values), computed from NOAA PSL's long-term monthly means, printed beside
+  the model in the climate step's tests (plan R09, R09.T13.e). NCEP-NCAR Reanalysis 1 data provided
+  by the NOAA PSL, Boulder, Colorado, USA, from their website at https://psl.noaa.gov. The dataset's
+  citation: E. Kalnay et al., Bull. Amer. Meteor. Soc. 77 (1996) 437-471. Only these derived means
+  are committed; no grid is.
+
+- The monthly zonal-mean 2 m air temperature of the NCEP/NCAR Reanalysis 1 over 1991-2020, reduced
+  to the sea level over land at the reference Earth's lapse rate, on the climate model's 72 bands
+  of 2.5° (864 values), computed from NOAA PSL's long-term monthly means
+  (air.2m.mon.ltm.1991-2020.nc, with the reanalysis's land mask land.sfc.gauss.nc and surface
+  height hgt.sfc.nc, https://psl.noaa.gov/data/gridded/data.ncep.reanalysis.html), the input of
+  the climate step's partition test on observed temperatures (plan R09, R09.T13.i). NCEP/NCAR
+  Reanalysis data provided by the NOAA PSL, Boulder, Colorado, USA, from their website at
+  https://psl.noaa.gov. The dataset's citation: E. Kalnay et al., Bull. Amer. Meteor. Soc. 77
+  (1996) 437-471. Only these derived means are committed; no grid is.
+
+- The monthly precipitation of GPCP v2.3 over 1991-2020 on Earth's 1,713 land boxes of 2.5° × 5°
+  (those at least half land by Natural Earth's 1:110m polygons; 20,556 values), computed from NOAA
+  NCEI's GPCP Monthly Climate Data Record (v02r03) as NOAA's Open Data Dissemination programme
+  distributes it (https://noaa-cdr-precip-gpcp-monthly-pds.s3.amazonaws.com/, whose files state
+  "No constraints on data access or use"), in the climate step's comparison with observed
+  climatologies (plan R09, R09.T13.l). GPCP's papers: R. F. Adler et al., J. Hydrometeor. 4 (2003)
+  1147-1167 (version 2), and R. F. Adler et al., Atmosphere 9 (2018) 138, DOI:
+  10.3390/atmos9040138 (version 2.3). These are means derived from NOAA's data, not NOAA's data
+  unaltered, and imply no endorsement by NOAA. Only these derived means are committed; no grid is.
+
+- The monthly 2 m air temperature of the NCEP/NCAR Reanalysis 1 over 1991-2020, reduced to the
+  sea level over land at the reference Earth's lapse rate, on the same land boxes (20,556 values),
+  computed from NOAA PSL's long-term monthly means (air.2m.mon.ltm.1991-2020.nc, with the
+  reanalysis's land mask land.sfc.gauss.nc and surface height hgt.sfc.nc, as the Internet Archive's
+  2022 snapshot of https://downloads.psl.noaa.gov holds them), in the same test (plan R09,
+  R09.T13.l; regenerated in R09.T13.m). NCEP/NCAR Reanalysis data provided by the NOAA PSL,
+  Boulder, Colorado, USA, from their website at https://psl.noaa.gov. The dataset's citation: E.
+  Kalnay et al., Bull. Amer. Meteor. Soc. 77 (1996) 437-471. Only these derived means are
+  committed; no grid is.

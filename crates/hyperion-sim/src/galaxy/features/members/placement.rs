@@ -19,7 +19,11 @@
 //! - **Candidate.** Candidate `i`'s streams are keyed by its [`FeatureMemberId`]: three uniforms on
 //!   `member.position` put it in its cell ([`CellProposal::place`]), one mark on `member.accept`
 //!   picks its class under the bound there or rejects it ([`MemberClassTable::pick`]), and an
-//!   accepted candidate is drawn by [`draw_member`].
+//!   accepted candidate is drawn by [`draw_member`](super::draw_member) (from generator version
+//!   27 with its recycled-object mark, P11.T8.f).
+//! - **Claim.** From generator version 26 a band-E member that the feature's list holds, a recent
+//!   death or a luminous blue variable (`members::recent`'s `claimed_by`; plan 09, P09.T36.a), is
+//!   no member of the cells, as a thinned candidate is not: the list's or the cells', never both.
 //!
 //! [`resolve_member`] reruns one candidate: "no such system" for an index at or past its cell's
 //! count, a rejected candidate, a feature that does not resolve or has no members, or a band the
@@ -28,18 +32,25 @@
 use crate::coords::{GalacticDisplacement, GalacticPosition, GalacticVelocity};
 use crate::galaxy::imf::MassBand;
 use crate::galaxy::placement::ResolveSystemError;
+use crate::galaxy::query::UNBOUND_PAD_SPEED;
 use crate::galaxy::{Galaxy, PointLy};
 use crate::id::{FeatureMemberId, FeatureRef, MemberSlot, SystemId};
 use crate::rng::{ObjectKey, Stream, tags};
 use crate::units::consts::METRES_PER_LIGHT_YEAR;
+use crate::units::{KilometresPerSecond, LightYears};
 
 use super::super::catalogue::{FeatureCatalogue, FeatureRecord, bulk_velocity};
-use super::super::cluster::ClusterModel;
-use super::super::interior::{CellProposal, LocalCell, MemberClassTable};
+use super::super::cluster::{ClusterModel, ClusterParameters};
+use super::super::interior::counts::TailReach;
+use super::super::interior::{BoundMemo, CellProposal, ClassKind, LocalCell, MemberClassTable};
 use super::super::nested::{NestedCell, NestedGrid};
 use super::level_list::FeatureLevelList;
+use super::recent::{FeatureStars, claimed_by};
 use super::source::FeatureInteriorCache;
-use super::{MemberRecord, draw_member};
+use super::{
+    INTERNAL_SPEED_SIGMAS, MemberRecord, RecycledShares, draw_member_marked, equipartition_factor,
+    is_at_the_turn_off,
+};
 
 /// A feature's interior: what placing its members needs, built once per feature and kept by the
 /// caller (P09.T21).
@@ -50,6 +61,12 @@ pub struct FeatureInterior {
     table: MemberClassTable,
     grid: NestedGrid,
     bulk: GalacticVelocity,
+    speed_bound: KilometresPerSecond,
+    /// The feature's stars, where its band-E cells give its list the members it claims (P09.T36.a).
+    claims: Option<Box<FeatureStars>>,
+    /// The shares of its neutron stars marked millisecond pulsars, from generator version 27
+    /// (P11.T8.f).
+    recycled: RecycledShares,
 }
 
 impl FeatureInterior {
@@ -62,6 +79,13 @@ impl FeatureInterior {
     /// ([`bulk_velocity`]) sets the tails' axis and so which candidates are accepted, and a zero
     /// stand-in would give the same ID another member. The tails run along it from the tidal
     /// radius to the feature's [`reach`](FeatureRecord::reach), cut at the grid's.
+    ///
+    /// # Panics
+    ///
+    /// If its [`member_speed_bound`](Self::member_speed_bound) is not below
+    /// [`UNBOUND_PAD_SPEED`], the speed the range query's feature lookup is padded by, and the
+    /// speed it keeps a feature's grid clear of a sphere at: a check made once an interior, which
+    /// release builds keep too (P09.T40.a).
     #[must_use]
     pub fn of(galaxy: &Galaxy, feature: &FeatureRecord) -> Option<Self> {
         let bulk = bulk_velocity(galaxy, feature)?;
@@ -70,13 +94,57 @@ impl FeatureInterior {
             MemberClassTable::new(galaxy, &model, feature.reach(), bulk.metres_per_second());
         let grid = table.grid();
         let table = table.with_tails_to(grid.reach());
+        let speed_bound = member_speed_bound(&model, &table, bulk);
+        assert!(
+            speed_bound.value() < UNBOUND_PAD_SPEED.value(),
+            "the members of {:?} may move at {} km/s, not below the {} km/s the range query's \
+             feature lookup is padded by",
+            feature.id(),
+            speed_bound.value(),
+            UNBOUND_PAD_SPEED.value()
+        );
+        let claims = FeatureStars::claiming(galaxy, feature).map(Box::new);
+        let recycled = recycled_shares(&model, &table);
         Some(Self {
             feature: *feature,
             model,
             table,
             grid,
             bulk,
+            speed_bound,
+            claims,
+            recycled,
         })
+    }
+
+    /// A bound on the reach of the nested grid [`of`](Self::of) builds for `feature`, ly, from its
+    /// cluster's tidal radius and its tails' length alone (`MemberClassTable::grid_reach_bound`),
+    /// or `None` where `of` builds no interior: what a query tests before it builds one
+    /// (P09.T40.a).
+    ///
+    /// The interior's class table, which chooses the grid's width, costs a hundred times the
+    /// cluster model, and the model a hundred times this; a 50 ly query at the Sun-like point
+    /// looks up some hundred features whose reach touches it, and one of their grids meets it
+    /// (measured 2026-10-30).
+    #[must_use]
+    pub fn grid_reach_bound(galaxy: &Galaxy, feature: &FeatureRecord) -> Option<LightYears> {
+        // `bulk_velocity`'s conditions, without its draw, and `ClusterModel::from_record`'s.
+        feature.component()?;
+        galaxy.kinematics()?;
+        let parameters = ClusterParameters::of_record(galaxy, feature)?;
+        // The model's tidal radius and `tail_window`'s length, bit for bit.
+        let tidal = parameters.tidal_radius(galaxy);
+        let tail = TailReach::of(
+            galaxy,
+            &parameters.position,
+            tidal,
+            parameters.age,
+            feature.reach(),
+        );
+        // A tail's reach as `MemberClassTable::from_counts` cuts it at the feature's.
+        let tails =
+            LightYears::new((tidal.value() + tail.length.value()).min(feature.reach().value()));
+        Some(MemberClassTable::grid_reach_bound(tidal, tails))
     }
 
     /// The feature.
@@ -103,10 +171,40 @@ impl FeatureInterior {
         &self.grid
     }
 
+    /// The bytes it owns on the heap: its class table's ([`MemberClassTable::heap_bytes`]). The
+    /// feature, the cluster model and the grid own nothing there. What a caller's byte-bounded
+    /// cache charges an interior (P09.T40.a).
+    #[must_use]
+    pub fn heap_bytes(&self) -> usize {
+        self.table.heap_bytes()
+    }
+
     /// Its bulk velocity, galactic.
     #[must_use]
     pub const fn bulk_velocity(&self) -> GalacticVelocity {
         self.bulk
+    }
+
+    /// A bound on the speed of every member in its grid, km/s, galactic (P09.T23.b).
+    ///
+    /// It is |bulk| plus the larger of two internal speeds, rounded up by 1 + 10⁻⁹: at least the
+    /// bulk speed, and below [`UNBOUND_PAD_SPEED`], which [`of`](Self::of) asserts in debug builds.
+    /// The range query pads the feature's cells by it where it passes a layer's pad speed.
+    ///
+    /// - A core member's internal velocity is cut at the local escape speed of the cluster's
+    ///   Plummer sphere, greatest at the centre: [`ClusterModel::escape_speed_at`] at 0, `√(2GM ÷
+    ///   a)`, not the fitted [`ClusterModel::escape_speed_central`].
+    /// - A tail member's is uncut, at the tidal radius's σ times its class's equipartition factor:
+    ///   at most 8.58 √2 times the largest over the bands' tails.
+    ///
+    /// It does not cover the classes of the feature-level list ([`MemberSlot::FeatureLevel`],
+    /// registered by P09.T36 and T43): a task that registers one with its own velocity law
+    /// extends this bound. P09.T30.b's tidal-disruption victims are the galactic centre's alone,
+    /// and the centre's source bounds their motion itself
+    /// ([`CentreMemberSource`](crate::galaxy::features::centre::CentreMemberSource)).
+    #[must_use]
+    pub const fn member_speed_bound(&self) -> KilometresPerSecond {
+        self.speed_bound
     }
 
     /// The feature-level list of its members (P09.T22).
@@ -135,7 +233,7 @@ impl FeatureInterior {
                 band: band.layer(),
                 level: cell.level(),
                 cell: cell.cell(),
-                index,
+                index: u32::from(index),
             },
         )
         .expect("an owned cell of a 16-cell, 8-level grid and an index below 8,192 make an ID")
@@ -144,8 +242,21 @@ impl FeatureInterior {
     /// How `band`'s candidates are proposed in `cell`, and the cell's box.
     #[must_use]
     fn proposal(&self, band: MassBand, cell: NestedCell) -> (CellProposal, LocalCell) {
+        self.proposal_with(band, cell, None)
+    }
+
+    /// [`proposal`](Self::proposal), bit for bit, its bound read from and kept in `memo`, this
+    /// interior's own ([`bound_memo`](Self::bound_memo)).
+    #[must_use]
+    fn proposal_with(
+        &self,
+        band: MassBand,
+        cell: NestedCell,
+        memo: Option<&mut BoundMemo<'_>>,
+    ) -> (CellProposal, LocalCell) {
         let local = self.grid.local_cell(cell);
-        (self.table.proposal(band, &local), local)
+        let memo = memo.map(|memo| (memo, self.grid.corner_key(cell)));
+        (self.table.proposal_with(band, &local, memo), local)
     }
 
     /// The expected candidates of `band` in `cell`: its bound times its volume, or its cusp
@@ -153,6 +264,25 @@ impl FeatureInterior {
     #[must_use]
     pub fn expected_candidates(&self, band: MassBand, cell: NestedCell) -> f64 {
         let (proposal, local) = self.proposal(band, cell);
+        proposal.expected(&local)
+    }
+
+    /// An empty [`BoundMemo`] for this interior's cells: one serves the cells of one sphere.
+    #[must_use]
+    pub(crate) fn bound_memo(&self) -> BoundMemo<'_> {
+        self.table.bound_memo(self.grid)
+    }
+
+    /// [`expected_candidates`](Self::expected_candidates), bit for bit, its bound read from and
+    /// kept in `memo` ([`BoundMemo`]), this interior's own ([`bound_memo`](Self::bound_memo)).
+    #[must_use]
+    pub(crate) fn expected_candidates_with(
+        &self,
+        band: MassBand,
+        cell: NestedCell,
+        memo: &mut BoundMemo<'_>,
+    ) -> f64 {
+        let (proposal, local) = self.proposal_with(band, cell, Some(memo));
         proposal.expected(&local)
     }
 
@@ -193,24 +323,60 @@ impl FeatureInterior {
         proposal: &CellProposal,
         local: &LocalCell,
     ) -> Option<(MemberRecord, PointLy)> {
+        self.candidate_where(galaxy, band, cell, index, (proposal, local), |_| true)
+    }
+
+    /// [`candidate_under`](Self::candidate_under), drawn only if `keep` takes its local position:
+    /// one it refuses is `None`, its class and its member unmade. Each candidate's draws are on
+    /// streams of its own ID, so leaving one unmade changes no other.
+    fn candidate_where(
+        &self,
+        galaxy: &Galaxy,
+        band: MassBand,
+        cell: NestedCell,
+        index: u16,
+        (proposal, local): (&CellProposal, &LocalCell),
+        keep: impl Fn(&PointLy) -> bool,
+    ) -> Option<(MemberRecord, PointLy)> {
         let id = self.member_id(band, cell, index);
         let key = ObjectKey::from(SystemId::from(id));
         let mut position = Stream::open(galaxy.seed(), tags::MEMBER_POSITION, key);
         let u = [0; 3].map(|_| position.uniform());
         let (p, bound) = proposal.place(local, u)?;
+        if !keep(&p) {
+            return None;
+        }
         let mark = Stream::open(galaxy.seed(), tags::MEMBER_ACCEPT, key).mark();
         let class = self.table.pick(band, &p, mark, bound)?;
         let at = self.galactic(&p);
-        draw_member(
+        draw_member_marked(
             galaxy,
             &self.feature,
             &self.model,
-            &class,
+            (&class, self.recycled),
             &at,
             id,
             self.bulk,
         )
+        .filter(|member| !self.claimed(galaxy, band, member))
         .map(|member| (member, p))
+    }
+
+    /// Whether the feature's list claims `member` of `band` (P09.T36.a): never under the hold's
+    /// held arm or outside band E.
+    #[must_use]
+    fn claimed(&self, galaxy: &Galaxy, band: MassBand, member: &MemberRecord) -> bool {
+        band == MassBand::E
+            && self.claims.as_ref().is_some_and(|stars| {
+                claimed_by(
+                    galaxy,
+                    stars,
+                    member.record(),
+                    member.composition(),
+                    member.velocity(),
+                )
+                .is_some()
+            })
     }
 
     /// The galactic position of the local point `p` of a member.
@@ -249,6 +415,98 @@ impl FeatureInterior {
             (0..n).filter_map(|i| self.candidate_under(galaxy, band, cell, i, &proposal, &local)),
         );
     }
+
+    /// The accepted members of `band` in `cell` within `within` of the local point `near`, in
+    /// index order, with their local positions, into `out` (cleared first):
+    /// [`members_in_cell`](Self::members_in_cell)'s that lie so near, the rest left undrawn
+    /// (P09.T40.a).
+    ///
+    /// A range query keeps only the members its sphere holds at its time, and a member's draw, its
+    /// class, mass, age and velocity, is nearly all its cost: in a 1 ly query about a globular's
+    /// centre the cells it touches hold four times the members its sphere does (measured
+    /// 2026-10-30). The cell's bound is read from and kept in `memo`, this interior's own
+    /// ([`bound_memo`](Self::bound_memo)), which a query shares over the cells it walks.
+    pub(crate) fn members_in_cell_near(
+        &self,
+        galaxy: &Galaxy,
+        band: MassBand,
+        cell: NestedCell,
+        near: &PointLy,
+        within: LightYears,
+        (out, memo): (&mut Vec<(MemberRecord, PointLy)>, &mut BoundMemo<'_>),
+    ) {
+        let within = within.value();
+        out.clear();
+        let (proposal, local) = self.proposal_with(band, cell, Some(memo));
+        let n = count_from_mean(
+            galaxy,
+            self.member_id(band, cell, 0),
+            proposal.expected(&local),
+        );
+        let keep = |p: &PointLy| {
+            let (dx, dy, dz) = (p.x - near.x, p.y - near.y, p.z - near.z);
+            (dx * dx + dy * dy + dz * dz).sqrt() <= within
+        };
+        out.extend((0..n).filter_map(|i| {
+            self.candidate_where(galaxy, band, cell, i, (&proposal, &local), keep)
+        }));
+    }
+}
+
+/// The relative margin [`FeatureInterior::member_speed_bound`] is rounded up by.
+///
+/// A kept core member's internal speed is below the cut as its draw computes the norm in km/s,
+/// and the cut enters the bound unrounded, while a member's speed is the norm in m/s of its bulk
+/// plus its internal velocity, component by component, which can pass |bulk| plus the cut by a few
+/// units in the last place. 10⁻⁹ is at least 4.5 × 10⁶ of them, and a millimetre per second at
+/// 1,000 km/s.
+const SPEED_BOUND_MARGIN: f64 = 1e-9;
+
+/// [`FeatureInterior::member_speed_bound`] for a cluster of `model`, with the class table `table`
+/// whose tails are cut at its grid's reach and bulk velocity `bulk`.
+#[must_use]
+fn member_speed_bound(
+    model: &ClusterModel,
+    table: &MemberClassTable,
+    bulk: GalacticVelocity,
+) -> KilometresPerSecond {
+    let core = model.escape_speed_at(LightYears::new(0.0)).value();
+    let turn_off = model.turn_off_mass();
+    let factor = MassBand::ALL
+        .iter()
+        .filter_map(|&band| table.tail(band))
+        .map(|tail| equipartition_factor(tail.class().mean_mass, turn_off))
+        .fold(0.0, f64::max);
+    let tail = INTERNAL_SPEED_SIGMAS * model.sigma(model.tidal_radius()).value() * factor;
+    let bulk = KilometresPerSecond::from(bulk.speed()).value();
+    KilometresPerSecond::new((bulk + core.max(tail)) * (1.0 + SPEED_BOUND_MARGIN))
+}
+
+/// The shares of a cluster's classes marked recycled objects, from generator version 27 (P09.T9.e's
+/// marks; P11.T8.f): its millisecond pulsars, `table`'s encounter-rate law capped at its neutron
+/// stars ([`MemberClassTable::millisecond_pulsars`]), over its expected neutron stars, and its
+/// blue stragglers ([`ClusterModel::blue_stragglers`]) over its expected binaries at the turn-off;
+/// none of a kind a cluster holds no member of.
+#[must_use]
+pub(crate) fn recycled_shares(model: &ClusterModel, table: &MemberClassTable) -> RecycledShares {
+    let neutron_stars = table.expected_of(ClassKind::NeutronStar);
+    let at_turn_off: f64 = MassBand::ALL
+        .iter()
+        .flat_map(|&band| table.classes(band))
+        .filter(|(class, _)| is_at_the_turn_off(class))
+        .map(|(_, expected)| expected)
+        .sum();
+    let share = |n: f64, of: f64| {
+        if of > 0.0 {
+            (n / of).clamp(0.0, 1.0)
+        } else {
+            0.0
+        }
+    };
+    RecycledShares::new(
+        share(table.millisecond_pulsars(model), neutron_stars),
+        share(model.blue_stragglers(), at_turn_off),
+    )
 }
 
 /// The count of a cell whose candidate 0 is `first` and whose mean is `mean`.
@@ -283,7 +541,7 @@ pub fn resolve_member(
         .ok_or(ResolveSystemError::NoSuchSystem)?;
     match id.slot() {
         MemberSlot::FeatureLevel { index } => FeatureLevelList::of(galaxy, &feature)
-            .member(index)
+            .member(galaxy, index)
             .ok_or(ResolveSystemError::NoSuchSystem),
         MemberSlot::InCell {
             band,
@@ -304,6 +562,8 @@ pub fn resolve_member(
                 .ok_or(ResolveSystemError::NoSuchSystem)?;
             let (proposal, local) = interior.proposal(band, cell);
             let mean = proposal.expected(&local);
+            // A feature's slot holds 13 bits, so a valid ID's index is a `u16`.
+            let index = u16::try_from(index).map_err(|_| ResolveSystemError::NoSuchSystem)?;
             if index >= count_from_mean(galaxy, interior.member_id(band, cell, 0), mean) {
                 return Err(ResolveSystemError::NoSuchSystem);
             }
@@ -335,6 +595,11 @@ mod tests {
     use crate::math;
     use crate::rng::Seed;
 
+    /// The Milky Way fixture with its kinematic tables, built once per process.
+    ///
+    /// The build takes some 5 s in a test build, and nextest runs each test in a process of its
+    /// own, so the fast properties that read it or the clusters below run in one test,
+    /// [`the_fixture_s_clusters_place_resolve_and_pin_their_members`].
     fn galaxy() -> &'static Galaxy {
         static GALAXY: OnceLock<Galaxy> = OnceLock::new();
         GALAXY.get_or_init(|| {
@@ -342,6 +607,124 @@ mod tests {
                 .unwrap()
                 .with_full_potential()
         })
+    }
+
+    /// The members of the fixture's clusters (plan 09), each property below on one build of the
+    /// fixture ([`galaxy`]) and of its clusters ([`open_cluster`], [`globular`]), in turn.
+    ///
+    /// The golden runs first, so that a statistical property tripped by a version bump does not keep
+    /// `just bless` from writing it. Each property's name is printed before it runs: two of them
+    /// share [`assert_profiles`], whose failure names a class but not its cluster, and nextest
+    /// shows a failing test's output.
+    #[test]
+    fn the_fixture_s_clusters_place_resolve_and_pin_their_members() {
+        let properties: [(&str, fn()); 11] = [
+            ("members_golden", members_golden),
+            (
+                "a_memo_s_expected_candidates_and_members_are_its_cells_own",
+                a_memo_s_expected_candidates_and_members_are_its_cells_own,
+            ),
+            (
+                "every_member_s_id_round_trips_and_resolves_to_it",
+                every_member_s_id_round_trips_and_resolves_to_it,
+            ),
+            (
+                "a_galaxy_without_its_kinematic_tables_places_no_member",
+                a_galaxy_without_its_kinematic_tables_places_no_member,
+            ),
+            (
+                "resolving_through_a_kept_interior_does_not_depend_on_order",
+                resolving_through_a_kept_interior_does_not_depend_on_order,
+            ),
+            (
+                "an_index_past_the_count_or_a_rejected_candidate_is_no_such_system",
+                an_index_past_the_count_or_a_rejected_candidate_is_no_such_system,
+            ),
+            (
+                "a_globular_s_members_follow_their_class_profiles",
+                a_globular_s_members_follow_their_class_profiles,
+            ),
+            (
+                "a_collapsed_cluster_s_cusp_is_placed_by_its_envelope",
+                a_collapsed_cluster_s_cusp_is_placed_by_its_envelope,
+            ),
+            (
+                "a_member_does_not_depend_on_what_else_was_placed",
+                a_member_does_not_depend_on_what_else_was_placed,
+            ),
+            (
+                "the_axes_hold_the_fullest_cell_and_it_is_far_from_the_index",
+                the_axes_hold_the_fullest_cell_and_it_is_far_from_the_index,
+            ),
+            (
+                "a_globular_of_a_million_systems_peaks_near_600_a_cell_and_its_light_counts_rise_gently",
+                a_globular_of_a_million_systems_peaks_near_600_a_cell_and_its_light_counts_rise_gently,
+            ),
+        ];
+        for (name, property) in properties {
+            println!("property: {name}");
+            property();
+        }
+    }
+
+    /// A census through a [`BoundMemo`] is each cell's own, bit for bit: over the cells a 50 ly
+    /// sphere about a globular's centre and one 20 ly off it touch, every band's expected
+    /// candidates and members found sharing one memo are those found without it, and the memo
+    /// holds far fewer bounds than the cells it served, since the grid's mirrors repeat them.
+    /// Run on its one build of the fixture by
+    /// [`the_fixture_s_clusters_place_resolve_and_pin_their_members`].
+    fn a_memo_s_expected_candidates_and_members_are_its_cells_own() {
+        use hyperion_testkit::float::assert_same_bits;
+
+        let galaxy = galaxy();
+        for interior in [globular(false), open_cluster()] {
+            for near in [PointLy::new(0.0, 0.0, 0.0), PointLy::new(20.0, -3.0, 7.5)] {
+                let radius = LightYears::new(50.0);
+                let cells: Vec<NestedCell> =
+                    interior.grid().cells_touching(&near, radius).collect();
+                let mut memo = interior.bound_memo();
+                let (mut with, mut without) = (Vec::new(), Vec::new());
+                for band in MassBand::ALL {
+                    for &cell in &cells {
+                        assert_same_bits(
+                            interior.expected_candidates_with(band, cell, &mut memo),
+                            interior.expected_candidates(band, cell),
+                        );
+                    }
+                }
+                let served = MassBand::ALL.len() * cells.len();
+                assert!(
+                    memo.len() * 4 < served,
+                    "{} bounds kept for {served} cells' bands",
+                    memo.len()
+                );
+                for band in MassBand::ALL {
+                    for &cell in cells.iter().step_by(37) {
+                        interior.members_in_cell_near(
+                            galaxy,
+                            band,
+                            cell,
+                            &near,
+                            radius,
+                            (&mut with, &mut memo),
+                        );
+                        interior.members_in_cell_near(
+                            galaxy,
+                            band,
+                            cell,
+                            &near,
+                            radius,
+                            (&mut without, &mut interior.bound_memo()),
+                        );
+                        assert_eq!(
+                            format!("{with:?}"),
+                            format!("{without:?}"),
+                            "{band:?} {cell:?}"
+                        );
+                    }
+                }
+            }
+        }
     }
 
     /// An old open cluster of a few thousand solar masses at birth, shared by the tests: an
@@ -436,7 +819,8 @@ mod tests {
         out
     }
 
-    #[test]
+    /// Run on its one build of the fixture by
+    /// [`the_fixture_s_clusters_place_resolve_and_pin_their_members`].
     fn every_member_s_id_round_trips_and_resolves_to_it() {
         let galaxy = galaxy();
         let interior = open_cluster();
@@ -460,7 +844,8 @@ mod tests {
         );
     }
 
-    #[test]
+    /// Run on its one build of the fixture by
+    /// [`the_fixture_s_clusters_place_resolve_and_pin_their_members`].
     fn a_galaxy_without_its_kinematic_tables_places_no_member() {
         let bare =
             Galaxy::from_params(Seed::new(0x0921_0000), GalaxyParams::milky_way_like()).unwrap();
@@ -480,7 +865,9 @@ mod tests {
 
     /// Members of one feature resolved through one shared [`KeepInteriors`], in any order, are
     /// the members resolved cold.
-    #[test]
+    ///
+    /// Run on its one build of the fixture by
+    /// [`the_fixture_s_clusters_place_resolve_and_pin_their_members`].
     fn resolving_through_a_kept_interior_does_not_depend_on_order() {
         use crate::galaxy::features::members::KeepInteriors;
         use hyperion_testkit::order::assert_order_independent;
@@ -512,7 +899,8 @@ mod tests {
         }
     }
 
-    #[test]
+    /// Run on its one build of the fixture by
+    /// [`the_fixture_s_clusters_place_resolve_and_pin_their_members`].
     fn an_index_past_the_count_or_a_rejected_candidate_is_no_such_system() {
         let galaxy = galaxy();
         let interior = open_cluster();
@@ -560,7 +948,8 @@ mod tests {
         tested
     }
 
-    #[test]
+    /// Run on its one build of the fixture by
+    /// [`the_fixture_s_clusters_place_resolve_and_pin_their_members`].
     fn a_globular_s_members_follow_their_class_profiles() {
         let galaxy = galaxy();
         let interior = globular(false);
@@ -571,7 +960,8 @@ mod tests {
         assert!(tested >= 3, "{tested} classes tested");
     }
 
-    #[test]
+    /// Run on its one build of the fixture by
+    /// [`the_fixture_s_clusters_place_resolve_and_pin_their_members`].
     fn a_collapsed_cluster_s_cusp_is_placed_by_its_envelope() {
         let galaxy = galaxy();
         let interior = globular(true);
@@ -596,7 +986,8 @@ mod tests {
 
     const CELL_TARGET: f64 = 2_000.0;
 
-    #[test]
+    /// Run on its one build of the fixture by
+    /// [`the_fixture_s_clusters_place_resolve_and_pin_their_members`].
     fn a_member_does_not_depend_on_what_else_was_placed() {
         let galaxy = galaxy();
         let interior = open_cluster();
@@ -632,6 +1023,7 @@ mod tests {
         let MemberSlot::InCell { index, .. } = id.slot() else {
             panic!("a nested member is in a cell")
         };
+        let index = u16::try_from(index).unwrap();
         assert_eq!(
             interior.candidate(galaxy, band, cell, index).map(|c| c.0),
             Some(first)
@@ -640,7 +1032,9 @@ mod tests {
 
     /// The fullest cell and band over every owned cell is the one on the axes, and under the
     /// target, for the shared open cluster and the two globulars.
-    #[test]
+    ///
+    /// Run on its one build of the fixture by
+    /// [`the_fixture_s_clusters_place_resolve_and_pin_their_members`].
     fn the_axes_hold_the_fullest_cell_and_it_is_far_from_the_index() {
         for interior in [open_cluster(), globular(false), globular(true)] {
             let grid = interior.grid();
@@ -745,7 +1139,8 @@ mod tests {
         build(&p)
     }
 
-    #[test]
+    /// Run on its one build of the fixture by
+    /// [`the_fixture_s_clusters_place_resolve_and_pin_their_members`].
     fn a_globular_of_a_million_systems_peaks_near_600_a_cell_and_its_light_counts_rise_gently() {
         let galaxy = galaxy();
         let (model, table) = synthetic_globular(galaxy, 1e6, 240.0);
@@ -847,7 +1242,8 @@ mod tests {
         }
     }
 
-    #[test]
+    /// Run on its one build of the fixture by
+    /// [`the_fixture_s_clusters_place_resolve_and_pin_their_members`].
     fn members_golden() {
         let galaxy = galaxy();
         let mut w = GoldenWriter::new();

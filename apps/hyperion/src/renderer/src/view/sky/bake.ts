@@ -14,13 +14,22 @@
  * cube with `writePackedCubeLevelFromBuffer`, with no readback. The scale's source, the brightest
  * luminance's bits, stays in a small buffer the cube's draw reads.
  *
+ * A face larger than {@link BAKE_TILE_PX} is baked a tile at a time (the owner's priority,
+ * 2026-11-01: the high setting's first bake made 286 MB of scratch beside its 302 MB cube, on
+ * Apple silicon's shared memory): each tile is splatted into a scratch tile, its levels down to
+ * {@link BakeTiling.upperLevel} are summed, packed and copied into their places on the cube, and
+ * its last step writes its parents into the face's upper levels, which are then baked whole. A
+ * texel's stars blend in the same order, and each sum, division and packing takes the same values,
+ * so the cube is the untiled bake's to the bit (the harness compares the two). The solid angles
+ * are the face's lower triangle (`cube.ts`'s `texelSolidAnglesLowerF32`), half the table.
+ *
  * Without `float32-blendable` the splat cannot be made, and the bake runs on the CPU through the
  * same steps' TypeScript references (`splatCpu.ts`, `mips.ts`, `pack.ts`), one face at a time; the
  * sums are the same in another order.
  *
- * The cube counts under `MemoryCategory` `sky-cube`; every transient, the scratch face and its mip
- * chain, the solid angles, the points and the staging, under `sky-scratch`, released when the bake
- * ends (T13.h's `releaseBuffer` and `releaseTexture`).
+ * The cube counts under `MemoryCategory` `sky-cube`; every transient, the scratch face's levels (or
+ * a tile's and the face's upper levels), the solid angles, the points and the staging, under
+ * `sky-scratch`, released when the bake ends (T13.h's `releaseBuffer` and `releaseTexture`).
  */
 
 import { BUFFER_USAGE, TEXTURE_USAGE } from "../engine/gpuFlags";
@@ -32,7 +41,7 @@ import type {
   RenderEngine,
   TextureHandle,
 } from "../engine/types";
-import { CUBE_FACE_COUNT, texelSolidAnglesSr } from "./cube";
+import { CUBE_FACE_COUNT, texelSolidAnglesLowerF32, texelSolidAnglesSr } from "./cube";
 import {
   divideBySolidAngle,
   faceMipChain,
@@ -45,6 +54,7 @@ import { packRgb9e5Texels } from "./pack";
 import bakeCommonWgsl from "./shaders/bakeCommon.wgsl?raw";
 import bakeClearWgsl from "./shaders/bakeClear.wgsl?raw";
 import bakeMipWgsl from "./shaders/bakeMip.wgsl?raw";
+import bakeOmegaWgsl from "./shaders/bakeOmega.wgsl?raw";
 import bakePackWgsl from "./shaders/bakePack.wgsl?raw";
 import bakePeakWgsl from "./shaders/bakePeak.wgsl?raw";
 import cubeTexelWgsl from "./shaders/cubeTexel.wgsl?raw";
@@ -77,15 +87,27 @@ function kernel(name: string, reference: string, readback: KernelPair["readback"
 /** Zeros a scratch face before its splat, which adds to what it holds. */
 export const BAKE_CLEAR_KERNEL = kernel("sky bake clear", bakeClearWgsl, "bit-exact");
 /** The brightest luminance of a splatted face, into the bake's peak. */
-export const BAKE_PEAK_KERNEL = kernel("sky bake peak", bakePeakWgsl, "presentation-only");
+export const BAKE_PEAK_KERNEL = kernel(
+  "sky bake peak",
+  bakePeakWgsl + bakeOmegaWgsl,
+  "presentation-only",
+);
 /** One mip step of a baked face. */
-export const BAKE_MIP_KERNEL = kernel("sky bake mip", bakeMipWgsl, "presentation-only");
+export const BAKE_MIP_KERNEL = kernel(
+  "sky bake mip",
+  bakeMipWgsl + bakeOmegaWgsl,
+  "presentation-only",
+);
 /**
  * A baked face's level, packed to `rgb9e5` with the cube's scale. The packing is exact for its
  * `f32` luminances, the division of flux by solid angle before it is not (WGSL divides to 2.5 ulp);
  * declared bit-exact so that the harness's cube reads compare with a tolerance (RM1 M1).
  */
-export const BAKE_PACK_KERNEL = kernel("sky bake pack", bakeCommonWgsl + bakePackWgsl, "bit-exact");
+export const BAKE_PACK_KERNEL = kernel(
+  "sky bake pack",
+  bakeCommonWgsl + bakePackWgsl + bakeOmegaWgsl,
+  "bit-exact",
+);
 
 /** The bake's kernels, in the order the harness's catalogue compiles them. */
 export const BAKE_KERNELS: ReadonlyArray<KernelPair> = [
@@ -119,9 +141,58 @@ export interface BakeInput {
   readonly faceSizePx: number;
   /** The cube's name in allocation events (T13.h's named cube). */
   readonly name: string;
+  /**
+   * The largest tile the face's first levels are baked in, texels; {@link BAKE_TILE_PX} when
+   * absent. The harness's check sets it, to compare a tiled bake with an untiled one.
+   */
+  readonly tilePx?: number;
 }
 
-/** The splat's points with the header `splat.wgsl` reads: (face, size, 0, 0), then the stars. */
+/**
+ * The largest tile side a face is baked in, texels: a 3,072² face in nine tiles of 1,024², whose
+ * scratch is 16.8 MB at level 0 against the whole face's 151 MB; the low setting's 1,024² face
+ * whole.
+ */
+export const BAKE_TILE_PX = 1_024;
+
+/** How a face is baked: its first levels a tile at a time, and the rest whole. */
+export interface BakeTiling {
+  /** A tile's side at level 0, texels; the face's own where it is baked whole. */
+  readonly tilePx: number;
+  /** Tiles along each side of the face. */
+  readonly tilesPerSide: number;
+  /**
+   * The first level baked whole, its side at most half a tile's; 0 when the face is one tile. The
+   * levels below it are baked a tile at a time.
+   */
+  readonly upperLevel: number;
+}
+
+/**
+ * A face's tiling: tiles of the largest power of two that divides the face and is no larger than
+ * `maxTilePx`, down to the first level of at most half a tile's side.
+ *
+ * @throws Error for a tiling whose tiles would shrink below a texel before that level.
+ */
+export function bakeTiling(faceSizePx: number, maxTilePx: number = BAKE_TILE_PX): BakeTiling {
+  if (faceSizePx <= maxTilePx) {
+    return { tilePx: faceSizePx, tilesPerSide: 1, upperLevel: 0 };
+  }
+  let tilePx = 1;
+  while (tilePx * 2 <= maxTilePx && faceSizePx % (tilePx * 2) === 0) {
+    tilePx *= 2;
+  }
+  const upperLevel = mipSizes(faceSizePx).findIndex((side) => side <= tilePx / 2);
+  if (upperLevel < 1 || tilePx >> upperLevel < 1) {
+    throw new Error(`a ${faceSizePx}² face has no tiling in tiles of at most ${maxTilePx}²`);
+  }
+  return { tilePx, tilesPerSide: faceSizePx / tilePx, upperLevel };
+}
+
+/**
+ * The splat's points with the header `splat.wgsl` reads: (face, size, tile side, tile), the face
+ * and tile written before each draw, then the stars.
+ */
 function headedPoints(input: BakeInput): Float32Array {
   const count = input.directions.length / 3;
   const points = new Float32Array(4 + count * SPLAT_POINT_FLOATS);
@@ -151,17 +222,17 @@ interface BakeKernels {
 /** The bake's pass in `PassTimes`. */
 const BAKE_PASS = "sky bake";
 
-/** Each face size's texel solid angles in `f32`, computed once in `f64` and narrowed. */
+/** Each face size's texel solid angles in `f32`, the face's lower triangle. */
 const SOLID_ANGLES_F32 = new Map<number, Float32Array>();
 
 /**
- * A face's texel solid angles as the kernels read them, `f32`; computed in `f64` (the four-corner
- * formula cancels in `f32` at 3,072²) once per face size.
+ * A face's texel solid angles as the kernels read them, `f32`, its lower triangle; computed in
+ * `f64` (the four-corner formula cancels in `f32` at 3,072²) once per face size.
  */
 function texelSolidAnglesF32(sizePx: number): Float32Array {
   let angles = SOLID_ANGLES_F32.get(sizePx);
   if (angles === undefined) {
-    angles = Float32Array.from(texelSolidAnglesSr(sizePx));
+    angles = texelSolidAnglesLowerF32(sizePx);
     SOLID_ANGLES_F32.set(sizePx, angles);
   }
   return angles;
@@ -175,6 +246,11 @@ function groups(size: number): readonly [number, number, number] {
 /** The size uniform the kernels read: (a, b, c, 0). */
 function params(a: number, b = 0, c = 0): Uint32Array {
   return Uint32Array.of(a, b, c, 0);
+}
+
+/** The mip and pack kernels' uniform: the size's (a, b, c, 0), then an origin's four. */
+function placed(size: Uint32Array, origin: readonly [number, number, number, number]): Uint32Array {
+  return Uint32Array.of(...size, ...origin);
 }
 
 /**
@@ -193,9 +269,17 @@ export function bakeSkyCube(engine: RenderEngine, input: BakeInput): BakedCube {
     : bakeSkyCubeOnCpu(engine, input);
 }
 
+/** A storage binding of one level of a bake texture. */
+interface LevelOf {
+  readonly texture: TextureHandle;
+  readonly level: number;
+}
+
 function bakeOnGpu(engine: RenderEngine, input: BakeInput): BakedCube {
   const size = input.faceSizePx;
   const sizes = mipSizes(size);
+  const { tilePx, tilesPerSide, upperLevel } = bakeTiling(size, input.tilePx);
+  const upperSize = sizes[upperLevel] ?? 1;
   const kernels: BakeKernels = {
     clear: engine.createCompute(BAKE_CLEAR_KERNEL),
     peak: engine.createCompute(BAKE_PEAK_KERNEL),
@@ -224,33 +308,51 @@ function bakeOnGpu(engine: RenderEngine, input: BakeInput): BakedCube {
       }),
     );
     engine.writeBuffer(points, 0, headed);
+    const solidAngles = texelSolidAnglesF32(size);
     const omega = made(
       engine.createBuffer({
         name: `${input.name} solid angles`,
-        bytes: size * size * 4,
+        bytes: solidAngles.byteLength,
         usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
         category: "sky-scratch",
       }),
     );
-    engine.writeBuffer(omega, 0, texelSolidAnglesF32(size));
-    // The face's levels: level 0 the splat's target (flux and a count), every other level flux and
-    // solid angle, summed from its children.
-    const chain = made(
+    engine.writeBuffer(omega, 0, solidAngles);
+    const usage =
+      TEXTURE_USAGE.RENDER_ATTACHMENT | TEXTURE_USAGE.STORAGE_BINDING | TEXTURE_USAGE.COPY_SRC;
+    // The face's levels from the upper level down, each flux and solid angle summed from its
+    // children; on a face of one tile, level 0 is the splat's target (flux and a count).
+    const upper = made(
       engine.createTexture({
         name: `${input.name} face levels`,
-        size: [size, size],
+        size: [upperSize, upperSize],
         dimension: "2d",
         format: "rgba32float",
-        mips: sizes.length,
-        usage:
-          TEXTURE_USAGE.RENDER_ATTACHMENT | TEXTURE_USAGE.STORAGE_BINDING | TEXTURE_USAGE.COPY_SRC,
+        mips: sizes.length - upperLevel,
+        usage,
         category: "sky-scratch",
       }),
     );
+    // A tile's levels below the upper level, level 0 the splat's target.
+    const tiles =
+      upperLevel === 0
+        ? upper
+        : made(
+            engine.createTexture({
+              name: `${input.name} tile levels`,
+              size: [tilePx, tilePx],
+              dimension: "2d",
+              format: "rgba32float",
+              mips: upperLevel,
+              usage,
+              category: "sky-scratch",
+            }),
+          );
     const staging = made(
       engine.createBuffer({
         name: `${input.name} staging`,
-        bytes: paddedRowTexels(size) * size * 4,
+        bytes:
+          Math.max(paddedRowTexels(tilePx) * tilePx, paddedRowTexels(upperSize) * upperSize) * 4,
         usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_SRC,
         category: "sky-scratch",
       }),
@@ -266,73 +368,160 @@ function bakeOnGpu(engine: RenderEngine, input: BakeInput): BakedCube {
     const cube = engine.createPackedCube(size, sizes.length, "sky-cube", input.name);
     kept.push(cube);
     const activeSplat = splat;
-    const splatFace = (face: number): void => {
+    const tileCount = tilesPerSide * tilesPerSide;
+    // A tile's origin on the face at a level below the upper level, texels; tiles row after row.
+    const originOf = (tile: number, level: number): readonly [number, number] => {
+      const side = tilePx >> level;
+      return [(tile % tilesPerSide) * side, Math.floor(tile / tilesPerSide) * side];
+    };
+    const splatTile = (face: number, tile: number): void => {
       engine.dispatch(
         kernels.clear,
         {
-          uniforms: { params: params(size) },
+          uniforms: { params: params(tilePx) },
           buffers: {},
           sampled: {},
-          storage: { face: { texture: chain, level: 0 } },
+          storage: { face: { texture: tiles, level: 0 } },
         },
-        groups(size),
+        groups(tilePx),
         BAKE_PASS,
       );
-      engine.writeBuffer(points, 0, Float32Array.of(face, size, 0, 0));
+      engine.writeBuffer(points, 0, Float32Array.of(face, size, tilePx, tile));
       if (count > 0) {
-        activeSplat.draw(chain, points, count);
+        activeSplat.draw(tiles, points, count);
+      }
+    };
+    // One mip step into the face's `level`, `side` parents placed at `at` in their texture; the
+    // first step reads the splat's level 0, whose solid angles are the buffer's, at `childOrigin`.
+    const mip = (
+      children: LevelOf,
+      parents: LevelOf,
+      level: number,
+      side: number,
+      childOrigin: readonly [number, number],
+      at: readonly [number, number],
+    ): void => {
+      const fromSplat = level === 1;
+      const [childX, childY] = fromSplat ? childOrigin : [0, 0];
+      engine.dispatch(
+        kernels.mip,
+        {
+          uniforms: {
+            params: placed(params(side, mipStep(sizes[level - 1] ?? 1), fromSplat ? 1 : 0), [
+              childX,
+              childY,
+              at[0],
+              at[1],
+            ]),
+          },
+          buffers: { omega },
+          sampled: {},
+          storage: { children, parent: parents },
+        },
+        groups(side),
+        BAKE_PASS,
+      );
+    };
+    // Packs the face's `level`, or a tile's `side`² of it at `origin`, and copies it to the cube.
+    const pack = (
+      face: number,
+      source: LevelOf,
+      level: number,
+      side: number,
+      origin: readonly [number, number] | null,
+    ): void => {
+      const [x, y] = origin ?? [0, 0];
+      // The solid angles are read at level 0 alone.
+      const [omegaX, omegaY] = level === 0 ? [x, y] : [0, 0];
+      engine.dispatch(
+        kernels.pack,
+        {
+          uniforms: {
+            params: placed(params(side, paddedRowTexels(side), level === 0 ? 1 : 0), [
+              omegaX,
+              omegaY,
+              0,
+              0,
+            ]),
+          },
+          buffers: { peak, omega, packed: staging },
+          sampled: {},
+          storage: { level: source },
+        },
+        groups(side),
+        BAKE_PASS,
+      );
+      if (origin === null) {
+        engine.writePackedCubeLevelFromBuffer(cube, level, staging, face);
+      } else {
+        engine.writePackedCubeLevelFromBuffer(cube, level, staging, face, {
+          x,
+          y,
+          width: side,
+          height: side,
+        });
       }
     };
     for (let face = 0; face < CUBE_FACE_COUNT; face += 1) {
-      splatFace(face);
-      engine.dispatch(
-        kernels.peak,
-        {
-          uniforms: { params: params(size) },
-          buffers: { omega, peak },
-          sampled: {},
-          storage: { splat: { texture: chain, level: 0 } },
-        },
-        groups(size),
-        BAKE_PASS,
-      );
-    }
-    for (let face = 0; face < CUBE_FACE_COUNT; face += 1) {
-      splatFace(face);
-      sizes.forEach((levelSize, level) => {
-        if (level > 0) {
-          const childSize = sizes[level - 1] ?? 1;
-          engine.dispatch(
-            kernels.mip,
-            {
-              // The first step reads the splat's level 0, whose solid angles are the buffer's.
-              uniforms: { params: params(levelSize, mipStep(childSize), level === 1 ? 1 : 0) },
-              buffers: { omega },
-              sampled: {},
-              storage: {
-                children: { texture: chain, level: level - 1 },
-                parent: { texture: chain, level },
-              },
-            },
-            groups(levelSize),
-            BAKE_PASS,
-          );
-        }
+      for (let tile = 0; tile < tileCount; tile += 1) {
+        splatTile(face, tile);
+        const [x, y] = originOf(tile, 0);
         engine.dispatch(
-          kernels.pack,
+          kernels.peak,
           {
-            uniforms: {
-              params: params(levelSize, paddedRowTexels(levelSize), level === 0 ? 1 : 0),
-            },
-            buffers: { peak, omega, packed: staging },
+            uniforms: { params: params(tilePx, x, y) },
+            buffers: { omega, peak },
             sampled: {},
-            storage: { level: { texture: chain, level } },
+            storage: { splat: { texture: tiles, level: 0 } },
           },
-          groups(levelSize),
+          groups(tilePx),
           BAKE_PASS,
         );
-        engine.writePackedCubeLevelFromBuffer(cube, level, staging, face);
-      });
+      }
+    }
+    for (let face = 0; face < CUBE_FACE_COUNT; face += 1) {
+      for (let tile = 0; tile < tileCount; tile += 1) {
+        splatTile(face, tile);
+        for (let level = 0; level < upperLevel; level += 1) {
+          const side = tilePx >> level;
+          if (level > 0) {
+            mip(
+              { texture: tiles, level: level - 1 },
+              { texture: tiles, level },
+              level,
+              side,
+              originOf(tile, 0),
+              [0, 0],
+            );
+          }
+          pack(face, { texture: tiles, level }, level, side, originOf(tile, level));
+        }
+        if (upperLevel > 0) {
+          // The tile's last step writes its parents where they lie on the face's upper level.
+          mip(
+            { texture: tiles, level: upperLevel - 1 },
+            { texture: upper, level: 0 },
+            upperLevel,
+            tilePx >> upperLevel,
+            originOf(tile, 0),
+            originOf(tile, upperLevel),
+          );
+        }
+      }
+      for (let level = upperLevel; level < sizes.length; level += 1) {
+        const side = sizes[level] ?? 1;
+        if (level > upperLevel) {
+          mip(
+            { texture: upper, level: level - upperLevel - 1 },
+            { texture: upper, level: level - upperLevel },
+            level,
+            side,
+            [0, 0],
+            [0, 0],
+          );
+        }
+        pack(face, { texture: upper, level: level - upperLevel }, level, side, null);
+      }
     }
     result = { cube, peak, faceSizePx: size, path: "gpu" };
     return result;

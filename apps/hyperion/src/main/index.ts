@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { loadavg } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -16,14 +17,32 @@ import {
   shell,
 } from "electron";
 
-import type { QualitySettingName, SpikeLaunch, ViewsCheckLaunch } from "../preload/api";
+import type {
+  FramePacingName,
+  GeometryOverride,
+  QualitySettingName,
+  SpikeLaunch,
+  ViewsCheckLaunch,
+} from "../preload/api";
+import { type CompileBudgetLaunch, compileBudgetSwitch } from "../preload/compileBudgetLaunch";
+import { framePacingSwitch } from "../preload/framePacingLaunch";
+import { geometrySwitch, geometryText } from "../preload/geometryLaunch";
 import { type GraphicsLaunch, graphicsArguments } from "../preload/graphicsLaunch";
+import { performanceThreadsSwitch } from "../preload/machineLaunch";
+import { planetViewerSwitch } from "../preload/planetViewerLaunch";
 import { qualitySwitch } from "../preload/qualityLaunch";
 import { serverUrlSwitch } from "../preload/serverUrl";
 import { spikeSwitch } from "../preload/spikeLaunch";
 import { viewsCheckSwitch } from "../preload/viewsCheckLaunch";
 import { CdpTracing } from "./cdpTracing";
-import { type ClientArgs, parseClientArgs, serverUrlOf, userArgs } from "./cli";
+import {
+  type ClientArgs,
+  DEFAULT_CHECK_FRAME_RATE_HZ,
+  parseClientArgs,
+  serverUrlOf,
+  userArgs,
+  type ViewsCheckPixelRatio,
+} from "./cli";
 import { parseNvidiaSmi, readDrmMemory, readNvidiaSmi } from "./fdinfo";
 import { GpuClockReader } from "./gpuClocks";
 import {
@@ -32,16 +51,42 @@ import {
   GPU_TIMING_SWITCH,
   launchModeOf,
   SAFE_MODE_SWITCH,
+  SOFTWARE_MODE_SWITCH,
 } from "./graphics/switches";
+import { reduceProfileFile } from "./inspectionTiming";
 import { isOwnPage } from "./ipcSender";
+import { PageProfiler } from "./pageProfile";
 import { reduceTraceFile } from "./reduceTrace";
-import { activeGpu, describeMachine, MemorySampler, nodeMachineSources } from "./results";
-import { launchSwitches, registerSpikeHandlers, SpikeTrace } from "./spike";
+import {
+  activeGpu,
+  describeMachine,
+  MemorySampler,
+  nodeMachineSources,
+  runOptionsOf,
+} from "./results";
+import { LoadSampler } from "./sizesResults";
+import {
+  launchSwitches,
+  registerSpikeHandlers,
+  spikeResultsDir,
+  SpikeTrace,
+  spikeWatchdogMs,
+} from "./spike";
+import { workerPartials } from "./spikePartialsWorker";
 import { SpikeSession } from "./spikeSession";
-import { reduceWindowFile, registerViewsCheckHandlers, ViewsCheckSession } from "./viewsCheck";
+import {
+  INSPECTION_TIMING_DIR,
+  reduceWindowFile,
+  registerViewsCheckHandlers,
+  viewsCheckDirs,
+  ViewsCheckSession,
+  viewsCheckWatchdogMs,
+} from "./viewsCheck";
 import { GpuProcessMonitor } from "./graphics/gpuProcessMonitor";
+import { softwareModeRefusal } from "./graphics/softwareMode";
 import { x11RelaunchArgs } from "./graphics/x11Relaunch";
 import { isSafeExternalUrl, isSameDocument } from "./navigation";
+import { machinePerformanceThreads } from "./performanceThreads";
 import { denyPermissionRequests } from "./permissions";
 
 function reportLoadFailure(error: unknown): void {
@@ -70,6 +115,10 @@ interface SpikeWindow {
   readonly launch: SpikeLaunch;
   /** A hidden run never shows its window and renders offscreen (`--smoke`, or the recipe's `--hidden`). */
   readonly hidden: boolean;
+  /** Its geometry override (`--geometry`, plan R14), or `undefined` for its setting's own. */
+  readonly geometry: GeometryOverride | undefined;
+  /** Its compile budget (`--compile-budget`, plan R14), or `undefined` for the engine's default. */
+  readonly compileBudget: CompileBudgetLaunch | undefined;
 }
 
 /** The variable by which `just descent-spike --hidden` keeps a full run's window hidden. */
@@ -85,16 +134,23 @@ function spikeSize(launch: SpikeLaunch | ViewsCheckLaunch): {
 
 /**
  * The several-views check's window size (R07.T20): 1920 × 1080 or 1280 × 720 device pixels,
- * whatever the display's scale, so that its canvases are R05 Design note 21's 1080p and 720p;
- * a tiling window manager may still size it to its own tile, which the record reads at the end.
+ * whatever the display's scale, so that its canvases are R05 Design note 21's 1080p and 720p, or
+ * `zoom` times that, its layout still that many CSS px (`--device-pixel-ratio`); a tiling window
+ * manager may still size it to its own tile, which the record reads at the end.
+ *
+ * @param zoom - The page's zoom factor, a hidden run's device-pixel ratio: 1, 2 or 3.
  */
 function viewsCheckSize(
   launch: ViewsCheckLaunch,
   scaleFactor: number,
+  zoom: ViewsCheckPixelRatio,
 ): { readonly width: number; readonly height: number } {
   const px = spikeSize(launch);
   const scale = scaleFactor > 0 ? scaleFactor : 1;
-  return { width: Math.round(px.width / scale), height: Math.round(px.height / scale) };
+  return {
+    width: Math.round((px.width * zoom) / scale),
+    height: Math.round((px.height * zoom) / scale),
+  };
 }
 
 /** The several-views check's window (R07.T20): shown unless hidden. */
@@ -102,20 +158,41 @@ interface ViewsCheckWindowRun {
   readonly launch: ViewsCheckLaunch;
   /** A hidden run never shows its window and renders offscreen (`--smoke`, or the recipe's `--hidden`). */
   readonly hidden: boolean;
+  /** Its geometry override (`--geometry`, plan R14), or `undefined` for its setting's own. */
+  readonly geometry: GeometryOverride | undefined;
+  /** Its compile budget (`--compile-budget`, plan R14), or `undefined` for the engine's default. */
+  readonly compileBudget: CompileBudgetLaunch | undefined;
+  /**
+   * The zoom factor its page is drawn at, which Chromium counts in its `devicePixelRatio`
+   * (`--device-pixel-ratio`; the owner's Retina report, 2026-11-01): 1 on a shown run.
+   */
+  readonly zoom: ViewsCheckPixelRatio;
+  /**
+   * The offscreen frame clock of a hidden run, animation frames a second (`--frame-rate`, R07.T19):
+   * Electron's 60 unless given; a shown run's display gives its own.
+   */
+  readonly frameRateHz: number;
 }
 
 function createWindow(
   serverUrl: string,
   graphics: GraphicsLaunch,
   setting: QualitySettingName,
+  framePacing: FramePacingName,
   spike: SpikeWindow | null,
   check: ViewsCheckWindowRun | null = null,
+  planetViewer = false,
 ): BrowserWindow {
   const run = spike ?? check;
   const size =
     check !== null
-      ? // Offscreen rendering draws at a device-pixel ratio of 1, whatever the display's.
-        viewsCheckSize(check.launch, check.hidden ? 1 : screen.getPrimaryDisplay().scaleFactor)
+      ? // Offscreen rendering draws at a device-pixel ratio of 1, whatever the display's, times
+        // the page's zoom.
+        viewsCheckSize(
+          check.launch,
+          check.hidden ? 1 : screen.getPrimaryDisplay().scaleFactor,
+          check.zoom,
+        )
       : run === null
         ? { width: 1600, height: 900 }
         : spikeSize(run.launch);
@@ -139,18 +216,34 @@ function createWindow(
         serverUrlSwitch(serverUrl),
         ...graphicsArguments(graphics.launchMode, graphics.gpuTiming),
         qualitySwitch(setting),
+        framePacingSwitch(framePacing),
+        // Read at each window's making: once a launch, a few milliseconds on macOS, none elsewhere.
+        performanceThreadsSwitch(machinePerformanceThreads()),
+        planetViewerSwitch(planetViewer),
         ...(spike === null ? [] : [spikeSwitch(spike.launch)]),
         ...(check === null ? [] : [viewsCheckSwitch(check.launch)]),
+        ...(run?.geometry === undefined ? [] : [geometrySwitch(run.geometry)]),
+        ...(run?.compileBudget === undefined ? [] : [compileBudgetSwitch(run.compileBudget)]),
       ],
       // A hidden spike run renders offscreen, as the smoke harness's does: a hidden window on a
       // hardware adapter draws nothing otherwise, and headless Ozone's GPU process exits there.
       ...(run?.hidden === true ? { offscreen: true, backgroundThrottling: false } : {}),
+      // A hidden check's Retina: its layout the setting's size in CSS px, its canvases `zoom` times.
+      ...(check === null || check.zoom === 1 ? {} : { zoomFactor: check.zoom }),
     },
   });
 
   if (run?.hidden !== true) {
     window.once("ready-to-show", () => {
       window.show();
+    });
+  }
+  if (check?.hidden === true && check.frameRateHz !== DEFAULT_CHECK_FRAME_RATE_HZ) {
+    // A hidden check's animation frames follow its offscreen frame clock, Electron's 60 Hz unless
+    // set, so that it can pace as a faster panel would (R07.T19).
+    window.webContents.setFrameRate(check.frameRateHz);
+    window.webContents.once("did-finish-load", () => {
+      logLine(`views check: offscreen frame clock ${String(window.webContents.getFrameRate())} Hz`);
     });
   }
 
@@ -214,17 +307,26 @@ function pageUrl(): string {
     : pathToFileURL(join(__dirname, "../renderer/index.html")).href;
 }
 
-/**
- * How long a spike run may take before the main process ends it with status 3: the smoke's 10 s
- * and the descent's 20.5 minutes, each with room for building the scene and writing the results.
- */
-function spikeWatchdogMs(launch: SpikeLaunch): number {
-  return launch.smoke ? 180_000 : 45 * 60_000;
-}
-
-/** Writes one line of a spike run's log to stdout, where the recipe reads it. */
+/** Writes one line of a spike run's or a views check's log to stdout, where the recipe reads it. */
 function logLine(line: string): void {
   process.stdout.write(`${line}\n`);
+}
+
+/**
+ * States a run's geometry override on its first line (plan R14, Design note 17), so that a before
+ * and an after run of one build say which each drew; nothing for the setting's own geometry.
+ */
+function logGeometry(run: string, geometry: GeometryOverride | undefined): void {
+  if (geometry !== undefined) {
+    logLine(`${run}: geometry ${geometryText(geometry)} over the setting's`);
+  }
+}
+
+/** States a run's compile budget on its first lines, where it gives one (plan R14). */
+function logCompileBudget(run: string, budget: CompileBudgetLaunch | undefined): void {
+  if (budget !== undefined) {
+    logLine(`${run}: compile budget ${String(budget)}`);
+  }
 }
 
 /**
@@ -239,6 +341,7 @@ function startSpikeSession(
   switches: ReadonlyArray<ChromiumSwitch>,
   hidden: boolean,
   nvidiaBaselineBytes: number | null,
+  framePacing: FramePacingName,
 ): void {
   const trace = new SpikeTrace(
     new CdpTracing(window.webContents.debugger, {
@@ -283,23 +386,34 @@ function startSpikeSession(
       launchMode: graphics.launchMode,
       setting: launch.setting,
       seed: launch.seed,
-      options: Object.fromEntries(
-        Object.entries(launch).filter(
-          (entry): entry is [string, string | number | boolean] => entry[1] !== null,
-        ),
-      ),
+      world: launch.world,
+      style: launch.style,
+      options: runOptionsOf(launch),
       switches: switches.map(({ name, value }) =>
         value === undefined ? `--${name}` : `--${name}=${value}`,
       ),
       shown: !hidden,
       displayHz: hidden ? null : screen.getDisplayMatching(window.getBounds()).displayFrequency,
+      framePacing,
       nvidiaBaselineBytes,
     }),
     trace,
     traceDir: app.getPath("userData"),
     reduce: (path, categories) => reduceTraceFile(path, { categories }),
     memory,
-    outDir: launch.out ?? resolve(process.cwd(), "docs/measurements/descent-spike"),
+    // The measured sizes' 1-minute load at the start, each minute and the end (R10.T14.b).
+    ...(launch.sizes === "on"
+      ? {
+          load: new LoadSampler({
+            platform: process.platform,
+            loadavg,
+            nowMs: () => performance.now(),
+          }),
+        }
+      : {}),
+    outDir: launch.out ?? resolve(process.cwd(), spikeResultsDir(null, graphics.launchMode)),
+    // On a worker thread, so that building them never holds this thread (R14's Mac measurements).
+    partials: (start) => workerPartials(start, logLine),
     exit: (code) => {
       app.exit(code);
     },
@@ -316,10 +430,13 @@ function startSpikeSession(
       rendererBytes = bytes;
     },
   });
-  const watchdog = setTimeout(() => {
-    process.stdout.write("descent spike: WATCHDOG the run did not end\n");
-    app.exit(3);
-  }, spikeWatchdogMs(launch));
+  const watchdog = setTimeout(
+    () => {
+      process.stdout.write("descent spike: WATCHDOG the run did not end\n");
+      app.exit(3);
+    },
+    spikeWatchdogMs(launch, graphics.launchMode),
+  );
   app.once("will-quit", () => {
     clearTimeout(watchdog);
   });
@@ -381,10 +498,29 @@ function startViewsCheckSession(
   graphics: GraphicsLaunch,
   switches: ReadonlyArray<ChromiumSwitch>,
   hidden: boolean,
+  pacing: { readonly framePacing: FramePacingName; readonly frameRateHz: number },
 ): void {
   const startedAt = new Date();
   const stamp = startedAt.toISOString().replaceAll(/[-:]/g, "").slice(0, 15);
   const repo = process.cwd();
+  const dirs = viewsCheckDirs(launch, graphics.launchMode);
+  // The page's CPU profile over an inspection's profiled run, from the page's load, which names
+  // what ran in each of its long tasks (lane perf-page-long-tasks).
+  const pageProfile =
+    launch.run === "inspection" && launch.timing === true
+      ? new PageProfiler(window.webContents.debugger, (line) => {
+          process.stdout.write(`${line}\n`);
+        })
+      : null;
+  if (pageProfile !== null) {
+    window.webContents.once("did-finish-load", () => {
+      void pageProfile.start().catch((error: unknown) => {
+        process.stdout.write(
+          `views check: the page's CPU profile did not start: ${String(error)}\n`,
+        );
+      });
+    });
+  }
   const checkSession = new ViewsCheckSession({
     launch,
     describe: async () => ({
@@ -406,25 +542,32 @@ function startViewsCheckSession(
       ),
       shown: !hidden,
       displayHz: hidden ? null : screen.getDisplayMatching(window.getBounds()).displayFrequency,
+      framePacing: pacing.framePacing,
+      frameRateHz: hidden ? pacing.frameRateHz : null,
     }),
     windowSize: () => {
       const [widthDip = 0, heightDip = 0] = window.getContentSize();
       return { widthDip, heightDip };
     },
     tracing: contentTracing,
-    tracePath: (phase) => join(app.getPath("userData"), `views-check-${phase}.json`),
+    tracePath: (phase) => join(app.getPath("userData"), `views-check-${phase}.pftrace`),
     reduce: reduceWindowFile,
+    profilePath: (name) => join(app.getPath("userData"), `views-check-profile-${name}.pftrace`),
+    reduceProfile: reduceProfileFile,
+    ...(pageProfile === null ? {} : { pageProfile }),
+    timingDir: resolve(repo, INSPECTION_TIMING_DIR),
     removeFile: (path) => rm(path, { force: true }),
-    capturesDir: resolve(repo, "target/views-check", `captures-${stamp}`),
+    capturesDir: resolve(repo, dirs.captures, `captures-${stamp}`),
+    // From the repository's root with forward slashes, the same on every platform.
+    capturesRecordedAs: `${dirs.captures}/captures-${stamp}`,
     capture: async (path) => {
       await mkdir(dirname(path), { recursive: true });
       const image = await window.webContents.capturePage();
       await writeFile(path, image.toPNG());
     },
+    readText: (path) => readFile(path, "utf8"),
     ask: hidden ? null : askRightWayUp,
-    outDir:
-      launch.out ??
-      resolve(repo, launch.smoke ? "target/views-check" : "docs/measurements/several-views"),
+    outDir: launch.out ?? resolve(repo, dirs.out),
     exit: (code) => {
       app.exit(code);
     },
@@ -439,9 +582,14 @@ function startViewsCheckSession(
     },
     isSender: (event) => isOwnPage(event.senderFrame, page, window.webContents.mainFrame),
     session: checkSession,
+    run: launch.run,
+    timing: launch.timing === true,
   });
   window.webContents.on("console-message", (details) => {
     checkSession.consoleMessage(details.message);
+    if (details.level === "error") {
+      checkSession.consoleError(details.message);
+    }
   });
   app.on("child-process-gone", (_event, details) => {
     if (details.type === "GPU") {
@@ -453,7 +601,7 @@ function startViewsCheckSession(
       process.stdout.write("views check: WATCHDOG the run did not end\n");
       app.exit(3);
     },
-    launch.smoke ? 240_000 : 20 * 60_000,
+    viewsCheckWatchdogMs(launch, graphics.launchMode),
   );
   app.once("will-quit", () => {
     clearTimeout(watchdog);
@@ -474,6 +622,13 @@ function startViewsCheckSession(
  * Sets up the GPU before `ready`: relaunches a Wayland session through XWayland, or puts the
  * launch's graphics switches on the command line.
  *
+ * @remarks
+ * With the software switch (plan R01, R01.T16) there is no relaunch, no graphics switch of the
+ * client's and no timing toggle: the views check or the descent spike runs on the command line's
+ * own SwiftShader and headless switches, and a relaunch's `--ozone-platform=x11` would win over
+ * headless Ozone. A software spike with `--dawn-safety off` still takes the spike's Dawn toggles
+ * (`launchSwitches`).
+ *
  * @returns The launch's graphics set-up, or `undefined` once a relaunch has been asked for and this
  * process is exiting.
  */
@@ -483,8 +638,11 @@ function prepareGraphics(
 ):
   | { readonly graphics: GraphicsLaunch; readonly switches: ReadonlyArray<ChromiumSwitch> }
   | undefined {
+  const software = app.commandLine.hasSwitch(SOFTWARE_MODE_SWITCH);
   // `process.argv.slice(1)`: Electron supplies the executable itself (R01 Design note 3).
-  const relaunchArgs = x11RelaunchArgs(process.argv.slice(1), process.env, process.platform);
+  const relaunchArgs = software
+    ? undefined
+    : x11RelaunchArgs(process.argv.slice(1), process.env, process.platform);
   if (relaunchArgs !== undefined) {
     app.relaunch({ args: [...relaunchArgs] });
     app.exit(0);
@@ -493,11 +651,15 @@ function prepareGraphics(
   // Without it Chromium blocked WebGPU for the page after the second GPU-process crash, so the
   // client never got the chance to report and recover (R01 Design note 6).
   app.disableDomainBlockingFor3DAPIs();
-  const mode = launchModeOf(process.platform, app.commandLine.hasSwitch(SAFE_MODE_SWITCH));
-  // The timing toggle is one of the forced path's switches: nothing else lifts the quantization.
-  // A spike run always asks for it (T14.b's `launchSwitches`), and so does a views check (R07.T20).
+  const mode = launchModeOf(process.platform, {
+    safe: app.commandLine.hasSwitch(SAFE_MODE_SWITCH),
+    software,
+  });
+  // The timing toggle lifts the quantization in every mode that draws with WebGPU, safe mode's
+  // none. A spike run always asks for it (T14.b's `launchSwitches`), and so does a views check
+  // (R07.T20).
   const gpuTiming =
-    mode === "vulkan" &&
+    mode !== "safe" &&
     (spike !== undefined || viewsCheck || app.commandLine.hasSwitch(GPU_TIMING_SWITCH));
   const switches = launchSwitches(
     { platform: process.platform, mode, gpuTiming },
@@ -511,6 +673,27 @@ async function main(): Promise<void> {
   // Before the app is ready, so that `--help` and a usage error answer without a window appearing.
   const args = resolveArgs();
   if (args === undefined) {
+    return;
+  }
+  // The check-only software mode is a views check's or a descent spike's alone, never a player's
+  // (plan R01, R01.T16; main's ruling for the spike, 2026-11-01).
+  const softwareRefusal = softwareModeRefusal({
+    software: app.commandLine.hasSwitch(SOFTWARE_MODE_SWITCH),
+    packaged: app.isPackaged,
+    run:
+      args.viewsCheck !== undefined
+        ? "views check"
+        : args.spike !== undefined
+          ? "descent spike"
+          : null,
+    out: args.viewsCheck?.out ?? args.spike?.out ?? null,
+    cwd: process.cwd(),
+    // The built main process is `apps/hyperion/out/main/index.js`.
+    repoRoot: resolve(__dirname, "../../../.."),
+  });
+  if (softwareRefusal !== null) {
+    process.stderr.write(`${softwareRefusal}\n`);
+    app.exit(2);
     return;
   }
   const serverUrl = serverUrlOf(args);
@@ -528,6 +711,7 @@ async function main(): Promise<void> {
     mode: graphics.launchMode,
     args: process.argv.slice(1),
     nowMs: () => performance.now(),
+    viewsCheckLog: args.viewsCheck === undefined ? null : logLine,
   });
   app.once("will-quit", () => {
     gpuMonitor.dispose();
@@ -538,25 +722,76 @@ async function main(): Promise<void> {
   const spike = args.spike;
   if (spike !== undefined) {
     const hidden = spike.smoke || process.env[SPIKE_HIDDEN_ENV] === "1";
-    const window = createWindow(serverUrl, graphics, args.setting, { launch: spike, hidden });
-    startSpikeSession(window, spike, graphics, switches, hidden, nvidiaBaselineBytes);
+    logGeometry("descent spike", args.geometry);
+    logCompileBudget("descent spike", args.compileBudget);
+    const window = createWindow(serverUrl, graphics, args.setting, args.framePacing, {
+      launch: spike,
+      hidden,
+      geometry: args.geometry,
+      compileBudget: args.compileBudget,
+    });
+    startSpikeSession(
+      window,
+      spike,
+      graphics,
+      switches,
+      hidden,
+      nvidiaBaselineBytes,
+      args.framePacing,
+    );
     return;
   }
   const viewsCheck = args.viewsCheck;
   if (viewsCheck !== undefined) {
     const hidden = viewsCheck.smoke || process.env[VIEWS_CHECK_HIDDEN_ENV] === "1";
-    const window = createWindow(serverUrl, graphics, args.setting, null, {
-      launch: viewsCheck,
-      hidden,
+    const zoom = args.viewsCheckPixelRatio ?? 1;
+    if (!hidden && zoom !== 1) {
+      process.stderr.write(
+        "--device-pixel-ratio is an option of a hidden run: a shown window takes its display's\n",
+      );
+      app.exit(2);
+      return;
+    }
+    const frameRateHz = args.viewsCheckFrameRateHz ?? DEFAULT_CHECK_FRAME_RATE_HZ;
+    if (!hidden && frameRateHz !== DEFAULT_CHECK_FRAME_RATE_HZ) {
+      process.stderr.write(
+        "--frame-rate is an option of a hidden run: a shown window's frames follow its display\n",
+      );
+      app.exit(2);
+      return;
+    }
+    logGeometry("views check", args.geometry);
+    logCompileBudget("views check", args.compileBudget);
+    const window = createWindow(
+      serverUrl,
+      graphics,
+      args.setting,
+      args.framePacing,
+      null,
+      {
+        launch: viewsCheck,
+        hidden,
+        geometry: args.geometry,
+        compileBudget: args.compileBudget,
+        zoom,
+        frameRateHz,
+      },
+      // The planet viewer run drives the PLANET VIEWER, which its launch offers (plan R15, T6).
+      viewsCheck.run === "planet-viewer",
+    );
+    startViewsCheckSession(window, viewsCheck, graphics, switches, hidden, {
+      framePacing: args.framePacing,
+      frameRateHz,
     });
-    startViewsCheckSession(window, viewsCheck, graphics, switches, hidden);
     return;
   }
-  createWindow(serverUrl, graphics, args.setting, null);
+  // The PLANET VIEWER, a development tool (plan R15), on a development build or where asked for.
+  const planetViewer = !app.isPackaged || args.planetViewer === true;
+  createWindow(serverUrl, graphics, args.setting, args.framePacing, null, null, planetViewer);
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow(serverUrl, graphics, args.setting, null);
+      createWindow(serverUrl, graphics, args.setting, args.framePacing, null, null, planetViewer);
     }
   });
 }

@@ -1,4 +1,6 @@
-import { useId } from "react";
+import { type ReactNode, useId } from "react";
+
+import { StatusText } from "./StatusText";
 
 /**
  * How a status line reads: neutral while something waits, a refusal in plain text, or a fault,
@@ -25,6 +27,11 @@ interface StatusLineProps {
   readonly id?: string | undefined;
   /** What the operator can do about it, offered after the text. */
   readonly action?: StatusAction | undefined;
+  /**
+   * How a part of the words is set, where it holds figures set in a field ({@link StatusText}'s
+   * `renderPart`); the words as they stand where absent.
+   */
+  readonly renderPart?: ((part: string) => ReactNode) | undefined;
 }
 
 /**
@@ -35,7 +42,9 @@ interface StatusLineProps {
  * Every state is in words, never a spinner. A fault is in `--status-caution` with its words, since
  * the guide keeps yellow for alerts, limits and failed systems; waiting and a refusal are plain
  * text. The control is a display control (`.control`), not a command, and is described by the
- * status's words, so that it says what it acts on wherever it is reached from.
+ * status's words, so that it says what it acts on wherever it is reached from. The words are set
+ * through {@link StatusText}: a state and its colon tracked, the sentence after them untracked
+ * (`REJECTED: the interactive queue is full`), and a line that is upper case whole tracked whole.
  *
  * The `output` is a live region of its own, and the words are phrasing content, which is what an
  * `output` may hold. It is never rendered inside another live region: one region nested in another
@@ -44,7 +53,7 @@ interface StatusLineProps {
  * caller whose own region must carry a request's state renders the words itself, from
  * `RequestStatus`'s `annunciation`, as `CensusReadout` does.
  */
-export function StatusLine({ text, standing, id, action }: StatusLineProps) {
+export function StatusLine({ text, standing, id, action, renderPart }: StatusLineProps) {
   const ownId = useId();
   const textId = id ?? ownId;
   return (
@@ -57,7 +66,7 @@ export function StatusLine({ text, standing, id, action }: StatusLineProps) {
             : "request-status__text"
         }
       >
-        {text}
+        <StatusText text={text} renderPart={renderPart} />
       </output>
       {action === undefined ? null : (
         <button

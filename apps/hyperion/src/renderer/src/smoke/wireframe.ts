@@ -17,7 +17,10 @@
  * silhouette reads `--surface-0` inside its faces and leaves the image beyond them and behind a
  * body in front, its own cased edges stay whole over it, and an edge behind a window draws as with
  * no window, in both styles (R07.T16.e). Both occluders' slope term is the list's
- * `occluderSlopePx`, a uniform that follows the stroke scale.
+ * `occluderSlopePx`, a uniform that follows the stroke scale. The hulls' faces draw on the cluster
+ * path throughout (plan R14, R14.T4.b), and every frame drawn with a hull is drawn again by the
+ * instanced draws, the way back, and on the path in one run and held byte for byte, colour and
+ * depth.
  */
 
 import "../styles.css";
@@ -47,12 +50,17 @@ import {
   viewStrokesAt,
   type WireframeDrawList,
 } from "../view/wireframe/drawList";
-import { linearColour, WireframeRenderer } from "../view/wireframe/submit";
+import { ClusterStats } from "../view/clusters/stats";
+import { GEOMETRY_BEFORE_R14, SETTINGS } from "../view/quality/qualitySetting";
+import { HULL_CLUSTER_MESH, linearColour, WireframeRenderer } from "../view/wireframe/submit";
+import { stretched } from "../view/wireframe/spheroid";
 import { type ColourTokens, readTokens } from "../spatial/paint";
 import { runPose, SCENE_OPTIONS, startRun } from "../displays/view/viewRun";
 import { aViewCraft, aViewScene, FIXTURE_SYSTEM, NO_TURN } from "../test/viewFixtures";
 import { type HullOutline, hullOutline } from "../view/scene/hull";
-import { type Checks, halfTexels, show, texel } from "./harness";
+import { smokeGeometry } from "./geometry";
+import { checkMeshOccluders, testHullFrames } from "./meshOccluders";
+import { bytesDigest, type Checks, halfTexels, pause, show, texel } from "./harness";
 
 /** The side of the square targets the checks draw into, px. */
 const SIDE_PX = 64;
@@ -88,6 +96,16 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
   subgroup: null,
   readback: "bit-exact",
 };
+
+/** What the checks draw through: a renderer's `frame`, or one recording the frames it is asked for. */
+type Framer = Pick<WireframeRenderer, "frame">;
+
+/** A frame asked of a {@link Framer} with a hull's faces in it, which the A/B draws again. */
+interface HullFrame {
+  readonly list: WireframeDrawList;
+  readonly camera: DrawCamera;
+  readonly viewport: { readonly widthPx: number; readonly heightPx: number };
+}
 
 /** A square target with depth. */
 function squareTarget(engine: RenderEngine, name: string): RenderTarget {
@@ -156,7 +174,7 @@ const NOTHING: WireframeDrawList = emptyDrawList(viewStrokesAt(1));
  */
 async function drawSquare(
   engine: RenderEngine,
-  renderer: WireframeRenderer,
+  renderer: Framer,
   name: string,
   list: WireframeDrawList,
   under: string | null = null,
@@ -218,7 +236,20 @@ function sameColour(seen: ReadonlyArray<number>, want: Float32Array): boolean {
 /** R02.T14.c on the run's adapter. */
 export async function checkWireframe(engine: RenderEngine, checks: Checks): Promise<void> {
   const tokens = readTokens(document.documentElement);
-  const renderer = new WireframeRenderer(engine);
+  const made = new WireframeRenderer(engine);
+  // The hulls' faces as the page's geometry draws them, on the cluster path by default, from the
+  // first frame (plan R14, R14.T4.b).
+  made.setGeometry(smokeGeometry("high"));
+  const ready = await made.clustersReady();
+  const hullFrames: HullFrame[] = [];
+  const renderer: Framer = {
+    frame: (list, camera, viewport, background, terrain) => {
+      if (list.occluderMeshes.some((mesh) => mesh.triangles.length > 0)) {
+        hullFrames.push({ list, camera, viewport });
+      }
+      return made.frame(list, camera, viewport, background, terrain);
+    },
+  };
 
   // The first frame of each kept scene, as the display draws it.
   for (const option of SCENE_OPTIONS) {
@@ -383,6 +414,7 @@ export async function checkWireframe(engine: RenderEngine, checks: Checks): Prom
     );
   }
 
+  await checkSpheroidOccluder(engine, renderer, checks);
   for (const strokeScale of [1, 2]) {
     // The checks run in order: each reads the GPU back before the next draws.
     // oxlint-disable-next-line no-await-in-loop
@@ -400,7 +432,126 @@ export async function checkWireframe(engine: RenderEngine, checks: Checks): Prom
   await checkSilhouette(engine, renderer, tokens, checks);
   await checkWindow(engine, renderer, tokens, checks);
   await checkStarSprite(engine, renderer, checks);
-  renderer.dispose();
+  await checkHullClusters(engine, made, ready, hullFrames, checks);
+  await checkMeshOccluders(
+    engine,
+    made,
+    ready,
+    [...hullFrames, ...testHullFrames(tokens)],
+    smokeGeometry("high"),
+    checks,
+  );
+  made.dispose();
+}
+
+/** A frame of `list` from `camera` onto a fresh target of `viewport`'s size, colour and depth. */
+async function drawFrameBytes(
+  engine: RenderEngine,
+  renderer: WireframeRenderer,
+  frame: HullFrame,
+): Promise<{ readonly colour: ArrayBuffer; readonly depth: ArrayBuffer }> {
+  const target = engine.createRenderTarget({
+    name: "R14 hull clusters",
+    size: frame.viewport,
+    format: "rgba16float",
+    mips: 1,
+    depth: true,
+    category: "render-targets",
+  });
+  try {
+    target.render(renderer.frame(frame.list, frame.camera, frame.viewport));
+    const [colour, depth] = await Promise.all([
+      engine.readTexture(target.colour),
+      engine.readTexture(target.depth ?? target.colour),
+    ]);
+    return { colour, depth };
+  } finally {
+    target.dispose();
+  }
+}
+
+/**
+ * R14.T4.b: every frame the group drew with a hull's faces, the kept scenes', the hidden-line
+ * faces', the slopes', the cased edges', the silhouettes' and the window's, drawn again by the
+ * hulls' instanced draws (the way back) and on the cluster path in one run: byte for byte, colour
+ * and depth; with the path's clusters drawn, counted by the counters' reduction, and their vertex
+ * invocations, 384 a cluster by index pulling, against the instanced draws' three a face.
+ */
+async function checkHullClusters(
+  engine: RenderEngine,
+  renderer: WireframeRenderer,
+  ready: boolean,
+  frames: ReadonlyArray<HullFrame>,
+  checks: Checks,
+): Promise<void> {
+  const differing: string[] = [];
+  let onPath = 0;
+  let faces = 0;
+  let clustersDrawn = 0;
+  let counted = 0;
+  try {
+    for (const [n, frame] of frames.entries()) {
+      renderer.setGeometry(GEOMETRY_BEFORE_R14);
+      // Each frame is drawn and read back by the way back, then on the path, before the next.
+      // oxlint-disable-next-line no-await-in-loop
+      const back = await drawFrameBytes(engine, renderer, frame);
+      renderer.setGeometry(SETTINGS.high.geometry);
+      // On the path, read back before the counters' sample reads its buckets.
+      // oxlint-disable-next-line no-await-in-loop
+      const path = await drawFrameBytes(engine, renderer, frame);
+      const drawn = renderer.lastHullClusters;
+      if (drawn !== null) {
+        onPath += 1;
+        faces += drawn.triangles;
+        // Its counters answer before the next frame's cull writes the buckets again.
+        // oxlint-disable-next-line no-await-in-loop
+        const answer = await hullStats(engine, drawn.buckets);
+        if (answer !== null) {
+          counted += 1;
+          clustersDrawn += answer;
+        }
+      }
+      if (
+        bytesDigest(back.colour) !== bytesDigest(path.colour) ||
+        bytesDigest(back.depth) !== bytesDigest(path.depth)
+      ) {
+        differing.push(`frame ${String(n)}`);
+      }
+    }
+  } finally {
+    renderer.setGeometry(smokeGeometry("high"));
+  }
+  checks.check(
+    "R14.T4.b the hulls' occluder faces drawn through the cluster path draw every hull frame the instanced draws draw, byte for byte in colour and depth",
+    ready &&
+      frames.length > 0 &&
+      onPath === frames.length &&
+      counted === onPath &&
+      differing.length === 0,
+    `cull kernel made ${String(ready)}; ${String(frames.length)} hull frames, ${String(onPath)} on the path, ${differing.length === 0 ? "every one the same" : `differing ${differing.join(", ")}`}; ${String(faces)} faces, ${String(clustersDrawn)} clusters drawn (${String(counted)} frames counted): ${String(384 * clustersDrawn)} vertex invocations by index pulling against ${String(3 * faces)} instanced`,
+  );
+}
+
+/** The clusters of the hulls' last cull, once its reduction answers, or `null`. */
+async function hullStats(
+  engine: RenderEngine,
+  buckets: NonNullable<WireframeRenderer["lastHullClusters"]>["buckets"],
+): Promise<number | null> {
+  // A ring of its own, so that its answer is this cull's.
+  const stats = new ClusterStats(engine, "smoke hull clusters");
+  try {
+    stats.sample(buckets, HULL_CLUSTER_MESH.templates, ["hulls"]);
+    let answer = stats.latest();
+    for (let round = 0; round < 100 && answer === null; round += 1) {
+      // The reduction's read answers some time after its submission.
+      // oxlint-disable-next-line no-await-in-loop
+      await pause(10);
+      answer = stats.latest();
+    }
+    return answer?.[0]?.clusters ?? null;
+  } finally {
+    stats.dispose();
+  }
 }
 
 /**
@@ -447,7 +598,7 @@ function behind(mesh: OccluderMesh): OccluderMesh {
  */
 async function checkCasedHullEdge(
   engine: RenderEngine,
-  renderer: WireframeRenderer,
+  renderer: Framer,
   tokens: ColourTokens,
   checks: Checks,
 ): Promise<void> {
@@ -578,7 +729,7 @@ function sphereDepth(
  */
 async function checkSphereSlope(
   engine: RenderEngine,
-  renderer: WireframeRenderer,
+  renderer: Framer,
   checks: Checks,
   strokeScale: number,
 ): Promise<void> {
@@ -603,6 +754,122 @@ async function checkSphereSlope(
     `R02.T14 a sphere occluder's depth is pushed by ${String(list.occluderSlopePx)} px of its slope's magnitude where the slope is diagonal (stroke scale ${String(strokeScale)})`,
     Math.abs(seen - want) < 0.1 * Math.abs(old - want),
     `depth ${seen.toPrecision(7)}, by the magnitude ${want.toPrecision(7)}, by the larger component ${old.toPrecision(7)}`,
+  );
+}
+
+/**
+ * The spheroid occluder's check (plan R02, R02.T19): its centre straight ahead, m; its equatorial
+ * and polar radii, m; and its pole, turned off every axis, so that the stretch runs obliquely
+ * across the view and along it.
+ */
+const SPHEROID_OCCLUDER = {
+  distanceM: 10,
+  equatorialRadiusM: 6,
+  polarRadiusM: 4,
+  pole: normalise(vec3(1, 2, 0.5)),
+} as const;
+
+/**
+ * Where the axis camera's ray through a texel's centre meets {@link SPHEROID_OCCLUDER}, in `f64`
+ * from its quadric (I − ppᵀ) ÷ a² + ppᵀ ÷ c² alone: the depth `occluderSphereHit.wgsl` should write
+ * there, less `slopePx` px of its screen slope's magnitude on the tangent plane, and the ray's
+ * discriminant as a share of its largest term, positive where it meets the figure; or `null`
+ * where it misses it.
+ */
+function spheroidOccluderAt(
+  column: number,
+  row: number,
+  slopePx: number,
+): { readonly depth: number | null; readonly grazing: number } {
+  const { distanceM, equatorialRadiusM: a, polarRadiusM: c, pole } = SPHEROID_OCCLUDER;
+  const quadric = (v: Vec3): Vec3 => {
+    const z = dot(v, pole);
+    return vec3(
+      (v.x - z * pole.x) / (a * a) + (z * pole.x) / (c * c),
+      (v.y - z * pole.y) / (a * a) + (z * pole.y) / (c * c),
+      (v.z - z * pole.z) / (a * a) + (z * pole.z) / (c * c),
+    );
+  };
+  const ndcX = ((column + 0.5) / SIDE_PX) * 2 - 1;
+  const ndcY = 1 - ((row + 0.5) / SIDE_PX) * 2;
+  const ray = normalise(vec3(ndcX, ndcY, -1));
+  const centre = vec3(0, 0, -distanceM);
+  const sc = quadric(centre);
+  const b = dot(ray, sc);
+  const k = dot(centre, sc) - 1;
+  const su = dot(ray, quadric(ray));
+  const disc = b * b - k * su;
+  const grazing = disc / (b * b);
+  if (!(disc >= 0 && b > 0)) {
+    return { depth: null, grazing };
+  }
+  const t = k / (b + Math.sqrt(disc));
+  const n = NEAR_PLANE_M;
+  const hit = scale(ray, t);
+  const normal = normalise(quadric(sub(hit, centre)));
+  const facing = Math.abs(dot(normal, hit));
+  const slopeX = (n * Math.abs(normal.x) * 2) / (SIDE_PX * facing);
+  const slopeY = (n * Math.abs(normal.y) * 2) / (SIDE_PX * facing);
+  return { depth: n / (t * -ray.z) - slopePx * Math.hypot(slopeX, slopeY), grazing };
+}
+
+/**
+ * R02.T19: a body's occluder is its spheroid, intersected in its stretched space
+ * (`occluderSphereHit.wgsl`): every texel whose ray meets the figure clear of its limb takes its
+ * `f64` depth, pushed by the list's slope term, and every texel whose ray misses it, those inside
+ * the sphere of its equatorial radius among them, keeps the cleared depth.
+ */
+async function checkSpheroidOccluder(
+  engine: RenderEngine,
+  renderer: Framer,
+  checks: Checks,
+): Promise<void> {
+  const { distanceM, equatorialRadiusM: a, polarRadiusM: c, pole } = SPHEROID_OCCLUDER;
+  const list = nothingAt(2);
+  const spheroid = { pole, stretch: a / c };
+  const centre = vec3(0, 0, -distanceM);
+  const drawn = await drawSquare(engine, renderer, "R02.T19 spheroid occluder", {
+    ...list,
+    occluderSpheres: [
+      {
+        id: "spheroid",
+        centreF32: new Float32Array([centre.x, centre.y, centre.z]),
+        radiusM: a,
+        altitudeM: norm(stretched(centre, spheroid)) - a,
+        spheroid,
+      },
+    ],
+  });
+  let onFigure = 0;
+  let onFigureMatched = 0;
+  let worst = 0;
+  let missed = 0;
+  let missedClear = 0;
+  let inTheBand = 0;
+  for (let row = 0; row < SIDE_PX; row += 1) {
+    for (let column = 0; column < SIDE_PX; column += 1) {
+      const seen = drawn.depth[row * SIDE_PX + column] ?? Number.NaN;
+      const at = spheroidOccluderAt(column, row, list.occluderSlopePx);
+      // Clear of the limb either way, where `f32`'s hit is sharp: a twentieth of the discriminant.
+      if (at.depth !== null && at.grazing > 0.05) {
+        onFigure += 1;
+        const error = Math.abs(seen / at.depth - 1);
+        worst = Math.max(worst, error);
+        onFigureMatched += error < 1e-4 ? 1 : 0;
+      } else if (at.depth === null && at.grazing < -0.05) {
+        missed += 1;
+        missedClear += seen === 0 ? 1 : 0;
+        // The sphere of radius a about the centre meets this ray: (ray · c)² ≥ |c|² − a².
+        const ndc = [((column + 0.5) / SIDE_PX) * 2 - 1, 1 - ((row + 0.5) / SIDE_PX) * 2];
+        const ray = normalise(vec3(ndc[0] ?? 0, ndc[1] ?? 0, -1));
+        inTheBand += dot(ray, centre) ** 2 >= dot(centre, centre) - a * a ? 1 : 0;
+      }
+    }
+  }
+  checks.check(
+    "R02.T19 a body's occluder is its spheroid: its depth where its rays meet it, none where they miss it inside its equatorial sphere",
+    onFigure > 100 && onFigureMatched === onFigure && inTheBand > 50 && missedClear === missed,
+    `${String(onFigureMatched)} of ${String(onFigure)} texels on the figure within 0.0001 of its f64 depth (worst ${worst.toExponential(2)}); ${String(missedClear)} of ${String(missed)} off it clear, ${String(inTheBand)} of them inside the sphere of its equatorial radius`,
   );
 }
 
@@ -695,7 +962,7 @@ function planeDepth(corners: ReadonlyArray<Vec3>, xPx: number, yPx: number): num
  */
 async function checkHullSlope(
   engine: RenderEngine,
-  renderer: WireframeRenderer,
+  renderer: Framer,
   checks: Checks,
   strokeScale: number,
 ): Promise<void> {
@@ -753,7 +1020,7 @@ async function checkHullSlope(
  */
 async function checkDiagonalCasedHullEdge(
   engine: RenderEngine,
-  renderer: WireframeRenderer,
+  renderer: Framer,
   tokens: ColourTokens,
   checks: Checks,
   strokeScale: number,
@@ -918,7 +1185,7 @@ function silhouetteReading(
  */
 async function checkSilhouette(
   engine: RenderEngine,
-  renderer: WireframeRenderer,
+  renderer: Framer,
   tokens: ColourTokens,
   checks: Checks,
 ): Promise<void> {
@@ -1058,7 +1325,7 @@ function windowList(hull: HullOutline, tokens: ColourTokens): WireframeDrawList 
  */
 async function checkWindow(
   engine: RenderEngine,
-  renderer: WireframeRenderer,
+  renderer: Framer,
   tokens: ColourTokens,
   checks: Checks,
 ): Promise<void> {
@@ -1128,12 +1395,11 @@ function pixelShare(p: number, centrePx: number): number {
  */
 async function checkStarSprite(
   engine: RenderEngine,
-  renderer: WireframeRenderer,
+  renderer: Framer,
   checks: Checks,
 ): Promise<void> {
   const sprite: StarSprite = {
     id: "star",
-    directionF32: new Float32Array([0, 0, -1]),
     xPx: SPRITE.xPx,
     yPx: SPRITE.yPx,
     exposedRgb: SPRITE.exposedRgb,

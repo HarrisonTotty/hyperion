@@ -1,21 +1,54 @@
-import { afterEach, describe, expect, it } from "vitest";
+import type { DiscSecondary } from "../bodies/discShading";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { countingRenderEngine, type CountingRenderEngine } from "../../test/countingRenderEngine";
+import { bindingStages } from "../../test/wgslStages";
+import { materialBindings, storageBuffersPerStage } from "../engine/webgpu/materials";
 import { goldenLevelTable, WGS84_FIGURE } from "../../test/terrainFixtures";
 import { NEAR_PLANE_M } from "../camera/projection";
 import { lookAlong } from "../camera/quaternion";
 import { IDENTITY_ROTATION, rotation3FromRows } from "../coords/rotation";
-import type { Vec3 } from "../../geometry/vec3";
+import { scale, sub, type Vec3 } from "../../geometry/vec3";
 import { MAX_REQUESTED_BUFFER_BYTES } from "../engine/platform";
-import { TERRAIN_SETTINGS, terrainSettingsFor } from "../quality/qualitySetting";
-import { terrainMaterialSpec } from "./gpu/material";
-import { terrainSlotLayout } from "./slotLayout";
+import type { TextureHandle } from "../engine/types";
+import {
+  GEOMETRY_BEFORE_R14,
+  type GeometrySettings,
+  SETTINGS,
+  TERRAIN_SETTINGS,
+  terrainSettingsFor,
+} from "../quality/qualitySetting";
+import { stillMaterialSpec, terrainMaterialSpec } from "./gpu/material";
+import { DEFAULT_TERRAIN_VIEW, LIT_INTERIOR_INDICES, normalsAtlasOf } from "./gpu/resources";
+import { CLASS_LAWS_BYTES, terrainSlotLayout } from "./slotLayout";
+import { terrainWireMaterialSpec } from "./terrainWire";
 import { distanceToBoxM, relativeBounds } from "./bounds";
 import type { DrawSet } from "./cache";
 import { vertexDir } from "./cube";
 import { finestPatchSizeM } from "./grounded";
-import { INSTANCE_RECORD_BYTES } from "./gpu/uniforms";
-import { type Edge, EDGES, edgeNeighbour, parentKey, patchKeyString } from "./patchKey";
+import {
+  INSTANCE_RECORD_BYTES,
+  MIX_STEPS,
+  mixStep,
+  NO_PARENT_SLOT,
+  subPatchOf,
+} from "./gpu/uniforms";
+import { FADE_STEPS, fadeByte, fadedMorph } from "./coarseFineHolds";
+import {
+  LOOKAHEAD_SAMPLES,
+  LOOKAHEAD_SLOW_EVERY,
+  lookaheadInput,
+  lookaheadSeconds,
+} from "./lookahead";
+import {
+  type Edge,
+  EDGES,
+  edgeNeighbour,
+  parentKey,
+  type PatchKey,
+  patchKeyString,
+} from "./patchKey";
+import { MORPH_IN_MS, MORPH_MAX_MS, MORPH_MS_PER_PX } from "./timeMorph";
 import { planetGeometry, surfacePoint } from "./planet";
 import {
   type PatchRequest,
@@ -23,33 +56,119 @@ import {
   type Selection,
   type SelectionInput,
   selectionErrorM,
+  selectPatches,
+  splitKeysOf,
 } from "./select";
 import {
   RESELECT_MOVE_FRACTION,
   SELECTION_MARGIN,
   selectionTolerancePx,
 } from "./selectionTolerance";
+import { lawFor } from "../appearance/phase";
+import { createAirlessTables } from "../atmosphere/surfaceLighting";
 import {
+  packTerrainLighting,
+  type TerrainLighting,
+  terrainDepthMaterialSpec,
+  terrainLitEmissiveInteriorMaterialSpec,
+  terrainLitEmissiveMaterialSpec,
+  terrainLitInteriorMaterialSpec,
+  terrainLitMaterialSpec,
+} from "./terrainMaterial";
+import { microtasks } from "../../test/opticsFakes";
+import { lavaWorldSurface } from "../../test/thermalSurfaces";
+import { surfaceTemperatureFieldOf } from "../atmosphere/thermal";
+import {
+  BAND_SLEW_PER_STEP,
+  BUDGET_HOLD_MARGIN,
   effectiveTauPx,
   morphRangeM,
   SELECT_MEASURE,
+  slewedTauPx,
   type TerrainFrame,
   type TerrainFrameInput,
+  type TerrainFrameLighting,
   type TerrainPassOptions,
   TerrainPass,
   type TerrainPool,
   type TerrainView,
+  terrainShadingOf,
 } from "./terrainPass";
 import { distanceToBoxFromM } from "./viewGeometry";
-import type { BakedPatch, BakeSettings } from "./workers/messages";
+import {
+  type BakedPatch,
+  type BakeSettings,
+  NORMALS_BETWEEN,
+  PALETTE_NONE,
+  type TerrainLayers,
+} from "./workers/messages";
+import type { RefinedDraft, RefineRequest } from "./workers/pool";
+
+/** An instance record's words (`gpu/uniforms.ts`' `INSTANCE_RECORD_BYTES`). */
+const WORDS = INSTANCE_RECORD_BYTES / 4;
 
 const PLANET = planetGeometry(WGS84_FIGURE, goldenLevelTable("off"));
+
+/** WebGPU's default `maxStorageBuffersPerShaderStage`, which the engine never raises. */
+const DEFAULT_STORAGE_BUFFERS_PER_STAGE = 8;
 
 /** A pool that records the demand and bakes on the test's command. */
 class FakePool implements TerrainPool {
   demand: ReadonlyArray<PatchRequest> = [];
+  /** R10's layers each bake carries: `null`, as the test planet's, unless a test sets them. */
+  layers: TerrainLayers | null = null;
+  /** Each key's own layers where a test gives them (R10.T16.b's rebake rule), else {@link layers}. */
+  readonly layersOf = new Map<string, TerrainLayers>();
+  /** Each key's own heights where a test gives them (R10.T16.i's spans), else flat at the datum. */
+  readonly heightsOf = new Map<string, Float32Array>();
+  /** Whether every worker is lost (R10.T16.b's fault). */
+  unavailable = false;
   readonly #listeners = new Set<(bake: BakedPatch) => void>();
+  readonly #failures = new Set<(failure: { readonly keyString: string }) => void>();
+  readonly #refinedListeners = new Set<(refined: RefinedDraft) => void>();
+  /** The refinements asked, in order (R10.T6.a's progressive bake). */
+  readonly refines: RefineRequest[] = [];
+  /** The refinements dropped, by key string, in order. */
+  readonly dropped: string[] = [];
+  /** The refinements asked and not yet told, as the pool counts them. */
+  refiningCount = 0;
   terminated = false;
+
+  refine(r: RefineRequest): void {
+    this.refines.push(r);
+  }
+
+  dropRefinement(keyString: string): void {
+    this.dropped.push(keyString);
+  }
+
+  onRefined(cb: (refined: RefinedDraft) => void): () => void {
+    this.#refinedListeners.add(cb);
+    return () => {
+      this.#refinedListeners.delete(cb);
+    };
+  }
+
+  /** Tells the pass `refined`, as the pool does a refinement's answer. */
+  refined(refined: RefinedDraft): void {
+    for (const listener of this.#refinedListeners) {
+      listener(refined);
+    }
+  }
+
+  onFailed(cb: (failure: { readonly keyString: string }) => void): () => void {
+    this.#failures.add(cb);
+    return () => {
+      this.#failures.delete(cb);
+    };
+  }
+
+  /** Gives up the request of `key`, as the pool does a bake that failed. */
+  fail(key: PatchRequest["key"]): void {
+    for (const listener of this.#failures) {
+      listener({ keyString: patchKeyString(key) });
+    }
+  }
 
   /** Listeners still subscribed. */
   get listeners(): number {
@@ -82,19 +201,25 @@ class FakePool implements TerrainPool {
     return demand.length;
   }
 
-  deliver(pass: TerrainPass, key: PatchRequest["key"]): void {
-    const n = pass.layout.atlas.samplesPerSide;
+  deliver(
+    pass: TerrainPass,
+    key: PatchRequest["key"],
+    normals?: { readonly fill: number; readonly drafted: boolean },
+  ): void {
+    const n = normalsAtlasOf(pass.layout).samplesPerSide;
     const bake: BakedPatch = {
       key,
       generation: 1,
       originM: { x: 1_000, y: 2_000, z: PLANET.figure.polarRadiusM },
-      heights: new Float32Array(65 * 65 * 2),
+      heights: this.heightsOf.get(patchKeyString(key)) ?? new Float32Array(65 * 65 * 2),
       offsets: this.settings.vertexPath === "baked-offsets" ? new Float32Array(65 * 65 * 6) : null,
-      normals: new Float16Array(n * n * 2),
+      normals: new Float16Array(n * n * 2).fill(normals?.fill ?? 0),
       heightRangeM: [0, 0],
       boundingRadiusM: 1,
       originHeightM: 0,
       skirtDepthM: 1,
+      layers: this.layersOf.get(patchKeyString(key)) ?? this.layers,
+      ...(normals?.drafted === true ? { drafted: true } : {}),
     };
     for (const listener of this.#listeners) {
       listener(bake);
@@ -149,24 +274,36 @@ function inputAt(view: TerrainView, nowMs = 0): TerrainFrameInput {
 
 async function passOn(
   setting: "high" | "low",
-  extra: Pick<TerrainPassOptions, "measureSelection" | "onResident" | "onSelect" | "terrain"> = {},
+  extra: Partial<
+    Pick<
+      TerrainPassOptions,
+      | "measureSelection"
+      | "onResident"
+      | "onSelect"
+      | "terrain"
+      | "source"
+      | "lookaheadClockMs"
+      | "budgetHoldMargin"
+    >
+  > = {},
 ): Promise<{ pass: TerrainPass; pool: () => FakePool; engine: CountingRenderEngine }> {
   const counting = await countingRenderEngine({
     maxStorageBufferBindingSize: MAX_REQUESTED_BUFFER_BYTES,
     maxBufferSize: MAX_REQUESTED_BUFFER_BYTES,
   });
   const pools: FakePool[] = [];
+  const { source = { kind: "test-planet", ridges: "off" }, ...rest } = extra;
   const pass = new TerrainPass({
     engine: counting,
     setting,
     planet: PLANET,
-    ridges: "off",
+    source,
     createPool: (bake) => {
       const pool = new FakePool(bake);
       pools.push(pool);
       return pool;
     },
-    ...extra,
+    ...rest,
   });
   await pass.ready();
   return {
@@ -182,13 +319,13 @@ async function passOn(
   };
 }
 
-/** The slots of the instance records last written. */
-function writtenSlots(engine: CountingRenderEngine): number[] {
-  const write = engine.writes.findLast((w) => w.buffer === "terrain instances");
+/** The slots of the instance records last written into `buffer`, the edge patches' by default. */
+function writtenSlots(engine: CountingRenderEngine, buffer = "terrain instances"): number[] {
+  const write = engine.writes.findLast((w) => w.buffer === buffer);
   const u = new Uint32Array(write?.data.slice().buffer ?? new ArrayBuffer(0));
   const slots: number[] = [];
   for (let i = 0; i < u.length / (INSTANCE_RECORD_BYTES / 4); i += 1) {
-    slots.push(u[i * 8 + 3] ?? -1);
+    slots.push(u[i * WORDS + 3] ?? -1);
   }
   return slots;
 }
@@ -204,7 +341,7 @@ describe("the terrain pass", () => {
     pass.frame(inputAt(view));
     pool().bakeDemand(pass);
     const frame = pass.frame(inputAt(view));
-    expect(frame.draw?.indirect?.buffer.name).toBe("terrain indirect");
+    expect(frame.draws.at(-1)?.indirect?.buffer.name).toBe("terrain indirect");
     expect(writtenSlots(engine)).toEqual(
       Array.from(frame.drawSet.slots.subarray(0, frame.drawSet.count)),
     );
@@ -259,8 +396,29 @@ describe("the terrain pass", () => {
       .filter(({ drawn }) => drawn.standIn && drawn.patch.key.level === 1);
     expect(standIns.length).toBeGreaterThan(0);
     for (const { i } of standIns) {
-      expect([f[i * 8 + 4], f[i * 8 + 5]]).toEqual(levelOne.map((m) => Math.fround(m)));
+      expect([f[i * WORDS + 4], f[i * WORDS + 5]]).toEqual(levelOne.map((m) => Math.fround(m)));
     }
+  });
+
+  it("writes each part a stand-in draws as its slot, with the part's word, and a whole patch's with none", async () => {
+    const { pass, pool, engine } = await passOn("high");
+    const view = northPole(2_000_000);
+    pass.frame(inputAt(view));
+    for (const face of [0, 1, 2, 3, 4, 5] as const) {
+      pool().deliver(pass, { face, level: 0, i: 0, j: 0 });
+    }
+    const frame = pass.frame(inputAt(view));
+    const write = engine.writes.findLast((w) => w.buffer === "terrain instances");
+    const u = new Uint32Array(write?.data.slice().buffer ?? new ArrayBuffer(0));
+    const written = frame.drawSet.patches.map(({ patch, within }, i) => [
+      u[i * WORDS + 3] === patch.slot,
+      u[i * WORDS + 8],
+      within === null ? 0 : subPatchOf(patch.key, within),
+    ]);
+    // Only the roots are resident: every selected patch is a root's part.
+    expect(frame.drawSet.patches.every(({ within }) => within !== null)).toBe(true);
+    expect(written.every(([slot, word, wanted]) => slot === true && word === wanted)).toBe(true);
+    expect(written.some(([, word]) => word !== 0)).toBe(true);
   });
 
   it("makes no GPU object after warm-up, frame after frame", async () => {
@@ -337,7 +495,7 @@ describe("the terrain pass", () => {
     pass.frame(inputAt(view));
     pool().bakeDemand(pass);
     const frame = pass.frame(inputAt(view));
-    expect(frame.draw?.material.name).toBe(terrainMaterialSpec("face-differences").name);
+    expect(frame.draws.at(-1)?.material.name).toBe(terrainMaterialSpec("face-differences").name);
   });
 
   it("keeps its variant through a device restore", async () => {
@@ -361,18 +519,29 @@ describe("the terrain pass", () => {
     expect((await passOn("low")).pass.maxPatches).toBe(648);
   });
 
+  it("reads its cache's pins against the slots, which its drawn patches hold within them (R10.T16.i)", async () => {
+    const { pass, pool } = await passOn("low");
+    const view = northPole(1_000_000);
+    pass.frame(inputAt(view));
+    pool().bakeDemand(pass);
+    const frame = pass.frame(inputAt(view, 16));
+    const pressure = pass.cachePressure;
+    // A stand-in draws its parts as instances of one resident patch.
+    const drawn = new Set(
+      frame.drawSet.patches.slice(0, frame.drawSet.count).map((each) => each.keyString),
+    );
+    expect(drawn.size).toBeGreaterThan(0);
+    expect([pressure.exceeded, pressure.forced + pressure.drawn >= drawn.size]).toEqual([
+      false,
+      true,
+    ]);
+  });
+
   it("selects no more patches than its budget, and says the budget bound", async () => {
-    const { pass, pool } = await passOn("high");
-    // 1.5 km up, 69° from straight down, at 1080p: even under the fake pool's flat bakes, whose
-    // ranges are tight, the high setting wants several thousand patches, beyond its budget of 981.
-    // Selection descends as bakes land (R05.T7's streaming gate), so the demand is baked until it
-    // empties.
-    const view = { ...tilted(1_500, 1.2), viewport: { widthPx: 1920, heightPx: 1080 } };
-    let frame = pass.frame(inputAt(view));
-    expect(frame.selection.patches.size).toBeLessThanOrEqual(pass.maxPatches);
-    for (let n = 1; n < 60 && pool().bakeDemand(pass) > 0; n += 1) {
-      frame = pass.frame(inputAt(view, 16 * n));
-      expect(frame.selection.patches.size).toBeLessThanOrEqual(pass.maxPatches);
+    // At BUDGET_VIEW the demand is baked until it empties, every frame's selection counted.
+    const { maxPatches, sizes, frame } = await streamedUnderBudget();
+    for (const size of sizes) {
+      expect(size).toBeLessThanOrEqual(maxPatches);
     }
     expect(frame.selection.limited).toBe(true);
     expect(frame.conditions.detailLimited).toBe(true);
@@ -454,7 +623,7 @@ describe("the terrain pass", () => {
       ),
     );
     // Column-major: the first column is R's first column, (0, 1, 0).
-    expect(Array.from(frame.draw?.uniforms["bodyRotation"] ?? []).slice(0, 4)).toEqual([
+    expect(Array.from(frame.draws.at(-1)?.uniforms["bodyRotation"] ?? []).slice(0, 4)).toEqual([
       0, 1, 0, 0,
     ]);
   });
@@ -718,6 +887,62 @@ function streamed(pass: TerrainPass, pool: () => FakePool, view: TerrainView): T
 }
 
 /**
+ * 1.5 km up, 69° from straight down, at 1080p: even under the fake pool's flat bakes, whose ranges
+ * are tight, the high setting wants several thousand patches here, beyond its budget of 981.
+ */
+const BUDGET_VIEW: TerrainView = {
+  ...tilted(1_500, 1.2),
+  viewport: { widthPx: 1920, heightPx: 1080 },
+};
+
+/** The high setting's pass streamed at {@link BUDGET_VIEW}, as {@link streamed} streams it. */
+interface BudgetStream {
+  /** The pass's budget, patches. */
+  readonly maxPatches: number;
+  /** Each frame's selected patches, the first frame's first. */
+  readonly sizes: ReadonlyArray<number>;
+  /** The last frame, whose draw set no later frame rewrites. */
+  readonly frame: TerrainFrame;
+  /** The morph bands the last frame wrote ({@link writtenBands}). */
+  readonly bands: ReadonlyMap<string, readonly [number, number]>;
+}
+
+let budgetStream: Promise<BudgetStream> | undefined;
+
+/**
+ * {@link BUDGET_VIEW}'s stream, run once for the budget's test and the morph bands' tests under
+ * it, which all read the same run: every input is fixed (the setting, the view, the fake pool's
+ * bakes and the frames' clock), and the run's figures are only read.
+ */
+function streamedUnderBudget(): Promise<BudgetStream> {
+  budgetStream ??= (async (): Promise<BudgetStream> => {
+    const { pass, pool, engine } = await passOn("high");
+    // Selection descends as bakes land (R05.T7's streaming gate), so the demand is baked until it
+    // empties.
+    const sizes: number[] = [];
+    let frame = pass.frame(inputAt(BUDGET_VIEW));
+    sizes.push(frame.selection.patches.size);
+    let n = 1;
+    for (; n < 60 && pool().bakeDemand(pass) > 0; n += 1) {
+      frame = pass.frame(inputAt(BUDGET_VIEW, 16 * n));
+      sizes.push(frame.selection.patches.size);
+    }
+    // The bands reach the last selection's τ′ at 2% a frame (R10.T16.i): 2.6 × 10² frames for a
+    // τ′ 200 times the setting's; and the refines go down a level a span, 0.6 s each.
+    for (const stop = n + 800; n < stop; n += 1) {
+      frame = pass.frame(inputAt(BUDGET_VIEW, 16 * n));
+    }
+    return {
+      maxPatches: pass.maxPatches,
+      sizes,
+      frame,
+      bands: writtenBands(engine, frame.drawSet),
+    };
+  })();
+  return budgetStream;
+}
+
+/**
  * The pass's d_min: the box distance from `cameraM` to the nearest selected patch not at the
  * finest level, floored at one finest patch, metres.
  */
@@ -765,7 +990,7 @@ function writtenBands(
   const f = new Float32Array(write?.data.slice().buffer ?? new ArrayBuffer(0));
   const bands = new Map<string, [number, number]>();
   drawSet.patches.forEach((drawn, i) => {
-    bands.set(drawn.keyString, [f[i * 8 + 4] ?? Number.NaN, f[i * 8 + 5] ?? Number.NaN]);
+    bands.set(drawn.keyString, [f[i * WORDS + 4] ?? Number.NaN, f[i * WORDS + 5] ?? Number.NaN]);
   });
   return bands;
 }
@@ -805,8 +1030,8 @@ function morphFactor([start, end]: readonly [number, number], distanceM: number)
 }
 
 describe("the morph bands under the patch budget", () => {
-  // As in the budget test above: the high setting wants several thousand patches here, beyond 981.
-  const limitedView = { ...tilted(1_500, 1.2), viewport: { widthPx: 1920, heightPx: 1080 } };
+  // The budget test's run: the high setting wants several thousand patches here, beyond 981.
+  const limitedView = BUDGET_VIEW;
 
   it("are at the setting's τ, bit for bit, while the budget does not bind", async () => {
     const { pass, pool, engine } = await passOn("high");
@@ -820,24 +1045,21 @@ describe("the morph bands under the patch budget", () => {
   });
 
   it("are at τ × max(1, the limit excess) while the budget binds", async () => {
-    const { pass, pool, engine } = await passOn("high");
-    const frame = streamed(pass, pool, limitedView);
+    const { frame, bands } = await streamedUnderBudget();
     expect(frame.selection.limited).toBe(true);
     // Above 1, so that τ′ is not the setting's τ.
     expect(frame.selection.limitExcess).toBeGreaterThan(1);
     const tauPx = TERRAIN_SETTINGS.high.tauPx * frame.selection.limitExcess;
-    expect(writtenBands(engine, frame.drawSet)).toEqual(bandsAt(limitedView, frame.drawSet, tauPx));
+    expect(bands).toEqual(bandsAt(limitedView, frame.drawSet, tauPx));
   });
 
   it("keep every coarse–fine edge at morph 1 while the budget binds", async () => {
-    const { pass, pool, engine } = await passOn("high");
-    const frame = streamed(pass, pool, limitedView);
+    const { frame, bands } = await streamedUnderBudget();
     expect(frame.selection.limited).toBe(true);
     // Past the bands' margin, so that bands at the setting's τ would leave edges unmorphed.
     expect(frame.selection.limitExcess).toBeGreaterThan(1 + SELECTION_MARGIN);
     // Nothing stands in, so every drawn patch is a selected leaf.
     expect(frame.drawSet.standingIn).toBe(0);
-    const bands = writtenBands(engine, frame.drawSet);
     const camera = limitedView.cameraM;
     let edges = 0;
     const unmorphed: string[] = [];
@@ -868,6 +1090,375 @@ describe("the morph bands under the patch budget", () => {
   });
 });
 
+describe("the budget's hold on the last selection's splits (R10.T16.i)", () => {
+  /** The inputs of a pass's first two selections, the second after a bake lands. */
+  async function twoSelections(
+    extra: Partial<Pick<TerrainPassOptions, "budgetHoldMargin">> = {},
+  ): Promise<ReadonlyArray<readonly [SelectionInput, Selection]>> {
+    const seen: Array<readonly [SelectionInput, Selection]> = [];
+    const { pass, pool } = await passOn("high", {
+      ...extra,
+      onSelect: (input, selection) => seen.push([input, selection]),
+    });
+    const view = northPole(2_000_000);
+    pass.frame(inputAt(view, 0));
+    pool().bakeDemand(pass);
+    pass.frame(inputAt(view, 16));
+    return seen;
+  }
+
+  it("holds each selection on the splits of the one before, at its margin, from the second on", async () => {
+    const [first, second] = await twoSelections();
+    if (first === undefined || second === undefined) {
+      throw new Error("the pass did not select twice");
+    }
+    expect([
+      first[0].budgetHold,
+      second[0].budgetHold?.margin,
+      [...(second[0].budgetHold?.split ?? [])].toSorted(),
+    ]).toEqual([
+      undefined,
+      BUDGET_HOLD_MARGIN,
+      [...splitKeysOf(first[1].patches.values())].toSorted(),
+    ]);
+  });
+
+  it("selects with no hold, as before, given no margin", async () => {
+    const seen = await twoSelections({ budgetHoldMargin: null });
+    expect(seen.length).toBeGreaterThan(1);
+    expect(seen.map(([input]) => input.budgetHold)).toEqual(seen.map(() => undefined));
+  });
+});
+
+describe("the morph bands' slew (R10.T16.i)", () => {
+  it("steps the bands' tolerance at most 2% towards the selection's, either way, and to it within a step", () => {
+    const step = 1 + BAND_SLEW_PER_STEP;
+    expect([
+      slewedTauPx(null, 10),
+      slewedTauPx(1, 50),
+      slewedTauPx(50, 1),
+      slewedTauPx(1.01, 1),
+      slewedTauPx(1, 1),
+    ]).toEqual([10, step, 50 / step, 1, 1]);
+  });
+
+  it("moves each level's band at most 2% a frame while the budget's τ′ steps", async () => {
+    const { pass, pool, engine } = await passOn("high");
+    let frame = pass.frame(inputAt(BUDGET_VIEW));
+    const ends: Array<Map<number, number>> = [];
+    for (let n = 1; n < 120; n += 1) {
+      pool().bakeDemand(pass);
+      frame = pass.frame(inputAt(BUDGET_VIEW, 16 * n));
+      const bands = writtenBands(engine, frame.drawSet);
+      ends.push(
+        new Map(
+          frame.drawSet.patches.map((p) => [p.patch.key.level, bands.get(p.keyString)?.[1] ?? 0]),
+        ),
+      );
+    }
+    const steps = ends.slice(1).flatMap((now, n) =>
+      [...now].flatMap(([level, end]) => {
+        const was = ends[n]?.get(level);
+        return was === undefined || !(end > 0) ? [] : [Math.max(end / was, was / end)];
+      }),
+    );
+    // The ends are f32: a step's ratio within 1 + 2% and an f32 rounding of each.
+    expect(Math.max(...steps)).toBeLessThanOrEqual(step32(1 + BAND_SLEW_PER_STEP));
+    expect(frame.selection.limitExcess).toBeGreaterThan(1);
+  });
+
+  it("tells its bands at the selection's τ′ once their slew reaches it, and from then on writes them alike", async () => {
+    const { pass, pool, engine } = await passOn("high");
+    // The draw set's changes cut, so that the bands alone move the records once the demand is in.
+    pass.setReducedMotion(true);
+    pass.frame(inputAt(BUDGET_VIEW));
+    let n = 1;
+    for (; n < 60 && pool().bakeDemand(pass) > 0; n += 1) {
+      pass.frame(inputAt(BUDGET_VIEW, 16 * n));
+    }
+    // Nothing lands now, so no selection moves τ′, and the bands go on towards it a step at a time.
+    const told: boolean[] = [];
+    const written: string[] = [];
+    for (const stop = n + 400; n < stop; n += 1) {
+      const frame = pass.frame(inputAt(BUDGET_VIEW, 16 * n));
+      told.push(pass.bandsAtTarget(DEFAULT_TERRAIN_VIEW));
+      written.push(JSON.stringify([...writtenBands(engine, frame.drawSet)]));
+    }
+    const first = told.indexOf(true);
+    expect(first).toBeGreaterThan(0);
+    expect(told.slice(first).every(Boolean)).toBe(true);
+    expect(written[first - 1]).not.toBe(written[first]);
+    expect(new Set(written.slice(first)).size).toBe(1);
+  });
+});
+
+/** `ratio` widened by two `f32` roundings. */
+function step32(ratio: number): number {
+  return ratio * (1 + 2 ** -22);
+}
+
+/** Each record's words, as the last frame wrote them to the spike's one view. */
+function recordWords(engine: CountingRenderEngine): Uint32Array[] {
+  const write = engine.writes.findLast((w) => w.buffer === "terrain instances");
+  const u = new Uint32Array(write?.data.slice().buffer ?? new ArrayBuffer(0));
+  return Array.from({ length: u.length / WORDS }, (_, n) => u.slice(n * WORDS, (n + 1) * WORDS));
+}
+
+/** The areas `drawn` draws, a sub-patch's its missing patch's. */
+function areaKeysOf(drawn: DrawSet): PatchKey[] {
+  return drawn.patches.map((p) => p.within ?? p.patch.key);
+}
+
+/** {@link areaKeysOf} as `patchKeyString`s. */
+function areasOf(drawn: DrawSet): Set<string> {
+  return new Set(areaKeysOf(drawn).map(patchKeyString));
+}
+
+/** The indices in `drawSet` of the instances that draw `key`'s patch, whole or in part. */
+function drawnBy(drawSet: DrawSet, key: PatchKey): number[] {
+  const keyString = patchKeyString(key);
+  return drawSet.patches.flatMap((p, n) => (p.keyString === keyString ? [n] : []));
+}
+
+describe("the drawn ground's changes over time (R10.T16.i)", () => {
+  const CHILD: PatchKey = { face: 2, level: 1, i: 0, j: 0 };
+
+  it("holds the first draw until every seen patch has a resident patch to draw it", async () => {
+    const made = await passOn("high");
+    // Far over the pole: the view sees several roots, none yet resident.
+    const view = northPole(20_000_000);
+    made.pass.frame(inputAt(view, 0));
+    const seen = [...(made.pass.lastStep?.selection.patches.values() ?? [])].filter((p) => p.seen);
+    const [lastToLand, ...others] = seen;
+    if (lastToLand === undefined) {
+      throw new Error("the view saw no patch");
+    }
+    // The draw set is rewritten in place each step: its counts are read as each step leaves them.
+    const counts = (): readonly [number, number] => {
+      const drawSet = made.pass.lastStep?.drawSet;
+      return [drawSet?.missing ?? -1, drawSet?.count ?? -1];
+    };
+    for (const patch of others) {
+      made.pool().deliver(made.pass, patch.key);
+    }
+    made.pass.frame(inputAt(view, 16));
+    const partly = counts();
+    made.pool().deliver(made.pass, lastToLand.key);
+    made.pass.frame(inputAt(view, 32));
+    const [missing, count] = counts();
+    expect([others.length > 0, partly, missing, count > 0]).toEqual([true, [1, 0], 0, true]);
+  });
+
+  /** A pass over the north pole with the roots and the face's other children baked, and `CHILD` not. */
+  async function standingIn(): Promise<{
+    readonly pass: TerrainPass;
+    readonly pool: () => FakePool;
+    readonly engine: CountingRenderEngine;
+    readonly view: TerrainView;
+  }> {
+    const made = await passOn("high");
+    const view = northPole(2_000_000);
+    made.pass.frame(inputAt(view, 0));
+    made.pool().bakeDemand(made.pass);
+    made.pass.frame(inputAt(view, 1_000));
+    for (const request of made.pool().demand) {
+      if (patchKeyString(request.key) !== patchKeyString(CHILD)) {
+        made.pool().deliver(made.pass, request.key);
+      }
+    }
+    // Long past every fade those bakes started.
+    made.pass.frame(inputAt(view, 2_000));
+    made.pass.frame(inputAt(view, 5_000));
+    return { ...made, view };
+  }
+
+  it("draws a refine's first frame on the stand-in's surface, its patch at k = 1", async () => {
+    const { pass, pool, engine, view } = await standingIn();
+    pool().deliver(pass, CHILD);
+    // The child's parts now stand for its own children, which selection takes at once.
+    const frame = pass.frame(inputAt(view, 6_000));
+    const words = recordWords(engine);
+    const drawn = drawnBy(frame.drawSet, CHILD).map((n) => {
+      const own = (words[n]?.[11] ?? 0) & 0xff;
+      return [own, fadedMorph((words[n]?.[7] ?? 0) >>> 2, 0, 0, own, 32, 32, 0)];
+    });
+    expect(drawn.length).toBeGreaterThan(0);
+    expect(drawn).toEqual(drawn.map(() => [FADE_STEPS, 1]));
+  });
+
+  it("lengthens a refine's fade by the pixels its morph moves the ground, to the longest", async () => {
+    // The fake bakes' origin and bounding radius, and the view's pixel: the pass's `#screenPx`.
+    const view = northPole(2_000_000);
+    const nearestM = Math.hypot(1_000, 2_000, view.cameraM.z - PLANET.figure.polarRadiusM) - 1;
+    const radPerPx = (2 * Math.tan(view.fovXRad / 2)) / view.viewport.widthPx;
+    const fadesOver = async (px: number, atMs: ReadonlyArray<number>): Promise<number[]> => {
+      const { pass, pool, engine } = await standingIn();
+      // The child's morph moves its ground `px` pixels: |h₀ − h₁| at one vertex.
+      const heights = new Float32Array(65 * 65 * 2);
+      heights[0] = px * nearestM * radPerPx;
+      pool().heightsOf.set(patchKeyString(CHILD), heights);
+      pool().deliver(pass, CHILD);
+      pass.frame(inputAt(view, 6_000));
+      return atMs.map((ms) => {
+        const frame = pass.frame(inputAt(view, 6_000 + ms));
+        const [n] = drawnBy(frame.drawSet, CHILD);
+        return (recordWords(engine)[n ?? -1]?.[11] ?? -1) & 0xff;
+      });
+    };
+    const spanMs = 100 * MORPH_MS_PER_PX;
+    const [atLeast, half, ended] = await fadesOver(100, [MORPH_IN_MS, spanMs / 2, spanMs]);
+    // The smoothstep's tail is flat: 0.8 of the longest span leaves a tenth of the fade.
+    const [beforeLongest, atLongest] = await fadesOver(1_000, [0.8 * MORPH_MAX_MS, MORPH_MAX_MS]);
+    // Half way down the smoothstep, within a step of the byte: the span is the heights' f32 one.
+    expect({
+      atLeast: (atLeast ?? 0) > fadeByte(0.5),
+      half: Math.abs((half ?? 0) - fadeByte(0.5)) <= 1,
+      ended,
+    }).toEqual({ atLeast: true, half: true, ended: 0 });
+    expect([(beforeLongest ?? 0) > 0, atLongest]).toEqual([true, 0]);
+  });
+
+  it("lengthens a refine's fade by its disagreement with its parent's surface, where its own morph moves nothing", async () => {
+    const view = northPole(2_000_000);
+    const nearestM = Math.hypot(1_000, 2_000, view.cameraM.z - PLANET.figure.polarRadiusM) - 1;
+    const radPerPx = (2 * Math.tan(view.fovXRad / 2)) / view.viewport.widthPx;
+    const { pass, pool, engine } = await standingIn();
+    // The child's own and morph heights 100 px above its flat parent's at their shared corner.
+    const heights = new Float32Array(65 * 65 * 2);
+    heights[0] = 100 * nearestM * radPerPx;
+    heights[1] = heights[0];
+    pool().heightsOf.set(patchKeyString(CHILD), heights);
+    pool().deliver(pass, CHILD);
+    pass.frame(inputAt(view, 6_000));
+    const fadeAt = (ms: number): number => {
+      const frame = pass.frame(inputAt(view, 6_000 + ms));
+      const [n] = drawnBy(frame.drawSet, CHILD);
+      return (recordWords(engine)[n ?? -1]?.[11] ?? -1) & 0xff;
+    };
+    const spanMs = 100 * MORPH_MS_PER_PX;
+    expect([fadeAt(MORPH_IN_MS) > fadeByte(0.5), fadeAt(spanMs)]).toEqual([true, 0]);
+  });
+
+  it("cuts a refine at its first draw under reduced motion", async () => {
+    const { pass, pool, engine, view } = await standingIn();
+    pass.setReducedMotion(true);
+    pool().deliver(pass, CHILD);
+    const frame = pass.frame(inputAt(view, 6_000));
+    const words = recordWords(engine);
+    const fades = drawnBy(frame.drawSet, CHILD).flatMap((n) => [
+      words[n]?.[9],
+      words[n]?.[10],
+      words[n]?.[11],
+    ]);
+    expect([fades.length > 0, fades.every((word) => word === 0)]).toEqual([true, true]);
+  });
+
+  it("draws the distance's k once the change has morphed in", async () => {
+    const { pass, pool, engine, view } = await standingIn();
+    pool().deliver(pass, CHILD);
+    pass.frame(inputAt(view, 6_000));
+    const halfway = pass.frame(inputAt(view, 6_000 + MORPH_IN_MS / 2));
+    const [first] = drawnBy(halfway.drawSet, CHILD);
+    const fadeHalfway = (recordWords(engine)[first ?? -1]?.[11] ?? 0) & 0xff;
+    const done = pass.frame(inputAt(view, 6_000 + MORPH_IN_MS));
+    const words = recordWords(engine);
+    const left = drawnBy(done.drawSet, CHILD).flatMap((n) => [
+      words[n]?.[9],
+      words[n]?.[10],
+      words[n]?.[11],
+    ]);
+    expect([fadeHalfway, left.length > 0, left.every((word) => word === 0)]).toEqual([
+      fadeByte(0.5),
+      true,
+      true,
+    ]);
+  });
+
+  it("writes no fade once nothing changes, the records as without one", async () => {
+    const { engine } = await standingIn();
+    const fades = recordWords(engine).flatMap((words) => [words[9], words[10], words[11]]);
+    expect(fades.length).toBeGreaterThan(0);
+    expect(fades.every((word) => word === 0)).toBe(true);
+  });
+
+  it("mixes a rebake's heights from its older bake's, kept in its slot, until the fade ends", async () => {
+    const { pass, pool, engine, view } = await standingIn();
+    const [drawn] = pass.lastStep?.drawSet.patches ?? [];
+    if (drawn === undefined) {
+      throw new Error("nothing is drawn");
+    }
+    const older = drawn.patch.slot;
+    pool().deliver(pass, drawn.patch.key);
+    const first = pass.frame(inputAt(view, 6_000));
+    const words = recordWords(engine);
+    const rebaking = drawnBy(first.drawSet, drawn.patch.key).map((n) => words[n]?.[11] ?? 0);
+    pass.frame(inputAt(view, 6_000 + MORPH_IN_MS / 2));
+    const halfway = recordWords(engine);
+    const midway = drawnBy(pass.lastStep?.drawSet ?? first.drawSet, drawn.patch.key).map(
+      (n) => ((halfway[n]?.[11] ?? 0) >>> 8) & MIX_STEPS,
+    );
+    const done = pass.frame(inputAt(view, 6_000 + MORPH_IN_MS));
+    const after = recordWords(engine);
+    const ended = drawnBy(done.drawSet, drawn.patch.key).map((n) => (after[n]?.[11] ?? 0) >>> 8);
+    expect(rebaking.length).toBeGreaterThan(0);
+    expect([
+      rebaking.every((word) => word >>> 20 === older && ((word >>> 8) & MIX_STEPS) === MIX_STEPS),
+      pass.resident(drawn.keyString)?.slot !== older,
+      midway.every((step) => step === mixStep(0.5)),
+      ended.every((word) => word === 0),
+    ]).toEqual([true, true, true, true]);
+  });
+
+  it("holds the finer patches through a coarsen until their fade reaches 1, then draws the coarser", async () => {
+    const { pass, pool, engine } = await passOn("high");
+    const near = northPole(2_000_000);
+    // Streamed near, then far enough that the selection coarsens.
+    let frame = pass.frame(inputAt(near, 0));
+    for (let n = 1; n < 30 && pool().bakeDemand(pass) > 0; n += 1) {
+      frame = pass.frame(inputAt(near, 1_000 * n));
+    }
+    frame = pass.frame(inputAt(near, 60_000));
+    const fineKeys = areaKeysOf(frame.drawSet);
+    // The finer areas drawn near inside `key`'s area.
+    const finerOver = (key: PatchKey): string[] =>
+      fineKeys
+        .filter(
+          (a) =>
+            a.face === key.face &&
+            a.level > key.level &&
+            a.i >> (a.level - key.level) === key.i &&
+            a.j >> (a.level - key.level) === key.j,
+        )
+        .map(patchKeyString);
+    const far = northPole(5_000_000);
+    const held = pass.frame(inputAt(far, 61_000));
+    // The patches selected far over finer ones drawn near: each a coarsen, held over the finer
+    // patches' areas, the rest of it newly in view.
+    const coarsened = [...held.selection.patches.values()]
+      .map((p) => p.key)
+      .filter((key) => finerOver(key).length > 0);
+    const during = areasOf(held.drawSet);
+    const rising = recordWords(engine).map((words) => (words[11] ?? 0) & 0xff);
+    const late = areasOf(pass.frame(inputAt(far, 61_000 + MORPH_IN_MS - 16)).drawSet);
+    pass.frame(inputAt(far, 61_000 + MORPH_IN_MS));
+    const after = areasOf(pass.frame(inputAt(far, 61_000 + MORPH_IN_MS + 16)).drawSet);
+    const heldIn = (areas: Set<string>): boolean[] =>
+      coarsened.map(
+        (key) => !areas.has(patchKeyString(key)) && finerOver(key).every((a) => areas.has(a)),
+      );
+    expect(coarsened.length).toBeGreaterThan(0);
+    // Their first frame at the fade's start, 0: the finer patches as they were.
+    expect([heldIn(during), heldIn(late), rising.every((byte) => byte === 0)]).toEqual([
+      coarsened.map(() => true),
+      coarsened.map(() => true),
+      true,
+    ]);
+    expect(coarsened.map((key) => after.has(patchKeyString(key)))).toEqual(
+      coarsened.map(() => true),
+    );
+  });
+});
+
 describe("the terrain pass after a device loss", () => {
   it("ignores a late bake from the pool it replaced", async () => {
     const { pass, pool, engine } = await passOn("low");
@@ -895,4 +1486,1111 @@ describe("the terrain pass after a device loss", () => {
     pass.dispose();
     expect(pool().terminated).toBe(true);
   });
+});
+
+/** A body's layers: slot 0 regolith (law 1, L(0) 1), slot 1 unnamed, the weights all slot 0's. */
+function bodyLayers(): TerrainLayers {
+  const palette = new Uint8Array(16).fill(PALETTE_NONE);
+  palette.set([1, 0, 2, PALETTE_NONE]);
+  const weights = new Uint8Array(65 * 65 * 8);
+  for (let v = 0; v < 65 * 65; v += 1) {
+    weights[8 * v] = 255;
+  }
+  const photometry = new Float32Array(40);
+  photometry.set([0.1, 0.12, 0.14, 1, 1]);
+  return {
+    palette,
+    weights,
+    surveyMask: new Uint8Array(65 * 65).fill(255),
+    fieldLevel: 8,
+    boundM: 1,
+    sigmaM: 0,
+    complete: true,
+    unsurveyedCells: new Uint32Array(),
+    photometry,
+    // A horizon map of 0° everywhere, the codes 0.
+    horizonNear: new Uint32Array(65 * 65 * 4),
+    horizonFar: new Uint32Array(9 * 9 * 4),
+    horizonComplete: true,
+    horizonRefusedCells: new Uint32Array(),
+  };
+}
+
+/**
+ * {@link bodyLayers} with one vertex, the corner (0, 0), outside the survey: its patches are edge
+ * patches, drawn by the lit mesh and the material with the survey discard (plan R14, R14.T1.a).
+ */
+function edgeLayers(): TerrainLayers {
+  const layers = bodyLayers();
+  const surveyMask = layers.surveyMask.slice();
+  surveyMask[0] = 0;
+  return { ...layers, surveyMask };
+}
+
+/**
+ * The parent slots and quadrants of the instance records last written, each quadrant without the
+ * morph holds above its two bits (R10.T8.c).
+ */
+function writtenParents(engine: CountingRenderEngine): Array<readonly [number, number]> {
+  const write = engine.writes.findLast((w) => w.buffer === "terrain instances");
+  const u = new Uint32Array(write?.data.slice().buffer ?? new ArrayBuffer(0));
+  const parents: Array<readonly [number, number]> = [];
+  for (let i = 0; i < u.length / (INSTANCE_RECORD_BYTES / 4); i += 1) {
+    const quadrant = u[i * WORDS + 7];
+    parents.push([u[i * WORDS + 6] ?? -1, quadrant === undefined ? -1 : quadrant & 3]);
+  }
+  return parents;
+}
+
+/** A planetshine source at x along the galactic x axis from the body, lx face-on in each channel. */
+function planetshineSource(x: number, lx: number): DiscSecondary {
+  return {
+    direction: { x, y: 0, z: Math.sqrt(1 - x * x) },
+    distance: 60,
+    radius: 3,
+    illuminance: [lx, lx, lx],
+  };
+}
+
+describe("the lit terrain of a body (R10.T10.b)", () => {
+  const BODY = {
+    kind: "body",
+    body: "0200080020000000.0301",
+    detailSeed: "617373656d626c79",
+    weights: "baked",
+  } as const;
+
+  const LIGHTING = {
+    lights: [],
+    occluders: [],
+    secondaries: [],
+    elsewhere: lawFor([0.12, 0.12, 0.12], [0.6, 0.6, 0.6], "moon"),
+    exposureScale: 1e-4,
+  } satisfies TerrainLighting;
+
+  it("shades a body baked with its weights with the lit material, the wireframe's bakes with its depth and contours (R10.T11), and the test planet with R05's", async () => {
+    const lit = await passOn("high", { source: BODY });
+    expect(lit.pass.shading).toBe("lit");
+    expect(lit.pass.layout.shading).toBe("lit");
+    expect(terrainShadingOf({ ...BODY, weights: "skipped" })).toBe("wire");
+    expect(terrainShadingOf({ kind: "test-planet", ridges: "on" })).toBe("spike");
+    const planet = await passOn("high");
+    expect(planet.pass.shading).toBe("spike");
+    // R05's layout keeps its slots: the lit fields are the lit layout's alone.
+    expect(planet.pass.layout.slots).toEqual(terrainSlotLayout(TERRAIN_SETTINGS.high));
+    expect(lit.pass.layout.slots).toEqual(terrainSlotLayout(TERRAIN_SETTINGS.high, "lit"));
+  });
+
+  it("binds the disc's normal map its lighting gives, for the fade near the hand-over, and the draw anew when it changes (R10.T15.b.2)", async () => {
+    const { pass, pool } = await passOn("low", { source: BODY });
+    pool().layers = edgeLayers();
+    const view = northPole(2_000_000);
+    pass.frame({ ...inputAt(view), lighting: LIGHTING });
+    pool().bakeDemand(pass);
+    const discNormals: TextureHandle = { kind: "texture", name: "disc normals" };
+    const drawn = (lighting: TerrainFrameLighting): TextureHandle | undefined =>
+      pass.frame({ ...inputAt(view), lighting }).draws.at(-1)?.textures["discNormals"];
+    expect(drawn({ ...LIGHTING, fade: { detailShare: 0.5, discNormals } })).toBe(discNormals);
+    expect(drawn(LIGHTING)?.name).toBe("terrain normals");
+  });
+
+  it("binds the slots' class weights and laws, the lights, the phase table and a body without air's tables", async () => {
+    const { pass, pool, engine } = await passOn("low", { source: BODY });
+    pool().layers = edgeLayers();
+    const view = northPole(2_000_000);
+    pass.frame({ ...inputAt(view), lighting: LIGHTING });
+    pool().bakeDemand(pass);
+    const frame = pass.frame({ ...inputAt(view), lighting: LIGHTING });
+    const draw = frame.draws.at(-1);
+    if (draw === undefined) {
+      throw new Error("the lit pass drew nothing");
+    }
+    expect(draw.material.name).toBe(
+      stillMaterialSpec(terrainLitMaterialSpec(pass.layout.vertexPath)).name,
+    );
+    expect(Object.keys(draw.storageBuffers ?? {}).toSorted()).toEqual([
+      "classLayers",
+      "contacts",
+      "heights",
+      "horizonMap",
+      "instances",
+      "slots",
+      "surveyMask",
+      "terrainLights",
+    ]);
+    expect(draw.storageBuffers?.["horizonMap"]?.name).toBe("terrain horizon-map");
+    expect(draw.storageBuffers?.["surveyMask"]?.name).toBe("terrain survey-mask");
+    expect(Object.keys(draw.textures).toSorted()).toEqual([
+      "atmosphereAbsorberColumns",
+      "atmosphereAbsorberCurves",
+      "atmosphereAbsorberPressureColumns",
+      "atmosphereBelowDeck",
+      "atmosphereBody",
+      "atmosphereIrradiance",
+      "atmosphereLastAbsorberPressureColumn",
+      "atmosphereSourceTable",
+      "atmosphereTransmittance",
+      "discNormals",
+      "normals",
+      "phaseFactorTable",
+      "shadowCascades",
+    ]);
+    // The low setting has no cascades: the placeholder stands for them (R10.T9.b).
+    expect(draw.textures["shadowCascades"]?.name).toBe("terrain shadow placeholder");
+    // No disc normal map given: the normals atlas stands for it, unread (R10.T15.b.2).
+    expect(draw.textures["discNormals"]).toBe(draw.textures["normals"]);
+    // The camera body-fixed, with 1 ÷ a beside it.
+    expect([...(draw.uniforms["cameraBodyFixedM"] ?? [])]).toEqual(
+      [0, 0, PLANET.figure.polarRadiusM + 2_000_000, 1 / PLANET.figure.equatorialRadiusM].map(
+        Math.fround,
+      ),
+    );
+    const lights = engine.writes.findLast((w) => w.buffer === "terrain lights");
+    expect(lights?.data).toEqual(
+      new Uint8Array(
+        packTerrainLighting(LIGHTING, PLANET.figure.polarRadiusM / PLANET.figure.equatorialRadiusM)
+          .buffer,
+      ),
+    );
+    // Slot 0's class law: regolith on its law's row, after row 0, `elsewhere`; slot 1 has none.
+    const laws = engine.writes.findLast(
+      (w) => w.buffer === "terrain class-layers" && w.bytes === CLASS_LAWS_BYTES,
+    );
+    const packed = new Float32Array(laws?.data.slice().buffer ?? new ArrayBuffer(0));
+    expect([...packed.subarray(0, 5)]).toEqual([0.14, 0.12, 0.1, 1, 1].map(Math.fround));
+    expect(packed[8 + 4]).toBe(-1);
+  });
+
+  it("lights its terrain by every planetshine source its record carries, or by the brightest alone where the geometry asks it (perf-bodies-near-ground)", async () => {
+    const { pass, pool, engine } = await passOn("low", { source: BODY });
+    pool().layers = edgeLayers();
+    const view = northPole(2_000_000);
+    // Brightest first, as `planetshineSources` gives them.
+    const lighting = {
+      ...LIGHTING,
+      secondaries: [planetshineSource(0.6, 0.2), planetshineSource(-0.8, 0.05)],
+    };
+    const written = (): Uint8Array | undefined =>
+      engine.writes.findLast((w) => w.buffer === "terrain lights")?.data;
+    const packed = (each: TerrainLighting): Uint8Array =>
+      new Uint8Array(
+        packTerrainLighting(each, PLANET.figure.polarRadiusM / PLANET.figure.equatorialRadiusM)
+          .buffer,
+      );
+    pass.frame({ ...inputAt(view), lighting });
+    pool().bakeDemand(pass);
+    pass.frame({ ...inputAt(view), lighting });
+    const record = written();
+    pass.setGeometry({ ...SETTINGS.low.geometry, terrainPlanetshine: "brightest" });
+    pass.frame({ ...inputAt(view), lighting });
+    expect([record, written()]).toEqual([
+      packed(lighting),
+      packed({ ...lighting, secondaries: lighting.secondaries.slice(0, 1) }),
+    ]);
+  });
+
+  it("draws nothing lit until a frame gives its lights, and binds the frame's atmosphere where given", async () => {
+    const { pass, pool, engine } = await passOn("low", { source: BODY });
+    pool().layers = edgeLayers();
+    const view = northPole(2_000_000);
+    pass.frame(inputAt(view));
+    pool().bakeDemand(pass);
+    const unlit = pass.frame(inputAt(view));
+    expect(unlit.draws.at(-1)).toBeDefined();
+    expect(engine.writes.filter((w) => w.buffer === "terrain lights")).toHaveLength(1);
+    const air = createAirlessTables(engine, "a body's air");
+    const withAir = pass.frame({ ...inputAt(view), lighting: { ...LIGHTING, atmosphere: air } });
+    expect(withAir.draws.at(-1)?.textures["atmosphereBody"]).toBe(air.body);
+  });
+
+  /** A lit pass on low over `bodyLayers`, its patches baked, and its view. */
+  async function bakedLitPass(): Promise<
+    Awaited<ReturnType<typeof passOn>> & { readonly view: TerrainView }
+  > {
+    const made = await passOn("low", { source: BODY });
+    made.pool().layers = edgeLayers();
+    const view = northPole(2_000_000);
+    made.pass.frame({ ...inputAt(view), lighting: LIGHTING });
+    made.pool().bakeDemand(made.pass);
+    return { ...made, view };
+  }
+
+  /** {@link LIGHTING} carrying the lava world's ground's emission about a star over the pole. */
+  const EMITTING: TerrainLighting = {
+    ...LIGHTING,
+    emission: {
+      field: surfaceTemperatureFieldOf(lavaWorldSurface()),
+      star: { x: 0, y: 0, z: 1 },
+      meltClasses: [],
+    },
+  };
+
+  it("draws a body whose lighting carries its ground's emission by the plain form until the emissive form is made (R08.T18.a)", async () => {
+    const { pass, view } = await bakedLitPass();
+    const plain = pass.frame({ ...inputAt(view), lighting: EMITTING });
+    expect(plain.draws.at(-1)?.material.name).toBe(
+      stillMaterialSpec(terrainLitMaterialSpec(pass.layout.vertexPath)).name,
+    );
+  });
+
+  it("draws it by the emissive form once that is made (R08.T18.a)", async () => {
+    const { pass, view } = await bakedLitPass();
+    pass.frame({ ...inputAt(view), lighting: EMITTING });
+    await microtasks();
+    const emissive = pass.frame({ ...inputAt(view), lighting: EMITTING });
+    expect(emissive.draws.at(-1)?.material.name).toBe(
+      stillMaterialSpec(terrainLitEmissiveMaterialSpec(pass.layout.vertexPath)).name,
+    );
+  });
+
+  it("writes the emission's block past the lights (R08.T18.a)", async () => {
+    const { pass, engine, view } = await bakedLitPass();
+    pass.frame({ ...inputAt(view), lighting: EMITTING });
+    const lights = engine.writes.findLast((w) => w.buffer === "terrain lights");
+    expect(lights?.data).toEqual(
+      new Uint8Array(
+        packTerrainLighting(EMITTING, PLANET.figure.polarRadiusM / PLANET.figure.equatorialRadiusM)
+          .buffer,
+      ),
+    );
+  });
+
+  it("draws a frame some instance of which mixes its heights by the material, and the frames either side by its still form (R10.T16.i)", async () => {
+    const { pass, pool, engine, view } = await bakedLitPass();
+    const path = pass.layout.vertexPath;
+    // Whether the frame's records, the edge patches' and the interior patches', hold a mix.
+    const mixes = (): boolean =>
+      ["terrain instances", "terrain interior instances"].some((buffer) => {
+        const write = engine.writes.findLast((w) => w.buffer === buffer);
+        const words = new Uint32Array(write?.data.slice().buffer ?? new ArrayBuffer(0));
+        return words.some((word, k) => k % WORDS === 11 && ((word >>> 8) & MIX_STEPS) !== 0);
+      });
+    const formOf = (
+      frame: TerrainFrame,
+    ): readonly [string | undefined, boolean, string | undefined] => [
+      frame.draws.at(-1)?.material.name,
+      mixes(),
+      pass.symbologyDepthMaterial?.name,
+    ];
+    const before = pass.frame({ ...inputAt(view, 10_000), lighting: LIGHTING });
+    const [drawn] = before.drawSet.patches;
+    if (drawn === undefined) {
+      throw new Error("the lit pass drew nothing");
+    }
+    const settled = formOf(before);
+    // A rebake of a drawn patch, whose heights mix from its older bake's until its fade ends.
+    pool().deliver(pass, drawn.patch.key);
+    const rebaking = formOf(pass.frame({ ...inputAt(view, 11_000), lighting: LIGHTING }));
+    const after = formOf(
+      pass.frame({ ...inputAt(view, 11_000 + 2 * MORPH_MAX_MS), lighting: LIGHTING }),
+    );
+    const still = [
+      stillMaterialSpec(terrainLitMaterialSpec(path)).name,
+      false,
+      stillMaterialSpec(terrainDepthMaterialSpec(path)).name,
+    ];
+    expect([settled, rebaking, after]).toEqual([
+      still,
+      [terrainLitMaterialSpec(path).name, true, terrainDepthMaterialSpec(path).name],
+      still,
+    ]);
+  });
+
+  it("goes back to the plain form for a frame without the emission (R08.T18.a)", async () => {
+    const { pass, view } = await bakedLitPass();
+    pass.frame({ ...inputAt(view), lighting: EMITTING });
+    await microtasks();
+    const after = pass.frame({ ...inputAt(view), lighting: LIGHTING });
+    expect(after.draws.at(-1)?.material.name).toBe(
+      stillMaterialSpec(terrainLitMaterialSpec(pass.layout.vertexPath)).name,
+    );
+  });
+
+  it("asks for the emissive form again on the device a restore makes (R08.T18.a)", async () => {
+    const { pass, pool, engine, view } = await bakedLitPass();
+    pass.frame({ ...inputAt(view), lighting: EMITTING });
+    await microtasks();
+    const name = terrainLitEmissiveMaterialSpec(pass.layout.vertexPath).name;
+    const asked = (): number => engine.compiles.filter((made) => made.name === name).length;
+    expect(asked()).toBe(1);
+    engine.loseDevice();
+    engine.restore();
+    await pass.ready();
+    // The new device's slots are empty until its pool bakes them again.
+    pool().layers = edgeLayers();
+    pass.frame({ ...inputAt(view), lighting: EMITTING });
+    pool().bakeDemand(pass);
+    pass.frame({ ...inputAt(view), lighting: EMITTING });
+    await microtasks();
+    expect(asked()).toBe(2);
+  });
+
+  it("reports an emissive form the device refuses, and draws on by the plain form (R08.T18.a)", async () => {
+    const { pass, engine, view } = await bakedLitPass();
+    const reported = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    engine.failMaterials((name) => name.startsWith("terrain-lit-emissive"));
+    pass.frame({ ...inputAt(view), lighting: EMITTING });
+    await microtasks();
+    const frame = pass.frame({ ...inputAt(view), lighting: EMITTING });
+    expect(frame.draws.at(-1)?.material.name).toBe(
+      stillMaterialSpec(terrainLitMaterialSpec(pass.layout.vertexPath)).name,
+    );
+    expect(reported).toHaveBeenCalledWith(
+      "the terrain's emissive form failed: its ground is drawn unlit by itself",
+      expect.any(Error),
+    );
+  });
+
+  it("binds the larger phase table once the slots' laws outgrow it", async () => {
+    const { pass, pool } = await passOn("low", { source: BODY });
+    pool().layers = edgeLayers();
+    const view = northPole(2_000_000);
+    pass.frame({ ...inputAt(view), lighting: LIGHTING });
+    pool().bakeDemand(pass);
+    const before = pass.frame({ ...inputAt(view), lighting: LIGHTING }).draws.at(-1)?.textures[
+      "phaseFactorTable"
+    ];
+    // Six bright frosts of six L(0)s: rows past the table's first four.
+    const frosts = edgeLayers();
+    const photometry = new Float32Array(40);
+    for (let k = 0; k < 6; k += 1) {
+      photometry.set([0.9, 0.9, 0.9, 2, 0.9 - 0.05 * k], 5 * k);
+    }
+    pool().layers = { ...frosts, photometry };
+    pool().deliver(pass, { face: 2, level: 3, i: 1, j: 1 });
+    const after = pass.frame({ ...inputAt(view), lighting: LIGHTING }).draws.at(-1)?.textures[
+      "phaseFactorTable"
+    ];
+    expect(before?.name).toBe("terrain phase table");
+    expect(after?.name).toBe("terrain phase table");
+    expect(after).not.toBe(before);
+  });
+
+  it("gives each drawn patch its parent's slot where the parent's horizon map is resident, and no parent otherwise", async () => {
+    const { pass, pool, engine } = await passOn("low", { source: BODY });
+    // Its edge patches by the lit mesh, whose records the test reads (R14.T1.g).
+    pass.setGeometry({ ...SETTINGS.low.geometry, finClusters: false });
+    pool().layers = edgeLayers();
+    const view = northPole(2_000_000);
+    pass.frame({ ...inputAt(view), lighting: LIGHTING });
+    for (const face of [0, 1, 2, 3, 4, 5] as const) {
+      pool().deliver(pass, { face, level: 0, i: 0, j: 0 });
+    }
+    // Face 2's level-1 patches, three with their parent's map resident and one under a root whose
+    // slot holds none.
+    for (const [i, j] of [
+      [0, 0],
+      [1, 0],
+      [0, 1],
+      [1, 1],
+    ] as const) {
+      pool().deliver(pass, { face: 2, level: 1, i, j });
+    }
+    const frame = pass.frame({ ...inputAt(view), lighting: LIGHTING });
+    const parents = writtenParents(engine);
+    expect(parents).toHaveLength(frame.drawSet.count);
+    const roots = new Map(
+      frame.drawSet.patches
+        .filter(({ patch }) => patch.key.level === 0)
+        .map(({ patch }) => [patch.key.face, patch.slot]),
+    );
+    const records = frame.drawSet.patches.map(({ patch }, n) => ({
+      level: patch.key.level,
+      face: patch.key.face,
+      quadrant: (patch.key.i & 1) | ((patch.key.j & 1) << 1),
+      written: parents[n] ?? [-1, -1],
+    }));
+    // A root has no parent; every other patch names its parent's slot and its quadrant there.
+    expect(records.filter((r) => r.level === 0 && r.written[0] !== NO_PARENT_SLOT)).toEqual([]);
+    const children = records.filter((r) => r.level > 0);
+    expect(children.length).toBeGreaterThan(0);
+    expect(
+      children.filter((r) => r.written[0] === NO_PARENT_SLOT || r.written[1] !== r.quadrant),
+    ).toEqual([]);
+    expect(children.filter((r) => roots.has(r.face) && r.written[0] !== roots.get(r.face))).toEqual(
+      [],
+    );
+    // A parent whose slot holds no map is no parent to blend to.
+    pool().layers = {
+      ...edgeLayers(),
+      horizonNear: new Uint32Array(),
+      horizonFar: new Uint32Array(),
+    };
+    pool().deliver(pass, { face: 2, level: 0, i: 0, j: 0 });
+    const again = pass.frame({ ...inputAt(view), lighting: LIGHTING });
+    const after = writtenParents(engine);
+    const underBlank = again.drawSet.patches.flatMap(({ patch }, n) =>
+      patch.key.face === 2 && patch.key.level === 1 ? [after[n]?.[0]] : [],
+    );
+    expect(underBlank.length).toBeGreaterThan(0);
+    expect(underBlank.filter((slot) => slot !== NO_PARENT_SLOT)).toEqual([]);
+  });
+
+  it("gives R05's spike shading no parent's map, which it does not draw", async () => {
+    const { pass, pool, engine } = await passOn("high");
+    const view = northPole(2_000_000);
+    pass.frame(inputAt(view));
+    pool().bakeDemand(pass);
+    pass.frame(inputAt(view));
+    expect(writtenParents(engine).every(([slot]) => slot === NO_PARENT_SLOT)).toBe(true);
+  });
+
+  it("refuses a bake without R10's layers into a lit layout's slots", async () => {
+    const { pass, pool } = await passOn("low", { source: BODY });
+    const view = northPole(2_000_000);
+    pass.frame({ ...inputAt(view), lighting: LIGHTING });
+    expect(pool().bakeDemand(pass)).toBeGreaterThan(0);
+    const frame = pass.frame({ ...inputAt(view), lighting: LIGHTING });
+    expect(frame.drawSet.count).toBe(0);
+  });
+});
+
+/** Each of a frame's draws' mesh, material, instance buffer and indirect buffer, by name. */
+function named(frame: TerrainFrame): string[][] {
+  return frame.draws.map((draw) => [
+    draw.mesh.name,
+    draw.material.name,
+    draw.storageBuffers?.["instances"]?.name ?? "",
+    draw.indirect?.buffer.name ?? "",
+  ]);
+}
+
+describe("the interior patches (plan R14, R14.T1.a)", () => {
+  const BODY = {
+    kind: "body",
+    body: "0200080020000000.0301",
+    detailSeed: "617373656d626c79",
+    weights: "baked",
+  } as const;
+
+  const LIGHTING = {
+    lights: [],
+    occluders: [],
+    secondaries: [],
+    elsewhere: lawFor([0.12, 0.12, 0.12], [0.6, 0.6, 0.6], "moon"),
+    exposureScale: 1e-4,
+  } satisfies TerrainLighting;
+
+  /** {@link LIGHTING} carrying the lava world's ground's emission about a star over the pole. */
+  const EMITTING: TerrainLighting = {
+    ...LIGHTING,
+    emission: {
+      field: surfaceTemperatureFieldOf(lavaWorldSurface()),
+      star: { x: 0, y: 0, z: 1 },
+      meltClasses: [],
+    },
+  };
+
+  /** The low setting's geometry with R14.T1.a's interior mesh, the lit pass off the cluster path. */
+  const INTERIOR_MESH: GeometrySettings = { ...SETTINGS.low.geometry, litClusters: false };
+
+  /**
+   * A lit pass on low over `bodyLayers`, wholly surveyed, its patches baked, and its view, on an
+   * engine that fails the materials `fails` names, drawing `geometry` (R14.T1.a's interior mesh
+   * unless given).
+   */
+  async function interiorPass(
+    fails: (name: string) => boolean = () => false,
+    geometry: GeometrySettings = INTERIOR_MESH,
+  ): Promise<{
+    readonly pass: TerrainPass;
+    readonly pool: FakePool;
+    readonly engine: CountingRenderEngine;
+    readonly view: TerrainView;
+  }> {
+    const engine = await countingRenderEngine({
+      maxStorageBufferBindingSize: MAX_REQUESTED_BUFFER_BYTES,
+      maxBufferSize: MAX_REQUESTED_BUFFER_BYTES,
+    });
+    engine.failMaterials(fails);
+    const pools: FakePool[] = [];
+    const pass = new TerrainPass({
+      engine,
+      setting: "low",
+      planet: PLANET,
+      source: BODY,
+      createPool: (bake) => {
+        const made = new FakePool(bake);
+        pools.push(made);
+        return made;
+      },
+      geometry,
+    });
+    await pass.ready();
+    const pool = pools.at(-1);
+    if (pool === undefined) {
+      throw new Error("no pool was made");
+    }
+    pool.layers = bodyLayers();
+    const view = northPole(2_000_000);
+    // Until nothing more is asked for, so that no patch is drawn by a stand-in, and then until the
+    // refines have morphed in, a level a span (R10.T16.i), so that none is held by its parent.
+    for (let round = 0; round < 6; round += 1) {
+      pass.frame({ ...inputAt(view), lighting: LIGHTING });
+      pool.bakeDemand(pass);
+    }
+    for (let n = 1; n <= 200; n += 1) {
+      pass.frame({ ...inputAt(view, 50 * n), lighting: LIGHTING });
+    }
+    return { pass, pool, engine, view };
+  }
+
+  it("draws a wholly surveyed body's patches by the interior mesh and form alone", async () => {
+    const { pass, engine, view } = await interiorPass();
+    const frame = pass.frame({ ...inputAt(view), lighting: LIGHTING });
+    const path = pass.layout.vertexPath;
+    expect(named(frame)).toEqual([
+      [
+        "terrain lit interior patch",
+        stillMaterialSpec(terrainLitInteriorMaterialSpec(path)).name,
+        "terrain interior instances",
+        "terrain interior indirect",
+      ],
+    ]);
+    const slots = Array.from(frame.drawSet.slots.subarray(0, frame.drawSet.count));
+    expect(slots.length).toBeGreaterThan(0);
+    expect(writtenSlots(engine, "terrain interior instances")).toEqual(slots);
+    const counts = engine.writes.filter((w) => w.buffer === "terrain interior indirect");
+    expect([
+      [...new Uint32Array(counts[0]?.data.slice().buffer ?? new ArrayBuffer(0))],
+      [...new Uint32Array(counts.at(-1)?.data.slice().buffer ?? new ArrayBuffer(0))],
+    ]).toEqual([[LIT_INTERIOR_INDICES, 0, 0, 0, 0], [slots.length]]);
+    // The interior draw is the lit draw but its mesh, material, records and indirect arguments.
+    const draw = frame.draws[0];
+    expect([draw?.uniforms["bodyRotation"], draw?.textures["phaseFactorTable"]?.name]).toEqual([
+      expect.any(Float32Array),
+      "terrain phase table",
+    ]);
+  });
+
+  it("draws the interior patches first and then the others, each in the draw set's order, and classifies a rebake again", async () => {
+    const { pass, pool, engine, view } = await interiorPass();
+    const first = pass.frame({ ...inputAt(view), lighting: LIGHTING });
+    const drawn = first.drawSet.patches.map(({ patch }) => patch);
+    expect(drawn.length).toBeGreaterThan(1);
+    // Every other drawn patch baked again with a vertex outside the survey: an edge patch now.
+    const edges = drawn.filter((_, n) => n % 2 === 1);
+    for (const patch of edges) {
+      pool.layersOf.set(patchKeyString(patch.key), edgeLayers());
+      pool.deliver(pass, patch.key);
+    }
+    const frame = pass.frame({ ...inputAt(view), lighting: LIGHTING });
+    const path = pass.layout.vertexPath;
+    expect(named(frame).map(([mesh, material]) => [mesh, material])).toEqual([
+      ["terrain lit interior patch", terrainLitInteriorMaterialSpec(path).name],
+      ["terrain lit patch", terrainLitMaterialSpec(path).name],
+    ]);
+    // Each rebake in the slot it took, a spare one (R10.T16.i).
+    const edgeSlots = new Set(
+      edges.map((patch) => pass.resident(patchKeyString(patch.key))?.slot ?? -1),
+    );
+    const slots = Array.from(frame.drawSet.slots.subarray(0, frame.drawSet.count));
+    expect([
+      writtenSlots(engine, "terrain interior instances"),
+      writtenSlots(engine, "terrain instances"),
+    ]).toEqual([
+      slots.filter((slot) => !edgeSlots.has(slot)),
+      slots.filter((slot) => edgeSlots.has(slot)),
+    ]);
+  });
+
+  it("counts the patches each draw draws", async () => {
+    const { pass, pool, view } = await interiorPass();
+    const first = pass.frame({ ...inputAt(view), lighting: LIGHTING });
+    const edge = first.drawSet.patches[0]?.patch;
+    if (edge === undefined) {
+      throw new Error("the pass drew nothing");
+    }
+    pool.layersOf.set(patchKeyString(edge.key), edgeLayers());
+    pool.deliver(pass, edge.key);
+    const view0 = pass.drawFor(DEFAULT_TERRAIN_VIEW, { ...inputAt(view), lighting: LIGHTING });
+    expect(view0.patches).toEqual({
+      interior: first.drawSet.count - 1,
+      edge: 1,
+      fins: 0,
+      edgeStandIns: 0,
+    });
+  });
+
+  it("draws as before the split by the way back, from the same records, and splits again on the cluster path", async () => {
+    const { pass, engine, view } = await interiorPass();
+    const path = pass.layout.vertexPath;
+    const split = pass.frame({ ...inputAt(view), lighting: LIGHTING });
+    pass.setGeometry(GEOMETRY_BEFORE_R14);
+    const before = pass.frame({ ...inputAt(view), lighting: LIGHTING });
+    const slots = Array.from(before.drawSet.slots.subarray(0, before.drawSet.count));
+    expect([named(before), writtenSlots(engine), pass.geometry]).toEqual([
+      [
+        [
+          "terrain lit patch",
+          stillMaterialSpec(terrainLitMaterialSpec(path)).name,
+          "terrain instances",
+          "terrain indirect",
+        ],
+      ],
+      slots,
+      GEOMETRY_BEFORE_R14,
+    ]);
+    pass.setGeometry(INTERIOR_MESH);
+    const again = pass.frame({ ...inputAt(view), lighting: LIGHTING });
+    expect(named(again)).toEqual(named(split));
+  });
+
+  it("draws a stand-in of an interior bake by the interior mesh, as its bake's other patches", async () => {
+    const { pass, pool, engine } = await interiorPass();
+    // Nearer, the selection asks for finer patches, which their resident ancestors stand in for.
+    const nearer = northPole(200_000);
+    pass.frame({ ...inputAt(nearer), lighting: LIGHTING });
+    const frame = pass.frame({ ...inputAt(nearer), lighting: LIGHTING });
+    const standIns = frame.drawSet.patches
+      .filter(({ standIn }) => standIn)
+      .map(({ patch }) => patch.slot);
+    expect([standIns.length > 0, pool.demand.length > 0]).toEqual([true, true]);
+    expect([
+      standIns.filter((slot) => !writtenSlots(engine, "terrain interior instances").includes(slot)),
+      standIns.filter((slot) => writtenSlots(engine).includes(slot)),
+    ]).toEqual([[], []]);
+  });
+
+  it("draws every patch by the lit mesh where the interior form cannot be made, and reports it", async () => {
+    const reported = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { pass, engine, view } = await interiorPass((name) =>
+      name.startsWith("terrain-lit-interior"),
+    );
+    const frame = pass.frame({ ...inputAt(view), lighting: LIGHTING });
+    expect(named(frame)).toEqual([
+      [
+        "terrain lit patch",
+        stillMaterialSpec(terrainLitMaterialSpec(pass.layout.vertexPath)).name,
+        "terrain instances",
+        "terrain indirect",
+      ],
+    ]);
+    expect(writtenSlots(engine)).toEqual(
+      Array.from(frame.drawSet.slots.subarray(0, frame.drawSet.count)),
+    );
+    expect(reported).toHaveBeenCalledWith(
+      "the terrain's interior form failed: its interior patches are drawn with the others",
+      expect.any(Error),
+    );
+  });
+
+  it("draws the interior patches by the interior emissive form once both emissive forms are made (R08.T18.a)", async () => {
+    const { pass, view } = await interiorPass();
+    const path = pass.layout.vertexPath;
+    const plain = pass.frame({ ...inputAt(view), lighting: EMITTING });
+    await microtasks();
+    const emissive = pass.frame({ ...inputAt(view), lighting: EMITTING });
+    expect([plain, emissive].map((frame) => frame.draws.map((draw) => draw.material.name))).toEqual(
+      [
+        [stillMaterialSpec(terrainLitInteriorMaterialSpec(path)).name],
+        [stillMaterialSpec(terrainLitEmissiveInteriorMaterialSpec(path)).name],
+      ],
+    );
+  });
+
+  it("draws them by the lit mesh's emissive form where its interior form cannot be made", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { pass, view } = await interiorPass((name) =>
+      name.startsWith("terrain-lit-emissive-interior"),
+    );
+    pass.frame({ ...inputAt(view), lighting: EMITTING });
+    await microtasks();
+    const frame = pass.frame({ ...inputAt(view), lighting: EMITTING });
+    expect(named(frame).map(([mesh, material]) => [mesh, material])).toEqual([
+      [
+        "terrain lit patch",
+        stillMaterialSpec(terrainLitEmissiveMaterialSpec(pass.layout.vertexPath)).name,
+      ],
+    ]);
+  });
+});
+
+describe("the terrain materials' storage bindings by stage (decision-r10-t10b-r09-t2e §5)", () => {
+  const materials = (["baked-offsets", "face-differences"] as const).flatMap((path) => [
+    terrainMaterialSpec(path),
+    terrainLitMaterialSpec(path),
+    terrainLitEmissiveMaterialSpec(path),
+    terrainDepthMaterialSpec(path),
+    terrainWireMaterialSpec(path),
+  ]);
+
+  it("count at most WebGPU's default eight storage buffers in each stage, by their declared stages", () => {
+    const over = materials.filter((spec) => {
+      const counts = storageBuffersPerStage(materialBindings(spec));
+      return Math.max(counts.vertex, counts.fragment) > DEFAULT_STORAGE_BUFFERS_PER_STAGE;
+    });
+    expect(over.map((spec) => spec.name)).toEqual([]);
+    // The lit material's: R05's five (four on face-differences) in the vertex stage, the class
+    // layers, the lights and the horizon map in the fragment stage, and R10.T10.c's survey mask in
+    // both.
+    expect(
+      storageBuffersPerStage(materialBindings(terrainLitMaterialSpec("baked-offsets"))),
+    ).toEqual({ vertex: 6, fragment: 4 });
+    expect(
+      storageBuffersPerStage(materialBindings(terrainLitMaterialSpec("face-differences"))),
+    ).toEqual({ vertex: 5, fragment: 4 });
+    // The wireframe's (R10.T11): R05's five (four on face-differences), the survey mask and the
+    // view's phases in the vertex stage, and the survey mask in the fragment stage.
+    expect(
+      storageBuffersPerStage(materialBindings(terrainWireMaterialSpec("baked-offsets"))),
+    ).toEqual({ vertex: 7, fragment: 1 });
+    expect(
+      storageBuffersPerStage(materialBindings(terrainWireMaterialSpec("face-differences"))),
+    ).toEqual({ vertex: 6, fragment: 1 });
+  });
+
+  it("declare each storage buffer to the stages whose entry points read it, and no other", () => {
+    expect(materials.filter((spec) => spec.vertexWgsl !== spec.fragmentWgsl)).toEqual([]);
+    const mismatched = materials.flatMap((spec) => {
+      const read = bindingStages(spec.vertexWgsl);
+      return (spec.storageBuffers ?? []).flatMap((buffer) => {
+        const declared = [...(buffer.stages ?? ["vertex", "fragment"])].toSorted();
+        const used = [...(read.get(buffer.binding) ?? [])].toSorted();
+        return declared.join(" ") === used.join(" ") ? [] : [[spec.name, buffer.name, used]];
+      });
+    });
+    expect(mismatched).toEqual([]);
+    // The walk finds the reads at all: the lit material's horizon map in its fragment stage, and
+    // its survey mask in both (R10.T10.c).
+    const lit = bindingStages(terrainLitMaterialSpec("face-differences").vertexWgsl);
+    expect([...(lit.get(16) ?? [])]).toEqual(["fragment"]);
+    expect([...(lit.get(17) ?? [])].toSorted()).toEqual(["fragment", "vertex"]);
+  });
+});
+
+/** `requests` by key string. */
+function requestsByKey(requests: ReadonlyArray<PatchRequest>): Map<string, PatchRequest> {
+  return new Map(requests.map((r) => [patchKeyString(r.key), r]));
+}
+
+describe("the terrain pass's lookahead (R10.T14.b)", () => {
+  /** The low setting's pass on a clock the test sets, with each selection's input and result. */
+  async function lookingAhead(): Promise<
+    Awaited<ReturnType<typeof passOn>> & {
+      readonly clock: { ms: number };
+      readonly inputs: SelectionInput[];
+      readonly selections: Selection[];
+    }
+  > {
+    const clock = { ms: 0 };
+    const inputs: SelectionInput[] = [];
+    const selections: Selection[] = [];
+    const made = await passOn("low", {
+      lookaheadClockMs: () => clock.ms,
+      onSelect: (input, selection) => {
+        inputs.push(input);
+        selections.push(selection);
+      },
+    });
+    return { ...made, clock, inputs, selections };
+  }
+
+  /** {@link northPole}'s camera moved `xM` along +x: along the ground, at the pole. */
+  function movedAlong(heightM: number, xM: number): TerrainView {
+    const view = northPole(heightM);
+    return { ...view, cameraM: { ...view.cameraM, x: xM } };
+  }
+
+  /**
+   * Streams the pass in at 1.5 km over the pole on a still clock, then moves the camera 200 m along
+   * the ground in 0.1 s, 2 km/s, which selects again: the lookahead's selection input there, with
+   * the pass's own selection of the step.
+   */
+  async function movedFast(): Promise<
+    Awaited<ReturnType<typeof lookingAhead>> & {
+      readonly ahead: SelectionInput;
+      readonly own: Selection;
+    }
+  > {
+    const made = await lookingAhead();
+    const { pass, pool, clock, inputs, selections } = made;
+    streamed(pass, pool, northPole(1_500));
+    clock.ms = 100;
+    const frame = pass.frame(inputAt(movedAlong(1_500, 200), 16 * 100));
+    const input = inputs.at(-1);
+    const own = selections.at(-1);
+    if (!frame.reselected || input === undefined || own === undefined) {
+      throw new Error("a move of 200 m at 1.5 km selects again");
+    }
+    const before = northPole(1_500).cameraM;
+    const after = movedAlong(1_500, 200).cameraM;
+    // The pass's L before any bake took time to land: 0.25 s.
+    const ahead = lookaheadInput(
+      input,
+      [{ velocityMps: scale(sub(after, before), 1 / 0.1), nearestM: 1_500 }],
+      pass.lookaheadS,
+    );
+    if (ahead === null) {
+      throw new Error("a camera at 2 km/s at 1.5 km selects ahead");
+    }
+    return { ...made, ahead, own };
+  }
+
+  it("asks for a moving camera's lookahead patches at half its weight", async () => {
+    const { pass, pool, ahead, own } = await movedFast();
+    expect(pass.lookaheadS).toBe(0.25);
+    const asked = requestsByKey(pool().demand);
+    const owned = requestsByKey(own.demand);
+    const atWeightOne = requestsByKey(
+      selectPatches({ ...ahead, views: ahead.views.map((view) => ({ ...view, weight: 1 })) })
+        .demand,
+    );
+    const lookahead = selectPatches(ahead).demand;
+    // Each at the larger of the two priorities; one only the lookahead asks for at half weight 1's.
+    const expected = lookahead.map((request): readonly [string, number] => {
+      const keyString = patchKeyString(request.key);
+      const mine = owned.get(keyString);
+      return [
+        keyString,
+        mine === undefined
+          ? (atWeightOne.get(keyString)?.priority ?? NaN) * 0.5
+          : Math.max(mine.priority, request.priority),
+      ];
+    });
+    expect(expected.map(([keyString]) => asked.get(keyString)?.priority)).toEqual(
+      expected.map(([, priority]) => priority),
+    );
+    expect(lookahead.filter((r) => !owned.has(patchKeyString(r.key))).length).toBeGreaterThan(0);
+    // The selection's own demand is asked too, with every request's time to need.
+    for (const keyString of owned.keys()) {
+      expect(asked.has(keyString)).toBe(true);
+    }
+    expect(pool().demand.every((r) => r.needS !== undefined && r.needS >= 0)).toBe(true);
+  });
+
+  it("never draws the lookahead's patches, and pins them as demanded alone", async () => {
+    const { pass, pool, clock, ahead, own } = await movedFast();
+    const owned = requestsByKey(own.demand);
+    const onlyAhead = selectPatches(ahead)
+      .demand.map((r) => r.key)
+      .filter((key) => !owned.has(patchKeyString(key)));
+    expect(onlyAhead.length).toBeGreaterThan(0);
+    for (const key of onlyAhead) {
+      pool().deliver(pass, key);
+    }
+    // Until the next selection they are pinned as demanded: as many patches no view selects as
+    // the cache has slots, shallower, which would go after them unpinned, evict none of them.
+    const slots = pass.layout.slots.slotCount;
+    for (let n = 0; n < slots; n += 1) {
+      pool().deliver(pass, { face: 5, level: 8, i: n % 256, j: Math.floor(n / 256) });
+    }
+    expect(onlyAhead.filter((key) => pass.resident(patchKeyString(key)) === undefined)).toEqual([]);
+    clock.ms = 200;
+    // Still now: the arrivals select again, and the cache's pins are the selection's alone.
+    const frame = pass.frame(inputAt(movedAlong(1_500, 200), 16 * 200));
+    expect(frame.reselected).toBe(true);
+    const chain = new Set<string>();
+    for (const selected of frame.selection.patches.values()) {
+      for (let key: PatchKey | null = selected.key; key !== null; key = parentKey(key)) {
+        chain.add(patchKeyString(key));
+      }
+    }
+    const drawn = new Set(
+      frame.drawSet.patches.slice(0, frame.drawSet.count).map((p) => p.keyString),
+    );
+    for (const key of onlyAhead) {
+      const keyString = patchKeyString(key);
+      expect([chain.has(keyString), drawn.has(keyString)]).toEqual([false, false]);
+    }
+  });
+
+  it("takes L from the median of its latest bakes' demand → resident times, within 0.25–2 s", async () => {
+    const { pass, pool, clock } = await lookingAhead();
+    const view = northPole(1_500);
+    const askedAt = new Map<string, number>();
+    const trips: number[] = [];
+    const step = (ms: number): void => {
+      clock.ms = ms;
+      pass.frame(inputAt(view, ms));
+      const asked = new Set(pool().demand.map((r) => patchKeyString(r.key)));
+      for (const keyString of askedAt.keys()) {
+        if (!asked.has(keyString)) {
+          askedAt.delete(keyString);
+        }
+      }
+      for (const keyString of asked) {
+        if (!askedAt.has(keyString)) {
+          askedAt.set(keyString, ms);
+        }
+      }
+    };
+    const deliver = (ms: number): void => {
+      clock.ms = ms;
+      for (const request of pool().demand) {
+        const keyString = patchKeyString(request.key);
+        trips.push((ms - (askedAt.get(keyString) ?? ms)) / 1000);
+        askedAt.delete(keyString);
+        pool().deliver(pass, request.key);
+      }
+    };
+    const expected = (): number => lookaheadSeconds(trips.slice(-LOOKAHEAD_SAMPLES));
+    expect(pass.lookaheadS).toBe(0.25);
+    // The roots in 0.1 s: below the clamp.
+    step(0);
+    deliver(100);
+    expect([pass.lookaheadS, expected()]).toEqual([0.25, 0.25]);
+    // Their children in 1.2 s, which outnumber them.
+    step(100);
+    deliver(1_300);
+    expect(pass.lookaheadS).toBe(expected());
+    expect(pass.lookaheadS).toBeCloseTo(1.2, 12);
+    // Then 8 s a bake, until they are most of the latest 64: above the clamp.
+    for (let n = 0; trips.length < 2 * LOOKAHEAD_SAMPLES && n < 20; n += 1) {
+      const ms = 1_300 + 8_000 * n;
+      step(ms);
+      deliver(ms + 8_000);
+      expect(pass.lookaheadS).toBe(expected());
+    }
+    expect(pass.lookaheadS).toBe(2);
+  });
+
+  it("selects ahead at most every fourth selection while selection takes over 2 ms at p95", async () => {
+    const { pass, pool, clock, selections } = await lookingAhead();
+    streamed(pass, pool, northPole(1_500));
+    // Each reading of the performance clock 3 ms after the last: every selection takes 3 ms.
+    let nowMs = 0;
+    const spy = vi.spyOn(performance, "now").mockImplementation(() => (nowMs += 3));
+    const readings: number[] = [];
+    for (let n = 1; n <= 12; n += 1) {
+      clock.ms = 100 * n;
+      const before = spy.mock.calls.length;
+      const selected = selections.length;
+      const frame = pass.frame(inputAt(movedAlong(1_500, 200 * n), 16 * n));
+      expect([frame.reselected, selections.length]).toEqual([true, selected + 1]);
+      readings.push(spy.mock.calls.length - before);
+    }
+    // Two readings for the selection's own, two more where the lookahead selects too.
+    const aheadAt = readings.flatMap((count, n) => (count === 4 ? [n] : []));
+    expect(readings.every((count) => count === 2 || count === 4)).toBe(true);
+    expect(aheadAt).toEqual([0, 4, 8]);
+    expect(LOOKAHEAD_SLOW_EVERY).toBe(4);
+  });
+
+  it("looks ahead of nothing without a clock, as the spike's frame selects", async () => {
+    const { pass, pool } = await passOn("low");
+    streamed(pass, pool, northPole(1_500));
+    const frame = pass.frame(inputAt(movedAlong(1_500, 400), 16 * 100));
+    expect(frame.reselected).toBe(true);
+    expect(pool().demand).toEqual(
+      frame.selection.demand.filter((r) => pass.resident(patchKeyString(r.key)) === undefined),
+    );
+  });
+});
+
+/** The half-float bits of `value`. */
+function halfBits(value: number): number {
+  return new Uint16Array(Float16Array.of(value).buffer)[0] ?? -1;
+}
+
+/** The normals tiles written, oldest first, each as its texels' half-float bits. */
+function normalsTiles(engine: CountingRenderEngine): Uint16Array[] {
+  return engine.textureWritten
+    .filter((w) => w.texture === "terrain normals")
+    .map((w) => new Uint16Array(w.data.buffer, w.data.byteOffset, w.data.byteLength / 2));
+}
+
+/** Sample (`x`, `y`)'s first component in a written tile of 129 × 129 and its gutter. */
+function tileTexel(tile: Uint16Array, x: number, y: number): number {
+  const stored = 129 + 2;
+  return tile[2 * ((y + 1) * stored + (x + 1))] ?? -1;
+}
+
+describe("the terrain pass's drafted bakes (R10.T6.a's progressive bake)", () => {
+  it("asks a draft's refinement at its request's priority and writes its normals alone, the vertices' kept", async () => {
+    const { pass, pool, engine } = await passOn("high");
+    const view = northPole(2_000_000);
+    pass.frame(inputAt(view));
+    const fake = pool();
+    const request = fake.demand[0];
+    if (request === undefined) {
+      throw new Error("nothing demanded");
+    }
+    fake.deliver(pass, request.key, { fill: 0.5, drafted: true });
+    expect(fake.refines).toEqual([{ key: request.key, priority: request.priority, ticket: 1 }]);
+    fake.refiningCount = 1;
+    expect(pass.refining).toBe(1);
+    const writes = engine.counts.bufferWrites;
+    const tiles = normalsTiles(engine).length;
+    fake.refined({
+      key: request.key,
+      ticket: 1,
+      normals: new Float32Array(2 * NORMALS_BETWEEN).fill(0.25),
+      complete: true,
+    });
+    const tile = normalsTiles(engine).at(-1);
+    expect([normalsTiles(engine).length, engine.counts.bufferWrites]).toEqual([tiles + 1, writes]);
+    if (tile === undefined) {
+      throw new Error("no normals were written");
+    }
+    expect([0, 1, 2, 3].map((x) => tileTexel(tile, x, 0))).toEqual([
+      halfBits(0.5),
+      halfBits(0.25),
+      halfBits(0.5),
+      halfBits(0.25),
+    ]);
+    expect([tileTexel(tile, 0, 1), tileTexel(tile, 1, 1), tileTexel(tile, 128, 128)]).toEqual([
+      halfBits(0.25),
+      halfBits(0.25),
+      halfBits(0.5),
+    ]);
+  });
+
+  it("drops a draft's refinement once a whole bake or an eviction replaces it, and writes nothing for its ticket", async () => {
+    const { pass, pool, engine } = await passOn("high");
+    pass.frame(inputAt(northPole(2_000_000)));
+    const fake = pool();
+    const [first, second] = fake.demand;
+    if (first === undefined || second === undefined) {
+      throw new Error("two patches are demanded");
+    }
+    fake.deliver(pass, first.key, { fill: 0.5, drafted: true });
+    fake.deliver(pass, first.key, { fill: 0.5, drafted: false });
+    expect(fake.dropped).toEqual([patchKeyString(first.key)]);
+    const tiles = normalsTiles(engine).length;
+    fake.refined({
+      key: first.key,
+      ticket: 1,
+      normals: new Float32Array(2 * NORMALS_BETWEEN),
+      complete: true,
+    });
+    // A later draft's refinement is told with its own ticket alone.
+    fake.deliver(pass, second.key, { fill: 0.5, drafted: true });
+    fake.refined({
+      key: second.key,
+      ticket: 1,
+      normals: new Float32Array(2 * NORMALS_BETWEEN),
+      complete: true,
+    });
+    expect([normalsTiles(engine).length, fake.refines.map((r) => r.ticket)]).toEqual([
+      tiles + 1,
+      [1, 2],
+    ]);
+  });
+
+  it.each([true, false])(
+    "takes a bake as complete where its refinement is (%s), so that a block bakes it again where not",
+    async (complete) => {
+      const { pass, pool } = await passOn("high");
+      pass.frame(inputAt(northPole(2_000_000)));
+      const fake = pool();
+      fake.layers = bodyLayers();
+      const request = fake.demand[0];
+      if (request === undefined) {
+        throw new Error("nothing demanded");
+      }
+      fake.deliver(pass, request.key, { fill: 0.5, drafted: true });
+      fake.refined({
+        key: request.key,
+        ticket: 1,
+        normals: new Float32Array(2 * NORMALS_BETWEEN),
+        complete,
+      });
+      let settled = false;
+      pass.fieldChanged({ newlySurveyed: new Uint32Array(), newlyHeld: new Uint32Array() }, () => {
+        settled = true;
+      });
+      expect(settled).toBe(complete);
+    },
+  );
 });

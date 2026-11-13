@@ -14,7 +14,7 @@
 //!   66.5, 12.8, 17.8, 2.85%, misses of -0.73, +1.19, +1.15, -1.53 Poisson errors, χ² 5.62 on 2
 //!   dof (passes); all stars below 0.5 M☉ 69.84% in 67.8–71.0% (passes); local mid-plane mean per
 //!   system in stars and white dwarfs 0.5517 M☉ in 0.54–0.60 (passes). Reported: the
-//!   all-inclusive local mean 0.6115 M☉, of which neutron stars and black holes 0.0530; the
+//!   all-inclusive local mean 0.6081 M☉, of which neutron stars and black holes 0.0496; the
 //!   primaries' mean present mass 0.4027 M☉ against the census's 0.437
 //!
 //! Fitted (P15.T4.b, ruling 138): the multinomial maximum-likelihood scale of the 20 pc

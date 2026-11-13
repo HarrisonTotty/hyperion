@@ -1,7 +1,17 @@
 import { describe, expect, it } from "vitest";
 
 import type { ViewsCheckRecord } from "../preload/api";
-import { readViewsCheckRecord } from "./viewsCheckRecord";
+import { ATMOSPHERE_RECORD, MOONLIT_NIGHT } from "./fixtures/atmosphereRecord";
+import { HANDOVER_RECORD, passingLook } from "./fixtures/handoverRecord";
+import { TERRAIN_RECORD } from "./fixtures/terrainRecord";
+import {
+  isCaptureLabel,
+  readAtmosphereCheckRecord,
+  readHandoverCheckRecord,
+  readTerrainCheckRecord,
+  readTerrainPhaseUpdate,
+  readViewsCheckRecord,
+} from "./viewsCheckRecord";
 
 const RECORD: ViewsCheckRecord = {
   timer: "full",
@@ -30,6 +40,7 @@ const RECORD: ViewsCheckRecord = {
       untimedFrames: 0,
       droppedResolves: 0,
       unattributedGpuMs: 0.01,
+      statements: ["IMAGE: DETAIL LIMITED"],
     },
   ],
   resize: {
@@ -72,6 +83,11 @@ function withField(path: ReadonlyArray<string | number>, value: unknown): unknow
   return replaced(RECORD, path, value);
 }
 
+/** `TERRAIN_RECORD` with one property path replaced. */
+function withTerrainField(path: ReadonlyArray<string | number>, value: unknown): unknown {
+  return replaced(TERRAIN_RECORD, path, value);
+}
+
 describe("the views check's record", () => {
   it("is read back whole", () => {
     expect(readViewsCheckRecord(structuredClone(RECORD))).toEqual(RECORD);
@@ -89,6 +105,8 @@ describe("the views check's record", () => {
     ],
     [["phases", 0, "views", 0, "canvas", "widthPx"], -1],
     [["phases", 0, "droppedResolves"], 0.5],
+    [["phases", 0, "statements"], undefined],
+    [["phases", 0, "statements"], [0]],
     [["resize", "allocations", 0, "kind"], "uploaded"],
     [["resize", "steps", 0, "views"], null],
     [["faults"], [3]],
@@ -98,5 +116,444 @@ describe("the views check's record", () => {
 
   it("refuses what is not an object", () => {
     expect(readViewsCheckRecord("record")).toBeNull();
+  });
+});
+
+describe("the terrain run's record (R10.T16.d)", () => {
+  it("is read back whole", () => {
+    expect(readTerrainCheckRecord(structuredClone(TERRAIN_RECORD))).toEqual(TERRAIN_RECORD);
+  });
+
+  it("is read back with the terrain session's faults (R10.T16.e)", () => {
+    const record = {
+      ...TERRAIN_RECORD,
+      terrainFaults: [
+        {
+          atMs: 40_000,
+          text: "TERRAIN NOT AVAILABLE: terrain computation failed, reopen VIEW to retry",
+          views: ["view", "instrument-1"],
+        },
+      ],
+    };
+    expect(readTerrainCheckRecord(structuredClone(record))).toEqual(record);
+  });
+
+  it("is read back with a session whose compile did not end (R10.T14.d)", () => {
+    const record = {
+      ...TERRAIN_RECORD,
+      sessions: [{ madeAtMs: 5, compile: { kind: "pending" } }],
+    };
+    expect(readTerrainCheckRecord(structuredClone(record))).toEqual(record);
+  });
+
+  describe("a whole-body run's readings (R10.T14.c)", () => {
+    const whole = {
+      cells: 24_576,
+      heldCells: 24_576,
+      textSamples: 24,
+      notSurveyedSamples: 0,
+      surveyEdgeSamples: 0,
+      decodeMs: 613,
+      decodeLongestFrameGapMs: null,
+      cacheBytes: 400_000_000,
+      selectionBudget: 604,
+      looks: [
+        {
+          kind: "read",
+          name: "orbit",
+          settled: true,
+          discPixels: 195_416,
+          skyPixels: 0,
+          outsidePixels: 60_100,
+          litOutsidePixels: 0,
+          finite: true,
+        },
+        { kind: "failed", name: "antipode", settled: false, failure: "no scene target" },
+      ],
+    } as const;
+
+    it("are read back with the record", () => {
+      const record = { ...TERRAIN_RECORD, whole };
+      expect(readTerrainCheckRecord(structuredClone(record))).toEqual(record);
+    });
+
+    it.each([
+      [{ ...whole, cells: -1 }],
+      [{ ...whole, selectionBudget: "604" }],
+      [{ ...whole, looks: [{ ...whole.looks[0], name: "corner" }] }],
+      [{ ...whole, looks: [{ ...whole.looks[0], kind: "seen" }] }],
+      [{ ...whole, looks: [{ ...whole.looks[1], failure: null }] }],
+    ])("refuse readings that do not check: %j", (bad) => {
+      expect(readTerrainCheckRecord(structuredClone({ ...TERRAIN_RECORD, whole: bad }))).toBeNull();
+    });
+  });
+
+  it("is read back with each phase's GPU time by pass (R14's Mac measurements)", () => {
+    const passes = [
+      { label: "bodies", ms: [4.1, 3.9], kernels: [], workgroups: [] },
+      { label: "terrain cluster cull", ms: [0.2, 0.3], kernels: ["cull"], workgroups: [12, 12] },
+    ];
+    const record = {
+      ...TERRAIN_RECORD,
+      phases: TERRAIN_RECORD.phases.map((phase) => ({ ...phase, passes })),
+    };
+    expect(readTerrainCheckRecord(structuredClone(record))).toEqual(record);
+  });
+
+  it("is read back with each phase's draws at which the cache's pins passed its slots (R10.T16.i)", () => {
+    const record = {
+      ...TERRAIN_RECORD,
+      phases: TERRAIN_RECORD.phases.map((phase) => ({
+        ...phase,
+        cachePressure: { draws: 2, firstScriptS: 41.25 },
+      })),
+    };
+    expect(readTerrainCheckRecord(structuredClone(record))).toEqual(record);
+  });
+
+  it("reads null for the cache's pins of a record written before them (R10.T16.i)", () => {
+    const older = {
+      ...TERRAIN_RECORD,
+      phases: TERRAIN_RECORD.phases.map(({ cachePressure: _pressure, ...phase }) => phase),
+    };
+    expect(
+      readTerrainCheckRecord(structuredClone(older))?.phases.map((phase) => phase.cachePressure),
+    ).toEqual([null, null, null]);
+  });
+
+  it("is read back with no hand-over range and an undestroyed device", () => {
+    const record = {
+      ...TERRAIN_RECORD,
+      handover: null,
+      loss: { ...TERRAIN_RECORD.loss, destroyedAtMs: null, notDestroyed: "no device was held" },
+    };
+    expect(readTerrainCheckRecord(structuredClone(record))).toEqual(record);
+  });
+
+  it.each([
+    [["timer"], "fast"],
+    [["phases", 0, "name"], "photoreal-alone"],
+    [["phases", 0, "endMs"], 0],
+    [["phases", 0, "views", 0, "missedFrames"], -1],
+    [["phases", 0, "views", 0, "firstTerrainMs"], "soon"],
+    [["phases", 0, "patchesDrawn"], [1.5]],
+    [["phases", 0, "patchesSelected"], [-1]],
+    [["phases", 0, "cachePressure"], 2],
+    [["phases", 0, "cachePressure", "draws"], -1],
+    [["phases", 0, "cachePressure"], { draws: 4, firstScriptS: 41.25 }],
+    [["phases", 0, "cachePressure", "firstScriptS"], 3],
+    [["phases", 0, "cachePressure", "firstScriptS"], "late"],
+    [["phases", 0, "trianglesDrawn"], [-1]],
+    [["phases", 0, "casterTriangles"], null],
+    [["phases", 0, "bakes", "baked"], null],
+    [["phases", 0, "memory", "liveBytes", 0, "bytes"], -2],
+    [["faults", 0, "kind"], "device-gone"],
+    [["faults", 0, "reason"], 3],
+    [["restoresAtMs"], ["soon"]],
+    [["terrainFaults"], null],
+    [["terrainFaults"], [{ atMs: "soon", text: "a fault", views: [] }]],
+    [["terrainFaults"], [{ atMs: 1, text: 2, views: [] }]],
+    [["terrainFaults"], [{ atMs: 1, text: "a fault", views: [3] }]],
+    [["loss", "after", "fieldChunks"], 1.5],
+    [["loss", "masks", "beforeKept"], "yes"],
+    [["teardown", "workersLive"], -1],
+    [["handover", "rangeM"], 0],
+    [["phases", 0, "views", 0, "longestGapEndScriptS"], "late"],
+    [["sessions"], null],
+    [["sessions", 0, "madeAtMs"], null],
+    [["sessions", 0, "compile"], null],
+    [["sessions", 0, "compile", "kind"], "done"],
+    [["sessions", 0, "compile", "compileMs"], -1],
+    [["sessions", 0, "compile", "compiled"], 1.5],
+    [["sessions", 0, "compile", "compiled"], null],
+    [["sessions", 0, "compile", "longestFrameGapMs"], "long"],
+    [["opening"], null],
+    [["span"], null],
+    [["span", "toMs"], 0],
+    [["span", "longestFrameGapMs"], -1],
+    [["span", "longestGapEndScriptS"], "late"],
+    [["span", "harnessMs"], -1],
+    [["opening", "preparedMs"], -1],
+    [["opening", "preparations"], 0.5],
+    [["opening", "longestFrameGapMs"], "long"],
+    [["phases", 0, "passes"], undefined],
+    [["phases", 0, "passes"], [{ label: "bodies", ms: [-1], kernels: [], workgroups: [] }]],
+    [["phases", 0, "passes"], [{ label: "", ms: [1], kernels: [], workgroups: [] }]],
+  ])("refuses a record whose %j is %j", (path, value) => {
+    expect(readTerrainCheckRecord(withTerrainField(path, value))).toBeNull();
+  });
+
+  it("reads a phase as it ended, with the timer and the device-pixel ratio (R14's Mac measurements)", () => {
+    const update = { timer: "quantized", devicePixelRatio: 2, phase: TERRAIN_RECORD.phases[0] };
+    expect(readTerrainPhaseUpdate(structuredClone(update))).toEqual(update);
+    expect([
+      readTerrainPhaseUpdate({ ...update, timer: "fast" }),
+      readTerrainPhaseUpdate({ ...update, devicePixelRatio: 0 }),
+      readTerrainPhaseUpdate({ ...update, phase: { ...update.phase, name: "photoreal-alone" } }),
+      readTerrainPhaseUpdate(TERRAIN_RECORD),
+    ]).toEqual([null, null, null, null]);
+  });
+
+  it("refuses T20's record, and T20's reader refuses it", () => {
+    expect(readTerrainCheckRecord(RECORD)).toBeNull();
+    expect(readViewsCheckRecord(TERRAIN_RECORD)).toBeNull();
+  });
+});
+
+describe("the hand-over check's record (R10.T10.g)", () => {
+  it("is read back whole", () => {
+    expect(readHandoverCheckRecord(structuredClone(HANDOVER_RECORD))).toEqual(HANDOVER_RECORD);
+  });
+
+  it("is read back with the halo's look, recorded, and refused judged or under another scene (R10.T1.c)", () => {
+    const halo = passingLook("handover-halo", "HAND-OVER HALO", false);
+    const record = { ...HANDOVER_RECORD, looks: [halo] };
+    expect([
+      readHandoverCheckRecord(structuredClone(record)),
+      readHandoverCheckRecord({ ...record, looks: [{ ...halo, judged: true }] }),
+      readHandoverCheckRecord({ ...record, looks: [{ ...halo, scene: "HAND-OVER 30°" }] }),
+    ]).toEqual([record, null, null]);
+  });
+
+  it("is read back with a look that was not locked and compared nothing", () => {
+    const look = {
+      ...passingLook("handover-90", "HAND-OVER 90°", true),
+      exposure: { lockedEv100: null, lockedReading: null, endReading: null, held: false },
+      switchesS: { figure: null, terrain: null, disc: null },
+      comparisons: [],
+      failures: ["the exposure was not locked: AUTO did not resume on ENABLE"],
+    };
+    const record = { ...HANDOVER_RECORD, looks: [look] };
+    expect(readHandoverCheckRecord(structuredClone(record))).toEqual(record);
+  });
+
+  it.each([
+    [["world"], 6],
+    [["devicePixelRatio"], 0],
+    [["canvas"], null],
+    [["target", "heightPx"], -1],
+    [["rangeM"], 0],
+    [["radPerPx"], Number.NaN],
+    [["cellLevel"], 6.5],
+    [["approach", "ratePerS"], 0],
+    [["approach", "closestRatio"], 4],
+    [["looks"], null],
+    [["looks", 0, "name"], "handover-45"],
+    [["looks", 1, "name"], "handover-30"],
+    [["looks", 0, "judged"], "yes"],
+    [["looks", 0, "judged"], false],
+    [["looks", 2, "judged"], true],
+    [["looks", 0, "scene"], "HAND-OVER 90°"],
+    [["looks", 0, "nominal", "phaseDeg"], -1],
+    [["looks", 0, "exposure", "held"], null],
+    [["looks", 0, "exposure", "lockedEv100"], "13.5"],
+    [["looks", 0, "surveyedCells"], -1],
+    [["looks", 0, "switchesS", "terrain"], "late"],
+    [["looks", 0, "failures"], [1]],
+    [["looks", 0, "comparisons", 1, "name"], "disc-to-figure"],
+    [["looks", 0, "comparisons", 0, "name"], "figure-to-disc"],
+    [["looks", 0, "comparisons", 0, "framesApart"], 0],
+    [["looks", 0, "comparisons", 0, "beforeWasLast"], 1],
+    [["looks", 0, "comparisons", 0, "before", "regime"], "mesh"],
+    [["looks", 0, "comparisons", 0, "before", "regime"], "figure"],
+    [["looks", 0, "comparisons", 0, "after", "regime"], "disc"],
+    [["looks", 0, "comparisons", 1, "after", "regime"], "figure"],
+    [["looks", 0, "comparisons", 2, "before", "regime"], "disc"],
+    [["looks", 0, "comparisons", 0, "before", "rangeRatio"], 0],
+    [["looks", 0, "comparisons", 0, "after", "bodyMisses"], 50_000],
+    [["looks", 0, "comparisons", 0, "after", "angles"], null],
+    [["looks", 0, "comparisons", 0, "body", "own", "meanAfter"], -0.1],
+    [["looks", 0, "comparisons", 0, "survey", "shared", "pixels"], 1.5],
+    [["looks", 0, "comparisons", 0, "texels", 0, "sharedPixels"], 0],
+    [["looks", 0, "comparisons", 0, "texels", 1, "texel"], 19_200],
+    [["looks", 0, "comparisons", 0, "texels", 2, "meanAfter"], Number.POSITIVE_INFINITY],
+    [["looks", 0, "comparisons", 0, "texels", 3, "muFloored"], "yes"],
+    [["looks", 0, "comparisons", 0, "texels", 0, "muFloored"], undefined],
+    [["faults", 0], { atMs: 1 }],
+  ])("refuses a record whose %j is %j", (path, value) => {
+    const record =
+      path[0] === "faults"
+        ? {
+            ...HANDOVER_RECORD,
+            faults: [{ atMs: 0, kind: "device-lost", reason: "unknown", line: "a" }],
+          }
+        : HANDOVER_RECORD;
+    expect(readHandoverCheckRecord(replaced(record, path, value))).toBeNull();
+  });
+
+  it("is read back with the regime's switch from the disc straight to the terrain", () => {
+    const record = replaced(
+      HANDOVER_RECORD,
+      ["looks", 0, "comparisons", 0, "after", "regime"],
+      "terrain",
+    );
+    expect(readHandoverCheckRecord(record)).toEqual(record);
+  });
+
+  it("refuses the terrain run's record", () => {
+    expect(readHandoverCheckRecord(TERRAIN_RECORD)).toBeNull();
+  });
+
+  it("is refused by the terrain run's reader", () => {
+    expect(readTerrainCheckRecord(HANDOVER_RECORD)).toBeNull();
+  });
+});
+
+describe("the atmosphere run's record (R08.T10.b)", () => {
+  it("is read back whole", () => {
+    expect(readAtmosphereCheckRecord(structuredClone(ATMOSPHERE_RECORD))).toEqual(
+      ATMOSPHERE_RECORD,
+    );
+  });
+
+  it("is read back with a stage flown back, past the centre", () => {
+    const back = {
+      ...ATMOSPHERE_RECORD,
+      stages: [
+        {
+          target: "TEST MARS",
+          stage: 3,
+          rateStep: 0,
+          askedM: -2.5e6,
+          holdMs: 0,
+          heldMs: 0,
+          longestStepMs: 0,
+          flownM: -1,
+          shortOfCentreM: -4e6,
+        },
+      ],
+    };
+    expect(readAtmosphereCheckRecord(structuredClone(back))).toEqual(back);
+  });
+
+  it("is read back with a capture drawn in the wireframe and one in no style", () => {
+    const drawn = {
+      ...ATMOSPHERE_RECORD,
+      captures: ATMOSPHERE_RECORD.captures.map((capture, i) =>
+        i === 0
+          ? { ...capture, style: "wireframe" }
+          : i === 1
+            ? { ...capture, style: null }
+            : capture,
+      ),
+    };
+    expect(readAtmosphereCheckRecord(structuredClone(drawn))).toEqual(drawn);
+  });
+
+  it("is read back with fault lines, no capture and no frame times", () => {
+    const night = {
+      ...MOONLIT_NIGHT,
+      exposure: null,
+      camera: null,
+      frames: {
+        ...MOONLIT_NIGHT.frames,
+        draws: 1,
+        intervalMedianMs: null,
+        intervalP95Ms: null,
+        gpuMedianMs: null,
+        gpuP95Ms: null,
+      },
+      faults: ["ATMOSPHERE NOT AVAILABLE: computation failed for TEST EARTH, reopen VIEW to retry"],
+    };
+    const faulted = { ...ATMOSPHERE_RECORD, captures: [night], faults: ["device-lost: unknown"] };
+    const empty = { ...ATMOSPHERE_RECORD, captures: [], stages: [] };
+    expect([
+      readAtmosphereCheckRecord(structuredClone(faulted)),
+      readAtmosphereCheckRecord(structuredClone(empty)),
+    ]).toEqual([faulted, empty]);
+  });
+
+  it.each([
+    [["timer"], "fast"],
+    [["devicePixelRatio"], 0],
+    [["canvas"], null],
+    [["canvas", "widthPx"], -1],
+    [["mediaReadyMs"], -1],
+    [["mediaReadyMs"], Number.NaN],
+    [["captures"], null],
+    [["captures", 0, "label"], "Fixture TEST EARTH"],
+    [["captures", 0, "label"], "../escape"],
+    [["captures", 0, "label"], "x".repeat(49)],
+    [["captures", 1, "label"], "fixture-test-earth"],
+    [["captures", 0, "kind"], "dusk"],
+    [["captures", 0, "kind"], "fixture"],
+    [["captures", 1, "kind"], null],
+    [["captures", 1, "designation"], 3],
+    [["captures", 1, "designation"], ""],
+    [["captures", 1, "designation"], null],
+    [["captures", 0, "camera"], false],
+    [["captures", 1, "rangeM"], 0],
+    [["captures", 1, "rangeM"], "far"],
+    [["captures", 1, "rangeM"], null],
+    [["captures", 1, "phaseDeg"], 181],
+    [["captures", 1, "phaseDeg"], -1],
+    [["captures", 1, "phaseDeg"], null],
+    [["captures", 0, "exposure"], 12],
+    [["captures", 0, "style"], "photoreal"],
+    [["captures", 1, "style"], "PHOTOREALISTIC"],
+    [["captures", 1, "style"], undefined],
+    [["captures", 0, "exposureSettleMs"], -1],
+    [["captures", 1, "exposureSettleMs"], null],
+    [["captures", 0, "atMs"], Number.POSITIVE_INFINITY],
+    [["captures", 0, "frames"], null],
+    [["captures", 0, "frames", "toMs"], 0],
+    [["captures", 0, "frames", "draws"], 1.5],
+    [["captures", 0, "frames", "intervalMedianMs"], -1],
+    [["captures", 0, "frames", "gpuP95Ms"], "slow"],
+    [["captures", 0, "statements"], [1]],
+    [["captures", 0, "primaryScale"], 0],
+    [["captures", 1, "primaryScale"], undefined],
+    [["captures", 0, "airSetting"], "medium"],
+    [["captures", 1, "airSetting"], null],
+    [["captures", 0, "faults"], null],
+    [["captures", 0, "faults"], [{ line: "a fault" }]],
+    [["stages"], null],
+    [["stages", 0, "target"], ""],
+    [["stages", 0, "stage"], 0],
+    [["stages", 0, "rateStep"], 32],
+    [["stages", 0, "rateStep"], 1.5],
+    [["stages", 0, "askedM"], Number.NaN],
+    [["stages", 0, "holdMs"], -1],
+    [["stages", 0, "heldMs"], -1],
+    [["stages", 0, "longestStepMs"], -1],
+    [["stages", 0, "flownM"], "far"],
+    [["stages", 0, "shortOfCentreM"], null],
+    [["faults"], [3]],
+  ])("refuses a record whose %j is %j", (path, value) => {
+    expect(readAtmosphereCheckRecord(replaced(ATMOSPHERE_RECORD, path, value))).toBeNull();
+  });
+
+  it.each([
+    ["designation", "TEST EARTH"],
+    ["rangeM", 5.1e7],
+    ["phaseDeg", null],
+  ])("refuses a night's capture that carries a fixture's %s", (field, value) => {
+    const night = { ...MOONLIT_NIGHT, [field]: value };
+    expect(readAtmosphereCheckRecord({ ...ATMOSPHERE_RECORD, captures: [night] })).toBeNull();
+  });
+
+  it("refuses a capture that records no style", () => {
+    const night = Object.fromEntries(
+      Object.entries(MOONLIT_NIGHT).filter(([field]) => field !== "style"),
+    );
+    expect(readAtmosphereCheckRecord({ ...ATMOSPHERE_RECORD, captures: [night] })).toBeNull();
+  });
+
+  it("takes the labels the capture's channel takes, and no other", () => {
+    expect([isCaptureLabel("fixture-test-earth-o3-slab"), isCaptureLabel("A/B")]).toEqual([
+      true,
+      false,
+    ]);
+  });
+
+  it("refuses the other runs' records, and their readers refuse it", () => {
+    expect([
+      readAtmosphereCheckRecord(RECORD),
+      readAtmosphereCheckRecord(TERRAIN_RECORD),
+      readAtmosphereCheckRecord(HANDOVER_RECORD),
+      readViewsCheckRecord(ATMOSPHERE_RECORD),
+      readTerrainCheckRecord(ATMOSPHERE_RECORD),
+      readHandoverCheckRecord(ATMOSPHERE_RECORD),
+    ]).toEqual([null, null, null, null, null, null]);
   });
 });

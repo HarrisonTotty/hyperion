@@ -1,0 +1,2047 @@
+import { describe, expect, it } from "vitest";
+
+import { vec3 } from "../../geometry/vec3";
+import { brdf, brdfFromTable } from "../appearance/brdf";
+import { PROVISIONAL_PHOTOMETRY } from "../appearance/fromWire";
+import {
+  mcewenLunarProfile,
+  PHASE_TABLE_SAMPLES,
+  PHASE_TABLE_STEP_RAD,
+  type PhaseFactorTable,
+  phaseFactorTableOf,
+  type PhaseTemplateId,
+  type PhotometricLaw,
+} from "../appearance/law";
+import { packPhaseFactorRows } from "../appearance/litBodyProbe";
+import { geometricAlbedo, lawFor, lawPhaseIntegral, withTemplateCurve } from "../appearance/phase";
+import { shapeGeometricAlbedo } from "../appearance/shapes";
+import { oblateAlbedoScale } from "../bodies/oblate";
+import { TERRAIN_DEPTH_FRACTION } from "../depth/groundPull";
+import { WGSL_CATALOGUE } from "../engine/catalogue";
+import type { WgslMaterialSpec } from "../engine/types";
+import {
+  declaredStructLayout,
+  OFFSET_MEMBER,
+  type StructLayout,
+  uniformLayout,
+} from "../engine/webgpu/uniforms";
+import { annulusEdges } from "../lighting/annuli";
+import { bindingStages } from "../../test/wgslStages";
+import { collapseWhitespace, wgslFunction } from "../../test/wgslText";
+import bodyDiscWgsl from "../shaders/bodyDisc.wgsl?raw";
+import cubeTexelWgsl from "../shaders/cubeTexel.wgsl?raw";
+import maturityNodesWgsl from "../shaders/maturityNodes.wgsl?raw";
+import occluderWgsl from "../shaders/occluder.wgsl?raw";
+import terrainDepthWgsl from "./shaders/terrainDepth.wgsl?raw";
+import terrainLitWgsl from "./shaders/terrainLit.wgsl?raw";
+import terrainLitShadeWgsl from "./shaders/terrainLitShade.wgsl?raw";
+import terrainShadowWgsl from "./shaders/terrainShadow.wgsl?raw";
+import terrainSurveyWgsl from "./shaders/terrainSurvey.wgsl?raw";
+import cascadeShadowWgsl from "./shadows/cascadeShadow.wgsl?raw";
+import { CASCADE_DEPTH_BIAS } from "./shadows/cascades";
+import horizonWgsl from "./shadows/horizon.wgsl?raw";
+import { LIT_VERTEX_CODE } from "./gpu/resources";
+import { PATH_SOURCES } from "./gpu/material";
+import {
+  MATURITY_NODES,
+  maturityCodeRatio,
+  maturityNodeAlbedo,
+  maturitySegment,
+} from "./maturityNodes";
+import {
+  CLASS_LAWS_BYTES,
+  CLASS_LAYERS_BYTES,
+  CLASS_MATURITY_BYTES,
+  CLASS_NODES_BYTES,
+  CLASS_WEIGHTS_BYTES,
+  SURVEY_CELL_CODE_BYTE,
+  SURVEY_MASK_BYTES,
+} from "./slotLayout";
+import {
+  AIRLESS_ICE_EXPONENT,
+  CLASS_LAW_ROWS,
+  CLASS_LAW_TEMPLATES,
+  classPhotometryOf,
+  classRowLaw,
+  classTexelLaw,
+  DISC_NORMALS_TEXTURE,
+  dominantSlot,
+  MELT_CLASS_CODE,
+  packClassLaws,
+  packClassNodes,
+  packTerrainLighting,
+  paletteMeltSlots,
+  SHADOW_CASCADES_TEXTURE,
+  SHADOW_COMPARE_SAMPLER,
+  TERRAIN_CLASSES,
+  TERRAIN_LIGHT_BUFFER_ROWS,
+  TERRAIN_LIGHT_ROWS,
+  TERRAIN_DEPTH_MATERIALS,
+  TERRAIN_LIT_BINDINGS,
+  TERRAIN_LIT_EMISSIVE_INTERIOR_MATERIALS,
+  TERRAIN_LIT_EMISSIVE_MATERIALS,
+  TERRAIN_LIT_INTERIOR_MATERIALS,
+  TERRAIN_LIT_MATERIALS,
+  TERRAIN_SHADOW_MATERIALS,
+  PHASE_LAW,
+  REGOLITH_TEMPLATES,
+  type TerrainLighting,
+  TerrainPhaseRows,
+  terrainDepthMaterialSpec,
+  terrainLitEmissiveMaterialSpec,
+  terrainLitMaterialSpec,
+  terrainReflectance,
+  terrainShadowMaterialSpec,
+  terrainShares,
+  terrainTexelLaws,
+  texelClassAlbedo,
+  texelLawOf,
+  texelWeights,
+  terrainLitEmissiveInteriorMaterialSpec,
+  terrainLitInteriorMaterialSpec,
+  TERRAIN_CLUSTER_ID_MATERIALS,
+  TERRAIN_CLUSTER_ID_PRIMITIVE_MATERIALS,
+  TERRAIN_RESOLVE_MATERIALS,
+  terrainClusterIdMaterialSpec,
+  terrainLitClusterMaterialSpec,
+  terrainResolveMaterialSpec,
+  withoutSurveyDiscard,
+  withTerrainEmission,
+} from "./terrainMaterial";
+import { packDiscEmission } from "../atmosphere/discReflectance";
+import { THERMAL_WGSL, surfaceTemperatureFieldOf } from "../atmosphere/thermal";
+import { lavaWorldSurface } from "../../test/thermalSurfaces";
+import terrainEmissionWgsl from "./shaders/terrainEmission.wgsl?raw";
+
+const RAD = Math.PI / 180;
+
+/** A struct layout's members as `name : type @ offset`, for comparison. */
+function membersOf(layout: StructLayout | null): string[] | undefined {
+  return layout?.members.map((m) => `${m.name} : ${m.type} @ ${String(m.offsetBytes)}`);
+}
+
+/** The `Draw` the engine packs from a material's uniforms, its offset member first. */
+function packedDraw(spec: WgslMaterialSpec): string[] | undefined {
+  return membersOf(uniformLayout([OFFSET_MEMBER, ...spec.uniforms]));
+}
+
+/** Each storage buffer's name, its declared stages and the stages its entry points read it in. */
+function storageStages(spec: WgslMaterialSpec): string[][] {
+  const read = bindingStages(spec.vertexWgsl);
+  return (spec.storageBuffers ?? []).map((buffer) => [
+    buffer.name,
+    [...(buffer.stages ?? [])].toSorted().join(" "),
+    [...(read.get(buffer.binding) ?? [])].toSorted().join(" "),
+  ]);
+}
+
+/** The `@group(2)` bindings a material's entry points read that its layout does not declare. */
+function undeclaredBindings(spec: WgslMaterialSpec): number[] {
+  const declared = new Set([
+    ...(spec.storageBuffers ?? []).map((buffer) => buffer.binding),
+    ...(spec.textures ?? []).map((texture) => texture.binding),
+    ...spec.samplers.map((sampler) => sampler.binding),
+  ]);
+  return [...bindingStages(spec.vertexWgsl).keys()].filter((binding) => !declared.has(binding));
+}
+
+/** A bake's photometry: each slot `[B, V, R, law, L(0)]`, the rest empty. */
+function photometryOf(slots: ReadonlyArray<readonly [number, number, number, number, number]>) {
+  const out = new Float32Array(TERRAIN_CLASSES * 5);
+  slots.forEach((slot, k) => {
+    out.set(slot, 5 * k);
+  });
+  return out;
+}
+
+/** A material's storage buffers' names. */
+function storageNames(spec: WgslMaterialSpec): string[] {
+  return (spec.storageBuffers ?? []).map((buffer) => buffer.name);
+}
+
+describe("the lit terrain's depth material for the symbology (R10.T16.c)", () => {
+  it("registers both vertex paths' depth materials in the catalogue", () => {
+    for (const spec of TERRAIN_DEPTH_MATERIALS) {
+      expect(WGSL_CATALOGUE.some((entry) => entry.kind === "material" && entry.spec === spec)).toBe(
+        true,
+      );
+    }
+    expect(TERRAIN_DEPTH_MATERIALS.map((spec) => spec.displayName)).toEqual([
+      "TERRAIN DEPTH OFFSETS",
+      "TERRAIN DEPTH",
+    ]);
+  });
+
+  it("writes depth alone, and binds what its entry points read: R05's vertex storage and the survey mask", () => {
+    const offsets = terrainDepthMaterialSpec("baked-offsets");
+    const read = bindingStages(offsets.vertexWgsl);
+    expect([offsets.colourWrites, offsets.depthWrite, offsets.textures]).toEqual([false, true, []]);
+    expect(
+      (offsets.storageBuffers ?? []).map((buffer) => [
+        buffer.name,
+        [...(buffer.stages ?? [])].toSorted().join(" "),
+        [...(read.get(buffer.binding) ?? [])].toSorted().join(" "),
+      ]),
+    ).toEqual([
+      ["heights", "vertex", "vertex"],
+      ["slots", "vertex", "vertex"],
+      ["instances", "vertex", "vertex"],
+      ["contacts", "vertex", "vertex"],
+      ["offsets", "vertex", "vertex"],
+      ["surveyMask", "fragment vertex", "fragment vertex"],
+    ]);
+    // No binding its entry points read is left out of the layout.
+    const declared = new Set((offsets.storageBuffers ?? []).map((buffer) => buffer.binding));
+    expect([...read.keys()].filter((binding) => !declared.has(binding))).toEqual([]);
+  });
+
+  it("takes the lit material's own draw fields, without the cascades', with the overlay's slope term after them", () => {
+    expect(terrainDepthMaterialSpec("face-differences").uniforms.map((u) => u.name)).toEqual([
+      ...terrainLitMaterialSpec("face-differences")
+        .uniforms.slice(0, 3)
+        .map((u) => u.name),
+      "occluderSlopePx",
+    ]);
+    expect(terrainDepthWgsl).toContain("occluderSlopePx : f32,");
+    const spec = terrainDepthMaterialSpec("baked-offsets");
+    expect(membersOf(declaredStructLayout(spec.vertexWgsl, "Draw"))).toEqual(packedDraw(spec));
+  });
+
+  it("pushes its depth away by the occluders' constant fraction", () => {
+    const fraction = /DEPTH_FRACTION\s*=\s*([0-9.]+)/u;
+    const depthFraction = /TERRAIN_DEPTH_FRACTION : f32 = ([0-9.]+)/u;
+    expect(terrainDepthWgsl.match(depthFraction)?.[1]).toBe(occluderWgsl.match(fraction)?.[1]);
+    expect(Number(terrainDepthWgsl.match(depthFraction)?.[1])).toBe(TERRAIN_DEPTH_FRACTION);
+  });
+
+  it("pushes its depth by that fraction alone, with no slope term (R10.T16.c's grazing fix)", () => {
+    const depthLines = terrainDepthWgsl.split("\n").filter((line) => line.includes("out.depth ="));
+    expect(depthLines.map((line) => line.trim())).toEqual([
+      "out.depth = clamp(in.clip.z * (1.0 - TERRAIN_DEPTH_FRACTION), 0.0, 1.0);",
+    ]);
+  });
+});
+
+describe("the lit terrain's material (R10.T10.b)", () => {
+  it("registers both vertex paths' lit materials in the catalogue", () => {
+    for (const spec of TERRAIN_LIT_MATERIALS) {
+      expect(WGSL_CATALOGUE.some((entry) => entry.kind === "material" && entry.spec === spec)).toBe(
+        true,
+      );
+    }
+    expect(TERRAIN_LIT_MATERIALS.map((spec) => spec.displayName)).toEqual([
+      "LIT TERRAIN OFFSETS",
+      "LIT TERRAIN",
+    ]);
+  });
+
+  it("declares each binding its WGSL reads, the offsets on the baked-offsets path alone", () => {
+    const offsets = terrainLitMaterialSpec("baked-offsets");
+    const differences = terrainLitMaterialSpec("face-differences");
+    expect(storageNames(offsets)).toContain("offsets");
+    expect(storageNames(differences)).not.toContain("offsets");
+    expect(storageNames(differences)).toEqual([
+      "heights",
+      "slots",
+      "instances",
+      "contacts",
+      "classLayers",
+      "terrainLights",
+      "horizonMap",
+      "surveyMask",
+    ]);
+    // Nine storage buffers on the baked-offsets path, five read by the vertex stage alone, three by
+    // the fragment stage alone, and the survey mask by both (decision-r10-t10b-r09-t2e §5;
+    // R10.T10.c).
+    expect(offsets.storageBuffers).toHaveLength(9);
+    expect(
+      (offsets.storageBuffers ?? []).map((buffer) => [buffer.name, buffer.stages?.join(" ")]),
+    ).toEqual([
+      ["heights", "vertex"],
+      ["slots", "vertex"],
+      ["instances", "vertex"],
+      ["contacts", "vertex"],
+      ["offsets", "vertex"],
+      ["classLayers", "fragment"],
+      ["terrainLights", "fragment"],
+      ["horizonMap", "fragment"],
+      ["surveyMask", "vertex fragment"],
+    ]);
+    const textures = differences.textures ?? [];
+    // R08's surface lighting's nine tables, the table below a deck at 21 (R08.T15.b.2) and the
+    // sources' table at 23 (R08.T9.b's lever), and the disc's normal map at 24 (R10.T15.b.2).
+    expect(textures.map((t) => t.binding)).toEqual([
+      4, 7, 9, 10, 11, 12, 13, 14, 15, 21, 23, 19, 24,
+    ]);
+    expect(differences.samplers.map((s) => s.binding)).toEqual([20]);
+    for (const [name, binding] of [
+      ["class_layers", TERRAIN_LIT_BINDINGS.classLayers],
+      ["phase_factor_table", TERRAIN_LIT_BINDINGS.phaseFactorTable],
+      ["terrain_lights", TERRAIN_LIT_BINDINGS.terrainLights],
+      ["atmosphere_body", TERRAIN_LIT_BINDINGS.atmosphere],
+      ["atmosphere_below_deck", TERRAIN_LIT_BINDINGS.belowDeck],
+      ["atmosphere_source_table", TERRAIN_LIT_BINDINGS.sourceTable],
+      ["horizon_map", TERRAIN_LIT_BINDINGS.horizonMap],
+      ["survey_mask", TERRAIN_LIT_BINDINGS.surveyMask],
+      ["shadow_cascades", TERRAIN_LIT_BINDINGS.shadowCascades],
+      ["shadow_compare", TERRAIN_LIT_BINDINGS.shadowCompare],
+      ["disc_normals", TERRAIN_LIT_BINDINGS.discNormals],
+    ] as const) {
+      expect(
+        terrainLitWgsl + horizonWgsl + terrainSurveyWgsl + cascadeShadowWgsl + terrainLitShadeWgsl,
+      ).toMatch(new RegExp(`@binding\\(${String(binding)}\\) var[^\\n]* ${name}`, "u"));
+    }
+    // No binding its entry points read is left out of the layout, on either path.
+    expect([offsets, differences].map(undeclaredBindings)).toEqual([[], []]);
+  });
+
+  it("states the hooks R11 fills, each with no effect", () => {
+    for (const hook of [
+      "fn terrain_decoration(p : vec3f, normal : vec3f) -> TerrainDecoration",
+      "fn terrain_shadow_factor(p : vec3f) -> f32",
+      "fn terrain_ring_shadow(p : vec3f, sun : vec3f) -> vec3f",
+      "fn terrain_sky_factor(p : vec3f) -> vec3f",
+    ]) {
+      expect(terrainLitWgsl).toContain(hook);
+    }
+  });
+
+  it("carries the layout's sizes: two vec4f a class after the weights, 25 rows of lights", () => {
+    expect(CLASS_LAW_ROWS * 16).toBe(CLASS_LAWS_BYTES);
+    expect(terrainLitWgsl).toContain(
+      `const CLASS_LAW_WORD : u32 = ${String(CLASS_WEIGHTS_BYTES / 4)}u;`,
+    );
+    expect(terrainLitWgsl).toContain(
+      `const CLASS_LAYER_WORDS : u32 = ${String(CLASS_LAYERS_BYTES / 4)}u;`,
+    );
+    expect(terrainLitWgsl).toContain("const TERRAIN_CLASSES : u32 = 8u;");
+    expect(terrainLitWgsl).toContain("const FIRST_TERRAIN_SECONDARY_ROW : u32 = 21u;");
+    expect(TERRAIN_LIGHT_ROWS).toBe(21 + 2 * 2);
+  });
+
+  it("carries the survey mask's layout: its words a slot, and the byte of its cell's code (R10.T10.c)", () => {
+    expect([
+      terrainSurveyWgsl.includes(
+        `const SURVEY_MASK_WORDS : u32 = ${String(SURVEY_MASK_BYTES / 4)}u;`,
+      ),
+      terrainSurveyWgsl.includes(
+        `const SURVEY_CELL_CODE_BYTE : u32 = ${String(SURVEY_CELL_CODE_BYTE)}u;`,
+      ),
+    ]).toEqual([true, true]);
+  });
+
+  it.each(Object.entries(LIT_VERTEX_CODE))(
+    "carries the lit mesh's vertex code %s as resources.ts gives it (R10.T10.c)",
+    (name, code) => {
+      const constant = `LIT_${name.replace(/[A-Z]/gu, (letter) => `_${letter}`).toUpperCase()}`;
+      expect(terrainSurveyWgsl).toContain(`const ${constant} : u32 = ${String(code)}u;`);
+    },
+  );
+});
+
+/** WGSL function `name` of `source` with its comments taken out first. */
+function uncommented(source: string, name: string): string {
+  return wgslFunction(source.replaceAll(/\/\/[^\n]*/gu, ""), name);
+}
+
+/**
+ * WGSL text with the terrain's copies' names as the disc's (R10.T15.b.2): the decode and the
+ * survey-masked bilinear sum of bodyDisc.wgsl's `stored_normal` and `shading_normal`, and
+ * cubeTexel.wgsl's warp, which terrainLitShade.wgsl copies under its own names.
+ */
+function asDiscs(text: string): string {
+  return collapseWhitespace(text)
+    .replaceAll("disc_stored_normal(", "stored_normal(")
+    .replaceAll("disc_uv_to_st(", "uv_to_st(")
+    .replaceAll("disc_normals", "surface_normals")
+    .replaceAll("DISC_NO_NORMAL_ABOVE", "NO_NORMAL_ABOVE")
+    .replaceAll("disc_decode_octahedral(", "decodeOctahedral(")
+    .replaceAll("at.face", "face");
+}
+
+describe("the lit terrain's shadow receiver (R10.T9.b)", () => {
+  const lit = terrainLitMaterialSpec("face-differences");
+
+  it("takes its own draw fields, then the cascades', in the Draw struct's order", () => {
+    expect(lit.uniforms.map((u) => `${u.name} : ${u.type}`)).toEqual([
+      "bodyRotation : mat4x4f",
+      "cameraBodyFixedM : vec4f",
+      "atlas : vec4f",
+      "cascadeLight0 : mat4x4f",
+      "cascadeLight1 : mat4x4f",
+      "cascadeLight2 : mat4x4f",
+      "cascadeLight3 : mat4x4f",
+      "cascadeFarM : vec4f",
+      "cascadeFadeStartM : vec4f",
+      "cascadeNormalOffsetM : vec4f",
+      "cascadeViewAxis : vec4f",
+    ]);
+    for (const path of ["baked-offsets", "face-differences"] as const) {
+      const spec = terrainLitMaterialSpec(path);
+      expect(membersOf(declaredStructLayout(spec.vertexWgsl, "Draw"))).toEqual(packedDraw(spec));
+    }
+  });
+
+  it("binds the cascades' layers as a depth array and reads them through a linear greater-equal comparison sampler", () => {
+    expect(lit.textures?.find((t) => t.name === SHADOW_CASCADES_TEXTURE)).toEqual({
+      name: "shadowCascades",
+      binding: 19,
+      sampleType: "depth",
+      viewDimension: "2d-array",
+    });
+    expect(lit.samplers).toEqual([
+      {
+        name: SHADOW_COMPARE_SAMPLER,
+        filter: "linear",
+        address: "clamp-to-edge",
+        binding: 20,
+        compare: "greater-equal",
+      },
+    ]);
+    expect(cascadeShadowWgsl).toContain(
+      "@group(2) @binding(19) var shadow_cascades : texture_depth_2d_array;",
+    );
+    expect(cascadeShadowWgsl).toContain(
+      "@group(2) @binding(20) var shadow_compare : sampler_comparison;",
+    );
+    // Read by the fragment stage alone, where the receiver runs.
+    const read = bindingStages(lit.vertexWgsl);
+    expect([read.get(19), read.get(20)].map((stages) => Array.from(stages ?? []))).toEqual([
+      ["fragment"],
+      ["fragment"],
+    ]);
+  });
+
+  it("composes the receiver into the lit material alone, after its Draw, not into the shared source", () => {
+    const shade = lit.vertexWgsl.indexOf(terrainLitShadeWgsl);
+    const receiver = lit.vertexWgsl.indexOf(cascadeShadowWgsl);
+    expect(shade).toBeGreaterThan(0);
+    expect(receiver).toBe(shade + terrainLitShadeWgsl.length);
+    for (const spec of [
+      terrainDepthMaterialSpec("face-differences"),
+      terrainShadowMaterialSpec("face-differences", false),
+    ]) {
+      const code = spec.vertexWgsl.replaceAll(/\/\/[^\n]*/gu, "");
+      expect(code).not.toContain("fn cascade_lit_fraction");
+      expect(code).not.toContain("cascadeLight0");
+      expect(code).not.toContain("shadow_cascades");
+    }
+  });
+
+  it("samples with textureSampleCompareLevel, which needs no uniform control flow, never textureSampleCompare", () => {
+    const code = cascadeShadowWgsl.replaceAll(/\/\/[^\n]*/gu, "");
+    expect(code.match(/textureSampleCompareLevel\(/gu)).toHaveLength(1);
+    expect(code).not.toMatch(/textureSampleCompare\(/u);
+  });
+
+  it("forms the geometric normal before the discard and hands c′ to shade_terrain, 1 for reference fragments", () => {
+    const code = terrainLitShadeWgsl.replaceAll(/\/\/[^\n]*/gu, "");
+    const derivatives = code.indexOf("dpdyFine(in.fromCameraBf)");
+    expect(derivatives).toBeGreaterThan(0);
+    expect(derivatives).toBeLessThan(code.indexOf("discard"));
+    expect(code).toContain("var cascade_lit = 1.0;");
+    expect(code).toContain("shade_terrain(in, normal, reference, cascade_lit, at)");
+    expect(terrainLitWgsl).toContain("cascade_lit : f32,");
+  });
+
+  it("multiplies the cascades' term into star 0's direct light alone, at the map's share of the cut R07 used", () => {
+    expect(terrainLitWgsl).toContain("fn terrain_cascade_term(m : f32, cascade_lit : f32) -> f32");
+    expect(terrainLitWgsl).toMatch(
+      /if \(j == 0u\) \{[^}]*disc_visible_fraction\(star_distance_radii, clamp\(phi \+ max\(local_horizon, 0\.0\), 0\.0, LIT_PI\)\);\s*shadowed = shadowed \* terrain_cascade_term\(m, cascade_lit\);/u,
+    );
+    // The meter's class keeps the horizon's and the eclipse's tests alone.
+    expect(terrainLitWgsl).toContain(
+      "out.lit = out.lit || (horizon > TERRAIN_LIT_IRRADIANCE && any(visible > vec3f(TERRAIN_LIT_IRRADIANCE)));",
+    );
+  });
+
+  it("scales the horizon map's elevations by row 2's share before carrying them into the element's frame (R10.T15.b.2)", () => {
+    expect(terrainLitWgsl).toMatch(/terrain_horizon\([^)]*nu, towards, phi,\s*misc\.z\s*\)/u);
+    expect(horizonWgsl).toContain(
+      "let e = share * horizon_blended(slot, parent, patch_uv * 64.0, knots, morph);",
+    );
+    expect(horizonWgsl).toContain("return element_horizon(e, star, phi);");
+  });
+
+  it("shades a skirt's wall and a fin as the grid at their edge vertex below a share of 1 alone (R10.T15.b.2)", () => {
+    const code = terrainLitShadeWgsl.replaceAll(/\/\/[^\n]*/gu, "");
+    expect(code).toContain(
+      "let reference = in.kind != LIT_GRID && !skirt_lip(in) && !(terrain_row(2u).z < 1.0);",
+    );
+  });
+
+  it("reconstructs the disc's normal map as the disc does, operation for operation (R10.T15.b.2)", () => {
+    const sum = (text: string): string =>
+      asDiscs(text).slice(
+        asDiscs(text).indexOf("let corner_at"),
+        asDiscs(text).indexOf("let size"),
+      );
+    expect(asDiscs(uncommented(terrainLitShadeWgsl, "disc_stored_normal"))).toBe(
+      asDiscs(uncommented(bodyDiscWgsl, "stored_normal")),
+    );
+    expect(sum(uncommented(terrainLitShadeWgsl, "disc_shading_normal"))).toBe(
+      sum(uncommented(bodyDiscWgsl, "shading_normal")),
+    );
+    expect(sum(uncommented(bodyDiscWgsl, "shading_normal")).length).toBeGreaterThan(200);
+    expect(asDiscs(uncommented(terrainLitShadeWgsl, "disc_uv_to_st"))).toBe(
+      asDiscs(uncommented(cubeTexelWgsl, "uv_to_st")),
+    );
+  });
+
+  it("mixes the place lit, its datum, height and shading normal from the disc's by row 2's share below 1 alone, after the rebake's fade (R10.T15.b.2)", () => {
+    const code = terrainLitShadeWgsl.replaceAll(/\/\/[^\n]*/gu, "");
+    const fade = code.indexOf(
+      "normal = normalize(mix(disc_shading_normal(disc.face, disc.st, disc.datum), normal, share));",
+    );
+    expect(code).toMatch(
+      /at = ShadePlace\(\s*mix\(disc\.place, at\.place, share\), normalize\(mix\(disc\.datum, at\.datum, share\)\), share \* at\.heightM\s*\);/u,
+    );
+    // shade_terrain lights the texel at the place given, its own wherever no fade stands.
+    const shade = wgslFunction(terrainLitWgsl, "shade_terrain");
+    expect([shade.includes("let q = at.place;"), shade.includes("let nu = at.datum;")]).toEqual([
+      true,
+      true,
+    ]);
+    expect(wgslFunction(terrainLitWgsl, "own_shade_place")).toContain(
+      "(in.fromCameraBf + draw.cameraBodyFixedM.xyz) * draw.cameraBodyFixedM.w,",
+    );
+    expect(fade).toBeGreaterThan(code.indexOf("normalize(mix(normal, older, in.rebakeFade))"));
+    expect(code.slice(code.lastIndexOf("if (share < 1.0)", fade), fade)).toMatch(
+      /^if \(share < 1\.0\) \{\s*let disc = disc_place\(in, at\);\s*$/u,
+    );
+    expect(code).toContain("@group(2) @binding(24) var disc_normals : texture_2d_array<f32>;");
+    for (const path of ["baked-offsets", "face-differences"] as const) {
+      for (const spec of [
+        terrainLitMaterialSpec(path),
+        terrainLitEmissiveMaterialSpec(path),
+        terrainLitInteriorMaterialSpec(path),
+        terrainLitEmissiveInteriorMaterialSpec(path),
+      ]) {
+        expect(spec.textures).toContainEqual({
+          name: DISC_NORMALS_TEXTURE,
+          binding: TERRAIN_LIT_BINDINGS.discNormals,
+          viewDimension: "2d-array",
+        });
+      }
+    }
+  });
+});
+
+describe("the terrain's shadow casters (R10.T9.b)", () => {
+  it("registers both vertex paths' casters in the catalogue, compiled for depth-only", () => {
+    for (const spec of TERRAIN_SHADOW_MATERIALS) {
+      const entry = WGSL_CATALOGUE.find(
+        (candidate) => candidate.kind === "material" && candidate.spec === spec,
+      );
+      expect(entry?.kind === "material" ? entry.targets : undefined).toEqual(["depth-only"]);
+    }
+    expect(TERRAIN_SHADOW_MATERIALS.map((spec) => spec.displayName)).toEqual([
+      "TERRAIN SHADOWS OFFSETS",
+      "TERRAIN SHADOWS",
+    ]);
+    expect(TERRAIN_SHADOW_MATERIALS.map((spec) => spec.unclippedDepth)).toEqual([false, false]);
+  });
+
+  it.each([true, false])(
+    "writes depth alone, cull none, biased away by the cascades' bias, unclippedDepth %s as given",
+    (unclippedDepth) => {
+      const spec = terrainShadowMaterialSpec("face-differences", unclippedDepth);
+      expect({
+        cullMode: spec.cullMode,
+        depthWrite: spec.depthWrite,
+        colourWrites: spec.colourWrites,
+        blend: spec.blend,
+        textures: spec.textures,
+        samplers: spec.samplers,
+        depthBiasAway: spec.depthBiasAway,
+        unclippedDepth: spec.unclippedDepth,
+      }).toEqual({
+        cullMode: "none",
+        depthWrite: true,
+        colourWrites: false,
+        blend: "none",
+        textures: [],
+        samplers: [],
+        depthBiasAway: {
+          constant: CASCADE_DEPTH_BIAS.constant,
+          slopeScale: CASCADE_DEPTH_BIAS.slopeScale,
+          clamp: CASCADE_DEPTH_BIAS.clamp,
+        },
+        unclippedDepth,
+      });
+    },
+  );
+
+  it("binds what its entry points read, as the depth material does: R05's vertex storage and the survey mask", () => {
+    const offsets = terrainShadowMaterialSpec("baked-offsets", false);
+    expect(storageStages(offsets)).toEqual([
+      ["heights", "vertex", "vertex"],
+      ["slots", "vertex", "vertex"],
+      ["instances", "vertex", "vertex"],
+      ["contacts", "vertex", "vertex"],
+      ["offsets", "vertex", "vertex"],
+      ["surveyMask", "fragment vertex", "fragment vertex"],
+    ]);
+    expect(offsets.storageBuffers).toEqual(
+      terrainDepthMaterialSpec("baked-offsets").storageBuffers,
+    );
+    expect(undeclaredBindings(offsets)).toEqual([]);
+    expect(storageNames(terrainShadowMaterialSpec("face-differences", false))).not.toContain(
+      "offsets",
+    );
+  });
+
+  it("takes the lit material's own draw fields alone, its Draw mirroring each the shared source reads", () => {
+    for (const path of ["baked-offsets", "face-differences"] as const) {
+      const spec = terrainShadowMaterialSpec(path, false);
+      expect(spec.uniforms).toEqual(terrainLitMaterialSpec(path).uniforms.slice(0, 3));
+      expect(membersOf(declaredStructLayout(spec.vertexWgsl, "Draw"))).toEqual(packedDraw(spec));
+    }
+  });
+
+  it.each(["baked-offsets", "face-differences"] as const)(
+    "draws the lit vertex stage unchanged on %s, with a fragment stage that only discards and writes nothing",
+    (path) => {
+      const caster = terrainShadowMaterialSpec(path, false).vertexWgsl;
+      const lit = terrainLitMaterialSpec(path).vertexWgsl;
+      // The shared source up to the material's own Draw, and the path's source after it, are the
+      // lit material's own, byte for byte.
+      const shared = lit.slice(0, lit.indexOf(terrainLitShadeWgsl));
+      expect(caster).toBe(shared + terrainShadowWgsl + PATH_SOURCES[path]);
+      expect(shared).toContain("fn vertexMain(");
+      const code = terrainShadowWgsl.replaceAll(/\/\/[^\n]*/gu, "");
+      expect(code).toMatch(
+        /@fragment\s+fn fragmentMain\(in : LitVertexOut\) \{\s*if \(!survey_kept\(in\)\) \{\s*discard;\s*\}\s*\}/u,
+      );
+      expect(code).not.toContain("@location");
+      expect(code).not.toContain("frag_depth");
+    },
+  );
+});
+
+describe("the class laws (decision-r10-limb; decision-r07-t8b)", () => {
+  it("takes R10.T1.a's three laws onto R07's moon, airless-ice and lambert templates", () => {
+    expect(CLASS_LAW_TEMPLATES).toEqual({
+      1: { template: "moon", phaseExponent: 1 },
+      2: { template: "airless-ice", phaseExponent: AIRLESS_ICE_EXPONENT },
+      3: { template: "lambert", phaseExponent: 1 },
+    });
+  });
+
+  it("solves the Ice law's exponent to Ganymede's q of 0.80 at a constant L of 1, as the generator does", () => {
+    const law: PhotometricLaw = {
+      a: [1, 1, 1],
+      lommelSeeligerShare: 1,
+      template: "airless-ice",
+      phaseExponent: [AIRLESS_ICE_EXPONENT, AIRLESS_ICE_EXPONENT, AIRLESS_ICE_EXPONENT],
+    };
+    expect(lawPhaseIntegral(law)[1]).toBeCloseTo(0.8, 6);
+  });
+
+  it("tabulates the particulate rows' L(α) as L(0) times McEwen's profile, and Lambert's f ≡ 1, L ≡ 0", () => {
+    const ice = phaseFactorTableOf(classRowLaw(2, 0.38));
+    const lambert = phaseFactorTableOf(classRowLaw(3, 0));
+    for (const i of [0, 60, 180, 300, 360]) {
+      const alpha = i * PHASE_TABLE_STEP_RAD;
+      expect(ice.alpha[i]).toBe(Math.fround(0.38 * mcewenLunarProfile(alpha)));
+      expect(lambert.alpha[i]).toBe(0);
+      expect([lambert.rgb[3 * i], lambert.rgb[3 * i + 1], lambert.rgb[3 * i + 2]]).toEqual([
+        1, 1, 1,
+      ]);
+    }
+  });
+
+  it("reads a slot's photometry as a law, R, V and B as r, g and b, and none for law 0", () => {
+    const photometry = photometryOf([
+      [0.1, 0.12, 0.14, 1, 1],
+      [0.9, 0.92, 0.94, 3, 0],
+      [0, 0, 0, 0, 0],
+    ]);
+    expect(classPhotometryOf(photometry, 0)).toEqual({
+      a: [Math.fround(0.14), Math.fround(0.12), Math.fround(0.1)],
+      l0: 1,
+      code: 1,
+    });
+    expect(classPhotometryOf(photometry, 1)?.code).toBe(3);
+    expect(classPhotometryOf(photometry, 2)).toBeNull();
+    expect(classPhotometryOf(photometry, 7)).toBeNull();
+  });
+
+  it("refuses a slot naming a law no law has", () => {
+    expect(() => classPhotometryOf(photometryOf([[0.1, 0.1, 0.1, 9, 1]]), 0)).toThrow(/law 9/u);
+  });
+
+  it("keys the rows by law and L(0): every material at L(0) = 1 shares its law's row, a bright frost takes its own", () => {
+    const elsewhere = withTemplateCurve({
+      a: [0.1, 0.1, 0.1],
+      lommelSeeligerShare: 1,
+      template: "moon",
+      phaseExponent: [1, 1, 1],
+    });
+    const rows = new TerrainPhaseRows(elsewhere);
+    expect(rows.laws).toEqual([elsewhere]);
+    const regolith = rows.rowOf(PHASE_LAW.regolith, 1);
+    expect(rows.rowOf(PHASE_LAW.regolith, 1)).toBe(regolith);
+    const frost = rows.rowOf(PHASE_LAW.ice, 0.57789);
+    const ice = rows.rowOf(PHASE_LAW.ice, 1);
+    const lambert = rows.rowOf(PHASE_LAW.lambert, 0);
+    expect([regolith, frost, ice, lambert]).toEqual([1, 2, 3, 4]);
+    expect(rows.laws[frost]?.lommelSeeligerShare).toBe(0.57789);
+  });
+
+  it("counts a change of row 0's law as a version, and no change for the same law", () => {
+    const elsewhere = classRowLaw(PHASE_LAW.regolith, 1);
+    const rows = new TerrainPhaseRows(elsewhere);
+    const before = rows.version;
+    expect(rows.setElsewhere(elsewhere)).toBe(false);
+    expect(rows.version).toBe(before);
+    expect(rows.setElsewhere({ ...elsewhere, phaseExponent: [1.1, 1, 1] })).toBe(true);
+    expect(rows.version).toBe(before + 1);
+  });
+
+  it("counts no change for a law equal to row 0's by value, as each view's frame gives its own (R10.T16.b)", () => {
+    const elsewhere = classRowLaw(PHASE_LAW.regolith, 1);
+    const rows = new TerrainPhaseRows(elsewhere);
+    const before = rows.version;
+    expect(rows.setElsewhere({ ...elsewhere, a: [...elsewhere.a] })).toBe(false);
+    expect(rows.version).toBe(before);
+    expect(rows.setElsewhere({ ...elsewhere, lommelSeeligerShare: 0.5 })).toBe(true);
+    expect(rows.version).toBe(before + 1);
+  });
+
+  it("packs a slot's class laws: A and L(0), then the row, −1 for a slot with none", () => {
+    const rows = new TerrainPhaseRows(classRowLaw(3, 0));
+    const packed = packClassLaws(
+      photometryOf([
+        [0.1, 0.12, 0.14, 1, 1],
+        [0, 0, 0, 0, 0],
+        [0.9, 0.92, 0.94, 3, 0],
+      ]),
+      rows,
+      1,
+    );
+    expect(packed).toHaveLength(CLASS_LAW_ROWS * 4);
+    expect([...packed.subarray(0, 5)]).toEqual([
+      Math.fround(0.14),
+      Math.fround(0.12),
+      Math.fround(0.1),
+      1,
+      1,
+    ]);
+    expect(packed[8 + 4]).toBe(-1);
+    expect([...packed.subarray(16, 21)]).toEqual([
+      Math.fround(0.94),
+      Math.fround(0.92),
+      Math.fround(0.9),
+      0,
+      2,
+    ]);
+    for (let k = 3; k < TERRAIN_CLASSES; k += 1) {
+      expect(packed[8 * k + 4]).toBe(-1);
+    }
+    expect(rows.laws).toHaveLength(3);
+  });
+
+  it("scales each class's A for an oblate figure as law 0's and R07's disc's laws are (R10.T10.e)", () => {
+    const cOverA = 0.9;
+    const photometry = photometryOf([
+      [0.1, 0.12, 0.14, 1, 1],
+      [0.8, 0.85, 0.9, 2, 0.6],
+      [0.9, 0.92, 0.94, 3, 0],
+    ]);
+    const packed = packClassLaws(photometry, new TerrainPhaseRows(classRowLaw(3, 0)), cOverA);
+    const expected = [
+      [0.14, 0.12, 0.1, 1],
+      [0.9, 0.85, 0.8, 0.6],
+      [0.94, 0.92, 0.9, 0],
+    ] as const;
+    expected.forEach(([r, g, b, l0], k) => {
+      const factor = oblateAlbedoScale(Math.fround(l0), cOverA);
+      // A factor of order the flattening wherever the law limb-darkens, 1 under Lommel–Seeliger's
+      // (L(0) = 1), whose disc reaches p on any figure.
+      expect(factor === 1).toBe(l0 === 1);
+      expect([...packed.subarray(8 * k, 8 * k + 4)]).toEqual([
+        Math.fround(Math.fround(r) * factor),
+        Math.fround(Math.fround(g) * factor),
+        Math.fround(Math.fround(b) * factor),
+        Math.fround(l0),
+      ]);
+    });
+  });
+});
+
+describe("the lit terrain's lights", () => {
+  const annuli = annulusEdges(0.6, 0.2, 2);
+  const lighting: TerrainLighting = {
+    lights: [
+      {
+        direction: vec3(0, 0.6, 0.8),
+        distance: 2.3e4,
+        radius: 109,
+        illuminance: [1.2e5, 1.1e5, 1.0e5],
+        annuli: [annuli, annuli, annuli],
+      },
+    ],
+    occluders: [{ centre: vec3(60, 0, 0), radius: 0.27 }],
+    secondaries: [
+      { direction: vec3(1, 0, 0), distance: 60, radius: 0.27, illuminance: [0.2, 0.2, 0.2] },
+    ],
+    elsewhere: withTemplateCurve({
+      a: [0.12, 0.12, 0.12],
+      lommelSeeligerShare: 1,
+      template: "moon",
+      phaseExponent: [1, 1, 1],
+    }),
+    exposureScale: 1e-3,
+  };
+
+  it("packs them as terrainLit.wgsl reads them, law 0's A scaled for the figure", () => {
+    const rows = packTerrainLighting(lighting, 0.9);
+    expect(rows).toHaveLength(TERRAIN_LIGHT_ROWS * 4);
+    const row = (i: number) => [...rows.subarray(4 * i, 4 * i + 4)];
+    expect(row(0)).toEqual([1, 1, 1, 2]);
+    const k = oblateAlbedoScale(1, 0.9);
+    expect(row(1)).toEqual([0.12 * k, 0.12 * k, 0.12 * k, 1].map(Math.fround));
+    expect(row(2)).toEqual([0, Math.fround(1e-3 / Math.PI), 1, 0]);
+    expect(row(3)).toEqual([0, 0.6, 0.8, 2.3e4].map(Math.fround));
+    expect(row(4)).toEqual([1.2e5, 1.1e5, 1.0e5, 109].map(Math.fround));
+    expect(row(5)).toEqual([...annuli.edges.subarray(1, 3), 1, 1].map(Math.fround));
+    expect(row(19)).toEqual([60, 0, 0, 0.27].map(Math.fround));
+    expect(row(21)).toEqual([1, 0, 0, 60]);
+    expect(row(22)).toEqual([0.2, 0.2, 0.2, 0.27].map(Math.fround));
+  });
+
+  it("packs a fade's share of the terrain's own detail in row 2, 1 with no fade (R10.T15.b.2)", () => {
+    const discNormals = { kind: "texture", name: "disc normals" } as const;
+    const shareOf = (detailShare: number): number | undefined =>
+      packTerrainLighting({ ...lighting, fade: { detailShare, discNormals } }, 1)[2 * 4 + 2];
+    expect([shareOf(0), shareOf(0.375), shareOf(1)]).toEqual([0, 0.375, 1]);
+    expect(packTerrainLighting(lighting, 1)[2 * 4 + 2]).toBe(1);
+  });
+
+  it("draws at most two stars, occluders and planetshine sources", () => {
+    const star = lighting.lights[0];
+    const occluder = lighting.occluders[0];
+    const source = lighting.secondaries[0];
+    if (star === undefined || occluder === undefined || source === undefined) {
+      throw new Error("the fixture has one of each");
+    }
+    const many = packTerrainLighting(
+      {
+        ...lighting,
+        lights: [star, star, star],
+        occluders: [occluder, occluder, occluder],
+        secondaries: [source, source, source],
+      },
+      1,
+    );
+    expect([...many.subarray(0, 3)]).toEqual([2, 2, 2]);
+  });
+});
+
+/** An airless body's law of normal albedo `a` and L(0) `l` on a law's row. */
+function rowLaw(
+  code: 1 | 2 | 3,
+  a: number,
+  l: number,
+): { law: PhotometricLaw; table: PhaseFactorTable } {
+  const row = classRowLaw(code, l);
+  return { law: { ...row, a: [a, a, a] }, table: phaseFactorTableOf(row) };
+}
+
+describe("a texel's blend (R10.T10.b; Design note 8)", () => {
+  const regolith = rowLaw(1, 0.12, 1);
+  const frost = rowLaw(2, 0.85, 0.65);
+  const geometries = [
+    [0.9, 0.7, 20],
+    [0.5, 0.1, 60],
+    [0.2, 0.95, 110],
+  ] as const;
+
+  it("reflects w r₁ + (1 − w) r₂ for two classes in weights w and 1 − w, to 10⁻⁶", () => {
+    for (const w of [0, 0.25, 0.5, 0.9, 1]) {
+      for (const [mu0, mu, deg] of geometries) {
+        const ours = terrainReflectance(
+          [null, texelLawOf(regolith.law), texelLawOf(frost.law)],
+          [0, w, 1 - w],
+          mu0,
+          mu,
+          deg * RAD,
+        );
+        const one = brdf(regolith.law, mu0, mu, deg * RAD);
+        const two = brdf(frost.law, mu0, mu, deg * RAD);
+        for (const c of [0, 1, 2] as const) {
+          expect(Math.abs(ours[c] - (w * one[c] + (1 - w) * two[c]))).toBeLessThan(1e-6);
+        }
+      }
+    }
+  });
+
+  it("sums an even blend of regolith (0.12, L 1) and snow (0.9, L 0) under one f at μ₀ 0.5, μ 0.1, not the 1.7× of the mixed law", () => {
+    // The test's own construction: one f for both, each its own L, as Design note 8's example.
+    const f = phaseFactorTableOf(classRowLaw(1, 1)).rgb;
+    const tableAt = (l: number): PhaseFactorTable => ({
+      rgb: f,
+      alpha: new Float32Array(PHASE_TABLE_SAMPLES).fill(l),
+    });
+    const laws = [
+      null,
+      { a: [0.12, 0.12, 0.12] as const, table: tableAt(1) },
+      { a: [0.9, 0.9, 0.9] as const, table: tableAt(0) },
+    ];
+    const alpha = 30 * RAD;
+    const summed = terrainReflectance(laws, [0, 0.5, 0.5], 0.5, 0.1, alpha)[1];
+    const parts =
+      0.5 * brdfFromTable({ a: [0.12, 0.12, 0.12] }, tableAt(1), 0.5, 0.1, alpha)[1] +
+      0.5 * brdfFromTable({ a: [0.9, 0.9, 0.9] }, tableAt(0), 0.5, 0.1, alpha)[1];
+    const mixed = brdfFromTable({ a: [0.51, 0.51, 0.51] }, tableAt(0.5), 0.5, 0.1, alpha)[1];
+    expect(summed).toBeCloseTo(parts, 12);
+    expect(mixed / summed).toBeCloseTo(1.7, 2);
+  });
+
+  it("adds nothing for a zero weight, whatever the law", () => {
+    const broken = { a: [Number.NaN, Number.NaN, Number.NaN] as const, table: regolith.table };
+    const without = terrainReflectance([null, texelLawOf(regolith.law)], [0, 1], 0.6, 0.5, 0.4);
+    const with0 = terrainReflectance(
+      [null, texelLawOf(regolith.law), broken],
+      [0, 1, 0],
+      0.6,
+      0.5,
+      0.4,
+    );
+    expect(with0).toEqual(without);
+  });
+
+  it("names the class of the largest weight, the lowest on a tie, none without weight", () => {
+    expect(dominantSlot([0.1, 0.5, 0.4, 0, 0, 0, 0, 0])).toBe(1);
+    expect(dominantSlot([0.4, 0.4, 0.2, 0, 0, 0, 0, 0])).toBe(0);
+    expect(dominantSlot([0, 0, 0, 0, 0, 0, 0, 0.2])).toBe(7);
+    expect(dominantSlot([0, 0, 0, 0, 0, 0, 0, 0])).toBeNull();
+  });
+
+  it("draws a one-class palette's texel as the per-body law of that class", () => {
+    const photometry = { a: [0.14, 0.12, 0.1] as const, l0: 0.84, code: 2 as const };
+    const perBody = withTemplateCurve({
+      a: photometry.a,
+      lommelSeeligerShare: photometry.l0,
+      template: "airless-ice",
+      phaseExponent: [AIRLESS_ICE_EXPONENT, AIRLESS_ICE_EXPONENT, AIRLESS_ICE_EXPONENT],
+    });
+    for (const [mu0, mu, deg] of geometries) {
+      expect(
+        terrainReflectance(
+          [null, classTexelLaw(photometry, 1, PROVISIONAL_PHOTOMETRY.law)],
+          [0, 1],
+          mu0,
+          mu,
+          deg * RAD,
+        ),
+      ).toEqual(brdf(perBody, mu0, mu, deg * RAD));
+    }
+  });
+
+  it("gives law 0 what the named slots leave, and scales them down past 1", () => {
+    const named = [true, false, true, false, false, false, false, false];
+    expect(terrainShares([0.5, 0.3, 0.2, 0, 0, 0, 0, 0], named)).toEqual([
+      0.30000000000000004, 0.5, 0, 0.2, 0, 0, 0, 0, 0,
+    ]);
+    const over = terrainShares([0.75, 0, 0.5, 0, 0, 0, 0, 0], named);
+    expect(over[0]).toBe(0);
+    expect((over[1] ?? 0) + (over[3] ?? 0)).toBeCloseTo(1, 15);
+    expect(terrainShares([0, 0, 0, 0, 0, 0, 0, 0], named)[0]).toBe(1);
+  });
+
+  it("reads a texel's weights bilinearly between its quad's vertices, each byte ÷ 255", () => {
+    const weights = new Uint8Array(65 * 65 * 8);
+    // Vertex (3, 4) all slot 0, vertex (4, 4) all slot 1.
+    weights[8 * (4 * 65 + 3)] = 255;
+    weights[8 * (4 * 65 + 4) + 1] = 255;
+    const at = (x: number, y: number) => texelWeights(weights, x / 64, y / 64);
+    expect(at(3, 4).slice(0, 2)).toEqual([1, 0]);
+    expect(at(4, 4).slice(0, 2)).toEqual([0, 1]);
+    const middle = at(3.25, 4);
+    expect(middle[0]).toBeCloseTo(0.75, 12);
+    expect(middle[1]).toBeCloseTo(0.25, 12);
+    expect(texelWeights(new Uint8Array(), 0.5, 0.5)).toEqual([0, 0, 0, 0, 0, 0, 0, 0]);
+  });
+});
+
+/** Vertices along a patch's side. */
+const SIDE = 65;
+
+/**
+ * A maturity layer's codes for the twin's tests: each vertex's code at n and at n − 1 from a
+ * pattern of their own, spread over unorm16's range.
+ */
+const CODES = Uint16Array.from({ length: 2 * SIDE * SIDE }, (_, n) => {
+  const v = Math.floor(n / 2);
+  const x = v % SIDE;
+  const y = Math.floor(v / SIDE);
+  return n % 2 === 0 ? (x * 997 + y * 6_151) % 65_536 : (x * 3_001 + y * 211 + 17) % 65_536;
+});
+
+/**
+ * A patch's maturity nodes as the module lays them out, each node's B, V and R: slot k's level ℓ's
+ * node j at `3 (K (2k + ℓ) + j)`, rising with j, and distinct by band, slot and level.
+ */
+const MODULE_NODES = Float32Array.from({ length: CLASS_NODES_BYTES / 4 }, (_, n) => {
+  const band = n % 3;
+  const node = Math.floor(n / 3) % MATURITY_NODES;
+  const level = Math.floor(n / (3 * MATURITY_NODES)) % 2;
+  const slot = Math.floor(n / (6 * MATURITY_NODES));
+  return 0.05 + 0.01 * node + 0.002 * band + 0.1 * slot + 0.03 * level;
+});
+
+/** Slots 0 and 2 named, a limb-darkening slot 2; slot 1 empty. */
+const MATURITY_PHOTOMETRY = photometryOf([
+  [0.1, 0.12, 0.14, 1, 1],
+  [0, 0, 0, 0, 0],
+  [0.8, 0.85, 0.9, 2, 0.6],
+]);
+
+/** Vertex (x, y)'s albedo at `level` (0 n, 1 n − 1) over packed nodes, its own code's. */
+function vertexAlbedo(
+  packed: Float32Array,
+  slot: number,
+  level: 0 | 1,
+  x: number,
+  y: number,
+): [number, number, number] {
+  const code = CODES[2 * (SIDE * y + x) + level] ?? Number.NaN;
+  const first = 3 * MATURITY_NODES * (2 * slot + level);
+  return maturityNodeAlbedo(packed, first, maturitySegment(maturityCodeRatio(code)));
+}
+
+/** The largest difference between two colours' channels. */
+function largestDifference(a: ReadonlyArray<number>, b: ReadonlyArray<number>): number {
+  return Math.max(...a.map((value, c) => Math.abs(value - (b[c] ?? Number.NaN))));
+}
+
+/** A phase table's rows of their own, row 0 a Lambert law. */
+function freshRows(): TerrainPhaseRows {
+  return new TerrainPhaseRows(classRowLaw(3, 0));
+}
+
+/** Each slot's "drawn from its nodes" flag in packed class laws, word 5 of its 8. */
+function nodeFlags(laws: Float32Array): number[] {
+  return Array.from({ length: TERRAIN_CLASSES }, (_, k) => laws[8 * k + 5] ?? Number.NaN);
+}
+
+/** The calls of WGSL function `name` in `source`, its definition aside. */
+function wgslCalls(source: string, name: string): number {
+  return source.split(`${name}(`).length - 2;
+}
+
+describe("a class's albedo drawn from its maturity nodes (R10.T1.c's client half)", () => {
+  const cOverA = 0.9;
+  const packed = packClassNodes(MODULE_NODES, MATURITY_PHOTOMETRY, cOverA);
+
+  it("carries the maturity layer's words after the laws: a word of codes a vertex, then the nodes", () => {
+    expect([CLASS_MATURITY_BYTES, CLASS_NODES_BYTES]).toEqual([
+      SIDE * SIDE * 4,
+      8 * 2 * MATURITY_NODES * 3 * 4,
+    ]);
+    expect(CLASS_WEIGHTS_BYTES + CLASS_LAWS_BYTES + CLASS_MATURITY_BYTES + CLASS_NODES_BYTES).toBe(
+      CLASS_LAYERS_BYTES,
+    );
+    expect(terrainLitWgsl).toContain(
+      `const CLASS_MATURITY_WORD : u32 = ${String((CLASS_WEIGHTS_BYTES + CLASS_LAWS_BYTES) / 4)}u;`,
+    );
+    expect(terrainLitWgsl).toContain(
+      `const CLASS_NODE_WORD : u32 = ${String(
+        (CLASS_WEIGHTS_BYTES + CLASS_LAWS_BYTES + CLASS_MATURITY_BYTES) / 4,
+      )}u;`,
+    );
+    for (const read of [
+      // Both codes of a vertex from its word, n's in the low half (`unpack2x16unorm`'s x).
+      "unpack2x16unorm(class_layers[slot * CLASS_LAYER_WORDS + CLASS_MATURITY_WORD + y * VERTICES_PER_SIDE + x])",
+      "bitcast<f32>(class_layers[slot * CLASS_LAYER_WORDS + CLASS_LAW_WORD + 8u * k + 5u]) > 0.5",
+      "slot * CLASS_LAYER_WORDS + CLASS_NODE_WORD + 3u * (MATURITY_NODES * (2u * k + level) + j)",
+    ]) {
+      expect(terrainLitWgsl).toContain(read);
+    }
+  });
+
+  it("composes the nodes' library before terrainLit.wgsl in every terrain module", () => {
+    const specs = [
+      ...TERRAIN_LIT_MATERIALS,
+      ...TERRAIN_DEPTH_MATERIALS,
+      ...TERRAIN_SHADOW_MATERIALS,
+    ];
+    const misplaced = specs.filter(({ vertexWgsl }) => {
+      const library = vertexWgsl.indexOf(maturityNodesWgsl);
+      return !(library >= 0 && library < vertexWgsl.indexOf(terrainLitWgsl));
+    });
+    expect(misplaced.map(({ name }) => name)).toEqual([]);
+  });
+
+  it("flags each named slot drawn from its nodes in word 5 of its law, and packs as before without a layer", () => {
+    const without = packClassLaws(MATURITY_PHOTOMETRY, freshRows(), cOverA);
+    const flagged = packClassLaws(MATURITY_PHOTOMETRY, freshRows(), cOverA, true);
+    expect([nodeFlags(without), nodeFlags(flagged)]).toEqual([
+      [0, 0, 0, 0, 0, 0, 0, 0],
+      [1, 0, 1, 0, 0, 0, 0, 0],
+    ]);
+    const unflagged = flagged.slice();
+    for (let k = 0; k < TERRAIN_CLASSES; k += 1) {
+      unflagged[8 * k + 5] = 0;
+    }
+    expect(unflagged).toEqual(without);
+    expect(packClassLaws(MATURITY_PHOTOMETRY, freshRows(), cOverA, false)).toEqual(without);
+  });
+
+  it("packs the nodes as r, g, b, each scaled for the figure as its law's A is, zeros for a slot with none", () => {
+    expect(packed).toHaveLength(CLASS_NODES_BYTES / 4);
+    const slotValues = 6 * MATURITY_NODES;
+    const factors = [oblateAlbedoScale(1, cOverA), 0, oblateAlbedoScale(Math.fround(0.6), cOverA)];
+    expect(factors[2]).not.toBe(1);
+    for (let k = 0; k < TERRAIN_CLASSES; k += 1) {
+      const factor = factors[k] ?? 0;
+      const expected = Array.from({ length: slotValues }, (_, n) => {
+        const node = slotValues * k + n - (n % 3);
+        return Math.fround((MODULE_NODES[node + 2 - (n % 3)] ?? Number.NaN) * factor);
+      });
+      expect([...packed.subarray(slotValues * k, slotValues * (k + 1))]).toEqual(expected);
+    }
+    expect(() => packClassNodes(new Float32Array(10), MATURITY_PHOTOMETRY, cOverA)).toThrow(
+      RangeError,
+    );
+  });
+
+  it("packs nodes that repeat the photometry's albedo as its law's packed A, to the bit", () => {
+    const repeating = Float32Array.from({ length: CLASS_NODES_BYTES / 4 }, (_, n) => {
+      const slot = Math.floor(n / (6 * MATURITY_NODES));
+      return MATURITY_PHOTOMETRY[5 * slot + (n % 3)] ?? Number.NaN;
+    });
+    const nodes = packClassNodes(repeating, MATURITY_PHOTOMETRY, cOverA);
+    const laws = packClassLaws(
+      MATURITY_PHOTOMETRY,
+      new TerrainPhaseRows(classRowLaw(3, 0)),
+      cOverA,
+    );
+    for (const k of [0, 2]) {
+      const a = [...laws.subarray(8 * k, 8 * k + 3)];
+      for (let at = 6 * MATURITY_NODES * k; at < 6 * MATURITY_NODES * (k + 1); at += 3) {
+        expect([...nodes.subarray(at, at + 3)]).toEqual(a);
+      }
+    }
+  });
+
+  it("draws a vertex's own albedo at its code at n where the morph is 0", () => {
+    for (const [x, y] of [
+      [0, 0],
+      [3, 4],
+      [63, 17],
+      [64, 64],
+    ] as const) {
+      for (const slot of [0, 2]) {
+        expect(texelClassAlbedo(CODES, packed, slot, x / 64, y / 64, 0)).toEqual(
+          vertexAlbedo(packed, slot, 0, x, y),
+        );
+      }
+    }
+    // Below 0 it is the patch's own field as well.
+    expect(texelClassAlbedo(CODES, packed, 0, 0.5, 0.5, -0.25)).toEqual(
+      vertexAlbedo(packed, 0, 0, 32, 32),
+    );
+  });
+
+  it("draws the parent's field at a morph of 1, bilinear on its even vertices, at every child vertex", () => {
+    const parentAt = (x: number, y: number): [number, number, number] => {
+      // The even vertices about (x, y), each corner its own code at n − 1, and their mean.
+      const xs = x % 2 === 0 ? [x] : [x - 1, x + 1];
+      const ys = y % 2 === 0 ? [y] : [y - 1, y + 1];
+      const corners = ys.flatMap((cy) => xs.map((cx) => vertexAlbedo(packed, 2, 1, cx, cy)));
+      const mean = (c: 0 | 1 | 2): number =>
+        corners.reduce((sum, corner) => sum + corner[c], 0) / corners.length;
+      return [mean(0), mean(1), mean(2)];
+    };
+    let worst = 0;
+    for (let y = 0; y < SIDE; y += 3) {
+      for (let x = 0; x < SIDE; x += 1) {
+        const drawn = texelClassAlbedo(CODES, packed, 2, x / 64, y / 64, 1);
+        worst = Math.max(worst, largestDifference(drawn, parentAt(x, y)));
+      }
+    }
+    expect(worst).toBeLessThan(1e-15);
+    // Past 1 it is the parent's field as well.
+    expect(texelClassAlbedo(CODES, packed, 2, 0.3, 0.7, 1.5)).toEqual(
+      texelClassAlbedo(CODES, packed, 2, 0.3, 0.7, 1),
+    );
+  });
+
+  it("mixes the two levels' fields as (1 − μ) T_n + μ T_(n−1) between the ends", () => {
+    const [u, v] = [0.371, 0.629];
+    const own = texelClassAlbedo(CODES, packed, 0, u, v, 0);
+    const parent = texelClassAlbedo(CODES, packed, 0, u, v, 1);
+    for (const morph of [0.25, 0.5, 0.9]) {
+      expect(texelClassAlbedo(CODES, packed, 0, u, v, morph)).toEqual(
+        own.map((value, c) => (1 - morph) * value + morph * (parent[c] ?? Number.NaN)),
+      );
+    }
+  });
+
+  it("draws uniform codes as the nodes there, wherever the texel and whatever the morph", () => {
+    const code = 20_000;
+    const uniform = new Uint16Array(2 * SIDE * SIDE).fill(code);
+    const segment = maturitySegment(maturityCodeRatio(code));
+    const levelA = (level: 0 | 1): [number, number, number] =>
+      maturityNodeAlbedo(packed, 3 * MATURITY_NODES * (2 * 2 + level), segment);
+    for (const [u, v] of [
+      [0, 0],
+      [0.123, 0.987],
+      [1, 0.5],
+    ] as const) {
+      expect(
+        largestDifference(texelClassAlbedo(uniform, packed, 2, u, v, 0), levelA(0)),
+      ).toBeLessThan(1e-15);
+      expect(
+        largestDifference(texelClassAlbedo(uniform, packed, 2, u, v, 1), levelA(1)),
+      ).toBeLessThan(1e-15);
+    }
+  });
+
+  it("refuses codes too short for the texel's quad", () => {
+    expect(() => texelClassAlbedo(new Uint16Array(8), packed, 0, 0.5, 0.5, 0)).toThrow(RangeError);
+  });
+
+  it("replaces each named slot's A alone where a texel has a maturity layer, as the twin draws it", () => {
+    const elsewhere: PhotometricLaw = { ...classRowLaw(1, 1), a: [0.11, 0.12, 0.13] };
+    const maturity = { codes: CODES, nodes: MODULE_NODES };
+    const at = { maturity, u: 0.4, v: 0.6, morph: 0.35 };
+    const plain = terrainTexelLaws(MATURITY_PHOTOMETRY, elsewhere, cOverA);
+    const drawn = terrainTexelLaws(MATURITY_PHOTOMETRY, elsewhere, cOverA, at);
+    expect([drawn[0], drawn[2], drawn.slice(4)]).toEqual([plain[0], null, plain.slice(4)]);
+    for (const slot of [0, 2]) {
+      expect(drawn[slot + 1]).toEqual({
+        a: texelClassAlbedo(CODES, packed, slot, at.u, at.v, at.morph),
+        table: plain[slot + 1]?.table,
+      });
+    }
+    // Without a layer each slot's A is its law's, scaled for the figure.
+    const law = classPhotometryOf(MATURITY_PHOTOMETRY, 2);
+    expect(plain[3]?.a).toEqual(law === null ? null : classTexelLaw(law, cOverA, elsewhere).a);
+  });
+});
+
+describe("the lit terrain's term of a class drawn from its maturity nodes (R10.T1.c's client half)", () => {
+  it("draws μ ≤ 0 from the patch's quad alone and μ ≥ 1 from the parent's, mixing between", () => {
+    const albedo = wgslFunction(terrainLitWgsl, "terrain_class_albedo");
+    for (const line of [
+      "if (!(morph >= 1.0)) { own = maturity_quad_albedo(slot, k, 0u, maturity.own); }",
+      "if (morph > 0.0) { parent = maturity_quad_albedo(slot, k, 1u, maturity.parent); }",
+      "if (!(morph > 0.0)) { return own; }",
+      "if (morph >= 1.0) { return parent; }",
+      "return (1.0 - morph) * own + morph * parent;",
+    ]) {
+      expect(albedo).toContain(line);
+    }
+  });
+
+  it("takes the patch's quad as the weights' and the parent's on the even vertices, as the twin does", () => {
+    const quads = wgslFunction(terrainLitWgsl, "texel_maturity");
+    for (const line of [
+      "let base = min(vec2u(floor(max(s, vec2f(0.0)))), vec2u(63u));",
+      "let f = clamp(s - vec2f(base), vec2f(0.0), vec2f(1.0));",
+      "out.own = maturity_quad(slot, base, 1u, 0u, f);",
+      "let base = min(2u * vec2u(floor(max(s, vec2f(0.0)) / 2.0)), vec2u(62u));",
+      "let f = clamp((s - vec2f(base)) / 2.0, vec2f(0.0), vec2f(1.0));",
+      "out.parent = maturity_quad(slot, base, 2u, 1u, f);",
+    ]) {
+      expect(quads).toContain(line);
+    }
+    expect(wgslFunction(terrainLitWgsl, "maturity_quad_albedo")).toContain(
+      "return mix(mix(corners[0], corners[1], quad.at.x), mix(corners[2], corners[3], quad.at.x), quad.at.y);",
+    );
+  });
+
+  it("places a quad's corner c at (x + s (c & 1), y + s (c >> 1)) and takes its code at the quad's level, as the twin does", () => {
+    expect(wgslFunction(terrainLitWgsl, "maturity_quad")).toContain(
+      "for (var c = 0u; c < 4u; c = c + 1u) { " +
+        "let ratios = vertex_maturity(slot, corner.x + span * (c & 1u), corner.y + span * (c >> 1u)); " +
+        "let segment = maturity_segment(ratios[level]); " +
+        "quad.nodes[c] = segment.node; " +
+        "quad.fractions[c] = segment.fraction; }",
+    );
+    // The twin's `maturityQuad` inside a quad, the patch's (s 1) at n and the parent's (s 2) at
+    // n − 1: corner c's albedo at vertex (x + s (c & 1), y + s (c >> 1)) at its own code at the
+    // level, by its bilinear weight; fx ≠ fy, so that a corner put on the other axis is seen.
+    const packed = packClassNodes(MODULE_NODES, MATURITY_PHOTOMETRY, 0.9);
+    const misses = (
+      [
+        { level: 0, span: 1, x: 5, y: 9, fx: 0.25, fy: 0.625 },
+        { level: 1, span: 2, x: 10, y: 4, fx: 0.375, fy: 0.75 },
+      ] as const
+    ).map(({ level, span, x, y, fx, fy }) => {
+      const weights = [(1 - fx) * (1 - fy), fx * (1 - fy), (1 - fx) * fy, fx * fy];
+      const corners = weights.map((_, c) =>
+        vertexAlbedo(packed, 2, level, x + span * (c & 1), y + span * (c >> 1)),
+      );
+      const expected = ([0, 1, 2] as const).map((ch) =>
+        corners.reduce((sum, corner, c) => sum + (weights[c] ?? 0) * corner[ch], 0),
+      );
+      const u = (x + span * fx) / 64;
+      const v = (y + span * fy) / 64;
+      return largestDifference(texelClassAlbedo(CODES, packed, 2, u, v, level), expected);
+    });
+    expect(Math.max(...misses)).toBeLessThan(1e-15);
+  });
+
+  it("mixes each corner's nodes j and j + 1 of its slot's table at the quad's level by its segment, as the twin does", () => {
+    expect(wgslFunction(terrainLitWgsl, "maturity_quad_albedo")).toContain(
+      "for (var c = 0u; c < 4u; c = c + 1u) { " +
+        "let j = quad.nodes[c]; " +
+        "corners[c] = maturity_mix(class_node(slot, k, level, j), class_node(slot, k, level, j + 1u), quad.fractions[c]); }",
+    );
+    // The twin's `maturityQuadAlbedo` at a vertex, at n (μ 0) and at n − 1 (μ 1, an even vertex):
+    // (1 − f) Tⱼ + f Tⱼ₊₁ of slot k's nodes at level ℓ, from 3 (K (2k + ℓ) + j) of the packed
+    // nodes, as `class_node` reads them, j and f the segment of the vertex's code at ℓ.
+    const packed = packClassNodes(MODULE_NODES, MATURITY_PHOTOMETRY, 0.9);
+    for (const [slot, level, x, y] of [
+      [0, 0, 7, 11],
+      [2, 1, 12, 30],
+    ] as const) {
+      const code = CODES[2 * (SIDE * y + x) + level] ?? Number.NaN;
+      const { node, fraction } = maturitySegment(maturityCodeRatio(code));
+      const at = (j: number, ch: number): number =>
+        packed[3 * (MATURITY_NODES * (2 * slot + level) + j) + ch] ?? Number.NaN;
+      expect([fraction > 0, texelClassAlbedo(CODES, packed, slot, x / 64, y / 64, level)]).toEqual([
+        true,
+        [0, 1, 2].map((ch) => (1 - fraction) * at(node, ch) + fraction * at(node + 1, ch)),
+      ]);
+    }
+  });
+
+  it("skips a slot of no share before its flag or nodes are read, and gathers the texel's segments once", () => {
+    const albedos = wgslFunction(terrainLitWgsl, "terrain_albedos");
+    const skip = albedos.indexOf("if (!(shares[k + 1u] > 0.0)) { continue; }");
+    expect(skip).toBeGreaterThan(0);
+    // The slot is the instance's, and on a rebake's second pass its older bake's (R10.T16.i).
+    expect(skip).toBeLessThan(albedos.indexOf("class_drawn_from_nodes(slot, k)"));
+    expect(albedos).toContain("albedos[0] = terrain_row(1u).xyz;");
+    expect(albedos).toContain("albedos[k + 1u] = class_law(base, k).law.a;");
+    // One call each in the source, so that a compiler inlining every call takes one copy.
+    expect([
+      wgslCalls(terrainLitWgsl, "texel_maturity"),
+      wgslCalls(terrainLitWgsl, "terrain_class_albedo"),
+      wgslCalls(terrainLitWgsl, "maturity_quad"),
+      wgslCalls(terrainLitWgsl, "maturity_quad_albedo"),
+    ]).toEqual([1, 1, 2, 2]);
+  });
+
+  it("weighs each law's A from the texel's albedos in the reflectance and the sky light's mean", () => {
+    expect(wgslFunction(terrainLitWgsl, "terrain_reflectance")).toContain(
+      "reflectance = reflectance + share * albedos[m] * row.rgb * disc_term;",
+    );
+    const shade = wgslFunction(terrainLitWgsl, "shade_terrain");
+    // Each class set's A and shares (`class_sets`, lane fix-coast-class-map), by its weight.
+    expect(wgslFunction(terrainLitWgsl, "class_sets")).toContain(
+      "sets.albedos[s] = terrain_albedos(",
+    );
+    expect(shade).toContain("set_a = set_a + sets.shares[s][m] * sets.albedos[s][m];");
+    expect(shade).toContain("mean_a = mean_a + sets.weight[s] * set_a;");
+    expect(shade).not.toContain("terrain_law(in.slot, m).a");
+  });
+
+  it("shades a texel by its class sets, its own, its parent's by μ and its cells' ancestor's by the fade, of weights (1 − c)(1 − μ), (1 − c) μ and c (lane fix-coast-class-map)", () => {
+    const sets = wgslFunction(terrainLitWgsl, "class_sets");
+    expect([
+      sets.includes("let own = (1.0 - c) * (1.0 - mu);"),
+      sets.includes("sets.weight[sets.count] = (1.0 - c) * mu;"),
+      sets.includes("sets.weight[sets.count] = c;"),
+      sets.includes("(in.cells.w & CLASS_MORPH) != 0u"),
+      wgslFunction(terrainLitWgsl, "class_sets_reflectance").includes(
+        "reflectance = reflectance + (*sets).weight[s] * terrain_reflectance(",
+      ),
+      // One call each of the shares, the albedos and the reflectance in the source.
+      wgslCalls(terrainLitWgsl, "terrain_shares"),
+      wgslCalls(terrainLitWgsl, "terrain_albedos"),
+      wgslCalls(terrainLitWgsl, "terrain_reflectance"),
+    ]).toEqual([true, true, true, true, true, 1, 1, 1]);
+  });
+
+  it("cuts each planetshine source's disc at the datum's tangent plane, as the disc does (R10.T10.g)", () => {
+    expect(wgslFunction(terrainLitWgsl, "shade_terrain")).toMatch(
+      /let cut = max\(angle_between\(nu, towards\) - angle_between\(normal, towards\), 0\.0\);\s+let irradiance = planetshine_irradiance\(to_source, source\.w, place\.w, normal, cut\);/u,
+    );
+  });
+});
+
+/** decision-r10-limb's particulate rule L_p(x) (`material/properties.rs`' `limb_parameter`). */
+function particulateLimb(x: number): number {
+  const onset = 0.6;
+  const enceladus = 1.35;
+  const limb = 0.38;
+  if (!(x > onset)) {
+    return 1;
+  }
+  if (x >= enceladus) {
+    return limb;
+  }
+  return (limb * enceladus * (x - onset) + onset * (enceladus - x)) / (x * (enceladus - onset));
+}
+
+/** Eight-point Gauss–Legendre on [0, 1]. */
+const GL_NODES = [
+  0.019855071751231856, 0.10166676129318664, 0.2372337950418355, 0.4082826787521751,
+  0.5917173212478249, 0.7627662049581645, 0.8983332387068134, 0.9801449282487681,
+];
+const GL_WEIGHTS = [
+  0.05061426814518813, 0.11119051722668724, 0.15685332293894363, 0.181341891689181,
+  0.181341891689181, 0.15685332293894363, 0.11119051722668724, 0.05061426814518813,
+];
+
+/** The emission cosines' subintervals: [0, 10⁻⁶], then 40 geometric steps to 1. */
+const MU_EDGES = [0, ...Array.from({ length: 41 }, (_, k) => 10 ** (-6 + (6 * k) / 40))];
+
+/** Midpoints in the relative azimuth over [0, π], doubled for its other half. */
+const AZIMUTHS = 180;
+
+/**
+ * η(μ₀) = A_h ÷ A_N of a row: (1 ÷ π μ₀) ∫ (I/F at A = 1) μ dΩ over the hemisphere, the I/F the
+ * twin's (`brdfFromTable`, the row's f and L(α)), cos α = μ₀ μ + sin i sin e cos φ.
+ */
+function eta(table: PhaseFactorTable, mu0: number): number {
+  const sinI = Math.sqrt(1 - mu0 * mu0);
+  const dPhi = Math.PI / AZIMUTHS;
+  const one = { a: [1, 1, 1] as const };
+  let sum = 0;
+  for (let s = 0; s + 1 < MU_EDGES.length; s += 1) {
+    const lo = MU_EDGES[s] ?? 0;
+    const hi = MU_EDGES[s + 1] ?? 1;
+    for (let g = 0; g < GL_NODES.length; g += 1) {
+      const mu = lo + (hi - lo) * (GL_NODES[g] ?? 0);
+      const w = (hi - lo) * (GL_WEIGHTS[g] ?? 0);
+      const sinE = Math.sqrt(Math.max(0, 1 - mu * mu));
+      let ring = 0;
+      for (let p = 0; p < AZIMUTHS; p += 1) {
+        const cosAlpha = mu0 * mu + sinI * sinE * Math.cos((p + 0.5) * dPhi);
+        const alpha = Math.acos(Math.min(1, Math.max(-1, cosAlpha)));
+        ring += brdfFromTable(one, table, mu0, mu, alpha)[1];
+      }
+      sum += w * mu * ring * 2 * dPhi;
+    }
+  }
+  return sum / (Math.PI * mu0);
+}
+
+/** The incidences of the bound's check (decision-r10-limb §3). */
+const MU0S = [1, 0.5, 0.2, 0.1, 0.05, 0.02, 0.01, 0.005];
+
+describe("the rows' energy bound, with their f and L(α) (decision-r10-limb §3)", () => {
+  it("keeps every A_h at most 1 on each particulate row, on an A_N grid up to its ceiling of 1.35", () => {
+    let worst = { code: 0, normalAlbedo: 0, mu0: 0, ah: 0 };
+    for (const code of [1, 2] as const) {
+      // L(0) is 1 up to A_N 0.60, where A_h = A_N η rises with A_N: its top, 0.60, stands for the
+      // grid below it; above it each A_N has an L(0) of its own.
+      for (let k = 12; k <= 27; k += 1) {
+        const normalAlbedo = 0.05 * k;
+        const table = phaseFactorTableOf(classRowLaw(code, particulateLimb(normalAlbedo)));
+        for (const mu0 of MU0S) {
+          const ah = normalAlbedo * eta(table, mu0);
+          if (ah > worst.ah) {
+            worst = { code, normalAlbedo, mu0, ah };
+          }
+        }
+      }
+    }
+    // The Ice row at its ceiling, 1.35 × 0.720 = 0.97 by the ruling's figures.
+    expect(worst).toMatchObject({ code: 2, normalAlbedo: expect.closeTo(1.35, 9) });
+    expect(worst.ah).toBeLessThanOrEqual(1);
+    expect(worst.ah).toBeCloseTo(0.97, 1);
+  });
+
+  it("gives the Ice row at L(0) 0.38 its sup η of 0.720 and its η(1) of 0.636, to 0.01", () => {
+    const table = phaseFactorTableOf(classRowLaw(2, 0.38));
+    const etas = MU0S.map((mu0) => eta(table, mu0));
+    expect(Math.abs((etas[0] ?? 0) - 0.636)).toBeLessThan(0.01);
+    expect(Math.abs(Math.max(...etas) - 0.72)).toBeLessThan(0.01);
+  });
+
+  it("holds the Lambert row's η at 1 at every incidence, to 10⁻⁶", () => {
+    const table = phaseFactorTableOf(classRowLaw(3, 0));
+    for (const mu0 of MU0S) {
+      expect(Math.abs(eta(table, mu0) - 1)).toBeLessThan(1e-6);
+    }
+  });
+});
+
+describe("the interior patches' lit forms (plan R14, R14.T1.a)", () => {
+  /** `terrainLitShade.wgsl`'s survey discard, which the interior forms take out. */
+  const DISCARD = "  if (!survey_kept(in)) {\n    discard;\n  }\n";
+
+  it.each(["baked-offsets", "face-differences"] as const)(
+    "makes the %s path's from the plain and emissive forms, the survey discard alone taken out, their bindings and states the same",
+    (path) => {
+      for (const [form, interior] of [
+        [terrainLitMaterialSpec(path), terrainLitInteriorMaterialSpec(path)],
+        [terrainLitEmissiveMaterialSpec(path), terrainLitEmissiveInteriorMaterialSpec(path)],
+      ] as const) {
+        const [head = "", tail = "", ...rest] = form.fragmentWgsl.split(DISCARD);
+        expect(rest).toEqual([]);
+        expect(interior.fragmentWgsl).toBe(head + tail);
+        // No discard statement is left, outside the comments that name it.
+        expect(interior.fragmentWgsl.replaceAll(/\/\/[^\n]*/gu, "")).not.toMatch(/\bdiscard\b/u);
+        expect(interior.vertexWgsl).toBe(interior.fragmentWgsl);
+        expect({
+          ...interior,
+          name: form.name,
+          displayName: form.displayName,
+          vertexWgsl: form.vertexWgsl,
+          fragmentWgsl: form.fragmentWgsl,
+        }).toEqual(form);
+      }
+      // The `terrain-lit-` prefix the probes and the hand-over check read (R10.T14, R10.T16).
+      expect([
+        terrainLitInteriorMaterialSpec(path).name,
+        terrainLitEmissiveInteriorMaterialSpec(path).name,
+      ]).toEqual([`terrain-lit-interior-${path}`, `terrain-lit-emissive-interior-${path}`]);
+    },
+  );
+
+  it("are registered in the catalogue for both paths", () => {
+    const names = WGSL_CATALOGUE.flatMap((entry) =>
+      entry.kind === "material" ? [entry.spec.name] : [],
+    );
+    expect(names).toEqual(
+      expect.arrayContaining(
+        [...TERRAIN_LIT_INTERIOR_MATERIALS, ...TERRAIN_LIT_EMISSIVE_INTERIOR_MATERIALS].map(
+          (m) => m.name,
+        ),
+      ),
+    );
+  });
+
+  it("refuses a source without the survey discard, or with two", () => {
+    expect(() => withoutSurveyDiscard("fn main() {}")).toThrow(/once, found 0/u);
+    expect(() => withoutSurveyDiscard(DISCARD + DISCARD)).toThrow(/once, found 2/u);
+  });
+});
+
+describe("the lit terrain's emissive form (R08.T18.a)", () => {
+  /** The line `withTerrainEmission` adds to `shade_terrain`. */
+  // Each class set's emission by its weight (`class_sets`, lane fix-coast-class-map).
+  const LINE =
+    "  for (var s = 0u; s < sets.count; s = s + 1u) {\n    out.radiance = out.radiance + sets.weight[s] * terrain_emission(nu, sets.shares[s], sets.albedos[s], sets.slot[s]);\n  }\n";
+
+  it.each(["baked-offsets", "face-differences"] as const)(
+    "makes the %s path's from its plain form, one loop added to shade_terrain and the emission appended, its bindings and states the same",
+    (path) => {
+      const plain = terrainLitMaterialSpec(path);
+      const emissive = terrainLitEmissiveMaterialSpec(path);
+      const appended = `\n${THERMAL_WGSL}\n${terrainEmissionWgsl}`;
+      expect(emissive.fragmentWgsl.endsWith(appended)).toBe(true);
+      const head = emissive.fragmentWgsl.slice(0, -appended.length);
+      expect(head.split(LINE)).toHaveLength(2);
+      expect(head.replace(LINE, "")).toBe(plain.fragmentWgsl);
+      expect(emissive.vertexWgsl).toBe(emissive.fragmentWgsl);
+      expect({
+        ...emissive,
+        name: plain.name,
+        displayName: plain.displayName,
+        vertexWgsl: plain.vertexWgsl,
+        fragmentWgsl: plain.fragmentWgsl,
+      }).toEqual(plain);
+      // The `terrain-lit-` prefix the probes and the hand-over check read (R10.T14, R10.T16).
+      expect(emissive.name).toBe(`terrain-lit-emissive-${path}`);
+    },
+  );
+
+  it("is registered in the catalogue for both paths", () => {
+    expect(TERRAIN_LIT_EMISSIVE_MATERIALS.map((spec) => spec.name)).toEqual([
+      "terrain-lit-emissive-baked-offsets",
+      "terrain-lit-emissive-face-differences",
+    ]);
+    const names = WGSL_CATALOGUE.flatMap((entry) =>
+      entry.kind === "material" ? [entry.spec.name] : [],
+    );
+    expect(names).toEqual(
+      expect.arrayContaining(TERRAIN_LIT_EMISSIVE_MATERIALS.map((m) => m.name)),
+    );
+  });
+
+  it("refuses a source without shade_terrain's end", () => {
+    expect(() => withTerrainEmission("fn main() {}")).toThrow(/once, found 0/u);
+  });
+
+  it("reads its block from the row the lights end at", () => {
+    const first = /const FIRST_TERRAIN_EMISSION_ROW : u32 = (\d+)u;/u.exec(terrainEmissionWgsl);
+    expect(Number(first?.[1])).toBe(TERRAIN_LIGHT_ROWS);
+    expect(TERRAIN_LIGHT_BUFFER_ROWS).toBe(TERRAIN_LIGHT_ROWS + 3);
+  });
+
+  it("packs the lighting's emission after the lights, and the lights alone as before without it", () => {
+    const lighting: TerrainLighting = {
+      lights: [],
+      occluders: [],
+      secondaries: [],
+      elsewhere: classRowLaw(1, 1),
+      exposureScale: 1e-4,
+    };
+    const emission = {
+      field: surfaceTemperatureFieldOf(lavaWorldSurface()),
+      star: vec3(0, 0.6, 0.8),
+      meltClasses: [],
+    };
+    const plain = packTerrainLighting(lighting, 1);
+    expect(plain).toHaveLength(TERRAIN_LIGHT_ROWS * 4);
+    const emitting = packTerrainLighting({ ...lighting, emission }, 1);
+    expect(emitting).toHaveLength(TERRAIN_LIGHT_BUFFER_ROWS * 4);
+    expect([...emitting.subarray(0, TERRAIN_LIGHT_ROWS * 4)]).toEqual([...plain]);
+    expect([...emitting.subarray(TERRAIN_LIGHT_ROWS * 4)]).toEqual([
+      ...packDiscEmission(emission, 1e-4),
+    ]);
+  });
+
+  it("flags each palette slot of the Melt form in its laws' word 6, and no other, as before without them", () => {
+    const palette = Uint8Array.from([
+      1,
+      0,
+      MELT_CLASS_CODE,
+      1,
+      255,
+      255,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+    ]);
+    const slots = paletteMeltSlots(palette);
+    expect(slots).toEqual([false, true, false, false, false, false, false, false]);
+    const photometry = photometryOf([
+      [0.1, 0.12, 0.14, 1, 1],
+      [0.05, 0.05, 0.05, 1, 1],
+    ]);
+    const rows = new TerrainPhaseRows(classRowLaw(3, 0));
+    const flagged = packClassLaws(photometry, rows, 1, false, slots);
+    const plain = packClassLaws(photometry, rows, 1);
+    expect([flagged[6], flagged[8 + 6]]).toEqual([0, 1]);
+    expect(plain[8 + 6]).toBe(0);
+    expect([...flagged].filter((value, i) => value !== plain[i])).toEqual([1]);
+  });
+});
+
+/** A served body's law: its template at its own L and s = 1, as plan 14 states it, at p. */
+function served(template: PhaseTemplateId, share: number, p: number): PhotometricLaw {
+  const a = p / shapeGeometricAlbedo(share);
+  return withTemplateCurve({
+    a: [a, a, a],
+    lommelSeeligerShare: share,
+    template,
+    phaseExponent: [1, 1, 1],
+  });
+}
+
+describe("a Regolith class on its body's curve (R10.T10.e)", () => {
+  // The airless rocks' Mercury at the Moon-like world's p_V and Mars at its own (T10.a's table).
+  const MERCURY = served("mercury", 1, 0.142);
+  const MARS = served("mars", 0.5, 0.17);
+  const MAGMA = served("magma", 1, 0.142);
+  // `TEST MOON`'s: the Regolith row at L(0) = 1 (`terrainScene.ts`' `terrainMoonPhotometry`).
+  const TEST_MOON: PhotometricLaw = { ...classRowLaw(PHASE_LAW.regolith, 1), a: [0.2, 0.2, 0.2] };
+
+  /** In-plane geometries at phase α, deg: i and e either side of the normal and on one side. */
+  function geometriesAt(alphaDeg: number): ReadonlyArray<readonly [number, number]> {
+    const pairs = [
+      [alphaDeg / 2, alphaDeg / 2],
+      [0, alphaDeg],
+      [alphaDeg, 0],
+      [alphaDeg + 20, 20],
+      [20, alphaDeg + 20],
+    ];
+    return pairs
+      .filter(([i = 0, e = 0]) => i < 85 && e < 85)
+      .map(([i = 0, e = 0]) => [Math.cos(i * RAD), Math.cos(e * RAD)] as const);
+  }
+
+  it("takes the body's template, s and L(α) curve on a regolith template, its L(0) no higher than the body's", () => {
+    for (const body of [TEST_MOON, MERCURY, MAGMA, MARS]) {
+      expect(REGOLITH_TEMPLATES.has(body.template)).toBe(true);
+      for (const l0 of [1, 0.6]) {
+        const row = classRowLaw(PHASE_LAW.regolith, l0, body);
+        expect(row.template).toBe(body.template);
+        expect(row.phaseExponent).toBe(body.phaseExponent);
+        expect(row.lommelSeeligerCurve).toBe(body.lommelSeeligerCurve);
+        expect(row.lommelSeeligerShare).toBe(l0);
+        // Mars's 0.5 caps both; the airless templates' 1 caps neither.
+        expect(row.lommelSeeligerCeiling).toBe(body === MARS ? 0.5 : undefined);
+      }
+    }
+    // The share drawn: Mars's constant 0.5; Mercury's L(0) on McEwen's profile.
+    const mars = phaseFactorTableOf(classRowLaw(PHASE_LAW.regolith, 1, MARS));
+    expect([...mars.alpha].every((share) => share === 0.5)).toBe(true);
+    const mercury = phaseFactorTableOf(classRowLaw(PHASE_LAW.regolith, 1, MERCURY));
+    expect(mercury.alpha[120]).toBe(Math.fround(mcewenLunarProfile(120 * PHASE_TABLE_STEP_RAD)));
+  });
+
+  it("keeps the Moon's curve at s = 1 on every other template, and the Ice and Lambert rows on every body", () => {
+    const others: ReadonlyArray<PhaseTemplateId> = [
+      "venus",
+      "earth",
+      "jupiter",
+      "saturn",
+      "uranus",
+      "neptune",
+      "airless-ice",
+      "snowball",
+      "lambert",
+    ];
+    for (const template of others) {
+      expect(REGOLITH_TEMPLATES.has(template)).toBe(false);
+      const body = lawFor([0.3, 0.3, 0.3], [0.9, 0.9, 0.9], template);
+      for (const l0 of [1, 0.6]) {
+        expect(classRowLaw(PHASE_LAW.regolith, l0, body)).toEqual(
+          classRowLaw(PHASE_LAW.regolith, l0),
+        );
+      }
+    }
+    for (const body of [TEST_MOON, MERCURY, MARS]) {
+      expect(classRowLaw(PHASE_LAW.ice, 0.8, body)).toEqual(classRowLaw(PHASE_LAW.ice, 0.8));
+      expect(classRowLaw(PHASE_LAW.lambert, 0, body)).toEqual(classRowLaw(PHASE_LAW.lambert, 0));
+    }
+  });
+
+  it.each([
+    ["Mercury's", MERCURY],
+    ["Mars's", MARS],
+  ])(
+    "draws ground of the body's p as the body's own law on %s template, at every phase and geometry",
+    (_, body) => {
+      // The worker's regolith at the body's p: L(0) 1 under the particulate rule, so A = p.
+      const row = classRowLaw(PHASE_LAW.regolith, 1, body);
+      const p = geometricAlbedo(body)[1];
+      let worst = 0;
+      let checked = 0;
+      for (let alphaDeg = 0; alphaDeg <= 150; alphaDeg += 10) {
+        for (const [mu0, mu] of geometriesAt(alphaDeg)) {
+          const surveyed = brdfFromTable(
+            { a: [p, p, p] },
+            phaseFactorTableOf(row),
+            mu0,
+            mu,
+            alphaDeg * RAD,
+          );
+          const unsurveyed = brdf(body, mu0, mu, alphaDeg * RAD);
+          for (const c of [0, 1, 2] as const) {
+            expect(unsurveyed[c]).toBeGreaterThan(0);
+            worst = Math.max(worst, Math.abs(surveyed[c] / unsurveyed[c] - 1));
+            checked += 1;
+          }
+        }
+      }
+      expect(checked).toBe(144);
+      // The two rows' f in `f32`, one of them 1.2 times the other on Mars.
+      expect(worst).toBeLessThan(1e-6);
+    },
+  );
+
+  it("states plan 14's q on the fixtures' templates: Mercury's 0.47980, Mars's 1.08465", () => {
+    // Plan 14's `templates.golden` at each template's own L.
+    expect(lawPhaseIntegral(MERCURY)[1]).toBeCloseTo(0.4798, 4);
+    expect(lawPhaseIntegral(MARS)[1]).toBeCloseTo(1.0846, 3);
+  });
+
+  it.each([
+    ["Mercury's", MERCURY],
+    ["magma's", MAGMA],
+    ["Mars's", MARS],
+  ])("gives a class on %s template the body's q", (_, body) => {
+    const row = classRowLaw(PHASE_LAW.regolith, 1, body);
+    expect(lawPhaseIntegral(row)[1] / lawPhaseIntegral(body)[1]).toBeCloseTo(1, 12);
+  });
+
+  it.each([
+    ["Mercury's", MERCURY],
+    ["magma's", MAGMA],
+    ["Mars's", MARS],
+  ])("keeps a class's p, A at L(0) 1, on %s template", (_, body) => {
+    const row = classRowLaw(PHASE_LAW.regolith, 1, body);
+    expect(geometricAlbedo({ ...row, a: [0.2, 0.2, 0.2] })).toEqual([0.2, 0.2, 0.2]);
+  });
+
+  it("drew the Moon's curve at s = 1 on every body before: q +30.5% on Mercury's, −42.3% on Mars's", () => {
+    const moonRow = lawPhaseIntegral(classRowLaw(PHASE_LAW.regolith, 1))[1];
+    expect([
+      moonRow / lawPhaseIntegral(MERCURY)[1] - 1,
+      moonRow / lawPhaseIntegral(MARS)[1] - 1,
+    ]).toEqual([expect.closeTo(0.305, 3), expect.closeTo(-0.423, 3)]);
+  });
+
+  it("leaves TEST MOON's rows as they were, bit for bit, on its Moon's template at s = 1 (T10.g's hand-back)", () => {
+    for (const l0 of [1, 0.84, 0.3]) {
+      expect(packPhaseFactorRows([classRowLaw(PHASE_LAW.regolith, l0, TEST_MOON)])).toEqual(
+        packPhaseFactorRows([classRowLaw(PHASE_LAW.regolith, l0)]),
+      );
+    }
+  });
+
+  it("makes the Regolith rows again in their places when row 0's law changes, the other rows kept", () => {
+    // The resources' stand-in until the first frame's lights: Lambert's row.
+    const rows = new TerrainPhaseRows(classRowLaw(PHASE_LAW.lambert, 0));
+    const regolith = rows.rowOf(PHASE_LAW.regolith, 1);
+    const ice = rows.rowOf(PHASE_LAW.ice, 1);
+    const iceLaw = rows.laws[ice];
+    expect(rows.laws[regolith]).toEqual(classRowLaw(PHASE_LAW.regolith, 1));
+    const before = rows.version;
+    expect(rows.setElsewhere(MARS)).toBe(true);
+    expect(rows.version).toBe(before + 1);
+    expect(rows.laws[0]).toBe(MARS);
+    expect(rows.laws[regolith]).toEqual(classRowLaw(PHASE_LAW.regolith, 1, MARS));
+    expect(rows.laws[ice]).toBe(iceLaw);
+    expect(rows.rowOf(PHASE_LAW.regolith, 1)).toBe(regolith);
+    // A row asked for afterwards is made on row 0's law at once.
+    const bright = rows.rowOf(PHASE_LAW.regolith, 0.8);
+    expect(rows.laws[bright]).toEqual(classRowLaw(PHASE_LAW.regolith, 0.8, MARS));
+    expect(rows.setElsewhere(MERCURY)).toBe(true);
+    expect(rows.laws[regolith]).toEqual(classRowLaw(PHASE_LAW.regolith, 1, MERCURY));
+    expect(rows.laws[bright]).toEqual(classRowLaw(PHASE_LAW.regolith, 0.8, MERCURY));
+  });
+
+  it("draws the twin's class on its body's row", () => {
+    const photometry = { a: [0.17, 0.17, 0.17] as const, l0: 1, code: PHASE_LAW.regolith };
+    expect(classTexelLaw(photometry, 1, MARS).table).toEqual(
+      phaseFactorTableOf(classRowLaw(PHASE_LAW.regolith, 1, MARS)),
+    );
+  });
+});
+
+/** Bytes of each inter-stage type a vertex stage here hands on (W3C WGSL's sizes). */
+const INTER_STAGE_BYTES: Readonly<Record<string, number>> = {
+  f32: 4,
+  u32: 4,
+  vec2f: 8,
+  vec2u: 8,
+  vec3f: 12,
+  vec4f: 16,
+  vec4u: 16,
+};
+
+/** The bytes a vertex stage hands its fragment stage by struct `name` in `source`, position included. */
+function interStageBytes(source: string, name: string): number {
+  const body = new RegExp(String.raw`struct\s+${name}\s*\{([^}]*)\}`, "u").exec(
+    source.replaceAll(/\/\/[^\n]*/gu, ""),
+  )?.[1];
+  if (body === undefined) {
+    throw new Error(`the source declares no struct ${name}`);
+  }
+  return body
+    .split(",")
+    .map((member) => /:\s*(\w+)\s*$/u.exec(member.trim())?.[1])
+    .filter((type): type is string => type !== undefined)
+    .reduce((sum, type) => sum + (INTER_STAGE_BYTES[type] ?? Number.NaN), 0);
+}
+
+describe("the visibility buffer's ID raster (plan R14, R14.T2.c)", () => {
+  it("registers both vertex paths' de-indexed rasters in the catalogue, compiled for r32uint", () => {
+    for (const spec of TERRAIN_CLUSTER_ID_MATERIALS) {
+      expect(
+        WGSL_CATALOGUE.some(
+          (entry) =>
+            entry.kind === "material" &&
+            entry.spec === spec &&
+            entry.targets?.length === 1 &&
+            entry.targets[0] === "r32uint",
+        ),
+      ).toBe(true);
+    }
+    expect(
+      [...TERRAIN_CLUSTER_ID_MATERIALS, ...TERRAIN_CLUSTER_ID_PRIMITIVE_MATERIALS].map(
+        (spec) => spec.displayName,
+      ),
+    ).toEqual([
+      "ID RASTER OFFSETS",
+      "TERRAIN ID RASTER",
+      "PRIMITIVE IDS OFFSETS",
+      "TERRAIN PRIMITIVE IDS",
+    ]);
+  });
+
+  it("hands its fragment stage the clip position and one flat u32, 20 B a vertex, on either path", () => {
+    for (const primitive of [false, true]) {
+      const source = terrainClusterIdMaterialSpec("baked-offsets", primitive).vertexWgsl;
+      expect(interStageBytes(source, "TerrainIdVertex")).toBe(20);
+    }
+    // The lit cluster form's, which the raster's stands in for: far more.
+    expect(
+      interStageBytes(
+        terrainLitClusterMaterialSpec("baked-offsets", false).vertexWgsl,
+        "LitVertexOut",
+      ),
+    ).toBeGreaterThan(100);
+  });
+
+  it("places each vertex as the lit cluster form does, its clip position @invariant", () => {
+    const source = terrainClusterIdMaterialSpec("face-differences", false).vertexWgsl;
+    const lit = terrainLitClusterMaterialSpec("face-differences", false).vertexWgsl;
+    const place = wgslFunction(source, "terrain_id_place");
+    const clip = "frame.clipProjection * frame.viewRotation * vec4f(placed.fromCameraM, 1.0)";
+    // The lit form's vertex stage places by `stride_place` and its clip position so (terrainLit.wgsl).
+    expect(wgslFunction(lit, "lit_vertex")).toContain(`out.clip = ${clip};`);
+    expect(wgslFunction(lit, "lit_vertex")).toContain("let placed = stride_place(grid, instance);");
+    expect(place).toContain(`out.clip = ${clip};`);
+    expect(place).toContain("let placed = stride_place(grid, instance);");
+    expect(collapseWhitespace(source)).toContain("@builtin(position) @invariant clip : vec4f,");
+    expect(source).toContain("const STRIDE_MORPH : bool = true;");
+    // No discard, no shading.
+    expect(wgslFunction(source, "fragmentMain")).toBe("{ return in.word; }");
+  });
+
+  it("takes the triangle from primitive_index on that path, its source enabling it first", () => {
+    const source = terrainClusterIdMaterialSpec("face-differences", true).vertexWgsl;
+    expect(source.startsWith("enable primitive_index;\n")).toBe(true);
+    expect(collapseWhitespace(source)).toContain("@builtin(primitive_index) triangle : u32");
+    expect(wgslFunction(source, "fragmentMain")).toBe(
+      "{ return (in.word << VISIBILITY_TRIANGLE_BITS) | triangle; }",
+    );
+    const deindexed = terrainClusterIdMaterialSpec("face-differences", false).vertexWgsl;
+    expect([
+      deindexed.includes("enable "),
+      deindexed.includes("@builtin(primitive_index)"),
+    ]).toEqual([false, false]);
+  });
+
+  it("binds what its vertex stage reads alone, seven at most, and nothing in its fragment stage", () => {
+    for (const primitive of [false, true]) {
+      const spec = terrainClusterIdMaterialSpec("baked-offsets", primitive);
+      const read = bindingStages(spec.vertexWgsl);
+      expect([spec.colourWrites, spec.depthWrite, spec.textures, spec.cullMode]).toEqual([
+        true,
+        true,
+        [],
+        "back",
+      ]);
+      expect(
+        (spec.storageBuffers ?? []).map((buffer) => [
+          buffer.name,
+          [...(buffer.stages ?? [])].join(" "),
+          [...(read.get(buffer.binding) ?? [])].toSorted().join(" "),
+        ]),
+      ).toEqual([
+        ["heights", "vertex", "vertex"],
+        ["slots", "vertex", "vertex"],
+        ["instances", "vertex", "vertex"],
+        ["contacts", "vertex", "vertex"],
+        ["offsets", "vertex", "vertex"],
+        ["surveyMask", "vertex", "vertex"],
+        ["clusterLists", "vertex", "vertex"],
+      ]);
+      const declared = new Set((spec.storageBuffers ?? []).map((buffer) => buffer.binding));
+      expect([...read.keys()].filter((binding) => !declared.has(binding))).toEqual([]);
+    }
+  });
+
+  it("takes the lit material's own draw fields, with the bucket's list base and its body's first index after them", () => {
+    expect(
+      terrainClusterIdMaterialSpec("face-differences", false).uniforms.map((u) => u.name),
+    ).toEqual([
+      ...terrainLitMaterialSpec("face-differences")
+        .uniforms.slice(0, 3)
+        .map((u) => u.name),
+      "clusterBase",
+      "visibleFirst",
+    ]);
+  });
+
+  it("numbers each body's IDs from its range's first index, reading its own lists from 0 (R14.T2.d)", () => {
+    for (const primitive of [false, true]) {
+      const source = terrainClusterIdMaterialSpec("baked-offsets", primitive).vertexWgsl;
+      expect([
+        source.includes("let item = cluster_lists[listed];"),
+        source.includes("out.visible = draw.visibleFirst + listed;"),
+      ]).toEqual([true, true]);
+    }
+  });
+});
+
+describe("the visibility buffer's resolve of terrain (plan R14, R14.T2.d)", () => {
+  it("registers both vertex paths' resolves and their emissive forms in the catalogue", () => {
+    for (const spec of TERRAIN_RESOLVE_MATERIALS) {
+      expect(WGSL_CATALOGUE.some((entry) => entry.kind === "material" && entry.spec === spec)).toBe(
+        true,
+      );
+    }
+    expect(TERRAIN_RESOLVE_MATERIALS.map((spec) => spec.displayName)).toEqual([
+      "RESOLVE OFFSETS",
+      "TERRAIN RESOLVE",
+      "EMISSIVE RESOLVE OFFSETS",
+      "EMISSIVE TERRAIN RESOLVE",
+    ]);
+  });
+
+  it("reads every storage buffer in its fragment stage, eight at most, the lights and contacts from its resolve frame", () => {
+    for (const path of ["baked-offsets", "face-differences"] as const) {
+      const spec = terrainResolveMaterialSpec(path, false);
+      const read = bindingStages(spec.vertexWgsl);
+      const storage = (spec.storageBuffers ?? []).map((buffer) => [
+        buffer.name,
+        [...(buffer.stages ?? [])].join(" "),
+        [...(read.get(buffer.binding) ?? [])].toSorted().join(" "),
+      ]);
+      expect(storage).toEqual(
+        [
+          "heights",
+          "slots",
+          "instances",
+          ...(path === "baked-offsets" ? ["offsets"] : []),
+          "surveyMask",
+          "clusterLists",
+          "classLayers",
+          "horizonMap",
+        ].map((name) => [name, "fragment", "fragment"]),
+      );
+      const declared = new Set([
+        ...(spec.storageBuffers ?? []).map((buffer) => buffer.binding),
+        ...(spec.textures ?? []).map((texture) => texture.binding),
+        ...spec.samplers.map((sampler) => sampler.binding),
+      ]);
+      expect([...read.keys()].filter((binding) => !declared.has(binding))).toEqual([]);
+      expect(spec.vertexWgsl).not.toContain("var<storage, read> terrain_lights");
+      expect(spec.vertexWgsl).not.toContain("var<storage, read> contacts");
+    }
+  });
+
+  it("binds the lit material's textures, then the view's IDs and its resolve frame: 15 of WebGPU's 16", () => {
+    const spec = terrainResolveMaterialSpec("baked-offsets", true);
+    expect([
+      spec.textures?.length,
+      spec.textures?.slice(-2).map((texture) => [texture.name, texture.sampleType]),
+      [spec.depthWrite, spec.colourWrites, spec.cullMode, spec.blend],
+    ]).toEqual([
+      15,
+      [
+        ["visibilityIds", "uint"],
+        ["resolveFrame", "unfilterable-float"],
+      ],
+      [false, true, "none", "none"],
+    ]);
+  });
+
+  it("takes the lit material's draw fields, then the lists' and templates' it decodes an ID by", () => {
+    expect(
+      terrainResolveMaterialSpec("face-differences", false).uniforms.map((u) => u.name),
+    ).toEqual([
+      ...terrainLitMaterialSpec("face-differences").uniforms.map((u) => u.name),
+      "resolveLists",
+      "resolveTemplates0",
+      "resolveTemplates1",
+    ]);
+  });
+
+  it("shades each pixel once by the lit fragment, its geometric normal the face's from its edges", () => {
+    const source = terrainResolveMaterialSpec("face-differences", false).fragmentWgsl;
+    const lit = wgslFunction(source, "lit_fragment");
+    expect([
+      lit.includes("dpdxFine"),
+      lit.includes("cascade_geometric_normal( face_dx, face_dy, datum )"),
+      source.split("lit_fragment(").length - 1,
+      source.split("lit_vertex(").length - 1,
+      wgslFunction(source, "terrain_row"),
+    ]).toEqual([false, true, 2, 2, "{ return textureLoad(resolve_frame, vec2u(i, 0u), 0); }"]);
+  });
+});

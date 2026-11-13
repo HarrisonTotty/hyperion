@@ -21,7 +21,9 @@
 
 When this plan is done a generated world, drawn in the photorealistic style, has everything the
 brainstorm's step 9 lists. The ground carries GPU decoration below the 2 m band limit, and the view
-says when it is on. Rocks 0.4 m across or more, which covers every rock 0.2 m tall, are
+says when it is on. Every texture it draws is generated for the world it lies on, from that world's
+own substances, forms and conditions, so no two worlds share one and the client ships no texture
+image (Design note 21, the owner's ruling of 2026-11-01). Rocks 0.4 m across or more, which covers every rock 0.2 m tall, are
 authoritative: `hyperion-surface` places them by hash in cells per size octave, from Golombek and
 Rapp's rock size–frequency law with an abundance set by the surface's type and age, with analytic
 shapes that the same crate answers contact queries against, bit for bit on native and both
@@ -49,6 +51,8 @@ In scope:
 - GPU decoration on terrain (normal detail, colour variation, sand ripples, crater scars, and the
   triplanar detail textures with their repetition hiding, which R10 hands over as decoration in its
   Design note 9), its setting and its `DECORATION ON` label.
+- The detail textures generated for each world from its own materials and conditions, with no
+  texture authored or shipped (Design note 21).
 - `hyperion_surface::scatter`: rock abundance, placement, shapes and the contact query; its goldens
   on three targets; its generator-version bump.
 - Rocks in the client: baked with patches through R10's `BakeHook`, instanced, drawn under the rule
@@ -182,9 +186,10 @@ pure module as its reference.
 - `surface/decoration/`: `decorationSetting.ts` (the ladder entries and whether decoration is
   drawn), `decorationLattice.ts` (the integer lattice hash the WGSL mirrors), `decoration.wgsl` and
   `detailTextures.wgsl` (triplanar, or biplanar on the low end, with two-scale repetition hiding),
-  both behind R10's `terrain_decoration` hook; `DECORATION_BAND_LIMIT_M`, R05's `BAND_LIMIT_M` read
-  through R05's `bandLimitM()` in `view/terrain/planet.ts`, over the wasm export `band_limit_m()`
-  (R05.T5, T7.a), and never redefined.
+  `detailTextureBake.ts` and `detailTextureBake.wgsl` (the world's generated detail sets, Design
+  note 21), all behind R10's `terrain_decoration` hook; `DECORATION_BAND_LIMIT_M`, R05's
+  `BAND_LIMIT_M` read through R05's `bandLimitM()` in `view/terrain/planet.ts`, over the wasm export
+  `band_limit_m()` (R05.T5, T7.a), and never redefined.
 - `surface/scatter/`: `rockLayer.ts` (the `ExtraLayer` it fills through R10's `BakeHook`),
   `rockMesh.ts` (`tessellateRock(rock, level)`, `chordalBound(rock, level)`), `rockSelection.ts`
   (`rocksToDraw(patches, bodies, setting, style)`, `couldTouch(body, path)`,
@@ -217,9 +222,11 @@ pure module as its reference.
 - In `src/preload/api.ts`, additions to `HyperionApi`: `saveStill(png, label)`, `listStills()`,
   `readStill(id)`; in `src/main/stills.ts`, their handlers, writing under
   `app.getPath("userData")/stills/`.
-- In R02's `ViewLabelBlock`: the `DECORATION ON` annunciation, whose nomenclature R02 drafts, and
-  `STILLS SUSPENDED` in the still control; in R05's `ViewSettings` and `SETTINGS`: the entries of
-  Design note 18.
+- The `DECORATION ON` annunciation, whose nomenclature R02 drafts, after the survey line's middle
+  dot (`view/terrain/readouts.ts`' `surveyLines`, on R10.T12's lower plate, where the guide places
+  it), or among `displays/view/viewRun.ts`' `labelStatements` where no survey line stands
+  (re-validated 2026-11-02); `STILLS SUSPENDED` in the still control; in R05's `ViewSettings` and
+  `SETTINGS`: the entries of Design note 18.
 - For R12: the pass labels of Design note 18, each for one of R12's `BudgetRow`s; R01
   `MemoryCategory` names on every allocation (`clouds`, `ocean`, `rings`, `scatter`, `stills`); and
   Design note 18's quality limits for R12.T7's audit.
@@ -234,17 +241,20 @@ ambiguous, the design note that reads it is named.
   (`RenderEngine.createRenderTarget(spec: RenderTargetSpec)`); indirect draws and dispatches
   (`DrawItem.indirect` and `dispatch(kernel, bindings, IndirectArgs)`); asynchronous pipeline
   creation (`createMaterialAsync`, `createComputeAsync`); per-pass GPU time (`onPassTimes`,
-  delivering `PassTimes` keyed by `FrameSubmission.label`, `bracketed` always `false` since R01
-  Design note 24) where the
-  adapter exposes `timestamp-query`, quantised to 65,536 ns in shipping launches and unquantised
-  under `--hyperion-gpu-timing` (its Design note 4, found by probe), with
-  `GraphicsStatus.timer: GpuTimer` (`"quantized" | "full" | "absent"`); CPU read-back
-  (`readTexture(texture, level?, rect?)` and `readBuffer`, not harness-only); `MemoryCategory`, the
-  union later plans extend, on every creation; the
-  device-loss and GPU-process-loss fault and its three-loss rule; the preload's `HyperionApi`, to
-  which this plan adds `ipcRenderer.invoke` handlers of its own, validating the sender itself (R01
-  sets no invoke convention); the SwiftShader smoke harness, `just test-render`, into whose
-  `WGSL_CATALOGUE` every shader here is registered for its no-f16 and no-subgroup runs.
+  delivering `PassTimes`, whose `passes` is a list of `{ label, ns, bracketed }`, one entry for each
+  timed pass by its label (a frame's is its `FrameSubmission.label`), not a map keyed by label;
+  `bracketed` always `false` since R01 Design note 24) where the adapter exposes `timestamp-query`,
+  quantised to 65,536 ns in shipping launches and unquantised under `--hyperion-gpu-timing` (its
+  Design note 4, found by probe), with `GraphicsStatus.timer: GpuTimer`
+  (`"quantized" | "full" | "absent"`); CPU read-back (`readTexture(texture, level?, rect?, access?)`
+  and `readBuffer(buffer, access?)`, not harness-only; each throws `PresentationOnlyReadback` for a
+  resource a `presentation-only` kernel wrote last, which T10.b's read-back must not meet, and
+  `access: "tolerance"`, which lifts that refusal, is the smoke harness's alone); `MemoryCategory`,
+  the union later plans extend, on every creation; the device-loss and GPU-process-loss fault and
+  its three-loss rule; the preload's `HyperionApi`, to which this plan adds `ipcRenderer.invoke`
+  handlers of its own, validating the sender itself (R01 sets no invoke convention); the SwiftShader
+  smoke harness, `just test-render`, into whose `WGSL_CATALOGUE` every shader here is registered for
+  its no-f16 and no-subgroup runs.
 - **R02:** the camera, camera-relative `f64` differencing and per-patch origins; `BodyFixedPosition`
   and its client mirror; the fixed reversed-Z infinite projection; `transparentLayerOrder`
   (R02.T7.b: opaque first, then per body back to front, within a body the shells above the camera by
@@ -273,10 +283,13 @@ ambiguous, the design note that reads it is named.
   allocations by `MemoryCategory`; the finest-level set under grounded and descending bodies
   (`SelectionInput.grounded: readonly GroundContact[]`, its Design note 9), with morph held at zero,
   to which this plan adds a swept path as a chain of `GroundContact`s spaced at most one radius
-  apart; `FORCED_REGION_RESIDENCY_S` in `view/terrain/grounded.ts`, the forced region's p99
-  residency, provisional until R05.T18 sets it (Design note 7); streaming priority; `BAND_LIMIT_M`
-  and `FINEST_SPACING_M`, with the band limit exported to TypeScript as the wasm `band_limit_m()`
-  and the client's `bandLimitM()` (R05.T5, T7.a); the `TERRAIN: STREAMING` and
+  apart; the selection's entry, `selectPatches(input: SelectionInput)`, with `ViewSelectionInput`
+  and `screenSpaceErrorPx(boundM, distanceM, view)` (`view/terrain/select.ts`), and
+  `view/terrain/cull.ts`'s `Frustum`, `frustumOf` and `inFrustum`, through which T10.a's still
+  selects once and culls each tile; `FORCED_REGION_RESIDENCY_S` in `view/terrain/grounded.ts`, the
+  forced region's p99 residency, provisional until R05.T18 sets it (Design note 7); streaming
+  priority; `BAND_LIMIT_M` and `FINEST_SPACING_M`, with the band limit exported to TypeScript as the
+  wasm `band_limit_m()` and the client's `bandLimitM()` (R05.T5, T7.a); the `TERRAIN: STREAMING` and
   `TERRAIN: DETAIL LIMITED` annunciations; `hyperion_surface::num`'s `min`, `max` and
   `assert_finite`; the scripted, seeded descent and its metrics harness, which this plan's by-hand
   runs reuse.
@@ -300,10 +313,26 @@ ambiguous, the design note that reads it is named.
 - **R08:** `HillaireAtmosphere`, whose `aerialPerspective(view)` exposes the volume and the
   transmittance table, for lighting clouds (a 2D array texture, one layer a curvature slice, read
   through `oblate.wgsl`'s slice lookup at the ray's latitude and azimuth, never as one texture;
-  R08 Design note 17), and the medium the clouds and the ocean are drawn inside;
+  R08 Design note 17), with the absorber-column table `absorberColumns` and the lights' curves of
+  growth `absorberCurves` beside it, since the table stores optical depth without the absorbers
+  and a reader adds them on read at the light's curve slot (R08.T6.c). Since R08.T6.f it reads a
+  slice through `oblate.wgsl`'s sliced lookup, `slicedRayOf` and `slicedStoredOf` from a
+  `LookupStart`, with `AerialPerspective.oblateBody`, and a band's own table through
+  `common.wgsl`'s `transmittanceThroughLayer`, which replaced `transmittanceThroughTables`
+  (corrected 2026-10-14).
+  Since R08.T4.d such a reader binds five textures, `transmittance`,
+  `absorberColumns`, `absorberCurves`, `absorberPressureColumns` and `lastAbsorberPressureColumn`,
+  and takes the medium's line-slot bitmask (`Draw.shell.z` in the composite, `Medium.absorbers.w`
+  in the kernels), each line slot reading its own pressure channel (plan 08's Risks, "Deviations in
+  T4.d, as built"); and the medium the clouds and the ocean are drawn inside;
   `skyView(view): SkyViewTable` (R08.T9.a), the view's sky radiance by local azimuth and elevation
-  summed over the drawn suns, with the per-sun fallback in the same type, for reflecting the sky
-  in the ocean; `surfaceLighting.wgsl`'s
+  summed over the drawn suns in one table, with no per-sun fallback (R08.T7's check held the table
+  within 2% of per-source tables near each source; corrected 2026-10-14), for reflecting the sky
+  in the ocean, of a per-azimuth shape on an oblate body since R08.T6.f: `texture`, `size`,
+  `scaleCdPerM2`, `zenith`, `azimuthOrigin`, `meridionalRadiusM`, `primeVerticalRadiusM`,
+  `heightM`, `atmosphereM` and `sphere`, which is `{ bottomRadiusM, horizonAngleRad }` on a sphere
+  and `null` on an oblate body, with `skyViewColumnOf(table, d)` for each azimuth's R_α and β
+  (corrected 2026-10-14); `surfaceLighting.wgsl`'s
   `atmosphere_sun_transmittance(altitude_m, mu_sun, latitude_rad, sun_azimuth_rad) -> vec3f` and
   `atmosphere_sky_irradiance(altitude_m, mu_sun, latitude_rad) -> vec3f` (R08.T9.b), through
   which lit clouds, oceans and rings take each sun's light and the sky's, each call at the lit
@@ -316,12 +345,19 @@ ambiguous, the design note that reads it is named.
   Design note 9 does; and R08's reference tracer beside which the ring subcommand sits in
   `hyperion-fit` (its Design note 10, whose output is JSON fixtures; this plan's is a shipped
   TypeScript module, a further kind of `hyperion-fit` output, Design note 15).
+  Every read of R08's tables (the aerial volume, the transmittance slices, the sky table) takes
+  R08's texel mapping (R08 Design note 19), through R08's lookups or `texelUvFromUnit` in R08's
+  `common.wgsl`, never a coordinate of its own.
+  R11's re-validation must read the new shapes, the sliced lookup and the per-azimuth
+  `SkyViewTable`, as built (plan 08's Risks, "Deviations in T6.f, as built").
 - **R09:** `FieldView`, with `CoarseField` on the server and `PartialField` on the client
   (`is_surveyed`); `FieldHeader` (`sea_level`, `craters: CraterParams`, and `surface_age: Gyr` and
   `surface_pressure: Pascals`, plan 14's figures carried for this plan's `RockSite`);
-  `SynthesisCell` (`water_surface_mm`, `ice`, `class`); `ClimateCell` at level L − 1 (monthly
-  anomaly and precipitation, the labelled heuristic, and `wind`); `CoarseCrater` through
-  `craters_reaching`; `craters::cumulative_density`; `DetailSeed` and its `stream`, the
+  `SynthesisCell` (`water_surface_mm`, `ice`, `class`); `ClimateCell` at level L − 1 (each
+  month's anomaly, precipitation, the labelled heuristic, and 10 m wind: the resultant's direction
+  and the mean speed), on R09's months of equal eccentric anomaly of the seasonal orbit, found from
+  the scene's time through `month_blend` and `FieldHeader.season_eccentricity`; `CoarseCrater`
+  through `craters_reaching`; `craters::cumulative_density`; `DetailSeed` and its `stream`, the
   `SurfaceDetail` scope and `ObjectKey::surface_cell(face, level, i, j, instance)`; R05's
   `BAND_LIMIT_M` and `FINEST_SPACING_M`, which R09 uses; `Synthesiser` (the field and the detail
   seed); the fallible `ObjectKey::surface_cell` (`Result<Self, SurfaceCellKeyError>`); the
@@ -333,16 +369,19 @@ ambiguous, the design note that reads it is named.
 - **R10:** `MaterialClass`, `Material` and `material_at` (the rock site's class, the scatter filter,
   `SeaIce` and `Seabed` for the ocean); `ground_at`, the authoritative ground the rocks stand on;
   `ClassWeights`; `TerrainLayers` and `BakeHook`, whose `extra: Vec<ExtraLayer>` carries this
-  plan's rock list in the same bake and cache; the shader hooks `terrain_decoration` and
+  plan's rock list in the same bake and cache; the shader hooks `terrain_decoration(p, normal)`,
+  returning a `TerrainDecoration` (`albedo` a factor per channel, and `normal`;
+  `terrain/shaders/terrainLit.wgsl`, whose `p`, ÷ a in `f32`, cannot key the lattice, so T2.b
+  passes the fragment's slot and patch place; re-validated 2026-11-02), and
   `terrain_shadow_factor(p) -> f32` (the direct sun's lit fraction, into which cloud shadows
   multiply, R10's Design note 11); `terrain_sky_factor(p) -> vec3f`, 1 by
   default, a factor on R08's `atmosphere_sky_irradiance` at the ground, into which the clouds'
   diffuse transmittance goes; and `terrain_ring_shadow(p, sun) -> vec3f`, 1 by default, which this
   plan fills for a ringed body with `ring_shadow_on_body`'s full `vec3f`, the per-channel
   transmittance that R07's `litBody.wgsl` also reads; the
-  survey mask; the collision-agrees test (R10.T15, in TypeScript over a committed bake fixture) and
-  the per-level-bound test, which this plan extends to rocks; the wireframe's depth-only terrain
-  pass.
+  survey mask; the collision-agrees test (R10.T15.a, in TypeScript over a committed bake fixture)
+  and the per-level-bound test, which this plan extends to rocks; the wireframe's depth-only
+  terrain pass.
 - **R12:** nothing is consumed. R12 folds this plan's recorded benchmarks into its runs, reads its
   ladder entries into its `SettingSnapshot`, maps its pass labels to `BudgetRow`s, counts its
   allocations by `MemoryCategory` and audits Design note 18's quality limits.
@@ -567,14 +606,19 @@ ambiguous, the design note that reads it is named.
     water surface above the cell's coarse elevation and no ice), never re-decided by a shader;
     within a cell the shoreline comes from R10's height texture against that level. Where the coarse
     field's ice covers the sea, the ocean gives way to R10's `SeaIce`, "with no glint and no waves".
-    Over unsurveyed ground no sea is drawn, as no coastline is claimed there; the research suggests
-    a disc-statistical glint on R07's reference body (the ocean fraction times the glint at the
-    body's mean wind), which is left to the owner (Risks).
+    Over unsurveyed ground no sea is drawn, as no coastline is claimed there; a disc-statistical
+    glint is drawn on R07's reference body instead (the ocean fraction times the glint at the
+    body's mean wind, at the disc's specular point, on its unsurveyed share only, without counting
+    the ocean's specular light twice; ruled 2026-10-19, `signoff-12.md`, item 33), which R11.T8
+    builds.
 
 12. **Ocean by distance, with one slope budget.** Researched 2026-09-29. The total slope
     variance is Cox and Munk's, anisotropic along the wind: σ_u² = 3.16 × 10⁻³ U and σ_c² = 0.003 +
     1.92 × 10⁻³ U (total 0.003 + 5.12 × 10⁻³ U), with U at 12.5 m converted from the climate field's
-    wind by a neutral log profile, U(z) = U₁₀ [1 + (√C_D ÷ κ) ln(z ÷ 10)], C_D ≈ 1.3 × 10⁻³, κ =
+    10 m wind (the month's mean speed, which the linear Cox–Munk law needs; the Pierson–Moskowitz
+    height and the whitecaps, superlinear in U, take it as their representative wind and are
+    labelled so) by a neutral log profile, U(z) = U₁₀ [1 + (√C_D ÷ κ) ln(z ÷ 10)], C_D ≈
+    1.3 × 10⁻³, κ =
     0.4, and clamped to 0–20 m/s with the extrapolation above 14 m/s stated. Above 20 km the ocean
     is the sphere with that distribution filtered per pixel, as Bruneton, Neyret and Holzschuch 2010
     draw it (their switch "for altitudes below 20,000 m" confirmed); below 20 km it is a projected
@@ -754,16 +798,21 @@ ambiguous, the design note that reads it is named.
     (`particles`; `annulus`) and `ringShadowOnBody` (on; off). The pass labels, each mapped to one
     of R12's `BudgetRow`s: `decoration` (inside R10's terrain pass, timed as its increment),
     `rocks`, `scatter`, `clouds`, `cloudShadow`, `ocean`, `rings` and `still`. Every GPU allocation
-    names an R01 `MemoryCategory`: `clouds` (noise volumes, the τ texture, the transmittance map),
-    `ocean`, `rings` (the profile and the shadowing table), `scatter` and `stills` (tiles and the
-    accumulation target). The quality limits for R12.T7's audit: the budget's rows above for each
-    pass on each GPU, 16 MB for the low clouds and 10–20 MB for the volume, and the tile sizes of
-    Design note 17; R12 records a miss as a finding.
+    names an R01 `MemoryCategory`: `decoration` (the world's generated detail sets, Design note
+    21), `clouds` (noise volumes, the τ texture, the transmittance map), `ocean`, `rings` (the
+    profile and the shadowing table), `scatter` and `stills` (tiles and the accumulation target).
+    The quality limits for R12.T7's audit: the budget's rows above for each pass on each GPU, 16 MB
+    for the low clouds and 10–20 MB for the volume, and the tile sizes of Design note 17; R12
+    records a miss as a finding.
 
 19. **Motion.** Clouds move with the simulation's wind and waves with its time: that is the world
     moving, which guide item 8's reduced-motion rule does not stop ("the world cannot be frozen").
-    Both hold still when the scene's time rate is zero, and clouds fade to their mean under fast
-    time warp (Design note 8). Decoration and scatter do not move.
+    The month is found from the seasonal orbit's mean anomaly at the scene's time with R09's
+    `month_blend`, called through R10's wasm field or a TypeScript twin tested against it. The
+    coverage, the wind and the sea state are blended between the two nearest months, so the seasons
+    turn without a step at a month's edge, and on an eccentric orbit faster near periapsis, as the
+    climate does. Both hold still when the scene's time rate is zero, and clouds fade to their mean
+    under fast time warp (Design note 8). Decoration and scatter do not move.
 
 20. **Craters between 1 and 2 m stay decoration (open question 18).** Researched 2026-09-29.
     Brand-new Martian craters of metre scale average d/D = 0.23 (Daubar et al. 2014), but lunar
@@ -778,11 +827,59 @@ ambiguous, the design note that reads it is named.
     about 1 m on legs spaced under 2 m arrives, a hazard console must show the ground below 2 m, or
     a fresh-crater class is placed at landing sites.
 
+21. **Every texture is generated for its world (the owner, 2026-11-01).** The owner ruled that
+    HYPERION generates nearly everything, textures and materials included, so that each world looks
+    as its own conditions make it. Its materials already are generated: a form of one of the body's
+    palette substances, resolved by the server (R10). This plan adds no texture image: every texture
+    its passes sample is generated in the client for the body it is drawn on, and none is authored
+    or shipped. The detail textures are one generated set (a tileable height-derived normal and an
+    albedo variation, with mips) for each material the body's field names, a form and its palette
+    entry, made by a compute pass from three inputs:
+    - **The form**, which picks the generator's family. The lean: fractured and jointed for
+      `Bedrock`; vesicular or flow-banded for `VolcanicRock`, by the entry's mechanics family; graded
+      grains for `Regolith`, `Soil`, `Sand` and `Dust`, at each form's grain size; laminae for
+      `Sediment` and `OrganicSediment`; crystalline and sintered for `Snow`, `Frost` and `Glacier`;
+      ridged and rafted plates for `SeaIce`; desiccation polygons for `Evaporite`; a cracked,
+      cooling skin for `Melt`.
+    - **The entry's own values.** Its B, V and R albedos give the colour variation's hue axis, and
+      its albedo span gives the amplitude. Its `FeO_T` and the ground's maturity, through R10's
+      space-weathering law, darken and redden an airless body's exposed grains.
+    - **The body's conditions.** Its pressure class decides the grains' shapes: airless ground is
+      impact-gardened and its rocks rounded by micrometeorites, while under air the wind sorts and
+      rounds them. Its gravity, its surface age (the scars' and weathering's density) and its surface
+      seed also count. The seed keys every hash with the entry, so two worlds of one substance differ
+      and every console sees one world the same. At draw time the patch's own wind orients the
+      ripples (T2.a).
+    - **The names as built** (re-validated 2026-11-02). The albedos are `PaletteEntry`'s
+      `normal_albedo_bvr` (`field/palette.rs`), reaching the client per slot as the bake's
+      `TerrainLayers.photometry`; the span is `FormRow::normal_albedo_v()`
+      (`material/properties.rs`), V only, per form and family, `None` where unsourced, and the
+      worker's alone; `FeO_T` is `feo_mass_fraction`; the maturity is the bake's `TerrainMaturity`
+      codes and per-slot nodes, which already carry R10.T1.d's law (`weathered_entry_bvr`); the
+      family is `PaletteEntry.mechanics`, which `PaletteEntryDto` does not carry; the pressure and
+      age are `SurfaceHeaderDto`'s `surface_pressure_pa` and `surface_age_gyr`, the seed
+      `ViewBody.detailSeed`; no client value carries the gravity. `Seabed`, the ocean's, takes no
+      family.
+
+    The families are the lean, which the re-validation may refine, and each mapping's figures are
+    researched and cited by T2.c (the Figures rule). The sets obey Design note 3: they are zero-mean
+    about the class albedo and the baked normal, never geometry, keyed by the integer lattice, and
+    not bit-identical across GPUs. They are decoration, so the low setting generates none, and a rock
+    on low is shaded by its material alone. On high, rocks (T4) sample their site entry's `Bedrock`
+    set and pebbles (T6) their ground's. A body's sets are generated when its first finest-level
+    patch is baked, spread over frames within the frame budget so that an arrival drops no frame, and
+    freed with the body. Until a set is ready its ground draws undecorated, and `DECORATION ON`
+    shows only once a set is drawn. Their memory is the `decoration` category, sized by T2.c against
+    the budget's memory table. The clouds' noises (T7.c), the ocean's wave spectrum (T8) and the
+    ring's shadowing table and profile (T9) are generated already, so every texture this plan
+    samples is the world's own. An authored image in any of these passes is a finding, and T2.c's
+    scan fails on one.
+
 ## Tasks
 
-T1 comes first. T2 needs T1. T3's subtasks run in order; T4 and T6 follow T3. T5 is a record and can
-land at any time. T7, T8 and T9 are independent of the rocks and of each other and can run beside
-them after T1. T10 follows T2, T4, T6 and T7–T9, since a still wants every pass; T10.a can start at
+T1 comes first. T2 needs T1, and T2.c follows T2.a. T3's subtasks run in order; T4 and T6 follow
+T3. T5 is a record and can land at any time. T7, T8 and T9 are independent of the rocks and of each
+other and can run beside them after T1. T10 follows T2, T4, T6 and T7–T9, since a still wants every pass; T10.a can start at
 once except for its decoration-fade test, which waits for T2. T11 closes. Before T1 starts, the plan
 is re-validated against the code as built (`revalidate-plan`): R01's, R02's and R05's for T1, T2 and
 T10, and R09's and R10's before T3, since their names are what T3 and T4 call. Every task that adds
@@ -802,11 +899,13 @@ Rust files are under `crates/hyperion-surface/src/` and client files under
 Add the ladder entries of Design note 18 as fields of R05's `ViewSettings`, with their high and low
 values in `SETTINGS` (`view/quality/qualitySetting.ts`) (`decoration`, `scatterDensity`,
 `clouds`, `cloudShadows`, `oceanComponents`, `oceanRefraction`, `whitecaps`, `rings`,
-`ringShadowOnBody`), and the `DECORATION ON` annunciation to
-R02's `ViewLabelBlock` beside the setting and the survey coverage, in `--text` on its plate, steady,
-shown while any decoration is drawn. Nothing is drawn yet, so it never shows.
+`ringShadowOnBody`), and the `DECORATION ON` annunciation after the survey line's middle dot
+(`view/terrain/readouts.ts`' `surveyLines`; the guide's survey line), or among the label block's
+statements (`displays/view/viewRun.ts`' `labelStatements`) where no survey line stands, in `--text`
+on its plate, steady, shown while any decoration is drawn. Nothing is drawn yet, so it never shows.
 
-Files: R05's `view/quality/qualitySetting.ts`, R02's `ViewLabelBlock`,
+Files: R05's `view/quality/qualitySetting.ts`, `readouts.ts` and `viewRun.ts` (re-validated
+2026-11-02: R02's `ViewLabelBlock` lost the survey line to R10.T12's lower plate),
 `surface/decoration/decorationSetting.ts`, tests. Tests: the annunciation follows what is drawn, not
 the setting alone; the low setting's defaults are Design note 18's, with no decoration of any kind;
 the label is text in the DOM, not canvas. Acceptance: `pnpm test`, `just ci`.
@@ -825,15 +924,44 @@ the label is text in the DOM, not canvas. Acceptance: `pnpm test`, `just ci`.
   offset, each texture's contribution zero-mean about R10's class albedo. Tests: the TypeScript
   reference's hash equals the WGSL's on SwiftShader through R01's smoke harness for 10⁴ lattice
   points; each perturbation has zero mean over a patch to 10⁻³; no octave above the band limit is
-  ever summed.
+  ever summed. T10.a's deferred decoration-fade test lands with the fade: in
+  `stills/stillPlan.test.ts`, the fade chosen for a pixel of a still's tile equals the fade for the
+  same pixel untiled, taken at `footprintView`'s pixel, which completes T10.a's test line (T10.a's
+  record).
 - **R11.T2.b On the terrain.** Wire the library into R10's `terrain_decoration` hook, compiled out
   when `decoration` is off; `DECORATION ON` shows while it is drawn. Tests: R01's smoke harness
   renders one patch's depth with decoration on and off and asserts the read-backs equal bit for bit;
   every texel finite; the low setting's pipeline contains no decoration code. Bench: GPU time added
   to the terrain pass on the high setting, at 1080p on the development machine and, by the owner,
   at 720p on the UHD 620.
+- **R11.T2.c Generated for the world.** Follows T2.a. T2.b may land first and sample the sets once
+  they exist. The work, in `detailTextureBake.ts` and `detailTextureBake.wgsl` (Design note 21):
+  - For each material the body's field names, a compute pass generates the material's detail set
+    from its form's family, its entry's values and the body's conditions, keyed by the surface seed
+    and the entry.
+  - The sets are generated when the body's first finest-level patch is baked, spread over frames,
+    and freed with the body. High setting only.
+  - `detailTextures.wgsl` samples them.
+  - Each mapping's figures are researched and cited first.
 
-Files: `surface/decoration/*`, R10's terrain material shader, R01's `WGSL_CATALOGUE`, tests.
+  Tests:
+  - The same body gives byte-equal sets in two runs on SwiftShader, through R01's smoke harness.
+  - Two bodies that differ only in their seed, their pressure class, or one entry's albedo,
+    `FeO_T` or maturity give sets that differ.
+  - Every set is zero-mean about its class albedo to 10⁻³, and its normals are unit length.
+  - The low setting creates no generator pipeline.
+  - A source scan in Vitest finds no image file imported under `view/` and none loaded by this
+    plan's passes.
+
+  Bench: each material's generation time, a body's sets' memory and the longest frame during an
+  arrival. These are measured on the development machine and the owner's Mac, and by the owner on
+  the UHD 620.
+
+  By hand: a mature lunar basalt plain, a dusty Mars and an icy Europa, seen from 2 m, read as
+  three different grounds, and two basalt worlds of different ages read differently.
+
+Files: `surface/decoration/*`, R10's terrain material shader, R01's `WGSL_CATALOGUE` and
+`MemoryCategory`, tests.
 Acceptance: `pnpm test`, `just ci`, `just test-render`, and by hand: from 2 m above a sandy slope,
 ripples and scars read as ground, and turn off with the setting.
 
@@ -903,7 +1031,7 @@ Acceptance: `cargo test -p hyperion-surface scatter`, `just ci` (both wasm targe
   function of pose, field of view, viewport, setting and bodies alone; the low setting raises the
   annunciation exactly when a finest-level patch with pixel-sized rocks is in view outside the
   region.
-- **R11.T4.c Collision agrees, with rocks.** R10's collision-agrees test (R10.T15) gains rocks. In
+- **R11.T4.c Collision agrees, with rocks.** R10's collision-agrees test (R10.T15.a) gains rocks. In
   Rust, on native and both wasm targets under R04's machinery, goldens of
   `surface_height_with_rocks` at 10⁴ sample points on four sampled worlds; in Vitest, against the
   wasm build of those same points, the drawn surface (R05's finest mesh formed in `Math.fround`
@@ -995,6 +1123,22 @@ tests. Acceptance: `pnpm test`, `just ci`, `just test-render`, by hand at the su
   different times give the same coverage at the same t, bit for bit; the time-rate fade reaches the
   mean above its named rate.
 
+  - _The split (main's ruling, 2026-10-20)._ T7.a is built in two parts under this one ID.
+    T7.a.1, first: `cloudOptics.ts` and its tests above (the twelve cases, plain Eddington's
+    negative control, R + T + A = 1, R monotonic in τ, the unscaled direct part) with the Monte
+    Carlo reference at a smoke size. It reads no other plan's names, so it starts before T1 and
+    needs no re-validation. Its Monte Carlo bounds are 3% for τ ≥ 10 and 10% at τ = 1 at either
+    μ₀, against the table's Monte Carlo column: the table's own τ = 10, g = 0.85, μ₀ = 0.5 row is
+    2.54%, and its τ = 1, μ₀ = 1 rows are 8.9% and 5.8%. The smoke reproduces that column within
+    four combined standard deviations, its own and the table's 0.002. The rest, `condensates.ts`,
+    `coverage.ts` and their tests, waits for P14.T52.c's decks, a condensate mode through R08's
+    `modeOptics` and R09's zonal climatology, and is re-validated first (Risks, "Composition,
+    for the re-validation").
+  - _The stand-in co-albedo, for T7.a's rest_ (R11.T7.a.1's review, 2026-10-20). A physics
+    reviewer recalled, with low confidence, that a 10 µm water cloud's co-albedo 1 − ϖ₀ at 0.55 µm
+    is nearer 10⁻⁶–10⁻⁷ than the 10⁻⁵ above. The rest re-checks it against Hansen and Travis 1974
+    with the other stand-ins; T7.a.1 depends on neither value.
+
 - **R11.T7.b The two-dimensional layer.** `cloudDensity.ts`, `cloudLayer.wgsl` and
   `cloudShadow.wgsl`: a shell at the condensate's altitude, its per-texel τ the column integral of
   the shared density, lit through R08's `atmosphere_sun_transmittance` at the shell's geodetic
@@ -1007,6 +1151,20 @@ tests. Acceptance: `pnpm test`, `just ci`, `just test-render`, by hand at the su
   `cloudShadows` off neither hook is written; the smoke harness; every texel finite. Bench on the
   UHD 620 at 720p, by the owner, against about 1 ms and under 16 MB, with the development machine's
   figure beside it.
+  - _The `f32` twin of `deltaEddington`_ (R11.T7.a.1's notes, 2026-10-20). The shader's
+    δ-Eddington follows `clouds/cloudOptics.ts`'s `f64` one, with these changes for `f32`:
+    - only decaying exponentials: e^(−kτ′), e^(−2kτ′) as (e^(−kτ′))², and e^(−τ′ ÷ μ₀); the
+      direct transmittance T_dir = e^(−τ ÷ μ₀) with the unscaled τ, and T_diff = T − T_dir;
+    - the co-albedo 1 − ϖ₀ passed, not ϖ₀, which `f32` cannot hold near 1 − 10⁻⁵ to useful
+      precision, and 1 − ϖ′ computed as (1 − ϖ₀) ÷ (1 − ϖ₀f);
+    - the conservative switch re-derived for `f32`, well above `CONSERVATIVE_CO_ALBEDO`'s 10⁻¹²:
+      the general solution's relative error grows as ε ÷ k, about 10⁻⁵ in `f32` at ϖ₀ = 1 − 10⁻⁵
+      and g 0.85, where k ≈ 7.6 × 10⁻³;
+    - no division by zero at kμ₀ = 1: it is not reached at cloud ϖ₀ unless g is within about 10⁻⁵
+      of 1, but is at ϖ₀ ≥ 0.9 as g nears 1 (T7.a.1's deferred findings), so the twin interpolates
+      R and T − e^(−τ′ ÷ μ₀) alone, linearly in μ₀, across a window near ε₃₂^(1/3), about
+      5 × 10⁻³ (ε₃₂ = 2⁻²³), as `deltaEddington` does across 10⁻⁵;
+    - T_diff clamped to ≥ 0 for the lighting, since thin layers leave it at round-off.
 - **R11.T7.c The volume.** `cloudVolume.wgsl` with the noises, march, integration, phase and octaves
   of Design note 10, and the transmittance map for its shadows; high setting only. The noise
   textures are generated into a storage-capable format and copied, or generated on the CPU once,
@@ -1016,6 +1174,11 @@ tests. Acceptance: `pnpm test`, `just ci`, `just test-render`, by hand at the su
   3–5% at μ₀ ≥ 0.5; per coverage cell, the mean of per-texel δ-Eddington equals the march's cell
   mean to 2%; the smoke harness. Bench on the discrete target (the development machine's RTX 3080)
   against 1.5–3 ms and 10–20 MB, and by the owner on the UHD 620 for the record.
+  - _The `f32` twin and the reference's bias_ (R11.T7.a.1's notes, 2026-10-20). The volume's
+    `f32` δ-Eddington follows T7.b's notes. Against a converged Monte Carlo, δ-Eddington's R at
+    τ 1, g 0.85, μ₀ 1 is about 10% high (10.0 ± 0.2% and 10.2 ± 0.15% in two 10⁷-photon runs;
+    T7.a.1's deferred findings), against the table's Monte Carlo column's 8.9%. The octave fit's
+    doc comment, which states its error, reads δ-Eddington's own bias there as about 10%.
 - **R11.T7.d The switch.** Switching the setting, or the style, leaves the coverage and density
   fields identical and the cell-mean brightness within the T7.c tolerance. By hand, recorded: an
   Earth-like world from orbit, from within the layer and from below, on both settings, and its zonal
@@ -1219,7 +1382,7 @@ ejecta-block population), shape parameter or authoritative dip opens a new tag a
   T7.a's provisional stand-in.
 - **The sea over unsurveyed ground** is not drawn (Design note 11), which removes the glint that
   makes an ocean world recognisable before a survey. A disc-statistical glint on R07's reference
-  body is suggested and left to the owner.
+  body restores it (Design note 11; `signoff-12.md`, item 33).
 - **The decoration label's scope** (Design note 2) is this plan's reading of guide item 2; the owner
   signs off the guide, and a wider reading only lengthens the annunciation.
 - **Rings wait on plan 14** for a radial profile, a size distribution and a thickness on the wire,
@@ -1246,3 +1409,236 @@ ejecta-block population), shape parameter or authoritative dip opens a new tag a
   collidable, or a tide model, reopens it.
 - **Rocks collide with nothing yet.** The contact query is tested against the drawn meshes and
   across targets, but no flight model calls it; the plan that builds one inherits it.
+- **Composition, for the re-validation (decision-composition, 2026-10-09).**
+  - R11.T7.a takes its condensates' optics from R08's material registry through `modeOptics`,
+    not `condensates.ts`'s five stand-ins. Its phase comes from the deck's material, not "liquid
+    above 260 K", and its coverage from plan 14's snapshot cloud fraction and P14.T52.c's decks.
+  - `atmosphere_class` reads the surface state, so a `Tenuous` world is not drawn as airless rock
+    under an "atmosphere" flag, and `RockSite.atmosphere` follows.
+  - R11.T8.a–b take the ocean's index, absorption, density, surface tension and viscosity from
+    the liquid's palette entry. The liquid members were ruled ahead of the re-validation
+    (decision-r11-palette-liquids, 2026-10-14; updated 2026-10-15):
+    - `PaletteEntry.liquid: Option<LiquidProperties>` carries, by R08's 15 bake bins
+      (380–760 nm), the index, and the absorption and scattering when modelled; surface tension,
+      dynamic viscosity, density and the resolved temperature; and a `basis` code, measured,
+      derived or stand-in;
+    - every member that is not modelled is absent, never 0;
+    - an R09 follow-up adds it to R09's `PaletteEntry` before the serve gate opens (galaxy plan
+      14's Generator version). _Built by R09.T2.e: `PaletteEntry.liquid` and `LiquidProperties`
+      in the surface crate's `field/palette.rs`, b as `scattering_per_m`._
+    - R11.T8 never enters its own scattering b (main's ruling for R09.T2.e, 2026-10-15). The
+      re-validation writes the deep-water body term (Morel and Prieur 1977, from a and b) to read b
+      from the palette record, and tests the absent-b path as labelled: Beer–Lambert alone, the
+      member Missing. Galaxy plan 14's P14.T49.h fills b in the testing worlds' and the reference
+      Earth's records before the serve gate; if R11.T8.b is briefed before that has landed, its
+      deep-water test waits on T49.h, a stated dependency. _Met: P14.T49.h's step 2 (`f27d0248`)
+      filled b in the testing worlds' and the reference Earth's water and methane records._
+  - `liquids.ts`'s four rows become the registry's test values, and a CH₄–C₂H₆–N₂ liquid's index
+    follows its composition (from memory, checked then).
+  - R11.T4's rock k_base is by (class, entry).
+- **Deviations in T10.a, as built** (2026-10-20; lane `lane/58-r11-t10a-still-job`, from
+  `rendering-and-planets` at `ae4bd052`, merged with `b9515f03`; main's rulings (a)–(c) for
+  R11.T10.a).
+  - _Files._ New: `stills/stillPlan.ts` and `stills/batchController.ts`, with their tests. No wire,
+    protocol, DTO, golden, generator version, engine type or settings list changes; nothing outside
+    `stills/` changes.
+  - _The Consumes check (ruling (c), at `ae4bd052`)._ R01: `GpuCapabilities.maxTextureDimension2D`
+    (`engine/platform.ts`, on `RenderEngine.capabilities`), `GpuTimer` with `GraphicsStatus.timer`
+    (`engine/status.ts`, its doc naming "Dawn's 65,536 ns quantization"), `onPassTimes` and
+    `createRenderTarget(spec: RenderTargetSpec)` are as the row says; `PassTimes` holds `passes`, a
+    list of `{ label, ns, bracketed }`, not a map keyed by `FrameSubmission.label`; `readTexture`
+    takes a fourth parameter, `access?: "cpu" | "tolerance"`, which the row's
+    `readTexture(texture, level?, rect?)` does not show, and throws `PresentationOnlyReadback` for
+    a texture last written by a `presentation-only` kernel, which T10.b's read-back must not meet.
+    R02: the row's "fixed reversed-Z infinite
+    projection" is `perspectiveReversedInfinite(fovXRad, aspect, nearM)` in `camera/projection.ts`,
+    with `project(v, camera, viewport)`, `toViewAxes` and `NEAR_PLANE_M`, as the row says. R05:
+    `QualitySetting` (`"high" | "low"`) is as the row says; `SelectionInput.grounded` is
+    `ReadonlyArray<GroundContact>`, the row's `readonly GroundContact[]`; `selectPatches(input)`
+    on a `SelectionInput`, `screenSpaceErrorPx(boundM, distanceM, view)`, `ViewSelectionInput` and
+    `cull.ts`' `Frustum`, `frustumOf` and `inFrustum`, which T10.a reads, are in `terrain/` but not
+    named in the row.
+  - _The decoration-fade test is deferred._ It waits for T2 (the Tasks preamble; main's rulings) and
+    is added when T2's fade exists, in `stillPlan.test.ts`, with the fade taken at
+    `footprintView`'s pixel; T10.a's test line is complete only then, and main assigns the task that
+    adds it. The rest of T10.a's test line is built. _Assigned 2026-10-20 to R11.T2, the task that
+    builds the fade (main's ruling at T10.a's landing); T2.a's Tests carry it._
+  - _The names._ Provides kept: `planTiles`, `tileProjection`, `nextBatch(measured)` (a method of
+    the class `BatchController`) and `STILL_TILE_MAX_PX`. Added in `stillPlan.ts`:
+    `tileLimitPx(maxTextureDimension2D, setting)`; `tileFrustum(camera, tile, marginPx = 0)`, a
+    `cull.ts` `Frustum`; `footprintView(view, still)`, a `ViewSelectionInput`;
+    `splitDispatch(workgroups, costPerWorkgroupNs | null)`, a `DispatchSplit`; `MAX_DISPATCH_NS`;
+    `PROBE_WORKGROUPS`; the types `PixelRect`, `StillTile`, `StillTiling`, `DispatchPiece` and
+    `DispatchSplit`. In `batchController.ts`: `TIMESTAMP_QUANTUM_NS`, `EMPTY_SUBMIT_SAMPLES`,
+    `batchCapNs(setting, frameIntervalNs)`, `timestampBudgetNs(setting, frameIntervalNs)`,
+    `passTimeBoundNs(measuredNs, timer)`, `medianNs(samplesNs)` and the types `BatchTiming`,
+    `BatchControllerOptions`, `BatchMeasurement`, `MeasuredPass` and `Batch`. T10.b reads them
+    there.
+  - _Where the figures live._ `stillPlan.ts`: `STILL_TILE_MAX_PX`, `MAX_DISPATCH_NS` (50 ms) and the
+    64 px width step from the 256-byte rule. `batchController.ts`: q (`TIMESTAMP_QUANTUM_NS`), the
+    two-quantum margin, the caps (6 ms, T ÷ 4), the 1.5 times growth, the halving and the five
+    empty submits, each a module constant citing Design note 17.
+  - _The calls on the open points._
+    - A batch's unit is one whole pass, named by a label for its pass and tile, since units of one
+      label are predicted at one cost. The controller is built with the job's queue of units and
+      proposes runs of it.
+    - With timestamps, a unit is predicted at its label's latest pass time, the largest of one
+      measurement's passes of that label. Under `quantized` it is measured + q, since a difference
+      of two quantised timestamps is off the true time by less than one quantum, so the sum bounds
+      the batch's true time. The batch is filled to the cap less 2q, which is kept under `full`
+      too, the conservative reading.
+    - Without timestamps, the GPU time is the round trip less the median of five empty submits, at
+      least 0, and the cost per unit that time over the batch's units.
+    - The first batch is one unit in either mode. A dispatch's first piece, before any cost per
+      workgroup, is a probe of one workgroup; the rest is split by the probe's measured cost.
+    - Missing data never grows a batch. With timestamps, a unit whose label has not been measured
+      is proposed alone, unpredicted; without, the last size repeats.
+    - A still width that is not a multiple of 64 px: the last column's texture is padded to the next
+      multiple, under 64 px, and cropped on the CPU at assembly, so any still size works. The
+      grid is as few, and as equal, tiles as L allows: 3,840 px on low is two 1,920 px columns,
+      not 2,048 + 1,792.
+    - A tile's frustum culls against its rect, not its padded texture; `marginPx` lets T10.b
+      widen it by the jitter's reach.
+    - A single unit predicted over the budget, and a workgroup over 50 ms, is proposed alone and
+      flagged (`overBudget`, `over-bound`), never planned silently.
+    - _One departure from the test line._ Whole units cannot grow from one by at most 1.5 times,
+      since ⌊1.5⌋ = 1 would stall, so a batch of one grows to two; from two units on, growth is at
+      most ⌊1.5 n⌋. Either step is still limited to what fits the cap at the cost measured. The
+      test is written so.
+    - _Two readings of the test line._ With timestamps, a single unit predicted over the budget
+      (`overBudget`) and a unit not yet measured (`predictedNs` `null`) are proposed alone and are
+      exempt from "no proposed batch's predicted time exceeds the cap less two quanta"; T10.b
+      answers `overBudget` by splitting the pass. Without timestamps, "never proposes a batch whose
+      GPU time exceeds the cap" is checked at the cost per unit last measured, since a jump in cost
+      makes one overrun unavoidable, which the halving answers.
+    - A negative pass time, which a reset of the timestamp counter gives (R01 does not clamp it),
+      is skipped and its label keeps its last time, as the WebGPU specification's note on
+      timestamp queries allows.
+    - WebGPU has no base workgroup, so a `DispatchPiece` runs as a dispatch of its own count with
+      `firstWorkgroup` an offset its kernel adds (a uniform in T10.b's split kernels).
+    - After an overrun the next batch is ⌊n ÷ 2⌋ units, or fewer where the cost measured fits
+      fewer: at a threefold jump, 162 → 54, not 81.
+    - `maxUnits` caps a batch's units, which T10.b's re-request after a loss sets to half the
+      batch in flight.
+  - _Figures._ L at a limit of 8,192 and of 16,384: 2,048 and 2,048 on low, 4,096 and 4,096 on high.
+    3,840 × 2,160: 2 × 2 tiles of 1,920 × 1,080 on low (`bytesPerRow` 7,680), one tile of
+    3,840 × 2,160 on high (15,360). The caps less 2q: 5,868,928 ns on low; 4,039,678 ns on high at
+    T = 16.683 ms, whose cap is 4,170,750 ns. The projection test's tolerance, per point:
+    (w ÷ 2) × 2⁻²⁴ × (|m₀ x ÷ w_clip| + |m₈|) px in x, y likewise with h, m₅ and m₉, plus
+    64 ε (W + H) for the `f64` arithmetic; at most about 2⁻²⁴ W, 2.3 × 10⁻⁴ px at 3,840 px wide.
+  - _Sources re-checked_ (2026-10-20, by a research agent): 8,192 is WebGPU's default (the Limits
+    table, the Candidate Recommendation Draft of 15 September 2026); the 256-byte rule is
+    "validating GPUTexelCopyBufferInfo" (§11.2.2), from which `writeTexture` is exempt; 640 ms and
+    2,500 ms are `Kconfig.profile`'s defaults; `TdrDelay` is 2 s (Microsoft). Gen9 preempting
+    compute between thread groups and 3D work between draws is confirmed for Linux only (i915's
+    Gen9 workarounds, Mesa's ANV); Intel's Windows driver is not checked.
+- **Deferred findings (2026-10-13 rule) (R11.T10.a).**
+  - With timestamps, a batch's prediction sums its pass times and leaves out the gaps between
+    passes, which no timestamp covers. Under `quantized` the quantum added to each pass covers
+    them; under `full` only the two-quantum margin does. T10.d's soak shows whether `full` needs an
+    allowance per pass.
+- **Deviations in T7.a.1, as built** (2026-10-20; lane `lane/60-r11-t7a1-delta-eddington`, from
+  `rendering-and-planets` at `61f628e4`; main's rulings (a)–(i) for R11.T7.a.1).
+  - _Files._ New: `clouds/cloudOptics.ts`, `clouds/slabMonteCarlo.ts` and `clouds/slabFixtures.ts`,
+    with `cloudOptics.test.ts` and `slabMonteCarlo.test.ts`. Nothing outside `clouds/` changes; no
+    wire, protocol, DTO, golden, generator version, engine type or settings list moves.
+  - _The tolerance (ruling (e))._ δ-Eddington's R is held to 3% of the table's Monte Carlo column
+    at τ ≥ 10 and to 10% at τ = 1 at either μ₀. The test line's 2.5% fails the table's own τ 10,
+    g 0.85, μ₀ 0.5 row (2.54%), and its 10% at τ = 1, given for an oblique sun only, is extended to
+    μ₀ = 1, where the table's rows are 8.9% and 5.8%. The smoke holds |R_N − R_table| to
+    4√(σ_N² + 0.002²), σ_N = √(R_table(1 − R_table) ÷ N); δ-Eddington is never compared with the
+    smoke run, whose σ on a bias near 10% would make the result hang on the seed.
+  - _The names._ Provides kept: `deltaEddington({ tau, asymmetry, singleScatterAlbedo, mu0 })`.
+    Added in `cloudOptics.ts`: the types `DeltaEddingtonInput` and `SlabFluxFractions`
+    (`reflectance`, `directTransmittance`, `diffuseTransmittance`, `absorptance`) and
+    `CONSERVATIVE_CO_ALBEDO`. In `slabMonteCarlo.ts`: `slabMonteCarlo(input, uniform)` with
+    `SlabMonteCarloInput` (`tau`, `asymmetry`, `mu0`, `photons`) and `SlabMonteCarloResult`
+    (`photons`, `reflected`, `transmitted`, `reflectance`, `transmittance`). In `slabFixtures.ts`:
+    `SLAB_CASES` and `SlabCase`, the twelve cases as one fixture for both tests, in `clouds/`
+    because the lane could not edit `test/`.
+  - _The calls._
+    - The conservative switch: the conservative solution at 1 − ϖ₀ ≤ 10⁻¹²
+      (`CONSERVATIVE_CO_ALBEDO`), the rulings' lean. Across it R moves at most 8.0 × 10⁻¹¹ at
+      τ ≤ 50 (g 0–0.85, μ₀ 0.05–1), and the absorptance dropped is at most 1.2 × 10⁻¹⁰. The
+      scaled co-albedo is computed as (1 − ϖ₀) ÷ (1 − ϖ₀f), without the cancellation of 1 − ϖ′.
+    - kμ₀ = 1: within |1 − kμ₀| < 10⁻⁵ the scattered part (R, and T less the scaled direct beam
+      e^(−τ′ ÷ μ₀)) is interpolated linearly in μ₀ between the closed form at kμ₀ = 1 ∓ 10⁻⁵, and
+      e^(−τ′ ÷ μ₀) is added at μ₀ itself, so that ϖ₀ = 0 keeps T_diff = 0 exactly (interpolating
+      the whole T left T_diff at −4 × 10⁻¹² there). Inside the window the result is within
+      8.3 × 10⁻¹² of an 80-digit solution, and the step at the window's edges is up to
+      1.7 × 10⁻¹¹ in R or T; the tests hold the step to 10⁻⁹, and ϖ₀ = 0 there to 10⁻¹⁵.
+    - The Monte Carlo takes no ϖ₀: it is the table's conservative run, and R_N + T_N = 1 holds by
+      count. It draws isotropic scatterings below |g| = 10⁻⁸, where the inverse's 0 ÷ 0 loses
+      precision.
+    - The monotonic test allows a fall of 10⁻¹⁵, a few ulps, for `Math.exp`'s platform
+      differences; no fall occurs on the grid here.
+  - _Figures._
+    - The twelve cases: largest |R − table| 4.53 × 10⁻⁵, at τ 10, g 0.75, μ₀ 0.5 (0.695645).
+    - Against the Monte Carlo column: largest |R − R_MC| ÷ R_MC 2.53% at τ ≥ 10 (τ 10, g 0.85,
+      μ₀ 0.5) and 9.65% at τ = 1 (g 0.85, μ₀ 0.5).
+    - The ODE check at 20,000 RK4 steps: largest difference 5.1 × 10⁻¹⁴ for the general solution
+      (ϖ₀ 0.5–0.999), 5.1 × 10⁻¹³ for the conservative one, and 4.7 × 10⁻¹² at kμ₀ = 1 (ϖ₀ 0.5,
+      g 0.5; ϖ₀ 0.9, g 0.95). The review's 80-digit solution meets the code to 2 × 10⁻¹⁴ at 944
+      regular points, and the general solution just above the switch to 7 × 10⁻¹¹ down to
+      τ = 10⁻³.
+    - The closure grid (3 × 5 × 4 × 61): R + T + A within 1.1 × 10⁻¹⁶ of 1, no part below 0, A = 0
+      at ϖ₀ = 1, and no fall of R in τ. Main's 600-value grid (below), re-run here, shows none.
+    - The smoke: N = 20,000 photons a case, case i on `seededRandom(0x7a11 + i)`. The twelve cases
+      took 1.12 s under Vitest on the laptop at a 1-minute load of 2.1, and 1.2 s in plain Node at
+      2.3. Its largest deviation is 0.0061 against a bound of 0.0111 (τ 1, g 0.75, μ₀ 1), 0.55 of
+      it; the isotropic control is 0.430 off the g 0.85 row, against a bound of 0.016.
+  - _Main's checks (2026-10-20)._ A 2 × 10⁶-photon Monte Carlo reproduces the table's column within
+    0.0026; δ-Eddington's largest biases against it are 2.62% at τ ≥ 10 and 9.85% at τ = 1. The
+    grid of ϖ₀ {0.99, 0.999, 1}, eleven g, nine μ₀ and 600 τ over [10⁻⁴, 10⁴] shows no violation of
+    R ∈ [0, 1], A ≥ 0, T_diff ≥ 0 or R non-decreasing in τ.
+  - _Sources re-checked_ (2026-10-20, by a research agent, from the scanned pages). Every formula of
+    the rulings matches the papers read; no difference to raise.
+    - Joseph, Wiscombe and Weinman 1976, read in full: f = g² (eq. 5a), g′ = (g − f) ÷ (1 − f)
+      (eq. 2b) = g ÷ (1 + g) (eq. 5b), τ′ (eq. 13), ϖ′ (eq. 14). They give no closed-form R or T
+      themselves, and validated over g 0–0.95, τ 0.01–100, ϖ₀ 0.1–0.99 and μ₀ 0.1–1 (their
+      Table 1).
+    - Meador and Weaver 1980, read in full: γ₁–γ₃ (Table 1, the Eddington row; the table has no
+      δ-Eddington row, the scaled values going into the Eddington coefficients), γ₄ = 1 − γ₃
+      (eq. 21), the two-stream equations (eqs. 12 and 13), R and T for a collimated beam over a
+      black surface (eqs. 14 and 15), α₁, α₂ and k (eqs. 16–18) and the conservative solution
+      (eq. 24). Their τ′ is the layer's total optical thickness, not a scaled one.
+    - Henyey and Greenstein 1941, read in full: the phase function (eq. 2) and g as its mean
+      cosine (eq. 3). The inverse-CDF draw is not theirs; it is read as eq. 3.19 of Wang and
+      Jacques's MCML manual, which conditions it on g > 0 and gives 2ξ − 1 at g = 0, as built.
+    - Toon et al. 1989 not read (closed, and no open copy found); cited as the secondary statement
+      of the two-stream equations' form only.
+- **Deferred findings (2026-10-13 rule) (R11.T7.a.1).**
+  - δ-Eddington's absorptance is 2–10% below a plane-parallel Henyey–Greenstein Monte Carlo's at
+    ϖ₀ 0.99–0.999 (main's, 5 × 10⁵ photons, 2026-10-20). A by δ-Eddington against A by the Monte
+    Carlo, at ϖ₀ 0.99, g 0.85 and μ₀ 1 unless stated: 0.01124 against 0.01182 at τ 1; 0.16364
+    against 0.17627 at τ 10; 0.16130 against 0.17158 at τ 10, μ₀ 0.5; 0.48950 against 0.50001 at
+    τ 50; 0.01831 against 0.02036 at ϖ₀ 0.999, τ 10; 0.10275 against 0.10622 at ϖ₀ 0.999, τ 50. R
+    is within about 2% at τ ≥ 10, and 11% high at τ = 1. T7.c's octave fit and R12's audit read it.
+    Nothing changes, since visible cloud ϖ₀ is about 1 − 10⁻⁵.
+  - The removable singularity at kμ₀ = 1 is reachable at ϖ₀ ≥ 0.9 when g is near 1, since ϖ′ falls
+    to 0 as g rises to 1: from g 0.930 at ϖ₀ 0.9 (k 1.11 at g 0.95), from g 0.994 at ϖ₀ 0.99 and
+    from g 0.9994 at ϖ₀ 0.999. The rulings' "k ≤ 0.76 there" holds at g 0.85. `deltaEddington`
+    steps around it at every ϖ₀, so nothing changes here; T7.b's and T7.c's `f32` twins must step
+    around it too, with a window wide enough for `f32`.
+  - At τ 1, g 0.85, μ₀ 1, δ-Eddington's R (0.046669) is about 10% above a converged Monte Carlo:
+    10.0 ± 0.2% and 10.2 ± 0.15% in two 10⁷-photon runs (this lane's and its review's, 2026-10-20;
+    R_MC 0.04243 and 0.04235), against main's 9.85% at 2 × 10⁶. The table's 0.0429 sits about
+    0.0005 high, within its stated 0.002, so the 10% bound holds against the table's column but not
+    against a converged run. T7.c's octave fit and R12's audit should read it as about 10%.
+- **R11.T1, as built (2026-11-02).**
+  - `ViewSettings` extends `R11Ladder` (`surface/decoration/decorationSetting.ts`, with
+    `CloudRendering`, `RingRendering`, `DECORATION_ON`, `decorationAllowed(ladder, frame)` and
+    `decorationStatement(drawn, surveyReading)`); the values stand in `SETTINGS`.
+  - What was drawn travels `TerrainViewFrame.decorated` → `LiveFrameTerrain.decorated` →
+    `ViewFrameDrawn.decoration`; every pass sets `false` until T2.b sets the first.
+  - Where the label stands (lean, 2026-11-02, the guide's survey line): after the primary's survey
+    line's middle dot (`surveyLines`' `decoration`, `TerrainLabelInput.decoration`; the line's
+    tallest form holds it on high), else among `labelStatements` (its third argument) where that
+    line is a state or gives way for room; an instrument's in its label block, its survey line
+    standing on a `GROUND` page that may be closed.
+- **The terrain resolve's texture budget for R11 (ruled 2026-11-13, ux-calls-and-checklist-gaps;
+  R14's records):** the resolve binds 15 of WebGPU's 16 sampled textures a stage. T9.a's rings'
+  shadow, τ(r) at one crossing, goes in the resolve frame's `rgba32float` row (a storage buffer in
+  the forward pass); T2.c's decoration sets are one `texture_2d_array`, a layer a material; T7.c's
+  cloud shadow is its own texture, the room made by moving `phase_factor_table` (`rgba32float`)
+  into the resolve frame as the lights were, which is bit for bit.

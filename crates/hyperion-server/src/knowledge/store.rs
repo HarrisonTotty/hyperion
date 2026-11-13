@@ -5,6 +5,7 @@ use std::error::Error;
 use std::fmt;
 
 use hyperion_sim::id::EventId;
+use hyperion_sim::time::UniverseTime;
 
 use super::persist::SaveKnowledgeError;
 use super::record::{ContactId, ContactRecord, ContactView, Sighting};
@@ -52,6 +53,11 @@ pub(crate) enum KnowledgeEntry {
     },
     /// The crew acknowledged `contact`.
     Acknowledged { contact: ContactId },
+    /// `contact`'s light fell under the detection limit at `at`, the observer's time (P12.T8.c).
+    Cleared {
+        contact: ContactId,
+        at: UniverseTime,
+    },
 }
 
 impl KnowledgeStore {
@@ -100,6 +106,22 @@ impl KnowledgeStore {
             .ok_or(AcknowledgeContactError::UnknownContact(contact))
     }
 
+    /// Marks `event`'s contact cleared at `at`, the observer's time its light fell under the
+    /// detection limit (Design note 11), returning the contact if it was lit. An event never seen
+    /// is no contact, and a contact cleared already stays as it was; either is `None`. The next
+    /// sighting of the event lights it again.
+    ///
+    /// # Panics
+    ///
+    /// Never: the clear the store plans for a contact it holds applies to it.
+    pub fn record_clear(&mut self, event: EventId, at: UniverseTime) -> Option<ContactId> {
+        let entry = self.clear_entry(event, at)?;
+        let contact = entry.contact();
+        self.apply(entry)
+            .expect("an entry planned by the store applies to it");
+        Some(contact)
+    }
+
     /// Every contact, in the order first seen, which is their numbers' order.
     pub fn contacts(&self) -> impl ExactSizeIterator<Item = ContactId> + '_ {
         self.records.iter().map(ContactRecord::contact)
@@ -133,12 +155,24 @@ impl KnowledgeStore {
         }
     }
 
+    /// The entry that clears `event`'s contact at `at`, or `None` if it has no contact or is
+    /// cleared already ([`record_clear`](Self::record_clear)).
+    #[must_use]
+    pub(crate) fn clear_entry(&self, event: EventId, at: UniverseTime) -> Option<KnowledgeEntry> {
+        let contact = self.by_event.0.get(&event).copied()?;
+        let lit = self
+            .record(contact)
+            .is_some_and(|record| !record.is_cleared());
+        lit.then_some(KnowledgeEntry::Cleared { contact, at })
+    }
+
     /// Applies one change, as the store's own methods do and as a file is replayed.
     ///
     /// # Errors
     ///
     /// [`ApplyEntryError`] if the entry does not fit the store: a sighting under a contact that is
-    /// neither its event's nor the next number, or an acknowledgement of a contact not yet seen.
+    /// neither its event's nor the next number, or an acknowledgement or a clear of a contact not
+    /// yet seen.
     pub(crate) fn apply(&mut self, entry: KnowledgeEntry) -> Result<(), ApplyEntryError> {
         match entry {
             KnowledgeEntry::Sighting {
@@ -165,6 +199,12 @@ impl KnowledgeStore {
                 .record_mut(contact)
                 .map(|record| {
                     record.acknowledge();
+                })
+                .ok_or(ApplyEntryError),
+            KnowledgeEntry::Cleared { contact, at } => self
+                .record_mut(contact)
+                .map(|record| {
+                    record.clear(at);
                 })
                 .ok_or(ApplyEntryError),
         }
@@ -206,7 +246,9 @@ impl KnowledgeEntry {
     #[must_use]
     pub(crate) const fn contact(&self) -> ContactId {
         match self {
-            Self::Sighting { contact, .. } | Self::Acknowledged { contact } => *contact,
+            Self::Sighting { contact, .. }
+            | Self::Acknowledged { contact }
+            | Self::Cleared { contact, .. } => *contact,
         }
     }
 }
@@ -250,11 +292,11 @@ mod tests {
     use hyperion_sim::galaxy::gas::ccm::Band;
     use hyperion_sim::observe::{Drift, Observer, retarded};
     use hyperion_sim::time::UniverseTime;
-    use hyperion_sim::units::WattsPerSquareMetre;
+    use hyperion_sim::units::{LightYears, WattsPerSquareMetre};
 
     use super::*;
     use crate::knowledge::record::{Acknowledgement, KnowledgeLevel};
-    use crate::knowledge::testing::{event_of, host, other_host};
+    use crate::knowledge::testing::{event_of, flare_in, host, other_host};
 
     /// A sighting of the host from `from` light-years, at `years`, with `flux` in V.
     fn sighting(from: [f64; 3], years: i64, flux: f64, level: KnowledgeLevel) -> Sighting {
@@ -270,9 +312,10 @@ mod tests {
         Sighting::new(
             &observer,
             &retarded(&observer, &star),
-            AlertBand::Photometric(Band::V),
+            &flare_in(AlertBand::Photometric(Band::V)),
             WattsPerSquareMetre::new(flux),
             level,
+            LightYears::ZERO,
         )
     }
 
@@ -438,7 +481,45 @@ mod tests {
             contact: ContactId::new(2).unwrap(),
         };
         assert_eq!(store.apply(unseen), Err(ApplyEntryError));
+        let unseen = KnowledgeEntry::Cleared {
+            contact: ContactId::new(2).unwrap(),
+            at: UniverseTime::EPOCH,
+        };
+        assert_eq!(store.apply(unseen), Err(ApplyEntryError));
         assert_eq!(store.len(), 1);
         assert_eq!(store.view(contact).unwrap().seen().sightings(), 1);
+    }
+
+    /// P12.T8.c: a contact's clear holds, with its time, until its event's next sighting, which
+    /// lights it again; a contact cleared already, and an event never seen, are not cleared; the
+    /// clear keeps the contact, its level and its acknowledgement.
+    #[test]
+    fn knowledge_a_clear_holds_until_the_next_sighting() {
+        let mut store = KnowledgeStore::new();
+        let event = event_of(host());
+        let contact =
+            store.record_sighting(event, sighting(HERE, 0, 1e-9, KnowledgeLevel::Resolved));
+        assert!(store.acknowledge(contact).unwrap());
+        let cleared = |store: &KnowledgeStore| store.view(contact).unwrap().seen().cleared();
+        assert_eq!(cleared(&store), None);
+
+        let at = UniverseTime::from_julian_years(1).unwrap();
+        assert_eq!(store.record_clear(event, at), Some(contact));
+        assert_eq!(cleared(&store), Some(at));
+        let later = UniverseTime::from_julian_years(2).unwrap();
+        assert_eq!(store.record_clear(event, later), None, "cleared already");
+        assert_eq!(cleared(&store), Some(at));
+        assert_eq!(store.record_clear(event_of(other_host()), at), None);
+        let view = store.view(contact).unwrap();
+        assert_eq!(view.level(), KnowledgeLevel::Resolved);
+        assert_eq!(view.seen().acknowledged(), Acknowledgement::Acknowledged);
+        assert_eq!(store.len(), 1);
+
+        store.record_sighting(event, sighting(HERE, 3, 1e-12, KnowledgeLevel::Bearing));
+        assert_eq!(cleared(&store), None, "lit again");
+        assert_eq!(
+            store.view(contact).unwrap().level(),
+            KnowledgeLevel::Resolved
+        );
     }
 }

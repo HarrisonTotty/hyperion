@@ -46,6 +46,7 @@ export function starSymbol(kind: ObjectKindDto): SymbolShape | null {
     case "dwarf":
     case "subgiant":
     case "hot_subdwarf":
+    case "stripped_helium_star":
     case "substellar":
       shape = "circle";
       break;
@@ -89,7 +90,8 @@ export const PLANET_SYMBOL: SymbolShape = "triangle-down";
  * The symbol a chart's object is drawn with, or `null` for one with nothing to draw: its primary's
  * for a star system or a brown dwarf ({@link starSymbol}), `null` without a brief (not yet formed),
  * and {@link PLANET_SYMBOL} for a free-floating planet, which has no brief and is drawn once it has
- * formed.
+ * formed. An object of a layer this build does not know is not drawn: its size class, which shows
+ * its layer, is not known.
  *
  * @param formed - Whether the object exists at the chart's time: its age then is positive.
  */
@@ -106,6 +108,9 @@ export function chartSymbol(
       break;
     case "rogue_planet":
       shape = formed ? PLANET_SYMBOL : null;
+      break;
+    case "unknown":
+      shape = null;
       break;
   }
   return shape;

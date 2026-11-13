@@ -14,7 +14,7 @@ use crate::Seed;
 use crate::galaxy::consts::{LIGHT_YEARS_PER_KILOPARSEC, LIGHT_YEARS_PER_PARSEC};
 use crate::galaxy::imf::MassFunctionKind;
 use crate::galaxy::params::GalaxyParams;
-use crate::galaxy::{Galaxy, PointLy};
+use crate::galaxy::{Galaxy, PointLy, Population};
 use crate::math;
 use crate::stellar::Composition;
 use crate::stellar::remnant::StandardKickLaw;
@@ -42,9 +42,13 @@ fn radius_ly(f: &FeatureRecord) -> f64 {
 
 // --- P09.T12.a ---
 
+/// P09.T12.a: drawn galaxies hold 80 to 800 globulars, here over 16 seeds, and the fixture 130
+/// to 190. The bound is asserted over 32 more seeds per commit and 10⁴ in the slow sweep, by
+/// `tests/common/mod.rs`' `assert_params_in_ranges` (`tests/galaxy_params.rs` and
+/// `tests/galaxy_sweeps.rs`), so this loop took 200 until `decision-test-coverage.md`'s N5.
 #[test]
 fn every_seed_holds_80_to_800_and_the_fixture_about_160() {
-    for n in 0..200 {
+    for n in 0..16 {
         let params = GalaxyParams::from_seed(Seed::new(SEED | n), MassFunctionKind::default());
         let count = params.accretion().globular_count();
         assert!((80..=800).contains(&count), "seed {n}: {count}");
@@ -137,6 +141,7 @@ fn catalogue_histories(galaxy: &Galaxy) -> Vec<(f64, f64, f64)> {
                 galaxy,
                 LightYears::new(g.pericentre_kpc * LIGHT_YEARS_PER_KILOPARSEC),
                 LightYears::new(g.apocentre_kpc * LIGHT_YEARS_PER_KILOPARSEC),
+                Population::Halo,
                 SolarMasses::new(g.mass),
                 LightYears::new(g.half_mass_radius_pc * LIGHT_YEARS_PER_PARSEC),
                 Years::new(12e9),
@@ -159,8 +164,16 @@ fn catalogue_histories(galaxy: &Galaxy) -> Vec<(f64, f64, f64)> {
 /// escape speed, today's times `√(M₀ ÷ M)`, 1.5–2.3 times today's.
 #[test]
 fn the_inversion_against_the_catalogue() {
-    let galaxy = milky_way(0);
-    let rows = catalogue_histories(&galaxy);
+    let (median_offset, share, median_ratio) = inversion_against_the_catalogue(&milky_way(0));
+    assert!(median_offset.abs() <= 0.25, "{median_offset}");
+    assert!(share >= 0.7, "{share} within 0.25 dex");
+    assert!((1.5..=2.3).contains(&median_ratio), "{median_ratio}");
+}
+
+/// [`catalogue_histories`]' median offset from the catalogue's initial masses (dex), the share
+/// within 0.25 dex of them, and the median birth escape speed over today's, printed.
+fn inversion_against_the_catalogue(galaxy: &Galaxy) -> (f64, f64, f64) {
+    let rows = catalogue_histories(galaxy);
     let mut offsets: Vec<f64> = rows.iter().map(|(ours, theirs, _)| ours - theirs).collect();
     let within = offsets.iter().filter(|d| d.abs() <= 0.25).count();
     let mut ratios: Vec<f64> = rows.iter().map(|r| r.2).collect();
@@ -174,6 +187,16 @@ fn the_inversion_against_the_catalogue() {
         "initial masses: median offset {median_offset:.3} dex, {share:.2} within 0.25 dex; \
          median birth escape over today's {median_ratio:.2}"
     );
+    (median_offset, share, median_ratio)
+}
+
+/// Ruling 145.5: the catalogue's clusters, inverted at the halo's own μ, meet Baumgardt et al.
+/// 2019's initial masses inside P09.T13's windows (BM03's 0.70 put the median offset at −0.168
+/// dex, the own μ at −0.072).
+#[test]
+fn the_globulars_inverted_at_their_own_mu_meet_the_catalogue() {
+    let galaxy = milky_way(0).with_full_potential();
+    let (median_offset, share, median_ratio) = inversion_against_the_catalogue(&galaxy);
     assert!(median_offset.abs() <= 0.25, "{median_offset}");
     assert!(share >= 0.7, "{share} within 0.25 dex");
     assert!((1.5..=2.3).contains(&median_ratio), "{median_ratio}");
@@ -224,6 +247,7 @@ fn the_milky_way_s_globular_system() {
                 &galaxy,
                 f.position(),
                 bulk_velocity(&galaxy, &f),
+                m.origin().population(),
                 m.mass(),
                 m.half_mass_radius(),
                 m.age(),

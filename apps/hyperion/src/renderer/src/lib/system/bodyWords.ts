@@ -12,15 +12,25 @@ import type {
   ArchitectureClassDto,
   BeltCompositionDto,
   BeltSiteDto,
-  DestructionCauseDto,
+  CrustLidDto,
   DetailLevelDto,
+  HabitabilityClassDto,
   MoonOriginDto,
   PlanetClassDto,
+  RedoxClassDto,
   RingKindDto,
   RingMaterialDto,
 } from "@hyperion/protocol";
 
-import type { BodyKind, BodyState, Section } from "./model";
+import { substanceName } from "../substances";
+import type {
+  BodyKind,
+  BodyState,
+  DestructionCause,
+  HabitabilityLimit,
+  Section,
+  SurfaceState,
+} from "./model";
 
 /** A section that stands in place of its values: withheld, or not computed. */
 export type SectionStandIn = Extract<Section<unknown>["state"], "not_resolved" | "not_modelled">;
@@ -102,9 +112,17 @@ export function bodyStateLabel(state: BodyState): string {
   return label;
 }
 
-/** What destroyed a body, in words. */
-export function destructionCauseLabel(cause: DestructionCauseDto): string {
-  let label: string;
+/**
+ * What destroyed a body, in words; `null` for a cause this build does not know, which reads
+ * Missing.
+ *
+ * @remarks
+ * `EVAPORATED` is `evaporated`, from generator version 28 a small hot rocky body whose rock vapour
+ * streamed off it until none was left (plan 14, P14.T55.b.a), the literature's "evaporation" of a
+ * rocky planet (Perez-Becker and Chiang 2013), as `ENGULFED` and `COLLIDED` are their events.
+ */
+export function destructionCauseLabel(cause: DestructionCause): string | null {
+  let label: string | null;
   switch (cause) {
     case "dispersed":
       label = "DISPERSED";
@@ -117,6 +135,12 @@ export function destructionCauseLabel(cause: DestructionCauseDto): string {
       break;
     case "collided":
       label = "COLLIDED";
+      break;
+    case "evaporated":
+      label = "EVAPORATED";
+      break;
+    case "unknown":
+      label = null;
       break;
   }
   return label;
@@ -140,6 +164,213 @@ export function planetClassLabel(planetClass: PlanetClassDto): string {
       break;
     case "gas_giant":
       label = "GAS GIANT";
+      break;
+  }
+  return label;
+}
+
+/**
+ * What a body's envelope is, the lead row of its `ATMOSPHERE`, from the envelope's `supercritical`
+ * key: `GAS ENVELOPE` for an H₂/He envelope, whose key is `null`, and a solid body's supercritical
+ * envelope by its condensable, `SUPERCRITICAL H2O` for a steam envelope's (signoff-11, item 21;
+ * P14.T53.f).
+ *
+ * @remarks
+ * `SUPERCRITICAL H2O` is the `SURFACE` state `steam_envelope`'s word, a phase word beside a
+ * formula, never "steam". Another condensable's reads by the same pattern, named by
+ * {@link substanceName} (`SUPERCRITICAL CH4`, and `SUPERCRITICAL UNLISTED MATERIAL` for a name the
+ * list does not hold), as the guide's `GAS ENVELOPE` row gives it (ruled 2026-11-13).
+ */
+export function envelopeLabel(supercritical: string | null): string {
+  return supercritical === null
+    ? "GAS ENVELOPE"
+    : `SUPERCRITICAL ${substanceName(supercritical, "upper")}`;
+}
+
+/**
+ * The state of a body's surface (plan 14, P14.T13.c, on the wire by P14.T35.e), in words:
+ * `TEMPERATE`, `MAGMA OCEAN`, `RUNAWAY GREENHOUSE`; `null` for a state this build does not know,
+ * which its reading shows Missing.
+ *
+ * @remarks
+ * Signed off with P14.T43.b's `SURFACE` rows (signoff-11, item 21). `SUPERCRITICAL H2O` is the
+ * wire's `steam_envelope` (P14.T53.b): water above its critical point with no interface, named by
+ * its formula, never by "steam", a common name for it (the guide's Voice and nomenclature).
+ * `TENUOUS ATMOSPHERE` is `tenuous` (P14.T53.c), a thin or transient atmosphere as Pluto's, the
+ * literature's term for it: never "air", since the console has one name for a body's gas,
+ * `ATMOSPHERE`, and `TENUOUS` alone would not say what is tenuous. `DESERT` is `desert`, from
+ * generator version 27 a `temperate` body with no liquid H2O at its surface, as Mars is, a label
+ * whose sections are `temperate`'s (ux-calls-data's ruling 9).
+ */
+export function surfaceStateLabel(state: SurfaceState): string | null {
+  let label: string | null;
+  switch (state) {
+    case "magma_ocean":
+      label = "MAGMA OCEAN";
+      break;
+    case "airless":
+      label = "AIRLESS";
+      break;
+    case "runaway_greenhouse":
+      label = "RUNAWAY GREENHOUSE";
+      break;
+    case "temperate":
+      label = "TEMPERATE";
+      break;
+    case "snowball":
+      label = "SNOWBALL";
+      break;
+    case "steam_envelope":
+      label = "SUPERCRITICAL H2O";
+      break;
+    case "tenuous":
+      label = "TENUOUS ATMOSPHERE";
+      break;
+    case "desert":
+      label = "DESERT";
+      break;
+    case "unknown":
+      label = null;
+      break;
+  }
+  return label;
+}
+
+/**
+ * Which crust lies at a body's surface (plan 14, P14.T51.c, read by P14.T43.g's `CRUST` row), in
+ * words: `PRIMARY`, `SECONDARY`, `UNDIFFERENTIATED`.
+ *
+ * @remarks
+ * Planetary science's classes of crust by how each formed: the first, from the body's first
+ * melting or freezing; one from later melting of the mantle; and none, the body's own unsorted
+ * material at the surface, which is the wire's `bulk`. Never `BULK`, the name of the record's
+ * `BULK` section (decision-ux-23-surface-rows).
+ */
+export function crustLidLabel(lid: CrustLidDto): string {
+  let label: string;
+  switch (lid) {
+    case "primary":
+      label = "PRIMARY";
+      break;
+    case "secondary":
+      label = "SECONDARY";
+      break;
+    case "bulk":
+      label = "UNDIFFERENTIATED";
+      break;
+  }
+  return label;
+}
+
+/**
+ * A body's mantle redox class (plan 14, P14.T51.c, read by P14.T43.g's `MANTLE REDOX` row), by its
+ * oxygen fugacity relative to the iron–wüstite buffer, in words: `REDUCED`, `INTERMEDIATE`,
+ * `OXIDISED`.
+ */
+export function redoxClassLabel(redox: RedoxClassDto): string {
+  let label: string;
+  switch (redox) {
+    case "reduced":
+      label = "REDUCED";
+      break;
+    case "intermediate":
+      label = "INTERMEDIATE";
+      break;
+    case "oxidised":
+      label = "OXIDISED";
+      break;
+  }
+  return label;
+}
+
+/**
+ * A body's habitability class (plan 14, P14.T25), in words: `HOSTILE`, `SUBSURFACE OCEAN`,
+ * `MARGINAL`, `TEMPERATE`.
+ */
+export function habitabilityClassLabel(habitabilityClass: HabitabilityClassDto): string {
+  let label: string;
+  switch (habitabilityClass) {
+    case "hostile":
+      label = "HOSTILE";
+      break;
+    case "subsurface_ocean":
+      label = "SUBSURFACE OCEAN";
+      break;
+    case "marginal":
+      label = "MARGINAL";
+      break;
+    case "temperate":
+      label = "TEMPERATE";
+      break;
+  }
+  return label;
+}
+
+/**
+ * A limit on a body's habitability (plan 14, P14.T25), in words: `FROZEN SURFACE`,
+ * `BELOW H2O TRIPLE POINT`, `HOST LEAVING MAIN SEQUENCE`; `null` for a limit this build does not
+ * know, which its reading shows Missing.
+ *
+ * @remarks
+ * Water is named by its formula, as the guide names every substance; a host's limits begin with
+ * `HOST`, or end with it where the guide's word order reads better (`ACTIVE HOST`, `YOUNG HOST`).
+ */
+export function habitabilityLimitLabel(limit: HabitabilityLimit): string | null {
+  let label: string | null;
+  switch (limit) {
+    case "outside_optimistic_zone":
+      label = "OUTSIDE OPTIMISTIC ZONE";
+      break;
+    case "outside_conservative_zone":
+      label = "OUTSIDE CONSERVATIVE ZONE";
+      break;
+    case "no_atmosphere":
+      label = "NO ATMOSPHERE";
+      break;
+    case "below_triple_point":
+      label = "BELOW H2O TRIPLE POINT";
+      break;
+    case "runaway_greenhouse":
+      label = "RUNAWAY GREENHOUSE";
+      break;
+    case "snowball":
+      label = "SNOWBALL";
+      break;
+    case "gas_envelope":
+      label = "GAS ENVELOPE";
+      break;
+    case "tidally_locked":
+      label = "TIDALLY LOCKED";
+      break;
+    case "high_eccentricity":
+      label = "HIGH ECCENTRICITY";
+      break;
+    case "active_host":
+      label = "ACTIVE HOST";
+      break;
+    case "young_host":
+      label = "YOUNG HOST";
+      break;
+    case "leaving_main_sequence":
+      label = "HOST LEAVING MAIN SEQUENCE";
+      break;
+    case "extrapolated_zone":
+      label = "EXTRAPOLATED ZONE";
+      break;
+    case "molten_surface":
+      label = "MOLTEN SURFACE";
+      break;
+    case "dry_surface":
+      label = "DRY SURFACE";
+      break;
+    case "mass_outside_temperate_range":
+      label = "MASS OUTSIDE TEMPERATE RANGE";
+      break;
+    case "frozen_surface":
+      label = "FROZEN SURFACE";
+      break;
+    case "unknown":
+      label = null;
       break;
   }
   return label;

@@ -12,7 +12,7 @@ use crate::planetary::derive::irradiation::BondAlbedo;
 use crate::planetary::disc::{ROCK_MASS_FRACTION, WATER_ICE_MASS_FRACTION};
 use crate::units::{
     Degrees, EarthMasses, Gigayears, JupiterMasses, JupiterRadii, Kelvin, Megayears, Metres,
-    Seconds,
+    Pascals, Seconds, WattsPerSquareMetre,
 };
 
 /// How far out a prograde satellite on a circular orbit about a planet on a circular orbit stays
@@ -25,6 +25,17 @@ use crate::units::{
 /// (their §3.1.1). The same fraction cuts every system at 0.49 of its sphere of influence and
 /// bounds moons inside Hill spheres.
 pub const SATELLITE_STABILITY_FRACTION: f64 = 0.4895;
+
+/// The share of a feature member's encounters closer than a planet's semi-major axis that remove
+/// the planet: 0.2 (lean, 2026-10-31, the orchestrator's research review of P14.T29), which scales
+/// both terms of the encounter rate ([`encounter_radius`](super::hosts::strip::encounter_radius)).
+///
+/// Counting every encounter within `b = a` as a removal is Li and Adams's (2015, MNRAS 448, 344)
+/// eq. 6 at α = 1, about five times the removal cross-sections their scattering experiments
+/// measure, so the rate is taken at a fifth of it. The paper was not read at source here (no
+/// journal access from the pod). It reaches the record only through the stripping's hold, at
+/// generator version 26.
+pub const ENCOUNTER_REMOVAL_FACTOR: f64 = 0.2;
 
 /// The floor on the spacing of two small planets on circular orbits: 10 mutual Hill radii
 /// (design note 7).
@@ -134,18 +145,114 @@ pub const ICE_GIANT_MASS: EarthMasses = EarthMasses::new(10.0);
 /// is where hydrogen and helium dominate.
 pub const GAS_GIANT_ENVELOPE_FRACTION: f64 = 0.5;
 
-/// The tidal Love number k₂ of a rocky body: 0.3 (plan 14, P14.T14.b, after Gladman et al. 1996,
-/// Icarus 122, 166).
+/// The tidal Love number k₂ of a rocky body: 0.3 (plan 14, P14.T14.b), Earth's and Venus's
+/// measured value, which the `Rocky` and `Icy` classes take
+/// ([`tides`](crate::planetary::derive::rotation::tides), P14.T14.d).
+///
+/// Earth's and Venus's measured k₂ are 0.30, Mars's 0.17 and Mercury's 0.45 (Lainey 2016,
+/// Celestial Mechanics and Dynamical Astronomy 126, 145, Table 1). Gladman et al. (1996, Icarus
+/// 122, 166), whose despinning time P14.T14.b takes, give a satellite a k₂ from its rigidity
+/// instead.
 pub const ROCKY_LOVE_NUMBER: f64 = 0.3;
 
-/// The tidal quality factor Q of a rocky body: 100 (P14.T14.b, after Gladman et al. 1996).
+/// The tidal quality factor Q of a rocky body: 100 (P14.T14.b), the conventional value, which
+/// the `Rocky` and `Icy` classes take ([`tides`](crate::planetary::derive::rotation::tides)).
+///
+/// Kasting, Whitmire and Reynolds (1993, Icarus 101, 108) take it for an Earth-like planet after
+/// `MacDonald` (1964, Reviews of Geophysics 2, 467), though lunar laser ranging gives Earth's
+/// present Q as 12 ± 2 (both as Barnes 2017, Celestial Mechanics and Dynamical Astronomy 129, 509,
+/// §1, recounts).
 pub const ROCKY_TIDAL_Q: f64 = 100.0;
 
-/// The tidal Love number k₂ of a giant: 0.4 (P14.T14.b, after Gladman et al. 1996).
+/// The tidal Love number k₂ of a gas giant: 0.4 (P14.T14.b), which the `GasGiant` class takes
+/// ([`tides`](crate::planetary::derive::rotation::tides), P14.T14.d).
+///
+/// It is close to Jupiter's 0.379 by Gavrilov and Zharkov (1977, as Zhang and Hamilton 2008,
+/// Icarus 193, 267, Table 4, quote it) and to Saturn's measured 0.390 (Lainey et al. 2017, as
+/// Jacobson and Park 2025, AJ 169, 65, §3.3, quote it; Juno measured Jupiter's at 0.565, Durante
+/// et al. 2020, ibid.).
 pub const GIANT_LOVE_NUMBER: f64 = 0.4;
 
-/// The tidal quality factor Q of a giant: 10⁵ (P14.T14.b, after Gladman et al. 1996).
+/// The tidal quality factor Q of a gas giant: 10⁵ (P14.T14.b), which the `GasGiant` class takes
+/// ([`tides`](crate::planetary::derive::rotation::tides)).
+///
+/// It is the age-averaged Q, which the moon limit and a planet's spin read; a 2:1 pair's budget
+/// reads the present-day rate at its inner moon's frequency instead
+/// ([`budget_tidal_response`](crate::planetary::moons::eccentricity::budget_tidal_response),
+/// P14.T55.j.a).
+///
+/// It is Goldreich and Soter's (1966) lower bound for Jupiter, Q ≥ 10⁵ at their k₂ of 1.5, so
+/// Q ÷ k₂ ≥ 6.7 × 10⁴ (as Zhang and Hamilton 2008, Table 4, quote it). With
+/// [`GIANT_LOVE_NUMBER`] the pair's Q′ = 3Q ÷ 2k₂ is 3.75 × 10⁵, inside Yoder and Peale's
+/// 2.4 × 10⁵ ≲ Q′ ≲ 8 × 10⁶ for Jupiter (1981, Icarus 47, 1, as Ogilvie 2014, ARA&A 52, 171,
+/// §5.4, quotes it).
 pub const GIANT_TIDAL_Q: f64 = 1e5;
+
+/// The fluid Love number of the core beneath a hydrogen and helium envelope: 0.9 (P14.T14.d), the
+/// first term's coefficient in
+/// [`love_number_under_envelope`](crate::planetary::derive::rotation::love_number_under_envelope).
+///
+/// This plan's fit to science-p14-tides's integration, not a source's. There a bare dry core of
+/// the generator's composition, Earth-like rock and iron at
+/// [`radius_zeng`](crate::planetary::derive::radius::radius_zeng)'s radius, has a fluid k₂ that
+/// self-compression lowers from 0.99 at 1.6 M⊕ through 0.91 at 5.5 M⊕ to 0.74 at 30 M⊕
+/// (Clairaut's equation in Radau's form over Seager et al.'s 2007 equations of state), and the fit
+/// takes one value over the generator's bodies. Earth's own 3J₂ ÷ q is 0.94, with
+/// q = ω²a³ ÷ GM = 3.46 × 10⁻³ from the J₂, ω, a and GM of the IERS Conventions 2010 (Table 1.1),
+/// and PREM's fluid k₂ is 0.933 (Padovan et al. 2018, A&A 620, A178, Table 1); the same
+/// integration gives a bare 1 M⊕ Earth-like core 1.00.
+pub const ENVELOPED_CORE_LOVE_NUMBER: f64 = 0.9;
+
+/// How much a water layer softens the fluid tide of the core beneath an envelope: 0.39, so that a
+/// core of [`OUTER_WATER_CAP`] water takes 0.79 of a dry core's k₂ (P14.T14.d).
+///
+/// This plan's fit to science-p14-tides's integration, not a source's. There a bare core of the
+/// generator's composition, 53.9% water on Earth-like rock and iron, takes 0.74–0.82 of a dry
+/// core's fluid k₂ over 1.6–30 M⊕. It is fitted at that one water fraction, the only one the
+/// composition solve lays an envelope on (water up to [`OUTER_WATER_CAP`], an envelope above it).
+/// The softening is not linear in the water fraction: a core 25% water takes 0.67–0.72 of a dry
+/// core's k₂, less than one 53.9% water, since a thin light shell over dense rock concentrates the
+/// mass most. Another water fraction beneath an envelope needs a refit.
+pub const ENVELOPED_CORE_WATER_SOFTENING: f64 = 0.39;
+
+/// The coefficient of a hydrogen and helium envelope's own tidal response, 0.62 f α in
+/// [`love_number_under_envelope`](crate::planetary::derive::rotation::love_number_under_envelope),
+/// with f the envelope's mass fraction and α the core's fractional radius (P14.T14.d).
+///
+/// This plan's fit to science-p14-tides's integration, not a source's: the response is linear in
+/// the envelope's mass, and weaker the further an envelope spreads above its core. Beyond 5% of
+/// the mass, n = 1 and n = 2 polytropes of hydrogen and helium differ by a factor of up to 3.3,
+/// which the fit splits (their geometric mean).
+pub const ENVELOPE_LOVE_COEFFICIENT: f64 = 0.62;
+
+/// The tidal quality factor Q of a body under a hydrogen and helium envelope, the `SubNeptune` and
+/// `IceGiant` classes: 1.03 × 10⁴ (P14.T14.d; science-p14-tides).
+///
+/// The average over the satellites' and the spin's evolution, which is what the locking time and
+/// the moon limit integrate, calibrated on the ice giants' modified quality factor
+/// Q′ = 3Q ÷ 2k₂ with
+/// [`love_number_under_envelope`](crate::planetary::derive::rotation::love_number_under_envelope).
+/// It puts the generated Uranus at Q′ = 1.6 × 10⁵, inside Tittemore and Wisdom's 1.6–5.6 × 10⁵,
+/// "most probably towards the lower end" (1990, Icarus 85, 394: 11,000 < Q < 39,000, at Gavrilov
+/// and Zharkov's k₂ = 0.104 as Zhang and Hamilton 2008, Table 4, give it; the Q′ as Ogilvie 2014,
+/// ARA&A 52, 171, §5.4, quotes it), and the generated Neptune at 1.3 × 10⁵, inside
+/// Zhang and Hamilton's 9,000 < Q < 36,000 at k₂ = 0.41, Q′ = 3.3 × 10⁴–1.32 × 10⁵ (2008, Icarus
+/// 193, 267, §4.3 and Table 4). Both clear the bounds Ariel and Proteus set, Q′ ≳ 9.1 × 10⁴ and
+/// 6.7 × 10⁴ (Ogilvie 2014, §5.4). One Q gives the generated Neptune 0.80 of Uranus's Q′, so only
+/// Q from 1.01 to 1.05 × 10⁴ meets all four, and this is its centre. Ćuk, El Moutamid and
+/// Tiscareno's tentative 15,000 < Q < 20,000 at k₂ = 0.1 (2020, PSJ 1, 22), a Q′ of
+/// 2.3–3.0 × 10⁵, cannot be met with Neptune inside Zhang and Hamilton's range. Hot Neptunes and
+/// sub-Neptunes dissipate as weakly: GJ 436b's eccentricity needs Q′ > 10⁵ (Veyette and Muirhead
+/// 2018, ApJ 863, 166), and Louden, Laughlin and Millholland (2023, `ApJL` 958, L21) expect
+/// Q ≈ 10³–10⁴ for 1–4 R⊕.
+///
+/// Uranus's present-day Q from astrometry is 678 ± 231 at an assumed k₂ of 0.300 (Jacobson and
+/// Park 2025, AJ 169, 65, §3.3), a Q′ of about 3.4 × 10³. Held over the system's age it would carry
+/// Ariel from the synchronous orbit to its own in about 0.2 Gyr, and it lies 27 times below
+/// Ariel's bound, so it is a snapshot of a dissipation that varies with frequency and time
+/// (resonance locking: Fuller, Luan and Quataert 2016, MNRAS 458, 3867; Stixrude et al. 2021, PSJ
+/// 2, 222), as Ogilvie (2014, §5.4) reads Jupiter's and Saturn's, not the average.
+pub const ENVELOPED_TIDAL_Q: f64 = 1.03e4;
 /// The largest radius a giant planet takes: 2 Jupiter radii (P14.T11.d).
 ///
 /// Plan 14's cap on the inflated radius of
@@ -344,3 +451,138 @@ pub const SYNCHRONOUS_TIDAL_FACTOR: f64 = 2.5;
 /// The largest flattening a figure takes: 0.2 (P14.T46.c, as R07 asks), beyond which first-order
 /// theory fails.
 pub const FLATTENING_CAP: f64 = 0.2;
+
+/// The heat flow below which no melt reaches the surface, `F_c`: 0.025 W m⁻² (P14.T24.b's present
+/// outgassing, after P14.T24.g; science-p14-t24b-laws §1.3).
+///
+/// The window it is ruled in: above the table's Mars at its 10% test bound, 24.2 mW m⁻², so that
+/// Mars outgasses nothing, and below the edge at which Venus's outgassing would fall under 0.3 of
+/// Earth's, (`F_Venus` − 0.3 F⊕) ÷ 0.7: 27.7 mW m⁻² at decision-p14-moons F1's 47 and 92, where the
+/// plan's "of order 0.03" gave Venus 0.27, and 31.1 mW m⁻² at the generator's own Venus and Earth,
+/// 49.6 and 92.5 mW m⁻² (P14.T24.b), where Mars lies at 22.5. Read physically, Mars, whose youngest
+/// flows are a few Myr old, sits at the threshold, while Venus erupts today and the Moon (12) and
+/// Mercury (11) have not for some 1 and 3.5 Gyr (from memory, the ruling's). For comparison,
+/// Earth's measured mean is 0.0916 W m⁻² (Davies and Davies 2010, Solid Earth 1, 5). P14.T56.d's
+/// heated rocky branch reads it too (decision-p14-moons, item 3).
+pub const SURFACE_MELT_HEAT_FLOW: WattsPerSquareMetre = WattsPerSquareMetre::new(0.025);
+
+/// The rigidity μ of a cold rocky moon, for its elastic Love number: 5.8 × 10¹⁰ Pa (P14.T56.d;
+/// decision-p14-moons §3.2), calibrated on the Moon.
+///
+/// The homogeneous elastic body's k₂ = `k_f` ÷ (1 + 19μ ÷ 2ρ̄gR)
+/// ([`elastic_love_number`](crate::planetary::moons::tides::elastic_love_number)) at the Moon's
+/// measured C ÷ MR² = 0.392863 at R = 1,738 km (`k_f` = 1.43; mean 0.392728 ± 0.000012, Williams
+/// et al. 2014, JGR Planets 119, 1546), 7.346 × 10²² kg and 1,737.4 km, gives GRAIL's k₂ = 0.0242
+/// at 5.79 × 10¹⁰ Pa (Konopliv et al. 2013, JGR Planets 118, 1415: 0.02405 ± 0.00018; Williams et
+/// al. 2014: 0.02416 ± 0.00022, the mean of the JPL and GSFC solutions at R = 1,738 km). It lies in
+/// PREM's lower-crust-to-lid range, 4.4–6.8 × 10¹⁰ Pa (Dziewonski and Anderson 1981, PEPI 25, 297;
+/// from its density and shear velocity, as the science check computed them).
+/// The generator's rocky moons take C = 0.33 (`k_f` = 0.93), so their k₂ comes out about 35% under
+/// the Moon's (decision-p14-moons §5, F3, for C's owner).
+pub const ROCK_RIGIDITY: Pascals = Pascals::new(5.8e10);
+
+/// The rigidity of a tidally heated rocky moon's partially molten interior: 1.14 × 10¹⁰ Pa
+/// (P14.T56.d; decision-p14-moons §3.2), calibrated on Io.
+///
+/// At Io's measured C ÷ MR² = 0.37685 (`k_f` = 1.29; Anderson et al. 2001, JGR 106, 32963),
+/// 8.932 × 10²² kg and 1,821.6 km, the homogeneous body's k₂ is Juno's Re k₂ = 0.125 ± 0.047 (1σ;
+/// Park et al. 2025, Nature 638, 69) at 1.14 × 10¹⁰ Pa, where a solid Io at [`ROCK_RIGIDITY`]
+/// gives 0.027. A shallow global magma ocean would give Re k₂ ≥ 0.8, which Park et al. rule out.
+pub const HEATED_ROCK_RIGIDITY: Pascals = Pascals::new(1.14e10);
+
+/// The rigidity of a cold icy moon's ice, and of the ice shell over an ocean: 3.5 × 10⁹ Pa
+/// (P14.T56.d; decision-p14-moons §3.2), the shear modulus of polycrystalline ice Ih from its
+/// single-crystal elastic constants at −16 °C, 3.521 × 10⁹ Pa (Gammon, Kiefte, Clouter and Denner
+/// 1983, J. Glaciol. 29, 433, Table VIII).
+///
+/// Gladman et al. (1996, Icarus 122, 166) and Meyer and Wisdom (2007, Icarus 188, 535, eq. 21)
+/// take 4 × 10⁹ Pa for icy satellites; 3.5 × 10⁹ Pa is Beuthe 2019's (Icarus 332, 66, Table 1) for
+/// an ice shell. No icy moon's solid-body k₂ is measured to check it against.
+pub const ICE_RIGIDITY: Pascals = Pascals::new(3.5e9);
+
+/// Poisson's ratio of an ice shell, ν: 0.33 (P14.T56.d; decision-p14-moons §F-ocean F2 and
+/// decision-p14-t56d-membrane §2.1), which
+/// the membrane's degree-2 stiffness 8(1 + ν) ÷ (5 + ν) reads. It is Beuthe's (2015, Icarus 248,
+/// 109, §3.3) ν̄, ν weighted by μ ÷ (1 − ν) over the shell, which equals ν for a constant ν, as he
+/// takes it, and Beuthe 2019's (Icarus 332, 66, Table 1); Gammon et al. (1983, J. Glaciol. 29,
+/// 433, Table VIII) give polycrystalline ice Ih 0.325.
+pub const ICE_POISSON_RATIO: f64 = 0.33;
+
+/// The tidal quality factor Q of a cold rocky moon: 38 (P14.T56.d; decision-p14-moons §3.2), the
+/// Moon's at a month from lunar laser ranging (Williams and Boggs 2015, JGR Planets 120, 689: 38 ±
+/// 4 at one month, 41 ± 9 at one year).
+pub const COLD_ROCK_TIDAL_Q: f64 = 38.0;
+
+/// The tidal quality factor Q of a cold icy moon: 100 (P14.T56.d; decision-p14-moons §3.2),
+/// Gladman et al.'s (1996, Icarus 122, 166) satellite value (as the ruling read it; the paper was
+/// not reached by the science check), since no icy moon's is measured.
+pub const COLD_ICE_TIDAL_Q: f64 = 100.0;
+
+/// The viscosity of an ice shell's ice at its melting point, `η_m`: 1.0 × 10¹⁴ Pa s (P14.T56.d;
+/// decision-p14-t56d-membrane §2.2), for the Maxwell ice whose rigidity, averaged over the
+/// shell's conductive profile, gives an ocean-branch moon's loss
+/// ([`shell_modulus`](crate::planetary::moons::tides::shell_modulus)).
+///
+/// The middle of the 10¹³–10¹⁵ Pa s that the grain size sets (Tobie, Choblet and Sotin 2003, JGR
+/// 108, 5124; Beuthe 2019, Icarus 332, 66, Table 1). Beuthe 2019's nominal 10¹³ is the low-stress
+/// lower bound, which he takes "to maximize shell dissipation". The range is the model's honest
+/// uncertainty: it gives Europa 19.3 mW m⁻² under 33 km at 10¹⁴, 22.0 under 29 km at 10¹³ and
+/// 11.0 under 58 km at 10¹⁵ (the ruling's figures), against Juno's 29 ± 10 km conductive layer
+/// (Levin et al. 2026, Nature Astronomy 10, 84), which rules out 10¹⁵. Čadek et al. 2019 argue for
+/// more than 3 × 10¹⁴ Pa s to keep Enceladus's shell's basal topography (as Beuthe 2019 §5.2
+/// records it): a recorded tension.
+pub const ICE_MELTING_VISCOSITY_PA_S: f64 = 1.0e14;
+
+/// The activation energy of an ice shell's creep, `E_a`: 5.94 × 10⁴ J mol⁻¹ (P14.T56.d;
+/// decision-p14-t56d-membrane §2.2), by which the ice's viscosity rises from
+/// [`ICE_MELTING_VISCOSITY_PA_S`] as the shell cools in the Arrhenius form η(T) = `η_m`
+/// exp((`E_a` ÷ R)(1 ÷ T − 1 ÷ `T_m`)).
+///
+/// The value of Beuthe 2019's Table 1 (Icarus 332, 66), with his Table 2's Arrhenius form: "the
+/// activation energy for diffusion creep" (Beuthe 2018, Icarus 302, 145, eq. 57; Goldsby and
+/// Kohlstedt 2001, JGR 106, 11017, not read at first hand). Tobie, Choblet and Sotin's (2003)
+/// 50 kJ mol⁻¹ belongs to a linearised law with `T_m` = 270 K, not to this one.
+pub const ICE_CREEP_ACTIVATION_ENERGY_J_PER_MOL: f64 = 5.94e4;
+
+/// The effective shear modulus of a porous, water-saturated, unconsolidated rock core under an
+/// ocean, Re μ̃: 1.0 × 10⁷ Pa (P14.T56.e, behind its hold at 27; ruled with the lane's science
+/// draft, lean of 2026-11-01), for the core term of an ocean-branch moon's Love number
+/// ([`core_love_number`](crate::planetary::moons::tides::core_love_number)).
+///
+/// The low end of Choblet et al.'s (2017, Nature Astronomy 1, 841) 10⁷–10⁸ Pa for a core of
+/// 20–30% porosity, some 10³ below solid rock's (Beuthe 2019, Icarus 332, 66; as
+/// decision-p14-t56d-membrane §8's science check read both), with its loss
+/// ([`POROUS_CORE_DISSIPATION`]) at the high end of theirs: the corner of their ranges at which
+/// this homogeneous core gives Enceladus the 25–40 GW that its shell conducts in all (Hemingway
+/// and Mittal 2019, Icarus 332, 111), its south polar terrain's 15.8 ± 3.1 GW (Howett et al. 2011,
+/// JGR 116, E03003) a part of it. Across their ranges this core gives Enceladus 2–27 GW at the
+/// planar root, against their 10–30. The modulus does not depend on the tide's frequency: they fit
+/// none, and the laboratory data behind it are taken at higher frequencies and lower pressures
+/// than a core's.
+pub const POROUS_CORE_RIGIDITY: Pascals = Pascals::new(1.0e7);
+
+/// The dissipation function Q⁻¹ = Im μ̃ ÷ Re μ̃ of a porous rock core under an ocean: 0.8
+/// (P14.T56.e, behind its hold at 27; lean of 2026-11-01), so that its complex shear modulus is
+/// [`POROUS_CORE_RIGIDITY`] × (1 + 0.8i).
+///
+/// The high end of Choblet et al.'s (2017, Nature Astronomy 1, 841) 0.2–0.8 (as
+/// decision-p14-t56d-membrane §8's science check read it), read as the specific dissipation
+/// function of a linear solid, Q⁻¹ = Im μ ÷ Re μ (Knopoff 1964, Rev. Geophys. 2, 625; O'Connell
+/// and Budiansky 1978, GRL 5, 5; recalled, not read in the pod). It is calibrated with the
+/// modulus on Enceladus's heat (see [`POROUS_CORE_RIGIDITY`]).
+pub const POROUS_CORE_DISSIPATION: f64 = 0.8;
+
+/// The effective pressure at the centre of a water-saturated rock core above which it is
+/// compacted, and its tide that of rigid rock: 1.0 × 10⁸ Pa (P14.T56.e, behind its hold at 27;
+/// lean of 2026-11-01), read against the grains' share of the core's weight, its lithostatic
+/// pressure less its pore water's
+/// ([`effective_pressure`](crate::planetary::moons::tides::OceanCore::effective_pressure)), since
+/// the ocean's own weight, carried by the pore water, compacts no grain (Terzaghi's principle).
+///
+/// Porous sandstones of 15–35% porosity begin to lose it by grain crushing and pore collapse under
+/// effective pressures of about 75–400 MPa (Zhang, Wong and Davis 1990, JGR 95, 341; recalled, not
+/// read in the pod), so a core of 20–30% porosity, Choblet et al.'s (2017), keeps it below some
+/// 10² MPa. Enceladus's core, at 21 MPa, stays porous, as the literature has it (Choblet et al.
+/// 2017); Titan's, Ganymede's, Callisto's and Europa's, at 2.7–15 GPa, are compacted, as the plan's
+/// rule requires; Dione's and Rhea's, at 78–93 MPa, lie just under it.
+pub const CORE_COMPACTION_PRESSURE: Pascals = Pascals::new(1.0e8);

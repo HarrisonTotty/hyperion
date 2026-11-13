@@ -1375,7 +1375,7 @@ pub(super) fn eccentricity_exponent(m1: SolarMasses, log_period: f64) -> f64 {
 /// ([`MultiplicityModel::eccentricity_distribution`]): circular under
 /// [`CIRCULARISATION_PERIOD`], and above it Moe and Di Stefano's (2017, ApJS 230, 15, §9.2)
 /// power law `p(e) ∝ e^η` on `[0, e_max]`, with η from their eqs. 17–18
-/// ([`eccentricity_exponent`]).
+/// (`eccentricity_exponent`).
 ///
 /// So solar-type pairs are sub-thermal, η ≈ 0.4 at intermediate periods, and early-type ones near
 /// thermal, η ≈ 0.8 ("consistent with a Maxwellian 'thermal' eccentricity distribution (η = 1)",

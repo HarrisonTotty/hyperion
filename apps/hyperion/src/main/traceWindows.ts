@@ -93,7 +93,7 @@ export const FRAME_SPAN_IDENTITY_MS = 1e-6;
 export const FRAME_SPAN_TOLERANCE_MS = 0.25;
 
 /**
- * How a window's trace is written: Chromium's JSON (Electron's `contentTracing`), or a Perfetto
+ * How a window's trace is written: Chromium's JSON (Electron 44's `contentTracing`), or a Perfetto
  * protobuf stream (CDP, from R05.T14.i).
  */
 export type TraceFormat = "json" | "perfetto-proto";

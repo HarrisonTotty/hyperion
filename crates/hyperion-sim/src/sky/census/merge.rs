@@ -12,6 +12,12 @@
 //! of the shells done are merged by [`merge_shells`] to the [`Completeness`] they reach, which
 //! lists only the stars within each partial layer's radius and keeps the rest for a later census of
 //! more shells. Merged once all are done, the shells give the one-shot census, star for star.
+//!
+//! A census at a synthetic ceiling (rendering plan R13, Design note 3) lists C, D and E by the
+//! radius towards each star's texel at every reply, the final one included, so it is merged by
+//! [`merge_shells`] whole too, to its plan's
+//! [`CensusPlan::complete`](super::CensusPlan::complete): the one-shot census of its cells less
+//! their stars at or beyond the real boundary, which the synthetic tier and the band hold.
 
 use std::cmp::Ordering;
 use std::num::NonZeroU32;
@@ -89,6 +95,10 @@ pub fn sky_order(a: &SkyStar, b: &SkyStar) -> Ordering {
 /// The parts may hold their stars in any order, and may come in any order and in any split of the
 /// cells. A star must appear in one part only, as each record belongs to one cell. The tallies are
 /// the parts' added up ([`CensusTallies::add`]), and with no part they are the default's.
+///
+/// Every star of the parts is listed or in the overflow. A census at a synthetic ceiling, which
+/// lists only C's, D's and E's stars within their real boundary, is merged by [`merge_shells`] to
+/// its plan's completeness instead (rendering plan R13).
 ///
 /// # Panics
 ///
@@ -397,7 +407,7 @@ mod tests {
         let whole = merge_census(parts.to_vec(), unbounded());
         let census = merge_census(parts.to_vec(), n_max);
         let all = whole.listed();
-        assert!(whole.overflow().is_empty());
+        assert_eq!(whole.overflow(), []);
         assert!(all.windows(2).all(|w| sky_order(&w[0], &w[1]).is_lt()));
         let keep = all.len().min(usize::try_from(n_max.get()).expect("fits"));
         assert_eq!(census.listed(), &all[..keep], "the brightest are listed");
@@ -592,7 +602,7 @@ mod tests {
         let stars = tied_stars();
         let whole = merge_census(dealt(&stars, 5), unbounded());
         assert_eq!(whole.listed().len(), stars.len());
-        assert!(whole.overflow().is_empty());
+        assert_eq!(whole.overflow(), []);
         for n_max in 1..=u32::try_from(stars.len()).expect("few") + 2 {
             let census = merge_census(dealt(&stars, 5), n(n_max));
             let mut both = census.listed().to_vec();

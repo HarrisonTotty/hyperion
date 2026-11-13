@@ -27,9 +27,9 @@ use crate::rng::Mark;
 use crate::units::LightYears;
 
 use super::super::cluster::ClusterModel;
-use super::super::nested::{NestedCell, NestedGrid};
+use super::super::nested::{CornerKey, NestedCell, NestedGrid, NestedLevel};
 use super::MemberClass;
-use super::counts::{ClassCounts, class_counts};
+use super::counts::{CANONICAL_SLOPE, ClassCount, ClassCounts, class_counts};
 use super::profile::{CUSP_SOFTENING, ClassProfile, ProfileShape};
 
 /// A cubic cell in the cluster's frame: its least corner and edge, ly.
@@ -60,6 +60,17 @@ impl LocalCell {
         sum.sqrt()
     }
 
+    /// The distance from the centre to the cell's farthest corner, ly.
+    #[must_use]
+    pub(crate) fn farthest_radius(&self) -> f64 {
+        let mut sum = 0.0;
+        for &lo in &self.min {
+            let d = lo.abs().max((lo + self.edge).abs());
+            sum += d * d;
+        }
+        sum.sqrt()
+    }
+
     /// The cell's centre and the radius of its bounding sphere, ly.
     #[must_use]
     pub fn bounding_sphere(&self) -> (PointLy, f64) {
@@ -68,6 +79,44 @@ impl LocalCell {
             PointLy::new(self.min[0] + h, self.min[1] + h, self.min[2] + h),
             h * 3.0_f64.sqrt(),
         )
+    }
+}
+
+/// The bounds of a band's profiled classes already found at a cell's corner radius
+/// ([`MemberClassTable::bound`], a pure function of the band and the radius), for the cells of one
+/// sphere of one table: the census and the walk of a range query read one per band and cell, and
+/// the nested grid's cells, whose corners lie at exact multiples of a power-of-two edge, repeat
+/// their corner radii across the grid's mirrors and permutations, so a 50 ly query in a globular's
+/// core finds most of its 60,000 census bounds here (P09.T10; a pod of 16 vCPU). A bound is
+/// kept by its cell's [`CornerKey`] and band, an index, since one key has one radius, to the bit
+/// ([`NestedGrid::corner_key`]), with the radius it was found at; and each band's cusp is found
+/// once. A memo is made by its table for one grid ([`MemberClassTable::bound_memo`]) and serves
+/// those alone.
+#[derive(Debug)]
+pub(crate) struct BoundMemo<'t> {
+    table: &'t MemberClassTable,
+    /// Each band's steepest cusp ([`MemberClassTable::cusp_slope`]).
+    cusps: [Option<f64>; MassBand::ALL.len()],
+    /// The corner keys' sums of squares a level holds, one more than the grid's largest.
+    stride: usize,
+    /// The bounds and the radii they were found at, by level, band and sum of squares.
+    bounds: Vec<Option<(f64, f64)>>,
+}
+
+impl BoundMemo<'_> {
+    /// The index of `band`'s bound at the corner `key`.
+    #[must_use]
+    fn index(&self, band: MassBand, key: CornerKey) -> usize {
+        let (level, squares) = key.parts();
+        (usize::from(level) * MassBand::ALL.len() + band.index()) * self.stride
+            + usize::try_from(squares).expect("a sum of three squares of cells fits in usize")
+    }
+
+    /// The bounds it holds.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn len(&self) -> usize {
+        self.bounds.iter().flatten().count()
     }
 }
 
@@ -128,15 +177,51 @@ impl TailClass {
     /// note 10): 0 if the sphere misses both ends' spans along the axis.
     #[must_use]
     pub fn bound(&self, centre: &PointLy, radius: f64) -> f64 {
-        let s = centre.x * self.axis[0] + centre.y * self.axis[1] + centre.z * self.axis[2];
+        self.bound_across(centre, radius, &mut Across::default())
+    }
+
+    /// [`bound`](Self::bound), bit for bit, with what it reads of the sphere shared (P09.T40.a).
+    ///
+    /// The sphere's place along the axis and the Gaussian across it come from `across`, filled by
+    /// the first tail that reads them: every band's tail shares its axis and width, and so both.
+    /// `across` serves one sphere.
+    #[must_use]
+    fn bound_across(&self, centre: &PointLy, radius: f64, across: &mut Across) -> f64 {
+        let same = |a: f64, b: f64| a.total_cmp(&b).is_eq();
+        let known = across.line.is_some_and(|(axis, width)| {
+            same(width, self.width) && axis.iter().zip(self.axis).all(|(&a, b)| same(a, b))
+        });
+        if !known {
+            *across = Across {
+                line: Some((self.axis, self.width)),
+                along: centre.x * self.axis[0] + centre.y * self.axis[1] + centre.z * self.axis[2],
+                gauss: None,
+            };
+        }
+        let s = across.along;
         let (lo, hi) = (s.abs() - radius, s.abs() + radius);
         if hi < self.inner || lo > self.reach {
             return 0.0;
         }
-        let d2 = (centre.x * centre.x + centre.y * centre.y + centre.z * centre.z - s * s).max(0.0);
-        let d = (d2.sqrt() - radius).max(0.0);
-        self.axis_density() * math::exp(-0.5 * d * d / (self.width * self.width)) * (1.0 + 1e-12)
+        let gauss = *across.gauss.get_or_insert_with(|| {
+            let d2 =
+                (centre.x * centre.x + centre.y * centre.y + centre.z * centre.z - s * s).max(0.0);
+            let d = (d2.sqrt() - radius).max(0.0);
+            math::exp(-0.5 * d * d / (self.width * self.width))
+        });
+        self.axis_density() * gauss * (1.0 + 1e-12)
     }
+}
+
+/// What [`TailClass::bound`] reads of one sphere for a tail's line, shared by the tails of one
+/// axis and width: the sphere's centre along the axis and, once a tail's span meets it, the
+/// Gaussian across at the sphere's nearest approach (P09.T40.a).
+#[derive(Debug, Clone, Copy, Default)]
+struct Across {
+    /// The axis and width it was found for, or `None` before any.
+    line: Option<([f64; 3], f64)>,
+    along: f64,
+    gauss: Option<f64>,
 }
 
 /// One profiled class of a band: the class, its count and its profile.
@@ -219,6 +304,48 @@ impl MemberClassTable {
         }
     }
 
+    /// The table of `classes` for a feature with no cluster model: plan 10's dwarf cores
+    /// (P10.T7.a).
+    ///
+    /// Every class is profiled inside `tidal` and flattened along the grid's z by `flattening` (1
+    /// for a sphere), with no tails, no depletion and no runaways. Classes of no expected members
+    /// are left out, as in [`from_counts`](Self::from_counts); the rest keep their order within
+    /// each band.
+    ///
+    /// # Panics
+    ///
+    /// If `tidal` is not positive and finite or `flattening` is not in (0, 1], and as
+    /// [`ClassProfile::new`] if a shape's scale is not.
+    #[must_use]
+    pub fn from_classes(classes: &[ClassCount], tidal: LightYears, flattening: f64) -> Self {
+        let tidal = tidal.value();
+        assert!(
+            tidal > 0.0 && tidal.is_finite(),
+            "a class table inside {tidal} ly"
+        );
+        assert!(
+            flattening > 0.0 && flattening <= 1.0,
+            "a flattening of {flattening}"
+        );
+        let mut bands: [Vec<Row>; 5] = Default::default();
+        for c in classes {
+            if c.expected > 0.0 {
+                bands[c.class.band.index()].push(Row {
+                    class: c.class,
+                    expected: c.expected,
+                    profile: ClassProfile::new(c.shape, tidal, flattening),
+                });
+            }
+        }
+        Self {
+            bands,
+            tails: [None; 5],
+            depleted_slope: CANONICAL_SLOPE,
+            runaway_share: 0.0,
+            tidal,
+        }
+    }
+
     /// The rows of `band`: none for plan 13's substellar bands, which a cluster's class table does
     /// not hold (their members are plan 13's to place).
     fn rows(&self, band: MassBand) -> &[Row] {
@@ -234,6 +361,22 @@ impl MemberClassTable {
     #[must_use]
     pub fn tail(&self, band: MassBand) -> Option<&TailClass> {
         self.tails.get(band.index()).and_then(Option::as_ref)
+    }
+
+    /// The bytes the table owns on the heap: each band's rows, by their buffers' capacities, and
+    /// each row's profile ([`ClassProfile::heap_bytes`]). A tail owns nothing on the heap.
+    #[must_use]
+    pub fn heap_bytes(&self) -> usize {
+        self.bands
+            .iter()
+            .map(|rows| {
+                rows.capacity() * size_of::<Row>()
+                    + rows
+                        .iter()
+                        .map(|row| row.profile.heap_bytes())
+                        .sum::<usize>()
+            })
+            .sum()
     }
 
     /// The millisecond pulsars the cluster's neutron stars hold: `model`'s encounter-rate law
@@ -300,10 +443,57 @@ impl MemberClassTable {
     /// over its bounding sphere, with a margin of 10⁻¹² over the rounding.
     #[must_use]
     pub fn cell_bound(&self, band: MassBand, cell: &LocalCell) -> f64 {
+        self.cell_bound_with(band, cell, None)
+    }
+
+    /// An empty [`BoundMemo`] for this table's cells of `grid`.
+    #[must_use]
+    pub(crate) fn bound_memo(&self, grid: NestedGrid) -> BoundMemo<'_> {
+        let stride = usize::try_from(grid.corner_squares_max())
+            .expect("a sum of three squares of cells fits in usize")
+            + 1;
+        BoundMemo {
+            table: self,
+            cusps: MassBand::ALL.map(|band| self.cusp_slope(band)),
+            stride,
+            bounds: vec![None; usize::from(grid.levels()) * MassBand::ALL.len() * stride],
+        }
+    }
+
+    /// [`cell_bound`](Self::cell_bound), bit for bit, its profiled classes' bound read from
+    /// `memo` where it holds the band's at the cell's corner key, and kept there otherwise.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, if `memo` was made by another table, or holds the key's bound at another
+    /// radius.
+    #[must_use]
+    fn cell_bound_with(
+        &self,
+        band: MassBand,
+        cell: &LocalCell,
+        memo: Option<(&mut BoundMemo<'_>, CornerKey)>,
+    ) -> f64 {
         let (centre, radius) = cell.bounding_sphere();
-        (self.bound(band, cell.nearest_radius())
-            + self.tail(band).map_or(0.0, |t| t.bound(&centre, radius)))
-            * (1.0 + 1e-12)
+        let nearest = cell.nearest_radius();
+        let profiled = match memo {
+            Some((memo, key)) => {
+                debug_assert!(
+                    std::ptr::eq(memo.table, self),
+                    "a bound memo serves the table that made it"
+                );
+                let index = memo.index(band, key);
+                let (at, bound) =
+                    *memo.bounds[index].get_or_insert_with(|| (nearest, self.bound(band, nearest)));
+                debug_assert!(
+                    at.total_cmp(&nearest).is_eq(),
+                    "a corner key has one radius: {at} and {nearest} at {key:?}"
+                );
+                bound
+            }
+            None => self.bound(band, nearest),
+        };
+        (profiled + self.tail(band).map_or(0.0, |t| t.bound(&centre, radius))) * (1.0 + 1e-12)
     }
 
     /// The density of `band`'s members at local `p` by class, into `out` (cleared first), in the
@@ -445,7 +635,24 @@ impl MemberClassTable {
     /// uniformly under [`cell_bound`](Self::cell_bound) everywhere else.
     #[must_use]
     pub fn proposal(&self, band: MassBand, cell: &LocalCell) -> CellProposal {
-        match self.cusp_slope(band) {
+        self.proposal_with(band, cell, None)
+    }
+
+    /// [`proposal`](Self::proposal), bit for bit, a uniform cell's profiled bound read from and
+    /// kept in `memo` ([`BoundMemo`]), made by this table, at the cell's corner key, and the
+    /// band's cusp read from it.
+    #[must_use]
+    pub(crate) fn proposal_with(
+        &self,
+        band: MassBand,
+        cell: &LocalCell,
+        memo: Option<(&mut BoundMemo<'_>, CornerKey)>,
+    ) -> CellProposal {
+        let cusp = match &memo {
+            Some((memo, _)) => memo.cusps[band.index()],
+            None => self.cusp_slope(band),
+        };
+        match cusp {
             Some(slope) if cell.nearest_radius() <= 0.0 => {
                 debug_assert!(
                     cell.min
@@ -478,7 +685,7 @@ impl MemberClassTable {
                 }
             }
             Some(_) | None => CellProposal::Uniform {
-                bound: self.cell_bound(band, cell),
+                bound: self.cell_bound_with(band, cell, memo),
             },
         }
     }
@@ -497,18 +704,34 @@ impl MemberClassTable {
     /// is.
     #[must_use]
     pub fn peak_candidates(&self, grid: &NestedGrid) -> f64 {
+        let mut marks = PeakCells::new(*grid);
+        grid.all_levels().fold(0.0_f64, |peak, level| {
+            peak.max(self.level_peak(*grid, level, Admit::Owned, &mut marks, f64::INFINITY))
+        })
+    }
+
+    /// The most candidates any band expects in the cells of `level` of `grid` that
+    /// [`peak_candidates`](Self::peak_candidates) reads and `admit` admits.
+    ///
+    /// Each cell is read once, and the most so far is returned as soon as it passes `stop`.
+    /// `marks` is scratch.
+    #[must_use]
+    fn level_peak(
+        &self,
+        grid: NestedGrid,
+        level: NestedLevel,
+        admit: Admit,
+        marks: &mut PeakCells,
+        stop: f64,
+    ) -> f64 {
+        marks.clear();
         let n = grid.cells_per_axis();
         let beside = [n / 2 - 1, n / 2];
-        let mut cells = std::collections::BTreeSet::new();
-        for level in 0..grid.levels() {
-            for along in 0..n {
-                for a in beside {
-                    for b in beside {
-                        cells.extend(
-                            [[along, a, b], [a, along, b], [a, b, along]]
-                                .into_iter()
-                                .filter_map(|c| grid.cell(level, c)),
-                        );
+        for along in 0..n {
+            for a in beside {
+                for b in beside {
+                    for c in [[along, a, b], [a, along, b], [a, b, along]] {
+                        marks.mark(c);
                     }
                 }
             }
@@ -516,40 +739,71 @@ impl MemberClassTable {
         if let Some(tail) = self.tails.iter().flatten().next() {
             // Every cell within one cell of a point of the line, in steps of a quarter cell.
             let axis = tail.axis;
-            for level in grid.all_levels() {
-                let edge = level.edge().value();
-                let half = level.half_width().value();
-                let steps = 8 * u32::from(n);
-                for i in 0..=steps {
-                    let along = -half + 2.0 * half * f64::from(i) / f64::from(steps);
-                    let point = axis.map(|a| along * a);
-                    let index = point.map(|c| (c / edge).floor() + f64::from(n / 2));
-                    for offset in [-1.0, 0.0, 1.0]
-                        .iter()
-                        .flat_map(|&dx| [-1.0, 0.0, 1.0].map(move |dy| (dx, dy)))
-                        .flat_map(|(dx, dy)| [-1.0, 0.0, 1.0].map(move |dz| [dx, dy, dz]))
-                    {
-                        let c = [0, 1, 2].map(|k| index[k] + offset[k]);
-                        if c.iter().all(|&v| (0.0..f64::from(n)).contains(&v)) {
-                            #[expect(
-                                clippy::cast_possible_truncation,
-                                clippy::cast_sign_loss,
-                                reason = "whole numbers checked to lie in 0..n, n at most 64"
-                            )]
-                            let c = c.map(|v| v as u8);
-                            cells.extend(grid.cell(level.level(), c));
-                        }
+            let edge = level.edge().value();
+            let half = level.half_width().value();
+            let steps = 8 * u32::from(n);
+            for i in 0..=steps {
+                let along = -half + 2.0 * half * f64::from(i) / f64::from(steps);
+                let point = axis.map(|a| along * a);
+                let index = point.map(|c| (c / edge).floor() + f64::from(n / 2));
+                for offset in [-1.0, 0.0, 1.0]
+                    .iter()
+                    .flat_map(|&dx| [-1.0, 0.0, 1.0].map(move |dy| (dx, dy)))
+                    .flat_map(|(dx, dy)| [-1.0, 0.0, 1.0].map(move |dz| [dx, dy, dz]))
+                {
+                    let c = [0, 1, 2].map(|k| index[k] + offset[k]);
+                    if c.iter().all(|&v| (0.0..f64::from(n)).contains(&v)) {
+                        #[expect(
+                            clippy::cast_possible_truncation,
+                            clippy::cast_sign_loss,
+                            reason = "whole numbers checked to lie in 0..n, n at most 64"
+                        )]
+                        let c = c.map(|v| v as u8);
+                        marks.mark(c);
                     }
                 }
             }
         }
         let mut peak = 0.0_f64;
-        for cell in cells {
-            for band in MassBand::ALL {
-                peak = peak.max(self.cell_candidates(band, grid, cell));
+        for c in marks.cells() {
+            let Some(cell) = grid.cell(level.level(), c) else {
+                continue;
+            };
+            if admit == Admit::InnerHalf && !c.iter().all(|&v| grid.is_inner(v)) {
+                continue;
+            }
+            peak = peak.max(self.cell_peak(&grid.local_cell(cell)));
+            if peak > stop {
+                break;
             }
         }
         peak
+    }
+
+    /// The most candidates any band expects in `cell` (P09.T40.a).
+    ///
+    /// It is the greatest over the bands of [`cell_candidates`](Self::cell_candidates), bit for
+    /// bit, with the cell's nearest radius and bounding sphere and its tails' Gaussian found once
+    /// for every band.
+    #[must_use]
+    fn cell_peak(&self, cell: &LocalCell) -> f64 {
+        let nearest = cell.nearest_radius();
+        let (centre, radius) = cell.bounding_sphere();
+        let mut across = Across::default();
+        MassBand::ALL.iter().fold(0.0_f64, |peak, &band| {
+            let expected = match self.cusp_slope(band) {
+                Some(_) if nearest <= 0.0 => self.proposal(band, cell).expected(cell),
+                // `cell_bound` over the cell, as `proposal` takes it.
+                Some(_) | None => {
+                    let tail = self
+                        .tail(band)
+                        .map_or(0.0, |t| t.bound_across(&centre, radius, &mut across));
+                    let bound = (self.bound(band, nearest) + tail) * (1.0 + 1e-12);
+                    CellProposal::Uniform { bound }.expected(cell)
+                }
+            };
+            peak.max(expected)
+        })
     }
 
     /// The width of the cluster's nested grid of [`FEATURE_GRID_CELLS`] cells and
@@ -565,18 +819,122 @@ impl MemberClassTable {
     /// Never: a table's extent is finite, so some power of two up to 2³⁰ ly reaches it.
     #[must_use]
     pub fn grid_width(&self) -> LightYears {
+        self.grid_width_from(GRID_WIDTH_MIN_LOG2)
+    }
+
+    /// [`grid_width`](Self::grid_width) tried from `2^floor_log2` ly up instead of
+    /// [`GRID_WIDTH_MIN_LOG2`]'s 1 ⁄ 64 ly: plan 10's dwarf cores start at 16 ly (P10.T7.a).
+    ///
+    /// # Panics
+    ///
+    /// If `floor_log2` is outside the nested grid's range of widths, 2⁻³⁰ to 2³⁰ ly; never
+    /// otherwise, as [`grid_width`](Self::grid_width) says.
+    #[must_use]
+    pub(crate) fn grid_width_from(&self, floor_log2: i32) -> LightYears {
         let reaches = |k: i32, r: f64| feature_grid(k).reach().value() >= r;
-        let mut k = GRID_WIDTH_MIN_LOG2;
+        let mut k = floor_log2;
         while !reaches(k, self.tidal) {
             k += 1;
         }
         let extent = self.extent().value();
-        while !reaches(k, extent)
-            && self.peak_candidates(&feature_grid(k + 1)) <= CELL_CANDIDATE_TARGET
-        {
+        let mut marks = PeakCells::new(feature_grid(k));
+        let mut read = Doubling::Whole;
+        while !reaches(k, extent) && self.doubled_holds(feature_grid(k + 1), read, &mut marks) {
             k += 1;
+            read = Doubling::Added;
         }
         feature_grid(k).width()
+    }
+
+    /// Whether [`peak_candidates`](Self::peak_candidates) of `grid` is at most
+    /// [`CELL_CANDIDATE_TARGET`], stopping at the first cell over it (P09.T40.a).
+    ///
+    /// For [`Doubling::Added`], the grid half as wide is known to hold, and only the cells it
+    /// lacks are read: the grid's level `j` is that grid's level `j + 1`, cell for cell, with the
+    /// same cells read and owned, but for level 0's inner half, which that grid's level 1 leaves to
+    /// its level 0, and the outermost level, which it has not got. A cell's expected candidates are
+    /// a function of its box alone, so the answer is the whole grid's, bit for bit.
+    ///
+    /// A level whose [`level_ceiling`](Self::level_ceiling) is under the target holds without its
+    /// cells being read, level 0 once its eight cells with a corner at the centre, which the
+    /// ceiling leaves out, are read and hold. Debug builds read such a level too, and check that it
+    /// holds.
+    #[must_use]
+    fn doubled_holds(&self, grid: NestedGrid, read: Doubling, marks: &mut PeakCells) -> bool {
+        let target = CELL_CANDIDATE_TARGET;
+        let outermost = grid.levels() - 1;
+        grid.all_levels().all(|level| {
+            let admit = match (read, level.level()) {
+                (Doubling::Whole, _) => Admit::Owned,
+                (Doubling::Added, 0) if outermost > 0 => Admit::InnerHalf,
+                (Doubling::Added, j) if j == outermost => Admit::Owned,
+                (Doubling::Added, _) => return true,
+            };
+            let centre_holds = || {
+                let n = grid.cells_per_axis();
+                let beside = [n / 2 - 1, n / 2];
+                beside.iter().all(|&x| {
+                    beside.iter().all(|&y| {
+                        beside.iter().all(|&z| {
+                            grid.cell(0, [x, y, z])
+                                .is_none_or(|c| self.cell_peak(&grid.local_cell(c)) <= target)
+                        })
+                    })
+                })
+            };
+            if self.level_ceiling(grid, level) <= target && (level.level() > 0 || centre_holds()) {
+                debug_assert!(
+                    self.level_peak(grid, level, admit, marks, f64::INFINITY) <= target,
+                    "level {} of the {} ly grid passes its ceiling but not the target",
+                    level.level(),
+                    grid.width().value()
+                );
+                return true;
+            }
+            self.level_peak(grid, level, admit, marks, target) <= target
+        })
+    }
+
+    /// A ceiling on what [`cell_peak`](Self::cell_peak) gives for any owned cell of `level` of
+    /// `grid` but, on level 0, the eight with a corner at the centre, where a cusp's envelope
+    /// peaks (P09.T40.a).
+    ///
+    /// A higher level owns no cell nearer the centre than a quarter of its cells per axis, and
+    /// those cells of level 0 none nearer than one edge, each exactly so in floating point. Every
+    /// profile is a power of `1 + (r ÷ a)²` or of `r² + ε²` with an exponent that is not positive
+    /// times a taper falling with `r`, so it never rises with the radius, as computed, by more than
+    /// `libm`'s last bits, which [`CEILING_MARGIN`] covers; a tail's Gaussian across is at most 1.
+    /// So each band's cell bound is at most its profiles' bound at that radius plus its tail's axis
+    /// density, and the cell's candidates that times its volume, every step a monotone rounding.
+    /// A table with a profile whose exponents do not show it falling
+    /// ([`ProfileShape::never_rises`]) has an infinite ceiling, and its levels are read.
+    #[must_use]
+    fn level_ceiling(&self, grid: NestedGrid, level: NestedLevel) -> f64 {
+        if !self
+            .bands
+            .iter()
+            .flatten()
+            .all(|row| row.profile.shape().never_rises())
+        {
+            return f64::INFINITY;
+        }
+        let edge = level.edge().value();
+        let nearest = if level.level() == 0 {
+            edge
+        } else {
+            f64::from(grid.cells_per_axis() / 4) * edge
+        };
+        MassBand::ALL.iter().fold(0.0_f64, |ceiling, &band| {
+            let tail = self
+                .tail(band)
+                .map_or(0.0, |t| t.axis_density() * (1.0 + 1e-12));
+            let bound = (self.bound(band, nearest) * (1.0 + CEILING_MARGIN) + tail) * (1.0 + 1e-12);
+            let expected = CellProposal::Uniform { bound }.expected(&LocalCell {
+                min: [0.0; 3],
+                edge,
+            });
+            ceiling.max(expected * (1.0 + CEILING_MARGIN))
+        })
     }
 
     /// The cluster's nested grid: [`grid_width`](Self::grid_width), 16 cells and eight levels.
@@ -586,8 +944,43 @@ impl MemberClassTable {
     /// Never: the width is a power of two within the grid's range.
     #[must_use]
     pub fn grid(&self) -> NestedGrid {
-        NestedGrid::new(self.grid_width(), FEATURE_GRID_CELLS, FEATURE_GRID_LEVELS)
-            .expect("a grid width is a power of two")
+        self.grid_from(GRID_WIDTH_MIN_LOG2)
+    }
+
+    /// A bound on the reach of [`grid`](Self::grid) for a table whose tidal radius is `tidal` and
+    /// whose tails run at most `tails` from the centre, without the table: the reach of the least
+    /// grid from 1 ⁄ 64 ly that reaches both. [`grid_width`](Self::grid_width) stops doubling once
+    /// its grid reaches the table's [`extent`](Self::extent), which is the larger of the two, so
+    /// its grid is never wider (P09.T40.a).
+    ///
+    /// # Panics
+    ///
+    /// If the larger is not a finite number, or lies beyond the reach of the widest grid of the
+    /// nested grid's range of widths (2³⁰ ly cells).
+    #[must_use]
+    pub(crate) fn grid_reach_bound(tidal: LightYears, tails: LightYears) -> LightYears {
+        let far = tidal.value().max(tails.value());
+        assert!(far.is_finite(), "a cluster reaching {far} ly");
+        let mut k = GRID_WIDTH_MIN_LOG2;
+        while feature_grid(k).reach().value() < far {
+            k += 1;
+        }
+        feature_grid(k).reach()
+    }
+
+    /// [`grid`](Self::grid) at [`grid_width_from`](Self::grid_width_from)`(floor_log2)`.
+    ///
+    /// # Panics
+    ///
+    /// As [`grid_width_from`](Self::grid_width_from).
+    #[must_use]
+    pub(crate) fn grid_from(&self, floor_log2: i32) -> NestedGrid {
+        NestedGrid::new(
+            self.grid_width_from(floor_log2),
+            FEATURE_GRID_CELLS,
+            FEATURE_GRID_LEVELS,
+        )
+        .expect("a grid width is a power of two")
     }
 }
 
@@ -671,6 +1064,70 @@ impl CellProposal {
 /// powers it is built from.
 const CUSP_MARGIN: f64 = 1e-9;
 
+/// The relative margin of [`MemberClassTable::level_ceiling`] over a profile's last-bit rises
+/// and the rounding of its own products: 10⁻⁹, against `libm`'s few units in 10¹⁶.
+const CEILING_MARGIN: f64 = 1e-9;
+
+/// Which cells of a doubled grid [`MemberClassTable::doubled_holds`] reads (P09.T40.a).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Doubling {
+    /// Every one: nothing is known of the grid half as wide.
+    Whole,
+    /// Those the grid half as wide, known to hold, lacks.
+    Added,
+}
+
+/// Which owned cells of a level [`MemberClassTable::level_peak`] reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Admit {
+    /// Every one.
+    Owned,
+    /// Those of the level's inner half, every coordinate inner.
+    InnerHalf,
+}
+
+/// One level's cells, as a bitmap over its `n³` cells, x-major: each cell where a table's bound
+/// can peak once, however many times the axes and the tail's line visit it (P09.T40.a).
+#[derive(Debug, Clone)]
+struct PeakCells {
+    n: usize,
+    words: Vec<u64>,
+}
+
+impl PeakCells {
+    /// An empty bitmap for a level of `grid`.
+    #[must_use]
+    fn new(grid: NestedGrid) -> Self {
+        let n = usize::from(grid.cells_per_axis());
+        Self {
+            n,
+            words: vec![0; (n * n * n).div_ceil(64)],
+        }
+    }
+
+    fn clear(&mut self) {
+        self.words.fill(0);
+    }
+
+    /// Marks cell `c`, each coordinate below `n`.
+    fn mark(&mut self, c: [u8; 3]) {
+        let i = (usize::from(c[0]) * self.n + usize::from(c[1])) * self.n + usize::from(c[2]);
+        self.words[i / 64] |= 1 << (i % 64);
+    }
+
+    /// The marked cells, x-major.
+    fn cells(&self) -> impl Iterator<Item = [u8; 3]> + '_ {
+        let n = self.n;
+        self.words.iter().enumerate().flat_map(move |(w, &word)| {
+            (0..64).filter(move |b| word & (1 << b) != 0).map(move |b| {
+                let i = w * 64 + b;
+                [i / (n * n), (i / n) % n, i % n]
+                    .map(|v| u8::try_from(v).expect("a cell coordinate is below 64"))
+            })
+        })
+    }
+}
+
 /// `∫₀^r h(s) s² ds` for `h(s) = max(ε, s)^−γ`, γ < 3 (a cusp's slope is 1.6–2).
 #[must_use]
 fn envelope_mass(r: f64, slope: f64) -> f64 {
@@ -710,6 +1167,10 @@ pub const FEATURE_GRID_LEVELS: u8 = 8;
 pub const GRID_WIDTH_MIN_LOG2: i32 = -6;
 
 /// The catalogue features' grid of width `2^k` ly.
+///
+/// # Panics
+///
+/// If `k` is outside the nested grid's range of widths, 2⁻³⁰ to 2³⁰ ly.
 #[must_use]
 fn feature_grid(k: i32) -> NestedGrid {
     let mut w = 1.0;
@@ -717,7 +1178,7 @@ fn feature_grid(k: i32) -> NestedGrid {
         w *= if k >= 0 { 2.0 } else { 0.5 };
     }
     NestedGrid::new(LightYears::new(w), FEATURE_GRID_CELLS, FEATURE_GRID_LEVELS)
-        .expect("a width of 2^k ly from 2^-6 up is a power of two")
+        .expect("a width of 2^k ly within the nested grid's range is a power of two")
 }
 
 #[cfg(test)]
@@ -726,6 +1187,27 @@ mod tests {
     use crate::galaxy::features::testing::{M4, catalogue_parameters, named_cluster};
     use crate::galaxy::params::GalaxyParams;
     use crate::rng::Seed;
+
+    /// A cell's farthest radius is the largest distance of its eight corners, on either side of
+    /// the centre and across it.
+    #[test]
+    fn a_cell_s_farthest_radius_is_its_farthest_corner_s() {
+        for (min, edge) in [
+            ([0.25, 0.5, -1.0], 0.25),
+            ([-0.25, -0.25, -0.25], 0.25),
+            ([-2.0, 1.0, 0.0], 1.0),
+            ([0.0, 0.0, 0.0], 0.0625),
+        ] {
+            let cell = LocalCell { min, edge };
+            let mut far: f64 = 0.0;
+            for corner in 0..8 {
+                let c = [0, 1, 2].map(|a| min[a] + if corner >> a & 1 == 1 { edge } else { 0.0 });
+                far = far.max((c[0] * c[0] + c[1] * c[1] + c[2] * c[2]).sqrt());
+            }
+            assert!((cell.farthest_radius() - far).abs() < 1e-15, "{min:?}");
+            assert!(cell.nearest_radius() <= cell.farthest_radius());
+        }
+    }
 
     #[test]
     fn the_envelope_s_radius_inverts_its_mass_on_both_sides_of_the_softening() {
@@ -774,6 +1256,218 @@ mod tests {
         let reach = LightYears::new(4.0 * model.tidal_radius().value());
         let table = MemberClassTable::new(&galaxy, &model, reach, [1.0, 0.0, 0.0]);
         (model, table)
+    }
+
+    /// The peak as the search had it before P09.T40.a: every cell into one ordered set, then every
+    /// band of every cell through `cell_candidates`.
+    fn peak_as_built(table: &MemberClassTable, grid: NestedGrid) -> f64 {
+        let n = grid.cells_per_axis();
+        let beside = [n / 2 - 1, n / 2];
+        let mut cells = std::collections::BTreeSet::new();
+        for level in 0..grid.levels() {
+            for along in 0..n {
+                for a in beside {
+                    for b in beside {
+                        cells.extend(
+                            [[along, a, b], [a, along, b], [a, b, along]]
+                                .into_iter()
+                                .filter_map(|c| grid.cell(level, c)),
+                        );
+                    }
+                }
+            }
+        }
+        if let Some(tail) = table.tails.iter().flatten().next() {
+            let axis = tail.axis;
+            for level in grid.all_levels() {
+                let edge = level.edge().value();
+                let half = level.half_width().value();
+                let steps = 8 * u32::from(n);
+                for i in 0..=steps {
+                    let along = -half + 2.0 * half * f64::from(i) / f64::from(steps);
+                    let point = axis.map(|a| along * a);
+                    let index = point.map(|c| (c / edge).floor() + f64::from(n / 2));
+                    for dx in [-1.0, 0.0, 1.0] {
+                        for dy in [-1.0, 0.0, 1.0] {
+                            for dz in [-1.0, 0.0, 1.0] {
+                                let c = [index[0] + dx, index[1] + dy, index[2] + dz];
+                                if c.iter().all(|&v| (0.0..f64::from(n)).contains(&v)) {
+                                    #[expect(
+                                        clippy::cast_possible_truncation,
+                                        clippy::cast_sign_loss,
+                                        reason = "whole numbers checked to lie in 0..n"
+                                    )]
+                                    let c = c.map(|v| v as u8);
+                                    cells.extend(grid.cell(level.level(), c));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let mut peak = 0.0_f64;
+        for cell in cells {
+            for band in MassBand::ALL {
+                peak = peak.max(table.cell_candidates(band, &grid, cell));
+            }
+        }
+        peak
+    }
+
+    /// The width as the search had it before P09.T40.a: every doubled grid's whole peak.
+    fn width_as_built(table: &MemberClassTable, floor_log2: i32) -> f64 {
+        let reaches = |k: i32, r: f64| feature_grid(k).reach().value() >= r;
+        let mut k = floor_log2;
+        while !reaches(k, table.tidal) {
+            k += 1;
+        }
+        while !reaches(k, table.extent().value())
+            && peak_as_built(table, feature_grid(k + 1)) <= CELL_CANDIDATE_TARGET
+        {
+            k += 1;
+        }
+        feature_grid(k).width().value()
+    }
+
+    /// The peak read level by level from a bitmap, its tails' Gaussian shared, and the width
+    /// searched from the cells each doubling adds, are the whole search's, bit for bit: for the
+    /// named globulars with short and long tails along two axes, and a dwarf core of classes alone
+    /// (P09.T40.a).
+    #[test]
+    fn the_width_search_is_the_whole_grids_search_bit_for_bit() {
+        use crate::galaxy::features::testing::{M15, OMEGA_CEN, PAL_5, TUC_47};
+        use hyperion_testkit::float::assert_same_bits;
+        let galaxy =
+            Galaxy::from_params(Seed::new(0x0921_0100), GalaxyParams::milky_way_like()).unwrap();
+        let mut tables = Vec::new();
+        for name in [M4, TUC_47, PAL_5, OMEGA_CEN, M15] {
+            let model = ClusterModel::new(&galaxy, &catalogue_parameters(named_cluster(name)));
+            for (radii, axis) in [(4.0, [1.0, 0.0, 0.0]), (40.0, [0.3, -0.8, 0.5])] {
+                let reach = LightYears::new(radii * model.tidal_radius().value());
+                tables.push(MemberClassTable::new(&galaxy, &model, reach, axis));
+            }
+        }
+        let classes: Vec<ClassCount> = tables[0]
+            .bands
+            .iter()
+            .flatten()
+            .map(|row| ClassCount {
+                class: row.class,
+                expected: row.expected,
+                shape: row.profile.shape(),
+            })
+            .collect();
+        tables.push(MemberClassTable::from_classes(
+            &classes,
+            LightYears::new(tables[0].tidal),
+            0.67,
+        ));
+        let mut doublings = 0;
+        for table in &tables {
+            let width = table.grid_width().value();
+            assert_same_bits(width, width_as_built(table, GRID_WIDTH_MIN_LOG2));
+            assert_same_bits(table.grid_width_from(2).value(), width_as_built(table, 2));
+            let mut k = GRID_WIDTH_MIN_LOG2;
+            while feature_grid(k).reach().value() < table.tidal {
+                k += 1;
+            }
+            // Every grid the search may read, and the one past it.
+            while feature_grid(k).width().value() <= 2.0 * width {
+                let grid = feature_grid(k);
+                assert_same_bits(table.peak_candidates(&grid), peak_as_built(table, grid));
+                doublings += 1;
+                k += 1;
+            }
+        }
+        assert!(doublings > 30, "{doublings} grids compared");
+    }
+
+    /// The search's width is the whole search's for every cluster within 3,000 ly of the
+    /// Sun-like point and the first hundred globulars of the walk, so that the levels its ceiling
+    /// passes unread are never ones the whole search would refuse (P09.T40.a).
+    #[test]
+    #[ignore = "slow: some hundreds of cluster models and whole width searches"]
+    fn every_cluster_near_the_sun_and_a_hundred_globulars_keep_the_whole_search_s_width() {
+        use crate::coords::GalacticPosition;
+        use crate::galaxy::features::FeatureProcess;
+        use crate::galaxy::features::catalogue::{FeatureCatalogue, NoFeatureCache, bulk_velocity};
+        use hyperion_testkit::float::assert_same_bits;
+        let galaxy = Galaxy::new(Seed::new(0x4d2)).with_full_potential();
+        let sun = GalacticPosition::from_light_years([0.0, 26_000.0, 0.0]).unwrap();
+        let near = FeatureCatalogue::near(&galaxy, &sun, LightYears::new(3_000.0), &NoFeatureCache);
+        let globulars = FeatureCatalogue::walk_process(&galaxy, FeatureProcess::Globular).take(100);
+        let (mut clusters, mut by_target) = (0, 0);
+        for feature in near.chain(globulars) {
+            let (Some(model), Some(bulk)) = (
+                ClusterModel::from_record(&galaxy, &feature),
+                bulk_velocity(&galaxy, &feature),
+            ) else {
+                continue;
+            };
+            let table =
+                MemberClassTable::new(&galaxy, &model, feature.reach(), bulk.metres_per_second());
+            let width = table.grid_width().value();
+            assert_same_bits(width, width_as_built(&table, GRID_WIDTH_MIN_LOG2));
+            clusters += 1;
+            if feature_grid_reach(width) < table.extent().value() {
+                by_target += 1;
+            }
+        }
+        println!("{clusters} clusters, {by_target} stopped by the target");
+        assert!(clusters > 100 && by_target > 0, "{clusters} {by_target}");
+    }
+
+    /// The reach of the catalogue's grid `width` ly wide.
+    fn feature_grid_reach(width: f64) -> f64 {
+        NestedGrid::new(
+            LightYears::new(width),
+            FEATURE_GRID_CELLS,
+            FEATURE_GRID_LEVELS,
+        )
+        .unwrap()
+        .reach()
+        .value()
+    }
+
+    /// The floor argument leaves a cluster's grid as it was (P10.T7.a), and a floor above the
+    /// rule's width is the width, since the doubling stops at the tails' extent or the target.
+    #[test]
+    fn a_grid_tried_from_a_floor_is_the_rule_s_from_there() {
+        let (_, table) = table();
+        let w = table.grid_width();
+        assert!(
+            table
+                .grid_width_from(GRID_WIDTH_MIN_LOG2)
+                .value()
+                .total_cmp(&w.value())
+                .is_eq()
+        );
+        assert_eq!(table.grid_from(GRID_WIDTH_MIN_LOG2), table.grid());
+        let above = table.grid_width_from(12).value();
+        assert!(above >= 4_096.0 && above >= w.value(), "{above}");
+        // A table of classes alone: no tails, so the grid is the least that holds the tidal radius.
+        let classes = [ClassCount {
+            class: MemberClass {
+                kind: super::super::ClassKind::Living,
+                band: MassBand::A,
+                generation: super::super::Generation::First,
+                multiplicity: super::super::Multiplicity::Single,
+                initial_mass_range: (
+                    crate::units::SolarMasses::new(0.08),
+                    crate::units::SolarMasses::new(0.5),
+                ),
+                mean_mass: crate::units::SolarMasses::new(0.2),
+            },
+            expected: 1e6,
+            shape: ProfileShape::Plummer { scale: 900.0 },
+        }];
+        let core = MemberClassTable::from_classes(&classes, LightYears::new(5_000.0), 0.67);
+        assert!(MassBand::ALL.iter().all(|&b| core.tail(b).is_none()));
+        assert!((core.expected(MassBand::A) - 1e6).abs() < 1e-6);
+        assert!((core.extent().value() - 5_000.0).abs() < 1e-12);
+        assert!((core.grid_width_from(4).value() - 8.0 * 2.0).abs() < 1e-12);
+        assert!((core.grid_width_from(-6).value() - 8.0).abs() < 1e-12);
     }
 
     #[test]

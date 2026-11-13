@@ -1,8 +1,15 @@
-import type { UniverseIdHex, UniverseTime } from "@hyperion/protocol";
+import type {
+  BodyIdHex,
+  DetailLevelDto,
+  SystemIdHex,
+  UniverseIdHex,
+  UniverseTime,
+} from "@hyperion/protocol";
 import {
   type FocusEvent,
   type KeyboardEvent,
   memo,
+  type ReactNode,
   useCallback,
   useEffect,
   useId,
@@ -16,9 +23,10 @@ import {
 import { DisclosureGlyph } from "../../components/DisclosureGlyph";
 import { StaleMark } from "../../components/StaleMark";
 import { StatusLine, type StatusStanding } from "../../components/StatusLine";
+import { StatusText } from "../../components/StatusText";
 import type { BodyDistanceUnit } from "../../lib/format";
 import type { SceneFrame } from "../../lib/scene/apparent";
-import type { SceneKinematics, SceneModel, SystemPlace } from "../../lib/scene/model";
+import type { SceneKinematics, SceneModel, SceneSystem, SystemPlace } from "../../lib/scene/model";
 import { type ElementSize, useElementSize } from "../../lib/useElementSize";
 import { useUniverse } from "../../lib/universe";
 import { usePrefersReducedMotion } from "../../lib/usePrefersReducedMotion";
@@ -26,10 +34,11 @@ import type { Anchor } from "../../spatial/drawList";
 import { type ColourTokens, readTokens } from "../../spatial/paint";
 import { pick } from "../../spatial/pick";
 import type { ScreenBoxPx } from "../../spatial/symbols";
-import { useThrottledValue } from "../../spatial/useThrottledValue";
 import { maxFreeRateStep } from "../../view/camera/freeCamera";
-import { BudgetedScale, drawsInFrame, PrimaryFrameTimes } from "../../view/budget/framePacing";
+import { BudgetedScale, FramePacer, PrimaryFrameTimes } from "../../view/budget/framePacing";
 import {
+  IMAGE_DETAIL_LIMITED,
+  INSTRUMENT_RATE_HZ,
   photorealisticAllowed,
   type ViewBudget,
   viewBudgets,
@@ -55,16 +64,17 @@ import {
   type GpuTimer,
   type GraphicsAnnunciation,
   graphicsAnnunciation,
-  type GraphicsStatus,
   useGraphicsStatus,
 } from "../../view/engine/status";
 import type { RenderView } from "../../view/engine/types";
+import { errorText } from "../../view/engine/webgpu/errorText";
 import {
   controlEv100,
   DEFAULT_EXPOSURE,
   type ExposureControl,
   exposureLevelReading,
   VIEW_CAMERA,
+  yieldsToMeter,
 } from "../../view/photometry/exposure";
 import {
   cameraKinematics,
@@ -72,32 +82,76 @@ import {
   serverSceneAtFrame,
   serverSceneAtPush,
 } from "../../view/scene/fromServer";
-import { cameraSceneOf, type ViewStar } from "../../view/scene/model";
-import type { DrawAnchor } from "../../view/wireframe/drawList";
+import {
+  bringsOwnSettings,
+  cameraSceneOf,
+  type ServedSceneSource,
+  type ViewScene,
+  type ViewStar,
+} from "../../view/scene/model";
+import type { DrawAnchor, DrawnSurveyEdge, LineOfSightPoint } from "../../view/wireframe/drawList";
 import type { StyleAvailability } from "../../view/engine/platform";
-import { hostLights, lightingState, sceneHostDiscs } from "../../view/lighting/hostLights";
+import {
+  heldHostDiscs,
+  hostLights,
+  lightingState,
+  sceneHostDiscs,
+  type SystemHostDiscs,
+} from "../../view/lighting/hostLights";
+import { type HostDiscsAsk, useHostDiscs } from "../../view/lighting/useHostDiscs";
+import { SkyKeep } from "../../view/sky/useSky";
 import type { PhotorealStatus } from "../../view/photoreal/renderer";
 import { AutoExposure, type Metering, meteringFor } from "../../view/post/autoExposure";
-import type { MeterMode } from "../../view/post/meter";
+import {
+  type BalancedWhite,
+  DEFAULT_WHITE_BALANCE,
+  frameWhiteBalance,
+  type WhiteBalance,
+} from "../../view/post/whiteBalance";
+import { histogramMeterOf, type MeterMode } from "../../view/post/meter";
 import { CameraControls, NO_OWN_SHIP } from "./CameraControls";
 import { placeLines, useCameraPlace } from "./cameraPlace";
 import { KeyLegend } from "./KeyLegend";
 import { type DragKind, dragKindOf } from "./useViewDrag";
-import { litLabelsOf } from "./photorealFrame";
+import { framePlacedLights, litLabelsOf } from "./photorealFrame";
 import { StyleControl } from "./StyleControl";
 import {
   availabilityOf,
+  GRID_AT_OPEN,
+  gridAfterStyle,
+  gridRowStands,
   NO_VIEW_REFUSALS,
   type StyleRefusals,
   styleRefusals,
   withPermission,
 } from "./styleRefusals";
+import { LABEL_BLOCK_KEY, MAXIMIZE_KEY, maximizedKeys, viewDisplayKey } from "./displayKeys";
 import { InstrumentControls } from "./InstrumentControls";
-import { InstrumentsPanel } from "./InstrumentsPanel";
+import { InstrumentsPanel, type InstrumentsPanelSlot, noRoomReason } from "./InstrumentsPanel";
 import { InstrumentView } from "./InstrumentView";
-import { type Instrument, type InstrumentsFrame, useInstruments } from "./useInstruments";
-import { PRIMARY_NAME, PRIMARY_VIEW_ID, PRIMARY_VIEW_NAME } from "./viewNames";
-import { autoNotAvailable, ExposurePanel, exposureNote } from "./ExposurePanel";
+import {
+  type Instrument,
+  type InstrumentGround,
+  type InstrumentsFrame,
+  useInstruments,
+} from "./useInstruments";
+import {
+  type InstrumentSlot,
+  instrumentViewId,
+  PRIMARY_NAME,
+  PRIMARY_VIEW_ID,
+  PRIMARY_VIEW_NAME,
+  viewDisplayName,
+} from "./viewNames";
+import {
+  autoNotAvailable,
+  EXPOSURE_COMMAND_NAMES,
+  type ExposureCommandName,
+  exposureCommandRefusal,
+  exposureCommandResult,
+  ExposurePanel,
+  exposureNote,
+} from "./ExposurePanel";
 import { MeterControl, meterLabel } from "./MeterControl";
 import {
   cameraAnnunciation,
@@ -107,7 +161,20 @@ import {
 } from "./serverScene";
 import { type InterimStarsInput, useInterimStars } from "./useInterimStars";
 import { type DrawnSky, primarySkyPlace, type SkyLineReading, useViewSky } from "./useViewSky";
-import { QUALITY_NAMES, type QualitySetting } from "../../view/quality/qualitySetting";
+import { renderViewport } from "../../view/photoreal/internalScale";
+import { decorationStatement } from "../../view/surface/decoration/decorationSetting";
+import type {
+  AtmosphereLeversOverride,
+  FramePacingName,
+  GeometryOverride,
+} from "../../../../preload/api";
+import {
+  type GeometrySettings,
+  geometryOf,
+  QUALITY_NAMES,
+  type QualitySetting,
+  SETTINGS,
+} from "../../view/quality/qualitySetting";
 import {
   DEFAULT_ENGINE_SOURCE,
   useViewEngine,
@@ -115,8 +182,37 @@ import {
   type ViewEngineState,
 } from "./useViewEngine";
 import { ViewCanvas } from "./ViewCanvas";
-import { makeViewFrameDrawer, type ViewFrameDrawer } from "./viewFrameDrawer";
+import {
+  makeViewFrameDrawer,
+  presentedViewport,
+  terrainReportOf,
+  type ViewFrameDrawer,
+  type ViewFrameInputs,
+} from "./viewFrameDrawer";
 import { ViewLabelBlock } from "./ViewLabelBlock";
+import { ViewLowerPlate } from "./ViewLowerPlate";
+import { InstrumentStub } from "./InstrumentStub";
+import { measureRoom, NOT_MEASURED, type RoomMeasures, sameRoomMeasures } from "./plateMeasures";
+import type { PlacePage } from "./PlaceTabs";
+import { useGroundPage } from "./useGroundPage";
+import { BESIDE_CLASS, COLUMNS_CLASS, ViewRoomSizers } from "./ViewRoomSizers";
+import { useReasonFolds } from "./reasonFolds";
+import { surveyPassStatement } from "./surveyPassStatement";
+import type { InspectionSurvey } from "../../view/scenes/inspectionSurvey";
+import {
+  columnsFit,
+  INSTRUMENT_SLOT_REM,
+  type RoomInput,
+  roomToOpen,
+  sameRoom,
+  type SlotRoomInput,
+  type SlotStanding,
+  STUB_HEIGHT_REM,
+  type ViewRoom,
+  viewRoom,
+  wholeRoom,
+} from "./viewRoom";
+import { PoseIntervals } from "../../view/terrain/poseInterval";
 import {
   type MarkLabelState,
   markLabelPlaces,
@@ -125,7 +221,45 @@ import {
   ViewMarkLabels,
 } from "./ViewMarkLabels";
 import { styleName } from "../../view/photoreal/style";
+import { isTerrainFault, type TerrainAnnunciation } from "../../view/terrain/annunciation";
+import { surveyReadingStands } from "../../view/terrain/readouts";
+import { TerrainFailureGuard } from "../../view/terrain/failureGuard";
+import type { TerrainSession } from "../../view/terrain/session";
+import type { SlopeBaselineM } from "../../view/terrain/workers/messages";
+import type { WorkerLike } from "../../view/terrain/workers/pool";
+import { useServerLink } from "../../lib/serverLink";
+import { faultsFor } from "./viewFaults";
+import type {
+  AtmosphereCache,
+  AtmosphereScene,
+  AtmosphereViewReport,
+} from "../../view/atmosphere/AtmosphereCache";
+import { type OpticsWorkerLike, startOpticsWorker } from "../../view/atmosphere/opticsPool";
+import { useAtmosphereCache, useBodyDetailShare } from "./useAtmosphereCache";
+import {
+  atmosphereShownOf,
+  NO_ATMOSPHERE_SHOWN,
+  ViewAtmosphereHandle,
+  type ViewAtmosphereShown,
+} from "./viewAtmosphere";
+import {
+  browserHeightWorker,
+  stepTerrainSession,
+  terrainSessionSource,
+  useTerrainFaults,
+  useTerrainSession,
+} from "./useTerrainSession";
 import { ViewMarkList } from "./ViewMarkList";
+import {
+  GROUND_READOUT_OPTIONS,
+  GroundReadouts,
+  type GroundSnapshot,
+  lineOfSightPointOf,
+  readoutBodyOf,
+} from "./groundReadout";
+import { orbitGroundOf } from "./orbitGround";
+import { terrainLowerParts } from "./terrainPlate";
+import { standingReadout, useTerrainLines } from "./useTerrainLines";
 import { ViewSceneContext } from "./ViewSceneProvider";
 import {
   DEFAULT_FOLD,
@@ -136,9 +270,12 @@ import {
   viewLayout,
 } from "./viewLayout";
 import {
+  commandCutsImage,
   commandRun,
   EASED_MOVES_STATEMENT,
+  framedRun,
   type LabelLine,
+  type LabelStatement,
   photorealStatements,
   WIREFRAME_ONLY,
   labelLines,
@@ -154,9 +291,16 @@ import {
   startRun,
   startServerRun,
   stepRun,
+  type SurveyEdgeListNote,
+  surveyEdgeNotes,
   targetKey,
   type ViewRun,
+  withGridLine,
+  withWhiteBalanceLine,
+  withSceneStarsLine,
 } from "./viewRun";
+import { incidentReadingLx } from "./incidentMeter";
+import { chooseMeter, DEFAULT_METER_CHOICE, type MeterChoice, shownMeter } from "./meterChoice";
 
 /** The shortest time between two changes of the view's readouts: 4 Hz (Design note 18). */
 const READOUT_INTERVAL_MS = 250;
@@ -171,60 +315,53 @@ const VIEW_NAME = PRIMARY_VIEW_NAME;
 const VIEW_ID: ViewId = PRIMARY_VIEW_ID;
 
 /**
- * An instrument slot's height and width on the stage before one is open, rem (decision-r07-t19,
- * item 2a): its title and padding, and its 15 × 11.25 rem canvas beside a label block up to 18 rem
- * wide, whose dozen lines (the stars' reading over three) set the height, 15.9 rem as measured.
+ * The label of the `PRIMARY` view's upper plate's first line that never scrolls: the lines before
+ * it, `FRAME` to `METER`, scroll where the stage cannot hold the plates whole
+ * (decision-r10-view-block-room §3).
  */
-const INSTRUMENT_SLOT_REM = { heightRem: 16, widthRem: 35 } as const;
-
-/** The insets about and between the slots on the stage, rem. */
-const INSTRUMENT_INSET_REM = 0.5;
+const STARS_LABEL = "STARS";
 
 /**
- * The least width left to the primary's label block beside the slots, rem: the 230 px it had at
- * 1280 × 720 with both open, which the ruling accepted.
+ * The last of the upper plate's lines that stay in view at its scroll's first position, the guide's
+ * "always shown" lines `FRAME` to `CAMERA`, with `QUALITY` among them.
  */
-const PRIMARY_LABEL_MIN_REM = 14;
+const PINNED_THROUGH = "CAMERA";
 
-/**
- * Whether the stage has room for one more instrument slot beside the `open` ones, beside the
- * primary's label block at its least width; `true` before the stage is laid out.
- *
- * @remarks
- * The slots stand at the stage's top right and its foot (decision-r07-t19-layout, item 3), so the
- * room is the stage's height less the open slots' and the insets about them; a new slot is taken
- * to be as tall as those open (a slot's label block, not its canvas, sets its height).
- *
- * @param open - The open slots' panels as laid out, each `null` before it is measured.
- */
-function roomForSlot(stage: ElementSize | null, open: ReadonlyArray<ElementSize | null>): boolean {
-  if (stage === null || stage.remPx <= 0) {
-    return true;
-  }
-  const inset = INSTRUMENT_INSET_REM * stage.remPx;
-  const defaultPx = INSTRUMENT_SLOT_REM.heightRem * stage.remPx;
-  const heightsPx = open.map((panel) => panel?.heightPx ?? defaultPx);
-  const usedPx = heightsPx.reduce((sum, heightPx) => sum + heightPx + inset, 0);
-  const slotPx =
-    heightsPx.length === 0 ? defaultPx : (usedPx - inset * heightsPx.length) / heightsPx.length;
-  const widthRem = stage.widthPx / stage.remPx;
-  return (
-    inset + usedPx + slotPx + inset <= stage.heightPx &&
-    INSTRUMENT_SLOT_REM.widthRem + 3 * INSTRUMENT_INSET_REM + PRIMARY_LABEL_MIN_REM <= widthRem
-  );
+/** How many of `lines` before `STARS` stay in view at the scroll's first position: to `CAMERA`. */
+function pinnedLinesOf(lines: ReadonlyArray<LabelLine>): number {
+  const scrolling = lines.findIndex((line) => line.label === STARS_LABEL);
+  const before = scrolling < 0 ? lines : lines.slice(0, scrolling);
+  return before.findIndex((line) => line.label === PINNED_THROUGH) + 1;
 }
 
-/**
- * A graphics fault to show on a view's plate: the standing fault, unless it is another view's
- * refusal, which only that view's plate shows (decided 2026-10-02).
- */
-function faultFor(
-  graphics: GraphicsStatus,
-  annunciation: GraphicsAnnunciation | null,
-  viewName: string,
-): string | null {
-  const otherView = graphics.fault?.kind === "view-refused" && graphics.fault.viewName !== viewName;
-  return annunciation?.standing === "fault" && !otherView ? annunciation.text : null;
+/** How an open slot is held, as the `INSTRUMENTS` panel says it: as its stub, whole, or not. */
+function heldOf(standing: SlotStanding): InstrumentsPanelSlot["held"] {
+  let held: InstrumentsPanelSlot["held"];
+  switch (standing) {
+    case "stub":
+      held = "stub";
+      break;
+    case "held":
+      held = "whole";
+      break;
+    case "stands":
+    case "closed":
+      held = null;
+      break;
+  }
+  return held;
+}
+
+/** What the room reads of a slot: whether it is open, and its height as it last stood whole. */
+function slotRoomOf(slot: Instrument | undefined): SlotRoomInput {
+  const panel = slot?.panelSize ?? null;
+  return {
+    open: slot?.open === true,
+    heightRem:
+      panel === null || !(panel.remPx > 0)
+        ? INSTRUMENT_SLOT_REM.heightRem
+        : panel.heightPx / panel.remPx,
+  };
 }
 
 /** No stars, one array for every frame without an answer. */
@@ -232,9 +369,6 @@ const NO_STARS: ReadonlyArray<ViewStar> = [];
 
 /** The pointer's reach to a mark, rem: half the guide's 2 rem target, as plan 05's pick has it. */
 const PICK_REM = 1;
-
-/** The camera presets, every one of which a scene with an own ship offers. */
-const PRESET_COUNT = Object.keys(PRESET_NAMES).length;
 
 /** The folding panels, in the side column's order. */
 const FOLD_PANELS: ReadonlyArray<FoldPanel> = [
@@ -244,6 +378,9 @@ const FOLD_PANELS: ReadonlyArray<FoldPanel> = [
   "exposure",
   "meter",
 ];
+
+/** No statement of a scene's opening. */
+const NO_SCENE_STATEMENTS: ReadonlyArray<LabelStatement> = [];
 
 /** The engine's standing while it is not ready: being made, until an adapter answers. */
 const ACQUIRING: { readonly text: string; readonly standing: StatusStanding } = {
@@ -267,11 +404,72 @@ interface ViewDisplayProps {
    */
   readonly setting?: QualitySetting | undefined;
   /**
+   * How the views are paced (R07.T19), the launch's `--frame-pacing`: `display` counts animation
+   * frames, `rate` draws each view at its own rate by time. Every launch passes its own; a mount
+   * without it (a test's) counts frames, as before the switch.
+   */
+  readonly framePacing?: FramePacingName | undefined;
+  /**
    * The platform the client runs on, `window.hyperion.platform` (R07.T19.f): its primary modifier,
    * ⌘ on macOS and Ctrl elsewhere, steps the free camera's rate with the arrows, and the key
    * legend names it; Linux's by default.
    */
   readonly platform?: string | undefined;
+  /**
+   * The machine's performance cores' threads with a third of its efficiency cores',
+   * `window.hyperion.performanceThreads`, which the terrain session's default worker count reads
+   * (plan R10, R10.T6.a), and the atmosphere cache's optics workers' (`defaultOpticsWorkers`); none
+   * by default.
+   */
+  readonly performanceThreads?: number | null | undefined;
+  /**
+   * The launch's geometry override, `window.hyperion.geometry` (`--geometry`, plan R14, Design note
+   * 17): the terrain's passes draw the setting's geometry with it over; none by default.
+   */
+  readonly geometry?: GeometryOverride | undefined;
+  /**
+   * A frame profile's atmosphere levers over the setting's (`--march-cover`, `--limb-rays`; plan
+   * R08, R08.T8.d): every view's atmospheres draw with them over `SETTINGS[s].atmosphereLevers`;
+   * none by default.
+   */
+  readonly atmosphereLevers?: AtmosphereLeversOverride | undefined;
+  /**
+   * Starts one of the terrain session's height workers (plan R10, R10.T16.a), stable in identity:
+   * the renderer's module worker by default (`browserHeightWorker`), a fake in a test.
+   */
+  readonly heightWorkers?: (() => WorkerLike) | undefined;
+  /**
+   * The kept scenes the `SCENE` selector offers, stable in identity: {@link SCENE_OPTIONS} by
+   * default. The views check's terrain run gives its own (plan R10, R10.T16.d), `TERRAIN TEST`'s
+   * fixture paced and counted by its probe; no other launch gives any.
+   */
+  readonly sceneOptions?: ReadonlyArray<SceneOption> | undefined;
+  /**
+   * Watches the terrain session `VIEW` holds (the views check's terrain run, R10.T16.d): called
+   * with each session made, its returned function when `VIEW` lets the session go.
+   */
+  readonly watchTerrain?: ((session: TerrainSession) => () => void) | undefined;
+  /**
+   * Starts one of the atmosphere cache's optics workers (plan R08, R08.T10.b), stable in identity:
+   * the renderer's module worker by default (`startOpticsWorker`), a fake in a test.
+   */
+  readonly opticsWorkers?: (() => OpticsWorkerLike) | undefined;
+  /**
+   * Whether the `SCENE` selector stands above the stage: by default; the `PLANET VIEWER`, whose
+   * scene is its own planet's inspection alone, gives none (plan R15).
+   */
+  readonly sceneBar?: boolean | undefined;
+  /**
+   * What the display's host states on the primary's label block after the scene's opening's
+   * statements, stable in identity: the `PLANET VIEWER`'s held sun (plan R15, T4); none by default.
+   */
+  readonly hostStatements?: ReadonlyArray<LabelStatement> | undefined;
+  /**
+   * Opens the body inspection's planet in the `PLANET VIEWER`, as the `SCENE` bar's
+   * `OPEN IN PLANET VIEWER` asks (`App`'s; plan R15, T5), where the launch offers the viewer and
+   * the inspection is of a planet or a moon; absent, and the control with it, otherwise.
+   */
+  readonly onPlanetViewer?: (() => void) | undefined;
 }
 
 /** What a view of the server's scene reads of `useScene`, kept current by its stage. */
@@ -299,20 +497,96 @@ interface ViewStageProps {
   readonly engineState: ViewEngineState;
   readonly exposure: ExposureControl;
   readonly onExposureChange: (exposure: ExposureControl) => void;
+  /**
+   * The photorealistic style's `WHITE BALANCE` (the owner's report, 2026-11-05), held above the
+   * stage as the exposure is, so that a new scene keeps it; every view draws at it.
+   */
+  readonly whiteBalance: WhiteBalance;
+  readonly onWhiteBalanceChange: (balance: WhiteBalance) => void;
   /** The operator's meter, held above the stage as the exposure is, so a new scene keeps it. */
   readonly meter: MeterMode;
   readonly onMeterChange: (meter: MeterMode) => void;
   readonly easedMoves: boolean;
   readonly onEasedMovesChange: (easedMoves: boolean) => void;
+  /**
+   * The baseline the primary's terrain readout reads `SLOPE` over, m, the `STYLE` panel's
+   * `BASELINE` row's (plan R10, R10.T12.a; decision-r10-t12a-scope §3.1): held above the stage as
+   * the exposure is, so that a new scene keeps it.
+   */
+  readonly slopeBaselineM: SlopeBaselineM;
+  readonly onSlopeBaselineChange: (baselineM: SlopeBaselineM) => void;
+  /**
+   * The page chosen for the camera panel's place while `CONTROLS` names an instrument (plan R10,
+   * R10.T12.d): the display's own, `CAMERA` as it mounts, held above the stage so that it is kept
+   * across `CONTROLS` and every scene.
+   */
+  readonly placePage: PlacePage;
+  readonly onPlacePage: (page: PlacePage) => void;
+  /**
+   * `MAXIMIZE VIEW` (the owner's request, 2026-11-01), held above the stage as the exposure is, so
+   * that a new scene keeps it: on, the side columns are hidden, their panels kept as they stand, and
+   * the primary's upper label block is `hidden`, as once turned on, its faults and failed requests
+   * alone standing at the stage's top edge, until its key `9` shows the whole `block`, and a second
+   * press hides it again.
+   */
+  readonly maximize: Maximize;
+  /** Turns `MAXIMIZE VIEW` on, its label block folded, or off: its toggle's press. */
+  readonly onMaximize: () => void;
+  /** Shows the label block whole under `MAXIMIZE VIEW`, or folds it again: its toggle's press. */
+  readonly onLabelBlock: () => void;
   /** The interim stars (R02.T16) and their count line, or `null` before an answer. */
   readonly stars: ReadonlyArray<ViewStar>;
   readonly countLine: string | null;
+  /**
+   * The scene's system's discs on their own (`host_discs`; plans R06 and R07), asked above the stage
+   * that a new scene remounts, kept by universe and system: a served scene is lit by them until a
+   * sky that names its system is held. `null` before any are held.
+   */
+  readonly hostDiscs: SystemHostDiscs | null;
+  /** Whether the scene's system's discs are asked and not yet answered or refused. */
+  readonly hostDiscsPending: boolean;
+  /**
+   * The view's sky kept above the stage (`SkyKeep`; plan R15): a new scene's stage takes up the sky
+   * held and the request in flight, which its request rule then judges as ever.
+   */
+  readonly skyKeep: SkyKeep;
   /** The open universe, about which the sky is asked (R06), or `null`. */
   readonly universe: UniverseIdHex | null;
   /** The quality setting the views are budgeted at, and drawn at. */
   readonly setting: QualitySetting;
+  /** How the loop paces the views at their rates (R07.T19), the launch's `--frame-pacing`. */
+  readonly framePacing: FramePacingName;
+  /**
+   * How the views draw their geometry (plan R14, Design note 17): a launch's `--geometry` over the
+   * setting's, as the terrain session's passes take it; `undefined`, the setting's.
+   */
+  readonly geometry: GeometrySettings | undefined;
+  /** The launch's atmosphere levers over the setting's (plan R08, R08.T8.d), or `undefined`. */
+  readonly atmosphereLevers: AtmosphereLeversOverride | undefined;
   /** The platform's primary modifier, whose chord with the arrows steps the rate (R07.T19.f). */
   readonly modifier: PrimaryModifier;
+  /**
+   * The terrain session of the stage's source (plan R10, R10.T16.a), made above the stage over
+   * `engineState`'s engine, or `null` with none: every view tells it what it drew each frame it
+   * draws, the primary's frame steps it, and every view's lit bodies take its class maps
+   * (R10.T10.d) and reliefs (R10.T10.e); without one every disc is its photometry's uniform law
+   * and none hands over.
+   */
+  readonly terrain: TerrainSession | null;
+  /**
+   * The stage's atmosphere cache (plan R08, R08.T10.b), made above the stage over `engineState`'s
+   * engine, or `null` with none: every view notes its frame with it through its own handle and
+   * draws the air of the bodies it holds tables for.
+   */
+  readonly atmosphere: AtmosphereCache | null;
+  /** Whether the link to the server is up: the atmosphere cache asks nothing while it is down. */
+  readonly linkUp: boolean;
+  /**
+   * What the scene's opening states on the primary's label block besides its own statements: the
+   * body inspection's survey pass while it is out or once refused (`surveyPassStatement`); none
+   * for any other scene.
+   */
+  readonly sceneStatements: ReadonlyArray<LabelStatement>;
 }
 
 /** What the drawing loop reads of the several views' budgets, kept current by an effect. */
@@ -323,6 +597,10 @@ interface BudgetInputs {
   readonly timer: GpuTimer;
   /** The quality setting every view draws at (R07.T17). */
   readonly setting: QualitySetting;
+  /** How every view draws its geometry (plan R14): a launch's override, or the setting's. */
+  readonly geometry: GeometrySettings | undefined;
+  /** The launch's atmosphere levers over the setting's (plan R08, R08.T8.d), or `undefined`. */
+  readonly atmosphereLevers: AtmosphereLeversOverride | undefined;
   /** Draws the instruments in a frame the primary draws. */
   readonly instruments: (frame: InstrumentsFrame) => void;
 }
@@ -330,14 +608,16 @@ interface BudgetInputs {
 /** An instrument view with its standing in the stage's budgets and graphics (R07.T19). */
 interface InstrumentViewState {
   readonly slot: Instrument;
+  /** Where it stands on the stage (R10.T12.b): whole, as its stub, held whole, or closed. */
+  readonly standing: SlotStanding;
   /** Why each style is held back for it: its adapter's, then (while open) the budget's. */
   readonly refusals: StyleRefusals;
   /** The styles it may switch to. */
   readonly availability: StyleAvailability;
   /** The style its budget draws. */
   readonly budgetStyle: RenderStyle;
-  /** A graphics fault for its plate, or `null`. */
-  readonly fault: string | null;
+  /** The faults for its plate, the graphics' then the terrain's ({@link faultsFor}). */
+  readonly faults: ReadonlyArray<string>;
 }
 
 /** What the view keys' listener reads of the stage, kept current by an effect. */
@@ -352,6 +632,10 @@ interface KeyTargets {
   }>;
   /** The `CONTROLS` view, which a key pressed off a canvas acts on. */
   readonly controlsView: ViewId;
+  /** Gives a view's `GRID` its other setting, where its row stands (`GRID_KEY`). */
+  readonly toggleGrid: (view: ViewId) => void;
+  /** Gives the exposure's command keyed (`ENABLE_KEY`, `INHIBIT_KEY`), as its button would. */
+  readonly keyExposure: (command: ExposureCommandName) => void;
 }
 
 /** A view's budget, which `viewBudgets` gives every view listed. */
@@ -366,6 +650,8 @@ function budgetOf(budgets: ReadonlyMap<ViewId, ViewBudget>, id: ViewId): ViewBud
 /** What the drawing loop reads of the display, kept current by an effect. */
 interface LoopInputs {
   readonly exposure: ExposureControl;
+  /** The views' white balance (`WHITE BALANCE`), read at each frame. */
+  readonly whiteBalance: WhiteBalance;
   readonly selection: CameraTarget | null;
   readonly reducedMotion: boolean;
   readonly size: ElementSize | null;
@@ -374,12 +660,49 @@ interface LoopInputs {
   readonly stars: ReadonlyArray<ViewStar>;
   /** The sky (R06), drawn in the interim stars' place once it has arrived, or `null`. */
   readonly sky: DrawnSky | null;
+  /**
+   * The scene's system's discs on their own (`host_discs`; plans R06 and R07), which light a served
+   * scene until a sky that names its system is held, or `null`.
+   */
+  readonly hostDiscs: SystemHostDiscs | null;
   /** The styles the adapter offers (R01's `styleAvailability`). */
   readonly availability: StyleAvailability;
   /** The operator's meter (R07.T13.b's control). */
   readonly meter: MeterMode;
   /** Takes the exposure the view's `AutoExposure` moved to, into the display's state. */
   readonly onExposureChange: (exposure: ExposureControl) => void;
+  /** The stage's terrain session (R10.T16.a), or `null`. */
+  readonly terrain: TerrainSession | null;
+  /** The stage's atmosphere cache (R08.T10.b), or `null`. */
+  readonly atmosphere: AtmosphereCache | null;
+  /** Whether the link is up, which the cache's requests read (R08.T10.b). */
+  readonly linkUp: boolean;
+  /** The open universe, in which the cache asks a server body's record (R08.T10.b), or `null`. */
+  readonly universe: UniverseIdHex | null;
+  /**
+   * A kept scene's terrain fixture's follower of its script (`TerrainFixture.notePlayed`,
+   * R10.T16.d), told the script's time each primary frame; `null` for any other stage.
+   */
+  readonly notePlayed: ((scriptS: number) => void) | null;
+  /**
+   * What the primary's terrain readout, as last rendered, reads of its line of sight, which its
+   * tripod marks (`ViewFrameInputs.lineOfSightPoint`, plan R10, R10.T12): a point over ground,
+   * surveyed or not, with its slant range where known, none at `NO GROUND`, and absent while the
+   * plate states no readout, given way or not standing, so that the mark and the readout never
+   * disagree.
+   */
+  readonly lineOfSightPoint: LineOfSightPoint | undefined;
+  /**
+   * The baseline the primary's terrain readout asks `SLOPE` over, m: the `STYLE` panel's
+   * `BASELINE` row's (plan R10, R10.T12.a), read at each publish, so that a choice reaches the next
+   * ask without the loop's effect running again.
+   */
+  readonly slopeBaselineM: SlopeBaselineM;
+  /**
+   * The primary's `GRID` (the owner's requests, 2026-10-31 and 2026-11-05): whether its
+   * photorealistic image takes the symbology over it, read at each frame.
+   */
+  readonly grid: boolean;
 }
 
 /** What the loop publishes for the DOM, at most every {@link READOUT_INTERVAL_MS}. */
@@ -389,9 +712,54 @@ interface Published {
   readonly anchors: ReadonlyArray<DrawAnchor>;
   /** The style the frame was drawn in, which the label block states (R07.T8.a). */
   readonly drawnStyle: RenderStyle;
+  /**
+   * The effective temperature of the star the display's `HOST` white balance adapts to, K
+   * (`BalancedWhite.teffK`), which `WHITE BALANCE` states; `null` where it adapts none.
+   */
+  readonly balancedTeffK: number | null;
+  /**
+   * Whether the frame drew the kept scene's own stars (`ViewFrameDrawn.sceneStars`), which the
+   * `STARS` line then states as `SCENE TEST FIELD`, with no count line (R08.T10.b).
+   */
+  readonly sceneStars: boolean;
   /** The photorealistic view's standing (`PhotorealRenderer.status`). */
   readonly photoreal: PhotorealStatus;
+  /**
+   * The terrain's annunciation of the bodies its last frame handed over (plan R10, R10.T16.c), for
+   * its label block's `labelStatements`; `null` with none.
+   */
+  readonly terrain: TerrainAnnunciation | null;
+  /**
+   * Whether its last frame drew decoration (`ViewFrameDrawn.decoration`; plan R11, R11.T1), which
+   * its survey line states as `DECORATION ON`, or its label block where that line does not stand.
+   */
+  readonly decoration: boolean;
+  /**
+   * The survey edges its last frame marked, for its list's notes (plan R10, R10.T16.c;
+   * decision-r10-t16-review §1).
+   */
+  readonly surveyEdges: ReadonlyArray<DrawnSurveyEdge>;
+  /**
+   * The contour interval its last frame drew its wireframe terrain at, m, for its label block's
+   * `CONTOUR INTERVAL` (plan R10, R10.T11); `null` while it draws none.
+   */
+  readonly contourIntervalM: number | null;
+  /**
+   * What its last frame said of its bodies' atmospheres (plan R08, R08.T10.b), for its label
+   * block's notes and fault lines.
+   */
+  readonly atmosphere: ViewAtmosphereShown;
+  /**
+   * Whether its last frame drew its photorealistic image below its quality setting's resolution,
+   * its internal scale stepped down by its frame-rate floor or by the resolution controller beside
+   * open instruments, which its label block states as `IMAGE: DETAIL LIMITED` (the owner's report,
+   * 2026-11-01).
+   */
+  readonly imageLimited: boolean;
 }
+
+/** The survey edges before the loop's first frame: none. */
+const NO_SURVEY_EDGES: ReadonlyArray<DrawnSurveyEdge> = [];
 
 /** What the meter holds before the loop's first readout: no image is drawn yet. */
 const NOT_YET_DRAWN: Metering = { kind: "no-image" };
@@ -411,14 +779,15 @@ function exposureShownChanged(shown: ExposureControl, next: ExposureControl): bo
 
 /**
  * The chrome over a view's stage, CSS px from its top left (R07.T16.i): every box over the canvas
- * but the marks' labels, which is the label block with its statements, and each open instrument
- * slot, but not the slots' column, which is empty between them.
+ * but the marks' labels, which is the label block's two plates (R10.T12.b), and each instrument
+ * slot standing, whole or as its stub, but not the slots' column, which is empty between them, nor
+ * the room's hidden sizers.
  */
 function chromeBoxesPx(overlay: Element): ScreenBoxPx[] {
   const origin = overlay.getBoundingClientRect();
   return [
     ...overlay.querySelectorAll(
-      ":scope > :not(.view-marks):not(.view-instruments), :scope > .view-instruments > .view-instrument",
+      ":scope > :not(.view-marks):not(.view-instruments):not(.view-room-sizers), :scope > .view-instruments > .view-instrument",
     ),
   ].map((element) => {
     const box = element.getBoundingClientRect();
@@ -452,6 +821,9 @@ function chromeBoxesPx(overlay: Element): ScreenBoxPx[] {
  * afresh.
  *
  * @param labels - The marks' labels by their target's key.
+ * @param lineOfSightPx - The line-of-sight mark's box as the last drawn frame drew it, device px
+ *   (`DrawnLineOfSight.boxPx`, plan R10, R10.T12), held clear as the chrome is; `null` where it was
+ *   not drawn.
  * @param stage - The stage's size, CSS px, its device-pixel ratio and its rem.
  * @param states - Each label's state after the frame before, written for the next.
  * @param nowMs - The animation frame's time, by which each label's changes are counted.
@@ -459,6 +831,7 @@ function chromeBoxesPx(overlay: Element): ScreenBoxPx[] {
 function placeMarkLabels(
   labels: ReadonlyMap<string, HTMLElement>,
   anchors: ReadonlyArray<DrawAnchor>,
+  lineOfSightPx: ScreenBoxPx | null,
   stage: ElementSize,
   selection: CameraTarget | null,
   states: WeakMap<HTMLElement, MarkLabelState>,
@@ -483,6 +856,7 @@ function placeMarkLabels(
   }
   const places = markLabelPlaces(anchors, plates, stage, {
     chrome: overlay === null ? [] : chromeBoxesPx(overlay),
+    lineOfSightPx,
     selection: selection === null ? null : targetKey(selection),
     previous,
     nowMs,
@@ -521,10 +895,16 @@ function pickAnchor(anchor: DrawAnchor): Anchor {
   };
 }
 
-/** The rows of the list, with the units they were last shown in kept for their hysteresis. */
+/**
+ * The rows and notes of the list, with the units they were last shown in kept for their
+ * hysteresis.
+ */
 interface ShownRows {
   readonly run: ViewRun;
   readonly rows: ReadonlyArray<MarkRow>;
+  /** The survey edges its notes were made from, and the notes (R10.T16.c). */
+  readonly edges: ReadonlyArray<DrawnSurveyEdge>;
+  readonly notes: ReadonlyArray<SurveyEdgeListNote>;
 }
 
 function unitsOf(rows: ReadonlyArray<MarkRow>): ReadonlyMap<string, BodyDistanceUnit> {
@@ -554,36 +934,102 @@ function ViewStage({
   engineState,
   exposure,
   onExposureChange,
+  whiteBalance,
+  onWhiteBalanceChange,
   meter,
   onMeterChange,
   easedMoves,
   onEasedMovesChange,
+  slopeBaselineM,
+  onSlopeBaselineChange,
+  placePage,
+  onPlacePage,
+  maximize,
+  onMaximize,
+  onLabelBlock,
   stars,
   countLine,
+  hostDiscs,
+  hostDiscsPending,
+  skyKeep,
   universe,
   setting,
+  framePacing,
+  geometry,
+  atmosphereLevers,
   modifier,
+  terrain,
+  atmosphere,
+  linkUp,
+  sceneStatements,
 }: ViewStageProps) {
   const legendId = useId();
+  const maximized = maximize !== "off";
   const server = source.kind === "server" ? source.server : null;
+  // A kept scene's terrain fixture follows the script the stage plays (R10.T16.d).
+  const notePlayed = source.kind === "kept" ? (source.option.terrain?.notePlayed ?? null) : null;
   const serverRef = useRef<ServerInput | null>(null);
   const [initial] = useState(() => initialRun(source));
   const runRef = useRef<ViewRun>(initial);
+  // Whether the run has been framed for the stage's aspect, as a kept scene may ask once.
+  const framedRef = useRef(false);
+  // What the loop last published, with each command's run at once, which the specs' styles read.
   const [published, setPublished] = useState<Published>({
     run: initial,
     anchors: [],
     drawnStyle: initial.camera.style,
+    balancedTeffK: null,
+    sceneStars: false,
     photoreal: "idle",
+    terrain: null,
+    decoration: false,
+    surveyEdges: NO_SURVEY_EDGES,
+    contourIntervalM: null,
+    atmosphere: NO_ATMOSPHERE_SHOWN,
+    imageLimited: false,
   });
-  const shown = useThrottledValue(published, READOUT_INTERVAL_MS);
+  // What the readouts show, changed at most every READOUT_INTERVAL_MS (Design note 18): the loop's
+  // publish at its turn, which a command's run waits for, or where no loop runs a command's at once
+  // or at its hold's end; set with the publish rather than held in a throttle, whose holds each
+  // rendered the stage again (lane perf-render-thread-2).
+  const [shown, setShown] = useState<Published>(published);
+  // Whether the drawing loop runs, publishing the run at its turn.
+  const loopRunsRef = useRef(false);
+  // A command's run where no loop runs: shown at once, or at its hold's end (`CommandReadouts`).
+  const [commandReadouts] = useState(() => new CommandReadouts(READOUT_INTERVAL_MS));
+  const showCommanded = useCallback((): void => {
+    // A loop started meanwhile publishes the run at its own turn.
+    if (!loopRunsRef.current) {
+      const run = runRef.current;
+      setShown((previous) => ({ ...previous, run }));
+    }
+  }, []);
+  // Its hold stops while the stage is hidden, a run left waiting shown at the end of a new one.
+  useEffect(() => {
+    commandReadouts.start();
+    return () => {
+      commandReadouts.stop();
+    };
+  }, [commandReadouts]);
+  // What the label block's terrain lines are made from, its FRAME body's survey and the terrain
+  // readout's latest answer (R10.T12; `GroundReadouts`), or `null` where it states none: published
+  // with the readouts at 4 Hz and, for a choice of BASELINE, out of their turn, and not throttled
+  // again, so that the answer to a choice stands as it comes (R10.T12.c).
+  const [ground, setGround] = useState<GroundSnapshot | null>(null);
   // The meter as the loop last read it out (R07.T16.b): given in the same frame as the exposure the
   // controller moved to, and not throttled again (the loop reads out at the readout rate), so that
   // the exposure's reading and the meter's status stand as one snapshot.
   const [metering, setMetering] = useState<Metering>(NOT_YET_DRAWN);
   const [selection, setSelection] = useState<CameraTarget | null>(null);
+  // The primary's GRID, its own: OFF as the stage mounts and each time its style becomes
+  // PHOTOREALISTIC (the owner's request, 2026-11-05).
+  const [grid, setGrid] = useState(GRID_AT_OPEN);
   const reducedMotion = usePrefersReducedMotion();
   const graphics = useGraphicsStatus();
   const annunciation = graphicsAnnunciation(graphics);
+  // The views that show the terrain's fault, every height worker lost (R10.T16.b) or a guarded
+  // computation failing on (R10.T16.e), each with its text.
+  const terrainFaults = useTerrainFaults(terrain);
   const { ref: stageRef, size } = useElementSize();
   const [canvas, setCanvas] = useState<HTMLCanvasElement | null>(null);
   // Whether the engine refused the stage's view at its first creation (a canvas with no context).
@@ -591,25 +1037,41 @@ function ViewStage({
   const heldRef = useRef(new Set<string>());
   // The turn the drags on the canvas have asked for since the loop's last frame (R07.T19.f).
   const turnRef = useRef<ViewTurn>(NO_TURN);
+  // Whether a camera command has cut the view since the loop's last frame, for its exposure.
+  const cutRef = useRef(false);
   // The marks' labels by their target's key, which the loop moves with their marks every frame.
   const labelsRef = useRef(new Map<string, HTMLElement>());
   const inputsRef = useRef<LoopInputs>({
     exposure,
+    whiteBalance,
     selection,
     reducedMotion,
     size,
     tokens: null,
     stars: [],
     sky: null,
+    hostDiscs: null,
     availability: WIREFRAME_ONLY,
-    meter: "average",
+    meter,
     onExposureChange,
+    terrain,
+    atmosphere,
+    linkUp,
+    universe,
+    notePlayed,
+    lineOfSightPoint: undefined,
+    grid: GRID_AT_OPEN,
+    slopeBaselineM,
   });
 
   // The sky replaces the interim field once it arrives, asked on the published run (R06.T13.c).
+  // A kept scene of served bodies is lit by its sky, as the server's is (the owner's request).
+  const servedScene = server === null ? (shown.run.scene.served ?? null) : null;
   const viewSky = useViewSky({
-    universe,
-    place: server?.place ?? null,
+    universe: servedScene?.universe ?? universe,
+    place: server?.place ?? servedScene?.place ?? null,
+    sky: servedScene?.sky,
+    keep: skyKeep,
     run: shown.run,
     exposure,
     widthPx: size === null ? null : Math.round(size.widthPx * size.devicePixelRatio),
@@ -620,6 +1082,9 @@ function ViewStage({
   // The instruments, and every view's budget on the setting (R07.T19).
   const [operated, setOperated] = useState<ViewId>(VIEW_ID);
   const primaryRun = useCallback((): ViewRun => runRef.current, []);
+  // The instrument whose GROUND page shows, and its tripod's point, for the loop (R10.T12.d): set
+  // after each commit, as the page stands.
+  const instrumentGroundRef = useRef<InstrumentGround | null>(null);
   const instruments = useInstruments({
     engineState,
     primaryRun,
@@ -630,12 +1095,60 @@ function ViewStage({
     exposure,
     setting,
     modifier,
+    ground: instrumentGroundRef,
   });
+  // The stage's room (plan R10, R10.T12.b; decision-r10-view-block-room §3): the slots by the
+  // stage's size and their own heights, then the plates' parts in the ruled order beside those that
+  // stand, from the plates as last laid out and the room decided before, its hysteresis's; adjusted
+  // during render as the measures change.
+  const { ref: stubRef, size: stubSize } = useElementSize();
+  const [measures, setMeasures] = useState<RoomMeasures>(NOT_MEASURED);
+  const roomInput: RoomInput = {
+    stage: size,
+    slots: [slotRoomOf(instruments.slots[0]), slotRoomOf(instruments.slots[1])],
+    stubHeightRem:
+      stubSize === null || !(stubSize.remPx > 0)
+        ? STUB_HEIGHT_REM
+        : stubSize.heightPx / stubSize.remPx,
+    full: measures.full,
+    beside: measures.beside,
+    measuredStage: measures.stage,
+    columns: size !== null && size.remPx > 0 && columnsFit(size),
+  };
+  const [shownRoom, setShownRoom] = useState<ViewRoom>(() =>
+    wholeRoom(roomInput.slots, roomInput.columns),
+  );
+  const decided = viewRoom(roomInput, shownRoom);
+  const room = sameRoom(decided, shownRoom) ? shownRoom : decided;
+  if (room !== shownRoom) {
+    setShownRoom(room);
+  }
+  const standingOf = (slot: InstrumentSlot): SlotStanding => room.slots[slot - 1] ?? "closed";
+  // The plates take the width left of the slots that stand, whole or as a stub; with none
+  // standing, on a stage that fits them, they stand in columns either side of the centre
+  // (R10.T12.c).
+  const beside = room.slots.some((each) => each === "stands" || each === "stub");
+  const plateClass = beside
+    ? BESIDE_CLASS
+    : room.arrangement === "columns"
+      ? COLUMNS_CLASS
+      : undefined;
+  const heldOne = standingOf(1) === "stub" || standingOf(1) === "held";
+  const heldTwo = standingOf(2) === "stub" || standingOf(2) === "held";
+  // A held slot draws nothing, so it is budgeted for nothing either.
   const specs: ReadonlyArray<ViewSpec> = [
     { id: VIEW_ID, slot: "primary", style: published.run.camera.style },
-    ...instruments.specs,
+    ...instruments.specs.filter((spec) =>
+      instruments.slots.some((slot) => slot.id === spec.id && standingOf(slot.slot) === "stands"),
+    ),
   ];
-  const budgets = viewBudgets(specs, setting);
+  // The primary's render resolution's rows, by which its photorealistic image alone takes its
+  // frame-rate floor (the owner's report, 2026-11-01).
+  const primaryRenderRowsPx =
+    size === null || size.heightPx <= 0
+      ? null
+      : renderViewport(presentedViewport(size), SETTINGS[setting].terrain.renderHeightPx).heightPx;
+  const budgets = viewBudgets(specs, setting, primaryRenderRowsPx);
   // While no view can be drawn both styles are held back, by the style panel and the key 4 alike,
   // whatever the adapter offers (decision-r07-t19b-exposure-fit, item 2).
   const drawing = engineState.kind === "ready" && !viewRefused;
@@ -651,39 +1164,77 @@ function ViewStage({
   // view can be drawn the instruments are held, as their canvases are not mounted.
   const instrumentViews: ReadonlyArray<InstrumentViewState> = instruments.slots.map((slot) => {
     const adapter = styleRefusals(graphics, slot.shown?.photoreal ?? "idle");
-    // A closed instrument has no budget to ask, and nothing to switch.
-    const slotRefusals = slot.open
-      ? withPermission(adapter, photorealisticAllowed(specs, setting, slot.id))
-      : adapter;
+    const standing = standingOf(slot.slot);
+    // A closed or held instrument has no budget to ask, and nothing to switch.
+    const slotRefusals =
+      standing === "stands"
+        ? withPermission(adapter, photorealisticAllowed(specs, setting, slot.id))
+        : adapter;
     return {
       slot,
+      standing,
       refusals: slotRefusals,
       availability: availabilityOf(slotRefusals),
       budgetStyle: budgets.get(slot.id)?.style ?? "wireframe",
-      fault: faultFor(graphics, annunciation, slot.id),
+      faults: faultsFor(
+        graphics,
+        annunciation,
+        slot.id,
+        slot.id,
+        terrainFaults,
+        slot.shown?.atmosphere.fault ?? [],
+      ),
     };
   });
   // The CONTROLS view: the side column's list and controls, and the single keys pressed off a
-  // canvas, act on it; an instrument closed meanwhile, or no view drawn, leaves PRIMARY there.
+  // canvas, act on it; an instrument closed meanwhile, or held for the stage's room (R10.T12.b),
+  // or no view drawn, leaves PRIMARY there, and a held one takes it back as it returns.
   const operatedView = drawing
     ? (instrumentViews.find(
-        ({ slot }) => slot.open && slot.id === operated && slot.shown !== null,
+        ({ slot, standing }) =>
+          standing === "stands" && slot.id === operated && slot.shown !== null,
       ) ?? null)
     : null;
   const controlsView = operatedView === null ? VIEW_ID : operatedView.slot.id;
   const controlledShown = operatedView?.slot.shown ?? null;
-  const fault = faultFor(graphics, annunciation, VIEW_NAME);
+  // The atmosphere's fault lines after the terrain's, as the loop last published them (R08.T10.b).
+  const faults = faultsFor(
+    graphics,
+    annunciation,
+    VIEW_NAME,
+    VIEW_ID,
+    terrainFaults,
+    shown.atmosphere.fault,
+  );
+  // The primary's terrain lines (R10.T12): its survey line, DATUM and readout, from the loop's
+  // latest publish, on the lower plate; the tripod and the list's note only while the plate states
+  // the readout (decision-r10-view-block-room §3).
+  const terrainLines = useTerrainLines(ground, faults, undefined, {
+    drawn: shown.decoration,
+    setting: SETTINGS[setting].decoration,
+  });
+  const lowerParts = terrainLowerParts(terrainLines);
+  const readoutAnswer = standingReadout(terrainLines, room.readout);
+  const sightPoint = readoutAnswer === null ? undefined : lineOfSightPointOf(readoutAnswer);
+  const hasPoint = sightPoint?.hasPoint;
+  const pointRangeM = sightPoint?.rangeM ?? null;
+  // The primary's own terrain annunciation (G10; R10.T16.c), none while its fault stands, of either
+  // cause (`terrainStatementOf`'s rule, C2).
+  const primaryTerrain = faults.some((fault) => isTerrainFault(fault)) ? null : shown.terrain;
 
   // The list's ranges switch unit with hysteresis, from the units they were last shown in;
   // adjusted during render as each published run arrives.
   const [shownRows, setShownRows] = useState<ShownRows>(() => ({
     run: initial,
     rows: markRows(initial),
+    edges: NO_SURVEY_EDGES,
+    notes: [],
   }));
-  let rows = shownRows.rows;
-  if (shownRows.run !== shown.run) {
-    rows = markRows(shown.run, unitsOf(shownRows.rows));
-    setShownRows({ run: shown.run, rows });
+  let { rows, notes } = shownRows;
+  if (shownRows.run !== shown.run || shownRows.edges !== shown.surveyEdges) {
+    rows = shownRows.run === shown.run ? rows : markRows(shown.run, unitsOf(shownRows.rows));
+    notes = surveyEdgeNotes(shown.run.scene, shown.surveyEdges, shownRows.notes);
+    setShownRows({ run: shown.run, rows, edges: shown.surveyEdges, notes });
   }
 
   // The loop reads the display through a ref, current after every commit; the colour tokens are
@@ -691,6 +1242,7 @@ function ViewStage({
   useLayoutEffect(() => {
     inputsRef.current = {
       exposure,
+      whiteBalance,
       selection,
       reducedMotion,
       size,
@@ -699,21 +1251,41 @@ function ViewStage({
       tokens: canvas === null || !canvas.isConnected ? null : readTokens(canvas),
       stars,
       sky: skyDrawn,
+      hostDiscs,
       availability,
       meter,
       onExposureChange,
+      terrain,
+      atmosphere,
+      linkUp,
+      universe,
+      notePlayed,
+      lineOfSightPoint: hasPoint === undefined ? undefined : { hasPoint, rangeM: pointRangeM },
+      slopeBaselineM,
+      grid,
     };
   }, [
     exposure,
+    whiteBalance,
     selection,
     reducedMotion,
     size,
     canvas,
     stars,
     skyDrawn,
+    hostDiscs,
     availability,
     meter,
     onExposureChange,
+    terrain,
+    atmosphere,
+    linkUp,
+    universe,
+    notePlayed,
+    hasPoint,
+    pointRangeM,
+    slopeBaselineM,
+    grid,
   ]);
 
   // The drawing loop reads the server's scene, as the latest render holds it, through a ref.
@@ -726,11 +1298,20 @@ function ViewStage({
     budgets,
     timer: graphics.timer,
     setting,
+    geometry,
+    atmosphereLevers,
     instruments: instruments.frame,
   });
   useLayoutEffect(() => {
-    budgetRef.current = { budgets, timer: graphics.timer, setting, instruments: instruments.frame };
-  }, [budgets, graphics.timer, setting, instruments.frame]);
+    budgetRef.current = {
+      budgets,
+      timer: graphics.timer,
+      setting,
+      geometry,
+      atmosphereLevers,
+      instruments: instruments.frame,
+    };
+  }, [budgets, graphics.timer, setting, geometry, atmosphereLevers, instruments.frame]);
 
   // The view's camera is reported to the server's scene while the stage draws it (R03.T14).
   const removeCamera = server?.removeCamera ?? null;
@@ -742,6 +1323,22 @@ function ViewStage({
       removeCamera(VIEW_ID);
     };
   }, [removeCamera]);
+
+  // A held instrument is not drawn (R10.T12.b): its camera leaves the server's scene until it
+  // returns and reports again, and no flight key stays held for it, its canvas gone with its focus.
+  const releaseKeys = instruments.releaseKeys;
+  useEffect(() => {
+    const held: ReadonlyArray<readonly [InstrumentSlot, boolean]> = [
+      [1, heldOne],
+      [2, heldTwo],
+    ];
+    for (const [slot, isHeld] of held) {
+      if (isHeld) {
+        removeCamera?.(instrumentViewId(slot));
+        releaseKeys(slot);
+      }
+    }
+  }, [heldOne, heldTwo, removeCamera, releaseKeys]);
 
   // The redraw loop: every frame while the display is shown; `Activity` tears it down when hidden.
   useEffect(() => {
@@ -756,7 +1353,7 @@ function ViewStage({
       // Not a loss: the canvas gave no context, or the engine could not configure it. The view
       // stays unmade until the stage remounts (a new scene); nothing here retries, so this cannot
       // loop.
-      console.error(`view ${VIEW_NAME} could not be made:`, error);
+      console.error(`view ${VIEW_NAME} could not be made: ${errorText(error)}`);
       // The engine's refusal is the external system's answer, known only once the canvas exists.
       // oxlint-disable-next-line react/set-state-in-effect
       setViewRefused(true);
@@ -778,19 +1375,45 @@ function ViewStage({
     const unsubscribeTimesRestored = engine.onRestored(() => {
       primaryTimes.reset(engine.passTimesFrame);
     });
-    // Animation frames since the loop started, by which each view's rate is paced.
-    let animationFrame = -1;
+    // Each view's frames at its rate, counted or by time (R07.T19), from the loop's start.
+    const pacer = new FramePacer(framePacing);
     let primaryMs: number | null = null;
     let drawnStyle: RenderStyle = "wireframe";
+    // The display's white (WHITE BALANCE), found each primary frame from the primary's lights, and
+    // given to every view, as the exposure is; the star it adapted to is kept against a near-equal
+    // one.
+    let white: BalancedWhite | null = null;
+    // The system it was found in: a star's index names a star of its own system alone.
+    let whiteSystem: SystemIdHex | null = null;
+    // Whether the last frame drawn drew the photorealistic image, presented or held back.
+    let imageDrawn = false;
+    // Whether that image was drawn below its setting's resolution (the owner's report).
+    let imageLimited = false;
+    let sceneStars = false;
     // The view's exposure controller (R07.T13.a): it meters the photorealistic image's histogram,
     // smooths `AUTO` toward it and holds the display's control; a command the operator gives is
     // applied to it when the display's control changes to one the controller did not publish.
+    const started = runRef.current.source;
     const auto = new AutoExposure({
       source: VIEW_ID,
       program: VIEW_CAMERA,
       control: inputsRef.current.exposure,
       meter: inputsRef.current.meter,
+      // A kept scene may open exposed for its subject, the body inspection, over any level but one
+      // the operator set (the owner's request).
+      opensAtMeter:
+        started.kind === "kept" &&
+        started.kept.startExposure === "metered" &&
+        yieldsToMeter(inputsRef.current.exposure),
     });
+    // A new scene, the stage's: the exposure snaps to its first reading (fix-view-light).
+    auto.cut();
+    // A cut within the scene: the exposure snaps to the first histogram of a frame drawn after it,
+    // those of frames drawn before it dropped.
+    const cutExposure = (): void => {
+      auto.cut();
+      drawer?.dropHistograms();
+    };
     // What the loop last read of the display's control, and what it last gave the display: an
     // operator's command is a control it reads that it did not give.
     let seenExposure = inputsRef.current.exposure;
@@ -798,23 +1421,58 @@ function ViewStage({
     let lastMs: number | null = null;
     let publishedMs = Number.NEGATIVE_INFINITY;
     let anchors: ReadonlyArray<DrawAnchor> = [];
+    // The line-of-sight mark's box as the last frame drew it, which the labels stand clear of
+    // (R10.T12).
+    let lineOfSightPx: ScreenBoxPx | null = null;
     // Where each mark's label stood after the last frame, kept with its element (R07.T16.i).
     const labelStates = new WeakMap<HTMLElement, MarkLabelState>();
+    // The terrain session the view last told what it drew, which forgets it when it goes.
+    let reportedTo: TerrainSession | null = null;
+    // The view's handle on the stage's atmosphere cache, and what the cache said of its last frame
+    // drawn (R08.T10.b).
+    const air = new ViewAtmosphereHandle();
+    let atmosphereReport: AtmosphereViewReport | null = null;
+    // The arrival the stage's views share (R08.T10.b): one object a system the stage draws, so that
+    // the cache asks every wanted body afresh, and lets the left system's go, on a new arrival.
+    let arrival: object = {};
+    let arrivalSystem: string | null = null;
+    // Each body's granted detail, made again when the scene's system is.
+    let grantsFor: SceneSystem | null = null;
+    let grants: ReadonlyMap<BodyIdHex, DetailLevelDto> = new Map();
+    // The terrain's annunciation of the last frame drawn (R10.T16.c), for the label block.
+    let terrainAnnunciation: TerrainAnnunciation | null = null;
+    // Whether the last frame drawn drew decoration (plan R11, R11.T1), for `DECORATION ON`.
+    let decorationDrawn = false;
+    // The survey edges the last frame drawn marked, for the list's notes (R10.T16.c).
+    let surveyEdges = NO_SURVEY_EDGES;
+    // The guard of the terrain session's step (the batch review's S5; R10.T16.e): a failure said
+    // once until a step succeeds, and the session's terrain faulted once its steps fail on for
+    // 250 ms. One a session, so that a run of failures is its own.
+    let stepGuard = new TerrainFailureGuard();
+    // The primary's terrain readout, asked at each publish (R10.T12; decision-r10-t12-leans §3).
+    const grounds = new GroundReadouts(VIEW_ID);
+    // The contour interval of the last frame drawn (R10.T11), for the label block.
+    let contourIntervalM: number | null = null;
+    // One interval for a pose (R10.T12.b; decision-r10-view-block-room §10): the stage's views
+    // state the contour interval held at the point their cameras share, through this one holder,
+    // which the primary's frames give the instruments' with their own.
+    const poseIntervals = new PoseIntervals();
     let frame = 0;
     const tick = (nowMs: number): void => {
-      animationFrame += 1;
+      pacer.frame(nowMs);
       const paced = budgetRef.current;
       const primaryBudget = budgetOf(paced.budgets, VIEW_ID);
-      // A 30 Hz primary draws on every second vsync, and its instruments only in its frames. Its
-      // labels are placed on every vsync, at the last drawn frame's marks, so that a readout's
-      // commit between two drawn frames, which can widen a plate or the chrome, is never painted
-      // with a label in part (R07.T16.i).
-      if (!drawsInFrame(animationFrame, primaryBudget.rateHz)) {
+      // A 30 Hz primary draws on every second vsync of a 60 Hz display, and its instruments only
+      // in its frames. Its labels are placed on every vsync, at the last drawn frame's marks, so
+      // that a readout's commit between two drawn frames, which can widen a plate or the chrome, is
+      // never painted with a label in part (R07.T16.i).
+      if (!pacer.draws(primaryBudget.rateHz)) {
         const between = inputsRef.current;
         if (between.size !== null) {
           placeMarkLabels(
             labelsRef.current,
             anchors,
+            lineOfSightPx,
             between.size,
             between.selection,
             labelStates,
@@ -838,6 +1496,17 @@ function ViewStage({
       lastMs = nowMs;
       const inputs = inputsRef.current;
       const current = serverRef.current;
+      // A kept scene framed on its view's aspect, the body inspection's, takes its pose at the
+      // stage's first frame with a size, before the camera has been flown (the owner's request).
+      if (!framedRef.current && inputs.size !== null && inputs.size.heightPx > 0) {
+        framedRef.current = true;
+        runRef.current = framedRun(runRef.current, inputs.size.widthPx / inputs.size.heightPx);
+        cutExposure();
+      }
+      if (cutRef.current) {
+        cutRef.current = false;
+        cutExposure();
+      }
       const run = stepRun(runRef.current, {
         // The server's scene where the ship sees it at this frame's time (R03's `frameAt`).
         serverScene: current === null ? null : serverSceneAtFrame(current, nowMs),
@@ -845,9 +1514,16 @@ function ViewStage({
         held: heldRef.current,
         reducedMotion: inputs.reducedMotion,
         turn: turnRef.current,
+        // The ground drawn under an ORBIT camera, its floor (plan R15, T4).
+        orbitGround: orbitGroundOf(runRef.current, inputs.terrain),
       });
       turnRef.current = NO_TURN;
       runRef.current = run;
+      // A kept scene's terrain fixture is told how far its script has played: its field's revision
+      // rises the first time the script passes the delta's time (R10.T16.d).
+      if (run.source.kind === "kept") {
+        inputs.notePlayed?.(run.tS);
+      }
       if (inputs.exposure !== seenExposure) {
         seenExposure = inputs.exposure;
         if (inputs.exposure !== givenExposure) {
@@ -857,43 +1533,178 @@ function ViewStage({
       if (inputs.meter !== auto.meter) {
         auto.setMeter(inputs.meter);
       }
-      // Last frame's histogram, if one arrived, under the exposure it was taken with; the
-      // controller meters none while the view draws its wireframe, which then times the meter out.
-      const reading = auto.step(drawer?.takeHistogram(), dtS);
+      // Last frame's histogram, if one arrived, under the exposure it was taken with, or under
+      // INCIDENT this frame's light on its body (ux-calls-view, item 3b); the controller meters
+      // none while the view draws its wireframe, which then times the meter out.
+      const reading = auto.step(
+        drawer?.takeHistogram(),
+        dtS,
+        auto.meter === "incident"
+          ? incidentReadingLx(run, inputs.selection, inputs.sky?.model ?? null, inputs.hostDiscs)
+          : undefined,
+      );
       if (run.source.kind === "server" && current !== null) {
         current.reportCamera(VIEW_ID, cameraKinematics(runPose(run), run.scene));
         // Here in the loop, not in the render that made the first scene: it logs.
         reportBondRatioFindings(run.scene);
       }
+      // The terrain session steps once a primary frame, before any view draws, on what each
+      // instrument drew last and on what the primary draws now, noted first, so that its selection
+      // is this frame's (R10.T16.a; the batch review's S2 and S6); a session let go is forgotten
+      // by this view first.
+      const session = inputs.terrain;
+      if (reportedTo !== session) {
+        reportedTo?.forgetView(VIEW_ID);
+        reportedTo = session;
+        stepGuard = new TerrainFailureGuard();
+      }
+      terrainAnnunciation = null;
+      if (run.scene.system !== arrivalSystem) {
+        // A jump to another system is a new scene, whose exposure snaps to it.
+        if (arrivalSystem !== null) {
+          cutExposure();
+        }
+        arrivalSystem = run.scene.system;
+        arrival = {};
+      }
+      const sceneSystem = current?.model.system ?? null;
+      if (sceneSystem !== grantsFor) {
+        grantsFor = sceneSystem;
+        grants = grantLevelsOf(sceneSystem);
+      }
+      // The server's scene as the atmosphere cache's requests take it, or a kept scene's served
+      // bodies' (the body inspection's); none for any other kept scene.
+      const served = current === null ? run.scene.served : undefined;
+      const airScene: AtmosphereScene | null =
+        current !== null && inputs.universe !== null
+          ? {
+              universe: inputs.universe,
+              system: current.place.system,
+              designation: current.place.designation,
+              time: run.scene.time,
+              arrival,
+              grants,
+              linkUp: inputs.linkUp,
+            }
+          : served === undefined
+            ? null
+            : {
+                universe: served.universe,
+                system: run.scene.system,
+                designation: served.place.designation,
+                time: run.scene.time,
+                arrival,
+                grants: served.grants,
+                linkUp: inputs.linkUp,
+              };
+      // The white every view of the display draws at: the primary's brightest host star's under
+      // HOST, from the primary's camera, whatever style the primary draws (the UX ruling).
+      if (run.scene.system !== whiteSystem) {
+        whiteSystem = run.scene.system;
+        white = null;
+      }
+      white =
+        inputs.whiteBalance === "d65"
+          ? null
+          : frameWhiteBalance(
+              inputs.whiteBalance,
+              framePlacedLights(run, runPose(run), inputs.sky, inputs.hostDiscs),
+              white,
+            );
+      let frameInputs: ViewFrameInputs | null = null;
       if (drawer !== null) {
         if (run.camera.style === "photorealistic" && drawer.photorealStatus === "failed") {
           // Its pipelines could not be made: the view returns to the wireframe, and the control
           // holds the style back with the reason.
           runRef.current = { ...run, camera: { ...run.camera, style: "wireframe" } };
         }
-        const drawn = drawer.draw({
+        frameInputs = {
           run,
           size: inputs.size,
           tokens: inputs.tokens,
           exposure: reading.control,
+          white,
           stars: inputs.stars,
           sky: inputs.sky,
+          hostDiscs: inputs.hostDiscs,
           selection: inputs.selection,
           style: primaryBudget.style,
           setting: paced.setting,
+          geometry: paced.geometry,
+          atmosphereLevers: paced.atmosphereLevers,
+          // Its air at the low setting's sizes while its frame-rate floor holds it stepped down
+          // (the owner's report, 2026-11-01).
+          atmosphereSetting: primaryScale.airStepped ? "low" : paced.setting,
+          // Its large discs' limbs at fewer cells while the floor holds its lowest step (R07.T8.i).
+          floorLowest: primaryScale.atLowestStep,
           // The scene target at the render resolution times the budget's or controller's scale.
           renderScale,
           availability: inputs.availability,
-          // The exposure's source: its frames take the histogram its meter reads (Design note 11).
-          meter: auto.meter,
-        });
+          // The exposure's source: its frames take the histogram its meter reads (Design note 11),
+          // none under INCIDENT.
+          meter: histogramMeterOf(auto.meter),
+          // A cut's frames are held back until its reading (fix-view-light).
+          present: !auto.holds,
+          // Every view's lit bodies shade and hand over by the session's (R10.T16.a).
+          classMaps: session?.classMaps,
+          reliefs: session?.reliefsFor(VIEW_ID),
+          // The view's own terrain of the session's passes, and its survey edges (R10.T16.c),
+          // its contour interval through the stage's holder (R10.T12.b).
+          terrain:
+            session === null
+              ? undefined
+              : { source: session, view: VIEW_ID, nowMs, intervals: poseIntervals },
+          // The tripod, while the plate states the readout with its point (R10.T12).
+          lineOfSightPoint: inputs.lineOfSightPoint,
+          // Its symbology over the photorealistic image, or none (the owner's requests).
+          grid: inputs.grid,
+          // Its bodies' air, through its handle on the stage's cache (R08.T10.b).
+          atmosphere: air.inputFor(inputs.atmosphere, airScene, nowMs),
+        };
+        // What it draws now, in the style it last drew in (S8), for the step below.
+        const report =
+          session === null
+            ? null
+            : terrainReportOf(
+                frameInputs,
+                drawer.regimes,
+                primaryBudget.streamPriority,
+                drawnStyle,
+                drawer.regimesFromM,
+              );
+        if (session !== null && report !== null) {
+          // Its FRAME body, whose terrain readout it states, is wanted wherever the camera is
+          // (R10.T12).
+          session.noteView(VIEW_ID, { ...report, readoutBody: readoutBodyOf(run) });
+        }
+      }
+      // Guarded: no throw of the step stops this loop or the instruments' (S5), and one that lasts
+      // faults the terrain (R10.T16.e).
+      stepTerrainSession(session, stepGuard, nowMs);
+      if (drawer !== null && frameInputs !== null) {
+        const drawn = drawer.draw(frameInputs);
         if (drawn !== null && inputs.size !== null) {
-          anchors = drawn.anchors;
-          // The wireframe, and the photorealistic view's stand-in while its pipelines compile.
-          drawnStyle = drawn.drawnStyle;
+          imageDrawn = drawn.drawnStyle === "photorealistic";
+          imageLimited =
+            imageDrawn && (renderScale < primaryBudget.renderScale || primaryScale.airStepped);
+          terrainAnnunciation = drawn.terrain;
+          decorationDrawn = drawn.decoration;
+          surveyEdges = drawn.surveyEdges;
+          contourIntervalM = drawn.contourIntervalM;
+          atmosphereReport = drawn.atmosphere;
+          // A frame held back leaves the view showing the last one presented, its marks' labels
+          // and its style with it (fix-view-light).
+          if (!(imageDrawn && frameInputs.present === false)) {
+            anchors = drawn.anchors;
+            lineOfSightPx = drawn.lineOfSight?.boxPx ?? null;
+            // The wireframe, and the photorealistic view's stand-in while its pipelines compile.
+            drawnStyle = drawn.drawnStyle;
+            sceneStars = drawn.sceneStars;
+          }
           placeMarkLabels(
             labelsRef.current,
             anchors,
+            lineOfSightPx,
             inputs.size,
             inputs.selection,
             labelStates,
@@ -901,23 +1712,38 @@ function ViewStage({
           );
         }
       }
-      // What the meter says is true of the frame just drawn: an image coming to be drawn opens
-      // the window before its first histogram, and one gone has nothing to meter (R07.T16.b).
-      auto.noteImage(drawnStyle === "photorealistic");
-      // The readouts change at 4 Hz, every view's in the same frame, so React renders them once.
-      const publish = nowMs - publishedMs >= READOUT_INTERVAL_MS;
+      // What the meter says is true of the frame just drawn, held back or not: an image coming to
+      // be drawn opens the window before its first histogram, and one gone has nothing to meter
+      // (R07.T16.b).
+      auto.noteImage(imageDrawn);
+      // The readouts change at 4 Hz, every view's in the same frame, so React renders them once:
+      // a frame the instruments draw in too, at their 30 Hz, so that every view's block states
+      // what it drew in that frame, one interval among them where they stand at one pose
+      // (R10.T12.b).
+      const publish =
+        nowMs - publishedMs >= READOUT_INTERVAL_MS &&
+        pacer.draws(INSTRUMENT_RATE_HZ, primaryBudget.rateHz);
       // The instruments in the primary's frame, so that their passes count in it.
       paced.instruments({
         nowMs,
-        frame: animationFrame,
+        draws: (rateHz) => pacer.draws(rateHz, primaryBudget.rateHz),
         publish,
         primary: runRef.current,
         budgets: paced.budgets,
         setting: paced.setting,
-        exposure: inputs.exposure,
+        geometry: paced.geometry,
+        // The primary's applied exposure, and its hold, so that no instrument shows a cut's new
+        // scene at the exposure from before it (fix-view-light).
+        exposure: reading.control,
+        white,
+        present: !auto.holds,
         stars: inputs.stars,
+        hostDiscs: inputs.hostDiscs,
         reportCamera:
           run.source.kind === "server" && current !== null ? current.reportCamera : null,
+        terrain: session,
+        intervals: poseIntervals,
+        atmosphere: { cache: inputs.atmosphere, scene: airScene },
       });
       if (publish) {
         publishedMs = nowMs;
@@ -929,24 +1755,46 @@ function ViewStage({
           inputs.onExposureChange(auto.control);
         }
         setMetering(auto.metering);
-        setPublished({
+        const next: Published = {
           run,
           anchors,
           drawnStyle,
+          balancedTeffK: white?.teffK ?? null,
+          sceneStars,
           photoreal: drawer?.photorealStatus ?? "idle",
-        });
+          terrain: terrainAnnunciation,
+          decoration: decorationDrawn,
+          surveyEdges,
+          contourIntervalM,
+          atmosphere:
+            atmosphereReport === null
+              ? NO_ATMOSPHERE_SHOWN
+              : atmosphereShownOf(atmosphereReport, run.scene),
+          imageLimited: imageLimited && drawnStyle === "photorealistic",
+        };
+        setPublished(next);
+        setShown(next);
+        setGround(grounds.publish(session, run, nowMs, inputs.slopeBaselineM));
+      } else if (grounds.due(inputs.slopeBaselineM)) {
+        // A choice of BASELINE is asked at once, and its answer stands as it comes, out of the
+        // readouts' turn (R10.T12.c); the other readouts keep theirs.
+        setGround(grounds.publish(session, run, nowMs, inputs.slopeBaselineM));
       }
       frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
+    loopRunsRef.current = true;
     return () => {
+      loopRunsRef.current = false;
       cancelAnimationFrame(frame);
       unsubscribeTimes();
       unsubscribeTimesRestored();
+      reportedTo?.forgetView(VIEW_ID);
+      air.close();
       // The drawer disposes of the view with itself.
       releaseDrawer();
     };
-  }, [engineState, canvas]);
+  }, [engineState, canvas, framePacing]);
 
   const command = useCallback(
     (action: ViewKeyAction): void => {
@@ -959,13 +1807,22 @@ function ViewStage({
       if (result.kind === "refused") {
         return;
       }
+      const before = runRef.current.camera.style;
       runRef.current = result.run;
       setPublished((previous) => ({ ...previous, run: result.run }));
+      setGrid((on) => gridAfterStyle(before, result.run.camera.style, on));
+      // Its readout at the loop's next publish, or where no loop runs through the command's hold.
+      if (!loopRunsRef.current) {
+        commandReadouts.offer(showCommanded);
+      }
+      if (commandCutsImage(action, result.run)) {
+        cutRef.current = true;
+      }
       if (action.kind === "target") {
         setSelection(result.run.camera.target);
       }
     },
-    [easedMoves, reducedMotion, availability],
+    [easedMoves, reducedMotion, availability, commandReadouts, showCommanded],
   );
 
   // Each view's command, through the styles its adapter and the budget allow it (R07.T19).
@@ -978,6 +1835,44 @@ function ViewStage({
     }
     commandInstrument(each.slot.slot, action, each.availability);
   };
+  // A view's GRID, which its key sets where the view's row stands, and nowhere else (the owner's
+  // request, 2026-11-01).
+  const toggleGrid = (view: ViewId): void => {
+    const each = instrumentViews.find(
+      ({ slot, standing }) => slot.id === view && standing === "stands",
+    );
+    if (each === undefined) {
+      // A view not drawn, an instrument held, has no row to set.
+      if (view === VIEW_ID && gridRowStands(shown.run.camera.style, refusals.photorealistic)) {
+        setGrid((on) => !on);
+      }
+      return;
+    }
+    const style = each.slot.shown?.run.camera.style;
+    if (style !== undefined && gridRowStands(style, each.refusals.photorealistic)) {
+      instruments.setGrid(each.slot.slot, !each.slot.grid);
+    }
+  };
+  // The exposure's command by its key, which acts only as its button would: one held back stays held
+  // back, its button stating why, and while the button is hidden (MAXIMIZE VIEW on, or its panel
+  // folded in the compact layout) its reason stands where the hidden panels' do for as long as the
+  // exposure stays at the level it was keyed at, forgotten as either changes (the owner's request,
+  // 2026-11-01).
+  const [keyedRefusal, setKeyedRefusal] = useState<KeyedRefusal | null>(null);
+  const [refusalMaximized, setRefusalMaximized] = useState(maximized);
+  if (refusalMaximized !== maximized) {
+    setRefusalMaximized(maximized);
+    setKeyedRefusal(null);
+  }
+  const keyExposure = (keyed: ExposureCommandName): void => {
+    const result = exposureCommandResult(keyed, exposure, meteringFor(metering, meter));
+    if (result.kind === "accepted") {
+      setKeyedRefusal(null);
+      onExposureChange(result.control);
+    } else {
+      setKeyedRefusal({ command: keyed, level: exposureLevelReading(exposure) });
+    }
+  };
   // The keys' listener reads the latest views and commands through a ref, current after every
   // commit, so that it is added once.
   const keysRef = useRef<KeyTargets>({
@@ -985,6 +1880,8 @@ function ViewStage({
     primaryCanvas: canvas,
     canvases: [],
     controlsView,
+    toggleGrid,
+    keyExposure,
   });
   useLayoutEffect(() => {
     keysRef.current = {
@@ -992,15 +1889,26 @@ function ViewStage({
       primaryCanvas: canvas,
       canvases: instruments.slots.map((slot) => ({ id: slot.id, canvas: slot.canvas })),
       controlsView,
+      toggleGrid,
+      keyExposure,
     };
   });
 
-  // The view's single keys act from anywhere on the display but a text field (keys.ts): on the
-  // focused canvas's view, which becomes the CONTROLS view first, and else on the CONTROLS view.
+  // The view's single keys act from anywhere on the display but a text field (keys.ts), the GRID
+  // row's among them (displayKeys.ts): on the focused canvas's view, which becomes the CONTROLS view
+  // first, and else on the CONTROLS view.
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent): void => {
       const action = viewKeyAction(event);
-      if (action === null) {
+      const displayKey = viewDisplayKey(event);
+      // The exposure is the display's, every view's, whichever view a key acts on.
+      if (displayKey === "enable" || displayKey === "inhibit") {
+        event.preventDefault();
+        keysRef.current.keyExposure(displayKey);
+        return;
+      }
+      const gridKey = displayKey === "grid";
+      if (action === null && !gridKey) {
         return;
       }
       event.preventDefault();
@@ -1013,7 +1921,12 @@ function ViewStage({
       if (onCanvas !== null) {
         setOperated(onCanvas);
       }
-      keys.commandView(onCanvas ?? keys.controlsView, action);
+      const view = onCanvas ?? keys.controlsView;
+      if (action === null) {
+        keys.toggleGrid(view);
+      } else {
+        keys.commandView(view, action);
+      }
     };
     document.addEventListener("keydown", onKeyDown);
     return () => {
@@ -1084,6 +1997,10 @@ function ViewStage({
   };
   const fovDeg = (): number => runRef.current.camera.fovDeg;
   const dragKind = (): DragKind => dragKindOf(runRef.current.camera.preset);
+  // A wheel zooms an `ORBIT` camera (plan R15, T4) and is refused in every other preset.
+  const onZoom = (steps: number): void => {
+    commandView(VIEW_ID, { kind: "zoom", steps });
+  };
   // Where the primary's camera is, at the readouts' rate, for its label block and camera panel.
   const place = useCameraPlace(shown.run);
 
@@ -1100,7 +2017,9 @@ function ViewStage({
           annunciation === null || graphics.condition.kind === "acquiring"
           ? NOT_MADE
           : annunciation;
-  const openPanels = instruments.slots.flatMap((slot) => (slot.open ? [slot.panelSize] : []));
+  // Room to open one more slot beside those that stand (a slot that is open stays open, held where
+  // the stage cannot hold it).
+  const openRoom = roomToOpen(roomInput, room);
   // Closing the CONTROLS instrument returns CONTROLS to PRIMARY. Its canvas never holds the focus
   // then, since CLOSE takes it.
   const closeInstrument = (id: ViewId): void => {
@@ -1115,13 +2034,15 @@ function ViewStage({
   };
 
   // The scene's lighting and lit bodies' labels, which every view's photorealistic statements read.
-  const lighting = lightingState(
-    hostLights(
-      shown.run.scene,
-      sceneHostDiscs(shown.run.scene, viewSky.drawn?.model.response.hosts ?? null),
-    ),
-    viewSky.pending,
-  );
+  // A served scene is lit by its held sky's discs where that sky names its system, else by its
+  // system's discs on their own, which arrive at once (plans R06 and R07); its lighting is awaited
+  // only while neither is held and one of them is asked, as the INCIDENT meter's reading is.
+  const sceneDiscs = sceneHostDiscs(shown.run.scene, viewSky.drawn?.model ?? null, hostDiscs);
+  const discsAwaited =
+    !bringsOwnSettings(shown.run.scene) &&
+    heldHostDiscs(shown.run.scene, viewSky.drawn?.model ?? null, hostDiscs) === null &&
+    (viewSky.pending || hostDiscsPending);
+  const lighting = lightingState(hostLights(shown.run.scene, sceneDiscs), discsAwaited);
   const litLabels = litLabelsOf(shown.run.scene);
   // The primary's STARS line, whose notes depend on the instruments open beside it
   // (decision-r06-t11f-stars-line): the sky's annunciations stand on it alone.
@@ -1130,15 +2051,97 @@ function ViewStage({
   // The meter's control stands beside a drawn photorealistic image only, and the primary's block
   // states the meter while it does (decision-r07-t19-layout, item 1b).
   const meterStands = shown.drawnStyle === "photorealistic";
+  // The white balance stands while any view of the display draws a photorealistic image, since
+  // every view draws at the primary's white (the UX ruling, 2026-11-06).
+  const balanceStands =
+    meterStands || instruments.slots.some((slot) => slot.shown?.drawnStyle === "photorealistic");
   // The meter as the panels show it: a meter's own status goes at once with the meter that found
   // nothing, in the render of the operator's choice (R07.T16.b).
   const meterShown = meteringFor(metering, meter);
-  const primaryPhotoreal = photorealStatements(shown.run, lighting, shown.drawnStyle, litLabels);
-  const primaryStatements = [
-    ...labelStatements(shown.run),
+  const primaryPhotoreal = photorealStatements(
+    shown.run,
+    lighting,
+    shown.drawnStyle,
+    litLabels,
+    shown.atmosphere,
+  );
+  // Which of the primary's notes' reasons stand opened, held here so that the live plate and the
+  // room's copy of it stand alike, and kept while the scene is (the owner's request, 2026-11-01).
+  const primaryFolds = useReasonFolds();
+  const primaryStatements: ReadonlyArray<LabelStatement> = [
+    // `DECORATION ON` among the statements only where the survey line cannot state it (R11.T1).
+    ...labelStatements(
+      shown.run,
+      primaryTerrain,
+      decorationStatement(
+        shown.decoration,
+        terrainLines !== null &&
+          surveyReadingStands(terrainLines.model) &&
+          room.survey === "stands",
+      ) === "statement",
+    ),
+    // After the terrain's annunciation, its own drawing's as this is (the owner's report).
+    ...(shown.imageLimited ? [IMAGE_DETAIL_LIMITED] : []),
+    ...sceneStatements,
     ...(easedMoves && !reducedMotion ? [EASED_MOVES_STATEMENT] : []),
     ...primaryPhotoreal,
   ];
+  const primaryLines = withPlaceLines(
+    withWhiteBalanceLine(
+      withMeterLine(
+        withQualityLine(
+          withGridLine(
+            withDrawnStyle(
+              withSceneStarsLine(
+                withSkyLine(
+                  labelLines(shown.run, exposure, stale, shown.contourIntervalM),
+                  skyLine,
+                ),
+                shown.sceneStars,
+              ),
+              shown.drawnStyle,
+            ),
+            grid,
+            shown.drawnStyle,
+          ),
+          setting,
+        ),
+        meterStands ? meter : null,
+      ),
+      whiteBalance,
+      shown.balancedTeffK,
+      balanceStands,
+    ),
+    placeLines(place, stale),
+  );
+  // The count line counts the range query's rows: none while the scene's own field is drawn.
+  const primaryCount = viewSky.drawn === null && !shown.sceneStars ? countLine : null;
+  // The upper plate as it stands: while MAXIMIZE VIEW folds it, its summary, the readings an
+  // operator acts on and the key that shows the whole block, with what it folds counted on that
+  // key's line, and nothing that scrolls (the owner's request, 2026-11-01); whole, as off, its
+  // reasons folded behind their notes as ever; its faults stand in either.
+  const bare = maximize === "hidden";
+  const plateLines = bare ? NO_LINES : primaryLines;
+  const plateStatements = bare ? failedRequests(primaryStatements) : primaryStatements;
+  const plateCount = bare ? null : primaryCount;
+
+  // The plates as laid out after each render, for the room's next decision (R10.T12.b): read from
+  // the DOM, an external system, and kept only where they changed.
+  const upperRef = useRef<HTMLDivElement | null>(null);
+  const sizersRef = useRef<HTMLDivElement | null>(null);
+  const pinnedLines = pinnedLinesOf(plateLines);
+  useLayoutEffect(() => {
+    const measure = (): void => {
+      const measured = measureRoom({
+        upper: upperRef.current,
+        sizers: sizersRef.current,
+        pinnedLines,
+        liveBeside: beside,
+      });
+      setMeasures((previous) => (sameRoomMeasures(previous, measured) ? previous : measured));
+    };
+    measure();
+  });
 
   // The layout, from the `.view` box's size alone (R07.T19.b; decision-r07-t19-layout, item 1).
   const { ref: viewBoxRef, size: viewBox } = useElementSize();
@@ -1173,10 +2176,59 @@ function ViewStage({
     exposure: `${legendId}-exposure`,
     meter: `${legendId}-meter`,
   };
+  // The operated instrument's GROUND page in the camera panel's place (plan R10, R10.T12.d).
+  const groundPage = useGroundPage({
+    instrument:
+      operatedView === null || controlledShown === null
+        ? null
+        : {
+            slot: operatedView.slot.slot,
+            name: operatedView.slot.name,
+            shown: controlledShown,
+            faults: operatedView.faults,
+          },
+    chosen: placePage,
+    // A page MAXIMIZE VIEW hides states nothing, as one folded does.
+    folded: folded("camera") || maximized,
+  });
+  const { pagedSlot, pointHas: pageHasPoint, pointRangeM: pageRangeM } = groundPage;
+  useLayoutEffect(() => {
+    instrumentGroundRef.current =
+      pagedSlot === null
+        ? null
+        : {
+            slot: pagedSlot,
+            lineOfSightPoint:
+              pageHasPoint === undefined
+                ? undefined
+                : { hasPoint: pageHasPoint, rangeM: pageRangeM },
+          };
+  }, [pagedSlot, pageHasPoint, pageRangeM]);
   const foldOf = (target: EventTarget | null): FoldPanel | null => {
     const section = target instanceof Element ? target.closest("section") : null;
     return FOLD_PANELS.find((panel) => section !== null && section.id === foldIds[panel]) ?? null;
   };
+  // The element over the stage that last took the focus (R10.T12.b). Where a render takes it away,
+  // a slot held or returning with its canvas, or a scroll ended with its tab stop, the focus goes to
+  // the PRIMARY view's canvas, as the stub's CLOSE gives it, never to the page, where no ring would
+  // show it; looked at after every render, since any change of the room can do it.
+  const stageFocusRef = useRef<HTMLElement | null>(null);
+  const onMainFocus = (event: FocusEvent<HTMLDivElement>): void => {
+    stageFocusRef.current = event.target instanceof HTMLElement ? event.target : null;
+  };
+  useLayoutEffect(() => {
+    const last = stageFocusRef.current;
+    const active = document.activeElement;
+    if (last === null || canvas === null) {
+      return;
+    }
+    const gone = !last.isConnected || last.tabIndex < 0;
+    const lost = active === null || active === document.body || active === last;
+    if (gone && lost) {
+      stageFocusRef.current = null;
+      canvas.focus();
+    }
+  });
   const onSideFocus = (event: FocusEvent<HTMLDivElement>): void => {
     setFocusedFold(foldOf(event.target));
   };
@@ -1234,6 +2286,18 @@ function ViewStage({
       inhibitButtonRef.current?.focus();
     }
   }, [compact, focusedFold, opened, meterStands, foldButtonsRef]);
+  // The focus in a panel that MAXIMIZE VIEW hides goes to the CONTROLS view's canvas, so that the
+  // keys go on acting on that view, or where none stands to MAXIMIZE VIEW's button, never to the
+  // page (the owner's request, 2026-11-01).
+  const sideRef = useRef<HTMLDivElement | null>(null);
+  const maximizeRef = useRef<HTMLButtonElement | null>(null);
+  const controlsCanvas = operatedView === null ? canvas : operatedView.slot.canvas;
+  useLayoutEffect(() => {
+    const active = document.activeElement;
+    if (maximized && active !== null && sideRef.current?.contains(active) === true) {
+      (controlsCanvas ?? maximizeRef.current)?.focus();
+    }
+  }, [maximized, controlsCanvas]);
 
   // The CONTROLS view's camera and style, which a folded panel's standing lines describe. Its style
   // panel heads the second column and stands in every engine state, so that nothing under it moves
@@ -1248,11 +2312,62 @@ function ViewStage({
       : controlledShown.photoreal === "failed";
   // The first style's refusal, as the style control shows it.
   const styleReason = controlledRefusals.wireframe ?? controlledRefusals.photorealistic;
-  const noOwnShip = offeredPresets(cameraSceneOf(controlledRun.scene)).length < PRESET_COUNT;
+  const controlledCamera = cameraSceneOf(controlledRun.scene);
+  const noOwnShip = controlledCamera.ownShip === null;
+  const orbitOffered = offeredPresets(controlledCamera).includes("orbit");
   // The exposure's status, `AUTO NOT AVAILABLE: …`, which stands under the row while it is folded.
   const exposureStanding = autoNotAvailable(meterShown);
-  // The compact layout's row of disclosure buttons, and under it the faults and statuses of the
-  // panels folded (decision-r07-t19-layout, item 1b); the limit reasons fold with their controls.
+  // The faults and statuses that stand for the panels hidden, folded in the compact layout or every
+  // one under MAXIMIZE VIEW (decision-r07-t19-layout, item 1b); the limit reasons go with their
+  // controls.
+  const cameraStanding = noOwnShip ? (
+    <p className="view-camera__reason view-folds__standing">
+      <StatusText text={NO_OWN_SHIP} />
+    </p>
+  ) : null;
+  const styleStanding =
+    controlledFaulted && styleReason !== null ? (
+      <p className="view-style__reason view-style__reason--fault view-folds__standing">
+        <StatusText text={styleReason} />
+      </p>
+    ) : null;
+  const exposureStandingLine =
+    exposureStanding === null ? null : (
+      <p className="view-exposure__reason view-folds__standing">
+        <output>
+          <StatusText text={exposureStanding} renderPart={exposureNote} />
+        </output>
+      </p>
+    );
+  // A command keyed and held back while its button is hidden: its name and its button's reason, the
+  // meter's own status after `NOT AVAILABLE:` as AUTO NOT AVAILABLE's stands after its own words.
+  const exposureFolded = folded("exposure");
+  const [refusalFolded, setRefusalFolded] = useState(exposureFolded);
+  if (refusalFolded !== exposureFolded) {
+    setRefusalFolded(exposureFolded);
+    setKeyedRefusal(null);
+  }
+  const keyedWhy =
+    (maximized || exposureFolded) &&
+    keyedRefusal !== null &&
+    keyedRefusal.level === exposureLevelReading(exposure)
+      ? exposureCommandRefusal(keyedRefusal.command, exposure, meterShown)
+      : null;
+  const keyedLine =
+    keyedWhy === null || keyedRefusal === null ? null : (
+      <p className="view-exposure__reason view-folds__standing">
+        <output>
+          <StatusText
+            text={`${EXPOSURE_COMMAND_NAMES[keyedRefusal.command]} ${
+              keyedWhy.startsWith(NOT_AVAILABLE) ? keyedWhy : `${NOT_AVAILABLE}: ${keyedWhy}`
+            }`}
+            renderPart={exposureNote}
+          />
+        </output>
+      </p>
+    );
+  // The compact layout's row of disclosure buttons, and under it the standing lines of the panels
+  // folded.
   const foldRow = compact ? (
     <>
       <div className="view-folds">
@@ -1273,19 +2388,66 @@ function ViewStage({
           </button>
         ))}
       </div>
-      {folded("camera") && noOwnShip ? (
-        <p className="view-camera__reason view-folds__standing">{NO_OWN_SHIP}</p>
-      ) : null}
-      {folded("style") && controlledFaulted && styleReason !== null ? (
-        <p className="view-style__reason view-style__reason--fault view-folds__standing">
-          {styleReason}
+      {folded("camera") ? cameraStanding : null}
+      {folded("style") ? styleStanding : null}
+      {folded("exposure") ? exposureStandingLine : null}
+      {folded("exposure") ? keyedLine : null}
+    </>
+  ) : null;
+  // Under MAXIMIZE VIEW, after the key legend on its row, what the hidden panels would show (the
+  // owner's request, 2026-11-01): the line naming its key, the hidden controls' keys, the CONTROLS
+  // view where it is an instrument and that view's selection; then the slots held whole for want of room, as the
+  // INSTRUMENTS panel states them folded; then every hidden panel's standing lines. They run on as
+  // one line where they fit, each part after a middle dot that leads it, and wrap between parts.
+  const heldWhole = instrumentViews
+    .filter(({ standing }) => standing === "held")
+    .map(({ slot }) => slot.name);
+  // An instrument views the primary's scene, so its selection is named among the primary's rows.
+  const controlsSelection = operatedView?.slot.selection ?? selection;
+  const selectedName =
+    controlsSelection === null
+      ? null
+      : (rows.find((row) => row.key === targetKey(controlsSelection))?.name ?? null);
+  // The CONTROLS view's GRID row stands, and so its key acts, while its style is PHOTOREALISTIC.
+  const gridStands = gridRowStands(controlledRun.camera.style, controlledRefusals.photorealistic);
+  // The parts' dots lead them on sight; the parts are read without them.
+  const footDot = (
+    <span className="view__foot-dot" aria-hidden="true">
+      ·
+    </span>
+  );
+  const standingPart = (line: ReactNode, key: string): ReactNode =>
+    line === null ? null : (
+      <div className="view__foot-item" key={key}>
+        {footDot}
+        {line}
+      </div>
+    );
+  const maximizedPart = maximized ? (
+    <>
+      {maximizedKeys(
+        controlsView === VIEW_ID ? null : viewDisplayName(controlsView),
+        selectedName,
+        gridStands,
+        orbitOffered,
+      ).map((part) => (
+        <p className="view__keys view__foot-item" key={part}>
+          {footDot}
+          <span className="view__maximized-keys">{part}</span>
         </p>
-      ) : null}
-      {folded("exposure") && exposureStanding !== null ? (
-        <p className="view-exposure__reason view-folds__standing">
-          <output>{exposureNote(exposureStanding)}</output>
-        </p>
-      ) : null}
+      ))}
+      {standingPart(
+        heldWhole.length === 0 ? null : (
+          <p className="view-instruments-panel__reason view-folds__standing">
+            <StatusText text={noRoomReason(heldWhole)} />
+          </p>
+        ),
+        "held",
+      )}
+      {standingPart(cameraStanding, "camera")}
+      {standingPart(styleStanding, "style")}
+      {standingPart(exposureStandingLine, "exposure")}
+      {standingPart(keyedLine, "keyed")}
     </>
   ) : null;
   const sideFolds: SideFolds = {
@@ -1295,8 +2457,11 @@ function ViewStage({
   };
 
   return (
-    <div className={`view view--${layout}`} ref={viewBoxRef}>
-      <div className="view__main">
+    <div
+      className={maximized ? `view view--${layout} view--maximized` : `view view--${layout}`}
+      ref={viewBoxRef}
+    >
+      <div className="view__main" onFocus={onMainFocus}>
         {engineLine === null ? (
           <>
             <ViewCanvas
@@ -1308,7 +2473,11 @@ function ViewStage({
                 PRIMARY_NAME,
                 PRESET_NAMES[shown.run.camera.preset],
               ].join(", ")}
-              describedBy={`${legendId}-label ${legendId}`}
+              describedBy={
+                lowerParts.length === 0
+                  ? `${legendId}-label ${legendId}`
+                  : `${legendId}-label ${legendId}-lower ${legendId}`
+              }
               onKeyDown={onCanvasKeyDown}
               onKeyUp={onCanvasKeyUp}
               onBlur={onCanvasBlur}
@@ -1318,6 +2487,7 @@ function ViewStage({
               onPress={onPress}
               onTurn={onTurn}
               onPick={onPick}
+              onZoom={onZoom}
             >
               <ViewMarkLabels
                 anchors={shown.anchors}
@@ -1327,27 +2497,42 @@ function ViewStage({
                 labelRef={placeLabel}
               />
               <ViewLabelBlock
+                ref={upperRef}
                 id={`${legendId}-label`}
-                lines={withPlaceLines(
-                  withMeterLine(
-                    withQualityLine(
-                      withDrawnStyle(
-                        withSkyLine(labelLines(shown.run, exposure, stale), skyLine),
-                        shown.drawnStyle,
-                      ),
-                      setting,
-                    ),
-                    meterStands ? meter : null,
-                  ),
-                  placeLines(place, stale),
-                )}
-                statements={primaryStatements}
-                countLine={viewSky.drawn === null ? countLine : null}
-                fault={fault}
+                lines={plateLines}
+                statements={plateStatements}
+                folds={primaryFolds}
+                countLine={plateCount}
+                faults={faults}
+                scroll={
+                  bare ? undefined : { from: STARS_LABEL, room: room.upper, view: PRIMARY_NAME }
+                }
+                className={plateClass}
+                bare={bare}
               />
+              {lowerParts.length === 0 ? null : (
+                <ViewLowerPlate
+                  id={`${legendId}-lower`}
+                  parts={lowerParts}
+                  readout={room.readout}
+                  survey={room.survey}
+                  className={plateClass}
+                />
+              )}
               <div className="view-instruments">
-                {instrumentViews.map(({ slot, budgetStyle, fault: slotFault }) =>
-                  slot.open ? (
+                {instrumentViews.map(({ slot, standing, budgetStyle, faults: slotFaults }) =>
+                  standing === "stub" ? (
+                    <InstrumentStub
+                      key={slot.id}
+                      ref={stubRef}
+                      name={slot.name}
+                      onClose={() => {
+                        closeInstrument(slot.id);
+                        // Its CLOSE goes with it: the focus goes to the stage.
+                        canvas?.focus();
+                      }}
+                    />
+                  ) : standing === "stands" ? (
                     <InstrumentView
                       key={slot.id}
                       instrument={slot}
@@ -1358,7 +2543,13 @@ function ViewStage({
                       litLabels={litLabels}
                       primaryPhotorealStatements={primaryPhotoreal}
                       skyAwaiting={viewSky.awaiting}
-                      fault={slotFault}
+                      faults={slotFaults}
+                      folds={{
+                        opened: slot.reasonsOpened,
+                        toggle: (note) => {
+                          instruments.foldReasons(slot.slot, note);
+                        },
+                      }}
                       legendId={legendId}
                       onKeyDown={(event) => {
                         // A view key on its canvas makes it the CONTROLS view before it acts.
@@ -1389,16 +2580,78 @@ function ViewStage({
                   ) : null,
                 )}
               </div>
+              {size === null ? null : (
+                <ViewRoomSizers
+                  ref={sizersRef}
+                  upper={{
+                    lines: plateLines,
+                    statements: plateStatements,
+                    folds: primaryFolds,
+                    countLine: plateCount,
+                    faults,
+                    bare,
+                  }}
+                  lower={lowerParts}
+                  liveClass={plateClass}
+                  beside={room.heldForPlates}
+                  scrollsFrom={STARS_LABEL}
+                />
+              )}
             </ViewCanvas>
-            <KeyLegend id={legendId} modifier={modifier} />
           </>
         ) : (
           <div className="view__unavailable">
             <StatusLine text={engineLine.text} standing={engineLine.standing} />
           </div>
         )}
+        {/*
+         * The view's foot: its key legend, beside it at the row's end MAXIMIZE VIEW, in one place in
+         * either state and at every size, so that the SCENE bar never takes a row for it (the
+         * owner's request, 2026-11-01).
+         */}
+        <div className="view__foot">
+          <div className="view__foot-lines">
+            {engineLine === null ? (
+              <KeyLegend
+                id={legendId}
+                modifier={modifier}
+                orbit={controlledRun.camera.preset === "orbit"}
+              />
+            ) : null}
+            {maximizedPart}
+          </div>
+          {maximized ? (
+            // The label block's key's control, for the pointer and touch, pressed while the whole
+            // block shows.
+            <button
+              type="button"
+              className="control view__maximize"
+              aria-pressed={maximize === "block"}
+              aria-keyshortcuts={LABEL_BLOCK_KEY}
+              onClick={onLabelBlock}
+            >
+              <span className="control__key">{LABEL_BLOCK_KEY}</span> LABEL BLOCK
+            </button>
+          ) : null}
+          <button
+            ref={maximizeRef}
+            type="button"
+            className="control view__maximize"
+            aria-pressed={maximized}
+            aria-keyshortcuts={MAXIMIZE_KEY}
+            onClick={onMaximize}
+          >
+            <span className="control__key">{MAXIMIZE_KEY}</span> MAXIMIZE VIEW
+          </button>
+        </div>
       </div>
-      <div className="view__side" onFocus={onSideFocus} onBlur={onSideBlur}>
+      <div
+        className="view__side"
+        ref={sideRef}
+        hidden={maximized}
+        onFocus={onSideFocus}
+        onBlur={onSideBlur}
+      >
         <div className="view__column view__column--a">
           <InstrumentsPanel
             id={foldIds.instruments}
@@ -1419,7 +2672,8 @@ function ViewStage({
               name: slot.name,
               open: slot.open,
               // Room for one more slot beside those open (a slot that is open stays open).
-              room: roomForSlot(size, openPanels),
+              room: openRoom,
+              held: heldOf(standingOf(slot.slot)),
             }))}
             operated={controlsView}
             unavailable={engineLine !== null}
@@ -1441,6 +2695,8 @@ function ViewStage({
                 </h2>
                 <ViewMarkList
                   rows={rows}
+                  notes={notes}
+                  groundNote={hasPoint === true}
                   fromCamera={rangesFromCamera(shown.run.scene)}
                   stale={stale}
                   selectedKey={selection === null ? null : targetKey(selection)}
@@ -1486,6 +2742,9 @@ function ViewStage({
               }}
               folds={sideFolds}
               modifier={modifier}
+              place={{ ...groundPage, onPage: onPlacePage }}
+              targetsRef={groundPage.targetsRef}
+              groundNote={groundPage.groundNote}
             />
           )}
         </div>
@@ -1500,6 +2759,30 @@ function ViewStage({
             designator={operatedView === null ? PRIMARY_NAME : operatedView.slot.name}
             id={foldIds.style}
             hidden={folded("style")}
+            // The GRID row sets the CONTROLS view's own symbology over its photorealistic image
+            // (the owner's requests, 2026-10-31 and 2026-11-05).
+            grid={
+              operatedView === null
+                ? { on: grid, onGrid: setGrid }
+                : {
+                    on: operatedView.slot.grid,
+                    onGrid: (on) => {
+                      instruments.setGrid(operatedView.slot.slot, on);
+                    },
+                  }
+            }
+            // The BASELINE row acts on the CONTROLS view's readout, the PRIMARY view's or an
+            // instrument's on its GROUND page, each view keeping its own (R10.T12.d; draft D4).
+            baseline={
+              operatedView === null
+                ? { chosen: slopeBaselineM, onBaseline: onSlopeBaselineChange }
+                : {
+                    chosen: operatedView.slot.slopeBaselineM,
+                    onBaseline: (baselineM) => {
+                      instruments.setBaseline(operatedView.slot.slot, baselineM);
+                    },
+                  }
+            }
           />
           <ExposurePanel
             exposure={exposure}
@@ -1509,6 +2792,15 @@ function ViewStage({
             id={foldIds.exposure}
             hidden={folded("exposure")}
             inhibitRef={inhibitButtonRef}
+            whiteBalance={
+              balanceStands
+                ? {
+                    balance: whiteBalance,
+                    balancedTeffK: shown.balancedTeffK,
+                    onBalance: onWhiteBalanceChange,
+                  }
+                : undefined
+            }
           />
           {meterStands ? (
             <MeterControl
@@ -1527,6 +2819,70 @@ function ViewStage({
     </div>
   );
 }
+
+/**
+ * The readouts of the commands given while no drawing loop publishes them (lane
+ * perf-render-thread-2): the first shown at once, then at most one an interval, the latest at each
+ * interval's end, timed by timeouts alone, as R02's 4 Hz readouts are (Design note 18).
+ */
+class CommandReadouts {
+  readonly #intervalMs: number;
+  /** Shows the latest commanded run, as the latest command gave it. */
+  #show: () => void = () => undefined;
+  #timer: number | null = null;
+  #waiting = false;
+
+  /** @param intervalMs - The shortest time between two readouts shown, ms. */
+  constructor(intervalMs: number) {
+    this.#intervalMs = intervalMs;
+  }
+
+  /**
+   * A command's run, which `show` shows: at once outside a hold, which it starts, else at the
+   * hold's end.
+   */
+  offer(show: () => void): void {
+    this.#show = show;
+    if (this.#timer !== null) {
+      this.#waiting = true;
+      return;
+    }
+    this.#show();
+    this.#hold();
+  }
+
+  /** Starts again after {@link CommandReadouts.stop}: a run left waiting is shown at a hold's end. */
+  start(): void {
+    if (this.#waiting && this.#timer === null) {
+      this.#hold();
+    }
+  }
+
+  /** Stops the hold's timeout, a run waiting kept for the next start. */
+  stop(): void {
+    if (this.#timer !== null) {
+      window.clearTimeout(this.#timer);
+      this.#timer = null;
+    }
+  }
+
+  #hold(): void {
+    this.#timer = window.setTimeout(() => {
+      this.#timer = null;
+      if (this.#waiting) {
+        this.#waiting = false;
+        this.#show();
+        this.#hold();
+      }
+    }, this.#intervalMs);
+  }
+}
+
+/**
+ * The stage, rendered for its own props and state alone (lane perf-render-thread-2): the scene's
+ * pushes and the connection's pings render the display above it, which hands it the same inputs.
+ */
+const Stage = memo(ViewStage);
 
 /**
  * The `PRIMARY` view's label block's lines with where its camera is and where it looks after
@@ -1584,7 +2940,7 @@ function withQualityLine(
 
 /**
  * The label block's lines with the sky's `STARS` reading in place of R02's, once the sky is asked:
- * `PENDING`, then the held reply's, with the edge's field while its note stands.
+ * `PENDING`, then the held reply's, with the limit's field and the edge's while its note stands.
  */
 function withSkyLine(
   lines: ReadonlyArray<LabelLine>,
@@ -1593,6 +2949,15 @@ function withSkyLine(
   return sky === null
     ? lines
     : lines.map((line) => (line.label === "STARS" ? { ...line, ...sky } : line));
+}
+
+/** Each body's granted detail level in the scene's system, as the atmosphere cache asks by it. */
+function grantLevelsOf(system: SceneSystem | null): ReadonlyMap<BodyIdHex, DetailLevelDto> {
+  const levels = new Map<BodyIdHex, DetailLevelDto>();
+  for (const [id, grant] of system?.grants ?? []) {
+    levels.set(id, grant.level);
+  }
+  return levels;
 }
 
 /**
@@ -1620,39 +2985,168 @@ function interimAt(
   return input;
 }
 
+/**
+ * What a stage's system's discs are asked of (`useHostDiscs`): a server scene's place's system, at
+ * the time its interim stars are asked at ({@link interimAt}); a kept scene of served bodies' system,
+ * at its start, in its own universe; nothing for any other kept scene, which brings its own, nor
+ * with no universe open.
+ */
+function hostDiscsAt(
+  universe: UniverseIdHex | null,
+  server: ServerInput | null,
+  served: ServedSceneSource | null,
+  keptStart: Pick<ViewScene, "system" | "time">,
+): HostDiscsAsk | null {
+  if (server !== null) {
+    return universe === null
+      ? null
+      : {
+          universe,
+          system: server.place.system,
+          time: interimAt(universe, server.place, server.model.clock.time).time,
+        };
+  }
+  return served === null
+    ? null
+    : { universe: served.universe, system: keptStart.system, time: keptStart.time };
+}
+
+/** No lines: the upper plate's while `MAXIMIZE VIEW` hides it. */
+const NO_LINES: ReadonlyArray<LabelLine> = [];
+
+/**
+ * The statements that stand while `MAXIMIZE VIEW` hides the upper label block: each request that
+ * failed (`ATMOSPHERE REJECTED` at `fault`, in `--status-caution`), as a fault is never hidden (the
+ * owner's ruling, 2026-11-01).
+ */
+function failedRequests(statements: ReadonlyArray<LabelStatement>): ReadonlyArray<LabelStatement> {
+  return statements.filter(
+    (statement) => typeof statement !== "string" && statement.standing === "fault",
+  );
+}
+
+/** The head of a held-back reason, as the guide's `NOT AVAILABLE` form words it. */
+const NOT_AVAILABLE = "NOT AVAILABLE";
+
+/**
+ * An exposure command keyed and held back, and the exposure's automation level it was keyed at, as
+ * its reading states it (`exposureLevelReading`).
+ */
+interface KeyedRefusal {
+  readonly command: ExposureCommandName;
+  readonly level: string;
+}
+
+/**
+ * `MAXIMIZE VIEW`'s setting (the owner's request, 2026-11-01): `off`; on with the primary's label
+ * block `hidden`, its faults alone standing; or on with the whole `block`.
+ */
+type Maximize = "off" | "hidden" | "block";
+
+/** `MAXIMIZE VIEW` turned on, its label block folded, or off. */
+function toggledMaximize(maximize: Maximize): Maximize {
+  return maximize === "off" ? "hidden" : "off";
+}
+
+/** The label block's key under `MAXIMIZE VIEW`: the whole block, or hidden again; nothing while off. */
+function toggledLabelBlock(maximize: Maximize): Maximize {
+  let next: Maximize;
+  switch (maximize) {
+    case "off":
+      next = "off";
+      break;
+    case "hidden":
+      next = "block";
+      break;
+    case "block":
+      next = "hidden";
+      break;
+  }
+  return next;
+}
+
 function ViewPanels({
   engineSource = DEFAULT_ENGINE_SOURCE,
   setting = "high",
+  framePacing = "display",
   platform = "linux",
+  performanceThreads = null,
+  geometry: override,
+  atmosphereLevers,
+  heightWorkers = browserHeightWorker,
+  sceneOptions = SCENE_OPTIONS,
+  watchTerrain,
+  opticsWorkers = startOpticsWorker,
+  sceneBar = true,
+  hostStatements = NO_SCENE_STATEMENTS,
+  onPlanetViewer,
 }: ViewDisplayProps) {
   const statusId = useId();
   const host = use(ViewSceneContext);
   if (host === null) {
     throw new Error("the VIEW display is rendered outside a ViewSceneProvider");
   }
-  const { scene, sceneName, keptName, knownSystem, choose } = host;
+  const { scene, sceneName, keptName, knownSystem, choose, inspection, closeInspection } = host;
   const engineState = useViewEngine(engineSource);
   const [exposure, setExposure] = useState<ExposureControl>(DEFAULT_EXPOSURE);
-  const [meter, setMeter] = useState<MeterMode>("average");
+  // The photorealistic style's white balance, the display's own, kept through every scene.
+  const [whiteBalance, setWhiteBalance] = useState<WhiteBalance>(DEFAULT_WHITE_BALANCE);
+  // The operator's meter, with the opening it was chosen in (ux-calls-view, item 3b).
+  const [meterChoice, setMeterChoice] = useState<MeterChoice>(DEFAULT_METER_CHOICE);
   const [easedMoves, setEasedMoves] = useState(false);
+  // The primary's readout's BASELINE (R10.T12.a; decision-r10-t12a-scope §3.1): the console's own
+  // setting, 2 m as the display mounts, kept while it stays mounted, through every scene.
+  const [slopeBaselineM, setSlopeBaselineM] = useState<SlopeBaselineM>(
+    GROUND_READOUT_OPTIONS.slopeBaselineM,
+  );
+  // The camera panel's place's page while CONTROLS names an instrument (R10.T12.d; draft D2):
+  // CAMERA as the display mounts, the choice kept while it stays mounted, through every scene.
+  const [placePage, setPlacePage] = useState<PlacePage>("camera");
+  // MAXIMIZE VIEW (the owner's request, 2026-11-01): off as the display mounts, VIEW's own, and kept
+  // while it stays mounted, through every scene and while another display is shown; on, with the
+  // primary's upper label block hidden, as each time it is turned on, or shown whole by its key.
+  const [maximize, setMaximize] = useState<Maximize>("off");
+  // Its keys act from anywhere on the display but a text field, as the view's single keys do; the
+  // label block's only while it is on.
+  useEffect(() => {
+    const onKeyDown = (event: globalThis.KeyboardEvent): void => {
+      const key = viewDisplayKey(event);
+      if (key === "maximize") {
+        event.preventDefault();
+        setMaximize(toggledMaximize);
+      } else if (key === "label-block") {
+        event.preventDefault();
+        setMaximize(toggledLabelBlock);
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, []);
   const universe = useUniverse().open?.id ?? null;
   const standing = serverSceneStanding(scene);
   // The server's scene is chosen by default; a kept scene stands in while it cannot be drawn.
   const serverChosen = sceneName === SERVER_SCENE_NAME;
-  const model = scene.model;
-  const sceneSystem = model?.system ?? null;
-  const server: ServerInput | null =
-    viewProvenance(sceneName, scene) === "server" && model !== null && sceneSystem !== null
+  // One input a scene and choice, so that the stage, memoised, renders for neither a parent's
+  // render nor a context's (lane perf-render-thread-2).
+  const server = useMemo((): ServerInput | null => {
+    const model = scene.model;
+    const sceneSystem = model?.system ?? null;
+    return viewProvenance(sceneName, scene) === "server" && model !== null && sceneSystem !== null
       ? {
           model,
           place: systemPlace(sceneSystem.model.system, sceneSystem.place, knownSystem),
-          stale: standing.stale,
+          stale: serverSceneStanding(scene).stale,
           frameAt: scene.frameAt,
           reportCamera: scene.reportCamera,
           removeCamera: scene.removeCamera,
         }
       : null;
-  const option = SCENE_OPTIONS.find((each) => each.name === (serverChosen ? keptName : sceneName));
+  }, [scene, sceneName, knownSystem]);
+  // The body inspection is offered after the kept scenes while it is open (the owner's request).
+  const offered = inspection === null ? sceneOptions : [...sceneOptions, inspection.option];
+  const option = offered.find((each) => each.name === (serverChosen ? keptName : sceneName));
   if (option === undefined) {
     throw new Error(`no kept scene named ${serverChosen ? keptName : sceneName}`);
   }
@@ -1660,17 +3154,168 @@ function ViewPanels({
   // Where the scene starts, kept for its identity: the interim stars are asked about its system
   // from here, above the stage that a new scene remounts, so that a scene in the same system asks
   // nothing again (Design note 19).
-  const keptStart = useMemo(() => option.make().sceneAt(0), [option]);
+  const keptScene = useMemo(() => option.make(), [option]);
+  const keptStart = useMemo(() => keptScene.sceneAt(0), [keptScene]);
+  // Each opening of the body inspection is a new scene, its camera framed afresh.
+  const opening =
+    server !== null
+      ? SERVER_SCENE_NAME
+      : option === inspection?.option
+        ? `${option.name} ${String(inspection.sequence)}`
+        : option.name;
+  const startMeter = server === null ? keptScene.startMeter : undefined;
+  const meter = shownMeter(meterChoice, opening, startMeter);
+  // A kept scene of served bodies, the body inspection's, is the server's to its terrain session
+  // and its atmosphere cache, which ask its bodies' records of the server; its session's fields are
+  // training's, gated by the server's scratch log, never the live scene's.
+  const served = server === null ? (keptStart.served ?? null) : null;
+  // The scene's system's discs on their own, asked from here, above the stage that a new scene
+  // remounts, so that a served scene is lit at once and one of the same system asks nothing again
+  // (plans R06 and R07).
+  const hostDiscs = useHostDiscs(hostDiscsAt(universe, server, served, keptStart));
+  // The sky held and its request in flight, kept from here, above the stage, so that a new scene of
+  // the same arrival keeps its stars drawn and its census under way (plan R15): the planet viewer's
+  // next generated planet, whose sky is the one they all share.
+  const [skyKeep] = useState(() => new SkyKeep());
+  useEffect(
+    () => () => {
+      skyKeep.dispose();
+    },
+    [skyKeep],
+  );
+  // What the chosen scene loads for itself, started here and not as it is made, in render
+  // (`ATMOSPHERE TEST`'s media, R08.T10.b). The load is the page's, shared by every stage that
+  // chooses the scene, so leaving the scene stops nothing.
+  useEffect(() => {
+    option.prepare?.();
+  }, [option]);
   const interim = useInterimStars(
     server === null
       ? {
-          universe,
+          universe: served?.universe ?? universe,
           system: keptStart.system,
           centre: keptStart.barycentre,
           time: keptStart.time,
         }
       : interimAt(universe, server.place, server.model.clock.time),
   );
+  // The launch's geometry over the setting's (plan R14), one value while both stay.
+  const terrainGeometry = useMemo(
+    () => (override === undefined ? undefined : geometryOf(setting, override)),
+    [setting, override],
+  );
+  // The terrain session of the stage's source, above the stage so that a new scene of the same
+  // source keeps its fields (R10.T16.a): the server's scene's over the link, a kept scene's over
+  // its terrain fixture, and none for any other kept scene.
+  const link = useServerLink();
+  // One body_detail fetch for the terrain session and the atmosphere cache (R08.T10.b).
+  const share = useBodyDetailShare(link.requests);
+  // The session's changes of the drawn ground cut rather than morph in under
+  // `prefers-reduced-motion` (R10.T16.i).
+  const reducedMotion = usePrefersReducedMotion();
+  const terrain = useTerrainSession({
+    engineState,
+    source: terrainSessionSource(
+      server === null && served === null
+        ? { kind: "kept", option }
+        : {
+            kind: "server",
+            universe: served?.universe ?? universe,
+            link,
+            onSurface: scene.onSurface,
+            requests: share.terrain,
+            scope: served === null ? "live" : "training",
+          },
+    ),
+    createWorker: heightWorkers,
+    performanceThreads,
+    setting,
+    geometry: terrainGeometry,
+    reducedMotion,
+  });
+  // The atmosphere cache of the stage's device (R08.T10.b), which asks a server scene's bodies'
+  // records through the share; a kept scene's bodies bring their own settings.
+  const atmosphere = useAtmosphereCache({
+    engineState,
+    requests: server === null && served === null ? null : share.atmosphere,
+    createWorker: opticsWorkers,
+    performanceThreads,
+    giantRoute: SETTINGS[setting].atmosphereView.giantRoute,
+  });
+  // The inspection's survey as it ended, held for the opening it was sent at; `null` while it is out.
+  const survey = inspection?.survey ?? null;
+  const [settledSurvey, setSettledSurvey] = useState<{
+    readonly survey: Promise<InspectionSurvey>;
+    readonly outcome: InspectionSurvey;
+  } | null>(null);
+  useEffect(() => {
+    if (survey === null) {
+      return undefined;
+    }
+    let ignore = false;
+    survey
+      .then((outcome) => {
+        if (!ignore) {
+          setSettledSurvey({ survey, outcome });
+        }
+        return undefined;
+      })
+      .catch((error: unknown) => {
+        console.error("the inspection's survey could not be taken:", error);
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [survey]);
+  const surveyOutcome =
+    survey !== null && settledSurvey?.survey === survey ? settledSurvey.outcome : null;
+  // A recorded pass is told to the session, which asks its body's new cells: the scene topic's
+  // push tells it too, but only while the scene is subscribed and drawn.
+  useEffect(() => {
+    if (terrain !== null && surveyOutcome?.kind === "recorded") {
+      terrain.noteSurfaceRevisions([
+        { body: surveyOutcome.body, revision: surveyOutcome.revision },
+      ]);
+    }
+  }, [terrain, surveyOutcome]);
+  // The inspection's plate states its pass while it is out and once it is refused (closed-loop).
+  const inspected = server === null && inspection !== null && option === inspection.option;
+  const sceneStatements = useMemo((): ReadonlyArray<LabelStatement> => {
+    const statement = inspected ? surveyPassStatement(surveyOutcome) : null;
+    return statement === null ? hostStatements : [statement, ...hostStatements];
+  }, [inspected, surveyOutcome, hostStatements]);
+  const source = useMemo(
+    (): StageSource => (server === null ? { kind: "kept", option } : { kind: "server", server }),
+    [server, option],
+  );
+  const onMeterChange = useCallback(
+    (chosen: MeterMode): void => {
+      setMeterChoice((choice) => chooseMeter(choice, chosen, opening, startMeter));
+    },
+    [opening, startMeter],
+  );
+  const onMaximize = useCallback((): void => {
+    setMaximize(toggledMaximize);
+  }, []);
+  const onLabelBlock = useCallback((): void => {
+    setMaximize(toggledLabelBlock);
+  }, []);
+  // The views check's terrain run watches the session (R10.T16.d); no other launch gives a watch.
+  useEffect(
+    () => (terrain === null || watchTerrain === undefined ? undefined : watchTerrain(terrain)),
+    [terrain, watchTerrain],
+  );
+  // The SCENE selector, whose pressed scene takes the focus from a CLOSE that goes with the
+  // inspection, once the render that removes it is laid out.
+  const scenesRef = useRef<HTMLFieldSetElement | null>(null);
+  const refocusScene = useRef(false);
+  useLayoutEffect(() => {
+    if (!refocusScene.current) {
+      return;
+    }
+    refocusScene.current = false;
+    scenesRef.current?.querySelector<HTMLButtonElement>('button[aria-pressed="true"]')?.focus();
+  });
   const lines = [
     ...(serverChosen && standing.annunciation !== null ? [standing.annunciation] : []),
     ...(server !== null && scene.cameraFault !== null
@@ -1679,54 +3324,115 @@ function ViewPanels({
   ];
   return (
     <div className="view-display">
-      <div className="view-display__bar">
-        <fieldset className="preset-buttons" aria-label="Scene">
-          <span className="field__label">SCENE</span>
-          {[SERVER_SCENE_NAME, ...SCENE_OPTIONS.map((each) => each.name)].map((name) => (
-            <button
-              key={name}
-              type="button"
-              className="control preset-buttons__button"
-              aria-pressed={name === sceneName}
-              aria-describedby={
-                name === SERVER_SCENE_NAME && lines.length > 0 ? statusId : undefined
-              }
-              onClick={() => {
-                choose(name);
-              }}
-            >
-              {name}
-            </button>
-          ))}
-        </fieldset>
-        {lines.length === 0 ? null : (
-          <div className="view-display__status" id={statusId}>
-            {lines.map((line) => (
-              <StatusLine
-                key={line.text}
-                text={line.text}
-                standing={line.standing}
-                action={line.retry === true ? { label: "RETRY", onAction: scene.retry } : undefined}
-              />
-            ))}
-          </div>
-        )}
-      </div>
-      <ViewStage
-        key={server === null ? option.name : SERVER_SCENE_NAME}
-        source={server === null ? { kind: "kept", option } : { kind: "server", server }}
+      {!sceneBar && lines.length === 0 ? null : (
+        <div className="view-display__bar">
+          {!sceneBar ? null : (
+            <fieldset className="preset-buttons" aria-label="Scene" ref={scenesRef}>
+              <span className="field__label">SCENE</span>
+              {[SERVER_SCENE_NAME, ...sceneOptions.map((each) => each.name)].map((name) => (
+                <button
+                  key={name}
+                  type="button"
+                  className="control preset-buttons__button"
+                  aria-pressed={name === sceneName}
+                  aria-describedby={
+                    name === SERVER_SCENE_NAME && lines.length > 0 ? statusId : undefined
+                  }
+                  onClick={() => {
+                    choose(name);
+                  }}
+                >
+                  {name}
+                </button>
+              ))}
+              {inspection === null ? null : (
+                // The inspection and its CLOSE stay on one line as the selector wraps.
+                <span className="view-display__inspection">
+                  <button
+                    type="button"
+                    className="control preset-buttons__button"
+                    aria-pressed={inspection.option.name === sceneName}
+                    onClick={() => {
+                      choose(inspection.option.name);
+                    }}
+                  >
+                    {inspection.option.name}
+                  </button>
+                  <button
+                    type="button"
+                    className="control preset-buttons__button view-display__inspection-close"
+                    aria-label={`CLOSE ${inspection.option.name}`}
+                    onClick={() => {
+                      // The button goes with the inspection: the focus goes to the scene shown.
+                      refocusScene.current = true;
+                      closeInspection();
+                    }}
+                  >
+                    CLOSE
+                  </button>
+                  {onPlanetViewer === undefined ? null : (
+                    <button
+                      type="button"
+                      className="control preset-buttons__button"
+                      onClick={onPlanetViewer}
+                    >
+                      OPEN IN PLANET VIEWER
+                    </button>
+                  )}
+                </span>
+              )}
+            </fieldset>
+          )}
+          {lines.length === 0 ? null : (
+            <div className="view-display__status" id={statusId}>
+              {lines.map((line) => (
+                <StatusLine
+                  key={line.text}
+                  text={line.text}
+                  standing={line.standing}
+                  action={
+                    line.retry === true ? { label: "RETRY", onAction: scene.retry } : undefined
+                  }
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      <Stage
+        key={opening}
+        source={source}
         engineState={engineState}
         exposure={exposure}
         onExposureChange={setExposure}
+        whiteBalance={whiteBalance}
+        onWhiteBalanceChange={setWhiteBalance}
         meter={meter}
-        onMeterChange={setMeter}
+        onMeterChange={onMeterChange}
         easedMoves={easedMoves}
         onEasedMovesChange={setEasedMoves}
+        slopeBaselineM={slopeBaselineM}
+        onSlopeBaselineChange={setSlopeBaselineM}
+        placePage={placePage}
+        onPlacePage={setPlacePage}
+        maximize={maximize}
+        onMaximize={onMaximize}
+        onLabelBlock={onLabelBlock}
         stars={interim.field?.stars ?? NO_STARS}
         countLine={interim.countLine}
+        hostDiscs={hostDiscs.held}
+        hostDiscsPending={hostDiscs.pending}
+        skyKeep={skyKeep}
         universe={universe}
         setting={setting}
+        framePacing={framePacing}
+        geometry={terrainGeometry}
+        atmosphereLevers={atmosphereLevers}
         modifier={primaryModifierOf(platform)}
+        terrain={terrain}
+        atmosphere={atmosphere}
+        linkUp={link.status === "connected"}
+        sceneStatements={sceneStatements}
       />
     </div>
   );
@@ -1740,7 +3446,10 @@ function ViewPanels({
  * @remarks
  * It draws the scene chosen under `SCENE`: `SERVER`, the server's scene of the open universe from
  * R03's subscription (`useScene`), by default, or a kept test scene, `PRECISION TEST` or
- * `FRAME CHANGE TEST`; the subscription and the choice are held above the console frame by
+ * `FRAME CHANGE TEST`, or the body inspection `SYSTEM`'s `VIEW BODY` opens, offered with its
+ * `CLOSE` after the kept scenes until it is closed (the owner's request, 2026-11-01): a kept scene
+ * of the body's served records, whose terrain session and atmosphere cache are the server scene's,
+ * and whose sky is asked as the server scene's is; the subscription and the choice are held above the console frame by
  * `ViewSceneProvider`, which it must be rendered in, so that `App`'s header strip shows `TRAINING`
  * over a kept scene only. While the server's scene cannot be drawn (no universe open, the
  * subscription pending, refused or unanswered, the link down before a scene arrived, or the ship in
@@ -1761,8 +3470,11 @@ function ViewPanels({
  * `EASED CAMERA MOVES` setting and never under `prefers-reduced-motion`, which also removes the
  * free camera's ramp and damping (Design note 18).
  *
- * Keys, from anywhere on the display but a text field: `1` `2` `3` the presets, `]` and `[` the
- * next and previous target, `+` and `-` the field of view; on the focused canvas the flight keys
+ * Keys, from anywhere on the display but a text field: `1` `2` `3` the presets, `4` the style, `5`
+ * the `GRID` while its row stands, `6` `MAXIMIZE VIEW` and while it is on `9` the label block, `7`
+ * `ENABLE` and `8` `INHIBIT`, each acting only where its button would, `]`
+ * and `[` the next and previous target,
+ * `+` and `-` the field of view; on the focused canvas the flight keys
  * (W/S, A/D, R/F, the arrows, Q/E, PageUp/PageDown, and the platform's primary modifier with the
  * up and down arrows, R07.T19.f). A drag on a canvas turns its camera, the free camera itself, or
  * a seat's or chase camera's look offset, which the arrows also turn there (R07.T19.f). A click
@@ -1771,9 +3483,34 @@ function ViewPanels({
  * where the system's position is known; another craft's mark carries its range and closure rate,
  * and a body drawn as its symbol its designation, as DOM labels over the canvas.
  *
+ * `MAXIMIZE VIEW`, its toggle at the end of the key legend's row and its key `6`, is an interim
+ * layout until the panels are designed again (the owner's request, 2026-11-01). On, the stage takes
+ * the display's whole body: the side columns are hidden, their panels kept as they stand, so that
+ * off restores them as they were; the scene bar and the header strip stay; the primary's upper
+ * label block is hidden whole, no box and no line of it, but that a fault line or a failed request
+ * stands alone at the stage's top edge (the owner's ruling, 2026-11-01), until its key `9`, or its
+ * `9 LABEL BLOCK` toggle beside `MAXIMIZE VIEW`'s, shows the whole block as it stands off, each
+ * note's reasons folded behind it, and hides it again; the lower plate stands as it does off; the
+ * instruments open stand in their slots over the stage, which they are part of; and after the key
+ * legend, running on along its row
+ * where they fit, a line names the key that shows the panels again, every hidden control's key
+ * (`hiddenControlKeys`), the `CONTROLS` view where it is an instrument and that view's selection,
+ * and the hidden panels' faults and statuses stand after it, as the compact layout's do under its
+ * row of disclosure buttons, with the reason of an `ENABLE` or `INHIBIT` keyed and held back. Every
+ * key acts as before, and the focus in a panel hidden goes to the
+ * `CONTROLS` view's canvas. The setting is the display's own and is kept through every scene and
+ * while another display is shown.
+ *
  * The `PRIMARY` view fills the stage, and the instrument views `INSTRUMENT 1` and `INSTRUMENT 2`
  * open in fixed slots over its right edge (plan R07, T19; decision-r07-t19), each with its own
- * camera, style and selection at the primary's exposure. The `Instruments` panel opens and closes
+ * camera, style and selection at the primary's exposure. The primary's label block stands as two
+ * plates, the upper at the stage's top left and, while the view states a body's terrain, the lower
+ * at its foot, both left of the slots that stand; where the stage cannot hold them whole the
+ * lower plate's readout, then its survey line and `DATUM`, give way to lines saying so, then the
+ * upper plate's lines before `STARS` scroll, and then the slots are held; a slot the stage cannot
+ * hold whole, `INSTRUMENT 2` first, is held, as its stub in its corner or off the stage, drawing
+ * nothing until it would stand whole with a line to spare, its camera, style and target kept, so
+ * that nothing over the stage is ever cut (plan R10, R10.T12.b; decision-r10-view-block-room §3). The `Instruments` panel opens and closes
  * them and holds `CONTROLS`, the view the `Targets`, `Camera` and `Style` panels and the single
  * keys pressed off a canvas act on; a press or a view key on a canvas makes its view the one. Every
  * view is budgeted on the quality setting (R07.T18's `viewBudgets`): paced at its rate, an
@@ -1782,5 +3519,15 @@ function ViewPanels({
  * controller while instruments are open, from every view's GPU time in the primary's frame. The
  * setting is the launch's `--setting` (R07.T17): every view's sky, wireframe and photorealistic
  * frame take its forms, a photorealistic scene target at most its `terrain.renderHeightPx` rows.
+ *
+ * The server's scene of the open universe, and a kept scene that carries a terrain fixture, have a
+ * terrain session (plan R10, R10.T16.a; `useTerrainSession`), made above the stage on the view's
+ * engine with the height workers `heightWorkers` starts: every view tells it what it drew each
+ * frame it draws, the primary's frame steps it, which wants the bodies' coarse fields the cameras
+ * can resolve, and every view's lit bodies take its class maps and reliefs. Each view's
+ * photorealistic frame draws the terrain of the bodies it hands over through the session, from its
+ * own camera at its own τ and weight, and its label block states that terrain's annunciation; every
+ * view, in either style, marks the surveys' edges (R10.T16.c). It goes with the engine when the
+ * display is hidden.
  */
 export const ViewDisplay = memo(ViewPanels);

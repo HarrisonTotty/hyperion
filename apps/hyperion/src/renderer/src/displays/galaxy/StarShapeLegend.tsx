@@ -1,3 +1,5 @@
+import { Fragment, type ReactNode } from "react";
+
 import { LegendSymbol } from "../../spatial/LegendSymbol";
 import type { SymbolShape } from "../../spatial/marks";
 import { SIZE_CLASS_REM } from "../../spatial/symbols";
@@ -23,7 +25,8 @@ const STAR_SHAPES: ReadonlyArray<StarShapeEntry> = [
   {
     shape: "circle",
     name: "Circle",
-    meaning: "PROTOSTAR, PRE-MAIN-SEQUENCE STAR, DWARF, SUBGIANT, HOT SUBDWARF, BROWN DWARF",
+    meaning:
+      "PROTOSTAR, PRE-MAIN-SEQUENCE STAR, DWARF, SUBGIANT, HOT SUBDWARF, STRIPPED HELIUM STAR, BROWN DWARF",
   },
   { shape: "ringed-circle", name: "Ringed circle", meaning: "GIANT, SUPERGIANT, WOLF-RAYET STAR" },
   { shape: "diamond", name: "Diamond", meaning: "WHITE DWARF" },
@@ -45,6 +48,41 @@ const PLANET_SHAPE: StarShapeEntry = {
   meaning: "PLANET",
 };
 
+/**
+ * A shape's kinds, as the entry's words: for several kinds one span, the entry's text as it was,
+ * with each kind in a span of its own between the commas, so that a layout that lets the entry
+ * break keeps each kind whole: every legend breaks such an entry only after a comma, never inside
+ * `STRIPPED HELIUM STAR` or after a hyphen of `PRE-MAIN-SEQUENCE` (look-72's ruling, and
+ * P06.T24.c's for the HR diagram's legend), and the compact local chart runs it inline. One
+ * span, so that the entry's flex row still holds two items, the mark and its words, and lays out as
+ * before; a single kind stays the plain text it was.
+ */
+function kindsOf(meaning: string): ReactNode {
+  if (!meaning.includes(", ")) {
+    return meaning;
+  }
+  return (
+    <span className="symbol-legend__kinds">
+      {meaning.split(", ").map((kind, index) => (
+        <Fragment key={kind}>
+          {index > 0 ? ", " : null}
+          <span className="symbol-legend__kind">{kind}</span>
+        </Fragment>
+      ))}
+    </span>
+  );
+}
+
+/**
+ * An entry's classes: one that names several kinds also carries `symbol-legend__item--kinds`, which
+ * the compact local chart lets break between its kinds.
+ */
+function itemClass(meaning: string): string {
+  return meaning.includes(", ")
+    ? "symbol-legend__item symbol-legend__item--wraps symbol-legend__item--kinds"
+    : "symbol-legend__item symbol-legend__item--wraps";
+}
+
 /** Props of {@link StarShapeLegend}. */
 export interface StarShapeLegendProps {
   /**
@@ -57,6 +95,11 @@ export interface StarShapeLegendProps {
    * instead. None when absent.
    */
   readonly planets?: boolean;
+  /**
+   * Whether the picture's systems hold an object of a mass layer this build does not know, which
+   * is listed and not drawn, so named before `LIST ONLY`. None when absent.
+   */
+  readonly unlistedLayer?: boolean;
 }
 
 /**
@@ -70,7 +113,11 @@ export interface StarShapeLegendProps {
  * is not read as an empty sky. A picture that draws free-floating planets names the inverted
  * triangle after the star shapes (plan 13, P13.T8.d).
  */
-export function StarShapeLegend({ compactRemnants, planets = false }: StarShapeLegendProps) {
+export function StarShapeLegend({
+  compactRemnants,
+  planets = false,
+  unlistedLayer = false,
+}: StarShapeLegendProps) {
   const stars = compactRemnants
     ? STAR_SHAPES
     : STAR_SHAPES.filter((entry) => !COMPACT_REMNANT_SHAPES.has(entry.shape));
@@ -78,13 +125,17 @@ export function StarShapeLegend({ compactRemnants, planets = false }: StarShapeL
   return (
     <>
       {shown.map(({ shape, name, meaning }) => (
-        // The circle's six kinds are longer than a narrow column, so its words may wrap.
-        <p className="symbol-legend__item symbol-legend__item--wraps" key={shape}>
+        // The circle's seven kinds are longer than a narrow column, so its words may wrap.
+        <p className={itemClass(meaning)} key={shape}>
           <LegendSymbol shape={shape} diameterRem={SIZE_CLASS_REM[4]} filled name={name} />
-          {meaning}
+          {kindsOf(meaning)}
         </p>
       ))}
-      <p className="symbol-legend__item">NO REMNANT, NOT YET FORMED: LIST ONLY</p>
+      <p className="symbol-legend__item">
+        {unlistedLayer
+          ? "NO REMNANT, NOT YET FORMED, UNLISTED LAYER: LIST ONLY"
+          : "NO REMNANT, NOT YET FORMED: LIST ONLY"}
+      </p>
     </>
   );
 }

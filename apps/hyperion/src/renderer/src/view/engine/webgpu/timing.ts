@@ -9,9 +9,16 @@
  * set and a small ring of resolve and staging buffers are made through the engine's one creation
  * path, so the allocation tally sees them, and the buffers are reused, not made each frame.
  * Without the feature there is no query set and nothing is ever reported.
+ *
+ * A resolve either reports its times or drops them. A read that fails drops its resolve's, and the
+ * first such failure warns once, with the error's name and message. A read that the device's loss
+ * cuts short is not a failure: the loss is the engine's fault to report, and on the owner's Mac it
+ * cut short the 47 to 64 reads in flight at the terrain run's forced loss, each of which was logged
+ * as an error before (R14's Mac measurements).
  */
 
 import { BUFFER_USAGE, MAP_MODE } from "../gpuFlags";
+import { errorParts, errorText } from "./errorText";
 import type { BufferSpec } from "../memory";
 import type { GpuTimer } from "../status";
 import type { BufferHandle, PassTimes } from "../types";
@@ -39,12 +46,15 @@ export const PASSES_PER_FRAME = 64;
 /**
  * Resolve and staging pairs at most: resolves whose times may be in flight at once. Each view's
  * and target's render resolves its own, the bloom chain one per level, and a mapping settles a
- * frame or more later. A photorealistic `VIEW` frame resolves 15 times, so its heaviest frame, a
- * photorealistic primary with two photorealistic instruments, 45; this holds three such frames
- * (R07.T19, decision-r07-t19 item 1: 64, or three such frames if more). The pairs are made as
- * they are needed, 2 KiB each.
+ * frame or more later. A photorealistic `VIEW` frame resolves 15 times, 17 with its bodies pass and
+ * the terrain's late raster (plan R14, R14.T3.d), so its heaviest frame, a photorealistic primary
+ * with two photorealistic instruments, 51; this holds three such frames (R07.T19,
+ * decision-r07-t19 item 1: 64, or three such frames if more). The pairs are made as they are
+ * needed, 2 KiB each. Since then the bloom chain resolves once, its levels one submission (plan
+ * R14), and a frame by the visibility buffer with the two-pass occlusion one render more than with
+ * the occlusion drawn forward (R14.T2.d), both within these counts.
  */
-export const TIMING_FRAMES_IN_FLIGHT = 135;
+export const TIMING_FRAMES_IN_FLIGHT = 153;
 
 /** Bytes of one pair's buffers: every query of a frame, 8 bytes each. */
 const RESOLVE_BYTES = PASSES_PER_FRAME * 2 * 8;
@@ -75,7 +85,10 @@ export class PassTimer {
   #frame = 0;
   #warned = false;
   #warnedInFlight = false;
+  #warnedFailedRead = false;
+  #failedReads = 0;
   #disposed = false;
+  #lost = false;
 
   /**
    * Makes the timer; its query set is made with the first pass it times, after the engine's
@@ -102,11 +115,27 @@ export class PassTimer {
     return this.#frame;
   }
 
+  /**
+   * The reads that failed, the device's loss and the engine's disposal aside, whose resolves'
+   * times were dropped.
+   */
+  get failedReads(): number {
+    return this.#failedReads;
+  }
+
   /** Stops reporting and drops the listeners; the engine destroys the query set and buffers. */
   dispose(): void {
     this.#disposed = true;
     this.#listeners.clear();
     this.#pending = [];
+  }
+
+  /**
+   * The device is lost: the reads in flight are cut short, which drops their times with no warning,
+   * and every later resolve is dropped as it is made, keeping its number.
+   */
+  deviceLost(): void {
+    this.#lost = true;
   }
 
   /** Registers a listener for each frame's times; returns its removal. */
@@ -150,7 +179,7 @@ export class PassTimer {
    * When every pair is still in flight, the frame's times are dropped, with one warning, rather
    * than a buffer being made; the resolve still takes its number, so that a caller grouping
    * resolves by number sees the drop as a gap rather than a frame with part of its time missing
-   * (R07.T19, decision-r07-t19 item 1).
+   * (R07.T19, decision-r07-t19 item 1). Once the device is lost, every resolve is dropped so.
    */
   resolve(
     encoder: Pick<GPUCommandEncoder, "resolveQuerySet" | "copyBufferToBuffer">,
@@ -162,6 +191,9 @@ export class PassTimer {
     this.#pending = [];
     this.#frame += 1;
     const frame = this.#frame;
+    if (this.#lost) {
+      return null;
+    }
     const pair = this.#free.pop() ?? this.#makePair();
     if (pair === null) {
       if (!this.#warnedInFlight) {
@@ -176,31 +208,55 @@ export class PassTimer {
     encoder.resolveQuerySet(this.#querySet, 0, passes.length * 2, pair.resolved, 0);
     encoder.copyBufferToBuffer(pair.resolved, 0, pair.staging, 0, bytes);
     return () => {
-      void pair.staging
+      const staging = pair.staging;
+      void staging
         .mapAsync(MAP_MODE.READ, 0, bytes)
-        .then((): void => {
-          const stamps = new BigUint64Array(pair.staging.getMappedRange(0, bytes).slice(0, bytes));
-          this.#report(frame, passes, stamps);
-          return undefined;
-        })
-        .catch((error: unknown) => {
-          // A read cut short by the engine's own disposal is not a failure.
-          if (!this.#disposed) {
-            console.error("reading the pass times failed:", error);
-          }
-        })
+        // A copy, so that the pair can go back before its times are reported.
+        .then(() => new BigUint64Array(staging.getMappedRange(0, bytes).slice(0, bytes)))
         .finally(() => {
           // The pair goes back however the read ended, so that a failed read costs one frame's
           // times, not a pair for good.
           if (this.#disposed) {
             return;
           }
-          if (pair.staging.mapState === "mapped") {
-            pair.staging.unmap();
+          if (staging.mapState === "mapped") {
+            staging.unmap();
           }
           this.#free.push(pair);
+        })
+        .then(
+          (stamps): undefined => {
+            this.#report(frame, passes, stamps);
+            return undefined;
+          },
+          (error: unknown) => {
+            this.#readFailed(error);
+          },
+        )
+        .catch((error: unknown) => {
+          console.error(`a listener of the pass times failed: ${errorText(error)}`);
         });
     };
+  }
+
+  /**
+   * A read that failed: its resolve's times are dropped, and the first failure that neither the
+   * engine's disposal nor the device's loss caused warns.
+   */
+  #readFailed(error: unknown): void {
+    // An `AbortError` is WebGPU's for a mapping cut short by the device's loss, or by the buffer's
+    // unmapping or destruction, which only the engine's disposal does (`mapAsync`'s map failure);
+    // it may reach the read before the loss reaches the engine.
+    if (this.#disposed || this.#lost || errorParts(error)?.name === "AbortError") {
+      return;
+    }
+    this.#failedReads += 1;
+    if (!this.#warnedFailedRead) {
+      this.#warnedFailedRead = true;
+      console.warn(
+        `a resolve's pass times could not be read, and are dropped, as are any later read's that fails: ${errorText(error)}`,
+      );
+    }
   }
 
   /** A new pair, while fewer than {@link TIMING_FRAMES_IN_FLIGHT} exist, or `null`. */

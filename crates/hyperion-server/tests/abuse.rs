@@ -118,6 +118,7 @@ impl Query {
             min_layer: self.min_layer,
             limit: self.limit,
             include_stellar: false,
+            mode: hyperion_protocol::QueryModeDto::Now,
         })
     }
 }
@@ -288,15 +289,17 @@ async fn two_hundred_queries_fired_at_once_end_in_exactly_two_hundred_terminal_m
 /// Closing the socket with a 1,024-pixel map in flight leaves the pool with nothing queued.
 ///
 /// One worker and the dearest raster there is: 32 bands, each of them seconds of work (plan 04,
-/// "Measured map costs"), so the map cannot finish while the test runs. The galaxy is warmed first,
-/// or the one worker would still be building it and no band would ever be queued; the pool's
+/// "Measured map costs"), so the map cannot finish while the test runs. The galaxy and its global
+/// list are warmed first, or the one worker would still be building them and no band or query
+/// would ever be queued; the pool's
 /// counters are then read before the close, so that a map which never reached the pool fails this
 /// test instead of letting it pass on an empty queue. Four range queries are then queued behind the
 /// band in hand, because the two kinds of work stop by different routes: a band nobody waits for is
 /// skipped because its flight is dropped with the last waiter, while a query's job is skipped only
 /// because the closing connection cancels its request's token. After the close every job still
 /// queued is skipped rather than computed, which the pool's `cancelled` counter shows — the 31
-/// bands and the 4 queries, measured, against two jobs run: the galaxy and the band in hand. That
+/// bands and the 4 queries, measured, against the jobs that warmed the galaxy and its list and the
+/// band in hand. That
 /// band runs to its end, which is a CPU wait of some seconds and not a network one; the harness's
 /// [`patience`](common::patience) is sized for it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -305,14 +308,28 @@ async fn closing_a_socket_with_a_map_in_flight_leaves_the_pool_idle() {
     const QUERIES: usize = 4;
 
     let data_dir = tempfile::tempdir().expect("a temporary directory");
+    // From generator version 27 a range query reads the galaxy's global list and its streams'
+    // tables, which the first builds (P10.T10.b): warmed too, or the queries below would wait for
+    // them, with no job of their own queued. A first server keeps the tables' envelopes, so that
+    // this one's one worker builds only those the query may touch.
+    let universe = common::envelopes_kept(data_dir.path(), ("Kepler Reach", SEED), |id| {
+        Query::around([0, 26_000, 0]).body(id)
+    })
+    .await;
     let config = TestServer::config(data_dir.path())
         .workers(one_worker())
         .build();
     let server = TestServer::start_with(config).await;
     let mut client = server.connected().await;
-    let universe = client.create_universe("Kepler Reach", SEED).await;
     open(&mut client, &universe.id).await;
     assert_eq!(server.stats().galaxies().builds(), 1, "the galaxy is warm");
+    let warm = client
+        .request(Query::around([0, 26_000, 0]).body(&universe.id))
+        .await;
+    assert!(warm.is_ok(), "the warming query is answered: {warm:?}");
+    // It read its layer-E cells in part, and background jobs keep them whole once it is answered
+    // (P08.T12): they are warming too, and the queries below find the cells held.
+    let warmed = server.pool_idle().await.pool().completed();
 
     client
         .send_request(map_body(&universe.id, MapView::EdgeOn, 1_024))
@@ -371,16 +388,16 @@ async fn closing_a_socket_with_a_map_in_flight_leaves_the_pool_idle() {
     );
     // The jobs still queued were skipped rather than computed. One of them may have reached a
     // worker in the instant between the count above and the close taking effect, so the count is
-    // held to one less; that job is also why `completed` is allowed a third beside the galaxy build
-    // and the band in hand. A query that ran would be a fourth.
+    // held to one less; that job is also why `completed` is allowed a second beside the band in
+    // hand, after the jobs that warmed the galaxy and its list. A query that ran would be a third.
     assert!(
         idle.pool().cancelled() + 1 >= queued,
         "the {queued} jobs still queued were skipped: {:?}",
         idle.pool()
     );
     assert!(
-        idle.pool().completed() <= 3,
-        "no job that nobody waited for was computed: {:?}",
+        idle.pool().completed() - warmed <= 2,
+        "no job that nobody waited for was computed: {:?} after {warmed} warming",
         idle.pool()
     );
     assert_eq!(
@@ -721,20 +738,27 @@ const _: () = assert!(SHUTDOWN_WITH_WORK_QUEUED.as_nanos() > CLOSE_TIMEOUT.as_na
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn shutdown_returns_within_the_network_timeout_with_work_queued() {
     let data_dir = tempfile::tempdir().expect("a temporary directory");
+    // From generator version 27 a range query reads the galaxy's global list and its streams'
+    // tables, which the first builds (P10.T10.b): warmed here, or the queries below would wait for
+    // them, with no job of their own queued. A first server keeps the tables' envelopes, so that
+    // this one's one worker builds only those the query may touch.
+    let query = Query::around([0, 26_000, 0]).with_radius(50.0);
+    let universe =
+        common::envelopes_kept(data_dir.path(), ("Kepler Reach", SEED), |id| query.body(id)).await;
     let config = TestServer::config(data_dir.path())
         .workers(one_worker())
         .build();
     let server = TestServer::start_with(config).await;
     let mut client = server.connected().await;
-    let universe = client.create_universe("Kepler Reach", SEED).await;
     open(&mut client, &universe.id).await;
+    let warm = client.request(query.body(&universe.id)).await;
+    assert!(warm.is_ok(), "the warming query is answered: {warm:?}");
 
     client
         .send_request(map_body(&universe.id, MapView::FaceOn, 128))
         .await;
     // The in-flight cap is per connection, so the queries come from a second one.
     let mut other = server.connected().await;
-    let query = Query::around([0, 26_000, 0]).with_radius(50.0);
     for _ in 0..MAX_IN_FLIGHT_REQUESTS {
         other.send_request(query.body(&universe.id)).await;
     }

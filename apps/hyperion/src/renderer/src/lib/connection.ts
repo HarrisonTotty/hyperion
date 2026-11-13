@@ -7,6 +7,8 @@ import {
 } from "@hyperion/protocol";
 import { useEffect, useState } from "react";
 
+import { type LinkSocket, openPageSocket } from "./linkSocket";
+
 const PING_INTERVAL_MS = 2_000;
 /** How long the link waits before trying again after the socket closes, ms. */
 export const RECONNECT_DELAY_MS = 2_000;
@@ -55,13 +57,13 @@ const INITIAL_STATE: ConnectionState = {
 
 const DISCONNECTED_STATE: ConnectionState = { ...INITIAL_STATE, status: "disconnected" };
 
-function send(socket: WebSocket, message: ClientMessage): void {
+function send(socket: LinkSocket, message: ClientMessage): void {
   socket.send(encodeClientMessage(message));
 }
 
 /** The request client and the socket it may write to, kept for the life of the hook. */
 class RequestLink {
-  #socket: WebSocket | null = null;
+  #socket: LinkSocket | null = null;
 
   readonly requests = new RequestClient((message) => {
     if (this.#socket === null) {
@@ -72,7 +74,7 @@ class RequestLink {
   });
 
   /** Lets requests use `socket`, once it has been welcomed with our protocol version. */
-  attach(socket: WebSocket): void {
+  attach(socket: LinkSocket): void {
     this.#socket = socket;
   }
 
@@ -84,7 +86,7 @@ class RequestLink {
    * Every request in flight was sent on the attached socket, so a socket that was never attached,
    * or one already replaced whose close event arrives late, has none to lose.
    */
-  detach(socket: WebSocket | null): void {
+  detach(socket: LinkSocket | null): void {
     if (socket === null || this.#socket !== socket) {
       return;
     }
@@ -101,14 +103,24 @@ class RequestLink {
  * One effect owns the socket, the ping and the reconnection. Every server message passes through
  * the request client before the link's own handling, and the client learns of every drop.
  *
+ * The app opens its socket on a worker's thread (`openLinkSocket`; fix-night-sky-stars), so that a
+ * long task of the page's never leaves the server's frames unread until its write timeout closes
+ * the connection.
+ *
  * @param clientVersion - Sent to the server in the opening hello.
+ * @param openSocket - Opens the socket to `url`: the page's own by default ({@link openPageSocket});
+ *   stable in identity.
  */
-export function useServerConnection(url: string, clientVersion: string): ServerConnection {
+export function useServerConnection(
+  url: string,
+  clientVersion: string,
+  openSocket: (url: string) => LinkSocket = openPageSocket,
+): ServerConnection {
   const [state, setState] = useState<ConnectionState>(INITIAL_STATE);
   const [link] = useState(() => new RequestLink());
 
   useEffect(() => {
-    let socket: WebSocket | null = null;
+    let socket: LinkSocket | null = null;
     let pingTimer: ReturnType<typeof setInterval> | undefined;
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
     let disposed = false;
@@ -117,7 +129,7 @@ export function useServerConnection(url: string, clientVersion: string): ServerC
 
     const connect = (): void => {
       setState((previous) => ({ ...previous, status: "connecting" }));
-      const current = new WebSocket(url);
+      const current = openSocket(url);
       // Before any message can arrive: a binary frame is then one `ArrayBuffer`, handed over whole,
       // where the default `blob` would need an asynchronous read per chunk (R03, Design note 10).
       current.binaryType = "arraybuffer";
@@ -127,18 +139,22 @@ export function useServerConnection(url: string, clientVersion: string): ServerC
         send(current, { type: "hello", client_version: clientVersion });
       });
 
-      current.addEventListener("message", (event: MessageEvent<unknown>) => {
-        if (event.data instanceof ArrayBuffer) {
-          const receipt = link.requests.handleBinaryFrame(event.data);
+      current.addEventListener("message", (event) => {
+        if (!(event instanceof MessageEvent)) {
+          return;
+        }
+        const data: unknown = event.data;
+        if (data instanceof ArrayBuffer) {
+          const receipt = link.requests.handleBinaryFrame(data);
           if (!receipt.ok) {
             console.error("server sent a malformed binary frame:", receipt.message);
           }
           return;
         }
-        if (typeof event.data !== "string") {
+        if (typeof data !== "string") {
           return;
         }
-        const message = decodeServerMessage(event.data);
+        const message = decodeServerMessage(data);
         if (link.requests.handleServerMessage(message)) {
           return;
         }
@@ -213,7 +229,7 @@ export function useServerConnection(url: string, clientVersion: string): ServerC
       link.detach(socket);
       socket?.close();
     };
-  }, [url, clientVersion, link]);
+  }, [url, clientVersion, link, openSocket]);
 
   return { ...state, requests: link.requests };
 }

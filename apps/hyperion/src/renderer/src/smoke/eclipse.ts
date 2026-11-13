@@ -85,10 +85,13 @@ function eclipseFrame(
     run: { ...start, scene: eclipseSceneAt(sceneS), camera: { ...start.camera, pose, fovDeg } },
     pose,
     viewport,
+    presentedPx: viewport,
     setting: "high",
     exposureScale: preExposure,
+    white: null,
     list: NO_LIST,
     sky: null,
+    hostDiscs: null,
     band: null,
     discs,
     cube: null,
@@ -113,6 +116,7 @@ function planOf(
     {
       camera: frame.camera,
       viewport: frame.viewport,
+      presentedPx: frame.presentedPx,
       exposureScale: frame.exposureScale,
       annuli: DISC_ANNULI_HIGH,
       planetshine: PLANETSHINE_SOURCES_HIGH,
@@ -420,9 +424,10 @@ export async function captureEclipse(engine: RenderEngine): Promise<CapturedImag
   const discs = new HostDiscLayer(engine);
   const images: CapturedImage[] = [];
   try {
-    // The pipelines compile once, before the first frame; a camera of another field only moves
-    // the bloom kernel, which the renderer follows.
-    await renderer.prepare(CAPTURE_VIEWPORT, "high", "eye", {
+    // The pipelines compile once, before the first frame, for the view's role as its runs start,
+    // a camera's (`startRun`); a camera of another field only moves the bloom kernel, which the
+    // renderer follows.
+    await renderer.prepare(CAPTURE_VIEWPORT, "high", startRun(eclipseScene()).camera.role, {
       orientation: ECLIPSE_CAMERA_POSE.orientation,
       fovXRad: (60 * Math.PI) / 180,
     });

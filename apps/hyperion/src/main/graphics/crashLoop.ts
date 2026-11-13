@@ -97,9 +97,10 @@ function statusDropped(
  * @returns `relaunch-safe` in `vulkan` mode when {@link CRASH_LOOP_COUNT} exits other than
  * `clean-exit` fall within {@link CRASH_LOOP_WINDOW_MS}, or when the feature status shows `vulkan`
  * leaving `enabled_on` or `webgpu` leaving `enabled` after an earlier status held it; `none`
- * otherwise. Always `none` in `default` and `safe` modes: safe mode never relaunches, which makes
- * the relaunch happen once, and every platform but Linux leaves a crash loop to Chromium's own
- * fallback (R01 Design note 6).
+ * otherwise. Always `none` in `default`, `safe` and `software` modes: safe mode never relaunches,
+ * which makes the relaunch happen once; every platform but Linux leaves a crash loop to Chromium's
+ * own fallback (R01 Design note 6); and the check-only software mode (R01.T16) has no Vulkan path
+ * to drop, its GPU-process exits judged by its views check instead.
  */
 export function crashLoopDecision(
   history: ReadonlyArray<GpuProcessEvent>,

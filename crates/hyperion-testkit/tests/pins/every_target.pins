@@ -1,0 +1,8 @@
+# Pinned figures (hyperion_testkit::pins): re-pin them by test name with `just repin <test>`.
+the_committed_file_reads_back_to_the_same_bits_on_every_target.largest = 18446744073709551615
+the_committed_file_reads_back_to_the_same_bits_on_every_target.least = 5e-324
+the_committed_file_reads_back_to_the_same_bits_on_every_target.negative_zero = -0.0
+the_committed_file_reads_back_to_the_same_bits_on_every_target.row = [3, 2.5, -1]
+the_committed_file_reads_back_to_the_same_bits_on_every_target.single = 0.10000000149011612
+the_committed_file_reads_back_to_the_same_bits_on_every_target.sum = 0.30000000000000004
+the_committed_file_reads_back_to_the_same_bits_on_every_target.tiny = 1e-7

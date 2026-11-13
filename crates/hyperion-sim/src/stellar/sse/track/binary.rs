@@ -23,30 +23,78 @@
 
 use crate::math;
 use crate::stellar::draws::StarDraws;
-use crate::stellar::remnant::collapse::RemnantDraws;
-use crate::stellar::remnant::structure::{OXYGEN_NEON_MC_BAGB, white_dwarf_radius};
+use crate::stellar::remnant::RemnantRecipe;
+use crate::stellar::remnant::collapse::{IRON_CORE_MC_BAGB, RemnantDraws};
+use crate::stellar::remnant::structure::{
+    OXYGEN_NEON_MC_BAGB, white_dwarf_collapse_mass, white_dwarf_radius,
+};
+use crate::stellar::remnant::white_dwarf::{self, WhiteDwarfCore};
 use crate::stellar::{Composition, Phase, StarState, StarStateParts};
 use crate::units::{
-    Megayears, SolarLuminosities, SolarMasses, SolarMassesPerYear, SolarRadii, Years,
+    Megayears, MetalFraction, SolarLuminosities, SolarMasses, SolarMassesPerYear, SolarRadii, Years,
 };
 
 use super::super::agb::CHANDRASEKHAR_MSUN;
 use super::super::coeffs::ZCoeffs;
 use super::super::gb::{self, GiantBranch};
 use super::super::helium::{self, HeliumStar};
-use super::super::ms::{self, MainSequence};
+use super::super::ms::{self, MainSequence, MainSequenceRadius};
 use super::super::wind;
 use super::build::{Builder, Entry, Keep, Resolution};
-use super::model::{HeliumCore, Model, Span, early_agb_core};
+use super::model::{HeliumCore, Model, Physics, PreparedRadius, Span, early_agb_core};
 use super::{
     Coordinate, HeliumHook, HeliumTable, MAX_INITIAL_MASS, Track, TrackOptions, reimers_eta,
 };
 
+/// A track's radius at one age for a star of any mass ([`Track::radius_at_age`]).
+#[derive(Debug)]
+pub(crate) struct RadiusAtAge<'a> {
+    phys: Physics<'a>,
+    /// The segment's model at the age.
+    prepared: PreparedRadius<'a>,
+    /// The factor of the junction's offset on the radius, where the segment's ramp has not yet
+    /// reached 1.
+    junction: Option<f64>,
+}
+
+impl RadiusAtAge<'_> {
+    /// The radius, R☉, of [`Track::structure_at`]'s star at the age prepared for and `mass` (M☉),
+    /// bit for bit ([`Track::radius_at`]), without the wind, core and envelope that the structure
+    /// adds and the radius does not read.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, if `mass` is not positive and finite.
+    #[must_use]
+    pub(crate) fn radius(&self, mass: f64) -> f64 {
+        debug_assert!(
+            mass.is_finite() && mass > 0.0,
+            "a star has a positive mass: {mass}"
+        );
+        // `Segment::evaluate_at`'s floor and `Segment::finish_point`'s offset; the structure keeps
+        // the evaluated radius, whatever it does to the mass and the wind.
+        let mt = SolarMasses::new(mass.max(super::build::MIN_EVALUATED_MASS));
+        let radius = self.prepared.radius(&self.phys, mt);
+        self.junction
+            .map_or(radius, |factor| radius * factor)
+            .value()
+    }
+}
+
 /// k′₂ of BSE equation 35 (HPT equation 109): the envelope's share of I ÷ (M R²).
+///
+/// The papers' fixed value. Hurley's published code takes k₂ per star from `hrdiag` (`evolv2.f`,
+/// lines 284 and 717 of AMUSE's copy), through `mrenv.f`'s fits for Z = 0.02 alone: 0.04–0.21 at
+/// the zero age, and toward 0.4 on the giant branches, above k′₃. HYPERION follows the papers,
+/// whose k′₂ < k′₃ the engine's bounds on the spin rely on.
 pub(crate) const ENVELOPE_GYRATION: f64 = 0.1;
 
 /// k′₃ of BSE equation 35 (HPT equation 109): a core's I ÷ (M R²), an n = 3/2 polytrope.
 pub(crate) const CORE_GYRATION: f64 = 0.21;
+
+// The engine's bounds on the spin read k′₂ < k′₃, a moment of inertia of at most k′₃ M R²: the
+// wind's factor of `Engine::zero_age_spin`, and the coarse test of `decay_reaches`.
+const _: () = assert!(ENVELOPE_GYRATION < CORE_GYRATION);
 
 /// Whether `x` is positive: false for zero, a negative number and NaN.
 #[must_use]
@@ -97,17 +145,7 @@ impl Track {
         draws: &StarDraws,
         age_max: Years,
     ) -> Self {
-        debug_assert!(
-            age_max.value().is_finite() && age_max.value() >= 0.0,
-            "a track is built to a finite, non-negative age: {age_max:?}"
-        );
-        Self::helium_star_from(
-            checked_helium_mass(m),
-            0.0,
-            comp,
-            draws,
-            Some(age_max.value().max(0.0)),
-        )
+        Self::helium_star_to(m, comp, draws, Some(age_max))
     }
 
     /// [`Track::helium_star`] built in full, to its death and remnant.
@@ -117,7 +155,32 @@ impl Track {
     /// In debug builds, as [`Track::helium_star`].
     #[must_use]
     pub fn helium_star_full(m: SolarMasses, comp: &Composition, draws: &StarDraws) -> Self {
-        Self::helium_star_from(checked_helium_mass(m), 0.0, comp, draws, None)
+        Self::helium_star_to(m, comp, draws, None)
+    }
+
+    /// [`Track::helium_star`] built until it covers `age_max`, or in full with `None`.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, as [`Track::helium_star`].
+    #[must_use]
+    fn helium_star_to(
+        m: SolarMasses,
+        comp: &Composition,
+        draws: &StarDraws,
+        age_max: Option<Years>,
+    ) -> Self {
+        debug_assert!(
+            age_max.is_none_or(|age| age.value().is_finite() && age.value() >= 0.0),
+            "a track is built to a finite, non-negative age: {age_max:?}"
+        );
+        Self::helium_star_from(
+            checked_helium_mass(m),
+            0.0,
+            comp,
+            draws,
+            age_max.map(|age| age.value().max(0.0)),
+        )
     }
 
     /// A naked helium star of mass `m` entering its helium main sequence at fractional age
@@ -146,6 +209,10 @@ impl Track {
     /// The track of a star entering its life at `entry` at age zero, whose initial mass is
     /// reported as `initial_mass`, under the generator's options. A star built so has lost its
     /// envelope to a companion, which its electron-capture window reads (plan 06, design note 11).
+    ///
+    /// Its rules are the version's, whatever the engine's: a naked helium star has no hydrogen
+    /// main sequence, gap, giant branch or horizontal branch, so no helium table reaches it
+    /// (P15.T7.b's hold, `stellar::rules`).
     #[must_use]
     fn build_from_entry(
         entry: Entry,
@@ -177,8 +244,9 @@ impl Track {
             segments: outcome.segments,
             fate: outcome.fate,
             built_until: outcome.built_until,
-            helium: HeliumHook::of(comp, &HeliumTable::COMMITTED),
+            helium: HeliumHook::of(comp, &HeliumTable::of(options.rules())),
             nebula: draws.nebula(),
+            companion_mark_read: outcome.companion_mark_read,
         }
     }
 
@@ -187,8 +255,9 @@ impl Track {
     /// convective envelope that tides, magnetic braking and common envelopes read.
     ///
     /// The closed forms are those of the segment that holds `age` at the track's own coordinate
-    /// there; only the radius and the wind read the mass, as HPT section 7.1 has every phase after
-    /// the main sequence do. A remnant keeps its own mass.
+    /// there; only the radius and the wind read the mass, as HPT section 7.1 has a star that loses
+    /// mass after the main sequence do (BSE's `evolv2.f` raises a heavier Hertzsprung-gap star's M0
+    /// to its mass below `M_FGB`). A remnant keeps its own mass.
     ///
     /// # Panics
     ///
@@ -272,21 +341,38 @@ impl Track {
     /// In debug builds, as [`Track::structure_at`].
     #[must_use]
     pub(crate) fn radius_at(&self, age: f64, mass: f64) -> f64 {
-        debug_assert!(
-            mass.is_finite() && mass > 0.0,
-            "a star has a positive mass: {mass}"
-        );
+        self.radius_at_age(age).radius(mass)
+    }
+
+    /// [`Track::radius_at`] at `age` (years on the track's clock) for a star of any mass.
+    ///
+    /// What the radius reads of the age alone is read once, and then the radius at each mass
+    /// ([`RadiusAtAge::radius`]), bit for bit: the bisection of a step of stable transfer asks for
+    /// its donor's radius at the step's end at each trial's mass.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, as [`Track::structure_at`].
+    #[must_use]
+    pub(crate) fn radius_at_age(&self, age: f64) -> RadiusAtAge<'_> {
         let age = self.checked_age(Years::new(age));
         let segment = self.segment_at(age);
         let (coord, own_mass) = segment.coordinate_and_mass(age);
         let phys = self.physics();
-        let evaluated = if segment.model.is_remnant_model() {
-            segment.evaluate_at(&phys, age, coord, own_mass)
-        } else {
-            segment.evaluate_at(&phys, age, coord, mass)
-        };
-        // `structure_of` keeps the evaluated radius, whatever it does to the mass and the wind.
-        evaluated.point.point.radius.value()
+        if segment.model.is_remnant_model() {
+            // A remnant is its own mass's whatever the binary gives it.
+            let own = segment.evaluate_at(&phys, age, coord, own_mass);
+            return RadiusAtAge {
+                phys,
+                prepared: PreparedRadius::fixed(own.point.point.radius),
+                junction: None,
+            };
+        }
+        RadiusAtAge {
+            phys,
+            prepared: segment.model.prepared_radius(coord, age),
+            junction: segment.junction_radius_factor(coord),
+        }
     }
 
     /// The structure of `segment`'s state `evaluated` at `age` and coordinate `coord` for a star
@@ -421,6 +507,12 @@ impl Track {
         // star's mass.
         let mc = point.core_mass.value().min(mass);
         let luminosity = point.luminosity;
+        let white_dwarf = |phase: Phase, core: Structure| {
+            white_dwarf_of(phase, SolarMasses::new(mc), luminosity, &core)
+        };
+        // The core's last living state: the track's structure here at the core's mass, as
+        // `collapse` takes it.
+        let core = || self.structure_at(age, mc);
         let helium_star = |mass: f64, tau0: f64| {
             let tau0 = tau0.clamp(0.0, 1.0);
             self.stripped_to(
@@ -439,20 +531,17 @@ impl Track {
             | Model::HeliumMainSequence { .. }
             | Model::Remnant { .. } => Remains::Nothing,
             // The crossing is the white dwarf's already, with its envelope gone.
-            Model::PostAgb { .. } => Remains::WhiteDwarf {
-                phase: self
+            Model::PostAgb { .. } => {
+                let phase = self
                     .fate
-                    .map_or(Phase::CarbonOxygenWhiteDwarf, |fate| fate.phase),
-                mass: SolarMasses::new(mc),
-                last_luminosity: luminosity,
-            },
-            Model::HertzsprungGap { core, .. } | Model::FirstGiantBranch { core, .. } => match core
-            {
-                HeliumCore::Degenerate => Remains::WhiteDwarf {
-                    phase: Phase::HeliumWhiteDwarf,
-                    mass: SolarMasses::new(mc),
-                    last_luminosity: luminosity,
-                },
+                    .map_or(Phase::CarbonOxygenWhiteDwarf, |fate| fate.phase);
+                // A post-AGB star's fate is its white dwarf, carbon–oxygen as the phase defaults.
+                let kind = WhiteDwarfCore::of(phase).unwrap_or(WhiteDwarfCore::CarbonOxygen);
+                white_dwarf(phase, self.bare_agb_core(age, SolarMasses::new(mc), kind))
+            }
+            Model::HertzsprungGap { core: helium, .. }
+            | Model::FirstGiantBranch { core: helium, .. } => match helium {
+                HeliumCore::Degenerate => white_dwarf(Phase::HeliumWhiteDwarf, core()),
                 HeliumCore::NonDegenerate => helium_star(mc, 0.0),
             },
             Model::FlashBridge { .. } => helium_star(mc, 0.0),
@@ -478,20 +567,17 @@ impl Track {
                 let oxygen_neon = self.segments[..index].iter().rev().any(|s| {
                     matches!(&s.model, Model::EarlyAgb { phase, .. } if phase.mc_bagb() >= OXYGEN_NEON_MC_BAGB)
                 });
-                Remains::WhiteDwarf {
-                    phase: if oxygen_neon {
-                        Phase::OxygenNeonWhiteDwarf
-                    } else {
-                        Phase::CarbonOxygenWhiteDwarf
-                    },
-                    mass: SolarMasses::new(mc),
-                    last_luminosity: luminosity,
-                }
+                let (phase, kind) = if oxygen_neon {
+                    (Phase::OxygenNeonWhiteDwarf, WhiteDwarfCore::OxygenNeon)
+                } else {
+                    (Phase::CarbonOxygenWhiteDwarf, WhiteDwarfCore::CarbonOxygen)
+                };
+                white_dwarf(phase, self.bare_agb_core(age, SolarMasses::new(mc), kind))
             }
             // No white dwarf is born at or above the Chandrasekhar mass (ruling 129.4c): the bare
             // core collapses at once, companion-stripped, on a helium-star track of its own
             // entered where this one is, whose death and remnant are plan 06's.
-            Model::HeliumShellBurning { star, span } if mc >= CHANDRASEKHAR_MSUN => {
+            Model::HeliumShellBurning { star, span } if self.bare_core_collapses(star, mc) => {
                 let entry = Entry::HeliumShellBurning {
                     star: Box::new(star.clone()),
                     clock0: span.at(coord),
@@ -499,16 +585,115 @@ impl Track {
                 };
                 self.collapse(entry, age, mc, draws, age_max)
             }
-            Model::HeliumShellBurning { star, .. } => Remains::WhiteDwarf {
-                phase: if star.mass() >= OXYGEN_NEON_MC_BAGB {
+            Model::HeliumShellBurning { star, .. } => white_dwarf(
+                if star.mass() >= OXYGEN_NEON_MC_BAGB {
                     Phase::OxygenNeonWhiteDwarf
                 } else {
                     Phase::CarbonOxygenWhiteDwarf
                 },
-                mass: SolarMasses::new(mc),
-                last_luminosity: luminosity,
-            },
+                core(),
+            ),
         }
+    }
+
+    /// The bare core of `mc` at `age_years` of a thermally pulsing AGB star or a post-AGB one, its
+    /// last living state where the star's envelope goes at once ([`Remains::WhiteDwarf`]'s
+    /// `core`): the track's structure there at the core's mass, at the luminosity and radius of
+    /// [`bare_core_light`], its white dwarf's of `kind` at formation. That is HPT section 6.3's
+    /// limit of a giant as its envelope goes (µ = 0; the published SSE code's `hrdiag`), where the
+    /// other giants' perturbation leaves their bare cores (`model::perturb_to_white_dwarf`). Under
+    /// the post-AGB bridge (P06.T16.a) the AGB's closed forms keep the giant's own luminosity and
+    /// radius until the envelope is lost, and the bridge crosses from there, so the structure alone
+    /// holds a bare core at a giant's radius: 1,158 R☉ on the AGB for a 1.4391 M☉ core, and 476 R☉
+    /// at the start of a 1.37 M☉ core's crossing, against their white dwarfs' 3.3 × 10⁻⁴ and
+    /// 3.0 × 10⁻³ R☉ (P11.T4's fix, 2026-11-01).
+    #[must_use]
+    fn bare_agb_core(&self, age_years: f64, mc: SolarMasses, kind: WhiteDwarfCore) -> Structure {
+        let mut core = self.structure_at(age_years, mc.value());
+        let phys = self.physics();
+        let (luminosity, radius) = bare_core_light(phys.remnant, phys.z, kind, mc);
+        core.state = StarState::new(StarStateParts {
+            luminosity,
+            radius,
+            ..state_parts(&core.state)
+        });
+        // sse's degenerate core radius, 5 R_WD, held to the radius, as a held state's is.
+        core.core_radius = SolarRadii::new(core.core_radius.value().min(radius.value()));
+        core
+    }
+
+    /// The star's carbon–oxygen core, M☉, at track age `age`, where its phase has one: on the
+    /// early AGB the phase's own (HPT equation 39 with `A_He`, inside the hydrogen-exhausted core
+    /// the state reports), on the thermally pulsing AGB and as a helium giant the state's core
+    /// (HPT sections 5.4 and 6.1); `None` in any other phase. For the binary engine's limit on a
+    /// core that is a white dwarf's (plan 11, P11.T4's dwarf limit, `Engine::core_limit_age`).
+    #[must_use]
+    pub(crate) fn carbon_oxygen_core_at(&self, age: f64) -> Option<SolarMasses> {
+        let age = self.checked_age(Years::new(age));
+        let index = self
+            .segments
+            .partition_point(|s| s.start <= age)
+            .saturating_sub(1);
+        let segment = &self.segments[index];
+        let (coord, _) = segment.coordinate_and_mass(age);
+        match &segment.model {
+            Model::EarlyAgb { phase, span, .. } => Some(phase.co_core_mass(span.at(coord))),
+            Model::ThermallyPulsingAgb { .. } | Model::HeliumShellBurning { .. } => {
+                let phys = self.physics();
+                Some(
+                    segment
+                        .evaluate_at(&phys, age, coord, segment.mass)
+                        .point
+                        .point
+                        .core_mass,
+                )
+            }
+            Model::Protostar(_)
+            | Model::PreMainSequence(_)
+            | Model::MainSequence { .. }
+            | Model::HertzsprungGap { .. }
+            | Model::FirstGiantBranch { .. }
+            | Model::FlashBridge { .. }
+            | Model::CoreHeliumBurning { .. }
+            | Model::HeliumMainSequence { .. }
+            | Model::PostAgb { .. }
+            | Model::Remnant { .. } => None,
+        }
+    }
+
+    /// Whether the track's carbon–oxygen core burns to oxygen–neon (HPT section 6): its early AGB's
+    /// `Mc,BAGB`, or its helium star's mass (HPT section 6.1), is 1.6 M☉ or more and below the
+    /// 2.25 M☉ from which the core goes on to iron.
+    #[must_use]
+    pub(crate) fn types_oxygen_neon(&self) -> bool {
+        let oxygen_neon = |mc_bagb: SolarMasses| {
+            (OXYGEN_NEON_MC_BAGB.value()..IRON_CORE_MC_BAGB.value()).contains(&mc_bagb.value())
+        };
+        self.segments.iter().any(|s| match &s.model {
+            Model::EarlyAgb { phase, .. } => oxygen_neon(phase.mc_bagb()),
+            Model::HeliumShellBurning { star, .. } => oxygen_neon(star.mass()),
+            Model::Protostar(_)
+            | Model::PreMainSequence(_)
+            | Model::MainSequence { .. }
+            | Model::HertzsprungGap { .. }
+            | Model::FirstGiantBranch { .. }
+            | Model::FlashBridge { .. }
+            | Model::CoreHeliumBurning { .. }
+            | Model::ThermallyPulsingAgb { .. }
+            | Model::HeliumMainSequence { .. }
+            | Model::PostAgb { .. }
+            | Model::Remnant { .. } => false,
+        })
+    }
+
+    /// Whether a helium giant of `star` stripped to its core of `mc` M☉ is no white dwarf but
+    /// collapses at once: at or above the Chandrasekhar mass (ruling 129.4c), and an oxygen–neon
+    /// one at its capture mass under the default recipe (P11.T4's kept-core endings).
+    #[must_use]
+    fn bare_core_collapses(&self, star: &HeliumStar, mc: f64) -> bool {
+        let capture =
+            white_dwarf_collapse_mass(Phase::OxygenNeonWhiteDwarf, self.options.remnant());
+        mc >= CHANDRASEKHAR_MSUN || (star.mass() >= OXYGEN_NEON_MC_BAGB && mc >= capture.value())
     }
 
     /// The bare core of `mc` M☉ that [`Track::remains_at`] leaves at `age` when it is no white
@@ -721,10 +906,17 @@ pub(crate) enum Remains {
     /// A white dwarf of `phase` and `mass` below the Chandrasekhar mass, from a star of
     /// `last_luminosity` then, which its cooling law is matched to
     /// (`white_dwarf::cooling_origin`).
+    ///
+    /// `core` is the bare core's last living state, the track's structure at the stripping at the
+    /// core's mass, and `core_radius` that structure's core radius, as [`Remains::Ended`] holds
+    /// them: the state a pinned primary whose pin is still to come is held at instead of its white
+    /// dwarf (plan 11, P11.T4's fix, `binary::pinned_white_dwarfs`).
     WhiteDwarf {
         phase: Phase,
         mass: SolarMasses,
         last_luminosity: SolarLuminosities,
+        core: StarState,
+        core_radius: SolarRadii,
     },
 }
 
@@ -789,6 +981,56 @@ impl LastLiving {
         let state = track.star_state(&evaluated, age);
         let core_radius = core_radius(&self.model, &state, self.coord, &track.coeffs);
         (state, core_radius)
+    }
+}
+
+/// [`Remains::WhiteDwarf`] of `phase` for a core of `mc` in a star of `last_luminosity`, with the
+/// core's last living structure `core` at the core's mass: a star the binary carries may keep
+/// more of it than its track's own wind leaves it.
+#[must_use]
+fn white_dwarf_of(
+    phase: Phase,
+    mc: SolarMasses,
+    last_luminosity: SolarLuminosities,
+    core: &Structure,
+) -> Remains {
+    Remains::WhiteDwarf {
+        phase,
+        mass: mc,
+        last_luminosity,
+        core: StarState::new(StarStateParts {
+            mass: mc,
+            core_mass: mc,
+            ..state_parts(&core.state)
+        }),
+        core_radius: core.core_radius,
+    }
+}
+
+/// The luminosity and radius of a bare core of `mc` that a pinned primary is held at until its pin
+/// (plan 11, P11.T4's fix at 27): below the Chandrasekhar mass its white dwarf's of `kind` at
+/// formation under `recipe` at metal fraction `z` (`white_dwarf::formation_luminosity` and HPT
+/// equation 91's radius), HPT section 6.3's limit of a giant as its envelope goes (µ = 0).
+///
+/// From the Chandrasekhar mass equation 91 has no white dwarf: its radius falls to the neutron
+/// star's floor, 12 km, at which a 1.49 M☉ core would show some 4 × 10⁶ K. There the core takes the
+/// zero-age helium star's of its mass instead (HPT equations 77 and 78), the remnant towards which
+/// HPT section 6.3 perturbs a non-degenerate core: 942 L☉ and 0.274 R☉, 61 kK, at 1.49 M☉. A lean
+/// of 2026-11-01, recorded in plan 11: such a core has no static state, and collapses at its pin.
+#[must_use]
+pub(crate) fn bare_core_light(
+    recipe: RemnantRecipe,
+    z: MetalFraction,
+    kind: WhiteDwarfCore,
+    mc: SolarMasses,
+) -> (SolarLuminosities, SolarRadii) {
+    if mc.value() >= CHANDRASEKHAR_MSUN {
+        (helium::zams_luminosity(mc), helium::zams_radius(mc))
+    } else {
+        (
+            white_dwarf::formation_luminosity(recipe, kind, mc, z),
+            white_dwarf_radius(recipe, mc),
+        )
     }
 }
 
@@ -900,14 +1142,7 @@ pub(crate) fn new_star_mass(
             0.0,
         )),
         NewStar::PulsingAgb => {
-            let helium_core = if mc >= 0.44 * 2.25 + 0.448 {
-                (mc + 0.35) / 0.773
-            } else if mc > 0.8 {
-                (mc - 0.448) / 0.44
-            } else {
-                mc
-            };
-            let m0 = inverse_mc_bagb(helium_core, c)?;
+            let m0 = inverse_mc_bagb(pulsing_agb_helium_core(SolarMasses::new(mc)).value(), c)?;
             Some((SolarMasses::new(m0), Phase::ThermallyPulsingAgb, 0.0))
         }
         NewStar::HeliumGiant => {
@@ -939,6 +1174,53 @@ pub(crate) fn new_star_mass(
             ))
         }
     }
+}
+
+/// The initial mass of the track a swollen helium white dwarf is placed on, in units of `M_HeF`
+/// ([`degenerate_giant_mass`]): 0.7, 1.40 M☉ at Z = 0.02 and 1.28 M☉ at Z = 0.0003, where the
+/// tracks' first giant branches reach their helium flash with their envelope and at its largest
+/// core. Measured on the built tracks (2026-11-02), the branch's last core is 0.41, 0.45, 0.46,
+/// 0.46 and 0.39 M☉ at Z = 0.02 for 0.7, 0.9, 1.2, 1.6 and 1.9 M☉ (`M_HeF` 2.00 M☉), and 0.49,
+/// 0.49, 0.49 and 0.48 M☉ at Z = 0.0003 for 0.7, 0.9, 1.2 and 1.6 M☉ (`M_HeF` 1.83 M☉): lighter
+/// tracks lose their envelope to their wind first, and near `M_HeF` the flash comes early (HPT
+/// equation 49's e^(15 (M − `M_HeF`))).
+const DEGENERATE_GIANT_SHARE: f64 = 0.7;
+
+/// The initial mass, M☉, of the track a helium white dwarf of `mc` M☉ fed hydrogen swells onto with
+/// its core still degenerate (plan 11, P11.T4's swollen dwarf, `Engine::swell`):
+/// [`DEGENERATE_GIANT_SHARE`] of `M_HeF`, whose first giant branch has a degenerate core and reaches
+/// a low-mass giant's helium flash; or `None` where `mc` is at or below `Mc,BGB`(`M_HeF`), whose
+/// giant [`new_star_mass`] already places on a degenerate branch, or not below that track's flash
+/// (`Mc,HeI`, HPT section 5.3 and equation 49).
+///
+/// [`new_star_mass`] places a core above `Mc,BGB`(`M_HeF`) at the base of the giant branch of a
+/// heavier star, whose core is not degenerate (BSE's `gntage`, `mheif`), so that its strip leaves
+/// a helium-burning star. Not the swollen star's own mass, whose track's branch never holds the
+/// core, nor the heaviest mass below `M_HeF` whose branch holds it, whose flash would come at the
+/// dwarf's own core (lean, 2026-11-02).
+#[must_use]
+pub(crate) fn degenerate_giant_mass(mc: SolarMasses, c: &ZCoeffs) -> Option<SolarMasses> {
+    let m0 = SolarMasses::new(DEGENERATE_GIANT_SHARE * c.m_hef().value());
+    let above_base = mc.value() > gb::mc_bgb(c.m_hef(), c).value();
+    (above_base && mc.value() < gb::mc_hei(m0, c).value()).then_some(m0)
+}
+
+/// The core at the base of the AGB of a thermally pulsing AGB star placed with the carbon–oxygen
+/// core `mc` (BSE section 2.7.4, `gntage.f`'s `mcx` for type 6, as BSE solves HPT's relations
+/// back): `Mc,BAGB` = (Mc + 0.35) ÷ 0.773 at or above `Mc,DU` of `Mc,BAGB` = 2.25 (0.44 × 2.25 +
+/// 0.448 M☉), where only the core at the supernova (HPT equation 75) could reach it;
+/// (Mc − 0.448) ÷ 0.44 above 0.8 M☉, the core at the second dredge-up (HPT equation 69); and the
+/// core itself below.
+#[must_use]
+pub(crate) fn pulsing_agb_helium_core(mc: SolarMasses) -> SolarMasses {
+    let mc = mc.value();
+    SolarMasses::new(if mc >= 0.44 * 2.25 + 0.448 {
+        (mc + 0.35) / 0.773
+    } else if mc > 0.8 {
+        (mc - 0.448) / 0.44
+    } else {
+        mc
+    })
 }
 
 /// The initial mass whose core at the base of the AGB is `mc` (HPT equation 66 inverted:
@@ -988,8 +1270,15 @@ pub(crate) fn main_sequence_radius(c: &ZCoeffs, helium: bool, m: f64, tau: f64) 
         m > 0.0 && (0.0..=1.0 + 1e-9).contains(&tau),
         "{m} M☉ at τ = {tau}"
     );
-    let (_, point, _) = main_sequence_point(c, helium, SolarMasses::new(m), tau.clamp(0.0, 1.0));
-    point.radius.value()
+    let (mass, tau) = (SolarMasses::new(m), tau.clamp(0.0, 1.0));
+    if helium {
+        let (_, point, _) = main_sequence_point(c, helium, mass, tau);
+        return point.radius.value();
+    }
+    // The radius alone, `main_sequence_point`'s bit for bit: the luminosity's quantities were
+    // half of a hydrogen donor's read (R06.T16.a's cost).
+    let radius = MainSequenceRadius::new(mass, c);
+    radius.at(radius.t_ms() * tau).value()
 }
 
 /// The phase, point and lifetime of a main-sequence (or, with `helium`, helium main-sequence)
@@ -1052,8 +1341,9 @@ pub(crate) fn main_sequence_structure(
         phase_fraction: tau,
     };
     let state = StarState::new(parts);
+    let options = TrackOptions::default();
     let rate = wind::rate(
-        TrackOptions::default().wind(),
+        options.wind(),
         &state,
         comp,
         reimers_eta(draws.eta().value()),
@@ -1381,6 +1671,82 @@ mod tests {
         }
     }
 
+    /// R06.T16.a's cost: a track's radius at an age, prepared once and read at any mass, is the
+    /// structure's radius there bit for bit, in every phase: over tracks of 0.9 to 30 M☉ at three
+    /// metallicities and with a helium excess, and helium stars of 0.8 to 8 M☉, at 600 ages to a
+    /// little past each one's death, at masses from above the star's own down to a hair above its core, read in
+    /// both orders so that the remnant a thin envelope keeps is the same whichever mass asks first.
+    #[test]
+    fn a_tracks_radius_at_an_age_is_the_structures_at_any_mass_bit_for_bit() {
+        use std::collections::BTreeSet;
+
+        use hyperion_testkit::float::bits;
+
+        use crate::units::{Dex, HeliumExcess};
+
+        let draws = StarDraws::median();
+        let comps = [
+            solar(),
+            Composition::from_fe_h(Dex::new(-1.5), HeliumExcess::ZERO),
+            Composition::from_fe_h(Dex::new(0.3), HeliumExcess::ZERO),
+            Composition::from_fe_h(Dex::new(-1.0), HeliumExcess::new(0.1)),
+        ];
+        let mut tracks = Vec::new();
+        for comp in &comps {
+            for m in [0.9, 1.5, 2.2, 3.0, 5.0, 9.0, 16.0, 30.0] {
+                tracks.push(Track::full(SolarMasses::new(m), comp, &draws));
+            }
+            for m in [0.8, 3.0, 8.0] {
+                tracks.push(Track::helium_star_full(SolarMasses::new(m), comp, &draws));
+            }
+        }
+        let mut phases = BTreeSet::new();
+        for track in &tracks {
+            // A little past the death, into the remnant.
+            let end = track.death().expect("a full track dies").age().value() * 1.02;
+            for i in 0..=600 {
+                let age = end * f64::from(i) / 600.0;
+                let state = track.state_at(Years::new(age));
+                let (m, mc) = (state.mass().value(), state.core_mass().value());
+                let masses: Vec<f64> = [1.2 * m, m, 0.9 * m, 0.5 * m, 0.2 * m]
+                    .into_iter()
+                    .chain(
+                        (mc > 0.0)
+                            .then_some([mc + 0.5 * (m - mc), mc + 0.1 * (m - mc), mc * 1.001])
+                            .into_iter()
+                            .flatten(),
+                    )
+                    .chain((mc > 0.0).then_some(mc * (1.0 + 1e-9)))
+                    .filter(|&mass| mass > 0.0)
+                    .collect();
+                for order in [masses.clone(), masses.iter().rev().copied().collect()] {
+                    let at = track.radius_at_age(age);
+                    for &mass in &order {
+                        let structure = track.structure_at(age, mass);
+                        phases.insert(structure.state.phase());
+                        assert_eq!(
+                            bits(at.radius(mass)),
+                            bits(structure.state.radius().value()),
+                            "{:?} at {age} yr, {mass} M☉ ({:?})",
+                            track.initial_mass(),
+                            structure.state.phase()
+                        );
+                    }
+                }
+            }
+        }
+        for phase in [
+            Phase::MainSequence,
+            Phase::HertzsprungGap,
+            Phase::FirstGiantBranch,
+            Phase::CoreHeliumBurning,
+            Phase::EarlyAgb,
+            Phase::HeliumMainSequence,
+        ] {
+            assert!(phases.contains(&phase), "no {phase:?} in {phases:?}");
+        }
+    }
+
     /// At the track's own mass, the structure's state is the track's state bit for bit.
     #[test]
     fn the_structure_at_the_tracks_own_mass_is_its_state() {
@@ -1607,6 +1973,67 @@ mod tests {
         }
     }
 
+    /// P11.T4's pinned white dwarfs: [`Remains::WhiteDwarf`] carries its bare core's last living
+    /// state, all core at the white dwarf's mass, with a core radius no larger than its radius. A
+    /// degenerate giant-branch core is the track's own structure there; a thermally pulsing AGB
+    /// core takes its white dwarf's luminosity and radius at formation ([`bare_core_light`]),
+    /// which from the Chandrasekhar mass are the zero-age helium star's of its mass.
+    #[test]
+    fn a_white_dwarf_s_remains_carry_its_bare_core() {
+        let draws = StarDraws::median();
+        let recipe = RemnantRecipe::default();
+        let z = solar().z_fit();
+        for m in [1.2, 3.0] {
+            let track = Track::full(SolarMasses::new(m), &solar(), &draws);
+            let phase = if m < 2.0 {
+                Phase::FirstGiantBranch
+            } else {
+                Phase::ThermallyPulsingAgb
+            };
+            let age = track
+                .age_in_phase(phase, 0.5)
+                .expect("the phase is on the track");
+            let Remains::WhiteDwarf {
+                phase: dwarf,
+                mass,
+                core,
+                core_radius,
+                ..
+            } = track.remains_at(age, 10.0, &draws, None)
+            else {
+                panic!("{m}: expected a white dwarf");
+            };
+            assert!(core.phase().is_living(), "{m}: {core:?}");
+            assert_eq!(core.mass(), mass, "{m}");
+            assert_eq!(core.core_mass(), mass, "{m}");
+            assert!(
+                core_radius <= core.radius(),
+                "{m}: {core_radius:?} in {core:?}"
+            );
+            if phase == Phase::ThermallyPulsingAgb {
+                let kind = WhiteDwarfCore::of(dwarf).expect("a white dwarf");
+                let (luminosity, radius) = bare_core_light(recipe, z, kind, mass);
+                assert_eq!(core.luminosity(), luminosity, "{m}");
+                assert_eq!(core.radius(), radius, "{m}");
+                assert_eq!(radius, white_dwarf_radius(recipe, mass), "{m}");
+            }
+        }
+        let kind = WhiteDwarfCore::CarbonOxygen;
+        let below = SolarMasses::new(1.3);
+        assert_eq!(
+            bare_core_light(recipe, z, kind, below),
+            (
+                white_dwarf::formation_luminosity(recipe, kind, below, z),
+                white_dwarf_radius(recipe, below)
+            )
+        );
+        let above = SolarMasses::new(1.49);
+        assert_eq!(
+            bare_core_light(recipe, z, kind, above),
+            (helium::zams_luminosity(above), helium::zams_radius(above))
+        );
+    }
+
     /// P11.T4.k (ruling p11-supernova-pins, 2026-10-06; finding F8): a core whose naked helium
     /// star has no life left at the stripping is [`Remains::Ended`], never a living helium star:
     /// the helium-star track dead from its start, which holds its own end, and the helium star's
@@ -1768,5 +2195,107 @@ mod tests {
             assert_eq!(structure.state.luminosity(), own.luminosity(), "at {age}");
             assert_eq!(structure.state.radius(), own.radius(), "at {age}");
         }
+    }
+
+    /// P11.T4's kept-core endings (research-leans-38): a helium giant of an oxygen–neon core
+    /// stripped to its core between the capture mass, 1.37 M☉, and the Chandrasekhar mass
+    /// collapses at once by electron capture into the 1.26 M☉ neutron star, where before the fix it
+    /// left an oxygen–neon dwarf of it. A 1.8 M☉ helium star's core is 1.403 M☉ at 0.999 of its
+    /// life.
+    #[test]
+    fn a_stripped_oxygen_neon_giant_collapses_at_the_capture_mass_from_29() {
+        use crate::stellar::remnant::DeathKind;
+        use crate::stellar::remnant::collapse::{
+            OXYGEN_NEON_CAPTURE_MASS, electron_capture_remnant,
+        };
+
+        let draws = StarDraws::median();
+        let star = Track::helium_star_full(SolarMasses::new(1.8), &solar(), &draws);
+        let death = star.death().expect("a full track reaches its death").age();
+        let age = 0.999 * death.value();
+        let state = star.state_at(Years::new(age));
+        let core = state.core_mass();
+        assert!(
+            core > OXYGEN_NEON_CAPTURE_MASS && core.value() < CHANDRASEKHAR_MSUN,
+            "{state:?}"
+        );
+        let Remains::Ended { track, .. } = star.remains_at(age, state.mass().value(), &draws, None)
+        else {
+            panic!("a bare core that collapses at once");
+        };
+        let death = track.death().expect("the bare core's track ends");
+        assert_eq!(death.kind(), DeathKind::ElectronCapture, "{death:?}");
+        assert_eq!(track.remnant(), Some(electron_capture_remnant()));
+    }
+
+    /// P11.T4's kept-core endings: a helium star whose core the integration brings to the
+    /// Chandrasekhar mass has reached it, whatever its last bits
+    /// (`structure::CORE_ROUNDING`): every oxygen–neon helium star of 1.74–2.24 M☉ collapses there
+    /// by electron capture (research-leans-40), where before the fix those whose core ended up to
+    /// 10⁻¹⁴ short of it left an oxygen–neon dwarf of it, and the rest collapsed an iron core.
+    #[test]
+    fn a_helium_star_s_core_at_the_chandrasekhar_mass_ends_one_way_from_29() {
+        use crate::stellar::remnant::DeathKind;
+
+        let kinds: Vec<DeathKind> = (0..11)
+            .map(|k| {
+                let m = SolarMasses::new(1.74 + 0.05 * f64::from(k));
+                let star = Track::helium_star_full(m, &solar(), &StarDraws::median());
+                let death = star.death().expect("a full track reaches its death");
+                let core = death.progenitor().co_core_mass().value();
+                assert!(
+                    (core - CHANDRASEKHAR_MSUN).abs() < 1e-13,
+                    "{m:?}: {death:?}"
+                );
+                death.kind()
+            })
+            .collect();
+        assert!(
+            kinds.iter().all(|&k| k == DeathKind::ElectronCapture),
+            "{kinds:?}"
+        );
+    }
+
+    /// P11.T4's kept-core endings (research-leans-40): a helium star of 1.6–2.25 M☉, whose mass
+    /// stands for `Mc,BAGB` (HPT section 6.1) in the range whose core HPT section 6 types
+    /// oxygen–neon, collapses at the Chandrasekhar mass by electron capture. A 2.0 M☉ one under the
+    /// default recipe leaves Mandel and Müller's 1.26 M☉ neutron star (MM20 section 3) with the
+    /// low-mode kick. A 2.4 M☉ one, from 2.25 M☉, still collapses an iron core. Before the fix
+    /// none captured electrons: a 2.04 M☉ one collapsed an iron core there, and the 2.0 M☉ one,
+    /// whose core ends 10⁻¹⁵ short of the mass, left an oxygen–neon dwarf.
+    #[test]
+    fn an_oxygen_neon_helium_star_collapses_by_electron_capture_from_29() {
+        use crate::stellar::remnant::collapse::electron_capture_remnant;
+        use crate::stellar::remnant::{
+            CollapseChannel, DeathKind, KickDraws, KickLaw, KickMode, StandardKickLaw,
+        };
+
+        let draws = StarDraws::median();
+        let end = |m: f64| {
+            let star = Track::helium_star_full(SolarMasses::new(m), &solar(), &draws);
+            let death = star.death().expect("a full track reaches its death");
+            (
+                death,
+                star.remnant().expect("a full track leaves a remnant"),
+            )
+        };
+        let (capture, remnant) = end(2.0);
+        assert_eq!(capture.kind(), DeathKind::ElectronCapture, "{capture:?}");
+        assert_eq!(remnant, electron_capture_remnant());
+        let channel = CollapseChannel::of(capture.kind()).expect("a collapse");
+        let rules = crate::stellar::rules::StellarRules::of_version(crate::GENERATOR_VERSION);
+        let kick = StandardKickLaw::under(rules).kick(
+            channel,
+            &capture.progenitor(),
+            &remnant,
+            &KickDraws::of(&draws),
+        );
+        assert_eq!(kick.mode(), KickMode::Low);
+        let (death, remnant) = end(2.4);
+        assert!(
+            matches!(death.kind(), DeathKind::CoreCollapse { .. }),
+            "2.4 M☉: {death:?}"
+        );
+        assert_ne!(remnant, electron_capture_remnant(), "2.4 M☉");
     }
 }

@@ -40,10 +40,12 @@
 //!    critical `p_c` = `r_c` (1 + e), `r_c` = maxᵢ Rᵢ ÷ `f_L`(qᵢ); divided by (1 + e)⁵ throughout:
 //!    - the spins' reservoir takes a share Φ I ÷ (μ (1 + e)² `r_c`^{3/2} √`r_p`) of the orbit's
 //!      angular momentum, with Φ = f₂(e) ÷ f₅(e) (Hut 1981; BSE equation 34) and I = Σ kᵢ mᵢ Rᵢ²
-//!      (BSE equation 35's coarse bound). Since Φ ÷ (1 + e)² ≤ 1 and `r_c` ≥ Rᵢ ÷ `f_L`(qᵢ),
-//!      the share is at most c ÷ √`r_p`, c = Σᵢ kᵢ √R̂ᵢ `f_L`(qᵢ,max)^{3/2} (1 + qᵢ,max),
-//!      whichever star sets `r_c`, with kᵢ the core's k′₃ = 0.21 where the table says a star may
-//!      have left its main sequence and the envelope's k′₂ = 0.1 elsewhere;
+//!      (BSE equation 35's coarse bound), with the spin a locked star's wind takes beyond its
+//!      inertia's share, (2/3 − k′₂) `ΔMᵢ` Rᵢ² (HPT equation 110; P11.T4.l), its wind's `ΔMᵢ` at
+//!      most mᵢ. Since Φ ÷ (1 + e)² ≤ 1 and `r_c` ≥ Rᵢ ÷ `f_L`(qᵢ), the share is at most c ÷ √`r_p`,
+//!      c = Σᵢ kᵢ √R̂ᵢ `f_L`(qᵢ,max)^{3/2} (1 + qᵢ,max), whichever star sets `r_c`, with kᵢ the
+//!      core's k′₃ = 0.21 where the table says a star may have left its main sequence and the
+//!      envelope's k′₂ = 0.1 elsewhere, each plus the wind's 2/3 − k′₂;
 //!    - magnetic braking (BSE equation 50) at the equilibrium spin carries Φ³, and Φ³ ÷ (1 + e)⁵
 //!      is at most [`BRAKING_ECCENTRICITY_FACTOR`], its value as e → 1; its integral is at most
 //!      Σ R̂ᵢ³ over the whole age, of each star above BSE's 0.35 M☉ floor, with M ÷ μ at its
@@ -82,7 +84,8 @@
 //!    pair's age at +H, the end of the clock window, which may lie after the window's end. A pair
 //!    it runs for its remnant alone is still one detached segment of its own models
 //!    ([`evolve`](super::evolve)'s pre-test gate), whose cooling member accretes nothing; the
-//!    engine steps the pair only if it can interact by +H. The window's ages are light-time ages,
+//!    engine steps the pair only if it can interact by +H, or if a star of it collapses by then
+//!    (P11.T10's fix), which item 3 already refuses. The window's ages are light-time ages,
 //!    each the age at an emission time of the source horizon (−(H + L) to +H), so the age at +H
 //!    lies at most [`RUN_HORIZON_PAST_WINDOW_YEARS`], 2H + L, past the window's end. So such a
 //!    pair is `Detached` only if items 1–3 also hold there. Otherwise it is read from the tables,
@@ -92,10 +95,18 @@
 //!    as often as a pair run to its +H, apart from draws the fit leaves out (η below −3.5σ, e above
 //!    0.95; plan 11's Risks, "P11.T17.b as built").
 //!
+//! 5. **Neither star can take 10⁻⁴ M☉ of its partner's wind by the window's end** (P11.T12's fix).
+//!    From 27 a pair the lobe and decay tests pass over is still run where its main-sequence star
+//!    takes that much of its partner's wind (`wind_accretion`), and the star departs from its own
+//!    model. The wind's reach table bounds what each star, the accretor in turn, can take by then,
+//!    every factor at its worst ([`may_take_wind`](super::wind_reach::may_take_wind)). Version 28's
+//!    bound read items 1–4 alone and called some such pairs `Detached`.
+//!
 //! Every term is monotone in the R̂ᵢ, the masses and the age, so later ages and smaller periastra
 //! only take pairs out of `Detached`. The engine's own span starts at the first arrival, after
-//! zero age, so the whole age bounds it. The test is the engine's at version 21, before P11.T4.l's
-//! wind-spin term and its passed-over collapses: its slow test runs again when they land.
+//! zero age, so the whole age bounds it. The test is the engine's with P11.T4.l's wind-spin term;
+//! T4.l's passed-over collapses need no more than item 3, which already refuses every pair a star
+//! of which may have collapsed by the window's end.
 //!
 //! # `Unchanged`, `Remnants` and `Bright` (P11.T17.c)
 //!
@@ -126,24 +137,23 @@
 //! 1 R☉, a window ending past 1.5 × 10¹⁰ years, a layer whose table is a placeholder, or masses
 //! given as intervals ([`pair_light_bound_over`] reads the tables for exact masses only).
 //!
-//! **The held floor** (P11.T17.c's follow-up, 2026-10-08, after R06.T8.g's slow test found a
-//! bulge pair of layer D whose stars shone at M<sub>V</sub> 1.3 and 2.5 at 8.7 Gyr where the
-//! tables read `Remnants`). A timeline that reaches the engine's cap on segments is left as it
-//! stands, its last segment stretched to the age asked, and a star the binary carries on its main
-//! sequence there, hydrogen or helium, is held at its last mass and fractional age for ever. The
-//! engine reaches the cap where an accretor so carried is fed at its main sequence's end, each
-//! step landing short of that end once the accretion has lowered its fractional age (plan 11's
-//! Risks: finding F15 for a helium accretor, and the same for a hydrogen one), and in P11.T4.g's
-//! swell and strip cycle (finding C2). About 3 × 10⁻⁵ of the census's pairs do, too few for the
-//! tables' 72 samples a cell to hold, and a held gainer reaches M<sub>V</sub> −7.6. So where the
-//! closed form does not call the pair `Detached` at the window's end, each bin from
-//! [`pair_light::held_floor`]'s first one reads its living and changed values as no fainter than
-//! the floor: the brightest hydrogen or helium main-sequence star of at most the pair's total
-//! mass, from the engine's own models, margin included. A pair the closed form calls `Detached`
-//! there has not been stepped by then, so it holds no such star, and reads the tables as they
-//! are. `Remnants` is then answered only by such pairs, and `Unchanged` only before any star of the
-//! pair can have ended its main sequence. The floor goes when the version-22 batch's engine work
-//! removes the cap's causes.
+//! **No held floor** (version 25's wiring; `decision-galaxy-25-train.md`, "The held floor"). A
+//! timeline that reaches the engine's cap on segments is left as it stands, its last segment
+//! stretched to the age asked, so a star the binary carries on its main sequence there, hydrogen
+//! or helium, is held at its last mass and fractional age for ever. P11.T17.c's follow-up
+//! (2026-10-08, after R06.T8.g's slow test found a bulge pair of layer D whose stars shone at
+//! M<sub>V</sub> 1.3 and 2.5 at 8.7 Gyr where the tables read `Remnants`) therefore read each bin,
+//! wherever the closed form did not call the pair `Detached`, as no fainter than a held floor: the
+//! brightest main-sequence star of at most the pair's total mass. The engine reached the cap where
+//! an accretor so carried was fed at its main sequence's end, each step landing short of that end
+//! once the accretion had lowered its fractional age (plan 11's Risks: finding F15 for a helium
+//! accretor, F18 for a hydrogen one), and in P11.T4.g's swell and strip cycle (finding C2).
+//! P11.T4.m removed the rules behind F15 and C2, and P11.T4.o the hydrogen accretor's. T4.o's
+//! re-run of the follow-up's probes left one capped timeline, which holds no such star at its cap
+//! and ends as it does with the cap raised (the engine's test
+//! `the_last_capped_sample_ends_as_it_does_with_the_cap_raised`). So the readers floor no capped
+//! main sequence: the bound reads the tables as they are, whether or not the closed form calls the
+//! pair `Detached` at the window's end.
 //!
 //! **White dwarfs are dark.** The tables hold no remnant's light, so all three verdicts hold only
 //! while white dwarfs have no V (R06's ask A4). A white dwarf the binary makes can be far younger
@@ -157,16 +167,12 @@
 //! verdict over A′ is no tighter than over A, in the census's order `Remnants` < `Detached` =
 //! `Unchanged` < `Bright(M)`, looser as M brightens, < `None`. `Remnants` over A′ holds over A,
 //! since its bins are A′'s; `Detached` reads only the window's end, and only shrinks with it; a
-//! wider window's M is the brightest over more bins, and the thin rule reads each bin alone. The
-//! held floor is read only where the closed form fails at the window's end, which it does at every
-//! later end: if it fails at A′'s end and holds at A's, A reads the tables as they are and answers
-//! `Remnants` or `Detached`, no looser than A′'s verdict, which is not `Detached`.
+//! wider window's M is the brightest over more bins, and the thin rule reads each bin alone.
 //! Asked after `Detached`, `Remnants` over A′ would follow `Detached` over A, whose stars take
 //! their own bounds, which may not be dark. A test holds the order over random nested windows.
 
 use std::ops::RangeInclusive;
 
-use crate::orbit::roche_lobe_radius;
 use crate::stellar::Composition;
 use crate::stellar::sse::{CORE_GYRATION, ENVELOPE_GYRATION, MIN_INITIAL_MASS};
 use crate::time::{CLOCK_WINDOW_H, LIGHT_CROSSING_L};
@@ -175,12 +181,14 @@ use crate::units::{Magnitudes, Metres, SolarMasses, Years};
 
 use super::detached::{
     DECAY_SAFETY, GRAVITATIONAL_WAVE_RATE, MAGNETIC_BRAKING, MAGNETIC_BRAKING_FLOOR,
+    WIND_SPIN_SHARE, lobe_fraction,
 };
 use super::pair_light::{
     self, DARK_CMAG, FAINTEST_CMAG, LAYERS as TABLE_LAYERS, PairLightTable, from_cmag,
 };
 use super::reach::{ReachBound, ReachTable, fe_h_of, has_helium_excess};
 use super::star::{G, positive};
+use super::wind_reach;
 
 /// What a pair of two stars can hold in a window of ages, as the census reads it (plan 11,
 /// P11.T17; `decision-p11-t16-hierarchy-bound.md` §5).
@@ -258,10 +266,7 @@ pub(crate) const THIN_DEPARTING_CLASS: u8 = 2;
 ///    bound (one to three of 72), and otherwise [`PairLight::Bright`] at the brightest departing
 ///    star or product of the bins, margin included.
 ///
-/// Where the closed form fails at the window's end, the tables are read through the held floor
-/// (the `pair_light` module's): a capped timeline may hold a main-sequence star of the pair for
-/// ever, so from the first age any star of the pair can end
-/// its main sequence, every bin holds a living, departing star as bright as such a star can be.
+/// `Detached` reads the lobe and decay tests and the wind's reach (the module's items 1–5).
 ///
 /// The tables cover a heavier star of 0.75–150 M☉, a periastron of at least 1 R☉ and a window
 /// ending by 1.5 × 10¹⁰ years, for exact masses; outside them a pair is `Detached` or `None`.
@@ -305,6 +310,58 @@ pub fn pair_light_bound(
     ages: RangeInclusive<Years>,
 ) -> Option<PairLight> {
     pair_light_bound_over([a..=a, b..=b], periastron_min, composition, ages)
+}
+
+/// Whether the pair of stars of initial masses `a` and `b`, of drawn periastron `periastron_min`
+/// and `composition`, certainly leaves each of its stars its own single-star model through the
+/// window of its `ages`, and certainly falls into no carved class by their end, which would have
+/// its system redrawn (plan 11, P11.T11.a; `decision-observed-class-findings.md` §A.2): the range
+/// brief's gate, with `ages` the system's ages over the clock window, the last its age at +H.
+///
+/// It holds where [`pair_light_bound`] answers [`PairLight::Detached`] over `ages`, so that the
+/// pair cannot interact by their end, by its wind neither, and no star of it can have died
+/// suddenly, and the reach table
+/// finds that at most one of its two stars may have left its main sequence by then.
+///
+/// - **Neither star off its main sequence:** neither holds a remnant, and the pair cannot
+///   interact, so `SystemStars`' `run_pairs` does not run it at all.
+/// - **One star off it:** `run_pairs` runs the pair for that star's remnant, as one detached
+///   segment of its two models ([`evolve`](super::evolve)'s pre-test gate). With no merger, no
+///   transfer and no neutron star or black hole by then, the only carved classes such a segment
+///   could show are a white dwarf fed by its companion's wind, which the classifier finds only for
+///   a giant's wind, and the other star stays on its main sequence.
+///
+/// Two stars that may both have left their main sequences could make a white dwarf and a giant,
+/// a wind-fed symbiotic star, which is carved: such a pair, or one that is not `Detached`, is
+/// refused. `false` also where the reach table does not reach (a mass below 0.08 M☉, or an age
+/// past its last bin).
+#[must_use]
+pub(crate) fn pair_keeps_own_models(
+    a: SolarMasses,
+    b: SolarMasses,
+    periastron_min: Metres,
+    composition: &Composition,
+    ages: RangeInclusive<Years>,
+) -> bool {
+    let until = ages.end().value().max(0.0);
+    // Only `Detached` says the pair cannot have interacted; a verdict added later certifies only
+    // once it is weighed here.
+    match pair_light_bound(a, b, periastron_min, composition, ages) {
+        Some(PairLight::Detached) => {}
+        Some(PairLight::Unchanged | PairLight::Remnants | PairLight::Bright(_)) | None => {
+            return false;
+        }
+    }
+    let fe_h = fe_h_of(composition);
+    let table = ReachTable::generator();
+    let mut evolved = 0_u8;
+    for m in [a.value(), b.value()] {
+        let Some(reach) = table.bound(m, m, fe_h, until) else {
+            return false;
+        };
+        evolved += u8::from(reach.may_hold_core());
+    }
+    evolved <= 1
 }
 
 /// [`pair_light_bound`] over every pair whose initial masses lie in `masses`, each interval its
@@ -369,21 +426,7 @@ fn bound_with(
     let exact = ends.iter().all(|&[lo, hi]| lo.total_cmp(&hi).is_eq());
     let detached = detached(ends, reach, periastron_rsun, fe_h, until);
     let read = if exact && tables == Tables::Read {
-        // A pair that cannot have interacted by the window's end holds no capped timeline's
-        // star in it (the module's held floor).
-        let held = if detached {
-            HeldStars::Impossible
-        } else {
-            HeldStars::Possible
-        };
-        tabled(
-            ends[1][0],
-            ends[0][0],
-            fe_h,
-            periastron_rsun,
-            [start, end],
-            held,
-        )
+        tabled(ends[1][0], ends[0][0], fe_h, periastron_rsun, [start, end])
     } else {
         None
     };
@@ -397,20 +440,9 @@ fn bound_with(
     read
 }
 
-/// Whether a capped timeline's held star may live in a pair's window (the module's held floor).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum HeldStars {
-    /// The pair may have interacted by the window's end, so the tables are read with the held
-    /// floor.
-    Possible,
-    /// The pair cannot have interacted by the window's end (T17.a's `Detached`), so the engine has
-    /// stepped none of it there, and the tables are read as they are.
-    Impossible,
-}
-
 /// Whether the pair of initial masses `ends` (M☉, each `[lo, hi]`, the lighter's `lo` first), of
 /// largest radii bounded by `reach` at the window's end `until_years`, metallicity coordinate
-/// `fe_h` and drawn periastron `periastron_rsun` (R☉), is `Detached` (the module's items 1–4).
+/// `fe_h` and drawn periastron `periastron_rsun` (R☉), is `Detached` (the module's items 1–5).
 #[must_use]
 fn detached(
     ends: [[f64; 2]; 2],
@@ -424,6 +456,10 @@ fn detached(
         return false;
     }
     if !passed_over(ends, reach, periastron_rsun, until_years) {
+        return false;
+    }
+    // 5. A star that may take 10⁻⁴ M☉ of its partner's wind by the window's end is fed it.
+    if wind_reach::may_take_wind(ends, periastron_rsun, fe_h, until_years) {
         return false;
     }
     // 4. A star below 0.1 M☉ accretes its companion's wind in a pair the engine steps, which it
@@ -446,9 +482,8 @@ fn detached(
 
 /// What P11.T17.b's tables say of the pair of initial masses `heavier_msun` and `lighter_msun`
 /// (M☉), metallicity coordinate `fe_h` and drawn periastron `periastron_rsun` (R☉) over the window
-/// `[start, end]` (years), with the held floor where `held` says a held star is possible:
-/// `Remnants`, `Unchanged`, `Bright`, or `None` outside the tables or for a thin bin (see the
-/// module's documentation).
+/// `[start, end]` (years): `Remnants`, `Unchanged`, `Bright`, or `None` outside the tables or for
+/// a thin bin (see the module's documentation).
 #[must_use]
 fn tabled(
     heavier_msun: f64,
@@ -456,7 +491,6 @@ fn tabled(
     fe_h: f64,
     periastron_rsun: f64,
     [start, end]: [f64; 2],
-    held: HeldStars,
 ) -> Option<PairLight> {
     let (table, cell) = TABLE_LAYERS.iter().find_map(|&layer| {
         let table = PairLightTable::generator(layer)?;
@@ -469,22 +503,12 @@ fn tabled(
     if first > last {
         return None;
     }
-    let fe_cell = table.grid().cell_parts(cell)[2];
-    let (held_from, floor) = match held {
-        HeldStars::Possible => {
-            let floor = pair_light::held_floor(fe_cell, heavier_msun + lighter_msun)?;
-            (floor.first_bin(), floor.cmag())
-        }
-        HeldStars::Impossible => (pair_light::AGE_BINS, DARK_CMAG),
-    };
     let mut remnants = true;
     let mut brightest = DARK_CMAG;
     let mut thin = false;
     for bin in first..=last {
-        // A capped timeline's held star may live at every bin from `held_from` (the module's).
-        let floor = if bin >= held_from { floor } else { DARK_CMAG };
-        remnants &= table.living_cmag_for(cell, bin, lighter_msun).min(floor) == DARK_CMAG;
-        let changed = table.changed_cmag_for(cell, bin, lighter_msun).min(floor);
+        remnants &= table.living_cmag_for(cell, bin, lighter_msun) == DARK_CMAG;
+        let changed = table.changed_cmag_for(cell, bin, lighter_msun);
         if changed != DARK_CMAG {
             // A departing star with no V (UNSEEN) reads the faintest V stored.
             brightest = brightest.min(changed.min(FAINTEST_CMAG));
@@ -537,7 +561,7 @@ fn passed_over(
             CORE_GYRATION
         } else {
             ENVELOPE_GYRATION
-        };
+        } + WIND_SPIN_SHARE;
         sum + k * radius[i].sqrt() * f_max[i] * f_max[i].sqrt() * (1.0 + q_max[i])
     });
     let s = p.sqrt() - c;
@@ -563,13 +587,6 @@ fn passed_over(
         return false;
     }
     s9 * s - DECAY_SAFETY * (braking_rate * braking + radiation * p) > crate::math::powi(r_c, 5)
-}
-
-/// Eggleton's (1983) Roche-lobe radius over the separation for a star of mass ratio `q` = its
-/// mass ÷ its companion's, as the engine reads it.
-#[must_use]
-fn lobe_fraction(q: f64) -> f64 {
-    roche_lobe_radius(q, Metres::new(1.0)).value()
 }
 
 #[cfg(test)]
@@ -647,6 +664,52 @@ mod tests {
         for (p, age) in [(5.0, 1.0e9), (0.3, 3.0e9), (40.0, 1.3e10)] {
             assert_eq!(solar(1.0, 0.6, p, age), solar(0.6, 1.0, p, age));
         }
+    }
+
+    /// The range brief's gate (P11.T11.a) keeps a `Detached` pair with at most one star that may
+    /// have left its main sequence by the window's end, and refuses a pair that is not
+    /// `Detached`, one whose two stars may both have evolved (a white dwarf fed by a giant's wind
+    /// is a symbiotic star, which is carved), and a mass the reach table does not hold. Along a
+    /// pair of 3 and 2.5 M☉ 10⁴ au apart, ages are found where one star and where both may have
+    /// evolved while the pair stays `Detached`.
+    #[test]
+    fn the_gate_keeps_a_pair_only_while_it_can_neither_change_nor_be_carved() {
+        let keeps = |a: f64, b: f64, au: f64, age: f64| {
+            pair_keeps_own_models(
+                SolarMasses::new(a),
+                SolarMasses::new(b),
+                Metres::new(au * AU_M),
+                &Composition::SOLAR,
+                Years::new(age)..=Years::new(age),
+            )
+        };
+        let fe_h = fe_h_of(&Composition::SOLAR);
+        let evolved = |m: f64, age: f64| {
+            ReachTable::generator()
+                .bound(m, m, fe_h, age)
+                .expect("inside the reach table")
+                .may_hold_core()
+        };
+        assert!(keeps(1.0, 0.6, 2_000.0, 1.0e9));
+        assert!(!keeps(1.0, 0.6, 0.04, 9.0e9));
+        assert!(
+            !keeps(1.0, 0.05, 2_000.0, 1.0e9),
+            "below the table's 0.08 M☉"
+        );
+        let (mut one, mut both) = (false, false);
+        for k in 0..60 {
+            let age = 1.0e8 * crate::math::powi(1.06, k);
+            let off = u8::from(evolved(3.0, age)) + u8::from(evolved(2.5, age));
+            let detached = solar(3.0, 2.5, 1.0e4, age) == Some(PairLight::Detached);
+            assert_eq!(
+                keeps(3.0, 2.5, 1.0e4, age),
+                detached && off <= 1,
+                "at {age} yr"
+            );
+            one |= detached && off == 1;
+            both |= detached && off == 2;
+        }
+        assert!(one && both, "one star evolved {one}, both {both}");
     }
 
     /// A wider orbit, an earlier age and narrower mass intervals only bring a pair into
@@ -746,7 +809,7 @@ mod tests {
     }
 
     /// Asserts that the pair's verdict over `outer` is no tighter than over a window inside it
-    /// drawn from `mix` (a point for a quarter of them), and returns the verdict over `outer`.
+    /// drawn from `mix` (a point for a quarter of them), and returns it.
     fn assert_no_tighter(
         [a, b]: [SolarMasses; 2],
         periastron: Metres,
@@ -763,16 +826,21 @@ mod tests {
             [at(x.min(y)), at(x.max(y))]
         };
         let years = |[s, e]: [f64; 2]| Years::new(s)..=Years::new(e);
+        let describe = || {
+            format!(
+                "{} + {} M_sun, periastron {:.4e} R_sun, [Fe/H] {:.3}",
+                a.value(),
+                b.value(),
+                periastron.value() / SOLAR_RADIUS_M,
+                comp.fe_h().value()
+            )
+        };
         let wide = pair_light_bound(a, b, periastron, comp, years(outer));
         let narrow = pair_light_bound(a, b, periastron, comp, years(inner));
         assert!(
             looseness(wide) >= looseness(narrow),
-            "{} + {} M_sun, periastron {:.4e} R_sun, [Fe/H] {:.3}: {wide:?} over {outer:?} is \
-             tighter than {narrow:?} over {inner:?}",
-            a.value(),
-            b.value(),
-            periastron.value() / SOLAR_RADIUS_M,
-            comp.fe_h().value()
+            "{}: {wide:?} over {outer:?} is tighter than {narrow:?} over {inner:?}",
+            describe()
         );
         wide
     }
@@ -821,16 +889,20 @@ mod tests {
                 seen[verdict_index(wide)] += 1;
             }
         }
-        // Across the age at which the closed form first fails, where the held floor starts to be
-        // read: a neutron star and a white dwarf 1,000 au apart are `Detached` at 10 Myr, before
-        // the primary may have collapsed, and `Bright` at the floor over a window to 1 Gyr.
+        // Across the age at which the closed form first fails: a neutron star and a white dwarf
+        // 1,000 au apart are `Detached` at 10 Myr, before the primary may have collapsed, and
+        // looser over a window to 1 Gyr, read from the tables. Until generator version 26 that
+        // was `Unchanged`, the tables holding no departing star of the pair; from 26 the tables
+        // refitted under 26's rules hold one in its bins, and the window was `Bright` at −6.23;
+        // from 27 the tables refitted under 27's rules leave that window unbounded (`None`, the
+        // widened envelope's), the loosest verdict of all.
         let years = |s: f64, e: f64| Years::new(s)..=Years::new(e);
         let (a, b) = (SolarMasses::new(10.0), SolarMasses::new(8.0));
         let p = Metres::new(1.0e3 * AU_M);
         let narrow = pair_light_bound(a, b, p, &Composition::SOLAR, years(1.0e7, 1.0e7));
         let wide = pair_light_bound(a, b, p, &Composition::SOLAR, years(1.0e7, 1.0e9));
         assert_eq!(narrow, Some(PairLight::Detached));
-        assert!(matches!(wide, Some(PairLight::Bright(_))), "{wide:?}");
+        assert_eq!(wide, None);
         assert!(looseness(wide) >= looseness(narrow));
         println!("verdicts over the outer windows: {seen:?} ({VERDICTS:?})");
         assert!(
@@ -840,11 +912,11 @@ mod tests {
     }
 
     /// The tables answer P11.T17.c's three verdicts: `Remnants` for two white dwarfs, asked before
-    /// `Detached`; `Unchanged` for a close pair too young for any star of it to have left its main
-    /// sequence; and `Bright` for an Algol, which bounds its gainer as the engine evolves it. A
-    /// pair whose star collapsed, which the closed form leaves, was `Remnants` until the held floor
-    /// (P11.T17.c's follow-up): its kick may have brought the orbit into an interaction, so a
-    /// capped timeline may hold a star of it, and it is `Bright` at the floor.
+    /// `Detached`, and for a pair whose star collapsed, which the closed form leaves; `Unchanged`
+    /// for a close pair too young for any star of it to have left its main sequence; and `Bright`
+    /// for an Algol, which bounds its gainer as the engine evolves it. The collapsed pair was
+    /// `Bright` at the held floor from P11.T17.c's follow-up until version 25's wiring dropped the
+    /// floor (the module's "No held floor").
     #[test]
     fn the_tables_answer_remnants_unchanged_and_bright() {
         // Two white dwarfs 10⁴ au apart: the closed form holds, but `Remnants` is asked first.
@@ -852,22 +924,11 @@ mod tests {
         assert_eq!(solar(3.0, 2.8, 1.0e4, 5.0e9), Some(PairLight::Remnants));
         assert_eq!(solar(3.0, 2.8, 1.0e4, 1.0e8), Some(PairLight::Detached));
         // A neutron star and a white dwarf 1,000 au apart: the primary collapsed, so the closed
-        // form cannot say, and nothing departs in the tables, but the held floor binds.
+        // form cannot say, and the tables, which sample the kicks, hold no star of it living.
         assert!(!closed(10.0, 8.0, 1.0e3, 1.0e9));
-        let table = PairLightTable::generator(Layer::E).expect("E's fitted table");
-        let p_rsun = 1.0e3 * AU_M / SOLAR_RADIUS_M;
-        let cell = table
-            .cell_of(10.0, 8.0, fe_h_of(&Composition::SOLAR), p_rsun)
-            .expect("inside E's table");
-        let floor =
-            pair_light::held_floor(table.grid().cell_parts(cell)[2], 18.0).expect("a pair's mass");
-        assert!(floor.first_bin() <= pair_light::age_bin(1.0e9).expect("a bin"));
-        assert_eq!(
-            solar(10.0, 8.0, 1.0e3, 1.0e9),
-            Some(PairLight::Bright(Magnitudes::new(from_cmag(floor.cmag()))))
-        );
+        assert_eq!(solar(10.0, 8.0, 1.0e3, 1.0e9), Some(PairLight::Remnants));
         // Two B stars 0.03 au apart at 0.24 Myr: the closed form cannot pass them over, and
-        // neither has reached its main sequence's end, the held floor's first bin.
+        // neither has reached its main sequence's end.
         assert!(!closed(4.6, 4.4, 0.03, 2.4e5));
         assert_eq!(solar(4.6, 4.4, 0.03, 2.4e5), Some(PairLight::Unchanged));
         // An Algol-like pair of Hurley, Tout and Pols's (2002, section 3.1) masses on `evolve`'s
@@ -920,8 +981,7 @@ mod tests {
 
     /// A bin whose changed value comes from one to three of the cell's own departing samples is
     /// too thin to bound, and the tables answer `None` there; with none of its own, or four or
-    /// more, the bin is `Bright` at its changed value. The tables are read as they are, without
-    /// the held floor, which [`a_capped_timelines_held_stars_are_bounded`] tests.
+    /// more, the bin is `Bright` at its changed value.
     #[test]
     fn a_thin_bin_is_not_bounded() {
         let mut found = [0_u32; 3];
@@ -947,8 +1007,7 @@ mod tests {
                     let age = (pair_light::age_edge_years(bin)
                         * pair_light::age_edge_years(bin + 1))
                     .sqrt();
-                    let verdict =
-                        tabled(heavier, lighter, fe_h, p, [age, age], HeldStars::Impossible);
+                    let verdict = tabled(heavier, lighter, fe_h, p, [age, age]);
                     if kind == 1 {
                         assert_eq!(verdict, None, "{layer:?} cell {cell} bin {bin}");
                     } else {
@@ -1002,20 +1061,23 @@ mod tests {
                 if alone(mid) { lo = mid } else { hi = mid }
             }
             boundaries += 1;
+            // A star below 0.1 M☉ takes no wind of the walk's.
             for t in [lo - 3.0e5, lo - 1.0e5, lo] {
-                let held = detached(ends, reach(ends, t), p_rsun, fe_h, t);
                 assert_eq!(
-                    held,
+                    detached(ends, reach(ends, t), p_rsun, fe_h, t),
                     t + RUN_HORIZON_PAST_WINDOW_YEARS <= lo,
                     "{ends:?} at {t}"
                 );
             }
-            // A star of 0.1 M☉ accretes nothing on its own track: its pair is read at its end.
+            // A star of 0.1 M☉ accretes no wind of the engine's on its own track: its pair is read
+            // at its window's end, where the walk's wind is screened too.
             let heavy = [[0.1, 0.1], [companion, companion]];
-            let at = |t: f64| detached(heavy, reach(heavy, t), p_rsun, fe_h, t);
+            let t = lo - 1.0e5;
+            let fed = wind_reach::may_take_wind(heavy, p_rsun, fe_h, t);
             assert_eq!(
-                at(lo - 1.0e5),
-                passed_over(heavy, reach(heavy, lo - 1.0e5), p_rsun, lo - 1.0e5)
+                detached(heavy, reach(heavy, t), p_rsun, fe_h, t),
+                passed_over(heavy, reach(heavy, t), p_rsun, t) && !fed,
+                "{heavy:?} at {t}"
             );
         }
         assert!(
@@ -1118,9 +1180,8 @@ mod tests {
 
     /// The bound gives each query the same answer bit for bit, whatever was asked before it
     /// (the sim-determinism skill's order independence: the census's warm cache asks it, and its
-    /// tables and cooling and held floors are filled lazily): 150 queries over layers C, D and E,
-    /// a third with a star below 0.1 M☉, and four that answer `Remnants` and `Unchanged`,
-    /// answering every verdict.
+    /// tables are filled lazily): 150 queries over layers C, D and E, a third with a star below
+    /// 0.1 M☉, and four that answer `Remnants` and `Unchanged`, answering every verdict.
     #[test]
     fn the_bound_does_not_depend_on_what_was_asked_before() {
         use hyperion_testkit::order::assert_order_independent;
@@ -1141,7 +1202,8 @@ mod tests {
             })
             .chain([
                 // Pairs of white dwarfs on wide orbits, which only `Remnants` answers, and a young
-                // close pair, which `Unchanged` does (the held floor makes both rare at random).
+                // close pair, which `Unchanged` does, so that every verdict occurs whatever the
+                // random queries give.
                 (3.0, 2.8, 2.15e6, 5.0e9, 0.0),
                 (6.0, 5.0, 1.0e6, 2.0e9, -0.5),
                 (4.0, 3.5, 5.0e5, 9.0e9, 0.2),
@@ -1193,24 +1255,28 @@ mod tests {
         assert_eq!(solar(1.0, 0.3, 1.0e4, 1.3e10), Some(PairLight::Detached));
     }
 
-    /// At version 21 a pair the pre-test passes over keeps its drawn orbit through its stars'
-    /// collapses, with no kick and no supernova record (P11.T4.l's finding F3, which the
-    /// version-22 batch fixes), so its stars are their own models across a supernova. When T4.l
-    /// lands this fails: then a collapse can hand the pair to the engine with its kick, and
-    /// P11.T17's collapse rule (the module's item 3) must still hold, or `Detached` must bound
-    /// the periastron after the kick (plan 11, P11.T17's 22-batch note).
+    /// A pair the pre-test passes over has its stars' collapses applied to its orbit, with their
+    /// kicks: the engine runs it from the start for its primary's collapse (P11.T10's fix,
+    /// `collapses.rs`; before it P11.T4.l's closed form applied the collapse to its drawn orbit,
+    /// finding F3, and at version 21 it kept the drawn orbit through them, with no record, which
+    /// this test pinned before T4.l). So P11.T17's collapse rule (the module's item 3) still holds,
+    /// as T17.a ruled it for this case (plan 11, P11.T17's note on the deferred batch): such a pair
+    /// is never `Detached`, and its verdict is the tables', which sample the kicks.
     #[test]
-    fn a_passed_over_pairs_collapse_keeps_its_drawn_orbit_at_version_21() {
-        use crate::stellar::binary::evolve;
+    fn a_passed_over_pairs_collapse_is_applied_and_the_bound_does_not_lean_on_it() {
+        use crate::stellar::binary::{Component, evolve};
         let input = super::super::tests::pair(15.0, 3.0, 1.0e5, 0.0, 0.02);
         let until = Years::new(1.0e8);
         assert!(!can_interact(&input, until));
         let timeline = evolve(&input, until);
-        assert_eq!(timeline.segments().len(), 1);
-        assert!(timeline.supernovae().is_empty());
-        assert_eq!(timeline.state_at(until).orbit(), Some(input.orbit()));
-        // The bound does not lean on it: the primary may have collapsed, so the pair is not
-        // `Detached`, and its verdict is the tables', which sample the kicks.
+        let [record] = timeline.supernovae() else {
+            panic!("the primary's collapse is recorded");
+        };
+        assert_eq!(record.component(), Component::Primary);
+        assert!(record.kick().is_some());
+        assert_ne!(timeline.state_at(until).orbit(), Some(input.orbit()));
+        // The bound does not lean on the drawn orbit: the primary may have collapsed, so the pair
+        // is not `Detached`.
         let [m1, m2] = input.masses();
         let p = input.orbit().periapsis();
         assert_ne!(
@@ -1265,7 +1331,7 @@ mod tests {
                 [SolarMasses::new(2.0)..=SolarMasses::new(1.0), one..=one],
                 wide,
                 solar,
-                ages()
+                ages(),
             ),
             None
         );
@@ -1331,8 +1397,12 @@ mod tests {
         /// Pairs a star of which may have died suddenly by the window's end, which the bound
         /// therefore leaves unbounded (the module's item 3).
         collapsed: u64,
-        /// Pairs the bound calls `Detached` that the pre-test passes, described.
+        /// Pairs the bound calls `Detached` that the pre-test's lobe and decay tests pass,
+        /// described.
         missed: Vec<String>,
+        /// Pairs the bound calls `Detached` that the pre-test sends to the engine, for its wind
+        /// too, which the bound's wind's reach must leave none of (P11.T12's fix), described.
+        wind_fed: Vec<String>,
     }
 
     impl Tally {
@@ -1342,6 +1412,7 @@ mod tests {
             self.detached += other.detached;
             self.collapsed += other.collapsed;
             self.missed.extend(other.missed);
+            self.wind_fed.extend(other.wind_fed);
         }
 
         fn check(&mut self, input: &BinaryInput, age: f64) {
@@ -1358,6 +1429,12 @@ mod tests {
                 Tables::Skip,
             );
             let interacts = can_interact(input, at);
+            // The pre-test's lobe and decay tests alone, without the wind's onset.
+            let reaches = super::super::evolve::interacts(
+                input,
+                &super::super::evolve::own_members(input, age, None),
+                age,
+            );
             let collapsed = [m1, m2].iter().any(|&m| {
                 crate::stellar::binary::largest_radius_bound(m..=m, input.composition(), at)
                     .is_some_and(|bound| bound.may_have_collapsed())
@@ -1365,18 +1442,24 @@ mod tests {
             self.collapsed += u64::from(collapsed);
             self.pairs += 1;
             self.passed_over += u64::from(!interacts);
+            let describe = || {
+                format!(
+                    "{:.4} + {:.4} M_sun, periastron {:.4e} R_sun, e {:.3}, [Fe/H] {:.3}, age \
+                     {age:.4e} yr",
+                    m1.value(),
+                    m2.value(),
+                    periastron.value() / SOLAR_RADIUS_M,
+                    input.orbit().eccentricity().value(),
+                    input.composition().fe_h().value(),
+                )
+            };
             if bound == Some(PairLight::Detached) {
                 self.detached += 1;
+                if reaches {
+                    self.missed.push(describe());
+                }
                 if interacts {
-                    self.missed.push(format!(
-                        "{:.4} + {:.4} M_sun, periastron {:.4e} R_sun, e {:.3}, [Fe/H] {:.3}, \
-                         age {age:.4e} yr",
-                        m1.value(),
-                        m2.value(),
-                        periastron.value() / SOLAR_RADIUS_M,
-                        input.orbit().eccentricity().value(),
-                        input.composition().fe_h().value(),
-                    ));
+                    self.wind_fed.push(describe());
                 }
             }
         }
@@ -1424,10 +1507,14 @@ mod tests {
     }
 
     /// Checks `per_layer` generated pairs of each stellar layer, printing each layer's shares, and
-    /// asserts that no `Detached` pair passes the pre-test.
+    /// asserts that no `Detached` pair passes the pre-test's lobe and decay tests. From 27 the
+    /// pre-test also sends a pair to the engine where its main-sequence star takes 10⁻⁴ M☉ of its
+    /// partner's wind; the bound takes the wind's reach (P11.T12's fix), and no `Detached` pair can
+    /// interact at all (asserted).
     fn no_detached_pair_interacts(per_layer: usize) {
         let galaxy = milky_way();
         let mut missed = 0;
+        let mut wind_fed = 0;
         for (salt, layer) in (0_u64..).zip(LAYERS) {
             let pairs = generated_pairs(&galaxy, layer, per_layer, SEED ^ salt);
             for (class, t) in ["old (the record's age)", "young (1e5-1e8 yr)"]
@@ -1438,28 +1525,43 @@ mod tests {
                 let share = |k: u64| k as f64 / t.pairs as f64;
                 println!(
                     "layer {layer:?}, {class}: {} pairs; the pre-test passes over {} ({:.4}); \
-                     Detached {} ({:.4}), {:.4} of those passed over; a star may have collapsed \
-                     in {} ({:.4})",
+                     Detached {} ({:.4}), {:.4} of those passed over, {} wind-fed; a star may \
+                     have collapsed in {} ({:.4})",
                     t.pairs,
                     t.passed_over,
                     share(t.passed_over),
                     t.detached,
                     share(t.detached),
                     share(t.detached) / share(t.passed_over.max(1)),
+                    t.wind_fed.len(),
                     t.collapsed,
                     share(t.collapsed),
                 );
                 for line in t.missed.iter().take(20) {
                     println!("  Detached but passed by the pre-test: {line}");
                 }
+                for line in t.wind_fed.iter().take(20) {
+                    println!("  Detached but wind-fed: {line}");
+                }
                 missed += t.missed.len();
+                wind_fed += t.wind_fed.len();
             }
         }
-        assert_eq!(missed, 0, "Detached pairs that the pre-test passes");
+        assert_eq!(
+            missed, 0,
+            "Detached pairs that the pre-test's lobe and decay tests pass"
+        );
+        assert_eq!(
+            wind_fed, 0,
+            "Detached pairs that the pre-test sends to the engine"
+        );
     }
 
     /// P11.T17.a: 2,000 of the generator's pairs, 400 of each stellar layer, each at its record's
-    /// age and at a young one: no `Detached` pair passes `can_interact` at its window's end.
+    /// age and at a young one: no `Detached` pair passes `can_interact`'s lobe and decay tests at
+    /// its window's end, nor its wind's onset: at 27 and 28, before the bound took the wind's reach
+    /// (P11.T12's fix), 67 of the 4,000 runs were `Detached` pairs the pre-test sends to the engine
+    /// for their wind alone, 27 of layer C's and 40 of layer D's at their records' ages.
     #[test]
     fn detached_generated_pairs_are_passed_over() {
         no_detached_pair_interacts(400);
@@ -1480,11 +1582,11 @@ mod tests {
     use super::super::star::Member;
     use super::super::timeline::Context;
     use crate::coords::GalacticPosition;
-    use crate::sky::photometry::absolute_v_of_state;
     use crate::stellar::binary::evolve;
     use crate::stellar::draws::StarDraws;
     use crate::stellar::multiplicity::testing::records_near;
     use crate::stellar::multiplicity::{HierarchyNode, StarIndex, hierarchy_bound};
+    use crate::stellar::photometry::absolute_v_of_state;
     use crate::stellar::system::{draw_metallicity, primary_draws};
     use crate::time::ClockWindow;
 
@@ -1682,33 +1784,14 @@ mod tests {
             ))
         })?;
         let bins = pair_light::age_bin(w0)?..=pair_light::age_bin(w1)?;
-        if tabled(
-            heavier_msun,
-            lighter_msun,
-            fe_h,
-            periastron_rsun,
-            [w0, w1],
-            HeldStars::Possible,
-        )
-        .is_some()
-        {
+        if tabled(heavier_msun, lighter_msun, fe_h, periastron_rsun, [w0, w1]).is_some() {
             return None;
         }
-        let fe_cell = table.grid().cell_parts(cell)[2];
-        let held = pair_light::held_floor(fe_cell, heavier_msun + lighter_msun)?;
-        let (held_from, floor) = (held.first_bin(), held.cmag());
-        bins.map(|bin| {
-            let changed = table.changed_cmag_for(cell, bin, lighter_msun);
-            if bin >= held_from {
-                changed.min(floor)
-            } else {
-                changed
-            }
-        })
-        .filter(|&k| k != DARK_CMAG)
-        .map(|k| k.min(FAINTEST_CMAG))
-        .min()
-        .map(from_cmag)
+        bins.map(|bin| table.changed_cmag_for(cell, bin, lighter_msun))
+            .filter(|&k| k != DARK_CMAG)
+            .map(|k| k.min(FAINTEST_CMAG))
+            .min()
+            .map(from_cmag)
     }
 
     /// What one set of a layer's pairs came to.
@@ -1737,6 +1820,13 @@ mod tests {
         least_room: f64,
         /// Pairs holding a departing star or product, among those checked.
         departing: u64,
+        /// `Detached` pairs the engine contradicts through their wind alone ([`wind_fed_by`]):
+        /// from generator version 27 a wide pair's main-sequence star takes its partner's wind
+        /// (P11.T12), which the closed form's `Detached` reaches only at 29 (its wind reach,
+        /// retargeted; train 27's findings), so they are counted apart, not held to the rule; and
+        /// the brightest V of a departing star among them, mag.
+        wind_fed: u64,
+        wind_fed_brightest: f64,
         violations: Vec<String>,
         /// Pairs on which the engine's debug assertions fired (release builds skip them).
         engine_panics: Vec<String>,
@@ -1747,6 +1837,7 @@ mod tests {
             Self {
                 least_room: f64::INFINITY,
                 thin_least_room: f64::INFINITY,
+                wind_fed_brightest: f64::INFINITY,
                 ..Self::default()
             }
         }
@@ -1769,6 +1860,8 @@ mod tests {
             self.bright_held += other.bright_held;
             self.least_room = self.least_room.min(other.least_room);
             self.departing += other.departing;
+            self.wind_fed += other.wind_fed;
+            self.wind_fed_brightest = self.wind_fed_brightest.min(other.wind_fed_brightest);
             self.violations.extend(other.violations);
             self.engine_panics.extend(other.engine_panics);
         }
@@ -1843,16 +1936,31 @@ mod tests {
                     held.departing_mag < m.value()
                 }
             };
-            if violated {
+            if violated && verdict == PairLight::Detached && wind_fed_by(input, w1) {
+                self.wind_fed += 1;
+                self.wind_fed_brightest = self.wind_fed_brightest.min(held.departing_mag);
+            } else if violated {
                 self.violations
                     .push(format!("{}; held {held:?}", describe()));
             }
         }
     }
 
+    /// Whether the pair of `input` can interact by `age` (years) through its wind alone, as the
+    /// pre-test reads it ([`can_interact`]): the lobe and decay tests pass it over on its stars'
+    /// own tracks, and its main-sequence star takes its partner's wind past the threshold by then
+    /// (P11.T12's fix, `wind_accretion::onset`), as `no_detached_pair_interacts` counts its
+    /// wind-fed pairs. A `Detached` pair the engine contradicts so is the 28 retarget's, not the
+    /// closed form's lobe and decay terms.
+    fn wind_fed_by(input: &BinaryInput, age: f64) -> bool {
+        let members = own_members(input, age, None);
+        !super::super::evolve::interacts(input, &members, age)
+            && super::super::wind_accretion::onset(input, &members, age).is_some()
+    }
+
     /// Checks each of `pairs` over a window in the old class (about its own age at +H) and in the
-    /// young (its age at +H log-uniform over 10⁵–10⁸ years), in eight shares (in turn on
-    /// wasm32-wasip1): the old and young tallies.
+    /// young (its age at +H log-uniform over 10⁵–10⁸ years), in eight shares on up to eight
+    /// threads, the fewer a run grants (in turn on wasm32-wasip1): the old and young tallies.
     ///
     /// A window ends up to 2H + L before the age at +H, as the census's light-time windows do,
     /// at the bound's extremes for a quarter of the pairs; its kind is [`window_ending`]'s, in
@@ -1893,21 +2001,7 @@ mod tests {
             }
             part
         };
-        #[cfg(not(target_family = "wasm"))]
-        let parts: Vec<[Checked; 2]> = std::thread::scope(|scope| {
-            let handles: Vec<_> = (0..SHARES)
-                .map(|k| {
-                    let share = &share;
-                    scope.spawn(move || share(k))
-                })
-                .collect();
-            handles
-                .into_iter()
-                .map(|h| h.join().expect("a share's thread"))
-                .collect()
-        });
-        #[cfg(target_family = "wasm")]
-        let parts: Vec<[Checked; 2]> = (0..SHARES).map(share).collect();
+        let parts: Vec<[Checked; 2]> = crate::planetary::testing::in_shares(SHARES, SHARES, share);
         let mut total = [Checked::new(), Checked::new()];
         for [old, young] in parts {
             total[0].merge(old);
@@ -1916,9 +2010,9 @@ mod tests {
         total
     }
 
-    /// Prints one set's tallies, and returns its violations.
-    fn report(layer: Layer, set: &str, tallies: &[Checked; 2]) -> usize {
-        let mut violations = 0;
+    /// Prints one set's tallies, and returns its violations and its wind-fed `Detached` pairs.
+    fn report(layer: Layer, set: &str, tallies: &[Checked; 2]) -> (usize, u64) {
+        let (mut violations, mut wind_fed) = (0, 0);
         for (class, t) in ["old", "young"].iter().zip(tallies) {
             let shares = |counts: &[u64; 5]| {
                 let total = counts.iter().sum::<u64>().max(1);
@@ -1964,7 +2058,8 @@ mod tests {
                 "layer {layer:?}, {set}, {class}: census windows {}; wide windows {}; thin none \
                  {:?} (census, wide), of which holding a V {}, least room {:.4} mag without the \
                  rule, {} brighter; Bright's M at 10/25/50/75/90% {}; departing {}; Bright \
-                 holding a V {}, least room {:.4} mag; {} violations; {} engine panics",
+                 holding a V {}, least room {:.4} mag; {} wind-fed Detached (brightest departing \
+                 V {:.2}); {} violations; {} engine panics",
                 shares(&t.census),
                 shares(&t.wide),
                 t.thin,
@@ -1975,6 +2070,8 @@ mod tests {
                 t.departing,
                 t.bright_held,
                 t.least_room,
+                t.wind_fed,
+                t.wind_fed_brightest,
                 t.violations.len(),
                 t.engine_panics.len()
             );
@@ -1992,15 +2089,20 @@ mod tests {
                 t.engine_panics.len()
             );
             violations += t.violations.len();
+            wind_fed += t.wind_fed;
         }
-        violations
+        (violations, wind_fed)
     }
 
     /// P11.T17.c's slow test: the verdicts against the engine, over ≥ 10⁵ realised pairs of each
     /// of C, D and E, as P11.T16's `hierarchy_bound` lists them, near the Sun and in the bulge,
     /// and pairs of theirs with a star below 0.1 M☉, each in an old and a young window, on a seed
     /// of its own:
-    /// - no `Detached` pair interacts before the window's end, or holds a departing star;
+    /// - no `Detached` pair interacts before the window's end, or holds a departing star, its
+    ///   wind's alone counted apart ([`wind_fed_by`]): none from generator version 29, whose
+    ///   `Detached` verdict takes the wind's reach (P11.T12); at 27 and 28, 15,652 windows (C 7,537,
+    ///   D 7,985, E 130, every one old but D's 35), a departing star among them as bright as
+    ///   M<sub>V</sub> −6.38;
     /// - no `Unchanged` pair holds a departing living star or a living product in the window;
     /// - no `Remnants` pair holds a living star or product in the window;
     /// - no `Bright(M)` pair holds a departing star or product brighter than M, which the census
@@ -2011,7 +2113,7 @@ mod tests {
         let galaxy = super::super::testing::milky_way(VERDICT_SEED);
         let sun = GalacticPosition::from_light_years([0.0, 26_000.0, 68.0]).expect("in the cube");
         let bulge = GalacticPosition::from_light_years([0.0, 2_000.0, 300.0]).expect("in the cube");
-        let mut violations = 0;
+        let (mut violations, mut wind_fed) = (0, 0);
         for (salt, layer) in (0x0c_u64..).zip([Layer::C, Layer::D, Layer::E]) {
             let near_sun = listed_pairs(&galaxy, layer, &sun, SUN_PAIRS);
             let in_bulge = listed_pairs(&galaxy, layer, &bulge, BULGE_PAIRS);
@@ -2022,76 +2124,75 @@ mod tests {
                 ("in the bulge", &in_bulge, 0x200),
                 ("a star below 0.1 M_sun", &light, 0x300),
             ] {
-                violations += report(layer, set, &checked(pairs, salt ^ k));
+                let (v, w) = report(layer, set, &checked(pairs, salt ^ k));
+                violations += v;
+                wind_fed += w;
             }
         }
+        println!("{wind_fed} wind-fed Detached pairs counted apart; {violations} violations");
+        assert_eq!(
+            wind_fed, 0,
+            "Detached pairs the engine contradicts through their wind alone"
+        );
         assert_eq!(violations, 0, "verdicts the engine contradicts");
     }
 
-    /// The seed of the samples [`a_capped_timelines_held_stars_are_bounded`] reads, from
+    /// The seed of the samples [`the_follow_ups_hydrogen_gainer_is_not_capped`] reads, from
     /// P11.T17.c's follow-up probe of D's close, metal-rich pairs of 5–8 M☉.
     const CAPPED_SEED: u64 = 0x7a59_e7ed_d0b1_0517;
 
-    /// A capped timeline's held stars are bounded (the module's held floor; P11.T17.c's follow-up
-    /// to R06.T8.g's bulge record `0x61fec2d802000037`). Two of D's table samples reach the
-    /// engine's cap on segments as an accretor carried on its main sequence is fed at its end,
-    /// and their stretched last segments hold it there to 1.5 × 10¹⁰ years:
-    /// - a hydrogen main-sequence gainer of 8.88 M☉ at τ = 1, at M<sub>V</sub> −3.48, beside its
-    ///   donor's white dwarf (5.72 + 4.36 M☉); the tables alone read `Bright(−1.38)` at 1 Gyr and
-    ///   `Remnants` from 3 Gyr;
-    /// - a helium main-sequence star of 1.59 M☉ at M<sub>V</sub> 1.98, fed by a helium giant
-    ///   (finding F15; 5.06 + 4.06 M☉); the tables alone read `Remnants` from about 4 Gyr.
-    ///
-    /// At every window from the cap to the age run to, the verdict holds against the engine, as
-    /// the slow test holds it, and it is never `Remnants` or `Unchanged`.
+    /// The other capped sample of P11.T17.c's follow-up in D's table, a helium main-sequence star
+    /// of 1.59 M☉ at M<sub>V</sub> 1.98 fed by a helium giant (5.06 + 4.06 M☉), whose tables alone
+    /// read `Remnants` from about 4 Gyr, held there by the cap (finding F15), is not capped since
+    /// P11.T4.m: a helium accretor keeps its fraction burnt (ruling p11-c2-swell of 2026-10-06).
     #[test]
-    fn a_capped_timelines_held_stars_are_bounded() {
+    fn the_follow_ups_fed_helium_star_is_not_capped() {
         let grid = pair_light::PairGrid::of(Layer::D).expect("D's grid");
-        for (cell, index) in [(4_817, 10_021), (4_273, 10_253)] {
-            let input = pair_light::sample_input(&grid, cell, index, CAPPED_SEED);
-            let horizon = pair_light::LAST_AGE_YEARS;
-            let timeline = evolve(&input, Years::new(horizon));
-            assert!(timeline.hit_segment_cap(), "cell {cell}, sample {index}");
-            let cap = timeline
-                .segments()
-                .last()
-                .expect("a segment")
-                .start()
-                .value();
-            let [m1, m2] = input.masses();
-            let p = input.orbit().periapsis();
-            let comp = input.composition();
-            let mut bright = 0;
-            for k in 0..=8 {
-                let lo = crate::math::log10(cap);
-                let hi = crate::math::log10(horizon);
-                let t = crate::math::exp10(lo + (hi - lo) * f64::from(k) / 8.0).min(horizon);
-                for window in [[t, t], [t * 0.9, t]] {
-                    let verdict = pair_light_bound(
-                        m1,
-                        m2,
-                        p,
-                        comp,
-                        Years::new(window[0])..=Years::new(window[1]),
-                    );
-                    let truth = held(&input, horizon, window);
-                    let what = || {
-                        format!("cell {cell}, sample {index}, {window:?}: {verdict:?}, {truth:?}")
-                    };
-                    assert!(truth.living && truth.departing, "{}", what());
-                    match verdict {
-                        Some(PairLight::Bright(m)) => {
-                            assert!(truth.departing_mag >= m.value(), "{}", what());
-                            bright += 1;
-                        }
-                        None => {}
-                        Some(PairLight::Remnants | PairLight::Unchanged | PairLight::Detached) => {
-                            panic!("{}", what())
-                        }
+        let input = pair_light::sample_input(&grid, 4_273, 10_253, CAPPED_SEED);
+        let timeline = evolve(&input, Years::new(pair_light::LAST_AGE_YEARS));
+        assert!(!timeline.hit_segment_cap(), "cell 4273, sample 10253");
+    }
+
+    /// The capped sample of P11.T17.c's follow-up in D's table, a hydrogen main-sequence gainer
+    /// of 8.88 M☉ fed at its main sequence's end by a 0.97 M☉ helium giant (5.72 + 4.36 M☉ at
+    /// 7.49 d), each of whose steps aimed at that end landed short of it, once its accretion had
+    /// lowered its τ, and closed a segment, to the engine's cap at 99.25 Myr (finding F18), whose
+    /// stretched segment then held it at M<sub>V</sub> −3.48 to 1.5 × 10¹⁰ years, is not capped
+    /// since P11.T4.o: a fed member that ages over the step aimed at its main sequence's end takes
+    /// that end. The helium giant feeds it on its main sequence for one segment, to 99.2367 Myr,
+    /// where it is a Hertzsprung-gap star.
+    #[test]
+    fn the_follow_ups_hydrogen_gainer_is_not_capped() {
+        use super::super::timeline::{Component, SegmentKind};
+        use crate::stellar::Phase;
+
+        let grid = pair_light::PairGrid::of(Layer::D).expect("D's grid");
+        let (cell, index) = (4_817, 10_021);
+        let input = pair_light::sample_input(&grid, cell, index, CAPPED_SEED);
+        let timeline = evolve(&input, Years::new(pair_light::LAST_AGE_YEARS));
+        assert!(!timeline.hit_segment_cap(), "cell {cell}, sample {index}");
+        let fed: Vec<_> = timeline
+            .segments()
+            .iter()
+            .filter(|s| {
+                let donor = timeline.state_at(s.start()).stars()[0].phase();
+                s.kind()
+                    == SegmentKind::StableTransfer {
+                        donor: Component::Primary,
                     }
-                }
-            }
-            assert!(bright > 0, "cell {cell}, sample {index}: no window Bright");
-        }
+                    && matches!(
+                        donor,
+                        Phase::HeliumHertzsprungGap | Phase::HeliumGiantBranch
+                    )
+                    && matches!(s.members()[1], Member::MainSequence { .. })
+            })
+            .collect();
+        assert_eq!(fed.len(), 1, "cell {cell}, sample {index}");
+        let end = fed[0].end();
+        assert!((end.value() / 99.2367e6 - 1.0).abs() < 1e-6, "{end:?}");
+        assert_eq!(
+            timeline.state_at(end).stars()[1].phase(),
+            Phase::HertzsprungGap
+        );
     }
 }

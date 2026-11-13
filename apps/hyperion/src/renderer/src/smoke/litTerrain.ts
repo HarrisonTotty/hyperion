@@ -1,0 +1,886 @@
+/**
+ * The smoke harness's lit-terrain check (plan R10, R10.T10.b): a generated world's patch set drawn
+ * by R10's lit material on the real device, by both vertex paths.
+ *
+ * @remarks
+ * The world is `hyperion_surface`'s Moon-like synthetic world, its first survey's payload blocks
+ * as the worker fixture pins them (`tests/golden/worker/moon_like.golden`), which a height worker
+ * takes into its field and bakes a 3 × 3 block of level-7 patches over, with their class weights,
+ * their palette's photometry and their horizon maps, and their four parents, whose maps the block's
+ * shadows blend to by a morph factor of about ¼ to ½ (R10.T8.b). They are drawn from 30 km above
+ * the block, 60° below the horizon, under one Sun-like star and one planetshine source through a
+ * body without air. The
+ * frame must be finite at every texel, mostly terrain, and lit. The block lies within the survey,
+ * so that R10.T10.c's discard keeps all of it. A buffer or texture beyond the
+ * device's limits, or a write outside one, raises an uncaptured validation error, which the
+ * harness's main process counts against the run.
+ *
+ * Then the morph's end (R10.T8.c): the block at k = 1 lies on its parents' surface, with its
+ * horizon and its shading normal blended wholly to theirs, so it must draw the parents' own image
+ * (drawn alone, at k = 0) wherever both draw, to within the rounding of two meshes over one
+ * surface; drawn at k = 1 with no parent to blend to, its own finer normals and maps must not, so
+ * that the check can fail.
+ *
+ * Then the ground's thermal emission (plan R08, R08.T18.a): the block drawn by the lit material's
+ * emissive form with no star and no planetshine, its ground a young magma ocean's field about the star's
+ * old direction, so that its light is its own alone. Each texel the first frame draws as terrain
+ * must emit, in luminance, between the least and the most that `thermal.ts`' shared function gives
+ * any of the block's laws' A, its laws' and its maturity nodes', over the field's temperature
+ * across the block, to 1% for the half floats and `f32`'s exponentials.
+ */
+
+import { withTemplateCurve } from "../view/appearance/phase";
+import {
+  createAirlessTables,
+  surfaceLightingDrawTextures,
+  type SurfaceLightingTables,
+} from "../view/atmosphere/surfaceLighting";
+import type { Quaternion } from "../view/camera/pose";
+import { viewRotation4 } from "../view/camera/projection";
+import { quaternionFromRows } from "../view/camera/quaternion";
+import type {
+  BufferHandle,
+  MaterialHandle,
+  RenderEngine,
+  RenderTarget,
+  TextureHandle,
+} from "../view/engine/types";
+import { annulusEdges } from "../view/lighting/annuli";
+import { METER_CLASS } from "../view/post/meter";
+import { TERRAIN_SETTINGS } from "../view/quality/qualitySetting";
+import { normalsAtlasOf, TerrainResources } from "../view/terrain/gpu/resources";
+import {
+  ContactRecords,
+  InstanceRecords,
+  NO_PARENT_SLOT,
+  parentQuadrant,
+  patchTerms,
+} from "../view/terrain/gpu/uniforms";
+import { SELECTION_RULE, sigmaSurveyOf } from "../view/terrain/levelBounds";
+import { parentKey, type PatchKey } from "../view/terrain/patchKey";
+import type { BodyFigure } from "../view/terrain/planet";
+import { createShadowPlaceholder } from "../view/terrain/shadows/terrainShadows";
+import {
+  classPhotometryOf,
+  DISC_NORMALS_TEXTURE,
+  MELT_CLASS_CODE,
+  SHADOW_CASCADES_TEXTURE,
+  TERRAIN_CLASSES,
+  type TerrainLighting,
+  terrainLitEmissiveMaterialSpec,
+  terrainLitMaterialSpec,
+} from "../view/terrain/terrainMaterial";
+import {
+  type BakedPatch,
+  type BakeSettings,
+  type HeightWorkerReply,
+  type HeightWorkerRequest,
+  PALETTE_NONE,
+} from "../view/terrain/workers/messages";
+import { moonLikeFixture, type WorkerFixture } from "../test/moonLikeFixture";
+import { lavaWorldSurface, magmaOceanSurface } from "../test/thermalSurfaces";
+import { rec709Luminance } from "../view/atmosphere/solar";
+import {
+  fieldTemperatureK,
+  groundTemperatureFieldOf,
+  type SurfaceTemperatureField,
+  thermalLuminance,
+} from "../view/atmosphere/thermal";
+import type { Rgb } from "../view/photometry/toneCurve";
+import { type Checks, halfTexels, projection } from "./harness";
+
+/** The Moon-like world's equatorial radius, m: R ÷ ∛(1 − f) ({@link MOON_LIKE}). */
+const MOON_LIKE_A_M = 1.7374e6 / Math.cbrt(1 - 0.0012);
+
+/**
+ * The Moon-like world's figure (`hyperion_surface`'s `testing/worlds.rs`: the Moon's volumetric
+ * radius, 1,737.4 km, at a flattening of 0.0012, `Spheroid::from_volumetric`'s a = R ÷ ∛(1 − f)).
+ */
+export const MOON_LIKE: Readonly<Pick<BodyFigure, "equatorialRadiusM" | "polarRadiusM">> = {
+  equatorialRadiusM: MOON_LIKE_A_M,
+  polarRadiusM: MOON_LIKE_A_M * (1 - 0.0012),
+};
+
+/** The frames' size, pixels. */
+const FRAME = { widthPx: 64, heightPx: 48 } as const;
+
+/** The frames' cache budget, 32 MiB: a few hundred lit slots on either path. */
+const CACHE_BYTES = 2 ** 25;
+
+/** How long the worker may take over the field and the bakes, milliseconds. */
+const WORKER_TIMEOUT_MS = 120_000;
+
+/** The block's centre patch: level 7 over the first survey's cells (22, 22) to (23, 23) of face +y. */
+const CENTRE: PatchKey = { face: 1, level: 7, i: 45, j: 45 };
+
+/** The camera's height above the centre patch's origin, metres, and its depression, degrees. */
+const HEIGHT_M = 30_000;
+const DEPRESSION_DEG = 60;
+
+/** The 3 × 3 block of keys about {@link CENTRE}, the centre first. */
+function keys(): PatchKey[] {
+  const out: PatchKey[] = [CENTRE];
+  for (let dj = -1; dj <= 1; dj += 1) {
+    for (let di = -1; di <= 1; di += 1) {
+      if (di !== 0 || dj !== 0) {
+        out.push({ ...CENTRE, i: CENTRE.i + di, j: CENTRE.j + dj });
+      }
+    }
+  }
+  return out;
+}
+
+/** The parents of `children`, each once, in the order first met. */
+function parentsOf(children: ReadonlyArray<PatchKey>): PatchKey[] {
+  const out: PatchKey[] = [];
+  for (const child of children) {
+    const parent = parentKey(child);
+    if (parent !== null && !out.some((p) => p.i === parent.i && p.j === parent.j)) {
+      out.push(parent);
+    }
+  }
+  return out;
+}
+
+/**
+ * The morph's start and end distances the block is drawn with, metres: the block lies 30 to about
+ * 60 km from the camera, so that its morph factor is about ¼ to ½ and the horizon is blended to the
+ * parents' maps (R10.T8.b).
+ */
+const MORPH_M = [0, 120_000] as const;
+
+/** A morph band that puts every vertex of the block, 30 km and more away, at k = 1, metres. */
+const MORPH_DONE_M = [0, 1] as const;
+
+/** Posts the fixture's field to a fresh height worker and bakes `wanted` over it. */
+async function bakeOverField(
+  wanted: ReadonlyArray<PatchKey>,
+  settings: BakeSettings,
+  field: WorkerFixture,
+): Promise<BakedPatch[]> {
+  const worker = new Worker(new URL("../view/terrain/workers/height.worker.ts", import.meta.url), {
+    type: "module",
+  });
+  try {
+    return await new Promise<BakedPatch[]>((resolve, reject) => {
+      const baked = new Map<number, BakedPatch>();
+      let held = 0;
+      const timer = setTimeout(() => {
+        reject(new Error(`${String(baked.size)} of ${String(wanted.length)} bakes in time`));
+      }, WORKER_TIMEOUT_MS);
+      const fail = (message: string): void => {
+        clearTimeout(timer);
+        reject(new Error(message));
+      };
+      worker.addEventListener("message", (event: MessageEvent<HeightWorkerReply>) => {
+        const reply = event.data;
+        switch (reply.kind) {
+          case "field-held":
+            held += 1;
+            if (held === field.blocks.length) {
+              wanted.forEach((key, id) => {
+                const request: HeightWorkerRequest = {
+                  kind: "bake",
+                  id,
+                  key,
+                  generation: 1,
+                  settings,
+                };
+                worker.postMessage(request, []);
+              });
+            }
+            return;
+          case "baked":
+            baked.set(reply.id, reply.bake);
+            if (baked.size === wanted.length) {
+              clearTimeout(timer);
+              resolve(wanted.map((_, id) => baked.get(id)).filter((b) => b !== undefined));
+            }
+            return;
+          case "bake-failed":
+          case "bake-unsurveyed":
+          case "field-refused":
+          // No class map is asked here (R10.T10.d).
+          case "class-map":
+          case "class-map-failed":
+          // No readout is asked here (R10.T12).
+          case "ground-readout":
+          case "ground-readout-failed":
+          // No bake is drafted here, so none is refined (R10.T6.a).
+          case "normals-refined":
+            fail(`the worker answered ${JSON.stringify(reply)}`);
+            return;
+        }
+      });
+      worker.addEventListener("error", (event: Event) => {
+        fail(event instanceof ErrorEvent ? event.message : "the worker did not load");
+      });
+      field.blocks.forEach((block, n) => {
+        const request: HeightWorkerRequest =
+          n === 0
+            ? {
+                kind: "field-init",
+                id: n,
+                body: field.body,
+                block,
+                form: "payload",
+                sigma: sigmaSurveyOf(SELECTION_RULE),
+              }
+            : { kind: "field-chunk", id: n, body: field.body, block };
+        worker.postMessage(request, []);
+      });
+    });
+  } finally {
+    worker.terminate();
+  }
+}
+
+interface Xyz {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+}
+
+function cross(a: Xyz, b: Xyz): Xyz {
+  return { x: a.y * b.z - a.z * b.y, y: a.z * b.x - a.x * b.z, z: a.x * b.y - a.y * b.x };
+}
+
+function along(a: Xyz, ka: number, b: Xyz, kb: number): Xyz {
+  return { x: a.x * ka + b.x * kb, y: a.y * ka + b.y * kb, z: a.z * ka + b.z * kb };
+}
+
+function unit(v: Xyz): Xyz {
+  const n = Math.hypot(v.x, v.y, v.z);
+  return { x: v.x / n, y: v.y / n, z: v.z / n };
+}
+
+/** What one frame of the check found. */
+interface LitFrame {
+  readonly pass: boolean;
+  readonly detail: string;
+}
+
+/** What a setting's frames found: the blended frame's check and the morph's end's (R10.T8.c). */
+interface LitFrames {
+  readonly lit: LitFrame;
+  readonly morph: LitFrame;
+  /** The ground's thermal emission's frame (R08.T18.a). */
+  readonly emission: LitFrame;
+  /** The `Melt` slots' frame on a night side (R08.T18.a). */
+  readonly melt: LitFrame;
+}
+
+/**
+ * Draws the field's block with `setting`'s path and reads it back, releasing what it made whether
+ * or not a step throws.
+ */
+async function drawLit(
+  engine: RenderEngine,
+  setting: "high" | "low",
+  field: WorkerFixture,
+): Promise<LitFrames> {
+  const settings = { ...TERRAIN_SETTINGS[setting], cacheBytes: CACHE_BYTES };
+  const resources = new TerrainResources(engine, settings, MOON_LIKE, "lit");
+  const air = createAirlessTables(engine, "lit terrain smoke: no air");
+  // No cascades: the lit material binds the placeholder, which it never samples at w = 0
+  // (R10.T9.b).
+  const shadow = createShadowPlaceholder(engine);
+  try {
+    return await drawInto(engine, setting, field, resources, air, shadow);
+  } finally {
+    resources.dispose();
+    engine.releaseTexture(air.body);
+    engine.releaseTexture(shadow);
+  }
+}
+
+/** {@link drawLit}'s frame, into `resources` lit through `air`. */
+async function drawInto(
+  engine: RenderEngine,
+  setting: "high" | "low",
+  field: WorkerFixture,
+  resources: TerrainResources,
+  air: SurfaceLightingTables,
+  shadow: TextureHandle,
+): Promise<LitFrames> {
+  const settings = TERRAIN_SETTINGS[setting];
+  const { layout } = resources;
+  const children = keys();
+  const parents = parentsOf(children);
+  const baked = await bakeOverField(
+    [...children, ...parents],
+    {
+      vertexPath: layout.vertexPath,
+      normals: settings.normals,
+      source: { kind: "body", body: field.body, detailSeed: field.seed, weights: "baked" },
+    },
+    field,
+  );
+  baked.forEach((bake, slot) => {
+    // Each patch's first palette slot takes the `Melt` form (R08.T18.a), which only the emissive
+    // form reads (its laws' word 6), so that its night side's frame below has melt to draw.
+    const result = resources.upload({ slot, ...withMeltFirst(bake) });
+    if (result.kind !== "uploaded") {
+      throw new Error(`slot ${String(slot)} refused: ${result.reason}`);
+    }
+    if (!resources.holdsHorizon(slot)) {
+      throw new Error(`slot ${String(slot)} holds no horizon map`);
+    }
+  });
+  // The block alone is drawn; its parents' maps, in the slots after it, are what it blends to.
+  const bakes = baked.slice(0, children.length);
+  const centre = bakes[0];
+  if (centre === undefined) {
+    throw new Error("no centre patch was baked");
+  }
+  // The camera above the centre's origin along its datum normal; body-fixed axes are the frame's.
+  const nu = patchTerms(centre.key, MOON_LIKE, centre.originHeightM).nu0;
+  const camera = along(centre.originM, 1, nu, HEIGHT_M);
+  const reference = Math.abs(nu.z) > 0.9 ? { x: 1, y: 0, z: 0 } : { x: 0, y: 0, z: 1 };
+  const east = unit(cross(reference, nu));
+  const north = cross(nu, east);
+  const d = (DEPRESSION_DEG * Math.PI) / 180;
+  const forward = along(north, Math.cos(d), nu, -Math.sin(d));
+  const upUnit = along(north, Math.sin(d), nu, Math.cos(d));
+  const right = cross(forward, upUnit);
+  const orientation = quaternionFromRows([
+    { x: right.x, y: upUnit.x, z: -forward.x },
+    { x: right.y, y: upUnit.y, z: -forward.y },
+    { x: right.z, y: upUnit.z, z: -forward.z },
+  ]);
+  const instances = new InstanceRecords(layout.slots.slotCount);
+  // The block's instances at the morph band `morphBandM`, each blending to its parent's slot, or
+  // to none.
+  const writeBlock = (morphBandM: readonly [number, number], blend: boolean): void => {
+    instances.clear();
+    bakes.forEach((bake, slot) => {
+      const parent = parentKey(bake.key);
+      const index = parents.findIndex((p) => p.i === parent?.i && p.j === parent.j);
+      if (index < 0) {
+        throw new Error(`no parent of slot ${String(slot)} was baked`);
+      }
+      instances.push(
+        slot,
+        {
+          x: bake.originM.x - camera.x,
+          y: bake.originM.y - camera.y,
+          z: bake.originM.z - camera.z,
+        },
+        morphBandM[0],
+        morphBandM[1],
+        blend ? children.length + index : NO_PARENT_SLOT,
+        parentQuadrant(bake.key),
+      );
+    });
+    resources.writeFrame(instances, new ContactRecords());
+  };
+  // The parents alone, at k = 0 (a band of no span), with no parent of their own to blend to.
+  const writeParents = (): void => {
+    instances.clear();
+    baked.slice(children.length).forEach((bake, index) => {
+      instances.push(
+        children.length + index,
+        {
+          x: bake.originM.x - camera.x,
+          y: bake.originM.y - camera.y,
+          z: bake.originM.z - camera.z,
+        },
+        0,
+        0,
+      );
+    });
+    resources.writeFrame(instances, new ContactRecords());
+  };
+  writeBlock(MORPH_M, true);
+  // A Sun-like star 40° from the zenith towards the east, at 1 au (IAU 2012 B2's 1.495978707 ×
+  // 10¹¹ m) with the Sun's nominal radius (IAU 2015 B3's 6.957 × 10⁸ m) and about the Sun's
+  // illuminance at 1 au, and an Earth-like neighbour's planetshine from the west, low, at the Moon's
+  // distance and the Earth's radius over the Moon-like a (3.844 × 10⁸ m and 6.371 × 10⁶ m), its
+  // illuminance a test value; the lights are relative to the centre ÷ a, body-fixed.
+  const a = MOON_LIKE.equatorialRadiusM;
+  const annuli = annulusEdges(0.6, 0.2, 2);
+  const lighting: TerrainLighting = {
+    lights: [
+      {
+        direction: unit(along(nu, Math.cos(0.7), east, Math.sin(0.7))),
+        distance: 1.495978707e11 / a,
+        radius: 6.957e8 / a,
+        illuminance: [1.3e5, 1.25e5, 1.2e5],
+        annuli: [annuli, annuli, annuli],
+      },
+    ],
+    occluders: [],
+    secondaries: [
+      {
+        direction: unit(along(nu, 0.2, east, -1)),
+        distance: 3.844e8 / a,
+        radius: 6.371e6 / a,
+        illuminance: [0.05, 0.05, 0.06],
+      },
+    ],
+    elsewhere: withTemplateCurve({
+      a: [0.11, 0.11, 0.11],
+      lommelSeeligerShare: 1,
+      template: "moon",
+      phaseExponent: [1, 1, 1],
+    }),
+    exposureScale: 1e-4,
+  };
+  resources.setLighting(lighting);
+  const lit = resources.lit;
+  const classLayers = resources.field("class-layers");
+  const horizonMap = resources.field("horizon-map");
+  const surveyMask = resources.field("survey-mask");
+  if (lit === null || classLayers === null || horizonMap === null || surveyMask === null) {
+    throw new Error("the lit layout has no lit resources");
+  }
+  const storageBuffers: Record<string, BufferHandle> = {
+    slots: resources.slotRecords,
+    instances: resources.instances,
+    contacts: resources.contacts,
+    classLayers,
+    terrainLights: lit.lights,
+    horizonMap,
+    surveyMask,
+  };
+  for (const name of ["heights", "offsets"] as const) {
+    const buffer = resources.field(name);
+    if (buffer !== null) {
+      storageBuffers[name] = buffer;
+    }
+  }
+  const material = await engine.createMaterialAsync(
+    terrainLitMaterialSpec(layout.vertexPath),
+    ["rgba16float"],
+    [resources.mesh],
+  );
+  const target = engine.createRenderTarget({
+    name: `lit terrain ${setting}`,
+    size: FRAME,
+    format: "rgba16float",
+    mips: 1,
+    depth: true,
+    category: "render-targets",
+  });
+  const draw: LitDraw = {
+    resources,
+    material,
+    air,
+    shadow,
+    lit,
+    storageBuffers,
+    orientation,
+    camera,
+    inverseRadius: 1 / a,
+    patches: bakes.length,
+  };
+  try {
+    const first = await renderInto(engine, target, draw);
+    const blended = litFrameOf(layout.vertexPath, draw, first);
+    // The morph's end's frames run in order, each read back before the next is written.
+    writeBlock(MORPH_DONE_M, true);
+    const done = await renderInto(engine, target, draw);
+    writeParents();
+    const coarse = await renderInto(engine, target, draw);
+    writeBlock(MORPH_DONE_M, false);
+    const unblended = await renderInto(engine, target, draw);
+    // The ground's own light alone (R08.T18.a): no star, no planetshine, the field about the star's
+    // old direction.
+    const star = lighting.lights[0];
+    const ocean = groundTemperatureFieldOf(magmaOceanSurface());
+    if (star === undefined) {
+      throw new Error("the frame has a star");
+    }
+    writeBlock(MORPH_M, true);
+    resources.setLighting({
+      ...lighting,
+      lights: [],
+      secondaries: [],
+      emission: { field: ocean, star: star.direction, meltClasses: [] },
+    });
+    const emissive = await engine.createMaterialAsync(
+      terrainLitEmissiveMaterialSpec(layout.vertexPath),
+      ["rgba16float"],
+      [resources.mesh],
+    );
+    const emitted = await renderInto(engine, target, { ...draw, material: emissive });
+    const albedos = blockAlbedos(bakes, lighting.elsewhere.a);
+    // The locked lava world's night side over the block: its ground at its 21 K night, its first
+    // slot's `Melt` at the melt's least temperature.
+    const lava = groundTemperatureFieldOf(lavaWorldSurface());
+    if (lava.meltK === null) {
+      throw new Error("the lava world has a melt");
+    }
+    resources.setLighting({
+      ...lighting,
+      lights: [],
+      secondaries: [],
+      emission: { field: lava, star: { x: -nu.x, y: -nu.y, z: -nu.z }, meltClasses: [] },
+    });
+    const molten = await renderInto(engine, target, { ...draw, material: emissive });
+    return {
+      lit: blended,
+      morph: morphFrameOf(done, coarse, unblended),
+      emission: emissionFrameOf(first, emitted, {
+        field: ocean,
+        star: star.direction,
+        nu,
+        albedos,
+        exposureScale: lighting.exposureScale,
+      }),
+      melt: meltFrameOf(first, molten, {
+        meltK: lava.meltK,
+        albedos,
+        exposureScale: lighting.exposureScale,
+      }),
+    };
+  } finally {
+    target.dispose();
+  }
+}
+
+/** A bake with its palette's first slot of the `Melt` form, its entry kept; an empty slot kept. */
+function withMeltFirst(bake: BakedPatch): BakedPatch {
+  const { layers } = bake;
+  if (layers === null || layers.palette[1] === PALETTE_NONE) {
+    return bake;
+  }
+  const palette = Uint8Array.from(layers.palette);
+  palette[0] = MELT_CLASS_CODE;
+  return { ...bake, layers: { ...layers, palette } };
+}
+
+/**
+ * The `Melt` frame's check (R08.T18.a): the block's night side, its ground at its night's 21 K
+ * and so dark, and its first slots of the `Melt` form at the melt's least temperature; every
+ * texel the first frame draws as terrain finite and at most what the brightest emitting A gives
+ * at that temperature, within {@link EMISSION_MARGIN}, and some of them lit by the melt alone.
+ */
+function meltFrameOf(
+  terrain: Float32Array,
+  molten: Float32Array,
+  bounds: {
+    readonly meltK: number;
+    readonly albedos: ReadonlyArray<Rgb>;
+    readonly exposureScale: number;
+  },
+): LitFrame {
+  const most =
+    Math.max(...bounds.albedos.map((a) => rec709Luminance(thermalLuminance(a, 1, bounds.meltK)))) *
+    bounds.exposureScale *
+    (1 + EMISSION_MARGIN);
+  let texels = 0;
+  let glowing = 0;
+  let over = 0;
+  let highest = 0;
+  for (let p = 0; p < FRAME.widthPx * FRAME.heightPx; p += 1) {
+    if (!isTerrain(terrain, p)) {
+      continue;
+    }
+    texels += 1;
+    const y = rec709Luminance([
+      molten[4 * p] ?? Number.NaN,
+      molten[4 * p + 1] ?? Number.NaN,
+      molten[4 * p + 2] ?? Number.NaN,
+    ]);
+    highest = Math.max(highest, y);
+    glowing += y > 1e-3 * most ? 1 : 0;
+    over += y > most ? 1 : 0;
+  }
+  const finite = molten.every(Number.isFinite);
+  return {
+    pass: finite && texels > 0 && glowing > 0 && over === 0,
+    detail:
+      `the night side at the ground's 21 K: ${String(glowing)} of ${String(texels)} terrain ` +
+      `texels glow by their Melt slot at ${bounds.meltK.toFixed(1)} K, the brightest ` +
+      `${highest.toPrecision(4)} of at most ${most.toPrecision(4)} pre-exposed, ${String(over)} over; finite ${String(finite)}`,
+  };
+}
+
+/**
+ * Every A a texel of the block may emit with: law 0's, each slot's photometry's and each of its
+ * maturity nodes', per display channel (Johnson R, V and B as r, g and b).
+ */
+function blockAlbedos(bakes: ReadonlyArray<BakedPatch>, elsewhere: Rgb): Rgb[] {
+  const out: Rgb[] = [elsewhere];
+  for (const bake of bakes) {
+    const layers = bake.layers;
+    if (layers === null) {
+      continue;
+    }
+    for (let k = 0; k < TERRAIN_CLASSES; k += 1) {
+      const law = classPhotometryOf(layers.photometry, k);
+      if (law !== null) {
+        out.push(law.a);
+      }
+    }
+    const nodes = layers.maturity?.nodes;
+    if (nodes !== undefined) {
+      for (let at = 0; at + 3 <= nodes.length; at += 3) {
+        const [b = 0, v = 0, r = 0] = nodes.subarray(at, at + 3);
+        if (b > 0 || v > 0 || r > 0) {
+          out.push([r, v, b]);
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/** What the emission's frame is held to (the module's remarks). */
+interface EmissionBounds {
+  readonly field: SurfaceTemperatureField;
+  /** The field's star, body-fixed, and the block's centre's datum normal. */
+  readonly star: Xyz;
+  readonly nu: Xyz;
+  readonly albedos: ReadonlyArray<Rgb>;
+  readonly exposureScale: number;
+}
+
+/** The emission's luminance's relative margin: the half floats' and `f32`'s exponentials'. */
+const EMISSION_MARGIN = 0.01;
+
+/** The cosine's spread from the block's centre over its 3 × 3 level-7 patches, generous. */
+const BLOCK_COSINE_SPREAD = 0.05;
+
+/**
+ * The emission's check (R08.T18.a; the module's remarks): every texel `terrain` draws as terrain
+ * finite, and its luminance in `emitted` between the least and the most any of the block's A
+ * emits over the field's temperatures across the block, within {@link EMISSION_MARGIN}.
+ */
+function emissionFrameOf(
+  terrain: Float32Array,
+  emitted: Float32Array,
+  bounds: EmissionBounds,
+): LitFrame {
+  const mu =
+    bounds.nu.x * bounds.star.x + bounds.nu.y * bounds.star.y + bounds.nu.z * bounds.star.z;
+  const temperatures = [mu - BLOCK_COSINE_SPREAD, mu + BLOCK_COSINE_SPREAD].map((m) =>
+    fieldTemperatureK(bounds.field, m, bounds.nu.z),
+  );
+  const luminances = bounds.albedos.flatMap((a) =>
+    temperatures.map((t) => rec709Luminance(thermalLuminance(a, 1, t)) * bounds.exposureScale),
+  );
+  const least = Math.min(...luminances) * (1 - EMISSION_MARGIN);
+  const most = Math.max(...luminances) * (1 + EMISSION_MARGIN);
+  let texels = 0;
+  let within = 0;
+  let lowest = Number.POSITIVE_INFINITY;
+  let highest = 0;
+  for (let p = 0; p < FRAME.widthPx * FRAME.heightPx; p += 1) {
+    if (!isTerrain(terrain, p)) {
+      continue;
+    }
+    texels += 1;
+    const y = rec709Luminance([
+      emitted[4 * p] ?? Number.NaN,
+      emitted[4 * p + 1] ?? Number.NaN,
+      emitted[4 * p + 2] ?? Number.NaN,
+    ]);
+    lowest = Math.min(lowest, y);
+    highest = Math.max(highest, y);
+    if (y >= least && y <= most) {
+      within += 1;
+    }
+  }
+  const finite = emitted.every(Number.isFinite);
+  return {
+    pass: finite && texels >= 0.5 * FRAME.widthPx * FRAME.heightPx && within === texels,
+    detail:
+      `${String(within)} of ${String(texels)} terrain texels emit within ` +
+      `[${least.toPrecision(4)}, ${most.toPrecision(4)}] pre-exposed (drawn ` +
+      `${lowest.toPrecision(4)} to ${highest.toPrecision(4)}), at ` +
+      `${temperatures.map((t) => t.toFixed(0)).join(" to ")} K over ${String(bounds.albedos.length)} A; finite ${String(finite)}`,
+  };
+}
+
+/** One frame's draw, as {@link drawInto} assembles it. */
+interface LitDraw {
+  readonly resources: TerrainResources;
+  readonly material: MaterialHandle;
+  readonly air: SurfaceLightingTables;
+  /** The shadow cascades' placeholder, which the lit material binds (R10.T9.b). */
+  readonly shadow: TextureHandle;
+  readonly lit: { readonly lights: BufferHandle; readonly phaseTable: TextureHandle };
+  readonly storageBuffers: Readonly<Record<string, BufferHandle>>;
+  readonly orientation: Quaternion;
+  readonly camera: Xyz;
+  /** 1 ÷ a, per metre. */
+  readonly inverseRadius: number;
+  readonly patches: number;
+}
+
+/** Renders `draw` into `target` and reads it back, four channels a texel. */
+async function renderInto(
+  engine: RenderEngine,
+  target: RenderTarget,
+  draw: LitDraw,
+): Promise<Float32Array> {
+  const { resources, material, air, shadow, lit, storageBuffers, orientation, camera } = draw;
+  const { layout } = resources;
+  const atlas = normalsAtlasOf(layout);
+  target.render({
+    label: "terrain",
+    viewRotation: viewRotation4(orientation),
+    projection: projection(FRAME.widthPx / FRAME.heightPx),
+    draws: [
+      {
+        mesh: resources.mesh,
+        material,
+        offsetFromCameraM: new Float32Array(3),
+        uniforms: {
+          bodyRotation: new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]),
+          cameraBodyFixedM: new Float32Array([camera.x, camera.y, camera.z, draw.inverseRadius]),
+          atlas: new Float32Array([
+            atlas.columns,
+            atlas.tilesPerLayer,
+            atlas.tileTexels,
+            atlas.samplesPerSide,
+          ]),
+        },
+        textures: {
+          normals: resources.normals,
+          phaseFactorTable: lit.phaseTable,
+          ...surfaceLightingDrawTextures(air),
+          [SHADOW_CASCADES_TEXTURE]: shadow,
+          // No disc normal map: read at no detail share below 1 (R10.T15.b.2).
+          [DISC_NORMALS_TEXTURE]: resources.normals,
+        },
+        storageBuffers,
+        indirect: { buffer: resources.indirect, offsetBytes: 0 },
+      },
+    ],
+    postProcesses: [],
+  });
+  return halfTexels(await engine.readTexture(target.colour));
+}
+
+/** Whether texel `p` of a frame is terrain: its meter class lit by a star, or unlit. */
+function isTerrain(texels: Float32Array, p: number): boolean {
+  const meter = texels[4 * p + 3];
+  return meter === METER_CLASS.litBody || meter === METER_CLASS.unlitBody;
+}
+
+/** The blended frame's check: finite at every texel, mostly terrain, and lit. */
+function litFrameOf(path: string, draw: LitDraw, texels: Float32Array): LitFrame {
+  const { resources } = draw;
+  let terrain = 0;
+  let litPixels = 0;
+  for (let p = 0; p < FRAME.widthPx * FRAME.heightPx; p += 1) {
+    if (isTerrain(texels, p)) {
+      terrain += 1;
+    }
+    if (texels[4 * p + 3] === METER_CLASS.litBody && (texels[4 * p + 1] ?? 0) > 0) {
+      litPixels += 1;
+    }
+  }
+  const cover = terrain / (FRAME.widthPx * FRAME.heightPx);
+  const finite = texels.every(Number.isFinite);
+  return {
+    pass: finite && cover >= 0.5 && litPixels > 0,
+    detail: `${path}: ${String(draw.patches)} patches, ${String(resources.phaseRows.laws.length)} phase rows, terrain ${(100 * cover).toFixed(1)}% of the frame, ${String(litPixels)} lit pixels, finite ${String(finite)}`,
+  };
+}
+
+/**
+ * The share of the texels drawn as terrain in both `a` and `b` whose colour in `a` lies within
+ * `tolerance` of `b`'s, relative, every channel, a channel under `floor` taken at `floor`; how many
+ * texels both draw; and the worst relative difference among them.
+ */
+function agreement(
+  a: Float32Array,
+  b: Float32Array,
+  tolerance: number,
+  floor: number,
+): { readonly share: number; readonly both: number; readonly worst: number } {
+  let both = 0;
+  let within = 0;
+  let worst = 0;
+  for (let p = 0; p < FRAME.widthPx * FRAME.heightPx; p += 1) {
+    if (!isTerrain(a, p) || !isTerrain(b, p)) {
+      continue;
+    }
+    both += 1;
+    let off = 0;
+    for (let c = 0; c < 3; c += 1) {
+      const x = a[4 * p + c] ?? NaN;
+      const y = b[4 * p + c] ?? NaN;
+      off = Math.max(off, Math.abs(x - y) / Math.max(Math.abs(y), floor));
+    }
+    worst = Math.max(worst, off);
+    if (off <= tolerance) {
+      within += 1;
+    }
+  }
+  return { share: both > 0 ? within / both : 0, both, worst };
+}
+
+/** A share as a percentage to two places. */
+function percent(x: number): string {
+  return `${(100 * x).toFixed(2)}%`;
+}
+
+/** The relative tolerance of a texel at the morph's end against the parents' image. */
+const MORPH_TOLERANCE = 0.01;
+
+/** The share of the texels both draw that must agree, which the unblended frame must not reach. */
+const MORPH_AGREEING = 0.98;
+
+/**
+ * The morph's end's check (R10.T8.c): the block at k = 1 (`done`) draws its parents' image
+ * (`coarse`) where both draw, and without its parents' tiles and maps (`unblended`) it does not, so
+ * that the check can fail; every frame finite, and the comparison over a quarter of the frame or
+ * more.
+ */
+function morphFrameOf(done: Float32Array, coarse: Float32Array, unblended: Float32Array): LitFrame {
+  let brightest = 0;
+  for (let p = 0; p < FRAME.widthPx * FRAME.heightPx; p += 1) {
+    if (isTerrain(coarse, p)) {
+      brightest = Math.max(brightest, coarse[4 * p + 1] ?? 0);
+    }
+  }
+  // A channel under a thousandth of the frame's brightest is compared as that thousandth.
+  const floor = Math.max(1e-3 * brightest, Number.MIN_VALUE);
+  const morphed = agreement(done, coarse, MORPH_TOLERANCE, floor);
+  const own = agreement(unblended, coarse, MORPH_TOLERANCE, floor);
+  const finite = [done, coarse, unblended].every((texels) => texels.every(Number.isFinite));
+  const enough = morphed.both >= 0.25 * FRAME.widthPx * FRAME.heightPx;
+  return {
+    pass: finite && enough && morphed.share >= MORPH_AGREEING && own.share < MORPH_AGREEING,
+    detail:
+      `at k = 1, ${percent(morphed.share)} of ${String(morphed.both)} texels within ` +
+      `${percent(MORPH_TOLERANCE)} of the parents' (worst ${morphed.worst.toExponential(2)}); ` +
+      `with no parent's tiles and maps, ${percent(own.share)} (worst ${own.worst.toExponential(2)}); ` +
+      `finite ${String(finite)}`,
+  };
+}
+
+/** R10.T10.b's lit terrain: a generated world's patch set by both vertex paths. */
+export async function checkLitTerrain(engine: RenderEngine, checks: Checks): Promise<void> {
+  const field = moonLikeFixture("first");
+  for (const setting of ["high", "low"] as const) {
+    // The frames run in order: each bakes, draws and reads back before the next allocates.
+    // oxlint-disable-next-line no-await-in-loop
+    const { lit, morph, emission, melt } = await drawLit(engine, setting, field);
+    checks.check(
+      `R10.T10.b the lit terrain of a generated world (${setting}) is finite, drawn and lit`,
+      lit.pass,
+      lit.detail,
+    );
+    checks.check(
+      `R10.T8.c a fine patch at k = 1 shades as its parents, normals and horizon (${setting})`,
+      morph.pass,
+      morph.detail,
+    );
+    checks.check(
+      `R08.T18.a the lit terrain's emissive form draws its ground's own light (${setting})`,
+      emission.pass,
+      emission.detail,
+    );
+    checks.check(
+      `R08.T18.a the lit terrain's Melt slots glow on a night side at the melt's temperature (${setting})`,
+      melt.pass,
+      melt.detail,
+    );
+  }
+}

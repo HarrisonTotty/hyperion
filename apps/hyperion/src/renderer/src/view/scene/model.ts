@@ -1,14 +1,19 @@
 import type {
   BodyIdHex,
+  DetailLevelDto,
+  DetailSeedHex,
   GalacticPosition,
   HostDiscDto,
   SystemIdHex,
+  UniverseIdHex,
   UniverseTime,
 } from "@hyperion/protocol";
 
 import type { Vec3 } from "../../geometry/vec3";
 import type { KeplerOrbit } from "../../lib/orbit";
+import type { SystemPlace } from "../../lib/scene/model";
 import type { WireAppearance } from "../appearance/fromWire";
+import type { KeptBodyAtmosphere } from "../atmosphere/AtmosphereCache";
 import {
   BODY_MIN_SIZE_CLASS,
   CONTACT_SIZE_CLASS,
@@ -92,12 +97,28 @@ export interface ViewBody {
    */
   readonly retarded: RetardedCentre | null;
   /**
+   * Its present velocity in the system frame, m/s from the barycentre along the galactic axes, for
+   * a body drawn at the present: the ship's local body in a served scene alone
+   * (`SceneFrame.localBodyVelocityMPerS`, which the own ship's velocity in its frame is held
+   * against), absent for every other body, whose velocity is its retarded one (plan R10, R10.T14.c;
+   * decision-r10-t14c-leans §5). The terrain session's contacts chain a craft's frame through it.
+   */
+  readonly presentVelocityMPerS?: Vec3;
+  /**
    * Its rotation from body-fixed to body axes at the time it is drawn at, or `null` where rotation
-   * is not modelled: a server body's from its rotation section (plan R07, T2.b), at the frame's
-   * time for the ship's local body, drawn at the present, and at its light's emission for every
-   * other, drawn where it is seen.
+   * is not modelled or not resolved (see {@link ViewBody.rotationNotResolved}): a server body's
+   * from its rotation section (plan R07, T2.b), at the frame's time for the ship's local body,
+   * drawn at the present, and at its light's emission for every other, drawn where it is seen.
    */
   readonly rotation: Rotation3 | null;
+  /**
+   * Whether the body's rotation is not resolved (rotation-not-resolved; the guide's "Data states"):
+   * `true` exactly where a served body's rotation section is `not_resolved`, the detail level
+   * granted to the console withholding it, when {@link ViewBody.rotation} is `null`; absent where
+   * the rotation is given or not modelled (a `not_modelled` section, an older server's absent
+   * section, a star, and every kept scene's body), so that a reader never infers the state.
+   */
+  readonly rotationNotResolved?: true;
   /**
    * How it is shaded where the photorealistic style lights it (plan R07, T2.b): a server body's
    * figure, photometry and labels from plan 14's sections (`heldAppearanceOf`), or `null`, as for
@@ -107,12 +128,34 @@ export interface ViewBody {
   readonly appearance: WireAppearance | null;
   /**
    * The unit normal of its orbit, along the galactic axes, which stands for its pole while its
-   * rotation is not modelled (Design note 14); `null` where it has no orbit drawn from elements,
-   * when the frame's +z stands in.
+   * rotation is not modelled or not resolved (Design note 14); `null` where it has no orbit drawn
+   * from elements, when the frame's +z stands in.
    */
   readonly orbitNormal: Vec3 | null;
   /** Its mark from the ship-wide symbol set, drawn below 3 px (`lib/system/bodySymbols.ts`). */
   readonly symbol: BodyMarkSymbol;
+  /**
+   * A kept scene's body's own detail seed (`BodyHooksDto.detail_seed`'s form), the seed of its
+   * terrain synthesis and class map, which the terrain session takes in place of asking
+   * `body_detail` (plan R10, R10.T16.a; `TERRAIN TEST`'s body carries one, R10.T16.d). Absent for a
+   * server body, whose seed the session asks of its record, and for a kept body with no terrain.
+   */
+  readonly detailSeed?: DetailSeedHex;
+  /**
+   * Whether the body has no surface for a view's survey line to speak of (plan R10, R10.T12;
+   * decision-r10-t12-commit3 §5): `true` for a kept scene's giant and for a served body in the
+   * gas-envelope state (a sub-Neptune, an ice giant or a gas giant by its bulk section's class), so
+   * that a view whose `FRAME` is its states no terrain lines; absent for every other body.
+   */
+  readonly surfaceless?: true;
+  /**
+   * A kept scene's setting of the body's atmosphere (plan R08, R08.T10.b; `AtmosphereCache`'s
+   * `KeptBodyAtmosphere`): airless, a medium the scene built, or one it is still building. Absent on
+   * a kept scene's body, none is set, which the view states as `ATMOSPHERE: NOT YET MODELLED`, as
+   * R07's `TEST GIANT` carries it (decision-r08-giant-label). A server body never carries one: its
+   * record is asked of the server.
+   */
+  readonly atmosphere?: KeptBodyAtmosphere;
 }
 
 /** Whether a scene body is lit in the photorealistic style: a planet, dwarf planet or moon. */
@@ -170,7 +213,11 @@ export function bodyKindSymbol(kind: ViewBodyKind): BodyMarkSymbol {
   return symbol;
 }
 
-/** A body's rings: an annulus in the body's equatorial plane. */
+/**
+ * A body's ring: an annulus in its own plane, the one its normal gives: its planet's local
+ * Laplace plane, the equatorial plane well inside the planet's Laplace radius (plan 14,
+ * P14.T56.a), or the planet's orbital plane from a server that sends no ring normal.
+ */
 export interface ViewRing {
   /** The ringed body. */
   readonly body: BodyIdHex;
@@ -231,6 +278,37 @@ export interface ViewStar {
 }
 
 /**
+ * Where a kept scene's bodies are a served universe's, as `VIEW`'s body inspection draws them (the
+ * owner's request, 2026-11-01): the universe, the system's place and each body's granted detail
+ * level. Its bodies are the server's records drawn by the server scene's own path, so they are
+ * served bodies wherever the view reads one: their atmospheres and detail seeds are asked of the
+ * server, and the view is lit by its sky's host discs, never by settings of the scene's own.
+ */
+export interface ServedSceneSource {
+  readonly universe: UniverseIdHex;
+  /** The system's designation of record and its barycentre, from which its sky is asked. */
+  readonly place: SystemPlace;
+  /** Each body's granted detail level, by which its record is asked. */
+  readonly grants: ReadonlyMap<BodyIdHex, DetailLevelDto>;
+  /**
+   * The body from whose centre its positions are seen, at its light-time: the inspected body, which
+   * the label block names (`POSITIONS AS SEEN FROM <designation>`).
+   */
+  readonly seenFrom: BodyIdHex;
+  /** Whose sky the view asks ({@link ServedSky}); absent, the system's own. */
+  readonly sky?: ServedSky;
+}
+
+/**
+ * Whose sky a served scene is seen against: `system`, its own system's, whose stars the census leaves
+ * out, as every galaxy system's is; or `shared`, the `PLANET VIEWER`'s one sky for every generated
+ * planet (plan R15), asked with no system left out. A viewer system is no record of the galaxy, so
+ * leaving it out leaves no star out, and every viewer system stands at one point: one sky then
+ * serves every generated planet within the client's hold, its discs asked on their own.
+ */
+export type ServedSky = "system" | "shared";
+
+/**
  * Where a scene came from: a kept test scene, with its name (`PRECISION TEST`,
  * `FRAME CHANGE TEST`), or the server's scene (R02.T17).
  */
@@ -280,6 +358,25 @@ export interface ViewScene {
    * scene leaves it unset and is lit by its held sky's `hosts`.
    */
   readonly hostDiscs?: ReadonlyArray<HostDiscDto>;
+  /**
+   * A kept scene's served bodies (`VIEW`'s body inspection; {@link ServedSceneSource}), which the
+   * view reads as a server scene's; absent for every other kept scene and for the server's.
+   */
+  readonly served?: ServedSceneSource;
+  /**
+   * The body an `ORBIT` camera is offered about (plan R15, T4): the `PLANET VIEWER`'s planet;
+   * absent for every other scene, which offers no `ORBIT`.
+   */
+  readonly orbitHome?: BodyIdHex;
+}
+
+/**
+ * Whether a scene's bodies bring settings of the scene's own, its host discs, atmospheres and detail
+ * seeds, as a kept test scene's do, where every other scene's are the server's: a server scene's,
+ * and a kept scene of served bodies ({@link ViewScene.served}, `VIEW`'s body inspection).
+ */
+export function bringsOwnSettings(scene: ViewScene): boolean {
+  return scene.provenance.kind === "kept" && scene.served === undefined;
 }
 
 /**
@@ -356,5 +453,20 @@ export function cameraSceneOf(scene: ViewScene): CameraScene {
             lengthM: own.hull.lengthM,
           },
     defaultPose: scene.defaultPose,
+    // Each with its reference spheroid where its figure is granted, else a sphere of its radius.
+    orbitBodies: scene.bodies.flatMap((body) =>
+      body.kind !== "star" && body.radiusM > 0
+        ? [
+            {
+              id: body.id,
+              equatorialRadiusM: body.radiusM,
+              polarRadiusM: body.appearance?.figure?.polarRadiusM ?? body.radiusM,
+              pole: body.appearance?.figure?.pole ?? null,
+            },
+          ]
+        : [],
+    ),
+    // Only the PLANET VIEWER's scene offers ORBIT, about its planet (plan R15, T4).
+    orbitHome: scene.orbitHome ?? null,
   };
 }

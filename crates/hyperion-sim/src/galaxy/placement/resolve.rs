@@ -12,15 +12,20 @@
 //! full the cell: no cell is generated, and nothing is cached, so the answer cannot depend on what
 //! has been generated before.
 
-use super::cell::{candidate_count_from_bound, layer_bound};
-use super::{
-    CandidateOutcome, CellKey, ResolveSystemError, SystemRecord, evaluate_candidate_from_bound,
-};
+use super::candidate::{catalogue_claims, evaluate_with_hook};
+use super::cell::{CellBound, candidate_count_from_bound};
+use super::{CandidateOutcome, CellKey, ResolveSystemError, SystemRecord};
 use crate::galaxy::Galaxy;
+use crate::galaxy::catalogue_classes::system_of;
 use crate::galaxy::features::centre::members::resolve_centre_member;
 use crate::galaxy::features::members::{NoInteriorCache, resolve_member};
-use crate::galaxy::global_list::TubeLookup;
-use crate::id::{SystemId, SystemIdKind};
+use crate::galaxy::global_list::dwarf_core::{DwarfCoreModel, resolve_dwarf_core_member};
+use crate::galaxy::global_list::members::{
+    GlobalMemberRecord, StreamBandShares, resolve_stream_member,
+};
+use crate::galaxy::global_list::{Debris, StreamNumber, TubeLookup, in_stream_shell};
+use crate::id::{DwarfCoreMemberId, StreamMemberId, SystemId, SystemIdKind};
+use crate::units::Years;
 
 /// The system `id` names in `galaxy`.
 ///
@@ -32,14 +37,19 @@ use crate::id::{SystemId, SystemIdKind};
 /// # Errors
 ///
 /// - [`ResolveSystemError::KindNotGenerated`] for an ID under the reserved layer value — a
-///   stream, a dwarf core, pinned content or a catalogue system — until plans 09 and 10 generate
-///   them. Streams and dwarf cores stay so here for good, since their members need the caller's
-///   tube tables: they resolve through [`resolve_with`]. A catalogue feature's member resolves
-///   through plan 09's [`resolve_member`] (P09.T21), and the galactic centre's through
-///   [`resolve_centre_member`] (P09.T27), which builds the centre's model.
+///   stream, a dwarf core or pinned content — until plan 10 generates them. Streams and dwarf
+///   cores stay so here for good, since their members need the caller's tube tables: they resolve
+///   through [`resolve_with`]. A catalogue feature's member resolves through plan 09's
+///   [`resolve_member`] (P09.T21), the galactic centre's through [`resolve_centre_member`]
+///   (P09.T27), which builds the centre's model, and a catalogue class's through the class grid
+///   ([`system_of`], P09.T33.a).
 /// - [`ResolveSystemError::NoSuchSystem`] if the index is at or above the cell's
 ///   [`candidate_count`](super::candidate_count), or its candidate was thinned, or a catalogue
-///   class claimed it; for a feature member, if [`resolve_member`] finds none.
+///   class claimed it, or, from generator version 25, its orbit passes inside the black hole's
+///   loss cone ([`CandidateOutcome::InLossCone`]; plan 09, P09.T28.b.b); for a
+///   feature member, if [`resolve_member`] finds none; for a catalogue system, if the class grid
+///   names none ([`system_of`]: a class with no process, an index past its cell's count, a
+///   candidate thinned or failing its class's test, a member its entry lacks).
 ///
 /// # Examples
 ///
@@ -77,10 +87,12 @@ pub fn resolve(galaxy: &Galaxy, id: SystemId) -> Result<SystemRecord, ResolveSys
         }
         // The galactic centre's members and its black hole (plan 09, P09.T27).
         SystemIdKind::Centre(member) => resolve_centre_member(galaxy, member).map(|m| *m.record()),
-        SystemIdKind::Stream(_)
-        | SystemIdKind::DwarfCore(_)
-        | SystemIdKind::Pinned(_)
-        | SystemIdKind::Catalogue(_) => Err(ResolveSystemError::KindNotGenerated),
+        // A catalogue class's member, through the class grid's production lookup, with the record
+        // its class gives it (plan 09, P09.T33.a).
+        SystemIdKind::Catalogue(id) => system_of(galaxy, id).map(|system| *system.record()),
+        SystemIdKind::Stream(_) | SystemIdKind::DwarfCore(_) | SystemIdKind::Pinned(_) => {
+            Err(ResolveSystemError::KindNotGenerated)
+        }
     }
 }
 
@@ -94,8 +106,15 @@ pub fn resolve(galaxy: &Galaxy, id: SystemId) -> Result<SystemRecord, ResolveSys
 ///
 /// # Errors
 ///
-/// As [`resolve`]. A stream's or a dwarf core's member answers
-/// [`ResolveSystemError::KindNotGenerated`] until plan 10 places them (P10.T8.b and P10.T7.b).
+/// As [`resolve`]. A stream's member is plan 10's [`resolve_stream_member`] in its stream's tube,
+/// which `lookup` gives (P10.T8.b), and a dwarf core's [`resolve_dwarf_core_member`] in its core's
+/// model (P10.T7.b); the stream's and the core's specifications are drawn from the galaxy's
+/// [`Debris`] until the list holds them (P10.T4). Either is [`ResolveSystemError::NoSuchSystem`]
+/// in a galaxy without its kinematic tables, whose debris is not defined, for a stream or a core
+/// the galaxy does not have, which reads no tube, or for a core whose fullest cell can pass its
+/// index ([`DwarfCoreModel::check_index_headroom`]). From version 26 a stream's member outside its
+/// stream's bounding shell, its entry's in `lookup`'s list, is none, as the range query's
+/// [`GlobalListSource`](crate::galaxy::global_list::GlobalListSource) leaves it out (P10.T9).
 ///
 /// # Examples
 ///
@@ -131,11 +150,11 @@ pub fn resolve(galaxy: &Galaxy, id: SystemId) -> Result<SystemRecord, ResolveSys
 pub fn resolve_with(
     galaxy: &Galaxy,
     id: SystemId,
-    _lookup: &dyn TubeLookup,
+    lookup: &dyn TubeLookup,
 ) -> Result<SystemRecord, ResolveSystemError> {
     match id.kind() {
         SystemIdKind::Stream(_) | SystemIdKind::DwarfCore(_) => {
-            Err(ResolveSystemError::KindNotGenerated)
+            resolve_list_member_with(galaxy, id, lookup).map(|member| *member.record())
         }
         SystemIdKind::Grid(_)
         | SystemIdKind::FeatureMember(_)
@@ -143,6 +162,88 @@ pub fn resolve_with(
         | SystemIdKind::Pinned(_)
         | SystemIdKind::Catalogue(_) => resolve(galaxy, id),
     }
+}
+
+/// The member of `galaxy`'s global list that `id` names, a stream's or a dwarf core's, with what
+/// its stars and its motion need beside its record (plan 10, P10.T10.b).
+///
+/// [`resolve_with`] gives the member's record alone. A list member's stars are its member
+/// record's ([`GlobalMemberRecord::stars`]), at its class and composition, which the stellar stage
+/// of a bare record would not give it, so a caller that generates them resolves here.
+///
+/// # Errors
+///
+/// [`ResolveSystemError::KindNotGenerated`] if `id` is neither a stream member's nor a dwarf core
+/// member's ID, and otherwise as [`resolve_with`] for the member.
+pub fn resolve_list_member_with(
+    galaxy: &Galaxy,
+    id: SystemId,
+    lookup: &dyn TubeLookup,
+) -> Result<GlobalMemberRecord, ResolveSystemError> {
+    match id.kind() {
+        SystemIdKind::Stream(member) => resolve_listed_stream_member(galaxy, lookup, member),
+        SystemIdKind::DwarfCore(member) => resolve_core_member(galaxy, member),
+        SystemIdKind::Grid(_)
+        | SystemIdKind::FeatureMember(_)
+        | SystemIdKind::Centre(_)
+        | SystemIdKind::Pinned(_)
+        | SystemIdKind::Catalogue(_) => Err(ResolveSystemError::KindNotGenerated),
+    }
+}
+
+/// A stream's member, its stream's specification from the galaxy's debris and its tube from
+/// `lookup` ([`resolve_with`]).
+fn resolve_listed_stream_member(
+    galaxy: &Galaxy,
+    lookup: &dyn TubeLookup,
+    id: StreamMemberId,
+) -> Result<GlobalMemberRecord, ResolveSystemError> {
+    if galaxy.kinematics().is_none() {
+        return Err(ResolveSystemError::NoSuchSystem);
+    }
+    let debris = Debris::generate(galaxy);
+    let spec = debris
+        .streams()
+        .iter()
+        .find(|stream| stream.number() == StreamNumber::from(id))
+        .ok_or(ResolveSystemError::NoSuchSystem)?;
+    let tube = lookup.tube(spec.number());
+    let shares = StreamBandShares::of(galaxy, spec);
+    let member = resolve_stream_member(galaxy, &tube, &shares, id)?;
+    // A member outside its stream's shell, which the list holds, is none (P10.T9;
+    // `global_list`'s "Bounding shells").
+    let admitted = lookup
+        .global_list()
+        .stream_entry(spec.number())
+        .is_some_and(|entry| in_stream_shell(&entry.shell(), member.record().epoch_position()));
+    if admitted {
+        Ok(member)
+    } else {
+        Err(ResolveSystemError::NoSuchSystem)
+    }
+}
+
+/// A dwarf core's member, its core's model built from the galaxy's debris ([`resolve_with`]).
+fn resolve_core_member(
+    galaxy: &Galaxy,
+    id: DwarfCoreMemberId,
+) -> Result<GlobalMemberRecord, ResolveSystemError> {
+    if galaxy.kinematics().is_none() {
+        return Err(ResolveSystemError::NoSuchSystem);
+    }
+    let debris = Debris::generate(galaxy);
+    let spec = debris
+        .cores()
+        .iter()
+        .find(|core| core.number().get() == id.number())
+        .ok_or(ResolveSystemError::NoSuchSystem)?;
+    let model = DwarfCoreModel::from_spec(galaxy, spec);
+    // A core whose fullest cell can pass the index is not played (P10.T7.b): its clamped
+    // counts would drop members.
+    model
+        .check_index_headroom()
+        .map_err(|_| ResolveSystemError::NoSuchSystem)?;
+    resolve_dwarf_core_member(galaxy, &model, id)
 }
 
 /// The record of candidate `index` of `key`, if the cell has that candidate and the thinning kept
@@ -156,15 +257,26 @@ fn resolve_candidate(
     key: CellKey,
     index: u32,
 ) -> Result<SystemRecord, ResolveSystemError> {
-    let bound = layer_bound(galaxy, key);
-    if index >= candidate_count_from_bound(galaxy.seed(), key, bound) {
+    resolve_candidate_with(galaxy, key, index, catalogue_claims)
+}
+
+/// [`resolve_candidate`] with the carve-out hook given: the production hook, or a test's claim
+/// (P08.T13's seam), on the same path as everything else that evaluates a candidate.
+fn resolve_candidate_with(
+    galaxy: &Galaxy,
+    key: CellKey,
+    index: u32,
+    claims: impl Fn(&Galaxy, &SystemRecord, Option<Years>) -> bool,
+) -> Result<SystemRecord, ResolveSystemError> {
+    let bound = CellBound::of(galaxy, key);
+    if index >= candidate_count_from_bound(galaxy.seed(), key, bound.total()) {
         return Err(ResolveSystemError::NoSuchSystem);
     }
-    match evaluate_candidate_from_bound(galaxy, key, index, bound) {
+    match evaluate_with_hook(galaxy, key, index, &bound, claims) {
         CandidateOutcome::Accepted(record) => Ok(record),
-        CandidateOutcome::Thinned | CandidateOutcome::ClaimedByCatalogue => {
-            Err(ResolveSystemError::NoSuchSystem)
-        }
+        CandidateOutcome::Thinned
+        | CandidateOutcome::ClaimedByCatalogue
+        | CandidateOutcome::InLossCone => Err(ResolveSystemError::NoSuchSystem),
     }
 }
 
@@ -172,7 +284,9 @@ fn resolve_candidate(
 mod tests {
     use super::*;
     use crate::coords::GalacticPosition;
+    use crate::galaxy::displaced::site::{ExplosionSite, explosion_site};
     use crate::galaxy::params::GalaxyParams;
+    use crate::galaxy::placement::candidate::claims_with;
     use crate::galaxy::placement::{
         STELLAR_LAYERS, candidate_count, evaluate_candidate, generate_cell,
     };
@@ -296,6 +410,80 @@ mod tests {
         panic!("only {thinned} thinned candidates in 64 layer-E cells at the Sun-like point");
     }
 
+    /// P08.T13: with a claim that says yes to every recent death, a layer-E record whose primary
+    /// dies inside the interval resolves to no such system and its candidate is the catalogue's,
+    /// while with no claim set it resolves to itself, and a record whose primary dies outside the
+    /// interval resolves to itself under either.
+    ///
+    /// Neither `resolve` nor the candidate's evaluation takes a time, so the outcome is the same
+    /// at every query time, on both sides of the death, by construction.
+    #[test]
+    fn resolve_refuses_a_record_whose_recent_death_is_claimed() {
+        let galaxy = galaxy();
+        let always = |g: &Galaxy, r: &SystemRecord, _: Option<Years>| {
+            claims_with(
+                g,
+                r,
+                explosion_site,
+                |_: &Galaxy, _: &ExplosionSite, _: &SystemRecord| true,
+            )
+        };
+        // A fixed scan along x from the Sun-like point: near the solar circle a death falls in the
+        // interval's 4.26 Myr in about one layer-E cell in 28.
+        let first = CellKey::containing(Layer::E, &sunlike()).unwrap();
+        let [x, y, z] = first.gen_cell().to_array();
+        let mut cell = Vec::new();
+        let (mut dying, mut quiet) = (None, None);
+        for step in 0..600 {
+            let key = CellKey::new(Layer::E, [x + step, y, z]).unwrap();
+            generate_cell(&galaxy, key, &mut cell);
+            for record in &cell {
+                match explosion_site(&galaxy, record) {
+                    Some(site) if dying.is_none() => dying = Some((key, *record, site)),
+                    None if quiet.is_none() => quiet = Some((key, *record)),
+                    Some(_) | None => {}
+                }
+            }
+            if dying.is_some() {
+                break;
+            }
+        }
+        let index = |record: &SystemRecord| {
+            let SystemIdKind::Grid(grid) = record.id().kind() else {
+                unreachable!("a grid record has a grid ID")
+            };
+            grid.index()
+        };
+        let (key, record, site) = dying.expect("a death in the interval within 600 layer-E cells");
+        assert_eq!(
+            resolve_candidate_with(&galaxy, key, index(&record), always),
+            Err(ResolveSystemError::NoSuchSystem)
+        );
+        let bound = CellBound::of(&galaxy, key);
+        assert_eq!(
+            evaluate_with_hook(&galaxy, key, index(&record), &bound, always),
+            CandidateOutcome::ClaimedByCatalogue
+        );
+        assert_eq!(resolve(&galaxy, record.id()), Ok(record));
+        // The same site from a second galaxy of the same seed, which has generated nothing.
+        assert_eq!(explosion_site(&self::galaxy(), &record), Some(site));
+        let (quiet_key, quiet) = quiet.expect("most layer-E records die outside the interval");
+        assert_eq!(
+            resolve_candidate_with(&galaxy, quiet_key, index(&quiet), always),
+            Ok(quiet)
+        );
+        println!(
+            "claimed: layer-E cell {:?}, candidate {}, {:.2} M☉ dying at {} ({:.1} yr), site {:?} \
+             ly (this galaxy has no kinematic tables, so it is the epoch position)",
+            key.gen_cell().to_array(),
+            index(&record),
+            record.primary_initial_mass().value(),
+            site.death(),
+            site.death().since_epoch().as_julian_years_f64(),
+            site.position().to_light_years_f64(),
+        );
+    }
+
     /// Since plan 13 (P13.T3.c) every layer resolves: a substellar ID names an object or no such
     /// system, never an ungenerated layer. The reserved kinds are still refused.
     #[test]
@@ -332,10 +520,11 @@ mod tests {
         }
     }
 
-    /// Plan 10, P10.T1: a stream's and a dwarf core's members are not resolved by either
-    /// resolver yet, and `resolve` never will resolve them.
+    /// Plan 10: `resolve` never resolves a stream's or a dwarf core's member; `resolve_with`
+    /// resolves both (P10.T7.b, T8.b), here in a galaxy without its kinematic tables, which has
+    /// none and reads no tube.
     #[test]
-    fn stream_and_dwarf_core_members_are_not_generated_yet() {
+    fn stream_and_dwarf_core_members_are_not_generated_by_resolve() {
         let galaxy = galaxy();
         let lookup = NoTubes(GlobalList::default());
         let stream = SystemId::from(StreamMemberId::new(3, Layer::D, 900, [31, 32], 0).unwrap());
@@ -359,17 +548,19 @@ mod tests {
                 resolve(&galaxy, id),
                 Err(ResolveSystemError::KindNotGenerated)
             );
+        }
+        for id in [stream, core, listed] {
             assert_eq!(
                 resolve_with(&galaxy, id, &lookup),
-                Err(ResolveSystemError::KindNotGenerated)
+                Err(ResolveSystemError::NoSuchSystem)
             );
         }
     }
 
     /// Plan 10, P10.T1: every kind but a stream's and a dwarf core's is forwarded, so
     /// `resolve_with` answers as `resolve` does on grid IDs (systems, empty indices and thinned
-    /// candidates) and on the centre's black hole. Feature and centre members are the slow test
-    /// below.
+    /// candidates) and on the centre's black hole, and `resolve_list_member_with` finds no list
+    /// member in any of them. Feature and centre members are the slow test below.
     #[test]
     fn resolve_with_agrees_with_resolve_on_grid_and_centre_ids() {
         let lookup = NoTubes(GlobalList::default());
@@ -389,6 +580,11 @@ mod tests {
             assert_eq!(
                 resolve_with(&galaxy, id, &lookup),
                 resolve(&galaxy, id),
+                "{id:?}"
+            );
+            assert_eq!(
+                resolve_list_member_with(&galaxy, id, &lookup),
+                Err(ResolveSystemError::KindNotGenerated),
                 "{id:?}"
             );
         }

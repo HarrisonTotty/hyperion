@@ -5,19 +5,31 @@ import { FIXTURE_MOON, FIXTURE_PLANET } from "../../test/viewFixtures";
 import { type ProjectionCamera, project, type Viewport } from "../camera/projection";
 import { IDENTITY_QUATERNION, quaternionFromAxisAngle } from "../camera/quaternion";
 import type { CameraTarget } from "../camera/state";
-import { markShiftDevicePx } from "../../lib/strokes";
+import { markShiftDevicePx, markStrokeDevicePx } from "../../lib/strokes";
 import { SIZE_CLASS_REM } from "../../spatial/symbols";
 import { bodyKindSymbol } from "../scene/model";
 import {
   bodySymbolMark,
   bracketHalfSizePx,
   bracketReticle,
+  contactRadiusPx,
   destinationHalfSizePx,
+  anchorFillsView,
   destinationReticle,
+  discFillsView,
   flightPathMarker,
+  type HullOnView,
+  lineOfSightClearancePx,
+  lineOfSightGivesWay,
+  type LineOfSightStrokes,
+  lineOfSightTripod,
+  markBoxPx,
   markLabelOffsetPx,
   markLabelRisePx,
+  reticleRadiusPx,
   type ScreenMark,
+  type ScreenSegment,
+  segmentDistancePx,
   symbologyMarks,
   symbolRadiusPx,
   targetMark,
@@ -427,5 +439,511 @@ describe("the outlines' outward shift (R07.T16.d; decision-thin-line-contrast, i
       ];
     });
     expect(out).toEqual(RATIOS.map((ratio) => [0, 0].map(() => px(markShiftDevicePx(ratio)))));
+  });
+});
+
+/** The view's strokes for the line-of-sight mark at a device-pixel ratio, device px. */
+function tripodStrokesAt(ratio: number): LineOfSightStrokes {
+  return {
+    markStrokePx: markStrokeDevicePx(ratio),
+    markShiftPx: markShiftDevicePx(ratio),
+  };
+}
+
+/** Fails the test where a mark that should have been made was not. */
+function absent(what: string): never {
+  throw new Error(`${what} was not made`);
+}
+
+/** The view's centre, where the line of sight falls. */
+const CENTRE = { xPx: 960, yPx: 540 };
+
+/**
+ * Each tick's inner and outer ends' distances from `at`, px, its direction out from `at`, degrees
+ * clockwise from straight up, and how far its line passes from `at`, px.
+ */
+function ticksAbout(
+  mark: ScreenMark,
+  at: { xPx: number; yPx: number },
+): Array<{ innerPx: number; outerPx: number; angleDeg: number; offLinePx: number }> {
+  return mark.segments.map(([inner, outer]) => {
+    const dx = outer.xPx - inner.xPx;
+    const dy = outer.yPx - inner.yPx;
+    return {
+      innerPx: Math.hypot(inner.xPx - at.xPx, inner.yPx - at.yPx),
+      outerPx: Math.hypot(outer.xPx - at.xPx, outer.yPx - at.yPx),
+      angleDeg: (Math.atan2(dx, -dy) * 180) / Math.PI,
+      offLinePx:
+        Math.abs(dx * (at.yPx - inner.yPx) - dy * (at.xPx - inner.xPx)) / Math.hypot(dx, dy),
+    };
+  });
+}
+
+/** The distance, px, from `p` to the segment `s`, by its foot on the segment's line, clamped. */
+function pointToSegmentPx(p: { xPx: number; yPx: number }, s: ScreenSegment): number {
+  const [a, b] = s;
+  const dx = b.xPx - a.xPx;
+  const dy = b.yPx - a.yPx;
+  const t = Math.min(
+    1,
+    Math.max(0, ((p.xPx - a.xPx) * dx + (p.yPx - a.yPx) * dy) / (dx * dx + dy * dy)),
+  );
+  return Math.hypot(a.xPx + t * dx - p.xPx, a.yPx + t * dy - p.yPx);
+}
+
+/** How far clockwise the direction `aDeg` stands from `bDeg`, whole degrees from 0 to 359. */
+function degreesApart(aDeg: number, bDeg: number): number {
+  return Math.round((((aDeg - bDeg) % 360) + 360) % 360);
+}
+
+/**
+ * How far from its centreline a tick's coloured stroke lights a pixel, device px, as `lines.wgsl`
+ * lights it: half the stroke and the fringe, its casing apart (decision-r10-t12-commit3 §3).
+ */
+function strokeReachPx(strokes: LineOfSightStrokes): number {
+  return strokes.markStrokePx / 2 + 0.5;
+}
+
+/** A point on the view, px. */
+function pointPx(xPx: number, yPx: number): { xPx: number; yPx: number } {
+  return { xPx, yPx };
+}
+
+describe("the line-of-sight mark, the tripod (R10.T12)", () => {
+  it("draws three --text ticks pointing at the point, one from below and two from above at 60° to the vertical", () => {
+    // At a ratio of 2 and 100%, where neither the shift nor the open centre moves it.
+    const mark = lineOfSightTripod(CENTRE, 32, tripodStrokesAt(2));
+    const ticks = ticksAbout(mark, CENTRE);
+    expect({
+      kind: mark.kind,
+      token: mark.token,
+      target: mark.target,
+      anchor: mark.anchor,
+      angles: ticks.map((tick) => Math.round(tick.angleDeg * 1e9) / 1e9),
+      onTheirLines: ticks.every((tick) => tick.offLinePx < 1e-9),
+    }).toEqual({
+      kind: "line_of_sight",
+      token: "text",
+      target: null,
+      anchor: CENTRE,
+      angles: [180, -60, 60],
+      onTheirLines: true,
+    });
+  });
+
+  it("sets its ticks 120° apart", () => {
+    const [below, left, right] = ticksAbout(
+      lineOfSightTripod(CENTRE, 32, tripodStrokesAt(2)),
+      CENTRE,
+    );
+    expect([
+      degreesApart(below?.angleDeg ?? 0, right?.angleDeg ?? 0),
+      degreesApart(right?.angleDeg ?? 0, left?.angleDeg ?? 0),
+      degreesApart(left?.angleDeg ?? 0, below?.angleDeg ?? 0),
+    ]).toEqual([120, 120, 120]);
+  });
+
+  it("starts its ticks 0.1875 rem from the point and ends them at 0.4375 rem", () => {
+    const ticks = ticksAbout(lineOfSightTripod(CENTRE, 32, tripodStrokesAt(2)), CENTRE);
+    expect(ticks.map((tick) => [px(tick.innerPx), px(tick.outerPx)])).toEqual([
+      [6, 14],
+      [6, 14],
+      [6, 14],
+    ]);
+  });
+
+  it("moves its ticks out by the outline's shift, keeping their length, as a craft's are", () => {
+    // At a ratio of 1 and the 200% interface scale the open centre does not bind: δ is 0.25 px.
+    const ticks = ticksAbout(lineOfSightTripod(CENTRE, 32, tripodStrokesAt(1)), CENTRE);
+    expect(ticks.map((tick) => [px(tick.innerPx), px(tick.outerPx)])).toEqual([
+      [6.25, 14.25],
+      [6.25, 14.25],
+      [6.25, 14.25],
+    ]);
+  });
+
+  it.each([
+    // [ratio, the interface's rem in CSS px (80% and 100%), the ticks' start, device px]: 0.1875 rem
+    // and δ, the casings free to meet over the point (decision-r10-t12-commit3 §3).
+    [1, 12.8, 0.1875 * 12.8 + 0.25],
+    [1, 16, 0.1875 * 16 + 0.25],
+    [2, 12.8, 0.1875 * 25.6],
+    [2, 16, 0.1875 * 32],
+  ])(
+    "keeps the point open at a ratio of %d and a rem of %d px, its ticks 0.25 rem long",
+    (ratio, remCssPx, innerPx) => {
+      const remPx = remCssPx * ratio;
+      const strokes = tripodStrokesAt(ratio);
+      const mark = lineOfSightTripod(CENTRE, remPx, strokes);
+      // The pixel that holds the point, wherever the point falls on the grid: at a corner of four
+      // pixels, at a pixel's centre and between.
+      const unlit = [0, 0.5, 0.3].every((fraction) => {
+        const at = { xPx: 960 + fraction, yPx: 540 + (fraction === 0.3 ? 0.8 : fraction) };
+        const tripod = lineOfSightTripod(at, remPx, strokes);
+        const pixel = { xPx: Math.floor(at.xPx) + 0.5, yPx: Math.floor(at.yPx) + 0.5 };
+        // At a corner, every one of the four pixels about it.
+        const pixels =
+          fraction === 0
+            ? [-1, 0].flatMap((i) =>
+                [-1, 0].map((j) => ({ xPx: 960 + i + 0.5, yPx: 540 + j + 0.5 })),
+              )
+            : [pixel];
+        return pixels.every((p) =>
+          tripod.segments.every(
+            (segment) => pointToSegmentPx(p, segment) >= strokeReachPx(strokes),
+          ),
+        );
+      });
+      const ticks = ticksAbout(mark, CENTRE);
+      expect({
+        inner: ticks.map((tick) => px(tick.innerPx)),
+        lengthRem: ticks.map((tick) => px((tick.outerPx - tick.innerPx) / remPx)),
+        unlit,
+      }).toEqual({
+        inner: [innerPx, innerPx, innerPx].map(px),
+        lengthRem: [0.25, 0.25, 0.25],
+        unlit: true,
+      });
+    },
+  );
+
+  it.each([0.78125, 1, 1.25, 2, 3])(
+    "never needs its guard at a ratio of %d from the 80% interface scale up, 0.1875 rem and the shift keeping the point open",
+    (ratio) => {
+      const strokes = tripodStrokesAt(ratio);
+      // The guard: the stroke's reach and half a pixel's diagonal (decision-r10-t12-commit3 §3).
+      const guardPx = strokeReachPx(strokes) + Math.SQRT1_2;
+      const starts = [12.8, 16, 20, 24].map(
+        (remCssPx) => 0.1875 * remCssPx * ratio + markShiftDevicePx(ratio),
+      );
+      expect(starts.every((startPx) => startPx >= guardPx)).toBe(true);
+    },
+  );
+
+  it("gives its box: its ticks' ends widened by half its stroke, its casing and the fringe", () => {
+    const mark = lineOfSightTripod(CENTRE, 32, tripodStrokesAt(2));
+    const reach = 1.5 + 2 + 0.5;
+    const across = 14 * Math.sin(Math.PI / 3);
+    const box = markBoxPx(mark, reach);
+    expect([box.leftPx, box.topPx, box.widthPx, box.heightPx].map(px)).toEqual(
+      [960 - across - reach, 540 - 7 - reach, 2 * (across + reach), 21 + 2 * reach].map(px),
+    );
+  });
+});
+
+describe("the least distance between two strokes on the view (R10.T12)", () => {
+  it("is 0 where they cross", () => {
+    expect(
+      segmentDistancePx([pointPx(0, 0), pointPx(10, 10)], [pointPx(0, 10), pointPx(10, 0)]),
+    ).toBe(0);
+  });
+
+  it("is the gap between two parallel strokes", () => {
+    expect(segmentDistancePx([pointPx(0, 0), pointPx(10, 0)], [pointPx(2, 3), pointPx(8, 3)])).toBe(
+      3,
+    );
+  });
+
+  it("is an end's distance from the middle of the other", () => {
+    expect(segmentDistancePx([pointPx(0, 0), pointPx(10, 0)], [pointPx(5, 2), pointPx(5, 9)])).toBe(
+      2,
+    );
+  });
+
+  it("is the gap between the near ends of two strokes on one line", () => {
+    expect(segmentDistancePx([pointPx(0, 0), pointPx(4, 0)], [pointPx(7, 0), pointPx(12, 0)])).toBe(
+      3,
+    );
+  });
+});
+
+describe("the line-of-sight mark's give-way (R10.T12; the guide's tripod, beside other marks)", () => {
+  // At a ratio of 2 and 100%: the tripod's ticks from 6 to 14 px, the outlines not moved.
+  const REM = 32;
+  const strokes = tripodStrokesAt(2);
+  const tripod = lineOfSightTripod(CENTRE, REM, strokes);
+  const CRAFT: CameraTarget = { kind: "craft", craft: "other" };
+  const straight: ProjectionCamera = { orientation: IDENTITY_QUATERNION, fovXRad: Math.PI / 3 };
+
+  /**
+   * Each kind of mark that makes it give way, directly below the point, its nearest stroke
+   * `clearRem` from the end of the tripod's lower tick (14 px down): a craft's ticks, its upper
+   * tick ending 12 + 8 px above its anchor; a body's circle, its top 12 px above its centre; and
+   * the flight path marker, its fin's tip 12 + 10 px above its centre.
+   */
+  const below: ReadonlyArray<readonly [string, (clearRem: number) => ScreenMark]> = [
+    [
+      "a craft's ticks",
+      (clearRem) =>
+        targetMark(
+          CRAFT,
+          { xPx: 960, yPx: 540 + 14 + 20 + clearRem * REM },
+          contactRadiusPx(REM),
+          vec3(1e3, 0, 0),
+          null,
+          0,
+        ),
+    ],
+    [
+      "a body's symbol",
+      (clearRem) =>
+        bodySymbolMark(
+          PLANET,
+          bodyKindSymbol("star"),
+          { xPx: 960, yPx: 540 + 14 + 12 + clearRem * REM },
+          1,
+          REM,
+          0,
+        ) ?? absent("the body's symbol"),
+    ],
+    [
+      "the flight path marker",
+      (clearRem) => {
+        // Below the view's centre by y px: along (0, −y ÷ (s W ÷ 2), −1), s = 1 ÷ tan 30°.
+        const yPx = 14 + 22 + clearRem * REM;
+        const t = yPx / (Math.sqrt(3) * 960);
+        return (
+          flightPathMarker(vec3(0, -t, -1), straight, VIEWPORT, REM, 0) ??
+          absent("the flight path marker")
+        );
+      },
+    ],
+  ];
+
+  it.each(below)("measures %s's clearance from its ticks, centreline to centreline", (_, at) => {
+    for (const clearRem of [0.3, 0.6, 1]) {
+      expect(lineOfSightClearancePx(tripod.segments, [at(clearRem)]) / REM).toBeCloseTo(
+        clearRem,
+        9,
+      );
+    }
+  });
+
+  it.each(below)(
+    "leaves for %s within 0.5 rem, and returns only once it is 0.75 rem clear",
+    (_, at) => {
+      const givesWay = (clearRem: number, yielded: boolean): boolean =>
+        lineOfSightGivesWay(tripod.segments, [at(clearRem)], REM, yielded);
+      expect({
+        leavesWithin: givesWay(0.49, false),
+        staysBeyond: givesWay(0.51, false),
+        heldInTheBand: [givesWay(0.6, false), givesWay(0.6, true)],
+        stillLeftAt: givesWay(0.74, true),
+        returnsAt: givesWay(0.76, true),
+      }).toEqual({
+        leavesWithin: true,
+        staysBeyond: false,
+        heldInTheBand: [false, true],
+        stillLeftAt: true,
+        returnsAt: false,
+      });
+    },
+  );
+
+  it("never gives way to the reticles that stand round it", () => {
+    const reticles = [
+      bracketReticle(PLANET, CENTRE, symbolRadiusPx(bodyKindSymbol("planet"), REM), REM, 0),
+      destinationReticle(PLANET, CENTRE, symbolRadiusPx(bodyKindSymbol("planet"), REM), REM, 0, 5),
+    ];
+    expect([
+      lineOfSightGivesWay(tripod.segments, reticles, REM, false),
+      lineOfSightGivesWay(tripod.segments, reticles, REM, true),
+    ]).toEqual([false, false]);
+  });
+
+  it("returns at once where no mark is near it", () => {
+    expect(lineOfSightGivesWay(tripod.segments, [], REM, true)).toBe(false);
+  });
+
+  /**
+   * A craft's hull as the tripod gives way to it (decision-r10-t12-commit3 §1): one edge across
+   * the view below the point, `clearRem` from the end of the lower tick (14 px down), and whether
+   * one of its opaque faces stands over the point.
+   */
+  function hullBelow(clearRem: number, coversPoint: boolean): HullOnView {
+    const yPx = 540 + 14 + clearRem * REM;
+    return {
+      edges: [
+        [
+          { xPx: 800, yPx },
+          { xPx: 1120, yPx },
+        ],
+      ],
+      coversPoint,
+    };
+  }
+
+  it("stands 0 clear of a hull whose opaque face covers the point, its edges 2 rem away", () => {
+    const clearRem = (hull: HullOnView): number =>
+      Math.round((lineOfSightClearancePx(tripod.segments, [], [hull]) / REM) * 1e9) / 1e9;
+    expect([clearRem(hullBelow(2, true)), clearRem(hullBelow(2, false))]).toEqual([0, 2]);
+  });
+
+  it.each(below)("measures a hull's edges as it measures %s's strokes", (_, at) => {
+    const mark = at(0.6);
+    expect(
+      lineOfSightClearancePx(tripod.segments, [], [{ edges: mark.segments, coversPoint: false }]),
+    ).toBe(lineOfSightClearancePx(tripod.segments, [mark]));
+  });
+
+  it("takes the nearer of the marks and the hulls", () => {
+    const [, craftTicks] = below[0] ?? absent("the craft's ticks");
+    expect(
+      lineOfSightClearancePx(tripod.segments, [craftTicks(1)], [hullBelow(0.3, false)]) / REM,
+    ).toBeCloseTo(0.3, 9);
+  });
+
+  it("leaves for a hull's edge within 0.5 rem, and returns only once it is 0.75 rem clear", () => {
+    const givesWay = (clearRem: number, yielded: boolean): boolean =>
+      lineOfSightGivesWay(tripod.segments, [], REM, yielded, [hullBelow(clearRem, false)]);
+    expect({
+      leavesWithin: givesWay(0.4, false),
+      heldInTheBand: [givesWay(0.6, false), givesWay(0.6, true)],
+      returnsAt: givesWay(0.8, true),
+    }).toEqual({ leavesWithin: true, heldInTheBand: [false, true], returnsAt: false });
+  });
+});
+
+/** A planet's mark with its disc `diameterPx` across. */
+function body(diameterPx: number): {
+  symbol: ReturnType<typeof bodyKindSymbol>;
+  diameterPx: number;
+} {
+  return { symbol: bodyKindSymbol("planet"), diameterPx };
+}
+
+/** The symbology of the planet, selected and the destination, its disc `diameterPx` across at `at`. */
+function discMarks(
+  diameterPx: number,
+  at: { xPx: number; yPx: number } = { xPx: 960, yPx: 540 },
+): ScreenMark[] {
+  return symbologyMarks(
+    {
+      anchors: [
+        {
+          target: PLANET,
+          at,
+          body: { symbol: bodyKindSymbol("planet"), diameterPx },
+          craft: null,
+        },
+      ],
+      selection: PLANET,
+      destination: PLANET,
+      ownVelocityMPerS: null,
+      remPx: REM_PX,
+      markShiftPx: 0,
+      minReticleGapPx: 4,
+    },
+    CAMERA,
+    VIEWPORT,
+  );
+}
+
+/** The mark of `kind` among `marks`, or `null`. */
+function markOf(marks: ReadonlyArray<ScreenMark>, kind: ScreenMark["kind"]): ScreenMark | null {
+  return marks.find((mark) => mark.kind === kind) ?? null;
+}
+
+describe("the selection's bracket about a body's drawn disc (the owner's request, 2026-10-31)", () => {
+  const symbolPx = symbolRadiusPx(bodyKindSymbol("planet"), REM_PX);
+  const marginPx = 0.25 * REM_PX;
+
+  it.each<readonly [string, number, number]>([
+    ["a disc smaller than its symbol, about the symbol", 4, symbolPx],
+    ["a mid-sized disc, about the disc", 300, 150],
+  ])("stands its corners a margin outside %s", (_, diameterPx, radiusPx) => {
+    const bracket = markOf(discMarks(diameterPx), "selection");
+    expect(bracket === null ? null : bounds(bracket).right - 960).toBeCloseTo(
+      radiusPx + marginPx,
+      9,
+    );
+  });
+
+  it("takes the larger of the symbol's radius and the disc's (reticleRadiusPx)", () => {
+    expect([
+      reticleRadiusPx({ body: body(4) }, REM_PX),
+      reticleRadiusPx({ body: body(300) }, REM_PX),
+      reticleRadiusPx({ body: null }, REM_PX),
+    ]).toEqual([symbolPx, 150, contactRadiusPx(REM_PX)]);
+  });
+
+  it("stands the destination's chevrons outside the grown bracket", () => {
+    const marks = discMarks(300);
+    const bracket = markOf(marks, "selection");
+    const destination = markOf(marks, "destination");
+    expect(
+      bracket !== null &&
+        destination !== null &&
+        bounds(destination).right - 960 > bounds(bracket).right - 960,
+    ).toBe(true);
+  });
+
+  it("holds each corner within the view, a margin in, where the bracket would leave it", () => {
+    const bracket = markOf(discMarks(900, { xPx: 100, yPx: 540 }), "selection");
+    const box = bracket === null ? null : bounds(bracket);
+    expect(box === null ? null : [box.left, box.right <= VIEWPORT.widthPx - marginPx]).toEqual([
+      marginPx,
+      true,
+    ]);
+  });
+
+  it("draws no bracket once the disc fills the view, the view's list marking the selection", () => {
+    // 2,300 px across about the view's centre covers its corners, 1,101 px from it.
+    expect(markOf(discMarks(2_300), "selection")).toBeNull();
+  });
+
+  it("keeps each held arm a third of its held side, the sides' middles open", () => {
+    // 2,000 px across about the view's centre leaves its corners out: every corner held.
+    const bracket = markOf(discMarks(2_000), "selection");
+    const lengths = (bracket?.segments ?? []).map(([a, b]) =>
+      Math.hypot(b.xPx - a.xPx, b.yPx - a.yPx),
+    );
+    const sideX = VIEWPORT.widthPx - 2 * marginPx;
+    const sideY = VIEWPORT.heightPx - 2 * marginPx;
+    expect([
+      lengths.length,
+      lengths.every((length) => length <= Math.max(sideX, sideY) / 3 + 1e-9),
+    ]).toEqual([8, true]);
+  });
+
+  it("leaves a bracket wholly off the view where it falls, unseen, rather than on the edge", () => {
+    const bracket = markOf(discMarks(4, { xPx: -5_000, yPx: 540 }), "selection");
+    expect(bracket === null ? null : bounds(bracket).right < 0).toBe(true);
+  });
+
+  it("judges a flattened disc's filling by its least radius", () => {
+    const at = { xPx: 960, yPx: 540 };
+    const flattened = {
+      at,
+      body: { ...body(2_400), extentPx: { halfPx: 1_200, leastPx: 1_000 } },
+    };
+    expect([
+      anchorFillsView(flattened, VIEWPORT),
+      anchorFillsView({ at, body: body(2_400) }, VIEWPORT),
+    ]).toEqual([false, true]);
+  });
+
+  it("draws no bracket and no chevrons about an unbounded disc, its reticles' radius kept finite", () => {
+    const inside = { body: { ...body(Number.POSITIVE_INFINITY) } };
+    const marks = discMarks(Number.POSITIVE_INFINITY);
+    expect([
+      markOf(marks, "selection"),
+      markOf(marks, "destination"),
+      reticleRadiusPx(inside, REM_PX),
+    ]).toEqual([null, null, symbolPx]);
+  });
+
+  it("sizes the bracket by the disc's extent where it is given, wider than its angular diameter", () => {
+    const anchor = { body: { ...body(600), extentPx: { halfPx: 330, leastPx: 300 } } };
+    expect(reticleRadiusPx(anchor, REM_PX)).toBe(330);
+  });
+
+  it("tells a disc that covers every corner of the view from one that leaves a corner out", () => {
+    const centre = { xPx: 960, yPx: 540 };
+    expect([
+      discFillsView(centre, 1_150, VIEWPORT),
+      discFillsView(centre, 1_000, VIEWPORT),
+      discFillsView({ xPx: 0, yPx: 0 }, 1_150, VIEWPORT),
+    ]).toEqual([true, false, false]);
   });
 });

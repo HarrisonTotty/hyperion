@@ -1,8 +1,10 @@
 //! The test planet's golden file, `tests/golden/test_planet.golden` (plan R05, T3.c).
 //!
-//! It pins `height` and its gradient at 500 fixed directions and levels, with ridges off and on,
+//! It pins the height and its gradient at 500 fixed directions and levels, with ridges off and on,
 //! as hexadecimal bits, on native, `wasm32-wasip1` and `wasm32-unknown-unknown`, so that the
-//! server's and the client's test planet agree bit for bit.
+//! server's and the client's test planet agree bit for bit. It reads them through the test
+//! planet's `HeightSource` impl, the path the descent spike keeps (R09.T20 deprecated the inherent
+//! `TestPlanet::height`, whose body is the same).
 //!
 //! The header carries [`TEST_PLANET_VERSION`], not the generator version: the test planet belongs
 //! to no universe (Design note 13). Where this test fails with the testkit's hint to "bump
@@ -20,6 +22,7 @@ use wasm_bindgen_test::wasm_bindgen_test as test;
 use hyperion_surface::TEST_PLANET_VERSION;
 use hyperion_surface::cube::{MAX_LEVEL, unit_dir};
 use hyperion_surface::noise::LatticeCache;
+use hyperion_surface::patch::HeightSource;
 use hyperion_surface::test_planet::{Ridges, TEST_PLANET};
 use hyperion_testkit::float::bits;
 use hyperion_testkit::golden;
@@ -55,7 +58,7 @@ fn the_test_planet_matches_its_golden() {
     for (ridges, name) in [(Ridges::Off, "off"), (Ridges::On, "on")] {
         let planet = TEST_PLANET.with_ridges(ridges);
         for (n, (dir, level)) in (0_u32..).zip(samples()) {
-            let s = planet.height(dir, level, &mut cache);
+            let s = HeightSource::height(&planet, &mut cache, dir, level).unwrap();
             w.line(&format!(
                 "height {n} {name} {level} {} {} {} {} {} {} {}",
                 hex(dir[0]),

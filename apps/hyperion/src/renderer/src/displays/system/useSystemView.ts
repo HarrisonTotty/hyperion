@@ -1,4 +1,9 @@
-import type { DetailLevelDto, RequestKind, UniverseTime } from "@hyperion/protocol";
+import {
+  type DetailLevelDto,
+  galacticPositionFromLy,
+  type RequestKind,
+  type UniverseTime,
+} from "@hyperion/protocol";
 import { useCallback, useMemo, useState } from "react";
 
 import { stateAt } from "../../lib/orbit";
@@ -16,13 +21,17 @@ import type { RequestState } from "../../lib/useServerRequest";
 import type { SpatialScene } from "../../spatial/marks";
 import { localFrameAt } from "../../geometry/frame";
 import { dot, norm } from "../../geometry/vec3";
+import type { BodyInspection } from "../../view/scenes/inspectionScene";
 import {
   bodyFitAu,
   bodyFrameName,
   bodyPlane,
   bodyScene,
+  equatorNormal,
   focusHeldReason,
   focusTarget,
+  inspectionHeldReason,
+  inspectionTarget,
 } from "./bodyFrame";
 import {
   ALL_ZONE_LAYERS,
@@ -47,6 +56,7 @@ import {
 } from "./orbitMap";
 import { type BodiesKnown, smallBodySections, systemNotes } from "./systemNote";
 import type { SystemTarget } from "./systemTarget";
+import { type BodyEventsQuery, useBodyEvents } from "./useBodyEvents";
 import { useBodyDetail } from "./useBodyDetail";
 import { type DisplayTime, useDisplayTime } from "./useDisplayTime";
 import { useSystemData } from "./useSystemData";
@@ -118,6 +128,16 @@ export interface SystemViewState {
   /** The system's bodies on show; `null` before them, or while the server does not serve them. */
   readonly bodies: SystemBodies | null;
   /**
+   * The events on the system's bodies in the century around the display time, and where their
+   * request stands (P14.T43.c); idle until the system is known to have formed.
+   */
+  readonly events: BodyEventsQuery;
+  /**
+   * Whether the events on show are a stale snapshot: the link that backed them is down, or their
+   * newer request was refused or timed out.
+   */
+  readonly eventsStale: boolean;
+  /**
    * The orbit map's reference plane as it is drawn: the system's, or the focused body's equatorial
    * plane; `null` without a formed system.
    */
@@ -129,7 +149,7 @@ export interface SystemViewState {
    * without a formed system.
    */
   readonly fitRadiusAu: number | null;
-  /** Whether the system has a belt for `BELTS` to fit, which is offered only then. */
+  /** Whether the system has a belt or protoplanetary disc for `BELTS` to fit, offered only then. */
   readonly hasBelts: boolean;
   /** The body the map is drawn about with `FOCUS BODY`, or `null` in the system frame. */
   readonly focused: SystemBody | null;
@@ -140,6 +160,17 @@ export interface SystemViewState {
    * `ORBIT NOT RESOLVED`), or `null` when there is a planet to focus.
    */
   readonly focusHeld: string | null;
+  /**
+   * What `VIEW BODY` opens in `VIEW` (the owner's request, 2026-11-01): the focused planet, or a
+   * selected moon of it, with the system's records at the display time; `null` while it is held
+   * back.
+   */
+  readonly inspection: BodyInspection | null;
+  /**
+   * Why `VIEW BODY` is held back (`NO BODY FOCUSED`, `MOON DESTROYED`, `BULK NOT RESOLVED`), or
+   * `null` when it opens a body.
+   */
+  readonly inspectionHeld: string | null;
   /** The map's frame, as its `FRAME` reads: `SYSTEM BARYCENTRIC`, or `BODY <designation>`. */
   readonly frameName: string;
   /** The zoom preset whose radius the view fits, and the grid covers. */
@@ -171,6 +202,17 @@ export interface SystemViewState {
    * when nothing is (ruling 113.2).
    */
   readonly notes: ReadonlyArray<string>;
+  /**
+   * Chooses a host or a body, on the map, in the body list or in the event list.
+   *
+   * @remarks
+   * While a body is focused, a choice with another planet for `FOCUS BODY` to focus moves the focus
+   * to that planet and fits the view again, as a press from the system frame does (the owner's
+   * report, 2026-11-10). Any other choice moves the selection alone and keeps the frame (the UX
+   * advisor's ruling, 2026-11-10): the focused planet, a moon or ring of it, or a choice
+   * `FOCUS BODY` is held back for, such as a host, a belt, a disc, the halo, a planet not present
+   * or off its orbit, or a moon or ring of one.
+   */
   readonly select: (id: string) => void;
   /** Chooses a zoom preset, which returns the map to the system frame. */
   readonly chooseZoom: (zoom: ZoomPreset) => void;
@@ -349,6 +391,7 @@ export function useSystemView(target: SystemTarget): SystemViewState {
   const selectedHost = chosenBody === undefined ? (chosenHost ?? hosts[0] ?? null) : null;
   const selectedId = chosenBody?.id ?? selectedHost?.id ?? null;
   const detail = useBodyDetail(target, chosenBody?.id ?? null, data.requestTime, generation);
+  const events = useBodyEvents(formed === null ? null : target, displayTime.time, generation);
   const time = displayTime.time;
 
   // The focus holds while its body is in the answer on show, present and on an orbit; a body that
@@ -367,6 +410,28 @@ export function useSystemView(target: SystemTarget): SystemViewState {
   }
   const focusable = focusTarget(chosenBody ?? null, bodyList);
   const focusHeld = focusHeldReason(chosenBody ?? null, bodyList);
+  const inspected = inspectionTarget(focusedBody, chosenBody ?? null);
+  const inspectionHeld = inspectionHeldReason(focusedBody, chosenBody ?? null);
+  const inspection: BodyInspection | null =
+    inspectionHeld === null && inspected !== null && formed !== null && bodies !== null
+      ? {
+          universe: target.universe,
+          place: {
+            kind: "charted",
+            system: target.system,
+            designation: target.designation,
+            barycentre: galacticPositionFromLy([
+              target.positionLy.x,
+              target.positionLy.y,
+              target.positionLy.z,
+            ]),
+          },
+          model: formed,
+          bodies,
+          body: inspected.id,
+          time: displayTime.time,
+        }
+      : null;
   const focusPlane = useMemo(
     () => (focusedBody === null ? null : bodyPlane(focusedBody, localFrameAt(target.positionLy))),
     [focusedBody, target.positionLy],
@@ -449,23 +514,24 @@ export function useSystemView(target: SystemTarget): SystemViewState {
     let inclinationRad: number | null = null;
     if (orbit !== null) {
       // A satellite's elements are in its planet's body frame, whose axes are the galactic axes,
-      // so its inclination is read to its planet's equator, taken in this generator version to be
-      // the planet's orbital plane; a body about a star, a pair, the barycentre or a belt, to the
-      // plane the map is drawn on.
+      // so its inclination is read to its planet's equator, the plane its `BODY` frame is drawn
+      // on: normal to the planet's pole, or to the planet's orbit normal where its rotation is
+      // not modelled, and to none where its rotation is withheld (plan 14, P14.T56.b); a body
+      // about a star, a pair, the barycentre or a belt, to the plane the map is drawn on.
       const orbitParent = orbit.parent;
       const parentBody =
         orbitParent.kind === "body"
           ? bodyList.find((candidate) => candidate.id === orbitParent.id)
           : undefined;
-      const reference =
+      const referenceNormal =
         parentBody !== undefined && !isPopulation(parentBody.kind)
-          ? parentBody.orbit.state === "ok"
-            ? parentBody.orbit.value.orbit
-            : null
-          : systemPlane;
-      if (reference !== null) {
+          ? equatorNormal(parentBody)
+          : systemPlane === null
+            ? null
+            : orbitNormal(systemPlane);
+      if (referenceNormal !== null) {
         inclinationRad = Math.acos(
-          Math.min(1, Math.max(-1, dot(orbitNormal(orbit.orbit), orbitNormal(reference)))),
+          Math.min(1, Math.max(-1, dot(orbitNormal(orbit.orbit), referenceNormal))),
         );
       } else if (parentBody === undefined) {
         // With no system plane the map is drawn on the galactic plane, to which the wire's own
@@ -511,6 +577,23 @@ export function useSystemView(target: SystemTarget): SystemViewState {
     setFitRequest((count) => count + 1);
   }, []);
   const focusedBodyId = focusedBody?.id ?? null;
+  const select = useCallback(
+    (id: string): void => {
+      setChosenId(id);
+      if (focusedBodyId === null) {
+        return;
+      }
+      // A focused map follows a choice of another planet, or of a moon or ring of one, as a press
+      // of FOCUS BODY would (the owner's report, 2026-11-10); a choice with no planet to focus
+      // leaves the focus where it is.
+      const next = focusTarget(bodyList.find((body) => body.id === id) ?? null, bodyList);
+      if (next !== null && next.id !== focusedBodyId) {
+        setFocusedId(next.id);
+        setFitRequest((count) => count + 1);
+      }
+    },
+    [focusedBodyId, bodyList],
+  );
   const focusableId = focusable?.id ?? null;
   const toggleFocus = useCallback((): void => {
     if (focusedBodyId !== null) {
@@ -553,6 +636,9 @@ export function useSystemView(target: SystemTarget): SystemViewState {
         (bodies !== null && failed(data.bodiesState))),
     layout,
     bodies,
+    events,
+    eventsStale:
+      events.shown !== null && (linkDownReason(linkStatus) !== null || failed(events.state)),
     plane: focusPlane ?? plane,
     fitRadii,
     fitRadiusAu: focusFitAu ?? fitRadii?.[zoom] ?? null,
@@ -563,6 +649,8 @@ export function useSystemView(target: SystemTarget): SystemViewState {
     focused: focusedBody,
     focusable,
     focusHeld,
+    inspection,
+    inspectionHeld,
     frameName: focusedBody === null ? "SYSTEM BARYCENTRIC" : bodyFrameName(focusedBody),
     zoom,
     zoomHeld,
@@ -574,7 +662,7 @@ export function useSystemView(target: SystemTarget): SystemViewState {
     primaryZone: zoneOfPrimary,
     selected,
     notes: formed === null || known === null ? NO_NOTES : systemNotes(known),
-    select: setChosenId,
+    select,
     chooseZoom,
     toggleFocus,
     fitChanged: setZoomHeld,

@@ -29,9 +29,11 @@
 //!    drawn by P14.T6.b ([`draw_pair_spacing`]) against the floor of the pair's masses and the
 //!    eccentricities it assumes. A member is placed only where it is admitted:
 //!    - inside the zone's limits and the disc's edges, and inside the snow line for a group that
-//!      stays inside it; a compact chain is not held by the disc's inner edge, since its first
-//!      period's law (Mulders et al. 2018) is the innermost planets' as observed, which the spread
-//!      of discs' inner edges already shapes (Lee and Chiang 2017; ruling 60);
+//!      stays inside it (from generator version 28, 3% outside a pair's P-type inner limit, the
+//!      fit's accuracy: P14.T9.d, `P_TYPE_PLACEMENT_MARGIN`); a compact chain is not held by the
+//!      disc's inner edge, since its first period's law (Mulders et al. 2018) is the innermost
+//!      planets' as observed, which the spread of discs' inner edges already shapes (Lee and
+//!      Chiang 2017; ruling 60);
 //!    - at least D7's circular floor from each neighbour already placed, and, towards a later
 //!      group's first body, at D7's floor with that body's eccentricity and its own largest;
 //!    - for a small planet, outside every giant's chaotic zone twice over, 2 × 1.3 (m ÷ M★)^(2⁄7)
@@ -119,10 +121,11 @@ use crate::planetary::placement::spacing::{
     MAX_SPACING_STEP, Neighbour, SpacingDraws, SpacingKind, draw_pair_spacing, mutual_hill_factor,
     mutual_hill_radius, next_semi_major_axis, satisfies_floor, spacing_floor,
 };
+use crate::planetary::placement::zones::P_TYPE_PLACEMENT_MARGIN;
 use crate::rng::{Mark, ObjectKey, Seed, Stream, Threshold, tags};
 use crate::stellar::draws::UnitUniform;
 use crate::units::consts::{EARTH_MASS_KG, GM_EARTH, GM_SUN, SECONDS_PER_DAY, SOLAR_MASS_KG};
-use crate::units::{Days, EarthMasses, GravitationalParameter, Metres, SolarMasses};
+use crate::units::{Days, EarthMasses, GravitationalParameter, Metres, Radians, SolarMasses};
 
 /// Words of the [`tags::PLANET_COUNT`] stream that one orbit host owns: host h reads words 64h to
 /// 64h + 63. 256 hosts fill words 0 to 16,383.
@@ -450,6 +453,33 @@ impl PlacedPlanet {
     pub const fn rescaled(&self) -> bool {
         self.rescaled
     }
+
+    /// A second-generation planet (P14.T28.e) at `index`, of `mass` on `orbit` about its neutron
+    /// star, as the derivation reads it: a rocky group's body, formed where it lies inside its
+    /// host's snow line, its eccentricity drawn from `law`.
+    #[must_use]
+    pub(crate) fn second_generation(
+        index: BodyIndex,
+        mass: EarthMasses,
+        orbit: KeplerElements,
+        law: EccentricityLaw,
+    ) -> Self {
+        Self {
+            index,
+            group: 0,
+            role: GroupRole::Rocky,
+            mass,
+            orbit,
+            formation_distance: orbit.semi_major_axis(),
+            formed: SnowLineSide::Inside,
+            origin: Origin::InSitu,
+            hot: false,
+            resonance: None,
+            drawn_eccentricity: orbit.eccentricity().value(),
+            eccentricity_law: law,
+            rescaled: false,
+        }
+    }
 }
 
 /// An orbit host's planets (P14.T8): its class as drawn and as kept, and its planets in slot
@@ -724,6 +754,101 @@ pub fn place(
     }
 }
 
+/// One planet's primordial mass and orbit, given in place of a class's placement (the planet
+/// viewer, plan R15; [`place_given`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GivenOrbit {
+    /// The planet's primordial mass.
+    pub mass: EarthMasses,
+    /// Its primordial semi-major axis about its host, m, positive and finite.
+    pub semi_major_axis: Metres,
+    /// Its primordial eccentricity.
+    pub eccentricity: Eccentricity,
+    /// How far from its host it formed, m, positive and finite, or `None` for where
+    /// placement's rule puts it: its semi-major axis, or a giant's the site where
+    /// giants' cores grow if that lies further out.
+    pub formation_distance: Option<Metres>,
+}
+
+/// The planet `given` of `host`, whose disc is `disc`, in slot `slot` of `system` in the universe
+/// of `seed`, placed as [`place`]'s planets are but on its given orbit (the planet viewer, plan R15):
+/// its node, argument of periapsis and mean anomaly its own [`OrbitDraws`], in the host's plane,
+/// which it lies in (a lone planet has no mutual inclination to draw); μ = G (M★ + m) with M★ the
+/// host's zero-age mass; its formation distance given, or placement's rule's; and the
+/// side of the snow line it formed on from that distance. `None` where the host has no disc: no
+/// planet forms without one.
+///
+/// # Panics
+///
+/// If `slot` lies in no planets' block, or `given`'s semi-major axis is not positive and finite.
+#[must_use]
+pub fn place_given(
+    seed: Seed,
+    system: SystemId,
+    host: &PlacementHost,
+    disc: &Disc,
+    given: &GivenOrbit,
+    slot: u8,
+) -> Option<PlacedPlanet> {
+    let profile = disc.profile()?;
+    let index = planet_index(slot);
+    let draws = OrbitDraws::for_planet(seed, system, index);
+    let plane = orbits::host_plane(seed, system, host.number(), host.plane());
+    let orientation =
+        orbits::orientation_in_plane(&plane, Radians::ZERO, draws.node, draws.periapsis)
+            .expect("the angles are finite and the inclination zero");
+    let mu = GravitationalParameter::new(
+        GM_SUN * host.zams().mass().value() + GM_EARTH * given.mass.value(),
+    );
+    let a = given.semi_major_axis;
+    let orbit = KeplerElements::from_semi_major_axis(
+        a,
+        mu,
+        given.eccentricity,
+        orientation,
+        draws.mean_anomaly,
+    )
+    .expect("a positive, finite axis about a positive mass");
+    let giant = given.mass >= EarthMasses::from(SPACING_GIANT_MASS);
+    let snow = profile.snow_line();
+    let core_site = snow.max_of(profile.inner_edge());
+    let formation_distance =
+        given
+            .formation_distance
+            .unwrap_or(if giant { a.max_of(core_site) } else { a });
+    let formed = if formation_distance < snow {
+        SnowLineSide::Inside
+    } else {
+        SnowLineSide::Beyond
+    };
+    let e = given.eccentricity.value();
+    Some(PlacedPlanet {
+        index,
+        group: 0,
+        role: match (giant, formed) {
+            (true, _) => GroupRole::Giant,
+            (false, SnowLineSide::Inside) => GroupRole::Rocky,
+            (false, SnowLineSide::Beyond) => GroupRole::IceRich,
+        },
+        mass: given.mass,
+        orbit,
+        formation_distance,
+        formed,
+        origin: if formation_distance > a {
+            Origin::Migrated
+        } else {
+            Origin::InSitu
+        },
+        hot: false,
+        resonance: None,
+        drawn_eccentricity: e,
+        // No law drew it: the given value as a Rayleigh law's scale, which nothing reads after
+        // placement.
+        eccentricity_law: EccentricityLaw::Rayleigh { sigma: e },
+        rescaled: false,
+    })
+}
+
 /// The last slot of the block `first` lies in, or `None` past the planets' blocks.
 #[must_use]
 fn last_slot(first: u8) -> Option<u8> {
@@ -855,9 +980,11 @@ impl<'a> Placer<'a> {
         disc: &'a DiscProfile,
         template: &'static ClassTemplate,
     ) -> Self {
-        let lo = limits
-            .inner()
-            .map_or(disc.inner_edge(), |r| r.max_of(disc.inner_edge()));
+        // A zone's inner limit is a pair's P-type limit, which the disc is cut at. From version 28
+        // a planet keeps the fit's accuracy outside it (P14.T9.d, research-leans-37 §1), in every
+        // bound read from it: `lo`, the cavity floor and the eccentricity limit.
+        let zone_inner = limits.inner().map(|r| r * (1.0 + P_TYPE_PLACEMENT_MARGIN));
+        let lo = zone_inner.map_or(disc.inner_edge(), |r| r.max_of(disc.inner_edge()));
         let hi = limits
             .outer()
             .map_or(disc.outer_edge(), |r| r.min_of(disc.outer_edge()));
@@ -870,7 +997,7 @@ impl<'a> Placer<'a> {
             template,
             draws: HostDraws::for_host(seed, system, host.number()),
             spacing: SpacingDraws::for_host(seed, system, host.number()),
-            zone_inner: limits.inner(),
+            zone_inner,
             zone_outer: limits.outer(),
             lo,
             hi,
@@ -1036,7 +1163,8 @@ impl<'a> Placer<'a> {
     }
 
     /// The largest eccentricity of a member at `a`: its periapsis outside the zone's inner limit
-    /// and twice its Roche limit, its apoapsis inside the zone's outer limit.
+    /// as placement holds it (its margin from version 28) and twice its Roche limit, its apoapsis
+    /// inside the zone's outer limit.
     fn eccentricity_limit(&self, member: usize, a: Metres) -> f64 {
         let q = self.zone_inner.map_or(self.roche_floor(member), |r| {
             r.max_of(self.roche_floor(member))
@@ -1912,14 +2040,14 @@ mod tests {
             let ratio = s.mass().value() * SOLAR_MASS_KG / (jupiter.mass().value() * EARTH_MASS_KG);
             let roche = radius * (ROCHE_COEFFICIENT * math::cbrt(ratio));
             assert!(jupiter.orbit().periapsis() >= roche * (2.0 * (1.0 - 1e-12)));
-            // Inside 10 days, or held at its lower bound where the zone begins beyond 10 days; the
-            // disc's inner edge does not hold it (it migrates inside the cavity).
+            // Inside 10 days, or held at its lower bound where the zone begins beyond 10 days, a
+            // pair's P-type limit with its margin (P14.T9.d, from generator version 28); the disc's
+            // inner edge does not hold it (it migrates inside the cavity).
             let period = Days::from(jupiter.orbit().period());
             let roche_bound = roche * 2.0;
-            let bound = s
-                .limits
-                .inner()
-                .map_or(roche_bound, |r| r.max_of(roche_bound));
+            let bound = s.limits.inner().map_or(roche_bound, |r| {
+                (r * (1.0 + P_TYPE_PLACEMENT_MARGIN)).max_of(roche_bound)
+            });
             let a = jupiter.orbit().semi_major_axis();
             assert!(
                 period.value() < 10.0 + 1e-9 || (a / bound - 1.0).abs() < 1e-12,
@@ -2133,7 +2261,7 @@ mod tests {
             5,
         );
         assert_eq!(none.class(), ArchitectureClass::Barren);
-        assert!(none.planets().is_empty());
+        assert_eq!(none.planets(), []);
         assert_eq!(none.next_slot(), 5);
     }
 
@@ -2235,6 +2363,60 @@ mod tests {
             }
         }
         assert!(planets > 30, "{planets}");
+    }
+
+    /// P14.T9.d (research-leans-37 §1, from generator version 28): a planet whose law puts it
+    /// inside its zone's P-type limit is placed at q = 1.03 × the limit on a circular orbit, and no
+    /// planet's periapsis lies nearer the limit; below 28 such a planet sat on the limit. A
+    /// compact chain about a 1.6 M☉ pair whose limit is 0.4 au, beyond most of its first periods'
+    /// law (Mulders et al. 2018), is held at its bound.
+    #[test]
+    fn a_planet_whose_law_lies_inside_a_p_type_limit_is_placed_its_margin_inside_it() {
+        let pair = zams_host(1.6, 0.0);
+        let inner = au(0.4);
+        let limits = Truncation::NONE.with_inner(inner);
+        let disc = disc::derive(&pair, Megayears::new(3.0), &DiscDraws::MEDIAN, limits);
+        let host = PlacementHost::new(17, pair, HostPlane::Isotropic);
+        let margin = inner * (1.0 + P_TYPE_PLACEMENT_MARGIN);
+        let innermost = |i: u32| {
+            let placed = place(
+                SEED,
+                system(i),
+                &host,
+                limits,
+                &disc,
+                ArchitectureClass::CompactMulti,
+                1,
+            );
+            placed
+                .planets()
+                .iter()
+                .map(|p| *p.orbit())
+                .min_by(|a, b| a.periapsis().total_cmp(&b.periapsis()))
+        };
+        let (mut hosts, mut held) = (0, 0);
+        for i in 0..40 {
+            let Some(at_28) = innermost(i) else {
+                continue;
+            };
+            hosts += 1;
+            assert!(
+                at_28.periapsis() >= margin * (1.0 - 1e-12),
+                "{i}: q {:?} inside {margin:?}",
+                at_28.periapsis()
+            );
+            if (at_28.periapsis() / margin - 1.0).abs() < 1e-12 {
+                held += 1;
+                assert!(
+                    (at_28.periapsis() / margin - 1.0).abs() < 1e-12
+                        && at_28.eccentricity().value() < 1e-12,
+                    "{i}: q {:?}, e {}",
+                    at_28.periapsis(),
+                    at_28.eccentricity().value()
+                );
+            }
+        }
+        assert!(hosts > 30 && held > 10, "{hosts} {held}");
     }
 
     #[test]

@@ -8,10 +8,13 @@
 //! start.
 //!
 //! The sources built so far are the grid's seven layers, the catalogue features' members (plan 09,
-//! P09.T21), and the supernova entry of plan 09's phase 4 as a value. The displaced remnants (plan
-//! 08, P08.T12), the galactic centre's members (P09.T24–T28), the streams' and dwarf cores' members
-//! (plan 10) and the catalogue classes' grids (P09.T32–T35) are not placed yet; each is added here
-//! by the task that places it (P12.T0 as built).
+//! P09.T21), the dwarf cores' and the streams' members (plan 10, P10.T7.b and P10.T8.b), the
+//! supernova entry of plan 09's phase 4 as a value, and the catalogue classes' entries built so
+//! far, the core collapses (P09.T33.a), the Type Ia (P09.T34.a), the luminous blue variables
+//! (P09.T43), the accreting white dwarfs, fast and slow (P11.T8.a), the X-ray binaries (P11.T8.b),
+//! and the stellar and neutron-star mergers (P11.T8.c–d). The displaced remnants (plan 08,
+//! P08.T12), the galactic centre's members (P09.T24–T28) and the other catalogue classes (P09.T35)
+//! are not placed yet; each is added here by the task that places it (P12.T0 as built).
 
 use hyperion_sim::Seed;
 use hyperion_sim::coords::{GalacticPosition, ROOT_HALF_WIDTH_LY};
@@ -20,26 +23,41 @@ use hyperion_sim::events::{
     TimeWindow, tags,
 };
 use hyperion_sim::galaxy::Galaxy;
+use hyperion_sim::galaxy::catalogue_classes::binary::{
+    AccretingWdFast, AccretingWdSlow, NeutronStarMergers, StellarMergers, XrayBinaries, XrbSide,
+};
+use hyperion_sim::galaxy::catalogue_classes::core_collapse::CoreCollapseProcess;
+use hyperion_sim::galaxy::catalogue_classes::lbv::LbvProcess;
 use hyperion_sim::galaxy::catalogue_classes::supernova::{
     SupernovaEntry, SupernovaKind, SupernovaState,
 };
+use hyperion_sim::galaxy::catalogue_classes::type_ia::TypeIaProcess;
+use hyperion_sim::galaxy::catalogue_classes::{
+    CatalogueCellKey, CatalogueClassCell, ClassId, system_of,
+};
 use hyperion_sim::galaxy::features::catalogue::{FeatureCatalogue, NoFeatureCache};
 use hyperion_sim::galaxy::features::members::FeatureInterior;
+use hyperion_sim::galaxy::global_list::dwarf_core::DwarfCoreModel;
+use hyperion_sim::galaxy::global_list::members::{StreamBandShares, stream_cell_members};
+use hyperion_sim::galaxy::global_list::tube::TubeCell;
+use hyperion_sim::galaxy::global_list::{Debris, TubeTable};
 use hyperion_sim::galaxy::imf::MassBand;
 use hyperion_sim::galaxy::params::GalaxyParams;
 use hyperion_sim::galaxy::placement::{CellKey, Existence, SystemRecord, generate_cell};
 use hyperion_sim::galaxy::query::{UNBOUND_PAD_SPEED, position_at};
 use hyperion_sim::galaxy::snr::{ExplosionEnergy, SiteGas, shell_window};
-use hyperion_sim::id::{Layer, SystemId};
-use hyperion_sim::observe::{Drift, Observer, Trajectory, retarded};
+use hyperion_sim::id::{Layer, StreamMemberId, SystemId};
+use hyperion_sim::observe::{Drift, Observer, TraceMotionError, Trajectory, retarded};
 use hyperion_sim::stellar::brief::BriefModel;
 use hyperion_sim::stellar::remnant::SupernovaType;
 use hyperion_sim::stellar::system::{SystemExistence, SystemStars};
 use hyperion_sim::time::{
     CLOCK_WINDOW_H, ClockWindow, LIGHT_CROSSING_L, SourceHorizon, Span, UniverseTime,
 };
-use hyperion_sim::units::consts::SPEED_OF_LIGHT;
-use hyperion_sim::units::{Dex, HydrogenPerCm3, KelvinPerCm3, KilometresPerSecond, LightYears};
+use hyperion_sim::units::consts::{METRES_PER_LIGHT_YEAR, SPEED_OF_LIGHT};
+use hyperion_sim::units::{
+    Dex, HydrogenPerCm3, KelvinPerCm3, KilometresPerSecond, LightYears, Seconds,
+};
 
 const SEED: u64 = 0x1200_0000_0000_0000;
 
@@ -250,6 +268,119 @@ fn source_horizon_sweep_every_source_answers_at_the_horizons_start() {
         "the feature has no member in bands A, C or E"
     );
 
+    // A dwarf core's members (plan 10, P10.T7.b): one of each band its cells have, on the line
+    // its own velocity gives it, which the system record alone cannot.
+    let debris = Debris::generate(&galaxy);
+    let core = debris
+        .cores()
+        .iter()
+        .map(|spec| DwarfCoreModel::from_spec(&galaxy, spec))
+        .find(|core| core.check_index_headroom().is_ok())
+        .expect("the fixture keeps a core under its index");
+    let mut core_members = Vec::new();
+    let mut core_swept = 0;
+    for band in [MassBand::A, MassBand::C, MassBand::E] {
+        let found = core.grid().owned_cells().find_map(|c| {
+            core.members_in_cell(&galaxy, band, c, &mut core_members);
+            core_members.first().map(|(m, _)| *m)
+        });
+        let Some(member) = found else { continue };
+        let line = Drift::of_global_member(&member);
+        assert_eq!(
+            Drift::of_record(&galaxy, member.record()),
+            Err(TraceMotionError::GlobalListMember(member.record().id()))
+        );
+        let stars = member.stars(&galaxy);
+        for t in TIMES {
+            assert_in_padded_cube("a core member", &line.position_at(t));
+            let exists = member.record().existence_at(t) == Existence::Exists;
+            let summary = stars.summary_at(t);
+            assert_eq!(summary.existence() == SystemExistence::Exists, exists);
+            assert_eq!(stars.brief_at(t).is_some(), exists);
+        }
+        for t in [ClockWindow::START, ClockWindow::END] {
+            let away = GalacticPosition::from_light_years([-20_000.0, -20_000.0, 30_000.0])
+                .expect("in range");
+            let seen = retarded(&Observer::new(away, t).expect("inside"), &line);
+            assert!(SourceHorizon::contains(seen.emitted()));
+            assert_in_padded_cube(
+                "a core member's apparent position",
+                seen.apparent_position(),
+            );
+        }
+        core_swept += 1;
+    }
+    assert!(core_swept >= 1, "the core has no member in bands A, C or E");
+
+    // A stream's members (plan 10, P10.T8.b): the cheapest stream to spray whose progenitor lies
+    // well inside the root cube, one member of each band its axis cells have.
+    let spec = debris
+        .streams()
+        .iter()
+        .filter(|s| {
+            let m = s.position().metres();
+            (m[0] * m[0] + m[1] * m[1] + m[2] * m[2]).sqrt() < 4e4 * METRES_PER_LIGHT_YEAR
+        })
+        .min_by_key(|s| {
+            s.orbit()
+                .fixed_step(Seconds::from(s.stripping_time()))
+                .expect("a finite stripping time")
+                .count()
+        })
+        .expect("a stream inside 40,000 ly");
+    let tube = TubeTable::build(&galaxy, spec).expect("the full potential");
+    let shares = StreamBandShares::of(&galaxy, spec);
+    let mut stream_members = Vec::new();
+    let mut stream_swept = 0;
+    for band in [MassBand::A, MassBand::C] {
+        let found = (0..tube.along_cells()).find_map(|along| {
+            let id = StreamMemberId::new(
+                spec.number().get(),
+                band.layer(),
+                u16::try_from(along).expect("at most 16,384 cells"),
+                [32, 32],
+                0,
+            )
+            .expect("a cell's ID");
+            stream_cell_members(
+                &galaxy,
+                &tube,
+                &shares,
+                TubeCell::from(id),
+                band,
+                &mut stream_members,
+            );
+            stream_members.first().copied()
+        });
+        let Some(member) = found else { continue };
+        let line = Drift::of_global_member(&member);
+        let stars = member.stars(&galaxy);
+        for t in TIMES {
+            assert_in_padded_cube("a stream member", &line.position_at(t));
+            let exists = member.record().existence_at(t) == Existence::Exists;
+            assert_eq!(
+                stars.summary_at(t).existence() == SystemExistence::Exists,
+                exists
+            );
+            assert_eq!(stars.brief_at(t).is_some(), exists);
+        }
+        for t in [ClockWindow::START, ClockWindow::END] {
+            let away = GalacticPosition::from_light_years([-20_000.0, -20_000.0, 30_000.0])
+                .expect("in range");
+            let seen = retarded(&Observer::new(away, t).expect("inside"), &line);
+            assert!(SourceHorizon::contains(seen.emitted()));
+            assert_in_padded_cube(
+                "a stream member's apparent position",
+                seen.apparent_position(),
+            );
+        }
+        stream_swept += 1;
+    }
+    assert!(
+        stream_swept >= 1,
+        "the stream has no member in bands A or C on its axis"
+    );
+
     // The supernova entry as a value: exploding at the horizon's start and at the epoch.
     let site = SiteGas::uniform(HydrogenPerCm3::new(1.0), KelvinPerCm3::new(3_800.0))
         .expect("a uniform site");
@@ -282,6 +413,285 @@ fn source_horizon_sweep_every_source_answers_at_the_horizons_start() {
                     assert!(remnant.offset().is_some_and(|o| o.value().is_finite()));
                 }
             }
+        }
+    }
+
+    // A core-collapse entry of the class grid (plan 09, P09.T33.a): its system on its line broken
+    // at the explosion, its record's existence, its stars and its supernova's state. Its line is
+    // not one, so the observer's drift refuses it, as it says.
+    let process = CoreCollapseProcess::new(&galaxy);
+    let entry = (8..28)
+        .map(|y| {
+            CatalogueCellKey::new(ClassId::CORE_COLLAPSE, [0, y, 0])
+                .expect("a cell of the root cube")
+        })
+        .flat_map(|key| CatalogueClassCell::generate(&galaxy, &process, key).into_entries())
+        .next()
+        .expect("the inner disc has recent deaths");
+    let catalogue = system_of(&galaxy, entry.id()).expect("an entry resolves");
+    let record = catalogue.record();
+    let stars = catalogue
+        .stars(&galaxy)
+        .expect("a core collapse's stars are the stellar stage's");
+    assert!(matches!(
+        Drift::of_record(&galaxy, record),
+        Err(TraceMotionError::CatalogueMotionNotTraced(_))
+    ));
+    for t in TIMES {
+        let p = catalogue.position_at(t);
+        assert_in_padded_cube("a core-collapse entry", &p);
+        assert_eq!(position_at(&galaxy, record, t), p);
+        let exists = record.existence_at(t) == Existence::Exists;
+        assert!(record.age_at(t).value().is_finite());
+        let summary = stars.summary_at(t);
+        assert_eq!(summary.existence() == SystemExistence::Exists, exists);
+        assert_eq!(
+            stars.brief_at(t).is_some(),
+            exists,
+            "{:?} at {t}",
+            record.id()
+        );
+        match entry.value().supernova().state_at(t) {
+            SupernovaState::Progenitor { .. } => assert!(t < entry.value().site().death()),
+            SupernovaState::Supernova { age, .. } | SupernovaState::BareRemnant { age, .. } => {
+                assert!(t >= entry.value().site().death() && age.value().is_finite());
+            }
+        }
+    }
+
+    // A luminous-blue-variable host of the class grid (plan 09, P09.T43): its system on its
+    // straight line, its record's existence, and its stars, whose window is the entry's. Its line
+    // is a catalogue system's, so the observer's drift refuses it, as it says. From 27 the
+    // features hold most young stars (P09.T2.c), and the field's sixteen hosts in the disc's
+    // 24 × 24 × 2 cells of 4,096 ly about the centre lie off the stretch towards the Sun that held
+    // one at 26, so the first of those cells' is taken (P12.T13).
+    let process = LbvProcess::new(&galaxy);
+    let entry = (-12..12)
+        .flat_map(|y| (-12..12).flat_map(move |x| [[x, y, 0], [x, y, -1]]))
+        .map(|cell| {
+            CatalogueCellKey::new(ClassId::LUMINOUS_BLUE_VARIABLE, cell)
+                .expect("a cell of the root cube")
+        })
+        .flat_map(|key| CatalogueClassCell::generate(&galaxy, &process, key).into_entries())
+        .next()
+        .expect("the disc has luminous-blue-variable hosts");
+    let catalogue = system_of(&galaxy, entry.id()).expect("an entry resolves");
+    let record = catalogue.record();
+    let stars = catalogue
+        .stars(&galaxy)
+        .expect("a host's stars are the stellar stage's");
+    assert_eq!(stars.lbv_window(), Some(entry.value().window()));
+    assert!(matches!(
+        Drift::of_record(&galaxy, record),
+        Err(TraceMotionError::CatalogueMotionNotTraced(_))
+    ));
+    for t in TIMES {
+        let p = catalogue.position_at(t);
+        assert_in_padded_cube("a luminous-blue-variable host", &p);
+        assert_eq!(position_at(&galaxy, record, t), p);
+        let exists = record.existence_at(t) == Existence::Exists;
+        assert!(record.age_at(t).value().is_finite());
+        let summary = stars.summary_at(t);
+        assert_eq!(summary.existence() == SystemExistence::Exists, exists);
+        assert_eq!(
+            stars.brief_at(t).is_some(),
+            exists,
+            "{:?} at {t}",
+            record.id()
+        );
+    }
+
+    // A Type Ia entry of the class grid (plan 09, P09.T34.a), one with a survivor: each member on
+    // its line, the system's straight and the survivor's broken at the explosion, its record's
+    // existence and its supernova's state. Neither member has stars of the stellar stage's, and the
+    // observer's drift refuses both lines.
+    let process = TypeIaProcess::new(&galaxy);
+    let entry = [[0, 0, 0], [-1, -1, -1], [0, 0, -1], [-1, 0, 0]]
+        .into_iter()
+        .map(|cell| CatalogueCellKey::new(ClassId::TYPE_IA, cell).expect("a cell about the centre"))
+        .flat_map(|key| CatalogueClassCell::generate(&galaxy, &process, key).into_entries())
+        .find(|entry| entry.members() == 2)
+        .expect("the centre has a recent Type Ia with a survivor");
+    for member in 0..entry.members() {
+        let id = entry.member_id(member).expect("a member of the entry");
+        let catalogue = system_of(&galaxy, id).expect("a member resolves");
+        let record = catalogue.record();
+        assert!(catalogue.stars(&galaxy).is_none());
+        assert!(matches!(
+            Drift::of_record(&galaxy, record),
+            Err(TraceMotionError::CatalogueMotionNotTraced(_))
+        ));
+        for t in TIMES {
+            let p = catalogue.position_at(t);
+            assert_in_padded_cube("a Type Ia's member", &p);
+            assert_eq!(position_at(&galaxy, record, t), p);
+            assert!(record.age_at(t).value().is_finite());
+            match entry.value().supernova().state_at(t) {
+                SupernovaState::Progenitor { .. } => assert!(t < entry.value().site().death()),
+                SupernovaState::Supernova { age, remnant, .. }
+                | SupernovaState::BareRemnant { age, remnant } => {
+                    assert!(t >= entry.value().site().death() && age.value().is_finite());
+                    assert!(
+                        remnant
+                            .survivor_offset()
+                            .is_some_and(|offset| offset.value().is_finite())
+                    );
+                }
+            }
+        }
+    }
+
+    // An accreting white dwarf of each class of the class grid (plan 11, P11.T8.a): its system on
+    // its one straight line, its record's existence, its stars (its pair, from its marks) and its
+    // novae, the series its scan marks carry, for a window at the horizon's start.
+    let fast = AccretingWdFast::new(&galaxy);
+    let slow = AccretingWdSlow::new(&galaxy);
+    let first_entry = |class: ClassId| {
+        (-4..4).find_map(|x| {
+            let key = CatalogueCellKey::new(class, [x, 50, 0]).expect("a cell of the root cube");
+            let entries = if class == ClassId::ACCRETING_WHITE_DWARF {
+                CatalogueClassCell::generate(&galaxy, &fast, key).into_entries()
+            } else {
+                CatalogueClassCell::generate(&galaxy, &slow, key).into_entries()
+            };
+            entries.into_iter().next()
+        })
+    };
+    for class in [
+        ClassId::ACCRETING_WHITE_DWARF,
+        ClassId::ACCRETING_WHITE_DWARF_SLOW,
+    ] {
+        let entry = first_entry(class).expect("the solar circle has accreting white dwarfs");
+        let catalogue = system_of(&galaxy, entry.id()).expect("an entry resolves");
+        let record = catalogue.record();
+        let stars = catalogue
+            .stars(&galaxy)
+            .expect("an accreting white dwarf's stars are its pair's");
+        for t in TIMES {
+            let p = catalogue.position_at(t);
+            assert_in_padded_cube("an accreting white dwarf", &p);
+            assert_eq!(position_at(&galaxy, record, t), p);
+            assert_eq!(record.existence_at(t), Existence::Exists);
+            assert!(record.age_at(t).value().is_finite());
+            assert_eq!(stars.summary_at(t).existence(), SystemExistence::Exists);
+            assert!(stars.brief_at(t).is_some(), "{:?} at {t}", record.id());
+            assert!(stars.state_at(t).is_some_and(|s| s.pairs().len() == 1));
+        }
+        let opening = TimeWindow::new(
+            SourceHorizon::START,
+            SourceHorizon::START.checked_add(year).expect("in range"),
+        )
+        .expect("ordered");
+        let mut novae = Vec::new();
+        entry.value().scan().eruptions_in(opening, &mut novae);
+        assert!(novae.iter().all(|e| opening.contains(e.time())));
+    }
+
+    // A stellar merger of the class grid (plan 11, P11.T8.c): its system on its one straight line,
+    // its record's existence, and its stars, the contact pair before its merger time and the
+    // merged star from it, under the one ID.
+    let mergers = StellarMergers::new(&galaxy);
+    let stellar = (-2..2)
+        .find_map(|x| {
+            let key = CatalogueCellKey::new(ClassId::STELLAR_MERGER, [x, 6, 0])
+                .expect("a cell of the root cube");
+            CatalogueClassCell::generate(&galaxy, &mergers, key)
+                .into_entries()
+                .into_iter()
+                .next()
+        })
+        .expect("the solar circle has stellar mergers");
+    // A neutron-star merger, the first of the galaxy's, walked cell by cell from the centre's.
+    let neutron_stars = NeutronStarMergers::new(&galaxy);
+    let compact = (0..16)
+        .flat_map(|r: i32| {
+            (-r..r.max(1)).flat_map(move |x| {
+                (-r..r.max(1)).flat_map(move |y| (-1..1).map(move |z| [x, y, z]))
+            })
+        })
+        .find_map(|cell| {
+            let key = CatalogueCellKey::new(ClassId::NEUTRON_STAR_MERGER, cell)
+                .expect("a cell of the root cube");
+            CatalogueClassCell::generate(&galaxy, &neutron_stars, key)
+                .into_entries()
+                .into_iter()
+                .next()
+        })
+        .expect("the galaxy has a neutron-star merger in the disc");
+    for (id, merger, what) in [
+        (
+            stellar.id(),
+            stellar.value().scan().merger_time(),
+            "a stellar merger",
+        ),
+        (
+            compact.id(),
+            compact.value().scan().merger_time(),
+            "a neutron-star merger",
+        ),
+    ] {
+        let catalogue = system_of(&galaxy, id).expect("an entry resolves");
+        let record = catalogue.record();
+        let stars = catalogue
+            .stars(&galaxy)
+            .expect("a merger's stars are its pair's");
+        for t in TIMES {
+            let p = catalogue.position_at(t);
+            assert_in_padded_cube(what, &p);
+            assert_eq!(position_at(&galaxy, record, t), p);
+            assert_eq!(record.existence_at(t), Existence::Exists);
+            assert!(record.age_at(t).value().is_finite());
+            assert_eq!(stars.summary_at(t).existence(), SystemExistence::Exists);
+            assert!(stars.brief_at(t).is_some(), "{:?} at {t}", record.id());
+            let state = stars.state_at(t).expect("the system exists");
+            let present = state
+                .stars()
+                .iter()
+                .filter(|s| s.phase() != hyperion_sim::stellar::Phase::NoRemnant)
+                .count();
+            assert_eq!(present, if t < merger { 2 } else { 1 }, "{what} at {t}");
+        }
+    }
+
+    // An X-ray binary of the class grid (plan 11, P11.T8.b), a low-mass host from the cells about
+    // the centre and a high-mass one from the disc: its system on its one straight line, its
+    // record's existence and its stars (its pair, from its marks). From 27 the features hold most
+    // young stars (P09.T2.c), and the plane's cells within 20,480 ly of the centre hold four
+    // high-mass hosts, none in the stretch of the inner disc that held one at 26 (P12.T13).
+    let xrb = XrayBinaries::new(&galaxy);
+    let xrb_entry = |cells: Vec<[i32; 3]>, side: XrbSide| {
+        cells.into_iter().find_map(|cell| {
+            let key = CatalogueCellKey::new(ClassId::XRAY_BINARY, cell).expect("a cell");
+            CatalogueClassCell::generate(&galaxy, &xrb, key)
+                .into_entries()
+                .into_iter()
+                .find(|e| XrbSide::of(e.value().record().population()) == side)
+        })
+    };
+    let block = |xs: std::ops::Range<i32>, ys: std::ops::Range<i32>| -> Vec<[i32; 3]> {
+        xs.flat_map(|x| ys.clone().map(move |y| [x, y, 0]))
+            .collect()
+    };
+    let low = xrb_entry(block(-4..4, -4..4), XrbSide::LowMass)
+        .expect("the centre has low-mass X-ray binaries");
+    let high = xrb_entry(block(-40..40, -40..40), XrbSide::HighMass)
+        .expect("the disc has high-mass X-ray binaries");
+    for entry in [low, high] {
+        let catalogue = system_of(&galaxy, entry.id()).expect("an entry resolves");
+        let record = catalogue.record();
+        let stars = catalogue
+            .stars(&galaxy)
+            .expect("an X-ray binary's stars are its pair's");
+        for t in TIMES {
+            let p = catalogue.position_at(t);
+            assert_in_padded_cube("an X-ray binary", &p);
+            assert_eq!(position_at(&galaxy, record, t), p);
+            assert_eq!(entry.value().scan().position_at(t), p);
+            assert_eq!(record.existence_at(t), Existence::Exists);
+            assert!(record.age_at(t).value().is_finite());
+            assert_eq!(stars.summary_at(t).existence(), SystemExistence::Exists);
+            assert!(stars.brief_at(t).is_some(), "{:?} at {t}", record.id());
+            assert!(stars.state_at(t).is_some_and(|s| s.pairs().len() == 1));
         }
     }
 

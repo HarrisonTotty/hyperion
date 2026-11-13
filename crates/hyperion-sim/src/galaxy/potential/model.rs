@@ -2,8 +2,8 @@
 //! P02.T6.d and Design note 6).
 
 use super::mge::{
-    Gaussian, GridPoint, InPlane, bar_disc, double_exponential, holed_double_exponential,
-    spheroidal_exponential,
+    Gaussian, GridPoint, InPlane, bar_disc, boxy_bulge, double_exponential,
+    holed_double_exponential,
 };
 use super::nfw::Nfw;
 use super::spherical::{NuclearCluster, PointMass, SphericalMass};
@@ -22,43 +22,20 @@ enum Centre {
     Excluded,
 }
 
-/// The second moments `⟨ϖ²⟩` and `⟨z²⟩` of the unit boxy body `exp(−m)`, `m = (ϖ^p + |z|^p)^(1÷p)`
-/// with `ϖ² = x² + y²` and `p` the boxiness, in closed form.
+/// The scales `(s, h)` of the bulge made axisymmetric in the plane, ly: `s = √((a² + b²) ÷ 2)` of
+/// its in-plane scales `a` and `b`, and `h` its vertical scale (decision-p15-revalidation Q8).
 ///
-/// `m` is homogeneous of degree 1, so for a function `h` homogeneous of degree 2, `∫ h e^(−m) dV
-/// = 5! ∫_{m≤1} h dV` and `∫ e^(−m) dV = 3! V(m ≤ 1)`. Over the unit body, with its boundary
-/// `z = (1 − ϖ^p)^(1÷p)`, `∫ ϖᵅ (1 − ϖ^p)^(β÷p) dϖ = B((α + 1) ÷ p, β ÷ p + 1) ÷ p`, so `⟨ϖ²⟩ =
-/// 20 B(4 ÷ p, 1 ÷ p + 1) ÷ B(2 ÷ p, 1 ÷ p + 1)` and `⟨z²⟩ = (20 ÷ 3) B(2 ÷ p, 3 ÷ p + 1) ÷
-/// B(2 ÷ p, 1 ÷ p + 1)`. At `p = 2`, the spherical exponential, they are 8 and 4.
-pub(crate) fn unit_bulge_moments(boxiness: f64) -> (f64, f64) {
-    let p = boxiness;
-    let ln_beta = |x: f64, y: f64| math::ln_gamma(x) + math::ln_gamma(y) - math::ln_gamma(x + y);
-    let volume = ln_beta(2.0 / p, 1.0 / p + 1.0);
-    let planar = 20.0 * math::exp(ln_beta(4.0 / p, 1.0 / p + 1.0) - volume);
-    let vertical = 20.0 / 3.0 * math::exp(ln_beta(2.0 / p, 3.0 / p + 1.0) - volume);
-    (planar, vertical)
-}
-
-/// The boxy bulge's second moments `⟨R²⟩` and `⟨z²⟩`, ly²: the unit body's scaled by the bulge's
-/// axes, `⟨R²⟩ = (a² + b²) ⟨ϖ²⟩ ÷ 2` and `⟨z²⟩ = c² ⟨z²⟩`.
-pub(crate) fn bulge_second_moments(bulge: &BulgeParams) -> (f64, f64) {
-    let (planar, vertical) = unit_bulge_moments(bulge.boxiness());
-    let (a, b, c) = (
-        bulge.scale_x().value(),
-        bulge.scale_y().value(),
-        bulge.scale_z().value(),
-    );
-    (f64::midpoint(a * a, b * b) * planar, c * c * vertical)
-}
-
-/// The spheroidal exponential `exp(−√(R² ÷ a_r² + z² ÷ a_z²))` with the boxy bulge's second
-/// moments (plan 02, Design note 6): its own are `⟨R²⟩ = 8 a_r²` and `⟨z²⟩ = 4 a_z²`.
+/// The body `exp(−((R ÷ s)^c + (|z| ÷ h)^c)^(1 ÷ c))` has the bulge's unit body, so it keeps the
+/// bulge's mass, its boxiness `c` and both its second moments, `⟨R²⟩ = s² ⟨ϖ²⟩ = (a² + b²) ⟨ϖ²⟩ ÷
+/// 2` and `⟨z²⟩ = h² ⟨z²⟩` of the unit body's, exactly: plan 02's Design note 6, `⟨R²⟩` matched.
+/// The potential expands it ([`boxy_bulge`]) and the bulge's tracer is it (plan 08, Design note 10;
+/// [`bulge_projected_sigma`](crate::galaxy::kinematics::spheroid::bulge_projected_sigma)).
 #[must_use]
-pub(crate) fn bulge_spheroid(bulge: &BulgeParams) -> (LightYears, LightYears) {
-    let (r2, z2) = bulge_second_moments(bulge);
+pub(crate) fn axisymmetric_bulge_scales(bulge: &BulgeParams) -> (LightYears, LightYears) {
+    let (a, b) = (bulge.scale_x().value(), bulge.scale_y().value());
     (
-        LightYears::new((r2 / 8.0).sqrt()),
-        LightYears::new((z2 / 4.0).sqrt()),
+        LightYears::new(f64::midpoint(a * a, b * b).sqrt()),
+        bulge.scale_z(),
     )
 }
 
@@ -73,8 +50,9 @@ pub(crate) fn bulge_spheroid(bulge: &BulgeParams) -> (LightYears, LightYears) {
 /// discs' central hole
 /// ([`mge::holed_double_exponential`](super::mge::holed_double_exponential); plan 02, P02.T12.b),
 /// whose Gaussians' masses are signed. The bar is an axisymmetric disc with its azimuthally averaged surface
-/// density ([`mge::bar_disc`](super::mge::bar_disc)); the boxy bulge is the spheroidal
-/// exponential with its mass and second moments. The stellar halo's 1% is left out.
+/// density ([`mge::bar_disc`](super::mge::bar_disc)); the boxy bulge is its own body made
+/// axisymmetric in the plane ([`mge::boxy_bulge`](super::mge::boxy_bulge), plan 15's P15.T3.c),
+/// which keeps its mass, boxiness and second moments. The stellar halo's 1% is left out.
 ///
 /// The discs' stars are cored in height ([`fields::vertical`](crate::galaxy::fields::vertical)),
 /// but the potential keeps them exponential in height, at the drawn heights, which are the stars'
@@ -131,7 +109,8 @@ impl MassModel {
         let mass = |p| params.population_mass(p);
         let (thin, thick, gas) = (params.thin_disc(), params.thick_disc(), params.gas_disc());
         let (nuclear, bar) = (params.nuclear_disc(), params.bar());
-        let (a_r, a_z) = bulge_spheroid(params.bulge());
+        let bulge = params.bulge();
+        let (s, h) = axisymmetric_bulge_scales(bulge);
         let parts = [
             holed_double_exponential(
                 mass(Population::YoungThinDisc) + mass(Population::OldThinDisc),
@@ -151,11 +130,15 @@ impl MassModel {
                 nuclear.inner_height(),
             ),
             bar_disc(mass(Population::LongBar), bar.half_length(), bar.height()),
-            spheroidal_exponential(mass(Population::Bulge), a_r, a_z),
+            boxy_bulge(mass(Population::Bulge), s, h, bulge.boxiness()),
         ];
         let gaussians = parts
             .into_iter()
-            .flat_map(|part| part.expect("built parameters give positive masses and lengths"))
+            .flat_map(|part| {
+                part.expect(
+                    "built parameters give positive masses and lengths, and a boxiness of 3–4",
+                )
+            })
             .collect();
         let (nuclear_cluster, black_hole) = match centre {
             Centre::Included => (
@@ -317,7 +300,129 @@ impl MassModel {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::galaxy::potential::mge::spheroidal_exponential;
     use crate::galaxy::quad::gl32;
+
+    /// The second moments `⟨ϖ²⟩` and `⟨z²⟩` of the unit boxy body `exp(−m)`, `m = (ϖ^p +
+    /// |z|^p)^(1÷p)` with `ϖ² = x² + y²` and `p` the boxiness, in closed form.
+    ///
+    /// `m` is homogeneous of degree 1, so for a function `h` homogeneous of degree 2, `∫ h e^(−m) dV
+    /// = 5! ∫_{m≤1} h dV` and `∫ e^(−m) dV = 3! V(m ≤ 1)`. Over the unit body, with its boundary
+    /// `z = (1 − ϖ^p)^(1÷p)`, `∫ ϖᵅ (1 − ϖ^p)^(β÷p) dϖ = B((α + 1) ÷ p, β ÷ p + 1) ÷ p`, so `⟨ϖ²⟩ =
+    /// 20 B(4 ÷ p, 1 ÷ p + 1) ÷ B(2 ÷ p, 1 ÷ p + 1)` and `⟨z²⟩ = (20 ÷ 3) B(2 ÷ p, 3 ÷ p + 1) ÷
+    /// B(2 ÷ p, 1 ÷ p + 1)`. At `p = 2`, the spherical exponential, they are 8 and 4.
+    fn unit_bulge_moments(boxiness: f64) -> (f64, f64) {
+        let p = boxiness;
+        let ln_beta =
+            |x: f64, y: f64| math::ln_gamma(x) + math::ln_gamma(y) - math::ln_gamma(x + y);
+        let volume = ln_beta(2.0 / p, 1.0 / p + 1.0);
+        let planar = 20.0 * math::exp(ln_beta(4.0 / p, 1.0 / p + 1.0) - volume);
+        let vertical = 20.0 / 3.0 * math::exp(ln_beta(2.0 / p, 3.0 / p + 1.0) - volume);
+        (planar, vertical)
+    }
+
+    /// The boxy bulge's second moments `⟨R²⟩` and `⟨z²⟩`, ly²: the unit body's scaled by the
+    /// bulge's axes, `⟨R²⟩ = (a² + b²) ⟨ϖ²⟩ ÷ 2` and `⟨z²⟩ = c² ⟨z²⟩`.
+    fn bulge_second_moments(bulge: &BulgeParams) -> (f64, f64) {
+        let (planar, vertical) = unit_bulge_moments(bulge.boxiness());
+        let (a, b, c) = (
+            bulge.scale_x().value(),
+            bulge.scale_y().value(),
+            bulge.scale_z().value(),
+        );
+        (f64::midpoint(a * a, b * b) * planar, c * c * vertical)
+    }
+
+    /// The spheroidal exponential `exp(−√(R² ÷ a_r² + z² ÷ a_z²))` with the boxy bulge's second
+    /// moments, which plan 02's potential held in the bulge's place until plan 15's P15.T3.c (its
+    /// Design note 6): its own are `⟨R²⟩ = 8 a_r²` and `⟨z²⟩ = 4 a_z²`. Plan 15's T3.b measures
+    /// the rotation curve's change from it.
+    fn bulge_spheroid(bulge: &BulgeParams) -> (LightYears, LightYears) {
+        let (r2, z2) = bulge_second_moments(bulge);
+        (
+            LightYears::new((r2 / 8.0).sqrt()),
+            LightYears::new((z2 / 4.0).sqrt()),
+        )
+    }
+
+    /// The axisymmetrised body keeps the bulge's second moments exactly, `s² ⟨ϖ²⟩` and `h²
+    /// ⟨z²⟩`, and its Gaussians hold them to the expansion's error: the mass-weighted `⟨R²⟩ = Σ
+    /// M 2σ²` and `⟨z²⟩ = Σ M q²σ²` of the Milky Way's bulge (c = 3.5) are 1.58% under and 1.62%
+    /// over the body's, held to 2% (decision-p15-revalidation Q8). The fit weights the mass inside
+    /// spheres and the midplane force, not the moments, and cannot follow the boxiness (plan 15,
+    /// P15.T3.b), so its terms trade height for radius.
+    #[test]
+    fn the_axisymmetric_bulge_keeps_the_bulge_s_second_moments() {
+        let params = GalaxyParams::milky_way_like();
+        let bulge = params.bulge();
+        let (s, h) = axisymmetric_bulge_scales(bulge);
+        let (planar, vertical) = unit_bulge_moments(bulge.boxiness());
+        let (r2, z2) = bulge_second_moments(bulge);
+        assert!((s.value() * s.value() * planar / r2 - 1.0).abs() < 1e-14);
+        assert!((h.value() * h.value() * vertical / z2 - 1.0).abs() < 1e-14);
+        let gaussians = boxy_bulge(SolarMasses::new(1.0), s, h, bulge.boxiness()).unwrap();
+        let (mut planar_sum, mut vertical_sum) = (0.0, 0.0);
+        for g in &gaussians {
+            let (m, sigma, q) = (g.mass().value(), g.sigma().value(), g.flattening());
+            planar_sum += m * 2.0 * sigma * sigma;
+            vertical_sum += m * q * q * sigma * sigma;
+        }
+        eprintln!(
+            "MGE_BOXY at c {}: ⟨R²⟩ {:+.4}%, ⟨z²⟩ {:+.4}% from the body's",
+            bulge.boxiness(),
+            100.0 * (planar_sum / r2 - 1.0),
+            100.0 * (vertical_sum / z2 - 1.0)
+        );
+        assert!(
+            (planar_sum / r2 - 1.0).abs() < 0.02,
+            "{planar_sum} against {r2}"
+        );
+        assert!(
+            (vertical_sum / z2 - 1.0).abs() < 0.02,
+            "{vertical_sum} against {z2}"
+        );
+    }
+
+    /// Plan 15's P15.T3.b at Milky Way values, run at the swap (T3.c): the circular speed with the
+    /// bulge's boxy body differs from the one with plan 02's moment-matched spheroidal exponential
+    /// in its place by under 3% anywhere, at 200 radii from 0.3 ly to 300,000 ly, every other
+    /// component as the model holds it.
+    #[test]
+    fn the_boxy_bulge_moves_the_milky_way_s_rotation_curve_under_three_per_cent() {
+        let params = GalaxyParams::milky_way_like();
+        let model = MassModel::new(&params);
+        let bulge = params.bulge();
+        let mass = params.population_mass(Population::Bulge);
+        let (s, h) = axisymmetric_bulge_scales(bulge);
+        let boxy = boxy_bulge(mass, s, h, bulge.boxiness()).unwrap();
+        let (a_r, a_z) = bulge_spheroid(bulge);
+        let spheroid = spheroidal_exponential(mass, a_r, a_z).unwrap();
+        let others = model.gaussians.len() - boxy.len();
+        assert_eq!(&model.gaussians[others..], boxy.as_slice());
+        let sum = |gaussians: &[Gaussian], r: LightYears| {
+            gaussians.iter().fold(0.0, |sum, g| sum + g.v_circ_sq(r))
+        };
+        let mut worst: (f64, f64) = (0.0, 0.0);
+        for i in 0..200 {
+            let r = LightYears::new(0.3 * math::exp(f64::from(i) / 199.0 * math::ln(1e6)));
+            let rest = model
+                .spherical()
+                .iter()
+                .fold(sum(&model.gaussians[..others], r), |sum, c| {
+                    sum + c.v_circ_sq(r)
+                });
+            let change = ((rest + sum(&boxy, r)) / (rest + sum(&spheroid, r))).sqrt() - 1.0;
+            if change.abs() > worst.1.abs() {
+                worst = (r.value(), change);
+            }
+        }
+        eprintln!(
+            "the boxy bulge moves v_c by at most {:+.3}%, at {:.0} ly",
+            100.0 * worst.1,
+            worst.0
+        );
+        assert!(worst.1.abs() < 0.03, "{worst:?}");
+    }
 
     /// The closed-form moments against a two-dimensional `gl32` quadrature of `exp(−m)` over the
     /// quarter plane in (ϖ, z), with the volume element `ϖ dϖ dz`, on panels in each variable.

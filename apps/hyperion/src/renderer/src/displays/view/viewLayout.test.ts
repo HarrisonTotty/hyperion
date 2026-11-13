@@ -41,6 +41,11 @@ describe("VIEW's layout (R07.T19.b)", () => {
     ]).toEqual(["compact", "compact", "compact"]);
   });
 
+  it("starts at a 99 rem box, so that the 98.5 rem box it began at is compact (R06.T13.j)", () => {
+    const heightPx = FULL_MIN_HEIGHT_REM * 16;
+    expect([FULL_MIN_WIDTH_REM, viewLayout(box(98.5 * 16, heightPx))]).toEqual([99, "compact"]);
+  });
+
   it("is full from its least width and height, and compact just below either", () => {
     const widthPx = FULL_MIN_WIDTH_REM * 16;
     const heightPx = FULL_MIN_HEIGHT_REM * 16;
@@ -52,6 +57,11 @@ describe("VIEW's layout (R07.T19.b)", () => {
   });
 });
 
+/** Column B's tallest, px, with its Style panel `stylePx` tall: the exposure, the meter and two gaps. */
+function columnPx(stylePx: number): number {
+  return stylePx + 425.5 + 168 + 2 * 8;
+}
+
 describe("VIEW's full layout's least height (R07.T19.b's follow-up)", () => {
   // A task that would pass the bound asks for a ruling rather than raise it.
   it("stays within 52.5 rem, so that a maximised 1920 × 1080 window is full (decision-r07-t19b-exposure-fit, item 2)", () => {
@@ -60,6 +70,28 @@ describe("VIEW's full layout's least height (R07.T19.b's follow-up)", () => {
 
   it("is bounded at the 53.5 rem box of a maximised 1920 × 1080 window less 1 rem", () => {
     expect(FULL_MIN_HEIGHT_BOUND_REM).toBe(52.5);
+  });
+
+  it("takes the STYLE panel's BASELINE row: 752 px, its 0.5 rem margin and its 2 rem row, 49.5 rem (R10.T12.a; decision-r10-t12a-scope §3.3)", () => {
+    expect([FULL_MIN_HEIGHT_REM, (752 + 8 + 32) / 16]).toEqual([49.5, 49.5]);
+  });
+
+  it("keeps 49.5 rem with the BASELINE row beside an instrument's QUALITY LOW reason, the GRID row never beside it (R10.T12.d)", () => {
+    // The Style panel at 99.5 px: with the two-line reason (43 px) and BASELINE (40 px), or GRID and
+    // BASELINE (40 px each).
+    expect([
+      columnPx(99.5 + 43 + 40) / 16,
+      columnPx(99.5 + 40 + 40) / 16 <= FULL_MIN_HEIGHT_REM,
+    ]).toEqual([FULL_MIN_HEIGHT_REM, true]);
+  });
+
+  it("keeps every named box's layout at 49.5 rem: 1920 × 1080 at 100% and maximised full, 1600 × 900 and 1280 × 720 compact", () => {
+    expect([
+      viewLayout(box(1888, 923)),
+      viewLayout(box(1888, 856)),
+      viewLayout(box(1568, 742)),
+      viewLayout(box(1248, 563)),
+    ]).toEqual(["full", "full", "compact", "compact"]);
   });
 });
 

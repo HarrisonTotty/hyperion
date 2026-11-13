@@ -23,8 +23,15 @@
 //! secondary by its place in [`secondary_window`], the windows read at the drawn delay itself so
 //! that both lifetimes fit it. A lifetime is plan 06's track at solar composition and median draws,
 //! tabulated once per distribution.
+//!
+//! The class that places these entries on the class grid, [`TypeIaProcess`] (P09.T34.a), is in
+//! [`process`].
 
 use core::num::NonZeroU64;
+
+pub mod process;
+
+pub use self::process::{IaComponent, TypeIaCandidate, TypeIaEntry, TypeIaProcess, TypeIaSurvivor};
 
 use crate::galaxy::Galaxy;
 use crate::galaxy::Population;
@@ -32,6 +39,7 @@ use crate::galaxy::ages::AgeDistribution;
 use crate::galaxy::consts::{LIGHT_YEARS_PER_YEAR_PER_KM_S, YEARS_PER_GIGAYEAR};
 use crate::galaxy::displaced::class_table::SURVIVOR_POPULATIONS;
 use crate::galaxy::features::interior::counts::white_dwarf_mass;
+use crate::galaxy::fields::{Component, ComponentId};
 use crate::galaxy::imf::MassBand;
 use crate::galaxy::quad;
 use crate::galaxy::snr::SHELL_WINDOW_CAP;
@@ -81,6 +89,12 @@ pub const DONOR_MAX: f64 = 3.0;
 /// Proposals of the delay's rejection draw before it gives up: the acceptance is at least a
 /// hundredth for every component the galaxy has, so 4,096 fail with probability under 10⁻¹⁷.
 const DELAY_ATTEMPTS: u64 = 4_096;
+
+/// The word of a progenitor's stream, counted from its component mark's, at which its explosion
+/// time is drawn: after the mark, the delay's 2 × [`DELAY_ATTEMPTS`] proposal words, the channel's
+/// mark and the two masses' uniforms. So the time can be read first, before the rest of the draw
+/// (plan 12, P12.T8.b.2), and the draw itself checks that it reads it there.
+const EXPLOSION_WORD: u64 = 1 + 2 * DELAY_ATTEMPTS + 3;
 
 /// The masses the lifetime table spans, M☉, and its nodes.
 const LIFETIME_MASSES: (f64, f64) = (0.8, 8.0);
@@ -150,8 +164,9 @@ pub const HYDROGEN_DONOR_SPEED_KM_S: (f64, f64) = (100.0, 250.0);
 /// The delay-time distribution and the galaxy's Type Ia rates, with what the delay-first draw
 /// needs: each component's formation history and its rate, and a table of lifetimes.
 ///
-/// Built once per galaxy ([`from_galaxy`](Self::from_galaxy)): a quadrature per component and 48
-/// stellar lifetimes, a few milliseconds.
+/// A quadrature per component and 48 stellar lifetimes, some 31 ms to build (release, pod, 16 vCPU,
+/// 2026-10-31): the galaxy keeps its field's, which [`TypeIaProcess`] shares, and a caller of
+/// [`from_galaxy`](Self::from_galaxy) holds the one it builds.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DelayTimeDistribution {
     components: Vec<ComponentRate>,
@@ -165,6 +180,98 @@ pub struct DelayTimeDistribution {
     ln_mass_falling: Vec<f64>,
 }
 
+/// The lifetimes of [`DelayTimeDistribution`]'s table: `ln m` and `ln τ` (years) at its 48 nodes
+/// over 0.8–8 M☉, at solar composition and median draws, `τ` falling with `m`.
+#[derive(Debug, Clone, PartialEq)]
+struct LifetimeTable {
+    ln_mass: Vec<f64>,
+    ln_lifetime: Vec<f64>,
+}
+
+impl LifetimeTable {
+    /// The table, 48 stellar lifetimes (some tens of milliseconds).
+    #[must_use]
+    fn new() -> Self {
+        let composition = Composition::SOLAR;
+        let draws = StarDraws::median();
+        let (lo, hi) = (math::ln(LIFETIME_MASSES.0), math::ln(LIFETIME_MASSES.1));
+        let last = LIFETIME_NODES - 1;
+        let ln_mass: Vec<f64> = (0..LIFETIME_NODES)
+            .map(|i| lo + (hi - lo) * index_f64(i) / index_f64(last))
+            .collect();
+        let ln_lifetime: Vec<f64> = ln_mass
+            .iter()
+            .map(|&x| {
+                let m = SolarMasses::new(math::exp(x).min(LIFETIME_MASSES.1));
+                math::ln(lifetime(m, &composition, &draws).value())
+            })
+            .collect();
+        Self {
+            ln_mass,
+            ln_lifetime,
+        }
+    }
+
+    /// The table, built on its first read: a lazy constant, the same bits whoever reads it first,
+    /// since it reads neither a galaxy nor its rules (the sim-determinism skill's exception, as
+    /// `LifetimeBracket::shared`; `the_shared_lifetime_table_is_the_built_one_bit_for_bit`).
+    #[must_use]
+    fn shared() -> &'static Self {
+        static TABLE: std::sync::LazyLock<LifetimeTable> =
+            std::sync::LazyLock::new(LifetimeTable::new);
+        &TABLE
+    }
+}
+
+/// The closed forms `ψ` and `Ψ` with their constants found once: the amplitude
+/// ([`DelayTimeDistribution::amplitude_per_year_per_solar_mass`]) and `(MIN_DELAY ÷ Gyr)^(β + 1)`,
+/// each the bits the closed forms find for themselves, for a caller that reads them at many delays.
+/// A quadrature of `ψ` over a feature's ages had found the amplitude's two powers at each of its
+/// 2,048 nodes, two thirds of its cost and a third of a feature's recent list, which a range query
+/// near the inner disc reads of some thousand features (P09.T37's bench).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct DelayLaw {
+    /// `A`, per year per solar mass formed.
+    amplitude_per_year_per_solar_mass: f64,
+    /// `(MIN_DELAY ÷ Gyr)^(β + 1)`.
+    floor_power: f64,
+}
+
+impl DelayLaw {
+    /// The law's constants.
+    #[must_use]
+    fn new() -> Self {
+        Self {
+            amplitude_per_year_per_solar_mass:
+                DelayTimeDistribution::amplitude_per_year_per_solar_mass(),
+            floor_power: math::powf(MIN_DELAY.value() / YEARS_PER_GIGAYEAR, DELAY_SLOPE + 1.0),
+        }
+    }
+
+    /// `ψ` at `delay`, per year per solar mass formed
+    /// ([`DelayTimeDistribution::rate_per_year_per_solar_mass`]).
+    #[must_use]
+    fn rate(self, delay: Years) -> f64 {
+        let t = delay.value();
+        if !(t >= MIN_DELAY.value() && t <= HUBBLE_TIME.value()) {
+            return 0.0;
+        }
+        self.amplitude_per_year_per_solar_mass * math::powf(t / YEARS_PER_GIGAYEAR, DELAY_SLOPE)
+    }
+
+    /// `Ψ` at `delay`, per solar mass formed
+    /// ([`DelayTimeDistribution::cumulative_per_solar_mass`]).
+    #[must_use]
+    fn cumulative(self, delay: Years) -> f64 {
+        let t = delay.value().clamp(MIN_DELAY.value(), HUBBLE_TIME.value());
+        let s = DELAY_SLOPE + 1.0;
+        self.amplitude_per_year_per_solar_mass
+            * YEARS_PER_GIGAYEAR
+            * (math::powf(t / YEARS_PER_GIGAYEAR, s) - self.floor_power)
+            / s
+    }
+}
+
 /// One component's part of the rate.
 #[derive(Debug, Clone, PartialEq)]
 struct ComponentRate {
@@ -176,6 +283,26 @@ struct ComponentRate {
     mean_rate: f64,
     /// `E[Ψ(age − S)]`: Type Ia per solar mass formed that exploded before the interval.
     exploded: f64,
+}
+
+impl ComponentRate {
+    /// The part of `systems` systems of `population` with ages `ages`.
+    #[must_use]
+    fn new(population: Population, systems: f64, ages: AgeDistribution) -> Self {
+        let before = before_interval();
+        let law = DelayLaw::new();
+        let mean_rate = expectation(&ages, MIN_DELAY, |a| law.rate(Years::new(a)));
+        let exploded = expectation(&ages, Years::new(MIN_DELAY.value() + before), |a| {
+            law.cumulative(Years::new(a - before))
+        });
+        Self {
+            population,
+            systems,
+            ages,
+            mean_rate,
+            exploded,
+        }
+    }
 }
 
 impl DelayTimeDistribution {
@@ -193,24 +320,14 @@ impl DelayTimeDistribution {
     /// [`MIN_DELAY`] and after [`HUBBLE_TIME`].
     #[must_use]
     pub fn rate_per_year_per_solar_mass(delay: Years) -> f64 {
-        let t = delay.value();
-        if !(t >= MIN_DELAY.value() && t <= HUBBLE_TIME.value()) {
-            return 0.0;
-        }
-        Self::amplitude_per_year_per_solar_mass() * math::powf(t / YEARS_PER_GIGAYEAR, DELAY_SLOPE)
+        DelayLaw::new().rate(delay)
     }
 
     /// `Ψ(delay)`: Type Ia per solar mass formed with a delay at most `delay`, in closed form; the
     /// yield at the Hubble time.
     #[must_use]
     pub fn cumulative_per_solar_mass(delay: Years) -> f64 {
-        let t = delay.value().clamp(MIN_DELAY.value(), HUBBLE_TIME.value());
-        let s = DELAY_SLOPE + 1.0;
-        let lo = MIN_DELAY.value() / YEARS_PER_GIGAYEAR;
-        Self::amplitude_per_year_per_solar_mass()
-            * YEARS_PER_GIGAYEAR
-            * (math::powf(t / YEARS_PER_GIGAYEAR, s) - math::powf(lo, s))
-            / s
+        DelayLaw::new().cumulative(delay)
     }
 
     /// The share of Type Ia whose delay is at most `delay`: 18.6% under 0.1 Gyr, 61.7% under 1.
@@ -219,42 +336,65 @@ impl DelayTimeDistribution {
         Self::cumulative_per_solar_mass(delay) / YIELD_PER_SOLAR_MASS
     }
 
+    /// The bytes the distribution owns on the heap: its components' and their ages', and its
+    /// tables of lifetimes.
+    #[must_use]
+    pub(crate) fn heap_bytes(&self) -> usize {
+        self.components.capacity() * size_of::<ComponentRate>()
+            + self
+                .components
+                .iter()
+                .map(|component| component.ages.heap_bytes())
+                .sum::<usize>()
+            + [
+                &self.ln_mass,
+                &self.ln_lifetime,
+                &self.ln_lifetime_rising,
+                &self.ln_mass_falling,
+            ]
+            .iter()
+            .map(|table| table.capacity() * size_of::<f64>())
+            .sum::<usize>()
+    }
+
     /// The distribution over `galaxy`'s components.
     #[must_use]
     pub fn from_galaxy(galaxy: &Galaxy) -> Self {
-        let composition = Composition::SOLAR;
-        let draws = StarDraws::median();
-        let (lo, hi) = (math::ln(LIFETIME_MASSES.0), math::ln(LIFETIME_MASSES.1));
-        let last = LIFETIME_NODES - 1;
-        let ln_mass: Vec<f64> = (0..LIFETIME_NODES)
-            .map(|i| lo + (hi - lo) * index_f64(i) / index_f64(last))
-            .collect();
-        let ln_lifetime: Vec<f64> = ln_mass
-            .iter()
-            .map(|&x| {
-                let m = SolarMasses::new(math::exp(x).min(LIFETIME_MASSES.1));
-                math::ln(lifetime(m, &composition, &draws).value())
-            })
-            .collect();
-        let before = before_interval();
-        let components = galaxy
-            .fields()
-            .components()
-            .iter()
-            .map(|c| {
-                let ages = c.ages().clone();
-                let psi = |a: f64| Self::rate_per_year_per_solar_mass(Years::new(a));
-                let mean_rate = expectation(&ages, MIN_DELAY, psi);
-                let exploded = expectation(&ages, Years::new(MIN_DELAY.value() + before), |a| {
-                    Self::cumulative_per_solar_mass(Years::new(a - before))
-                });
-                ComponentRate {
-                    population: c.population(),
-                    systems: c.count_with_unborn(),
-                    ages,
-                    mean_rate,
-                    exploded,
-                }
+        Self::over(galaxy, |_, c| (c.count_with_unborn(), c.ages().clone()))
+    }
+
+    /// The distribution over `galaxy`'s field (plan 09, P09.T2.c): each component's systems and
+    /// ages are the field's, its budget's times its layer-D field factor and, for the young disc,
+    /// the young field's ages. Until generator version 26 it is [`from_galaxy`](Self::from_galaxy),
+    /// bit for bit. Its rates are the field's, and the field class reads it
+    /// ([`TypeIaProcess`]).
+    #[must_use]
+    pub(crate) fn of_field(galaxy: &Galaxy) -> Self {
+        Self::over(galaxy, |id, c| {
+            (
+                galaxy.field_part(id, MassBand::D, c.count_with_unborn()),
+                galaxy.field_ages(id).clone(),
+            )
+        })
+    }
+
+    /// The distribution over `galaxy`'s components, each with the systems and ages `part` gives
+    /// it.
+    fn over(
+        galaxy: &Galaxy,
+        part: impl Fn(ComponentId, &Component) -> (f64, AgeDistribution),
+    ) -> Self {
+        let LifetimeTable {
+            ln_mass,
+            ln_lifetime,
+        } = LifetimeTable::new();
+        let fields = galaxy.fields();
+        let components = fields
+            .component_ids()
+            .map(|id| {
+                let c = fields.component(id);
+                let (systems, ages) = part(id, c);
+                ComponentRate::new(c.population(), systems, ages)
             })
             .collect();
         let band_d = crate::galaxy::POPULATIONS.map(|p| galaxy.shares().share(MassBand::D, p));
@@ -267,6 +407,38 @@ impl DelayTimeDistribution {
             ln_mass,
             ln_lifetime,
         }
+    }
+
+    /// The distribution of a catalogue feature's own members, of `population` and with ages
+    /// `ages` (plan 09, P09.T36): one component, at index 0, whose systems are 1, with the
+    /// lifetime table every distribution holds, built once a process (a lazy constant of solar
+    /// composition and median draws, which neither the galaxy nor its rules move). It costs one
+    /// quadrature of `ψ` over the ages.
+    #[must_use]
+    pub(crate) fn of_feature(
+        galaxy: &Galaxy,
+        population: Population,
+        ages: AgeDistribution,
+    ) -> Self {
+        let table = LifetimeTable::shared();
+        let band_d = crate::galaxy::POPULATIONS.map(|p| galaxy.shares().share(MassBand::D, p));
+        Self {
+            components: vec![ComponentRate::new(population, 1.0, ages)],
+            formed_mass: galaxy.mean_formed_mass().value(),
+            band_d,
+            ln_lifetime_rising: table.ln_lifetime.iter().rev().copied().collect(),
+            ln_mass_falling: table.ln_mass.iter().rev().copied().collect(),
+            ln_mass: table.ln_mass.clone(),
+            ln_lifetime: table.ln_lifetime.clone(),
+        }
+    }
+
+    /// `E[ψ(age)]` over `ages`, per year per solar mass formed: the Type Ia rate per solar mass
+    /// formed at the epoch of systems of those ages, a component's `mean_rate` (P09.T36).
+    #[must_use]
+    pub(crate) fn mean_rate_over(ages: &AgeDistribution) -> f64 {
+        let law = DelayLaw::new();
+        expectation(ages, MIN_DELAY, |a| law.rate(Years::new(a)))
     }
 
     /// The galaxy's Type Ia rate at the epoch, per year.
@@ -286,6 +458,24 @@ impl DelayTimeDistribution {
             .fold(0.0, |sum, c| {
                 sum + c.systems * self.formed_mass * c.mean_rate
             })
+    }
+
+    /// The Type Ia rate per system of the field component `component` at the epoch, per year.
+    ///
+    /// It is the mass formed per system × the component's `E[ψ(age)]`. A component's systems, born
+    /// and unborn, are its density's integral ([`Component::count_with_unborn`]), so its density × this is its Type Ia
+    /// per cubic light-year per year, and their sum over the galaxy is
+    /// [`rate_per_year`](Self::rate_per_year). It is the same as the component's layer-D share of
+    /// systems × its rate per layer-D system, since every primary is of layer D.
+    ///
+    /// [`Component::count_with_unborn`]: crate::galaxy::fields::Component::count_with_unborn
+    ///
+    /// # Panics
+    ///
+    /// If `component` is not one of the galaxy's components the distribution was built from.
+    #[must_use]
+    pub fn rate_per_system_per_year(&self, component: ComponentId) -> f64 {
+        self.formed_mass * self.components[component.index()].mean_rate
     }
 
     /// The share of `population`'s layer D that exploded before the interval and left nothing:
@@ -495,7 +685,56 @@ impl IaProgenitor {
             .mark()
             .pick_weighted(&weights, total)
             .unwrap_or(weights.len() - 1);
-        let (index, component) = candidates[pick];
+        let (index, _) = candidates[pick];
+        Self::draw_after_pick(delays, stream, base, index, after, until)
+    }
+
+    /// A progenitor of the field component `component` exploding in `(after, until]`, drawn from
+    /// `stream` under `delays`, or `None` where [`draw`](Self::draw) would give none.
+    ///
+    /// It is `draw` once its first word has picked that component, at the same word offsets from
+    /// the stream's position on entry, that first word unread. `None` if the component has no Type
+    /// Ia (no age past [`MIN_DELAY`]) or, as `draw`, every proposal of the delay was rejected.
+    ///
+    /// The Type Ia class's candidates draw here (plan 09, P09.T34.a): a candidate's site has
+    /// already picked its component by that component's density there, and `draw`'s pick by the
+    /// population's rates would read the delay from another component's ages than the one whose
+    /// density placed it.
+    ///
+    /// # Panics
+    ///
+    /// As [`draw`](Self::draw).
+    #[must_use]
+    pub fn draw_in(
+        delays: &DelayTimeDistribution,
+        stream: &mut Stream,
+        component: ComponentId,
+        after: UniverseTime,
+        until: UniverseTime,
+    ) -> Option<Self> {
+        let rate = delays.components.get(component.index())?;
+        if rate.mean_rate.is_nan() || rate.mean_rate <= 0.0 {
+            return None;
+        }
+        let base = stream.position();
+        // `draw`'s first word, its component mark, which a given component does not read.
+        stream.seek(base + 1);
+        Self::draw_after_pick(delays, stream, base, component.index(), after, until)
+    }
+
+    /// The draw of component `index`'s progenitor from word `base` + 1 of `stream` on, `base`
+    /// being the word `draw`'s component mark was read at; its explosion is [`explosion_in`] at
+    /// word `base` + [`EXPLOSION_WORD`].
+    fn draw_after_pick(
+        delays: &DelayTimeDistribution,
+        stream: &mut Stream,
+        base: u64,
+        index: usize,
+        after: UniverseTime,
+        until: UniverseTime,
+    ) -> Option<Self> {
+        let component = &delays.components[index];
+        let population = component.population;
         let delay_years = draw_delay(stream, &component.ages)?;
         stream.seek(base + 1 + 2 * DELAY_ATTEMPTS);
         let bin = delay_bin(delay_years);
@@ -507,17 +746,12 @@ impl IaProgenitor {
         let channel = IaChannel::ALL[channel_index];
         let u_primary = stream.uniform();
         let u_secondary = stream.uniform();
-        let window = until
-            .checked_since(after)
-            .filter(|s| !s.is_negative() && s.seconds() > 0);
-        debug_assert!(window.is_some(), "an explosion interval must have a length");
-        let length = NonZeroU64::new(
-            u64::try_from(window?.seconds()).expect("the filter keeps only positive lengths"),
-        )?;
-        let offset = 1 + stream.below(length);
-        let explosion = after.checked_add(Span::from_seconds(
-            i64::try_from(offset).expect("an offset at most the interval's length fits in i64"),
-        ))?;
+        debug_assert_eq!(
+            stream.position(),
+            base + EXPLOSION_WORD,
+            "the explosion is drawn at its own word, which the scans read first"
+        );
+        let explosion = explosion_in(stream, after, until)?;
         let delay = Span::from_seconds_f64(delay_years * SECONDS_PER_JULIAN_YEAR)?;
         let fit = delays.mass_with_lifetime(Years::new(delay_years));
         let (lo, hi) = primary_range(fit);
@@ -708,6 +942,29 @@ pub fn secondary_window(channel: IaChannel, primary: f64, fit: SolarMasses) -> (
     }
 }
 
+/// The explosion time `stream` draws at its position in `(after, until]`: `after` and one more
+/// second than a whole number of seconds below the interval's whole seconds, or `None` for an
+/// interval of no whole second. A progenitor's draw and the scans that read the time first
+/// ([`TypeIaProcess`]'s `event_time`, plan 12, P12.T8.b.2) both draw it here, at the stream's
+/// [`EXPLOSION_WORD`].
+fn explosion_in(
+    stream: &mut Stream,
+    after: UniverseTime,
+    until: UniverseTime,
+) -> Option<UniverseTime> {
+    let window = until
+        .checked_since(after)
+        .filter(|s| !s.is_negative() && s.seconds() > 0);
+    debug_assert!(window.is_some(), "an explosion interval must have a length");
+    let length = NonZeroU64::new(
+        u64::try_from(window?.seconds()).expect("the filter keeps only positive lengths"),
+    )?;
+    let offset = 1 + stream.below(length);
+    after.checked_add(Span::from_seconds(
+        i64::try_from(offset).expect("an offset at most the interval's length fits in i64"),
+    ))
+}
+
 /// The delay, years, from the rejection draw on `stream`'s words after the component's: a proposal
 /// from `ages` above [`MIN_DELAY`], accepted with probability `ψ(delay) ÷ ψ(lowest)`.
 fn draw_delay(stream: &mut Stream, ages: &AgeDistribution) -> Option<f64> {
@@ -716,12 +973,13 @@ fn draw_delay(stream: &mut Stream, ages: &AgeDistribution) -> Option<f64> {
         return None;
     }
     let lowest = ages.min().value().max(MIN_DELAY.value());
-    let peak = DelayTimeDistribution::rate_per_year_per_solar_mass(Years::new(lowest));
+    let law = DelayLaw::new();
+    let peak = law.rate(Years::new(lowest));
     for _ in 0..DELAY_ATTEMPTS {
         let u = stream.uniform();
         let accept = stream.mark();
         let delay = ages.quantile(u0 + (1.0 - u0) * u).value().max(lowest);
-        let psi = DelayTimeDistribution::rate_per_year_per_solar_mass(Years::new(delay));
+        let psi = law.rate(Years::new(delay));
         if accept.is_below(Threshold::from_ratio(psi.min(peak), peak)) {
             return Some(delay);
         }
@@ -762,6 +1020,10 @@ fn lifetime_span(delays: &DelayTimeDistribution, mass: f64) -> Span {
 
 /// Peters's (1964) circular separation, m, of white dwarfs of `m1` and `m2` M☉ that merge in
 /// `seconds`: `a⁴ = (256 ⁄ 5) G³ m₁ m₂ (m₁ + m₂) t ÷ c⁵`.
+///
+/// Kept apart from [`crate::orbit::peters_separation_for`], the binary engine's, which differs from
+/// it in the last bit or two for about a third of inputs: sharing the one would move the entry's
+/// pinned separations (P11.T6), so the swap waits for a bump.
 fn peters_separation(m1: f64, m2: f64, seconds: f64) -> f64 {
     let g3 = GM_SUN * GM_SUN * GM_SUN;
     let c5 = SPEED_OF_LIGHT * SPEED_OF_LIGHT * SPEED_OF_LIGHT * SPEED_OF_LIGHT * SPEED_OF_LIGHT;
@@ -872,8 +1134,83 @@ mod tests {
     use crate::galaxy::params::GalaxyParams;
     use crate::rng::{Mark, ObjectKey, tags};
 
+    /// P09.T37's bench: the delay law with its constants found once gives the closed forms' bits,
+    /// as they were when each delay found its own constants, below the floor, across it and past
+    /// the Hubble time.
+    #[test]
+    fn the_delay_law_found_once_is_the_closed_forms_bit_for_bit() {
+        let law = DelayLaw::new();
+        let s = DELAY_SLOPE + 1.0;
+        let lo = MIN_DELAY.value() / YEARS_PER_GIGAYEAR;
+        for k in 0..=2_000_u32 {
+            let t = math::powf(10.0, 6.0 + 4.5 * f64::from(k) / 2_000.0);
+            let rate = if t >= MIN_DELAY.value() && t <= HUBBLE_TIME.value() {
+                DelayTimeDistribution::amplitude_per_year_per_solar_mass()
+                    * math::powf(t / YEARS_PER_GIGAYEAR, DELAY_SLOPE)
+            } else {
+                0.0
+            };
+            assert_same_bits(law.rate(Years::new(t)), rate);
+            let c = t.clamp(MIN_DELAY.value(), HUBBLE_TIME.value());
+            let cumulative = DelayTimeDistribution::amplitude_per_year_per_solar_mass()
+                * YEARS_PER_GIGAYEAR
+                * (math::powf(c / YEARS_PER_GIGAYEAR, s) - math::powf(lo, s))
+                / s;
+            assert_same_bits(law.cumulative(Years::new(t)), cumulative);
+        }
+    }
+
     fn milky_way() -> Galaxy {
         Galaxy::from_params(Seed::new(0x0918_0001), GalaxyParams::milky_way_like()).unwrap()
+    }
+
+    /// Once read, the galaxy keeps its field's distribution: a fresh build of
+    /// [`DelayTimeDistribution::of_field`], bit for bit (its `Debug` text, which shows a zero's
+    /// sign), the same `Arc` at every read and in every Type Ia process, and counted in the
+    /// galaxy's `heap_bytes`; under the generator's rules and under every 26 hold, whose field
+    /// share gives the field its own systems and ages. The galaxy's equality does not depend on
+    /// whether it has been read.
+    #[test]
+    fn the_galaxy_keeps_its_field_s_distribution() {
+        use std::sync::Arc;
+
+        use super::process::TypeIaProcess;
+        use crate::galaxy::rules::GalaxyRules;
+
+        fn under_26() -> Galaxy {
+            Galaxy::from_params_with_rules(
+                Seed::new(0x0918_0001),
+                GalaxyParams::milky_way_like(),
+                GalaxyRules::of_version(crate::GENERATOR_VERSION),
+            )
+            .unwrap()
+        }
+        /// A galaxy under one arm's rules, built afresh.
+        type Build = fn() -> Galaxy;
+        let arms: [(&str, Build); 2] = [
+            ("the generator's", milky_way),
+            ("every 26 hold's", under_26),
+        ];
+        for (arm, build) in arms {
+            let (galaxy, fresh) = (build(), build());
+            let unread = galaxy.heap_bytes();
+            let kept = Arc::clone(galaxy.type_ia_delays());
+            assert_eq!(
+                format!("{kept:?}"),
+                format!("{:?}", DelayTimeDistribution::of_field(&fresh)),
+                "{arm}"
+            );
+            assert!(Arc::ptr_eq(&kept, galaxy.type_ia_delays()));
+            let process = TypeIaProcess::new(&galaxy);
+            assert!(std::ptr::eq(process.delays(), Arc::as_ptr(&kept)));
+            assert!(kept.heap_bytes() > 0);
+            assert_eq!(
+                galaxy.heap_bytes(),
+                unread + size_of::<DelayTimeDistribution>() + kept.heap_bytes(),
+                "{arm}"
+            );
+            assert_eq!(galaxy, fresh, "{arm}");
+        }
     }
 
     fn interval() -> (UniverseTime, UniverseTime) {
@@ -1120,6 +1457,48 @@ mod tests {
         assert!(q[0].abs() < 1e-15 && (q[2] - 1.0).abs() < 1e-15 && q[1] > 0.0 && q[1] < 1.0);
     }
 
+    /// P09.T34.a: `draw_in` is `draw` once its first word has picked the component: on the same
+    /// stream, whichever component `draw` picks, `draw_in` of that component gives the same
+    /// progenitor to the bit and leaves the stream where `draw` does, so phase 4's progenitors and
+    /// the class's are one law.
+    #[test]
+    fn draw_in_is_draw_for_the_component_it_picked() {
+        let galaxy = milky_way();
+        let delays = DelayTimeDistribution::from_galaxy(&galaxy);
+        let (after, until) = interval();
+        let mut seen = std::collections::BTreeSet::new();
+        for k in 0..4_000_u64 {
+            let population = POPULATIONS[usize::try_from(k % 7).unwrap()];
+            let (mut a, mut b) = (stream(k), stream(k));
+            let Some(p) = IaProgenitor::draw(&delays, &mut a, population, after, until) else {
+                continue;
+            };
+            let index = usize::try_from(p.component()).unwrap();
+            let component = galaxy.fields().component_id(index).unwrap();
+            assert_eq!(
+                IaProgenitor::draw_in(&delays, &mut b, component, after, until),
+                Some(p)
+            );
+            assert_eq!(a.position(), b.position());
+            // From a stream already moved on, the same words relative to where it stands.
+            let (mut a, mut b) = (stream(k), stream(k));
+            a.seek(5);
+            b.seek(5);
+            if let Some(p) = IaProgenitor::draw(&delays, &mut a, population, after, until) {
+                let index = usize::try_from(p.component()).unwrap();
+                let component = galaxy.fields().component_id(index).unwrap();
+                assert_eq!(
+                    IaProgenitor::draw_in(&delays, &mut b, component, after, until),
+                    Some(p)
+                );
+                assert_eq!(a.position(), b.position());
+            }
+            seen.insert(index);
+        }
+        eprintln!("components drawn: {seen:?}");
+        assert!(seen.len() >= 12, "{seen:?}");
+    }
+
     /// The same stream gives the same progenitor.
     #[test]
     fn the_draw_is_deterministic() {
@@ -1260,5 +1639,37 @@ mod tests {
             IaLeftover::PartlyBurntDwarf.offset_at(Years::new(1e4)),
             Some(LightYears::ZERO)
         );
+    }
+
+    /// The lifetime table a feature's distribution reads, built once a process
+    /// (`LifetimeTable::shared`), is the one every galaxy's distribution builds, bit for bit, and a
+    /// feature's distribution holds it as the galaxy's does (P09.T36).
+    #[test]
+    fn the_shared_lifetime_table_is_the_built_one_bit_for_bit() {
+        let (shared, built) = (LifetimeTable::shared(), LifetimeTable::new());
+        assert_eq!(shared.ln_mass.len(), LIFETIME_NODES);
+        for (a, b) in [
+            (&shared.ln_mass, &built.ln_mass),
+            (&shared.ln_lifetime, &built.ln_lifetime),
+        ] {
+            assert_eq!(a.len(), b.len());
+            for (&x, &y) in a.iter().zip(b) {
+                assert_same_bits(x, y);
+            }
+        }
+        let galaxy = milky_way();
+        let ages = AgeDistribution::uniform(Years::new(1e9), Years::new(2e9)).unwrap();
+        let feature = DelayTimeDistribution::of_feature(&galaxy, Population::OldThinDisc, ages);
+        let whole = DelayTimeDistribution::from_galaxy(&galaxy);
+        for (a, b) in [
+            (&feature.ln_mass, &whole.ln_mass),
+            (&feature.ln_lifetime, &whole.ln_lifetime),
+            (&feature.ln_mass_falling, &whole.ln_mass_falling),
+            (&feature.ln_lifetime_rising, &whole.ln_lifetime_rising),
+        ] {
+            for (&x, &y) in a.iter().zip(b) {
+                assert_same_bits(x, y);
+            }
+        }
     }
 }

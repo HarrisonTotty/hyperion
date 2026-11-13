@@ -22,7 +22,10 @@ use hyperion_sim::math;
 use hyperion_sim::units::LightYears;
 use hyperion_testkit::lcg::Lcg;
 
-/// The Milky Way fixture with its kinematic tables, built once per binary.
+/// The Milky Way fixture with its kinematic tables, built once per process.
+///
+/// The build takes some 5 s in a test build, and nextest runs each test in a process of its own,
+/// so the properties that read it run in one test, [`the_discs_velocity_laws_hold_at_milky_way_values`].
 fn galaxy() -> &'static Galaxy {
     static GALAXY: OnceLock<Galaxy> = OnceLock::new();
     GALAXY.get_or_init(|| {
@@ -33,6 +36,18 @@ fn galaxy() -> &'static Galaxy {
         .expect("the fixture's gas is mostly neutral")
         .with_full_potential()
     })
+}
+
+/// The discs' velocity laws (P08.T2), each property below on one build of the fixture
+/// ([`galaxy`]), in turn.
+#[test]
+fn the_discs_velocity_laws_hold_at_milky_way_values() {
+    the_vertical_table_is_sharma_s_law_at_the_reference_radius();
+    the_vertical_dispersion_falls_outward();
+    the_in_plane_dispersions_at_the_sun();
+    the_young_disc_holds_its_floor();
+    the_arm_streaming_averages_out();
+    the_streaming_is_inward_on_a_ridge_and_azimuthal_in_quadrature();
 }
 
 fn components(galaxy: &Galaxy, population: Population) -> Vec<ComponentId> {
@@ -54,7 +69,9 @@ fn moments(galaxy: &Galaxy, id: ComponentId, p: &PointLy) -> [f64; 4] {
 /// `σ_z` is Sharma et al.'s (2021) law as plan 02 applies it, `21.1 km/s × ((τ ÷ Gyr + 0.1) ÷
 /// 10.1)^0.441 × (1 + 0.20 |z| ÷ kpc)` times the galaxy's dispersion scale, the rise capped at 2.0
 /// kpc (ruling 4), to 5%: the table and the profiles solve one equation.
-#[test]
+///
+/// Run on its one build of the fixture by
+/// [`the_discs_velocity_laws_hold_at_milky_way_values`].
 fn the_vertical_table_is_sharma_s_law_at_the_reference_radius() {
     let galaxy = galaxy();
     let heights = galaxy.fields().sub_disc_heights();
@@ -88,7 +105,9 @@ fn the_vertical_table_is_sharma_s_law_at_the_reference_radius() {
 /// (which are 0.9 of the thin disc's), since the dark halo's and the gas's share of `K_z` falls
 /// more slowly than the stars'. The test holds the sub-discs to 1.7–2.4 and the thick disc to
 /// 2.4–3.2.
-#[test]
+///
+/// Run on its one build of the fixture by
+/// [`the_discs_velocity_laws_hold_at_milky_way_values`].
 fn the_vertical_dispersion_falls_outward() {
     let galaxy = galaxy();
     let mut ids = components(galaxy, Population::OldThinDisc);
@@ -135,7 +154,9 @@ fn the_vertical_dispersion_falls_outward() {
 /// 0.6–0.75, the asymmetric drift is `σ_R² ÷ 80 km/s` to 15% (Dehnen and Binney 1998, eq. 17: 80
 /// ± 5 km/s), and the thick disc is within 15% of (65, 40, 35) km/s with a lag of 40–60 km/s
 /// (Bensby et al. 2003, 2005; Soubiran et al. 2003).
-#[test]
+///
+/// Run on its one build of the fixture by
+/// [`the_discs_velocity_laws_hold_at_milky_way_values`].
 fn the_in_plane_dispersions_at_the_sun() {
     let galaxy = galaxy();
     let sun = PointLy::new(0.0, 26_000.0, 0.0);
@@ -173,7 +194,9 @@ fn the_in_plane_dispersions_at_the_sun() {
 
 /// P08.T2.c: no young-disc dispersion falls below 5 km/s anywhere on a 10⁴-point sample of the
 /// disc.
-#[test]
+///
+/// Run on its one build of the fixture by
+/// [`the_discs_velocity_laws_hold_at_milky_way_values`].
 fn the_young_disc_holds_its_floor() {
     let galaxy = galaxy();
     let young = components(galaxy, Population::YoungThinDisc)[0];
@@ -196,7 +219,9 @@ fn the_young_disc_holds_its_floor() {
 /// P08.T2.c with ruling 105.3: the azimuthal streaming averages zero around every circle, to
 /// 10⁻⁹ of its amplitude; and weighted by the young disc's density, which crowds onto the arms,
 /// neither the rotation nor the radial motion shifts by 0.5 km/s or more.
-#[test]
+///
+/// Run on its one build of the fixture by
+/// [`the_discs_velocity_laws_hold_at_milky_way_values`].
 fn the_arm_streaming_averages_out() {
     let galaxy = galaxy();
     let young = components(galaxy, Population::YoungThinDisc)[0];
@@ -240,7 +265,9 @@ fn the_arm_streaming_averages_out() {
 
 /// Ruling 105.3's phases: on a ridge inside corotation the young disc moves inward and does not
 /// shift its rotation; a quarter turn of phase on, it rotates `A` faster.
-#[test]
+///
+/// Run on its one build of the fixture by
+/// [`the_discs_velocity_laws_hold_at_milky_way_values`].
 fn the_streaming_is_inward_on_a_ridge_and_azimuthal_in_quadrature() {
     let galaxy = galaxy();
     let young = components(galaxy, Population::YoungThinDisc)[0];

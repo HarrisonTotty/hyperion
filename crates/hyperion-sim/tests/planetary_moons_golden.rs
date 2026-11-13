@@ -8,6 +8,7 @@
 use hyperion_sim::coords::{CellSize, GenCell};
 use hyperion_sim::id::{BodyId, Layer, SystemId};
 use hyperion_sim::orbit::{Eccentricity, KeplerElements, Orientation};
+use hyperion_sim::planetary::belts::BeltComposition;
 use hyperion_sim::planetary::derive::PlanetClass;
 use hyperion_sim::planetary::moons::{
     BeltAdjacency, MoonParent, MoonParentParts, NearestBelt, ParentKind, captures,
@@ -239,7 +240,11 @@ fn pin_small_captures(w: &mut GoldenWriter, belt: Option<NearestBelt>) {
 fn moons_are_pinned() {
     let mut w = GoldenWriter::new();
     w.header(GENERATOR_VERSION.get());
-    let belt = NearestBelt::new(EarthMasses::new(4e-4), BeltAdjacency::Neighbouring);
+    let belt = NearestBelt::new(
+        EarthMasses::new(4e-4),
+        BeltAdjacency::Neighbouring,
+        BeltComposition::Rocky,
+    );
     pin_giants(&mut w, belt);
     pin_impacts(&mut w);
     pin_small_captures(&mut w, belt);

@@ -1,0 +1,249 @@
+# generator_version = 31
+source = 42002f2200c00000
+walked 5494 cells, 10799 systems, 0 spheres, layers LayerSet(31)
+3 lens events
+lens0 = 42002e8e00800009
+lens0.peak = 0s 0ns
+lens0.impact = 0x40d6053452bcc997  # 22548.81754989325
+lens0.einstein_radius_m = 0x425252d5af0eabf0  # 314796588090.6865
+lens0.einstein_time_s = 0x4155d5fd5e33771a  # 5724149.471891189
+lens0.peak_magnification = 0x3fefffffffffffff  # 0.9999999999999999
+lens0.closest_s = 0xc2167fd3ec4d24f2  # -24158468883.28608
+lens0.closest_impact = 0x40d5a194f2fe7334  # 22150.327331173423
+lens0.bearing.frame = Local
+lens0.bearing.azimuth_deg = 0x406686f92131b7cb  # 180.2179113360456
+lens0.bearing.elevation_deg = 0x3fef83021ae3b6a0  # 0.9847422146974232
+lens1 = 02001ba2e00a0000
+lens1.peak = 3155760000s 0ns
+lens1.impact = 0x40d95228634c4367  # 25928.631060663054
+lens1.einstein_radius_m = 0x4237c403214652d2  # 102072787270.32352
+lens1.einstein_time_s = 0x413a145d01f74b78  # 1709149.0076796692
+lens1.peak_magnification = 0x3ff0000000000000  # 1.0
+lens1.closest_s = 0x420cfb150e4245ed  # 15558943176.284143
+lens1.closest_impact = 0x40d84f189adfecda  # 24892.38445280199
+lens1.bearing.frame = Local
+lens1.bearing.azimuth_deg = 0x4066870afbff021a  # 180.2200908642415
+lens1.bearing.elevation_deg = 0x3fef09c50a64dba2  # 0.9699425890929556
+lens2 = 62005c1802000003
+lens2.peak = 3155760000s 0ns
+lens2.impact = 0x40d953dac5600e8f  # 25935.418296827524
+lens2.einstein_radius_m = 0x4251137f7554df57  # 293366256979.4897
+lens2.einstein_time_s = 0x4148e9c752ee6373  # 3265422.647900039
+lens2.peak_magnification = 0x3ff0000000000000  # 1.0
+lens2.closest_s = 0x421cf87b8bd685c3  # 31106982645.630627
+lens2.closest_impact = 0x40d7e88aace5f888  # 24482.166802876192
+lens2.bearing.frame = Local
+lens2.bearing.azimuth_deg = 0x40668762d6b541ff  # 180.2308152713958
+lens2.bearing.elevation_deg = 0x3fefc1c00d40917f  # 0.9924011477310585
+segment: 181 layer-C keys
+key [-1, 812, 0]
+key [0, 812, 0]
+key [-1, 813, 0]
+key [0, 813, 0]
+key [-1, 814, 0]
+key [0, 814, 0]
+key [-1, 815, 0]
+key [0, 815, 0]
+key [-1, 816, 0]
+key [0, 816, 0]
+key [-1, 817, 0]
+key [0, 817, 0]
+key [-1, 818, 0]
+key [0, 818, 0]
+key [-1, 819, 0]
+key [0, 819, 0]
+key [-1, 820, 0]
+key [0, 820, 0]
+key [0, 821, 0]
+key [0, 822, 0]
+key [0, 823, 0]
+key [0, 824, 0]
+key [0, 825, 0]
+key [0, 826, 0]
+key [0, 827, 0]
+key [0, 828, 0]
+key [0, 829, 0]
+key [0, 830, 0]
+key [0, 831, 0]
+key [0, 832, 0]
+key [0, 832, 1]
+key [0, 833, 0]
+key [0, 833, 1]
+key [0, 834, 0]
+key [0, 834, 1]
+key [0, 835, 0]
+key [0, 835, 1]
+key [0, 836, 0]
+key [0, 836, 1]
+key [0, 837, 1]
+key [0, 838, 1]
+key [0, 839, 1]
+key [0, 840, 1]
+key [0, 841, 1]
+key [0, 842, 1]
+key [0, 843, 1]
+key [0, 844, 1]
+key [0, 845, 1]
+key [0, 846, 1]
+key [0, 847, 1]
+key [0, 848, 1]
+key [0, 849, 1]
+key [0, 850, 1]
+key [0, 851, 1]
+key [0, 852, 1]
+key [0, 853, 1]
+key [0, 854, 1]
+key [0, 855, 1]
+key [0, 856, 1]
+key [0, 857, 1]
+key [0, 858, 1]
+key [0, 859, 1]
+key [0, 860, 1]
+key [0, 861, 1]
+key [0, 862, 1]
+key [0, 863, 1]
+key [0, 864, 1]
+key [0, 865, 1]
+key [0, 866, 1]
+key [0, 867, 1]
+key [0, 868, 1]
+key [0, 869, 1]
+key [0, 870, 1]
+key [0, 871, 1]
+key [0, 872, 1]
+key [0, 873, 1]
+key [0, 874, 1]
+key [0, 875, 1]
+key [0, 876, 1]
+key [0, 877, 1]
+key [0, 878, 1]
+key [0, 879, 1]
+key [0, 880, 1]
+key [0, 881, 1]
+key [0, 882, 1]
+key [0, 883, 1]
+key [0, 884, 1]
+key [0, 885, 1]
+key [0, 886, 1]
+key [0, 887, 1]
+key [0, 888, 1]
+key [0, 889, 1]
+key [0, 890, 1]
+key [0, 891, 1]
+key [0, 891, 2]
+key [0, 892, 1]
+key [0, 892, 2]
+key [0, 893, 1]
+key [0, 893, 2]
+key [0, 894, 1]
+key [0, 894, 2]
+key [0, 895, 1]
+key [0, 895, 2]
+key [0, 896, 2]
+key [0, 897, 2]
+key [0, 898, 2]
+key [0, 899, 2]
+key [0, 900, 2]
+key [0, 901, 2]
+key [0, 902, 2]
+key [0, 903, 2]
+key [0, 904, 2]
+key [0, 905, 2]
+key [0, 906, 2]
+key [0, 907, 2]
+key [0, 908, 2]
+key [0, 909, 2]
+key [0, 910, 2]
+key [0, 911, 2]
+key [0, 912, 2]
+key [0, 913, 2]
+key [0, 914, 2]
+key [0, 915, 2]
+key [0, 916, 2]
+key [0, 917, 2]
+key [0, 918, 2]
+key [0, 919, 2]
+key [0, 920, 2]
+key [0, 921, 2]
+key [0, 922, 2]
+key [0, 923, 2]
+key [0, 924, 2]
+key [0, 925, 2]
+key [0, 926, 2]
+key [0, 927, 2]
+key [0, 928, 2]
+key [0, 929, 2]
+key [0, 930, 2]
+key [0, 931, 2]
+key [0, 932, 2]
+key [0, 933, 2]
+key [0, 934, 2]
+key [0, 935, 2]
+key [0, 936, 2]
+key [0, 937, 2]
+key [0, 938, 2]
+key [0, 939, 2]
+key [0, 940, 2]
+key [0, 941, 2]
+key [0, 942, 2]
+key [0, 943, 2]
+key [0, 944, 2]
+key [0, 945, 2]
+key [0, 946, 2]
+key [0, 947, 2]
+key [0, 948, 2]
+key [0, 949, 2]
+key [0, 950, 2]
+key [0, 950, 3]
+key [0, 951, 2]
+key [0, 951, 3]
+key [0, 952, 2]
+key [0, 952, 3]
+key [0, 953, 2]
+key [0, 953, 3]
+key [0, 954, 2]
+key [0, 954, 3]
+key [0, 955, 3]
+key [0, 956, 3]
+key [0, 957, 3]
+key [0, 958, 3]
+key [0, 959, 3]
+key [0, 960, 3]
+key [0, 961, 3]
+key [0, 962, 3]
+key [0, 963, 3]
+key [0, 964, 3]
+key [0, 965, 3]
+key [0, 966, 3]
+key [0, 967, 3]
+key [0, 968, 3]
+bearing.coreward.frame = Local
+bearing.coreward.azimuth_deg = 0x0000000000000000  # 0.0
+bearing.coreward.elevation_deg = 0x0000000000000000  # 0.0
+bearing.spinward.frame = Local
+bearing.spinward.azimuth_deg = 0x4056800000000000  # 90.0
+bearing.spinward.elevation_deg = 0x0000000000000000  # 0.0
+bearing.rimward.frame = Local
+bearing.rimward.azimuth_deg = 0x4066800000000000  # 180.0
+bearing.rimward.elevation_deg = 0x0000000000000000  # 0.0
+bearing.antispinward.frame = Local
+bearing.antispinward.azimuth_deg = 0x4070e00000000000  # 270.0
+bearing.antispinward.elevation_deg = 0x0000000000000000  # 0.0
+bearing.north.frame = Local
+bearing.north.azimuth_deg = 0x0000000000000000  # 0.0
+bearing.north.elevation_deg = 0x4056800000000000  # 90.0
+bearing.south.frame = Local
+bearing.south.azimuth_deg = 0x4066800000000000  # 180.0
+bearing.south.elevation_deg = 0xc056800000000000  # -90.0
+bearing.up_spinward.frame = Local
+bearing.up_spinward.azimuth_deg = 0x40734a8e93198f2a  # 308.6598082540901
+bearing.up_spinward.elevation_deg = 0x4043e55a57637779  # 39.79181949955723
+bearing.down_rimward.frame = Local
+bearing.down_rimward.azimuth_deg = 0x40643214e634c3b8  # 161.56505117707798
+bearing.down_rimward.elevation_deg = 0xc0326f58ce59e23d  # -18.434948822922014
+bearing.centre.frame = Local
+bearing.centre.azimuth_deg = 0x0000000000000000  # 0.0
+bearing.centre.elevation_deg = 0xbfa690d2e41bb558  # -0.0440736678554951
+bearing.from_axis.frame = GalacticX
+bearing.from_axis.azimuth_deg = 0x4056800e7120137e  # 90.00088146336017
+bearing.from_axis.elevation_deg = 0xbfcc34e988a23161  # -0.22036475345192755

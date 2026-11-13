@@ -1,0 +1,10 @@
+# The Type Ia yield's smoke run: a census of a five-thousandth of the full run's records at
+# generator version 30, whose few candidates leave most bins capped; some seconds on four threads.
+task = "type_ia_yield"
+
+[params]
+seed = 0x0b17_15a0_0000_0001
+generator_version = 31
+records = 2_000
+parts = 4
+part_count = 8

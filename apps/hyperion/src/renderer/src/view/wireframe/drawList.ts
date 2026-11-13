@@ -8,11 +8,14 @@ import {
 } from "../../lib/strokes";
 import type { ColourToken } from "../../spatial/drawList";
 import type { ColourTokens } from "../../spatial/paint";
+import type { ScreenBoxPx } from "../../spatial/symbols";
 import type { CameraPose } from "../camera/pose";
 import {
   pixelSolidAngle,
+  pixelSolidAngleBy,
   type ProjectionCamera,
   project,
+  projector,
   type Viewport,
 } from "../camera/projection";
 import { type CameraTarget, targetPosition } from "../camera/state";
@@ -26,17 +29,35 @@ import { starColour } from "../photometry/starColour";
 import { REC709_LUMA } from "../sky/photometry";
 import type { Rgb } from "../photometry/toneCurve";
 import { cameraSceneOf, sceneOrigins, type ViewBody, type ViewScene } from "../scene/model";
-import { angularDiameterPx, graticule, isSymbolSized, ringEllipse } from "./bodies";
+import {
+  angularDiameterPx,
+  type DatumInside,
+  datumSpheroidOfFigure,
+  discExtentPx,
+  graticule,
+  isSymbolSized,
+  ringEllipse,
+} from "./bodies";
 import { behindLimb, sphereInFrustum } from "./cull";
 import type { Polyline } from "./curve";
-import { hullEdges, hullFaces } from "./hulls";
+import { hullBoundingRadiusM, hullEdges, hullFaces, hullOnView } from "./hulls";
+import type { MeshOccluder } from "./meshOccluders";
 import { orbitPath } from "./orbits";
+import { surveyEdgeMark, type SurveyEdgeView } from "../terrain/surveyEdge";
+import { type DatumSpheroid, stretched } from "./spheroid";
 import {
   anchorRadiusPx,
   bracketHalfSizePx,
+  lineOfSightGivesWay,
+  lineOfSightTripod,
+  markBoxPx,
   markLabelOffsetPx,
   markLabelRisePx,
+  reticleRadiusPx,
+  type HullOnView,
+  type ScreenMark,
   type ScreenPx,
+  STROKE_FRINGE_PX,
   type SymbologyAnchor,
   symbologyMarks,
   targetMark,
@@ -56,6 +77,41 @@ export { CASING_PX };
  * stroke), and the selected orbit's 2 px (the guide's).
  */
 export const STROKE_PX = { thin: 1, heavy: 1.5, selected: 2 } as const;
+
+/**
+ * The `--surface-0` casing on each side of a stroke at a line scale, device px: {@link CASING_PX}
+ * times the scale. The wireframe cases its lines at it, the photorealistic overlay every batch
+ * (`overlayDrawList`), and a body's datum is stroked inside its figure by it over the image
+ * ({@link datumInsideAt}; R10.T16.g), so that the inset and the casing drawn cannot drift.
+ */
+export function casingDevicePx(strokeScale: number): number {
+  return CASING_PX * strokeScale;
+}
+
+/**
+ * How far a cased stroke's coverage reaches from its centreline, device px: δ = w ÷ 2 + c +
+ * {@link STROKE_FRINGE_PX}, for a stroke `widthPx` wide cased `casingPx` on each side, its casing
+ * drawn w + 2c wide beneath it (`lineStroke.wgsl`'s coverage; R10.T16.g). At a line scale of 2 a
+ * thin line's is 3.5 and a heavy one's 4; at 3, 5 and 5.75.
+ */
+export function strokeReachPx(widthPx: number, casingPx: number): number {
+  return widthPx / 2 + casingPx + STROKE_FRINGE_PX;
+}
+
+/**
+ * How a body's datum is stroked inside its figure over the photorealistic image at a line scale
+ * (plan R10, R10.T16.g): the thin and heavy lines' reaches, cased as the overlay cases them
+ * ({@link casingDevicePx}).
+ */
+export function datumInsideAt(strokeScale: number): DatumInside {
+  const casingPx = casingDevicePx(strokeScale);
+  return {
+    reachPx: {
+      thin: strokeReachPx(STROKE_PX.thin * strokeScale, casingPx),
+      heavy: strokeReachPx(STROKE_PX.heavy * strokeScale, casingPx),
+    },
+  };
+}
 
 /**
  * The dash of a predicted path, CSS px on and off, in screen space so that it does not crawl: 6
@@ -175,6 +231,29 @@ export interface LineBatch {
   readonly casingColour: string;
   /** The dash, device px on and off, for predicted paths only, or `null` for a solid stroke. */
   readonly dash: { readonly onPx: number; readonly offPx: number } | null;
+  /**
+   * The body whose datum the batch draws, its limb and graticule, which give way to its surveyed
+   * terrain where the wireframe draws it (plan R10, R10.T11; `packWireframe`'s `surveyed`); absent
+   * for every other batch.
+   */
+  readonly body?: string;
+  /**
+   * Whether the photorealistic overlay keeps the batch with the view's `GRID` at `OFF`, the picture
+   * otherwise bare (the owner's request and its UX ruling, 2026-11-05): a craft's hull edges and a
+   * ring's two edges, which stand for what the image does not draw yet (Design note 17), and a
+   * survey edge, which tells unsurveyed ground from surveyed; absent for every other batch, which
+   * `GRID OFF` leaves out.
+   */
+  readonly keptAtGridOff?: true;
+  /**
+   * The centre, from the camera, `f32` m along the camera frame's axes, of the body whose ground
+   * the batch is drawn on (plan R10, R10.T16.c): the survey edge's, each of whose fragments is
+   * tested at the depth the datum's plane through its point has at the fragment's pixel where that
+   * is nearer, so that the ground beneath its nearer half stays behind it while the terrain's own
+   * depth is pushed by its constant fraction alone, and a nearer ridge hides its centre line
+   * (`lineStroke.wgsl`'s `line_depth`); absent for every other batch.
+   */
+  readonly groundCentreF32?: Float32Array;
 }
 
 /** A body's depth-only occluder sphere (Design note 5). */
@@ -183,13 +262,24 @@ export interface OccluderSphere {
   readonly id: string;
   /** Its centre from the camera, `f32` m. */
   readonly centreF32: Float32Array;
-  /** Its radius, m: `occluderRadius`, a little inside the body. */
+  /**
+   * Its radius, m: `occluderRadius`, a little inside the body; of its polar radius where the list
+   * draws its survey edge, so that the edge on its spheroid stands outside it (R10.T10.c). For a
+   * spheroid (R02.T19), the radius of the stretched sphere, inside its equatorial radius.
+   */
   readonly radiusM: number;
   /**
    * Its centre's distance from the camera less its radius, m, differenced in `f64`: the shader's
-   * intersection takes it rather than lose it to cancellation in `f32` near the body (R02.T14).
+   * intersection takes it rather than lose it to cancellation in `f32` near the body (R02.T14). For
+   * a spheroid, its stretched centre's, |L c|, less its stretched radius.
    */
   readonly altitudeM: number;
+  /**
+   * The spheroid it is, where the body's datum is drawn on one (plan R02, R02.T19): the occluder is
+   * the body's figure, the stretched sphere of {@link OccluderSphere.radiusM} mapped back, the
+   * figure shrunk about its centre. Absent for a sphere.
+   */
+  readonly spheroid?: DatumSpheroid;
 }
 
 /**
@@ -223,8 +313,6 @@ export interface OccluderMesh {
 export interface StarSprite {
   /** The star's system. */
   readonly id: string;
-  /** Its direction from the camera, unit, `f32`. */
-  readonly directionF32: Float32Array;
   /** Where it falls, px from the view's top left, with its sub-pixel part. */
   readonly xPx: number;
   /** Where it falls, px from the top. */
@@ -270,6 +358,13 @@ export interface DrawAnchor {
    */
   readonly labelRisePx: number | null;
   /**
+   * While the mark is the destination, the reach of its chevron set that other marks' labels keep
+   * clear of, device px, as {@link DrawAnchor.labelRisePx} is reckoned but about the mark's own
+   * symbol, so that a set grown about a large disc (the owner's request, 2026-10-31) keeps no
+   * label off the disc; `null` while it is not.
+   */
+  readonly setRisePx: number | null;
+  /**
    * How far about the anchor the mark stands, device px, the half-size of a square that holds it:
    * the outer edge of its selection's bracket's place, whether or not it is drawn, which holds its
    * symbol and its reticles, or a body's drawn disc where that is larger. A destination's label
@@ -304,6 +399,12 @@ export interface WireframeDrawList {
    * `--surface-0` by `overlayDrawList` over the photorealistic image (R07.T16.e).
    */
   readonly occluderMeshes: ReadonlyArray<OccluderMesh>;
+  /**
+   * The DAG consumers' meshes drawn as occluders from the renderer's page pool (plan R14,
+   * R14.T5.f; `meshOccluders.ts`), depth only, after the hulls' faces; absent where none is, as in
+   * every scene's list until a view draws meshes.
+   */
+  readonly meshOccluders?: ReadonlyArray<MeshOccluder>;
   /** The line batches, view-space first, then screen-space symbology. */
   readonly lines: ReadonlyArray<LineBatch>;
   /** The star sprites. */
@@ -316,6 +417,75 @@ export interface WireframeDrawList {
   readonly markStrokePx: number;
   /** Both occluders' slope term, device px: {@link occluderSlopePxAt} the stroke scale. */
   readonly occluderSlopePx: number;
+  /**
+   * The bodies' survey edges drawn (plan R10, R10.T10.c), each with the range to its nearest point
+   * in the picture that the operator can see (R10.T16.c), for the view's list note `SURVEY EDGE`
+   * (T12's).
+   */
+  readonly surveyEdges: ReadonlyArray<DrawnSurveyEdge>;
+  /**
+   * The line-of-sight mark this frame (plan R10, R10.T12): whether it gives way, the state the
+   * view keeps for its next frame, and its box where it is drawn; `null` where the options give the
+   * list no line of sight ({@link DrawOptions.lineOfSight}).
+   */
+  readonly lineOfSight: DrawnLineOfSight | null;
+}
+
+/** What a view's terrain readout reads of its line of sight, as its tripod marks it (R10.T12). */
+export interface LineOfSightPoint {
+  /**
+   * Whether the view's terrain readout reads a point on its line of sight, which the tripod marks:
+   * over surveyed ground or `NOT SURVEYED` ground alike, and unchanged under `GRAZING`; not at
+   * `NO GROUND`, where there is no point. Its changes come with the readout's own updates.
+   */
+  readonly hasPoint: boolean;
+  /**
+   * The point's slant range from the camera, m (`SLANT RANGE`), by which only a craft's hull nearer
+   * than it makes the tripod give way (decision-r10-t12-commit3 §1); `null` where it is not known,
+   * `NOT SURVEYED`, or there is no point, when every hull drawn counts.
+   */
+  readonly rangeM: number | null;
+}
+
+/**
+ * The view's line of sight as its draw list marks it (plan R10, R10.T12; the guide's tripod): what
+ * its terrain readout reads, and the give-way's state, which the view keeps from frame to frame, so
+ * that the list stays a function of its arguments.
+ */
+export interface LineOfSightOptions extends LineOfSightPoint {
+  /**
+   * Whether the tripod gave way to another mark in the view's frame before
+   * ({@link DrawnLineOfSight.yielded}); `false` in the view's first frame.
+   */
+  readonly yielded: boolean;
+}
+
+/** The line-of-sight mark of one frame (plan R10, R10.T12). */
+export interface DrawnLineOfSight {
+  /**
+   * Whether the tripod gives way this frame, a body's symbol, a craft's ticks, the flight path
+   * marker or a craft's hull nearer than the point standing within 0.5 rem of its ticks, or a hull's
+   * opaque face over its point, or not yet 0.75 rem clear of them since it gave
+   * way (`lineOfSightGivesWay`): the view's next {@link LineOfSightOptions.yielded}. It is kept
+   * whether or not the readout has a point, so that the hysteresis runs on through `NO GROUND`.
+   */
+  readonly yielded: boolean;
+  /**
+   * The box that holds every pixel of the drawn tripod, its casing included, device px from the
+   * view's top left, which no mark's label covers; `null` where it is not drawn, given way or with
+   * no point.
+   */
+  readonly boxPx: ScreenBoxPx | null;
+}
+
+/** A survey edge the list draws (R10.T10.c). */
+export interface DrawnSurveyEdge {
+  readonly body: string;
+  /**
+   * The range to its nearest point inside the view that no drawn ground hides (R10.T16.c), m, from
+   * the own ship where there is one, else from the camera; `null` where none of it is seen there.
+   */
+  readonly nearestRangeM: number | null;
 }
 
 /** A list that draws nothing, with a view's strokes: for a frame whose symbology is not drawn. */
@@ -331,6 +501,8 @@ export function emptyDrawList(
     strokeScale: strokes.strokeScale,
     markStrokePx: strokes.markStrokePx,
     occluderSlopePx: occluderSlopePxAt(strokes.strokeScale),
+    surveyEdges: [],
+    lineOfSight: null,
   };
 }
 
@@ -370,6 +542,34 @@ export interface DrawOptions extends ViewStrokes {
    * arrived; `undefined` or `null` draws the scene's stars.
    */
   readonly skyStars?: ReadonlyArray<SpriteStar> | null;
+  /**
+   * The bodies' surveys whose edges the list marks (plan R10, R10.T10.c; the guide's
+   * `SURVEY EDGE`), in both styles: each wanted body's coverage in view, from the terrain session
+   * (R10.T16.c, `surveyEdgeViewsOf`); none without one.
+   */
+  readonly surveyEdges?: ReadonlyArray<SurveyEdgeView>;
+  /**
+   * The view's line of sight (plan R10, R10.T12): with a point, the list marks it with its tripod at
+   * the picture's centre, in both styles, unless it gives way. Absent or `null`, the list draws no
+   * tripod and is as it was before R10.T12, as for a view that states no terrain readout: an
+   * instrument (decision-r10-t12-leans §3), or a view under `TERRAIN NOT AVAILABLE` (§5).
+   */
+  readonly lineOfSight?: LineOfSightOptions | null;
+  /**
+   * Whether the bodies' datums are stroked inside their figures, for a list drawn over the
+   * photorealistic image (plan R10, R10.T16.g; {@link datumInsideAt}): each limb its reach inside
+   * the outline, every other datum line at least its own, and none for a body too small to stroke
+   * inside (`datumOverImage`). Absent or `false`, the wireframe's datum, its limb centred on the
+   * outline, as the list was before R10.T16.g.
+   */
+  readonly datumInside?: boolean;
+  /**
+   * Whether the own ship's hull is drawn (`ViewScene.ownShip`'s): `hidden` for a view whose camera
+   * stands at the ship's own pose, inside its hull, whose edges would cut across the picture, as
+   * the descent spike's main view does (the owner's request, 2026-11-01); drawn where absent. Its
+   * predicted path and marks are drawn either way.
+   */
+  readonly ownHull?: "drawn" | "hidden";
 }
 
 /** A star as the sprite path takes it: its direction from the camera and its light per channel. */
@@ -444,6 +644,31 @@ function packScreen(segments: ReadonlyArray<readonly [ScreenPx, ScreenPx]>): Flo
 }
 
 /**
+ * A body's part of its symbology anchor: its symbol, its angular diameter, and, where its disc is
+ * drawn rather than its symbol, its disc's extent about the mark (`discExtentPx`; the owner's
+ * request, 2026-10-31), a flattened body's least radius its polar.
+ */
+function bodyAnchorOf(
+  body: ViewBody,
+  pointM: Vec3,
+  at: ScreenPx,
+  projection: ProjectionCamera,
+  viewport: Viewport,
+): NonNullable<SymbologyAnchor["body"]> {
+  const diameterPx = angularDiameterPx(pointM, body.radiusM, projection, viewport);
+  if (isSymbolSized(diameterPx)) {
+    return { symbol: body.symbol, diameterPx };
+  }
+  const spheroid = datumSpheroidOfFigure(body.appearance?.figure ?? null);
+  const polarRadiusM = spheroid === null ? body.radiusM : body.radiusM / spheroid.stretch;
+  return {
+    symbol: body.symbol,
+    diameterPx,
+    extentPx: discExtentPx(pointM, body.radiusM, polarRadiusM, projection, viewport, at),
+  };
+}
+
+/**
  * Builds the wireframe style's draw list for one frame (plan R02, R02.T13).
  *
  * @remarks
@@ -463,6 +688,20 @@ function packScreen(segments: ReadonlyArray<readonly [ScreenPx, ScreenPx]>): Flo
  * can stand about its mark (R07.T16.g). Colours come from `tokens` (plan 05's `readTokens`), never
  * literals. Every position is differenced in `f64` and narrowed once. The list is a function of
  * its arguments alone.
+ *
+ * For a list drawn over the photorealistic image (`options.datumInside`; plan R10, R10.T16.g) each
+ * body's datum is stroked inside its figure (`graticule`'s `inside`, at {@link datumInsideAt} the
+ * line scale), so that no datum line or casing covers the image beyond the body; its batches keep
+ * their names and their `body`, so that a surveyed body's still give way (R10.T16.f).
+ *
+ * Where the options give the view's line of sight with a point (plan R10, R10.T12), its tripod is
+ * drawn at the picture's centre, the first of the screen-space marks, after the survey edges and
+ * before every other mark, and the survey edges' ticks keep 0.5 rem clear of its ticks. It gives
+ * way, with hysteresis, to a body's symbol, a craft's ticks or the flight path marker near it, and
+ * to a craft's hull nearer than the point by its outline or its opaque faces, so that `CHASE`
+ * draws none; the
+ * give-way's state comes in the options and goes out in the list
+ * ({@link WireframeDrawList.lineOfSight}). Without a line of sight the list is as it was before.
  */
 export function buildWireframeDrawList(
   scene: ViewScene,
@@ -480,6 +719,7 @@ export function buildWireframeDrawList(
   const bodyCentre = (body: ViewBody): Vec3 =>
     fromCamera({ kind: "body", body: body.id, m: vec3(0, 0, 0) });
   const { strokeScale, markStrokePx } = options;
+  const datumInside = options.datumInside === true ? datumInsideAt(strokeScale) : null;
   // A line's width, or a dash's length, given in the guide's CSS pixels, as the view draws it.
   const drawnPx = (cssPx: number): number => cssPx * strokeScale;
   const batch = (
@@ -490,7 +730,7 @@ export function buildWireframeDrawList(
     widthPx: number,
     dash: LineBatch["dash"] = null,
     originF32: Float32Array = new Float32Array(3),
-    casingWidthPx: number = drawnPx(CASING_PX),
+    casingWidthPx: number = casingDevicePx(strokeScale),
   ): LineBatch => ({
     id,
     space,
@@ -507,62 +747,115 @@ export function buildWireframeDrawList(
   const occluderSpheres: OccluderSphere[] = [];
   const lines: LineBatch[] = [];
   const anchors: DrawAnchor[] = [];
-  const limbs: { id: string; centreM: Vec3; radiusM: number }[] = [];
-  // Whether a mark is in sight: not behind the limb of a body drawn as a sphere, its own excepted.
+  const limbs: {
+    id: string;
+    centreM: Vec3;
+    radiusM: number;
+    spheroid: DatumSpheroid | null;
+  }[] = [];
+  const surveyedPolarRadiusM = new Map(
+    (options.surveyEdges ?? []).map((edge) => [edge.body, edge.figure.polarRadiusM]),
+  );
+  // Whether a mark is in sight: not behind the limb of a body drawn as a sphere or a spheroid, its
+  // own excepted. A spheroid's is its stretched sphere's, the stretch keeping which lines of sight
+  // meet it before their point (R02.T19).
   const shown = (pointM: Vec3, own: string | null): boolean =>
-    !limbs.some((body) => body.id !== own && behindLimb(pointM, body.centreM, body.radiusM));
+    !limbs.some(
+      (body) =>
+        body.id !== own &&
+        behindLimb(
+          stretched(pointM, body.spheroid),
+          stretched(body.centreM, body.spheroid),
+          body.radiusM,
+        ),
+    );
 
   for (const body of scene.bodies) {
     const centreM = bodyCentre(body);
     if (!sphereInFrustum(centreM, body.radiusM, projection, viewport)) {
       continue;
     }
+    // Its datum on its figure's spheroid (R02.T19); with no rotation, a flattened body's drawn
+    // about the pole its figure is drawn about, a sphere's about its orbit normal
+    // (`graticuleRotation`).
+    const spheroid = datumSpheroidOfFigure(body.appearance?.figure ?? null);
     const wireframe = graticule(
       {
         centreM,
         radiusM: body.radiusM,
         rotation: body.rotation,
         unmodelledPole: body.orbitNormal,
+        spheroid,
       },
       projection,
       viewport,
       strokeScale,
       options.lowSetting,
+      datumInside,
     );
     if (wireframe.regime !== "symbol") {
-      limbs.push({ id: body.id, centreM, radiusM: body.radiusM });
+      limbs.push({ id: body.id, centreM, radiusM: body.radiusM, spheroid });
       const distanceM = norm(centreM);
-      const radiusM = occluderRadius(body.radiusM, distanceM);
-      occluderSpheres.push({
-        id: body.id,
-        centreF32: narrow(centreM),
-        radiusM,
-        altitudeM: distanceM - radiusM,
-      });
+      if (spheroid === null) {
+        // A body whose survey edge is drawn is occluded from inside its spheroid, at its polar
+        // radius: the edge stands on the spheroid, up to a − c inside the equatorial sphere
+        // (21 km on Earth), and the edge's own horizon cull hides what of it lies behind the body.
+        const radiusM = occluderRadius(
+          Math.min(body.radiusM, surveyedPolarRadiusM.get(body.id) ?? body.radiusM),
+          distanceM,
+        );
+        occluderSpheres.push({
+          id: body.id,
+          centreF32: narrow(centreM),
+          radiusM,
+          altitudeM: distanceM - radiusM,
+        });
+      } else {
+        // The figure itself with both its radii inset by `occluderRadius`'s margin, a′ and c′, so
+        // that it stands that margin inside the figure all over it, within 0.13% on Saturn and
+        // 0.62% at the wire's least c ÷ a, 0.8, while the margin is under c ÷ 2
+        // (decision-r02-t19-leans, item 4), and its own survey edge, on the figure, stands outside
+        // it: the sphere of radius a′ in its own stretch a′ ÷ c′, its altitude differenced there in
+        // `f64`.
+        const radiusM = occluderRadius(body.radiusM, distanceM);
+        const occluder: DatumSpheroid = {
+          pole: spheroid.pole,
+          stretch: radiusM / occluderRadius(body.radiusM / spheroid.stretch, distanceM),
+        };
+        occluderSpheres.push({
+          id: body.id,
+          centreF32: narrow(centreM),
+          radiusM,
+          altitudeM: norm(stretched(centreM, occluder)) - radiusM,
+          spheroid: occluder,
+        });
+      }
     }
     const major = wireframe.lines.filter((line) => line.major).flatMap((line) => line.runs);
     const minor = wireframe.lines.filter((line) => !line.major).flatMap((line) => line.runs);
     if (major.length > 0) {
-      lines.push(
-        batch(
+      lines.push({
+        ...batch(
           `body:${body.id}:major`,
           "view",
           packPolylines(major),
           "textMuted",
           drawnPx(STROKE_PX.heavy),
         ),
-      );
+        body: body.id,
+      });
     }
     if (minor.length > 0) {
-      lines.push(
-        batch(
+      lines.push({
+        ...batch(
           `body:${body.id}:graticule`,
           "view",
           packPolylines(minor),
           "textMuted",
           drawnPx(STROKE_PX.thin),
         ),
-      );
+        body: body.id,
+      });
     }
   }
 
@@ -572,15 +865,18 @@ export function buildWireframeDrawList(
       continue;
     }
     const selected = sameTarget(options.selection, { kind: "body", body: ring.body });
-    lines.push(
-      batch(
-        `ring:${ring.body}`,
-        "view",
-        packPolylines(ringEllipse({ ...ring, centreM }, projection, viewport)),
-        selected ? "text" : "textMuted",
-        drawnPx(selected ? STROKE_PX.selected : STROKE_PX.thin),
-      ),
-    );
+    const token = selected ? "text" : "textMuted";
+    const widthPx = drawnPx(selected ? STROKE_PX.selected : STROKE_PX.thin);
+    const { edges, ticks } = ringEllipse({ ...ring, centreM }, projection, viewport);
+    // Its two edges stand for it over the image until R11 draws it, whatever the view's `GRID`.
+    lines.push({
+      ...batch(`ring:${ring.body}`, "view", packPolylines(edges), token, widthPx),
+      keptAtGridOff: true,
+    });
+    // Its ticks a batch of their own, which the overlay's `GRID` at `OFF` leaves out (R08.T17).
+    if (ticks.length > 0) {
+      lines.push(batch(`ring:${ring.body}:ticks`, "view", packPolylines(ticks), token, widthPx));
+    }
   }
 
   for (const orbit of scene.orbits) {
@@ -605,7 +901,14 @@ export function buildWireframeDrawList(
   }
 
   const occluderMeshes: OccluderMesh[] = [];
+  // The hulls the tripod gives way to (R10.T12; decision-r10-t12-commit3 §1): each drawn, not behind
+  // a body's limb, and nearer than the point; taken only where a line of sight is given.
+  const sightHulls: HullOnView[] = [];
+  const sight = options.lineOfSight ?? null;
   for (const craft of scene.craft) {
+    if (options.ownHull === "hidden" && craft.id === scene.ownShip) {
+      continue;
+    }
     const originM = fromCamera(craft.pose.position);
     if (!sphereInFrustum(originM, craft.hull.lengthM, projection, viewport)) {
       continue;
@@ -616,8 +919,15 @@ export function buildWireframeDrawList(
       origins,
     );
     const edges = hullEdges(craft.hull, craft.pose.attitude);
-    lines.push(
-      batch(
+    if (
+      sight !== null &&
+      shown(originM, null) &&
+      (sight.rangeM === null || norm(originM) - hullBoundingRadiusM(craft.hull) < sight.rangeM)
+    ) {
+      sightHulls.push(hullOnView(craft.hull, craft.pose.attitude, originM, projection, viewport));
+    }
+    lines.push({
+      ...batch(
         `hull:${craft.id}`,
         "view",
         packPolylines(edges.map(([a, b]) => [a, b])),
@@ -629,7 +939,9 @@ export function buildWireframeDrawList(
         // photorealistic image the overlay cases it (R07.T16.a), within the faces' slope term.
         0,
       ),
-    );
+      // The craft's stand-in over the image until the image draws craft, whatever the `GRID`.
+      keptAtGridOff: true,
+    });
     const faces = hullFaces(craft.hull, craft.pose.attitude);
     const triangles = new Float32Array(faces.length * 9);
     faces.forEach((corners, i) => {
@@ -662,12 +974,15 @@ export function buildWireframeDrawList(
     );
   }
 
-  // Symbology: body symbols, anchors, reticles and the flight path marker, in screen space.
+  const own = scene.craft.find((craft) => craft.id === scene.ownShip);
+
+  // Symbology: body symbols, anchors, reticles and the flight path marker, in screen space; made
+  // before the survey edges, whose ticks keep clear of the line-of-sight mark, which gives way to
+  // some of them, and drawn after.
   const markAt = (pointM: Vec3): ScreenPx | null => {
     const p = project(pointM, projection, viewport);
     return p.inFront ? { xPx: p.xPx, yPx: p.yPx } : null;
   };
-  const own = scene.craft.find((craft) => craft.id === scene.ownShip);
   const symbologyAnchors: SymbologyAnchor[] = [];
   for (const target of cameraSceneOf(scene).targets) {
     const pointM = fromCamera(targetPosition(target, origins));
@@ -696,13 +1011,7 @@ export function buildWireframeDrawList(
                   ? null
                   : sub(craft.velocityMPerS, own.velocityMPerS),
             },
-      body:
-        body === undefined
-          ? null
-          : {
-              symbol: body.symbol,
-              diameterPx: angularDiameterPx(pointM, body.radiusM, projection, viewport),
-            },
+      body: body === undefined ? null : bodyAnchorOf(body, pointM, at, projection, viewport),
     };
     symbologyAnchors.push(anchor);
     let label: AnchorLabel | null = null;
@@ -735,12 +1044,14 @@ export function buildWireframeDrawList(
         yPx: at.yPx,
         distanceM: norm(pointM),
         label,
+        // Placed from the bracket's place, which grows with a body's drawn disc (the owner's
+        // request, 2026-10-31).
         labelOffsetPx: markLabelOffsetPx(
-          anchorRadiusPx(anchor, options.remPx),
+          reticleRadiusPx(anchor, options.remPx),
           options.remPx,
           options.markShiftPx,
         ),
-        labelRisePx: sameTarget(options.destination, target)
+        setRisePx: sameTarget(options.destination, target)
           ? markLabelRisePx(
               anchorRadiusPx(anchor, options.remPx),
               options.remPx,
@@ -749,9 +1060,18 @@ export function buildWireframeDrawList(
               markStrokePx,
             )
           : null,
+        labelRisePx: sameTarget(options.destination, target)
+          ? markLabelRisePx(
+              reticleRadiusPx(anchor, options.remPx),
+              options.remPx,
+              options.markShiftPx,
+              options.minReticleGapPx,
+              markStrokePx,
+            )
+          : null,
         markReachPx: Math.max(
           bracketHalfSizePx(
-            anchorRadiusPx(anchor, options.remPx),
+            reticleRadiusPx(anchor, options.remPx),
             options.remPx,
             options.markShiftPx,
           ) +
@@ -776,6 +1096,48 @@ export function buildWireframeDrawList(
     projection,
     viewport,
   );
+  const lineOfSight = lineOfSightMark(options, marks, sightHulls, viewport);
+
+  // The survey edges (R10.T10.c): a `--text` line, its ticks into the unsurveyed side, cased as
+  // every line, in view space, so that nearer ground hides it; ranges from the own ship. Their
+  // ticks keep 0.5 rem clear of the tripod's where it is drawn (R10.T12).
+  const surveyEdges: DrawnSurveyEdge[] = [];
+  for (const edge of options.surveyEdges ?? []) {
+    const mark = surveyEdgeMark(edge, projection, viewport, {
+      remPx: options.remPx,
+      keepClear: lineOfSight.tripod?.segments ?? [],
+      rangeFromM: own === undefined ? null : fromCamera(own.pose.position),
+      lineWidthPx: drawnPx(STROKE_PX.thin),
+    });
+    const segments = new Float32Array(mark.line.length + mark.ticks.length);
+    segments.set(mark.line);
+    segments.set(mark.ticks, mark.line.length);
+    if (segments.length > 0) {
+      lines.push({
+        ...batch(`survey-edge:${edge.body}`, "view", segments, "text", drawnPx(STROKE_PX.thin)),
+        // On the body's ground: its depth pulled towards the camera over it (R10.T16.c).
+        groundCentreF32: Float32Array.from([edge.centreM.x, edge.centreM.y, edge.centreM.z]),
+        // Unsurveyed ground never looks surveyed, whatever the `GRID` (the guide's survey edge).
+        keptAtGridOff: true,
+      });
+    }
+    surveyEdges.push({ body: edge.body, nearestRangeM: mark.nearestRangeM });
+  }
+
+  // The tripod first of the marks: over the ground's own lines, its casing cutting them, and
+  // beneath the reticles, which stand round it (R10.T12). Its name carries no index, so that the
+  // other marks' names are as they were whether or not it is drawn.
+  if (lineOfSight.tripod !== null) {
+    lines.push(
+      batch(
+        "mark:line_of_sight",
+        "screen",
+        packScreen(lineOfSight.tripod.segments),
+        lineOfSight.tripod.token,
+        markStrokePx,
+      ),
+    );
+  }
   for (const [i, mark] of marks.entries()) {
     // An outline at the marks' width, not the line scale's, so that it keeps its hole; its casing
     // is a line's.
@@ -799,6 +1161,48 @@ export function buildWireframeDrawList(
     strokeScale,
     markStrokePx,
     occluderSlopePx: occluderSlopePxAt(strokeScale),
+    surveyEdges,
+    lineOfSight: lineOfSight.drawn,
+  };
+}
+
+/**
+ * The frame's line-of-sight mark (plan R10, R10.T12; the guide's tripod): at the picture's centre,
+ * where the projection puts the line of sight, its ticks as {@link lineOfSightTripod} places them;
+ * drawn where the view's readout has a point and it does not give way to the frame's `marks` or
+ * `hulls` ({@link lineOfSightGivesWay}, from the view's last state), else not.
+ *
+ * @param hulls - The craft's hulls that count, drawn, in sight and nearer than the point
+ *   (`hullOnView`).
+ * @returns The tripod to draw, or `null`; and the frame's {@link DrawnLineOfSight}, `null` with no
+ *   line of sight in the options.
+ */
+function lineOfSightMark(
+  options: DrawOptions,
+  marks: ReadonlyArray<ScreenMark>,
+  hulls: ReadonlyArray<HullOnView>,
+  viewport: Viewport,
+): { readonly tripod: ScreenMark | null; readonly drawn: DrawnLineOfSight | null } {
+  const input = options.lineOfSight ?? null;
+  if (input === null) {
+    return { tripod: null, drawn: null };
+  }
+  const casingPx = casingDevicePx(options.strokeScale);
+  const tripod = lineOfSightTripod(
+    { xPx: viewport.widthPx / 2, yPx: viewport.heightPx / 2 },
+    options.remPx,
+    { markStrokePx: options.markStrokePx, markShiftPx: options.markShiftPx },
+  );
+  const yielded = lineOfSightGivesWay(tripod.segments, marks, options.remPx, input.yielded, hulls);
+  if (!input.hasPoint || yielded) {
+    return { tripod: null, drawn: { yielded, boxPx: null } };
+  }
+  return {
+    tripod,
+    drawn: {
+      yielded,
+      boxPx: markBoxPx(tripod, strokeReachPx(options.markStrokePx, casingPx)),
+    },
   };
 }
 
@@ -841,9 +1245,20 @@ export function spriteRecord(
   projection: ProjectionCamera,
   viewport: Viewport,
 ): SpriteRecord {
-  const perWeight = exposure / pixelSolidAngle(direction, projection, viewport);
+  return exposedSpriteRecord(
+    place,
+    exposedLight(illuminanceRgbLx, exposure, pixelSolidAngle(direction, projection, viewport)),
+  );
+}
+
+/**
+ * A sprite's pre-exposed light per unit of point-spread weight: its illuminance times the exposure
+ * scale over the solid angle of its pixel, sr.
+ */
+function exposedLight(illuminanceRgbLx: Rgb, exposure: number, solidAngleSr: number): Rgb {
+  const perWeight = exposure / solidAngleSr;
   const [r, g, b] = illuminanceRgbLx;
-  return exposedSpriteRecord(place, [r * perWeight, g * perWeight, b * perWeight]);
+  return [r * perWeight, g * perWeight, b * perWeight];
 }
 
 /** A sprite's record from its place and its pre-exposed light per unit of point-spread weight. */
@@ -861,11 +1276,15 @@ function starSprites(
 ): StarSprite[] {
   const exposure = exposureScale(options.ev100);
   const sprites: StarSprite[] = [];
+  // The camera's projection and pixel solid angle taken once for the frame's stars, not once a
+  // star (lane perf-main-thread): the same sums, so the same sprites.
+  const projectStar = projector(projection, viewport);
+  const solidAngleOf = pixelSolidAngleBy(projection, viewport);
   for (const star of options.skyStars ?? interimSpriteStars(scene)) {
     // Interim stars are far enough that the direction from the barycentre is the direction from
     // the camera (Design note 19); the sky's sprites come already placed from the camera.
     const direction = star.direction;
-    const p = project(scale(direction, 1e3), projection, viewport);
+    const p = projectStar(scale(direction, 1e3));
     if (
       !p.inFront ||
       p.xPx < -SPRITE_MARGIN_PX ||
@@ -876,20 +1295,11 @@ function starSprites(
       continue;
     }
     const [r, g, b] = star.illuminanceRgbLx;
-    const record = spriteRecord(
-      { xPx: p.xPx, yPx: p.yPx, depth: 0 },
-      star.illuminanceRgbLx,
-      exposure,
-      direction,
-      projection,
-      viewport,
-    );
     sprites.push({
       id: star.id,
-      directionF32: narrow(direction),
       xPx: p.xPx,
       yPx: p.yPx,
-      exposedRgb: [record[4], record[5], record[6]],
+      exposedRgb: exposedLight(star.illuminanceRgbLx, exposure, solidAngleOf(direction)),
       // Rec. 709's luminance weights: the photopic illuminance the ranking keeps the brightest by.
       illuminanceLx: REC709_LUMA[0] * r + REC709_LUMA[1] * g + REC709_LUMA[2] * b,
     });

@@ -5,7 +5,8 @@
 mod displaced_support;
 
 use displaced_support::{
-    AGE_MIDS, OLD_SOURCES, disc_born, old_born, own_shares, scales_and_fields, seed_params,
+    AGE_MIDS, HOLE, HOLED_CLASS, OLD_SOURCES, disc_born, old_born, own_shares, scales_and_fields,
+    seed_params,
 };
 use hyperion_sim::galaxy::PointLy;
 use hyperion_sim::galaxy::displaced::forms::{
@@ -13,9 +14,11 @@ use hyperion_sim::galaxy::displaced::forms::{
     FlaredLayerParams, OwnFormMixture, cube_integral, keeps_arm, young_disc,
 };
 use hyperion_sim::galaxy::displaced::{AGE_BINS, AgeBin, SPEED_BINS};
+use hyperion_sim::galaxy::fields::disc::hole_mass_fraction;
 use hyperion_sim::galaxy::params::GalaxyParams;
 use hyperion_sim::math;
 use hyperion_testkit::lcg::Lcg;
+use hyperion_testkit::stats::ALPHA;
 
 /// The cube's half-width, ly.
 const L: f64 = 65_536.0;
@@ -24,8 +27,9 @@ fn age(i: usize) -> AgeBin {
     AgeBin::new(u8::try_from(i).unwrap()).unwrap()
 }
 
-/// P08.T10.a: the layer's column density is `exp(−R ÷ h_R) × 2Γ(1 + 1 ÷ β)` to 10⁻⁶, across the
-/// table's rows and radii from the centre to the cube's edge.
+/// P08.T10.a: the layer's column density is `exp(−R_h ÷ R − R ÷ h_R) × 2Γ(1 + 1 ÷ β)` to 10⁻⁶,
+/// across the table's rows and radii from the centre to the cube's edge; a holed layer's is 0 on
+/// the axis.
 #[test]
 fn the_layers_column_is_its_closed_form() {
     let (scales, _) = scales_and_fields(&GalaxyParams::milky_way_like());
@@ -36,6 +40,14 @@ fn the_layers_column_is_its_closed_form() {
             for r in [0.0, 3_000.0, 26_000.0, 60_000.0] {
                 let closed = layer.radial(r) * 2.0 * math::gamma(1.0 + 1.0 / row.beta);
                 let column = layer.column(r);
+                if row.hole > 0.0 && r <= 0.0 {
+                    assert_eq!(
+                        (closed, column),
+                        (0.0, 0.0),
+                        "bin ({speed}, {a}) on the axis"
+                    );
+                    continue;
+                }
                 assert!(
                     (column / closed - 1.0).abs() < 1e-6,
                     "bin ({speed}, {a}) at {r} ly: {column} against {closed}"
@@ -45,30 +57,60 @@ fn the_layers_column_is_its_closed_form() {
     }
 }
 
-/// The integral over the cube of `f(|x|, |y|, |z|)` by importance sampling: each coordinate is
-/// `L u³` with u uniform, whose density `t^(−2/3) ÷ (3 L^(1/3))` follows a cored form's rise to its
-/// core, and eight octants.
-fn monte_carlo(points: u32, lcg: &mut Lcg, shape: impl Fn(f64, f64, f64) -> f64) -> f64 {
+/// The integral over the cube of `f(|x|, |y|, |z|)` by importance sampling, and its standard error.
+///
+/// Each of x and y is `L u³` with u uniform, whose density `t^(−2/3) ÷ (3 L^(1/3))` follows a cored
+/// form's rise to its core; z is a Cauchy draw of scale `z_scale_ly` (ly, positive and finite) on
+/// `[0, L]`, `z_scale_ly tan(u atan(L ÷ z_scale_ly))`, of density `1 ÷ (z_scale_ly atan(L ÷
+/// z_scale_ly) (1 + (z ÷ z_scale_ly)²))`, which holds a flattened form's points near its plane, and
+/// whose `z⁻²` tail, heavier than the spheroids' `z^(−γ)` here, keeps the weights' variance small;
+/// and eight octants. The error is the sample standard deviation of the weighted values over √n,
+/// times the eight octants.
+fn monte_carlo(
+    points: u32,
+    z_scale_ly: f64,
+    lcg: &mut Lcg,
+    shape: impl Fn(f64, f64, f64) -> f64,
+) -> (f64, f64) {
     let mut sum = 0.0;
+    let mut sum_of_squares = 0.0;
     let pick = |lcg: &mut Lcg| {
         let u = lcg.next_f64().max(1e-300);
         let coordinate = L * u * u * u;
         let weight = 3.0 * math::cbrt(L) * math::cbrt(coordinate) * math::cbrt(coordinate);
         (coordinate, weight)
     };
+    let reach = math::atan(L / z_scale_ly);
+    let pick_z = |lcg: &mut Lcg| {
+        let z = z_scale_ly * math::tan(lcg.next_f64() * reach);
+        let t = z / z_scale_ly;
+        (z, z_scale_ly * reach * (1.0 + t * t))
+    };
     for _ in 0..points {
         let (x, wx) = pick(lcg);
         let (y, wy) = pick(lcg);
-        let (z, wz) = pick(lcg);
-        sum += shape(x, y, z) * wx * wy * wz;
+        let (z, wz) = pick_z(lcg);
+        let value = shape(x, y, z) * wx * wy * wz;
+        sum += value;
+        sum_of_squares += value * value;
     }
-    8.0 * sum / f64::from(points)
+    let n = f64::from(points);
+    let mean = sum / n;
+    let variance = (sum_of_squares / n - mean * mean) * n / (n - 1.0);
+    (8.0 * sum / n, 8.0 * (variance.max(0.0) / n).sqrt())
 }
 
 /// P08.T10.a: the numerical normalisation of a spheroid agrees with a 10⁷-point Monte Carlo to
-/// 0.5%, for a round, a flattened and a steep one.
+/// 0.5%, for a round, a flattened and a steep one. So that the three hold the skill's α = 10⁻³
+/// family-wise, each Monte Carlo's standard error is at most 0.5% over the two-sided normal
+/// quantile at α ÷ 3, 3.59: 0.139% of the integral (`decision-test-coverage.md` §3.2 addendum).
+/// Each spheroid's z is drawn at its own flattened scale, `q a R_d`, which brings the flattened
+/// one's error from 0.183% to 0.099%; each prints its error beside the tolerance.
 #[test]
 fn a_spheroids_normalisation_agrees_with_a_monte_carlo() {
+    const TOLERANCE: f64 = 0.005;
+    let quantile = -math::normal_quantile(ALPHA / 6.0);
+    let most_error = TOLERANCE / quantile;
     let (scales, _) = scales_and_fields(&GalaxyParams::milky_way_like());
     let mut lcg = Lcg::new(0x0810_a000);
     for row in [
@@ -92,12 +134,26 @@ fn a_spheroids_normalisation_agrees_with_a_monte_carlo() {
         },
     ] {
         let spheroid = CoredPowerLaw::new(&row, &scales).unwrap();
-        let sampled = monte_carlo(10_000_000, &mut lcg, |x, y, z| {
+        let z_scale_ly = row.q * row.a * scales.r_d().value();
+        let (sampled, error) = monte_carlo(10_000_000, z_scale_ly, &mut lcg, |x, y, z| {
             spheroid.shape(math::hypot(x, y), z)
         });
         let integral = 1.0 / spheroid.norm();
+        eprintln!(
+            "{row:?}: Monte Carlo {sampled:e} ± {error:e}, a standard error of {:.3e} of the \
+             integral against the tolerance's {TOLERANCE:e} at most {most_error:.3e}; off by {:.2} \
+             standard errors",
+            error / integral,
+            (sampled - integral) / error
+        );
         assert!(
-            (sampled / integral - 1.0).abs() < 0.005,
+            error / integral <= most_error,
+            "{row:?}: the Monte Carlo's standard error is {:e} of the integral, over the \
+             {most_error:e} at which the tolerance holds α ÷ 3",
+            error / integral
+        );
+        assert!(
+            (sampled / integral - 1.0).abs() < TOLERANCE,
             "{row:?}: {sampled} against {integral}"
         );
     }
@@ -307,6 +363,7 @@ fn a_flared_layer_has_its_rows_shape() {
         h_0: 0.05,
         r_flare: 4.0,
         beta: 1.2,
+        hole: 0.0,
     };
     let layer = FlaredLayer::new(&row, &scales).unwrap();
     let r = 20_000.0;
@@ -317,4 +374,50 @@ fn a_flared_layer_has_its_rows_shape() {
     assert!((layer.shape(r, z) / shape - 1.0).abs() < 1e-12);
     assert!((layer.density(&PointLy::new(r, 0.0, z)) / (layer.norm() * shape) - 1.0).abs() < 1e-12);
     assert!(FlaredLayer::new(&FlaredLayerParams { beta: 0.0, ..row }, &scales).is_err());
+    for hole in [-0.1, f64::NAN, f64::INFINITY] {
+        let refused = FlaredLayer::new(&FlaredLayerParams { hole, ..row }, &scales).unwrap_err();
+        assert_eq!(refused.quantity, "hole", "{hole}");
+    }
+}
+
+/// P15.T6.c: a holed layer is the layer without the hole times `exp(−R_h ÷ R)`, empty on the axis,
+/// and its normalisation over the cube holds the holed disc's mass: against the layer without it,
+/// [`hole_mass_fraction`]'s `2x K₂(2√x)` to 10⁻³ for a layer that does not flare (the cube's edge,
+/// about nine scale lengths out, cuts under 10⁻³ of either).
+#[test]
+fn a_holed_layer_holds_the_holed_discs_mass() {
+    let (scales, _) = scales_and_fields(&GalaxyParams::milky_way_like());
+    let r_d = scales.r_d().value();
+    let (holed_row, _, _) = disc_born(HOLED_CLASS.0, HOLED_CLASS.1);
+    assert!((holed_row.hole - HOLE).abs() < 1e-15);
+    let holed = FlaredLayer::new(&holed_row, &scales).unwrap();
+    let plain = FlaredLayer::new(
+        &FlaredLayerParams {
+            hole: 0.0,
+            ..holed_row
+        },
+        &scales,
+    )
+    .unwrap();
+    for r in [100.0, 3_000.0, 26_000.0] {
+        let factor = math::exp(-HOLE * r_d / r);
+        assert!((holed.shape(r, 50.0) / (plain.shape(r, 50.0) * factor) - 1.0).abs() < 1e-12);
+    }
+    assert_eq!(holed.density(&PointLy::new(0.0, 0.0, 10.0)), 0.0);
+    let thin = FlaredLayerParams {
+        weight: 1.0,
+        h_r: 1.0,
+        h_0: 0.05,
+        r_flare: 1e6,
+        beta: 1.0,
+        hole: HOLE,
+    };
+    let holed = FlaredLayer::new(&thin, &scales).unwrap();
+    let plain = FlaredLayer::new(&FlaredLayerParams { hole: 0.0, ..thin }, &scales).unwrap();
+    let ratio = plain.norm() / holed.norm();
+    let expected = hole_mass_fraction(HOLE);
+    assert!(
+        (ratio / expected - 1.0).abs() < 1e-3,
+        "{ratio} against {expected}"
+    );
 }

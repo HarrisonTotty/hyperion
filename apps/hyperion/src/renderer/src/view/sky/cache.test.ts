@@ -144,6 +144,51 @@ describe("SkyCubeCache", () => {
     expect([made, released, cache.size]).toEqual([["cube 1", "cube 2"], [], 1]);
   });
 
+  it("keeps a disposed view's cube as its spare, which a view of the same sky takes up again (plan R15)", async () => {
+    const { engine, made, released } = await countingCubes();
+    const cache = new SkyCubeCache(engine);
+    const cube = cache.acquire("view", requestOf());
+    cache.letGo("view");
+    const held = cache.size;
+    // A new stage's view, its selection culled again: the same stars, in another array.
+    const again = cache.acquire("view", { ...requestOf(), baked: Uint32Array.from([0, 1]) });
+    expect([again === cube, made, released, held, cache.size]).toEqual([
+      true,
+      ["cube 1"],
+      [],
+      1,
+      1,
+    ]);
+  });
+
+  it("releases its spare before another sky's bake, and with another spare", async () => {
+    const { engine, made, released } = await countingCubes();
+    const cache = new SkyCubeCache(engine);
+    cache.acquire("view", requestOf());
+    cache.letGo("view");
+    cache.acquire("view", requestOf(aSky()));
+    const beforeBake = [...released];
+    cache.letGo("view");
+    cache.acquire("other", requestOf());
+    cache.letGo("other");
+    expect([beforeBake, made, released, cache.size]).toEqual([
+      ["cube 1"],
+      ["cube 1", "cube 2", "cube 3"],
+      ["cube 1", "cube 2"],
+      1,
+    ]);
+  });
+
+  it("forgets its spare at a device loss's restore", async () => {
+    const { engine, made, released, restore } = await countingCubes();
+    const cache = new SkyCubeCache(engine);
+    cache.acquire("view", requestOf());
+    cache.letGo("view");
+    restore();
+    cache.acquire("view", requestOf());
+    expect([made, released, cache.size]).toEqual([["cube 1", "cube 2"], [], 1]);
+  });
+
   it("keeps a view's cube across frames that hand it the same stars again", async () => {
     const { engine, made } = await countingCubes();
     const cache = new SkyCubeCache(engine);

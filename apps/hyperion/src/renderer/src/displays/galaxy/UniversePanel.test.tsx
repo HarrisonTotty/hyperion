@@ -14,6 +14,7 @@ import {
 } from "../../test/galaxyFixtures";
 import { ServerLinkHarness } from "../../test/ServerLinkHarness";
 import { UniversePanel } from "./UniversePanel";
+import { describedText, statusLine } from "../../test/statusLine";
 
 const RECONNECT_DELAY_MS = 2_000;
 
@@ -84,6 +85,13 @@ function reading(label: string): HTMLElement {
 /** The elements showing `text` that are not hidden, such as a description shown on screen. */
 function shownText(text: string): HTMLElement[] {
   return screen.queryAllByText(text).filter((element) => element.closest("[hidden]") === null);
+}
+
+/** The status lines reading `text` that are not hidden, such as a reason shown on screen. */
+function shownStatus(text: string): HTMLElement[] {
+  return screen
+    .queryAllByText(statusLine(text))
+    .filter((element) => element.closest("[hidden]") === null);
 }
 
 function universeRows(): HTMLElement[] {
@@ -166,8 +174,23 @@ describe("UniversePanel", () => {
         socket.serverAnswers("list_universes", () => aUniverseList([]));
       });
 
-      expect(screen.getByText("NO UNIVERSES: create one below")).toBeInTheDocument();
+      expect(screen.getByText(statusLine("NO UNIVERSES: create one below"))).toBeInTheDocument();
       expect(screen.queryByRole("table", { name: "Universes" })).not.toBeInTheDocument();
+    });
+
+    it("tracks NO UNIVERSES: as a panel's empty state, and leaves what to do untracked", async () => {
+      const { socket } = renderPanel();
+
+      await server(() => {
+        socket.serverAnswers("list_universes", () => aUniverseList([]));
+      });
+
+      const state = screen.getByText("NO UNIVERSES:");
+      expect([
+        state.className,
+        state.nextElementSibling?.className,
+        state.parentElement?.className,
+      ]).toEqual(["status-text__state", "status-text__sentence", "panel__empty"]);
     });
 
     it("opens a universe with OPEN: PENDING, then its name and upper-case seed", async () => {
@@ -255,7 +278,23 @@ describe("UniversePanel", () => {
       await user.click(button);
 
       expect(socket.requestsOfKind("open_universe")).toEqual([]);
-      expect(shownText("GENERATOR VERSION 1: server runs version 2")).toHaveLength(1);
+      expect(shownStatus("GENERATOR VERSION 1: server runs version 2")).toHaveLength(1);
+    });
+
+    it("tracks a held-back OPEN's GENERATOR VERSION 1: as its state, the sentence after it not", async () => {
+      const { user, socket } = renderPanel();
+      await server(() => {
+        socket.serverAnswers("list_universes", () => aUniverseList([OLD_SURVEY], 2));
+      });
+
+      await user.hover(screen.getByRole("button", { name: "Open universe OLD SURVEY" }));
+
+      const state = screen.getByText("GENERATOR VERSION 1:");
+      expect([
+        state.className,
+        state.nextElementSibling?.className,
+        state.parentElement?.className,
+      ]).toEqual(["status-text__state", "status-text__sentence", "universe-panel__reason"]);
     });
 
     it("shows why an OPEN is held back only while it is pointed at or focused", async () => {
@@ -265,18 +304,18 @@ describe("UniversePanel", () => {
       });
       const reason = "GENERATOR VERSION 1: server runs version 2";
       const oldSurvey = screen.getByRole("button", { name: "Open universe OLD SURVEY" });
-      expect(shownText(reason)).toEqual([]);
+      expect(shownStatus(reason)).toEqual([]);
 
       await user.hover(oldSurvey);
-      expect(shownText(reason)).toHaveLength(1);
+      expect(shownStatus(reason)).toHaveLength(1);
       await user.unhover(oldSurvey);
-      expect(shownText(reason)).toEqual([]);
+      expect(shownStatus(reason)).toEqual([]);
       await user.hover(screen.getByRole("button", { name: "Open universe SURVEY 1" }));
-      expect(shownText(reason)).toEqual([]);
+      expect(shownStatus(reason)).toEqual([]);
 
       oldSurvey.focus();
       await user.keyboard("{Enter}");
-      expect(shownText(reason)).toHaveLength(1);
+      expect(shownStatus(reason)).toHaveLength(1);
       expect(socket.requestsOfKind("open_universe")).toEqual([]);
     });
 
@@ -558,7 +597,9 @@ describe("UniversePanel", () => {
         });
       });
       expect(toggle).toHaveAttribute("aria-expanded", "true");
-      expect(screen.getByText("REJECTED: a universe named SURVEY 1 exists")).toBeInTheDocument();
+      expect(
+        screen.getByText(statusLine("REJECTED: a universe named SURVEY 1 exists")),
+      ).toBeInTheDocument();
 
       await user.click(screen.getByRole("button", { name: "Open universe SURVEY 2" }));
       await server(() => {
@@ -612,7 +653,7 @@ describe("UniversePanel", () => {
 
       const name = screen.getByRole("textbox", { name: "NAME" });
       expect(name).toHaveAttribute("aria-invalid", "true");
-      expect(name).toHaveAccessibleDescription(
+      expect(describedText(name)).toBe(
         "1-48 CHARACTERS NAME INVALID: enter 1 to 48 printable characters",
       );
       expect(socket.requestsOfKind("create_universe")).toEqual([]);
@@ -624,7 +665,7 @@ describe("UniversePanel", () => {
       await user.type(screen.getByRole("textbox", { name: "NAME" }), `${"X".repeat(49)}{Enter}`);
 
       expect(
-        screen.getByText("NAME INVALID: enter 1 to 48 printable characters"),
+        screen.getByText(statusLine("NAME INVALID: enter 1 to 48 printable characters")),
       ).toBeInTheDocument();
       expect(socket.requestsOfKind("create_universe")).toEqual([]);
     });
@@ -638,10 +679,24 @@ describe("UniversePanel", () => {
       await user.type(seed, "BEEG{Enter}");
 
       expect(seed).toHaveAttribute("aria-invalid", "true");
-      expect(seed).toHaveAccessibleDescription(
+      expect(describedText(seed)).toBe(
         "1-16 HEXADECIMAL DIGITS SEED INVALID: enter 1 to 16 hexadecimal digits (0-9, A-F)",
       );
       expect(socket.requestsOfKind("create_universe")).toEqual([]);
+    });
+
+    it("tracks SEED INVALID: as a field's refusal, and leaves what is valid untracked", async () => {
+      const { user } = renderPanel();
+
+      await user.click(screen.getByRole("radio", { name: "ENTERED" }));
+      await user.type(screen.getByRole("textbox", { name: "SEED VALUE" }), "BEEG{Enter}");
+
+      const state = screen.getByText("SEED INVALID:");
+      expect([
+        state.className,
+        state.nextElementSibling?.className,
+        state.parentElement?.className,
+      ]).toEqual(["status-text__state", "status-text__sentence", "form-field__error"]);
     });
 
     it("clears a field's message once the field is edited", async () => {
@@ -651,7 +706,7 @@ describe("UniversePanel", () => {
       await user.type(screen.getByRole("textbox", { name: "NAME" }), "S");
 
       expect(
-        screen.queryByText("NAME INVALID: enter 1 to 48 printable characters"),
+        screen.queryByText(statusLine("NAME INVALID: enter 1 to 48 printable characters")),
       ).not.toBeInTheDocument();
       expect(screen.getByRole("textbox", { name: "NAME" })).not.toHaveAttribute("aria-invalid");
     });
@@ -740,7 +795,7 @@ describe("UniversePanel", () => {
         for (const toggle of [fields, panel]) {
           expect(toggle).toHaveAttribute("aria-expanded", "true");
           expect(toggle).toHaveAttribute("aria-disabled", "true");
-          expect(toggle).toHaveAccessibleDescription(
+          expect(describedText(toggle)).toBe(
             "CREATE UNCONFIRMED: link lost before reply; check the universe list",
           );
         }

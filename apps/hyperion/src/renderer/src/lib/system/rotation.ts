@@ -1,7 +1,7 @@
 /**
- * A body's rotation angle and body-fixed axes at a time, from the rotation law plan 14 sends
- * (P14.T46.f; rendering plan R07, T2.b): the client's twin of the simulation's
- * `RotationLaw::angle_at` and `planetary::frames::body_fixed_at`.
+ * A body's rotation angle, body-fixed axes and spin rate at a time, from the rotation law plan 14
+ * sends (P14.T46.f; rendering plan R07, T2.b; R08.T3.d): the client's twin of the simulation's
+ * `RotationLaw::angle_at`, `planetary::frames::body_fixed_at` and `RotationLaw::rate_at`.
  *
  * @remarks
  * With s the seconds from the epoch to t, d = τ − `s_e` and Δ = max(s, 0), W is, reduced into
@@ -128,6 +128,24 @@ export function rotationAngleAt(law: SystemBodyRotation, time: UniverseTime): nu
     }
   }
   return reduced(angle);
+}
+
+/**
+ * The body's spin rate at `time`, rad/s: the simulation's `RotationLaw::rate_at`, which the figure
+ * was flattened at and the atmosphere's normal gravity turns at (R08.T3.d).
+ *
+ * @remarks
+ * At or after a lock within the clock it is the locked rate `ω_L`; otherwise the law's rate at the
+ * system's age `s_e` + s, ω₀ + (`ω_L` − ω₀) clamp((`s_e` + s) ÷ τ, 0, 1), or ω₀ for a body that
+ * never locks. As the simulation's, it leaves out the capture's phase δ (Δ ÷ d)², whose rate,
+ * 2δΔ ÷ d² with δ in `[−π, π)` and Δ < d, is under 2π ÷ d.
+ */
+export function spinRateAt(law: SystemBodyRotation, time: UniverseTime): number {
+  const { lock } = law;
+  if (lock.kind === "in_clock" && atOrAfter(time, lock.locksAt)) {
+    return law.lockedRateRadPerS;
+  }
+  return rateAtAge(law, law.ageAtEpochS + secondsFromEpoch(time));
 }
 
 /**

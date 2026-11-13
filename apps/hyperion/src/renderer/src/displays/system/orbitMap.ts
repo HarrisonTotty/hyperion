@@ -44,7 +44,7 @@ export interface ZoomPresetControl {
 
 /**
  * The orbit map's zoom presets in the order they are offered: `INNER`, `ALL` and `BELTS` (plan 14,
- * P14.T42.b). `BELTS` is offered only for a system with a belt to fit.
+ * P14.T42.b). `BELTS` is offered only for a system with a belt or a protoplanetary disc to fit.
  */
 export const ZOOM_PRESETS: ReadonlyArray<ZoomPresetControl> = [
   { name: "inner", label: "INNER", key: "I" },
@@ -117,14 +117,17 @@ export const INNER_BODY_COUNT = 5;
 
 /**
  * What the zoom presets fit besides the stars: the bodies' reaches, the habitable zone's and the
- * outermost belt's.
+ * outermost belt's or protoplanetary disc's.
  */
 export interface BodyFit {
   /** The farthest each drawn body other than a moon can be from the barycentre, AU, nearest first. */
   readonly bodyReachesAu: ReadonlyArray<number>;
   /** How far out the primary's habitable zone reaches from the barycentre, AU; `null` for none. */
   readonly habitableOuterAu: number | null;
-  /** How far out the outermost belt proper reaches from the barycentre, AU; `null` for none. */
+  /**
+   * How far out the outermost belt proper or protoplanetary disc reaches from the barycentre, AU;
+   * `null` for neither.
+   */
   readonly beltsOuterAu: number | null;
 }
 
@@ -139,8 +142,8 @@ export interface BodyFit {
  * With bodies, `INNER` fits the outer limit of the primary's habitable zone or the fifth body out,
  * whichever is nearer, so that it shows the inner system however the planets fall; with neither, it
  * fits the stars as below. `ALL` fits the farthest of the bodies, the stars and `INNER`'s radius,
- * so that everything drawn is in it. `BELTS` fits the outermost belt proper, and `ALL`'s radius in
- * a system with no belt, where it is not offered.
+ * so that everything drawn is in it. `BELTS` fits the outermost belt proper or protoplanetary disc,
+ * and `ALL`'s radius in a system with neither, where it is not offered.
  *
  * Without bodies, as before `system_bodies` answers, `ALL` fits the farthest any drawn star's orbits
  * can take it from the barycentre and `INNER` the nearest such reach that is not zero, so that a
@@ -307,8 +310,8 @@ export interface OrbitSceneInput {
 
 /**
  * The orbit map at the display time, as the scene the spatial view draws: the hosts, the bodies,
- * their paths, the zones' and the belts' annuli, the cometary halo when it is inside the fitted
- * radius, and the reference plane's grid out to that radius.
+ * their paths, the zones', the belts' and the discs' annuli, the cometary halo when it is inside
+ * the fitted radius, and the reference plane's grid out to that radius.
  */
 export function orbitScene(input: OrbitSceneInput): SpatialScene {
   const { hosts, layout, plane, time, selectedId, bands, fitRadiusAu, bodies } = input;

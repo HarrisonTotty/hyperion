@@ -23,6 +23,7 @@ import {
   setManual,
   setManualEv100,
   VIEW_CAMERA,
+  yieldsToMeter,
 } from "./exposure";
 
 const AUTO: ExposureControl = { kind: "auto", ev100: 3 };
@@ -423,5 +424,31 @@ describe("the operator's MAN entry (R07.T13.d)", () => {
     ]) {
       expect(setManualEv100(ev100)).toEqual({ kind: "refused", reason: "invalid_ev100" });
     }
+  });
+});
+
+describe("a view that opens at its meter, over the exposure it finds (the owner's request)", () => {
+  it("takes AUTO over the display's own default MAN", () => {
+    expect(yieldsToMeter(DEFAULT_EXPOSURE)).toBe(true);
+  });
+
+  it("takes AUTO over AUTO", () => {
+    expect(yieldsToMeter({ kind: "auto", ev100: 9 })).toBe(true);
+  });
+
+  it("takes AUTO over a system inhibit, which returns to AUTO by itself", () => {
+    expect(yieldsToMeter({ kind: "inhibited", ev100: 9, reason: "no_image_to_meter" })).toBe(true);
+  });
+
+  it("leaves MAN the operator entered, at the default's own value too", () => {
+    const entered = setManualEv100(DEFAULT_MAN_EV100);
+    if (entered.kind !== "accepted") {
+      throw new Error("the default's value is a MAN entry");
+    }
+    expect(yieldsToMeter(entered.control)).toBe(false);
+  });
+
+  it("leaves the operator's INHIBIT, which only ENABLE leaves", () => {
+    expect(yieldsToMeter({ kind: "inhibited", ev100: 9, reason: "operator" })).toBe(false);
   });
 });

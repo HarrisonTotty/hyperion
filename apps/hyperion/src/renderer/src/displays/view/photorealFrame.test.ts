@@ -1,16 +1,29 @@
 import { describe, expect, it } from "vitest";
 
 import { countingRenderEngine } from "../../test/countingRenderEngine";
+import { packClassMap } from "../../view/bodies/discSurface";
 import { type LitBodyInput, planLitBodies } from "../../view/bodies/draw";
 import { DISC_ANNULI_HIGH } from "../../view/lighting/annuli";
 import { PLANETSHINE_SOURCES_HIGH } from "../../view/lighting/planetshine";
 import { lightingFramesOf } from "../../view/lighting/retarded";
 import { DEFAULT_EXPOSURE, controlEv100, exposureScale } from "../../view/photometry/exposure";
-import { PHASE_GIANT, PHASE_PLANETS, PHASE_STAR, phaseScene } from "../../view/scenes/phaseScene";
-import { HostDiscLayer } from "../../view/sky/disc";
-import { buildWireframeDrawList, viewStrokesAt } from "../../view/wireframe/drawList";
+import {
+  PHASE_GIANT,
+  PHASE_PLANETS,
+  PHASE_STAR,
+  phasePlanetDirection,
+  phaseScene,
+} from "../../view/scenes/phaseScene";
+import { HostDiscLayer, NO_AIR } from "../../view/sky/disc";
+import {
+  buildWireframeDrawList,
+  emptyDrawList,
+  viewStrokesAt,
+} from "../../view/wireframe/drawList";
 import { vec3 } from "../../geometry/vec3";
 import { FIXTURE_EARTH, FIXTURE_JUPITER } from "../../test/planetaryFixture";
+import { lavaWorldSurface } from "../../test/thermalSurfaces";
+import { surfaceTemperatureFieldOf } from "../../view/atmosphere/thermal";
 import {
   sceneModelOf,
   shipFrameOf,
@@ -20,12 +33,40 @@ import {
   viewSceneOf,
 } from "../../test/sceneFixture";
 import { PROVISIONAL_PHOTOMETRY } from "../../view/appearance/fromWire";
+import type { PhotometricLaw } from "../../view/appearance/law";
+import { lawFor } from "../../view/appearance/phase";
+import type { Viewport } from "../../view/camera/projection";
+import { type AbsorberCurve, absorberCurve } from "../../view/atmosphere/absorbers";
+import {
+  EARTH_OZONE,
+  EARTH_REFERENCE,
+  EARTH_REFERENCE_CURVES,
+  R05_EARTH_REFERENCE,
+} from "../../view/atmosphere/earth";
+import { BAKE_BIN_COUNT } from "../../view/atmosphere/medium";
+import { bakeSpectrumOf } from "../../view/atmosphere/spectralColour";
+import { AtmosphereTables } from "../../view/atmosphere/tables";
+import type { FrameAtmosphere } from "../../view/photoreal/renderer";
+import { type DiscAir, glareDiscAir } from "../../view/post/glareAir";
+import { aHostDisc, aLitBody } from "../../test/litFixtures";
+import { IDENTITY_QUATERNION, lookAlong } from "../../view/camera/quaternion";
+import type { ViewRole } from "../../view/camera/state";
+import { IDENTITY_ROTATION } from "../../view/coords/rotation";
+import type { TextureHandle } from "../../view/engine/types";
+import type { ClassMapSource } from "../../view/terrain/classMap";
 import { sceneHostDiscs } from "../../view/lighting/hostLights";
 import type { ViewScene } from "../../view/scene/model";
-import { litBodiesOf, litLabelsOf, photorealFrame } from "./photorealFrame";
+import {
+  frameGlareAir,
+  glareOccluders,
+  litBodiesOf,
+  litLabelsOf,
+  photorealFrame,
+  type PhotorealInputs,
+} from "./photorealFrame";
 import { runPose, startRun, startServerRun } from "./viewRun";
 
-const VIEWPORT = { widthPx: 1920, heightPx: 1080 };
+const VIEWPORT: Viewport = { widthPx: 1920, heightPx: 1080 };
 
 /** Stand-in colours, one distinct string per token, as `readTokens` would read them. */
 const TOKENS = {
@@ -37,14 +78,46 @@ const TOKENS = {
   surface0: "colour-surface-0",
 } as const;
 
+/** A view's terrain that draws nothing and gives no mask. */
+const NO_TERRAIN = {
+  surveyCoverage: () => null,
+  surveyedWhole: () => false,
+  draws: () => [],
+  symbologyDepth: () => [],
+  sceneDepth: () => false,
+  lateDraws: () => [],
+  visibility: () => null,
+  opaqueDraws: () => [],
+};
+
 /** A lit body lit as a static scene's: by the frame's hosts and the bodies where drawn. */
 function drawnOnly(body: LitBodyInput): LitBodyInput {
   return { ...body, lighting: undefined };
 }
 
-async function frameOfPhaseScene(): Promise<ReturnType<typeof photorealFrame>> {
-  const engine = await countingRenderEngine();
+/** The phase scene's run, its planets turning (their rotations the identity) where `rotated`. */
+function phaseRun(rotated: boolean): ReturnType<typeof startRun> {
   const run = startRun(phaseScene());
+  return rotated
+    ? {
+        ...run,
+        scene: {
+          ...run.scene,
+          bodies: run.scene.bodies.map((body) =>
+            body.kind === "star" ? body : { ...body, rotation: IDENTITY_ROTATION },
+          ),
+        },
+      }
+    : run;
+}
+
+async function frameOfPhaseScene(
+  sources: Pick<PhotorealInputs, "classMaps" | "reliefs" | "terrain" | "atmosphereFailed"> = {},
+  rotated = false,
+  presentedPx: Viewport = VIEWPORT,
+): Promise<ReturnType<typeof photorealFrame>> {
+  const engine = await countingRenderEngine();
+  const run = phaseRun(rotated);
   const pose = runPose(run);
   const camera = { pose, fovXRad: (run.camera.fovDeg * Math.PI) / 180 };
   const list = buildWireframeDrawList(run.scene, camera, VIEWPORT, TOKENS, {
@@ -59,16 +132,20 @@ async function frameOfPhaseScene(): Promise<ReturnType<typeof photorealFrame>> {
     run,
     pose,
     viewport: VIEWPORT,
+    presentedPx,
     setting: "high",
     exposureScale: exposureScale(controlEv100(DEFAULT_EXPOSURE)),
+    white: null,
     list,
     sky: null,
+    hostDiscs: null,
     band: null,
     discs: new HostDiscLayer(engine),
     cube: null,
     previousRegimes: new Map(),
     overlay: null,
     meter: "average",
+    ...sources,
   });
 }
 
@@ -93,6 +170,7 @@ describe("a photorealistic frame of the phase scene", () => {
     const options = {
       camera: frame.camera,
       viewport: frame.viewport,
+      presentedPx: frame.presentedPx,
       exposureScale: frame.exposureScale,
       annuli: DISC_ANNULI_HIGH,
       planetshine: PLANETSHINE_SOURCES_HIGH,
@@ -104,11 +182,131 @@ describe("a photorealistic frame of the phase scene", () => {
     );
   });
 
+  it("gives the plan no footprint of its own for a terrain, which its body's regime counts (R10.T16.c)", async () => {
+    const frame = await frameOfPhaseScene(
+      { reliefs: { reliefM: () => 4_000 }, terrain: NO_TERRAIN },
+      true,
+    );
+    expect(frame.depthWriters).toEqual([]);
+  });
+
+  it("shades each lit body with the view's class maps (R10.T10.d)", async () => {
+    const asked: string[] = [];
+    const classMaps: ClassMapSource = {
+      classMapOf: (body) => {
+        asked.push(body);
+        return null;
+      },
+    };
+    await frameOfPhaseScene({ classMaps });
+    expect(asked).toEqual([...PHASE_PLANETS, PHASE_GIANT]);
+  });
+
+  it("gives each lit body with a rotation its relief from the view's reliefs (R10.T10.e)", async () => {
+    const frame = await frameOfPhaseScene({ reliefs: { reliefM: () => 4_000 } }, true);
+    expect(frame.bodies.map((body) => body.handoverReliefM)).toEqual(
+      [...PHASE_PLANETS, PHASE_GIANT].map(() => 4_000),
+    );
+  });
+
+  it("gives a body whose rotation is not known no relief, so that it never hands over (R10.T16.c)", async () => {
+    const frame = await frameOfPhaseScene({ reliefs: { reliefM: () => 4_000 } });
+    expect(frame.bodies.map((body) => body.handoverReliefM)).toEqual(
+      [...PHASE_PLANETS, PHASE_GIANT].map(() => undefined),
+    );
+  });
+
+  it("asks the view's terrain for each lit body's survey coverage (R10.T10.e)", async () => {
+    const asked: string[] = [];
+    await frameOfPhaseScene({
+      terrain: {
+        surveyCoverage: (body) => {
+          asked.push(body);
+          return null;
+        },
+        surveyedWhole: () => false,
+        draws: () => [],
+        symbologyDepth: () => [],
+        sceneDepth: () => false,
+        lateDraws: () => [],
+        visibility: () => null,
+        opaqueDraws: () => [],
+      },
+    });
+    expect(asked).toEqual([...PHASE_PLANETS, PHASE_GIANT]);
+  });
+
+  it("carries the view's terrain, which draws the bodies handed over (R10.T10.e)", async () => {
+    const terrain = {
+      surveyCoverage: () => null,
+      surveyedWhole: () => false,
+      draws: () => [],
+      symbologyDepth: () => [],
+      sceneDepth: () => false,
+      lateDraws: () => [],
+      visibility: () => null,
+      opaqueDraws: () => [],
+    };
+    expect((await frameOfPhaseScene({ terrain })).terrain).toBe(terrain);
+  });
+
+  it("hands a throw from a body's air to the view's cache (R08.T10.b; decision-r08-t10b-leans §2)", async () => {
+    const reported: Array<readonly [string, string]> = [];
+    const frame = await frameOfPhaseScene({
+      atmosphereFailed: (body, _error, viewName) => {
+        reported.push([body, viewName]);
+      },
+    });
+    frame.onAtmosphereFailed?.(PHASE_GIANT, new Error("a bug"), "VIEW 1");
+    expect(reported).toEqual([[PHASE_GIANT, "VIEW 1"]]);
+  });
+
   it("draws no sky without one, and takes the camera's role and field", async () => {
     const frame = await frameOfPhaseScene();
     expect(frame.sky).toEqual([]);
-    expect(frame.role).toBe("eye");
+    expect(frame.role).toBe("camera");
     expect(frame.camera.fovXRad).toBeCloseTo(Math.PI / 3, 12);
+  });
+
+  it("frames VIEW's primary as a ship's camera, which takes no glare from the Sun 5° outside it, where a window's eye would (ux-calls-view, item 3a)", async () => {
+    const engine = await countingRenderEngine();
+    const start = startRun(phaseScene());
+    // Looking 35° from the Sun across a 60° field puts its disc 5° outside the frame's left edge.
+    const pose = {
+      ...start.camera.pose,
+      orientation: lookAlong(phasePlanetDirection(180 - 35), vec3(0, 1, 0)),
+    };
+    const frameAs = (role: ViewRole) =>
+      photorealFrame({
+        run: { ...start, camera: { ...start.camera, role, pose, style: "photorealistic" } },
+        pose,
+        viewport: VIEWPORT,
+        presentedPx: VIEWPORT,
+        setting: "high",
+        exposureScale: exposureScale(controlEv100(DEFAULT_EXPOSURE)),
+        white: null,
+        list: emptyDrawList(viewStrokesAt(1)),
+        sky: null,
+        hostDiscs: null,
+        band: null,
+        discs: new HostDiscLayer(engine),
+        cube: null,
+        previousRegimes: new Map(),
+        overlay: null,
+        meter: "average",
+      });
+    const primary = frameAs(start.camera.role);
+    expect([primary.role, primary.glareSources, frameAs("eye").glareSources.length]).toEqual([
+      "camera",
+      [],
+      1,
+    ]);
+  });
+
+  it("carries the presented size beside its own viewport, for the hand-over's pixel (R10.T10.g)", async () => {
+    const presentedPx: Viewport = { widthPx: 3840, heightPx: 2160 };
+    const frame = await frameOfPhaseScene({}, false, presentedPx);
+    expect([frame.viewport, frame.presentedPx]).toEqual([VIEWPORT, presentedPx]);
   });
 });
 
@@ -130,7 +328,7 @@ describe("a server scene's lit bodies (R07.T2.b)", () => {
   it("shade a body with its sections' figure and photometry, and pass its rotation", () => {
     const { scene, pose } = sliceScene();
     const earth = viewBodyOf(scene, FIXTURE_EARTH);
-    const lit = litBodiesOf(scene, pose, sceneHostDiscs(scene, null)).find(
+    const lit = litBodiesOf(scene, pose, sceneHostDiscs(scene, null, null)).find(
       (body) => body.id === FIXTURE_EARTH,
     );
     expect([lit?.figure, lit?.photometry, lit?.rotation]).toEqual([
@@ -143,12 +341,118 @@ describe("a server scene's lit bodies (R07.T2.b)", () => {
 
   it("shade a body without a photometric section with the provisional photometry", () => {
     const { scene, pose } = sliceScene();
-    const lit = litBodiesOf(scene, pose, sceneHostDiscs(scene, null)).find(
+    const lit = litBodiesOf(scene, pose, sceneHostDiscs(scene, null, null)).find(
       (body) => body.id === FIXTURE_JUPITER,
     );
     expect(lit?.photometry).toBe(PROVISIONAL_PHOTOMETRY);
     expect(lit).toBeDefined();
     expect(lit).not.toHaveProperty("rotation");
+  });
+
+  it("shade each body's disc with its class map, oriented where its rotation is known and elsewhere's alone where it is null (R10.T10.d)", () => {
+    const { scene, pose } = sliceScene();
+    const weights: TextureHandle = { kind: "texture", name: "slice class map" };
+    const texels = packClassMap(1, 1, () => [1]);
+    const dark = lawFor([0.05, 0.05, 0.05], [0.6, 0.6, 0.6], "moon");
+    const asked: Array<readonly [string, PhotometricLaw]> = [];
+    const classMaps: ClassMapSource = {
+      classMapOf: (body, elsewhere) => {
+        asked.push([body, elsewhere]);
+        return { kind: "class-map", weights, texels, laws: [dark], elsewhere, normals: null };
+      },
+    };
+    const lit = litBodiesOf(scene, pose, sceneHostDiscs(scene, null, null), classMaps);
+    const earth = lit.find((body) => body.id === FIXTURE_EARTH);
+    const jupiter = lit.find((body) => body.id === FIXTURE_JUPITER);
+    if (earth === undefined || jupiter === undefined) {
+      throw new Error("the slice lights its Earth and its Jupiter");
+    }
+    // Each asked with its own photometry's law as `elsewhere`.
+    expect(asked).toContainEqual([FIXTURE_EARTH, earth.photometry.law]);
+    expect(asked).toContainEqual([FIXTURE_JUPITER, PROVISIONAL_PHOTOMETRY.law]);
+    expect(earth.surface).toMatchObject({ kind: "class-map", laws: [dark] });
+    expect(earth.rotation).toEqual(viewBodyOf(scene, FIXTURE_EARTH).rotation);
+    expect(jupiter.surface?.kind).toBe("class-map");
+    expect(jupiter).not.toHaveProperty("rotation");
+    // Drawn as discs straight ahead: Earth's map oriented by its rotation, Jupiter's elsewhere alone.
+    const options = {
+      camera: { orientation: IDENTITY_QUATERNION, fovXRad: Math.PI / 3 },
+      viewport: VIEWPORT,
+      presentedPx: VIEWPORT,
+      exposureScale: 1e-3,
+      annuli: DISC_ANNULI_HIGH,
+      planetshine: PLANETSHINE_SOURCES_HIGH,
+      setting: "high" as const,
+    };
+    const ahead = (body: LitBodyInput): LitBodyInput => ({
+      ...drawnOnly(body),
+      centreM: vec3(0, 0, -40 * body.figure.equatorialRadiusM),
+    });
+    const surfaces = [earth, jupiter].map((body) => {
+      const plan = planLitBodies([ahead(body)], [], options, new Map([[body.id, "disc"]]));
+      return plan.discs[0]?.surface;
+    });
+    expect(surfaces[0]).toMatchObject({ kind: "class-map", rotation: earth.rotation });
+    expect(surfaces[1]).toEqual({ kind: "uniform", law: PROVISIONAL_PHOTOMETRY.law });
+  });
+
+  it("give each body its ground's temperature field where the source holds one, and none emits without (R08.T18.a)", () => {
+    const { scene, pose } = sliceScene();
+    const field = surfaceTemperatureFieldOf(lavaWorldSurface());
+    const lit = litBodiesOf(
+      scene,
+      pose,
+      sceneHostDiscs(scene, null, null),
+      undefined,
+      {},
+      (body) => (body === FIXTURE_EARTH ? field : null),
+    );
+    expect(lit.find((body) => body.id === FIXTURE_EARTH)?.thermal).toBe(field);
+    expect(lit.filter((body) => body.thermal !== undefined)).toHaveLength(1);
+    const bare = litBodiesOf(scene, pose, sceneHostDiscs(scene, null, null));
+    expect(bare.filter((body) => body.thermal !== undefined)).toEqual([]);
+  });
+
+  it("shade every disc uniform without class maps", () => {
+    const { scene, pose } = sliceScene();
+    const lit = litBodiesOf(scene, pose, sceneHostDiscs(scene, null, null));
+    expect(lit.filter((body) => body.surface !== undefined)).toEqual([]);
+  });
+
+  it("give each body its relief and its survey's coverage mask where the view's terrain holds them, whole or not, and none hands over without (R10.T10.e, R07.T8.h)", () => {
+    const { scene, pose } = sliceScene();
+    const mask: TextureHandle = { kind: "texture", name: "slice coverage mask" };
+    const lit = litBodiesOf(scene, pose, sceneHostDiscs(scene, null, null), undefined, {
+      reliefs: { reliefM: (body) => (body === FIXTURE_EARTH ? 18_000 : null) },
+      terrain: {
+        surveyCoverage: (body) => (body === FIXTURE_EARTH ? mask : null),
+        surveyedWhole: (body) => body === FIXTURE_EARTH,
+      },
+    });
+    const earth = lit.find((body) => body.id === FIXTURE_EARTH);
+    const jupiter = lit.find((body) => body.id === FIXTURE_JUPITER);
+    // The mask comes with the axes it is read in, Earth's rotation, and whether it is whole.
+    expect([earth?.handoverReliefM, earth?.surveyCoverage]).toEqual([
+      18_000,
+      { mask, rotation: viewBodyOf(scene, FIXTURE_EARTH).rotation, whole: true },
+    ]);
+    expect(jupiter).not.toHaveProperty("handoverReliefM");
+    expect(jupiter).not.toHaveProperty("surveyCoverage");
+    const bare = litBodiesOf(scene, pose, sceneHostDiscs(scene, null, null));
+    expect(
+      bare.filter(
+        (body) => body.handoverReliefM !== undefined || body.surveyCoverage !== undefined,
+      ),
+    ).toEqual([]);
+  });
+
+  it("give no coverage mask to a body without a rotation to read it in (R10.T10.e)", () => {
+    const { scene, pose } = sliceScene();
+    const mask: TextureHandle = { kind: "texture", name: "slice coverage mask" };
+    const lit = litBodiesOf(scene, pose, sceneHostDiscs(scene, null, null), undefined, {
+      terrain: { surveyCoverage: () => mask, surveyedWhole: () => true },
+    });
+    expect(lit.find((body) => body.id === FIXTURE_JUPITER)).not.toHaveProperty("surveyCoverage");
   });
 
   it("state the provisional photometry's label while one lit body takes it", () => {
@@ -201,5 +505,171 @@ describe("a server scene's lit bodies (R07.T2.b)", () => {
 
   it("state the label for a kept scene's bodies, which carry no appearance", () => {
     expect(litLabelsOf(phaseScene().sceneAt(0))).toEqual(["BODY PHOTOMETRY: NOT YET MODELLED"]);
+  });
+});
+
+/** The lit body `id` of `bodies`. */
+function litBodyNamed(bodies: ReadonlyArray<LitBodyInput>, id: string): LitBodyInput | undefined {
+  return bodies.find((body) => body.id === id);
+}
+
+describe("a served giant's disc beneath its gas envelope's air (R08.T16.a.2)", () => {
+  it("stands on the ground the cache gives where the frame draws its air, keeping its record's figure and photometry for the rest", async () => {
+    const engine = await countingRenderEngine();
+    const { scene, pose } = sliceScene();
+    const floorM = 71_310_949;
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, floorM);
+    const floor = { equatorialRadiusM: floorM, polarRadiusM: floorM };
+    const ground = { figure: floor, tableFigure: floor };
+    const frame = photorealFrame({
+      run: startServerRun(scene),
+      pose,
+      viewport: VIEWPORT,
+      presentedPx: VIEWPORT,
+      setting: "high",
+      exposureScale: exposureScale(controlEv100(DEFAULT_EXPOSURE)),
+      white: null,
+      list: emptyDrawList(viewStrokesAt(1)),
+      sky: null,
+      hostDiscs: null,
+      band: null,
+      discs: new HostDiscLayer(engine),
+      cube: null,
+      previousRegimes: new Map(),
+      overlay: null,
+      meter: "average",
+      atmospheres: (id) => (id === FIXTURE_JUPITER ? tables : null),
+      // The Earth's air is not drawn, so the ground given for it is not taken.
+      discGrounds: () => ground,
+    });
+    const bare = litBodiesOf(scene, pose, sceneHostDiscs(scene, null, null));
+    const jupiter = litBodyNamed(bare, FIXTURE_JUPITER);
+    expect(jupiter).toBeDefined();
+    expect([
+      litBodyNamed(frame.bodies, FIXTURE_JUPITER),
+      litBodyNamed(frame.bodies, FIXTURE_EARTH),
+    ]).toEqual([
+      jupiter === undefined ? undefined : { ...jupiter, ground },
+      litBodyNamed(bare, FIXTURE_EARTH),
+    ]);
+    tables.dispose();
+  });
+});
+
+describe("the air between the camera and a star (fix-view-light)", () => {
+  /** Earth's mean radius, m. */
+  const EARTH_RADIUS_M = 6_371_008.8;
+  const AU_M = 149_597_870_700;
+  const SUN_RADIUS_RAD = 0.00465;
+  /** The reference Sun's curves, and ozone's under an equal-energy light, a second slot's. */
+  const SUN_CURVES = EARTH_REFERENCE_CURVES[0] ?? [];
+  const FLAT_CURVES = [
+    absorberCurve(EARTH_OZONE, bakeSpectrumOf(Array.from({ length: BAKE_BIN_COUNT }, () => 1))),
+  ];
+  /** The direction 1° above the horizon of a camera 2 m up on the body's +x, towards +y. */
+  const LOW_SUN = vec3(Math.sin(Math.PI / 180), Math.cos(Math.PI / 180), 0);
+
+  /** A body 2 m below the camera, its body-fixed axes the galactic ones, under `tables`. */
+  function earthUnder(
+    id: string,
+    tables: AtmosphereTables,
+  ): { readonly body: LitBodyInput; readonly air: FrameAtmosphere } {
+    const lit = aLitBody();
+    const centreM = vec3(-(EARTH_RADIUS_M + 2), 0, 0);
+    return {
+      body: { id, centreM, figure: lit.figure, photometry: lit.photometry, lighting: undefined },
+      air: {
+        id,
+        tables,
+        camera: {
+          positionM: vec3(EARTH_RADIUS_M + 2, 0, 0),
+          orientation: IDENTITY_QUATERNION,
+          fovXRad: Math.PI / 3,
+          viewport: { widthPx: 1920, heightPx: 1080 },
+        },
+        toBodyFixed: IDENTITY_QUATERNION,
+      },
+    };
+  }
+
+  /** The glare's air of one body's medium alone, its tables' figure a sphere. */
+  function alone(curves: ReadonlyArray<AbsorberCurve>): DiscAir {
+    return glareDiscAir(
+      {
+        medium: EARTH_REFERENCE,
+        equatorialRadiusM: EARTH_RADIUS_M,
+        polarRadiusM: EARTH_RADIUS_M,
+        cameraM: vec3(EARTH_RADIUS_M + 2, 0, 0),
+        toBodyFixed: IDENTITY_QUATERNION,
+      },
+      curves,
+      LOW_SUN,
+      SUN_RADIUS_RAD,
+      AU_M,
+      "lines",
+    );
+  }
+
+  /** Star 3 at 1 au and star 7, fainter, at 1.2 au: slots 0 and 1 of the body's lights. */
+  const LIGHTS = [
+    { disc: aHostDisc({ star: 7 }), centreM: vec3(0, 1.2 * AU_M, 0) },
+    { disc: aHostDisc({ star: 3 }), centreM: vec3(0, AU_M, 0) },
+  ];
+
+  it("hides a disc by a near body's air's lines, not by its sphere, and by a far body's sphere", () => {
+    const lit = aLitBody();
+    const oblate = { equatorialRadiusM: 6_378_137, polarRadiusM: 6_356_752, pole: vec3(0, 0, 1) };
+    const body = (id: string, centreM: ReturnType<typeof vec3>): LitBodyInput => ({
+      id,
+      centreM,
+      figure: oblate,
+      photometry: lit.photometry,
+      lighting: undefined,
+    });
+    // 2 m over the pole, with air and without; and one 100 radii off.
+    const above = vec3(0, 0, -(6_356_752 + 2));
+    const occluders = glareOccluders(
+      [body("air", above), body("airless", above), body("far", vec3(6.4e8, 0, 0))],
+      new Set(["air", "far"]),
+    );
+    expect(occluders).toEqual([
+      { centreM: above, radiusM: expect.closeTo(6_356_752, 3) },
+      { centreM: vec3(6.4e8, 0, 0), radiusM: Math.sqrt(6_378_137 * 6_356_752) },
+    ]);
+  });
+
+  it("takes no air where the frame draws none", () => {
+    expect(frameGlareAir([], [], LIGHTS)).toBe(NO_AIR);
+  });
+
+  it("reads each star's line through its own light slot's curves, brightest first", async () => {
+    const engine = await countingRenderEngine();
+    const tables = new AtmosphereTables(engine, EARTH_REFERENCE, EARTH_RADIUS_M, [
+      SUN_CURVES,
+      FLAT_CURVES,
+    ]);
+    const { body, air } = earthUnder("earth", tables);
+    const of = frameGlareAir([air], [body], LIGHTS);
+    expect(of(3, LOW_SUN, SUN_RADIUS_RAD, AU_M)).toEqual([alone(SUN_CURVES)]);
+    expect(of(7, LOW_SUN, SUN_RADIUS_RAD, AU_M)).toEqual([alone(FLAT_CURVES)]);
+    expect(of(3, LOW_SUN, SUN_RADIUS_RAD, AU_M)).not.toEqual(of(7, LOW_SUN, SUN_RADIUS_RAD, AU_M));
+  });
+
+  it("takes every body's air the line crosses, one by one", async () => {
+    const engine = await countingRenderEngine();
+    const tables = new AtmosphereTables(engine, EARTH_REFERENCE, EARTH_RADIUS_M, [
+      SUN_CURVES,
+      FLAT_CURVES,
+    ]);
+    const one = earthUnder("one", tables);
+    const two = earthUnder("two", tables);
+    expect(
+      frameGlareAir([one.air, two.air], [one.body, two.body], LIGHTS)(
+        3,
+        LOW_SUN,
+        SUN_RADIUS_RAD,
+        AU_M,
+      ),
+    ).toEqual([alone(SUN_CURVES), alone(SUN_CURVES)]);
   });
 });

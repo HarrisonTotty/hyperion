@@ -19,15 +19,20 @@ function Reading({ value }: ReadingProps) {
 }
 
 /**
- * The launch modes' words (R01.T5.c, signed off 2026-09-30).
+ * The launch modes' words (R01.T5.c, signed off 2026-09-30; `SOFTWARE`, main's ruling of
+ * 2026-10-29, R01.T16).
  *
  * @remarks
  * The safe mode reads `SAFE MODE`, since `SAFE` alone is the guide's command that disarms an `ARM`.
+ * The check-only software mode reads `SOFTWARE` here, and the record names it as `software`; it has
+ * no header banner of its own, since the views check's `MEASUREMENT` banner already stands and a
+ * second would move the layout its captures judge.
  */
 const MODE_WORDS = {
   default: "DEFAULT",
   vulkan: "VULKAN",
   safe: "SAFE MODE",
+  software: "SOFTWARE",
 } as const satisfies Record<GraphicsLaunchMode, string>;
 
 /** The timer's words (R01.T5.c, signed off 2026-09-30). */
@@ -48,7 +53,11 @@ const FEATURE_NAMES: ReadonlyArray<
   readonly [
     keyof Omit<
       GpuCapabilities,
-      "maxTextureDimension2D" | "subgroupMinSize" | "maxStorageBufferBindingSize" | "maxBufferSize"
+      | "maxTextureDimension2D"
+      | "subgroupMinSize"
+      | "maxStorageBufferBindingSize"
+      | "maxBufferSize"
+      | "subpixelBits"
     >,
     GPUFeatureName,
   ]
@@ -60,6 +69,7 @@ const FEATURE_NAMES: ReadonlyArray<
   ["float32Blendable", "float32-blendable"],
   ["rg11b10Renderable", "rg11b10ufloat-renderable"],
   ["depthClipControl", "depth-clip-control"],
+  ["primitiveIndex", "primitive-index"],
 ];
 
 function summaryOf(condition: GraphicsCondition): AdapterSummary | null {

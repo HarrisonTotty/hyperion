@@ -16,13 +16,22 @@
 //! [`Handler`] is the seam where each kind's handler plugs in (plan 04, P04.T14). The server's is
 //! [`Handlers`]; unit tests inject doubles through [`AppState`]. The handlers of the universe
 //! lifecycle are in [`universe`], the galaxy's in [`galaxy`], the system's in [`system`], the
-//! scene's in [`scene`], and the sky's in [`sky`].
+//! scene's in [`scene`], the sky's in [`sky`], the surface's in [`surface`], plan 12's
+//! `resolve_system` in [`observe`], and plan 09's features' in [`features`].
 
+mod features;
 mod galaxy;
+mod global_list;
+mod observe;
 mod scene;
 mod sky;
+mod surface;
 mod system;
 mod universe;
+mod viewer;
+
+pub use sky::SkyFileCounters;
+pub(crate) use sky::{SKY_FILES_DIR, SkyReplyCache, SkyReplyFiles, SkySettings};
 
 pub(crate) use self::system::bodies_of;
 pub(crate) use self::universe::openable_universe;
@@ -36,9 +45,9 @@ use std::time::{Duration, Instant};
 use futures_util::FutureExt;
 use futures_util::future::BoxFuture;
 use hyperion_protocol::{
-    ClientMessage, ErrorCode, REQUEST_KINDS, RequestBody, RequestError, RequestId, ResponseBody,
-    SceneCamerasRequest, ServerMessage, SubscribeRequest, Subscribed, SubscriptionState,
-    SubscriptionTopic, UnsubscribeRequest,
+    AlertsAcknowledgeRequest, AlertsObserverRequest, ClientMessage, ErrorCode, REQUEST_KINDS,
+    RequestBody, RequestError, RequestId, ResponseBody, SceneCamerasRequest, ServerMessage,
+    SubscribeRequest, Subscribed, SubscriptionState, SubscriptionTopic, UnsubscribeRequest,
 };
 use serde_json::Value;
 use tokio::sync::{mpsc, oneshot};
@@ -49,6 +58,7 @@ use crate::bulk::{Answer, BulkPayload};
 use crate::compute::{
     CancelToken, ComputeError, CpuPool, JobError, Priority, SubmitJobError, panic_message,
 };
+use crate::knowledge::ContactId;
 use crate::limits::MAX_IN_FLIGHT_REQUESTS;
 use crate::stats::Ending;
 use crate::subscriptions::{Pusher, SubscriptionCommand, Subscriptions};
@@ -188,21 +198,28 @@ fn open_topic(
         SubscriptionTopic::Scene(scene) => {
             Box::pin(crate::scene::open(state, universe, scene, pusher, token))
         }
+        SubscriptionTopic::Alerts(alerts) => {
+            Box::pin(crate::alerts::open(state, universe, alerts, pusher, token))
+        }
     }
 }
 
 /// The server's handlers: every request kind, and the code that answers it.
 ///
 /// Every kind of the first milestone is served (plan 04, P04.T14), plan 06's `system_summary`
-/// (P06.T34), plan 14's `system_bodies` and `body_detail` (P14.T36), and rendering plan R06's `sky`
-/// (R06.T11.a–c: the census's JSON, its stars and band in bulk, and the host discs), the one kind
-/// answered in bulk, behind its landing switch ([`SkyService`](crate::SkyService)): until R06.T8.g
-/// turns it on by default, `sky` is answered `unsupported` unless the server is started with
-/// `--serve-sky`. A later plan's kind that this server's
-/// [`REQUEST_KINDS`] does not hold is refused before it reaches here, as `unsupported`. A kind the
-/// protocol already defines but whose handler has not landed is answered `unsupported` here, under
-/// its own ID, as an older server would answer it (plan 04, design note 15): `body_events` until
-/// plan 14's P14.T31. Each handler that names a universe starts from
+/// (P06.T34), plan 14's `system_bodies` and `body_detail` (P14.T36), plan 07's `extinction_map`
+/// and `extinction` (P07.T10), and rendering plan R06's `sky` (R06.T11.a–d: the census's JSON, its
+/// stars and band in bulk, and the host discs), the one kind answered in bulk, behind its switch
+/// ([`SkyService`](crate::SkyService)): it is on by default since rendering plan R13's R13.T2, and
+/// when the server is started with `--serve-sky=false`, `sky` is answered `unsupported`, as before
+/// R06.T11.a. Rendering plan R09's `survey_pass` is served (R09.T19.a), and its `surface_field`,
+/// answered in bulk (R09.T19.b), and plan 12's `resolve_system` (P12.T6). A later plan's kind that
+/// this server's [`REQUEST_KINDS`] does not hold is refused before it reaches here, as
+/// `unsupported`. A kind the protocol already defines but whose handler has not landed is answered
+/// `unsupported` here, under its own ID, as an older server would answer it (plan 04, design note
+/// 15): plan 09's `features_in_range`, `galaxy_features`, `feature_detail` and `black_hole_state`
+/// until its P09.T40.b. Plan 14's `body_events` is served from generator version 25, which puts
+/// its P14.T31 events on the record. Each handler that names a universe starts from
 /// [`universe::openable_universe`].
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct Handlers;
@@ -241,7 +258,10 @@ impl Handler for Handlers {
             RequestBody::BodyDetail(request) => {
                 Box::pin(system::detail(state, request, token).map(answered))
             }
-            RequestBody::BodyEvents(_) => Box::pin(ready(Err(not_served_yet("body_events")))),
+            // Served from generator version 25, which puts P14.T31's events on the record.
+            RequestBody::BodyEvents(request) => {
+                Box::pin(system::events(state, request, token).map(answered))
+            }
             // The connection answers `subscribe` through `Handler::subscribe` and `unsubscribe`
             // itself (rendering plan R03, R03.T5.b), so neither reaches here; the arms keep the
             // match exhaustive for a caller that bypasses the connection.
@@ -253,11 +273,66 @@ impl Handler for Handlers {
             // The connection routes `scene_cameras` to its subscription (R03.T8.a); the arm keeps
             // the match exhaustive for a caller that bypasses the connection.
             RequestBody::SceneCameras(_) => Box::pin(ready(Err(not_served_yet("scene_cameras")))),
+            // Routed to their subscriptions by the connection as `scene_cameras` is (P12.T9.a).
+            RequestBody::AlertsObserver(_) => {
+                Box::pin(ready(Err(not_served_yet("alerts_observer"))))
+            }
+            RequestBody::AlertsAcknowledge(_) => {
+                Box::pin(ready(Err(not_served_yet("alerts_acknowledge"))))
+            }
             RequestBody::Sky(request) => match state.sky_service {
                 SkyService::Served => Box::pin(sky::answer(state, request, token, replies)),
-                // The landing switch is off (R06.T11.c): answered as before R06.T11.a, with no job.
+                // The switch is off (R06.T11.c): answered as before R06.T11.a, with no job.
                 SkyService::Unsupported => Box::pin(ready(Err(not_served_yet("sky")))),
             },
+            RequestBody::SurfaceField(request) => Box::pin(surface::field(state, request, token)),
+            RequestBody::SurveyPass(request) => {
+                Box::pin(surface::survey_pass(state, request, token).map(answered))
+            }
+            RequestBody::ExtinctionMap(request) => {
+                Box::pin(galaxy::extinction_map(state, request, token).map(answered))
+            }
+            RequestBody::Extinction(request) => {
+                Box::pin(galaxy::extinction(state, request, token).map(answered))
+            }
+            RequestBody::ResolveSystem(request) => {
+                Box::pin(observe::resolve_system(state, request, token).map(answered))
+            }
+            // Plan 09's kinds (P09.T39), served since P09.T40.b.
+            RequestBody::FeaturesInRange(request) => {
+                Box::pin(features::in_range(state, request, token).map(answered))
+            }
+            RequestBody::GalaxyFeatures(request) => {
+                Box::pin(features::map(state, request, token).map(answered))
+            }
+            RequestBody::FeatureDetail(request) => {
+                Box::pin(features::detail(state, request, token).map(answered))
+            }
+            RequestBody::BlackHoleState(request) => {
+                Box::pin(features::black_hole(state, request, token).map(answered))
+            }
+            // Plan 10's kinds (P10.T10.a).
+            RequestBody::GlobalFeatures(request) => {
+                Box::pin(global_list::features(state, request, token).map(answered))
+            }
+            RequestBody::StreamTrack(request) => {
+                Box::pin(global_list::track(state, request).map(answered))
+            }
+            // The planet viewer's kinds (rendering plan R15).
+            RequestBody::ViewerPlanet(request) => {
+                Box::pin(viewer::planet(state, request, token).map(answered))
+            }
+            RequestBody::ViewerRandomize(request) => {
+                Box::pin(viewer::randomize(state, request, token).map(answered))
+            }
+            RequestBody::ViewerInputs(request) => {
+                Box::pin(viewer::inputs(state, request, token).map(answered))
+            }
+            // A system's discs on their own (rendering plans R06 and R07): served whether or not
+            // the sky is, since they read no census.
+            RequestBody::HostDiscs(request) => {
+                Box::pin(sky::host_discs_answer(state, request, token).map(answered))
+            }
         }
     }
 
@@ -279,8 +354,7 @@ fn answered(result: Result<ResponseBody, RequestError>) -> Result<Answer, Reques
 }
 
 /// The answer to a kind the protocol defines and this server does not serve yet: `unsupported`,
-/// as an older server would answer it (plan 04, design note 15). Plan 14's `body_events` takes it
-/// until P14.T31 lands.
+/// as an older server would answer it (plan 04, design note 15).
 #[must_use]
 fn not_served_yet(kind: &str) -> RequestError {
     request_error(
@@ -306,7 +380,24 @@ pub(crate) fn kind(body: &RequestBody) -> &'static str {
         RequestBody::Unsubscribe(_) => "unsubscribe",
         RequestBody::SceneShip(_) => "scene_ship",
         RequestBody::SceneCameras(_) => "scene_cameras",
+        RequestBody::AlertsObserver(_) => "alerts_observer",
+        RequestBody::AlertsAcknowledge(_) => "alerts_acknowledge",
         RequestBody::Sky(_) => "sky",
+        RequestBody::SurfaceField(_) => "surface_field",
+        RequestBody::SurveyPass(_) => "survey_pass",
+        RequestBody::ExtinctionMap(_) => "extinction_map",
+        RequestBody::Extinction(_) => "extinction",
+        RequestBody::ResolveSystem(_) => "resolve_system",
+        RequestBody::FeaturesInRange(_) => "features_in_range",
+        RequestBody::GalaxyFeatures(_) => "galaxy_features",
+        RequestBody::FeatureDetail(_) => "feature_detail",
+        RequestBody::BlackHoleState(_) => "black_hole_state",
+        RequestBody::GlobalFeatures(_) => "global_features",
+        RequestBody::StreamTrack(_) => "stream_track",
+        RequestBody::ViewerPlanet(_) => "viewer_planet",
+        RequestBody::ViewerRandomize(_) => "viewer_randomize",
+        RequestBody::ViewerInputs(_) => "viewer_inputs",
+        RequestBody::HostDiscs(_) => "host_discs",
     }
 }
 
@@ -315,19 +406,34 @@ pub(crate) fn kind(body: &RequestBody) -> &'static str {
 ///
 /// A system's bodies can: its belts' named members (plan 14, P14.T21) run to 255 a belt, each a
 /// record. So can a window of body events, whose comets carry sampled tracks (P14.T31). One body's
-/// record cannot. A subscription's answer is as large as its topic's state: the scene's holds a
-/// whole system's bodies (rendering plan R03, Design note 14). `scene_ship`, `scene_cameras` and
-/// `unsubscribe` are small. The sky's JSON is small but its census and hosts grow with the request,
-/// and rendering plan R06 classes it large (`is_large`; Design note 17's size class).
+/// record cannot. An extinction map can, as a density map can; the extinction to at most 64
+/// targets cannot (plan 07, P07.T10), and neither can one system's row (plan 12, P12.T6). A
+/// subscription's answer is as large as its topic's state: the scene's holds a whole system's bodies
+/// (rendering plan R03, Design note 14). `scene_ship`, `scene_cameras` and `unsubscribe` are small.
+/// The sky's JSON is small but its census and hosts grow with the request, and rendering plan R06
+/// classes it large (`is_large`; Design note 17's size class). Rendering plan R09 classes its
+/// `surface_field` large as plan 04's row R09 requires, whose payload runs to some 15 MB, though
+/// its JSON is a header and a cover; its `survey_pass` answers one revision. Plan 09's
+/// `features_in_range` can, as `systems_in_range` can, and so can its `galaxy_features`, a list
+/// over the whole galaxy; one feature's detail and the black hole's state cannot. Plan 10's
+/// `global_features` can, a list over the whole galaxy too; one stream's track, at most 256 points,
+/// cannot. The planet viewer's answers (rendering plan R15) are one planet's inputs each, and
+/// `host_discs`' a system's few stars' discs.
 pub(crate) fn is_large(body: &ResponseBody) -> bool {
     match body {
         ResponseBody::DensityMap(_)
+        | ResponseBody::ExtinctionMap(_)
         | ResponseBody::SystemsInRange(_)
+        | ResponseBody::FeaturesInRange(_)
+        | ResponseBody::GalaxyFeatures(_)
+        | ResponseBody::GlobalFeatures(_)
         | ResponseBody::SystemBodies(_)
         | ResponseBody::BodyEvents(_)
-        | ResponseBody::Sky(_) => true,
+        | ResponseBody::Sky(_)
+        | ResponseBody::SurfaceField(_) => true,
         ResponseBody::Subscribe(subscribed) => match subscribed.state {
-            SubscriptionState::Scene(_) => true,
+            // An alerts state holds every contact the universe knows (plan 12, P12.T9.a).
+            SubscriptionState::Scene(_) | SubscriptionState::Alerts(_) => true,
         },
         ResponseBody::CreateUniverse(_)
         | ResponseBody::ListUniverses(_)
@@ -337,7 +443,19 @@ pub(crate) fn is_large(body: &ResponseBody) -> bool {
         | ResponseBody::BodyDetail(_)
         | ResponseBody::Unsubscribe
         | ResponseBody::SceneShip(_)
-        | ResponseBody::SceneCameras => false,
+        | ResponseBody::SceneCameras
+        | ResponseBody::SurveyPass(_)
+        | ResponseBody::Extinction(_)
+        | ResponseBody::ResolveSystem(_)
+        | ResponseBody::FeatureDetail(_)
+        | ResponseBody::BlackHoleState(_)
+        | ResponseBody::AlertsObserver
+        | ResponseBody::AlertsAcknowledge
+        | ResponseBody::ViewerPlanet(_)
+        | ResponseBody::ViewerRandomize(_)
+        | ResponseBody::ViewerInputs(_)
+        | ResponseBody::HostDiscs(_)
+        | ResponseBody::StreamTrack(_) => false,
     }
 }
 
@@ -401,6 +519,10 @@ impl From<ComputeError> for RequestError {
             ComputeError::Submit(error) => error.into(),
             ComputeError::Job(error) => error.into(),
             ComputeError::UnplayableGalaxy(cause) => request_error(
+                ErrorCode::Internal,
+                format!("this universe cannot be generated: {cause}"),
+            ),
+            ComputeError::UnplayableCentre(cause) => request_error(
                 ErrorCode::Internal,
                 format!("this universe cannot be generated: {cause}"),
             ),
@@ -681,6 +803,8 @@ impl Requests {
             // The state is sequence 0, whatever the topic set: the first notification is 1.
             match &mut state {
                 SubscriptionState::Scene(scene) => scene.sequence = 0,
+                // An alerts state carries no sequence: its first notification is 1 all the same.
+                SubscriptionState::Alerts(_) => {}
             }
             Ok(ResponseBody::Subscribe(Box::new(Subscribed {
                 subscription: subscription.get(),
@@ -713,12 +837,97 @@ impl Requests {
             cameras: request.cameras,
             answer,
         };
-        if let Err(error) = subscriptions.command(request.subscription, command) {
+        self.route(
+            id,
+            (request.subscription, command, answered),
+            ResponseBody::SceneCameras,
+            subscriptions,
+        )
+    }
+
+    /// Routes an `alerts_observer` to its subscription's topic, as
+    /// [`scene_cameras`](Self::scene_cameras) is routed (plan 12, P12.T9.a), or refuses it: as that
+    /// refuses, and `bad_request` naming `observer` or `time` for an observer no subscription can
+    /// have.
+    pub(crate) fn alerts_observer(
+        &mut self,
+        id: RequestId,
+        request: &AlertsObserverRequest,
+        handshake: Handshake,
+        subscriptions: &Subscriptions,
+    ) -> Option<String> {
+        let kind = "alerts_observer";
+        if let Some(refusal) = self.admit(id, kind, handshake) {
+            return Some(refusal);
+        }
+        let observer = match crate::convert::observer(&request.observer, &request.time) {
+            Ok(observer) => observer,
+            Err(error) => return Some(self.refuse(id, kind, error.into())),
+        };
+        let (answer, answered) = oneshot::channel();
+        let command = SubscriptionCommand::AlertsObserver { observer, answer };
+        self.route(
+            id,
+            (request.subscription, command, answered),
+            ResponseBody::AlertsObserver,
+            subscriptions,
+        )
+    }
+
+    /// Routes an `alerts_acknowledge` to its subscription's topic, as
+    /// [`scene_cameras`](Self::scene_cameras) is routed (plan 12, P12.T9.a), or refuses it: as that
+    /// refuses, and `bad_request` naming `contact` for contact 0, which no contact has.
+    pub(crate) fn alerts_acknowledge(
+        &mut self,
+        id: RequestId,
+        request: AlertsAcknowledgeRequest,
+        handshake: Handshake,
+        subscriptions: &Subscriptions,
+    ) -> Option<String> {
+        let kind = "alerts_acknowledge";
+        if let Some(refusal) = self.admit(id, kind, handshake) {
+            return Some(refusal);
+        }
+        let Some(contact) = ContactId::new(request.contact) else {
+            let refusal = RequestError {
+                code: ErrorCode::BadRequest,
+                message: "no contact is numbered 0".to_owned(),
+                field: Some("contact".to_owned()),
+            };
+            return Some(self.refuse(id, kind, refusal));
+        };
+        let (answer, answered) = oneshot::channel();
+        let command = SubscriptionCommand::AlertsAcknowledge { contact, answer };
+        self.route(
+            id,
+            (request.subscription, command, answered),
+            ResponseBody::AlertsAcknowledge,
+            subscriptions,
+        )
+    }
+
+    /// Routes `command` to subscription `subscription`'s topic and starts the request that waits
+    /// for its answer on `answered`, `body` once the topic accepts it; or refuses it and returns
+    /// the refusal: `bad_request` naming `subscription` for a subscription the connection does not
+    /// have live, and `queue_full` for one with too many waiting.
+    fn route(
+        &mut self,
+        id: RequestId,
+        (subscription, command, answered): (
+            u32,
+            SubscriptionCommand,
+            oneshot::Receiver<Result<(), RequestError>>,
+        ),
+        body: ResponseBody,
+        subscriptions: &Subscriptions,
+    ) -> Option<String> {
+        let kind = command.kind();
+        if let Err(error) = subscriptions.command(subscription, command) {
             return Some(self.refuse(id, kind, error));
         }
         let handled: HandlerFuture = Box::pin(async move {
             match answered.await {
-                Ok(checked) => checked.map(|()| ResponseBody::SceneCameras.into()),
+                Ok(checked) => checked.map(|()| body.into()),
                 Err(_) => Err(request_error(
                     ErrorCode::Internal,
                     "the subscription ended before it answered",
@@ -1091,14 +1300,19 @@ mod tests {
     use std::collections::BTreeMap;
 
     use hyperion_protocol::{
-        BodyDetailRequest, BodyEventsRequest, BodyIdHex, CreateUniverseRequest, DensityMap,
-        DensityMapRequest, DetailLevelDto, FramePositionDto, GalacticPosition,
-        GalaxyParametersRequest, KinematicsDto, MapPopulation, MapView, MassLayer,
-        OpenUniverseRequest, SceneCamerasRequest, SceneClockDto, SceneClockStateDto,
-        SceneShipRequest, SceneShipSet, SceneStateDto, SceneSubscribeRequest, SkyRequest,
-        SubscribeRequest, Subscribed, SubscriptionTopic, SystemBodiesRequest, SystemIdHex,
-        SystemSummaryRequest, SystemsInRangeRequest, UniverseIdHex, UniverseTime,
-        UnsubscribeRequest,
+        BlackHoleStateRequest, BodyDetailRequest, BodyEventsRequest, BodyIdHex,
+        CreateUniverseRequest, DensityMap, DensityMapRequest, DetailLevelDto, ExtinctionMap,
+        ExtinctionMapRequest, ExtinctionRequest, ExtinctionResult, ExtinctionTarget,
+        FeatureDetailRequest, FeatureIdHex, FeatureKindWire, FeaturesInRangeRequest,
+        FramePositionDto, GalacticPosition, GalaxyFeaturesRequest, GalaxyParametersRequest,
+        GlobalFeaturesRequest, HostDiscsRequest, KinematicsDto, MapFeatureKindWire, MapPopulation,
+        MapView, MassLayer, OpenUniverseRequest, PlanetInputsDto, SceneCamerasRequest,
+        SceneClockDto, SceneClockStateDto, SceneShipRequest, SceneShipSet, SceneStateDto,
+        SceneSubscribeRequest, SkyRequest, StreamTrackRequest, SubscribeRequest, Subscribed,
+        SubscriptionTopic, SurfaceFieldRequest, SurveyPassRequest, SurveyScopeDto, SurveySourceDto,
+        SystemBodiesRequest, SystemIdHex, SystemSummaryRequest, SystemsInRangeRequest,
+        TargetExtinction, UniverseIdHex, UniverseTime, UnsubscribeRequest, ViewerInputsRequest,
+        ViewerPlanetRequest, ViewerRandomizeRequest,
     };
 
     use tokio::time::timeout;
@@ -1106,8 +1320,13 @@ mod tests {
     use super::*;
     use crate::compute::SingleFlight;
     use crate::testing::{Call, Harness, Scripted, WAIT, body, small_response};
+    use crate::ws::ConnectionLimits;
 
     /// A request body of every kind.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one whole request of each kind, and the list must name them all"
+    )]
     fn every_body() -> Vec<RequestBody> {
         let universe = UniverseIdHex::from_u64(42);
         vec![
@@ -1137,11 +1356,13 @@ mod tests {
                 min_layer: MassLayer::A,
                 limit: 5_000,
                 include_stellar: false,
+                mode: hyperion_protocol::QueryModeDto::Now,
             }),
             RequestBody::SystemSummary(SystemSummaryRequest {
                 universe: universe.clone(),
                 system: SystemIdHex::from_u64(0x0200_0800_2000_0000),
                 time: UniverseTime::default(),
+                mode: hyperion_protocol::QueryModeDto::Now,
             }),
             RequestBody::SystemBodies(SystemBodiesRequest {
                 universe: universe.clone(),
@@ -1187,6 +1408,110 @@ mod tests {
                 n_max: None,
                 cone: None,
                 exclude_system: None,
+            }),
+            RequestBody::SurfaceField(SurfaceFieldRequest {
+                universe: UniverseIdHex::from_u64(42),
+                body: BodyIdHex::from_parts(0x0200_0800_2000_0000, 0x0100),
+                have_revision: None,
+                scope: SurveyScopeDto::Live,
+            }),
+            RequestBody::SurveyPass(SurveyPassRequest {
+                universe: UniverseIdHex::from_u64(42),
+                body: BodyIdHex::from_parts(0x0200_0800_2000_0000, 0x0100),
+                from: UniverseTime::default(),
+                to: UniverseTime::default(),
+                source: SurveySourceDto::Orbital,
+                resolution_m: 100.0,
+                cells: Vec::new(),
+                scope: SurveyScopeDto::Live,
+            }),
+            RequestBody::ExtinctionMap(ExtinctionMapRequest {
+                universe: UniverseIdHex::from_u64(42),
+                view: MapView::FaceOn,
+                resolution: 128,
+                bits: 8,
+            }),
+            RequestBody::Extinction(ExtinctionRequest {
+                universe: UniverseIdHex::from_u64(42),
+                origin: GalacticPosition::default(),
+                time: UniverseTime::default(),
+                targets: vec![ExtinctionTarget::System {
+                    id: SystemIdHex::from_u64(0x0200_0800_2000_0000),
+                }],
+            }),
+            RequestBody::ResolveSystem(hyperion_protocol::ResolveSystemRequest {
+                universe: UniverseIdHex::from_u64(42),
+                system: SystemIdHex::from_u64(0x0200_0800_2000_0000),
+                time: UniverseTime::default(),
+                mode: hyperion_protocol::QueryModeDto::Now,
+            }),
+            RequestBody::FeaturesInRange(FeaturesInRangeRequest {
+                universe: UniverseIdHex::from_u64(42),
+                centre: GalacticPosition::default(),
+                radius_ly: 1_000.0,
+                time: UniverseTime::default(),
+                kinds: vec![FeatureKindWire::Globular],
+            }),
+            RequestBody::GalaxyFeatures(GalaxyFeaturesRequest {
+                universe: UniverseIdHex::from_u64(42),
+                kinds: vec![MapFeatureKindWire::Globular],
+                time: UniverseTime::default(),
+            }),
+            RequestBody::FeatureDetail(FeatureDetailRequest {
+                universe: UniverseIdHex::from_u64(42),
+                feature: FeatureIdHex::from_u64(0xe842_0002_8000_0000),
+                time: UniverseTime::default(),
+            }),
+            RequestBody::BlackHoleState(BlackHoleStateRequest {
+                universe: UniverseIdHex::from_u64(42),
+                time: UniverseTime::default(),
+            }),
+            RequestBody::AlertsObserver(AlertsObserverRequest {
+                subscription: 1,
+                observer: GalacticPosition::default(),
+                time: UniverseTime::default(),
+            }),
+            RequestBody::AlertsAcknowledge(AlertsAcknowledgeRequest {
+                subscription: 1,
+                contact: 1,
+            }),
+            RequestBody::GlobalFeatures(GlobalFeaturesRequest {
+                universe: UniverseIdHex::from_u64(42),
+            }),
+            RequestBody::StreamTrack(StreamTrackRequest {
+                universe: UniverseIdHex::from_u64(42),
+                stream: 0,
+            }),
+            RequestBody::ViewerPlanet(ViewerPlanetRequest {
+                universe: UniverseIdHex::from_u64(42),
+                inputs: PlanetInputsDto {
+                    seed: hyperion_protocol::SeedHex::from_u64(7),
+                    star_mass_msun: 1.0,
+                    fe_h_dex: 0.0,
+                    age_gyr: 4.57,
+                    mass_mearth: 1.0,
+                    semi_major_axis_au: 1.0,
+                    eccentricity: 0.0,
+                    formed_at_au: None,
+                    day_hours: None,
+                    tilt_deg: None,
+                    water_rank: None,
+                    carbon_rank: None,
+                    nitrogen_rank: None,
+                },
+            }),
+            RequestBody::ViewerRandomize(ViewerRandomizeRequest {
+                universe: UniverseIdHex::from_u64(42),
+                draw_seed: hyperion_protocol::SeedHex::from_u64(7),
+            }),
+            RequestBody::ViewerInputs(ViewerInputsRequest {
+                universe: UniverseIdHex::from_u64(42),
+                body: BodyIdHex::from_parts(0x0200_0800_2000_0000, 0x0100),
+            }),
+            RequestBody::HostDiscs(HostDiscsRequest {
+                universe: UniverseIdHex::from_u64(42),
+                system: SystemIdHex::from_u64(0x0200_0800_2000_0000),
+                time: UniverseTime::default(),
             }),
         ]
     }
@@ -1353,25 +1678,31 @@ mod tests {
 
     #[tokio::test]
     async fn kinds_without_a_handler_are_answered_unsupported() {
-        // The kind is the protocol's (P14.T35.c), so it parses and reaches the handlers, which
-        // answer it as an older server would until P14.T31 serves it. So are rendering plan R03's
-        // kinds the connection routes, `scene_cameras` until R03.T8 serves it, and R06's `sky`
-        // while its landing switch is off, as it is by default until R06.T8.g (R06.T11.c).
-        let harness = Harness::start(Handlers).await;
+        // Rendering plan R03's kinds the connection routes are answered as an older server would,
+        // `scene_cameras` until R03.T8 serves it, and so are plan 12's `alerts_observer` and
+        // `alerts_acknowledge`, routed the same way (P12.T9.a), and R06's `sky` while its switch is
+        // off (R06.T11.c), as this test turns it: it is on by default since rendering plan R13's
+        // R13.T2. Plan 09's four kinds are served since P09.T40.b, and P14.T31's `body_events`
+        // from generator version 25.
+        let harness = Harness::start_configured(Handlers, ConnectionLimits::default(), |config| {
+            config.sky_service(SkyService::Unsupported)
+        })
+        .await;
         let events = every_body()
             .into_iter()
             .filter(|body| {
                 matches!(
                     body,
-                    RequestBody::BodyEvents(_)
-                        | RequestBody::Subscribe(_)
+                    RequestBody::Subscribe(_)
                         | RequestBody::Unsubscribe(_)
                         | RequestBody::SceneCameras(_)
+                        | RequestBody::AlertsObserver(_)
+                        | RequestBody::AlertsAcknowledge(_)
                         | RequestBody::Sky(_)
                 )
             })
             .collect::<Vec<_>>();
-        assert_eq!(events.len(), 5);
+        assert_eq!(events.len(), 6);
         for body in events {
             let name = kind(&body);
             let answer = Handlers
@@ -1423,6 +1754,32 @@ mod tests {
     }
 
     #[test]
+    fn an_extinction_map_is_large_and_the_extinction_to_its_targets_is_not() {
+        // Plan 07, P07.T10: a map can run to megabytes as a density map can; at most 64 targets'
+        // figures cannot.
+        let map = ResponseBody::ExtinctionMap(ExtinctionMap {
+            universe: UniverseIdHex::from_u64(42),
+            view: MapView::FaceOn,
+            width_px: 2,
+            height_px: 2,
+            centre_ly: [0.0, 0.0],
+            ly_per_px: 65_536.0,
+            bits: 8,
+            floor_log10_mag: -2.0,
+            ceiling_log10_mag: -2.0,
+            data_base64: "AAAAAA==".to_owned(),
+        });
+        assert!(is_large(&map));
+        let lines = ResponseBody::Extinction(ExtinctionResult {
+            universe: UniverseIdHex::from_u64(42),
+            origin: GalacticPosition::default(),
+            time: UniverseTime::default(),
+            targets: vec![TargetExtinction::NoSuchSystem],
+        });
+        assert!(!is_large(&lines));
+    }
+
+    #[test]
     fn pool_errors_become_request_errors() {
         let code = |error: RequestError| error.code;
         assert_eq!(code(SubmitJobError::QueueFull.into()), ErrorCode::QueueFull);
@@ -1466,6 +1823,19 @@ mod tests {
                 .message
                 .starts_with("this universe cannot be generated: layer A's densest cell"),
             "{unplayable:?}"
+        );
+        // So is a centre whose feature-level list cannot number plan 11's carved classes.
+        let too_full = RequestError::from(ComputeError::from(
+            hyperion_sim::galaxy::features::members::ExceedFeatureListError::CentreListTooFull {
+                candidates: 70_000.0,
+            },
+        ));
+        assert_eq!(too_full.code, ErrorCode::Internal);
+        assert!(
+            too_full.message.starts_with(
+                "this universe cannot be generated: the galactic centre's feature-level list"
+            ),
+            "{too_full:?}"
         );
     }
 

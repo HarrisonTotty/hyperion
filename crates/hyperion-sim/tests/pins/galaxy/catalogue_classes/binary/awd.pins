@@ -1,0 +1,7 @@
+# Pinned figures (hyperion_testkit::pins): re-pin them by test name with `just repin <test>`.
+a_slow_host_s_eruptions_are_pinned.eruptions = [[-135905991237, 948673211]]
+a_slow_host_s_eruptions_are_pinned.host = 18196753784258953216
+each_class_holds_its_share_row_s_hosts.row_hosts = [454196.9614751879, 7633387.338378704]
+the_hosts_layers_against_the_share_rows.layer_counts = [57, 137, 2]
+the_local_density_and_the_milky_way_s_total.catalogue_hosts = 8065132.745474433
+the_local_density_and_the_milky_way_s_total.local_density = 5.278839326560183e-6

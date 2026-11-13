@@ -3,6 +3,8 @@
 //!
 //! CI runs this, so a table that is stale, or edited by hand, fails it.
 
+mod common;
+
 use std::num::NonZeroUsize;
 
 use hyperion_fit::emit::Workspace;
@@ -26,18 +28,12 @@ fn type_ia_delay_table_is_reproduced() {
         GENERATOR_VERSION.get(),
     )
     .expect("the type_ia_delay task runs");
-    let rendered = planned.text;
-    if rendered != COMMITTED {
-        let line = rendered
-            .lines()
-            .zip(COMMITTED.lines())
-            .position(|(a, b)| a != b)
-            .map_or_else(|| "the length".to_owned(), |n| format!("line {}", n + 1));
-        panic!(
-            "crates/hyperion-sim/src/tables/type_ia_delay.rs differs from the fit at {line}: run \
-             `just fit type_ia_delay`"
-        );
-    }
+    common::assert_reproduced(
+        "crates/hyperion-sim/src/tables/type_ia_delay.rs",
+        "type_ia_delay",
+        COMMITTED,
+        &planned.text,
+    );
 }
 
 /// P15.T9.a's acceptance at the manifest's Milky Way: the yield to 1%, a fifth under 0.1 Gyr and

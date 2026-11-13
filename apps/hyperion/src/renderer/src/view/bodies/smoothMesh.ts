@@ -42,7 +42,22 @@ import {
   rotateToBodyFixed,
   rotation3FromRows,
 } from "../coords/rotation";
+import {
+  CLUSTER_FLAG_MAY_DISCARD,
+  CLUSTER_RECORD_BYTES,
+  CLUSTER_SHAPE_CODE,
+} from "../clusters/record";
+import {
+  CLUSTER_PAD_FRACTION,
+  CLUSTER_PAD_M,
+  STRIP_NORMAL_FRACTION,
+  TERRAIN_BLOCKS,
+  TERRAIN_CLUSTERS_PER_PAGE,
+  terrainClusterPlace,
+  terrainTemplateRef,
+} from "../clusters/terrain";
 import type { QualitySetting } from "../quality/qualitySetting";
+import type { FrustumCamera } from "../terrain/cull";
 import { stToUv } from "../terrain/cube";
 import { patchMeshData } from "../terrain/gpu/resources";
 import {
@@ -100,6 +115,11 @@ export interface SmoothMesh {
    * than its tolerance inside the limb.
    */
   readonly limited: boolean;
+  /**
+   * The camera it was selected for, its orientation along the galactic axes its origins are in,
+   * whose frustum its cluster path culls to (plan R14, R14.T4.a).
+   */
+  readonly camera: FrustumCamera;
 }
 
 /**
@@ -241,7 +261,14 @@ export function smoothMeshOf(
         2 * chordSagittaM(planet, Math.max(key.level - 1, 0)) + 2 ** -20 * norm(originFromCameraM),
     });
   }
-  return { body: id, axes, figure, patches, limited: selection.limited };
+  return {
+    body: id,
+    axes,
+    figure,
+    patches,
+    limited: selection.limited,
+    camera: { orientation: camera.orientation, fovXRad: camera.fovXRad, viewport },
+  };
 }
 
 /** The records of a frame's smooth figures, for one draw each. */
@@ -280,6 +307,195 @@ export function packSmoothMeshes(meshes: ReadonlyArray<SmoothMesh>): SmoothMeshR
     firstInstance,
     count,
   };
+}
+
+/** Words of one cluster record, as `clusters/record.ts` lays it out. */
+const RECORD_WORDS = CLUSTER_RECORD_BYTES / 4;
+
+/** The bit pattern of `f32` +∞: a strided record's unread parent error. */
+const F32_INFINITY_BITS = 0x7f80_0000;
+
+/** Each of a patch's clusters' block, `bx + 8 by`: a strip's the block its feet hang from. */
+const CLUSTER_BLOCK = Uint8Array.from({ length: TERRAIN_CLUSTERS_PER_PAGE }, (_, cluster) => {
+  const place = terrainClusterPlace(cluster);
+  return place.bx + 8 * place.by;
+});
+
+/** Each of a patch's clusters' template reference (`clusters/terrain.ts`). */
+const CLUSTER_TEMPLATE_REF = Uint32Array.from({ length: TERRAIN_CLUSTERS_PER_PAGE }, (_, cluster) =>
+  terrainTemplateRef(cluster),
+);
+
+/**
+ * Each of a patch's clusters' flags word: terrain's block or strip, strided, whose fragments may
+ * discard (plan R14, R14.T4.a: the figure's `disc_pixel` and survey discards), material 0.
+ */
+const CLUSTER_FLAGS = Uint32Array.from(
+  { length: TERRAIN_CLUSTERS_PER_PAGE },
+  (_, cluster) => CLUSTER_SHAPE_CODE[terrainClusterPlace(cluster).shape] | CLUSTER_FLAG_MAY_DISCARD,
+);
+
+/**
+ * A page's records but their spheres: each cluster's error bytes (0, +∞), its template reference
+ * and its flags, copied whole into each page's records before their spheres are written.
+ */
+const PAGE_WORDS = (() => {
+  const words = new Uint32Array(TERRAIN_CLUSTERS_PER_PAGE * RECORD_WORDS);
+  for (let cluster = 0; cluster < TERRAIN_CLUSTERS_PER_PAGE; cluster += 1) {
+    const at = cluster * RECORD_WORDS;
+    words[at + 5] = F32_INFINITY_BITS;
+    words[at + 6] = CLUSTER_TEMPLATE_REF[cluster] ?? 0;
+    words[at + 7] = CLUSTER_FLAGS[cluster] ?? 0;
+  }
+  return words;
+})();
+
+/** Vertices along a patch's side. */
+const PATCH_SIDE = 65;
+
+/**
+ * Each patch's 64 blocks' spheres, by figure and key, about the patch origin M d₀ along the axes
+ * the figure is built in: centre x, y, z and radius, m, four a block. A figure's patches change
+ * only with its selection, so a frame reuses those it drew before.
+ */
+const BLOCK_SPHERES = new Map<string, Float64Array>();
+const BLOCK_SPHERES_MAX = 4096;
+
+/**
+ * A patch's blocks' spheres about its origin (see {@link BLOCK_SPHERES}), made once: each about
+ * the middle of its 81 vertices' box, its radius the farthest of them, in `f64` as
+ * {@link smoothPatchVertices} places them, padded by {@link CLUSTER_PAD_M} and
+ * {@link CLUSTER_PAD_FRACTION} of its reach for the GPU's `f32` placement (R05's 1 mm bound on
+ * `FaceDifferences`) and the record's narrowing, as terrain's are.
+ */
+function blockSpheresOf(figure: BodyFigure, patch: SmoothPatch): Float64Array {
+  const { key, terms } = patch;
+  const id = `${String(figure.equatorialRadiusM)} ${String(figure.polarRadiusM)} ${String(key.face)} ${String(key.level)} ${String(key.i)} ${String(key.j)}`;
+  let spheres = BLOCK_SPHERES.get(id);
+  if (spheres !== undefined) {
+    return spheres;
+  }
+  if (BLOCK_SPHERES.size >= BLOCK_SPHERES_MAX) {
+    BLOCK_SPHERES.clear();
+  }
+  const p0 = spheroidAt(figure, centreDirection(terms));
+  // Each vertex M d − M d₀ as `directionAt` and `spheroidAt` form it, row by row, unrolled.
+  const [a, e1, e2] = terms.axes;
+  const us = Float64Array.from({ length: PATCH_SIDE }, (_, x) =>
+    stToUv(terms.st0[0] + (x - 32) * terms.step),
+  );
+  const { equatorialRadiusM: ra, polarRadiusM: rc } = figure;
+  const grid = new Float64Array(3 * PATCH_SIDE * PATCH_SIDE);
+  for (let y = 0; y < PATCH_SIDE; y += 1) {
+    const v = stToUv(terms.st0[1] + (y - 32) * terms.step);
+    for (let x = 0; x < PATCH_SIDE; x += 1) {
+      const u = us[x] ?? 0;
+      const nx = a.x + u * e1.x + v * e2.x;
+      const ny = a.y + u * e1.y + v * e2.y;
+      const nz = a.z + u * e1.z + v * e2.z;
+      const length = Math.sqrt(nx * nx + ny * ny + nz * nz);
+      const at = 3 * (y * PATCH_SIDE + x);
+      grid[at] = (ra * nx) / length - p0.x;
+      grid[at + 1] = (ra * ny) / length - p0.y;
+      grid[at + 2] = (rc * nz) / length - p0.z;
+    }
+  }
+  spheres = new Float64Array(4 * TERRAIN_BLOCKS);
+  for (let n = 0; n < TERRAIN_BLOCKS; n += 1) {
+    const x0 = 8 * (n % 8);
+    const y0 = 8 * Math.floor(n / 8);
+    let [lowX, lowY, lowZ] = [Infinity, Infinity, Infinity];
+    let [highX, highY, highZ] = [-Infinity, -Infinity, -Infinity];
+    for (let y = y0; y <= y0 + 8; y += 1) {
+      for (let x = x0; x <= x0 + 8; x += 1) {
+        const at = 3 * (y * PATCH_SIDE + x);
+        const px = grid[at] ?? Number.NaN;
+        const py = grid[at + 1] ?? Number.NaN;
+        const pz = grid[at + 2] ?? Number.NaN;
+        lowX = Math.min(lowX, px);
+        lowY = Math.min(lowY, py);
+        lowZ = Math.min(lowZ, pz);
+        highX = Math.max(highX, px);
+        highY = Math.max(highY, py);
+        highZ = Math.max(highZ, pz);
+      }
+    }
+    const cx = (lowX + highX) / 2;
+    const cy = (lowY + highY) / 2;
+    const cz = (lowZ + highZ) / 2;
+    let radiusSq = 0;
+    for (let y = y0; y <= y0 + 8; y += 1) {
+      for (let x = x0; x <= x0 + 8; x += 1) {
+        const at = 3 * (y * PATCH_SIDE + x);
+        const dx = (grid[at] ?? Number.NaN) - cx;
+        const dy = (grid[at + 1] ?? Number.NaN) - cy;
+        const dz = (grid[at + 2] ?? Number.NaN) - cz;
+        radiusSq = Math.max(radiusSq, dx * dx + dy * dy + dz * dz);
+      }
+    }
+    const radiusM = Math.sqrt(radiusSq);
+    const reachM = Math.sqrt(cx * cx + cy * cy + cz * cz) + radiusM;
+    spheres[4 * n] = cx;
+    spheres[4 * n + 1] = cy;
+    spheres[4 * n + 2] = cz;
+    spheres[4 * n + 3] = radiusM + CLUSTER_PAD_M + CLUSTER_PAD_FRACTION * reachM;
+  }
+  BLOCK_SPHERES.set(id, spheres);
+  return spheres;
+}
+
+/**
+ * The cluster records of a frame's smooth figures (plan R14, R14.T4.a): each patch's
+ * {@link TERRAIN_CLUSTERS_PER_PAGE}, patch by patch in {@link packSmoothMeshes}' order, so that a
+ * patch's page is its instance; strided, may-discard, unmeasured.
+ *
+ * @remarks
+ * A block's sphere holds its 81 vertices ({@link blockSpheresOf}), so it holds their convex hull,
+ * every triangle of the block and every morph target, a mean of two of its own vertices, and every
+ * mix between; a strip's is its block's widened by the patch's skirt depth and
+ * {@link STRIP_NORMAL_FRACTION} of it, since a foot hangs that far from its morphed edge vertex
+ * along the spheroid's normal. Each centre is about the patch origin, turned from the figure's axes
+ * into the galactic axes the instances' origins are in, in `f64`, and narrowed once, so that the
+ * cull takes no rotation.
+ */
+export function packSmoothClusterRecords(meshes: ReadonlyArray<SmoothMesh>): ArrayBuffer {
+  const count = meshes.reduce((sum, mesh) => sum + mesh.patches.length, 0);
+  const out = new ArrayBuffer(
+    Math.max(count, 1) * TERRAIN_CLUSTERS_PER_PAGE * CLUSTER_RECORD_BYTES,
+  );
+  const floats = new Float32Array(out);
+  const words = new Uint32Array(out);
+  // Each block's centre turned into the galactic axes, and its radius.
+  const turned = new Float64Array(4 * TERRAIN_BLOCKS);
+  let page = 0;
+  for (const mesh of meshes) {
+    const [r0, r1, r2] = mesh.axes.rows;
+    for (const patch of mesh.patches) {
+      const spheres = blockSpheresOf(mesh.figure, patch);
+      for (let n = 0; n < 4 * TERRAIN_BLOCKS; n += 4) {
+        const x = spheres[n] ?? 0;
+        const y = spheres[n + 1] ?? 0;
+        const z = spheres[n + 2] ?? 0;
+        turned[n] = r0.x * x + r0.y * y + r0.z * z;
+        turned[n + 1] = r1.x * x + r1.y * y + r1.z * z;
+        turned[n + 2] = r2.x * x + r2.y * y + r2.z * z;
+        turned[n + 3] = spheres[n + 3] ?? Infinity;
+      }
+      const skirtM = patch.skirtDepthM * (1 + STRIP_NORMAL_FRACTION);
+      const first = page * TERRAIN_CLUSTERS_PER_PAGE * RECORD_WORDS;
+      words.set(PAGE_WORDS, first);
+      for (let cluster = 0; cluster < TERRAIN_CLUSTERS_PER_PAGE; cluster += 1) {
+        const block = 4 * (CLUSTER_BLOCK[cluster] ?? 0);
+        const at = first + cluster * RECORD_WORDS;
+        floats[at] = turned[block] ?? 0;
+        floats[at + 1] = turned[block + 1] ?? 0;
+        floats[at + 2] = turned[block + 2] ?? 0;
+        floats[at + 3] = (turned[block + 3] ?? Infinity) + (cluster < TERRAIN_BLOCKS ? 0 : skirtM);
+      }
+      page += 1;
+    }
+  }
+  return out;
 }
 
 /**

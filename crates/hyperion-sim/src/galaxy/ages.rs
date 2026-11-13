@@ -19,6 +19,7 @@ use std::error::Error;
 use std::fmt;
 
 use super::consts::{YEARS_PER_GIGAYEAR, YEARS_PER_MEGAYEAR};
+use super::features::shares::YoungFieldShare;
 use crate::math;
 use crate::rng::Stream;
 use crate::time::CLOCK_WINDOW_H;
@@ -151,12 +152,38 @@ impl SubDisc {
 /// and so are not field stars (brainstorm, "Populations": the young field's ages "carry the factor
 /// 1 − φ").
 ///
-/// Only [`FeatureShare::None`] exists until plan 09 builds the features; the young disc's
-/// constructor already takes the argument so that plan 09 changes no caller.
+/// The young disc's constructor takes it, so that plan 09 changed no caller: the galaxy's density
+/// fields, its budget, take [`FeatureShare::None`], and the field placement thins to from
+/// generator version 27 takes [`FeatureShare::Phi`] (plan 09, P09.T2.c; `FieldShareRules`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FeatureShare {
     /// φ = 0 at every age: every young star is a field star.
     None,
+    /// Plan 09's φ of the young disc, [`phi_young`](super::features::shares::phi_young), as
+    /// `YoungFieldShare` holds it: averaged over panels of a megayear or less, and the born
+    /// ages' mean before birth.
+    Phi,
+}
+
+/// Whether the field gives up to the features the share φ of its systems that sit in them (plan
+/// 09, P09.T2.c, on the record from generator version 27).
+///
+/// Placement's thinning keeps of each component's budget in each band only the field's share,
+/// `FeatureShares::field_factor` (for a sub-disc of the old thin disc its own φ), and for the young
+/// disc `1 − φ(age)` at the system's age, so the young field's ages are the budget's times `1 − φ`,
+/// renormalised ([`FeatureShare::Phi`]). The catalogue classes of the field's deaths, the expected
+/// counts and the class table's stay shares read the same field. The density fields stay the
+/// budget, and so does everything else they feed: the gas, the substellar abundance, the
+/// kinematics, the feature catalogue, the map and the mean masses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum FieldShareRules {
+    /// The budget, which no version takes: φ = 0, and the field holds every population's whole
+    /// budget. The tests' reference for the field (P09.T2.c's and P09.T38's budget tests).
+    #[cfg(test)]
+    None,
+    /// Every version's: the field keeps each component's field factor of its budget, and the young
+    /// disc `1 − φ(age)` at each age (P09.T2.c).
+    Phi,
 }
 
 /// An [`AgeDistribution`] could not be built.
@@ -307,7 +334,7 @@ pub struct AgeDistribution {
 impl AgeDistribution {
     /// A distribution from pieces on ordered, disjoint intervals whose weights sum to 1.
     fn from_pieces(pieces: Vec<Piece>) -> Self {
-        debug_assert!(!pieces.is_empty());
+        debug_assert_ne!(pieces, []);
         debug_assert!(pieces.windows(2).all(|w| w[0].hi <= w[1].lo));
         let mut cumulative = Vec::with_capacity(pieces.len() + 1);
         let mut sum = 0.0;
@@ -366,6 +393,10 @@ impl AgeDistribution {
     /// The young thin disc: the same declining history continued from 100 Myr to −H, times
     /// `1 − φ(age)` for the stars still in features.
     ///
+    /// Under [`FeatureShare::Phi`] the history is cut into `YoungFieldShare`'s panels, each an
+    /// exponential piece weighted by its `1 − φ`, and the unborn sliver from −H keeps the born
+    /// ages' mean, so the field's born share of its systems is the budget's (P09.T2.c).
+    ///
     /// # Errors
     ///
     /// As [`exponential_history`](Self::exponential_history).
@@ -375,7 +406,40 @@ impl AgeDistribution {
     ) -> Result<Self, BuildAgeDistributionError> {
         match feature_share {
             FeatureShare::None => Self::exponential_history(tau, -clock_window(), YOUNG_AGE_LIMIT),
+            FeatureShare::Phi => {
+                // The budget's history refuses a bad timescale before the share is built on it.
+                Self::exponential_history(tau, -clock_window(), YOUNG_AGE_LIMIT)?;
+                Self::young_field(tau, &YoungFieldShare::new(tau))
+            }
         }
+    }
+
+    /// The young field's ages (P09.T2.c): the young disc's history of timescale `tau` times
+    /// `share`'s `1 − φ` on each of its panels, and times its born mean from −H to 0, renormalised.
+    ///
+    /// # Errors
+    ///
+    /// As [`exponential_history`](Self::exponential_history).
+    pub(crate) fn young_field(
+        tau: Years,
+        share: &YoungFieldShare,
+    ) -> Result<Self, BuildAgeDistributionError> {
+        let history = Shape::Exponential { tau: tau.value() };
+        let start = -clock_window().value();
+        let unborn = (start, 0.0, share.born_mean());
+        let mut pieces = Vec::with_capacity(share.keeps().len() + 1);
+        let mut total = 0.0;
+        for (lo, hi, keep) in std::iter::once(unborn).chain(share.panels_years()) {
+            let mut piece = Piece::new(lo, hi, 0.0, history)?;
+            // The budget's share of the piece, over the common factor τ e^(−H/τ), times 1 − φ.
+            piece.weight = math::exp((lo - start) / tau.value()) * piece.span(tau.value()) * keep;
+            total += piece.weight;
+            pieces.push(piece);
+        }
+        for piece in &mut pieces {
+            piece.weight /= total;
+        }
+        Ok(Self::from_pieces(pieces))
     }
 
     /// The nuclear disc: 90% uniform on 8–12 Gyr, 5% on 1–8 Gyr and 5% from −H to 1 Gyr.
@@ -425,6 +489,37 @@ impl AgeDistribution {
             .map(|p| p.weight * p.pdf(x))
             .next()
             .unwrap_or(0.0)
+    }
+
+    /// The greatest probability density at any age in `[lo, hi]`, per year; 0 if no piece meets
+    /// the range.
+    ///
+    /// Each piece's density never falls with age, a uniform piece's being flat and an exponential
+    /// history's rising, so the greatest over the range is a piece's own at the range's top or at
+    /// the piece's end, whichever comes first, in [`pdf`](Self::pdf)'s arithmetic. A process that
+    /// thins on `pdf` over a range of ages bounds it with this (plan 09, P09.T33.a).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use hyperion_sim::galaxy::ages::{AgeDistribution, FeatureShare};
+    /// use hyperion_sim::units::Years;
+    ///
+    /// let young = AgeDistribution::young_disc(Years::new(7e9), FeatureShare::None)?;
+    /// let (lo, hi) = (Years::new(0.0), Years::new(5e7));
+    /// // The young disc's history rises with age, so its density is greatest at 50 Myr.
+    /// assert_eq!(young.max_pdf_between(lo, hi), young.pdf(hi));
+    /// assert!(young.pdf(lo) < young.pdf(hi));
+    /// # Ok::<(), hyperion_sim::galaxy::ages::BuildAgeDistributionError>(())
+    /// ```
+    #[must_use]
+    pub fn max_pdf_between(&self, lo: Years, hi: Years) -> f64 {
+        let (lo, hi) = (lo.value(), hi.value());
+        self.pieces
+            .iter()
+            .filter(|p| p.lo <= hi && lo <= p.hi)
+            .map(|p| p.weight * p.pdf(p.hi.min(hi)))
+            .fold(0.0, f64::max)
     }
 
     /// The probability that a system is younger than `age`.
@@ -498,9 +593,13 @@ impl AgeDistribution {
         )
     }
 
-    /// The ages where the density has a kink or a jump: every piece's ends, ascending, without
-    /// repeats.
-    pub(crate) fn edges(&self) -> Vec<f64> {
+    /// The ages where the density has a kink or a jump, years: every piece's ends, ascending,
+    /// without repeats.
+    ///
+    /// `pub` for `hyperion-sky` alone (the crate split, CS.T1); not part of the sim's API.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn edges(&self) -> Vec<f64> {
         let mut edges = Vec::with_capacity(2 * self.pieces.len());
         for piece in &self.pieces {
             if edges.last() != Some(&piece.lo) {
@@ -545,6 +644,10 @@ mod tests {
                 "young",
                 AgeDistribution::young_disc(gyr(7.0), FeatureShare::None).unwrap(),
             ),
+            (
+                "young field",
+                AgeDistribution::young_disc(gyr(7.0), FeatureShare::Phi).unwrap(),
+            ),
             ("nuclear", AgeDistribution::nuclear_disc()),
             (
                 "thick",
@@ -563,6 +666,47 @@ mod tests {
             ));
         }
         all
+    }
+
+    /// P09.T33.a: the greatest density over a range is the greatest of the pieces' own, at the
+    /// range's top or the piece's end, and no age of the range has a greater one. It may be the
+    /// right limit of a jump at the range's top, a bound that a piece starting there reaches.
+    #[test]
+    fn max_pdf_between_bounds_every_age_of_its_range() {
+        for (name, ages) in examples() {
+            let (lo, hi) = (ages.min().value(), ages.max().value());
+            for (a, b) in [
+                (lo, hi),
+                (lo, f64::midpoint(lo, hi)),
+                (0.3 * hi, 0.7 * hi),
+                (-5e9, 2e10),
+            ] {
+                let bound = ages.max_pdf_between(Years::new(a), Years::new(b));
+                let mut greatest = 0.0_f64;
+                for k in 0..=50_000 {
+                    let age = a + (b - a) * f64::from(k) / 50_000.0;
+                    let pdf = ages.pdf(Years::new(age));
+                    assert!(
+                        pdf <= bound,
+                        "{name}: {pdf} above {bound} at {age} in [{a}, {b}]"
+                    );
+                    greatest = greatest.max(pdf);
+                }
+                // The bound is reached, within the grid's step, where the range meets a piece, or,
+                // where a piece starts at the range's top, as its own density there: the young
+                // field's panels meet at whole megayears (P09.T2.c).
+                greatest = greatest.max(ages.pdf(Years::new(b.next_up())).min(bound));
+                assert!(
+                    greatest >= bound * (1.0 - 1e-3) || greatest == 0.0,
+                    "{name}: {greatest} < {bound}"
+                );
+            }
+            assert_eq!(
+                ages.max_pdf_between(Years::new(2e10), Years::new(3e10)),
+                0.0,
+                "{name}"
+            );
+        }
     }
 
     #[test]
@@ -698,6 +842,41 @@ mod tests {
         assert_same_bits(gap.pdf(Years::new(1.5)), 0.0);
         // A flat stretch of the distribution inverts to the start of the next piece.
         assert_same_bits(gap.quantile(0.5).value(), 2.0);
+    }
+
+    /// P09.T2.c: the young field's ages are the young disc's times `1 − φ` on its panels,
+    /// renormalised: each panel holds the budget's share times its `1 − φ`, over the born mean's
+    /// normalisation; its born share is the budget's; its ends are −H and 100 Myr; and a bad
+    /// timescale is refused as the budget's is.
+    #[test]
+    fn the_young_field_is_the_budget_times_one_less_phi() {
+        let tau = gyr(7.0);
+        let budget = AgeDistribution::young_disc(tau, FeatureShare::None).unwrap();
+        let field = AgeDistribution::young_disc(tau, FeatureShare::Phi).unwrap();
+        let share = YoungFieldShare::new(tau);
+        assert_eq!(field.min(), budget.min());
+        assert_eq!(field.max(), budget.max());
+        assert!((field.born_fraction() - budget.born_fraction()).abs() < 1e-15);
+        for (lo, hi, keep) in share.panels_years() {
+            let mass = |ages: &AgeDistribution| ages.cdf(Years::new(hi)) - ages.cdf(Years::new(lo));
+            let expected = mass(&budget) * keep / share.born_mean();
+            assert!(
+                (mass(&field) / expected - 1.0).abs() < 1e-9,
+                "[{lo}, {hi}]: {} against {expected}",
+                mass(&field)
+            );
+        }
+        // Nine in ten of the youngest are in their nurseries; the field's mean age is the older.
+        assert!(field.cdf(Years::new(3e7)) < 0.5 * budget.cdf(Years::new(3e7)));
+        assert!(field.mean() > budget.mean());
+        assert_eq!(
+            AgeDistribution::young_disc(Years::new(f64::INFINITY), FeatureShare::Phi),
+            Err(BuildAgeDistributionError::NonFinite)
+        );
+        assert_eq!(
+            AgeDistribution::young_disc(Years::new(-1.0), FeatureShare::Phi),
+            Err(BuildAgeDistributionError::TimescaleNotPositive)
+        );
     }
 
     #[test]

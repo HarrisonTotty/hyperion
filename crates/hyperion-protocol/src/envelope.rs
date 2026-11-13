@@ -14,10 +14,23 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::alerts::{
+    AlertsAcknowledgeRequest, AlertsNotification, AlertsObserverRequest, AlertsSubscribeRequest,
+    AlertsSubscribed,
+};
+use crate::features::{
+    BlackHoleState, BlackHoleStateRequest, FeatureDetail, FeatureDetailRequest, FeaturesInRange,
+    FeaturesInRangeRequest, GalaxyFeatures, GalaxyFeaturesRequest,
+};
 use crate::galaxy::{
-    DensityMap, DensityMapRequest, GalaxyParameters, GalaxyParametersRequest, SystemsInRange,
+    DensityMap, DensityMapRequest, ExtinctionMap, ExtinctionMapRequest, ExtinctionRequest,
+    ExtinctionResult, GalaxyParameters, GalaxyParametersRequest, SystemsInRange,
     SystemsInRangeRequest,
 };
+use crate::global_list::{
+    GlobalFeatures, GlobalFeaturesRequest, StreamTrackRequest, StreamTrackWire,
+};
+use crate::observe::{ResolveSystemRequest, ResolvedSystem};
 use crate::planetary::{
     BodyDetailDto, BodyDetailRequest, BodyEventsDto, BodyEventsRequest, SystemBodiesDto,
     SystemBodiesRequest,
@@ -27,9 +40,14 @@ use crate::scene::{
     SceneCamerasRequest, SceneNotificationDto, SceneShipRequest, SceneShipSet, SceneStateDto,
     SceneSubscribeRequest,
 };
-use crate::sky::{SkyRequest, SkyResponse};
+use crate::sky::{HostDiscsDto, HostDiscsRequest, SkyRequest, SkyResponse};
 use crate::stellar::{SystemSummaryDto, SystemSummaryRequest};
+use crate::surface::{SurfaceFieldDto, SurfaceFieldRequest, SurveyPassDto, SurveyPassRequest};
 use crate::universe::{CreateUniverseRequest, OpenUniverseRequest, UniverseInfo, UniverseList};
+use crate::viewer::{
+    ViewerDrawDto, ViewerInputsRequest, ViewerPlanetDto, ViewerPlanetRequest,
+    ViewerRandomizeRequest, ViewerReadDto,
+};
 
 /// A request's ID, chosen by the client and unique among its requests in flight.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
@@ -146,13 +164,15 @@ pub enum ServerMessage {
 
 /// What a subscription watches, tagged by `topic`: the topic's own request fields.
 ///
-/// Plan 12's P12.T9 adds `alerts`.
+/// Plan 12's P12.T9.a adds `alerts`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(tag = "topic", rename_all = "snake_case")]
 #[ts(export)]
 pub enum SubscriptionTopic {
     /// A universe's scene (rendering plan R03).
     Scene(SceneSubscribeRequest),
+    /// A sensor's alerts at an observer (plan 12, P12.T9.a).
+    Alerts(AlertsSubscribeRequest),
 }
 
 /// A subscription's whole state when it opens, tagged by `topic`, the same value as its request's
@@ -160,9 +180,16 @@ pub enum SubscriptionTopic {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(tag = "topic", rename_all = "snake_case")]
 #[ts(export)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "a state is made once per subscription and sent boxed in its answer \
+              (`ResponseBody::Subscribe`), so the scene's size costs the alerts nothing"
+)]
 pub enum SubscriptionState {
     /// The scene.
     Scene(SceneStateDto),
+    /// The alerts.
+    Alerts(AlertsSubscribed),
 }
 
 /// A notification's body, tagged by `topic`: what changed since the last push.
@@ -172,6 +199,8 @@ pub enum SubscriptionState {
 pub enum NotificationBody {
     /// The scene.
     Scene(SceneNotificationDto),
+    /// The alerts.
+    Alerts(AlertsNotification),
 }
 
 /// Opens a subscription (`subscribe`), answered by [`Subscribed`] with the topic's whole state;
@@ -231,9 +260,16 @@ pub enum ErrorCode {
     HelloRequired,
     /// No universe has the given ID.
     UnknownUniverse,
-    /// A well-formed system ID that names no system of the universe; `field` names the request's
-    /// field.
+    /// A well-formed system ID that names no system of the universe, or one that resolves but
+    /// cannot be placed yet (a member of the galactic centre, as `resolve_system` answers it);
+    /// `field` names the request's field.
     UnknownSystem,
+    /// A well-formed feature ID that names no feature of the universe at the request's time, or a
+    /// stream number its galaxy's global list has no stream for; `field` names the request's field
+    /// (galaxy plan 09, P09.T40.b, and plan 10, P10.T10.a).
+    ///
+    /// Like the other codes plan 04's reserved list names as growing, it was added without a bump.
+    UnknownFeature,
     /// A well-formed body ID that names no body of its system, or none the detail level asked for
     /// resolves; `field` names the request's field.
     UnknownBody,
@@ -292,6 +328,42 @@ pub enum RequestBody {
     SceneCameras(SceneCamerasRequest),
     /// The stars and the band seen from a point at a time, answered in bulk (rendering plan R06).
     Sky(SkyRequest),
+    /// A body's coarse field in the cells the ship has surveyed, answered in bulk (rendering plan
+    /// R09).
+    SurfaceField(SurfaceFieldRequest),
+    /// Record one survey pass of a body (rendering plan R09).
+    SurveyPass(SurveyPassRequest),
+    /// A map of the visual extinction through a universe's galaxy.
+    ExtinctionMap(ExtinctionMapRequest),
+    /// The extinction from one point to each of a list of targets.
+    Extinction(ExtinctionRequest),
+    /// One system by its ID at a time, now or as an observer receives it (plan 12).
+    ResolveSystem(ResolveSystemRequest),
+    /// The large features within range of a point at a time (plan 09).
+    FeaturesInRange(FeaturesInRangeRequest),
+    /// The features the galaxy map draws at a time (plan 09).
+    GalaxyFeatures(GalaxyFeaturesRequest),
+    /// One feature's structure at a time (plan 09).
+    FeatureDetail(FeatureDetailRequest),
+    /// The central black hole's state at a time (plan 09).
+    BlackHoleState(BlackHoleStateRequest),
+    /// Move an alerts subscription's observer (plan 12, P12.T9.a).
+    AlertsObserver(AlertsObserverRequest),
+    /// Acknowledge a contact on an alerts subscription (plan 12, P12.T9.a).
+    AlertsAcknowledge(AlertsAcknowledgeRequest),
+    /// The galaxy's global list: its centre, streams and dwarf cores, and its accreted
+    /// progenitors (plan 10).
+    GlobalFeatures(GlobalFeaturesRequest),
+    /// One stream's track (plan 10).
+    StreamTrack(StreamTrackRequest),
+    /// Generate one planet from its inputs (the planet viewer, rendering plan R15).
+    ViewerPlanet(ViewerPlanetRequest),
+    /// Draw a real planet's inputs from the galaxy (the planet viewer, rendering plan R15).
+    ViewerRandomize(ViewerRandomizeRequest),
+    /// A served planet's inputs, read back (the planet viewer, rendering plan R15).
+    ViewerInputs(ViewerInputsRequest),
+    /// A system's stars as discs at a time, on their own (rendering plans R06 and R07).
+    HostDiscs(HostDiscsRequest),
 }
 
 /// The answer to a request, with the same `kind` as the request it answers.
@@ -333,6 +405,42 @@ pub enum ResponseBody {
     // Boxed: the hosts' discs make it the largest answer but one.
     /// The sky computed, its stars and band in the binary frames before it.
     Sky(Box<SkyResponse>),
+    /// The body's coarse field, its cells in the binary frames before it, or why it has none.
+    SurfaceField(SurfaceFieldDto),
+    /// The survey pass recorded.
+    SurveyPass(SurveyPassDto),
+    /// The extinction map.
+    ExtinctionMap(ExtinctionMap),
+    /// The extinction to each target, in the request's order.
+    Extinction(ExtinctionResult),
+    // Boxed, as `SystemBodies` is: a range row is several times the size of most answers.
+    /// The system's row.
+    ResolveSystem(Box<ResolvedSystem>),
+    /// The features found, with their census.
+    FeaturesInRange(FeaturesInRange),
+    /// The map's features, kind by kind.
+    GalaxyFeatures(GalaxyFeatures),
+    // Boxed, as `BodyDetail` is: a summary and a structure make it one of the largest answers.
+    /// The feature and its structure.
+    FeatureDetail(Box<FeatureDetail>),
+    /// The black hole's state.
+    BlackHoleState(BlackHoleState),
+    /// The observer moved.
+    AlertsObserver,
+    /// The contact acknowledged.
+    AlertsAcknowledge,
+    /// The global list's entries and progenitors.
+    GlobalFeatures(GlobalFeatures),
+    /// The stream's track, or that it is pending.
+    StreamTrack(StreamTrackWire),
+    /// The planet generated.
+    ViewerPlanet(Box<ViewerPlanetDto>),
+    /// The planet's inputs drawn.
+    ViewerRandomize(Box<ViewerDrawDto>),
+    /// The planet's inputs read.
+    ViewerInputs(Box<ViewerReadDto>),
+    /// The system's stars' discs.
+    HostDiscs(HostDiscsDto),
 }
 
 /// The `kind` string of every [`RequestBody`] variant, which is also that of the
@@ -356,6 +464,23 @@ pub const REQUEST_KINDS: &[&str] = &[
     "scene_ship",
     "scene_cameras",
     "sky",
+    "surface_field",
+    "survey_pass",
+    "extinction_map",
+    "extinction",
+    "resolve_system",
+    "features_in_range",
+    "galaxy_features",
+    "feature_detail",
+    "black_hole_state",
+    "alerts_observer",
+    "alerts_acknowledge",
+    "global_features",
+    "stream_track",
+    "viewer_planet",
+    "viewer_randomize",
+    "viewer_inputs",
+    "host_discs",
 ];
 
 #[cfg(test)]
@@ -366,23 +491,33 @@ mod tests {
 
     use super::*;
     use crate::bulk::BulkManifestDto;
-    use crate::galaxy::{
-        Census, MapPopulation, MapView, MassLayer, ParameterGroup, SystemsInRange,
+    use crate::features::{
+        self, CloudStructure, FeatureKindWire, FeatureStructure, MapFeatureKindWire,
+        MapFeatureList, MapShells,
     };
+    use crate::galaxy::{
+        Census, ExtinctionTarget, MapPopulation, MapView, MassLayer, ParameterGroup, Population,
+        SystemRecord, SystemsInRange, TargetExtinction,
+    };
+    use crate::global_list::{self, TrackWire};
+    use crate::observe::QueryModeDto;
     use crate::orbit::HierarchyDto;
     use crate::planetary::{
         BodyKindDto, BodyRecordDto, BodyStateDto, DetailLevelDto, OrbitHostDto, SectionDto,
     };
     use crate::primitives::{
-        BodyIdHex, GalacticPosition, SeedHex, SystemIdHex, UniverseIdHex, UniverseTime,
+        BodyIdHex, FeatureIdHex, GalacticPosition, SeedHex, SystemIdHex, UniverseIdHex,
+        UniverseTime,
     };
     use crate::scene::{
         CameraReportDto, FramePositionDto, KinematicsDto, SceneClockDto, SceneClockStateDto,
     };
     use crate::sky::BandSpecDto;
     use crate::stellar::SystemExistenceDto;
+    use crate::surface::{CellRangeDto, RecordSectionDto, SurveyScopeDto, SurveySourceDto};
     use crate::testing::{assert_wire_form, assert_wire_strings};
     use crate::universe::UniverseStatus;
+    use crate::viewer;
 
     fn universe() -> UniverseIdHex {
         UniverseIdHex::from_u64(42)
@@ -403,6 +538,7 @@ mod tests {
             fe_h_dex: 0.0,
             stars: Vec::new(),
             hierarchy: HierarchyDto { nodes: Vec::new() },
+            observed: None,
         }
     }
 
@@ -438,6 +574,8 @@ mod tests {
             observer: GalacticPosition::default(),
             valid_until: UniverseTime::default(),
             cut_v: 9.5,
+            synthetic_ceiling_v: None,
+            real_limit_ly: None,
             census: Vec::new(),
             listed: 0,
             overflow: 0,
@@ -454,9 +592,40 @@ mod tests {
         }
     }
 
+    /// A moon's whole surveyed field, for the walk.
+    fn surface_field_request() -> SurfaceFieldRequest {
+        SurfaceFieldRequest {
+            universe: universe(),
+            body: BodyIdHex::from_parts(system().to_u64(), 0x0103),
+            have_revision: None,
+            scope: SurveyScopeDto::Live,
+        }
+    }
+
+    /// One orbit's survey of a moon's first 96 cells, for the walk.
+    fn survey_pass_request() -> SurveyPassRequest {
+        SurveyPassRequest {
+            universe: universe(),
+            body: BodyIdHex::from_parts(system().to_u64(), 0x0103),
+            from: UniverseTime::default(),
+            to: UniverseTime {
+                seconds: 5_400,
+                nanos: 0,
+            },
+            source: SurveySourceDto::Orbital,
+            resolution_m: 100.0,
+            cells: vec![CellRangeDto { start: 0, end: 96 }],
+            scope: SurveyScopeDto::Live,
+        }
+    }
+
     /// The request that follows `previous` in a walk over every variant, starting from `None`.
     ///
     /// The match has no wildcard, so a new variant fails to compile here until it joins the walk.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one arm per variant, each a whole request, and the walk must name them all"
+    )]
     fn next_request(previous: Option<&RequestBody>) -> Option<RequestBody> {
         let universe = universe();
         match previous {
@@ -491,6 +660,7 @@ mod tests {
                     min_layer: MassLayer::A,
                     limit: 5_000,
                     include_stellar: false,
+                    mode: QueryModeDto::Now,
                 }))
             }
             Some(RequestBody::SystemsInRange(_)) => {
@@ -498,6 +668,7 @@ mod tests {
                     universe,
                     system: system(),
                     time: UniverseTime::default(),
+                    mode: QueryModeDto::Now,
                 }))
             }
             Some(RequestBody::SystemSummary(_)) => {
@@ -550,7 +721,113 @@ mod tests {
                 }))
             }
             Some(RequestBody::SceneCameras(_)) => Some(RequestBody::Sky(sky_request())),
-            Some(RequestBody::Sky(_)) => None,
+            Some(RequestBody::Sky(_)) => Some(RequestBody::SurfaceField(surface_field_request())),
+            Some(RequestBody::SurfaceField(_)) => {
+                Some(RequestBody::SurveyPass(survey_pass_request()))
+            }
+            Some(RequestBody::SurveyPass(_)) => {
+                Some(RequestBody::ExtinctionMap(ExtinctionMapRequest {
+                    universe,
+                    view: MapView::FaceOn,
+                    resolution: 128,
+                    bits: 8,
+                }))
+            }
+            Some(RequestBody::ExtinctionMap(_)) => {
+                Some(RequestBody::Extinction(ExtinctionRequest {
+                    universe,
+                    origin: GalacticPosition::default(),
+                    time: UniverseTime::default(),
+                    targets: vec![ExtinctionTarget::System { id: system() }],
+                }))
+            }
+            Some(RequestBody::Extinction(_)) => {
+                Some(RequestBody::ResolveSystem(ResolveSystemRequest {
+                    universe,
+                    system: system(),
+                    time: UniverseTime::default(),
+                    mode: QueryModeDto::Observed {
+                        observer: GalacticPosition::default(),
+                    },
+                }))
+            }
+            Some(RequestBody::ResolveSystem(_)) => {
+                Some(RequestBody::FeaturesInRange(FeaturesInRangeRequest {
+                    universe,
+                    centre: GalacticPosition::default(),
+                    radius_ly: 1_000.0,
+                    time: UniverseTime::default(),
+                    kinds: vec![FeatureKindWire::OpenCluster],
+                }))
+            }
+            Some(RequestBody::FeaturesInRange(_)) => {
+                Some(RequestBody::GalaxyFeatures(GalaxyFeaturesRequest {
+                    universe,
+                    kinds: vec![MapFeatureKindWire::Globular],
+                    time: UniverseTime::default(),
+                }))
+            }
+            Some(RequestBody::GalaxyFeatures(_)) => {
+                Some(RequestBody::FeatureDetail(FeatureDetailRequest {
+                    universe,
+                    feature: FeatureIdHex::from_u64(features::tests::FEATURE),
+                    time: UniverseTime::default(),
+                }))
+            }
+            Some(RequestBody::FeatureDetail(_)) => {
+                Some(RequestBody::BlackHoleState(BlackHoleStateRequest {
+                    universe,
+                    time: UniverseTime::default(),
+                }))
+            }
+            Some(RequestBody::BlackHoleState(_)) => {
+                Some(RequestBody::AlertsObserver(AlertsObserverRequest {
+                    subscription: 2,
+                    observer: GalacticPosition::default(),
+                    time: UniverseTime::default(),
+                }))
+            }
+            Some(RequestBody::AlertsObserver(_)) => {
+                Some(RequestBody::AlertsAcknowledge(AlertsAcknowledgeRequest {
+                    subscription: 2,
+                    contact: 1,
+                }))
+            }
+            Some(RequestBody::AlertsAcknowledge(_)) => {
+                Some(RequestBody::GlobalFeatures(GlobalFeaturesRequest {
+                    universe,
+                }))
+            }
+            Some(RequestBody::GlobalFeatures(_)) => {
+                Some(RequestBody::StreamTrack(StreamTrackRequest {
+                    universe,
+                    stream: 0,
+                }))
+            }
+            Some(RequestBody::StreamTrack(_)) => {
+                Some(RequestBody::ViewerPlanet(ViewerPlanetRequest {
+                    universe,
+                    inputs: viewer::tests::earth(),
+                }))
+            }
+            Some(RequestBody::ViewerPlanet(_)) => {
+                Some(RequestBody::ViewerRandomize(ViewerRandomizeRequest {
+                    universe,
+                    draw_seed: SeedHex::from_u64(7),
+                }))
+            }
+            Some(RequestBody::ViewerRandomize(_)) => {
+                Some(RequestBody::ViewerInputs(ViewerInputsRequest {
+                    universe,
+                    body: BodyIdHex::from_parts(system().to_u64(), 0x0100),
+                }))
+            }
+            Some(RequestBody::ViewerInputs(_)) => Some(RequestBody::HostDiscs(HostDiscsRequest {
+                universe,
+                system: system(),
+                time: UniverseTime::default(),
+            })),
+            Some(RequestBody::HostDiscs(_)) => None,
         }
     }
 
@@ -578,12 +855,17 @@ mod tests {
                 figure: Some(SectionDto::NotResolved),
                 photometry: Some(SectionDto::NotResolved),
                 surface: SectionDto::NotResolved,
+                envelope: Some(SectionDto::NotResolved),
                 hooks: SectionDto::NotResolved,
             },
         }
     }
 
     /// The response that follows `previous` in a walk over every variant, as for requests.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one arm per variant, each a whole response, and the walk must name them all"
+    )]
     fn next_response(previous: Option<&ResponseBody>) -> Option<ResponseBody> {
         let universe = universe();
         match previous {
@@ -657,6 +939,8 @@ mod tests {
                 system: system(),
                 from: UniverseTime::default(),
                 to: UniverseTime::default(),
+                listed_from: UniverseTime::default(),
+                listed_to: UniverseTime::default(),
                 events: Vec::new(),
             })),
             Some(ResponseBody::BodyEvents(_)) => {
@@ -668,7 +952,137 @@ mod tests {
             })),
             Some(ResponseBody::SceneShip(_)) => Some(ResponseBody::SceneCameras),
             Some(ResponseBody::SceneCameras) => Some(ResponseBody::Sky(Box::new(sky_response()))),
-            Some(ResponseBody::Sky(_)) => None,
+            Some(ResponseBody::Sky(_)) => {
+                Some(ResponseBody::SurfaceField(SurfaceFieldDto::NotModelled {
+                    section: RecordSectionDto::Surface,
+                }))
+            }
+            Some(ResponseBody::SurfaceField(_)) => {
+                Some(ResponseBody::SurveyPass(SurveyPassDto { revision: 1 }))
+            }
+            Some(ResponseBody::SurveyPass(_)) => Some(ResponseBody::ExtinctionMap(ExtinctionMap {
+                universe,
+                view: MapView::EdgeOn,
+                width_px: 2,
+                height_px: 1,
+                centre_ly: [0.0, 0.0],
+                ly_per_px: 65_536.0,
+                bits: 8,
+                floor_log10_mag: -2.0,
+                ceiling_log10_mag: -2.0,
+                data_base64: "AAA=".to_owned(),
+            })),
+            Some(ResponseBody::ExtinctionMap(_)) => {
+                Some(ResponseBody::Extinction(ExtinctionResult {
+                    universe,
+                    origin: GalacticPosition::default(),
+                    time: UniverseTime::default(),
+                    targets: vec![TargetExtinction::NoSuchSystem],
+                }))
+            }
+            Some(ResponseBody::Extinction(_)) => {
+                Some(ResponseBody::ResolveSystem(Box::new(ResolvedSystem {
+                    universe,
+                    time: UniverseTime::default(),
+                    record: SystemRecord {
+                        id: system(),
+                        designation: "Vorth AB-C e4-17".to_owned(),
+                        position: GalacticPosition::default(),
+                        layer: MassLayer::E,
+                        initial_mass_msun: 11.25,
+                        age_myr: 7_250.5,
+                        population: Population::OldThinDisc,
+                        placement: None,
+                        velocity_km_s: [0.0; 3],
+                        stellar: None,
+                        fe_h_dex: None,
+                        observed: None,
+                        origin: None,
+                        member_class: None,
+                        supernova: None,
+                    },
+                })))
+            }
+            Some(ResponseBody::ResolveSystem(_)) => {
+                Some(ResponseBody::FeaturesInRange(FeaturesInRange {
+                    universe,
+                    centre: GalacticPosition::default(),
+                    radius_ly: 1_000.0,
+                    time: UniverseTime::default(),
+                    census: Vec::new(),
+                    features: Vec::new(),
+                }))
+            }
+            Some(ResponseBody::FeaturesInRange(_)) => {
+                Some(ResponseBody::GalaxyFeatures(GalaxyFeatures {
+                    universe,
+                    time: UniverseTime::default(),
+                    lists: vec![MapFeatureList::BrightShell(MapShells::NotGenerated)],
+                }))
+            }
+            Some(ResponseBody::GalaxyFeatures(_)) => {
+                Some(ResponseBody::FeatureDetail(Box::new(FeatureDetail {
+                    universe,
+                    time: UniverseTime::default(),
+                    feature: features::tests::star_forming_region(),
+                    structure: FeatureStructure::Cloud(CloudStructure {
+                        core_radius_ly: 25.0,
+                        central_density_per_cm3: 125.0,
+                    }),
+                })))
+            }
+            Some(ResponseBody::FeatureDetail(_)) => {
+                Some(ResponseBody::BlackHoleState(BlackHoleState {
+                    universe,
+                    time: UniverseTime::default(),
+                    id: SystemIdHex::from_u64(0xf000_0007_0000_0000),
+                    mass_msun: 4.25e6,
+                    luminosity: None,
+                    disruptions: Vec::new(),
+                }))
+            }
+            Some(ResponseBody::BlackHoleState(_)) => Some(ResponseBody::AlertsObserver),
+            Some(ResponseBody::AlertsObserver) => Some(ResponseBody::AlertsAcknowledge),
+            Some(ResponseBody::AlertsAcknowledge) => {
+                Some(ResponseBody::GlobalFeatures(GlobalFeatures {
+                    universe,
+                    entries: global_list::tests::entries(),
+                    progenitors: global_list::tests::progenitors(),
+                }))
+            }
+            Some(ResponseBody::GlobalFeatures(_)) => {
+                Some(ResponseBody::StreamTrack(StreamTrackWire {
+                    universe,
+                    stream: 0,
+                    track: TrackWire::Pending,
+                }))
+            }
+            Some(ResponseBody::StreamTrack(_)) => Some(ResponseBody::ViewerPlanet(Box::new(
+                viewer::tests::planet(),
+            ))),
+            Some(ResponseBody::ViewerPlanet(_)) => {
+                Some(ResponseBody::ViewerRandomize(Box::new(ViewerDrawDto {
+                    universe,
+                    draw_seed: SeedHex::from_u64(7),
+                    inputs: viewer::tests::earth(),
+                    source: BodyIdHex::from_parts(system().to_u64(), 0x0100),
+                })))
+            }
+            Some(ResponseBody::ViewerRandomize(_)) => {
+                Some(ResponseBody::ViewerInputs(Box::new(ViewerReadDto {
+                    universe,
+                    body: BodyIdHex::from_parts(system().to_u64(), 0x0100),
+                    inputs: viewer::tests::earth(),
+                    multiple_stars: false,
+                })))
+            }
+            Some(ResponseBody::ViewerInputs(_)) => Some(ResponseBody::HostDiscs(HostDiscsDto {
+                universe,
+                system: system(),
+                time: UniverseTime::default(),
+                hosts: Vec::new(),
+            })),
+            Some(ResponseBody::HostDiscs(_)) => None,
         }
     }
 
@@ -895,6 +1309,7 @@ mod tests {
             (ErrorCode::HelloRequired, "hello_required"),
             (ErrorCode::UnknownUniverse, "unknown_universe"),
             (ErrorCode::UnknownSystem, "unknown_system"),
+            (ErrorCode::UnknownFeature, "unknown_feature"),
             (ErrorCode::UnknownBody, "unknown_body"),
             (
                 ErrorCode::GeneratorVersionMismatch,
@@ -954,6 +1369,23 @@ mod tests {
                 "scene_ship",
                 "scene_cameras",
                 "sky",
+                "surface_field",
+                "survey_pass",
+                "extinction_map",
+                "extinction",
+                "resolve_system",
+                "features_in_range",
+                "galaxy_features",
+                "feature_detail",
+                "black_hole_state",
+                "alerts_observer",
+                "alerts_acknowledge",
+                "global_features",
+                "stream_track",
+                "viewer_planet",
+                "viewer_randomize",
+                "viewer_inputs",
+                "host_discs",
             ]
         );
     }
@@ -1106,6 +1538,91 @@ mod tests {
         );
     }
 
+    /// `host_discs`, answered in JSON alone: its body is its request's or its discs' beside `kind`.
+    #[test]
+    fn host_discs_wire_forms() {
+        let system = SystemIdHex::from_u64(0x0200_0800_2000_0000);
+        assert_wire_form(
+            &RequestBody::HostDiscs(HostDiscsRequest {
+                universe: universe(),
+                system: system.clone(),
+                time: UniverseTime::default(),
+            }),
+            json!({
+                "kind": "host_discs",
+                "universe": "000000000000002a",
+                "system": "0200080020000000",
+                "time": { "seconds": 0, "nanos": 0 },
+            }),
+        );
+        assert_wire_form(
+            &ResponseBody::HostDiscs(HostDiscsDto {
+                universe: universe(),
+                system,
+                time: UniverseTime::default(),
+                hosts: Vec::new(),
+            }),
+            json!({
+                "kind": "host_discs",
+                "universe": "000000000000002a",
+                "system": "0200080020000000",
+                "time": { "seconds": 0, "nanos": 0 },
+                "hosts": [],
+            }),
+        );
+    }
+
+    /// Rendering plan R09's kinds: the field's own `state` tag sits beside the body's `kind`.
+    #[test]
+    fn surface_field_and_survey_pass_wire_forms() {
+        assert_wire_form(
+            &RequestBody::SurfaceField(SurfaceFieldRequest {
+                universe: universe(),
+                body: BodyIdHex::from_parts(system().to_u64(), 0x0103),
+                have_revision: Some(2),
+                scope: SurveyScopeDto::Live,
+            }),
+            json!({
+                "kind": "surface_field",
+                "universe": "000000000000002a",
+                "body": "0200080020000000.0103",
+                "have_revision": 2,
+            }),
+        );
+        assert_wire_form(
+            &ResponseBody::SurfaceField(SurfaceFieldDto::NotModelled {
+                section: RecordSectionDto::Surface,
+            }),
+            json!({ "kind": "surface_field", "state": "not_modelled", "section": "surface" }),
+        );
+        assert_wire_form(
+            &RequestBody::SurveyPass(SurveyPassRequest {
+                universe: universe(),
+                body: BodyIdHex::from_parts(system().to_u64(), 0x0103),
+                from: UniverseTime::default(),
+                to: UniverseTime::default(),
+                source: SurveySourceDto::Landed,
+                resolution_m: 0.004,
+                cells: vec![CellRangeDto { start: 5, end: 8 }],
+                scope: SurveyScopeDto::Live,
+            }),
+            json!({
+                "kind": "survey_pass",
+                "universe": "000000000000002a",
+                "body": "0200080020000000.0103",
+                "from": { "seconds": 0, "nanos": 0 },
+                "to": { "seconds": 0, "nanos": 0 },
+                "source": "landed",
+                "resolution_m": 0.004,
+                "cells": [{ "start": 5, "end": 8 }],
+            }),
+        );
+        assert_wire_form(
+            &ResponseBody::SurveyPass(SurveyPassDto { revision: 4 }),
+            json!({ "kind": "survey_pass", "revision": 4 }),
+        );
+    }
+
     #[test]
     fn notification_wire_form() {
         assert_wire_form(
@@ -1118,6 +1635,7 @@ mod tests {
                     arrival: None,
                     bodies: Vec::new(),
                     craft: None,
+                    surface_revisions: None,
                 }),
             },
             json!({

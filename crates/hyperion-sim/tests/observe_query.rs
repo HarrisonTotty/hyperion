@@ -48,7 +48,7 @@ impl StarsCache for KeepStars<'_> {
         f(self
             .kept
             .entry(record.id())
-            .or_insert_with(|| stars_of(galaxy, interiors, record)))
+            .or_insert_with(|| stars_of(galaxy, interiors, record).unwrap()))
     }
 }
 

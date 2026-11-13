@@ -10,8 +10,11 @@ use tokio::sync::watch;
 use crate::AppState;
 use crate::cache::LruCounters;
 use crate::compute::{
-    BodyCacheCounters, GalaxyCounters, PoolCounters, SkyCellCounters, SkyTablesCounters,
+    BodyCacheCounters, EnvelopeFileCounters, GalaxyCounters, PoolCounters, SkyCellCounters,
+    SkyTablesCounters,
 };
+use crate::requests::SkyFileCounters;
+use crate::surface::SurfaceCounters;
 
 /// A snapshot of the server's activity.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
@@ -28,6 +31,18 @@ pub struct ServerStats {
     briefs: LruCounters,
     sky_cells: SkyCellCounters,
     sky_tables: SkyTablesCounters,
+    sky_replies: LruCounters,
+    sky_files: SkyFileCounters,
+    surface: SurfaceCounters,
+    extinction_maps: LruCounters,
+    sightlines: LruCounters,
+    feature_cells: LruCounters,
+    cluster_models: LruCounters,
+    class_cells: LruCounters,
+    galaxy_features: LruCounters,
+    global_lists: LruCounters,
+    tube_tables: LruCounters,
+    envelope_files: EnvelopeFileCounters,
 }
 
 impl ServerStats {
@@ -47,6 +62,18 @@ impl ServerStats {
             briefs: state.briefs.counters(),
             sky_cells: state.sky_cells.counters(),
             sky_tables: state.sky_tables.counters(),
+            sky_replies: state.sky_replies.counters(),
+            sky_files: state.sky_files.counters(),
+            surface: state.surface.counters(),
+            extinction_maps: state.extinction_maps.counters(),
+            sightlines: state.sightlines.counters(),
+            feature_cells: state.feature_cells.counters(),
+            cluster_models: state.cluster_models.counters(),
+            class_cells: state.class_cells.counters(),
+            galaxy_features: state.galaxy_features.counters(),
+            global_lists: state.global_lists.counters(),
+            tube_tables: state.global_lists.tube_counters(),
+            envelope_files: state.tube_tables.envelope_file_counters(),
         }
     }
 
@@ -130,6 +157,95 @@ impl ServerStats {
     #[must_use]
     pub fn sky_tables(&self) -> SkyTablesCounters {
         self.sky_tables
+    }
+
+    /// The kept skies' final replies and their use, including their byte budget: a hit is a sky
+    /// asked again exactly, answered with no sky job (rendering plan R06, R06.T11.l). All zeros
+    /// with `--keep-skies=false`.
+    #[must_use]
+    pub fn sky_replies(&self) -> LruCounters {
+        self.sky_replies
+    }
+
+    /// The kept skies' files' contents and use, under the data directory: the same final replies,
+    /// which a sky asked again after a restart is answered with (rendering plan R06, R06.T11.n).
+    /// All zeros with `--keep-skies=false`, `--kept-skies-disk 0` or `--serve-sky=false`.
+    #[must_use]
+    pub fn sky_files(&self) -> SkyFileCounters {
+        self.sky_files
+    }
+
+    /// The surface service's cache's contents and use, including its byte budget, and the coarse
+    /// passes computed: requests for one body's field at once share one pass, and a field asked
+    /// again is a hit (rendering plan R09, R09.T17).
+    #[must_use]
+    pub fn surface(&self) -> SurfaceCounters {
+        self.surface
+    }
+
+    /// The extinction map cache's contents and use, including its byte budget: a repeated
+    /// `extinction_map` for one raster is a hit and computes nothing (plan 07, P07.T10.a).
+    #[must_use]
+    pub fn extinction_maps(&self) -> LruCounters {
+        self.extinction_maps
+    }
+
+    /// The sightline cache's contents and use, including its byte budget: a repeated
+    /// `extinction` to one target marches no step (plan 07, P07.T10.c).
+    #[must_use]
+    pub fn sightlines(&self) -> LruCounters {
+        self.sightlines
+    }
+
+    /// The feature cell cache's contents and use, including its byte budget: a query near a
+    /// feature reads its cells there (plan 09, P09.T40.a).
+    #[must_use]
+    pub fn feature_cells(&self) -> LruCounters {
+        self.feature_cells
+    }
+
+    /// The cluster model cache's contents and use, including its byte budget: a feature's
+    /// interior is built once and lent to every query and request that reads its members or its
+    /// structure (plan 09, P09.T40.a).
+    #[must_use]
+    pub fn cluster_models(&self) -> LruCounters {
+        self.cluster_models
+    }
+
+    /// The catalogue class cell cache's contents and use, including its byte budget: a class cell is
+    /// made once and read by every range query within its class's reach (plan 09, P09.T40).
+    #[must_use]
+    pub fn class_cells(&self) -> LruCounters {
+        self.class_cells
+    }
+
+    /// The galaxy map's feature lists' contents and use, including their byte budget: a galaxy's
+    /// globulars are found once and kept (plan 09, P09.T40.b).
+    #[must_use]
+    pub fn galaxy_features(&self) -> LruCounters {
+        self.galaxy_features
+    }
+
+    /// The global lists' contents and use, including their byte budget: a galaxy's list is built
+    /// once and kept (plan 10, P10.T10.a).
+    #[must_use]
+    pub fn global_lists(&self) -> LruCounters {
+        self.global_lists
+    }
+
+    /// The streams' tube tables' contents and use, including their byte budget: each built once,
+    /// by an open's warm-up or the first request that reads it, and kept (plan 10, P10.T10.b).
+    #[must_use]
+    pub fn tube_tables(&self) -> LruCounters {
+        self.tube_tables
+    }
+
+    /// The streams' envelopes' files' size and use, under the data directory: each table's
+    /// envelope written as it is kept, and read back when its galaxy's list is built again
+    /// (perf-range-envelopes-on-disk).
+    #[must_use]
+    pub fn envelope_files(&self) -> EnvelopeFileCounters {
+        self.envelope_files
     }
 }
 

@@ -308,10 +308,20 @@ describe("the strokes changed here and --surface-2 (decision-thin-line-contrast,
       ".galaxy-pages__tab:hover",
       ".system-list__row:hover",
       '.system-list__row[aria-selected="true"]',
+      // The alert list's rows hold text alone there: `--status-advisory` at 6.60:1 and, stale,
+      // `--text-muted` at 6.04:1, each scored on its pair (plan 12, P12.T12).
+      ".alert-list__row:hover",
+      '.alert-list__row[aria-selected="true"]',
       ".body-list__row:hover",
       '.body-list__row[aria-selected="true"]',
+      ".event-list__row:hover",
+      '.event-list__row[aria-selected="true"]',
       ".view-list__row:hover",
       '.view-list__row[aria-selected="true"]',
+      // An instrument's place's tabs, as GALAXY's, and the held-back GROUND's reason over the place:
+      // `--text-muted` text, 6.04:1 on `--surface-2`, with no stroke of these under them (R10.T12.d).
+      ".view-place__tab:hover",
+      ".view-place__reason",
     ]);
   });
 

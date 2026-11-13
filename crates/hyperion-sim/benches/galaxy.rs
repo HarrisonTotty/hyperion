@@ -14,6 +14,20 @@
 //! - `FeatureCatalogue::cell` of an inner-disc feature cell, 10 ms, and the walk of every
 //!   globular, 0.3 s (plan 09, P09.T3.c). Until phase 3 supplies their density the globular walk
 //!   visits 32,768 empty cells.
+//! - `global_list::discrete_share` from in-plane tables, of the Milky Way fixture, which has one
+//!   recent progenitor, and of the first sweep galaxy, which has eight, as a drawn galaxy has on
+//!   average: about 1.3 ms and 10 ms (plan 10, P10.T3.d.a, restated from "under a millisecond").
+//! - `GlobalList::build` of the Milky Way fixture, its centre's model, debris and shell orbits
+//!   included: about a second (plan 10, P10.T4); 1.55 s on a pod (8 vCPU) as first built, most of
+//!   it the shell orbits. Its performance pass, output bit for bit (pod, 16 vCPU, before and
+//!   after): 779 and 486 ms, the shell orbits stepped side by side, from 98 to 49.5 ns a step,
+//!   and an orphan's rejected attempt skipping its apocentre, the debris from 158 to 110 ms; with
+//!   the centre's model held, 669 and 376 ms; sweep galaxies 0 and 1, 634 and 408 ms, and 1.94 and
+//!   1.13 s.
+//! - `Spray::tracers` of the fixture's stream 0, a living globular's, and stream 4, the first
+//!   orphan's, 2,000 tracers each (plan 10, P10.T5.b), under P10.T6.c's 0.2 s of parallel wall time
+//!   for a tube: 3.28 and 2.24 s, then 1.96 and 1.33 s with the tracers stepped side by side,
+//!   bit for bit (pod, 16 vCPU).
 
 use std::hint::black_box;
 use std::time::Duration;
@@ -206,7 +220,89 @@ fn features(c: &mut Criterion) {
     group.finish();
 }
 
+/// The halo's discrete share, from a galaxy's parameters, seed and in-plane tables (plan 10,
+/// P10.T3.d.a): of the Milky Way fixture, about 1.3 ms, and of the first sweep galaxy of
+/// T3.d.a's summary, whose eight recent progenitors cost most of its 10 ms in their epoch states
+/// (pod, 4 vCPU). Then whole lists (P10.T4), each time on a fresh copy of the galaxy: the
+/// fixture's, whose centre the list reads and builds; the fixture's with its centre built already,
+/// as a server's galaxy cache holds it; and the lists of the first two sweep galaxies, of 219 and
+/// 751 entries, centres included. Then the fixture's sprays (P10.T5) of a living globular's stream
+/// and of an orphan's, their 2,000 tracers each.
+fn global_list(c: &mut Criterion) {
+    use hyperion_sim::galaxy::global_list::spray::{Spray, SprayForce, SprayParams};
+    use hyperion_sim::galaxy::global_list::{GlobalList, discrete_share};
+    let params = GalaxyParams::milky_way_like();
+    let tables = PotentialTables::in_plane(&MassModel::new(&params));
+    let sweep = Seed::new(0x0a10_3d00_0000_0000);
+    let drawn = GalaxyParams::from_seed(sweep, MassFunctionKind::default());
+    let drawn_tables = PotentialTables::in_plane(&MassModel::new(&drawn));
+    let mut group = c.benchmark_group("global_list");
+    group.bench_function("discrete_share", |b| {
+        b.iter(|| discrete_share(black_box(Seed::new(7)), black_box(&params), &tables));
+    });
+    group.bench_function("discrete_share (sweep galaxy 0)", |b| {
+        b.iter(|| discrete_share(black_box(sweep), black_box(&drawn), &drawn_tables));
+    });
+    let galaxy = Galaxy::from_params(Seed::new(7), params)
+        .expect("the Milky Way fixture's gas is mostly neutral")
+        .with_full_potential();
+    group.sample_size(10);
+    group.measurement_time(Duration::from_secs(30));
+    group.bench_function("GlobalList::build", |b| {
+        b.iter_batched(
+            || galaxy.clone(),
+            |g| GlobalList::build(black_box(&g)),
+            BatchSize::LargeInput,
+        );
+    });
+    let held = galaxy.clone();
+    held.centre().expect("the fixture's centre builds");
+    group.bench_function("GlobalList::build (centre held)", |b| {
+        b.iter_batched(
+            || held.clone(),
+            |g| GlobalList::build(black_box(&g)),
+            BatchSize::LargeInput,
+        );
+    });
+    for n in 0..2 {
+        let seed = Seed::new(sweep.get() | n);
+        let drawn = Galaxy::from_params(
+            seed,
+            GalaxyParams::from_seed(seed, MassFunctionKind::default()),
+        )
+        .expect("a drawn galaxy builds")
+        .with_full_potential();
+        group.bench_function(format!("GlobalList::build (sweep galaxy {n})"), |b| {
+            b.iter_batched(
+                || drawn.clone(),
+                |g| GlobalList::build(black_box(&g)),
+                BatchSize::LargeInput,
+            );
+        });
+    }
+    let list = GlobalList::build(&galaxy);
+    let tables = galaxy.potential();
+    let force = SprayForce::new(tables).expect("the fixture has the full potential");
+    for (n, what) in [(0, "a living globular's"), (4, "the first orphan's")] {
+        let spec = &list.debris().streams()[n];
+        let spray = Spray::new(galaxy.seed(), &force, tables, spec, &SprayParams::default())
+            .expect("a specification's stripping time is finite");
+        group.bench_function(format!("Spray::tracers (stream {n}, {what})"), |b| {
+            b.iter(|| black_box(&spray).tracers());
+        });
+    }
+    group.finish();
+}
+
 criterion_group!(
-    galaxy, potential, params, fields, bounds, handle, map, features
+    galaxy,
+    potential,
+    params,
+    fields,
+    bounds,
+    handle,
+    map,
+    features,
+    global_list
 );
 criterion_main!(galaxy);

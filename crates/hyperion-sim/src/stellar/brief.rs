@@ -1,9 +1,24 @@
-//! A range query's brief of a system, routed by what its primary is (plan 06, P06.T38.e; rulings
-//! 89, 90 and 99).
+//! A range query's brief of a system, routed by whether its pair can have changed its primary
+//! (plan 11, P11.T11.a) and by what that primary is (plan 06, P06.T38.e; rulings 89, 90 and 99).
 //!
-//! A range row's [`StellarBrief`] needs the primary's state at the query's time and the system's
-//! star count, and nothing else of the system: no companion's model, no orbit, no photometry. The
-//! [`BriefModel`] builds only that, by the cheapest of three routes:
+//! A range row's [`StellarBrief`] needs the primary's state at the query's time, as the system's
+//! summary gives it ([`SystemStars::brief_at`]), and the system's star count, and nothing else of
+//! the system: no companion's state, no orbit, no photometry. The [`BriefModel`] builds only that.
+//!
+//! **The gate** (P11.T11.a; `decision-observed-class-findings.md` §A). The model first decides
+//! whether the primary is certainly its own single-star model at every time of the clock window.
+//! It is if the system is single (plan 11's count-only draw,
+//! [`draw_star_count`](crate::stellar::multiplicity::draw_star_count), is 1), or if no pair of two
+//! stars in the system's first redraw attempt (attempt 0 of P11.T16's
+//! [`hierarchy_bound`](crate::stellar::multiplicity::hierarchy_bound)) can change its stars or be
+//! carved: then the generator keeps that attempt and the binary engine reaches no state of the
+//! primary. That is every such pair of the attempt: a supernova that unbinds any pair changes what
+//! the system shows (P11.T10), and for a grid system a carved one would have the system redrawn
+//! (P11.T7) and the primary might be in another pair at the attempt kept. A pair
+//! passes where plan 11's census bound
+//! ([`pair_light_bound`](crate::stellar::binary::pair_light_bound)) calls it `Detached` over the
+//! window's ages and at most one of its stars may have left its main sequence by their end. A
+//! certified primary takes the cheapest of three routes, which run no engine:
 //!
 //! - **The fate table** ([`BriefRoute::Table`]): a primary the fate table ([`FittedFates`]) finds
 //!   dead through the whole clock window, by its death age's bound, is its remnant's closed form
@@ -19,45 +34,58 @@
 //!   rows in ten near the Sun.
 //! - **Exact** ([`BriefRoute::Exact`]): below 0.1 M☉, P06.T13's cooling fits; for a star the table
 //!   found dead but whose guard failed, its exact remnant from a build to its death that keeps no
-//!   other segment; and otherwise its [`StarModel`], as
-//!   [`SystemStars::generate`](crate::stellar::system::SystemStars::generate) builds it.
+//!   other segment; and otherwise its [`StarModel`], as [`SystemStars::generate`] builds it. A
+//!   record whose class constrains its primary's kick (plan 08's retained and displaced
+//!   remnants, P08.T12.c) takes this route and no other: its model is the kick loop's kept
+//!   attempt, whose remnant the table and the remnant build, at the record's own attempt, need
+//!   not give.
 //!
-//! The star count comes from [`draw_star_count`], plan 11's count-only draw, which equals the
-//! hierarchy's count at the first redraw attempt for every system and builds no orbit for a
-//! single one. It runs no binary engine, so for the grid systems that
-//! [`SystemStars::generate`](crate::stellar::system::SystemStars::generate) redraws because a pair
-//! fell into a carved class (P11.T7, about 10⁻⁴ of them) it is the first attempt's count, which
-//! may differ from the kept attempt's (plan 11's Risks, "Deviations in P11.T7, as built"). The
-//! composition and the primary's draws are the ones
-//! [`SystemStars::generate`](crate::stellar::system::SystemStars::generate) reads, from the same
-//! streams; a main-sequence primary reads η alone, the one draw its state and class depend on.
+//! Every other system takes **the paired route** ([`BriefRoute::Paired`]): its [`SystemStars`],
+//! binary engine included, whose brief is the summary's primary by construction, a redrawn
+//! system's included.
 //!
-//! The exact and main-sequence routes give the brief
-//! [`SystemStars::brief_at`](crate::stellar::system::SystemStars::brief_at) gives, bit for bit: a
-//! brief is `StellarBrief::of` the same state, composition, draws and count. A [`BriefModel`]
-//! holds epoch state only and is the same whatever was asked before, so a server may cache it by
-//! system.
+//! The star count is the first redraw attempt's: 1 for a system the count-only draw finds single
+//! from its count words, and otherwise the count of the attempt the gate draws, which is
+//! `draw_star_count`'s, so that no hierarchy is drawn twice and none for a single star. A
+//! certified system keeps that attempt, so its count is the kept one; for the grid
+//! systems that [`SystemStars::generate`] redraws because a pair fell into a carved class (P11.T7,
+//! about 10⁻⁴ of them, every one on the paired route) it is the first attempt's, which may differ
+//! from the kept attempt's (plan 11's Risks, "Deviations in P11.T7, as built"). A system that a
+//! supernova has unbound, always on the paired route, counts the stars it shows then
+//! (`SystemStars::shown_at`, P11.T10). The composition and
+//! the primary's draws are the ones [`SystemStars::generate`] reads, from the same streams; a
+//! main-sequence primary reads η alone, the one draw its state and class depend on.
+//!
+//! The exact, main-sequence and paired routes give the brief [`SystemStars::brief_at`] gives, bit
+//! for bit, the paired route with the first attempt's count: a brief is `StellarBrief::of` the same
+//! state, composition, draws and count. A [`BriefModel`] holds epoch state only and is the same
+//! whatever was asked before, so a server may cache it by system.
 
 use crate::galaxy::Galaxy;
+use crate::galaxy::catalogue_classes::system_of_record;
 use crate::galaxy::features::members::{FeatureInteriorCache, MemberRecord, resolve_member};
-use crate::galaxy::placement::{SystemOrigin, SystemRecord};
-use crate::id::SystemIdKind;
+use crate::galaxy::global_list::members::GlobalMemberRecord;
+use crate::galaxy::placement::{ResolveSystemError, SystemOrigin, SystemRecord, is_helium_donor};
+use crate::id::{BodyId, SystemIdKind};
 use crate::math;
 use crate::rng::Mark;
 use crate::stellar::Composition;
+use crate::stellar::binary::pair_keeps_own_models;
 use crate::stellar::classify::ClassExtras;
 use crate::stellar::draws::{StandardNormal, StarDraws, StarDrawsParts, UnitUniform};
 use crate::stellar::fates::{FateRoute, FittedFate, FittedFates, stripped_mark_matters};
-use crate::stellar::multiplicity::{draw_star_count, draw_star_count_of_composition};
+use crate::stellar::multiplicity::{KeptPrimary, MultiplicityContext, drawn_single, first_attempt};
 use crate::stellar::remnant::NeutronStar;
 use crate::stellar::remnant::collapse::RemnantDraws;
 use crate::stellar::remnant::wd_spectral::white_dwarf_type;
+use crate::stellar::rules::StellarRules;
 use crate::stellar::sse::{
     MAX_INITIAL_MASS, MIN_INITIAL_MASS, RemnantModel, Track, TrackOptions, remnant_of,
 };
 use crate::stellar::system::{
-    GRID_ATTEMPT, StarModel, StellarBrief, draw_metallicity, grid_multiplicity, primary_draws,
-    primary_eta, primary_rotation_draws,
+    GRID_ATTEMPT, Pulses, Shown, StarModel, StarStreams, StellarBrief, SystemStars,
+    draw_metallicity, grid_multiplicity, primary_draws, primary_eta, primary_model,
+    primary_rotation_draws,
 };
 use crate::stellar::{Phase, StarState};
 use crate::time::{ClockWindow, UniverseTime};
@@ -74,6 +102,9 @@ pub enum BriefRoute {
     Table,
     /// The primary's [`StarModel`]: the cooling fits below 0.1 M☉, and otherwise its track.
     Exact,
+    /// A system whose pair may have changed its primary, or that the grid may redraw (P11.T11.a):
+    /// its [`SystemStars`], binary engine included, read as its summary reads them.
+    Paired,
 }
 
 /// The stated error of a table-routed brief at one time: the least and greatest log₁₀ L ÷ L☉
@@ -88,16 +119,18 @@ pub struct StatedError {
     pub effective_temperature: (f64, f64),
 }
 
-/// What a range query's row needs of one grid system at any clock time: its primary, by the
-/// cheapest of the module's routes, and its star count (plan 06, P06.T38.e).
+/// What a range query's row needs of one grid system at any clock time: its primary as the
+/// system's summary has it, by the cheapest of the module's routes, and its star count (plan 06,
+/// P06.T38.e; plan 11, P11.T11.a).
 ///
 /// It holds epoch state and nothing that depends on a time asked about, so it can be cached by
 /// system and asked about any time of the clock window.
 ///
 /// # Examples
 ///
-/// The brief of each system of a cell at the solar circle has the full system's kind and class,
-/// and is the full system's bit for bit unless the fate table gave it:
+/// The brief of each system of a cell at the solar circle has the kind and class of its
+/// summary's primary, whatever the primary's companion has made of it, and is the full system's
+/// brief bit for bit unless the fate table gave it:
 ///
 /// ```
 /// use hyperion_sim::Seed;
@@ -114,15 +147,16 @@ pub struct StatedError {
 /// for record in cell.iter().take(20) {
 ///     let model = BriefModel::new(&galaxy, record);
 ///     let brief = model.brief_at(UniverseTime::EPOCH).ok_or("formed")?;
-///     let full = SystemStars::generate(&galaxy, record)
-///         .brief_at(UniverseTime::EPOCH)
-///         .ok_or("formed")?;
+///     let stars = SystemStars::generate(&galaxy, record);
+///     let summary = stars.summary_at(UniverseTime::EPOCH);
+///     let primary = summary.stars().first().ok_or("a primary")?;
 ///     assert_eq!(
 ///         (brief.kind(), brief.class().to_string()),
-///         (full.kind(), full.class().to_string())
+///         (primary.kind(), primary.classification().to_string())
 ///     );
+///     // A system the grid redrew would count its first attempt's stars, which none of these is.
 ///     if model.route() != BriefRoute::Table {
-///         assert_eq!(brief, full);
+///         assert_eq!(Some(brief), stars.brief_at(UniverseTime::EPOCH));
 ///     }
 /// }
 /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -131,6 +165,8 @@ pub struct StatedError {
 pub struct BriefModel {
     primary: Primary,
     star_count: u8,
+    /// The galaxy's stellar rules, which the primary's class reads on every route.
+    rules: StellarRules,
 }
 
 /// A [`BriefModel`]'s primary.
@@ -164,8 +200,11 @@ enum Primary {
         /// The age at which the remnant formed, years since the onset of collapse.
         birth: f64,
     },
-    /// [`BriefRoute::Exact`].
-    Exact(Box<StarModel>),
+    /// [`BriefRoute::Exact`], with the streams of the primary's body, from which its thermal
+    /// pulses are opened for its class (P06.T24.b).
+    Exact(Box<StarModel>, StarStreams),
+    /// [`BriefRoute::Paired`]: the system's stars.
+    Paired(Box<SystemStars>),
 }
 
 /// The factor on the fate table's validated bounds by which its stated error, and the margin by
@@ -203,7 +242,7 @@ const WHITE_DWARF_CORNERS: [(f64, f64, f64); 9] = [
 
 /// An iron core's corners: its death age and its two cores; its remnant's kind is decided by the
 /// cores alone.
-const IRON_CORE_CORNERS: [(f64, f64, f64); 9] = WHITE_DWARF_CORNERS;
+pub(crate) const IRON_CORE_CORNERS: [(f64, f64, f64); 9] = WHITE_DWARF_CORNERS;
 
 impl BriefModel {
     /// The brief model of the grid system `record` in `galaxy`: a star system's, or a free-floating
@@ -211,10 +250,12 @@ impl BriefModel {
     ///
     /// # Panics
     ///
-    /// As [`SystemStars::generate`](crate::stellar::system::SystemStars::generate) does: for a
-    /// record of another galaxy, and for a rogue planet, whose mass is below the stellar stage's
-    /// and which has no brief (plan 13, P13.T5.d); a caller checks
-    /// [`SystemRecord::kind`](crate::galaxy::placement::SystemRecord::kind) first.
+    /// - As [`SystemStars::generate`] does: for a record of another galaxy, and for a rogue
+    ///   planet, whose mass is below the stellar stage's and which has no brief (plan 13,
+    ///   P13.T5.d); a caller checks [`SystemRecord::kind`] first.
+    /// - As [`pair_light_bound`](crate::stellar::binary::pair_light_bound), which the gate reads for
+    ///   a multiple system, if a committed pair-light table cannot be read: a broken invariant,
+    ///   which `hyperion-fit check` and the tests rule out.
     #[must_use]
     pub fn new(galaxy: &Galaxy, record: &SystemRecord) -> Self {
         Self::with_fates(galaxy, record, &FittedFates::generator())
@@ -225,12 +266,65 @@ impl BriefModel {
     ///
     /// # Panics
     ///
-    /// As [`BriefModel::new`]: for a record of another galaxy, and for a rogue planet.
+    /// As [`BriefModel::new`]: for a record of another galaxy, for a rogue planet, and if a
+    /// committed pair-light table cannot be read.
     #[must_use]
     pub fn with_fates(galaxy: &Galaxy, record: &SystemRecord, fates: &FittedFates<'_>) -> Self {
         let composition = draw_metallicity(galaxy, record);
-        let star_count = draw_star_count(galaxy, record, grid_multiplicity(record), GRID_ATTEMPT);
-        Self::build(galaxy, record, composition, star_count, fates)
+        Self::build(
+            galaxy,
+            record,
+            (composition, grid_multiplicity(record)),
+            fates,
+        )
+    }
+
+    /// Whether [`BriefModel::new`] keeps the grid system `record`'s primary on one of its
+    /// single-star routes, the module's gate (P11.T11.a), without building the model.
+    ///
+    /// It is true for a single system, or one no pair of whose first redraw attempt can change its
+    /// stars or be carved, and is `BriefModel::new(galaxy, record).route() != BriefRoute::Paired`
+    /// for every record `new` takes: for timing the gate alone. A rogue planet, which has no brief,
+    /// is a single object, and is certified.
+    ///
+    /// # Panics
+    ///
+    /// As [`BriefModel::new`]: for a record of another galaxy, and if a committed pair-light table
+    /// cannot be read.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use hyperion_sim::Seed;
+    /// use hyperion_sim::galaxy::Galaxy;
+    /// use hyperion_sim::galaxy::placement::{CellKey, generate_cell};
+    /// use hyperion_sim::id::Layer;
+    /// use hyperion_sim::stellar::brief::{BriefModel, BriefRoute};
+    ///
+    /// let galaxy = Galaxy::new(Seed::new(11));
+    /// let mut cell = Vec::new();
+    /// generate_cell(&galaxy, CellKey::new(Layer::C, [0, 812, 0])?, &mut cell);
+    /// for record in cell.iter().take(10) {
+    ///     let paired = BriefModel::new(&galaxy, record).route() == BriefRoute::Paired;
+    ///     assert_eq!(BriefModel::certifies(&galaxy, record), !paired);
+    /// }
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn certifies(galaxy: &Galaxy, record: &SystemRecord) -> bool {
+        let composition = draw_metallicity(galaxy, record);
+        let kept = kept_primary(galaxy, record, composition);
+        let primary = kept
+            .as_ref()
+            .map_or(KeptPrimary::FromRecord, KeptPrimary::Model);
+        gate(
+            galaxy,
+            record,
+            &composition,
+            grid_multiplicity(record),
+            primary,
+        )
+        .certified
     }
 
     /// The brief model of the feature member `member` in `galaxy` (plan 09, P09.T10): its
@@ -239,25 +333,47 @@ impl BriefModel {
     /// [`BriefModel::new`] would read a grid system's metallicity draw, which a member has no
     /// density component for.
     ///
+    /// A member whose stars are not its context's draw, an entry of plan 11's binary classes on
+    /// its feature's list or a member whose recycled-object mark its companions bear out (P11.T8.f,
+    /// from generator version 27), takes its paired route from those stars, so that its brief
+    /// and its stars are one system.
+    ///
     /// # Panics
     ///
-    /// As [`MemberRecord::stars`] does.
+    /// As [`MemberRecord::stars`] does, and as [`BriefModel::new`] if a committed pair-light table
+    /// cannot be read.
     #[must_use]
     pub fn of_member(galaxy: &Galaxy, member: &MemberRecord) -> Self {
-        let record = member.record();
-        let composition = *member.composition();
-        let star_count = draw_star_count_of_composition(
-            galaxy,
-            record,
-            &composition,
-            member.multiplicity_context(),
-            GRID_ATTEMPT,
-        );
+        if member.listed_class().is_some() || member.marked_attempt().is_some() {
+            let stars = member.stars(galaxy);
+            return Self {
+                star_count: stars.star_count(),
+                primary: Primary::Paired(Box::new(stars)),
+                rules: galaxy.rules().stellar,
+            };
+        }
         Self::build(
             galaxy,
-            record,
-            composition,
-            star_count,
+            member.record(),
+            (*member.composition(), member.multiplicity_context()),
+            &FittedFates::generator(),
+        )
+    }
+
+    /// The brief model of the global list's member `member` in `galaxy`, a stream's or a dwarf
+    /// core's (plan 10, P10.T10.b's registration member): its
+    /// [`GlobalMemberRecord::stars`]' brief by the module's routes, at its composition, its
+    /// multiplicity its own to draw ([`MultiplicityContext::Free`]), as its stars are.
+    ///
+    /// # Panics
+    ///
+    /// As [`BriefModel::new`], if a committed pair-light table cannot be read.
+    #[must_use]
+    pub fn of_global_member(galaxy: &Galaxy, member: &GlobalMemberRecord) -> Self {
+        Self::build(
+            galaxy,
+            member.record(),
+            (*member.composition(), MultiplicityContext::Free),
             &FittedFates::generator(),
         )
     }
@@ -265,29 +381,38 @@ impl BriefModel {
     /// The brief model of `record`'s system in `galaxy`, whatever placed it, as
     /// [`stars_of`](crate::observe::stars_of) builds its stars: a grid system's
     /// [`BriefModel::new`], a feature member's [`BriefModel::of_member`], its feature's interior
-    /// taken from `interiors`.
+    /// taken from `interiors`, and a catalogue system's at its class's composition and context
+    /// (plan 09, P09.T33.a).
+    ///
+    /// # Errors
+    ///
+    /// [`ResolveSystemError::KindNotGenerated`] for a catalogue system whose class does not model
+    /// its members' stars by the stellar stage, a Type Ia's (plan 09, P09.T34.a), as
+    /// [`stars_of`](crate::observe::stars_of) answers for it.
     ///
     /// # Panics
     ///
     /// - For a rogue planet, as [`BriefModel::new`], and for a member of the galactic centre,
     ///   whose stars wait for plan 09's centre composition.
+    /// - For a member of the global list, whose stars are its member record's, which the caller's
+    ///   list gives.
     /// - If `record` is a feature member that does not resolve in `galaxy`, which only a record of
-    ///   another galaxy can be.
-    #[must_use]
+    ///   another galaxy can be; and if it is a catalogue system that does not resolve.
+    /// - As [`BriefModel::new`], if a committed pair-light table cannot be read.
     pub fn of_record(
         galaxy: &Galaxy,
         interiors: &dyn FeatureInteriorCache,
         record: &SystemRecord,
-    ) -> Self {
+    ) -> Result<Self, ResolveSystemError> {
         match record.origin() {
-            SystemOrigin::Grid(_) => Self::new(galaxy, record),
+            SystemOrigin::Grid(_) => Ok(Self::new(galaxy, record)),
             SystemOrigin::FeatureMember { .. } => {
                 let SystemIdKind::FeatureMember(id) = record.id().kind() else {
                     unreachable!("a feature member's record is built with a member ID")
                 };
                 let member = resolve_member(galaxy, interiors, id)
                     .expect("a feature member's record resolves in the galaxy that placed it");
-                Self::of_member(galaxy, &member)
+                Ok(Self::of_member(galaxy, &member))
             }
             SystemOrigin::CentreMember { .. } => {
                 panic!(
@@ -295,20 +420,82 @@ impl BriefModel {
                     record.id()
                 )
             }
+            SystemOrigin::GlobalListMember { .. } => {
+                panic!(
+                    "a global-list member's stars are its member record's, through its list: {:?}",
+                    record.id()
+                )
+            }
+            SystemOrigin::CatalogueSystem(_) => {
+                let system = system_of_record(galaxy, record);
+                let (composition, context) = system
+                    .star_model()
+                    .ok_or(ResolveSystemError::KindNotGenerated)?;
+                Ok(Self::build(
+                    galaxy,
+                    system.record(),
+                    (*composition, context),
+                    &FittedFates::generator(),
+                ))
+            }
         }
     }
 
-    /// The model of `record` at `composition` with `star_count` stars, its primary by the
-    /// cheapest route `fates` allows.
+    /// The model of `record` at `composition` under the multiplicity context `ctx`: its system's
+    /// stars where the gate does not certify its primary, and otherwise its primary by the
+    /// cheapest route `fates` allows, with its first attempt's star count either way.
     fn build(
         galaxy: &Galaxy,
         record: &SystemRecord,
-        composition: Composition,
-        star_count: u8,
+        (composition, ctx): (Composition, MultiplicityContext),
         fates: &FittedFates<'_>,
     ) -> Self {
+        // A record whose class constrains its primary's kick (plan 08's retained and displaced
+        // remnants) takes the kick loop's kept attempt, the star `SystemStars` keeps (P08.T12.c):
+        // the gate reads its stripped mark, and a certified primary is its exact model, since the
+        // table's and the remnant build's routes read the remnant's draws of the record's own
+        // attempt.
+        let kept = kept_primary(galaxy, record, composition);
+        let Gate {
+            star_count,
+            certified,
+        } = gate(
+            galaxy,
+            record,
+            &composition,
+            ctx,
+            kept.as_ref()
+                .map_or(KeptPrimary::FromRecord, KeptPrimary::Model),
+        );
+        if !certified {
+            // `SystemStars::generate` for a grid record, `MemberRecord::stars` for a member: the
+            // same composition and context, so the same system, from the kept primary where it
+            // is built already.
+            let stars = match kept {
+                Some(primary) => SystemStars::generate_of_primary(galaxy, record, primary, ctx),
+                None => SystemStars::generate_with(galaxy, record, &composition, ctx),
+            };
+            return Self {
+                primary: Primary::Paired(Box::new(stars)),
+                star_count,
+                rules: galaxy.rules().stellar,
+            };
+        }
+        if let Some(primary) = kept {
+            return Self {
+                primary: Primary::Exact(
+                    Box::new(primary),
+                    StarStreams::new(galaxy.seed(), BodyId::new(record.id(), 0)),
+                ),
+                star_count,
+                rules: galaxy.rules().stellar,
+            };
+        }
         let m0 = record.primary_initial_mass();
         let age_at_epoch = record.age_at_epoch();
+        // Every route's track is built under the galaxy's stellar rules, as the model's is.
+        let rules = galaxy.rules().stellar;
+        let options = TrackOptions::default().with_rules(rules);
         // The main sequence reads η alone of the primary's draws: its one stream, not all of
         // them (a quarter of a main-sequence row's instructions, P06.T38.e's measurement).
         let eta = primary_eta(galaxy, record);
@@ -322,12 +509,13 @@ impl BriefModel {
         });
         if let Some(fate) = dead {
             let draws = primary_draws(galaxy, record);
-            let primary = table_primary(fate, composition, &draws, age_at_epoch, m0)
-                .or_else(|| exact_remnant(m0, composition, &draws, age_at_epoch))
-                .unwrap_or_else(|| exact(m0, composition, draws, age_at_epoch));
+            let primary = table_primary(fate, composition, &draws, (age_at_epoch, m0), options)
+                .or_else(|| exact_remnant(m0, composition, &draws, age_at_epoch, options))
+                .unwrap_or_else(|| exact(galaxy, record, (m0, composition, draws), age_at_epoch));
             return Self {
                 primary,
                 star_count,
+                rules: galaxy.rules().stellar,
             };
         }
         // The main sequence's class reads the rotation rank and fossil mark too (P06.T25).
@@ -335,12 +523,7 @@ impl BriefModel {
         let on_main_sequence = (MIN_INITIAL_MASS..=MAX_INITIAL_MASS)
             .contains(&m0)
             .then(|| {
-                Track::knot_free_main_sequence(
-                    m0,
-                    &composition,
-                    &eta_draws(eta, rotation),
-                    TrackOptions::default(),
-                )
+                Track::knot_free_main_sequence(m0, &composition, &eta_draws(eta, rotation), options)
             })
             .flatten()
             // The main sequence must hold every age of the window: from the arrival on it
@@ -359,11 +542,17 @@ impl BriefModel {
                 age_at_epoch,
             }
         } else {
-            exact(m0, composition, primary_draws(galaxy, record), age_at_epoch)
+            exact(
+                galaxy,
+                record,
+                (m0, composition, primary_draws(galaxy, record)),
+                age_at_epoch,
+            )
         };
         Self {
             primary,
             star_count,
+            rules: galaxy.rules().stellar,
         }
     }
 
@@ -373,19 +562,22 @@ impl BriefModel {
         match self.primary {
             Primary::MainSequence { .. } => BriefRoute::MainSequence,
             Primary::Table { .. } => BriefRoute::Table,
-            Primary::Remnant { .. } | Primary::Exact(_) => BriefRoute::Exact,
+            Primary::Remnant { .. } | Primary::Exact(..) => BriefRoute::Exact,
+            Primary::Paired(_) => BriefRoute::Paired,
         }
     }
 
-    /// How many stars the system has, the primary included.
+    /// How many stars the system has, the primary included, at its first redraw attempt: the kept
+    /// count for every system the grid does not redraw (plan 11's Risks, "Deviations in P11.T7, as
+    /// built").
     #[must_use]
     pub const fn star_count(&self) -> u8 {
         self.star_count
     }
 
-    /// The system's brief at `t`, or `None` before its primary forms:
-    /// [`SystemStars::brief_at`](crate::stellar::system::SystemStars::brief_at)'s, bit for bit on
-    /// the exact and main-sequence routes, and of its kind and class on the table's.
+    /// The system's brief at `t`, or `None` before its primary forms: [`SystemStars::brief_at`]'s,
+    /// the summary's primary then, bit for bit on the exact, main-sequence and paired routes (the
+    /// paired one with the first attempt's star count), and of its kind and class on the table's.
     ///
     /// # Panics
     ///
@@ -408,7 +600,7 @@ impl BriefModel {
                         composition,
                         &eta_draws(*eta, *rotation),
                         ClassExtras::NONE,
-                        self.star_count,
+                        (self.star_count, self.rules),
                     )
                 })
             }
@@ -422,9 +614,8 @@ impl BriefModel {
                 track,
                 composition,
                 draws,
-                age_at(*age_at_epoch, t),
-                fate.death_age.value(),
-                self.star_count,
+                (age_at(*age_at_epoch, t), fate.death_age.value()),
+                (self.star_count, self.rules),
             )),
             Primary::Remnant {
                 track,
@@ -436,18 +627,24 @@ impl BriefModel {
                 track,
                 composition,
                 draws,
-                age_at(*age_at_epoch, t),
-                *birth,
-                self.star_count,
+                (age_at(*age_at_epoch, t), *birth),
+                (self.star_count, self.rules),
             )),
-            Primary::Exact(model) => model.state_at(t).map(|state| {
+            Primary::Exact(model, streams) => model.state_at(t).map(|state| {
                 StellarBrief::of(
                     &state,
                     model.composition(),
                     model.draws(),
-                    model.class_extras_at(&state, t),
-                    self.star_count,
+                    model.class_extras_at(&state, t, Pulses::Opened(*streams)),
+                    (self.star_count, model.rules()),
                 )
+            }),
+            // A system a supernova has unbound counts the stars it shows then (P11.T10). No other
+            // route reaches one: the gate checks every pair, and a pair with a supernova keeps no
+            // own models.
+            Primary::Paired(stars) => stars.brief_at(t).map(|brief| match stars.shown_at(t) {
+                Shown::Drawn => brief.with_star_count(self.star_count),
+                Shown::Pair(_) | Shown::Part { .. } | Shown::Alone => brief,
             }),
         }
     }
@@ -497,14 +694,16 @@ impl BriefModel {
 
     /// The bytes the model owns on the heap, beyond `size_of::<BriefModel>()`: what a server's
     /// byte-bounded cache charges it. A main-sequence model owns a few kilobytes; an exact one its
-    /// [`StarModel`]'s track, tens of kilobytes for a dead star.
+    /// [`StarModel`]'s track, tens of kilobytes for a dead star; a paired one its system's stars,
+    /// each star's track and each pair's timeline ([`SystemStars::heap_bytes`]).
     #[must_use]
     pub fn heap_bytes(&self) -> usize {
         match &self.primary {
             Primary::MainSequence { track, .. }
             | Primary::Table { track, .. }
             | Primary::Remnant { track, .. } => size_of::<Track>() + track.heap_bytes(),
-            Primary::Exact(model) => size_of::<StarModel>() + model.heap_bytes(),
+            Primary::Exact(model, _) => size_of::<StarModel>() + model.heap_bytes(),
+            Primary::Paired(stars) => size_of::<SystemStars>() + stars.heap_bytes(),
         }
     }
 }
@@ -514,7 +713,8 @@ impl BriefModel {
 ///
 /// # Panics
 ///
-/// As [`BriefModel::new`] and [`BriefModel::brief_at`].
+/// As [`BriefModel::new`] and [`BriefModel::brief_at`], which include a pair-light table that
+/// cannot be read.
 #[must_use]
 pub fn range_brief(
     galaxy: &Galaxy,
@@ -522,6 +722,80 @@ pub fn range_brief(
     t: UniverseTime,
 ) -> Option<StellarBrief> {
     BriefModel::new(galaxy, record).brief_at(t)
+}
+
+/// What the gate finds of a system: its first attempt's star count, and whether its primary is
+/// certainly its own single-star model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Gate {
+    /// How many stars the first redraw attempt draws, [`draw_star_count`]'s count.
+    ///
+    /// [`draw_star_count`]: crate::stellar::multiplicity::draw_star_count
+    star_count: u8,
+    /// Whether the primary is certainly its own single-star model through the clock window.
+    certified: bool,
+}
+
+/// The module's gate (P11.T11.a; `decision-observed-class-findings.md` §A.2) for `record`'s
+/// system at `composition` under `ctx`: whether its primary is certainly its own single-star model
+/// at every time up to the clock window's end, and its first attempt's star count.
+///
+/// A system drawn single is, from its count words alone (`drawn_single`, the start of
+/// [`draw_star_count`](crate::stellar::multiplicity::draw_star_count)). Otherwise its first
+/// attempt is drawn once ([`first_attempt`]), for its count, which is `draw_star_count`'s, and for
+/// its pairs of two stars, read over the system's ages from the window's start to its end, the last
+/// its age at +H, to which `SystemStars` runs its pairs: each pair must leave its stars their own
+/// models and fall into no carved class ([`pair_keeps_own_models`]), since a supernova that unbinds
+/// any pair changes what the system shows (P11.T10), and for a grid system any carved one would
+/// have the system redrawn and the primary might be in another pair at the attempt kept; then the
+/// generator keeps attempt 0, whose count it is. The test of each pair holds at every age up to the
+/// window's end, so a time before the window, as the tests ask, is certified too.
+///
+/// It is conservative, not exact: a refused system takes the paired route, which is right
+/// whatever its pairs did. The tests check that every certified primary is its own model at
+/// times across the window. The pair-light and reach tables the test reads are the version's
+/// tracks', so under another Humphreys–Davidson arm (P06.T42.b's hold) no pair is certified.
+///
+/// `primary` says where the hierarchy reads the primary's stripped mark: the kick loop's kept
+/// attempt, for a record whose class constrains its kick (P08.T12.c).
+#[must_use]
+fn gate(
+    galaxy: &Galaxy,
+    record: &SystemRecord,
+    composition: &Composition,
+    ctx: MultiplicityContext,
+    primary: KeptPrimary<'_>,
+) -> Gate {
+    if drawn_single(
+        galaxy,
+        record,
+        Some(composition),
+        ctx,
+        GRID_ATTEMPT,
+        primary,
+    ) {
+        return Gate {
+            star_count: 1,
+            certified: true,
+        };
+    }
+    let attempt = first_attempt(galaxy, record, composition, ctx, primary);
+    let age_at_epoch = record.age_at_epoch();
+    let ages = Years::new(age_at(age_at_epoch, ClockWindow::START))
+        ..=Years::new(age_at(age_at_epoch, ClockWindow::END));
+    let stars = attempt.stars();
+    // A supernova that unbinds any pair changes what the system shows (P11.T10), so every pair is
+    // checked, as for a system the grid redraws.
+    let certified = attempt.pairs().iter().all(|pair| {
+        let [a, b] = pair
+            .stars()
+            .map(|star| stars[usize::from(star.get())].initial_mass());
+        pair_keeps_own_models(a, b, pair.periastron(), composition, ages.clone())
+    });
+    Gate {
+        star_count: attempt.hierarchy().star_count(),
+        certified,
+    }
 }
 
 /// Draws of η `eta`, the rotation rank and fossil mark `rotation`, and every other draw at its
@@ -585,45 +859,49 @@ fn pulsar_class_holds(
         })
 }
 
-/// The exact primary: its [`StarModel`].
+/// The exact primary of `record` in `galaxy`, of initial mass `m0`, `composition` and `draws`:
+/// its [`StarModel`], under the galaxy's stellar rules, with its body's streams.
 #[must_use]
 fn exact(
-    m0: SolarMasses,
-    composition: Composition,
-    draws: StarDraws,
+    galaxy: &Galaxy,
+    record: &SystemRecord,
+    (m0, composition, draws): (SolarMasses, Composition, StarDraws),
     age_at_epoch: Years,
 ) -> Primary {
-    Primary::Exact(Box::new(
-        StarModel::new(m0, composition, draws, age_at_epoch)
-            .expect("a grid record's primary is a star or a brown dwarf, with a finite age"),
-    ))
+    Primary::Exact(
+        Box::new(
+            StarModel::new_under(m0, composition, draws, age_at_epoch, galaxy.rules().stellar)
+                .expect("a grid record's primary is a star or a brown dwarf, with a finite age"),
+        ),
+        StarStreams::new(galaxy.seed(), BodyId::new(record.id(), 0)),
+    )
 }
 
 /// The exact primary of a star dead through the whole window, from its remnant alone: the
 /// remnant a build to the death that keeps no other segment gives (`remnant_of`), which is its
-/// full track's bit for bit, and so its brief is [`SystemStars::brief_at`]'s. `None` if the star
-/// is alive at the window's start after all, which the table's bound makes rare.
-///
-/// [`SystemStars::brief_at`]: crate::stellar::system::SystemStars::brief_at
+/// full track's bit for bit, and so its brief is [`SystemStars::brief_at`]'s for a primary the
+/// gate certifies. `None` if the star is alive at the window's start after all, which the table's
+/// bound makes rare. The build is under `options`, the galaxy's rules'.
 #[must_use]
 fn exact_remnant(
     m0: SolarMasses,
     composition: Composition,
     draws: &StarDraws,
     age_at_epoch: Years,
+    options: TrackOptions,
 ) -> Option<Primary> {
     let m = if m0 > MAX_INITIAL_MASS {
         MAX_INITIAL_MASS
     } else {
         m0
     };
-    let (remnant, _) = remnant_of(m, &composition, draws, TrackOptions::default());
+    let (remnant, _) = remnant_of(m, &composition, draws, options);
     let birth = remnant.birth;
     (age_at(age_at_epoch, ClockWindow::START) >= birth).then(|| Primary::Remnant {
         track: Box::new(Track::remnant_only(
             &composition,
             draws.eta().value(),
-            TrackOptions::default(),
+            options,
             remnant,
         )),
         composition,
@@ -647,25 +925,26 @@ fn remnant_extras(state: &StarState, draws: &StarDraws, age: f64, birth: f64) ->
 }
 
 /// The brief at `age` of a remnant-only `track` formed at `birth`, for a star of `composition`
-/// and `draws` in a system of `star_count` stars: the remnant's state and its history's extras.
+/// and `draws` in a system of `star_count` stars under the stellar `rules`: the remnant's state
+/// and its history's extras.
 #[must_use]
 fn remnant_brief(
     track: &Track,
     composition: &Composition,
     draws: &StarDraws,
-    age: f64,
-    birth: f64,
-    star_count: u8,
+    (age, birth): (f64, f64),
+    (star_count, rules): (u8, StellarRules),
 ) -> StellarBrief {
     let state = track.state_at(Years::new(age));
     let extras = remnant_extras(&state, draws, age, birth);
-    StellarBrief::of(&state, composition, draws, extras, star_count)
+    StellarBrief::of(&state, composition, draws, extras, (star_count, rules))
 }
 
 /// The table-routed primary of `fate`, found dead through the whole clock window, of initial
-/// mass `m0`, `composition`, `draws` and age at the epoch `age_at_epoch`, or `None` if it is not
-/// the table's: its companion-stripped mark can move its fate, or the guard finds that its kind
-/// or class could differ somewhere in the fate's error box over the window (P06.T38.e).
+/// mass `m0`, `composition`, `draws` and age at the epoch `age_at_epoch`, its remnant's track
+/// under `options`, or `None` if it is not the table's: its companion-stripped mark can move its
+/// fate, or the guard finds that its kind or class could differ somewhere in the fate's error box
+/// over the window (P06.T38.e).
 ///
 /// - A white dwarf's class is a function of its temperature and draws alone
 ///   ([`white_dwarf_type`]). The guard takes the temperature's range over the box and the window
@@ -684,20 +963,15 @@ fn table_primary(
     fate: FittedFate,
     composition: Composition,
     draws: &StarDraws,
-    age_at_epoch: Years,
-    m0: SolarMasses,
+    (age_at_epoch, m0): (Years, SolarMasses),
+    options: TrackOptions,
 ) -> Option<Primary> {
     if stripped_mark_matters(m0, &composition, draws) {
         return None;
     }
     let remnant_draws = RemnantDraws::of(draws);
     let centre = fate.remnant(remnant_draws, (0.0, 0.0, 0.0));
-    let track = Track::remnant_only(
-        &composition,
-        draws.eta().value(),
-        TrackOptions::default(),
-        centre,
-    );
+    let track = Track::remnant_only(&composition, draws.eta().value(), options, centre);
     let passes = match fate.route {
         FateRoute::HeliumWhiteDwarf
         | FateRoute::CarbonOxygenWhiteDwarf
@@ -749,15 +1023,33 @@ fn age_at(age_at_epoch: Years, t: UniverseTime) -> f64 {
     age_at_epoch.value() + t.since_epoch().as_julian_years_f64()
 }
 
+/// The primary a record's brief takes from [`primary_model`] rather than its own routes, if any:
+/// a record whose class constrains its kick (plan 08's retained and displaced remnants), whose
+/// model the kick loop keeps (P08.T12.c), and a hypervelocity survivor's helium white dwarf, which
+/// no route but the model's builds (plan 09, P09.T34.b).
+#[must_use]
+fn kept_primary(
+    galaxy: &Galaxy,
+    record: &SystemRecord,
+    composition: Composition,
+) -> Option<StarModel> {
+    (record.kick_range(galaxy).is_some() || is_helium_donor(record))
+        .then(|| primary_model(galaxy, record, composition).0)
+}
+
 #[cfg(test)]
 mod tests {
     use hyperion_testkit::float::bits;
+    use hyperion_testkit::lcg::Lcg;
 
     use super::*;
     use crate::Seed;
+    use crate::coords::GalacticPosition;
+    use crate::galaxy::params::GalaxyParams;
     use crate::galaxy::placement::{CellKey, generate_cell};
     use crate::id::Layer;
-    use crate::stellar::system::SystemStars;
+    use crate::stellar::multiplicity::RedrawAttempt;
+    use crate::stellar::multiplicity::testing::records_near;
 
     fn records(galaxy: &Galaxy) -> Vec<SystemRecord> {
         let mut all = Vec::new();
@@ -777,22 +1069,55 @@ mod tests {
         UniverseTime::from_julian_years(y).expect("inside the clock")
     }
 
-    /// The exact routes give the full system's brief bit for bit at times across the window, the
-    /// table's its kind and class with its luminosity near its stated error, and every route is
-    /// taken.
+    /// `route`'s place in a tally of the four.
+    fn route_index(route: BriefRoute) -> usize {
+        match route {
+            BriefRoute::MainSequence => 0,
+            BriefRoute::Table => 1,
+            BriefRoute::Exact => 2,
+            BriefRoute::Paired => 3,
+        }
+    }
+
+    /// The brief at `t` of `stars`' primary as its single-star self, in a system of `star_count`
+    /// stars: what `SystemStars::brief_at` gave before P11.T11.a, and so every range row before
+    /// it.
+    fn single_star_brief(
+        stars: &SystemStars,
+        star_count: u8,
+        t: UniverseTime,
+    ) -> Option<StellarBrief> {
+        let primary = stars.primary();
+        let state = primary.state_at(t)?;
+        Some(StellarBrief::of(
+            &state,
+            primary.composition(),
+            primary.draws(),
+            primary.class_extras_at(
+                &state,
+                t,
+                Pulses::Opened(stars.streams(BodyId::new(stars.record().id(), 0))),
+            ),
+            (star_count, primary.rules()),
+        ))
+    }
+
+    /// The exact, main-sequence and paired routes give the full system's brief bit for bit at
+    /// times across the window (the paired one with the first attempt's count while the system
+    /// shows every drawn star, and the stars it shows once a supernova has unbound part of it,
+    /// P11.T10), the table's its kind and class with its luminosity near its stated error, and
+    /// every route is taken.
     #[test]
     fn every_route_is_the_full_systems_brief() {
         let galaxy = Galaxy::new(Seed::new(0x6272_6965));
-        let mut routes = [0_u32; 3];
+        let mut routes = [0_u32; 4];
         for record in records(&galaxy) {
             let model = BriefModel::new(&galaxy, &record);
             let stars = SystemStars::generate(&galaxy, &record);
-            assert_eq!(model.star_count(), stars.star_count(), "{record:?}");
-            routes[match model.route() {
-                BriefRoute::MainSequence => 0,
-                BriefRoute::Table => 1,
-                BriefRoute::Exact => 2,
-            }] += 1;
+            if stars.attempt() == RedrawAttempt::FIRST {
+                assert_eq!(model.star_count(), stars.star_count(), "{record:?}");
+            }
+            routes[route_index(model.route())] += 1;
             if model.route() == BriefRoute::Table {
                 for y in [-1_000, 0, 1_000] {
                     let t = years(y);
@@ -816,7 +1141,15 @@ mod tests {
                 continue;
             }
             for y in [-200_000, -1_000, -500, 0, 500, 1_000] {
-                let (a, b) = (model.brief_at(years(y)), stars.brief_at(years(y)));
+                let (a, b) = (
+                    model.brief_at(years(y)),
+                    stars
+                        .brief_at(years(y))
+                        .map(|b| match stars.shown_at(years(y)) {
+                            Shown::Drawn => b.with_star_count(model.star_count()),
+                            Shown::Pair(_) | Shown::Part { .. } | Shown::Alone => b,
+                        }),
+                );
                 assert_eq!(a, b, "{record:?} at {y} yr");
                 if let (Some(a), Some(b)) = (a, b) {
                     assert_eq!(
@@ -867,12 +1200,85 @@ mod tests {
         );
     }
 
-    /// A model is the same built twice, and answers the same whatever was asked before.
+    /// The gate is conservative (P11.T11.a): over 400 systems of each stellar layer near the Sun
+    /// and 150 in the bulge, every system it certifies keeps its first attempt, and its primary
+    /// is its own model at both ends of the window, at the epoch, at a random time of the window
+    /// and 200,000 years before it. So each certified row is the full system's brief, and is the
+    /// single-star brief every range row was before P11.T11.a, bit for bit. Both answers are found
+    /// among the multiples, and `certifies` is the route's.
+    #[test]
+    fn the_gate_is_conservative() {
+        let galaxy = Galaxy::from_params(Seed::new(0x6761_7465), GalaxyParams::milky_way_like())
+            .expect("the Milky Way fixture's gas is mostly neutral");
+        let sun = GalacticPosition::from_light_years([0.0, 26_000.0, 68.0]).expect("in the cube");
+        let bulge = GalacticPosition::from_light_years([0.0, 2_000.0, 300.0]).expect("in the cube");
+        let mut rng = Lcg::new(0x6761_7465);
+        let (mut certified_multiples, mut paired) = (0_u32, 0_u32);
+        for (place, at, n) in [("near the Sun", sun, 400), ("in the bulge", bulge, 150)] {
+            for layer in [Layer::A, Layer::B, Layer::C, Layer::D, Layer::E] {
+                let (mut multiples, mut kept, mut layer_paired) = (0_u32, 0_u32, 0_u32);
+                for record in records_near(&galaxy, layer, &at, n) {
+                    let model = BriefModel::new(&galaxy, &record);
+                    let certified = model.route() != BriefRoute::Paired;
+                    assert_eq!(BriefModel::certifies(&galaxy, &record), certified);
+                    multiples += u32::from(model.star_count() > 1);
+                    if !certified {
+                        paired += 1;
+                        layer_paired += 1;
+                        continue;
+                    }
+                    kept += u32::from(model.star_count() > 1);
+                    let stars = SystemStars::generate(&galaxy, &record);
+                    assert_eq!(stars.attempt(), RedrawAttempt::FIRST, "{record:?}");
+                    assert_eq!(model.star_count(), stars.star_count(), "{record:?}");
+                    certified_multiples += u32::from(model.star_count() > 1);
+                    let random =
+                        years(i64::try_from(rng.next_u64() % 2_001).expect("small") - 1_000);
+                    for t in [
+                        ClockWindow::START,
+                        ClockWindow::END,
+                        UniverseTime::EPOCH,
+                        random,
+                        years(-200_000),
+                    ] {
+                        assert_ne!(
+                            stars.primary_is_its_own_at(t),
+                            Some(false),
+                            "{record:?} at {t}: certified, and its pair has changed it"
+                        );
+                        if model.route() == BriefRoute::Table {
+                            continue;
+                        }
+                        let brief = model.brief_at(t);
+                        assert_eq!(brief, stars.brief_at(t), "{record:?} at {t}");
+                        assert_eq!(
+                            brief,
+                            single_star_brief(&stars, model.star_count(), t),
+                            "{record:?} at {t}"
+                        );
+                    }
+                }
+                println!(
+                    "layer {layer:?} {place}: {n} systems, {multiples} multiple; {kept} \
+                     multiples certified, {layer_paired} paired"
+                );
+            }
+        }
+        assert!(
+            certified_multiples > 100 && paired > 10,
+            "{certified_multiples} certified multiples, {paired} paired"
+        );
+    }
+
+    /// A model is the same built twice, and answers the same whatever was asked before, on every
+    /// route, the paired one included.
     #[test]
     fn a_model_does_not_depend_on_what_was_asked_before() {
         let galaxy = Galaxy::new(Seed::new(0x6272_6966));
-        for record in records(&galaxy).iter().take(40) {
+        let mut routes = [0_u32; 4];
+        for record in &records(&galaxy) {
             let model = BriefModel::new(&galaxy, record);
+            routes[route_index(model.route())] += 1;
             assert_eq!(model, BriefModel::new(&galaxy, record));
             let times = [years(700), years(-300), years(0)];
             let forward: Vec<_> = times.iter().map(|&t| model.brief_at(t)).collect();
@@ -883,5 +1289,6 @@ mod tests {
                 model.brief_at(years(0))
             );
         }
+        assert!(routes.iter().all(|&n| n > 0), "{routes:?}");
     }
 }

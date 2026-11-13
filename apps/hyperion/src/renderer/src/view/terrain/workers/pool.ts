@@ -7,14 +7,65 @@
  * cancelling stays cheap: a queued request is cancelled by removing it, and priorities are re-scored
  * every frame. Per-worker queues were rejected, because their cancellations race the bakes. A
  * result whose generation is stale is still delivered if its key is still wanted, and dropped
- * otherwise. The coarse field is posted to one worker at a time, each copy acknowledged before the
- * next is made, so that at most one transient copy exists; once a field is posted, a worker bakes
- * only after it holds it, and a bake made from an older field is baked again.
+ * otherwise.
+ *
+ * A body's coarse field reaches the workers block by block (plan R10, T7, Design note 16):
+ * {@link HeightWorkerPool.fieldInit} posts its first block, {@link HeightWorkerPool.fieldChunk}
+ * each later one and {@link HeightWorkerPool.fieldRelease} drops it, each to every worker at once.
+ * A worker takes its messages in the order sent, so a bake posted after a block is made with it,
+ * and the transient copies are one block, at most 1 MiB, a worker, where R05's one field went to
+ * one worker at a time.
+ *
+ * Bakes go through lanes (plan R10, R10.T16.b; decision-r10-live-path, D2): each of a body's
+ * terrain passes takes its own ({@link HeightWorkerPool.lane}), with its own bake settings (its
+ * height source, vertex path and normals), demand, generation and listeners, over the pool's one
+ * queue, workers and fields. The queue takes forced requests first, then the larger weighted excess
+ * w × ρ ÷ τ whatever the lane (Design note 24's priority, comparable across lanes), then the sooner
+ * needed (a pass's lookahead's time to need, R10.T14.b), then the older lane's, then by key; but where that is one lane's refinement, a lane with a hole in its drawn
+ * set, a root still to bake (`priority.ts`' `fillsHole`), takes the worker first, its best hole
+ * first (the per-pass share, plan R10, R10.T14.b; lean, 2026-11-01). One lane alone is baked in
+ * Design note 24's order, request for request. A pool made with bake settings (the descent spike's)
+ * is a pool of one lane, whose calls are the pool's own; one made without them (the terrain
+ * session's) holds the fields and answers the class maps, and bakes through its lanes alone.
+ *
+ * A lane's bakes are of one height source, its settings'. The test planet reads no field, so no
+ * field ever makes its bakes stale. A body's bakes are held back until its field is started, and
+ * its field alone makes them stale (per-body epochs): a bake in flight when the field starts again
+ * or is released is baked again, and one in flight while blocks arrive is baked again by R10's
+ * rebake rule, conservatively, since the blocks' changes may not be known yet: unless it is
+ * complete, its horizon map complete, with its survey mask whole (`rebake.ts`' `staleInFlight`). A
+ * bake the field cannot make yet, a survey whose margin is still to come, waits for the body's next
+ * block. Each block's change of the survey is reported once ({@link HeightWorkerPool.onFieldChange}),
+ * for the bakes already delivered (`rebake.ts`).
+ *
+ * A body's coarse class map for R07's disc (plan R10, T10.d) is asked of one worker
+ * ({@link HeightWorkerPool.classMap}), after the blocks posted before it, which it reads, and so is a
+ * view's terrain readout (plan R10, T12; {@link HeightWorkerPool.groundReadout}). A pool made with
+ * a readout worker ({@link HeightWorkerPoolOptions.readoutWorker}; plan R10, R10.T12.c) runs one more
+ * worker that takes every field and no bake, and asks the readouts of it, so that a readout never
+ * waits behind a worker's two bakes in flight; the class maps stay with the bake workers.
  */
 
-import { patchKeyString } from "../patchKey";
+import type { BodyIdHex, DetailSeedHex } from "@hyperion/protocol";
+
+import { type LevelBounds, SELECTION_RULE, sigmaSurveyOf } from "../levelBounds";
+import { type PatchKey, patchKeyString, unreachable } from "../patchKey";
+import { fillsHole } from "../priority";
 import type { PatchRequest } from "../select";
-import type { BakedPatch, BakeSettings, HeightWorkerReply, HeightWorkerRequest } from "./messages";
+import type {
+  BakedPatch,
+  BakeSettings,
+  ClassMapAnswer,
+  FieldBlockAnswer,
+  FieldForm,
+  GroundReadoutQuery,
+  HeightWorkerReply,
+  HeightWorkerRequest,
+  SigmaSurveySetting,
+  SurfaceGroundReadout,
+  TerrainLayers,
+} from "./messages";
+import { staleInFlight } from "./rebake";
 
 /** The part of a `Worker` the pool uses, so that tests can stand in for one. */
 export interface WorkerLike {
@@ -42,6 +93,73 @@ export const MAX_IN_FLIGHT_PER_WORKER = 2;
  */
 export const MAX_CONSECUTIVE_WORKER_FAILURES = 3;
 
+/** The most height workers a pool runs by default. */
+export const MOST_HEIGHT_WORKERS = 8;
+
+/**
+ * The hardware threads the default count leaves to everything but the height workers: the render
+ * thread, the GPU and browser processes, a local server and the optics workers.
+ */
+export const THREADS_LEFT_BESIDE_HEIGHT_WORKERS = 8;
+
+/**
+ * The hardware threads of an Apple chip's performance cores that the default count leaves to the
+ * render thread and the GPU process.
+ */
+export const PERFORMANCE_THREADS_LEFT_BESIDE_HEIGHT_WORKERS = 2;
+
+/**
+ * The default number of height workers, the machine's budget for the terrain whatever the views and
+ * bodies: clamp(max(⌊threads ÷ 4⌋, threads − {@link THREADS_LEFT_BESIDE_HEIGHT_WORKERS}), 1,
+ * {@link MOST_HEIGHT_WORKERS}); or, where the OS tells performance cores from efficiency cores
+ * (Apple silicon's, `HyperionApi.performanceThreads`), clamp(P −
+ * {@link PERFORMANCE_THREADS_LEFT_BESIDE_HEIGHT_WORKERS} + ⌊E ÷ 3⌋, 1, {@link MOST_HEIGHT_WORKERS})
+ * of its P performance and E efficiency threads, which the main process hands on as P + ⌊E ÷ 3⌋
+ * (leans, 2026-11-01, plan R05's Risks).
+ *
+ * @remarks
+ * R05 Design note 11's clamp(⌊threads ÷ 4⌋, 1, 3) where a machine has eight threads or fewer (two
+ * on the i7-8665U's eight, its budget's two cores), and above that every thread past eight, up to
+ * eight workers: eight on the target's 16. Bakes are bound by the CPU alone: on a pod with threads
+ * to spare, N workers baked N times one worker's patches a second up to 24 (Earth-like L12, high,
+ * 7.1 a second a worker). An Apple chip's efficiency cores, which `hardwareConcurrency` counts
+ * with the rest, bake far slower, so they count at a third of a performance core (an M5's four and
+ * six give four; an M1's four and four give three where its eight threads give two; an M1 Pro's
+ * eight and two give six where its ten threads give two). The owner's sweep on the target
+ * (`scripts/workerSweep.mjs`) confirms or lowers either.
+ *
+ * One pool runs them: the descent spike's (as `defaultSpikeWorkers`) and `VIEW`'s terrain session's
+ * (plan R10, R10.T16.a). A thread count the browser does not report as a finite number takes the
+ * least, one worker.
+ *
+ * @param hardwareConcurrency - The machine's logical processors, `navigator.hardwareConcurrency`.
+ * @param performanceThreads - Its performance cores' threads with a third of its efficiency
+ *   cores', `HyperionApi.performanceThreads`, or `null` where its OS tells none apart.
+ */
+export function defaultHeightWorkers(
+  hardwareConcurrency: number,
+  performanceThreads: number | null = null,
+): number {
+  if (
+    performanceThreads !== null &&
+    Number.isInteger(performanceThreads) &&
+    performanceThreads >= 1
+  ) {
+    return Math.min(
+      MOST_HEIGHT_WORKERS,
+      Math.max(1, performanceThreads - PERFORMANCE_THREADS_LEFT_BESIDE_HEIGHT_WORKERS),
+    );
+  }
+  if (!Number.isFinite(hardwareConcurrency)) {
+    return 1;
+  }
+  const spare = Math.max(
+    Math.floor(hardwareConcurrency / 4),
+    Math.floor(hardwareConcurrency) - THREADS_LEFT_BESIDE_HEIGHT_WORKERS,
+  );
+  return Math.min(MOST_HEIGHT_WORKERS, Math.max(1, spare));
+}
+
 /** What makes a pool. */
 export interface HeightWorkerPoolOptions {
   /** How many workers to run, at least one (Design note 11's defaults, or `--workers`). */
@@ -51,14 +169,99 @@ export interface HeightWorkerPoolOptions {
    * "module" })` in the app, a fake in tests.
    */
   readonly createWorker: () => WorkerLike;
-  /** The setting's vertex path and normal resolution, sent with every bake. */
-  readonly bake: BakeSettings;
+  /**
+   * The settings of the pool's own lane, the setting's vertex path and normal resolution and the
+   * height source, sent with every bake of it: a pool of one lane, whose calls are the pool's own
+   * (the descent spike's). A body's source holds its bakes back until its field is started, and
+   * makes them stale as its field grows.
+   *
+   * @remarks
+   * Absent for a pool that holds fields and answers class maps and bakes through its lanes alone
+   * (the terrain session's, R10.T16.a and T16.b): its {@link HeightWorkerPool.request},
+   * {@link HeightWorkerPool.reprioritise} and {@link HeightWorkerPool.cancelStale} throw.
+   */
+  readonly bake?: BakeSettings;
+  /**
+   * Whether to run one more worker beside {@link HeightWorkerPoolOptions.workers}, which takes every
+   * body's field and never a bake, and of which every terrain readout is asked (plan R10,
+   * R10.T12.c): the terrain session's pool, whose readout the `BASELINE` row asks at once. False
+   * unless given; a pool without one asks its readouts of the least loaded bake worker.
+   */
+  readonly readoutWorker?: boolean;
 }
 
 /** A request given up because its bake failed, for the metrics and the console. */
+/**
+ * A refinement of a drafted bake (plan R10, R10.T6.a's progressive bake): the normals its
+ * draft left between the vertices ({@link RefinedNormals}).
+ */
+export interface RefineRequest {
+  readonly key: PatchKey;
+  /** The order among refinements, higher first, as a bake's priority orders bakes. */
+  readonly priority: number;
+  /** The asker's token for the draft it refines, handed back with its normals. */
+  readonly ticket: number;
+}
+
+/** A drafted bake's normals between its vertices, as the pool hands them to its lane's listeners. */
+export interface RefinedDraft {
+  readonly key: PatchKey;
+  /** The request's {@link RefineRequest.ticket}. */
+  readonly ticket: number;
+  /** {@link RefinedNormals.normals}. */
+  readonly normals: Float32Array;
+  /** {@link RefinedNormals.complete}. */
+  readonly complete: boolean;
+}
+
 export interface BakeFailure {
   readonly keyString: string;
   readonly message: string;
+}
+
+/** A block of a body's field that a worker refused, reported once for each start of the field. */
+export interface FieldRefusal {
+  readonly body: BodyIdHex;
+  readonly message: string;
+}
+
+/**
+ * What one block of a body's payload changed in the workers' fields, reported once, from the first
+ * worker to answer it: the cells it surveyed anew and the cells it brought that the fields did not
+ * hold, which R10's rebake rule reads (`rebake.ts`'s `needsRebake`), and the body's level table
+ * after it.
+ */
+export interface FieldChange extends FieldBlockAnswer {
+  readonly body: BodyIdHex;
+  /** The block's place among this start of the field's blocks, the first 0. */
+  readonly sequence: number;
+}
+
+/** A body's field as the pool keeps it, for the workers that start later. */
+interface KeptField {
+  /** Its blocks in the order posted, its first block first. */
+  readonly blocks: ArrayBuffer[];
+  /** A payload's, which the workers decode, or a stand-in's, which they hold undecoded. */
+  readonly form: FieldForm;
+  /** Whether the workers survey the body's σ, by the rule in force when the field was started. */
+  readonly sigma: SigmaSurveySetting;
+  /** The first message ID of this start of the field: a refusal of an older one is not its. */
+  readonly sinceId: number;
+  /** Whether a refusal of this start has been reported. */
+  refused: boolean;
+  /** How many of its blocks, from the first, have had their changes reported. */
+  reported: number;
+  /** The body's level bounds as a worker last reported them, `null` before any. */
+  bounds: LevelBounds | null;
+}
+
+/** A block posted to a worker, by the message's ID. */
+interface PostedBlock {
+  readonly body: BodyIdHex;
+  /** The start of the field it is of. */
+  readonly field: KeptField;
+  /** Its place among the field's blocks. */
+  readonly sequence: number;
 }
 
 interface Queued {
@@ -66,62 +269,297 @@ interface Queued {
   readonly keyString: string;
 }
 
-interface InFlight {
-  readonly id: number;
-  readonly request: PatchRequest;
-  readonly keyString: string;
-  readonly generation: number;
-  /** The field the worker held when the request was sent. */
-  readonly fieldEpoch: number;
+/** One lane's bakes: its settings, demand and listeners (R10.T16.b). */
+interface Lane {
+  /** Its place among the lanes made, the first 0: the queue's order between equal requests. */
+  readonly index: number;
+  /** The settings sent with every bake of it. */
+  readonly settings: BakeSettings;
+  /** The body whose field its bakes read, `null` for the test planet, which reads none. */
+  readonly sourceBody: BodyIdHex | null;
+  readonly queue: Map<string, Queued>;
+  readonly wanted: Set<string>;
+  readonly failedKeys: Set<string>;
+  /** The requests the source body's field could not make yet, until its next block. */
+  readonly waiting: Map<string, PatchRequest>;
+  readonly bakedListeners: Set<(bake: BakedPatch) => void>;
+  readonly failureListeners: Set<(failure: BakeFailure) => void>;
+  /**
+   * Whether its bakes may be drafted ({@link BakedPatch.drafted}): a body's, at double normals that
+   * are baked.
+   */
+  readonly drafts: boolean;
+  /** Its refinements asked and not yet told, queued, waiting or in flight, by key string. */
+  readonly refining: Map<string, RefineRequest>;
+  /** Those of them queued, not yet sent to a worker. */
+  readonly refinements: Map<string, RefineRequest>;
+  /** Those of them the source body's field could not make yet, until its next block. */
+  readonly waitingRefinements: Map<string, RefineRequest>;
+  readonly refinedListeners: Set<(refined: RefinedDraft) => void>;
+  generation: number;
+  terminated: boolean;
 }
 
+interface InFlight {
+  readonly id: number;
+  /** The lane it was asked through; its answer reaches that lane alone. */
+  readonly lane: Lane;
+  readonly request: PatchRequest;
+  /** The refinement it is, or `null` for a bake. */
+  readonly refine: RefineRequest | null;
+  readonly keyString: string;
+  readonly generation: number;
+  /** The source body's field when the request was sent; `null` for the test planet, or none. */
+  readonly field: KeptField | null;
+  /** How many of that field's blocks had been posted when the request was sent. */
+  readonly blocksAtSend: number;
+}
+
+/** A query posted to a worker and not yet answered: a class map, or a view's terrain readout. */
+type PendingQuery =
+  | {
+      readonly kind: "class-map";
+      readonly body: BodyIdHex;
+      readonly detailSeed: DetailSeedHex;
+      readonly resolve: (map: ClassMapAnswer | null) => void;
+      readonly reject: (error: Error) => void;
+    }
+  | {
+      readonly kind: "ground-readout";
+      readonly body: BodyIdHex;
+      readonly detailSeed: DetailSeedHex;
+      readonly query: GroundReadoutQuery;
+      readonly resolve: (readout: SurfaceGroundReadout | null) => void;
+      readonly reject: (error: Error) => void;
+    };
+
 interface Slot {
+  /**
+   * Whether it bakes: false for the readout worker (R10.T12.c), which is given no bake and answers
+   * the readouts, and the class maps too once every bake worker is given up.
+   */
+  readonly bakes: boolean;
   worker: WorkerLike;
   readonly onMessage: (event: MessageEvent<HeightWorkerReply>) => void;
   readonly onError: () => void;
   readonly inFlight: Map<number, InFlight>;
-  /** Whether the worker holds the current field. */
-  hasField: boolean;
+  /** The class-map and readout queries posted to this worker and not yet answered, by message ID. */
+  readonly queries: Map<number, PendingQuery>;
+  /** The blocks posted to this worker and not yet answered, by message ID. */
+  readonly posted: Map<number, PostedBlock>;
+  /** What the worker last said it holds of every body's field, bytes. */
+  fieldBytes: number;
   /** Failures in a row with no answer between. */
   failures: number;
   /** Given up after {@link MAX_CONSECUTIVE_WORKER_FAILURES}: no worker runs in this place. */
   lost: boolean;
 }
 
-/** Orders requests: forced first, then higher priority, then by key string. */
-function before(a: Queued, b: Queued): boolean {
-  if (a.request.forced !== b.request.forced) {
-    return a.request.forced;
+/** A worker's requests out: its bakes and its class-map and readout queries in flight. */
+function loadOf(slot: Slot): number {
+  return slot.inFlight.size + slot.queries.size;
+}
+
+/** A queued request with its lane, as the queue orders them. */
+interface Candidate {
+  readonly lane: Lane;
+  readonly queued: Queued;
+}
+
+/**
+ * Orders requests: forced first, then higher priority whatever the lane, then the sooner needed
+ * (`PatchRequest.needS`, a pass's lookahead's, 0 where absent; R10.T14.b), then the older lane's,
+ * then by key string. With one lane and no lookahead it is R05's order.
+ */
+function before(a: Candidate, b: Candidate): boolean {
+  const ra = a.queued.request;
+  const rb = b.queued.request;
+  if (ra.forced !== rb.forced) {
+    return ra.forced;
   }
-  if (a.request.priority !== b.request.priority) {
-    return a.request.priority > b.request.priority;
+  if (ra.priority !== rb.priority) {
+    return ra.priority > rb.priority;
+  }
+  const na = ra.needS ?? 0;
+  const nb = rb.needS ?? 0;
+  if (na !== nb) {
+    return na < nb;
+  }
+  if (a.lane.index !== b.lane.index) {
+    return a.lane.index < b.lane.index;
+  }
+  return a.queued.keyString < b.queued.keyString;
+}
+
+function newLane(index: number, settings: BakeSettings): Lane {
+  return {
+    index,
+    settings,
+    sourceBody: settings.source.kind === "body" ? settings.source.body : null,
+    queue: new Map(),
+    wanted: new Set(),
+    failedKeys: new Set(),
+    waiting: new Map(),
+    bakedListeners: new Set(),
+    failureListeners: new Set(),
+    drafts:
+      settings.normals === "double" &&
+      settings.source.kind === "body" &&
+      (settings.source.normals ?? "baked") === "baked",
+    refining: new Map(),
+    refinements: new Map(),
+    waitingRefinements: new Map(),
+    refinedListeners: new Set(),
+    generation: 0,
+    terminated: false,
+  };
+}
+
+/** Drops `keyString`'s refinement of `lane`, queued, waiting or in flight. */
+function dropRefinementOf(lane: Lane, keyString: string): void {
+  lane.refining.delete(keyString);
+  lane.refinements.delete(keyString);
+  lane.waitingRefinements.delete(keyString);
+}
+
+/** Orders refinements: higher priority first, then the older lane's, then by key string. */
+function refinesBefore(
+  a: { readonly lane: Lane; readonly keyString: string; readonly r: RefineRequest },
+  b: { readonly lane: Lane; readonly keyString: string; readonly r: RefineRequest },
+): boolean {
+  if (a.r.priority !== b.r.priority) {
+    return a.r.priority > b.r.priority;
+  }
+  if (a.lane.index !== b.lane.index) {
+    return a.lane.index < b.lane.index;
   }
   return a.keyString < b.keyString;
+}
+
+/**
+ * One lane of a {@link HeightWorkerPool} (plan R10, R10.T16.b): a terrain pass's bakes, of its own
+ * settings, over the pool's queue, workers and fields.
+ *
+ * @remarks
+ * Its demand replaces its own alone; its bakes and failures reach its own listeners alone; and
+ * terminating it drops its queued, waiting and in-flight requests (an answer still to come is
+ * dropped as it arrives) and leaves the fields, the class-map queries and the other lanes. A pass
+ * rebuilt after a device loss terminates its lane and takes a new one, so that no field is posted
+ * again (decision-r10-live-path, D2).
+ */
+export interface HeightWorkerLane {
+  /** The settings every bake of the lane is sent with. */
+  readonly settings: BakeSettings;
+  /** The lane's current generation, which each new request is tagged with. */
+  readonly currentGeneration: number;
+  /** The lane's requests queued, not yet sent to a worker. */
+  readonly queuedCount: number;
+  /**
+   * How many of the lane's requests wait for a block of its body's field, which their surveys'
+   * margins are still to come in: patches waiting on a surveyed region's block, which Design note
+   * 16 counts toward `TERRAIN: STREAMING`.
+   */
+  readonly waitingCount: number;
+  /**
+   * Whether the pool can bake nothing more: every bake worker given up (`lostWorkers` equal to the
+   * pool's size, its readout worker apart), R10.T16.b's fault.
+   */
+  readonly unavailable: boolean;
+  /** Whether the lane, or its pool, was terminated. */
+  readonly terminated: boolean;
+  /**
+   * Queues one request, or re-scores it if queued already or waiting for a block; one in flight is
+   * left alone.
+   *
+   * @throws Error once the lane or its pool is terminated.
+   */
+  request(r: PatchRequest): void;
+  /**
+   * Replaces the lane's demand, once a frame: queues new requests, re-scores queued ones and drops
+   * those no longer in it; the other lanes' are untouched. Requests in flight are untouched, and
+   * their results are kept if their keys are still in the demand when they arrive.
+   *
+   * @throws Error once the lane or its pool is terminated.
+   */
+  reprioritise(demand: ReadonlyArray<PatchRequest>): void;
+  /**
+   * Drops every queued or waiting request of the lane, and every result yet to arrive, whose key is
+   * not in `keep`.
+   *
+   * @throws Error once the lane or its pool is terminated.
+   */
+  cancelStale(keep: ReadonlySet<string>): void;
+  /** Listens for the lane's bakes; returns the function that stops listening. */
+  onBaked(cb: (bake: BakedPatch) => void): () => void;
+  /** Listens for the lane's requests given up because their bake failed; returns the unsubscribe. */
+  onFailed(cb: (failure: BakeFailure) => void): () => void;
+  /**
+   * Asks for the normals a drafted bake of `r.key` left between its vertices, or re-scores the ask
+   * (plan R10, R10.T6.a's progressive bake). Refinements wait behind every bake of every lane, and
+   * go only to a worker with nothing in flight, so that no bake waits behind more than one; their
+   * answers reach {@link HeightWorkerLane.onRefined} with the ticket asked, a later ask of the key
+   * replacing an earlier one's.
+   *
+   * @throws Error once the lane or its pool is terminated.
+   */
+  refine(r: RefineRequest): void;
+  /** Drops `keyString`'s refinement, queued, waiting or in flight: its answer is not told. */
+  dropRefinement(keyString: string): void;
+  /** The lane's refinements asked and not yet told. */
+  readonly refiningCount: number;
+  /** Listens for the lane's refined normals; returns the function that stops listening. */
+  onRefined(cb: (refined: RefinedDraft) => void): () => void;
+  /**
+   * Ends the lane: drops its queued, waiting and in-flight requests and its listeners, and leaves
+   * the pool's fields, class-map queries and other lanes; a second call does nothing.
+   */
+  terminate(): void;
+}
+
+/** A listener set's adder, which returns the unsubscribe. */
+function listen<T>(listeners: Set<T>, listener: T): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+/**
+ * Tells every listener of `listeners` `value`, each whatever the one before threw: a listener that
+ * throws, a bug of its own, is reported, so that the others hear and the pool's message handler
+ * goes on to pump the queue (plan R10, R10.T16; the batch review's S4).
+ */
+function tell<T>(listeners: Iterable<(value: T) => void>, value: T, what: string): void {
+  for (const listener of listeners) {
+    try {
+      listener(value);
+    } catch (error: unknown) {
+      console.error(`a listener of the height workers' ${what} failed:`, error);
+    }
+  }
 }
 
 /**
  * The pool of height workers that bake patches for the cache.
  *
  * @remarks
- * Each frame the terrain pass calls {@link HeightWorkerPool.reprioritise} with the selection's
- * demand (the patches not yet resident); the pool hands bakes to {@link HeightWorkerPool.onBaked}'s
- * listeners, which insert them into the cache. A key whose bake failed is reported through
- * {@link HeightWorkerPool.onFailed} and not requested again. {@link HeightWorkerPool.terminate}
- * stops every worker and drops every listener.
+ * Each frame a terrain pass calls its lane's `reprioritise` (or, in a pool of one lane, the pool's
+ * {@link HeightWorkerPool.reprioritise}) with the selection's demand (the patches not yet
+ * resident); the pool hands bakes to the lane's `onBaked` listeners, which insert them into the
+ * cache. A key whose bake failed is reported through `onFailed` and not requested again by that
+ * lane. {@link HeightWorkerPool.terminate} stops every worker and drops every listener.
  */
 export class HeightWorkerPool {
   private readonly createWorker: () => WorkerLike;
-  private readonly settings: BakeSettings;
   private readonly slots: Slot[] = [];
-  private readonly queue = new Map<string, Queued>();
-  private readonly wanted = new Set<string>();
-  private readonly failedKeys = new Set<string>();
-  private readonly bakedListeners = new Set<(bake: BakedPatch) => void>();
-  private readonly failureListeners = new Set<(failure: BakeFailure) => void>();
-  private field: ArrayBuffer | null = null;
-  private fieldEpoch = 0;
-  private fieldPending: { readonly slot: Slot; readonly id: number } | null = null;
-  private generation = 0;
+  /** The live lanes, oldest first. */
+  private readonly lanes: Lane[] = [];
+  /** The pool's own lane, of the settings it was made with; `null` for a pool of lanes alone. */
+  private readonly own: Lane | null;
+  private readonly refusalListeners = new Set<(refusal: FieldRefusal) => void>();
+  private readonly changeListeners = new Set<(change: FieldChange) => void>();
+  private readonly fields = new Map<BodyIdHex, KeptField>();
+  private nextLane = 0;
   private nextId = 1;
   private terminated = false;
 
@@ -130,9 +568,12 @@ export class HeightWorkerPool {
       throw new Error(`a height-worker pool needs at least one worker, not ${opts.workers}`);
     }
     this.createWorker = opts.createWorker;
-    this.settings = opts.bake;
-    for (let n = 0; n < opts.workers; n += 1) {
+    this.own = opts.bake === undefined ? null : this.addLane(opts.bake);
+    // The readout worker first, the bake workers after it, as they were made before it.
+    const readout = opts.readoutWorker === true ? 1 : 0;
+    for (let n = 0; n < opts.workers + readout; n += 1) {
       const slot: Slot = {
+        bakes: n >= readout,
         worker: this.createWorker(),
         onMessage: (event) => {
           this.receive(slot, event.data);
@@ -141,7 +582,9 @@ export class HeightWorkerPool {
           this.replace(slot);
         },
         inFlight: new Map(),
-        hasField: false,
+        queries: new Map(),
+        posted: new Map(),
+        fieldBytes: 0,
         failures: 0,
         lost: false,
       };
@@ -150,14 +593,18 @@ export class HeightWorkerPool {
     }
   }
 
-  /** The current generation, which every new request is tagged with. */
+  /** The current generation of the pool's own lane, which every new request is tagged with. */
   get currentGeneration(): number {
-    return this.generation;
+    return this.own?.generation ?? 0;
   }
 
-  /** How many requests are queued, not yet sent to a worker. */
+  /** How many requests are queued, not yet sent to a worker, over every lane. */
   get queuedCount(): number {
-    return this.queue.size;
+    let n = 0;
+    for (const lane of this.lanes) {
+      n += lane.queue.size;
+    }
+    return n;
   }
 
   /** How many requests are in flight, over every worker. */
@@ -169,102 +616,376 @@ export class HeightWorkerPool {
     return n;
   }
 
+  /** How many bake workers the pool runs, given up or not: its size, its readout worker apart. */
+  get workerCount(): number {
+    return this.slots.filter((s) => s.bakes).length;
+  }
+
   /**
-   * How many workers were given up after failing {@link MAX_CONSECUTIVE_WORKER_FAILURES} times in a
-   * row; when it equals the pool's size, nothing more is baked.
+   * How many workers the pool runs, given up or not, its readout worker among them: every one is
+   * posted every body's field.
+   */
+  get slotCount(): number {
+    return this.slots.length;
+  }
+
+  /**
+   * How many bake workers were given up after failing {@link MAX_CONSECUTIVE_WORKER_FAILURES} times
+   * in a row; when it equals the pool's size, nothing more is baked.
    */
   get lostWorkers(): number {
-    return this.slots.filter((s) => s.lost).length;
-  }
-
-  /** Queues one request, or re-scores it if queued already; in flight, it is left alone. */
-  request(r: PatchRequest): void {
-    this.assertLive();
-    const keyString = patchKeyString(r.key);
-    if (this.failedKeys.has(keyString)) {
-      return;
-    }
-    this.wanted.add(keyString);
-    if (!this.isInFlight(keyString)) {
-      this.queue.set(keyString, { request: r, keyString });
-    }
-    this.pump();
+    return this.slots.filter((s) => s.bakes && s.lost).length;
   }
 
   /**
-   * Replaces the demand, once a frame: queues new requests, re-scores queued ones and drops those
-   * no longer in the demand. Requests in flight are untouched, and their results are kept if their
-   * keys are still in the demand when they arrive.
+   * The workers' copies of every body's field together, bytes, as each running worker last
+   * reported its own (R10.T14; R12 Design note 6's line for the field in the workers).
+   */
+  get fieldResidentBytes(): number {
+    let bytes = 0;
+    for (const slot of this.slots) {
+      bytes += slot.lost ? 0 : slot.fieldBytes;
+    }
+    return bytes;
+  }
+
+  /** The bodies whose fields the pool keeps, in the order they were started. */
+  get fieldBodies(): ReadonlyArray<BodyIdHex> {
+    return [...this.fields.keys()];
+  }
+
+  /**
+   * The pool's own copy of every body's field together, bytes: each kept field's blocks, held on
+   * the render thread for a worker that replaces a failed one (R10.T7's "The pool's own copy"; R10.T14
+   * and R12 Design note 6 state it beside {@link HeightWorkerPool.fieldResidentBytes}).
+   */
+  get keptFieldBytes(): number {
+    let bytes = 0;
+    for (const kept of this.fields.values()) {
+      for (const block of kept.blocks) {
+        bytes += block.byteLength;
+      }
+    }
+    return bytes;
+  }
+
+  /**
+   * How many requests wait for a block of their source body's field, which their surveys' margins
+   * are still to come in, over every lane: patches waiting on a surveyed region's chunk, which R10's
+   * Design note 16 counts toward R05's `TERRAIN: STREAMING`.
+   */
+  get waitingCount(): number {
+    let n = 0;
+    for (const lane of this.lanes) {
+      n += lane.waiting.size;
+    }
+    return n;
+  }
+
+  /**
+   * The blocks posted to running workers that they have still to answer: what of the fields the
+   * workers have yet to take.
+   */
+  get blocksInFlight(): number {
+    let n = 0;
+    for (const slot of this.slots) {
+      n += slot.posted.size;
+    }
+    return n;
+  }
+
+  /**
+   * `body`'s level table, 25 × 4 as the test planet's `levelTable`, as its field's latest block
+   * reported it (R10.T6.b; T4.b's selection reads it); `null` before any, or with no field kept.
+   */
+  fieldLevels(body: BodyIdHex): Float64Array | null {
+    return this.fields.get(body)?.bounds?.table ?? null;
+  }
+
+  /**
+   * `body`'s level bounds, its level table ({@link fieldLevels}) with its σ by level and level
+   * charge, as its field's latest block reported them (plan R10, R10.T4.b; plan R09, R09.T8.d
+   * (b3); `levelBounds.ts`); `null` before any, or with no field kept.
+   */
+  fieldBounds(body: BodyIdHex): LevelBounds | null {
+    return this.fields.get(body)?.bounds ?? null;
+  }
+
+  /**
+   * How many of this start of `body`'s field's blocks are posted, and how many of them have had
+   * their changes reported ({@link HeightWorkerPool.onFieldChange}), in order from the first;
+   * `null` with no field kept (R10.T16.b: the session holds a coverage back until the workers have
+   * taken the blocks posted before it).
+   */
+  fieldBlocks(body: BodyIdHex): { readonly posted: number; readonly reported: number } | null {
+    const kept = this.fields.get(body);
+    return kept === undefined ? null : { posted: kept.blocks.length, reported: kept.reported };
+  }
+
+  /**
+   * A lane of bakes of `bake`'s settings over the pool's queue, workers and fields (R10.T16.b): a
+   * terrain pass's, which it terminates when it is rebuilt or disposed.
+   *
+   * @throws Error once the pool is terminated.
+   */
+  lane(bake: BakeSettings): HeightWorkerLane {
+    this.assertLive();
+    const lane = this.addLane(bake);
+    // The object's getters bind `this` to the object, so the pool's state is read through arrows.
+    const unavailable = (): boolean => this.lostWorkers === this.workerCount;
+    return {
+      settings: bake,
+      get currentGeneration(): number {
+        return lane.generation;
+      },
+      get queuedCount(): number {
+        return lane.queue.size;
+      },
+      get waitingCount(): number {
+        return lane.waiting.size;
+      },
+      get unavailable(): boolean {
+        return unavailable();
+      },
+      get terminated(): boolean {
+        return lane.terminated;
+      },
+      request: (r) => {
+        this.laneRequest(lane, r);
+      },
+      reprioritise: (demand) => {
+        this.laneReprioritise(lane, demand);
+      },
+      cancelStale: (keep) => {
+        this.laneCancelStale(lane, keep);
+      },
+      onBaked: (cb) => listen(lane.bakedListeners, cb),
+      onFailed: (cb) => listen(lane.failureListeners, cb),
+      refine: (r) => {
+        this.laneRefine(lane, r);
+      },
+      dropRefinement: (keyString) => {
+        dropRefinementOf(lane, keyString);
+      },
+      get refiningCount(): number {
+        return lane.refining.size;
+      },
+      onRefined: (cb) => listen(lane.refinedListeners, cb),
+      terminate: () => {
+        this.dropLane(lane);
+      },
+    };
+  }
+
+  /**
+   * Queues one request of the pool's own lane, or re-scores it if queued already or waiting for a
+   * block; one in flight is left alone.
+   *
+   * @throws Error once the pool is terminated, or for a pool made without bake settings.
+   */
+  request(r: PatchRequest): void {
+    this.laneRequest(this.ownLane(), r);
+  }
+
+  /**
+   * Replaces the pool's own lane's demand, once a frame: queues new requests, re-scores queued ones
+   * and drops those no longer in the demand. Requests in flight are untouched, and their results are
+   * kept if their keys are still in the demand when they arrive.
+   *
+   * @throws Error once the pool is terminated, or for a pool made without bake settings.
    */
   reprioritise(demand: ReadonlyArray<PatchRequest>): void {
-    this.assertLive();
-    this.generation += 1;
-    this.wanted.clear();
-    this.queue.clear();
-    for (const request of demand) {
-      const keyString = patchKeyString(request.key);
-      if (this.failedKeys.has(keyString)) {
-        continue;
-      }
-      this.wanted.add(keyString);
-      if (!this.isInFlight(keyString)) {
-        this.queue.set(keyString, { request, keyString });
-      }
-    }
-    this.pump();
-  }
-
-  /** Drops every queued request, and every result yet to arrive, whose key is not in `keep`. */
-  cancelStale(keep: ReadonlySet<string>): void {
-    this.assertLive();
-    for (const keyString of this.queue.keys()) {
-      if (!keep.has(keyString)) {
-        this.queue.delete(keyString);
-      }
-    }
-    for (const keyString of this.wanted) {
-      if (!keep.has(keyString)) {
-        this.wanted.delete(keyString);
-      }
-    }
-  }
-
-  /** Listens for bakes; returns the function that stops listening. */
-  onBaked(cb: (bake: BakedPatch) => void): () => void {
-    this.bakedListeners.add(cb);
-    return () => {
-      this.bakedListeners.delete(cb);
-    };
-  }
-
-  /** Listens for requests given up because their bake failed; returns the unsubscribe. */
-  onFailed(cb: (failure: BakeFailure) => void): () => void {
-    this.failureListeners.add(cb);
-    return () => {
-      this.failureListeners.delete(cb);
-    };
+    this.laneReprioritise(this.ownLane(), demand);
   }
 
   /**
-   * Posts the coarse field to every worker in turn, each copy acknowledged before the next.
+   * Drops every queued or waiting request of the pool's own lane, and every result yet to arrive,
+   * whose key is not in `keep`.
    *
-   * @remarks
-   * The pool keeps `bytes`, about 15 MB on the render thread, so that a worker started later, to
-   * replace a failed one, gets it too. A second call replaces the field in every worker, and bakes
-   * in flight from the old field are baked again.
+   * @throws Error once the pool is terminated, or for a pool made without bake settings.
    */
-  postField(bytes: ArrayBuffer): void {
-    this.assertLive();
-    this.field = bytes;
-    this.fieldEpoch += 1;
-    for (const slot of this.slots) {
-      slot.hasField = false;
-    }
-    this.fieldPending = null;
-    this.postNextField();
+  cancelStale(keep: ReadonlySet<string>): void {
+    this.laneCancelStale(this.ownLane(), keep);
   }
 
-  /** Stops every worker and drops every listener; the pool cannot be used afterwards. */
+  /**
+   * Listens for the bakes of the pool's own lane; returns the function that stops listening. A pool
+   * made without bake settings has none to tell of.
+   */
+  onBaked(cb: (bake: BakedPatch) => void): () => void {
+    return this.own === null ? () => undefined : listen(this.own.bakedListeners, cb);
+  }
+
+  /** Listens for the own lane's requests given up because their bake failed; returns the unsubscribe. */
+  onFailed(cb: (failure: BakeFailure) => void): () => void {
+    return this.own === null ? () => undefined : listen(this.own.failureListeners, cb);
+  }
+
+  /**
+   * {@link HeightWorkerLane.refine} of the pool's own lane.
+   *
+   * @throws Error once the pool is terminated, or for a pool made without bake settings.
+   */
+  refine(r: RefineRequest): void {
+    this.laneRefine(this.ownLane(), r);
+  }
+
+  /** {@link HeightWorkerLane.dropRefinement} of the pool's own lane; none for a pool without one. */
+  dropRefinement(keyString: string): void {
+    if (this.own !== null) {
+      dropRefinementOf(this.own, keyString);
+    }
+  }
+
+  /** {@link HeightWorkerLane.refiningCount} of the pool's own lane; 0 for a pool without one. */
+  get refiningCount(): number {
+    return this.own?.refining.size ?? 0;
+  }
+
+  /** Listens for the own lane's refined normals; returns the unsubscribe. */
+  onRefined(cb: (refined: RefinedDraft) => void): () => void {
+    return this.own === null ? () => undefined : listen(this.own.refinedListeners, cb);
+  }
+
+  /** Listens for a body's field refused by a worker; returns the unsubscribe. */
+  onFieldRefused(cb: (refusal: FieldRefusal) => void): () => void {
+    return listen(this.refusalListeners, cb);
+  }
+
+  /**
+   * Listens for each block of a payload the workers have taken, once a block, with what it changed
+   * of the survey; returns the unsubscribe. The bakes delivered before it that R10's rebake rule
+   * makes stale (`rebake.ts`'s `needsRebake`) are the listener's to ask again.
+   */
+  onFieldChange(cb: (change: FieldChange) => void): () => void {
+    return listen(this.changeListeners, cb);
+  }
+
+  /**
+   * Starts `body`'s field in every worker from its first block, R09's block 0 of the first payload
+   * (Design note 16), cloned to each; or, as a `stand-in`, a block of no payload that the workers
+   * hold undecoded (the descent spike's synthetic field, R10.T7).
+   *
+   * @remarks
+   * The pool keeps the body's blocks on the render thread, about 12 MB for an Earth (R09 Design
+   * note 17), so that a worker started later, to replace a failed one, gets them too. Bakes of the
+   * body in flight are baked again once they arrive; requests waiting for its field are sent. The
+   * workers survey the body's σ by level only where the selection rule in force reads it
+   * (`sigmaSurveyOf(SELECTION_RULE)`, R10.T4.c): under the hard rule they skip it, and σ is 0.
+   *
+   * @throws Error if `body`'s field is already started: release it first.
+   */
+  fieldInit(body: BodyIdHex, block: ArrayBuffer, form: FieldForm = "payload"): void {
+    this.assertLive();
+    if (this.fields.has(body)) {
+      throw new Error(`the field of ${body} is already started; release it first`);
+    }
+    const kept: KeptField = {
+      blocks: [block],
+      form,
+      sigma: sigmaSurveyOf(SELECTION_RULE),
+      sinceId: this.nextId,
+      refused: false,
+      reported: 0,
+      bounds: null,
+    };
+    this.fields.set(body, kept);
+    for (const slot of this.slots) {
+      this.postBlock(slot, body, kept, 0);
+    }
+    this.afterBlock(body);
+  }
+
+  /**
+   * Adds one more block to `body`'s field in every worker: any block after the first, a later
+   * payload's block 0 included. Requests waiting for the body's field are sent again after it.
+   *
+   * @throws Error if `body`'s field was not started with {@link HeightWorkerPool.fieldInit}.
+   */
+  fieldChunk(body: BodyIdHex, block: ArrayBuffer): void {
+    this.assertLive();
+    const kept = this.fields.get(body);
+    if (kept === undefined) {
+      throw new Error(`a block of ${body} was posted before its field was started`);
+    }
+    kept.blocks.push(block);
+    const sequence = kept.blocks.length - 1;
+    for (const slot of this.slots) {
+      this.postBlock(slot, body, kept, sequence);
+    }
+    this.afterBlock(body);
+  }
+
+  /** Drops `body`'s field from every worker and from the pool; a body not started is no error. */
+  fieldRelease(body: BodyIdHex): void {
+    this.assertLive();
+    if (!this.fields.delete(body)) {
+      return;
+    }
+    for (const lane of this.lanes) {
+      if (lane.sourceBody === body) {
+        // Nothing waits for a field that is gone: the next demand asks again, held until it starts.
+        lane.waiting.clear();
+      }
+    }
+    for (const slot of this.slots) {
+      if (!slot.lost) {
+        slot.worker.postMessage({ kind: "field-release", id: this.takeId(), body }, []);
+      }
+    }
+  }
+
+  /**
+   * `body`'s coarse class map for R07's disc (plan R10, T10.d), answered by one worker over the field
+   * it holds of the body with the body's detail seed `detailSeed`: the least loaded running worker,
+   * posted after every block posted so far, which it reads.
+   *
+   * @remarks
+   * A worker that fails before it answers is replaced and the query asked again, of its replacement
+   * once the fields are posted to it, or of another worker where its place is given up. A pool
+   * terminated before the answer answers `null`.
+   *
+   * @returns The map, or `null` where the pool keeps no field of `body`, no worker runs, or the
+   *   worker holds no payload field of it; rejected with the module's message where the module
+   *   refused the query.
+   */
+  classMap(body: BodyIdHex, detailSeed: DetailSeedHex): Promise<ClassMapAnswer | null> {
+    this.assertLive();
+    if (!this.fields.has(body)) {
+      return Promise.resolve(null);
+    }
+    return new Promise((resolve, reject) => {
+      this.postQuery({ kind: "class-map", body, detailSeed, resolve, reject });
+    });
+  }
+
+  /**
+   * A view's terrain readout of `body` where `query`'s line of sight meets its ground (plan R10,
+   * T12), answered by one worker over the field it holds of the body with the body's detail seed
+   * `detailSeed`, as {@link HeightWorkerPool.classMap} is: the readout worker where the pool runs one
+   * (R10.T12.c), else the least loaded running worker, posted after every block posted so far, and
+   * asked again of a failed worker's replacement.
+   *
+   * @returns The readout, or `null` where the pool keeps no field of `body`, no worker runs, or the
+   *   pool is terminated before the answer; rejected with the module's message where it refused an
+   *   argument out of its range.
+   * @throws Error once the pool is terminated.
+   */
+  groundReadout(
+    body: BodyIdHex,
+    detailSeed: DetailSeedHex,
+    query: GroundReadoutQuery,
+  ): Promise<SurfaceGroundReadout | null> {
+    this.assertLive();
+    if (!this.fields.has(body)) {
+      return Promise.resolve(null);
+    }
+    return new Promise((resolve, reject) => {
+      this.postQuery({ kind: "ground-readout", body, detailSeed, query, resolve, reject });
+    });
+  }
+
+  /** Stops every worker and drops every lane and listener; the pool cannot be used afterwards. */
   terminate(): void {
     if (this.terminated) {
       return;
@@ -274,13 +995,125 @@ export class HeightWorkerPool {
       this.detach(slot);
       slot.worker.terminate();
       slot.inFlight.clear();
+      slot.posted.clear();
+      for (const query of slot.queries.values()) {
+        query.resolve(null);
+      }
+      slot.queries.clear();
     }
-    this.queue.clear();
-    this.wanted.clear();
-    this.bakedListeners.clear();
-    this.failureListeners.clear();
-    this.field = null;
-    this.fieldPending = null;
+    for (const lane of this.lanes) {
+      this.clearLane(lane);
+    }
+    this.lanes.length = 0;
+    this.refusalListeners.clear();
+    this.changeListeners.clear();
+    this.fields.clear();
+  }
+
+  /** {@link HeightWorkerLane.request} of `lane`. */
+  private laneRequest(lane: Lane, r: PatchRequest): void {
+    this.assertLane(lane);
+    const keyString = patchKeyString(r.key);
+    if (lane.failedKeys.has(keyString)) {
+      return;
+    }
+    lane.wanted.add(keyString);
+    if (lane.waiting.has(keyString)) {
+      lane.waiting.set(keyString, r);
+    } else if (!this.isInFlight(lane, keyString)) {
+      lane.queue.set(keyString, { request: r, keyString });
+    }
+    this.pump();
+  }
+
+  /** {@link HeightWorkerLane.refine} of `lane`. */
+  private laneRefine(lane: Lane, r: RefineRequest): void {
+    this.assertLane(lane);
+    const keyString = patchKeyString(r.key);
+    lane.refining.set(keyString, r);
+    if (lane.waitingRefinements.has(keyString)) {
+      lane.waitingRefinements.set(keyString, r);
+    } else if (!this.isRefining(lane, keyString)) {
+      lane.refinements.set(keyString, r);
+    }
+    this.pump();
+  }
+
+  /** {@link HeightWorkerLane.reprioritise} of `lane`. */
+  private laneReprioritise(lane: Lane, demand: ReadonlyArray<PatchRequest>): void {
+    this.assertLane(lane);
+    lane.generation += 1;
+    lane.wanted.clear();
+    lane.queue.clear();
+    const waited = new Map(lane.waiting);
+    lane.waiting.clear();
+    for (const request of demand) {
+      const keyString = patchKeyString(request.key);
+      if (lane.failedKeys.has(keyString)) {
+        continue;
+      }
+      lane.wanted.add(keyString);
+      if (waited.has(keyString)) {
+        // Still waiting for the field's next block: asking again before it would be refused again.
+        lane.waiting.set(keyString, request);
+      } else if (!this.isInFlight(lane, keyString)) {
+        lane.queue.set(keyString, { request, keyString });
+      }
+    }
+    this.pump();
+  }
+
+  /** {@link HeightWorkerLane.cancelStale} of `lane`. */
+  private laneCancelStale(lane: Lane, keep: ReadonlySet<string>): void {
+    this.assertLane(lane);
+    for (const keyString of lane.queue.keys()) {
+      if (!keep.has(keyString)) {
+        lane.queue.delete(keyString);
+      }
+    }
+    for (const keyString of lane.waiting.keys()) {
+      if (!keep.has(keyString)) {
+        lane.waiting.delete(keyString);
+      }
+    }
+    for (const keyString of lane.wanted) {
+      if (!keep.has(keyString)) {
+        lane.wanted.delete(keyString);
+      }
+    }
+  }
+
+  private addLane(bake: BakeSettings): Lane {
+    const lane = newLane(this.nextLane, bake);
+    this.nextLane += 1;
+    this.lanes.push(lane);
+    return lane;
+  }
+
+  /** Ends `lane`: its requests and listeners dropped; its answers still to come are dropped too. */
+  private dropLane(lane: Lane): void {
+    if (lane.terminated) {
+      return;
+    }
+    this.clearLane(lane);
+    const at = this.lanes.indexOf(lane);
+    if (at >= 0) {
+      this.lanes.splice(at, 1);
+    }
+    this.pump();
+  }
+
+  private clearLane(lane: Lane): void {
+    lane.terminated = true;
+    lane.queue.clear();
+    lane.waiting.clear();
+    lane.wanted.clear();
+    lane.bakedListeners.clear();
+    lane.failureListeners.clear();
+    lane.refining.clear();
+    lane.refinements.clear();
+    lane.waitingRefinements.clear();
+    lane.refinedListeners.clear();
   }
 
   private assertLive(): void {
@@ -289,10 +1122,42 @@ export class HeightWorkerPool {
     }
   }
 
-  private isInFlight(keyString: string): boolean {
+  private assertLane(lane: Lane): void {
+    this.assertLive();
+    if (lane.terminated) {
+      throw new Error("the height-worker lane was terminated");
+    }
+  }
+
+  /** The pool's own lane, of a pool made with bake settings. */
+  private ownLane(): Lane {
+    this.assertLive();
+    if (this.own === null) {
+      throw new Error(
+        "the height-worker pool was made without bake settings: it holds fields and answers class maps, and bakes through its lanes alone",
+      );
+    }
+    return this.own;
+  }
+
+  /** Whether a bake of `keyString` of `lane` is in flight. */
+  private isInFlight(lane: Lane, keyString: string): boolean {
+    return this.inFlightOf(lane, keyString, "bake");
+  }
+
+  /** Whether a refinement of `keyString` of `lane` is in flight. */
+  private isRefining(lane: Lane, keyString: string): boolean {
+    return this.inFlightOf(lane, keyString, "refine");
+  }
+
+  private inFlightOf(lane: Lane, keyString: string, kind: "bake" | "refine"): boolean {
     for (const slot of this.slots) {
       for (const inFlight of slot.inFlight.values()) {
-        if (inFlight.keyString === keyString) {
+        if (
+          inFlight.lane === lane &&
+          inFlight.keyString === keyString &&
+          (inFlight.refine === null) === (kind === "bake")
+        ) {
           return true;
         }
       }
@@ -310,14 +1175,10 @@ export class HeightWorkerPool {
     slot.worker.removeEventListener("error", slot.onError);
   }
 
-  /** Whether a worker may be sent a bake: running, and holding the field if one was posted. */
-  private canBake(slot: Slot): boolean {
-    return !slot.lost && (this.field === null || slot.hasField);
-  }
-
   /**
    * Hands queued requests to workers with room, the best request first, one a worker a round and
-   * the least loaded workers first, so that no worker idles while another holds two.
+   * the least loaded workers first, so that no worker idles while another holds two; once no bake
+   * is queued, the best refinements to the workers with nothing in flight.
    */
   private pump(): void {
     if (this.terminated) {
@@ -325,55 +1186,162 @@ export class HeightWorkerPool {
     }
     for (let load = 0; load < MAX_IN_FLIGHT_PER_WORKER; load += 1) {
       for (const slot of this.slots) {
-        if (slot.inFlight.size !== load || !this.canBake(slot)) {
+        if (!slot.bakes || slot.inFlight.size !== load || slot.lost) {
           continue;
         }
         const next = this.best();
-        if (next === null) {
+        if (next !== null) {
+          this.send(slot, next);
+          continue;
+        }
+        const refine = load === 0 ? this.bestRefinement() : null;
+        if (refine === null) {
           return;
         }
-        this.send(slot, next);
+        this.sendRefinement(slot, refine.lane, refine.keyString, refine.r);
       }
     }
   }
 
-  private send(slot: Slot, next: Queued): void {
-    this.queue.delete(next.keyString);
-    const inFlight: InFlight = {
-      id: this.nextId,
-      request: next.request,
-      keyString: next.keyString,
-      generation: this.generation,
-      fieldEpoch: this.fieldEpoch,
-    };
-    this.nextId += 1;
-    slot.inFlight.set(inFlight.id, inFlight);
-    slot.worker.postMessage(
-      {
-        kind: "bake",
-        id: inFlight.id,
-        key: next.request.key,
-        generation: inFlight.generation,
-        settings: this.settings,
-      },
-      [],
-    );
-  }
-
-  private best(): Queued | null {
-    let best: Queued | null = null;
-    for (const queued of this.queue.values()) {
-      if (best === null || before(queued, best)) {
-        best = queued;
+  /** The best queued refinement over every lane whose body's field is started, or `null`. */
+  private bestRefinement(): {
+    readonly lane: Lane;
+    readonly keyString: string;
+    readonly r: RefineRequest;
+  } | null {
+    let best: {
+      readonly lane: Lane;
+      readonly keyString: string;
+      readonly r: RefineRequest;
+    } | null = null;
+    for (const lane of this.lanes) {
+      if (lane.sourceBody === null || !this.fields.has(lane.sourceBody)) {
+        continue;
+      }
+      for (const [keyString, r] of lane.refinements) {
+        const candidate = { lane, keyString, r };
+        if (best === null || refinesBefore(candidate, best)) {
+          best = candidate;
+        }
       }
     }
     return best;
   }
 
-  /** Puts a request back in the queue if its key is still wanted and not queued already. */
+  private sendRefinement(slot: Slot, lane: Lane, keyString: string, r: RefineRequest): void {
+    lane.refinements.delete(keyString);
+    const field = this.sourceField(lane);
+    const inFlight: InFlight = {
+      id: this.takeId(),
+      lane,
+      request: { key: r.key, priority: r.priority, forced: false },
+      refine: r,
+      keyString,
+      generation: lane.generation,
+      field,
+      blocksAtSend: field?.blocks.length ?? 0,
+    };
+    slot.inFlight.set(inFlight.id, inFlight);
+    slot.worker.postMessage(
+      {
+        kind: "refine-normals",
+        id: inFlight.id,
+        key: r.key,
+        generation: inFlight.generation,
+        settings: lane.settings,
+      },
+      [],
+    );
+  }
+
+  private send(slot: Slot, next: Candidate): void {
+    const { lane, queued } = next;
+    lane.queue.delete(queued.keyString);
+    // A draft while other bakes wait behind it: its first draw at half a whole bake's cost, its
+    // normals between the vertices after them (R10.T6.a's progressive bake).
+    const draft = lane.drafts && this.best() !== null;
+    const field = this.sourceField(lane);
+    const inFlight: InFlight = {
+      id: this.takeId(),
+      lane,
+      request: queued.request,
+      refine: null,
+      keyString: queued.keyString,
+      generation: lane.generation,
+      field,
+      blocksAtSend: field?.blocks.length ?? 0,
+    };
+    slot.inFlight.set(inFlight.id, inFlight);
+    slot.worker.postMessage(
+      {
+        kind: "bake",
+        id: inFlight.id,
+        key: queued.request.key,
+        generation: inFlight.generation,
+        settings: lane.settings,
+        ...(draft ? { draft: true } : {}),
+      },
+      [],
+    );
+  }
+
+  /**
+   * The best queued request over every lane whose bakes can be made now: the first by
+   * {@link before}, unless that is a refinement, neither forced nor filling a hole, and another lane
+   * has a hole to fill, whose best hole by {@link before} then goes first (the per-pass share,
+   * R10.T14.b). So a lane never jumps its own refinements, and one lane alone keeps R05's order.
+   */
+  private best(): Candidate | null {
+    let best: Candidate | null = null;
+    // Each lane's best request that fills a hole, at most one a lane.
+    const holes: Candidate[] = [];
+    for (const lane of this.lanes) {
+      // A body's patches are baked over its field, so none is sent before the field is started.
+      if (lane.sourceBody !== null && !this.fields.has(lane.sourceBody)) {
+        continue;
+      }
+      let hole: Candidate | null = null;
+      for (const queued of lane.queue.values()) {
+        const candidate = { lane, queued };
+        if (best === null || before(candidate, best)) {
+          best = candidate;
+        }
+        if (fillsHole(queued.request) && (hole === null || before(candidate, hole))) {
+          hole = candidate;
+        }
+      }
+      if (hole !== null) {
+        holes.push(hole);
+      }
+    }
+    if (best === null || best.queued.request.forced || fillsHole(best.queued.request)) {
+      return best;
+    }
+    let share: Candidate | null = null;
+    for (const hole of holes) {
+      if (hole.lane !== best.lane && (share === null || before(hole, share))) {
+        share = hole;
+      }
+    }
+    return share ?? best;
+  }
+
+  /** Puts a request back in its lane's queue if its key is still wanted and not queued already. */
   private requeue(inFlight: InFlight): void {
-    if (this.wanted.has(inFlight.keyString) && !this.queue.has(inFlight.keyString)) {
-      this.queue.set(inFlight.keyString, {
+    const { lane } = inFlight;
+    if (inFlight.refine !== null) {
+      const asked = lane.refining.get(inFlight.keyString);
+      if (!lane.terminated && asked !== undefined && !lane.refinements.has(inFlight.keyString)) {
+        lane.refinements.set(inFlight.keyString, asked);
+      }
+      return;
+    }
+    if (
+      !lane.terminated &&
+      lane.wanted.has(inFlight.keyString) &&
+      !lane.queue.has(inFlight.keyString)
+    ) {
+      lane.queue.set(inFlight.keyString, {
         request: inFlight.request,
         keyString: inFlight.keyString,
       });
@@ -382,50 +1350,182 @@ export class HeightWorkerPool {
 
   private receive(slot: Slot, reply: HeightWorkerReply): void {
     slot.failures = 0;
-    switch (reply.kind) {
-      case "baked": {
-        const inFlight = slot.inFlight.get(reply.id);
-        slot.inFlight.delete(reply.id);
-        if (inFlight === undefined) {
-          break;
-        }
-        if (inFlight.fieldEpoch !== this.fieldEpoch) {
-          this.requeue(inFlight);
-        } else if (this.wanted.has(inFlight.keyString)) {
-          this.wanted.delete(inFlight.keyString);
-          for (const listener of this.bakedListeners) {
-            listener(reply.bake);
-          }
-        }
-        break;
-      }
-      case "bake-failed": {
-        const inFlight = slot.inFlight.get(reply.id);
-        slot.inFlight.delete(reply.id);
-        if (inFlight !== undefined) {
-          this.wanted.delete(inFlight.keyString);
-          this.failedKeys.add(inFlight.keyString);
-          const failure = { keyString: inFlight.keyString, message: reply.message };
-          for (const listener of this.failureListeners) {
-            listener(failure);
-          }
-        }
-        break;
-      }
-      case "field-loaded":
-        if (this.fieldPending !== null && this.fieldPending.id === reply.id) {
-          this.fieldPending.slot.hasField = true;
-          this.fieldPending = null;
-          this.postNextField();
-        }
-        break;
-    }
+    this.take(slot, reply);
     this.pump();
   }
 
   /**
-   * Replaces a failed worker, re-queueing its requests still wanted and re-posting the field, or
-   * gives its place up after {@link MAX_CONSECUTIVE_WORKER_FAILURES} failures in a row.
+   * Takes one reply of `slot`'s worker. Every kind returns from its case, so that a kind the switch
+   * does not take is a compile error at {@link unreachable}, not a reply dropped unseen.
+   */
+  private take(slot: Slot, reply: HeightWorkerReply): void {
+    switch (reply.kind) {
+      case "baked": {
+        const inFlight = slot.inFlight.get(reply.id);
+        slot.inFlight.delete(reply.id);
+        if (inFlight === undefined || inFlight.lane.terminated || inFlight.refine !== null) {
+          return;
+        }
+        const { lane } = inFlight;
+        if (this.madeStale(inFlight, reply.bake.layers)) {
+          this.requeue(inFlight);
+        } else if (lane.wanted.has(inFlight.keyString)) {
+          lane.wanted.delete(inFlight.keyString);
+          tell(lane.bakedListeners, reply.bake, "bakes");
+        }
+        return;
+      }
+      case "normals-refined": {
+        const inFlight = slot.inFlight.get(reply.id);
+        slot.inFlight.delete(reply.id);
+        if (inFlight === undefined || inFlight.lane.terminated || inFlight.refine === null) {
+          return;
+        }
+        const { lane, keyString } = inFlight;
+        const asked = lane.refining.get(keyString);
+        if (asked === undefined || lane.refinements.has(keyString)) {
+          // Dropped, or asked again since with a ticket of its own, which is queued.
+          return;
+        }
+        const { refined } = reply;
+        if (this.refineStale(inFlight, refined.complete)) {
+          this.requeue(inFlight);
+          return;
+        }
+        lane.refining.delete(keyString);
+        const told: RefinedDraft = {
+          key: refined.key,
+          ticket: asked.ticket,
+          normals: refined.normals,
+          complete: refined.complete,
+        };
+        tell(lane.refinedListeners, told, "refined normals");
+        return;
+      }
+      case "bake-unsurveyed": {
+        const inFlight = slot.inFlight.get(reply.id);
+        slot.inFlight.delete(reply.id);
+        if (inFlight === undefined || inFlight.lane.terminated) {
+          return;
+        }
+        const field = this.sourceField(inFlight.lane);
+        if (
+          field !== inFlight.field ||
+          field === null ||
+          field.blocks.length > inFlight.blocksAtSend
+        ) {
+          // A block came since, which may hold what it lacked, or the field started anew.
+          this.requeue(inFlight);
+        } else if (inFlight.refine !== null) {
+          const asked = inFlight.lane.refining.get(inFlight.keyString);
+          if (asked !== undefined) {
+            inFlight.lane.waitingRefinements.set(inFlight.keyString, asked);
+          }
+        } else if (inFlight.lane.wanted.has(inFlight.keyString)) {
+          inFlight.lane.waiting.set(inFlight.keyString, inFlight.request);
+        }
+        return;
+      }
+      case "bake-failed": {
+        const inFlight = slot.inFlight.get(reply.id);
+        slot.inFlight.delete(reply.id);
+        if (inFlight?.refine !== null && inFlight?.refine !== undefined) {
+          // A refinement refused: the draft stays drawn, a shading loss alone (R05 Design note 25).
+          inFlight.lane.refining.delete(inFlight.keyString);
+          return;
+        }
+        if (inFlight !== undefined && !inFlight.lane.terminated) {
+          const { lane } = inFlight;
+          lane.wanted.delete(inFlight.keyString);
+          lane.failedKeys.add(inFlight.keyString);
+          const failure = { keyString: inFlight.keyString, message: reply.message };
+          tell(lane.failureListeners, failure, "failed bakes");
+        }
+        return;
+      }
+      case "field-held": {
+        slot.fieldBytes = reply.heldBytes;
+        const posted = slot.posted.get(reply.id);
+        slot.posted.delete(reply.id);
+        if (posted !== undefined && reply.block !== null) {
+          this.report(posted, reply.block);
+        }
+        return;
+      }
+      case "class-map": {
+        const query = this.answered(slot, reply);
+        if (query?.kind === "class-map") {
+          query.resolve(reply.map);
+        }
+        return;
+      }
+      case "ground-readout": {
+        const query = this.answered(slot, reply);
+        if (query?.kind === "ground-readout") {
+          query.resolve(reply.readout);
+        }
+        return;
+      }
+      case "class-map-failed": {
+        const query = this.answered(slot, reply);
+        if (query?.kind === "class-map") {
+          query.reject(new Error(`the class map of ${reply.body} was refused: ${reply.message}`));
+        }
+        return;
+      }
+      case "ground-readout-failed": {
+        const query = this.answered(slot, reply);
+        if (query?.kind === "ground-readout") {
+          query.reject(
+            new Error(`the ground readout of ${reply.body} was refused: ${reply.message}`),
+          );
+        }
+        return;
+      }
+      case "field-refused": {
+        slot.fieldBytes = reply.heldBytes;
+        slot.posted.delete(reply.id);
+        const kept = this.fields.get(reply.body);
+        if (kept !== undefined && reply.id >= kept.sinceId && !kept.refused) {
+          kept.refused = true;
+          const refusal = { body: reply.body, message: reply.message };
+          tell(this.refusalListeners, refusal, "refused fields");
+        }
+        return;
+      }
+    }
+    unreachable(reply);
+  }
+
+  /**
+   * The query `reply` answers, taken from `slot`'s, or `undefined` where none is pending under its
+   * ID. A reply of another kind than the query's is a bug of the worker's: the query is rejected
+   * naming it, and `undefined` returned, so that no query waits forever on a wrong answer.
+   */
+  private answered(
+    slot: Slot,
+    reply: Extract<
+      HeightWorkerReply,
+      { kind: "class-map" | "class-map-failed" | "ground-readout" | "ground-readout-failed" }
+    >,
+  ): PendingQuery | undefined {
+    const query = slot.queries.get(reply.id);
+    slot.queries.delete(reply.id);
+    if (query === undefined) {
+      return undefined;
+    }
+    const answers = reply.kind === query.kind || reply.kind === `${query.kind}-failed`;
+    if (!answers) {
+      query.reject(new Error(`a ${query.kind} query of ${reply.body} was answered ${reply.kind}`));
+      return undefined;
+    }
+    return query;
+  }
+
+  /**
+   * Replaces a failed worker, re-queueing its requests still wanted in their lanes and re-posting
+   * every body's field, or gives its place up after {@link MAX_CONSECUTIVE_WORKER_FAILURES}
+   * failures in a row.
    */
   private replace(slot: Slot): void {
     if (this.terminated || slot.lost) {
@@ -437,34 +1537,162 @@ export class HeightWorkerPool {
       this.requeue(inFlight);
     }
     slot.inFlight.clear();
-    slot.hasField = false;
-    if (this.fieldPending !== null && this.fieldPending.slot === slot) {
-      this.fieldPending = null;
-    }
+    // The failed worker will never answer its blocks; a replacement is posted them afresh.
+    slot.posted.clear();
+    const queries = [...slot.queries.values()];
+    slot.queries.clear();
+    slot.fieldBytes = 0;
     slot.failures += 1;
     if (slot.failures >= MAX_CONSECUTIVE_WORKER_FAILURES) {
       slot.lost = true;
     } else {
       slot.worker = this.createWorker();
       this.attach(slot);
+      for (const [body, kept] of this.fields) {
+        kept.blocks.forEach((_, n) => {
+          this.postBlock(slot, body, kept, n);
+        });
+      }
     }
-    this.postNextField();
+    // Asked again after the fields, of the replacement or of another worker.
+    for (const query of queries) {
+      this.postQuery(query);
+    }
     this.pump();
   }
 
-  /** Posts the field to the next running worker without it, unless one is loading it now. */
-  private postNextField(): void {
-    if (this.field === null || this.fieldPending !== null) {
+  /**
+   * Posts a class-map or readout query, or answers `null` with no worker running: a readout to the
+   * running readout worker where there is one (R10.T12.c), else, as a class map always, to the
+   * least loaded running bake worker; the readout worker where it alone runs.
+   */
+  private postQuery(query: PendingQuery): void {
+    const running = this.slots.filter((each) => !each.lost);
+    const readout =
+      query.kind === "ground-readout" ? running.find((each) => !each.bakes) : undefined;
+    const bakers = running.filter((each) => each.bakes);
+    const choices = readout === undefined ? (bakers.length > 0 ? bakers : running) : [readout];
+    let slot: Slot | null = null;
+    for (const each of choices) {
+      if (slot === null || loadOf(each) < loadOf(slot)) {
+        slot = each;
+      }
+    }
+    if (slot === null) {
+      query.resolve(null);
       return;
     }
-    const slot = this.slots.find((s) => !s.lost && !s.hasField);
-    if (slot === undefined) {
+    const id = this.takeId();
+    slot.queries.set(id, query);
+    const { body, detailSeed } = query;
+    switch (query.kind) {
+      case "class-map":
+        slot.worker.postMessage({ kind: "class-map", id, body, detailSeed }, []);
+        return;
+      case "ground-readout":
+        slot.worker.postMessage(
+          { ...query.query, kind: "ground-readout", id, body, detailSeed },
+          [],
+        );
+        return;
+    }
+    unreachable(query);
+  }
+
+  /** Posts block `sequence` of `body`'s field `kept` to a running worker. */
+  private postBlock(slot: Slot, body: BodyIdHex, kept: KeptField, sequence: number): void {
+    const block = kept.blocks[sequence];
+    if (slot.lost || block === undefined) {
       return;
     }
+    const id = this.takeId();
+    slot.posted.set(id, { body, field: kept, sequence });
+    // Cloned, not transferred: the pool keeps the block for the next worker.
+    slot.worker.postMessage(
+      sequence === 0
+        ? { kind: "field-init", id, body, block, form: kept.form, sigma: kept.sigma }
+        : { kind: "field-chunk", id, body, block },
+      [],
+    );
+  }
+
+  /** `lane`'s source body's field as kept now: `null` for the test planet, or none started. */
+  private sourceField(lane: Lane): KeptField | null {
+    return lane.sourceBody === null ? null : (this.fields.get(lane.sourceBody) ?? null);
+  }
+
+  /**
+   * Whether a bake made after `inFlight` was sent is stale on arrival: its body's field started
+   * anew or was released since, or blocks came since and R10's rebake rule may take it, being
+   * incomplete, with a horizon map whose far field a block could change, or with a survey mask a
+   * block could change (`rebake.ts`' `staleInFlight`). The blocks' own changes may not have been
+   * answered yet, so the rule is taken conservatively here.
+   */
+  private madeStale(inFlight: InFlight, layers: TerrainLayers | null): boolean {
+    if (inFlight.lane.sourceBody === null) {
+      return false;
+    }
+    const field = this.sourceField(inFlight.lane);
+    if (field !== inFlight.field) {
+      return true;
+    }
+    if (field === null || field.blocks.length === inFlight.blocksAtSend) {
+      return false;
+    }
+    return staleInFlight(layers);
+  }
+
+  /**
+   * Whether refined normals made after `inFlight` was sent are stale on arrival: their body's field
+   * started anew or was released since, or blocks came since and they are incomplete, so that a
+   * block may hold what they lacked.
+   */
+  private refineStale(inFlight: InFlight, complete: boolean): boolean {
+    const field = this.sourceField(inFlight.lane);
+    if (field !== inFlight.field) {
+      return true;
+    }
+    return field !== null && field.blocks.length !== inFlight.blocksAtSend && !complete;
+  }
+
+  /** After a block of `body`'s field: the requests of its lanes waiting for it are asked again. */
+  private afterBlock(body: BodyIdHex): void {
+    for (const lane of this.lanes) {
+      if (lane.sourceBody !== body) {
+        continue;
+      }
+      for (const [keyString, request] of lane.waiting) {
+        if (!lane.queue.has(keyString) && !this.isInFlight(lane, keyString)) {
+          lane.queue.set(keyString, { request, keyString });
+        }
+      }
+      lane.waiting.clear();
+      for (const [keyString, r] of lane.waitingRefinements) {
+        if (!lane.refinements.has(keyString) && !this.isRefining(lane, keyString)) {
+          lane.refinements.set(keyString, r);
+        }
+      }
+      lane.waitingRefinements.clear();
+    }
+    this.pump();
+  }
+
+  /** Reports the change of block `posted`, once, from the first worker to answer it. */
+  private report(posted: PostedBlock, block: FieldBlockAnswer): void {
+    const { body, field, sequence } = posted;
+    if (this.fields.get(body) !== field || sequence < field.reported) {
+      return;
+    }
+    field.reported = sequence + 1;
+    field.bounds = { table: block.levels, sigmaM: block.sigmaM, chargeM: block.chargeM };
+    const change: FieldChange = { ...block, body, sequence };
+    tell(this.changeListeners, change, "field changes");
+  }
+
+  /** The next message ID, shared by bakes and field messages. */
+  private takeId(): number {
     const id = this.nextId;
     this.nextId += 1;
-    this.fieldPending = { slot, id };
-    // Cloned, not transferred: the pool keeps the field for the next worker.
-    slot.worker.postMessage({ kind: "field", id, bytes: this.field }, []);
+    return id;
   }
 }

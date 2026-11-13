@@ -148,7 +148,9 @@ FeatureRecord>`, `walk_process(&Galaxy, FeatureProcess) -> impl Iterator<Item = 
   `NestedGrid::new(width, cells_per_axis, levels)`, `cells_touching(sphere)`,
   `owner_of(local_position)`.
 - `features::members::{MemberRecord, resolve_member, FeatureLevelList, FeatureMemberSource}`.
-  `FeatureMemberSource` implements plan 03's `SystemSource`. A `MemberRecord` holds a plan 03
+  `FeatureMemberSource` implements plan 03's `SystemSource`, and pads each feature's cells by its
+  members' own speed bound, `FeatureInterior::member_speed_bound() -> KilometresPerSecond`
+  (P09.T23.b), which R06.T16.a's census relies on. A `MemberRecord` holds a plan 03
   `SystemRecord` (design note 20), the member's class, its `Composition` and its `MemberAbundances`.
   `features::members::sphere_of_influence(galaxy, &FeatureRecord, &ClusterModel, &MemberRecord) ->
 Metres` (as built: the member needs its cluster's model) is the smaller-radius
@@ -279,10 +281,12 @@ change, the owning plan wins and only call sites here change.
   (`KinematicTables::ellipsoid`; `draw_velocity` and `epoch_velocity` take a `SystemRecord`, so a
   feature draws its bulk motion through the crate-private `kinematics::draw_on`, which P09.T4.a
   added); `kick_bins::speed_bin_shares` (the kick distribution by remnant
-  kind and mode); `displaced::{explosion_site, ExplosionSite}` and the stub
-  `recent_death_claims(galaxy, &site, &record) -> bool`, whose body this plan supplies, with
-  `SHELL_WINDOW_CAP` (4 Myr there), which this plan takes over; `displaced::ClassTable` with the
-  split between budget-fed `class_weight` and field-fed `stay_share`; the zero-weight hypervelocity
+  kind and mode); `displaced::{explosion_site, ExplosionSite}` and the gate
+  `RECENT_DEATH_CLAIM: Option<fn(&Galaxy, &ExplosionSite, &SystemRecord) -> bool>`, `None` until
+  P09.T35 writes `recent_death_claims` and sets it to `Some` (main's ruling on P08.T13's cost,
+  2026-10-15), with `SHELL_WINDOW_CAP` (4 Myr there), which this plan takes over;
+  `displaced::ClassTable` with the split between budget-fed `class_weight` and field-fed
+  `stay_share`; the zero-weight hypervelocity
   class (`DisplacedKind::HypervelocitySurvivor`); `runaway::RunawayModel`;
   `SystemRecord::{placement_class, formation_site, kick_constraint, mark_attempt}`;
   `pad_speed(Layer)` with `UNBOUND_PAD_SPEED`. At `d2787a2` only P08.T1–T7 are built: `kick_bins`,
@@ -365,10 +369,11 @@ Each note is a decision the brainstorm leaves open. None contradicts it.
 9. **Profiles.** A class's profile is (1 + r² ÷ r_c²)^(−3q′ ÷ 2) × (1 − r² ÷ r_t²)² inside the tidal
    radius r_t and zero outside, normalised by a fixed 64-node quadrature when the cluster model is
    built. q′ = q^η for q below 1 and q above, with η =
-   `tables::cluster_dynamics::EQUIPARTITION_EXPONENT`, provisionally 1 (the brainstorm's full
-   equipartition), which is the partial-equipartition constant "Open questions" lists for an offline
-   fit. Core-collapsed clusters replace the core by a cusp of drawn slope, softened at 10⁻³ ly so it
-   stays integrable and bounded. Internal dispersions use the Plummer form with a = r_h ÷ 1.305.
+   `tables::cluster_dynamics::EQUIPARTITION_EXPONENT`, 1, which is δ = ½ mass segregation and not
+   velocity equipartition (ruling 139.2), kept as production by plan 15's ruling
+   (decision-p15-t8-blocks). Core-collapsed clusters replace the core by a cusp of drawn slope,
+   softened at 10⁻³ ly so it stays integrable and bounded. Internal dispersions use the Plummer
+   form with a = r_h ÷ 1.305.
 10. **The tail's bound.** A tail is a Gaussian tube about a straight line, which rises and falls
     along the axes. Its cell bound is the axis density at the point of the cell's bounding sphere
     nearest the line, which is a true bound because the Gaussian falls with distance.
@@ -537,6 +542,8 @@ cell; registry golden. Acceptance:
   census, caps and band read the field alone. So the field gives up φ only when the sky takes the
   members in. Otherwise the sky loses φ of each population: about nine in ten of the young disc's
   O and early-B stars, and at least a quarter of its B stars.
+  _Built behind its hold (lane `p09-t2c`, 2026-10-31, at `GENERATOR_VERSION` 24, no output moved):
+  see Risks, "P09.T2.c as built"._
 
 #### P09.T3 The feature catalogue grid
 
@@ -685,14 +692,16 @@ except that P09.T9.d needs P09.T9.c.
 - **P09.T9.c Black holes.** Retained at birth from the kick law with complete fallback unkicked
   (about four fifths). Mass fraction today f(t) = [(1 + ψ₁ f₀) e^(−β ψ₁ k t ÷ t★) − 1] ÷ ψ₁, floored
   at zero, with the clock factor k = `BH_CLOCK_FACTOR` = 2.5 for the cluster's denser past (ruling
-  126.4; scratch, fitted by P15.T8.a with the rest), f₀ = 0.06 × retention (Breen and Heggie 2013;
+  126.4; kept by P15.T8.a's ruling), f₀ = 0.06 × retention (Breen and Heggie 2013;
   Antonini and Gieles 2020). It is the solution, at constant mass and radius, of df ÷ dt = −β (1 + ψ₁ f) ÷ t★: black-hole mass is lost at
   β cluster masses per relaxation time, and the relaxation time shortens by 1 + ψ₁ f while black
   holes remain. β = 2.8 × 10⁻³ and ψ₁ = 147 are `BH_LOSS_BETA` and `BH_LOSS_PSI_SLOPE` of
   `tables::cluster_dynamics`, read from there and never written as literals, and with
   `BH_RELAXATION_PREFACTOR` in t★ they are the three constants plan 15's P15.T8.a fits against the
-  CMC catalogue (Kremer and others 2020); these are the scratch values until then. The decay rate β
-  ψ₁ = 0.41 is derived, not a constant of its own, and with f₀ near 0.05 the black holes are gone
+  CMC catalogue (Kremer and others 2020); plan 15 kept them as production (decision-p15-t8-blocks):
+  they are Antonini and Gieles's (2020) own fit, β 2.80 × 10⁻³ and a₁ 1.47 (ψ₁ = a₁ ÷ 0.01). The
+  decay rate β ψ₁ = 0.41 is derived, not a constant of its own, and with f₀ near 0.05 the black
+  holes are gone
   after about five relaxation times, inside the brainstorm's four to six (on the clock k t ÷ t★, so
   1.6–2.4 of today's t★ at k = 2.5; ruling 126.4). Black holes are a compact
   Plummer class of scale 0.1–0.3 r_h, and the drawn core radius is correlated with f. Tests: none in
@@ -857,6 +866,8 @@ Pure functions. The processes that use them are in phase 7.
 
 #### P09.T17 The supernova test with a clock
 
+**Built** (2026-10-27; no output moves): see "P09.T17 as built" under Risks.
+
 `DeathMarks { death_time: T, energy, metallicity, fastest_member_speed, kind: SupernovaKind }` and
 `claims(galaxy, site, marks, environment)`: true if and only if −(W_eff + L + H) < T ≤ +H. W is
 `shell_window` at the site, W_eff = min(W, the environment's cap, 4,096 ly ÷ v_fast − (L + 2H))
@@ -955,8 +966,9 @@ Index 0 is member zero where the kind has one. From 1, classes in the list order
 each a Poisson count on the feature's stream with positions by inverse transform of the class
 profile's cumulative distribution, which is exact. This task builds the list and its resolution with
 no class registered; P09.T30.b, T36 and T43 register theirs. The list's summed expected count plus
-eight standard deviations must stay under 8,192, asserted when the list is built, and the count is
-clamped. Tests: resolution, canonical IDs (level and cell bits zero), and that registering a second
+eight standard deviations must stay under its list's limit, 8,192, or 65,536 at the centre
+(P11.T8.e.b), asserted when the list is built, and the count is clamped. Tests: resolution,
+canonical IDs (the bits between the list's index and the band zero), and that registering a second
 class leaves the first's indices unchanged.
 
 #### P09.T23 Feature members in the range query
@@ -1010,6 +1022,8 @@ Tests:
 Files: `galaxy/features/members/source.rs`, `galaxy/features/members/placement.rs`. Acceptance:
 `cargo test -p hyperion-sim features::members`, `just ci`. No GENERATOR_VERSION bump: padding
 chooses cells, not output.
+
+_Done (issue #15, 2026-10-14, at `GENERATOR_VERSION` 22): see Risks, "P09.T23.b as built"._
 
 ### Phase 6: the galactic centre
 
@@ -1099,15 +1113,58 @@ hundred innermost members.
   axis 0.0158 ly, e = 0.88) gives a 16-year period, 120 au at pericentre and 7,800 km/s there;
   energy and angular momentum conserved to 10⁻¹² over ±1,000 yr; propagating by dt and then by −dt
   returns the start to 10⁻¹² relative; bit-identical goldens on both CI architectures.
-- **P09.T28.b Regime and the drift hook.** `regime_of(record)` per design note 12, with the
+- **P09.T28.b Regime and the drift hook** (split in two by decision-galaxy-25-train §2,
+  2026-10-27: T28.b.a, the new functions, lands pure; T28.b.b, the two swaps that move output, lands
+  behind a galaxy hold for version 25). `regime_of(record)` per design note 12, with the
   influence radius where the enclosed stars equal the black hole's mass. `position_velocity_at`
   replaces the straight line for Kepler-regime systems in plan 08's drift hook, for members and grid
   systems alike, and the grid's loss-cone carve-out. Bump `GENERATOR_VERSION`. Tests: positions at t
   = 0 unchanged for every golden system; at 9.9 and 10.1 ly the two regimes differ by less than 0.01
   ly after 1,000 yr.
+  - **P09.T28.b.a Regime and the Kepler state, pure** (no output moves, no bump; after T28.a;
+    before T28.b.b, T28.c and T29; decision-galaxy-25-train §2). `motion::Regime` and
+    `regime_of(..)` per design note 12: a system is in the Kepler regime if its epoch distance from
+    the black hole is inside the influence radius (`CentreProfile::influence_radius`, where the
+    enclosed stars weigh the black hole's mass), whatever the query's time.
+    `position_velocity_at(galaxy, record, t)`: the `KeplerOrbit` from the record's epoch state (a
+    member's own; for a grid system, plan 08's epoch velocity as the initial condition), μ = G
+    (M_bh + M★(< r₀)), propagated to t. A pericentre inside the loss cone gives the "no such
+    system" verdict as a value, as a member's would. A galaxy without kinematic tables, or a
+    `Radial` orbit, keeps the epoch position.
+    - **Design note 15's choice is this task's.** The regime needs only the influence radius. The
+      task picks how a galaxy carries it: a scalar computed at build from the profile, or a memo
+      left out of the derived equality. Either way, no output and no `Debug` digest moves, and the
+      fast suite's added time is recorded.
+    - **Nothing on the record calls these:** `position_at`, `hit_at` and `resolve` are unchanged.
+    - **Tests:** the two regimes at 9.9 and 10.1 ly differ by under 0.01 ly after 1,000 years
+      (continuity at the regime's edge); t = 0 returns the epoch state to the bit; an S2-like
+      member agrees with T28.a's `KeplerOrbit`; a galaxy without kinematic tables keeps the epoch
+      position; the loss-cone verdict on a pinned plunging orbit.
+    - **New golden `galaxy/motion/regime.golden`** (the pre-pin of decision-galaxy-25-train §1.5,
+      D1). For three seeds, each grid record within 1.5 influence radii: its regime, and today's
+      `position_at` at t = ±100, ±1,000 yr and ±H. An extension at the version in force.
+    - **Files:** `galaxy/motion.rs`, `galaxy/features/centre/` as the carrier needs,
+      `galaxy/mod.rs`, `tests/galaxy_motion.rs`, the golden.
+  - **P09.T28.b.b The drift hook and the loss cone** (behind `KEPLER_REGIME_VERSION` = 25 and
+    `GalaxyRules::kepler_regime`; rides version 25, else 26; decision-galaxy-25-train §1).
+    - **The swap.** `position_at` (through `epoch_velocity`) takes `position_velocity_at` for
+      Kepler-regime systems, members and grid systems alike. `resolve` answers "no such system" for
+      a grid record whose pericentre falls inside the loss cone.
+    - **Under the held arm**, today's code runs.
+    - **The bump** is the 25 wiring lane's, which deletes the hold.
+    - **Tests:** the tripwire; `regime.golden` unchanged; under `GalaxyRules::every_25_hold()`:
+      positions at t = 0 unchanged for every golden system (the plan's test), records inside the
+      radius move and records outside it don't, and the loss cone's carve-outs counted and listed;
+      the same seed twice.
+    - **Census C1:** over the three seeds, at t = ±100, ±1,000 yr and ±H. The movers, the largest
+      displacement, every mover finite, and the carve-outs by ID.
+    - _Built behind its hold (lane `p09-centre`, 2026-10-29, at `GENERATOR_VERSION` 23, no output
+      moved): see Risks, "P09.T28.b.b as built"._
 - **P09.T28.c Sphere of influence at pericentre.** A Kepler-regime system's tidal radius is taken at
   its pericentre and is constant in time: 2.7 au for a semi-major axis of 0.01 ly. Test: that
   figure, and about 0.01 ly for a near-circular orbit at 3 ly.
+  _Built (lane `p09-secular`, 2026-10-29, at `GENERATOR_VERSION` 23, no output moved): see Risks,
+  "P09.T28.c as built"._
 - **P09.T28.d The two secular rates.** `propagate` turns the orbit in its plane by two rates × dt:
   the Schwarzschild advance 6πGM ÷ (c² a (1 − e²)) per orbit (`schwarzschild_rate`) and the
   retrograde precession from the enclosed stars (`mass_precession_rate`), from the orbit-averaged
@@ -1117,6 +1174,97 @@ hundred innermost members.
   the S2-like orbit; against a direct integration in the smooth potential of black hole plus
   cluster, position error under a tenth of the tidal radius after 1,000 yr at 0.1, 1 and 5 ly; the
   profile test of P09.T31 is the acceptance of the pair.
+  - **P09.T28.d.a The rates, pure** (no output moves, no bump; decision-galaxy-25-train §2.2).
+    `schwarzschild_rate`, `mass_precession_rate` and the eccentricity table (built once per galaxy)
+    land pure. `KeplerOrbit::propagate` keeps the two-body law, and T28.a's `kepler.golden` stays.
+    The secular step is a method of its own. _Built (lane `p09-secular`, 2026-10-29, at
+    `GENERATOR_VERSION` 23, no output moved): see Risks, "P09.T28.d.a as built"._
+  - **P09.T28.d.b The term** (behind `KEPLER_SECULAR_VERSION` = 25; after P09.T28.b.b; restated
+    2026-10-30 on research advice). A Kepler-regime state with a bound orbit in the centre's Ψ
+    follows that orbit exactly, with the Schwarzschild advance (`schwarzschild_rate`) as the one
+    secular rate. T28.d.a's secular step and its averages stay pure and unwired.
+    - _The orbit._ From the epoch state, E = v² ÷ 2 − Ψ(r₀) and L, with
+      `v_r² = v_r0² + 2(Ψ(r) − Ψ(r₀)) + L²(1 ÷ r₀² − 1 ÷ r²)`, which avoids E's rounding.
+      - The turning points r_p and r_a come from a safeguarded Newton solve in a bracket, a fixed
+        step count, started from the Kepler orbit's.
+      - Hénon's anomaly is `r = r̄ − Δ cos η`. dt/dη and dψ/dη are taken at N = 64 fixed nodes
+        η_j = 2π(j + ½) ÷ N and kept as K = 32 cosine terms each, in the form regular at the
+        turning points, `Δ ÷ √H(cos η)` with `H = v_r² ÷ (1 − cos² η)`.
+      - At t, η solves t(η) = t(η₀) + t by a safeguarded Newton solve with a fixed step count.
+        The position is r(η), turned in the plane by ψ(η) − ψ(η₀) + ω̇_GR t; the velocity is from
+        the same series. t = 0 returns the epoch state to the bit.
+    - _Edges._
+      - A near-circular orbit, with Δ ÷ r̄ under a threshold the task measures, takes the
+        epicyclic limit, since v_r² cancels there.
+      - A state with no apocentre inside Ψ's table keeps the two-body law, which is T28.b.b's.
+      - The task measures e ≥ 0.97, where the Fourier series converges slowest.
+    - _The carrier._ A Ψ table on `SecularTable`'s pattern: the black hole's 1/r exact, the rest at
+      32 knots a decade. It is built once with the galaxy's `CentreMotion`, behind `GalaxyRules`,
+      under T28.d.a's lazy-value notes.
+    - _What follows._
+      - At every radius, the true orbit is no faster than the Kepler orbit about μ = G M(<r₀), and
+        its radial range lies inside that orbit's. Both follow from M(<r) ≶ M(<r₀) on either side
+        of r₀, to the dark halo's share of about 10⁻³.
+      - So P09.T29's shells and pads, T28.b.b's loss-cone verdict and T28.c's radius, all taken on
+        the Kepler orbit, stay valid bounds and stay as built. The verdict then errs towards
+        carving out, and the radius towards the smaller. The task re-checks this.
+    - _Tests._
+      - Against a direct integration in Ψ over ±1,000 yr from 0.1, 1 and 5 ly, on a circular orbit
+        and four eccentric ones: under a tenth of T28.c's radius, the plan's bound. This replaces
+        T28.d.a's pinned misses.
+      - A harmonic core about a point mass: the radial period and the apsidal angle against their
+        closed forms.
+      - S2's 12′.
+      - t = 0 to the bit, and the same bits twice.
+      - T28.b's continuity at the regime's edge.
+      - A bench of `Trajectory::of` and `state_at` against the two-body law's, in
+        `benches/centre.rs`.
+    - _The hold._ The term in `position_velocity_at` sits behind `KEPLER_SECULAR_VERSION` = 25,
+      apart from T28.b.b's hold for attribution, and may re-pin T28.b.b's 25-arm figures by name
+      (decision-galaxy-25-train §1.3). The plan's "Bump `GENERATOR_VERSION`" becomes the 25
+      wiring's. Its D2 and C1 run with `kepler_regime` on, under `every_25_hold()`; its term
+      reaches generated output only through T28.b.b's swap.
+    - _Built behind its hold (lane `p09-t28db`, 2026-10-30, at `GENERATOR_VERSION` 23, no output
+      moved): see Risks, "P09.T28.d.b as built"._
+  - **P09.T28.d.c The exact orbit's arc from the epoch** (behind `KEPLER_ARC_VERSION` = 27; after
+    P09.T28.d.b; added 2026-11-02 on research advice, research-leans-9 §1). T28.d.b takes a state
+    from one 32-term series of dt/dη over the whole radial period. On an orbit bound only far out,
+    its apocentre 10⁴–10⁵ times its pericentre, the series must give the time near pericentre to
+    some 10⁻⁹ of a period of 10⁶–10⁹ yr, and misses the plan's bound there: 252 of 6,562 of the
+    fixture's D2 record-times at ±1,000 yr, the worst 0.052 ly off, and records outside their walk
+    pad (a broken contract).
+    - _When._ A non-circular exact orbit whose |dt| is under half its radial period (lean; the task
+      measures it) takes its state by the arc. Longer spans and the epicyclic edge keep the series.
+    - _The arc._ `t_arc(η) = ∫ from η₀ to η of dt/dη′`, with `dt/dη = r Δ |sin η| ÷ √F(r)` and
+      `r = e^(ū − Δ cos η)`, by a fixed Gauss–Legendre rule (`tables::gauss_legendre`'s 16 nodes),
+      the panel split at a turning point the arc crosses (lean; the task measures it). η solves
+      `t_arc(η) = dt` by a fixed count of safeguarded Newton steps from the series' η, inside the
+      bracket its wobble gives. The azimuth swept is `∫ L ÷ r² · dt/dη` over the same nodes, and
+      the Schwarzschild advance turns in proportion to it, as in T28.d.b.
+    - _The carrier._ `SphericalOrbit` keeps η₀ and what F reads at the epoch (r₀, the rest of Ψ
+      there, `v_r0²`, `L²`), and the state reads Ψ's table: `Galaxy::centre_potential` holds an
+      `Arc<CentrePotential>`, and each exact orbit under the arc a clone of it (lean).
+    - _Determinism._ Fixed nodes, step counts and order, and `crate::math` only; the constants
+      belong to the generator version from 27.
+    - _Tests._
+      - The plan's test under every 27 hold, every case within the bound (the ×1.6 orbit from
+        0.1 ly included, its pinned window dropped), with research's sweep from 0.1 and 0.3 ly at
+        ×1.45–2.0, tilt 0.3, at ±100 and ±1,000 yr.
+      - The fixture's Kepler-regime records in layer B within 1.5 r_h whose Δ exceeds 2, at ±100
+        and ±1,000 yr, against a direct integration (RK4 in the profile's pull at 2 × 10⁻³ local
+        dynamical times, converged against 10⁻³): every state-time within the bound, or pinned by
+        ID with its figure.
+      - T28.d.b's census C1 and the centre's source against a scan, under every 27 hold.
+      - The same state twice to the bit and in any order, and a digest named `pinned` for the
+        wasip1 suite.
+      - A bench of `state_at` on the series against the arc, in `benches/centre.rs`; the target is
+        a few µs.
+    - _The hold._ `KEPLER_ARC_VERSION` = 27, `KeplerArcRules::{Series, Local}`, a `GalaxyRules`
+      field in the every-27 list and the tripwire `the_kepler_arc_is_held_only_until_the_27_bump`
+      (decision-galaxy-25-train §1.3's pattern). Under `Series`, T28.d.b's code verbatim, no golden
+      changes; it reaches generated output only through T28.b.b's and T28.d.b's holds.
+    - _Built behind its hold (lane `fix-p09-t28d-local-arc`, 2026-11-02, at `GENERATOR_VERSION`
+      24, no output moved): see Risks, "P09.T28.d.c as built"._
 
 #### P09.T29 The range query at the centre
 
@@ -1128,24 +1276,67 @@ Tests: r_full of 0.31 ly and about 37,000 systems at a century (42,000 under Kro
 = ±100 yr equals a brute-force scan of the inner 2 ly; bench: the century query with cached orbits,
 target about 10 ms.
 
+_Done (lane `p09-centre`, 2026-10-28, at `GENERATOR_VERSION` 23, no output moved): see Risks, "P09.T29
+as built"._
+
 #### P09.T30 The black hole's own events
 
 - **P09.T30.a Flares and disruptions.** On the black hole's event key (`EventKey::derive` with the
-  black hole's ID as subject), with plan 06's `PoissonBins`: flares at about one a day with a
-  power-law energy distribution (Neilsen et al. 2013), tag `0x0200 CENTRE_FLARE`, in bins of one
-  day; tidal disruptions at 10⁻⁴ per year × (M_bh ÷ 4.3 × 10⁶ M☉)^−0.4 (Stone and Metzger 2016), tag
+  black hole's ID as subject), with plan 06's `PoissonBins`: flares at 1.1 a day above a mean
+  unabsorbed 2–10 keV luminosity of 10³⁴ erg/s, their mean luminosity (dN/dL ∝ L^−1.9 on
+  10³⁴–1.925 × 10³⁵ erg/s) and duration (dN/dT ∝ T^−0.9 on 400–8,175 s) drawn independently and
+  their energy the product (Neilsen et al. 2013, §5 and Table 2), tag `0x0200 CENTRE_FLARE`, in bins
+  of one day; tidal disruptions at 2.9 × 10⁻⁵ per year × (M_bh ÷ 10⁸ M☉)^−0.404 (Stone and Metzger
+  2016, equation 27 as printed; 1.03 × 10⁻⁴ a year at the Milky Way's mass), tag
   `0x0201 TIDAL_DISRUPTION`, in bins of 1,024 years so that the source horizon is a few hundred
   bins. Both tags are registered in `event_tags!` here, inside plan 06's block for this plan. Tests:
-  the same events in any order of asking; 0.06–0.2 disruptions expected in ±H and about 26 in the
-  horizon at Milky Way values; about 365 flares a year.
+  the same events in any order of asking; 0.06–0.21 disruptions expected in ±H and about 27 (27.31)
+  in the horizon at Milky Way values; 401.775 flares a Julian year (1.1 a day) (corrected 2026-10-15
+  to the as-built law: Risks, "P09.T30.a as built").
+
+  _Done (issue #20, 2026-10-15, at `GENERATOR_VERSION` 22): see Risks, "P09.T30.a as built"._
+
 - **P09.T30.b Victims and luminosity.** Each disruption inside the source horizon has a victim, a
   feature-level member of class `TIDAL_DISRUPTION_VICTIM`, first in the centre's list order, on a
   near-parabolic orbit whose pericentre passage is the event time; its mass is drawn from the
-  centre's living classes and its state after the event is "no system". `luminosity_at(t)` =
-  quiescence + flares + the t^(−5⁄3) tails of the disruptions in the horizon, by looking back over
-  their bins. Tests: a victim resolves from its ID and is at pericentre at the event time; 0.3–3 ×
-  10³⁹ erg/s a thousand years after a disruption (Ponti et al. 2010); the Kepler members' loss cone
-  stays empty.
+  centre's living classes and its state after the event is "no system". Its draws start at word 0 of
+  its disruption's event stream, where T30.a draws none, so no T30.a ID or time moves. Each victim
+  has an outcome, disrupted or swallowed whole: swallowed when the black hole's mass is at or above
+  the victim's Hills mass, where r_t = 2 r_g (Stone and Metzger 2016, §2 and near equation 33, §4.2;
+  1.14 × 10⁸ M☉ for a 1 M☉, 1 R☉ star). The outcome is recorded on the event, never dropped, and
+  only a disrupted victim adds a tail (updated 2026-10-15). `luminosity_at(t)` = quiescence +
+  flares + the t^(−5⁄3) tails of the disruptions in the horizon, by looking back over their bins
+  with this task's own look-back (T30.a's disruptions look back 0 bins). Tests: a victim resolves
+  from its ID and is at pericentre at the event time; a Sun-like tail follows its closed forms; at
+  Milky Way values the centre is at or below Ponti et al.'s 10³⁶ erg/s at the epoch in most seeds;
+  the Kepler members' loss cone stays empty; at Milky Way values every main-sequence victim is
+  disrupted (updated 2026-10-30 by P09.T30.c, from "0.3–3 × 10³⁹ erg/s a thousand years after a
+  disruption (Ponti et al. 2010)": the light echoes measure short outbursts, not a tail).
+
+  _Done (lane `p09-victims`, 2026-10-29, at `GENERATOR_VERSION` 23, no output moved): see Risks,
+  "P09.T30.b as built", and the findings after it._
+
+- **P09.T30.c The centre's quiescence** (added 2026-10-30: the research lane `research-p09-t30b`'s
+  advice on P09.T30.b's findings 1 and 2, §1 and §2, as main ruled it on 2026-10-29). A disrupted
+  victim's tail radiates `ε Ṁ c²`, at most L_Edd, with an efficiency that falls with its fallback
+  rate `ṁ = Ṁ ÷ Ṁ_Edd`, `Ṁ_Edd = 10 L_Edd ÷ c²`: Xie and Yuan's (2012, MNRAS 427, 1580, Table 1,
+  equation 11) hot-flow fit at δ = 0.5, α = 0.1 and s = 0.4, `ε = ε₀ (ṁ ÷ 10⁻²)^a` with
+  `(ε₀, a)` = (1.58, 0.65), (0.055, 0.076) and (0.17, 1.12), each range between where it meets
+  its neighbours (2.8802 × 10⁻⁵ and 3.3929 × 10⁻³), and η = 0.1 from where the top range reaches
+  it (6.2265 × 10⁻³), so that ε is continuous and non-decreasing. The tails do not end, and
+  `peak_luminosity_watts` takes the same efficiency at the peak rate. The law moves
+  `galaxy/features/centre_luminosity`, so it is built behind a hold of its own in `GalaxyRules`
+  (decision-galaxy-25-train §1): `CENTRE_QUIESCENCE_VERSION` = 25 with its tripwire, and a field
+  whose `of_version(25)` arm is the new law, which `every_25_hold()` includes. Tests: at 23 no
+  golden moves; under every 25 hold only `centre_luminosity` moves, its moved figures recorded; a
+  Sun-like tail follows its closed forms, without Ponti's bracket; over T30.b's 200 seeds at Milky
+  Way values the centre is at most 10³⁶ erg/s at the epoch (Ponti et al. 2010) in at least half
+  the seeds under 25's rules, and under 23's law in 1 of 200, pinned. Recorded as gaps, not
+  built: the echoes' short outbursts; partial disruptions' steeper t^(−9⁄4) tails; a 2–10 keV
+  share that should fall at very low rates (Sgr A*'s own C_X is about 190–380, not 15.8).
+
+  _Done (lane `p09-t30c`, 2026-10-30, behind its hold at `GENERATOR_VERSION` 23, no output moved):
+  see Risks, "P09.T30.c as built", and its gaps._
 
 #### P09.T31 Centre tests
 
@@ -1154,9 +1345,14 @@ Slow tests. Members sampled in six radial shells from 0.01 to 100 ly keep the pr
 eccentricities thermal (mean 0.6–0.72); the brightest-band members inside 0.04 ly include S2-like
 orbits (periods of 10–20 yr occur); mean spacing about 0.05 ly at 3 ly.
 
+_Built (lane `p10-list-registration`, 2026-11-01, at `GENERATOR_VERSION` 24, test-only): see Risks,
+"P09.T31 as built"._
+
 ### Phase 7: catalogue classes and the merge
 
 #### P09.T32 The catalogue-class grid
+
+**Built** (2026-10-27; no output moves): see "P09.T32 as built" under Risks.
 
 `ClassProcess`: a trait with a class ID, a cell size (512 ly × 2ᵏ, low cell bits zero for coarser
 classes), a bound over a cell, a candidate draw under a cap, and the class's test.
@@ -1171,6 +1367,11 @@ resolution, canonical IDs, no cell above 2²⁴ candidates.
 
 #### P09.T33 The core-collapse class
 
+**P09.T33.a built** (2026-10-29; no output moves): see "P09.T33.a as built" under Risks.
+
+**P09.T33.b built behind its hold** (lane `p09-t33b`, 2026-11-01, at `GENERATOR_VERSION` 24, no
+output moved): see "P09.T33.b, as built" under Risks.
+
 - **P09.T33.a Field deaths.** `CoreCollapseProcess` on 512 ly cells: sites follow what dies in the
   field, which is the young field with its (1 − φ(a)) age factor. Envelope = site density bound ×
   (the field cap + L + 2H) × the largest death rate per system; a candidate draws its site, accepts
@@ -1183,14 +1384,22 @@ resolution, canonical IDs, no cell above 2²⁴ candidates.
   the site + velocity × (t − T) before the explosion and at site + (velocity + kick) × (t − T) after
   it. Tests: entries per galaxy 3,000–21,000 more than distinct shells; 20–160 core collapses in ±H
   over seeds and about 40 at two a century; every kept entry's window is under its cap; no entry
-  travels more than 4,096 ly from its site within its lifetime.
+  travels more than 4,096 ly from its site within its lifetime. (Bound by P08.T13's interval
+  predicate: see "From P08.T13: the interval predicate is part of the one shared test", after
+  P09.T35; main's ruling, 2026-10-15.)
 - **P09.T33.b Runaway and walkaway deaths.** A second site density in the same class: plan 08's
   runaway and walkaway classes of band E, whose members die away from their birthplace, with the
   death rate conditional on the class's ejection-age marks. The grid side of these classes is carved
   in P09.T35. Tests: their share of field core collapses against the closed form from
-  `RunawayModel`; complementarity for sampled runaway candidates.
+  `RunawayModel`; complementarity for sampled runaway candidates. (Bound by P08.T13's interval
+  predicate: see "From P08.T13: the interval predicate is part of the one shared test", after
+  P09.T35; main's ruling, 2026-10-15.)
 
 #### P09.T34 The Type Ia class and the ancient survivors
+
+**P09.T34.a built** (2026-10-30; no output moves): see "P09.T34.a as built" under Risks.
+**P09.T34.b built** (2026-11-01; held for 27, no output moves): see "P09.T34.b, as built" under
+Risks.
 
 - **P09.T34.a The class.** `TypeIaProcess` on the same grid: sites follow every population's layer-D
   budget density weighted by its Type Ia rate, candidates use `IaProgenitor::draw`, the window reads
@@ -1222,6 +1431,10 @@ resolution, canonical IDs, no cell above 2²⁴ candidates.
 
 #### P09.T43 The luminous blue variables
 
+**Field half built** (2026-10-31; no output moves): see "P09.T43 as built" under Risks. The band-E
+runaways' sites (after P08.T12, with P09.T33.b), the feature-level list entry (after P09.T36.a) and
+`lbv_claims`'s wiring (P09.T35) wait.
+
 `LbvProcess` (`ClassId::LUMINOUS_BLUE_VARIABLE`), on the same grid: hosts are layer-E systems whose
 window near the Humphreys–Davidson limit, plan 06's `SystemStars::lbv_window()`, overlaps the source
 horizon −(H + L) to +H. Sites follow the young field as in P09.T33.a and the band-E runaways; a
@@ -1241,19 +1454,61 @@ else; complementarity as in P09.T38; hosts per galaxy recorded in a golden summa
 
 #### P09.T35 The carve-out on the grid side
 
-Plan 03's `catalogue_claims` already computes `displaced::explosion_site` for every layer-E record,
+Plan 03's `catalogue_claims` computes `displaced::explosion_site` for every layer-E record,
 field or displaced, whose death time falls within (−(`SHELL_WINDOW_CAP` + L + H), +H], backing a
-displaced candidate out to its birth site along a straight line, and passes it to plan 08's stub
-`recent_death_claims(galaxy, &site, &record)`. This task replaces the stub's body: it generates the
-record's `SystemStars`, builds `DeathMarks::of` and returns
-`claims(galaxy, &site, &marks, ShellEnvironment::Field)`. Only records that pass plan 08's prefilter
-pay for a stellar evaluation. A claimed candidate resolves to "no such system". Runaway classes do
-the same, and the luminous blue variables' test of P09.T43 is asked beside it. Layer D's share loses
-`ancient_share`; recent Type Ia need no carve-out here because plan 11's binaries redraw any
-explosion before +H, which this task records as a requirement in plan 11's consumed interface and
-guards with a `debug_assert` hook. Bump `GENERATOR_VERSION`, regenerate goldens. Tests: the
+displaced candidate out to its birth site along a straight line, once a claim is set. This task
+writes `recent_death_claims(galaxy, &site, &record)` (the record's `SystemStars`, `DeathMarks::of`,
+`claims(galaxy, &site, &marks, ShellEnvironment::Field)`) and sets `RECENT_DEATH_CLAIM` to
+`Some(recent_death_claims)` in its bump commit (main's ruling on P08.T13's cost, 2026-10-15). Only
+records that pass plan 08's prefilter pay for a stellar evaluation. A claimed candidate resolves to
+"no such system". Runaway classes do the same, and the luminous blue variables' test of P09.T43 is
+asked beside it. Layer D's share loses `ancient_share`; recent Type Ia need no carve-out here
+because plan 11's binaries redraw any explosion before +H, which this task records as a requirement
+in plan 11's consumed interface and guards with a `debug_assert` hook. Bump `GENERATOR_VERSION`,
+regenerate goldens. It requires `LifetimeBracket` baked as a `hyperion-fit` table, P08.T13's second
+follow-up, which lands before P08.T12.c or this task, whichever is first. It measures the sim's fast
+suite before and after setting the claim, and benches the hook at the Sun-like point, on a young arm
+ridge and at the centre (with P08.T16, which should bench an arm ridge too). Tests: the
 complementarity test of P09.T38 for sampled candidates; a grid star due to die at +1,500 yr is still
-a grid star, dies in place and has a shell when evaluated then.
+a grid star, dies in place and has a shell when evaluated then; and a placement golden that pins a
+layer-E cell holding a death the claim takes, so that setting the claim cannot land without moving
+a golden: check that one does, or add one, such as the cell (200, 203, 0) that
+`resolve_refuses_a_record_whose_recent_death_is_claimed` (`galaxy/placement/resolve.rs`) finds
+(galaxy plan 08's Risks, "Deferred findings (2026-10-13 rule) (P08.T13.b)").
+_The field half built behind its hold (lane `p09-t2c`, step 2, 2026-10-31, at `GENERATOR_VERSION`
+24, no output moved): see Risks, "P09.T35 as built, the field half"._
+
+> **From P08.T13: the interval predicate is part of the one shared test** (main's ruling,
+> 2026-10-15).
+>
+> Plan 08's `displaced::death_in_interval(m0, &composition, eta, age_at_epoch, draws)` decides
+> whether a primary's death falls in (−(`SHELL_WINDOW_CAP` + L + H), +H]. It decides in three
+> tiers: plan 08's `LifetimeBracket`, then the fate table at the range brief's margin, then the
+> exact `lifetime`. Its `None`s rest on validated bounds, not proved ones. So:
+>
+> 1. **Every side calls it.** That means:
+>    - the grid's `catalogue_claims`, through `explosion_site`;
+>    - P09.T33.a's field candidates;
+>    - T33.b's runaways and walkaways;
+>    - T36.a–b's members and the centre's.
+>
+>    Each calls `death_in_interval` on its own candidate's primary marks. It keeps an entry only if
+>    that is `Some` and `claims` is true. No side tests T against the interval by any other route.
+>    A catalogue candidate whose T was drawn inside the interval, but which the tiers put outside,
+>    is dropped, because the grid keeps that system.
+>
+> 2. **The inputs belong to the version.** From T35's bump on, the predicate's inputs are
+>    generator-version items: the fate tables, `LifetimeBracket` and its widening, and
+>    `STATED_FACTOR` and `DEAD_MARGIN_FLOOR`. A change to any of them is a bump, and re-runs
+>    P08.T13's soundness tests.
+> 3. **A failed bound costs a shell, never a double count:** the system stays on the grid without a
+>    shell. P08.T13's slow test bounds the rate below 3 × 10⁻⁴ per death in the interval: at 95%,
+>    about two of the Milky Way's roughly 7,000 shells. P09.T38 records the measured figure beside
+>    the shell counts.
+> 4. **P09.T38 tests the reject path.** Its complementarity test includes the predicate's reject
+>    path, forced through a test-only margin, and checks that both sides agree there.
+> 5. **The same rule binds P09.T43.** Its prefilter on the record alone binds its catalogue side in
+>    the same way.
 
 #### P09.T36 The recently dead inside features and the centre
 
@@ -1267,14 +1522,21 @@ a grid star, dies in place and has a shell when evaluated then.
   galaxy are in features, which hold about a quarter (0.15–0.35) of distinct shells; a chart finds
   every shell of an association from the catalogue without touching its nested grid (asserted with a
   counting cache); complementarity between a feature's band-E cells and its list over 10⁴ sampled
-  members.
+  members. (Bound by P08.T13's interval predicate: see "From P08.T13: the interval predicate is part
+  of the one shared test", after P09.T35; main's ruling, 2026-10-15.)
 - **P09.T36.b Globulars and the centre.** Globular clusters have no core-collapse entries and no
   shells; their Type Ia hosts are drawn from the delay-time distribution on their mass (0.1–0.5
   expected over the whole system) and are listed as hosts whose window is zero. The centre's list
   takes a handful of core collapses from its young class and its Type Ia from its old classes, and
   the centre's band-D and band-E cells carve them by the same test, with the smooth gas at the
   origin as the site. Tests: a handful (1–20) of entries at the centre at Milky Way values; no
-  globular entry ever reports a shell.
+  globular entry ever reports a shell. (Bound by P08.T13's interval predicate: see "From P08.T13:
+  the interval predicate is part of the one shared test", after P09.T35; main's ruling, 2026-10-15.)
+
+_Built behind its hold (lane `p09-t2c`, step 3, 2026-10-31, at `GENERATOR_VERSION` 24, no output
+moved): see Risks, "P09.T36 as built". The alert walks read its lists from 29 (lane
+`fix-p09-alert-walk-features`, 2026-11-05), every class they hold (lane
+`fix-p09-alert-walk-features-2`, 2026-11-05): see Risks, "P09.T36 in the alert walks"._
 
 #### P09.T37 Merge into the range query
 
@@ -1287,6 +1549,17 @@ remnant's, after the explosion) is inside the sphere. Tests: census lines identi
 cached; a query at the very centre reports that nothing fits at 50 ly and a complete census at 0.05
 ly; bench: the brainstorm's 50 ly query at Sun-like density stays under 5 ms cold with all sources
 registered.
+
+_T37.a, the grid's classes, built behind its hold (lane `p09-t37`, 2026-11-01, at
+`GENERATOR_VERSION` 24, no output moved): see Risks, "P09.T37.a, as built". T37.b, the centre's
+source and the two centre tests, built behind P10.T10.b's hold (lane `p10-list-registration`,
+2026-11-01, at 24, no output moved): see Risks, "P09.T37.b, as built". The bench's cold query,
+cut bit for bit (lane `perf-range-27`, 2026-11-01, no output moved): see Risks, "P09.T37's
+bench"; its 5 ms target is missed, a finding. The features' and the
+centre's recent dead placed (lane `fix-p09-recent-dead`, 2026-11-01, at 24, under P09.T36's and
+P10.T10.b's holds, no output moved at 24–25): see Risks, "P09.T37, the recent dead placed". The
+next cuts (lane `perf-range-27-b`, 2026-11-02, no output moved): see Risks, "P09.T37's bench, the
+next cuts"; the 5 ms target is still missed, a finding._
 
 #### P09.T38 Complementarity, budgets and the Milky Way's shells
 
@@ -1301,7 +1574,14 @@ population's budget within Poisson error in twelve test volumes. **Shells at Mil
 (about two core collapses and half a Type Ia a century): 3,000–30,000 distinct shells over seeds and
 about 7,000 at those rates; one to two thousand non-radiative; counts by phase recorded in a golden
 summary; sizes 10–800 ly; the longest window under `SHELL_WINDOW_CAP`, with the longest seen
-recorded against the brainstorm's 2–4 Myr and the 4.3 Myr of the oldest known remnant.
+recorded against the brainstorm's 2–4 Myr and the 4.3 Myr of the oldest known remnant. (Bound by
+P08.T13's interval predicate: see "From P08.T13: the interval predicate is part of the one shared
+test", after P09.T35; main's ruling, 2026-10-15.)
+
+_Built under every 27 hold (lane `p09-t38`, 2026-11-01, at `GENERATOR_VERSION` 24; one fault fixed
+behind 27's runaways' hold, no output moved at 24–26): see Risks, "P09.T38, as built". The budgets'
+centre volume run (lane `fix-p09-recent-dead`, 2026-11-01): see Risks, "P09.T38, the centre's
+volume"._
 
 ### Phase 8: protocol, server and display
 
@@ -1329,8 +1609,13 @@ for `hello`.
   with interior mutability because `SystemSource` takes `&self`. The `SystemsInRange` handler
   registers `FeatureMemberSource`, `CentreMemberSource` and `CatalogueClassSource`, and passes
   `FeatureGas` wherever it passed `NoModifiers`. Tests: eviction never changes a reply; a range
-  query over the WebSocket inside a globular returns members with their origin. Rendering plan
-  R06's R06.T16.a reads only the features' part: `FeatureCellCache`, `ClusterModelCache`,
+  query over the WebSocket inside a globular returns members with their origin. Every row carries
+  `origin` from the build that registers the features' source, for the variants that the
+  registered sources place (plan 04's reserved list names `SystemOriginWire`, `CatalogueClassWire`
+  and `MemberClassWire` growing). `CatalogueClassWire` comes from `ClassId` by a match on the
+  registry's constants, and a test walks `ALL_CLASSES` and finds a distinct wire string for each,
+  in value order. `PROTOCOL_VERSION`'s documentation and `features.rs` name the three as growing
+  (`just gen-protocol`). Rendering plan R06's R06.T16.a reads only the features' part: `FeatureCellCache`, `ClusterModelCache`,
   `FeatureMemberSource` registered, and `FeatureGas` passed. That part may be built ahead of the
   centre's and the catalogue classes' sources, which wait on P09.T29 and T37 (decided 2026-10-05,
   `decision-r06-t16a-scope.md`).
@@ -1338,6 +1623,13 @@ for `hello`.
   `GalaxyFeatures` computed in the background and cached per universe, like the density map. Tests:
   integration tests over the WebSocket for each message, including an unknown feature ID and a
   radius that fits nothing.
+
+_The catalogue classes' cell cache and the source's read-first levers built (lane
+`p09-t40-class-cells`, 2026-11-01, at `GENERATOR_VERSION` 24, no output moved): see Risks,
+"P09.T40, the classes' cost"._
+
+_The sky's features' gas index built (lane `p09-t40a-sky-feature-gas`, 2026-11-05, at 27, held
+until `SKY_FEATURE_GAS_FROM`, no output moved): see Risks, "P09.T40.a, the sky's features' gas"._
 
 #### P09.T41 Client: feature marks and shells
 
@@ -1353,7 +1645,13 @@ for `hello`.
 - **P09.T41.c Lists and readouts.** The chart lists features in a second list with the same keyboard
   selection, and `FeatureReadout` shows designation, kind, distance, extent, age, mass, member count
   and emission class. A selected system's readout gains its origin, member class and supernova
-  state. Component tests for the lists and readouts.
+  state. Component tests for the lists and readouts. An origin, a catalogue class or a member
+  class this build does not know reads Missing, and the readout's other rows read as before (plan
+  04's reserved list): `toChartSystem` maps the wire's origin to the model's with an explicit
+  unknown arm, so the readout's switches stay exhaustive. Tests: a row whose origin is
+  `{ "type": "pinned" }`, one whose `catalogue_system` class is `"magnetar"` and a `listed` member
+  class of `"magnetar"`, each cast at the test's boundary, read Missing where they are unknown,
+  keep the row, and change no other reading.
 
 #### P09.T42 Client: the centre's fine radius steps
 
@@ -1361,6 +1659,28 @@ The query-radius selector and the scale bar run down in 1-2-5 steps to 0.01 ly a
 readout gives distances in light-years to four decimals or in AU below 0.01 ly, and the census line
 is shown at every step. A `BLACK HOLE` readout shows mass and luminosity at the chart's time. Tests:
 selector steps, unit switching, formatting under the guide's number rules.
+
+_Done (lane `p09-t42`, 2026-10-31, at `GENERATOR_VERSION` 24, client only, no output moved): see
+Risks, "P09.T42, records"._
+
+#### P09.T44 Client: a core-collapse remnant's nebula rows
+
+Added 2026-10-21 by main's decision on a young neutron star's `NEBULA RADIUS NONE`, from P12.T11's
+landing look, where next to a Vela-age pulsar it read as no nebula at all, though such a star
+almost always has a supernova shell. The rows are the planetary nebula's, which comes only from a
+star that leaves a white dwarf, so both system readouts, `GALAXY`'s `STAR A` and the `SYSTEM`
+display's host readout, leave out `NEBULA RADIUS` and the four rows after it (`NEBULA AGE`,
+`NEBULA EXPANSION`, `IONISED MASS`, `EXCITATION CLASS`) for a `neutron_star` or `black_hole` host,
+as they are left out for `no_remnant`: the guide's Not applicable state. This amends the
+orchestrator's ruling 149.4's "`NEBULA RADIUS` always" for those two kinds only; `EVENTS` stays, and
+a white dwarf and a living star keep the rows, with `—` or `NONE`. P09.T41.c's remnant rows (the
+shell's radius, phase and emission, and the pulsar wind nebula) are to take the place. Files: under
+`apps/hyperion/src/renderer/src/`: `displays/galaxy/PrimaryReadings.tsx`,
+`displays/system/HostReadings.tsx`, tests; the guide's `NEBULA RADIUS` row. Tests: Vitest for a
+neutron-star and a black-hole host in both readouts, and a white dwarf and a Sun-like star keeping
+the row. Acceptance: `pnpm test`, `just ci`. No `GENERATOR_VERSION` change.
+
+_Done (issue #74, 2026-10-22, at `GENERATOR_VERSION` 22): see Risks, "P09.T44 as built"._
 
 ## Verification
 
@@ -1384,13 +1704,22 @@ selector steps, unit switching, formatting under the guide's number rules.
 
 ## Generator version
 
-This plan changes generated output four times, each a bump with regenerated goldens: P09.T2.c (the
+This plan changes generated output five times, each a bump with regenerated goldens: P09.T2.c (the
 field gives up φ), P09.T28.b (the Kepler regime and the grid's loss cone), P09.T28.d (the secular
+rates, away from the epoch only), P09.T30.c (the disruption tails' falling efficiency, ruled
+2026-10-29), P09.T35 (the supernova and luminous-blue-variable carve-outs, layer D's ancient share
+and the hypervelocity class's weight). T28.b, T28.d and T30.c ride version 25 (S1), each behind a
+`GalaxyRules` hold until the bump, and T35 and T2.c (with rendering plan R06's R06.T16.a) ride 26
+(S2); each boards a later train if not ready (decision-bump-plan-after-22, 2026-10-14; updated
+2026-10-15). It reserves, so that later
 rates, away from the epoch only), P09.T35 (the supernova and luminous-blue-variable carve-outs,
-layer D's ancient share and the hypervelocity class's weight). It reserves, so that later plans move
-nothing: the `ClassId` values 2, 3, 5, 6 and 8 for plan 11 and the rule that feature-level lists
-append classes in the list order of design note 16; event tags 0x0203–0x02FF of this plan's block;
-the `10` sub-kinds `01` and `10` for plan 10 (`11` stays rejected);
+layer D's ancient share and the hypervelocity class's weight), and P09.T13's bound share (ruling
+145.5). T28.b and T28.d ride version 25 (S1), and T35, T2.c (with rendering plan R06's R06.T16.a)
+and the bound share ride 26 (S2); each boards a later train if
+not ready (decision-bump-plan-after-22, 2026-10-14; updated 2026-10-15). It reserves, so that later
+plans move nothing: the `ClassId` values 2, 3, 5, 6 and 8 for plan 11 and the rule that
+feature-level lists append classes in the list order of design note 16; event tags 0x0203–0x02FF of
+this plan's block; the `10` sub-kinds `01` and `10` for plan 10 (`11` stays rejected);
 `FeatureKind::{Stream, DwarfCore}`; `FeatureShares::set_halo_discrete`; the binary classes of the
 class table with scratch fractions; member 1–15 of a catalogue system; domain-tag prefixes
 `feature.`, `member.`, `centre.`, `snr.`, `class.`. Parameters that belong to the generator version
@@ -1435,7 +1764,9 @@ loss constants; light-curve templates; cloud statistics; the nuclear cluster's m
   spare band value. That contradicts the brainstorm's "under it the level and cell are zero" and
   plan 01's canonical rule, so it needs the brainstorm revised first; the alternative within the
   brainstorm is to list at feature level only the centre's hosts above a brightness floor. Reported
-  to the brainstorm's owner.
+  to the brainstorm's owner. **Ruled 2026-10-26:** the centre's list index alone is widened to 16
+  bits (`[15:0]` under band 7, `[31:16]` zero), an extension that moves no existing ID, built by
+  plan 11's P11.T8.e.b (plan 11's Risks, "The centre's feature-level index, ruled").
 - **The nuclear cluster's budget** is not in the brainstorm's list of populations (design note 5).
   Plan 02 draws its mass for the potential; this plan treats it as a budget of its own, about 0.05%
   on top of the drawn stellar mass. The brainstorm should say so or name the population it comes out
@@ -1467,9 +1798,16 @@ loss constants; light-curve templates; cloud statistics; the nuclear cluster's m
   as built".)_
 - **Grid systems inside the influence radius** are not drawn from the distribution function, so
   their density is not exactly stationary. They are about one in a hundred of the systems there and
-  the effect is confined to the inner 1.5 ly over the clock window.
-- **Scratch constants** (black-hole loss, equipartition, pulsar counts, Type Ia samplers, helium)
-  ship as defaults and change with plan 15's tables, each a version bump.
+  the effect is confined to the inner 1.5 ly over the clock window. _(As built in P09.T28.b.b,
+  under its hold's new arm: 78.6% of the sampled Kepler-regime grid records are unbound about the
+  mass inside their epoch radius, and they move up to 4.63 ly from their straight lines over ±H
+  across the whole regime, not the inner 1.5 ly alone; see "P09.T28.b.b as built", "Unbound
+  orbits".)_
+- **Scratch constants** (helium) ship as defaults and change with plan 15's tables, each a version
+  bump. The cluster-dynamics three (black-hole loss, equipartition, pulsar counts) are production
+  at their scratch values (decision-p15-t8-blocks, no bump), with plan 15's findings on the closed
+  form, the profile's form and Γ's scale recorded there. The Type Ia samplers are P15.T9.a's
+  fitted `tables::type_ia_delay` since version 15.
 - **Retention at 50 km/s (ruling 106.4, plan text only).** P09.T9.b's window at 50 km/s was
   13–19%, but plan 06's kick law as built (ruling 96: Disberg and Mandel's log-normal truncated at
   1,000 km/s, with a low mode of σ 5 km/s and a share of about 19%) retains 19.6% there, nearly
@@ -1493,7 +1831,8 @@ loss constants; light-curve templates; cloud statistics; the nuclear cluster's m
   on P08.T12's `stay_share`; P09.T15.b, T17 and T33–T36 on P08.T9, T12 and T13 (`ClassTable`,
   `explosion_site`, `SHELL_WINDOW_CAP`, `recent_death_claims`); P09.T10's member velocities on a
   record-free draw such as `kinematics::draw_on`; P09.T24 on research finding R2 (the M–σ offset).
-  Phases 2–8 otherwise consume only what phase 1 now provides.
+  _(T17's names reconciled at `e8b5c6f3`: see "P09.T17 as built".)_ Phases 2–8 otherwise consume
+  only what phase 1 now provides.
 - **Ruling 2's gas decision is provisional** (copied here at re-validation, as the ruling asks). The
   gas stays exponential in height, so the clouds' proposal bound is the ratio at the height nearest
   the plane. If a later ruling cores the gas as the stellar discs are, the clouds take the stellar
@@ -2203,7 +2542,7 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   the history's dynamical survival carried over (ruling 145.1), the interior's lost living mass is
   L05's `M_esc` for a young cluster with no remnants kept, and the nursery's tail carries it within
   3% (below, "Ruling 145 as built").
-- **`BOUND_SHARE` against the galaxy's own μ (ruling 145.5; queued, wired, its own bump).**
+- **`BOUND_SHARE` against the galaxy's own μ (ruling 145.5; built behind `BOUND_SHARE_VERSION` = 26, below).**
   `kinds::globular`'s history `M = 0.70 M₀ (1 − t ÷ t_dis)` takes BM03's 0.70, a Kroupa function
   to 15 M☉, while the galaxy's function and fates leave about 0.46 of the mass formed at 12 Gyr.
   Generated globulars' birth masses are then about 1.5 times low, which feeds
@@ -2544,4 +2883,3306 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   2⌈n0⌉ subnormal units beyond its 64 in the subnormal range, in the tightness half only (safety
   stays exact; `bounds.rs` is untouched). The same change to the galaxy's parameters took it to
   1.08 × 10⁻¹² at ln corner = −634 and to 81 units for the nuclear disc at 3.5 × 10⁻³¹¹. See plan
-  11's Risks, "P11.T4.h as built".
+  11's Risks, "P11.T4.h as built". Since 2026-10-12 a disc's 2⌈n0⌉ applies in both halves (plan
+  02's Risks, "P02.T8.a's subnormal check, either way").
+- **P09.T6's budget test takes P11.T7's carved classes (lane slow-fix-tests, 2026-10-12, at version
+  21; the slow-pass triage's T2).** Test-only: no generated output moves.
+  - `field_and_features_add_up_to_every_budget` (`tests/galaxy_features.rs`) failed in slow passes
+    1A and 2A, as it had since ad16be12 (on `origin/galaxy-generation`: bin5b, P11.T7).
+    `FeatureShares::field_factor` became 1 − φ − `class_share`, the carved binary classes that plan
+    11's catalogue will hold (P11.T8), while the test still summed only the field, the members and
+    the globulars. It fell short by exactly the class share, the same in every population:
+    1.6 × 10⁻⁷ in band A, 1.8 × 10⁻⁶ in band B (the first to fail, the young disc at seed 0), 4.8
+    and 7.7 × 10⁻⁴ in bands C and D, and 1.8 × 10⁻⁵ in band E.
+  - The sum now adds `budget × share × class_share(population, band)`, and the test has a doc
+    comment. The tolerance stays P09.T6's 10⁻⁶ relative. The carved share is the value the field
+    factor subtracts, so it adds only rounding. The error left is the members' quadratures': at
+    worst 5.1 × 10⁻¹², the young disc's, in every band at all three seeds; the other populations
+    reach 4.7 × 10⁻¹³ at most. The young disc's ten age bins read 1 − φ(age) and are unchanged;
+    they reach 2.9 × 10⁻¹¹ (bins 7–9, the triage's run). The carved share itself is checked by
+    `shares.rs`'s `the_field_features_and_carved_classes_add_up_to_the_budget`.
+  - It passes by name (`--cargo-profile slow-test --run-ignored only`).
+- **P09.T23.b as built (issue #15, lane `lane/15-p09-t23b-feature-pad`, 2026-10-14, at
+  `GENERATOR_VERSION` 22).** No output moves and there is no bump: the padding chooses which cells
+  are visited, not what they hold. No golden is added, and every golden passes unchanged,
+  `galaxy/features/members` among them. Files: `members/placement.rs`, `members/source.rs`, and
+  one `pub(crate)` constant in `members.rs`.
+  - _The bound._ `FeatureInterior::member_speed_bound() -> KilometresPerSecond` is computed once
+    in `FeatureInterior::of` and kept in a field. It is (|bulk| + max(core, tail)) × (1 + 10⁻⁹).
+    - "The cluster's central escape speed" is read as the value of `member_velocity`'s cut at the
+      centre, `ClusterModel::escape_speed_at(0)` = √(2GM ÷ a) of the cluster's Plummer sphere,
+      the most the cut takes anywhere. It is not `ClusterModel::escape_speed_central`, the fitted
+      `central_escape_speed` that retention reads: on the sample's fastest feature the fit is the
+      larger, 0.334 against 0.268 km/s.
+    - The tail term is 8.58 √2 = 12.134 (`members::INTERNAL_SPEED_SIGMAS`, rounded up from
+      √(212 ln 2) = 12.1222) times σ at the tidal radius times the largest `equipartition_factor`
+      over the bands' tails, in the table cut at the grid's reach. It is 0 without a tail.
+    - Its doc comment states the limit: the feature-level list's classes (P09.T30.b, T36 and T43)
+      are not covered, and a task that registers one with its own velocity law extends the bound.
+  - _Rounding._ Both: the 8.58 factor for the tail term, and a relative margin of 10⁻⁹ on the sum
+    (`placement::SPEED_BOUND_MARGIN`). The margin was applied from the start, not after a test
+    tripped: the core term is the cut's own value, unrounded, while a member's speed in m/s is the
+    norm of a component-wise sum.
+  - _The reach._ `source::band_reach(radius, t, layer, bound)`, a private pure function, is the
+    radius plus `pad_for(t, max(pad_speed(layer), bound))`: today's reach, bit for bit, where the
+    bound is the lower. `interiors_near` is asked with the sphere padded at `UNBOUND_PAD_SPEED`
+    whatever the layers asked (it was the fastest asked layer's pad). The debug assertion that
+    every bound lies below `UNBOUND_PAD_SPEED` sits in `FeatureInterior::of`, so that it checks
+    every interior any caller builds, not only those the source looks up. The census is unchanged.
+  - _Fast tests,_ added to `the_member_source_finds_and_counts_what_a_scan_finds` on its one
+    fixture build. The bound of the tests' open cluster and globular equals |bulk| plus the larger
+    term recomputed from the model's getters (to the margin), is above every member the fast tests
+    enumerate (the open cluster's 1,647; the globular's busiest band-C cell, 7) and is below
+    `UNBOUND_PAD_SPEED`. Open cluster: 236.359 km/s = 230.260 + max(core 1.445, tail 6.099);
+    globular: 170.816 = 165.392 + max(1.773, 5.424). The tail term is the larger in both.
+    The open cluster's query asked for band C alone now equals the scan's band-C hits too, which
+    checks the lookup without layer E, the one whose radius grew.
+    `a_feature_s_reach_is_its_layer_s_unless_its_bound_is_faster` needs no fixture. The scan now
+    runs over a member list enumerated once (`every_member`), so the open cluster's comparison and
+    the slow globular-core test each enumerate their cluster once for both times.
+    `cargo test -p hyperion-sim features::members`: 15 passed, 5 ignored, in 18.1 s.
+  - _The sample_ (`source::tests::sample`, for the slow tests). It takes every feature with an
+    interior within 2,000 ly of the galactic centre, from `FeatureCatalogue::near`, then features
+    from `walk_process` up to 200: a third each from the globulars, the old open clusters (the
+    sub-discs in turn) and the nurseries. The inner set alone is 225 features: 7 globulars, 104
+    old open clusters (89 of the first sub-disc, 10 of the second, 4 of the third, 1 of the fourth)
+    and 114 nurseries. So the sample is the inner set, and the walk adds none.
+  - _"The fixture's features"_ (the count, and "the fixture's feature with the largest bound" among
+    the ±H centres) are read as the sample's, not the whole catalogue's. A feature farther out has
+    its bulk below the local escape speed (the pad-speed ruling of 2026-10-05). That is at most
+    715.9 km/s beyond 2,000 ly, the value in the plane at 2,000 ly, where the flattened potential
+    is deepest. The sample's largest internal term is 69.7 km/s, and the ruling's largest central
+    escape speed over P09.T14's 50 seeds is 164 km/s, so no feature outside the sample is expected
+    near `PAD_SPEED` either.
+  - _The run-time rule_ is issue #15's brief's: time the member test once, alone and capped; at 20
+    minutes or less keep every member; above that keep every member of the inner set, the open
+    clusters, the nurseries and the feature with the largest bound, and take the other globulars'
+    bands A and B whole and bands C–E in every eighth owned cell, recording the cut.
+  - _Slow tests,_ each run once on the slow-test profile, alone under a 6 GB memory cap, on the
+    shared 8-thread laptop at a 1-minute load of 1–4:
+    - `every_member_of_the_sampled_features_moves_below_its_feature_s_bound`: all 2,731,509
+      members of the 225 features, every band and owned cell, move below their feature's bound.
+      The largest ratio of a member's speed to its bound is 0.999089, in FFG F201, an old open
+      cluster of 228 members bound at 314.209 km/s. 1,179 s (19.6 minutes), within the run-time
+      rule's 20, so no member is cut; the cut would have thinned only globulars outside the inner
+      set, and the sample has none, so the test has no thinning. The seven globulars hold
+      2.04 × 10⁶ of the members, FGF F2's 768,514 the most, and most of the time.
+    - `the_sampled_features_bounds_stay_below_the_unbound_pad_and_the_fast_ones_are_counted`: none
+      of the 225 at or above `PAD_SPEED`. The largest bound is 688.505 km/s, of GGF F43, an old
+      open cluster of the first sub-disc with 136 members: bulk 685.996, core 0.268, tail 2.509
+      km/s. 7.0 s.
+    - `queries_at_plus_and_minus_h_find_what_a_scan_finds_in_the_20_fastest_sampled_features`: at
+      t = ±1,000 years the source's hits of each of the sample's 20 fastest features equal the
+      scan's. Their bounds run from 464.6 to 688.5 km/s; they are 18 old open clusters and the
+      globulars GFG F3 and FGF F4. The sphere is the half-mass radius, centred a quarter of it off
+      the feature's centre, not P09.T23's 50 ly: its edge cuts the cluster, so that members cross
+      it over ±H, where the bulk alone carries the fastest some 2.3 ly. It holds 5 to 40,774
+      members a query; the test asks that 18 of the 20 centres find members, and all 20 do. 581 s,
+      nearly all of it the two globulars' 237,000 and 321,000 members. The 20 centres are a slow
+      test of their own; the fast comparison at 0 and −600 years is unchanged.
+    - The existing `a_50_ly_query_in_a_globular_s_core_is_a_brute_force_enumeration` passes in
+      18.8 s, and placement's `no_cell_and_band_of_the_fixture_s_clusters_nears_the_index` in
+      14.1 s with its recorded figures (734 clusters, 2 over the target, the fullest 4,237).
+- **Deferred findings (2026-10-13 rule)**, from P09.T23.b's review:
+  - _No golden pins the member source's hits._ That a padding change moves no hit is held only by
+    the scan comparisons, so a later edit to the padding or the lookup could change which members
+    a query returns without any golden failing. A small golden of the shared open cluster's query
+    hits, all layers and band C alone at −600 years, would pin them: a new label at the version in
+    force, with no bump. This task adds no golden, by its brief.
+- **P09.T30.a as built (issue #20, lane `lane/20-p09-t30a-bh-events`, 2026-10-15, at
+  `GENERATOR_VERSION` 22).** No output moves and there is no bump (the bump plan after 22, ruled
+  2026-10-14: "P09.T30.a | No (new event tags) | No bump"): the task adds two event tags and the
+  kinds on them and changes nothing that existed. `rng/tags` gains exactly two lines at its end, and
+  `galaxy/features/centre_events` is a new golden at header 22. Files:
+  `galaxy/features/centre/events/{mod,flares,disruptions}.rs`, `centre/mod.rs` (the module
+  declaration and one line of its doc), `rng/tags.rs`, `id/event_tags.rs`. Nothing reads the events
+  yet; P09.T30.b and plan 12 will.
+  - _API._ `features::centre::events::subject() -> EventSubject`, the black hole's own ID (Design
+    note 23).
+    - Flares: `CentreFlareModel::{new(seed), of(&Galaxy), series(), listed_rate()}`, a `RateModel`
+      whose bound and rate are both 1.1 a day; `CentreFlare` (`Copy`) with `id`, `onset`, `end`,
+      `duration` (a `Span`), `duration_seconds`, `mean_luminosity_watts`, `energy_joules`,
+      `peak_luminosity_watts`, `is_active_at(t)` and `luminosity_watts_at(t)`;
+      `flares(&model, window, out)`, `flares_active_at(&model, t, out)` (the look-back's onsets
+      filtered by duration) and `flare(&model, id) -> Option<CentreFlare>`;
+      `flares::peak_over_mean()`; and the constants of `flares`: `BIN_SECONDS`, `LOOK_BACK_BINS`,
+      `RATE_PER_DAY`, `MIN_MEAN_LUMINOSITY_WATTS`, `MAX_MEAN_LUMINOSITY_WATTS`,
+      `LUMINOSITY_SLOPE`, `MIN_DURATION_SECONDS`, `MAX_DURATION_SECONDS`, `DURATION_SLOPE`,
+      `MAX_DURATION` and `MAX_PEAK_LUMINOSITY_WATTS`.
+    - Disruptions: `TidalDisruptionModel`, a `RateModel`, with `new(seed, black_hole_mass)`,
+      `of(&Galaxy)`, `series()`, `black_hole_mass()`, `listed_rate()` and
+      `expected_count(window)` (the rate times the span, in 128-bit nanoseconds). Its `new`
+      returns `BuildTidalDisruptionModelError::InvalidMass` for a mass that is not finite and
+      positive, and `BuildTidalDisruptionModelError::RateAboveBinLimit` for a mass below about
+      0.56 M☉, where a bin's mean would exceed `PoissonBins::MAX_MEAN_PER_BIN` (see the disruption
+      law below); `TidalDisruption` (`Copy`, `Eq`, `Ord`, `Hash`) with `id` and `time`;
+      `tidal_disruptions(&model, window, out)` and `tidal_disruption(&model, id)`;
+      `disruption_rate(mass) -> EventsPerSecond`, equation 27; the constants
+      `disruptions::{BIN_SECONDS, LOOK_BACK_BINS, RATE_AT_PIVOT_PER_YEAR, PIVOT_MASS, MASS_INDEX}`.
+    - The plan's `flares` and `tidal_disruptions` keep their names; `luminosity_at` is T30.b's.
+      Each model is built from its parts (the seed; the seed and the mass), with `of(&Galaxy)`
+      beside it, so that the tests sweep seeds and masses without solving a galaxy's black hole
+      (the brief's lean). `of` reads `galaxy.params().black_hole().mass()`, as `black_hole_of`
+      does. Luminosities are watts and energies joules, the unit in the getter's name; no unit
+      newtype is added.
+    - For plan 12's registry rows (P12.T5.a): the flares' `BIN_SECONDS`, `LOOK_BACK_BINS`,
+      `MAX_DURATION` and `MAX_PEAK_LUMINOSITY_WATTS`, and `CentreFlare::luminosity_watts_at`; the
+      disruptions' bound, duration and light curve are T30.b's.
+  - _The tags_ (the brief's ruling of 2026-10-15, item 4).
+    `CENTRE_EV_FLARE: Event = "centre.ev.flare"` (hash `0xe60651f1fe53aed5`) and
+    `CENTRE_EV_TIDAL_DISRUPTION: Event = "centre.ev.tidal_disruption"` (`0xa1782ed5a9226363`),
+    appended after `SYSTEM_ABUNDANCES` under a "Plan 09, phase 6 (P09.T30.a)" heading; `0x0200 => CENTRE_FLARE` and
+    `0x0201 => TIDAL_DISRUPTION` after `0x0202 => SUPERNOVA` in plan 09's block, so that the
+    registry's order holds. The module doc's parenthetical now reads "(plan 09 registered `0x0202`
+    first, in P09.T19.a, and `0x0200` and `0x0201` after it, in P09.T30.a)". A test pins the block
+    to exactly `0x0200`–`0x0202` with their names, and
+    `plan_09_registers_its_tags_with_their_scopes` covers the two new tags. No `System` tag: a
+    kind's marks come from `BinEvent::marks()`.
+  - _The flare rate_ (ruling item 2). A constant 1.1 a day above a mean unabsorbed 2–10 keV
+    luminosity of 10³⁴ erg/s (Neilsen et al. 2013, ApJ 774, 42, §5: "1.1 (+0.2 −0.1) flares per day
+    above a luminosity of 10³⁴ erg s⁻¹"), 401.775 a Julian year, the same at every time and for
+    every black hole. The threshold is the luminosity law's floor. The plan's "about 365 flares a
+    year" is read as the brainstorm's "about one a day", at the bottom of Neilsen's interval
+    (1.0–1.3 a day): the test asserts 1.1 × 365.25 = 401.775 to 10⁻¹² relative. Bins of 86,400 s,
+    looking back one; a bin's mean is 1.1 and nothing is thinned.
+  - _The flare marks_ (ruling item 3; a deviation from the plan's "power-law energy
+    distribution"). Word 0 is the mean luminosity, dN/dL ∝ L^−1.9 on [10³⁴, 1.925 × 10³⁵] erg/s
+    (Table 2: Γ = −1.9 +0.3 −0.4), and word 1 the duration, dN/dT ∝ T^−0.9 on [400, 8,175] s
+    (Table 2: −0.9 ± 0.2), each by inverse transform of its truncated law, independently. The
+    energy is their product, E = L̄ × T, since the mean luminosity is the fluence over the duration
+    (§3), so the energy distribution is a product of two power laws. The reasons, as ruled: §5's
+    "independence of the flare intensity on duration"; §4.2's correlation coefficients (the fluence
+    with the peak rate ρ ∼ 0.89 and with the duration ∼ 0.54, the peak rate with the duration
+    ∼ 0.27), which independent L̄ and T reproduce; and a rate stated above a luminosity, which an
+    energy-first law cannot hold. The energy-first law is not built. The tops of the two ranges are
+    where §4.3's test of the fits' extrapolation starts, "at our highest bins" (the paper does not
+    call them bin edges), just above the brightest flare's 1.92 × 10³⁵ erg/s (Table 1) and the
+    longest's about 7,800 s (§3); 400 s is a selection limit, "our shortest allowed time" (§3).
+    Scatter added later takes words 2, 3, … in a fixed order.
+    - _Checks of the built law_ against the ruling's figures.
+      `flares::tests::the_law_reproduces_neilsen_et_al_s_figures` computes them from the built
+      constants and asserts the share above 10³⁵ erg/s and its interval, the duty cycle, the energy
+      range, the share above 10³⁸ erg, the peak ratio and the bound; it prints the mean duration
+      and the daily rate above 10³⁸ erg. The Poisson interval and the dN/dE index are the
+      science-checker's, recomputed by hand for this record.
+      - above 10³⁵ erg/s, a share of 0.0603, one flare in 15.08 days, against Neilsen's "every
+        ∼11.5 days" (§5), three flares in 34.7 days, whose 90% Poisson interval is one in 4.5–42.5
+        days;
+      - a mean duration of 2,750.0 s and a duty cycle of 3.501%, against §4's 3.5% (the ruling's
+        2,752 s is the same law, rounded differently);
+      - energies from 4.0 × 10³⁶ to 1.574 × 10³⁹ erg, which hold Table 1's L × T, from
+        1.15 × 10³⁷ (ObsID 13853) to 1.05 × 10³⁹ erg (ObsID 14392);
+      - above 10³⁸ erg, a share of 0.2530, 0.278 a day (the ruling's 0.254 and 0.279), against
+        Ponti et al.'s (2015, MNRAS 454, 1525) bright-or-very-bright 0.26 ± 0.05 a day in 2012
+        (Table 3) and 0.27 ± 0.01 over 1999–2014 (§5.4);
+      - a least-squares index of dN/dE over 10³⁷–10³⁹ erg of −1.53 on a log-uniform grid (the
+        ruling's −1.52; Table 2's fluence fit: −1.5 ± 0.2).
+
+      The science-checker's closed forms reproduce every figure independently; the small
+      differences from the ruling's are rounding and fitting method, not the law.
+
+  - _The light curve_ (lean, the brief's §2.2 item 2). Neilsen §3's flare shape, a Gaussian in
+    time whose start and stop are its 2σ limits. It is centred at the onset plus T ÷ 2 with
+    σ = T ÷ 4; its value at ±2σ, e^−2 of its amplitude A, is subtracted, so that it is continuous
+    and 0 outside the flare; and it is scaled so that ∫ ΔL dt = E. Its integral is 1.851235 σA and
+    its peak A (1 − e^−2), so the peak is 1.868298 times the mean luminosity (`peak_over_mean`) and
+    the bound is 3.596474 × 10²⁸ W, which `MAX_PEAK_LUMINOSITY_WATTS` holds rounded up at the fifth
+    figure, 3.5965 × 10²⁸ W (3.5965 × 10³⁵ erg/s). It is ΔL in the 2–10 keV band, in watts, not a
+    factor: the black hole has no quiescent luminosity until T30.b.
+  - _The duration's cap._ `MAX_DURATION` is the law's top, 8,175 s. A `const` assertion holds it
+    under the day's look-back, and `flare_of` asserts each flare's duration under it in debug
+    builds, so `flares_active_at` finds every flare still running.
+  - _The disruption law_ (ruling item 1; a technical correction). Stone and Metzger's (2016, MNRAS
+    455, 859, §4.1) equation 27 as printed, Ṅ = 2.9 × 10⁻⁵ (M• ÷ 10⁸ M☉)^−0.404 per Julian year,
+    the whole sample's fit ("our fiducial model uses a power law fit to the entire galaxy sample (B
+    = −0.404)"), at the black hole's mass, constant in time, for any finite positive mass and with
+    no clamp. The plan's 10⁻⁴ × (M ÷ 4.3 × 10⁶ M☉)^−0.4 is this equation rounded at the Milky Way's
+    mass, and is withdrawn.
+    - _Technical correction._ The ±H window of the plan's test moves from 0.06–0.2 to 0.06–0.21,
+      since its top was the rounding; its bottom, 0.06, is Yao et al.'s observed rate over 2,000
+      years and stays. The horizon's "about 26" becomes "about 27 (27.31)".
+    - At the fixture's 4.300220 × 10⁶ M☉ the equation gives 1.033874 × 10⁻⁴ a year: 0.20677 in ±H,
+      27.309 in the source horizon's 264,144 years and 0.10587 a bin. Per bin it is 0.427 at 1.5
+      dex below the Milky Way's mass, 0.484 at 10⁵ M☉ and 0.0187 at 10^8.5 M☉, under 64
+      throughout. The 1.5 dex either side is the ±4σ of the M–σ relation's 0.38 dex scatter that
+      the draws reach in practice, as `centre`'s `no_drawn_centre_fails_its_inversion` takes it;
+      the builder itself validates the scatter to ±9σ, and a draw reaches 8.58σ at most, about
+      4 × 10³ M☉ at the Milky Way's dispersion, 1.8 a bin.
+    - _Masses below 0.56 M☉ are refused_ (a decision of this build, from the review). There a
+      bin's mean would exceed `PoissonBins::MAX_MEAN_PER_BIN`, which the bins cannot list, so
+      `TidalDisruptionModel::new` returns `RateAboveBinLimit` rather than clamp the rate. No galaxy
+      the builder allows has such a black hole, and the rate at every mass accepted is equation 27
+      unclamped, as ruled.
+    - The module doc states that an event is the disruption of a star that entered the loss cone,
+      at the equation's rate of loss-cone entries (in a steady state the two rates are equal), its
+      time the disruption, which T30.b makes the victim's pericentre passage; that the equation is
+      extrapolated below SM16's sample, about 10⁶ M☉ (§6), and has no support below Yao et al.'s
+      10^5.3 M☉; and that above about 10^7.5 M☉ some would be swallowed whole, which T30.b decides
+      per victim (SM16's rule near equation 33, §4.2; the brief's ruling item 1).
+    - _Sanity checks._ Van Velzen (2018, ApJ 852, 72) finds ≈ 1 × 10⁻⁴ per galaxy per year
+      (abstract; §3), the equation's value at the fixture's mass, and slopes from +0.3 to −0.5
+      "broadly consistent" (§4.3), a range that holds −0.404. Yao et al. (2023, arXiv:2303.06523v2)
+      find 3.2 (+0.8 −0.6) × 10⁻⁵ at a host of 10¹⁰ M☉ (abstract; §6.5), where their equation 5
+      gives a black hole of 2.66 × 10⁶ M☉ and equation 27 gives 1.26 × 10⁻⁴, 3.9 times more: the
+      tension of SM16 §5.1 and Yao et al. §6.6, a deferred finding.
+  - _The disruption bins and look-back_ (lean, the brief's §2.2 item 5). Bins of 1,024 Julian
+    years, 32,314,982,400 s, so that the source horizon is bins −257 to 0, 258 bins; a look-back of
+    0, since a disruption is an instant. T30.b sets its own look-back for the tails, which moves no
+    event.
+  - _The word layout._ Flares: word 0 the mean luminosity, word 1 the duration. Disruptions: no
+    word is drawn; the words of a disruption's event stream from word 0 are T30.b's, for its
+    victim, so that T30.b moves no time and no ID.
+  - _Sources_, each read in full text for this task: Neilsen et al. 2013 (ApJ 774, 42; §3, §4,
+    §4.2, §4.3, §5, Tables 1 and 2); Stone and Metzger 2016 (MNRAS 455, 859; §2.2, §4.1 and
+    equation 27, §4.2 near equation 33, §5.1, §6); van Velzen 2018 (ApJ 852, 72; abstract, §3,
+    §4.3 and equation 10, §5.4); Yao et al. 2023 (arXiv:2303.06523v2; abstract, equation 5, §6.4,
+    §6.5, §6.6); Ponti et al. 2015 (MNRAS 454, 1525; §1, §2.4, Table 3, §5.4); GRAVITY
+    Collaboration 2020 (A&A 638, A2; §4, Table 2); Witzel et al. 2018 (ApJ 863, 15; abstract);
+    Witzel et al. 2021 (ApJ 917, 73; abstract).
+  - _Tests_, 26 in the module, none marked slow.
+    - Flares (`flares::tests`, 12): the year's 401.775 to 10⁻¹² relative; the bound across the
+      source horizon; the law's figures above; the marks' ranges, the cap and the two
+      Kolmogorov–Smirnov tests over a year; the light curve (0 outside, continuous to 10⁻⁶ of the
+      peak over a microsecond, peak at the middle, the trapezoid integral the energy to 10⁻⁵);
+      partitions in any order and on threads (compiled out on wasm32-wasip1); regeneration and
+      `None` for the other tag, another subject and numbers beyond the counts; `flares_active_at`
+      against the listing at 20,000 instants; no history at +900 years; the same seed twice.
+    - Disruptions (`disruptions::tests`, 11): 258 bins; the fixture's 0.20677 and 27.309, each
+      equation 27 times the span to 10⁻¹² relative, and 0.06 ≤ 0.20677 ≤ 0.21; the bound over 71
+      masses from 10⁵ to 10^8.5 M☉; the two refusals; partitions in any order and on threads;
+      regeneration and `None` for foreign IDs; no history at +900 years; the same seed twice.
+    - `events::tests` (3): the subject, `of(&Galaxy)`, and the golden.
+    - _The rate integrals._ Flares over one Julian year from the epoch, summed over 10³ seeds
+      (family `0x0930_a000_0000_0000`): expected 401,775.000, counted 402,103, interval
+      (399,691, 403,862) at α = 10⁻³. Disruptions over the source horizon, summed over 10⁴ seeds
+      each: at the fixture's mass expected 273,091.72, counted 273,537, interval (271,374, 274,813);
+      at 10⁵ M☉ expected 1,248,069.44, counted 1,247,877, interval (1,244,395, 1,251,747); at
+      10^8.5 M☉ expected 48,110.38, counted 48,058, interval (47,390, 48,834). They take 0.27 s and
+      1.09 s on the slow-test profile and 1.4 s together in a debug build, so neither is marked
+      slow: about 0.27 ms for a year of flares at one seed and 36 µs for a source horizon of
+      disruptions at one seed.
+    - `cargo test -p hyperion-sim features::centre::events`: 26 passed, in 2.2 s of tests (67 s
+      with the build); its five doctests pass under `--doc`. The registry run,
+      `cargo test -p hyperion-sim -- events event_tags domain_tags_are_pinned`: 93 passed and 3
+      ignored (other tasks' slow tests), 1 passed, and 15 doctests passed. Measured on the shared 8-thread laptop at a 1-minute load of
+      3–8, with another lane's tests running beside them at times.
+- **Deferred findings (2026-10-13 rule) (P09.T30.a).** Recorded and deferred: each leaves the
+  algorithm and every contract as they are.
+  - _One flare law for every black hole._ Neilsen et al. measured Sgr A* alone; the rate, the laws
+    and the template are the same at every black-hole mass. A dependence on the mass or the
+    accretion rate needs a source that this task did not read.
+  - _The near-infrared and submillimetre counterparts._ Every X-ray flare has a near-infrared one,
+    and near-infrared flares are about four times as frequent (Ponti et al. 2015, §1; GRAVITY
+    Collaboration 2020, §4: "X-ray flares and NIR flares are coupled. The converse is not true").
+    The near infrared is a flux distribution: a log-normal with a power-law tail above about 2 mJy
+    (GRAVITY 2020, §§4–5; median 1.1 ± 0.3 mJy), the log-normal flux densities of a red-noise
+    process with τ_b = 243 (+82 −57) minutes (Witzel et al. 2018). The X-ray process is the
+    low-pass-filtered near-infrared one, and the submillimetre lags the near infrared by about 30
+    minutes (Witzel et al. 2021). Not modelled.
+  - _The bright-flare rate's changes._ Ponti et al.'s (2015, §5.4) bright-flare rate rises from
+    0.27 ± 0.01 a day to 2.52 ± 0.98 after 2014 August 31, and GRAVITY (2020, §4) report six bright
+    near-infrared flares in 2019. The rate here is constant in time.
+  - _The efficiency-corrected integral._ Neilsen's Table 2 fit to the efficiency-corrected
+    luminosity distribution (N = 50 ± 20, Γ = −1.9) integrates to about 1.5 a day on
+    [10³⁴, 1.925 × 10³⁵] erg/s over the campaign's 34.5 days (104.4 ks of flaring at a 3.5% duty
+    cycle, §4), against the 1.1 built (ruling item 2); without the top it is 1.6. Its errors
+    involve "extrapolating outside the domain of the data" (Table 2's note), and Ponti et al.'s
+    bright-flare rate matches 1.1 a day under this law (0.278) and not 1.5 (0.379).
+  - _Flare substructure._ The brightest flare peaked near 5 × 10³⁵ erg/s with four subflares
+    (Neilsen §5, Table 1), above the single template's bound of 3.5965 × 10³⁵ erg/s. Neilsen fit
+    each subflare with σ of 100–1,600 s; a flare here longer than 6,400 s has σ up to 2,044 s and
+    stands for several subflares in one Gaussian.
+  - _Faint and short flares._ Flares below 10³⁴ erg/s and shorter than the 400 s selection limit
+    (Neilsen §3, §5) are not modelled.
+  - _Equation 27 below 10⁶ M☉_ is an extrapolation (SM16 §6), in the direction that Yao et al.'s
+    TDE mass function, ∝ M_BH^−0.25 down to 10^5.3 M☉ (§6.4), supports; below 10^5.3 M☉, which a
+    draw reaches only beyond about 4σ of the M–σ scatter, nothing supports it.
+  - _The Hills-mass cut._ SM16 (near equation 33, §4.2: "Eq. 27 if M• < M_Hills(M★), but is 0
+    otherwise"), van Velzen 2018 (§3) and Yao et al. 2023 (§6.4) cut the rate where stars are
+    swallowed whole, from about 10^7.5 M☉. A 1 M☉, 1 R☉ star's Hills mass is 1.14 × 10⁸ M☉ by SM16
+    §2.2's definition, below 1.36 × 10⁸ M☉, 1.5 dex (±4σ) above the Milky Way's black hole, and
+    the builder allows more. Every star entering the loss cone is an event here; T30.b gives each victim its outcome, disrupted or swallowed whole, so that no
+    T30.a ID or time moves.
+  - _SM16's tension with observed rates._ Their few × 10⁻⁴ per galaxy per year exceeds the
+    observed rates "by at least an order of magnitude" (§5.1); Yao et al.'s optical rate at the
+    Milky Way's mass is 3.9 times below equation 27 (§6.6).
+  - _A rate of this centre's own._ The rate could come from this centre's loss cone and
+    distribution function (P09.T24.b's `DistributionFunction`, P09.T25's `LossCone`) instead of
+    SM16's fit to other galaxies' Nuker profiles, which ignore nuclear-cluster light (SM16 §6).
+    This centre's inner slope sits at their boundary between core and intermediate galaxies.
+  - _A shared power-law sampler._ `flares::power_law_quantile` is this module's own, beside
+    P06.T28.a's private inverse transform; one helper in `crate::events` would change T28.a's file.
+    Lean: share it when a third kind needs one.
+- **P09.T44 as built** (issue #74, lane `lane/74-p12-t11c-compact-refusals`, 2026-10-22, at
+  `GENERATOR_VERSION` 22). Client and guide only: no Rust, protocol, binding, server, sim or golden
+  change, nothing generated moves, and no version changes.
+  - _Names._ Under `apps/hyperion/src/renderer/src/`: `displays/system/HostReadings.tsx`'s private
+    `radiusInKm` becomes `isCoreCollapseRemnant(host)`, a neutron star or a black hole, read at
+    both its uses, the radius's unit and the nebula's rows; its private `nebulaReadings` takes the
+    host rather than its nebula and gives nothing for such a host. `PrimaryReadings` names its
+    inline test of the same two kinds `collapsed` and reads it for the radius and for
+    `NEBULA RADIUS`. No helper is shared between the two files: no file of this task's scope is
+    one both import, and each tests the kind as it already did for the radius in `km`.
+  - _As briefed._ The rows are left out by the host's kind, whatever nebula the answer carries, so
+    a star read as observed keeps them by the kind its light shows. `EVENTS` stays. The docs of
+    `PrimaryReadings`, `HostReadings` and `nebulaReadings` say so; `PrimaryReadings`' and
+    `isCoreCollapseRemnant`'s cite Kwitter and Henry (2022, PASP 134, 022001, §1) for a planetary
+    nebula's coming only from a star of 0.8–8 M☉ that leaves a white dwarf, and Smartt (2009, ARA&A
+    47, 63) for core collapse above about 8 M☉ (science check: both hold; Kwitter and Henry imply
+    the exclusion rather than state it). The guide's `NEBULA RADIUS` row reads as the brief gives
+    it. P09.T41.c's entry is not edited to point back here: a task's text changes only through a
+    re-validation, and this record and T44's entry say what T41.c's rows take.
+  - _Tests (11 new, as run)._ `displays/system/HostReadings.test.tsx` (6: a neutron-star and a
+    black-hole host read none of the five rows, and each still reads `EVENTS NONE`; a neutron-star
+    host reads none of them even where the answer carries a nebula; a white dwarf that lights none
+    still reads `NEBULA RADIUS NONE`); `displays/galaxy/SystemReadout.summary.test.tsx` (5: no
+    `NEBULA RADIUS` under `STAR A` for `aNeutronStar` and `aBlackHole`, each still reading `EVENTS`,
+    and `aWhiteDwarf`'s `—`). The Sun-like star's `—` the brief names is the existing test of what
+    this version does not model, so the new one is the white dwarf's, which separates the remnants
+    (TypeScript review). Every other existing test passes unchanged, the white dwarf's nebula and
+    the living star's `NONE` and `—` among them.
+  - _Deferred findings (2026-10-13 rule)._ (1) § Data states has the server set a section's state
+    and the console never infer it; here the console leaves the rows out from `host.kind`, which is
+    the server's, so a contradictory answer (a neutron star carrying a nebula) is hidden without a
+    sign. Whether a row left out by a server-sent kind counts as set by the server, or Not
+    applicable should come on the wire with P09.T41.c's rows, is the owner's (UX review). (2) The
+    one kind test now sets the radius's unit and the nebula's rows in two files (`collapsed`,
+    `isCoreCollapseRemnant`); one predicate in `lib/system/`, outside this lane, would keep the two
+    displays from drifting apart (UX review).
+- **P09.T17 as built (issue #122, lane `lane/122-p09-t17-supernova-clock`, 2026-10-27, at
+  `GENERATOR_VERSION` 23, no output moves).** Pure functions; nothing calls them until P09.T35, so
+  no generated output moves and there is no bump (decision-bump-plan-after-22, §3). Files:
+  `galaxy/catalogue_classes/supernova.rs` (the items) with `supernova/clock_tests.rs` (their
+  tests), `snr/window.rs` (the electron-capture and Iax laws), `snr/caps.rs` and `galaxy/mod.rs`
+  (the held caps), `gas/field.rs` (`GasField::metallicity_at`), `rng/tags.rs` (`snr.energy`, scope
+  `System`, keyed by `ObjectKey::from(SystemId)`: word 0 one uniform, the energy's rank; words 1–7
+  reserved). Also the brief's three doc comments from the docs queue: `features/cluster.rs`'s
+  `MEAN_BLACK_HOLE_MASS` (F1), `Galaxy::mean_formed_mass` (F2: 1.0961 M☉ under the default and
+  0.8215 under Kroupa's, measured at this base) and `sse/track/build.rs`'s
+  `stripped_by_companion` (F3). The desktop accepted leans (a)–(g) as built on the issue
+  (2026-10-27); the signatures below are the Provides that P09.T33–T36 consume.
+  - _Consumes, re-validated against P08.T9 and P08.T13 as built._
+    `SystemStars::death_time()`'s T is `ClockDeath::At(UniverseTime, DeathKind)`, with
+    `BeyondClockRange` and `AlreadyRemnantAtBirth` beside it. `natal_kick()` is `Option<NatalKick>`
+    (`speed`, `direction`, `velocity` in m/s). The system's `Composition` is
+    `SystemStars::primary().composition()` and is not read (ruling 136.9).
+    `displaced::ExplosionSite` is `new(position, death)`, `position()`, `death()`.
+    `SHELL_WINDOW_CAP` is `snr::caps::SHELL_WINDOW_CAP`, already this plan's. `explosion_site` and
+    `death_in_interval` are as built, the latter's interval (−(`SHELL_WINDOW_CAP` + L + H), +H].
+    `recent_death_claims` is no function: `RECENT_DEATH_CLAIM: Option<RecentDeathClaim> = None`,
+    for P09.T35, untouched here. `ClassTable` is read only through `IaLeftover::speed`, whose
+    speeds `IaLeftover::draw` takes from `SURVIVOR_POPULATIONS`. `GasField::dust_per_hydrogen`
+    returns ζ = 10^[M/H], not [M/H]. `ShellEnvironment` carries no data. `snr.energy` was not
+    registered, and is added here.
+  - _Signatures, against the Provides sketch._
+    `DeathMarks::of(&Galaxy, &SystemStars, &ExplosionSite, GalacticVelocity) -> Option<DeathMarks>`
+    (the velocity added, and `Option`; points (a) and (e)).
+    `DeathMarks::of_type_ia` (added; point (b)) takes `&Galaxy`, `SystemId`, `&IaProgenitor`,
+    `&IaLeftover`, `&ExplosionSite` and `GalacticVelocity`, and gives `DeathMarks`.
+    `claims(&Galaxy, &ExplosionSite, &DeathMarks, Surroundings) -> bool` (`Surroundings` for
+    `ShellEnvironment`; point (g)). Added beside them: `claimed_window` (the cut window where
+    `claims` holds, the one route by which a class tests a death and gets its entry's window),
+    `effective_window` (W_eff's window), `lifetime_cap`, `LIFETIME_REACH` (4,096 ly, a parameter
+    of the generator version), `Surroundings::environment`, `BubbleInterior`,
+    `SupernovaKind::of_death`, `SupernovaInterval`'s `of_window`, `of_cap`, `thinning_cap`,
+    `window`, `start`, `end`, `length` and `contains`, and on `ExplosionEnergy` the two new laws
+    and their constants.
+    `DeathMarks` holds the system, T, the kind, the energy and v_fast; the sketch's metallicity is
+    dropped (point (c)).
+  - _The interval on the clock._ W_eff = min(W, the environment's cap, 4,096 ly ÷ v_fast − (L +
+    2H)), floored at zero, in Julian years, then floored to the nanosecond
+    (`Span::from_seconds_f64`) and held to 0…`SHELL_WINDOW_CAP`. `claims` is start < T ≤ +H with
+    start = EPOCH − (W_eff + L + H), so T = +H is in and T = start is out, exactly. At
+    `SHELL_WINDOW_CAP` the start is `death_in_interval`'s, 134,534,593,094,400 s before the epoch,
+    and no interval opens earlier.
+  - _Design points._
+    - (a) v_fast for a core collapse is |v + kick|, or |v| with no kick, with v the caller's
+      galactic velocity: the grid's `epoch_velocity`, a member's bulk plus its own, a candidate's
+      draw. `epoch_velocity` serves grid records only and a Type Ia candidate has no
+      `SystemStars`, so the constructor cannot find v itself. The system's companions are not
+      members of the entry and are not read.
+    - (b) A second constructor for Type Ia candidates, since they have no `SystemStars`; a recent
+      Type Ia has no grid side to agree with (P09.T35: plan 11's binaries redraw any explosion
+      before +H). v_fast is the bound |v| + `IaLeftover::speed`, which has no direction; |v| for
+      a merger and for a Type Iax's partly burnt dwarf.
+    - (c) `claims` reads the site gas's [M/H], `GasField::metallicity_at(p) -> Dex`, which
+      `zeta` now calls, bit for bit (`dust_per_hydrogen` is 10^ it, tested); `shell_window` holds
+      it to −1…+0.5 dex. Cited to CMB88, p. 259 ("`ζ_m` = 1 for solar abundances").
+    - (d) The Iax law, `ExplosionEnergy::iax_from_uniform`, and, by the desktop's answer on the
+      issue (2026-10-27), an electron-capture law, `ExplosionEnergy::electron_capture_from_uniform`:
+      below. A private `EnergyLaw` picks the law from the death (`ElectronCapture`) or the channel
+      (`Iax`), so `SupernovaKind` is unchanged and an electron-capture supernova keeps the light
+      curve of its type. `ExplosionEnergy::from_foes` now accepts `IAX_MIN`–`MAX`; `MIN`, `MAX`,
+      `from_uniform` and the caps' scan, at `MAX`, are unchanged, so no cap moves.
+    - (e) `SupernovaKind::of_death(&Death) -> Option<SupernovaKind>`. `CoreCollapse` keeps its
+      type. `ElectronCapture` is typed by plan 06's envelope rule (`SupernovaType::of_envelopes`
+      on the hydrogen envelope and the helium outside the carbon–oxygen core), so a super-AGB
+      progenitor is a IIP, as SN 2018zd is (Hiramatsu et al. 2021). `EnvelopeLoss`,
+      `DirectCollapse` and a `CoreCollapse` of `SupernovaType::None` make no shell and give no
+      marks; so do `PairInstability` (5–94 × 10⁵¹ erg, Heger and Woosley 2002, far above the caps)
+      and `ThermonuclearDisruption` (no Type Ia channel describes a single star's carbon
+      ignition), both stated as not modelled and left on the grid. No marks rather than a `claims`
+      of false: the marks would have no kind to carry, and the caller learns before it reads the
+      gas.
+    - (f) `WindowCaps::from_galaxy` costs 3.7 ms in a test build against 352 ms for
+      `Galaxy::new`, about 1%, so `Galaxy::from_params` computes the caps once
+      (`Galaxy::window_caps`) and `from_galaxy` now copies them; a test holds them to
+      `WindowCaps::from_gas_params` of the gas's parameters, bit for bit. A scan on every claim
+      would cost that for every recent death. `Galaxy::from_params` documents the caps' assertion
+      under Panics; it never fires at the drawn floors, 300–450 K cm⁻³.
+    - (g) `ShellEnvironment` stays fieldless. `Surroundings`, of `Field`, `TypeIa` and
+      `Bubble(BubbleInterior)`, carries the interior the caller passes from the member's parent
+      feature, `BubbleInterior::new(SiteGas, wall)`, with the distance from the site to the
+      bubble's wall, so the wall cut (`ShellWindow::ended_at_wall`) is part of the shared test and
+      every side agrees on T36.a's window "ended at the wall". The window is cut at the cap with
+      `WindowCaps::cut`, whose debug assertion catches an interior the bubble's cap was not
+      scanned over.
+    - (h) `claims` takes no cache, so no `FeatureCellCache` can be passed to panic on use, and the
+      plan's test cannot be written as sketched. `the_test_reaches_no_feature` pins the signatures
+      of `claims`, `claimed_window`, `effective_window` and both constructors, and checks that the
+      non-test source of `supernova.rs`, `snr/{mod,window,shell,caps}.rs` and
+      `gas/{field,noise,phase,pressure,smooth}.rs` names neither `FeatureCatalogue`,
+      `FeatureCellCache`, `NoFeatureCache` nor `FeatureRef`, and that `supernova.rs` and
+      `snr/window.rs` name no `features::` path, no `GasModifier` and no `modifiers_near`. Our
+      reading: with no cache argument the remaining route to a feature is generating its cell,
+      `FeatureCatalogue::cell`, and nothing the test calls names it.
+  - _The electron-capture law (the desktop's answer, 2026-10-27)._ Log-normal in E, median
+    10^−0.85 = 0.141 × 10⁵¹ erg (√2 × 10⁵⁰, the geometric middle of the simulations' 1–2 × 10⁵⁰),
+    0.2 dex as the core-collapse law, truncated at ±2σ: 0.056–0.35 × 10⁵¹ erg (ours, provisional;
+    `ELECTRON_CAPTURE_LOG_MEDIAN`, `_SIGMA_DEX`, `_TRUNCATION`, `_MIN`, `_MAX`). Sources: an
+    oxygen–neon core explodes "with an energy of about or slightly more than `10**50` erg" (Kitaura,
+    Janka and Hillebrandt 2006, the arXiv abstract; the manuscript's reads "≳ 0.1 × 10⁵¹ erg");
+    "simulations consistently predict explosion energy (∼ 2 × 10⁵⁰ erg)" (Hiramatsu et al. 2021,
+    on SN 2018zd); self-consistent models give 0.12–0.18 × 10⁵¹ (Radice et al. 2017, model n8.8)
+    and 1.36–1.48 × 10⁵⁰ (Zha et al. 2022). The Crab's filaments carry about 7 × 10⁴⁹ erg (Smith
+    2013, §2), inside the range near its floor. The whole law lies below the core-collapse law's
+    0.40 and above the Iax floor. Science check: the quotes and constants hold; it offered
+    10^−0.9 (0.126) as an alternative median, between the Garching runs' ~0.10 and the others'
+    0.14–0.18, and found −0.85 defensible, which is kept.
+  - _The Iax law (ruling 136.10)._ Log-normal in E, median 10^−1.3 = 0.050 × 10⁵¹ erg, 0.65 dex,
+    truncated at ±2σ: 0.0025–1.0 × 10⁵¹ erg (ours, provisional; `IAX_LOG_MEDIAN`,
+    `IAX_SIGMA_DEX`, `IAX_TRUNCATION`, `IAX_MIN`, `IAX_MAX`). Median: SN 2020kyg's E_k = 4.4
+    (+2.2/−1.5) × 10⁴⁹ erg (Srivastav et al. 2022, §3), a faint Iax; their volume-limited rates
+    put faint Iax at 12 and luminous at 0.9 per 100 Type Ia, of 15 for all. Floor: SN 2008ha's
+    ~2 × 10⁴⁸ erg (Foley et al. 2009); Valenti et al. (2009) find 1–5 × 10⁴⁹ for the same event,
+    which the sources leave discrepant. Top: SN 2012Z's ~10⁵¹ erg (Stritzinger et al. 2015, who
+    give the class ~10⁴⁹–10⁵¹). 6.3% of Iax lie above 0.4 × 10⁵¹ erg, the luminous share of 0.9 in
+    15 if the luminous are the energetic (our reading). A normal Type Ia's 1.2 ± 0.2 × 10⁵¹ erg
+    (Woosley et al. 2007, §8) lies inside the core-collapse law's 0.40–2.51. The window at each
+    law's least energy is finite and positive over the window table's densities.
+  - _Figures._ The lifetime cap at 2,500 km/s is 4,096 × 299,792.458 ÷ 2,500 − 264,144 =
+    227,035.963 yr, under 0.23 Myr; at a thin site, (0, 30,000, 900) ly, it is what ends the
+    window. Seed 19's caps, as `claims` reads them: field and Type Ia 3.357 Myr, bubble 0.570
+    Myr; thinning caps 3.622 and 0.834 Myr. At the solar site (0, 26,000, 20) ly, 10⁵¹ erg, W_eff
+    is 3.181 × 10⁵ yr, so the interval opens 18,343,657,851,196.6 s before the epoch.
+  - _Tests_ (`supernova/clock_tests.rs`, fifteen, each on its own build of seed 19's galaxy;
+    `snr::caps`'s held-caps test; the plan-09 tag test; five doctests, on `lifetime_cap`, `claims`,
+    `claimed_window`, `DeathMarks::of_type_ia` and `SupernovaInterval`): membership by
+    `SupernovaEntry::state_at` before, at and after T and after W_eff, and a death 500 years
+    after the epoch claimed as a progenitor; the marks against the stellar stage, the kick and
+    the stream (the death's law bit for bit, the same twice, two systems two streams); each death
+    kind; Type Ia marks of all four channels (the Iax law, |v| + survivor); a 240-case sweep for
+    purity and `assert_order_independent`, both answers in every environment, `claimed_window`
+    agreeing with `claims`; the four boundary ticks; the lifetime cap, and W_eff never negative
+    nor above its cap or `SHELL_WINDOW_CAP` over 400 sites and speeds to 6,000 km/s; every
+    interval inside `death_in_interval`'s, the ends and thinning caps exact; ζ from the site gas;
+    the bubble's wall and cap; the Iax and electron-capture laws' ranges and medians, and the Iax
+    share above 0.4 × 10⁵¹ erg; each death on its law; no feature reached; and the three laws at
+    three ranks, two systems' draws and the solar site's W_eff and start pinned bit for bit, so
+    that a change before P09.T35 fails a test rather than riding T35's bump (determinism review).
+  - _Goldens._ golden_diff against `origin/rendering-and-planets`: `rng/tags.golden` extended only
+    (+1 −0, `snr.energy (System) = 0xc77e73f30ba691e8`), no changed value, no other golden,
+    `GENERATOR_VERSION` 23 → 23.
+  - _Not here (P09.T32–T36's)._ `ClassProcess` and the class grid, the processes and lists of
+    T33–T36, `recent_death_claims` and `RECENT_DEATH_CLAIM`, any change in `displaced/` or
+    `placement/`, plan 08's text.
+- **Deferred findings (2026-10-13 rule)**, from P09.T17:
+  - _One velocity on every side._ v_fast reads the velocity the caller passes, and decides
+    W_eff's lifetime cap, so near the interval's start two sides that pass the same system
+    different velocities could disagree. T35 and T33–T36 should take the velocity from one
+    function per kind of candidate (the grid's `epoch_velocity`), or test that the sides pass the
+    same bits (determinism review).
+  - _CMB88 at low energy._ The Iax and electron-capture laws run CMB88's window down to 0.0025 ×
+    10⁵¹ erg, far below the energies its scalings were fitted at, where the ejecta-dominated phase
+    lasts longer. The caps are unaffected (the window is largest at `MAX`); the window at the
+    least energies is an extrapolation, noted in `ExplosionEnergy`'s doc (science review).
+  - _Partly burnt Iax remnants move._ LP 40-365 moves at 852 ± 10 km/s in the Galaxy's rest frame
+    (Raddi et al. 2018) and Jordan et al. (2012) expect a kick of a few hundred km/s, but
+    P09.T18.c's `IaLeftover::PartlyBurntDwarf` stays at the site with no speed, so an Iax entry's
+    v_fast is |v|. If T18.c gives it a speed, `of_type_ia` reads it through `IaLeftover::speed`.
+  - _Companions._ v_fast reads only the remnant: a bound companion's recoil
+    (`SystemStars::recoil`) and an unbound one's speed are plan 11's, and no member of the entry
+    yet.
+  - _F2's "alone"._ `Galaxy::mean_formed_mass`'s doc, as queued, says the figure "depends on the
+    mass function alone", but 1.0961 and 0.8215 M☉ count the companions the mass function implies
+    (`fates.rs`); "on the mass function and the companions it implies" would be exact (science
+    review). Applied as queued.
+  - _A stale Consumes line._ This plan's Consumes bullet for plan 08 still says "only P08.T1–T7
+    are built" at `d2787a2`; P08.T9, T12 and T13 are built. Left for the plan's next
+    re-validation.
+- **P09.T28.a's propagator: a solve the iteration leaves unsolved is bisected (found and fixed in
+  P09.T28.b.a, lane `p09-centre`, 2026-10-27, at `GENERATOR_VERSION` 23; main's ruling of
+  2026-10-27).** No output moves: nothing generated reads the propagator yet, and every state
+  that the ten Laguerre–Conway steps solve keeps its bits (`kepler.golden` and T28.a's tests
+  unchanged).
+  - _The defect._ The fixed `UNIVERSAL_ITERATIONS` = 10 do not solve every state the centre
+    holds. P09.T28.b.a's pre-pin found a rogue planet of seed 0x5eed0000c0ffee00
+    (`0xcfffdfffc0005f87`: 1.50 ly out, leaving at 958 km/s on a nearly radial hyperbola, e =
+    1.449, q = 0.0875 ly) whose state 1,000 yr back came out 26,480 ly away (3,953 ly at −999 yr),
+    where the orbit is some 2 ly out; its energy was conserved, since any χ gives a point of the
+    conic, but at the wrong time. Run backward, the flyby falls in through its pericentre: the
+    starter (the parabolic cubic's, below the root as designed) lies near the pericentre, where
+    `F′ = r` is least, the first step overshoots into the hyperbolic branch, and from there each
+    step gains only about `1 ÷ √−α`. A scale-free scan (e from 1 to 2, the start's true anomaly,
+    τ in units of `√(q³ ÷ μ)`) finds two such regions, neither in T28.a's stress set: a solve
+    towards the pericentre from 20–220 pericentres out at e of 1.05–2 and τ′ of 60–3,000, and a
+    nearly parabolic flyby (e ≈ 1.01) over τ′ of 10⁶–10⁷, which within the clock window means
+    pericentres inside about 10⁻⁴ ly.
+  - _The fix._ `propagate` solves through `universal_anomaly`: the ten steps as before, then
+    `solves` checks Kepler's universal equation to `UNSOLVED_RESIDUAL` = 10⁻⁸ of its largest term
+    (a solved χ leaves 10⁻¹³ even far out on a hyperbola; the unsolved ones leave 10³–10⁴ times
+    √μτ; an overflowed one is never solved), and an unsolved χ is found again by `bisect_anomaly`,
+    `BISECTION_STEPS` = 128 halvings of `[0, √μτ ÷ q]`. The bracket holds the one root:
+    `dF ÷ dχ = r ≥ q > 0` (Battin 1999, §4.5), so F is increasing, `F(0) = 0` and
+    `F(√μτ ÷ q) ≥ √μτ`. Far out on a hyperbola the bracket's end can
+    lie where the Stumpff terms overflow and their sum is not a number; such a χ is beyond the root
+    (the terms grow with |χ|, and every root the clock window reaches is finite), so the far end
+    moves in to it. Only IEEE operations and `math` functions, fixed counts; the residual test is a
+    comparison of deterministic values, so native and wasip1 agree bit for bit (the tests run in
+    the wasip1 suite).
+  - _Tests (new, in `galaxy/motion.rs`)._
+    `an_inbound_flyby_through_its_pericentre_is_solved_pinned` (the rogue planet: the ten steps
+    leave it unsolved, the fallback solves it, 1.5–2.5 ly at −1,000 yr, within 10⁻⁹ of the
+    hyperbolic anomaly's position, energy to 10⁻¹²);
+    `nearly_radial_flybys_match_independent_references_pinned` (e = 1, 1 + 10⁻⁶, 1 + 10⁻⁴, 1.01,
+    1.05, 1.2, 1.45, 2; pericentres 10⁻⁴–1 ly; starts 1–300 pericentres out, inbound and outbound;
+    ±1 to ±10⁴ yr; against Barker's equation for the parabolas and the hyperbolic anomaly for the
+    rest, both by bisection and sharing no algebra with the universal variables (Vallado 2013,
+    §2.2); 2,016 propagations, 14 by the fallback, worst 3.5 × 10⁻¹⁰ of the farther radius,
+    held to 10⁻⁹; it fails if the fallback is never reached); and T28.a's
+    `the_fixed_iteration_count_converges` now asserts that its stress set never takes the
+    fallback, so those states keep the iterated χ. Both constants belong to the generator version
+    once P09.T28.b.b wires the propagator in. This supersedes "P09.T28.a as built"'s _Method_ (the
+    ten steps alone); its _Domain_ case (e = 100, q = 10⁻³ ly, solved back from 160 ly) was not
+    re-run.
+  - _In P09.T28.b.a's pre-pin sample_ (three galaxies, 453,819 Kepler-regime grid records at four
+    times each), 5 records take the fallback, each at one of its times; with it, the Kepler arm
+    moves no record more than 4.6 ly from its straight line over 1,000 yr (fast flybys deflected
+    by the black hole), where it had moved one 26,480 ly.
+- **P09.T28.b.a as built (lane `p09-centre`, 2026-10-27, on e8b5c6f3 at `GENERATOR_VERSION` 23;
+  decision-galaxy-25-train §2, with main's rulings of 2026-10-27 on the influence radius and the
+  pre-pin).** No output moves: nothing on the record calls the new functions (`position_at`,
+  `hit_at` and `resolve` are unchanged; plan 03's `drifted` is only made `pub(crate)`), no golden
+  moves, and `golden_diff.py` finds only new labels. New goldens `galaxy/motion/regime.golden` (the
+  pre-pin, slow) and `galaxy/motion/centre_motion.golden` (fast), extensions at 23. `Galaxy`'s
+  `Debug` text gains a fixed `centre_motion: CentreMotionCell` field, which no persisted digest
+  reads. Files: `galaxy/motion.rs`, `galaxy/mod.rs`, `galaxy/features/centre/{profile,mod}.rs`
+  (`BuildCentreError::NoInfluenceRadius`, a crate-internal `heap_bytes`, doc pointers),
+  `galaxy/potential/monopole.rs` (a crate-internal `heap_bytes`), `galaxy/query/{mod,motion}.rs`,
+  `tests/galaxy_motion.rs`, `tests/galaxy_handle.rs` (a comment), the goldens.
+  - _Signatures._ In `motion`: `Regime { Straight, Kepler }`,
+    `regime_of(&Galaxy, &SystemRecord) -> Regime`,
+    `position_velocity_at(&Galaxy, &EpochState, UniverseTime) -> StateAt`,
+    `loss_cone_verdict(&Galaxy, &EpochState) -> LossConeVerdict`, `CentreMotion`, `EpochState`,
+    `BuildEpochStateError`, `MotionState`, `StateAt { Exists(MotionState), NoSuchSystem }` and
+    `LossConeVerdict { Clear, Inside }`; and `Galaxy::centre_motion() -> &CentreMotion`.
+    `position_velocity_at` takes an `EpochState`, the record with its epoch velocity, not the
+    record alone, so that one function serves T28.b.b's grid records, T29's members and plan 12:
+    `EpochState::of_grid_record` (plan 08's `epoch_velocity`, zero without kinematic tables),
+    `of_centre_member` (the member's own) and `new` (any source with its own velocity; refuses a
+    non-finite velocity or one not below light's, so no law can leave the addressable range).
+    `CentreMotion`: `new(&GalaxyParams, &MassModel)`, `profile`, `influence_radius`,
+    `stars_within`, `enclosed_mass`, `loss_cone`, `regime_at` and `kepler_orbit`, the orbit
+    `position_velocity_at` propagates, bit for bit, for T28.c's pericentre and T29's cache. A
+    crate-internal `KeplerOrbit::displacement` (its state in metres); `Regime::name`.
+  - _Design note 15's choice: a memo in the galaxy._ `Galaxy` holds `CentreMotion` in a
+    `OnceLock`, built on first read from the parameters and the mass model; it compares equal
+    always and prints a fixed `Debug` text (the sim-determinism skill's lazy exception, as
+    `BlackHoleCell`), and `the_motion_is_order_independent_pinned` holds its three readers to the
+    same answers in any order and cold or warm. Built eagerly it added 64 ms to every galaxy build
+    (test profile, the sim at opt-level 2; `Galaxy::new` 328 → 392 ms on a loaded machine), nearly
+    all `SphericalAverage::of_extended`, against Design note 15's 100 ms; `CentreProfile::new` is
+    under a microsecond once the cluster's shape is built. The galaxy holds this part, not the
+    whole `CentreModel` (91 ms): `resolve` still builds the model per call, and T29 decides its
+    cache. Once read, the memo adds about 20 KiB to `heap_bytes`, which then depends on whether it
+    has been read; the server's `GalaxyCache` sums it at insertion, and `galaxy_handle.rs`'s exact
+    byte difference holds while neither galaxy has read it. The fast suite gains the nine new fast tests of `galaxy_motion`, 9.7 s of test time (each its own
+    nextest process, which builds its galaxy in about 0.6 s; the order test 3.0 s), the motion
+    module's new unit tests (its twelve take 0.02 s) and two doctests; a galaxy build pays nothing
+    until the memo is read.
+  - _The influence radius (main's ruling, a blocker as found)._ The ruling's
+    `CentreProfile::influence_radius` counts the nuclear cluster alone, and for 60 of seeds 1–300
+    (default mass function) the black hole outweighs the whole cluster (seed 1: 4.16 × 10⁷ against
+    8.3 × 10⁶ M☉), so it has no root and returns its bracket's end, 10⁴ ly: every system within
+    10⁴ ly would have been in the regime. The edge is instead where all the mass inside weighs the
+    black hole, the brainstorm's "where it outweighs the stars inside": the cluster plus the
+    centre's spherical average of the discs, bar and bulge (`SphericalAverage::extended_mass`), gas
+    included, dark halo not. That is M(< r_h) = `M_bh`, the convention of Baumgardt, Amaro-Seoane
+    and Schödel (2018, A&A 609, A28, §3), not Merritt's r_m, M★(< r_m) = 2 `M_bh`, nor G `M_bh` ÷ σ²
+    (Merritt 2004; Merritt 2013, CQG 30, 244005), which agree in a singular isothermal sphere,
+    where this radius is half of them (science check). μ takes the same mass. At Milky Way values
+    r_h = 7.19 ly (2.20 pc, against the 2.18 pc of Schödel et al. 2018's masses; the cluster-only
+    radius 7.20 ly); seeds 1–300 give 1.9–177 ly, median 11.8 ly. The brainstorm's "about 10 ly" is
+    the literature's ~3 pc, which is r_m, some 11 ly here. Gas is 2.2 × 10⁻⁶ of the mass inside the
+    fixture's edge and 1.0 × 10⁻⁴ inside seed 1's (78.3 ly, where the rest of the galaxy is 81% of
+    the mass inside); an NFW halo of Milky Way normalisation holds about 0.1% of `M_bh` inside the
+    fixture's edge (science check, estimate). A bracket with no root is
+    `BuildCentreError::NoInfluenceRadius`, which no seed of the sweep gives.
+    - _Finding, for its owner (P09.T24.a's `CentreProfile::influence_radius` and
+      `CentreModel::influence_radius`, which Provides lists for plan 10):_ unchanged, it has no
+      root for a fifth of drawn galaxies and returns 10⁴ ly (seed 1's is pinned by
+      `the_centre_motion_weighs_every_star_inside`); its docs now say so and point at the
+      regime's edge. Its only reader is the centre's golden.
+  - _The law._ The Kepler arm applies strictly inside r_h. At the epoch either arm gives the epoch
+    state to the bit; outside, the straight arm is plan 03's `position_at`, bit for bit (held for
+    every pre-pin record at all four times). A state with no orbit (the black hole itself, or one
+    with no angular momentum) keeps its epoch position, which is how a galaxy without kinematic
+    tables keeps its grid systems still. A centre member's `EpochState` carries its
+    distribution-function velocity, which exists without those tables, so in such a galaxy the
+    member follows its orbit: the plan's "a galaxy without kinematic tables keeps the epoch
+    position" is built as the grid systems'. T28.b.b decides what `position_at` gives a member
+    there.
+  - _The loss cone._ The verdict is the members' own test (`LossCone::contains`: the Kepler
+    pericentre about the black hole alone, about 2 au), not the pericentre of the orbit followed
+    about μ: a nearly radial orbit's pericentre `J² ÷ 2G M_bh` depends only on the black hole,
+    all the mass within a few au (Alexander 2017, ARA&A 55, 17, §3.1; science check). It applies
+    to Kepler-regime grid records and feature members that have an orbit; a centre member is
+    always `Clear` (its placement passed the same test), and so is a state with no orbit.
+  - _The edge (main's ruling: a figure, not a blocker)._ Across the edge the two laws part by
+    `½ μ t² ÷ r²` to leading order, G `M_bh` t² ÷ r_h² at the edge: 0.0130 ly over 1,000 yr at the
+    fixture's 7.19 ly, and 0.0136 ly at worst over four velocities to 440 km/s, against the plan's
+    0.01 ly, which was written for the brainstorm's "about 10 ly". The test holds 0.014 ly there and
+    the closed form to 2% for a slow state 0.1 ly inside; at the plan's 9.9 and 10.1 ly the two
+    laws part by under 0.01 ly (four velocities; M(< 10 ly) = 7.38 × 10⁶ M☉ against the black hole's
+    4.30 × 10⁶, not the plan's version-15 5.29 × 10⁶). The gap scales as `M_bh ÷ r_h²`: about
+    0.020 ly at seed 0x2's 4.09 ly edge (closed form, ours).
+  - _Tests (as run)._ `tests/galaxy_motion.rs`: `the_two_regimes_meet_at_the_influence_radius`;
+    `the_epoch_state_comes_back_to_the_bit` (members and grid systems on both sides, the black
+    hole, a grid system with no velocity); `an_s2_like_member_follows_its_kepler_orbit` (GRAVITY
+    2020's a and e about the model's μ: 16 ± 0.1 yr, the position to 10⁻¹² of the apocentre and the
+    velocity to the bit over ±1,000 yr, the same state twice);
+    `a_galaxy_without_kinematic_tables_keeps_its_grid_systems_still`;
+    `the_loss_cone_carves_out_a_plunging_grid_orbit` (1 ly out, 200 km/s in and 1.38 km/s across:
+    about 1 au against the 2 au cone, no such system at any time; a grazing one, a centre member
+    and the same state outside the regime clear);
+    `the_centre_motion_weighs_every_star_inside` (the model's profile and loss cone bit for bit,
+    the memo equal to a direct build, equality and `Debug` text unchanged by the read, the edge
+    weighing the black hole to 10⁻⁹, seed 1's cluster-only radius at its bracket's end);
+    `the_centre_motion_s_tables_count_once_read`; `the_motion_is_order_independent_pinned`;
+    `centre_motion_figures_are_pinned` (the fast golden: the fixture's edge, the mass inside eight
+    radii, one orbit at ±1,000 yr); and the slow `regime_records_near_the_centre_are_pinned`.
+  - _The pre-pin (decision-galaxy-25-train §1.5, D1; main's ruling)._ `regime.golden`: the Milky
+    Way fixture (seed 0x0928b0a000000001) and seeds 0x5eed0000c0ffee00 and 0x2, each with its full
+    potential, edges 7.19, 10.14 and 4.09 ly. The stellar layers A–E within 1.5 r_h; the brown
+    dwarfs and rogue planets within min(1.5 r_h, 4 ly), the reach of the rogue planets' eight
+    central cells, since 1.5 r_h holds some 10⁵ brown dwarfs and 10⁷ rogue planets in a drawn
+    galaxy, so the substellar records between 4 ly and 1.5 r_h of the fixture and of 0x5eed are not
+    pinned. Per layer: the record count, the Kepler count, digests (`f64_digest`) of the IDs, the
+    regimes and `position_at` at −1,000, −100, +100 and +1,000 yr (±H is ±1,000 yr, so the ruling's
+    "±1,000 yr and ±H" are one pair), and the four records nearest the black hole in full: 790,511
+    records, 453,819 in the regime, 1,818 lines, 131 kB. `#[ignore = "slow: …"]`, about 112 s,
+    blessed by name; T28.b.b runs it by name at its hold, and the slow pass's wasip1 part runs it.
+    A drawn galaxy with an edge near 177 ly would mean some 10⁸ records and was not used.
+  - _For P09.T28.b.b._ Over the pre-pin, the Kepler arm (with P09.T28.a's fix) moves records at
+    most 4.04, 4.63 and 3.94 ly from their straight lines over ±1,000 yr (fast flybys deflected by
+    the black hole) and carves out one record, in 0x5eed (its C1 census lists the ID).
+    `EpochState::of_grid_record` reads `epoch_velocity`, which panics for a non-grid record in a
+    galaxy with tables, so the swap dispatches on the record's origin (plan 03's Risks). The memo
+    makes `heap_bytes` depend on what has been read.
+  - _For P09.T29 (may start)._ It reads `regime_of`, `position_velocity_at` with
+    `EpochState::of_centre_member`, `loss_cone_verdict`, `CentreMotion::kepler_orbit` (the same
+    orbit, for its cache) and `galaxy.centre_motion().{influence_radius, enclosed_mass}` (not
+    `CentreModel::influence_radius`), with T28.a's `KeplerOrbit` and T27's `CentrePlacement`.
+    Kepler-regime grid records move up to 4.6 ly from their straight lines over ±H, so they need
+    the grid-side pad, whose reach `GalaxyRules` (T28.b.b) sets. The regime's edge can lie beyond
+    the centre's 128 ly reach (up to 177 ly at the sweep's seeds).
+  - _Deferred findings (2026-10-13 rule)_, from P09.T28.b.a's science check: (1) T25's
+    `LOSS_CONE_AU` doc calls 2 au "the tidal radius of a Sun-like star", which is about 0.76 au at
+    4.3 × 10⁶ M☉ (r_t ≃ (M_bh ÷ M★)^⅓ R★; Alexander 2017, §1.2): 2 au is about 2.6 r_t, a sound
+    loss-cone radius described wrongly (`marks.rs`, T25's; the figure is the brainstorm's).
+    (2) The brainstorm's "Orbits and time" says the edge is "about 10 ly", μ "the cluster mass
+    inside its own radius" and the regime "passes smoothly into drift"; as built under main's
+    ruling the edge is M(< r_h) = `M_bh` over all the mass inside (7.19 ly at Milky Way values),
+    μ uses all the mass inside, and at ±H the two laws part by 0.013 ly at the fixture's edge
+    (0.02 ly at seed 0x2's). Drafted for the brainstorm's sign-off: which convention it means, and
+    that this jump is the regime's continuity.
+- **P09.T32 as built (issue #127, `lane/127-p09-t32-class-grid`, 2026-10-27, at
+  `GENERATOR_VERSION` 23, no output moves).** The class grid, tested on toy classes; no
+  production class is registered, so nothing generated moves and there is no bump
+  (decision-bump-plan-after-22, §3). Files: `galaxy/catalogue_classes/grid.rs` (the grid) with
+  `grid/tests.rs` (its tests and the toys), `galaxy/catalogue_classes/ids.rs` (`CatalogueCellKey`,
+  moved from `mod.rs`, and the `111` checks), `mod.rs` (declarations and re-exports, every old
+  path kept), `rng/tags.rs` (`class.cell`, scope `Cell`, keyed by
+  `ObjectKey::cell(CatalogueCellKey::word())`: one Poisson draw from word 0, of mean the class's
+  bound × the cell's volume). `registry.rs` is unchanged. The desktop accepted design points
+  (a)–(e), the lookup, the headroom check and the one-velocity rule as built, on the issue
+  (2026-10-27); P09.T33.a's brief inherits (a).
+  - _Signatures, the Provides that P09.T33–T38, T43 and plan 11 consume_ (all re-exported from
+    `catalogue_classes`):
+    - `trait ClassProcess`, with `type Candidate` and `type Entry`, and five methods:
+      - `class(&self) -> ClassId`;
+      - `bound(&self, &Galaxy, &CatalogueCellKey) -> PerCubicLightYear`;
+      - `candidate(&self, &Galaxy, &CatalogueCellKey, CatalogueSystemId, PerCubicLightYear)`,
+        which returns `Option<Self::Candidate>`;
+      - `test(&self, &Galaxy, Self::Candidate) -> Option<Self::Entry>`;
+      - `members(&self, &Self::Entry) -> u8`.
+
+      The candidate's ID is its member 0, which keys its streams. `test` both tests and builds the
+      entry, because P09.T33.a's test, `claimed_window`, returns the window its `SupernovaEntry` is
+      built with. `members` is 1–16, numbered without gaps (debug-asserted, then clamped). The
+      trait's doc states the contract in eight rules: purity, streams, the bound, the test, the
+      reach, one velocity, headroom and a placed class.
+
+    - `CatalogueClassCell::<E>::generate(&Galaxy, &P, CatalogueCellKey)`, which panics on a key of
+      another class, with `key`, `candidates` and `entries` (or `into_entries`) in index order.
+      `CatalogueEntry<E>` has `id` (member 0), `members`, `value` (or `into_value`) and
+      `member_id(u8) -> Option<CatalogueSystemId>`. `CatalogueMember<E>` has `id`, `member` and
+      `entry` (or `into_entry`).
+    - `resolve_entry(&Galaxy, &P, CatalogueSystemId)`, one process's resolve, returns
+      `Result<CatalogueMember<P::Entry>, ResolveSystemError>`.
+    - The `111` prefix's `resolve(&Galaxy, &L, CatalogueSystemId, V)`, with `L: ClassLookup` and
+      `V: MemberVisitor`, returns `Result<V::Output, ResolveSystemError>`.
+    - `ClassLookup::visit_class(&Galaxy, ClassId, V)`, with `V: ClassVisitor`, returns
+      `Option<V::Output>`. `ClassVisitor::visit<P: ClassProcess>(self, &P)` and
+      `MemberVisitor::visit<P: ClassProcess>(self, &P, CatalogueMember<P::Entry>)` each return
+      their `Output`. `ProductionClasses` is the production lookup, with no process.
+    - `cells_in_sphere(ClassId, &QuerySphere) -> impl Iterator<Item = CatalogueCellKey>`.
+    - `check_class_headroom(ClassId, PerCubicLightYear)`, the class and its largest bound, returns
+      `Result<(), CheckClassHeadroomError>`: `NotPlaced(ClassId)`, or `ClassTooDense` with the
+      class, the largest mean and the capacity.
+    - On `CatalogueCellKey`: `of(CatalogueSystemId)` returns
+      `Result<Self, BuildCatalogueCellKeyError>`, whose error gains `FreeClass(u8)` and
+      `Misaligned { class, cell }`; `candidate_id(index, member)` returns
+      `Result<CatalogueSystemId, BuildSystemIdError>`; `origin_ly() -> [i32; 3]`;
+      `volume_ly3() -> f64`.
+  - _Design points._
+    - (a) `placement::resolve`'s `Catalogue(_)` arm is unchanged and still answers
+      `KindNotGenerated`, which a test pins. The class grid's resolve is its own. Wiring the arm now
+      would turn every `111` answer into `NoSuchSystem` with no class to resolve, and a resolved
+      entry needs a `SystemRecord` whose `SystemOrigin::CatalogueSystem` does not exist yet, which
+      means deciding what a catalogue system is in every match on `SystemOrigin`. That is P09.T33.a's:
+      it registers the first class, wires the dispatch, adds the origin variant and says what the
+      record's stars and motion are.
+    - (b) Associated types with static dispatch, no `dyn`. An entry's type differs by class
+      (T33.a's carries `SystemStars`, T34.a's an `IaProgenitor` and a survivor), and T32 has no
+      common entry type to put behind an object-safe trait: the record with a catalogue origin is
+      T33.a's. A dispatch on `ClassId` is one `match` in a `ClassLookup` that hands the class's
+      process to a generic `ClassVisitor`, as `count_tag` matches on `FeatureProcess`; `resolve`
+      hands its `CatalogueMember` to a second generic visitor, `MemberVisitor`, so the caller
+      decides what a member becomes (T33.a's a `SystemRecord`). T37's merge and plan 12's walk
+      visit each class in turn and turn entries into records there; if T37's merge needs a common
+      entry type, T37 introduces it (the desktop, 2026-10-27). The bound, the candidate and the
+      test are separate methods, as P11.T8 expects.
+    - (c) One `Cell` tag, `class.cell`, for every class's count: design note 23 gives each feature
+      process a tag because processes share a feature cell, but class cells share nothing and the
+      word carries the class. Each class adds its candidates' `System` tags under `class.` in its
+      own task.
+    - (d) `ids.rs` holds `CatalogueCellKey` (moved from `mod.rs`; its path and doctest kept), the
+      canonical check `CatalogueCellKey::of` and the conversions between a key and its IDs.
+      `BuildCatalogueCellKeyError` gains two variants rather than a second error type, since
+      `of` builds a key; nothing outside the module named it.
+    - (e) Two toy processes in `grid/tests.rs`, not physics: `CORE_COLLAPSE` at 512 ly (12
+      candidates expected per cell, entries of two members, as T34.a's survivor) and
+      `STELLAR_MERGER` at 4,096 ly (40, one member). A candidate draws its position uniformly in
+      the cell, is accepted with probability its x fraction across the cell, and is kept by the
+      test if it moves upwards (v_z > 0), so a cell's entries are Poisson of mean `mean` ÷ 4,
+      checked by hand; every toy draw is on `selftest.stream`. The golden adds two more, at means
+      of 0.7 (`XRAY_BINARY`) and 0 (`ACCRETING_WHITE_DWARF`).
+  - _The lookup._ `cells_in_sphere` yields every cell of the class whose closed box meets the
+    sphere of `sphere.radius()` + `LIFETIME_REACH` about its centre, clipped to the root cube, in
+    ascending x, then y, then z (the key's order). It reads the sphere's radius, not its
+    `padded_radius`, the grid layers' pad for drift: the reach is the class's pad (a test). The gap
+    test is plan 03's walk's, whole light-years and the centre's fraction, written again here
+    because `query::Walk` is private and keyed by `Layer`; each column's run grows outwards from
+    its nearest cell. 4,096 ly ÷ 512 ly is eight rings of 512 ly cells and one of 4,096 ly cells,
+    which a test checks from a cell's middle. A 50 ly sphere visits 2,902 cells of 512 ly and 20 of
+    4,096 ly at (0, 26,000, 20) ly, and 2,890 and 20 at (1,234.4, 26,000.6, 17.2) ly, as a Minkowski
+    sum of the cell and the 4,146 ly sphere estimates (1 + 6r + 3πr² + 4πr³ ÷ 3 cells for r = R ÷
+    a: 2,892 and 21).
+  - _Headroom._ The count debug-asserts its draw against `CatalogueSystemId::INDEX_LIMIT` and
+    clamps it, as `candidate_count_from_bound` does. `check_class_headroom(class, largest_bound)`
+    asks the fullest cell's mean, the bound × the class's cell volume, plus eight standard
+    deviations to stay within 2²⁴, plan 03's eight (repeated as a private constant, since
+    `placement`'s is private): the largest mean that passes is (√(16 + 2²⁴) − 4)² = 16,744,480.
+    Each class's task finds its largest bound and calls it in its tests.
+  - _One velocity on every side (T17's deferred finding)._ Rule 6 of `ClassProcess`'s contract:
+    each kind of candidate takes its velocity from one function, a class candidate's drawn once
+    and carried into its test and its entry, the grid side's plan 08's `epoch_velocity`, naming
+    `DeathMarks::of`'s `velocity` argument; or a test shows that two routes give the same bits.
+    The toy carries a velocity drawn by one function (`Toy::velocity`) and its test reads it;
+    `the_velocity_has_one_route` checks that the cell, `resolve_entry` and that function see the
+    same bits.
+  - _Against the task text._ The trait has no cell-size method: the size is
+    `ClassId::cell_log2_ly()`, read wherever a key is built, so no second copy can disagree, and a
+    process for `TIDAL_DISRUPTION_VICTIM` has no `CatalogueCellKey`, so it generates and resolves
+    nothing. "A candidate draw under a cap" is `candidate(.., bound)`, the cell's bound handed to
+    the count and to every candidate. `members` is added, since P09.T34.a's survivor is member 1.
+    `CatalogueClassCell` is `CatalogueClassCell<E>`, generic in the class's entry type, the price of
+    static dispatch (point (b)); plan 11's Consumes names it without the parameter. `resolve`
+    takes a `MemberVisitor` beside the lookup, for the same reason. Its checks run in this order:
+    `CatalogueCellKey::of` (a free value, the unplaced class, a misaligned cell), the lookup's
+    process, the index against the count, the thinning, the test, the member. Every one answers
+    `NoSuchSystem`.
+  - _Registration._ A class registers by one arm in `ProductionClasses::visit_class`,
+    `ClassId::X => Some(visitor.visit(&XProcess::new(galaxy)))`, and not with
+    `CatalogueClassSource`, which is P09.T37's and wraps the lookup: P11.T8's "registers its
+    `ClassId` with plan 09's `CatalogueClassSource`" means that arm. At T32 the lookup has no arm,
+    and every `111` ID answers `NoSuchSystem` from the grid; `placement::resolve` keeps
+    `KindNotGenerated` for `111` (point (a)) until P09.T33.a points its arm at
+    `resolve(.., &ProductionClasses, ..)` and adds the record's origin.
+  - _Tests_ (`grid/tests.rs`, 26, each on seed `0x0932_0000_6772_6964`'s galaxy, shared through a
+    `OnceLock`; `ids.rs`, 7; the plan-09 tag test; eight doctests, on `ClassProcess`,
+    `CatalogueClassCell::generate`, `resolve_entry`, `ClassLookup` with a `ClassVisitor`,
+    `resolve`, `check_class_headroom`, `cells_in_sphere` and `CatalogueCellKey::of`):
+    - order independence: the cells forwards against backwards with every entry of the cell before
+      resolved and a stray ID of the other class asked between, bit for bit;
+      `assert_order_independent` over the cells and over 16 resolves per cell; the same seed on a
+      fresh galaxy twice, and another seed's counts differ;
+    - the toys' counts and entries over 576 cells each, Poisson of mean `mean` and `mean` ÷ 4 at α
+      = 10⁻³;
+    - resolution: every entry and member resolves to itself bit for bit, and through the toys'
+      lookup; each `NoSuchSystem` case in a test of its own (a free class value, the
+      tidal-disruption victims with a toy registered for them, a class with no process, a
+      misaligned cell, an index at the count and at 2²⁴ − 1, a thinned candidate, one failing the
+      test, a missing member);
+    - one velocity: the cell's, `resolve_entry`'s and `Toy::velocity`'s bits agree, and the test
+      kept only upward movers;
+    - canonical IDs: aligned, member 0, round-trips through `SystemId::from_raw`, `cell_word` the
+      key's word, entries in index order below the count; every low cell bit of a 4,096 ly entry
+      names nothing while its aligned twin resolves;
+    - headroom: the clamp, a debug assertion past 2²⁴ (`should_panic`), a cell of another class
+      refused (`should_panic`), the check passes the toys and refuses a mean at 2²⁴, either side of
+      16,744,480, and a NaN, infinite or negative bound; `NotPlaced` for the victims;
+    - the lookup against a brute-force scan and against a plain float distance, over 47 centres
+      (the Sun-like point, the origin, the root cube's faces and corners, 3,000 ly outside a face,
+      40 sampled) at radii of 0.001–2,000 ly, at 512 and 4,096 ly, ascending; eight rings and one;
+      the sphere's pad not read; the 50 ly counts pinned;
+    - the production lookup: no class visited, and 2,000 sampled `111` IDs of every class value
+      answer `NoSuchSystem`, while `placement::resolve` still answers `KindNotGenerated`;
+    - `ids.rs`: `of` inverts `candidate_id` over 1,800 sampled IDs and refuses each non-canonical
+      kind with its own variant; the cell field's figures; the index and member limits.
+  - _Goldens._ golden_diff against `origin/rendering-and-planets` (`ae64fa92`): `rng/tags.golden`
+    extended only (+1 −0, `class.cell (Cell) = 0xd675c50fb0714e5f`), no changed value;
+    `catalogue_classes/grid.golden` new, at header 23, pinning four toys' cells (the key words,
+    the counts on `class.cell`, the entries' IDs; means of 12, 40, 0.7 and 0, so that the Poisson
+    draw's two-word, one-word and no-word paths are all pinned) and the 50 ly lookup's 20 cells
+    of 4,096 ly and the count, first and last three of its 2,902 of 512 ly; no other golden;
+    `GENERATOR_VERSION` 23 → 23.
+  - _Not here (P09.T33–T38's)._ Every class's process, list and tags (T33–T36, T43, P11.T8);
+    `recent_death_claims` and `RECENT_DEATH_CLAIM` (T35); `CatalogueClassSource`,
+    `expected_hosts_in_sphere` and the merge (T37), T38, and T40's `CatalogueClassCellCache`; the
+    wiring of `placement::resolve` and `SystemOrigin::CatalogueSystem` (T33.a); plan 12's
+    source-horizon sweep, whose row the task that places the first production class adds
+    (T33.a).
+- **Deferred findings (2026-10-13 rule)**, from P09.T32:
+  - _Two copies of plan 03's code._ `cells_in_sphere`'s gap test repeats `query::walk`'s (private
+    and keyed by `Layer`), and `check_class_headroom` repeats `placement::headroom`'s private eight
+    sigmas and its fit test, since `query/` and `placement/` were out of scope. Each copy has its
+    own tests; a later task in those modules could give both a `pub(crate)` home (Rust review).
+  - _The 50 ly query's cells._ A 50 ly sphere visits 2,902 cells of each 512 ly class and 20 of
+    each 4,096 ly class, so with the five 512 ly classes and the three 4,096 ly ones registered a
+    cold 50 ly query evaluates some 14,600 class bounds and counts. P09.T37's 5 ms budget leaves
+    about 0.34 µs a cell, so T37 or T40's `CatalogueClassCellCache` will need the cache warm or a
+    cheaper bound for empty cells.
+  - _A contract check for every class._ Each class's task re-proves the same three properties on
+    its own process: order independence, every entry resolving to its cell's bits, and the same
+    seed twice. A `pub(crate)` test helper generic over `ClassProcess`, run over a list of keys,
+    would let T33.a, T34.a, T43 and P11.T8 call one check (determinism review).
+  - _A checked member count._ `members` returns a bare `u8` that the grid debug-asserts to 1–16
+    and clamps; a `MemberCount` newtype with a checked constructor would carry the proof, and is
+    cheapest before any class implements the trait (Rust review).
+  - _No shared position draw for a class cell._ No helper draws a uniform position in a class cell
+    (plan 01's `GenCell::position_from_words` stops at 128 ly), so each class lays out its own site
+    draw; T33.a's is the first.
+- **P09.T29 as built (lane `p09-centre`, 2026-10-28, on 820e5431 at `GENERATOR_VERSION` 23;
+  decision-galaxy-25-train §2.2).** No output moves: nothing registers `CentreMemberSource`
+  (P09.T37 does) and no walk reads `kepler_pad_for`; `position_velocity_at` is
+  `Trajectory::of(..).state_at(t)`, the same operations in the same order; `resolve` of a centre
+  member reads the galaxy's held model, equal to `CentreModel::new`'s (`the_galaxy_holds_its_centre`);
+  and `NestedGrid::cells_touching` yields the same cells in the same order through its new per-level
+  walk. No golden moves (`golden_diff.py`: "No golden files changed"), no tag is added, and
+  T28.b.a's pre-pin passes by name. `Galaxy`'s `Debug` text gains a fixed `centre: CentreModelCell`
+  field, which no persisted digest reads. Files: in `galaxy/features/centre/`, `source.rs` (new),
+  `mod.rs`, `profile.rs`, `df.rs`, `classes.rs` and `members.rs`; `galaxy/features/nested.rs`,
+  `galaxy/features/interior/table.rs`, `galaxy/motion.rs`, `galaxy/mod.rs`, `galaxy/query/mod.rs`,
+  `galaxy/query/motion.rs`, `tests/galaxy_centre_query.rs` (new) and `benches/centre.rs`.
+  - _Signatures._ In `features::centre`: `CentreMemberSource`, `CentreOrbitCache`,
+    `CentreCellOrbits`, `NoCentreOrbitCache` and `KeepCentreOrbits`.
+    - `CentreMemberSource::new(&Galaxy, &dyn CentreOrbitCache)` returns a `Result` over
+      `BuildCentreError`, with `placement()`; its `SystemSource` methods panic if asked about
+      another galaxy, as `KeepInteriors` does, and it suppresses nothing.
+    - `CentreOrbitCache::orbits(&self, &Galaxy, &CentrePlacement, MassBand, NestedCell)` lends an
+      `Arc<CentreCellOrbits>`: the sim's caller-supplied trait, as `FeatureCellCache` is; the
+      server's byte-bounded cache is P09.T40.a's.
+    - `KeepCentreOrbits` keeps one galaxy's cells and asserts that the placement is the galaxy's
+      own. Its key is one integer: 46 ms against the tuple key's 61 ms over a century's 480,000
+      band-cells (opt-level 2).
+    - `CentreCellOrbits` (`new`, `trajectories`, `heap_bytes`) holds each member's `Trajectory`
+      and its shell.
+    - `Galaxy::centre()` returns `Result<&CentreModel, BuildCentreError>` (Provides: a bare
+      `&CentreModel`): the inversions can fail.
+    - `motion::plunge_pad(mu, r0, dt)` returns an `Option<LightYears>` (`None` inside the full
+      scan), and it and `full_scan_radius(mu, dt)` take μ (Provides: `(r0, dt)` and `(dt)`), since
+      the source pads about a μ of its own per cell.
+    - Added: `motion::Trajectory` (`new`, `of`, `start`, `regime`, `orbit`, `state_at`: the law
+      prepared once, for the cache), `KeplerOrbit::apocentre` and `query::kepler_pad_for`; and,
+      crate-internal, `motion::SpeedBound`, `CentreProfile::outer_psi`,
+      `LocalCell::farthest_radius`, `NestedGrid::level_cells_touching` and `level_touches`,
+      `CentreModel::from_parts` and the model's `heap_bytes`.
+    - Not built: `as_global_entry()` (P10.T4 adds it, decision §2.2). Nothing calls
+      `CentrePlacement::check_index_headroom` (P09.T40.a, below).
+  - _Design note 15's choice for the model: a memo in the galaxy_, built on first read from
+    `centre_motion()`'s profile and the galaxy's mass function, boxed, equal always, with a fixed
+    `Debug` text, as T28.b.a's motion; `with_full_potential` and `with_substellar_params` carry it,
+    since neither changes what it reads. Once read with the motion it adds 470 kB to `heap_bytes`.
+    `resolve` of a centre member now rests on `centre_motion()`'s `expect` (the mass inside
+    10⁻³–10⁴ ly brackets the black hole's at every seed of T28.b.a's sweep), where it mapped every
+    `BuildCentreError` to "no such system".
+  - _The plunge pad, per cell, about an effective μ (a deviation from "per level ... √(2GM)")._
+    Members are drawn in the galaxy's whole potential (`v < √(2(Ψ − E_out))`, the distribution
+    function's outer cut) and orbit the mass inside their epoch radius, so they can be unbound
+    about it and the pad about the black hole's √(2GM) does not hold them. A cell's members have
+    μ ≤ G M(< r_far) (`CentreMotion::enclosed_mass`, r_far its farthest corner) and a Kepler energy
+    under ε = Ψ_out(r_near) − E_out (`outer_psi`, the potential of the mass outside the cell's
+    nearest radius and of the rest of the galaxy, non-increasing; E_out the four floors' least),
+    so inside r_far they move below the escape speed of μ′ = μ + ε r_far, and their path is under
+    Δ about μ′ from r_near; members beyond r_h move in straight lines under the same bound. A
+    bound per level, over its nearest radius and far corner, chooses the walk's radius; each cell
+    is then tested at its own pad. Margins: 10⁻⁹ on the closed forms, 10⁻⁶ on the tables' inputs
+    and on the shells. The science check confirmed each step (the comparison argument, μ′, the
+    outward fixed point, the energy bound, the grid pad's three cases).
+  - _The full scan._ A cell whose nearest radius is inside the full scan about its own μ′ is
+    scanned in full whenever the sphere comes within its members' outward reach of the black hole
+    (a fixed-point bound on r^(3⁄2) over their Kepler orbits, or the straight lines beyond r_h),
+    and not otherwise, so a sphere away from the black hole scans none of it. At a century it
+    reaches a nearest radius of 0.389 ly over 95,696 cells (`each_level_s_reach_holds_its_cells`),
+    against the plan's 0.31 ly, which is `full_scan_radius` about 4.30 × 10⁶ M☉ (0.3114 ly); at
+    ±1,000 yr it reaches 2.88 ly over 179,208 cells. A member whose shell (pericentre to
+    apocentre; its epoch distance with no orbit; none for a straight line) misses the sphere's is
+    not propagated.
+  - _The grid's Kepler-regime pad: built, not wired (decision §2.2 said it reads
+    `galaxy.rules().kepler_regime`)._ `kepler_pad_for` (μ = G M(< r_h), ε = V²⁄2 at the layer's pad
+    speed) is read by no walk: under the law in force every grid record moves in a straight line,
+    which `pad_for` covers; `GalaxyRules` does not exist yet; and `decide_census` counts the padded
+    sphere's cells against the cell budget (`query/census.rs`), so wiring it can move the census
+    near the centre, against §2.2's "padding moves no output either way". It pads a 1 ly sphere at
+    the black hole 1.23 ly at a century and 5.71 ly at ±1,000 yr (layers A–D), against the
+    straight lines' 0.33 and 3.34. Its test holds every Kepler-regime record of layers A and D of
+    the fixture, under the Kepler arm called directly, at ±100 and ±1,000 yr, each in a 0.01 ly
+    sphere about where it ends and in five near the black hole; in this fixture none moved farther
+    than the straight pad (the farthest 2.95 ly), so the test does not show the pad's need, which
+    T28.b.a's seeds do (4.6 ly from the straight line); layer E (1.7 million records in its central
+    cells) is not exercised.
+  - _"The brute-force test runs under both rules" (decision §2.2)._ The members have one law, the
+    Kepler orbit inside r_h, under either rule; the grid's Kepler arm is held by the pad's test;
+    the range query's brute force under both arms is T28.b.b's (below).
+  - _Figures (Milky Way fixture)._ Systems inside 0.31 ly from the model's classes: 62,443 (Kroupa's
+    75,285) against "about 37,000" (brainstorm) and "42,000 under Kroupa's" (this plan), pinned at
+    1%; realised members inside 0.312 ly: 62,534. Split: old stars 48,462, black holes 1,563, the
+    young disc 8,074, the isotropic young 4,345 (Kroupa's: 58,971, 1,277, 9,773, 5,264). The old
+    stars' own share is the brainstorm's 37,000 raised by the joint revision's normalisation (×1.32
+    on the cusp: M(<1 pc) 8.47 × 10⁵ → 1.120 × 10⁶ M☉, not the 28% "The joint revision as built"
+    quotes) at the class device's mean mass; ruling 144's young population and the black holes add
+    the rest (science check). The observed cusp allows 27,000–66,000 inside that radius (Schödel et
+    al. 2018, A&A 609, A27, §4.5 and Table 3; science check, rough).
+  - _Tests (as run)._ `tests/galaxy_centre_query.rs`:
+    `a_query_a_decade_either_way_finds_what_a_scan_of_the_inner_fifth_of_a_light_year_finds` (fast:
+    ±10 yr, the inner 0.2 ly, cached and uncached, a second build of the galaxy, and
+    `assert_order_independent` warm and cold); `a_query_a_century_either_way_finds_what_a_scan_of_the_inner_2_ly_finds`
+    (the plan's test, `#[ignore = "slow: …"]`: five spheres at ±100 yr, 1,190,151 members, 65,178
+    hits that moved in from outside their sphere, 303 s; its peak memory is not measured, some
+    300 MB by estimate); `the_census_counts_the_cells_touching_the_sphere_and_the_black_hole`;
+    `the_full_scan_radius_and_the_systems_inside_it_at_a_century`; `the_galaxy_holds_its_centre`;
+    `a_centre_source_merges_into_the_range_query` (registered in the test only);
+    `the_kepler_pad_holds_every_kepler_regime_grid_record`. Unit tests:
+    `each_level_s_reach_holds_its_cells` (every owned cell at six times),
+    `a_cell_s_orbits_are_its_members_on_their_shells`, `the_excess_holds_the_fastest_member_s_orbit`,
+    `the_pads_bound_every_orbit_and_straight_line` (T28.a's stress set), `the_plunge_pad_is_its_closed_form`,
+    `the_outer_potential_is_the_potential_less_the_pull_from_inside`,
+    `a_cell_s_farthest_radius_is_its_farthest_corner_s`, and the nested walk level by level. The
+    integration file's fast tests take some 14 s of test time natively.
+  - _The bench_ `centre_query/century_query_cached` (0.1 ly at the black hole, +100 yr, a warm
+    `KeepCentreOrbits`): **not run** with the task, pending main's quiet window. A probe at
+    opt-level 2 on a shared machine measured 102 ms warm, after the shell test, the integer key and
+    one classification per cell (160 ms before), against "about 10 ms": the 480,000 band-cell
+    lookups of the full scan some 45 ms, the cell choice and the propagation of some 110,000
+    members the rest. Cold it took 17.6 s, nearly all member placement (about 160 µs a member,
+    P09.T27's draws). `CentreModel::new` is not re-benched either.
+    - _Run (lane `p09-centre`, 2026-10-29, at `GENERATOR_VERSION` 23; pod, 4 vCPU, not the
+      target desktop)._ `cargo bench -p hyperion-sim --bench centre`, release (thin LTO), with
+      nothing else running, Criterion's 20 samples:
+      - `centre_query/century_query_cached`: **159.5 ms** (159.1–159.9 ms; a second run 159.5 ms),
+        against the old machine's probe of 102 ms at opt-level 2 and the plan's "about 10 ms". The
+        cold query before it, 11,793 hits with 109,544 members placed and propagated, took about
+        29 s from the process's start (the galaxy's and the centre's builds included, under a
+        second of it; the bench times only the warm query), against the probe's 17.6 s: some
+        265 µs a member.
+      - `centre/model` (`CentreModel::new`, the four inversions, the marks' acceptances and the
+        classes): **233.7 ms** (233.5–234.0 ms), against Design note 15's 100 ms and P09.T27's
+        91 ms with three inversions.
+      - `centre/profile_and_four_inversions`: **185.6 ms** (185.4–185.8 ms), against the 50 ms set
+        for three inversions.
+      - _Findings (2026-10-13 rule; recorded, not blockers: cost alone is not one)._ The warm
+        query misses its 10 ms about sixteen times over, and `CentreModel::new` its 100 ms more
+        than twice over; the galaxy pays the model once, when its centre is first read
+        (`Galaxy::centre`), and a galaxy that never asks pays nothing. The pod's figures are not
+        the target desktop's; the owner's machine should re-run the bench before either is tuned.
+  - _For P09.T28.b.b._ Wire `kepler_pad_for` into `sphere_for_layer` behind `kepler_regime`, with
+    its census moves in C1; run a range-query brute force near the centre under both arms; if a
+    centre member's `position_at` is gated on the rule, gate the source's `Trajectory` with it, so
+    the two agree under the held arm once P09.T37 registers the source.
+  - _For P09.T40.a._ Call `CentrePlacement::check_index_headroom` beside the grid's (an
+    overflowing cell clamps at 8,192 in release, a debug assertion otherwise); the server's
+    `GalaxyCache` sums `heap_bytes` at insertion and misses the model read later (470 kB with the
+    motion); at ±1,000 yr the full scan reaches every member within about 3 ly, some two million
+    members, some 400 MB at 200 bytes each and minutes cold.
+  - _For plan 10._ P10.T4 can read `Galaxy::centre()` rather than build a second model; P10.T9
+    wraps `CentreMemberSource::new`, a `Result`; R06.T16.a's census reads the source through
+    `SystemSource` with a shared `CentreOrbitCache`, and pays the cold placement above near the
+    centre.
+- **Deferred findings (2026-10-13 rule)**, from P09.T29: (1) 62,443 systems inside r_full at a
+  century against the brainstorm's 37,000 (75,285 against 42,000 under Kroupa's), split above:
+  drafted for the brainstorm's sign-off. (2) The full scan reaches 0.389 ly at a century against
+  0.31, and the warm century query took 102 ms (opt-level 2) against "about 10 ms": the
+  brainstorm's figures assume the black hole's escape speed bounds the members. (3) Members are
+  drawn in the galaxy's whole potential but follow Kepler orbits about the mass inside their epoch
+  radius (T28.b.a's law), so many are unbound about it: in single cells along the axis, 31% at
+  0.6 ly, 29% at 1.2 ly, 39% at 2.4 ly and 27% at 4.7 ly of the Kepler-regime members (samples of
+  13–557). Over the clock window they leave on hyperbolae, so the density is not stationary, where
+  the brainstorm says "Kepler motion preserves [the distribution function], so the density is
+  exactly the profile at every time"; P09.T31's profile test at ±1,000 yr will meet it, and it
+  bears on T28.b.b's wiring: for main and the brainstorm's owner. (4) Decision §2.2's "padding
+  moves no output either way" does not hold through the census's cell budget. (5) "The joint
+  revision as built" says the normalisation raised the cusp by 28%; its own figures give ×1.32.
+- **P09.T30.b as built (lane `p09-victims`, 2026-10-29, on 3161136a at `GENERATOR_VERSION` 23;
+  the brief's "ext").** No output moves and there is no bump: the victims take the centre's
+  feature-level IDs from index 1, which `resolve` answered "no such system" before; no T30.a ID
+  or time, no cell member and no existing golden moves (`golden_diff.py`: two new goldens, no
+  changed value), and no tag is added. New goldens `galaxy/features/centre_victims` and
+  `galaxy/features/centre_luminosity` at 23. Files: `galaxy/features/centre/events/victims.rs`
+  and `events/luminosity.rs` (new), `events/mod.rs`, `centre/{members,mod,source}.rs`,
+  `features/members/headroom.rs`, `features/members/{level_list,placement}.rs` (docs),
+  `galaxy/motion.rs` (a crate-private `MotionState::new`), `tests/galaxy_sweeps.rs` (a doc figure).
+  - _API_, in `features::centre::events` (re-exported there):
+    - In `victims`: `CentreVictims`, `TidalDisruptionVictim`, `DisruptionOutcome` (`Disrupted`,
+      `SwallowedWhole`), `BuildCentreVictimsError`, `tidal_radius`, `schwarzschild_radius`,
+      `hills_mass`, `outcome_of`, `expected_victims` and the word constants `ORBIT_WORDS`,
+      `STAR_ATTEMPT_WORDS`, `STAR_ATTEMPTS`, `MIN_STAR_AGE`. `CentreVictims`:
+      `new(&Galaxy, &CentreModel)`, `of(&Galaxy)`, `from_parts(seed, mass, centre, mass function)`,
+      `one(galaxy, centre, index)`, `victims`, `victim(index)`, `of_disruption(EventId)`, `count`,
+      `at(t)`, `model`; a victim's `id`, `index`,
+      `disruption`, `time`, `member`, `record`, `class`, `star_mass`, `star_radius`, `star_phase`,
+      `outcome`, `tidal_radius`, `hills_mass`, `pericentre`, `orbit_at_disruption`, `tail`,
+      `state_at` and `reach_at`.
+    - In `luminosity`: `luminosity_at(&CentreLuminosityModel, t) -> CentreLuminosity`,
+      `CentreLuminosityModel::{new, of}`, `DisruptionTail`, `fallback_time`,
+      `eddington_luminosity_watts` and the constants `QUIESCENT_LUMINOSITY_WATTS`,
+      `RADIATIVE_EFFICIENCY`, `BOLOMETRIC_CORRECTION`, `XRAY_SHARE` and `TAIL_LOOK_BACK_BINS`.
+      Provides' `luminosity_at(t)` takes the model, which lists the
+      horizon's victims once; the result is by part (quiescence, flares, tails), in watts.
+    - Crate-private: `CentreMemberRecord::from_parts`, `members::centre_composition`,
+      `MotionState::new`. `resolve_centre_member_with` answers a feature-level index from 1
+      through `CentreVictims::one`, which draws that victim alone.
+  - _Not a `ListClass` (a deviation)._ The victims' count is the horizon's disruptions, not a
+    `member.list` draw, and their places are their parabolas, not a profile's, so the centre lists
+    them itself at indices 1 to N after its black hole (N = `CentreVictims::count()`, by time, then
+    event ID); `registered_classes` stays empty. _For P11.T8.f, T36 and T43:_ a class listed on
+    the centre after the victims starts at N + 1. `FeatureLevelList::with_classes` numbers from 1
+    and its clamp does not count them, so it needs a first-index offset at the centre.
+  - _Draws_, the disruption's event stream from word 0. Words 0–2: the pericentre's direction
+    (isotropic) and the velocity's angle about it. From word 3, attempt k at 3 + 3k:
+    - a `Mark` picking a living class (kind `Living`, expected above 0, in the classes' order) by
+      its expected count over the whole cluster (lean, below);
+    - the age at the disruption, uniform in the class's component from `MIN_STAR_AGE` (10⁴ yr);
+    - the initial mass on the galaxy's mass function in the class's range below the turn-off at
+      that age, as P09.T27's members draw theirs. An empty range passes the attempt; at most 64,
+      never reached in practice (a debug assertion, then the first class).
+
+    The star is plan 06's at its age with `StarDraws::median()` (lean: its own draws are keyed by
+    its ID). The record's epoch position and velocity are its parabola's at the epoch, formal for
+    a victim gone by then (59 ly out for the oldest); its origin `CentreMember { attempt }`, its
+    population `NuclearDisc`, its age the drawn one plus the time since the disruption, its layer
+    its initial mass's.
+
+  - _The outcome._ SM16 §2.2's Hills mass with the IAU 2015 nominal R☉ and GM☉, 1.1434 × 10⁸ M☉
+    for 1 M☉ and 1 R☉; swallowed whole at M• ≥ M_H. It is the victim's (`of_disruption` finds it
+    from the event's ID); T30.a's `TidalDisruption` is unchanged.
+  - _The orbit (lean)._ An exact parabola about G M• alone, not T28.b.a's μ from the epoch
+    radius: the "near-parabolic" orbit as the theory of disruption takes it. Its pericentre is r_t
+    when disrupted (β = 1, not SM16 equation 28's pinhole share ∝ β⁻² with f_pinhole ≈ 0.3), and
+    2 r_g when swallowed, so the parabola is slower than light before the event. The state at the
+    disruption is held exactly, at pericentre; `state_at(t)` propagates it up to t_d and is
+    `StateAt::NoSuchSystem` after. _For P09.T28.b.b and T37:_ a victim's record says `Exists`
+    after its disruption (plan 03's `Existence` has no end), and `position_velocity_at` on its
+    `EpochState` would follow the Kepler regime's law, so a victim is asked through its own
+    `state_at`.
+  - _The tails (lean on the efficiency and the band)._
+    `t_fb = (π ÷ √2) R★^{3⁄2} M• ÷ (M★ √(G M•))`, 3.54 × 10⁶ s M₆^½ m★⁻¹ r★^{3⁄2} (SM16
+    equation 23; Stone, Sari and Loeb 2013,
+    equation 49), then `Ṁ = (M★ ÷ 3t_fb)(Δt ÷ t_fb)^(−5⁄3)` (SSL13 equation 50), radiating
+    `min(η Ṁ c², L_Edd)` with η = 0.1 (SM16 §3) and L_Edd for ionised hydrogen, 1.257 × 10³⁸
+    erg/s per M☉. A share 1 ÷ 15.8 (Ho 2009's median C_X) is in 2–10 keV, so that a tail adds to
+    T30.a's flares in their band, above a quiescence of 3.6 × 10³³ erg/s (Nowak et al. 2012,
+    Table 1, as Neilsen et al. 2013 §4 take it), the same for every black hole. The look-back is
+    the horizon, `TAIL_LOOK_BACK_BINS` = 257 (bin −257 from +H's bin 0, not T30.a's 258 bins
+    counted from its edge); `luminosity_at` sums the held victims, which a test holds equal to
+    `active_at` with that look-back, cut to the horizon, from −H, 0 and +H. A disruption before
+    the horizon has no victim and adds no tail.
+  - _For P12.T5.a._ The tails' bound is `DisruptionTail::peak_luminosity_watts`,
+    `XRAY_SHARE × L_Edd(M•)`, 3.42 × 10⁴³ erg/s at the fixture; their duration is unbounded
+    within the horizon (`TAIL_LOOK_BACK_BINS`); their light curve is
+    `DisruptionTail::luminosity_watts_at`.
+  - _The speed bound (the brief)._ `FeatureInterior::member_speed_bound` covers catalogue
+    features, whose lists hold no victim (the class is the centre's alone), and its doc says so.
+    `CentreMemberSource` (still unregistered) lists the victims that exist at the sphere's time,
+    on their own parabolas, and passes over one whose reach misses the sphere: its pericentre plus
+    `full_scan_radius(G M•, t_d − t)`, widened by 10⁻⁹, since a victim moves below the black
+    hole's own escape speed. The reach changes no hit (`a_victim_s_reach_changes_no_hit`: 312
+    hits, 156 passed over); the census adds one in its layer for each victim inbound at the epoch
+    inside the radius. `CentreMemberSource::new` `expect`s the victims (refused only for a black
+    hole below 0.56 M☉).
+  - _Headroom_ (plan 11's P11.T8.e record: "each must join the candidates when it registers").
+    `CentreListForecast` gains `victims()` (`expected_victims`: SM16 equation 27 over the
+    horizon's 264,144 years, 27.31 at the fixture, 125 at 10⁵ M☉) and `entries()`, the victims
+    then the candidates; `fits`, `margin` and the check's error read the entries, and
+    `candidates()` is unchanged. `CentreListTooFull { candidates }` keeps its field's name, holds
+    the entries and says "entries". Re-pinned margins at eight standard deviations: 57,685.18 and
+    58,394.90 at the fixture under Chabrier's and Kroupa's functions, 46,112.75 and 52,449.08 at
+    the caps (from 57,713.79, 58,423.57, 46,140.86 and 52,477.38); the 10³-seed sweep passes, its
+    worst margin 46,074.8 (from 46,130.9; 407 s in the slow-test profile, pod, 4 vCPU). The
+    twice-the-cap tripwire still doubles the candidates alone.
+  - _Figures_, at the fixture (seed `0x0926_0000`): 26 victims (27.31 expected), all disrupted,
+    of bands A–C and components 0–2, the latest 1,294 yr before the epoch (a 1.16 M☉ star), so
+    the black hole is at 3.47 × 10³⁸ erg/s now, nearly all that tail. Over 200 seeds, 5,524
+    victims: 4,962 on the main sequence, 89 before it, 473 below 0.1 M☉ on plan 06's cooling fits
+    (phase `Substellar`); the least Hills mass 2.87 M•. At 1.36 × 10⁸ M☉, 276 of 286 are
+    swallowed whole. A Sun-like tail at 4.30 × 10⁶ M☉: t_fb 84.9 d; 2.10 × 10⁴⁰ erg/s at 100 yr,
+    4.52 × 10³⁸ at 1,000 yr (inside 0.3–3 × 10³⁹), 9.73 × 10³⁶ at 10⁴ yr.
+  - _Tests._ `victims::tests` (8): the Hills mass; the plan's resolve-and-pericentre test (with
+    `one`, `of_disruption` and the epoch state on its parabola); the words from 0; every
+    main-sequence victim disrupted at Milky Way values (200 seeds, and a main-sequence star of
+    0.1–150 M☉ at five ages); swallowed whole above the Hills mass; the Kepler members' loss cone
+    stays empty (3,268 members of the cells about the black hole, levels 0–5, none inside it, and
+    no victim on a cell); order independence; the golden (with a seed of both outcomes at 1.36 ×
+    10⁸ M☉, a victim inbound at the epoch and states before a disruption). `luminosity::tests`
+    (6): the closed forms; the Ponti bracket on a Sun-like tail, with the drawn tails pinned as
+    they stand; the sum by part; the look-back; order independence; the golden. `source::tests`
+    (2): the reach changes no hit; an inbound victim counted and found, the same in any order and
+    with either cache. `cargo test -p hyperion-sim --lib -- features::centre features::members`:
+    112 passed, 7 ignored, 36.8 s of tests (pod, 4 vCPU).
+- **Findings of P09.T30.b (for the owner's ruling; nothing built on them moves output).**
+  1. _The Ponti bracket's subject._ The plan's 0.3–3 × 10³⁹ erg/s a thousand years on holds for
+     a Sun-like victim (4.52 × 10³⁸) and is asserted there. The drawn victims are mostly M dwarfs,
+     and a tail scales as M★^⅓ R★: their median is 8.2 × 10³⁷ erg/s over 200 seeds (7.5 × 10³⁷ at
+     the fixture), 9.7% inside (5 of the fixture's 26), pinned as they stand. Ponti et al. 2010
+     state no band (their figure is Terrier et al. 2010's 1–100 keV) and no disruption; Ponti et
+     al.'s 2013 review (§4.4) has flares "of the order of 10³⁹ erg s⁻¹ or higher, between ∼100
+     and ∼1000 years ago". Lean: the bracket stays on the Sun-like star. _Ruled 2026-10-29 and
+     built in P09.T30.c: the bracket applies to neither; see "P09.T30.c as built"._
+  2. _The tails at late times._ η = 0.1 is SM16's figure for super-Eddington accretion. A tail is
+     below a tenth of Eddington after about five years and at 1.3 × 10⁻⁵ of it by 1,000, where
+     low-luminosity nuclei radiate "much less than the canonical value of 0.1" (Ho 2009). With
+     t^(−5⁄3) for ever, the horizon's tails keep a Milky Way centre at 10³⁵–10³⁸ erg/s, the
+     fixture at 3.47 × 10³⁸ now, 10⁵ times Sgr A*'s 3.6 × 10³³; Ponti et al. 2010 put Sgr A*
+     below 8 × 10³⁵ erg/s until 60–90 years ago. Lean: the plan's law stands now; a ruling may let
+     η fall with Ṁ below about 10⁻² Ṁ_Edd (an advection-dominated law, not checked) or end the
+     tails, a version bump. _Ruled 2026-10-29 and built in P09.T30.c, behind its 25 hold: Xie
+     and Yuan's falling efficiency, the tails not ended._
+  3. _Weights and β (leans)._ A victim's class is drawn by its count over the whole cluster, not
+     by the loss-cone flux, which favours stars near the influence radius; β is 1, not SM16's
+     pinhole tail. Neither moves a figure the plan names.
+  4. _Minor._ L_Edd is for ionised hydrogen; SM16 equation 24 takes 0.34 cm² g⁻¹, 17% higher.
+     Ho's C_X applies below a tenth of Eddington, so not to a tail's first five years.
+- **P09.T28.b.b as built (lane `p09-centre`, 2026-10-29, on 3161136a at `GENERATOR_VERSION` 23;
+  decision-galaxy-25-train §1 and §2).** Built behind its hold, `KEPLER_REGIME_VERSION` = 25, so
+  no output moves at 23: `golden_diff.py` finds no golden changed, T28.b.a's pre-pin
+  (`regime_records_near_the_centre_are_pinned`) passes by name, and the gate's `fit-check` holds
+  every table. `Galaxy`'s `Debug` text gains `rules: GalaxyRules { kepler_regime: Straight }`,
+  which no persisted digest reads, and its equality compares the rules. Files: `galaxy/rules.rs`
+  (new), `galaxy/motion.rs`, `galaxy/motion/kepler_regime_hold.rs` (new, the hold's tests),
+  `galaxy/mod.rs` (with P09.T29's bench figure in `Galaxy::centre`'s doc),
+  `galaxy/placement/{candidate,generate,resolve}.rs`, `galaxy/query/{mod,motion,result}.rs` and
+  `galaxy/frame.rs`.
+  - _The hold (decision §1.2–§1.3, E1–E6)._ The crate-internal `galaxy::rules::GalaxyRules` with
+    one field, `kepler_regime`, and `of_version` and `#[cfg(test)] every_25_hold()`, as
+    `bump-25-list.md` names them; `galaxy::motion::{KEPLER_REGIME_VERSION, KeplerRegimeRules}`
+    (`Straight`, held; `Kepler`). `Galaxy` carries `rules`, which `from_params` sets from
+    `of_version(GENERATOR_VERSION)` through a private `build`; `rules()` reads it, and the tests'
+    doors are `#[cfg(test)] from_params_with_rules` and `#[cfg(test)] with_rules`. Three call sites, each one `match` whose held arm is the old code
+    verbatim: plan 03's `position_at`; the candidate evaluation that `generate_cell` and `resolve`
+    share (`in_loss_cone`); and the crate-internal `query::walk_pad`, which the range query's
+    `sphere_for_layer` (now taking the galaxy) and the frame search's `search_sphere` read. Nothing
+    gated feeds a static or a table (E2, E3), and no payload or protocol type moves (E5).
+  - _`with_rules` (a test door the decision does not name)._ It swaps the rules of a built galaxy,
+    so that D2, C1 and the frame test compare both arms on one galaxy without building its
+    potential's grid twice (8 s a build in the test profile on the pod); D4 holds it equal to
+    `from_params_with_rules`, with the same cells, positions and memo. It keeps the centre's motion
+    and model if read, which holds while neither memo reads the rules: a hold whose arm reaches one
+    (T28.d's secular term stays at its call site) must reset them there.
+  - _The swap._ Under `Kepler`, `position_at` of a grid record away from the epoch is
+    `position_velocity_at` from `EpochState::of_grid_record` (`motion::kepler_regime_position_at`),
+    which outside the regime is the straight line to the bit.
+  - _Members' `position_at`, against the task's "members and grid systems alike" (lean,
+    2026-10-29; for main)._ Under either arm a feature or centre member's `position_at` is the held
+    arm's: in a galaxy with kinematic tables it panics (`draw_velocity` on a record with no
+    component; plan 03's Risks, "`position_at` and feature members"), and without them it is the
+    epoch position, while `CentreMemberSource` moves the member on its orbit. A `SystemRecord`
+    does not carry a member's velocity, and resolving the member inside `position_at` would be a
+    fourth call site and a change outside the hold. The members move by their own sources:
+    the centre's on its `Trajectory`, the features' on their lines (`observe::Drift::of_record`
+    resolves a feature member). _Finding, a crash at version 23 already:_ the server's extinction
+    request (`requests/galaxy.rs`, `LineEnd::System`) resolves any ID and calls `position_at`, so a
+    feature or centre member's ID away from the epoch panics in its job; `resolve_system` already
+    dispatches on the origin. Lean: route it through the origin as `resolve_system` does, a fix of
+    its own outside this hold. _Closed by P07.T10.c (lane `fix-server-positions`, 2026-10-29;
+    plan 07's Risks, "Fixed in P07.T10.c"):_ the crash had three paths, `extinction`,
+    `scene_ship` and the scene's core, and each now places a client's ID through one function,
+    `convert::system_motion`, by its origin, as `resolve_system` now does too: the centre's
+    members are refused at every time until P09.T37 and P09.T40 place them. Deferred finding (2)
+    below then reads, for a client's ID, that function's grid arm alone (`requests/observe.rs` and
+    `scene/core.rs` call it), with `convert.rs`'s `system_place` and range rows for the grid.
+  - _The carve-out, where `resolve` and the walk both see it (lean, 2026-10-29)._ The task text
+    names `resolve` alone. The carve-out sits in the candidate evaluation that `generate_cell` and
+    `resolve` share, after the catalogue hook, as a new `CandidateOutcome::InLossCone`, so that a
+    range query never returns a system `resolve` refuses, which plan 03's placement promises. It
+    applies to the grid records of every layer, the substellar two included, by the members' own
+    test (`LossCone::contains`, the pericentre about the black hole alone), and only to a
+    Kepler-regime record: a record outside the regime is answered by its distance, without drawing
+    its velocity. A galaxy without kinematic tables carves out nothing (no velocity, no orbit) and
+    is answered without building `centre_motion`, so under the new arm such a galaxy and its
+    `with_full_potential` differ near the black hole by the carve-outs. A candidate a class claims
+    is `ClaimedByCatalogue` first; no class claims any yet. _Finding (science check):_ the cone is
+    the stars' (about 2 au at Sgr A*'s mass, some 2.6 times a Sun-like star's tidal radius, r_t ≃
+    R (M_bh ÷ m)^⅓; Rees 1988, Nature 333, 523; Alexander 2017, ARA&A 55, 17, §1.2); brown dwarfs
+    and rogue planets are destroyed or swallowed only inside about 0.34–0.79 au (the larger of
+    their tidal radius and direct capture at 8GM ÷ c²), so for them it is 2.5–6 times too wide and
+    removes a few times more than it need: here one record in 4.5 × 10⁵. As Design note 12's "as
+    a member would" sets the members' test, it is recorded, not changed (with T28.b.a's deferred
+    finding (1) on `LOSS_CONE_AU`'s doc).
+  - _A carved-out record made by hand (lean, 2026-10-29)._ `position_at` gives it its straight
+    line, the held arm's answer, rather than a panic or a position on an orbit it does not have;
+    neither `generate_cell` nor `resolve` gives one.
+  - _Members, and the source's `Trajectory`._ No member's `position_at` is gated: the centre's
+    members move by `CentreMemberSource` on their `Trajectory`, one law under either rule (P09.T29
+    as built), so the source needs no gate, and it and the grid agree under both arms once P09.T37
+    registers it.
+  - _The walk's pad._ Under `Kepler`, `walk_pad` is `kepler_pad_for`, and the census counts the
+    same sphere's cells. The range query's `widest_sphere`, what its sources are asked about, and
+    `QueryStats::padded_radius` stay the straight lines' (the sources pad for their own members;
+    `padded_radius`'s doc says so). The frame search picks the sphere its sources are asked about
+    as the widest of its layers' search spheres, which under the new arm are Kepler-padded near
+    the black hole (its comment says so); a source reads only the sphere's centre, radius and
+    time.
+  - _Tests (as run)._ In `galaxy/rules.rs`: `a_galaxy_carries_the_version_s_rules` (D3: the
+    version's rules, equal to a galaxy built under them explicitly, `Debug` text and all, and
+    unequal to one under every 25 hold; `with_substellar_params` keeps them) and
+    `each_hold_turns_on_at_its_version`. In `galaxy/frame.rs`:
+    `the_search_pads_as_the_walk_does_under_either_arm` (the frame search's spheres near the black
+    hole, every stellar layer at ±100 and ±1,000 yr: the straight pad under the held arm, the
+    Kepler pad under the new one, wider in 18 of 20 layer-times; layer E's 10 ly at ±1,000 yr
+    already holds the orbits). In `galaxy/motion/kepler_regime_hold.rs`, fast:
+    `the_kepler_regime_is_held_only_until_the_25_bump` (the tripwire, E6);
+    `the_kepler_arm_moves_records_inside_the_radius_and_no_others_pinned` (D2, in the wasip1
+    suite: the fixture's 12,671 layer-B records within 1.5 r_h, 3,286 in the regime and 9,385
+    outside, at ±100 and ±1,000 yr; at the epoch both arms give the epoch position; the held arm is
+    the straight line; the new arm moves every Kepler-regime record onto `position_velocity_at`'s
+    state, 13,144 record-times, the farthest 1.40 ly, and no other; the cells are the held arm's
+    less the loss cone's, none here; the walks' pad is `pad_for` under the held arm and
+    `kepler_pad_for` under the new one, to the bit; the counts and a digest of the new arm's
+    positions, `0xdc2a4657d88c161e` on x86-64, are pinned, which T28.d's secular term may re-pin by
+    name, §1.3); and `the_kepler_arm_gives_the_same_seed_the_same_answers_twice_and_in_any_order`
+    (D4 on seed 0x5eed0000c0ffee00: built under the rules, it equals the galaxy given them by
+    `with_rules`, with the same cell, positions and centre motion to the bit; the census's
+    carved-out rogue planet is resolved under the held arm, and under the new one is
+    `InLossCone`, "no such system" and missing from its cell, which loses nothing else; and
+    `assert_order_independent` over its cell, a central layer-B cell, two resolutions, three
+    positions and a pad, once on one galaxy and once on a fresh copy each time, so that the
+    centre's motion is built from inside cell generation, first or last). Slow, by name:
+    `the_kepler_arm_s_census_near_the_black_hole` (C1, below, 426 s on the pod in the test
+    profile) and `a_range_query_near_the_black_hole_finds_what_a_scan_finds_under_either_arm`
+    (four spheres of 0.5–2 ly at and near the black hole at ±100 and ±1,000 yr, grid only, against
+    a scan of every Kepler-regime record and the straight-regime records within the straight pad:
+    3,674 hits under the held arm and 3,817 under the new one, 369 s; no stellar hit came from
+    beyond the straight pad, which C1 shows for the rogue planets). The fast tests take 37 s of
+    test time on the pod, each in its own nextest process (D4 22 s, D2 9.7 s). T28.b.a's pre-pin
+    passes by name (223 s).
+  - _"Positions at t = 0 unchanged for every golden system", as tested._ No integration golden can
+    run under every 25 hold (`from_params_with_rules` is `#[cfg(test)]`): the tests hold it for
+    the pre-pin's records (C1) and D2's sample, and everywhere else `position_at` returns the epoch
+    position before it reads the rules. Under the new arm `0xcfffe0003fff0b41` no longer exists, so
+    `regime.golden` loses it at the bump.
+  - _Census C1 (decision §1.6), under every 25 hold against the held arm._ Over T28.b.a's pre-pin
+    (the Milky Way fixture, seeds 0x5eed0000c0ffee00 and 0x2: 790,511 grid records, 453,819 in the
+    regime; ±100 yr and ±1,000 yr, which is ±H): every Kepler-regime record moves at every time,
+    and none outside the regime; every mover is finite; the largest moves are 4.04, 4.63 and
+    3.94 ly at −1,000 yr (rogue planets; the stellar layers at most 2.47, 3.70 and 2.30 ly), as
+    T28.b.a's tally forecast, and at ±100 yr 0.34, 0.43 and 0.31 ly; every record lies within the
+    walk's Kepler pad of where it ends, and some rogue planets passing near the black hole faster
+    than 1,000 km/s end farther from their epoch positions than the straight lines' pad (5
+    record-times in the fixture, at ±100 yr; 55 in seed 0x5eed, 10–16 at each time; none in seed
+    0x2 or in a stellar layer), which only the Kepler pad holds. The one carve-out in the sample is
+    rogue planet `0xcfffe0003fff0b41` of seed 0x5eed0000c0ffee00, 2.54 ly from the black hole, the
+    one T28.b.a forecast: "no such system" under the new arm. The substellar layers are sampled
+    within 4 ly, as in the pre-pin, so their records between 4 ly and r_h, most of the regime's by
+    number, are not counted. The range query's census (48 queries a galaxy:
+    spheres of 0.5–50 ly at and near the black hole, stellar and with the substellar layers, at
+    ±100 and ±1,000 yr) moves for none of the 144: near the black hole the census limit stops
+    first and the 2²⁰-cell budget never binds. The cells the census counts rise: a 3 ly sphere
+    12.2 ly out at ±1,000 yr from 38 to 158–174, and a 1 ly sphere 3.2 ly out from 40 to 46–66
+    (stellar) and from 74 to 124–208 (with the substellar layers). So P09.T29's finding (4) stands
+    for a caller's smaller budget, and at the default budgets the pad moved no census here.
+  - _Unbound orbits (P09.T29's deferred finding (3))._ The held arm does not change the centre's
+    members, which have one law under either rule. Under the new arm the grid's Kepler-regime
+    records take the same law with plan 08's velocities, and 78.6% of them are unbound about the
+    mass inside their epoch radius (the fixture 79.9%, 0x5eed 73.2%, 0x2 87.3%; the stellar layers
+    alone 80.6%, 74.1% and 87.6%). The science check traces it to the tracers, not to the draw's
+    cut: plan 08's populations there (the nuclear disc, the bulge, the bar) are cored over tens to
+    hundreds of light-years, and their Jeans dispersions at a few light-years, about 170–290 km/s
+    per axis at 1–5 ly in the black hole's and cluster's well alone, carry the whole well's depth,
+    against a Kepler escape speed of 222 km/s about M(< 3 ly) = 5.28 × 10⁶ M☉ (circular 157 km/s);
+    they pass through on orbits that reach far beyond r₀, hyperbolae about that point mass, and the
+    cut, 1,000 km/s there, removes under 10⁻⁴ of them (its estimate, 68–79% unbound, matches; not
+    re-checked at source). The centre's members, at about 100 km/s, are 27–39% unbound by the same
+    measure (P09.T29's (3)). They move no farther than the figures above over the clock window
+    (a crossing at 3 ly takes some 2,600 yr), but the density inside r_h is not stationary under
+    the new arm, where the brainstorm's "Orbits and time" says "the density is exactly the profile
+    at every time". Recorded for main and the
+    brainstorm's owner with P09.T29's (3), not as a blocker: no state, class or value is wrong or
+    non-finite, and the walks hold every move.
+  - _Deferred findings (2026-10-13 rule), for the 25 wiring and the plans named._ (1)
+    `observe::Drift::of_record`, which the sky census's retarded times and plan 12 read, still
+    draws a Kepler-regime grid record's straight line under the new arm, so it and `position_at`
+    part inside r_h at 25 (the sky census's pads stay the straight lines', consistent with it);
+    (2) the server reports `epoch_velocity` beside `position_at` (`convert.rs`,
+    `requests/observe.rs`, `scene/core.rs`), which inside r_h is not the orbit's velocity at t
+    (`position_velocity_at` gives both); (3) feature members inside r_h keep their source's
+    straight lines under either arm, though the task text says "members and grid systems alike";
+    (4) under the new arm a galaxy with its kinematic tables builds `centre_motion` (64 ms) with
+    the first record it places, and every galaxy with its first range query or frame search
+    (`kepler_pad_for` reads it); (5) `displaced::site::explosion_site` drifts a grid record in a
+    straight line to its death, and plan 08's test holds the site equal to `position_at` inside the
+    clock window, so under the new arm a Kepler-regime layer-E record's site parts from its orbit
+    (nothing reads it until P09.T35 sets `RECENT_DEATH_CLAIM`, train 26); (6) from 25 a cell
+    depends on whether its galaxy has its kinematic tables (the carve-out), which the server's
+    `(GalaxyKey, CellKey)` cell key does not say: every production galaxy has them
+    (`compute/galaxies.rs`), and a debug assertion in the shared cell cache, or the tables' state
+    in the key, would keep it so (determinism audit). None moves output at 23.
+  - _D5._ The new arm propagates on `position_at`'s path, so the D2 test, named `pinned`, runs in
+    the wasip1 suite (wasmtime 49.0.1). Run by name on the pod before the gate, it passes in
+    12.1 s with the digest blessed natively on x86-64; the gate's wasip1 suite runs it again with
+    the module's other fast tests.
+- **P09.T39 as built (lane `p09-wire`, 2026-10-29, on 7a674ea at `GENERATOR_VERSION` 23 and
+  `PROTOCOL_VERSION` 3; no output moves).** Types only. `hyperion-protocol` gains plan 09's four
+  kinds and their payloads (`features.rs`, new; `FeatureIdHex` in `primitives.rs`; the kinds in
+  `envelope.rs`, appended to `REQUEST_KINDS` as `features_in_range`, `galaxy_features`,
+  `feature_detail` and `black_hole_state`) and the range row's optional `origin`, `member_class`
+  and `supernova` (`galaxy.rs`). The server answers each kind `unsupported` through
+  `not_served_yet` until P09.T40.b, as plan 04's design note 15 has a server answer a kind it does
+  not serve, classes `features_in_range` and `galaxy_features` large in `is_large`, and writes the
+  three row fields `None` (`convert.rs`, and the range-query bench's row), so no wire form, server
+  golden, protocol fixture or client fixture moves. `just gen-protocol` adds 40 binding files and
+  changes three, every new type exported from `packages/protocol/src/index.ts`; the client's fake
+  server in `apps/hyperion/src/tools/placeShip.test.ts` lists the four kinds. Every shape is free to
+  change until the first build that sends a value of it (P09.T40). Choices the task leaves open
+  (lean, 2026-10-29), as built:
+  - _IDs._ `FeatureIdHex` is the 64-bit word a feature's members share with their member bits
+    zeroed: `FeatureRef::object_word` for a catalogue feature, `f000000000000000` for the galactic
+    centre (a wire convention the sim does not name, which P09.T40 resolves). The word is also a
+    well-formed member `SystemId` (a zero slot is band A's member 0 of nested cell 0), so T40
+    refuses a word that does not round-trip.
+  - _Requests._ `FeatureDetailRequest` is `{ universe, feature, time }`, not `{ feature }`: an ID
+    names no universe, and a feature's kind and structure depend on the time. Each `kinds` list is
+    non-empty with no repeat, which T40.b validates.
+  - _`features_in_range`._ `FeatureSummary` adds `designation`, for P09.T41.c, beside the plan's
+    fields; `age_myr` (a cloud has none), `emission` and `bubble_radius_ly` are nullable, and
+    `extent_ly` is the radius at the time, not `reach()`. A feature is within range when its sphere
+    of `extent_ly` meets the query's. The census has a line per requested kind,
+    `{ kind, returned, status }`, with `status` one of `included`, `over_cell_budget` and
+    `not_generated` (streams and dwarf cores, plan 10's global list); the plan names no limit, so
+    there is no `expected` and no `over_limit`.
+  - _`galaxy_features`._ Its kinds are `MapFeatureKindWire` (`globular`, `galactic_centre`,
+    `bright_shell`), not `FeatureKindWire`, because a bright shell is no `FeatureKind`. A bright
+    shell is a remnant whose shell is non-radiative (free expansion or Sedov–Taylor), sent as
+    `BrightShell { system, designation, site, age_yr, shell }`. The answer's lists are tagged by
+    kind, so that a kind fixes its entries' type (TypeScript review), each `complete` or
+    `not_generated`. There is no `pending` on the wire: the request waits, as the density map's
+    does, and P09.T41.b's "pending" is the client's own request state.
+  - _`feature_detail`._ The reply echoes `universe` and `time` and carries the `FeatureSummary`
+    beside a structure tagged `cluster` (radii, central escape speed, relaxation time, the
+    core-collapse flag, the black-hole count and the classes), `centre` (the influence and
+    loss-cone radii and the classes) or `cloud` (core radius, central density). `ClassCountWire` is
+    `{ class, initial_mass_min_msun, initial_mass_max_msun, mean_mass_msun, expected }`; a profile's
+    shape and a tail's length are not sent. `MemberClassWire` is tagged
+    `cluster { kind, band, generation, multiplicity }`, `centre { kind, band, episode, tracer }` or
+    `listed { class }` (an entry of a feature-level list), with `band` as `MassLayer`. The episode
+    is the index into the centre's `age_components`, without which its four `Stars` episodes would
+    share one class (plan-conformance review).
+  - _The shell._ `ShellSummary` is the shell alone (radius, shock speed, phase, emission flags). The
+    remnant's offset, its bow shock, its nebula and a Type Ia survivor's offset are a
+    `RemnantSummary` beside it, as the sim splits `ShellState` and `RemnantState`, so that a bare
+    remnant keeps them; the plan's text puts the offset and the nebula in `ShellSummary`.
+    `SupernovaStateWire` is `progenitor { until_explosion_yr, pair_period_s }`,
+    `supernova { age_yr, shell, remnant }` or `bare_remnant { age_yr, remnant }`.
+  - _`black_hole_state`._ It adds the black hole's `id` (`f000000700000000`). `luminosity` is
+    optional on the wire, as the lane's brief set it while P09.T30.b was building `luminosity_at`;
+    that is in the tree now, and T40 may send it on every answer. It comes by part (quiescent,
+    flares, tails, total; unabsorbed 2–10 keV). The plan's "recent disruptions" are every
+    disruption at or before the time, newest first, back to the start of the source horizon
+    (`TidalDisruptionWire { victim, time, star_mass_msun, outcome, peak_luminosity_w }`).
+  - _Origins._ `SystemOriginWire` is `grid` (with no component: the row names its population),
+    `feature_member { feature }`, `centre_member` and `catalogue_system { class }`, and
+    `CatalogueClassWire` holds the registry's nine values in value order. The sim's
+    `SystemOrigin::CatalogueSystem(ClassId)` is P09.T33.a's and was not in this lane's tree: nothing
+    here changes when it lands, and T40 converts it by `ClassId::value()`. The row's `supernova` is
+    boxed, since few rows carry one.
+  - _Not taken (reviews)._ Nesting `member_class` and `supernova` under `origin` (TypeScript
+    review): the plan and the lane's brief name three row fields, a supernova host can be a feature
+    member as well as a catalogue system, and a member class spans two origins; a narrowing helper
+    is P09.T41.c's if it wants one. Tagging `RemnantSummary` by whether a compact remnant exists: it
+    mirrors the sim's `RemnantState`, whose offset is absent for a remnant without a kick too.
+  - _Open, for the owner._ (1) `SystemOriginWire` is a closed enum, and plan 10's P10.T10.a adds
+    `stream` and `dwarf_core`; pinned content (`110`) would add another. Lean: name it growing in
+    plan 04's reserved list, as `Population` is, with P09.T41.c reading an unknown origin as
+    Missing; until that is ruled, P09.T40 sends no `origin` before P10.T10.a's variants exist, or
+    P10.T10.a bumps. (2) `CatalogueClassWire` likewise: the registry leaves values 9–63 free and
+    design note 16 appends later classes. Lean: growing too.
+  - _Ruled (2026-10-30, main)._ `SystemOriginWire`, `CatalogueClassWire` and `MemberClassWire` join
+    plan 04's growing list (its reserved list), before any build sent a value of any of them, so
+    no bump. Every row carries `origin` from the build that registers the features' source, for the
+    variants the registered sources place; P09.T33.a's `catalogue_system` and P10.T10.a's `stream`
+    and `dwarf_core` join without a bump, as would a member class of plan 10's own. Registering
+    `FeatureMemberSource` waits for P09.T2.c, at version 26, since members registered before it are
+    counted twice (`decision-r06-t16a-scope.md`): P09.T40.a builds the registration behind a switch
+    that is off at 23, so no row carries an `origin` before then and the range query's replies do
+    not change. P09.T41.c reads an origin, a catalogue class or a member class it does not know as
+    Missing.
+  - _Tests._ Wire forms with JSON round trips for every request and reply (features in range, also
+    with nothing in range; the map's lists of each kind and status; a cluster's, the centre's and a
+    cloud's structure; the black hole with and without a luminosity), every `SystemOriginWire`,
+    `SupernovaStateWire` and `MemberClassWire` variant and every string enum, and the row with each
+    new field absent (the existing rows) and present; `FeatureIdHex`'s form and its refusals;
+    `request_kinds_are_pinned` and the envelope's walk over every kind; the server's
+    `kinds_without_a_handler_are_answered_unsupported`, now over nine kinds, and over the WebSocket
+    `a_feature_kind_is_answered_unsupported_until_it_is_served`.
+- **P09.T30.c as built (lane `p09-t30c`, 2026-10-30, at `GENERATOR_VERSION` 23; the research lane
+  `research-p09-t30b`'s advice, §1 and §2, as main ruled it on 2026-10-29; decision-galaxy-25-train
+  §1).** Built behind its hold, `CENTRE_QUIESCENCE_VERSION` = 25, so no output moves at 23:
+  `golden_diff.py --base` the lane's base finds no golden changed. Files:
+  `galaxy/features/centre/events/luminosity.rs`, `events/luminosity/centre_quiescence_hold.rs`
+  (new, the hold's tests), `events/victims.rs` and `galaxy/rules.rs`; the brainstorm's centre
+  paragraph (its own commit, as ruled) and this plan's T30.b test sentence and Generator version.
+  Finding 2 of P09.T30.b is closed by it, and finding 1 as its record says.
+  - _The hold (E1–E6)._ `luminosity::{CENTRE_QUIESCENCE_VERSION, CentreQuiescenceRules}`
+    (`ConstantEfficiency`, held; `HotFlow`), crate-private, and `GalaxyRules::centre_quiescence`,
+    which `every_25_hold()` turns on with nothing to edit. It is read through the `Galaxy` (E1)
+    where its victims are drawn, `CentreVictims::new` and `one`, so `CentreLuminosityModel::new`
+    and `of` and `CentreMemberSource::new` take it; each `DisruptionTail` carries its galaxy's arm.
+    It reaches no memo of the galaxy (the centre's model holds no victim), so `Galaxy::with_rules`
+    needs no reset for it, and it feeds no static (E2), table (E3) or wire type (E5). _One call
+    site, not the advice's two (lean):_ the private `DisruptionTail::accreted_watts(rate)`, a
+    `match` whose held arm is the old expression verbatim, `RADIATIVE_EFFICIENCY * rate * c * c`
+    in the same order, which `bolometric_watts_at` and `peak_luminosity_watts` share, so the bump
+    deletes one `match`. `Galaxy`'s `Debug` text gains `centre_quiescence: ConstantEfficiency`,
+    and a tail's `Debug` and equality its arm; no persisted digest reads either.
+  - _Doors (lean)._ The crate-private `DisruptionTail::new_with_rules` and
+    `CentreVictims::from_parts_with_rules` take the arm; the public `DisruptionTail::new` and
+    `CentreVictims::from_parts`, which take no galaxy, take the generator version's
+    (`GalaxyRules::of_version(GENERATOR_VERSION)`), the held arm until the bump and the one law
+    after. `radiative_efficiency(eddington_ratio)`, `HOT_FLOW_EFFICIENCY` and
+    `HOT_FLOW_RATE_SCALE` are crate-private until the bump, and `EDDINGTON_RATE_PER_WATT`
+    (`10 ÷ c²`, Xie and Yuan's `Ṁ_Edd = 10 L_Edd ÷ c²`) private.
+  - _The law._ `ε(ṁ) = min(η, max(min(ε₁, ε₂), ε₃))`, `εᵢ = ε₀ (ṁ ÷ 10⁻²)^a`: the advice's
+    piecewise form exactly (each range between where it meets its neighbours, 2.8802 × 10⁻⁵ and
+    3.3929 × 10⁻³, η from 6.2265 × 10⁻³), continuous and non-decreasing by construction, so a
+    tail's light falls monotonically from t_fb. Three `powf` a call, where the piecewise form
+    would take one; nothing reads it on a hot path.
+  - _Census C1, what moves under every 25 hold_ (the fixture `0x0926_0000`, against the held
+    arm). The victims do not move: records, stars, outcomes, orbits, and the tails' timing and
+    peaks, since every peak at the Milky Way's black hole is above the switch (15 Eddington rates
+    for a Sun-like star). Of the `centre_luminosity` golden's 52 values 33 move, every one
+    finite and fainter, and no other: a Sun-like tail at 100, 1,000 and 10⁵ yr, 2.0968 × 10⁴⁰ →
+    9.3276 × 10³⁹, 4.5175 × 10³⁸ → 9.5944 × 10³⁷ and 2.0968 × 10³⁵ → 3.0340 × 10³² erg/s (its
+    1-yr and 10-yr values do not: it is η's for its first 24.9 yr); and the tails and totals at
+    all fifteen instants, by 0.028–0.39, the fixture's at −1,000, 0 and +1,000 yr 4.0174 ×
+    10³⁹ → 1.5726 × 10³⁹, 3.4676 × 10³⁸ → 6.0033 × 10³⁷ and 1.3674 × 10³⁸ → 1.2468 × 10³⁷
+    erg/s (totals). The flares, the Eddington luminosity and the fallback time do not move. The
+    new arm's values have the digest `0xacdcf23d013fd38e` (x86-64). A Sun-like tail falls to the
+    quiescence 4.0677 × 10⁴ yr on, where η takes 1.1459 × 10⁶.
+  - _Ponti et al.'s limit_ (2010: at most 10³⁶ erg/s, the mean over the last 60–90 years), at the
+    epoch over P09.T30.b's 200 seeds at Milky Way values, quiescence, flares and tails: under every
+    25 hold 149 seeds are within it (the least 4.544 × 10³³, median 9.574 × 10³⁴, 90th percentile
+    1.719 × 10³⁷ erg/s; 35 at or below 10³⁴ and 134 at or below 3.5 × 10³⁵, the limit in 2–10 keV
+    if it is Terrier et al.'s 1–100 keV); under the held law 1 is (the least 9.211 × 10³⁵, median
+    9.170 × 10³⁶, 90th percentile 1.686 × 10³⁸). The greatest, 3.421 × 10⁴³ under either, is a
+    seed disrupting a star in the year before the epoch. The counts are the research probe's,
+    with the flares in.
+  - _The drawn tails a thousand years on_, re-pinned as they stand: over the 200 seeds' 5,524,
+    a median of 8.199 × 10³⁷ erg/s and 538 in the old 0.3–3 × 10³⁹ under η, 5.742 × 10³⁶ and 35
+    under the hot flow; the fixture's 26, a median of 7.472 × 10³⁷ under η.
+  - _Checks of the law._ At EHT 2022 Paper V's rates for Sgr A*, 5.2 and 9.5 × 10⁻⁹ M☉/yr, it
+    gives 1.7629 and 4.7651 × 10³⁵ erg/s bolometric, 3.86 and 1.93 times below EHT's 6.8 and
+    9.2 × 10³⁵. Xie and Yuan's Eddington rate at the fixture's black hole is 6.0146 × 10²¹ kg/s
+    (0.095456 M☉/yr). A peak below the switch is lowered: a 1 M☉, 10 R☉ star at 10⁸ M☉ peaks at
+    4.2 × 10⁻³ Eddington rates, at 0.6494 of η's light; `peak_luminosity_watts` is a tail's light
+    at t_fb under either arm.
+  - _Deviations (leans, 2026-10-30)._ (1) The Ponti test is in the fast tier, not the slow one
+    the lane's brief named: its 200-seed sweep takes about 2 s in the test profile (pod, 8 vCPU),
+    as T30.b's own sweep does, so it runs in every gate and in the wasip1 suite. (2) It reads
+    `luminosity_at`'s total, the flares in, where the probe left them out; the counts are the
+    same. (3) It tests an instant, the epoch, against a mean over 60–90 years, as ruled. (4) _D1._
+    No extension pre-pin: `centre_luminosity`, blessed at 23, already pins the region the hold
+    moves (a Sun-like tail at five times, the fixture's tails and totals at fifteen instants), and
+    the hold leaves it byte-identical. (5) The hold's constant is `CENTRE_QUIESCENCE_VERSION`, as
+    the lane's brief named it, not the advice's `TAIL_EFFICIENCY_VERSION`. (6) The EHT check's
+    bracket, 1.9–4.0, holds the measured 1.93 and 3.86, which the advice rounds to "2–4 times";
+    EHT's §6 gives 6.8–9.8 × 10³⁵ erg/s where its abstract gives 6.8–9.2, and unpaired the ratio
+    spans 1.4–5.2 (science check). Against EHT's own efficiency, (1.3–3.0) × 10⁻³, the law's
+    6.0–8.9 × 10⁻⁴ is 1.5–5 times lower.
+  - _The fast suite._ The hold's six tests and the module's three new ones add 10.7 s of test time
+    (pod, 8 vCPU; the renamed closed-form test went from 1.8 s to 1.1 s), most of it the fixture
+    galaxy that each of nextest's processes builds; the slowest, the drawn tails' and Ponti's
+    sweeps, take 2.4 s each. The centre's, the members' and the rules' tests, under
+    `cargo nextest run -p hyperion-sim --lib` over `features::centre`, `features::members` and
+    `galaxy::rules`: 122 passed, 45.6 s.
+  - _Tests (as run)._ In `luminosity::tests`: `a_sun_like_tail_follows_its_closed_forms` (from
+    T30.b's `a_thousand_years_after_a_disruption_its_tail_gives_ponti_s_luminosity`, without the
+    bracket, under both arms: dark before t_fb, Eddington's share at it, half the star back, the
+    rate's t^(−5⁄3), the light's t^(−5⁄3) under η and `Ṁ^1.65` on the lowest range under the hot
+    flow, the research's six figures a tail),
+    `the_drawn_tails_a_thousand_years_on_are_pinned_as_they_stand`,
+    `the_hot_flow_s_efficiency_is_xie_and_yuan_s_fit_made_continuous` (the switches, the published
+    bounds within 1% and 3%, the 2.9% dip the printed bounds would leave, each range between its
+    switches, η above, continuity, non-decreasing over 10⁻¹²–10² Eddington rates on 140,001
+    points, EHT's check) and `a_tail_s_light_falls_from_its_peak_under_either_efficiency`;
+    `centre_luminosity_is_pinned` writes `centre_luminosity_entries`, the same bytes. In
+    `luminosity/centre_quiescence_hold.rs`: the tripwire,
+    `the_centre_s_quiescence_is_held_only_until_the_25_bump` (E6, with the doors that take no
+    galaxy on the version's arm); `the_hot_flow_moves_only_the_centre_s_luminosity_pinned` (D2
+    and C1 above; `CentreVictims::one`, `resolve`'s door, equal to the list's victim at every
+    index under the new arm); `the_hot_flow_s_law_beyond_the_golden_is_pinned` (a second digest,
+    `0x7fe1828ba0fad5a7`, of `radiative_efficiency` inside each range and above the switch and of
+    the 10 R☉ tail's peak and its light ten fallback times on, where the golden does not reach;
+    both pinned tests run in the wasip1 suite by their names);
+    `the_hot_flow_gives_the_same_seed_the_same_light_twice_and_in_any_order` (D4: a galaxy built
+    under every 25 hold equals the fixture given them, its victims and light to the bit, and
+    `assert_order_independent` over 119 instants); and
+    `at_milky_way_values_the_centre_is_within_ponti_s_limit_at_the_epoch_in_most_seeds`. In
+    `galaxy/rules.rs`, `each_hold_turns_on_at_its_version` covers the field.
+  - _D5._ The new arm adds three `powf` a tail on its path. Run by name on the pod before the
+    gate, the module's 14 tests and the rules' 2 pass on wasip1 under wasmtime 49.0.1 (the two
+    pinned tests in 2.2 s and 0.4 s), with both digests blessed natively on x86-64; the gate's
+    wasip1 suite runs them again.
+  - _Reviews._ The Rust, determinism, plan-conformance and science reviews' fixes are in: plain
+    code, not links, for the crate-private names in public docs (rustdoc's private links); the
+    units in the rates' names; `one` and the law beyond the golden pinned under the new arm; and
+    the science check's corrections, some of them to the advice (the outbursts' energy, the
+    debris's apocentres, where a peak falls below the switch, Ho's quote, the switch's place
+    against Maccarone's range and Xie and Yuan's two-phase flow). It could not reach Nowak et al.
+    2012's 3.6 × 10³³ erg/s (P09.T30.b's quiescence, unchanged here) at source. _For main (lean:
+    keep the ruled text):_ the brainstorm's "radiatively inefficient once the fallback falls below
+    a few thousandths of Eddington's rate" is the label of the regime, but at δ = 0.5 the law is
+    only 2–3 times below η at 10⁻³–3 × 10⁻⁵ Eddington rates ("the efficiency of ADAFs is not as
+    low as people sometimes imagine", Xie and Yuan 2012, §4.1), and 10 times below near 4 × 10⁻⁶.
+  - _For P12.T5.a._ The tails' bound is still `DisruptionTail::peak_luminosity_watts`, exact
+    under either arm; their duration still the horizon (`TAIL_LOOK_BACK_BINS`), though from 25 a
+    Sun-like tail is below the quiescence some 4 × 10⁴ yr on; their light curve
+    `DisruptionTail::luminosity_watts_at`. Plan 12's text is not changed here.
+  - _Gaps (recorded, not built; the advice's, as main ruled)._ (1) _The echoes' outbursts_: about
+    10³⁹ erg/s for a few to ten years, 10⁴⁷ erg or so each (the Bridge's fluence is about
+    10⁴⁸ n₃⁻¹ erg, Churazov et al. 2017, MNRAS 465, 45), a 5–10% duty cycle over the past
+    millennium (Ponti et al. 2015, MNRAS 453, 172, §8.4.3, after Ponti et al. 2013; Clavel et al.
+    2013; Terrier et al. 2018, A&A 612, A102), of unsettled cause: neither T30.a's
+    flares (at most 3.6 × 10³⁵ erg/s and 8,175 s) nor T30.b's tails; a candidate for a later centre
+    task. (2) _Partial disruptions' steeper tails_: t^(−9⁄4) when a core survives (Coughlin and
+    Nixon 2019, ApJL 883, L17), n ≃ −2.2 for about half of all disruptions (Guillochon and
+    Ramirez-Ruiz 2013, ApJ 767, 25); at β = 1 a γ = 4⁄3 Sun-like star is only partly disrupted
+    (Stone and Metzger 2016, §3), and 24% of the drawn victims are above 0.5 M☉. It needs a drawn
+    β, new draw words and a bump. (3) _An X-ray share that falls at very low rates_: Ho's
+    C_X = 15.8 is extrapolated below about 10⁻⁶ L_Edd and errs bright there; Sgr A*'s own is about
+    190–380 (EHT 2022's L_bol over Baganoff et al. 2003's and Nowak et al. 2012's L_X), and with
+    300 below 10⁻⁷ L_Edd the research probe's median at the epoch falls about elevenfold. A share
+    that falls with ṁ needs a sourced law and a ruling. Two assumptions are also unchecked at
+    source: that accretion follows the fallback in the thin-disc phase (≲25 yr), where the viscous
+    time at 2 r_t is of order 10 yr; and that debris returning after 10³–10⁵ yr, from apocentres of
+    0.16–3.4 pc (semi-major axes of 0.08–1.7 pc, where the advice took them for apocentres), does
+    so ballistically through Sgr A*'s gas.
+  - _For the 25 wiring (C2)._ Delete in its own checkpoint, blessed at 24:
+    `CENTRE_QUIESCENCE_VERSION`, `CentreQuiescenceRules` with `ConstantEfficiency`,
+    `GalaxyRules::centre_quiescence`, the `match` in `accreted_watts`, the tail's `rules` field,
+    the doors `new_with_rules` and `from_parts_with_rules` (folded into `new` and `from_parts`)
+    and the tripwire. `centre_luminosity` moves, its 33 values as above and no other golden; the
+    hold's tests become the version's (the digest, the 149 and the 33 stay; the held arm's pins,
+    the 1 of 200 among them, go).
+- **Deferred findings (2026-10-13 rule)**, from P12.T5.a.2 (main's ruling of 2026-10-30; plan 12's
+  Risks, "P12.T5.a.2's citations, checked at source"). Recorded and deferred, not built; nothing in
+  this plan changes with them.
+  - _The Type Ia template rises too fast_ (P09.T19.b; `catalogue_classes::supernova`, τ_m = 13 d).
+    - It peaks at 15.1 days. That is earlier than all 18 of Firth et al.'s (2015, MNRAS 446, 3895)
+      supernovae, whose rise is 18.98 ± 0.54 days (15.98–24.7). It is 1.4 days under Scalzo et
+      al.'s (2014, MNRAS 440, 1498, equation 6) bolometric rise of 16.5 ± 2 days. Contardo et al.
+      (2000) give 16–20 days, and Stritzinger et al. (2006) 19 days.
+    - Its peak is 0.74 of the heating rate at that time, where Arnett's rule takes α = 1
+      (Stritzinger et al.) or 1.2 (Scalzo et al.).
+    - Retuned to a 17–19 day rise with α ≈ 1, the peak becomes 1.18–1.31 × 10⁴³ erg/s, and plan
+      12's `TYPE_IA_PEAK` must follow it: its test holds the bound to the template.
+    - Design note 18 names no source for the templates, so this is a choice of this plan, not a
+      contradiction of the brainstorm. `LightCurve::of`'s "about 15 days in" is the template's
+      figure, not an observed one.
+    - If the templates feed recorded output by then, the retune rides a bump train.
+  - _Ho's 15.8 is applied outside its range_ (P09.T30.b's tails;
+    `features::centre::events::luminosity::BOLOMETRIC_CORRECTION`).
+    - Ho (2009, ApJ 699, 626, §3) gives 15.8 as the median for nuclei below a tenth of
+      Eddington, but the tails apply it up to the Eddington cap.
+    - As plan 12's X-ray bound it errs high, which is safe for reach. The tails' X-ray light near
+      the cap is overstated, though, since a more luminous nucleus puts a smaller share in X-rays
+      (Vasudevan and Fabian 2007; recalled, not read at source).
+    - For P09.T30.c, whose law replaces T30.b's. The three corrections to that file's docs that
+      plan 12's record lists, (c) to (e), ride with it.
+- **P09.T28.c as built (lane `p09-secular`, 2026-10-29, on 5bec9f1 at `GENERATOR_VERSION` 23;
+  decision-galaxy-25-train §1.7 and §2.2: pure, no hold).** No output moves: nothing calls the new
+  functions (P14.T29 wires them in plan 14's train), no golden is added or changed, and no tag or
+  stream is touched. Files: `galaxy/motion/tidal.rs` (new) and one `pub mod tidal;` line in
+  `galaxy/motion.rs`.
+  - _Signatures._ An inherent method in the child module,
+    `CentreMotion::tidal_radius_at_pericentre(&self, &KeplerOrbit, SolarMasses) -> Metres`, and
+    the one call for P14.T29, `motion::tidal::tidal_radius(&Galaxy, &EpochState, SolarMasses) -> Metres`:
+    in the Kepler regime with an orbit (`CentreMotion::kepler_orbit`), the radius at that orbit's
+    pericentre; otherwise (the straight regime, or a Kepler-regime state with no orbit, which is
+    every grid system of a galaxy without kinematic tables) plan 02's
+    `galaxy.potential().tidal_radius(m, &PointLy::from(record.epoch_position()))`, bit for bit.
+    It takes an `EpochState` (Provides names no signature): a grid record's is
+    `EpochState::of_grid_record`, a centre member's `of_centre_member`.
+  - _The form (lean, 2026-10-29; science check in this record)._ `r_t = (G m ÷ (ω_p² − Φ″(r_p)))^⅓`
+    at the Kepler pericentre `r_p` (`KeplerOrbit::pericentre`), with `ω_p = h ÷ r_p²` the orbit's
+    own angular speed there and Φ″ the centre's spherical potential's
+    (`CentreProfile::psi_curvature`: the black hole, the cluster and the galaxy's monopole, dark
+    halo included), which carries King's d ln M ÷ d ln r term. It is King's (1962) radius at
+    perigalacticon in its general form: about a point mass it is `r_p (m ÷ ((3 + e) M))^⅓`, and for
+    a circular orbit `ω² − Φ″ = 4Ω² − κ²`, the brainstorm's formula, so the rule and plan 02's
+    radius agree where the orbit is circular. The denominator is floored at 0.05 ω_p², plan 02's own
+    floor, which no orbit about the black hole reaches. μ excludes the dark halo (P09.T28.b.a) and
+    Φ″ includes it, some 10⁻³ of the mass inside the fixture's edge.
+  - _Figures (Milky Way fixture, a solar mass)._ A circular orbit at 0.01 ly keeps **2.6965 au**
+    (the plan's 2.7 au; M(<0.01 ly) = 4.300 × 10⁶ M☉, so King's term is under 10⁻⁴), and one at
+    3 ly **0.01240 ly**, where plan 02's radius at that position is also 0.01240 ly (about 0.01 ly,
+    the plan's); at 0.99 and 1.01 times the circular speed (e = 0.02) 0.01189 and 0.01237 ly. S2's
+    orbit keeps about 0.47 au (King's point-mass form, e = 0.8846).
+  - _Leans (2026-10-29)._ (1) An unbound Kepler-regime orbit takes the rule too: a flyby is stripped
+    at its one pericentre passage, before or after the epoch. (2) The call reads neither the
+    galaxy's rules nor the loss cone: the radius is the planets' whatever the drift hook draws
+    (`KEPLER_REGIME_VERSION`), and a system the loss cone carves out is not asked about. (3) The
+    plan's 2.7 au "for a semi-major axis of 0.01 ly" is the circular orbit's; an eccentric orbit of
+    that a keeps less, `a (1 − e) (m ÷ ((3 + e) M))^⅓`, so P14.T29's test ("nothing beyond 2.7 au")
+    holds for a circular one. (4) King's turning term makes the radius at pericentre up to 9%
+    smaller, `(3 ÷ (3 + e))^⅓`, than the brainstorm's point-mass radius `r_p (m ÷ 3M)^⅓` taken at
+    the same pericentre: for main and the brainstorm's owner, with (3).
+  - _Tolerances._ 2.7 ± 0.05 au and the point-mass radius to 10⁻⁴ at 0.01 ly; 0.008–0.015 ly and
+    within 10% of plan 02's radius at 3 ly; King's point-mass form to 10⁻¹²; the radius from the
+    orbit propagated ±1,000 yr to 10⁻⁹.
+  - _Science check (2026-10-29)._ The form, its two reductions and the figures re-derived: ok
+    (2.6965 au; S2's 0.4655 au, its pericentre 118.96 au). The citations were not re-checked at
+    source (no access to the journals from the pod): King 1962 for the `(3 + e)` form, and Webb et
+    al. 2013, §1, for the general form, which may credit Bertin and Varri (2008, ApJ 689, 1005); to
+    re-check before P14.T29 wires the rule. The floor's doc had its inequality's sign wrong
+    (`−Φ″ ≥ −G M(<r) ÷ r³`), fixed in the review's commit.
+  - _Tests (in `motion/tidal.rs`, fast, 1.2 s together):_
+    `a_circular_orbit_a_hundredth_of_a_light_year_out_keeps_2_7_au`,
+    `a_near_circular_orbit_at_3_ly_keeps_about_a_hundredth_of_a_light_year` (against plan 02's
+    radius to 10%), `about_a_point_mass_the_radius_is_king_s` (to 10⁻¹², bound and unbound),
+    `the_radius_is_the_same_at_every_time` (from the orbit propagated ±1,000 yr, to 10⁻⁹), and
+    `the_rule_follows_the_regime` (plan 02's radius to the bit outside the regime and with no
+    orbit, the pericentre rule inside, the same bits twice); and a doctest on each function.
+  - _For P14.T29._ Replace `SystemContext::from_stars`' `galaxy.potential().tidal_radius(..)` with
+    `motion::tidal::tidal_radius(galaxy, &EpochState::of_grid_record(galaxy, record), mass)` for a
+    grid record (`of_grid_record` panics for any other record in a galaxy with kinematic tables),
+    and take the smaller of it and the feature's radius for a feature member. It reads
+    `Galaxy::centre_motion`, which builds on first read (about 64 ms, once a galaxy). It moves
+    output only within the influence radius (7.19 ly at the fixture), which removes the README's
+    relaxation "no pericentre stripping within about 10 ly of the centre".
+- **P09.T28.d.a as built (lane `p09-secular`, 2026-10-29, on 5bec9f1 at `GENERATOR_VERSION` 23;
+  decision-galaxy-25-train §2.2: the rates pure, the term held).** No output moves: nothing calls
+  the rates or the step (the term is P09.T28.d.b's), `propagate` is unchanged and `kepler.golden`
+  with it, and no golden is added. Files: `galaxy/motion/secular.rs` (new) and one
+  `pub mod secular;` line in `galaxy/motion.rs`.
+  - _Signatures._ In `motion::secular`: `SecularTable` (`new(&CentreMotion)`), the eccentricity
+    table, a value built from the centre's motion and held by no `Galaxy` field (the held half adds
+    the carrier with `GalaxyRules`); `SecularRates` (`schwarzschild`, `mass_precession`, `apsidal`,
+    `mean_motion_correction`, each a `PerYear`); and `SecularOrbit` (`orbit`, `rates`, and the
+    secular step `propagate(Seconds) -> KeplerOrbit`), the orbit with its own rates, so that the
+    step cannot be given another orbit's (review). On `KeplerOrbit`, in the child module:
+    `schwarzschild_rate(GravitationalParameter) -> Option<PerYear>` (the black hole's μ, since the
+    orbit's own holds the stars inside r₀), `mass_precession_rate(&SecularTable) -> Option<PerYear>`
+    (the table, since no galaxy holds one until T28.d.b's carrier),
+    `secular_rates(&SecularTable) -> Option<SecularRates>` and
+    `secular(&SecularTable) -> Option<SecularOrbit>`; Provides named no arguments. Parabolic and
+    unbound orbits take `None`, and keep `propagate`.
+  - _The rates._ Schwarzschild: `3 G M_bh n ÷ (c² a (1 − e²))`, `6π G M_bh ÷ (c² a (1 − e²))` a
+    radial period, about the black hole alone. The stars: Lagrange's equations for the
+    orbit-averaged `ΔΦ = Φ + μ ÷ r` about T28.b.a's μ = G M(<r₀), whose partial derivatives reduce
+    to orbit averages of the stars' pull `g★ = G M★(<r) ÷ r²`, so that `ω̇★ = −n √(1 − e²) β★ ÷ μ`,
+    `β★ = (a² ÷ πe) ∫₀^π g★ (e − cos E) dE`, retrograde.
+  - _Deviation: the mean motion (lean, 2026-10-29)._ The plan turns the orbit "by two rates × dt".
+    That alone moves a circular orbit along its track by ω̇★ t r, though about μ = G M(<r₀) the
+    circular orbit is exact: 36–68 tenths of its tidal radius in 1,000 yr at 0.1–5 ly. So the step
+    also advances the mean anomaly at the rate Lagrange's equations give,
+    `Ṁ − n = n (2 (G M_bh − μ) + 2 α★ + (1 − e²) β★) ÷ μ` with
+    `α★ = (a² ÷ π) ∫₀^π g★ (1 − e cos E)² dE`, which cancels the precession on a circular orbit, and
+    takes the mean orbit's mean motion from the energy integral,
+    `1 ÷ ā = 1 ÷ a − 2 (ΔΦ(r₀) − ⟨ΔΦ⟩) ÷ μ` (the epoch's osculating a is not the mean one). The step
+    is the two-body orbit propagated by dt (1 + δn ÷ n), then turned about its angular momentum by
+    the two precession rates × dt. With the GR advance it changes no radial period, which is
+    gauge-dependent at order G M ÷ (c² a). The deviation has a cost the direct integration shows
+    (below): on the eccentric orbits at 1 and 5 ly the step as built is the worst of the four
+    variants (3,181 and 1,953, against 323 and 276 for the precession alone), the mean-motion
+    correction that keeps circular orbits exact costing a factor of 6–10 there; at 0.1 ly it is the
+    best by far (65 against 1,838).
+  - _The table's design point (lean, 2026-10-29)._ On (a, e), of the profile itself: `α★`, `β★` and
+    `⟨Γ★⟩ − Γ★(a)` (Γ★ the stars' potential), each over its scale G M★(<a) (or ÷ a), at 16 knots a
+    decade from 10⁻⁴ to 10⁴ ly and 32 eccentricities `(j + ½) ÷ 32` (mirrored across e = 0), read by
+    cubic Lagrange interpolation; each entry an 80-node quadrature in E over five panels graded
+    towards pericentre, of `M★(<r)` and Γ★ tabulated at 32 knots a decade from 10⁻⁷ to 10⁶ ly.
+    Values of a and r outside are clamped, and e above 63 ÷ 64 takes the last node's averages.
+    Measured: the orbit averages to 3.6 × 10⁻⁴ of a 2,048-node quadrature on the exact mass for a
+    under 100 ly, and 2.3 × 10⁻³ beyond (orbits of e above 0.93 from inside the 10 ly break to
+    beyond the 100 ly taper); a harmonic core's closed forms to 6 × 10⁻⁵ (4 × 10⁻⁴ for the
+    potential's average). At 8 knots a decade the break's orbits were read 4 × 10⁻³ off. The
+    alternative, the power law's averages at the slope read at a, agrees to 10⁻⁴ inside 3 ly at
+    Milky Way values (the cusp is a clean 1.3 there) and is 0.3–0.7% off at 5 ly, 3–14% at 8 ly and
+    up to 21% at 12 to 30 ly, across the break, which seeds with influence radii of 10–177 ly hold.
+    The table builds in about 54 ms (release, pod, 4 vCPU) and holds 106 kB: T28.d.b's carrier pays
+    it once.
+  - _Figures._ S2 (a = 0.0163 ly, e = 0.8846) advances **12.260′** an orbit about 4.297 × 10⁶ M☉
+    (GRAVITY 2020's 12.1′ is about their 4.261 × 10⁶ M☉), the plan's a = 0.0158 ly, e = 0.88
+    12.192′. A circular orbit's precession and mean-motion shift cancel to 10⁻⁴: at 0.1, 1 and 5 ly
+    ω̇★ is −1.53, −2.39 and −2.71 × 10⁻⁵ rad yr⁻¹.
+  - _The direct integration (the plan's test; a finding, pinned as it stands)._ The step, with the
+    stars' rates alone, and the two-body law, against a fourth-order Runge–Kutta integration in
+    `CentreMotion`'s M(<r) (steps of 2 × 10⁻³ local dynamical times, agreeing with steps of 10⁻³ to
+    10⁻³ of the bound), after ±1,000 yr from 0.1, 1 and 5 ly, on a circular orbit and four eccentric
+    ones (e 0.51–0.85), in tenths of the orbit's T28.c tidal radius for a solar mass (the bound is
+    1):
+
+    | From   | Step as built | No mean orbit | Precession alone | Two-body |
+    | ------ | ------------- | ------------- | ---------------- | -------- |
+    | 0.1 ly | 65.4          | 875           | 1,838            | 1,805    |
+    | 1 ly   | 3,181         | 1,990         | 323              | 380      |
+    | 5 ly   | 1,953         | 962           | 276              | 1.09     |
+
+    Circular orbits meet the bound under the step and the two-body law (under 0.001). No eccentric
+    orbit does under any of them. At 0.1 ly the span holds one to eight radial periods (P 131–838
+    yr) and the step beats the two-body law on every orbit, some thirtyfold at worst; at 1 and 5 ly
+    it holds a fraction of one (P 4,000–240,000 yr), the averages are not what a short arc feels,
+    and the two-body law is the closer on every eccentric orbit, the step putting a star 0.1–2.5 ly
+    from where it is. The step is first-order secular theory: its error is the short-period terms,
+    of order the variation of M(<r) over the orbit times a, which only an orbit inside some 0.03 ly
+    keeps under a tenth of its tidal radius. The two-body law's own miss (380 at 1 ly) is T28.b.a's
+    fixed μ = G M(<r₀) on an orbit whose enclosed mass changes by percents. The test
+    (`the_secular_step_beats_the_two_body_law_only_where_the_span_holds_whole_periods`, fast, 1.5 s
+    with the others) pins each worst to 10% and holds the order above.
+
+  - _For P09.T28.d.b (lean, 2026-10-29; QUESTION for main)._ The term as the plan has it would move
+    Kepler-regime records at 1–7 ly by up to a few light-years more than the two-body law, a move
+    larger than any T28.b.b's census found. Lean: apply the term only to a bound orbit whose radial
+    period is under the clock window's half-width H (1,000 yr; a ≲ 0.25 ly at Milky Way values), a
+    property of the system and so continuous in time, and keep the two-body law elsewhere; the
+    plan's bound itself needs the short-period terms (first-order variation of parameters along the
+    arc) or a propagator in the spherical potential, a task of its own.
+  - _Tests (in `motion/secular.rs`, fast):_ `an_s2_like_orbit_advances_12_arcminutes_an_orbit`,
+    `the_table_holds_a_harmonic_core_s_closed_forms`,
+    `the_table_holds_the_profile_s_orbit_averages`, `a_circular_orbit_keeps_its_two_body_motion`,
+    `unbound_orbits_take_neither_rate_and_the_step_repeats_to_the_bit` (the table's entries the same
+    bits twice, dt = 0 the orbit itself, the energy and the angular momentum's length kept) and
+    `the_secular_step_beats_the_two_body_law_only_where_the_span_holds_whole_periods`; doctests on
+    `SecularTable` and `SecularOrbit::propagate` (S2 back at apocentre a period on, turned some
+    12′). T28.a's `kepler.golden` is unchanged (`golden_diff.py`: nothing to reconcile).
+  - _Tolerances._ 11.8–12.6′ for both S2-like orbits and the closed form to 10⁻⁹; the harmonic
+    core's averages to 10⁻⁴ (10⁻³ for the potential's) and its rate to 10⁻⁴; the profile's averages
+    to 5 × 10⁻⁴ inside 100 ly and 3 × 10⁻³ beyond; a circular orbit's precession and mean-motion
+    shift cancelling to 10⁻⁴ and its step within 10⁻⁶ r of the two-body orbit; the integration's
+    worsts pinned to 10%.
+  - _Science check (2026-10-29)._ Re-derived and ok: the Schwarzschild rate and S2's 12.260′ and
+    12.192′; Lagrange's equations from Murray and Dermott's ϖ and ε forms (`ω̇ = ϖ̇`,
+    `Ṁ − n = ε̇ − ϖ̇` in the plane); the two partial derivatives, the point masses adding nothing to
+    the e-derivative; the small-e limit `Ω − κ` (a numerical ratio of 1.00004); the harmonic core's
+    closed forms; and the mean orbit's 1 ÷ ā, which is Lagrange's first-order short-period δa.
+    Against the exact radial period and apsidal angle of a black hole and a harmonic core, ω̇★ errs
+    at second order (7.8 × 10⁻⁴ at a stellar mass of 10⁻³ of the black hole's) and the mean motion
+    with the mean orbit to 2 × 10⁻⁷, against 5 × 10⁻⁴ to 10⁻³ without it. The short-arc conclusion
+    holds: about μ = G M(<r₀) the two-body law feels no perturbing force at the epoch, so its error
+    grows as t³ and the step's as t. Fixed in the review's commit: the stars' relativistic term is
+    about M★(<a) ÷ M_bh of the black hole's, not "under 10⁻¹⁰". Not re-checked at source (no access
+    from the pod): Weinberg 1972 §8.6, Murray and Dermott §6.8, Merritt 2013 §4.4.1 (which the plan
+    marks "to re-check"), Binney and Tremaine §3.2.3, and GRAVITY 2020's printed 12.1′ (their
+    elements give 12.156′).
+- **P09.T28.d.b as built (lane `p09-t28db`, 2026-10-30, on 90e53c0 at `GENERATOR_VERSION` 23).**
+  No output moves at 23: nothing below 25 builds the centre's potential, and no golden changes.
+  - _Names._ `motion::spherical::{CentrePotential, SphericalOrbit}`;
+    `Trajectory::in_potential(&CentreMotion, &CentrePotential, EpochState)`,
+    `Trajectory::exact_orbit()` and `Trajectory::heap_bytes()`; `Trajectory` is no longer `Copy`
+    (its exact orbit is boxed, some 640 bytes). `Galaxy::centre_potential()` (crate-internal,
+    lazy, outside equality and `Debug`).
+  - _The hold._ `GalaxyRules::kepler_secular` (`KeplerSecularRules::{TwoBody, Spherical}`),
+    `KEPLER_SECULAR_VERSION` = 25; one call site, `Trajectory::new`, which `position_velocity_at`
+    and now `CentreCellOrbits::new` read. The bump deletes the field, its `match` and the tripwire
+    `the_kepler_secular_term_is_held_only_until_the_25_bump`.
+  - _Deviations (lean, 2026-10-30)._
+    - The anomaly is logarithmic, `ln r = ū − Δ cos η`, not Hénon's: Hénon's missed the bound by
+      16 and 10⁵ tenths on wide orbits (unbound about μ, as most of the grid's are).
+    - The Schwarzschild advance is `6π (G M_bh ÷ (c L))²` a radial period, on the exact orbit's L,
+      turned in proportion to the Newtonian azimuth, not `schwarzschild_rate × t` (none for an
+      orbit unbound about μ, too large by up to μ ÷ G M_bh for a bound one, and uniform in time).
+    - The velocity is the Newtonian one turned with the position, as T28.d.a's step, without `ω̇ r`.
+    - The near-circular threshold is Δ < 10⁻⁵, measured; the harmonic core's closed forms are
+      tested in its two limits, with the first-order advance between them.
+  - _Re-pinned by name (decision §1.3)._ T28.b.b's D2 digest, `0xce83_b24f_e65c_7554`. T28.d.a's
+    pinned-miss test is replaced by `the_exact_orbit_meets_the_plan_s_bound_against_a_direct_integration`.
+  - _For P09.T29 and P14.T29._ Under the exact law the source's shells are the exact orbit's
+    turning points; the pads, the loss-cone verdict and T28.c's radius stay on the Kepler orbit,
+    which bounds the exact one but for the dark halo's share inward (re-checked by the source
+    against a scan and by C1).
+- **P09.T40.a, the features' part, as built (lane `p09-t40`, 2026-10-30, on 1e55cff at
+  `GENERATOR_VERSION` 23 and `PROTOCOL_VERSION` 3; no output moves).** Main's rulings of
+  2026-10-30 narrow it to the features' part (`decision-r06-t16a-scope.md`): `CentreMemberSource`,
+  `CatalogueClassSource`, `CentreOrbitCache`, `NestedCellCache` and `CatalogueClassCellCache` wait
+  on P09.T37, and with them "P09.T29 as built"'s _For P09.T40.a_ (`check_index_headroom`, the
+  centre model's bytes in `GalaxyCache`). No server golden, wire form or fixture moves;
+  `golden_diff.py` reports nothing to reconcile, and `just gen-protocol` changes three bindings'
+  comments.
+  - _Names._ `compute::SharedFeatureCellCache` is a `SharedByteLru` over `(GalaxyKey, FeatureCell)`
+    of `FeatureCellContents`, and `compute::SharedClusterModelCache` one over
+    `(GalaxyKey, FeatureId)` of `FeatureInterior` (the cluster model with its class table and nested
+    grid). They stand for Provides' `FeatureCellCache` and `ClusterModelCache`: the sim's caller-supplied trait
+    is already `FeatureCellCache`, and the server's caches are `Shared*`. Each lends the sim's trait
+    through a handle for one galaxy (`FeatureCellHandle`, `ClusterModelHandle`) that asserts the
+    seed; `SharedClusterModelCache::kept` gives one job a `KeptInteriors` over it, so a range
+    query's census, hits and rows build each interior at most once whatever the budget. A feature
+    without members is not stored, and a galaxy without its kinematic tables never reads the cache
+    (its key is its full-potential twin's). Added: `--feature-cache` (`HYPERION_FEATURE_CACHE_MB`,
+    16 MiB) and `--cluster-model-cache` (`HYPERION_CLUSTER_MODEL_CACHE_MB`, 64 MiB);
+    `ServerStats::{feature_cells, cluster_models}`; in the sim, `FeatureCellContents::heap_bytes`,
+    `MemberClassTable::heap_bytes` and `FeatureInterior::heap_bytes`, which the caches charge (a
+    record is 168 bytes, a cell near the Sun about 38 kB; an interior 27 kB on average over the 477
+    within 3,000 ly of the Sun-like point; 2026-10-30). The system and brief caches resolve a
+    feature member through the interior cache (`with_interiors`), plan 07's deferred finding (1).
+  - _The switch (lean, 2026-10-30)._ A version hold, `config::FEATURE_MEMBERS_FROM` = 26, with
+    `FeatureMembers::{Held, Served}` (default `of_version(GENERATOR_VERSION)`), in the pattern of
+    the surface's serve gate `GENERATED_SURFACES_FROM`, rather than a flag: it opens with the bump
+    that carries P09.T2.c without a lane having to remember it, and its tripwire,
+    `the_feature_members_gate_holds_until_its_version`, fails at 26, so that bump opens it with
+    P09.T2.c and R06.T16.a or raises it to P09.T2.c's train. No option or variable serves members,
+    so no running server counts them twice; tests serve them through
+    `ServerConfigBuilder::feature_members`. Held, the handler registers no source, no row carries
+    `origin` or `member_class`, and neither the sky nor `extinction` takes any modifier: the replies
+    are as before, bit for bit (`behind_the_gate_a_query_inside_a_globular_answers_as_the_grid`
+    reads the frame for the keys).
+  - _Served._ The `SystemsInRange` handler registers `FeatureMemberSource` over both caches, in
+    both modes. Every row carries `origin`, grid rows included (`grid`,
+    `feature_member { feature }`); a centre member or a later origin panics, since no registered source places one. A
+    member's row carries `member_class` (`cluster { … }`; `listed` is never placed, as
+    `FeatureLevelList::member` is `None`) and its own velocity, its cluster's and its own: both its
+    member record's, resolved again through the job's kept interiors (`convert::RowOrigins::Sent`),
+    since a hit carries its record alone. `supernova` stays absent.
+  - _Feature gas._ The server passed `NoModifiers` in the sky's job context, and an empty list in
+    the `extinction` request's lines, which plan 07's P07.T10.c names as a `NoModifiers` site.
+    Served, `SkyTablesService::with_features` lends every table the shared feature cells and each
+    job marches `FeatureGas` at its observer's time (`SkyTables::gas`, `SkyGas`; `march_context`
+    takes the modifiers); `extinction`'s lines take `FeatureGas` at the request's time
+    (`compute::LineGas`), keyed by that time, a smooth line keeping its key. The extinction maps
+    take none: `render_extinction_rows` integrates the smooth field. The caps' rays read no
+    modifiers (before this task too), so served, the census's sightlines see the features' gas and
+    the caps' do not: R06.T16.a's to reconcile. Each served segment looks its feature cells up
+    through the shared cache's one lock from every worker; unmeasured. _(The sky's gas: superseded
+    by "P09.T40.a, the sky's features' gas".)_
+  - _Catalogue classes._ `convert::features::catalogue_class(ClassId) -> Option<CatalogueClassWire>`
+    matches the registry's constants and is `None` past plan 09's nine, since `ClassId` is a struct;
+    `every_registered_class_has_a_distinct_wire_string` walks `ALL_CLASSES` in value order. Its
+    first caller is P09.T33.a's origin. "P09.T39 as built"'s "by `ClassId::value()`" gives way to
+    the match. The docs of `PROTOCOL_VERSION`, `features.rs` and the three enums name them growing;
+    `TargetExtinction::NoSuchSystem` and `ErrorCode::UnknownSystem` say a system that resolves but
+    cannot be placed is answered so too (plan 07's deferred finding (2)).
+  - _Costs (served; test profile, the sim at opt-level 2; pod; 2026-10-30)._ A cold 50 ly query at
+    the Sun-like point builds 115 interiors, one for every feature whose reach (a nursery's up to
+    1,750 ly) touches the padded sphere, in 10.1 s, about 88 ms each, against 22 ms for the grid
+    alone; warm, 28 ms. A 1 ly query in the core of the globular nearest the Sun (43 members, 68
+    interiors) costs some 12 s cold, nearly all P09.T23's member draws. A finding against the
+    brainstorm's 5 ms cold target, not a blocker (2026-10-13 rule). Levers for the lane that opens
+    the gate: test a feature's nested grid against the sphere before building its interior, or warm
+    the interiors at open.
+  - _Not tested._ A served answer of more than `BRIEF_CHUNK_ROWS` rows (the chunked conversion
+    takes the same `RowOrigins`), too dear in a globular's core in a test build; and observed
+    members' lines, which the sim's `Drift::of_record` builds through `NoInteriorCache`
+    (`of_record_in` is crate-private), so each observed member row builds its interior again.
+  - _Tests._ `compute::features`: `a_feature_cell_is_the_catalogue_s_and_the_second_ask_is_a_hit`,
+    `an_interior_is_the_sim_s_charged_and_lent_again`, `eviction_never_changes_a_range_query_s_members`
+    (hits and census, cold and warm, keeping nothing, evicting and keeping all, and kept for a job);
+    `convert::features`: the class strings, the origins, a member class; `compute::sky`'s and
+    `compute::sky_tables`' feature gas at a nursery's two times, through the tables and through the
+    service, and `the_sky_takes_the_features_gas_only_once_the_gate_serves_them`;
+    `compute::sightlines::a_line_through_the_features_gas_is_the_sim_s_at_its_own_time`; the gate's
+    tripwire and `the_feature_members_gate_opens_at_its_version`; over the WebSocket,
+    `tests/feature_members.rs`: served, a query inside a globular returns its members with their
+    origin, class and velocity, the sim's own rows at 0 and 1,000 yr, the same warm, and with
+    briefs and observed; near the Sun every row says `grid`; held, no member and no key.
+- **P09.T40.b, records (lane `p09-t40`, 2026-10-30, at 23 and 3; no existing output moves).**
+  - Handlers: `requests/features.rs`; checks and answers in `convert/feature_answers.rs`. The four
+    kinds are served at 23, whatever P09.T40.a's members gate holds.
+  - New wire: `ErrorCode::UnknownFeature` (growing, no bump), naming `feature`, for a feature word
+    naming nothing at the time; a word that is no feature's is `bad_request` naming `feature`.
+    `FeatureStructure::Association(AssociationStructure)`, a nursery with no model and no gas left;
+    one with gas is `cloud`, its gas Plummer ball.
+  - New limits: `MAX_FEATURE_CELLS` = 512 gives `over_cell_budget` to the catalogue kinds (the
+    centre still answered); `GALAXY_FEATURES_CACHE_BYTES` = 1 MiB.
+  - New server items: `compute::{GalaxyFeaturesService, MapGlobulars, MapGlobular}` (the map's
+    globulars per galaxy, a bulk job), `expected_members_of`, `counted_members`,
+    `ServerStats::galaxy_features`.
+  - The centre: ID `f000000000000000`, designation `CENTRE`, extent 128 ly, null age.
+    `black_hole_state` is refused outside the clock window and is `internal` if the centre's
+    events fail to build.
+  - Left undone: a detail of a feature that is none at the time is untested; no job checks its
+    cancel token between features. Bright shells stay `not_generated` until P09.T37.
+  - Golden: `tests/golden/features.golden` pins the four answers' frames.
+- **P09.T40.a, the served query's speed (lane `perf-range-query`, 2026-10-30, at 23 and 3; no
+  output moves).**
+  - `FeatureInteriorCache::grid_reach` (provided; never below the lent interior's grid reach,
+    `None` only where it lends none): `FeatureMemberSource` builds an interior only where that
+    bound meets the sphere, and draws only the candidates within the radius padded at
+    `member_speed_bound` (`FeatureInterior::members_in_cell_near`). New:
+    `FeatureInterior::grid_reach_bound`, `ClusterParameters::of_record`.
+  - `SharedClusterModelCache` holds a feature by its bound until its interior is built; its
+    counters count both. `FeatureInterior::of` asserts the speed bound in release too.
+    `ClassProfile` tabulates its distribution when first read.
+  - Bench: `hyperion-server/benches/feature_range_query.rs`. Left: the grid and the feature cells
+    keep the Sun-like query over 5 ms cold, and remnant draws a globular core's (the lane's
+    findings).
+- **P09.T40.a, the served query's speed, second pass (lane `perf-range-query-2`, 2026-10-30; no
+  output moves).**
+  - New: `FeatureCatalogue::cell_through(galaxy, cell, last)`, `FeatureCellContents::holds`, and
+    `FeatureCellCache::contents_through` (provided; lends the whole cell by default).
+    `FeatureCatalogue::near` reads a cell only through the last process whose farthest reach
+    (crate-private `farthest_reach`) can touch the sphere. The server's cell cache holds such parts.
+    `counts()` is 0 for a process a part does not hold.
+  - A cell's disc proposals read shared column bounds (`Fields::component_bounds_of`).
+    `MemberClassTable::grid_width` reads only each doubling's new cells, and skips a level whose
+    ceiling is under the target; `peak_candidates` is unchanged in value. A change to the width
+    rule or the profiles keeps `level_ceiling` a ceiling
+    (`the_width_search_is_the_whole_grids_search_bit_for_bit` and its slow twin).
+- **P09.T40.a, the served query's cells in parallel (lane `perf-range-cells`, 2026-10-31; no
+  output moves).**
+  - Sim: `range_query` is `RangePlan::new(galaxy, sources, query).run(galaxy, cache, sources)`;
+    `RangePlan::{cells, with_sources, census, query}`. `FeatureCatalogue::cells_near` lists the
+    cells `near` reads, each with its `last`. `FeatureMemberSource::{feature_cells, read_ahead}`.
+  - Server: `systems_in_range` runs through `compute::served_range_query` (`compute/range.rs`, not
+    `compute/systems.rs`), which takes a `RangeCaches` and a `ServedQuery`; `AppState.cells` is an
+    `Arc`. Its cell jobs are queued by the request's task, never by a job (the pool's FIFO would
+    stall).
+  - Second pass: `RangePlan::{walk_cells, source_hits, finish}` with `WalkedCells` and
+    `SourceHits` (`query/parts.rs`); `run` is `finish` of no part. `finish` takes a part's cell
+    only if the part walked its layer with the plan's own sphere. The grid's jobs walk as they
+    generate (`SharedCellCache::walk_generated`, in place of `generate_all`); a sources job
+    (census and source hits) follows the feature jobs. A cold finish asks the cell cache for no
+    cell, so its counters read no lookup.
+- **P09.T41.a, records (lane `p09-t41`, 2026-10-30, at 23 and 3; client only, no output moves).**
+  - The guide keeps its one Greek cross for every kind, the kind named by the label (`OC GPF F207`),
+    in place of the task text's "a symbol per kind"; it gains the cross's proportions, the label's
+    and a superbubble's form, and the legend's `FEATURE` and `TRUE RADIUS`.
+  - Spatial view: `SymbolShape` gains `greek-cross`; `FeatureMark` (a `PointMark` with `radius`) and
+    `ShellMark` (centre, radius, label; its own type, since a `SphereMark` is about the view
+    centre) ride `SpatialScene.features` and `.shells`. A feature is placed, picked and labelled
+    with the points; circles at true radius are drawn first.
+  - Chart: `useFeaturesInRange` asks every kind beside the range query; `LocalChartState` gains
+    `features` (only an answer for the chart's own centre, radius and time), `featureState`,
+    `featureFault`, `selectedFeature`, `selectFeature`, `selectMark` and `retryFeatures`. A mark's ID
+    is `feature:<id>` (`featureMarkId`, `selectionOfMark`), since a feature's word is also a member's.
+  - Model and adapter: `ChartFeature` and `ChartFeatures` in `lib/galaxy/model.ts`, built by
+    `lib/galaxy/featureWire.ts`; words in `lib/galaxy/featureWords.ts`; fixtures cut from the
+    server's `features.golden` in `test/featureFixtures.ts`.
+  - Not drawn: a remnant's shell on the chart, since a range row carries no explosion site; the
+    map's bright shells carry one (P09.T41.b).
+- **P09.T41.b, records (lane `p09-t41`, 2026-10-30, at 23 and 3; client only).**
+  - `useGalaxyFeatures` (the page's one `galaxy_features` request, at the epoch) and
+    `toMapFeatureLayers` give `MapFeatureLayer`s (`MapFeature`, `MapShell` in `lib/galaxy/model.ts`);
+    `placeMapFeatures` (`lib/galaxy/mapFeatures.ts`) places them per view, pure; `MapFeatureOverlay`
+    draws them over each picture; `MapFeatureToggles` (`GC`, `CENTRE`, `SNR`) stands in the face-on
+    view's words, through `GalaxyMapView`'s new `remPx`, `featureLayers`, `featureKinds` and
+    `featureControls` props; the toggles, each beside its sample, are the overlay's legend.
+  - "Pending" is the request's own state, said on the page's line for the views' wait after the
+    link's state and a stale view's `PENDING`, with a failure's `RETRY`; a shown kind the server
+    does not generate reads `SNR: NOT YET MODELLED` there.
+  - `mapLayout`'s face-on words gain `FEATURES_ROW_REM` = 2.25 rem, estimated, not measured: plan 07's
+    hidden runs should re-measure it (the stacked overlay's room at 1920 × 1080 now has 20 px).
+  - Not drawn: a globular beyond the edge-on picture's ±32,768 ly; nothing is pegged.
+- **P09.T41.c, records (lane `p09-t41`, 2026-10-30, at 23 and 3; client only).**
+  - `ChartSystem` gains `origin: SystemOrigin` (`not_sent`, `unknown` and the four wire arms),
+    `memberClass: MemberClass | null` and `supernova: SupernovaState | null`, built by
+    `toSystemOrigin`, `toMemberClass` and `toSupernovaState` (`lib/galaxy/featureWire.ts`) inside
+    `toChartSystem`; unknown values are found by `Object.hasOwn` against the known tags and classes.
+  - The panel shows one of two lists, `SYSTEMS` or `FEATURES` (`FeatureList`), one tab stop; a feature
+    selected shows `FeatureReadout`, with `useFeatureDetail` (`STRUCTURE`) and, for the centre,
+    `useBlackHoleState` (`BLACK HOLE`: mass, total 2–10 keV luminosity, disruptions). That is
+    P09.T42's `BLACK HOLE` readout's half, mass and luminosity at the chart's time; T42 keeps the
+    fine radius steps and the distance units.
+  - `OriginReadings` adds `ORIGIN`, `MEMBER CLASS` and the supernova rows to the system readout,
+    `SystemReadout` taking the chart's `features`. They are in the `GALAXY` readout only: the
+    `SYSTEM` display's host readout, which T44 also names, gets none, since `system_summary` carries
+    no supernova state.
+  - The selection is the operator's (`LocalChartState.selection`): while a new chart's features are
+    awaited the selected feature is read, stale, from the answer before (`selectedFeatureStale`).
+  - Leans (2026-10-30): a grid system's `ORIGIN` is its population alone until P08.T15.a sends a
+    placement; an absent origin reads `NOT YET MODELLED`; a member of a feature the chart lacks reads
+    `FEATURE` and its ID; the server's zero `expected_members` (no cluster model) reads Missing; the
+    slow hosts' accreting white dwarfs read `SLOW ACCRETING WD`; supernova ages are in `kyr`.
+  - Merged over the client's growing enums (2026-10-30): a member class's `band` is a `ChartLayer`
+    through `wire.ts`'s `toChartLayer`, and a grid origin's unknown population reads Missing.
+    A class whose band's layer is unknown reads that letter Missing: `LIVING · — · FIRST · SINGLE`.
+- **P09.T33.a as built (lane `p09-classes`, 2026-10-29, at `GENERATOR_VERSION` 23, no output
+  moves).** The first production class, registered: `ProductionClasses` has the
+  `CORE_COLLAPSE` arm and plan 03's `placement::resolve` hands every `111` ID to the class grid
+  (P09.T32's point (a)), so a core-collapse entry's ID resolves to its record. A placed class whose process is not
+  built yet still answers `KindNotGenerated` through plan 03 (`system_of`; the grid's own
+  `resolve` answers `NoSuchSystem`, as P09.T32 built it), since its IDs will name systems once
+  its task registers it with no bump; a free class value, the tidal-disruption victims, a
+  misaligned cell and every candidate the class does not keep answer `NoSuchSystem`
+  (determinism review). Nothing the grid places
+  moves (`RECENT_DEATH_CLAIM` stays `None`, P09.T35) and no existing golden pinned a `111` answer,
+  so there is no bump and no `GalaxyRules` hold (decision-bump-plan-after-22, §3). Files:
+  `catalogue_classes/core_collapse.rs` (the process, its candidate and entry) with
+  `core_collapse/tests.rs`; `catalogue_classes/system.rs` (`CatalogueSystem`, `CatalogueMotion`,
+  `system_of`, `system_of_record`); `grid.rs` (the trait's `system`, the arm, `candidate_count`
+  `pub(crate)` for the tests' census); `ids.rs` (`CatalogueCellKey::position_from_words`, T32's
+  deferred "no shared position draw"); `ages.rs` (`AgeDistribution::max_pdf_between`);
+  `placement/record.rs` (`SystemOrigin::CatalogueSystem(ClassId)`) and every match on the origin;
+  `supernova.rs` (v_fast, below); `rng/tags.rs` (five `System` tags under `class.core_collapse.`:
+  `site`, `mass`, `metallicity`, `death`, `velocity`, appended after `class.cell` at the end of
+  `domain_tags!`, and the registry's lint attribute, below); the
+  server's system cache; `tests/source_horizon.rs` (the class's row, P12.T0's rule).
+  - _Signatures_ (what P09.T43, T36.a, T37 and P11.T8 consume). In `catalogue_classes::core_collapse`:
+    `CoreCollapseProcess::new(&Galaxy)`, `components() -> &[YoungComponent]` (`id`, `share`,
+    `deaths_per_system`), `interval() -> &SupernovaInterval`; `CoreCollapseEntry` (`record`,
+    `component`, `composition`, `site`, `motion`, `marks`, `supernova`, `stars(&Galaxy)`);
+    `RECENT_DEATH_AGES: Years` (`YOUNG_AGE_LIMIT`, 100 Myr). Re-exported from `catalogue_classes`:
+    `CatalogueMotion` (`broken`, `straight`, `point`, `at`, `velocity_at`, `position_at`),
+    `CatalogueSystem` (`new`, `with_stars`, `record`, `motion`, `position_at`, `star_model`,
+    `stars`), `system_of(&Galaxy, CatalogueSystemId)`, which returns
+    `Result<CatalogueSystem, ResolveSystemError>`, and
+    `system_of_record(&Galaxy, &SystemRecord) -> CatalogueSystem`. Also
+    `ClassProcess::system(&self, &Galaxy, &CatalogueMember<Self::Entry>) -> CatalogueSystem`;
+    `CatalogueCellKey::position_from_words([u64; 3]) -> GalacticPosition`;
+    `AgeDistribution::max_pdf_between(Years, Years) -> f64`;
+    `TraceMotionError::CatalogueMotionNotTraced(SystemId)`.
+  - _The process_ (module documentation). Sites follow the young field's layer-E density: every
+    component with layer-E systems younger than `RECENT_DEATH_AGES` (100 Myr), at 23 the young thin
+    disc and the nuclear disc's two components; the old thin disc's youngest sub-disc starts at
+    100 Myr. A candidate draws its site in its cell, thinned on the envelope there with one mark
+    that also picks its component (plan 03's pick); its band-E mass; its [Fe/H] from its
+    component's law at the site, read at age zero (both young laws are flat in age); its primary's
+    draws at attempt 0 and their exact `lifetime`; T uniform over the field's thinning interval
+    (word 0 of `class.core_collapse.death`); its age at the epoch, lifetime − T; then it is thinned
+    on its component's age density at that age against the component's largest (word 1); then its
+    velocity, plan 08's `draw_on` of its component's law at the site (rule 6; zero without
+    kinematic tables, as `epoch_velocity`). The test is `death_in_interval` on its primary's marks,
+    `DeathMarks::of` its single-star `SystemStars` (companions are no members) at the site with that
+    velocity, and `claimed_window` in `Surroundings::Field`. The entry has one member, moving at the
+    velocity until T and at it plus the natal kick from T (`CatalogueMotion::broken`); its record's
+    epoch position is that line's at the epoch, its stars `generate_with` at its composition,
+    `MultiplicityContext::Free`.
+  - _Deviations from the task text, each a lean (2026-10-29)._ (1) **No redraw until a core
+    collapse.** "Builds its `SystemStars` … with `StarDraws::for_attempt` until the death kind is a
+    core collapse (bounded at 64 attempts)" would keep a candidate whose first draws die another
+    way and so over-produce entries wherever another death is likely. Under MM20 (their Table 1)
+    complete fallback is certain from an 8 M☉ carbon–oxygen core, some 27 M☉ initial at constant
+    mass (Hurley, Pols and Tout 2000, eqs. 66 and 75); near solar metallicity plan 06's tracks hold
+    the core at 6.0–8.1 M☉ over 23–56 M☉ (P06.T18's Wolf–Rayet plateau), where it is likely but
+    not certain. So redrawing would turn a chance of a shell of perhaps a sixth to a third into
+    near-certainty, and where fallback is certain all 64 attempts would fail; the mass's acceptance
+    would have to carry P(core collapse | m), which no table holds. The class thins instead: a death without a shell has no marks and is dropped, exactly as the grid
+    side's claim reads the same record (in the sample cells, 73 of 356 kept candidates had none).
+    The origin carries no attempt. (2) **A death rate per component.** The envelope's "largest
+    death rate per system" is each component's own: the nuclear disc's (a twentieth of its stars
+    over its last gigayear) is 1/201 of the young disc's, and against the young disc's the four
+    cells at the centre drew 30 million candidates (245 s) for 97 entries; with each component's
+    own, 150,549 (4.5 s). The envelope is Σ share × the component's `bound` over the cell × its
+    deaths per system over the interval, and the site's mark picks against those terms. (3) **The
+    rate is read at the drawn age**, lifetime − T, after T is drawn, not "at that mass" before it,
+    so the thinning is exact where the age density or a later (1 − φ(a)) varies with age. (4)
+    **The young field includes the nuclear disc's young tail**: the grid places it and P09.T35's
+    claim takes every layer-E record, so the catalogue must hold its deaths too (66 of 102 entries
+    of four central cells in the probe were its). The field holds no nuclear-cluster system: plan
+    02's two nuclear-disc components are the nuclear stellar disc's main and inner parts (Sormani
+    et al. 2022; ruling 143.1), and the nuclear cluster is a budget of its own (Design note 5), so
+    T36.b's centre entries add no double count and T36.b subtracts nothing (decision-galaxy-25-train
+    §3's consumes check). (5) **v_fast counts the progenitor** (below).
+  - _`ClassProcess::system` (rule 9, added)._ "Deciding what a catalogue system is" needs every
+    class's member as a record, a motion and its stars, and `resolve`'s `MemberVisitor` is generic
+    over any class, so the trait gains a required method,
+    `system(&Galaxy, &CatalogueMember<Entry>) -> CatalogueSystem` (P09.T32's toys implement it).
+    `CatalogueSystem` holds the record, a
+    `CatalogueMotion` (two lines meeting at a break; `straight` for one) and the composition and
+    multiplicity context of its stars, `None` for a class whose members the stellar stage does not
+    model (`star_model()`). `system_of(&Galaxy, CatalogueSystemId)` resolves one through
+    `ProductionClasses`; `CatalogueMotion::position_at` takes the time from its break as one exact
+    clock span, rounded once (determinism review). A catalogue system's existence and epoch
+    position read the galaxy's kinematic tables (a progenitor rests without them, as every grid
+    record does), which the server always builds.
+  - _What a catalogue system is, match by match._ `SystemOrigin::CatalogueSystem(ClassId)`
+    (8 bytes still): `from_parts` asserts an ID of its class; `layer()` the band of its primary's
+    initial mass (P09.T37's "counts in the layer its initial mass gives it"); `component()` `None`;
+    the primary read at attempt 0 (`record_attempt`, `MemberRecord::attempt`); the loss cone
+    `Clear` (it follows its class's line); `query::position_at` its class's motion;
+    `query::epoch_velocity` its line's velocity at the epoch (the server's scene and place read
+    it); `observe::stars_of`, `BriefModel::of_record`, the planetary context and the server's
+    system cache its class's stars (`KindNotGenerated` for a class without), the last two through
+    one exhaustive match on the ID's kind; lensing's mass its class's stars; `from_parts` also
+    asserts its primary is of 0.08–150 M☉, so that `layer()` cannot fail; `Drift::of_record` refuses it with a new `TraceMotionError::CatalogueMotionNotTraced`,
+    since its line breaks at the explosion (the server maps it to `unknown_system`, as the centre's
+    members); the sky census skips it (no class is a census source before P09.T37).
+  - _v_fast counts the progenitor._ `DeathMarks::of` took v_fast as the remnant's speed after T,
+    |v + kick|. A kick against the motion leaves the remnant slower than its progenitor, which
+    then outruns `LIFETIME_REACH` before T: over the field's thinning interval (3.43 Myr at the
+    fixture, its cap plus L + 2H) a progenitor above about 360 km/s does, as the nuclear disc's
+    can. v_fast is now max(|v|, |v + kick|), the
+    brainstorm's "fastest member's speed" over the entry's lifetime; nothing calls it in production
+    before P09.T35, so no output moves. T17's marks test asserts the new rule and a regression case
+    (v = −0.9 × kick). This supersedes "P09.T17 as built"'s design point (a), |v + kick|;
+    `of_type_ia`'s bound, |v| + the survivor's speed, is unchanged.
+  - _The registry's const assertion._ With the five tags the sim's registry passes rustc's
+    deny-by-default `long_running_const_eval` (the macro's name check is quadratic), as P10.T7.a's
+    one tag did on integration. `rng/tags.rs` carries P10.T7.a's module-level
+    `#![expect(long_running_const_eval, …)]`, with its reason string, as main asked (2026-10-29),
+    so the merge is trivial; the real fix in `hyperion-base`'s `assert_tag_names`, comparing stored
+    hashes, is queued separately. The lane's first commit changed `assert_tag_names` itself, and
+    its fix commit takes that back.
+  - _Figures (pod, 4 vCPU, opt-level 2)._ Fixture (seed `0x0933_0000_6363_6f6c`): layer-E share
+    0.00946; deaths per system over the 3.43 Myr interval 0.0345 (young disc) and 1.71 × 10⁻⁴
+    (nuclear disc); 54 entries in the 21 sample cells (73 deaths without a shell, 229 before their
+    window's interval); the farthest any of them travels 1,693 ly; the fullest cell expects at
+    most 38,302 candidates (the octants' bound), far inside 2²⁴. The census (`core_collapses_over_seeds`,
+    slow, 358 s on four threads): the fixture 1.56 core collapses a century, 36 in ±H, 15,558
+    entries, 11,383 shells, 4,175 beyond them, longest window 2.62 Myr, farthest 4,088 ly; three
+    drawn galaxies 1.66, 2.42 and 1.44 a century, 33, 44 and 28 in ±H, 4,444, 6,455 and 3,726
+    beyond the shells, farthest 4,093–4,095 ly. "About 40 at two a century" holds as 36 at 1.56
+    (31 expected); the Milky Way's measured rate is 1.63 ± 0.46 a century (Rozwadowska, Vissani and
+    Cappellaro 2021, New Astronomy 83, 101498).
+  - _Cost (finding)._ Some 10 ms a cell at the solar circle and 1.1 s a nuclear-disc cell at the
+    centre, nearly all of it three track builds per thinned candidate (the rate's `lifetime`, the
+    predicate's exact tier, `SystemStars`); a cold 50 ly query's 2,902 cells would take some 30 s,
+    against P09.T37's 5 ms. T37/T40's cache is needed. A prefilter that `claims` implies (T before
+    the interval's start at the window of the site's gas at `ExplosionEnergy::MAX`, with a margin
+    for the rounding of T) would skip the tracks for the 65–85% of candidates the window rejects,
+    changing nothing generated; and P08.T13's seam `decide(.., exact_death_age)` could take the
+    lifetime already computed.
+  - _Tests_ (`core_collapse/tests.rs`, 13, the census natively over four galaxies and on
+    wasm32-wasip1, which has no threads, over the fixture alone; the server's system cache, 1; the plan-09 tag test; `record.rs`, 3; `ages.rs`, 1;
+    `grid/tests.rs`'s production test rewritten; `clock_tests.rs`'s marks test; doctests on
+    `CoreCollapseProcess`, `CatalogueMotion`, `system_of`, `position_from_words`,
+    `max_pdf_between`): the young field's components and rates, every age density under its
+    component's bound; the envelope over 24,000 random points and the centre's corners; headroom by
+    the octants; the kept candidates against the field's own intensity by quadrature (young disc
+    138 against 139.1, nuclear disc 875 against 869.6; α = 10⁻³); every entry the shared test's
+    (predicate, marks with the one velocity, `claims`, the window, the caps, the kick at T);
+    no entry past the reach; resolution through the process, `system_of` and plan 03, a second
+    member and an index past the count naming nothing; the rest of the sim reading an entry through
+    its class (`stars_of`, the range brief on every route, the planetary context, the lensing mass,
+    plan 03's position and epoch velocity, the loss cone, the drift's refusal); deaths without a
+    shell and too early
+    thinned and unresolvable; order independence with stray resolves, the same seed twice, another
+    seed's counts differ; a galaxy without kinematics; the golden
+    `catalogue_classes/core_collapse.golden` (new, at 23: rates, interval, 21 cells' bounds, counts
+    and every entry); the slow census over four galaxies (above), with every window under its caps
+    and every system inside the reach at its interval's ends.
+  - _Goldens._ `rng/tags.golden` extended only (+5); `catalogue_classes/core_collapse.golden` new;
+    no other golden; `GENERATOR_VERSION` 23 → 23.
+- **Deferred findings (2026-10-13 rule)**, from P09.T33.a: (1) _Sites at the explosion, not at the
+  epoch._ The class's sites follow the young field's density, as the task says, so its systems'
+  epoch positions are those moved on by v (t − T), up to some 3,400 ly along the orbit over the
+  interval, while the grid's carved systems' epoch positions follow the density and their sites
+  are moved back. The two agree off the arms; on the young disc's sharp arms they differ by a
+  pattern shift, which P09.T38's budgets in twelve volumes will measure. The class also reads its
+  component's [Fe/H] law and plan 08's velocity law at the site, where the grid reads them at the
+  epoch position (`draw_metallicity`, `epoch_velocity`), so the two differ by the same shift. The
+  alternative, to draw the epoch position from the density and back the site out along x + v T as
+  `explosion_site` does, is listed for main (lean: the task's sites, 2026-10-29). (2) _No Kepler
+  regime._
+  A catalogue system follows straight lines everywhere; a nuclear-disc entry inside the black
+  hole's influence radius would follow its orbit on the grid side (T36.b, T38's centre volumes).
+  (3) _Companions are not carved._ `SystemStars::generate_with` redraws carved binaries for grid
+  records only (`binary::carve::grid_redraws`), so a catalogue system's companions may fall in a
+  plan 11 class (P11.T8). (4) _At version 26._ The class reads each component's age distribution
+  and `ShareMatrix::component_share`, so P09.T2.c's (1 − φ) and P08.T12.a's per-component
+  `stay_share` factor reach it unchanged; P09.T33.b adds the displaced classes' deaths beside it.
+  (5) _Plan 03's `position_at` and feature members._ It still panics for a feature member away
+  from the epoch in a galaxy with kinematic tables (P12.T0's finding), which the server's
+  extinction request can reach with a member's ID; a catalogue system is now routed through its
+  class. (6) _The census's brackets are galaxy-wide._ 20–160 core collapses in ±H, about 40 at two
+  a century and 3,000–21,000 entries beyond the shells are the brainstorm's figures for a whole
+  galaxy, which the field class holds alone at 23 only because φ = 0. From P09.T2.c (version 26)
+  the young field keeps 1 − φ(a), so the class holds a tenth to a fifth of core collapses (ruling
+  118.2) until P09.T36.a lists the rest, and `core_collapses_over_seeds` fails as written: P09.T2.c
+  restates it on the field's share, or the galaxy-wide counts move to T36.a's or T38's census.
+  (7) _A class that redraws._ `SystemOrigin::CatalogueSystem(ClassId)` carries no attempt, and
+  `record_attempt` reads every catalogue system's primary at attempt 0. P09.T43's catalogue side
+  redraws its star "with `StarDraws::for_attempt` until the window overlaps", exact there because
+  its sampler is conditional on the overlap, so T43 adds the attempt to the variant
+  (`CatalogueSystem { class, attempt: u16 }`, still eight bytes; every core collapse keeps 0, so
+  nothing moves). (8) _The fixture's rate._ 1.56 core collapses a century against the brainstorm's
+  "about two" (Li et al. 2011); the measured 1.63 ± 0.46 (Rozwadowska et al. 2021) sits between,
+  so the census checks the ±H count against the galaxy's own rate, and the figure is listed for
+  main. (9) _Fast-suite cost._ The sample cells take some 10 s to generate in each test process
+  that reads them (the centre's cell 1.1 s; opt-level 2, pod), and the golden reads them on
+  wasm32-wasip1 too; the module's fast tests take 13–30 s of test time natively.
+- **P09.T33.b not built (lane `p09-classes`, 2026-10-29, at `GENERATOR_VERSION` 23): it waits on
+  P08.T12.** Its second site density is "plan 08's runaway and walkaway classes of band E", and
+  those classes have no density until P08.T12.a builds the displaced fields: each class's weight
+  × its `FormTable` form, with the form's in-cube, unbound and own-form shares (the nuclear disc's
+  own-form share stays in the field) and a bound over a cell. Plan 09's Consumes already puts
+  T33–T36 on P08.T12. Three things stand in the way, and building around them would be a stand-in
+  for P08.T12.a:
+  - _No carrier._ `ClassTable::build` takes 0.53 s for the fixture (pod, opt-level 2), and the
+    class's process is built from the galaxy alone at each visit of the production lookup
+    (P09.T32's registration), so it cannot build the table; nothing carries it per galaxy before
+    P08.T12.
+  - _No densities or bounds._ `DiscBornForm` and `CoredPowerLaw` have densities but no bound over
+    a cell yet; `FlareFactor` and the arms' `sup` are the pieces P08.T12.a's `layer_bound` will
+    assemble.
+  - _No physical forms._ `FormTable::committed()` is provisional, "fitted to the orbit run's smoke
+    histograms and … not physical", until P15.T6's production table.
+  - _The closed form, measured_ (a probe, not committed): at the fixture, W = 0.340 from the class
+    table; over band E's 33 nodes at the thin disc's reference lifetimes, solar composition and
+    the median draws (whose deaths make a shell up to 18.2 M☉ and 65.9% of band E's deaths by
+    rate), runaways are 15.4% and walkaways 34.0% of the young field's core collapses: 49.4% of
+    them die after being ejected. These are lifetime shares. A runaway's encounter, at 0–3 Myr,
+    comes before every band-E death after 3 Myr; a walkaway's release, at its heavier
+    companion's death, always comes first. At 23 the grid places every young star in the field,
+    so T33.a's field-only class agrees with the grid.
+  - _Design for when P08.T12 lands (lean, 2026-10-29)._ (1) T33.a's field term keeps a death only
+    if its ejection marks say it was not ejected before it died. The marks go on a new tag,
+    `class.core_collapse.ejection`: the kind by `runaway_share` and `walkaway_share`, the channel,
+    and the ejection age as the class table's `ejection_ages` gives it. They are judged at the
+    reference lifetime, so the closed form is exact for the share. (2) A second set of terms in
+    the same class, one per band-E runaway and walkaway class of the thin disc and the nuclear
+    disc (speed bin by the bin of the time from ejection to death). Each term is its class's
+    form × an envelope of its recent deaths, and the site's mark picks a term as T33.a's picks a
+    component, so both densities share the class's cells and index space. (3) A term's candidate:
+    - draws its mass by thinning on its class's conditional weight against its largest;
+    - draws its ejection age inside the age bin and its speed inside the speed bin;
+    - takes as its velocity the source component's law at the site plus the ejection velocity
+      (the one velocity);
+    - then goes through T33.a's death-rate thinning and the shared test.
+
+    (4) Tests: the class's ejected share against the closed form above (α = 10⁻³); and
+    complementarity for sampled runaway candidates, where a grid runaway record and a catalogue
+    candidate with the same marks and velocity give the same `death_in_interval` and `claims`.
+    The production lookup needs the galaxy to carry P08.T12's displaced fields, or a
+    `GalaxyRules` hold at 26.
+
+  - _For P09.T43._ Its "sites follow … the band-E runaways" waits on the same carrier.
+- **Deferred findings (2026-10-13 rule)**, from P09.T33.a's review: _Every read of a catalogue
+  record resolves its entry again._ `query::position_at`, `epoch_velocity`, `stars_of`,
+  `BriefModel::of_record` and lensing's mass each call `system_of_record`. That rebuilds the
+  process and reruns the candidate and its test, some milliseconds each time. Before P09.T37 puts
+  catalogue systems into the range query, callers that hold the `CatalogueSystem` should pass it,
+  or the process should be cached per galaxy (Rust review).
+- **P09.T33.a merged over P09.T28.b.b, T30.b and P10.T7.a (lane `gate-p09-t33a`, 2026-10-29, at
+  `GENERATOR_VERSION` 23, no output moves).** T33.a was built on an older base; its three commits
+  were applied over the integration tip with their textual conflicts resolved (both docs of
+  `placement::resolve`; the union of `query/motion.rs`'s imports, `position_at` giving a catalogue
+  system its class's motion before T28.b.b's `match` on the rules; P10.T7.a's lint attribute and
+  tag, then T33.a's five; both lanes' records). One semantic gap remained:
+  - _The Kepler arm's `match` on the origin._ T28.b.b's `motion::kepler_regime_position_at` did
+    not cover `SystemOrigin::CatalogueSystem` (E0004). It gains that arm, its class's broken line
+    (`system_of_record(..).position_at(t)`), the answer `position_at` gives before it reads the
+    rules, rather than a drift at the epoch velocity, which is the remnant's after the explosion. So
+    a catalogue system moves by its class under either arm, as T28.b.b's "its own source moves it"
+    has a member do; `regime_of`'s doc says the regime does not choose its law. Test, in
+    `galaxy/motion/kepler_regime_hold.rs`: `a_catalogue_system_moves_by_its_class_under_either_arm`
+    (the core collapses of the class cell at the black hole, on T28.b.b's fixture: the same entries
+    and systems under both rules; `position_at` under both arms and `kepler_regime_position_at` are
+    the class's line, bit for bit, at ±100 and ±1,000 yr and either side of an explosion inside the
+    clock window; a millennium on the far side of each explosion from the epoch, the arm's answer is
+    the line and a drift at the epoch velocity is not; every entry is of layer E, its v_fast under
+    layer E's pad speed and its moves within either arm's walk pad; 20 entries, none inside the
+    7.19 ly influence radius, pinned; 11.6 s on the pod). The tag registry's comment now says
+    T33.a's tags follow P10.T7.a's.
+  - _Joins checked, no gap._ (1) The loss cone: `CandidateOutcome::InLossCone` is the grid
+    candidates' outcome, after the claim hook; a catalogue candidate never reaches it, `verdict_on`
+    answers `Clear` for a catalogue system, and the class reads no rule, so a core collapse is kept
+    or thinned alike under either arm (T33.a's deferred finding (2), no Kepler regime). A placed
+    class without a process still answers `KindNotGenerated`, and a carved-out grid candidate
+    `NoSuchSystem`. (2) The pads: no walk reaches a catalogue system before P09.T37 (the range
+    query, the frame search, the sky census and the lensing walk read grid cells and feature
+    sources), so `walk_pad` pads grid records alone. Every core collapse's primary is of band E, so
+    its layer is E, and its v_fast, at most |v| + 990 km/s with plan 08's cut below 1,000 km/s, is
+    under layer E's 3,000 km/s, which the test holds; T37's source pads by the class's own v_fast.
+    (3) T30.b's victims are the centre's feature-level IDs (`SystemIdKind::Centre`, indices 1 to N),
+    which `resolve_centre_member` answers; T33.a's dispatch takes `SystemIdKind::Catalogue` alone,
+    where class 7, `TIDAL_DISRUPTION_VICTIM`, is never placed and answers `NoSuchSystem`, and the
+    server's system cache and the planetary context still send a centre ID through `resolve` and
+    refuse its stars. (4) The headroom: the core collapses are a field class in the class grid's
+    index space, not on the centre's list, so `CentreListForecast`'s entries (the victims and the
+    carved classes' candidates) are unchanged, and its doc's other classes there are still T36's
+    and T43's. (5) Census C1 counts the grid records of P09.T28.b.a's pre-pin, which no class claims
+    at 23 (`RECENT_DEATH_CLAIM` is `None`), so no catalogue system is among them; under every 25
+    hold the catalogue systems move as they do at 23.
+  - _Met P07.T10.c's server at 24 (2026-10-30)._ `extinction`'s `match` on `system_motion` lacked
+    `CatalogueMotionNotTraced` (E0004). A catalogue system is now refused at every time, as a
+    centre member is: `no_such_system` to `extinction`, `unknown_system` to `resolve_system` and
+    `scene_ship`. The task that gives its class's broken line a tracer lifts the refusal there.
+- **P09.T33.a's leans, kept (main's research, 2026-10-29).** Its four leans stand and nothing
+  blocks landing. Two follow-ups, each its own commit, no golden moved:
+  - _[Fe/H] at age zero, pinned (determinism audit)._
+    `a_candidate_s_metallicity_is_read_at_age_zero` (`core_collapse/tests.rs`): every candidate of
+    a young-disc cell and of the cell at the centre (5, 197 and 21 by component) has the
+    composition of the one normal of `class.core_collapse.metallicity` from its component's law at
+    its site read at age zero, to the bit, and both young laws give the same bits at its age at the
+    epoch, the age plan 06's `draw_metallicity` reads a grid record's law at, and at
+    `RECENT_DEATH_AGES`; 8.3 s on the pod. A slope in either law fails it, and the class must then
+    read its candidate's age.
+  - _`v_fast`'s reason, corrected._ `v_fast` = max(|v|, |v + kick|) stays, but "P09.T33.a as
+    built"'s reason, that over the field's thinning interval a progenitor above about 360 km/s
+    outruns `LIFETIME_REACH` before T, is wrong: nothing reads an entry before −(H + L), the source
+    horizon's start, so a progenitor's line is read for at most L + 2H before T, and only one above
+    4,096 ly ÷ (L + 2H), about 4,649 km/s (`lifetime_cap`'s edge), could outrun the reach.
+    `DeathMarks::of`'s doc now says so, and keeps the max as the fastest member's speed over the
+    entry's lifetime, the brainstorm's v_fast. A debug guard at that speed is P09.T35's.
+- **P09.T34.a as built (lane `p09-t34a`, 2026-10-30, at `GENERATOR_VERSION` 23, no output
+  moves).** `type_ia::TypeIaProcess` (`type_ia/process.rs`), in `ProductionClasses`; golden
+  `catalogue_classes/type_ia_class` new; `rng/tags.golden` +3, `class.type_ia.` `site`,
+  `velocity` and `survivor`.
+  - _Sites._ Σ_c density × `DelayTimeDistribution::rate_per_system_per_year` (new) × the interval,
+    no `component_share`: the layer-D budget × its rate per layer-D system at 23. P09.T2.c brings
+    its (1 − φ) to this rate; T36's feature and globular hosts come out of it then.
+  - _Progenitors._ `IaProgenitor::draw_in(.., ComponentId, ..)` (new): `draw` after its pick, bit
+    for bit, with the site's mark choosing the component (lean, 2026-10-30). T36 can call it.
+  - _Member 0_ moves at its drawn velocity and carries the shell. P12.T5.b reads T and the site
+    from `TypeIaEntry::site()`, and the event from `supernova().explosion_event()`.
+  - _Member 1_ exists where `IaLeftover::has_survivor()`: a donor flung out isotropically from T, or
+    a Type Iax's unkicked dwarf. Its record's mass is its own star's (layer A–D). Before T it sits
+    at member 0's place, so T37 lists it from T only (lean).
+  - _No stars._ `observe::stars_of` and `BriefModel::of_record` now return `Result`,
+    `Err(KindNotGenerated)` for both members; R06's and P12's callers take the new signatures.
+  - _Pads._ A survivor outruns its layer's walk pad in ±H (3 of 7 at the centre). T34.b's layer-D
+    raise covers member 0 only; T37 pads this class by `v_fast`.
+  - _T34.b's tests._ P09.T34's "Tests, added" paragraph continues T34.b's bullet (the pad raise,
+    the hypervelocity weight), so T34.a does not build it.
+  - _Merge gap._ The extinction handler's match lacked T33.a's `CatalogueMotionNotTraced`; such a
+    target is `no_such_system` (own commit).
+  - _At 26._ The census's Type Ia share of shells (0.19–0.21) is against field core collapses
+    alone; from P09.T2.c it moves to T36.a's or T38's census.
+- **P12.T5.b's addition to `supernova.rs` (lane `p12-t5b`, 2026-10-30, at 23, no output moves).**
+  `LightCurve::terms_at(Years) -> SupernovaTerms` (`breakout`, `plateau`, `radioactive`, `total`,
+  `weighted([f64; 3])`, `ZERO`). The terms stay in erg/s and are converted once, so `total` and
+  `weighted([1.0; 3])` are `at`'s bits; `at` is now `terms_at(age).total()`, and
+  `phase_four_golden` is unchanged. A retune of a template (the Type Ia's rise among them) moves
+  plan 12's band tables and bounds in `alerts::light` and `alerts::registry`; their recompute tests
+  and `alerts/registry.golden` catch it.
+- **Ruling 145.5 as built (P09.T13; lane `p09-bound-share`, 2026-10-31, at `GENERATOR_VERSION` 24,
+  behind `BOUND_SHARE_VERSION` = 26).**
+  - `kinds::globular::history` and `history_on_orbit` take the cluster's `population` before its
+    mass, and `bound_share(galaxy, population, age)` is the μ of the history's law and of its mass
+    loss `μ M₀ ÷ t_dis`. `GalaxyRules::bound_share` is `BoundShareRules::{Bm03, OwnMu}`; this is
+    the first galaxy 26 hold, so it adds `GalaxyRules::every_26_hold()` (test-only).
+  - `OwnMu`: `fates::present_share_of_formed_with` under the galaxy's function and
+    `fates_for(population)`, counting the stars and white dwarfs (`CensusFates`,
+    `StarsAndWhiteDwarfs`), on `Galaxy::companions()`, a lazy cell built once a galaxy. (Lean,
+    2026-10-31: neutron stars and black holes are not counted. That gives the ruling's "about
+    0.46", 0.47 at 12 Gyr; with them the halo's would be 0.552.)
+  - The 26 bump deletes `BOUND_SHARE_VERSION`, `BoundShareRules` with its `Bm03` arm, the field,
+    the `match` in `bound_share` and the tripwire `the_bound_share_is_held_only_until_the_26_bump`.
+- **P09.T43 as built, the field half (lane `p09-t43`, 2026-10-31, at 24, no output moves).**
+  `catalogue_classes::lbv::{LbvProcess, LbvEntry, may_host, horizon_window}` and a `pub(crate)`
+  `lbv_claims`; the process in `ProductionClasses`; scratch `tables::lbv::LBV_SAMPLER`; five tags.
+  - _The sampler (for P15.T10.a)._ Nodes 32, 36, 43, 55 and 97 M☉ (to 150), each the first and
+    last age of every window of its masses over [Fe/H] −2.4 to +0.3, widened 2% and rounded out to
+    the kyr; a slow test rebuilds it. `LbvProcess::new` weights the nodes by the mass function.
+  - _No redraw (lean, 2026-10-31)._ No draw moves a window (`no_draw_moves_a_window`), so the class
+    thins on attempt 0 as the grid reads it; the origin gains no attempt (T33.a's finding (7) moot).
+  - _Prefilter (lean, 2026-10-31)._ `may_host`: the mass in a node and the age within its
+    [first − H, last + H + L], tighter than the lowest node and longest end; both sides read it.
+  - _Sites at the epoch (lean, 2026-10-31)._ A host's site is its epoch position on the young
+    field's density, its [Fe/H] and velocity read there, as the grid's; entries move straight.
+  - _Resolution._ A class-4 `111` ID resolves through the class where it answered
+    `KindNotGenerated`; the server's serving test pins one host.
+  - _For P09.T35:_ ask `lbv_claims(galaxy, record)` of every layer-E record under `Claimed`, after
+    `recent_death_claims`, with or without an explosion site (`claims_with`'s site gate must not
+    hold it). The class's core-collapse claim is the grid's (`the_class_s_core_collapse_claim_…`).
+  - _Waiting:_ the band-E runaways' sites (after P08.T12, with P09.T33.b); the nurseries' and young
+    open clusters' lists after `TYPE_IA` (after P09.T36.a), and the centre's from N + 1 (lean,
+    2026-10-31: P09.T30.b's record). Companions are not carved (T33.a's finding (3)). A track change
+    reruns the scan.
+  - _Goldens._ `catalogue_classes/lbv` new (hosts per galaxy at its end); `rng/tags.golden` +5.
+- **P09.T42, records (lane `p09-t42`, 2026-10-31, at 24 and 3; client only).**
+  - `RADIUS_STEPS_LY` runs 0.001–500 ly (18 steps). The selector and `QUERY EDGE` write a radius
+    through `formatQueryRadius` (`chartModel.ts`): `0.01 ly` and up as before, the fine steps in AU
+    to three figures (`316 AU`, `126 AU`, `63.2 AU`). The scale bar's ladder was already ly then AU.
+  - `LocalChartState.distanceDecimals` is now `distanceUnit: ChartDistanceUnit` (`symbol`, `perLy`,
+    `decimals`) from `distanceUnitFor(radius)`; `SystemList`, `FeatureList`, `SystemReadout` and
+    `FeatureReadout` take `distanceUnit` and write through `formatChartDistance` and
+    `formatChartOffset`. Below 0.01 ly every distance and offset is in AU to 0.1 AU (lean,
+    2026-10-31), the lists' headers `DIST AU`; other charts read as D21 had them.
+  - `BLACK HOLE`: T41.c's readout already asks at the chart's time and reads mass and the 2–10 keV
+    total; T42 adds only tests (asked again at a new chart time; an absent luminosity Missing).
+    Nothing is missing from the wire for it.
+- **P09.T42 fixes, records (lane `p09-t42`, step 2, 2026-10-31, at 24 and 3; client only).**
+  - _`DIST` column._ Neither switched to ly nor widened: `formatFeatureDistance` (`chartModel.ts`)
+    keeps the chart's unit and writes a feature's distance at the chart's precision while it fits
+    `DISTANCE_COLUMN_CH` (7), and past it to three figures (`formatSignificant`: `126,000`, `300`,
+    `6.32E8`), in `FeatureList` and `FeatureReadout` alike. Systems always fit.
+  - _`CentreEntry`._ `MAX_DECIMALS` 5: 0.00001 ly (0.63 AU), a hundredth of the finest chart's
+    radius, the finest chart's furniture step; the field is 13ch, for `-65,535.99999`.
+  - _Furniture._ `placeDecimalsFor(radius)` (`chartReadings.ts`): 1 decimal from 10 ly, one more
+    per decade below, 5 below 0.01 ly; `radiusReading`, `placeReadings` and `modeReading` take it,
+    the slots widening with it. `HrDiagram` gains `placeDecimals`. Built to a guide draft (lean,
+    2026-10-31): the guide states no furniture precision but `POSITION`'s "to one decimal".
+  - _`DRIVE RANGE`._ Accepts 0.001–500 ly at four decimals (the query radii's span, D9's default
+    radius following it); `RANGE` and `PLANE` labels go through `formatQueryRadius`, so a range
+    below 0.01 ly reads in AU (`RANGE 94.9 AU SET`).
+  - _`ANGLE` (lane `p09-t42-angle`, 2026-10-31)._ `placePrecisionFor(radius, centre)` gives
+    `PlacePrecision { place, angle }`, angle = clamp(⌈d + log₁₀(πR ÷ 180) − 10⁻⁹⌉, 1, d) at the
+    answer's centre (1 on the axis); `placeReadings`, `modeReading` and `HrDiagram.placePrecision`
+    take it, the observer at the centre's. Far from the axis (R > 57.3 ly) the cap is a stated
+    limit; the core arrow stays in ly.
+- **P09.T40.b fix, the centre's served sphere of influence (lane `galaxy-centre-core`, 2026-10-31,
+  at 24 and 3; served value only, no switch).** `CentreStructure::influence_radius_ly` is now
+  `galaxy.centre_motion().influence_radius()`, every mass inside, not the cluster-only
+  `CentreProfile::influence_radius` (10⁴ ly where the hole outweighs the cluster). The server
+  tests' seed serves 111.09 ly; `features.golden` and the client's `aCentreDetail` moved with it.
+- **P09.T10 perf, the remnant attempts bit for bit (lane `galaxy-centre-core`, 2026-10-31, at 24;
+  no output moves).** `remnant_fits` reads `stellar::system::RemnantFate` (`of`, `remnant`,
+  `kick_is_none_or`), from `sse::fate_to_age` and `fate_of`, not a `StarModel`. The track builder
+  holds the companion-stripped mark unread (`Builder::with_companion_mark`) and reads it only where
+  the capture window's two widths disagree; the remnant stage, only where the kick's verdict
+  depends on it. Dwarf-core, centre and global-list members share `remnant_fits`.
+- **P09.T10 perf, the tabulated remnants at 26 (lane `galaxy-centre-core`, 2026-10-31, at 24,
+  behind `TABULATED_REMNANTS_VERSION` = 26).** `GalaxyRules::member_remnants`
+  (`MemberRemnantRules::{EveryAttempt, Tabulated}`, `features/members/remnants.rs`). Under
+  `Tabulated`, `draw_member` asks `tabulated_fit` before `remnant_fits`: a white dwarf below
+  `ClusterModel::white_dwarf_ceiling` (lazy, per stellar rules) is kept on its draws-only kick
+  (`StandardKickLaw::white_dwarf_kick`); a neutron star whose systemic speed and the ordinary
+  kicks' floor both reach `v_eff` is refused. Only `draw_member` reads it; dwarf-core, centre and
+  global-list members keep `remnant_fits`. The bump deletes the hold as its tripwire says.
+- **P12.T5.c's addition to `supernova.rs` (lane `p12-t5b`, 2026-10-31, at 23, no output moves).**
+  `SupernovaEntry::pulsar() -> Option<NeutronStar>`, the neutron star the class's test put in the
+  entry, which plan 12's magnetar walk reads to drop entries whose field is born at or below the
+  critical field before it builds their stars.
+- **P09.T2.c as built (lane `p09-t2c`, 2026-10-31, at `GENERATOR_VERSION` 24, behind
+  `FIELD_SHARE_VERSION` = 26; no output moved).**
+  - _Hold._ `ages::{FIELD_SHARE_VERSION, FieldShareRules::{None, Phi}}`, `GalaxyRules::field_share`.
+    One `match`, in `Galaxy::build`, installs `galaxy::field_share::FieldShare`; readers go through
+    `Galaxy::{field_share, field_ages, field_part, field_component_share}`, the budget's verbatim
+    under `None`. `Galaxy::with_rules` refuses a change of it (debug assert).
+  - _Where φ applies (lean, 2026-10-31)._ `Fields` stays the budget. The field: placement's
+    thinning, `query::expected_counts`, `CoreCollapseProcess`, `LbvProcess` (P09.T43, since the
+    rebase onto it), `TypeIaProcess` (`DelayTimeDistribution::of_field`) and
+    `ClassTable::stay_share`. The budget, on either arm: the
+    gas, `SubstellarAbundance`, `KinematicTables`, `FeatureShares` and the catalogue, `map`,
+    `derive`'s mean masses (the system count, the potential), `small_bodies`, `displaced_forms`'
+    fit, `DelayTimeDistribution::from_galaxy`, `bounds` and `headroom`, the record's age draw
+    (thinned after), the per-record law readers (`stellar::system`, `sky::binary_light`,
+    `guard_twin`, `period_fit`, `global_list::orphans`, `globular::origin_component`), and the sky's
+    `luminosity`, `band` and `caps`, which R06.T16.a routes through `Galaxy::field_*`.
+  - _Thinning._ Bounds and candidates stay the budget's; a candidate picked for component c is kept
+    in the lowest `f` of c's slice of the mark, so a field record is the budget's bit for bit. `f`
+    is `FeatureShares::component_field_factor` (a sub-disc takes its own φ_k, lean), and for the
+    young disc `1 − φ(age)` on `YoungFieldShare`'s 101 panels, scaled to its factor.
+  - _`FeatureShare::Phi`._ The unborn sliver keeps the born ages' mean of `1 − φ` (lean), so one
+    factor serves density and count.
+  - _Class table._ `stay_share` is the field's (the budget's × the factor, the young disc's D and E
+    over the young field's ages); class weights, stay marks and `closure` stay the budget's.
+    P08.T12.a's per-component factor must read the new `ClassTable::budget_stay_share`, or φ is
+    taken twice.
+  - _Censuses._ `core_collapses_over_seeds_under_every_26_hold` and
+    `type_ia_over_seeds_under_every_26_hold` keep the Poisson, reach and cap checks, and check the
+    field's deaths against the budget's weighed by what the field keeps. The galaxy-wide brackets
+    (20–160 in ±H, 3,000–21,000 beyond the shells, a third of shells Type Ia) move to P09.T38.
+  - _Tests._ `checks.rs`'s globular inversion, `globular.rs`'s `own_rules` and the helium census run
+    "every 26 hold but the field share" through `with_rules`; the field reaches neither globulars nor
+    members. T33.a's `max_pdf_between` test also accepts the bound reached as the right limit at the
+    range's top, where the young field's panels meet. `FIELD_RECORDS_DIGEST` (D2) is pinned by hand,
+    not a golden (E4): a later 26 hold that moves a record's mass or age re-pins it.
+  - _Bump._ 26 deletes `FIELD_SHARE_VERSION`, `FieldShareRules`' `None` arm, the field, the `match`,
+    the refusal and the tripwire `the_field_share_is_held_only_until_the_26_bump`, and restates
+    `tests/galaxy_class_table.rs`'s stay asserts (`stay_share(E)` = marks' total, `stay_share(A)` =
+    1), which the factor breaks. D1 is `placement/young_field`, labelled by ID.
+- **P09.T35 as built, the field half (lane `p09-t2c`, step 2, 2026-10-31, at `GENERATOR_VERSION` 24,
+  behind `CARVE_OUT_VERSION` = 26; no output moved).**
+  - _Hold._ `displaced::site::{CARVE_OUT_VERSION, CarveOutRules::{Unclaimed, Claimed}}`,
+    `GalaxyRules::carve_out`. `RECENT_DEATH_CLAIM` is now `fn recent_death_claim(rules)`, each arm
+    one item; `Galaxy::with_rules` refuses a change of the carve-out (debug assert).
+  - _Claim._ `core_collapse::recent_death_claims`: the record's `ForcedSingle` stars at its own
+    metallicity, `DeathMarks::of` at its `epoch_velocity`, `claims` in the field. Under `Claimed`
+    `catalogue_claims` asks it of each layer-E record with a site, then `lbv_claims` of every
+    layer-E record it did not take, with or without a site.
+  - _Layer D (lean, 2026-10-31)._ Not in the share matrix, whose bounds would move every layer-D
+    candidate: `Galaxy::layer_d_kept`, 1 − `ancient_share` (about 0.96 for the old populations at
+    the fixture), built in a second step of `Galaxy::build`, thins inside the picked component's
+    slice as T2.c's field does, and `field_component_share` (the expected counts) takes it. Not in
+    `FeatureShares::field_factor` either (P11.T7's text): it needs the built galaxy's delays and
+    its own hold. The Type Ia class and `ClassTable::stay_share(D)` leave it out: the class's rate
+    is per budget system, and P08.T12.a reads `budget_stay_share`.
+  - _Type Ia._ The debug hook `displaced::site::keeps_a_recent_type_ia`, false until P11.T6 wires
+    it to `carved_class`, is asserted of every kept grid system in `SystemStars::generate_with`.
+    `recent_death_claims` debug-asserts a claimed progenitor under `lifetime_cap`'s edge, about
+    4,649 km/s (the `v_fast` guard of "P09.T33.a's leans, kept").
+  - _Tests._ `placement/carve_out_hold.rs`. D1 is `placement/carve_out`: cells (147, 56, 0),
+    (−68, 141, 0) and (87, 168, 0) of seed `0x0935_0000_0000_0001`, not plan 08's (200, 203, 0),
+    which is in a fixture without the field share. P09.T43's `grid_core_collapse_claims` calls
+    `recent_death_claims`. Complementarity is per mark set (each side keys its draws on its own
+    ID, so a class candidate has no grid twin); the harness with its forced reject path is T38's.
+  - _Known gap._ Carved-out hosts are missing from range queries until P09.T37 (27).
+  - _Waiting._ The runaway classes (T33.b), P09.T43's runaway test and T34.b's, after P08.T12, join
+    `CarveOutRules::Claimed`. T28.b.b's deferred findings (5), a Kepler-regime layer-E site on a
+    straight line, and (6), a cell that depends on its galaxy's kinematic tables, now read by the
+    claim under every 26 hold, go to the bump.
+  - _Bump._ 26 deletes `CARVE_OUT_VERSION`, `CarveOutRules`' `Unclaimed` arm, the field, the
+    `match`es in `recent_death_claim` and `Galaxy::build`, the refusal and the tripwire
+    `the_carve_out_is_held_only_until_the_26_bump`; the claim is again the one item.
+- **P09.T10 perf, a slow pair's neutron stars at 26 (lane `galaxy-centre-core`, 2026-10-31, at 24,
+  under `TABULATED_REMNANTS_VERSION`).** `ClusterModel::remnant_table(rules)` (a
+  `remnants::RemnantTable`: `white_dwarf_ceiling` and `capture_window_top`) replaces
+  `white_dwarf_ceiling(rules)`; `tabulated_fit` takes `(kind, mass)` and the composition. A
+  neutron-star attempt on a pair below `v_eff` is refused when it is unstripped (its mark read
+  against the share) and above the cluster's highest `m_cc` plus `CAPTURE_MARGIN` (0.5 M☉).
+- **P09.T10, before the 26 bump (lane `galaxy-centre-core`, 2026-10-31).** The slow
+  `every_fixture_cluster_s_white_dwarfs_below_its_ceiling_are_their_tracks` (`members/remnants.rs`)
+  checks every white dwarf the table keeps below a ceiling against its track, over every fixture
+  cluster whose turn-off lies below it; run it by name before the bump. A cluster's ceiling now
+  takes its helium corner only if it has a second population.
+- **P09.T10, the reviews of the 26 levers (lane `galaxy-centre-core`, 2026-10-31).** The tabulated
+  arm defines 26's members: a refusal the track would keep moves the draw on to the next attempt
+  (the agreement test, now `the_tabulated_remnants_keep_only_what_the_track_keeps`, counts them
+  and allows 1%; none observed). The helium axis is read only under the fitted helium table it
+  was built under. `ClusterModel::first_population_share` is shared by the class counts and the
+  ceiling's corners.
+- **P09.T34.a, the delay-time distribution kept (lane `perf-small-server`, 2026-10-31; no output
+  moves).** `Galaxy::type_ia_delays` (crate-private) keeps `DelayTimeDistribution::of_field` in a
+  lazy cell, counted in `heap_bytes`, and `TypeIaProcess` holds it as an `Arc`. `from_galaxy`
+  (the carve-out's `layer_d_kept`, `ancient_share`) still builds its own.
+- **P09.T35 with P06.T42.b (lane `fix-26-hold-tests`, 2026-10-31; no output on the record moved,
+  and under every 26 hold the sites of primaries past the limit move).** The interval
+  predicate reads the galaxy's stellar rules, as its stars do: `explosion_site`, the core-collapse
+  class's candidates and claims and the LBVs' `core_collapse_claims` call the new
+  `displaced::death_in_interval_under` and `sse::lifetime_under` (`death_in_interval` keeps the
+  version's). Its fate-table tier is refused under another Humphreys–Davidson arm, as the
+  brief's is.
+- **P09.T36 as built (lane `p09-t2c`, step 3, 2026-10-31, at `GENERATOR_VERSION` 24, behind
+  `FEATURE_CLASSES_VERSION` = 26; no output moved).** With P09.T43's list halves: the nurseries'
+  variables after `TYPE_IA`, and the centre's from N + 1.
+  - _Hold._ `members::recent::{FEATURE_CLASSES_VERSION, FeatureClassesRules::{Unlisted, Listed}}`,
+    `GalaxyRules::feature_classes`: one switch for the lists (`FeatureStars::listing`,
+    `CentreRecent::new`) and the band-E cells' claim (`FeatureStars::claiming`,
+    `centre_cells_claim`), so both or neither (research-leans-10, item 4).
+  - _For P09.T37._ `FeatureLevelList::{recent_entry, recent_entries}` give `RecentEntry` (class,
+    `MemberRecord`, site, window); `FeatureLevelList::member` now takes the galaxy,
+    `member(galaxy, index)`. The centre's `CentreRecent::{list, entry}` give `CentreRecentEntry`,
+    its classes from N + 1 (`FeatureLevelList::with_classes_from`). `resolve_member` and
+    `resolve_centre_member_with` resolve both. A feature's entry moves at its bulk velocity, a
+    centre entry at its tracer's DF draw; each site is the epoch position moved straight to the
+    death. `member_speed_bound` does not cover the list. A list needs the kinematic tables
+    (`bulk_velocity`).
+  - _For P09.T38._ Both sides ask `claimed_by` (features) or `claimed_at_centre` on their own marks.
+    A list draws its candidates from an envelope (`Candidates`: the masses and ages a lifetime
+    bracket or a sampler node can put in the class), which every claimed mark set must lie in
+    (`Candidates::contains`). A nursery's core collapses are drawn over the longer of the bubble's
+    and the field's caps, for a site outside the wall. The lists' density is formed mass ×
+    survival × band E's share, not the cells' depletion and remnant retention: a bound cluster's
+    cells keep few kicked neutron stars, so in 10⁴ members its cells give up 0 core collapses and
+    9 variables, while the list keeps every death at its site. T38's budgets compare the two, and
+    check the listed deaths' escaped remnants against plan 08's displaced objects. No association
+    has a nested grid in this build (`ClusterModel::from_record`), so its list is its only half.
+    The centre's cells are not walked: at 24 a neutron-star class of the young burst exhausts its
+    attempts (`draw_centre_member`'s debug assertion; a finding), so its test draws 10⁴ mark sets
+    as the list does.
+  - _Counts (seed `0x0935_0000_0000_0001`, Milky Way, under the full `every_26_hold()`; deaths in
+    (−(L + H), +H] on every side)._ Features: 0.838 of the core collapses (3,618 of 4,320), in
+    0.7–0.9. 0.446 of the 8,735 distinct shells, against 0.15–0.35: a finding, pinned. Globulars:
+    0.139 Type Ia expected, in 0.1–0.5, listed with no window over the horizon. Centre: 29
+    victims, then 565 candidates (534 core collapses, 11.3 Type Ia, 23.6 variables), 17 kept. The
+    new arm's entries are pinned by digest (`ENTRIES_DIGEST`, `CENTRE_ENTRIES_DIGEST`).
+  - _Leans (2026-10-31)._ No new tag: the entries read `member.mass`, `member.position`,
+    `centre.velocity` and `class.type_ia.*`, keyed by their list IDs. The centre carves band E
+    only: it draws no binary a Type Ia could come from, until plan 11 draws the centre's binaries.
+    A single age is widened to 10³ yr for the delay draw. `CentreListForecast::recent` counts the
+    classes at their bound under both arms (a check with no caller yet; the cap still leaves
+    44,537.4 indices, the 10³ seeds' worst 44,498.7).
+  - _The HD limit (2026-11-01)._ Both lists ask the predicate under their galaxy's stellar rules
+    (`death_in_interval_under`, 4ad2009), as their stars are, and T36's tests run under the full
+    `every_26_hold()`; `every_26_hold_but_the_hd_limit` is gone. The limit moved the centre's
+    kept from 18 to 17 and the census from 0.839 and 0.442; the figures above are its.
+  - _Bump._ 26 deletes `FEATURE_CLASSES_VERSION`, `FeatureClassesRules`' `Unlisted` arm, the field,
+    the `match`es in `FeatureStars::listing`, `FeatureStars::claiming`, `CentreRecent::new`,
+    `recent_member` and `centre_cells_claim`, and the tripwire
+    `the_feature_classes_are_held_only_until_the_26_bump`.
+- **P09.T10 perf, white dwarfs above the ceiling at 26 (lane `galaxy-centre-core`, 2026-10-31).**
+  `RemnantTable` gains `unstripped_white_dwarf_ceiling` (the edge less 0.2 M☉) and
+  `highest_iron_core_mass`. Its fields are private, and `capture_window_top()` is derived from
+  the highest `m_cc`. The functions for the ceiling and the window's top are gone;
+  `white_dwarf_edge` and `highest_iron_core_mass` remain. Above the ceiling a white dwarf reads
+  its mark as its track does, through `sse::is_companion_stripped_under` (now `pub(crate)`). An
+  unstripped one is kept below its own ceiling. Any is refused `WHITE_DWARF_TOP_MARGIN` (0.3 M☉)
+  above `m_cc` less its window's width.
+- **P09.T10 perf, a slow pair's stripped neutron stars at 26 (lane `galaxy-centre-core`,
+  2026-10-31).** `ClusterModel::co_core_floor(rules)` (`remnants::co_core_floor`, lazy in its own
+  `RulesCell`, which replaces `RemnantTableCell`): the lightest mass from which every corner's exact
+  CO core reaches the low mode's ramp top (3 M☉). A slow pair's stripped attempt at or above it is
+  refused. The fixture's floors are 13.10 and 12.64 M☉.
+- **P09.T10 perf, the census's cell bounds (lane `galaxy-centre-core`, 2026-11-01; bit for bit).**
+  `interior::BoundMemo`: a sphere's profiled bounds by band and corner radius (keyed by value),
+  read through `MemberClassTable::proposal_with`, `FeatureInterior::expected_candidates_with` and
+  `members_in_cell_near`, which now takes `(out, memo)`. A memo is made by its table
+  (`MemberClassTable::bound_memo`, `FeatureInterior::bound_memo`). It serves only that table, which
+  a debug assertion checks. `FeatureMemberSource` keeps one memo per interior per call. The tail's
+  bound stays each cell's own. Sharing it across bands was not taken: in a core query a cell's
+  bounding sphere ends short of the tidal radius, where the tails begin, so each band's tail bound
+  is a dot product and a comparison.
+- **P09.T10 perf, a slow pair's stripped neutron stars below the CO floor (lane
+  `galaxy-centre-core`, 2026-11-01; bit for bit).** `ClusterModel::main_sequence_loss(rules)`
+  (`remnants::main_sequence_loss`, lazy in its own `RulesCell`): the largest main-sequence loss at
+  the CO floor over the corners and η 0, 0.5 and 0.92, ×1.25 + 0.005 M☉. `remnants::low_mode_fit`
+  brackets the attempt's CO and helium cores with `sse::early_agb_cores` at its track mass and at
+  that less the loss (the early AGB reads the main sequence's end mass,
+  `sse::main_sequence_end_mass`), and decides where the mode's and the remnant's marks agree over
+  the bracket.
+- **P09.T10 perf, the white dwarfs between the ceilings (lane `galaxy-centre-core`, 2026-11-01;
+  bit for bit).** `ClusterModel::white_dwarf_main_sequence_loss(rules)`
+  (`remnants::white_dwarf_main_sequence_loss`, lazy in its own `RulesCell`) is the largest
+  main-sequence loss at the unstripped refusal's top. `main_sequence_loss` and it share
+  `largest_main_sequence_loss`. Between the ceilings and the refusals, a white dwarf is kept below
+  the start of its window at its own composition and refused where its track mass less the loss is
+  past it. Elsewhere the track decides.
+- **P09.T10 perf, the decided remnants' draws (lane `galaxy-centre-core`, 2026-11-01; bit for
+  bit).** `StarDraws::kick_low_for_attempt` and `StarDraws::stripped_for_attempt` read one stream
+  each. A white dwarf below the ceiling reads only its kick's speed, through
+  `StandardKickLaw::white_dwarf_kick_speed` (which replaces `white_dwarf_kick`; `maxwellian` takes
+  its speed from `maxwellian_speed`). A neutron star refused by its mark reads only the mark.
+- **P09.T10 perf, the white dwarfs' band (lane `galaxy-centre-core`, 2026-11-01; bit for bit).**
+  In the band between the window decisions, a white dwarf is decided by its own main sequence's
+  end mass (`sse::main_sequence_end_mass`) against its window's start, so no white dwarf above the
+  ceiling builds its track.
+- **P09.T10 perf, the bound memo by corner key (lane `galaxy-centre-core`, 2026-11-01; bit for
+  bit).** `BoundMemo` keeps a band's bound by the cell's `nested::CornerKey`, its level and the sum
+  of the squares of its nearest corner's offsets in cells, in a vector indexed by level, band and
+  that sum, in place of a `BTreeMap` by radius. One key has one radius to the bit, which a debug
+  assertion checks. It also keeps each band's cusp slope. `MemberClassTable::bound_memo` now takes
+  the grid, and `NestedGrid::corner_key` and `corner_squares_max` are new.
+- **P09.T10 perf, the white dwarfs' mark alone (lane `galaxy-centre-core`, 2026-11-01; bit for
+  bit).** Above the ceiling a white dwarf reads its companion-stripped mark alone, through
+  `sse::is_companion_stripped_by`, which `is_companion_stripped_under` (private again) now calls.
+  It builds its whole draws only in the band.
+- **P09.T10 perf, the pair's speed drawn only for the low mode (lane `galaxy-centre-core`,
+  2026-11-01; bit for bit).** A member's attempt draws its pair's systemic speed only for a
+  neutron-star or black-hole class, the only ones whose low-mode kick reads it. Each attempt seeks
+  its own words, so nothing else moves. The 50 ly globular-core query reaches 19.8 ms warm under
+  every 26 hold (20 ms target).
+- **P09.T37.a, as built (lane `p09-t37`, 2026-11-01, at `GENERATOR_VERSION` 24, behind
+  `CLASS_SOURCE_VERSION` = 27; no output moved).**
+  - _Split (lean, 2026-11-01; decision-galaxy-25-train §3)._ T37.a is the grid's classes; T37.b is
+    `CentreMemberSource`'s registration and the two centre tests, after P09.T31. P10.T10.b
+    registers `GlobalListSource` in its own task.
+  - _Source._ `catalogue_classes::CatalogueClassSource<L: ClassLookup = ProductionClasses>`:
+    `new()`, `with_lookup(L)`, and `registered_in(&Galaxy) -> Option<Self>`, the hold's one read.
+    Census: per class, Σ bound × the cell's overlap with the unpadded sphere's cube, in each layer
+    of its `member_layers` row (one set per member). A newly registered class needs a row, or the
+    census panics. Hits: `cells_in_sphere` (the 4,096 ly reach, so it pads the Type Ia's survivor),
+    each candidate through `resolve_entry` and `ClassProcess::system`. A further member is listed
+    from its entry's break. `suppresses` is false, since the grid keeps no twin from 26 (tested).
+  - _Processes._ They are built once a call (the census and the hits), not once an entry. A build
+    costs microseconds once the galaxy holds its Type Ia delays.
+  - _Hold._ `GalaxyRules::class_source` (`ClassSourceRules::{Unregistered, Registered}`) and
+    `GalaxyRules::every_27_hold()`, the first galaxy 27 hold; its tests run inside
+    `with_every_27_hold`. The server's `compute::range::beside_the_grid` puts the source after
+    `FeatureMemberSource`; held members take no source. The 27 bump deletes the hold, the field,
+    the `match` in `registered_in` and `the_class_source_is_held_only_until_the_27_bump`. It
+    re-blesses the server's `systems_in_range` and `systems_in_range_briefs` goldens, whose
+    census moves.
+  - _Cost (a finding)._ Bench `classes_at_27` (server, `feature_range_query`): the Sun-like 50 ly
+    query cold with every source registered takes 30.3 s, against 5 ms (pod, 16 vCPU). Each class
+    alone: the slow accreting white dwarfs 15.6 s, the fast 12.0 s, the stellar mergers 6.0 s, the
+    core collapses 0.32 s, and the other four under 45 ms. For T40: the cache is the lever. So is a
+    reach per class: the accreting white dwarfs', the two merger classes' and the luminous blue
+    variables' entries sit in their cells at the epoch, and need only the cells within R + v|t|.
+- **P09.T33.b, as built (lane `p09-t33b`, 2026-11-01, at `GENERATOR_VERSION` 24, behind
+  `RUNAWAY_DEATHS_VERSION` = 27; no output moves at 24–26).**
+  - _Hold._ `core_collapse::{RUNAWAY_DEATHS_VERSION, RunawayDeathsRules::{FieldOnly, Ejected}}`,
+    `GalaxyRules::runaway_deaths` in `every_27_hold`; tripwire
+    `the_runaway_deaths_are_held_only_until_the_27_bump` (`core_collapse/runaway_hold.rs`).
+    `CoreCollapseProcess::new` matches it once; `candidate` and `bound` read its terms: the new arm
+    needs the class table and a term, so a galaxy without P08.T12's displaced classes keeps the
+    held arm. The held arm's bound and first entries under every 26 hold are pinned bit for bit
+    (`the_held_arm_s_cell_is_pinned_under_every_26_hold`, checked against the base's code).
+  - _Tag._ `class.core_collapse.ejection`, appended after `body.resources` (the tags golden
+    extended by one line).
+  - _The field term (departure)._ From 27 it reads the band budget taken to the field
+    (`Galaxy::field_part`), not `field_component_share`'s stay share (plan 08's "P09.T33.b's lane
+    decides"), then drops a death whose ejection marks put an ejection before it: the kind by
+    `runaway_share` and `walkaway_share`, then one pick among the kind's `ejection_ages` (the
+    channel with it), judged at the source's `reference_lifetime`.
+  - _The terms (`EjectedTerm`)._ One per young component of an ejecting source × each of its
+    source's band-E classes with a form that takes a share of some star's deaths (12 thin-disc
+    classes, speed bins 0–1 × age bins 0–5; 2 nuclear-disc classes per nuclear component): the
+    class's form × the component's band-E systems taken to the field × `largest_share` × the
+    field's largest death rate. `largest_share` is a rigorous bound per interval of the class
+    table's 33 mass nodes (`SourceNodes`, built once per source).
+    - _Departure (pending the owner's ruling, below)._ The terms take the field's part (1 − φ) of
+      the budget, as the field term does, not the budget the grid's displaced classes weigh: the
+      features keep φ of the young disc and list their members' deaths themselves (P09.T36.a), so
+      a budget-wide term counted φ × P of the young disc's deaths twice (about 0.44 of them at the
+      fixture; the review's must-fix).
+    - _Departure, the key._ A class is that of the ejection's speed bin and the age bin of
+      `reference_lifetime − ejection age`: the analogue, for a star dying now, of the grid's time
+      since ejection at the epoch, so that the classes take the closed form's share exactly.
+    - _Departure, the mass._ A candidate thins its mass on its class's share of that mass's deaths
+      (`ejected_parts`), not on the class table's conditional mass weight, which counts the
+      class's living members at the epoch; its ejection age is one of the table's `ejection_ages`
+      nodes, as the grid's `since_ejection` picks one.
+    - _Velocity._ Plan 08's law of the class at the death site (Design note 22,
+      `kinematics::class_velocity`, split out of `draw_displaced` with the grid's arithmetic
+      unchanged): the ballistic bins' circular velocity plus the ejection (speed in its bin by
+      `speed_in_bin`, an azimuth, v_z = z ÷ s with s the time since the ejection), the class's
+      Gaussian otherwise, on `class.core_collapse.velocity`.
+    - _Metallicity._ At the source's reference site, plan 08's `formation_site` for a displaced
+      record, at age zero as T33.a's candidates read theirs.
+  - _Readable by P09.T43 and the rest:_ `CoreCollapseEntry::ejection()` (`Ejection`: class, kind,
+    ejection age, speed). The grid's carve-out already asks every layer-E record its claim
+    (P09.T35), a runaway's and a walkaway's with the rest, so the "_Waiting._" join needs no code.
+    A grid runaway is alive at the epoch, so its death falls in the interval only within +H; the
+    test moves 110 grid runaways and walkaways into the interval (`SystemRecord::with_age_at_epoch`,
+    test-only) and both sides agree on every death and claim.
+  - _Measured._ Galaxy-wide, the candidates' ejected share is the closed form's: 0.514 against
+    0.518 under every 27 hold (z = −0.91), 0.534 against 0.534 where the field is the budget
+    (z = −0.04; the record's 49.4% is the same share over the shell-making deaths alone). Cost
+    (release, one thread, every 27 hold against the held arm): the solar circle's cell 4.5 ms
+    against none, the inner disc's (0, 12, 0) 4.3 against 3.2 ms, the centre's 479 against 162
+    ms (43,811 candidates); the process's build 0.42 ms against 2 µs, which the production lookup
+    pays each visit.
+  - _Pending the owner's ruling (ruled by kind below, "The deaths by kind")._ Where a feature's
+    ejected members die: kept in their features'
+    lists (as built, the brainstorm's "four in five" in features intact), or the features drop
+    them by the same ejection marks and the terms take the whole budget, as the grid's displaced
+    classes weigh it (physically the runaways' origin; features then hold about 0.39 of core
+    collapses). Walkaways, released at 30 km/s or less a few Myr before they die, mostly die
+    within a few hundred light-years of their feature (science check).
+  - _Not done._ `FormTable::committed()` is still provisional until P15.T6's forms (held for train
+    26); the terms read it as P08.T12 does. The class's `MAX_PARTS` buffers and the lazy pick spare
+    the candidate a vector; the class table's `ejection_ages` still returns one per call.
+  - _For P09.T38._ The grid's living layer-E field records draw their age below their lifetime
+    without regard to an ejection by then (`placement/marks.rs`'s `stay`), so the grid carves a
+    little more field deaths than the class's field term places (from reading, not measured).
+  - _Movers at 27._ `catalogue_classes/core_collapse` (the class's entries), and the slow census
+    brackets of `core_collapses_over_seeds*`, restated at the bump.
+  - _Cost, after its perf pass (lane `p09-t33b-perf`, 2026-11-01; nothing moves at 24–27)._ The
+    galaxy keeps the process (`Galaxy::core_collapse`, which `ProductionClasses` visits), the
+    shared test's exact tier reads the candidate's lifetime (`death_in_interval_knowing`), and the
+    terms read one `FormPoint` a candidate. A digest of 336 cells' entries under every 27 hold and
+    its held arm is unchanged by each. Release, one thread, pod, 16 vCPU, every 27 hold against
+    its held arm, before and after: the centre's cell 469 → 332 ms (held 163 → 117 ms); the inner
+    disc's (0, 12, 0) 4.2 → 4.2 ms (held 3.2 → 2.9 ms); `system_of` 2.07 → 0.87 ms; P09.T40's
+    bench, the Sun-like 50 ly query at 27, every source cold 543 → 513 ms, warm 5.10 → 4.23 ms,
+    the core collapses alone cold 291 → 260 ms (held arm 160 → 144 ms), warm 0.22 ms.
+    - _Target missed (finding)._ "Within 10% of the held arm" is out of reach bit for bit. The
+      cost is `lifetime_under`, some 0.4 ms, at every candidate that reaches step 3, and the
+      test's star, 0.56 ms, at every one kept. Step 5's death-rate bound is the young disc's age
+      density at 100 Myr (`RECENT_DEATH_AGES`), about 9× its density at 3–20 Myr, where band E
+      dies (0.11 of it; 0.24 at 40 Myr), so some 85% of those candidates pay a lifetime and are
+      thinned away, in both arms. The 27 arm's terms add such candidates in proportion: 488
+      lifetimes against 301 in the range query, and 274 kept against 118 at the centre.
+    - _The terms' bound is not the lever._ `largest_share`'s rejections cost about 2 µs each
+      (the mass and `ejected_parts`). Squeezing on each mass interval's bound saves under 2 ms of
+      260, and any tighter thinning bound moves 27's entries. The lever is step 5's bound: the
+      young disc's density over the ages band E dies at (some 50 Myr) would spare about two
+      thirds of those lifetimes, but it moves every version's entries, so it needs a hold of its
+      own.
+  - _The deaths by kind, and the bounds by mass (lane `fix-p09-t33b-ejected-deaths`, 2026-11-01,
+    in `runaway_deaths`' arm; nothing moves at 24–26)._ A feature's runaways die in the field and
+    its walkaways in it (lean, 2026-11-01; research-leans-21): a runaway travels some 584 pc
+    before it dies, past any bubble, a walkaway some 103 pc at most (Renzo et al. 2019, A&A 624,
+    A66, §5.1), and Higdon and Lingenfelter's (2005) 80–90% is where supernovae go off, not which
+    stars a feature holds.
+    - _The death lists._ A nursery's or an open cluster's `CORE_COLLAPSE` candidate whose ejection
+      marks, the field term's (`ejection_before_death`) on its own feature-level key, put a
+      runaway's ejection before its death is no entry (`core_collapse::feature_runaway`); a
+      walkaway's stays listed. A feature-level ID (prefix `0`) never meets a class candidate's
+      (`111`). The candidates' expected count is unchanged.
+    - _The terms (lean, 2026-11-01: the smaller reversible choice)._ A term per class and kind,
+      since speed bin 0 holds both: a runaway's at the component's whole band budget and its
+      ages, a walkaway's at the field's part and the field's ages, as built; each kind its own
+      share bounds. The alternative, thinning a walkaway by 1 − φ(a) against a whole-budget bound,
+      was not taken.
+    - _The living counts (P09.T9.f, `features::interior::counts`)._ Where the class follows the
+      runaways (`core_collapse::ejecting_table`, the one arm all three read), a cluster of an
+      ejecting source nets at each living mass of bands D and E `RunawayModel`'s share ejected by
+      its age, both kinds and both channels (`ClassTable::ejected_by`), in place of Oh et al.'s
+      `runaway_share(M)`, `RUNAWAY_BAND_D_SHARE` and the 100 Myr step. It reaches every cluster
+      with a model (`ClusterModel::from_record`): the nurseries' bound clusters and the old open
+      clusters, which now net their whole lifetime shares; an association has no members and a
+      globular's source ejects none.
+    - _The bounds by mass (main's rule E)._ The field term's and every term's death rate is
+      bounded on band E's 32 node intervals (`MassRates`): the ages' densest below the lifetime
+      bracket's longest there, widened by a quarter (`LIFETIME_MARGIN`), plus the interval; and a
+      term's share by its class's share as the kind there. A candidate draws its interval by its
+      share of the band × those bounds, its mass in it by the mass function (one word more on
+      `class.core_collapse.mass`), and thins against its interval's. The young disc's rate in
+      the envelope falls to 0.44 of its densest; the widened bracket holds 256 lifetimes at [Fe/H]
+      −1 to +0.6, the longest at 0.93 of the bracket's own.
+    - _Measured._ The features hold 0.706 of the 4,208 core collapses in the source horizon under
+      every 27 hold (research-leans-21 expected about 0.67), against 0.904 of 4,004 under every 26
+      hold. A feature's list drops 10,512 of 40,000 members' deaths against 10,438.5 (z = 0.85).
+      Galaxy-wide the class's candidates are 0.758 ejected against 0.759 (z = −0.37).
+    - _Cost (release, one thread, 32 vCPU pod; every 27 hold before and after the bounds, its held
+      arm)._ The Sun-like 50 ly query's core collapses cold 314 → 197 ms (144), warm 0.22 ms
+      (0.21); the inner disc's (0, 12, 0) 6.2 → 4.2 ms (2.9); the solar circle's 0.9 → under
+      0.05 ms; the centre's 360 → 361 ms (117). _Target missed (finding):_ the centre and the
+      inner disc keep 2.4× and 3× the held arm's candidates for the shared test, deaths the 27 arm
+      places, each about 1 ms (a lifetime and a star), and the nuclear disc's age density is flat,
+      so no bound spares the centre a lifetime.
+    - _Movers at 27._ `catalogue_classes/core_collapse` (the class's entries, `EJECTED_PIN`
+      re-pinned), the features' lists' core collapses (their runaways'), the clusters' living
+      counts in bands D and E and so every cluster's members, and the census brackets of
+      `core_collapses_over_seeds*`, restated at the bump.
+  - _The screen (lane `p09-t33b-screen`, 2026-11-01, main's rule D; nothing moves at 24–27)._ From
+    27 a candidate the shared test cannot keep is refused before its star is built
+    (`CoreCollapseProcess::screened_candidate`): after the site's pick, a T (the death stream's
+    word 0) at or before the start of the interval of `supernova::field_window_bound`, the
+    longer of the field windows of the system's two core-collapse energy draws at the site, at
+    the field's cap (the lifetime cap only shortens a window); and at step 3, whose lifetime is
+    now its death's age (`sse::death_under`, `lifetime_of`'s own build), a death that makes no
+    supernova. `the_screen_refuses_no_entry` holds the screened cells to the unscreened
+    candidates' tested entries; the galaxy-wide census counts the unscreened
+    (`unscreened_candidate`). The held arm is not screened. At the centre's cell the test had 286
+    candidates for 21 entries (187 failing the claim, 78 with no supernova); the screen refuses
+    286 of the 287 refusals in the centre's and the sample cells.
+    - _Cost (release, one thread, 32 vCPU pod; every 27 hold before and after, its held arm)._
+      The centre's cell 349 → 111 ms (112); the inner disc's (0, 12, 0) 4.1 → 1.8 ms (2.8); the
+      Sun-like 50 ly range query's core collapses cold 186 → 66 ms (138), warm 0.22 ms. The 27
+      arm is now at or below its held arm everywhere measured, which keeps its unscreened
+      candidates' cost. The cell-wide sharing of the test's work was not needed: the claim's gas
+      costs some 3 µs a site.
+- **P09.T34.b, as built (lane `p09-t34b`, 2026-11-01, at 24; held for 27, no output moves).**
+  - _The weight._ `displaced::survivors::Survivors` (new), through `ClassTable::survivors()` and
+    `class_count(D, hv)`; `class_weight` stays 0. Rate × shareᵢ × (`HYPERVELOCITY_MEAN_EXIT_LY` ÷
+    v_eff,ᵢ − S): the galaxy's own rate (`DelayTimeDistribution::from_galaxy`), ruling 128.1's
+    shares, and S the latest start of the Type Ia interval, whose survivors are T34.a's member 1
+    (`SHELL_WINDOW_CAP` + L + H: a galaxy's own start reads its gas, which is the seed's).
+  - _The draws_, on plan 08's tags, none new (lean, 2026-11-01): population by the counts on
+    `displaced.origin_bin`, speed ∝ path ÷ v − S on `runaway.speed`, time since launch uniform on
+    [S, path ÷ v] on `runaway.ejection`, birth component by Type Ia rate.
+    `placement::survivor_flight` reads the flight back.
+  - _The donor_ (fix, 2026-11-01): its mass is its speed's inverse at Roche-lobe contact beside
+    a 1.0 M☉ accretor (`survivors::donor_mass`; Eggleton 1983, Nauenberg 1972), held to
+    0.15–1.0 M☉. Up to 0.30 M☉ (`HEAVIEST_HELIUM_WHITE_DWARF`) it is a helium white dwarf, the
+    record's primary of its own mass and age since launch (`placement::is_helium_donor`), built by
+    `StarModel::helium_white_dwarf_under` and taken exactly by the brief model. A C/O donor's
+    progenitor is Kalirai's inverse in layer D.
+  - _The launch_ (fix, 2026-11-01): the direction is drawn from launch sites on the sphere of
+    radius vτ by `Survivors::launches_per_year_per_cubic_ly`, on `system.velocity` words
+    4k–4k + 3 (`Survivors::launch_direction`, `LaunchSampler`: a uniform, lobe and plane-band
+    proposal, bound at its probes).
+  - _The pad._ Raising `pad_speed(D)` outright moved `sky/census_near_sun`'s and `sky/eye_cut`'s
+    cell tallies at 24, so `query::pad_speed_in(galaxy, layer)` and `escape_cut_holds_in` (new)
+    give layer D `UNBOUND_PAD_SPEED` from 27; the walks, `epoch_velocity`, lensing and the exempt
+    cut read them. So do the features' and streams' reach (`band_reach`) and `widest_sphere`, by
+    the galaxy, and the sky census and the server's sky through `SkyQueryBuilder::pads`
+    (`query::LayerPads`, new; `BlockParams` carries the query's). `census_plan` debug-asserts its
+    query's pads are its galaxy's.
+  - _The hold._ `GalaxyRules::hypervelocity` (`HypervelocityRules`, `HYPERVELOCITY_VERSION` 27),
+    in `every_27_hold`; tripwire `the_hypervelocity_survivors_are_held_only_until_the_27_bump`;
+    `Galaxy::with_rules` refuses it. The carve-out reads layer D only as each field component's
+    share, so the survivors do not join `CarveOutRules::Claimed`.
+  - _For P15.T6._ `HYPERVELOCITY` stays the provisional form; its production table should fit
+    the convolution over launches before S, as today's holds survivors of every age.
+  - _The bump's goldens_, blessed under every 26 hold with and without the weight: at least
+    `galaxy_map`, `placement/displaced_prepin`, `query/range`, the sky's `band_face_row`,
+    `eye_cut` and `near_sun`, and the server's `density_map_face_on_128`, `systems_in_range` and
+    `systems_in_range_briefs`.
+- **P09.T40, the classes' cost (lane `p09-t40-class-cells`, 2026-11-01, at `GENERATOR_VERSION` 24,
+  under 27's `CLASS_SOURCE_VERSION`; no output moved).**
+  - _Rule 11._ `ClassProcess::{epoch_place, reads_place_first}`: the entry's place at the epoch,
+    the site's first three words (`grid::site_stream`, which every site now reads through). The
+    accreting white dwarfs, both merger classes and the luminous blue variables give it. The source
+    builds only the candidates whose place its sphere, padded at `PAD_SPEED`, holds, and walks
+    only the cells that sphere meets.
+  - _Cache._ In `catalogue_classes`: `ClassCellSystems`, `CatalogueClassCellCache`,
+    `NoClassCellCache`, and `CachedClassSource` (from `CatalogueClassSource::with_cells`). In the
+    server: `compute::SharedClassCellCache`, 32 MiB (`DEFAULT_CLASS_CELL_CACHE_MIB`, no
+    command-line option yet), now `RangeCaches::new`'s fourth argument. `beside_the_grid` takes
+    the class cells.
+  - _Figures (pod, release, 27's rules)._ The Sun-like 50 ly query takes 413 ms cold and 5.04 ms
+    warm, against 30.3 s at T37.a. The 1 ly query takes 296 ms and 4.03 ms. The classes' cold
+    share at 50 ly is about 200 ms: the core collapses 160 ms and the X-ray binaries 33 ms. The
+    grid and the members alone take 215 ms cold.
+  - _Next levers._ The core collapses' window prefilter ("P09.T33.a as built", _Cost_), and a
+    place bound for the X-ray binaries: the site plus the recoil's flight.
+  - _Fixed._ Under the 27 hold's fitted tables the X-ray binaries count in layers D and E
+    (`member_layers(class, BinaryTableRules)`): P15.T10.b's engine-fitted sampler draws compact
+    stars' progenitors from 3.2 M☉. Its accretors grew past the core-collapse mass, so the layers
+    widen with it rather than the fit being bounded. Under the scratch tables the class stays at
+    E.
+- **P09.T38, as built (lane `p09-t38`, 2026-11-01, at `GENERATOR_VERSION` 24, under every 27 hold;
+  no output moves at 24–26).**
+  - _Tests_ (slow, fixed seeds, run by name for the 27 bump; `catalogue_classes::verification`):
+    `complementarity::the_grid_and_the_catalogue_are_complementary_under_every_27_hold` and
+    `…_under_every_26_hold`; `budgets::the_field_members_and_catalogue_hold_each_population_s_budget`;
+    `shells::the_shells_at_milky_way_rates_under_every_27_hold` (golden
+    `catalogue_classes/shells_27`, new). Beside them, the features' and the centre's
+    complementarity under every 27 hold: `features::members::recent::tests::the_cells_and_the_list_are_complementary_under_every_27_hold`
+    and `features::centre::recent::tests::the_centre_s_cells_and_its_list_are_complementary_under_every_27_hold`.
+    Fast: `lbv::tests::a_displaced_host_is_the_grid_s_from_27`.
+  - _Seams (test builds only)._ `displaced::site::with_forced_margin` (the reject path, forced);
+    `core_collapse::test_on_grid_marks` and `lbv::test_on_grid_marks` (each class's test on a grid
+    record's marks); `SystemRecord::with_primary_initial_mass`; `placement::catalogue_claims`.
+    `lbv`'s verdict reads its stars through `Verdict::of_record` (bit for bit).
+  - _Fault fixed (P09.T43's class, under 27's runaways' field, `RunawayDeathsRules::Ejected`)._
+    `lbv_claims` claimed displaced systems, which `LbvProcess` never draws (it takes the stay
+    share): lost systems. From 27 `lbv::claims_its_placement` leaves them on the grid; the 27 bump
+    deletes its match with the hold. The 26 arm keeps the gap (held output).
+  - _Budgets._ The centre's volume ran later ("P09.T38, the centre's volume"). The carve-out's claims are printed, not tested: the grid's
+    displaced classes weigh the whole budget and T33.b's terms its field part (pending the owner's
+    ruling there). Members are tested only where a volume holds 20 features or more.
+  - _The bump's goldens_, blessed under every 26 hold with and without the weight and layer D's
+    raised pad, with the fixed donor and launch: at least `galaxy_map`,
+    `placement/displaced_prepin`, `query/range`, the sky's `census_near_sun` and `eye_cut`, and
+    the server's `density_map_face_on_128`, `systems_in_range` and `systems_in_range_briefs`.
+- **P09.T31 as built (lane `p10-list-registration`, 2026-11-01, at `GENERATOR_VERSION` 24;
+  test-only, no output moved).**
+  - _Tests._ `galaxy::features::centre::over_time`'s four, slow, by name, on the centre's fixture
+    under every 25 hold: the profile and flattening (six threads, `.config/nextest.toml`), the
+    eccentricities, the S2-like orbits and the spacing. The figures are in the lane's outbox.
+  - _Bands._ Beyond 1 ly the shells sample band D: a band-E neutron-star class (component 3) exhausts
+    its draw's attempts there, the debug assertion P09.T36.b met at 24 (a finding).
+  - _Pinned as measured (findings)._ The spacing at 3 ly, 0.0443 ly; the eccentricities' mean is in
+    0.6–0.72 but not thermal by Kolmogorov–Smirnov, which the test prints and does not assert.
+- **P09.T37.b, as built (lane `p10-list-registration`, 2026-11-01, at `GENERATOR_VERSION` 24,
+  behind `LIST_SOURCE_VERSION` = 27 with P10.T10.b's registration; no output moved).**
+  - _Registration._ The centre's source is served inside `GlobalListSource` (plan 10's
+    "P10.T10.b's registration member as built"), whose census adds the centre's expected counts
+    before the census decision; `CentreMemberSource` is never registered alone.
+  - _Cache._ `compute::SharedCentreOrbitCache` (`CentreOrbitHandle`), keyed by galaxy, band and
+    cell, of `limits::CENTRE_ORBIT_CACHE_BYTES`, 128 MiB; `RangeCaches::new`'s fourth argument is
+    `(classes, centre)`.
+  - _Rows._ `convert::features::centre_member_class`: a cell member its centre class, a victim
+    `listed` as a tidal disruption's, the black hole none; the row's velocity is the epoch's
+    (lean, 2026-11-01). The recent dead of P09.T36.b's list are not placed by the source yet.
+  - _Bench._ `feature_range_query`'s `list_at_27`; the figures, and the 5 ms miss, are in the
+    lane's outbox.
+- **P09.T37's placement by ID (lane `p10-placed-motion-27`, 2026-11-01, at 24, behind the 27
+  holds; no output moved).** The centre's members and the class hosts a query returns are placed
+  by their IDs at their rows' positions (`CentrePath`; plan 10's "P10.T10.b's placement as
+  built"). A centre recent entry is placed straight at its velocity until its source lands (lean,
+  2026-11-01).
+- **P09.T37's bench, the cold query cut bit for bit (lane `perf-range-27`, 2026-11-01, at
+  `GENERATOR_VERSION` 24; no output moves at 24–27).**
+  - _Class cells ahead._ `CatalogueClassSource::cells_read(galaxy, query, layers)` lists the class
+    cells the hits read; `CachedClassSource::read_ahead(galaxy, cells)` makes them through a cache.
+    The served query's first job asks `SharedClassCellCache::lacking` (sampled, as the grid's), and
+    the sources' cell jobs make them (`SharedClassCellCache::read_ahead`), so the sources' job finds
+    every class cell held. No new cache or limit: P09.T40's class cell cache and budget.
+  - _The list's models._ `GlobalListModels` (the dwarf cores' models and the streams' band shares),
+    lent to every `GlobalListSource` by `TubeLookup::models` (default `None`: the source makes its
+    own). The server keeps them in `HeldGlobalList::new(galaxy, list)`, charged within
+    `GLOBAL_LIST_CACHE_BYTES`, and `ListedTubes` lends them.
+  - _One bound a cell._ `ClassCellSystems::of` keeps each entry under the cell's one bound
+    (`grid::entry_systems_in`) instead of resolving each member's ID.
+- **P09.T37, the recent dead placed (lane `fix-p09-recent-dead`, 2026-11-01, at 24, under
+  `feature_classes` (26) and `list_source` (27); no output moved at 24–25).**
+  - _Features._ `FeatureMemberSource` reads each near feature's recent-only list
+    (`FeatureLevelList::recent_of`, lent by the new `FeatureInteriorCache::recent_list`, kept by
+    `KeepInteriors` and the server's `KeptInteriors`); the 26 bump deletes its hold compares.
+  - _Census._ `FeatureLevelList::add_recent_expected_within` and `CentreRecent::add_expected_within`:
+    each class's expected candidates × its profile's shell share, in `RecentClass::layer` (E; D, Ia).
+  - _Centre._ `CentreMemberSource` (in `GlobalListSource`) builds the list lazily:
+    `CentreRecent::{place, places}`, `CentrePlace::kept`, `TracerProfiles`.
+  - _Pads._ An entry moves straight at its velocity: a feature's list is read within its reach
+    plus the bulk speed (debug-asserted below `UNBOUND_PAD_SPEED`), the centre's within `REACH`
+    plus light's travel over |t|; each line is tested before the class's test.
+  - _By ID._ Each returned entry is where its placement by ID puts it: a centre entry's
+    `CentrePath` (`Straight`) bit for bit, a feature's `Drift::of_record_in` within 10 m.
+  - _Fix (deviation)._ `centre::recent::position` drew radii below the tracer's DF inner cut
+    (10⁻³ ly; 0.1 ly, young disc): every centre entry within 0.08 ly at up to 17,000 km/s. Now
+    inside `REACH`: 25 kept of 565 (were 17), `CENTRE_ENTRIES_DIGEST` re-pinned.
+  - _Finding._ P09.T36.b's "a handful (1–20)" now fails at 25; the range check went, 25 is pinned.
+  - _Centre binaries._ P11.T8.f's share `position`, so they move under `feature_binaries` (27);
+    pinned by `centre::binaries::tests::the_centre_s_binary_entries_are_pinned`.
+  - _Lean (2026-11-01; overturned 2026-11-02, "…the listed dead kicked")._ A listed death's
+    remnant stays on its progenitor's line, no natal kick, as `Drift::of_member` reads it.
+  - _Tests (slow)._ `verification::recent_in_range::every_recent_entry_in_a_sphere_is_returned_once_under_every_26_hold`
+    and `…_under_every_27_hold`. They failed on BASE (117 entries inside, none returned), so
+    `feature_classes` may not switch on without this lane; held to 27, the 26 test checks none lists.
+  - _Plan 11's listed binaries_ (P11.T8.f, 27) on the same lists: placed later ("…plan 11's listed
+    binaries placed").
+- **P09.T37, the centre's band-E draw (lane `fix-p09-recent-dead`, 2026-11-01, under
+  `list_source` (27); no output moved at 24–26).**
+  - _Cause._ `draw_star` drew a member's age once; at 24's rules every star of 52–100 M☉ dead by
+    3.3–4.0 Myr makes a black hole, so a continuous-component neutron star aged there exhausted
+    its 4,096 attempts (about 2% of them), the debug assertion of P09.T31's and T36.b's finding.
+  - _Fix._ From 27 a remnant class's attempt `k` draws its age on `centre.age` word `k` (attempt
+    0 unchanged); a living class still draws once. The 27 bump deletes the `match`. Test:
+    `centre::members::tests::a_centre_remnant_draws_its_age_with_each_attempt_from_27`.
+  - _Below 27._ The draw still exhausts: P09.T31's `over_time` tests (every 25 hold) still meet
+    the assertion beyond 1 ly.
+- **P09.T38, the centre's volume (lane `fix-p09-recent-dead`, 2026-11-01, under every 27 hold;
+  test only).**
+  - _Volumes._ Thirteen: the galactic centre's, about the black hole, sized by the query's own
+    census (`centre_radius_for`, 0.05–3,000 ly), since the nuclear cluster outnumbers the budget.
+  - _Sources._ `GlobalListSource` beside the members and the classes, as the server registers it;
+    the centre's and the streams' and cores' members are counted apart and printed, not tested.
+  - _Figures._ In the lane's outbox.
+- **P09.T37, the runaway claim (lane `fix-p09-recent-dead`, 2026-11-02, under `runaway_deaths`
+  (27); no output moved).**
+  - _Claim._ `members::recent::claimed_by` gives `Claim::{Listed(RecentClass), Runaway}`: a core
+    collapse whose member's own ejection marks make it a runaway (`FeatureStars::runaway`, which
+    `entry` reads too) is the class's runaway terms', so the cells give it up and the list drops it.
+  - _Lean (2026-11-02)._ The cells keep giving it up: P09.T33.b's terms take the whole budget's
+    runaways, so a cell keeping it would count it twice.
+  - _Test._ `features::members::recent::tests::the_cells_and_the_list_are_complementary_under_every_27_hold`,
+    which failed on BASE at `SystemId(0xe04de000f0000001)`: 308 runaway candidates, 20 mark sets.
+- **P09.T37, plan 11's listed binaries placed (lane `fix-p09-recent-dead`, 2026-11-02, under
+  `feature_binaries` (27); no output moved at 24–26).**
+  - _Features._ `FeatureMemberSource` reads a feature's whole list (`FeatureLevelList::listed_of`,
+    lent by `FeatureInteriorCache::list`, which replaces `recent_list`) under either list hold;
+    its census (`add_expected_within`, renamed) counts a binary class in each layer of its
+    `catalogue_classes::source::member_layers` set (now crate-visible), its hits read
+    `FeatureLevelList::member`.
+  - _Centre._ `CentreBinaries::{place, places, add_expected_within}` and
+    `CentreBinaryPlace::kept`; `entry` is `place` then `kept`, bit for bit.
+  - _Profiles._ `FeatureStars::of` tabulates its profile, so all of a list's classes share one
+    table (bit for bit).
+  - _Test (slow)._ `verification::recent_in_range::every_listed_binary_in_a_sphere_is_returned_once_under_every_27_hold`,
+    which failed first: 60 of the features' entries and 51 of the centre's inside, none returned.
+- **P09.T37's bench, the next cuts (lane `perf-range-27-b`, 2026-11-02, at 24; no output moves at
+  24–27).** Figures in the lane's outbox.
+  - _Lists kept._ The server's `SharedClusterModelCache` keeps each feature's list beside its
+    interior or bound (`list`), charged `FeatureLevelList::heap_bytes` within its budget;
+    `FeatureLevelList::listed_of` is `pub`, and `FeatureMemberSource::read_ahead` makes the lists.
+    `type_ia::DelayLaw` finds `ψ`'s and `Ψ`'s constants once a quadrature, bit for bit. A cell is
+    read ahead in parts (`FeatureMemberSource::read_ahead_part` of a `CellPart`; the server's
+    `FEATURE_CELL_PARTS`, 4).
+  - _Bench._ `served_at_27` adds the global list, the black hole's 50 ly query and a galaxy's first.
+  - _Centre's census._ `CentreModel` keeps each level's and band's bounds by corner key
+    (`members::CornerBounds`, made when first read, 370 kB, bounded by the grid);
+    `CentreMemberSource` reads no cell and no list for a sphere asked for no layer.
+  - _One track._ `sse::track_under` (the whole track) replaces `death_under`; a core-collapse
+    candidate keeps it and its test builds the stars on it (`StarModel::on_track_under`,
+    `system::primary_model_on_track`).
+  - _Query tables._ `Galaxy::make_query_tables` builds what a query's first reading built (the
+    centre's motion, the Type Ia delays, the core-collapse process, as the rules read them); the
+    server's `GalaxyCache` calls it after the headroom checks, 77 ms of a 3.5 s build at 27.
+- **P09.T37, the listed dead kicked (lane `fix-p09-recent-dead`, 2026-11-02, under
+  `feature_classes` and `list_source` (27); no output moved at 24–26).**
+  - _Motion._ research-leans-31 (median 283 kyr, 169 km/s): a listed core collapse, a feature's or
+    the centre's, moves on `CatalogueMotion::broken(site, T, bulk, bulk + kick)`, the kick its
+    own `ForcedSingle` stars' `natal_kick()` (`members::recent::ListedDeath`); its member's epoch
+    place and velocity are the motion's (`RecentEntry::motion`, `CentreRecentEntry::motion`).
+  - _Shell._ Its `SupernovaEntry` takes the kick (`with_remnant`): `RecentEntry::supernova`.
+  - _By ID._ `Drift::of_record_in` reads `members::listed_death_motion` (`Drift::broken`),
+    `CentrePath` a `Law::Broken`; the server's `SystemLine::at` reads `velocity_at(t)`.
+  - _Pads._ A remnant lies within `LISTED_DEATH_REACH` of its candidate's line (below): the
+    features' lists are looked up about the sphere grown by it (`lists_lookup_radius`; interiors
+    as before), the centre's within `REACH` plus it; a candidate is tested so, then its own line.
+  - _Lean (2026-11-02)._ The census counts a core collapse by its candidate's place, as the
+    classes count by cell: every list within 4,096 ly would add some 2,400 expected candidates
+    to layer E at the Sun, past a 50 ly query's 4,096 limit.
+  - _Reach (fix-p09-listed-death-reach, 2026-11-03; research-leans-33 overturned the lean of
+    `LIFETIME_REACH`)._ `members::source::LISTED_DEATH_REACH`, 8,192 ly: the cap keeps each of the
+    two lines within `LIFETIME_REACH` of the site, so by the triangle inequality the remnant lies
+    within twice that of its candidate's line; test
+    `members::source::tests::a_remnant_kicked_against_its_bulk_keeps_its_candidate_in_the_pre_tests`
+    (5,524 ly), which failed first.
+  - _Digests._ `ENTRIES_DIGEST` and `CENTRE_ENTRIES_DIGEST` re-pinned (places and velocities).
+  - _Test (slow)._ `verification::recent_in_range::a_listed_core_collapse_moves_on_its_remnant_s_kick_under_every_27_hold`,
+    which failed on BASE at all 90 kicked places.
+- **P09.T37, the centre's living band-E yield (lane `fix-p09-recent-dead`, 2026-11-02, under
+  `list_source` (27); no output moved at 24–26).**
+  - _Cause._ `draw_star` drew a living star's age once and refused it where its band was dead:
+    the continuous component's band-E living stars (8–16.5 M☉) live only in its first some 35 Myr
+    of 150, so its class kept 123 of its 626 expected.
+  - _Fix._ From 27 a living class's attempt `k` draws its age on `centre.age` word `k`, as the
+    remnants' do (attempt 0 unchanged): a uniform age over the ages its band lives.
+  - _Joint draw (fix-p09-centre-joint-draw, 2026-11-03; research-leans-33 overturned the lean
+    of a uniform age)._ From 27 every class's attempt `k` draws its age on word `k` and its mass
+    over its whole range, kept where that star then is of the class (living below the turn-off,
+    dead at it or above and `remnant_fits`): exact rejection, the count's mix. Test
+    `centre::members::tests::a_centre_class_s_draws_are_its_count_s_mix_of_ages_and_masses_from_27`,
+    which failed first (band-E living 18.3 Myr against 12.2; band-D white dwarfs 323 against
+    348); no centre digest at 27 moved.
+  - _Test._ `centre::members::tests::a_centre_living_class_yields_its_expected_count_from_27`
+    (`CentrePlacement::class_under`, split out of `candidate_under` bit for bit), which failed
+    first at 123; now 562, every candidate of the class kept, within four standard deviations.
+- **P09.T37, the kicks' cost cut (lane `fix-p09-recent-dead`, 2026-11-03, under `feature_classes`
+  (26), so at 26 and 27; no output moved at 24–27).**
+  - _Deaths._ `FeatureLevelList::kept_deaths`: a list's kept core collapses (candidate, record,
+    broken line) and their farthest offset from their lines by +H, found once with the list.
+  - _Caches._ `FeatureInteriorCache::deaths` lends them apart from the list; the server holds
+    them in `HeldFeature::deaths`, charged their bytes, so a far feature costs no list.
+  - _Hits._ A feature is read where its entries or its dead can reach the sphere, its list only
+    where its entries can; no candidate is tested again.
+  - _Bench._ `feature_range_query`'s `kicks_by_version`; figures in the lane's outbox.
+- **P09.T37, the kicks' cold cost (lane `fix-p09-recent-dead`, 2026-11-03, under `feature_classes`
+  (26); no output moved at 24–27).**
+  - _Profile._ Cold at 27, the dead within 8,247 ly of the Sun-like point: their stars' profile
+    tables 34%, the lists' other classes 8%, the candidates' death tests 41%, their stars 18%.
+  - _Bounds._ `level_list::death_bound`: a remnant lies within `|k| dt` of its candidate's line,
+    `|k|` ≤ 1,000 km/s and `dt` bounded by its two lines' `LIFETIME_REACH`; before its death
+    `dt` comes from the shared lifetime bracket, after it from its time.
+  - _Steps._ `KeptDeaths` asks each candidate's death, then its place and the rest, only where
+    its bound reaches the sphere, each once; a far feature's are kept without its stars or list.
+  - _Tables._ `FeatureStars::of` no longer tabulates its profile; its list does, before its
+    classes share it (`FeatureStars::tabulated`), bit for bit.
+  - _Lifetimes._ `displaced::death_in_interval_by_end` stops the exact tier's build at +H
+    (`track::fate_to_age`), bit for bit (`a_death_found_by_the_interval_s_end_is_the_death_bit_for_bit`).
+  - _Figures._ In the lane's outbox; the 3× target is missed (a finding).
+- **P09.T37, the kicks' cold cost, second pass (lane `fix-p09-recent-dead`, 2026-11-03, under
+  `feature_classes` (26); no output moved at 24–27).**
+  - _Envelope._ `displaced::envelope::LifetimeEnvelope`, held with the galaxy: band-E median-draw
+    lifetimes over 97 masses × 31 [Fe/H] columns, each made when first read; bilinear in ln τ,
+    widened by 3%, four times the worst error over 2 × 10⁴ random stars (0.69%).
+  - _Order._ A candidate's death test asks the envelope first, its bound before death reads it,
+    and its exact tier (`death_and_kick_by_end`) gives the remnant's kick too, bit for bit
+    (`stellar::system::natal_kick_of`), so a told death's bound is its own `|k| dt`.
+  - _Placed._ A told death's place and broken line are tested before its stars are made.
+  - _Charge._ A far feature's dead are charged their candidates; their few boxed steps are not.
+  - _Figures._ In the lane's outbox: the Sun-like target met, the inner disc's missed.
+- **P09.T28.d.c as built (lane `fix-p09-t28d-local-arc`, 2026-11-02, behind `KEPLER_ARC_VERSION`
+  = 27; no output moved at 24–26).**
+  - _Names._ `motion::spherical::{KEPLER_ARC_VERSION, KeplerArcRules::{Series, Local}}`,
+    `GalaxyRules::kepler_arc`; `SphericalOrbit::by_arc(&Arc<CentrePotential>, &KeplerOrbit)` and
+    `Trajectory::in_potential_by_arc(&CentreMotion, &Arc<CentrePotential>, EpochState)`, read by
+    `Trajectory::new`'s one `match`; `SphericalOrbit::new` and `Trajectory::in_potential` stay the
+    series. `Galaxy::centre_potential()` now returns `&Arc<CentrePotential>`, and the galaxy's
+    `heap_bytes` counts the shared value too; an orbit on the arc holds a clone, counted there.
+  - _Deviation (lean, 2026-11-02)._ The arc's η₀ is its own, from ln r₀ and the turning points
+    (`tan(η₀ ÷ 2) = √((ln r₀ − ln r_p) ÷ (ln r_a − ln r₀))`), not the series': the series' η₀ is
+    the wide orbits' miss (from it the arc erred as the series does), so the series' state jumps
+    at the epoch on them, some 3 au a second on the ×1.6 orbit from 0.1 ly.
+  - _Leans, measured (figures in the lane's outbox)._ The half-period span, the split at a turning
+    point, three quadratures, and `ARC_FLOOR`'s limit within F's rounding of a turning point.
+  - _Lean: the arc from Δ 0.03 (`ARC_LEAST_RANGE`)._ Nearer a circle F is too small beside its
+    terms for nodes near a turning point, and the series is the more exact, so the orbit keeps it
+    (`the_arc_meets_the_plan_s_bound_near_a_circle`).
+  - _The solve._ The wobble's bracket is cut to a radial period on the epoch's side; a root
+    off by more than `ARC_RESIDUAL` allows after three quadratures takes five more
+    (`ARC_MORE_STEPS`; three of the census's rogue planets, bound only some 6 × 10⁵ ly out); one
+    still off, or a state that rounds non-finite, takes the series.
+  - _For the 27 bump._ It re-blesses `galaxy/motion/centre_motion.golden`
+    (`centre_motion_figures_are_pinned`) and the slow `galaxy/motion/regime.golden`
+    (`regime_records_near_the_centre_are_pinned`), both 25's re-blesses too; no other golden of
+    the fast suite moves (checked by blessing with the 25 holds forced on and testing with the arc
+    on). It deletes the tripwire `the_kepler_arc_is_held_only_until_the_27_bump`, the `Series` arm
+    and the plan's test's 25 figures.
+- **P09.T40.a, the sky's features' gas (lane `p09-t40a-sky-feature-gas`, 2026-11-05, at 27 and 3;
+  held until `SKY_FEATURE_GAS_FROM`, no output moved).**
+  - _Sim._ `gas_overlay::{FeatureGasIndex, FeatureGasSlab}` (`build`, `slab`, `assemble`, `SLABS`)
+    and `FeatureGas::indexed`: `FeatureGas::new`'s modifiers in its order for every segment
+    (`gas_index_finds_what_the_cells_find`). `FeatureRecord::touches_sphere` is `near`'s test.
+  - _Server._ `SkyFeatureGas::{Held, Marched}` (`of_version`; `ServerConfigBuilder::sky_feature_gas`
+    only). `SkyTables::with_features(FeatureGasIndex)`; the service queues its 32 slab jobs ahead of
+    the tables'. The sky's gas reads no `SharedFeatureCellCache`; its census's members still do.
+  - _Exact._ `extinction::pieces` tests each piece only against the holes whose bounds hold its
+    middle (`Line::inside_bounds`), bit for bit
+    (`the_sweep_labels_each_piece_as_testing_every_hole_does`).
+  - _Lean: the constant (2026-11-05)._ `SKY_FEATURE_GAS_FROM` stays 28: train 28 retargets it to 29.
+  - _Lean: the time (2026-11-05)._ "Twice the 26 s" is read as twice the held shallow sky on the
+    same machine: on the pod 68.7 s held, 69.4 s marched (the lane's outbox).
+  - _For the bump that opens it._ Delete `SKY_FEATURE_GAS_FROM`, `SkyFeatureGas` and the tripwire,
+    and give every sky test's sim reference the gas as `tests/sky.rs`' `under_its_hold_*` do.
+  - _Then, too._ Refresh the constant's cost sentence and re-bless the sky's goldens. The index's
+    52 MB leave the 160 MiB tables budget one galaxy, and its 7 CPU-s join the tables' 31 (budget
+    30).
+- **P09.T36 in the alert walks (lane `fix-p09-alert-walk-features`, 2026-11-05, at 27, behind
+  `LISTED_ALERTS_VERSION` = 29; no output moved).** Train 27's finding: the walks saw the field's
+  deaths alone.
+  - _Hold._ `alerts::listed::{LISTED_ALERTS_VERSION, ListedAlertsRules::{FieldAlone, Lists}}`,
+    `GalaxyRules::listed_alerts`.
+  - _Bump._ 29 deletes them, the `match` in `ListedWalk::rules_read`, `unwalked_by`'s held arm, the
+    tripwire and `the_listed_alerts_turn_on_at_29`, and moves `listed/tests.rs`' 27 arms.
+  - _Names (alerts)._ `alerts::listed_scan_slab(galaxy, ctx, query, (class, sphere), x, out) -> u64`,
+    which the server's `walk_slabs` calls; `AlertContext::with_feature_cells`; from 29
+    `ScanResult::drawn` counts the lists' drawn candidates too.
+  - _Names (plan 09)._ `FeatureLevelList::{expected, recent_entry_when}`, `FeatureStars::entry_when`
+    (`entry` is test-only), `ListedExplosion` and `{RecentEntry, CentreRecentEntry}::explosion_kind`
+    (a listed Type Ia keeps its channel), `supernova::explosion_event_of`.
+  - _Classes walked (lean, 2026-11-05)._ `CORE_COLLAPSE` (supernovae, magnetars) and `TYPE_IA` alone:
+    the lists' LBVs (P09.T43) and plan 11's binaries (P11.T8.f) are not, and
+    `AlertSource::FeatureLists` names those two tasks from 29.
+  - _Census (lean, 2026-11-05)._ The lists' expected candidates join the cells' only where the cells
+    leave the class complete, and their deaths are read in the same pass; a background walk adds
+    the lists' drawn candidates.
+  - _Centre (lean, 2026-11-05)._ The centre's recent dead are walked with their classes, without the
+    global list, so the server's scans see them.
+  - _Lookup (lean, 2026-11-05)._ A list is read through a ball about its feature (its reach plus its
+    bulk travel, capped at `LIFETIME_REACH`), the features found at `UNBOUND_PAD_SPEED`; lists are
+    built afresh each walk, not from the interior cache, whose `listed_of` builds every death.
+- **P09.T36 in the alert walks, every class (lane `fix-p09-alert-walk-features-2`, 2026-11-05, at
+  28, behind the same hold; no output moved).** Supersedes the lane before's classes, `unwalked_by`,
+  `FeatureLevelList::expected` and its lists built afresh.
+  - _Classes._ From 29 every class the lists hold is walked beside its cells (`listed::Walked::of`):
+    the LBVs, both white dwarf classes, the X-ray binaries and both merger classes with the core
+    collapses and the Type Ia; `AlertSource::FeatureLists` is `Complete` from 29
+    (`ListedWalk::source_status`). The bump deletes `source_status`'s held arm with the hold.
+  - _Names (alerts)._ `alerts::{ListedCell, ListedHosts, ListedHostsCache, NoListedHostsCache}`,
+    `AlertContext::with_listed_hosts`; the cells' per-host steps `NovaWalk`, `EruptionWalk`,
+    `xray_binary_host_detections` and `oneshot::listed_merger_event`, which the cells' walks call
+    bit for bit.
+  - _Names (plan 09)._ `FeatureLevelList::{class_counts_of, class_counts, core_collapse_told}`.
+  - _Server._ `alerts::SharedListedHostsCache` (`AppState::listed_hosts`, in
+    `LISTED_HOSTS_CACHE_BYTES`), lent to `walk_interactive` and `walk_slabs`.
+  - _Kept lists (lean, 2026-11-05)._ Kept per feature cell: each feature's class counts, its core
+    collapses' deaths read time first (their entries built each walk where the cut takes them),
+    the other classes' kept hosts, each found when first read and charged as if found; one job
+    builds a cell while the others wait.
+  - _Centre (lean, 2026-11-05)._ Its living hosts' ball pads their travel at their places' fastest
+    speed (`ListedHosts::centre_fastest`), uncapped; the features' living hosts', at their bulk
+    speed, uncapped too; deaths keep the cap.
+- **P09.T5, the superbubbles' merge and walls (lane `fix-p09-superbubble-extinction`, 2026-11-05,
+  at 27 and 3; held until `SUPERBUBBLE_MERGE_VERSION` = 29, no output moved).**
+  - _Sim._ `GasModifier::Wall` (a shell that replaces the field outside every hole; the densest
+    wins) and `PieceKind::Wall`, swept as the holes are. `Superbubble::merging`, `in_galaxy`,
+    `core_radius`, `wall_density` and `wall_inner_radius`; `GalaxyRules::superbubbles`. Every
+    bubble reader (`FeatureGas`, the recently dead, the server's feature answers) goes through
+    `in_galaxy`.
+  - _Lean: the merge (2026-11-05)._ A bubble stops at the remnants' merge speed, β c_net
+    (`snr::window::merge_speed`), at `L̄ = E(t) ÷ t`: its hot core fills 0.216 of the solar circle's
+    plane (0.96 before), and with the field's own hot phase 0.50 is hot.
+  - _Lean: the wall (2026-11-05)._ The swept-up sphere's mean gas at β² = 4 times its density, from
+    `WALL_INNER_SHARE` = ∛¾ of the radius; the hole is the core. Plane A_V over 1 kpc: 2.14 mag/kpc.
+  - _For the 29 bump._ Delete the hold, `SuperbubbleRules`, its field and the tripwire
+    `the_superbubbles_merge_only_from_29`; re-bless `galaxy/features/gas.golden`
+    (`feature_gas_about_the_sun_is_pinned`); restate T4.b's radii test, which reads `of`.
+- **P09.T37, the 27 range tests within wasm32's 4 GiB (lane `fix-wasm-range-hits`, 2026-11-05, at
+  28; no output moved).**
+  - _Cause._ Not the hits (at most 20,766 a sphere): the tests' class-cell cache kept the eight
+    stellar-merger cells about the centre, 12.2 million places (557 MiB) each, and the sixth
+    cell's places, grown by doubling to 2²⁴, asked for 768 MiB; the grid cache also kept
+    `generate_cell`'s reservation, 1.5 GiB for 0.22 GiB of records about the centre.
+  - _Sim._ `ClassCellSystems::of` reserves a placed class's places exactly, bit for bit.
+  - _Tests (lean, 2026-11-05)._ The verification's `KeepClassCells::under(bytes)` keeps cells of
+    at most `KEPT_CLASS_CELL_BYTES` (64 MiB) in `recent_in_range`, on both targets (`Default`
+    keeps every cell, as `budgets` has it), and `KeepCells` keeps each cell shrunk to its records.
+    The range plans are not walked in chunks: the hits are not what fills the memory.
+  - _Result._ The three pass natively and on wasip1 (wasmtime 49.0.1), peaking at 1.5–3.0 GiB
+    there; figures in the lane's outbox.
+- **P09.T37, the listed deaths' kick directions (lane `perf-range-layer-e-in-part`, part 2,
+  2026-11-06; no output moves).**
+  - `DeathCandidate` keeps its kick's two possible directions (`KickDraws::directions`, from its
+    primary's draws) and, lazily, its candidate's place (`KeptDeaths::place`, which `placed` now
+    reads). `death_hits` asks `told` only where a segment from the feature's centre (within its
+    reach), then from that place, along either direction and as long as the bound before death,
+    passes within the sphere's radius and the bulk's pad (`source::kick_may_reach`).
+  - A reader that adds a kick direction, or moves a remnant off its candidate's line other than by
+    its kick times the time since its death, updates `KickDraws::directions` and `kick_may_reach`.
+- **P09.T35's C1 at the budget (lane `fix-carve-out-census`, 2026-11-06, at 29; test only).**
+  `census_of_the_carve_out` builds both arms with `budget_rules` (`FieldShareRules::None`) and walks
+  `REMNANT_REACH_CELLS` = 112 past `young_mean`'s stop. Both halves still fail there (lane outbox).
+- **The carve-out's residuals, held at 31 (lane `fix-carve-out-residuals`, 2026-11-07).** One hold,
+  `GalaxyRules::residuals` (`CarveResidualsRules`, `CARVE_RESIDUALS_VERSION` = 31, in
+  `displaced/site.rs`; `GalaxyRules::every_31_hold()`). Its LBV half (P09.T43): from 31 a component's
+  share is the field's × `StayMarks`' alive odds, each node weight × `AliveLaw`'s bound, and a host
+  is thinned on `AliveLaw::odds` (lifetime at `Z_ref`, own draws) on a new tag, `class.lbv.alive`.
+  Lean (2026-11-07): thin at the host, after the test, so only hosts pay the lifetime.
+  Its dead-record half (P09.T35's C1): from 31 `placement::marks::dead_age` takes the exact fate of a
+  table-read record whose drawn time since death is under `recent_death_reach()` (`W_cap` + L + 2H)
+  plus the bracket's width, and redraws after its death age at the same `u`; `Tracks::Defer` stops
+  there (`Unbuilt`); a route or reach disagreement keeps the table's draw. `FateRead::Table` gained
+  `lower`. The census builds both arms at the budget with the 31 residuals, and resumes from
+  `HYPERION_CENSUS_CHECKPOINT` (chunks of 512 columns).
+  - _Folded at 31 (train 31):_ `CARVE_RESIDUALS_VERSION`, `CarveResidualsRules`,
+    `GalaxyRules::residuals` and `every_31_hold` deleted; both fixes always apply. Its tests are
+    `lbv/alive_law_tests` (lean: they check the rule, so they stay, the held comparisons gone);
+    `the_class_s_deaths_inside_the_table_s_excess` and the `_under_the_31_residuals` twins went.

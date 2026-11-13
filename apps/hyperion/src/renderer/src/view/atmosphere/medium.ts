@@ -5,21 +5,94 @@
  * @remarks
  * Each term is a density profile over height, scattering and absorption coefficients per channel at
  * unit density, and a phase function, as Bevy 0.19's `ScatteringMedium` is a list of terms. A new
- * gas or aerosol is a new term, never a new model. The three channels are spectral samples at
- * {@link CHANNEL_WAVELENGTHS_NM}, not RGB: `solar.ts` turns them into Rec. 709 luminance.
+ * gas or aerosol is a new term, never a new model. The three channels are the smooth terms
+ * evaluated at {@link CHANNEL_WAVELENGTHS_NM}, which the star's linear Rec. 709 colour multiplies
+ * (plan R08, Design note 5, R08.T6.d): a table holds light per unit of the star's illuminance in
+ * each channel.
  */
 
 import type { Rgb } from "../photometry/toneCurve";
+import type { ColumnAbsorberSpec, PairAbsorberSpec } from "./absorbers";
+import { FITTED_CHANNEL_WAVELENGTHS_NM } from "./fittedChannels";
+import { acos, exp, expm1, pow } from "../../lib/pinnedMath";
 
 /**
- * The wavelengths of the three spectral channels, nm: 680, 550 and 440, red, green and blue.
+ * The wavelengths the smooth terms are evaluated at for the three render channels, nm, red, green
+ * and blue: R08.T4.a's fitted triple, `channels.json`'s (645, 544, 433.625) as built (plan R08,
+ * Design note 5; R08.T6.d).
  *
  * @remarks
- * Bruneton's `kLambdaR`, `kLambdaG` and `kLambdaB` (precomputed_atmospheric_scattering, 2017,
- * `atmosphere/model.h`), which Hillaire 2020 and sebh's reference code inherit. R08 refits them
- * (R08 Design note 8).
+ * `fittedChannels.ts`'s {@link FITTED_CHANNEL_WAVELENGTHS_NM}, the minimax fit of Δu′v′ over
+ * R08.T4.a's family of twelve suns and 29 airs, which `channels.test.ts` records and holds. R05
+ * evaluated its Earth constants at Bruneton's `kLambdaR`, `kLambdaG` and `kLambdaB` (680, 550 and
+ * 440 nm; precomputed_atmospheric_scattering, 2017, `atmosphere/model.h`), which Hillaire 2020
+ * and sebh's reference code inherit; `earth.ts`'s `R05_EARTH_REFERENCE` keeps them as numbers of
+ * its own.
  */
-export const CHANNEL_WAVELENGTHS_NM: Rgb = [680, 550, 440];
+export const CHANNEL_WAVELENGTHS_NM: Rgb = FITTED_CHANNEL_WAVELENGTHS_NM;
+
+/** A render channel, by its index in {@link CHANNEL_WAVELENGTHS_NM}: 0 red, 1 green, 2 blue. */
+export type RenderChannel = 0 | 1 | 2;
+
+/** The span of the bake bins, nm: 380 to 760 (R08 Design note 5). */
+export const BAKE_RANGE_NM: readonly [number, number] = [380, 760];
+
+/** The number of bake bins: 15, R06's `SKY_BAKE_BINS`. */
+export const BAKE_BIN_COUNT = 15;
+
+/** Each bake bin's width, nm: 380 ÷ 15 = 25.33. */
+export const BAKE_BIN_WIDTH_NM = (BAKE_RANGE_NM[1] - BAKE_RANGE_NM[0]) / BAKE_BIN_COUNT;
+
+/**
+ * The centres of the 15 bins every off-frame bake is solved in, nm: 392.67 + 25.33 k, k = 0..14,
+ * each {@link BAKE_BIN_WIDTH_NM} wide over {@link BAKE_RANGE_NM} (R08 Design note 5, after
+ * Bruneton 2017's use of bin midpoints).
+ *
+ * @remarks
+ * R06's `sky::colour::BAKE_WAVELENGTHS_NM` mirrors it, and a star's `HostDiscDto.bake_spectrum` is
+ * its spectrum's mean over each bin. Both are tested against
+ * `packages/protocol/fixtures/bake_wavelengths_nm.json` (here in `medium.test.ts`).
+ */
+export const BAKE_WAVELENGTHS_NM: ReadonlyArray<number> = Array.from(
+  { length: BAKE_BIN_COUNT },
+  (_, k) => BAKE_RANGE_NM[0] + (k + 0.5) * BAKE_BIN_WIDTH_NM,
+);
+
+/**
+ * A density given level by level (plan R08, Design note 2): R08's hydrostatic column (`column.ts`),
+ * a polytrope rather than an exponential, and layers with a base and a top.
+ *
+ * @remarks
+ * The density is linear in height between neighbouring levels and constant beyond the first and
+ * the last, the rule a texture sampled with linear filtering and clamped edges follows, and the
+ * one R08.T12.a's reference tracer reads a case's `tabulated` profile by
+ * (`hyperion-fit`'s `atmosphere::case::DensityProfile::Tabulated`), so that the client and the
+ * reference read the same air. The levels are checked by {@link tabulatedDensity}, as the tracer
+ * checks a case's: at least two, heights finite and strictly ascending, and relative densities
+ * finite and not negative, as many as the heights. Under R08 Design note 17 the heights are
+ * gravity-scaled heights h\* = s h, as every profile's are on an oblate body.
+ */
+export interface TabulatedDensity {
+  readonly kind: "tabulated";
+  /** The levels' heights above the ground, m, strictly ascending. */
+  readonly altitudesM: Float64Array;
+  /** The relative density at each level. */
+  readonly relative: Float64Array;
+  /**
+   * The heights of its layer's edges, m, ascending, where its levels do not show them: a table
+   * resampled onto other levels (`tables.ts`'s `resampledDensity`), whose ramps spread over the
+   * new levels about the old edges. Absent, {@link layerEdgesM} takes them from the levels.
+   */
+  readonly edgesM?: ReadonlyArray<number>;
+  /**
+   * Set where its levels are another profile's projection onto them (`tables.ts`'s
+   * `resampledDensity`, plan R08, R08.T16.a.2): a sheet its levels would alias, spread over the
+   * levels about it. The per-frame marches cut each of its ramps that holds any of it at both its
+   * edges, not at its middle, so that the spread sheet takes a piece of its own
+   * (`marchSteps.ts`'s `marchEdgesM`).
+   */
+  readonly projected?: true;
+}
 
 /**
  * How a term's density, relative to its value at the reference height, varies with height above
@@ -28,6 +101,7 @@ export const CHANNEL_WAVELENGTHS_NM: Rgb = [680, 550, 440];
  * - `exponential`: e^(−h ÷ H) with scale height H, 1 at the ground.
  * - `tent`: zero below `bottomM` and above `topM`, rising linearly to 1 at `peakM` and falling
  *   linearly back (Bruneton 2017's ozone layer).
+ * - `tabulated`: given level by level ({@link TabulatedDensity}).
  */
 export type DensityProfile =
   | { readonly kind: "exponential"; readonly scaleHeightM: number }
@@ -36,23 +110,358 @@ export type DensityProfile =
       readonly bottomM: number;
       readonly peakM: number;
       readonly topM: number;
-    };
+    }
+  | TabulatedDensity;
+
+/**
+ * A tabulated density from its levels, checked.
+ *
+ * @remarks
+ * The arrays are kept, not copied; the caller does not change them afterwards.
+ *
+ * @throws RangeError for fewer than two levels, arrays of different lengths, heights that are not
+ *   finite and strictly ascending, or a relative density that is not finite and at least 0.
+ */
+export function tabulatedDensity(
+  altitudesM: Float64Array,
+  relative: Float64Array,
+): TabulatedDensity {
+  if (altitudesM.length < 2 || relative.length !== altitudesM.length) {
+    throw new RangeError(
+      `a tabulated density needs at least two levels and one density each, got ${altitudesM.length} heights and ${relative.length} densities`,
+    );
+  }
+  for (let i = 0; i < altitudesM.length; i += 1) {
+    const h = altitudesM[i] ?? Number.NaN;
+    const below = i === 0 ? Number.NEGATIVE_INFINITY : (altitudesM[i - 1] ?? Number.NaN);
+    if (!(Number.isFinite(h) && h > below)) {
+      throw new RangeError(`a tabulated density's heights ascend strictly: ${h} m at level ${i}`);
+    }
+    const d = relative[i] ?? Number.NaN;
+    if (!(Number.isFinite(d) && d >= 0)) {
+      throw new RangeError(`a tabulated density is finite and not negative: ${d} at level ${i}`);
+    }
+  }
+  return { kind: "tabulated", altitudesM, relative };
+}
+
+/**
+ * The index i of the level at or below h, with h in [altitudesM[0], last), by bisection:
+ * altitudesM[i] ≤ h < altitudesM[i + 1].
+ */
+function levelBelow(altitudesM: Float64Array, h: number): number {
+  let low = 0;
+  let high = altitudesM.length - 1;
+  while (high - low > 1) {
+    const middle = (low + high) >>> 1;
+    if ((altitudesM[middle] ?? Number.NaN) <= h) {
+      low = middle;
+    } else {
+      high = middle;
+    }
+  }
+  return low;
+}
+
+/** Level i's interval at h, linear between its ends. */
+function withinLevel(profile: TabulatedDensity, i: number, h: number): number {
+  const h0 = profile.altitudesM[i] ?? Number.NaN;
+  const h1 = profile.altitudesM[i + 1] ?? Number.NaN;
+  const d0 = profile.relative[i] ?? Number.NaN;
+  const d1 = profile.relative[i + 1] ?? Number.NaN;
+  return d0 + ((d1 - d0) * (h - h0)) / (h1 - h0);
+}
+
+/** A tabulated density at h: linear between levels, constant beyond the first and the last. */
+function tabulatedAt(profile: TabulatedDensity, h: number): number {
+  const heights = profile.altitudesM;
+  const last = heights.length - 1;
+  if (h <= (heights[0] ?? Number.NaN)) {
+    return profile.relative[0] ?? Number.NaN;
+  }
+  if (h >= (heights[last] ?? Number.NaN)) {
+    return profile.relative[last] ?? Number.NaN;
+  }
+  return withinLevel(profile, levelBelow(heights, h), h);
+}
+
+/**
+ * A tabulated density's integral from the ground to `upToM`, m: the constant below the first
+ * level, the trapezoids of the levels, which are exact for the linear interpolant, and the
+ * constant above the last, each over the part of it below `upToM`.
+ */
+function tabulatedColumnM(profile: TabulatedDensity, upToM: number): number {
+  const heights = profile.altitudesM;
+  const last = heights.length - 1;
+  const top = Math.max(upToM, 0);
+  const first = heights[0] ?? Number.NaN;
+  const final = heights[last] ?? Number.NaN;
+  let length = 0;
+  if (first > 0) {
+    length += (profile.relative[0] ?? Number.NaN) * Math.min(top, first);
+  }
+  for (let i = 0; i < last; i += 1) {
+    const low = Math.max(heights[i] ?? Number.NaN, 0);
+    if (low >= top) {
+      break;
+    }
+    const high = Math.min(heights[i + 1] ?? Number.NaN, top);
+    if (high > low) {
+      length += 0.5 * (high - low) * (withinLevel(profile, i, low) + withinLevel(profile, i, high));
+    }
+  }
+  if (top > final) {
+    length += (profile.relative[last] ?? Number.NaN) * (top - Math.max(final, 0));
+  }
+  return length;
+}
+
+/**
+ * A phase function given entry by entry, per channel (plan R08, Design note 6): a Mie,
+ * literature or aggregate phase function, which no closed form carries.
+ *
+ * @remarks
+ * The entries stand at u = √(θ ÷ π), θ the scattering angle, so that a 256-entry table spaced
+ * evenly in u puts its entries densest near the forward peak, where a 1 ÷ x-wide diffraction peak
+ * would starve on a cos θ grid. The phase is linear in u between neighbouring entries
+ * ({@link phaseAt}). The values are per steradian, each channel normalised so that its integral
+ * over the sphere is 1, as the closed forms are; the table's builder (R08.T5.c) holds that, and
+ * {@link phaseTable} checks only the shape. The arrays are kept, not copied.
+ *
+ * The drawn image is scalar and reads `values`, the scattering matrix's a₁, alone. The rest of the
+ * matrix, where its source publishes one, is for the reference and the polarisation correction
+ * (Design note 10, as ruled on 2026-10-09).
+ */
+export interface PhaseTable {
+  /** u = √(θ ÷ π) at each entry, strictly ascending from 0 (forward) to 1 (backward). */
+  readonly u: Float64Array;
+  /** The phase per channel at each entry, sr⁻¹: the scattering matrix's a₁. */
+  readonly values: readonly [Float64Array, Float64Array, Float64Array];
+  /**
+   * The scattering matrix's other elements, or `undefined` where its source publishes none, which
+   * makes the term a total depolariser in the reference and the polarisation correction.
+   */
+  readonly matrix: PhaseMatrixTable | undefined;
+  /**
+   * Each channel's share of the scattering in the table's forward delta, the unresolved diffraction
+   * peak R08.T5.c lays on its first entries (`forwardPeak.ts`), 0 where it has none (plan R08,
+   * Design note 6; R08.T7). The delta is direct light: the kernels' medium takes it out of the table
+   * and the term's extinction (`tables.ts`'s `withoutForwardDelta`); the table itself keeps it, for
+   * R08.T12's reference and the thick bakes' delta-M.
+   */
+  readonly forwardPeak: Rgb;
+}
+
+/** One element of a scattering matrix per channel, on a {@link PhaseTable}'s u. */
+export type PhaseMatrixElement = readonly [Float64Array, Float64Array, Float64Array];
+
+/**
+ * A scattering matrix's elements beside a₁, block-diagonal for a macroscopically isotropic and
+ * mirror-symmetric medium (Hovenier, van der Mee and Domke 2004), each normalised as a₁ is.
+ *
+ * @remarks
+ * R08.T5.b and T5.c fill them (a sphere's from T5.a's amplitudes, with a₂ = a₁ and a₄ = a₃);
+ * {@link phaseTable} checks only their shape.
+ */
+export interface PhaseMatrixTable {
+  readonly a2: PhaseMatrixElement;
+  readonly a3: PhaseMatrixElement;
+  readonly a4: PhaseMatrixElement;
+  readonly b1: PhaseMatrixElement;
+  readonly b2: PhaseMatrixElement;
+}
 
 /**
  * A term's phase function.
  *
- * - `rayleigh`: 3 ÷ (16π) × (1 + cos²θ).
+ * - `rayleigh`: molecular scattering with the depolarisation ratio ρ per channel (natural light;
+ *   R08 Design note 4), 3 ÷ (4(1 + 2γ)) × ((1 + 3γ) + (1 − γ) cos²θ) ÷ (4π) with γ = ρ ÷ (2 − ρ),
+ *   the dipole phase of a randomly oriented anisotropic molecule from its ᾱ² and γ² (Chandrasekhar,
+ *   Radiative Transfer, 1950; the form Bucholtz 1995, Appl. Opt. 34, 2765, uses, not read here),
+ *   which is 3 ÷ (16π) × (1 + cos²θ) at ρ = 0. R08.T3.c's molecular term carries the mixture's ρ,
+ *   and the kernels draw it per channel since R08.T6.b (`source.wgsl`'s `phaseOf`); R05's constant
+ *   media say ρ = 0.
  * - `cornette-shanks`: Cornette and Shanks 1992's form of Henyey–Greenstein with asymmetry g.
  * - `none`: an absorbing-only term, which scatters nothing.
+ * - `tabulated`: given entry by entry, per channel ({@link PhaseTable}; R08.T6.a).
  */
 export type PhaseFunction =
-  | { readonly kind: "rayleigh" }
+  | { readonly kind: "rayleigh"; readonly depolarisation: Rgb }
   | { readonly kind: "cornette-shanks"; readonly asymmetry: number }
-  | { readonly kind: "none" };
+  | { readonly kind: "none" }
+  | { readonly kind: "tabulated"; readonly table: PhaseTable };
+
+/**
+ * A phase table from its entries, checked.
+ *
+ * @remarks
+ * The arrays are kept, not copied; the caller does not change them afterwards.
+ *
+ * @param forwardPeak - Each channel's share of the scattering in the table's forward delta, which
+ *   its first entries hold (`aerosol.ts`'s `aerosolPhaseTable`); none by default.
+ * @throws RangeError for fewer than two entries, channels of another length, a u that is not
+ *   finite and strictly ascending from exactly 0 to exactly 1, a value that is not finite and at
+ *   least 0, a matrix element of another length or not finite, or a delta's share outside [0, 1).
+ */
+export function phaseTable(
+  u: Float64Array,
+  values: readonly [Float64Array, Float64Array, Float64Array],
+  matrix?: PhaseMatrixTable,
+  forwardPeak: Rgb = [0, 0, 0],
+): PhaseTable {
+  if (!forwardPeak.every((share) => Number.isFinite(share) && share >= 0 && share < 1)) {
+    throw new RangeError(
+      `a phase table's forward delta takes a share in [0, 1) a channel, not ${forwardPeak.join(", ")}`,
+    );
+  }
+  const last = u.length - 1;
+  if (u.length < 2 || values.some((channel) => channel.length !== u.length)) {
+    throw new RangeError(
+      `a phase table needs at least two entries and one value a channel each, got ${u.length} and ${values.map((channel) => channel.length).join(", ")}`,
+    );
+  }
+  if (u[0] !== 0 || u[last] !== 1) {
+    throw new RangeError(`a phase table spans u from 0 to 1, not ${u[0]} to ${u[last]}`);
+  }
+  for (let i = 1; i <= last; i += 1) {
+    const at = u[i] ?? Number.NaN;
+    if (!(Number.isFinite(at) && at > (u[i - 1] ?? Number.NaN))) {
+      throw new RangeError(`a phase table's u ascends strictly: ${at} at entry ${i}`);
+    }
+  }
+  for (const [c, channel] of values.entries()) {
+    for (const [i, value] of channel.entries()) {
+      if (!(Number.isFinite(value) && value >= 0)) {
+        throw new RangeError(
+          `a phase table's values are finite and not negative: ${value} at entry ${i}, channel ${c}`,
+        );
+      }
+    }
+  }
+  if (matrix !== undefined) {
+    const elements: ReadonlyArray<readonly [string, PhaseMatrixElement]> = [
+      ["a2", matrix.a2],
+      ["a3", matrix.a3],
+      ["a4", matrix.a4],
+      ["b1", matrix.b1],
+      ["b2", matrix.b2],
+    ];
+    for (const [name, element] of elements) {
+      for (const [c, channel] of element.entries()) {
+        if (channel.length !== u.length || !channel.every(Number.isFinite)) {
+          throw new RangeError(
+            `a phase table's matrix element ${name} needs ${u.length} finite entries in channel ${c}`,
+          );
+        }
+      }
+    }
+  }
+  return { u, values, matrix, forwardPeak };
+}
+
+/** A phase table per channel at u, linear between the entries that bracket it. */
+function tabulatedPhase(table: PhaseTable, u: number): Rgb {
+  const entries = table.u;
+  let low = 0;
+  let high = entries.length - 1;
+  while (high - low > 1) {
+    const middle = (low + high) >>> 1;
+    if ((entries[middle] ?? Number.NaN) <= u) {
+      low = middle;
+    } else {
+      high = middle;
+    }
+  }
+  const u0 = entries[low] ?? Number.NaN;
+  const f = Math.min(Math.max((u - u0) / ((entries[high] ?? Number.NaN) - u0), 0), 1);
+  const at = (channel: Float64Array): number => {
+    const v0 = channel[low] ?? Number.NaN;
+    return v0 + ((channel[high] ?? Number.NaN) - v0) * f;
+  };
+  return [at(table.values[0]), at(table.values[1]), at(table.values[2])];
+}
+
+/**
+ * Rayleigh's phase with the depolarisation ratio ρ, sr⁻¹: 3 ÷ (16π) × ((1 + 3γ) + (1 − γ) μ²) ÷
+ * (1 + 2γ), γ = ρ ÷ (2 − ρ) ({@link PhaseFunction}'s `rayleigh`), which at ρ = 0 is
+ * `source.wgsl`'s 3 ÷ (16π) × (1 + μ²) to the bit.
+ */
+function rayleighPhase(depolarisation: number, mu: number): number {
+  const gamma = depolarisation / (2 - depolarisation);
+  return ((3 / (16 * Math.PI)) * (1 + 3 * gamma + (1 - gamma) * mu * mu)) / (1 + 2 * gamma);
+}
+
+/**
+ * A phase function's value per channel, sr⁻¹, for the cosine of the scattering angle.
+ *
+ * @remarks
+ * The closed forms are `source.wgsl`'s `phaseOf`: Rayleigh's (Bruneton and Neyret 2008, eq. 2),
+ * here with each channel's ρ (Chandrasekhar's form, which the kernels draw since R08.T6.b), and
+ * Cornette and Shanks's, the same in every channel (Appl. Opt. 31 (1992) 3152, as
+ * Bruneton and Neyret 2008, eq. 4, g its shape parameter and not the mean cosine), its denominator
+ * floored at 10⁻⁶ as there. A `tabulated` phase is read at u = √(θ ÷ π),
+ * θ = acos(cos θ), linear between the entries that bracket it ({@link PhaseTable}).
+ *
+ * @param cosTheta - The cosine between the direction of travel before and after scattering,
+ *   clamped to [−1, 1].
+ */
+export function phaseAt(phase: PhaseFunction, cosTheta: number): Rgb {
+  const mu = Math.min(Math.max(cosTheta, -1), 1);
+  let value: number;
+  switch (phase.kind) {
+    case "none":
+      value = 0;
+      break;
+    case "rayleigh": {
+      const [red, green, blue] = phase.depolarisation;
+      return [rayleighPhase(red, mu), rayleighPhase(green, mu), rayleighPhase(blue, mu)];
+    }
+    case "cornette-shanks": {
+      const g = phase.asymmetry;
+      const k = ((3 / (8 * Math.PI)) * (1 - g * g)) / (2 + g * g);
+      value = (k * (1 + mu * mu)) / pow(Math.max(1 + g * g - 2 * g * mu, 1e-6), 1.5);
+      break;
+    }
+    case "tabulated":
+      return tabulatedPhase(phase.table, Math.sqrt(acos(mu) / Math.PI));
+  }
+  return [value, value, value];
+}
+
+/**
+ * What an absorber term absorbs (R08.T4.b and T4.c, Design notes 5 and 8): its gases, whose
+ * transmittance each sun's curve of growth gives from the column u crossed, and the density that
+ * turns the term's relative density into u.
+ *
+ * - `column`: molecules, u = n ∫ ρ ds molecules m⁻², the spec's `columnPerM2` over the vertical.
+ * - `pair` (R08.T4.c): molecule pairs absorbing as σ n_A n_B, u = n ∫ ρ ds molecule pairs m⁻⁵,
+ *   the term's ρ the square of the column's relative density, and the spec's `pairColumnPerM5`
+ *   over the vertical.
+ */
+export type TermAbsorber =
+  | {
+      readonly kind: "column";
+      /** The absorbing species on one vertical profile (`absorbers.ts`'s `absorberSpecs`). */
+      readonly spec: ColumnAbsorberSpec;
+      /** n at relative density 1, molecules m⁻³. */
+      readonly numberDensityPerM3: number;
+    }
+  | {
+      readonly kind: "pair";
+      /** The molecule pairs on one vertical profile (`absorbers.ts`'s `absorberSpecs`). */
+      readonly spec: PairAbsorberSpec;
+      /** n_A n_B at relative density 1, molecule pairs m⁻⁶. */
+      readonly pairDensityPerM6: number;
+    };
 
 /** One constituent of an atmosphere: a gas, an aerosol or an absorbing layer. */
 export interface MediumTerm {
-  /** A short lower-case name, unique within its medium: `rayleigh`, `aerosol`, `ozone`. */
+  /**
+   * A short name, unique within its medium: `rayleigh`, `aerosol`, `ozone`, `thomson`, an
+   * absorber's `absorber:` and its species' registry keys joined by `+` (`absorber:O3+SO2`), or a
+   * pair absorber's `pair:` and its pairs' keys joined by `,` (`pair:O2+O2,H2+He`), keys keeping
+   * their chemical case.
+   */
   readonly name: string;
   readonly density: DensityProfile;
   /** The scattering coefficient per channel at unit density, m⁻¹. */
@@ -60,7 +469,37 @@ export interface MediumTerm {
   /** The absorption coefficient per channel at unit density, m⁻¹. */
   readonly absorption: Rgb;
   readonly phase: PhaseFunction;
+  /**
+   * An absorber's gases, absent for every other term. Its absorption is its curves of growth, one
+   * a sun, not `absorption`, which is 0 for it (`absorbers.ts`'s `absorberTerm`). The tables store
+   * its column along each ray and add each light's curve on read (R08.T6.c, Design notes 5 and 8).
+   */
+  readonly absorber?: TermAbsorber;
 }
+
+/**
+ * The pressure the pressure-weighted columns are taken over, Pa (R08.T4.d; `common.wgsl`'s
+ * `ABSORBER_PRESSURE_REFERENCE_PA`): 1 bar, the unit of {@link AtmosphereMedium.pressureBar}.
+ *
+ * @remarks
+ * A path's absorber-weighted pressure is the Curtis–Godson one (A. R. Curtis 1952, QJRMS 78, 638;
+ * W. L. Godson 1953, QJRMS 79, 367), p̄ = ∫p du ÷ ∫du over the absorber's own amount: here
+ * p̄ = 10⁵ Pa × w ÷ x, w its pressure-weighted column Σ (p ÷ 10⁵ Pa)(u ÷ U) and x its column u ÷ U.
+ * At 10⁵ Pa a Venus-class grazing chord's w, about 3 × 10³, stays under `rgba16float`'s largest
+ * value, 65,504 (IEEE 754-2008's binary16). A high, thin path's w is subnormal where x p̄ is under
+ * 6.1 Pa and rounds to 0 under about 3 × 10⁻³ Pa: pressures at which a visible line's Lorentz width
+ * no longer matters, and below every curve's first row, at which the read holds p̄
+ * ({@link ABSORBER_PRESSURE_FLOOR_PA}).
+ */
+export const ABSORBER_PRESSURE_REFERENCE_PA = 1e5;
+
+/**
+ * The least absorber-weighted pressure a path is read at, Pa (R08.T4.d; `common.wgsl`'s
+ * `ABSORBER_PRESSURE_FLOOR_PA`): 10⁻³ Pa, far under any curve's first row, 10 Pa ÷ f, so that a
+ * pressure-weighted column stored as 0 ({@link ABSORBER_PRESSURE_REFERENCE_PA}) reads at that row
+ * rather than at ln 0.
+ */
+export const ABSORBER_PRESSURE_FLOOR_PA = 1e-3;
 
 /**
  * An atmosphere's medium above a body's ground, independent of the body's size and figure.
@@ -77,6 +516,13 @@ export interface AtmosphereMedium {
   /** The ground's albedo per channel, Lambertian, in [0, 1]. */
   readonly groundAlbedo: Rgb;
   readonly terms: readonly MediumTerm[];
+  /**
+   * The column's pressure at each level in bar, over {@link ABSORBER_PRESSURE_REFERENCE_PA}, as a
+   * profile over the heights (`column.ts`'s `columnPressureBar`; R08.T4.d): where given, the
+   * kernels and the twin carry each path's pressure-weighted columns beside its columns, which an
+   * absorber whose curves have pressure rows (one with lines) needs. Absent for a medium with none.
+   */
+  readonly pressureBar?: TabulatedDensity;
 }
 
 /**
@@ -89,7 +535,7 @@ export function densityAt(profile: DensityProfile, heightM: number): number {
   let density: number;
   switch (profile.kind) {
     case "exponential":
-      density = Math.exp(-h / profile.scaleHeightM);
+      density = exp(-h / profile.scaleHeightM);
       break;
     case "tent":
       if (h <= profile.bottomM || h >= profile.topM) {
@@ -100,8 +546,44 @@ export function densityAt(profile: DensityProfile, heightM: number): number {
         density = (profile.topM - h) / (profile.topM - profile.peakM);
       }
       break;
+    case "tabulated":
+      density = tabulatedAt(profile, h);
+      break;
   }
   return density;
+}
+
+/**
+ * {@link densityAt} of one profile as a function of height, for a march that asks for it at
+ * nearby heights again and again (`tablesCpu.ts`'s twins): a tabulated profile's level is found by
+ * walking from the last one asked for, not by bisection, and its value is {@link densityAt}'s to the
+ * bit, by the same interpolation.
+ */
+export function densityLookup(profile: DensityProfile): (heightM: number) => number {
+  if (profile.kind !== "tabulated") {
+    return (heightM) => densityAt(profile, heightM);
+  }
+  const heights = profile.altitudesM;
+  const last = heights.length - 1;
+  const first = heights[0] ?? Number.NaN;
+  const final = heights[last] ?? Number.NaN;
+  let level = 0;
+  return (heightM) => {
+    const h = Math.max(heightM, 0);
+    if (h <= first) {
+      return profile.relative[0] ?? Number.NaN;
+    }
+    if (h >= final) {
+      return profile.relative[last] ?? Number.NaN;
+    }
+    while (level > 0 && (heights[level] ?? Number.NaN) > h) {
+      level -= 1;
+    }
+    while (level < last - 1 && (heights[level + 1] ?? Number.NaN) <= h) {
+      level += 1;
+    }
+    return withinLevel(profile, level, h);
+  };
 }
 
 /**
@@ -114,13 +596,63 @@ export function columnLengthM(profile: DensityProfile, topM: number): number {
   let length: number;
   switch (profile.kind) {
     case "exponential":
-      length = profile.scaleHeightM * -Math.expm1(-topM / profile.scaleHeightM);
+      length = profile.scaleHeightM * -expm1(-topM / profile.scaleHeightM);
       break;
     case "tent":
       length = tentColumnM(profile.bottomM, profile.peakM, profile.topM, topM);
       break;
+    case "tabulated":
+      length = tabulatedColumnM(profile, topM);
+      break;
   }
   return length;
+}
+
+/**
+ * The heights of a profile's layer edges, m, ascending, at most four (plan R08, R08.T6.d;
+ * `decision-r08-t6b-floor.md` §9.2): a tabulated density's, where it leaves 0 and where the ramp
+ * from 0 ends, at a layer's bottom above the first level, and where the ramp to 0 starts and where
+ * it reaches 0, at a top below the last level. The transmittance kernel and its twin split each ray
+ * where it crosses them.
+ *
+ * @remarks
+ * `absorbers.ts`'s `absorberTerm` ramps a layer to 0 over at most one interval of its column, where
+ * the density's slope jumps twice: about 115 m on the four-absorber fixture's 250 K column, and 78 m
+ * at the base and 10 m at the top of T6.d's ozone slab (`earth.ts`'s `EARTH_OZONE_SLAB`; Earth's
+ * measured ozone, R08.T6.h, has none). On a ray whose equal steps are longer than the ramp,
+ * the midpoint rule sees it as a step of the density, and errs to first order in the step: R08.T6.c
+ * measured 4.1% of a grazing ray's transmittance. Split there, the ramp is a piece of its own, on
+ * which the midpoint rule is exact, and every other piece is smooth.
+ *
+ * The edges are the levels themselves, unless the profile carries its own
+ * ({@link TabulatedDensity.edgesM}), as a resampled table does. A density that is above 0 at its
+ * first and last levels has none, as a column has. An `exponential` profile has none, and neither
+ * has a `tent`: its three kinks are a slope's change of 1 ÷ 15 km on R05's ozone, not a ramp, and
+ * R05's tables are kept as R05 measured them.
+ */
+export function layerEdgesM(profile: DensityProfile): ReadonlyArray<number> {
+  if (profile.kind !== "tabulated") {
+    return [];
+  }
+  if (profile.edgesM !== undefined) {
+    return profile.edgesM;
+  }
+  const { altitudesM, relative } = profile;
+  const last = relative.length - 1;
+  const first = relative.findIndex((d) => d > 0);
+  if (first < 0) {
+    return [];
+  }
+  const final = relative.findLastIndex((d) => d > 0);
+  const at = (i: number): number => altitudesM[i] ?? Number.NaN;
+  const edges: number[] = [];
+  if (first > 0) {
+    edges.push(at(first - 1), at(first));
+  }
+  if (final < last) {
+    edges.push(at(final), at(final + 1));
+  }
+  return edges;
 }
 
 /** A tent's integral from the ground to `upToM`: its rising side's area, then its falling side's. */
@@ -130,13 +662,52 @@ function tentColumnM(bottomM: number, peakM: number, tentTopM: number, upToM: nu
   return (up * up) / (2 * (peakM - bottomM)) + down - (down * down) / (2 * (tentTopM - peakM));
 }
 
-/** A term's extinction per channel at unit density, m⁻¹: scattering plus absorption. */
+/**
+ * A term's extinction coefficient per channel at unit density, m⁻¹: scattering plus absorption.
+ *
+ * @remarks
+ * An absorber term's coefficients are 0: it absorbs by its curves of growth, one a light, through
+ * the amount a path crosses (R08.T4.b, R08.T4.c, Design notes 5 and 8), which the tables, the CPU
+ * twin and the oracle add beside this from R08.T6.c (`tables.ts`'s `absorberSlots`,
+ * `opticalDepth.ts`'s `absorberAmounts`). A reader that takes this alone for a medium's extinction
+ * leaves its absorbers out.
+ */
 export function extinction(term: MediumTerm): Rgb {
   return [
     term.scattering[0] + term.absorption[0],
     term.scattering[1] + term.absorption[1],
     term.scattering[2] + term.absorption[2],
   ];
+}
+
+/**
+ * Checks that no tabulated density of a medium is held up to its top from a last level below it.
+ *
+ * @remarks
+ * The `tabulated` rule holds the last level's density beyond it ({@link TabulatedDensity}), as
+ * R08.T3.a's column holds its last level's 10⁻⁷ of the ground's, so a medium built on a column
+ * takes a top no higher than the column's. A layer whose last level is 0 may end below the top.
+ * The CPU twin (`tablesCpu.ts`) and the kernels' packer (`tables.ts`'s `packMedium`) refuse such a
+ * medium alike (plan R08, R08.T6.a and T6.b).
+ *
+ * @throws RangeError for a tabulated density whose last level lies below the medium's top with a
+ *   density other than 0.
+ */
+export function checkTabulatedTops(medium: AtmosphereMedium): void {
+  for (const term of medium.terms) {
+    const profile = term.density;
+    if (profile.kind !== "tabulated") {
+      continue;
+    }
+    const last = profile.altitudesM.length - 1;
+    const topLevelM = profile.altitudesM[last] ?? Number.NaN;
+    const atTop = profile.relative[last] ?? Number.NaN;
+    if (topLevelM < medium.topHeightM && atTop !== 0) {
+      throw new RangeError(
+        `term ${term.name} of medium ${medium.name} holds a density of ${atTop} from its last level at ${topLevelM} m up to the medium's top at ${medium.topHeightM} m`,
+      );
+    }
+  }
 }
 
 /**
@@ -150,4 +721,79 @@ export function termNamed(medium: AtmosphereMedium, name: string): MediumTerm {
     throw new Error(`atmosphere medium ${medium.name} has no term ${name}`);
   }
   return term;
+}
+
+/**
+ * The least local scale height the fitted lookup takes, m of h\*: 1 km (plan R08, R08.T6.f; moved
+ * here from `hillaire.ts` by R08.T9.b, which re-exports it).
+ *
+ * @remarks
+ * The fit's second point stands one local scale height up the ray, and its deep-dip parabola
+ * √(2 R_α H ÷ s) either side of the lowest point, so that the fit's differences of h\* are about
+ * H. Near the top, or where the stored vertical depth above a point is under the half float's
+ * least step (2⁻²⁴; within a few tens of kilometres of a Saturn-class top), the column gives a
+ * height of metres, whose differences `f32` cannot take from heights of hundreds of kilometres
+ * (0.06 m a step at 800 km): the smoke's kernel arm parted from the twin by 2% there. A kilometre
+ * keeps them to about 10⁻⁴, and lies under the least scale height drawn so far (R05's Earth
+ * aerosol, 1.2 km); a body of one band takes no fit.
+ * `oblate.wgsl`'s `OBLATE_SCALE_FLOOR_M` is the same. The fit itself rises at least
+ * {@link fitLeastRiseM}, which a giant's figure takes over this.
+ */
+export const FIT_SCALE_FLOOR_M = 1_000;
+
+/**
+ * The least drop below its tangent the fitted lookup's second point stands at, m of h\*: 2 m
+ * (plan R08, R08.T6.f; R08.T16.a.2's routed giant, 2026-11-03).
+ *
+ * @remarks
+ * The fit's radius is a quotient whose denominator, 2(h\*₁ − h\*₀ − μ\* s x₁), is twice the ray's
+ * drop below its tangent over x₁: about H² ÷ 2R at 45°, a second difference, where
+ * {@link FIT_SCALE_FLOOR_M} was sized by the first, H. In a thin cloud sheet, whose local scale
+ * height is held at that floor, the drop was 6.7 cm on the hand Jupiter's deck datum (R_ref
+ * 6.98 × 10⁷ m; its NH₃ sheet at h\* 178 km, the sun 20° up), near the kernel's `f32` rounding of
+ * h\* there (1.6 cm a step), and the kernel's h\*₁ stood some 5 cm from the twin's (the twin read
+ * the kernel's sky-view texel to 3 × 10⁻⁴ with its h\*₁ 5 cm lower): the kernel's κ\* fell above
+ * the slices' range where the twin's fell below it, and the per-frame kernels missed their twin by
+ * 2.3% in the sky view and 7% in the march (R08.T11's (S) row). 2 m holds the drop at 45° forty
+ * times that difference and over a hundred times the rounding.
+ * `oblate.wgsl`'s `OBLATE_FIT_LEAST_DROP_M` is the same.
+ */
+export const FIT_LEAST_DROP_M = 2;
+
+/**
+ * The least rise the fitted lookup of a body of several bands places its second point at, m of
+ * h\*: the local scale height held to at least √(2 R_ref {@link FIT_LEAST_DROP_M}), the rise whose
+ * drop below its tangent at 45° on the sphere of R_ref is that drop, and to
+ * {@link FIT_SCALE_FLOOR_M}; 16.7 km on the hand Jupiter's deck datum and 15.3 km on Saturn's
+ * figure, under its air's 49.7 km scale height. `oblate.wgsl`'s `oblateLeastRiseOf` is the same.
+ *
+ * @param referenceRadiusM - The tables' R_ref (`tableRadiusM`), m.
+ */
+export function fitLeastRiseM(referenceRadiusM: number): number {
+  return Math.max(FIT_SCALE_FLOOR_M, Math.sqrt(2 * referenceRadiusM * FIT_LEAST_DROP_M));
+}
+
+/**
+ * The local scale height in h\* at `scaledHeightM` (plan R08, R08.T6.f; moved here from
+ * `hillaire.ts` by R08.T9.b): the medium's vertical optical depth above it in green over its
+ * extinction there in green, held to the room left to the top, all of it where nothing
+ * extinguishes, and to at least {@link FIT_SCALE_FLOOR_M}; one scale height for an exponential, the
+ * column's own e-folding for any profile. `tablesCpu.ts`'s `OblateReader` takes the optical depth
+ * from slice 0's stored table, the kernels likewise; this takes it from each term's column
+ * ({@link columnLengthM}), within the table's 10⁻³. The composite takes it at the camera, and the
+ * lit passes from the body's table, where `tables.ts`'s `packOblateBody` tabulates it.
+ */
+export function localScaleHeightM(medium: AtmosphereMedium, scaledHeightM: number): number {
+  const top = medium.topHeightM;
+  const room = Math.max(top - scaledHeightM, 1);
+  const height = Math.min(Math.max(scaledHeightM, 0), top);
+  let column = 0;
+  let extinctionPerM = 0;
+  for (const term of medium.terms) {
+    const green = extinction(term)[1];
+    column += green * (columnLengthM(term.density, top) - columnLengthM(term.density, height));
+    extinctionPerM += green * densityAt(term.density, height);
+  }
+  const held = extinctionPerM > 0 ? Math.min(column / extinctionPerM, room) : room;
+  return Math.max(held, FIT_SCALE_FLOOR_M);
 }

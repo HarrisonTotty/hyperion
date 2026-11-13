@@ -1,0 +1,25 @@
+# The neutron-star mergers' sampler and share row (plan 15, P15.T10.b's merger step; read by plan
+# 11's P11.T8.d class from generator version 31), fitted as `binary_merger.toml`'s are, through the
+# sim's merger census of layers D and E, whose primaries collapse: the slab's census is 8 × 10^6
+# records about the solar circle, in a slab of 32,000 by 8,000 by 3,000 ly whose layer-D cells hold
+# them (the default's 24,000 by 4,000 by 3,000 hold too few), in the band shares' proportion, each
+# population scarce there 3 × 10^5 of its own, parts 0–31 of 64 for the fit and the rest for the
+# sim's slow tests. The row is scaled to the brainstorm's ten neutron-star mergers in the source
+# horizon. A mark is fitted to a Kish size of at least 50.
+task = "binary_nsm"
+
+[params]
+seed = 0x0b17_15a0_0000_0001
+generator_version = 31
+records = 8_000_000
+population_records = 300_000
+parts = 32
+part_count = 64
+young_thin_disc_site = [0, 0, 0, 40_000, 40_000, 600]
+bulge_site = [0, 0, 0, 5_000, 5_000, 2_000]
+long_bar_site = [0, 0, 0, 16_000, 4_000, 1_000]
+nuclear_disc_site = [0, 0, 0, 800, 800, 200]
+halo_site = [0, 0, 10_000, 10_000, 10_000, 5_000]
+slab_site = [0, 26_000, 0, 16_000, 4_000, 1_500]
+min_members = 50
+total_hosts = 10.0

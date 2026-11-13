@@ -36,15 +36,21 @@
 
 use std::sync::Arc;
 
-use crate::stellar::Phase;
+use crate::stellar::remnant::RemnantRecipe;
 use crate::stellar::remnant::collapse::MAX_NEUTRON_STAR_MASS;
-use crate::stellar::remnant::structure::CHANDRASEKHAR_MASS;
+use crate::stellar::remnant::structure::{white_dwarf_collapse_mass, white_dwarf_radius};
+use crate::stellar::remnant::white_dwarf::WhiteDwarfCore;
 use crate::stellar::sse::{self, NewStar, Remains, Structure, Track};
-use crate::units::{Megayears, SolarMasses, Years};
+use crate::stellar::{Phase, StarState, StarStateParts};
+use crate::units::{Megayears, SolarMasses, SolarMassesPerYear, SolarRadii, Years};
 
-use super::evolve::{Engine, clock_resolution_years, roche_lobe, track_mass};
-use super::rlof::{dynamical, kelvin_helmholtz};
+use super::co_chandrasekhar::ChandrasekharPath;
+use super::dwarf_limit::{self, CoreSource, ProductTyping, Unplaced};
+use super::evolve::{Engine, roche_lobe, track_mass};
+use super::params::BinaryParams;
+use super::rlof::kelvin_helmholtz;
 use super::star::{G, Kind, Member, Path, cooling_origin, moment_of_inertia, positive};
+use super::supernova::core_limit;
 use super::timeline::{IaPoolChannel, PooledIaEvent, SegmentKind};
 
 /// BSE's collision matrix (their table 2, as their code's `instar` sets it): the type of the
@@ -82,8 +88,8 @@ pub(super) fn collision_product(k1: Kind, k2: Kind) -> Kind {
 }
 
 /// One star's side of a common envelope (BSE section 2.7.1's effective values).
-#[derive(Debug, Clone, Copy)]
-struct Side {
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct Side {
     kind: Kind,
     mass: f64,
     /// The effective core, M′_c: the whole star for a main-sequence or degenerate star.
@@ -102,7 +108,7 @@ struct Side {
 impl Side {
     /// The side of a star of structure `s`.
     #[must_use]
-    fn of(s: &Structure) -> Self {
+    pub(super) fn of(s: &Structure) -> Self {
         let mass = s.state.mass().value();
         let kind = Kind::of(s.state.phase(), mass);
         let mc = s.state.core_mass().value();
@@ -171,6 +177,23 @@ const RAPID_CONTACT_SHARE: f64 = 0.1;
 /// §3.2 and Fig. 2).
 pub(super) const TEMPORARY_CONTACT_OVERFILL: f64 = 0.10;
 
+/// The relative miss, built core against the core asked for, within which a swelled giant is
+/// placed exactly ([`Engine::swelled_star`]; ruling p11-c2-swell of 2026-10-06, §3.3 A4).
+const SWELL_CORE_TOLERANCE: f64 = 1e-9;
+
+/// The top of the bracket of the core asked of a swelled giant's placement, in units of the core
+/// wanted: a placed track's core falls short of the one asked for by up to 8.4% (finding F16;
+/// ruling p11-c2-swell, §3.3 A4).
+const SWELL_BRACKET: f64 = 1.1;
+
+/// The most track builds a swelled giant's placement makes before it is refused (ruling
+/// p11-c2-swell, §3.3 A4).
+const SWELL_BUILDS: u32 = 12;
+
+/// The most bisections of the branch's fraction [`Engine::degenerate_giant`] makes before it gives
+/// up: enough to narrow the fraction to the last bits of an f64.
+const DEGENERATE_GIANT_BISECTIONS: u32 = 64;
+
 /// Whether a merger may still pass through a common envelope.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Envelope {
@@ -224,17 +247,13 @@ impl Engine {
             self.structure(d, self.age, md, td),
             self.structure(o, self.age, mo, to),
         ) else {
-            self.coalesce(None);
+            self.coalesce(d, None);
             return;
         };
         let a_i = self.orbit.as_ref().map_or(0.0, |orbit| orbit.a);
         let (s1, s2) = (Side::of(&sd), Side::of(&so));
         let params = *self.ctx.params();
-        let lambda = params.lambda;
-        let mut binding = s1.mass * s1.envelope / (lambda * s1.radius);
-        if s2.kind.is_giant_like() {
-            binding += s2.mass * s2.envelope / (lambda * s2.radius);
-        }
+        let binding = envelope_binding(&s1, &s2, params.lambda);
         // Nothing to eject from a held bare core (ruling 129.4c): no stripping changes it, so it
         // would touch its companion again at once, envelope after envelope. It merges instead,
         // and the merger must not hand it back to a common envelope (a giant-like bare core
@@ -243,28 +262,10 @@ impl Engine {
             self.mix_with(Envelope::Spent);
             return;
         }
-        let orbit_i = s1.core * s2.core / (2.0 * a_i);
-        let orbit_f = orbit_i + binding / params.alpha_ce;
-        let a_f = s1.core * s2.core / (2.0 * orbit_f);
-        let lobe1 = roche_lobe(s1.core, s2.core, a_f);
-        let lobe2 = roche_lobe(s2.core, s1.core, a_f);
-        let fills = s1.core_radius > lobe1 || s2.core_radius > lobe2;
-        if !fills {
-            self.survive_envelope(d, &s2, a_f);
-            return;
+        match envelope_outcome(s1, s2, binding, a_i, &params) {
+            EnvelopeOutcome::Survives { a_f } => self.survive_envelope(d, &s2, a_f),
+            EnvelopeOutcome::Coalesces(remains) => self.coalesce(d, Some(remains)),
         }
-        // The cores coalesce where the first of them fills its lobe (BSE equation 73).
-        let reach =
-            |side: &Side, other: &Side| side.core_radius / (roche_lobe(side.core, other.core, 1.0));
-        let a_l = reach(&s1, &s2).max(reach(&s2, &s1));
-        let orbit_l = (s1.core * s2.core / (2.0 * a_l)).max(orbit_i);
-        let binding_f = binding - params.alpha_ce * (orbit_l - orbit_i);
-        self.coalesce(Some(CommonEnvelopeRemains {
-            binding,
-            binding_f,
-            s1,
-            s2,
-        }));
     }
 
     /// The cores of a common envelope around member `d` survive on a circular orbit of `a_f`
@@ -274,12 +275,12 @@ impl Engine {
         let o = 1 - d;
         self.stripped[d] = true;
         let (donor, donor_collapses) = self.stripped_member(d);
-        self.set_member(d, donor);
+        self.set_stripped(d, donor, donor_collapses);
         let mut other_collapses = false;
         if s2.kind.is_giant_like() {
             self.stripped[o] = true;
             let (other, collapses) = self.stripped_member(o);
-            self.set_member(o, other);
+            self.set_stripped(o, other, collapses);
             other_collapses = collapses;
         }
         let age = self.age;
@@ -295,6 +296,9 @@ impl Engine {
         for (i, collapses) in [(d, donor_collapses), (o, other_collapses)] {
             if collapses && !self.members[i].is_gone() {
                 self.die(i);
+            } else if self.bare_oxygen_neon_core_collapses(i) {
+                let (m, _) = self.current(i);
+                self.accretion_induced_collapse(i, m);
             }
         }
     }
@@ -326,11 +330,16 @@ impl Engine {
     /// the engine's age: for the pinned hold, which strips a bare core at its last living age
     /// (P11.T4.g), where the track itself has already died. `None` where the member has no
     /// envelope to lose and stays as it is.
+    ///
+    /// A pinned primary whose pin is pending is held at its bare core's last living state whether
+    /// the core collapses or is a white dwarf's (P11.T4's fix,
+    /// [`pinned_white_dwarfs`](super::pinned_white_dwarfs)).
     #[must_use]
     pub(super) fn stripped_member_at(&self, i: usize, track_age: f64) -> Option<(Member, bool)> {
         let age = self.age;
         let (track, offset) = self.members[i].track()?;
         let (mass, _) = self.current(i);
+        let pinned = self.pin_pending(i);
         let member = match track.remains_at(
             track_age,
             mass,
@@ -357,23 +366,7 @@ impl Engine {
             }
             Remains::Ended {
                 core, core_radius, ..
-            } if i == 0
-                && self.pin.is_some_and(|p| {
-                    p.death.age().value() >= age - clock_resolution_years(age)
-                }) =>
-            {
-                let state = crate::stellar::StarState::new(crate::stellar::StarStateParts {
-                    phase: core.phase(),
-                    age: core.age(),
-                    mass: core.mass(),
-                    core_mass: core.core_mass(),
-                    luminosity: core.luminosity(),
-                    radius: core.radius(),
-                    mass_loss_rate: crate::units::SolarMassesPerYear::ZERO,
-                    phase_fraction: core.phase_fraction(),
-                });
-                return Some((Member::Frozen { state, core_radius }, false));
-            }
+            } if pinned => return Some((held_core(&core, core_radius), false)),
             Remains::Ended { track, .. } => {
                 return Some((
                     Member::Track {
@@ -384,15 +377,25 @@ impl Engine {
                 ));
             }
             Remains::WhiteDwarf {
+                core, core_radius, ..
+            } if pinned => {
+                return Some((held_core(&core, core_radius), false));
+            }
+            Remains::WhiteDwarf {
                 phase,
                 mass,
                 last_luminosity,
-            } => Member::Remnant {
-                phase,
-                birth: age,
-                origin: cooling_origin(&self.ctx, phase, mass.value(), Some(last_luminosity)),
-                mass: Path::starting(age, mass.value()),
-            },
+                ..
+            } => {
+                // A star whose core is a dwarf's leaves the dwarf's kind (P11.T4's fixes).
+                let phase = self.dwarf_cores[i].dwarf_phase(phase);
+                Member::Remnant {
+                    phase,
+                    birth: age,
+                    origin: cooling_origin(&self.ctx, phase, mass.value(), Some(last_luminosity)),
+                    mass: Path::starting(age, mass.value()),
+                }
+            }
         };
         Some((member, false))
     }
@@ -403,10 +406,96 @@ impl Engine {
         self.close_segment();
         self.stripped[i] = true;
         let (member, collapses) = self.stripped_member(i);
-        self.set_member(i, member);
+        self.set_stripped(i, member, collapses);
         self.kind = self.quiet_kind();
         if collapses {
             self.die(i);
+        } else if self.bare_oxygen_neon_core_collapses(i) {
+            let (m, _) = self.current(i);
+            self.accretion_induced_collapse(i, m);
+        }
+    }
+
+    /// Whether member `i`, an oxygen–neon white dwarf a strip has just left, collapses at once: at
+    /// or above its capture mass under the default recipe (P11.T4's kept-core endings;
+    /// [`Engine::collapse_mass`]), as a fed one does, a pinned primary's being left to its pin. A window's giant that keeps its thermal pulses grows its core past the capture
+    /// mass, and a strip there leaves it bare.
+    #[must_use]
+    fn bare_oxygen_neon_core_collapses(&self, i: usize) -> bool {
+        let Member::Remnant {
+            phase: Phase::OxygenNeonWhiteDwarf,
+            mass,
+            ..
+        } = &self.members[i]
+        else {
+            return false;
+        };
+        SolarMasses::new(mass.at(self.age)) >= self.collapse_mass(Phase::OxygenNeonWhiteDwarf)
+            && !self.pin_pending(i)
+    }
+
+    /// Sets member `i` to what its strip leaves, `member`: a star whose core is a dwarf's
+    /// ([`Engine::dwarf_cores`]) keeps that kind where the strip leaves a star, living or a bare
+    /// core that dies at once (`collapses`), and gives it to a white dwarf it leaves.
+    fn set_stripped(&mut self, i: usize, member: Member, collapses: bool) {
+        let source = self.dwarf_cores[i];
+        let dwarf = matches!(member, Member::Remnant { .. }) && !collapses;
+        self.set_member(i, member);
+        if !dwarf {
+            self.dwarf_cores[i] = source;
+        }
+    }
+
+    /// The mass, M☉, at which a white dwarf of `phase` collapses under the pair's recipe
+    /// ([`white_dwarf_collapse_mass`]: an oxygen–neon one at the capture mass under the default
+    /// recipe, P11.T4's kept-core endings).
+    #[must_use]
+    pub(super) fn collapse_mass(&self, phase: Phase) -> SolarMasses {
+        white_dwarf_collapse_mass(phase, self.ctx.track_options().remnant())
+    }
+
+    /// Whether member `i`, of type `kind`, is a giant whose own track types its carbon–oxygen core
+    /// oxygen–neon (a thermally pulsing AGB star of `Mc,BAGB`, or a helium giant of mass, 1.6 M☉
+    /// or more; HPT sections 6.1 and 6.2.1), which a merger product's core is too.
+    #[must_use]
+    fn own_oxygen_neon_core(&self, i: usize, kind: Kind) -> bool {
+        // A giant whose core is a dwarf's (a swollen dwarf's, a placed product's) has that core, not
+        // its track's: a swell places a carbon–oxygen dwarf's core on whatever track holds it.
+        self.dwarf_cores[i] == CoreSource::Other
+            && matches!(kind, Kind::PulsingAgb | Kind::HeliumGap | Kind::HeliumGiant)
+            && self.members[i]
+                .track()
+                .is_some_and(|(track, _)| track.types_oxygen_neon())
+    }
+
+    /// The white dwarf whose core member `i`, of type `kind`, is: its own if it is a
+    /// carbon–oxygen or oxygen–neon dwarf, the one its giant's core came from otherwise
+    /// ([`Engine::dwarf_cores`]).
+    #[must_use]
+    pub(super) fn dwarf_core(&self, i: usize, kind: Kind) -> CoreSource {
+        match CoreSource::of(kind) {
+            CoreSource::Other => self.dwarf_cores[i],
+            source @ (CoreSource::CarbonOxygenDwarf | CoreSource::OxygenNeonDwarf) => source,
+        }
+    }
+
+    /// The white dwarf whose core the product of a coalescence of `parents`, each a member's index
+    /// and type, takes ([`Engine::dwarf_core`], P11.T4's dwarf limit; version 27 typed a
+    /// coalescence's or a collision's product by no dwarf parent). The product's core is both members' (BSE
+    /// section 2.7.1): a dwarf's where either is, and oxygen–neon where either's is, a giant's own
+    /// included (research-leans-35 §7).
+    #[must_use]
+    pub(super) fn coalesced_source(&self, parents: [(usize, Kind); 2]) -> CoreSource {
+        let [(a, kind_a), (b, kind_b)] = parents;
+        let source = self.dwarf_core(a, kind_a).with(self.dwarf_core(b, kind_b));
+        if source == CoreSource::CarbonOxygenDwarf
+            && parents
+                .into_iter()
+                .any(|(i, kind)| self.own_oxygen_neon_core(i, kind))
+        {
+            CoreSource::OxygenNeonDwarf
+        } else {
+            source
         }
     }
 
@@ -424,69 +513,225 @@ impl Engine {
         self.spins[i] = (moment_of_inertia(&s) * omega).max(1e-10);
     }
 
-    /// The pair coalesces, with what a common envelope left, `remains`, if there was one (BSE
-    /// sections 2.7.1–2.7.4), or in a collision without one.
-    fn coalesce(&mut self, remains: Option<CommonEnvelopeRemains>) {
-        let Some(CommonEnvelopeRemains {
-            binding,
-            binding_f,
-            s1,
-            s2,
-        }) = remains
-        else {
+    /// The pair coalesces, with what a common envelope around member `d` left, `remains`, if there
+    /// was one (BSE sections 2.7.1–2.7.4), or in a collision without one.
+    fn coalesce(&mut self, d: usize, remains: Option<CommonEnvelopeRemains>) {
+        let Some(remains) = remains else {
             self.mix();
             return;
         };
-        let product_kind = collision_product(s1.kind, s2.kind);
-        // Two degenerate helium cores ignite, and nothing is left (BSE section 2.7.2).
-        let degenerate = |s: &Side| {
-            (matches!(s.kind, Kind::HertzsprungGap | Kind::GiantBranch) && s.degenerate)
-                || s.kind == Kind::HeliumWhiteDwarf
-        };
-        let total = s1.mass + s2.mass;
-        let product = if degenerate(&s1) && degenerate(&s2) {
-            Member::Gone
-        } else if s2.kind.number() >= 13 || s1.kind.number() >= 13 {
-            // An unstable Thorne–Żytkow object keeps only its compact core (BSE section 2.7.2).
-            let compact = if s2.kind.number() >= 13 { s2 } else { s1 };
-            self.compact(compact.kind, compact.mass)
-        } else {
-            let core = if s2.kind == Kind::HeliumMainSequence && s1.kind.number() <= 6 {
-                s1.true_core + s2.mass
-            } else {
-                s1.true_core + s2.true_core
-            };
-            let x = self.ctx.giant_exponent();
-            let mut mf = if binding_f <= 0.0 {
-                core
-            } else {
-                final_mass(total, core, binding_f / binding, x)
-            };
-            if s2.true_core <= 0.0 && s2.kind != Kind::HeliumMainSequence {
-                mf = mf.max(s1.true_core + s2.mass);
-            }
-            let mf = mf.min(total).max(core);
-            let burnt = {
-                let weight = |s: &Side| {
-                    if s.kind == Kind::HeliumMainSequence {
-                        s.mass
-                    } else {
-                        s.true_core
-                    }
-                };
-                let (w1, w2) = (weight(&s1), weight(&s2));
-                if w1 + w2 > 0.0 {
-                    (s1.burnt * w1 + s2.burnt * w2) / (w1 + w2)
-                } else {
-                    0.0
-                }
-            };
-            let fraction = s1.fraction;
-            self.new_star(product_kind, mf, core, burnt, fraction)
-        };
+        let source = self.coalesced_source([(d, remains.s1.kind), (1 - d, remains.s2.kind)]);
+        let product = coalesced_product(&remains, self.ctx.giant_exponent());
+        let product = self.product_member(product, source);
         self.finish_merger(product);
     }
 
+    /// What a coalescence in a common envelope leaves, from what [`coalesced_product`] gives:
+    /// nothing, a compact star, or a star of its kind, mass and core, placed by
+    /// [`Engine::new_star_around`] at the engine's age, its core from `source`.
+    #[must_use]
+    pub(super) fn product_member(&self, product: CoalescedProduct, source: CoreSource) -> Product {
+        match product {
+            CoalescedProduct::Nothing => Member::Gone.into(),
+            CoalescedProduct::Compact { kind, mass } => self.compact(kind, mass).into(),
+            CoalescedProduct::Star {
+                kind,
+                mass,
+                core,
+                burnt,
+                fraction,
+            } => self
+                .merged_capture(source, mass, core)
+                .unwrap_or_else(|| self.new_star_around(kind, mass, core, burnt, fraction, source)),
+        }
+    }
+
+    /// The product of a coalescence of `mass_msun` M☉ around a core of `core_msun` M☉ from `source`
+    /// where it collapses at once by electron capture (P11.T4's `merged_capture`): one whose core is an oxygen–neon dwarf's ([`Engine::coalesced_source`], which is where either
+    /// parent's core is, a giant's own track typing it so included) and holds its limit
+    /// (`supernova::core_limit`), unless the primary's pin is pending; `None` otherwise.
+    #[must_use]
+    fn merged_capture(
+        &self,
+        source: CoreSource,
+        mass_msun: f64,
+        core_msun: f64,
+    ) -> Option<Product> {
+        if source != CoreSource::OxygenNeonDwarf || self.pin_pending(0) {
+            return None;
+        }
+        let limit = core_limit(source, self.ctx.track_options().remnant())?;
+        if core_msun < limit.value() {
+            return None;
+        }
+        #[cfg(test)]
+        super::merged_capture::count_merged_capture();
+        Some(Product::ElectronCapture {
+            co_core: SolarMasses::new(core_msun.min(mass_msun)),
+            mass: SolarMasses::new(mass_msun),
+        })
+    }
+}
+
+/// The envelope's binding energy (÷ G) in a common envelope around a giant-like donor of side `s1`
+/// and its companion `s2`, both envelopes if the companion is giant-like too (BSE section 2.7.1,
+/// equation 69), at the binding parameter `lambda`.
+#[must_use]
+pub(super) fn envelope_binding(s1: &Side, s2: &Side, lambda: f64) -> f64 {
+    let mut binding = s1.mass * s1.envelope / (lambda * s1.radius);
+    if s2.kind.is_giant_like() {
+        binding += s2.mass * s2.envelope / (lambda * s2.radius);
+    }
+    binding
+}
+
+/// How a common envelope of `binding` around the donor of side `s1` and its companion `s2` on an
+/// orbit of `a_i` R☉ ends (BSE section 2.7.1): the cores survive on the orbit of `a_f` that the
+/// α energy balance leaves, or, where either core fills its lobe there, they coalesce where the
+/// first of them fills it (equation 73).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) enum EnvelopeOutcome {
+    /// The cores survive on a circular orbit of `a_f` R☉.
+    Survives {
+        /// The cores' separation, R☉.
+        a_f: f64,
+    },
+    /// The cores coalesce, leaving these remains to the merger.
+    Coalesces(CommonEnvelopeRemains),
+}
+
+/// [`EnvelopeOutcome`] of a common envelope of `binding` around sides `s1` and `s2` on an orbit
+/// of `a_i` R☉ under `params`' α: the engine's own rule, which the stellar merger class's evolved
+/// donors read too (P11.T8.c's channels), so that the two agree bit for bit.
+#[must_use]
+pub(super) fn envelope_outcome(
+    s1: Side,
+    s2: Side,
+    binding: f64,
+    a_i: f64,
+    params: &BinaryParams,
+) -> EnvelopeOutcome {
+    let orbit_i = s1.core * s2.core / (2.0 * a_i);
+    let orbit_f = orbit_i + binding / params.alpha_ce;
+    let a_f = s1.core * s2.core / (2.0 * orbit_f);
+    let lobe1 = roche_lobe(s1.core, s2.core, a_f);
+    let lobe2 = roche_lobe(s2.core, s1.core, a_f);
+    let fills = s1.core_radius > lobe1 || s2.core_radius > lobe2;
+    if !fills {
+        return EnvelopeOutcome::Survives { a_f };
+    }
+    // The cores coalesce where the first of them fills its lobe (BSE equation 73).
+    let reach =
+        |side: &Side, other: &Side| side.core_radius / (roche_lobe(side.core, other.core, 1.0));
+    let a_l = reach(&s1, &s2).max(reach(&s2, &s1));
+    let orbit_l = (s1.core * s2.core / (2.0 * a_l)).max(orbit_i);
+    let binding_f = binding - params.alpha_ce * (orbit_l - orbit_i);
+    EnvelopeOutcome::Coalesces(CommonEnvelopeRemains {
+        binding,
+        binding_f,
+        s1,
+        s2,
+    })
+}
+
+/// What a coalescence in a common envelope leaves (BSE sections 2.7.1–2.7.4): nothing, a compact
+/// core, or a star of the collision matrix's kind with its mass, core, burnt share and phase
+/// fraction.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) enum CoalescedProduct {
+    /// Two degenerate helium cores ignite and nothing is left (section 2.7.2).
+    Nothing,
+    /// An unstable Thorne–Żytkow object keeps its compact core (section 2.7.2).
+    Compact {
+        /// The core's kind.
+        kind: Kind,
+        /// Its mass, M☉.
+        mass: f64,
+    },
+    /// A star of the collision matrix's kind (their table 2).
+    Star {
+        /// Its kind.
+        kind: Kind,
+        /// Its mass, M☉ (equation 77).
+        mass: f64,
+        /// Its core's mass, M☉.
+        core: f64,
+        /// The share of its core's helium burnt.
+        burnt: f64,
+        /// The donor's fraction through its phase.
+        fraction: f64,
+    },
+}
+
+/// What a coalescence in a common envelope with `remains` leaves, at the giant-radius exponent `x`
+/// (BSE sections 2.7.1–2.7.4, table 2 and equation 77): the engine's own rule, which the stellar
+/// merger class's evolved donors read too (P11.T8.c's channels), so that the two agree bit for
+/// bit.
+#[must_use]
+pub(super) fn coalesced_product(remains: &CommonEnvelopeRemains, x: f64) -> CoalescedProduct {
+    let CommonEnvelopeRemains {
+        binding,
+        binding_f,
+        s1,
+        s2,
+    } = *remains;
+    let product_kind = collision_product(s1.kind, s2.kind);
+    // Two degenerate helium cores ignite, and nothing is left (BSE section 2.7.2).
+    let degenerate = |s: &Side| {
+        (matches!(s.kind, Kind::HertzsprungGap | Kind::GiantBranch) && s.degenerate)
+            || s.kind == Kind::HeliumWhiteDwarf
+    };
+    let total = s1.mass + s2.mass;
+    if degenerate(&s1) && degenerate(&s2) {
+        CoalescedProduct::Nothing
+    } else if s2.kind.number() >= 13 || s1.kind.number() >= 13 {
+        // An unstable Thorne–Żytkow object keeps only its compact core (BSE section 2.7.2).
+        let compact = if s2.kind.number() >= 13 { s2 } else { s1 };
+        CoalescedProduct::Compact {
+            kind: compact.kind,
+            mass: compact.mass,
+        }
+    } else {
+        let core = if s2.kind == Kind::HeliumMainSequence && s1.kind.number() <= 6 {
+            s1.true_core + s2.mass
+        } else {
+            s1.true_core + s2.true_core
+        };
+        let mut mf = if binding_f <= 0.0 {
+            core
+        } else {
+            final_mass(total, core, binding_f / binding, x)
+        };
+        if s2.true_core <= 0.0 && s2.kind != Kind::HeliumMainSequence {
+            mf = mf.max(s1.true_core + s2.mass);
+        }
+        let mf = mf.min(total).max(core);
+        let burnt = {
+            let weight = |s: &Side| {
+                if s.kind == Kind::HeliumMainSequence {
+                    s.mass
+                } else {
+                    s.true_core
+                }
+            };
+            let (w1, w2) = (weight(&s1), weight(&s2));
+            if w1 + w2 > 0.0 {
+                (s1.burnt * w1 + s2.burnt * w2) / (w1 + w2)
+            } else {
+                0.0
+            }
+        };
+        CoalescedProduct::Star {
+            kind: product_kind,
+            mass: mf,
+            core,
+            burnt,
+            fraction: s1.fraction,
+        }
+    }
+}
+
+impl Engine {
     /// A collision or coalescence without a common envelope: the two stars merge with their masses
     /// (BSE section 2.7.3), the product in the primary's place.
     pub(super) fn mix(&mut self) {
@@ -507,18 +752,17 @@ impl Engine {
             self.structure(1, self.age, m1, t1),
         );
         let (Some(a), Some(b)) = (s0, s1) else {
-            // One of them is already gone: the other stays as it is.
-            let survivor = if self.members[0].is_gone() {
-                self.members[1].clone()
-            } else {
-                self.members[0].clone()
-            };
-            self.finish_merger(survivor);
+            // One of them is already gone: the other stays as it is, a swollen dwarf's giant with
+            // its dwarf's kind.
+            let k = usize::from(self.members[0].is_gone());
+            let survivor = self.members[k].clone();
+            self.finish_merger(Product::Member(survivor, self.dwarf_cores[k]));
             return;
         };
         let (k0, k1) = (Kind::of(a.state.phase(), m0), Kind::of(b.state.phase(), m1));
         // Body 1 of BSE's `mix` is the more evolved.
-        let (hi, lo, s_hi, s_lo) = if k0.number() >= k1.number() {
+        let first = usize::from(k0.number() < k1.number());
+        let (hi, lo, s_hi, s_lo) = if first == 0 {
             (k0, k1, &a, &b)
         } else {
             (k1, k0, &b, &a)
@@ -526,15 +770,16 @@ impl Engine {
         let (m_hi, m_lo) = (s_hi.state.mass().value(), s_lo.state.mass().value());
         let total = m_hi + m_lo;
         let masses = [SolarMasses::new(m0), SolarMasses::new(m1)];
-        let chandrasekhar = CHANDRASEKHAR_MASS.value();
-        let product = match (hi, lo) {
+        let product: Product = match (hi, lo) {
             (
                 Kind::LowMassMainSequence | Kind::MainSequence,
                 Kind::LowMassMainSequence | Kind::MainSequence,
-            ) => self.main_sequence_merger(false, total, [(m_hi, s_hi), (m_lo, s_lo)]),
-            (Kind::HeliumMainSequence, Kind::HeliumMainSequence) => {
-                self.main_sequence_merger(true, total, [(m_hi, s_hi), (m_lo, s_lo)])
-            }
+            ) => self
+                .main_sequence_merger(false, total, [(m_hi, s_hi), (m_lo, s_lo)])
+                .into(),
+            (Kind::HeliumMainSequence, Kind::HeliumMainSequence) => self
+                .main_sequence_merger(true, total, [(m_hi, s_hi), (m_lo, s_lo)])
+                .into(),
             (Kind::HeliumMainSequence, Kind::LowMassMainSequence | Kind::MainSequence) => {
                 self.new_star(Kind::CoreHeliumBurning, total, m_hi, s_hi.burnt, 0.0)
             }
@@ -544,22 +789,22 @@ impl Engine {
             (
                 Kind::CarbonOxygenWhiteDwarf | Kind::OxygenNeonWhiteDwarf,
                 Kind::LowMassMainSequence | Kind::MainSequence,
-            ) => self.new_star(Kind::PulsingAgb, total, m_hi, 1.0, 0.0),
+            ) => self.new_star_around(Kind::PulsingAgb, total, m_hi, 1.0, 0.0, CoreSource::of(hi)),
             (Kind::HeliumWhiteDwarf, Kind::HeliumMainSequence) => {
                 let tau = s_lo.burnt * m_lo / total;
-                self.helium_main_sequence(total, tau)
+                self.helium_main_sequence(total, tau).into()
             }
             (
                 Kind::CarbonOxygenWhiteDwarf | Kind::OxygenNeonWhiteDwarf,
                 Kind::HeliumMainSequence,
-            ) => self.new_star(Kind::HeliumGiant, total, m_hi, 1.0, 0.0),
+            ) => self.new_star_around(Kind::HeliumGiant, total, m_hi, 1.0, 0.0, CoreSource::of(hi)),
             (Kind::HeliumWhiteDwarf, Kind::HeliumWhiteDwarf) => {
                 self.pool(PooledIaEvent::new(
                     Years::new(self.age),
                     IaPoolChannel::Merger,
                     masses,
                 ));
-                self.helium_main_sequence(total, 0.0)
+                self.helium_main_sequence(total, 0.0).into()
             }
             (Kind::CarbonOxygenWhiteDwarf | Kind::OxygenNeonWhiteDwarf, Kind::HeliumWhiteDwarf) => {
                 self.pool(PooledIaEvent::new(
@@ -567,7 +812,7 @@ impl Engine {
                     IaPoolChannel::Merger,
                     masses,
                 ));
-                self.new_star(Kind::HeliumGiant, total, m_hi, 1.0, 0.0)
+                self.new_star_around(Kind::HeliumGiant, total, m_hi, 1.0, 0.0, CoreSource::of(hi))
             }
             (
                 Kind::CarbonOxygenWhiteDwarf | Kind::OxygenNeonWhiteDwarf,
@@ -583,25 +828,36 @@ impl Engine {
                 } else {
                     Phase::CarbonOxygenWhiteDwarf
                 };
-                if total < chandrasekhar {
-                    self.white_dwarf(phase, total)
-                } else {
-                    self.finish_merger(self.white_dwarf(phase, total));
-                    self.accretion_induced_collapse(0, total);
+                // `finish_merger` ends a dwarf at the Chandrasekhar mass (P11.T4's fix), but for a
+                // pinned primary's, which ends at once at it: it disrupts unless it is oxygen–neon
+                // (`co_chandrasekhar`).
+                if self.pin_pending(0) && dwarf_limit::collapses(total) {
+                    self.finish_merger(self.white_dwarf(phase, total).into());
+                    if phase == Phase::OxygenNeonWhiteDwarf {
+                        self.accretion_induced_collapse(0, total);
+                    } else {
+                        self.end_at_the_chandrasekhar_mass(
+                            0,
+                            total,
+                            ChandrasekharPath::PinnedMerger,
+                            [SolarMasses::new(total), SolarMasses::ZERO],
+                        );
+                    }
                     return;
                 }
+                self.white_dwarf(phase, total).into()
             }
             (
                 Kind::NeutronStar | Kind::BlackHole,
                 Kind::LowMassMainSequence | Kind::MainSequence | Kind::HeliumMainSequence,
-            ) => self.compact(hi, m_hi),
+            ) => self.compact(hi, m_hi).into(),
             (Kind::NeutronStar | Kind::BlackHole, _) => {
                 let kind = if hi == Kind::NeutronStar && total > MAX_NEUTRON_STAR_MASS.value() {
                     Kind::BlackHole
                 } else {
                     hi
                 };
-                self.compact(kind, total)
+                self.compact(kind, total).into()
             }
             _ => {
                 // A giant-like star is involved: BSE treats the collision as a common envelope,
@@ -614,12 +870,13 @@ impl Engine {
                     return;
                 }
                 let kind = collision_product(hi, lo);
-                self.new_star(
+                self.new_star_around(
                     kind,
                     total,
                     s_hi.state.core_mass().value(),
                     s_hi.burnt,
                     s_hi.state.phase_fraction(),
+                    self.dwarf_core(first, hi),
                 )
             }
         };
@@ -627,19 +884,79 @@ impl Engine {
     }
 
     /// Records the merger as [`Engine::finish_merger`] does, for a product built by the caller.
-    pub(super) fn finish_merger_with(&mut self, product: Member) {
+    pub(super) fn finish_merger_with(&mut self, product: Product) {
         self.finish_merger(product);
     }
 
     /// Records the merger: `product` in the primary's place, nothing in the secondary's, no orbit.
-    fn finish_merger(&mut self, product: Member) {
+    ///
+    /// A white dwarf product at or above the Chandrasekhar mass ends at once, as an accreting one
+    /// does (`Engine::accretor_events`): an oxygen–neon one by accretion-induced collapse, and any
+    /// other in a disruption that leaves nothing ([`Engine::end_at_the_chandrasekhar_mass`], P11.T4's
+    /// fix, `dwarf_limit::collapses`), its Type Ia candidate, of the product's mass alone, pooled
+    /// first. A pinned primary's product is left to its pin
+    /// ([`Engine::pin_pending`], P11.T4's dwarf limit), and an unplaced product's iron core
+    /// ([`Product::IronCore`]) collapses at once ([`Engine::iron_core_collapse`]), as does its
+    /// oxygen–neon core by electron capture ([`Product::ElectronCapture`],
+    /// [`Engine::capture_collapse`]), with no candidate, and its disruption leaves nothing
+    /// ([`Product::Disruption`]), with a candidate of its mass alone. A product whose core
+    /// is a carbon–oxygen or oxygen–neon dwarf's keeps that kind ([`Engine::dwarf_cores`]).
+    fn finish_merger(&mut self, product: Product) {
+        let (product, source, ending) = match product {
+            Product::Member(member, source) => (member, source, None),
+            ending @ (Product::IronCore { .. }
+            | Product::ElectronCapture { .. }
+            | Product::Disruption { .. }) => (Member::Gone, CoreSource::Other, Some(ending)),
+        };
+        let pinned = self.pin_pending(0);
+        let dwarf = if let Member::Remnant { phase, mass, .. } = &product
+            && matches!(
+                phase,
+                Phase::HeliumWhiteDwarf
+                    | Phase::CarbonOxygenWhiteDwarf
+                    | Phase::OxygenNeonWhiteDwarf
+            )
+            && dwarf_limit::collapses_at(mass.at(self.age), self.collapse_mass(*phase))
+            && !pinned
+        {
+            Some((*phase, mass.at(self.age)))
+        } else {
+            None
+        };
         self.close_segment();
         self.set_member(0, product);
+        self.dwarf_cores[0] = source;
         self.set_member(1, Member::Gone);
         self.orbit = None;
         self.kind = SegmentKind::Merged;
         self.stripped[1] = false;
         self.corotate(0);
+        match ending {
+            Some(Product::IronCore {
+                co_core,
+                helium_core,
+                mass,
+            }) => self.iron_core_collapse(0, co_core, helium_core, mass),
+            Some(Product::ElectronCapture { co_core, mass }) => {
+                self.capture_collapse(0, co_core, mass);
+            }
+            Some(Product::Disruption { mass }) => self.end_at_the_chandrasekhar_mass(
+                0,
+                mass.value(),
+                ChandrasekharPath::UnplacedProduct,
+                [mass, SolarMasses::ZERO],
+            ),
+            Some(Product::Member(..)) | None => {}
+        }
+        if let Some((phase, m)) = dwarf {
+            if phase == Phase::OxygenNeonWhiteDwarf {
+                self.accretion_induced_collapse(0, m);
+            } else {
+                // The candidate is the product's alone, so that it can detonate.
+                let masses = [SolarMasses::new(m), SolarMasses::ZERO];
+                self.end_at_the_chandrasekhar_mass(0, m, ChandrasekharPath::MergedDwarf, masses);
+            }
+        }
     }
 
     /// The stars collide at periastron, or come into contact: a common envelope around a
@@ -839,9 +1156,11 @@ impl Engine {
     /// (P11.T4.k, ruling p11-t4k-faults of 2026-10-06, finding C: before it the contact ran to its
     /// coalescence past the pin, and the merger's product died at its own later age). The pin is
     /// acted on ([`Engine::pinned_collapse`]) where it lies before the pair's age; otherwise the
-    /// pair is left in contact, as a contact outlasting the age is. A primary the binary keeps on
-    /// its main sequence then explodes from it at plan 06's age (design note 16, a departure
-    /// recorded in plan 11's Risks).
+    /// pair is left in contact, as a contact outlasting the age is. The pinned primary's own
+    /// main-sequence end stops the knots the same way, before the pin (P11.T4.n): a primary the
+    /// binary keeps on its main sequence leaves it there, and the pair coalesces
+    /// ([`Engine::end_pinned_main_sequence`]). So no pinned primary in contact meets its pin there
+    /// now; before T4.n it exploded from its main sequence at plan 06's age.
     pub(super) fn contact_phase(&mut self) {
         let end = if self.contact_until.is_finite() {
             self.contact_until
@@ -854,9 +1173,17 @@ impl Engine {
             .pin
             .map(|pin| pin.death.age().value())
             .filter(|&at| at > start && at <= end);
+        // The pinned primary's own main sequence's end stops the knots as the pin does, before it
+        // (P11.T4.n): the contact coalesces there (`Engine::end_pinned_main_sequence`).
+        let (m0, tau0) = self.current(0);
+        let phase = self.structure(0, start, m0, tau0).map(|s| s.state.phase());
+        let own_end = self
+            .own_main_sequence_end_after(start, phase)
+            .filter(|&at| at <= end);
         for k in 1..=steps {
             let age = start + (end - start) * f64::from(k) / f64::from(steps);
             let age = pin.map_or(age, |at| age.min(at));
+            let age = own_end.map_or(age, |at| age.min(at));
             for i in 0..2 {
                 let (m, tau) = self.current(i);
                 let tau = match &self.members[i] {
@@ -878,6 +1205,12 @@ impl Engine {
                 orbit.set(age, a, e);
             }
             self.age = age;
+            if own_end.is_some_and(|at| age >= at) {
+                if age < self.until {
+                    self.end_pinned_main_sequence();
+                }
+                return;
+            }
             if pin.is_some_and(|at| age >= at) {
                 if age < self.until {
                     self.contact_until = 0.0;
@@ -897,10 +1230,25 @@ impl Engine {
     }
 
     /// Dynamical transfer from member `d` that merges the pair (BSE sections 2.6.4 and 2.6.5):
-    /// a low-mass main-sequence donor over its critical ratio gives its whole mass on
-    /// √(`τ_KH` `τ_dyn`), of which a main-sequence accretor keeps what its thermal timescale allows
-    /// (equation 64) and a giant all; a white dwarf's, neutron star's or black hole's coalesces
-    /// with its companion as a collision does.
+    /// a low-mass main-sequence donor over its critical ratio gives its whole mass, of which a
+    /// main-sequence accretor keeps both stars' masses as the collision of two main-sequence stars
+    /// does (section 2.7.3) and a Hertzsprung-gap accretor the whole donor, as BSE's code gives any
+    /// accretor of k 2–6 (P11.T4.d's fix); a white dwarf's, neutron star's or black hole's
+    /// coalesces with its companion as a collision does.
+    ///
+    /// As first built a main-sequence or gap accretor kept only what its thermal timescale allowed
+    /// of the donor, √(`τ_KH` `τ_dyn`) ÷ `τ_KH,2` of it (equation 64), a small fraction, and the
+    /// rest left the pair: a 0.454 + 0.138 M☉ pair left 0.1375 M☉. BSE's own code, read as COSMIC
+    /// carries it (research-leans-16; v3.4.0's `evolv2.f`, the original branch), restricts a
+    /// main-sequence accretor so ("Restrict accretion to thermal timescale of secondary", `dm2 =
+    /// taum/tkh(j2)*dm1`), but gives an accretor of k 2–6, the gap among them, the whole donor ("Add
+    /// all the material to the giant's envelope", `dm2 = dm1`). Its collision rule, `mix.f`, merges
+    /// two main-sequence stars with M₁ + M₂, and COSMIC changed the dynamical branch's main-sequence
+    /// accretor to full accretion on 2023-07-20 ("This will lead to a merger of the two MS stars").
+    /// P11.T4.d's rule as main reads it (the brief of 2026-10-31) is that collision rule: a
+    /// main-sequence accretor and the donor make a main-sequence star of M₁ + M₂ at the fractional
+    /// age 0.1 Σ Mᵢ τᵢ ÷ M (their equation 80) of both stars, and a gap accretor takes the whole
+    /// donor, at its place in the gap on its new mass's track, each with no mass lost.
     pub(super) fn merge_dynamically(&mut self, d: usize) {
         let o = 1 - d;
         let (md, td) = self.current(d);
@@ -916,15 +1264,19 @@ impl Engine {
         let ko = Kind::of(so.state.phase(), mo);
         if kd == Kind::LowMassMainSequence && (ko.is_main_sequence() || ko == Kind::HertzsprungGap)
         {
-            let timescale = (kelvin_helmholtz(&sd, kd) * dynamical(&sd)).sqrt();
-            let kept = (timescale / kelvin_helmholtz(&so, ko) * md).min(md);
-            let total = mo + kept;
             let product = if ko.is_main_sequence() {
-                self.main_sequence_merger(false, total, [(mo, &so), (0.0, &so)])
+                // P11.T4.d's rule, the collision of two main-sequence stars (BSE section 2.7.3):
+                // both stars' masses, at both stars' fractional age.
+                self.main_sequence_merger(false, md + mo, [(md, &sd), (mo, &so)])
+                    .into()
             } else {
+                // A Hertzsprung-gap accretor takes the whole donor, as BSE's own dynamical branch
+                // gives an accretor of k 2–6 (`evolv2.f`: "Add all the material to the giant's
+                // envelope", `dm2 = dm1`), and sits at the accretor's place in the gap on its own
+                // mass's track, whose core it takes.
                 self.new_star(
                     Kind::HertzsprungGap,
-                    total,
+                    mo + md,
                     so.state.core_mass().value(),
                     0.0,
                     so.state.phase_fraction(),
@@ -960,6 +1312,9 @@ impl Engine {
     }
 
     /// A main-sequence star of mass `m` at fractional age `tau`, on its own track, in slot 0.
+    ///
+    /// A product over the tracks' 150 M☉ (`sse::MAX_INITIAL_MASS`), where no track exists, is
+    /// placed at 150 M☉ (`track_mass`), the excess lost at the merger (lean, 2026-11-05).
     #[must_use]
     fn main_sequence_star(&self, m: f64, tau: f64) -> Member {
         if m < sse::MIN_INITIAL_MASS.value() {
@@ -972,10 +1327,11 @@ impl Engine {
         let lifetime = sse::main_sequence_lifetime(self.ctx.coeffs(), false, mass.value());
         let guess = sse::main_sequence_start(mass, self.ctx.composition()) + tau * lifetime;
         let (composition, draws) = (self.ctx.composition(), self.ctx.draws(0));
+        let options = self.ctx.track_options();
         let (track, placed) = super::evolve::track_reaching(
             guess,
             self.reach_span_years(self.age),
-            |reach| Track::to_age(mass, composition, draws, Years::new(reach)),
+            |reach| Track::to_age_with(mass, composition, draws, options, Years::new(reach)),
             |track| track.age_in_phase(Phase::MainSequence, tau),
         );
         let at = placed.unwrap_or(tau * lifetime);
@@ -986,6 +1342,9 @@ impl Engine {
     }
 
     /// A helium main-sequence star of mass `m` at fractional age `tau`, on its own track.
+    ///
+    /// A product over the tracks' 150 M☉ (`sse::MAX_INITIAL_MASS`), where no track exists, is
+    /// placed at 150 M☉, the excess lost at the merger (lean, 2026-11-05).
     #[must_use]
     fn helium_main_sequence(&self, m: f64, tau: f64) -> Member {
         let track = Track::helium_star_from(
@@ -1046,15 +1405,35 @@ impl Engine {
     /// burnt and `fraction` through its phase (a Hertzsprung gap's), placed as BSE section 2.7.4
     /// places it; a star that cannot be placed becomes the remnant of its core.
     #[must_use]
-    fn new_star(&self, kind: Kind, m: f64, core: f64, burnt: f64, fraction: f64) -> Member {
+    fn new_star(&self, kind: Kind, m: f64, core: f64, burnt: f64, fraction: f64) -> Product {
+        self.new_star_around(kind, m, core, burnt, fraction, CoreSource::Other)
+    }
+
+    /// [`Engine::new_star`] for a product whose core came from `source`: it types the dwarf an unplaced product leaves ([`ProductTyping::unplaced`]), and a placed
+    /// product keeps its kind ([`ProductTyping::placed`], [`Engine::dwarf_cores`]).
+    #[must_use]
+    fn new_star_around(
+        &self,
+        kind: Kind,
+        m: f64,
+        core: f64,
+        burnt: f64,
+        fraction: f64,
+        source: CoreSource,
+    ) -> Product {
         let target = match kind {
             Kind::LowMassMainSequence | Kind::MainSequence => {
-                return self.main_sequence_star(m, 0.0);
+                return self.main_sequence_star(m, 0.0).into();
             }
-            Kind::HeliumMainSequence => return self.helium_main_sequence(m, burnt),
+            Kind::HeliumMainSequence => return self.helium_main_sequence(m, burnt).into(),
             Kind::HertzsprungGap => {
                 let mass = track_mass(SolarMasses::new(m));
-                let track = Track::full(mass, self.ctx.composition(), self.ctx.draws(0));
+                let track = Track::full_with(
+                    mass,
+                    self.ctx.composition(),
+                    self.ctx.draws(0),
+                    self.ctx.track_options(),
+                );
                 let at = track
                     .age_in_phase(Phase::HertzsprungGap, fraction)
                     .unwrap_or(0.0);
@@ -1062,28 +1441,102 @@ impl Engine {
                     track: Arc::new(track),
                     offset: super::evolve::offset_for(self.age, at),
                     mass: Path::starting(self.age, m),
-                };
+                }
+                .into();
             }
             Kind::GiantBranch => NewStar::GiantBranch,
             Kind::CoreHeliumBurning => NewStar::CoreHeliumBurning { burnt },
             Kind::EarlyAgb => NewStar::EarlyAgb,
             Kind::PulsingAgb => NewStar::PulsingAgb,
             Kind::HeliumGap | Kind::HeliumGiant => NewStar::HeliumGiant,
-            Kind::HeliumWhiteDwarf => return self.white_dwarf(Phase::HeliumWhiteDwarf, m),
+            Kind::HeliumWhiteDwarf => return self.white_dwarf(Phase::HeliumWhiteDwarf, m).into(),
             Kind::CarbonOxygenWhiteDwarf => {
-                return self.white_dwarf(Phase::CarbonOxygenWhiteDwarf, m);
+                return self.white_dwarf(Phase::CarbonOxygenWhiteDwarf, m).into();
             }
-            Kind::OxygenNeonWhiteDwarf => return self.white_dwarf(Phase::OxygenNeonWhiteDwarf, m),
-            Kind::NeutronStar | Kind::BlackHole => return self.compact(kind, m),
-            Kind::Massless => return Member::Gone,
+            Kind::OxygenNeonWhiteDwarf => {
+                return self.white_dwarf(Phase::OxygenNeonWhiteDwarf, m).into();
+            }
+            Kind::NeutronStar | Kind::BlackHole => return self.compact(kind, m).into(),
+            Kind::Massless => return Member::Gone.into(),
         };
-        self.placed_star(0, target, m, core).unwrap_or_else(|| {
-            let phase = if core < 0.5 {
-                Phase::HeliumWhiteDwarf
-            } else {
-                Phase::CarbonOxygenWhiteDwarf
-            };
-            self.white_dwarf(phase, core.max(1e-3).min(m))
+        // A pinned primary's product is left to its pin, placed or not: typed as at 27, its dwarf
+        // held by `held_product` (research-leans-34 §1(b)).
+        let typing = if self.pin_pending(0) {
+            ProductTyping::Pinned
+        } else {
+            ProductTyping::Unpinned
+        };
+        if let Some(star) = self.placed_star(0, target, m, core) {
+            // A placed product keeps its dwarf parent's kind (P11.T4's fix).
+            return Product::Member(star, typing.placed(source));
+        }
+        let (m, core) = (SolarMasses::new(m), SolarMasses::new(core));
+        let unplaced = typing.unplaced(kind, m, core, source);
+        #[cfg(test)]
+        unplaced.count(self.pin_pending(0));
+        match unplaced {
+            Unplaced::WhiteDwarf { phase, mass } => self
+                .held_product(target, phase, mass)
+                .unwrap_or_else(|| self.white_dwarf(phase, mass.value()))
+                .into(),
+            Unplaced::HeliumStar { mass } => self.helium_main_sequence(mass.value(), burnt).into(),
+            Unplaced::IronCore {
+                co_core,
+                helium_core,
+                mass,
+            } => Product::IronCore {
+                co_core,
+                helium_core,
+                mass,
+            },
+            Unplaced::ElectronCapture { co_core, mass } => {
+                Product::ElectronCapture { co_core, mass }
+            }
+            Unplaced::Disruption { mass } => Product::Disruption { mass },
+        }
+    }
+
+    /// A merger's product in the primary's place to be placed as `target` that no star of that
+    /// kind can hold, whose white dwarf of `phase` and `mass` [`Engine::new_star`] makes of its
+    /// core, held at its core's last living state instead while the primary's pin is pending
+    /// (P11.T4's fix, [`pinned_white_dwarfs`](super::pinned_white_dwarfs)): design note 16's "if
+    /// the pair has merged, the product collapses", at its pin. `None` otherwise.
+    ///
+    /// The held state is the bare core as `Track::remains_at` holds a stripped AGB star's: a star
+    /// of `target`'s phase whose mass is all core, at [`sse::bare_core_light`]'s luminosity and
+    /// radius, its white dwarf's at formation below the Chandrasekhar mass (HPT section 6.3's
+    /// limit of a giant as its envelope goes, µ = 0). The product has no track whose structure it
+    /// could take, so this state is a lean (2026-11-01, recorded in plan 11).
+    #[must_use]
+    fn held_product(&self, target: NewStar, phase: Phase, mass: SolarMasses) -> Option<Member> {
+        if !self.pin_pending(0) {
+            return None;
+        }
+        let kind = WhiteDwarfCore::of(phase)?;
+        let recipe = RemnantRecipe::default();
+        let (luminosity, radius) =
+            sse::bare_core_light(recipe, self.ctx.composition().z_fit(), kind, mass);
+        let state = StarState::new(StarStateParts {
+            phase: match target {
+                NewStar::GiantBranch => Phase::FirstGiantBranch,
+                NewStar::CoreHeliumBurning { .. } => Phase::CoreHeliumBurning,
+                NewStar::EarlyAgb => Phase::EarlyAgb,
+                NewStar::PulsingAgb => Phase::ThermallyPulsingAgb,
+                NewStar::HeliumGiant => Phase::HeliumGiantBranch,
+            },
+            age: Years::new(self.age),
+            mass,
+            core_mass: mass,
+            luminosity,
+            radius,
+            mass_loss_rate: SolarMassesPerYear::ZERO,
+            phase_fraction: 0.0,
+        });
+        // sse's degenerate core radius, 5 R_WD, held to the radius.
+        let degenerate = 5.0 * white_dwarf_radius(recipe, mass).value();
+        Some(Member::Frozen {
+            state,
+            core_radius: SolarRadii::new(degenerate.min(radius.value())),
         })
     }
 
@@ -1098,8 +1551,131 @@ impl Engine {
         m: f64,
         core: f64,
     ) -> Option<Member> {
+        self.placed_by(i, target, m.max(core), core)
+    }
+
+    /// The giant a fed helium star or white dwarf swells into ([`Engine::swell`]): a star of mass
+    /// `m` M☉ placed as `target` in member `i`'s slot, whose built track's core at the placement,
+    /// read at `m`, is `core` M☉ (below `m`) to [`SWELL_CORE_TOLERANCE`] of it; or `None` where no
+    /// ask places one so within [`SWELL_BUILDS`] track builds (ruling p11-c2-swell of 2026-10-06,
+    /// §3.3 A4; P11.T4.m).
+    ///
+    /// [`Engine::placed_star`] builds the new star's track from the zero-age main sequence with its
+    /// winds, so the track enters the placed phase at a wind-reduced effective initial mass (HPT
+    /// section 7.1) and its core there falls short of the one asked for (finding F16): for a
+    /// core-helium-burning star of 8 M☉ at Z = 0.02 by about 7% halfway through core helium
+    /// burning, and by 8.4% a tenth of the way through. As an envelope, that miss was a fictitious
+    /// giant's (finding C2). BSE's `gntage` starts the star at the placement (`gntage.f` 159–160),
+    /// so that its core is the one asked for to its bisection's 10⁻⁵ M☉ in M₀ (lines 24 and 147).
+    /// Here the core asked of the placement, c′, is solved for instead: bracketed in
+    /// [core, [`SWELL_BRACKET`] core] among the asks that place a star, from the fixed-point step
+    /// c′ = core + (core − built) and then by the secant rule, or by bisection where that leaves
+    /// the bracket. An ask that places no star, or overshoots, closes the bracket from above. The
+    /// trials are a fixed sequence of the inputs. Every other caller keeps `placed_star`'s miss,
+    /// whose own fix is F16's task.
+    #[must_use]
+    pub(super) fn swelled_star(
+        &self,
+        i: usize,
+        target: NewStar,
+        m: f64,
+        core: f64,
+    ) -> Option<Member> {
+        let tolerance = SWELL_CORE_TOLERANCE * core;
+        // The ask's star and its built core's miss, or `None` where the ask places none.
+        let trial = |ask: f64| {
+            let member = self.placed_by(i, target, m, ask)?;
+            let built = member.evaluate(&self.ctx, i, self.age, m, 0.0)?;
+            let miss = built.state.core_mass().value() - core;
+            Some((member, miss))
+        };
+        let (member, miss) = trial(core)?;
+        if miss.abs() <= tolerance {
+            return Some(member);
+        }
+        if miss > 0.0 {
+            return None;
+        }
+        let (mut lo, mut top) = (core, SWELL_BRACKET * core);
+        let mut last = (core, miss);
+        // The next ask, where the last step gives one inside the bracket; a bisection otherwise.
+        let mut next = Some(core - miss);
+        for _ in 1..SWELL_BUILDS {
+            let ask = next
+                .filter(|&ask| ask > lo && ask < top)
+                .unwrap_or(lo + 0.5 * (top - lo));
+            let Some((member, miss)) = trial(ask) else {
+                top = ask;
+                next = None;
+                continue;
+            };
+            if miss.abs() <= tolerance {
+                return Some(member);
+            }
+            if miss < 0.0 {
+                lo = ask;
+            } else {
+                top = ask;
+            }
+            // The secant through the last two trials, where they differ.
+            let slope = (miss - last.1) / (ask - last.0);
+            next = (slope.is_finite() && slope.abs() > 0.0).then(|| ask - miss / slope);
+            last = (ask, miss);
+        }
+        None
+    }
+
+    /// The giant a helium white dwarf of `core` M☉ fed hydrogen swells into with its core still
+    /// degenerate ([`Engine::swell`], P11.T4's swollen dwarf): a star of mass `m` M☉ in member
+    /// `i`'s slot on the track of [`sse::degenerate_giant_mass`], a star below `M_HeF`, placed on
+    /// its first giant branch where its core, read at `m`, is `core` to [`SWELL_CORE_TOLERANCE`] of
+    /// it; or `None` where no such track's branch holds the core.
+    ///
+    /// The branch's core grows with its fraction, so the fraction is found by bisection, in at most
+    /// [`DEGENERATE_GIANT_BISECTIONS`] reads of the one track.
+    #[must_use]
+    pub(super) fn degenerate_giant(&self, i: usize, m: f64, core: f64) -> Option<Member> {
+        let m0 = sse::degenerate_giant_mass(SolarMasses::new(core), self.ctx.coeffs())?;
+        let track = Arc::new(Track::full_with(
+            track_mass(m0),
+            self.ctx.composition(),
+            self.ctx.draws(i),
+            self.ctx.track_options(),
+        ));
+        // The giant at fraction `f` of the branch and its core's miss, or `None` off the branch.
+        let at = |f: f64| {
+            let age = track.age_in_phase(Phase::FirstGiantBranch, f)?;
+            let member = Member::Shaped {
+                track: Arc::clone(&track),
+                offset: super::evolve::offset_for(self.age, age),
+                mass: Path::starting(self.age, m),
+            };
+            let built = member.evaluate(&self.ctx, i, self.age, m, 0.0)?;
+            let miss = built.state.core_mass().value() - core;
+            (built.state.phase() == Phase::FirstGiantBranch).then_some((member, miss))
+        };
+        let tolerance = SWELL_CORE_TOLERANCE * core;
+        if at(0.0)?.1 > tolerance {
+            return None;
+        }
+        let (mut lo, mut hi) = (0.0, 1.0);
+        for _ in 0..DEGENERATE_GIANT_BISECTIONS {
+            let mid = lo + 0.5 * (hi - lo);
+            match at(mid) {
+                Some((member, miss)) if miss.abs() <= tolerance => return Some(member),
+                Some((_, miss)) if miss < 0.0 => lo = mid,
+                Some(_) | None => hi = mid,
+            }
+        }
+        None
+    }
+
+    /// A star of mass `m` M☉ that the binary carries from now in member `i`'s slot, placed as
+    /// `target` with the core `ask` M☉ asked of [`sse::new_star_mass`] ([`Engine::placed_star`]).
+    #[must_use]
+    fn placed_by(&self, i: usize, target: NewStar, m: f64, ask: f64) -> Option<Member> {
         let (m0, phase, fraction) =
-            sse::new_star_mass(target, SolarMasses::new(core), self.ctx.coeffs())?;
+            sse::new_star_mass(target, SolarMasses::new(ask), self.ctx.coeffs())?;
         let track = match target {
             NewStar::HeliumGiant => {
                 Track::helium_star_full(m0, self.ctx.composition(), self.ctx.draws(i))
@@ -1107,23 +1683,84 @@ impl Engine {
             NewStar::GiantBranch
             | NewStar::CoreHeliumBurning { .. }
             | NewStar::EarlyAgb
-            | NewStar::PulsingAgb => {
-                Track::full(track_mass(m0), self.ctx.composition(), self.ctx.draws(i))
-            }
+            | NewStar::PulsingAgb => Track::full_with(
+                track_mass(m0),
+                self.ctx.composition(),
+                self.ctx.draws(i),
+                self.ctx.track_options(),
+            ),
         };
         let at = track.age_in_phase(phase, fraction)?;
         Some(Member::Shaped {
             track: Arc::new(track),
             offset: super::evolve::offset_for(self.age, at),
-            mass: Path::starting(self.age, m.max(core)),
+            mass: Path::starting(self.age, m),
         })
+    }
+}
+
+/// The pinned primary held at its bare core's last living state `core`, with its structure's
+/// `core_radius`, until its pin collapses it (plan 11, design note 16; P11.T4.g).
+#[must_use]
+fn held_core(core: &StarState, core_radius: SolarRadii) -> Member {
+    let state = StarState::new(StarStateParts {
+        phase: core.phase(),
+        age: core.age(),
+        mass: core.mass(),
+        core_mass: core.core_mass(),
+        luminosity: core.luminosity(),
+        radius: core.radius(),
+        mass_loss_rate: SolarMassesPerYear::ZERO,
+        phase_fraction: core.phase_fraction(),
+    });
+    Member::Frozen { state, core_radius }
+}
+
+/// What a merger leaves in the primary's place ([`Engine::finish_merger`]): a member, with the
+/// white dwarf its core is if a dwarf's (P11.T4's swollen dwarf and dwarf limit,
+/// [`Engine::dwarf_cores`]), or the iron core of a product that no star can hold, which collapses
+/// at once (P11.T4's dwarf limit, [`Unplaced::IronCore`]).
+#[derive(Debug, Clone)]
+pub(super) enum Product {
+    /// The member, and the dwarf its core is.
+    Member(Member, CoreSource),
+    /// A star of `mass` whose carbon–oxygen core of `co_core`, inside a helium core of
+    /// `helium_core`, is an iron core.
+    IronCore {
+        /// Its carbon–oxygen core.
+        co_core: SolarMasses,
+        /// Its helium core, everything below its hydrogen envelope.
+        helium_core: SolarMasses,
+        /// Its mass.
+        mass: SolarMasses,
+    },
+    /// A helium star of `mass` whose carbon–oxygen core of `co_core` is an oxygen–neon one, which
+    /// collapses by electron capture ([`Unplaced::ElectronCapture`]).
+    ElectronCapture {
+        /// Its carbon–oxygen core.
+        co_core: SolarMasses,
+        /// Its mass.
+        mass: SolarMasses,
+    },
+    /// A star of `mass` whose carbon–oxygen core ignites carbon and disrupts it, leaving nothing
+    /// ([`Unplaced::Disruption`]).
+    Disruption {
+        /// Its mass.
+        mass: SolarMasses,
+    },
+}
+
+impl From<Member> for Product {
+    /// A member whose core is no dwarf's.
+    fn from(member: Member) -> Self {
+        Self::Member(member, CoreSource::Other)
     }
 }
 
 /// What a common envelope whose cores coalesce leaves to the merger: the envelope's binding
 /// energy before and after the spiral-in (÷ G) and the two sides.
-#[derive(Debug, Clone, Copy)]
-struct CommonEnvelopeRemains {
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct CommonEnvelopeRemains {
     binding: f64,
     binding_f: f64,
     s1: Side,

@@ -10,7 +10,10 @@ import {
   DAWN_SAFETY_OFF_DISABLED,
   DAWN_SAFETY_OFF_ENABLED,
   type DawnSafety,
+  FIELD_HOLD_TIMEOUT_MS,
   launchSwitches,
+  MEASURE_TIMEOUT_MS,
+  MEASUREMENT_MARGIN_MS,
   registerSpikeHandlers,
   SPIKE_CHANNELS,
   type SpikeHandlerDeps,
@@ -20,16 +23,23 @@ import {
   SPIKE_TRACE_BUFFER_KB,
   SPIKE_TRACE_CATEGORIES,
   SPIKE_TRACE_FORMAT,
+  SERVED_FIELD_HOLD_TIMEOUT_MS,
+  SOFTWARE_SPIKE_RESULTS_DIR,
+  SPIKE_RESULTS_DIR,
+  spikeResultsDir,
   SpikeTrace,
   type SpikeTracing,
   spikeTraceConfig,
+  spikeWatchdogMs,
   type TraceWindowStop,
   traceSettingsOf,
 } from "./spike";
+import { SOFTWARE_WAIT_FACTOR } from "./graphics/softwareMode";
+import { sizesReportOf } from "./fixtures/sizesReport";
 import { smallReport } from "./fixtures/spikeReport";
 
 const PLATFORMS: ReadonlyArray<NodeJS.Platform> = ["linux", "win32", "darwin"];
-const MODES: ReadonlyArray<GraphicsLaunchMode> = ["default", "vulkan", "safe"];
+const MODES: ReadonlyArray<GraphicsLaunchMode> = ["default", "vulkan", "safe", "software"];
 const SAFETY: ReadonlyArray<DawnSafety> = ["on", "off"];
 
 const VULKAN_SET: ReadonlyArray<ChromiumSwitch> = [
@@ -58,9 +68,10 @@ const SAFETY_OFF_ENABLE: ChromiumSwitch = {
   name: "enable-dawn-features",
   value: DAWN_SAFETY_OFF_ENABLED.join(","),
 };
-const SAFETY_OFF_DISABLE: ChromiumSwitch = {
+/** The safety toggles' disabled list with the timing toggle first, as a spike off the Vulkan path merges them. */
+const TIMING_SAFETY_OFF_DISABLE: ChromiumSwitch = {
   name: "disable-dawn-features",
-  value: DAWN_SAFETY_OFF_DISABLED.join(","),
+  value: ["timestamp_quantization", ...DAWN_SAFETY_OFF_DISABLED].join(","),
 };
 const VULKAN_SAFETY_OFF: ReadonlyArray<ChromiumSwitch> = [
   { name: "use-angle", value: "vulkan" },
@@ -85,10 +96,11 @@ function documentedSpikeSet(
   if (mode === "safe") {
     return [];
   }
+  // The timing toggle is on every backend's (R14's Mac measurements); the Vulkan set Linux's alone.
   if (dawnSafety === "on") {
-    return forced ? [...VULKAN_SET, TIMING] : [];
+    return forced ? [...VULKAN_SET, TIMING] : [TIMING];
   }
-  return forced ? VULKAN_SAFETY_OFF : [SAFETY_OFF_ENABLE, SAFETY_OFF_DISABLE];
+  return forced ? VULKAN_SAFETY_OFF : [TIMING_SAFETY_OFF_DISABLE, SAFETY_OFF_ENABLE];
 }
 
 describe("the spike's measurement switches", () => {
@@ -174,15 +186,18 @@ describe("the spike's measurement switches", () => {
     ]);
   });
 
-  it("put the safety toggles on a default-mode launch, which has no R01 switches", () => {
+  it("put the safety toggles on a default-mode launch, merged after its one R01 switch, the timing toggle", () => {
     expect(
       launchSwitches(
         { platform: "win32", mode: "default", gpuTiming: false },
         { dawnSafety: "off" },
       ),
     ).toEqual([
+      {
+        name: "disable-dawn-features",
+        value: ["timestamp_quantization", ...DAWN_SAFETY_OFF_DISABLED].join(","),
+      },
       { name: "enable-dawn-features", value: DAWN_SAFETY_OFF_ENABLED.join(",") },
-      { name: "disable-dawn-features", value: DAWN_SAFETY_OFF_DISABLED.join(",") },
     ]);
   });
 
@@ -251,6 +266,48 @@ function keep(): {
     },
   };
 }
+
+describe("the spike's watchdog", () => {
+  it("gives a descent 45 minutes and a smoke 3, with each generated world's measurement", () => {
+    const terrainMs = FIELD_HOLD_TIMEOUT_MS + MEASURE_TIMEOUT_MS + MEASUREMENT_MARGIN_MS;
+    const servedMs = SERVED_FIELD_HOLD_TIMEOUT_MS + MEASURE_TIMEOUT_MS + MEASUREMENT_MARGIN_MS;
+    for (const mode of ["default", "vulkan", "safe"] as const) {
+      expect(spikeWatchdogMs({ smoke: false, world: "test-planet" }, mode)).toBe(45 * 60_000);
+      expect(spikeWatchdogMs({ smoke: true, world: "test-planet" }, mode)).toBe(180_000);
+      expect(spikeWatchdogMs({ smoke: false, world: "terrain-test" }, mode)).toBe(
+        45 * 60_000 + terrainMs,
+      );
+      expect(spikeWatchdogMs({ smoke: true, world: "served" }, mode)).toBe(180_000 + servedMs);
+    }
+    expect(terrainMs).toBe(13 * 60_000);
+    expect(servedMs).toBe(21 * 60_000);
+  });
+
+  it("is five times as long in the software mode, on every world", () => {
+    for (const smoke of [false, true]) {
+      for (const world of ["test-planet", "terrain-test", "served"] as const) {
+        expect(spikeWatchdogMs({ smoke, world }, "software")).toBe(
+          SOFTWARE_WAIT_FACTOR * spikeWatchdogMs({ smoke, world }, "vulkan"),
+        );
+      }
+    }
+  });
+});
+
+describe("the spike's results directory", () => {
+  it("is the measurements' directory on a GPU launch, and --out where one is given", () => {
+    for (const mode of ["default", "vulkan", "safe"] as const) {
+      expect(spikeResultsDir(null, mode)).toBe("docs/measurements/descent-spike");
+      expect(spikeResultsDir("/runs/here", mode)).toBe("/runs/here");
+    }
+    expect(SPIKE_RESULTS_DIR).toBe("docs/measurements/descent-spike");
+  });
+
+  it("is under target/ in the software mode, whose figures are SwiftShader's", () => {
+    expect(spikeResultsDir(null, "software")).toBe("target/descent-spike/results");
+    expect(SOFTWARE_SPIKE_RESULTS_DIR.startsWith("target/")).toBe(true);
+  });
+});
 
 describe("the spike's trace", () => {
   it("records a timed run's five categories, without gpu or the CPU profiler, and only those", () => {
@@ -469,6 +526,7 @@ describe("the spike's IPC handlers", () => {
       writeResults: vi.fn<SpikeHandlerDeps<FakeEvent>["writeResults"]>(() =>
         Promise.resolve({ kind: "written", paths: { json: "a.json", markdown: "a.md" } }),
       ),
+      writePart: vi.fn<SpikeHandlerDeps<FakeEvent>["writePart"]>(() => Promise.resolve()),
       writeCapture: vi.fn<SpikeHandlerDeps<FakeEvent>["writeCapture"]>(() =>
         Promise.resolve("/capture"),
       ),
@@ -508,8 +566,12 @@ describe("the spike's IPC handlers", () => {
     await expect(call(SPIKE_CHANNELS.writeResults, OWN, { frames: 1 })).rejects.toThrow(/report/);
     await expect(call(SPIKE_CHANNELS.writeCapture, OWN, { json: 1 })).rejects.toThrow(/capture/);
     await expect(call(SPIKE_CHANNELS.end, OWN, { status: "fail" })).rejects.toThrow(/end/);
+    await expect(
+      call(SPIKE_CHANNELS.writePart, OWN, { fromFrame: 0, throughS: 1, report: { frames: 1 } }),
+    ).rejects.toThrow(/part of a report/);
     expect(deps.rendererMemory).not.toHaveBeenCalled();
     expect(deps.writeResults).not.toHaveBeenCalled();
+    expect(deps.writePart).not.toHaveBeenCalled();
     expect(deps.end).not.toHaveBeenCalled();
   });
 
@@ -522,13 +584,34 @@ describe("the spike's IPC handlers", () => {
       kind: "written",
       paths: { json: "a.json", markdown: "a.md" },
     });
+    const part = { fromFrame: 0, throughS: 61, report: smallReport() };
+    await call(SPIKE_CHANNELS.writePart, OWN, part);
     await call(SPIKE_CHANNELS.stopTrace, OWN);
     await call(SPIKE_CHANNELS.end, OWN, { status: "fail", reason: "no bake" });
+    expect(deps.writePart).toHaveBeenCalledExactlyOnceWith(part);
     expect(deps.startMeasuring).toHaveBeenCalledOnce();
     expect(deps.cycleTrace).toHaveBeenCalledOnce();
     expect(deps.stopMeasuring).toHaveBeenCalledOnce();
     expect(deps.rendererMemory).toHaveBeenCalledWith(4096);
     expect(deps.writeResults).toHaveBeenCalledWith(smallReport());
     expect(deps.end).toHaveBeenCalledWith(1, "no bake");
+  });
+
+  it("writes the results without a malformed sizes block, handing the block on with its problems (R10.T14.b)", async () => {
+    const { call, deps } = setUp();
+    const sizes = sizesReportOf();
+    const block = { ...sizes, readouts: { ...sizes.readouts, publishes: -1 } };
+    await call(SPIKE_CHANNELS.writeResults, OWN, { ...smallReport(), sizes: block });
+    expect(deps.writeResults).toHaveBeenCalledExactlyOnceWith(smallReport(), {
+      block,
+      problems: ["sizes.readouts.publishes is not a whole count"],
+    });
+  });
+
+  it("hands a well-formed sizes block on within the report", async () => {
+    const { call, deps } = setUp();
+    const report = { ...smallReport(), sizes: sizesReportOf() };
+    await call(SPIKE_CHANNELS.writeResults, OWN, report);
+    expect(deps.writeResults).toHaveBeenCalledExactlyOnceWith(report);
   });
 });

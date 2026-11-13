@@ -5,7 +5,7 @@
 //! carbon–oxygen core of 3 M☉, may take the kick law's low mode (plan 06, design note 11), so the
 //! share of stripped primaries sets how many remnants stay near their birth sites. It is built on
 //! plan 11's quadrature of the companions the hierarchy draw gives,
-//! [`band_share_as_drawn`](crate::stellar::multiplicity::band_share_as_drawn): the share of
+//! [`band_share_as_drawn`]: the share of
 //! primaries whose innermost companion's periastron lies in a band of periastra that depends on
 //! the mass ratio, over plan 11's count, period, mass-ratio and eccentricity laws (ruling 81's
 //! direct construction from 3 M☉, [`MultiplicityModel::default_v1`] below).
@@ -47,6 +47,13 @@
 //! the exact quadrature and track outside it. Every reader reads the same two functions, so the
 //! mark, the kick law, the hierarchy draw and plan 08's class table (P08.T9) agree.
 //!
+//! A star with a helium excess, a cluster's second population's, is not the table's: its share and
+//! radii are read from the table's helium axis ([`HeliumStrippingTable`], `hyperion-fit`'s
+//! `stripping_helium` task, `tables::stripping_helium`; from version 26, P11.T1.d), three slices
+//! of helium excess over the same grid, interpolated linearly in ΔY from the table's own at none,
+//! built under the fitted helium table the tracks read. Past the axis it takes the exact path,
+//! some 3.5 ms a star.
+//!
 //! Plan 06's companion-stripped mark is read against [`stripped_share`] (P11.T1.d, edit 4), and
 //! plan 11's hierarchy draws a marked primary's innermost orbit from its stripping band and an
 //! unmarked one's from the band's complement (ruling 123.5). [`kick_bins`](super::kick_bins)
@@ -54,6 +61,7 @@
 //!
 //! [`can_interact`]: crate::stellar::binary::can_interact
 
+use crate::GENERATOR_VERSION;
 use crate::math;
 use crate::orbit::roche_lobe_radius;
 use crate::rng::{Mark, Threshold};
@@ -63,8 +71,11 @@ use crate::stellar::draws::{StarDraws, StarDrawsParts};
 use crate::stellar::multiplicity::{
     MultiplicityModel, band_share_as_drawn, stripped_share_as_drawn as multiplicity_share,
 };
-use crate::stellar::sse::{MAX_INITIAL_MASS, MIN_INITIAL_MASS, Stage, Track, main_sequence_start};
-use crate::tables::stripping;
+use crate::stellar::rules::StellarRules;
+use crate::stellar::sse::{
+    MAX_INITIAL_MASS, MIN_INITIAL_MASS, Stage, Track, TrackOptions, main_sequence_start,
+};
+use crate::tables::{stripping, stripping_helium};
 use crate::units::consts::SOLAR_RADIUS_M;
 use crate::units::{Metres, SolarMasses, Years};
 
@@ -223,12 +234,20 @@ impl StageRadii {
     /// 150 M☉ above the tracks' range): a full track, about a millisecond.
     #[must_use]
     pub fn of_track(m1: SolarMasses, comp: &Composition) -> Self {
+        Self::of_track_under(m1, comp, StellarRules::of_version(GENERATOR_VERSION))
+    }
+
+    /// [`StageRadii::of_track`] with the track built under the stellar stage's `rules`, those of
+    /// the star whose mark or orbit reads it.
+    #[must_use]
+    pub(crate) fn of_track_under(m1: SolarMasses, comp: &Composition, rules: StellarRules) -> Self {
         let m0 = if m1 > MAX_INITIAL_MASS {
             MAX_INITIAL_MASS
         } else {
             m1
         };
-        Self::of_built(&Track::full(m0, comp, &unstripped_median()))
+        let options = TrackOptions::default().with_rules(rules);
+        Self::of_built(&Track::full_with(m0, comp, &unstripped_median(), options))
     }
 
     /// The radii read from a primary's full track `track`, built at [`StageRadii::of_track`]'s
@@ -324,7 +343,13 @@ pub fn stripping_band(m1: SolarMasses, q: f64, comp: &Composition) -> StrippingB
 /// If `m` is not positive and finite.
 #[must_use]
 pub fn exact_stripped_share(m: SolarMasses, comp: &Composition) -> f64 {
-    band_share_of(m, comp, StageRadii::of_track(m, comp))
+    exact_stripped_share_under(m, comp, StellarRules::of_version(GENERATOR_VERSION))
+}
+
+/// [`exact_stripped_share`] with the primary's track built under the stellar stage's `rules`.
+#[must_use]
+fn exact_stripped_share_under(m: SolarMasses, comp: &Composition, rules: StellarRules) -> f64 {
+    band_share_of(m, comp, StageRadii::of_track_under(m, comp, rules))
 }
 
 /// [`exact_stripped_share`]'s quadrature over the bands of `radii`.
@@ -362,16 +387,44 @@ fn band_share_of(m: SolarMasses, comp: &Composition, radii: StageRadii) -> f64 {
 /// ```
 #[must_use]
 pub fn stripped_share(m: SolarMasses, comp: &Composition) -> f64 {
-    StrippingTable::generator()
-        .at(m, comp)
-        .map_or_else(|| exact_stripped_share(m, comp), |node| node.share)
+    stripped_share_under(m, comp, StellarRules::of_version(GENERATOR_VERSION))
+}
+
+/// [`stripped_share`] under the stellar stage's `rules`, those of the star whose mark reads it:
+/// the table they choose (`tabulated_node`), and the exact path's track built under them. The
+/// stripping table holds no star with a helium excess, whose track the rules' helium table moves
+/// (P15.T7.b's hold, `stellar::rules`); from 26 its helium axis does.
+#[must_use]
+pub(crate) fn stripped_share_under(m: SolarMasses, comp: &Composition, rules: StellarRules) -> f64 {
+    tabulated_node(m, comp).map_or_else(
+        || exact_stripped_share_under(m, comp, rules),
+        |node| node.share,
+    )
+}
+
+/// The node of a primary of initial mass `m1` and composition `comp` that a table holds, if one
+/// does: [`HeliumStrippingTable::generator`]'s, which is [`StrippingTable::generator`]'s for a star
+/// with no helium excess and its helium axis's for one with (P11.T1.d), built under the fitted
+/// helium table (P15.T7.b) the tracks read. The exact path answers the rest.
+#[must_use]
+fn tabulated_node(m1: SolarMasses, comp: &Composition) -> Option<StrippingNode> {
+    HeliumStrippingTable::generator().at(m1, comp)
 }
 
 /// [`stripped_share`] with the primary's full track `track`, already built at the median draws
 /// with the mark [`NEVER_STRIPPED`], standing in for the exact path's own (P08.T9's build shares
 /// it with the kick bins' unmarked fate, ruling 128.5): the same bits, and no second track outside
 /// the table's domain.
+///
+/// # Panics
+///
+/// In debug builds, for a star with a helium excess: its only readers, the kick bins, build at no
+/// helium excess, and the table's helium axis would answer such a star under 26's rules.
 pub(crate) fn stripped_share_on(m: SolarMasses, comp: &Composition, track: &Track) -> f64 {
+    debug_assert!(
+        comp.helium_excess().value() <= 0.0,
+        "the kick bins' share is read at no helium excess: {comp:?}"
+    );
     StrippingTable::generator().at(m, comp).map_or_else(
         || band_share_of(m, comp, StageRadii::of_built(track)),
         |node| node.share,
@@ -388,9 +441,18 @@ pub(crate) fn stripped_share_on(m: SolarMasses, comp: &Composition, track: &Trac
 /// If `m1` is not positive and finite.
 #[must_use]
 pub fn stripping_node(m1: SolarMasses, comp: &Composition) -> StrippingNode {
-    StrippingTable::generator()
-        .at(m1, comp)
-        .unwrap_or_else(|| StrippingNode::of(m1, comp))
+    stripping_node_under(m1, comp, StellarRules::of_version(GENERATOR_VERSION))
+}
+
+/// [`stripping_node`] under the stellar stage's `rules`, those of the galaxy whose hierarchy draws
+/// the primary's orbit: the table they choose, and the exact path's track built under them.
+#[must_use]
+pub(crate) fn stripping_node_under(
+    m1: SolarMasses,
+    comp: &Composition,
+    rules: StellarRules,
+) -> StrippingNode {
+    tabulated_node(m1, comp).unwrap_or_else(|| StrippingNode::of_under(m1, comp, rules))
 }
 
 /// A companion-stripped mark that no share below 1 sets: the largest mark, 2⁵³ − 1, which lies
@@ -408,7 +470,19 @@ pub const NEVER_STRIPPED: Mark = Mark::from_word(u64::MAX);
 /// If `m` is not positive and finite.
 #[must_use]
 pub fn is_stripped(mark: Mark, m: SolarMasses, comp: &Composition) -> bool {
-    mark != NEVER_STRIPPED && is_stripped_at(mark, stripped_share(m, comp))
+    is_stripped_under(mark, m, comp, StellarRules::of_version(GENERATOR_VERSION))
+}
+
+/// [`is_stripped`] against [`stripped_share_under`] the stellar stage's `rules`: what a track
+/// built under them asks of its mark.
+#[must_use]
+pub(crate) fn is_stripped_under(
+    mark: Mark,
+    m: SolarMasses,
+    comp: &Composition,
+    rules: StellarRules,
+) -> bool {
+    mark != NEVER_STRIPPED && is_stripped_at(mark, stripped_share_under(m, comp, rules))
 }
 
 /// Whether the companion-stripped mark `mark` is set against the stripped share `share`, the
@@ -479,9 +553,37 @@ impl StrippingNode {
     /// quadrature, as `hyperion-fit`'s `stripping` task computes each node.
     #[must_use]
     pub fn of(m1: SolarMasses, comp: &Composition) -> Self {
+        Self::of_under(m1, comp, StellarRules::of_version(GENERATOR_VERSION))
+    }
+
+    /// [`StrippingNode::of`], whose track reads the fitted helium table (`tables::helium`)
+    /// under the version's stellar rules: what [`HeliumStrippingTable`] tabulates, as
+    /// `hyperion-fit`'s `stripping_helium` task computes each node, so that its helium axis holds
+    /// the helium excess's own effect over the same tracks as the table at none.
+    #[must_use]
+    pub fn of_fitted_helium(m1: SolarMasses, comp: &Composition) -> Self {
+        Self::of(m1, comp)
+    }
+
+    /// [`StrippingNode::of`] with the track built under the stellar stage's `rules`.
+    #[must_use]
+    fn of_under(m1: SolarMasses, comp: &Composition, rules: StellarRules) -> Self {
         Self {
-            share: exact_stripped_share(m1, comp),
-            radii: StageRadii::of_track(m1, comp),
+            share: exact_stripped_share_under(m1, comp, rules),
+            radii: StageRadii::of_track_under(m1, comp, rules),
+        }
+    }
+
+    /// The node of a table's interpolated row, `[share, log₁₀ r_MS, log₁₀ r_HG, log₁₀ r_CHeB]`.
+    #[must_use]
+    fn of_row([share, main_sequence, hertzsprung_gap, core_helium_burning]: [f64; 4]) -> Self {
+        Self {
+            share,
+            radii: StageRadii::new(
+                math::exp10(main_sequence),
+                math::exp10(hertzsprung_gap),
+                math::exp10(core_helium_burning),
+            ),
         }
     }
 
@@ -593,35 +695,150 @@ impl<'t> StrippingTable<'t> {
         if comp.helium_excess().value().abs() > 0.0 {
             return None;
         }
-        let mass = m1.value().min(STRIPPING_MASS_RANGE.1);
-        if mass.is_nan() || mass < STRIPPING_MASS_RANGE.0 {
+        let mass = table_mass(m1)?;
+        Some(StrippingNode::of_row(interpolate(
+            self.nodes,
+            mass,
+            table_fe_h(comp),
+        )))
+    }
+}
+
+/// `m1` as the tables read it, M☉: held to their heaviest, 150 M☉, as the tracks are, or `None`
+/// below their lightest. A mass that is not a number is held to the heaviest too (`f64::min`
+/// returns the other operand), as the stripping table has always read it.
+#[must_use]
+fn table_mass(m1: SolarMasses) -> Option<f64> {
+    let mass = m1.value().min(STRIPPING_MASS_RANGE.1);
+    (mass >= STRIPPING_MASS_RANGE.0).then_some(mass)
+}
+
+/// The \[Fe/H\] of `comp`'s `z_fit` the tables are laid out in, log₁₀(`z_fit` ÷ 0.02).
+#[must_use]
+fn table_fe_h(comp: &Composition) -> f64 {
+    math::log10(comp.z_fit().value() / 0.02)
+}
+
+/// The bilinear interpolant in ln m and \[Fe/H\] of `nodes`, one table's [`STRIPPING_NODES`] mass
+/// fastest, at `mass` (M☉, inside the mass range) and `fe_h` (held to the metallicities' range):
+/// `(share, log₁₀ r_MS, log₁₀ r_HG, log₁₀ r_CHeB)`.
+#[must_use]
+fn interpolate(nodes: &[(f64, f64, f64, f64)], mass: f64, fe_h: f64) -> [f64; 4] {
+    let (ln_lo, ln_hi) = (
+        math::ln(STRIPPING_MASS_RANGE.0),
+        math::ln(STRIPPING_MASS_RANGE.1),
+    );
+    let by_mass = cell(math::ln(mass), ln_lo, ln_hi, STRIPPING_MASSES);
+    let (lowest, highest) = metallicity_range();
+    let by_fe_h = cell(fe_h, lowest, highest, STRIPPING_METALLICITIES);
+    let node = |a: usize, b: usize| nodes[b * STRIPPING_MASSES + a];
+    let mix = |pick: fn(&(f64, f64, f64, f64)) -> f64| {
+        let (col, along) = by_mass;
+        let row = |b: usize| {
+            pick(&node(col, b)) + along * (pick(&node(col + 1, b)) - pick(&node(col, b)))
+        };
+        let (line, across) = by_fe_h;
+        row(line) + across * (row(line + 1) - row(line))
+    };
+    [mix(|n| n.0), mix(|n| n.1), mix(|n| n.2), mix(|n| n.3)]
+}
+
+/// The number of [`HeliumStrippingTable`]'s slices above the stripping table's own at no helium
+/// excess: three, a step of 0.06 in ΔY.
+pub const STRIPPING_HELIUMS: usize = 3;
+
+/// The greatest helium excess [`HeliumStrippingTable`] holds, ΔY: a cluster's greatest
+/// (`interior::abundances::HELIUM_EXCESS_MAX`, Milone and Marino 2022), its last slice.
+pub const STRIPPING_HELIUM_MAX: f64 = 0.18;
+
+/// The number of [`HeliumStrippingTable`]'s own nodes, its slices' together.
+pub const STRIPPING_HELIUM_NODES: usize = STRIPPING_HELIUMS * STRIPPING_NODES;
+
+/// The helium excesses of [`HeliumStrippingTable`]'s slices, ΔY, ascending: 0.06, 0.12 and 0.18,
+/// above the stripping table's own at none.
+#[must_use]
+pub fn stripping_heliums() -> Vec<f64> {
+    even(0.0, STRIPPING_HELIUM_MAX, STRIPPING_HELIUMS + 1)
+        .into_iter()
+        .skip(1)
+        .collect()
+}
+
+/// The stripped share and the stage radii of a star with a helium excess (P11.T1.d's helium axis,
+/// version 26's): [`STRIPPING_HELIUMS`] slices of [`StrippingTable`]'s grid at the helium excesses
+/// [`stripping_heliums`], each node [`StrippingNode::of_fitted_helium`], over the stripping table's
+/// own at none, interpolated as it is in ln m and \[Fe/H\] and then linearly in ΔY.
+///
+/// The share hardly moves with the helium excess, by some 10⁻⁴ over 0–0.18 at most nodes, but it
+/// can where a giant branch changes from blue to red (0.58 to 0.45 at 40 M☉ and \[Fe/H\] −1).
+/// `hyperion-fit`'s `stripping_helium` task writes the slices and validates the axis at its cells'
+/// centres.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HeliumStrippingTable<'t> {
+    /// The table at no helium excess.
+    base: StrippingTable<'t>,
+    /// The slices' nodes, `(share, log₁₀ r_MS, log₁₀ r_HG, log₁₀ r_CHeB)`, mass fastest, then
+    /// metallicity, then helium excess.
+    slices: &'t [(f64, f64, f64, f64)],
+}
+
+impl HeliumStrippingTable<'static> {
+    /// The generator's axis, [`tables::stripping_helium`](crate::tables::stripping_helium), over
+    /// [`StrippingTable::generator`].
+    #[must_use]
+    pub const fn generator() -> Self {
+        let slices: &[(f64, f64, f64, f64); STRIPPING_HELIUM_NODES] = &stripping_helium::NODES;
+        Self {
+            base: StrippingTable::generator(),
+            slices,
+        }
+    }
+}
+
+impl<'t> HeliumStrippingTable<'t> {
+    /// The axis of `slices` over `base`, or `None` unless it holds all
+    /// [`STRIPPING_HELIUM_NODES`].
+    #[must_use]
+    pub fn new(base: StrippingTable<'t>, slices: &'t [(f64, f64, f64, f64)]) -> Option<Self> {
+        (slices.len() == STRIPPING_HELIUM_NODES).then_some(Self { base, slices })
+    }
+
+    /// The slices' nodes, mass fastest, then metallicity, then helium excess.
+    #[must_use]
+    pub const fn slices(&self) -> &'t [(f64, f64, f64, f64)] {
+        self.slices
+    }
+
+    /// The interpolated node of a primary of initial mass `m1` and composition `comp`, or `None`
+    /// outside the axis: below its lightest mass, or for a helium excess above
+    /// [`STRIPPING_HELIUM_MAX`]. At no helium excess it is [`StrippingTable::at`]'s, bit for bit.
+    #[must_use]
+    pub fn at(&self, m1: SolarMasses, comp: &Composition) -> Option<StrippingNode> {
+        let helium = comp.helium_excess().value();
+        if helium <= 0.0 {
+            return self.base.at(m1, comp);
+        }
+        if helium.is_nan() || helium > STRIPPING_HELIUM_MAX {
             return None;
         }
-        let (ln_lo, ln_hi) = (
-            math::ln(STRIPPING_MASS_RANGE.0),
-            math::ln(STRIPPING_MASS_RANGE.1),
-        );
-        let by_mass = cell(math::ln(mass), ln_lo, ln_hi, STRIPPING_MASSES);
-        let fe_h = math::log10(comp.z_fit().value() / 0.02);
-        let (lowest, highest) = metallicity_range();
-        let by_fe_h = cell(fe_h, lowest, highest, STRIPPING_METALLICITIES);
-        let node = |a: usize, b: usize| self.nodes[b * STRIPPING_MASSES + a];
-        let mix = |pick: fn(&(f64, f64, f64, f64)) -> f64| {
-            let (col, along) = by_mass;
-            let row = |b: usize| {
-                pick(&node(col, b)) + along * (pick(&node(col + 1, b)) - pick(&node(col, b)))
-            };
-            let (line, across) = by_fe_h;
-            row(line) + across * (row(line + 1) - row(line))
-        };
-        Some(StrippingNode {
-            share: mix(|n| n.0),
-            radii: StageRadii::new(
-                math::exp10(mix(|n| n.1)),
-                math::exp10(mix(|n| n.2)),
-                math::exp10(mix(|n| n.3)),
-            ),
-        })
+        let mass = table_mass(m1)?;
+        let fe_h = table_fe_h(comp);
+        let (slice, weight) = cell(helium, 0.0, STRIPPING_HELIUM_MAX, STRIPPING_HELIUMS + 1);
+        let below = interpolate(self.slice(slice), mass, fe_h);
+        let above = interpolate(self.slice(slice + 1), mass, fe_h);
+        Some(StrippingNode::of_row(
+            [0, 1, 2, 3].map(|i| below[i] + weight * (above[i] - below[i])),
+        ))
+    }
+
+    /// The nodes of slice `k`: the stripping table's at no helium excess for 0, else the `k`-th of
+    /// [`stripping_heliums`].
+    #[must_use]
+    fn slice(&self, k: usize) -> &'t [(f64, f64, f64, f64)] {
+        match k {
+            0 => self.base.nodes,
+            _ => &self.slices[(k - 1) * STRIPPING_NODES..k * STRIPPING_NODES],
+        }
     }
 }
 

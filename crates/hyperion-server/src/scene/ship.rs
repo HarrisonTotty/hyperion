@@ -1,6 +1,8 @@
 //! The ship stand-in: a pose in a frame, moving in a straight line at its velocity in that frame,
 //! until sessions supply a ship (rendering plan R03, Design note 2).
 
+use std::sync::Arc;
+
 use hyperion_protocol::KinematicsDto;
 use hyperion_sim::coords::{
     BodyPosition, GalacticDisplacement, GalacticPosition, SystemPosition, SystemVector,
@@ -10,7 +12,7 @@ use hyperion_sim::time::UniverseTime;
 use hyperion_sim::units::Seconds;
 
 use super::Ship;
-use crate::convert::ShipRequest;
+use crate::convert::{ShipRequest, SystemLine};
 
 /// Where a ship is, in the frame it was set in.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -42,6 +44,8 @@ pub(crate) struct ShipStandIn {
     time: UniverseTime,
     /// The pose as the client set it, which the scene sends back.
     wire: KinematicsDto,
+    /// The path of the frame's system, as `scene_ship` found it.
+    frame: Option<Arc<SystemLine>>,
 }
 
 impl ShipStandIn {
@@ -61,7 +65,15 @@ impl ShipStandIn {
             velocity_m_s,
             time,
             wire,
+            frame: None,
         }
+    }
+
+    /// The same stand-in, its frame's system moving on `frame`, the path `scene_ship` found for it
+    /// ([`Ship::frame_line`]).
+    #[must_use]
+    pub(crate) fn with_frame(self, frame: Option<Arc<SystemLine>>) -> Self {
+        Self { frame, ..self }
     }
 }
 
@@ -114,6 +126,10 @@ impl Ship for ShipStandIn {
 
     fn kinematics(&self) -> KinematicsDto {
         self.wire.clone()
+    }
+
+    fn frame_line(&self) -> Option<&SystemLine> {
+        self.frame.as_deref()
     }
 }
 

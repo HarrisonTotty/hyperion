@@ -15,7 +15,8 @@ use std::f64::consts::{FRAC_PI_4, LN_2, PI};
 use std::num::NonZeroU64;
 
 use hyperion_base::rng::{
-    ObjectKey, PiecewiseLinear, PiecewisePowerLaw, PowerLaw, Stream, Threshold, Thresholds, tags,
+    DetailSeed, DomainTag, ObjectKey, PiecewiseLinear, PiecewisePowerLaw, PowerLaw, Stream,
+    SurfaceSeed, TagScope, Threshold, Thresholds, tags,
 };
 use hyperion_base::{GENERATOR_VERSION, Seed, math};
 use hyperion_testkit::golden;
@@ -638,4 +639,52 @@ fn decisions_are_pinned() {
     }
     w.line(&format!("words = {}", stream.position()));
     golden!("rng/decisions", w.as_str());
+}
+
+/// The surface keys' packing and the streams the two surface seeds open (plan R09.T1.a): each cell
+/// key's word, then the first four words of each seed's stream under a tag of its own scope, for
+/// cell keys (two of them alike but for `i` and `j` swapped) and item keys. The tags are minted
+/// here, since the surface crate's registry holds the real ones, which this crate cannot see; a
+/// tag's hash is its name's alone, so the lines pin the packing and the seeds' keying, both of
+/// which R09's "Generator version" reserves.
+#[test]
+fn surface_streams_are_pinned() {
+    const COARSE_TAG: DomainTag =
+        DomainTag::registered("selftest.surface_coarse", TagScope::SurfaceCoarse);
+    const DETAIL_TAG: DomainTag =
+        DomainTag::registered("selftest.surface_detail", TagScope::SurfaceDetail);
+    let cells: [(u8, u8, u32, u32, u16); 6] = [
+        (0, 0, 0, 0, 0),
+        (1, 3, 5, 2, 0),
+        (1, 3, 2, 5, 0),
+        (2, 8, 131, 77, 5),
+        (4, 19, 0x0004_1234, 0x0007_ffff, 1),
+        (5, 28, 0x0abc_def1, 0x0123_4567, u16::MAX),
+    ];
+    let mut w = writer();
+    let mut keys = Vec::new();
+    for (face, level, i, j, instance) in cells {
+        let key = ObjectKey::surface_cell(face, level, i, j, instance).unwrap();
+        let label = format!("cell {face} {level} ({i}, {j}) instance {instance}");
+        w.u64_hex(&format!("{label} word"), key.word());
+        keys.push((label, key));
+    }
+    for n in [0, 1, 48, u64::MAX] {
+        keys.push((format!("item {n}"), ObjectKey::surface_item(n)));
+    }
+    for seed in [0, 0x5eed_0000_0009_0001, u64::MAX] {
+        for (label, key) in &keys {
+            let mut coarse = SurfaceSeed::new(seed).stream(COARSE_TAG, *key);
+            for n in 0..4 {
+                let label = format!("surface seed {seed:016x} {label} word {n}");
+                w.u64_hex(&label, coarse.next_u64());
+            }
+            let mut detail = DetailSeed::new(seed).stream(DETAIL_TAG, *key);
+            for n in 0..4 {
+                let label = format!("detail seed {seed:016x} {label} word {n}");
+                w.u64_hex(&label, detail.next_u64());
+            }
+        }
+    }
+    golden!("rng/surface_streams", w.as_str());
 }

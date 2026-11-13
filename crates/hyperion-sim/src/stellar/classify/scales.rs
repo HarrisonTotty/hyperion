@@ -284,8 +284,9 @@ pub(crate) const SUPERGIANT: [Node; 53] = {
 mod tests {
     use hyperion_testkit::float::bits;
 
-    use super::super::pm13::DWARF_SEQUENCE;
+    use super::super::pm13::DwarfSequence;
     use super::*;
+    use crate::stellar::rules::StellarRules;
 
     /// The node of `nodes` at `code`.
     fn at(nodes: &[Node], code: f64) -> f64 {
@@ -296,13 +297,24 @@ mod tests {
             .unwrap()
     }
 
-    /// The dwarf table's temperature at `code`.
+    /// The dwarf sequence's code at `teff_k` (its fitted grids).
+    fn dwarf_code(teff_k: f64) -> f64 {
+        DwarfSequence::of(StellarRules::of_version(crate::GENERATOR_VERSION)).code_at(teff_k)
+    }
+
+    /// The dwarf sequence's temperature at `code`, K: its monotone code inverted by bisection in
+    /// log₁₀ T<sub>eff</sub> between Y4V's 250 K and O3V's 44,900 K.
     fn dwarf(code: f64) -> f64 {
-        DWARF_SEQUENCE
-            .iter()
-            .find(|r| bits(r.code()) == bits(code))
-            .unwrap()
-            .teff_k
+        let (mut cool, mut hot) = (crate::math::log10(250.0), crate::math::log10(44_900.0));
+        for _ in 0..80 {
+            let mid = f64::midpoint(cool, hot);
+            if dwarf_code(crate::math::exp10(mid)) > code {
+                cool = mid;
+            } else {
+                hot = mid;
+            }
+        }
+        crate::math::exp10(f64::midpoint(cool, hot))
     }
 
     /// Temperature falls strictly and the code rises strictly along each scale, from O3 to M9.5.
@@ -318,8 +330,9 @@ mod tests {
         }
     }
 
-    /// The A2–F5 giants are the dwarf table's rows, digit for digit, and the B0–A1 giants take
-    /// the dwarf table's rows as their level.
+    /// The A2–F5 giants are the dwarf table's rows, which the dwarf sequence's grids read back
+    /// within their acceptance (0.05 of a subtype), and the B0–A1 giants take the dwarf table's
+    /// rows as their level.
     #[test]
     fn the_a_and_f_giants_are_on_the_dwarf_scale() {
         let shared: Vec<&Node> = GIANT
@@ -328,7 +341,8 @@ mod tests {
             .collect();
         assert_eq!(shared.len(), 14);
         for n in shared {
-            assert_eq!(bits(dwarf(n.code)), bits(n.teff_k), "{n:?}");
+            let code = dwarf_code(n.teff_k);
+            assert!((code - n.code).abs() < 0.05, "{n:?}: {code}");
         }
         for n in GIANT.iter().filter(|n| (10.0..=21.0).contains(&n.code)) {
             let ratio = n.teff_k / dwarf(n.code);

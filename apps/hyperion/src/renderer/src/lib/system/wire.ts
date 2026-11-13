@@ -44,13 +44,25 @@ export type SystemModelResult =
   | { readonly kind: "ok"; readonly model: SystemModel }
   | { readonly kind: "fault"; readonly fault: string };
 
-/** The `system_summary` request for a system at a time. */
+/**
+ * The `system_summary` request for a system at a time, in a mode (plan 12, P12.T6.b).
+ *
+ * @remarks
+ * Only an observed request carries `mode`, so that one in `now` is byte for byte plan 06's (the
+ * port ruling, §6.1). Asked observed, the answer's stars are as the system was when the light the
+ * observer receives at `time` left it, and its `time` still echoes the request's.
+ *
+ * @param mode - The wire's mode, as `toQueryModeDto` writes it; `now` when absent, as the
+ *   `SYSTEM` display always asks.
+ */
 export function toSummaryRequest(
   universe: UniverseIdHex,
   system: SystemIdHex,
   time: UniverseTime,
+  mode?: RequestOf<"system_summary">["mode"],
 ): RequestOf<"system_summary"> {
-  return { kind: "system_summary", universe, system, time };
+  const request: RequestOf<"system_summary"> = { kind: "system_summary", universe, system, time };
+  return mode === undefined ? request : { ...request, mode };
 }
 
 /**
@@ -91,14 +103,25 @@ function propagatable(orbit: KeplerOrbit): boolean {
   );
 }
 
-function modelled<T, U>(value: T | null | undefined, convert: (present: T) => U): Modelled<U> {
+/**
+ * A wire field of the protocol's `Modelled<T>` as the client holds it: absent is not modelled,
+ * `null` is computed and none, and anything else its value, converted by `convert`.
+ */
+export function modelled<T, U>(
+  value: T | null | undefined,
+  convert: (present: T) => U,
+): Modelled<U> {
   if (value === undefined) {
     return { kind: "not_modelled" };
   }
   return value === null ? { kind: "none" } : { kind: "value", value: convert(value) };
 }
 
-function pending<T, U>(value: T | undefined, convert: (present: T) => U): Pending<U> {
+/**
+ * A wire field a later task fills, as the client holds it: absent is not modelled, and anything
+ * else its value, converted by `convert`.
+ */
+export function pending<T, U>(value: T | undefined, convert: (present: T) => U): Pending<U> {
   return value === undefined ? { kind: "not_modelled" } : { kind: "value", value: convert(value) };
 }
 

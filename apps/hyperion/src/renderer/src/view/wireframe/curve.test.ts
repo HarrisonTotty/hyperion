@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { vec3 } from "../../geometry/vec3";
-import type { ProjectionCamera, Viewport } from "../camera/projection";
+import { norm, sub, type Vec3, vec3 } from "../../geometry/vec3";
+import { type ProjectionCamera, projector, type Viewport } from "../camera/projection";
 import { IDENTITY_QUATERNION } from "../camera/quaternion";
 import { cosineWindows, sampleCurve } from "./curve";
 
@@ -34,6 +34,11 @@ describe("cosineWindows", () => {
   });
 });
 
+/** Whether a chord's point stands within 0.01 m of the curve's. */
+function withinACentimetre(curveM: Vec3, chordM: Vec3): boolean {
+  return norm(sub(curveM, chordM)) <= 0.01;
+}
+
 describe("sampleCurve", () => {
   it("finds a drawn window however short against the first spans", () => {
     const runs = sampleCurve(
@@ -63,6 +68,33 @@ describe("sampleCurve", () => {
     });
   });
 
+  it("halves a span the view reaches until its ends' depths are within a factor of 2, a run cut at the near plane among them (R08.T17)", () => {
+    // A moon's orbit about a camera near its focus: a circle of 10⁹ m in the x–z plane, half of it
+    // behind the camera, cut where it meets the near plane, 0.1 m ahead and 10⁹ m to the side.
+    const project = projector(CAMERA, VIEWPORT);
+    const runs = sampleCurve(
+      {
+        point: (u) => vec3(1e9 * Math.sin(u), 0, -1e9 * Math.cos(u)),
+        windows: [[-Math.PI, Math.PI]],
+        initialSpans: 2,
+      },
+      CAMERA,
+      VIEWPORT,
+    );
+    const reached = runs.flatMap((run) =>
+      run.slice(1).flatMap((b, i) => {
+        const a = project(run[i] ?? b);
+        const z = project(b);
+        const onView = Math.max(a.xPx, z.xPx) >= 0 && Math.min(a.xPx, z.xPx) <= VIEWPORT.widthPx;
+        return onView ? [Math.max(a.depth, z.depth) / Math.min(a.depth, z.depth)] : [];
+      }),
+    );
+    expect({ reached: reached.length > 0, widest: Math.max(...reached) <= 2 }).toEqual({
+      reached: true,
+      widest: true,
+    });
+  });
+
   it("does not refine a span wholly off one side of the view", () => {
     const off = sampleCurve(
       { point: circleAhead(1e6, 10), windows: [[-0.1, 0.1]], initialSpans: 1 },
@@ -70,6 +102,31 @@ describe("sampleCurve", () => {
       VIEWPORT,
     );
     expect(off.flat().length).toBe(2);
+  });
+
+  /**
+   * The near half of a circle 10 m in radius whose centre stands 100 m ahead, in a plane through
+   * the view's axis: it projects to a straight line, so its chords leave no lateral sagitta, while
+   * they sag behind it along the line of sight.
+   */
+  const EDGE_ON = {
+    point: (u: number) => vec3(0, 10 * Math.sin(u), -100 + 10 * Math.cos(u)),
+    windows: [[-1, 1]] as const,
+    initialSpans: 2,
+  };
+
+  it("halves a span that projects straight until its chords' depth sag is within what its spec allows (R02.T19.b)", () => {
+    // A chord over Δ sags 10 (1 − cos(Δ ÷ 2)) m, under 0.01 m from Δ = 0.0894: 1 rad in 16.
+    expect([
+      sampleCurve(EDGE_ON, CAMERA, VIEWPORT).flat().length,
+      sampleCurve({ ...EDGE_ON, depthSagWithin: withinACentimetre }, CAMERA, VIEWPORT).flat()
+        .length,
+    ]).toEqual([3, 33]);
+  });
+
+  it("stops halving a span for its depth sag alone after 8 halvings (R02.T19.b)", () => {
+    const runs = sampleCurve({ ...EDGE_ON, depthSagWithin: () => false }, CAMERA, VIEWPORT);
+    expect(runs.flat().length).toBe(2 * 2 ** 8 + 1);
   });
 
   it("refines a curve on the view until its chords leave under 0.25 px", () => {

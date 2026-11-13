@@ -16,30 +16,63 @@ import type { ElementSize } from "../../lib/useElementSize";
 export type ViewLayout = "full" | "compact";
 
 /**
- * The least width of the `.view` box for the full layout, rem: a 50.5 rem stage (a 35 rem
- * instrument slot, three 0.5 rem insets and the primary's least 14 rem label block), then the
- * 26 rem and 20 rem columns, each after a 1 rem gap.
+ * The least width of the `.view` box for the full layout, rem: a 51 rem stage (a 35 rem instrument
+ * slot, three 0.5 rem insets and the 14.5 rem label block the primary has at 1280 × 720 with the
+ * slots open), then the 26 rem and 20 rem columns, each after a 1 rem gap.
+ *
+ * @remarks
+ * 99 rem, where it was 98.5 (R06.T13.j, as the desktop ruled): at 98.5 the primary's block was
+ * 14 rem beside the slots, and the `STARS` limit's run with its field, `V 10.0 mag S CAM`, passed
+ * its plate by 2.5 px. The boxes from 98.5 to 99 rem, about 8 px of window width, are compact, as
+ * every narrower box already is. A stated limit: the room rule still opens a slot beside a 14 rem
+ * primary block, so below the guide's least size, 1280 × 720, the limit's run may pass its plate.
  */
-export const FULL_MIN_WIDTH_REM = 98.5;
+export const FULL_MIN_WIDTH_REM = 99;
 
 /**
  * The least height of the `.view` box for the full layout, rem: the taller column's tallest state
  * with the list at two rows, rounded up to the next 0.25 rem, as measured at 1920 × 1080
- * (R07.T19.d's hidden captures, 16 px to the rem, the side column's line box 1.25).
+ * (P05.T13's hidden runs, after R07.T19.d's, 16 px to the rem, the side column's line box 1.25),
+ * with the `STYLE` panel's `BASELINE` row added by arithmetic (plan R10, R10.T12.a;
+ * decision-r10-t12a-scope §3.3).
  *
  * @remarks
- * The first column's tallest, 729 px: `Instruments` 202.5 px with both closed, `Targets` 173 px at
- * two rows under its two-line `RANGE FROM CAMERA` head, `Camera` 337.5 px with `NO OWN SHIP`, both
- * limit reasons and reduced motion, and two 0.5 rem gaps. The second's, 731.5 px: `Style` 99.5 px
- * with a two-line refusal added at 17.5 px a line and its 0.5 rem margin, 43 px (`QUALITY LOW`'s on
- * an instrument, or the software adapter's, which this machine cannot raise), the exposure
- * `INHIBITED · OPERATOR` with a refused entry and `INHIBIT` held back beside its two-line reason,
- * 365 px, the meter with `METERED`, 208 px, and two gaps. 731.5 px is 45.72 rem. It must never pass
- * 52.5 rem, so that a maximised 1920 × 1080 window (a box of about 53.5 rem) is full
- * (decision-r07-t19b-exposure-fit, item 2): a task that adds to a side panel re-measures, and asks
- * for a ruling rather than pass it.
+ * The first column's tallest, 730.5 px: `Instruments` 202.5 px with both closed, `Targets` 173 px
+ * at two rows under its two-line `RANGE FROM CAMERA` head, `Camera` 339 px with `NO OWN SHIP`, both
+ * limit reasons and reduced motion, and two 0.5 rem gaps. The second's, 792 px: `Style` 99.5 px
+ * with a two-line refusal added at 17.5 px a line and its 0.5 rem margin, 43 px (the software
+ * adapter's, which this machine cannot raise), and the `BASELINE` row, 32 px under its 0.5 rem
+ * margin, 8 px; the exposure `INHIBITED · OPERATOR` with nothing metered and a refused entry,
+ * 425.5 px, its `AUTO NOT AVAILABLE: NO LIT SIDE` (or `NO DARK SIDE`, or `STAR DISC ONLY`) on two
+ * lines and `INHIBIT` held back beside its three-line reason, since P05.T13 tracks their states;
+ * the meter with its status in the reading's place, 168 px; and two gaps. 792 px is 49.5 rem.
+ * - **The `BASELINE` row** (R10.T12.a) stands for the `CONTROLS` view, the `PRIMARY` view or,
+ *   since R10.T12.d, an instrument on its `GROUND` page or not, so that with an instrument there,
+ *   whose `QUALITY LOW` refusal is the other two-line one, the column is 792 px too, 49.5 rem; it
+ *   was 752 px there before R10.T12.d. The row is 17.42 rem wide against the panel's 18.375 rem of
+ *   content (B612's shipped metrics, no kerning, so it errs wide); were its buttons ever to wrap
+ *   under its legend, the column would be 824 px, 51.5 rem, still within the bound.
+ * - **The `GRID` row** (the owner's request, 2026-10-31), 32 px under its 0.5 rem margin, stands
+ *   only while the photorealistic style is asked for and offered, so never beside the style's
+ *   reason (R10.T12.d's lean): the panel's tallest stays the reason with `BASELINE`, 182.5 px, the
+ *   `GRID` row with `BASELINE` 179.5 px. Beside the reason it would have made the column 832 px.
+ * - **The exposure's keys** (`7 ENABLE`, `8 INHIBIT`, the owner's request, 2026-11-01), each shown
+ *   before its button's label, were re-measured hidden and offscreen at 1920 × 1080 (B612's shipped
+ *   fonts, in a pod): no state of the second column grows, its tallest without the refused entry
+ *   770.5 px before and after, so 792 px with it; in the compact layout's column a state grows by
+ *   at most 3 px, its tallest unchanged at 615 px.
+ * - **The `GROUND` page** (R10.T12.d) stands in the camera panel's place in the first column, which
+ *   it never makes taller: its parts give way, with the list at its floor, before it would.
+ * - **Before.** 752 px, 47 rem, before R10.T12.a; 731.5 px (45.75 rem) before P05.T13, the
+ *   exposure then 365 px beside a two-line reason with the meter's `METERED`, which that state now
+ *   reaches at 749 px.
+ * - **The bound.** It must never pass 52.5 rem ({@link FULL_MIN_HEIGHT_BOUND_REM}), so that a
+ *   maximised 1920 × 1080 window (a box of about 53.5 rem) is full (decision-r07-t19b-exposure-fit,
+ *   item 2): a task that adds to a side panel re-measures, and asks for a ruling rather than pass
+ *   it. The row held back with a reason, its draft form, would have passed it at 852.5 px with a
+ *   two-line reason, and a panel of its own would have stood at it, 839.5 px.
  */
-export const FULL_MIN_HEIGHT_REM = 45.75;
+export const FULL_MIN_HEIGHT_REM = 49.5;
 
 /**
  * The bound on {@link FULL_MIN_HEIGHT_REM}, rem: a maximised 1920 × 1080 window's box, about

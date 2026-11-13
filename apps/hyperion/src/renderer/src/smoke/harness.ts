@@ -25,23 +25,63 @@ export interface Check {
   readonly detail: string;
 }
 
+/** One group's wall time on the page, ms, by `performance.now()`. */
+export interface GroupTime {
+  readonly name: string;
+  readonly ms: number;
+}
+
 /** The checks of one run, in order. */
 export class Checks {
   readonly list: Check[] = [];
+  /**
+   * Each group's wall time, in order: the smoke stands near its 180 s watchdog (plan R08's Risks,
+   * "Deviations in T6.d, as built"), and these say where the time goes (R08.T6.i).
+   */
+  readonly times: GroupTime[] = [];
 
   /** Records one property. */
   check(name: string, pass: boolean, detail: string): void {
     this.list.push({ name, pass, detail });
   }
 
-  /** Runs a group of checks, recording a throw as a failure of the group. */
+  /**
+   * Runs a group of checks, recording a throw as a failure of the group, and timing it.
+   *
+   * @remarks
+   * Each group's time also goes to the console as a warning as the group ends, which the
+   * harness's main process writes to its log: a run the watchdog ends sends no report, and the
+   * times say which group it ended in.
+   */
   async group(name: string, run: () => Promise<void>): Promise<void> {
+    const start = performance.now();
     try {
       await run();
     } catch (error: unknown) {
       const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
       this.check(name, false, `threw ${message}`);
+    } finally {
+      const ms = performance.now() - start;
+      this.times.push({ name, ms });
+      console.warn(`smoke group ${name}: ${(ms / 1_000).toFixed(1)} s`);
     }
+  }
+
+  /**
+   * Records the groups' times as one check that always passes: each group's in seconds, slowest
+   * first, and their sum.
+   */
+  recordTimes(): void {
+    const total = this.times.reduce((sum, { ms }) => sum + ms, 0);
+    const each = this.times
+      .toSorted((a, b) => b.ms - a.ms)
+      .map(({ name, ms }) => `${name} ${(ms / 1_000).toFixed(1)} s`)
+      .join("; ");
+    this.check(
+      "the page's groups' wall times",
+      true,
+      `${(total / 1_000).toFixed(1)} s in all: ${each}`,
+    );
   }
 }
 
@@ -113,6 +153,46 @@ export function fullScreenMesh(engine: RenderEngine, name: string, zM = -1): Mes
   });
 }
 
+/**
+ * A rectangle in view space from its lower left corner (x₀, y₀) to its upper right (x₁, y₁), m,
+ * as two counter-clockwise triangles at `zM` (negative is ahead): a surface over part of a view,
+ * its edges where the caller puts them (plan R08, R08.T8.b's depth edge).
+ */
+export function rectangleMesh(
+  engine: RenderEngine,
+  name: string,
+  corners: readonly [number, number, number, number],
+  zM: number,
+): MeshHandle {
+  const [x0, y0, x1, y1] = corners;
+  return engine.createMesh({
+    name,
+    positions: new Float32Array([
+      x0,
+      y0,
+      zM,
+      x1,
+      y0,
+      zM,
+      x1,
+      y1,
+      zM,
+      x0,
+      y0,
+      zM,
+      x1,
+      y1,
+      zM,
+      x0,
+      y1,
+      zM,
+    ]),
+    indices: null,
+    topology: "triangle-list",
+    attributes: {},
+  });
+}
+
 /** A counter-clockwise triangle in view space, at 1 m ahead unless `zM` says otherwise. */
 export function triangleMesh(
   engine: RenderEngine,
@@ -174,6 +254,23 @@ export function halfToNumber(bits: number): number {
 /** The texels of an `rgba16float` read-back, four numbers each. */
 export function halfTexels(bytes: ArrayBuffer): Float32Array {
   return Float32Array.from(new Uint16Array(bytes), halfToNumber);
+}
+
+/**
+ * The 32-bit FNV-1a of a read-back's bytes, eight lowercase hexadecimal digits: a frame's
+ * fingerprint in a check's details, so that two builds' frames can be compared byte for byte from
+ * their logs alone (plan R14, R14.T1.a).
+ */
+export function bytesDigest(data: ArrayBufferView | ArrayBuffer): string {
+  const bytes =
+    data instanceof ArrayBuffer
+      ? new Uint8Array(data)
+      : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+  let hash = 0x811c9dc5;
+  for (const byte of bytes) {
+    hash = Math.imul(hash ^ byte, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, "0");
 }
 
 /** A half's place on the number line, so that neighbouring halves differ by 1 and ±0 is 0. */

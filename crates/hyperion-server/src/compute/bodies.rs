@@ -24,12 +24,24 @@
 //! holds one kind of value. An entry is charged the context's heap (its stars' models and tracks,
 //! copied from the stars cache's entry) and the system's zones, hosts and bodies by count, so it
 //! costs about as much as the same system's stars plus a few hundred bytes a body.
+//!
+//! # The events' models
+//!
+//! A system's events (`body_events`, P14.T36.b) are listed from its event models, read from its
+//! records at the epoch ([`PlanetarySystem::event_models`], a whole snapshot's work), so the cache
+//! keeps one [`SystemEvents`] per system beside it ([`SharedBodyCache::events_of`]), under the same
+//! key, built from the cached system under its own [`SingleFlight`] as one interactive job, and
+//! in an LRU of its own, since one [`SharedByteLru`] holds one kind of value. It takes a budget of
+//! the same size as the systems': a system's models are one entry a planet, member and moon, about
+//! what its bodies cost, and an evicted model is built again from its system. The events are on
+//! the record from generator version 25 (P14.T31.c).
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use hyperion_sim::galaxy::placement::ResolveSystemError;
 use hyperion_sim::id::SystemId;
+use hyperion_sim::planetary::system::SystemEvents;
 use hyperion_sim::planetary::{PlanetarySystem, SystemContext, generate};
 
 use super::{CancelOnDrop, CancelToken, ComputeError, CpuPool, GalaxyKey, JobError, Priority};
@@ -48,6 +60,13 @@ impl HeapBytes for GeneratedSystem {
     /// hosts and bodies ([`PlanetarySystem::heap_bytes`]).
     fn heap_bytes(&self) -> usize {
         self.0.heap_bytes().saturating_add(self.1.heap_bytes())
+    }
+}
+
+impl HeapBytes for SystemEvents {
+    /// One entry a body with models ([`SystemEvents::heap_bytes`]).
+    fn heap_bytes(&self) -> usize {
+        SystemEvents::heap_bytes(self)
     }
 }
 
@@ -78,11 +97,14 @@ impl From<JobError> for GenerateBodiesError {
     }
 }
 
-/// A snapshot of the body cache: its [`LruCounters`], and how many systems it has generated.
+/// A snapshot of the body cache: its systems' and its event models' [`LruCounters`], and how many
+/// of each it has built.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct BodyCacheCounters {
     cache: LruCounters,
     generated: u64,
+    events: LruCounters,
+    modelled: u64,
 }
 
 impl BodyCacheCounters {
@@ -99,19 +121,38 @@ impl BodyCacheCounters {
     pub fn generated(&self) -> u64 {
         self.generated
     }
+
+    /// The event models held, the bytes they are charged, the budget, and their hits, misses,
+    /// evictions and refusals so far ([`SharedBodyCache::events_of`]).
+    #[must_use]
+    pub fn events(&self) -> LruCounters {
+        self.events
+    }
+
+    /// Systems' event models built so far, one per flight run to the end, as
+    /// [`generated`](Self::generated) counts systems.
+    #[must_use]
+    pub fn modelled(&self) -> u64 {
+        self.modelled
+    }
 }
 
-/// The generated planetary systems of every galaxy the server holds, in one byte budget.
+/// The generated planetary systems of every galaxy the server holds, in one byte budget, with
+/// their event models in another.
 #[derive(Debug)]
 pub struct SharedBodyCache {
     pool: Arc<CpuPool>,
     systems: Arc<SharedByteLru<BodyEntryKey, GeneratedSystem>>,
     flights: SingleFlight<BodyEntryKey, GeneratedSystem, GenerateBodiesError>,
     generated: Arc<AtomicU64>,
+    events: Arc<SharedByteLru<BodyEntryKey, SystemEvents>>,
+    event_flights: SingleFlight<BodyEntryKey, SystemEvents, ComputeError>,
+    modelled: Arc<AtomicU64>,
 }
 
 impl SharedBodyCache {
-    /// An empty cache that holds at most `budget_bytes` of charged systems, generating on `pool`.
+    /// An empty cache that holds at most `budget_bytes` of charged systems, and as much again of
+    /// their event models, building both on `pool`.
     ///
     /// A budget of zero caches nothing: every request generates its system, and concurrent ones
     /// still share one generation.
@@ -122,6 +163,9 @@ impl SharedBodyCache {
             systems: Arc::new(SharedByteLru::new(budget_bytes)),
             flights: SingleFlight::new(),
             generated: Arc::new(AtomicU64::new(0)),
+            events: Arc::new(SharedByteLru::new(budget_bytes)),
+            event_flights: SingleFlight::new(),
+            modelled: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -184,12 +228,69 @@ impl SharedBodyCache {
             .await
     }
 
-    /// The systems held, the bytes they are charged, their use, and the generations so far.
+    /// The event models of the system `id` of the galaxy `key` names, whose bodies are `system`:
+    /// the cache's, or built on the pool, then stored (plan 14, P14.T36.b).
+    ///
+    /// On a miss one interactive pool job reads the system's records at the epoch into its models
+    /// ([`PlanetarySystem::event_models`]); callers that miss one key at once share it, and if every
+    /// one of them gives up, a job still queued is skipped.
+    ///
+    /// # Errors
+    ///
+    /// A [`ComputeError`] if the interactive queue is full (`queue_full`), the pool is shutting
+    /// down, or the job is cancelled or panics.
+    pub async fn events_of(
+        &self,
+        key: GalaxyKey,
+        id: SystemId,
+        system: Arc<GeneratedSystem>,
+    ) -> Result<Arc<SystemEvents>, ComputeError> {
+        let entry_key = (key, id);
+        if let Some(models) = self.events.get(&entry_key) {
+            return Ok(models);
+        }
+        let pool = Arc::clone(&self.pool);
+        let events = Arc::clone(&self.events);
+        let modelled = Arc::clone(&self.modelled);
+        self.event_flights
+            .run(entry_key, move || async move {
+                // As for the systems: another flight may have stored the models just before.
+                if events.contains_key(&entry_key)
+                    && let Some(models) = events.get(&entry_key)
+                {
+                    return Ok(models);
+                }
+                let token = CancelToken::new();
+                // Cancels the job once every waiter on this flight has gone.
+                let _cancel_on_drop = CancelOnDrop::new(token.clone());
+                let receiver = pool
+                    .try_submit(Priority::Interactive, token, move |_| {
+                        let (ctx, planets) = system.as_ref();
+                        planets.event_models(ctx)
+                    })
+                    .map_err(ComputeError::Submit)?;
+                let models = receiver
+                    .await
+                    .unwrap_or_else(|closed| Err(JobError::from(closed)))
+                    .map_err(ComputeError::Job)?;
+                modelled.fetch_add(1, Ordering::Relaxed);
+                let models = Arc::new(models);
+                // Models larger than the whole budget are handed back and still answered from.
+                let _ = events.insert(entry_key, Arc::clone(&models));
+                Ok(models)
+            })
+            .await
+    }
+
+    /// The systems held, the bytes they are charged, their use, and the generations so far, with
+    /// the event models'.
     #[must_use]
     pub fn counters(&self) -> BodyCacheCounters {
         BodyCacheCounters {
             cache: self.systems.counters(),
             generated: self.generated.load(Ordering::Relaxed),
+            events: self.events.counters(),
+            modelled: self.modelled.load(Ordering::Relaxed),
         }
     }
 }
@@ -360,6 +461,86 @@ mod tests {
         assert!(counters.cache().entries() < ids.len());
         // Every miss of the tight cache generated, since nothing ran concurrently.
         assert_eq!(counters.generated(), counters.cache().misses());
+        pool.shutdown().await.unwrap();
+    }
+
+    /// What the cache charges an entry of event models.
+    fn events_charge(models: &SystemEvents) -> usize {
+        models.heap_bytes() + size_of::<SystemEvents>() + ENTRY_OVERHEAD_BYTES
+    }
+
+    async fn events(
+        cache: &SharedBodyCache,
+        id: SystemId,
+        system: &Arc<GeneratedSystem>,
+    ) -> Arc<SystemEvents> {
+        timeout(WAIT, cache.events_of(key(), id, Arc::clone(system)))
+            .await
+            .expect("timed out building a system's event models")
+            .unwrap()
+    }
+
+    /// P14.T36.b, test (a): two requests for one system's events at once build its models once
+    /// (a counter, not timing), the sim's own, and a later one is a hit.
+    #[tokio::test]
+    async fn two_concurrent_requests_for_one_system_s_events_model_it_once() {
+        let pool = pool();
+        let cache = SharedBodyCache::new(Arc::clone(&pool), 64 << 20);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let id = systems(1)[0];
+        let system = get(&cache, id, &calls).await.unwrap();
+        // Whether the second joins the first's flight or finds what it stored, one model is built.
+        let (first, second) =
+            tokio::join!(events(&cache, id, &system), events(&cache, id, &system));
+        assert!(Arc::ptr_eq(&first, &second), "both hold the one model");
+        let counters = cache.counters();
+        assert_eq!(counters.modelled(), 1);
+        assert_eq!(counters.events().entries(), 1);
+        assert_eq!(counters.events().bytes(), events_charge(&first));
+        let (ctx, planets) = system.as_ref();
+        assert_eq!(*first, planets.event_models(ctx));
+        let third = events(&cache, id, &system).await;
+        assert!(Arc::ptr_eq(&first, &third));
+        assert_eq!(cache.counters().modelled(), 1);
+        assert!(cache.counters().events().hits() >= 1);
+        // The systems' own counters are untouched by the models.
+        assert_eq!(cache.counters().generated(), 1);
+        pool.shutdown().await.unwrap();
+    }
+
+    /// P14.T36.b, test (a): event models past their byte bound are evicted, the bound is never
+    /// exceeded, and an evicted system's models are built again, the same.
+    #[tokio::test]
+    async fn event_models_past_the_byte_bound_are_evicted_and_the_bound_is_never_exceeded() {
+        let pool = pool();
+        let ids = systems(12);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let roomy = SharedBodyCache::new(Arc::clone(&pool), 64 << 20);
+        let mut generated = Vec::new();
+        let mut charges = Vec::new();
+        for &id in &ids {
+            let system = get(&roomy, id, &calls).await.unwrap();
+            charges.push(events_charge(&*events(&roomy, id, &system).await));
+            generated.push(system);
+        }
+        let budget = charges.iter().copied().max().unwrap() * 3;
+        let tight = SharedBodyCache::new(Arc::clone(&pool), budget);
+        for round in 0..2 {
+            for (&id, system) in ids.iter().zip(&generated) {
+                let models = events(&tight, id, system).await;
+                assert_eq!(*models, *events(&roomy, id, system).await, "{id:?}");
+                let counters = tight.counters().events();
+                assert!(
+                    counters.bytes() <= budget,
+                    "round {round}: {} bytes held against {budget}",
+                    counters.bytes()
+                );
+            }
+        }
+        let counters = tight.counters();
+        assert!(counters.events().evictions() > 0, "{counters:?}");
+        assert!(counters.events().entries() < ids.len());
+        assert_eq!(counters.modelled(), counters.events().misses());
         pool.shutdown().await.unwrap();
     }
 

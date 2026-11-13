@@ -48,12 +48,14 @@ use std::error::Error;
 use std::fmt;
 
 use super::{CompactRemnant, Death, DeathKind, ProgenitorAtDeath, RemnantKind, Stripping};
+use crate::GENERATOR_VERSION;
 use crate::coords::UnitVector;
 use crate::galaxy::displaced::binarity;
 use crate::math;
 use crate::rng::{Mark, Threshold};
 use crate::stellar::Composition;
 use crate::stellar::draws::{REDRAW_TRIES, StandardNormal, StarDraws};
+use crate::stellar::rules::StellarRules;
 use crate::tables::kick_rank;
 use crate::units::{KilometresPerSecond, MetresPerSecond, SolarMasses};
 
@@ -164,7 +166,7 @@ impl CollapseChannel {
 ///
 /// Speeds are in km/s, masses in M☉ of carbon–oxygen core or of the initial mass the track's
 /// `m_c_bagb` reads. The four defaults of the brainstorm's "Open questions" are read from
-/// [`tables::kick_rank`], which plan 15 owns after P06.T19.e.
+/// [`crate::tables::kick_rank`], which plan 15 owns after P06.T19.e.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct KickLawParams {
     /// The log-normal's μ, ln(km/s): 5.60 (Disberg and Mandel 2025).
@@ -183,13 +185,20 @@ pub struct KickLawParams {
     /// Müller (2020) have 0.5 (ruling 96.4).
     pub bh_factor: f64,
     /// The single-star electron-capture window's width, M☉ of the mass `m_c_bagb` reads: 0.1
-    /// ([`kick_rank::EC_WINDOW_SINGLE`]). The track reads its own copy,
-    /// [`SINGLE_STAR_WINDOW`](super::collapse::SINGLE_STAR_WINDOW), which a test holds equal; this
-    /// field records the default for plan 15's tools.
+    /// ([`kick_rank::EC_WINDOW_SINGLE`]). Finite and positive.
+    ///
+    /// The generator's track reads its own copy,
+    /// [`SINGLE_STAR_WINDOW`](super::collapse::SINGLE_STAR_WINDOW), which a test holds equal, and
+    /// no law's field. [`ReferencePopulation`](super::reference::ReferencePopulation) and
+    /// [`kick_observables`](super::reference::kick_observables) pass this field to their stars'
+    /// tracks ([`TrackOptions::with_capture_windows`](crate::stellar::sse::TrackOptions::with_capture_windows);
+    /// P15.T5.d), so that plan 15's review of the defaults can move it.
     pub ec_window_single: f64,
     /// The companion-stripped window's width, M☉ of the same mass: 1.0
-    /// ([`kick_rank::EC_WINDOW_STRIPPED`]; the track's copy is
-    /// [`COMPANION_STRIPPED_WINDOW`](super::collapse::COMPANION_STRIPPED_WINDOW)).
+    /// ([`kick_rank::EC_WINDOW_STRIPPED`]). Finite and positive. The generator's track reads its
+    /// own copy, [`COMPANION_STRIPPED_WINDOW`](super::collapse::COMPANION_STRIPPED_WINDOW), and
+    /// the reference population and the observables pass this field to their tracks, as
+    /// [`ec_window_single`](Self::ec_window_single).
     pub ec_window_stripped: f64,
     /// The white dwarfs' Maxwellian σ, km/s: 1, the brainstorm's "about 1 km/s".
     pub wd_sigma_km_s: f64,
@@ -422,6 +431,49 @@ impl KickRankTable {
     }
 }
 
+impl KickRankTable {
+    /// The table the stellar stage's `rules` choose: the one `match` on their
+    /// [`kick_rank`](StellarRules::kick_rank) field.
+    ///
+    /// Every reader of the generator's law reaches it through [`StandardKickLaw::under`]. At the
+    /// version's rules it is [`generator`](Self::generator).
+    #[must_use]
+    pub(crate) fn of(rules: StellarRules) -> Self {
+        match rules.kick_rank {
+            KickRankRules::Committed => Self::generator(),
+            #[cfg(test)]
+            KickRankRules::Probe => Self::probe(),
+        }
+    }
+
+    /// The test-only second table ([`KickRankRules::Probe`]): the generator's quantiles, each
+    /// doubled.
+    ///
+    /// Every score inside the table ranks as half of itself would, so every ordinary kick above the
+    /// rank clamp's floor is slower. It is no physical table. It only shows that a reader of the
+    /// law takes the table its rules choose.
+    #[cfg(test)]
+    #[must_use]
+    fn probe() -> Self {
+        Self::new(kick_rank::SCORE_QUANTILES.iter().map(|q| 2.0 * q).collect())
+            .expect("doubling keeps the committed quantiles finite and strictly increasing")
+    }
+}
+
+/// Which rank table the ordinary kick reads (the stellar rules' `kick_rank` field).
+///
+/// Every version takes the committed table. No later version holds another one: the production
+/// table of plan 15's P15.T5.a replaces the committed one with version 25's bump (P06.T19.e).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum KickRankRules {
+    /// The committed table, [`kick_rank::SCORE_QUANTILES`] ([`KickRankTable::generator`]).
+    Committed,
+    /// A test-only second table ([`KickRankTable::of`]'s `probe`), which no version takes: the
+    /// tests' door to show that every reader of the law goes through its choke point.
+    #[cfg(test)]
+    Probe,
+}
+
 impl Default for KickRankTable {
     fn default() -> Self {
         Self::generator()
@@ -491,6 +543,23 @@ impl KickDraws {
     pub const fn direction(&self) -> UnitVector {
         self.direction
     }
+
+    /// The direction of a Maxwellian kick from these draws ([`maxwellian`]): its three normals'
+    /// own, or the ordinary mode's where all three are zero.
+    #[must_use]
+    fn maxwellian_direction(&self) -> UnitVector {
+        UnitVector::from_components(self.low.map(StandardNormal::value)).unwrap_or(self.direction)
+    }
+
+    /// The directions a natal kick from these draws can take, whatever the death, the progenitor
+    /// and the remnant: the ordinary mode's, which a black hole's kick and a complete fallback's
+    /// nil one take too, and the Maxwellian modes' ([`StandardKickLaw`]'s `kick`). Every kick is
+    /// one of them times its speed, so a reader that knows only the draws knows the lines a kicked
+    /// remnant can leave on (a feature's listed core collapses, P09.T37's cold cost).
+    #[must_use]
+    pub(crate) fn directions(&self) -> [UnitVector; 2] {
+        [self.direction, self.maxwellian_direction()]
+    }
 }
 
 /// A natal kick law: the kick a remnant is born with, from how it was born, its progenitor, its
@@ -539,6 +608,17 @@ impl StandardKickLaw {
         Self { params, table }
     }
 
+    /// The generator's law under the stellar stage's `rules`: the generator's parameters over the
+    /// rank table the rules choose ([`KickRankTable::of`]).
+    ///
+    /// Every reader of the law on the record takes it from here, with the rules of its galaxy, its
+    /// star or its pair. At the version's rules it is [`StandardKickLaw::default`], which
+    /// `hyperion-fit` and the tests keep.
+    #[must_use]
+    pub(crate) fn under(rules: StellarRules) -> Self {
+        Self::new(KickLawParams::default(), KickRankTable::of(rules))
+    }
+
     /// The law's parameters.
     #[must_use]
     pub const fn params(&self) -> &KickLawParams {
@@ -549,6 +629,16 @@ impl StandardKickLaw {
     #[must_use]
     pub const fn table(&self) -> &KickRankTable {
         &self.table
+    }
+
+    /// The speed of the natal kick of a white dwarf left by the loss of an envelope, from the
+    /// low mode's normals `low` of the star's draws alone (`StarDraws::kick_low_for_attempt`): what
+    /// [`natal_kick`](Self::natal_kick) gives every such death, whatever its progenitor, a
+    /// Maxwellian of [`KickLawParams::wd_sigma_km_s`], bit for bit (plan 09's tabulated remnants,
+    /// P09.T10).
+    #[must_use]
+    pub(crate) fn white_dwarf_kick_speed(&self, low: &[StandardNormal; 3]) -> MetresPerSecond {
+        maxwellian_speed(self.params.wd_sigma_km_s, low.map(StandardNormal::value))
     }
 
     /// The ordinary mode's speed, km/s, of a remnant of `remnant` M☉ from a core of `co_core`:
@@ -575,10 +665,11 @@ impl StandardKickLaw {
     /// no longer read here: it stays for the tests' quadratures.
     ///
     /// Besides the kick, only the track reads the mark: a marked star's electron-capture window is
-    /// the companion-stripped one, 1 M☉ wide, and its envelope is still a single star's, as design
-    /// note 11 has it until plan 11. Every collapse is of a star above the lowest initial mass the
-    /// mark is drawn from, `m_cc(Z)` − 1 M☉ (ruling 45.2), since the widest electron-capture window
-    /// begins there and iron cores at `m_cc`.
+    /// the companion-stripped one, 1 M☉ wide in the generator's track (other widths are plan 15's
+    /// review's, P15.T5.d), and its envelope is still a single star's, as design note 11 has it
+    /// until plan 11. Every collapse is of a star above the lowest initial mass the mark is drawn
+    /// from, `m_cc(Z)` − 1 M☉ (ruling 45.2), since the widest electron-capture window begins there
+    /// and iron cores at `m_cc`.
     #[must_use]
     pub fn with_stripped_mark(
         &self,
@@ -624,17 +715,51 @@ pub(crate) fn stripped_mark_applied(
     m0: SolarMasses,
     comp: &Composition,
 ) -> Death {
-    let collapse = matches!(
+    stripped_mark_applied_under(
+        death,
+        draws,
+        (m0, comp),
+        StellarRules::of_version(GENERATOR_VERSION),
+    )
+}
+
+/// [`stripped_mark_applied`] against the stripped share under the stellar stage's `rules`, those
+/// of the star whose death it is: the share's exact path, which a star with a helium excess takes,
+/// builds its track under them, as the star's own track reads its mark
+/// (`binarity::is_stripped_under`). The model's remnant stage and the engine's pinned death read
+/// it.
+#[must_use]
+pub(crate) fn stripped_mark_applied_under(
+    death: Death,
+    draws: &StarDraws,
+    (m0, comp): (SolarMasses, &Composition),
+    rules: StellarRules,
+) -> Death {
+    if !mark_can_apply(&death) || !binarity::is_stripped_under(draws.stripped(), m0, comp, rules) {
+        return death;
+    }
+    stripped_by_companion(death)
+}
+
+/// Whether `death` is one that the companion-stripped mark marks where it is set
+/// ([`stripped_mark_applied_under`]): a collapse by an iron core, electron capture or complete
+/// fallback.
+#[must_use]
+pub(crate) fn mark_can_apply(death: &Death) -> bool {
+    matches!(
         CollapseChannel::of(death.kind()),
         Some(
             CollapseChannel::IronCore
                 | CollapseChannel::ElectronCapture
                 | CollapseChannel::CompleteFallback
         )
-    );
-    if !collapse || !binarity::is_stripped(draws.stripped(), m0, comp) {
-        return death;
-    }
+    )
+}
+
+/// `death` with its progenitor stripped by a companion, as [`stripped_mark_applied_under`] marks a
+/// collapse whose mark is set.
+#[must_use]
+pub(crate) fn stripped_by_companion(death: Death) -> Death {
     let p = death.progenitor();
     let progenitor = ProgenitorAtDeath::new(
         p.co_core_mass(),
@@ -699,13 +824,18 @@ impl KickLaw for StandardKickLaw {
 #[must_use]
 fn maxwellian(sigma_km_s: f64, draws: &KickDraws, mode: KickMode) -> NatalKick {
     let z = draws.low.map(StandardNormal::value);
-    let norm = math::hypot(math::hypot(z[0], z[1]), z[2]);
-    let direction = UnitVector::from_components(z).unwrap_or(draws.direction);
     NatalKick::new(
-        MetresPerSecond::from(KilometresPerSecond::new(sigma_km_s * norm)),
-        direction,
+        maxwellian_speed(sigma_km_s, z),
+        draws.maxwellian_direction(),
         mode,
     )
+}
+
+/// The speed of [`maxwellian`]'s kick of σ `sigma_km_s` (km/s) on the normals `z`: σ |z|.
+#[must_use]
+fn maxwellian_speed(sigma_km_s: f64, z: [f64; 3]) -> MetresPerSecond {
+    let norm = math::hypot(math::hypot(z[0], z[1]), z[2]);
+    MetresPerSecond::from(KilometresPerSecond::new(sigma_km_s * norm))
 }
 
 #[cfg(test)]
@@ -790,6 +920,29 @@ mod tests {
             ..p
         };
         assert!((untruncated.ordinary_speed_km_s(0.5) - math::exp(5.6)).abs() < 1e-9);
+    }
+
+    /// The generator's track options carry `collapse`'s two windows bit for bit, and so do SSE's,
+    /// whose remnant recipe never reads them (P15.T5.d): the default track is the one before the
+    /// windows became an option.
+    #[test]
+    fn the_default_track_options_carry_the_collapse_windows_bit_for_bit() {
+        use crate::stellar::sse::{CaptureWindowWidths, TrackOptions};
+        let single = super::super::collapse::SINGLE_STAR_WINDOW.value();
+        let stripped = super::super::collapse::COMPANION_STRIPPED_WINDOW.value();
+        for options in [TrackOptions::default(), TrackOptions::hurley2000()] {
+            let windows = options.capture_windows();
+            assert_same_bits(windows.single().value(), single);
+            assert_same_bits(windows.companion_stripped().value(), stripped);
+        }
+        assert_eq!(CaptureWindowWidths::default(), CaptureWindowWidths::DEFAULT);
+        let p = KickLawParams::default();
+        assert_same_bits(p.ec_window_single, single);
+        assert_same_bits(p.ec_window_stripped, stripped);
+        // The default reference population builds the generator's tracks, every option included.
+        let population = super::super::reference::ReferencePopulation::default();
+        assert_eq!(population.track_options(), TrackOptions::default());
+        assert_eq!(population.params(), &p);
     }
 
     #[test]

@@ -1,10 +1,19 @@
 /**
  * The planet's geometry as selection reads it: its reference spheroid and the level table the
- * height workers' module hands over at run time (plan R05, T7.a, Design notes 5, 7 and 15).
+ * height workers' module hands over at run time (plan R05, T7.a, Design notes 5, 7 and 15), with
+ * the body's σ by level and level charge and the bound selection charges each level under the rule
+ * in force (plan R10, R10.T4.b; plan R09, R09.T8.d (b3); `levelBounds.ts`).
  */
 
 import type { Vec3 } from "../../geometry/vec3";
 import { BAND_LIMIT_M, finestLevel, type Xyz } from "./cube";
+import {
+  checkLevelCharge,
+  checkLevelSigma,
+  SELECTION_RULE,
+  selectionBound,
+  type SelectionRule,
+} from "./levelBounds";
 import { MAX_LEVEL } from "./patchKey";
 
 /**
@@ -39,6 +48,27 @@ export interface PlanetGeometry {
    * for R07's zero-height `mesh` regime, a reference spheroid with no height worker.
    */
   readonly levels: Float64Array | null;
+  /**
+   * The body's σ_n by level, 25, metres: the workers' `levelSigmaM()` (R10.T4.b); `null` where none
+   * was given, as for the test planet's table alone and R07's reference spheroid.
+   */
+  readonly sigmaM: Float64Array | null;
+  /**
+   * The body's level charge by level, 25, metres: the workers' `levelChargeM()`, ε_n with the
+   * channels' share held by the cells they hold (R09.T8.d (b3)), never above {@link levels}' ε_n;
+   * `null` where none was given, as for the test planet's table alone and R07's reference
+   * spheroid.
+   */
+  readonly chargeM: Float64Array | null;
+  /**
+   * The bound selection charges each level, 25, metres: {@link levels}' ε_n under
+   * {@link rule} with {@link sigmaM} and {@link chargeM} (`levelBounds.ts`' `selectionBound`);
+   * `null` with no table. Culling, the skirts, the baked ranges' widening and the descent's floors
+   * read the stated ε_n instead.
+   */
+  readonly selectionBoundM: Float64Array | null;
+  /** The rule {@link selectionBoundM} is made under: `levelBounds.ts`' rule in force unless given. */
+  readonly rule: SelectionRule;
 }
 
 /** Entries a level table holds per level. */
@@ -46,14 +76,25 @@ export const LEVEL_TABLE_STRIDE = 4;
 
 /**
  * The planet's geometry from its figure and the module's level table, or a `null` table for a
- * zero-height reference spheroid (R07 Design notes 3 and 19).
+ * zero-height reference spheroid (R07 Design notes 3 and 19), with the body's σ by level and level
+ * charge where the workers gave them and the selection rule (R10.T4.b; R09.T8.d (b3)).
  *
- * @throws Error if the figure's radii are not finite and positive with c ≤ a, or the table is not
- *   {@link LEVEL_TABLE_STRIDE} × 25 finite numbers.
+ * @param sigmaM - The body's σ_n by level, 25 (`levelBounds.ts`' `LevelBounds.sigmaM`); `null`,
+ *   or with no table, the statistical rule's selection bound is the stated one.
+ * @param rule - The rule the selection bound is made under; the rule in force unless a test or a
+ *   count asks for another.
+ * @param chargeM - The body's level charge by level, 25 (`LevelBounds.chargeM`); `null`, or with no
+ *   table, the hard rule's selection bound is the stated one.
+ * @throws Error if the figure's radii are not finite and positive with c ≤ a, the table is not
+ *   {@link LEVEL_TABLE_STRIDE} × 25 finite numbers, σ is not 25 finite values of at least 0, or the
+ *   charge is not 25 finite values of at least 0, each at most the table's ε_n where one is given.
  */
 export function planetGeometry(
   figure: BodyFigure,
   levelTable: Float64Array | null,
+  sigmaM: Float64Array | null = null,
+  rule: SelectionRule = SELECTION_RULE,
+  chargeM: Float64Array | null = null,
 ): PlanetGeometry {
   const { equatorialRadiusM: a, polarRadiusM: c } = figure;
   if (!(Number.isFinite(a) && Number.isFinite(c) && c > 0 && c <= a)) {
@@ -65,7 +106,45 @@ export function planetGeometry(
       throw new Error(`a level table has ${expected} finite entries, got ${levelTable.length}`);
     }
   }
-  return { figure, finestLevel: finestLevel(a), levels: levelTable };
+  if (sigmaM !== null) {
+    checkLevelSigma(sigmaM);
+  }
+  if (chargeM !== null) {
+    checkLevelCharge(chargeM);
+    if (levelTable !== null) {
+      const level = chargeM.findIndex((x, n) => !(x <= (levelTable[LEVEL_TABLE_STRIDE * n] ?? 0)));
+      if (level >= 0) {
+        throw new Error(
+          `a body's level charge is at most its stated bound, got ${String(chargeM[level])} m over ${String(levelTable[LEVEL_TABLE_STRIDE * level])} m at level ${String(level)}`,
+        );
+      }
+    }
+  }
+  return {
+    figure,
+    finestLevel: finestLevel(a),
+    levels: levelTable,
+    sigmaM,
+    chargeM,
+    selectionBoundM:
+      levelTable === null ? null : selectionBounds(levelTable, sigmaM, chargeM, rule),
+    rule,
+  };
+}
+
+/** Each level's selection bound from the table's stated ε_n, σ_n and the charge under `rule`. */
+function selectionBounds(
+  levelTable: Float64Array,
+  sigmaM: Float64Array | null,
+  chargeM: Float64Array | null,
+  rule: SelectionRule,
+): Float64Array {
+  const bounds = new Float64Array(MAX_LEVEL + 1);
+  for (let level = 0; level <= MAX_LEVEL; level += 1) {
+    const hardM = levelTable[LEVEL_TABLE_STRIDE * level] ?? 0;
+    bounds[level] = selectionBound(hardM, sigmaM?.[level] ?? 0, rule, chargeM?.[level] ?? hardM);
+  }
+  return bounds;
 }
 
 function entry(planet: PlanetGeometry, level: number, offset: number): number {
@@ -87,12 +166,123 @@ export function levelBoundM(planet: PlanetGeometry, level: number): number {
   return entry(planet, level, 0);
 }
 
+/**
+ * The bound selection charges `level`, metres: the level charge under the hard rule, the stated
+ * ε_n ({@link levelBoundM}) where none is given (R09.T8.d (b3)), min(ε_n, 4σ_n) under the
+ * statistical one ({@link PlanetGeometry.selectionBoundM}; R10.T4.b), zero with no table. Only the
+ * error selection charges reads it; every bounding volume keeps ε_n.
+ *
+ * @throws Error if `level` is outside the level table.
+ */
+export function selectionBoundM(planet: PlanetGeometry, level: number): number {
+  if (planet.selectionBoundM === null) {
+    return 0;
+  }
+  const value = planet.selectionBoundM[level];
+  if (value === undefined) {
+    throw new Error(`level ${level} is outside the level table`);
+  }
+  return value;
+}
+
 /** The lowest and highest heights a patch of `level` can reach above the datum, metres. */
 export function levelHeightRangeM(
   planet: PlanetGeometry,
   level: number,
 ): readonly [number, number] {
   return [entry(planet, level, 1), entry(planet, level, 2)];
+}
+
+/**
+ * One `f32` step's relative size: a height rounded to `f32` is within this of its value, as the
+ * bake's `f32_step` takes it for the skirts' depth.
+ */
+export const F32_RELATIVE_STEP = 2 ** -23;
+
+/**
+ * Per level, the lowest bottom and the highest top any patch of the level, or of a finer level
+ * beneath one, can reach, before the skirt margin (see {@link subtreeHeightRangeM}).
+ */
+interface SubtreeRanges {
+  readonly lowM: Float64Array;
+  readonly highM: Float64Array;
+}
+
+const subtreeRanges = new WeakMap<PlanetGeometry, SubtreeRanges>();
+
+/** The planet's {@link SubtreeRanges}, made on first use (the planet is immutable). */
+function subtreeRangesOf(planet: PlanetGeometry): SubtreeRanges {
+  let ranges = subtreeRanges.get(planet);
+  if (ranges === undefined) {
+    const rows = MAX_LEVEL + 1;
+    // From each level to the deepest drawn, the planet's finest: the lowest skirt bottom and the
+    // highest height. No patch beneath the finest level is drawn, so from it on each level is its
+    // own.
+    const fromLow = new Float64Array(rows);
+    const fromHigh = new Float64Array(rows);
+    let low = Infinity;
+    let high = -Infinity;
+    for (let m = MAX_LEVEL; m >= 0; m -= 1) {
+      if (m >= planet.finestLevel) {
+        low = Infinity;
+        high = -Infinity;
+      }
+      const [rowLow, rowHigh] = levelHeightRangeM(planet, m);
+      // A level-m bake hangs its skirts from its own heights and its morph targets, its parent
+      // level's, alike: by ε_m, an f32 step of the largest height over both and its margin.
+      const [parentLow, parentHigh] = m > 0 ? levelHeightRangeM(planet, m - 1) : [rowLow, rowHigh];
+      const largest = Math.max(
+        Math.abs(rowLow),
+        Math.abs(rowHigh),
+        Math.abs(parentLow),
+        Math.abs(parentHigh),
+      );
+      const bottom =
+        Math.min(rowLow, parentLow) - levelBoundM(planet, m) - largest * F32_RELATIVE_STEP;
+      low = Math.min(low, bottom);
+      high = Math.max(high, rowHigh);
+      fromLow[m] = low;
+      fromHigh[m] = high;
+    }
+    // Level n's subtree takes the rows from its parent's on: a patch's morph targets are its
+    // parent level's heights.
+    const lowM = new Float64Array(rows);
+    const highM = new Float64Array(rows);
+    for (let n = 0; n < rows; n += 1) {
+      const from = Math.max(0, n - 1);
+      lowM[n] = fromLow[from] ?? 0;
+      highM[n] = fromHigh[from] ?? 0;
+    }
+    ranges = { lowM, highM };
+    subtreeRanges.set(planet, ranges);
+  }
+  return ranges;
+}
+
+/**
+ * The lowest and highest heights the patches of `level`, and of every finer level beneath one, can
+ * reach above the datum, metres, skirts included: over the level table's rows from the level's
+ * parent to the deepest drawn ({@link PlanetGeometry.finestLevel}), each level's skirt bottom the lower of its row's low and its parent row's,
+ * its morph targets', less its skirt depth (ε_m, an `f32` step of the largest |h| over both rows
+ * and `skirtMarginM`, as the bake hangs its skirts). Selection drops a patch's
+ * whole subtree when no view sees its box, so a box it prunes by holds every descendant's
+ * vertices, morph targets and skirts (R09.T8.d; decision-r09-t8d-reach, follow-up 1): a coarse
+ * level's own row may hold far less than a finer one's.
+ *
+ * @throws Error if `level` is outside the level table.
+ */
+export function subtreeHeightRangeM(
+  planet: PlanetGeometry,
+  level: number,
+  skirtMarginM = 0,
+): readonly [number, number] {
+  const ranges = subtreeRangesOf(planet);
+  const low = ranges.lowM[level];
+  const high = ranges.highM[level];
+  if (!Number.isInteger(level) || low === undefined || high === undefined) {
+    throw new Error(`level ${level} is outside the level table`);
+  }
+  return [low - skirtMarginM, high];
 }
 
 /** The lowest height anywhere on the planet, metres: the occluder's depth below the datum. */

@@ -14,7 +14,9 @@ import {
   NO_WINDOW_REASON,
   PHASE_VIEWS,
   type PhaseTraceFigures,
+  softwareViewsCheckFailures,
   type ViewsCheckInput,
+  type ViewsCheckResults,
   viewsCheckMarkdown,
   writeViewsCheckResults,
 } from "./viewsCheckResults";
@@ -41,7 +43,7 @@ function phaseRecord(
       gpuMs: [i === 0 ? 2 : 0.05],
       submitMs: [0.1],
       passLabels: style === "photorealistic" ? ["bloom", "tonemap"] : ["view:wireframe"],
-      scales: style === "photorealistic" && i === 0 ? [1, 0.8] : [],
+      scales: style === "photorealistic" && i === 0 ? [1] : [],
     })),
     frameIntervalsMs: Array.from({ length: 99 }, () => T_MS),
     primaryIntervalsMs: Array.from({ length: 99 }, () => T_MS),
@@ -50,6 +52,7 @@ function phaseRecord(
     untimedFrames: 0,
     droppedResolves: 0,
     unattributedGpuMs: 0,
+    statements: [],
   };
 }
 
@@ -110,6 +113,11 @@ function traces(
   );
 }
 
+/** A phase's T in `results`, ms to two decimals. */
+function periodOf(results: ViewsCheckResults, phase: ViewsCheckPhaseName): string | undefined {
+  return results.phases.find((each) => each.name === phase)?.periodMs.value?.toFixed(2);
+}
+
 function input(overrides: Partial<ViewsCheckInput> = {}): ViewsCheckInput {
   return {
     run: {
@@ -131,6 +139,8 @@ function input(overrides: Partial<ViewsCheckInput> = {}): ViewsCheckInput {
       switches: ["--use-angle=vulkan"],
       shown: true,
       displayHz: VSYNC_HZ,
+      framePacing: "display",
+      frameRateHz: null,
       window: { widthDip: 1920, heightDip: 1080 },
       captures: measured("/repo/target/views-check/captures"),
     },
@@ -177,6 +187,24 @@ describe("the views check's results", () => {
     expect(cockpit?.rateHz).toBe(30);
     expect(cockpit?.periodMs.value).toBeCloseTo(2 * T_MS);
     expect(cockpit?.criteria.rows.find((row) => row.id === "p95")?.limit).toBe(35);
+  });
+
+  it("reads T on a 120 Hz panel as the vsyncs its pacing draws each rate on, and records the pacing and the measured vsync (R07.T19)", () => {
+    const at = (framePacing: "rate" | "display"): ViewsCheckResults =>
+      buildViewsCheckResults(
+        input({ run: { ...input().run, setting: "low", displayHz: 120, framePacing } }),
+      );
+    const rate = at("rate");
+    const counted = at("display");
+    expect([
+      periodOf(rate, "photoreal-two-wireframe"),
+      periodOf(rate, "wireframe-two-wireframe"),
+      periodOf(counted, "photoreal-two-wireframe"),
+      periodOf(counted, "wireframe-two-wireframe"),
+      rate.run.framePacing,
+      rate.phases[0]?.measuredVsyncMs.value?.toFixed(2),
+      viewsCheckMarkdown(rate).includes(", pacing rate"),
+    ]).toEqual(["33.33", "16.67", "16.67", "8.33", "rate", T_MS.toFixed(2), true]);
   });
 
   it("reads the low setting's wireframe primary at 60 Hz, as T20's low cases ask", () => {
@@ -362,6 +390,62 @@ describe("the views check's results", () => {
     );
   });
 
+  describe("reads no overhead where the primary did not draw alike in the pair (fix-retina-frame)", () => {
+    /** The photorealistic pair, its cockpit's phase's primary `primary`. */
+    function cockpitPair(
+      primary: Partial<ViewsCheckPhaseRecord>,
+      scales: ReadonlyArray<number> = [1],
+    ): ReturnType<typeof buildViewsCheckResults>["findings"]["perCanvasOverhead"] {
+      const record: ViewsCheckRecord = {
+        ...RECORD,
+        phases: RECORD.phases.map((phase) =>
+          phase.name === "photoreal-two-wireframe"
+            ? {
+                ...phase,
+                ...primary,
+                views: phase.views.map((view, i) => (i === 0 ? { ...view, scales } : view)),
+              }
+            : phase,
+        ),
+      };
+      return buildViewsCheckResults(input({ record })).findings.perCanvasOverhead;
+    }
+
+    it.each([
+      ["moved within a phase", [1, 0.8]],
+      ["held below the other phase's", [0.5]],
+    ])("where its scale %s", (_case, scales) => {
+      const overhead = cockpitPair({}, scales);
+      expect([overhead.pairs[0]?.perCanvasMs.reason, overhead.measuredMs.value]).toEqual([
+        "the primary's scale moved within the pair",
+        overhead.pairs[1]?.perCanvasMs.value,
+      ]);
+    });
+
+    it("where it stated IMAGE: DETAIL LIMITED as a window ended, its scale held", () => {
+      const overhead = cockpitPair({
+        statements: ["ATMOSPHERE: APPROXIMATE", "IMAGE: DETAIL LIMITED"],
+      });
+      expect(overhead.pairs[0]?.perCanvasMs.reason).toBe(
+        "the primary stated IMAGE: DETAIL LIMITED within the pair",
+      );
+    });
+
+    it("and records each phase's statement", () => {
+      const record: ViewsCheckRecord = {
+        ...RECORD,
+        phases: RECORD.phases.map((phase) =>
+          phase.name === "photoreal-alone"
+            ? { ...phase, statements: ["IMAGE: DETAIL LIMITED"] }
+            : phase,
+        ),
+      };
+      expect(
+        buildViewsCheckResults(input({ record })).phases.map((phase) => phase.imageLimited),
+      ).toEqual([true, false, false, false, false]);
+    });
+  });
+
   it("reads no overhead from a phase that did not hold its configuration", () => {
     const record: ViewsCheckRecord = {
       ...RECORD,
@@ -411,6 +495,46 @@ function memoryFiles(
     },
   };
 }
+
+describe("a software run's judgement (R01.T16)", () => {
+  it("passes a run with every primary as asked and no GPU-process exit", () => {
+    expect(softwareViewsCheckFailures(buildViewsCheckResults(input()), 0)).toBeNull();
+  });
+
+  it("fails a run whose GPU process exited", () => {
+    const results = buildViewsCheckResults(input({ gpuProcessExits: 2 }));
+    expect(softwareViewsCheckFailures(results, 2)).toBe("2 exits of the GPU process");
+  });
+
+  it("fails a run whose GPU process exited after its results were written", () => {
+    const results = buildViewsCheckResults(input());
+    expect(softwareViewsCheckFailures(results, 1)).toBe("1 exits of the GPU process");
+  });
+
+  it("fails a phase whose photorealistic primary went back to the wireframe", () => {
+    const record: ViewsCheckRecord = {
+      ...RECORD,
+      phases: PHASES.map((name) =>
+        name === "photoreal-two-wireframe"
+          ? phaseRecord(name, ["wireframe", "wireframe", "wireframe"])
+          : phaseRecord(name),
+      ),
+    };
+    expect(softwareViewsCheckFailures(buildViewsCheckResults(input({ record })), 0)).toBe(
+      "photoreal-two-wireframe's primary was drawn wireframe, not photorealistic",
+    );
+  });
+
+  it("fails a phase whose primary drew no view", () => {
+    const record: ViewsCheckRecord = {
+      ...RECORD,
+      phases: [phaseRecord("wireframe-alone", [])],
+    };
+    expect(softwareViewsCheckFailures(buildViewsCheckResults(input({ record })), 0)).toBe(
+      "wireframe-alone's primary was drawn in no style, not wireframe",
+    );
+  });
+});
 
 describe("writeViewsCheckResults", () => {
   it("names the files by date, machine and setting, numbering a second run", async () => {

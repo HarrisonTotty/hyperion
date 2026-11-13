@@ -12,9 +12,23 @@
 /**
  * What a GPU allocation is for, by the names R12.T3.a reports (R12 Design note 6).
  *
- * - `atmosphere-tables`: the per-planet transmittance and multiple-scattering tables (R05.T12.b).
+ * - `render-targets`: the offscreen targets' colour and depth, an ID target's `r32uint` among them
+ *   (plan R14, R14.T2.b), and their post-process intermediates.
+ * - `atmosphere-tables`: the per-planet transmittance and multiple-scattering tables (R05.T12.b),
+ *   the medium's terms and density and phase tables that they and the per-frame kernels read
+ *   (R08.T6.b), and the absorber-column table and the lights' curves of growth (R08.T6.c).
  * - `atmosphere-view`: the per-frame sky-view, aerial-perspective and ray-march tables (R05.T12.c).
+ * - `geometry-clusters`: plan R14's cluster path: each terrain slot's cluster records, each view's
+ *   buckets (their lists and indirect arguments), its cull inputs and its counters' read-back ring
+ *   (R14.T1.b).
+ * - `geometry-pages`: plan R14's mesh page pool, its pages and their records and LOD spheres,
+ *   `GeometrySettings.pageBytes` in all (R14.T5.b).
+ * - `coarse-field-gpu`: the brainstorm's "coarse field, GPU copy", each body's coverage mask, a
+ *   byte a coarse cell a face (R10.T7, R10 Design note 12), and the disc's class map once R10.T10.d
+ *   files it here; the fields themselves stay in the height workers.
  * - `height-cache`: the terrain's patch cache, its slot buffers and normals atlas (R05.T11.a).
+ * - `shadows`: the terrain's shadow cascades, one set of four 2,048² `depth32float` layers for the
+ *   engine, 64 MiB (R10.T9.b; R12's name, plan 12's `MemoryItem`).
  * - `sky-cube`: R06's baked star cube and the buffer of its scale (R06.T13.g).
  * - `sky-scratch`: the sky bake's transients, released when it ends (R06.T13.g).
  */
@@ -23,7 +37,11 @@ export type MemoryCategory =
   | "other"
   | "atmosphere-tables"
   | "atmosphere-view"
+  | "coarse-field-gpu"
+  | "geometry-clusters"
+  | "geometry-pages"
   | "height-cache"
+  | "shadows"
   | "sky-cube"
   | "sky-scratch";
 
@@ -135,14 +153,19 @@ const BYTES_PER_TEXEL: Readonly<Partial<Record<GPUTextureFormat, number>>> = {
   "depth32float-stencil8": 5,
 };
 
+/** Bytes per texel of `format`, or `null` for a compressed or unknown one. */
+export function texelBytesOf(format: GPUTextureFormat): number | null {
+  return BYTES_PER_TEXEL[format] ?? null;
+}
+
 /**
  * Bytes per texel of `format`.
  *
  * @throws Error for a compressed or unknown format, which no creation here makes.
  */
 export function bytesPerTexel(format: GPUTextureFormat): number {
-  const bytes = BYTES_PER_TEXEL[format];
-  if (bytes === undefined) {
+  const bytes = texelBytesOf(format);
+  if (bytes === null) {
     throw new Error(`no texel size is known for ${format}`);
   }
   return bytes;

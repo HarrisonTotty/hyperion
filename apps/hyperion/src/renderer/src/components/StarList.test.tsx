@@ -119,6 +119,21 @@ describe("StarList", () => {
     ]);
   });
 
+  it("names a stripped helium star by its own kind, not as a hot subdwarf", () => {
+    const stripped = aSunlikeStar({
+      kind: "stripped_helium_star",
+      phase: "helium_main_sequence",
+      class: "He-sdO3",
+      initial_mass_msun: 10.96,
+      mass_msun: 2.37,
+    });
+    render(<StarList model={modelOf(aSingleStarSummary(stripped))} stale={false} />);
+
+    expect(rowsOf(screen.getByRole("table", { name: "STARS" }))).toEqual([
+      ["A", "He-sdO3", "2.37", "STRIPPED HELIUM STAR"],
+    ]);
+  });
+
   it("reads a merger's product under its own letter", () => {
     const single = aSingleStarSummary();
     const stars = single.stars.map((star) => ({

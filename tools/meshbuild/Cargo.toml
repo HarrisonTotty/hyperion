@@ -1,0 +1,40 @@
+# The offline DAG builder of virtualized geometry (plan R14, T5.a): it clusters a triangle mesh to
+# 128 triangles a cluster, groups the clusters, simplifies each group with its border locked, and
+# repeats to a root, then writes the DAG as `MeshPage`s. It is outside the HYPERION workspace (its
+# own `[workspace]` table, and the root manifest's `exclude = ["tools/*"]`), as `tools/gpu-replay`
+# is; `just meshbuild-check` lints and tests it. Versions follow the root workspace's where it has
+# the crate.
+[package]
+name = "meshbuild"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+publish = false
+
+[workspace]
+
+[dependencies]
+anyhow = "1.0.104"
+clap = { version = "4.6.7", features = ["derive"] }
+# Pinned exactly, as the root workspace pins it: libm is reproducible across platforms but not
+# across its own versions, and the test meshes' pages are checked byte for byte.
+libm = { version = "=0.2.16", default-features = false }
+thiserror = "2.0.21"
+
+[dev-dependencies]
+sha2 = "0.11.1"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+
+# The tests build the DAG of a 10⁶-triangle mesh, which takes minutes at `opt-level = 0`. Rust never
+# contracts or reorders float arithmetic at any level, so the pages are the same bytes either way,
+# and the debug assertions and overflow checks stay on.
+[profile.dev]
+opt-level = 2
+debug = "line-tables-only"

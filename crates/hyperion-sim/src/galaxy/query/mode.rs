@@ -12,7 +12,7 @@ use crate::coords::GalacticPosition;
 use crate::galaxy::Galaxy;
 use crate::galaxy::features::members::KeepInteriors;
 use crate::galaxy::placement::{CellCache, SystemKind};
-use crate::observe::{Drift, Observer, StarsCache, TraceMotionError, observe_on_line};
+use crate::observe::{Drift, Observer, StarsCache, TraceMotionError, observe_hit_on};
 
 /// What a query reports (plan 12's Provides).
 ///
@@ -118,10 +118,10 @@ pub fn range_query_observed<C: CellCache, S: StarsCache>(
         .zip(&lines)
         .map(|(hit, line)| {
             if hit.record().kind() == SystemKind::RoguePlanet {
-                observe_on_line(galaxy, hit, line, None, &observer)
+                observe_hit_on(galaxy, hit, line, None, &observer)
             } else {
                 stars.with_stars(galaxy, hit.record(), |system| {
-                    observe_on_line(galaxy, hit, line, Some(system), &observer)
+                    observe_hit_on(galaxy, hit, line, Some(system), &observer)
                 })
             }
         })
@@ -181,7 +181,7 @@ mod tests {
             let built = &mut self.built;
             f(self.kept.entry(record.id()).or_insert_with(|| {
                 *built += 1;
-                stars_of(galaxy, &NoInteriorCache, record)
+                stars_of(galaxy, &NoInteriorCache, record).unwrap()
             }))
         }
     }
@@ -268,7 +268,7 @@ mod tests {
                 range_query_observed(&galaxy, &mut NoCache::new(), &mut NoStarsCache, &[], &now)
                     .unwrap();
             assert_eq!(as_now, present, "now mode is plan 03's answer");
-            assert!(as_now.observed().is_empty());
+            assert_eq!(as_now.observed(), []);
 
             let plain = range_query(&galaxy, &mut NoCache::new(), &[], &observed);
             let seen =

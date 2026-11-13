@@ -1,0 +1,13 @@
+# Pinned figures (hyperion_testkit::pins): re-pin them by test name with `just repin <test>`.
+the_cap_s_centre_list_fits_under_either_mass_function.chabrier.candidates = 34309.23503372763
+the_cap_s_centre_list_fits_under_either_mass_function.chabrier.margin_at_eight = 28148.138911583686
+the_cap_s_centre_list_fits_under_either_mass_function.kroupa.candidates = 22803.527102431843
+the_cap_s_centre_list_fits_under_either_mass_function.kroupa.margin_at_eight = 40552.19748631008
+the_milky_way_s_centre_list_fits_under_either_mass_function.chabrier.candidates = 13404.947974337174
+the_milky_way_s_centre_list_fits_under_either_mass_function.chabrier.margin_at_eight = 50555.30122613486
+the_milky_way_s_centre_list_fits_under_either_mass_function.chabrier.margin_at_five = 50910.67200472889
+the_milky_way_s_centre_list_fits_under_either_mass_function.chabrier.primaries_share = 0.70348
+the_milky_way_s_centre_list_fits_under_either_mass_function.kroupa.candidates = 12127.050982513136
+the_milky_way_s_centre_list_fits_under_either_mass_function.kroupa.margin_at_eight = 51992.38125863015
+the_milky_way_s_centre_list_fits_under_either_mass_function.kroupa.margin_at_five = 52329.70570477203
+the_milky_way_s_centre_list_fits_under_either_mass_function.kroupa.primaries_share = 0.71327

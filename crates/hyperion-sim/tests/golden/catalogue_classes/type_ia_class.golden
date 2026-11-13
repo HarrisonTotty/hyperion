@@ -1,0 +1,753 @@
+# generator_version = 31
+component 0 explosions per system = 0x3ed4f51dce8e0816  # 4.996654049517856e-6
+component 1 explosions per system = 0x3ec28265aff75c5b  # 2.2064881475092547e-6
+component 2 explosions per system = 0x3ea1eb073fefefe7  # 5.340003780269853e-7
+component 3 explosions per system = 0x3e90b45f68b5541b  # 2.4891765156481913e-7
+component 4 explosions per system = 0x3e80dc12bdcc4b00  # 1.2561426290159412e-7
+component 5 explosions per system = 0x3e74b0d8e508bd92  # 7.707927208370049e-8
+component 6 explosions per system = 0x3e6f238df3037f52  # 5.8000692583622005e-8
+component 7 explosions per system = 0x3e719a706b75be63  # 6.557732034283255e-8
+component 8 explosions per system = 0x3e76b5c888a53e3a  # 8.460168224766046e-8
+component 9 explosions per system = 0x3e8da2f0c76b11b9  # 2.2080903124532333e-7
+component 10 explosions per system = 0x3e8da2f0c76b11b9  # 2.2080903124532333e-7
+component 11 explosions per system = 0x3e6af1af4b9123b1  # 5.0187261853790283e-8
+component 12 explosions per system = 0x3e6af1af4b9123b1  # 5.0187261853790283e-8
+component 13 explosions per system = 0x3e6af1af4b9123b1  # 5.0187261853790283e-8
+component 14 explosions per system = 0x3e6af1af4b9123b1  # 5.0187261853790283e-8
+component 15 explosions per system = 0x3e6af1af4b9123b1  # 5.0187261853790283e-8
+component 16 explosions per system = 0x3e6af1af4b9123b1  # 5.0187261853790283e-8
+interval (T-108446247424134.718750000 s, T+31557600000.000000000 s]
+cell [0, 0, 0] bound = 0x3f0303a6e9441e89  # 3.6266833520368315e-5
+cell [0, 0, 0] candidates 4932 entries 3
+cell [0, 0, 0] fc18080800008650 component 9 explodes T-4768954408557.718750000 s as TypeIa(Iax), members 2
+cell [0, 0, 0] fc18080800008650 window = 0x40d794b143e326f2  # 24146.769768512757
+cell [0, 0, 0] fc18080800008650 primary = 0x401ff31e49dcd35d  # 7.98742022905648
+cell [0, 0, 0] fc18080800008650 secondary = 0x400284788939c3f8  # 2.3146830292466767
+cell [0, 0, 0] fc18080800008650 age = 0x4184707a29cfeec1  # 42864453.226529606
+cell [0, 0, 0] fc18080800008650 energy = 0x3fd0b55fe23ad257  # 0.2610702237391584
+cell [0, 0, 0] fc18080800008650 fastest = 0x40f437a6c7d91fc6  # 82810.42379105007
+cell [0, 0, 0] fc18080800008650 leftover PartlyBurntDwarf
+cell [0, 0, 0] fc18080800008650 site cell [100, 109, 50]
+cell [0, 0, 0] fc18080800008650 site offset 0 = 0x43373af5c4be3df0  # 6538751706545648.0
+cell [0, 0, 0] fc18080800008650 site offset 1 = 0x43311e2af7427231  # 4818244489867825.0
+cell [0, 0, 0] fc18080800008650 site offset 2 = 0x4335709a8a0c93d6  # 6034783554278358.0
+cell [0, 0, 0] fc18080800008650 member fc18080800008650 epoch cell [103, 150, 41]
+cell [0, 0, 0] fc18080800008650 member fc18080800008650 epoch offset 0 = 0x433f72c46b929c94  # 8851912221957268.0
+cell [0, 0, 0] fc18080800008650 member fc18080800008650 epoch offset 1 = 0x42f78797a7a70700  # 413938117931120.0
+cell [0, 0, 0] fc18080800008650 member fc18080800008650 epoch offset 2 = 0x431c12eaca1932d8  # 1975524742548662.0
+cell [0, 0, 0] fc18080800008650 member fc18080800008650 mass = 0x401ff31e49dcd35d  # 7.98742022905648
+cell [0, 0, 0] fc18080800008650 member fc18080800008650 velocity before 0 = 0x40b9247ec2505ee7  # 6436.495152495546
+cell [0, 0, 0] fc18080800008650 member fc18080800008650 velocity before 1 = 0x40f3a1cf08c486ec  # 80412.93964054779
+cell [0, 0, 0] fc18080800008650 member fc18080800008650 velocity before 2 = 0xc0d24462193cb163  # -18705.532790349225
+cell [0, 0, 0] fc18080800008650 member fc18080800008650 velocity after 0 = 0x40b9247ec2505ee7  # 6436.495152495546
+cell [0, 0, 0] fc18080800008650 member fc18080800008650 velocity after 1 = 0x40f3a1cf08c486ec  # 80412.93964054779
+cell [0, 0, 0] fc18080800008650 member fc18080800008650 velocity after 2 = 0xc0d24462193cb163  # -18705.532790349225
+cell [0, 0, 0] fc18080800008650 member fc18080800008651 epoch cell [103, 150, 41]
+cell [0, 0, 0] fc18080800008650 member fc18080800008651 epoch offset 0 = 0x433f72c46b929c94  # 8851912221957268.0
+cell [0, 0, 0] fc18080800008650 member fc18080800008651 epoch offset 1 = 0x42f78797a7a70700  # 413938117931120.0
+cell [0, 0, 0] fc18080800008650 member fc18080800008651 epoch offset 2 = 0x431c12eaca1932d8  # 1975524742548662.0
+cell [0, 0, 0] fc18080800008650 member fc18080800008651 mass = 0x401ff31e49dcd35d  # 7.98742022905648
+cell [0, 0, 0] fc18080800008650 member fc18080800008651 velocity before 0 = 0x40b9247ec2505ee7  # 6436.495152495546
+cell [0, 0, 0] fc18080800008650 member fc18080800008651 velocity before 1 = 0x40f3a1cf08c486ec  # 80412.93964054779
+cell [0, 0, 0] fc18080800008650 member fc18080800008651 velocity before 2 = 0xc0d24462193cb163  # -18705.532790349225
+cell [0, 0, 0] fc18080800008650 member fc18080800008651 velocity after 0 = 0x40b9247ec2505ee7  # 6436.495152495546
+cell [0, 0, 0] fc18080800008650 member fc18080800008651 velocity after 1 = 0x40f3a1cf08c486ec  # 80412.93964054779
+cell [0, 0, 0] fc18080800008650 member fc18080800008651 velocity after 2 = 0xc0d24462193cb163  # -18705.532790349225
+cell [0, 0, 0] fc18080800009bc0 component 9 explodes T-5127672159898.718750000 s as TypeIa(Merger), members 1
+cell [0, 0, 0] fc18080800009bc0 window = 0x40e715b9d83197ec  # 47277.8076408355
+cell [0, 0, 0] fc18080800009bc0 primary = 0x401bb2a6783134c7  # 6.924463155749613
+cell [0, 0, 0] fc18080800009bc0 secondary = 0x4018e57b49a268c8  # 6.224103117501905
+cell [0, 0, 0] fc18080800009bc0 age = 0x4193dcf77b1a1e46  # 83312094.77550611
+cell [0, 0, 0] fc18080800009bc0 energy = 0x3ff3133e14ec8b58  # 1.192197877630596
+cell [0, 0, 0] fc18080800009bc0 fastest = 0x41094a90288ab1e1  # 207186.0197957894
+cell [0, 0, 0] fc18080800009bc0 leftover Nothing
+cell [0, 0, 0] fc18080800009bc0 site cell [268, 135, 51]
+cell [0, 0, 0] fc18080800009bc0 site offset 0 = 0x431fbf32787a336b  # 2233986942143706.8
+cell [0, 0, 0] fc18080800009bc0 site offset 1 = 0x433cb5ebb4a3cbce  # 8081323300473806.0
+cell [0, 0, 0] fc18080800009bc0 site offset 2 = 0x4325729ee29e9748  # 3018500621683620.0
+cell [0, 0, 0] fc18080800009bc0 member fc18080800009bc0 epoch cell [232, 242, 57]
+cell [0, 0, 0] fc18080800009bc0 member fc18080800009bc0 epoch offset 0 = 0x43327cddfcd2da5b  # 5203842452085339.0
+cell [0, 0, 0] fc18080800009bc0 member fc18080800009bc0 epoch offset 1 = 0x4314978048c9a638  # 1449019191749006.0
+cell [0, 0, 0] fc18080800009bc0 member fc18080800009bc0 epoch offset 2 = 0x432ab58283e3c4e8  # 3758960778797684.0
+cell [0, 0, 0] fc18080800009bc0 member fc18080800009bc0 mass = 0x401bb2a6783134c7  # 6.924463155749613
+cell [0, 0, 0] fc18080800009bc0 member fc18080800009bc0 velocity before 0 = 0xc0f01320c89ebf81  # -65842.04897951895
+cell [0, 0, 0] fc18080800009bc0 member fc18080800009bc0 velocity before 1 = 0x4107f0e9ccf2bd10  # 196125.225072362
+cell [0, 0, 0] fc18080800009bc0 member fc18080800009bc0 velocity before 2 = 0x40c5e74e115bae80  # 11214.609904728131
+cell [0, 0, 0] fc18080800009bc0 member fc18080800009bc0 velocity after 0 = 0xc0f01320c89ebf81  # -65842.04897951895
+cell [0, 0, 0] fc18080800009bc0 member fc18080800009bc0 velocity after 1 = 0x4107f0e9ccf2bd10  # 196125.225072362
+cell [0, 0, 0] fc18080800009bc0 member fc18080800009bc0 velocity after 2 = 0x40c5e74e115bae80  # 11214.609904728131
+cell [0, 0, 0] fc1808080000cce0 component 9 explodes T-11461471756934.718750000 s as TypeIa(DoubleDetonation), members 2
+cell [0, 0, 0] fc1808080000cce0 window = 0x411befdd041f55a7  # 457719.25402578193
+cell [0, 0, 0] fc1808080000cce0 primary = 0x4016dcb8caedb739  # 5.715548678168312
+cell [0, 0, 0] fc1808080000cce0 secondary = 0x400c560f22e54485  # 3.5420210577217994
+cell [0, 0, 0] fc1808080000cce0 age = 0x41b68ed875877fee  # 378460277.5292958
+cell [0, 0, 0] fc1808080000cce0 energy = 0x3ff0273cad989b42  # 1.0095793515299225
+cell [0, 0, 0] fc1808080000cce0 fastest = 0x41346f5aebb55282  # 1339226.9207355087
+cell [0, 0, 0] fc1808080000cce0 leftover SurvivingDonor { speed: KilometresPerSecond(1218.5506330705402) }
+cell [0, 0, 0] fc1808080000cce0 survivor speed = 0x40930a33d927d844  # 1218.5506330705402
+cell [0, 0, 0] fc1808080000cce0 site cell [92, 505, 99]
+cell [0, 0, 0] fc1808080000cce0 site offset 0 = 0x433fbd534894efb2  # 8933889675685810.0
+cell [0, 0, 0] fc1808080000cce0 site offset 1 = 0x431e655a6453df28  # 2138922051499978.0
+cell [0, 0, 0] fc1808080000cce0 site offset 2 = 0x433f5bf403228df8  # 8826827860774392.0
+cell [0, 0, 0] fc1808080000cce0 member fc1808080000cce0 epoch cell [-45, 555, 100]
+cell [0, 0, 0] fc1808080000cce0 member fc1808080000cce0 epoch offset 0 = 0x43341443bb266972  # 5651780669434226.0
+cell [0, 0, 0] fc1808080000cce0 member fc1808080000cce0 epoch offset 1 = 0x4324eacdebbd4994  # 2943834839229642.0
+cell [0, 0, 0] fc1808080000cce0 member fc1808080000cce0 epoch offset 2 = 0x433babec62c553c8  # 7788856128918472.0
+cell [0, 0, 0] fc1808080000cce0 member fc1808080000cce0 mass = 0x4016dcb8caedb739  # 5.715548678168312
+cell [0, 0, 0] fc1808080000cce0 member fc1808080000cce0 velocity before 0 = 0xc0fbadb51f43b149  # -113371.320132916
+cell [0, 0, 0] fc1808080000cce0 member fc1808080000cce0 velocity before 1 = 0x40e42fc38c77a28f  # 41342.11089689016
+cell [0, 0, 0] fc1808080000cce0 member fc1808080000cce0 velocity before 2 = 0x4086f701baf349e3  # 734.8758448607372
+cell [0, 0, 0] fc1808080000cce0 member fc1808080000cce0 velocity after 0 = 0xc0fbadb51f43b149  # -113371.320132916
+cell [0, 0, 0] fc1808080000cce0 member fc1808080000cce0 velocity after 1 = 0x40e42fc38c77a28f  # 41342.11089689016
+cell [0, 0, 0] fc1808080000cce0 member fc1808080000cce0 velocity after 2 = 0x4086f701baf349e3  # 734.8758448607372
+cell [0, 0, 0] fc1808080000cce0 member fc1808080000cce1 epoch cell [-509, 197, -1254]
+cell [0, 0, 0] fc1808080000cce0 member fc1808080000cce1 epoch offset 0 = 0x4306ea4dfb952390  # 806258767733874.0
+cell [0, 0, 0] fc1808080000cce0 member fc1808080000cce1 epoch offset 1 = 0x43271b241dfcf594  # 3251883200117450.0
+cell [0, 0, 0] fc1808080000cce0 member fc1808080000cce1 epoch offset 2 = 0x42fddc923102ab80  # 525330923137720.0
+cell [0, 0, 0] fc1808080000cce0 member fc1808080000cce1 mass = 0x400c560f22e54485  # 3.5420210577217994
+cell [0, 0, 0] fc1808080000cce0 member fc1808080000cce1 velocity before 0 = 0xc0fbadb51f43b149  # -113371.320132916
+cell [0, 0, 0] fc1808080000cce0 member fc1808080000cce1 velocity before 1 = 0x40e42fc38c77a28f  # 41342.11089689016
+cell [0, 0, 0] fc1808080000cce0 member fc1808080000cce1 velocity before 2 = 0x4086f701baf349e3  # 734.8758448607372
+cell [0, 0, 0] fc1808080000cce0 member fc1808080000cce1 velocity after 0 = 0xc11e5274a638e259  # -496797.1623263709
+cell [0, 0, 0] fc1808080000cce0 member fc1808080000cce1 velocity after 1 = 0xc10f05cd9149ca82  # -254137.6959415265
+cell [0, 0, 0] fc1808080000cce0 member fc1808080000cce1 velocity after 2 = 0xc1310d65748a0d0e  # -1117541.455231491
+cell [-1, -1, -1] bound = 0x3f0303a6e9441e89  # 3.6266833520368315e-5
+cell [-1, -1, -1] candidates 4989 entries 8
+cell [-1, -1, -1] fc17f7f7f00022f0 component 9 explodes T-3027585518676.718750000 s as TypeIa(DoubleDetonation), members 2
+cell [-1, -1, -1] fc17f7f7f00022f0 window = 0x40dc0e8ead0f4441  # 28730.229312721876
+cell [-1, -1, -1] fc17f7f7f00022f0 primary = 0x40178e56f6ecd064  # 5.889003618434888
+cell [-1, -1, -1] fc17f7f7f00022f0 secondary = 0x400f4053fde98be9  # 3.906410201730513
+cell [-1, -1, -1] fc17f7f7f00022f0 age = 0x41bc9b15b1e8bc88  # 479925681.90912676
+cell [-1, -1, -1] fc17f7f7f00022f0 energy = 0x3ff1e73b218ed943  # 1.1189528761729697
+cell [-1, -1, -1] fc17f7f7f00022f0 fastest = 0x4134f36e0cac9699  # 1373038.049508488
+cell [-1, -1, -1] fc17f7f7f00022f0 leftover SurvivingDonor { speed: KilometresPerSecond(1294.279690231657) }
+cell [-1, -1, -1] fc17f7f7f00022f0 survivor speed = 0x4094391e671db7e9  # 1294.279690231657
+cell [-1, -1, -1] fc17f7f7f00022f0 site cell [-163, -39, -134]
+cell [-1, -1, -1] fc17f7f7f00022f0 site offset 0 = 0x432bbaf7300466da  # 3902697598235501.0
+cell [-1, -1, -1] fc17f7f7f00022f0 site offset 1 = 0x431007b40e80af96  # 1128017386548197.5
+cell [-1, -1, -1] fc17f7f7f00022f0 site offset 2 = 0x4333d346ac3ea60e  # 5580325048460814.0
+cell [-1, -1, -1] fc17f7f7f00022f0 member fc17f7f7f00022f0 epoch cell [-171, -22, -118]
+cell [-1, -1, -1] fc17f7f7f00022f0 member fc17f7f7f00022f0 epoch offset 0 = 0x43368b68acdf0dbd  # 6345731180793277.0
+cell [-1, -1, -1] fc17f7f7f00022f0 member fc17f7f7f00022f0 epoch offset 1 = 0x433b3f2dc08d66c6  # 7669290107758278.0
+cell [-1, -1, -1] fc17f7f7f00022f0 member fc17f7f7f00022f0 epoch offset 2 = 0x433a6b9bc6f1c84e  # 7436666196314190.0
+cell [-1, -1, -1] fc17f7f7f00022f0 member fc17f7f7f00022f0 mass = 0x40178e56f6ecd064  # 5.889003618434888
+cell [-1, -1, -1] fc17f7f7f00022f0 member fc17f7f7f00022f0 velocity before 0 = 0xc0d79ff49cf30b95  # -24191.822079430876
+cell [-1, -1, -1] fc17f7f7f00022f0 member fc17f7f7f00022f0 velocity before 1 = 0x40eafe5c9f92601c  # 55282.89447897693
+cell [-1, -1, -1] fc17f7f7f00022f0 member fc17f7f7f00022f0 velocity before 2 = 0x40e8b6545a495e7a  # 50610.636021313214
+cell [-1, -1, -1] fc17f7f7f00022f0 member fc17f7f7f00022f0 velocity after 0 = 0xc0d79ff49cf30b95  # -24191.822079430876
+cell [-1, -1, -1] fc17f7f7f00022f0 member fc17f7f7f00022f0 velocity after 1 = 0x40eafe5c9f92601c  # 55282.89447897693
+cell [-1, -1, -1] fc17f7f7f00022f0 member fc17f7f7f00022f0 velocity after 2 = 0x40e8b6545a495e7a  # 50610.636021313214
+cell [-1, -1, -1] fc17f7f7f00022f0 member fc17f7f7f00022f1 epoch cell [-78, 208, -449]
+cell [-1, -1, -1] fc17f7f7f00022f0 member fc17f7f7f00022f1 epoch offset 0 = 0x433f16031c9df02d  # 8749926898855981.0
+cell [-1, -1, -1] fc17f7f7f00022f0 member fc17f7f7f00022f1 epoch offset 1 = 0x4337db0cb5c2aaa6  # 6714772099869350.0
+cell [-1, -1, -1] fc17f7f7f00022f0 member fc17f7f7f00022f1 epoch offset 2 = 0x430fc079fc61b270  # 1117169304483406.0
+cell [-1, -1, -1] fc17f7f7f00022f0 member fc17f7f7f00022f1 mass = 0x400f4053fde98be9  # 3.906410201730513
+cell [-1, -1, -1] fc17f7f7f00022f0 member fc17f7f7f00022f1 velocity before 0 = 0xc0d79ff49cf30b95  # -24191.822079430876
+cell [-1, -1, -1] fc17f7f7f00022f0 member fc17f7f7f00022f1 velocity before 1 = 0x40eafe5c9f92601c  # 55282.89447897693
+cell [-1, -1, -1] fc17f7f7f00022f0 member fc17f7f7f00022f1 velocity before 2 = 0x40e8b6545a495e7a  # 50610.636021313214
+cell [-1, -1, -1] fc17f7f7f00022f0 member fc17f7f7f00022f1 velocity after 0 = 0x41104f32d31263f8  # 267212.7061248417
+cell [-1, -1, -1] fc17f7f7f00022f0 member fc17f7f7f00022f1 velocity after 1 = 0x41279c632eab9236  # 773681.5911527339
+cell [-1, -1, -1] fc17f7f7f00022f0 member fc17f7f7f00022f1 velocity after 2 = 0xc12e158fa309de4e  # -985799.8184346647
+cell [-1, -1, -1] fc17f7f7f0004920 component 9 explodes T-1203608251349.718750000 s as TypeIa(DoubleDetonation), members 2
+cell [-1, -1, -1] fc17f7f7f0004920 window = 0x411c234c002a2394  # 461011.00016074744
+cell [-1, -1, -1] fc17f7f7f0004920 primary = 0x401d6273d7c6cbaf  # 7.346145030506633
+cell [-1, -1, -1] fc17f7f7f0004920 secondary = 0x401d4ea1444625c0  # 7.326787058621846
+cell [-1, -1, -1] fc17f7f7f0004920 age = 0x41970c314bb8df35  # 96668754.93053897
+cell [-1, -1, -1] fc17f7f7f0004920 energy = 0x3fe612bf0ae0c903  # 0.6897883617841959
+cell [-1, -1, -1] fc17f7f7f0004920 fastest = 0x4130e6b32060d2df  # 1107635.1264774126
+cell [-1, -1, -1] fc17f7f7f0004920 leftover SurvivingDonor { speed: KilometresPerSecond(1009.0989817255661) }
+cell [-1, -1, -1] fc17f7f7f0004920 survivor speed = 0x408f88cab6ee51aa  # 1009.0989817255661
+cell [-1, -1, -1] fc17f7f7f0004920 site cell [-361, -507, -70]
+cell [-1, -1, -1] fc17f7f7f0004920 site offset 0 = 0x432a75563189428a  # 3723681226596677.0
+cell [-1, -1, -1] fc17f7f7f0004920 site offset 1 = 0x42e226fe2a916a76  # 159669458078547.7
+cell [-1, -1, -1] fc17f7f7f0004920 site offset 2 = 0x43237879a8bd8f40  # 2740244237436832.0
+cell [-1, -1, -1] fc17f7f7f0004920 member fc17f7f7f0004920 epoch cell [-364, -520, -69]
+cell [-1, -1, -1] fc17f7f7f0004920 member fc17f7f7f0004920 epoch offset 0 = 0x433e28d17b32c3ad  # 8489129481520045.0
+cell [-1, -1, -1] fc17f7f7f0004920 member fc17f7f7f0004920 epoch offset 1 = 0x43399cabf2e64044  # 7209136746283076.0
+cell [-1, -1, -1] fc17f7f7f0004920 member fc17f7f7f0004920 epoch offset 2 = 0x4313d33b3b2cb0e8  # 1395068976704570.0
+cell [-1, -1, -1] fc17f7f7f0004920 member fc17f7f7f0004920 mass = 0x401d6273d7c6cbaf  # 7.346145030506633
+cell [-1, -1, -1] fc17f7f7f0004920 member fc17f7f7f0004920 velocity before 0 = 0xc0d32967a6441da8  # -19621.61952307602
+cell [-1, -1, -1] fc17f7f7f0004920 member fc17f7f7f0004920 velocity before 1 = 0xc0f78470c163d5a2  # -96327.04721435023
+cell [-1, -1, -1] fc17f7f7f0004920 member fc17f7f7f0004920 velocity before 2 = 0x40ba56b0310937d7  # 6742.688248230107
+cell [-1, -1, -1] fc17f7f7f0004920 member fc17f7f7f0004920 velocity after 0 = 0xc0d32967a6441da8  # -19621.61952307602
+cell [-1, -1, -1] fc17f7f7f0004920 member fc17f7f7f0004920 velocity after 1 = 0xc0f78470c163d5a2  # -96327.04721435023
+cell [-1, -1, -1] fc17f7f7f0004920 member fc17f7f7f0004920 velocity after 2 = 0x40ba56b0310937d7  # 6742.688248230107
+cell [-1, -1, -1] fc17f7f7f0004920 member fc17f7f7f0004921 epoch cell [-359, -435, 27]
+cell [-1, -1, -1] fc17f7f7f0004920 member fc17f7f7f0004921 epoch offset 0 = 0x433d2113da531215  # 8199143475581461.0
+cell [-1, -1, -1] fc17f7f7f0004920 member fc17f7f7f0004921 epoch offset 1 = 0x4300279841b6169e  # 568391814791891.8
+cell [-1, -1, -1] fc17f7f7f0004920 member fc17f7f7f0004921 epoch offset 2 = 0x433c62f51fdf2060  # 7990104289124448.0
+cell [-1, -1, -1] fc17f7f7f0004920 member fc17f7f7f0004921 mass = 0x401d4ea1444625c0  # 7.326787058621846
+cell [-1, -1, -1] fc17f7f7f0004920 member fc17f7f7f0004921 velocity before 0 = 0xc0d32967a6441da8  # -19621.61952307602
+cell [-1, -1, -1] fc17f7f7f0004920 member fc17f7f7f0004921 velocity before 1 = 0xc0f78470c163d5a2  # -96327.04721435023
+cell [-1, -1, -1] fc17f7f7f0004920 member fc17f7f7f0004921 velocity before 2 = 0x40ba56b0310937d7  # 6742.688248230107
+cell [-1, -1, -1] fc17f7f7f0004920 member fc17f7f7f0004921 velocity after 0 = 0x40d2fbbf105e932a  # 19438.985374110904
+cell [-1, -1, -1] fc17f7f7f0004920 member fc17f7f7f0004921 velocity after 1 = 0x412148136201ed42  # 566281.6914209502
+cell [-1, -1, -1] fc17f7f7f0004920 member fc17f7f7f0004921 velocity after 2 = 0x412766b71c9ccc43  # 766811.555883773
+cell [-1, -1, -1] fc17f7f7f0004b70 component 9 explodes T-13718116924027.718750000 s as TypeIa(DoubleDetonation), members 2
+cell [-1, -1, -1] fc17f7f7f0004b70 window = 0x4110935872bc2094  # 271574.11204577354
+cell [-1, -1, -1] fc17f7f7f0004b70 primary = 0x4004e2795770d3a2  # 2.610583003168771
+cell [-1, -1, -1] fc17f7f7f0004b70 secondary = 0x40021ffb535b2bcc  # 2.265616084308453
+cell [-1, -1, -1] fc17f7f7f0004b70 age = 0x41fdd56622545223  # 8008393253.270053
+cell [-1, -1, -1] fc17f7f7f0004b70 energy = 0x3fe17ea062710484  # 0.5467073366818487
+cell [-1, -1, -1] fc17f7f7f0004b70 fastest = 0x413137fa5f00f517  # 1128442.3711083585
+cell [-1, -1, -1] fc17f7f7f0004b70 leftover SurvivingDonor { speed: KilometresPerSecond(1053.1197087395306) }
+cell [-1, -1, -1] fc17f7f7f0004b70 survivor speed = 0x4090747a94ed8551  # 1053.1197087395306
+cell [-1, -1, -1] fc17f7f7f0004b70 site cell [-267, -41, -11]
+cell [-1, -1, -1] fc17f7f7f0004b70 site offset 0 = 0x4331271f08bc1983  # 4828088848095619.0
+cell [-1, -1, -1] fc17f7f7f0004b70 site offset 1 = 0x433dc7cad82e0be4  # 8382448348826596.0
+cell [-1, -1, -1] fc17f7f7f0004b70 site offset 2 = 0x4338277f81154595  # 6798828021040533.0
+cell [-1, -1, -1] fc17f7f7f0004b70 member fc17f7f7f0004b70 epoch cell [-251, -107, -96]
+cell [-1, -1, -1] fc17f7f7f0004b70 member fc17f7f7f0004b70 epoch offset 0 = 0x4337f370c19ea583  # 6741590074631555.0
+cell [-1, -1, -1] fc17f7f7f0004b70 member fc17f7f7f0004b70 epoch offset 1 = 0x432c2238b5ffaac8  # 3959463157421412.0
+cell [-1, -1, -1] fc17f7f7f0004b70 member fc17f7f7f0004b70 epoch offset 2 = 0x43339242515bb1d4  # 5508838087963092.0
+cell [-1, -1, -1] fc17f7f7f0004b70 member fc17f7f7f0004b70 mass = 0x4004e2795770d3a2  # 2.610583003168771
+cell [-1, -1, -1] fc17f7f7f0004b70 member fc17f7f7f0004b70 velocity before 0 = 0x40c5d2f63491051c  # 11173.923479201789
+cell [-1, -1, -1] fc17f7f7f0004b70 member fc17f7f7f0004b70 velocity before 1 = 0xc0e661ef02968c01  # -45839.469065926976
+cell [-1, -1, -1] fc17f7f7f0004b70 member fc17f7f7f0004b70 velocity before 2 = 0xc0ecab4f4f3801f3  # -58714.4784202612
+cell [-1, -1, -1] fc17f7f7f0004b70 member fc17f7f7f0004b70 velocity after 0 = 0x40c5d2f63491051c  # 11173.923479201789
+cell [-1, -1, -1] fc17f7f7f0004b70 member fc17f7f7f0004b70 velocity after 1 = 0xc0e661ef02968c01  # -45839.469065926976
+cell [-1, -1, -1] fc17f7f7f0004b70 member fc17f7f7f0004b70 velocity after 2 = 0xc0ecab4f4f3801f3  # -58714.4784202612
+cell [-1, -1, -1] fc17f7f7f0004b70 member fc17f7f7f0004b71 epoch cell [-1445, -639, 693]
+cell [-1, -1, -1] fc17f7f7f0004b70 member fc17f7f7f0004b71 epoch offset 0 = 0x43316e1508873103  # 4906111220527363.0
+cell [-1, -1, -1] fc17f7f7f0004b70 member fc17f7f7f0004b71 epoch offset 1 = 0x431ce664a043a190  # 2033654801950820.0
+cell [-1, -1, -1] fc17f7f7f0004b70 member fc17f7f7f0004b71 epoch offset 2 = 0x4332b65e53308594  # 5267065819661716.0
+cell [-1, -1, -1] fc17f7f7f0004b70 member fc17f7f7f0004b71 mass = 0x40021ffb535b2bcc  # 2.265616084308453
+cell [-1, -1, -1] fc17f7f7f0004b70 member fc17f7f7f0004b71 velocity before 0 = 0x40c5d2f63491051c  # 11173.923479201789
+cell [-1, -1, -1] fc17f7f7f0004b70 member fc17f7f7f0004b71 velocity before 1 = 0xc0e661ef02968c01  # -45839.469065926976
+cell [-1, -1, -1] fc17f7f7f0004b70 member fc17f7f7f0004b71 velocity before 2 = 0xc0ecab4f4f3801f3  # -58714.4784202612
+cell [-1, -1, -1] fc17f7f7f0004b70 member fc17f7f7f0004b71 velocity after 0 = 0xc128cae95f4ff376  # -812404.6861568529
+cell [-1, -1, -1] fc17f7f7f0004b70 member fc17f7f7f0004b71 velocity after 1 = 0xc119332b718302b4  # -412874.8608513281
+cell [-1, -1, -1] fc17f7f7f0004b70 member fc17f7f7f0004b71 velocity after 2 = 0x411da06e26fa3036  # 485403.5380637677
+cell [-1, -1, -1] fc17f7f7f00066c0 component 9 explodes T-24391201566889.718750000 s as TypeIa(DoubleDetonation), members 2
+cell [-1, -1, -1] fc17f7f7f00066c0 window = 0x4123047fff7c87a3  # 623167.9989969622
+cell [-1, -1, -1] fc17f7f7f00066c0 primary = 0x401e69cbc1edf28c  # 7.603316335819397
+cell [-1, -1, -1] fc17f7f7f00066c0 secondary = 0x401dad144fc2a551  # 7.419022794966922
+cell [-1, -1, -1] fc17f7f7f00066c0 age = 0x418bfaf94850a5a6  # 58679081.03937845
+cell [-1, -1, -1] fc17f7f7f00066c0 energy = 0x3fff4d1aa3d5a2e3  # 1.9563242339883622
+cell [-1, -1, -1] fc17f7f7f00066c0 fastest = 0x4134bbaecde25f04  # 1358766.8042353997
+cell [-1, -1, -1] fc17f7f7f00066c0 leftover SurvivingDonor { speed: KilometresPerSecond(1271.215629223614) }
+cell [-1, -1, -1] fc17f7f7f00066c0 survivor speed = 0x4093dcdccde83df0  # 1271.215629223614
+cell [-1, -1, -1] fc17f7f7f00066c0 site cell [-493, -335, -92]
+cell [-1, -1, -1] fc17f7f7f00066c0 site offset 0 = 0x432b655b1234f7f1  # 3855633096539128.5
+cell [-1, -1, -1] fc17f7f7f00066c0 site offset 1 = 0x4330027d874a97c8  # 4506337791350728.0
+cell [-1, -1, -1] fc17f7f7f00066c0 site offset 2 = 0x4336a7af9ceaccef  # 6376822181383407.0
+cell [-1, -1, -1] fc17f7f7f00066c0 member fc17f7f7f00066c0 epoch cell [-432, -552, -79]
+cell [-1, -1, -1] fc17f7f7f00066c0 member fc17f7f7f00066c0 epoch offset 0 = 0x4333676123ccbb38  # 5461691467610936.0
+cell [-1, -1, -1] fc17f7f7f00066c0 member fc17f7f7f00066c0 epoch offset 1 = 0x4333ee29705e8088  # 5609886303813768.0
+cell [-1, -1, -1] fc17f7f7f00066c0 member fc17f7f7f00066c0 epoch offset 2 = 0x43374c4a5219c56f  # 6557806553056623.0
+cell [-1, -1, -1] fc17f7f7f00066c0 member fc17f7f7f00066c0 mass = 0x401e69cbc1edf28c  # 7.603316335819397
+cell [-1, -1, -1] fc17f7f7f00066c0 member fc17f7f7f00066c0 velocity before 0 = 0x40d72b8d09a54850  # 23726.203713722818
+cell [-1, -1, -1] fc17f7f7f00066c0 member fc17f7f7f00066c0 velocity before 1 = 0xc0f489b920acc662  # -84123.57047727102
+cell [-1, -1, -1] fc17f7f7f00066c0 member fc17f7f7f00066c0 velocity before 2 = 0x40b3b9ca9ad25056  # 5049.791424889196
+cell [-1, -1, -1] fc17f7f7f00066c0 member fc17f7f7f00066c0 velocity after 0 = 0x40d72b8d09a54850  # 23726.203713722818
+cell [-1, -1, -1] fc17f7f7f00066c0 member fc17f7f7f00066c0 velocity after 1 = 0xc0f489b920acc662  # -84123.57047727102
+cell [-1, -1, -1] fc17f7f7f00066c0 member fc17f7f7f00066c0 velocity after 2 = 0x40b3b9ca9ad25056  # 5049.791424889196
+cell [-1, -1, -1] fc17f7f7f00066c0 member fc17f7f7f00066c1 epoch cell [2412, -559, -1708]
+cell [-1, -1, -1] fc17f7f7f00066c0 member fc17f7f7f00066c1 epoch offset 0 = 0x432373716e5a8670  # 2737477788713784.0
+cell [-1, -1, -1] fc17f7f7f00066c0 member fc17f7f7f00066c1 epoch offset 1 = 0x43307b864a6539c8  # 4639416331352520.0
+cell [-1, -1, -1] fc17f7f7f00066c0 member fc17f7f7f00066c1 epoch offset 2 = 0x432c80ba0f9c51e0  # 4011417981036784.0
+cell [-1, -1, -1] fc17f7f7f00066c0 member fc17f7f7f00066c1 mass = 0x401dad144fc2a551  # 7.419022794966922
+cell [-1, -1, -1] fc17f7f7f00066c0 member fc17f7f7f00066c1 velocity before 0 = 0x40d72b8d09a54850  # 23726.203713722818
+cell [-1, -1, -1] fc17f7f7f00066c0 member fc17f7f7f00066c1 velocity before 1 = 0xc0f489b920acc662  # -84123.57047727102
+cell [-1, -1, -1] fc17f7f7f00066c0 member fc17f7f7f00066c1 velocity before 2 = 0x40b3b9ca9ad25056  # 5049.791424889196
+cell [-1, -1, -1] fc17f7f7f00066c0 member fc17f7f7f00066c1 velocity after 0 = 0x4131314a37e67b2f  # 1126730.2183606138
+cell [-1, -1, -1] fc17f7f7f00066c0 member fc17f7f7f00066c1 velocity after 1 = 0xc0f535e7b316249e  # -86878.48122228912
+cell [-1, -1, -1] fc17f7f7f00066c0 member fc17f7f7f00066c1 velocity after 2 = 0xc12321ad0cc11b0c  # -626902.5249107792
+cell [-1, -1, -1] fc17f7f7f000c2b0 component 9 explodes T-1456507811641.718750000 s as TypeIa(Merger), members 1
+cell [-1, -1, -1] fc17f7f7f000c2b0 window = 0x41178bdf7a4500a3  # 385783.8694038486
+cell [-1, -1, -1] fc17f7f7f000c2b0 primary = 0x401cb27f2bec60b4  # 7.174313246061661
+cell [-1, -1, -1] fc17f7f7f000c2b0 secondary = 0x400cfb7d7173964e  # 3.622797857608737
+cell [-1, -1, -1] fc17f7f7f000c2b0 age = 0x420378b3b5d00910  # 10453677754.004425
+cell [-1, -1, -1] fc17f7f7f000c2b0 energy = 0x3ff224476f44a817  # 1.133857187882773
+cell [-1, -1, -1] fc17f7f7f000c2b0 fastest = 0x40fb9812d4a02a71  # 113025.1769105585
+cell [-1, -1, -1] fc17f7f7f000c2b0 leftover Nothing
+cell [-1, -1, -1] fc17f7f7f000c2b0 site cell [-86, -332, -129]
+cell [-1, -1, -1] fc17f7f7f000c2b0 site offset 0 = 0x432cb57e8bd92789  # 4040427232334788.5
+cell [-1, -1, -1] fc17f7f7f000c2b0 site offset 1 = 0x432dd3b1dc6409d4  # 4197767592412394.0
+cell [-1, -1, -1] fc17f7f7f000c2b0 site offset 2 = 0x433312456e64422d  # 5368113971610157.0
+cell [-1, -1, -1] fc17f7f7f000c2b0 member fc17f7f7f000c2b0 epoch cell [-69, -333, -125]
+cell [-1, -1, -1] fc17f7f7f000c2b0 member fc17f7f7f000c2b0 epoch offset 0 = 0x432b7569d7ffed88  # 3864460913538756.0
+cell [-1, -1, -1] fc17f7f7f000c2b0 member fc17f7f7f000c2b0 epoch offset 1 = 0x42ff0c6fe8668320  # 546212441122866.0
+cell [-1, -1, -1] fc17f7f7f000c2b0 member fc17f7f7f000c2b0 epoch offset 2 = 0x430b5480f0f945a0  # 961592143325364.0
+cell [-1, -1, -1] fc17f7f7f000c2b0 member fc17f7f7f000c2b0 mass = 0x401cb27f2bec60b4  # 7.174313246061661
+cell [-1, -1, -1] fc17f7f7f000c2b0 member fc17f7f7f000c2b0 velocity before 0 = 0x40faede7fcaf8b7c  # 110302.49919085013
+cell [-1, -1, -1] fc17f7f7f000c2b0 member fc17f7f7f000c2b0 velocity before 1 = 0xc0c1954681f0e972  # -9002.550840486514
+cell [-1, -1, -1] fc17f7f7f000c2b0 member fc17f7f7f000c2b0 velocity before 2 = 0x40d66b2372da8983  # 22956.55388511113
+cell [-1, -1, -1] fc17f7f7f000c2b0 member fc17f7f7f000c2b0 velocity after 0 = 0x40faede7fcaf8b7c  # 110302.49919085013
+cell [-1, -1, -1] fc17f7f7f000c2b0 member fc17f7f7f000c2b0 velocity after 1 = 0xc0c1954681f0e972  # -9002.550840486514
+cell [-1, -1, -1] fc17f7f7f000c2b0 member fc17f7f7f000c2b0 velocity after 2 = 0x40d66b2372da8983  # 22956.55388511113
+cell [-1, -1, -1] fc17f7f7f0010fe0 component 10 explodes T-2180614211196.718750000 s as TypeIa(Iax), members 2
+cell [-1, -1, -1] fc17f7f7f0010fe0 window = 0x40c21584ae15d925  # 9259.036562663105
+cell [-1, -1, -1] fc17f7f7f0010fe0 primary = 0x4013f2f4085e9ea4  # 4.987259035849693
+cell [-1, -1, -1] fc17f7f7f0010fe0 secondary = 0x3feea781a38a0170  # 0.9579475587961905
+cell [-1, -1, -1] fc17f7f7f0010fe0 age = 0x420253ef9e7607bd  # 9839702990.753778
+cell [-1, -1, -1] fc17f7f7f0010fe0 energy = 0x3f81c2bb9bc9dec9  # 0.008672204677380961
+cell [-1, -1, -1] fc17f7f7f0010fe0 fastest = 0x40ed8339ec353320  # 60441.81008396135
+cell [-1, -1, -1] fc17f7f7f0010fe0 leftover PartlyBurntDwarf
+cell [-1, -1, -1] fc17f7f7f0010fe0 site cell [-94, -92, -40]
+cell [-1, -1, -1] fc17f7f7f0010fe0 site offset 0 = 0x42ff17f285ca5542  # 547003417011540.1
+cell [-1, -1, -1] fc17f7f7f0010fe0 site offset 1 = 0x42e2e25e551b39d1  # 166107636357582.53
+cell [-1, -1, -1] fc17f7f7f0010fe0 site offset 2 = 0x42b0f92e3d0acdfc  # 18662408653517.984
+cell [-1, -1, -1] fc17f7f7f0010fe0 member fc17f7f7f0010fe0 epoch cell [-106, -95, -47]
+cell [-1, -1, -1] fc17f7f7f0010fe0 member fc17f7f7f0010fe0 epoch offset 0 = 0x42f56f748b0d6840  # 377095053170308.0
+cell [-1, -1, -1] fc17f7f7f0010fe0 member fc17f7f7f0010fe0 epoch offset 1 = 0x43235f58f811ee9d  # 2726430140593998.5
+cell [-1, -1, -1] fc17f7f7f0010fe0 member fc17f7f7f0010fe0 epoch offset 2 = 0x43310022647bf7ee  # 4785222318815214.0
+cell [-1, -1, -1] fc17f7f7f0010fe0 member fc17f7f7f0010fe0 mass = 0x4013f2f4085e9ea4  # 4.987259035849693
+cell [-1, -1, -1] fc17f7f7f0010fe0 member fc17f7f7f0010fe0 velocity before 0 = 0xc0e9759543c0a83c  # -52140.66452057703
+cell [-1, -1, -1] fc17f7f7f0010fe0 member fc17f7f7f0010fe0 velocity before 1 = 0xc0c720c7615d2732  # -11841.557658809794
+cell [-1, -1, -1] fc17f7f7f0010fe0 member fc17f7f7f0010fe0 velocity before 2 = 0xc0db8603982c1e2a  # -28184.05616286226
+cell [-1, -1, -1] fc17f7f7f0010fe0 member fc17f7f7f0010fe0 velocity after 0 = 0xc0e9759543c0a83c  # -52140.66452057703
+cell [-1, -1, -1] fc17f7f7f0010fe0 member fc17f7f7f0010fe0 velocity after 1 = 0xc0c720c7615d2732  # -11841.557658809794
+cell [-1, -1, -1] fc17f7f7f0010fe0 member fc17f7f7f0010fe0 velocity after 2 = 0xc0db8603982c1e2a  # -28184.05616286226
+cell [-1, -1, -1] fc17f7f7f0010fe0 member fc17f7f7f0010fe1 epoch cell [-106, -95, -47]
+cell [-1, -1, -1] fc17f7f7f0010fe0 member fc17f7f7f0010fe1 epoch offset 0 = 0x42f56f748b0d6840  # 377095053170308.0
+cell [-1, -1, -1] fc17f7f7f0010fe0 member fc17f7f7f0010fe1 epoch offset 1 = 0x43235f58f811ee9d  # 2726430140593998.5
+cell [-1, -1, -1] fc17f7f7f0010fe0 member fc17f7f7f0010fe1 epoch offset 2 = 0x43310022647bf7ee  # 4785222318815214.0
+cell [-1, -1, -1] fc17f7f7f0010fe0 member fc17f7f7f0010fe1 mass = 0x4013f2f4085e9ea4  # 4.987259035849693
+cell [-1, -1, -1] fc17f7f7f0010fe0 member fc17f7f7f0010fe1 velocity before 0 = 0xc0e9759543c0a83c  # -52140.66452057703
+cell [-1, -1, -1] fc17f7f7f0010fe0 member fc17f7f7f0010fe1 velocity before 1 = 0xc0c720c7615d2732  # -11841.557658809794
+cell [-1, -1, -1] fc17f7f7f0010fe0 member fc17f7f7f0010fe1 velocity before 2 = 0xc0db8603982c1e2a  # -28184.05616286226
+cell [-1, -1, -1] fc17f7f7f0010fe0 member fc17f7f7f0010fe1 velocity after 0 = 0xc0e9759543c0a83c  # -52140.66452057703
+cell [-1, -1, -1] fc17f7f7f0010fe0 member fc17f7f7f0010fe1 velocity after 1 = 0xc0c720c7615d2732  # -11841.557658809794
+cell [-1, -1, -1] fc17f7f7f0010fe0 member fc17f7f7f0010fe1 velocity after 2 = 0xc0db8603982c1e2a  # -28184.05616286226
+cell [-1, -1, -1] fc17f7f7f0011940 component 9 explodes T-15763082770964.718750000 s as TypeIa(DoubleDetonation), members 2
+cell [-1, -1, -1] fc17f7f7f0011940 window = 0x41110aa0a2f61ac1  # 279208.1591419392
+cell [-1, -1, -1] fc17f7f7f0011940 primary = 0x400e9dc0c50c85f4  # 3.8270278353163523
+cell [-1, -1, -1] fc17f7f7f0011940 secondary = 0x400a52e7c9f3ab0c  # 3.2904811646925562
+cell [-1, -1, -1] fc17f7f7f0011940 age = 0x41ce42e0440905cb  # 1015398536.0704893
+cell [-1, -1, -1] fc17f7f7f0011940 energy = 0x3ff6f9e6cdb104ee  # 1.4360111269782538
+cell [-1, -1, -1] fc17f7f7f0011940 fastest = 0x4137025b90e57e8d  # 1507931.5660018057
+cell [-1, -1, -1] fc17f7f7f0011940 leftover SurvivingDonor { speed: KilometresPerSecond(1311.9605718723965) }
+cell [-1, -1, -1] fc17f7f7f0011940 survivor speed = 0x40947fd7a027259a  # 1311.9605718723965
+cell [-1, -1, -1] fc17f7f7f0011940 site cell [-11, -49, -15]
+cell [-1, -1, -1] fc17f7f7f0011940 site offset 0 = 0x433f3027ac96fe07  # 8778671235464711.0
+cell [-1, -1, -1] fc17f7f7f0011940 site offset 1 = 0x433d71410cd8baf6  # 8287298526952182.0
+cell [-1, -1, -1] fc17f7f7f0011940 site offset 2 = 0x43373be4c8bfeeac  # 6539778270949036.0
+cell [-1, -1, -1] fc17f7f7f0011940 member fc17f7f7f0011940 epoch cell [227, -193, -186]
+cell [-1, -1, -1] fc17f7f7f0011940 member fc17f7f7f0011940 epoch offset 0 = 0x433a291480bcde88  # 7363517430423176.0
+cell [-1, -1, -1] fc17f7f7f0011940 member fc17f7f7f0011940 epoch offset 1 = 0x43405bbfbe14b27b  # 9208957426558198.0
+cell [-1, -1, -1] fc17f7f7f0011940 member fc17f7f7f0011940 epoch offset 2 = 0x432c3e13b87571d8  # 3974776883951852.0
+cell [-1, -1, -1] fc17f7f7f0011940 member fc17f7f7f0011940 mass = 0x400e9dc0c50c85f4  # 3.8270278353163523
+cell [-1, -1, -1] fc17f7f7f0011940 member fc17f7f7f0011940 velocity before 0 = 0x41016d0dc1d6a228  # 142753.71964766202
+cell [-1, -1, -1] fc17f7f7f0011940 member fc17f7f7f0011940 velocity before 1 = 0xc0f515fd8f6d6b96  # -86367.84751646066
+cell [-1, -1, -1] fc17f7f7f0011940 member fc17f7f7f0011940 velocity before 2 = 0xc0f9189f9357905b  # -102793.9734721793
+cell [-1, -1, -1] fc17f7f7f0011940 member fc17f7f7f0011940 velocity after 0 = 0x41016d0dc1d6a228  # 142753.71964766202
+cell [-1, -1, -1] fc17f7f7f0011940 member fc17f7f7f0011940 velocity after 1 = 0xc0f515fd8f6d6b96  # -86367.84751646066
+cell [-1, -1, -1] fc17f7f7f0011940 member fc17f7f7f0011940 velocity after 2 = 0xc0f9189f9357905b  # -102793.9734721793
+cell [-1, -1, -1] fc17f7f7f0011940 member fc17f7f7f0011941 epoch cell [1216, 1712, -603]
+cell [-1, -1, -1] fc17f7f7f0011940 member fc17f7f7f0011941 epoch offset 0 = 0x4338c4a65cc5d3c8  # 6971618241139656.0
+cell [-1, -1, -1] fc17f7f7f0011940 member fc17f7f7f0011941 epoch offset 1 = 0x432a71a3a0d5886c  # 3721648493216822.0
+cell [-1, -1, -1] fc17f7f7f0011940 member fc17f7f7f0011941 epoch offset 2 = 0x433f8254347777ac  # 8869022447138732.0
+cell [-1, -1, -1] fc17f7f7f0011940 member fc17f7f7f0011941 mass = 0x400a52e7c9f3ab0c  # 3.2904811646925562
+cell [-1, -1, -1] fc17f7f7f0011940 member fc17f7f7f0011941 velocity before 0 = 0x41016d0dc1d6a228  # 142753.71964766202
+cell [-1, -1, -1] fc17f7f7f0011940 member fc17f7f7f0011941 velocity before 1 = 0xc0f515fd8f6d6b96  # -86367.84751646066
+cell [-1, -1, -1] fc17f7f7f0011940 member fc17f7f7f0011941 velocity before 2 = 0xc0f9189f9357905b  # -102793.9734721793
+cell [-1, -1, -1] fc17f7f7f0011940 member fc17f7f7f0011941 velocity after 0 = 0x4126786b35605dd4  # 736309.6042508432
+cell [-1, -1, -1] fc17f7f7f0011940 member fc17f7f7f0011941 velocity after 1 = 0x41301f7831558e70  # 1056632.192711737
+cell [-1, -1, -1] fc17f7f7f0011940 member fc17f7f7f0011941 velocity after 2 = 0xc11587dec7e290e1  # -352759.69520021795
+cell [-1, -1, -1] fc17f7f7f00130e0 component 9 explodes T-5231620680637.718750000 s as TypeIa(Merger), members 1
+cell [-1, -1, -1] fc17f7f7f00130e0 window = 0x4111ec98c6d22372  # 293670.1941609896
+cell [-1, -1, -1] fc17f7f7f00130e0 primary = 0x40089bb9359f81a9  # 3.0760368527700916
+cell [-1, -1, -1] fc17f7f7f00130e0 secondary = 0x40039a97f5a8a086  # 2.450485152443494
+cell [-1, -1, -1] fc17f7f7f00130e0 age = 0x42001ca2e39e2291  # 8649989235.766878
+cell [-1, -1, -1] fc17f7f7f00130e0 energy = 0x3fe8b3751a355b66  # 0.7719064247020071
+cell [-1, -1, -1] fc17f7f7f00130e0 fastest = 0x40f060af709ce551  # 67082.96499337746
+cell [-1, -1, -1] fc17f7f7f00130e0 leftover Nothing
+cell [-1, -1, -1] fc17f7f7f00130e0 site cell [-82, -209, -121]
+cell [-1, -1, -1] fc17f7f7f00130e0 site offset 0 = 0x431a77b65e4edd9f  # 1862493636114279.8
+cell [-1, -1, -1] fc17f7f7f00130e0 site offset 1 = 0x4338143b17198020  # 6777643464228896.0
+cell [-1, -1, -1] fc17f7f7f00130e0 site offset 2 = 0x43214d51daef601b  # 2435044282445837.5
+cell [-1, -1, -1] fc17f7f7f00130e0 member fc17f7f7f00130e0 epoch cell [-64, -204, -153]
+cell [-1, -1, -1] fc17f7f7f00130e0 member fc17f7f7f00130e0 epoch offset 0 = 0x433711bd4bb07908  # 6493429180692744.0
+cell [-1, -1, -1] fc17f7f7f00130e0 member fc17f7f7f00130e0 epoch offset 1 = 0x4324b42cc6e24200  # 2913801971245312.0
+cell [-1, -1, -1] fc17f7f7f00130e0 member fc17f7f7f00130e0 epoch offset 2 = 0x432cbaeb65010a1b  # 4043409761273101.5
+cell [-1, -1, -1] fc17f7f7f00130e0 member fc17f7f7f00130e0 mass = 0x40089bb9359f81a9  # 3.0760368527700916
+cell [-1, -1, -1] fc17f7f7f00130e0 member fc17f7f7f00130e0 velocity before 0 = 0x40e0537da519d5d9  # 33435.926403920814
+cell [-1, -1, -1] fc17f7f7f00130e0 member fc17f7f7f00130e0 velocity before 1 = 0x40c037a8b8a0e65e  # 8303.318134415134
+cell [-1, -1, -1] fc17f7f7f00130e0 member fc17f7f7f00130e0 velocity before 2 = 0xc0ec1b11e16f0afc  # -57560.5587687697
+cell [-1, -1, -1] fc17f7f7f00130e0 member fc17f7f7f00130e0 velocity after 0 = 0x40e0537da519d5d9  # 33435.926403920814
+cell [-1, -1, -1] fc17f7f7f00130e0 member fc17f7f7f00130e0 velocity after 1 = 0x40c037a8b8a0e65e  # 8303.318134415134
+cell [-1, -1, -1] fc17f7f7f00130e0 member fc17f7f7f00130e0 velocity after 2 = 0xc0ec1b11e16f0afc  # -57560.5587687697
+cell [0, 0, -1] bound = 0x3f0303a6e9441e89  # 3.6266833520368315e-5
+cell [0, 0, -1] candidates 4820 entries 3
+cell [0, 0, -1] fc180807f0000be0 component 8 explodes T-1208205766421.718750000 s as TypeIa(HydrogenDonor), members 2
+cell [0, 0, -1] fc180807f0000be0 window = 0x40da0613f48a96d5  # 26648.311800620362
+cell [0, 0, -1] fc180807f0000be0 primary = 0x400698ed4473381d  # 2.824671301618777
+cell [0, 0, -1] fc180807f0000be0 secondary = 0x3ff04ccd2a2b9f96  # 1.0187503478318596
+cell [0, 0, -1] fc180807f0000be0 age = 0x42014d1e0bbf838a  # 9288532343.939228
+cell [0, 0, -1] fc180807f0000be0 energy = 0x3ff3a80da151fce8  # 1.2285286237309325
+cell [0, 0, -1] fc180807f0000be0 fastest = 0x412130f114cddc5a  # 563320.5406330929
+cell [0, 0, -1] fc180807f0000be0 leftover HydrogenDonor { speed: KilometresPerSecond(141.68313887016228) }
+cell [0, 0, -1] fc180807f0000be0 survivor speed = 0x4061b5dc460c3f26  # 141.68313887016228
+cell [0, 0, -1] fc180807f0000be0 site cell [0, 97, -374]
+cell [0, 0, -1] fc180807f0000be0 site offset 0 = 0x43401907ae00c03c  # 9062240804241528.0
+cell [0, 0, -1] fc180807f0000be0 site offset 1 = 0x432f1af1663d1400  # 4377674191374848.0
+cell [0, 0, -1] fc180807f0000be0 site offset 2 = 0x434091b5d311485e  # 9327619487207612.0
+cell [0, 0, -1] fc180807f0000be0 member fc180807f0000be0 epoch cell [40, 123, -400]
+cell [0, 0, -1] fc180807f0000be0 member fc180807f0000be0 epoch offset 0 = 0x431908877b7bf6e0  # 1761563100773816.0
+cell [0, 0, -1] fc180807f0000be0 member fc180807f0000be0 epoch offset 1 = 0x432d88a452a87180  # 4156506833696960.0
+cell [0, 0, -1] fc180807f0000be0 member fc180807f0000be0 epoch offset 2 = 0x433ad85471aad97c  # 7556206590351740.0
+cell [0, 0, -1] fc180807f0000be0 member fc180807f0000be0 mass = 0x400698ed4473381d  # 2.824671301618777
+cell [0, 0, -1] fc180807f0000be0 member fc180807f0000be0 velocity before 0 = 0x4112bf9529bfc419  # 307173.29077059176
+cell [0, 0, -1] fc180807f0000be0 member fc180807f0000be0 velocity before 1 = 0x4108d47a1544d3c1  # 203407.26038518365
+cell [0, 0, -1] fc180807f0000be0 member fc180807f0000be0 velocity before 2 = 0xc1090803bb4028be  # -205056.46643096762
+cell [0, 0, -1] fc180807f0000be0 member fc180807f0000be0 velocity after 0 = 0x4112bf9529bfc419  # 307173.29077059176
+cell [0, 0, -1] fc180807f0000be0 member fc180807f0000be0 velocity after 1 = 0x4108d47a1544d3c1  # 203407.26038518365
+cell [0, 0, -1] fc180807f0000be0 member fc180807f0000be0 velocity after 2 = 0xc1090803bb4028be  # -205056.46643096762
+cell [0, 0, -1] fc180807f0000be0 member fc180807f0000be1 epoch cell [39, 114, -384]
+cell [0, 0, -1] fc180807f0000be0 member fc180807f0000be1 epoch offset 0 = 0x433a4924a6eaccb8  # 7398771162533048.0
+cell [0, 0, -1] fc180807f0000be0 member fc180807f0000be1 epoch offset 1 = 0x433c8a7ee233d880  # 8033576913459328.0
+cell [0, 0, -1] fc180807f0000be0 member fc180807f0000be1 epoch offset 2 = 0x433825a5f86b7c5c  # 6796794208681052.0
+cell [0, 0, -1] fc180807f0000be0 member fc180807f0000be1 mass = 0x3ff04ccd2a2b9f96  # 1.0187503478318596
+cell [0, 0, -1] fc180807f0000be0 member fc180807f0000be1 velocity before 0 = 0x4112bf9529bfc419  # 307173.29077059176
+cell [0, 0, -1] fc180807f0000be0 member fc180807f0000be1 velocity before 1 = 0x4108d47a1544d3c1  # 203407.26038518365
+cell [0, 0, -1] fc180807f0000be0 member fc180807f0000be1 velocity before 2 = 0xc1090803bb4028be  # -205056.46643096762
+cell [0, 0, -1] fc180807f0000be0 member fc180807f0000be1 velocity after 0 = 0x41128e22a62868c7  # 304008.6622635242
+cell [0, 0, -1] fc180807f0000be0 member fc180807f0000be1 velocity after 1 = 0x41009e751b6b0ab0  # 136142.63838775968
+cell [0, 0, -1] fc180807f0000be0 member fc180807f0000be1 velocity after 2 = 0xc0f3a0eaa1992288  # -80398.66445268143
+cell [0, 0, -1] fc180807f000dc40 component 9 explodes T-3968683219175.718750000 s as TypeIa(Merger), members 1
+cell [0, 0, -1] fc180807f000dc40 window = 0x4121bc681f034b91  # 581172.0605720152
+cell [0, 0, -1] fc180807f000dc40 primary = 0x40197d3938681fcb  # 6.372288590769993
+cell [0, 0, -1] fc180807f000dc40 secondary = 0x3ffaf05129daec6c  # 1.6836711535422877
+cell [0, 0, -1] fc180807f000dc40 age = 0x42056f96780ea559  # 11508305665.830736
+cell [0, 0, -1] fc180807f000dc40 energy = 0x3ffebb17c5ab2f1e  # 1.920676967757522
+cell [0, 0, -1] fc180807f000dc40 fastest = 0x40e4bc8282af3e0a  # 42468.078452702684
+cell [0, 0, -1] fc180807f000dc40 leftover Nothing
+cell [0, 0, -1] fc180807f000dc40 site cell [361, 416, -53]
+cell [0, 0, -1] fc180807f000dc40 site offset 0 = 0x433993f4d9e5c8ea  # 7199554254784746.0
+cell [0, 0, -1] fc180807f000dc40 site offset 1 = 0x431504c34afb6514  # 1479052833511749.0
+cell [0, 0, -1] fc180807f000dc40 site offset 2 = 0x43276c1ab38e125b  # 3296393200863533.5
+cell [0, 0, -1] fc180807f000dc40 member fc180807f000dc40 epoch cell [371, 404, -44]
+cell [0, 0, -1] fc180807f000dc40 member fc180807f000dc40 epoch offset 0 = 0x4334f7a50eef25ea  # 5901787826431466.0
+cell [0, 0, -1] fc180807f000dc40 member fc180807f000dc40 epoch offset 1 = 0x43107888547c5c50  # 1159031638923028.0
+cell [0, 0, -1] fc180807f000dc40 member fc180807f000dc40 epoch offset 2 = 0x42eaf2060b24abc0  # 237014286411102.0
+cell [0, 0, -1] fc180807f000dc40 member fc180807f000dc40 mass = 0x40197d3938681fcb  # 6.372288590769993
+cell [0, 0, -1] fc180807f000dc40 member fc180807f000dc40 velocity before 0 = 0x40d6f5dd76fc5c2d  # 23511.460387315765
+cell [0, 0, -1] fc180807f000dc40 member fc180807f000dc40 velocity before 1 = 0xc0dc03b2a31879c1  # -28686.791204565907
+cell [0, 0, -1] fc180807f000dc40 member fc180807f000dc40 velocity before 2 = 0x40d432ef18016613  # 20683.735840177233
+cell [0, 0, -1] fc180807f000dc40 member fc180807f000dc40 velocity after 0 = 0x40d6f5dd76fc5c2d  # 23511.460387315765
+cell [0, 0, -1] fc180807f000dc40 member fc180807f000dc40 velocity after 1 = 0xc0dc03b2a31879c1  # -28686.791204565907
+cell [0, 0, -1] fc180807f000dc40 member fc180807f000dc40 velocity after 2 = 0x40d432ef18016613  # 20683.735840177233
+cell [0, 0, -1] fc180807f000ec90 component 9 explodes T-4962470325038.718750000 s as TypeIa(Merger), members 1
+cell [0, 0, -1] fc180807f000ec90 window = 0x411475862ed7f21b  # 335201.54574564256
+cell [0, 0, -1] fc180807f000ec90 primary = 0x401c25a58eed589a  # 7.036764367329079
+cell [0, 0, -1] fc180807f000ec90 secondary = 0x4012e33739915a06  # 4.721890353676377
+cell [0, 0, -1] fc180807f000ec90 age = 0x41afd93ba84a7793  # 267165140.14544353
+cell [0, 0, -1] fc180807f000ec90 energy = 0x3ff3759a1843f001  # 1.2162114093653147
+cell [0, 0, -1] fc180807f000ec90 fastest = 0x40fdde61124d3a5e  # 122342.0669681816
+cell [0, 0, -1] fc180807f000ec90 leftover Nothing
+cell [0, 0, -1] fc180807f000ec90 site cell [160, 167, -32]
+cell [0, 0, -1] fc180807f000ec90 site offset 0 = 0x4312829f98a4becd  # 1302542888284083.3
+cell [0, 0, -1] fc180807f000ec90 site offset 1 = 0x43403d35210344a1  # 9141796047587650.0
+cell [0, 0, -1] fc180807f000ec90 site offset 2 = 0x4340895ace1e56ad  # 9309245451054426.0
+cell [0, 0, -1] fc180807f000ec90 member fc180807f000ec90 epoch cell [126, 114, -43]
+cell [0, 0, -1] fc180807f000ec90 member fc180807f000ec90 epoch offset 0 = 0x43330b146f8c01b3  # 5360206956200371.0
+cell [0, 0, -1] fc180807f000ec90 member fc180807f000ec90 epoch offset 1 = 0x432deb5345d23684  # 4210758605413186.0
+cell [0, 0, -1] fc180807f000ec90 member fc180807f000ec90 epoch offset 2 = 0x4338a7afca71327a  # 6939772898587258.0
+cell [0, 0, -1] fc180807f000ec90 member fc180807f000ec90 mass = 0x401c25a58eed589a  # 7.036764367329079
+cell [0, 0, -1] fc180807f000ec90 member fc180807f000ec90 velocity before 0 = 0xc0ef403a7ea602da  # -64001.827960019655
+cell [0, 0, -1] fc180807f000ec90 member fc180807f000ec90 velocity before 1 = 0xc0f8e93d323d29e3  # -102035.82476536142
+cell [0, 0, -1] fc180807f000ec90 member fc180807f000ec90 velocity before 2 = 0xc0d4f21f85ca1e96  # -21448.49254086482
+cell [0, 0, -1] fc180807f000ec90 member fc180807f000ec90 velocity after 0 = 0xc0ef403a7ea602da  # -64001.827960019655
+cell [0, 0, -1] fc180807f000ec90 member fc180807f000ec90 velocity after 1 = 0xc0f8e93d323d29e3  # -102035.82476536142
+cell [0, 0, -1] fc180807f000ec90 member fc180807f000ec90 velocity after 2 = 0xc0d4f21f85ca1e96  # -21448.49254086482
+cell [-1, 0, 0] bound = 0x3f0303a6e9441e89  # 3.6266833520368315e-5
+cell [-1, 0, 0] candidates 4873 entries 3
+cell [-1, 0, 0] fc17f808000107e0 component 9 explodes T-3045583849619.718750000 s as TypeIa(Merger), members 1
+cell [-1, 0, 0] fc17f808000107e0 window = 0x40eb9ecb15164d91  # 56566.34632411146
+cell [-1, 0, 0] fc17f808000107e0 primary = 0x401ffe78dc9c1df9  # 7.998507926014548
+cell [-1, 0, 0] fc17f808000107e0 secondary = 0x401ffc53404afb6d  # 7.996411327911898
+cell [-1, 0, 0] fc17f808000107e0 age = 0x4185897f69e7e9fd  # 45166573.238239266
+cell [-1, 0, 0] fc17f808000107e0 energy = 0x3fe17b9a9799d297  # 0.5463383637384877
+cell [-1, 0, 0] fc17f808000107e0 fastest = 0x4100701387a9abf6  # 134658.44124159188
+cell [-1, 0, 0] fc17f808000107e0 leftover Nothing
+cell [-1, 0, 0] fc17f808000107e0 site cell [-248, 412, 109]
+cell [-1, 0, 0] fc17f808000107e0 site offset 0 = 0x433ec7219c857b0f  # 8663196475161359.0
+cell [-1, 0, 0] fc17f808000107e0 site offset 1 = 0x43006dfcd3308328  # 578066533716069.0
+cell [-1, 0, 0] fc17f808000107e0 site offset 2 = 0x43193a23a11d9401  # 1775199779775744.3
+cell [-1, 0, 0] fc17f808000107e0 member fc17f808000107e0 epoch cell [-279, 384, 97]
+cell [-1, 0, 0] fc17f808000107e0 member fc17f808000107e0 epoch offset 0 = 0x433c859dd3b15d10  # 8028212255874320.0
+cell [-1, 0, 0] fc17f808000107e0 member fc17f808000107e0 epoch offset 1 = 0x4322b9eb6a3bfb0a  # 2635485165780357.0
+cell [-1, 0, 0] fc17f808000107e0 member fc17f808000107e0 epoch offset 2 = 0x4321f0d3bec5b9e0  # 2524933416738032.0
+cell [-1, 0, 0] fc17f808000107e0 member fc17f808000107e0 mass = 0x401ffe78dc9c1df9  # 7.998507926014548
+cell [-1, 0, 0] fc17f808000107e0 member fc17f808000107e0 velocity before 0 = 0xc0f78fa2b31d0880  # -96506.1687288601
+cell [-1, 0, 0] fc17f808000107e0 member fc17f808000107e0 velocity before 1 = 0xc0f511f00fa2ec0d  # -86303.00381748397
+cell [-1, 0, 0] fc17f808000107e0 member fc17f808000107e0 velocity before 2 = 0xc0e214cb28c92784  # -37030.34872873037
+cell [-1, 0, 0] fc17f808000107e0 member fc17f808000107e0 velocity after 0 = 0xc0f78fa2b31d0880  # -96506.1687288601
+cell [-1, 0, 0] fc17f808000107e0 member fc17f808000107e0 velocity after 1 = 0xc0f511f00fa2ec0d  # -86303.00381748397
+cell [-1, 0, 0] fc17f808000107e0 member fc17f808000107e0 velocity after 2 = 0xc0e214cb28c92784  # -37030.34872873037
+cell [-1, 0, 0] fc17f80800011f30 component 9 explodes T-2096217906670.718750000 s as TypeIa(Merger), members 1
+cell [-1, 0, 0] fc17f80800011f30 window = 0x40e274f75bc32d2b  # 37799.729951465815
+cell [-1, 0, 0] fc17f80800011f30 primary = 0x401f2535683c8143  # 7.786336544697693
+cell [-1, 0, 0] fc17f80800011f30 secondary = 0x401ea245b711eac9  # 7.658469067066741
+cell [-1, 0, 0] fc17f80800011f30 age = 0x4193f9eeddacc952  # 83786679.41873673
+cell [-1, 0, 0] fc17f80800011f30 energy = 0x3fe15788f5f76ce8  # 0.541935425189334
+cell [-1, 0, 0] fc17f80800011f30 fastest = 0x4101ca3084463068  # 145734.06458700006
+cell [-1, 0, 0] fc17f80800011f30 leftover Nothing
+cell [-1, 0, 0] fc17f80800011f30 site cell [-347, 52, 111]
+cell [-1, 0, 0] fc17f80800011f30 site offset 0 = 0x42dcd6ba4c842293  # 126834296623242.3
+cell [-1, 0, 0] fc17f80800011f30 site offset 1 = 0x43407c8c56c101bb  # 9281083640251254.0
+cell [-1, 0, 0] fc17f80800011f30 site offset 2 = 0x430a181bf82f8f3d  # 918107225190887.6
+cell [-1, 0, 0] fc17f80800011f30 member fc17f80800011f30 epoch cell [-347, 20, 112]
+cell [-1, 0, 0] fc17f80800011f30 member fc17f80800011f30 epoch offset 0 = 0x4331194e6243ec3b  # 4812899050843195.0
+cell [-1, 0, 0] fc17f80800011f30 member fc17f80800011f30 epoch offset 1 = 0x43386ac941504076  # 6872812057804918.0
+cell [-1, 0, 0] fc17f80800011f30 member fc17f80800011f30 epoch offset 2 = 0x4331f4ac9db60d9c  # 5054096821587356.0
+cell [-1, 0, 0] fc17f80800011f30 member fc17f80800011f30 mass = 0x401f2535683c8143  # 7.786336544697693
+cell [-1, 0, 0] fc17f80800011f30 member fc17f80800011f30 velocity before 0 = 0x40a176f894a5259c  # 2235.485509072152
+cell [-1, 0, 0] fc17f80800011f30 member fc17f80800011f30 velocity before 1 = 0xc101c523de47b510  # -145572.48353520827
+cell [-1, 0, 0] fc17f80800011f30 member fc17f80800011f30 velocity before 2 = 0x40b9564f78423e49  # 6486.310428753096
+cell [-1, 0, 0] fc17f80800011f30 member fc17f80800011f30 velocity after 0 = 0x40a176f894a5259c  # 2235.485509072152
+cell [-1, 0, 0] fc17f80800011f30 member fc17f80800011f30 velocity after 1 = 0xc101c523de47b510  # -145572.48353520827
+cell [-1, 0, 0] fc17f80800011f30 member fc17f80800011f30 velocity after 2 = 0x40b9564f78423e49  # 6486.310428753096
+cell [-1, 0, 0] fc17f80800012290 component 9 explodes T-9306397383675.718750000 s as TypeIa(Merger), members 1
+cell [-1, 0, 0] fc17f80800012290 window = 0x40df5f5d414a1e1e  # 32125.45710995618
+cell [-1, 0, 0] fc17f80800012290 primary = 0x400f97e68c66dce4  # 3.9491702050105335
+cell [-1, 0, 0] fc17f80800012290 secondary = 0x4004b95d419d4fa4  # 2.590509903538946
+cell [-1, 0, 0] fc17f80800012290 age = 0x42000f1a3a6180d1  # 8621606732.187899
+cell [-1, 0, 0] fc17f80800012290 energy = 0x3fdf287857fa9074  # 0.4868450984161037
+cell [-1, 0, 0] fc17f80800012290 fastest = 0x41019067187db9a3  # 143884.88695855168
+cell [-1, 0, 0] fc17f80800012290 leftover Nothing
+cell [-1, 0, 0] fc17f80800012290 site cell [-88, 276, 66]
+cell [-1, 0, 0] fc17f80800012290 site offset 0 = 0x433d6d59afcb55c1  # 8283006293464513.0
+cell [-1, 0, 0] fc17f80800012290 site offset 1 = 0x432189e7f58f08db  # 2468351977161837.5
+cell [-1, 0, 0] fc17f80800012290 site offset 2 = 0x432ccf5576b79988  # 4054632659406020.0
+cell [-1, 0, 0] fc17f80800012290 member fc17f80800012290 epoch cell [-155, 153, 87]
+cell [-1, 0, 0] fc17f80800012290 member fc17f80800012290 epoch offset 0 = 0x4323922936882500  # 2754365131854464.0
+cell [-1, 0, 0] fc17f80800012290 member fc17f80800012290 epoch offset 1 = 0x4339b15b4fba18ae  # 7231880155502766.0
+cell [-1, 0, 0] fc17f80800012290 member fc17f80800012290 epoch offset 2 = 0x433d5ab7101a6c24  # 8262516620291108.0
+cell [-1, 0, 0] fc17f80800012290 member fc17f80800012290 mass = 0x400f97e68c66dce4  # 3.9491702050105335
+cell [-1, 0, 0] fc17f80800012290 member fc17f80800012290 velocity before 0 = 0xc0f0c612aa73c74d  # -68705.16661432125
+cell [-1, 0, 0] fc17f80800012290 member fc17f80800012290 velocity before 1 = 0xc0fe66febd30d03a  # -124527.9211891302
+cell [-1, 0, 0] fc17f80800012290 member fc17f80800012290 velocity before 2 = 0x40d54a19dd22fbfa  # 21800.404122110434
+cell [-1, 0, 0] fc17f80800012290 member fc17f80800012290 velocity after 0 = 0xc0f0c612aa73c74d  # -68705.16661432125
+cell [-1, 0, 0] fc17f80800012290 member fc17f80800012290 velocity after 1 = 0xc0fe66febd30d03a  # -124527.9211891302
+cell [-1, 0, 0] fc17f80800012290 member fc17f80800012290 velocity after 2 = 0x40d54a19dd22fbfa  # 21800.404122110434
+cell [0, 1, 0] bound = 0x3ea6434ae8aca331  # 6.634849837083669e-7
+cell [0, 1, 0] candidates 101 entries 1
+cell [0, 1, 0] fc18081800000320 component 9 explodes T-30340473655893.718750000 s as TypeIa(Merger), members 1
+cell [0, 1, 0] fc18081800000320 window = 0x41274ff3fbc5f182  # 763897.9917445632
+cell [0, 1, 0] fc18081800000320 primary = 0x401b71c6508f3460  # 6.8611080729870935
+cell [0, 1, 0] fc18081800000320 secondary = 0x4012f8f38ac954e4  # 4.743116539514833
+cell [0, 1, 0] fc18081800000320 age = 0x41b35c5a64e43dc0  # 324819556.89156723
+cell [0, 1, 0] fc18081800000320 energy = 0x3fedd8f9f423f166  # 0.9327363746993285
+cell [0, 1, 0] fc18081800000320 fastest = 0x4103301836c72465  # 157187.02674702104
+cell [0, 1, 0] fc18081800000320 leftover Nothing
+cell [0, 1, 0] fc18081800000320 site cell [388, 887, 28]
+cell [0, 1, 0] fc18081800000320 site offset 0 = 0x4330655cb863eb4b  # 4615048532323147.0
+cell [0, 1, 0] fc18081800000320 site offset 1 = 0x433fd0d535a923a8  # 8955338424918952.0
+cell [0, 1, 0] fc18081800000320 site offset 2 = 0x432a86c751bb499f  # 3733270011159759.5
+cell [0, 1, 0] fc18081800000320 member fc18081800000320 epoch cell [16, 1221, 97]
+cell [0, 1, 0] fc18081800000320 member fc18081800000320 epoch offset 0 = 0x433abeeeb768f64b  # 7528281883080267.0
+cell [0, 1, 0] fc18081800000320 member fc18081800000320 epoch offset 1 = 0x432ed95243b8ee50  # 4341598324029224.0
+cell [0, 1, 0] fc18081800000320 member fc18081800000320 epoch offset 2 = 0x431578291b548c40  # 1510773114610448.0
+cell [0, 1, 0] fc18081800000320 member fc18081800000320 mass = 0x401b71c6508f3460  # 6.8611080729870935
+cell [0, 1, 0] fc18081800000320 member fc18081800000320 velocity before 0 = 0xc0fc4bc948cb6d56  # -115900.5802721282
+cell [0, 1, 0] fc18081800000320 member fc18081800000320 velocity before 1 = 0x40f963b6afcd1406  # 103995.4179201872
+cell [0, 1, 0] fc18081800000320 member fc18081800000320 velocity before 2 = 0x40d4f08fc19c15ce  # 21442.24619199876
+cell [0, 1, 0] fc18081800000320 member fc18081800000320 velocity after 0 = 0xc0fc4bc948cb6d56  # -115900.5802721282
+cell [0, 1, 0] fc18081800000320 member fc18081800000320 velocity after 1 = 0x40f963b6afcd1406  # 103995.4179201872
+cell [0, 1, 0] fc18081800000320 member fc18081800000320 velocity after 2 = 0x40d4f08fc19c15ce  # 21442.24619199876
+cell [0, 2, 0] bound = 0x3e811331ed961c75  # 1.2721851909097547e-7
+cell [0, 2, 0] candidates 22 entries 0
+cell [0, 3, 0] bound = 0x3e62a9fe33882c58  # 3.476447435834269e-8
+cell [0, 3, 0] candidates 5 entries 0
+cell [0, 4, 0] bound = 0x3e53b697fa768db0  # 1.8359400803141772e-8
+cell [0, 4, 0] candidates 0 entries 0
+cell [0, 5, 0] bound = 0x3e5031879cd7b0e2  # 1.5081349327291814e-8
+cell [0, 5, 0] candidates 1 entries 0
+cell [0, 6, 0] bound = 0x3e4e6237e38820b5  # 1.4148496694559006e-8
+cell [0, 6, 0] candidates 3 entries 0
+cell [0, 7, 0] bound = 0x3e4d658cdd9e7731  # 1.3688896172675719e-8
+cell [0, 7, 0] candidates 2 entries 0
+cell [0, 8, 0] bound = 0x3e4ca7932d2188dc  # 1.3343333025467157e-8
+cell [0, 8, 0] candidates 1 entries 0
+cell [0, 9, 0] bound = 0x3e4bf3305d3acdb4  # 1.3015212830527791e-8
+cell [0, 9, 0] candidates 1 entries 1
+cell [0, 9, 0] fc18089800000000 component 2 explodes T-9973937102335.718750000 s as TypeIa(Merger), members 1
+cell [0, 9, 0] fc18089800000000 window = 0x4122fdcb12f142da  # 622309.5369969264
+cell [0, 9, 0] fc18089800000000 primary = 0x401d7878e0303a22  # 7.367648604339168
+cell [0, 9, 0] fc18089800000000 secondary = 0x4016fa1b0220d5a2  # 5.744243653539714
+cell [0, 9, 0] fc18089800000000 age = 0x41d44e86ee2f3e55  # 1362762680.7381794
+cell [0, 9, 0] fc18089800000000 energy = 0x3ff8b7f654f0ccf4  # 1.544912654685331
+cell [0, 9, 0] fc18089800000000 fastest = 0x40fd28cdb9d9f3cb  # 119436.85787387115
+cell [0, 9, 0] fc18089800000000 leftover Nothing
+cell [0, 9, 0] fc18089800000000 site cell [470, 4693, 352]
+cell [0, 9, 0] fc18089800000000 site offset 0 = 0x4331d3373e2e9f82  # 5017308823986050.0
+cell [0, 9, 0] fc18089800000000 site offset 1 = 0x432c3813a3cdf5a7  # 3971478175808211.5
+cell [0, 9, 0] fc18089800000000 site offset 2 = 0x4330454b9d4e285f  # 4579790691379295.0
+cell [0, 9, 0] fc18089800000000 member fc18089800000000 epoch cell [546, 4793, 355]
+cell [0, 9, 0] fc18089800000000 member fc18089800000000 epoch offset 0 = 0x4328c1ce2c783b04  # 3484245347278210.0
+cell [0, 9, 0] fc18089800000000 member fc18089800000000 epoch offset 1 = 0x433deadce4f87154  # 8421008779800916.0
+cell [0, 9, 0] fc18089800000000 member fc18089800000000 epoch offset 2 = 0x4330eaf5a1004523  # 4761940316407075.0
+cell [0, 9, 0] fc18089800000000 member fc18089800000000 mass = 0x401d7878e0303a22  # 7.367648604339168
+cell [0, 9, 0] fc18089800000000 member fc18089800000000 velocity before 0 = 0x40f18ffbb08c32a0  # 71935.730602453
+cell [0, 9, 0] fc18089800000000 member fc18089800000000 velocity before 1 = 0x40f7444a38cb92d2  # 95300.63886601783
+cell [0, 9, 0] fc18089800000000 member fc18089800000000 velocity before 2 = 0x40a65fcbe7d0bba9  # 2863.8982529858663
+cell [0, 9, 0] fc18089800000000 member fc18089800000000 velocity after 0 = 0x40f18ffbb08c32a0  # 71935.730602453
+cell [0, 9, 0] fc18089800000000 member fc18089800000000 velocity after 1 = 0x40f7444a38cb92d2  # 95300.63886601783
+cell [0, 9, 0] fc18089800000000 member fc18089800000000 velocity after 2 = 0x40a65fcbe7d0bba9  # 2863.8982529858663
+cell [0, 10, 0] bound = 0x3e4b335ad784cd52  # 1.2666268687199165e-8
+cell [0, 10, 0] candidates 1 entries 0
+cell [0, 11, 0] bound = 0x3e4a60209249d414  # 1.22820478867356e-8
+cell [0, 11, 0] candidates 3 entries 1
+cell [0, 11, 0] fc1808b800000010 component 5 explodes T-21433077069348.718750000 s as TypeIa(DoubleDetonation), members 2
+cell [0, 11, 0] fc1808b800000010 window = 0x411d2e50536a08fc  # 478100.0814591793
+cell [0, 11, 0] fc1808b800000010 primary = 0x400cb7dc8a9f131c  # 3.5897761182590227
+cell [0, 11, 0] fc1808b800000010 secondary = 0x40011f886bd83e2e  # 2.1403969216696828
+cell [0, 11, 0] fc1808b800000010 age = 0x42004936bf4ce49c  # 8743475177.611626
+cell [0, 11, 0] fc1808b800000010 energy = 0x3fe95646bc173c4a  # 0.7917817758224228
+cell [0, 11, 0] fc1808b800000010 fastest = 0x41393e66ce3b77c3  # 1654374.805594907
+cell [0, 11, 0] fc1808b800000010 leftover SurvivingDonor { speed: KilometresPerSecond(1485.445971253197) }
+cell [0, 11, 0] fc1808b800000010 survivor speed = 0x409735c8acb02dc0  # 1485.445971253197
+cell [0, 11, 0] fc1808b800000010 site cell [294, 5756, 221]
+cell [0, 11, 0] fc1808b800000010 site offset 0 = 0x4319e1e82e2e209d  # 1821315435300903.3
+cell [0, 11, 0] fc1808b800000010 site offset 1 = 0x4321e99755bc3348  # 2520955395905956.0
+cell [0, 11, 0] fc1808b800000010 site offset 2 = 0x4326d24a3d432b8c  # 3211832892429766.0
+cell [0, 11, 0] fc1808b800000010 member fc1808b800000010 epoch cell [-43, 5938, 214]
+cell [0, 11, 0] fc1808b800000010 member fc1808b800000010 epoch offset 0 = 0x433a14d86ddbcce7  # 7341269183089895.0
+cell [0, 11, 0] fc1808b800000010 member fc1808b800000010 epoch offset 1 = 0x433421a7ed8ead24  # 5666504663018788.0
+cell [0, 11, 0] fc1808b800000010 member fc1808b800000010 epoch offset 2 = 0x433e027e2c6e82ce  # 8446990235894478.0
+cell [0, 11, 0] fc1808b800000010 member fc1808b800000010 mass = 0x400cb7dc8a9f131c  # 3.5897761182590227
+cell [0, 11, 0] fc1808b800000010 member fc1808b800000010 velocity before 0 = 0xc1022087775a853c  # -148496.9332781228
+cell [0, 11, 0] fc1808b800000010 member fc1808b800000010 velocity before 1 = 0x40f3a6301d55efd9  # 80483.00716203394
+cell [0, 11, 0] fc1808b800000010 member fc1808b800000010 velocity before 2 = 0xc0a63b3301658122  # -2845.599620029462
+cell [0, 11, 0] fc1808b800000010 member fc1808b800000010 velocity after 0 = 0xc1022087775a853c  # -148496.9332781228
+cell [0, 11, 0] fc1808b800000010 member fc1808b800000010 velocity after 1 = 0x40f3a6301d55efd9  # 80483.00716203394
+cell [0, 11, 0] fc1808b800000010 member fc1808b800000010 velocity after 2 = 0xc0a63b3301658122  # -2845.599620029462
+cell [0, 11, 0] fc1808b800000010 member fc1808b800000011 epoch cell [-1984, 6909, 2786]
+cell [0, 11, 0] fc1808b800000010 member fc1808b800000011 epoch offset 0 = 0x434073bacef3d454  # 9261691601135784.0
+cell [0, 11, 0] fc1808b800000010 member fc1808b800000011 epoch offset 1 = 0x43362c1e1f3142e4  # 6240957371597540.0
+cell [0, 11, 0] fc1808b800000010 member fc1808b800000011 epoch offset 2 = 0x433e446e15a6b406  # 8519488901657606.0
+cell [0, 11, 0] fc1808b800000010 member fc1808b800000011 mass = 0x40011f886bd83e2e  # 2.1403969216696828
+cell [0, 11, 0] fc1808b800000010 member fc1808b800000011 velocity before 0 = 0xc1022087775a853c  # -148496.9332781228
+cell [0, 11, 0] fc1808b800000010 member fc1808b800000011 velocity before 1 = 0x40f3a6301d55efd9  # 80483.00716203394
+cell [0, 11, 0] fc1808b800000010 member fc1808b800000011 velocity before 2 = 0xc0a63b3301658122  # -2845.599620029462
+cell [0, 11, 0] fc1808b800000010 member fc1808b800000011 velocity after 0 = 0xc12eacf84d33ce65  # -1005180.1507858752
+cell [0, 11, 0] fc1808b800000010 member fc1808b800000011 velocity after 1 = 0x411f12f3b09f0f75  # 509116.9224817672
+cell [0, 11, 0] fc1808b800000010 member fc1808b800000011 velocity after 2 = 0x413147ab0380d42b  # 1132459.0136845212
+cell [0, 12, 0] bound = 0x3e4978ff4079fa67  # 1.1861624584676908e-8
+cell [0, 12, 0] candidates 1 entries 0
+cell [0, 13, 0] bound = 0x3e488139f0afe586  # 1.1410932218211434e-8
+cell [0, 13, 0] candidates 2 entries 0
+cell [0, 14, 0] bound = 0x3e477d88e0ca4daf  # 1.093855586082459e-8
+cell [0, 14, 0] candidates 0 entries 0
+cell [0, 15, 0] bound = 0x3e46729858ac2f3f  # 1.0452995598891788e-8
+cell [0, 15, 0] candidates 2 entries 0
+cell [0, 16, 0] bound = 0x3e4564787d03aa1b  # 9.961642094944277e-9
+cell [0, 16, 0] candidates 3 entries 0
+cell [0, 17, 0] bound = 0x3e44567a76c2a602  # 9.470528993259108e-9
+cell [0, 17, 0] candidates 1 entries 1
+cell [0, 17, 0] fc18091800000000 component 1 explodes T-23224004747364.718750000 s as TypeIa(Merger), members 1
+cell [0, 17, 0] fc18091800000000 window = 0x4125771b60164557  # 703373.6876699132
+cell [0, 17, 0] fc18091800000000 primary = 0x401a2bf3dc5d35ef  # 6.542922442616585
+cell [0, 17, 0] fc18091800000000 secondary = 0x40138138e40f3e0e  # 4.876193583898852
+cell [0, 17, 0] fc18091800000000 age = 0x41a37bae6eeb7730  # 163436343.4598937
+cell [0, 17, 0] fc18091800000000 energy = 0x3fe5bb2acc32f3a4  # 0.6790975559484775
+cell [0, 17, 0] fc18091800000000 fastest = 0x41047d09a6a7e86d  # 167841.20637494643
+cell [0, 17, 0] fc18091800000000 leftover Nothing
+cell [0, 17, 0] fc18091800000000 site cell [242, 8743, 195]
+cell [0, 17, 0] fc18091800000000 site offset 0 = 0x4336ffd9adcb5d2f  # 6473759876406575.0
+cell [0, 17, 0] fc18091800000000 site offset 1 = 0x432781bd04dff702  # 3308286647466881.0
+cell [0, 17, 0] fc18091800000000 site offset 2 = 0x42f245c2dae73a1a  # 321453298709409.6
+cell [0, 17, 0] fc18091800000000 member fc18091800000000 epoch cell [-145, 8855, 280]
+cell [0, 17, 0] fc18091800000000 member fc18091800000000 epoch offset 0 = 0x4338c076ed2fd76f  # 6967016459065199.0
+cell [0, 17, 0] fc18091800000000 member fc18091800000000 epoch offset 1 = 0x433c211f7eedd301  # 7917718505116417.0
+cell [0, 17, 0] fc18091800000000 member fc18091800000000 epoch offset 2 = 0x433e364a56bff3e2  # 8503942212219874.0
+cell [0, 17, 0] fc18091800000000 member fc18091800000000 mass = 0x401a2bf3dc5d35ef  # 6.542922442616585
+cell [0, 17, 0] fc18091800000000 member fc18091800000000 velocity before 0 = 0xc1033df34bbfa2e6  # -157630.41198661103
+cell [0, 17, 0] fc18091800000000 member fc18091800000000 velocity before 1 = 0x40e65ff85abd761f  # 45823.761076670366
+cell [0, 17, 0] fc18091800000000 member fc18091800000000 velocity before 2 = 0x40e11455235f1158  # 34978.66056779277
+cell [0, 17, 0] fc18091800000000 member fc18091800000000 velocity after 0 = 0xc1033df34bbfa2e6  # -157630.41198661103
+cell [0, 17, 0] fc18091800000000 member fc18091800000000 velocity after 1 = 0x40e65ff85abd761f  # 45823.761076670366
+cell [0, 17, 0] fc18091800000000 member fc18091800000000 velocity after 2 = 0x40e11455235f1158  # 34978.66056779277
+cell [0, 18, 0] bound = 0x3e434b017247c1d2  # 8.983998941455884e-9
+cell [0, 18, 0] candidates 1 entries 0
+cell [0, 19, 0] bound = 0x3e4244d6c2b93a77  # 8.507120417099122e-9
+cell [0, 19, 0] candidates 0 entries 0
+cell [0, 20, 0] bound = 0x3e41468ca1649f81  # 8.04457038186709e-9
+cell [0, 20, 0] candidates 0 entries 0
+cell [0, 21, 0] bound = 0x3e4053ea2c8a725b  # 7.603220623675561e-9
+cell [0, 21, 0] candidates 0 entries 0
+cell [0, 22, 0] bound = 0x3e3ed526a52c8588  # 7.178778976462026e-9
+cell [0, 22, 0] candidates 1 entries 0
+cell [0, 23, 0] bound = 0x3e3d19fdba8d1e4f  # 6.775727458985855e-9
+cell [0, 23, 0] candidates 0 entries 0
+cell [0, 24, 0] bound = 0x3e3b499d350263c0  # 6.353379003583772e-9
+cell [0, 24, 0] candidates 2 entries 1
+cell [0, 24, 0] fc18098800000010 component 2 explodes T-15097741490064.718750000 s as TypeIa(Merger), members 1
+cell [0, 24, 0] fc18098800000010 window = 0x412c15f3baafd770  # 920313.8646228146
+cell [0, 24, 0] fc18098800000010 primary = 0x401e1ba9f131f127  # 7.527015465424745
+cell [0, 24, 0] fc18098800000010 secondary = 0x400b240f8ad395ec  # 3.392607769567567
+cell [0, 24, 0] fc18098800000010 age = 0x41d29cffb8201c66  # 1249115872.5017333
+cell [0, 24, 0] fc18098800000010 energy = 0x3ff872e091f77826  # 1.528046198065121
+cell [0, 24, 0] fc18098800000010 fastest = 0x410a394b8819db45  # 214825.4414555674
+cell [0, 24, 0] fc18098800000010 leftover Nothing
+cell [0, 24, 0] fc18098800000010 site cell [259, 12327, 418]
+cell [0, 24, 0] fc18098800000010 site offset 0 = 0x4323b94851ce16b8  # 2775872409373532.0
+cell [0, 24, 0] fc18098800000010 site offset 1 = 0x4328b357a6de3365  # 3476294242081202.5
+cell [0, 24, 0] fc18098800000010 site offset 2 = 0x43321fc9622eea26  # 5101499376921126.0
+cell [0, 24, 0] fc18098800000010 member fc18098800000010 epoch cell [-49, 12177, 397]
+cell [0, 24, 0] fc18098800000010 member fc18098800000010 epoch offset 0 = 0x4337f4230a7fa05c  # 6742355801514076.0
+cell [0, 24, 0] fc18098800000010 member fc18098800000010 epoch offset 1 = 0x4330cd5604bfee32  # 4729368957939250.0
+cell [0, 24, 0] fc18098800000010 member fc18098800000010 epoch offset 2 = 0x42e57762b9dee4c0  # 188820013119270.0
+cell [0, 24, 0] fc18098800000010 member fc18098800000010 mass = 0x401e1ba9f131f127  # 7.527015465424745
+cell [0, 24, 0] fc18098800000010 member fc18098800000010 velocity before 0 = 0xc107871fe5de99d6  # -192739.9872409838
+cell [0, 24, 0] fc18098800000010 member fc18098800000010 velocity before 1 = 0xc0f6ed7d3de7deb1  # -93911.82761370648
+cell [0, 24, 0] fc18098800000010 member fc18098800000010 velocity before 2 = 0xc0ca5655666cd379  # -13484.667188266047
+cell [0, 24, 0] fc18098800000010 member fc18098800000010 velocity after 0 = 0xc107871fe5de99d6  # -192739.9872409838
+cell [0, 24, 0] fc18098800000010 member fc18098800000010 velocity after 1 = 0xc0f6ed7d3de7deb1  # -93911.82761370648
+cell [0, 24, 0] fc18098800000010 member fc18098800000010 velocity after 2 = 0xc0ca5655666cd379  # -13484.667188266047
+cell [0, 25, 0] bound = 0x3e398a624eb16fee  # 5.9466256182182675e-9
+cell [0, 25, 0] candidates 0 entries 0
+cell [0, 26, 0] bound = 0x3e37d7c8c36d4c0c  # 5.551359419749569e-9
+cell [0, 26, 0] candidates 0 entries 0
+cell [0, 27, 0] bound = 0x3e3651ddc0ee1e6c  # 5.196731058395461e-9
+cell [0, 27, 0] candidates 2 entries 2
+cell [0, 27, 0] fc1809b800000000 component 0 explodes T-7458818928030.718750000 s as TypeIa(Merger), members 1
+cell [0, 27, 0] fc1809b800000000 window = 0x41104fc3abf799d1  # 267248.91793670977
+cell [0, 27, 0] fc1809b800000000 primary = 0x4019bd1338402e25  # 6.434643629948856
+cell [0, 27, 0] fc1809b800000000 secondary = 0x4019b78a43028117  # 6.429238364246223
+cell [0, 27, 0] fc1809b800000000 age = 0x41905638596dd915  # 68521494.35727341
+cell [0, 27, 0] fc1809b800000000 energy = 0x3ff28da1e4b873d8  # 1.1595782217402668
+cell [0, 27, 0] fc1809b800000000 fastest = 0x410c9028c38c9ed0  # 233989.0954830558
+cell [0, 27, 0] fc1809b800000000 leftover Nothing
+cell [0, 27, 0] fc1809b800000000 site cell [198, 14256, 253]
+cell [0, 27, 0] fc1809b800000000 site offset 0 = 0x433ad434b9dcefeb  # 7551672316129259.0
+cell [0, 27, 0] fc1809b800000000 site offset 1 = 0x4310e2a6258fd397  # 1188200712500453.8
+cell [0, 27, 0] fc1809b800000000 site offset 2 = 0x432f4b140d987c99  # 4404136888778316.5
+cell [0, 27, 0] fc1809b800000000 member fc1809b800000000 epoch cell [15, 14251, 271]
+cell [0, 27, 0] fc1809b800000000 member fc1809b800000000 epoch offset 0 = 0x43238501b58f6e58  # 2747133472519980.0
+cell [0, 27, 0] fc1809b800000000 member fc1809b800000000 epoch offset 1 = 0x43204e9ce68fe0ac  # 2295017708712022.0
+cell [0, 27, 0] fc1809b800000000 member fc1809b800000000 epoch offset 2 = 0x4337a0105e25eb4c  # 6649916623809356.0
+cell [0, 27, 0] fc1809b800000000 member fc1809b800000000 mass = 0x4019bd1338402e25  # 6.434643629948856
+cell [0, 27, 0] fc1809b800000000 member fc1809b800000000 velocity before 0 = 0xc10c69c3c6f37e79  # -232760.4721441155
+cell [0, 27, 0] fc1809b800000000 member fc1809b800000000 velocity before 1 = 0xc0b83195fa3bbca1  # -6193.585849507858
+cell [0, 27, 0] fc1809b800000000 member fc1809b800000000 velocity before 2 = 0x40d6970d1e2656bd  # 23132.204965195375
+cell [0, 27, 0] fc1809b800000000 member fc1809b800000000 velocity after 0 = 0xc10c69c3c6f37e79  # -232760.4721441155
+cell [0, 27, 0] fc1809b800000000 member fc1809b800000000 velocity after 1 = 0xc0b83195fa3bbca1  # -6193.585849507858
+cell [0, 27, 0] fc1809b800000000 member fc1809b800000000 velocity after 2 = 0x40d6970d1e2656bd  # 23132.204965195375
+cell [0, 27, 0] fc1809b800000010 component 1 explodes T-6790435932781.718750000 s as TypeIa(Merger), members 1
+cell [0, 27, 0] fc1809b800000010 window = 0x4110e4d32d987e8f  # 276788.79452703235
+cell [0, 27, 0] fc1809b800000010 primary = 0x40199543d87348d4  # 6.395766622578055
+cell [0, 27, 0] fc1809b800000010 secondary = 0x40132ee961bfc45a  # 4.795812156037835
+cell [0, 27, 0] fc1809b800000010 age = 0x41b2ae442ec2aa57  # 313410606.7604117
+cell [0, 27, 0] fc1809b800000010 energy = 0x3ff95efcc41dce30  # 1.5856902752683588
+cell [0, 27, 0] fc1809b800000010 fastest = 0x4109df449ce8571d  # 211944.57661502893
+cell [0, 27, 0] fc1809b800000010 leftover Nothing
+cell [0, 27, 0] fc1809b800000010 site cell [101, 13997, 291]
+cell [0, 27, 0] fc1809b800000010 site offset 0 = 0x433dfce796fd6e2f  # 8440845925445167.0
+cell [0, 27, 0] fc1809b800000010 site offset 1 = 0x43246c098ed52d10  # 2874143920526984.0
+cell [0, 27, 0] fc1809b800000010 site offset 2 = 0x432df0d26e2220f2  # 4213780453068921.0
+cell [0, 27, 0] fc1809b800000010 member fc1809b800000010 epoch cell [-49, 14021, 285]
+cell [0, 27, 0] fc1809b800000010 member fc1809b800000010 epoch offset 0 = 0x433a3aa4d0c5c3b0  # 7382828946146224.0
+cell [0, 27, 0] fc1809b800000010 member fc1809b800000010 epoch offset 1 = 0x4319bf55610b7ba0  # 1811811959758568.0
+cell [0, 27, 0] fc1809b800000010 member fc1809b800000010 epoch offset 2 = 0x4326e8d78fdb8320  # 3224231008387472.0
+cell [0, 27, 0] fc1809b800000010 member fc1809b800000010 mass = 0x40199543d87348d4  # 6.395766622578055
+cell [0, 27, 0] fc1809b800000010 member fc1809b800000010 velocity before 0 = 0xc10987b2a26204bd  # -209142.32928851797
+cell [0, 27, 0] fc1809b800000010 member fc1809b800000010 velocity before 1 = 0x40e0402cba9df173  # 33281.39778039129
+cell [0, 27, 0] fc1809b800000010 member fc1809b800000010 velocity before 2 = 0xc0c09c980711f218  # -8505.187715762338
+cell [0, 27, 0] fc1809b800000010 member fc1809b800000010 velocity after 0 = 0xc10987b2a26204bd  # -209142.32928851797
+cell [0, 27, 0] fc1809b800000010 member fc1809b800000010 velocity after 1 = 0x40e0402cba9df173  # 33281.39778039129
+cell [0, 27, 0] fc1809b800000010 member fc1809b800000010 velocity after 2 = 0xc0c09c980711f218  # -8505.187715762338
+cell [0, 28, 0] bound = 0x3e3522dcf4c0a3b8  # 4.921151330224113e-9
+cell [0, 28, 0] candidates 1 entries 0

@@ -388,6 +388,12 @@ function shadowOf(
 }
 
 /**
+ * A law's Lommel–Seeliger share as {@link discEclipseVisible} takes it: a constant L, or L(α) as a
+ * function of the phase, rad.
+ */
+export type EclipseShare = number | ((alphaRad: number) => number);
+
+/**
  * The fraction of a body's reflected light towards a far point that the occluders' shadows leave,
  * per display channel (r, g, b), from `star`'s B, V and R limb laws.
  *
@@ -397,7 +403,9 @@ function shadowOf(
  *   shadows are taken not to overlap.
  * @param towards - The unit direction from the body to the far point: the camera for a point body,
  *   the lit body for a planetshine neighbour.
- * @param share - The law's Lommel–Seeliger share L, 0 to 1.
+ * @param share - The law's Lommel–Seeliger share, 0 to 1: a constant L, or L(α) as a function of
+ *   the phase between the star and `towards` (`limbShareAt`; plan R10, R10.T10.b), which one phase
+ *   holds over the whole disc.
  * @param k - The eclipse term's annuli: `DISC_ANNULI_HIGH` or `DISC_ANNULI_LOW`.
  */
 export function discEclipseVisible(
@@ -405,7 +413,7 @@ export function discEclipseVisible(
   body: EclipsedBody,
   occluders: ReadonlyArray<Occluder>,
   towards: Vec3,
-  share: number,
+  share: EclipseShare,
   k: number,
 ): Rgb {
   if (occluders.length === 0) {
@@ -419,7 +427,9 @@ export function discEclipseVisible(
   const seed = Math.abs(s.x) < 0.9 ? vec3(1, 0, 0) : vec3(0, 1, 0);
   const frame: StarFrame = { starM, distanceM, towards: s, e1: normalise(cross(seed, s)) };
   const alpha = Math.acos(Math.min(1, Math.max(-1, dot(towards, s))));
-  const total = Math.PI * shapeGeometricAlbedo(share) * shapePhase(share, alpha);
+  const l = typeof share === "number" ? share : share(alpha);
+  // The disc term's integral at the one L of this phase: π [L Φ_LS + ⅔ (1 − L) Φ_Lam].
+  const total = Math.PI * shapeGeometricAlbedo(l) * shapePhase(l, alpha);
   if (!(total > 0)) {
     return [1, 1, 1];
   }
@@ -428,7 +438,7 @@ export function discEclipseVisible(
   const hidden: [number, number, number] = [0, 0, 0];
   for (const occluder of occluders) {
     const relative = { centreM: sub(occluder.centreM, body.centreM), radiusM: occluder.radiusM };
-    const shadow = shadowOf(frame, star.disc.radius_m, relative, radiusM, towards, share, annuli);
+    const shadow = shadowOf(frame, star.disc.radius_m, relative, radiusM, towards, l, annuli);
     if (shadow === "umbra") {
       return [0, 0, 0];
     }

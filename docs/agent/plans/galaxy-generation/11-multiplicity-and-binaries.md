@@ -146,7 +146,8 @@ pub fn all_stars_fraction_below(mf: &dyn MassFunction, model: &MultiplicityModel
     m: SolarMasses) -> f64;
 pub fn mean_companion_mass_per_system(mf: &dyn MassFunction, model: &MultiplicityModel)
     -> SolarMasses;
-pub fn stripped_share(model: &MultiplicityModel, m1: SolarMasses, comp: &Composition) -> f64;
+pub fn stripped_share(model: &MultiplicityModel, m1: SolarMasses, comp: &Composition,
+    interacting_periastron: impl Fn(SolarMasses, f64, &Composition) -> Metres) -> f64;
 
 pub struct SystemHierarchy { /* nodes: Vec<HierarchyNode>, stars: Vec<StarSlot> */ }
 pub enum HierarchyNode { Star(StarIndex), Pair { inner: NodeIndex, outer: NodeIndex,
@@ -204,7 +205,7 @@ pub enum CarvedClass { AccretingWdFast, AccretingWdSlow, XrayBinary, StellarMerg
 pub fn carved_class(timeline: &BinaryTimeline, age_at_epoch: Years) -> Option<CarvedClass>;
 pub use crate::stellar::multiplicity::{RedrawAttempt, MAX_REDRAWS, DRAWS_PER_ATTEMPT};
 pub enum MergedBinaryFate { StaysJudgedOnPairVelocity, StaysJudgedOnKick, Ejected }
-pub const CLUSTER_MERGED_BINARY_FATE: MergedBinaryFate; // the default P15.T5.c reviews
+pub const CLUSTER_MERGED_BINARY_FATE: MergedBinaryFate; // the default P15.T5.c reviewed
 ```
 
 The census's bound on a pair's light (P11.T17, R06's ask B, `decision-r06-census-cost.md` §7;
@@ -228,7 +229,8 @@ impl SystemStars {
     pub fn system_mass_at(&self, t: UniverseTime) -> SolarMasses;
     pub fn recoil(&self) -> Option<SystemVelocity>;          // the pair's, after a low-mode kick
 }
-// `summary_at` and `brief_at` (plan 06) now cover all stars; `SystemSummary` gains
+// `summary_at` and `brief_at` (plan 06) now cover all stars: `brief_at` is the primary's state as
+// the system's summary gives it (P11.T11.a); `SystemSummary` gains
 // `hierarchy: HierarchySummary`, and `StarSummary` gains `binary_class: BinaryClass`.
 pub struct MultiplicityFates<F: StellarFates>(/* wraps plan 06's fates */); // plan 02's seam
 ```
@@ -279,10 +281,10 @@ pub const CLASS_SHARES: ClassShareTable;
 The reader types over them are `stellar::binary::ia::IaExplosionMark` and
 `stellar::binary::sampler::ClassSampler`. `AWD_SAMPLER` serves both accreting white dwarf classes:
 the recurrence period is one of its marks and the split is a test on it. Until P15.T9.b and
-P15.T10.b land, the constants hold the scratch values of Design note 13. `tables::MANIFEST` does not
-exist yet (plan 15's P15.T2 builds it and registers the tables already committed), so until then
-the file says it is provisional in its header, under the README's header convention, as
-`tables/mge.rs` does; once the manifest exists it lists them with `provisional: true`.
+P15.T10.b land, the constants hold the scratch values of Design note 13. `tables::MANIFEST` exists
+since plan 15's P15.T2, but it lists only the tables that `hyperion-fit` writes, so it does not list
+`tables::binary`, whose values are written by hand: the file says it is provisional in its header
+(`@provisional`, in plan 15's grammar) until plan 15's task for it exists.
 
 ### Domain tags (never renamed)
 
@@ -401,9 +403,11 @@ given; where it is not, the task that builds it is named.
   later classes after its own (its design note 16); `features::interior::{MemberClass, ClassKind}`
   with the binary classes and the recycled-object marks of P09.T9.e;
   `features::cluster::ClusterModel` (`sigma(r)`, for the hard–soft boundary);
-  `features::shares::FeatureShares::field_factor`, through which layer D already gives up
-  `type_ia::ancient_share`; the Type Ia entry (`type_ia::IaProgenitor`) and the requirement its
-  P09.T35 records, that this plan's binaries redraw any explosion before +H;
+  `features::shares::FeatureShares::field_factor`; layer D gives up `type_ia::ancient_share`
+  through `Galaxy::layer_d_kept` (P09.T35, from 26), not `field_factor`; the Type Ia entry (`type_ia::IaProgenitor`) and the requirement its
+  P09.T35 records, that this plan's binaries redraw any explosion before +H (its debug hook
+  `displaced::site::keeps_a_recent_type_ia`, asserted in `SystemStars::generate_with`, which P11.T6
+  wires to `carved_class`);
   `catalogue_classes::testing::assert_complementary`.
 - **Plan 15** (not built at `9d8e775`: `hyperion-fit` holds only plan 02's `mge` task, and neither
   `tables::type_ia_delay` nor `tables::MANIFEST` exists): `tables::type_ia_delay::DELAY_EDGES`;
@@ -474,7 +478,11 @@ given; where it is not, the task that builds it is named.
    _(P11.T4.j, ruling p11-channels of 2026-10-06:)_ a pair can interact if it reaches that test on
    the drawn orbit, or after the decay the engine's sinks can make by then: magnetic braking at the
    tidal equilibrium spin, gravitational radiation and the spins' reservoir, bounded from above.
-   Everything else is two single stars on an orbit. Wind-fed symbiotics need no orbit change, so
+   Everything else is two single stars on an orbit that their core collapses change (BSE appendix
+   A1; _P11.T4.l, ruling p11-supernova-pins of 2026-10-06:_ each collapse is applied once in closed
+   form on the drawn orbit, widened by Jeans's mode for the winds, and the pre-test is asked again
+   of a bound new orbit, from which the engine runs the pair if it can interact). Wind-fed
+   symbiotics need no orbit change, so
    they are classified from the state of a wide pair. _(P11.T4.i, ruling p11-channels of
    2026-10-06:)_ the engine starts at the first arrival on the main sequence. A star that has not
    arrived by then is its own zero-age main-sequence star to the test and to the engine, its clock
@@ -544,7 +552,7 @@ given; where it is not, the task that builds it is named.
 14. **Defaults of the generator version** set here: common-envelope efficiency α = 1 with the
     binding parameter of Hurley, Tout and Pols; their critical mass ratios; accretion
     Eddington-limited for white dwarfs, neutron stars and black holes (ruling 132.1). `CLUSTER_MERGED_BINARY_FATE` is the fourth of the kick law's defaults that the
-    brainstorm's "Open questions" lists, and P15.T5.c reviews it; its value is that a merged pair
+    brainstorm's "Open questions" lists, and P15.T5.c reviewed it; its value is that a merged pair
     stays a member and is judged on the pair's velocity.
 15. **Brown-dwarf companions.** The brainstorm counts brown dwarfs at "one for every four or five
     stars, companions included" and gives the free-floating ones a layer (plan 13, one for every
@@ -840,8 +848,9 @@ P11.T4, as built"._
     - **Stop order.** A constructed pair where wind removes a `Shaped` star's envelope on the
       step that lands on its phase boundary, and one on its pin: the strip comes first (one
       segment fewer; the collapse's phase just before is HeMS/HeHG/HeGB).
-    - Keep 129.4c's and b64352e's tests (`a_held_bare_core_beside_a_main_sequence_star_merges_without_recursing`
-      becomes `…_stays_a_helium_star`, golden re-blessed).
+    - Keep 129.4c's and b64352e's tests
+      (`a_held_bare_core_beside_a_main_sequence_star_merges_without_recursing`
+      becomes `…_stays_a_helium_star`, golden re-blessed; b64352e is now 03065252).
   - **Goldens to re-bless** (at version 19, "for the version 20 batch"):
     `stellar/binary_timelines` (expected to move broadly: segment counts from the stop order),
     `stellar/held_bare_core_merger` (renamed if the test is), and any of `stellar/summaries`,
@@ -862,10 +871,11 @@ P11.T4, as built"._
     `cargo nextest run -p hyperion-sim --run-ignored only -E 'test(binary_system) | test(binary_carve)'`
     passes with the figures recorded in Risks; determinism-auditor and science-checker reviews
     clean; the version-20 commit (P14 Phase J's T46.f/T47.d) carries this task's goldens.
-  - **Finding left open (not this task):** `swell` (`rlof.rs`) places the new giant with
-    core = its whole mass. BSE `evolv2` keeps the accretor's core and gives it the accreted
-    envelope (`gntage`). Measured to change white-dwarf and helium-star accretors in 1.6% of
-    layer-D systems (epoch state 1.1%). Its ruling needs the BSE source checked first.
+  - **Finding C2, ruled** (ruling p11-c2-swell, 2026-10-06): `swell` places the new giant with
+    core = its whole mass after the step, and swells any fed helium star, so a helium star losing
+    mass to its wind is made a giant whose envelope is the placement's miss, and is stripped back
+    at once. BSE keeps the accretor's own core and gives it the step's net gain as envelope,
+    behind a gate (`evolv2.f` 1480–1491). Built by P11.T4.m.
 
 - **P11.T4.i Start at the first arrival** (ruling p11-channels, 2026-10-06; output moves;
   version-21 batch, re-blessed at 20, held out of integration like T4.h and 9a0950e). Hurley,
@@ -1102,7 +1112,9 @@ P11.T4, as built"._
         death: a 1.411 M☉ neutron star at 18.6316 Myr, bound.
       - No merger follows.
       - Before T4.k there was no record, and the pair merged at 985.7 Myr.
-    - `a_contact_stops_at_the_pin` (C): pair 0277.
+    - `a_contact_stops_at_the_pin` (C): pair 0277. _(Restated by P11.T4.n as
+      `a_contact_stops_at_its_primarys_own_main_sequence_end`: the contact now ends at the
+      primary's own main-sequence end, before the pin.)_
       - The record is at 46.831 Myr, from the main-sequence primary in contact.
       - A run to 30 Myr, inside the contact and before the pin, records nothing, stays in
         contact, and equals the full run up to 30 Myr bit for bit.
@@ -1144,8 +1156,8 @@ P11.T4, as built"._
   _As built (Phase J lane, 2026-10-06): see Risks, "P11.T4.k as built"._
 
 - **P11.T4.l A passed-over pair's collapses** (ruling p11-supernova-pins, 2026-10-06; finding
-  F3, P11.T10's first half brought forward; output moves; version 22, its own bump; after
-  P11.T4.k and the version-21 refit).
+  F3, P11.T10's first half brought forward; output moves; its own bump, in a later bump batch,
+  after plan 14's 23 → 24; after P11.T4.k and the version-21 refit).
   - **The rule.** A pair that `can_interact` passes over is two single stars on its drawn orbit
     (design note 7). If either star collapses (a sudden death) before the age asked, the drawn
     orbit stands to the collapse.
@@ -1253,8 +1265,269 @@ P11.T4, as built"._
     orbit, so S gains (2/3 − k′₂) ΔMᵢ R_max,i² Ω_c for each star (the T4.j probe's wind-spin
     variant: 0 misses, up to 2.9 × the passes). Re-run the zero-miss gate
     (`the_decay_bound_never_passes_over_an_interaction`) and record the passes.
-  - **Acceptance:** as T4.k's, plus `GENERATOR_VERSION` 21 → 22 with every golden re-blessed,
-    and P11.T10's agreement test, if it then exists, re-baselined.
+  - **Acceptance:** as T4.k's, plus the deferred batch's `GENERATOR_VERSION` bump (a later bump
+    batch, after plan 14's 23 → 24: version 25, S1, by decision-bump-plan-after-22, 2026-10-14;
+    updated 2026-10-15) with every golden re-blessed, and P11.T10's agreement test, if it then
+    exists, re-baselined.
+
+  _As built (lane p11-t4l, 2026-10-28; at version 23 on its lane branch, held for 25's train): see
+  Risks, "P11.T4.l as built"._
+
+- **P11.T4.m A fed helium star or white dwarf swells around its own core** (ruling p11-c2-swell,
+  2026-10-06; finding C2 of P11.T4.g, and F15; output moves; an anchor of version 25 (S1), built
+  after P11.T4.l on its lane branch and landed only with the train, by decision-bump-plan-after-22
+  §2.2; the binary engine stays on lane branches, decision-galaxy-25-train §1.7). The ruling's
+  figures below were measured on T4.k's prototype engine at version 21: T4.m re-measures them on
+  the engine as T4.l leaves it, and records each one that moves.
+  - **The rule** (Hurley, Tout and Pols 2002, §2.6.6, §2.7.4, eq. 82–84; BSE `evolv2.f`
+    1471–1560, `gntage.f` 99–160, `hrdiag.f` 357–367):
+    - A star the binary carries that accretes hydrogen-rich matter (a donor of `Surface::Hydrogen`)
+      becomes a giant around its own core when the hydrogen accumulates:
+      - a helium main-sequence star: core-helium-burning, core = its mass at the step's start,
+        its fraction burnt kept;
+      - a helium giant: thermally pulsing AGB around its CO core;
+      - a white dwarf above 2.71 × 10⁻⁷ M☉/yr: first giant branch (He) or thermally pulsing
+        AGB (CO, ONe) around its mass at the step's start.
+    - Its mass is the mass after the step, so its envelope is the step's net gain.
+    - The hydrogen accumulates when both gates pass:
+      - (a) BSE's: the step's accretion exceeds 1.05 × the accretor's own net wind over it;
+      - (b) the burn gate: the step's net gain exceeds the new giant's core growth over the same
+        step. It replaces BSE's per-orbit 10⁻⁴ guard, whose threshold scales as 1 ÷ P.
+    - Otherwise the star keeps its type and the step's mass change (BSE below its gate; COMPAS
+      always).
+    - A helium main-sequence accretor keeps its fraction burnt (BSE `evolv2.f` 1889–1900;
+      COMPAS's `HURLEY` default): no m₀ ÷ m₁ factor.
+  - **`binary/rlof.rs`:**
+    - `accretor_events` receives the accretor's mass at the step's start and the step's dt, and
+      passes them, with `gained`, to `swell`.
+    - `swell`: the core and the gates above, in this order: the donor's surface, gate (a), the
+      exact placement, gate (b), then the segment closed and the member set. A refusal closes no
+      segment.
+    - `accretion`: only a hydrogen-rich donor swells a helium star (BSE `kstar(j1).le.6`). Any
+      other donor gives the thermally limited share.
+    - `rejuvenated_tau`: `mixed` is `!helium && !(0.35..=1.25).contains(&m1)`.
+    - Docs: the module's accretion paragraph, `swell`, `accretor_events` and `rejuvenated_tau`,
+      citing the BSE lines and this ruling.
+  - **`binary/common_envelope.rs`:** a placement for the swell whose built track's core at the
+    placement equals the core asked for to 10⁻⁹ relative.
+    - Bracket the asked core in [core, 1.1 core] among the asks that place a star, then use
+      secant or bisection, at most 12 track builds.
+    - Where none reproduces it, the swell is refused: the accretor keeps its type, as where no
+      star of the kind has such a core. The ruling's probe refused 6 of 190 white-dwarf requests
+      in layer D, about 3%. Record the count of refusals in Risks.
+    - Every other caller of `placed_star` is unchanged. Finding F16, that every placed star
+      misses its core by up to 8% (an exact placement for every caller moves 264 of the pinned
+      thousand's digests), has its own task and bump (ruling p11-c2-swell §6).
+  - **Not in it:** the engine fixes for finding F18, for a transfer donor that dies inside a step
+    (the `transfer_phase` debug assertion) and for finding F17 are P11.T4.o's, after P11.T4.n
+    (decision-galaxy-25-train §11, 2026-10-27).
+  - **Tests** (`stellar/binary/tests.rs`, unless said):
+    - `a_helium_star_fed_less_than_its_wind_stays_a_helium_star`: pairs 1723 and 8002 of
+      `binary_classes`' prior sampler (band 4; in `tests/binary_classes.rs`, beside the sampler).
+      - Neither is capped.
+      - The helium star stays on its own track from its strip to its pin.
+      - 1723: a 1.188 M☉ neutron star at 36.342 Myr, bound, in about 16 segments.
+      - 8002: a 1.208 M☉ neutron star at 37.709 Myr, bound, in about 18.
+      - Before T4.m both reached the 64-segment cap.
+    - `a_fed_helium_star_swells_around_its_own_core`: pinned pair 0255 (or 0267).
+      - At the swell (about 8.611 Myr) the primary is core-helium-burning.
+      - Its core is its helium mass at the step's start (5.530251 M☉) to 10⁻⁹ relative.
+      - M − Mc is the step's net gain (about 3.2 × 10⁻⁴ M☉) to 10⁻⁹ of M.
+      - The fraction burnt is the helium star's τ, and R < 1 R☉.
+      - Before T4.m: a 1,076 R☉ giant at 8.6095 Myr, with nothing accreted.
+    - `a_fed_white_dwarf_swells_around_itself`: one pinned pair whose white dwarf swells (the
+      ruling's probe found 20 in the thousand).
+      - The giant's core is the dwarf's mass at the step's start to 10⁻⁹.
+      - M − Mc is the step's net gain.
+      - Pair 0305 shows no CO white dwarf above the Chandrasekhar mass.
+    - `a_swell_the_shell_would_burn_is_refused` (unit, on `swell`): a helium main-sequence member
+      whose net gain is below the placed giant's core growth over dt stays a helium star with the
+      step's mass, and so does one whose wind beats its accretion.
+    - `a_white_dwarf_donor_does_not_swell_a_helium_star` (unit, on `accretion`).
+    - `a_helium_accretor_keeps_its_fraction_burnt` (unit, on `rejuvenated_tau`), and pair 6695 of
+      band 3 is not capped (`tests/binary_classes.rs`).
+    - `the_swells_placement_is_exact` (unit): CHeB at y = 0.1, 0.5, 0.9 for cores of 0.8–8 M☉, and
+      TP-AGB for 0.55–1.3 M☉, at Z = 0.02 and 0.004. The built core equals the asked one to 10⁻⁹,
+      or the placement is refused. Before T4.m the miss was up to −7% (CHeB, 8 M☉, Z = 0.02).
+    - `tests/stellar_system.rs`, `a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star`:
+      drop the allowance for "a core-helium-burning giant with a thin envelope again and again".
+      - From 15.457 Myr to the collapse the primary is HeMS, HeHG or HeGB at every knot.
+      - If a gate passes there, the swelled giant's M − Mc equals its step's net gain. Record
+        which.
+    - The 10³-pair suites: no capped timeline (as now). At the start of every segment that begins
+      with a swelled giant, M − Mc > 0.
+  - **Goldens** (blessed at header 24 in T4.m's own checkpoint on the lane branch, for the
+    version-25 batch, by decision-bump-plan-after-22 §2.2's wiring):
+    - `stellar/binary_timelines`: about 27 of 1,000 digests (the ruling's prototype).
+      - By cause: 21 white-dwarf swells, 2 helium-star swells (0255, 0267), and 4 by the helium
+        accretor's clock (0050, 0138, 0841, 0960, in their bits).
+      - 5 change their outcomes (0080, 0255, 0267, 0305, 0487).
+    - `stellar/held_bare_core_helium_star`, `stellar/summaries` and the system goldens: run
+      `golden_diff`, and attribute any move.
+  - **Statistics** (slow; record, and assert where they are asserted now). Expected, from the
+    ruling's probe on 10,000 layer-D and 12,000 layer-E prior pairs:
+    - capped timelines 1 + 2 → 0;
+    - layer E: records 8,393 → 8,396, hydrogen-poor share 0.5376 → 0.5380;
+    - layer D: accretion-induced collapses (bound NS after the primary's collapse) 158 → 140,
+      persistent NS LMXBs 104 → 86, millisecond pulsars 43 → 29, hot-subdwarf time −30% (pair
+      6695's capped segment);
+    - swell requests, refusals by each gate, placements refused and swells made, recorded;
+    - `binary_system`'s marks, `binary_carve` within Poisson, the R06 census with its time, and
+      `just fit-check`, whose flagged tables are refitted in the train's wiring.
+  - **Acceptance:**
+    - `cargo nextest run -p hyperion-sim -E 'test(binary::)'`;
+    - the slow `binary_system`, `binary_carve` and `binary_classes` suites, the 10³-pair suites
+      and the R06 census, with the figures recorded in Risks;
+    - `the_gate_is_conservative` (`stellar/brief.rs`) and P11.T17.a's agreement test,
+      `detached_generated_pairs_are_passed_over` (`binary/light.rs`), re-run and passing
+      (decision-observed-class-findings §A.5);
+    - determinism-auditor, science-checker and rust-reviewer reviews.
+
+  _As built (lane p11-t4mn, 2026-10-29; at version 23 on its lane branch, held for 25's train): see
+  Risks, "P11.T4.m as built"._
+
+- **P11.T4.n A pinned main sequence ends at its own** (decision-observed-class-findings §B,
+  2026-10-21; a physically absurd collapse; output moves; an anchor of version 25 (S1), after
+  P11.T4.l and T4.m on their lane branch and landed only with the train, by
+  decision-bump-plan-after-22's addendum of 2026-10-21; decision-galaxy-25-train §1.7).
+  - **The fault.** Record 822C72E00000008C's pinned case-A donor collapses on its hydrogen main
+    sequence, at plan 06's death age.
+    - A death age of 24.62 Myr means m₀ ≈ 10.5 M☉ at Z 0.02 (10.9 at 0.014, 11.2 at 0.008), with
+      t_MS ≈ 22.3 Myr. Core collapse needs a degenerate iron (or ONe) core, which forms only after
+      carbon, neon, oxygen and silicon burning; a main-sequence core is hot, non-degenerate
+      hydrogen.
+    - At 24.6 Myr a real case-A donor is at its terminal-age main sequence, in rapid case AB
+      (about 0.3 Myr), or a young stripped helium star, and most likely ends as an ONe or CO white
+      dwarf, or in an electron-capture supernova, after 30 Myr (Wellstein, Langer and Braun 2001,
+      system 31). Real case-A main sequences extend only about 5–10%. BSE's τ-preserving rule
+      (HPT §7.1, `aged_tau`) overstates the extension by an order of magnitude, because real
+      donors are overluminous (Sen et al. 2022: about 7 times).
+    - The pin stays (Design note 16; Risks, "Deaths the engine cannot move"): plan 08's placement
+      class and plan 09's supernova test read the primary's single-star death in placement,
+      before the engine runs, so moving the death age, or ending the timeline any other way, is
+      rejected.
+    - This supersedes ruling p11-t4k-faults' "recorded, not routed" (its §2.1 C and §7). A
+      collapse from a post-main-sequence state that has not finished helium burning (a
+      supergiant or a stripped helium star) is no blocker: a shift of about 10% of the life, from
+      a real class of progenitor, recorded.
+  - **The switch.**
+    - The pinned primary's own track's main-sequence end age (from `PinnedTrack`'s track) becomes an
+      engine stop. If, at that age, member 0 holds a hydrogen main sequence that outlasts the pin's
+      own, carried (`Member::MainSequence { helium: false }`) or on a track of its own (a merger's
+      product), the engine closes the segment there, a listed event. It then carries the star on the
+      pin's own track: `Member::Shaped` at offset 0, at the binary's mass, the form a case-B donor
+      already takes.
+    - What follows is existing machinery: the radius at the star's mass (HPT §7.1), the
+      small-envelope perturbation, a naked helium star once M ≤ Mc, and case AB. The pin falls at
+      the own track's death through the existing carried tie. The core becomes Mc,TMS(10.5 M☉)
+      ≈ 2.3 M☉, which can make plan 06's neutron star (BSE sends a helium star above 2.25 M☉ to
+      core collapse).
+    - Unchanged: the pin's age, remnant and kick; a star already off its main sequence at that
+      age; a helium main sequence; a star that is not pinned; pairs whose run ends before that
+      age. No draw, stream or tag changes.
+    - A τ floor was rejected: it leaves a helium star of about 1.2 M☉, early in helium burning,
+      which BSE itself would make a CO white dwarf, so plan 06's neutron star would come out of
+      an explosion with no ejecta.
+  - **Files** (the ruling names none): where the build puts the stop, about `binary/evolve.rs`
+    (`PinnedTrack`, `pinned_death`), the engine's stops (`binary/detached.rs`'s `Stop`,
+    `binary/rlof.rs`) and `binary/star.rs` (`Member`); the tests below.
+  - **Tests:**
+    - 822C72E00000008C, and pairs 0223 and 0277 of the pinned thousand: no pinned collapse from
+      the hydrogen main sequence. The progenitor is a supergiant or a naked helium star, and the
+      remnant is plan 06's bit for bit.
+    - A new invariant in the 10³-pair suite and the slow invariant suites: pinned collapses from
+      a hydrogen main-sequence state = 0.
+    - `check_invariants`' continuity inside a segment lists the switch as an event: the step in
+      L falls on a segment's edge.
+  - **What moves** (the ruling's blast radius): the timelines of pinned primaries (m_cc − 1 M☉
+    and up) whose binary main sequence outlasts their own, at ages past their own terminal-age
+    main sequence: case-A donors; member-0 main-sequence accretors that were rejuvenated;
+    main-sequence merger products that hold the pin; contact pairs (0223, 0277). The 2026-10-06
+    rulings counted 2 of the pinned thousand collapsing on the main sequence, and 0 of 12,000
+    layer-E prior pairs. The switch also moves case-A pairs that did not collapse on the main
+    sequence: count every moved timeline.
+  - **Goldens** (blessed at header 24 in T4.n's own checkpoint, for the version-25 batch):
+    `stellar/binary_timelines` (some of the 10³ digests), and possibly `stellar/summaries`, the
+    brief goldens and the server's goldens that hold such a system. Run `golden_diff`, and
+    attribute every move.
+  - **Tables and statistics:** `just fit-check`: `pair_light` (P11.T17.b), and R06's
+    `sky_binary_light_c/d/e` if stale, refitted in the train's wiring. Re-measured and recorded:
+    `binary_classes`, the stripped share, the double neutron stars, and the R06 census.
+  - **Departures to record in Risks:**
+    - L steps up about 0.75 dex at the switch, from log L 3.56 to 4.31. Real donors are
+      overluminous, so the direction is right; easing it over a thermal time is deferred.
+    - The core is case-B-like, about twice a real case-A core.
+    - Real donors of this mass most likely end as white dwarfs or in an electron-capture
+      supernova, later than the pin: Design note 16's departure.
+    - A case-A-stripped remnant belongs to finding F13's stripped-mark remnant law (plan 06's
+      deferred findings), not here.
+  - **Acceptance:** as T4.m's: `cargo nextest run -p hyperion-sim -E 'test(binary::)'`; the slow
+    suites above, with the figures recorded in Risks; `the_gate_is_conservative` and
+    `detached_generated_pairs_are_passed_over` re-run and passing; determinism-auditor,
+    science-checker and rust-reviewer reviews.
+
+  _As built (lane p11-t4n, 2026-10-29; at version 23 on its lane branch beside T4.l's, held for
+  25's train): see Risks, "P11.T4.n as built"._
+
+- **P11.T4.o The transfer loop's steps: the boundary, a donor dead inside a step, and the step's
+  size** (findings F18 and F17, and the engine finding of "P11.T17.b as built";
+  decision-galaxy-25-train §11, 2026-10-27; output moves; an anchor of version 25 (S1), after
+  P11.T4.n on the same lane branch and landed only with the train; the binary engine stays on lane
+  branches, decision-galaxy-25-train §1.7).
+  - **F18, the receding boundary.** A boundary stop closes a segment whether or not the boundary
+    is reached, while `after_boundary` acts only at τ ≥ 1. A rejuvenated accretor's landings
+    therefore fall short and close a segment each, until `MAX_SEGMENTS`.
+    - The rule, in `detached_phase` and `transfer_phase`: a step limited by a member's
+      main-sequence boundary takes that boundary at its end if the member aged over the step (τ
+      at the end above τ at the start). Its τ is set to 1, and the segment closes and
+      `after_boundary` acts.
+    - A member that did not age over the step (its rejuvenation at or above its ageing) does not
+      take the boundary: no segment closes, and the phase goes on.
+    - The main sequence then ends early by at most the last step's rejuvenation, under one step's
+      τ increment. Record the largest measured value in Risks.
+    - BSE's least step of 10⁻⁷ Myr is not used: it still closes a segment at every short landing.
+  - **A donor that dies inside a step** (the engine finding of "P11.T17.b as built"). At the top
+    of `transfer_phase`'s loop, a donor whose structure is neither living nor a white dwarf has
+    died inside the last step.
+    - The engine acts on its death there as on `Stop::Death`: `die(d)`, BSE §2.5's collapse with
+      its mass loss and kick, then `end_without_a_living_donor(d)`, at the step's end.
+    - This replaces the debug assertion "a transfer step from a donor with nothing living".
+    - The death is dated at the step's end, at most one step late (about 0.5% of the donor's
+      mass), a departure recorded in Risks.
+    - Find why that step's limit missed the death, and record it. If a limit fix makes the branch
+      unreachable, keep it as the backstop.
+  - **F17, the step's size** (ruling p11-c2-swell §4.4). A transfer step whose solved transfer
+    moves more than 2 × `TRANSFER_STEP` (1%) of the donor's mass is repeated at half its dt, up to
+    8 times, the same inputs giving the same halvings. `dt_hint` starts from the accepted dt.
+  - **Tests:**
+    - F18:
+      - P11.T17.c's follow-up gainer in layer D (8.88 M☉, fed by a 0.97 M☉ helium giant) ends
+        its main sequence in one boundary step and is not capped;
+      - a fed mixed accretor that does not age over a step keeps its main sequence and closes no
+        segment;
+      - an unfed star's main sequence ends at the same age as before to 10⁻⁹ relative.
+    - The dead donor:
+      - E's cell 3579, sample 49 under `FIT_SEED` (32.75 + 31.83 M☉ at [Fe/H] −1.98, circular
+        at 65.8 R☉), leaves a black-hole pair or a disrupted one at about 8.51 Myr, not one
+        31.65 M☉ black hole;
+      - no transfer step starts from a dead donor over the pinned thousand and the 10³-pair
+        suites.
+    - F17: pinned pair 0305's 1.57 Myr step moves at most 1% of its donor, and no accepted step
+      over the pinned thousand moves more.
+  - **The held floor.** Re-run P11.T17.c's follow-up probes, its capped timelines in C, D and E.
+    - If none is capped, the held floor is dropped in version 25's wiring with the pair-light
+      refits, which restores D's and E's `Remnants`.
+    - Otherwise give main the count by pair.
+  - **Goldens** (blessed at header 24 in T4.o's own checkpoint, for the version-25 batch):
+    `stellar/binary_timelines` and what reads it. Run `golden_diff`, and attribute every move to
+    F18, the dead donor or F17.
+  - **Acceptance:** as T4.m's: `cargo nextest run -p hyperion-sim -E 'test(binary::)'`; the slow
+    suites, with the figures recorded in Risks; `the_gate_is_conservative` and P11.T17.a's
+    agreement test re-run and passing; determinism-auditor, science-checker and rust-reviewer
+    reviews.
+
+  _As built (lane p11-t4o, 2026-10-30; at version 23 on the train branch, held for 25's train): see
+  Risks, "P11.T4.o as built"._
 
 ### P11.T5 Classes from state
 
@@ -1348,19 +1621,27 @@ tables must keep that under one in ten, which a test counts.
   density at `sunlike_point` for Milky Way parameters is within 30% of 4.8 × 10⁻⁶ per cubic parsec
   (Pala et al. 2020); the expected galaxy total is 6–12 × 10⁶ over ten seeds; the two classes
   partition the hosts, and no slow host has more than two eruptions in the horizon.
+  _As built (lane `p11-t8a`, 2026-10-31; at version 24, no bump): see Risks, "P11.T8.a as
+  built"._
 - **P11.T8.b X-ray binaries.** Low-mass (neutron-star and black-hole, persistent and transient),
   high-mass (Be/X, supergiant). Hosts follow the old populations for low-mass and the young disc,
   displaced by the pair's recoil, for high-mass. Test: about 10⁴ in total (0.7–1.5 × 10⁴) and 1,300
   ± 400 black-hole transients at Milky Way parameters (Corral-Santana et al. 2016).
+  _As built (lane `p11-t8b`, 2026-10-31; at version 24, no bump): see Risks, "P11.T8.b as
+  built"._
 - **P11.T8.c Stellar mergers.** One-shot entries with the merger time T as a mark, uniform over the
   source horizon; the pair before T, a luminous red nova from T, the merged star after. One ID on
   both sides of T. Test: an expected 0.2–0.5 a year (Kochanek et al. 2014); evaluated before T the
   entry is a contact or inspiralling pair whose `merger_age` is T, and after T a single merged star
   under the same ID.
+  _As built (lane `p11-t8cd`, 2026-10-31; at version 24, no bump): see Risks, "P11.T8.c as
+  built"._
 - **P11.T8.d Neutron-star mergers.** As T8.c with Peters's inspiral before T and a kilonova after;
   the remnant by total mass. Test: the expected count at Milky Way parameters is 8–12, the
   brainstorm's "about 10", and the realised counts of ten seeds pass
   `hyperion_testkit::stats::assert_poisson_count` against it.
+  _As built (lane `p11-t8cd`, 2026-10-31; at version 24, no bump): see Risks, "P11.T8.d as
+  built"._
 - **P11.T8.e The centre's feature-level index.** Plan 09 flags it and the arithmetic bears it out:
   the index under the spare band value is 13 bits, 8,192 members, and a nuclear cluster of 4–6 × 10⁷
   systems at the galaxy-wide share of 10⁻⁴ expects 2,400–6,000 accreting white dwarfs before any
@@ -1374,9 +1655,20 @@ tables must keep that under one in ten, which a test counts.
   09's alternative, list at the centre only hosts above a brightness floor, which leaves the dim
   hosts as ordinary members that alerts cannot find from afar. Acceptance: the check passes for
   every seed of the sweep, or the finding is recorded in this plan's Risks with the figures.
+  - **P11.T8.e.b The centre's list index widened to 16 bits** (new, 2026-10-26; no output moves, no
+    bump; before T8.f). Under band 7 the centre's index is `[15:0]` and `[31:16]` must be zero
+    (`FeatureLevelFieldsSet`), so its list holds 65,536 entries, while catalogue features, dwarf
+    cores and every index in a cell keep 13 bits, and every existing ID keeps its value. The shared
+    bound, `c + 8√c + 1` under the list's own limit, moves with it, so `FeatureLevelList` and
+    `check_feature_list_headroom` hold the centre up to 63,519 expected candidates, 3.47 times
+    plan 02's worst seed. Tests cover the layout's rule, `cell_word` and designations at the new
+    limit, two added lines of `id/layouts.golden`, the re-pinned headroom figures, a tripwire at
+    twice either cap, and the sweep with no failing seed; the record is "P11.T8.e.b as built", in
+    Risks.
 - **P11.T8.f Inside features.** The same classes on plan 09's `FeatureLevelList`, appended after
-  plan 09's own in the order `STELLAR_MERGER`, `NEUTRON_STAR_MERGER`, `XRAY_BINARY`,
-  `ACCRETING_WHITE_DWARF`, `ACCRETING_WHITE_DWARF_SLOW` (plan 09's design note 16), with counts from
+  plan 09's own in the order `ACCRETING_WHITE_DWARF`, `ACCRETING_WHITE_DWARF_SLOW`, `XRAY_BINARY`,
+  `STELLAR_MERGER`, `NEUTRON_STAR_MERGER` (plan 09's design note 16 and `FEATURE_LEVEL_LIST_ORDER`,
+  as P11.T8.e found), with counts from
   the feature's own parameters: the feature's budget times the class's row of `CLASS_SHARES`, and
   for globulars the encounter-rate scaling of P09.T9.e in its place. `draw_hierarchy` and a
   conditional binary draw for members that plan 09 marks millisecond pulsar, X-ray binary or blue
@@ -1387,7 +1679,11 @@ tables must keep that under one in ten, which a test counts.
   first- and second-population values, re-checked and cited (Milone et al. 2012). Test: a 47
   Tucanae-like cluster (`features::testing::named_cluster`) shows its marked pulsars as recycled
   binaries or isolated recycled pulsars, none as young pulsars; registering these classes leaves
-  every supernova entry's index unchanged.
+  every supernova entry's index unchanged. At the centre the list's index is 16 bits (T8.e.b), so
+  T8.f lists the classes there at that limit and wires `check_feature_list_headroom` beside
+  `check_index_headroom` in `crates/hyperion-server/src/compute/galaxies.rs`.
+  _As built (lane `p11-t8f`, 2026-11-01; at version 24, held at 27): see Risks, "Deviations in
+  P11.T8.f, as built"._
 
 Files: `galaxy/catalogue_classes/binary/{mod,awd,xrb,merger,nsm,feature}.rs`,
 `galaxy/catalogue_classes/mod.rs` (the new `ClassId`), `stellar/binary/scan.rs`,
@@ -1435,15 +1731,41 @@ rate at Milky Way parameters is the brainstorm's 30–50 a year (slow, from a 1%
 catalogue; a miss is a finding against the scratch sampler's transfer rates and is re-run in T15).
 Acceptance: `cargo test -p hyperion-sim binary::events`.
 
+- **P11.T9.a Light curves and the X-ray luminosity, pure.** `stellar/binary/light_curves.rs`: the
+  closed forms above, one per kind, each a value built from the event's physical parameters, with
+  its bolometric light, its light in plan 07's `Band`s and, for the X-ray kinds, its X-ray
+  luminosity. Nothing calls it, so no output moves. Tests: each curve is finite, non-negative, zero
+  before onset and continuous after it, and peaks where its form says; a heavier white dwarf
+  declines faster; a neutron star's bursts stay under its Eddington luminosity; in-band light never
+  exceeds the bolometric; each kind's peak and radiated energy against its source's ranges (a miss
+  is a finding). Acceptance: `cargo test -p hyperion-sim binary::light_curves`.
+- **P11.T9.b The event tags, `events_in` and `active_at` (after P11.T8.a).** The seven tags, the
+  two constructions and the one-shots above in `stellar/binary/events.rs`, and Provides'
+  `light_curve(event, dt, band)` and `xray_luminosity(event, dt)` over T9.a's curves, with the
+  task's tests and acceptance.
+  _As built (lane `p11-t8b`, 2026-10-31; at version 24, no bump): see Risks, "P11.T9.b as
+  built"._
+
 ### P11.T10 Agreement with kicks, displaced objects and runaways
 
 Build the conditional multiplicity of layer-D and -E systems on plan 08's `record.placement_class()`
 and plan 06's stripped mark (Design note 1): `Displaced { kind: Remnant, .. }` with an ordinary-mode
-kick is `ForcedSingle`; `Retained` and low-mode remnants keep their drawn companion and move at the
-pair's recoil (10–30 km/s, checked against the velocity plan 08 drew and its `kick_constraint()`);
-`Displaced` with kind `Runaway` or `Walkaway` is `ForcedSingle`; a grid binary whose supernova
-unbinds it shows the remnant alone, because the released companion is plan 08's independent object.
+kick is `ForcedSingle`; `Retained` and low-mode remnants keep their companion where the engine's
+collapse leaves the pair bound (P11.T4.k–l), and move at its recoil (`SystemStars::recoil`; 10–30
+km/s, checked against the velocity plan 08 drew and its `kick_constraint()`), and where it unbinds
+them, for example when more than half the pair's mass is lost, the remnant is alone; `Displaced`
+with kind `Runaway` or `Walkaway` is `ForcedSingle`; a grid binary whose supernova unbinds it, the
+engine's `Disrupted`, shows the remnant alone, because the released companion is plan 08's
+independent object. That applies to every pair, since every collapse is applied (P11.T4.l).
 Low-mass released companions are left out, as the brainstorm says. Bump the version.
+
+_Amended by P11.T4.l (ruling p11-supernova-pins §7, 2026-10-06; written 2026-10-28):_ the
+agreement test runs after T4.l. Without it the engine released 1,001 companions of 2.5 M☉ or more
+per 12,000 layer-E prior pairs, 40% of them faster than 30 km/s; with it, 2,212 and 18% (the
+ruling's probe). Its walkaway figure is likely to miss (the ruling's §8, F11: the record holds
+speeds at the explosion, Renzo et al. speeds at infinity). A system this task moves at its recoil
+must stay below its layer's `pad_speed`, through P08.T17's check: layer D's neutron-star recoils
+measure at most 76 km/s, and T4.l's new bound pairs recoil at most 22 km/s.
 
 Files: `stellar/system.rs`, `stellar/binary/supernova.rs`.
 
@@ -1451,11 +1773,14 @@ Tests (slow, prior-sampled massive binaries): the stripped share equals `strippe
 the low mode is 20 ± 10% of neutron stars and nearly all of its members keep a companion; more than
 half of double neutron stars have e < 0.3; the rate of released companions above 2.5 M☉ matches the
 supernova-release part of plan 08's `RunawayModel` (walkaways, and the half of runaways not ejected
-by encounters) to 25%, most of them under 30 km/s; retention in a cluster with a 50 km/s birth
+by encounters, amended to the tenth by design note 24 as ruling 128.2–3 amended it) to 25%, most
+of them under 30 km/s; retention in a cluster with a 50 km/s birth
 escape speed is at least a tenth with pairs judged on system velocity; at least half of black holes
 are unkicked; and, for Design note 16, `SystemStars::death_time` and `natal_kick` of 10⁴ layer-E
 systems equal what plan 06 alone gives. Acceptance: `just test-slow` passes these by name
 (`binary_kick_*`).
+
+_As built (lane `p11-t10`, 2026-11-01), held at 27: see Risks, "P11.T10, as built"._
 
 ### P11.T11 System assembly
 
@@ -1475,6 +1800,50 @@ Acceptance: `cargo test -p hyperion-sim stellar::system`.
 _As built (round 9c, `bin5b`; output moves, its bump batched into version 16): see Risks,
 "Deviations in P11.T11, as built"._
 
+- **P11.T11.a The range rows read the pair** (ruling `decision-observed-class-findings.md` §A,
+  2026-10-21; a blocker: in now mode a primary its pair has changed read one class in its range
+  row and another in the summary, on one screen; no version of its own). Plan 06's brief model
+  first decides, by a gate, whether the system's primary is certainly its own single-star model
+  through the whole clock window: a single system, or one whose first redraw attempt holds no pair
+  of two stars that the binary engine can run so as to change its stars or carve it
+  (`pair_light_bound` `Detached`, and no second star off its main sequence). A certified system
+  keeps plan 06's routes bit for bit; every other takes a new `BriefRoute::Paired`, which holds the
+  system's `SystemStars` and reads their brief. `SystemStars::brief_at` takes the body of plan 12's
+  `summary_brief_at`, which goes, so that one public brief remains; the row keeps the first
+  attempt's star count (P11.T7).
+  - **Files:** `stellar/brief.rs`, `stellar/system.rs`, `stellar/binary/light.rs`,
+    `stellar/multiplicity/bound.rs` and `hierarchy.rs`, the callers in `observe/`, the server's
+    cache docs (`compute/systems.rs`, `config.rs`), the tests and benches named in the as-built,
+    and `stellar/briefs.golden` and the server's `systems_in_range_briefs.golden` re-blessed at
+    version 22 with no bump (the ruling's §A.4).
+  - **Tests:** a now row is the summary's primary for stripped, merged and fed primaries before,
+    during and after their change, and for LOOK72's 820E6EE00000008D and 822C72E00000008C; every
+    row the gate certifies is its primary's own model at the times sampled; a certified row is its
+    single-star brief bit for bit; the retargeted tests of §A.2.4.
+  - **Acceptance:** §A.3: the gate at most 5 µs a row on average, the 50 ly Sun-like query's briefs
+    cold at most 300 ms on one thread (ceiling 500 ms), warm at most 1.5 µs a row; the commands
+    are in the as-built.
+  - _As built: see Risks, "P11.T11.a as built"._
+- **P11.T11.b A paired helium star's surface** (`decision-stripped-star-class.md` §3,
+  2026-10-21; a wrong class, so a blocker). `PairedStar::class_extras` gave a helium star its
+  pair had made no `HeliumSurface`, so every paired Wolf-Rayet helium star read WN for life, where
+  a single one turns WC once it has lost, as a helium star, more than f of its entry mass
+  (P06.T24.a). Binary-stripped helium stars do turn WC from about 9–11 M☉ of initial helium mass
+  (Woosley 2019, ApJ 878, 49, §4.1; Yoon 2017, MNRAS 470, 3970, §3.2).
+  - Build: `PairedStar` carries the star's helium-star entry mass, its mass when its pair's
+    timeline made it a naked helium star in its current, unbroken helium-star life (HeMS, HeHG or
+    HeGB): a helium star's track's `helium_star_entry_mass` where the member is on one, otherwise
+    the start of the earliest segment in that life. Mass lost by case BB transfer counts as lost.
+    For those phases `class_extras` returns
+    `ClassExtras::helium_star(HeliumSurface::of(entry, M))`; the neutron star's branch is
+    unchanged. No draw, stream or tag changes.
+  - Tests (failing before the fix): a paired stripped primary above the floor, of about 30 M☉ or
+    more, is WN early and WC once entry − M > f × entry, and its class is `classify`'s with
+    `HeliumSurface::of` on the same state; a single helium star of the same entry mass turns WC
+    at the same mass.
+  - _As built (lane `stripped-class`, 2026-10-21; at version 22, no bump): see Risks,
+    "Deviations in P11.T11.b, as built"._
+
 ### P11.T12 Statistical suite
 
 Slow tests, fixed seeds, Milky Way parameters unless stated: multiplicity by primary mass in six
@@ -1492,6 +1861,10 @@ tests; a Hertzsprung–Russell dump of a cluster with binaries for the check by 
 Files: `crates/hyperion-sim/tests/binaries_statistical.rs`.
 
 Acceptance: `just test-slow` passes; `just ci` stays green.
+
+_As built (lane `p11-t12`, 2026-11-01; tests only, nothing generated moves): see Risks, "P11.T12,
+as built". Its fix, the wide pairs' wind held at 27: see Risks, "P11.T12's fix"; the pair bound's
+wind reach, held at 29: see Risks, "P11.T12's wind reach"._
 
 ### P11.T13 Protocol and server
 
@@ -1548,8 +1921,9 @@ keyboard-reachable. Acceptance: `pnpm test`, `just ci`, and a check by eye again
 When P15.T9.b and P15.T10.b have landed `tables/binary.rs`: clear the `provisional` flags, bump the
 version, regenerate goldens, and re-run T6's redraw rate (now 2–4%), T8's counts and sampler
 chi-squares at the fitted tolerance, and T9's nova rate. Likewise note P15.T4.b's scale in T12's
-Chabrier window and P15.T5.c's verdict on `CLUSTER_MERGED_BINARY_FATE`; if only the alternative
-passes its four retention bands, change the default here with the bump. Acceptance: `just ci` and
+Chabrier window and P15.T5.c's verdict on `CLUSTER_MERGED_BINARY_FATE`: the default passes its four
+retention bands (2026-10-26), and T5.c's guard in `retention.rs` fails the build if it changes, so
+changing the default needs a reader of the other branches first. Acceptance: `just ci` and
 `just test-slow` green with no provisional entry for `binary` in `tables::MANIFEST`.
 
 ### P11.T16 The census's hierarchy bound (R06's ask A)
@@ -1557,8 +1931,8 @@ passes its four retention bands, change the default here with the bump. Acceptan
 Decided 2026-10-05 (`decision-r06-census-cost.md`, §7, "Ask A"), for rendering plan R06's
 R06.T8.g, the sky census's bound star by star. Its form and cost were ruled on 2026-10-07
 (`decision-p11-t16-hierarchy-bound.md`), after the lane's measurement (Risks, "P11.T16's cost,
-measured"). It is built at `GENERATOR_VERSION` 21, beside P11.T17 (ask B), while the 21 → 22
-batch (T4.l, T4.m) waits (owner, 2026-10-07: features first).
+measured"). It is built at `GENERATOR_VERSION` 21, beside P11.T17 (ask B), while the deferred
+bump batch (T4.l, T4.m) waits (owner, 2026-10-07: features first).
 
 `stellar::multiplicity::hierarchy_bound(galaxy, record, composition) -> HierarchyBound` is exact
 by construction. For every redraw attempt that `SystemStars::generate` can keep, it is the
@@ -1692,14 +2066,21 @@ Order: after P11.T4.k, at version 21. It is independent of P11.T16, and R06.T8.g
 `Detached` agrees with the generator as built at 21, including P11.T4.j's decay bound without
 P11.T4.l's wind-spin term.
 
-**The version-22 batch** (P11.T4.l, T4.m). T4.l adds the wind-spin term to the decay bound (its
-sample 2's passes rise from 2,761 to 5,047), changes `decay_reaches` to take a `TestedOrbit`, and
-lets a passed-over pair's collapse hand the pair to the engine, with its kick. Then:
+**The deferred bump batch** (P11.T4.l, T4.m: a later bump batch, after plan 14's 23 → 24, since
+plan 14's batches take versions 22, 23 and 24; the ruling's "21 → 22 batch" above). T4.l adds the
+wind-spin term to the decay bound (its sample 2's passes rise from 2,761 to 5,047), changes
+`decay_reaches` to take a `TestedOrbit`, and lets a passed-over pair's collapse hand the pair to the
+engine, with its kick. Then:
 
 - `Detached` must still bound the periastron after a kick, or return `None` for every pair a star
   of which can explode by the window's end. T17.a does the latter at 21 already.
 - T17.a's test `a_passed_over_pairs_collapse_keeps_its_drawn_orbit_at_version_21` pins today's
-  behaviour and fails when T4.l lands, so the rule is looked at again then.
+  behaviour and fails when T4.l lands, so the rule is looked at again then. _(Looked at again by
+  P11.T4.l, 2026-10-28: the collapse rule, `None` for every pair a star of which may have
+  collapsed, stands, and the test is restated as
+  `a_passed_over_pairs_collapse_is_applied_and_the_bound_does_not_lean_on_it`. T17.a's closed
+  form gains T4.l's wind-spin term, so that `Detached` still implies the pre-test fails. See
+  Risks, "P11.T4.l as built".)_
 - Re-run T17.a's and T17.c's slow tests, and refit T17.b's tables, in the batch.
 
 - **P11.T17.a The reach table, the interface and `Detached`.**
@@ -1878,8 +2259,8 @@ lets a passed-over pair's collapse hand the pair to the engine, with its kick. T
       - realised near the Sun: C 155 (43), D 6 (2), E 0.
   - **T17.b's read-side widenings stand at version 21** (the orchestrator, 2026-10-08): the
     cooling floor below 0.1 M☉, E's 0.7 mag margin and E's ±0.3 dex age smear. They satisfy "a
-    violation widens the table", and are stored at the version-22 refit. A pair is read through
-    the floor-applying accessors `living_cmag_for` and `changed_cmag_for`, never the plain
+    violation widens the table", and are stored at the deferred bump batch's refit. A pair is read
+    through the floor-applying accessors `living_cmag_for` and `changed_cmag_for`, never the plain
     `living_cmag` and `changed_cmag`.
   - **The held floor** (P11.T17.c's follow-up, 2026-10-08, after R06.T8.g's slow test found a
     star shining where its pair's bound read `Remnants`).
@@ -1896,8 +2277,8 @@ lets a passed-over pair's collapse hand the pair to the engine, with its kick. T
     - A pair the closed form calls `Detached` at the window's end has not been stepped by then, so
       it reads the tables as they are. Inclusion monotonicity holds (the floor is per bin, and is
       read only past the age where the closed form first fails).
-    - It is a read-side widening at version 21, with no refit. It goes when the version-22 batch's
-      engine work removes the cap's causes.
+    - It is a read-side widening at version 21, with no refit. It goes when the deferred bump
+      batch's engine work removes the cap's causes.
   - **Inclusion monotonicity** (R06.T8.h's ruling, `decision-r06-t8h-warm.md` §5). T8.h's warm
     cache serves a window from an entry over a wider one, and its bit-identical reply rests on
     each verdict only loosening as the window widens: for windows A ⊆ A′, the verdict over A′ is
@@ -1952,24 +2333,29 @@ This plan changes generated output in T1.d, T2.c, T2.d, T6, T7, T8, T10 and T15,
 bump and regenerated goldens. T11 moves output too, as built: a paired star's summary is its pair's
 state (round 9c, `bin5b`, whose T2.d, T7 and T11 take one bump in the orchestrator's version 16
 batch). T4.g and T4.h move output too, as built: T4.g in P14 Phase J's version 20 batch. T4.h
-(the early AGB's core radius and remnant at SSE's τ), 9a0950e's protostar and build-age fixes,
-T4.i, T4.j and T4.k (rulings p11-channels, p11-supernova-pins and p11-t4k-faults) took version 21
-together, with P14.T47.e and P14.T13.c's Bond albedo, in one bump (Phase J lane, 2026-10-06; Risks,
-"The 20 → 21 bump, as built"). Each was committed with its goldens blessed at 20, and the bump
-re-blessed them at 21 without moving a value. The batch also staled four fitted tables, which
-were refitted at `--since 21` on the same branch and land with it, so that (seed, 21) names one
-output:
+(the early AGB's core radius and remnant at SSE's τ), 9a0950e's protostar and build-age fixes
+(landed as ff65e543), T4.i, T4.j and T4.k (rulings p11-channels, p11-supernova-pins and
+p11-t4k-faults) took version 21 together, with P14.T47.e and P14.T13.c's Bond albedo, in one bump
+(Phase J lane, 2026-10-06; Risks, "The 20 → 21 bump, as built"). Each was committed with its goldens
+blessed at 20, and the bump re-blessed them at 21 without moving a value. The batch also staled four
+fitted tables, which were refitted at `--since 21` on the same branch and land with it, so that
+(seed, 21) names one output:
 
 - plan 06's `stellar_fates_low` and `_mid`, which T4.h left stale by rerun, by a unit in about the
   eighth significant digit (plan 06's Risks), with every golden re-blessed at 21 after them;
 - R06's `sky_binary_light_c`, `_d` and `_e`, whose probes run pair evolution, refitted on the new
   fates (R06's Risks, "Generator version 21").
 
-T4.l moves output at version 22, with its own bump, and T4.m rides it (ruling p11-c2-swell). T1.d
-moves every star once, because the mean mass per system changes
-the system count (plan 02 lists it among its known future bumps). After that no primary moves: IDs,
-positions, primary masses, ages, primary draws, death times and kicks are untouched, except that T7
-redraws about 10⁻⁴ of grid systems (as built it removes none). It reserves: body indices 0–15 for the stellar level, which is
+T4.l moves output in a later bump batch, after plan 14's 23 → 24, with its own bump, and T4.m
+rides it (ruling p11-c2-swell): version 25 (S1), the first galaxy train after plan 14's 23 → 24
+(decision-bump-plan-after-22, 2026-10-14; updated 2026-10-15). T4.n rides it too, after T4.m, and
+T4.o after T4.n (decision-observed-class-findings §B.4, 2026-10-21; decision-galaxy-25-train
+§11, 2026-10-27). T1.d moves every star once,
+because the mean mass per system changes the system count (plan 02 lists it among its known
+future bumps). After that no primary
+moves: IDs, positions, primary masses, ages, primary draws, death times and kicks are untouched,
+except that T7 redraws about 10⁻⁴ of grid systems (as built it removes none). It reserves: body
+indices 0–15 for the stellar level, which is
 plan 14's slot `0x00`; the domain tags and the event tags 0x0300–0x0306 listed under Provides, with
 the rest of 0x0300–0x03FF free for later binary kinds; 64 draw numbers per redraw attempt; the five
 `ClassId` values plan 09's registry holds for this plan (2, 3, 5, 6 and 8); `system.substellar`, so
@@ -1996,10 +2382,17 @@ that brown-dwarf companions can be retuned without touching a star; the shapes o
   depend on the binary engine, inside placement. A companion that dies within the supernova interval
   is not a catalogue entry, because the brainstorm's test is on "its primary's death"; it explodes
   in place with its shell and is found only by going there. If that proves visible (a second
-  supernova class for companions), it is a change to plan 09's `DeathMarks`.
+  supernova class for companions), it is a change to plan 09's `DeathMarks`. P11.T4.n keeps the pin
+  where a pair prolongs the primary's main sequence past it, by ending that main sequence at the
+  primary's own; such a donor would really end later, and as a white dwarf or in an
+  electron-capture supernova, a larger departure than a few per cent ("P11.T4.n as built").
 - **The centre's feature-level index** (T8.e). Scratch arithmetic says 13 bits are tight for the
   centre's accreting white dwarfs, and plan 09 has reported it to the brainstorm's owner. Neither
-  way out is this plan's to choose.
+  way out is this plan's to choose. P11.T8.e measured it: the Milky Way fixture's centre fits, but
+  a cluster 5% heavier does not, nor do 393 of the first 10³ of plan 02's seeds ("The centre's
+  feature-level index, as measured (P11.T8.e)", at the end of this section). Ruled 2026-10-26: the
+  centre's index alone is widened to 16 bits, built by P11.T8.e.b ("The centre's feature-level
+  index, ruled", at the end of this section).
 - **Engine size.** Hurley, Tout and Pols's algorithm is large. T4 is six days as written and may be
   ten. Its subtasks each leave `just ci` green, so it can be paused.
 - **Circular dependency with plan 15**, resolved by scratch values in shapes this plan owns (Design
@@ -3103,16 +3496,20 @@ record.age_at_epoch())`. The primary is built as plan 06 built it, through a nam
     single star is never in a class, so the grid half of complementarity stays exact, and moving
     one period would need the engine run again with no guarantee. Unreachable in expectation
     (below 10⁻²⁸ a system at the measured carve rates).
-  - _The brief's count._ The range brief (`draw_star_count`, P06.T38.e) runs no engine and reads
-    attempt 0, and `SystemStars::brief_at` reports the same first attempt's count, so that a row is
-    the same whichever built it. For a redrawn system whose kept attempt has another star count the
-    row then disagrees with the summary and `SystemStars::star_count`, about half of the redrawn
-    systems. **For the orchestrator to rule:** accept, or have the brief evolve the pairs of a
-    multiple system (the engine for every multiple row).
+  - _The brief's count._ The range brief (`draw_star_count`, P06.T38.e) ran no engine and read
+    attempt 0, and `SystemStars::brief_at` reported the same first attempt's count, so that a row
+    was the same whichever built it. For a redrawn system whose kept attempt has another star count
+    the row then disagrees with the summary and `SystemStars::star_count`, about half of the
+    redrawn systems. **Ruled 2026-10-21** (`decision-observed-class-findings.md` §A.2, item 2;
+    P11.T11.a): the row keeps the first attempt's count, the engine runs only for the rows whose
+    pair can have changed their primary, and every redrawn system is among them, so its row reads
+    the kept system's primary with attempt 0's count. `SystemStars::brief_at`, the one brief, now
+    counts the kept attempt's stars.
   - _`tables/binary.rs`_ holds `ClassShareTable`, `ClassShareRow` and the scratch `CLASS_SHARES`
     (Design note 13): the same hosts per solar mass formed in every population, scaled to the Milky
     Way fixture's formed mass, `MILKY_WAY_FORMED_MASS` = 9.376 × 10¹⁰ M☉ (its components' born
-    systems times 0.957 M☉), for 4.5 × 10⁶ fast and 4.5 × 10⁶ slow accreting white dwarfs, 10⁴
+    systems times 1.0961 M☉, corrected from 0.957 by P11.T8.e's deferred findings), for 4.5 × 10⁶
+    fast and 4.5 × 10⁶ slow accreting white dwarfs, 10⁴
     X-ray binaries, 9 × 10⁴ stellar mergers in the source horizon and 10 neutron-star mergers.
     Layer shares are a guess from the stars that make each class: accreting white dwarfs C 0.75, D
     0.25; X-ray binaries and neutron-star mergers E; stellar mergers A 0.1, B 0.2, C 0.5, D 0.15, E
@@ -3164,10 +3561,14 @@ record.age_at_epoch())`. The primary is built as plan 06 built it, through a nam
     in the list as plan 06's `NoRemnant`, so the list keeps its length. The hierarchy in the
     summary is the drawn one; `state_at` has the orbits then. The server sends `binary_class`
     (`null` for none); the client's `BINARY CLASSES: NOT YET MODELLED` state gives way to `NONE`.
-  - _The brief_ (`brief_at`, and the range brief) keeps the primary's single-star state, so that a
-    range row is the same whichever built it and the range brief stays free of the engine. A
-    primary that its pair has changed (an Algol's donor, a merger product) reads so in the summary
-    only. **For the orchestrator to rule.**
+  - _The brief_ (`brief_at`, and the range brief) kept the primary's single-star state, so that a
+    range row was the same whichever built it and the range brief stayed free of the engine. A
+    primary that its pair has changed (an Algol's donor, a merger product) read so in the summary
+    only. **Ruled 2026-10-21** (`decision-observed-class-findings.md` §A, a blocker: a row and the
+    summary showed different classes on one screen): the brief must read the pair. P11.T11.a
+    certifies the rows whose primary is certainly its own model, which keep plan 06's routes bit for
+    bit, and runs the engine for every other (`BriefRoute::Paired`); `SystemStars::brief_at` is the
+    summary's primary. See "P11.T11.a as built".
   - _The tidal radius and census fields._ `planetary::context` already reads the tidal radius at
     the hierarchy's system mass; plan 03's frame rule keeps the primary's mass, as it must before
     any hierarchy is drawn, which the tidal cut's half share covers. The bright exception is
@@ -3396,7 +3797,8 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
         ln corner = −634.
       - The subnormal range allows a disc 2⌈n0⌉ units beyond its 64: each path rounds the
         subnormal factor once before × n0. It reached 81 units for the nuclear disc, n0 = 105, at
-        3.5 × 10⁻³¹¹.
+        3.5 × 10⁻³¹¹. Since 2026-10-12 it applies in both halves (plan 02's Risks, "P02.T8.a's
+        subnormal check, either way").
       - Pointers are in plans 02's and 09's Risks.
   - _Tests added_ (`agb.rs`):
     - `the_nuclear_end_is_sses`: SSE's landmarks; t_n falls with the mass; the pulses' relation
@@ -3956,8 +4358,8 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
       the doc's statement. Built as ruled, with the doc saying so. The reservoir is also counted
       once, where a star whose I falls and rises (the flash, a blue loop) could draw it twice.
       _Ruled (orchestrator, 2026-10-06):_ T4.j's bound is kept as built in version 21, and the
-      missing wind-spin term goes into P11.T4.l, the 21 → 22 task, so that the bound becomes
-      provable (T4.l's block, "The wind-spin term").
+      missing wind-spin term goes into P11.T4.l, the deferred bump batch's task, so that the bound
+      becomes provable (T4.l's block, "The wind-spin term").
     - **The ruling's "F0–K" for +1.5 < M_V < +7.5** is A3–K5 (Pecaut and Mamajek 2013, ApJS 208,
       9, extended in Mamajek's online dwarf table, v2022.04.16: A3V M_V 1.70 to K5V 7.28; the
       paper's own table has no M_V).
@@ -4097,7 +4499,9 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
     A3–K5's source (Mamajek's dwarf table), the progenitor-mass wording, F13's metallicity and
     island, F14's merging yield against Pol et al.'s intervals, and Tauris et al.'s 39 of 47 for A.
 - **Version 21 limit: a passed-over pair's collapses** (ruling p11-supernova-pins, 2026-10-06,
-  figures re-measured by ruling p11-t4k-faults; fixed by P11.T4.l at version 22).
+  figures re-measured by ruling p11-t4k-faults; fixed by P11.T4.l in the deferred bump batch).
+  _Closed by P11.T4.l (lane p11-t4l, 2026-10-28), on its lane branch for version 25's train: the
+  limit holds at versions 21 to 24. See "P11.T4.l as built"._
   - A pair that the pre-test passes over keeps its drawn orbit through its stars' core collapses,
     with no record, mass loss or kick.
   - These are 42% of layer-E primaries' collapses (5,012 of 11,915 in the 12,000 prior pairs,
@@ -4121,6 +4525,9 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
     - Pairs 0223 and 0277 of the thousand collapse at τ 0.999 and 0.987, 18.5 kyr and 0.68 Myr
       before their binary main sequences would end. Their merger products would have died 10
       and 22 Myr later.
+    - _Closed by P11.T4.n (lane p11-t4n, 2026-10-29), on its lane branch for version 25's train
+      (decision-observed-class-findings §B): no pinned primary collapses from its main sequence.
+      See "P11.T4.n as built"._
   - **Pinned primaries stripped by the binary keep plan 06's single-star remnant**, capped at
     their mass (design note 16).
     - Binary-stripped stars have smaller carbon–oxygen cores. For case B strips, Schneider,
@@ -4128,7 +4535,8 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
       ≳ 34 M☉ to ≳ 67.5 M☉ (the complements of Table 1's neutron-star ranges, at Z = 0.0142; case
       B also has a black-hole island at about 31.5–34 M☉, where the trend runs the other way).
     - Finding F13: plan 06's remnant law should read the stripped mark, as its kick law does.
-      Routed to P15.T5.c, with its own bump.
+      Recorded as a deferred correction in plan 06's Risks, with no task and no bump
+      (decision-p15-revalidation Q5, 2026-10-23); P15.T5.c does not wait on it.
 - **Finding F14 (ruling p11-t4k-faults): wide bound double neutron stars.**
   - 115 bound per 12,000 layer-E prior pairs (7.2 × 10⁻⁵ per M☉ formed) is about 4.4 times
     COMPAS's (Vigna-Gómez et al. 2018).
@@ -4137,7 +4545,9 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
     (2023).
   - Routed to the binary-population calibration investigation with F9–F12.
 - **P11.T4.g's finding C2 (`swell`'s core) has a measured consequence** (ruling p11-t4k-faults;
-  ruled by ruling p11-c2-swell, 2026-10-06, and fixed by P11.T4.m at version 22).
+  ruled by ruling p11-c2-swell, 2026-10-06, and fixed by P11.T4.m in the deferred bump batch).
+  _Closed by P11.T4.m (lane p11-t4mn, 2026-10-29), with F15, on its lane branch for version 25's
+  train: the caps hold at versions 21 to 24. See "P11.T4.m as built"._
   - A helium main-sequence accretor fed hydrogen by a main-sequence donor:
     - is swelled at any positive rate, even while its wind outweighs what it is fed, into a
       core-helium-burning giant whose envelope is the placement's miss (−0.2 to −0.6% of its
@@ -4157,6 +4567,28 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
   - T4.k's collapse invariants skip capped timelines, as the 10³ suites assert none.
   - BSE keeps the accretor's own core and gives it the step's net gain as envelope, behind a gate
     (`evolv2.f` 1480–1491): P11.T4.m's rule, which removes both caps.
+- **Finding F16: a placed star misses its core** (ruling p11-c2-swell, 2026-10-06; not fixed;
+  recorded and deferred under the 2026-10-13 rule; P11.T4.p reserved for it,
+  decision-galaxy-25-train §11, 2026-10-27).
+  - `placed_star` builds the new star's track from zero age with its winds, so it enters the
+    placed phase at a wind-reduced effective initial mass (HPT §7.1). Its core there falls short of
+    the one asked for:
+    - core-helium-burning at Z = 0.02: −0.07% at 0.8 M☉, −0.7% at 1.5, −2.5% at 2.5, −7% at 8;
+    - thermally pulsing AGB: up to −0.6%;
+    - a fifth to a third as much at Z = 0.004.
+  - BSE's `gntage` starts the star at the placement, exact (`gntage.f` 159).
+  - It touches every merger and common-envelope product (BSE §2.7.4's Mc3). An exact placement
+    for every caller moves 264 of the 1,000 digests. It is a figure, not a wrong state.
+  - P11.T4.m makes the swell's placement exact by its own solve.
+  - The general fix, P11.T4.p when a ruling schedules it: a plan 06 track that starts at the
+    placed phase with the solved M₀, beside P06.T9's helium-star entry point, then `placed_star`
+    for every caller, with its own bump.
+- **Finding F17: a transfer step can move far more than BSE eq. 92's 0.5% of its donor** (ruling
+  p11-c2-swell, 2026-10-06; fixed by P11.T4.o at version 25, decision-galaxy-25-train §11).
+  - In pinned pair 0305, one 1.57 Myr step moved 0.49 M☉, about 25% of its donor, onto a white
+    dwarf, after a slower step had lengthened `dt_hint`.
+  - So the accretion regime (nova, steady, giant) and the swell are decided once for that mass.
+  - P11.T4.o repeats a step that moves more than 2 × `TRANSFER_STEP` of the donor at half its dt.
 - **The local V light is low, and the pair light (a pointer from rendering plan R06, 2026-10-06,
   `decision-r06-t9b-band.md`; for this plan's owner, not a ruling on this plan).** Near the Sun
   the fixture's V light is 26% under Flynn et al. 2006's 0.056 ± 10% L☉ pc⁻³ (plan 02's Risks,
@@ -4188,6 +4620,12 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
     | 1845d20, cdebae44   | none                                                                                                                                                                                                                                                   |
     | fates refit at 21   | none: the refit commit re-blesses every golden after refitting `stellar_fates_low` and `_mid` (P11.T4.h's early-AGB core, through the fates), and no golden moves                                                                                      |
 
+    The hashes in this table, in the Phase J records above and in the T4.i and T4.k entries are
+    the lane's. Each landed with a hash of its own: ee47311 as c07edb86, 9a0950e as ff65e543,
+    3a52ca8 as 156a75fb, ce69992 as 0dd535f7, 1e47d16 as 0c115993, 3b55013d as 809235d6, f7b6b4eb
+    as 0eeb6fca, 1845d20 as 5babf55b and cdebae44 as 6804c059. The bump below, 2ecdeb4a, landed as
+    a1110def.
+
     In all, `binary_timelines` moves all 1,000 digests: 372 in place, and 628 with a new segment
     count in their label. `summaries` moves 29 values and one relabelled death. T47.e and the
     albedo share 8 of `close_binary`'s 72 moved values and 2 of each other system's 18.
@@ -4213,7 +4651,8 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
     21", has the refit as built.
   - _Stale by rerun: the fates, refitted in 21 too._ `hyperion-fit check --rerun-fast` at 21 also
     found plan 06's `stellar_fates_low` and `_mid` stale by rerun, moved by T4.h alone. The
-    orchestrator first kept them for 21 with a refit in the version-22 batch. The same day
+    orchestrator first kept them for 21 with a refit in the version-22 batch (as the deferred bump
+    batch was numbered then, before plan 14's batches took versions 22–24). The same day
     (`status.md`, 2026-10-07) it ruled them refitted at 21 instead:
     - no version-21 output is published;
     - kept, they would leave `just test-slow` and `just ci-slow` red at 21 and could hide a third
@@ -4298,7 +4737,7 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
   - (b) As (a), with the cover cut by a sharper exact exclusion built on P11.T17's pair bound. The
     exclusion is for no merger, no transfer and no compact accretor beside a living star in the
     source horizon. The cost then approaches attempt 0's.
-  - (c) A generator change in the deferred version-22 batch:
+  - (c) A generator change in the deferred bump batch:
     - the direct period law tabulated by mass node;
     - a closed-form windowed period quantile;
     - companions' masses kept across carve redraws, or a redraw of the carved pair alone.
@@ -4450,9 +4889,11 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
     - But a pair passed over only at the window's end, and run to +H (because it can interact by
       then, or holds a remnant), goes through the engine from zero age, kick and all. T4.j's
       zero-miss gate covers interactions before the first supernova only.
-    - So the rule is needed at 21 as well as at 22. The test
+    - So the rule is needed at 21 as well as after the deferred bump batch. The test
       `a_passed_over_pairs_collapse_keeps_its_drawn_orbit_at_version_21` pins the F3 behaviour and
-      fails when T4.l lands, by design.
+      fails when T4.l lands, by design. _(P11.T4.l, 2026-10-28: it did, and is restated as
+      `a_passed_over_pairs_collapse_is_applied_and_the_bound_does_not_lean_on_it`; the rule
+      stands. See "P11.T4.l as built".)_
   - **The sampling, set by the dense test and the science check:**
     - each cell's stars at 9 masses, 7 metallicities (0.083 dex apart at most) and 11 η draws (η =
       0, then −3.5σ to +3.5σ in nine steps, then +7σ);
@@ -4538,10 +4979,10 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
     - 404 µs for 1,024 census-like queries: 0.39 µs a call, 2.5 × 10⁶ a second, against the
       1 µs target;
     - 519 of the 1,024 queries are `Detached`.
-  - **At the version-22 batch:**
+  - **At the deferred bump batch:**
     - re-run both slow tests;
     - refit `binary_reach` if fit-check finds it stale;
-    - revisit the supernova rule when the pin fails (the task text's 22-batch note).
+    - revisit the supernova rule when the pin fails (the task text's note on the deferred batch).
 - **P11.T17.b as built** (2026-10-08, at version 21; `decision-p11-t16-hierarchy-bound.md` §§5, 6
   and 10). No generated output moves, and there is no bump: nothing generated reads the tables.
   - **Built:**
@@ -4565,7 +5006,7 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
     - Each of the three table modules carries one `#[allow(clippy::unreadable_literal)]`, for
       D's and E's six-digit counts in `DIMENSIONS`. An `expect` would go unfulfilled on C. Writing
       the counts with separators would change the committed bytes, so that waits for the
-      version-22 refit.
+      deferred bump batch's refit.
   - **The probe** (scratch, not committed: `.git/rm23-scratch/p11-bounds/t17b/probe_t17b.rs` and
     `probe_full.log`):
     - It took 10⁴ generated star–star pairs a layer near the Sun, each run through `evolve` to
@@ -4720,8 +5161,10 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
       A refit at 21 was possible (the placeholder trick, 1.2–1.8 CPU-h a layer), but would have
       taken the CPU past the approved 7 h. The floor also needs the lighter star's exact mass,
       which no cell holds.
-    - The version-22 refit should store E's margin and smear. This is to be added to the 22
-      batch's entry in `deferred-corrections.md`, which today says only "refit the tables".
+    - The deferred bump batch's refit should store E's margin and smear. This is to be added to
+      that batch's entry in `deferred-corrections.md` (headed there "The 21 → 22 batch", its number
+      before plan 14's batches took versions 22–24; it now follows plan 14's 23 → 24), which
+      today says only "refit the tables".
   - **The slow test** (`the_pair_light_tables_bound_evolved_pairs`):
     - It takes 10⁴ pairs a layer sampled as the fit samples them, on a seed of the test's own,
       and about 9,300–9,650 generated pairs a layer near the Sun whose heavier star lies in the
@@ -4750,8 +5193,8 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
 
       The walk counts such a member's wind accretion as a departure, so the tables include it.
 
-  - **The engine finding** (deferred, not fixed; `deferred-corrections.md`, the 22 batch's engine
-    work):
+  - **The engine finding** (deferred, not fixed; `deferred-corrections.md`, the deferred bump
+    batch's engine work):
     - `rlof.rs`'s debug assertion, "a transfer step from a donor with nothing living", fires
       for 1 in 3.9 × 10⁴ of E's samples.
     - The pair: E's cell 3579, sample 49 under `FIT_SEED`, a 32.75 + 31.83 M☉ twin at
@@ -4779,7 +5222,7 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
       table.
     - E's living column merges within 2 mag.
     - The cooling floor and E's margin and smear are applied in the reader, not in the fit.
-  - **What the sampling leaves out, to fix at the version-22 refit** (the science check):
+  - **What the sampling leaves out, to fix at the deferred bump batch's refit** (the science check):
     - **Eccentricities.** The law's are clamped at 0.95, and the high extreme is 0.9.
       - At a fixed periastron the generator's law reaches e → 1, held at 0.9999
         (`stability.rs`).
@@ -4835,7 +5278,7 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
     - **science-checker.** No must-fix. Its should-fixes are the sampling gaps and the white-dwarf
       note above, and the periastron edge's comment, corrected.
   - **Not built:** the core-inertia column (the open option), and T17.c's verdicts.
-  - **At the version-22 batch:**
+  - **At the deferred bump batch:**
     - refit the three tables, storing E's read margin and smear and the cooling floor, and
       sampling the gaps above;
     - re-run the slow test.
@@ -4970,7 +5413,7 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
     provisional): 561 µs for 1,024 queries, 0.55 µs a call, against the 1 µs target. The queries
     give 518 `Detached`, 17 `Unchanged`, 26 `Remnants`, 410 `Bright` and 53 `None`.
   - **`just fit-check`:** 26 fresh, 6 provisional warnings (as before), 0 failures.
-  - **Findings, for R06.T8.g and the version-22 refit** (reported to main, not fixed):
+  - **Findings, for R06.T8.g and the deferred bump batch's refit** (reported to main, not fixed):
     - **`Bright`'s M is loose.** Over the census's windows its median is M<sub>V</sub> −6.4 in C,
       −7.3 in D and −5.0 in E (old, near the Sun; 90% brighter than −3.6, −0.8 and −0.5). So nearly
       every `Bright` pair's record stays listable and is generated. Only 21%, 8% and 1% of C's, D's
@@ -4987,9 +5430,9 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
         0.1 M☉ depart before an interaction. A star of at least 0.1 M☉ stays on its own track,
         keeping plan 06's mass and accreting no wind, until Roche-lobe overflow or a common
         envelope. So the lever acts on the light-member cells alone, and is folded, narrowed, into
-        the version-22 refit after a probe. `Bright`'s looseness is the tables' aggregation: each
-        value is cumulative over every wider periastron, dilated, merged, and smeared in E. Its
-        levers are deferred (`deferred-corrections.md`, "Census cost")._
+        the deferred bump batch's refit after a probe. `Bright`'s looseness is the tables'
+        aggregation: each value is cumulative over every wider periastron, dilated, merged, and
+        smeared in E. Its levers are deferred (`deferred-corrections.md`, "Census cost")._
     - **The core-inertia column** (T17.b's open option), like for like. Over the census's old
       windows near the Sun, the pre-test passes over 81.7%, 29.0% and 7.0% of C's, D's and E's
       pairs, and `Detached` takes 75.2%, 21.8% and 0.7%. Of the pairs it misses, these go to
@@ -5039,7 +5482,7 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
       2H + L wrongly (the value was right). Its should-fixes are the accretion figure and the
       white-dwarf note above; its considers, the C and D merger gaps and the cooling floor's DARK
       bins, are recorded here and in item 4's docs.
-  - **At the version-22 batch:** re-run the slow test and the monotonicity test after the tables'
+  - **At the deferred bump batch:** re-run the slow test and the monotonicity test after the tables'
     refit. Item 4 already checks for sudden deaths by +H, which T4.l's passed-over collapses will
     hand to the engine.
 - **P11.T17.c's follow-up: capped timelines, and the held floor** (2026-10-08, at version 21;
@@ -5101,7 +5544,7 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
       the shrinking steps through its least step of 10⁻⁷ Myr, the aim's release after 1,000
       iterations, and having no cap on segments. The engine's shortfall shrinks each step by a
       factor of about τ Ṁ t_MS ÷ m, so its steps converge without end wherever that is below 1.
-    - The lever, for the version-22 batch: a least step, as BSE's, or a boundary step that falls
+    - The lever, for the deferred bump batch: a least step, as BSE's, or a boundary step that falls
       short only by the rejuvenation taking the boundary. With T4.m's C2 and F15 work, it should
       leave no capped timeline. Re-run this follow-up's probes then, and drop the held floor if
       none is capped.
@@ -5184,5 +5627,2164 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
     any carried main-sequence member. A pinned primary held (`Member::Frozen`) when its timeline
     is capped would be held for ever too, brighter than the floor; none of the 87 was.
   - **For `deferred-corrections.md`** (reported to main): the proposed F18 and the C2 caps in C and
-    D, with T4.m, in the version-22 batch's engine work; then the follow-up's probes again, and the
-    floor dropped if no timeline is capped, which restores D's and E's `Remnants` and the 18%.
+    D, with T4.m, in the deferred bump batch's engine work; then the follow-up's probes again, and
+    the floor dropped if no timeline is capped, which restores D's and E's `Remnants` and the 18%.
+- **The cooling floor as a fitted table** (lane perf-native-tests, 2026-10-11, at version 21;
+  `decision-test-coverage.md` §3.2, N7, adopted). No generated output moves.
+  - The floor of P11.T17.b's first widening was built lazily, once a process: about 1.1 × 10⁶
+    evaluations of the cooling fits, 2.6 s in a test build, paid again by every test process that
+    read a pair whose lighter star lies below 0.1 M☉ (some ten fast tests, and every census's
+    first sky).
+  - It is now the fitted table `tables::binary_cooling_floor` (`COOLING_FLOOR_CMAG`, 4 metallicity
+    intervals × 53 age bins of `i16`), written by `hyperion-fit`'s fast task
+    `binary_cooling_floor` from the sim's `pair_light::build_cooling_floor_cmag`, the old lazy
+    build's code. `cooling_floor_cmag` reads the constant.
+  - Freshness: the fast test `the_lazy_values_are_fresh_builds` holds every committed value to a
+    fresh build on every run, natively and on wasm32-wasip1, both to its own copy of the formula
+    and to `build_cooling_floor_cmag`; `just fit-check` checks the table's inputs hash, its body's
+    hash and a fingerprint of 34 probes (the grid's two counts, and at 16 cells the fits'
+    brightest V and the stored value); the slow pass's `--rerun-fast` reruns the task and compares
+    bytes. The golden `stellar/pair_light_tables`,
+    which pins the floor's values, is unchanged.
+  - Written with `cargo run -p hyperion-fit -- run binary_cooling_floor --since 21`, the dev
+    profile, whose sim is at opt-level 2 (not `just fit`'s release build, to spare it): the
+    output is the same bits in any profile, and a rerun on one thread wrote the same bytes.
+    The run wrote the table, its lock entry and its `MANIFEST` row but not its `pub mod` line in
+    `tables/mod.rs`, added by hand, against `task.rs`'s "Adding a task" step 4 (reported to main).
+  - Gates: `just fit-check` (27 fresh, 0 failures); fmt and Clippy `-D warnings` (sim and fit,
+    all targets, and the workspace's); `stellar::binary::pair_light` and `light` tests and the
+    tables' manifest test, natively and on wasm32-wasip1 (38 each); the fit task's tests, the
+    registry's, the toolchain's and `list_prints_registered_tasks`; `golden_diff.py`: no golden
+    changed. The review's fixes renamed `cooling_brightest` to `cooling_brightest_mag` and added
+    the stored values to the fingerprint (the table's body unchanged).
+- **P11.T2.c's multiplicity test counts stellar slots (lane slow-fix-tests, 2026-10-12, at version
+  21; the slow-pass triage's T4).** Test-only: no generated output moves.
+  - `multiple_systems_follow_the_model_over_ten_thousand_systems` (`tests/stellar_system.rs`)
+    failed in slow passes 1A and 2A, as it had since ad16be12 (on `origin/galaxy-generation`:
+    bin5b's P11.T2.d, "Counted as a star" in "Deviations in P11.T2.d, as built"). It counted
+    `star_count() > 1`, which includes the brown-dwarf slot, against `drawn_multiple_fraction`,
+    which is stellar: 6,230 of 10,002 systems against 6,037.3 ± 44.8, z = 4.30.
+  - `check_multiple_share`, which the 400-system fast twin `multiple_systems_follow_the_model`
+    shares, now counts a system multiple when more than one of its slots is a `SlotKind::Star`, or
+    the stability test dropped a companion. A brown dwarf never counts there: a dropped one leaves
+    the stellar hierarchy as drawn (`substellar.rs`'s draw falls back to it), and a placed one keeps
+    the stellar draw's dropped count (`with_outer_brown_dwarf`). Measured: 6,084, z = 1.04. The 146
+    systems between the two counts are single stars whose only companion is a brown dwarf.
+  - The expectation is unchanged; the triage's science-checker found no model defect. Adding the
+    brown-dwarf rate to it was rejected: its survival of the stability test has no closed form,
+    and `substellar.rs` tests the rate. The expectation also leaves out P11.T7's redraw, which
+    keeps only systems with no carved pair: at the measured redraw rate that moves the count by
+    about 0.2σ at most (this lane's science-checker).
+  - The slow test passes by name (`--cargo-profile slow-test --run-ignored only`).
+- **P11.T11.a as built** (lane p11-rows, 2026-10-21, at version 22 with no bump;
+  `decision-observed-class-findings.md` §A). Range rows in now mode read the pair: a row's class
+  is the summary's. The record, the summaries and the timelines do not move; only the brief's read
+  path and its two goldens do (§A.4's exception, named in the commit).
+  - **Built:**
+    - `stellar/brief.rs`: the gate (`gate`, private, returning the first attempt's star count
+      and whether the primary is certified) runs first in every constructor (`new`, `with_fates`,
+      `of_member`, and so `of_record` and `range_brief`). A certified system keeps
+      `MainSequence`, `Table` and `Exact` unchanged; every other takes `BriefRoute::Paired`,
+      which holds `Box<SystemStars>` (`generate_with` at the model's composition and context:
+      `SystemStars::generate` for a grid record, `MemberRecord::stars` for a member) and answers
+      its `brief_at` with the model's star count (`StellarBrief::with_star_count`,
+      crate-private). `heap_bytes` counts `SystemStars::heap_bytes`, which the server's
+      `SharedBriefCache` charges as before. `BriefModel::certifies(galaxy, record)` (public) is
+      the gate alone, for its bench. Plan 06's `stellar::brief` Provides gains `BriefRoute::Paired`
+      and `BriefModel::certifies`.
+    - `stellar/multiplicity/hierarchy.rs`: `drawn_single` (crate-private), the count words'
+      test with which `draw_star_count` already began, now shared. A system drawn single is
+      certified with a count of 1 and no hierarchy; any other has its first attempt drawn once,
+      by `first_attempt`, for its count (`draw_star_count`'s, which the tests compare) and its
+      pairs at once, where the first build drew it twice.
+    - `stellar/multiplicity/bound.rs`: `first_attempt` (crate-private), the bound's own attempt 0
+      (a shared `attempt_at`, so its draw is `hierarchy_bound`'s first, bit for bit; tested).
+    - `stellar/binary/light.rs`: `pair_keeps_own_models` (crate-private), the gate's test of one
+      pair: `pair_light_bound` is `Detached` over the system's ages from the window's start to its
+      end, and the reach table's cores column says at most one of the two stars may have left its
+      main sequence by then. The ages end at the age at +H, to which `run_pairs` runs, so the
+      bound's `RUN_HORIZON_PAST_WINDOW_YEARS` contract (the age at +H at most 2H + L past their
+      end) holds at zero, with its whole margin to spare.
+    - `stellar/system.rs`: `SystemStars::brief_at` has the body of plan 12's `summary_brief_at`
+      (the summary's primary, the kept attempt's count), which goes; its callers in `observe/`
+      read `brief_at`. The `first_star_count` field goes with it, since nothing reads it now, and
+      so does its test, `the_summary_brief_counts_the_kept_stars`: the one brief counts the kept
+      stars by construction.
+  - **The gate, and two deviations from §A.2's item 1.**
+    - _"`hierarchy_bound` lists attempt 0 alone" is read as its stated meaning, "the system cannot
+      be redrawn"._ `hierarchy_bound` lists attempt 1 whenever attempt 0 holds any pair of two
+      stars (`AttemptBound::may_carve` is that coarse), so the literal test certifies no grid
+      system with a pair of two stars, only those whose companions are brown dwarfs, and of the
+      ruling's examples a triple's outer star never: of the gate test's 400 systems a layer near
+      the Sun, 29% (A) to 88% (E) are multiple. The gate shows instead that attempt 0 cannot be
+      carved. A pair `run_pairs` does not run cannot be carved; a `Detached` pair it runs only for
+      a remnant is one detached segment of its two models (`evolve`'s pre-test), with no merger,
+      no transfer and, `Detached` ruling out a sudden death, no neutron star or black hole, so the
+      only carved class it could show is a white dwarf fed by its companion's wind
+      (`CarvedClass::AccretingWd*`), which the classifier finds only for a giant's wind
+      (`pair_class`), and so only once both stars have left their main sequences. Hence the
+      clause "at most one star may have left its main sequence by the window's end", which the
+      ruling does not have. For a grid system every pair of attempt 0 must pass, since a carved
+      one has the system redrawn and the primary may sit in another pair at the attempt kept;
+      then attempt 0 is kept and its count is the kept one. Only attempt 0 is drawn, not
+      `hierarchy_bound`'s later attempts.
+    - _A system the grid does not redraw_ (a feature member) is certified when the primary's own
+      pair passes the same test, where the ruling takes `Detached` alone: one rule for both, and
+      stricter, which costs time only.
+    - Every redrawn system is paired, since its attempt 0 is carved and so holds a pair the gate
+      refuses. The row keeps the first attempt's count on every route (§A.2, item 2), which
+      differs from the summary's only for those systems (plan 11's P11.T7 deviation, now ruled):
+      the server's FPG 0Z0B00 E-55 (`systems_in_range.rs`) counts 2 in its row and 3 in its
+      summary. `carve.rs`'s CARVED record counts 2 at both attempts, so its test cannot tell the
+      two counts apart.
+  - **Shares** (`stellar::brief`'s `the_gate_is_conservative`, the Milky Way fixture): paired
+    rows near the Sun, of 400 systems a layer, A 0, B 2, C 61, D 221, E 349; in the bulge, of 150,
+    A 0, B 2, C 30, D 79, E 131. Certified multiples near the Sun: A 117 of 117, B 170 of 172, C
+    152 of 213, D 48 of 269, E 1 of 350. Paired rows of the benches' queries: the 50 ly Sun-like
+    query 45 of 917 (4.9%), the thick disc's 200 ly 211 of 3,704 (5.7%), the bulge's 50 ly 1,380
+    of 2,206 (62.6%; at the default census limit only layers D and E are admitted there) and the
+    bulge at the 20,000-row cap 3,043 of 16,746 (18.2%).
+  - **Tests.**
+    - New: `stellar_briefs.rs`'s `now_rows_read_the_pair_before_during_and_after_it_changes_the_primary`
+      (two stripped and two merged primaries of layer E near the solar circle, and the only two
+      primaries of 4,000 layer-E systems that their companions feed on the main sequence,
+      `REJUVENATED`, after a case-A mass-ratio reversal, each re-aged so that the epoch falls
+      5,000 years before the change, in its middle and 20,000 years after it; at both ends of the
+      window and the epoch each row is its summary's primary, bit for bit, and paired during and
+      after; _P11.T4.n moved the second, restated: see "P11.T4.n as built"_) and
+      `certified_rows_are_their_single_star_briefs` (every certified row of 300 random
+      systems is the brief of its primary alone, bit for bit, the table's its kind and class);
+      `observe_brief.rs`'s `look72_now_rows_read_the_pair`, run by its
+      `observed_rows_and_summaries_read_one_state` (820E6EE00000008D and 822C72E00000008C of
+      LOOK72 at full potential, re-aged to the first age at which the pair has made the primary
+      another class, or changed it at all: a paired model whose rows at both ends of the window and
+      the epoch are the summary's, the stripped one no longer its single-star class);
+      `brief.rs`'s `the_gate_is_conservative` (400 systems of each layer near the Sun and 150 in
+      the bulge: every certified system keeps attempt 0 and its primary is its own model at the
+      window's ends, the epoch, a random time and 200,000 years before, and its row is its full
+      brief and its single-star brief bit for bit; `certifies` is the route's); `light.rs`'s
+      `the_gate_keeps_a_pair_only_while_it_can_neither_change_nor_be_carved`; `bound.rs`'s
+      `the_first_attempt_is_the_bounds_attempt_0`.
+    - Retargeted to the pair-aware brief (§A.2, item 4): `briefs_are_the_full_systems_over_random_systems`
+      and the 3 × 10⁴ slow test (now also at ±H; the count against `draw_star_count`), which
+      passes by name in 246 s with 24,940 table rows inside their stated error; `briefs_are_pinned`;
+      `BriefModel`'s and `SystemStars::brief_at`'s doc examples; `members.rs`'s route test (a
+      binary neutron-star member takes the paired route); `carve.rs`'s redrawn record (paired, its
+      row counting attempt 0's stars and its brief the kept attempt's); the server's
+      `a_range_request_with_include_stellar_returns_a_brief_on_every_row` and
+      `systems_in_range.rs`'s `assert_briefs_are_the_sims`, which now check the count against
+      attempt 0's. `stellar_system.rs`'s `companions_move_no_primary` compares a primary's brief
+      with its lone self only where no pair holds it.
+    - _Departures from §A.2's item 4._ Only `check_briefs` (300 systems and the slow test), the
+      gate test and the new tests sample both ends of the window, the epoch and random times:
+      `briefs_are_pinned` keeps its golden's −500, 0 and +500 years, `members.rs`'s test and the
+      doc examples the epoch, and the server's tests their query's time, since goldens and wire
+      tests are pinned at fixed times and `check_briefs` covers ±H. The order and cache tests are
+      extended where the ruling kept them unchanged: `a_model_does_not_depend_on_what_was_asked_before`
+      runs all 180 of its records rather than 40 and requires every route, the server's
+      `a_brief_model_is_built_once_and_every_cache_answers_the_same` adds a paired system of
+      layer C, and their assertions are unchanged.
+    - **Acceptance** (all green on the gated tree), with `cargo nextest run`:
+      - `-p hyperion-sim --lib`, filtered to `stellar::brief`, `stellar::binary::light`,
+        `stellar::multiplicity::bound`, `stellar::binary::carve` and `galaxy::features::members`;
+      - `-p hyperion-sim --test stellar_briefs --test observe_brief --test stellar_system`;
+      - `-p hyperion-server --lib`, filtered to `compute::systems` and `convert`, and
+        `-p hyperion-server --test systems_in_range`;
+      - the slow test by name: `--test stellar_briefs --run-ignored only`, filtered to
+        `briefs_are_the_full_systems_over_thirty_thousand_systems`.
+  - **Goldens** (blessed by name, main's go, 2026-10-21; `golden_diff.py`: only these two move,
+    and its "not bumped" verdict is §A.4's exception):
+    - `stellar/briefs`: three pinned systems go from `Table` to `Paired`: layer C's DA9.2 white
+      dwarf and layer E's NS neutron star, both of two stars, whose log L and `T_eff` move within
+      the table's stated error (the paired route is exact, and their pairs have not changed them),
+      and layer E's black hole of four stars, which does not move. Classes and counts unchanged.
+    - `systems_in_range_briefs`: 19 of 51 rows, all paired (checked with a probe), each now its
+      summary's primary: FPF 1Z0P1Z D-35 DA9.7, FPG 1Z0P00 D-27 DQ7.1 → DQ6.0, GPF 000P1Z D-2
+      DC7.5, FPG 1Z0P00 D-6 DB2.4 → DB2.2, FPF 1Z0N1Z D-4 DA8.6, GPF 000P1Z D-12 DC9.4,
+      GPF 000N1Z D-38 DA7.9, FPG 1Z0P00 D-12 DC10.1, GPF 000N1Z D-6 DC33.7 → NS (an ONe white
+      dwarf of 1.36 M☉ alone, a 1.20 M☉ neutron star in its pair), GPG 000N00 D-30 DA7.0,
+      FPG 1Z0P00 D-29 DC35.1 → NS (an ONe white dwarf of 1.19 M☉ alone), FPG 1Z0P00 D-22 DA3.8,
+      FPG 1Z0P00 D-3 DA9.0 → DA8.9, GPG 000P00 D-24 DC10.5 → DC10.4, GPF 000N1Z D-36 DA2.9 → NS
+      (a CO white dwarf of 1.12 M☉ alone, a 1.45 M☉ neutron star in its pair), FPF 0Z0B0Z E-23
+      NS, FPG 1Z0P00 D-19 DC7.8, GPG 000P00 D-19 DC9.7 → DC8.5, GPF 000P1Z D-19 DC11.2 →
+      DC11.0. Thirteen are primaries the pair changed; six are unchanged primaries that move
+      from the table's approximation to the exact state. Every star count is unchanged.
+  - **Cost** (§A.3; `benches/stellar.rs`, its groups `stellar/briefs` and
+    `stellar/briefs_elsewhere`, one thread under the heavy lock in main's quiet window 9, load 2,
+    2026-10-21; the Milky Way fixture's 50 ly query about the Sun-like point, 917 rows):
+    - _The gate:_ **0.28 µs a row** over what every row read before it (the gate alone 4.93 ms
+      for the query, its metallicity and first attempt's count alone 4.67 ms), against the bound of
+      5 µs. The first build drew a multiple's hierarchy twice and cost 9.9 µs a row in all (window
+      8); drawing it once (`drawn_single`, then `first_attempt` for the count and the pairs) is what
+      brought it under.
+    - _Cold:_ **304.6 ms**, against the target of 300 ms (missed by 1.5%) and the ceiling of 500 ms
+      (held). Every row's `SystemStars` with the engine, as observed mode builds them, is 350.9 ms
+      on the same run: the 45 paired rows (4.9%) carry most of it, as §A.3 expected. Recorded, not
+      a hold (the 2026-10-20 rule).
+    - _Warm:_ **0.89 µs a row** (818.6 µs for the query), against the bound of 1.5 µs.
+    - _Heap bytes of a paired model_ (`size_of::<BriefModel>()` + `heap_bytes`), on average: 94.6 kB
+      in the 50 ly query, 90.9 kB in the thick disc's, 109.5 kB in the bulge's and 87.2 kB at the
+      cap; the server's 64 MiB brief cache holds some 700 of them.
+    - _Recorded, not bounded_ (`stellar/briefs_elsewhere`): the thick disc's 200 ly query (3,000 ly
+      above the Sun-like point, 3,704 rows, 5.7% paired) 1.17 s cold, 505 ms per 1,600 rows
+      against P06.T38.e's 29 ms; the bulge's 50 ly query (2,000 ly out, 300 ly above the plane, at
+      the default census limit, which admits only layers D and E there: 2,206 rows, 62.6% paired)
+      **9.75 s cold, 7.07 s per 1,600 rows against P06.T38.e's 148 ms, past the 3 times §A.3 asks
+      to be told of (main was told, 2026-10-21)**; the bulge at the 20,000-row cap (16,746 rows,
+      18.2% paired) 15.0 s on one thread, about 2.1 s over the pool's seven workers, against
+      1.8 s before on one thread. A paired bulge row costs some 7 ms: its dead primary's full
+      track to its death, its companions' and the engine, where the table route needed none.
+  - **Not done:** the cost levers of §A.3 item 5 (narrowing the paired build to the primary's
+    pair; sharing `SharedSystemCache`), since the 50 ly query's ceiling holds; they are the levers
+    for the bulge (below). The lens-mass ruling (`first_attempt_models`) stays open, as §A.2
+    item 5 says. Stale text outside this lane's files, reported to main: `sky/census/cell.rs`'s
+    module doc and R06's plan (`06-the-sky.md`) still call the brief the primary's single-star
+    model, which it now is only where the gate certifies it.
+  - **Deferred findings (2026-10-20 rule).**
+    - The three white dwarfs the server's golden now shows as neutron stars are the engine's: an
+      ONe white dwarf grown to its collapse by accretion is a known channel (accretion-induced
+      collapse); a 1.12 M☉ CO white dwarf ending as a neutron star rather than a Type Ia is less
+      usual, and is the summary's already. For P15's review of the engine's white-dwarf channels.
+    - A main-sequence primary fed by its companion is rare in the engine: two of 4,000 layer-E
+      systems near the solar circle, both after a case-A reversal; the primary's accretion is
+      otherwise onto a remnant or a helium star.
+- **Recorded with galaxy plan 06's P06.T24.c (lane `stripped-class`, 2026-10-21;
+  `decision-stripped-star-class.md`, "Recorded, not blockers").** Neither moves a class, so both are
+  deferred under the 2026-10-20 rule.
+  - _R1: the stripped mass is some 30% low._ look-72's 10.96 M☉ primary (LOOK72's
+    `820E6EE00000008D`, plan 12's Risks) is stripped to 2.37 M☉, against 3.32 M☉ in Götberg et al.
+    (2018, A&A 615, A78, Table 1, 11.01 M☉) and 3.43 M☉ in Laplace et al. (2020, A&A 637, A6).
+    Hurley et al.'s M_c,BGB ≈ 0.098 M^1.35 (2000, eq. 44) gives 2.48 M☉: a model difference, not a
+    code error. Both masses are stripped helium stars since P06.T24.c, so no class depends on it.
+  - _R3: the pair window is narrower than the kind's edge._ `HOT_SUBDWARF_MASSES` (0.32–0.8 M☉) is
+    the ~0.5 M☉ channel, and P06.T24.c's kind edge is 1.7 M☉, so a 0.8–1.7 M☉ helium star in a
+    pair is a hot subdwarf by kind with no pair class. That names nothing wrongly. Aligning the two
+    would move pair classes and the `binary_classes` census: a candidate rider for version 25 (S1),
+    if main wants it.
+- **Deviations in P11.T11.b, as built (lane `stripped-class`, 2026-10-21; at version 22, no
+  bump).** The ruling is `decision-stripped-star-class.md` §3.
+  - _API._ `BinaryTimeline::helium_star_entry_mass(component, age)` (crate): the mass the member
+    had when it became a naked helium star in the unbroken helium-star life it is in at `age`, or
+    `None` outside one. `PairedStar` gains `helium_entry`, which `SystemStars::paired_state` fills
+    from the pair's timeline; `PairedStar::class_extras` matches the phase exhaustively, as
+    `StarModel::class_extras_at` does, and gives a helium star
+    `ClassExtras::helium_star(HeliumSurface::of(entry, M))`. So the summary's star and the
+    system's one brief, `SystemStars::brief_at` (P11.T11.a), which the now and observed rows
+    read, all take the paired surface.
+  - _The entry mass, as built._ The member is walked back over the segments its helium-star life
+    spans, to the earliest, and its mass at that segment's start is taken: there its pair made it
+    a helium star (the engine places a star its companion strips on a helium star's track built
+    from its mass then, `Track::remains_at`, so this is the track's `helium_star_entry_mass`).
+    The walk asks whether the member was a helium star at the end of the segment before, or at its
+    start where the star's own state at the boundary is past its life (a bare core held as
+    `Member::Frozen` after its track died), so a hold keeps its life's entry. A rise of the mass
+    across a boundary by more than 10⁻⁶ of it marks a merger's new star, whose life starts there.
+    A member that becomes a helium star inside a segment takes its own track's entry mass
+    (`Member::Track`, the single star's rule), or, where the binary sets its mass on that track,
+    its mass where the track's phase turns, found by bisection (64 halvings).
+  - _Deviation: the walk comes first._ The ruling takes "the track's `helium_star_entry_mass`
+    where the member is a helium-star track". The engine also builds a helium star's track from
+    the star's mass at the end of a carried helium main sequence, after case BA or BB transfer
+    (`after_boundary`), whose entry would be the star's mass after that transfer; the walk keeps
+    the mass at its stripping, so that the transfer's loss counts as lost, as the ruling asks.
+    Where the member's first segment is a helium star's track placed at its stripping, both give
+    the same mass.
+  - _Deviation: a merger's product._ A member whose mass the binary sets on a hydrogen star's own
+    track (`Member::Shaped`, a merger's product) becomes a helium star inside a segment.
+    "The start of the earliest segment in that life" would there be its giant's mass, and that
+    track's own entry mass the unshaped star's (9.80 against the product's 11.17 M☉ for reference
+    system 44's 30 M☉ product), with which it could never turn WC; so the entry is its mass where
+    the track's phase turns.
+  - _Measured (reference systems 40–63, `record_of`'s young thin disc, 2.0 × 10⁷ yr)._ Of the 14
+    60 M☉ primaries that become helium stars, 11 of them made so by their pair, 12 turn WC before
+    their pinned collapse (9 of the 11), at entry masses of 15.7–27.6 M☉ (f = 0.22–0.31); those of
+    12.8 and 15.3 M☉ do not. No 25, 30 or 40 M☉ primary does (entries 4.3–14.9 M☉): 40 M☉ system
+    41's 11.41 M☉ helium star ends at 7.24 M☉ at its pinned collapse, against the 7.12 M☉ at
+    which its carbon would show (Woosley 2019's 11 M☉ helium star ends at 7 M☉).
+  - _Tests._ `stellar::system`'s `a_paired_helium_star_turns_wc_as_a_single_one_does`: among the
+    60 M☉ primaries of reference systems 40–63, each one its pair has changed into a helium star is
+    classified in its summary as `classify` gives its state with `HeliumSurface::of` its entry
+    mass, one entry for its life; one at least is WN and then WC, at the mass at which a single
+    helium star of the same entry mass on its own track turns WC. It fails before the fix (paired
+    helium stars read WN). `a_merger_products_helium_entry_is_its_mass_where_its_track_strips_it`:
+    a 30 or 60 M☉ merger's product's entry is its mass at the turn, to ten years, and holds to its
+    collapse, its hold included; none before.
+  - _Files._ Also `stellar/binary/timeline.rs` (`helium_star_entry_mass`, the private
+    `is_helium_star`, `HELIUM_ONSET_STEPS`, `MERGER_MASS_RISE`); its tests are in
+    `stellar::system`, which T11's acceptance selects.
+  - _Cost._ `SystemStars::paired_state` walks back for every paired naked helium star, its
+    `state_at` callers included, which discard the entry: a few member states per segment, and
+    64 more for a merger's product. Only helium stars pay; not benched.
+  - _Declined: a golden of the entry mass._ The determinism audit asked for a golden pinning a
+    paired helium star's entry mass as bits and its class, and for `classify.golden` rows of a
+    stripped helium star and a hot subdwarf. Main asked for no golden to move at 22, and a new one
+    would need version 23's bless to carry it; the tests pin the rule (the class against
+    `HeliumSurface::of` and a single star's onset) and the merger's entry against its masses either
+    side of the turn. Recorded for the 23 bless (S1), if main wants it.
+  - _No golden moved._ No golden pins a paired Wolf-Rayet star's class; the bless of every golden
+    that reads a class or a kind left every file as it was (`golden_diff.py`).
+  - _Deferred finding (2026-10-20 rule)._ No 40 M☉ primary's helium star turns WC before its
+    pinned collapse, where Woosley (2019, §4.1) and Yoon (2017, §3.2) have binary-stripped helium
+    stars from about 9–11 M☉ turn WC. Two causes, the science check's: the pin's early collapse
+    costs about 0.1 M☉ (11.41 → 7.24 M☉, against about 7.14 M☉ interpolated in Woosley's table 4;
+    plan 12's Risks, finding 5, ruled not a blocker in `decision-observed-class-findings.md`
+    §B.1), and `carbon_shows_after`'s f sits 0.02–0.03 above the loss at which carbon shows in
+    Woosley's table 4 (≤ 0.359 at 11 M☉) and Yoon's table 1 (≤ 0.334 at 12 M☉, f_WR = 1), so the
+    fit reads even Woosley's star as WN. At 40 M☉ the entries are 0–19% below Woosley's eq. 5
+    (14.1 M☉), so the low stripped masses (R1 above) are not what keeps it WN. Not a blocker: the
+    rule is right, and a figure is short.
+  - _The merger's convention._ A merger's product (HeMS + HeMS, HeWD + HeMS) re-forms its
+    convective core at the merged mass, so its life's entry is that mass: sound to first order
+    (the science check). The CO or ONe white dwarf + HeMS → HeGB row is the exception, whose only
+    carbon is the white dwarf's core, and which would turn WC too early; it needs a white dwarf
+    beside a helium star in the Wolf-Rayet range, which is rare. Recorded, not a blocker.
+- **P11.T8.e as built** (lane `lane/106-p11-t8e`, 2026-10-26; at version 23, nothing generated
+  moves).
+  - _The forecast._ `galaxy/features/members/headroom.rs` (new; `members.rs` re-exports it):
+    `centre_list_forecast(params) -> Result<CentreListForecast, BuildCentreError>` builds the
+    centre's classes as `CentreModel::from_params` does (`CentreProfile::from_params`, the
+    parameters' mass function, `CentreClasses::new`; no distribution function) and takes the
+    formed mass as `primaries_formed()` × `GalaxyParams::mean_formed_mass()`, each carved class's
+    hosts as the formed mass × its `CLASS_SHARES` row's largest `hosts_per_formed_mass` over
+    `POPULATIONS`, and the candidates as each class's hosts ÷ `CLASS_ACCEPTANCE_FLOOR` (0.9),
+    summed in the rows' order. `CentreListForecast` has getters for each figure, `fits()` and
+    `margin(sigmas)`. `check_feature_list_headroom(galaxy) -> Result<(), ExceedFeatureListError>`
+    refuses a centre whose candidates do not fit, with
+    `ExceedFeatureListError::CentreListTooFull { candidates }`.
+  - _Deviation: the formed mass is the share matrix's_ (`r m̄_f` of every system born, P11.T7).
+    `m̄_f` counts companions, which the centre's members do not have (ruling 144.4), so the
+    forecast errs high.
+  - _Deviation: the largest rate over the seven populations._ The centre is none of them. While
+    the scratch rows are equal this is exact; after P15.T10.b it is an upper bound.
+  - _Deviation: the thinning allowance_ is T8's floor on a class's acceptance, "under one in ten",
+    as the constant `CLASS_ACCEPTANCE_FLOOR` = 0.9.
+  - _Deviation: eight standard deviations, not five._ The bound is the list's own,
+    `c + 8√c + 1 < 8,192`, index 0 spared: a centre that passed at five and failed at eight would
+    panic in `FeatureLevelList::with_classes` as soon as T8.f built its list. The predicate moved
+    out of `with_classes` into `level_list::fits_list_index` (with `list_index_margin` and
+    `LIST_HEADROOM_SIGMAS`, all crate-private), which both call; the assertion's expression,
+    message and behaviour are unchanged. The five-sigma margin is reported beside the eight.
+  - _Deviation: the galaxy's own mass model._ The check builds the centre's profile from the
+    built galaxy's mass model and held mass function, as `CentreModel::new` does, not by
+    rebuilding them from `galaxy.params()`; a test holds the two paths equal bit for bit in every
+    figure, for the fixture and two drawn seeds (`0x1108_e100`, which overflows, and
+    `0x1108_e101`, which fits).
+  - _Deviation: no `BuildCentreError` variant._ A built galaxy's black hole and cluster have
+    finite, non-negative masses (its parameters' builder sees to it), so the check `expect`s the
+    profile with that reason.
+  - _Deviation: only the centre._ Plan 09's classes on its list (P09.T30.b's victims, T36's
+    supernovae, T43's variables) register nothing yet and add nothing; each must join the
+    candidates when it registers. Catalogue features are not walked: a nursery or open cluster
+    forms at most `NURSERY_MASS_MAX`, 10⁵ M☉, about 11 candidates at these rates; a globular's
+    count is P09.T9.e's encounter law under T8.f, which T8.f brings into the check;
+    `with_classes` asserts the bound on every list it builds.
+  - _Deviation: not called by the server._ No list holds these classes until T8.f, and a refusal
+    now would refuse galaxies over members that no list holds. T8.f wires it beside plan 03's
+    `check_index_headroom` in `hyperion-server`'s `compute/galaxies.rs`, or the owner's ruling
+    changes what it checks.
+  - _Deviation: the file._ `members/headroom.rs`, since `members.rs` became a module with
+    children; the plan's Files names `members.rs`.
+  - _Measured at the Milky Way fixture_ (default mass function, cluster 2.4747 × 10⁷ M☉):
+    `primaries_formed()` 6.0454 × 10⁷, `systems()` 6.0173 × 10⁷ (ruling 144.4's "about 5.8 ×
+    10⁷"), `m̄_f` 1.0961 M☉, formed mass 6.6261 × 10⁷ M☉. Hosts: 3,179.9 fast and 3,179.9 slow
+    accreting white dwarfs, 7.07 X-ray binaries, 63.60 stellar mergers, 0.0071 neutron-star
+    mergers. Candidates 7,145.0; plus eight σ and 1, 7,822.2 (369.8 to spare); plus five σ and 1,
+    7,568.6 (623.4). Under Kroupa's function (cluster 2.4843 × 10⁷ M☉, `m̄_f` 0.8215 M☉):
+    candidates 6,468.0, 1,079.6 to spare at eight σ.
+  - _Measured at the cap_: Chabrier's 6.4 × 10⁷ M☉ expects 18,311.6 (19,395.1 with eight σ, 11,203
+    over; 1.5493 × 10⁸ primaries formed); Kroupa's 4.7 × 10⁷ M☉ expects 12,174.9 (13,058.6, 4,867
+    over). The check first fails at 2.597 × 10⁷ M☉ under the default function, 1.0494 times the
+    fixture's cluster, and at 2.880 × 10⁷ M☉ under Kroupa's, 1.1593 times. The candidates are
+    linear in the cluster's mass to 0.7% over a factor of two (the deeper cluster keeps more
+    remnants).
+  - _How high the formed mass errs._ The primaries alone form 0.70348 of `m̄_f` under the default
+    function and 0.71327 under Kroupa's, so the companions are 30% of it. Counted with the
+    primaries' mass alone, the fixture's centre expects 5,026.3 (4,613.5 under Kroupa's) and first
+    fails near 1.49 times its cluster (1.63), and the caps still overflow, at 12,881.7 and 8,684.0
+    candidates.
+  - _The sweep._ `tests/galaxy_sweeps.rs`'s `the_centre_s_feature_level_list_over_a_thousand_seeds`
+    (slow), over the first 10³ of plan 02's seeds, not the 10⁴: 100 seeds took 27.4 s in the
+    slow-test profile, so the 10⁴ would have taken over half an hour against the brief's 5
+    minutes. The 10³ took 205.9 s on an 8-thread laptop, the test on one thread, at a 1-minute
+    load of 1.4–2.8 with no other build running. 393 of the 10³ fail at eight σ and 378 at five;
+    344 expect 8,191 candidates or more outright, so their lists would clamp; 207 fail with the
+    primaries' mass alone; 41 clusters sit at plan 02's cap. The least failing cluster holds
+    2.603 × 10⁷ M☉. The worst seed, `0x02005ee900000339`, a cluster at the cap of 6.4 × 10⁷ M☉,
+    expects 18,321.3. The test prints every failing seed and pins the counts as regression bounds.
+  - _Main's arithmetic, replaced._ The brief's rough figures (about 6,000 candidates at the
+    fixture, failing from about 1.25 times its cluster) took `m̄_f` as 0.957 M☉ and the centre as
+    5.8 × 10⁷ primaries; at version 23 they are 1.0961 M☉ and 6.045 × 10⁷, which give 7,145
+    candidates and a failure from 1.049 times.
+  - _Verdict: a finding_ (the next bullet). The task stops there: it lands the check, its tests
+    and these figures, and changes neither the ID layout, nor the list, nor any count.
+  - _Tests_ (`galaxy::features::members::headroom`): the fixture's arithmetic to 10⁻¹² and its
+    hosts in the rows' proportion; linearity within 1%; the fixture's check `Ok(())` with its
+    candidates and margins pinned; the first failing mass under each function, pinned to 10⁻⁵ and
+    confirmed a part in 500 to either side; the caps' `CentreListTooFull` with their candidates
+    pinned to 10⁻⁵; the shared bound, just under it the check passes and the list builds, just
+    over it the check fails and the list panics; the two paths bit for bit; the error's text.
+    The pins hold until the owner rules on the centre's index (below).
+  - _Acceptance_, since the shared `catalogue_classes::binary` filter selects none of this task's
+    tests: `cargo test -p hyperion-sim galaxy::features::members`, and the sweep by nextest with
+    `--cargo-profile slow-test --profile slow --run-ignored only --test galaxy_sweeps`, which
+    `just test-slow` runs.
+  - **Deferred findings (2026-10-13 rule)**, from P11.T8.e:
+    - `Galaxy::mean_formed_mass`'s doc gives 0.957 M☉ under the default mass function and
+      0.836 M☉ under Kroupa's, and "Deviations in P11.T7, as built" above quotes 0.957 M☉ for
+      `MILKY_WAY_FORMED_MASS`. At version 23 the value is 1.0961 and 0.8215 M☉ (ruling 141.6's
+      1.096), and `MILKY_WAY_FORMED_MASS` holds at 1.0961 M☉ times about 8.55 × 10¹⁰ born
+      systems. The doc is outside this task's files; a one-line fix for whoever next edits
+      `galaxy/mod.rs`.
+    - P11.T8.f's text lists plan 11's classes on the list as `STELLAR_MERGER`,
+      `NEUTRON_STAR_MERGER`, `XRAY_BINARY`, `ACCRETING_WHITE_DWARF`, `ACCRETING_WHITE_DWARF_SLOW`
+      and cites plan 09's design note 16, which (as `FEATURE_LEVEL_LIST_ORDER` and its golden do)
+      lists them the other way round, the accreting white dwarfs first. Under the clamp the later
+      classes lose members first, so the order decides which class a full list shortens. For
+      T8.f to reconcile.
+- **The centre's feature-level index, as measured (P11.T8.e)** (lane `lane/106-p11-t8e`,
+  2026-10-26; for the brainstorm's owner; nothing changed). The centre's feature-level list cannot
+  hold plan 11's carved classes for a large share of galaxies.
+  - _Failing:_ 393 of the first 10³ of plan 02's seeds at eight standard deviations (378 at five,
+    344 expecting 8,191 candidates or more outright), 207 even with the primaries' mass alone.
+  - _The worst:_ seed `0x02005ee900000339`, a cluster at the cap of 6.4 × 10⁷ M☉, expects
+    18,321.3 candidates, 2.2 times the index.
+  - _Where it first fails:_ at 2.597 × 10⁷ M☉ under the default mass function, 1.049 times the
+    fixture's 2.4747 × 10⁷ M☉ (the Milky Way's 2.5 × 10⁷ M☉), against a cap of 6.4 × 10⁷; at
+    2.880 × 10⁷ M☉ under Kroupa's, against its cap of 4.7 × 10⁷. The capped clusters overflow by
+    11,203 and 4,867 indices at eight σ. With the primaries' mass alone it first fails near 1.49
+    times the fixture's cluster, and both caps still overflow.
+  - _The two ways out_, neither chosen: widen the index into the level and cell bits, which are
+    zero under the spare band value (every existing ID keeps its value, but it contradicts the
+    brainstorm's "under it the level and cell are zero" and plan 01's canonical rule); or list at
+    the centre only the hosts above a brightness floor, leaving the dim hosts as ordinary members
+    that alerts cannot find from afar.
+  - T8.f waits on the ruling. Whichever way it goes, T8.f also decides whether the centre's
+    budget counts companions (ruling 144.4), which sets how far this forecast's 30% allowance for
+    them overstates.
+- **The centre's feature-level index, ruled** (2026-10-26, main's ruling
+  `decision-p11-centre-index`; built by P11.T8.e.b; no output moves, no bump). The finding above
+  is closed by widening the galactic centre's list index alone, from 13 bits to 16.
+  - **The rule.** Under band 7 at the centre, the index is `[15:0]` and `[31:16]` must be zero, so
+    the list holds 65,536 entries, with index 0 the black hole. Catalogue features and dwarf cores
+    keep 13 bits, with level and cell zero.
+  - **The contract.** It is an extension of the layout. Every existing ID keeps its value and
+    meaning, and the only centre list ID in use is M0. The wire's 16 hexadecimal digits and the
+    designation `CENTRE M<index>` keep their form, and `PROTOCOL_VERSION` is unchanged.
+  - **The bound.** It stays eight standard deviations plus index 0, now at the list's own limit.
+    At 16 bits it holds up to 63,519 expected candidates. That is 3.47 times the worst seed
+    (`0x02005ee900000339`, 18,321) and the capped cluster (18,312), so no seed of plan 02 can fail
+    while the cap holds. The brainstorm's ID sketch, plan 01's Design note 17 and plan 09's P09.T22
+    are revised to match.
+  - **Rejected:**
+    - a brightness floor or a weighted sample, which would drop real accreting white dwarfs (the
+      Galactic Centre's thousands of X-ray point sources) and the novae alerts must find;
+    - moving them to the nested cells, where alerts could not find them from the list and the
+      cells refuse the carved classes;
+    - splitting the list, which is the same layout change with more machinery;
+    - a cap of about 2.6 × 10⁷ M☉, which would truncate 39% of seeds' clusters at the Milky Way's
+      own.
+  - **T8.f** lists the classes at the 16-bit limit and wires `check_feature_list_headroom` in the
+    server.
+- **P11.T8.e.b as built** (lane `lane/109-p11-t8eb`, 2026-10-26; at version 23, nothing generated
+  moves, no bump).
+  - _The tripwire fired at 31 (train 31):_ the fitted merger rows (P15.T10.b) take Chabrier's
+    capped centre to 34,309 candidates; twice that leaves −5,179 at eight standard deviations, so
+    the ruling's 32-bit fallback is due. Lean (2026-11-08, pending main's ruling): the index stays
+    16 bits; `twice_either_cap_s_candidates_fit_the_centre_s_index` asserts the cap's own fit.
+  - _The layout_ (`id/nested.rs`). `NestedSlotLayout` gains `list_index_bits`, 13 in
+    `FEATURE_SLOT` and 16 in `CENTRE_SLOT`, with `list_index()` (`[12:0]`, `[15:0]`),
+    `list_padding()` (the bits between it and the band, `[27:13]`, `[31:16]`) and
+    `list_index_limit()`. `validate` tests band 7 first and rejects any bit of `list_padding` with
+    `FeatureLevelFieldsSet`; `slot` reads a band-7 index through `list_index`; `with_slot` writes
+    the zero bits and refuses a feature-level index at or past the list's limit with
+    `IndexTooLarge`, which only `FEATURE_SLOT` can reach. `CentreMemberId::LIST_INDEX_LIMIT` is
+    tied to `CENTRE_SLOT.list_index_limit()` by a compile-time assertion beside a second tiling,
+    band 7's view of the centre. `MemberSlot::INDEX_LIMIT` stays 8,192 and `FeatureLevel`'s index
+    `u16`. `DecodeSystemIdError::FeatureLevelFieldsSet` keeps its name; its doc and its `Display`
+    now say "a bit set between its index and its band".
+  - _The names._ The brief's leans are all kept: `CentreMemberId::LIST_INDEX_LIMIT: u32 = 1 << 16`,
+    `fits_list_index(expected, limit: u32)`, `list_index_margin(expected, sigmas, limit: u32)`,
+    `pub enum ListIndex { Feature, Centre }` with `limit()`, re-exported from `members`. Added, all
+    private to `id`: `NestedSlotLayout::{list_index, list_padding, list_index_limit}` and
+    `CentreMemberId::index_field`.
+  - _`cell_word`_, through `CentreMemberId::index_field()`: a centre list member's `[15:0]` is
+    zeroed, so every entry shares the black hole's word, `0xF000_0007_0000_0000`; a member of a
+    centre cell has `[12:0]` zeroed only, since `[15:13]` are its cell's z, which a test checks
+    with z at 31. Every other kind is unchanged.
+  - _Designations._ `parse_slot` takes the list's limit from its caller: `CENTRE M<index>` below
+    65,536, a catalogue feature's or a dwarf core's `M<index>` and every in-cell index below 8,192.
+    The formatter is unchanged.
+  - _Deviation: `FeatureLevelList::with_classes` gains `index: ListIndex` after `member_zero`._
+    Plan 09's "Phase 5 as built" names five arguments; T8.f calls it with six. The Rust review
+    asked for one enum in place of `MemberZero` and `ListIndex`, which move together at every call
+    today; they are kept apart, as the brief's lean, since a dwarf core's list could have a member
+    zero under the 13-bit index. The assertion's message keeps "eight standard deviations" and names
+    the limit ("under its 8192 index", "under its 65536 index"); the clamp's room is the limit less
+    one.
+  - _The `entries()` fix._ A centre list's `len()` can reach 65,536, which is no `u16`, so
+    `entries()` iterates the indices as `u32` and converts each, at most 65,535. A test fills a
+    centre list by hand (65,535 counted) and walks its entries to 65,535.
+  - _The brief's correction to the ruling's tests._ `with_slot` cannot be handed 65,536 at the
+    centre, since the index is a `u16`: `u16::MAX` builds and round-trips there, and 65,536 is
+    tested where it can be written, as bit 16 of a raw ID (`FeatureLevelFieldsSet`) and as
+    `CENTRE M65536` (`NumberOutOfRange`).
+  - _The fuzz test_ (`every_raw_is_rejected_or_decodes_to_the_one_kind_that_rebuilds_it`) gains a
+    seventh zero region, `[31:16]`, and counts the centre list entries past 8,191 it accepts: 40 of
+    the 200,000, against a floor of 20. Its expected errors are unchanged. `random_valid_id`'s
+    centre-list recipe now leaves `[15:0]` random.
+  - _Re-pinned at 65,536_ (to 10⁻⁵, measured at version 23): the default fixture's 7,144.99
+    candidates leave 57,713.79 indices at eight σ and 57,967.37 at five, Kroupa's 6,468.04 leave
+    58,423.57 and 58,664.84, and the caps' 18,311.57 and 12,174.90 leave 46,140.86 and 52,477.38.
+    The bound holds up to (√65,551 − 4)² = 63,518.77 candidates, and (√8,207 − 4)² = 7,498.26 at
+    8,192. The primaries' shares of `m̄_f`, 0.70348 and 0.71327, are pinned in the fixture's test.
+  - _Tests turned._ `the_check_first_fails_just_above_the_milky_way_s_cluster` is removed: nothing
+    fails below either cap. `the_cap_s_centre_list_overflows_under_either_mass_function` becomes
+    `the_cap_s_centre_list_fits_under_either_mass_function`, without its "fits without companions"
+    assertion (the caps expect 12,881.7 and 8,684.0 with the primaries' mass alone, printed).
+    `the_milky_way_s_centre_list_fits` becomes `…_under_either_mass_function`, Kroupa's fixture
+    pinned too. In `a_galaxy_s_check_reads_what_its_parameters_forecast` both drawn seeds fit; the
+    first, at 11,350.8 candidates, would not fit 13 bits. The list's tests add each limit's root
+    from either side, a centre list of 9,000 numbering its entries past 8,191, and, from the
+    determinism review, `the_index_s_width_moves_no_draw`: below the clamp both widths draw the same
+    counts and entries, bit for bit.
+  - _The tripwire_, `twice_either_cap_s_candidates_fit_the_centre_s_index` in headroom: twice the
+    caps' candidates, 36,623.1 and 24,349.8, leave 27,380.9 and 39,936.8 indices at eight σ. It
+    marks the ruling's fallback, which `decision-p11-centre-index` states and the record above does
+    not: widening all 32 bits now was rejected as an M task of about 30 call sites and kept as the
+    fallback, so if a refit or new centre classes bring the capped forecast within a factor of two
+    of 63,519, the next step is the same rule at `[31:0]`. The ruling also rejected a sub-kind of
+    the centre's list's own, which would move M0's ID.
+  - _The sweep._ `the_centre_s_feature_level_list_over_a_thousand_seeds` (slow) asserts that no seed
+    fails at eight σ or five and that none expects 65,535 candidates or more. Over the first 10³
+    of plan 02's seeds none fails at either and none expects 65,535; 41 clusters sit at the cap,
+    and the worst seed, `0x02005ee900000339`, a cluster of 6.4 × 10⁷ M☉, expects 18,321.3
+    candidates and leaves 46,130.90 indices at eight σ (46,536.97 at five). This meets T8.e's
+    acceptance, "the check passes for every seed of the sweep". It took 204.5 s in the slow-test
+    profile on an 8-thread laptop, the test on one thread, at a 1-minute load of 3.5 falling to
+    1.1. The primaries-only count, its helper and the worst seed's regression bound are dropped:
+    nothing fails either way, and the caps' pins and the tripwire watch the forecast.
+  - _Goldens._ `id/layouts.golden` alone gains two lines, blessed by its own test at 23:
+    `centre FeatureLevel { index: 8192 } -> 0xf000000700002000 -> CENTRE M8192` and
+    `centre FeatureLevel { index: 65535 } -> 0xf00000070000ffff -> CENTRE M65535`. No other golden
+    changes. `golden_diff.py --base origin/rendering-and-planets`, after the lane's last merge
+    (`f39782da`), reports version 23 to 23 and `id/layouts.golden` "extended only", two new labels
+    and every pinned value unchanged. Its check, whether a new label's value existed at the base,
+    holds: there both indices were refused with `IndexTooLarge`.
+  - _Acceptance:_ `cargo test -p hyperion-sim id::`, `cargo test -p hyperion-sim
+galaxy::features::members`, `cargo test -p hyperion-sim --test foundation_golden`, and the
+    sweep by nextest with `--cargo-profile slow-test --profile slow --run-ignored only --test
+galaxy_sweeps`.
+  - **Deferred findings (2026-10-13 rule)**, from P11.T8.e.b:
+    - `FeatureLevelList::with_classes` takes its `ListIndex` from the caller and the list does not
+      keep it, so two call paths that built the centre's list with different widths would agree
+      only below the 8,191 clamp (the determinism review). T8.f, which builds the centre's list,
+      should take the width from the feature in one place, or assert it.
+    - Plan 09's "Phase 5 as built" keeps `with_classes`'s five arguments, as records keep their
+      text; this record names the sixth.
+- **P11.T9.a as built** (2026-10-31, at version 24; nothing generated moves, no bump, no tag):
+  `stellar::binary::light_curves`, public, which nothing calls yet.
+  - _The shape (lean, 2026-10-31)._ Each kind is a value checked by its `of`
+    (`BuildLightCurveError`), each `Into` the enum `BinaryLightCurve`: `NovaCurve::of(wd)`,
+    `DwarfNovaCurve::of(wd, period, accreted)`,
+    `XrayTransientCurve::of(XrayAccretor, mass, accreted, hydrogen)`,
+    `XrayBurstCurve::of(ns, BurstFuel)`, `BeXOutburstCurve::of(ns, hydrogen)`,
+    `LuminousRedNovaCurve::of(merger)` and `KilonovaCurve::of(ejecta)`.
+  - `BinaryLightCurve::{bolometric(dt), in_band(dt, Band), xray_luminosity(dt)}` return `Watts`,
+    with dt a `Span` since the onset; `xray_luminosity` is 2–10 keV, zero for the non-X-ray kinds.
+    Also `peak`, `peak_luminosity`, `radiated_joules`, `fades_below(share)` and
+    `eddington_luminosity(mass, hydrogen)`. T9.b wraps Provides' `light_curve(event, dt, band)` and
+    `xray_luminosity(event, dt)` around them.
+  - _T9.b supplies:_ masses in each kind's range (a white dwarf under 1.44 M☉, a neutron star to
+    3.2, a black hole or merger to 300, at most 1 M☉ gathered or ejected); the gathered mass at the
+    accreted rate times the cycle, and the accreted matter's X (ruling 132.1); the burst fuel; the
+    merger's total mass; and the ejecta, `GW170817_EJECTA_MASS` when it has none.
+  - _For P12.T5.c:_ every fade is asymptotic, so a row's `LongestDuration` takes `fades_below` at a
+    share it chooses, and its `PeakBound` the peak at the top of the kind's mass range.
+  - _Leans (2026-10-31):_ a linear rise; t₃ held at U Sco's 2.6 d; the dwarf nova's period held to
+    Warner's 1.3–10 h; the red nova's plateau 100 (M ÷ M☉)^½ d within 100–200; one colour
+    temperature per kind and a 2% reprocessed share; no optical light of a Be/X outburst's own. The
+    figures were recalled, not read at source: the literature was unreachable in this build.
+- **P11.T8.a as built** (lane `p11-t8a`, 2026-10-31; at version 24, no bump: registering a class
+  moves no existing value, as P09.T33.a's record rules; `golden_diff.py` "extended only").
+  - _Files._ `galaxy/catalogue_classes/binary/{mod,awd}.rs` (`AwdProcess`, shared by the
+    newtypes `AccretingWdFast` and `AccretingWdSlow`, `AwdSide`, `AwdEntry`);
+    `stellar/binary/{sampler,scan}.rs`, `stellar/binary/testing/members.rs`; arms for classes 6
+    and 8 in `ProductionClasses`.
+  - _`ClassSampler<M, P>`_ over `ClassSamplerTable<M, P>`, keyed by each class's mark and choice
+    enums (`SamplerKey`; `AwdMark`, `AwdPick`), one word a draw; `draw_in_ranks` is the exact
+    conditional draw. A mark is one residual (17 ranks) about a median on 17 nodes of its
+    condition: narrower than a law per node, which P15.T10.b may widen (lean, 2026-10-31).
+  - _Marks (lean, 2026-10-31)._ The recurrence is drawn first, on the class's side of L by rank;
+    the white dwarf's mass given it; the rate is P11.T5's ignition-mass fit inverted
+    (`scan::transfer_rate_for`), and P_rec is recomputed by `nova_recurrence_period`
+    (re-checked against Yaron et al. 2005). Donor kind (main sequence, helium, giant), period and
+    donor mass follow; magnetism is the white dwarf's own `star.magnetism` draw, as `classify`
+    reads it. The history's age is the table's, raised to 1.05 × plan 06's lifetime, not the
+    component's age law.
+  - _Scan marks_: `scan_marks(galaxy, &AwdProcess, cell, id, bound)` and `scan_cell`, accreting
+    white dwarfs only (T8.b adds its own); `Some` exactly for an entry. Novae: `0x0300 NOVA` on
+    body 0, `nova_clock` (origin drawn in one period), `nova_phase` (0.08 cycles, one-cycle
+    lattice); a slow host carries at most two eruptions, a fast host has `eruptions_in`.
+    `engine_calls()` counts this thread's `run_pair` calls (`cfg(test)` or `testing`).
+  - _Stars._ `ClassProcess::stars` (default `None`) with `CatalogueSystem::with_class_stars`; an
+    entry's `SystemStars::of_marked_pair` holds its two models, `SystemHierarchy::binary_on` the
+    marked orbit and its `from_marks` timeline. The range brief (`BriefModel::of_record`) still
+    answers `KindNotGenerated` for class stars, until P09.T37.
+  - _Tags._ `class.awd.{site,recurrence,velocity,binary,history,metallicity}` and the Event tag
+    `binary.ev.nova`; 0x0301–0x0306 stay P11.T9's.
+  - _Not built._ Plan 09's `assert_complementary` (the class's own every-age test stands in). The
+    hosts' primaries fall 88% in layer D against `CLASS_SHARES`' C 0.75 / D 0.25, so the budgets
+    close by population, not band by band (pinned; for main's ruling). `brute_force_class_members`
+    takes each layer's share of members from `CLASS_SHARES` near the solar circle, not the prior
+    over all systems (lean, 2026-10-31).
+  - _Acceptance:_ `cargo test -p hyperion-sim catalogue_classes::binary`, `stellar::binary::scan`,
+    `stellar::binary::sampler`, `id::event_tags`; slow, `tests/binary_awd.rs` (with the `testing`
+    feature, as the workspace's slow run builds it) and `tests/source_horizon.rs`'s new row.
+  - _Totals._ The total over ten Milky Way seeds (research-leans-10), 9 × 10⁶ each; plan 02's
+    sweep (5.39–15.43 × 10⁶) is printed.
+- **P11.T8.b as built** (lane `p11-t8b`, 2026-10-31; at version 24, no bump: registering a class
+  moves no existing value; `golden_diff.py` "extended only").
+  - _Files._ `binary/xrb.rs` (`XrayBinaries`, `XrbSide`, `XrbEntry`); `XRB_SAMPLER`, `XrbMark`,
+    `XrbPick`, `XrbHostKind` in `tables/binary.rs`; class 5's arm in `ProductionClasses`.
+  - _Tests moved (lean, 2026-10-31)._ On P11.T8.c–d no placed class lacks a process, so those
+    that took `XRAY_BINARY` as one change: the core collapses' and the luminous blue variables'
+    order tests resolve the first X-ray binary about the centre as their stray, its record pinned;
+    the production lookup's test asserts no placed class waits; and the server's
+    `compute/systems.rs` refuses an ID of the never-placed tidal-disruption class as naming no
+    system, unstored.
+  - _Scan marks._ `scan_marks`/`scan_cell` are generic over `scan::ScanProcess`. `XrbScanMarks`:
+    kind, site, position, velocity, `XrbRecoil`, a transient's recurrence, the compact star's mass,
+    the period and the mean transfer rate (for P11.T9.b).
+  - _Sides (lean, 2026-10-31; for main's ruling)._ The row's total, the high-mass side the table's
+    0.16 of it over the young thin disc, the low-mass side the rest; the row alone would give
+    the young disc about 25.
+  - _For P11.T8.f._ Per-component rates are `XrbComponent::hosts_per_system`: the young disc's are
+    about 65 times the row's, so a feature counted from the row alone holds too few high-mass hosts.
+  - _Recoil (lean, 2026-10-31)._ A Maxwellian systemic speed and the years since move a high-mass
+    host from its site on a straight line; no P08.T12 field. σ 12 (Be/X, plan 09's) and 33.5 km/s,
+    from van den Heuvel et al.'s (2000) tangential means; the supergiants' pass the brainstorm's
+    10–30 km/s (for main's ruling).
+  - _Low-mass marks._ Donors on M₂ ≈ 0.11 P_h to 0.8 M☉, evolved beyond 1.3 × their ZAMS radius
+    (Rappaport et al. 1995's core); the rate is `xrb_line` × 10^excess, 10⁻⁶ dex off the line,
+    held to the Eddington rate (a persistent host whose line passes it stays just above the line).
+  - _High-mass marks._ Be/X: detached, its donor plan 06's track at half its life (later if O
+    type), its draws the first of 4,096 attempts that make it a Be star (about 1 in 36).
+    Supergiant: Roche-lobe overflow, a Hertzsprung-gap donor at its own track's luminosity.
+  - _History (lean)._ Low-mass ages from the component's law, raised to 1.05 × the progenitor's
+    life; high-mass ages are life plus the years since. Donors' initial masses held under 0.95 of
+    the turn-off at that age, so their own models live; progenitors' models leave the marked
+    remnant in 100 of 112 sample hosts (not conditioned).
+  - _Figures._ The table's are recalled, not read at source in this build.
+  - _Tags._ `class.xrb.{site,kind,binary,recoil,velocity,orbit,history,metallicity}`; no Event
+    tag. `ClassMember::xray()` (`classify::xray_binary_reading`) gives an X-ray member's marks.
+  - _Not built._ Plan 09's `assert_complementary` and the per-population budget test, which the
+    sides lean fails by design (young disc 1,600 against the row's 25); P09.T38 not re-run.
+  - _Sampler test._ Accretor mass, period, donor mass and rate at T8.a's tolerance (0.97 of the
+    members per dof); the engine gives no high-mass member near the solar circle, so the recoil's
+    marks are not compared (findings).
+  - _Acceptance._ `cargo test -p hyperion-sim -- catalogue_classes stellar::binary rng::tags`,
+    `cargo test -p hyperion-sim --test foundation_golden`, the server's `compute::systems`; slow,
+    `just test-slow` (`tests/binary_xrb.rs`, ten Milky Way seeds, research-leans-10, and
+    `tests/source_horizon.rs`'s new rows).
+- **P11.T8.c as built** (lane `p11-t8cd`, 2026-10-31; at version 24, no bump: registering a class
+  moves no existing value; `golden_diff.py` "extended only").
+  - _Files._ `galaxy/catalogue_classes/binary/{hosts,merger}.rs` (`ClassHosts`, the share row's
+    intensity both merger classes thin on; `StellarMergers`, `ContactPair`, `MergerEntry`);
+    `stellar/binary/scan/merger.rs` (`MergerScanMarks`, `merger_scan_marks`, `scan_merger_cell`,
+    `horizon_time`); `stellar/binary/testing/mergers.rs`; `tables::binary::MERGER_SAMPLER`
+    (`MergerMark`, `MergerPick`); the arm for class 2 in `ProductionClasses`; tags
+    `class.merger.{site,time,metallicity,mass,velocity,binary}`.
+  - _What T9.b and P12.T5.b read_ (`MergerScanMarks`): `merger_time()` (T, uniform over the source
+    horizon; bin 0 and number 0 of `0x0305`), `total_mass()` (the red nova's merger mass, the pair's
+    initial masses' sum), `position_at(T)`, `velocity()`, `id()`. No event tag is registered.
+  - _The merged star (lean, 2026-10-31; main's lean)._ P11.T4.d's rule for two main-sequence stars
+    (BSE eq. 80): a main-sequence star of the pair's mass at τ = 0.1 Σ Mᵢτᵢ ÷ M on its own track
+    (`main_sequence_product`), held from T.
+  - _The pair (lean, 2026-10-31)._ Every entry is two main-sequence stars in contact before T,
+    each at its own track's state at T, radius its Roche lobe, the period from the primary filling
+    its lobe. The age at the epoch is drawn first, from the component's own law; the layer by the
+    share row's weights restricted to layers with main-sequence stars at T; the primary from the
+    galaxy's mass function below the turn-off then; q from the table. So old components give no
+    D or E primary, and the realised layers do not follow the row (pinned).
+  - _The sampler's test_ is against `brute_force_merger_members`: the engine's first-attempt pairs
+    that merged at any age, kept by `carved_class(timeline, T)` and weighted by the component's age
+    hazard f(T) ÷ (1 − F(T)), since about one grid system in 10⁶ merges inside the horizon.
+  - _Not built._ Plan 09's `assert_complementary`, as for T8.a; the classes' own every-age tests
+    stand in.
+  - _Acceptance:_ `cargo test -p hyperion-sim catalogue_classes::binary::merger`, `rng::tags`,
+    `tables::binary`; slow, `tests/binary_mergers.rs` (with `testing`) and
+    `tests/source_horizon.rs`'s new row.
+- **P11.T8.d as built** (lane `p11-t8cd`, 2026-10-31; at version 24, no bump; `golden_diff.py`
+  "extended only").
+  - _Files._ `galaxy/catalogue_classes/binary/nsm.rs` (`NeutronStarMergers`, `Inspiral`,
+    `NsmEntry`, on T8.c's `ClassHosts`); `stellar/binary/scan/nsm.rs` (`NsmScanMarks`,
+    `nsm_scan_marks`, `scan_nsm_cell`); `tables::binary::NSM_SAMPLER` (`NsmMark`, `NsmPick`,
+    `NsmPairKind`); the arm for class 3; tags `class.nsm.{site,time,metallicity,mass,velocity,binary}`.
+  - _What T9.b and P12.T5.b read_ (`NsmScanMarks`): `merger_time()` (bin 0 and number 0 of
+    `0x0306`), `ejecta_mass()` (`GW170817_EJECTA_MASS`: no ejecta model), `total_mass()`,
+    `remnant_phase()` and `remnant_mass()`, `position_at(T)`, `velocity()`, `id()`.
+  - _The pair (lean, 2026-10-31)._ Two neutron stars (0.8) or a black hole and a neutron star
+    (0.2); the primary is the heavier progenitor (8–20 M☉ for a neutron star, 25–60 for a black
+    hole); kept only if both progenitors' plan 06 lifetimes end before T. Before T: detached, the
+    circular orbit whose Peters merger time is T − (start of the source horizon), held fixed
+    (`from_marks` holds orbits), each compact star at its state at T.
+  - _The remnant (lean, 2026-10-31)._ The engine's rule (P11.T4.d's `mix`): a black hole of the
+    total mass above `MAX_NEUTRON_STAR_MASS` (2.0 M☉), so every merger leaves a black hole.
+  - _Acceptance:_ `cargo test -p hyperion-sim catalogue_classes::binary::nsm`; slow,
+    `tests/binary_mergers.rs`'s `ten_milky_way_seeds_realise_their_neutron_star_mergers` and
+    `the_nsm_sampler_against_the_engine_s_mergers` (with `testing`), and `tests/source_horizon.rs`.
+- **P11.T9.b as built** (lane `p11-t8b`, 2026-10-31; at version 24, no bump: nothing in
+  generation calls it; `golden_diff.py` "extended only").
+  - _Files._ `stellar/binary/events.rs`; tags 0x0301–0x0306 in `id/event_tags.rs` and their
+    `binary.ev.*` keys in `rng/tags.rs`; `classify::cv_line` beside `xrb_line`.
+  - _Shape (lean, 2026-10-31)._ A `BinarySystem` is a seed and a host's scan marks or entry:
+    `accreting_white_dwarf_scan`, `accreting_white_dwarf` (dwarf novae need the entry's orbit),
+    `xray_binary`, `stellar_merger` and `neutron_star_merger`. `events_in` and `active_at` append to
+    an `out` vector in time order, ties by ID.
+  - _Clocks._ Novae run on T8.a's `nova_clock` and `nova_phase`. The other phases take the novae's
+    noise and a `LinearClock` whose origin is event stream 255 of bin 0 of their own series.
+  - _Dwarf novae and transients (leans)._ A dwarf nova's cycle is 30 d × line ÷ rate on 10 d–33
+    yr, with a skip of 0.2. A transient recurs at the scan's recurrence, gathering the rate over it,
+    with X 0.7.
+  - _Bursts and Be/X (leans)._ Bursts on persistent neutron stars only: a 10⁸ g cm⁻² ignition
+    column, helium at 0.01–0.1 of Eddington, none at or above it. Be/X giant outbursts 0.1 a year
+    in yearly bins. Persistent black holes and supergiants list none.
+  - _One-shots (on T8.c–d, main's note of 2026-10-31)._ A merger host lists one event at its
+    `merger_time()`, bin 0 and number 0 of its tag on its system: a red nova of `total_mass()`, a
+    kilonova of `ejecta_mass()` (GW170817's). The free builders `luminous_red_nova` and `kilonova`
+    are gone: a caller builds the host with `BinarySystem::stellar_merger` or `neutron_star_merger`
+    (an entry by its `scan()`). _Lean (2026-10-31):_ `remnant_phase()` and `remnant_mass()` set
+    nothing, since T9.a's kilonova has no remnant term and every T8.d merger leaves a black hole of
+    the pair's mass (T8.d's own tests pin it); P12.T5.b may read them.
+  - _Active._ An event is active from its onset until its light stays under 1% of its peak.
+  - _Measured._ The galaxy's novae at Milky Way parameters, each class's novae a sampled host over
+    1,000 years times its expected hosts: 46.0 a year (52.3 by the sampled cells' share alone).
+  - _Acceptance._ `cargo test -p hyperion-sim -- binary::events id::event_tags rng::tags`; slow,
+    `just test-slow` (`tests/binary_events.rs`).
+- **P11.T1.d's helium axis (lane `galaxy-centre-core`, 2026-10-31, at 24, behind
+  `STRIPPING_HELIUM_VERSION` = 26).** `StellarRules::stripping`, of `binarity::StrippingRules`
+  (`HeliumExact`, `HeliumTabulated`). Under `HeliumTabulated` a star with a helium excess up to
+  0.18 reads `binarity::HeliumStrippingTable` (`tables::stripping_helium`, `hyperion-fit`'s
+  `stripping_helium` task: 3 slices of ΔY over the stripping grid, each
+  `StrippingNode::of_fitted_helium`) through `tabulated_node`, which `stripped_share_under` and
+  `stripping_node_under` read; at no helium excess it is `StrippingTable::at`, bit for bit.
+  `stripped_share_on` (the kick bins) is unchanged. The bump refits both tables under 26's rules.
+- **P11.T9.b's black-hole ejecta (fix, lane `p12-t5b-classes`, 2026-10-31, at 24, no bump: nothing
+  in generation reads the ejecta).** `NsmScanMarks::ejecta_mass()` is no longer `const`: GW170817's
+  for two neutron stars; for a black hole `scan::NsbhOutflow::of(hole, star).ejecta()` (Foucart et
+  al. 2018's remnant, Krüger and Foucart 2020's dynamical part, 0.15 of the disc; χ = 0, lean). A
+  merger that ejects nothing lists no kilonova: 8.9% of the class's black holes eject, at most
+  0.026 M☉. `stellar/binary_events.golden`'s kilonova fixture is now the first double neutron
+  star (one line, its subject and onset). `remnant_mass()` is still the total.
+- **P11.T4.l as built** (lane p11-t4l, 2026-10-28; ruling p11-supernova-pins, finding F3, and the
+  orchestrator's wind-spin ruling of 2026-10-06). A pair the pre-test passes over has each of its
+  stars' core collapses applied once, in closed form, on its drawn orbit. **Built as version 25's
+  behaviour at version 23, on its lane branch, with no hold and no bump**: an anchor of version
+  25's train (decision-bump-plan-after-22 §2.2; decision-galaxy-25-train §1.7), its goldens
+  re-blessed by name at header 23, which the train's bump re-blesses at 25. `golden_diff.py`
+  therefore reports "changed values, not bumped", as the lane's brief expects.
+  - _The rule, as built._
+    - `evolve.rs` `run_pair`'s passed-over branch calls `Engine::passed_over` (`supernova.rs`).
+      A pair with no collapse before the age asked is the one detached segment it was, bit for
+      bit.
+    - `collapses_before` lists the sudden deaths before the age asked, in age order, the
+      primary's first at a tie (`total_cmp`). The pinned primary takes the pin's age and kick and
+      `held_to(pin.remnant, living mass)`, the living mass its own track's death's progenitor
+      mass (T4.k). Any other star takes its own track's death and remnant, and `own_kick` with
+      its progenitor's own stripping: `own_kick` is `companion_kick`'s body, which now calls it
+      with `Stripping::Companion` where the binary took the envelope.
+    - A1's arithmetic is `appendix_a1`, taken out of `lose_mass` and shared with it bit for bit
+      (with `universe_time_at` and `alone`; its bound flag is now whether an orbit follows). The
+      closed form has no engine, so it calls neither `explode` nor `lose_mass` but writes the
+      record as `explode` does. Its input is `jeans_widened_state`: the rails' relative state at
+      the collapse's universe time, r × f and v ÷ f with f = M on the rails ÷ M now (the drawn
+      masses' sum for the first collapse, the mass after it for a later one).
+    - Bound: the orbit after is A1's, shown on fixed elements (`rails_elements`, e held to
+      0.9998 as the engine reports it), and a later collapse is applied on it the same way.
+      Unbound: `Disrupted { by }`, no orbit; a later collapse is recorded with its kick alone.
+    - After each bound collapse `interacts_after_collapse` asks the pre-test again of A1's orbit
+      (its own eccentricity, unclamped), from the collapse to the age asked: the lobe test
+      (`evolve.rs` `reaches_lobe_on`) and the decay bound, on a `TestedOrbit`. If it passes,
+      `Engine::new` at the collapse with the members (restarted there), A1's orbit and any pin
+      still ahead, then `take_over` (the segments and records so far) and `run`.
+    - `detached.rs`: `decay_reaches(params, &TestedOrbit, members, start, until, radii)`;
+      `TestedOrbit { elements, masses_msun, lobe_ratios, wind_loss_msun }` (`TestedOrbit::drawn`
+      reproduces the drawn test bit for bit: the same ratios m₁ ÷ m₂ and the same Eggleton
+      fraction, now `lobe_fraction`, which `light.rs` shares); the wind-spin term
+      `WIND_SPIN_SHARE` (2/3 − k′₂) Σᵢ ΔMᵢ Rᵢ², with tides and the wind's spin switch on, added to
+      the reservoir's inertia in the coarse test and the fine one. ΔMᵢ (`wind_loss_msun`) is the
+      star's mass at the span's start less its least living mass by the age asked: its track's
+      mass then, or its death's progenitor mass if it dies first.
+    - `light.rs` (P11.T17.a's closed form) gains the same term, bounded by ΔMᵢ ≤ mᵢ: each kᵢ in
+      its c gains 2/3 − k′₂. Without it the engine's pre-test would pass pairs that `Detached`
+      certifies, against "`Detached` ⇒ the pre-test fails" (decision-observed-class-findings
+      §A.5's forward condition for T4.l).
+    - `stellar/system.rs`: `run_pairs`' doc (a dead pair is run so that its collapses act on its
+      orbit), and `SystemStars::recoil`'s (a passed-over pair's collapses' recoils count).
+  - _Deviations from the ruling's text, and the lane's choices (lean, 2026-10-28)._
+    - **The pre-test asked again**: each living star at its own track's `max_radius_until` the
+      age asked, which bounds the span's largest from above; a star dead by the collapse at its
+      remnant's radius; each star's lobe at its least living mass by the age asked against the
+      other's mass at the collapse (the earlier port's science must-fix).
+    - **The engine's spins at a takeover** (not in the ruling, which says `Engine::new`): each
+      living star on its own track carries the angular momentum it arrived on its main sequence
+      with (`Engine::zero_age_spin`, the engine's own start there: HPT equations 107 and 108, BSE
+      equation 35), held at most at its break-up now, √(G M ÷ R³). A single star only loses spin,
+      so this bounds its spin from above. `Engine::new`'s start, the zero-age velocity at the
+      star's radius then, spins a red supergiant past break-up (a 10 M☉ star at 500 R☉: 232 km/s
+      against 62 km/s). The remnant keeps `Engine::new`'s.
+      - _The train's fix (2026-10-30):_ the zero-age J is multiplied by the wind's factor
+        (M ÷ M₀)^{2/(3k′₃)} before the cap, a tighter upper bound. The cap's source is Hurley's
+        published `evolv2.f` (break-up on every step). It moves `stellar/passed_over_collapses`.
+      - The published code's k₂ is `hrdiag`'s per star (`mrenv.f`, up to 0.4 on giants), not HPT's
+        fixed 0.1; HYPERION keeps the paper's (`sse::ENVELOPE_GYRATION`'s doc).
+    - **A later collapse in an unbound pair** keeps the label `Disrupted { by: <the first> }`,
+      the star whose collapse unbound the pair. _The train's fix (2026-10-30):_ the engine's
+      `explode` keeps it too (`a_disrupted_pair_keeps_the_label_of_the_death_that_unbound_it`).
+    - **A collapse at the age asked itself** is not reached, as the engine's own deaths at its
+      age are not: the build-age comparisons skip that instant.
+    - **The build-age contract** holds bit for bit where the pre-test, and the pre-test asked
+      again after each bound collapse, pass a pair over at both ages. Where the second passes it
+      over at an age and not at a later one, the later run's engine evolves the orbit from the
+      collapse where the earlier keeps it fixed; the history to the collapse is the same and the
+      later run shows no interaction before the earlier age (T4.j's wording, which the plan says
+      covers it). `check_any_age` checks exactly that. _(The review of T4.l's questions,
+      2026-10-29: the weaker form is accepted. `can_interact`'s doc, which claimed "no interaction
+      before it" outright, before T4.l as after, now has T4.j's wording: none before that age and
+      before the pair's first supernova; a later run may take the pair over after a collapse.
+      `check_any_age` now compares the supernova records too (`assert_same_records`): before the
+      earlier age, or to the collapse, its record included, where the later run's engine takes
+      over.)_
+    - **`a_wide_black_hole_pair_stays_bound`**: at version 23 the 40 M☉ primary, stripped by its
+      own winds to a 9.83 M☉ helium star, collapses at 5.51 Myr into a black hole of its whole
+      mass with no kick: no mass is lost, so A1's a′ is the widened 84,263 R☉ (f = 2.52) and e′ =
+      0, with a recoil of about 0 (the plan's "small mass lost" was the prototype's). The test
+      adds the kick-free case of the companion's collapse at 27.82 Myr, which loses a quarter to
+      a half of the pair's mass on the circular orbit the first left: Blaauw's a′ and e′ from the
+      orbit widened by the companion's wind since, and the recoil v m_BH ΔM ÷ (M M′), to 10⁻⁹.
+    - **`a_kicked_wide_pair_that_closes_is_run_from_its_collapse`** (in `tests/binary_classes.rs`,
+      beside the prior sampler): layer-E prior pair 35928, 8.30 + 5.88 M☉ at 56,573 d, e 0.47,
+      whose neutron star (38.92 Myr) is kicked onto e 0.994; the engine takes over and the
+      companion's first giant branch meets it in a common envelope at 72.33 Myr, after which its
+      helium star feeds the neutron star (the ruling's pair 6441, at version 21, went the same
+      way). A search of 10⁵ layer-E prior pairs found seven such pairs (17367, 29814, 35423,
+      35928, 57273, 68325, 80075) among 38,847 passed over, 38,368 with a collapse and 7,702 bound
+      after their first.
+    - **`the_widening_is_jeans_mode`** tests `jeans_widened_state` on three constructed orbits:
+      the separation × f exactly, and a × f, e, the orientation and the rails' phase (so the true
+      anomaly) to 10⁻¹²; `a_wide_pair_is_unbound_by_its_primarys_collapse` checks the engine-level
+      input through the record's velocities to 10⁻⁹.
+    - **T17.a's version-21 test**,
+      `a_passed_over_pairs_collapse_keeps_its_drawn_orbit_at_version_21`, failed as planned and is
+      restated as
+      `a_passed_over_pairs_collapse_is_applied_and_the_bound_does_not_lean_on_it`: the collapse rule
+      (item 3, `None` for a pair a star of which may have collapsed by the window's end) stands.
+    - **More tests** (the reviews): `the_second_pre_test_never_passes_over_an_interaction` (slow;
+      `evolve_past_the_second_pre_test` runs every pair a bound collapse leaves through the engine);
+      `a_taken_over_star_keeps_its_zero_age_spin`; `passed_over_collapses_are_pinned`, a new
+      golden; the build-age suites' wide massive pairs (`wide_massive_pair`, beside every tenth
+      pinned pair: 6 in the fast suite, 100 in the slow one); `check_collapses` on passed-over
+      pairs; two wide pairs in `a_timeline_is_the_same_in_any_order`; and a 1.5 + 0.45 M☉ pair at
+      2,300 d in `the_bound_follows_the_engines_switches`, which passes by 13.8 Gyr only with the
+      wind's spin.
+  - _Known departures_ (the plan's, as built): the shown orbit before a collapse is the drawn one,
+    and steps to A1's orbit from the widened state at the collapse; a white dwarf's birth keeps
+    the orbit (F1). The widening assumes the stars' mass-loss times far exceed the period, which
+    beyond periods of about 10⁷ d it extrapolates, as BSE's orbit-averaged rates do (science
+    check, recorded). `SystemStars`: a passed-over pair's star now has its collapse's record, and
+    `recoil()` is `Some` for a pair bound after its collapses.
+  - _Goldens_ (blessed by name at header 23, `uname -m` x86_64; `golden_diff.py --base` the lane's
+    base: three files, no header change, "changed values, not bumped"):
+    - `stellar/binary_timelines`: **29 of 1,000 digests**, each a single segment at the base.
+      - 10 by the closed form: 0083, 0221, 0430, 0629, 0648, 0775, 0836, 0872, 0887, 0998. Six
+        are disrupted by the primary's collapse (0221, 0430, 0648, 0775, 0872, 0998, four of them
+        recording the companion's collapse later); four stay bound on A1's orbit (0083, 0629,
+        0836, 0887), of which three are disrupted by the companion's collapse and 0836 stays bound
+        through both. None is taken over by the engine.
+      - 19 by the wind-spin term, which now passes them, so that the engine runs them from the
+        first arrival; none interacts: 0018, 0218, 0290, 0350, 0414, 0440, 0511, 0532, 0538, 0573,
+        0575, 0620, 0628, 0801, 0817, 0837, 0920, 0925, 0978 (0538, 26.9 + 19.6 M☉ at 5,653 d,
+        collapses on the engine's orbit; the plan's list had it as a closed-form pair).
+      - Of the plan's fifteen, 0330, 0480, 0782 and 0886 do not move: T4.j's bound runs them
+        since T4.k (as T4.k's record said).
+    - `stellar/pair_light`: **13 of its 256 verdict queries**, all `Detached` at the base, by
+      T17.a's wind-spin term: 8 to `Bright` (026, 055, 061, 077, 150, 213, 221, 248), 2 to
+      `Unchanged` (179, 253), 3 to `None` (131, 156, 199); 8 `M_V` lines are new, for the new
+      `Bright` verdicts. `Detached` falls from 143 to 130 of the queries.
+    - `sky/census_near_sun` (`the_census_near_the_sun_is_pinned`): the systems the census
+      generates in full rise, as T17.a's `Detached` certifies fewer pairs (A 559 → 570, B 437 →
+      453, C 3,311 → 3,334, D 782 → 797; C's and D's without photometry 828 → 858 and 916 → 941);
+      every accepted and listed count is unchanged, so the census's stars do not move.
+    - `stellar/passed_over_collapses`: new (an extension), from `passed_over_collapses_are_pinned`.
+    - No other golden moves: all 357 golden tests the change reaches, in the sim and the server,
+      run without stopping at a failure, and the gate's fast suite.
+  - _Statistics_ (layer E, the 12,000 prior pairs of `binary_classes`' sampler, all run to
+    13.8 Gyr as `run_pairs` runs them; the lane's probe against the base, x86_64, pod 4 vCPU):
+    - the bound share after the primary's collapse **66.8% → 33.9%** (neutron stars 62.1% →
+      17.0%, black holes 74.4% → 61.1%; the plan expected 34.0%, 17.2% and 61.2%);
+    - the hydrogen-poor share of the recorded collapses 0.538 → **0.376** (8,393 → 14,084
+      records);
+    - bound NS/BH beside a living star 26.4 × 10⁶ → **4.26 × 10⁶** pair-Myr (−84%; the plan −86%),
+      on a log grid of 400 ages;
+    - the double-neutron-star class shown in 282 → **115** pairs, against 115 by record before and
+      after (the plan expected 126 against 112);
+    - symbiotic neutron-star X-ray binaries 24,600 → **1,870** pair-Myr (−92%; the plan −95%);
+    - released companions of 2.5 M☉ or more 1,039 → **2,234**, 61% → 82% of them below 30 km/s
+      (the plan: 2,212, the new ones nearly all slow);
+    - pairs the pre-test passes over by 13.8 Gyr 5,068 → 4,625: the wind-spin term passes 443
+      more (+8.7% engine runs in this sample);
+    - **the zero-miss gate** (`the_decay_bound_never_passes_over_an_interaction`, 3 × 6,000
+      pairs): **0 misses** in each sample; the pre-test passes 2,262, 2,611 and 5,041 (at version
+      21, before the term: 2,262, 2,576 and 2,761; the probe's 2,761 → 5,047), of which 542, 126
+      and 3,730 do not interact;
+    - **the pre-test asked again** (`the_second_pre_test_never_passes_over_an_interaction`, 3,000
+      wide massive pairs): 1,071 bound after a collapse, 2 taken over by the engine, 1
+      interaction when the engine is forced from every bound collapse, **0 missed** (the plan's
+      probe: 0–3 of 5,607);
+    - the build-age suites: 3,803 runs just past events and 30 between arrivals; at any age 397
+      run, 598 passed over, 5 through collapses, 0 missed; between arrivals 60 run, 661 passed
+      over, 0 missed; the 100 wide massive pairs 10 passed over and 90 through collapses, 0
+      missed. The 10³ close pairs keep the engine's invariants, `check_collapses` now on
+      passed-over pairs too;
+    - `binary_classes` (4 of 4): every class reached; 115 bound double neutron stars in the
+      window test, 72 (63%) at e < 0.3, 26 merging, about 30 a Myr by VG18's yield (Pol et al.
+      28–72); **the shown class 115 against 115 by record** (the new test; within 15); recycled
+      pulsars' median periods 27.7 ms beside CO/ONe white dwarfs and 70.3 ms beside neutron stars;
+    - `binary_system` (3 of 3): ruling 137's share per exploding star **0.472** (2,723 of 5,765
+      collapses; 0.500 at version 21 before T4.l, by the earlier port's run), not asserted (but
+      see Findings: the share over the collapses that leave a neutron star is now asserted);
+      Rucinski's contact pairs 2.84 × 10⁻³ a star; the bright exception 4 of 86,184 thin-disc
+      systems;
+    - `binary_carve` (1 of 1): redrawn A 0, B 0, C 1.0 × 10⁻³, D 6.85 × 10⁻³, E 4.0 × 10⁻³; no
+      system uses every attempt;
+    - P11.T17.a's agreement (`detached_generated_pairs_are_passed_over`, and the slow
+      `no_detached_pair_is_passed_by_the_pre_test` over 10⁵ pairs a layer): **no `Detached` pair
+      passes the pre-test.** The term's ΔMᵢ ≤ mᵢ costs `Detached` most where a heavy star has a
+      light companion (its (1 + q) factor): against "P11.T17.a as built"'s table, A 99.69% →
+      99.38% (young 99.93% → 99.79%), B 98.20% → 96.76% (99.63% → 99.11%), C 77.46% → 72.87%
+      (99.38% → 97.74%), D 25.96% → 19.92% (97.35% → 90.55%), E 0.95% → 0.72% (66.16% →
+      49.93%); the pre-test passes over C 81.98%, D 26.67% and E 9.77% at the records' ages;
+    - P11.T17.c's `the_pair_verdicts_hold_against_the_engine`: 0 violations and 0 engine panics
+      over its 4.05 × 10⁵ pairs (1,141 s);
+    - `the_gate_is_conservative` (P11.T11.a; decision-observed-class-findings §A.5) passes, run by
+      name, and `briefs_are_the_full_systems_over_thirty_thousand_systems` passes (23,888
+      table-routed rows inside their stated error, 514 s);
+    - R06's census oracles: within 1,000 ly of the Sun
+      (`the_census_is_its_oracle_1000_ly_from_the_sun`, 1,400 s) the census generates 476,140 of
+      1,411,018 systems in full, against R06's last record of 453,260 (+5.0%: C 251,630 →
+      270,421, D 137,060 → 141,147, E 64,570 → 64,572), from T17.a's smaller `Detached`; the
+      150 ly and dwarfs' oracles pass; the four nuclear-disc ones were not run (stopped to give
+      the gate the pod's cores);
+    - **the R06 census** (`a_hundred_thousand_systems_live_and_die_in_order`) passes in **381 s**
+      (pod, 4 vCPU, alone: not comparable with T4.k's 188 s on the old machine under the heavy
+      lock), and `multiple_systems_follow_the_model_over_ten_thousand_systems` passes;
+    - `just fit-check`: 45 fresh, 5 provisional as at the base (`displaced_forms`, `helium`,
+      `kick_rank`, `mge`, `streams`), **0 stale**: no table moves, so no refit here. T17.b's
+      tables' refit (P11.T17's note on the deferred batch) stays with the train's wiring, at
+      `--since 25`.
+  - _Findings_ (recorded; not this task's):
+    - **Ruling 137's share in `binary_system` is 0.472**, against the ruling's expected 0.32–0.38
+      (scaled from the prior sample, where it is 0.376): for the binary-population calibration,
+      as the earlier port recorded. _Restated (the review of T4.l's questions, 2026-10-29): not a
+      defect._ T4.l adds only 393 collapses (6.8%) to `binary_system`'s, and the test's share
+      counts the direct collapses to black holes, where Sana et al.'s (2012) 37% counts
+      supernovae. Over the collapses that leave a neutron star the share is 0.354 (the review's
+      figure), inside the ruling's 0.28–0.40.
+      `binary_system_stripped_marks_and_the_share_per_exploding_star` now prints both shares and
+      asserts that one in 0.28–0.40.
+    - **T17.a's `Detached` shrinks** under ΔMᵢ ≤ mᵢ (above): a tighter bound per cell, such as
+      the least living mass the reach table could store, would recover much of it, in T17.b's
+      refit for the train (lean, 2026-10-28). It costs the census more table reads and the brief
+      gate fewer certified rows; no verdict is wrong.
+    - **The engine's `explode` relabels `Disrupted { by }`** by a later collapse in an unbound
+      pair (the closed form keeps the first). Fixed in the train (above).
+    - **Citations not re-read in the pod** (no web access): HTP02 §2.2 for Jeans's mode (the
+      plan's), HPT equations 107–110 and BSE equation 35. The science check derived every formula
+      (all ok) and leaves the section and equation numbers to a check against the sources.
+- **P11.T4.m as built** (lane p11-t4mn, 2026-10-29; ruling p11-c2-swell, findings C2 and F15). A
+  fed helium star or white dwarf swells into a giant around its own core only where the hydrogen
+  accumulates, on an exact placement, and a helium main-sequence accretor keeps its fraction
+  burnt. **Built as version 25's behaviour at version 23, on its lane branch, with no hold and no
+  bump**, as P11.T4.l is (the lane's brief; decision-bump-plan-after-22 §2.2;
+  decision-galaxy-25-train §1.7): its goldens are re-blessed by name at header 23, not at the
+  task's header 24, and the train's bump re-blesses them at 25. `golden_diff.py` reports "changed
+  values, not bumped". P11.T4.n, split off to a lane of its own, is not in it.
+  - _The rule, as built._
+    - `rlof.rs`: `transfer_phase` builds a `Fed` (the accretor's type, mass and core at the step's
+      start, what it accreted, `accretion.share × rate × dt`, and the step's dt) and passes it
+      through `accretor_events` to `swell`. `swell`: the type at the step's end against the
+      type at its start; the target and the core (a helium main-sequence star's or a dwarf's mass
+      at the step's start, a helium giant's carbon–oxygen core then); gate (a),
+      `SWELL_WIND_FACTOR` = 1.05 (the accretion beats 1.05 × its net wind, the accretion less its
+      net gain, and m is above the core); the placement, `Engine::swelled_star`; gate (b); then
+      the segment closed and the member set. The mass is m, never raised to the core; y is the
+      helium star's τ at the step's end. A refusal leaves the member as it is and closes no
+      segment.
+    - `accretion`: a helium star takes the whole transfer, and may swell, only from a donor of
+      `Surface::Hydrogen`; any other, a white dwarf among them, gives the thermally limited share.
+      `rejuvenated_tau`: `mixed` is `!helium && !(0.35..=1.25).contains(&m1)`.
+    - `common_envelope.rs`: `placed_star`'s body is `placed_by(i, target, m, ask)`, the carried
+      mass apart from the core asked of `sse::new_star_mass`; `placed_star` calls it with
+      `(m.max(core), core)`, so every other caller is bit for bit as before (F16).
+      `swelled_star(i, target, m, core)` solves for the ask: the core itself first (kept within
+      `SWELL_CORE_TOLERANCE`, 10⁻⁹; refused if it places no star or overshoots); then the
+      fixed-point step core − miss, then the secant through the last two trials, or bisection
+      where it leaves the bracket [core, `SWELL_BRACKET` core = 1.1 core]; an ask that places no
+      star or overshoots closes the bracket from above; at most `SWELL_BUILDS` (12) track builds,
+      a fixed sequence of the inputs, with no cache.
+    - `accretion`, `swell`, `rejuvenated_tau`, `Accretion` (and its fields) and `Fed` are
+      `pub(super)` for `binary/tests.rs`.
+  - _Deviations from the task's text, and the lane's choices (lean, 2026-10-29)._
+    - **Gate (b) also asks that the giant keep its envelope to the step's end.** Read at m, a core
+      that would outgrow the mass is held at it, so the growth test alone (later − now below
+      m − pre) passes such a core wherever the placement's built core lies a hair above the
+      asked one. Both are asked: the growth below the net gain, and the core at age + dt below m.
+      That is the gate's own purpose: the next step does not strip the giant (P11.T4.g's strip).
+    - **A step over which the accretor's type changes swells nothing** (the review). BSE reads the
+      type at the step's start (`kstar(j2)`, `evolv2.f` 1482); a helium giant whose step lands on
+      its death reads as a dwarf at the step's end, and would otherwise be placed around its whole
+      mass just before the death acts. Counted with scratch counters: it never fires in the
+      pinned thousand or in 22,000 prior pairs, and moves nothing.
+    - **Gate (a) applies to white dwarfs too**, as the task's rule is written; BSE has neither gate
+      for a dwarf (`evolv2.f` 1513–1547, the science check). A dwarf has no wind, so it refuses
+      none (0 of layer D's 190 requests).
+    - **The bracket's top is not built first**: an ask outside (lo, top) bisects instead. **The 1.1
+      bracket refuses one corner of `the_swells_placement_is_exact`'s grid**, core helium burning
+      at y = 0.1 with an 8 M☉ core at Z = 0.02, where `placed_star` misses by −8.4% and the placed
+      core rises at about 0.78 of the ask, so that the exact ask lies at about 1.108 × the core.
+      37 of the 38 cases are placed exactly. No swell in the samples meets it (no placement of a
+      helium star is refused in them). The ruling's bracket is kept; widening it to about 1.15
+      would move nothing now.
+    - **`a_swell_the_shell_would_burn_is_refused`'s wind case** feeds 100 × the core growth and loses
+      41/42 of it to the wind: the star gains mass and would pass the burn gate, so the case tests
+      BSE's 1.05 alone. Pairs 1723 and 8002 cover a star whose wind beats its accretion.
+    - **`a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star`** reads 65 even samples
+      a segment, its edges included, not every knot; a swell closes a segment, so it would fall on
+      a sampled edge. No gate passes there: BSE's gate (a) refuses all 133 requests (counted).
+    - **`a_fed_white_dwarf_swells_around_itself`** reads pinned pairs 0118 (a 0.715027 M☉ CO dwarf
+      becomes a TP-AGB star, Z = 0.004) and 0305 (it swells around its 1.274548 M☉ dwarf), and
+      for both looks for a CO dwarf above the Chandrasekhar mass at every segment edge and every
+      knot of a remnant's mass.
+    - **More tests** (the reviews): `a_fed_helium_giant_swells_around_its_carbon_oxygen_core` (unit:
+      a 1.45 M☉ helium Hertzsprung-gap star becomes a TP-AGB star around its CO core at the step's
+      start to 10⁻⁹, and the same step read as a change of type is refused);
+      `a_swell_is_the_same_in_any_order_and_at_any_age` (pinned pairs 0255, 0305 and 0487 in both
+      orders, and run to just past each event); `check_swells` in `check_invariants`, which besides
+      the plan's M − Mc > 0 checks each swelled giant's core against the ruling's to 10⁻⁹; and
+      `the_follow_ups_fed_helium_star_is_not_capped` (below).
+    - **Two other tests restated, no golden:** `light.rs`'s `a_capped_timelines_held_stars_are_bounded`
+      (P11.T17.c's follow-up) keeps the held floor's check on its F18 sample (cell 4817 of D's
+      table, P11.T4.o's) alone, and the F15 sample (cell 4273, sample 10253) gets its own test,
+      asserting it is no longer capped. R06's
+      `sky::census::cell::tests::the_capped_bulge_record_is_bounded_star_by_star`: record
+      `0x61fec2d802000037`'s pair (R06's record of it in `06-the-sky.md`) is no longer capped,
+      and both its stars are dead by 8.7 Gyr, so no star is checked at T8.g's times
+      ((systems, own + widened, unbounded) = (1, 0, 0), against (1, 4) before); the held floor
+      keeps its coverage in `light.rs` and its own tests. The held floor's docs (`light.rs`,
+      `pair_light::held_floor`) say T4.m removed the rules behind F15 and C2, and label their
+      rates as before T4.m.
+    - **Citations corrected by the science check:** the "reverse of the process" sentence is HTP02
+      §2.6.4, not §2.6.6; BSE's `gntage` never refuses a placement (it re-types the star,
+      `gntage.f` 34–49, 132–137, 281–294), so the refusal is the ruling's (item 7); and the burn
+      gate now cites Nomoto, Saio, Kato and Hachisu (2007, ApJ 663, 1269, §3). **The ruling's
+      "COMPAS's `HURLEY` default" is wrong**: COMPAS's default rejuvenation is `STARTRACK`
+      (`m_prev` ÷ m), and HTP02 §2.6.6 rejuvenates a helium main-sequence accretor as a
+      convective-core star; only BSE's code (`evolv2.f` 1889–1900) and COMPAS's `HURLEY` option
+      keep its fraction burnt. Item C stands as ruled; the docs say so (lean: keep it, since the
+      paper's rule is F15's stall).
+  - _Re-measured on T4.l's engine_ (the ruling measured on T4.k's prototype; every figure below
+    matches it unless said):
+    - 1723: 16 segments, a 1.188 M☉ neutron star at 36.342 Myr, bound; 8002: 18 segments, 1.208 M☉
+      at 37.709 Myr, bound (both capped at 64 segments before).
+    - 6695: 18 segments, not capped; its fed helium star collapses to a neutron star at
+      183.85 Myr (capped at 183.1 Myr before).
+    - 0255 swells at 8.611390 Myr around 5.530250928 M☉ (net gain 1.96 × 10⁻⁶ M☉ yr⁻¹ over a
+      163 yr step), envelope 3.1896 × 10⁻⁴ M☉, y = τ to 10⁻¹⁵, R 0.667 R☉; its black holes are of
+      2.880 and 4.179 M☉ (2.941 before), and **the pair stays bound through both** (the ruling's
+      prototype had it disrupted).
+    - 0267: a real swell at 14.1815 Myr (0.546 R☉), one more transfer segment (11 → 12), the same
+      merger. 0305: no 1.77 M☉ CO dwarf nor collapse at 526.2 Myr; a TP-AGB star around its
+      1.2745 M☉ dwarf, then a merger to a 1.284 M☉ ONe dwarf (21 → 15 segments). 0487: the exact
+      placement refused, an accretion-induced collapse at 454.18 Myr (15 → 18 segments). 0080:
+      21 → 19 segments, its neutron star at 366.708 Myr (366.572 before).
+  - _Swells_ (scratch counters in a probe, never committed; requests repeat at every step):
+    - layer E (12,000 prior pairs): 396 helium-star requests, all refused by gate (a); 2
+      white-dwarf requests, both made;
+    - layer D (10,000): 187 helium-star requests, 162 refused by gate (a) and 25 by gate (b), none
+      made; 190 white-dwarf requests, **6 placements refused**, 184 made;
+    - the pinned thousand: 49 helium-star requests (41 by (a), 6 by (b), 2 made) and 25
+      white-dwarf ones (5 placements refused, 20 made).
+  - _Goldens_ (blessed by name at header 23, `uname -m` x86_64; `golden_diff.py --base ef9b605`,
+    T4.l's commit: two files, "changed values, not bumped"):
+    - `stellar/binary_timelines`: **27 of 1,000 digests**, as the task listed: 21 by white dwarfs
+      (20 swells: 0059, 0080, 0118, 0248, 0264, 0284, 0305, 0319, 0332, 0417, 0524, 0528, 0562,
+      0590, 0698, 0769, 0787, 0934, 0977, 0983; and 0487, whose placement is refused), 2 by helium
+      stars' swells (0255, 0267) and 4 by the helium accretor's clock, in their bits (0050, 0138,
+      0841, 0960). Segment counts change in the task's five: 0080, 0255 (15 → 14), 0267, 0305 and 0487.
+    - `stellar/held_bare_core_helium_star` (**the ruling expected none**): star 1, the 12.66 M☉
+      companion that fed the helium star, leaves a neutron star at 20.31 Myr of 1.3716645444
+      M☉, not 1.3716643345 (+1.5 × 10⁻⁷), and its luminosity with it: with no swell and strip
+      between 15.69 Myr and the primary's collapse, the transfer it gave differs.
+    - No other golden moves: the 2,902 tests the gate selects, run without stopping at a failure
+      (3,938 s, pod, 4 vCPU), failed only on these two goldens, the two restated tests above and
+      the fitted tables' freshness.
+  - _Statistics_ (the probe on `binary_classes`' prior sampler, every pair run to 13.8 Gyr as
+    `run_pairs` runs it; T4.l's engine before, this task's after):
+    - capped timelines: layer E 2 → **0**, layer D 1 → **0**;
+    - layer E: records 14,084 → 14,087, hydrogen-poor 5,300 → 5,305 (0.3763 → 0.3766; the ruling's
+      8,393 → 8,396 and 0.5376 → 0.5380 were before T4.l), blue-straggler time −39% (34,912 →
+      21,230 pair-Myr on 400 log ages, all of it 1723's and 8002's stretched segments);
+    - layer D: records 914 → 891; accretion-induced collapses 41 → 23; bound neutron stars after
+      the primary's collapse 160 → 142 (the ruling 158 → 140); low-mass X-ray binaries, persistent
+      NS 104 → 86, persistent BH 17 → 6, transient NS 98 → 85, transient BH 21 → 8, symbiotic BH
+      20 → 8 (the ruling's figures exactly); millisecond pulsars 39 → 28 (the ruling 43 → 29);
+      CVs 684 → 682, symbiotics 150 → 149, double white dwarfs 2,170 → 2,168, Type Ia progenitors
+      137 → 136; pairs ever holding a bound NS or BH beside a living star 159 → 141; hot-subdwarf
+      time **−30%** (45,204 → 31,519 pair-Myr, 6695's stretched segment).
+    - `just fit-check` (the gate's step): **`binary_pair_light_c`, `binary_pair_light_d` and R06's
+      `sky_binary_light_d` are stale** by their fingerprint probes (0 stale at T4.l). The task
+      leaves them to the train's wiring, and P11.T4.n's lane stales the same tables, so they are
+      not refitted here (lean, 2026-10-29); the gate's freshness step fails by design until then.
+  - _The acceptance runs_ (over T4.m's commit, with T4.l's fix below it; pod, 4 vCPU; the slow
+    ones in the `slow-test` profile, by name, one at a time, none beside the gate):
+    - `cargo nextest run -p hyperion-sim -E 'test(binary::)'` (150 tests, among them the new unit
+      tests and `the_capped_bulge_record_is_bounded_star_by_star`), and the tests that filter
+      leaves out: `binary_classes`' fast ones (`a_helium_star_fed_less_than_its_wind_stays_a_helium_star`,
+      `a_helium_accretor_fed_to_its_end_is_not_capped`) and `stellar_system`'s
+      `a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star`: all pass.
+    - decision-observed-class-findings §A.5: `the_gate_is_conservative` and
+      `detached_generated_pairs_are_passed_over` pass; the slow
+      `no_detached_pair_is_passed_by_the_pre_test` passes with `Detached` as at T4.l (old A
+      0.9938, B 0.9676, C 0.7287, D 0.1992, E 0.0072; young 0.9979, 0.9911, 0.9774, 0.9055,
+      0.4993; the closed form reads no engine); P11.T17.c's `the_pair_verdicts_hold_against_the_engine`:
+      **0 violations and 0 engine panics** in its 18 sets (1,218 s), so the three stale tables'
+      verdicts still hold against the changed engine.
+    - The 10³-pair suites: `a_thousand_close_pairs_keep_the_engines_invariants` (`check_swells`
+      now in it), no capped timeline; `a_thousand_timelines_are_the_same_whatever_age_they_are_run_to`
+      (with T4.l's fix's record comparison): 397 run at both ages, 598 passed over, 5 through
+      collapses, 0 missed; between arrivals 60, 661, 0; the 100 wide massive pairs 10 passed over
+      and 90 through collapses, 0 missed; `a_hundred_timelines_run_to_just_past_their_events_are_the_same`:
+      3,773 runs just past events, 30 between arrivals.
+    - The pre-test's gates: `the_decay_bound_never_passes_over_an_interaction`, 0 misses (passes
+      2,262, 2,611, 5,041, as at T4.l); `the_second_pre_test_never_passes_over_an_interaction`,
+      1,071 bound after a collapse, 2 taken over, 1 interacting when forced, 0 missed.
+    - `binary_system` (3 of 3): ruling 137's share 0.472 over every collapse (2,723 of 5,765) and
+      **0.354 over the collapses that leave a neutron star** (1,291 of 3,651; asserted in
+      0.28–0.40 since T4.l's fix), as at T4.l; the marks: 1,407 of 1,752 marked primaries
+      stripped, 300 merged, the merger band 813 of 984 merged; Rucinski's contact pairs
+      2.84 × 10⁻³ a star; the bright exception 4 of 86,184 thin-disc systems.
+    - `binary_carve` (1 of 1): redrawn A 0, B 0, C 9.5 × 10⁻⁴ (19), D 6.35 × 10⁻³ (127), E
+      4.0 × 10⁻³ (40), against T4.l's 1.0 × 10⁻³, 6.85 × 10⁻³ and 4.0 × 10⁻³: within Poisson; no
+      system uses every attempt.
+    - `binary_classes` (4 of 4 slow): every class reached; 115 bound double neutron stars, 72
+      (63%) at e < 0.3, 26 merging, about 30 a Myr by VG18's yield; the shown class 115 against
+      115 by record; recycled pulsars' median periods 27.7 ms beside CO/ONe dwarfs (239) and
+      70.3 ms beside neutron stars (176).
+    - The R06 census (`a_hundred_thousand_systems_live_and_die_in_order`) passes in **387 s**
+      (T4.l 381 s, the same pod class); `multiple_systems_follow_the_model_over_ten_thousand_systems`
+      passes; `briefs_are_the_full_systems_over_thirty_thousand_systems` passes (23,888
+      table-routed rows inside their stated error, 515 s).
+    - R06's census oracles (`sky_census`, all seven): within 1,000 ly of the Sun, 476,140 of
+      1,411,018 systems generated in full, as at T4.l (1,348 s); 150 ly in motion 13,959 of 42,076
+      (24 s); the dwarfs 3,769 of 249,096 (7 s); and the four nuclear-disc ones, which T4.l's
+      lane did not run (D and E within 20 ly, at −x above the plane 165,297 of 220,301 generated,
+      2,408 s; −x below, 2,410 s; +x above, 2,392 s; +x below, 2,373 s, run alone after a
+      lost pod): all pass.
+  - _Findings_ (recorded; not this task's):
+    - **F16's miss is larger early in core helium burning**: −8.4% at y = 0.1, 8 M☉, Z = 0.02,
+      beyond "up to 8%"; the swell's 1.1 bracket refuses that corner (above).
+    - **Gate (b) on the thermally pulsing AGB** compares the net gain with the core's growth, which
+      third dredge-up cuts (HPT eq. 73, λ up to 0.9), not with the shell's burning rate: so for a
+      dwarf or helium giant swelled to the TP-AGB it passes gains down to (1 − λ) of that rate.
+      As ruled (gate (b) is the core's growth); for the binary-population calibration (the
+      science check).
+    - **The rejuvenation of a helium accretor** (item C; above): the paper and COMPAS's default
+      rejuvenate it, BSE's code does not. Kept as ruled.
+- **P11.T4.n as built** (lane p11-t4n, 2026-10-29; decision-observed-class-findings §B, which
+  supersedes ruling p11-t4k-faults' "recorded, not routed", its §2.1 C and §7). A pinned primary's
+  own track's main-sequence end is an engine stop, where a hydrogen main sequence the pair has
+  prolonged goes on along the pin's own track. **Built as version 25's behaviour at version 23, on
+  its lane branch beside T4.l's patch, with no hold and no bump**: an anchor of version 25's train
+  (decision-bump-plan-after-22 §2.2 and its 2026-10-21 addendum; decision-galaxy-25-train §1.7;
+  §B.4's "a held patch on T4.l's patches"). T4.m was built in parallel on the same base, so the
+  patch is re-cut onto T4.l and T4.m before the 25 wiring. Its goldens are re-blessed by name at
+  header 23 (not the task text's 24), which the train's bump re-blesses at 25: `golden_diff.py`
+  reports "changed values, not bumped", as the ruling expects.
+  - _The rule, as built._
+    - `evolve.rs`: `PinnedTrack::main_sequence_end` reads the pin's own full track's
+      `Track::main_sequence_end` (the start of the segment after its last main-sequence one) into
+      `OwnMainSequenceEnd { track, age_years }`. `run_pair` gives it to the engine
+      (`Engine::with_own_main_sequence_end`, kept only if it lies after the engine's start) and to
+      `Engine::passed_over`, which gives it to an engine that takes a pair over after a collapse.
+    - The stop is `detached.rs`'s `Stop::PinnedMainSequenceEnd`. `step_limit` and `rlof.rs`'s
+      `transfer_limit` register it just after the pin while member 0, of its phase at the step's
+      start, holds a hydrogen main sequence that outlasts it (`own_main_sequence_end_after`,
+      `outlasts_its_own`): a carried `Member::MainSequence { helium: false }`, or a star on a track
+      whose main-sequence segment (`phase_ahead`'s, which a track holds whole however far it is
+      built) ends later, a merger's product. A primary on its own track ends there by itself, at its own
+      boundary, and never registers it, so no other pair's steps move. The first registered wins
+      a tie (`StepLimit`): the pin, always later, then the stop, then the members' events.
+    - `contact_phase` (`common_envelope.rs`) stops its knots at it as at the pin, whatever the age
+      asked.
+    - `Engine::end_pinned_main_sequence` acts on it. The segment closes, an event, and member 0
+      becomes a `Member::Shaped` on the pin's own track, at `offset_for(age, end)` and its own
+      mass, the form `carry` gives a case-B donor. Every step lands on the end exactly (the step
+      is `end − age`, exact by Sterbenz), so the offset is 0.0. A contact pair then coalesces
+      (below).
+    - `Engine::run` acts on one due at the engine's age (to `clock_resolution_years`) before each
+      phase, as on the pin (`own_main_sequence_end_due_now`): a step that lands on it and leaves
+      its phase by another exit (a transfer that detaches on it, a strip or an onset found inside
+      it). One the engine has passed is dropped, debug-asserted to leave no main sequence that
+      outlasts it.
+    - Unchanged: the pin's age, remnant and kick; a star off its main sequence then; a helium main
+      sequence; an unpinned member 0; a run that ends before the end (the stop does not depend on
+      the age asked, as the pin's does not). No draw, stream or tag.
+  - _Deviations from the ruling's text, and the lane's choices (lean, 2026-10-29)._
+    - **Merger products are switched too.** The ruling's test names the carried form,
+      `Member::MainSequence { helium: false }`, "or the merger product that holds the pin". The
+      engine's main-sequence merger product is a `Member::Track` on a track of its own mass,
+      young by BSE's equation 80 (`main_sequence_star`), not a carried main sequence, and 34 of the
+      pinned thousand's 53 main-sequence collapses were such products. The build reads the
+      ruling's intent: any hydrogen main sequence of member 0 that outlasts the pin's own. The
+      product goes on along the pin's own track at its own mass.
+    - **A contact pair coalesces at the switch**, as the engine's contact does when a star leaves
+      its main sequence (Nelson and Eggleton 2001's slow case, `Engine::contact`; L2 overflow, HTP
+      2002 §2.6.6, which coalesces every contact; Menon et al. 2021, MNRAS 507, 5013, §2.2.3, whose
+      massive contact pairs merge as a star leaves its main sequence): `mix` of the Hertzsprung-gap
+      star and its main-sequence companion is a common envelope, which in every sampled pair ends in
+      a coalesced Hertzsprung-gap product of the pair's mass on its own full track (`new_star`). In
+      0223 and 0277 that product's own track dies before the pin (16.56 and 44.24 Myr), and it is
+      held there (`Engine::hold`), an early-AGB supergiant, until the pin collapses it.
+    - **The stop is registered only while member 0 holds such a main sequence**, so that it moves
+      no step of any other pair.
+    - **T4.k's pin inside a contact** is now a backstop that no pinned contact reaches: a contact
+      needs both stars on their main sequences, and member 0's ends at the switch, before its pin.
+      `a_contact_stops_at_the_pin` (T4.k's finding C) is restated as
+      `a_contact_stops_at_its_primarys_own_main_sequence_end`.
+  - _Tests_ (`stellar/binary/tests.rs`):
+    - `a_pinned_case_a_donor_leaves_its_main_sequence_at_its_own_end`: record 822C72E00000008C of
+      LOOK72 (seed 0xa49f_649b_ef43_4b20, the full potential; 10.486 M☉, Z = 0.03). Its own main
+      sequence ends at 21.8206 Myr inside its case-A transfer; the 6.674 M☉ carried donor goes on
+      along the pin's own track, a Hertzsprung-gap star with a 2.196 M☉ core, L up 0.766 dex (log
+      L 3.517 → 4.282); case AB strips it to a 2.24 M☉ helium star by 21.866 Myr, which collapses
+      at its pin, 24.6187 Myr, into plan 06's 1.1927 M☉ neutron star with plan 06's kick, bit for
+      bit. Before: it collapsed from its main sequence, 5.80 M☉ at log L 3.31. The build-age
+      contract either side of the end.
+    - `pinned_contact_pairs_collapse_from_past_their_main_sequences`: pairs 0223 and 0277. Their
+      contacts end at 15.5205 and 41.9137 Myr in a common envelope and Hertzsprung-gap products of
+      20.00 and 11.50 M☉; at their pins (17.195 and 46.831 Myr) they are early-AGB supergiants,
+      held, and leave plan 06's 1.4222 and 1.1881 M☉ neutron stars with plan 06's kicks.
+    - `a_pinned_merger_product_leaves_its_main_sequence_at_the_primarys_end`: pair 0040 (14.77 +
+      2.93 M☉, 2.23 d, Z = 0.004), the detached route and the merger-product branch. The 17.656 M☉
+      product's step lands on the primary's own end, 14.637 Myr; it goes on along the pin's own
+      track (log L 4.522 → 4.734, a 3.62 M☉ core) and collapses at its pin, 16.210 Myr, an
+      early-AGB supergiant, into plan 06's remnant. The build-age contract either side of the end.
+    - `a_main_sequence_end_due_at_the_engines_age_is_applied`: the backstop, on the 17 + 12 M☉
+      pair with its primary set to a carried main sequence at the end.
+    - `a_contact_stops_at_its_primarys_own_main_sequence_end` (restated, above): pair 0277's runs
+      to 30, 41, 41.95 and 46.9 Myr are the full run's bit for bit.
+    - **A fixture moved, restated** (`tests/stellar_briefs.rs`, P11.T11.a's `REJUVENATED`):
+      `0x826c_b2e0_0000_0013`, a primary its companion fed on its main sequence after a case-A
+      transfer (19.3 M☉ then), now leaves that main sequence at its own end, just before its
+      companion's overflow returns (8.8257 Myr). It is replaced by `0x821e_b320_0000_001b` (26.0
+      M☉ then), found in the row of 150 layer-E cells above the original row: among the 7,900
+      systems of the two rows the engine feeds a hydrogen main-sequence primary in only these two,
+      each for under 120 years before its own end. T11.a's "the only two of 4,000" no longer
+      holds.
+    - **Untested now:** T4.k's pin inside a contact (`contact_phase`'s pin branch), which no
+      pinned contact reaches (above); it stays as the backstop.
+    - **The new invariant**, `check_no_main_sequence_collapse` (no recorded pin from a hydrogen
+      main-sequence state), in `check_invariants` (the 60 close pairs, the slow 10³ close pairs,
+      the two widening pairs) and in `a_thousand_timelines_are_pinned` (the pinned thousand).
+      `check_invariants`' doc lists the switch among the continuity's events: its step in L and R
+      falls on a segment's edge.
+  - _What moves_ (the lane's census against its base, T4.l at version 23; pod, 4 vCPU, x86_64).
+    Every moved timeline is one whose member 0 is on a hydrogen main sequence at its own end, and
+    every such timeline moves. By kind, at the switch (case-A donors, rejuvenated member-0
+    accretors, main-sequence merger products, contact pairs):
+    - **the pinned thousand: 66** = 17 + 0 + 35 (19 merged directly, 16 after a contact) + 14
+      (0223 and 0277 among them);
+    - the 10³ close pairs (`sample_pairs(1_000, 0x5eed_0002)`): 80 = 32 + 0 + 41 (23 + 18) + 7;
+    - the 60 close pairs (`0x5eed_0001`): 5 = 4 + 0 + 1 (after a contact) + 0.
+    - Every case-A donor is in its transfer at the switch, so every one goes through case AB.
+      None of the samples has a rejuvenated member-0 accretor still on its main sequence at the
+      end. The 12 contact pairs other than 0223 and 0277 merged at their binary main sequence's
+      end before T4.n, after their primary's own, and their products collapsed from it.
+    - **Main-sequence collapses, before → after:** the pinned thousand **53 → 0** (34 merger
+      products, 14 contact pairs, 5 case-A donors), the 10³ close pairs 57 → 0 (40, 7, 10), the 60
+      close pairs 3 → 0. The rulings of 2026-10-06 counted 2 in the pinned thousand (0223 and
+      0277, the carried contact stars): the merger products, `Member::Track`s on tracks of their
+      own, were not counted.
+    - **Progenitors at the pin** (the pinned thousand's 66): case-A donors 15 helium
+      main-sequence and 2 helium Hertzsprung-gap stars; merger products 31 early-AGB, 1
+      thermally pulsing AGB and 3 helium Hertzsprung-gap stars; contact pairs 9 early-AGB, 3 helium
+      Hertzsprung-gap and 2 helium main-sequence stars. None is on a main sequence.
+    - **Remnants:** plan 06's bit for bit in 60. In 6 case-A donors, pairs 0097, 0192, 0533,
+      0535, 0551 and 0681, plan 06's black hole is capped at the helium star's living mass
+      (`held_to`, T4.k), as it was before; their helium stars are heavier now (0192: 4.50 → 7.67
+      M☉).
+  - _The ruling's departures, as measured_ (recorded, not routed):
+    - **L steps at the switch**, on a segment's edge. Record 822C72E00000008C's donor: +0.766 dex,
+      log L 3.517 → 4.282 (the ruling's 3.56 → 4.31). Case-A donors in the pinned thousand +0.006
+      to +1.009 dex (median +0.54), and to +1.31 in the close pairs. Real donors are overluminous,
+      so the direction is right; easing the step over a thermal time is deferred. **New:** a merger
+      product heavier than the pin's track steps by −0.46 to +0.35 dex (median +0.02), since the
+      gap's L reads the track's initial mass, as BSE does for a mass-losing star but not for a
+      heavier one below M_FGB (HPT section 7.1; `evolv2.f`), so a heavy product
+      dims at the switch.
+    - **The core is the own track's at its end**, case-B-like, about twice a real case-A core:
+      822C72E00000008C 2.196 M☉, Mc,TMS of the track at its own mass there, 10.15 M☉ after its
+      main-sequence wind (the ruling's 2.3 M☉ is HPT's Mc,TMS at 10.49 M☉ with no main-sequence
+      wind; on the track, as in SSE, the star reaches its TAMS at 10.15 M☉); the pinned thousand's
+      case-A donors 1.40–13.2 M☉ (median 2.94).
+    - **Real donors of this mass most likely end as white dwarfs or in an electron-capture
+      supernova, later than the pin** (Wellstein, Langer and Braun 2001, system 31): design note
+      16's departure. 822C72E00000008C's helium star is 2.24 M☉, in BSE's oxygen–neon band (HPT
+      §6.1), where BSE also makes a neutron star (1.30 M☉; about 1.26 M☉ and a low kick in
+      COSMIC's electron-capture branch). The pin's 1.1927 M☉ neutron star at 12 km s⁻¹ agrees in
+      class and kick; the collapse comes during the helium main sequence (§B.1). No ruling is
+      needed (the review of T4.n's leans, 2026-10-30).
+    - **A case-A-stripped remnant** belongs to finding F13's stripped-mark remnant law (P15.T5.c;
+      plan 06's deferred findings), not here.
+  - _Goldens_ (blessed by name at header 23, `uname -m` x86_64; `golden_diff.py` against the base:
+    changed values, not bumped, as the ruling expects):
+    - `stellar/binary_timelines`: **66 of 1,000 digests**, the pinned thousand's moved set above
+      (63 change their segment count; 0533, 0535 and 0724 keep it).
+    - `stellar/summaries`: system 8200B2E000000002 (layer E, Z = 0.03), both of whose pairs are
+      case-A donors switched at their own ends (4.151 and 4.495 Myr). Its 52.36 M☉ primary's black
+      hole is 7.5372 M☉, capped at its stripped helium star's living mass, where it was 9.2749 M☉
+      after collapsing from its main sequence and accreting; star 2's black hole is 6.0091 M☉
+      (5.9660), fed by star 3's helium star, which a common envelope now leaves; and star 3 is a
+      1.6017 M☉ neutron star (a pulsar), where it was swallowed before.
+    - Not moved (run by name, or in a targeted run of 1,043 sim and server tests): `stellar/briefs`,
+      `classify`, `hierarchies`, `kicks`, `passed_over_collapses`, `held_bare_core_helium_star`,
+      `pair_light`, and the server's `systems_in_range`, `systems_in_range_briefs` and
+      `scene_systems`. The gate ran every test the change reaches.
+  - _Statistics_ (the slow suites, run by name in the test profile, four at a time; pod, 4 vCPU):
+    - **The layer-E prior pairs** (`binary_classes`' sampler, the 12,000 of band 4, run to 13.8
+      Gyr; a lane probe): of 7,375 pairs the pre-test runs, 7,204 record their primary's collapse,
+      and **737 of those collapsed from a hydrogen main sequence at the base, 0 now**. The
+      rulings of 2026-10-06 counted 0 of these 12,000.
+    - `binary_classes` (4 of 4): every class reached; **108 bound double neutron stars** in the
+      window test (T4.l: 115), 66 (61%) at e < 0.3, 25 merging, about 29 a Myr by VG18's yield
+      (Pol et al. 28–72); the shown class 108 against 108 by record; recycled pulsars' median
+      periods 27.7 ms beside CO/ONe white dwarfs (T4.l 27.7) and 71.4 ms beside neutron stars
+      (70.3).
+    - `binary_system` (3 of 3): **ruling 137's hydrogen-poor share per exploding star 0.509**
+      (2,920 of 5,737 collapses; T4.l 0.472, 2,723 of 5,765), not asserted, as the switched donors
+      now collapse stripped; marked primaries stripped and not merged 1,408 of 1,752, merged 299;
+      Rucinski's contact pairs 2.84 × 10⁻³ a star and the bright exception 4 of 86,184, as at
+      T4.l.
+    - `binary_carve` (1 of 1): redrawn A 0, B 0, C 1.0 × 10⁻³, D 6.85 × 10⁻³, E 4.0 × 10⁻³, as
+      at T4.l.
+    - **The R06 census** (`a_hundred_thousand_systems_live_and_die_in_order`) passes, in 424 s
+      beside three other tests (T4.l: 381 s alone), and
+      `multiple_systems_follow_the_model_over_ten_thousand_systems` passes.
+    - The 10³ close pairs keep the engine's invariants, the new one included; the build-age
+      suites: 3,873 runs just past events (T4.l: 3,803, the switch's edges added) and 30 between
+      arrivals; at any age 397 run, 598 passed over, 5 through collapses, 0 missed; between
+      arrivals 60 run, 661 passed over, 0 missed; the 100 wide massive pairs 10 passed over and 90
+      through collapses, 0 missed.
+    - `the_gate_is_conservative` (P11.T11.a; decision-observed-class-findings §A.5) and P11.T17.a's
+      `detached_generated_pairs_are_passed_over` re-run and pass. The acceptance's
+      `test(binary::)` does not select `tests/stellar_briefs.rs` or `tests/observe_brief.rs`,
+      which were run beside it.
+    - **`just fit-check`: 45 fresh, 5 provisional as at the base, 1 stale, P11.T17.b's
+      `binary_pair_light_d`** (its sim fingerprint probe `cell([11, 2, 2, 3]).living` moved). R06's
+      `sky_binary_light_c`, `_d` and `_e` stay fresh. Not refitted here: the train's wiring refits
+      the pair-light tables once, at `--since 25` (the task's "Tables and statistics"; a lean,
+      2026-10-29, for main to confirm).
+  - _Findings_ (recorded; not this task's):
+    - **The blast radius is larger than the rulings' census:** 53 main-sequence collapses in the
+      pinned thousand (the ruling's 2) and 737 in the 12,000 layer-E prior pairs (the ruling's
+      0), most of them main-sequence merger products.
+    - **822C72E00000008C's helium star is in BSE's oxygen–neon band**, where BSE also makes a
+      neutron star (above, the third departure).
+    - **A merger product heavier than the pin's track dims at the switch** (above, the first
+      departure).
+- **P11.T4.e's label for a pinned pair instability** (the train's fix, 2026-10-30). A pinned
+  primary off its own track whose plan 06 death leaves nothing becomes `Member::Gone` at its pin,
+  and the pair read `Merged` (a false `merger_age`). Now `explode` reads only the other member gone
+  as a merger, and `quiet_kind` keeps `Disrupted` whatever dies after, as the closed form does
+  (`a_pinned_pair_instability_disrupts_the_pair`). A `NoRemnant` star's summary class is `None`
+  whatever its pair (`paired_state`; lean, 2026-10-30). It needs a primary of 145–150 M☉ at
+  Z ≤ 2 × 10⁻⁴: none in an R06-style census of 10⁵ systems, and no golden moves.
+- **P11.T4.o as built** (lane p11-t4o, 2026-10-30; findings F18 and F17, and the engine finding of
+  "P11.T17.b as built"). Version 25's behaviour at version 23 on the train branch, no bump and no
+  hold; its goldens are re-blessed by name at header 23 (the task's text says 24).
+  - _F18:_ `detached::Stop::MainSequenceEnd(i)` replaces `Stop::Boundary` for a carried main
+    sequence's end in `step_limit` and `transfer_limit`; both phases act on it as a boundary.
+    `detached::main_sequence_end_landed(stop, start, &mut end)` takes the end, τ = 1 in `end`,
+    where τ reached 1 or where the member was fed (its mass rose) and aged; otherwise no segment
+    closes.
+  - _F18's rule (lean, 2026-10-30, for main):_ the task takes the end wherever the member aged, but
+    an unfed main sequence lands short too, as its own loss of mass lengthens t_MS. That rule moved
+    351 of the pinned thousand's 447 unfed ends by up to 10⁻⁴, against the task's own 10⁻⁹ test;
+    fed-only keeps every unfed end that F17 does not touch bit for bit.
+  - _F18's early end:_ at most Δτ = 1.1 × 10⁻³, 0.993 of the step's own τ increment, and
+    3 × 10⁵ yr, over the lane's probes; pair 0077's accretor 0.50 Myr (its 17.4 Myr in all,
+    1,052.889 → 1,035.446 Myr, is mostly F17's finer accretion).
+  - _The dead donor's cause_ was no step limit: `Engine::after_boundary` placed a carried helium
+    main sequence whose plan 06 track has no Hertzsprung gap (above about 18.7 M☉) at its death
+    and acted on nothing, in either phase. It now calls `die(i)` there, and the transfer's boundary
+    arm then `end_without_a_living_donor(d)`. The backstop at the top of `transfer_phase` is built
+    and unreached; the tests count it (`rlof::DEAD_DONOR_STEPS`, test builds only).
+  - _F17:_ `rlof::TRANSFER_HALVINGS` = 8; a halved step lands on no event, and `dt_hint` reads the
+    accepted dt. Over 1% after eight halvings: pinned pair 0171's first step from a new helium
+    white dwarf (4.3%, pinned so in `a_thousand_timelines_are_pinned`), and a few of the lane's
+    prior pairs and table samples (up to 9.5%).
+  - _The held floor:_ the rebuilt follow-up probes leave one capped timeline, sample 11 of D's cell
+    2027 under `FIT_SEED ^ 0x0d`, a helium donor's detach-and-refill cycle capped at its merged
+    neutron star, which holds no star. Dropping the floor in 25's wiring is main's call.
+  - _Tests restated:_ `light.rs`'s capped test is `the_follow_ups_hydrogen_gainer_is_not_capped`;
+    T4.k's `a_transfers_last_step_applies_the_death` reads pair 0318 (0741 no longer fills its
+    lobe); `a_fed_white_dwarf_swells_around_itself` reads 0305's dwarf at 0.8036 M☉; BSE §3.4's
+    double neutron star is carved an X-ray binary until its last 480 years, case BB, leave the
+    horizon.
+  - _For the 25 wiring:_ `binary_timelines` moves 370 of 1,000 digests (F18 233, F17 72, both
+    65), its segments 11,421 → 11,096; F17 alone moves `passed_over_collapses`, R06's
+    `census_near_sun` and `band_face_row`, and the server's `systems_in_range_briefs`.
+    `binary_pair_light_c`, `_d` and `sky_binary_light_d` stay stale until the `--since 25` refit;
+    P11.T17.b's slow `the_pair_light_tables_bound_evolved_pairs` fails on them in C and E at the
+    train's base and after T4.o alike (158 bins, the same).
+- **The held floor, dropped in version 25's wiring** (2026-10-31, at header 24): `held_floor` and
+  `light.rs`'s `HeldStars` are gone; `binary::tests`'s
+  `the_last_capped_sample_ends_as_it_does_with_the_cap_raised` checks D's cell 2027 sample 11 with
+  the cap raised (test-only `evolve::evolve_with_segment_cap`). At the bump: refit
+  `binary_pair_light_c`, `_d` and `sky_binary_light_d` `--since 25`, then run the slow
+  `the_pair_light_tables_bound_evolved_pairs` and `the_pair_verdicts_hold_against_the_engine`.
+- **P11.T9.a's red novae above 30 M☉ (fix, lane `p12-t5b-classes`, 2026-11-01, at 24, no bump or
+  hold: nothing generated reads the curve, and no pinned value moves).** `LuminousRedNovaCurve`
+  keeps V1309 Sco's 3 × 10⁴ L☉ × (M ÷ 1.5)^2.5 to 30 M☉, bit for bit, the heaviest progenitors in
+  MacLeod, De and Loeb's (2022) compilation of eight red novae, which it meets within 4.1× (0.29
+  dex high on average). Above, M^⅔ (lean, Matsumoto and Metzger 2022): 300 M☉ peaks at 2.5 × 10⁸
+  L☉, 21× its Eddington luminosity, not 1,464×. The plateau's length is unchanged.
+- **P11.T4.d's merger mass, held at 26** (lane `p11-t8cd`, step 2, 2026-10-31; at version 24 no
+  golden moves). P11.T8.c's finding: `Engine::merge_dynamically` (BSE §2.6.4) gave a
+  main-sequence accretor only √(`τ_KH` `τ_dyn`) ÷ `τ_KH,2` of a low-mass donor, so the product was
+  the accretor's mass (0.454 + 0.138 → 0.1375 M☉; 719 of 803 main-sequence mergers among 3,000
+  engine mergers under 99% of the pair). From `MERGER_MASS_VERSION` = 26
+  (`stellar/binary/merger_mass.rs`, `StellarRules::merger_mass`) it takes the collision rule, T4.d's
+  table 2: M_d + M_a at eq. 80's age of both stars, no mass lost (lean, 2026-10-31). BSE's own
+  dynamical branch (`evolv2.f`, read in COSMIC v3.4.0 by research-leans-16) keeps only the thermal
+  share for a main-sequence accretor; its `mix.f` merges two main-sequence stars with M₁ + M₂, and
+  COSMIC moved that accretor to full accretion on 2023-07-20. The same branch gives an accretor of
+  k 2–6 the whole donor, so from 26 the Hertzsprung-gap accretor does too (amendment,
+  2026-11-01): `mo + md` through the same `new_star`, which places the star at the accretor's
+  place in the gap on its new mass's track and takes that track's core (it reads no core for a
+  gap star); 1.3 + 0.6 M☉ leaves 1.29981 M☉ held and 1.89978 under the arm. No grid pair reaches
+  that branch (none of 6,000 engine mergers), so its pin is a pair built for it and run through
+  the engine's own dynamical merger (`class_merger::secondary_dynamical_merger`, test-only). The
+  brief's gate refuses the pair-light and reach tables under the new arm. Movers:
+  `stellar/binary_timelines`, `sky/census_near_sun`, `sky/band_face_row`, all the main-sequence
+  accretor's (the gap accretor's arm, forced on alone at 24, moves no test or slow census); the
+  bump re-blesses them and refits those tables.
+  - _Acceptance:_ `cargo test -p hyperion-sim stellar::rules::merger_mass_hold` (with the pinned
+    gap accretor, the held figure and the pair less its stars' winds under the arm); slow, its two
+    ignored tests (the same 3,000 records re-run under the arm alone and under every 26 hold, each
+    main-sequence merger keeping the pair less the product's own wind, at least 0.99893).
+- **P11.T8.c's channels, held at 26** (lane `p11-t8cd`, step 3, 2026-10-31; research-leans-13
+  §2(c) overturned the all-contact lean; at version 24 no golden moves).
+  - _The hold._ `MERGER_CLASS_VERSION` = 26, `GalaxyRules::merger_class`
+    (`MergerClassRules::{ContactOnly, Channels}`); the held arm is the class verbatim.
+  - _From 26_ the scan draws `MERGER_SAMPLER`'s new choice `Channel` first on `class.merger.mass`:
+    `MergerChannel::Contact` or `MergerChannel::EvolvedDonor`, scratch 0.15 / 0.85. The contact
+    pair's q takes `ContactMassRatio` (0.06–0.15, median 0.09), its primary at least 0.1 ÷ 0.15
+    M☉. An evolved donor's mass is drawn between the turn-off at T and the heaviest mass whose
+    death (plan 06's fate) comes after T (`EvolvedPrimaryRank`); its companion by
+    `EvolvedMassRatio` on its main sequence and inside the ratio the engine's stability test finds
+    unstable (`class_merger::unstable_companion_ratio`, from `rlof::giant_critical_ratio`, `GAP_Q`,
+    `CODE_Q`); it fills its lobe on a circular orbit, `SegmentKind::Detached` before T.
+  - _The engine decides._ `stellar::binary::class_merger` builds the engine at T and runs its
+    `roche_onset` alone (stability, then the common envelope through `envelope_outcome`,
+    `coalesced_product` and `Engine::product_member`, extracted from `resolve_common_envelope` and
+    `coalesce`, moving nothing); a candidate is kept only if that leaves one star. The scan asks
+    `evolved_donor_merges`, the candidate builds the star (`scan::evolved_product`).
+    `ContactPair` is now `MergerPair`.
+  - _Deviation: the scan builds an engine._ For an evolved donor the scan builds the pair's two
+    tracks and an `Engine` at T and runs about 6–12 plan 06 fates for the living-mass bracket; it
+    never steps the engine (`run_pair`), so `engine_calls()` stays zero.
+  - _Movers under the hold:_ goldens `catalogue_classes/stellar_mergers` and
+    `catalogue_classes/neutron_star_mergers`; the version-arm tests of `merger/tests.rs` and
+    `nsm/tests.rs`; the galaxy-wide scan's pin in `tests/binary_mergers.rs`.
+  - _Acceptance:_ `cargo test -p hyperion-sim catalogue_classes::binary::merger`,
+    `stellar::binary::class_merger`; slow, `channels_hold`'s sampler test (with `--ignored`).
+- **P11.T8.d's rider, held at 26** (lane `p11-t8cd`, step 3, 2026-10-31; research-leans-13 §2(b)).
+  Under `MERGER_CLASS_VERSION` `NsmScanMarks::remnant_mass` is the pair's mass less its own ejecta,
+  `ejecta_mass()` (`scan::remnant_mass_under`): GW170817's for two neutron stars (2.74 → 2.69 M☉),
+  P11.T9.b's `NsbhOutflow` for a black hole, nothing where the hole swallows its star whole. The
+  marks carry the rule and compute the remnant from the same ejecta; the remnant's state takes it;
+  `remnant_phase` stays the engine's rule on the total. Under the version's rules it is still the
+  total, as T9.b's record has it. _Finding:_ the energy radiated in
+  gravitational waves is not taken off; its source was not read, and the values recalled
+  (≥ 0.04 M☉c², GWTC-1) are lower bounds. _Movers:_ `catalogue_classes/neutron_star_mergers` (its
+  remnant masses). _Acceptance:_ `cargo test -p hyperion-sim catalogue_classes::binary::nsm`.
+- **P11.T8.c's missing channel, held at 27** (lane `p11-t8cd`, 2026-11-01; research-leans-16 §1.1;
+  at versions 24–26 nothing moves).
+  - _The hold._ `MERGER_CHANNELS_VERSION` = 27 (`binary/merger.rs`), `GalaxyRules::merger_channels`
+    (`MergerChannelRules::{ContactAndEvolved, WithDynamical}`), read only under the 26 arm's
+    channels; the held arm is version 26's draw verbatim (`MergerPick::Channel`,
+    `MergerChannel::HELD`). `GalaxyRules::every_27_hold` opens the galaxy's 27 arm; the planetary
+    27 holds stay on the thread (`with_every_27_hold`).
+  - _From 27_ the channel is one of three, `MergerPick::EngineChannel`, scratch 0.15 contact, 0.50
+    evolved donor, 0.35 dynamical main sequence (the rest split as the engine's evolved donors and
+    its main-sequence pairs, not fitted). A dynamical main-sequence merger is a low-mass (k = 0)
+    donor, the primary, by `DynamicalPrimaryMass` (0.1–0.7 M☉, median 0.6), beside a lighter
+    companion by `DynamicalMassRatio` (0.15–1, median 0.73), at the donor's lobe on a circular
+    orbit, the companion inside its own; the engine at T (`class_merger::donor_onset_merges`, the
+    helpers renamed from `evolved_donor_*`) finds it past 0.695 and merges it in
+    `merge_dynamically`, and the entry's star is the engine's. An evolved donor's companion takes
+    its kind's mark: `GapMassRatio` (0.05–0.25), `HeliumBurningMassRatio` (0.05–0.33),
+    `AgbMassRatio` (median 0.49), the giant branch keeping `EvolvedMassRatio`. The compact-companion
+    channel is left out (the engine's "others", 0.29, mostly a star beside a white dwarf).
+  - _Measured_ (48,000 engine members, an effective 1,259, 17 times P11.T8.c's 73; 10,000 entries
+    a side in the reference's own cells), χ²/dof of log total mass, mass ratio, log primary mass:
+    27, 215, 63, 310; the 26 arm, 183, 172, 291 (at an effective 73 it read 14.2, 12.1, 16.0).
+    Re-pinned once every 27 hold took P15.T11.b's orphan streams, whose galaxy draws the reference
+    (an effective 1,233): 27, 214, 62, 305; the 26 arm, 182, 166, 286.
+    The engine holds 13% of its primaries in layers D–E against the class's 1.3%, its giant-branch
+    donors are heavier (median 1.69 M☉) than the class's at the turn-off, and its evolved donors
+    are 8% gap, 78% giant branch, 14% AGB and no helium burning against the class's 31%, 47%, 0%
+    and 22%: a donor fills its lobe where its radius first reaches it, the class's kind follows
+    its time in each phase. For P15.T10.b's fit; not chased.
+  - _Acceptance:_ `cargo test -p hyperion-sim catalogue_classes::binary::merger`; slow,
+    `engine_channels_hold`'s measurement (with `--ignored`).
+- **Deviations in P11.T6, as built** (lane `p11-t6`, 2026-11-01; held at 27, so nothing generated
+  moves at 24–26). The tags golden gains `binary.ia_mark`, and a new golden,
+  `stellar/ia_marks`, pins eight pairs' marks at every attempt.
+  - _The hold replaces the bump._ `StellarRules::ia_explosion` (`IaExplosionRules::Pooled` to 26,
+    `Marked` from `IA_EXPLOSION_VERSION` = 27), `StellarRules::every_27_hold` and
+    `GalaxyRules::every_27_hold` (added here; no galaxy-side hold turns on at 27 yet). The tripwire
+    and the tests are in `stellar/rules/ia_hold.rs`.
+  - _The table (P15.T9.b's shape)._ In `tables::binary`: `IaYieldTable`, `IA_YIELD`,
+    `IA_DELAY_BINS` and `ia_delay_bin`. `IaYieldTable::new([[f64; 2]; IA_DELAY_BINS])` is const,
+    each share in [0, 1], with `eta_in(bin, channel)` and `eta(delay, channel)`, the merger
+    first. A delay outside `DELAY_EDGES` falls in the end bin on its side. `IaPoolChannel` stays
+    the engine's type in `stellar::binary` and is re-exported from `tables::binary`. There is no
+    `tables::MANIFEST` row, as Provides § Tables says (the manifest lists only what hyperion-fit
+    writes); the header says provisional.
+  - _The mark and the carve._ `IaExplosionMark::of(seed, pair_key, attempt)` is word 64n of the
+    pair's `binary.ia_mark` stream (`SystemHierarchy::pair_key`); `marked_explosion` is
+    `pub(crate)`. `SystemStars::exploded_pair` sits beside `carved_pair`, and the redraw loop keeps
+    the first attempt with neither.
+    - P09.T35's `keeps_a_recent_type_ia` is `exploded_pair().is_some()`, not `carved_class`.
+      `carved_class(timeline, age)` is also the catalogue's test (P11.T8), and the mark needs the
+      seed, the key and the attempt, which it does not take.
+    - The hierarchy bound's cover holds, since only an engine-run pair pools a candidate.
+    - A feature member is not redrawn and may keep a marked candidate (P11.T8.f's and plan 09's).
+  - _Plan 09's entry._ `orbit::peters_separation_for` was public already. `type_ia.rs` keeps its
+    private `peters_separation`, the separation after the envelope: the two differ in the last bit
+    or two for 324,702 of 10⁶ inputs, and sharing would move the entry's pinned separations.
+    The test runs the `Engine` on the entry's two white dwarfs from the second dwarf's birth, not
+    `evolve`, which starts from zero-age stars. Over 60 entries the merger falls at the drawn delay
+    within 1%, and the inspiral within 0.43% of the entry's.
+  - _Measured_ (slow; a drawn Kroupa galaxy, every 27 hold, the scratch η):
+    - The galaxy's layer D: 333 of 10⁵ redrawn, 0.333%. The band 0.3–4.5% is asserted on this
+      sample: records built from parts, each component by its share of the galaxy's systems, at its
+      population's reference position. The task's figure is a galaxy-wide rate.
+    - Near the Sun (placed records): 280 of 99,904, 0.280%, below the band; printed only.
+    - Exploded ÷ pooled: 344 of 1,940, against a sixth.
+    - The pool to date is 0.25 times the delay-time distribution's Type Ia for the mergers, and
+      0.66 for every candidate, against the observed five to seven (findings). No η of at most 1
+      reaches the observed rate, so P15.T9.b's acceptance cannot pass against this pool. P11.T15's
+      2–4% needs η near 1 (layer D pools 1.9%).
+  - _At the bump._ No golden moves. `sky_binary_light_c`'s fingerprint probe moves, so the bump
+    refits `sky_binary_light_c`, `_d` and `_e`. "Generator version" should name P11.T6's redraw of
+    about 0.3% of layer D beside T7's.
+  - _Acceptance:_ `cargo test -p hyperion-sim binary::ia`, `stellar::rules::ia_hold` and
+    `tables::binary`; slow, the two `ia_hold::slow` tests (`just test-slow`).
+  - _Only a detonatable candidate explodes (lane `fix-p11-t6-ia-eligible`, 2026-11-01, main's
+    lean; still held at 27)._ `IaExplosionMark::explodes` also asks `ia::is_detonatable`
+    (ruling 129.1's rule by masses; an accretion by its dwarf's mass at ignition), `IA_YIELD` is 1
+    everywhere, and layer D redraws 1.4%. `PINNED` is `[2, 406, 0]` record 4; the old pin is
+    `TOO_LIGHT`, kept. _At the bump_ the movers are now the golden `sky/census_near_sun` and
+    `sky_binary_light_d`'s probe (refit `_c` to `_e`), not those above (`ia_hold.rs`'s header).
+- **Deviations in P11.T8.f, as built** (lane `p11-t8f`, 2026-11-01; at version 24 behind
+  `FEATURE_BINARIES_VERSION` = 27; `golden_diff.py` extended only, `rng/tags.golden` gaining
+  `member.recycled`).
+  - _The hold._ `GalaxyRules::feature_binaries` (`FeatureBinariesRules`), `every_27_hold()`, the
+    tripwire `the_feature_binaries_are_held_only_until_the_27_bump`. At 27 the goldens
+    `accreting_white_dwarf_golden`, `xray_binary_golden`, `stellar_merger_golden`,
+    `neutron_star_merger_golden` and `binary_events_golden` move (the catalogue's give-up).
+  - _Hosts._ `catalogue_classes::binary::{BinaryHost, HostPlace, ListedHost, ListedBinary}`. Every
+    class's scan marks carry `host()`; `id()` is now a `SystemId` and `component()` an `Option`.
+    `candidate_of(galaxy, &scan)` and `{awd,xrb,merger,nsm}_marks_at` draw at either host; the
+    catalogue's draws are unchanged.
+  - _Counts (lean, 2026-11-01)._ A feature's hosts are its member systems × m̄_f × the class's
+    rate in its population, a globular's systems its present mass ÷ its population's mean system
+    mass, weighted by its bands. The X-ray binaries use `XrayBinaries::hosts_per_formed_mass`
+    (T8.b's sides), and a globular's are `ClusterModel::xray_binaries`, the only class P09.T9.e's
+    law covers. The catalogue keeps `catalogue_share`, all but `features_share`, which leaves out
+    the halo's discrete share.
+  - _Members._ The API is `FeatureLevelList::{binary_entry, binary_entries}` and
+    `MemberRecord::{listed_class, recycled, marked_attempt, max_separation}`. A listed or marked
+    member's stars and brief come from its own pair.
+  - _Multiplicity (lean)._ `members::hard_soft_separation` is G M ÷ σ(r)², the plan's words; that is
+    4× Heggie's kT boundary, for the owner. From 27, `carve::redraws` (was `grid_redraws`) redraws
+    a feature member's carved pair. A forced multiple left single is not redrawn (T2.b's point).
+  - _Fractions._ An open cluster's are `counts::open_cluster_binary_fraction`, MF × the period law
+    inside the boundary at r_h; a globular's stay 5% and 1%.
+  - _Recycled marks (lean)._ `member.recycled` marks millisecond pulsars and blue stragglers; a
+    marked member takes the first of `RedrawAttempt::marked` 8–255 (`SystemStars::generate_at`)
+    that bears its mark out (`BLUE_STRAGGLER_SEPARATION` 0.03 au, ours), else is unmarked. The X-ray
+    binaries' mark is the list's `XRAY_BINARY` class.
+  - _Centre._ `centre::binaries::CentreBinaries` follows the recent classes: primaries formed × m̄_f
+    × the nuclear disc's rate (companions counted, ruling 144.4's lean). Its members'
+    `CentreMemberRecord` class is the episode's: P09.T37 reads the entry for their stars.
+  - _Server._ `check_feature_list_headroom` runs at every version (`ComputeError::UnplayableCentre`),
+    some 65 ms a galaxy build.
+  - _Not built._ P09.T38 (not on the tip); the neutron-star mergers' χ² (the lists expect under
+    one); ruling 140.5's M4 re-check.
+  - _For P15.T10.b._ Listed candidates are thinned by their members' ages: the nurseries keep none,
+    the young open clusters about half. The lists read the galaxy's share table and samplers
+    (`GalaxyRules::binary_tables`), independently of `feature_binaries`.
+- **P11.T4's neutron-star accretion, held at 27** (lane `fix-p11-t4-ns-accretion`, 2026-11-01;
+  at version 24 no golden moves). From `NS_ACCRETION_VERSION` = 27 (`stellar/binary/ns_accretion.rs`,
+  `StellarRules::ns_accretion`; `StellarRules::every_27_hold` is new) a neutron star fed by stable
+  transfer keeps `NS_ACCRETION_EFFICIENCY` = 0.1 of it, up to the Eddington rate (lean,
+  2026-11-01); the brief's gate refuses the pair-light and reach tables under it. Test helpers:
+  `testing::census::slab_census` (10⁷ slab records in 64 parts) and
+  `testing::remnant_pair::donor_onto_remnant`. Left: `Accretion::from_accretor` is set but
+  `transfer_trial` never reads it, so every loss leaves with the donor's angular momentum.
+- **P11.T4's heavy donors and the transfer's angular momentum, held at 27** (lane
+  `fix-p11-t4-heavy-donor-cvs`, 2026-11-01; at version 24 no golden moves). The cause is the
+  engine's: `transfer_trial` never read `Accretion::from_accretor`, and returned the donor's
+  transferred spin to the orbit while `corotate_donor` restored the donor's spin with nothing drawn
+  from it, so a heavier donor's orbit widened and it transferred at a nuclear rate. From
+  `HEAVY_DONOR_VERSION` = 27 (`stellar/binary/heavy_donor.rs`, `StellarRules::heavy_donor`) the
+  marked loss takes the accretor's specific angular momentum, the corotation onto a compact
+  accretor is `synchronise`'s (the pair's total kept; onto any other the held book stays, lean,
+  2026-11-01), and a main-sequence donor heavier than its compact accretor is held to
+  M ÷ `τ_KH` and transfers at it wherever a step at it leaves it overfilling (lean, 2026-11-01: a
+  cap alone never binds on the engine's equilibrium radii). Test helper:
+  `testing::remnant_pair::thermal_rate`.
+- **P11.T4's black-hole low-mass X-ray binaries, diagnosed, not yet fixed** (lane
+  `fix-p11-t4-bh-lmxb-masses`, 2026-11-01). Of 10⁷ slab records under every 27 hold, no black-hole
+  primary beside a companion born under 1.5 M☉ becomes an X-ray binary: the common envelope merges
+  70 of 136 before the collapse, a main-sequence primary over its critical ratio 35, and 17 stay
+  detached (`testing::census::tests::the_black_holes_low_mass_companions_end_by_fallback`). The
+  envelope is not what holds the median under 5 M☉: with λ raised to 2 or 10 for donors over
+  8 M☉ the genuine black-hole LMXBs rise from 14 to 58 or 94, but their median stays at 3.0–3.1
+  M☉, since most are plan 06's partial-fallback holes, 0.8 `M_CO` ≈ 2–3.5 M☉. Open: the remnant
+  recipe (lean: Fryer et al. 2012's rapid model, held at 27, which decides the type too). Test
+  helper: `testing::census::slab_pairs`.
+- **P11.T10, as built** (lane `p11-t10`, 2026-11-01; held at 27, nothing moves at 24–26).
+  - _The rule._ `BINARY_KICKS_VERSION` = 27 (`stellar/system.rs`, `StellarRules::binary_kicks`,
+    `BinaryKicksRules::{Paired, Alone}`). From the first supernova whose next segment is `Disrupted`
+    (`disrupting_supernova`), a system shows its primary alone if that pair holds the primary. If
+    another pair's leaves only stars 0 and 1, it shows that pair on its drawn orbit, and otherwise
+    the primary alone (lean, 2026-11-01). One choke point, `SystemStars::shown_at`, read by
+    `summary_at`, `state_at` (its pairs numbered in the shown hierarchy), `brief_at` and the range
+    brief's paired route; under the arm the brief's gate checks every pair. The sky census walks
+    `SystemStars::hierarchy_at(t)` (crate-private).
+  - _Kept as drawn (lean, 2026-11-01)._ `hierarchy()`, `stars()`, `star_count()` and so plan 14's
+    context and star positions.
+  - _Already built._ `grid_multiplicity` makes `Displaced` single. Low-mode kicks (σ 5 km/s) all
+    fall in speed bin 0, so they stay `Retained` with their companions.
+  - _Step 1's count._ Under the held arm, every system a supernova has unbound by the epoch shows
+    the star it released: 1,899 of 10⁴ prior-sampled massive systems (1,851 by the primary's pair)
+    and 628 of 10⁴ layer-E records near the Sun (570). Under the arm none does. This tree lacks
+    P11.T4.l; on it, the passed-over disruptions fall under the rule and the slow figures move.
+  - _Tests._ Fast: `stellar/rules/binary_kicks_hold.rs` (seven). Slow:
+    `stellar::binary::supernova::agreement::binary_kick_*` (nine, 16 slots; the sampler is
+    `binary::testing::massive_records`). Three figures miss and are pinned as measured (findings):
+    - the stripped share: 0.428 against 0.452;
+    - the released companions: 0.20 of `RunawayModel`'s rate;
+    - 9 of 5,134 pinned primaries not collapsing at their pin: about 8 M☉ electron-capture
+      primaries stripped by a common envelope, whose merger collapses later. An engine fault of
+      P11.T4's pin.
+  - _Recoil._ 97% of retained remnants kept bound recoil within their kick bin; the fastest is
+    115 km/s, against layer E's 3,000 km/s pad.
+  - _For the bump to 27._ It moves the goldens `sky/census_near_sun`, `sky/band_face_row` and
+    `stellar/briefs`, and the server's `systems_in_range` response, and stales `sky_binary_light_e`
+    (refit). It must also restate tests:
+    - three compare the range brief with the first attempt's count:
+      `stellar::brief::tests::every_route_is_the_full_systems_brief`,
+      `marks_hold::every_reader_of_a_constrained_primary_sees_the_kept_attempt` and
+      `stellar_briefs::briefs_are_the_full_systems_over_random_systems`;
+    - two expect every companion shown:
+      `stellar_system::{every_companion_is_its_slots_star_with_the_systems_composition_and_age,
+a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.
+- **P11.T5's helium donors, held at 27** (lane `fix-p11-t5-awd-helium`, 2026-11-01;
+  research-p15-t10b-rates; at versions 24–26 nothing moves).
+  - _The hold._ `AWD_DONORS_VERSION` = 27 (`stellar/binary/awd_donors.rs`),
+    `StellarRules::awd_donors` (`AwdDonorRules::{EveryDonor, HydrogenDonors}`), in
+    `StellarRules::every_27_hold` and so `GalaxyRules::every_27_hold`. Its one `match` is
+    `AwdDonorRules::has_novae`; the held arm is the code verbatim.
+  - _From 27_ a white dwarf fed helium (a donor of HeMS, HeHG, HeGB or HeWD, BSE's types 7–10, as
+    `AccretingMarks::donor_kind` reads it) has no nova: `classify::nova_recurrence_under` gives it
+    an infinite recurrence through the timeline's rules, read by `carved_class` and the census's
+    marks, so it is a slow host. No helium-flash law (the brief's lean): the class's novae are
+    hydrogen's; V445 Pup's helium nova is left out, far under 1% of the Galaxy's novae.
+  - _The catalogue._ Its timelines, built from marks, take the version's rules, so under every 27
+    hold its test keeps every donor's novae. The fast side's scan reads the donor's kind, the
+    binary's first draw (`AwdProcess::donor_draw`), under the galaxy's rules and refuses one fed
+    helium (`has_no_nova`), so the scan keeps exactly the entries at the bump as well.
+    _Finding, pinned:_ a slow host fed helium keeps the hydrogen nova clock its scan draws from
+    the sampler's recurrence before its kind (17 of 129 slow sample entries under the arm, 5 of
+    them erupting in the source horizon). Giving it none needs scan marks without a nova (here) or
+    a recurrence drawn after the kind (the refit's).
+  - _Measured_ (10⁶ slab records, every 27 hold against every 27 hold but this one): 182 fast
+    hosts, 8 fed helium (4.4%), which made 59.2% of their novae; under the arm 174, and the novae a
+    year a fast host fall from 1.53 × 10⁻⁴ to 6.52 × 10⁻⁵.
+  - _Movers_ (the arm forced on at 24): the golden `catalogue_classes/accreting_white_dwarfs`,
+    `awd::tests::the_hosts_layers_against_the_share_rows` and, slow,
+    `tables_hold::the_accreting_white_dwarf_samplers_against_the_engine`'s pinned misses (the fast
+    hosts fed helium leave the class); the hold's own version-arm tests. The bump re-blesses them.
+  - _Acceptance:_ `cargo test -p hyperion-sim awd_donors` (the hold's tests and
+    `stellar::binary::awd_donors`'); slow, `the_helium_fed_hosts_leave_the_fast_class_in_a_census`.
+- **P11.T12, as built** (lane `p11-t12`, 2026-11-01; tests only, no golden, no fault found). The
+  suite is `tests/binaries_statistical.rs` (feature `testing`, every 27 hold through
+  `Galaxy::from_params_at_version`, eight slots in `.config/nextest.toml`), seven slow tests:
+  - model only: `multiplicity_by_primary_mass_follows_the_model_and_the_surveys`,
+    `sun_like_companion_counts_follow_the_model_and_raghavan`,
+    `first_companions_periods_and_mass_ratios_pass_kolmogorov_smirnov`,
+    `all_stars_below_half_a_solar_mass_match_the_census`;
+  - the engine's, to re-run by name after the BH LMXB and binary-rows fixes:
+    `old_populations_hold_blue_stragglers_and_hot_subdwarfs`,
+    `recycled_fields_and_the_double_neutron_star_merger_rate`,
+    `an_old_open_cluster_s_hertzsprung_russell_table` (its table goes where `HYPERION_HR_DUMP`
+    names).
+  - _Leans (2026-11-01):_ seven mass bins, one per anchor as ruling 74 left them, not the plan's
+    six; the model's χ² reads placement class `Alive` only, since the stripped mark selects which
+    remnants plan 08 retains; the surveys are compared on living `Alive` primaries, without the
+    displaced runaways (73–81% of the grid's living primaries above 9 M☉) and the features' cluster
+    stars; plan 06's 0.3–3% window is asserted on primaries, like for like; the recycling and
+    double-neutron-star yields draw every layer-D/E record `Free`.
+  - _Sources:_ the blue-straggler, hot-subdwarf and recycled-field windows are recalled. The pod
+    reads no web, so they go unchecked against their papers, and a miss of any of them is a
+    finding, not a failure.
+  - _The halo's window, like for like_ (research's ruling of 2026-11-02). Preston and Sneden's
+    about 4 blue stragglers per horizontal-branch star is the local halo's; at |Z| ≈ 5 kpc, where
+    the halo's records are sought, the inner halo gives 1.5–2.0 per blue horizontal-branch star,
+    both classes A-type stars at T_eff ≥ 7,650 K (Santucci et al. 2015, ApJ 801, 116).
+    `old_populations_hold_blue_stragglers_and_hot_subdwarfs` counts the halo's so (`BlueCount`),
+    against 0.6–5.5; the bulge keeps all its stragglers per horizontal-branch star. Measured
+    (2026-11-02, each straggler matched to its pair by node): the halo's A-type stragglers are
+    0.169 per blue horizontal-branch star, a finding (all of them per horizontal-branch star
+    0.563); the bulge's 0.405, inside its 0.10–1.11; the thick disc's 0.496.
+- **P11.T5's and P11.T8.b's X-ray binaries, held at 27** (lane `fix-p11-t5-awd-helium`'s pod,
+  brief `fix-p11-t8b-xrb-carving`, 2026-11-01; research-p15-t10b-rates; at 24–26 nothing moves).
+  - _The hold._ `XRB_CLASS_VERSION` = 27 (`stellar/binary/xrb_class.rs`),
+    `StellarRules::xrb_class` (`XrbClassRules::{Held, Carved}`, one `match` in `carves`), read
+    through each timeline's rules by `classify`'s three rules and through the galaxy's by the X-ray
+    binaries' scan.
+  - _From 27_ (each recalled, provisional): Roche-lobe overflow onto a compact star is an X-ray
+    binary only at `XRB_MIN_TRANSFER_RATE` = 10⁻¹² M☉ yr⁻¹ or more (about 10³⁴ erg s⁻¹
+    time-averaged; King and Wijnands 2006; research-leans-30 §4, over 10⁻¹³ as first built); a main-sequence B star without a fossil field that gained
+    `SPUN_UP_GAINED_SHARE` = 0.1 of its mass in stable transfer is a Be star (Packet 1981); a
+    wind-fed black hole beside a massive star needs it to fill `WIND_DISC_ROCHE_FILLING` = 0.9 of
+    its lobe (Hirai and Mandel 2021). Wind-fed neutron stars keep no disc rule (deviation: their
+    field takes a wind). The scan refuses a candidate fed under the floor, so it keeps exactly the
+    entries at the bump.
+  - _Kinds_ (`fix-p11-t8b-new-kinds`, 2026-11-02). `XrbHostKind` holds the nine kinds the census
+    counts, the held six (`LOW_MASS_HELD`, `HIGH_MASS_HELD`) then `Ultracompact`, `Symbiotic` and
+    `BlackHoleHighMass`, and `XrayMarks::member_kind` returns one (`XrbMemberKind` is gone).
+    Before the fix the row counted the three, s₃ = 0.388 of the galaxy's hosts at 27 in
+    `binary_xrb`'s censuses, and the catalogue drew their hosts as the six, over-weighted by
+    1 ÷ (1 − s₃) = 1.63. From 27 under the fitted tables (`BinaryTableRules::xrb_sampler` keyed on
+    `XrbClassRules`) the class draws from `XRB_SAMPLER_27`: `XRB_SAMPLER_26`'s marks, each kind
+    weighted by its galaxy share in those censuses (`XRB_LOW_MASS_KINDS_27`,
+    `XRB_HIGH_MASS_KINDS_27`; black holes 0.0017 of the high-mass hosts). Below 27 the tables
+    weigh the six alone and nothing moves; the fit at 26 keeps `XrbMark::HELD`'s twenty marks.
+    From P15.T10.b's refit at 27 (plan 15's "T10.b's refit at 27"), `xrb_sampler` takes no
+    carving rule: the fitted tables draw from `XRB_SAMPLER_27`, its marks and kinds fitted at 27.
+  - _Marks_ (`XRB_SAMPLER`'s ten new ones, `@provisional`, for the refit at 27). Ultracompact: a
+    period of 10^(1.5 ± 0.16) min on 10–80, a helium white dwarf filling its lobe on Eggleton's
+    cold mass–radius relation (0.057 M☉ at 11.4 min), fed by gravitational radiation (ζ the
+    relation's own slope, −0.275 at 0.057 M☉, after van Haaften et al. 2012; 10⁻¹² M☉ yr⁻¹ near
+    60 min, so the floor takes about 4% of the draws), a transient below the irradiated line
+    taking a recurrence of 10^(1.0 ± 0.4) yr, its progenitor 10^(0.15 ± 0.08) M☉ unheld by the
+    turn-off. Symbiotic: detached, 10^(3.0 ± 0.25) d on 150–5,000, a 1–3 M☉ giant at 0.45 ± 0.12
+    of its lobe; the scan refuses it under `SYMBIOTIC_XRB_MIN_LUMINOSITY`
+    (`classify::wind_fed_luminosity`). Black-hole high-mass: the supergiant shape with Cyg X-1's
+    black hole, period and donor, and the supergiants' recoil.
+  - _Deviations._ The symbiotic giant is not on its own track: a first-giant-branch state at the
+    accreting white dwarfs' 3,600 K and 0.35 M☉ core, its radius held under the red giant tip's
+    129 R☉, its luminosity by Stefan–Boltzmann and its Reimers wind (η = 0.5) feeding the neutron
+    star. Black-hole high-mass hosts are always in Roche-lobe overflow at 10^(−8.5 ± 0.4) M☉ yr⁻¹,
+    with no filling mark and no wind-fed case, and their donors lie on 20–60 M☉, not the brief's
+    20–40, to hold Cyg X-1's 40.6 (Miller-Jones et al. 2021). From 27 the held six are re-weighted
+    from the 27 censuses too. The catalogue's ultracompacts are neutron stars beside helium white
+    dwarfs and its symbiotic hosts neutron stars beside first-giant-branch giants; the census's
+    hold black holes, helium stars and carbon–oxygen white dwarfs too (ultracompact, median 65
+    min against the marks' 32), and black holes (88%), core-helium-burning giants of a median
+    5.4 M☉ and periods of a median 7.3 × 10⁴ d (symbiotic): findings for a ruling. The three have
+    no events (P11.T9's); the wire takes them as `Persistent`/`Transient`, `Symbiotic` and
+    `Supergiant` (`convert/stellar.rs`), no new member. New API: `XrbHostKind::LOW_MASS_HELD`
+    and `HIGH_MASS_HELD`, `XrbMark::HELD`, `XrbScanMarks::{class, is_transient}`,
+    `XrayBinaries::of_table` (crate), `classify::wind_fed_luminosity` (crate).
+  - _Findings_ (2026-11-02). At 27 the census's black-hole transients fall from the fit's 0.663 to
+    0.0196, about 190 hosts against P11.T8.b's 1,300 ± 400 (P11.T4's NS accretion grows none from
+    neutron stars), and the high-mass side rises from 0.0032 to 0.0078. Against the census, the
+    scratch marks miss widely, chi-square per degree of freedom 78 (ultracompact periods), 29
+    (rates), 86 (accretor masses), 22 (symbiotic periods) and 29 (symbiotic accretor masses), all
+    inside the shared test's scratch tolerance; the refit fits them. The ultracompacts' Eddington
+    rate takes hydrogen's 0.7 (it never binds).
+  - _Movers at 27_: `xrb_class_hold::the_scan_refuses_a_host_fed_under_the_floor_under_the_arm`
+    now scans version 27's table under both arms. New tests: `xrb::kinds_tests` and the slow
+    `xrb_class_hold::the_catalogue_draws_the_census_s_kinds`. At 24–26 `golden_diff.py` reports
+    "No golden files changed".
+  - _Symbiotic X-ray binaries bounded_ (research's ruling of 2026-11-02, `fix-p11-syxb-bounds`).
+    From 27 the wind-fed giant arm of `classify` makes a symbiotic X-ray binary only of a neutron
+    star, never a black hole (none is known; Deng and Li 2024, ApJ 977, 95, predict at most one
+    in six), beside a K–M giant at `SYMBIOTIC_XRB_MAX_TEFF` = 5,000 K or cooler, under 8 M☉,
+    inside `SYMBIOTIC_XRB_MAX_FILLING` = 0.8 of its lobe (`fills_lobe_share`, the wind disc's test
+    generalised), on an orbit of `SYMBIOTIC_XRB_MAX_PERIOD` = 10⁴ d or less. The floor stays at
+    10³² erg s⁻¹, its source corrected to Yungelson, Kuranov and Postnov 2019 (MNRAS 485, 851).
+    The sampler's periods widen to 150–5,000 d (IGR J16194−2810's 192.7 d to 4U 1700+24's
+    4,391 d, Hinkle et al. 2019) and its giants' filling to 0.15–0.75, inside the bound.
+    _Finding_ (measured after the chain's items 1–4): the 10⁶-record censuses keep one symbiotic
+    X-ray binary of the slab's five and one of the young disc's thirty, and `binary_xrb`'s four,
+    0.0010 of the galaxy's hosts, about 10 in the Galaxy, against the models' 240 (Yungelson et
+    al. 2019) or 100–1,000 (Lü et al. 2012); research foresaw about a dozen and 15.
+  - _A helium disc's line_ (research's ruling of 2026-11-02). From 27 a low-mass X-ray binary fed
+    by a white dwarf, of helium or of carbon and oxygen, splits on its irradiated helium disc's
+    line, `helium_disc_line` = 2.4 × 10⁻¹² (P ÷ 1 min)^1.67 M☉ yr⁻¹ (Lasota, Dubus and Kruk 2008,
+    equation 6 in its period form, equation 12), some 22–24 times the hydrogen disc's beside a 1.4
+    M☉ neutron star and taken as a lower bound for a carbon–oxygen disc
+    (`classify::low_mass_xrb_line`). _Deviation_ (the science check of 2026-11-02): a helium star
+    keeps the hydrogen line, since the period form builds in an ultracompact disc and would stand
+    50–80 times the hydrogen line at a helium star's periods of hours to days. A cold ultracompact
+    host turns transient from about 20 minutes, where the hydrogen line turned it at about 32.
+    The catalogue's scan reads the line its class's test reads, the version's; under every 27
+    hold the catalogue's ultracompact transients, and their recurrences, still follow the
+    hydrogen line until the bump (movers then, `kinds_tests` checks both arms).
+  - _The black-hole transients pinned_ (research's ruling of 2026-11-02, plan 11's design note
+    11: counts are observed). `XRB_LOW_MASS_KINDS_27` takes the census's shares at 27 after the
+    symbiotic bounds and the helium line (s₃ = 0.381), but the black-hole transients' at
+    `BLACK_HOLE_TRANSIENT_SHARE` = 0.13, the 1,300 of the row's 10⁴ (Corral-Santana et al. 2016:
+    1,280 ± 120, a lower limit), the other kinds keeping the census's ratios in the rest. The
+    census's 0.0196, about 190, is a finding: likely the common envelopes that survive at
+    `α_CE λ` = 0.5 (Podsiadlowski et al. 2003), which is not touched, nor are the kicks.
+  - _Ultracompact hosts under the refit_ (P15.T10.b's refit at 27, 2026-11-03; a finding). The
+    refit draws the engine's ultracompact periods, median 65 minutes (q10 41, q90 77). The scan
+    takes its donor's mass from the cold white dwarfs' relation at the drawn period (0.0063 M☉ at
+    65 minutes, against the engine's semi-degenerate 0.012). Above about an hour that donor's
+    gravitational-wave rate falls under the 10⁻¹² M☉ yr⁻¹ floor (1.7 × 10⁻¹² at 55 minutes, 6.6 ×
+    10⁻¹³ at 65, beside 1.4 M☉). The scan and the test refuse 63 of 93 ultracompact candidates,
+    against P11.T8's bound of one in ten, and the kinds tests' cells keep 50 entries against the
+    88.8 their weight gives. Pinned in `xrb::kinds_tests` and `feature::tests`. A remedy is
+    P11.T8.b's to choose: draw the donor's mass from a mark conditional on the period, as the
+    engine's members give it, or keep the cold relation and refit the period to it.
+  - _An engine pin behind the engine_ (P15.T10.b's refit at 27, 2026-11-03; a finding for
+    P11.T4). Under the slow profile's debug assertions, `evolve.rs`'s pin assertion fires: "the
+    primary's pin at 4,237,647 yr lies behind the engine at 8,397,062 yr", detached, the primary
+    a black hole at Z 0.0063. It fires on system `0x81c9b51fc0000001` in layer E's cell (−55,
+    212, −4), a thick-disc primary of 75.6 M☉ at 11.45 Gyr, in the census galaxy at 27 (every 27
+    hold with the scratch binary tables, seed `0x0b17_15a0_0000_0001`). That record is the
+    7,448th of `class_census_in` over the solar circle's slab, part 19 of 64. Both of
+    `tables_hold`'s K–S tests stop on it. Their verdicts were taken with
+    `CARGO_PROFILE_SLOW_TEST_DEBUG_ASSERTIONS=false`; release builds, the fits', run through it.
+  - _The pin's clock, fixed_ (lane `fix-p11-pin-clock`, 2026-11-03; folded at 27 with P11.T10's
+    `collapses`, its switch gone).
+    - Cause: the pair is about 1,800 au wide (75.6 and 23.0 M☉, e = 0.55). The collapses fix
+      runs it for its primary's collapse. The primary is stripped by its mark, and its pin falls
+      at 4,237,646.62 yr.
+    - Near the pin the rates limit the detached step below its floor, max(10⁻⁹ age, 10⁻³ yr).
+      The floored step, 0.0042 yr, passed the pin 0.0029 yr ahead.
+    - Nothing acts on a pin passed: the primary died on its own track with no supernova, and the
+      assertion fired at the next phase, at 8.4 Myr.
+    - Fix: a step held at its floor stops at a pin inside it (`detached.rs`'s `step_limit`).
+    - Test: `collapses_hold::a_floored_step_stops_at_the_pin`. It builds the system as the census
+      does and finds the primary's supernova at the pin. On round 11's head the system draws 69.0
+      and 21.0 M☉ at Z 0.024, no step near its pin is floored, and the test passes without the
+      fix: it needs a re-pin there.
+    - A floored step could pass a non-pinned star's death in the same way (`Stop::Death`, which
+      has no backstop). None was found; not changed.
+  - _Deviation._ A timeline from marks has no history, so a Be star spun up by transfer is one in
+    the engine's timeline alone; `classify`'s marks round trip skips such pairs.
+  - _A Be star feeds a neutron star alone_ (main's ruling of 2026-11-01: the black holes' 0.145 of
+    the young disc's high-mass hosts a wrong state). 62 of the 64 were beside Be stars, most spun
+    up by transfer, and no wind-fed black hole filled 0.9 of its lobe (0.03–0.3). From 27 a Be star
+    beside a black hole makes no X-ray binary (Zhang, Li and Wang 2004; MWC 656's 10³¹ erg s⁻¹):
+    black holes 2 of 379, 0.005. Be/X stay 0.989 of the neutron stars' against 0.65, pinned: the
+    census counts quiescent Be/X too, which the catalogued share under-sees (the share's
+    denominator; the Be/X phase outlasts the supergiant one 10–100 times, recalled). Its movers at
+    the bump add `carve::tests::a_carved_first_attempt_is_redrawn` and
+    `bound::tests::the_carved_record_lists_the_attempt_it_keeps`, whose pinned carved record is no
+    X-ray binary under the arm.
+  - _Measured_ (10⁶ slab and 10⁶ young thin disc records, every 27 hold with P11.T4's NS
+    accretion, heavy donors and pinned white dwarfs, and from 2026-11-02 the symbiotic bounds and
+    the helium disc's line): slab members 567 → 180, its ultracompacts 456 → 76, all under 80 min
+    (at 10⁻¹³ they were 456, fed 1.6 × 10⁻¹³ to 3 × 10⁻¹¹ M☉ yr⁻¹, 38–119 min); research-leans-30
+    expected 75 and 181 (a finding). The floor takes three substellar-donor transients of the slab
+    and two main-sequence-donor ones of the young disc (findings), and ten young-disc
+    ultracompacts, helium stars of 0.8–4.4 M☉ feeding neutron stars and black holes 81 min to 3.1
+    d out, are longer (a finding). Young disc 209 → 473, Be/X 19 → 373, supergiant neutron stars
+    11 → 4, black holes 56 → 2 (64 before the Be stars' rule), symbiotic 30 → 1.
+    `ns_accretion_hold`'s census: members 1,159 → 378; `heavy_donor_hold`'s 4,103. Before P11.T4's
+    fixes the slab's ultracompacts were 145 → 14.
+  - _Movers_ (the arm forced on at 24): the golden `sky/census_near_sun`, the slow
+    `tables_hold::the_x_ray_binary_sampler_against_the_engine`'s and
+    `channels_hold::the_channel_sampler_against_the_engine_under_every_26_hold`'s pins, and the
+    hold's own version-arm tests. Under every 27 hold `engine_channels_hold`'s pins are re-measured
+    (the grid redraws other systems).
+  - _Acceptance:_ `cargo test -p hyperion-sim xrb_class_hold` and `every_x_ray_binary_member`;
+    slow, `no_census_member_is_fed_under_the_floor_and_every_member_has_a_kind`.
+- **P11.T10's fix: every collapse acts on the orbits it unbinds, held at 27** (lane
+  `fix-p11-t10-released`, 2026-11-01; nothing moves at 24–26).
+  - _The hold._ `COLLAPSES_VERSION` = 27 (`stellar/binary/collapses.rs`), `StellarRules::collapses`
+    (`CollapseRules::{Gated, Applied}`), read by `run_pair`'s pre-test and `system::outer_releases`;
+    the brief's gate adds `CollapseRules::fitted_tables_hold`. Tests: `rules/collapses_hold.rs`.
+  - _The gate._ A pair the pre-test passes over runs through the engine if a star of it dies
+    suddenly by its age (`evolve::first_sudden_death`, the pin's age for a pinned primary); a white
+    dwarf's birth runs none. Lean (2026-11-01): its pre-collapse orbit is the engine's,
+    wind-widened, so it depends on the age asked (P11.T4.l's closed form, not on this tree, keeps
+    the drawn one); the build-age suite passes under the arm.
+  - _The outer orbits._ `OuterRelease` (`SystemStars::releases`): each run pair's supernova acts
+    on its parent's orbit by A1, the pair a point mass, and up while bound; the primary's member of
+    an unbound orbit goes on as a point mass at its velocity, which may unbind the orbit above.
+    `shown_at` shows the largest drawn part on the primary's chain that is all held: new
+    `Shown::Part { node, stars }`, `SystemHierarchy::part`, `NodeIndex::in_part`. Leans
+    (2026-11-01): Jeans-mode widening of the drawn state; a bound outer orbit keeps its drawn
+    elements; a star still bound beyond a gap in the shown bodies is left out (0.002 per massive
+    system); a star in no run pair collapses without touching its orbit.
+  - _The closure._ The agreement test counts every star a supernova releases and the system hides
+    (pair, outer orbit, left behind by the primary's pair): 0.875 of `RunawayModel`'s rate, inside
+    the plan's 25%, so W stays.
+  - _Not on this tree._ P11.T4.l and `fix-p11-t4-pin-white-dwarfs`: `PIN_MISSES` is 63, 55 of them
+    white dwarfs at their pin, now counted.
+  - _For the bump to 27._ Movers (the arm forced on at 24): the golden `stellar/binary_timelines`;
+    `light::tests::a_passed_over_pairs_collapse_keeps_its_drawn_orbit_at_version_21` (to restate);
+    `binary_kicks_hold::a_quadruple_whose_outer_pair_is_unbound_shows_its_inner_pair` (its primary's
+    pair now records its collapse); the hold's own tests. The bump refits the pair-light and reach
+    tables, and adds a golden of the releases under both arms (`collapses_hold`'s pinned systems:
+    each release's node, age and velocities, and the shown hierarchy): no golden reads them yet.
+- **P11.T4's pinned white dwarfs, held at 27** (lane `fix-p11-t4-pin-white-dwarfs`, 2026-11-01;
+  research-leans-26's item 2; at versions 24–26 nothing moves).
+  - _The hold._ `PINNED_WHITE_DWARFS_VERSION` = 27 (`stellar/binary/pinned_white_dwarfs.rs`),
+    `StellarRules::pinned_white_dwarfs` (`PinnedWhiteDwarfRules::{Born, Frozen}`, one `match`,
+    `holds`). From 27 a pinned primary whose pin is pending (`Engine::pin_pending`) is never a white
+    dwarf: `stripped_member_at`'s white-dwarf arm holds it `Frozen` as the `Ended` arm does, from
+    `Remains::WhiteDwarf`'s new `core` and `core_radius`, and the pin collapses it from that mass.
+  - _Lean (2026-11-01)._ A bare TPAGB or post-AGB core is held at its white dwarf's L and R at
+    formation (HPT §6.3's µ = 0 limit, `Track::bare_agb_core`): their closed forms gave 1,158 and
+    476 R☉ at M = Mc.
+  - _Lean (2026-11-01)._ A merger's product that no star of its kind can hold (`new_star`'s
+    fallback to its core's white dwarf) is held by `Engine::held_product`: the kind's phase at the
+    core's mass, with that white dwarf's L and R. Like the held arm's dwarf, it drops the envelope.
+  - _Lean (2026-11-01)._ A held core at or above M_Ch, where HPT eq. 91 has no white dwarf (the
+    12 km floor), shows the helium ZAMS star of its mass (HPT eqs. 77–78, `sse::bare_core_light`).
+  - _Measured_ (layer E's 10⁴ under every 27 hold, on P11.T10's fix): of 5,421 pinned primaries
+    63 miss without the arm (55 white dwarfs at their pin, 8 later collapses; 59 systems), none
+    with it. `PIN_MISSES` is 0 (was 63).
+  - _For the bump to 27._ It moves the goldens `stellar/binary_timelines` (pairs 0252, 0438, 0902)
+    and `sky/census_near_sun` (layers D and E without photometry, 916 → 914 and 571 → 560). Under
+    every 27 hold it re-pins `engine_channels_hold`'s χ², `heavy_donor_hold`'s census (accreting
+    white dwarfs 4,116 → 4,106: pinned primaries now neutron stars) and `ns_accretion_hold`'s (its
+    neutron stars 1,132 → 1,143; members 1,159, the pin's 1,154 already stale on P11.T10's fix).
+- **P11.T12's fix: a wide pair's main-sequence star takes its partner's wind, held at 27** (lanes
+  `fix-wide-wind-accretion` and `fix-wide-wind-accretion-2`, 2026-11-02; research-leans-29 §2 and
+  research-leans-30 §2; nothing moves at 24–26).
+  - _The hold._ `WIND_ACCRETION_VERSION` = 27 (`stellar/binary/wind_accretion.rs`),
+    `StellarRules::wind_accretion` (`WindAccretionRules::{OwnTracks, WindRocheLobe}`, and a
+    test-only `BondiHoyle`), read at `wind_accretion::onset` by `can_interact`,
+    `can_interact_with_tracks` and `run_pair`'s pass-over; the brief's gate adds `fitted_tables_hold`.
+  - _From 27._ A pair the lobe and decay tests pass over is walked over its partner's own track
+    (two midpoint steps between mass knots): its main-sequence star takes BSE eq. 6's share, or,
+    beside an AGB partner, the larger WRLOF share (Abate et al. 2013, at most 0.5; recalled). From
+    10⁻⁴ M☉ the pair is wind-fed: the accretor carried and rejuvenated, then a track of its mass.
+  - _Leans (2026-11-01/02)._ One accretor, on its main sequence only; the drawn orbit shown; the
+    grown accretor's lobe not tested; WRLOF held at its peak past R_d ÷ R_L ≈ 1.62 and read at the
+    semi-major axis; no pair fed whose lobe and decay tests send it to the engine, or a star of
+    which dies suddenly, by the universe's age (`evolve::runs_or_collapses_by`).
+  - _Movers_ (the arm forced on at 24): the goldens `sky/census_near_sun`, `sky/band_face_row`,
+    `stellar/binary_timelines` and `stellar/summaries`; the fitted `sky_binary_light_c` and `_d`;
+    `cell::tests::the_star_bound_holds_for_some_realised_systems` (until those refit),
+    `light::tests::detached_generated_pairs_are_passed_over`, and, to restate on a pair still
+    passed over, `a_wide_pair_is_still_passed_over`, `the_pre_test_reads_the_periastron` and
+    `classify::tests::a_wide_white_dwarf_beside_a_giant_is_symbiotic`; the hold's own tests.
+  - _For the bump to 27._ Delete `OwnTracks`, the field, `onset`'s and the gate's reads and the
+    tripwire; keep `BondiHoyle` only for the engine comparison. Refit the pair-light and reach
+    tables, and give `pair_light_bound`'s `Detached` the wind's reach.
+  - _Acceptance:_ the lib tests `wind_accretion` and `whatever_age_it_is_run_to`; slow,
+    `old_populations_hold_blue_stragglers_and_hot_subdwarfs` (the halo still short of its window:
+    a finding).
+- **P11.T4's dwarf limit, held at 27** (lane `fix-swollen-he-wd-and-merger-dwarf`, 2026-11-02;
+  nothing moves at 24–26). From `DWARF_LIMIT_VERSION` = 27 (`stellar/binary/dwarf_limit.rs`,
+  `StellarRules::dwarf_limit`) no engine white dwarf passes the Chandrasekhar mass:
+  `Engine::finish_merger` collapses a merged dwarf at it as an accreting one, and a dwarf fed helium
+  past the edge-lit mark, or by a wind in a detached phase (`detached::Stop::Chandrasekhar`),
+  collapses there too. `Engine::new_star`'s unplaced product is oxygen–neon
+  where its carbon–oxygen core's `sse::pulsing_agb_helium_core` is 1.6 M☉ or more or it merged
+  from one (lean, 2026-11-02), and a helium core at or above the Chandrasekhar mass is its naked
+  helium star, not a collapse (lean, 2026-11-02). The brief's gate refuses the fitted tables
+  under it. Test helper: `binary::testing::shows_a_dwarf_above_the_limit`.
+- **P11.T10's kicks at version 25** (lane `fix-p11-t10-kicks-25`, 2026-11-02; held at 27, nothing
+  moves at 25–26).
+  - _Cause._ P11.T4.o's halved transfer steps (F17) let a case BB helium giant swell step by step
+    far past its lobe, and `HEAVY_DONOR_VERSION`'s arm drew its corotation from the orbit at its
+    own radius: the orbit drained to nothing and the pair merged, or the spin came back and widened
+    it past the supernova (39 double neutron stars, against 175 under 25's rules).
+  - _Fix, the 27 arm only._ The donor's corotation reads BSE's `radx`, its radius held to its
+    lobe (`star::moment_of_inertia_within`, `Engine::synchronise_donor`). Test:
+    `heavy_donor_hold::a_case_bb_helium_star_beside_a_neutron_star_leaves_a_double_neutron_star`,
+    on `testing::remnant_pair::helium_star_beside_remnant`.
+  - _Re-pinned._ `binary_kick_the_stripped_share_is_stripped_share` at 0.05 (0.496 against 0.452):
+    P11.T4.n's pinned main-sequence end and P11.T4.l's passed-over collapses strip more, as they
+    should (the fix takes 0.001 off it).
+  - _The fix's movers, every 27 hold's only._ `census_of_the_heavy_donors` (4,120 → 4,546 accreting
+    white dwarfs), `census_of_the_neutron_star_accretion` (411 → 1,854 X-ray binaries, the neutron
+    stars' with a main-sequence or substellar donor; 1 of the 13 black holes not fed by a dwarf born
+    a neutron star, against the brief's 5%, a finding), the engine channels' chi-squares and
+    `the_pinned_neutron_star_keeps_a_tenth_under_the_arm`'s every-27-hold row, re-pinned.
+- **P11.T4's heavy-donor wind, under `HEAVY_DONOR_VERSION` = 27** (lane
+  `fix-p11-t4-heavy-donor-wind`, 2026-11-04; no new hold, nothing moves at 26; folded at 27 with
+  the heavy-donor hold, `HeavyDonorRules` gone). `Engine::accretion` now takes the donor's mass: a
+  white dwarf fed hydrogen at `GIANT_RATE` or more by a donor `heavy_donor::thermal_rate` holds
+  keeps max(`critical_rate`, `GIANT_RATE`) ÷ rate and blows the rest off from itself
+  (`Engine::optically_thick_wind`), with no swell; every other accretion keeps BSE's swell.
+  `heavy_donor_hold::while_heavier` stops at a merger, at an accretor no longer a white dwarf, and
+  at q ≤ `REVERSED_BELOW` = 1.02 (lean, 2026-11-04: the pinned pair falls inside its lobe at
+  q = 1.012). Open: the paper's cataclysmic variable
+  (donor τ ≈ 0.75) falls inside its lobe at q = 1.36 after 10 kyr and transfers on its nuclear
+  timescale while the heavier for 2.3 Gyr; its restated tests read it after the reversal.
+- **P11.T4's neutron-star accretion census re-pinned at 27** (lane `fix-p11-ns-accretion-census`,
+  2026-11-05; test only; lean, 2026-11-05: a real effect). The census is 413 → 1,816: the `radx` fix
+  above is +1,350 in landing order (its lane's 1,854 was lost). Causes: on `CENSUS_FIGURES`.
+- **P11.T4's swollen helium dwarf, held at 29** (lane `p11-wd-union`, first built at 27 by
+  `fix-swollen-he-wd-and-merger-dwarf` on 2026-11-02; rebased onto land/next on 2026-11-05 and held
+  at 29 as train 28 froze; nothing moves at 24–28). From `SWOLLEN_DWARF_VERSION` = 29
+  (`stellar/binary/swollen_dwarf.rs`, `StellarRules::swollen_dwarf`) a helium dwarf above
+  `Mc,BGB`(`M_HeF`) fed hydrogen swells onto the first giant branch of a 0.7 `M_HeF` star where its
+  core is the dwarf's (`Engine::degenerate_giant`, `sse::degenerate_giant_mass`; lean, 2026-11-02),
+  so a strip leaves a helium dwarf. It does not swell while its donor is held to
+  `heavy_donor::thermal_rate`, which stops once it is a giant, so it would be stripped back and
+  swell again to the segment cap (lean, 2026-11-02). The brief's gate refuses the fitted tables
+  under it.
+- **P11.T4's dwarf limit made whole, held at 29** (lane `p11-wd-union`; rebased onto land/next on
+  2026-11-05, nothing moves at 24–28). From `DWARF_LIMIT_VERSION` = 29 (`DwarfLimitRules::Whole`;
+  the held arm is v27's code): a pinned primary whose pin is pending is left to its pin
+  (`Engine::pin_pending`, now one predicate with the member's index), its unplaced product typed by
+  the held arm and held by `held_product` (research-leans-34 §1(b)); a helium-giant product is
+  typed by its mass (HPT §6.1); a helium core of 0.5 M☉ or more is its helium star (HPT §6); only
+  CO and ONe dwarfs stop at M_Ch in a detached phase.
+  - From fix-p11-wd-iron-core (same hold): an unplaced TPAGB product of no dwarf with a CO core of
+    1.438 M☉ or more (`Mc,BAGB` ≥ 2.25 M☉, HPT §6) is `Unplaced::IronCore`, collapsed at once by
+    plan 06's iron-core fate (`sse::iron_core_fate`, `Engine::iron_core_collapse`) with the
+    ordinary kick and no Ia; the held arm's ONe AIC stays. Merger callers pass
+    `common_envelope::Product`. The census counts the unplaced products by kind.
+  - From fix-p11-swollen-dwarf-kind (under `SWOLLEN_DWARF_VERSION` 29): a CO or ONe dwarf's swell
+    records its kind (`Engine::swollen_cores`, `CoreSource::CarbonOxygenDwarf` added), and every
+    exit of the giant takes it: its strip, a merger it survives as itself, an unplaced product made
+    from it, and its own death (`SwollenDeath`). Pinned pair 0080's ONe dwarf no longer strips back
+    to CO.
+  - From fix-p11-placed-product-kind (dwarf limit at 29): a placed merger product of a CO or ONe
+    dwarf parent keeps the dwarf's kind (`DwarfLimitRules::placed`, `CoreSource::with`; ONe if
+    either parent's core is); `swollen_cores` is now `Engine::dwarf_cores`, and
+    `common_envelope::Product::Member` carries the `CoreSource`. A kept CO core whose track would
+    collapse disrupts at the track's death and leaves nothing (research-leans-35 §7).
+  - A giant's own ONe-typing track counts for a product's core only where no dwarf's core is
+    recorded for it: as first built, a swollen CO dwarf placed on an ONe-typing track (a 0.774 M☉
+    core on a 6.54 M☉ track, pinned pair 0417) came back ONe through a merger. No placed product
+    changes kind in the census now (4 in layer D at 25, 109 at 27 before the fix).
+  - From fix-p11-helium-product-core (dwarf limit at 29): an unplaced helium giant of no dwarf
+    with a CO core of 1.438 M☉ or more is `Unplaced::IronCore` (now with `helium_core`). A kept core
+    stops at its limit (`detached::Stop::CoreLimit`, `Engine::core_limit_age`,
+    `Track::carbon_oxygen_core_at`): ONe at `OXYGEN_NEON_CAPTURE_MASS` under MandelMuller2020,
+    M_Ch under Hurley2000, CO at M_Ch.
+- From fix-p11-kept-core-endings (2026-11-03; rebased onto v27 2026-11-05), held at
+  `CORE_ENDINGS_VERSION` 29 (`stellar/binary/core_endings.rs`, `StellarRules::core_endings`):
+  - A kept core ends as its track does: the track's iron collapse, the kept kind setting only what
+    is left. `SwollenDeath::of` takes the core's mass; a CO core below M_Ch at an electron capture
+    is left as its dwarf. No core limit for CO cores.
+  - Under MandelMuller2020 every ONe core collapses at `OXYGEN_NEON_CAPTURE_MASS`
+    (`CoreEndingRules::collapse_mass`): fed (wind, RLOF), merged and stripped ONe dwarfs, helium
+    stars (`helium_star_end`, `remains_at`) and the window's pulses (`Builder::pulses_cap`).
+  - The window keeps its early-AGB cap (lean): single stars at Z = 5 × 10⁻⁴–0.02 are unchanged;
+    a companion-stripped 7.7 M☉ star now collapses at 1.37 M☉, not 1.378.
+  - Mid-engine helium-star tracks take the pair's `core_endings` (`Track::helium_star_under`).
+  - A core within 10⁻⁹ of M_Ch has reached it (`CoreEndingRules::below_the_chandrasekhar_mass`,
+    `CORE_ROUNDING`): the ONe helium stars of 1.74–2.24 M☉ all collapse an iron core, where the held
+    arm alternates with a dwarf at 1.44 M☉ by the core's last bits (science check).
+  - An unplaced helium giant ends by its mass: `Unplaced::Disruption`, `Product::Disruption`.
+  - Census under every 29: layer D's no-star pairs 400 → 22; ONe dwarfs above 1.37 M☉ 0 in every
+    layer, pinned or not (225 and 89 in D and E under every 27 hold). Movers at 29 are listed in
+    `core_endings_hold.rs`.
+- From fix-p11-helium-star-capture (2026-11-04), on the same hold (research-leans-40):
+  - A helium star of 1.6–2.25 M☉ whose core reaches M_Ch collapses by electron capture
+    (`oxygen_neon_capture_fate`: MM20's 1.26 M☉ neutron star, or HPT eq. 92 under Hurley2000), and
+    from 2.25 M☉ an iron core (HPT §§6 and 6.1). The held arm keeps the iron core from 1.6 M☉.
+  - An unplaced helium giant of 1.6–2.25 M☉ captures electrons too (`Unplaced::ElectronCapture`,
+    `Engine::capture_collapse`, with Mc,SN at least M_Ch under Hurley2000). None reaches it in the
+    census.
+  - Census under every 29: layer D's no-star pairs 22 → 56 (E 10 → 12): kept CO cores disrupting
+    at M_Ch, with no Ia, on those helium stars' tracks.
+- The union on land/next (2026-11-05, held at 29):
+  - A coalescence and a collision read a white-dwarf parent's own kind only under the whole dwarf
+    limit (`Engine::merged_dwarf_core`, `Engine::coalesced_source`); under the held arm only a
+    swollen dwarf's record, as v27 read none there (review). As first ported, an ONe-typing helium
+    giant coalescing with a CO dwarf could type its unplaced product ONe under every 27 hold; no
+    census met one.
+  - Rebased onto land/next at v28 (85c7ba1c): train 28's helpers gone, the held arms and every pin
+    unchanged at 28.
+  - Movers, the three holds turned on at the version together (at 27, and the same at 28): the
+    goldens `sky/census_near_sun` and `sky/band_face_row` (one glaring star fewer within 100 ly),
+    the sky's phase fit, three engine pins and the kick tables (listed in `core_endings_hold.rs`),
+    beside the holds' own tests.
+  - `census_of_the_neutron_star_accretion_under_every_29_hold`: 1,816 → 1,834 members (neutron
+    stars 1,800 → 1,818). Added in turn (the galaxy's holds at 29, swollen dwarf, dwarf limit,
+    core endings), all but `core_endings` move it by 0, and it by +18. The black holes and the most
+    gained are unchanged.
+- **P11.T12's wind reach: the pair bound's `Detached` takes the partner's wind, held at 29** (lane
+  `p11-t12-wind-reach`, 2026-11-05; nothing moves at 28).
+  - _The hold._ `WIND_REACH_VERSION` = 29 (`stellar/binary/wind_reach.rs`), `StellarRules::wind_reach`
+    (`WindReachRules::{LobeAndDecay, Wind}`), read at `light::detached` (its item 5). The census
+    (`StarBounds`) and the brief's gate (`pair_keeps_own_models`) pass the galaxy's rules through
+    `pair_light_bound_under`; `pair_light_bound` stays the version's.
+  - _The screen._ New fitted `binary_wind_reach` (fast, since 28) on the reach table's grid: per
+    cell and bin the walk's Bondi–Hoyle sum S = Σ ΔM (R ÷ β_W M)², per cell the AGB's start, loss,
+    least mass and dust radius. A star of at most m takes at most α m² S ÷ (8 r_p²) plus the AGB
+    overflow at its worst q and x. Pair-light, reach and sky binary-light read no `Detached`: unchanged.
+  - _Leans (2026-11-05)._ The accretor at its initial mass, as the walk feeds it on its own track
+    (not the engine screen's m + 0.8 ΔM); S rather than the product of each factor's worst; S's
+    margin 0.1 dex, the AGB's 10%; e = 0, the bound knowing only the periastron.
+  - _Tests._ `the_star_bound_holds_for_realised_systems` runs under 29 only, since 28's `Detached`
+    fails it on a wind-fed star (a layer C companion at M_V 0.79 against 2.55).
+  - _For the bump to 29._ Delete `LobeAndDecay`, the field, the `match`, the tallies' held column
+    and the tripwire; the census tests' 29 galaxy becomes the fixture.
+- **P11.T4.d's 150 M☉ bound (2026-11-05).** A merger's product over 150 M☉ is placed at 150 M☉
+  (`track_mass`), the excess lost at the merger (lean, 2026-11-05). The slow check reads
+  min(M₁ + M₂, 150 M☉); `LEAST_KEPT_UNDER_THE_ARM` is re-pinned at 28.
+- **P11.T4: a carbon–oxygen dwarf or core at M_Ch ends one way, held at 30** (lane
+  `p15-t9b-ia-yield`, 2026-11-05; nothing moves at 28–29).
+  - _The hold._ `CO_CHANDRASEKHAR_VERSION` = 30, `StellarRules::co_chandrasekhar`, and new
+    `StellarRules`/`GalaxyRules::every_30_hold`. One choke point, `Engine::end_at_the_chandrasekhar_mass`
+    by `ChandrasekharPath` (seven paths); the brief's gate reads its `fitted_tables_hold`.
+  - _From 30._ Every path disrupts, leaves nothing and pools one `Accretion` candidate: the dwarf
+    or core at ignition, beside its companion (none after a merger). ONe keeps its AIC.
+  - _Leans (2026-11-05)._ A helium dwarf at its collapse mass disrupts too (BSE's `evolv2.f`). A
+    track's own carbon ignition in a core that is no dwarf's pools none (plan 09's single-star rule).
+  - _Lean (2026-11-05): research-leans-38 kept._ A kept core whose track collapses an iron core still
+    collapses. That is P15.T9.b's 1.12 M☉ dwarf (golden `0x62005957fe000024`, galaxy 1234): a CO
+    dwarf merged with a helium star. It is a neutron star at 28 and 29 by that collapse, and at 30
+    by `merged_capture`'s electron capture at the merger (1.26 M☉; record below).
+  - _Lean (2026-11-06): a pair's first candidate wins._ P11.T6's pool keeps a pair's first event,
+    so most endings at M_Ch at 30 pool none of their own (layer D: 40 of 194). Of those, 11 could
+    detonate behind one that cannot (D 9, E 2; `chandrasekhar_endings`' last column).
+  - _P11.T6's slow tests._ None remain (`ia_hold.rs` went with the 27 fold). The by-path census's
+    candidate column stands in at 30; layer D's redraw share is not re-measured.
+  - _Tests._ `PinnedMerger` and `KeptCoreIgnition` have constructed cases only; no census pair
+    takes either path.
+  - _For the bump to 30._ Delete `Held`, `ChandrasekharPath::held_ending`, the field, the brief's
+    read and the tripwire; refit the pair-light and reach tables. The census figures are in
+    `co_chandrasekhar_hold.rs` and `ns_accretion_hold.rs` (members 1,834 → 1,658 at 30).
+  - _Landed over 29's folds (land-pod-r2, 2026-11-06)._ No `KeptCoreAtLimit` path: since the 29
+    folds a kept carbon–oxygen core has no limit of its own, so seven paths; the tests' "every 29
+    hold" is the version's rules.
+- **P11.T4: an ONe dwarf's coalescence past the capture mass collapses at once, held at 30** (lane
+  `p15-t9b-ia-yield`, 2026-11-06; research-leans-45 item 1; nothing moves at 28–29).
+  - _The hold._ `MERGED_CAPTURE_VERSION` = 30, `StellarRules::merged_capture`, read by
+    `Engine::product_member` (`merged_capture`): a coalescence whose `coalesced_source` is ONe and
+    whose core holds `supernova::core_limit` becomes `Product::ElectronCapture`; a pinned primary's
+    product is left to its pin.
+  - _Measured._ Layer E's probe (`the_merged_channel_s_pairs_against_e_s_table`, against 28's
+    table): 164 pairs past under every 29 hold, none under every 30 hold, so no ONe slice is
+    needed. The dwarf-limit census's new arm collapses 261 coalescences in D and 24 in E; the NS
+    accretion census at 30 is unchanged.
+  - _Lean (2026-11-06): its reach._ The source is ONe where either parent's core is, a partner's
+    own ONe-typing track included (research-leans-35 §7). So a CO dwarf that coalesces with such a
+    star collapses too: the golden pair above, a bump mover. Movers were not surveyed.
+  - _For the bump to 30._ Delete `Held`, the field, the brief's read and the tripwire; the 30
+    refit of the pair-light tables then takes the channel (P11.T17.b's two slow tests at 30).

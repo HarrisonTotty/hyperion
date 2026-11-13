@@ -1,5 +1,6 @@
 import type { LocalFrame } from "../geometry/frame";
 import { dot, type Vec3 } from "../geometry/vec3";
+import type { ColourToken } from "./drawList";
 
 /**
  * The outline of a mark, which encodes its type.
@@ -8,7 +9,9 @@ import { dot, type Vec3 } from "../geometry/vec3";
  * One meaning per shape on every spatial display. `circle` is a star system; `diamond`, `square`
  * and `triangle` are drawn now and given their meaning by plan 06. Later plans add their own
  * shapes to this union: plan 06 the `ringed-circle` (a giant), plan 13 the `triangle-down` (a
- * planet), plan 14 the `pentagon` (a moon) and the `hexagon` (an unresolved contact). Each is drawn
+ * planet), plan 14 the `pentagon` (a moon) and the `hexagon` (an unresolved contact), plan 09
+ * the `greek-cross` (a feature, a group of systems or a cloud of gas: {@link FeatureMark}), and plan
+ * 12 the `transient`, a four-point star (the source of a sensor detection, P12.T12). Each is drawn
  * here before the display that gives it its meaning is built, and every one is closed, since a mark
  * is filled above the reference plane and open below it.
  */
@@ -20,7 +23,9 @@ export type SymbolShape =
   | "ringed-circle"
   | "triangle-down"
   | "pentagon"
-  | "hexagon";
+  | "hexagon"
+  | "greek-cross"
+  | "transient";
 
 /** The size of a mark, 0 (smallest) to 4, which encodes a class and never depth. */
 export type SizeClass = 0 | 1 | 2 | 3 | 4;
@@ -41,6 +46,38 @@ export interface PointMark {
   readonly label: string;
   /** Higher values are labelled first when not every mark can be. */
   readonly labelPriority: number;
+}
+
+/**
+ * A large feature's mark (plan 09, P09.T41.a): a point mark in the Greek cross, which no system or
+ * body takes, with the feature's true radius.
+ *
+ * @remarks
+ * It is placed, stalked, filled, picked, bracketed and labelled as every point mark is, its label
+ * naming its kind by its abbreviation (`OC GPF F207`). Where its sphere is wider on the screen than
+ * the mark, the sphere's outline is drawn too, a solid `--text-muted` circle at its true radius
+ * about the mark, since a sphere is a circle in the orthographic view (the guide's 3D conventions).
+ */
+export interface FeatureMark extends PointMark {
+  readonly shape: "greek-cross";
+  /** The feature's radius at the scene's time, in scene units: its sphere's. */
+  readonly radius: number;
+}
+
+/**
+ * A sphere about a point of the scene with no mark of its own, such as a remnant's shell or a
+ * nursery's superbubble (plan 09, P09.T41.a): drawn as its outline at its true radius, a solid
+ * `--text-muted` circle, and labelled at it, never picked.
+ */
+export interface ShellMark {
+  /** Stable identity, which keys its label. */
+  readonly id: string;
+  /** Its centre, relative to the view centre in scene units and the scene's axes. */
+  readonly centre: Vec3;
+  /** Its radius in scene units. */
+  readonly radius: number;
+  /** Text of its label, at its circle; empty for none. */
+  readonly label: string;
 }
 
 /** A sphere about the view centre, drawn as its outline: a circle of the same radius. */
@@ -110,10 +147,19 @@ export interface AnnulusMark {
   /** Stable identity, which keys its label. */
   readonly id: string;
   /**
-   * Its centre, relative to the view centre in scene units; the view centre when absent. Only its
-   * foot on the reference plane counts, since the band lies in the plane.
+   * Its centre, relative to the view centre in scene units; the view centre when absent. Without a
+   * {@link AnnulusMark.normal} only its foot on the reference plane counts, since the band lies in
+   * the plane.
    */
   readonly centre?: Vec3 | undefined;
+  /**
+   * The normal of the plane the band lies in, through its centre, for a band off the reference
+   * plane, as a ring tilted to its planet's equatorial plane is (plan 14, P14.T56.b); any length
+   * but zero, its sense kept. Its angles, the ticks' every 10° and its label's points, run from
+   * the reference plane's coreward laid onto its own plane, towards that plane's spinward, which
+   * its sense chooses. The reference plane when absent.
+   */
+  readonly normal?: Vec3 | undefined;
   /** Radius of the inner edge in scene units; an edge of radius 0 is not drawn. */
   readonly innerRadius: number;
   /** Radius of the outer edge in scene units, at least the inner's; equal radii draw one edge. */
@@ -142,6 +188,83 @@ export interface AnnulusMark {
    * absent.
    */
   readonly selected?: boolean | undefined;
+  /**
+   * The ID of the mark the band is drawn about, a ring's planet, whose bracket's box its label
+   * need not keep outside while no reticle is drawn about that mark: a ring's label names the
+   * ring, so it cannot be read as its own planet's name, but no label stands on a drawn bracket
+   * (plan 14, P14.T42.g; main's ruling on issue #96). None when absent, as for a zone or a belt,
+   * whose label beside its host would read as the host's name.
+   */
+  readonly aboutId?: string | undefined;
+}
+
+/**
+ * How a segment is stroked: `solid`, or `dashed` at a predicted path's dash, since the guide keeps
+ * dashes for prediction (an apparent position's joiner is one: plan 12, P12.T11).
+ */
+export type SegmentLine = "solid" | "dashed";
+
+/**
+ * A straight line between two scene points, such as the dashed joiner from a system's mark to its
+ * apparent position (plan 12, P12.T11) or a contact's solid bearing ray from the observer (P12.T12):
+ * drawn, clipped to the view, and never picked.
+ *
+ * @remarks
+ * Its width and dash are CSS px, which `paint` draws at the line scale, never under 2 device px
+ * (decision-thin-line-contrast; R07.T16.f). A line that carries meaning takes the guide's 6:1
+ * against `--surface-0`: `textMuted` reaches it and `line` does not ({@link PathRole}).
+ */
+export interface SegmentMark {
+  /** Stable identity. */
+  readonly id: string;
+  /** One end, relative to the view centre in scene units and the scene's axes. */
+  readonly from: Vec3;
+  /** The other end, in the same units and axes. */
+  readonly to: Vec3;
+  readonly line: SegmentLine;
+  readonly stroke: ColourToken;
+  /** Its width, CSS px. */
+  readonly widthPx: number;
+  /**
+   * The point mark it leaves from: it is drawn only outside that mark's outline on the screen, so
+   * that it never crosses the symbol whose shape encodes the type, and its tick only where `to`
+   * lies outside the outline. Not cut when absent, or when no mark of that ID is drawn.
+   */
+  readonly fromMark?: string | undefined;
+  /**
+   * Whether a solid tick 0.25 rem long crosses it at `to`, square to it on the screen, as wide and
+   * in its colour: an apparent position's tick. None when absent.
+   */
+  readonly endTick?: boolean | undefined;
+  /**
+   * The length on the screen, CSS px, that it must exceed to be drawn at all; 0 when absent.
+   */
+  readonly minLengthPx?: number | undefined;
+  /**
+   * Text of a label beside its end as drawn: at `to` where that lies in the view, else where the
+   * line leaves the view, so that a ray drawn to a far point ends at the display's edge with its
+   * label, as a bearing without a range does (plan 12, P12.T12). None when absent.
+   */
+  readonly endLabel?: string | undefined;
+}
+
+/**
+ * Where a scene's observer stands, in observed mode (plan 12, P12.T11): a mark of its own, an eye
+ * (two arcs meeting at points left and right), labelled and with a stalk to its foot on the
+ * reference plane as the other marks have, drawn only where it lies inside the view, and never
+ * picked.
+ *
+ * @remarks
+ * Its shape is none of a {@link SymbolShape} (a contact's), the bracket reticle (the selection),
+ * the chevrons (a destination), and the galaxy map's upright cross with a gap (its cursor) or its
+ * diagonal cross (its chart centre). It is filled north of the reference plane and open south of
+ * it, as every mark is.
+ */
+export interface ObserverMark {
+  /** Its position, relative to the view centre in scene units and the scene's axes. */
+  readonly position: Vec3;
+  /** Text of its label. */
+  readonly label: string;
 }
 
 /** Everything a spatial view draws, in scene units about the view centre. */
@@ -152,8 +275,16 @@ export interface SpatialScene {
   readonly plane: PlaneSpec;
   /** Paths such as orbits, drawn but never picked; none when absent (plan 14, T40.a). */
   readonly paths?: ReadonlyArray<PathMark> | undefined;
+  /** Straight lines, drawn but never picked; none when absent (plan 12, P12.T11). */
+  readonly segments?: ReadonlyArray<SegmentMark> | undefined;
+  /** The observer, in observed mode; none when absent (plan 12, P12.T11). */
+  readonly observer?: ObserverMark | undefined;
   /** Bands on the reference plane, drawn with it and never picked; none when absent. */
   readonly annuli?: ReadonlyArray<AnnulusMark> | undefined;
+  /** Large features, drawn and picked with the points; none when absent (plan 09, P09.T41.a). */
+  readonly features?: ReadonlyArray<FeatureMark> | undefined;
+  /** Shells and superbubbles, drawn and never picked; none when absent (plan 09, P09.T41.a). */
+  readonly shells?: ReadonlyArray<ShellMark> | undefined;
   /** The selected mark, drawn with the `--accent` bracket reticle. */
   readonly selectedId: string | null;
   /** The commanded destination, drawn with the `--target` chevrons (R07.T16.h). */

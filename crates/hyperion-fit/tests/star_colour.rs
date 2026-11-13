@@ -9,6 +9,8 @@
 //! says so on stderr and checks nothing more; the sim's own tests of the table (`sky::colour`) run
 //! either way.
 
+mod common;
+
 use std::fs;
 use std::num::NonZeroUsize;
 use std::path::Path;
@@ -176,17 +178,12 @@ fn table_is_reproduced(name: &str, committed: &str) {
         render(1) == rendered,
         "{name}: one thread renders another table than eight"
     );
-    if rendered != committed {
-        let line = rendered
-            .lines()
-            .zip(committed.lines())
-            .position(|(a, b)| a != b)
-            .map_or_else(|| "the length".to_owned(), |n| format!("line {}", n + 1));
-        panic!(
-            "crates/hyperion-sim/src/tables/{name}.rs differs from the fit at {line}: run `just fit \
-             {name}`"
-        );
-    }
+    common::assert_reproduced(
+        &format!("crates/hyperion-sim/src/tables/{name}.rs"),
+        name,
+        committed,
+        &rendered,
+    );
 }
 
 /// The observer with the fetched V band.
@@ -298,6 +295,108 @@ fn star_colour_the_bake_bins_are_the_sims() {
     for (a, b) in bake_wavelengths_nm().iter().zip(BAKE_WAVELENGTHS_NM) {
         assert!((a - b).abs() < 1e-9, "{a} against {b}");
     }
+}
+
+/// The client's bake-spectra fixture (`packages/protocol/fixtures/bake_spectra.json`, the suns of
+/// rendering plan R08.T4.a's channel fit) is the sim's colour table read at each sun, as
+/// `HostDiscDto`'s `chroma`, `lux_per_v0` and `bake_spectrum` carry it: [`star_colour`] on each
+/// row's grid, and [`solar_colour`] at the Sun's 5,772 K and log g 4.438, each value to 10⁻¹² of
+/// the table's. The chroma is held exactly as the client reads it from the wire: the `f32`s'
+/// shortest decimals, as `serde_json` writes them, so that a decimal that rounds to the same `f32`
+/// but is another double fails. The Sun's row holds the client's copies of R06's solar photometry
+/// (`earth.test.ts`, `hostDisc.test.ts`; R08.T6.j). A refit of the table that moves them fails
+/// here, and the fixture and the client's fit are updated with it.
+#[test]
+fn star_colour_the_clients_bake_spectra_are_the_tables() {
+    /// The fixture's names for [`AtmosphereGrid`]'s variants.
+    #[derive(serde::Deserialize)]
+    enum Grid {
+        MainSequence,
+        Giant,
+        WhiteDwarf,
+    }
+    #[derive(serde::Deserialize)]
+    struct Sun {
+        teff_k: f64,
+        log_g: f64,
+        grid: Grid,
+        // As the client reads `HostDiscDto.chroma`: doubles.
+        chroma: [f64; 2],
+        lux_per_v0: f64,
+        // The sim's count, so that serde refuses a fixture row of another length.
+        bake_spectrum: [f64; hyperion_sim::sky::colour::BAKE_WAVELENGTH_COUNT],
+    }
+    /// Whether `a` is `b` to 10⁻¹² of `b`.
+    fn agrees(a: f64, b: f64) -> bool {
+        (a - b).abs() <= 1e-12 * b.abs()
+    }
+    /// How to correct a row that fails.
+    const UPDATE: &str = "update the row in packages/protocol/fixtures/bake_spectra.json to the \
+                          table's, then bless the client's channel fit: HYPERION_BLESS=1 pnpm \
+                          --filter hyperion exec vitest run \
+                          src/renderer/src/view/atmosphere/channels.test.ts";
+    #[derive(serde::Deserialize)]
+    struct Fixture {
+        suns: Vec<Sun>,
+    }
+    let fixture: Fixture = serde_json::from_str(include_str!(
+        "../../../packages/protocol/fixtures/bake_spectra.json"
+    ))
+    .expect("the fixture is JSON of its shape");
+    assert!(fixture.suns.len() >= 3, "the fit's three suns at least");
+    let mut solar_rows = 0;
+    for sun in &fixture.suns {
+        let solar = (sun.teff_k - SUN_TEFF_K).abs() < 1e-9 && (sun.log_g - SUN_LOG_G).abs() < 1e-9;
+        let colour = if solar {
+            solar_rows += 1;
+            solar_colour()
+        } else {
+            let grid = match sun.grid {
+                Grid::MainSequence => AtmosphereGrid::MainSequence,
+                Grid::Giant => AtmosphereGrid::Giant,
+                Grid::WhiteDwarf => AtmosphereGrid::WhiteDwarf,
+            };
+            star_colour(Kelvin::new(sun.teff_k), sun.log_g, grid)
+        };
+        // The Sun's row is also the client's copies, `hostDisc.ts`'s `SUN_*` constants.
+        let copies = if solar {
+            ", and the Sun's copies in apps/hyperion/src/renderer/src/view/lighting/hostDisc.ts"
+        } else {
+            ""
+        };
+        // The chroma exactly as the wire writes it, `HostDiscDto.chroma`'s `f32`s in serde_json's
+        // shortest decimals, against the fixture's doubles written back the same way: a double's
+        // shortest decimal is its own, so the texts are equal only if the doubles are.
+        let wire = serde_json::to_string(&colour.chroma()).expect("serde_json writes any f32");
+        let fixture = serde_json::to_string(&sun.chroma).expect("serde_json writes any f64");
+        assert_eq!(
+            fixture, wire,
+            "{} K, log g {}, chroma: fixture {fixture}, the wire's {wire}; {UPDATE}{copies}",
+            sun.teff_k, sun.log_g
+        );
+        assert!(
+            agrees(sun.lux_per_v0, colour.lux_per_v0()),
+            "{} K, log g {}, lux_per_v0: fixture {}, table {}; {UPDATE}{copies}",
+            sun.teff_k,
+            sun.log_g,
+            sun.lux_per_v0,
+            colour.lux_per_v0()
+        );
+        for (k, (a, b)) in sun
+            .bake_spectrum
+            .iter()
+            .zip(colour.bake_spectrum())
+            .enumerate()
+        {
+            assert!(
+                agrees(*a, b),
+                "{} K, log g {}, bin {k}: fixture {a}, table {b}; {UPDATE}{copies}",
+                sun.teff_k,
+                sun.log_g
+            );
+        }
+    }
+    assert_eq!(solar_rows, 1, "the fixture holds the Sun once");
 }
 
 /// The fifteen-bin illuminance of every bake spectrum is 1 lx to 10⁻⁶: every row of the committed

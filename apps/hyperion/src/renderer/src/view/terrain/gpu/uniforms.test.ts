@@ -2,18 +2,36 @@ import { describe, expect, it } from "vitest";
 
 import vertexGolden from "../../../../../../../../crates/hyperion-surface/tests/golden/vertex_f32.golden?raw";
 import { vec3 } from "../../../geometry/vec3";
+import { INSTANCE_FINEST, INSTANCE_SUB_GRID_STRIDES } from "../../clusters/strides";
+import { TERRAIN_SUB_PATCH_MASK } from "../../clusters/terrain";
+import { MAX_MORPH_HOLDS } from "../coarseFineHolds";
 import type { Face, PatchKey } from "../patchKey";
 import {
   CONTACT_RECORD_BYTES,
   CONTACTS_HEADER_BYTES,
   ContactRecords,
+  DATUM_SLOT,
+  fadeWord,
+  MIX_STEPS,
+  CLASS_MORPH,
+  cellAncestorPlace,
+  clusterSubPatchOf,
   INSTANCE_RECORD_BYTES,
   InstanceRecords,
+  MAX_CELL_ANCESTOR_LEVELS,
   MAX_CONTACTS,
+  MAX_SUB_PATCH_LEVELS,
+  NO_PARENT_SLOT,
+  parentQuadrant,
   patchTerms,
   SLOT_RECORD_BYTES,
+  subPatchOf,
+  subPatchWord,
   writeSlotRecord,
 } from "./uniforms";
+
+/** An instance record's words. */
+const WORDS = INSTANCE_RECORD_BYTES / 4;
 
 /** WGS 84, the test planet's figure (NIMA TR8350.2): a and c = a (1 − 1 ÷ 298.257223563). */
 const WGS84 = { equatorialRadiusM: 6_378_137, polarRadiusM: 6_378_137 * (1 - 1 / 298.257223563) };
@@ -118,6 +136,132 @@ describe("an instance record", () => {
     expect(records.bytes().byteLength).toBe(INSTANCE_RECORD_BYTES);
   });
 
+  it("carries the parent's slot and the patch's quadrant for the horizon's blend, or no parent", () => {
+    const records = new InstanceRecords(2);
+    records.push(1, vec3(0, 0, 0), 0, 1);
+    records.push(2, vec3(0, 0, 0), 0, 1, 9, 1);
+    const u = new Uint32Array(records.buffer);
+    expect([u[6], u[7]]).toEqual([NO_PARENT_SLOT, 0]);
+    expect([u[WORDS + 6], u[WORDS + 7]]).toEqual([9, 1]);
+    expect(NO_PARENT_SLOT).toBe(0xffff_ffff);
+  });
+
+  it("names a patch's quadrant in its parent by the low bits of its i and j", () => {
+    const key = { face: 2, level: 5, i: 6, j: 4 } as const;
+    expect(parentQuadrant(key)).toBe(0);
+    expect(parentQuadrant({ ...key, i: 7 })).toBe(1);
+    expect(parentQuadrant({ ...key, j: 5 })).toBe(2);
+    expect(parentQuadrant({ ...key, i: 7, j: 5 })).toBe(3);
+  });
+
+  it("refuses a quadrant past 3", () => {
+    expect(() => {
+      new InstanceRecords(1).push(3, vec3(0, 0, 0), 0, 1, 9, 4);
+    }).toThrow(RangeError);
+  });
+
+  it("carries the patch's morph holds above its quadrant's two bits, the record's size unchanged", () => {
+    const records = new InstanceRecords(2);
+    records.push(1, vec3(0, 0, 0), 0, 1, 9, 3, MAX_MORPH_HOLDS);
+    records.pushXyz(2, 0, 0, 0, 0, 1, 9, 2, 0b1_0000_0001);
+    const u = new Uint32Array(records.buffer);
+    expect([u[7], u[WORDS + 7], records.bytes().byteLength]).toEqual([
+      0x3_ffff,
+      (0b1_0000_0001 << 2) | 2,
+      2 * INSTANCE_RECORD_BYTES,
+    ]);
+  });
+
+  it("carries its edges' fades, its corners' and its own and its rebake's word (R10.T16.i)", () => {
+    const records = new InstanceRecords(1);
+    const own = fadeWord(7, 2_000, 1_234);
+    records.push(1, vec3(0, 0, 0), 0, 1, 9, 0, 0, 0, 0x0102_0304, 0xff00_00ff, own);
+    const u = new Uint32Array(records.buffer);
+    expect([Array.from(u.slice(9, 12)), own]).toEqual([
+      [0x0102_0304, 0xff00_00ff, own],
+      (7 | (2_000 << 8) | (1_234 << 20)) >>> 0,
+    ]);
+  });
+
+  it("refuses a fades word that is not a u32", () => {
+    const records = new InstanceRecords(1);
+    expect(() => {
+      records.push(1, vec3(0, 0, 0), 0, 1, 9, 0, 0, 0, 0, 0, -1);
+    }).toThrow(RangeError);
+    expect(() => {
+      records.push(1, vec3(0, 0, 0), 0, 1, 9, 0, 0, 0, 2 ** 32, 0, 0);
+    }).toThrow(RangeError);
+  });
+
+  it("packs a rebake's fade and its older slot, the datum's for a rise, and refuses what does not fit", () => {
+    expect([fadeWord(0, 0, 0), fadeWord(255, 0, 0), fadeWord(0, 2_048, DATUM_SLOT)]).toEqual([
+      0,
+      255,
+      ((2_048 << 8) | (0xfff << 20)) >>> 0,
+    ]);
+    for (const [own, rebake, slot] of [
+      [256, 0, 0],
+      [0, -1, 0],
+      [0, MIX_STEPS + 1, 0],
+      [0.5, 0, 0],
+      [0, 0, DATUM_SLOT + 1],
+    ] as const) {
+      expect(() => fadeWord(own, rebake, slot)).toThrow(RangeError);
+    }
+  });
+
+  it("carries the sub-patch it draws of its slot's patch, 0 for the whole patch", () => {
+    const records = new InstanceRecords(2);
+    records.push(1, vec3(0, 0, 0), 0, 1);
+    records.push(2, vec3(0, 0, 0), 0, 1, 9, 2, 5, subPatchWord(3, 5, 6));
+    const u = new Uint32Array(records.buffer);
+    expect([u.slice(8, 12), u.slice(WORDS + 8, WORDS + 12)].map((w) => Array.from(w))).toEqual([
+      [0, 0, 0, 0],
+      [3 | (5 << 5) | (6 << 18), 0, 0, 0],
+    ]);
+  });
+
+  it("packs a sub-patch's levels and place, its patch's descendant's less its patch's", () => {
+    const patch = { face: 4, level: 7, i: 21, j: 90 } as const;
+    expect([
+      subPatchWord(0, 0, 0),
+      subPatchWord(MAX_SUB_PATCH_LEVELS, 8191, 8191),
+      subPatchOf(patch, { face: 4, level: 9, i: 21 * 4 + 3, j: 90 * 4 + 1 }),
+    ]).toEqual([0, 13 | (8191 << 5) | (8191 << 18), 2 | (3 << 5) | (1 << 18)]);
+  });
+
+  it("refuses a sub-patch too deep, outside its patch or on another face", () => {
+    const patch = { face: 4, level: 7, i: 21, j: 90 } as const;
+    expect(
+      [
+        () => subPatchWord(MAX_SUB_PATCH_LEVELS + 1, 0, 0),
+        () => subPatchWord(2, 4, 0),
+        () => subPatchWord(2, 0, -1),
+        () => subPatchOf(patch, { face: 4, level: 8, i: 44, j: 180 }),
+        () => subPatchOf(patch, { face: 3, level: 8, i: 42, j: 180 }),
+      ].map((call) => {
+        try {
+          call();
+          return "made";
+        } catch (error: unknown) {
+          return error instanceof RangeError ? "refused" : "threw";
+        }
+      }),
+    ).toEqual(["refused", "refused", "refused", "refused", "refused"]);
+  });
+
+  it("refuses morph holds past 16 bits", () => {
+    expect(() => {
+      new InstanceRecords(1).push(3, vec3(0, 0, 0), 0, 1, 9, 0, MAX_MORPH_HOLDS + 1);
+    }).toThrow(RangeError);
+  });
+
+  it("refuses a parent slot that is not a u32", () => {
+    expect(() => {
+      new InstanceRecords(1).push(3, vec3(0, 0, 0), 0, 1, -1, 0);
+    }).toThrow(RangeError);
+  });
+
   it("refuses more records than its capacity", () => {
     const records = new InstanceRecords(1);
     records.push(0, vec3(0, 0, 0), 0, 1);
@@ -132,6 +276,176 @@ describe("an instance record", () => {
     records.clear();
     expect(records.count).toBe(0);
     expect(records.bytes().byteLength).toBe(0);
+  });
+
+  it("copies another's record word for word, as a shadow cascade's casters take it (R10.T9.b)", () => {
+    const source = new InstanceRecords(2);
+    source.push(4, vec3(1.25, -2.5, 0.1), 10, 20);
+    source.push(5, vec3(-3, 4, 1e-7), 30, 40, 9, 2, 3);
+    const copy = new InstanceRecords(1);
+    copy.pushCopy(source, 1);
+    expect(Array.from(copy.bytes())).toEqual(
+      Array.from(source.bytes().subarray(INSTANCE_RECORD_BYTES)),
+    );
+  });
+
+  it("refuses a copy past its capacity", () => {
+    const source = new InstanceRecords(2);
+    source.push(4, vec3(0, 0, 0), 0, 1);
+    source.push(5, vec3(0, 0, 0), 0, 1);
+    const copy = new InstanceRecords(1);
+    copy.pushCopy(source, 0);
+    expect(() => {
+      copy.pushCopy(source, 1);
+    }).toThrow(RangeError);
+    expect(copy.count).toBe(1);
+  });
+
+  it.each([-1, 1, 0.5, Number.NaN])(
+    "refuses to copy record %f, which is not one of the source's this frame",
+    (index) => {
+      const source = new InstanceRecords(2);
+      source.push(4, vec3(0, 0, 0), 0, 1);
+      const copy = new InstanceRecords(2);
+      expect(() => {
+        copy.pushCopy(source, index);
+      }).toThrow(RangeError);
+      expect(copy.count).toBe(0);
+    },
+  );
+});
+
+describe("an instance record's camera strides (plan R14, R14.T3.c)", () => {
+  it("holds its holds' onsets' shares in word 14, a byte an edge, 0 by default", () => {
+    const records = new InstanceRecords(2);
+    records.push(1, vec3(0, 0, 0), 0, 1);
+    records.push(
+      2,
+      vec3(0, 0, 0),
+      0,
+      1,
+      NO_PARENT_SLOT,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      undefined,
+      false,
+      undefined,
+      (255 << 8) | 7,
+    );
+    const u = new Uint32Array(records.buffer);
+    expect([u[14], u[WORDS + 14]]).toEqual([0, (255 << 8) | 7]);
+  });
+
+  it("marks a sub-patch on its own grid for the camera passes' cap in the quadrant word's bit 19, beside its holds, and refuses it in the forced region (R14.T3.c's stand-ins)", () => {
+    const records = new InstanceRecords(2);
+    const push = (finest: boolean, subGrid: boolean): void => {
+      records.push(
+        2,
+        vec3(0, 0, 0),
+        0,
+        1,
+        NO_PARENT_SLOT,
+        3,
+        5,
+        subPatchWord(4, 1, 2),
+        0,
+        0,
+        0,
+        undefined,
+        finest,
+        undefined,
+        0,
+        subGrid,
+      );
+    };
+    push(false, true);
+    push(true, false);
+    const u = new Uint32Array(records.buffer);
+    expect([u[7], u[WORDS + 7]]).toEqual([
+      (3 | (5 << 2) | INSTANCE_SUB_GRID_STRIDES) >>> 0,
+      (3 | (5 << 2) | INSTANCE_FINEST) >>> 0,
+    ]);
+    expect(() => {
+      push(true, true);
+    }).toThrow(RangeError);
+  });
+});
+
+describe("a stand-in's sub-patch word on the cluster path (plan R14, Design note 19)", () => {
+  const patch: PatchKey = { face: 2, level: 7, i: 40, j: 9 };
+
+  it("marks a stand-in one to three levels below its slot's patch a mask of that patch's own blocks", () => {
+    expect(
+      [1, 2, 3].map((levels) => {
+        const side = 2 ** levels;
+        const within = { face: 2 as const, level: 7 + levels, i: 40 * side + 1, j: 9 * side };
+        return (
+          clusterSubPatchOf(patch, within) ===
+          (subPatchOf(patch, within) | TERRAIN_SUB_PATCH_MASK) >>> 0
+        );
+      }),
+    ).toEqual([true, true, true]);
+  });
+
+  it("leaves a stand-in more than three levels below its slot's patch its own grid", () => {
+    const within = { face: 2 as const, level: 11, i: 40 * 16 + 3, j: 9 * 16 + 5 };
+    expect(clusterSubPatchOf(patch, within)).toBe(subPatchOf(patch, within));
+  });
+});
+
+describe("an instance record's class sets (lane fix-coast-class-map)", () => {
+  it("carries no ancestor, fade or flag until they are set, then its ancestor's slot, its place there, the fade and its flags", () => {
+    const records = new InstanceRecords(2);
+    records.push(1, vec3(0, 0, 0), 0, 1);
+    records.push(2, vec3(0, 0, 0), 0, 1);
+    records.setCells(9, cellAncestorPlace(3, 13, 6), 0.25, CLASS_MORPH);
+    const u = new Uint32Array(records.buffer);
+    const f = new Float32Array(records.buffer);
+    expect([
+      Array.from(u.slice(16, 20)),
+      [u[WORDS + 16], u[WORDS + 17], f[WORDS + 18], u[WORDS + 19]],
+      INSTANCE_RECORD_BYTES,
+    ]).toEqual([[NO_PARENT_SLOT, 0, 0, 0], [9, 3 | (5 << 5) | (6 << 18), 0.25, CLASS_MORPH], 272]);
+  });
+
+  it("places a patch in its ancestor d levels up by its i and j mod 2^d, the patch itself at 0 levels", () => {
+    expect([
+      cellAncestorPlace(0, 77, 91),
+      cellAncestorPlace(1, 3, 2),
+      cellAncestorPlace(MAX_CELL_ANCESTOR_LEVELS, 2 ** 13 + 5, 7),
+    ]).toEqual([0, 1 | (1 << 5), 13 | (5 << 5) | (7 << 18)]);
+  });
+
+  it("refuses class sets with no record, out of range, or a place past its levels", () => {
+    expect(() => {
+      new InstanceRecords(1).setCells(1, 0, 0, 0);
+    }).toThrow(/no record/u);
+    const records = new InstanceRecords(1);
+    records.push(1, vec3(0, 0, 0), 0, 1);
+    expect(
+      [
+        () => {
+          records.setCells(1, 0, 1.5, 0);
+        },
+        () => {
+          records.setCells(1, 0, 0, 2);
+        },
+        () => cellAncestorPlace(MAX_CELL_ANCESTOR_LEVELS + 1, 0, 0),
+      ].map((call) =>
+        (() => {
+          try {
+            call();
+            return "none";
+          } catch (error) {
+            return error instanceof RangeError ? "RangeError" : "other";
+          }
+        })(),
+      ),
+    ).toEqual(["RangeError", "RangeError", "RangeError"]);
   });
 });
 

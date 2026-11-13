@@ -1,4 +1,4 @@
-# generator_version = 21
+# generator_version = 31
 {
   "type": "response",
   "id": 3,
@@ -6,7 +6,7 @@
     "kind": "galaxy_parameters",
     "universe": "5eed000000000001",
     "seed": "00000000000004d2",
-    "generator_version": 21,
+    "generator_version": 31,
     "groups": [
       {
         "key": "identity",
@@ -24,7 +24,7 @@
             "origin": "fixed",
             "value": {
               "type": "number",
-              "value": 21.0,
+              "value": 31.0,
               "unit": "count"
             }
           },
@@ -55,7 +55,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 105866012993.75002,
+              "value": 106499842112.09853,
               "unit": "count"
             }
           },
@@ -64,7 +64,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 0.597925785135228,
+              "value": 0.5943672561673522,
               "unit": "msun"
             }
           },
@@ -82,7 +82,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 9070044914.946762,
+              "value": 9075407121.979666,
               "unit": "msun"
             }
           },
@@ -91,7 +91,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 84173629.87498371,
+              "value": 90256484.12258898,
               "unit": "msun"
             }
           },
@@ -100,7 +100,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 38040514.46378081,
+              "value": 38086578.590371355,
               "unit": "msun"
             }
           },
@@ -218,7 +218,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 181551660.22224048,
+              "value": 181995672.3065857,
               "unit": "msun"
             }
           },
@@ -227,7 +227,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 36033059816.70695,
+              "value": 36054025868.869965,
               "unit": "msun"
             }
           },
@@ -236,7 +236,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 8732703080.103659,
+              "value": 8702025254.94619,
               "unit": "msun"
             }
           },
@@ -245,7 +245,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 10775943933.252728,
+              "value": 10779814581.922089,
               "unit": "msun"
             }
           },
@@ -254,7 +254,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 5258444521.796091,
+              "value": 5260755437.693512,
               "unit": "msun"
             }
           },
@@ -263,7 +263,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 1489967270.6234612,
+              "value": 1491771505.9745662,
               "unit": "msun"
             }
           },
@@ -272,7 +272,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 828348655.7191094,
+              "value": 829630616.7113137,
               "unit": "msun"
             }
           }
@@ -286,7 +286,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 0.8731248455071842,
+              "value": 0.8700511320205525,
               "unit": "msun"
             }
           },
@@ -295,7 +295,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 0.6047257477969993,
+              "value": 0.6014765183585169,
               "unit": "msun"
             }
           },
@@ -304,7 +304,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 0.5948644907153856,
+              "value": 0.5892468699447195,
               "unit": "msun"
             }
           },
@@ -313,7 +313,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 0.5808003221503708,
+              "value": 0.5775510927118882,
               "unit": "msun"
             }
           },
@@ -322,7 +322,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 0.5892045079338087,
+              "value": 0.5859552784953264,
               "unit": "msun"
             }
           },
@@ -331,7 +331,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 0.585091704272713,
+              "value": 0.5823138410492888,
               "unit": "msun"
             }
           },
@@ -340,7 +340,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 0.6058188467670158,
+              "value": 0.6031453342209804,
               "unit": "msun"
             }
           }
@@ -354,7 +354,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 7111.735994710674,
+              "value": 7113.137203801997,
               "unit": "ly"
             }
           },
@@ -372,7 +372,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 7111.735994710674,
+              "value": 7113.137203801997,
               "unit": "ly"
             }
           },
@@ -390,7 +390,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 5016.145462010998,
+              "value": 5017.133781688499,
               "unit": "ly"
             }
           },
@@ -408,7 +408,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 13295.057480216254,
+              "value": 13297.676975009761,
               "unit": "ly"
             }
           }
@@ -422,7 +422,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 2002.1520724909474,
+              "value": 2002.3917637766642,
               "unit": "ly"
             }
           },
@@ -431,7 +431,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 1197.2955861242997,
+              "value": 1197.4389225483228,
               "unit": "ly"
             }
           },
@@ -440,7 +440,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 716.2025157092728,
+              "value": 716.288257199234,
               "unit": "ly"
             }
           },
@@ -512,7 +512,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 2.2632458557052386,
+              "value": 2.2640054435241748,
               "unit": "deg_per_myr"
             }
           }
@@ -526,7 +526,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 382.3811858366237,
+              "value": 382.5354682784162,
               "unit": "ly"
             }
           },
@@ -535,7 +535,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 162.08160148707842,
+              "value": 162.14699786685156,
               "unit": "ly"
             }
           }
@@ -577,6 +577,15 @@
             "value": {
               "type": "number",
               "value": 0.12239215654864648,
+              "unit": "none"
+            }
+          },
+          {
+            "key": "halo.discrete_share",
+            "origin": "drawn",
+            "value": {
+              "type": "number",
+              "value": 0.12104441017006494,
               "unit": "none"
             }
           },
@@ -771,7 +780,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 242.28723775014475,
+              "value": 242.24264332404186,
               "unit": "km_per_s"
             }
           },
@@ -780,7 +789,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 574.0160483642072,
+              "value": 574.0035549748384,
               "unit": "km_per_s"
             }
           }
@@ -812,7 +821,7 @@
             "origin": "derived",
             "value": {
               "type": "number",
-              "value": 23.008609341359918,
+              "value": 22.898567233980895,
               "unit": "none"
             }
           },
@@ -822,6 +831,173 @@
             "value": {
               "type": "text",
               "value": "yes"
+            }
+          }
+        ]
+      },
+      {
+        "key": "gas",
+        "parameters": [
+          {
+            "key": "gas.scale_height",
+            "origin": "fixed",
+            "value": {
+              "type": "number",
+              "value": 700.0,
+              "unit": "ly"
+            }
+          },
+          {
+            "key": "gas.hole_scale",
+            "origin": "drawn",
+            "value": {
+              "type": "number",
+              "value": 17609.28073153903,
+              "unit": "ly"
+            }
+          },
+          {
+            "key": "gas.warm_density",
+            "origin": "drawn",
+            "value": {
+              "type": "number",
+              "value": 0.033532870289084554,
+              "unit": "per_cm3"
+            }
+          },
+          {
+            "key": "gas.warm_height",
+            "origin": "drawn",
+            "value": {
+              "type": "number",
+              "value": 3122.5567573294757,
+              "unit": "ly"
+            }
+          },
+          {
+            "key": "gas.warm_fraction",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 0.15650453242444592,
+              "unit": "none"
+            }
+          },
+          {
+            "key": "gas.molecular_mass",
+            "origin": "drawn",
+            "value": {
+              "type": "number",
+              "value": 2164332.651213001,
+              "unit": "msun"
+            }
+          },
+          {
+            "key": "gas.molecular_length",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 382.5354682784162,
+              "unit": "ly"
+            }
+          },
+          {
+            "key": "gas.molecular_height",
+            "origin": "drawn",
+            "value": {
+              "type": "number",
+              "value": 92.97373510910414,
+              "unit": "ly"
+            }
+          },
+          {
+            "key": "gas.molecular_fraction",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 0.00023848325723825863,
+              "unit": "none"
+            }
+          },
+          {
+            "key": "gas.neutral_fraction",
+            "origin": "derived",
+            "value": {
+              "type": "number",
+              "value": 0.8432569843183157,
+              "unit": "none"
+            }
+          },
+          {
+            "key": "gas.corona_density",
+            "origin": "drawn",
+            "value": {
+              "type": "number",
+              "value": 0.0006815731476337032,
+              "unit": "per_cm3"
+            }
+          },
+          {
+            "key": "gas.pressure_floor",
+            "origin": "drawn",
+            "value": {
+              "type": "number",
+              "value": 368.66067511997295,
+              "unit": "k_per_cm3"
+            }
+          },
+          {
+            "key": "gas.pressure_height",
+            "origin": "fixed",
+            "value": {
+              "type": "number",
+              "value": 1500.0,
+              "unit": "ly"
+            }
+          },
+          {
+            "key": "gas.pressure_speed",
+            "origin": "fixed",
+            "value": {
+              "type": "number",
+              "value": 5.15,
+              "unit": "km_per_s"
+            }
+          },
+          {
+            "key": "gas.sigma_ln",
+            "origin": "drawn",
+            "value": {
+              "type": "number",
+              "value": 1.0183771229887448,
+              "unit": "none"
+            }
+          },
+          {
+            "key": "gas.lane_offset",
+            "origin": "drawn",
+            "value": {
+              "type": "number",
+              "value": 453.9411274978304,
+              "unit": "ly"
+            }
+          },
+          {
+            "key": "gas.lane_width",
+            "origin": "drawn",
+            "value": {
+              "type": "number",
+              "value": 239.41582452053348,
+              "unit": "ly"
+            }
+          },
+          {
+            "key": "gas.lane_fraction",
+            "origin": "drawn",
+            "value": {
+              "type": "number",
+              "value": 0.16238027577610648,
+              "unit": "none"
             }
           }
         ]

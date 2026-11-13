@@ -13,7 +13,7 @@ use hyperion_sim::galaxy::params::GalaxyParams;
 use hyperion_sim::galaxy::potential::{MassModel, PotentialTables};
 use hyperion_sim::galaxy::shares::{POPULATION_COLUMNS, ShareMatrix};
 use hyperion_sim::galaxy::substellar::{SubstellarAbundance, SubstellarParams};
-use hyperion_sim::galaxy::{Galaxy, POPULATIONS, PointLy};
+use hyperion_sim::galaxy::{Galaxy, POPULATIONS, PointLy, Population};
 use hyperion_sim::units::LightYears;
 use hyperion_sim::{GENERATOR_VERSION, Seed};
 use hyperion_testkit::float::assert_same_bits;
@@ -30,7 +30,7 @@ const PINNED: [u64; 3] = [
 
 /// A value as its `Debug` text, which prints every float in its shortest round-tripping form and
 /// so tells any two different values apart, 0 from −0 included: equal texts are equal bits.
-fn text(value: &impl Debug) -> String {
+fn text(value: &(impl Debug + ?Sized)) -> String {
     format!("{value:?}")
 }
 
@@ -46,7 +46,7 @@ fn fingerprint(galaxy: &Galaxy) -> (u64, usize) {
 /// Asserts that two values, galaxies or their parts, are equal bit for bit, naming the first
 /// difference without printing megabytes.
 #[track_caller]
-fn assert_same<T: Debug>(what: &str, a: &T, b: &T) {
+fn assert_same<T: Debug + ?Sized>(what: &str, a: &T, b: &T) {
     let (a, b) = (text(a), text(b));
     if let Some(at) = a.bytes().zip(b.bytes()).position(|(x, y)| x != y) {
         let context = |s: &str| {
@@ -95,8 +95,10 @@ fn points() -> impl Iterator<Item = PointLy> {
 fn the_galaxy_handle_is_send_sync_and_unwind_safe() {
     // A `Cell`, `RefCell` or `OnceCell` anywhere inside would make it neither `Sync` nor
     // `RefUnwindSafe`; a `Box<dyn …>` without those bounds would fail the latter too. Locks,
-    // `OnceLock` and atomics would pass; the sim holds one `OnceLock`, the parameters' black hole,
-    // a pure function of the parameters solved as the galaxy is built.
+    // `OnceLock` and atomics would pass; the sim holds two `OnceLock`s, the parameters' black hole,
+    // a pure function of the parameters solved as the galaxy is built, and the galaxy's centre
+    // motion, a pure function of the parameters and the mass model built on first read (plan 09,
+    // P09.T28.b.a).
     fn shareable<T: Send + Sync + RefUnwindSafe + UnwindSafe + Clone + Debug + PartialEq>() {}
     shareable::<Galaxy>();
     shareable::<ShareMatrix>();
@@ -119,18 +121,29 @@ fn a_galaxy_handle_holds_the_parts_built_one_by_one() {
             &PotentialTables::in_plane(&model),
         );
         assert!(!galaxy.potential().has_grid());
-        assert_same("fields", galaxy.fields(), &Fields::new(&params, &model));
+        // From generator version 27 the build installs plan 08's displaced classes after the
+        // field's components (P08.T12.a): the components are the field's own.
+        assert_same(
+            "components",
+            galaxy.fields().components(),
+            Fields::new(&params, &model).components(),
+        );
+        assert!(galaxy.fields().displaced().is_some(), "{kind:?}");
         // Plan 13's two substellar rows hold the galaxy's own abundances per system.
         let substellar = SubstellarAbundance::for_galaxy(&galaxy, &SubstellarParams::default());
         assert_eq!(galaxy.substellar(), &substellar, "{kind:?}");
-        assert_same(
-            "shares",
-            galaxy.shares(),
-            &ShareMatrix::uniform(&bands).with_substellar(
-                substellar.brown_dwarfs_per_system(),
-                substellar.rogue_planets_per_system(),
-            ),
+        // The classes' columns follow the populations', which they leave bit for bit.
+        let uniform = ShareMatrix::uniform(&bands).with_substellar(
+            substellar.brown_dwarfs_per_system(),
+            substellar.rogue_planets_per_system(),
         );
+        for band in MassBand::ALL.into_iter().chain(MassBand::SUBSTELLAR) {
+            assert_same(
+                "shares",
+                &galaxy.shares().row(band)[..POPULATION_COLUMNS],
+                &uniform.row(band)[..POPULATION_COLUMNS],
+            );
+        }
         assert_eq!(
             text(&galaxy.mass_function()),
             text(&kind.to_mass_function()),
@@ -165,6 +178,25 @@ fn a_galaxy_handle_holds_the_parts_built_one_by_one() {
     );
 }
 
+/// `text`, a fields' `Debug` text, without its displaced classes' table's field stays
+/// (`field: Some([…])`): the share of each component's budget its field keeps (plan 09,
+/// P09.T2.c).
+fn without_field_stays(text: &str) -> String {
+    const START: &str = "field: Some([";
+    const END: &str = "]]),";
+    assert_eq!(text.matches(START).count(), 1, "one table's field stays");
+    let start = text.find(START).expect("the class table's field stays");
+    let end = start + text[start..].find(END).expect("the field stays' end") + END.len();
+    format!("{}{}", &text[..start], &text[end..])
+}
+
+/// A galaxy from parameters keeps them and its seed. The seed keys placement, the gas field's
+/// draws and, from generator version 27, the halo's discrete share (plan 10, P10.T3.d.b): the
+/// global list's dwarfs, drawn on the seed, hold their share of the halo's budget, which the halo's
+/// field gives up, 0.0254 of it at this galaxy's seed and 0.0296 at the other's. So another seed
+/// gives the same galaxy otherwise: the same potential and share matrix, and the same fields but
+/// for the share of each halo component's budget its field keeps (the class table's field stays,
+/// P09.T2.c), which is its budget's stay share less that share.
 #[test]
 fn a_galaxy_handle_from_params_keeps_them_and_its_seed() {
     let params = GalaxyParams::milky_way_like();
@@ -173,12 +205,40 @@ fn a_galaxy_handle_from_params_keeps_them_and_its_seed() {
         Galaxy::from_params(seed, params.clone()).expect("this galaxy's gas is mostly neutral");
     assert_eq!(galaxy.seed(), seed);
     assert_same("params", galaxy.params(), &params);
-    // The seed keys placement only: another seed gives the same galaxy otherwise.
     let other =
         Galaxy::from_params(Seed::new(7), params).expect("this galaxy's gas is mostly neutral");
-    assert_same("fields", other.fields(), galaxy.fields());
+    assert_same(
+        "fields without their field stays",
+        &without_field_stays(&text(other.fields())),
+        &without_field_stays(&text(galaxy.fields())),
+    );
     assert_same("potential", other.potential(), galaxy.potential());
     assert_same("shares", other.shares(), galaxy.shares());
+    let phi = |g: &Galaxy, band| g.feature_shares().phi(Population::Halo, band);
+    let (ours, theirs) = (
+        galaxy.class_table().expect("the version's classes"),
+        other.class_table().expect("the version's classes"),
+    );
+    let mut halo_rows = 0;
+    for id in galaxy.fields().component_ids() {
+        let halo = galaxy.fields().component(id).population() == Population::Halo;
+        for band in MassBand::ALL.into_iter().chain(MassBand::SUBSTELLAR) {
+            let (a, b) = (ours.stay_share(band, id), theirs.stay_share(band, id));
+            if halo {
+                let moved =
+                    ours.budget_stay_share(band, id) * (phi(&galaxy, band) - phi(&other, band));
+                assert!(moved.abs() > 1e-4, "{id:?} {band:?}: {moved}");
+                assert!(
+                    (b - a - moved).abs() < 1e-14,
+                    "{id:?} {band:?}: {a} {b} {moved}"
+                );
+            } else {
+                assert_same_bits(b, a);
+            }
+        }
+        halo_rows += usize::from(halo);
+    }
+    assert!(halo_rows > 0, "the fixture has a halo");
 }
 
 #[test]
@@ -187,9 +247,11 @@ fn every_share_column_of_a_galaxy_handle_sums_to_one() {
         let galaxy = Galaxy::with_mass_function(Seed::new(PINNED[0]), kind);
         let shares = galaxy.shares();
         let bands = BandShares::of(galaxy.mass_function());
-        // The populations, and no displaced classes before plan 08.
-        assert_eq!(shares.column_count(), POPULATION_COLUMNS);
-        for column in 0..shares.column_count() {
+        // The populations, then from generator version 27 plan 08's displaced classes
+        // (P08.T12.a), whose columns hold their systems inside the cube in layers D and E.
+        let classes = galaxy.fields().displaced().map_or(0, |d| d.classes().len());
+        assert_eq!(shares.column_count(), POPULATION_COLUMNS + classes);
+        for column in 0..POPULATION_COLUMNS {
             let total = MassBand::ALL
                 .iter()
                 .fold(0.0, |sum, &band| sum + shares.row(band)[column]);
@@ -223,10 +285,28 @@ fn layer_densities_of_a_galaxy_handle_sum_to_the_total() {
     for galaxy in &galaxies {
         let (fields, shares) = (galaxy.fields(), galaxy.shares());
         for p in points() {
-            let total = fields.densities(&p, &mut out);
+            let mut total = fields.densities(&p, &mut out);
             let layers = MassBand::ALL.iter().fold(0.0, |sum, &band| {
                 sum + fields.layer_density(shares, band, &p)
             });
+            // From generator version 27 layers D and E give up the dead that leave their birth
+            // place to plan 08's displaced classes (P08.T12.a), each class's density weighted by
+            // its column: the total is what the components keep and what the classes hold.
+            if let Some(displaced) = fields.displaced() {
+                let kept = fields.components().iter().fold(0.0, |sum, component| {
+                    let density = component.density(&p);
+                    MassBand::ALL.iter().fold(sum, |sum, &band| {
+                        sum + shares.component_share(band, component) * density
+                    })
+                });
+                let moved = MassBand::ALL.iter().fold(0.0, |sum, &band| {
+                    let row = shares.row(band);
+                    displaced.order(band).iter().fold(sum, |sum, &id| {
+                        sum + row[POPULATION_COLUMNS + id.index()] * displaced.density(id, &p)
+                    })
+                });
+                total = kept + moved;
+            }
             // Beyond every cut and underflow, nothing at all.
             if total <= 0.0 {
                 assert_same_bits(layers, 0.0);
@@ -238,11 +318,12 @@ fn layer_densities_of_a_galaxy_handle_sum_to_the_total() {
                 "seed {}, {p:?}: the layers give {layers:e} against {total:e}",
                 galaxy.seed()
             );
-            // And component by component, each population's share of each band.
+            // And component by component, each population's share of each band (the share before
+            // the displaced classes take their part of layers D and E).
             for component in fields.components() {
                 let density = component.density(&p);
                 let by_band = MassBand::ALL.iter().fold(0.0, |sum, &band| {
-                    sum + shares.component_share(band, component) * density
+                    sum + shares.share(band, component.population()) * density
                 });
                 // A subnormal density keeps fewer bits: its sum is held to a unit in the last
                 // place of the smallest normal number too (the young disc 20,000 ly above the
@@ -260,14 +341,23 @@ fn layer_densities_of_a_galaxy_handle_sum_to_the_total() {
 }
 
 /// Every layer's density at [`POINTS`], checked bit for bit against `Σ share × density` in
-/// component order: the sum placement thins against (plan 03).
+/// component order, then the displaced classes' in theirs: the sum placement thins against (plan
+/// 03, P08.T12.a).
 fn write_layers(w: &mut GoldenWriter, label: &str, galaxy: &Galaxy) {
     let (fields, shares) = (galaxy.fields(), galaxy.shares());
     for (i, p) in points().enumerate() {
         for band in MassBand::ALL {
             let layer = fields.layer_density(shares, band, &p);
-            let by_component = fields.components().iter().fold(0.0, |sum, c| {
+            let field = fields.components().iter().fold(0.0, |sum, c| {
                 sum + shares.component_share(band, c) * c.density(&p)
+            });
+            // From generator version 27 the sum runs on over plan 08's displaced classes in the
+            // band's order (P08.T12.a).
+            let by_component = fields.displaced().map_or(field, |displaced| {
+                let row = shares.row(band);
+                displaced.order(band).iter().fold(field, |sum, &id| {
+                    sum + row[POPULATION_COLUMNS + id.index()] * displaced.density(id, &p)
+                })
             });
             assert_same_bits(layer, by_component);
             w.f64(&format!("{label}.point[{i}].layer_{band:?}"), layer);

@@ -402,6 +402,9 @@ impl QueryStats {
     ///
     /// Each layer is walked with its own pad: layer E's is plan 08's unbound class's, 3,000 km/s,
     /// and every other layer's plan 03's 1,000 km/s, so this is layer E's whenever it is walked.
+    /// From generator version 25 a sphere near the black hole is walked wider still, for the
+    /// Kepler regime's orbits (plan 09, P09.T28.b.b); this stays the straight lines' radius, the
+    /// one the sources are asked about.
     #[must_use]
     pub const fn padded_radius(&self) -> LightYears {
         self.padded_radius

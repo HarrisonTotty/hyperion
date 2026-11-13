@@ -61,6 +61,17 @@
 //! The plan first dimmed every direction by the least extinction of 48 rays, the polar rays' near
 //! the Sun, then each ray by the mean field's, then gave each layer one radius, a sphere; R06's
 //! Risks record each and what it missed. [`CapCount::spheres`] keeps the spheres, for comparison.
+//!
+//! **The real boundary** ([`real_boundary`]; rendering plan R13, Design note 3). A query that
+//! states a synthetic ceiling V<sub>P</sub> censuses layers C to E only to their real boundary
+//! R(u): ray by ray the least of the cap at V<sub>P</sub>, the cut's own cap and
+//! [`REAL_LIMIT_LY`]. Beyond it every star brighter than the cut is the synthetic tier's, or the
+//! band's until that tier lands, and each layer states the count brighter than V<sub>P</sub> left
+//! there ([`LayerCap::bright_beyond`]). Its census opens cells by the rays' cones widened by the
+//! band texel's largest radius ρ, and lists by the radius towards each star's texel at every
+//! reply, so that no star within R(u) of its texel lies in a cell left closed: T7.b's gap, closed
+//! by fix (i) of `decision-r06-t8i-listing.md` (ruled 2026-10-09, `decision-r13-guard-trip.md`
+//! §1).
 
 use std::ops::Range;
 use std::sync::Arc;
@@ -140,6 +151,44 @@ const INDEX_BALL_RAD: f64 = 6.0 * RADIANS_PER_DEGREE;
 
 /// The margin on every angle a test widens, radians, against rounding (10⁻⁹).
 const ANGLE_MARGIN_RAD: f64 = 1e-9;
+
+/// The real limit, ly: the farthest the real tier of a query at a synthetic ceiling reaches in
+/// layers C to E, on any ray (rendering plan R13, Design note 3; [`real_boundary`]).
+///
+/// 2,000 ly, twice the first jump drive's range of 1,000 ly and one of the census's fixed shell
+/// edges ([`SHELL_EDGES_LY`](super::census::SHELL_EDGES_LY), which a test holds), so the real
+/// tier's last shell ends on it. Decided by the owner on 2026-10-09
+/// (`decision-r13-guard-trip.md`, option A), after R13.T1 measured the real tier to the caps at
+/// V<sub>P</sub> alone at 8.8–22.6 times its estimate, and kept by the owner the same day
+/// (`decision-r13-t1b-guard.md`, option A) after R13.T1.b measured it held at this limit: near
+/// the Sun on the test fixture 1.31 × 10⁴ CPU-s at V<sub>P</sub> 5.0, with 74.8 stars brighter than
+/// V 4.5 beyond R(u), C to E, and the brightest expected about V 2.1. It is one constant, lifted to
+/// the caps at V<sub>P</sub> once the census's cost levers make that affordable (R13's Risks, "The
+/// limit is lifted").
+pub const REAL_LIMIT_LY: f64 = 2_000.0;
+
+/// The synthetic ceiling V<sub>P</sub> a server serves the sky at, apparent V (rendering plan R13,
+/// Design notes 3, 4 and 15): V 5.0, RM3's interim, until R13.T7 sets the owner's 4.5 (decided
+/// 2026-10-08, `feasibility-hybrid-sky.md` §11). R13.T5.a's `sky::synthetic` takes it over.
+///
+/// A server's constant, not a client setting: a bridge shares one sky, and every ship takes the
+/// same rule. The sim reads only the ceiling a query states
+/// ([`SkyQuery::synthetic_ceiling`](super::census::SkyQuery::synthetic_ceiling)); a server states
+/// this one, or the request's cut where the cut is brighter, or none where a ceiling would hold no
+/// ray ([`served_ceiling`]; decided 2026-10-09, `decision-r13-t2b-ceiling.md`). Layers C, D and E
+/// are then censused only to their real boundary ([`real_boundary`]), at most [`REAL_LIMIT_LY`],
+/// so that no served sky reaches past the limit at any cut. Near the Sun at the eye's cut that
+/// leaves some 172 stars brighter than V 5.0 beyond their real boundary, C to E, on the test
+/// fixture, and costs about 1.3 × 10⁴ CPU-s there and 2.8 × 10⁴ on the server's galaxy, against
+/// 1.4 × 10⁵ at the caps at V 5.0 alone (R13.T1, T1.b).
+pub const SYNTHETIC_CEILING_V: f64 = 5.0;
+
+/// The layers whose census a synthetic ceiling holds within the real boundary: C, D and E
+/// (rendering plan R13, Design note 2).
+///
+/// A, B and the brown dwarfs, whose caps near the Sun are 11–260 ly at the eye's and the camera's
+/// cuts, are wholly real.
+pub(crate) const REAL_BOUNDARY_LAYERS: [Layer; 3] = [Layer::C, Layer::D, Layer::E];
 
 /// The layers a cap is computed for: the five stellar layers and the brown dwarfs.
 pub const CAPPED_LAYERS: [Layer; 6] = [
@@ -229,11 +278,6 @@ pub struct CapLattice {
     /// The cosine of the spacing: a direction lies in a ray's cone where its cosine with the ray is
     /// at least this.
     cos_spacing: f64,
-    /// The cosine and sine of the spacing and [`ANGLE_MARGIN_RAD`], which a cell's test widens by.
-    widened: [f64; 2],
-    /// The sine of [`INDEX_BALL_RAD`]: a ball of a larger angular radius is tested against every
-    /// ray.
-    index_ball_sin: f64,
     /// The index's cube map.
     index: BandSpec,
     /// Each index texel's first ray in `near`, in the texels' order (face, row, column), and the
@@ -271,13 +315,10 @@ impl CapLattice {
             }
         }
         starts.push(near.len());
-        let widened_angle = spacing + ANGLE_MARGIN_RAD;
         Self {
             directions,
             spacing,
             cos_spacing: math::cos(spacing),
-            widened: [math::cos(widened_angle), math::sin(widened_angle)],
-            index_ball_sin: math::sin(INDEX_BALL_RAD),
             index,
             starts,
             near,
@@ -313,6 +354,42 @@ impl CapLattice {
     #[must_use]
     fn near(&self, texel: usize) -> &[usize] {
         &self.near[self.starts[texel]..self.starts[texel + 1]]
+    }
+}
+
+/// The cones about a lattice's rays that a census opens its cells by (R06.T7.b): each of
+/// half-angle the lattice's spacing, widened by an angle that R06's census takes as none and a
+/// census at a synthetic ceiling as the band texel's largest radius ρ (rendering plan R13, Design
+/// note 3; fix (i) of `decision-r06-t8i-listing.md`, ruled 2026-10-09).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct RayCones {
+    /// The cosine and sine of the cones' half-angle and [`ANGLE_MARGIN_RAD`], which a cell's test
+    /// widens by.
+    widened: [f64; 2],
+    /// The sine of the largest angular radius of a cell's ball that the lattice's index serves for
+    /// these cones, [`INDEX_BALL_RAD`] less the widening, or −1 where the widening reaches it: the
+    /// index holds every ray within the spacing and [`INDEX_BALL_RAD`] of its texels. A larger ball
+    /// is tested against every ray.
+    index_ball_sin: f64,
+}
+
+impl RayCones {
+    /// The cones of half-angle `spacing` widened by `by`, both radians.
+    ///
+    /// Widened by none, they are R06's, bit for bit: `spacing + 0.0` is `spacing`. Widened by
+    /// [`INDEX_BALL_RAD`] or more, no ball is tested through the index, which holds no ray that
+    /// far.
+    #[must_use]
+    fn of(spacing: f64, by: f64) -> Self {
+        let angle = spacing + by + ANGLE_MARGIN_RAD;
+        Self {
+            widened: [math::cos(angle), math::sin(angle)],
+            index_ball_sin: if by < INDEX_BALL_RAD {
+                math::sin(INDEX_BALL_RAD - by)
+            } else {
+                -1.0
+            },
+        }
     }
 }
 
@@ -460,13 +537,15 @@ impl RayRadii {
     ///
     /// They are on the same lattice (R06.T8.i, a shell's edge). Towards each direction they give
     /// the lesser of the edge and [`toward`](Self::toward), bit for bit, since both take a ray's
-    /// radius as it is.
+    /// radius as it is. The hybrid sky holds its real boundary so within its real limit (rendering
+    /// plan R13, Design note 3), and R13.T1.b's bench censuses to the boundary held so, before
+    /// R13.T2.a's rule is built.
     ///
     /// # Panics
     ///
     /// Unless `edge_ly` is finite and positive.
     #[must_use]
-    pub(crate) fn within(&self, edge_ly: f64) -> Self {
+    pub fn within(&self, edge_ly: f64) -> Self {
         assert!(
             edge_ly.is_finite() && edge_ly > 0.0,
             "an edge of {edge_ly} ly holds no ray within it"
@@ -577,17 +656,39 @@ impl RayRadii {
         LightYears::new(radius)
     }
 
+    /// The cones of the rays' lattice widened by `by`, radians.
+    ///
+    /// A census at a synthetic ceiling opens its cells by them, with `by` the band texel's largest
+    /// radius ρ (rendering plan R13, Design note 3; fix (i)), and R06's census by those widened by
+    /// none. Towards a direction within ρ of a texel's centre, some ray whose radius is the radius
+    /// towards that centre ([`toward`](Self::toward)) holds it in its widened cone, so the cell of
+    /// every star nearer than its texel's radius is opened.
+    ///
+    /// # Panics
+    ///
+    /// Unless `by` is finite and not negative.
+    #[must_use]
+    pub(crate) fn cones_widened_by(&self, by: Radians) -> RayCones {
+        let by = by.value();
+        assert!(
+            by.is_finite() && by >= 0.0,
+            "a cone is widened by a finite angle, not negative: {by} rad"
+        );
+        RayCones::of(self.lattice.spacing, by)
+    }
+
     /// Whether a ball of radius `radius_ly` whose centre lies `offset_ly` from the apex (both in
-    /// light-years, on the galactic axes) meets the census's region: the cone of some ray, widened
-    /// by [`ANGLE_MARGIN_RAD`], nearer than the ray's radius. A cell's padded ball that meets no
-    /// cone within its radius holds no point the census is complete to ([`toward`](Self::toward)),
-    /// so the census need not open it.
+    /// light-years, on the galactic axes) meets the census's region: the cone of `cones` about
+    /// some ray ([`cones_widened_by`](Self::cones_widened_by)), widened by [`ANGLE_MARGIN_RAD`],
+    /// nearer than the ray's radius. A cell's padded ball that meets no cone within its radius
+    /// holds no point the census is complete to ([`toward`](Self::toward)), so the census need not
+    /// open it.
     ///
     /// The test takes the ball's angular radius as its own, asin(radius ÷ distance), and its
     /// nearest distance as distance less radius: a ball that meets a cone within its ray's radius
-    /// passes, and a few that do not.
+    /// passes, and a few that do not. Unwidened cones give R06.T7.b's test, bit for bit.
     #[must_use]
-    pub(crate) fn meets_ball(&self, offset_ly: [f64; 3], radius_ly: f64) -> bool {
+    pub(crate) fn meets_ball(&self, cones: &RayCones, offset_ly: [f64; 3], radius_ly: f64) -> bool {
         let distance = math::hypot(math::hypot(offset_ly[0], offset_ly[1]), offset_ly[2]);
         if distance <= radius_ly {
             return true;
@@ -597,14 +698,14 @@ impl RayRadii {
             return false;
         }
         let sin_ball = radius_ly / distance;
-        // cos(spacing + margin + the ball's angular radius).
-        let [cos_spacing, sin_spacing] = self.lattice.widened;
+        // cos(the cones' half-angle + margin + the ball's angular radius).
+        let [cos_spacing, sin_spacing] = cones.widened;
         let threshold = cos_spacing * (1.0 - sin_ball * sin_ball).sqrt() - sin_spacing * sin_ball;
         let u = offset_ly.map(|c| c / distance);
         let meets = |&k: &usize| {
             self.radii[k] > reach && dot(self.lattice.directions[k].components(), u) >= threshold
         };
-        if sin_ball <= self.lattice.index_ball_sin {
+        if sin_ball <= cones.index_ball_sin {
             let texel = self.lattice.texel(u);
             reach < self.texel_bound[texel] && self.lattice.near(texel).iter().any(meets)
         } else {
@@ -626,6 +727,9 @@ pub struct LayerCap {
     radius: LightYears,
     rule_bound: LightYears,
     expected_beyond: f64,
+    /// The expected count brighter than the synthetic ceiling beyond the radii, for a real
+    /// boundary ([`real_boundary`]).
+    bright_beyond: Option<f64>,
     rays: Option<RayRadii>,
 }
 
@@ -667,10 +771,24 @@ impl LayerCap {
     }
 
     /// The expected number of the layer's stars brighter than the cut beyond the cap's radii,
-    /// under one.
+    /// under one for the caps' own; for a real boundary ([`real_boundary`]) C's, D's and E's count
+    /// beyond R(u), which the synthetic tier and the band take, some thousands near the Sun.
     #[must_use]
     pub const fn expected_beyond(&self) -> f64 {
         self.expected_beyond
+    }
+
+    /// The expected number of the layer's stars brighter than the synthetic ceiling V<sub>P</sub>
+    /// beyond the cap's radii, for a real boundary ([`real_boundary`]; rendering plan R13, Design
+    /// note 3), and `None` for every other cap.
+    ///
+    /// Where the cap at V<sub>P</sub> lies within [`REAL_LIMIT_LY`] it is under one; beyond the
+    /// limit it is the stars brighter than V<sub>P</sub> that the synthetic tier draws, which a
+    /// reply states. Near the Sun on the test fixture at V<sub>P</sub> 5.0 they are C 0.854, D 8.60
+    /// and E 162 (R13.T1.b, at the caps' own count).
+    #[must_use]
+    pub const fn bright_beyond(&self) -> Option<f64> {
+        self.bright_beyond
     }
 
     /// A cap of `radius` in every direction for `layer`, with nothing stated beyond it: the brute
@@ -682,13 +800,17 @@ impl LayerCap {
             radius,
             rule_bound: radius,
             expected_beyond: 0.0,
+            bright_beyond: None,
             rays: None,
         }
     }
 
     /// A cap of `rays`' radii for `layer`, with nothing stated beyond them: a test's, or a bench's
-    /// census to a boundary the caps' count does not give, such as the hybrid sky's real boundary
-    /// before its rule is built (rendering plan R13, R13.T1; [`RayRadii::lesser`]).
+    /// census to a boundary the caps' count does not give (rendering plan R13, R13.T1;
+    /// [`RayRadii::lesser`]).
+    ///
+    /// A census to the hybrid sky's real boundary takes [`real_boundary`]'s caps, which state their
+    /// counts beyond.
     #[must_use]
     pub fn forced_by_ray(layer: Layer, rays: RayRadii) -> Self {
         let radius = rays.largest();
@@ -697,6 +819,7 @@ impl LayerCap {
             radius,
             rule_bound: radius,
             expected_beyond: 0.0,
+            bright_beyond: None,
             rays: Some(rays),
         }
     }
@@ -802,7 +925,7 @@ impl RayExtinctions {
     /// at each of the profiles' nodes (R06.T7.b).
     ///
     /// The sub-rays are the ray itself and `sub_rays` − 1 more, spread evenly round it at
-    /// [`SUB_RAY_RING_SPACINGS`] of the lattice's spacing, within its cone. The least extinction at
+    /// `SUB_RAY_RING_SPACINGS` of the lattice's spacing, within its cone. The least extinction at
     /// each node, interpolated linearly, is at most each sub-ray's own between the nodes, so a ray
     /// counts at least the stars of its clearest sub-ray: a window between the rays narrower than
     /// their spacing, which one profile a ray misses, is counted where a sub-ray meets it.
@@ -1584,10 +1707,38 @@ impl CapCount {
         self.cap_widened(Self::layer_index(layer), layer, WIDENING_SPACINGS)
     }
 
+    /// `layer`'s cap by [`cap`](Self::cap)'s rule with an expected count beyond of under `budget`
+    /// stars instead of one: λ the largest yield that keeps the stars left out under `budget`, then
+    /// the same widening. A budget of one is [`cap`](Self::cap), bit for bit, and a larger one
+    /// holds every ray's radius at or within it.
+    ///
+    /// It is for the record only (rendering plan R13, R13.T1.b): a yield-ordered budget for D and
+    /// E, weighed for a later ruling (R13's Risks), which no census takes.
+    ///
+    /// # Panics
+    ///
+    /// If `layer` is not one of [`CAPPED_LAYERS`], or `budget` is not finite and positive.
+    #[cfg(any(test, feature = "testing"))]
+    #[must_use]
+    pub fn cap_with_budget(&self, layer: Layer, budget: f64) -> LayerCap {
+        assert!(
+            budget.is_finite() && budget > 0.0,
+            "a budget of stars beyond is finite and positive, not {budget}"
+        );
+        self.cap_budgeted(Self::layer_index(layer), layer, WIDENING_SPACINGS, budget)
+    }
+
     /// The cap of `layer`, the `l`-th of [`CAPPED_LAYERS`], each ray widened to the largest radius
     /// within `spacings` of the lattice's spacing ([`caps_widened`](Self::caps_widened)).
     #[must_use]
     fn cap_widened(&self, l: usize, layer: Layer, spacings: f64) -> LayerCap {
+        self.cap_budgeted(l, layer, spacings, 1.0)
+    }
+
+    /// [`cap_widened`](Self::cap_widened) with λ the largest yield that keeps the stars left out
+    /// under `budget` ([`ray_extents`]).
+    #[must_use]
+    fn cap_budgeted(&self, l: usize, layer: Layer, spacings: f64, budget: f64) -> LayerCap {
         let n_rays = self.lattice.directions.len();
         let intervals = self.radii.len() - 1;
         let bound = self.bounds[l];
@@ -1603,7 +1754,7 @@ impl CapCount {
                 systems.push(self.slice(n, l, i));
             }
         }
-        let kept = ray_extents(&stars, &systems, intervals, 1.0);
+        let kept = ray_extents(&stars, &systems, intervals, budget);
         let radii: Vec<f64> = kept.iter().map(|&k| self.radii[k].min(bound)).collect();
         let rays = RayRadii::new(
             Arc::clone(&self.lattice),
@@ -1614,6 +1765,7 @@ impl CapCount {
             radius: rays.largest(),
             rule_bound: LightYears::new(bound),
             expected_beyond: 0.0,
+            bright_beyond: None,
             rays: Some(rays),
         };
         cap.expected_beyond = self.stars_beyond(&cap);
@@ -1662,6 +1814,7 @@ impl CapCount {
                     radius: LightYears::new(radius),
                     rule_bound: LightYears::new(bound),
                     expected_beyond: stated,
+                    bright_beyond: None,
                     rays: None,
                 }
             })
@@ -2063,29 +2216,60 @@ fn widen(lattice: &CapLattice, radii: &[f64], spacings: f64) -> Vec<f64> {
 /// [`LuminosityTables::age_for`]; `cache` is the caller's noise cache for the rays.
 ///
 /// Measured at cut 7.95 (the eye's near the Sun), version 21, with v☉, 1,536 rays and three
-/// sub-rays a ray (R06.T7.b): each layer's rays' median radius, with the 10th and 90th
-/// percentiles and the largest, against R06.T7's sphere at v☉ (one radius a layer, 768 rays,
-/// one profile a ray). They stand against the brainstorm's version-14 estimates (C 3,000, D 4,300
-/// and E 10,000 ly near the Sun; a few hundred to about 1,000 in the nuclear disc), which the tests
-/// do not pin (decided 2026-10-03 and 2026-10-04; the slow test `caps_converge_in_rays`, whose six
-/// points R06's Risks record, "Deviations in T7.b, as built"; T17 re-derives them). Radii in ly:
+/// sub-rays a ray, by R06.T17 (2026-10-11, the slow test `caps_converge_in_rays`, which prints
+/// these): at each of its six points, each layer's rays' median radius, with the 10th and 90th
+/// percentiles, the largest and its direction, the median of the rays within 10° of the plane,
+/// and the sphere at the same count ([`CapCount::spheres`]: the least radius beyond which the
+/// layer's count summed over the rays falls below one, the radius the brainstorm's figures
+/// describe). Since each ray is widened to its neighbours', the largest radius is held by a patch
+/// of rays, and its direction is the patch's centre, to the degree; a patch wider than about 10°
+/// spans several windows. l runs, seen from each point, from the direction to the galactic centre
+/// towards spinward, as the IAU's does, and b towards the frame's +z, the IAU's south galactic
+/// pole (the frame's galaxy turns counter-clockwise seen from +z, the Milky Way clockwise seen from
+/// the north galactic pole; Blaauw, Gum, Pawsey and Westerhout 1960, MNRAS 121, 123), so the
+/// IAU's b is −b. They stand against the brainstorm's version-14 estimates (C 3,000, D 4,300 and E
+/// 10,000 ly near the Sun; a few hundred to about 1,000 in the nuclear disc), which the tests do
+/// not pin (decided 2026-10-03 and 2026-10-04; R06's Risks, "Deviations in T7.b, as built" and
+/// "Deviations in T17, as built"). Radii in ly:
 ///
-/// | Point (ly) | Layer | Rays: median (10th–90th), largest | Sphere |
-/// | ---------- | ----- | --------------------------------- | ------ |
-/// | Near the Sun (0, 26,000, 68) | A | 10 (10–10), 11 | 11 |
-/// | | B | 68 (62–68), 68 | 68 |
-/// | | C | 8,193 (6,764–9,018), 14,563 | 8,193 |
-/// | | D | 6,764 (6,146–9,925), 13,232 | 9,925 |
-/// | | E | 4,610 (4,188–14,563), 61,341 | 21,369 |
-/// | Nuclear disc (0, 150, 0) | A | 12 (12–13), 13 | 13 |
-/// | | B | 18 (16–18), 18 | 18 |
-/// | | C | 74 (61–120), 213 | 131 |
-/// | | D | 99 (82–213), 344 | 232 |
-/// | | E | 235 (145–417), 555 | 374 |
+/// | Point (ly) | Layer | Rays: median (10th–90th) | Largest, at (l, b) | In the plane | Sphere |
+/// | ---------- | ----- | ------------------------ | ------------------ | ------------ | ------ |
+/// | Near the Sun (0, 26,000, 68) | A | 10 (10–10) | 11 | 10 | 11 |
+/// | | B | 68 (62–68) | 68 | 68 | 68 |
+/// | | C | 8,193 (6,764–9,018) | 14,563 (167°, +1°) | 8,193 | 8,193 |
+/// | | D | 6,764 (6,146–9,925) | 13,232 (192°, +3°; several windows) | 9,925 | 9,925 |
+/// | | E | 4,610 (4,188–14,563) | 61,341 (164°, +1°) | 16,029 | 23,519 |
+/// | Nuclear disc (0, 150, 0) | A | 12 (12–13) | 13 | 12 | 13 |
+/// | | B | 18 (16–18) | 18 | 16 | 18 |
+/// | | C | 74 (61–120) | 213 (178°, +51°) | 68 | 132 |
+/// | | D | 99 (82–213) | 344 (179°, +45°) | 90 | 235 |
+/// | | E | 235 (145–417) | 555 (175°, +31°) | 160 | 379 |
+/// | Solar circle, a quarter turn (26,000, 0, 68) | C | 8,193 (6,146–8,193) | 14,563 (179°, +1°) | 6,764 | 7,444 |
+/// | | D | 6,146 (5,584–9,018) | 13,232 (189°, +1°) | 9,018 | 9,018 |
+/// | | E | 4,610 (4,188–14,563) | 67,513 (192°, 0°) | 14,563 | 19,416 |
+/// | Solar circle, far side (−18,385, −18,385, 68) | C | 8,193 (6,764–9,018) | 16,029 (146°, +1°; several) | 8,193 | 8,193 |
+/// | | D | 6,764 (5,584–9,925) | 14,563 (139°, −1°; several) | 9,925 | 10,924 |
+/// | | E | 4,610 (4,188–16,029) | 50,639 (174°, 0°) | 17,641 | 21,369 |
+/// | Inner disc (0, 8,000, 0) | C | 7,444 (5,584–8,193) | 14,563 (17°, 0°) | 7,444 | 9,018 |
+/// | | D | 6,764 (5,584–9,018) | 16,029 (17°, 0°) | 9,018 | 13,232 |
+/// | | E | 6,146 (5,073–12,023) | 21,369 (11°, −3°) | 12,023 | 17,641 |
+/// | 2,000 ly above the Sun (0, 26,000, 2,000) | C | 9,018 (8,193–14,563) | 25,886 (194°, −4°) | 9,018 | 14,563 |
+/// | | D | 8,193 (7,444–14,563) | 23,519 (206°, −5°) | 13,232 | 16,029 |
+/// | | E | 7,444 (6,764–31,356) | 120,000 (199°, −1°; several) | 37,983 | 41,804 |
 ///
-/// The brown dwarfs' are 1 ly. Near the Sun the rays open 74% of the spheres' systems, and E's
-/// 33% of its sphere's. C's cap rests on rare bright phases of pair channels whose fitted rate rests
-/// on a few of the fit's systems (R06 Risks, "T5.d's pair-evolved light, as built").
+/// Away from the Sun and the nuclear disc, A, B and the brown dwarfs are within a few light-years
+/// of the Sun's (A 10–26, 1 ly 2,000 ly above the Sun; B 56–100; brown dwarfs 1 ly). C's, D's and
+/// E's largest rays all lie within 5° of the plane but the nuclear disc's, which are hundreds of
+/// light-years long and leave its dense central dust upwards: the far rays run through the dust's
+/// clear windows along the disc, not towards the poles (2,000 ly above the Sun, a few degrees below
+/// the horizon, back through the disc). On the solar circle they run out along the outer disc,
+/// within 41° of the anticentre (l 139°–206°), and in the inner disc towards the centre (l
+/// 11°–17°). Near the Sun the rays open 61% of the systems of the spheres at the same count (C
+/// 94%, D 77%, E 21%; [`CapCount::systems_within`], whose trapezoid in ln r over-counts a sphere
+/// by about 1%). C's cap rests on post-AGB crossings and rare bright phases of pair channels whose
+/// fitted rate rests on a few of the fit's systems; the AGB tips, M<sub>V</sub> −2 to −4, count
+/// only nearer in (R06 Risks, "T5.d's pair-evolved light, as built" and "Deviations in T17, as
+/// built").
 ///
 /// # Panics
 ///
@@ -2467,6 +2651,250 @@ pub fn expected_beyond_caps_by_visibility(
         .collect()
 }
 
+/// Each layer's real boundary at a synthetic ceiling (rendering plan R13, Design note 3, in
+/// R13.T1's ruled form): for C, D and E each ray the least of the layer's cap at the ceiling, its
+/// cap at the request's cut and [`REAL_LIMIT_LY`]; for A, B and the brown dwarfs their caps at the
+/// cut, which are wholly real.
+///
+/// `at_ceiling` is the count at the ceiling V<sub>P</sub>, one uniform cut over the rays of
+/// `at_cut`, the request's own count (at its cut, or by the eye's visibility), and `caps_at_cut`
+/// are `at_cut`'s caps ([`CapCount::cap`]), one for each layer of [`CAPPED_LAYERS`], as a server
+/// draws them a job a layer (R06.T11.g), so that they are not drawn twice. The caps come back in
+/// `caps_at_cut`'s order. Each of C's, D's and E's rays is its cap at V<sub>P</sub>'s
+/// (`at_ceiling`'s [`CapCount::cap`], widened as R06.T7.b widens), held within the same ray of its
+/// cap at the cut ([`RayRadii::lesser`]) and then within the limit ([`RayRadii::within`]), as
+/// R13.T1's and R13.T1.b's benches built it; the two holds commute, bit for bit. Each such cap
+/// keeps its cut's rule bound and states:
+///
+/// - its [`expected_beyond`](LayerCap::expected_beyond) at the cut beyond R(u) (`at_cut`'s
+///   [`CapCount::stars_beyond`]): the stars the synthetic tier and the band take, near the Sun on
+///   the test fixture at V<sub>P</sub> 5.0 and the eye's cut V 8.18 C 1,660, D 2,970 and E 3,940
+///   (R13.T1.b);
+/// - its [`bright_beyond`](LayerCap::bright_beyond), the count brighter than V<sub>P</sub> beyond
+///   R(u) (`at_ceiling`'s [`CapCount::stars_beyond`]): under one where the cap at V<sub>P</sub>
+///   lies within the limit, and near the Sun some 172 C to E at V<sub>P</sub> 5.0, beyond 2,000 ly.
+///
+/// A, B and the brown dwarfs keep their caps at the cut, each stating its count brighter than
+/// V<sub>P</sub> beyond them too.
+///
+/// A census to these caps lists C to E by the radius towards each star's band texel at every
+/// reply and opens their cells by the rays' cones widened by the texel's largest radius, where its
+/// query states the ceiling ([`SkyQueryBuilder::synthetic_ceiling`](super::census::SkyQueryBuilder::synthetic_ceiling);
+/// [`census_plan_of`](super::census::census_plan_of)).
+///
+/// # Panics
+///
+/// If `caps_at_cut` lacks a layer of [`CAPPED_LAYERS`] or holds a cap of another layer, if C's,
+/// D's or E's cap at the cut is not one radius a ray, or if the counts and the caps are not of
+/// lattices of one ray count. Debug builds also check that C's, D's and E's caps are `at_cut`'s.
+///
+/// # Examples
+///
+/// The real tier near the Sun at RM3's ceiling of V 5.0 (`no_run`: the tables take a minute or
+/// more to build):
+///
+/// ```no_run
+/// use hyperion_sim::Seed;
+/// use hyperion_sim::coords::GalacticPosition;
+/// use hyperion_sim::galaxy::Galaxy;
+/// use hyperion_sim::galaxy::gas::noise::NoiseCache;
+/// use hyperion_sim::observe::Observer;
+/// use hyperion_sim::sky::caps::{CapCount, CapResolution, REAL_LIMIT_LY, real_boundary};
+/// use hyperion_sim::sky::census::{SkyQuery, census_plan_of};
+/// use hyperion_sim::sky::envelope::BrightnessEnvelope;
+/// use hyperion_sim::sky::luminosity::LuminosityTables;
+/// use hyperion_sim::time::UniverseTime;
+/// use hyperion_sim::units::Magnitudes;
+///
+/// let galaxy = Galaxy::new(Seed::new(7));
+/// let (tables, envelope) = (LuminosityTables::build(&galaxy), BrightnessEnvelope::build(&galaxy));
+/// let sun = GalacticPosition::from_light_years([0.0, 26_000.0, 68.0]).ok_or("in the cube")?;
+/// let observer = Observer::new(sun, UniverseTime::EPOCH)?;
+/// let mut cache = NoiseCache::with_capacity(1 << 16);
+/// let (cut, ceiling) = (Magnitudes::new(7.95), Magnitudes::new(5.0));
+/// let mut count = |v| {
+///     CapCount::measure(&galaxy, &tables, &envelope, &observer, v, CapResolution::STANDARD, &mut cache)
+/// };
+/// let (at_cut, at_ceiling) = (count(cut), count(ceiling));
+/// let caps = real_boundary(&at_ceiling, &at_cut, &at_cut.caps());
+/// assert!(caps.iter().all(|cap| cap.radius().value() <= REAL_LIMIT_LY));
+/// // E's stars brighter than V 5.0 beyond 2,000 ly, which the synthetic tier draws.
+/// assert!(caps[4].bright_beyond() > Some(1.0));
+/// // The census of the real tier: C to E listed by each star's texel, their cones widened.
+/// let query = SkyQuery::builder(observer, cut).synthetic_ceiling(ceiling).build()?;
+/// let plan = census_plan_of(&query, caps.clone());
+/// assert_eq!(plan.caps(), caps.as_slice());
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+#[must_use]
+pub fn real_boundary(
+    at_ceiling: &CapCount,
+    at_cut: &CapCount,
+    caps_at_cut: &[LayerCap],
+) -> Vec<LayerCap> {
+    let rays = at_cut.lattice.directions.len();
+    assert_eq!(
+        at_ceiling.lattice.directions.len(),
+        rays,
+        "the counts at the ceiling and at the cut are over one lattice"
+    );
+    for layer in CAPPED_LAYERS {
+        assert!(
+            caps_at_cut.iter().any(|cap| cap.layer() == layer),
+            "a cap at the cut for {layer:?}"
+        );
+    }
+    for cap in caps_at_cut {
+        assert!(
+            CAPPED_LAYERS.contains(&cap.layer()),
+            "a cap at the cut of {:?}, which no count holds",
+            cap.layer()
+        );
+    }
+    caps_at_cut
+        .iter()
+        .map(|cut| {
+            let layer = cut.layer();
+            if !REAL_BOUNDARY_LAYERS.contains(&layer) {
+                return LayerCap {
+                    bright_beyond: Some(at_ceiling.stars_beyond(cut)),
+                    ..cut.clone()
+                };
+            }
+            let low = cut
+                .rays()
+                .unwrap_or_else(|| panic!("{layer:?}'s cap at the cut is one radius a ray"));
+            assert_eq!(
+                low.radii_ly().len(),
+                rays,
+                "{layer:?}'s cap at the cut is of the counts' lattice"
+            );
+            debug_assert_eq!(
+                cut,
+                &at_cut.cap(layer),
+                "{layer:?}'s cap is the cut's count's"
+            );
+            let high = at_ceiling.cap(layer);
+            let held = high
+                .rays()
+                .expect("the caps' own are one radius a ray")
+                .lesser(low)
+                .within(REAL_LIMIT_LY);
+            let mut real = LayerCap {
+                layer,
+                radius: held.largest(),
+                rule_bound: cut.rule_bound(),
+                expected_beyond: 0.0,
+                bright_beyond: None,
+                rays: Some(held),
+            };
+            real.expected_beyond = at_cut.stars_beyond(&real);
+            real.bright_beyond = Some(at_ceiling.stars_beyond(&real));
+            real
+        })
+        .collect()
+}
+
+/// The synthetic ceiling a server states for a request at `cut`, its constant being `ceiling`
+/// (rendering plan R13, R13.T2.b; decided 2026-10-09, `decision-r13-t2b-ceiling.md`): the lesser
+/// of the two, or none where a ceiling would hold nothing.
+///
+/// That is `ceiling` where the cut is deeper, and otherwise the cut itself, so that no served
+/// sky's census of C, D and E reaches past [`REAL_LIMIT_LY`] at any cut: at a ceiling at the cut
+/// a uniform cut's two counts are one, and the real boundary is the cut's caps held within the
+/// limit, each layer's [`bright_beyond`](LayerCap::bright_beyond) its
+/// [`expected_beyond`](LayerCap::expected_beyond). Where the cut is at or brighter than `ceiling`
+/// and C's, D's and E's caps at the cut, `caps_at_cut` (one a layer of [`CAPPED_LAYERS`], as
+/// [`real_boundary`] takes them), already lie within the limit on every ray, a ceiling would hold
+/// no ray, and the request is served without one: its plan and its reply are R06's, exact, with
+/// under one star a layer expected beyond its caps. A forced cap counts as its one radius.
+///
+/// # Panics
+///
+/// If the cut is at or brighter than `ceiling` and `caps_at_cut` lacks a cap of C, D or E.
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::sky::caps::{CAPPED_LAYERS, LayerCap, served_ceiling};
+/// use hyperion_sim::units::{LightYears, Magnitudes};
+///
+/// let caps = |ly| CAPPED_LAYERS.map(|layer| LayerCap::forced(layer, LightYears::new(ly)));
+/// let v = Magnitudes::new;
+/// // The eye near the Sun, at V 7.95: RM3's ceiling of V 5.0.
+/// assert_eq!(served_ceiling(v(7.95), v(5.0), &caps(9_000.0)), Some(v(5.0)));
+/// // A shallow cut whose caps reach past 2,000 ly: the cut itself, so that the limit holds.
+/// assert_eq!(served_ceiling(v(4.6), v(5.0), &caps(3_000.0)), Some(v(4.6)));
+/// // One whose caps lie within the limit: no ceiling, R06's sky.
+/// assert_eq!(served_ceiling(v(4.6), v(5.0), &caps(150.0)), None);
+/// ```
+#[must_use]
+pub fn served_ceiling(
+    cut: Magnitudes,
+    ceiling: Magnitudes,
+    caps_at_cut: &[LayerCap],
+) -> Option<Magnitudes> {
+    if cut.value() > ceiling.value() {
+        return Some(ceiling);
+    }
+    let within = REAL_BOUNDARY_LAYERS.iter().all(|&layer| {
+        let cap = caps_at_cut
+            .iter()
+            .find(|cap| cap.layer() == layer)
+            .unwrap_or_else(|| panic!("a cap at the cut for {layer:?}"));
+        cap.radius().value() <= REAL_LIMIT_LY
+    });
+    (!within).then_some(cut)
+}
+
+/// The caps of `query`'s census at the synthetic ceiling `ceiling`, as
+/// [`census_plan`](super::census::census_plan) derives them (rendering plan R13, R13.T2.a): the
+/// standard lattice's rays measured once, counted at the request's cut (by the eye's visibility
+/// where the query asks it) and at the ceiling, and [`real_boundary`] of the two. Each count is
+/// [`layer_caps`]' (or [`layer_caps_by_visibility`]'s) over the same rays, bit for bit, since a ray
+/// is a function of its own direction and the cache changes no value.
+///
+/// # Panics
+///
+/// As [`layer_caps`].
+#[must_use]
+pub(crate) fn real_boundary_of(
+    galaxy: &Galaxy,
+    tables: &LuminosityTables,
+    envelope: &BrightnessEnvelope,
+    query: &super::census::SkyQuery,
+    ceiling: Magnitudes,
+    cache: &mut NoiseCache,
+) -> Vec<LayerCap> {
+    let observer = query.observer();
+    let lattice = Arc::new(CapLattice::new(CAP_RAYS));
+    let cuts = match query.eye_visibility() {
+        Some(visibility) => visible_cuts_v(&lattice, visibility),
+        None => vec![query.cut().value(); CAP_RAYS],
+    };
+    let rays = RayExtinctions::measure_clearest(
+        galaxy,
+        observer.position(),
+        lattice,
+        CapResolution::STANDARD.sub_rays,
+        cache,
+    );
+    let count = |cuts_v| {
+        CapCount::over(
+            galaxy,
+            tables,
+            envelope,
+            observer,
+            &rays,
+            cuts_v,
+            RADIAL_STEPS_PER_DECADE,
+        )
+    };
+    let at_cut = count(cuts);
+    let at_ceiling = count(vec![ceiling.value(); CAP_RAYS]);
+    real_boundary(&at_ceiling, &at_cut, &at_cut.caps())
+}
+
 #[cfg(test)]
 mod tests {
     use hyperion_testkit::float::bits;
@@ -2574,7 +3002,8 @@ mod tests {
         // plan 11's fixes move, so it keeps only its floor; the rule's bound, asserted above, is
         // its ceiling (decided 2026-10-04, "T5.d caps after the pair correction"), on every ray. D
         // and E keep the brainstorm's brackets on their median ray: their largest rays reach far
-        // past them through the clear windows (E's to 61,341 ly towards the poles).
+        // past them through the clear windows (E's to 61,341 ly at l 164°, b +1° in the frame,
+        // along the outer disc towards the anticentre; R06.T17's record).
         let c = quantile(cap(&sun, Layer::C), 0.0);
         assert!(c >= 1_000.0, "C's least ray: {c} ly");
         for (layer, brainstorm) in [(Layer::D, 4_300.0), (Layer::E, 10_000.0)] {
@@ -2599,13 +3028,19 @@ mod tests {
         assert!(e < 1_500.0, "E's largest ray in the nuclear disc: {e} ly");
     }
 
-    /// Near the Sun the caps by ray open at most 75% of the spheres' systems over every layer,
-    /// and E's at most 35% of its sphere's (`decision-r06-census-cost.md`, the interim gate), each
-    /// counted at 3,072 rays and twice the radial steps, the convergence test's count, towards
-    /// whose rays the caps' radii are read. The spheres are R06.T7's: one radius a layer from
-    /// 768 rays, each through its own profile. Prints, for the record, each layer's share, its
-    /// expected count beyond both shapes, and the expected stars the spheres list that the rays
-    /// drop, and those the rays gain.
+    /// Near the Sun the caps by ray open at most 87% of the spheres' systems over every layer,
+    /// and E's at most 42% of its sphere's (`decision-r06-census-cost.md`'s interim gate, 75% and
+    /// 35% until generator version 26), each counted at 3,072 rays and twice the radial steps, the
+    /// convergence test's count, towards whose rays the caps' radii are read. The spheres are
+    /// R06.T7's: one radius a layer from 768 rays, each through its own profile. Prints, for the
+    /// record, each layer's share, its expected count beyond both shapes, and the expected stars
+    /// the spheres list that the rays drop, and those the rays gain.
+    ///
+    /// From 26, with the brightness envelopes and the binary light refitted under 26's rules, the
+    /// rays open 76.8% of the spheres' systems and E's 40.6% of its sphere's (a finding for R06:
+    /// the gate restated to the measured shares, not the census tuned); from 27, with them refitted
+    /// on 27's engine and the envelope's helium-rich nodes, 86.0% and E's 32.6%, layer C's rays
+    /// holding its whole sphere (100.1%), the gate restated again (train 27's findings).
     #[test]
     fn near_the_sun_the_rays_open_at_most_three_quarters_of_the_spheres_systems() {
         let sun = [0.0, 26_000.0, 68.0];
@@ -2646,8 +3081,8 @@ mod tests {
             "Sun, every layer: {:.1}% of the spheres' systems",
             100.0 * share
         );
-        assert!(share <= 0.75, "{share}");
-        assert!(e_share <= 0.35, "E: {e_share}");
+        assert!(share <= 0.87, "{share}");
+        assert!(e_share <= 0.42, "E: {e_share}");
     }
 
     /// The counts towards a boundary no cap holds (R13.T1) are those of a cap that holds it, near
@@ -2711,6 +3146,63 @@ mod tests {
     #[should_panic(expected = "a boundary's radius is finite and not negative, not NaN ly")]
     fn a_nan_boundary_is_refused() {
         let _ = boundary_ly(LightYears::new(f64::NAN));
+    }
+
+    /// A cap with a budget of stars beyond (R13.T1.b), near the Sun at 7.95 on a coarse count (192
+    /// rays, 12 steps a decade): a budget of one is [`CapCount::cap`], bit for bit, in every layer;
+    /// each larger budget of 3, 10 and 30 holds every ray at or within the smaller's, states under
+    /// its budget beyond, and opens fewer of E's systems than a budget of one.
+    #[test]
+    fn a_larger_budget_holds_every_ray_within_the_caps() {
+        let count = count_at(
+            [0.0, 26_000.0, 68.0],
+            CapResolution::new(192, 12).expect("non-zero"),
+        );
+        let radii = |cap: &LayerCap| cap.rays().expect("one radius a ray").radii_ly().to_vec();
+        let radii_bits = |cap: &LayerCap| radii(cap).into_iter().map(bits).collect::<Vec<_>>();
+        for layer in CAPPED_LAYERS {
+            let (own, one) = (count.cap(layer), count.cap_with_budget(layer, 1.0));
+            assert_eq!(radii_bits(&one), radii_bits(&own), "{layer:?}");
+            assert_eq!(bits(one.expected_beyond()), bits(own.expected_beyond()));
+            assert_eq!(
+                bits(one.rule_bound().value()),
+                bits(own.rule_bound().value())
+            );
+            let mut nearer = own;
+            for budget in [3.0, 10.0, 30.0] {
+                let cap = count.cap_with_budget(layer, budget);
+                let held = radii(&cap).iter().zip(radii(&nearer)).all(|(r, n)| r <= &n);
+                assert!(held, "{layer:?} at a budget of {budget}");
+                assert!(
+                    (0.0..budget).contains(&cap.expected_beyond()),
+                    "{layer:?}: {} beyond at a budget of {budget}",
+                    cap.expected_beyond()
+                );
+                assert_eq!(bits(cap.expected_beyond()), bits(count.stars_beyond(&cap)));
+                nearer = cap;
+            }
+        }
+        let e = |budget| count.systems_within(&count.cap_with_budget(Layer::E, budget));
+        assert!(e(30.0) < e(1.0), "E: {} against {}", e(30.0), e(1.0));
+    }
+
+    /// A budget of stars beyond must be finite and positive.
+    #[test]
+    #[should_panic(expected = "a budget of stars beyond is finite and positive, not 0")]
+    fn a_budget_of_none_is_refused() {
+        let (plan, rays) = small_count_plan();
+        let tables = crate::sky::testing::milky_way_dark_tables();
+        let count = plan.join([plan.count_rays(milky_way_galaxy(), tables, &rays, 0..8)]);
+        let _ = count.cap_with_budget(Layer::E, 0.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "a budget of stars beyond is finite and positive, not NaN")]
+    fn a_nan_budget_is_refused() {
+        let (plan, rays) = small_count_plan();
+        let tables = crate::sky::testing::milky_way_dark_tables();
+        let count = plan.join([plan.count_rays(milky_way_galaxy(), tables, &rays, 0..8)]);
+        let _ = count.cap_with_budget(Layer::E, f64::NAN);
     }
 
     /// A context near the Sun for the eye's pre-pass and the band: the fixture's tables.
@@ -3025,9 +3517,12 @@ mod tests {
         );
         let cut = Magnitudes::new(7.95);
         let (tables, envelope) = (milky_way_tables(), milky_way_envelope());
+        // One measure of the caps, compared with the joined rays' here and with the counts in
+        // parts below: each call measures 3,072 rays.
+        let whole = layer_caps(galaxy, tables, envelope, &observer, cut, &mut cache);
         assert_eq!(
             layer_caps_over(galaxy, tables, envelope, &observer, cut, &joined),
-            layer_caps(galaxy, tables, envelope, &observer, cut, &mut cache)
+            whole
         );
         let visibility = EyeVisibility::uniform(observer, crate::sky::EyeObserver::default(), cut);
         let seen =
@@ -3046,7 +3541,6 @@ mod tests {
         // The count in parts of rays, out of order and of uneven sizes, joined, with its caps
         // drawn a layer at a time, is the count of one job bit for bit, at a uniform cut and by
         // the eye's visibility: the server's count jobs and cap jobs (R06.T11.g).
-        let whole = layer_caps(galaxy, tables, envelope, &observer, cut, &mut cache);
         let in_parts = |plan: CapCountPlan| -> Vec<LayerCap> {
             assert_eq!(plan.rays(), CAP_RAYS);
             let parts = [1_000..CAP_RAYS, 0..1, 1..1, 1..1_000]
@@ -3170,9 +3664,11 @@ mod tests {
         let observer = observer_at([0.0, 26_000.0, 68.0]);
         let mut cache = NoiseCache::with_capacity(1 << 10);
         let rays = RayExtinctions::measure(galaxy, observer.position(), CAP_RAYS, &mut cache);
+        // The rays' profile is checked before any table is read, so the dark tables refuse it
+        // alike.
         let _ = layer_caps_over(
             galaxy,
-            milky_way_tables(),
+            crate::sky::testing::milky_way_dark_tables(),
             milky_way_envelope(),
             &observer,
             Magnitudes::new(7.95),
@@ -3427,54 +3923,94 @@ mod tests {
 
     /// A ball meets the census's region exactly when, by a scan of every ray in angles, it meets a
     /// ray's cone within the ray's radius, at 10⁵ random balls near and far, wide and narrow: the
-    /// test never misses one, and passes only those within 10⁻⁷ rad of one.
+    /// test never misses one, and passes only those within 10⁻⁷ rad of one. So it is for the cones
+    /// widened by the 64² band texel's largest radius ρ (rendering plan R13, fix (i)), and by 5°
+    /// and 7°, which leave the lattice's index for wider balls and for every ball.
     #[test]
     fn a_ball_meets_the_region_where_it_meets_a_cone_within_its_rays_radius() {
         let rays = random_radii(0x7b_0004);
         let lattice = rays.lattice();
-        let spacing = lattice.spacing().value();
-        let scan = |offset: [f64; 3], radius: f64, margin: f64| {
-            let d = math::hypot(math::hypot(offset[0], offset[1]), offset[2]);
-            if d <= radius {
-                return true;
+        let rho = BandSpec::STANDARD.largest_texel_radius().value();
+        for by in [0.0, rho, 5.0 * RADIANS_PER_DEGREE, 7.0 * RADIANS_PER_DEGREE] {
+            let cones = rays.cones_widened_by(Radians::new(by));
+            let spacing = lattice.spacing().value() + by;
+            let scan = |offset: [f64; 3], radius: f64, margin: f64| {
+                let d = math::hypot(math::hypot(offset[0], offset[1]), offset[2]);
+                if d <= radius {
+                    return true;
+                }
+                let u = offset.map(|c| c / d);
+                let opening = spacing + math::asin(radius / d) + margin;
+                lattice
+                    .directions()
+                    .iter()
+                    .zip(rays.radii_ly())
+                    .any(|(k, &r)| {
+                        r > d - radius
+                            && math::acos(dot(k.components(), u).clamp(-1.0, 1.0)) <= opening
+                    })
+            };
+            let mut uniforms = uniforms(0x7b_0005);
+            let (mut met, mut missed) = (0_u32, 0_u32);
+            for _ in 0..100_000 {
+                let mut next = || uniforms.next().expect("endless");
+                let distance = 10.0 * math::exp10(3.3 * next());
+                let u = UnitVector::from_components(std::array::from_fn(|_| 2.0 * next() - 1.0))
+                    .expect("a direction");
+                let offset = u.components().map(|c| c * distance);
+                let radius = distance * 0.3 * next() * next();
+                let ours = rays.meets_ball(&cones, offset, radius);
+                if scan(offset, radius, -1e-7) {
+                    assert!(
+                        ours,
+                        "widened by {by} rad, {offset:?}, {radius}: a ball the region meets is \
+                         missed"
+                    );
+                }
+                if ours {
+                    assert!(
+                        scan(offset, radius, 1e-7),
+                        "widened by {by} rad, {offset:?}, {radius}: passed, far from any cone"
+                    );
+                    met += 1;
+                } else {
+                    missed += 1;
+                }
             }
-            let u = offset.map(|c| c / d);
-            let opening = spacing + math::asin(radius / d) + margin;
-            lattice
-                .directions()
-                .iter()
-                .zip(rays.radii_ly())
-                .any(|(k, &r)| {
-                    r > d - radius && math::acos(dot(k.components(), u).clamp(-1.0, 1.0)) <= opening
-                })
-        };
-        let mut uniforms = uniforms(0x7b_0005);
-        let (mut met, mut missed) = (0_u32, 0_u32);
-        for _ in 0..100_000 {
-            let mut next = || uniforms.next().expect("endless");
-            let distance = 10.0 * math::exp10(3.3 * next());
-            let u = UnitVector::from_components(std::array::from_fn(|_| 2.0 * next() - 1.0))
-                .expect("a direction");
-            let offset = u.components().map(|c| c * distance);
-            let radius = distance * 0.3 * next() * next();
-            let ours = rays.meets_ball(offset, radius);
-            if scan(offset, radius, -1e-7) {
-                assert!(
-                    ours,
-                    "{offset:?}, {radius}: a ball the region meets is missed"
-                );
-            }
-            if ours {
-                assert!(
-                    scan(offset, radius, 1e-7),
-                    "{offset:?}, {radius}: passed, far from any cone"
-                );
-                met += 1;
-            } else {
-                missed += 1;
-            }
+            assert!(
+                met > 1_000 && missed > 1_000,
+                "widened by {by} rad: {met} met, {missed} not"
+            );
         }
-        assert!(met > 1_000 && missed > 1_000, "{met} met, {missed} not");
+    }
+
+    /// Cones widened by nothing are R06.T7.b's, whose half-angle is the lattice's spacing and
+    /// whose index serves balls to [`INDEX_BALL_RAD`], bit for bit.
+    #[test]
+    fn cones_widened_by_nothing_are_the_lattices_own() {
+        let rays = random_radii(0x7b_0006);
+        let spacing = rays.lattice().spacing().value();
+        let cones = rays.cones_widened_by(Radians::new(0.0));
+        let angle = spacing + ANGLE_MARGIN_RAD;
+        assert_eq!(
+            cones.widened.map(bits),
+            [math::cos(angle), math::sin(angle)].map(bits)
+        );
+        assert_eq!(bits(cones.index_ball_sin), bits(math::sin(INDEX_BALL_RAD)));
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "a cone is widened by a finite angle, not negative: -0.000000001 rad"
+    )]
+    fn a_negative_widening_is_refused() {
+        let _ = random_radii(0x7b_0006).cones_widened_by(Radians::new(-1e-9));
+    }
+
+    #[test]
+    #[should_panic(expected = "a cone is widened by a finite angle, not negative: NaN rad")]
+    fn a_nan_widening_is_refused() {
+        let _ = random_radii(0x7b_0006).cones_widened_by(Radians::new(f64::NAN));
     }
 
     /// Each ray's widened radius is the largest of the rays' within twice the spacing, its own
@@ -3515,5 +4051,462 @@ mod tests {
         assert_eq!(ray_extents(&stars, &systems, 4, 100.0), vec![0, 0]);
         assert_eq!(ray_extents(&[0.0; 8], &systems, 4, 1.0), vec![0, 0]);
         assert_eq!(ray_extents(&stars, &systems, 4, 1e-9), vec![4, 4]);
+    }
+
+    /// The real limit is one of the census's shell edges, so the real tier's last shell ends on it
+    /// (rendering plan R13, Design note 3).
+    #[test]
+    fn the_real_limit_is_a_shell_edge() {
+        use crate::sky::census::SHELL_EDGES_LY;
+        let at = SHELL_EDGES_LY
+            .iter()
+            .position(|&edge| bits(f64::from(edge)) == bits(REAL_LIMIT_LY));
+        assert_eq!(at, Some(4), "{REAL_LIMIT_LY} ly among {SHELL_EDGES_LY:?}");
+    }
+
+    /// Holding a ceiling's radii within the cut's ray by ray and within the real limit commute,
+    /// bit for bit, in either order and whichever radii are held within the other, at an edge
+    /// some rays reach exactly (R13.T1.b's determinism audit): `real_boundary` takes `lesser`,
+    /// then `within`.
+    #[test]
+    fn holding_within_the_cut_and_within_the_limit_commute() {
+        let (high, low) = (random_radii(0x7b_0010), random_radii(0x7b_0011));
+        let radii_bits =
+            |rays: &RayRadii| rays.radii_ly().iter().map(|&r| bits(r)).collect::<Vec<_>>();
+        let exact = high.radii_ly()[17];
+        for edge in [REAL_LIMIT_LY, exact, 50.0, 1e6] {
+            let first = high.lesser(&low).within(edge);
+            for other in [
+                high.within(edge).lesser(&low),
+                low.lesser(&high).within(edge),
+                low.within(edge).lesser(&high),
+                high.within(edge).lesser(&low.within(edge)),
+            ] {
+                assert_eq!(radii_bits(&other), radii_bits(&first), "at {edge} ly");
+                assert_eq!(other, first);
+            }
+            let (held, at) = (
+                first.radii_ly().iter().filter(|&&r| r < edge).count(),
+                first
+                    .radii_ly()
+                    .iter()
+                    .filter(|&&r| bits(r) == bits(edge))
+                    .count(),
+            );
+            if edge < 1e5 {
+                assert!(held > 0 && at > 0, "at {edge} ly: {held} within, {at} at");
+            }
+        }
+    }
+
+    /// The counts at the cut and at the ceiling over the same rays from `observer`: the standard
+    /// lattice's, measured once, as `census_plan` counts them at a ceiling, each count
+    /// `layer_caps`' at its cut, bit for bit.
+    fn counts_over_one_lattice(observer: &Observer, cuts_v: &[f64]) -> Vec<CapCount> {
+        let mut cache = NoiseCache::with_capacity(1 << 16);
+        let lattice = Arc::new(CapLattice::new(CAP_RAYS));
+        let rays = RayExtinctions::measure_clearest(
+            milky_way_galaxy(),
+            observer.position(),
+            lattice,
+            SUB_RAYS,
+            &mut cache,
+        );
+        cuts_v
+            .iter()
+            .map(|&v| {
+                CapCount::over(
+                    milky_way_galaxy(),
+                    milky_way_tables(),
+                    milky_way_envelope(),
+                    observer,
+                    &rays,
+                    vec![v; CAP_RAYS],
+                    RADIAL_STEPS_PER_DECADE,
+                )
+            })
+            .collect()
+    }
+
+    /// The real boundary near the Sun and in the nuclear disc at the cut 7.95, at the ceilings
+    /// V 4.5 and 5.0 (rendering plan R13, R13.T2.a; Design note 3):
+    ///
+    /// - every ray of C's, D's and E's R(u) lies within its cap at the cut and the real limit, and
+    ///   is its cap at the ceiling where neither holds it; near the Sun the limit holds some of
+    ///   D's and E's rays, and in the nuclear disc none, where each layer's expected count
+    ///   brighter than the ceiling beyond R(u) is under one;
+    /// - each layer's `bright_beyond` is the count at the ceiling's beyond R(u), and its
+    ///   `expected_beyond` the count at the cut's, bit for bit, each also by the closure towards
+    ///   R(u)'s rays; its rule bound is its cut's;
+    /// - A, B and the brown dwarfs keep their caps at the cut, stating their count brighter than
+    ///   the ceiling beyond them;
+    /// - `census_plan` at the ceiling takes these caps, bit for bit.
+    #[test]
+    fn the_real_boundary_is_held_within_the_cut_and_the_limit_and_states_its_counts() {
+        let points = [
+            ("near the Sun", [0.0, 26_000.0, 68.0], true),
+            ("in the nuclear disc", [0.0, 150.0, 0.0], false),
+        ];
+        for (name, at, limit_holds) in points {
+            let observer = observer_at(at);
+            let counts = counts_over_one_lattice(&observer, &[7.95, 4.5, 5.0]);
+            let (at_cut, caps) = (&counts[0], counts[0].caps());
+            for (ceiling, at_ceiling) in [(4.5, &counts[1]), (5.0, &counts[2])] {
+                let real = real_boundary(at_ceiling, at_cut, &caps);
+                let own = at_ceiling.caps();
+                for ((r, cut), high) in real.iter().zip(&caps).zip(&own) {
+                    let layer = r.layer();
+                    assert_eq!(layer, cut.layer());
+                    let bright = r.bright_beyond().expect("a real boundary states it");
+                    if !REAL_BOUNDARY_LAYERS.contains(&layer) {
+                        assert_eq!(
+                            &LayerCap {
+                                bright_beyond: None,
+                                ..r.clone()
+                            },
+                            cut,
+                            "{name}: {layer:?} at the cut's cap"
+                        );
+                        assert_eq!(bits(bright), bits(at_ceiling.stars_beyond(cut)));
+                        continue;
+                    }
+                    let rays = r.rays().expect("by ray");
+                    let (low, high) = (
+                        cut.rays().expect("by ray").radii_ly(),
+                        high.rays().expect("by ray").radii_ly(),
+                    );
+                    let mut held = 0_usize;
+                    for ((&r, &c), &h) in rays.radii_ly().iter().zip(low).zip(high) {
+                        assert!(r <= c && r <= REAL_LIMIT_LY, "{name}: {layer:?} ray {r} ly");
+                        if bits(r) == bits(REAL_LIMIT_LY) && h > REAL_LIMIT_LY {
+                            held += 1;
+                        } else {
+                            assert_eq!(bits(r), bits(h.min(c)), "{name}: {layer:?}");
+                        }
+                    }
+                    assert_eq!(bits(r.expected_beyond()), bits(at_cut.stars_beyond(r)));
+                    assert_eq!(
+                        bits(r.expected_beyond()),
+                        bits(at_cut.stars_beyond_toward(layer, |u| rays.toward(u)))
+                    );
+                    assert_eq!(bits(bright), bits(at_ceiling.stars_beyond(r)));
+                    assert_eq!(
+                        bits(bright),
+                        bits(at_ceiling.stars_beyond_toward(layer, |u| rays.toward(u)))
+                    );
+                    assert_eq!(r.rule_bound(), cut.rule_bound());
+                    assert_eq!(bits(r.radius().value()), bits(rays.largest().value()));
+                    eprintln!(
+                        "{name}, V_P {ceiling:.1}, {layer:?}: {held} rays held at the limit; beyond \
+                         R(u) {bright:.3} brighter than V_P, {:.1} brighter than the cut",
+                        r.expected_beyond()
+                    );
+                    if limit_holds {
+                        assert!(layer == Layer::C || held > 0, "{name}: {layer:?}");
+                    } else {
+                        assert_eq!(held, 0, "{name}: {layer:?}");
+                        assert!(bright < 1.0, "{name}: {layer:?} {bright}");
+                    }
+                }
+            }
+            if limit_holds {
+                let query = crate::sky::census::SkyQuery::builder(observer, Magnitudes::new(7.95))
+                    .synthetic_ceiling(Magnitudes::new(5.0))
+                    .build()
+                    .expect("a query at the ceiling");
+                let plan = crate::sky::census::census_plan(
+                    milky_way_galaxy(),
+                    milky_way_tables(),
+                    milky_way_envelope(),
+                    &query,
+                    &mut NoiseCache::with_capacity(1 << 16),
+                );
+                assert_eq!(
+                    plan.caps(),
+                    real_boundary(&counts[2], at_cut, &caps).as_slice()
+                );
+                let own = layer_caps(
+                    milky_way_galaxy(),
+                    milky_way_tables(),
+                    milky_way_envelope(),
+                    &observer,
+                    Magnitudes::new(7.95),
+                    &mut NoiseCache::with_capacity(1 << 16),
+                );
+                assert_eq!(caps, own, "the counts over one lattice are layer_caps'");
+            }
+        }
+    }
+
+    /// The ceiling a server states, RM3's V 5.0 or the cut where the cut is brighter, holds every
+    /// served sky's C, D and E within the real limit at every cut, and none is stated where it
+    /// would hold nothing (rendering plan R13, R13.T2.b; `decision-r13-t2b-ceiling.md` §8), near
+    /// the Sun and in the nuclear disc at uniform cuts, each point's rays measured once:
+    ///
+    /// - `served_ceiling` is 4.6, 5.0, 5.0 and 5.0 near the Sun at the cuts 4.6, 5.0, 5.4 and 7.95,
+    ///   the cut's D and E caps reaching past 2,000 ly, and none, none, 5.0 and 5.0 in the nuclear
+    ///   disc, whose cut's caps lie within it at 4.6 and 5.0; never fainter than the cut;
+    /// - where stated, every C, D and E ray of the real boundary lies within the limit; at a
+    ///   ceiling at the cut, each of their `bright_beyond` is its `expected_beyond`, bit for bit;
+    ///   in the nuclear disc at 5.4 the limit holds no ray, the ceiling holds some, and under one
+    ///   star brighter than it is expected beyond R(u) a layer;
+    /// - where none is stated, the cut's C, D and E caps lie within the limit, a real boundary at
+    ///   the cut would be those caps on every ray, and `census_plan` without a ceiling takes them,
+    ///   bit for bit.
+    #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one table of points and cuts, each row's assertions as the ruling lists them"
+    )]
+    fn the_served_ceiling_holds_the_limit_at_every_cut() {
+        use crate::sky::census::{SkyQuery, census_plan};
+        const CEILING: f64 = 5.0;
+        let cuts = [4.6, CEILING, 5.4, 7.95];
+        let points = [
+            (
+                "near the Sun",
+                [0.0, 26_000.0, 68.0],
+                [Some(4.6), Some(CEILING), Some(CEILING), Some(CEILING)],
+            ),
+            (
+                "in the nuclear disc",
+                [0.0, 150.0, 0.0],
+                [None, None, Some(CEILING), Some(CEILING)],
+            ),
+        ];
+        let ray_bits = |cap: &LayerCap| -> Vec<u64> {
+            cap.rays()
+                .expect("by ray")
+                .radii_ly()
+                .iter()
+                .map(|&r| bits(r))
+                .collect()
+        };
+        for (name, at, expected) in points {
+            let observer = observer_at(at);
+            let counts = counts_over_one_lattice(&observer, &cuts);
+            let at_ceiling = &counts[1];
+            for ((&cut, at_cut), expected) in cuts.iter().zip(&counts).zip(expected) {
+                let caps = at_cut.caps();
+                let stated = served_ceiling(Magnitudes::new(cut), Magnitudes::new(CEILING), &caps)
+                    .map(Magnitudes::value);
+                assert_eq!(stated, expected, "{name} at the cut {cut}");
+                let Some(v) = stated else {
+                    // R06's sky, which reaches no farther than a real boundary would.
+                    let real = real_boundary(at_cut, at_cut, &caps);
+                    for (r, c) in real.iter().zip(&caps) {
+                        if !REAL_BOUNDARY_LAYERS.contains(&c.layer()) {
+                            continue;
+                        }
+                        assert!(
+                            c.radius().value() <= REAL_LIMIT_LY,
+                            "{name} at {cut}: {:?}",
+                            c.layer()
+                        );
+                        assert_eq!(ray_bits(r), ray_bits(c), "{name} at {cut}: {:?}", c.layer());
+                    }
+                    let query = SkyQuery::builder(observer, Magnitudes::new(cut))
+                        .build()
+                        .expect("a query");
+                    let plan = census_plan(
+                        milky_way_galaxy(),
+                        milky_way_tables(),
+                        milky_way_envelope(),
+                        &query,
+                        &mut NoiseCache::with_capacity(1 << 16),
+                    );
+                    assert_eq!(plan.caps(), caps.as_slice(), "{name} at {cut}");
+                    eprintln!("{name} at the cut {cut}: no ceiling; R06's caps within the limit");
+                    continue;
+                };
+                assert!(v <= cut, "{name}: a ceiling of {v} at the cut {cut}");
+                let at_v = if bits(v) == bits(cut) {
+                    at_cut
+                } else {
+                    at_ceiling
+                };
+                let real = real_boundary(at_v, at_cut, &caps);
+                for r in &real {
+                    let layer = r.layer();
+                    if !REAL_BOUNDARY_LAYERS.contains(&layer) {
+                        continue;
+                    }
+                    let radii = r.rays().expect("by ray").radii_ly();
+                    assert!(
+                        radii.iter().all(|&ly| ly <= REAL_LIMIT_LY),
+                        "{name} at {cut}: {layer:?} within the limit"
+                    );
+                    let held = radii
+                        .iter()
+                        .filter(|&&ly| bits(ly) == bits(REAL_LIMIT_LY))
+                        .count();
+                    let bright = r.bright_beyond().expect("a real boundary states it");
+                    eprintln!(
+                        "{name} at the cut {cut}, ceiling {v}, {layer:?}: {held} rays at the \
+                         limit; beyond R(u) {bright:.3} brighter than the ceiling, {:.3} than \
+                         the cut",
+                        r.expected_beyond()
+                    );
+                    if bits(v) == bits(cut) {
+                        assert_eq!(bits(bright), bits(r.expected_beyond()), "{name} at {cut}");
+                    }
+                    if name == "in the nuclear disc" && bits(cut) == bits(5.4) {
+                        assert_eq!(held, 0, "{name}: {layer:?}");
+                        assert!(bright < 1.0, "{name}: {layer:?} {bright}");
+                    }
+                }
+                if name == "in the nuclear disc" && bits(cut) == bits(5.4) {
+                    assert!(
+                        real.iter().zip(&caps).any(|(r, c)| {
+                            REAL_BOUNDARY_LAYERS.contains(&r.layer()) && ray_bits(r) != ray_bits(c)
+                        }),
+                        "{name}: the ceiling holds some C–E ray within the cut's cap"
+                    );
+                }
+            }
+        }
+    }
+
+    /// `census_plan` at a ceiling for an eye-only request that caps by the eye's visibility counts
+    /// its cut by that visibility, as [`layer_caps_by_visibility`] does (rendering plan R13,
+    /// R13.T2.a): in the nuclear disc, with a visibility of V 6.5 over half the sky and the cut
+    /// 7.95 over the rest, its caps are [`real_boundary`] of the counts at the ceiling V 5.0 and
+    /// by the visibility, bit for bit, and its A, B and brown dwarfs' caps are
+    /// [`layer_caps_by_visibility`]'s, beside the count each states beyond them; they are not the
+    /// uniform cut's.
+    #[test]
+    fn a_ceiling_by_the_eyes_visibility_counts_its_cut_by_it() {
+        use crate::sky::EyeObserver;
+        use crate::sky::census::{SkyQuery, census_plan};
+        let (galaxy, tables, envelope) =
+            (milky_way_galaxy(), milky_way_tables(), milky_way_envelope());
+        let observer = observer_at([0.0, 150.0, 0.0]);
+        let (eye, cut) = (EyeObserver::default(), Magnitudes::new(7.95));
+        let visibility = EyeVisibility::of_limits(observer, eye, cut, |u| {
+            if u.components()[1] > 0.0 { 6.5 } else { 7.95 }
+        });
+        let query = SkyQuery::builder(observer, cut)
+            .eye(eye)
+            .eye_visibility(visibility.clone())
+            .synthetic_ceiling(Magnitudes::new(5.0))
+            .build()
+            .expect("an eye-only request at a ceiling");
+        let plan = census_plan(
+            galaxy,
+            tables,
+            envelope,
+            &query,
+            &mut NoiseCache::with_capacity(1 << 16),
+        );
+        let lattice = Arc::new(CapLattice::new(CAP_RAYS));
+        let rays = RayExtinctions::measure_clearest(
+            galaxy,
+            observer.position(),
+            Arc::clone(&lattice),
+            SUB_RAYS,
+            &mut NoiseCache::with_capacity(1 << 16),
+        );
+        let count = |cuts_v| {
+            CapCount::over(
+                galaxy,
+                tables,
+                envelope,
+                &observer,
+                &rays,
+                cuts_v,
+                RADIAL_STEPS_PER_DECADE,
+            )
+        };
+        let (seen, at_ceiling) = (
+            count(visible_cuts_v(&lattice, &visibility)),
+            count(vec![5.0; CAP_RAYS]),
+        );
+        let expected = real_boundary(&at_ceiling, &seen, &seen.caps());
+        assert_eq!(plan.caps(), expected.as_slice());
+        let by_visibility = layer_caps_by_visibility(
+            galaxy,
+            tables,
+            envelope,
+            &observer,
+            &visibility,
+            &mut NoiseCache::with_capacity(1 << 16),
+        );
+        for (real, own) in plan.caps().iter().zip(&by_visibility) {
+            if !REAL_BOUNDARY_LAYERS.contains(&real.layer()) {
+                let without = LayerCap {
+                    bright_beyond: None,
+                    ..real.clone()
+                };
+                assert_eq!(&without, own, "{:?}", real.layer());
+            }
+        }
+        let uniform = count(vec![cut.value(); CAP_RAYS]);
+        assert_ne!(
+            plan.caps(),
+            real_boundary(&at_ceiling, &uniform, &uniform.caps()).as_slice(),
+            "the visibility's count, not the uniform cut's"
+        );
+    }
+
+    /// R(u)'s rays near the Sun at a coarse count (192 rays, 12 steps a decade) at the cut 7.95 and
+    /// the ceilings V 4.5 and 5.0, pinned with each layer's counts beyond (R13.T1.b's determinism
+    /// audit; rendering plan R13, R13.T2.a): every C, D and E ray, the real limit holding some of
+    /// E's, and each layer's radius, rule bound, `expected_beyond` and `bright_beyond`, whose bits
+    /// are the counts' own beyond R(u).
+    #[test]
+    fn the_real_boundary_is_pinned() {
+        use hyperion_testkit::golden::GoldenWriter;
+        let resolution = CapResolution::new(192, 12).expect("non-zero");
+        let sun = [0.0, 26_000.0, 68.0];
+        let at_cut = count_at(sun, resolution);
+        let caps = at_cut.caps();
+        let mut w = GoldenWriter::new();
+        w.header(crate::GENERATOR_VERSION.get());
+        w.line("near the Sun (0, 26,000, 68) ly, cut V 7.95, 192 rays at 12 steps a decade");
+        for ceiling in [4.5, 5.0] {
+            let at_ceiling = CapCount::measure(
+                milky_way_galaxy(),
+                milky_way_tables(),
+                milky_way_envelope(),
+                &observer_at(sun),
+                Magnitudes::new(ceiling),
+                resolution,
+                &mut NoiseCache::with_capacity(1 << 16),
+            );
+            let real = real_boundary(&at_ceiling, &at_cut, &caps);
+            let mut held_e = 0_usize;
+            for cap in &real {
+                let layer = cap.layer();
+                let label = format!("V_P {ceiling:.1} {layer:?}");
+                let bright = cap.bright_beyond().expect("stated");
+                w.f64(&format!("{label} radius"), cap.radius().value());
+                w.f64(&format!("{label} rule bound"), cap.rule_bound().value());
+                w.f64(&format!("{label} expected beyond"), cap.expected_beyond());
+                w.f64(&format!("{label} bright beyond"), bright);
+                if !REAL_BOUNDARY_LAYERS.contains(&layer) {
+                    continue;
+                }
+                let rays = cap.rays().expect("by ray");
+                assert_eq!(
+                    bits(bright),
+                    bits(at_ceiling.stars_beyond_toward(layer, |u| rays.toward(u)))
+                );
+                assert_eq!(
+                    bits(cap.expected_beyond()),
+                    bits(at_cut.stars_beyond_toward(layer, |u| rays.toward(u)))
+                );
+                for (k, &r) in rays.radii_ly().iter().enumerate() {
+                    w.f64(&format!("{label} ray {k:03}"), r);
+                    if layer == Layer::E && bits(r) == bits(REAL_LIMIT_LY) {
+                        held_e += 1;
+                    }
+                }
+            }
+            assert!(
+                held_e > 0,
+                "V_P {ceiling}: the limit holds some of E's rays"
+            );
+        }
+        hyperion_testkit::golden!("sky/real_boundary", w.as_str());
     }
 }

@@ -1,0 +1,259 @@
+# Test fixture: a cut-down star-systems stage, shaped like the real data (not the real data).
+
+[meta]
+stage = "stars"
+part = "stars"
+prefix = "s"
+title = "Star Systems"
+snapshot = "a6d3f6dd"
+
+[[cluster]]
+id = "s.primary"
+label = "Primary star"
+
+[[cluster]]
+id = "s.evolution"
+label = "Evolution"
+parent = "s.primary"
+
+[[cluster]]
+id = "s.multiplicity"
+label = "Multiplicity"
+
+[[node]]
+id = "s.stream"
+label = "System stream"
+kind = "seed"
+summary = "hash(system id, STAR) → per-star draw words"
+source = ["crates/hyperion-sim/src/rng/tags.rs"]
+status = "built"
+
+[[node]]
+id = "s.mass"
+label = "Primary mass"
+kind = "draw"
+cluster = "s.primary"
+summary = "Inverse CDF of the IMF from one stream word"
+source = ["crates/hyperion-sim/src/stellar/draws.rs"]
+status = "built"
+
+[[node]]
+id = "s.age"
+label = "Stellar age"
+kind = "draw"
+cluster = "s.primary"
+summary = "Birth time from the population's star-formation history"
+detail = ["age = now − birth, clamped to the track's lifetime"]
+source = ["crates/hyperion-sim/src/stellar/draws.rs"]
+status = "built"
+
+[[node]]
+id = "s.mist"
+label = "MIST evolution tracks"
+kind = "table"
+cluster = "s.evolution"
+summary = "Mass × [Fe/H] × age grid, 0.1–150 M☉, 0.5 dex steps"
+detail = [
+  "EEPs resampled to 400 points per track",
+  "log L, log T_eff, log g and surface X, Y, Z per point",
+]
+cite = ["Choi et al. 2016", "Dotter 2016"]
+source = ["crates/hyperion-fit/src/mist.rs", "crates/hyperion-sim/src/tables/mist.rs"]
+status = "built"
+
+[[node]]
+id = "s.track"
+label = "Track interpolation"
+kind = "model"
+cluster = "s.evolution"
+summary = "L, T_eff and R by bilinear interpolation in log space"
+detail = ["R = √(L / 4πσT_eff⁴), checked against the track's R"]
+source = ["crates/hyperion-sim/src/stellar/mod.rs"]
+status = "built"
+
+[[node]]
+id = "s.alive"
+label = "Still on its track?"
+kind = "decision"
+cluster = "s.evolution"
+summary = "Age past the track's end hands the star to its remnant"
+status = "built"
+
+[[node]]
+id = "s.remnant"
+label = "Remnant fate"
+kind = "model"
+cluster = "s.evolution"
+summary = "White dwarf, neutron star or black hole by initial mass"
+detail = [
+  "M < 8 M☉ → WD, 8–20 M☉ → NS, > 20 M☉ → BH",
+  "initial–final mass relation for the white dwarf",
+]
+cite = ["Cummings et al. 2018", "Sukhbold et al. 2016"]
+source = ["crates/hyperion-sim/src/stellar/remnant/mod.rs"]
+status = "partial"
+
+[[node]]
+id = "s.multiplicity_frac"
+label = "Multiplicity fractions"
+kind = "param"
+cluster = "s.multiplicity"
+summary = "Companion fraction from 0.2 (M dwarfs) to 0.7 (O/B)"
+cite = ["Moe & Di Stefano 2017"]
+source = ["crates/hyperion-sim/src/stellar/multiplicity/mod.rs"]
+status = "built"
+
+[[node]]
+id = "s.companion"
+label = "Companion draw"
+kind = "draw"
+cluster = "s.multiplicity"
+summary = "Mass ratio q, period P and eccentricity e per companion"
+detail = ["log P ~ N(5.0, 2.3) days for solar-type primaries"]
+cite = ["Raghavan et al. 2010"]
+source = ["crates/hyperion-sim/src/stellar/binary/mod.rs"]
+status = "built"
+
+[[node]]
+id = "s.spectral"
+label = "Spectral classification"
+kind = "model"
+summary = "MK type and luminosity class from T_eff and log g"
+source = ["crates/hyperion-sim/src/stellar/classify/mod.rs"]
+status = "built"
+
+[[node]]
+id = "s.star"
+label = "Star record"
+kind = "entity"
+summary = "Mass, age, L, T_eff, R, MK class and remnant flag"
+source = ["crates/hyperion-sim/src/stellar/brief.rs"]
+status = "built"
+
+[[node]]
+id = "s.system"
+label = "Stellar system"
+kind = "entity"
+summary = "Hierarchy of stars and orbits, barycentre at the origin"
+source = ["crates/hyperion-sim/src/stellar/mod.rs"]
+status = "built"
+
+[[node]]
+id = "s.flare"
+label = "Flare activity"
+kind = "draw"
+summary = "Flare rate and XUV output from the rotation–age relation"
+cite = ["Davenport 2016"]
+status = "planned"
+
+[[node]]
+id = "s.blurb"
+label = "Star description"
+kind = "enrich"
+summary = "LLM blurb from the star record, cached by star id"
+status = "partial"
+
+[[edge]]
+from = "g.system"
+to = "s.stream"
+kind = "seed"
+label = "system id"
+
+[[edge]]
+from = "s.stream"
+to = "s.mass"
+kind = "seed"
+label = "word 0"
+
+[[edge]]
+from = "s.stream"
+to = "s.age"
+kind = "seed"
+label = "word 1"
+
+[[edge]]
+from = "g.imf"
+to = "s.mass"
+label = "IMF segments"
+
+[[edge]]
+from = "g.sfh"
+to = "s.age"
+kind = "lookup"
+label = "SFR(t) of the population"
+
+[[edge]]
+from = "s.mass"
+to = "s.track"
+
+[[edge]]
+from = "s.age"
+to = "s.track"
+
+[[edge]]
+from = "g.metallicity"
+to = "s.track"
+label = "[Fe/H] at position"
+
+[[edge]]
+from = "s.mist"
+to = "s.track"
+kind = "lookup"
+label = "bracketing tracks"
+
+[[edge]]
+from = "s.track"
+to = "s.alive"
+
+[[edge]]
+from = "s.alive"
+to = "s.spectral"
+label = "yes"
+
+[[edge]]
+from = "s.alive"
+to = "s.remnant"
+label = "no: past the last EEP"
+
+[[edge]]
+from = "s.remnant"
+to = "s.star"
+
+[[edge]]
+from = "s.spectral"
+to = "s.star"
+
+[[edge]]
+from = "s.multiplicity_frac"
+to = "s.companion"
+kind = "constraint"
+label = "P(companion | M₁)"
+
+[[edge]]
+from = "s.stream"
+to = "s.companion"
+kind = "seed"
+label = "words 2 and on"
+
+[[edge]]
+from = "s.mass"
+to = "s.companion"
+label = "primary mass M₁"
+
+[[edge]]
+from = "s.star"
+to = "s.system"
+
+[[edge]]
+from = "s.companion"
+to = "s.system"
+label = "orbits"
+
+[[edge]]
+from = "s.star"
+to = "s.blurb"
+
+[[edge]]
+from = "s.age"
+to = "s.flare"
+label = "rotation from age"

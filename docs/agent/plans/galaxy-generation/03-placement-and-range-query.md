@@ -1095,6 +1095,17 @@ Reserved so that later plans move no star they need not:
   its `MemberRecord` carries. Nothing calls it for a member yet. Plan 12 moves every record through
   `observe::Drift::of_record`, which resolves the member; whoever next wires members into the drift
   hook (plan 08's P08.T12.d or plan 09's P09.T28.b) should make the hook dispatch on the origin.
+  - _As built in the server (P07.T10.c, lane `fix-server-positions`, 2026-10-29, at
+    `GENERATOR_VERSION` 23)._ Three server paths did call it for a member, each with a client's
+    ID: `extinction`'s system targets, `scene_ship`'s frame, and the scene core's `ship_galactic`
+    and `drift` (the latter through `epoch_velocity`, which panics at every time). Each answered
+    `internal` for a feature member's or a centre member's ID away from the epoch, and `drift` at
+    the epoch too. The server now places every system it resolves from a client's ID in one
+    function, `convert::system_motion`, by `record.origin()`: a grid record by `position_at` and
+    `epoch_velocity`, a feature member by `Drift::of_record`, and a centre member refused at every
+    time (`TraceMotionError::CentreOrbitNotBuilt`); `resolve_system` takes it too. `position_at`'s
+    documented panic stays, and so do `system_place` and the range rows, which read grid records
+    alone. See plan 07's Risks, "Fixed in P07.T10.c".
 - **T11's long-range pin re-measured (lane `perf08`, 2026-09-29, at `GENERATOR_VERSION` 15).**
   `benches/range_query.rs`'s `long_range` asserted 41,925 systems and stopped before measuring,
   since nothing in CI runs the benches. At version 15 the query walks **37,675 systems (29,424 in
@@ -1129,3 +1140,15 @@ Reserved so that later plans move no star they need not:
   `candidate_from`, and the rule is untouched (`tests/frame.rs` and `frame/frames.golden` pass
   unchanged; `candidate_at_gives_the_candidate_frame_at_weighs` is new). `None` outside the clock
   window, before the system is born, and at the exact galactic centre. No output moves.
+- **The served range query's speed, bit for bit (P03.T4.b and P03.T5.a, lane `perf-range-query-2`,
+  2026-10-30; no output moves).**
+  - The pick reads densities one at a time (`Fields::densities_lazily`, crate-private) only as far
+    as its pick, every band but the rogue planets'. Debug builds read them all and check the pick
+    against `Mark::pick_weighted`. A change to `Fields::densities` keeps `densities_lazily` its
+    bits (`the_densities_read_one_at_a_time_are_the_densities_bit_for_bit`).
+  - A galaxy holds its mass function as `imf::Kept<F>`, each stellar band's draw kept
+    (`RangeDraw`). A new mass-function kind implements `imf::Pieces` to be held.
+- **The range walk reads a cold layer-E cell in part (P03.T9 with P08.T12, lane
+  `perf-range-layer-e-in-part`, 2026-11-05; no output moves).** `CellCache::with_cell_if_held`, a
+  default method that lends through `with_cell`, is the walk's question for a layer-E cell; a cache
+  that answers `None` has the cell walked through `visit_cell`. The records are in plan 08's Risks.

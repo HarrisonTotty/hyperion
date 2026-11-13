@@ -1,34 +1,34 @@
-# generator_version = 21
+# generator_version = 31
 
-an ordinary-mode neutron star = 0x8200b2e000000000
-initial mass = 0x4028512fa4298b62  # 12.158566598960252
+an ordinary-mode neutron star = 0x8200b2e000000001
+initial mass = 0x40235b0e4de09662  # 9.67784350744768
 CoreCollapse { supernova: IIP }, None, NeutronStar
-co core = 0x40035cedcfb0d626  # 2.42037546404278
-remnant mass = 0x3ff9dc17684f290e  # 1.6162332605914034
+co core = 0x3ffba1ab77ef281e  # 1.7269701657228391
+remnant mass = 0x3ff33c7140abf477  # 1.2022564436186067
 mode Ordinary
-speed m/s = 0x41106ace7c375ed2  # 268979.6213049713
-direction x = 0x3feede27a279b680  # 0.9646185086582619
-direction y = 0x3fcf967fb8648e01  # 0.24678036216310775
-direction z = 0x3fb7c14c400ff1b0  # 0.09279324115772769
+speed m/s = 0x4105248aa85ca6a3  # 173201.3322079676
+direction x = 0x3fea17845045038d  # 0.8153707092061367
+direction y = 0x3fe27a4e4f18fa45  # 0.5774299187540427
+direction z = 0x3fa563c293c636e0  # 0.041776733912326725
 
-a low-mode neutron star = 0x8200b2e00000000c
-initial mass = 0x402022172783de79  # 8.066582903716368
-ElectronCapture, None, NeutronStar
-co core = 0x3ff70a3d70a3d707  # 1.4399999999999993
+a low-mode neutron star = 0x8200b2e000000002
+initial mass = 0x40203cc27f7afc5b  # 8.118671401751433
+ElectronCapture, Companion, NeutronStar
+co core = 0x3ff6d6020e134766  # 1.427248053533242
 remnant mass = 0x3ff428f5c28f5c29  # 1.26
 mode Low
-speed m/s = 0x40c225c8cf3b9429  # 9291.568824241012
-direction x = 0x3fdb162ec8b543c5  # 0.4232289276160908
-direction y = 0x3fecbd421bf29025  # 0.898102812371239
-direction z = 0x3fbe99d84e18eed3  # 0.11953498751330054
+speed m/s = 0x40c3419d949cf37b  # 9859.231097811591
+direction x = 0x3fefa4daf25620bf  # 0.9888739331372774
+direction y = 0x3fc19cc49eb9b7d4  # 0.13759668112055456
+direction z = 0xbfacf1558af63570  # -0.05652873345671139
 
-a kicked black hole = 0x8200b2e000000005
-initial mass = 0x4030f7cc6f864dfb  # 16.96796319035455
-CoreCollapse { supernova: IIb }, Companion, BlackHole
-co core = 0x400e885f16b3c969  # 3.8165876172653737
-remnant mass = 0x4009afd8257bac0e  # 3.210861485325501
+a kicked black hole = 0x8200b2e000000000
+initial mass = 0x402c6c0bf770fbfe  # 14.211028797666582
+CoreCollapse { supernova: IIP }, Companion, BlackHole
+co core = 0x40083f1ac12dd20c  # 3.0308127491100603
+remnant mass = 0x4004432b272315bb  # 2.5327971513349588
 mode Ordinary
-speed m/s = 0x40f596ed5dde0a59  # 88430.83541683237
-direction x = 0x3fa61a41f5525eb0  # 0.04316907996797903
-direction y = 0xbfca8aae57091935  # -0.20735720872671384
-direction z = 0x3fef462489a61b36  # 0.9773123444036631
+speed m/s = 0x40f9d366753d39d4  # 105782.40362284268
+direction x = 0xbfc683de8e4bd692  # -0.1758993334585069
+direction y = 0x3fcee2851d204cd5  # 0.24128784105469117
+direction z = 0x3fee8a462ffcca66  # 0.9543791711096901

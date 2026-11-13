@@ -97,6 +97,7 @@ function meshBody(
   const options: BodyFrameOptions = {
     camera,
     viewport,
+    presentedPx: viewport,
     exposureScale: EXPOSURE,
     annuli: 4,
     planetshine: PLANETSHINE_SOURCES_HIGH,

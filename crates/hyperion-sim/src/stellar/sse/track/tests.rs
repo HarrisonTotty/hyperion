@@ -481,6 +481,116 @@ fn the_electron_capture_window_meets_the_iron_cores() {
     assert!(matches!(last, DeathKind::CoreCollapse { .. }));
 }
 
+/// Ruling 93.2 as amended (P08.T12.c): a star in the band where the single star's and the
+/// companion-stripped star's electron-capture windows disagree, 8.1 M☉ at Z = 0.02, reads its
+/// companion-stripped mark, which decides its death: set, it collapses by electron capture; clear,
+/// it ends as a white dwarf. Outside the band the build reads no mark: at 8.25 M☉, inside both
+/// windows, and at 15 M☉, outside the stripped window.
+#[test]
+fn the_build_reads_the_companion_mark_only_where_the_windows_disagree() {
+    use crate::galaxy::displaced::binarity::NEVER_STRIPPED;
+    use crate::rng::Mark;
+    let solar = composition(0.02);
+    let with_mark = |stripped| {
+        StarDraws::from_parts(StarDrawsParts {
+            stripped,
+            ..StarDrawsParts::MEDIAN
+        })
+    };
+    let (set, clear) = (with_mark(Mark::from_word(0)), with_mark(NEVER_STRIPPED));
+    let track = |m: f64, draws: &StarDraws| Track::full(SolarMasses::new(m), &solar, draws);
+    let (marked, unmarked) = (track(8.1, &set), track(8.1, &clear));
+    assert_eq!(marked.companion_mark_read(), Some(true));
+    assert_eq!(unmarked.companion_mark_read(), Some(false));
+    assert_eq!(
+        marked.death().map(|d| d.kind()),
+        Some(DeathKind::ElectronCapture)
+    );
+    assert_eq!(
+        unmarked.death().map(|d| d.kind()),
+        Some(DeathKind::EnvelopeLoss)
+    );
+    for m in [8.25, 15.0] {
+        let (a, b) = (track(m, &set), track(m, &clear));
+        assert_eq!(a.companion_mark_read(), None, "{m} M☉");
+        assert_eq!(b.companion_mark_read(), None, "{m} M☉");
+        assert!(a == b, "{m} M☉: the mark moves no track outside the band");
+    }
+}
+
+/// P11.T4's kept-core endings (research-leans-40): an oxygen–neon core's electron capture
+/// ([`oxygen_neon_capture_fate`]) leaves Mandel and Müller's 1.26 M☉ neutron star under the default
+/// recipe (MM20 section 3) and, under `Hurley2000`, HPT's equation 92 of its core: 1.17 + 0.09 ×
+/// 1.44 = 1.2996 M☉ at the Chandrasekhar mass. Both are electron captures with no iron core.
+#[test]
+fn an_oxygen_neon_core_captures_electrons_under_either_recipe() {
+    use crate::stellar::remnant::collapse::electron_capture_remnant;
+    use crate::stellar::remnant::{ProgenitorAtDeath, Stripping};
+
+    let core = SolarMasses::new(1.44);
+    let progenitor = ProgenitorAtDeath::new(
+        core,
+        SolarMasses::new(2.0),
+        SolarMasses::ZERO,
+        Stripping::Wind,
+    );
+    let mm20 = electron_capture_remnant().mass().value();
+    for (recipe, mass) in [
+        (RemnantRecipe::MandelMuller2020, mm20),
+        (RemnantRecipe::Hurley2000, 1.17 + 0.09 * 1.44),
+    ] {
+        let fate = oxygen_neon_capture_fate(recipe, Years::new(1.0e6), core, progenitor);
+        assert_eq!(fate.death.kind(), DeathKind::ElectronCapture, "{recipe:?}");
+        assert_eq!(fate.remnant.kind(), RemnantKind::NeutronStar, "{recipe:?}");
+        assert!(
+            (fate.remnant.mass().value() - mass).abs() < 1e-12,
+            "{recipe:?}: {fate:?}"
+        );
+        assert_eq!(fate.phase, Phase::NeutronStar, "{recipe:?}");
+        assert!(fate.iron_core.is_none(), "{recipe:?}");
+    }
+}
+
+/// P11.T4's kept-core endings (research-leans-38): a window star's thermal pulses end in its
+/// collapse at the capture mass, 1.37 M☉ (`Builder::pulses_cap`). A companion-stripped 7.7 M☉
+/// star at Z = 0.02, whose pulses start below the cap, collapses by electron capture into the
+/// 1.26 M☉ neutron star with its core at the capture mass, where before the fix its core reached
+/// 1.378 M☉. A window star whose core is above the cap from the second dredge-up, 8.25 M☉ or
+/// 8.1 M☉ companion-stripped, collapses with its core above it, as before the fix.
+#[test]
+fn a_window_star_s_pulses_end_at_the_capture_mass_from_29() {
+    use crate::rng::Mark;
+    use crate::stellar::remnant::collapse::{OXYGEN_NEON_CAPTURE_MASS, electron_capture_remnant};
+
+    let marked = StarDraws::from_parts(StarDrawsParts {
+        stripped: Mark::from_word(0),
+        ..StarDrawsParts::MEDIAN
+    });
+    let death = |m: f64, draws: &StarDraws| {
+        let track = Track::full_with(
+            SolarMasses::new(m),
+            &composition(0.02),
+            draws,
+            TrackOptions::default(),
+        );
+        assert_eq!(track.remnant(), Some(electron_capture_remnant()), "{m} M☉");
+        let death = track.death().expect("a full track dies");
+        assert_eq!(death.kind(), DeathKind::ElectronCapture, "{m} M☉");
+        death
+    };
+    let capture = OXYGEN_NEON_CAPTURE_MASS.value();
+    let core = |death: &crate::stellar::remnant::Death| death.progenitor().co_core_mass().value();
+    let capped = death(7.7, &marked);
+    assert!(
+        (core(&capped) - capture).abs() < 1e-9 * capture,
+        "{capped:?}"
+    );
+    for (m, draws) in [(8.25, StarDraws::median()), (8.1, marked)] {
+        let death = death(m, &draws);
+        assert!(core(&death) > capture, "{m} M☉: {death:?}");
+    }
+}
+
 /// Ruling 57: under the generator's recipes no white dwarf is heavier than the electron-capture
 /// mass of an oxygen–neon core, 1.37 M☉, and none sits at the neutron star's radius, over 5–9 M☉
 /// (where the heaviest dwarfs come from) at five metallicities; under `Hurley2000`, as in SSE,
@@ -875,8 +985,15 @@ fn the_lifetime_falls_with_mass_and_is_continuous_at_five_metallicities() {
     check_lifetime_in_mass(&[1e-4, 0.001, 0.004, 0.02, 0.03], 400);
 }
 
+/// The one rise of the lifetime with mass, at (Z, the lighter mass, M☉): from generator version 26,
+/// under the enforced Humphreys–Davidson limit, the lifetime at Z = 0.03 is flat near 4.5 Myr from
+/// 60 to 65 M☉ and rises 0.42% from 63.83 to 64.94 M☉ (4.493 to 4.512 Myr; a finding, pinned as it
+/// stands, the rise held under 0.002 dex).
+const LIFETIME_RISES: [(f64, f64); 1] = [(0.03, 63.83)];
+
 /// The lifetime at `intervals` + 1 masses evenly spaced in log mass over 0.1–100 M☉, at each of
-/// `metallicities`: falling, and without a jump of 10⁻³ dex between two masses of the same route.
+/// `metallicities`: falling, but at [`LIFETIME_RISES`], and without a jump of 10⁻³ dex between two
+/// masses of the same route.
 fn check_lifetime_in_mass(metallicities: &[f64], intervals: u32) {
     for &z in metallicities {
         let comp = composition(z);
@@ -895,10 +1012,13 @@ fn check_lifetime_in_mass(metallicities: &[f64], intervals: u32) {
             .collect();
         let values: Vec<f64> = log_masses.iter().map(|&x| life(x)).collect();
         for (i, pair) in values.windows(2).enumerate() {
+            let lighter = math::exp10(log_masses[i]);
+            let pinned = LIFETIME_RISES
+                .iter()
+                .any(|&(at, mass)| (z - at).abs() < 1e-12 && (lighter / mass - 1.0).abs() < 1e-3);
             assert!(
-                pair[1] < pair[0],
-                "the lifetime rises at Z = {z} from {} to {} M☉",
-                math::exp10(log_masses[i]),
+                pair[1] < pair[0] || (pinned && pair[1] - pair[0] < 0.002),
+                "the lifetime rises at Z = {z} from {lighter} to {} M☉",
                 math::exp10(log_masses[i + 1])
             );
         }
@@ -986,14 +1106,29 @@ fn the_thermal_pulses_count_up_through_the_pulsing_agb() {
     let mut last = -1.0;
     for i in 0..100 {
         let a = segment.start + (segment.end - segment.start) * f64::from(i) / 100.0;
-        let p = track
-            .pulse_phase_at(Years::new(a))
-            .expect("inside the phase");
+        let p = track.pulse_phase_at(a, 0.0).expect("inside the phase");
         assert!(p >= last, "{p} after {last}");
         last = p;
     }
     assert!(last > 3.0, "{last} pulses");
-    assert_eq!(track.pulse_phase_at(Years::new(segment.start * 0.5)), None);
+    assert!(track.pulse_phase_at(segment.start * 0.5, 0.0).is_none());
+    assert!(track.pulse_phase_at(segment.start, -1.0).is_none());
+    assert!(track.pulse_phase_at(segment.end, 1.0).is_none());
+    let span = track.pulsing_agb().expect("the phase");
+    assert_eq!(
+        (span.start().value(), span.end().value()),
+        (segment.start, segment.end)
+    );
+    // The two-part reading is the summed age's where the offset is exact in the sum.
+    let middle = f64::midpoint(segment.start, segment.end);
+    assert_eq!(
+        bits(track.pulse_phase_at(middle, 0.0).expect("inside the phase")),
+        bits(
+            track
+                .pulse_phase_at(middle - 1_024.0, 1_024.0)
+                .expect("inside the phase")
+        )
+    );
 }
 
 /// A main sequence or helium main sequence rebuilt at its current mass carries the lifetime the
@@ -1214,5 +1349,150 @@ fn a_track_built_short_of_its_main_sequence_knows_its_arrival() {
             Years::new(1.0e4),
         );
         assert_eq!(helium.main_sequence_arrival(), None);
+    }
+}
+
+/// The electron-capture windows' widths are validated once, finite and positive (P15.T5.d), and
+/// the builder method changes the windows alone.
+#[test]
+fn capture_window_widths_are_finite_and_positive() {
+    let ok = SolarMasses::new(0.1);
+    for bad in [0.0, -0.1, f64::NAN, f64::INFINITY] {
+        let bad = SolarMasses::new(bad);
+        assert_eq!(
+            CaptureWindowWidths::new(bad, ok),
+            Err(BuildCaptureWindowWidthsError::Single),
+            "{bad:?}"
+        );
+        assert_eq!(
+            CaptureWindowWidths::new(ok, bad),
+            Err(BuildCaptureWindowWidthsError::CompanionStripped),
+            "{bad:?}"
+        );
+    }
+    let narrow = CaptureWindowWidths::new(SolarMasses::new(0.05), SolarMasses::new(0.4)).unwrap();
+    assert_eq!(narrow.single(), SolarMasses::new(0.05));
+    assert_eq!(narrow.companion_stripped(), SolarMasses::new(0.4));
+    let options = TrackOptions::default().with_capture_windows(narrow);
+    assert_eq!(options.capture_windows(), narrow);
+    assert_eq!(options.wind(), TrackOptions::default().wind());
+    assert_eq!(options.remnant(), TrackOptions::default().remnant());
+    assert_eq!(options.bridges(), TrackOptions::default().bridges());
+    assert_eq!(
+        BuildCaptureWindowWidthsError::Single.to_string(),
+        "a single star's electron-capture window width is not finite and positive"
+    );
+}
+
+/// The options' `Debug` at the generator's windows is the text it had before they became an option
+/// (P15.T5.d), which the binary timelines' golden digests through a track's `Debug`; other windows
+/// are named.
+#[test]
+fn the_default_options_debug_as_they_did_before_the_windows() {
+    assert_eq!(
+        format!("{:?}", TrackOptions::default()),
+        "TrackOptions { wind: Modern, remnant: MandelMuller2020, bridges: Physical }"
+    );
+    assert_eq!(
+        format!("{:?}", TrackOptions::hurley2000()),
+        "TrackOptions { wind: Hurley2000, remnant: Hurley2000, bridges: Instant }"
+    );
+    let narrow = CaptureWindowWidths::new(SolarMasses::new(0.05), SolarMasses::new(1.0)).unwrap();
+    let text = format!("{:?}", TrackOptions::default().with_capture_windows(narrow));
+    assert!(
+        text.contains("capture_windows: CaptureWindowWidths"),
+        "{text}"
+    );
+}
+
+/// The fate of a star whose builder holds its companion-stripped mark as `with_companion_mark`
+/// does, read only where the electron-capture window asks, is the fate of one given the mark read
+/// first (`is_companion_stripped_under`), bit for bit: across the stripped window and the
+/// window's edges at two metallicities, one of them with a helium excess, whose share takes the
+/// exact path, and with the mark never set, set wherever the share is above zero, and as drawn.
+#[test]
+fn a_companion_mark_read_where_the_window_asks_gives_the_fate_read_first() {
+    use crate::galaxy::displaced::binarity::NEVER_STRIPPED;
+    use crate::rng::Mark;
+
+    let rules = StellarRules::of_version(GENERATOR_VERSION);
+    let options = TrackOptions::default().with_rules(rules);
+    let helium = Composition::from_fe_h(Dex::new(-0.65), HeliumExcess::new(0.04));
+    let masses = [5.4, 5.6, 6.6, 7.0, 7.4, 8.1, 8.25, 8.35, 9.0, 10.9, 11.2];
+    for comp in [composition(0.02), helium] {
+        for m0 in masses.map(SolarMasses::new) {
+            for mark in [
+                NEVER_STRIPPED,
+                Mark::from_word(0),
+                StarDrawsParts::MEDIAN.stripped,
+            ] {
+                let draws = StarDraws::from_parts(StarDrawsParts {
+                    stripped: mark,
+                    ..StarDrawsParts::MEDIAN
+                });
+                let coeffs = ZCoeffs::new(comp.z_fit());
+                let read_first = Builder::new(
+                    &coeffs,
+                    &comp,
+                    options,
+                    reimers_eta(draws.eta().value()),
+                    RemnantDraws::of(&draws),
+                    Resolution::GENERATOR,
+                    build::Keep::Lifetime,
+                )
+                .stripped_by_companion(is_companion_stripped_under(m0, &comp, &draws, rules))
+                .run(m0.value(), None)
+                .fate
+                .expect("a full build reaches the death");
+                let what = format!("{} M☉, {comp:?}, mark {mark:?}", m0.value());
+                assert_eq!(fate_of(m0, &comp, &draws, options), read_first, "{what}");
+                let track = Track::full_with(m0, &comp, &draws, options);
+                assert_eq!(track.death(), Some(read_first.death), "{what}");
+                assert_eq!(track.remnant(), Some(read_first.remnant), "{what}");
+                assert_eq!(
+                    remnant_of(m0, &comp, &draws, options).1,
+                    read_first,
+                    "{what}"
+                );
+            }
+        }
+    }
+}
+
+/// `fate_to_age` is the fate of `Track::to_age_with`'s track of the same arguments, bit for bit,
+/// at ages either side of the star's death and of its segments' ends: `None` where that track stops
+/// short of the death, and the track's own fate (`fate_with` its own remnant draws) where it
+/// reaches it.
+#[test]
+fn a_fate_to_an_age_is_the_track_s_to_that_age() {
+    let options = TrackOptions::default();
+    let helium = Composition::from_fe_h(Dex::new(-0.65), HeliumExcess::new(0.04));
+    for comp in [composition(0.02), helium] {
+        for m0 in [0.9, 2.5, 7.4, 8.25, 20.0].map(SolarMasses::new) {
+            let draws = StarDraws::median();
+            let full = Track::full_with(m0, &comp, &draws, options);
+            let death = full.lifetime().expect("a full track dies").value();
+            let mut ages: Vec<f64> = [0.5, 1.0 - 1e-9, 1.0, 1.0 + 1e-9, 2.0]
+                .map(|f| death * f)
+                .to_vec();
+            for stage in [
+                Stage::MainSequence,
+                Stage::HertzsprungGap,
+                Stage::CoreHeliumBurning,
+            ] {
+                if let Some(end) = full.stage_end(stage).map(Years::value) {
+                    ages.extend([end * (1.0 - 1e-12), end, end * (1.0 + 1e-12)]);
+                }
+            }
+            for age in ages.into_iter().map(Years::new) {
+                let track = Track::to_age_with(m0, &comp, &draws, options, age);
+                assert_eq!(
+                    fate_to_age(m0, &comp, &draws, options, age),
+                    track.fate_with(RemnantDraws::of(&draws)),
+                    "{} M☉, {comp:?}, {age:?}",
+                    m0.value()
+                );
+            }
+        }
     }
 }

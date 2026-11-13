@@ -41,9 +41,24 @@
 //! - [`body_frame`]: which body's non-rotating frame a camera or craft is in, by the Hill sphere
 //!   (plan R02, R02.T4), the rule the client's camera twins.
 //! - [`label`]: bodies' labels for people, `A b` onwards (design note 22, P14.T30.c).
+//! - [`laplace`]: the classical Laplace surface every moon and ring lies on, its Laplace radius,
+//!   the parent's hydrostatic J₂ and the eccentricity band (P14.T56.a).
 //! - [`rings`], [`belts`] and [`halo`]: a giant's rings (P14.T20), a host's asteroid and
 //!   Kuiper-like belts with their fading debris and largest members (P14.T21.a–c), and the
 //!   cometary halo (P14.T21.d), each from plain arguments until P14.T22.a and T30.a call them.
+//! - [`chem`]: element chemistry on the snapshot path (Phase L, P14.T50.a): a body's element
+//!   inventory by reservoir, its mantle's ΔIW and redox class, and its host's C/O and Mg/Si, all
+//!   pure until P14.T54.a wires them onto the record.
+//! - [`events`]: events on bodies (P14.T31): the Poisson bins of P14.T31.a, a body's impacts and
+//!   eruptions and a system's long-period comets, and the monotone phases of P14.T31.b, a giant's
+//!   great storms and a dry, thin-aired planet's global dust storms, each from plain arguments
+//!   until P14.T31.c calls them.
+//! - [`viewer`]: the planet viewer's planets (rendering plan R15): one planet from the generator's
+//!   own inputs as a synthetic system, a generated planet's inputs read back, and `RANDOMIZE`'s
+//!   draw of a real planet's.
+//! - [`surface`]: rendering plan R09's coarse pass, a body's coarse field from its surface seed
+//!   and plan 14's global figures; so far its frame (R09.T10): the inputs, the cell graph, the
+//!   quantiser and the steps as no-ops.
 //!
 //! The vertical slice to the `SYSTEM` display (ruling 33) builds these pieces ahead of the stages
 //! that will feed them. Each takes what a later stage supplies as a plain argument: the disc takes
@@ -83,7 +98,7 @@
 //! | 02, 03 | the sample of real systems (`testing`, P14.T1.d) | [`Galaxy::from_params`](crate::galaxy::Galaxy::from_params) with [`GalaxyParams::milky_way_like`](crate::galaxy::params::GalaxyParams::milky_way_like); [`galaxy::placement::generate_cell`](crate::galaxy::placement::generate_cell), [`STELLAR_LAYERS`](crate::galaxy::placement::STELLAR_LAYERS) and each layer's [`MassBand`](crate::galaxy::imf::MassBand); [`galaxy::query::QuerySphere`](crate::galaxy::query::QuerySphere), [`cells_in_sphere`](crate::galaxy::query::cells_in_sphere) and [`count_cells_in_sphere`](crate::galaxy::query::count_cells_in_sphere) |
 //! | 11 | a synthetic binary's period and eccentricity (P14.T1.d) | [`LOG_PERIOD_MIN`](crate::stellar::multiplicity::LOG_PERIOD_MIN), [`LOG_PERIOD_MAX`](crate::stellar::multiplicity::LOG_PERIOD_MAX), [`MultiplicityModel::eccentricity_distribution`](crate::stellar::multiplicity::MultiplicityModel::eccentricity_distribution)'s `e_max`, and [`orbit::OpenOrbit::MIN_ECCENTRICITY`](crate::orbit::OpenOrbit::MIN_ECCENTRICITY) |
 //! | 09 | sphere of influence and encounter environment | not built: T1.d's interim rule, the galactic tidal radius and `None`; [`context::EncounterEnvironment`] holds what P14.T29 reads of a feature member |
-//! | 13 | free-floating hosts, `SystemRecord::kind` | not built: every context is [`HostKind::Stellar`] |
+//! | 13 | free-floating hosts, `SystemRecord::kind` | [`galaxy::placement::SystemKind`](crate::galaxy::placement::SystemKind): a brown dwarf's context is [`HostKind::BrownDwarf`] from generator version 26 ([`hosts::substellar`], P14.T27.a), and a rogue planet's [`HostKind::RoguePlanet`], with no star, from 26 (P14.T27.b) |
 //! | 06 | a star at any time (ruling 34) | [`stellar::system::StarModel`](crate::stellar::system::StarModel): `state_at`, `age_at`, `max_radius_until`, `death`, `remnant` and `natal_kick`, which [`fate`] reads |
 //! | 06 | how a star dies | [`stellar::remnant::Death`](crate::stellar::remnant::Death), its [`DeathKind::is_sudden`](crate::stellar::remnant::DeathKind::is_sudden) and [`ProgenitorAtDeath`](crate::stellar::remnant::ProgenitorAtDeath), and [`NatalKick`](crate::stellar::remnant::NatalKick) (`None` until P06.T19) |
 //! | 11, 14 | an orbit's expansion and its inverse | [`orbit::KeplerElements::scaled`](crate::orbit::KeplerElements::scaled) (P14.T2.a) and [`orbit::elements_from_state`](crate::orbit::elements_from_state), whose [`orbit::Orbit`](crate::orbit::Orbit) is bound or open (P14.T2.c) |
@@ -92,17 +107,25 @@
 //! | 02, 06 | \[α/Fe\] (P14.T1.a) | no plan draws one: [`context::alpha_fe`](fn@context::alpha_fe), a closed form of [`Composition::fe_h`](crate::stellar::Composition::fe_h) and the record's [`galaxy::Population`](crate::galaxy::Population) ([`SystemRecord::population`](crate::galaxy::placement::SystemRecord::population)), held on [`SystemContext::alpha_fe`] |
 //! | 06 | an X-ray and ultraviolet history (P14.T1.a) | no plan has one: [`context::XuvHistory`], a closed form of a star's initial mass and its zero-age luminosity ([`SystemContext::xuv_history`]); plan 06's [`ActivityLevel`](crate::stellar::rotation::ActivityLevel) is not read, since a history set from the level at the time would not be monotone in time |
 //! | 06 | a star's largest past luminosity (design note 11) | [`StarModel::max_luminosity_until`](crate::stellar::system::StarModel::max_luminosity_until), which each host's [`derive::HostLight::with_history`] carries to the atmosphere (P14.T13) |
-//! | 01 | a planet's volatile inventory (P14.T13.a) | [`rng::tags::PLANET_VOLATILES`](crate::rng::tags::PLANET_VOLATILES) (`Body`), opened with `ObjectKey::from(BodyId)`, words 0–2 ([`derive::atmosphere::VolatileDraws`]) |
+//! | 01 | a planet's volatile inventory (P14.T13.a) | [`rng::tags::PLANET_VOLATILES`](crate::rng::tags::PLANET_VOLATILES) (`Body`), opened with `ObjectKey::from(BodyId)`, words 0–5, 3–5 read by number from [`derive::atmosphere::SULPHUR_WORD`] (P14.T50.a; [`derive::atmosphere::VolatileDraws`]) |
+//! | 01 | a host's C/O and Mg/Si (P14.T50.a) | [`rng::tags::SYSTEM_ABUNDANCES`](crate::rng::tags::SYSTEM_ABUNDANCES) (`System`), opened with `ObjectKey::from(SystemId)`, words 0–1 ([`chem::AbundanceDraws`]) |
+//! | 01 | a small body's formation time (P14.T51.c) | [`rng::tags::BODY_FORMATION`](crate::rng::tags::BODY_FORMATION) (`Body`), opened with `ObjectKey::from(BodyId)`, word 0 ([`hooks::crust::formation_time`]) |
+//! | 01 | an airless body's exposed fraction of its cold traps (P14.T51.f) | [`rng::tags::BODY_COLD_TRAPS`](crate::rng::tags::BODY_COLD_TRAPS) (`Body`), opened with `ObjectKey::from(BodyId)`, word 0 ([`hooks::cold_traps::exposed_fraction`]) |
+//! | 01 | a gas envelope's formation draws (P14.T50.d) | [`rng::tags::BODY_ENVELOPE_FORMATION`](crate::rng::tags::BODY_ENVELOPE_FORMATION) (`Body`), opened with `ObjectKey::from(BodyId)`, words 0–1 ([`chem::envelope_abundances::EnvelopeDraws`]) |
+//! | 01, 06 | events on bodies (P14.T31.a) | [`events::EventSeries::new`](crate::events::EventSeries::new) with a [`BodyId`](crate::id::BodyId) or [`SystemId`](crate::id::SystemId) subject, [`events::PoissonBins`](crate::events::PoissonBins) and [`events::RateModel`](crate::events::RateModel); [`id::event_tags::BODY_IMPACT`](crate::id::event_tags::BODY_IMPACT), [`BODY_ERUPTION`](crate::id::event_tags::BODY_ERUPTION) and [`SYSTEM_COMET`](crate::id::event_tags::SYSTEM_COMET), backed by `rng::tags`' scope-`Event` tags of the same names |
+//! | 01, 06 | the monotone phases on bodies (P14.T31.b) | [`events::EventSeries::new`](crate::events::EventSeries::new) with a [`BodyId`](crate::id::BodyId) subject, [`events::MonotonePhase`](crate::events::MonotonePhase) on an [`events::LinearClock`](crate::events::LinearClock) with a [`events::SkipMark`](crate::events::SkipMark), and [`orbit::solve_kepler`](crate::orbit::solve_kepler); [`id::event_tags::BODY_STORM`](crate::id::event_tags::BODY_STORM) and [`BODY_DUSTSTORM`](crate::id::event_tags::BODY_DUSTSTORM), backed by `rng::tags`' scope-`Event` tags of the same names |
 //! | 14 | a young magma ocean (design note 12) | [`hosts::young::Formation::molten_until`], which [`derive::PlacedBody::with_magma_ocean_until`] carries to the atmosphere |
 
 pub mod architecture;
 pub mod belts;
 pub mod body_frame;
+pub mod chem;
 pub mod context;
 pub mod derive;
 pub mod disc;
 pub mod drift;
 pub mod error;
+pub mod events;
 pub mod fate;
 pub mod frames;
 pub mod halo;
@@ -110,18 +133,22 @@ pub mod hooks;
 pub mod hosts;
 pub mod index;
 pub mod label;
+pub mod laplace;
 pub mod moons;
 pub mod params;
 pub mod placement;
 pub mod record;
 pub mod rings;
 pub mod satellites;
+pub mod surface;
 pub mod system;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
+pub mod viewer;
 
 pub use context::{HostKind, SystemContext};
 pub use error::{DecodeBodyIndexError, EncodeBodyIndexError, ResolveBodyError};
+pub use hooks::structure::temperature_at;
 pub use index::{BodyIndex, BodySlot, BodySub};
 pub use label::BodyLabel;
 pub use system::{Body, PlanetaryHost, PlanetarySystem, generate, generate_planets};

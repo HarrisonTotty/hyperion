@@ -26,9 +26,15 @@
 //! found by projected coordinate descent on the normal equations with a fixed number of sweeps
 //! from zero, so the result depends on no tolerance test. Plan 15 refits with free widths.
 //!
-//! The task is [`MgeTask`], fast and provisional: its manifest `manifests/mge.toml` records the
-//! parameters above, which are constants of this module, and a manifest that disagrees with them
-//! is refused.
+//! The task is [`MgeTask`], fast. Since plan 15's P15.T3.c its manifest,
+//! `manifests/mge.toml`, is the refit's ([`refit`], P15.T3.a, with the boxy bulge's [`boxy`],
+//! P15.T3.b): it names `method = "free_widths"` and every parameter of the refit, and the committed
+//! table is the refit's, with `MGE_BOXY`. The first cut above is still the task's for a manifest
+//! without `method`, which must then hold exactly this module's constants; no committed manifest
+//! names it now.
+
+pub mod boxy;
+pub mod refit;
 
 use std::fmt::Write as _;
 use std::num::NonZeroUsize;
@@ -43,8 +49,10 @@ use crate::manifest::{Manifest, SimFingerprint};
 use crate::task::{FitTask, RunTaskError, TaskClass, TaskOutput};
 
 /// The task's version, written into the table's header. A change to anything below that moves
-/// the table bumps it.
-pub const VERSION: u32 = 1;
+/// the table bumps it: 2 since P15.T3.c made the committed table the refit's (plan 15, Design note
+/// 6), and 3 since P15.T12's check judged `MGE_BOXY` on its ruled criteria, which cleared the
+/// header's flag with the body unchanged.
+pub const VERSION: u32 = 3;
 
 /// The number of widths in each expansion.
 pub const WIDTHS: usize = 14;
@@ -401,7 +409,8 @@ non-negative least-squares solution by projected coordinate descent on the norma
     }
 }
 
-/// The task: plan 02's first cut (P02.T6.a), fast, revision [`VERSION`].
+/// The task: plan 15's refit (P15.T3.a–c) from its manifest, or plan 02's first cut (P02.T6.a)
+/// from one without `method`; fast, revision [`VERSION`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct MgeTask;
 
@@ -422,8 +431,9 @@ impl FitTask for MgeTask {
         VERSION
     }
 
+    /// The committed table's, the refit's; the first cut emits the first three only.
     fn items(&self) -> &'static [&'static str] {
-        &["MGE_EXP", "MGE_HOLED_EXP", "MGE_BAR"]
+        &["MGE_EXP", "MGE_HOLED_EXP", "MGE_BAR", "MGE_BOXY"]
     }
 
     /// The thin disc's hole in scale lengths, the one number of the sim's galaxy model the fit
@@ -435,7 +445,12 @@ impl FitTask for MgeTask {
         )])
     }
 
+    /// The refit if the manifest names a `method` (`refit::run`, which refuses any but
+    /// `"free_widths"`), else the first cut, whose manifest must hold exactly its constants.
     fn run(&self, manifest: &Manifest, _threads: NonZeroUsize) -> Result<TaskOutput, RunTaskError> {
+        if manifest.params().contains_key(refit::METHOD_KEY) {
+            return refit::run(manifest);
+        }
         manifest.expect_params(&parameters())?;
         let tables = fit();
         let r = residuals(&tables);

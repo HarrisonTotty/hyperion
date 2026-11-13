@@ -1,18 +1,44 @@
-# The Gaussian expansions behind the galaxy's potential (plan 02, P02.T6.a; plan 15, P15.T3). The
-# parameters are constants of `src/tasks/mge.rs`, recorded here so that the inputs hash covers them;
-# the task refuses a manifest that disagrees with its code.
+# The Gaussian expansions behind the galaxy's potential (plan 02, P02.T6.a; plan 15, P15.T3): the
+# refit with free widths (P15.T3.a and P15.T3.b), swapped in by P15.T3.c. `MGE_EXP`, `MGE_HOLED_EXP`
+# and `MGE_BAR`, their widths polished by Levenberg–Marquardt and their weights by non-negative least
+# squares (`src/tasks/mge/refit.rs`), and the boxy bulge's `MGE_BOXY`, its terms' weights, widths and
+# axis ratios polished together (the `boxy_*` keys, `src/tasks/mge/boxy.rs`). `widths`, `boxy_terms`
+# and the bar's shape are fixed by the tables and the profile; the task refuses other values.
 task = "mge"
 
 [params]
+method = "free_widths"
 widths = 14
-sweeps = 50000
-exp_range = [0.02, 12.0]
-exp_samples = 300
-exp_widths = [0.04, 3.5]
+exp_range = [0.001, 12.0]
+exp_samples = 400
+exp_start_widths = [0.04, 3.5]
+iterations = 300
+difference_step = 1e-7
 bar_width = 0.1
 bar_level = 0.85
 bar_end = 0.15
 bar_reach = 2.0
 bar_samples = 321
-bar_mass_weight = 5.0
-bar_widths = [0.04, 0.8]
+bar_mass_weight = 20.0
+bar_cumulative_weight = 3.0
+bar_cumulative_step = 0.01
+bar_cumulative_pairs = 125
+bar_cumulative_from = 0.05
+bar_start_widths = [0.04, 0.8]
+bar_minimax_scales = [0.03, 0.003, 0.05]
+minimax_iterations = 300
+bar_rounds = 6
+boxy_terms = 16
+boxy_boxiness = [3.0, 3.5, 4.0]
+boxy_range = [0.001, 40.0]
+boxy_radii = 48
+boxy_angles = 12
+boxy_monopole_weight = 3.0
+boxy_force_weight = 10.0
+boxy_monopole_reach = 12.0
+boxy_centre_weight = 1.0
+boxy_mass_weight = 3.0
+boxy_widths = [0.001, 40.0]
+boxy_axis_ratios = [0.05, 20.0]
+boxy_split = 1.1
+boxy_iterations = 300

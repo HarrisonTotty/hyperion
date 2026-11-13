@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  limbShareAt,
+  limbShareFromTable,
+  mcewenLunarProfile,
   PHASE_F_CLAMP,
   PHASE_TABLE_SAMPLES,
   PHASE_TABLE_STEP_RAD,
@@ -175,4 +178,87 @@ describe("phaseFactorTable", () => {
       expect(Math.abs(read / exact - 1)).toBeLessThan(1e-4);
     },
   );
+});
+
+describe("McEwen's lunar L(α) (plan R10, R10.T10.b; decision-r07-t8b)", () => {
+  it("is 1 at 0°, 0.6084 at 30° and 0.1859 at 90°", () => {
+    expect(mcewenLunarProfile(0)).toBe(1);
+    expect(mcewenLunarProfile(30 * RAD_PER_DEG)).toBeCloseTo(0.6084, 4);
+    expect(mcewenLunarProfile(90 * RAD_PER_DEG)).toBeCloseTo(0.1859, 4);
+  });
+
+  it("falls to 0 at its root, 103.948°, which decision-r07-t8b's 103.9° rounds, and is held at 0 beyond", () => {
+    // The cubic's one real root: it is still 7.7 × 10⁻⁴ at 103.9°.
+    expect(mcewenLunarProfile(103.9 * RAD_PER_DEG)).toBeCloseTo(7.7e-4, 5);
+    expect(mcewenLunarProfile(103.94 * RAD_PER_DEG)).toBeGreaterThan(0);
+    for (const deg of [103.95, 104, 120, 150, 180]) {
+      expect(mcewenLunarProfile(deg * RAD_PER_DEG)).toBe(0);
+    }
+  });
+
+  it("falls monotonically from opposition and is NaN for a NaN phase", () => {
+    let last = mcewenLunarProfile(0);
+    for (let deg = 0.25; deg <= 180; deg += 0.25) {
+      const l = mcewenLunarProfile(deg * RAD_PER_DEG);
+      expect(l).toBeLessThanOrEqual(last);
+      last = l;
+    }
+    expect(mcewenLunarProfile(Number.NaN)).toBeNaN();
+  });
+
+  it("scales a law's L(0): L(α) = L(0) × the profile, and L(0) at every phase without a curve", () => {
+    const curved: PhotometricLaw = {
+      ...lawOf("airless-ice", 0.38),
+      lommelSeeligerCurve: "mcewen-1996",
+    };
+    const constant = lawOf("airless-ice", 0.38);
+    for (const deg of [0, 30, 90, 120]) {
+      const alpha = deg * RAD_PER_DEG;
+      expect(limbShareAt(curved, alpha)).toBeCloseTo(0.38 * mcewenLunarProfile(alpha), 15);
+      expect(limbShareAt(constant, alpha)).toBe(0.38);
+    }
+  });
+});
+
+describe("the table's L(α) channel (decision-r07-t8b)", () => {
+  const constant = lawOf("mercury", 0.7);
+  const curved: PhotometricLaw = { ...lawOf("moon", 1), lommelSeeligerCurve: "mcewen-1996" };
+
+  it("holds a law without a curve's L at every sample, its f unchanged", () => {
+    const table = phaseFactorTable(constant);
+    expect(table.alpha).toHaveLength(PHASE_TABLE_SAMPLES);
+    expect([...table.alpha].every((l) => l === Math.fround(0.7))).toBe(true);
+    for (const i of [0, 10, 100, 250, 360]) {
+      const alpha = i * PHASE_TABLE_STEP_RAD;
+      // f against the constant share, as R07 built it.
+      const end = Math.min(alpha, PHASE_TEMPLATES.mercury.validToRad);
+      const f = Math.min(PHASE_F_CLAMP, PHASE_TEMPLATES.mercury.phaseV(end) / shapePhase(0.7, end));
+      expect(table.rgb[3 * i + 1]).toBe(Math.fround(f));
+    }
+  });
+
+  it("holds a curved law's L(α) at each sample's own phase, read linearly as the shader reads it", () => {
+    const table = phaseFactorTable(curved);
+    for (const i of [0, 60, 180, 207, 208, 300]) {
+      expect(table.alpha[i]).toBe(Math.fround(mcewenLunarProfile(i * PHASE_TABLE_STEP_RAD)));
+    }
+    const below = table.alpha[60] ?? Number.NaN;
+    const above = table.alpha[61] ?? Number.NaN;
+    expect(limbShareFromTable(table, 60.25 * PHASE_TABLE_STEP_RAD)).toBeCloseTo(
+      below + 0.25 * (above - below),
+      12,
+    );
+  });
+
+  it("tabulates a curved law's f against its L(α), so f Φ_shape(α; L(α)) stays Φ_t where unclamped", () => {
+    for (let deg = 0; deg <= 150; deg += 5) {
+      const alpha = deg * RAD_PER_DEG;
+      const f = phaseFactor(curved, alpha)[1];
+      if (f >= PHASE_F_CLAMP) {
+        continue;
+      }
+      const shape = shapePhase(1, alpha, limbShareAt(curved, alpha));
+      expect(f * shape).toBeCloseTo(PHASE_TEMPLATES.moon.phaseV(alpha), 12);
+    }
+  });
 });

@@ -232,7 +232,10 @@ domain_tags! {
     /// An accepted system's signed age at the epoch.
     SYSTEM_AGE: System = "system.age";
 
-    /// A system's velocity at the epoch: reserved for plan 08 and opened by nothing before it.
+    /// A system's velocity at the epoch: the escape cut's attempts at words 4k (P08.T5), for a
+    /// member of a displaced class in a first-excursion bin its outbound marks at words 64 + k
+    /// (P08.T12.d), and for a hypervelocity survivor its launch's tries at words 4k to 4k + 3
+    /// (P09.T34.b).
     SYSTEM_VELOCITY: System = "system.velocity";
 
     // Plan 06: the stars. Every `star.*` draw tag has scope `Body`, is opened with
@@ -365,12 +368,15 @@ domain_tags! {
     // Scope `System`, opened with `ObjectKey::from(SystemId)`, the orbit host and the planet's
     // slot in the draw number (plan 14, design note 4): `planet.disc`, `planet.plane`,
     // `planet.class`, `planet.count`, `planet.spacing`, `planet.mass`, `planet.secondgen`,
-    // `belt.population`, `cometary.population`.
+    // `belt.population`, `cometary.population`, and, opened with `ObjectKey::from(SystemId)`
+    // alone, `system.abundances` (P14.T50.a).
     //
     // Scope `Body`, opened with `ObjectKey::from(BodyId)`: `planet.orbit`, `planet.radius`,
     // `planet.volatiles`, `planet.spin`, `planet.origin`, `planet.scatter` (ruling 80),
     // `moon.count`, `moon.mass`, `moon.orbit`, `moon.impact`, `moon.capture`, `ring.system`,
-    // `belt.member`, `body.surface`, `body.resources`.
+    // `belt.member`, `body.surface`, `body.resources`, `body.continents` (P14.T48.a),
+    // `body.formation` (P14.T51.c), `body.cold_traps` (P14.T51.f), `body.envelope_formation`
+    // (P14.T50.d).
     //
     // Scope `Event`, each behind an event tag of plan 06's block 0x0400–0x04FF: `body.impact`
     // (0x0400), `body.eruption` (0x0401), `body.storm` (0x0402), `body.duststorm` (0x0403),
@@ -417,7 +423,9 @@ domain_tags! {
     /// A planet's formation (P14.T28.a): the rank of a giant's formation age between 0.5 Myr and
     /// its disc's lifetime, word 0, and the rank of the host age at which a terrestrial planet's
     /// magma ocean ends, word 1, one uniform each, drawn for every planet; words 2–7 are reserved
-    /// (`planetary::hosts::young::FormationDraws`).
+    /// (`planetary::hosts::young::FormationDraws`). On a rogue planet's object, body `0x0000`,
+    /// which no planet is, words 2–4 are its birth orbit (P14.T27.b): its semi-major axis's rank,
+    /// and its plane's cos i and node, one uniform each (`planetary::hosts::substellar::BirthOrbit`).
     PLANET_ORIGIN: Body = "planet.origin";
 
     /// A planet's radius rank (P14.T30.a, design note 8): the one uniform that places it within
@@ -510,7 +518,9 @@ domain_tags! {
     /// its depletion factor and of its size slope, one uniform each, a Kuiper-like belt's bright
     /// mark and its bright efficiency's standard normal (words 8n + 3 and 8n + 4), and the rank of
     /// its largest member's share (word 8n + 5, ruling 100.3); words 8n + 6 and 8n + 7 are
-    /// reserved (`planetary::belts::BeltDraws`).
+    /// reserved (`planetary::belts::BeltDraws`). Belt slot 14 (`0xEE`), which no belt takes, holds
+    /// a white dwarf's marks (P14.T28.d): its pollution mark, its debris disc's mark and the rank
+    /// of the disc's span, words 112–114 (`planetary::hosts::white_dwarfs::WhiteDwarfDraws`).
     BELT_POPULATION: System = "belt.population";
 
     /// A belt's named member (P14.T21.c), keyed by the member: the rank of its component, its
@@ -553,17 +563,22 @@ domain_tags! {
     /// each per attempt (P08.T12.c).
     DISPLACED_DEATH: System = "displaced.death";
 
-    /// A displaced record's formation radius in the mixed age bins: one uniform (P08.T12.c).
+    /// A displaced record's formation radius in the mixed age bins: one uniform (P08.T12.c); a
+    /// hypervelocity survivor's birth component, by the components' Type Ia rates: one mark
+    /// (P09.T34.b).
     DISPLACED_BIRTH: System = "displaced.birth";
 
     /// The speed bin an unbound record's kick is drawn in, for the fastest classes: one mark
-    /// (P08.T12.c).
+    /// (P08.T12.c); a hypervelocity survivor's population, slow or fast: one mark (P09.T34.b).
     DISPLACED_ORIGIN_BIN: System = "displaced.origin_bin";
 
-    /// A runaway or walkaway's ejection speed: one uniform (P08.T12.c).
+    /// A ballistic runaway or walkaway's ejection: its speed's rank in its speed bin, word 0, and
+    /// the kick's azimuth, word 1 (P08.T12.d); a hypervelocity survivor's launch speed's rank in
+    /// its population, word 0 (P09.T34.b).
     RUNAWAY_SPEED: System = "runaway.speed";
 
-    /// A runaway or walkaway's ejection channel and age: one mark and two uniforms (P08.T12.c).
+    /// A runaway or walkaway's ejection age, among the quadrature's: one mark (P08.T12.c); a
+    /// hypervelocity survivor's time since launch: one uniform (P09.T34.b).
     RUNAWAY_EJECTION: System = "runaway.ejection";
 
     /// A lesser halo progenitor's kinematics (P08.T3): its anisotropy β, uniform on 0.3–0.7, word
@@ -638,8 +653,9 @@ domain_tags! {
     // reserves. Appended here, after plan 13's entries, because the macro's order fixes `ALL`.
 
     /// A planet's volatile inventory (P14.T13.a): the ranks of its water, carbon and nitrogen as
-    /// log-normal multiples of Earth's per unit mass, words 0–2, one uniform each; words 3–7 are
-    /// reserved (`planetary::derive::atmosphere::VolatileDraws`).
+    /// log-normal multiples of Earth's per unit mass, words 0–2, one uniform each; the ranks of its
+    /// sulphur, chlorine and mantle ΔIW, words 3–5, one uniform each, read by their numbers
+    /// (P14.T50.a); words 6–7 are reserved (`planetary::derive::atmosphere::VolatileDraws`).
     PLANET_VOLATILES: Body = "planet.volatiles";
 
     // Plan 09, phases 2 and 3 (P09.T7–T13), appended after plan 14's atmospheres: a globular's
@@ -670,7 +686,9 @@ domain_tags! {
     // note 23); the explosion's event tag is backed by an `Event` tag.
 
     /// A Type Ia progenitor's delay-first draw: its component, its age, its channel, its masses
-    /// and its time of explosion (P09.T18.b, `IaProgenitor::draw`).
+    /// and its time of explosion (P09.T18.b, `IaProgenitor::draw`). The class's candidates draw
+    /// with `IaProgenitor::draw_in`, whose component is their site's pick, so their word 0 is
+    /// unread (P09.T34.a).
     CLASS_TYPE_IA_PROGENITOR: System = "class.type_ia.progenitor";
 
     /// What a Type Ia leaves: the surviving donor's population and speed, two words (P09.T18.c,
@@ -772,6 +790,542 @@ domain_tags! {
     /// and the mean anomaly at the epoch, one uniform each
     /// (`stellar::multiplicity::draw_hierarchy`).
     SYSTEM_SUBSTELLAR: System = "system.substellar";
+
+    // Rendering plan R09: the surface generator (R09.T1.a). Its `surface.*` tags are the surface
+    // crate's (`hyperion_surface::tags`); this one sits beside plan 14's `body.surface` in name and
+    // scope, and is appended here, after plan 11's entries, because the macro's order fixes `ALL`.
+
+    /// A body's detail seed (R09.T1.b's `planetary::hooks::detail_seed`), keyed by the body:
+    /// word 0, the seed itself, which no other property reads. Sent to clients in the surface
+    /// seed's place, it opens only the local synthesis's tags
+    /// ([`DetailSeed::stream`](crate::rng::DetailSeed::stream)), and shares
+    /// nothing with the surface seed but the universe seed (the rendering brainstorm's
+    /// "Knowledge, and the surface seed"; R09, Design note 2).
+    BODY_SURFACE_DETAIL: Body = "body.surface.detail";
+
+    // Plan 14, phase K: the continental fraction (P14.T48.a), under the name and scope the "Plan
+    // 14" heading above lists. Appended here, after R09's entry, because the macro's order fixes
+    // `ALL`.
+
+    /// A body's continental asymptote f∞ (P14.T48.a), keyed by the body: word 0, one open uniform
+    /// u, f∞ = 0.2 + 0.5 u; words 1–7 are reserved
+    /// (`planetary::hooks::figures::relief::continental_asymptote`).
+    BODY_CONTINENTS: Body = "body.continents";
+
+    // Plan 14, phase L: the host's abundances (P14.T50.a; decision-composition §1.11), under the
+    // name and scope the "Plan 14" heading above lists. Appended here, after `body.continents`,
+    // because the macro's order fixes `ALL`.
+
+    /// A system's host abundances (P14.T50.a), keyed by the system, so that every body of it reads
+    /// one value until plan 06 carries them on the star: word 0, the rank of the host's C/O, and
+    /// word 1, that of its Mg/Si, one open uniform each; words 2–7 are reserved
+    /// (`planetary::chem::AbundanceDraws`).
+    SYSTEM_ABUNDANCES: System = "system.abundances";
+
+    // Plan 09, phase 6 (P09.T30.a): the central black hole's own events, behind event tags 0x0200
+    // and 0x0201 in plan 09's block, keyed through the event key with the black hole's ID as the
+    // subject (Design note 23). Appended here, after plan 14's `system.abundances`, because the
+    // macro's order fixes `ALL`.
+
+    /// The central black hole's X-ray flares, behind event tag 0x0200 (P09.T30.a,
+    /// `galaxy::features::centre::events::flares`).
+    CENTRE_EV_FLARE: Event = "centre.ev.flare";
+
+    /// The central black hole's tidal disruptions of stars, behind event tag 0x0201 (P09.T30.a,
+    /// `galaxy::features::centre::events::disruptions`).
+    CENTRE_EV_TIDAL_DISRUPTION: Event = "centre.ev.tidal_disruption";
+
+    // Plan 06, P06.T28.b: the Vela-like glitch class, under the name and scope the "Plan 06"
+    // heading above lists. Appended here, after plan 09's `centre.ev.tidal_disruption`, because the
+    // macro's order fixes `ALL`.
+
+    /// Whether a neutron star glitches as a Vela-like pulsar (P06.T28.b), keyed by the star's body:
+    /// word 0, one mark decided against the Vela-like share
+    /// (`stellar::events::glitches::is_vela_like_marked`), fixed for the star's life; words 1–7
+    /// are reserved, for a per-star size index or characteristic size. Unlike the draw tags under
+    /// the heading, it is not a member of `stellar::draws::StarDraws`, and word 0 is read whatever
+    /// the kick loop's attempt.
+    STAR_NS_GLITCH_CLASS: Body = "star.ns.glitch_class";
+
+    // Plan 14, phase L: a small body's formation time (P14.T51.c), under the name and scope the
+    // "Plan 14" heading above lists. Appended here, after plan 06's `star.ns.glitch_class`,
+    // because the macro's order fixes `ALL`.
+
+    /// A body's formation time `t_f` (P14.T51.c), keyed by the body, for every body that is
+    /// neither a planet nor a giant-impact moon, whose crust's thermal history reads it: word 0,
+    /// one open uniform, its place in its window; words 1–7 are reserved
+    /// (`planetary::hooks::crust::formation_time`).
+    BODY_FORMATION: Body = "body.formation";
+
+    // Plan 14, phase L (P14.T51.f): an airless body's exposed fraction of its cold traps, under the
+    // name and scope the "Plan 14" heading above lists. Appended here, after P14.T51.c's
+    // `body.formation`, because the macro's order fixes `ALL`.
+
+    /// The share of a body's cold traps whose ice is exposed, `f_x` (P14.T51.f), keyed by the body:
+    /// word 0, one open uniform, its log-uniform rank in [0.016, 0.45]; words 1–7 are reserved
+    /// (`planetary::hooks::cold_traps::exposed_fraction`).
+    BODY_COLD_TRAPS: Body = "body.cold_traps";
+
+    // Plan 14, phase G (P14.T31.a): three of the five event tags the "Plan 14" heading above
+    // lists, each behind its event tag in plan 06's block 0x0400–0x04FF; P14.T31.b adds
+    // `body.storm` and `body.duststorm`, after `system.comet`. Appended here, after P14.T51.f's
+    // `body.cold_traps`, because the macro's order fixes `ALL`.
+
+    /// Impacts on a body (P14.T31.a), behind event tag 0x0400, keyed through the event key with the
+    /// body's ID as the subject: Poisson bins of a Julian year (`planetary::events::impacts`).
+    BODY_IMPACT: Event = "body.impact";
+
+    /// Volcanic eruptions on a body (P14.T31.a), behind event tag 0x0401, keyed through the event
+    /// key with the body's ID as the subject: Poisson bins of a week
+    /// (`planetary::events::eruptions`).
+    BODY_ERUPTION: Event = "body.eruption";
+
+    /// The perihelion passages of a system's long-period comets (P14.T31.a), behind event tag
+    /// 0x0404, keyed through the event key with the system's ID as the subject: Poisson bins of a
+    /// Julian year (`planetary::events::comets`).
+    SYSTEM_COMET: Event = "system.comet";
+
+    // Plan 14, phase G (P14.T31.b): the last two of the five event tags the "Plan 14" heading
+    // above lists, each behind its event tag in plan 06's block 0x0400–0x04FF. Appended here,
+    // after P14.T31.a's `system.comet`, because the macro's order fixes `ALL`.
+
+    /// The great storms of a giant planet (P14.T31.b), behind event tag 0x0402, keyed through the
+    /// event key with the body's ID as the subject: a monotone phase of the orbital period
+    /// (`planetary::events::storms`).
+    BODY_STORM: Event = "body.storm";
+
+    /// The global dust storms of a dry, thin-aired planet (P14.T31.b), behind event tag 0x0403,
+    /// keyed through the event key with the body's ID as the subject: a monotone phase of the
+    /// orbital period with a skip, held to the perihelion season
+    /// (`planetary::events::dust_storms`).
+    BODY_DUSTSTORM: Event = "body.duststorm";
+
+    // Plan 09, phase 4 (P09.T17): the supernova test's explosion energy, which plan 09's Provides
+    // names with scope `System`, read on every side of the carve-out. Appended here, after
+    // P14.T31.b's `body.duststorm`, because the macro's order fixes `ALL`.
+
+    /// A supernova's kinetic energy (P09.T17, `DeathMarks`), opened with
+    /// `ObjectKey::from(SystemId)` of the system whose star explodes: word 0, one uniform, the
+    /// energy's rank in its death's law (`ExplosionEnergy::from_uniform`, or
+    /// `ExplosionEnergy::electron_capture_from_uniform` for an electron-capture supernova and
+    /// `ExplosionEnergy::iax_from_uniform` for a Type Iax); words 1–7 are reserved.
+    SNR_ENERGY: System = "snr.energy";
+
+    // Plan 09, phase 7 (P09.T32): the catalogue-class grid's candidate count, shared by every
+    // class, since a class cell's word carries its class (Design note 23). Each class adds its
+    // candidates' own `System` tags under `class.` in its own task. Appended here, after
+    // P09.T17's `snr.energy`, because the macro's order fixes `ALL`.
+
+    /// A catalogue-class cell's candidate count (P09.T32, `CatalogueClassCell`), opened with
+    /// `ObjectKey::cell(CatalogueCellKey::word())`, the raw ID of the cell's candidate 0 with its
+    /// index and member zeroed: one Poisson draw from word 0, of mean the class's bound × the
+    /// cell's volume (`Stream::poisson`: no word at a mean of 0, one below 10, two per attempt
+    /// from 10).
+    CLASS_CELL: Cell = "class.cell";
+
+    // Plan 10 (P10.T7.a): a dwarf core's mean metallicity, under the "Plan 10" heading's rule of
+    // keys. Appended here, after P09.T32's `class.cell`, because the macro's order fixes `ALL`.
+
+    /// A dwarf core's offset of its mean \[Fe/H\] from Kirby et al. 2013's eq. 4: one normal draw
+    /// of 0.17 dex, two words, keyed by `ObjectKey::galaxy_item` of its progenitor's number, `6 +
+    /// j`, as the progenitor's other draws are (P10.T7.a).
+    DWARF_CORE_METALLICITY: Galaxy = "dwarf.core.metallicity";
+
+    // Plan 10, P10.T5: the particle spray, under the "Plan 10" heading's rule (scope `Galaxy`),
+    // keyed by `ObjectKey::galaxy_item` of the stream's number (Design note 14). Appended here,
+    // after P09.T32's `class.cell`, because the macro's order fixes `ALL`.
+
+    /// A stream's release schedule (P10.T5.a, `global_list::spray::ReleaseSchedule`): word `i`, one
+    /// uniform, where release `i` falls inside its stratum of the tube's mass.
+    STREAM_SPRAY_RELEASE: Galaxy = "stream.spray.release";
+
+    /// A stream's release offsets (P10.T5.b, `global_list::spray::Spray`): words `4t` to `4t + 3`
+    /// for tracer `t`, one uniform each, the ranks of its `k_r`, `k_vφ`, `k_z` and `k_vz` in their
+    /// cut Gaussians (Fardal, Huang and Weinberg 2015).
+    STREAM_SPRAY_OFFSETS: Galaxy = "stream.spray.offsets";
+
+    // Plan 10, P10.T6.b: a tube's gap noise, under the "Plan 10" heading's rule (scope `Galaxy`),
+    // keyed by `ObjectKey::galaxy_item` of the stream's number (Design note 14). Appended here,
+    // after P10.T5's spray, because the macro's order fixes `ALL`.
+
+    /// A stream's gap noise (P10.T6.b, `global_list::tube::TubeTable::noise`, Design note 8):
+    /// words `2k` and `2k + 1`, a Box–Muller pair whose first normal is the noise's node `k` along
+    /// ψ, from the trailing arm's tip.
+    STREAM_TUBE_GAPS: Galaxy = "stream.tube.gaps";
+
+    // Plan 10, P10.T7.b: a dwarf core's members, placed by plan 09's machinery on its `member.*`
+    // tags and keyed by their `DwarfCoreMemberId` (Design note 14), with scope `System`, beside
+    // the "Plan 10" heading's `Galaxy` tags. Appended here, after P10.T6.b's gaps, because the
+    // macro's order fixes `ALL`.
+
+    /// A dwarf core member's age, by the inverse transform of its core's star formation history:
+    /// word `k`, one uniform, for attempt `k` of its star's draw (P10.T7.b).
+    DWARF_CORE_AGE: System = "dwarf.core.age";
+
+    /// A dwarf core member's offset of its \[Fe/H\] from its core's mean, in units of the core's
+    /// spread: one normal draw, two words (P10.T7.b).
+    DWARF_CORE_ABUNDANCE: System = "dwarf.core.abundance";
+
+    // Plan 10, P10.T8: a stream's members, keyed by their `StreamMemberId` (Design note 14), with
+    // scope `System`, beside the "Plan 10" heading's `Galaxy` tags; their initial masses are on
+    // plan 09's `member.mass`. Appended here, after P10.T7.b's, because the macro's order fixes
+    // `ALL`.
+
+    /// A dwarf's stream member's age, by the inverse transform of its dwarf's history: word `k`,
+    /// one uniform, for attempt `k` of its star's draw (P10.T8.a). A globular's stream's members
+    /// take its cluster's age and read none.
+    STREAM_MEMBER_AGE: System = "stream.member.age";
+
+    /// A dwarf's stream member's offset of its \[Fe/H\] from its dwarf's mean, in units of the
+    /// dwarf's spread: one normal draw, two words (P10.T8.a).
+    STREAM_MEMBER_ABUNDANCE: System = "stream.member.abundance";
+
+    /// A tube cell's member count in a band (P10.T8.b), opened with `ObjectKey::cell` of the raw
+    /// ID of the cell's member 0 in the band (Design note 14): one Poisson draw from word 0.
+    STREAM_CELL: Cell = "stream.cell";
+
+    /// A stream member's place in its tube cell (P10.T8.b): three uniforms, its along coordinate
+    /// in its along cell, then its two across coordinates' ranks in their truncated normals.
+    STREAM_MEMBER_POSITION: System = "stream.member.position";
+
+    /// A stream member's velocity about its tube's mean (P10.T8.c): a Box–Muller pair and the
+    /// first normal of a second, four words, along the tube's local tangent, normal and binormal.
+    STREAM_MEMBER_VELOCITY: System = "stream.member.velocity";
+    // Plan 09, phase 7 (P09.T33.a): a core-collapse candidate's draws, `System` tags under
+    // `class.core_collapse.`, one per property group, opened with `ObjectKey::from(SystemId)` of
+    // the candidate's ID, its member 0 (Design note 23). Its primary's own draws are plan 06's
+    // `star.*` tags, keyed by its body 0 at attempt 0, and its explosion's energy `snr.energy`.
+    // Appended after P10.T7.a's `dwarf.core.metallicity`, because the macro's order fixes `ALL`.
+
+    /// A core-collapse candidate's site: words 0–2 its position in its 512 ly cell, x, y and z,
+    /// and word 3 the mark that thins it on the young field's density and picks its density
+    /// component (P09.T33.a).
+    CLASS_CORE_COLLAPSE_SITE: System = "class.core_collapse.site";
+
+    /// A core-collapse candidate's primary's initial mass, in band E: one word (P09.T33.a).
+    CLASS_CORE_COLLAPSE_MASS: System = "class.core_collapse.mass";
+
+    /// A core-collapse candidate's \[Fe/H\]: one normal of its component's distribution at its site
+    /// (P09.T33.a).
+    CLASS_CORE_COLLAPSE_METALLICITY: System = "class.core_collapse.metallicity";
+
+    /// A core-collapse candidate's death: word 0 a uniform that places T in the field's thinning
+    /// interval, word 1 the mark that thins it on its component's death rate (P09.T33.a).
+    CLASS_CORE_COLLAPSE_DEATH: System = "class.core_collapse.death";
+
+    /// A core-collapse candidate's velocity at its site, galactic: plan 08's draw of its
+    /// component's law, four words per attempt of the escape cut (P09.T33.a); from 27 a runaway's
+    /// or a walkaway's, its displaced class's law, as plan 08's members of the class draw theirs
+    /// (P09.T33.b).
+    CLASS_CORE_COLLAPSE_VELOCITY: System = "class.core_collapse.velocity";
+
+    // Plan 09, phase 7 (P09.T34.a): a Type Ia candidate's draws beside phase 4's
+    // `class.type_ia.progenitor` and `class.type_ia.leftover`, `System` tags under
+    // `class.type_ia.`, opened with `ObjectKey::from(SystemId)` of the candidate's ID, its member 0
+    // (Design note 23). Appended after P09.T33.a's `class.core_collapse.velocity`, because the
+    // macro's order fixes `ALL`.
+
+    /// A Type Ia candidate's site: words 0–2 its position in its 512 ly cell, x, y and z, and word
+    /// 3 the mark that thins it on the galaxy's Type Ia density and picks its density component
+    /// (P09.T34.a).
+    CLASS_TYPE_IA_SITE: System = "class.type_ia.site";
+
+    /// A Type Ia candidate's velocity at its site, galactic: plan 08's draw of its component's
+    /// law, four words per attempt of the escape cut (P09.T34.a).
+    CLASS_TYPE_IA_VELOCITY: System = "class.type_ia.velocity";
+
+    /// A Type Ia entry's survivor's direction of flight from the site, in the progenitor's frame:
+    /// two words, an isotropic direction (P09.T34.a).
+    CLASS_TYPE_IA_SURVIVOR: System = "class.type_ia.survivor";
+
+    // Plan 11, P11.T8.a: an accreting white dwarf candidate's draws, `System` tags under
+    // `class.awd.` (the plan's `class.awd`, one per property group, as P09.T33.a's are), opened
+    // with `ObjectKey::from(SystemId)` of the candidate's ID, its member 0 (Design note 23). The
+    // fast and the slow hosts share them; their IDs differ in the class field. Its two stars'
+    // own draws are plan 06's `star.*` tags, keyed by bodies 0 and 1 at attempt 0. And the event
+    // key of plan 11's `0x0300 NOVA`. Appended after P09.T34.a's `class.type_ia.survivor`, because
+    // the macro's order fixes `ALL`.
+
+    /// An accreting white dwarf candidate's site: words 0–2 its position in its 512 ly cell, x, y
+    /// and z, and word 3 the mark that thins it on the class's density and picks its density
+    /// component (P11.T8.a).
+    CLASS_AWD_SITE: System = "class.awd.site";
+
+    /// An accreting white dwarf candidate's scan marks: word 0 the rank of its nova recurrence
+    /// period on its class's side of L, word 1 the rank of its white dwarf's mass, word 2 the
+    /// place of its nova clock's origin in one period (P11.T8.a).
+    CLASS_AWD_RECURRENCE: System = "class.awd.recurrence";
+
+    /// An accreting white dwarf candidate's velocity at its site, galactic: plan 08's draw of its
+    /// component's law, four words per attempt of the escape cut (P11.T8.a).
+    CLASS_AWD_VELOCITY: System = "class.awd.velocity";
+
+    /// An accreting white dwarf candidate's binary now: word 0 its donor's kind, word 1 the rank of
+    /// its period, word 2 that of its donor's mass, words 3–5 its orbit's cosine of inclination,
+    /// ascending node and argument of periapsis, word 6 its mean anomaly at the epoch (P11.T8.a).
+    CLASS_AWD_BINARY: System = "class.awd.binary";
+
+    /// An accreting white dwarf candidate's history: the ranks of its primary's initial mass
+    /// (word 0), its donor's initial mass (word 1) and its age (word 2) (P11.T8.a).
+    CLASS_AWD_HISTORY: System = "class.awd.history";
+
+    /// An accreting white dwarf candidate's \[Fe/H\]: one normal of its component's distribution
+    /// at its site and age (P11.T8.a).
+    CLASS_AWD_METALLICITY: System = "class.awd.metallicity";
+
+    /// The event key of an accreting white dwarf's novae (plan 11's `0x0300 NOVA`, P11.T8.a): a
+    /// monotone phase at its recurrence period on its white dwarf, body 0.
+    BINARY_EV_NOVA: Event = "binary.ev.nova";
+
+    // Plan 09, phase 7 (P09.T43): a luminous-blue-variable candidate's draws, `System` tags under
+    // `class.lbv.`, one per property group, opened with `ObjectKey::from(SystemId)` of the
+    // candidate's ID, its member 0 (Design note 23). Its primary's own draws are plan 06's `star.*`
+    // tags, keyed by its body 0 at attempt 0. Appended after P11.T8.a's `binary.ev.nova`,
+    // because the macro's order fixes `ALL`.
+
+    /// A luminous-blue-variable candidate's site, its position at the epoch: words 0–2 its
+    /// position in its 4,096 ly cell, x, y and z, and word 3 the mark that thins it on the young
+    /// field's density and picks its density component (P09.T43).
+    CLASS_LBV_SITE: System = "class.lbv.site";
+
+    /// A luminous-blue-variable candidate's primary's initial mass: word 0 the mark that picks
+    /// the sampler's node, word 1 the uniform that places the mass among the node's (P09.T43).
+    CLASS_LBV_MASS: System = "class.lbv.mass";
+
+    /// A luminous-blue-variable candidate's age at the epoch: word 0 the uniform that places it
+    /// among the node's ages, word 1 the mark that thins it on its component's age density
+    /// (P09.T43).
+    CLASS_LBV_AGE: System = "class.lbv.age";
+
+    /// A luminous-blue-variable candidate's \[Fe/H\]: one normal of its component's distribution at
+    /// its site and age (P09.T43).
+    CLASS_LBV_METALLICITY: System = "class.lbv.metallicity";
+
+    /// A luminous-blue-variable candidate's velocity at its site, galactic: plan 08's draw of its
+    /// component's law, four words per attempt of the escape cut (P09.T43).
+    CLASS_LBV_VELOCITY: System = "class.lbv.velocity";
+
+    // Plan 11, P11.T8.c: a stellar merger candidate's draws, `System` tags under `class.merger.`
+    // (the plan's `class.merger`, one per property group, as P11.T8.a's are), opened with
+    // `ObjectKey::from(SystemId)` of the candidate's ID, its member 0 (Design note 23). Its two
+    // stars' own draws are plan 06's `star.*` tags, keyed by bodies 0 and 1 at attempt 0. Its
+    // luminous red nova's event tag is P11.T9's. Appended after P09.T43's `class.lbv.velocity`,
+    // because the macro's order fixes `ALL`.
+
+    /// A stellar merger candidate's site, its position at the epoch: words 0–2 its position in
+    /// its 4,096 ly cell, x, y and z, and word 3 the mark that thins it on the class's density and
+    /// picks its density component (P11.T8.c).
+    CLASS_MERGER_SITE: System = "class.merger.site";
+
+    /// A stellar merger candidate's time: word 0 the place of its merger time T in the source
+    /// horizon, word 1 the rank of its system's age at the epoch in its component's law
+    /// (P11.T8.c).
+    CLASS_MERGER_TIME: System = "class.merger.time";
+
+    /// A stellar merger candidate's \[Fe/H\]: one normal of its component's distribution at its
+    /// site and age (P11.T8.c).
+    CLASS_MERGER_METALLICITY: System = "class.merger.metallicity";
+
+    /// A stellar merger candidate's pair: word 0 its primary's layer, word 1 the rank of its
+    /// primary's initial mass in the layer's band, word 2 the rank of its mass ratio (P11.T8.c).
+    CLASS_MERGER_MASS: System = "class.merger.mass";
+
+    /// A stellar merger candidate's velocity at its site, galactic: plan 08's draw of its
+    /// component's law, four words per attempt of the escape cut (P11.T8.c).
+    CLASS_MERGER_VELOCITY: System = "class.merger.velocity";
+
+    /// A stellar merger candidate's orbit before the merger: words 0–2 its cosine of inclination,
+    /// ascending node and argument of periapsis, word 3 its mean anomaly at the epoch (P11.T8.c).
+    CLASS_MERGER_BINARY: System = "class.merger.binary";
+
+    // Plan 11, P11.T8.d: a neutron-star merger candidate's draws, `System` tags under
+    // `class.nsm.` (the plan's `class.nsm`, one per property group), opened with
+    // `ObjectKey::from(SystemId)` of the candidate's ID, its member 0 (Design note 23). Its two
+    // progenitors' own draws are plan 06's `star.*` tags, keyed by bodies 0 and 1 at attempt 0. Its
+    // kilonova's event tag is P11.T9's. Appended after P11.T8.c's `class.merger.binary`, because
+    // the macro's order fixes `ALL`.
+
+    /// A neutron-star merger candidate's site, its position at the epoch: words 0–2 its position
+    /// in its 4,096 ly cell, x, y and z, and word 3 the mark that thins it on the class's density
+    /// and picks its density component (P11.T8.d).
+    CLASS_NSM_SITE: System = "class.nsm.site";
+
+    /// A neutron-star merger candidate's time: word 0 the place of its merger time T in the source
+    /// horizon, word 1 the rank of its system's age at the epoch in its component's law
+    /// (P11.T8.d).
+    CLASS_NSM_TIME: System = "class.nsm.time";
+
+    /// A neutron-star merger candidate's \[Fe/H\]: one normal of its component's distribution at
+    /// its site and age (P11.T8.d).
+    CLASS_NSM_METALLICITY: System = "class.nsm.metallicity";
+
+    /// A neutron-star merger candidate's pair: word 0 its kind, words 1 and 2 the ranks of its
+    /// primary's and its secondary's masses at the merger, words 3 and 4 those of their
+    /// progenitors' initial masses (P11.T8.d).
+    CLASS_NSM_MASS: System = "class.nsm.mass";
+
+    /// A neutron-star merger candidate's velocity at its site, galactic: plan 08's draw of its
+    /// component's law, four words per attempt of the escape cut (P11.T8.d).
+    CLASS_NSM_VELOCITY: System = "class.nsm.velocity";
+
+    /// A neutron-star merger candidate's orbit before the merger: words 0–2 its cosine of
+    /// inclination, ascending node and argument of periapsis, word 3 its mean anomaly at the epoch
+    /// (P11.T8.d).
+    CLASS_NSM_BINARY: System = "class.nsm.binary";
+
+    // Plan 14, P14.T28.e: a neutron star's second-generation planets, under the `planet.secondgen`
+    // name the "Plan 14" heading reserves. Appended after P11.T8.d's `class.nsm.binary`, because
+    // the macro's order fixes `ALL`.
+
+    /// A neutron star's second-generation system (P14.T28.e): its mark, the rank of its count,
+    /// its plane's two uniforms, and its bodies' axes' and masses' ranks, words 0–9 of orbit host
+    /// h's block from word 16h; words 10–15 are reserved
+    /// (`planetary::hosts::second_generation::SecondGenerationDraws`).
+    PLANET_SECONDGEN: System = "planet.secondgen";
+
+    // Plan 11, P11.T8.b: an X-ray binary candidate's draws, `System` tags under `class.xrb.` (the
+    // plan's `class.xrb`, one per property group), opened with `ObjectKey::from(SystemId)` of the
+    // candidate's ID, its member 0 (Design note 23). Its two stars' own draws are plan 06's
+    // `star.*` tags, keyed by bodies 0 and 1. No event tag: the transients' and the Be/X
+    // outbursts' series are P11.T9's. Appended after P14.T28.e's `planet.secondgen`, because
+    // the macro's order fixes `ALL`.
+
+    /// An X-ray binary candidate's site: words 0–2 its position in its 512 ly cell, x, y and z,
+    /// and word 3 the mark that thins it on the class's density and picks its density component,
+    /// whose population gives its side, low-mass or high-mass (P11.T8.b).
+    CLASS_XRB_SITE: System = "class.xrb.site";
+
+    /// An X-ray binary candidate's kind on its side (word 0) and, for a low-mass transient, the
+    /// rank of its outbursts' recurrence (word 1), an ultracompact host's drawn after its binary's
+    /// marks, whose rate makes it one (P11.T8.b and its fix).
+    CLASS_XRB_KIND: System = "class.xrb.kind";
+
+    /// A high-mass X-ray binary candidate's recoil from its supernova: word 0 the rank of its
+    /// speed, words 1–2 its isotropic direction, word 3 the rank of the years since (P11.T8.b).
+    CLASS_XRB_RECOIL: System = "class.xrb.recoil";
+
+    /// An X-ray binary candidate's velocity at its site, galactic: plan 08's draw of its
+    /// component's law, four words per attempt of the escape cut (P11.T8.b).
+    CLASS_XRB_VELOCITY: System = "class.xrb.velocity";
+
+    /// An X-ray binary candidate's binary now, part of its scan marks: word 0 the rank of its
+    /// compact star's mass, then by kind the ranks of its period, its donor's mass and its rate
+    /// over the instability line (a low-mass host), of its period, eccentricity and Be star's mass
+    /// (a Be/X host), or of its period, its donor's mass and its transfer rate (a supergiant host)
+    /// (P11.T8.b).
+    CLASS_XRB_BINARY: System = "class.xrb.binary";
+
+    /// An X-ray binary candidate's orbit's orientation and phase: words 0–2 its cosine of
+    /// inclination, ascending node and argument of periapsis, word 3 its mean anomaly at the
+    /// epoch (P11.T8.b).
+    CLASS_XRB_ORBIT: System = "class.xrb.orbit";
+
+    /// An X-ray binary candidate's history: the rank of its compact star's progenitor's initial
+    /// mass (word 0) and, for a low-mass host, of its donor's initial mass (word 1) and its age in
+    /// its component's law (word 2) (P11.T8.b).
+    CLASS_XRB_HISTORY: System = "class.xrb.history";
+
+    /// An X-ray binary candidate's \[Fe/H\]: one normal of its component's distribution at its
+    /// site and age (P11.T8.b).
+    CLASS_XRB_METALLICITY: System = "class.xrb.metallicity";
+
+    // Plan 11, P11.T9.b: the event keys of the binary events 0x0301–0x0306, one `Event` tag each
+    // under `binary.ev.`, as P11.T8.a's `binary.ev.nova`. Appended after P11.T8.b's, because the
+    // macro's order fixes `ALL`.
+
+    /// The event key of a dwarf nova's outbursts (plan 11's `0x0301 DWARF_NOVA`, P11.T9.b): a
+    /// monotone phase with a skip mark on its white dwarf, body 0.
+    BINARY_EV_DWARF_NOVA: Event = "binary.ev.dwarf_nova";
+
+    /// The event key of an X-ray transient's outbursts (plan 11's `0x0302 XRAY_TRANSIENT`,
+    /// P11.T9.b): a monotone phase at its recurrence on its compact star, body 0.
+    BINARY_EV_XRAY_TRANSIENT: Event = "binary.ev.xray_transient";
+
+    /// The event key of a neutron star's Type I X-ray bursts (plan 11's `0x0303 XRAY_BURST`,
+    /// P11.T9.b): a monotone phase at the ignition recurrence on the neutron star, body 0.
+    BINARY_EV_XRAY_BURST: Event = "binary.ev.xray_burst";
+
+    /// The event key of a Be/X-ray binary's giant (Type II) outbursts (plan 11's
+    /// `0x0304 BEX_GIANT_OUTBURST`, P11.T9.b): Poisson bins on its neutron star, body 0.
+    BINARY_EV_BEX_GIANT_OUTBURST: Event = "binary.ev.bex_giant_outburst";
+
+    /// The event key of a stellar merger's luminous red nova (plan 11's `0x0305
+    /// LUMINOUS_RED_NOVA`, P11.T9.b): one-shot, bin 0 and number 0, on the merged system.
+    BINARY_EV_LUMINOUS_RED_NOVA: Event = "binary.ev.luminous_red_nova";
+
+    /// The event key of a neutron-star merger's kilonova (plan 11's `0x0306 KILONOVA`, P11.T9.b):
+    /// one-shot, bin 0 and number 0, on the merged system.
+    BINARY_EV_KILONOVA: Event = "binary.ev.kilonova";
+
+    // Plan 14, phase L (P14.T50.d): a gas envelope's formation draws, under the name and scope the
+    // "Plan 14" heading above lists. Appended here, after P11.T9.b's `binary.ev.kilonova`, because
+    // the macro's order fixes `ALL`.
+
+    /// A gas envelope's formation draws (P14.T50.d), keyed by the body: the rank of its
+    /// enrichment's log-normal scatter about the trend, word 0, and the rank of its solids' share
+    /// of its carbon, nitrogen and oxygen, word 1, one open uniform each; words 2–7 are reserved
+    /// (`planetary::chem::envelope_abundances::EnvelopeDraws`).
+    BODY_ENVELOPE_FORMATION: Body = "body.envelope_formation";
+
+    // Plan 14, phase E (P14.T26): a body's resource abundances, under the name and scope the
+    // "Plan 14" heading above lists. Appended here, after P14.T50.d's `body.envelope_formation`,
+    // because the macro's order fixes `ALL`.
+
+    /// A body's resource abundances (P14.T26), keyed by the body: the rank of each resource's
+    /// log-normal multiple, one open uniform per resource in `Resource::ALL`'s order, words 0–10;
+    /// words 11–15 are reserved (`planetary::hooks::resources::ResourceDraws`).
+    BODY_RESOURCES: Body = "body.resources";
+
+    // Plan 11, P11.T6: the Type Ia explosion mark, under the name and scope the "Plan 11" heading
+    // lists. Appended here, after P14.T26's `body.resources`, because the macro's order fixes
+    // `ALL`.
+
+    /// Whether a pair's pooled Type Ia candidate explodes (P11.T6): one mark at word 64n of
+    /// attempt n, keyed by the star the pair's orbit brings in, below η of the candidate's delay
+    /// bin and channel (`stellar::binary::ia::IaExplosionMark`).
+    BINARY_IA_MARK: Body = "binary.ia_mark";
+
+    // Plan 11, P11.T8.f: a feature member's recycled-object mark, a `System` tag opened with
+    // `ObjectKey::from(SystemId)` of the member's ID, as plan 09's `member.*` tags are. Appended
+    // after P11.T6's `binary.ia_mark`, because the macro's order fixes `ALL`.
+
+    /// A feature member's recycled-object mark (P11.T8.f): word 0, a mark against its class's
+    /// share of the recycled objects it may be, P09.T9.e's expected millisecond pulsars over a
+    /// cluster's neutron stars or its blue stragglers over its binaries at the turn-off
+    /// (`members::RecycledShares`); the other words are reserved.
+    MEMBER_RECYCLED: System = "member.recycled";
+
+    // Plan 09, phase 7 (P09.T33.b): a core-collapse candidate's ejection, beside P09.T33.a's
+    // `class.core_collapse.*` tags above. Appended here, after P11.T8.f's `member.recycled`, because
+    // the macro's order fixes `ALL`.
+
+    /// A core-collapse candidate's ejection (P09.T33.b), keyed as its other `class.core_collapse.*`
+    /// draws are: for a field candidate, word 0 the mark that picks whether it is a runaway, a
+    /// walkaway or neither by its mass's shares, and word 1 the mark that picks its ejection age
+    /// among its kind's, the channel with it; for a runaway's or a walkaway's candidate, word 0 the
+    /// mark that picks its kind and ejection age among its class's at its mass, word 1 the rank of
+    /// its ejection speed inside its class's speed bin, and word 2 its azimuth, which its class's
+    /// velocity reads in the ballistic bins.
+    CLASS_CORE_COLLAPSE_EJECTION: System = "class.core_collapse.ejection";
+
+    // Rendering plan R15: the planet viewer's `RANDOMIZE`, a tool's draw of a real planet's inputs
+    // that no generator opens. Appended here, after P09.T33.b's ejection, because the macro's order
+    // fixes `ALL`.
+
+    /// The planet viewer's `RANDOMIZE` (rendering plan R15, `planetary::viewer::draw_inputs`),
+    /// opened with its draw seed as the stream's seed and `ObjectKey::galaxy_item(try)`: words
+    /// 0–3 four uniforms that place a point by the galaxy's density, word 4 the planet picked of
+    /// the system nearest it, word 5 the new `SEED`; every later word is reserved.
+    VIEWER_DRAW: Galaxy = "viewer.draw";
+
+    // Plan 09, P09.T43 at 31 (the carve-out's residuals): a luminous-blue-variable host's alive
+    // mark, beside P09.T43's `class.lbv.*` tags above. Appended here, after R15's `viewer.draw`,
+    // because the macro's order fixes `ALL`.
+
+    /// A luminous-blue-variable host's alive mark (P09.T43, from generator version 31), keyed as
+    /// its other `class.lbv.*` draws are: word 0 the mark that thins it on the grid's alive law at
+    /// its mass against its node's bound (`lbv::AliveLaw`); the other words are reserved.
+    CLASS_LBV_ALIVE: System = "class.lbv.alive";
 }
 
 /// Fails compilation if a tag's name or hash is in two registries: the foundation's, the surface
@@ -810,6 +1364,37 @@ mod tests {
         assert!(hyperion_base::rng::tags::ALL.contains(&SELFTEST_STREAM));
     }
 
+    /// R09's names are in the registries the disjointness assertion above lists, so it covers
+    /// them: the nine `surface.*` tags in the surface crate's, `body.surface.detail` in this one.
+    #[test]
+    fn the_disjointness_check_covers_r09_s_names() {
+        use hyperion_surface::tags as surface;
+        let surface_tags = [
+            surface::SURFACE_COARSE_PLATES,
+            surface::SURFACE_COARSE_WARP,
+            surface::SURFACE_COARSE_RELIEF,
+            surface::SURFACE_COARSE_CRATER,
+            surface::SURFACE_COARSE_EROSION,
+            surface::SURFACE_RELIEF,
+            surface::SURFACE_CHANNEL,
+            surface::SURFACE_CHANNEL_BEND,
+            surface::SURFACE_CRATER,
+        ];
+        for tag in surface_tags {
+            assert!(surface::ALL.contains(&tag), "{}", tag.name());
+            assert!(
+                ALL.iter()
+                    .all(|t| t.name() != tag.name() && t.hash() != tag.hash()),
+                "{} clashes with a tag of this registry",
+                tag.name()
+            );
+        }
+        assert!(ALL.contains(&BODY_SURFACE_DETAIL));
+        assert_eq!(BODY_SURFACE_DETAIL.name(), "body.surface.detail");
+        assert_eq!(BODY_SURFACE_DETAIL.scope(), crate::rng::TagScope::Body);
+        assert_ne!(BODY_SURFACE_DETAIL.hash(), BODY_SURFACE.hash());
+    }
+
     #[test]
     fn no_two_tags_share_a_name_or_a_hash() {
         for (i, a) in ALL.iter().enumerate() {
@@ -845,6 +1430,7 @@ mod tests {
             STAR_NS_PHASE,
             STAR_BH_SPIN,
             STAR_NEBULA,
+            STAR_NS_GLITCH_CLASS,
         ];
         for tag in star {
             assert_eq!(tag.scope(), crate::rng::TagScope::Body, "{}", tag.name());
@@ -891,6 +1477,7 @@ mod tests {
             (BINARY_ORBIT, "binary.orbit", TagScope::Body),
             (BINARY_ORIENTATION, "binary.orientation", TagScope::Body),
             (BINARY_PHASE, "binary.phase", TagScope::Body),
+            (BINARY_IA_MARK, "binary.ia_mark", TagScope::Body),
         ];
         for (tag, name, scope) in tags {
             assert_eq!(tag.name(), name);
@@ -936,6 +1523,13 @@ mod tests {
     }
 
     #[test]
+    fn plan_14_registers_the_second_generation_tag_with_system_scope() {
+        assert_eq!(PLANET_SECONDGEN.name(), "planet.secondgen");
+        assert_eq!(PLANET_SECONDGEN.scope(), crate::rng::TagScope::System);
+        assert!(ALL.contains(&PLANET_SECONDGEN));
+    }
+
+    #[test]
     fn plan_14_registers_the_radius_tag_with_body_scope() {
         assert_eq!(PLANET_RADIUS.name(), "planet.radius");
         assert_eq!(PLANET_RADIUS.scope(), crate::rng::TagScope::Body);
@@ -961,6 +1555,90 @@ mod tests {
         assert_eq!(PLANET_VOLATILES.name(), "planet.volatiles");
         assert_eq!(PLANET_VOLATILES.scope(), crate::rng::TagScope::Body);
         assert!(ALL.contains(&PLANET_VOLATILES));
+    }
+
+    /// P14.T50.a's one new tag, keyed by the system, last in `ALL` when it was appended.
+    #[test]
+    fn plan_14_registers_the_abundances_tag_with_system_scope() {
+        assert_eq!(SYSTEM_ABUNDANCES.name(), "system.abundances");
+        assert_eq!(SYSTEM_ABUNDANCES.scope(), crate::rng::TagScope::System);
+        let at = |tag| ALL.iter().position(|t| *t == tag);
+        assert!(at(SYSTEM_ABUNDANCES) > at(BODY_CONTINENTS));
+    }
+
+    /// P14.T51.c's one new tag, appended after plan 06's `star.ns.glitch_class`.
+    #[test]
+    fn plan_14_registers_the_formation_tag_with_body_scope() {
+        assert_eq!(BODY_FORMATION.name(), "body.formation");
+        assert_eq!(BODY_FORMATION.scope(), crate::rng::TagScope::Body);
+        let at = |tag| ALL.iter().position(|t| *t == tag);
+        assert!(at(BODY_FORMATION) > at(STAR_NS_GLITCH_CLASS));
+    }
+
+    /// P14.T51.f's one new tag, keyed by the body, appended after P14.T51.c's.
+    #[test]
+    fn plan_14_registers_the_cold_traps_tag_with_body_scope() {
+        assert_eq!(BODY_COLD_TRAPS.name(), "body.cold_traps");
+        assert_eq!(BODY_COLD_TRAPS.scope(), crate::rng::TagScope::Body);
+        let at = |tag| ALL.iter().position(|t| *t == tag);
+        assert!(at(BODY_COLD_TRAPS) > at(BODY_FORMATION));
+    }
+
+    /// P14.T50.d's one new tag, keyed by the body, last in `ALL` when it was appended.
+    #[test]
+    fn plan_14_registers_the_envelope_formation_tag_with_body_scope() {
+        assert_eq!(BODY_ENVELOPE_FORMATION.name(), "body.envelope_formation");
+        assert_eq!(BODY_ENVELOPE_FORMATION.scope(), crate::rng::TagScope::Body);
+        let at = |tag| ALL.iter().position(|t| *t == tag);
+        assert!(at(BODY_ENVELOPE_FORMATION) > at(CLASS_NSM_BINARY));
+    }
+
+    /// P14.T26's one new tag, keyed by the body, last in `ALL` when it was appended.
+    #[test]
+    fn plan_14_registers_the_resources_tag_with_body_scope() {
+        assert_eq!(BODY_RESOURCES.name(), "body.resources");
+        assert_eq!(BODY_RESOURCES.scope(), crate::rng::TagScope::Body);
+        let at = |tag| ALL.iter().position(|t| *t == tag);
+        assert_eq!(
+            at(BODY_RESOURCES),
+            at(BODY_ENVELOPE_FORMATION).map(|i| i + 1)
+        );
+    }
+
+    /// P14.T31.a's three event tags, in the order the "Plan 14" heading lists them, the last three
+    /// of `ALL` when they were appended.
+    #[test]
+    fn plan_14_registers_its_first_event_tags_with_event_scope() {
+        let at = |tag| ALL.iter().position(|t| *t == tag);
+        let appended = [
+            (BODY_IMPACT, "body.impact"),
+            (BODY_ERUPTION, "body.eruption"),
+            (SYSTEM_COMET, "system.comet"),
+        ];
+        for (tag, name) in appended {
+            assert_eq!(tag.name(), name);
+            assert_eq!(tag.scope(), crate::rng::TagScope::Event, "{name}");
+            assert!(at(tag) > at(BODY_COLD_TRAPS), "{name}");
+        }
+        assert_eq!(at(BODY_ERUPTION), at(BODY_IMPACT).map(|i| i + 1));
+        assert_eq!(at(SYSTEM_COMET), at(BODY_ERUPTION).map(|i| i + 1));
+    }
+
+    /// P14.T31.b's two event tags, in the order the "Plan 14" heading lists them, appended after
+    /// P14.T31.a's `system.comet`.
+    #[test]
+    fn plan_14_registers_its_storm_tags_with_event_scope_after_the_comets() {
+        let at = |tag| ALL.iter().position(|t| *t == tag);
+        for (tag, name) in [
+            (BODY_STORM, "body.storm"),
+            (BODY_DUSTSTORM, "body.duststorm"),
+        ] {
+            assert_eq!(tag.name(), name);
+            assert_eq!(tag.scope(), crate::rng::TagScope::Event, "{name}");
+            assert!(at(tag) > at(SYSTEM_COMET), "{name}");
+        }
+        assert_eq!(at(BODY_STORM), at(SYSTEM_COMET).map(|i| i + 1));
+        assert_eq!(at(BODY_DUSTSTORM), at(BODY_STORM).map(|i| i + 1));
     }
 
     #[test]
@@ -1047,6 +1725,163 @@ mod tests {
             assert!(tag.name().starts_with("class."));
             assert!(ALL.contains(&tag));
         }
+        for (tag, name) in [
+            (CENTRE_EV_FLARE, "centre.ev.flare"),
+            (CENTRE_EV_TIDAL_DISRUPTION, "centre.ev.tidal_disruption"),
+        ] {
+            assert_eq!(tag.scope(), crate::rng::TagScope::Event, "{name}");
+            assert_eq!(tag.name(), name);
+            assert!(tag.name().starts_with("centre."));
+            assert!(ALL.contains(&tag));
+        }
+    }
+
+    /// Plan 09's tags of its supernova remnants and its catalogue classes' grid and candidates.
+    #[test]
+    fn plan_09_registers_its_class_tags_with_their_scopes() {
+        // P09.T17: the explosion energy, the one tag plan 09's Provides names under `snr.`.
+        assert_eq!(SNR_ENERGY.name(), "snr.energy");
+        assert_eq!(SNR_ENERGY.scope(), crate::rng::TagScope::System);
+        assert!(SNR_ENERGY.name().starts_with("snr."));
+        assert!(ALL.contains(&SNR_ENERGY));
+        // P09.T32: the class grid's candidate count, one `Cell` tag for every class.
+        assert_eq!(CLASS_CELL.name(), "class.cell");
+        assert_eq!(CLASS_CELL.scope(), crate::rng::TagScope::Cell);
+        assert!(CLASS_CELL.name().starts_with("class."));
+        assert!(ALL.contains(&CLASS_CELL));
+        // P09.T33.a: the core collapses' candidates, one `System` tag per property group.
+        for tag in [
+            CLASS_CORE_COLLAPSE_SITE,
+            CLASS_CORE_COLLAPSE_MASS,
+            CLASS_CORE_COLLAPSE_METALLICITY,
+            CLASS_CORE_COLLAPSE_DEATH,
+            CLASS_CORE_COLLAPSE_VELOCITY,
+            CLASS_CORE_COLLAPSE_EJECTION,
+        ] {
+            assert_eq!(tag.scope(), crate::rng::TagScope::System, "{}", tag.name());
+            assert!(tag.name().starts_with("class.core_collapse."));
+            assert!(ALL.contains(&tag));
+        }
+        // P09.T34.a: the Type Ia candidates' own, beside phase 4's two.
+        for tag in [
+            CLASS_TYPE_IA_SITE,
+            CLASS_TYPE_IA_VELOCITY,
+            CLASS_TYPE_IA_SURVIVOR,
+        ] {
+            assert_eq!(tag.scope(), crate::rng::TagScope::System, "{}", tag.name());
+            assert!(tag.name().starts_with("class.type_ia."));
+            assert!(ALL.contains(&tag));
+        }
+    }
+
+    /// P09.T43: the luminous blue variables' candidates, one `System` tag per property group.
+    #[test]
+    fn plan_09_registers_the_luminous_blue_variables_tags() {
+        for tag in [
+            CLASS_LBV_SITE,
+            CLASS_LBV_MASS,
+            CLASS_LBV_AGE,
+            CLASS_LBV_METALLICITY,
+            CLASS_LBV_VELOCITY,
+            CLASS_LBV_ALIVE,
+        ] {
+            assert_eq!(tag.scope(), crate::rng::TagScope::System, "{}", tag.name());
+            assert!(tag.name().starts_with("class.lbv."));
+            assert!(ALL.contains(&tag));
+        }
+    }
+
+    /// Plan 11's catalogue classes' candidates, `System` tags under plan 09's prefix `class.`
+    /// (P11.T8.a, c and d), and the novae's event key.
+    #[test]
+    fn plan_11_registers_its_class_tags_under_class() {
+        // P11.T8.a: the accreting white dwarfs' candidates, under plan 09's prefix `class.`.
+        for tag in [
+            CLASS_AWD_SITE,
+            CLASS_AWD_RECURRENCE,
+            CLASS_AWD_VELOCITY,
+            CLASS_AWD_BINARY,
+            CLASS_AWD_HISTORY,
+            CLASS_AWD_METALLICITY,
+        ] {
+            assert_eq!(tag.scope(), crate::rng::TagScope::System, "{}", tag.name());
+            assert!(tag.name().starts_with("class.awd."));
+            assert!(ALL.contains(&tag));
+        }
+        assert_eq!(BINARY_EV_NOVA.scope(), crate::rng::TagScope::Event);
+        assert_eq!(BINARY_EV_NOVA.name(), "binary.ev.nova");
+        // P11.T8.c: the stellar mergers' candidates.
+        for tag in [
+            CLASS_MERGER_SITE,
+            CLASS_MERGER_TIME,
+            CLASS_MERGER_METALLICITY,
+            CLASS_MERGER_MASS,
+            CLASS_MERGER_VELOCITY,
+            CLASS_MERGER_BINARY,
+        ] {
+            assert_eq!(tag.scope(), crate::rng::TagScope::System, "{}", tag.name());
+            assert!(tag.name().starts_with("class.merger."));
+            assert!(ALL.contains(&tag));
+        }
+        // P11.T8.d: the neutron-star mergers' candidates.
+        for tag in [
+            CLASS_NSM_SITE,
+            CLASS_NSM_TIME,
+            CLASS_NSM_METALLICITY,
+            CLASS_NSM_MASS,
+            CLASS_NSM_VELOCITY,
+            CLASS_NSM_BINARY,
+        ] {
+            assert_eq!(tag.scope(), crate::rng::TagScope::System, "{}", tag.name());
+            assert!(tag.name().starts_with("class.nsm."));
+            assert!(ALL.contains(&tag));
+        }
+    }
+
+    /// P11.T8.f: a feature member's recycled-object mark, under plan 09's prefix `member.`.
+    #[test]
+    fn plan_11_registers_the_recycled_mark_under_member() {
+        assert_eq!(MEMBER_RECYCLED.scope(), crate::rng::TagScope::System);
+        assert_eq!(MEMBER_RECYCLED.name(), "member.recycled");
+        assert!(ALL.contains(&MEMBER_RECYCLED));
+    }
+
+    /// P11.T8.b: the X-ray binaries' candidates' tags, under plan 09's prefix `class.`, with their
+    /// scope.
+    #[test]
+    fn plan_11_registers_the_xray_binaries_tags() {
+        for tag in [
+            CLASS_XRB_SITE,
+            CLASS_XRB_KIND,
+            CLASS_XRB_RECOIL,
+            CLASS_XRB_VELOCITY,
+            CLASS_XRB_BINARY,
+            CLASS_XRB_ORBIT,
+            CLASS_XRB_HISTORY,
+            CLASS_XRB_METALLICITY,
+        ] {
+            assert_eq!(tag.scope(), crate::rng::TagScope::System, "{}", tag.name());
+            assert!(tag.name().starts_with("class.xrb."));
+            assert!(ALL.contains(&tag));
+        }
+    }
+
+    /// P11.T9.b: the binary events' keys, `Event` tags under `binary.ev.`, after P11.T8.a's novae.
+    #[test]
+    fn plan_11_registers_the_binary_event_tags() {
+        for tag in [
+            BINARY_EV_NOVA,
+            BINARY_EV_DWARF_NOVA,
+            BINARY_EV_XRAY_TRANSIENT,
+            BINARY_EV_XRAY_BURST,
+            BINARY_EV_BEX_GIANT_OUTBURST,
+            BINARY_EV_LUMINOUS_RED_NOVA,
+            BINARY_EV_KILONOVA,
+        ] {
+            assert_eq!(tag.scope(), crate::rng::TagScope::Event, "{}", tag.name());
+            assert!(tag.name().starts_with("binary.ev."));
+            assert!(ALL.contains(&tag));
+        }
     }
 
     #[test]
@@ -1057,6 +1892,10 @@ mod tests {
             STREAM_ORPHAN_ORBIT,
             DWARF_ORBIT,
             DWARF_STRIPPING,
+            DWARF_CORE_METALLICITY,
+            STREAM_SPRAY_RELEASE,
+            STREAM_SPRAY_OFFSETS,
+            STREAM_TUBE_GAPS,
         ];
         for tag in tags {
             assert_eq!(tag.scope(), crate::rng::TagScope::Galaxy, "{}", tag.name());

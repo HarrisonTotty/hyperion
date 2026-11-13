@@ -233,6 +233,13 @@ impl SphericalAverage {
         hermite(t, h, self.psi[k], self.psi[k + 1]).0
     }
 
+    /// The bytes it owns on the heap: its knots and its two tables, for plan 09's
+    /// [`CentreMotion`](crate::galaxy::motion::CentreMotion), which a galaxy holds (P09.T28.b.a).
+    #[must_use]
+    pub(crate) fn heap_bytes(&self) -> usize {
+        size_of_val(&*self.ln_knots) + size_of_val(&*self.log_mass) + size_of_val(&*self.psi)
+    }
+
     /// The Gaussians' mass inside `r` ly: the discs', the bar's and the bulge's.
     #[must_use]
     pub fn extended_mass(&self, r: LightYears) -> SolarMasses {
@@ -282,10 +289,18 @@ mod tests {
             let direct = model.expanded_enclosed_mass(LightYears::new(r)).value();
             let (table, density) = average.extended(r);
             // The holed thin disc's Gaussians of both signs make M(<r) turn most near 5,000 ly,
-            // where 8 knots a decade hold it to 2.7 × 10⁻⁵; inside 1,000 ly, to 10⁻⁵. Inside the
-            // first knot the power law of its slope is 5 × 10⁻⁵ off at 3 × 10⁻⁴ ly, where the
-            // black hole outweighs this mass 10¹⁵ times.
-            let tolerance = if (FIRST..1e3).contains(&r) {
+            // where 8 knots a decade hold it to 2.7 × 10⁻⁵; from 1 to 1,000 ly, to 10⁻⁵. Plan 15's
+            // refit of `MGE_EXP` (P15.T3.c) reaches widths of 0.0024 scale lengths, so the holed
+            // inner nuclear disc's thinnest terms, of both signs, are 0.086 ly across: inside a
+            // light-year they curve the mass between knots, 1.6 × 10⁻⁵ off at 0.07 ly, and inside
+            // the first knot the power law of its slope is 1.8 × 10⁻³ off at 3 × 10⁻⁴ ly (under 10⁻⁵
+            // and 5 × 10⁻⁵ with the first cut's narrowest 0.04), where the black hole outweighs this
+            // mass 10¹⁵ times.
+            let tolerance = if r < FIRST {
+                3e-3
+            } else if r < 1.0 {
+                3e-5
+            } else if r < 1e3 {
                 1e-5
             } else {
                 1e-4

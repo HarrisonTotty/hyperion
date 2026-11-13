@@ -15,7 +15,8 @@
 import { sub, dot } from "../../geometry/vec3";
 import { PACKED_BOUNDS_LENGTH, packBounds, type PatchBounds } from "./bounds";
 import { PATCH_QUADS, vertexSpacing } from "./cube";
-import type { BodyFixedVec3, PlanetGeometry } from "./planet";
+import type { BodyFigure, BodyFixedVec3, PlanetGeometry } from "./planet";
+import type { ResidentHeightsView } from "./residentHeights";
 import { distanceToPackedBoxFromM } from "./viewGeometry";
 
 /**
@@ -41,18 +42,22 @@ export interface GroundContact {
  */
 export const FORCED_REGION_RESIDENCY_S = 30;
 
-/** Below this height above the spheroid, a body moving towards it is descending, metres (provisional). */
+/**
+ * Below this height above the ground under it, a body moving towards it is descending, metres
+ * (provisional).
+ */
 export const DESCENT_ALTITUDE_M = 1_000;
 
 /** Under this time to contact at its present vertical speed, a body is descending, seconds (provisional). */
 export const DESCENT_TIME_TO_CONTACT_S = 30;
 
 /**
- * Whether a body is descending (Design note 9): below {@link DESCENT_ALTITUDE_M} above the spheroid
+ * Whether a body is descending (Design note 9): below {@link DESCENT_ALTITUDE_M} above the ground
  * under it and moving towards it, or reaching it within {@link DESCENT_TIME_TO_CONTACT_S} at its
  * present vertical speed.
  *
- * @param altitudeM - Its height above the spheroid under it, metres.
+ * @param altitudeM - Its height above the ground under it, metres: the workers' ground where it is
+ *   held ({@link heldGroundUnder}), the spheroid elsewhere (R10.T14.c).
  * @param verticalSpeedMps - Its speed along the spheroid's normal there, m/s, positive upward.
  */
 export function isDescending(altitudeM: number, verticalSpeedMps: number): boolean {
@@ -62,6 +67,166 @@ export function isDescending(altitudeM: number, verticalSpeedMps: number): boole
   return (
     altitudeM < DESCENT_ALTITUDE_M || altitudeM / -verticalSpeedMps < DESCENT_TIME_TO_CONTACT_S
   );
+}
+
+/**
+ * Where a craft stands over a body's ground: its height above the ground beneath it and that
+ * ground's point and outward normal (plan R10, R10.T16.b), which decide whether it is a contact
+ * and where the contact is passed.
+ */
+export interface GroundUnder {
+  /** The craft's height above the ground beneath it, metres, along the ground's normal. */
+  readonly heightM: number;
+  /** The point of the ground beneath it, body-fixed metres. */
+  readonly groundPointM: BodyFixedVec3;
+  /** The ground's outward unit normal there, body-fixed. */
+  readonly normal: BodyFixedVec3;
+}
+
+/**
+ * The ground under a body-fixed point: R10.T16.b's one function for a contact's height and ground
+ * point (decision-r10-t16-contracts §2), the workers' ground where it is held
+ * ({@link heldGroundUnder}, R10.T14.c) and the datum's elsewhere ({@link datumGroundUnder}).
+ */
+export type GroundUnderFunction = (positionM: BodyFixedVec3) => GroundUnder;
+
+/**
+ * The datum's ground under a point: the spheroid point M·d of the direction d whose parametric
+ * image holds the point (d = M⁻¹p ÷ |M⁻¹p|, the cube sphere's own mapping), the height the point's
+ * offset from it along the spheroid's normal there.
+ *
+ * @remarks
+ * Exact on a sphere. On a flattened body the parametric direction and the normal differ by up to
+ * about f rad, so the ground point stands up to about h f off the normal's foot and the height is
+ * short by up to about (h f)² ÷ 2a: 3.4 m and under a micrometre (8.9 × 10⁻⁷ m at worst) at the
+ * 1 km a descent is judged within, for WGS 84's f = 1 ÷ 298.257223563 and a = 6,378,137 m (NIMA
+ * TR8350.2, 3rd ed., 2000, Table 3.1), well inside a finest patch. Over surveyed relief the datum
+ * can lie kilometres from the ground under it: where the workers' ground is held, the session's
+ * contacts stand on {@link heldGroundUnder} instead (R10.T14.c; the ruling's §2), which is this
+ * function's wherever none is.
+ */
+export function datumGroundUnder(
+  figure: Pick<BodyFigure, "equatorialRadiusM" | "polarRadiusM">,
+): GroundUnderFunction {
+  const a = figure.equatorialRadiusM;
+  const c = figure.polarRadiusM;
+  return (p) => datumFootOf(a, c, p).under;
+}
+
+/**
+ * The workers' ground under a point where it is held (R10.T14.c; decision-r10-t16-contracts §2):
+ * the drawn ground of a pass's resident bakes, which the forced region exists to make equal to
+ * collision's (Design notes 6 and 9). Over the datum's foot M·d of the point's parametric direction
+ * d ({@link datumGroundUnder}'s) it stands h_g along the spheroid's normal ν(d), h_g the finest
+ * resident bake's drawn ground over d (`ResidentHeightsView.groundHeightAtM`), at the point
+ * M·d + h_g ν(d): the drawn vertex's construction, M·d + h ν(d) (`surfacePoint`), at the height
+ * read, which is interpolated in the bake's grid (`residentHeights.ts`) rather than a vertex's own;
+ * the height is (p − M·d)·ν(d) − h_g.
+ *
+ * @remarks
+ * - **Where it is held** it converges on collision's ground as finer bakes land, off it by the read
+ *   bake's own error (decision-r10-t14c-leans §2). A wholly surveyed bake is read from its 17 × 17
+ *   grid of every fourth vertex (`residentHeights.ts`), which is level L − 2's grid carrying level
+ *   L's bands, so its error is about that of a bake two levels coarser than its own, not its
+ *   selection error under τ pixels; an edge bake is read from its whole 65 × 65 heights. Once a
+ *   forced region brings the finest bake in under a craft, the read ground is within centimetres
+ *   of collision's.
+ * - **Off the survey** it is the datum, the reference surface the picture draws there, as it is
+ *   where no bake is resident. D6 forces nothing there anyway (decision-r10-t16-contracts §2).
+ * - **The normal** is the datum's ν: Design note 9's vertical speed is along the spheroid's normal,
+ *   and the body's turning, ω × r, has no component along it on a figure of revolution.
+ * - **The approximation** is {@link datumGroundUnder}'s, h the point's height above the datum:
+ *   exact on a sphere; on a flattened body the ground is read up to about h f off the normal's
+ *   foot, 3.4 m at 1 km and 30 m at 8.8 km on WGS 84, within two of its finest patches, where a
+ *   slope s moves the height by about s h f.
+ * - With `heights` `null`, or its answer `null` or 0, it is {@link datumGroundUnder}'s, bit for bit.
+ *
+ * @param heights - A pass's resident heights (`TerrainPass.heights`), or `null` for none: the datum.
+ */
+export function heldGroundUnder(
+  figure: Pick<BodyFigure, "equatorialRadiusM" | "polarRadiusM">,
+  heights: Pick<ResidentHeightsView, "groundHeightAtM"> | null,
+): GroundUnderFunction {
+  const a = figure.equatorialRadiusM;
+  const c = figure.polarRadiusM;
+  return (p) => {
+    const { direction, under } = datumFootOf(a, c, p);
+    const groundM = heights?.groundHeightAtM(direction) ?? 0;
+    if (groundM === 0) {
+      return under;
+    }
+    const { groundPointM: foot, normal } = under;
+    return {
+      heightM: under.heightM - groundM,
+      groundPointM: {
+        x: foot.x + groundM * normal.x,
+        y: foot.y + groundM * normal.y,
+        z: foot.z + groundM * normal.z,
+      },
+      normal,
+    };
+  };
+}
+
+/**
+ * The datum's ground under `p` on the spheroid of radii `a` and `c` ({@link datumGroundUnder}), with
+ * the parametric unit direction d it stands over: the pole's at the body's centre.
+ */
+function datumFootOf(
+  a: number,
+  c: number,
+  p: BodyFixedVec3,
+): { readonly direction: BodyFixedVec3; readonly under: GroundUnder } {
+  const mx = p.x / a;
+  const my = p.y / a;
+  const mz = p.z / c;
+  const m = Math.hypot(mx, my, mz);
+  if (!(m > 0)) {
+    // The body's centre: no direction, so the ground is taken straight up the pole.
+    return {
+      direction: { x: 0, y: 0, z: 1 },
+      under: { heightM: -c, groundPointM: { x: 0, y: 0, z: c }, normal: { x: 0, y: 0, z: 1 } },
+    };
+  }
+  const direction = { x: mx / m, y: my / m, z: mz / m };
+  const ground = { x: (a * mx) / m, y: (a * my) / m, z: (c * mz) / m };
+  const nx = direction.x / a;
+  const ny = direction.y / a;
+  const nz = direction.z / c;
+  const n = Math.hypot(nx, ny, nz);
+  const normal = { x: nx / n, y: ny / n, z: nz / n };
+  const heightM =
+    (p.x - ground.x) * normal.x + (p.y - ground.y) * normal.y + (p.z - ground.z) * normal.z;
+  return { direction, under: { heightM, groundPointM: ground, normal } };
+}
+
+/**
+ * A craft as a contact (Design note 9; R10.T16.b): passed at the ground beneath it, at its bounding
+ * radius, while grounded (its height within its held radius, {@link heldRadiusM}, so that its held
+ * sphere reaches the ground, as R05's spike rules it) or descending ({@link isDescending}); `null`
+ * otherwise.
+ *
+ * @param positionM - The craft's position, body-fixed metres from the body's centre.
+ * @param velocityMps - Its velocity against the body, body-fixed m/s, or `null` where it is not
+ *   known, when it is a contact only while grounded.
+ * @param radiusM - Its bounding radius, metres (the hull's farthest vertex from its reference).
+ * @param ground - The ground under a point: the workers' where it is held ({@link heldGroundUnder}),
+ *   the datum's elsewhere ({@link datumGroundUnder}).
+ * @param patchSizeM - The finest patch's edge, metres ({@link finestPatchSizeM}).
+ */
+export function craftContact(
+  positionM: BodyFixedVec3,
+  velocityMps: BodyFixedVec3 | null,
+  radiusM: number,
+  ground: GroundUnderFunction,
+  patchSizeM: number,
+): GroundContact | null {
+  const under = ground(positionM);
+  const contact: GroundContact = { positionM: under.groundPointM, radiusM };
+  const grounded = under.heightM <= heldRadiusM(contact, patchSizeM);
+  const descending =
+    velocityMps !== null && isDescending(under.heightM, dot(velocityMps, under.normal));
+  return grounded || descending ? contact : null;
 }
 
 /** The finest level's patch edge on `planet`, metres: 64 of its largest vertex spacings. */
@@ -152,8 +317,9 @@ export function contactHold(distanceM: number, heldM: number, rampM: number): nu
 /**
  * The morph hold at a vertex's unmorphed position (Design note 6): the least over the contacts of
  * {@link contactHold} with the contact's held radius ({@link heldRadiusM}) and ramp
- * ({@link morphRampM}), 1 with no contact. The morph factor is min(k_CDLOD, morphHold), a function
- * of position alone, so the patches sharing a vertex agree.
+ * ({@link morphRampM}), 1 with no contact. The morph factor is min(k_CDLOD, morphHold), k_CDLOD
+ * as the coarse–fine holds leave it (R10.T8.c, `coarseFineHolds.ts`); the hold is a function of
+ * position alone, so the patches sharing a vertex agree on it.
  *
  * @param v - The vertex's unmorphed position, body-fixed metres.
  * @param patchSizeM - {@link finestPatchSizeM} of the planet.

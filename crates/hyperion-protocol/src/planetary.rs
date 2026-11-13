@@ -16,17 +16,28 @@ use ts_rs::TS;
 
 pub use population::{
     BeltComponentDto, BeltCompositionDto, BeltDto, BeltGapDto, BeltSiteDto, CometaryHaloDto,
-    PopulationDto, RingDto, RingGapDto, RingKindDto, RingMaterialDto,
+    DebrisDiscDto, DiscGapDto, PopulationDto, ProtoplanetaryDiscDto, RingDto, RingGapDto,
+    RingKindDto, RingMaterialDto,
 };
 pub use record::{
-    BandsDto, BeltKindDto, BodyDetailDto, BodyFigureDto, BodyHooksDto, BodyKindDto,
-    BodyPhotometryDto, BodyRecordDto, BodyRotationDto, BodyStateDto, BodySummaryDto,
-    BodySurfaceDto, BulkPropertiesDto, DestructionCauseDto, FigureDatumDto, FigureLawDto,
-    MassFractionsDto, MoonOriginDto, PhaseTemplateDto, PlanetClassDto, SpinResonanceDto,
+    AbsorberDto, AerosolInventoryDto, AerosolModeDto, AerosolNotModelledDto, AerosolShapeDto,
+    AerosolTauBasisDto, BandsDto, BeltKindDto, BiosphereDto, BiosphereFluxDto, BodyDetailDto,
+    BodyEnvelopeDto, BodyFigureDto, BodyHooksDto, BodyKindDto, BodyPhotometryDto, BodyRecordDto,
+    BodyRotationDto, BodyStateDto, BodySummaryDto, BodySurfaceDto, BulkPropertiesDto,
+    ClimateForcingDto, ClimateRegimeDto, CondensateDeckDto, CraterContractDto, CraterScreeningDto,
+    CraterTargetClassDto, CrustCompositionDto, CrustLidDto, DestructionCauseDto, FigureDatumDto,
+    FigureLawDto, GasShareDto, GuillotProfileDto, HabitabilityClassDto, HabitabilityDto,
+    HabitabilityLimitDto, MagneticFieldClassDto, MassFractionsDto, MixingRatioNodeDto,
+    MoonOriginDto, NotFormedCondensateDto, NotFormedReasonDto, OceanFloorDto, PhaseTemplateDto,
+    PlanetClassDto, ProfileNodeDto, RadiationClassDto, RadioisotopesDto, RedoxClassDto,
+    ResourceAbundancesDto, SilicateVapourDto, SizeDistributionDto, SpinResonanceDto,
+    SubstanceAreaDto, SubstancePhaseDto, SubsurfaceOceanDto, SurfaceCondensateDto,
+    SurfaceMaterialDto, SurfaceModifiersDto, SurfaceStateDto, TaxonomicClassDto, TectonicRegimeDto,
+    ThermalRegimeDto, VerticalStructureDto, WetEpochDto,
 };
 pub use requests::{
-    BodyDetailRequest, BodyEventDto, BodyEventsDto, BodyEventsRequest, SystemBodiesDto,
-    SystemBodiesRequest,
+    BodyDetailRequest, BodyEventDto, BodyEventsDto, BodyEventsRequest, CometEventDto,
+    CometTrackPointDto, StormBandDto, SystemBodiesDto, SystemBodiesRequest,
 };
 pub use zones::{ArchitectureClassDto, HabitableZoneDto, SystemPlaneDto, ZoneDto};
 
@@ -97,7 +108,8 @@ pub struct BodyOrbitDto {
     /// What the body orbits, whose position the orbit is relative to.
     pub parent: OrbitHostDto,
     /// The orbit about it: in the system frame for a planet, and for a moon or a ring in its
-    /// planet's body frame, referred to the planet's equator (plan 14, phase D).
+    /// planet's body frame, centred on the planet with the galactic axes (plan 14, phase D; the
+    /// local Laplace plane is not a reference here).
     pub orbit: OrbitDto,
     /// The last instant at which the elements hold: the next change of the body's state or orbit
     /// that the server knows of (a host's sudden death, the body destroyed or unbound), or the

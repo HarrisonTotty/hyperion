@@ -14,6 +14,7 @@ import {
   omittedSigmaM,
   NormalScale,
   Ridges,
+  SurfaceFields,
   surfaceHeightM,
   testPlanetVersion,
   VertexPath,
@@ -25,6 +26,7 @@ import {
   answerRequest,
   bakeKey,
   EXPECTED_TEST_PLANET_VERSION,
+  WorkerFields,
   type HeightModule,
   packNormals,
   staleModuleMessage,
@@ -32,7 +34,7 @@ import {
   WASM_RIDGES,
   WASM_VERTEX_PATH,
 } from "./heightBake";
-import type { BakeSettings } from "./messages";
+import type { BakeSettings, TestPlanetRidges } from "./messages";
 
 /** The module's bytes, from the `data:` URL Vite inlines them as. */
 function wasmBytes(): Uint8Array {
@@ -63,6 +65,7 @@ interface GoldenBake {
   readonly i: number;
   readonly j: number;
   readonly settings: BakeSettings;
+  readonly ridges: TestPlanetRidges;
   readonly digests: Readonly<Record<string, readonly [number, bigint] | null>>;
   readonly scalars: Readonly<Record<string, string>>;
 }
@@ -98,6 +101,7 @@ function goldenBakes(): GoldenBake[] {
     i: number;
     j: number;
     settings: BakeSettings;
+    ridges: TestPlanetRidges;
     digests: Record<string, readonly [number, bigint] | null>;
     scalars: Record<string, string>;
   } | null = null;
@@ -115,6 +119,7 @@ function goldenBakes(): GoldenBake[] {
       ) {
         throw new Error(`malformed bake line: ${line}`);
       }
+      const ridges = lookup(RIDGES, words[7]);
       current = {
         face,
         level,
@@ -123,8 +128,9 @@ function goldenBakes(): GoldenBake[] {
         settings: {
           vertexPath: lookup(VERTEX_PATHS, words[5]),
           normals: lookup(NORMALS, words[6]),
-          ridges: lookup(RIDGES, words[7]),
+          source: { kind: "test-planet", ridges },
         },
+        ridges,
         digests: {},
         scalars: {},
       };
@@ -142,15 +148,24 @@ function goldenBakes(): GoldenBake[] {
   return bakes;
 }
 
-const module: HeightModule = { bakePatch, testPlanetVersion };
+const module: HeightModule = {
+  bakePatch,
+  testPlanetVersion,
+  createFields: () => new SurfaceFields(),
+};
 
-/** A field holder for the bake tests, which post no field. */
-function ignoreField(): void {
-  // The bake tests post no field.
-}
+/**
+ * The fields of the bake tests, which post none, made once the module is loaded; the field
+ * messages' own tests are `fieldsWasm.test.ts`'s.
+ */
+let noFields: WorkerFields;
 
 /** The settings of the answer tests. */
-const SETTINGS: BakeSettings = { vertexPath: "baked-offsets", normals: "double", ridges: "off" };
+const SETTINGS: BakeSettings = {
+  vertexPath: "baked-offsets",
+  normals: "double",
+  source: { kind: "test-planet", ridges: "off" },
+};
 
 /** An array's length and `f32_digest`, as `bake.golden` prints them. */
 function digest(values: Float32Array): readonly [number, bigint] {
@@ -160,6 +175,7 @@ function digest(values: Float32Array): readonly [number, bigint] {
 describe("the height worker's module", () => {
   beforeAll(() => {
     initSync({ module: wasmBytes() });
+    noFields = new WorkerFields(module);
   });
 
   it("maps the settings to the module's enum values", () => {
@@ -242,13 +258,13 @@ describe("the height worker's module", () => {
         g.j,
         WASM_VERTEX_PATH[g.settings.vertexPath],
         WASM_NORMAL_SCALE[g.settings.normals],
-        WASM_RIDGES[g.settings.ridges],
+        WASM_RIDGES[g.ridges],
         0,
       );
       const normals = raw.normals();
       raw.free();
       const key = { face: g.face, level: g.level, i: g.i, j: g.j };
-      const bake = bakeKey(module, key, 7, g.settings);
+      const bake = bakeKey(module, key, 7, g.settings, g.ridges);
       expect(digest(bake.heights)).toEqual(g.digests["heights"]);
       expect(bake.offsets === null ? null : digest(bake.offsets)).toEqual(g.digests["offsets"]);
       expect(digest(normals)).toEqual(g.digests["normals"]);
@@ -276,7 +292,7 @@ describe("the height worker's module", () => {
         generation: 2,
         settings: SETTINGS,
       },
-      ignoreField,
+      noFields,
     );
     if (reply.kind !== "baked") {
       throw new Error(`the bake failed: ${JSON.stringify(reply)}`);
@@ -302,7 +318,7 @@ describe("the height worker's module", () => {
         generation: 2,
         settings: SETTINGS,
       },
-      ignoreField,
+      noFields,
     );
     expect(failed.reply.kind).toBe("bake-failed");
     expect(failed.transfer).toEqual([]);
@@ -325,18 +341,8 @@ describe("the height worker's module", () => {
           generation: 1,
           settings: SETTINGS,
         },
-        ignoreField,
+        noFields,
       ),
     ).toThrow(WebAssembly.RuntimeError);
-  });
-
-  it("holds a field and acknowledges it", () => {
-    const bytes = new ArrayBuffer(8);
-    let held: ArrayBuffer | null = null;
-    const answer = answerRequest(module, { kind: "field", id: 9, bytes }, (b) => {
-      held = b;
-    });
-    expect(answer).toEqual({ reply: { kind: "field-loaded", id: 9 }, transfer: [] });
-    expect(held).toBe(bytes);
   });
 });

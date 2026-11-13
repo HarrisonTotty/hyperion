@@ -22,9 +22,9 @@
 //!
 //! `0x0002`–`0x00FF` and everything from `0x0500` stay unallocated. Within a block numbers are
 //! explicit, fixed by the owning plan and never reused; a plan may register them out of order
-//! (plan 09 registers `0x0202` before its reserved `0x0200` and `0x0201`). Each tag's events are built by
-//! one of `events`' two constructions only, Poisson bins or a monotone phase, never both, because
-//! the two give the event key's slots different meanings.
+//! (plan 09 registered `0x0202` first, in P09.T19.a, and `0x0200` and `0x0201` after it, in
+//! P09.T30.a). Each tag's events are built by one of `events`' two constructions only, Poisson bins
+//! or a monotone phase, never both, because the two give the event key's slots different meanings.
 
 use super::event::EventTag;
 use crate::rng::{DomainTag, TagScope, tags};
@@ -132,10 +132,61 @@ event_tags! {
     0x0109 => STAR_VARIABILITY_CYCLE = tags::STAR_VAR_CYCLE;
 
     // Plan 09: features, the galactic centre and the catalogue classes, block 0x0200–0x02FF.
-    // 0x0200 (`CENTRE_FLARE`) and 0x0201 (`TIDAL_DISRUPTION`) are reserved for P09.T30.
+    // 0x0202 was registered first (P09.T19.a), and 0x0200 and 0x0201 after it (P09.T30.a), so
+    // that the registry's order holds.
     /// The explosion of a supernova catalogue entry: bin 0, number 0, on the entry's member 0
     /// (P09.T19.a).
     0x0202 => SUPERNOVA = tags::CLASS_EV_SUPERNOVA;
+    /// The central black hole's X-ray flares, in bins of a day on the black hole's own ID
+    /// (Poisson bins; P09.T30.a).
+    0x0200 => CENTRE_FLARE = tags::CENTRE_EV_FLARE;
+    /// The central black hole's tidal disruptions of stars, in bins of 1,024 years on the black
+    /// hole's own ID (Poisson bins; P09.T30.a).
+    0x0201 => TIDAL_DISRUPTION = tags::CENTRE_EV_TIDAL_DISRUPTION;
+
+    // Plan 11: binaries, block 0x0300–0x03FF. P11.T8.a registers 0x0300, whose series an
+    // accreting white dwarf's scan marks carry, and P11.T9.b 0x0301–0x0306; 0x0307–0x03FF stay
+    // free for later binary kinds.
+    /// Classical novae of accreting white dwarfs, one a cycle of the recurrence period on the
+    /// white dwarf's body, 0 (monotone phase; P11.T8.a).
+    0x0300 => NOVA = tags::BINARY_EV_NOVA;
+    /// Dwarf novae's outbursts, one a cycle of the disc's fill time on the white dwarf, body 0,
+    /// some cycles skipped (monotone phase with a skip mark; P11.T9.b).
+    0x0301 => DWARF_NOVA = tags::BINARY_EV_DWARF_NOVA;
+    /// Low-mass X-ray transients' outbursts, one a cycle of the recurrence on the compact star,
+    /// body 0 (monotone phase; P11.T9.b).
+    0x0302 => XRAY_TRANSIENT = tags::BINARY_EV_XRAY_TRANSIENT;
+    /// Type I X-ray bursts on an accreting neutron star, one a cycle of the ignition recurrence,
+    /// body 0 (monotone phase; P11.T9.b).
+    0x0303 => XRAY_BURST = tags::BINARY_EV_XRAY_BURST;
+    /// Be/X-ray binaries' giant (Type II) outbursts on the neutron star, body 0 (Poisson bins;
+    /// P11.T9.b).
+    0x0304 => BEX_GIANT_OUTBURST = tags::BINARY_EV_BEX_GIANT_OUTBURST;
+    /// A stellar merger's luminous red nova, once at its merger on the system: bin 0, number 0
+    /// (one-shot; P11.T9.b).
+    0x0305 => LUMINOUS_RED_NOVA = tags::BINARY_EV_LUMINOUS_RED_NOVA;
+    /// A neutron-star merger's kilonova, once at its merger on the system: bin 0, number 0
+    /// (one-shot; P11.T9.b).
+    0x0306 => KILONOVA = tags::BINARY_EV_KILONOVA;
+
+    // Plan 14: bodies, block 0x0400–0x04FF (plan 14, design note 15). P14.T31.a registers 0x0400,
+    // 0x0401 and 0x0404, and P14.T31.b 0x0402 and 0x0403; 0x0405–0x04FF stay free for later body
+    // events.
+    /// Impacts on a body, in bins of a Julian year on the body's ID (Poisson bins; P14.T31.a).
+    0x0400 => BODY_IMPACT = tags::BODY_IMPACT;
+    /// Volcanic eruptions on a body, in bins of a week on the body's ID (Poisson bins;
+    /// P14.T31.a).
+    0x0401 => BODY_ERUPTION = tags::BODY_ERUPTION;
+    /// The great storms of a giant planet, one a cycle of its orbital period on the body's ID
+    /// (monotone phase; P14.T31.b).
+    0x0402 => BODY_STORM = tags::BODY_STORM;
+    /// The global dust storms of a dry, thin-aired planet, at most one a cycle of its orbital
+    /// period on the body's ID, with a skip and in the perihelion season (monotone phase;
+    /// P14.T31.b).
+    0x0403 => BODY_DUSTSTORM = tags::BODY_DUSTSTORM;
+    /// The perihelion passages of a system's long-period comets, in bins of a Julian year on the
+    /// system's ID (Poisson bins; P14.T31.a).
+    0x0404 => SYSTEM_COMET = tags::SYSTEM_COMET;
 }
 
 #[cfg(test)]
@@ -179,6 +230,93 @@ mod tests {
             .filter(|t| (0x0100..=0x01FF).contains(&t.number()))
             .count();
         assert_eq!(in_block, plan_06.len());
+    }
+
+    /// Plan 09's block holds exactly `0x0200`, `0x0201` and `0x0202`, each backed by its domain
+    /// tag, and `0x0203`–`0x02FF` stay reserved.
+    #[test]
+    fn plan_09_holds_0x0200_to_0x0202_with_their_names() {
+        let plan_09 = [
+            (CENTRE_FLARE, 0x0200, "centre.ev.flare"),
+            (TIDAL_DISRUPTION, 0x0201, "centre.ev.tidal_disruption"),
+            (SUPERNOVA, 0x0202, "class.ev.supernova"),
+        ];
+        for (tag, number, name) in plan_09 {
+            assert_eq!(tag.number(), number, "{name}");
+            assert_eq!(tag.name(), name);
+            assert_eq!(EventTag::from_number(number), Some(tag));
+        }
+        assert_eq!(EventTag::from_number(0x0203), None);
+        let mut in_block: Vec<u16> = ALL
+            .iter()
+            .map(|t| t.number())
+            .filter(|n| (0x0200..=0x02FF).contains(n))
+            .collect();
+        in_block.sort_unstable();
+        assert_eq!(in_block, [0x0200, 0x0201, 0x0202]);
+    }
+
+    /// Plan 11's block holds 0x0300–0x0306, its seven event tags of Provides, each backed by its
+    /// domain tag under `binary.ev.`: P11.T8.a's novae and P11.T9.b's six. 0x0307–0x03FF stay
+    /// reserved.
+    #[test]
+    fn plan_11_holds_0x0300_to_0x0306_in_order() {
+        let expected = [
+            (NOVA, 0x0300, "binary.ev.nova"),
+            (DWARF_NOVA, 0x0301, "binary.ev.dwarf_nova"),
+            (XRAY_TRANSIENT, 0x0302, "binary.ev.xray_transient"),
+            (XRAY_BURST, 0x0303, "binary.ev.xray_burst"),
+            (BEX_GIANT_OUTBURST, 0x0304, "binary.ev.bex_giant_outburst"),
+            (LUMINOUS_RED_NOVA, 0x0305, "binary.ev.luminous_red_nova"),
+            (KILONOVA, 0x0306, "binary.ev.kilonova"),
+        ];
+        for (tag, number, name) in expected {
+            assert_eq!(tag.number(), number);
+            assert_eq!(tag.name(), name);
+            assert_eq!(EventTag::from_number(number), Some(tag));
+            assert_eq!(tag.domain_tag().scope(), crate::rng::TagScope::Event);
+        }
+        for reserved in [0x0307, 0x03FF] {
+            assert_eq!(EventTag::from_number(reserved), None, "{reserved:#06x}");
+        }
+        let in_block: Vec<u16> = ALL
+            .iter()
+            .map(|t| t.number())
+            .filter(|n| (0x0300..=0x03FF).contains(n))
+            .collect();
+        assert_eq!(
+            in_block,
+            [0x0300, 0x0301, 0x0302, 0x0303, 0x0304, 0x0305, 0x0306]
+        );
+    }
+
+    /// Plan 14's block holds 0x0400–0x0404, its five event tags of Provides, each backed by its
+    /// domain tag: P14.T31.a's 0x0400, 0x0401 and 0x0404 and P14.T31.b's 0x0402 and 0x0403.
+    /// 0x0405–0x04FF stay reserved.
+    #[test]
+    fn plan_14_holds_its_five_tags_with_their_names() {
+        let plan_14 = [
+            (BODY_IMPACT, 0x0400, "body.impact"),
+            (BODY_ERUPTION, 0x0401, "body.eruption"),
+            (BODY_STORM, 0x0402, "body.storm"),
+            (BODY_DUSTSTORM, 0x0403, "body.duststorm"),
+            (SYSTEM_COMET, 0x0404, "system.comet"),
+        ];
+        for (tag, number, name) in plan_14 {
+            assert_eq!(tag.number(), number, "{name}");
+            assert_eq!(tag.name(), name);
+            assert_eq!(EventTag::from_number(number), Some(tag));
+        }
+        for reserved in [0x0405, 0x0406, 0x04FF] {
+            assert_eq!(EventTag::from_number(reserved), None, "{reserved:#06x}");
+        }
+        let mut in_block: Vec<u16> = ALL
+            .iter()
+            .map(|t| t.number())
+            .filter(|n| (0x0400..=0x04FF).contains(n))
+            .collect();
+        in_block.sort_unstable();
+        assert_eq!(in_block, [0x0400, 0x0401, 0x0402, 0x0403, 0x0404]);
     }
 
     #[test]

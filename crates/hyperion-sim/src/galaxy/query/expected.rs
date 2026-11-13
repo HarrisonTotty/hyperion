@@ -36,12 +36,19 @@
 //! 1,024. The rule is exact for the volume itself, since the area of a disc is quadratic in z and
 //! the polar integrand is linear in r.
 //!
+//! Where the galaxy's build has installed plan 08's displaced classes (P08.T12.a), each class's
+//! form is integrated at the same nodes, and layers D and E add `Σ count × Iᵏ` over their classes in
+//! their order after the components, as their densities do.
+//!
 //! Nothing is clipped to the root cube, so a sphere that pokes outside it is counted as though the
 //! galaxy went on. That errs high, which can only drop a layer from a census early — the direction
 //! the brainstorm accepts for the features' share.
 
 use super::{LayerCounts, SubstellarRequest};
 use crate::coords::GalacticPosition;
+use crate::galaxy::displaced::DisplacedForm;
+use crate::galaxy::displaced::forms::FormPoint;
+use crate::galaxy::field_share::FieldShare;
 use crate::galaxy::fields::MAX_COMPONENTS;
 use crate::galaxy::imf::MassBand;
 use crate::galaxy::placement::{STELLAR_LAYERS, rogue_planet_saturation_density};
@@ -116,6 +123,7 @@ pub fn expected_counts(
     let fields = galaxy.fields();
     let components = fields.components();
     let shares = galaxy.shares();
+    let field = galaxy.field_share();
     let rogue = substellar.admits(Layer::RoguePlanet);
     // The rogue planets' shares per component, in component order, and their saturation density.
     let mut rogue_shares = [0.0; MAX_COMPONENTS];
@@ -128,10 +136,30 @@ pub fn expected_counts(
     let mut integrals = [0.0; MAX_COMPONENTS];
     let mut densities = [0.0; MAX_COMPONENTS];
     let mut rogue_integral = 0.0;
+    // Plan 08's displaced classes, once installed (P08.T12.a): each class with a form, integrated
+    // at the same nodes, by class index.
+    let displaced = fields.displaced();
+    let mut class_integrals = displaced.map_or_else(Vec::new, |d| vec![0.0; d.classes().len()]);
+    // Every class's form reads the node's cylindrical radius and its arm point, on the young
+    // disc's arm geometry, which the classes' arms share: found once a node, the forms' densities
+    // bit for bit (`FormPoint`; P08.T12, half the census's cost under every 26 hold).
+    let geometry = displaced.and_then(|d| {
+        d.classes()
+            .iter()
+            .find_map(|class| class.form().and_then(DisplacedForm::arm_geometry))
+    });
     for_each_node(&PointLy::from(centre), radius.value(), |point, weight| {
         fields.densities(point, &mut densities);
         for (integral, density) in integrals.iter_mut().zip(densities) {
             *integral += weight * density;
+        }
+        if let Some(displaced) = displaced {
+            let at = FormPoint::new(point, geometry);
+            for (integral, class) in class_integrals.iter_mut().zip(displaced.classes()) {
+                if let Some(form) = class.form() {
+                    *integral += weight * form.density_at(&at);
+                }
+            }
         }
         if rogue {
             // `share × density` added from 0 in component order, as the thinning adds them.
@@ -140,17 +168,33 @@ pub fn expected_counts(
                 .zip(densities)
                 .take(components.len())
                 .fold(0.0, |sum, (share, density)| sum + share * density);
-            rogue_integral += weight * density.min(saturation);
+            rogue_integral += weight
+                * match field {
+                    None => density.min(saturation),
+                    Some(field) => {
+                        field_rogue_density(galaxy, field, &rogue_shares, &densities, density)
+                    }
+                };
         }
     });
     let mut counts = LayerCounts::ZERO;
+    // From version 26 each component's share is the field's (P09.T2.c), the budget's until then,
+    // `Σ share × Iᶜ` over the components; then, under plan 08's displaced classes (P08.T12.a),
+    // over the band's classes in their order, whose weights are the budget's: the sum the
+    // layer's density takes.
     let linear = |band: MassBand| {
-        components
-            .iter()
+        let field = fields
+            .component_ids()
             .zip(integrals)
-            .fold(0.0, |sum, (component, integral)| {
-                sum + shares.component_share(band, component) * integral
-            })
+            .fold(0.0, |sum, (id, integral)| {
+                sum + galaxy.field_component_share(band, id) * integral
+            });
+        match displaced {
+            None => field,
+            Some(displaced) => displaced.order(band).iter().fold(field, |sum, &id| {
+                sum + shares.displaced_share(band, id) * class_integrals[id.index()]
+            }),
+        }
     };
     for spec in STELLAR_LAYERS {
         counts.set(spec.layer(), linear(spec.band()));
@@ -162,6 +206,32 @@ pub fn expected_counts(
         counts.set(Layer::RoguePlanet, rogue_integral);
     }
     counts
+}
+
+/// The field's rogue planets per cubic light-year at a node, from version 26 (P09.T2.c): each
+/// component's `share × density` times its field factor, in component order, scaled as the
+/// thinning scales the budget's where `budget`, their budget's sum, saturates. The field thins
+/// after the saturation, inside each component's scaled slice.
+fn field_rogue_density(
+    galaxy: &Galaxy,
+    field: &FieldShare,
+    shares: &[f64; MAX_COMPONENTS],
+    densities: &[f64; MAX_COMPONENTS],
+    budget: f64,
+) -> f64 {
+    let kept = galaxy
+        .fields()
+        .component_ids()
+        .zip(shares.iter().zip(densities))
+        .fold(0.0, |sum, (id, (share, density))| {
+            sum + share * density * field.factor(id, MassBand::RoguePlanet)
+        });
+    let saturation = rogue_planet_saturation_density();
+    if budget > saturation {
+        kept * (saturation / budget)
+    } else {
+        kept
+    }
 }
 
 /// Calls `sample(point, weight)` at every node of the sphere's quadrature, so that
@@ -446,14 +516,17 @@ mod tests {
     }
 
     /// The per-node sum of the rogue planets is the linear `Σ share × Iᶜ` where nothing saturates,
-    /// up to the order of the sums; at the Sun no node comes near the saturation density.
+    /// up to the order of the sums; at the Sun no node comes near the saturation density. From
+    /// generator version 27 each component's share is the field's
+    /// ([`Galaxy::field_component_share`], P09.T2.c), the budget's times its field factor, which
+    /// the field takes after the saturation; in the halo that factor gives up plan 10's discrete
+    /// share too (P10.T3.d.b).
     #[test]
     fn expected_rogue_planets_are_linear_where_nothing_saturates() {
         let galaxy = galaxy();
         let counts = expected_counts(&galaxy, &sunlike(), LightYears::new(50.0), EVERY);
         let rogue = counts.get(Layer::RoguePlanet);
         let fields = galaxy.fields();
-        let shares = galaxy.shares();
         let mut integrals = [0.0; MAX_COMPONENTS];
         let mut densities = [0.0; MAX_COMPONENTS];
         for_each_node(&PointLy::from(&sunlike()), 50.0, |point, weight| {
@@ -463,10 +536,9 @@ mod tests {
             }
         });
         let linear: f64 = fields
-            .components()
-            .iter()
+            .component_ids()
             .zip(integrals)
-            .map(|(c, i)| shares.component_share(MassBand::RoguePlanet, c) * i)
+            .map(|(id, i)| galaxy.field_component_share(MassBand::RoguePlanet, id) * i)
             .sum();
         assert!(
             (rogue / linear - 1.0).abs() < 1e-12,

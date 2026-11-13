@@ -31,7 +31,9 @@ use crate::requests::{Handler, HandlerFuture, Replies, SubscribeFuture, to_frame
 use crate::stats::{OutboundCounters, RequestCounters};
 use crate::subscriptions::Pusher;
 use crate::ws::ConnectionLimits;
-use crate::{AppState, Server, ServerConfig, ServerConfigBuilder, ServerStats};
+use crate::{
+    AppState, GlobalListWarmUp, Server, ServerConfig, ServerConfigBuilder, ServerStats, SkyService,
+};
 
 /// Upper bound on any single wait.
 ///
@@ -86,6 +88,11 @@ impl Harness {
 
     /// [`Harness::start_with_limits`], with the configuration `configure` makes of the harness's,
     /// as a test that injects the scene's knowledge or craft needs.
+    ///
+    /// The harness's configuration has one CPU worker and the sky off ([`SkyService::Unsupported`],
+    /// though the server's default serves it since rendering plan R13's R13.T2), so that an open in
+    /// a test of something else starts no sky tables on the worker; `configure` may turn it on. The
+    /// global list's warm-up is off for the same reason ([`GlobalListWarmUp::Off`]).
     pub(crate) async fn start_configured(
         handler: impl Handler + 'static,
         limits: ConnectionLimits,
@@ -107,7 +114,9 @@ impl Harness {
         let config = configure(
             ServerConfig::builder()
                 .data_dir(data_dir.path())
-                .workers(std::num::NonZeroUsize::MIN),
+                .workers(std::num::NonZeroUsize::MIN)
+                .sky_service(SkyService::Unsupported)
+                .global_list_warm_up(GlobalListWarmUp::Off),
         )
         .build();
         let server = timeout(
@@ -337,9 +346,10 @@ impl Harness {
                 outbound.held_requests(),
                 pool.queued_interactive(),
                 pool.queued_bulk(),
+                pool.queued_background(),
                 pool.running(),
             ),
-            (0, 0, 0, 0, 0, 0, 0),
+            (0, 0, 0, 0, 0, 0, 0, 0),
             "something outlived the server: {stats:?}"
         );
         assert_eq!(
@@ -543,7 +553,11 @@ impl Client {
 /// How a [`Harness`] prepares the sockets it accepts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Tap {
-    /// As every server does: [`tap_socket`](crate::tap_socket) sets the low-water mark.
+    /// As every server does: [`tap_socket`](crate::tap_socket) sets the low-water mark on Linux and
+    /// Android only.
+    ///
+    /// Elsewhere the socket is left as the kernel makes it, as with [`Tap::Kernel`] (rendering plan
+    /// R03, Design note 11).
     LowWaterMark,
     /// As the kernel makes them.
     Kernel,
@@ -551,6 +565,10 @@ pub(crate) enum Tap {
 
 /// A frame a [`Client`] received.
 #[derive(Debug)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "a test's frames, matched by value in every socket test, one at a time"
+)]
 pub(crate) enum Received {
     /// A text frame: a message.
     Message(ServerMessage),

@@ -4,8 +4,9 @@ import { describe, expect, it } from "vitest";
 
 import { PLANET_SYMBOL, starSymbol } from "../../lib/galaxy/starSymbols";
 import { aCensus } from "../../test/galaxyFixtures";
+import { stylesheetRule } from "../../test/stylesheet";
 import { layerBands } from "./chartModel";
-import { SymbolLegend } from "./SymbolLegend";
+import { FEATURE_LEGEND, SymbolLegend, TRUE_RADIUS_LEGEND } from "./SymbolLegend";
 
 /** Every kind the wire names, so that the legend is checked against the whole symbol set. */
 const EVERY_KIND: ReadonlyArray<ObjectKindDto> = [
@@ -17,6 +18,7 @@ const EVERY_KIND: ReadonlyArray<ObjectKindDto> = [
   "supergiant",
   "wolf_rayet",
   "hot_subdwarf",
+  "stripped_helium_star",
   "white_dwarf",
   "neutron_star",
   "black_hole",
@@ -38,7 +40,7 @@ describe("SymbolLegend", () => {
     render(<SymbolLegend bands={layerBands(aCensus().layers)} />);
 
     expect(meaningOf("Circle")).toBe(
-      "PROTOSTAR, PRE-MAIN-SEQUENCE STAR, DWARF, SUBGIANT, HOT SUBDWARF, BROWN DWARF",
+      "PROTOSTAR, PRE-MAIN-SEQUENCE STAR, DWARF, SUBGIANT, HOT SUBDWARF, STRIPPED HELIUM STAR, BROWN DWARF",
     );
     expect(meaningOf("Ringed circle")).toBe("GIANT, SUPERGIANT, WOLF-RAYET STAR");
     expect(meaningOf("Diamond")).toBe("WHITE DWARF");
@@ -77,6 +79,23 @@ describe("SymbolLegend", () => {
     expect(within(legend()).getByText("NO REMNANT, NOT YET FORMED: LIST ONLY")).toBeInTheDocument();
   });
 
+  it("names a layer this build does not know among those listed and not drawn, while the answer holds one", () => {
+    render(<SymbolLegend bands={null} unlistedLayer />);
+
+    expect(
+      within(legend()).getByText("NO REMNANT, NOT YET FORMED, UNLISTED LAYER: LIST ONLY"),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps each of an entry's kinds whole wherever the entry wraps, as the HR diagram's does", () => {
+    // jsdom lays nothing out, so the stylesheet's rule is what is held (P06.T24.c): without it the
+    // HR diagram's legend broke `STRIPPED HELIUM STAR` across two lines at 1280 x 720.
+    expect(stylesheetRule(".symbol-legend__kind")).toMatch(/white-space: nowrap;/u);
+    render(<SymbolLegend bands={null} />);
+
+    expect(screen.getByText("STRIPPED HELIUM STAR")).toHaveClass("symbol-legend__kind");
+  });
+
   it("draws the ringed circle's disc filled inside an open ring", () => {
     render(<SymbolLegend bands={null} />);
 
@@ -93,5 +112,26 @@ describe("SymbolLegend", () => {
     render(<SymbolLegend bands={layerBands(aCensus().layers)} />);
 
     expect(within(legend()).getByText(/^RINGED CIRCLE SIZE AT LEAST 0\.75/u)).toBeInTheDocument();
+  });
+});
+
+describe("SymbolLegend with features (plan 09, P09.T41.a)", () => {
+  it("names the feature's cross and the circle at true radius while the chart draws a feature", () => {
+    render(<SymbolLegend bands={layerBands(aCensus().layers)} features />);
+
+    const items = within(legend())
+      .getAllByRole("paragraph")
+      .map((item) => item.textContent);
+    expect(items).toContain(FEATURE_LEGEND);
+    expect(items).toContain(TRUE_RADIUS_LEGEND);
+    const cross = within(legend()).getByText(FEATURE_LEGEND).querySelector("svg path");
+    expect(cross).not.toBeNull();
+  });
+
+  it("names neither while the chart draws no feature", () => {
+    render(<SymbolLegend bands={layerBands(aCensus().layers)} />);
+
+    expect(within(legend()).queryByText(FEATURE_LEGEND)).toBeNull();
+    expect(within(legend()).queryByText(TRUE_RADIUS_LEGEND)).toBeNull();
   });
 });

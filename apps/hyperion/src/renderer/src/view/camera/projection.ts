@@ -126,13 +126,21 @@ export interface Projected {
 
 /** `v`, relative to the camera along its frame's axes, in the camera's view axes. */
 export function toViewAxes(v: Vec3, orientation: Quaternion): Vec3 {
+  return viewAxesBy(orientation)(v);
+}
+
+/**
+ * {@link toViewAxes} for one orientation, its rotation taken once, for the many points of a mark
+ * (R10.T16.c's cost): the same sums, so the same values.
+ */
+export function viewAxesBy(orientation: Quaternion): (v: Vec3) => Vec3 {
   const [r0, r1, r2] = rotationRows(orientation);
   // Rᵀ · v: the dot products of v with R's columns.
-  return {
+  return (v) => ({
     x: r0.x * v.x + r1.x * v.y + r2.x * v.z,
     y: r0.y * v.x + r1.y * v.y + r2.y * v.z,
     z: r0.z * v.x + r1.z * v.y + r2.z * v.z,
-  };
+  });
 }
 
 /**
@@ -143,17 +151,30 @@ export function toViewAxes(v: Vec3, orientation: Quaternion): Vec3 {
  * `relativeToCamera`).
  */
 export function project(v: Vec3, camera: ProjectionCamera, viewport: Viewport): Projected {
-  const view = toViewAxes(v, camera.orientation);
+  return projector(camera, viewport)(v);
+}
+
+/**
+ * {@link project} for one camera and view, its rotation and scales taken once, for the many points
+ * of a curve (R02.T19.b): the same sums, so the same values.
+ */
+export function projector(camera: ProjectionCamera, viewport: Viewport): (v: Vec3) => Projected {
+  const [r0, r1, r2] = rotationRows(camera.orientation);
   const s = 1 / Math.tan(camera.fovXRad / 2);
   const aspect = viewport.widthPx / viewport.heightPx;
-  const w = -view.z;
-  const ndcX = (s * view.x) / w;
-  const ndcY = (s * aspect * view.y) / w;
-  return {
-    xPx: ((ndcX + 1) / 2) * viewport.widthPx,
-    yPx: ((1 - ndcY) / 2) * viewport.heightPx,
-    depth: NEAR_PLANE_M / w,
-    inFront: w >= NEAR_PLANE_M,
+  return (v) => {
+    // Rᵀ · v, as `toViewAxes` takes it.
+    const x = r0.x * v.x + r1.x * v.y + r2.x * v.z;
+    const y = r0.y * v.x + r1.y * v.y + r2.y * v.z;
+    const w = -(r0.z * v.x + r1.z * v.y + r2.z * v.z);
+    const ndcX = (s * x) / w;
+    const ndcY = (s * aspect * y) / w;
+    return {
+      xPx: ((ndcX + 1) / 2) * viewport.widthPx,
+      yPx: ((1 - ndcY) / 2) * viewport.heightPx,
+      depth: NEAR_PLANE_M / w,
+      inFront: w >= NEAR_PLANE_M,
+    };
   };
 }
 
@@ -169,9 +190,23 @@ export function project(v: Vec3, camera: ProjectionCamera, viewport: Viewport): 
  * @param dir - The direction, along the camera's frame axes; any length.
  */
 export function pixelSolidAngle(dir: Vec3, camera: ProjectionCamera, viewport: Viewport): number {
-  const view = toViewAxes(dir, camera.orientation);
-  const length = Math.hypot(view.x, view.y, view.z);
-  const cosTheta = -view.z / length;
+  return pixelSolidAngleBy(camera, viewport)(dir);
+}
+
+/**
+ * {@link pixelSolidAngle} for one camera and view, its rotation and centre pixel taken once, for the
+ * many stars of a frame (lane perf-main-thread): the same sums, so the same values.
+ */
+export function pixelSolidAngleBy(
+  camera: ProjectionCamera,
+  viewport: Viewport,
+): (dir: Vec3) => number {
+  const toView = viewAxesBy(camera.orientation);
   const centre = ((2 * Math.tan(camera.fovXRad / 2)) / viewport.widthPx) ** 2;
-  return centre * Math.max(cosTheta, 0) ** 3;
+  return (dir) => {
+    const view = toView(dir);
+    const length = Math.hypot(view.x, view.y, view.z);
+    const cosTheta = -view.z / length;
+    return centre * Math.max(cosTheta, 0) ** 3;
+  };
 }

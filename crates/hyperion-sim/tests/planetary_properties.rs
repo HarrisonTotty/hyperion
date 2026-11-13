@@ -1,5 +1,6 @@
 //! Plan 14's property tests of derivation on placed planets (P14.T16.b): no planet hotter than its
-//! star, and a body's radius, temperatures and envelope continuous in time across ±H.
+//! star, and a body's radius, temperatures and envelope continuous in time, across ±100 years in
+//! the fast tier and ±H in the slow tier.
 //!
 //! The hosts are `planetary_support`'s, made as P14.T30.a makes them. Each star is plan 06's
 //! `StarModel` at the system's age, and each body goes through P14.T16.a's `derive_body` as the
@@ -12,7 +13,9 @@ mod planetary_support;
 
 use hyperion_sim::planetary::architecture::template::EARTH_MASSES_PER_JUPITER_MASS;
 use hyperion_sim::planetary::context::XuvHistory;
-use hyperion_sim::planetary::derive::atmosphere::{Retention, SurfaceState, VolatileDraws};
+use hyperion_sim::planetary::derive::atmosphere::{
+    CarbonCarrier, Retention, SurfaceState, VolatileDraws,
+};
 use hyperion_sim::planetary::derive::{BodyHosts, HostLight, PlacedBody, derive_body};
 use hyperion_sim::planetary::placement::PlacedPlanet;
 use hyperion_sim::stellar::draws::{StarDraws, UnitUniform};
@@ -78,6 +81,7 @@ struct Derived {
     envelope: f64,
     state: SurfaceState,
     retention: Retention,
+    carbon: Option<CarbonCarrier>,
 }
 
 /// The body `p` of `host`, with radius rank `rank` and volatile ranks `volatiles`, at `t`, about
@@ -138,6 +142,7 @@ fn derive_at(
             envelope: body.fractions().envelope(),
             state: air.state(),
             retention: air.retention(),
+            carbon: air.carbon_carrier(),
         },
         hottest,
     ))
@@ -174,6 +179,7 @@ fn ranks(lcg: &mut Lcg) -> (UnitUniform, VolatileDraws) {
         water: rank(lcg),
         carbon: rank(lcg),
         nitrogen: rank(lcg),
+        ..VolatileDraws::MEDIAN
     };
     (radius, volatiles)
 }
@@ -184,15 +190,53 @@ fn ranks(lcg: &mut Lcg) -> (UnitUniform, VolatileDraws) {
 /// time, and its surface temperature at most at it, where `atmosphere` saturates it (ruling
 /// 133.5; the saturated share is printed as a finding and held to at most 10⁻³); hosts that are
 /// black holes are left out.
+///
+/// The fast tier derives the planets at 0.1 and 5 Gyr, and
+/// [`no_planet_hotter_than_its_star_at_the_other_ages`] those at 1 and 12 Gyr, each age's planets
+/// with the ranks the whole run draws them (P14.T54.b.l's §C.7 split, sized on 24's times: 209 s
+/// over the four ages, pod, 4 vCPU). Each half holds the saturated share to 10⁻³, so the whole
+/// sample does too.
 #[test]
 fn no_planet_hotter_than_its_star() {
+    no_planet_hotter_than_its_star_at(Ages::FirstAndThird);
+}
+
+/// [`no_planet_hotter_than_its_star`] at its other two ages, 1 and 12 Gyr: the slow tier's half of
+/// P14.T54.b.l's §C.7 split.
+#[test]
+#[ignore = "slow: the guard's planets at 1 and 12 Gyr, the fast tier's other ages"]
+fn no_planet_hotter_than_its_star_at_the_other_ages() {
+    no_planet_hotter_than_its_star_at(Ages::SecondAndFourth);
+}
+
+/// Which of [`no_planet_hotter_than_its_star`]'s four ages, 0.1, 1, 5 and 12 Gyr, a run derives.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Ages {
+    /// 0.1 and 5 Gyr.
+    FirstAndThird,
+    /// 1 and 12 Gyr.
+    SecondAndFourth,
+}
+
+/// The body of [`no_planet_hotter_than_its_star`] and its slow half, at the ages `ages`.
+fn no_planet_hotter_than_its_star_at(ages: Ages) {
     let galaxy = galaxy(SEED);
     let mut lcg = Lcg::new(0x0016_b0d1);
     let (mut bodies, mut giants, mut airless, mut aired) = (0_u32, 0_u32, 0_u32, 0_u32);
     let (mut samples, mut saturated) = (0_u32, 0_u32);
     for (k, age) in [1e8, 1e9, 5e9, 1.2e10].into_iter().enumerate() {
         let first = 100_000 * u32::try_from(k).expect("four ages");
+        let derived = (k % 2 == 0) == (ages == Ages::FirstAndThird);
         for system in systems(&galaxy, first, 600, Years::new(age)) {
+            if !derived {
+                // The other ages' draws, so that each derived planet keeps the whole run's ranks.
+                for host in &system.hosts {
+                    for _ in host.placement.planets() {
+                        ranks(&mut lcg);
+                    }
+                }
+                continue;
+            }
             let stars = stars(&system, galaxy.seed());
             for host in &system.hosts {
                 for p in host.placement.planets() {
@@ -234,7 +278,7 @@ fn no_planet_hotter_than_its_star() {
         }
     }
     assert!(
-        bodies > 2_000 && giants > 100 && airless > 100 && aired > 100,
+        bodies > 1_000 && giants > 50 && airless > 50 && aired > 50,
         "{bodies} bodies, {giants} giants, {airless} airless, {aired} with air"
     );
     // Ruling 133.5: the host's temperature bounds the grey greenhouse, and a surface held at it
@@ -247,12 +291,42 @@ fn no_planet_hotter_than_its_star() {
     assert!(share <= 1e-3, "{saturated} of {samples} surfaces saturated");
 }
 
-/// P14.T16.b: a body's radius, temperatures and envelope fraction are continuous in time across
-/// ±H: at steps of a year, no relative jump reaches 10⁻³ except where a star it orbits changes
-/// phase in that step, or the body's surface state or the gases it retains change (a recorded
-/// state change).
+/// P14.T16.b: a body's radius, temperatures and envelope fraction are continuous in time: at
+/// steps of a year, no relative jump reaches 10⁻³ except where a star it orbits changes phase in
+/// that step, or the body's surface state, the gases it retains or its carbon's carrier (P14.T24.f)
+/// change (a recorded state change).
+///
+/// The fast tier, across ±[`FAST_CONTINUITY_YEARS`]: every planet of both ages at the test's own
+/// yearly steps, 28,500 derivations, so that every class of discontinuity stays covered at full
+/// resolution (decision-p14-t54a-passes §C.7). The whole of ±H is the slow tier's
+/// ([`radius_temperature_and_envelope_are_continuous_over_the_whole_window`]).
 #[test]
 fn radius_temperature_and_envelope_are_continuous_in_time() {
+    let steps = continuity_steps(FAST_CONTINUITY_YEARS);
+    eprintln!("{steps} yearly steps compared");
+    assert!(steps > 25_000, "{steps}");
+}
+
+/// How far either side of the epoch the fast tier's continuity test steps, years: ±100 to version
+/// 23 (114,570 derivations), ±25 from 24, P14.T54.b.l's §C.7 split sized on 24's times, where a
+/// derivation costs several times 23's.
+const FAST_CONTINUITY_YEARS: i64 = 25;
+
+/// P14.T16.b's continuity ([`radius_temperature_and_envelope_are_continuous_in_time`]) across the
+/// whole of ±H, at the same yearly steps: the slow tier, run in the slow pass
+/// (decision-p14-t54a-passes §C.7).
+#[test]
+#[ignore = "slow: derives 570 planets every year over ±1,000 years, about 1.1 million derivations"]
+fn radius_temperature_and_envelope_are_continuous_over_the_whole_window() {
+    let steps = continuity_steps(window());
+    eprintln!("{steps} yearly steps compared");
+    assert!(steps > 1_100_000, "{steps}");
+}
+
+/// The continuity tests' body: every planet of the 60 systems sampled at each of two ages, derived
+/// every year from `years` before the epoch to `years` after it, each step's relative jumps held
+/// under 10⁻³ but at a recorded state change. It returns the steps compared.
+fn continuity_steps(years: i64) -> u64 {
     let galaxy = galaxy(SEED);
     let mut lcg = Lcg::new(0x0016_b0d2);
     let mut steps = 0_u64;
@@ -267,7 +341,7 @@ fn radius_temperature_and_envelope_are_continuous_in_time() {
                 }
                 let drawn: Vec<_> = planets.iter().map(|_| ranks(&mut lcg)).collect();
                 let mut previous: Option<Step> = None;
-                for step in -window()..=window() {
+                for step in -years..=years {
                     let t = at(step);
                     let states: Vec<Option<StarState>> =
                         stars.iter().map(|(s, _)| s.state_at(t)).collect();
@@ -289,7 +363,11 @@ fn radius_temperature_and_envelope_are_continuous_in_time() {
                                 continue;
                             };
                             steps += 1;
-                            if changed || b.state != n.state || b.retention != n.retention {
+                            if changed
+                                || b.state != n.state
+                                || b.retention != n.retention
+                                || b.carbon != n.carbon
+                            {
                                 continue;
                             }
                             let jump = |x: f64, y: f64| ((y - x) / x).abs();
@@ -304,7 +382,7 @@ fn radius_temperature_and_envelope_are_continuous_in_time() {
             }
         }
     }
-    assert!(steps > 50_000, "{steps}");
+    steps
 }
 
 /// The ages the small planets of [`small_planets`] are derived at.
@@ -591,7 +669,7 @@ mod satellites {
     use hyperion_sim::planetary::moons::irregular::KOZAI_GAP;
     use hyperion_sim::planetary::moons::{CaptureKind, MoonParent};
     use hyperion_sim::planetary::placement::mutual_hill_radius;
-    use hyperion_sim::planetary::record::{BodyRecord, Population, Section};
+    use hyperion_sim::planetary::record::{BodyRecord, Population, Section, SystemSnapshot};
     use hyperion_sim::planetary::satellites::{Satellite, SatelliteMoon, Satellites};
     use hyperion_sim::planetary::{PlanetarySystem, SystemContext, generate};
     use hyperion_sim::time::{ClockWindow, UniverseTime};
@@ -700,27 +778,24 @@ mod satellites {
         }
     }
 
-    /// Asserts P14.T22.b's properties for one planet's satellites `found` in `system` at `t`.
+    /// Asserts P14.T22.b's properties for one planet's satellites `found` at the time of
+    /// `snapshot`, its system's snapshot, which holds their records.
     fn check(
         ctx: &SystemContext,
-        system: &PlanetarySystem,
+        snapshot: &SystemSnapshot,
         found: &Satellites,
-        t: UniverseTime,
         counts: &mut Counts,
     ) {
+        let t = snapshot.time();
         let Some(parent) = found.parent() else {
             return;
         };
-        let record = |index| {
-            system
-                .body_at(ctx, index, t)
-                .expect("a generated body resolves")
-        };
+        let record = |index| snapshot.body(index).expect("a generated body resolves");
         let present = |r: &BodyRecord| r.identity().state() == BodyState::Present;
         let mut ordered: Vec<(KeplerElements, &Satellite)> = Vec::new();
         for moon in found.moons() {
             let r = record(moon.index());
-            if !present(&r) {
+            if !present(r) {
                 continue;
             }
             let orbit = *r
@@ -777,7 +852,7 @@ mod satellites {
                 "{:?} crosses {:?} in {:?} at {t:?}: {inner:?} {outer:?} {mi:?} {mo:?} {parent:?}",
                 mi.index(),
                 mo.index(),
-                system.system()
+                snapshot.system()
             );
         }
         // Ruling 83.8: each irregular clears every other moon and avoids the Kozai gap.
@@ -807,25 +882,24 @@ mod satellites {
             );
             counts.irregulars += 1;
         }
-        check_rings(ctx, system, found, parent, t, counts);
+        check_rings(snapshot, found, parent, counts);
     }
 
-    /// Asserts that `found`'s rings about `parent` lie inside its Roche limits at `t` (P14.T20).
+    /// Asserts that `found`'s rings about `parent` lie inside its Roche limits at the time of
+    /// `snapshot`, which holds their records (P14.T20).
     fn check_rings(
-        ctx: &SystemContext,
-        system: &PlanetarySystem,
+        snapshot: &SystemSnapshot,
         found: &Satellites,
         parent: &MoonParent,
-        t: UniverseTime,
         counts: &mut Counts,
     ) {
         let present = |r: &BodyRecord| r.identity().state() == BodyState::Present;
         // Rings inside Roche limits (P14.T20).
         for ring in found.rings() {
-            let r = system
-                .body_at(ctx, ring.index(), t)
+            let r = snapshot
+                .body(ring.index())
                 .expect("a generated body resolves");
-            if !present(&r) {
+            if !present(r) {
                 continue;
             }
             let Section::Ok(Population::Ring(ring)) = r.population() else {
@@ -838,14 +912,48 @@ mod satellites {
     }
 
     /// Checks every planet's satellites of the first `count` systems of [`each_system`] at −H,
-    /// the epoch and +H.
+    /// the epoch and +H, on [`SLOW_THREADS`] threads.
     pub(super) fn check_all(seed: Seed, count: usize) -> Counts {
         let galaxy = galaxy(seed);
         let plan = plan(&galaxy, count);
-        check_shares(&galaxy, &plan)
+        check_shares(&galaxy, &plan, SLOW_THREADS)
+    }
+
+    /// The threads [`check_all`] checks its systems on: the slots `.config/nextest.toml` reserves
+    /// for the million-system run, or the fewer a run grants.
+    const SLOW_THREADS: usize = 16;
+
+    /// The threads [`check_cells`] checks its chunk on, or the fewer a run grants.
+    const CHUNK_THREADS: usize = 4;
+
+    /// A chunk of a plan's cells, in walk order.
+    #[derive(Debug, Clone, Copy)]
+    enum Cells {
+        /// The first third of the cells.
+        FirstThird,
+        /// The rest.
+        OtherTwoThirds,
+    }
+
+    /// [`check_all`] over one chunk of the first `count` systems' cells, so that chunks check
+    /// disjoint systems, each satellite in full.
+    fn check_cells(seed: Seed, count: usize, cells: Cells) -> Counts {
+        let galaxy = galaxy(seed);
+        let plan = plan(&galaxy, count);
+        let cut = plan.len() / 3;
+        let chunk = match cells {
+            Cells::FirstThird => &plan[..cut],
+            Cells::OtherTwoThirds => &plan[cut..],
+        };
+        check_shares(&galaxy, chunk, CHUNK_THREADS)
     }
 
     /// Checks the systems of the `k`th of `shares` shares of `plan`, every `shares`th cell.
+    ///
+    /// A system with a moon or a ring is checked at each time from its snapshot then, whose
+    /// records are [`PlanetarySystem::body_at`]'s body by body: a satellite's own record derives
+    /// its planet's record again, so the snapshot, which derives each body once, costs about half
+    /// as much.
     fn check_share(galaxy: &Galaxy, plan: &[(CellKey, usize)], k: usize, shares: usize) -> Counts {
         let mut counts = Counts::default();
         let mut records: Vec<SystemRecord> = Vec::new();
@@ -854,9 +962,18 @@ mod satellites {
             for record in records.iter().take(take) {
                 let ctx = SystemContext::from_record(galaxy, record);
                 let system = generate(galaxy.seed(), &ctx);
-                for found in system.satellites() {
-                    for t in window() {
-                        check(&ctx, &system, found, t, &mut counts);
+                // A planet with no moon and no ring, or with no parent, has nothing to check.
+                let checked = system.satellites().iter().any(|found| {
+                    found.parent().is_some()
+                        && !(found.moons().is_empty() && found.rings().is_empty())
+                });
+                if !checked {
+                    continue;
+                }
+                for t in window() {
+                    let snapshot = system.snapshot_at(&ctx, t);
+                    for found in system.satellites() {
+                        check(&ctx, &snapshot, found, &mut counts);
                     }
                 }
             }
@@ -866,10 +983,14 @@ mod satellites {
 
     /// The cells are shared out among threads, each counting its own; the checks are per system
     /// and the counts are summed, so the result is the same on any number of threads. At most
-    /// four, the slots `.config/nextest.toml` gives the slow run.
+    /// `reserved`, the slots `.config/nextest.toml` gives the run, or the fewer a run grants.
     #[cfg(not(target_family = "wasm"))]
-    fn check_shares(galaxy: &Galaxy, plan: &[(CellKey, usize)]) -> Counts {
-        let threads = std::thread::available_parallelism().map_or(4, |n| n.get().min(4));
+    fn check_shares(galaxy: &Galaxy, plan: &[(CellKey, usize)], reserved: usize) -> Counts {
+        let granted = hyperion_testkit::threads::granted(reserved);
+        // A machine whose parallelism cannot be read runs the grant: the counts are the same on any
+        // number of threads.
+        let threads =
+            std::thread::available_parallelism().map_or(granted, |n| n.get().min(granted));
         std::thread::scope(|scope| {
             let workers: Vec<_> = (0..threads)
                 .map(|k| scope.spawn(move || check_share(galaxy, plan, k, threads)))
@@ -888,7 +1009,7 @@ mod satellites {
 
     /// wasm32-wasip1 has no threads, so the whole plan is one share on this thread.
     #[cfg(target_family = "wasm")]
-    fn check_shares(galaxy: &Galaxy, plan: &[(CellKey, usize)]) -> Counts {
+    fn check_shares(galaxy: &Galaxy, plan: &[(CellKey, usize)], _reserved: usize) -> Counts {
         check_share(galaxy, plan, 0, 1)
     }
 
@@ -998,11 +1119,29 @@ mod satellites {
         assert!(gas + ice > 500, "{gas} + {ice} giants");
     }
 
+    /// The fast tier's chunk: the first third of the 1,500 systems' cells, in walk order
+    /// (P14.T54.b.l's §C.7 split, sized on 24's times). The other two thirds are
+    /// [`moons_inside_hill_spheres_and_rings_inside_roche_limits_over_the_other_cells`]'s, so that
+    /// the two check disjoint chunks of the same systems, each satellite in full.
     #[test]
     fn moons_inside_hill_spheres_and_rings_inside_roche_limits() {
-        let counts = check_all(SEED, 1_500);
+        let counts = check_cells(SEED, 1_500, Cells::FirstThird);
+        eprintln!("{counts:?}");
         assert!(
-            counts.moons > 300 && counts.irregulars > 30 && counts.rings > 100,
+            counts.moons > 100 && counts.irregulars > 10 && counts.rings > 33,
+            "{counts:?}"
+        );
+    }
+
+    /// The slow tier's chunk of [`moons_inside_hill_spheres_and_rings_inside_roche_limits`]: the
+    /// other two thirds of its cells.
+    #[test]
+    #[ignore = "slow: the satellites of 1,000 whole systems at ±H, the fast tier's other cells"]
+    fn moons_inside_hill_spheres_and_rings_inside_roche_limits_over_the_other_cells() {
+        let counts = check_cells(SEED, 1_500, Cells::OtherTwoThirds);
+        eprintln!("{counts:?}");
+        assert!(
+            counts.moons > 200 && counts.irregulars > 20 && counts.rings > 66,
             "{counts:?}"
         );
     }

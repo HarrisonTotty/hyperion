@@ -7,14 +7,30 @@
 //!   `retarded_from`, from the present position a range query already has, ≤ 0.5 µs.
 //! - `lens_walk_26kly`: the cold lens walk from the Sun to a bulge source at Baade's window,
 //!   26,000 ly, over a year, in a galaxy whose systems move (the cone of Design note 13 as built),
-//!   ≤ 15 s on one thread; `lens_walk_26kly_pool`, the same walk in chunks on the server's pool
-//!   (its default, the cores less one), ≤ 5 s wall; `lens_renew_26kly`, a year's window renewed
+//!   ≤ 15 s on one thread; `lens_walk_26kly_pool`, the same walk in the plan's chunks
+//!   (`LensWalkPlan::chunks`) on the server's pool (its default, the cores less one), ≤ 5 s wall,
+//!   the plan built on one thread inside it; `lens_renew_26kly`, a year's window renewed
 //!   from candidates walked for two centuries, ≤ 10 ms; `lens_walk_26kly_still`, the plan's thin
 //!   tube in a galaxy whose systems keep their epoch positions.
-//! - `lens_cells_26kly`: generating the bulge walk's cells alone, the cold walk's floor.
+//! - `lens_cells_26kly`: generating the bulge walk's cells whole, as the walk did before it read
+//!   them in part: what the walk no longer pays.
 //! - `lens_walk_disc_5kly`: a cold walk of a 5,000 ly disc sightline in the moving galaxy, ≤ 1 s.
+//!
+//! Measured at generator version 27 (P12.T13; pod, 48 vCPU, loaded; criterion's medians):
+//! - `retarded` 314 ns, `retarded_later` 327 ns and `retarded_from` 267 ns: within their targets.
+//! - `lens_walk_26kly` 34.5 s, over its 15 s: `lens_cells_26kly`, its 310,894 cells, takes 32.3 s.
+//! - `lens_walk_26kly_pool` 20.4 s wall on 47 workers, over its 5 s; `lens_walk_26kly_still` 2.1 s.
+//! - `lens_renew_26kly` 2.79 µs and `lens_walk_disc_5kly` 203 ms: within their targets.
+//!
+//! After the walk read its cells in part, with its pool's chunks and `running_sums` reserved
+//! (perf-lens-walk, 2026-11-05, at 28; pod, 32 vCPU, 16 cores; criterion's medians, the same pod's
+//! at 27 before the change in brackets): `lens_walk_26kly` 8.50 s (34.80 s),
+//! `lens_walk_26kly_pool` 466 ms on 31 workers (20.61 s), `lens_walk_26kly_still` 225 ms (2.07 s)
+//! and `lens_walk_disc_5kly` 32.7 ms (205 ms); `lens_cells_26kly` 32.32 s (32.54 s) and
+//! `lens_renew_26kly` 2.77 µs (2.78 µs).
 
 use std::hint::black_box;
+use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
@@ -68,12 +84,12 @@ fn source_in(galaxy: &Galaxy, key: CellKey) -> SystemId {
     cell.first().expect("the cell holds systems").id()
 }
 
-/// The walk of `plan` in chunks of cells on `workers` threads, each taking the next chunk.
-fn walk_on_pool(galaxy: &Galaxy, plan: LensWalkPlan, workers: usize) -> LensCandidates {
-    let chunks: Vec<&[CellKey]> = plan.cells().chunks(2_048).collect();
+/// The walk of `plan` in its chunks on `workers` threads, each taking the next chunk.
+fn walk_on_pool(galaxy: &Galaxy, plan: LensWalkPlan, workers: NonZeroUsize) -> LensCandidates {
+    let chunks: Vec<&[CellKey]> = plan.chunks(workers).collect();
     let next = AtomicUsize::new(0);
     let walked = std::thread::scope(|scope| {
-        let handles: Vec<_> = (0..workers)
+        let handles: Vec<_> = (0..workers.get())
             .map(|_| {
                 scope.spawn(|| {
                     let mut mine = Vec::new();
@@ -117,9 +133,9 @@ fn lensing(c: &mut Criterion) {
     };
     let bulge_year = query(bulge, 0, 1);
     let workers = std::thread::available_parallelism()
-        .map_or(1, std::num::NonZeroUsize::get)
-        .saturating_sub(1)
-        .max(1);
+        .ok()
+        .and_then(|cores| NonZeroUsize::new(cores.get() - 1))
+        .unwrap_or(NonZeroUsize::MIN);
     let span = query(bulge, -100, 100);
     let candidates =
         lens_candidates(&moving, &mut NoCache::new(), &span).expect("the span's walk fits");

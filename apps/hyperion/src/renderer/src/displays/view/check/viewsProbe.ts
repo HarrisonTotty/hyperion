@@ -12,10 +12,18 @@
  * did. A view's name is its engine name (`view`, `instrument-1`), and a target belongs to the view
  * its name begins with, up to a `:` or a space (`view:hdr`, `instrument-1 blue noise`).
  *
- * Only the check's launch makes a probe; nothing else reads it.
+ * Only the check's launch makes a probe; nothing else reads it. The terrain run (plan R10,
+ * R10.T16.d) watches it too ({@link ViewsProbe.watch}): each render's submission and each target
+ * made, and the engine's faults and restores with their times.
  */
 
 import type {
+  InspectionAtmosphereRead,
+  InspectionAtmosphereReadName,
+  InspectionTimingCompile,
+  InspectionTimingFirstFrame,
+  InspectionTimingMemory,
+  InspectionTimingPass,
   ViewsCheckCanvas,
   ViewsCheckPhaseName,
   ViewsCheckPhaseRecord,
@@ -23,8 +31,18 @@ import type {
   ViewsCheckViewName,
   ViewsCheckViewRecord,
 } from "../../../../../preload/api";
+import type { CompositeProbe } from "../../../view/atmosphere/hillaire";
+import type { MarchCensus, MarchProbe } from "../../../view/atmosphere/marchProbe";
+import type { LitProbe } from "../../../view/atmosphere/surfaceLighting";
 import type { GpuTimer, GraphicsFault } from "../../../view/engine/status";
-import type { PassTimes, RenderEngine, ViewSize } from "../../../view/engine/types";
+import type {
+  FrameSubmission,
+  PassTimes,
+  RenderEngine,
+  RenderTarget,
+  RenderTargetSpec,
+  ViewSize,
+} from "../../../view/engine/types";
 import { DEFAULT_ENGINE_SOURCE, type ViewEngineSource } from "../useViewEngine";
 import { type EngineProbe, ProbedEngine } from "./probedEngine";
 
@@ -56,6 +74,60 @@ interface FrameEntry {
   readonly atMs: number;
   mainMs: number;
   readonly views: Map<string, FrameView>;
+  /**
+   * Its dispatches in their order: each one's pass label, kernel and workgroups (or `null`), and the
+   * body with air it drew for, numbered from 1 by its tables (or `null`).
+   */
+  readonly dispatches: Array<{
+    readonly pass: string;
+    readonly kernel: string;
+    readonly workgroups: number | null;
+    readonly air: number | null;
+  }>;
+}
+
+/** The per-frame kernels of a body's atmosphere (`hillaire.ts`), every read's forms named after them. */
+const AIR_KERNELS: ReadonlyArray<string> = [
+  "atmosphere sky view",
+  "atmosphere aerial perspective",
+  "atmosphere ray march",
+];
+
+/** The reads, each a later one the one a body's frame drew where its kernels hold several. */
+const READ_RANK: ReadonlyArray<InspectionAtmosphereReadName> = [
+  "thin",
+  "thick",
+  "deck",
+  "beneath a deck",
+];
+
+/**
+ * The read a per-frame atmosphere kernel draws by, from its name (`hillaire.ts`' forms: `, thick`,
+ * `, over a deck`, `beneath a deck`, `, thermal`), or `null` for a kernel of no read (the composite,
+ * the march's fill and limb lists, the tables').
+ *
+ * @remarks
+ * Over a deck the sky view and the aerial perspective are the thick read's, beside the deck's
+ * marches, so a body's frame is read as the latest of its kernels' reads ({@link READ_RANK}).
+ */
+export function atmosphereReadOf(
+  kernel: string,
+): { readonly read: InspectionAtmosphereReadName; readonly thermal: boolean } | null {
+  if (
+    !AIR_KERNELS.some((start) => kernel.startsWith(start)) ||
+    kernel.startsWith("atmosphere ray march's")
+  ) {
+    return null;
+  }
+  let read: InspectionAtmosphereReadName = "thin";
+  if (kernel.includes("beneath a deck")) {
+    read = "beneath a deck";
+  } else if (kernel.includes(", over a deck")) {
+    read = "deck";
+  } else if (kernel.includes(", thick")) {
+    read = "thick";
+  }
+  return { read, thermal: kernel.includes(", thermal") };
 }
 
 /** A view's scene target given a size: its scale against the view's canvas then. */
@@ -71,11 +143,56 @@ export interface ShownView {
   readonly style: ViewsCheckStyle;
 }
 
+/** A fault, with when it was reported. */
+export interface TimedFault {
+  /** The page's clock, ms. */
+  readonly atMs: number;
+  readonly fault: GraphicsFault;
+}
+
+/** What watches the probe's engines' submissions and targets (the terrain run's probe). */
+export interface SubmissionWatcher {
+  /**
+   * A view's or target's render of `frame` returned, in the animation frame stamped `frameMs`
+   * (`null` outside any).
+   */
+  submitted(owner: string, frame: FrameSubmission, frameMs: number | null): void;
+  /** A render target was made of `spec`. */
+  madeTarget(spec: RenderTargetSpec, target: RenderTarget): void;
+}
+
+/**
+ * A window's figures: a phase's record without its name and its label block's statements
+ * ({@link ViewsProbe.window}).
+ */
+export type WindowFigures = Omit<ViewsCheckPhaseRecord, "name" | "statements">;
+
 /** An allocation event, timed. */
 export interface TimedAllocation {
   readonly atMs: number;
   readonly kind: "created" | "destroyed";
   readonly name: string;
+}
+
+/** One of the engine's writes, allocations or releases, timed, with its bytes. */
+interface TimedTraffic {
+  readonly atMs: number;
+  readonly kind: "created" | "destroyed" | "uploaded";
+  readonly name: string;
+  readonly bytes: number;
+}
+
+/** The resources a window's memory traffic lists by their writes. */
+const LISTED_UPLOADS = 10;
+
+/**
+ * The materials' preparations the views' renderers made (R10.T14.d): how many, how many have not
+ * settled, and when the last settled, ms.
+ */
+export interface PreparationCount {
+  seen: number;
+  inFlight: number;
+  lastSettledAtMs: number | null;
 }
 
 /** Records `VIEW`'s frames, resolves, sizes, allocations and faults for the several-views check. */
@@ -86,25 +203,66 @@ export class ViewsProbe implements EngineProbe {
   /** The timestamp of the animation frame whose callback is running, or `null` between them. */
   #frameMs: number | null = null;
   readonly #frames = new Map<number, FrameEntry>();
+  /** Each body's tables' number, from 1 in the order first dispatched against. */
+  readonly #airs = new WeakMap<object, number>();
+  #nextAir = 1;
+  /**
+   * The timestamps of the frames each view drew in, in order, for {@link ViewsProbe.drawTimes}
+   * (lane perf-render-thread-ground): the frame profile asks for its draws four times a second, and
+   * a filter over every frame kept took the main thread 5 to 24 ms a draw by a run's end.
+   */
+  readonly #drawsByView = new Map<string, number[]>();
   readonly #resolves = new Map<string, ResolveEntry>();
   readonly #times = new Map<string, PassTimes>();
   readonly #allocations: TimedAllocation[] = [];
+  readonly #compiles: InspectionTimingCompile[] = [];
+  /** When the first engine was given to `VIEW`, ms, or `null` before it. */
+  #engineAtMs: number | null = null;
+  /** Every write, allocation and release with its bytes, for the frame profile's windows. */
+  readonly #traffic: TimedTraffic[] = [];
   readonly #faults: string[] = [];
+  readonly #timedFaults: TimedFault[] = [];
+  readonly #restoresAtMs: number[] = [];
+  readonly #watchers = new Set<SubmissionWatcher>();
   readonly #sizes = new Map<string, ViewSize>();
   readonly #scales: ScaleEntry[] = [];
   #timer: GpuTimer | null = null;
   /** Bumped for each engine and restore, since each numbers its resolves from 1 again. */
   #generation = 0;
+  /** The materials' preparations seen, those not yet settled, and when the last settled (R10.T14.d). */
+  readonly #preparations: PreparationCount = { seen: 0, inFlight: 0, lastSettledAtMs: null };
+  /** The probe its engines make the atmosphere's composite under, or `null` (as drawn). */
+  readonly #compositeProbe: CompositeProbe | null;
+  /** The probe its engines make the atmosphere's march under, or `null` (as drawn). */
+  readonly #marchProbe: MarchProbe | null;
+  /** The probe its engines make the lit materials and kernels under, or `null` (as drawn). */
+  readonly #litProbe: LitProbe | null;
+  /** The latest engine it made, which a census is asked of ({@link ViewsProbe.marchCensus}). */
+  #engine: ProbedEngine | null = null;
 
   /**
    * @param inner - Where the engines come from: R01's by default.
    * @param nowMs - The page's clock, `performance.now()`, on which animation frames are stamped.
+   * @param compositeProbe - The inspection profile's probe of the atmosphere's composite
+   *   (`--composite-probe`; the owner's priority, 2026-11-01), which every engine's composite is
+   *   made under ({@link ProbedEngine}); `null`, the default, as drawn.
+   * @param marchProbe - The inspection profile's probe of the atmosphere's march (`--march-probe`;
+   *   plan R08, R08.T8.d), which every engine's march is made under; `null`, the default, as drawn.
+   * @param litProbe - The inspection profile's probe of the lit passes (`--lit-probe`; R08.T9.b's
+   *   measurement), which every engine's lit materials and kernels are made under
+   *   ({@link ProbedEngine}); `null`, the default, as drawn.
    */
   constructor(
     inner: ViewEngineSource = DEFAULT_ENGINE_SOURCE,
     nowMs: () => number = () => performance.now(),
+    compositeProbe: CompositeProbe | null = null,
+    marchProbe: MarchProbe | null = null,
+    litProbe: LitProbe | null = null,
   ) {
     this.#nowMs = nowMs;
+    this.#compositeProbe = compositeProbe;
+    this.#marchProbe = marchProbe;
+    this.#litProbe = litProbe;
     this.source = {
       requestAdapter: inner.requestAdapter,
       load: async (outcome, status) => this.#attach(await inner.load(outcome, status)),
@@ -147,10 +305,225 @@ export class ViewsProbe implements EngineProbe {
       return;
     }
     const frame = this.#frameAt(frameMs);
-    const part = frame.views.get(view) ?? { submitMs: 0, resolves: [] };
+    const known = frame.views.get(view);
+    const part = known ?? { submitMs: 0, resolves: [] };
     part.submitMs += cpuMs;
     part.resolves.push(...keys);
     frame.views.set(view, part);
+    if (known === undefined) {
+      this.#drawOf(view, frameMs);
+    }
+  }
+
+  dispatched(
+    kernel: string,
+    workgroups: number | null,
+    pass: string | undefined,
+    air: object | null,
+  ): void {
+    const frameMs = this.#frameMs;
+    if (frameMs !== null && pass !== undefined) {
+      this.#frameAt(frameMs).dispatches.push({ pass, kernel, workgroups, air: this.#airOf(air) });
+    }
+  }
+
+  /** The number of the body whose tables are `air`, given at its first dispatch, or `null`. */
+  #airOf(air: object | null): number | null {
+    if (air === null) {
+      return null;
+    }
+    let number = this.#airs.get(air);
+    if (number === undefined) {
+      number = this.#nextAir;
+      this.#nextAir += 1;
+      this.#airs.set(air, number);
+    }
+    return number;
+  }
+
+  /**
+   * Each body's atmosphere read over the animation frames stamped from `startMs` up to `endMs`,
+   * from the kernels each frame dispatched against its tables ({@link atmosphereReadOf}): by body,
+   * then read in the order first drawn, with the frames that drew it so.
+   */
+  atmosphereReads(startMs: number, endMs: number): ReadonlyArray<InspectionAtmosphereRead> {
+    const frames = [...this.#frames.values()]
+      .filter((frame) => frame.atMs >= startMs && frame.atMs < endMs)
+      .toSorted((a, b) => a.atMs - b.atMs);
+    const reads = new Map<
+      string,
+      {
+        air: number;
+        read: InspectionAtmosphereReadName;
+        thermal: boolean;
+        frames: number;
+        kernels: Set<string>;
+      }
+    >();
+    for (const frame of frames) {
+      const drawn = new Map<number, { rank: number; thermal: boolean; kernels: string[] }>();
+      for (const each of frame.dispatches) {
+        const read = each.air === null ? null : atmosphereReadOf(each.kernel);
+        if (each.air === null || read === null) {
+          continue;
+        }
+        const body = drawn.get(each.air) ?? { rank: 0, thermal: false, kernels: [] };
+        body.rank = Math.max(body.rank, READ_RANK.indexOf(read.read));
+        body.thermal ||= read.thermal;
+        body.kernels.push(each.kernel);
+        drawn.set(each.air, body);
+      }
+      for (const [air, body] of drawn) {
+        const read = READ_RANK[body.rank] ?? "thin";
+        const key = `${String(air)} ${read} ${String(body.thermal)}`;
+        const known = reads.get(key) ?? {
+          air,
+          read,
+          thermal: body.thermal,
+          frames: 0,
+          kernels: new Set(),
+        };
+        known.frames += 1;
+        for (const kernel of body.kernels) {
+          known.kernels.add(kernel);
+        }
+        reads.set(key, known);
+      }
+    }
+    return [...reads.values()]
+      .toSorted((a, b) => a.air - b.air)
+      .map((each) => ({
+        air: each.air,
+        read: each.read,
+        thermal: each.thermal,
+        frames: each.frames,
+        kernels: [...each.kernels],
+      }));
+  }
+
+  /** When the first engine was given to `VIEW`, on the probe's clock, ms, or `null` before it. */
+  engineAtMs(): number | null {
+    return this.#engineAtMs;
+  }
+
+  /**
+   * Every pipeline compile the engines' budgets ran so far, in the order they settled, each timed
+   * as it settled (plan R08, fix-r08-decked-air-route; `RenderEngine.onCompile`).
+   */
+  compiles(): ReadonlyArray<InspectionTimingCompile> {
+    return [...this.#compiles];
+  }
+
+  /**
+   * `view`'s first draw, then its first that drew a body's air (plan R08, fix-r08-decked-air-route),
+   * where each was drawn: one-time costs, its compiles and its tables', told apart from the
+   * frames after them.
+   */
+  firstFrames(view: string): ReadonlyArray<InspectionTimingFirstFrame> {
+    const draws = this.#drawsByView.get(view) ?? [];
+    const drewAir = (atMs: number): boolean =>
+      this.#frames
+        .get(atMs)
+        ?.dispatches.some((each) => each.air !== null && atmosphereReadOf(each.kernel) !== null) ===
+      true;
+    const kinds: ReadonlyArray<{
+      readonly kind: InspectionTimingFirstFrame["kind"];
+      readonly at: number;
+    }> = [
+      { kind: "drawn", at: draws.length > 0 ? 0 : -1 },
+      { kind: "air", at: draws.findIndex(drewAir) },
+    ];
+    return kinds.flatMap(({ kind, at }) => {
+      const atMs = draws[at];
+      const frame = atMs === undefined ? undefined : this.#frames.get(atMs);
+      if (atMs === undefined || frame === undefined) {
+        return [];
+      }
+      const before = at > 0 ? draws[at - 1] : undefined;
+      return [
+        {
+          kind,
+          atMs,
+          intervalMs: before === undefined ? null : atMs - before,
+          mainThreadMs: frame.mainMs,
+          submitMs: frame.views.get(view)?.submitMs ?? 0,
+          gpuMs: this.#frameGpuMs(frame),
+        },
+      ];
+    });
+  }
+
+  /**
+   * The far limb's census of the next march its latest engine dispatches over an area (plan R08,
+   * R08.T8.d; {@link ProbedEngine.marchCensus}), or `null` before it has made one; withdrawn as
+   * `signal` aborts.
+   */
+  marchCensus(signal: AbortSignal): Promise<MarchCensus> | null {
+    return this.#engine?.marchCensus(signal) ?? null;
+  }
+
+  submitted(owner: string, frame: FrameSubmission): void {
+    for (const watcher of this.#watchers) {
+      watcher.submitted(owner, frame, this.#frameMs);
+    }
+  }
+
+  preparing(prepared: Promise<void>): void {
+    const preparations = this.#preparations;
+    preparations.seen += 1;
+    preparations.inFlight += 1;
+    // Its caller handles its failure; here it only settles.
+    const settle = (): void => {
+      preparations.inFlight -= 1;
+      preparations.lastSettledAtMs = this.#nowMs();
+    };
+    void prepared.then(settle, settle);
+  }
+
+  /**
+   * The materials' preparations so far (plan R10, R10.T14.d): how many the views' renderers made,
+   * how many have not settled, and when the last settled, ms; VIEW's opening ends once those its
+   * views made as they opened have settled.
+   */
+  preparations(): Readonly<PreparationCount> {
+    return { ...this.#preparations };
+  }
+
+  madeTarget(spec: RenderTargetSpec, target: RenderTarget): void {
+    for (const watcher of this.#watchers) {
+      watcher.madeTarget(spec, target);
+    }
+  }
+
+  /** Tells `watcher` of every submission and target from now on; returns its removal. */
+  watch(watcher: SubmissionWatcher): () => void {
+    this.#watchers.add(watcher);
+    return () => {
+      this.#watchers.delete(watcher);
+    };
+  }
+
+  /** Every fault so far, with its time. */
+  timedFaults(): ReadonlyArray<TimedFault> {
+    return [...this.#timedFaults];
+  }
+
+  /** When the engine restored after each loss so far, ms. */
+  restoresAtMs(): ReadonlyArray<number> {
+    return [...this.#restoresAtMs];
+  }
+
+  /** The timestamps of every animation frame from `startMs` up to `endMs`, in order. */
+  frameTimes(startMs: number, endMs: number): number[] {
+    return [...this.#frames.keys()]
+      .filter((atMs) => atMs >= startMs && atMs < endMs)
+      .toSorted((a, b) => a - b);
+  }
+
+  /** The timestamps of the animation frames from `startMs` up to `endMs` in which `view` drew, in order. */
+  drawTimes(view: string, startMs: number, endMs: number): number[] {
+    const draws = this.#drawsByView.get(view) ?? [];
+    return draws.slice(firstAtOrAfter(draws, startMs), firstAtOrAfter(draws, endMs));
   }
 
   sized(owner: string, kind: "view" | "target", size: ViewSize): void {
@@ -210,7 +583,8 @@ export class ViewsProbe implements EngineProbe {
 
   /**
    * The figures of the animation frames stamped from `startMs` up to `endMs`, for the phase
-   * `name` whose views were `shown`.
+   * `name` whose views were `shown`, with what the primary's label block said as it ended
+   * (`statements`).
    *
    * @remarks
    * A frame's GPU time counts once every resolve made in it has reported; a resolve still
@@ -222,21 +596,19 @@ export class ViewsProbe implements EngineProbe {
     startMs: number,
     endMs: number,
     shown: ReadonlyArray<ShownView>,
+    statements: ReadonlyArray<string>,
   ): ViewsCheckPhaseRecord {
+    return { name, ...this.window(startMs, endMs, shown), statements };
+  }
+
+  /**
+   * The figures of the animation frames stamped from `startMs` up to `endMs`, whose views were
+   * `shown`: {@link ViewsProbe.phase}'s, for a window of either run.
+   */
+  window(startMs: number, endMs: number, shown: ReadonlyArray<ShownView>): WindowFigures {
     const frames = [...this.#frames.values()]
       .filter((frame) => frame.atMs >= startMs && frame.atMs < endMs)
       .toSorted((a, b) => a.atMs - b.atMs);
-    const gpuOf = (keys: ReadonlyArray<string>): number | null => {
-      let ns = 0;
-      for (const key of keys) {
-        const times = this.#times.get(key);
-        if (times === undefined) {
-          return null;
-        }
-        ns += times.passes.reduce((sum, pass) => sum + pass.ns, 0);
-      }
-      return ns / 1e6;
-    };
     const frameGpuMs: number[] = [];
     let untimedFrames = 0;
     const made = new Set<string>();
@@ -248,7 +620,7 @@ export class ViewsProbe implements EngineProbe {
       for (const key of keys) {
         made.add(key);
       }
-      const gpuMs = gpuOf(keys);
+      const gpuMs = this.#gpuMsOf(keys);
       if (gpuMs === null) {
         untimedFrames += 1;
       } else {
@@ -273,7 +645,7 @@ export class ViewsProbe implements EngineProbe {
         canvas: this.canvasOf(view.name),
         draws: drawn.length,
         gpuMs: drawn.flatMap((part) => {
-          const gpuMs = part.resolves.length === 0 ? null : gpuOf(part.resolves);
+          const gpuMs = part.resolves.length === 0 ? null : this.#gpuMsOf(part.resolves);
           return gpuMs === null ? [] : [gpuMs];
         }),
         submitMs: drawn.map((part) => part.submitMs),
@@ -282,7 +654,6 @@ export class ViewsProbe implements EngineProbe {
       };
     });
     return {
-      name,
       startMs,
       endMs,
       views,
@@ -298,29 +669,187 @@ export class ViewsProbe implements EngineProbe {
     };
   }
 
+  /**
+   * Each pass label's GPU time in each animation frame stamped from `startMs` up to `endMs` that
+   * made a resolve and whose resolves all reported, ms, every view's and target's passes of the
+   * label in the frame summed, 0 in a frame without one: the frames of
+   * {@link ViewsProbe.window}'s `frameGpuMs`, in the same order, labels in the order first seen (the
+   * inspection run's frame profile; the owner's report, 2026-11-01). A label a frame repeats is
+   * numbered from its second pass in the frame's order (`atmosphere view #2`), so that one label's
+   * several dispatches, or the shadow cascades' four passes, are told apart; a label whose passes
+   * are dispatches carries their kernels and workgroups, by which its time a texel and a step is
+   * read (the march's, main's ask of 2026-11-01).
+   */
+  passTimes(startMs: number, endMs: number): ReadonlyArray<InspectionTimingPass> {
+    const frames = [...this.#frames.values()]
+      .filter((frame) => frame.atMs >= startMs && frame.atMs < endMs)
+      .toSorted((a, b) => a.atMs - b.atMs);
+    const byLabel = new Map<string, number[]>();
+    const kernels = new Map<string, Set<string>>();
+    const groups = new Map<string, number[]>();
+    let timed = 0;
+    for (const frame of frames) {
+      const keys = [...frame.views.values()].flatMap((part) => part.resolves);
+      const resolves = keys.map((key) => this.#times.get(key));
+      if (keys.length === 0 || resolves.some((times) => times === undefined)) {
+        continue;
+      }
+      // A label the frame repeats is numbered from its second pass, in the frame's order.
+      const seen = new Map<string, number>();
+      for (const times of resolves) {
+        for (const pass of times?.passes ?? []) {
+          const nth = (seen.get(pass.label) ?? 0) + 1;
+          seen.set(pass.label, nth);
+          const label = nth === 1 ? pass.label : `${pass.label} #${String(nth)}`;
+          let ms = byLabel.get(label);
+          if (ms === undefined) {
+            ms = Array.from({ length: timed + 1 }, () => 0);
+            byLabel.set(label, ms);
+          }
+          ms[timed] = (ms[timed] ?? 0) + pass.ns / 1e6;
+        }
+      }
+      // The frame's dispatches, numbered by label as their passes are: one timed pass each.
+      const dispatched = new Map<string, number>();
+      for (const each of frame.dispatches) {
+        const nth = (dispatched.get(each.pass) ?? 0) + 1;
+        dispatched.set(each.pass, nth);
+        const label = nth === 1 ? each.pass : `${each.pass} #${String(nth)}`;
+        const names = kernels.get(label) ?? new Set<string>();
+        names.add(each.kernel);
+        kernels.set(label, names);
+        const counts = groups.get(label) ?? [];
+        while (counts.length < timed) {
+          counts.push(0);
+        }
+        counts[timed] = (counts[timed] ?? 0) + (each.workgroups ?? 0);
+        groups.set(label, counts);
+      }
+      timed += 1;
+      for (const series of [...byLabel.values(), ...groups.values()]) {
+        while (series.length < timed) {
+          series.push(0);
+        }
+      }
+    }
+    return [...byLabel].map(([label, ms]) => ({
+      label,
+      ms,
+      kernels: [...(kernels.get(label) ?? [])],
+      workgroups: kernels.has(label) ? (groups.get(label) ?? []) : [],
+    }));
+  }
+
+  /**
+   * The engine's writes, allocations and releases from `startMs` up to `endMs`, each a count and
+   * its bytes, and the resources written most (the inspection run's frame profile).
+   */
+  memoryTraffic(startMs: number, endMs: number): InspectionTimingMemory {
+    const inside = this.#traffic.filter((each) => each.atMs >= startMs && each.atMs < endMs);
+    const total = (kind: TimedTraffic["kind"]): { count: number; bytes: number } => {
+      const of = inside.filter((each) => each.kind === kind);
+      return { count: of.length, bytes: of.reduce((sum, each) => sum + each.bytes, 0) };
+    };
+    const byName = new Map<string, { readonly name: string; count: number; bytes: number }>();
+    for (const each of inside) {
+      if (each.kind === "uploaded") {
+        const held = byName.get(each.name) ?? { name: each.name, count: 0, bytes: 0 };
+        held.count += 1;
+        held.bytes += each.bytes;
+        byName.set(each.name, held);
+      }
+    }
+    return {
+      uploaded: total("uploaded"),
+      created: total("created"),
+      destroyed: total("destroyed"),
+      uploads: [...byName.values()]
+        .toSorted((a, b) => b.bytes - a.bytes || (a.name < b.name ? -1 : 1))
+        .slice(0, LISTED_UPLOADS),
+    };
+  }
+
   #attach(engine: RenderEngine): RenderEngine {
     this.#generation += 1;
+    this.#engineAtMs ??= this.#nowMs();
     // Each listener lives as long as its engine, whose disposal drops it.
     engine.onPassTimes((times) => {
       this.#timer = times.timer;
       this.#times.set(this.#key(times.frame), times);
     });
     engine.onAllocation((event) => {
+      const atMs = this.#nowMs();
+      this.#traffic.push({ atMs, kind: event.kind, name: event.name, bytes: event.bytes });
       if (event.kind !== "uploaded") {
-        this.#allocations.push({ atMs: this.#nowMs(), kind: event.kind, name: event.name });
+        this.#allocations.push({ atMs, kind: event.kind, name: event.name });
       }
+    });
+    engine.onCompile((event) => {
+      this.#compiles.push({
+        name: event.name,
+        lane: event.lane,
+        readyAtMs: this.#nowMs(),
+        waitedMs: event.waitedMs,
+        ms: event.ms,
+      });
     });
     engine.onFault((fault) => {
       this.#faults.push(faultLine(fault));
+      this.#timedFaults.push({ atMs: this.#nowMs(), fault });
     });
     engine.onRestored(() => {
       this.#generation += 1;
+      this.#restoresAtMs.push(this.#nowMs());
     });
-    return new ProbedEngine(engine, this, this.#nowMs);
+    const probed = new ProbedEngine(
+      engine,
+      this,
+      this.#nowMs,
+      this.#compositeProbe,
+      this.#marchProbe,
+      this.#litProbe,
+    );
+    this.#engine = probed;
+    return probed;
+  }
+
+  /**
+   * The GPU time of `frame`'s resolves, every view's, ms, or `null` where it took none (no pass
+   * timer) or one has not reported.
+   */
+  #frameGpuMs(frame: FrameEntry): number | null {
+    const keys = [...frame.views.values()].flatMap((part) => part.resolves);
+    return keys.length === 0 ? null : this.#gpuMsOf(keys);
+  }
+
+  /** The GPU time of the resolves `keys`, ms, or `null` while any has not reported. */
+  #gpuMsOf(keys: ReadonlyArray<string>): number | null {
+    let ns = 0;
+    for (const key of keys) {
+      const times = this.#times.get(key);
+      if (times === undefined) {
+        return null;
+      }
+      ns += times.passes.reduce((sum, pass) => sum + pass.ns, 0);
+    }
+    return ns / 1e6;
   }
 
   #key(resolve: number): string {
     return `${String(this.#generation)}/${String(resolve)}`;
+  }
+
+  /** Notes that `view` drew in the frame at `frameMs`, its times kept in order. */
+  #drawOf(view: string, frameMs: number): void {
+    let draws = this.#drawsByView.get(view);
+    if (draws === undefined) {
+      draws = [];
+      this.#drawsByView.set(view, draws);
+    }
+    const at = firstAtOrAfter(draws, frameMs);
+    if (draws[at] !== frameMs) {
+      draws.splice(at, 0, frameMs);
+    }
   }
 
   #frameAt(atMs: number): FrameEntry {
@@ -328,7 +857,7 @@ export class ViewsProbe implements EngineProbe {
     if (known !== undefined) {
       return known;
     }
-    const frame: FrameEntry = { atMs, mainMs: 0, views: new Map() };
+    const frame: FrameEntry = { atMs, mainMs: 0, views: new Map(), dispatches: [] };
     this.#frames.set(atMs, frame);
     return frame;
   }
@@ -353,8 +882,10 @@ export class ViewsProbe implements EngineProbe {
     if (generation === undefined || resolves.length === 0) {
       return 0;
     }
-    const low = Math.min(...resolves);
-    const high = Math.max(...resolves);
+    // A fold rather than an argument spread: a terrain run's window of minutes holds some 10⁵
+    // resolves, past the argument list a spread can take (R10.T16.d).
+    const low = resolves.reduce((least, n) => Math.min(least, n), Number.POSITIVE_INFINITY);
+    const high = resolves.reduce((most, n) => Math.max(most, n), Number.NEGATIVE_INFINITY);
     let ns = 0;
     for (const [key, times] of this.#times) {
       const [g, n] = key.split("/").map(Number);
@@ -378,7 +909,7 @@ function intervalsOf(frames: ReadonlyArray<FrameEntry>): number[] {
 }
 
 /** A fault as one line of the record. */
-function faultLine(fault: GraphicsFault): string {
+export function faultLine(fault: GraphicsFault): string {
   let line: string;
   switch (fault.kind) {
     case "device-lost":
@@ -395,4 +926,19 @@ function faultLine(fault: GraphicsFault): string {
       break;
   }
   return line;
+}
+
+/** The index of the first of the ascending `times` at or after `atMs`: `times.length` with none. */
+function firstAtOrAfter(times: ReadonlyArray<number>, atMs: number): number {
+  let low = 0;
+  let high = times.length;
+  while (low < high) {
+    const mid = (low + high) >>> 1;
+    if ((times[mid] ?? Number.POSITIVE_INFINITY) < atMs) {
+      low = mid + 1;
+    } else {
+      high = mid;
+    }
+  }
+  return low;
 }

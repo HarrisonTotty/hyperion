@@ -129,7 +129,12 @@ export function childKeys(k: PatchKey): readonly [PatchKey, PatchKey, PatchKey, 
  * numeric maps per level key patches by without building a string.
  */
 export function patchKeyIndex(key: PatchKey): number {
-  return key.face * 2 ** 48 + key.i * 2 ** 24 + key.j;
+  return patchIndex(key.face, key.i, key.j);
+}
+
+/** {@link patchKeyIndex} of the patch (i, j) of `face`, its key not built. */
+export function patchIndex(face: Face, i: number, j: number): number {
+  return face * 2 ** 48 + i * 2 ** 24 + j;
 }
 
 /**

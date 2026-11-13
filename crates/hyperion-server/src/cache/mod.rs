@@ -6,7 +6,9 @@
 //! so that two saves of one seed share their entries (plan 04, design note 23).
 
 mod byte_lru;
+mod fnv;
 
 pub use byte_lru::{
     ByteLru, ENTRY_OVERHEAD_BYTES, HeapBytes, Insertion, LruCounters, SharedByteLru,
 };
+pub(crate) use fnv::fnv1a;

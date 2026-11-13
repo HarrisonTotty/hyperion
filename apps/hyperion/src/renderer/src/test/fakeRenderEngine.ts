@@ -3,22 +3,34 @@
  * adapter as a real one does, and whose device loss the test raises.
  *
  * @remarks
- * Only views, faults, allocation listeners, disposal, buffer handles and releases are faked;
- * every other member throws, naming itself.
+ * Only views, faults, allocation listeners, disposal, buffer, mesh, material and kernel handles
+ * and releases, and depth-layer targets that record their renders, are faked; every other member
+ * throws, naming itself.
  */
 
+import type { KernelPair } from "../view/engine/kernels";
 import type { AllocationEvent, BufferSpec } from "../view/engine/memory";
 import { deviceCapabilities } from "../view/engine/platform";
 import type { GraphicsFault } from "../view/engine/status";
 import type {
   BufferHandle,
+  CompileEvent,
+  ComputeHandle,
   CreateWebGpuEngine,
+  DepthLayerPass,
+  DepthLayersSpec,
+  DepthLayerTarget,
   FrameSubmission,
+  MaterialHandle,
+  MeshHandle,
+  MeshSpec,
   PassTimes,
   RenderEngine,
   RenderView,
+  TargetRender,
   TextureHandle,
   ViewSize,
+  WgslMaterialSpec,
 } from "../view/engine/types";
 
 /** The allocation every fake engine holds, and whose `destroyed` event its disposal raises. */
@@ -59,16 +71,51 @@ export class FakeView implements RenderView {
   }
 }
 
+/** A depth-layer target that records its renders' passes (plan R10, R10.T9.b). */
+export class FakeDepthLayers implements DepthLayerTarget {
+  readonly name: string;
+  readonly sizePx: number;
+  readonly layers: number;
+  readonly depth: TextureHandle;
+  /** Each render's owner and passes, first first. */
+  readonly renders: Array<{
+    readonly owner: string;
+    readonly passes: ReadonlyArray<DepthLayerPass>;
+  }> = [];
+  disposed = false;
+
+  constructor(spec: DepthLayersSpec) {
+    this.name = spec.name;
+    this.sizePx = spec.sizePx;
+    this.layers = spec.layers;
+    this.depth = Object.freeze({ kind: "texture", name: spec.name });
+  }
+
+  render(owner: string, passes: ReadonlyArray<DepthLayerPass>): void {
+    this.renders.push({ owner, passes });
+  }
+  dispose(): void {
+    this.disposed = true;
+  }
+}
+
 /** An engine made on a device the test may lose. */
 export class FakeRenderEngine implements RenderEngine {
   readonly capabilities: RenderEngine["capabilities"];
   readonly depthPolicy = "reversed-z-float" as const;
   readonly views: FakeView[] = [];
-  /** The buffers and textures released, in order. */
-  readonly released: Array<BufferHandle | TextureHandle> = [];
+  /** The depth-layer targets made, first first (R10.T9.b). */
+  readonly depthLayers: FakeDepthLayers[] = [];
+  /** The buffers, textures, meshes, materials and kernels released, in order. */
+  readonly released: Array<
+    BufferHandle | TextureHandle | MeshHandle | MaterialHandle | ComputeHandle
+  > = [];
+  /** The materials asked of `prepareMaterial`, in order (R10.T14.d). */
+  readonly prepared: MaterialHandle[] = [];
   disposed = false;
   readonly #faultListeners = new Set<(fault: GraphicsFault) => void>();
   readonly #allocationListeners = new Set<(event: AllocationEvent) => void>();
+  readonly #compileListeners = new Set<(event: CompileEvent) => void>();
   readonly #passTimeListeners = new Set<(times: PassTimes) => void>();
   readonly #restoredListeners = new Set<() => void>();
   readonly #viewless: boolean;
@@ -128,6 +175,24 @@ export class FakeRenderEngine implements RenderEngine {
       this.#passTimeListeners.delete(listener);
     };
   }
+  onCompile(listener: (event: CompileEvent) => void): () => void {
+    this.#compileListeners.add(listener);
+    return () => {
+      this.#compileListeners.delete(listener);
+    };
+  }
+  /** Reports a settled compile, as the WebGPU engine's budget does. */
+  reportCompile(event: CompileEvent): void {
+    for (const listener of this.#compileListeners) {
+      listener(event);
+    }
+  }
+  /** Reports an allocation, a release or a write, as the WebGPU engine does as it makes them. */
+  reportAllocation(event: AllocationEvent): void {
+    for (const listener of this.#allocationListeners) {
+      listener(event);
+    }
+  }
   /** Reports a resolve's times, as the WebGPU engine does once their read settles. */
   reportPassTimes(times: PassTimes): void {
     for (const listener of this.#passTimeListeners) {
@@ -157,23 +222,49 @@ export class FakeRenderEngine implements RenderEngine {
   createRenderTarget(): never {
     throw notFaked("createRenderTarget");
   }
-  createMesh(): never {
-    throw notFaked("createMesh");
+  /** Each target's own `render`, in order, as the engine's one submission draws them (plan R14). */
+  renderTargets(renders: ReadonlyArray<TargetRender>): void {
+    for (const { target, frame } of renders) {
+      target.render(frame);
+    }
   }
-  createMaterial(): never {
-    throw notFaked("createMaterial");
+  /**
+   * A depth-layer target with nothing behind it (plan R10, R10.T9.b), its depth a handle as
+   * {@link FakeRenderEngine.createMesh} gives one, which records its renders' passes and whether it
+   * was disposed.
+   */
+  createDepthLayers(spec: DepthLayersSpec): FakeDepthLayers {
+    const target = new FakeDepthLayers(spec);
+    this.depthLayers.push(target);
+    return target;
   }
-  createMaterialAsync(): Promise<never> {
-    return Promise.reject(notFaked("createMaterialAsync"));
+  /** A handle with nothing behind it, for tests of what is done with handles (R10.T16.b). */
+  createMesh(spec: MeshSpec): MeshHandle {
+    return Object.freeze({ kind: "mesh", name: spec.name });
+  }
+  /** A handle with nothing behind it, as {@link FakeRenderEngine.createMesh} gives. */
+  createMaterial(spec: WgslMaterialSpec): MaterialHandle {
+    return Object.freeze({ kind: "material", name: spec.name });
+  }
+  /** {@link FakeRenderEngine.createMaterial}'s handle, at once. */
+  createMaterialAsync(spec: WgslMaterialSpec): Promise<MaterialHandle> {
+    return Promise.resolve(this.createMaterial(spec));
+  }
+  /** Nothing to make: records the material and resolves at once (R10.T14.d). */
+  prepareMaterial(material: MaterialHandle): Promise<void> {
+    this.prepared.push(material);
+    return Promise.resolve();
   }
   createPostProcess(): never {
     throw notFaked("createPostProcess");
   }
-  createCompute(): never {
-    throw notFaked("createCompute");
+  /** A kernel's handle with no pipeline behind it, for tests of what is done with handles (R01.T15). */
+  createCompute(pair: KernelPair): ComputeHandle {
+    return Object.freeze({ kind: "compute", name: pair.name, path: "reference" });
   }
-  createComputeAsync(): Promise<never> {
-    return Promise.reject(notFaked("createComputeAsync"));
+  /** A handle as {@link FakeRenderEngine.createCompute} makes one, at once. */
+  createComputeAsync(pair: KernelPair): Promise<ComputeHandle> {
+    return Promise.resolve(this.createCompute(pair));
   }
   /** A handle with no GPU memory behind it, for tests of what is done with handles. */
   createBuffer(spec: BufferSpec): BufferHandle {
@@ -205,8 +296,23 @@ export class FakeRenderEngine implements RenderEngine {
   releaseTexture(texture: TextureHandle): void {
     this.released.push(texture);
   }
+  /** Records a release, as {@link FakeRenderEngine.releaseBuffer} does (R10.T16.b). */
+  releaseMesh(mesh: MeshHandle): void {
+    this.released.push(mesh);
+  }
+  /** Records a release, as {@link FakeRenderEngine.releaseBuffer} does (R10.T16.b). */
+  releaseMaterial(material: MaterialHandle): void {
+    this.released.push(material);
+  }
+  /** Records a release, as {@link FakeRenderEngine.releaseBuffer} does (R01.T15). */
+  releaseCompute(kernel: ComputeHandle): void {
+    this.released.push(kernel);
+  }
   dispatch(): never {
     throw notFaked("dispatch");
+  }
+  stagedWrites<T>(_label: string, write: () => T): T {
+    return write();
   }
   writeBuffer(): never {
     throw notFaked("writeBuffer");

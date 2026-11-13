@@ -2,13 +2,37 @@
 // and 24): each pixel's rays intersected with the body's spheroid and shaded by `body_brdf`'s law
 // under the horizon, eclipse, ring-shadow and atmosphere terms of `litBody.wgsl`, and by the
 // planetshine of up to two lit neighbours. The law is the disc's surface's (`DiscSurface`): one law,
-// or under R10's class map each class's law by its weight at the hit and the uniform law by what
-// the weights leave. The TypeScript twin is `view/bodies/discShading.ts`.
+// or under R10's class map each class's law by its share at the hit and the uniform law by the
+// rest, the shares reconstructed from the map's texels (`surface_at`, R10.T10.d). The
+// TypeScript twin is `view/bodies/discShading.ts`.
 //
-// A library composed by concatenation after frame.wgsl and litBody.wgsl, with no entry point of its
-// own: its includer declares `draw`, a `Draw` whose `disc` is the body's record in `discs`, and
-// `cell_sums` at `@group(2) @binding(5)`, the pixels' sums of the `disc cells` pass (R07.T8.d),
-// which a disc under 32 px reads in place of summing its own cells (`pixel_cells`). Two includers
+// A class map may carry the field's normal map (plan R10, R10.T10.g; decision-r10-t16-leans §1):
+// its surveyed ground is then shaded with the field's own cell-scale slopes, as the terrain's
+// coarsest patches shade it, so that disc and terrain share them at the hand-over. Two normals
+// meet at each hit: the datum's ν, the spheroid's, and the shading normal n′, the map's there
+// (`shading_normal`) or ν where the map holds none. As `terrainLit.wgsl`'s `shade_terrain` takes
+// them: the law's μ and μ₀ on n′, μ floored at half the datum's, so that a cell whose slope faces
+// away near the limb never draws black; each star's horizon term on n′ with the datum's tangent
+// plane as the local horizon, so that the body's curvature still sets the terminator; R08's
+// lookups on ν; the sky's light by (1 + n′ · ν) ÷ 2; planetshine on n′, under the same cut. The
+// hit, the limb, the eclipse, the ring and the phase are the datum's, which have no normal. With
+// no normal map n′ = ν, the floor and the cut are inactive and every value is as before.
+//
+// A class map may carry its texels' maturity (plan R10, R10.T1.c's client half;
+// decision-r10-t1c-client-scope §2.3): each texel's unorm16 code in the layers past its weights',
+// and each class's albedo nodes in the record. Each class drawn from its nodes then takes as its A,
+// at a point of a surveyed texel, its nodes' albedo at each corner's code by the very bilinear
+// weights the shares take, renormalised over the surveyed corners (`surface_at`); the shares, L(0),
+// the rows and law 0 stay as they are. With no maturity (row 25's w 0) every value is as before.
+//
+// A library composed by concatenation after frame.wgsl, preciseTrig.wgsl, R08's common.wgsl,
+// oblate.wgsl and surfaceLighting.wgsl (plan R08, R08.T9.b), litBody.wgsl, cubeTexel.wgsl (the
+// cube sphere's texel lookup, moved out of this file by R10.T11) and maturityNodes.wgsl (the
+// maturity nodes' formula, R10.T1.c), with no entry point of
+// its own: its includer declares `draw`, a `Draw` whose `disc` is the body's record in `discs`, and
+// `cell_sums` at `@group(2) @binding(5)`, the pixels' sums of the `disc cells` pass (R07.T8.d–g),
+// which a disc under 32 px, and a larger disc's limb and its face's near-limb band, read in place
+// of summing their own cells (`pixel_cells`). Two includers
 // draw it (`disc_pixel`), each with `draw` at `@group(1) @binding(0)` and `cell_sums` read-only:
 //   - bodyDiscDraw.wgsl, the disc regime: one screen rectangle the CPU bounds, in two draws the CPU
 //     orders together in the painter's sequence, `edgePass` 0 for the pixels the body covers
@@ -19,8 +43,9 @@
 //   - smoothMesh.wgsl, the mesh regime (T9): R05's patches of the spheroid at zero height, writing
 //     depth, which draw the wholly covered pixels as the disc's first draw does; the limb is the
 //     disc's second draw, at the limb's depth.
-// A third, bodyDiscCells.wgsl, is the `disc cells` kernel: one invocation a cell of a small disc's
-// pixel (`cell_sum`), its `draw` private and set from the job, writing `cell_sums`.
+// A third, bodyDiscCells.wgsl, is the `disc cells` kernel: one invocation a cell of a pixel
+// (`cell_sum`), every pixel of a small disc's, and of a large disc's limb and its face's near-limb
+// band (R07.T8.d–g), its `draw` private and set from the job, writing `cell_sums`.
 //
 // Every length reaches the GPU already divided: the body's centre as a unit direction with its
 // radii over its distance D, and every light and occluder relative to the body's centre over its
@@ -31,34 +56,80 @@
 //   1  the centre's unit direction from the camera; w, a ÷ D;
 //   2  the pole's unit direction; w, c ÷ a;
 //   3  samples per axis in a wholly covered pixel and in a limb pixel; the lights; the occluders;
-//   4  law 0's A per channel (r, g, b), scaled for the figure; w, its L: the uniform law, or a
-//      class map's `elsewhere`;
+//   4  law 0's A per channel (r, g, b), scaled for the figure; w, its L(0): the uniform law, or a
+//      class map's `elsewhere` (its L(α) is its row's alpha);
 //   5  law 0's row of `phase_factor_table`; the annuli per channel; exposure ÷ π; the class map's
 //      classes, 0 for a uniform surface;
 //   6 + 8j, light j: the star's unit direction from the body's centre, w its distance ÷ a; its
 //      illuminance face-on per channel (lx), w its radius ÷ a; then its annuli (`DiscAnnuli`'s outer
 //      edges and fluxes) for r, g and b, two rows each;
 //   22 + k, occluder k: its centre from the body's centre ÷ a; w, its radius ÷ a;
-//   24, 25  a class map's body-fixed x and y axes (z their cross product);
-//   26 + k, class k (law k + 1): its A per channel, scaled; w, its L;
+//   24, 25  a class map's body-fixed x and y axes (z their cross product); 24's w 1 where it
+//      carries the field's normal map (`surface_normals`, R10.T10.g), 0 otherwise; 25's w 1 where
+//      it carries its texels' maturity (`class_map_maturity`, R10.T1.c), 0 otherwise;
+//   26 + k, class k (law k + 1): its A per channel, scaled; w, its L(0);
 //   42 to 45  the classes' rows of `phase_factor_table`, four a row;
 //   46  the planetshine sources (x);
 //   47 + 2j, source j: the neighbour's unit direction from the body's centre, w its distance ÷ a;
 //      its illuminance face-on at the body's centre per channel (lx), w its radius ÷ a;
-//   51  where the `disc cells` pass left the pixels' sums (T8.d): the first sum's index in
-//      `cell_sums`, the left and top of the rectangle summed, px, and its width, px; x −1 for a
-//      disc whose draws sum their own cells.
+//   51  where the `disc cells` pass left the pixels' sums (T8.d): for a disc whose every pixel
+//      takes the same cells, the first sum's index in `cell_sums`, the left and top of the
+//      rectangle summed, px, and its width, px; for a large disc's limb and its face's near-limb
+//      band (T8.f–g), the first of its rows' spans in `discs` (`cell_sums_index`), its rows, its
+//      top, px, and w −1; x −1 for a disc whose draws sum their own cells;
+//   52 + K k + j, class k's maturity node j (R10.T1.c, K = MATURITY_NODES): its A per channel at
+//      the node's maturity, scaled as the class's; node 0's w 1 where the class is drawn from its
+//      nodes; written only where row 25's w is 1, and 0 otherwise.
+// Past the records, the spans of the large discs whose row 51 points at them (T8.f–g;
+// `discShading.ts`' `packDiscRecords`): four rows a pixel row, the limb draw's two spans of it and
+// then the face's near-limb band's two, each the index in `cell_sums` of its first pixel's sums,
+// its first pixel's x and its end's, px, and 0.
 @group(2) @binding(0) var<storage, read> discs : array<vec4f>;
 
 // The phase factors of the frame's laws, one row each (`litBody.wgsl`).
 @group(2) @binding(1) var phase_factor_table : texture_2d<f32>;
 
-// The disc's class map (`discSurface.ts`): N × N texels per face of R05's cube sphere, class k's
-// weight in channel k mod 4 of layer face + 6 ⌊k ÷ 4⌋, read unfiltered; any one texture where the
-// surface is uniform, unread.
+// The disc's class map (`discSurface.ts`): (N + 2) × (N + 2) texels a layer, the N × N of a face of
+// R05's cube sphere at (1, 1) to (N, N) and a one-texel gutter about them from the neighbouring
+// faces' edge texels, its corners empty (R10.T10.d); class k's weight in channel k mod 4 of layer
+// face + 6 ⌊k ÷ 4⌋, read by texel (`textureLoad`) and reconstructed here (`surface_at`); where row
+// 25's w is 1, each texel's maturity code in layer face + 6 ⌈classes ÷ 4⌉, its high byte in r and
+// its low byte in g, the gutter as the weights' (`class_map_maturity`, R10.T1.c); past those, where
+// the texture has more layers, its fine page (lane fix-coast-class-map; `discSurface.ts`'
+// `ClassMapFine`): six index layers, one a face, each refined texel's tile t + 1 in r and g and its
+// cells a side, r, in b (`fine_tile`), then the tiles' pages, each its classes' layers and under a
+// maturity its codes' layer, each tile r + 2 texels a side, its cells and a gutter of the cells about
+// it, or where its index's a is 255 its cells' (r + 1)² corners from (0, 0) and its cells' survey
+// flags at (r + 1, j); any one texture where the surface is uniform, unread.
 @group(2) @binding(2) var class_weights : texture_2d_array<f32>;
 
-const DISC_ROWS : u32 = 52u;
+// The body's atmosphere, which `surfaceLighting.wgsl` reads (plan R08, R08.T9.b; `draw.ts`'s
+// DISC_TEXTURES), each by textureLoad: the body's table, the transmittance tables (one layer a κ
+// slice), the lights' curves of growth and the sky's irradiance (one layer a band and light slot);
+// one-texel tables of zeros for a body without one, which read as no air.
+@group(2) @binding(6) var atmosphere_body : texture_2d<f32>;
+@group(2) @binding(7) var atmosphere_transmittance : texture_2d_array<f32>;
+@group(2) @binding(8) var atmosphere_absorber_columns : texture_2d_array<f32>;
+@group(2) @binding(9) var atmosphere_absorber_pressure_columns : texture_2d_array<f32>;
+@group(2) @binding(10) var atmosphere_last_absorber_pressure_column : texture_2d_array<f32>;
+@group(2) @binding(11) var atmosphere_absorber_curves : texture_2d<f32>;
+@group(2) @binding(12) var atmosphere_irradiance : texture_2d_array<f32>;
+// The table below a cloud deck over a surface (R08.T15.b.2), or a one-texel stub, past the mesh's
+// coverage mask (13), the normal map (14) and the disc's table (15).
+@group(2) @binding(16) var atmosphere_below_deck : texture_2d_array<f32>;
+// The sources' transmittance table (R08.T9.b's lever), or a one-texel stub: past the table below a
+// deck.
+@group(2) @binding(17) var atmosphere_source_table : texture_2d_array<f32>;
+
+// The class map's normal map (plan R10, R10.T10.g; `discNormals.ts`): the class map's layout at the
+// field's level, N = 2ᴸ texels a face's side, 32 to 256, (N + 2) × (N + 2) texels a layer, one layer
+// a face, each `rg16float` texel the octahedral pair of a body-fixed unit normal, the gutter the
+// neighbouring faces' edge texels, its corners and every unsurveyed texel the pair (2, 2); read by
+// texel (`textureLoad`) and reconstructed here (`shading_normal`) where row 24's w is 1; any one
+// texture where it is 0, unread.
+@group(2) @binding(14) var surface_normals : texture_2d_array<f32>;
+
+const DISC_ROWS : u32 = 308u;
 const FIRST_LIGHT_ROW : u32 = 6u;
 const LIGHT_ROWS : u32 = 8u;
 const FIRST_OCCLUDER_ROW : u32 = 22u;
@@ -69,6 +140,7 @@ const SECONDARY_COUNT_ROW : u32 = 46u;
 const FIRST_SECONDARY_ROW : u32 = 47u;
 const SECONDARY_ROWS : u32 = 2u;
 const CELL_SUMS_ROW : u32 = 51u;
+const FIRST_NODE_ROW : u32 = 52u;
 const MAX_DISC_LIGHTS : u32 = 2u;
 const MAX_DISC_OCCLUDERS : u32 = 2u;
 const MAX_DISC_SECONDARIES : u32 = 2u;
@@ -116,6 +188,10 @@ struct Body {
   axis_x : vec3f,
   axis_y : vec3f,
   axis_z : vec3f,
+  // Whether the class map carries the field's normal map (row 24's w, R10.T10.g).
+  normals : bool,
+  // Whether the class map carries its texels' maturity (row 25's w, R10.T1.c).
+  maturity : bool,
 }
 
 fn stretch_along(body : Body, x : vec3f) -> vec3f {
@@ -131,82 +207,450 @@ fn body_of() -> Body {
   body.stretch = 1.0 / pole_row.w;
   body.radius = centre_row.w;
   body.scaled_centre = stretch_along(body, body.centre);
-  body.axis_x = to_view(disc_row(AXES_ROW).xyz);
-  body.axis_y = to_view(disc_row(AXES_ROW + 1u).xyz);
+  let axes_row = disc_row(AXES_ROW);
+  let y_row = disc_row(AXES_ROW + 1u);
+  body.axis_x = to_view(axes_row.xyz);
+  body.axis_y = to_view(y_row.xyz);
   body.axis_z = cross(body.axis_x, body.axis_y);
+  body.normals = axes_row.w > 0.5;
+  body.maturity = y_row.w > 0.5;
   return body;
 }
 
-// S2's quadratic warp from a face coordinate u ∈ [−1, 1] to a cell coordinate s ∈ [0, 1]
-// (`uvToSt`, R05's cube sphere).
-fn uv_to_st(u : f32) -> f32 {
-  if (u >= 0.0) {
-    return 0.5 * sqrt(1.0 + 3.0 * u);
-  }
-  return 1.0 - 0.5 * sqrt(1.0 - 3.0 * u);
+// A body-fixed direction's texel on R05's cube sphere (`class_map_texel`, `cube_face_uv`) is
+// cubeTexel.wgsl's, composed before this file (R10.T11).
+
+// One class-map texel's share of each of the disc's laws, and whether it holds any weight: each
+// class's weight at stored texel `texel`, its classes 4g to 4g + 3 in layer `layer` + `step` g (a
+// face's texel: its face and 6; a fine page's cell: its page's first layer and 1), scaled down to
+// sum to 1 where it sums to more, and law 0 (`elsewhere`) what they leave (`surfaceShares`).
+struct TexelShares {
+  shares : array<f32, SURFACE_LAWS>,
+  surveyed : bool,
 }
 
-// A cell coordinate as a texel index of n.
-fn texel_index(s : f32, n : u32) -> u32 {
-  return u32(clamp(floor(s * f32(n)), 0.0, f32(n - 1u)));
-}
-
-// The class map's texel of a body-fixed direction: (i, j, face), R05's face of the largest
-// |component| (ties to the lowest face: +x 0, +y 1, +z 2, −x 3, −y 4, −z 5) and its (u, v) there
-// (`xyzToFaceUv`), warped and scaled by n (`classMapTexelOf`).
-fn class_map_texel(p : vec3f, n : u32) -> vec3u {
-  let faces = vec3u(select(3u, 0u, p.x > 0.0), select(4u, 1u, p.y > 0.0), select(5u, 2u, p.z > 0.0));
-  let size = abs(p);
-  var face = faces.x;
-  var largest = size.x;
-  for (var axis = 1u; axis < 3u; axis = axis + 1u) {
-    if (size[axis] > largest || (size[axis] == largest && faces[axis] < face)) {
-      face = faces[axis];
-      largest = size[axis];
-    }
-  }
-  var uv : vec2f;
-  switch face {
-    case 0u: { uv = vec2f(p.y / p.x, p.z / p.x); }
-    case 1u: { uv = vec2f(-p.x / p.y, p.z / p.y); }
-    case 2u: { uv = vec2f(-p.x / p.z, -p.y / p.z); }
-    case 3u: { uv = vec2f(p.z / p.x, p.y / p.x); }
-    case 4u: { uv = vec2f(p.z / p.y, -p.x / p.y); }
-    default: { uv = vec2f(-p.y / p.z, -p.x / p.z); }
-  }
-  return vec3u(texel_index(uv_to_st(uv.x), n), texel_index(uv_to_st(uv.y), n), face);
-}
-
-// The share of each of the disc's laws at the point `q` (from the body's centre ÷ a): law 0's
-// alone on a uniform surface; under a class map, each class's weight at the texel the point's
-// cube-sphere direction falls in (R05's spheroid point of the unit direction d is M d, so d is q
-// stretched along the pole), scaled down to sum to 1 where it sums to more, and law 0 (`elsewhere`)
-// what they leave (`surfaceShares`).
-fn surface_shares(body : Body, q : vec3f, classes : u32) -> array<f32, SURFACE_LAWS> {
-  var shares : array<f32, SURFACE_LAWS>;
-  shares[0] = 1.0;
-  if (classes == 0u) {
-    return shares;
-  }
-  let d = normalize(stretch_along(body, q));
-  let p = vec3f(dot(d, body.axis_x), dot(d, body.axis_y), dot(d, body.axis_z));
-  let texel = class_map_texel(p, textureDimensions(class_weights).x);
-  let count = min(classes, MAX_DISC_CLASSES);
+fn texel_shares(texel : vec2u, layer : u32, step : u32, count : u32) -> TexelShares {
+  var out : TexelShares;
   var total = 0.0;
   for (var group = 0u; group * 4u < count; group = group + 1u) {
-    let weights = textureLoad(class_weights, texel.xy, texel.z + 6u * group, 0);
+    let weights = textureLoad(class_weights, texel, layer + step * group, 0);
     for (var c = 0u; c < min(4u, count - group * 4u); c = c + 1u) {
-      shares[group * 4u + c + 1u] = weights[c];
+      out.shares[group * 4u + c + 1u] = weights[c];
       total = total + weights[c];
     }
   }
   if (total > 1.0) {
     for (var k = 1u; k <= count; k = k + 1u) {
-      shares[k] = shares[k] / total;
+      out.shares[k] = out.shares[k] / total;
     }
   }
-  shares[0] = select(1.0 - total, 0.0, total >= 1.0);
-  return shares;
+  out.shares[0] = select(1.0 - total, 0.0, total >= 1.0);
+  out.surveyed = total > 0.0;
+  return out;
+}
+
+// The largest byte of a unorm8 channel, and of a maturity code (`bake::encode_maturity`, unorm16).
+const UNORM8_MAX : f32 = 255.0;
+const MATURITY_CODE_MAX : f32 = 65535.0;
+
+// The deficit ratio r = code ÷ 65,535 of the maturity code at stored texel `texel` of layer `layer`
+// (R10.T1.c; `discSurface.ts`' `classMapMaturityLayer`, face + 6 ⌈count ÷ 4⌉ past the weights', or
+// a fine page's cell's in its page's last layer): its two bytes, rebuilt exactly from the channels'
+// unorm values, high in r and low in g.
+fn class_map_maturity(texel : vec2u, layer : u32) -> f32 {
+  let bytes = textureLoad(class_weights, texel, layer, 0);
+  let code = round(bytes.r * UNORM8_MAX) * (UNORM8_MAX + 1.0) + round(bytes.g * UNORM8_MAX);
+  return code / MATURITY_CODE_MAX;
+}
+
+// Class k's maturity node j: its A per channel at the node's maturity, scaled, in xyz; node 0's w
+// its drawn flag (rows FIRST_NODE_ROW + K k + j).
+fn class_node(k : u32, j : u32) -> vec4f {
+  return disc_row(FIRST_NODE_ROW + MATURITY_NODES * k + j);
+}
+
+// Whether class k is drawn from its maturity nodes: node 0's w.
+fn class_drawn(k : u32) -> bool {
+  return class_node(k, 0u).w > 0.5;
+}
+
+// The disc's laws at a point: each one's share, and its A there (R10.T1.c), its law's own but for
+// a class drawn from its maturity nodes.
+struct SurfaceAt {
+  shares : array<f32, SURFACE_LAWS>,
+  albedo : array<vec3f, SURFACE_LAWS>,
+}
+
+// A class map's layout, as `surface_at` reads it (`discSurface.ts`): its classes and their layers'
+// groups, whether it carries its texels' maturity, the first of its fine page's index layers, and
+// whether it carries a fine page (lane fix-coast-class-map; `ClassMapFine`).
+struct ClassMapLayout {
+  count : u32,
+  groups : u32,
+  maturity : bool,
+  index_layer : u32,
+  fine : bool,
+}
+
+// A refined texel's tile in the fine page: its first texel, its page's first layer and its cells
+// along a side, r, whether it holds its cells' corners (its index's a 255) rather than the cells;
+// `found` false for a texel not refined.
+struct FineTile {
+  origin : vec2u,
+  layer : u32,
+  side : u32,
+  corners : bool,
+  found : bool,
+}
+
+// The tile of the texel stored at `texel` of `face` (`discSurface.ts`' `storedTile`): its index
+// layer's t + 1 in r (high byte) and g (low), r in b, 0 for none, the gutter's included; tile t at
+// ((q mod T)(r + 2), ⌊q ÷ T⌋ (r + 2)) of page ⌊t ÷ T²⌋, q = t mod T², T = ⌊(N + 2) ÷ (r + 2)⌋.
+fn fine_tile(texel : vec2u, face : u32, map_layout : ClassMapLayout) -> FineTile {
+  var out : FineTile;
+  out.found = false;
+  if (!map_layout.fine) {
+    return out;
+  }
+  let index = textureLoad(class_weights, texel, map_layout.index_layer + face, 0);
+  let code = u32(round(index.r * UNORM8_MAX) * (UNORM8_MAX + 1.0) + round(index.g * UNORM8_MAX));
+  if (code == 0u) {
+    return out;
+  }
+  let tile = code - 1u;
+  out.side = u32(round(index.b * UNORM8_MAX));
+  out.corners = index.a > 0.5;
+  let per_row = textureDimensions(class_weights).x / (out.side + 2u);
+  let per_page = per_row * per_row;
+  let q = tile % per_page;
+  out.origin = vec2u(q % per_row, q / per_row) * (out.side + 2u);
+  let page_layers = map_layout.groups + select(0u, 1u, map_layout.maturity);
+  out.layer = map_layout.index_layer + 6u + (tile / per_page) * page_layers;
+  out.found = true;
+  return out;
+}
+
+// The survey-masked reconstruction's running sums at a point: each law's share by its term's
+// weight, the weights' sum, and under a maturity each term's weight and code's segment, at most 16
+// terms (four corners, each a refined texel's four cells).
+struct SurfaceSums {
+  sum : array<f32, SURFACE_LAWS>,
+  norm : f32,
+  terms : u32,
+  b : array<f32, 16>,
+  segment : array<MaturitySegment, 16>,
+}
+
+// Adds the surveyed texel `one`, stored at `texel` with its code in layer `code_layer`, at the
+// weight `b`.
+fn add_term(
+  sums : ptr<function, SurfaceSums>,
+  one : TexelShares,
+  b : f32,
+  map_layout : ClassMapLayout,
+  texel : vec2u,
+  code_layer : u32,
+) {
+  for (var m = 0u; m <= map_layout.count; m = m + 1u) {
+    (*sums).sum[m] = (*sums).sum[m] + b * one.shares[m];
+  }
+  (*sums).norm = (*sums).norm + b;
+  if (map_layout.maturity) {
+    (*sums).b[(*sums).terms] = b;
+    (*sums).segment[(*sums).terms] = maturity_segment(class_map_maturity(texel, code_layer));
+  }
+  (*sums).terms = (*sums).terms + 1u;
+}
+
+// A refined texel `texel` as a corner, at the bilinear weight `b`, of another texel's
+// reconstruction at (n s, n t) = `st_n` (`discSurface.ts`' `clampedCellTerms`): its cells at the
+// point held within their centres' span, each by its bilinear weight among them times `b`, those
+// surveyed alone.
+fn add_clamped_cells(
+  sums : ptr<function, SurfaceSums>,
+  tile : FineTile,
+  texel : vec2i,
+  st_n : vec2f,
+  b : f32,
+  map_layout : ClassMapLayout,
+) {
+  if (tile.corners) {
+    add_clamped_corners(sums, tile, texel, st_n, b, map_layout);
+    return;
+  }
+  let r = f32(tile.side);
+  let local = clamp(st_n * r - r * vec2f(texel), vec2f(0.5), vec2f(r - 0.5)) - 0.5;
+  let first = min(vec2u(floor(local)), vec2u(tile.side - 2u));
+  let f = local - vec2f(first);
+  for (var corner = 0u; corner < 4u; corner = corner + 1u) {
+    let step = vec2u(corner & 1u, corner >> 1u);
+    let stored = tile.origin + first + step + vec2u(1u);
+    let one = texel_shares(stored, tile.layer, 1u, map_layout.count);
+    if (!one.surveyed) {
+      continue;
+    }
+    let w = select(1.0 - f.x, f.x, step.x == 1u) * select(1.0 - f.y, f.y, step.y == 1u);
+    add_term(sums, one, b * w, map_layout, stored, tile.layer + map_layout.groups);
+  }
+}
+
+// Tile `tile`'s cell `cell` at `f` within it, under a fine page at its cells' corners
+// (`discSurface.ts`' `cornerTerms`): its four corners, each by its bilinear weight times `b`, `every`
+// one, a corner not surveyed as law 0 alone, or those surveyed alone.
+fn add_cell_corners(
+  sums : ptr<function, SurfaceSums>,
+  tile : FineTile,
+  cell : vec2u,
+  f : vec2f,
+  b : f32,
+  map_layout : ClassMapLayout,
+  every : bool,
+) {
+  for (var corner = 0u; corner < 4u; corner = corner + 1u) {
+    let step = vec2u(corner & 1u, corner >> 1u);
+    let stored = tile.origin + cell + step;
+    let one = texel_shares(stored, tile.layer, 1u, map_layout.count);
+    if (!every && !one.surveyed) {
+      continue;
+    }
+    let w = select(1.0 - f.x, f.x, step.x == 1u) * select(1.0 - f.y, f.y, step.y == 1u);
+    add_term(sums, one, b * w, map_layout, stored, tile.layer + map_layout.groups);
+  }
+}
+
+// Whether tile `tile`'s cell `cell` is surveyed, under a fine page at its cells' corners
+// (`discSurface.ts`' `cellSurveyed`): channel x of the page's first layer at (r + 1, y), 255 for a
+// surveyed cell.
+fn fine_cell_surveyed(tile : FineTile, cell : vec2u) -> bool {
+  let flags = textureLoad(class_weights, tile.origin + vec2u(tile.side + 1u, cell.y), tile.layer, 0);
+  return flags[cell.x] > 0.0;
+}
+
+// `add_clamped_cells` under a fine page at its cells' corners (`discSurface.ts`'
+// `clampedCornerTerms`): its cells' corners about the point held within its span, each by its
+// bilinear weight among them times `b`, those surveyed alone.
+fn add_clamped_corners(
+  sums : ptr<function, SurfaceSums>,
+  tile : FineTile,
+  texel : vec2i,
+  st_n : vec2f,
+  b : f32,
+  map_layout : ClassMapLayout,
+) {
+  let r = f32(tile.side);
+  let local = clamp(st_n * r - r * vec2f(texel), vec2f(0.0), vec2f(r));
+  let cell = min(vec2u(floor(local)), vec2u(tile.side - 1u));
+  add_cell_corners(sums, tile, cell, local - vec2f(cell), b, map_layout, false);
+}
+
+// The share of each of the disc's laws at the point `q` (from the body's centre ÷ a): law 0's
+// alone on a uniform surface; under a class map, by the survey-masked bilinear reconstruction
+// (R10.T10.d, decision-r07-t8b; `classMapSharesAt`) at the point's cube-sphere direction (R05's
+// spheroid point of the unit direction d is M d, so d is q stretched along the pole): law 0 alone
+// where the texel holding it holds no weight, and otherwise the shares of the four texels whose
+// centres are nearest, the gutter's at a face's edge, by their bilinear weights, those holding
+// weight alone, renormalised. The texel holding the point is one of the four, at a bilinear weight
+// of at least ¼. Under a fine page (lane fix-coast-class-map; `ClassMapFine`), in a refined texel
+// the same rule on its tile's cells, the field's, law 0 alone where the cell holding the point holds
+// no weight; and a refined texel among another's four stands by its cells at the point held within
+// their span (`add_clamped_cells`). A page at its cells' corners draws a refined texel's cell
+// bilinearly between its four corners instead, a corner not surveyed as law 0 alone, as the
+// terrain's patch of level L − 6 draws its quad, law 0 alone where that cell is not surveyed, and a
+// refined neighbour by its corners about the point held within its span (`add_clamped_corners`). Each law's A is its own (`surface_law`), but where the map
+// carries its texels' maturity (`body.maturity`, R10.T1.c; `classMapAlbedoAt`): there a class of a
+// share above 0 drawn from its nodes takes Σ b T(x) ÷ Σ b over the same surveyed terms and weights
+// b, T(x) its nodes' albedo at the term's code (`maturity_segment`, `maturity_mix`), a zero share's
+// class skipped before any node is read.
+fn surface_at(body : Body, q : vec3f, classes : u32) -> SurfaceAt {
+  var out : SurfaceAt;
+  let count = min(classes, MAX_DISC_CLASSES);
+  for (var m = 0u; m <= count; m = m + 1u) {
+    out.albedo[m] = surface_law(m).a;
+  }
+  out.shares[0] = 1.0;
+  if (classes == 0u) {
+    return out;
+  }
+  var map_layout : ClassMapLayout;
+  map_layout.count = count;
+  map_layout.groups = (count + 3u) / 4u;
+  map_layout.maturity = body.maturity;
+  map_layout.index_layer = 6u * map_layout.groups + select(0u, 6u, body.maturity);
+  map_layout.fine = textureNumLayers(class_weights) > map_layout.index_layer;
+  let d = normalize(stretch_along(body, q));
+  let p = vec3f(dot(d, body.axis_x), dot(d, body.axis_y), dot(d, body.axis_z));
+  let at = cube_face_uv(p);
+  // N, the texels along a face's side, the gutter apart.
+  let n = textureDimensions(class_weights).x - 2u;
+  let last = f32(n - 1u);
+  let st_n = vec2f(uv_to_st(at.uv.x), uv_to_st(at.uv.y)) * f32(n);
+  let holding = vec2i(clamp(floor(st_n), vec2f(0.0), vec2f(last)));
+  var sums : SurfaceSums;
+  let own = fine_tile(vec2u(holding + vec2i(1)), at.face, map_layout);
+  if (own.found && own.corners) {
+    // In a refined texel of a fine page at its cells' corners: the corners of its cell holding the
+    // point, as the terrain's patch of level L − 6 draws its quad there, a corner not surveyed as
+    // the patch's vertex of no weight.
+    let r = f32(own.side);
+    let local = st_n * r - r * vec2f(holding);
+    let held = vec2u(clamp(floor(local), vec2f(0.0), vec2f(r - 1.0)));
+    if (!fine_cell_surveyed(own, held)) {
+      return out;
+    }
+    add_cell_corners(&sums, own, held, local - vec2f(held), 1.0, map_layout, true);
+  } else if (own.found) {
+    // In a refined texel: its tile's cells, on the grid of N r a face.
+    let r = f32(own.side);
+    let local = st_n * r - r * vec2f(holding);
+    let held = vec2u(clamp(floor(local), vec2f(0.0), vec2f(r - 1.0)));
+    if (!texel_shares(own.origin + held + vec2u(1u), own.layer, 1u, count).surveyed) {
+      return out;
+    }
+    let first = vec2i(clamp(floor(local - 0.5), vec2f(-1.0), vec2f(r - 1.0)));
+    let f = local - 0.5 - vec2f(first);
+    for (var corner = 0u; corner < 4u; corner = corner + 1u) {
+      let step = vec2i(i32(corner & 1u), i32(corner >> 1u));
+      let stored = vec2u(vec2i(own.origin) + first + step + vec2i(1));
+      let one = texel_shares(stored, own.layer, 1u, count);
+      if (!one.surveyed) {
+        continue;
+      }
+      let b = select(1.0 - f.x, f.x, step.x == 1) * select(1.0 - f.y, f.y, step.y == 1);
+      add_term(&sums, one, b, map_layout, stored, own.layer + map_layout.groups);
+    }
+  } else {
+    let corner_at = st_n - 0.5;
+    let first = vec2i(clamp(floor(corner_at), vec2f(-1.0), vec2f(last)));
+    let f = corner_at - vec2f(first);
+    for (var corner = 0u; corner < 4u; corner = corner + 1u) {
+      let step = vec2i(i32(corner & 1u), i32(corner >> 1u));
+      let texel = first + step;
+      let stored = vec2u(texel + vec2i(1));
+      let one = texel_shares(stored, at.face, 6u, count);
+      if (all(texel == holding) && !one.surveyed) {
+        return out;
+      }
+      if (!one.surveyed) {
+        continue;
+      }
+      let b = select(1.0 - f.x, f.x, step.x == 1) * select(1.0 - f.y, f.y, step.y == 1);
+      let tile = fine_tile(stored, at.face, map_layout);
+      if (tile.found) {
+        add_clamped_cells(&sums, tile, texel, st_n, b, map_layout);
+        continue;
+      }
+      add_term(&sums, one, b, map_layout, stored, at.face + 6u * map_layout.groups);
+    }
+  }
+  if (!(sums.norm > 0.0)) {
+    return out;
+  }
+  for (var m = 0u; m <= count; m = m + 1u) {
+    out.shares[m] = sums.sum[m] / sums.norm;
+  }
+  if (!body.maturity) {
+    return out;
+  }
+  for (var k = 0u; k < count; k = k + 1u) {
+    // A class of no share reads none of its nodes, as the terrain skips a zero-share slot.
+    if (!(out.shares[k + 1u] > 0.0) || !class_drawn(k)) {
+      continue;
+    }
+    var albedo = vec3f(0.0);
+    for (var t = 0u; t < sums.terms; t = t + 1u) {
+      let segment = sums.segment[t];
+      let lo = class_node(k, segment.node).xyz;
+      let hi = class_node(k, segment.node + 1u).xyz;
+      albedo = albedo + sums.b[t] * maturity_mix(lo, hi, segment.fraction);
+    }
+    out.albedo[k + 1u] = albedo / sums.norm;
+  }
+  return out;
+}
+
+// A normal-map texel holds no normal where its first coordinate's magnitude is above this
+// (`discNormals.ts`' NO_NORMAL_ABOVE): the sentinel pair (2, 2), outside every octahedral pair's
+// [−1, 1]².
+const NO_NORMAL_ABOVE : f32 = 1.5;
+
+// +1 for x ≥ 0, −1 otherwise: `terrainPatch.wgsl`'s `signNotZero`, under the disc's own name since
+// the terrain's library is not composed with this one.
+fn disc_sign_not_zero(v : vec2f) -> vec2f {
+  return select(vec2f(1.0), vec2f(-1.0), v < vec2f(0.0));
+}
+
+// The unit vector of an octahedral pair: `terrainPatch.wgsl`'s `decodeOctahedral`, operation for
+// operation (the bake's `decode_octahedral`; its twin `shadingNormal.ts`' `decodeOctahedral`).
+fn disc_decode_octahedral(e : vec2f) -> vec3f {
+  let z = 1.0 - abs(e.x) - abs(e.y);
+  var xy = e;
+  if (z < 0.0) {
+    xy = (1.0 - abs(e.yx)) * disc_sign_not_zero(e);
+  }
+  return normalize(vec3f(xy, z));
+}
+
+// The decoded body-fixed normal of the normal map's face texel `texel` (the gutter's at −1 and N)
+// of `face`'s layer in xyz, w 1; or w 0 where it holds none.
+fn stored_normal(texel : vec2i, face : u32) -> vec4f {
+  let pair = textureLoad(surface_normals, vec2u(texel + vec2i(1)), face, 0).xy;
+  if (abs(pair.x) > NO_NORMAL_ABOVE) {
+    return vec4f(0.0);
+  }
+  return vec4f(disc_decode_octahedral(pair), 1.0);
+}
+
+// The shading normal n′ at a hit, in view space, and whether it is the normal map's.
+struct ShadingNormal {
+  normal : vec3f,
+  mapped : bool,
+}
+
+// The shading normal at the point `q` (from the body's centre ÷ a) whose datum normal is `datum`
+// (R10.T10.g; `discNormals.ts`' `normalMapNormalAt`): `datum` where the record carries no normal
+// map or the texel holding the point's cube-sphere direction holds none; otherwise the normal map's
+// survey-masked bilinear reconstruction on the decoded vectors, as the class map's shares are
+// reconstructed (`surface_at`) at the map's own N: each of the four texels whose centres are
+// nearest, the gutter's at a face's edge, by its bilinear weight, those holding a normal alone,
+// summed and renormalised (the holding texel's own where the sum vanishes), filtered on the vectors
+// and never on the pairs, for the octahedron's fold; then turned from the body-fixed axes into the
+// view's by the record's (rows 24, 25 and their cross product).
+fn shading_normal(body : Body, q : vec3f, datum : vec3f) -> ShadingNormal {
+  var out : ShadingNormal;
+  out.normal = datum;
+  out.mapped = false;
+  if (!body.normals) {
+    return out;
+  }
+  let d = normalize(stretch_along(body, q));
+  let p = vec3f(dot(d, body.axis_x), dot(d, body.axis_y), dot(d, body.axis_z));
+  let at = cube_face_uv(p);
+  // N, the texels along a face's side, the gutter apart.
+  let n = textureDimensions(surface_normals).x - 2u;
+  let last = f32(n - 1u);
+  let st_n = vec2f(uv_to_st(at.uv.x), uv_to_st(at.uv.y)) * f32(n);
+  let own = stored_normal(vec2i(clamp(floor(st_n), vec2f(0.0), vec2f(last))), at.face);
+  if (own.w == 0.0) {
+    return out;
+  }
+  let corner_at = st_n - 0.5;
+  let first = vec2i(clamp(floor(corner_at), vec2f(-1.0), vec2f(last)));
+  let f = corner_at - vec2f(first);
+  var sum = vec3f(0.0);
+  for (var corner = 0u; corner < 4u; corner = corner + 1u) {
+    let step = vec2i(i32(corner & 1u), i32(corner >> 1u));
+    let one = stored_normal(first + step, at.face);
+    if (one.w == 0.0) {
+      continue;
+    }
+    let b = select(1.0 - f.x, f.x, step.x == 1) * select(1.0 - f.y, f.y, step.y == 1);
+    sum = sum + b * one.xyz;
+  }
+  let size = length(sum);
+  let n_fixed = select(own.xyz, sum / size, size > 0.0);
+  out.normal = normalize(n_fixed.x * body.axis_x + n_fixed.y * body.axis_y + n_fixed.z * body.axis_z);
+  out.mapped = true;
+  return out;
 }
 
 // Law m of the disc: 0 from rows 4 and 5, class m − 1 from its rows.
@@ -260,9 +704,10 @@ fn light_annuli(j : u32, c : u32, count : u32) -> DiscAnnuli {
 }
 
 // The reflectance I/F of the surface's laws by their shares at a point lit by one source of
-// irradiance factor `h` (`lit_disc_term`), at phase `alpha`.
+// irradiance factor `h` (`lit_disc_term`), at phase `alpha`, each law's A the point's
+// (`surface_at`'s albedo, R10.T1.c).
 fn surface_reflectance(
-  shares : array<f32, SURFACE_LAWS>,
+  surface : SurfaceAt,
   laws : u32,
   h : f32,
   mu0 : f32,
@@ -272,13 +717,15 @@ fn surface_reflectance(
 ) -> vec3f {
   var reflectance = vec3f(0.0);
   for (var m = 0u; m < laws; m = m + 1u) {
-    let share = shares[m];
+    let share = surface.shares[m];
     if (!(share > 0.0)) {
       continue;
     }
     let law = surface_law(m);
-    let disc_term = lit_disc_term(law.l, h, mu0, mu, source_radius);
-    reflectance = reflectance + share * law.a * phase_factor(law.table_row, alpha) * disc_term;
+    // f and L(α) from the law's row (plan R10, R10.T10.b; decision-r07-t8b).
+    let row = phase_row(law.table_row, alpha);
+    let disc_term = lit_disc_term(row.a, h, mu0, mu, source_radius);
+    reflectance = reflectance + share * surface.albedo[m] * row.rgb * disc_term;
   }
   return reflectance;
 }
@@ -289,52 +736,82 @@ struct Shaded {
   lit : bool,
 }
 
-// The radiance of the point `q` (from the body's centre ÷ a) seen along `ray`, pre-exposed.
+// The radiance of the point `q` (from the body's centre ÷ a) seen along `ray`, pre-exposed: lit on
+// its shading normal n′ (`shading_normal`, R10.T10.g) and its datum's ν, as the header says.
 fn shade(body : Body, q : vec3f, ray : vec3f) -> Shaded {
   let stretch2 = body.stretch * body.stretch;
+  // The datum's normal ν, the spheroid's.
   let normal = normalize(q + (stretch2 - 1.0) * dot(q, body.pole) * body.pole);
-  let mu = dot(normal, -ray);
+  let mu_datum = dot(normal, -ray);
   let counts = disc_row(3u);
   let misc = disc_row(5u);
-  let annulus_count = u32(misc.y);
+  // No annuli under the lit probe's eclipse form (`surfaceLighting.wgsl`'s `LIT_PROBE`).
+  let annulus_count = select(u32(misc.y), 0u, LIT_PROBE == 3u);
   let laws = min(u32(misc.w), MAX_DISC_CLASSES) + 1u;
   var out : Shaded;
   out.radiance = vec3f(0.0);
   out.lit = false;
-  if (mu <= 0.0) {
+  if (mu_datum <= 0.0) {
     return out;
   }
-  var shares = surface_shares(body, q, laws - 1u);
+  let shading = shading_normal(body, q, normal);
+  let tilted = shading.normal;
+  // The law's μ on n′, floored at half the datum's, so that a cell whose slope faces away near the
+  // limb never draws black (R10.T10.g); μ itself wherever it is at least that, and on the datum.
+  let mu = max(dot(tilted, -ray), 0.5 * mu_datum);
+  // R08's sky light on a surface tilted by β from the datum: (1 + cos β) ÷ 2 of an isotropic sky
+  // (Bruneton 2017, `GetSunAndSkyIrradiance`'s `(1 + dot(normal, point) / r) × 0.5`: an isotropic
+  // sky seen by a tilted plane), as the terrain takes it (`shade_terrain`'s `sky_factor`); 1 on the
+  // datum.
+  let sky_tilt = select(1.0, 0.5 * (1.0 + dot(tilted, normal)), shading.mapped);
+  let surface = surface_at(body, q, laws - 1u);
   // The surface's mean A, for R08's sky light on the Lambert share's flat term.
   var mean_a = vec3f(0.0);
   for (var m = 0u; m < laws; m = m + 1u) {
-    if (shares[m] > 0.0) {
-      mean_a = mean_a + shares[m] * surface_law(m).a;
+    if (surface.shares[m] > 0.0) {
+      mean_a = mean_a + surface.shares[m] * surface.albedo[m];
     }
   }
+  // R08's lookups (R08.T9.b): the point's geodetic latitude and its north, its geodetic height 0 on
+  // the figure at zero height.
+  let local = local_frame(normal, body.pole);
   let lights = min(u32(counts.z), MAX_DISC_LIGHTS);
   let occluders = min(u32(counts.w), MAX_DISC_OCCLUDERS);
-  var first_mu0 = 0.0;
   for (var j = 0u; j < lights; j = j + 1u) {
     let place = disc_row(FIRST_LIGHT_ROW + j * LIGHT_ROWS);
     let light = disc_row(FIRST_LIGHT_ROW + j * LIGHT_ROWS + 1u);
     let to_star = to_view(place.xyz) * place.w - q;
     let distance = length(to_star);
     let towards = to_star / distance;
-    let mu0 = dot(normal, towards);
-    if (j == 0u) {
-      first_mu0 = mu0;
+    // The star's cosine against the datum, R08's lookups', and against n′, the law's.
+    let mu0_datum = dot(normal, towards);
+    let mu0 = select(mu0_datum, dot(tilted, towards), shading.mapped);
+    // R08's sky light (R08.T9.b): the star's illuminance times the sky's irradiance at its own μ₀
+    // against the datum, its light slot j's, on the Lambert share's flat term of the surface's mean
+    // A, by the tilt's factor; added before the horizon's `continue`, so that a star just set still
+    // lights the twilight ground.
+    let sky = atmosphere_sky_irradiance(0.0, mu0_datum, local.latitude, j) * sky_tilt;
+    // The horizon term: the star's whole disc over the element's tangent plane (Design note 6), its
+    // angle from the normal by `preciseAtan2` of the cross and dot products, never WGSL's `acos`.
+    // Its bound near μ₀ = 0 is atan2's 4,096 ULP, 4.9 × 10⁻⁴ rad, 10% of the Sun's angular radius at
+    // 1 au, and Mesa's is 6.75 × 10⁻⁵ low just above μ₀ = 0 and as much high just below (R07.T6.d).
+    // On n′ the datum's tangent plane is the local horizon (R10.T10.g; `horizon.wgsl`'s
+    // `element_horizon` at a horizon of 0): η = φ_ν − φ′ cuts the star's disc at its true distance
+    // from the datum's plane, π ÷ 2 − φ_ν, so that the body's curvature still sets the terminator for
+    // a slope that faces the star. The share cut off is exact and the light through it weighed about
+    // n′, an error of at most (2 ÷ 3π) ρ sin φ (1 − cos β) of face-on, β the angle at the star
+    // between the great circles to n′ and ν (decision-r10-t8b §1). n′'s own plane (η 0) where it
+    // hides more.
+    let phi_datum = preciseAtan2(length(cross(normal, towards)), mu0_datum);
+    var phi = phi_datum;
+    if (shading.mapped) {
+      phi = preciseAtan2(length(cross(tilted, towards)), mu0);
     }
-    // The horizon term: the star's whole disc over the element's tangent plane (Design note 6).
-    let horizon = sphere_irradiance(distance / light.w, acos(clamp(mu0, -1.0, 1.0)), 0.0);
-    if (horizon <= 0.0) {
+    let horizon = sphere_irradiance(distance / light.w, phi, max(phi_datum - phi, 0.0));
+    if (horizon <= 0.0 && !any(sky > vec3f(0.0))) {
       continue;
     }
-    let alpha = acos(clamp(dot(towards, -ray), -1.0, 1.0));
     let star_radius = asin(min(1.0, light.w / distance));
-    // `body_brdf` with the disc's μ₀ factor replaced by the horizon term (`lit_disc_term`), each of
-    // the surface's laws by its share.
-    let reflectance = surface_reflectance(shares, laws, horizon, mu0, mu, alpha, star_radius);
     // The eclipse term, each occluder's hidden fraction added (`eclipseVisible`).
     var visible = vec3f(1.0);
     for (var k = 0u; k < occluders; k = k + 1u) {
@@ -364,36 +841,73 @@ fn shade(body : Body, q : vec3f, ray : vec3f) -> Shaded {
       }
     }
     visible = max(visible, vec3f(0.0));
-    let transmitted = atmosphere_sun_transmittance(0.0, mu0, 0.0, 0.0);
     let ring = ring_shadow_on_body(q, towards);
-    out.radiance = out.radiance + light.xyz * misc.z * reflectance * visible * transmitted * ring;
+    // The sky light shares the point's eclipse and ring shadow: the air above the point is taken to
+    // lie in the shadow with it, as an umbra's air does.
+    out.radiance = out.radiance + light.xyz * misc.z * mean_a * sky * visible * ring;
+    if (horizon <= 0.0) {
+      continue;
+    }
+    // The direct term only where some channel is neither eclipsed nor in the ring's shadow (R08.T9.b's
+    // exact cut): elsewhere its product is 0 and the reflectance and the air's lookup are not formed,
+    // the sum unchanged to the bit. A loop of at most one pass, not an `if`, as the composite's reads
+    // are (`composite.wgsl`): SwiftShader, the checks' adapter, runs both sides of a branch under its
+    // lanes' mask, and a loop only while a lane is in it.
+    for (var direct = any((visible > vec3f(0.0)) & (ring > vec3f(0.0))); direct; direct = false) {
+      let alpha = acos(clamp(dot(towards, -ray), -1.0, 1.0));
+      // `body_brdf` with the disc's μ₀ factor replaced by the horizon term (`lit_disc_term`), each
+      // of the surface's laws by its share.
+      let reflectance = surface_reflectance(surface, laws, horizon, mu0, mu, alpha, star_radius);
+      // R08's transmittance to the star's centre (R08.T9.b; Design note 7: a star's disc is under
+      // about 1°), its light slot j's, 0 where the ground hides it, at the datum's cosine.
+      let transmitted = atmosphere_sun_transmittance(
+        0.0, mu0_datum, local.latitude, local_azimuth(local, towards), j
+      );
+      out.radiance = out.radiance + light.xyz * misc.z * reflectance * visible * transmitted * ring;
+    }
     // Lit directly: the horizon and eclipse terms leave more than LIT_IRRADIANCE of face-on.
     out.lit = out.lit || (horizon > LIT_IRRADIANCE && any(visible > vec3f(LIT_IRRADIANCE)));
   }
   // Planetshine (Design note 7): each lit neighbour a uniform sphere, never shadow-tested against a
-  // third body nor by R11's ring shadow, through R08's transmittance along its own direction. It
-  // lights the night side, which stays unlit for the meter.
+  // third body nor by R11's ring shadow. It crosses the air as starlight does (R08.T9.b): its direct
+  // term through R08's three-node rule over its disc, its sky term its illuminance at the point (its
+  // face-on illuminance at the centre carried by the inverse square, as `planetshine_irradiance`
+  // carries it) times the sky's irradiance at its own μ₀, both at light slot 0, the brightest star's
+  // curves, and the sky's added before the horizon's `continue`, as a star's. It lights the night
+  // side, which stays unlit for the meter. As the terrain takes it (R10.T10.g): its direct term and
+  // the law's μ₀ on n′, the source's disc cut by the datum's tangent plane as a star's is, so that
+  // the body's curvature sets planetshine's terminator too; the sky's and the air's on ν.
   let secondaries = min(u32(disc_row(SECONDARY_COUNT_ROW).x), MAX_DISC_SECONDARIES);
   for (var j = 0u; j < secondaries; j = j + 1u) {
     let place = disc_row(FIRST_SECONDARY_ROW + j * SECONDARY_ROWS);
     let source = disc_row(FIRST_SECONDARY_ROW + j * SECONDARY_ROWS + 1u);
     let to_source = to_view(place.xyz) * place.w - q;
-    let irradiance = planetshine_irradiance(to_source, source.w, place.w, normal, 0.0);
+    let distance = length(to_source);
+    let towards = to_source / distance;
+    let mu0_datum = dot(normal, towards);
+    let mu0 = select(mu0_datum, dot(tilted, towards), shading.mapped);
+    let near = place.w / distance;
+    let sky = atmosphere_sky_irradiance(0.0, mu0_datum, local.latitude, 0u) * sky_tilt;
+    out.radiance = out.radiance + source.xyz * (near * near) * misc.z * mean_a * sky;
+    // The cut η = φ_ν − φ′ at the datum's plane, n′'s own plane (η 0) where it hides more; 0 off
+    // the map, where n′ = ν.
+    var cut = 0.0;
+    if (shading.mapped) {
+      let phi_datum = preciseAtan2(length(cross(normal, towards)), mu0_datum);
+      cut = max(phi_datum - preciseAtan2(length(cross(tilted, towards)), mu0), 0.0);
+    }
+    let irradiance = planetshine_irradiance(to_source, source.w, place.w, tilted, cut);
     if (irradiance <= 0.0) {
       continue;
     }
-    let distance = length(to_source);
-    let towards = to_source / distance;
-    let mu0 = dot(normal, towards);
     let alpha = acos(clamp(dot(towards, -ray), -1.0, 1.0));
     let source_radius = asin(min(1.0, source.w / distance));
-    let reflectance = surface_reflectance(shares, laws, irradiance, mu0, mu, alpha, source_radius);
-    let transmitted = atmosphere_sun_transmittance(0.0, mu0, 0.0, 0.0);
+    let reflectance = surface_reflectance(surface, laws, irradiance, mu0, mu, alpha, source_radius);
+    let transmitted = atmosphere_source_transmittance(
+      0.0, mu0_datum, local.latitude, local_azimuth(local, towards), source_radius, 0u
+    );
     out.radiance = out.radiance + source.xyz * misc.z * reflectance * transmitted;
   }
-  // R08's sky light, 0 until it lands, on the Lambert share's flat term.
-  out.radiance = out.radiance
-    + mean_a * atmosphere_sky_irradiance(0.0, first_mu0, 0.0) * misc.z;
   return out;
 }
 
@@ -443,34 +957,47 @@ fn add_sample(sum : ptr<function, CellSum>, body : Body, px : vec2f, weight : f3
   (*sum).shaded = (*sum).shaded + 1u;
 }
 
+// The points a cell is shaded at, in order, at most three Gauss points in each of its profile's
+// three pieces: each a distance `t` along the limb's local normal `normal` from the cell's centre and
+// a weight; and the cell's covered share. Gathered before any is shaded, so that `cell_sum` calls
+// `add_sample`, and so `shade`, from one place: a compiler that inlines every call (SwiftShader's)
+// then takes one copy of the shading, which R08.T9.b's lookups through the air made too large to
+// take six (plan R08, R08.T9.b; the arithmetic and the order of the sums are R07's).
+struct CellSamples {
+  normal : vec2f,
+  offsets : array<f32, 9>,
+  weights : array<f32, 9>,
+  count : u32,
+  coverage : f32,
+}
+
 // A cell of side h = 1 ÷ n about `px`: deep inside, its centre's light; near the limb, the
 // integral over its profile across the limb's local normal (a trapezoid, the convolution of boxes
 // of widths h|n_x| and h|n_y|) inside the limb, by three Gauss points in u = √δ in each linear
 // piece, exact where the light goes as A + B√δ + Cδ with the depth δ (`discShading.ts`).
-fn cell_sum(body : Body, px : vec2f, n : u32) -> CellSum {
-  var sum : CellSum;
-  sum.radiance = vec3f(0.0);
-  sum.coverage = 0.0;
-  sum.lit = 0u;
-  sum.shaded = 0u;
+fn cell_samples(body : Body, px : vec2f, n : u32) -> CellSamples {
+  var samples : CellSamples;
+  samples.normal = vec2f(0.0);
+  samples.offsets[0] = 0.0;
+  samples.weights[0] = 1.0;
+  samples.count = 1u;
+  samples.coverage = 1.0;
   let angle = angle_at(body, px);
   let sx = (angle_at(body, px + vec2f(GRADIENT_STEP_PX, 0.0)) - angle) / GRADIENT_STEP_PX;
   let sy = (angle_at(body, px + vec2f(0.0, GRADIENT_STEP_PX)) - angle) / GRADIENT_STEP_PX;
   let slope = length(vec2f(sx, sy));
   let h = 1.0 / f32(n);
   if (!(slope > 0.0)) {
-    add_sample(&sum, body, px, 1.0);
-    sum.coverage = 1.0;
-    return sum;
+    return samples;
   }
   let normal = vec2f(sx, sy) / slope;
   let half_extent = h * (abs(normal.x) + abs(normal.y)) * 0.5;
   let depth = -angle / slope;
   if (depth - half_extent > NEAR_LIMB_CELLS * h) {
-    add_sample(&sum, body, px, 1.0);
-    sum.coverage = 1.0;
-    return sum;
+    return samples;
   }
+  samples.normal = normal;
+  samples.count = 0u;
   let a = h * max(abs(normal.x), abs(normal.y));
   let b = h * min(abs(normal.x), abs(normal.y));
   let top = h * h / a;
@@ -500,11 +1027,26 @@ fn cell_sum(body : Body, px : vec2f, n : u32) -> CellSum {
       let u = ua + GAUSS_NODES[g] * (ub - ua);
       let t = depth - u * u;
       let profile = piece.z + (piece.w - piece.z) * (t - t0) / (t1 - t0);
-      let weight = GAUSS_WEIGHTS[g] * (ub - ua) * 2.0 * u * profile / (h * h);
-      add_sample(&sum, body, px + t * normal, weight);
+      samples.offsets[samples.count] = t;
+      samples.weights[samples.count] = GAUSS_WEIGHTS[g] * (ub - ua) * 2.0 * u * profile / (h * h);
+      samples.count = samples.count + 1u;
     }
   }
-  sum.coverage = min(1.0, covered / (h * h));
+  samples.coverage = min(1.0, covered / (h * h));
+  return samples;
+}
+
+fn cell_sum(body : Body, px : vec2f, n : u32) -> CellSum {
+  var sum : CellSum;
+  sum.radiance = vec3f(0.0);
+  sum.coverage = 0.0;
+  sum.lit = 0u;
+  sum.shaded = 0u;
+  let samples = cell_samples(body, px, n);
+  for (var k = 0u; k < samples.count; k = k + 1u) {
+    add_sample(&sum, body, px + samples.offsets[k] * samples.normal, samples.weights[k]);
+  }
+  sum.coverage = samples.coverage;
   return sum;
 }
 
@@ -531,18 +1073,59 @@ fn pixel_sum(body : Body, centre_px : vec2f, n : u32) -> CellSum {
   return sum;
 }
 
-// The pixel whose centre is `centre_px`, its n × n cells summed: as the `disc cells` pass left it in
-// `cell_sums` where row 51 holds its sums (two `vec4f` a pixel: the light and the coverage as
-// means, then the lit and shaded points), else by `pixel_sum` here. The pass sums each pixel's cells
-// in `pixel_sum`'s order with the same functions, so the two differ by no more than the compilers'
-// own rounding.
-fn pixel_cells(body : Body, centre_px : vec2f, n : u32) -> CellSum {
+// The spans one draw of a large disc takes a pixel row (T8.f): two rows of `discs`.
+const LIMB_SPANS : u32 = 2u;
+// The rows of `discs` a large disc's pixel row takes (T8.g, `discShading.ts`' LIMB_SPAN_ROWS): the
+// limb draw's two spans, then the face's near-limb band's two.
+const LIMB_SPAN_ROWS : u32 = 4u;
+
+// The index in `cell_sums` of the sums the `disc cells` pass left for `pixel` (its top-left
+// corner, px) at n × n cells, as row 51 says, or −1 where it left none: every pixel of a
+// rectangle in row order (T8.d); or a large disc's, each pixel row's spans at the limb's cells for
+// its limb draw (T8.f), then at the interior's for its face's near-limb band (T8.g), where a pixel
+// outside them sums its own.
+fn cell_sums_index(pixel : vec2f, n : u32) -> i32 {
   let sums = disc_row(CELL_SUMS_ROW);
   if (sums.x < 0.0) {
+    return -1;
+  }
+  if (sums.w >= 0.0) {
+    return i32(u32(sums.x) + u32(pixel.y - sums.z) * u32(sums.w) + u32(pixel.x - sums.y));
+  }
+  let row = pixel.y - sums.z;
+  if (row < 0.0 || row >= sums.y) {
+    return -1;
+  }
+  // The draw by its cells: the limb's, the limb draw's spans; the interior's, the face band's.
+  let counts = disc_row(3u);
+  var list = 0u;
+  if (n != u32(counts.y)) {
+    if (n != u32(counts.x)) {
+      return -1;
+    }
+    list = 1u;
+  }
+  let first = u32(sums.x) + LIMB_SPAN_ROWS * u32(row) + LIMB_SPANS * list;
+  for (var s = 0u; s < LIMB_SPANS; s = s + 1u) {
+    let span = discs[first + s];
+    if (pixel.x >= span.y && pixel.x < span.z) {
+      return i32(u32(span.x) + u32(pixel.x - span.y));
+    }
+  }
+  return -1;
+}
+
+// The pixel whose centre is `centre_px`, its n × n cells summed: as the `disc cells` pass left it in
+// `cell_sums` where row 51 holds its sums (two `vec4f` a pixel: the light and the coverage as
+// means, then the lit and shaded points), else by `pixel_sum` here, its one call. The pass sums each
+// pixel's cells in `pixel_sum`'s order with the same functions, so the two differ by no more than
+// the compilers' own rounding.
+fn pixel_cells(body : Body, centre_px : vec2f, n : u32) -> CellSum {
+  let found = cell_sums_index(floor(centre_px), n);
+  if (found < 0) {
     return pixel_sum(body, centre_px, n);
   }
-  let pixel = floor(centre_px);
-  let index = u32(sums.x) + u32(pixel.y - sums.z) * u32(sums.w) + u32(pixel.x - sums.y);
+  let index = u32(found);
   let light = cell_sums[2u * index];
   let points = cell_sums[2u * index + 1u];
   var sum : CellSum;
@@ -587,11 +1170,12 @@ fn disc_pixel(position : vec2f, edge_pass : u32) -> DiscPixel {
   let limb = !all(corners / gradient < vec4f(-LIMB_OVERLAP_PX));
   var out : DiscPixel;
   out.drawn = true;
+  if ((edge_pass == 0u && !interior) || (edge_pass != 0u && !limb)) {
+    return none;
+  }
+  // One call of the shading for either draw, its cells the draw's own (`CellSamples`' note).
+  let sum = pixel_cells(body, position, select(u32(counts.y), u32(counts.x), edge_pass == 0u));
   if (edge_pass == 0u) {
-    if (!interior) {
-      return none;
-    }
-    let sum = pixel_cells(body, position, u32(counts.x));
     let light = select(vec3f(0.0), sum.radiance / sum.coverage, sum.coverage > 0.0);
     // The pure-pixel class: lit where every shaded point is, unlit where none is, `other` where
     // they are mixed or no star lights the body.
@@ -606,10 +1190,6 @@ fn disc_pixel(position : vec2f, edge_pass : u32) -> DiscPixel {
     out.colour = vec4f(min(light, vec3f(HDR_MAX)), meter);
     return out;
   }
-  if (!limb) {
-    return none;
-  }
-  let sum = pixel_cells(body, position, u32(counts.y));
   if (sum.coverage <= 0.0) {
     return none;
   }

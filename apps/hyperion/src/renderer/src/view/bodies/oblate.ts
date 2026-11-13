@@ -13,7 +13,12 @@
  * from 45° latitude.
  */
 import { cross, dot, norm, normalise, type Vec3, vec3 } from "../../geometry/vec3";
-import { phaseFactorFromTable, phaseFactorTableOf, type PhotometricLaw } from "../appearance/law";
+import {
+  limbShareAt,
+  phaseFactorFromTable,
+  phaseFactorTableOf,
+  type PhotometricLaw,
+} from "../appearance/law";
 import { discIntegratedPhase, geometricAlbedo } from "../appearance/phase";
 import type { Rgb } from "../photometry/toneCurve";
 import type { BodyFigure } from "../terrain/planet";
@@ -178,9 +183,9 @@ export function figurePole(figure: BodyFigure): Vec3 {
 /**
  * The light a body reflects towards a distant observer, per channel, over the illuminance on it
  * and (a ÷ Δ)²: p Φ(α) for a sphere, and for a spheroid its law integrated over its figure,
- * A′ f(α) K ÷ π (A′ the disc's scaled A, {@link oblateAlbedoScale}; K {@link
- * spheroidGeometricIntegral}). The point regime's flux and planetshine's illuminance are
- * E (a ÷ Δ)² times this.
+ * A′ f(α) K ÷ π (A′ the disc's scaled A, {@link oblateAlbedoScale} at L(0); K {@link
+ * spheroidGeometricIntegral} at the law's L(α), one share over the whole figure at the phase).
+ * The point regime's flux and planetshine's illuminance are E (a ÷ Δ)² times this.
  *
  * @param towardsStar - The unit direction from the body to the light.
  * @param towardsObserver - The unit direction from the body to the observer.
@@ -202,7 +207,7 @@ export function bodyReflection(
   const f = phaseFactorFromTable(phaseFactorTableOf(law), alpha);
   const geometric =
     spheroidGeometricIntegral(
-      law.lommelSeeligerShare,
+      limbShareAt(law, alpha),
       c / a,
       figurePole(figure),
       towardsStar,

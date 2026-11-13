@@ -1,7 +1,11 @@
-import { act, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
+import type { ReactNode } from "react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { FramePacingName } from "../../../../preload/api";
 import { binaryFrame } from "../../test/binaryFrames";
+import { describedText, statusLine } from "../../test/statusLine";
 import {
   InThreadSkyWorker,
   nearestFirstCensus,
@@ -23,7 +27,7 @@ import {
   timedEngineSource,
   type ViewDisplayHarness,
 } from "../../test/viewDisplayHarness";
-import { ONE_PHOTOREALISTIC_VIEW } from "../../view/budget/viewBudget";
+import { IMAGE_DETAIL_LIMITED, ONE_PHOTOREALISTIC_VIEW } from "../../view/budget/viewBudget";
 import { EngineUnavailable } from "../../view/engine/resilientEngine";
 import { GraphicsStatusStore, initialGraphicsStatus } from "../../view/engine/status";
 import type {
@@ -36,8 +40,14 @@ import { SKY_PASS_LABEL } from "../../view/photoreal/passes";
 import { HISTOGRAM_PASS } from "../../view/post/histogram";
 import { TONEMAP_PASS } from "../../view/post/tonemap";
 import type { QualitySetting } from "../../view/quality/qualitySetting";
+import { viewId } from "../../view/camera/state";
+import { DEFAULT_EXPOSURE } from "../../view/photometry/exposure";
+import { phaseScene } from "../../view/scenes/phaseScene";
+import { InstrumentView } from "./InstrumentView";
+import { type ReasonFolds, useReasonFolds } from "./reasonFolds";
+import type { Instrument } from "./useInstruments";
 import type { ViewEngineSource } from "./useViewEngine";
-import { STAR_SOURCE } from "./viewRun";
+import { type LabelStatement, STAR_SOURCE, startRun } from "./viewRun";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -66,6 +76,7 @@ async function setup(
     readonly store?: GraphicsStatusStore;
     readonly setting?: QualitySetting;
     readonly stagePx?: { readonly widthPx: number; readonly heightPx: number };
+    readonly framePacing?: FramePacingName;
   } = {},
 ): Promise<Setup> {
   const fake = timedEngineSource();
@@ -75,6 +86,7 @@ async function setup(
     engines: fake.engines,
     ...(options.setting === undefined ? {} : { setting: options.setting }),
     ...(options.stagePx === undefined ? {} : { stagePx: options.stagePx }),
+    ...(options.framePacing === undefined ? {} : { framePacing: options.framePacing }),
   });
   await settle();
   harness.advance(100);
@@ -217,6 +229,15 @@ describe("VIEW's instrument views (R07.T19)", () => {
     ]);
   });
 
+  it("keeps every label of an open instrument's block whole, as the primary's plates do (R10.T12.c)", async () => {
+    const view = await setup();
+    await openInstrument(view, "INSTRUMENT 1");
+    const terms = within(screen.getByRole("region", { name: "INSTRUMENT 1" })).getAllByRole("term");
+    expect([...new Set(terms.map((term) => term.parentElement?.className))]).toEqual([
+      "field view-label__line view-label__line--whole",
+    ]);
+  });
+
   it("reaches each open instrument's canvas by Tab from the primary's", async () => {
     const view = await setup();
     await openInstrument(view, "INSTRUMENT 1");
@@ -255,10 +276,12 @@ describe("VIEW's instrument views (R07.T19)", () => {
     await view.user.click(controlsButton("INSTRUMENT 1"));
     view.advance(100);
     expect(
-      within(screen.getByRole("region", { name: "Style INSTRUMENT 1" })).getByRole("button", {
-        name: "PHOTOREALISTIC",
-      }),
-    ).toHaveAccessibleDescription(ONE_PHOTOREALISTIC_VIEW);
+      describedText(
+        within(screen.getByRole("region", { name: "Style INSTRUMENT 1" })).getByRole("button", {
+          name: "PHOTOREALISTIC",
+        }),
+      ),
+    ).toBe(ONE_PHOTOREALISTIC_VIEW);
   });
 
   it("refuses a second view's key 4 on low, the CONTROLS instrument staying a wireframe", async () => {
@@ -290,7 +313,7 @@ describe("VIEW's instrument views (R07.T19)", () => {
     view.advance(100);
     await openInstrument(view, "INSTRUMENT 1");
     expect(canvasNamed(/PRIMARY/)).toHaveAccessibleDescription(
-      expect.stringContaining("SCENE ECLIPSE TEST SCENE CLOCK ×100"),
+      expect.stringContaining("SCENE ECLIPSE TEST SCENE CLOCK 100 s/s"),
     );
     // The instrument's block is on show, with its own SOURCE line, and names no scene.
     const instrument = screen.getByRole("region", { name: "INSTRUMENT 1" });
@@ -333,16 +356,33 @@ describe("VIEW's instrument views (R07.T19)", () => {
   it("holds a closed instrument's CONTROLS button back with its reason", async () => {
     const view = await setup();
     await openInstrument(view, "INSTRUMENT 1");
-    expect(controlsButton("INSTRUMENT 2")).toHaveAccessibleDescription(
+    expect(describedText(controlsButton("INSTRUMENT 2"))).toBe(
       "NOT AVAILABLE: INSTRUMENT 2 is not open",
     );
   });
 
   it("gives both closed instruments' CONTROLS buttons one reason", async () => {
     await setup();
-    expect(controlsButton("INSTRUMENT 1")).toHaveAccessibleDescription(
+    expect(describedText(controlsButton("INSTRUMENT 1"))).toBe(
       "NOT AVAILABLE: INSTRUMENT 1 and INSTRUMENT 2 are not open",
     );
+  });
+
+  it("tracks the reason's NOT AVAILABLE: and leaves its sentence, the slots' names in it, untracked", async () => {
+    await setup();
+    const reason = screen.getByText(
+      statusLine("NOT AVAILABLE: INSTRUMENT 1 and INSTRUMENT 2 are not open"),
+    );
+    expect([
+      reason.className,
+      [...reason.children].map((part) => [part.className, part.textContent]),
+    ]).toEqual([
+      "view-instruments-panel__reason",
+      [
+        ["status-text__state", "NOT AVAILABLE:"],
+        ["status-text__sentence", " INSTRUMENT 1 and INSTRUMENT 2 are not open"],
+      ],
+    ]);
   });
 
   it("designates the target, camera and style panels with the CONTROLS view", async () => {
@@ -378,7 +418,7 @@ describe("VIEW's instrument views (R07.T19)", () => {
     const open = within(screen.getByRole("group", { name: "INSTRUMENT 1" })).getByRole("button", {
       name: "OPEN",
     });
-    expect(open).toHaveAccessibleDescription("NOT AVAILABLE: no view can be drawn");
+    expect(describedText(open)).toBe("NOT AVAILABLE: no view can be drawn");
   });
 
   it("draws an instrument opened during a device loss once the engine is restored", async () => {
@@ -442,7 +482,7 @@ describe("VIEW's instrument views (R07.T19)", () => {
     view.advance(100);
     expect(
       within(screen.getByRole("region", { name: "INSTRUMENT 1" })).getByText(
-        /^GRAPHICS NOT AVAILABLE: views could not be made/,
+        statusLine(/^GRAPHICS NOT AVAILABLE: views could not be made/),
       ),
     ).toBeInTheDocument();
   });
@@ -453,9 +493,7 @@ describe("VIEW's instrument views (R07.T19)", () => {
     const open = within(screen.getByRole("group", { name: "INSTRUMENT 2" })).getByRole("button", {
       name: "OPEN",
     });
-    expect(open).toHaveAccessibleDescription(
-      "NOT AVAILABLE: no room for INSTRUMENT 2 at this window size",
-    );
+    expect(describedText(open)).toBe("NOT AVAILABLE: no room for INSTRUMENT 2 at this window size");
   });
 });
 
@@ -484,6 +522,19 @@ describe("VIEW's budgets against a fake engine (R07.T19)", () => {
     await closeInstrument(view, "INSTRUMENT 1");
     runFrames(view, 10, () => 5);
     expect([(lowered?.widthPx ?? 0) < FULL.widthPx, sceneTargetSize(view)]).toEqual([true, FULL]);
+  });
+
+  it("states IMAGE: DETAIL LIMITED while the controller holds the primary below its max, and not once they close (the owner's report)", async () => {
+    const view = await setup({ store: await nominalStore(["timestamp-query"]) });
+    await photorealControls(view);
+    await openInstrument(view, "INSTRUMENT 1");
+    runFrames(view, 40, () => 5);
+    view.advance(300);
+    expect(screen.getByText(statusLine(IMAGE_DETAIL_LIMITED))).toBeTruthy();
+    await closeInstrument(view, "INSTRUMENT 1");
+    runFrames(view, 10, () => 5);
+    view.advance(300);
+    expect(screen.queryByText(statusLine(IMAGE_DETAIL_LIMITED))).toBeNull();
   });
 
   it("counts an instrument's pass times in the primary's frame", async () => {
@@ -515,18 +566,32 @@ describe("VIEW's budgets against a fake engine (R07.T19)", () => {
     );
   });
 
-  it("draws a 30 Hz photorealistic primary in every second animation frame on low", async () => {
-    const view = await setup({ store: await nominalStore(), setting: "low" });
-    await photorealControls(view);
-    const tonemapped = (): number =>
-      view
-        .views()
-        .find((each) => each.name === "view")
-        ?.frames.filter((frame) => frame.label === TONEMAP_PASS).length ?? 0;
-    const before = tonemapped();
+  it("draws a 30 Hz instrument in every second frame of a 60 Hz primary when paced by rate on a 60 Hz clock (R07.T19)", async () => {
+    const view = await setup({ framePacing: "rate" });
+    await openInstrument(view, "INSTRUMENT 1");
+    const primary = framesOf(view, "view");
+    const instrument = framesOf(view, "instrument-1");
     view.advance(16 * 20);
-    expect(tonemapped() - before).toBe(10);
+    expect([framesOf(view, "view") - primary, framesOf(view, "instrument-1") - instrument]).toEqual(
+      [20, 10],
+    );
   });
+
+  it.each(["display", "rate"] as const)(
+    "draws a 30 Hz photorealistic primary in every second animation frame on low, paced by %s",
+    async (framePacing) => {
+      const view = await setup({ store: await nominalStore(), setting: "low", framePacing });
+      await photorealControls(view);
+      const tonemapped = (): number =>
+        view
+          .views()
+          .find((each) => each.name === "view")
+          ?.frames.filter((frame) => frame.label === TONEMAP_PASS).length ?? 0;
+      const before = tonemapped();
+      view.advance(16 * 20);
+      expect(tonemapped() - before).toBe(10);
+    },
+  );
 });
 
 describe("VIEW's one frame path (R07.T19.c)", () => {
@@ -629,8 +694,8 @@ async function nextReport(view: Setup): Promise<number | undefined> {
   return view.socket.requestsOfKind("scene_cameras").at(-1)?.body.cameras.length;
 }
 
-async function serverScene(): Promise<Setup> {
-  const view = await setup();
+async function serverScene(options: Parameters<typeof setup>[0] = {}): Promise<Setup> {
+  const view = await setup(options);
   await openUniverse(view);
   await sceneArrives(view);
   await settle();
@@ -671,7 +736,7 @@ describe("VIEW's instruments in the server's scene (R07.T19)", () => {
     expect(await nextReport(view)).toBe(2);
   });
 
-  it("states an instrument's camera limit at the primary's exposure (R07.T13.e)", async () => {
+  it("states an instrument's camera limit at the primary's exposure, under its camera sky's cut (R07.T13.e; R06.T13.i)", async () => {
     vi.stubGlobal("Worker", InThreadSkyWorker);
     const view = await serverScene();
     await skyArrives(view);
@@ -681,7 +746,7 @@ describe("VIEW's instruments in the server's scene (R07.T19)", () => {
     await view.user.keyboard("15{Enter}");
     view.advance(300);
     expect([atDefault, instrumentStars("INSTRUMENT 1")]).toEqual([
-      "V 10.1 mag CAM",
+      "V 9.6 mag CAM",
       "V 2.6 mag CAM",
     ]);
   });
@@ -736,9 +801,13 @@ function starsLines(instruments: ReadonlyArray<string>): Array<string | null> {
   ];
 }
 
-/** The primary eye's and an instrument camera's limits at the default exposure. */
-const EYE = "V 7.4 mag EYE";
-const CAM = "V 10.1 mag CAM";
+/**
+ * The camera limit at the default exposure over the fixture's band at 60°, under the cut of the sky
+ * the primary's camera asks (R06.T13.i): the primary's and an instrument's alike, both cameras at
+ * 60° (ux-calls-view, item 3a), so these tests tell the two lines apart by their notes alone; an
+ * eye's own limit is `useViewSky.test.tsx`'s.
+ */
+const CAM = "V 9.6 mag CAM";
 /** The fixture reply's one gap, as the line names it. */
 const LEFT_OUT = "CLUSTERS: NOT YET MODELLED";
 
@@ -759,12 +828,12 @@ describe("VIEW's STARS lines while the sky arrives nearest first (R06.T11.f)", (
     const streaming = starsLines([]);
     await skyReplyAt(view, [null, null, null], true);
     expect([streaming, starsLines([])]).toEqual([
-      [`${EYE} · BEYOND 2000 ly: STREAMING · ${LEFT_OUT}`],
-      [`${EYE} · ${LEFT_OUT}`],
+      [`${CAM} · BEYOND 2000 ly: STREAMING · ${LEFT_OUT}`],
+      [`${CAM} · ${LEFT_OUT}`],
     ]);
   });
 
-  it("mutes the edge alone on the primary's line while the link is down, its S in the field", async () => {
+  it("mutes the limit and the edge on the primary's line while the link is down, each S in its field", async () => {
     vi.stubGlobal("Worker", InThreadSkyWorker);
     const view = await serverScene();
     await skyReplyAt(view, [2_000, 4_000, 4_000], false);
@@ -780,7 +849,13 @@ describe("VIEW's STARS lines while the sky arrives nearest first (R06.T11.f)", (
       within(reading).getByText("2000 ly").classList.contains("stale"),
       field?.querySelector(".stale-mark")?.textContent,
       reading.classList.contains("stale"),
-    ]).toEqual([`${EYE} · BEYOND 2000 ly Sstale: STREAMING · ${LEFT_OUT}`, true, true, "S", false]);
+    ]).toEqual([
+      `V 9.6 mag Sstale CAM · BEYOND 2000 ly Sstale: STREAMING · ${LEFT_OUT}`,
+      true,
+      true,
+      "S",
+      false,
+    ]);
   });
 
   it.each([[["INSTRUMENT 1"]], [["INSTRUMENT 1", "INSTRUMENT 2"]]])(
@@ -797,8 +872,8 @@ describe("VIEW's STARS lines while the sky arrives nearest first (R06.T11.f)", (
       await skyReplyAt(view, [null, null, null], true);
       const each = instruments.map(() => `${CAM} · ${LEFT_OUT}`);
       expect([streaming, starsLines(instruments)]).toEqual([
-        [`${EYE} · BEYOND 16,000 ly: STREAMING`, ...each],
-        [`${EYE} · ${LEFT_OUT}`, ...each],
+        [`${CAM} · BEYOND 16,000 ly: STREAMING`, ...each],
+        [`${CAM} · ${LEFT_OUT}`, ...each],
       ]);
     },
   );
@@ -823,8 +898,72 @@ describe("VIEW's STARS lines while the sky arrives nearest first (R06.T11.f)", (
     view.advance(300);
     await settle();
     expect([unsized, starsLines(["INSTRUMENT 1"])]).toEqual([
-      [`${EYE} · ${LEFT_OUT}`, STAR_SOURCE],
-      [`${EYE} · BEYOND 2000 ly: STREAMING`, `${CAM} · ${LEFT_OUT}`],
+      [`${CAM} · ${LEFT_OUT}`, STAR_SOURCE],
+      [`${CAM} · BEYOND 2000 ly: STREAMING`, `${CAM} · ${LEFT_OUT}`],
+    ]);
+  });
+});
+
+describe("VIEW's star limits while the link is down (R06.T13.j)", () => {
+  it("mutes the primary's camera limit and an instrument's, each S after its unit and before its kind", async () => {
+    vi.stubGlobal("Worker", InThreadSkyWorker);
+    const view = await serverScene();
+    await openInstrument(view, "INSTRUMENT 1");
+    await skyReplyAt(view, [null, null, null], true);
+    act(() => {
+      view.socket.close();
+    });
+    await settle();
+    const limits = [primaryLabelBlock(), screen.getByRole("region", { name: "INSTRUMENT 1" })].map(
+      (block) => {
+        const reading = starsOutput(block);
+        const field = reading.querySelector(".view-label__field");
+        return [
+          reading.textContent,
+          field?.querySelector(".stale")?.textContent,
+          field?.querySelector(".stale-mark")?.textContent,
+          field?.nextSibling?.textContent,
+          reading.classList.contains("stale"),
+        ];
+      },
+    );
+    expect(limits).toEqual([
+      [`V 9.6 mag Sstale CAM · ${LEFT_OUT}`, "V 9.6 mag", "S", " CAM", false],
+      [`V 9.6 mag Sstale CAM · ${LEFT_OUT}`, "V 9.6 mag", "S", " CAM", false],
+    ]);
+  });
+
+  it("sets each limit in its field, unmarked, while the link is up", async () => {
+    vi.stubGlobal("Worker", InThreadSkyWorker);
+    const view = await serverScene();
+    await openInstrument(view, "INSTRUMENT 1");
+    await skyReplyAt(view, [null, null, null], true);
+    const limits = [primaryLabelBlock(), screen.getByRole("region", { name: "INSTRUMENT 1" })].map(
+      (block) => {
+        const field = starsOutput(block).querySelector<HTMLElement>(".view-label__field");
+        return [field?.textContent, field?.style.minWidth, field?.querySelector(".stale-mark")];
+      },
+    );
+    expect(limits).toEqual([
+      ["V 9.6 mag", "13ch", null],
+      ["V 9.6 mag", "13ch", null],
+    ]);
+  });
+
+  it("leads each note with its dot on the primary's and an instrument's STARS line", async () => {
+    vi.stubGlobal("Worker", InThreadSkyWorker);
+    const view = await serverScene();
+    await openInstrument(view, "INSTRUMENT 1");
+    await skyReplyAt(view, [2_000, 4_000, 4_000], false);
+    const parts = [primaryLabelBlock(), screen.getByRole("region", { name: "INSTRUMENT 1" })].map(
+      (block) =>
+        [...starsOutput(block).querySelectorAll(".view-label__part")].map(
+          (part) => part.textContent,
+        ),
+    );
+    expect(parts).toEqual([
+      [CAM, "· BEYOND 2000 ly: STREAMING"],
+      [CAM, `· ${LEFT_OUT}`],
     ]);
   });
 });
@@ -901,5 +1040,180 @@ describe("VIEW's instruments under the pointer (R07.T19.f)", () => {
     expect([turned, chaseCameraLine()]).toEqual([turned, turned]);
     expect(turned).toMatch(/^CHASE · LOOK \d{3}° \+00°$/u);
     await view.user.keyboard("{/Control}{/ArrowLeft}");
+  });
+});
+
+/** Sets the interface scale's rem, as the scale setting does, and fires the window's resize. */
+function scaleTo(view: Setup, remPx: number): void {
+  act(() => {
+    document.documentElement.style.fontSize = `${String(remPx)}px`;
+    window.dispatchEvent(new Event("resize"));
+  });
+  view.advance(100);
+}
+
+describe("VIEW's instruments held for the stage's room (R10.T12.b)", () => {
+  /** A stage that holds an instrument at 16 px to the rem, but too narrow for one at 24 px. */
+  const HOLDS_AT_100_ONLY = { widthPx: 1000, heightPx: 720 } as const;
+
+  afterEach(() => {
+    document.documentElement.style.fontSize = "";
+  });
+
+  it("withdraws a held instrument's camera from the server's scene", async () => {
+    const view = await serverScene({ stagePx: HOLDS_AT_100_ONLY });
+    await openInstrument(view, "INSTRUMENT 1");
+    await nextReport(view);
+    scaleTo(view, 24);
+    expect(await nextReport(view)).toBe(1);
+  });
+
+  it("reports a held instrument's camera again once it returns", async () => {
+    const view = await serverScene({ stagePx: HOLDS_AT_100_ONLY });
+    await openInstrument(view, "INSTRUMENT 1");
+    await nextReport(view);
+    scaleTo(view, 24);
+    await nextReport(view);
+    scaleTo(view, 16);
+    expect(await nextReport(view)).toBe(2);
+  });
+
+  it("lets go of the flight keys held on an instrument as it is held", async () => {
+    const view = await setup({ stagePx: HOLDS_AT_100_ONLY });
+    await openInstrument(view, "INSTRUMENT 1");
+    canvasNamed(/INSTRUMENT 1/).focus();
+    const before = chaseCameraLine();
+    await view.user.keyboard("{ArrowLeft>}");
+    view.advance(300);
+    const turning = chaseCameraLine() !== before;
+    scaleTo(view, 24);
+    scaleTo(view, 16);
+    view.advance(300);
+    const returned = chaseCameraLine();
+    view.advance(600);
+    expect([turning, chaseCameraLine()]).toEqual([true, returned]);
+    await view.user.keyboard("{/ArrowLeft}");
+  });
+});
+
+/** Holds an instrument's folds, as its slot's state does. */
+function SlotFolds({ children }: { readonly children: (folds: ReasonFolds) => ReactNode }) {
+  return children(useReasonFolds());
+}
+
+/**
+ * `INSTRUMENT 1` drawing PHASE TEST photorealistically, its atmosphere's reasons given, its folds
+ * held as its slot's are, or `folds` where given.
+ */
+function renderInstrument(
+  reasons: ReadonlyArray<string>,
+  primary: ReadonlyArray<LabelStatement>,
+  folds?: ReasonFolds,
+): void {
+  const instrument: Instrument = {
+    slot: 1,
+    id: viewId("INSTRUMENT 1"),
+    name: "INSTRUMENT 1",
+    open: true,
+    style: "photorealistic",
+    selection: null,
+    grid: true,
+    slopeBaselineM: 2,
+    reasonsOpened: new Set(),
+    shown: {
+      ground: null,
+      run: startRun(phaseScene()),
+      anchors: [],
+      drawnStyle: "photorealistic",
+      sceneStars: false,
+      photoreal: "ready",
+      terrain: null,
+      decoration: false,
+      surveyEdges: [],
+      contourIntervalM: null,
+      atmosphere: {
+        labels: ["atmosphereApproximate"],
+        plate: [],
+        approximate: reasons,
+        fault: [],
+      },
+    },
+    refused: false,
+    size: null,
+    skyLabel: null,
+    canvas: null,
+    canvasRef: () => undefined,
+    stageRef: () => undefined,
+    panelSize: null,
+    panelRef: () => undefined,
+  };
+  const view = (held: ReasonFolds): ReactNode => (
+    <InstrumentView
+      instrument={instrument}
+      exposure={DEFAULT_EXPOSURE}
+      budgetStyle="photorealistic"
+      stale={false}
+      lighting="lit"
+      litLabels={[]}
+      primaryPhotorealStatements={primary}
+      skyAwaiting={false}
+      faults={[]}
+      folds={held}
+      legendId="legend"
+      onKeyDown={() => undefined}
+      onKeyUp={() => undefined}
+      onBlur={() => undefined}
+      fovDeg={() => 60}
+      dragKind={() => "orbit"}
+      onPress={() => undefined}
+      onTurn={() => undefined}
+      onPick={() => undefined}
+    />
+  );
+  render(folds === undefined ? <SlotFolds>{view}</SlotFolds> : view(folds));
+}
+
+/** `INSTRUMENT 1`'s panel, its statements queried within it. */
+function instrumentPanel(): ReturnType<typeof within> {
+  return within(screen.getByRole("region", { name: "INSTRUMENT 1" }));
+}
+
+describe("an instrument's reasons for ATMOSPHERE: APPROXIMATE (R08.T10.d)", () => {
+  const note = "ATMOSPHERE: APPROXIMATE";
+  const water = "H2O: its absorption estimated, not measured, for TEST GIANT";
+  const thick =
+    "Multiple scattering: drawn by the thin-atmosphere method beyond its checked range, for TEST GIANT";
+
+  it("shows ATMOSPHERE: APPROXIMATE straight above a reason the primary lacks, though the primary shows the note", async () => {
+    const user = userEvent.setup();
+    renderInstrument([water, thick], [note, { text: water, standing: "sentence" }]);
+    const panel = instrumentPanel();
+    await user.click(panel.getByRole("button", { name: "1 REASON" }));
+    expect(
+      panel.getByText(statusLine(note)).closest("p")?.nextElementSibling?.firstElementChild,
+    ).toBe(panel.getByText(thick));
+  });
+
+  it("stands its reasons opened as its slot's folds hold them", () => {
+    renderInstrument([water, thick], [note, { text: water, standing: "sentence" }], {
+      opened: new Set([note]),
+      toggle: () => undefined,
+    });
+    const panel = instrumentPanel();
+    expect([
+      panel.getByRole("button", { name: "1 REASON" }).getAttribute("aria-expanded"),
+      panel.queryByText(thick) !== null,
+    ]).toEqual(["true", true]);
+  });
+
+  it("drops a reason the primary shows already", () => {
+    renderInstrument([water, thick], [note, { text: water, standing: "sentence" }]);
+    expect(instrumentPanel().queryByText(water)).toBeNull();
+  });
+
+  it("shows neither the note nor a reason where all its reasons are the primary's", () => {
+    renderInstrument([water], [note, { text: water, standing: "sentence" }]);
+    const panel = instrumentPanel();
+    expect([panel.queryByText(statusLine(note)), panel.queryByText(water)]).toEqual([null, null]);
   });
 });

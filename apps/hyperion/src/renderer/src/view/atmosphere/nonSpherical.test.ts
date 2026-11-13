@@ -1,0 +1,1053 @@
+import { describe, expect, it } from "vitest";
+
+import { memoised } from "../../test/memo";
+import { henyeyGreenstein } from "./aerosol";
+import enstatitePhase from "./fixtures/enstatite-sample-phase.json" with { type: "json" };
+import ga from "./fixtures/granada-amsterdam.json" with { type: "json" };
+import mgsPhase from "./fixtures/mgs1m-phase.json" with { type: "json" };
+import excerpt from "./fixtures/tamudust-excerpt.json" with { type: "json" };
+import { MATERIAL_FILES, refractiveIndex, resolveMaterial } from "./materials/materials";
+import { type ComplexIndex, mieSphere } from "./mie";
+import {
+  FLOOR_ALBEDO_MIN,
+  forwardPeakSplit,
+  ICE_ANALOGUE_ASYMMETRY_BIAS,
+  ICE_KEYS,
+  isIce,
+  KERNEL_EDGE_MODEL_EXCESS,
+  KERNEL_EDGE_N,
+  KERNEL_EDGE_REFLECTANCE_TOLERANCE,
+  KERNEL_K_MAX,
+  kernelEdgeRule,
+  type NonSphericalParticles,
+  nonSphericalModeOptics,
+  opticsOfParticles,
+  particlesOf,
+  PHASE_FILES,
+  parsePhaseFile,
+  type PhaseFileTable,
+  phaseFileOf,
+  radiusDistribution,
+  type RadiusDistribution,
+  SMALL_GRAIN_SIZE_PARAMETER,
+  tableModeOptics,
+  tabulatedRadiusDistribution,
+  waterIceTable,
+} from "./nonSpherical";
+import { sphereModeOptics } from "./sizeDistribution";
+
+const cosine = (deg: number): number => Math.cos((deg * Math.PI) / 180);
+
+/** A value computed on its first use, so that a describe block's setup runs inside its tests. */
+function once<T>(make: () => T): () => T {
+  let value: { readonly made: T } | undefined;
+  return () => {
+    value ??= { made: make() };
+    return value.made;
+  };
+}
+
+/** The angles of the measured ratios (science-r08-nonspherical.md §2.1–§2.2). */
+const ANGLES = [30, 90, 120, 150, 165, 170] as const;
+const MU = Float64Array.from(ANGLES, cosine);
+const at = (deg: (typeof ANGLES)[number]): number => ANGLES.indexOf(deg);
+
+/** A laser sizer's measured number distribution, n(r) per µm at each r. */
+interface MeasuredSizes {
+  readonly radiiUm: ReadonlyArray<number>;
+  readonly numberDensity: ReadonlyArray<number>;
+}
+
+/**
+ * A measured distribution as one in the tables' volume-to-area radius r_VA = 3V ÷ 4A, from the
+ * sizer's projected-area-equivalent radius r_A (MGS-1 M, Martikainen et al. 2025 §2.2) or its
+ * volume-equivalent radius r_V (enstatite, Frattin et al. 2019 §4.3.2): r_VA ÷ r_A is the table's
+ * own (3Ṽ ÷ 4Ã) ÷ √(Ã ÷ π), 0.599 at sphericity 0.71, and r_VA ÷ r_V its (3Ṽ ÷ 4Ã) ÷ ∛(3Ṽ ÷ 4π),
+ * 0.71, each the same at every size of the ensemble. With a wavelength, the points past the table's
+ * largest size there are dropped.
+ */
+function inVolumeToArea(
+  table: PhaseFileTable,
+  sample: MeasuredSizes,
+  radius: "projectedArea" | "volume" = "projectedArea",
+  wavelengthNm?: number,
+): RadiusDistribution {
+  const node = table.nodes[0];
+  const v = node?.volumes[20] ?? Number.NaN;
+  const a = node?.areas[20] ?? Number.NaN;
+  const ratio =
+    (0.75 * v) /
+    a /
+    (radius === "volume" ? Math.cbrt((3 * v) / (4 * Math.PI)) : Math.sqrt(a / Math.PI));
+  const last = (node?.sizeParameters.length ?? 0) - 1;
+  const topUm =
+    wavelengthNm === undefined
+      ? Infinity
+      : (((0.75 * (node?.volumes[last] ?? Number.NaN)) / (node?.areas[last] ?? Number.NaN)) *
+          wavelengthNm) /
+        1000 /
+        (2 * Math.PI);
+  const kept = sample.radiiUm
+    .map((r, i) => [r * ratio, (sample.numberDensity[i] ?? Number.NaN) / ratio] as const)
+    .filter(([r]) => r <= topUm);
+  return tabulatedRadiusDistribution(
+    kept.map(([r]) => r),
+    kept.map(([, n]) => n),
+  );
+}
+
+/** The MgSiO₃ phase file, on the shortwave kernel's floor. */
+function enstatiteTable(): PhaseFileTable {
+  const table = PHASE_FILES.find((p) => p.key === "MgSiO3");
+  if (table === undefined) {
+    throw new Error("the MgSiO3 phase file is missing");
+  }
+  return table;
+}
+
+/** The ratios a₁(θ) ÷ a₁(30°) of a matrix at {@link ANGLES}. */
+function normalisedAt30(a1: Float64Array): number[] {
+  const at30 = a1[at(30)] ?? Number.NaN;
+  return Array.from(a1, (v) => v / at30);
+}
+
+/**
+ * a₁ ÷ a₁(30°) at {@link ANGLES} of spheres of radius r over a measured distribution, by Mie, 40
+ * steps per interval in ln r.
+ */
+function sphereRatiosAt30(
+  sample: MeasuredSizes,
+  wavelengthNm: number,
+  index: ComplexIndex,
+): number[] {
+  const sums = new Float64Array(ANGLES.length);
+  const { radiiUm, numberDensity } = sample;
+  for (let i = 0; i + 1 < radiiUm.length; i += 1) {
+    const r0 = radiiUm[i] ?? Number.NaN;
+    const r1 = radiiUm[i + 1] ?? Number.NaN;
+    const n0 = numberDensity[i] ?? Number.NaN;
+    const n1 = numberDensity[i + 1] ?? Number.NaN;
+    for (let s = 0; s < 40; s += 1) {
+      const t = (s + 0.5) / 40;
+      const r = r0 * (r1 / r0) ** t;
+      const n = n0 * (n1 / n0) ** t;
+      const x = (2 * Math.PI * r * 1000) / wavelengthNm;
+      const mie = mieSphere(x, index, MU);
+      const weight = (r * n * Math.log(r1 / r0) * r * r) / (40 * x * x);
+      for (let j = 0; j < ANGLES.length; j += 1) {
+        sums[j] =
+          (sums[j] ?? 0) +
+          weight *
+            ((mie.s1[2 * j] ?? 0) ** 2 +
+              (mie.s1[2 * j + 1] ?? 0) ** 2 +
+              (mie.s2[2 * j] ?? 0) ** 2 +
+              (mie.s2[2 * j + 1] ?? 0) ** 2);
+      }
+    }
+  }
+  return normalisedAt30(sums);
+}
+
+describe("the phase files", () => {
+  it("parse, each with its model, source, licence and nodes", () => {
+    expect(PHASE_FILES.length).toBeGreaterThanOrEqual(4);
+    for (const file of PHASE_FILES) {
+      expect(file.licence).toContain("CC BY 4.0");
+      expect(file.source).toMatch(/MD5 [0-9a-f]{32}/u);
+      expect(file.nodes.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("carry TAMUdust2020's required sentence in its tables", () => {
+    for (const file of PHASE_FILES.filter((p) => p.model === "tamudust2020")) {
+      expect(file.licence).toContain("The scattering properties are obtained from TAMUdust2020.");
+    }
+  });
+
+  it("belong to material files, each covering 380–780 nm", () => {
+    for (const file of PHASE_FILES) {
+      const material = MATERIAL_FILES.find(
+        (m) => m.key === file.key && m.phase === file.phase && m.variant === file.variant,
+      );
+      expect(material === undefined ? undefined : phaseFileOf(material)).toBe(file);
+      expect(file.nodes[0]?.wavelengthNm).toBeLessThanOrEqual(380);
+      expect(file.nodes.at(-1)?.wavelengthNm).toBeGreaterThanOrEqual(780);
+    }
+  });
+
+  it("give Mars dust, the silicates and solid iron the hexahedra", () => {
+    for (const key of ["mars_dust", "MgSiO3", "Mg2SiO4", "Fe"]) {
+      expect(PHASE_FILES.find((p) => p.key === key)?.model).toBe("tamudust2020");
+    }
+  });
+
+  it("refuse a broken file by name", () => {
+    expect(() => parsePhaseFile({ model: "tamudust2020" }, "bad.json")).toThrow(/bad\.json/u);
+  });
+});
+
+describe("MGS-1 M against Martikainen et al. (science-r08-nonspherical.md §2.1)", () => {
+  const table = once(() => parsePhaseFile(mgsPhase, "fixtures/mgs1m-phase.json"));
+  const distribution = once(() => inVolumeToArea(table(), ga.mgs1m));
+
+  it("gives Martikainen et al. 2025's g 0.7111 ± 0.005 and ω 0.9905 ± 0.002 at 650 nm", () => {
+    const optics = tableModeOptics(table(), distribution(), { n: 1.5, k: 4.33e-4 }, 650, MU);
+    expect(Math.abs(optics.asymmetry - 0.7111)).toBeLessThan(0.005);
+    const omega = optics.scatteringCrossSectionM2 / optics.extinctionCrossSectionM2;
+    expect(Math.abs(omega - 0.9905)).toBeLessThan(0.002);
+  });
+
+  // The measured matrix at 640 nm (Martikainen et al. 2024, ApJS 273, 28; the database's
+  // matrix_MGS1M_640nm.txt), its k from opticalPropertiesMGS1M_1.txt's 600 and 650 nm rows.
+  const matrix = once(
+    () => tableModeOptics(table(), distribution(), { n: 1.5, k: 4.29e-4 }, 640, MU).matrix,
+  );
+
+  it("puts a₁ ÷ a₁(30°) within 40% of the measured 0.141, 0.105, 0.099 and 0.119", () => {
+    const ratios = normalisedAt30(matrix().a1);
+    for (const [deg, value] of [
+      [90, 0.141],
+      [120, 0.105],
+      [150, 0.099],
+      [170, 0.119],
+    ] as const) {
+      expect(Math.abs((ratios[at(deg)] ?? Number.NaN) / value - 1)).toBeLessThan(0.4);
+    }
+  });
+
+  it("polarises with the measured signs: −b₁ ÷ a₁ positive at 90° and negative at 165°", () => {
+    const measured = matrix();
+    expect(-(measured.b1[at(90)] ?? 0) / (measured.a1[at(90)] ?? 1)).toBeGreaterThan(0);
+    expect(-(measured.b1[at(165)] ?? 0) / (measured.a1[at(165)] ?? 1)).toBeLessThan(0);
+  });
+
+  it("puts a₂ ÷ a₁ at 170° within 0.15 of the measured 0.54", () => {
+    const measured = matrix();
+    expect(Math.abs((measured.a2[at(170)] ?? 0) / (measured.a1[at(170)] ?? 1) - 0.54)).toBeLessThan(
+      0.15,
+    );
+  });
+
+  it("gives b₂ ÷ a₁ at 90° the sign of the measured F₃₄ ÷ F₁₁, +0.137", () => {
+    const measured = matrix();
+    expect((measured.b2[at(90)] ?? 0) / (measured.a1[at(90)] ?? 1)).toBeGreaterThan(0);
+  });
+
+  it("fails it with spheres of the same distribution", () => {
+    const spheres = sphereRatiosAt30(ga.mgs1m, 640, { n: 1.5, k: 4.29e-4 });
+    const measuredRatios = [
+      [90, 0.141],
+      [120, 0.105],
+      [150, 0.099],
+      [170, 0.119],
+    ] as const;
+    const misses = measuredRatios.filter(
+      ([deg, value]) => Math.abs((spheres[at(deg)] ?? 0) / value - 1) >= 0.4,
+    );
+    expect(misses.length).toBeGreaterThan(0);
+  });
+});
+
+/** The step and reach of the angles the forward lobe's half-width is read at, degrees. */
+const LOBE_STEP_DEG = 0.04;
+const LOBE_MAX_DEG = 8;
+/** The cosines of those angles, from 0° to {@link LOBE_MAX_DEG}. */
+const LOBE_MU = Float64Array.from(
+  { length: Math.round(LOBE_MAX_DEG / LOBE_STEP_DEG) + 1 },
+  (_, i) => cosine(LOBE_STEP_DEG * i),
+);
+
+/**
+ * The half-width at half maximum of a₁ at {@link LOBE_MU}, degrees, linear between the angles: the
+ * resolved lobe's, since a phase file's unresolved forward peak is a delta held apart from a₁.
+ */
+function lobeHalfWidthDeg(a1: Float64Array): number {
+  const half = (a1[0] ?? Number.NaN) / 2;
+  const i = a1.findIndex((v) => v <= half);
+  const before = a1[i - 1] ?? Number.NaN;
+  const after = a1[i] ?? Number.NaN;
+  if (!(i >= 1 && before > after)) {
+    throw new Error(`a₁ does not fall to half its forward value within ${LOBE_MAX_DEG}°`);
+  }
+  return LOBE_STEP_DEG * (i - 1 + (before - half) / (before - after));
+}
+
+/** A gamma distribution at Wolff et al. 2009's width for Mars dust, v_eff 0.3 (their ¶[27]). */
+function wolffGamma(effectiveRadiusUm: number) {
+  return { kind: "gamma", effectiveRadiusUm, effectiveVariance: 0.3 } as const;
+}
+
+describe("Mars dust (science-r08-nonspherical.md §2.1 (iii))", () => {
+  // The test's r_eff 1.5 µm is in Wolff et al. 2009's convention, the surface-equivalent radius of
+  // D/L = 1 cylinders (their ¶[26], ¶[32]). Mars's dust sizes were fixed by the sky near the Sun,
+  // whose forward lobe scales as 1 ÷ r_A, so the size converts at equal projected area: in the
+  // modes' volume-to-area radius it is 1.5 × 0.71^(3/2) = 0.8974 µm, the same v_eff
+  // (science-r08-mmf.md §3, superseding §2.3's equal-V/A 1.2247 µm).
+  const mode = { material: "mars_dust", sizes: wolffGamma(0.8974) } as const;
+  const optics = once(() =>
+    nonSphericalModeOptics(mode, 650, Float64Array.from([90, 150], cosine)),
+  );
+
+  it("is drawn on the hexahedra as a model", () => {
+    expect(optics().phaseBasis).toBe("model");
+    expect(optics().phaseModel).toBe("tamudust2020");
+  });
+
+  it("gives g within Chen-Chen et al. 2019's 0.673 ± 0.081 at 650 nm", () => {
+    expect(Math.abs(optics().asymmetry - 0.673)).toBeLessThan(0.081);
+  });
+
+  it("gives a₁(150°) ÷ a₁(90°) within 0.5–0.85 (MSL's sky, 0.71)", () => {
+    const ratio = (optics().matrix?.a1[1] ?? 0) / (optics().matrix?.a1[0] ?? 1);
+    expect(ratio).toBeGreaterThan(0.5);
+    expect(ratio).toBeLessThan(0.85);
+  });
+
+  it("gives ω within Wolff et al. 2009's 0.975 ± 0.015", () => {
+    expect(Math.abs(optics().singleScatteringAlbedo - 0.975)).toBeLessThan(0.015);
+  });
+
+  // The forward lobe against Mie spheres of the same distribution in r_A (gamma r_eff 1.5 µm,
+  // v_eff 0.3, on the file's index): about 4.06° and 2.72°, as science-r08-mmf.md §3.2's proxy
+  // gives (4.04° and 2.72°). The hexahedra give 3.82° and 2.53° (6% and 7% narrower); at §2.3's
+  // equal-V/A 1.2247 µm they gave 2.78° and 1.84°, 32% narrower, which the bound refuses.
+  const lobeWavelengthsNm = [645, 434] as const;
+  const sphereLobesDeg = once(() =>
+    lobeWavelengthsNm.map((nm) =>
+      lobeHalfWidthDeg(
+        sphereModeOptics(wolffGamma(1.5), refractiveIndex("mars_dust", nm).index, nm, LOBE_MU)
+          .matrix.a1,
+      ),
+    ),
+  );
+  /** The hexahedra's lobe at r_eff over the spheres', minus 1, at each of the wavelengths. */
+  const lobeMisses = (effectiveRadiusUm: number): number[] =>
+    lobeWavelengthsNm.map((nm, i) => {
+      const { matrix } = nonSphericalModeOptics(
+        { ...mode, sizes: wolffGamma(effectiveRadiusUm) },
+        nm,
+        LOBE_MU,
+      );
+      if (matrix === undefined) {
+        throw new Error(`Mars dust at r_eff ${effectiveRadiusUm} µm has no matrix at ${nm} nm`);
+      }
+      return lobeHalfWidthDeg(matrix.a1) / (sphereLobesDeg()[i] ?? Number.NaN) - 1;
+    });
+
+  it("puts its forward lobe's half-width within 15% of equal-area spheres' at 645 and 434 nm", () => {
+    for (const miss of lobeMisses(0.8974)) {
+      expect(Math.abs(miss)).toBeLessThan(0.15);
+    }
+  }, 60_000); // M2 worst 3.7 s, M3 6.3 s, desktop over 15 s (2026-10-15): 10× M2, CPU-bound
+
+  it("is a bound that the equal-V/A size, 1.2247 µm, fails at both wavelengths", () => {
+    for (const miss of lobeMisses(1.2247)) {
+      expect(Math.abs(miss)).toBeGreaterThanOrEqual(0.15);
+    }
+  });
+});
+
+describe("enstatite against Frattin et al. 2019 (science-r08-nonspherical.md §2.2, §7)", () => {
+  // The sample's own iron, Mg₀.₈₅Fe₀.₀₈Si₀.₉₉O₃: Dorschner et al. 1995's pyroxene glasses give
+  // 1.594 + 4.5 × 10⁻⁴i at 520 nm, the fixture's index (test-only; the MgSiO₃ file stays iron-free).
+  // Its sizes are the MIE section, read as volume-equivalent radii (Frattin et al. §4.3.2).
+  const index = { n: 1.594, k: 4.5e-4 } as const;
+  const table = once(() => parsePhaseFile(enstatitePhase, "fixtures/enstatite-sample-phase.json"));
+  const optics = once(() =>
+    tableModeOptics(table(), inVolumeToArea(table(), ga.enstatite, "volume", 520), index, 520, MU),
+  );
+  const measured = [
+    [90, 0.149],
+    [120, 0.11],
+    [150, 0.102],
+    [170, 0.115],
+  ] as const;
+  /** The measured angles at which ratios to 30° part from the measured by a factor of 2 or more. */
+  const missesByFactor2 = (ratios: ReadonlyArray<number>): number[] =>
+    measured
+      .filter(([deg, value]) => {
+        const r = (ratios[at(deg)] ?? Number.NaN) / value;
+        return !(r > 0.5 && r < 2);
+      })
+      .map(([deg]) => deg);
+
+  it("is drawn on the hexahedra at its own index, above the kernel's floor", () => {
+    expect(table().nodes.map((n) => n.wavelengthNm)).toEqual([520]);
+    expect(table().particles).toContain("sphericity 0.71");
+    expect(optics().floored).toBe(false);
+  });
+
+  it("puts a₁(170°) ÷ a₁(90°) within 0.5–1.2 (measured 0.77)", () => {
+    const { a1 } = optics().matrix;
+    const ratio = (a1[at(170)] ?? Number.NaN) / (a1[at(90)] ?? Number.NaN);
+    expect(ratio).toBeGreaterThan(0.5);
+    expect(ratio).toBeLessThan(1.2);
+  });
+
+  it("polarises positively at 90° (measured +0.108)", () => {
+    const { matrix } = optics();
+    expect(-(matrix.b1[at(90)] ?? 0) / (matrix.a1[at(90)] ?? 1)).toBeGreaterThan(0);
+  });
+
+  it("puts a₁ ÷ a₁(30°) within a factor of 2 of the measured 0.149, 0.110, 0.102 and 0.115", () => {
+    expect(missesByFactor2(normalisedAt30(optics().matrix.a1))).toEqual([]);
+  });
+
+  it("is a bound that volume-equivalent spheres of the distribution fail", () => {
+    expect(missesByFactor2(sphereRatiosAt30(ga.enstatite, 520, index)).length).toBeGreaterThan(0);
+  });
+
+  it("is a bound that Henyey–Greenstein at the mode's g fails", () => {
+    const g = optics().asymmetry;
+    const hg = normalisedAt30(Float64Array.from(MU, (mu) => henyeyGreenstein(g, mu)));
+    expect(missesByFactor2(hg).length).toBeGreaterThan(0);
+  });
+});
+
+/** The excerpt's a₁ at one record, decoded (round(1000 ln a₁), size-major). */
+function excerptA1(record: 0 | 1): Float64Array {
+  const rec = excerpt.records[record];
+  if (rec === undefined) {
+    throw new Error(`the excerpt has no record ${record}`);
+  }
+  const bytes = atob(rec.a1);
+  return Float64Array.from({ length: bytes.length / 2 }, (_, i) => {
+    const v = bytes.charCodeAt(2 * i) | (bytes.charCodeAt(2 * i + 1) << 8);
+    return Math.exp((v >= 0x8000 ? v - 0x10000 : v) / 1000);
+  });
+}
+
+describe("the rules, on the raw excerpt (n 1.60, sphericity 0.712)", () => {
+  const angles = excerpt.phaseAnglesDeg.length;
+
+  it("holds the k-floor rule: a₁ at k 10⁻³ and 10⁻⁴ within 2% wherever ω at 10⁻³ ≥ 0.99", () => {
+    const low = excerptA1(0);
+    const high = excerptA1(1);
+    expect(excerpt.records[0]?.k).toBeCloseTo(1e-4, 9);
+    expect(excerpt.records[1]?.k).toBeCloseTo(1e-3, 9);
+    let checked = 0;
+    for (const [s, row] of (excerpt.records[1]?.isca ?? []).entries()) {
+      const omega = (row[4] ?? 0) / (row[3] ?? 1);
+      if (omega < FLOOR_ALBEDO_MIN) {
+        continue;
+      }
+      checked += 1;
+      for (let j = 0; j < angles; j += 1) {
+        const ratio = (high[s * angles + j] ?? 0) / (low[s * angles + j] ?? 1);
+        expect(Math.abs(ratio - 1)).toBeLessThan(0.02);
+      }
+    }
+    expect(checked).toBeGreaterThan(50);
+  });
+
+  it("starts the small-grain rule where the hexahedra and spheres part by 5% in a₁", () => {
+    const a1 = excerptA1(0);
+    const mu = Float64Array.from(excerpt.phaseAnglesDeg, cosine);
+    const worstAt = (row: ReadonlyArray<number>, s: number): { x: number; worst: number } => {
+      const xVa = (0.75 * (row[2] ?? 0)) / (row[1] ?? 1);
+      const mie = mieSphere(xVa, { n: 1.6, k: 1e-4 }, mu);
+      let worst = 0;
+      for (let j = 0; j < angles; j += 1) {
+        const sq =
+          (mie.s1[2 * j] ?? 0) ** 2 +
+          (mie.s1[2 * j + 1] ?? 0) ** 2 +
+          (mie.s2[2 * j] ?? 0) ** 2 +
+          (mie.s2[2 * j + 1] ?? 0) ** 2;
+        const sphere = (2 * sq) / (xVa * xVa * mie.qSca);
+        worst = Math.max(worst, Math.abs((a1[s * angles + j] ?? 0) / sphere - 1));
+      }
+      return { x: xVa, worst };
+    };
+    const rows = excerpt.records[0]?.isca ?? [];
+    const results = rows.slice(0, 60).map((row, s) => worstAt(row, s));
+    const below = results.filter((r) => r.x < SMALL_GRAIN_SIZE_PARAMETER);
+    const above = results.filter((r) => r.x >= SMALL_GRAIN_SIZE_PARAMETER);
+    expect(below.every((r) => r.worst < 0.05)).toBe(true);
+    // The next node past the constant parts by 4.9% and the one after by 5.3%: the constant is the
+    // measured crossing, per particle (x_VA), applied to a mode's 2π r_eff ÷ λ.
+    expect(above[0]?.worst ?? 0).toBeGreaterThan(0.048);
+    expect(above[1]?.worst ?? 0).toBeGreaterThan(0.05);
+  });
+});
+
+describe("the fallback", () => {
+  /** Rutile's ordinary index by DeVore's Sellmeier fit (J. Opt. Soc. Am. 41, 416, 1951), k = 0. */
+  const rutile: NonSphericalParticles = {
+    material: "TiO2",
+    shape: "nonSphericalMineral",
+    index: (nm) => ({ n: Math.sqrt(5.913 + 0.2441 / ((nm / 1000) ** 2 - 0.0803)), k: 0 }),
+    provenance: "measured",
+    table: undefined,
+  };
+
+  it("draws a 3 µm TiO₂ mode, outside both kernels, with Henyey–Greenstein and no matrix", () => {
+    const optics = opticsOfParticles(
+      rutile,
+      { kind: "gamma", effectiveRadiusUm: 3, effectiveVariance: 0.1 },
+      550,
+    );
+    expect(optics.phaseBasis).toBe("fallback");
+    expect(optics.phaseModel).toBe("henyeyGreenstein");
+    expect(optics.matrix).toBeUndefined();
+    expect(optics.phaseNote).toMatch(
+      /^TiO2: n \d\.\d{3} above 1\.7 with k under 1E-3, below the longwave kernel's k floor, with no floor table on file; a Henyey–Greenstein phase from Mie's g, with Mie's single-scattering albedo and no matrix, a fallback$/u,
+    );
+  });
+
+  it("draws a small TiO₂ grain with the sphere's own Mie matrix, still a fallback", () => {
+    const radiusUm = (0.5 * SMALL_GRAIN_SIZE_PARAMETER * 0.55) / (2 * Math.PI);
+    const optics = opticsOfParticles(
+      rutile,
+      { kind: "gamma", effectiveRadiusUm: radiusUm, effectiveVariance: 0.1 },
+      550,
+    );
+    expect(optics.phaseBasis).toBe("fallback");
+    expect(optics.phaseModel).toBe("mie");
+    expect(optics.matrix).toBeDefined();
+    expect(optics.phaseNote).toContain(
+      "; a small grain (effective size parameter 0.11 < 0.22), drawn with the sphere's own Mie matrix, a fallback",
+    );
+  });
+
+  it("draws a mineral with no reduced table as a fallback, and says it has none on file", () => {
+    const optics = opticsOfParticles(
+      { ...rutile, material: "an absorbing mineral", index: () => ({ n: 1.5, k: 0.01 }) },
+      { kind: "gamma", effectiveRadiusUm: 3, effectiveVariance: 0.1 },
+      550,
+    );
+    expect(optics.phaseNote).toBe(
+      "unlisted material: no reduced dust-kernel table on file; a Henyey–Greenstein phase from Mie's g, with Mie's single-scattering albedo and no matrix, a fallback",
+    );
+  });
+});
+
+describe("solid and liquid iron", () => {
+  it("draws a solid iron grain on the longwave kernel, with a₂ ÷ a₁ below 0.95 at 170°", () => {
+    const optics = nonSphericalModeOptics(
+      { material: "Fe", sizes: { kind: "gamma", effectiveRadiusUm: 0.5, effectiveVariance: 0.1 } },
+      550,
+      Float64Array.from([cosine(170)]),
+    );
+    expect(optics.phaseModel).toBe("tamudust2020");
+    expect((optics.matrix?.a2[0] ?? 1) / (optics.matrix?.a1[0] ?? 1)).toBeLessThan(0.95);
+    expect(PHASE_FILES.find((p) => p.key === "Fe")?.nodes[0]?.kernel).toBe("longwave");
+  });
+});
+
+describe("water ice on Yang et al. 2013's roughened 8-column aggregate (§2.3)", () => {
+  /** Gamma r_eff 30 µm, v_eff 0.1, in Yang et al.'s own volume-to-area convention. */
+  const cirrus = {
+    material: "H2O",
+    form: { phase: "solid" },
+    sizes: { kind: "gamma", effectiveRadiusUm: 30, effectiveVariance: 0.1 },
+  } as const;
+
+  it("draws water ice as the model", () => {
+    const optics = nonSphericalModeOptics(cirrus, 550);
+    expect(optics.phaseBasis).toBe("model");
+    expect(optics.phaseModel).toBe("yang2013");
+    expect(optics.matrix).toBeDefined();
+  });
+
+  it("gives Järvinen et al. 2018's g 0.750 ± 0.010 at 532 nm and 0.754 ± 0.010 at 780 nm", () => {
+    expect(Math.abs(nonSphericalModeOptics(cirrus, 532).asymmetry - 0.75)).toBeLessThan(0.01);
+    expect(Math.abs(nonSphericalModeOptics(cirrus, 780).asymmetry - 0.754)).toBeLessThan(0.01);
+  });
+
+  it("has no local maximum of a₁ between 15° and 50°: no 22° or 46° halo", () => {
+    const degrees = Array.from({ length: 36 }, (_, i) => 15 + i);
+    const optics = nonSphericalModeOptics(cirrus, 550, Float64Array.from(degrees, cosine));
+    const a1 = optics.matrix?.a1 ?? new Float64Array(0);
+    expect(a1.length).toBe(degrees.length);
+    const maxima = degrees.filter(
+      (_, i) =>
+        i > 0 &&
+        i + 1 < degrees.length &&
+        (a1[i] ?? 0) > (a1[i - 1] ?? 0) &&
+        (a1[i] ?? 0) > (a1[i + 1] ?? 0),
+    );
+    expect(maxima).toEqual([]);
+  });
+
+  it("is an analogue when crystals below the table's 2 µm carry over 10% at 550 nm", () => {
+    // The 8-column aggregate of D = 2 µm has r = 3V ÷ 4A of 0.30 µm, so the tail is r < 0.30 µm.
+    const small = nonSphericalModeOptics(
+      { ...cirrus, sizes: { kind: "gamma", effectiveRadiusUm: 0.25, effectiveVariance: 0.1 } },
+      550,
+    );
+    expect(small.phaseBasis).toBe("analogue");
+    expect(small.phaseNote).toContain("2 µm");
+  });
+});
+
+describe("the other ices, on water ice's table as named analogues", () => {
+  const sizes = { kind: "gamma", effectiveRadiusUm: 10, effectiveVariance: 0.1 } as const;
+
+  it("draws NH₃ ice as an analogue with its own index's Mie cross-sections and ω", () => {
+    const optics = nonSphericalModeOptics({ material: "NH3", sizes }, 550);
+    expect(optics.phaseBasis).toBe("analogue");
+    expect(optics.phaseModel).toBe("yang2013");
+    expect(optics.phaseNote).toBe(
+      "NH3 ice drawn on H2O ice's roughened 8-column table, a named analogue; its g expected -0.056 from H2O ice's",
+    );
+    // Since R08.T5.i NH₃ ice's k is 0 (decision-p14-t49c-split §5.3), so its own index gives ω = 1
+    // to rounding, where water ice's absorbs.
+    const water = nonSphericalModeOptics({ material: "H2O", form: { phase: "solid" }, sizes }, 550);
+    expect(optics.singleScatteringAlbedo).toBeCloseTo(1, 12);
+    expect(optics.singleScatteringAlbedo).toBeGreaterThan(water.singleScatteringAlbedo);
+  }, 60_000); // M2 worst 1.7 s, M3 2.4 s, desktop over 15 s (2026-10-15): over 2× desktop
+
+  it("draws CH₄ and CO₂ ices as analogues too", () => {
+    for (const material of ["CH4", "CO2"]) {
+      const optics = nonSphericalModeOptics({ material, form: { phase: "solid" }, sizes }, 550);
+      expect(optics.phaseBasis).toBe("analogue");
+    }
+  });
+});
+
+describe("the floor rule's two exits", () => {
+  // Coarse MgSiO₃ grains on the shortwave floor (k 10⁻⁴) absorb along their paths, so the mode's
+  // ω on the floor's table falls below 0.99.
+  const coarse = { kind: "gamma", effectiveRadiusUm: 8, effectiveVariance: 0.1 } as const;
+
+  it("makes a coarse mode past the floor rule an analogue on the floor's table", () => {
+    const particles: NonSphericalParticles = {
+      material: "MgSiO3",
+      shape: "nonSphericalMineral",
+      index: (nm) => refractiveIndex("MgSiO3", nm).index,
+      provenance: "measured",
+      table: enstatiteTable(),
+    };
+    const optics = opticsOfParticles(particles, coarse, 550);
+    expect(optics.phaseBasis).toBe("analogue");
+    expect(optics.phaseModel).toBe("tamudust2020");
+    expect(optics.phaseNote).toMatch(
+      /^MgSiO3: the k-floor rule exceeded \(the floor's single-scattering albedo 0\.\d{4} < 0\.99\), the floor's table stands in, a named analogue$/u,
+    );
+  });
+
+  it("names a material past the floor rule in words, never by its key", () => {
+    const particles: NonSphericalParticles = {
+      material: "brine_xyz",
+      shape: "nonSphericalMineral",
+      index: (nm) => refractiveIndex("MgSiO3", nm).index,
+      provenance: "measured",
+      table: enstatiteTable(),
+    };
+    expect(opticsOfParticles(particles, coarse, 550).phaseNote).toMatch(
+      /^unlisted material: the k-floor rule exceeded \(the floor's single-scattering albedo 0\.\d{4} < 0\.99\), the floor's table stands in, a named analogue$/u,
+    );
+  });
+
+  it("makes it a fallback instead above n 1.70", () => {
+    const particles: NonSphericalParticles = {
+      material: "a transparent high-index mineral",
+      shape: "nonSphericalMineral",
+      index: () => ({ n: 1.8, k: 2e-5 }),
+      provenance: "measured",
+      table: enstatiteTable(),
+    };
+    const optics = opticsOfParticles(particles, coarse, 550);
+    expect(optics.phaseBasis).toBe("fallback");
+    expect(optics.matrix).toBeUndefined();
+    expect(optics.phaseNote).toMatch(
+      /^unlisted material: the k-floor rule exceeded \(the floor's single-scattering albedo 0\.\d{4} < 0\.99\) at n 1\.800 above 1\.7; a Henyey–Greenstein phase from Mie's g, with Mie's single-scattering albedo and no matrix, a fallback$/u,
+    );
+  });
+});
+
+describe("the particles below a table's smallest size", () => {
+  it("keep their own absorption, by Mie, unscaled by the table's k", () => {
+    // Ice of r_eff 0.03 µm lies wholly below the 8-column table's r = 0.30 µm: it is the
+    // volume-to-area spheres' Mie, whatever k ÷ k_node the table's absorption takes at 650 nm.
+    const sizes = { kind: "gamma", effectiveRadiusUm: 0.03, effectiveVariance: 0.1 } as const;
+    const ice = nonSphericalModeOptics({ material: "H2O", form: { phase: "solid" }, sizes }, 650);
+    const index = refractiveIndex("H2O", 650, { phase: "solid" }).index;
+    const spheres = sphereModeOptics(sizes, index, 650);
+    const ratio = (1 - ice.singleScatteringAlbedo) / (1 - spheres.singleScatteringAlbedo);
+    expect(Math.abs(ratio - 1)).toBeLessThan(0.02);
+  });
+
+  it("keep each ice crystal's area and volume, as Grenfell and Warren 1999's spheres", () => {
+    // Each crystal below the table is Ã ÷ πr̃² spheres of its r_VA, at the table's smallest crystal.
+    const sizes = { kind: "gamma", effectiveRadiusUm: 0.03, effectiveVariance: 0.1 } as const;
+    const ice = nonSphericalModeOptics({ material: "H2O", form: { phase: "solid" }, sizes }, 650);
+    const index = refractiveIndex("H2O", 650, { phase: "solid" }).index;
+    const spheres = sphereModeOptics(sizes, index, 650);
+    const node = waterIceTable()?.nodes[0];
+    const area = node?.areas[0] ?? Number.NaN;
+    const r = (0.75 * (node?.volumes[0] ?? Number.NaN)) / area;
+    const copies = area / (Math.PI * r * r);
+    expect(copies).toBeGreaterThan(4);
+    for (const [crystals, sphere] of [
+      [ice.geometricCrossSectionM2, spheres.geometricCrossSectionM2],
+      [ice.volumeM3, spheres.volumeM3],
+      [ice.scatteringCrossSectionM2, spheres.scatteringCrossSectionM2],
+    ] as const) {
+      expect(Math.abs(crystals / sphere / copies - 1)).toBeLessThan(1e-3);
+    }
+  });
+
+  it("make a water-ice mode of r_eff 0.5 µm, v_eff 0.3, an analogue by its tail", () => {
+    // Tail crystals keep their area, so they carry 14% of the scattering at 550 nm.
+    const sizes = { kind: "gamma", effectiveRadiusUm: 0.5, effectiveVariance: 0.3 } as const;
+    const ice = nonSphericalModeOptics({ material: "H2O", form: { phase: "solid" }, sizes }, 550);
+    expect(ice.phaseBasis).toBe("analogue");
+    expect(ice.phaseNote).toMatch(
+      /^crystals below the table's 2 µm carry \d+ % of the scattering at 550 nm, drawn as volume-to-area spheres$/u,
+    );
+  });
+});
+
+describe("the forward peak the files' angles miss", () => {
+  it("is sized so that the whole integrates to 1 with the source's g", () => {
+    // A node of x_D 11,810: the interpolant holds 0.591 of the scattering, of mean cosine 0.772.
+    const split = forwardPeakSplit(0.591, 0.591 * 0.772, 0.866);
+    expect(split.scale * 0.591 + split.forwardPeak).toBeCloseTo(1, 12);
+    expect(split.scale * 0.591 * 0.772 + split.forwardPeak).toBeCloseTo(0.866, 12);
+    expect(split.forwardPeak).toBeGreaterThan(0.39);
+    expect(Math.abs(split.scale - 1)).toBeLessThan(0.01);
+  });
+
+  it("is none where the resolved part's own g is above the source's: that part is normalised", () => {
+    expect(forwardPeakSplit(0.98, 0.98 * 0.8, 0.79)).toEqual({ scale: 1 / 0.98, forwardPeak: 0 });
+  });
+});
+
+describe("a non-spherical mode with no phase", () => {
+  it("is drawn as its solid: a water crystal on Yang et al.'s table, not liquid water's index", () => {
+    const optics = nonSphericalModeOptics(
+      {
+        material: "H2O",
+        shape: "crystal",
+        sizes: { kind: "gamma", effectiveRadiusUm: 30, effectiveVariance: 0.1 },
+      },
+      550,
+    );
+    expect(optics.phaseBasis).toBe("model");
+    expect(optics.phaseModel).toBe("yang2013");
+  });
+});
+
+describe("the distributions and files the tables read", () => {
+  it("refuse a bad tabulated distribution", () => {
+    expect(() => tabulatedRadiusDistribution([1], [1])).toThrow(RangeError);
+    expect(() => tabulatedRadiusDistribution([1, 1], [1, 1])).toThrow(RangeError);
+    expect(() => tabulatedRadiusDistribution([1, 2], [1, -1])).toThrow(RangeError);
+  });
+
+  it("refuse a phase file whose variant or sizes are bad", () => {
+    expect(() => parsePhaseFile({ ...mgsPhase, variant: 5 }, "bad.json")).toThrow(/variant/u);
+    const [node] = mgsPhase.nodes;
+    const reversed = { ...node, volumes: (node?.volumes ?? []).toReversed() };
+    expect(() => parsePhaseFile({ ...mgsPhase, nodes: [reversed] }, "bad.json")).toThrow(/ascend/u);
+  });
+
+  it("read a node's nTable as its n where the file leaves it out", () => {
+    const table = parsePhaseFile(mgsPhase, "fixtures/mgs1m-phase.json");
+    expect(table.nodes.every((n) => n.nTable === n.n)).toBe(true);
+  });
+
+  it.each([
+    ["an nTable outside the longwave kernel's n range", { n: 3.5, nTable: 3.3 }],
+    ["an nTable on a node whose own n lies inside it", { n: 1.5, nTable: 3.2 }],
+    ["an nTable inside the range but not at its nearer edge", { n: 3.5, nTable: 3 }],
+    ["an nTable at the farther edge", { n: 3.5, nTable: 0.4 }],
+  ])("refuse %s (decision-r08-t5d ruling 2)", (_, change) => {
+    const [node] = mgsPhase.nodes;
+    expect(() =>
+      parsePhaseFile({ ...mgsPhase, nodes: [{ ...node, ...change }] }, "bad.json"),
+    ).toThrow(/nTable/u);
+  });
+});
+
+/** An ice's real index at 550 nm. */
+function n550(key: string): number {
+  return refractiveIndex(key, 550, { phase: "solid" }).index.n;
+}
+
+/** A gamma distribution of r_eff (µm) at v_eff 0.1. */
+function gamma(effectiveRadiusUm: number) {
+  return { kind: "gamma", effectiveRadiusUm, effectiveVariance: 0.1 } as const;
+}
+
+/** MnS's phase table (decision-r08-t5d ruling 2's test material). */
+function mnsTable(): PhaseFileTable {
+  const file = resolveMaterial("MnS").file;
+  const table = file === undefined ? undefined : phaseFileOf(file);
+  if (table === undefined) {
+    throw new Error("MnS has no phase table");
+  }
+  return table;
+}
+
+/** A material's own particles, as a non-spherical mode of it resolves them. */
+function particlesOfKey(material: string, index?: ComplexIndex): NonSphericalParticles {
+  const resolved = resolveMaterial(material, { phase: "solid" });
+  const shape = resolved.file?.shape === "crystal" ? "crystal" : "nonSphericalMineral";
+  const own = particlesOf({ material, sizes: gamma(1) }, resolved, shape);
+  return index === undefined ? own : { ...own, index: () => index };
+}
+
+/**
+ * An ice's optics at 550 nm in a gamma mode of r_eff 10 µm: the crystals' test reads every ice's,
+ * and the notes' tests O₂'s and argon's again, each a Mie integral over the mode at the ice's own
+ * index.
+ */
+const iceOptics = memoised(
+  (key: string) => opticsOfParticles(particlesOfKey(key), gamma(10), 550),
+  (key) => key,
+);
+
+describe("every non-spherical file's phase basis (R08.T5.d)", () => {
+  it("gives every non-spherical mineral its own reduced TAMUdust2020 table over 380–780 nm", () => {
+    const minerals = MATERIAL_FILES.filter((file) => file.shape === "nonSphericalMineral");
+    expect(minerals.length).toBeGreaterThan(15);
+    for (const file of minerals) {
+      const table = phaseFileOf(file);
+      expect([file.key, table?.model]).toEqual([file.key, "tamudust2020"]);
+      expect(table?.nodes[0]?.wavelengthNm).toBe(380);
+      expect(table?.nodes.at(-1)?.wavelengthNm).toBe(780);
+    }
+  });
+
+  it("serves each mineral's own index at every wavelength by a kernel or its edge, never past", () => {
+    // Where the kernel-edge rule gives a model or a named analogue the table serves; the floor rule
+    // decides beyond that, from the mode.
+    for (const file of MATERIAL_FILES.filter((f) => f.shape === "nonSphericalMineral")) {
+      for (const [i, nm] of file.wavelengthsNm.entries()) {
+        const basis = kernelEdgeRule({ n: file.n[i] ?? Number.NaN, k: file.k[i] ?? Number.NaN });
+        expect([file.key, nm, basis.basis === "fallback"]).toEqual([file.key, nm, false]);
+      }
+    }
+  });
+
+  it("draws every crystal on water ice's table, as the model for H2O and a named analogue otherwise", () => {
+    expect(waterIceTable()).toBeDefined();
+    const crystals = MATERIAL_FILES.filter((file) => file.shape === "crystal");
+    expect(crystals.filter((file) => !isIce(file.key)).map((file) => file.key)).toEqual([]);
+    for (const file of crystals) {
+      const optics = iceOptics(file.key);
+      expect([file.key, optics.phaseModel, optics.phaseBasis]).toEqual([
+        file.key,
+        "yang2013",
+        file.key === "H2O" ? "model" : "analogue",
+      ]);
+    }
+  }, 300_000); // M2 worst 13.2 s, M3 18.8 s, desktop over 15 s (2026-10-15): 10× M2, CPU-bound
+
+  it("holds O2 and Ar among the ices (decision-r08-t5d ruling 3)", () => {
+    for (const key of ["O2", "Ar", "H2S", "N2", "CO"]) {
+      expect(ICE_KEYS.has(key)).toBe(true);
+    }
+  });
+});
+
+describe("the ices' expected g bias, by van Diedenhoven et al. 2014's eq. (16)", () => {
+  // eq. (16): g_RT(m₂) ÷ g_RT(m₁) = ((m₁ − ε)(m₂ + ε)) ÷ ((m₁ + ε)(m₂ − ε)), ε = 0.960251 for compact
+  // crystals (their §2c), with g_tot = (1 + g_RT) ÷ 2, water ice at 550 nm the base: Δg =
+  // (2g_water − 1)(C − 1) ÷ 2, g_water a cirrus mode's on Yang et al.'s table (r_eff 30 µm).
+  const epsilon = 0.960_251;
+  const water = once(
+    () =>
+      nonSphericalModeOptics(
+        { material: "H2O", form: { phase: "solid" }, sizes: gamma(30) },
+        550,
+        new Float64Array(0),
+      ).asymmetry,
+  );
+  it.each(Object.entries(ICE_ANALOGUE_ASYMMETRY_BIAS))(
+    "gives %s ice its recorded %f to 0.001",
+    (key, bias) => {
+      const m1 = n550("H2O");
+      const m2 = n550(key);
+      const ratio = ((m1 - epsilon) * (m2 + epsilon)) / ((m1 + epsilon) * (m2 - epsilon));
+      expect(Math.abs(((2 * water() - 1) * (ratio - 1)) / 2 - bias)).toBeLessThan(0.001);
+    },
+  );
+
+  it("finds the new ices' n at 550 nm inside the fit's 1.18–1.43", () => {
+    const outside = ["N2", "CO", "O2", "Ar"].filter((key) => n550(key) < 1.18 || n550(key) > 1.43);
+    expect(outside).toEqual([]);
+  });
+
+  it("records a bias for each new ice", () => {
+    const unrecorded = ["N2", "CO", "O2", "Ar"].filter(
+      (key) => ICE_ANALOGUE_ASYMMETRY_BIAS[key] === undefined,
+    );
+    expect(unrecorded).toEqual([]);
+  });
+
+  it("finds H2S's and NH4SH's n at 550 nm past the fit's 1.43", () => {
+    expect(["H2S", "NH4SH"].filter((key) => n550(key) <= 1.43)).toEqual([]);
+  });
+
+  it("records no bias for H2S or NH4SH, past the fit", () => {
+    expect(["H2S", "NH4SH"].filter((key) => key in ICE_ANALOGUE_ASYMMETRY_BIAS)).toEqual([]);
+  });
+
+  it("names O2 ice's analogue and its expected g, signed, in its note", () => {
+    const optics = iceOptics("O2");
+    expect(optics.phaseNote).toBe(
+      "O2 ice drawn on H2O ice's roughened 8-column table, a named analogue; its g expected +0.024 from H2O ice's",
+    );
+  });
+
+  it("names argon, an atomic solid, as solid Ar in its note", () => {
+    const optics = iceOptics("Ar");
+    expect(optics.phaseNote).toBe(
+      "solid Ar drawn on H2O ice's roughened 8-column table, a named analogue; its g expected +0.028 from H2O ice's",
+    );
+  });
+});
+
+describe("the kernel-edge rule (decision-r08-t5d ruling 2)", () => {
+  const small = gamma(0.3);
+  // On the longwave floor at 600 nm a 0.3 µm mode of n 2.8 already absorbs past the floor rule's
+  // ω 0.99; a 0.1 µm mode keeps it, and a 3 µm mode, within the table's reach, leaves it.
+  const tiny = gamma(0.1);
+  const coarse = gamma(3);
+
+  it("holds the ruling's constants", () => {
+    expect(KERNEL_EDGE_N).toEqual([0.4, 3.2]);
+    expect(KERNEL_K_MAX).toBe(4);
+    expect(KERNEL_EDGE_MODEL_EXCESS).toBe(0.05);
+    expect(KERNEL_EDGE_REFLECTANCE_TOLERANCE).toBe(0.2);
+  });
+
+  it("makes Cr a model at 582 nm, where its n of 3.22 lies within 0.05 of the edge", () => {
+    expect(refractiveIndex("Cr", 582).index.n).toBeGreaterThan(3.2);
+    const optics = opticsOfParticles(particlesOfKey("Cr"), small, 582);
+    expect([optics.phaseModel, optics.phaseBasis]).toEqual(["tamudust2020", "model"]);
+  });
+
+  it.each([380, 410])("makes MnS a named analogue at %i nm, naming its n and 3.2", (nm) => {
+    const { n } = refractiveIndex("MnS", nm).index;
+    const optics = opticsOfParticles(particlesOfKey("MnS"), small, nm);
+    expect([optics.phaseModel, optics.phaseBasis]).toEqual(["tamudust2020", "analogue"]);
+    expect(optics.phaseNote).toBe(
+      `MnS: n ${n.toFixed(3)} above the longwave kernel's 3.2, the hexahedra at n 3.2 stand in, a named analogue`,
+    );
+  });
+
+  it("names MnS's 3.513 at 380 nm", () => {
+    expect(opticsOfParticles(particlesOfKey("MnS"), small, 380).phaseNote).toContain("n 3.513");
+  });
+
+  it.each([420, 450])("makes MnS a model at %i nm", (nm) => {
+    const optics = opticsOfParticles(particlesOfKey("MnS"), small, nm);
+    expect([optics.phaseModel, optics.phaseBasis]).toEqual(["tamudust2020", "model"]);
+  });
+
+  it("draws MnS at 600 nm on the floor's table, below the longwave kernel's k floor", () => {
+    const index = refractiveIndex("MnS", 600).index;
+    expect(index.k).toBeLessThan(1e-3);
+    const optics = tableModeOptics(mnsTable(), radiusDistribution(tiny), index, 600);
+    expect(optics.floored).toBe(true);
+    expect(optics.tableAlbedo).toBeGreaterThanOrEqual(FLOOR_ALBEDO_MIN);
+  });
+
+  it("follows T5.c's floor rule for small MnS grains at 600 nm: a model", () => {
+    expect(opticsOfParticles(particlesOfKey("MnS"), tiny, 600).phaseBasis).toBe("model");
+  });
+
+  it("follows T5.c's floor rule for coarse MnS grains at 600 nm: the fallback, above n 1.70", () => {
+    const optics = opticsOfParticles(particlesOfKey("MnS"), coarse, 600);
+    expect(optics.phaseBasis).toBe("fallback");
+    expect(optics.phaseNote).toMatch(/the k-floor rule exceeded .* at n 2\.8\d\d above 1\.7/u);
+  });
+
+  it("gives MnS's table the fallback under a test index of 4.5 + 0.01i, naming n and the edge", () => {
+    const optics = opticsOfParticles(particlesOfKey("MnS", { n: 4.5, k: 0.01 }), small, 450);
+    expect(optics.phaseBasis).toBe("fallback");
+    expect(optics.phaseNote).toMatch(
+      /^MnS: n 4\.500 above the longwave kernel's 3\.2, its normal-incidence reflectance 32 % from the edge's; /u,
+    );
+  });
+
+  // Both rules on one mode: the worse basis wins, and both notes are kept.
+  it("keeps both notes in the fallback where the edge's analogue meets the floor's exit above 1.70", () => {
+    const optics = opticsOfParticles(particlesOfKey("MnS", { n: 3.4, k: 1e-5 }), coarse, 600);
+    expect(optics.phaseBasis).toBe("fallback");
+    expect(optics.phaseNote).toMatch(
+      /^MnS: n 3\.400 above the longwave kernel's 3\.2; the k-floor rule exceeded \(the floor's single-scattering albedo 0\.\d{4} < 0\.99\) at n 3\.400 above 1\.7; a Henyey–Greenstein /u,
+    );
+  }, 60_000); // M2 worst 2.0 s, M3 2.9 s, desktop over 15 s (2026-10-15): over 2× desktop
+
+  it("keeps the edge's note alone for a small grain the floor rule keeps", () => {
+    const optics = opticsOfParticles(particlesOfKey("MnS", { n: 3.4, k: 1e-5 }), tiny, 600);
+    expect(optics.phaseBasis).toBe("analogue");
+    expect(optics.phaseNote).toBe(
+      "MnS: n 3.400 above the longwave kernel's 3.2, the hexahedra at n 3.2 stand in, a named analogue",
+    );
+  });
+
+  // The two analogues cannot meet: an edge analogue above the kernel lies past n 1.70, where the
+  // floor's exit is the fallback, and below it a floored index (k under 1E-3) moves the reflectance
+  // by more than 20% wherever n lies more than 0.05 under 0.4.
+  it("leaves a floored index below the edge no analogue tier: the fallback past 0.05", () => {
+    expect(kernelEdgeRule({ n: 0.345, k: 1e-4 }).basis).toBe("fallback");
+    expect(kernelEdgeRule({ n: 0.355, k: 1e-4 }).basis).toBe("model");
+  });
+
+  it("gives the fallback to a k above the longwave kernel's 4", () => {
+    expect(kernelEdgeRule({ n: 3, k: 4.46 })).toEqual({
+      basis: "fallback",
+      clause: "k 4.460 above the longwave kernel's 4",
+    });
+  });
+
+  it("makes an index within 0.05 of the edge a model", () => {
+    expect(kernelEdgeRule({ n: 3.21, k: 3.3 })).toEqual({ basis: "model" });
+  });
+
+  it("holds an index below the kernel at its lower edge, 0.4", () => {
+    expect(kernelEdgeRule({ n: 0.3, k: 2 })).toEqual({
+      basis: "analogue",
+      nEdge: 0.4,
+      clause: "n 0.300 below the longwave kernel's 0.4",
+    });
+  });
+
+  it("states the renderer's own constants in each table held at the edge, as the tool writes them", () => {
+    // The tool keeps its own copies (its KERNEL_EDGE); this catches drift.
+    const held = PHASE_FILES.filter((table) => table.nodes.some((node) => node.nTable !== node.n));
+    expect(held.map((table) => table.key)).toContain("MnS");
+    for (const table of held) {
+      expect(table.reduction).toContain(
+        `Where n lies past the longwave kernel's ${KERNEL_EDGE_N[0]}–${KERNEL_EDGE_N[1]}, the table is made at the nearer edge (nTable), a model within ${KERNEL_EDGE_MODEL_EXCESS} of it and a named analogue while the normal-incidence reflectance moves by at most ${100 * KERNEL_EDGE_REFLECTANCE_TOLERANCE}%`,
+      );
+      for (const node of table.nodes.filter((n) => n.nTable !== n.n)) {
+        expect(node.nTable).toBe(node.n > KERNEL_EDGE_N[1] ? KERNEL_EDGE_N[1] : KERNEL_EDGE_N[0]);
+      }
+    }
+  });
+});
+
+describe("the reasons as player text (R08.T10.d)", () => {
+  /**
+   * A citation in player text: an author, a year, a data set's name, or an author's equation or
+   * condition number, which no reason on the plate holds.
+   */
+  const CITATION = /et al\.|Diedenhoven|TAMUdust|\b(?:19|20)\d\d\b|(?:equation|condition|eq\.) \(/u;
+
+  it("cites no paper or data set in an ice's analogue, a fallback with no table, or a kernel's edge", () => {
+    const noTable: NonSphericalParticles = {
+      ...particlesOfKey("MnS"),
+      material: "an absorbing mineral",
+      index: () => ({ n: 1.5, k: 0.01 }),
+      table: undefined,
+    };
+    const notes = [
+      iceOptics("O2").phaseNote,
+      iceOptics("Ar").phaseNote,
+      opticsOfParticles(noTable, gamma(3), 550).phaseNote,
+      opticsOfParticles(particlesOfKey("MnS"), gamma(0.3), 380).phaseNote,
+      opticsOfParticles(particlesOfKey("MnS", { n: 4.5, k: 0.01 }), gamma(0.3), 450).phaseNote,
+    ];
+    expect([
+      notes.every((note) => note !== undefined),
+      notes.filter((note) => CITATION.test(note ?? "")),
+    ]).toEqual([true, []]);
+  });
+});

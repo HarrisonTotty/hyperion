@@ -1,0 +1,23 @@
+# generator_version = 31
+world earth_coast: level 8, classes 0:1 2:1 12:0
+default 3 texels complete true
+texel 2373 16/16 0000ff -
+texel 2384 16/16 02bd40 -
+texel 2385 16/16 54ab00 -
+refined 3 texels 1 refined complete true
+texel 2373 16/16 0000ff -
+texel 2384 16/16 02bd40 -
+texel 2385 16/16 54ab00 -
+fine 1 0000ff/- 01fe00/- 05fa00/- 03fc00/- 0000ff/- 01fe00/- 04fb00/- 03fc00/- 0000ff/- 01fe00/- 03fc00/- 03fc00/- 0000ff/- 01fe00/- 03fc00/- 03fc00/-
+world two_crusts: level 7, classes 1:0 1:1
+default 3 texels complete true
+texel 4912 4/4 807f 0000
+texel 4913 4/4 ff00 0000
+texel 4916 4/4 00ff 0000
+refined 3 texels 3 refined complete true
+texel 4912 4/4 807f 0000
+texel 4913 4/4 ff00 0000
+texel 4916 4/4 00ff 0000
+fine 0 00ff/0000 ff00/0000 00ff/0000 ff00/0000
+fine 1 ff00/0000 ff00/0000 ff00/0000 ff00/0000
+fine 2 00ff/0000 00ff/0000 00ff/0000 00ff/0000

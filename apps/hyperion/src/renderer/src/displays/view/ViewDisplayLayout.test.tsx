@@ -11,6 +11,7 @@ import { fakeViewEngineSource } from "../../test/fakeViewEngine";
 import { stubMatchMedia } from "../../test/stubMatchMedia";
 import {
   COMPACT_VIEW_PX,
+  type LaidOutBoxPx,
   type LaidOutPx,
   nominalStore,
   renderViewDisplay,
@@ -25,6 +26,9 @@ import {
 } from "../../view/engine/status";
 import { NO_VIEW_DRAWN, PHOTOREAL_NOT_CREATED } from "./styleRefusals";
 import type { ViewEngineSource } from "./useViewEngine";
+import { CENTRE_CLEAR_REM, STAGE_INSET_REM, STUB_REASON } from "./viewRoom";
+import { describedText, statusLine } from "../../test/statusLine";
+import STYLES from "../../styles.css?raw";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -33,6 +37,8 @@ afterEach(() => {
 async function setup(
   options: {
     readonly viewPx?: LaidOutPx;
+    readonly stagePx?: LaidOutPx;
+    readonly blockPx?: () => LaidOutBoxPx;
     readonly store?: GraphicsStatusStore;
     readonly source?: ViewEngineSource;
   } = {},
@@ -43,6 +49,8 @@ async function setup(
     source: options.source ?? fake.source,
     engines: fake.engines,
     ...(options.viewPx === undefined ? {} : { viewPx: options.viewPx }),
+    ...(options.stagePx === undefined ? {} : { stagePx: options.stagePx }),
+    ...(options.blockPx === undefined ? {} : { blockPx: options.blockPx }),
   });
   await settle();
   view.advance(100);
@@ -102,7 +110,9 @@ function refusingMaterialsSource(): ViewEngineSource {
 
 /** The style's fault standing under the row, or `null`. */
 function standing(): HTMLElement | null {
-  return screen.queryByText(PHOTOREAL_NOT_CREATED, { selector: ".view-folds__standing" });
+  return screen.queryByText(statusLine(PHOTOREAL_NOT_CREATED), {
+    selector: ".view-folds__standing",
+  });
 }
 
 /**
@@ -252,7 +262,7 @@ describe("VIEW's full layout (R07.T19.b)", () => {
       region("Exposure meter PRIMARY"),
       document.activeElement ===
         within(screen.getByRole("region", { name: "Exposure PRIMARY" })).getByRole("button", {
-          name: "INHIBIT",
+          name: "8 INHIBIT",
         }),
     ]).toEqual(["LIT", null, true]);
   });
@@ -388,7 +398,8 @@ describe("VIEW's compact layout (R07.T19.b)", () => {
       "EASED CAMERA MOVES",
     ];
     const full = await setup();
-    const fullOrder = (await tabOrder(full, 24)).filter((name) => shared.includes(name));
+    // 27: the STYLE panel's BASELINE row (R10.T12.a) adds three stops ahead of EXPOSURE.
+    const fullOrder = (await tabOrder(full, 27)).filter((name) => shared.includes(name));
     full.resizeView(COMPACT_VIEW_PX);
     const compactOrder = (await tabOrder(full, 24)).filter((name) => shared.includes(name));
     expect([fullOrder, compactOrder]).toEqual([shared, shared]);
@@ -516,7 +527,7 @@ describe("VIEW's compact layout (R07.T19.b)", () => {
     const foldedLines = [onShow(PHOTOREAL_NOT_CREATED), onShow(NO_VIEW_DRAWN)];
     await view.user.click(disclosure("STYLE"));
     const reason = within(screen.getByRole("region", { name: "Style PRIMARY" })).getByText(
-      NO_VIEW_DRAWN,
+      statusLine(NO_VIEW_DRAWN),
     );
     expect([faulted, foldedLines, reason.classList.contains("view-style__reason--fault")]).toEqual([
       true,
@@ -532,6 +543,52 @@ describe("VIEW's compact layout (R07.T19.b)", () => {
       "CAMERA",
       "STYLE",
       "EXPOSURE",
+    ]);
+  });
+});
+
+/**
+ * The stops from the instrument's list through its first preset, as Tab reaches them, a fold
+ * row's disclosure button marked as one, since the place's `CAMERA` tab shares its name.
+ */
+async function placeStops(view: ViewDisplayHarness): Promise<string[]> {
+  screen.getByRole("application", { name: /PRIMARY/ }).focus();
+  const stops: string[] = [];
+  for (let step = 0; step < 40 && stops.at(-1) !== "1 SEAT"; step += 1) {
+    // Each Tab moves on from where the last left the focus.
+    // oxlint-disable-next-line no-await-in-loop
+    await view.user.tab();
+    const focused = document.activeElement;
+    const name = focused?.getAttribute("aria-label") ?? focused?.textContent ?? "";
+    if (stops.length > 0 || name === "Marks in view") {
+      stops.push(focused?.hasAttribute("aria-expanded") === true ? `${name} (fold)` : name);
+    }
+  }
+  return stops;
+}
+
+describe("an instrument's place's tabs in both layouts (R10.T12.d; guide draft D2)", () => {
+  it("reaches the chosen page's tab alone after the list and before the presets in the full layout", async () => {
+    const view = await setup();
+    await openInstrument(view, "INSTRUMENT 1");
+    await controlsAt(view, "INSTRUMENT 1");
+    expect(await placeStops(view)).toEqual(["Marks in view", "CAMERA", "1 SEAT"]);
+  });
+
+  it("reaches the chosen page's tab after the fold row and before the presets in the compact layout", async () => {
+    const view = await compact();
+    await view.user.click(disclosure("Instruments"));
+    await openInstrument(view, "INSTRUMENT 1");
+    await controlsAt(view, "INSTRUMENT 1");
+    // Folding INSTRUMENTS opens the camera panel's place again.
+    await view.user.click(disclosure("Instruments"));
+    expect(await placeStops(view)).toEqual([
+      "Marks in view",
+      "CAMERA (fold)",
+      "STYLE (fold)",
+      "EXPOSURE (fold)",
+      "CAMERA",
+      "1 SEAT",
     ]);
   });
 });
@@ -664,5 +721,392 @@ describe("VIEW's list without an own ship (R07.T19.b)", () => {
     const targets = screen.getByRole("region", { name: "Targets PRIMARY" });
     expect(within(targets).getByText("RANGE")).toBeInTheDocument();
     expect(within(targets).queryByText("FROM CAMERA")).not.toBeInTheDocument();
+  });
+});
+
+describe("VIEW's SCENE selector at 150% interface scale (R10.T16's batch review, D-D)", () => {
+  it("wraps its row between its buttons", () => {
+    expect(STYLES).toMatch(/\.view-display__bar \.preset-buttons \{[^}]*flex-wrap: wrap;/u);
+  });
+
+  it("keeps each button's label on one line", () => {
+    expect(STYLES).toMatch(
+      /\.view-display__bar \.preset-buttons__button \{[^}]*white-space: nowrap;/u,
+    );
+  });
+});
+
+/** The primary's upper plate on the stage. */
+function upperPlate(): Element {
+  const plate = document.querySelector(".view__overlay > .view-label");
+  if (plate === null) {
+    throw new Error("the stage shows no upper plate");
+  }
+  return plate;
+}
+
+async function closeInstrument(view: ViewDisplayHarness, name: string): Promise<void> {
+  await view.user.click(
+    within(screen.getByRole("group", { name })).getByRole("button", { name: "CLOSE" }),
+  );
+  view.advance(300);
+}
+
+function controlsButton(name: string): HTMLElement {
+  return within(screen.getByRole("group", { name: "CONTROLS" })).getByRole("button", { name });
+}
+
+/** The `CONTROLS` view, by its pressed button's name. */
+function controlsView(): string | null {
+  return (
+    within(screen.getByRole("group", { name: "CONTROLS" }))
+      .getAllByRole("button")
+      .find((button) => button.getAttribute("aria-pressed") === "true")?.textContent ?? null
+  );
+}
+
+/** The target selected on the `Targets` list of the view `name`, by its row's name, or `null`. */
+function selectedTarget(name: string): string | null {
+  const [row] = within(screen.getByRole("region", { name: `Targets ${name}` })).queryAllByRole(
+    "option",
+    { selected: true },
+  );
+  return row?.getAttribute("aria-label") ?? null;
+}
+
+/** Sets the interface scale's rem, as the scale setting does, and fires the window's resize. */
+function scaleTo(view: ViewDisplayHarness, remPx: number): void {
+  act(() => {
+    document.documentElement.style.fontSize = `${String(remPx)}px`;
+    window.dispatchEvent(new Event("resize"));
+  });
+  view.advance(100);
+}
+
+describe("VIEW's room for its slots and plates (R10.T12.b)", () => {
+  /** A stage with room for INSTRUMENT 1 beside the plates, but not for INSTRUMENT 2 below it. */
+  const ONE_SLOT_HIGH = { widthPx: 1000, heightPx: 400 } as const;
+
+  /** A stage too narrow for any slot beside the plates' least width at 16 px to the rem. */
+  const NARROW = { widthPx: 800, heightPx: 720 } as const;
+
+  afterEach(() => {
+    document.documentElement.style.fontSize = "";
+  });
+
+  /** Both slots opened on the full stage, which then has room for INSTRUMENT 1 alone. */
+  async function withStub(): Promise<ViewDisplayHarness> {
+    const view = await setup();
+    await openInstrument(view, "INSTRUMENT 1");
+    await openInstrument(view, "INSTRUMENT 2");
+    view.resizeStage(ONE_SLOT_HIGH);
+    view.advance(100);
+    return view;
+  }
+
+  /** INSTRUMENT 1 opened, made the CONTROLS view, and its camera set to SEAT. */
+  async function instrumentAtSeat(view: ViewDisplayHarness): Promise<void> {
+    await openInstrument(view, "INSTRUMENT 1");
+    await controlsAt(view, "INSTRUMENT 1");
+    await view.user.keyboard("1");
+    view.advance(300);
+  }
+
+  describe("INSTRUMENT 2's stub", () => {
+    it("stands INSTRUMENT 2 as its stub, with its CLOSE, where the stage holds INSTRUMENT 1 alone", async () => {
+      await withStub();
+      expect(
+        within(screen.getByRole("region", { name: "INSTRUMENT 2" })).getByRole("button", {
+          name: "CLOSE",
+        }),
+      ).toBeInTheDocument();
+    });
+
+    it("states in the stub why INSTRUMENT 2 is not drawn", async () => {
+      await withStub();
+      expect(describedText(screen.getByRole("region", { name: "INSTRUMENT 2" }))).toBe(STUB_REASON);
+    });
+
+    it("draws no INSTRUMENT 2 canvas while it stands as its stub", async () => {
+      await withStub();
+      expect(screen.queryByRole("application", { name: /INSTRUMENT 2/ })).toBeNull();
+    });
+
+    it("keeps INSTRUMENT 1 drawn beside the stub", async () => {
+      await withStub();
+      expect(canvasOf("INSTRUMENT 1")).toBeInTheDocument();
+    });
+
+    it("closes INSTRUMENT 2 from its stub's CLOSE", async () => {
+      const view = await withStub();
+      await view.user.click(
+        within(screen.getByRole("region", { name: "INSTRUMENT 2" })).getByRole("button", {
+          name: "CLOSE",
+        }),
+      );
+      view.advance(100);
+      expect(
+        within(screen.getByRole("group", { name: "INSTRUMENT 2" })).getByRole("button", {
+          name: "CLOSE",
+        }),
+      ).toHaveAttribute("aria-pressed", "true");
+    });
+  });
+
+  describe("a slot held on a change of interface scale", () => {
+    /** INSTRUMENT 1 at SEAT on a stage that holds it at 100% but not at 150%, then at 150%. */
+    async function heldAt150(): Promise<ViewDisplayHarness> {
+      const view = await setup({ stagePx: { widthPx: 1000, heightPx: 720 } });
+      await instrumentAtSeat(view);
+      // The focus leaves the INSTRUMENTS panel, which the compact layout then folds.
+      act(() => {
+        canvasOf("PRIMARY").focus();
+      });
+      scaleTo(view, 24);
+      return view;
+    }
+
+    it("states the held slot under the folded INSTRUMENTS row at 150%", async () => {
+      await heldAt150();
+      expect(
+        screen.getByText(
+          statusLine("NOT AVAILABLE: no room for INSTRUMENT 1 at this window size"),
+          { selector: ".view-instruments-panel__standing" },
+        ),
+      ).toBeInTheDocument();
+    });
+
+    it("draws no canvas for the held slot", async () => {
+      await heldAt150();
+      expect(screen.queryByRole("application", { name: /INSTRUMENT 1/ })).toBeNull();
+    });
+
+    it("returns the slot at 100% with its camera at SEAT and its style as they were", async () => {
+      const view = await setup({
+        store: await nominalStore(),
+        stagePx: { widthPx: 1000, heightPx: 720 },
+      });
+      await instrumentAtSeat(view);
+      await toggleStyle(view);
+      act(() => {
+        canvasOf("PRIMARY").focus();
+      });
+      scaleTo(view, 24);
+      scaleTo(view, 16);
+      await settle();
+      view.advance(300);
+      expect(canvasOf("INSTRUMENT 1")).toHaveAccessibleName(
+        "VIEW, PHOTOREALISTIC, INSTRUMENT 1, SEAT",
+      );
+    });
+
+    it("returns INSTRUMENT 2 whole at 100% where both slots stood with less than a line to spare", async () => {
+      // Both slots stand in 532 of the stage's 541 px at 100%; both are held at 150%.
+      const view = await setup({ stagePx: { widthPx: 1000, heightPx: 541 } });
+      await openInstrument(view, "INSTRUMENT 1");
+      await openInstrument(view, "INSTRUMENT 2");
+      act(() => {
+        canvasOf("PRIMARY").focus();
+      });
+      scaleTo(view, 24);
+      scaleTo(view, 16);
+      expect(canvasOf("INSTRUMENT 2")).toBeInTheDocument();
+    });
+
+    it("returns the slot at 100% with its target still selected", async () => {
+      const view = await setup({ stagePx: { widthPx: 1000, heightPx: 720 } });
+      await openInstrument(view, "INSTRUMENT 1");
+      await controlsAt(view, "INSTRUMENT 1");
+      const rows = within(
+        screen.getByRole("region", { name: "Targets INSTRUMENT 1" }),
+      ).getAllByRole("option");
+      await view.user.click(rows.at(-1) ?? document.body);
+      view.advance(100);
+      const chosen = selectedTarget("INSTRUMENT 1");
+      act(() => {
+        canvasOf("PRIMARY").focus();
+      });
+      scaleTo(view, 24);
+      scaleTo(view, 16);
+      view.advance(300);
+      expect([chosen !== null, selectedTarget("INSTRUMENT 1")]).toEqual([true, chosen]);
+    });
+
+    it("lets the upper plate take the stage's full width at 150%", async () => {
+      await heldAt150();
+      expect(upperPlate()).not.toHaveClass("view-label--beside");
+    });
+
+    it("stands the upper plate whole at 150%, with no scroll", async () => {
+      await heldAt150();
+      expect([
+        screen.queryByRole("region", { name: "PRIMARY lines" }),
+        screen.queryByRole("region", { name: "PRIMARY label block" }),
+      ]).toEqual([null, null]);
+    });
+  });
+
+  describe("the focus over the stage as the room changes", () => {
+    it("gives the PRIMARY canvas the focus once the instrument canvas that held it is held", async () => {
+      const view = await setup({ stagePx: { widthPx: 1000, heightPx: 720 } });
+      await openInstrument(view, "INSTRUMENT 1");
+      act(() => {
+        canvasOf("INSTRUMENT 1").focus();
+      });
+      scaleTo(view, 24);
+      expect(canvasOf("PRIMARY")).toHaveFocus();
+    });
+
+    it("gives the PRIMARY canvas the focus once the label block scroll that held it stops scrolling", async () => {
+      // The plate laid out taller than the 704 px it has: everything under VIEW scrolls.
+      const block = { leftPx: 0, topPx: 0, widthPx: 300, heightPx: 800 };
+      const view = await setup({ blockPx: () => block });
+      view.advance(300);
+      act(() => {
+        screen.getByRole("region", { name: "PRIMARY label block" }).focus();
+      });
+      block.heightPx = 100;
+      view.advance(300);
+      expect(canvasOf("PRIMARY")).toHaveFocus();
+    });
+
+    it("leaves the focus on the label block scroll while it still scrolls", async () => {
+      const block = { leftPx: 0, topPx: 0, widthPx: 300, heightPx: 800 };
+      const view = await setup({ blockPx: () => block });
+      view.advance(300);
+      const scroll = screen.getByRole("region", { name: "PRIMARY label block" });
+      act(() => {
+        scroll.focus();
+      });
+      view.advance(300);
+      expect(scroll).toHaveFocus();
+    });
+  });
+
+  describe("the plates beside the slots", () => {
+    it("lets the upper plate take the stage's full width with no slot open", async () => {
+      await setup();
+      expect(upperPlate()).not.toHaveClass("view-label--beside");
+    });
+
+    it("sets the upper plate beside INSTRUMENT 1 while it stands", async () => {
+      const view = await setup();
+      await openInstrument(view, "INSTRUMENT 1");
+      expect(upperPlate()).toHaveClass("view-label--beside");
+    });
+
+    it("keeps the upper plate beside the slots while INSTRUMENT 2 stands as its stub", async () => {
+      await withStub();
+      expect(upperPlate()).toHaveClass("view-label--beside");
+    });
+
+    it("lets the upper plate take the full width once INSTRUMENT 1 is held", async () => {
+      const view = await setup();
+      await openInstrument(view, "INSTRUMENT 1");
+      view.resizeStage(NARROW);
+      view.advance(100);
+      expect(upperPlate()).not.toHaveClass("view-label--beside");
+    });
+
+    it("lets the upper plate take the full width once INSTRUMENT 1 closes", async () => {
+      const view = await setup();
+      await openInstrument(view, "INSTRUMENT 1");
+      await closeInstrument(view, "INSTRUMENT 1");
+      expect(upperPlate()).not.toHaveClass("view-label--beside");
+    });
+  });
+
+  describe("the plates in columns (R10.T12.c)", () => {
+    /** The floor's stage, 1280 × 720 at 100%: 51 × 33.5 rem, as measured. */
+    const FLOOR_STAGE: LaidOutPx = { widthPx: 816, heightPx: 536 };
+
+    it("stands the upper plate in columns with no slot open, on the floor's stage", async () => {
+      await setup({ stagePx: FLOOR_STAGE });
+      expect([
+        upperPlate().classList.contains("view-label--columns"),
+        upperPlate().classList.contains("view-label--beside"),
+      ]).toEqual([true, false]);
+    });
+
+    it("stands it stacked beside INSTRUMENT 1 while it stands", async () => {
+      const view = await setup({ stagePx: FLOOR_STAGE });
+      await openInstrument(view, "INSTRUMENT 1");
+      expect([
+        upperPlate().classList.contains("view-label--columns"),
+        upperPlate().classList.contains("view-label--beside"),
+      ]).toEqual([false, true]);
+    });
+
+    it("stands it in columns again once INSTRUMENT 1 closes", async () => {
+      const view = await setup({ stagePx: FLOOR_STAGE });
+      await openInstrument(view, "INSTRUMENT 1");
+      await closeInstrument(view, "INSTRUMENT 1");
+      expect(upperPlate()).toHaveClass("view-label--columns");
+    });
+
+    it("stands it stacked on a stage 40 rem tall or taller, as 80 × 45 rem's", async () => {
+      await setup();
+      expect(upperPlate()).not.toHaveClass("view-label--columns");
+    });
+  });
+
+  describe("CONTROLS while its instrument is held", () => {
+    /** INSTRUMENT 1 opened and made the CONTROLS view, then held on a narrow stage. */
+    async function heldControls(): Promise<ViewDisplayHarness> {
+      const view = await setup();
+      await openInstrument(view, "INSTRUMENT 1");
+      await controlsAt(view, "INSTRUMENT 1");
+      view.resizeStage(NARROW);
+      view.advance(100);
+      return view;
+    }
+
+    it("returns CONTROLS to PRIMARY", async () => {
+      await heldControls();
+      expect(controlsView()).toBe("PRIMARY");
+    });
+
+    it("holds the held instrument's CONTROLS button back", async () => {
+      await heldControls();
+      expect(controlsButton("INSTRUMENT 1")).toHaveAttribute("aria-disabled", "true");
+    });
+
+    it("gives CONTROLS back to the instrument as it returns", async () => {
+      const view = await heldControls();
+      view.resizeStage({ widthPx: 1280, heightPx: 720 });
+      view.advance(100);
+      expect(controlsView()).toBe("INSTRUMENT 1");
+    });
+  });
+});
+
+describe("VIEW's plates in columns in the stylesheet (R10.T12.c)", () => {
+  it("ends each plate in columns CENTRE_CLEAR_REM short of the picture's centre, past its inset", () => {
+    const shortOfHalfRem = String(STAGE_INSET_REM + CENTRE_CLEAR_REM).replace(".", "\\.");
+    expect(STYLES).toMatch(
+      new RegExp(
+        `\\.view-label--columns \\{\\s*max-width: calc\\(50% - ${shortOfHalfRem}rem\\);\\s*\\}`,
+        "u",
+      ),
+    );
+  });
+
+  it("starts the lower plate in columns CENTRE_CLEAR_REM past the picture's centre", () => {
+    expect(STYLES).toMatch(
+      new RegExp(
+        `\\.view-label--lower\\.view-label--columns \\{\\s*left: calc\\(50% \\+ ${String(CENTRE_CLEAR_REM)}rem\\);\\s*\\}`,
+        "u",
+      ),
+    );
+  });
+});
+
+describe("VIEW's room in the stylesheet (R10.T12.b)", () => {
+  it("narrows the plates beside the slots by a slot's width and its three insets", () => {
+    expect(STYLES).toMatch(/\.view-label--beside \{\s*max-width: calc\(100% - 36\.5rem\);\s*\}/u);
+  });
+
+  it("lets a plate's scroll take the pointer, which the overlay passes through", () => {
+    expect(STYLES).toMatch(/\.view-label__scroll \{[^}]*pointer-events: auto;/u);
   });
 });

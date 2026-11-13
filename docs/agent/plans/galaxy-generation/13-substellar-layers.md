@@ -1076,3 +1076,16 @@ Result<CoolingState, EvaluateGiantCoolingError>`, as P06.T13 returned a `Result`
   loss box of `the_default_saturates_few_galaxies_and_loses_almost_nothing` grows to 768 ly, since
   the worst seed's centre saturates past 128 ly. The brainstorm's "the Milky Way's does not reach
   it" no longer holds; the tests hold the measured state until the owner rules.
+- **P13.T4's fixture-centre test without the walk, as built (lane `perf-native-tests`,
+  2026-10-11, at `GENERATOR_VERSION` 21; no output moves; `decision-test-coverage.md` §3.2, Q6's
+  ruling).** `the_fixture_s_centre_does_not_saturate` asserts only the rogue planets' expected count
+  at the fixture's origin, 0.5 ly, within 0.4–0.8 of C × V, so it now calls `expected_counts` with
+  the query's centre, radius and request, the arguments the census passes, instead of running the
+  query. Checked once before the change, at this query: the census's `expected()` of
+  `range_query(…)` equals `expected_counts(…)` bit for bit in every layer (A 6.065146960030446,
+  B 1.0716865581996697, C 1.5075140161251084, D 0.30925436553905117, E 0.08551729045460268, brown
+  dwarfs 2.362171702697138, rogue planets 272.8308316615191, `0x40710d4b1623eb4b`), the census
+  adding no source's count to the grid's. What goes is the unasserted walk of the rogue-planet
+  cells at the fixture's origin; the same code walks denser cells in
+  `a_query_near_the_centre_counts_the_saturated_density` (fast) and
+  `a_query_at_the_very_centre_counts_the_saturated_density` (slow) on the saturated galaxy.

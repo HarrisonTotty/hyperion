@@ -66,6 +66,7 @@ fn write_context(w: &mut GoldenWriter, name: &str, context: &SystemContext) {
     w.f64("strip_radius_m", context.strip_radius().value());
     for ((slot, star), zero_age) in context
         .hierarchy()
+        .unwrap()
         .stars()
         .iter()
         .zip(context.stars())

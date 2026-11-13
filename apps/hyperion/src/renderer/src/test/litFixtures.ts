@@ -7,6 +7,7 @@
  */
 import type { HostDiscDto } from "@hyperion/protocol";
 
+import bakeSpectra from "../../../../../../packages/protocol/fixtures/bake_spectra.json" with { type: "json" };
 import type { BodyAppearance } from "../view/appearance/bodyAppearance";
 import { type BodyPhotometry, PROVISIONAL_PHOTOMETRY } from "../view/appearance/fromWire";
 import type { PhaseTemplateId } from "../view/appearance/law";
@@ -24,6 +25,26 @@ export function aHostDisc(
   overrides: Partial<HostDiscDto> & { readonly absoluteV?: number } = {},
 ): HostDiscDto {
   return sunLikeHostDisc(overrides);
+}
+
+/** A sun's row of R06's fixture, `packages/protocol/fixtures/bake_spectra.json`. */
+export type BakeSpectraRow = (typeof bakeSpectra.suns)[number];
+
+/**
+ * The Sun's row of R06's fixture: `solar_colour()`, 5,772 K and log g 4.438 on the main sequence,
+ * which `hyperion-fit`'s `star_colour` test holds to R06's table and the client's copies of R06's
+ * solar photometry are held to (plan R08, R08.T6.j).
+ *
+ * @throws Error if the fixture holds no such row.
+ */
+export function solarFixtureRow(): BakeSpectraRow {
+  const row = bakeSpectra.suns.find(
+    (s) => s.teff_k === 5_772 && s.log_g === 4.438 && s.grid === "MainSequence",
+  );
+  if (row === undefined) {
+    throw new Error("bake_spectra.json holds no 5,772 K, log g 4.438 main-sequence sun");
+  }
+  return row;
 }
 
 /** One value in each of Johnson B, V and R. */

@@ -6,7 +6,7 @@
 //! from [`FIRST_NODE_LY`] to the root cube's edge on distance nodes spaced geometrically,
 //! [`BandSpec::nodes_per_decade`] a decade (twelve at [`BandSpec::STANDARD`]), with every layer's
 //! complete-to radius inserted as a node of its own. Its extinction at every node comes from one
-//! [`profile`] march ([`NoiseMode::Realised`], [`BAND_PROFILE_QUALITY`], with the modifiers near
+//! [`profile`] march ([`NoiseMode::Realised`], [`SIGHTLINE_QUALITY`], with the modifiers near
 //! the ray). At each node, for each density component and layer, the band takes the component's
 //! density times the layer's share of its systems times their luminosity function
 //! ([`LuminosityTables::get_at`], read at the node's light age through
@@ -122,12 +122,10 @@
 
 use std::ops::Range;
 
-use core::num::NonZeroU32;
-
 use crate::coords::{GalacticDisplacement, GalacticPosition, ROOT_HALF_WIDTH_LY, UnitVector};
 use crate::galaxy::consts::LIGHT_YEARS_PER_PARSEC;
 use crate::galaxy::fields::{ComponentId, MAX_COMPONENTS};
-use crate::galaxy::gas::extinction::{NoiseMode, Quality, profile};
+use crate::galaxy::gas::extinction::{NoiseMode, SIGHTLINE_QUALITY, profile};
 use crate::galaxy::gas::modifiers::GasModifier;
 use crate::galaxy::imf::MassBand;
 use crate::galaxy::{Galaxy, PointLy};
@@ -147,11 +145,6 @@ use super::dgl::Illumination;
 use super::eye::{REFERENCE_SP_RATIO, illuminance_of_magnitude};
 use super::luminosity::LuminosityTables;
 use crate::tables::star_colour::LUMINANCE_RGB;
-
-/// The quality of each ray's extinction profile (Design note 14): `Budget(256)`, the value of plan
-/// 07's `SIGHTLINE_QUALITY` (P07.T10.c), as R06.T9.a fixes it.
-pub const BAND_PROFILE_QUALITY: Quality =
-    Quality::Budget(NonZeroU32::new(256).expect("256 is not zero"));
 
 /// The nearest distance a ray's light is taken from, ly (Design note 14).
 ///
@@ -996,7 +989,7 @@ impl Reach {
 const NOWHERE_LY: [f64; 1] = [0.0];
 
 /// A face's rows of a band, marched (R06.T9.f; see the [module](self) documentation): each ray's
-/// five sums ([`Sums`]) of a reply complete to each radius the march keeps, per layer, from which
+/// five sums (`Sums`) of a reply complete to each radius the march keeps, per layer, from which
 /// [`sum_rows`] gives any of those replies' texels; and, where a camera's deeper cut set the
 /// query's, the same of the light fainter than the eye's cut, the eye's background (R06.T9.j).
 ///
@@ -1555,7 +1548,7 @@ impl Rays {
             direction,
             &self.nodes,
             NoiseMode::Realised,
-            BAND_PROFILE_QUALITY,
+            SIGHTLINE_QUALITY,
             &self.modifiers,
             &mut ctx.noise,
             &mut self.a_v,
@@ -1931,7 +1924,9 @@ fn march_rows_through(
 ///
 /// - If the march does not keep a layer's radius of `complete_to` ([`BandMarch::holds`]).
 /// - For a census of shells, if `complete_to` is not the radii its completeness states, or if some
-///   layer is not yet final and the march is not at the census's band or from its observer.
+///   layer lists by its stars' texels (one not yet final, or C to E at a synthetic ceiling,
+///   [`Completeness::lists_by_texel`](super::census::Completeness::lists_by_texel)) and the march
+///   is not at the census's band or from its observer.
 pub fn sum_rows(
     march: &BandMarch,
     census: &SkyCensus,
@@ -1944,11 +1939,12 @@ pub fn sum_rows(
             "a census of shells is summed at the radii it is complete to"
         );
         assert!(
-            completeness.is_final()
+            !completeness.lists_by_texel()
                 || (completeness.band_spec() == march.spec
                     && completeness.observer().is_same_point(&march.origin)),
-            "a census of shells not yet final lists by its query's band, {:?}, from its observer, \
-             so its band is marched at it from there, not at {:?}",
+            "a census of shells not yet final lists by its query's band, {:?}, from its observer \
+             (and one at a synthetic ceiling at every reply), so its band is marched at it from \
+             there, not at {:?}",
             completeness.band_spec(),
             march.spec
         );
@@ -2198,27 +2194,35 @@ fn band_rows_through(
 
 #[cfg(test)]
 mod tests {
+    use core::num::NonZeroU32;
     use std::sync::OnceLock;
 
     use hyperion_testkit::float::{bits, bits_f32};
 
     use super::*;
     use crate::coords::GalacticPosition;
+    use crate::galaxy::ages::FieldShareRules;
+    use crate::galaxy::catalogue_classes::{CatalogueClassSource, NoClassCellCache};
+    use crate::galaxy::features::catalogue::NoFeatureCache;
     use crate::galaxy::features::centre::testing::milky_way_galaxy;
+    use crate::galaxy::features::members::KeepInteriors;
+    use crate::galaxy::features::members::source::FeatureMemberSource;
     use crate::galaxy::gas::CENTIMETRES_PER_LIGHT_YEAR;
     use crate::galaxy::gas::ccm::HYDROGEN_COLUMN_PER_MAG;
-    use crate::galaxy::gas::extinction::sightline;
+    use crate::galaxy::gas::extinction::{Quality, sightline};
     use crate::galaxy::gas::modifiers::{GasModifierSource, NoModifiers};
     use crate::galaxy::gas::noise::NoiseCache;
+    use crate::galaxy::rules::GalaxyRules;
     use crate::sky::caps::{CAP_RAYS, CapLattice};
     use crate::sky::census::{
-        CensusTallies, Cone, MAX_N_MAX, NoSkyCellCache, SkyStar, census_cell, census_plan,
-        census_plan_of, merge_census, merge_shells,
+        CensusTallies, Cone, MAX_N_MAX, MemberPart, NoSkyCellCache, SkySource, SkyStar,
+        census_cell, census_members, census_plan, census_plan_of, merge_census, merge_shells,
+        takes_class_hosts, takes_feature_members,
     };
     use crate::sky::eye::surface_brightness;
     use crate::sky::testing::{
-        milky_way_dark_tables, milky_way_envelope, milky_way_offsets, milky_way_tables,
-        sun_illumination,
+        milky_way_dark_context, milky_way_dark_tables, milky_way_envelope, milky_way_offsets,
+        milky_way_tables, sun_illumination,
     };
     use crate::time::UniverseTime;
     use crate::units::consts::RADIANS_PER_DEGREE;
@@ -2985,9 +2989,10 @@ mod tests {
     #[should_panic(expected = "reach past a face of 8 rows")]
     fn rows_past_the_face_are_refused() {
         let mut out = Vec::new();
+        // The rows are checked before any table is read, so the dark tables refuse them alike.
         band_rows(
             milky_way_galaxy(),
-            &mut context(),
+            &mut milky_way_dark_context(),
             &query_at(SUN, 6.5),
             &SkyCensus::empty(),
             &CompleteTo::everywhere(),
@@ -3240,16 +3245,25 @@ mod tests {
     /// Lowering the cut moves the light of the stars between the cuts from the listed stars and
     /// the overflow into the band, and raising it moves it back: the listed, overflow and band
     /// light together is kept within 1% either way, as it is when `n_max` moves stars from the
-    /// list into the overflow (exactly, but for rounding). The eye is asked, and every total is
-    /// the bits it is without it (R06.T8.k).
+    /// list into the overflow (exactly, but for rounding). The eye is asked throughout, and three
+    /// of the totals are held to the bits they are without it (R06.T8.k): V 8 and V 6 with every
+    /// star listed, and V 8 with the 100 brightest. V 8 lies beside the eye's own cut (about
+    /// 8.10), V 6 is the farthest below it, and the 100 brightest bring an overflow. The other
+    /// three, V 7, and V 7 and V 6 with 100 listed, lie between those regimes and are not held
+    /// (`decision-test-coverage.md` §3.1). The fourth configuration held is the radius test's,
+    /// complete to 100 ly.
     #[test]
     fn lowering_or_raising_the_cut_conserves_the_light() {
         let spec = spec(8);
         let all = n(MAX_N_MAX);
         let r = CENSUS_RADIUS_LY;
         let mut totals = Vec::new();
-        for cut in [CENSUS_CUT, 7.0, 6.0] {
-            let (listed, band) = total_light_with_the_eye(cut, r, all, spec);
+        for (cut, held_to_the_bits) in [(CENSUS_CUT, true), (7.0, false), (6.0, true)] {
+            let (listed, band) = if held_to_the_bits {
+                total_light_with_the_eye(cut, r, all, spec)
+            } else {
+                total_light(cut, r, all, spec, Eye::Asked)
+            };
             eprintln!(
                 "cut {cut}, complete to {r} ly: listed {listed:.5e} lx, band {band:.5e} lx, \
                  together {:.5e} lx",
@@ -3279,9 +3293,14 @@ mod tests {
                 "V {deep} → {shallow}: {a} lx → {b} lx"
             );
         }
-        // n_max keeps the 100 brightest: the rest overflow into the band, with no light lost.
-        for (cut, listed, band) in totals {
-            let (listed_100, band_100) = total_light_with_the_eye(cut, r, n(100), spec);
+        // n_max keeps the 100 brightest: the rest overflow into the band, with no light lost. The
+        // first total, V 8's, is held to its bits without the eye.
+        for (i, (cut, listed, band)) in totals.into_iter().enumerate() {
+            let (listed_100, band_100) = if i == 0 {
+                total_light_with_the_eye(cut, r, n(100), spec)
+            } else {
+                total_light(cut, r, n(100), spec, Eye::Asked)
+            };
             let (moved_out, moved_in) = (listed - listed_100, band_100 - band);
             assert!(moved_out > 0.0, "cut {cut}");
             assert!(
@@ -3293,8 +3312,10 @@ mod tests {
 
     /// The listed, overflow and band light together does not depend on how far the census is
     /// complete, within 1%: a census complete to 100 ly and one complete to 200 ly (as a partial
-    /// and a later reply, R06.T8.i) give the same sky's light. The eye is asked, and every total
-    /// is the bits it is without it (R06.T8.k).
+    /// and a later reply, R06.T8.i) give the same sky's light. The eye is asked, and the partial
+    /// reply's total, complete to 100 ly, is held to the bits it is without it (R06.T8.k); the
+    /// total complete to 200 ly is the cut test's first, held there
+    /// (`decision-test-coverage.md` §3.1).
     ///
     /// Against the band of no census at all, complete nowhere, the listed stars' light falls
     /// short of the tables' expectation of it by more (printed, not asserted; R06's Risks, "The
@@ -3313,8 +3334,12 @@ mod tests {
             spec,
         );
         let mut totals = Vec::new();
-        for radius in [100.0, CENSUS_RADIUS_LY] {
-            let (listed, band) = total_light_with_the_eye(CENSUS_CUT, radius, all, spec);
+        for (radius, held_to_the_bits) in [(100.0, true), (CENSUS_RADIUS_LY, false)] {
+            let (listed, band) = if held_to_the_bits {
+                total_light_with_the_eye(CENSUS_CUT, radius, all, spec)
+            } else {
+                total_light(CENSUS_CUT, radius, all, spec, Eye::Asked)
+            };
             eprintln!(
                 "complete to {radius} ly: listed {listed:.5e} lx, band {band:.5e} lx, together \
                  {:.5e} lx, {:+.2}% against the band complete nowhere ({nowhere:.5e} lx); the \
@@ -3330,6 +3355,83 @@ mod tests {
             "{} lx against {} lx",
             totals[1],
             totals[0]
+        );
+    }
+
+    /// T9.b's conservation at a synthetic ceiling (rendering plan R13, R13.T2.a): near the Sun to
+    /// V 8, with C's, D's and E's real boundary one radius a ray between 100 and 200 ly, held
+    /// within a limit of 150 ly, and A's, B's and the brown dwarfs' caps at 200 ly, the census at
+    /// the ceiling lists C, D and E by the radius towards each star's texel and the band is
+    /// complete to that boundary: the listed, overflow and band light together is R06's at the
+    /// cut's caps, every layer complete to 200 ly, within 1%. At an `n_max` of 100 the rest of the
+    /// listed stars overflow into the band, with no light lost.
+    #[test]
+    fn at_a_ceiling_the_light_is_the_light_at_the_cuts_caps() {
+        let galaxy = milky_way_galaxy();
+        let spec = spec(8);
+        let all = n(MAX_N_MAX);
+        let (listed, band) = total_light(CENSUS_CUT, CENSUS_RADIUS_LY, all, spec, Eye::NotAsked);
+        let r06 = listed + band;
+        let query = SkyQuery::builder(observer_at(SUN), Magnitudes::new(CENSUS_CUT))
+            .band_spec(spec)
+            .synthetic_ceiling(Magnitudes::new(5.0))
+            .build()
+            .expect("a query at the ceiling");
+        let lattice = std::sync::Arc::new(CapLattice::new(CAP_RAYS));
+        let caps: Vec<LayerCap> = CAPPED_LAYERS
+            .iter()
+            .zip(0_u64..)
+            .map(|(&layer, k)| {
+                if matches!(layer, Layer::C | Layer::D | Layer::E) {
+                    let radii = crate::sky::testing::uniforms(0x7b_0300 + k)
+                        .take(CAP_RAYS)
+                        .map(|u| 100.0 + 100.0 * u)
+                        .collect();
+                    let rays = RayRadii::new(std::sync::Arc::clone(&lattice), radii).within(150.0);
+                    LayerCap::forced_by_ray(layer, rays)
+                } else {
+                    LayerCap::forced(layer, LightYears::new(CENSUS_RADIUS_LY))
+                }
+            })
+            .collect();
+        let plan = census_plan_of(&query, caps);
+        let mut ctx = context();
+        let (mut stars, mut tallies) = (Vec::new(), CensusTallies::default());
+        for key in plan.cells() {
+            tallies.add(&census_cell(galaxy, &mut ctx, key, &query, &mut stars));
+        }
+        let complete = plan.complete();
+        let light = |n_max| {
+            let census = merge_shells([(stars.clone(), tallies)], n_max, complete.clone());
+            let band = whole_band(&query, &census, complete.complete_to(), spec);
+            (stars_lux(census.listed()), band_lux(&band, spec))
+        };
+        let (ours_listed, ours_band) = light(all);
+        let ours = ours_listed + ours_band;
+        eprintln!(
+            "at the ceiling, complete to R(u): listed {ours_listed:.5e} lx, band {ours_band:.5e} \
+             lx, together {ours:.5e} lx, {:+.3}% against R06's at the cut's caps ({r06:.5e} lx: \
+             listed {listed:.5e} lx, band {band:.5e} lx)",
+            100.0 * (ours / r06 - 1.0)
+        );
+        assert!(
+            ours_listed < listed,
+            "the list's light {ours_listed} lx at R(u) against {listed} lx at the cut's caps"
+        );
+        assert!(
+            ours_band > band,
+            "the band's light {ours_band} lx at R(u) against {band} lx at the cut's caps"
+        );
+        assert!(
+            (ours / r06 - 1.0).abs() < 0.01,
+            "{ours} lx against {r06} lx"
+        );
+        let (listed_100, band_100) = light(n(100));
+        let (moved_out, moved_in) = (ours_listed - listed_100, band_100 - ours_band);
+        assert!(moved_out > 0.0);
+        assert!(
+            (moved_in / moved_out - 1.0).abs() < 1e-9,
+            "{moved_out} lx left the list, {moved_in} lx reached the band"
         );
     }
 
@@ -3375,7 +3477,7 @@ mod tests {
         let spec = spec(8);
         let query = query_at(SUN, CENSUS_CUT);
         let census = census_to(CENSUS_CUT, 50.0, n(20), Eye::NotAsked);
-        assert!(!census.overflow().is_empty());
+        assert_ne!(census.overflow(), []);
         let replies = replies_near_the_sun();
         let nodes = Edges::of_replies(replies.clone()).nodes;
         let dust = solar_colour().reddening();
@@ -3685,9 +3787,11 @@ mod tests {
     #[test]
     #[should_panic(expected = "is not a radius the march keeps")]
     fn a_reply_the_march_does_not_keep_is_refused() {
+        // The reply's radii are what is refused, which the dark tables' march keeps as the full
+        // tables' does.
         let march = march_rows(
             milky_way_galaxy(),
-            &mut context(),
+            &mut milky_way_dark_context(),
             &query_at(SUN, 6.5),
             [complete_within(100.0), complete_within(400.0)],
             &spec(2),
@@ -3702,20 +3806,42 @@ mod tests {
         );
     }
 
-    /// The stars a census near the Sun lists to V [`CENSUS_CUT`] within 400 ly, every cap forced to
-    /// it, with no eye: its cells on up to four threads (one on WebAssembly, which has none), each
-    /// with its own context, merged at [`MAX_N_MAX`], whose order is total, so the threads'
-    /// timing changes no bit.
+    /// The fixture with its field holding every population's whole budget (P09.T2.c's φ held, the
+    /// test-only door), as the band reads it: from generator version 27 the fixture's own field
+    /// gives the features most of the young disc's stars (P09.T2.c), and the census takes them as
+    /// the features' members, most of whom lie farther than 400 ly from the Sun, while the band
+    /// spreads that light as the field is (R06.T16.a's lean, 2026-11-01). Its density fields, its
+    /// components and so its tables are the fixture's.
+    fn budget_galaxy() -> &'static Galaxy {
+        static GALAXY: OnceLock<Galaxy> = OnceLock::new();
+        GALAXY.get_or_init(|| {
+            Galaxy::from_params_with_rules(
+                milky_way_galaxy().seed(),
+                crate::galaxy::params::GalaxyParams::milky_way_like(),
+                GalaxyRules {
+                    field_share: FieldShareRules::None,
+                    ..GalaxyRules::of_version(crate::GENERATOR_VERSION)
+                },
+            )
+            .expect("the fixture builds")
+        })
+    }
+
+    /// The stars a census near the Sun lists to V [`CENSUS_CUT`] within 400 ly in
+    /// [`budget_galaxy`], every cap forced to it, with no eye: its cells on up to four threads (the
+    /// slots `.config/nextest.toml` reserves, or the fewer a run grants; one on WebAssembly, which
+    /// has none), each with its own context, and each shell's members beyond the grid where the
+    /// field gives them up, as the census takes them (R06.T16.a's switch): the carve-out's class
+    /// hosts (P09.T35), and with φ held no feature member. Merged at [`MAX_N_MAX`], whose order is
+    /// total, so the threads' count and timing change no bit.
     fn census_within_400_ly() -> Vec<SkyStar> {
-        let galaxy = milky_way_galaxy();
+        let galaxy = budget_galaxy();
         let query = query_near_the_sun(CENSUS_CUT, Eye::NotAsked)
             .with_caps_forced(LightYears::new(400.0))
             .expect("a forced cap");
         let mut ctx = context();
-        let keys: Vec<crate::galaxy::placement::CellKey> =
-            census_plan(galaxy, ctx.tables, ctx.envelope, &query, &mut ctx.noise)
-                .cells()
-                .collect();
+        let plan = census_plan(galaxy, ctx.tables, ctx.envelope, &query, &mut ctx.noise);
+        let keys: Vec<crate::galaxy::placement::CellKey> = plan.cells().collect();
         let next = std::sync::atomic::AtomicUsize::new(0);
         let job = || {
             let mut ctx = context();
@@ -3728,19 +3854,40 @@ mod tests {
                 census_cell(galaxy, &mut ctx, key, &query, &mut stars);
             }
         };
-        let stars: Vec<SkyStar> = if cfg!(target_family = "wasm") {
+        let mut stars: Vec<SkyStar> = if cfg!(target_family = "wasm") {
             job()
         } else {
+            let held = crate::planetary::testing::HeldRules::on_this_thread();
             std::thread::scope(|scope| {
-                let threads: Vec<_> = (0..4).map(|_| scope.spawn(job)).collect();
+                let threads: Vec<_> = (0..hyperion_testkit::threads::granted(4))
+                    .map(|_| scope.spawn(move || held.install(job)))
+                    .collect();
                 threads
                     .into_iter()
                     .flat_map(|thread| thread.join().expect("a census thread completes"))
                     .collect()
             })
         };
+        let interiors = KeepInteriors::new(galaxy);
+        let members = FeatureMemberSource::new(&NoFeatureCache, &interiors);
+        let classes = CatalogueClassSource::new().with_cells(&NoClassCellCache);
+        let mut sources: Vec<&dyn SkySource> = Vec::new();
+        if takes_feature_members(galaxy) {
+            sources.push(&members);
+        }
+        if takes_class_hosts(galaxy) {
+            sources.push(&classes);
+        }
+        let mut ctx = SkyContext {
+            sources: &sources,
+            ..context()
+        };
+        for shell in plan.shells() {
+            let whole = (shell, MemberPart::WHOLE);
+            census_members(galaxy, &mut ctx, &plan, whole, &query, &mut stars);
+        }
         let census = merge_census([(stars, CensusTallies::default())], n(MAX_N_MAX));
-        assert!(census.overflow().is_empty());
+        assert_eq!(census.overflow(), []);
         census.listed().to_vec()
     }
 
@@ -3748,6 +3895,13 @@ mod tests {
     /// 200 and 400 ly (every cap forced, the census listing only the stars within each radius, its
     /// brightest 500 listed and the rest overflowing into the band) agree within 1% (R06.T9.f,
     /// the band ruling's item 5).
+    ///
+    /// The census is the budget's ([`budget_galaxy`]), whose field the band reads. From generator
+    /// version 27 the fixture's own sky falls short of the band between 100 and 400 ly by 1.33%
+    /// (8.740 × 10⁻⁴ against 8.624 × 10⁻⁴ lx, its members within 400 ly adding one star): the
+    /// field gives up φ of the young disc to the features (P09.T2.c), most of them farther out,
+    /// and the band spreads their light as the field is (R06.T16.a's lean). The budget's agree
+    /// within 0.95% (8.744, 8.675 and 8.661 × 10⁻⁴ lx).
     #[test]
     fn one_marchs_light_at_100_200_and_400_ly_agrees_within_1_percent() {
         let galaxy = milky_way_galaxy();
@@ -3922,7 +4076,7 @@ mod tests {
             .copied()
             .collect();
         let census = merge_census([(within, CensusTallies::default())], n(MAX_N_MAX));
-        assert!(census.overflow().is_empty());
+        assert_eq!(census.overflow(), []);
         census
     }
 
@@ -4468,9 +4622,10 @@ mod tests {
     #[should_panic(expected = "a cone's band is marched at its query's band")]
     fn a_cones_band_at_another_resolution_is_refused() {
         let cone = Cone::new(UnitVector::X, Degrees::new(10.0)).expect("a cone");
+        // The band is checked before any table is read, so the dark tables refuse it alike.
         let _ = march_rows(
             milky_way_galaxy(),
-            &mut context(),
+            &mut milky_way_dark_context(),
             &cone_query(cone, spec(16)),
             [CompleteTo::everywhere()],
             &spec(8),
@@ -4686,7 +4841,7 @@ mod tests {
                     origin,
                     &end,
                     NoiseMode::Realised,
-                    BAND_PROFILE_QUALITY,
+                    SIGHTLINE_QUALITY,
                     modifiers,
                     &mut cache,
                 )
@@ -5119,6 +5274,44 @@ mod tests {
         let (census, march) = first_shell_and_march(16, 8);
         let completeness = census.completeness().expect("a census of shells");
         sum_rows(&march, &census, completeness.complete_to(), &mut Vec::new());
+    }
+
+    /// A final census at a synthetic ceiling lists C, D and E by their stars' texels, so it too is
+    /// summed at its query's band (rendering plan R13, R13.T2.a), where R06's final census may be
+    /// summed at any.
+    #[test]
+    #[should_panic(expected = "a census of shells not yet final lists by its query's band")]
+    fn a_final_census_at_a_ceiling_summed_at_another_band_is_refused() {
+        let query = SkyQuery::builder(observer_at(SUN), Magnitudes::new(CENSUS_CUT))
+            .band_spec(spec(16))
+            .synthetic_ceiling(Magnitudes::new(5.0))
+            .build()
+            .expect("a query at the ceiling")
+            .with_caps_forced(LightYears::new(1_000.0))
+            .expect("a forced cap");
+        let plan = census_plan_of(&query, query.forced_caps().expect("forced caps").to_vec());
+        let last = plan.complete();
+        assert!(last.is_final() && last.lists_by_texel());
+        let census = merge_shells(Vec::new(), n(MAX_N_MAX), last.clone());
+        let mut ctx = SkyContext {
+            tables: milky_way_dark_tables(),
+            envelope: milky_way_envelope(),
+            offsets: milky_way_offsets(),
+            noise: NoiseCache::with_capacity(1 << 12),
+            cells: &NoSkyCellCache,
+            sources: &[],
+            modifiers: &NoModifiers,
+        };
+        let march = march_rows(
+            milky_way_galaxy(),
+            &mut ctx,
+            &query,
+            plan.replies(),
+            &spec(8),
+            CubeFace::PosZ,
+            0..1,
+        );
+        sum_rows(&march, &census, last.complete_to(), &mut Vec::new());
     }
 
     #[test]

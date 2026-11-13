@@ -1,5 +1,6 @@
-//! The extents of a system's populations on the wire: a planet's rings, a belt and the cometary
-//! halo (plan 14, P14.T35.b's `BeltDto` and the halo section, from P14.T20–T21).
+//! The extents of a system's populations on the wire: a planet's rings, a belt, the cometary
+//! halo (plan 14, P14.T35.b's `BeltDto` and the halo section, from P14.T20–T21), a
+//! protoplanetary disc (P14.T28.a) and a white dwarf's debris disc (P14.T28.d).
 //!
 //! Each is a body of its system's list (design note 3), whose record carries what it is as its
 //! `population` section, a [`PopulationDto`]; every other body's is `not_applicable`. Every
@@ -11,8 +12,13 @@ use ts_rs::TS;
 use crate::planetary::{OrbitHostDto, SectionDto};
 use crate::primitives::BodyIdHex;
 
-/// What a population body is, and where it lies: a ring, a belt or a cometary halo, tagged by
-/// `type` (`{"type": "belt", "host": …, …}`).
+/// What a population body is, and where it lies: a ring, a belt, a cometary halo or a disc,
+/// tagged by `type` (`{"type": "belt", "host": …, …}`).
+///
+/// It grows (plan 04's growing enums): a server of a later generator version may send a `type`
+/// an older client does not know, which reads as Missing. The protoplanetary disc's and the debris
+/// disc's arms are sent from generator version 26 (P14.T28.a and T28.d), so
+/// [`PROTOCOL_VERSION`](crate::PROTOCOL_VERSION) stays 3.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[ts(export)]
@@ -23,6 +29,10 @@ pub enum PopulationDto {
     Belt(BeltDto),
     /// A system's cometary halo (P14.T21.d).
     CometaryHalo(CometaryHaloDto),
+    /// A young host's protoplanetary disc, while it lasts (P14.T28.a).
+    ProtoplanetaryDisc(ProtoplanetaryDiscDto),
+    /// A white dwarf's dusty debris disc, while it lasts (P14.T28.d).
+    DebrisDisc(DebrisDiscDto),
 }
 
 /// Which of a giant's rings a ring is.
@@ -60,11 +70,12 @@ pub struct RingGapDto {
     pub radius_m: f64,
 }
 
-/// A giant's ring: its kind, material, edges and optical depth (P14.T20).
+/// A giant's ring: its kind, material, edges and optical depth (P14.T20), and its plane's normal
+/// (P14.T56.a).
 ///
-/// Its edges are distances from its planet's centre in the planet's equatorial plane, which this
-/// generator version takes to be the planet's orbital plane until P14.T14 gives planets their
-/// poles. The ring's record's `position_m` is its planet's.
+/// Its edges are distances from its planet's centre in its plane, the plane `normal` is normal to,
+/// or without `normal` the planet's orbital plane. The ring's record's `position_m` is its
+/// planet's.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct RingDto {
@@ -81,6 +92,15 @@ pub struct RingDto {
     pub optical_depth: f64,
     /// The gaps the planet's moons clear in it, inside out; none in a dusty ring.
     pub gaps: Vec<RingGapDto>,
+    /// The normal of its plane, a unit vector along the galactic axes (P14.T56.a): the planet's
+    /// local Laplace plane at the geometric mean of its edges, on the spin's side, its equator
+    /// well inside its Laplace radius. Absent from a server of a generator version that does
+    /// not place rings on the Laplace surface, whose rings lie in their planet's orbital plane.
+    /// Optional on the wire, so [`PROTOCOL_VERSION`](crate::PROTOCOL_VERSION) stays 2 (plan 04,
+    /// Design note 15).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub normal: Option<[f64; 3]>,
 }
 
 /// Where a belt lies, by the rule that placed it.
@@ -198,6 +218,66 @@ pub struct CometaryHaloDto {
     pub comet_rate_per_s: f64,
 }
 
+/// A gap a giant has opened in a protoplanetary disc (P14.T28.a).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct DiscGapDto {
+    /// The giant that opened it.
+    pub giant: BodyIdHex,
+    /// Its distance from the disc's host, the giant's semi-major axis at the record's time, in
+    /// metres.
+    pub radius_m: f64,
+}
+
+/// A young host's protoplanetary disc at the record's time, while it lasts (P14.T28.a, design
+/// note 12): its extent, its snow line and its masses as born, and the gaps its giants have
+/// opened by then.
+///
+/// It lies in its host's planetary plane, the plane of the host's zone. Its record's `mass_kg` is
+/// its gas and solids together; the record is `destroyed` (`dispersed`) from the disc's lifetime
+/// on, with this section `not_applicable`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ProtoplanetaryDiscDto {
+    /// The orbit host it goes round, a zone's host.
+    pub host: OrbitHostDto,
+    /// The inner edge, in metres from its host.
+    pub inner_edge_m: f64,
+    /// The outer edge, in metres from its host.
+    pub outer_edge_m: f64,
+    /// The snow line, in metres from its host, between its edges or outside them.
+    pub snow_line_m: f64,
+    /// The characteristic radius of its taper, in metres: its surface density falls as
+    /// e^(−r ÷ `r_c`) ÷ r.
+    pub characteristic_radius_m: f64,
+    /// Its gas between its edges, in kilograms.
+    pub gas_mass_kg: f64,
+    /// Its solids between its edges, in kilograms.
+    pub solid_mass_kg: f64,
+    /// The gaps its giants have opened by the record's time, inside out; none before its first
+    /// giant forms.
+    pub gaps: Vec<DiscGapDto>,
+}
+
+/// A white dwarf's dusty debris disc at the record's time, while it lasts (P14.T28.d, design note
+/// 11): the dust of tidally disrupted asteroids, inside the white dwarf's Roche limit.
+///
+/// It lies in its host's planetary plane. Its record's `mass_kg` is `not_modelled`; the record is
+/// `destroyed` (`dispersed`) once the disc's span of cooling age ends, with this section
+/// `not_applicable`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct DebrisDiscDto {
+    /// The white dwarf it goes round, a zone's host.
+    pub host: OrbitHostDto,
+    /// The inner edge, in metres from its host: where its dust sublimates, never beyond its outer
+    /// edge.
+    pub inner_edge_m: f64,
+    /// The outer edge, in metres from its host: the white dwarf's Roche limit for a rocky
+    /// asteroid, about a solar radius.
+    pub outer_edge_m: f64,
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use serde_json::{Value, json};
@@ -221,6 +301,7 @@ pub(crate) mod tests {
                 resonance: [2, 1],
                 radius_m: 117_000_000.0,
             }],
+            normal: None,
         })
     }
 
@@ -291,6 +372,30 @@ pub(crate) mod tests {
         assert_wire_form(&saturn_ring(), saturn_ring_json());
     }
 
+    /// P14.T56.a: a ring's plane on the Laplace surface goes as its unit normal, and a ring
+    /// without one, as an older server sends it, reads as before.
+    #[test]
+    fn a_ring_s_normal_is_optional_on_the_wire() {
+        let PopulationDto::Ring(ring) = saturn_ring() else {
+            unreachable!("the fixture is a ring")
+        };
+        let tilted = PopulationDto::Ring(RingDto {
+            normal: Some([0.0, -0.6, 0.8]),
+            ..ring
+        });
+        let mut wire = saturn_ring_json();
+        wire["normal"] = json!([0.0, -0.6, 0.8]);
+        assert_wire_form(&tilted, wire);
+        let without: PopulationDto = serde_json::from_value(saturn_ring_json()).unwrap();
+        assert_eq!(without, saturn_ring());
+        assert!(
+            serde_json::to_value(&without)
+                .unwrap()
+                .get("normal")
+                .is_none()
+        );
+    }
+
     #[test]
     fn belt_wire_form() {
         assert_wire_form(&main_belt(), main_belt_json());
@@ -341,6 +446,53 @@ pub(crate) mod tests {
                 "outer_edge_m": 1.496e16,
                 "comets": 7.5e11,
                 "comet_rate_per_s": 3.45e-7,
+            }),
+        );
+    }
+
+    #[test]
+    fn protoplanetary_disc_wire_form() {
+        assert_wire_form(
+            &PopulationDto::ProtoplanetaryDisc(ProtoplanetaryDiscDto {
+                host: OrbitHostDto::Star { body_index: 0 },
+                inner_edge_m: 1.5e9,
+                outer_edge_m: 1.346e13,
+                snow_line_m: 4.04e11,
+                characteristic_radius_m: 4.488e12,
+                gas_mass_kg: 1.9e28,
+                solid_mass_kg: 1.5e26,
+                gaps: vec![DiscGapDto {
+                    giant: BodyIdHex::from_parts(SYSTEM, 0x0500),
+                    radius_m: 7.78e11,
+                }],
+            }),
+            json!({
+                "type": "protoplanetary_disc",
+                "host": { "type": "star", "body_index": 0 },
+                "inner_edge_m": 1.5e9,
+                "outer_edge_m": 1.346e13,
+                "snow_line_m": 4.04e11,
+                "characteristic_radius_m": 4.488e12,
+                "gas_mass_kg": 1.9e28,
+                "solid_mass_kg": 1.5e26,
+                "gaps": [{ "giant": "0200080020000000.0500", "radius_m": 7.78e11 }],
+            }),
+        );
+    }
+
+    #[test]
+    fn debris_disc_wire_form() {
+        assert_wire_form(
+            &PopulationDto::DebrisDisc(DebrisDiscDto {
+                host: OrbitHostDto::Star { body_index: 0 },
+                inner_edge_m: 7.0e7,
+                outer_edge_m: 6.0e8,
+            }),
+            json!({
+                "type": "debris_disc",
+                "host": { "type": "star", "body_index": 0 },
+                "inner_edge_m": 7.0e7,
+                "outer_edge_m": 6.0e8,
             }),
         );
     }

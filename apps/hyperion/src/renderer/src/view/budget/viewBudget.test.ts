@@ -4,8 +4,12 @@ import { type RenderStyle, viewId } from "../camera/state";
 import { QUALITY_SETTINGS, SETTINGS } from "../quality/qualitySetting";
 import { ResolutionController } from "./resolutionController";
 import {
+  aloneScaleBounds,
+  FLOOR_RATE_HZ,
   frameGpuBudgetMs,
   GPU_FRAME_SHARE,
+  IMAGE_DETAIL_LIMITED,
+  LOW_LOOK_ROWS_PX,
   ONE_PHOTOREALISTIC_VIEW,
   PER_CANVAS_OVERHEAD_MS,
   photorealisticAllowed,
@@ -164,7 +168,7 @@ describe("viewBudgets", () => {
   });
 
   it.each(QUALITY_SETTINGS)(
-    "renders a photorealistic primary alone at the bounds' max, uncontrolled, on %s",
+    "renders a photorealistic primary alone at the bounds' max, uncontrolled, on %s, its rows not known",
     (setting) => {
       const alone = budgetOf(viewBudgets([primary("photorealistic")], setting), COCKPIT);
       expect(alone).toMatchObject({
@@ -183,6 +187,52 @@ describe("viewBudgets", () => {
       );
     },
   );
+
+  it("gives a photorealistic primary alone on high its frame-rate floor, down to the low setting's look (the owner's report)", () => {
+    const alone = budgetOf(viewBudgets([primary("photorealistic")], "high", 1080), COCKPIT);
+    expect(alone.renderScale).toBe(1);
+    expect(alone.control).toEqual({
+      kind: "floor",
+      bounds: [LOW_LOOK_ROWS_PX / 1080, 1],
+      target: { periodMs: 1000 / FLOOR_RATE_HZ, gpuBudgetMs: frameGpuBudgetMs(30, 0) },
+    });
+    // Never below the setting's own bounds, and none where the image is at the low look already.
+    expect([
+      aloneScaleBounds("high", 2160),
+      aloneScaleBounds("high", 900),
+      aloneScaleBounds("high", 720),
+      aloneScaleBounds("low", 1080),
+    ]).toEqual([[0.5, 1], [0.8, 1], null, null]);
+  });
+
+  it("keeps the floor's low look at the low setting's own rows, and states it as the guide does", () => {
+    expect([LOW_LOOK_ROWS_PX, IMAGE_DETAIL_LIMITED]).toEqual([
+      SETTINGS.low.terrain.renderHeightPx,
+      "IMAGE: DETAIL LIMITED",
+    ]);
+  });
+
+  it("steps a lone primary down only once its frames run past the floor's rate, and back up", () => {
+    const control = budgetOf(
+      viewBudgets([primary("photorealistic")], "high", 1080),
+      COCKPIT,
+    ).control;
+    if (control === null) {
+      throw new Error("the primary alone on high should have its floor");
+    }
+    // A frame of the setting's own 60 Hz budget, or near it, never steps.
+    const fits = new ResolutionController(control.bounds, control.target);
+    for (let frame = 0; frame < 600; frame += 1) {
+      fits.update([16.7], 16.7);
+    }
+    expect(fits.scale).toBe(1);
+    // One of 200 ms at full scale, a slow GPU's, falls to the floor and no further.
+    const slow = new ResolutionController(control.bounds, control.target);
+    for (let frame = 0; frame < 600; frame += 1) {
+      slow.update([200 * slow.scale * slow.scale], 200);
+    }
+    expect(slow.scale).toBe(control.bounds[0]);
+  });
 
   it("drops the primary's scale while instruments are open", () => {
     // The primary alone fits its frame at full scale; two instruments add 1.5 ms each.

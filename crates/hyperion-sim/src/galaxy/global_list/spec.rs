@@ -38,6 +38,8 @@
 //! to the last major merger, whichever is shorter"). `T_s` also stops at a cluster's age, since no
 //! cluster lost stars before it formed (P10.T3, as built).
 
+use std::num::NonZeroU32;
+
 use crate::coords::{GalacticDisplacement, GalacticVelocity};
 use crate::galaxy::consts::LIGHT_YEARS_PER_YEAR_PER_KM_S;
 use crate::galaxy::potential::PotentialTables;
@@ -182,8 +184,8 @@ impl SphericalOrbit {
 
     /// Where the orbit is `t` years after a pericentre, `t` in `[0, radial period]`: the radius
     /// (ly), the radial speed (km/s, negative on the way in) and the angle swept since the
-    /// pericentre (radians). The time from pericentre is inverted by 60 bisections in θ, each
-    /// integrating only the panel it falls in, whose start is summed once.
+    /// pericentre (radians). The time from pericentre is inverted by at most 60 bisections in θ,
+    /// each integrating the time alone over only the panel it falls in, whose start is summed once.
     #[must_use]
     pub(crate) fn state_after_pericentre(&self, phi: &impl Fn(f64) -> f64, t: f64) -> [f64; 3] {
         let period = self.radial_period;
@@ -209,9 +211,14 @@ impl SphericalOrbit {
         }
         let a = start + width * f64::from(panel);
         let (mut lo, mut hi) = (a, a + width);
+        // The time alone. Once the midpoint is an end of the interval, every later step keeps
+        // it there whichever way it goes, so leaving then gives the 60 steps' result.
         for _ in 0..60 {
             let mid = f64::midpoint(lo, hi);
-            if before + self.panel_integrals(phi, a, mid).0 < t_half {
+            if mid.total_cmp(&lo).is_eq() || mid.total_cmp(&hi).is_eq() {
+                break;
+            }
+            if before + self.panel_time(phi, a, mid) < t_half {
                 lo = mid;
             } else {
                 hi = mid;
@@ -226,6 +233,47 @@ impl SphericalOrbit {
         } else {
             [r, -v_r, self.azimuthal_advance - angle]
         }
+    }
+
+    /// [`panel_integrals`](Self::panel_integrals)`(phi, from, to).0` alone, by the same
+    /// arithmetic: the time (years).
+    #[must_use]
+    fn panel_time(&self, phi: &impl Fn(f64) -> f64, from: f64, to: f64) -> f64 {
+        let (mid, half) = (
+            f64::midpoint(self.apocentre, self.pericentre),
+            0.5 * (self.apocentre - self.pericentre),
+        );
+        let momentum = self.angular_momentum;
+        let rate = |theta: f64| {
+            let (sin, cos) = math::sin_cos(theta);
+            let radius = mid + half * sin;
+            let v_r_sq =
+                2.0 * (self.energy - phi(radius)) - momentum * momentum / (radius * radius);
+            // As in `panel_integrals`: such a node lies within a hair of a turning point.
+            if v_r_sq <= 0.0 {
+                0.0
+            } else {
+                half * cos / v_r_sq.sqrt()
+            }
+        };
+        gl32(rate, from, to) / LIGHT_YEARS_PER_YEAR_PER_KM_S
+    }
+
+    /// [`radial_integrals`](Self::radial_integrals)`(phi, theta).0` alone, by the same
+    /// arithmetic: the time (years) from pericentre out to the radius at angle `theta`.
+    #[must_use]
+    pub(crate) fn radial_time(&self, phi: &impl Fn(f64) -> f64, theta: f64) -> f64 {
+        let start = -core::f64::consts::FRAC_PI_2;
+        let width = core::f64::consts::PI / f64::from(RADIAL_PANELS);
+        let mut time = 0.0;
+        for k in 0..RADIAL_PANELS {
+            let a = start + width * f64::from(k);
+            if a >= theta {
+                break;
+            }
+            time += self.panel_time(phi, a, (a + width).min(theta));
+        }
+        time
     }
 
     /// [`radial_integrals`](Self::radial_integrals) over `[a, b]` of θ alone, by one 32-point
@@ -348,6 +396,25 @@ impl SphericalOrbit {
             span,
         )
     }
+
+    /// [`fixed_step`](Self::fixed_step) at `steps` steps per pericentre crossing
+    /// ([`FixedStep::with_steps_per_crossing`]): `fixed_step`'s, bit for bit, at 64.
+    ///
+    /// # Errors
+    ///
+    /// As [`fixed_step`](Self::fixed_step).
+    pub fn fixed_step_at(
+        &self,
+        span: Seconds,
+        steps: NonZeroU32,
+    ) -> Result<FixedStep, BuildLeapfrogError> {
+        FixedStep::with_steps_per_crossing(
+            Metres::from(self.pericentre()),
+            MetresPerSecond::from(self.pericentre_speed()),
+            span,
+            steps,
+        )
+    }
 }
 
 /// Design note 5's stripping time for an orbit whose progenitor has tidal radius `tidal_radius`
@@ -393,12 +460,18 @@ pub enum MassLoss {
     },
 }
 
-/// A globular cluster's stars, which a globular's or an orphan's stream shares: its [Fe/H] and its
-/// age. A dwarf's stream takes its core's instead (plan 10, P10.T7).
+/// A globular cluster's stars, which a globular's or an orphan's stream shares: its [Fe/H], its
+/// age, and what plan 09's model says it still holds of them, which sets what its stream holds
+/// (P10.T8.a). A dwarf's stream takes its core's instead (plan 10, P10.T7).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ClusterStars {
     pub(super) fe_h: Dex,
     pub(super) age: Years,
+    /// `K`, the share of every class but the black holes that the cluster keeps (plan 09's
+    /// `ClassCounts::scale`): 0 for an orphan, which keeps nothing.
+    pub(super) kept: f64,
+    /// Its present slope over 0.2–0.8 M☉ (plan 09's `ClassCounts::depleted_slope`).
+    pub(super) depleted_slope: f64,
 }
 
 impl ClusterStars {
@@ -412,6 +485,20 @@ impl ClusterStars {
     #[must_use]
     pub const fn age(&self) -> Years {
         self.age
+    }
+
+    /// The share of every class but its black holes that the cluster still holds, plan 09's `K`:
+    /// 0 for an orphan.
+    #[must_use]
+    pub const fn kept(&self) -> f64 {
+        self.kept
+    }
+
+    /// The cluster's present slope of its mass function over 0.2–0.8 M☉, plan 09's depleted
+    /// slope; an orphan's is the canonical −1.5, which it no longer applies (it keeps nothing).
+    #[must_use]
+    pub const fn depleted_slope(&self) -> f64 {
+        self.depleted_slope
     }
 }
 
@@ -601,6 +688,101 @@ mod tests {
 
     fn kepler(r: f64) -> f64 {
         -GM / r
+    }
+
+    /// [`SphericalOrbit::state_after_pericentre`] as it was before its time-only bisection: 60
+    /// steps, each integrating the time and the angle.
+    fn state_by_sixty_steps(orbit: &SphericalOrbit, phi: &impl Fn(f64) -> f64, t: f64) -> [f64; 3] {
+        let period = orbit.radial_period;
+        let t = t.clamp(0.0, period);
+        let (outbound, t_half) = if t <= 0.5 * period {
+            (true, t)
+        } else {
+            (false, period - t)
+        };
+        let start = -core::f64::consts::FRAC_PI_2;
+        let width = core::f64::consts::PI / f64::from(RADIAL_PANELS);
+        let (mut before, mut swept, mut panel) = (0.0, 0.0, 0);
+        for k in 0..RADIAL_PANELS {
+            let a = start + width * f64::from(k);
+            let (time, angle) = orbit.panel_integrals(phi, a, a + width);
+            if before + time >= t_half || k + 1 == RADIAL_PANELS {
+                panel = k;
+                break;
+            }
+            before += time;
+            swept += angle;
+        }
+        let a = start + width * f64::from(panel);
+        let (mut lo, mut hi) = (a, a + width);
+        for _ in 0..60 {
+            let mid = f64::midpoint(lo, hi);
+            if before + orbit.panel_integrals(phi, a, mid).0 < t_half {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        let theta = f64::midpoint(lo, hi);
+        let angle = swept + orbit.panel_integrals(phi, a, theta).1;
+        let r = orbit.radius_at(theta);
+        let v_r = orbit.radial_speed(phi, r);
+        if outbound {
+            [r, v_r, angle]
+        } else {
+            [r, -v_r, orbit.azimuthal_advance - angle]
+        }
+    }
+
+    /// The time-only paths of P10.T3.d.a's cost fix, which moved no output, against what they
+    /// replace, bit for bit: `panel_time` against `panel_integrals`' time over every panel and part
+    /// of one, `radial_time` against `radial_integrals`' at and between the panels' edges, and the
+    /// epoch state against 60 full bisections at the turning points, at each panel's edge and
+    /// between, on Kepler orbits and on the Milky Way fixture's in-plane tables, one orbit of
+    /// which reaches past the tables' grid.
+    #[test]
+    fn the_time_alone_is_the_integrals_time_bit_for_bit() {
+        fn check(orbit: &SphericalOrbit, phi: &impl Fn(f64) -> f64) {
+            let same = |a: f64, b: f64| a.total_cmp(&b).is_eq();
+            let start = -core::f64::consts::FRAC_PI_2;
+            let width = core::f64::consts::PI / f64::from(RADIAL_PANELS);
+            let mut times = vec![0.0, orbit.radial_period, 0.5 * orbit.radial_period];
+            for k in 0..RADIAL_PANELS {
+                let a = start + width * f64::from(k);
+                for b in [a + 0.3 * width, a + width] {
+                    let (time, _) = orbit.panel_integrals(phi, a, b);
+                    assert!(same(orbit.panel_time(phi, a, b), time), "panel [{a}, {b}]");
+                }
+                for theta in [a, a + 0.7 * width] {
+                    let (time, _) = orbit.radial_integrals(phi, theta);
+                    assert!(same(orbit.radial_time(phi, theta), time), "θ {theta}");
+                    times.extend([time, orbit.radial_period - time, 1.000_001 * time]);
+                }
+            }
+            for t in times {
+                let fast = orbit.state_after_pericentre(phi, t);
+                let full = state_by_sixty_steps(orbit, phi, t);
+                assert!(
+                    fast.iter().zip(&full).all(|(&x, &y)| same(x, y)),
+                    "t {t}: {fast:?} against {full:?}"
+                );
+            }
+        }
+        for (peri, apo) in [(20_000.0, 120_000.0), (2_000.0, 78_000.0)] {
+            check(
+                &SphericalOrbit::from_turning_points(kepler, peri, apo).unwrap(),
+                &kepler,
+            );
+        }
+        let params = crate::galaxy::params::GalaxyParams::milky_way_like();
+        let tables = PotentialTables::in_plane(&crate::galaxy::potential::MassModel::new(&params));
+        let phi = |r: f64| tables.potential_in_plane(LightYears::new(r));
+        for (peri, apo) in [(25_000.0, 150_000.0), (40_000.0, 400_000.0)] {
+            let orbit =
+                SphericalOrbit::between(&tables, LightYears::new(peri), LightYears::new(apo))
+                    .unwrap();
+            check(&orbit, &phi);
+        }
     }
 
     #[test]

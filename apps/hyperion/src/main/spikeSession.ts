@@ -14,7 +14,13 @@
  * A smoke run hands its report to the same results call as a full run
  * (decision-r05-trace-windows-2.md, addendum A): its windows are merged with it, the frame-span
  * check included, each window's verdict is logged, and the call answers the first failed window's
- * reason, with which the renderer fails the smoke. A smoke builds and writes no results file.
+ * reason, with which the renderer fails the smoke. A smoke builds and writes no results file: its
+ * log says how long its script flew and shows its geometry block.
+ *
+ * A `--sizes on` run's `sizes` block that its check refused (R10.T14.b) loses the run nothing: its
+ * problems are logged, the results are written without it, and the block as the renderer sent it
+ * goes beside them with its problems, as `<results-name>-sizes-rejected.json`
+ * ({@link rejectedSizesPath}).
  *
  * Electron is reached only through {@link SpikeSessionDeps}, so that `index.ts` wires it and the
  * logic is testable; the IPC handlers (`registerSpikeHandlers`) call into the session.
@@ -24,20 +30,26 @@ import { mkdir, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import type { DescentSpikeReport, SpikeLaunch, SpikeResultsAnswer } from "../preload/api";
+import { geometrySmokeLines } from "./geometryResults";
 import { type Measured, measured, missing } from "./measured";
 import type { TraceFigures } from "./reduceTrace";
 import {
   buildResults,
   describeClocks,
   describeClockSamples,
+  freeResultsName,
   gpuClocksOf,
   type MemorySample,
+  NODE_PARTIAL_FILES,
   type ResultsFiles,
+  resultsStem,
   type RunDescription,
   writeResults,
 } from "./results";
+import type { LoadReading } from "./sizesResults";
 import type { SpikeHandlerDeps, SpikeTraceState, TraceWindowStop } from "./spike";
-import type { SpikeCaptureFiles } from "./spikeReport";
+import { runWithTerrain, type SpikePartialsSink, type SpikePartialsStart } from "./spikePartials";
+import type { RejectedSizes, SpikeCaptureFiles } from "./spikeReport";
 import {
   mergeTraceWindows,
   type TraceRecording,
@@ -79,8 +91,20 @@ export interface SpikeSessionDeps {
    */
   readonly reduce: (path: string, categories: ReadonlyArray<string>) => Promise<TraceFigures>;
   readonly memory: { start(): void; stop(): Promise<ReadonlyArray<MemorySample>> };
+  /**
+   * The machine's 1-minute load, read at the start, each minute and the end of a `--sizes on` run
+   * (plan R10, R10.T14.b; `LoadSampler`), beside the memory sampler, for the `sizes` block; absent,
+   * none is read.
+   */
+  readonly load?: { start(): void; stop(): Measured<ReadonlyArray<LoadReading>> };
   /** The results file's directory (`--out`, or `docs/measurements/descent-spike/`). */
   readonly outDir: string;
+  /**
+   * Where a full run's finished segments are written as each ends, so that a run stopped part-way
+   * keeps them (R14's Mac measurements): a worker thread's (`workerPartials`) in a run; absent,
+   * none are written.
+   */
+  readonly partials?: (start: SpikePartialsStart) => SpikePartialsSink;
   readonly exit: (code: number) => void;
   readonly log: (line: string) => void;
   /** The file operations, Node's by default. */
@@ -96,6 +120,14 @@ export interface SpikeFiles {
   size(path: string): Promise<number>;
   /** For the results file (`writeResults`'s). */
   readonly results?: ResultsFiles;
+}
+
+/**
+ * Where a refused `sizes` block goes (R10.T14.b): beside the results file `resultsPath`, as
+ * `<results-name>-sizes-rejected.json`.
+ */
+export function rejectedSizesPath(resultsPath: string): string {
+  return `${resultsPath.replace(/\.json$/u, "")}-sizes-rejected.json`;
 }
 
 function messageOf(error: unknown): string {
@@ -153,8 +185,13 @@ export class SpikeSession {
   #windows: WrittenWindow[] = [];
   #trace: Measured<TraceRecording> = missing("the trace was not recorded");
   #memory: ReadonlyArray<MemorySample> = [];
+  /** The load's readings of a `--sizes on` run, or `null` where none were read. */
+  #load: Measured<ReadonlyArray<LoadReading>> | null = null;
   /** The renderer's last private-memory reading, bytes. */
   #rendererBytes: number | null = null;
+  /** The results' name a full run with finished segments takes as it starts, and their sink. */
+  #name: string | null = null;
+  #partials: SpikePartialsSink | null = null;
   #ended = false;
 
   /** Whether the renderer has ended the run (`end`). */
@@ -183,7 +220,12 @@ export class SpikeSession {
       rendererMemory: (bytes) => {
         this.#rendererBytes = bytes;
       },
-      writeResults: (report) => this.#writeResults(report),
+      writeResults: (report, rejectedSizes) => this.#writeResults(report, rejectedSizes ?? null),
+      writePart: (part) => {
+        // A smoke's, or a run's whose sink is not given, is let go: it writes no finished segments.
+        this.#partials?.add(part);
+        return Promise.resolve();
+      },
       writeCapture: (capture) => this.#writeCapture(capture),
       end: (code, reason) => {
         this.#ended = true;
@@ -200,10 +242,23 @@ export class SpikeSession {
       throw new Error("the spike is already measuring");
     }
     this.#run = this.#deps.describe();
-    await this.#run;
+    const run = await this.#run;
+    const partials = this.#deps.partials;
+    if (!this.#deps.launch.smoke && partials !== undefined && this.#partials === null) {
+      // The name the finished segments and the results share, free of either as the run starts.
+      const stem = resultsStem({ ...run, profiled: this.#deps.trace.settings.profiled });
+      const name = await freeResultsName(
+        this.#deps.outDir,
+        stem,
+        this.#files.results ?? NODE_PARTIAL_FILES,
+      );
+      this.#name = name;
+      this.#partials = partials({ outDir: this.#deps.outDir, name, run });
+    }
     this.#windows = [];
     await this.#deps.trace.start();
     this.#deps.memory.start();
+    this.#deps.load?.start();
     this.#measuring = true;
   }
 
@@ -259,6 +314,7 @@ export class SpikeSession {
     this.#refuseWhileBusy();
     this.#measuring = false;
     this.#memory = await this.#deps.memory.stop();
+    this.#load = this.#deps.load?.stop() ?? null;
     try {
       // A trace a failed cycle ended has no last window to stop.
       if (this.#deps.trace.state === "recording") {
@@ -362,37 +418,73 @@ export class SpikeSession {
     return merged.figures.reason;
   }
 
-  async #writeResults(report: DescentSpikeReport): Promise<SpikeResultsAnswer> {
+  /**
+   * A smoke's script, how long and in how many frames, its 10 s counted from its first worker bake
+   * (R05.T18), and its report's `geometry` block (plan R14, R14.T1.f): as a results file's summary
+   * shows it, or that no segment sampled drawn terrain ({@link geometrySmokeLines}), or that it has
+   * none, as over the test planet.
+   */
+  #logSmokeReport(report: DescentSpikeReport): void {
+    const times = report.frames.scriptTimesS;
+    this.#deps.log(
+      `descent spike: the smoke flew ${(times.at(-1) ?? 0).toFixed(1)} s of script in ${String(times.length)} frames`,
+    );
+    if (report.geometry === undefined) {
+      this.#deps.log("descent spike: the report holds no geometry block");
+      return;
+    }
+    for (const line of geometrySmokeLines(report.geometry)) {
+      this.#deps.log(`descent spike: ${line}`);
+    }
+  }
+
+  async #writeResults(
+    report: DescentSpikeReport,
+    rejectedSizes: RejectedSizes | null,
+  ): Promise<SpikeResultsAnswer> {
     if (this.#run === null) {
       throw new Error("the spike wrote results before it started measuring");
     }
+    if (rejectedSizes !== null) {
+      this.#deps.log(
+        `descent spike: the sizes block was refused, the results are written without it: ${rejectedSizes.problems.join("; ")}`,
+      );
+    }
     if (this.#deps.launch.smoke) {
-      // A smoke's 10 s are all warm-up and it writes no file: its log holds every clock sample.
+      // A smoke's script is all warm-up and it writes no file: its log holds every clock sample,
+      // how long it flew and the geometry a file would hold.
       this.#deps.log(
         `descent spike: GPU clocks sampled ${describeClockSamples(gpuClocksOf(this.#memory))}`,
       );
+      this.#logSmokeReport(report);
       return { kind: "smoke checked", failure: this.#checkSmokeTrace(report) };
     }
-    const described = await this.#run;
     // The terrain variant the renderer drew with, beside the flags that asked for it.
-    const run =
-      report.terrain === undefined
-        ? described
-        : {
-            ...described,
-            options: {
-              ...described.options,
-              terrainVertexPath: report.terrain.vertexPath,
-              terrainNormals: report.terrain.normals,
-            },
-          };
-    const results = buildResults({ run, report, trace: this.#trace, memory: this.#memory });
+    const run = runWithTerrain(await this.#run, report);
+    const load = this.#load;
+    const results = buildResults({
+      run,
+      report,
+      trace: this.#trace,
+      memory: this.#memory,
+      ...(load === null ? {} : { load }),
+    });
     const { clocks } = results.gpu;
     this.#deps.log(
       `descent spike: GPU clocks ${clocks.value === null ? `— (${clocks.reason})` : describeClocks(clocks.value, results.memory.series.tMs, report.warmupS)}`,
     );
-    const paths = await writeResults(this.#deps.outDir, results, this.#files.results);
+    const paths = await writeResults(this.#deps.outDir, results, this.#files.results, this.#name);
     this.#deps.log(`descent spike: results in ${paths.json}`);
+    // The results stand: the finished segments' files, once every part is written, are removed.
+    await this.#partials?.close(true);
+    if (rejectedSizes !== null) {
+      const rejected = rejectedSizesPath(paths.json);
+      await this.#files.writeFile(
+        rejected,
+        `${JSON.stringify({ problems: rejectedSizes.problems, sizes: rejectedSizes.block }, null, 2)}\n`,
+      );
+      this.#deps.log(`descent spike: the refused sizes block and its problems in ${rejected}`);
+    }
     return { kind: "written", paths };
   }
 

@@ -1,0 +1,2541 @@
+# HYPERION procedural generation: the galaxy stage.
+# Read from rendering-and-planets at a6d3f6dd (GENERATOR_VERSION 21). Code is the authority;
+# planned steps come from docs/agent/plans/galaxy-generation and the galaxy brainstorm.
+
+[meta]
+stage = "galaxy"
+part = "galaxy"
+prefix = "g"
+title = "Galactic Properties & Megastructures"
+snapshot = "25d5d636"
+
+# ---------------------------------------------------------------------------------------------
+# Clusters
+# ---------------------------------------------------------------------------------------------
+
+[[cluster]]
+id = "g.det"
+label = "Determinism backbone"
+
+[[cluster]]
+id = "g.params"
+label = "Galaxy parameters"
+
+[[cluster]]
+id = "g.potential"
+label = "Mass model and potential"
+
+[[cluster]]
+id = "g.fields"
+label = "Population fields"
+
+[[cluster]]
+id = "g.gas"
+label = "Gas and dust"
+
+[[cluster]]
+id = "g.features"
+label = "Feature catalogue: clusters, nebulae"
+
+[[cluster]]
+id = "g.centre"
+label = "Galactic centre"
+
+[[cluster]]
+id = "g.global"
+label = "Global list: streams, dwarfs"
+
+[[cluster]]
+id = "g.place"
+label = "Grid placement"
+
+[[cluster]]
+id = "g.motion"
+label = "Kinematics and displaced objects"
+
+[[cluster]]
+id = "g.classes"
+label = "Catalogue classes and SNRs"
+
+[[cluster]]
+id = "g.query"
+label = "Runtime access"
+
+# ---------------------------------------------------------------------------------------------
+# Determinism backbone
+# ---------------------------------------------------------------------------------------------
+
+[[node]]
+id = "g.seed"
+label = "Universe seed (u64)"
+kind = "seed"
+cluster = "g.det"
+summary = "Any u64; text form is exactly 16 lower-case hex digits"
+detail = [
+  "Key word 0 of every stream; universe = (seed, version)",
+  "Keys are built from integers only; float bits never hashed",
+]
+source = ["crates/hyperion-base/src/rng/key.rs", "P01.T7.c"]
+status = "built"
+
+[[node]]
+id = "g.gen_version"
+label = "GENERATOR_VERSION = 21"
+kind = "param"
+cluster = "g.det"
+summary = "Gates all output; only the current version generates"
+detail = [
+  "Covers block function, key layout, tag hash, word-to-float,",
+  "sampler algorithms and word use, threshold rule, event keys,",
+  "pinned libm, H and L, ID layouts and the fitted tables",
+  "Not in the stream key: a bump moves only what code moves",
+  "Golden files fail CI until a bump is deliberate",
+]
+source = ["crates/hyperion-base/src/version.rs", "crates/hyperion-sim/src/tables/mod.rs", "P01.T3"]
+status = "built"
+
+[[node]]
+id = "g.stream"
+label = "Threefry2x64-20 stream"
+kind = "seed"
+cluster = "g.det"
+summary = "Key (seed, FNV-1a tag hash); counter (word, sub, block)"
+detail = [
+  "Domain tags: registered names, never renamed, one scope each",
+  "(Galaxy, Cell, Feature, System, Body, ...); open checks it",
+  "Counter word 1 = sub << 48 | block; 2^49 words per stream",
+  "uniform = (w >> 11) × 2^-53; normal by Box-Muller pair",
+  "Poisson: inversion below mean 10, PTRS from 10 up",
+  "Decisions: mark w >> 11 against ceil(p × 2^53)",
+]
+cite = ["Salmon et al. 2011", "Hormann 1993"]
+source = [
+  "crates/hyperion-base/src/rng/stream.rs",
+  "crates/hyperion-base/src/rng/threefry.rs",
+  "crates/hyperion-base/src/rng/domain_tag.rs",
+  "crates/hyperion-base/src/rng/decide.rs",
+  "crates/hyperion-base/src/rng/sample/poisson.rs",
+  "crates/hyperion-sim/src/rng/tags.rs",
+  "P01.T7.a",
+  "P01.T7.b",
+  "P01.T8.d",
+  "P01.T9",
+]
+status = "built"
+
+[[node]]
+id = "g.key_galaxy"
+label = "Key: galaxy() / galaxy_item(n)"
+kind = "seed"
+cluster = "g.det"
+summary = "Counter word 0 = 0, or item n of a galaxy-wide list"
+detail = [
+  "Scalar parameters on galaxy(); lists on galaxy_item(n)",
+  "Progenitors: dominant 0, lesser 1-5, recent 6 + j",
+  "Halo items: in situ 0, dominant 1, lesser 2-6, debris 7",
+  "gas.noise: item = packed lattice word (octave, i, j, k)",
+  "Orphan stream k: item k; a dwarf: its progenitor's n",
+]
+source = ["crates/hyperion-base/src/rng/key.rs", "crates/hyperion-sim/src/galaxy/params/draws.rs", "P02.T5.a"]
+status = "built"
+
+[[node]]
+id = "g.key_cell"
+label = "Key: cell(word)"
+kind = "seed"
+cluster = "g.det"
+summary = "Cell word = ID of the cell's candidate 0, index zeroed"
+detail = [
+  "Grid cells: SystemId::cell_word; feature cells: the word of",
+  "FeatureRef(cell, 0); nested cells: candidate 0 in its band",
+  "Counts: one stream per cell and tag; cells independent",
+]
+source = ["crates/hyperion-base/src/rng/key.rs", "crates/hyperion-sim/src/galaxy/placement/cell.rs", "P03.T3"]
+status = "built"
+
+[[node]]
+id = "g.key_feature"
+label = "Key: feature(word)"
+kind = "seed"
+cluster = "g.det"
+summary = "FeatureRef object word: 4,096 ly cell + 14-bit index"
+detail = [
+  "Index = candidate number + counts of the earlier processes",
+  "Opens every per-feature mark stream (feature.*)",
+]
+source = ["crates/hyperion-sim/src/id/reserved.rs", "crates/hyperion-sim/src/galaxy/features/ids.rs", "P09.T1"]
+status = "built"
+
+[[node]]
+id = "g.key_system"
+label = "Key: from(SystemId / BodyId)"
+kind = "seed"
+cluster = "g.det"
+summary = "64-bit system or member ID as counter word 0"
+detail = [
+  "Candidate draws are keyed by the candidate's own ID, so",
+  "other candidates of the cell never shift them",
+  "BodyId: the system's word, sub = body index, scope Body",
+  "Index layouts belong to the stellar and planetary stages",
+]
+source = [
+  "crates/hyperion-base/src/rng/key.rs",
+  "crates/hyperion-sim/src/id/mod.rs",
+  "crates/hyperion-sim/src/id/system.rs",
+  "crates/hyperion-sim/src/id/body.rs",
+  "P01.T7.c",
+]
+status = "built"
+
+[[node]]
+id = "g.event_key"
+label = "Event key (two-step)"
+kind = "seed"
+cluster = "g.det"
+summary = "One block of (seed, event tag; ID) keys the bin streams"
+detail = [
+  "Step 2 counter: (bin or cycle k, slot << 48 | block)",
+  "Slot 0 is the bin's own stream; slot j + 1 is event j's",
+  "Event word: 16-bit tag, signed 40-bit bin, 8-bit number",
+  "class.ev.supernova backs event tag 0x0202 (catalogue SNe)",
+  "Stars: star.var.cycle 0x0109; star.ev.* 0x0100-0x0108",
+]
+source = [
+  "crates/hyperion-sim/src/rng/event.rs",
+  "crates/hyperion-sim/src/id/event.rs",
+  "crates/hyperion-sim/src/id/event_tags.rs",
+  "crates/hyperion-sim/src/events/mod.rs",
+  "P01.T6.e",
+  "P01.T10",
+  "P06.T27.a",
+]
+status = "built"
+
+# ---------------------------------------------------------------------------------------------
+# Galaxy parameters
+# ---------------------------------------------------------------------------------------------
+
+[[node]]
+id = "g.mw_fixture"
+label = "Milky Way fixture"
+kind = "param"
+cluster = "g.params"
+summary = "Measured values in place of draws (milky_way_like)"
+detail = [
+  "M* 5.12e10 M☉; thick 8%, bulge+bar 35% (bar 30%),",
+  "nuclear disc 2.06%, halo 1%; τ 7 Gyr; thin 7,000 × 1,130 ly",
+  "Bar 16,000 ly, corotation 1.24; nuclear disc 290 × 93 ly",
+  "4 arms at 12°; f* 0.28 → M200 1.16e12 M☉; gas 29.3% of thin",
+  "BH -0.384 dex below M-σ → 4.30e6 M☉ (Sgr A*)",
+]
+cite = ["Bland-Hawthorn & Gerhard 2016", "Portail et al. 2017", "Sormani et al. 2022", "GRAVITY Collaboration 2022", "McMillan 2017"]
+source = ["crates/hyperion-sim/src/galaxy/params/milky_way.rs", "P02.T5.c"]
+status = "built"
+
+[[node]]
+id = "g.imf"
+label = "Mass function (fitted IMF)"
+kind = "table"
+cluster = "g.params"
+summary = "Chabrier 2003 system IMF, >1 M☉ branch × 0.920 (default)"
+detail = [
+  "Log-normal m_c 0.22 M☉, σ 0.57 dex to 1 M☉; m^-2.3 above",
+  "Scale s = 0.9201 fitted to the 20 pc census (P15.T4.b)",
+  "Kroupa 2001 alternative: slopes 1.3 / 2.3, break 0.5 M☉",
+  "Stellar range 0.08-150 M☉; substellar branch to 0.01 M☉",
+  "Band shares are integrated, never constants; default A-E",
+  "67 / 12 / 17 / 3.4 / 0.95 %",
+]
+cite = ["Chabrier 2003", "Kroupa 2001", "Kirkpatrick et al. 2024"]
+source = [
+  "crates/hyperion-sim/src/galaxy/imf.rs",
+  "crates/hyperion-sim/src/tables/chabrier.rs",
+  "crates/hyperion-fit/src/tasks/chabrier.rs",
+  "P02.T2",
+  "P15.T4.b",
+]
+status = "built"
+
+[[node]]
+id = "g.draw_mass"
+label = "Stellar mass M*"
+kind = "draw"
+cluster = "g.params"
+summary = "Log-uniform 3-10 × 10^10 M☉, one word"
+detail = ["lo × (hi/lo)^u, clamped to the range"]
+source = ["crates/hyperion-sim/src/galaxy/params/draws.rs", "P02.T5.a"]
+status = "built"
+
+[[node]]
+id = "g.draw_shares"
+label = "Population shares and SFH"
+kind = "draw"
+cluster = "g.params"
+summary = "Shares of systems; thin disc takes the rest; τ 5-9 Gyr"
+detail = [
+  "Thick 0.08-0.14; bulge+bar 0.20-0.35, bar 0.30-0.40 of it",
+  "Nuclear disc 0.010-0.025; halo 0.007-0.014 (uniform)",
+  "SFH: thin-disc rate ~ exp(age/τ) over 10 Gyr, τ U(5, 9) Gyr",
+  "Young share = expm1(0.1/τ) / expm1(10/τ): 0.32-0.55%",
+]
+cite = ["Bland-Hawthorn & Gerhard 2016", "Licquia & Newman 2015"]
+source = ["crates/hyperion-sim/src/galaxy/params/draws.rs", "crates/hyperion-sim/src/galaxy/ages.rs", "P02.T5.a", "P02.T3"]
+status = "built"
+
+[[node]]
+id = "g.draw_structure"
+label = "Structure, arms and gradient"
+kind = "draw"
+cluster = "g.params"
+summary = "Size scatters, heights, axis ratios, arms, [Fe/H] slope"
+detail = [
+  "Scatter dex: thin 0.05, bulge 0.06, bar 0.05, nuclear 0.04",
+  "Thin mean height 850-1,150 ly; young disc 225-345 ly",
+  "Thick L 0.7-0.9, h 2.7-3.3 × thin; bulge b/a 0.5-0.7,",
+  "c/a 0.3-0.4, boxiness 3-4; bar width 0.08-0.12 L, h 500-700",
+  "ly, corotation 1.0-1.4 L; nuclear h/L 0.3-0.5",
+  "Arms 2|4, pitch 10-18°; [Fe/H] grad -0.07..-0.04 dex/kpc",
+]
+cite = ["Wegg & Gerhard 2013", "Wegg, Gerhard & Portail 2015", "Bovy 2017"]
+source = ["crates/hyperion-sim/src/galaxy/params/draws.rs", "crates/hyperion-sim/src/galaxy/params/inputs.rs", "P02.T5.a"]
+status = "built"
+
+[[node]]
+id = "g.draw_dark"
+label = "Dark halo draws"
+kind = "draw"
+cluster = "g.params"
+summary = "f* log-uniform 0.12-0.45; concentration scatter 0.11 dex"
+source = ["crates/hyperion-sim/src/galaxy/params/draws.rs", "P02.T5.a"]
+cite = ["Dutton & Maccio 2014"]
+status = "built"
+
+[[node]]
+id = "g.draw_halo"
+label = "Stellar halo components"
+kind = "draw"
+cluster = "g.params"
+summary = "In situ, dominant merger, 2-5 lesser, globular debris"
+detail = [
+  "Shares: in situ 0.15-0.30, dominant 0.35-0.60, lesser",
+  "0.10-0.25 (stick-breaking), debris 0.08-0.15; renormalised",
+  "q: in situ 0.45-0.55, dominant 0.6-0.8, lesser 0.6-1.0",
+  "Inner slope 2.2-2.8 (debris 4.0-4.5); dominant break",
+  "52,000-91,000 ly, steepening 1.5-2.5; age mid 10.5-12.5 Gyr",
+  "Cores 1,500-5,000 ly (lesser 3,000); lesser [Fe/H] -2..-1",
+]
+cite = ["Deason, Belokurov & Evans 2011", "Xue et al. 2015", "Pila-Diez et al. 2015", "Medina et al. 2024"]
+source = ["crates/hyperion-sim/src/galaxy/params/draws.rs", "crates/hyperion-sim/src/galaxy/params/halo.rs", "P02.T5.a"]
+status = "built"
+
+[[node]]
+id = "g.draw_accretion"
+label = "Accretion history"
+kind = "draw"
+cluster = "g.params"
+summary = "Last major merger 6-11 Gyr; recent progenitors Poisson(8)"
+detail = [
+  "Recent masses dN/dM ~ M^-1.45 on 1e5-10^9.5 M☉, 0-6 Gyr ago",
+  "Lesser ones accreted 6-12 Gyr ago, after their last stars",
+  "Orbits: apocentre log-U 20,000-200,000 ly, peri 0.05-0.6 apo",
+  "Dominant (GSE-like) merger: eccentricity 0.85-0.95",
+  "cos i U(-1, 1); node and phase U(0, 2π)",
+  "Globular count scatter N(0, 0.2 dex)",
+]
+cite = ["Belokurov et al. 2018"]
+source = ["crates/hyperion-sim/src/galaxy/params/draws.rs", "crates/hyperion-sim/src/galaxy/params/accretion.rs", "P02.T5.a"]
+status = "built"
+
+[[node]]
+id = "g.system_count"
+label = "System count and population mass"
+kind = "model"
+cluster = "g.params"
+summary = "N = M* / Σ(share × mean present mass) ≈ 0.5-1.7e11"
+detail = [
+  "7 population shares: young = thin × young share,",
+  "bulge = bulge+bar - bar; halo, nuclear as drawn",
+  "Mean mass per population from the stars stage's fates",
+  "MW: 0.5985 M☉ per system → N = 8.55e10 (Kroupa 0.48)",
+  "Population mass = N × share × mean, in population order",
+  "Those masses set the coupled sizes",
+]
+source = [
+  "crates/hyperion-sim/src/galaxy/params/derive.rs",
+  "P02.T4",
+  "P02.T5.b",
+]
+status = "built"
+
+[[node]]
+id = "g.size_coupling"
+label = "Sizes coupled to mass^(1/3)"
+kind = "model"
+cluster = "g.params"
+summary = "MW size × (M / M_MW)^(1/3) × 10^scatter, clamped"
+detail = [
+  "Thin R_d 8,480 ly at 3.4e10 M☉, clamp 7,000-11,500 ly",
+  "Bulge long axis 2,300 ly at 1.3e10, clamp 1,700-3,000 ly",
+  "Bar half-length 16,000 ly at 5.6e9, clamp 10,000-18,000",
+  "Nuclear disc 290 ly at 1.05e9 M☉, clamp 200-400 ly",
+  "Independent draws gave 390 km/s at 1 kpc, so rejected",
+]
+cite = ["Bland-Hawthorn & Gerhard 2016", "Wegg, Gerhard & Portail 2015", "Sormani et al. 2022"]
+source = ["crates/hyperion-sim/src/galaxy/params/derive.rs", "P02.T5.b"]
+status = "built"
+
+# ---------------------------------------------------------------------------------------------
+# Mass model and potential
+# ---------------------------------------------------------------------------------------------
+
+[[node]]
+id = "g.mge"
+label = "MGE coefficient tables"
+kind = "table"
+cluster = "g.potential"
+summary = "Gaussian sums for exp, holed exp and bar (provisional)"
+detail = [
+  "14 fixed log-spaced widths, NNLS by coordinate descent",
+  "MGE_EXP within 1.289% of e^-s over s = 0.05-10",
+  "MGE_BAR within 2.88% of its centre; mass within 0.212%",
+  "Free-width refit and a boxy bulge table planned (P15.T3)",
+]
+cite = ["Emsellem, Monnet & Bacon 1994"]
+source = ["crates/hyperion-sim/src/tables/mge.rs", "crates/hyperion-fit/src/tasks/mge.rs", "P02.T6.a", "P15.T3"]
+status = "built"
+
+[[node]]
+id = "g.halo_nfw"
+label = "NFW dark halo"
+kind = "model"
+cluster = "g.potential"
+summary = "M200 = M* / (0.157 f*); c200 after Dutton & Maccio 2014"
+detail = [
+  "log c = 0.905 - 0.101 log(M200 h / 1e12 M☉) + scatter",
+  "h = 0.671; r200 at 200 ρ_crit; finite escape speed",
+  "MW: M200 1.16e12 M☉ (McMillan 2017: 1.3 ± 0.3e12)",
+]
+cite = ["Navarro, Frenk & White 1997", "Dutton & Maccio 2014", "McMillan 2017"]
+source = ["crates/hyperion-sim/src/galaxy/params/derive.rs", "crates/hyperion-sim/src/galaxy/potential/nfw.rs", "P02.T5.b", "P02.T6"]
+status = "built"
+
+[[node]]
+id = "g.mass_model"
+label = "Mass model"
+kind = "model"
+cluster = "g.potential"
+summary = "≈936 Gaussians + NFW + nuclear cluster + BH point mass"
+detail = [
+  "Order: thin+young (holed), thick, gas, nuclear main, nuclear",
+  "inner, bar, bulge; then NFW, nuclear cluster, black hole",
+  "Each Gaussian's force is a 1D integral on 32 GL nodes",
+  "Gas disc (drawn mass, length): plain double exponential",
+  "Bulge is a moment-matched spheroid (no fitted boxy table)",
+]
+cite = ["Binney & Tremaine 2008", "Cappellari 2002"]
+source = ["crates/hyperion-sim/src/galaxy/potential/model.rs", "crates/hyperion-sim/src/galaxy/potential/mge.rs", "P02.T6.b"]
+status = "built"
+
+[[node]]
+id = "g.potential_tables"
+label = "Potential tables"
+kind = "model"
+cluster = "g.potential"
+summary = "v_c, Ω, κ, Φ in plane; 64×64 (R, |z|) grid on request"
+detail = [
+  "64 log points 2^-4 to 2^18 ly; cubic Hermite in ln R",
+  "Grid by with_full_potential (≈2 s): Φ and forces off-plane",
+  "Escape speed to 2 r200: 512 km/s at 26,000 ly (MW)",
+  "Tidal radius (G m / (4Ω² - κ²))^(1/3), floor 0.05 Ω²",
+  "Bar pattern speed Ω(corotation); MW test 33-41 km/s/kpc",
+]
+cite = ["Deason et al. 2019", "Piffl et al. 2014"]
+source = ["crates/hyperion-sim/src/galaxy/potential/tables.rs", "P02.T6.d"]
+status = "built"
+
+# ---------------------------------------------------------------------------------------------
+# Population fields
+# ---------------------------------------------------------------------------------------------
+
+[[node]]
+id = "g.thin_disc"
+label = "Thin disc: young + 5 sub-discs"
+kind = "model"
+cluster = "g.fields"
+summary = "Σ ~ exp(-R_h/R - R/R_d), central hole R_h = 0.55 R_d"
+detail = [
+  "Young disc: ages -H to 100 Myr, sharp arms",
+  "Old sub-discs by age 0.1-1, 1-2, 2-4, 4-7, 7-10 Gyr",
+  "Each normalised to its share × N, over all space",
+  "Cell bound: exp at nearest radius, hole at the farthest",
+]
+cite = ["Dehnen & Binney 1998", "Lopez-Corredoira et al. 2004", "Bovy & Rix 2013"]
+source = ["crates/hyperion-sim/src/galaxy/fields/disc.rs", "crates/hyperion-sim/src/galaxy/fields/sub_discs.rs", "P02.T7.a", "P02.T12.b"]
+status = "built"
+
+[[node]]
+id = "g.vertical"
+label = "Vertical Jeans profiles"
+kind = "model"
+cluster = "g.fields"
+summary = "Cored profiles from the Jeans eq. in the model potential"
+detail = [
+  "σ_z = s × 21.1 km/s ((τ+0.1)/10.1)^0.441 (1 + 0.20|z|/kpc)",
+  "Rise stops at 2 kpc; s is fixed by the drawn mean height",
+  "Solved at the solar radius 3.8 R_d (nuclear disc at 2 L)",
+  "E(z) tabulated at 705 knots, monotone bit for bit",
+  "Serves young, sub-, thick and nuclear discs alike",
+]
+cite = ["Sharma et al. 2021", "Bovy 2017"]
+source = ["crates/hyperion-sim/src/galaxy/fields/vertical.rs", "crates/hyperion-sim/src/galaxy/fields/sub_discs.rs", "P02.T7.b"]
+status = "built"
+
+[[node]]
+id = "g.thick_disc"
+label = "Thick disc"
+kind = "model"
+cluster = "g.fields"
+summary = "Exponential, cored (Jeans), no hole; ages U(10, 12) Gyr"
+detail = [
+  "Length 0.7-0.9 and height 2.7-3.3 × the thin disc's",
+  "MW fixture: 1.93 kpc × 935 pc; 8-14% of systems",
+]
+cite = ["Bland-Hawthorn & Gerhard 2016"]
+source = ["crates/hyperion-sim/src/galaxy/fields/disc.rs", "crates/hyperion-sim/src/galaxy/ages.rs", "P02.T7.a"]
+status = "built"
+
+[[node]]
+id = "g.bulge"
+label = "Boxy triaxial bulge"
+kind = "model"
+cluster = "g.fields"
+summary = "n0 exp(-m), boxy vertical exponent 3-4; ages 8-12 Gyr"
+detail = [
+  "m = ([(x/a)² + (y/b)²]^(k/2) + |z/c|^k)^(1/k), k = 3-4",
+  "Long axis a coupled to mass^(1/3); along the bar (x axis)",
+  "MW a, b, c = 2,280, 1,440, 730 ly",
+  "Centre ≈ 100× solar-neighbourhood density (0.2-0.35/ly³)",
+]
+cite = ["Wegg & Gerhard 2013"]
+source = ["crates/hyperion-sim/src/galaxy/fields/bulge.rs", "P02.T7.c"]
+status = "built"
+
+[[node]]
+id = "g.bar"
+label = "Long bar along +x"
+kind = "model"
+cluster = "g.fields"
+summary = "Level to 0.85 L, Gaussian end 0.15 L; ages 6-10 Gyr"
+detail = [
+  "n0 L(|x|) exp(-y²/2σ_y²) exp(-|z|/h); defines the x axis",
+  "MW half-length 16,000 ly, width 0.10 L, height 590 ly",
+  "Half-length coupled to mass^(1/3); arms fade in at its ends",
+]
+cite = ["Wegg, Gerhard & Portail 2015", "Portail et al. 2017"]
+source = ["crates/hyperion-sim/src/galaxy/fields/bar.rs", "P02.T7.c"]
+status = "built"
+
+[[node]]
+id = "g.nuclear_disc"
+label = "Nuclear disc: main + inner"
+kind = "model"
+cluster = "g.fields"
+summary = "200-400 ly exponential disc; inner 5.5% at 0.158 L, holed"
+detail = [
+  "Main part: 94.5% of the mass, effective height 0.3-0.5 L",
+  "Inner part: height 0.8 × its length, hole 0.55 × its length",
+  "Ages: 90% 8-12 Gyr, 5% 1-8 Gyr, 5% from -H to 1 Gyr",
+  "Length coupled to mass^(1/3); cored Jeans profiles",
+]
+cite = ["Sormani et al. 2022", "Nogueras-Lara et al. 2020", "Launhardt et al. 2002", "Sofue 2013"]
+source = [
+  "crates/hyperion-sim/src/galaxy/fields/disc.rs",
+  "crates/hyperion-sim/src/galaxy/params/mod.rs",
+  "crates/hyperion-sim/src/galaxy/ages.rs",
+  "P02.T12",
+]
+status = "built"
+
+[[node]]
+id = "g.stellar_halo"
+label = "Stellar halo mixture"
+kind = "model"
+cluster = "g.fields"
+summary = "Cored, flattened broken power laws; sphere cut 65,000 ly"
+detail = [
+  "n0 (1 + m²/a²)^(-γ/2) B(m), with m² = x² + y² + z²/q²",
+  "Dominant merger: B = min(1, (m/r_b)^-Δ) beyond its break",
+  "In-situ part cut at 50,000 ly; each normalised in its cut",
+  "Components are marks, each with its own ages and [Fe/H]",
+]
+cite = ["Deason et al. 2013", "Xue et al. 2015", "Pila-Diez et al. 2015"]
+source = ["crates/hyperion-sim/src/galaxy/fields/halo.rs", "P02.T7.d"]
+status = "built"
+
+[[node]]
+id = "g.arms"
+label = "Logarithmic spiral arms"
+kind = "model"
+cluster = "g.fields"
+summary = "φ = n(θ + ln(R/L_bar)/tan p); mean 1 around every circle"
+detail = [
+  "Fade-in (1 + tanh((R - L_bar) / 0.1 L_bar)) / 2",
+  "Old discs: 1 + f a cos φ, amplitude a U(0.10, 0.30)",
+  "Young: 1 + f A (g - 1), g = exp(k(cos φ - 1)) / I0e(k)",
+  "A U(0.7, 0.9); width σ_w U(250, 500) ly, set in light-years",
+  "Arms trail the counter-clockwise rotation",
+]
+source = ["crates/hyperion-sim/src/galaxy/fields/arms.rs", "crates/hyperion-sim/src/galaxy/special.rs", "P02.T7", "P02.T8.b"]
+status = "built"
+
+[[node]]
+id = "g.ages"
+label = "Age distributions"
+kind = "model"
+cluster = "g.fields"
+summary = "Per component: exponential history or uniform pieces"
+detail = [
+  "Signed age at the epoch; still-forming parts start at -H",
+  "Exact closed-form quantile: one uniform per draw",
+  "Thick 10-12, bulge 8-12, bar 6-10 Gyr; halo components in",
+  "1 Gyr ranges, heated ones no younger than the merger",
+  "Young field's (1 - φ(age)) factor not yet applied",
+]
+cite = ["Nogueras-Lara et al. 2020"]
+source = ["crates/hyperion-sim/src/galaxy/ages.rs", "P02.T3", "P09.T2.c"]
+status = "partial"
+
+[[node]]
+id = "g.feh_field"
+label = "[Fe/H] distributions"
+kind = "model"
+cluster = "g.fields"
+summary = "Mean and σ per component, position and age; no draws"
+detail = [
+  "Thin: gradient × (R - 3.8 R_d), clamp -1..+0.5, σ 0.20",
+  "Thick: -0.5 at 11 Gyr, -0.2 dex per Gyr of age, σ 0.20",
+  "Bulge 0.0 / 0.40; bar 0.0 / 0.30; nuclear disc +0.1 / 0.30",
+  "Halo: in situ -0.6, dominant -1.2, debris -1.5, σ 0.3",
+  "Every disc is solar at its own solar circle, 3.8 R_d",
+]
+cite = ["Bergemann et al. 2014", "Casagrande et al. 2011", "Haywood et al. 2013", "Xiang & Rix 2022"]
+source = ["crates/hyperion-sim/src/galaxy/fields/metallicity.rs", "P02.T7.e", "P02.T12.c"]
+status = "built"
+
+# ---------------------------------------------------------------------------------------------
+# Gas and dust
+# ---------------------------------------------------------------------------------------------
+
+[[node]]
+id = "g.gas_draws"
+label = "Gas disc and field draws"
+kind = "draw"
+cluster = "g.gas"
+summary = "Gas mass and length, 11 gas.params words, lattice noise"
+detail = [
+  "Mass 0.175-0.35 of thin disc; R_g 1.5-2.0 R_d; h 700 ly",
+  "Warm 0.025-0.035 cm^-3, h 2,500-3,500 ly; hole 0.8-1.2 L_bar",
+  "Molecular 2-3e6 M☉; corona 0.5-0.8e-3 cm^-3; floor 300-450",
+  "Lanes: offset 300-600 ly, width 150-300 ly, A 0.08-0.20",
+  "σ_ln 1.0-1.4; octaves 1,024-64 ly, +32 and 8 ly for phase",
+  "One standard normal per lattice point; quintic trilinear",
+]
+cite = ["McKee, Parravano & Hollenbach 2015", "Miller & Bregman 2015"]
+source = [
+  "crates/hyperion-sim/src/galaxy/gas/params.rs",
+  "crates/hyperion-sim/src/galaxy/gas/noise.rs",
+  "crates/hyperion-sim/src/galaxy/params/draws.rs",
+  "P07.T1",
+  "P07.T4",
+]
+status = "built"
+
+[[node]]
+id = "g.gas_field"
+label = "Gas field and phases"
+kind = "model"
+cluster = "g.gas"
+summary = "Neutral, warm ionised, molecular, corona; noise; phases"
+detail = [
+  "Neutral exp(-R_m/R - R/R_g) exp(-|z|/h) × arm-phase lanes",
+  "n = n_disc × exp(σ_ln g - σ²/2) + n_corona (mean-preserving)",
+  "P/k = floor + 1.4 m_H σ_P² n_0(R) exp(-|z|/1,500 ly)",
+  "Hot, warm ionised, warm neutral, cold in pressure balance",
+  "Dust per H = 10^[Fe/H] of the young disc's mean at R",
+  "MW plane: 0.80 cm^-3 neutral; column 13.8 M☉/pc²",
+]
+cite = ["Wolfire et al. 2003", "Ferriere 2001", "Krolik, McKee & Tarter 1981", "McMillan 2017", "Gaensler et al. 2008"]
+source = [
+  "crates/hyperion-sim/src/galaxy/gas/field.rs",
+  "crates/hyperion-sim/src/galaxy/gas/smooth.rs",
+  "crates/hyperion-sim/src/galaxy/gas/lanes.rs",
+  "crates/hyperion-sim/src/galaxy/gas/pressure.rs",
+  "crates/hyperion-sim/src/galaxy/gas/phase.rs",
+  "P07.T2",
+  "P07.T3",
+  "P07.T5",
+  "P07.T6",
+]
+status = "built"
+
+[[node]]
+id = "g.feature_gas"
+label = "Feature gas overlay"
+kind = "model"
+cluster = "g.gas"
+summary = "Superbubble holes and Plummer clouds along a sight line"
+detail = [
+  "Hole: replaces the field inside a superbubble, no dust",
+  "Cloud: n_c (1 + r²/a²)^(-5/2) added on top of the field",
+  "From clouds, nurseries' bubbles and embedded gas",
+  "Epoch positions only; the server has no call site yet",
+]
+source = ["crates/hyperion-sim/src/galaxy/features/gas_overlay.rs", "crates/hyperion-sim/src/galaxy/gas/modifiers.rs", "P09.T5", "P07.T8.c"]
+status = "partial"
+
+[[node]]
+id = "g.extinction"
+label = "Extinction along a sight line"
+kind = "query"
+cluster = "g.gas"
+summary = "Dust column → A_V; CCM to 0.9 μm, Gordon et al. from 1.1"
+detail = [
+  "R_V 3.1; N_H 5.8e21 cm^-2 per mag E(B-V); A_K/A_V 0.102",
+  "2-point GL steps ≤ min(32 ly × 2^lod, half local scale)",
+  "Mean or realised noise; symmetric in its end points",
+  "MW: 0.9-2.0 mag per 3,000 ly; 24-38 to centre (tests)",
+  "Feeds star reddening in the sky census (64-step budget)",
+]
+cite = ["Cardelli, Clayton & Mathis 1989", "Gordon et al. 2023", "Bohlin, Savage & Drake 1978", "Decleir et al. 2022"]
+source = ["crates/hyperion-sim/src/galaxy/gas/extinction.rs", "crates/hyperion-sim/src/galaxy/gas/ccm.rs", "P07.T7", "P07.T8"]
+status = "built"
+
+# ---------------------------------------------------------------------------------------------
+# Feature catalogue
+# ---------------------------------------------------------------------------------------------
+
+[[node]]
+id = "g.phi"
+label = "Feature rates and φ"
+kind = "model"
+cluster = "g.features"
+summary = "Birth rates, survival and the share φ of each budget"
+detail = [
+  "Young: φ(a) from f_n 0.9, bound fraction Γ_b 0.125:",
+  "0.85-0.95 at 3 Myr, 0.05-0.15 at 100 Myr",
+  "Open clusters dissolve in 1.3 Gyr (m / 1e4 M☉)^0.62",
+  "Globulars: placed mass / population budget, per band",
+  "Not yet given up by the field (P09.T2.c, with R06.T16.a)",
+  "Also carved binary classes' shares (P11.T7)",
+]
+cite = ["Lamers et al. 2005"]
+source = ["crates/hyperion-sim/src/galaxy/features/shares.rs", "P09.T2.a", "P09.T2.b", "P09.T2.c"]
+status = "partial"
+
+[[node]]
+id = "g.feature_grid"
+label = "Feature catalogue grid"
+kind = "draw"
+cluster = "g.features"
+summary = "4,096 ly cells; one Poisson count per process, thinned"
+detail = [
+  "32³ cells, index capacity 16,384; processes in order:",
+  "globular, old open clusters of sub-discs 1-5, nursery,",
+  "cloud (neutral and molecular terms)",
+  "Disc, neutral clouds: 256 columns of 256 ly; exp(-|z|/H)",
+  "One mark vs density / bound: 1.4-1.6 per accepted feature",
+  "Lookup: cells within radius + 4,096 ly max reach",
+]
+source = ["crates/hyperion-sim/src/galaxy/features/catalogue.rs", "crates/hyperion-sim/src/galaxy/features/ids.rs", "P09.T3.a", "P09.T3.b"]
+status = "built"
+
+[[node]]
+id = "g.globulars"
+label = "Globular clusters"
+kind = "draw"
+cluster = "g.features"
+summary = "N_GC = M200 / 6.5e9 M☉ × 10^scatter, clamped 80-800"
+detail = [
+  "Density (1 + r²/r_c²)^-1.75, r_c 6,800 ly; metal-rich 30%",
+  "(q 0.5, cut 26,000 ly), metal-poor 70% sphere to 65,000",
+  "Mass (M+2e5)^-2 exp(-(M+2e5)/1.07e6) on 1e3-1e7 M☉",
+  "[Fe/H] N(-0.55, 0.25) rich, N(-1.55, 0.35) poor",
+  "Age 12.8 Gyr in situ, U(10.5, 13) accreted; origin mark",
+  "Mass history: Baumgardt & Makino 2003 dissolution",
+]
+cite = ["Burkert & Forbes 2020", "Harris 2010", "Jordan et al. 2007", "Baumgardt & Makino 2003", "Massari et al. 2019"]
+source = [
+  "crates/hyperion-sim/src/galaxy/features/kinds/globular.rs",
+  "crates/hyperion-sim/src/galaxy/params/derive.rs",
+  "P09.T12",
+  "P09.T13",
+]
+status = "built"
+
+[[node]]
+id = "g.open_clusters"
+label = "Old open clusters"
+kind = "draw"
+cluster = "g.features"
+summary = "Per sub-disc; M^-2 on 1e2-1e5 M☉; Lamers survival"
+detail = [
+  "Age from its sub-disc's history, kept by survival S(a)",
+  "Present mass m0 μ_ev(t) (1 - t/t_dis)^(1/0.62)",
+  "r_h = 11.08 ly (m0 / 1e4)^0.242 × 10^(0.25 n)",
+  "Concentration U(0.5, 1.5); [Fe/H] from the field at site",
+]
+cite = ["Lamers et al. 2005", "Brown & Gnedin 2021", "Spitzer 1987"]
+source = ["crates/hyperion-sim/src/galaxy/features/kinds/open_cluster.rs", "P09.T4.a"]
+status = "built"
+
+[[node]]
+id = "g.nurseries"
+label = "Nurseries and OB associations"
+kind = "draw"
+cluster = "g.features"
+summary = "Young-disc clusters: embedded → bound or association"
+detail = [
+  "Mass M^-2; bound mark Γ_b 0.125; embedded U(3, 5) Myr",
+  "Dissolve U(30, 100) Myr; expansion U(1, 5) km/s",
+  "ε U(0.1, 0.3); size max(2 R_clump, v × age), 10-300 ly",
+  "Superbubble R = 0.76 (E t²/ρ)^(1/5), winds + supernovae",
+  "H II if ≥ 0.5 expected stars > 15 M☉; reflection if gas",
+]
+cite = ["Lada & Lada 2003", "Weaver et al. 1977", "Mac Low & McCray 1988", "Krause et al. 2013"]
+source = ["crates/hyperion-sim/src/galaxy/features/kinds/nursery.rs", "crates/hyperion-sim/src/galaxy/features/emission.rs", "P09.T4.b", "P09.T4.d"]
+status = "built"
+
+[[node]]
+id = "g.clouds"
+label = "Molecular clouds, dark nebulae"
+kind = "draw"
+cluster = "g.features"
+summary = "M^-1.7 on 1e4-10^6.5 M☉; Plummer balls of gas and dust"
+detail = [
+  "R = (M / 228)^(1/2.36) pc: 32-370 ly across",
+  "Rate ~ 0.15 n_neutral + 9 n_mol of the smooth gas",
+  "≈9,800 clouds at MW values; emission class dark cloud",
+]
+cite = ["Miville-Deschenes et al. 2017", "Roman-Duval et al. 2010"]
+source = ["crates/hyperion-sim/src/galaxy/features/kinds/cloud.rs", "P09.T4.c"]
+status = "built"
+
+[[node]]
+id = "g.feature_record"
+label = "FeatureRecord"
+kind = "entity"
+cluster = "g.features"
+summary = "ID, process, epoch position, component, marks, reach"
+detail = [
+  "kind_at(t): globular, open cluster, star-forming region,",
+  "association, molecular cloud, or none once dissolved",
+  "Reach ≤ 4,096 ly; designation '<sector> F<index>'",
+  "Bulk velocity on demand: component's law, feature.velocity",
+  "Emission: H II, reflection, dark cloud (no SNR or PWN)",
+]
+source = ["crates/hyperion-sim/src/galaxy/features/catalogue.rs", "crates/hyperion-sim/src/galaxy/features/emission.rs", "P09.T4"]
+status = "built"
+
+[[node]]
+id = "g.cluster_model"
+label = "Cluster interior model"
+kind = "draw"
+cluster = "g.features"
+summary = "Class counts, profiles, retention; 3 marks per cluster"
+detail = [
+  "r_t from the potential; v_esc = sqrt(GM/r_h) 10^(f(r_h/r_c))",
+  "Kicks vs effective escape speed; BH loss; core collapse",
+  "Depleted mass function, white dwarfs, NSs, binaries, tails",
+  "Multiple populations above 1e5 M☉; iron spread in 1/6",
+  "Profiles: cored × tidal taper, cusp, Plummer for BHs",
+]
+cite = ["Baumgardt & Hilker 2018", "Spitzer 1987", "Breen & Heggie 2013", "Milone & Marino 2022", "Kalirai et al. 2008"]
+source = [
+  "crates/hyperion-sim/src/galaxy/features/cluster.rs",
+  "crates/hyperion-sim/src/galaxy/features/interior/counts.rs",
+  "crates/hyperion-sim/src/galaxy/features/interior/retention.rs",
+  "crates/hyperion-sim/src/galaxy/features/interior/profile.rs",
+  "P09.T7",
+  "P09.T8",
+  "P09.T9",
+]
+status = "built"
+
+[[node]]
+id = "g.fit_cluster"
+label = "Cluster dynamics tables"
+kind = "table"
+cluster = "g.features"
+summary = "NS/BH retention grid; BH loss and segregation constants"
+detail = [
+  "Retention: 16 masses × 11 [Fe/H] × 2 kinds × 32 speeds",
+  "cluster_bh, equipartition, pulsars: provisional; scratch",
+  "values kept because the fits miss their acceptance",
+]
+cite = ["Kremer et al. 2020", "Antonini & Gieles 2020"]
+source = [
+  "crates/hyperion-sim/src/tables/cluster_retention.rs",
+  "crates/hyperion-sim/src/tables/cluster_dynamics.rs",
+  "crates/hyperion-fit/src/tasks/cluster_retention.rs",
+  "P09.T9.b",
+  "P15.T8",
+]
+status = "built"
+
+[[node]]
+id = "g.member_place"
+label = "Member placement and marks"
+kind = "draw"
+cluster = "g.features"
+summary = "Nested 16-cell × 8-level grid per cluster, thinned"
+detail = [
+  "member.cell: Poisson per cell and band, at most 8,192",
+  "member.position 3 words; member.accept picks the class",
+  "member.mass: IMF in class range, remnant redraws ≤ 4,096",
+  "member.velocity: bulk + N(0, σ(r) g(m)/g(m_TO)), escape cut",
+  "member.abundance: 2nd-population enrichment, Fe offset",
+  "Feature-level lists built, but no class registered",
+]
+cite = ["Bianchini et al. 2016"]
+source = [
+  "crates/hyperion-sim/src/galaxy/features/nested.rs",
+  "crates/hyperion-sim/src/galaxy/features/members/placement.rs",
+  "crates/hyperion-sim/src/galaxy/features/members.rs",
+  "crates/hyperion-sim/src/galaxy/features/members/level_list.rs",
+  "P09.T10",
+  "P09.T21",
+  "P09.T22",
+]
+status = "built"
+
+[[node]]
+id = "g.feature_member"
+label = "Feature member SystemRecord"
+kind = "entity"
+cluster = "g.features"
+summary = "Cluster member: shares the cluster's age and [Fe/H]"
+detail = [
+  "ID under layer 7, prefix 0: feature, band, level, cell",
+  "Origin FeatureMember; population from the feature",
+  "Age = cluster age - spread × u; class mark not in the ID",
+  "Composition: cluster [Fe/H] + offset, helium ΔY",
+  "Range query via FeatureMemberSource (sim only)",
+]
+source = ["crates/hyperion-sim/src/galaxy/features/members/source.rs", "crates/hyperion-sim/src/id/reserved.rs", "P09.T10", "P09.T23"]
+status = "built"
+
+# ---------------------------------------------------------------------------------------------
+# Galactic centre
+# ---------------------------------------------------------------------------------------------
+
+[[node]]
+id = "g.nsc"
+label = "Nuclear star cluster"
+kind = "draw"
+cluster = "g.centre"
+summary = "0.024 × nuclear-disc mass × 10^N(0, 0.2 dex), capped"
+detail = [
+  "Mass inside 128 ly; cap 6.4e7 M☉ (4.7e7 under Kroupa)",
+  "Nuker law: γ 1.3, break at 10 ly (α 10) to slope 3.5,",
+  "taper at 100 ly to slope 5.5; 96.8% inside the reach",
+  "MW 2.5e7 M☉",
+]
+cite = ["Schodel et al. 2014", "Gallego-Cano et al. 2018", "Neumayer, Seth & Boker 2020"]
+source = ["crates/hyperion-sim/src/galaxy/params/mod.rs", "crates/hyperion-sim/src/galaxy/params/derive.rs", "P02.T5.b"]
+status = "built"
+
+[[node]]
+id = "g.bh_mass"
+label = "Central black hole (M-σ)"
+kind = "draw"
+cluster = "g.centre"
+summary = "10^(8.32 + 5.64 log(σ_e/200 km/s) + N(0, 0.38 dex)) M☉"
+detail = [
+  "σ_e: Jeans line-of-sight σ inside R_e of the mass model",
+  "without BH and cluster; solved lazily (second phase)",
+  "MW: σ_e ≈ 117 km/s, offset -0.384 dex → 4.30e6 M☉",
+  "Offset held to ±0.40 dex: pseudobulges lie below M-σ",
+]
+cite = ["McConnell & Ma 2013", "Kormendy & Ho 2013", "GRAVITY Collaboration 2022"]
+source = ["crates/hyperion-sim/src/galaxy/potential/sigma.rs", "crates/hyperion-sim/src/galaxy/params/derive.rs", "P02.T6.e", "P08.T4.d"]
+status = "built"
+
+[[node]]
+id = "g.centre_model"
+label = "Centre profile, DF and classes"
+kind = "model"
+cluster = "g.centre"
+summary = "Eddington DF in BH + cluster + galaxy monopole potential"
+detail = [
+  "4 tracers: stars, BHs (γ 1.75), young disc, young isotropic",
+  "Ages 80% 10-13 Gyr, 15% 2.5-3.5, 3% 0.15-0.5, 1% to -H,",
+  "3-8 Myr burst 6e-4; [Fe/H] +0.3; retention table: NS 0.38",
+  "and BH 0.88 kept; 5.83e7 systems inside 128 ly; SOI 7.2 ly",
+]
+cite = ["Binney & Tremaine 2008", "Schodel et al. 2020", "Bahcall & Wolf 1976", "Do et al. 2013", "Lu et al. 2013"]
+source = [
+  "crates/hyperion-sim/src/galaxy/features/centre/profile.rs",
+  "crates/hyperion-sim/src/galaxy/features/centre/df.rs",
+  "crates/hyperion-sim/src/galaxy/features/centre/classes.rs",
+  "P09.T24",
+  "P09.T26",
+]
+status = "built"
+
+[[node]]
+id = "g.centre_draws"
+label = "Centre members: grid and orbits"
+kind = "draw"
+cluster = "g.centre"
+summary = "12-level grid, 1/256 to 8 ly cells; DF velocity, marks"
+detail = [
+  "member.cell count ≤ 8,192; member.position, member.accept",
+  "centre.velocity: isotropic direction, envelope rejection",
+  "centre.marks: inclination exp(-k sin² i), k 0.84 old, 25",
+  "young disc; retrograde reversal; 2 au loss cone rejected",
+  "centre.age: 1 uniform; centre.mass: 6 words per attempt",
+]
+cite = ["Chatzopoulos et al. 2015", "Yelda et al. 2014", "Schodel et al. 2014"]
+source = [
+  "crates/hyperion-sim/src/galaxy/features/centre/members.rs",
+  "crates/hyperion-sim/src/galaxy/features/centre/marks.rs",
+  "crates/hyperion-sim/src/galaxy/features/centre/df.rs",
+  "P09.T24.c",
+  "P09.T25",
+  "P09.T27",
+]
+status = "built"
+
+[[node]]
+id = "g.centre_member"
+label = "Centre member record"
+kind = "entity"
+cluster = "g.centre"
+summary = "SystemRecord, origin CentreMember, population nuclear disc"
+detail = [
+  "ID prefix 10, sub-kind 00: band, level 0-11, cell, index",
+  "Black hole = member 0 (0xF000000700000000), at rest",
+  "Resolvable by ID; range-query source (P09.T29) planned",
+  "Kepler propagator (P09.T28.a) built; nothing reads it",
+]
+source = [
+  "crates/hyperion-sim/src/galaxy/features/centre/members.rs",
+  "crates/hyperion-sim/src/id/global.rs",
+  "crates/hyperion-sim/src/galaxy/motion.rs",
+  "P09.T27",
+  "P09.T28",
+  "P09.T29",
+]
+status = "partial"
+
+# ---------------------------------------------------------------------------------------------
+# Global list: streams and dwarf cores
+# ---------------------------------------------------------------------------------------------
+
+[[node]]
+id = "g.gc_streams"
+label = "Globular and orphan streams"
+kind = "draw"
+cluster = "g.global"
+summary = "Tubes of living globulars; Poisson orphans on orbits"
+detail = [
+  "Living tube if pericentre > bar corotation (3.6% qualify)",
+  "Orphans: Poisson(1.5 N_GC - tubes), 251-300 at MW values",
+  "Orphan mass log-normal, median 1e4 M☉, 0.5 dex, 1e3-1e5",
+  "Age U(10.5, 13) Gyr; [Fe/H] N(-1.55, 0.35)",
+  "Orbit: radius ~ (1 + r²/6,800²)^-1.75, debris velocity law,",
+  "≤ 256 attempts; stripping time after Johnston 1998",
+]
+cite = ["Johnston 1998", "Baumgardt & Makino 2003", "Bonaca & Price-Whelan 2025"]
+source = [
+  "crates/hyperion-sim/src/galaxy/global_list/debris.rs",
+  "crates/hyperion-sim/src/galaxy/global_list/orphans.rs",
+  "crates/hyperion-sim/src/galaxy/global_list/spec.rs",
+  "crates/hyperion-sim/src/tables/streams.rs",
+  "P10.T3.a",
+  "P10.T3.b",
+]
+status = "built"
+
+[[node]]
+id = "g.dwarfs"
+label = "Dwarf streams and cores"
+kind = "draw"
+cluster = "g.global"
+summary = "Recent progenitors stripped at each pericentre"
+detail = [
+  "dwarf.orbit: argument of pericentre U(0, 2π)",
+  "dwarf.stripping: fraction f U(0.1, 0.5) per pericentre",
+  "Core M (1 - f)^n; tube = mass lost in the stripping window",
+  "Core kept if ≥ 1e3 systems and inside the cube; at most 4",
+  "Spherical orbit in the mid-plane potential",
+]
+cite = ["Johnston, Sackett & Bullock 2001"]
+source = ["crates/hyperion-sim/src/galaxy/global_list/dwarfs.rs", "crates/hyperion-sim/src/galaxy/global_list/spec.rs", "P10.T3.c"]
+status = "built"
+
+[[node]]
+id = "g.stream_list"
+label = "Global list and stream members"
+kind = "draw"
+cluster = "g.global"
+summary = "List, spray, tubes, members planned; leapfrog built"
+detail = [
+  "List: centre + streams + dwarf cores, with bounding shells",
+  "Spray of ≈2,000 tracers per stream; tube table of knots",
+  "Members: Poisson in tube cells (along, a, b) × mass band",
+  "Dwarf cores: flattened Plummer, Kirby et al. [Fe/H] law",
+  "GlobalListSource planned; built: IDs, numbering, leapfrog",
+]
+cite = ["Fardal, Huang & Weinberg 2015", "Kirby et al. 2013"]
+source = [
+  "crates/hyperion-sim/src/galaxy/global_list/mod.rs",
+  "crates/hyperion-sim/src/galaxy/global_list/tube.rs",
+  "crates/hyperion-sim/src/galaxy/global_list/orbit.rs",
+  "P10.T1",
+  "P10.T2",
+  "P10.T4",
+  "P10.T5",
+  "P10.T6",
+  "P10.T7",
+  "P10.T8",
+  "P10.T9",
+]
+status = "partial"
+
+# ---------------------------------------------------------------------------------------------
+# Grid placement
+# ---------------------------------------------------------------------------------------------
+
+[[node]]
+id = "g.layers"
+label = "Layers A-G and SystemId layout"
+kind = "param"
+cluster = "g.place"
+summary = "Mass-band grids of 8-128 ly; brown dwarfs 16, rogues 4 ly"
+detail = [
+  "A 8 ly 0.08-0.5; B 16 ly 0.5-0.75; C 32 ly 0.75-2.5 M☉",
+  "D 64 ly 2.5-8; E 128 ly 8-150; F 16 ly 13 M_Jup-0.08 M☉",
+  "G 4 ly 1/3 M⊕-13 M_Jup; root cube ±65,536 ly",
+  "ID: layer [63:61], 14-k bits/axis, 16+3k index (G 15, 16)",
+  "Capacity 65,536 (A) to 2^28 (E); layer 7 reserved for",
+  "features, centre, streams, pinned and catalogue systems",
+]
+source = [
+  "crates/hyperion-sim/src/galaxy/placement/layers.rs",
+  "crates/hyperion-sim/src/id/mod.rs",
+  "crates/hyperion-sim/src/id/layer.rs",
+  "P01.T6.a",
+  "P01.T6.b",
+  "P03.T1",
+]
+status = "built"
+
+[[node]]
+id = "g.layer_density"
+label = "Layer density and cell bound"
+kind = "model"
+cluster = "g.place"
+summary = "Σ share(band, pop) × ρ; bound: nearest corner × arm sup"
+detail = [
+  "Share matrix: IMF band shares × 7 population columns",
+  "Substellar rows per system: BD 0.24-0.26, rogues 28-30",
+  "Rogue density saturates at ≈992.5 per ly³ (ruling 125)",
+  "Bound = envelope at nearest corner × (1 + 2^-40) × arm sup",
+  "Displaced-class columns reserved for plan 08",
+]
+cite = ["Lewis & Shedler 1979", "Sumi et al. 2023"]
+source = [
+  "crates/hyperion-sim/src/galaxy/shares.rs",
+  "crates/hyperion-sim/src/galaxy/bounds.rs",
+  "crates/hyperion-sim/src/galaxy/substellar/abundance.rs",
+  "P02.T8",
+  "P02.T9",
+  "P13.T2",
+]
+status = "built"
+
+[[node]]
+id = "g.cell_count"
+label = "Cell candidate count"
+kind = "draw"
+cluster = "g.place"
+summary = "Poisson(bound × cell volume), clamped to index capacity"
+detail = [
+  "Headroom check refuses a galaxy whose densest cell comes",
+  "within 8σ of its layer's capacity",
+  "Cells never read neighbours; generated lazily and whole",
+]
+source = ["crates/hyperion-sim/src/galaxy/placement/cell.rs", "crates/hyperion-sim/src/galaxy/placement/headroom.rs", "P03.T3"]
+status = "built"
+
+[[node]]
+id = "g.cand_position"
+label = "Candidate position"
+kind = "draw"
+cluster = "g.place"
+summary = "Uniform in cell: 3 words, whole ly + 52-bit fraction"
+detail = ["Cell sizes are powers of two, so the draw is exactly uniform"]
+source = ["crates/hyperion-sim/src/galaxy/placement/candidate.rs", "crates/hyperion-sim/src/coords/cell.rs", "P03.T4.a"]
+status = "built"
+
+[[node]]
+id = "g.thinning"
+label = "Thinning and component pick"
+kind = "draw"
+cluster = "g.place"
+summary = "One mark vs running sums of share × ρ / bound"
+detail = [
+  "First component whose threshold exceeds the mark wins;",
+  "none → thinned. The pick fixes population, age law, [Fe/H]",
+]
+cite = ["Lewis & Shedler 1979"]
+source = ["crates/hyperion-sim/src/galaxy/placement/candidate.rs", "P03.T4.b"]
+status = "built"
+
+[[node]]
+id = "g.primary_mass"
+label = "Primary initial mass"
+kind = "draw"
+cluster = "g.place"
+summary = "One word through the IMF restricted to the layer band"
+detail = [
+  "Initial mass: a layer-E primary is now mostly a remnant",
+  "Reads only its own stream and the band: drawable first",
+]
+source = ["crates/hyperion-sim/src/galaxy/placement/record.rs", "P03.T5.a"]
+status = "built"
+
+[[node]]
+id = "g.age_draw"
+label = "System age at the epoch"
+kind = "draw"
+cluster = "g.place"
+summary = "One uniform through the picked component's age quantile"
+detail = ["Ages down to -H: born during play, absent until then"]
+source = ["crates/hyperion-sim/src/galaxy/placement/record.rs", "P03.T5.a"]
+status = "built"
+
+[[node]]
+id = "g.substellar_mass"
+label = "Brown dwarf / rogue planet mass"
+kind = "draw"
+cluster = "g.place"
+summary = "Layer F: IMF substellar branch; G: dN/dM ~ M^-1.96"
+detail = [
+  "BD 13 M_Jup-0.08 M☉: Chabrier log-normal continued down",
+  "Rogues 1/3 M⊕-13 M_Jup; 21 per star (Sumi et al. 2023)",
+  "Same thinning, populations and ages as the stars",
+]
+cite = ["Sumi et al. 2023", "Mroz et al. 2017", "Chabrier 2003"]
+source = ["crates/hyperion-sim/src/galaxy/substellar/mass.rs", "crates/hyperion-sim/src/galaxy/substellar/params.rs", "P13.T1", "P13.T3"]
+status = "built"
+
+[[node]]
+id = "g.small_bodies"
+label = "Interstellar small bodies"
+kind = "model"
+cluster = "g.place"
+summary = "0.1 per au³ × local system density / 0.003 per ly³"
+detail = [
+  "Comets and asteroids ejected from systems: mean density",
+  "scales with all components' summed system density",
+  "Density only: nothing places them; the Cell tag",
+  "interstellar.small_bodies is reserved for that",
+]
+source = ["crates/hyperion-sim/src/galaxy/substellar/small_bodies.rs", "P13.T6"]
+status = "built"
+
+[[node]]
+id = "g.carveout"
+label = "Claimed by a catalogue class?"
+kind = "decision"
+cluster = "g.place"
+summary = "catalogue_claims hook: always false at this commit"
+detail = [
+  "Planned P09.T35: claim layer-E records whose death falls",
+  "in the shell window; a claimed ID is 'no such system'",
+  "Stellar layers only; substellar layers skip the hook",
+]
+source = ["crates/hyperion-sim/src/galaxy/placement/candidate.rs", "P03.T5.b", "P09.T35"]
+status = "partial"
+
+[[node]]
+id = "g.system_record"
+label = "SystemRecord: stellar slot"
+kind = "entity"
+cluster = "g.place"
+summary = "ID, epoch position, origin, component, pop, mass, age"
+detail = [
+  "State at the epoch only; the query moves it to time t",
+  "Kind from the layer: stellar, brown dwarf or rogue planet",
+  "No [Fe/H], velocity, gas or multiplicity stored: later",
+  "stages draw them on their own streams, keyed by the ID",
+  "existence_at(t): unborn while its age is ≤ 0",
+]
+source = ["crates/hyperion-sim/src/galaxy/placement/record.rs", "crates/hyperion-sim/src/galaxy/placement/generate.rs", "P03.T5.a", "P03.T6"]
+status = "built"
+
+# ---------------------------------------------------------------------------------------------
+# Kinematics and displaced objects
+# ---------------------------------------------------------------------------------------------
+
+[[node]]
+id = "g.kin_tables"
+label = "Kinematic tables"
+kind = "draw"
+cluster = "g.motion"
+summary = "Jeans velocity laws per component; lesser halo β, spin"
+detail = [
+  "Discs: σ_z by vertical Jeans, σ_R by Sharma ratio, σ_φ from",
+  "κ²/4Ω², asymmetric drift; young floor 5 km/s + streaming",
+  "Halo β_inf: dominant 0.9, in situ 0.3 (rot 0.11 v_c), debris",
+  "0.5; lesser β U(0.3, 0.7), rotation U(-0.25, 0.25) v_c",
+  "Bulge, bar: pattern rotation + streaming, Satoh k 0.6, 0.8",
+  "Nuclear disc: σ_R,0 67.7 km/s, Satoh k 0.95",
+]
+cite = ["Sharma et al. 2021", "Binney & Tremaine 2008", "An & Evans 2006", "Belokurov et al. 2018", "Belokurov et al. 2020", "Sormani et al. 2022"]
+source = [
+  "crates/hyperion-sim/src/galaxy/kinematics/mod.rs",
+  "crates/hyperion-sim/src/galaxy/kinematics/discs.rs",
+  "crates/hyperion-sim/src/galaxy/kinematics/halo.rs",
+  "crates/hyperion-sim/src/galaxy/kinematics/spheroid.rs",
+  "P08.T2",
+  "P08.T3",
+  "P08.T4",
+]
+status = "built"
+
+[[node]]
+id = "g.velocity"
+label = "Epoch velocity"
+kind = "draw"
+cluster = "g.motion"
+summary = "Mean + σ × normals on the component's ellipsoid axes"
+detail = [
+  "4 words per attempt; redraw if ≥ min(v_esc, 1,000 km/s),",
+  "16 attempts, then 0.99 × the cut; redrawn on every call",
+  "Same law on feature.velocity for a cluster's bulk motion",
+  "Zero without with_full_potential: systems never move",
+]
+source = ["crates/hyperion-sim/src/galaxy/kinematics/draw.rs", "P08.T5"]
+status = "built"
+
+[[node]]
+id = "g.fit_displaced"
+label = "Displaced-class forms"
+kind = "table"
+cluster = "g.motion"
+summary = "Provisional fits: class forms, in-cube shares, kinematics"
+detail = [
+  "Forms from orbits in the model potential with a Dehnen bar",
+  "hyperion-fit task displaced_forms (since version 16)",
+  "Revision 0 on smoke histograms (211 orbits)",
+]
+cite = ["Dehnen 2000"]
+source = [
+  "crates/hyperion-sim/src/tables/displaced_forms.rs",
+  "crates/hyperion-fit/src/tasks/displaced_forms",
+  "P15.T6",
+]
+status = "built"
+
+[[node]]
+id = "g.displaced"
+label = "Displaced remnants, runaways"
+kind = "draw"
+cluster = "g.motion"
+summary = "97 classes by speed and age; placement still planned"
+detail = [
+  "Speed edges 0.25-2.8 v_c; age edges 0.1-8 R_d/v_c",
+  "Runaways 0.03 below 8 M☉ rising to 0.30 above 20; walkaways",
+  "Kick-bin shares by quadrature over the kick law (built)",
+  "Planned P08.T12: extra density components in layers D, E,",
+  "displaced.* and runaway.* marks, KickConstraint for stars",
+]
+cite = ["Hoogerwerf et al. 2001", "Renzo et al. 2019", "Mandel & Muller 2020"]
+source = [
+  "crates/hyperion-sim/src/galaxy/displaced/class_table.rs",
+  "crates/hyperion-sim/src/galaxy/displaced/runaway.rs",
+  "crates/hyperion-sim/src/galaxy/displaced/kick_bins.rs",
+  "crates/hyperion-sim/src/galaxy/displaced/forms.rs",
+  "P08.T8",
+  "P08.T9",
+  "P08.T10",
+  "P08.T12",
+]
+status = "partial"
+
+# ---------------------------------------------------------------------------------------------
+# Catalogue classes and supernova remnants
+# ---------------------------------------------------------------------------------------------
+
+[[node]]
+id = "g.class_grid"
+label = "Catalogue-class grid"
+kind = "draw"
+cluster = "g.classes"
+summary = "Rare hosts carved from cells so that charts find them"
+detail = [
+  "Registry: core collapse, Type Ia, stellar and NS mergers,",
+  "LBV, X-ray binary, accreting WD, TDE victim",
+  "Cells 512 or 4,096 ly; ID prefix 111, 24-bit index",
+  "Built: registry and IDs; grid, draws P09.T32-T38 planned",
+]
+source = ["crates/hyperion-sim/src/galaxy/catalogue_classes/registry.rs", "crates/hyperion-sim/src/id/catalogue.rs", "P09.T1", "P09.T32", "P09.T33", "P09.T37"]
+status = "partial"
+
+[[node]]
+id = "g.fit_ia"
+label = "Type Ia delay samplers"
+kind = "table"
+cluster = "g.classes"
+summary = "24 delay bins: yields, channel shares, mass CDFs"
+cite = ["Maoz & Graur 2017", "Kalirai et al. 2008", "Peters 1964"]
+source = ["crates/hyperion-sim/src/tables/type_ia_delay.rs", "crates/hyperion-fit/src/tasks/type_ia_delay.rs", "P15.T9.a"]
+status = "built"
+
+[[node]]
+id = "g.type_ia"
+label = "Type Ia progenitor, leftover"
+kind = "draw"
+cluster = "g.classes"
+summary = "DTD ψ ~ t^-1.1 from 42.55 Myr; channel, masses, time"
+detail = [
+  "A = 2.162e-13 per yr per M☉ formed; MW 0.462 per century",
+  "Channels: merger 0.53, double detonation 0.30, H donor",
+  "0.04, Iax 0.13; survivors 1,000-1,500 or 2,000-2,500 km/s",
+  "Ancient share before -(4 Myr + L + H) not yet applied",
+]
+cite = ["Maoz & Graur 2017", "Shen et al. 2018", "El-Badry et al. 2023", "Peters 1964"]
+source = ["crates/hyperion-sim/src/galaxy/catalogue_classes/type_ia.rs", "P09.T18"]
+status = "partial"
+
+[[node]]
+id = "g.snr"
+label = "Supernova remnant shell"
+kind = "model"
+cluster = "g.classes"
+summary = "Window and radius from energy and site gas (CMB88)"
+detail = [
+  "E log-normal, median 1e51 erg, 0.2 dex (snr.energy planned)",
+  "Free expansion → Sedov-Taylor → pressure-driven → momentum",
+  "snowplough; window cap 4 Myr; radii 6-843 ly at its end",
+  "Remnant offset = kick × age; bow shock; PWN > 1e35 erg/s",
+  "Read only by SupernovaEntry, which nothing builds",
+]
+cite = ["Cioffi, McKee & Bertschinger 1988", "Truelove & McKee 1999", "Tang & Wang 2005", "van der Swaluw, Downes & Keegan 2004"]
+source = [
+  "crates/hyperion-sim/src/galaxy/snr/window.rs",
+  "crates/hyperion-sim/src/galaxy/snr/shell.rs",
+  "crates/hyperion-sim/src/galaxy/snr/caps.rs",
+  "crates/hyperion-sim/src/galaxy/snr/remnant.rs",
+  "P09.T15",
+  "P09.T16",
+  "P09.T17",
+]
+status = "partial"
+
+[[node]]
+id = "g.sn_entry"
+label = "Supernova catalogue entry"
+kind = "entity"
+cluster = "g.classes"
+summary = "state_at(t): progenitor → SN + shell → bare remnant"
+detail = [
+  "Light curves IIP, IIL, IIb, Ib/c, Ia, Iax templates with",
+  "Ni-56 / Co-56 heating; neutrino burst 3e53 erg",
+  "Explosion is event tag 0x0202 (class.ev.supernova)",
+  "No entries generated yet; merge source P09.T37 planned",
+]
+cite = ["Nadyozhin 1994"]
+source = ["crates/hyperion-sim/src/galaxy/catalogue_classes/supernova.rs", "P09.T19", "P09.T37"]
+status = "partial"
+
+# ---------------------------------------------------------------------------------------------
+# Runtime access
+# ---------------------------------------------------------------------------------------------
+
+[[node]]
+id = "g.range_query"
+label = "Range query (sphere, time t)"
+kind = "query"
+cluster = "g.query"
+summary = "Walk layers E→A (+F, G), cells meeting the padded sphere"
+detail = [
+  "t within ±1,000 yr; pad 1,000 km/s × |t| (layer E 3,000)",
+  "Distances tested at t by straight-line drift; unborn out",
+  "Merge hook: FeatureMemberSource only; server passes none",
+  "Observed mode re-reads each hit at t - d/c (plan 12)",
+  "Pure: the sim keeps no cache; the server's are byte-bound",
+]
+source = [
+  "crates/hyperion-sim/src/galaxy/query/mod.rs",
+  "crates/hyperion-sim/src/galaxy/query/walk.rs",
+  "crates/hyperion-sim/src/galaxy/query/motion.rs",
+  "crates/hyperion-sim/src/galaxy/query/source.rs",
+  "crates/hyperion-sim/src/galaxy/query/mode.rs",
+  "P03.T9",
+  "P08.T6",
+  "P12.T3",
+]
+status = "built"
+
+[[node]]
+id = "g.census"
+label = "Layer fits the census?"
+kind = "decision"
+cluster = "g.query"
+summary = "Whole layer or none, decided from expected counts"
+detail = [
+  "Default limit 4,096 systems; cell budget 2^20",
+  "Expected = Σ share × (ρ integrated over sphere), GL nodes:",
+  "4×4×8 for R ≤ 256 ly, 8×8×16 above",
+  "Result says 'complete down to layer X'; mass floor optional",
+]
+source = [
+  "crates/hyperion-sim/src/galaxy/query/census.rs",
+  "crates/hyperion-sim/src/galaxy/query/expected.rs",
+  "crates/hyperion-sim/src/galaxy/query/request.rs",
+  "P03.T9.c",
+  "P03.T9.d",
+]
+status = "built"
+
+[[node]]
+id = "g.resolve"
+label = "Resolve a SystemId"
+kind = "query"
+cluster = "g.query"
+summary = "Recount the cell, check the index, rerun one candidate"
+detail = [
+  "Fails → 'no such system': index ≥ count, thinned, claimed",
+  "Centre members resolve through a CentreModel (≈90 ms)",
+  "Streams, dwarf cores, pinned, catalogue: KindNotGenerated",
+  "Feature members rerun one nested candidate",
+]
+source = ["crates/hyperion-sim/src/galaxy/placement/resolve.rs", "P03.T7"]
+status = "built"
+
+[[node]]
+id = "g.frame"
+label = "Frame selection (SOI)"
+kind = "query"
+cluster = "g.query"
+summary = "Jacobi radius per system; least distance/radius wins"
+detail = [
+  "Ties to the lower ID; switches only when 10% smaller",
+  "Outside every sphere a ship is in the galactic frame",
+]
+source = ["crates/hyperion-sim/src/galaxy/frame.rs", "P03.T12"]
+status = "built"
+
+[[node]]
+id = "g.map"
+label = "Galaxy map column densities"
+kind = "query"
+cluster = "g.query"
+summary = "Face-on and edge-on columns from the fields; no stars"
+detail = [
+  "Face-on: discs, bar closed form; bulge, halo 32-node GL",
+  "Extinction rasters from the gas field (sim only)",
+]
+source = ["crates/hyperion-sim/src/galaxy/map.rs", "crates/hyperion-sim/src/galaxy/gas/map.rs", "P02.T10", "P07.T9"]
+status = "built"
+
+# ---------------------------------------------------------------------------------------------
+# Edges: seed and stream derivation
+# ---------------------------------------------------------------------------------------------
+
+[[edge]]
+from = "g.seed"
+to = "g.stream"
+kind = "seed"
+label = "key word 0"
+
+[[edge]]
+from = "g.gen_version"
+to = "g.stream"
+kind = "constraint"
+label = "fixes layouts and samplers"
+
+[[edge]]
+from = "g.stream"
+to = "g.key_galaxy"
+kind = "seed"
+label = "scope Galaxy"
+
+[[edge]]
+from = "g.stream"
+to = "g.key_cell"
+kind = "seed"
+label = "scope Cell"
+
+[[edge]]
+from = "g.stream"
+to = "g.key_feature"
+kind = "seed"
+label = "scope Feature"
+
+[[edge]]
+from = "g.stream"
+to = "g.key_system"
+kind = "seed"
+label = "scope System, Body"
+
+[[edge]]
+from = "g.stream"
+to = "g.event_key"
+kind = "seed"
+label = "scope Event: one block"
+
+[[edge]]
+from = "g.key_galaxy"
+to = "g.draw_mass"
+kind = "seed"
+label = "galaxy.params.stellar_mass"
+
+[[edge]]
+from = "g.key_galaxy"
+to = "g.draw_shares"
+kind = "seed"
+label = "galaxy.params.share/sfh.*"
+
+[[edge]]
+from = "g.key_galaxy"
+to = "g.draw_structure"
+kind = "seed"
+label = "galaxy.params: 21 shape tags"
+
+[[edge]]
+from = "g.key_galaxy"
+to = "g.draw_dark"
+kind = "seed"
+label = "galaxy.params.dark.*"
+
+[[edge]]
+from = "g.key_galaxy"
+to = "g.draw_halo"
+kind = "seed"
+label = "galaxy.params.halo.*"
+
+[[edge]]
+from = "g.key_galaxy"
+to = "g.draw_accretion"
+kind = "seed"
+label = "galaxy.params.accretion.*"
+
+[[edge]]
+from = "g.key_galaxy"
+to = "g.bh_mass"
+kind = "seed"
+label = "galaxy.params.bh.scatter"
+
+[[edge]]
+from = "g.key_galaxy"
+to = "g.nsc"
+kind = "seed"
+label = "galaxy.params.nuclear_*"
+
+[[edge]]
+from = "g.key_galaxy"
+to = "g.gas_draws"
+kind = "seed"
+label = "galaxy.params.gas.*, gas.*"
+
+[[edge]]
+from = "g.key_galaxy"
+to = "g.kin_tables"
+kind = "seed"
+label = "halo.kinematics, item n"
+
+[[edge]]
+from = "g.key_galaxy"
+to = "g.gc_streams"
+kind = "seed"
+label = "stream.orphan.*"
+
+[[edge]]
+from = "g.key_galaxy"
+to = "g.dwarfs"
+kind = "seed"
+label = "dwarf.orbit, dwarf.stripping"
+
+[[edge]]
+from = "g.key_cell"
+to = "g.cell_count"
+kind = "seed"
+label = "galaxy.cell.candidates"
+
+[[edge]]
+from = "g.key_cell"
+to = "g.feature_grid"
+kind = "seed"
+label = "feature.cell.* (8 tags)"
+
+[[edge]]
+from = "g.key_cell"
+to = "g.member_place"
+kind = "seed"
+label = "member.cell"
+
+[[edge]]
+from = "g.key_cell"
+to = "g.centre_draws"
+kind = "seed"
+label = "member.cell"
+
+[[edge]]
+from = "g.key_cell"
+to = "g.class_grid"
+kind = "seed"
+label = "class cell word (planned)"
+
+[[edge]]
+from = "g.key_cell"
+to = "g.stream_list"
+kind = "seed"
+label = "tube cell counts (planned)"
+
+[[edge]]
+from = "g.key_feature"
+to = "g.feature_grid"
+kind = "seed"
+label = "feature.position, .accept"
+
+[[edge]]
+from = "g.key_feature"
+to = "g.globulars"
+kind = "seed"
+label = "feature.globular"
+
+[[edge]]
+from = "g.key_feature"
+to = "g.open_clusters"
+kind = "seed"
+label = "feature.open_cluster"
+
+[[edge]]
+from = "g.key_feature"
+to = "g.nurseries"
+kind = "seed"
+label = "feature.nursery"
+
+[[edge]]
+from = "g.key_feature"
+to = "g.clouds"
+kind = "seed"
+label = "feature.cloud"
+
+[[edge]]
+from = "g.key_feature"
+to = "g.cluster_model"
+kind = "seed"
+label = "feature.cluster"
+
+[[edge]]
+from = "g.key_feature"
+to = "g.velocity"
+kind = "seed"
+label = "feature.velocity"
+
+[[edge]]
+from = "g.key_system"
+to = "g.cand_position"
+kind = "seed"
+label = "galaxy.candidate.position"
+
+[[edge]]
+from = "g.key_system"
+to = "g.thinning"
+kind = "seed"
+label = "galaxy.candidate.accept"
+
+[[edge]]
+from = "g.key_system"
+to = "g.primary_mass"
+kind = "seed"
+label = "system.primary_mass"
+
+[[edge]]
+from = "g.key_system"
+to = "g.age_draw"
+kind = "seed"
+label = "system.age"
+
+[[edge]]
+from = "g.key_system"
+to = "g.substellar_mass"
+kind = "seed"
+label = "substellar.mass"
+
+[[edge]]
+from = "g.key_system"
+to = "g.velocity"
+kind = "seed"
+label = "system.velocity"
+
+[[edge]]
+from = "g.key_system"
+to = "g.member_place"
+kind = "seed"
+label = "member.* on the member ID"
+
+[[edge]]
+from = "g.key_system"
+to = "g.centre_draws"
+kind = "seed"
+label = "centre.*, member.position"
+
+[[edge]]
+from = "g.key_system"
+to = "g.displaced"
+kind = "seed"
+label = "displaced/runaway (planned)"
+
+[[edge]]
+from = "g.key_system"
+to = "g.type_ia"
+kind = "seed"
+label = "class.type_ia.*"
+
+[[edge]]
+from = "g.event_key"
+to = "s.events"
+kind = "seed"
+label = "star.ev.* bins and phases"
+
+# ---------------------------------------------------------------------------------------------
+# Edges: parameters and derivation
+# ---------------------------------------------------------------------------------------------
+
+[[edge]]
+from = "g.mw_fixture"
+to = "g.system_count"
+label = "replaces drawn inputs"
+
+[[edge]]
+from = "g.imf"
+to = "g.system_count"
+kind = "lookup"
+label = "IMF for the mean mass"
+
+[[edge]]
+from = "g.draw_mass"
+to = "g.system_count"
+label = "M*"
+
+[[edge]]
+from = "g.draw_shares"
+to = "g.system_count"
+label = "shares of systems"
+
+[[edge]]
+from = "g.draw_shares"
+to = "g.ages"
+label = "τ: young share, sub-discs"
+
+[[edge]]
+from = "g.draw_structure"
+to = "g.size_coupling"
+label = "size scatters (dex)"
+
+[[edge]]
+from = "g.draw_structure"
+to = "g.vertical"
+label = "drawn effective heights"
+
+[[edge]]
+from = "g.draw_structure"
+to = "g.arms"
+label = "count, pitch, amplitudes"
+
+[[edge]]
+from = "g.draw_structure"
+to = "g.feh_field"
+label = "[Fe/H] gradient"
+
+[[edge]]
+from = "g.draw_structure"
+to = "g.thick_disc"
+label = "length, height ratios"
+
+[[edge]]
+from = "g.draw_halo"
+to = "g.stellar_halo"
+label = "component parameters"
+
+[[edge]]
+from = "g.draw_accretion"
+to = "g.draw_halo"
+kind = "constraint"
+label = "merger bounds halo ages"
+
+[[edge]]
+from = "g.system_count"
+to = "g.size_coupling"
+label = "population masses"
+
+[[edge]]
+from = "g.draw_dark"
+to = "g.halo_nfw"
+label = "f*, c scatter"
+
+[[edge]]
+from = "g.draw_halo"
+to = "g.draw_accretion"
+kind = "constraint"
+label = "age centres cap infall"
+
+[[edge]]
+from = "g.draw_halo"
+to = "g.ages"
+label = "halo age centres"
+
+# ---------------------------------------------------------------------------------------------
+# Edges: mass model and potential
+# ---------------------------------------------------------------------------------------------
+
+[[edge]]
+from = "g.size_coupling"
+to = "g.mass_model"
+label = "sizes and masses"
+
+[[edge]]
+from = "g.mge"
+to = "g.mass_model"
+kind = "lookup"
+label = "Gaussian coefficients"
+
+[[edge]]
+from = "g.halo_nfw"
+to = "g.mass_model"
+label = "NFW halo"
+
+[[edge]]
+from = "g.nsc"
+to = "g.mass_model"
+label = "Nuker cluster"
+
+[[edge]]
+from = "g.bh_mass"
+to = "g.mass_model"
+kind = "constraint"
+label = "BH point mass (phase 2)"
+
+[[edge]]
+from = "g.mass_model"
+to = "g.bh_mass"
+label = "σ_e without BH, cluster"
+
+[[edge]]
+from = "g.mass_model"
+to = "g.potential_tables"
+label = "Φ, v_c², forces"
+
+[[edge]]
+from = "g.mass_model"
+to = "g.vertical"
+label = "K_z at reference radii"
+
+# ---------------------------------------------------------------------------------------------
+# Edges: population fields
+# ---------------------------------------------------------------------------------------------
+
+[[edge]]
+from = "g.system_count"
+to = "g.layer_density"
+label = "N × shares normalise ρ"
+
+[[edge]]
+from = "g.size_coupling"
+to = "g.thin_disc"
+label = "R_d"
+
+[[edge]]
+from = "g.size_coupling"
+to = "g.bulge"
+label = "long axis a"
+
+[[edge]]
+from = "g.size_coupling"
+to = "g.bar"
+label = "half-length"
+
+[[edge]]
+from = "g.size_coupling"
+to = "g.nuclear_disc"
+label = "length"
+
+[[edge]]
+from = "g.vertical"
+to = "g.thick_disc"
+label = "cored profiles"
+
+[[edge]]
+from = "g.vertical"
+to = "g.nuclear_disc"
+label = "cored profiles"
+
+[[edge]]
+from = "g.vertical"
+to = "g.thin_disc"
+label = "cored profiles"
+
+[[edge]]
+from = "g.arms"
+to = "g.thin_disc"
+label = "arm factors"
+
+[[edge]]
+from = "g.thin_disc"
+to = "g.layer_density"
+label = "ρ young + sub-discs"
+
+[[edge]]
+from = "g.thick_disc"
+to = "g.layer_density"
+label = "ρ"
+
+[[edge]]
+from = "g.bulge"
+to = "g.layer_density"
+label = "ρ"
+
+[[edge]]
+from = "g.bar"
+to = "g.layer_density"
+label = "ρ"
+
+[[edge]]
+from = "g.nuclear_disc"
+to = "g.layer_density"
+label = "ρ main + inner"
+
+[[edge]]
+from = "g.stellar_halo"
+to = "g.layer_density"
+label = "ρ per component"
+
+[[edge]]
+from = "g.ages"
+to = "g.age_draw"
+label = "age quantile per component"
+
+[[edge]]
+from = "g.feh_field"
+to = "s.draw_feh"
+label = "mean, σ at site and age"
+
+# ---------------------------------------------------------------------------------------------
+# Edges: gas and dust
+# ---------------------------------------------------------------------------------------------
+
+[[edge]]
+from = "g.gas_draws"
+to = "g.gas_field"
+label = "masses, lanes, noise"
+
+[[edge]]
+from = "g.gas_draws"
+to = "g.mass_model"
+label = "gas disc mass, length"
+
+[[edge]]
+from = "g.feh_field"
+to = "g.gas_field"
+label = "young-disc [Fe/H]: dust"
+
+[[edge]]
+from = "g.arms"
+to = "g.gas_field"
+label = "arm geometry: dust lanes"
+
+[[edge]]
+from = "g.gas_field"
+to = "g.extinction"
+label = "density, dust per H"
+
+[[edge]]
+from = "g.feature_gas"
+to = "g.extinction"
+label = "holes, clouds"
+
+[[edge]]
+from = "g.extinction"
+to = "s.sky_census"
+label = "A_V along each sight line"
+
+[[edge]]
+from = "g.gas_field"
+to = "g.clouds"
+label = "smooth gas rate, bound"
+
+[[edge]]
+from = "g.gas_field"
+to = "g.snr"
+label = "site gas at 250 ly"
+
+# ---------------------------------------------------------------------------------------------
+# Edges: feature catalogue
+# ---------------------------------------------------------------------------------------------
+
+[[edge]]
+from = "g.system_count"
+to = "g.phi"
+label = "mass formed, budgets"
+
+[[edge]]
+from = "g.thin_disc"
+to = "g.phi"
+label = "young, sub-disc fields"
+
+[[edge]]
+from = "g.imf"
+to = "g.phi"
+kind = "lookup"
+label = "band shares"
+
+[[edge]]
+from = "g.phi"
+to = "g.feature_grid"
+label = "rates per system"
+
+[[edge]]
+from = "g.phi"
+to = "g.layer_density"
+kind = "constraint"
+label = "1 - φ (planned P09.T2.c)"
+
+[[edge]]
+from = "g.thin_disc"
+to = "g.feature_grid"
+label = "young, sub-disc ρ"
+
+[[edge]]
+from = "g.feature_grid"
+to = "g.globulars"
+label = "accepted candidate"
+
+[[edge]]
+from = "g.feature_grid"
+to = "g.open_clusters"
+label = "accepted candidate"
+
+[[edge]]
+from = "g.feature_grid"
+to = "g.nurseries"
+label = "accepted candidate"
+
+[[edge]]
+from = "g.feature_grid"
+to = "g.clouds"
+label = "accepted candidate"
+
+[[edge]]
+from = "g.halo_nfw"
+to = "g.globulars"
+label = "M200 / 6.5e9 M☉"
+
+[[edge]]
+from = "g.draw_accretion"
+to = "g.globulars"
+label = "count scatter, progenitors"
+
+[[edge]]
+from = "g.globulars"
+to = "g.feature_record"
+label = "marks"
+
+[[edge]]
+from = "g.open_clusters"
+to = "g.feature_record"
+label = "marks"
+
+[[edge]]
+from = "g.nurseries"
+to = "g.feature_record"
+label = "marks, emission class"
+
+[[edge]]
+from = "g.clouds"
+to = "g.feature_record"
+label = "marks"
+
+[[edge]]
+from = "g.feature_record"
+to = "g.feature_gas"
+label = "bubbles, clouds, embedded"
+
+[[edge]]
+from = "g.feature_record"
+to = "g.cluster_model"
+label = "bound clusters, globulars"
+
+[[edge]]
+from = "g.potential_tables"
+to = "g.cluster_model"
+label = "tidal radius"
+
+[[edge]]
+from = "g.fit_cluster"
+to = "g.cluster_model"
+kind = "lookup"
+label = "retention, BH loss"
+
+[[edge]]
+from = "g.cluster_model"
+to = "g.member_place"
+label = "class counts, profiles"
+
+[[edge]]
+from = "g.velocity"
+to = "g.member_place"
+label = "cluster bulk velocity"
+
+[[edge]]
+from = "g.member_place"
+to = "g.feature_member"
+label = "accepted members"
+
+[[edge]]
+from = "g.feature_member"
+to = "s.composition"
+label = "cluster [Fe/H], ΔY"
+
+[[edge]]
+from = "g.feature_member"
+to = "s.ctx"
+kind = "constraint"
+label = "binaries: ForcedMultiple"
+
+[[edge]]
+from = "g.feature_member"
+to = "s.attempt"
+kind = "data"
+label = "the member's attempt"
+
+[[edge]]
+from = "g.feature_member"
+to = "g.range_query"
+label = "FeatureMemberSource"
+
+# ---------------------------------------------------------------------------------------------
+# Edges: galactic centre
+# ---------------------------------------------------------------------------------------------
+
+[[edge]]
+from = "g.nuclear_disc"
+to = "g.nsc"
+label = "0.024 × disc mass"
+
+[[edge]]
+from = "g.mass_model"
+to = "g.centre_model"
+label = "galaxy monopole in Ψ"
+
+[[edge]]
+from = "g.fit_cluster"
+to = "g.centre_model"
+kind = "lookup"
+label = "NS, BH retention"
+
+[[edge]]
+from = "g.nsc"
+to = "g.centre_model"
+label = "Nuker profile"
+
+[[edge]]
+from = "g.bh_mass"
+to = "g.centre_model"
+label = "M_bh"
+
+[[edge]]
+from = "g.centre_model"
+to = "g.centre_draws"
+label = "DF, class counts"
+
+[[edge]]
+from = "g.centre_draws"
+to = "g.centre_member"
+label = "accepted members"
+
+[[edge]]
+from = "g.centre_member"
+to = "s.composition"
+label = "[Fe/H] +0.3 (stars planned)"
+
+[[edge]]
+from = "g.centre_member"
+to = "s.attempt"
+kind = "data"
+label = "attempt (stars planned)"
+
+# ---------------------------------------------------------------------------------------------
+# Edges: global list
+# ---------------------------------------------------------------------------------------------
+
+[[edge]]
+from = "g.feature_record"
+to = "g.gc_streams"
+label = "living globulars"
+
+[[edge]]
+from = "g.kin_tables"
+to = "g.gc_streams"
+label = "debris velocity law"
+
+[[edge]]
+from = "g.potential_tables"
+to = "g.gc_streams"
+label = "corotation, orbits"
+
+[[edge]]
+from = "g.draw_accretion"
+to = "g.dwarfs"
+label = "recent progenitors"
+
+[[edge]]
+from = "g.potential_tables"
+to = "g.dwarfs"
+label = "orbit, tidal radius"
+
+[[edge]]
+from = "g.gc_streams"
+to = "g.stream_list"
+label = "stream specs"
+
+[[edge]]
+from = "g.dwarfs"
+to = "g.stream_list"
+label = "tubes, cores"
+
+[[edge]]
+from = "g.stream_list"
+to = "g.range_query"
+label = "GlobalListSource (planned)"
+
+# ---------------------------------------------------------------------------------------------
+# Edges: grid placement
+# ---------------------------------------------------------------------------------------------
+
+[[edge]]
+from = "g.imf"
+to = "g.layer_density"
+kind = "lookup"
+label = "band shares"
+
+[[edge]]
+from = "g.layer_density"
+to = "g.small_bodies"
+label = "fields' summed ρ, no shares"
+
+[[edge]]
+from = "g.layers"
+to = "g.cell_count"
+label = "cell size, capacity"
+
+[[edge]]
+from = "g.layer_density"
+to = "g.cell_count"
+label = "bound × volume"
+
+[[edge]]
+from = "g.cell_count"
+to = "g.cand_position"
+label = "index < count"
+
+[[edge]]
+from = "g.cand_position"
+to = "g.thinning"
+label = "position"
+
+[[edge]]
+from = "g.layer_density"
+to = "g.thinning"
+label = "weights / bound"
+
+[[edge]]
+from = "g.thinning"
+to = "g.carveout"
+label = "record: pos, mass, age"
+
+[[edge]]
+from = "g.carveout"
+to = "g.system_record"
+label = "no: field system"
+
+[[edge]]
+from = "g.carveout"
+to = "g.class_grid"
+kind = "constraint"
+label = "yes: class host (planned)"
+
+[[edge]]
+from = "g.thinning"
+to = "g.age_draw"
+label = "picked component"
+
+[[edge]]
+from = "g.imf"
+to = "g.primary_mass"
+kind = "lookup"
+label = "quantile in layer band"
+
+[[edge]]
+from = "g.imf"
+to = "g.substellar_mass"
+kind = "lookup"
+label = "substellar branch"
+
+[[edge]]
+from = "g.primary_mass"
+to = "g.system_record"
+label = "initial mass"
+
+[[edge]]
+from = "g.age_draw"
+to = "g.system_record"
+label = "age at the epoch"
+
+[[edge]]
+from = "g.substellar_mass"
+to = "g.system_record"
+label = "object mass (F, G)"
+
+[[edge]]
+from = "g.system_record"
+to = "ps.free_hosts"
+label = "layer F and G records"
+
+[[edge]]
+from = "g.system_record"
+to = "g.velocity"
+label = "component, position"
+
+[[edge]]
+from = "g.system_record"
+to = "g.range_query"
+label = "grid hits"
+
+# ---------------------------------------------------------------------------------------------
+# Edges: kinematics and displaced objects
+# ---------------------------------------------------------------------------------------------
+
+[[edge]]
+from = "g.potential_tables"
+to = "g.kin_tables"
+label = "forces, Ω, κ, grid"
+
+[[edge]]
+from = "g.kin_tables"
+to = "g.velocity"
+label = "mean, dispersions"
+
+[[edge]]
+from = "g.velocity"
+to = "g.range_query"
+label = "drift to time t"
+
+[[edge]]
+from = "g.fit_displaced"
+to = "g.displaced"
+kind = "lookup"
+label = "class forms, shares"
+
+[[edge]]
+from = "s.draw_kick"
+to = "g.displaced"
+label = "kick law quadrature"
+
+[[edge]]
+from = "g.displaced"
+to = "g.layer_density"
+kind = "constraint"
+label = "class columns (planned)"
+
+[[edge]]
+from = "g.displaced"
+to = "s.kick_loop"
+kind = "constraint"
+label = "KickConstraint (planned)"
+
+# ---------------------------------------------------------------------------------------------
+# Edges: catalogue classes and supernova remnants
+# ---------------------------------------------------------------------------------------------
+
+[[edge]]
+from = "g.fit_ia"
+to = "g.type_ia"
+kind = "lookup"
+label = "delay bins, mass CDFs"
+
+[[edge]]
+from = "g.class_grid"
+to = "g.type_ia"
+label = "Ia entries (planned)"
+
+[[edge]]
+from = "g.type_ia"
+to = "g.sn_entry"
+label = "channel, masses (planned)"
+
+[[edge]]
+from = "g.snr"
+to = "g.sn_entry"
+label = "shell at age; no entries yet"
+
+[[edge]]
+from = "s.remnant"
+to = "g.snr"
+label = "kick, pulsar (planned)"
+
+# ---------------------------------------------------------------------------------------------
+# Edges: runtime access
+# ---------------------------------------------------------------------------------------------
+
+[[edge]]
+from = "g.thin_disc"
+to = "g.map"
+label = "disc, bar: closed form"
+
+[[edge]]
+from = "g.stellar_halo"
+to = "g.map"
+label = "halo, bulge: 32-node GL"
+
+[[edge]]
+from = "g.gas_field"
+to = "g.map"
+label = "extinction rasters"
+
+[[edge]]
+from = "g.range_query"
+to = "g.census"
+label = "expected count per layer"
+
+[[edge]]
+from = "g.census"
+to = "g.cell_count"
+kind = "constraint"
+label = "admitted layers only"
+
+[[edge]]
+from = "g.cell_count"
+to = "g.resolve"
+label = "recount: index < count"
+
+[[edge]]
+from = "g.system_record"
+to = "g.resolve"
+label = "the rerun candidate"
+
+[[edge]]
+from = "g.range_query"
+to = "g.frame"
+label = "systems near the ship"
+
+[[edge]]
+from = "g.potential_tables"
+to = "g.frame"
+label = "Ω, κ: Jacobi radius"

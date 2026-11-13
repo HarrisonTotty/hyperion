@@ -1,30 +1,40 @@
 import type { ObjectKindDto } from "@hyperion/protocol";
 import { describe, expect, it } from "vitest";
 
+import { AU_PER_LY } from "../../lib/format";
 import { toChartResult } from "../../lib/galaxy/wire";
 import { localFrameAt } from "../../geometry/frame";
 import { vec3 } from "../../geometry/vec3";
 import {
   aCensus,
+  anUnknownLayer,
+  anUnknownLayerLine,
   aStellarBrief,
   aSystemsInRange,
   type BriefLayer,
   LAYERS,
+  withCensusLine,
+  withRowFields,
 } from "../../test/galaxyFixtures";
 import {
   censusHint,
   censusLine,
   chartDataFault,
   distanceDecimalsFor,
+  distanceUnitFor,
   formatBandMsun,
+  formatChartDistance,
   formatChartLengthLy,
+  formatChartOffset,
+  formatFeatureDistance,
+  formatQueryRadius,
   filterSystems,
   inRangeCount,
   layerBands,
   nextStarFilter,
   passesStarFilter,
   queryRadiusForDriveRange,
-  shownCountText,
+  shownCount,
   STAR_FILTERS,
   starFilterLabel,
   SUBSTELLAR_FLOORS,
@@ -93,6 +103,28 @@ describe("toScene", () => {
       "RANGE 50 ly SET",
       "QUERY EDGE 80 ly",
     ]);
+  });
+
+  it("draws a drive range below 0.01 ly on a fine chart, labelled in AU as a setting", () => {
+    // 0.0015 ly is 94.86 AU, inside a chart of 0.002 ly (126 AU).
+    const scene = sceneOf([{ relLy: [0.001, 0, 0] }], { radiusLy: 0.002, driveRangeLy: 0.0015 });
+
+    expect(scene.spheres.map((sphere) => sphere.label)).toEqual([
+      "RANGE 94.9 AU SET",
+      "QUERY EDGE 126 AU",
+    ]);
+    expect(scene.plane.rings.find((ring) => ring.radius === 0.0015)?.label).toBe(
+      "PLANE 94.9 AU SET",
+    );
+    expect(scene.points[0]?.status).toBe("available");
+  });
+
+  it("labels the query edge of a chart of the centre's finest step in AU, as its selector reads", () => {
+    const scene = sceneOf([], { radiusLy: 0.001 });
+
+    expect(scene.spheres.map((sphere) => sphere.label)).toEqual(["QUERY EDGE 63.2 AU"]);
+    expect(scene.plane.spacing).toBe(0.0002);
+    expect(scene.plane.rings.map((ring) => ring.label)).toEqual(["", "", "", "", ""]);
   });
 
   it("rings the plane at every grid spacing out to 50 ly, the drive range labelled", () => {
@@ -315,11 +347,98 @@ describe("distanceDecimalsFor", () => {
   });
 });
 
+describe("distanceUnitFor", () => {
+  it.each([
+    [500, "ly", 2],
+    [10, "ly", 2],
+    [1, "ly", 3],
+    [0.5, "ly", 4],
+    [0.01, "ly", 4],
+    // A computed 0.01 a bit off the literal stays in light-years, as the scale bar does.
+    [0.1 * 0.1, "ly", 4],
+    [0.01 * (1 - 1e-12), "ly", 4],
+    [0.005, "AU", 1],
+    [0.002, "AU", 1],
+    [0.001, "AU", 1],
+  ])(
+    "writes every distance on a %s ly chart in %s with %s decimals",
+    (radiusLy, symbol, decimals) => {
+      const unit = distanceUnitFor(radiusLy);
+
+      expect(unit.symbol).toBe(symbol);
+      expect(unit.decimals).toBe(decimals);
+      expect(unit.perLy).toBe(symbol === "AU" ? AU_PER_LY : 1);
+    },
+  );
+});
+
+describe("formatChartDistance and formatChartOffset", () => {
+  it.each([
+    [0.0042, 0.5, "0.0042", "+0.0042"],
+    [-0.0042, 0.01, "0.0042", "-0.0042"],
+    [12.3456, 20, "12.35", "+12.35"],
+    // 0.001 ly is 63.241 AU (the IAU's 2012 au and the Julian light-year, both exact).
+    [0.001, 0.001, "63.2", "+63.2"],
+    [-0.0005, 0.001, "31.6", "-31.6"],
+    [0, 0.005, "0.0", "+0.0"],
+    // A feature's centre may lie far beyond a fine chart's edge: grouped from five digits.
+    [2, 0.001, "126,482.2", "+126,482.2"],
+  ])(
+    "writes %s ly on a %s ly chart as %s, and as an offset %s",
+    (ly, radiusLy, distance, offset) => {
+      const unit = distanceUnitFor(radiusLy);
+
+      expect(formatChartDistance(Math.abs(ly), unit)).toBe(distance);
+      expect(formatChartOffset(ly, unit)).toBe(offset);
+    },
+  );
+});
+
+describe("formatFeatureDistance", () => {
+  it.each([
+    // Within the column's seven characters, at the chart's precision.
+    [99.9999, 0.5, "99.9999"],
+    [0.0042, 0.001, "265.6"],
+    [0.15, 0.001, "9486.2"],
+    [499.99, 50, "499.99"],
+    // Past it, to three figures in the chart's unit.
+    [300, 0.5, "300"],
+    [12_345.678, 0.01, "12,300"],
+    [1.5, 0.001, "94,900"],
+    [2, 0.001, "126,000"],
+    [10_000, 0.001, "6.32E8"],
+    [12_345.678, 50, "12,300"],
+  ])("writes a feature %s ly off on a %s ly chart as %s", (ly, radiusLy, text) => {
+    const written = formatFeatureDistance(ly, distanceUnitFor(radiusLy));
+
+    expect(written).toBe(text);
+    expect(written.length).toBeLessThanOrEqual(7);
+  });
+});
+
+describe("formatQueryRadius", () => {
+  it.each([
+    [500, "500 ly"],
+    [80, "80 ly"],
+    [37.5, "37.5 ly"],
+    [0.05, "0.05 ly"],
+    [0.01, "0.01 ly"],
+    [0.005, "316 AU"],
+    [0.002, "126 AU"],
+    [0.001, "63.2 AU"],
+  ])("writes a radius of %s ly as %s", (ly, text) => {
+    expect(formatQueryRadius(ly)).toBe(text);
+  });
+});
+
 describe("queryRadiusForDriveRange", () => {
   it.each([
     [50, 50],
     [80, 100],
-    [0.005, 0.01],
+    [0.01, 0.01],
+    [0.0015, 0.002],
+    [0.001, 0.001],
+    [0.0005, 0.001],
     [600, 500],
   ])("follows a drive range of %s ly with %s ly", (driveRangeLy, radiusLy) => {
     expect(queryRadiusForDriveRange(driveRangeLy)).toBe(radiusLy);
@@ -415,6 +534,7 @@ describe("the STARS filter", () => {
     "supergiant",
     "wolf_rayet",
     "hot_subdwarf",
+    "stripped_helium_star",
     "white_dwarf",
     "neutron_star",
     "black_hole",
@@ -436,6 +556,7 @@ describe("the STARS filter", () => {
       "supergiant",
       "wolf_rayet",
       "hot_subdwarf",
+      "stripped_helium_star",
       "substellar",
     ]);
   });
@@ -482,14 +603,20 @@ describe("the STARS filter", () => {
   });
 });
 
-describe("shownCountText", () => {
-  it("says what a filter hides, digits grouped from five", () => {
-    expect(shownCountText(412, 1630, "living")).toBe("412 OF 1630 SHOWN: LIVING");
-    expect(shownCountText(9, 12_480, "remnants")).toBe("9 OF 12,480 SHOWN: REMNANTS");
+describe("shownCount", () => {
+  it("gives the figure apart from the words saying what each filter hides, digits grouped from five", () => {
+    expect(shownCount(412, 1630, "living")).toEqual({
+      figure: "412 OF 1630",
+      filterWords: "SHOWN: LIVING",
+    });
+    expect(shownCount(9, 12_480, "remnants")).toEqual({
+      figure: "9 OF 12,480",
+      filterWords: "SHOWN: REMNANTS",
+    });
   });
 
-  it("gives the total alone under ALL", () => {
-    expect(shownCountText(1630, 1630, "all")).toBe("1630");
+  it("gives the total alone under ALL, with no words after it", () => {
+    expect(shownCount(1630, 1630, "all")).toEqual({ figure: "1630", filterWords: null });
   });
 });
 
@@ -571,5 +698,47 @@ describe("the substellar layers (plan 13, P13.T8.c)", () => {
     // 1/3 M⊕ is 1.001E-6 M☉ and 13 M_Jup 0.01241 M☉.
     expect(rogue?.minMsun).toBeCloseTo(1.001_2e-6, 9);
     expect(brown?.minMsun).toBeCloseTo(0.012_41, 5);
+  });
+});
+
+describe("a layer this build does not know (plan 04's reserved list)", () => {
+  /** Two layer A systems, the nearer moved to a layer this build does not know, as a newer server's. */
+  function newerChart() {
+    const response = withCensusLine(
+      aSystemsInRange({
+        centreLy: CENTRE,
+        systems: [
+          { relLy: [1, 0, 0], layer: "a" },
+          { relLy: [2, 0, 0], layer: "a" },
+        ],
+      }),
+      anUnknownLayerLine(),
+    );
+    return toChartResult(withRowFields(response, { layer: anUnknownLayer() }, 1));
+  }
+
+  it("charts an answer whose census adds a line of it to the five stellar layers", () => {
+    const result = newerChart();
+
+    expect(chartDataFault(result)).toBeNull();
+    expect(layerBands(result.layers)?.map((band) => band.layer)).toEqual(LAYERS);
+  });
+
+  it("draws none of its objects, whose size class is not known", () => {
+    const result = newerChart();
+    const scene = toScene(result, {
+      frame: FRAME,
+      driveRangeLy: 50,
+      selectedId: null,
+      destinationId: null,
+    });
+
+    expect(scene.points.map((point) => point.label)).toEqual(["H7K 4C0RFZ A-2"]);
+  });
+
+  it("reads the census's edge as Missing where it is the lightest layer included", () => {
+    const line = censusLine(newerChart().census);
+
+    expect(line).toMatchObject({ kind: "complete", aboveMsun: 1e-9, above: null });
   });
 });

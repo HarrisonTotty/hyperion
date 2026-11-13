@@ -12,9 +12,9 @@
 //! # `WindRecipe::Hurley2000`
 //!
 //! HPT section 7.1, as the published SSE code (`mlwind.f`) applies it to a single star. Four
-//! places differ between the printed text and the code, and in each the text's form moves the rate
-//! by far more than the tolerances P06.T12.b validates the backbone to (1% in mass, 0.02 dex in L
-//! and R), so the code's form is used, for the owner to confirm (plan 06, ruling 10 of
+//! places differ between the published text and the code, and in each the text's form moves the
+//! rate by far more than the tolerances P06.T12.b validates the backbone to (1% in mass, 0.02 dex
+//! in L and R), so the code's form is used, for the owner to confirm (plan 06, ruling 10 of
 //! 2026-09-22); each is named again where it acts:
 //!
 //! - Nieuwenhuijzen and de Jager's rate is switched on at L = 4,000 L☉ by a linear ramp over
@@ -28,6 +28,12 @@
 //! - The luminous-blue-variable term acts from the Hertzsprung gap to the thermally pulsing AGB
 //!   (types 2–6), not on the main sequence, where the text does not restrict it (it is reached
 //!   there only by the most massive stars near their terminal main sequence).
+//!
+//! HPT's luminous-blue-variable term, 0.1 (10⁻⁵ R L^½ − 1)³ (L ÷ 6 × 10⁵ − 1) M☉ per year, is the
+//! same in the published text (MNRAS 315, 543, section 7.1, p. 562) and in SSE's code
+//! ([`hurley_lbv`]), and vanishes on the Humphreys–Davidson limit. Only the arXiv preprint
+//! (astro-ph/0001295v1, its one version) drops the − 1 from the cube, which would step the rate to
+//! 0.07 M☉ per year at 10⁶ L☉ on the limit.
 //!
 //! SSE scales the naked-helium-star rate by an input `hewind`, which its distributed input file
 //! sets to 0.5 while its source comment calls 1.0 normal; the paper has no such factor, and this
@@ -53,8 +59,9 @@
 //!   smaller jump near 15,000 K at high Z (their section 5.2) is left out, as Belczynski et al.
 //!   leave it.
 //! - An evolved hydrogen-rich star beyond the Humphreys–Davidson limit loses 1.5 × 10⁻⁴ M☉ per
-//!   year, independent of metallicity, as the whole of its wind (Belczynski et al. 2010,
-//!   equation 8 with `f_lbv` = 1.5).
+//!   year, independent of metallicity, at least: a floor (Belczynski et al. 2010, equation 8 with
+//!   `f_lbv` = 1.5), with the limit enforced above it (below; to version 25 it was the whole of
+//!   its wind).
 //! - Naked helium stars follow Hamann and Koesterke (1998, A&A 335, 1003) in HPT's reduced form
 //!   10⁻¹³ L^1.5, scaled as (Z ÷ Z☉)^0.86 (Vink and de Koter 2005, A&A 442, 587, for WN stars
 //!   over 10⁻³ ≲ Z ÷ Z☉ ≲ 1), which is Belczynski et al. (2010) equation 9.
@@ -79,12 +86,46 @@
 //!
 //! The recipe is continuous in effective temperature: the bi-stability jump and the hand-over
 //! from the cool rate to Vink's are linear blends across a band (see [`vink`] and
-//! [`hot_or_cool`]). The one step left is the Humphreys–Davidson limit, where Belczynski et al.'s
-//! constant rate switches on by design, about six times the rate just inside it for a 60 M☉ star
-//! of 10⁶ L☉. Between phases the rate may step, as in the codes the recipe follows: at low Z most
+//! [`hot_or_cool`]). At the Humphreys–Davidson limit Belczynski et al.'s constant is a floor under
+//! the rate the star would have inside the limit, with HPT's luminous-blue-variable term added
+//! (P06.T42.a's [`modern_limited`]), so the rate steps there only where the floor exceeds that
+//! rate. Between phases the rate may step, as in the codes the recipe follows: at low Z most
 //! of all where a giant cooler than 11,500 K is stripped to a naked helium star, since HPT's
 //! small-envelope term carries no Z and the helium stars' rate carries Z^0.86 (a fall of about 95
 //! times at Z = 10⁻⁴ and 7 at 0.002).
+//!
+//! # The Humphreys–Davidson limit enforced (ask A2)
+//!
+//! Cool supergiants are observed up to log L ≈ 5.5 (Davies, Crowther and Beasor 2018, MNRAS 478,
+//! 3138, section 3.1, from the second and third brightest: 5.4 in the SMC and 5.5 in the LMC),
+//! against Humphreys and Davidson's 1979 limit of 5.7–5.9, revised to 5.66 by Humphreys (1983) and
+//! Elias et al. (1985), as Davies et al. (section 3.2) quote it. Past the limit the modern
+//! recipe's constant rate is about equal to the Nieuwenhuijzen–de Jager rate it replaces on the
+//! cool side at log L 5.8–5.9 and about five times below it at log L 6.3 (8.1 × 10⁻⁴ M☉ per year
+//! for 80 M☉ at 4,000 K), so the tracks keep cool supergiants there for some 2 × 10⁵ years.
+//! Ruling 29 of signoff 12 (rendering plan R06's ask A2) has the tracks shed them.
+//! [`modern_limited`] is that rate, built pure by P06.T42.a, and P06.T42.b's swap makes it
+//! `Modern`'s from version 26 on: [`rate`] reads it. The recipe described above, Belczynski et
+//! al.'s constant the whole of an evolved star's wind past the limit (`modern`), stays only as
+//! P06.T42.a's tests' reference.
+//!
+//! Past the limit it is the larger of [`MODERN_LBV`] and the rate the star would have inside it
+//! (the cool side's HPT rates or Vink's, through [`hot_or_cool`]), steepened near the Eddington
+//! limit as above, and then HPT's luminous-blue-variable term ([`hurley_lbv`]) added on top, as
+//! the COMPAS code's `HURLEY_ADD` prescription adds it to the other winds
+//! (`BaseStar::CalculateMassLossRateBelczynski2010`). So it departs from Belczynski et al., whose
+//! equation 8 "is assumed to give the full amount of LBV mass loss". At 4,000 K the term is a
+//! wall: zero up to L = 6 × 10⁵ L☉ (log L = 5.78), about 9 M☉ per year at log L 5.80 and 120 at
+//! 5.90, against a cool-side rate of 1.0–1.6 × 10⁻⁴ there, which is about [`MODERN_LBV`], so the
+//! floor alone would change nothing. The main sequence and naked helium stars are left as they
+//! are: SSE applies the term from the Hertzsprung gap to the thermally pulsing AGB (types 2–6).
+//!
+//! HPT's term as published (MNRAS 315, 543, section 7.1, p. 562) is 0.1 (10⁻⁵ R L^½ − 1.0)³
+//! (L ÷ 6 × 10⁵ − 1.0). SSE's code (`mlwind.f`, `0.1d0*(x-1.d0)**3*(lum/6.0d+05-1.d0)`, for
+//! types 2–6), COMPAS (`CalculateMassLossRateLBVHurley`), COSMIC and Belczynski et al. (2010,
+//! section 2.1, equation 5) write the same, and both recipes here use it. The arXiv preprint prints
+//! the cube without the − 1.0, a slip the journal's text corrects; at 4,000 K the preprint's form
+//! would be 21–28% higher from log L 5.78 to 5.90.
 
 use crate::math;
 use crate::stellar::composition::Z_SOLAR;
@@ -99,8 +140,8 @@ pub enum WindRecipe {
     /// that the backbone can be validated against SSE's output (P06.T12.b).
     Hurley2000,
     /// The generator's default: Vink, de Koter and Lamers (2001) for hot hydrogen-rich stars, the
-    /// luminous-blue-variable rate of Belczynski et al. (2010) beyond the Humphreys–Davidson
-    /// limit, Hamann and Koesterke (1998) scaled as Z^0.86 (Vink and de Koter 2005) for naked
+    /// Humphreys–Davidson limit enforced beyond it (Belczynski et al.'s 2010 luminous-blue-variable
+    /// rate as a floor, HPT's term on top; P06.T42.b), Hamann and Koesterke (1998) scaled as Z^0.86 (Vink and de Koter 2005) for naked
     /// helium stars, and Hurley, Pols and Tout's prescriptions elsewhere.
     #[default]
     Modern,
@@ -143,6 +184,8 @@ impl ReimersEta {
 /// `recipe`, with Reimers' `eta`: M☉ per Julian year, non-negative, positive for loss as in
 /// [`StarStateParts::mass_loss_rate`](crate::stellar::StarStateParts::mass_loss_rate).
 ///
+/// The `Modern` recipe enforces the Humphreys–Davidson limit ([`modern_limited`], P06.T42.b).
+///
 /// Remnants, protostars, pre-main-sequence stars, substellar objects and the post-AGB crossing
 /// have none: HPT's recipe starts on the main sequence, and the post-AGB crossing begins when the
 /// envelope is gone. The terms and how they combine are those of the module documentation.
@@ -165,7 +208,7 @@ pub(crate) fn rate(
     debug_assert!(s.m > 0.0, "a star with a wind has mass: {state:?}");
     SolarMassesPerYear::new(match recipe {
         WindRecipe::Hurley2000 => hurley(regime, &s, eta),
-        WindRecipe::Modern => modern(regime, &s, eta),
+        WindRecipe::Modern => modern_limited(regime, &s, eta),
     })
 }
 
@@ -211,17 +254,50 @@ pub(crate) fn small_envelope_mu(
     core_mass: SolarMasses,
     luminosity: SolarLuminosities,
 ) -> f64 {
-    let (m, mc, l) = (mass.value(), core_mass.value(), luminosity.value());
+    small_envelope_mu_of(mass, core_mass, small_envelope_factor(luminosity))
+}
+
+/// [`small_envelope_mu`]'s factor of the luminosity alone, min(5, max(1.2, (L ÷ L₀)^κ)), which a
+/// star whose luminosity the current mass does not move keeps at every mass.
+#[must_use]
+pub(crate) fn small_envelope_factor(luminosity: SolarLuminosities) -> f64 {
+    let q = luminosity.value() / MU_L0;
+    // The power's own check of its base, which the clamp's ends below no longer reach.
+    debug_assert!(
+        !q.is_infinite(),
+        "the small-envelope factor needs a finite luminosity, not {luminosity:?}"
+    );
+    // Where the clamp decides the factor the power is not taken: (L ÷ L₀)^κ is at most 1.1953
+    // from L ÷ L₀ = 0.7 and at least 5.063 up to 0.039, and `powf_positive` is within 2 × 10⁻¹³
+    // of it relatively here, so the clamp gives the same bits (perf-layer-e-fates: the factor was
+    // 6% of a layer-E fate's instructions).
+    if q >= MU_CLAMPED_LOW_FROM {
+        return MU_CLAMP.0;
+    }
+    if q > 0.0 && q <= MU_CLAMPED_HIGH_TO {
+        return MU_CLAMP.1;
+    }
+    MU_CLAMP
+        .1
+        .min(MU_CLAMP.0.max(math::powf_positive(q, MU_KAPPA)))
+}
+
+/// [`small_envelope_mu`] with its luminosity's `factor` ([`small_envelope_factor`]) given, bit for
+/// bit.
+///
+/// # Panics
+///
+/// As [`small_envelope_mu`].
+#[must_use]
+pub(crate) fn small_envelope_mu_of(mass: SolarMasses, core_mass: SolarMasses, factor: f64) -> f64 {
+    let (m, mc) = (mass.value(), core_mass.value());
     debug_assert!(m > 0.0, "μ needs a positive mass: {m}");
-    ((m - mc) / m)
-        * MU_CLAMP
-            .1
-            .min(MU_CLAMP.0.max(math::powf_positive(l / MU_L0, MU_KAPPA)))
+    ((m - mc) / m) * factor
 }
 
 /// Kudritzki and Reimers' coefficient, M☉ yr⁻¹ per (L☉ R☉ ÷ M☉): `Ṁ_R` = η × 4 × 10⁻¹³ L R ÷ M
 /// (HPT equation 106).
-const REIMERS: f64 = 4e-13;
+pub(crate) const REIMERS: f64 = 4e-13;
 
 /// Vassiliadis and Wood's rate as HPT write it: log `Ṁ_VW` = −11.4 + 0.0125 [P₀ − 100
 /// max(M − 2.5, 0)], P₀ in days.
@@ -273,6 +349,14 @@ const MU_KAPPA: f64 = -0.5;
 /// The clamp of HPT equation 97's luminosity factor, (min, max).
 const MU_CLAMP: (f64, f64) = (1.2, 5.0);
 
+/// L ÷ L₀ from which equation 97's factor is its least, [`MU_CLAMP`]'s 1.2: 0.7^−½ = 1.1952,
+/// 0.4% below it ([`small_envelope_factor`]).
+const MU_CLAMPED_LOW_FROM: f64 = 0.7;
+
+/// L ÷ L₀ up to which equation 97's factor is its greatest, [`MU_CLAMP`]'s 5: 0.039^−½ = 5.0637,
+/// 1.3% above it ([`small_envelope_factor`]).
+const MU_CLAMPED_HIGH_TO: f64 = 0.039;
+
 /// The Humphreys–Davidson limit as HPT write it: L > 6 × 10⁵ L☉ and 10⁻⁵ R L^½ > 1 (section 7.1,
 /// after Humphreys and Davidson 1994).
 const HD_LUMINOSITY: f64 = 6e5;
@@ -280,13 +364,15 @@ const HD_LUMINOSITY: f64 = 6e5;
 /// See [`HD_LUMINOSITY`]: per R☉ L☉^½.
 const HD_RADIUS_SCALE: f64 = 1e-5;
 
-/// HPT's luminous-blue-variable rate, 0.1 (10⁻⁵ R L^½ − 1)³ (L ÷ 6 × 10⁵ − 1) M☉ yr⁻¹, added to
-/// the others (section 7.1).
+/// HPT's luminous-blue-variable rate as HPT publish it (section 7.1, p. 562) and SSE's code writes
+/// it, 0.1 (10⁻⁵ R L^½ − 1)³ (L ÷ 6 × 10⁵ − 1) M☉ yr⁻¹, added to the others; the arXiv preprint
+/// omits the − 1.
 const HURLEY_LBV: f64 = 0.1;
 
 /// The luminous-blue-variable rate beyond the Humphreys–Davidson limit, M☉ yr⁻¹: `f_lbv` × 10⁻⁴
-/// with Belczynski et al.'s (2010, equation 8) standard `f_lbv` = 1.5, the whole of the star's
-/// wind, independent of metallicity.
+/// with Belczynski et al.'s (2010, equation 8) standard `f_lbv` = 1.5, independent of metallicity:
+/// a floor under the enforced limit ([`modern_limited`]), and the whole of the star's wind in
+/// `modern`, P06.T42.a's tests' reference.
 const MODERN_LBV: f64 = 1.5e-4;
 
 /// The power of Z ÷ Z☉ in a Wolf-Rayet star's wind: Vink and de Koter (2005, section 4) find
@@ -476,10 +562,44 @@ fn hurley_evolved(s: &Surface, eta: ReimersEta, agb: bool) -> f64 {
 }
 
 /// Design note 6's modern recipe with P06.T39's steepening near the Eddington limit (module
-/// documentation).
+/// documentation), Belczynski et al.'s constant the whole of the wind past the
+/// Humphreys–Davidson limit: version 25's and before, now P06.T42.a's tests' reference.
+#[cfg(test)]
 #[must_use]
 fn modern(regime: Regime, s: &Surface, eta: ReimersEta) -> f64 {
-    let recipe = |surface: &Surface| modern_below_kink(regime, surface, eta);
+    with_eddington_kink(regime, s, |surface| modern_below_kink(regime, surface, eta))
+}
+
+/// The modern recipe with the Humphreys–Davidson limit enforced (ask A2, P06.T42.a; module
+/// documentation): [`modern`]'s rate to the bit within the limit, and for an evolved
+/// hydrogen-rich star beyond it max([`MODERN_LBV`], the cool- or hot-side rate), steepened near
+/// the Eddington limit, plus [`hurley_lbv`] at the star's own state. M☉ per Julian year.
+///
+/// The term is added after the steepening, not inside it, so the twin at Γₑ = 0.7 that
+/// [`eddington_boosted`] reads carries none.
+#[must_use]
+fn modern_limited(regime: Regime, s: &Surface, eta: ReimersEta) -> f64 {
+    let below_kink = |surface: &Surface| match regime {
+        Regime::Evolved { agb } if beyond_humphreys_davidson(surface) => {
+            MODERN_LBV.max(hot_or_cool(surface, || hurley_evolved(surface, eta, agb)))
+        }
+        Regime::Windless | Regime::MainSequence | Regime::Evolved { .. } | Regime::NakedHelium => {
+            modern_below_kink(regime, surface, eta)
+        }
+    };
+    let rate = with_eddington_kink(regime, s, below_kink);
+    match regime {
+        Regime::Evolved { .. } if beyond_humphreys_davidson(s) => rate + hurley_lbv(s),
+        Regime::Windless | Regime::MainSequence | Regime::Evolved { .. } | Regime::NakedHelium => {
+            rate
+        }
+    }
+}
+
+/// `recipe`, a modern rate below the Eddington kink, steepened above it ([`eddington_boosted`])
+/// in the regimes P06.T39 steepens.
+#[must_use]
+fn with_eddington_kink(regime: Regime, s: &Surface, recipe: impl Fn(&Surface) -> f64) -> f64 {
     match regime {
         // The AGB's own endpoint is its dust-driven superwind, capped at 1.36 × 10⁻⁹ L, which
         // Vink et al.'s line-driven kink does not describe; its last envelope reaches Γₑ ≈ 0.8
@@ -523,12 +643,12 @@ fn eddington_boosted(s: &Surface, recipe: impl Fn(&Surface) -> f64) -> f64 {
 fn modern_below_kink(regime: Regime, s: &Surface, eta: ReimersEta) -> f64 {
     match regime {
         Regime::Windless => 0.0,
-        Regime::MainSequence => hot_or_cool(s, nieuwenhuijzen_de_jager(s)),
+        Regime::MainSequence => hot_or_cool(s, || nieuwenhuijzen_de_jager(s)),
         Regime::Evolved { agb } => {
             if beyond_humphreys_davidson(s) {
                 MODERN_LBV
             } else {
-                hot_or_cool(s, hurley_evolved(s, eta, agb))
+                hot_or_cool(s, || hurley_evolved(s, eta, agb))
             }
         }
         Regime::NakedHelium => reimers(s, eta).max(
@@ -605,8 +725,9 @@ fn beyond_humphreys_davidson(s: &Surface) -> bool {
     s.l > HD_LUMINOSITY && humphreys_davidson_x(s) > 1.0
 }
 
-/// HPT's luminous-blue-variable rate beyond the Humphreys–Davidson limit, 0.1 (x − 1)³ (L ÷ 6 ×
-/// 10⁵ − 1) with x = 10⁻⁵ R L^½, and zero within it; it vanishes on the limit itself.
+/// HPT's luminous-blue-variable rate beyond the Humphreys–Davidson limit as HPT publish it (p. 562)
+/// and SSE's code writes it, 0.1 (x − 1)³ (L ÷ 6 × 10⁵ − 1) with x = 10⁻⁵ R L^½, and zero within
+/// it, so that it vanishes on the limit itself (the arXiv preprint omits the − 1).
 #[must_use]
 fn hurley_lbv(s: &Surface) -> f64 {
     if !beyond_humphreys_davidson(s) {
@@ -617,19 +738,20 @@ fn hurley_lbv(s: &Surface) -> f64 {
 }
 
 /// The modern recipe's rate for a hydrogen-rich star inside the Humphreys–Davidson limit whose
-/// HPT rate is `cool`: `cool` up to 11,500 K, Vink's rate alone from 12,500 K, and between them
+/// HPT rate `cool` gives: `cool` up to 11,500 K, Vink's rate alone from 12,500 K, and between them
 /// (1 − w) × `cool` + w × Vink with w rising linearly in T from 0 to 1 across the band, both
-/// evaluated at the star's own state ([`HANDOVER_K`]).
+/// evaluated at the star's own state ([`HANDOVER_K`]). `cool` is taken only below 12,500 K, where
+/// it is read: a hot star's track pays for no HPT rate (perf-layer-e-fates).
 #[must_use]
-fn hot_or_cool(s: &Surface, cool: f64) -> f64 {
+fn hot_or_cool(s: &Surface, cool: impl FnOnce() -> f64) -> f64 {
     let (low, high) = HANDOVER_K;
     if s.t <= low {
-        cool
+        cool()
     } else if s.t >= high {
         vink(s)
     } else {
         let w = (s.t - low) / (high - low);
-        (1.0 - w) * cool + w * vink(s)
+        (1.0 - w) * cool() + w * vink(s)
     }
 }
 
@@ -658,7 +780,7 @@ mod tests {
     use super::super::continuity::assert_continuous_over;
     use super::*;
     use crate::units::{Dex, HeliumExcess, SolarRadii, Years};
-    use hyperion_testkit::float::assert_same_bits;
+    use hyperion_testkit::float::{assert_same_bits, bits};
 
     /// A star in `phase` of mass `m` and core mass `mc` (M☉), luminosity `l` (L☉) and radius `r`
     /// (R☉).
@@ -700,8 +822,49 @@ mod tests {
         .value()
     }
 
+    /// The modern rate, the Humphreys–Davidson limit enforced.
     fn modern_rate(state: &StarState, z: f64) -> f64 {
         rate(WindRecipe::Modern, state, &metals(z), ReimersEta::HURLEY).value()
+    }
+
+    /// The modern recipe is [`modern_limited`], bit for bit, over a grid of states inside and past
+    /// the limit, and moves from [`modern`] past it; HPT's recipe is its own.
+    #[test]
+    fn the_modern_recipe_enforces_the_limit() {
+        let mut past = 0;
+        for phase in [
+            Phase::MainSequence,
+            Phase::HertzsprungGap,
+            Phase::CoreHeliumBurning,
+            Phase::EarlyAgb,
+            Phase::HeliumMainSequence,
+        ] {
+            for (m, core) in [(25.0, 8.0), (60.0, 20.0), (90.0, 35.0)] {
+                for log_l in [5.6, 5.8, 6.0, 6.3] {
+                    for r in [20.0, 150.0, 1_500.0] {
+                        let core = if phase == Phase::MainSequence {
+                            0.0
+                        } else {
+                            core
+                        };
+                        let s = star(phase, m, core, math::exp10(log_l), r);
+                        let comp = metals(0.02);
+                        let surface = Surface::of(&s, &comp);
+                        let regime = Regime::of(phase);
+                        let eta = ReimersEta::HURLEY;
+                        let limited = rate(WindRecipe::Modern, &s, &comp, eta).value();
+                        assert_same_bits(limited, modern_limited(regime, &surface, eta));
+                        assert_same_bits(
+                            rate(WindRecipe::Hurley2000, &s, &comp, eta).value(),
+                            hurley(regime, &surface, eta),
+                        );
+                        past +=
+                            u32::from(modern(regime, &surface, eta).total_cmp(&limited).is_ne());
+                    }
+                }
+            }
+        }
+        assert!(past > 0, "no state past the limit moved");
     }
 
     #[track_caller]
@@ -1074,16 +1237,16 @@ mod tests {
             Phase::EarlyAgb,
         ] {
             let lbv = star(phase, 60.0, 20.0, 1e6, 150.0);
-            assert_same_bits(modern_rate(&lbv, 0.02), 1.5e-4);
+            assert_same_bits(todays_rate(&lbv, 0.02), 1.5e-4);
         }
         let inside = star(Phase::HertzsprungGap, 60.0, 20.0, 1e6, 90.0);
-        let within = modern_rate(&inside, 0.02);
+        let within = todays_rate(&inside, 0.02);
         assert!(within < 1e-4, "inside the limit: {within:e}");
         let main_sequence = star(Phase::MainSequence, 60.0, 0.0, 1e6, 150.0);
         let s = surface(&main_sequence, 0.02);
         assert_same_bits(
-            modern_rate(&main_sequence, 0.02),
-            hot_or_cool(&s, nieuwenhuijzen_de_jager(&s)),
+            todays_rate(&main_sequence, 0.02),
+            hot_or_cool(&s, || nieuwenhuijzen_de_jager(&s)),
         );
     }
 
@@ -1217,13 +1380,13 @@ mod tests {
             let cool = star_at(Phase::CoreHeliumBurning, m, 0.5 * m, l, 5_000.0);
             assert!(beyond_humphreys_davidson(&surface(&cool, 0.02)));
             let expected = MODERN_LBV * math::powf(gamma / EDDINGTON_KINK, 3.99);
-            assert_close("LBV", modern_rate(&cool, 0.02), expected, 1e-9);
+            assert_close("LBV", todays_rate(&cool, 0.02), expected, 1e-9);
             let hot = star_at(Phase::MainSequence, m, 0.0, l, 45_000.0);
             let at_kink = star_at(Phase::MainSequence, kink, 0.0, l, 45_000.0);
             assert_close(
                 "Vink",
-                modern_rate(&hot, 0.02),
-                modern_rate(&at_kink, 0.02) * math::powf(gamma / EDDINGTON_KINK, 3.99),
+                todays_rate(&hot, 0.02),
+                todays_rate(&at_kink, 0.02) * math::powf(gamma / EDDINGTON_KINK, 3.99),
                 1e-9,
             );
         }
@@ -1232,9 +1395,274 @@ mod tests {
         let s = surface(&faint, 0.02);
         assert!(eddington_factor(SolarLuminosities::new(s.l), SolarMasses::new(s.m)) < 0.7);
         assert_same_bits(
-            modern_rate(&faint, 0.02),
-            hot_or_cool(&s, nieuwenhuijzen_de_jager(&s)),
+            todays_rate(&faint, 0.02),
+            hot_or_cool(&s, || nieuwenhuijzen_de_jager(&s)),
         );
+    }
+
+    /// P06.T42.a's rate for `state` at metal fraction `z`, with HPT's η.
+    fn limited_rate(state: &StarState, z: f64) -> f64 {
+        modern_limited(
+            Regime::of(state.phase()),
+            &surface(state, z),
+            ReimersEta::HURLEY,
+        )
+    }
+
+    /// Belczynski et al.'s modern rate for `state` at metal fraction `z`, with HPT's η: [`modern`]
+    /// itself, not [`rate`], which P06.T42.b points at the limited rate, so that T42.a's tests
+    /// keep their reference.
+    fn todays_rate(state: &StarState, z: f64) -> f64 {
+        modern(
+            Regime::of(state.phase()),
+            &surface(state, z),
+            ReimersEta::HURLEY,
+        )
+    }
+
+    /// A grid of states in every phase with a wind, from 1 to 4 × 10⁶ L☉ and 3,000 to 120,000 K,
+    /// at three Eddington factors Γₑ (0.2, 0.9 and 2) where the mass allows, with cores of 0.3 of
+    /// the mass on the giants' phases.
+    fn wind_grid() -> Vec<StarState> {
+        let phases = [
+            Phase::MainSequence,
+            Phase::HertzsprungGap,
+            Phase::FirstGiantBranch,
+            Phase::CoreHeliumBurning,
+            Phase::EarlyAgb,
+            Phase::ThermallyPulsingAgb,
+            Phase::HeliumMainSequence,
+            Phase::HeliumHertzsprungGap,
+            Phase::HeliumGiantBranch,
+        ];
+        let mut states = Vec::with_capacity(2_160);
+        for phase in phases {
+            let core = match Regime::of(phase) {
+                Regime::Evolved { .. } => 0.3,
+                Regime::Windless | Regime::MainSequence | Regime::NakedHelium => 0.0,
+            };
+            for log_l in [0.0, 3.6, 4.5, 5.5, 5.75, 5.78, 5.8, 5.9, 6.3, 6.6] {
+                let l = math::exp10(log_l);
+                for gamma in [0.2, 0.9, 2.0] {
+                    let m = (l * EDDINGTON_PER_LIGHT_TO_MASS / gamma).max(0.5);
+                    for t in [
+                        3_000.0, 4_000.0, 8_000.0, 11_800.0, 20_000.0, 25_000.0, 40_000.0,
+                        120_000.0,
+                    ] {
+                        states.push(star_at(phase, m, core * m, l, t));
+                    }
+                }
+            }
+        }
+        states
+    }
+
+    /// P06.T42.a: within the Humphreys–Davidson limit, and on the main sequence and for naked
+    /// helium stars wherever they are, the limited rate is today's modern rate bit for bit,
+    /// across the hand-over and bi-stability bands, the Eddington kink and four metallicities.
+    #[test]
+    fn within_the_humphreys_davidson_limit_the_limited_rate_is_the_modern_rate() {
+        let (mut within, mut beyond) = (0, 0);
+        let grid = wind_grid();
+        for z in [1e-4, 0.004, 0.02, 0.04] {
+            for state in &grid {
+                let s = surface(state, z);
+                let evolved_beyond = matches!(Regime::of(state.phase()), Regime::Evolved { .. })
+                    && beyond_humphreys_davidson(&s);
+                if evolved_beyond {
+                    beyond += 1;
+                } else {
+                    within += 1;
+                    assert_same_bits(limited_rate(state, z), todays_rate(state, z));
+                    assert_same_bits(todays_rate(state, z), modern_rate(state, z));
+                }
+            }
+        }
+        assert!(
+            within > 2_000 && beyond > 200,
+            "{within} within, {beyond} beyond"
+        );
+        // A remnant has no wind under either.
+        let remnant = star(Phase::CarbonOxygenWhiteDwarf, 0.6, 0.6, 1e-3, 0.0126);
+        assert_same_bits(limited_rate(&remnant, 0.02), 0.0);
+    }
+
+    /// P06.T42.a: beyond the limit an evolved hydrogen-rich star loses at least
+    /// [`MODERN_LBV`], at least the cool- or hot-side rate it would have inside it, and at least
+    /// today's modern rate. Below the Eddington kink, and on the AGB, the rate is exactly the
+    /// larger of the first two plus HPT's term; above it, off the AGB, it is that floor steepened
+    /// as [`eddington_boosted`] steepens, at the star and at its twin of Γₑ = 0.7, plus the term
+    /// at the star alone, so that a term inside the steepening, (Γₑ ÷ 0.7)^3.99 times larger,
+    /// fails.
+    #[test]
+    fn beyond_the_limit_the_limited_rate_is_at_least_belczynskis_and_the_side_rate() {
+        let (mut checked, mut above_kink) = (0, 0);
+        let grid = wind_grid();
+        for z in [1e-4, 0.004, 0.02, 0.04] {
+            for state in &grid {
+                let s = surface(state, z);
+                let Regime::Evolved { agb } = Regime::of(state.phase()) else {
+                    continue;
+                };
+                if !beyond_humphreys_davidson(&s) {
+                    continue;
+                }
+                checked += 1;
+                let floor = |x: &Surface| {
+                    MODERN_LBV.max(hot_or_cool(x, || {
+                        hurley_evolved(x, ReimersEta::HURLEY, agb)
+                    }))
+                };
+                let side = hot_or_cool(&s, || hurley_evolved(&s, ReimersEta::HURLEY, agb));
+                let limited = limited_rate(state, z);
+                assert!(limited >= MODERN_LBV, "{state:?}: {limited:e}");
+                assert!(limited >= side, "{state:?}: {limited:e} < {side:e}");
+                let today = todays_rate(state, z);
+                assert!(limited >= today, "{state:?}: {limited:e} < {today:e}");
+                let gamma = eddington_factor(SolarLuminosities::new(s.l), SolarMasses::new(s.m));
+                if gamma <= EDDINGTON_KINK || agb {
+                    assert_same_bits(limited, floor(&s) + hurley_lbv(&s));
+                } else {
+                    above_kink += 1;
+                    let ratio = gamma / EDDINGTON_KINK;
+                    let twin = Surface {
+                        m: s.m * ratio,
+                        ..s
+                    };
+                    let steepened =
+                        floor(&s).max(floor(&twin) * math::powf_positive(ratio, EDDINGTON_POWER));
+                    assert_same_bits(limited, steepened + hurley_lbv(&s));
+                }
+            }
+        }
+        assert!(
+            checked > 200 && above_kink > 50,
+            "{checked}, {above_kink} above the kink"
+        );
+    }
+
+    /// P06.T42.a: at 4,000 K HPT's term is a wall at log L 5.78–5.80, zero up to 6 × 10⁵ L☉,
+    /// 0.66 M☉ per year at log L 5.78, 9.2 at 5.80 and 120 at 5.90, on top of a cool-side rate
+    /// of 1.0–1.6 × 10⁻⁴ there, about [`MODERN_LBV`]. The values are Python's double-precision
+    /// arithmetic on the formula, with R = (5,772 K ÷ T)² L^½ as the test's stars have it, for a
+    /// 40 M☉ core-helium-burning star (Γₑ 0.23–0.30, below the kink).
+    #[test]
+    fn at_4000_k_hurleys_term_is_a_wall_at_log_l_5_8() {
+        let at = |log_l: f64| {
+            star_at(
+                Phase::CoreHeliumBurning,
+                40.0,
+                15.0,
+                math::exp10(log_l),
+                4_000.0,
+            )
+        };
+        for (log_l, term, cool) in [
+            (5.78, 0.656_753_503_732_772_3, 1.010_909_523_712_470_5e-4),
+            (5.8, 9.227_093_137_673_823, 1.090_466_399_003_082_5e-4),
+            (5.9, 121.542_627_492_826_17, 1.592_620_450_186_529_2e-4),
+        ] {
+            let state = at(log_l);
+            let s = surface(&state, 0.02);
+            assert!(beyond_humphreys_davidson(&s), "{log_l}");
+            assert_close(&format!("term at {log_l}"), hurley_lbv(&s), term, 1e-9);
+            let side = hot_or_cool(&s, || hurley_evolved(&s, ReimersEta::HURLEY, false));
+            assert_close(&format!("cool side at {log_l}"), side, cool, 1e-9);
+            assert_close(
+                &format!("rate at {log_l}"),
+                limited_rate(&state, 0.02),
+                MODERN_LBV.max(cool) + term,
+                1e-12,
+            );
+        }
+        assert!((9.0..9.5).contains(&hurley_lbv(&surface(&at(5.8), 0.02))));
+        assert!((115.0..125.0).contains(&hurley_lbv(&surface(&at(5.9), 0.02))));
+        // HPT's limit is L > 6 × 10⁵ L☉, strictly: on the line the star is inside it, so neither
+        // the floor nor the term acts and the rate is the cool side's.
+        let line = star_at(Phase::CoreHeliumBurning, 40.0, 15.0, HD_LUMINOSITY, 4_000.0);
+        let s = surface(&line, 0.02);
+        assert_same_bits(hurley_lbv(&s), 0.0);
+        assert_same_bits(
+            limited_rate(&line, 0.02),
+            hot_or_cool(&s, || hurley_evolved(&s, ReimersEta::HURLEY, false)),
+        );
+    }
+
+    /// P06.T42.a's rate past the limit, pinned by its bits until P06.T42.b moves it onto the
+    /// record, so that an edit before the swap shows apart from the swap's own move: the three
+    /// 4,000 K stars of the wall (40 M☉), a cool supergiant above the Eddington kink (20 M☉ of
+    /// 2 × 10⁶ L☉, Γₑ 1.53), an early-AGB star (log L 5.9, 4,000 K) and a hot star just past the
+    /// line (60 M☉ of 2 × 10⁶ L☉ at 25,000 K, 10⁻⁵ R L^½ = 1.07), at Z = 0.02.
+    #[test]
+    fn past_the_limit_the_limited_rate_is_pinned_by_its_bits() {
+        let cool = |log_l: f64| {
+            star_at(
+                Phase::CoreHeliumBurning,
+                40.0,
+                15.0,
+                math::exp10(log_l),
+                4_000.0,
+            )
+        };
+        let cases = [
+            cool(5.78),
+            cool(5.8),
+            cool(5.9),
+            star_at(Phase::CoreHeliumBurning, 20.0, 6.0, 2e6, 4_000.0),
+            star_at(Phase::EarlyAgb, 30.0, 10.0, math::exp10(5.9), 4_000.0),
+            star_at(Phase::HertzsprungGap, 60.0, 20.0, 2e6, 25_000.0),
+        ];
+        for state in &cases {
+            assert!(
+                beyond_humphreys_davidson(&surface(state, 0.02)),
+                "{state:?}"
+            );
+        }
+        let got: Vec<u64> = cases.iter().map(|s| bits(limited_rate(s, 0.02))).collect();
+        assert_eq!(got, PAST_THE_LIMIT_BITS);
+    }
+
+    /// [`past_the_limit_the_limited_rate_is_pinned_by_its_bits`]'s rates, M☉ yr⁻¹, as `f64` bits.
+    const PAST_THE_LIMIT_BITS: [u64; 6] = [
+        0x3fe5_055a_7f25_1f4d,
+        0x4022_7459_3669_1940,
+        0x405e_62bd_04a8_37eb,
+        0x40ce_99b8_19b8_93f9,
+        0x405e_62bc_e69b_5a2c,
+        0x3f2c_7f80_b1ae_4398,
+    ];
+
+    /// Equation 97's factor is the clamped power, bit for bit, where the clamp is read without the
+    /// power: across both ends of the clamp and the shortcut's bounds, and over the luminosities
+    /// of stars.
+    #[test]
+    fn the_small_envelope_factor_is_the_clamped_power_bit_for_bit() {
+        let clamped = |l: f64| {
+            MU_CLAMP
+                .1
+                .min(MU_CLAMP.0.max(math::powf_positive(l / MU_L0, MU_KAPPA)))
+        };
+        let mut luminosities: Vec<f64> = (0..=20_000)
+            .map(|i| math::exp10(-4.0 + 12.0 * f64::from(i) / 20_000.0))
+            .collect();
+        for edge in [
+            MU_CLAMPED_LOW_FROM,
+            MU_CLAMPED_HIGH_TO,
+            1.0 / 1.44,
+            1.0 / 25.0,
+        ] {
+            let (mut below, mut above) = (edge * MU_L0, edge * MU_L0);
+            luminosities.push(below);
+            for _ in 0..64 {
+                below = below.next_down();
+                above = above.next_up();
+                luminosities.extend([below, above]);
+            }
+        }
+        for l in luminosities {
+            let factor = small_envelope_factor(SolarLuminosities::new(l));
+            assert_eq!(bits(factor), bits(clamped(l)), "L = {l:e} L☉");
+        }
     }
 
     /// Where only Vink's fits act, the blends reproduce each fit at the edges of their bands.
@@ -1257,12 +1685,12 @@ mod tests {
         assert_close("25,000 K", vink(&at(mid)), blend, 1e-15);
         assert_same_bits(vink(&at(60_000.0)), VINK_HOT.rate(l, m, VINK_MAX_K, 1.0));
         let (low, high) = HANDOVER_K;
-        assert_same_bits(hot_or_cool(&at(low), 0.25), 0.25);
-        assert_same_bits(hot_or_cool(&at(high), 0.25), vink(&at(high)));
+        assert_same_bits(hot_or_cool(&at(low), || 0.25), 0.25);
+        assert_same_bits(hot_or_cool(&at(high), || 0.25), vink(&at(high)));
         let mid = f64::midpoint(low, high);
         assert_close(
             "12,000 K",
-            hot_or_cool(&at(mid), 0.25),
+            hot_or_cool(&at(mid), || 0.25),
             0.125 + 0.5 * vink(&at(mid)),
             1e-15,
         );

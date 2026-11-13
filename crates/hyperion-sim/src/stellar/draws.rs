@@ -393,8 +393,11 @@ impl StarDraws {
     /// The Reimers η draw alone of `star` at `attempt`: [`StarDraws::for_attempt`]'s
     /// [`eta`](StarDraws::eta), bit for bit, from its one stream, for a caller that reads no
     /// other draw (the range brief of a main-sequence star, P06.T38.e).
+    ///
+    /// `pub` for `hyperion-sky` alone (the crate split, CS.T1); not part of the sim's API.
+    #[doc(hidden)]
     #[must_use]
-    pub(crate) fn eta_for_attempt(seed: Seed, star: BodyId, attempt: u32) -> StandardNormal {
+    pub fn eta_for_attempt(seed: Seed, star: BodyId, attempt: u32) -> StandardNormal {
         let mut stream = Stream::open(seed, tags::STAR_ETA, ObjectKey::from(star));
         stream.seek(u64::from(attempt) * ATTEMPT_WORDS);
         StandardNormal::draw(&mut stream)
@@ -417,6 +420,69 @@ impl StarDraws {
         let mut magnetism = Stream::open(seed, tags::STAR_MAGNETISM, key);
         magnetism.seek(start);
         (UnitUniform::draw(&mut rotation), magnetism.mark())
+    }
+
+    /// These draws with the remnant's (`star.remnant.*`), the companion-stripped mark
+    /// (`star.stripped`) and the kick's (`star.kick.*`) taken from `star`'s attempt `attempt`, as
+    /// [`for_attempt`](Self::for_attempt) reads them, and every other draw kept: one attempt of plan
+    /// 08's kick loop, which repeats only the remnant stage on one built track (P08.T12.c, Design
+    /// note 17). Where that track's build read the mark, the loop keeps the track's
+    /// ([`with_stripped`](Self::with_stripped); ruling 93.2, amended 2026-11-01).
+    #[must_use]
+    pub(crate) fn with_remnant_draws_of(self, seed: Seed, star: BodyId, attempt: u32) -> Self {
+        let key = ObjectKey::from(star);
+        let start = u64::from(attempt) * ATTEMPT_WORDS;
+        let open = |tag: DomainTag| {
+            let mut stream = Stream::open(seed, tag, key);
+            stream.seek(start);
+            stream
+        };
+        Self::from_parts(StarDrawsParts {
+            stripped: open(tags::STAR_STRIPPED).mark(),
+            remnant_type: open(tags::STAR_REMNANT_TYPE).mark(),
+            remnant_fallback: open(tags::STAR_REMNANT_FALLBACK).mark(),
+            remnant_mass: StandardNormal::draw(&mut open(tags::STAR_REMNANT_MASS)),
+            kick_score: StandardNormal::draw_array(&mut open(tags::STAR_KICK_SCORE)),
+            kick_mode: open(tags::STAR_KICK_MODE).mark(),
+            kick_low: StandardNormal::draw_array(&mut open(tags::STAR_KICK_LOW)),
+            kick_direction: isotropic(&mut open(tags::STAR_KICK_DIRECTION)),
+            ..self.parts
+        })
+    }
+
+    /// These draws with the companion-stripped mark `stripped` in place of their own, and every
+    /// other draw kept: an attempt of plan 08's kick loop on a track whose build read the mark,
+    /// which keeps the track's (P08.T12.c; ruling 93.2, amended 2026-11-01).
+    #[must_use]
+    pub(crate) fn with_stripped(self, stripped: Mark) -> Self {
+        Self::from_parts(StarDrawsParts {
+            stripped,
+            ..self.parts
+        })
+    }
+
+    /// The low kick mode's three normals alone of `star` at `attempt`: [`StarDraws::for_attempt`]'s
+    /// [`kick_low`](StarDraws::kick_low), bit for bit, from its one stream, for a caller that reads
+    /// no other draw (P09.T10's white-dwarf members, whose kick's speed is all they read).
+    #[must_use]
+    pub(crate) fn kick_low_for_attempt(
+        seed: Seed,
+        star: BodyId,
+        attempt: u32,
+    ) -> [StandardNormal; 3] {
+        let mut stream = Stream::open(seed, tags::STAR_KICK_LOW, ObjectKey::from(star));
+        stream.seek(u64::from(attempt) * ATTEMPT_WORDS);
+        StandardNormal::draw_array(&mut stream)
+    }
+
+    /// The companion-stripped mark alone of `star` at `attempt`: [`StarDraws::for_attempt`]'s
+    /// [`stripped`](StarDraws::stripped), bit for bit, from its one stream, for a caller that reads
+    /// no other draw (P09.T10's neutron-star members refused by their mark).
+    #[must_use]
+    pub(crate) fn stripped_for_attempt(seed: Seed, star: BodyId, attempt: u32) -> Mark {
+        let mut stream = Stream::open(seed, tags::STAR_STRIPPED, ObjectKey::from(star));
+        stream.seek(u64::from(attempt) * ATTEMPT_WORDS);
+        stream.mark()
     }
 
     /// Draws from explicit variates, for quadratures and tests that need no ID.
@@ -618,6 +684,27 @@ mod tests {
                     assert_same_bits(
                         StarDraws::eta_for_attempt(seed, star, attempt).value(),
                         StarDraws::for_attempt(seed, star, attempt).eta().value(),
+                    );
+                }
+            }
+        }
+    }
+
+    /// The low kick mode's normals and the companion-stripped mark alone are the full draws', bit
+    /// for bit (P09.T10's white-dwarf and neutron-star members).
+    #[test]
+    fn the_kick_low_and_stripped_draws_alone_are_the_full_draws() {
+        for seed in [Seed::new(0x5eed), Seed::new(0x0065_7461)] {
+            for star in bodies() {
+                for attempt in [0, 1, 7] {
+                    let full = StarDraws::for_attempt(seed, star, attempt);
+                    let low = StarDraws::kick_low_for_attempt(seed, star, attempt);
+                    for (alone, all) in low.iter().zip(full.kick_low()) {
+                        assert_same_bits(alone.value(), all.value());
+                    }
+                    assert_eq!(
+                        StarDraws::stripped_for_attempt(seed, star, attempt),
+                        full.stripped()
                     );
                 }
             }

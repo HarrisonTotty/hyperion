@@ -11,27 +11,45 @@
  * `system_bodies` (P14.T35.b–c), each section tagged with its state as the server tagged it.
  */
 import type {
+  AerosolShapeDto,
+  AerosolTauBasisDto,
   ArchitectureClassDto,
   BeltCompositionDto,
   BinaryClassDto,
   BeltKindDto,
   BeltSiteDto,
   BodyIdHex,
+  ClimateForcingDto,
+  ClimateModelDto,
+  CraterTargetClassDto,
+  CrustLidDto,
   DestructionCauseDto,
   DetailLevelDto,
   FigureDatumDto,
   FigureLawDto,
+  HabitabilityClassDto,
+  HabitabilityLimitDto,
   KickModeDto,
+  MagneticFieldClassDto,
   MoonOriginDto,
   ObjectKindDto,
+  OceanFloorDto,
   PhaseDto,
   PhaseTemplateDto,
   PlanetClassDto,
+  RadiationClassDto,
+  RedoxClassDto,
   RingKindDto,
   RingMaterialDto,
   SpinResonanceDto,
   StarEventKindDto,
+  SubstancePhaseDto,
+  SurfaceMaterialDto,
+  SurfaceStateDto,
   SystemIdHex,
+  TaxonomicClassDto,
+  TectonicRegimeDto,
+  ThermalRegimeDto,
   UniverseIdHex,
   UniverseTime,
   VariableKindDto,
@@ -236,11 +254,17 @@ export type BodyKind =
   | { readonly kind: "debris_disc" }
   | { readonly kind: "unresolved" };
 
+/**
+ * What destroyed a body as the display reads it: the wire's, or `unknown` for one this build does
+ * not know, since the list grows without a protocol bump (galaxy plan 04's growing enums).
+ */
+export type DestructionCause = DestructionCauseDto | "unknown";
+
 /** What has become of a body at the answer's time. */
 export type BodyState =
   | { readonly kind: "not_yet_formed" }
   | { readonly kind: "present" }
-  | { readonly kind: "destroyed"; readonly cause: DestructionCauseDto; readonly at: UniverseTime }
+  | { readonly kind: "destroyed"; readonly cause: DestructionCause; readonly at: UniverseTime }
   | { readonly kind: "unbound"; readonly at: UniverseTime };
 
 /** A body's orbit about what it orbits, and until when its elements hold. */
@@ -379,7 +403,8 @@ export interface RingGap {
 
 /**
  * A giant's ring (the protocol's `RingDto`): its edges are distances from its planet's centre in
- * the planet's equatorial plane, which this generator version takes to be its orbital plane.
+ * its plane, the one {@link Ring.normal} is normal to, or without a normal the planet's orbital
+ * plane.
  */
 export interface Ring {
   readonly ringKind: RingKindDto;
@@ -390,6 +415,13 @@ export interface Ring {
   readonly opticalDepth: number;
   /** Inside out; none in a dusty ring. */
   readonly gaps: ReadonlyArray<RingGap>;
+  /**
+   * The normal of its plane, a unit vector along the galactic axes (plan 14, P14.T56.a): its
+   * planet's local Laplace plane at the geometric mean of its edges, on the spin's side, which is
+   * the planet's equator well inside its Laplace radius. `null` from a server that does not send
+   * it, whose rings lie in their planet's orbital plane.
+   */
+  readonly normal: Vec3 | null;
 }
 
 /** One annulus of a belt, in metres from the belt's host. */
@@ -449,11 +481,49 @@ export interface CometaryHalo {
   readonly cometRatePerS: number;
 }
 
+/** A gap a giant has opened in a protoplanetary disc. */
+export interface DiscGap {
+  readonly giant: BodyIdHex;
+  /** Its distance from the disc's host, the giant's semi-major axis. */
+  readonly radiusM: number;
+}
+
+/**
+ * A young host's protoplanetary disc while it lasts (the protocol's `ProtoplanetaryDiscDto`,
+ * plan 14's P14.T28.a): its edges lie in its host's zone's plane, in metres from the host.
+ */
+export interface ProtoplanetaryDisc {
+  readonly host: OrbitHost;
+  readonly innerEdgeM: number;
+  readonly outerEdgeM: number;
+  /** From its host's zero-age luminosity; it may lie outside the edges. */
+  readonly snowLineM: number;
+  /** The characteristic radius r_c of its taper, Σ ∝ e^(−r ÷ r_c) ÷ r. */
+  readonly characteristicRadiusM: number;
+  /** Its gas and its solids between its edges, in Earth masses. */
+  readonly gasMassMearth: number;
+  readonly solidMassMearth: number;
+  /** Inside out; none before its first giant forms. */
+  readonly gaps: ReadonlyArray<DiscGap>;
+}
+
+/**
+ * A white dwarf's dusty debris disc while it lasts (the protocol's `DebrisDiscDto`, plan 14's
+ * P14.T28.d), in metres from the white dwarf: from where its dust sublimates to its Roche limit.
+ */
+export interface DebrisDisc {
+  readonly host: OrbitHost;
+  readonly innerEdgeM: number;
+  readonly outerEdgeM: number;
+}
+
 /** What a population body is and where it lies (the protocol's `PopulationDto`). */
 export type Population =
   | ({ readonly kind: "ring" } & Ring)
   | ({ readonly kind: "belt" } & Belt)
-  | ({ readonly kind: "cometary_halo" } & CometaryHalo);
+  | ({ readonly kind: "cometary_halo" } & CometaryHalo)
+  | ({ readonly kind: "protoplanetary_disc" } & ProtoplanetaryDisc)
+  | ({ readonly kind: "debris_disc" } & DebrisDisc);
 
 /** One body of a system as the system's list carries it (the protocol's `BodySummaryDto`). */
 export interface SystemBody {
@@ -500,12 +570,611 @@ export interface BodyHooks {
    * body's surface seed never reaches the client (R04, Design note 17).
    */
   readonly detailSeed: Section<string>;
+  /**
+   * Its habitability at the record's time (plan 14, P14.T25); `not_modelled` where an older server
+   * leaves the field out.
+   */
+  readonly habitability: Section<Habitability>;
+  /**
+   * Its resource abundances (plan 14, P14.T26), which the server holds back as `not_modelled`
+   * below generator version 27; `not_modelled` too where an older server leaves the field out.
+   */
+  readonly resources: Section<ResourceAbundances>;
 }
 
-/** One body's whole record (the protocol's `BodyRecordDto`): its list entry, its surface and hooks. */
+/**
+ * A habitability limit as the display reads it: the wire's, or `unknown` for one this build does
+ * not know, since the list grows without a protocol bump (galaxy plan 04's growing enums).
+ */
+export type HabitabilityLimit = HabitabilityLimitDto | "unknown";
+
+/**
+ * A body's habitability (plan 14, P14.T25): whether liquid water stands on or under its surface,
+ * and every limit that bears on it. It says nothing about life.
+ */
+export interface Habitability {
+  readonly habitabilityClass: HabitabilityClassDto;
+  /** Every limit that applies, in the wire's order; empty for a body with none, which is data. */
+  readonly limits: ReadonlyArray<HabitabilityLimit>;
+}
+
+/** The four long-lived radioactive isotopes' mass fractions of a body's outer layers, 0 to 1. */
+export interface Radioisotopes {
+  readonly uranium238: number;
+  readonly uranium235: number;
+  readonly thorium232: number;
+  readonly potassium40: number;
+}
+
+/**
+ * A body's resource abundances (plan 14, P14.T26): the mass fraction, kg per kg, of its accessible
+ * outer layers (an undifferentiated body's bulk, a crust, an ice shell or a gas envelope's gas at
+ * 1 bar) of each resource of the plan's closed list, each 0 to 1, in the list's order.
+ */
+export interface ResourceAbundances {
+  readonly ironGroup: number;
+  readonly lightLithophiles: number;
+  readonly rareEarths: number;
+  readonly platinumGroup: number;
+  /** The four radioactive isotopes together, as {@link radioisotopes} sum to. */
+  readonly radioactives: number;
+  readonly silicates: number;
+  /** H2O, frozen or liquid, less its deuterium. */
+  readonly waterIce: number;
+  /** CO2, NH3 and CH4. */
+  readonly otherIces: number;
+  readonly hydrocarbons: number;
+  /**
+   * Helium-3: `not_modelled` where the generator does not compute it, on a solid layer, whose
+   * implanted helium it leaves out, which the readout shows Missing, never as none.
+   */
+  readonly helium3: Pending<number>;
+  readonly deuterium: number;
+  readonly radioisotopes: Radioisotopes;
+}
+
+/**
+ * One gas of a mixture and its share by number.
+ *
+ * @remarks
+ * The gas is a key of the substance registry, never a closed union: a console names it by
+ * `substanceName` (`lib/substances.ts`), and a key it does not know is still read.
+ */
+export interface GasShare {
+  readonly species: string;
+  /** In `[0, 1]`. */
+  readonly moleFraction: number;
+}
+
+/** One substance of a surface's cover, by its registry key, and the share of the surface it covers. */
+export interface SubstanceArea {
+  readonly substance: string;
+  /** In `[0, 1]`. */
+  readonly areaFraction: number;
+}
+
+/** A body's climate regime (plan 14's P14.T48.d): its three fields and the coarse model it names. */
+export interface ClimateRegime {
+  readonly thermal: ThermalRegimeDto;
+  readonly forcing: ClimateForcingDto;
+  /** The climate's condensable by its registry key; `null` for a world with none, as Venus. */
+  readonly condensable: string | null;
+  readonly model: ClimateModelDto;
+}
+
+/** An ocean under a body's surface (plan 14's P14.T24.b and P14.T51.g). */
+export interface SubsurfaceOcean {
+  readonly shellThicknessM: number;
+  /** Its liquid's depth, from the shell's base to its floor. */
+  readonly thicknessM: number;
+  readonly floor: OceanFloorDto;
+  /** Its liquid, by its registry key. */
+  readonly liquid: string;
+  /** In `[0, 1]`. */
+  readonly soluteMassFraction: number;
+  /** At the ice shell's base, where the shell meets it. */
+  readonly baseTemperatureK: number;
+}
+
+/** What screens a body's small impactors before they crater the ground. */
+export type CraterScreening =
+  | { readonly kind: "none" }
+  | { readonly kind: "atmosphere"; readonly columnMassKgM2: number }
+  | { readonly kind: "cutoff"; readonly diameterM: number };
+
+/**
+ * A body's crater contract (plan 14's P14.T48.c with T48.f's impactors), whose gravity is the bulk
+ * section's.
+ */
+export interface CraterContract {
+  /** N☾(>1 km), the lunar-equivalent cumulative crater density above 1 km. */
+  readonly lunarEquivalentN1kmPerKm2: number;
+  readonly screening: CraterScreening;
+  readonly projectileDensityKgM3: number;
+  /** The target factor, dimensionless: 1 for rock, 0.12 for an ice-rich crust. */
+  readonly kTarget: number;
+  readonly targetClass: CraterTargetClassDto;
+  readonly targetDensityKgM3: number;
+  readonly systemAgeS: number;
+  /** `null` where the contract gives none. */
+  readonly impactVelocityMS: number | null;
+}
+
+/** The span over which a body's surface held liquid (plan 14's P14.T48.b), as times before now. */
+export interface WetEpoch {
+  /** The liquid that flowed, by its registry key. */
+  readonly liquid: string;
+  readonly startAgoS: number;
+  /** Zero for a world wet now. */
+  readonly endAgoS: number;
+  /** The time channel-forming flow ran, in Earth-equivalent Julian years. */
+  readonly effectiveFlowYr: number;
+  readonly runoffMPerYr: number;
+  /** The liquid inventory then, over the body's whole surface. */
+  readonly paleoInventoryKgM2: number;
+}
+
+/** One node of a temperature profile. */
+export interface ProfileNode {
+  readonly pressurePa: number;
+  readonly temperatureK: number;
+}
+
+/**
+ * The vertical structure of a surface's air (plan 14's P14.T24.e): a scaled adiabat from the
+ * section's surface temperature and pressure to an isothermal skin.
+ */
+export interface VerticalStructure {
+  /** α, the factor on the dry adiabat's R ÷ c_p, dimensionless. */
+  readonly alpha: number;
+  readonly skinTemperatureK: number;
+  /** From the surface up, the pressures descending. */
+  readonly adiabat: ReadonlyArray<ProfileNode>;
+}
+
+/** An aerosol mode's size distribution, by its volume-to-area radius (plan 14's P14.T24.c). */
+export type SizeDistribution =
+  | {
+      readonly kind: "gamma" | "log_normal";
+      readonly effectiveRadiusM: number;
+      /** Dimensionless. */
+      readonly effectiveVariance: number;
+    }
+  | {
+      readonly kind: "aggregate";
+      readonly monomerRadiusM: number;
+      readonly monomerCount: number;
+      /** D_f, in `[1, 2.5]`. */
+      readonly fractalDimension: number;
+      /** k_f, dimensionless. */
+      readonly fractalPrefactor: number;
+    };
+
+/** The phases an aerosol mode can hold. */
+export type AerosolPhase = Extract<SubstancePhaseDto, "solid" | "liquid">;
+
+/**
+ * Why members of an aerosol mode are not modelled (plan 14's P14.T54.b.b): one reason a mode,
+ * which says which of its members are.
+ *
+ * @remarks
+ * `no_grain_density` carries the phase and temperature the generator asked for, that temperature
+ * the mode's own {@link AerosolMode.temperatureK} (R08's review of P14.T54.b.b, S6). A size's
+ * reason (`no_collision_constants`, `no_condensate`, `no_size_distribution`) leaves the size and
+ * the optical depth not modelled, `optics_not_modelled` the optical depth (and a rule's column
+ * mass), and `no_mass_extinction` an aggregate's column mass and temperature.
+ */
+export type AerosolNotModelled =
+  | {
+      readonly kind: "no_grain_density";
+      readonly phase: AerosolPhase;
+      readonly temperatureK: number;
+    }
+  | {
+      readonly kind:
+        | "no_collision_constants"
+        | "no_condensate"
+        | "no_size_distribution"
+        | "optics_not_modelled"
+        | "no_mass_extinction";
+    };
+
+/** A mode's column optical depth at 550 nm and what it rests on. */
+export interface AerosolOpticalDepth {
+  /**
+   * Dimensionless: the column where the mode lies, over the share of the sky it covers (in-cloud,
+   * {@link AerosolMode.coverage} not applied).
+   */
+  readonly tau550: number;
+  readonly basis: AerosolTauBasisDto;
+}
+
+/**
+ * One aerosol mode: a cloud's, a haze's or a dust layer's particles of one material and phase.
+ *
+ * @remarks
+ * A member the server's generator does not model is not modelled, never none, and
+ * {@link AerosolMode.notModelled} says why.
+ */
+export interface AerosolMode {
+  /** Its material, by its registry key. */
+  readonly material: string;
+  readonly phase: AerosolPhase;
+  /**
+   * The deck it belongs to, by its condensate's key; `null` for a mode of no deck (the dust, a
+   * haze, a sulphate layer).
+   */
+  readonly deck: string | null;
+  readonly shape: AerosolShapeDto;
+  readonly sizeDistribution: Pending<SizeDistribution>;
+  readonly columnMassKgM2: Pending<number>;
+  readonly opticalDepth: Pending<AerosolOpticalDepth>;
+  readonly basePa: number;
+  readonly topPa: number;
+  /**
+   * The exponent of its mixing ratio's (p ÷ p_base) law, dimensionless: its deck's f_sed, or for a
+   * loop deck's mode from generator version 26 the smaller of that and its saturation's log-slope
+   * at the base; 0 when well mixed; negative, above −1, for a haze whose mixing ratio rises aloft
+   * (from generator version 30 the methane haze's). Its optical depth is spread by the same
+   * profile.
+   */
+  readonly fSed: number;
+  /** The share of the sky it covers, in `[0, 1]`. */
+  readonly coverage: number;
+  /** The temperature its phase, grain density and optical depth were taken at. */
+  readonly temperatureK: Pending<number>;
+  /** Why its members that are not modelled are not; `null` where every one is. */
+  readonly notModelled: AerosolNotModelled | null;
+}
+
+/** A condensate deck: where it lies, and its vapour below and above it. */
+export interface CondensateDeck {
+  /** The condensate, by its registry key, which its modes' `deck` names. */
+  readonly condensate: string;
+  /** Its phase at its base, which it keeps throughout. */
+  readonly phase: AerosolPhase;
+  readonly basePa: number;
+  readonly baseTemperatureK: number;
+  readonly topPa: number;
+  /**
+   * In `[0, 1]`: the limiting vapour's, by the condensate's law, as the protocol's
+   * `CondensateDeckDto` says (its own gas, a product law's scarcer reactant, or an element's atoms
+   * per molecule of gas).
+   */
+  readonly vapourMoleFractionBelow: number;
+  /** In `[0, 1]`: the same vapour's, above the deck. */
+  readonly vapourMoleFractionAbove: number;
+  /** Ackerman and Marley's f_sed, dimensionless; 0 for a deck of well-mixed modes. */
+  readonly fSed: number;
+  /** Whether the law that placed its base is applied outside what it was fitted over. */
+  readonly extrapolated: boolean;
+}
+
+/** A condensable whose vapour an air holds that forms no deck, with why. */
+export interface NotFormedCondensate {
+  /** By its registry key. */
+  readonly condensate: string;
+  /**
+   * `bulk_gas` for a vapour holding at least half the air; `displaced` by the condensate, by its
+   * registry key, that takes its limiting vapour first; `supercritical` for a vapour whose partial
+   * pressure reaches its critical pressure where the profile cools through its critical
+   * temperature, so that it crosses no saturation curve (plan 14's P14.T52.f).
+   */
+  readonly reason:
+    | { readonly kind: "bulk_gas" }
+    | { readonly kind: "displaced"; readonly by: string }
+    | { readonly kind: "supercritical" };
+}
+
+/** One node of an absorber's profile. */
+export interface MixingRatioNode {
+  readonly pressurePa: number;
+  /** Relative to the profile's peak, in `[0, 1]`. */
+  readonly relativeMixingRatio: number;
+}
+
+/**
+ * An absorbing gas with its column and layer: in a surface's inventory, one that is not one of the
+ * section's well-mixed gases; in an envelope's, its 10-mbar gas's, which its 1-bar composition may
+ * hold too, one gas read at two levels (the protocol's `AbsorberDto`).
+ */
+export interface Absorber {
+  /** The gas, by its registry key. */
+  readonly species: string;
+  /** Its column, molecules per square metre. */
+  readonly columnPerM2: number;
+  readonly basePa: number;
+  readonly topPa: number;
+  /** Its nodes, the pressures descending; `null` for a layer of constant mixing ratio. */
+  readonly profile: ReadonlyArray<MixingRatioNode> | null;
+}
+
+/**
+ * A surface air's aerosol and absorber inventory (plan 14's P14.T24.c), or a gas envelope's
+ * (P14.T52.d, {@link BodyEnvelope.aerosols}): every list empty for a surface with no air; not
+ * modelled for a magma ocean that holds an air.
+ */
+export interface AerosolInventory {
+  /** Each deck's modes, in the decks' order, then the modes of no deck. */
+  readonly modes: ReadonlyArray<AerosolMode>;
+  /** At most one a condensate, so that a mode's `deck` names one. */
+  readonly decks: ReadonlyArray<CondensateDeck>;
+  readonly absorbers: ReadonlyArray<Absorber>;
+  readonly notFormed: ReadonlyArray<NotFormedCondensate>;
+}
+
+/** The phases a surface condensate can hold. */
+export type CondensatePhase = Exclude<SubstancePhaseDto, "vapour">;
+
+/** One condensate at a surface (plan 14's P14.T51.a). */
+export interface SurfaceCondensate {
+  /** By its registry key. */
+  readonly substance: string;
+  readonly phase: CondensatePhase;
+  /**
+   * Its condensed mass in this phase over the whole surface, kg m⁻²: the list's sort key, and its
+   * only amount where its layer is not modelled.
+   */
+  readonly reservoirKgM2: number;
+  /**
+   * Its reservoir as a global equivalent layer; on a body whose water froze, its whole frozen
+   * water, shell, any ocean under a Snowball's ice and deeper ice included, until plan 14's
+   * P14.T53.c divides it. Not modelled where the server's registry has not read the phase's
+   * density, never none.
+   */
+  readonly reservoirGelM: Pending<number>;
+  /** In `[0, 1]`. */
+  readonly areaFraction: number;
+  /**
+   * The part of its area in cold traps, in `[0, areaFraction]`; not modelled until plan 14's
+   * P14.T54.b.
+   */
+  readonly trappedAreaFraction: Pending<number>;
+  readonly seasonal: boolean;
+}
+
+/** A body's crust (plan 14's P14.T51.c), each crust by its registry key or `null` for none. */
+export interface CrustComposition {
+  readonly primary: string | null;
+  readonly secondary: string | null;
+  readonly tertiary: string | null;
+  /** An undifferentiated body's own material; `null` for a body with a crust. */
+  readonly bulk: string | null;
+  /** Which of them lies at the surface. */
+  readonly lid: CrustLidDto;
+  readonly provinces: string;
+  readonly redox: RedoxClassDto;
+  /** ΔIW, log₁₀ units of oxygen fugacity relative to the iron–wüstite buffer. */
+  readonly mantleRedoxIw: number;
+  /** In `[0, 1]`. */
+  readonly meltAreaFraction: number;
+}
+
+/** A surface's modifiers (plan 14's P14.T51.d). */
+export interface SurfaceModifiers {
+  /** Dimensionless, 0 fresh to 1 mature. */
+  readonly maturity: number;
+  /**
+   * Dimensionless, not negative: the space-weathering dose rate relative to the Moon's, which is
+   * 1.
+   */
+  readonly weatheringRate: number;
+  /** In `[0, 1]`: the covered fraction of the ground that can take an organic cover. */
+  readonly organicCover: number;
+  readonly resurfacingMPerYr: number;
+  /**
+   * An Io's SO₂ frost and sulphur, by registry key, each with its share of the surface; empty for
+   * every other body. With the weathering deposits, together at most 1.
+   */
+  readonly volcanicDeposits: ReadonlyArray<SubstanceArea>;
+  /**
+   * An oxidised surface's `ferric` deposit (plan 14's P14.T51.j), by registry key, with its share
+   * of the surface; empty for every other body. With the volcanic deposits, together at most 1.
+   */
+  readonly weatheringDeposits: ReadonlyArray<SubstanceArea>;
+}
+
+/** One net surface flux of a biosphere. */
+export interface BiosphereFlux {
+  /** By its registry key. */
+  readonly species: string;
+  /** In units of Earth's present biotic flux of it, of either sign: negative for a net sink. */
+  readonly fluxEarth: number;
+}
+
+/** A biosphere's fluxes (plan 14's P14.T53.d). */
+export interface Biosphere {
+  readonly fluxes: ReadonlyArray<BiosphereFlux>;
+}
+
+/**
+ * The vapour a surface's melt evaporates over it, its silicate vapour (the protocol's
+ * `SilicateVapourDto`, on the wire by plan 14's P14.T35.f): uninhabited, as the wire's type is.
+ *
+ * @remarks
+ * Its members are P14.T55.b's, which gives this type them; until then it has no value, and the
+ * client reads none of a newer server's figures.
+ */
+export type SilicateVapour = never;
+
+/**
+ * A surface state as the display reads it: the wire's, or `unknown` for one this build does not
+ * know, since the list grows without a protocol bump (galaxy plan 04's growing enums), as 27's
+ * `desert` does.
+ */
+export type SurfaceState = SurfaceStateDto | "unknown";
+
+/**
+ * A body's surface section (the protocol's `BodySurfaceDto`, plan 14's P14.T35.e): its state and
+ * material, its surface conditions and climate regime, its global figures, and the members of later
+ * tasks.
+ *
+ * @remarks
+ * Every substance is a registry key. A member a later task fills is {@link Modelled}: not modelled
+ * while the wire leaves it out, which is never "none", and `none` where the generator computes it
+ * as none.
+ */
+export interface BodySurface {
+  readonly state: SurfaceState;
+  readonly material: SurfaceMaterialDto;
+  readonly meanSurfaceTemperatureK: number;
+  /** T(0°) − T(90°): negative where the poles are the warmer. */
+  readonly equatorPoleContrastK: number;
+  readonly dayNightContrastK: number;
+  /**
+   * The volatile air's: zero for an airless body, and for a surface holding melt whose volatiles
+   * are gone.
+   *
+   * @remarks
+   * It does not include the melt's own vapour, {@link BodySurface.silicateVapour}.
+   */
+  readonly surfacePressurePa: number;
+  /**
+   * Largest first, summing to 1; empty for an airless body, or for a surface holding melt with no
+   * volatile air, which does not deny the melt's own vapour.
+   */
+  readonly gases: ReadonlyArray<GasShare>;
+  /** `null` with an empty {@link BodySurface.gases}. */
+  readonly meanMolarMassGPerMol: number | null;
+  /** `c_p` ÷ R, dimensionless; `null` with an empty {@link BodySurface.gases}. */
+  readonly heatCapacityOverR: number | null;
+  readonly stellarFluxWM2: number;
+  readonly radiationClass: RadiationClassDto;
+  /** Whether water can be liquid somewhere in the climate's range at the surface pressure. */
+  readonly liquidWater: boolean;
+  readonly climateRegime: ClimateRegime;
+  /** In `[0, 1]`: the sum of {@link BodySurface.surfaceLiquids}. */
+  readonly oceanFraction: number;
+  /** In `[0, 1]`: the sum of {@link BodySurface.surfaceIces}. */
+  readonly iceFraction: number;
+  /** In `[0, 1]`. */
+  readonly cloudFraction: number;
+  readonly surfaceLiquids: ReadonlyArray<SubstanceArea>;
+  readonly surfaceIces: ReadonlyArray<SubstanceArea>;
+  /** σ_h, the hypsometric standard deviation. */
+  readonly sigmaHM: number;
+  /** In `[0, 1]`. */
+  readonly continentalFraction: number;
+  readonly heatFlowWM2: number;
+  readonly tectonicRegime: TectonicRegimeDto;
+  /** V, dimensionless: the Solar System table's Mars's is 1. */
+  readonly volcanismLevel: number;
+  /** The present outgassing over Earth's present rate. */
+  readonly outgassingEarth: number;
+  readonly magneticFieldClass: MagneticFieldClassDto;
+  readonly surfaceAgeS: number;
+  /** Not modelled for a body no rule computes; `none` for one computed to hold none. */
+  readonly subsurfaceOcean: Modelled<SubsurfaceOcean>;
+  readonly craters: CraterContract;
+  /** `null` for a world never wet. */
+  readonly wetEpoch: WetEpoch | null;
+  readonly verticalStructure: Modelled<VerticalStructure>;
+  readonly aerosols: Modelled<AerosolInventory>;
+  readonly condensates: Modelled<ReadonlyArray<SurfaceCondensate>>;
+  readonly crust: Modelled<CrustComposition>;
+  readonly modifiers: Modelled<SurfaceModifiers>;
+  /**
+   * The body's taxonomic class (P14.T51.e), the class's name in lower case as the wire sends it.
+   *
+   * @remarks
+   * Not modelled from every server before generator version 24, and where the record lacks what
+   * the body's rule reads (its crust, or its modifiers); `none` for a planet, and for a member or
+   * moon the rules leave unclassed.
+   */
+  readonly taxonomicClass: Modelled<TaxonomicClassDto>;
+  readonly biosphere: Modelled<Biosphere>;
+  /**
+   * The melt's own vapour (P14.T35.f), which is not part of the volatile air of
+   * {@link BodySurface.surfacePressurePa} and {@link BodySurface.gases}.
+   *
+   * @remarks
+   * Not modelled from every server until P14.T55.b; from then, `none` on a surface computed to hold
+   * no melt, and a value over melt, whose members this client does not read yet.
+   */
+  readonly silicateVapour: Modelled<SilicateVapour>;
+}
+
+/**
+ * An envelope's irradiated grey profile's parameters (Guillot 2010, Eq. 29), with τ = κ_th p₁ ÷
+ * (n g) × (p ÷ p₁)ⁿ, p₁ = 1 bar, and g the bulk section's surface gravity.
+ */
+export interface GuillotProfile {
+  /** κ_th at 1 bar, m² kg⁻¹. */
+  readonly thermalOpacityM2PerKg: number;
+  /** n, τ ∝ pⁿ, dimensionless and at least 1; 2 for every envelope. */
+  readonly opticalDepthExponent: number;
+  /** γ = κ_v ÷ κ_th, dimensionless. */
+  readonly opacityRatio: number;
+  /** f, dimensionless: ¼ averaged over the sphere. */
+  readonly redistributionFactor: number;
+}
+
+/**
+ * A gas-envelope body's visible atmosphere (the protocol's `BodyEnvelopeDto`, plan 14's P14.T24.d
+ * with P14.T52.d on P14.T50.b's abundances, on the wire by P14.T35.e and P14.T54.b.i): the section
+ * of a giant or a sub-Neptune, whose surface section does not apply, sent `ok` from generator
+ * version 24 where the generator models it, and of a solid body under a supercritical envelope
+ * (P14.T53.b part 2), sent `not_modelled` from 24 to 25 and from 26 its supercritical envelope's
+ * model where the generator models it (P14.T53.f).
+ */
+export interface BodyEnvelope {
+  /**
+   * The condensable whose supercritical fluid the envelope is, by its registry key; `null` for an
+   * H₂/He envelope. No server sends it other than `null` before generator version 26: a solid body
+   * under a supercritical envelope has its envelope `not_modelled` until then, and from 26 its
+   * model's (P14.T53.f), `H2O` for a steam envelope.
+   */
+  readonly supercritical: string | null;
+  /**
+   * Positive: the record's internal heat from 0.414 Jupiter masses, blended with P14.T24.d's
+   * cooling law below; not the bulk section's (`T_eff`⁴ − `T_eq`⁴)^¼ there.
+   */
+  readonly internalTemperatureK: number;
+  /** `T_irr`⁴ = `T_eq`⁴ ÷ f, from the bulk section's equilibrium temperature. */
+  readonly irradiationTemperatureK: number;
+  readonly profile: GuillotProfile;
+  /** Where the profile joins the dry adiabat. */
+  readonly joinPressurePa: number;
+  /**
+   * From the join, at the grey profile's temperature there, the pressures ascending evenly in
+   * ln p to the larger of 100 bar and e^0.3 p_join; between two nodes the temperature follows the
+   * power law between them.
+   */
+  readonly adiabat: ReadonlyArray<ProfileNode>;
+  /** The gas at 1 bar alone, largest first, summing to 1. */
+  readonly composition: ReadonlyArray<GasShare>;
+  readonly meanMolarMassGPerMol: number;
+  /** `c_p` ÷ R at the 1-bar level's temperature, dimensionless, for display. */
+  readonly heatCapacityOverR: number;
+  /**
+   * Its condensate decks with their modes, its photochemical hazes, its absorbers at 10 mbar and
+   * its condensables not formed, as one inventory, the type a surface's takes (R08's review of
+   * P14.T54.b.i, C1): `modes` the wire's deck modes, each naming one of `decks`, then its hazes,
+   * naming none; `decks` the wire's `condensate_decks`. Every envelope mode covers the whole sky
+   * at generator version 24, read as the fraction it is.
+   */
+  readonly aerosols: AerosolInventory;
+  /** The hazes' optical depth at 550 nm, dimensionless: the sum of theirs that carry one. */
+  readonly hazeTau550: number;
+}
+
+/**
+ * One body's whole record (the protocol's `BodyRecordDto`): its list entry, its surface, envelope
+ * and hooks.
+ */
 export interface BodyRecord extends SystemBody {
-  /** No generator version computes a surface yet, so an `ok` surface carries nothing. */
-  readonly surface: Section<never>;
+  /**
+   * `not_applicable` for a body in the gas-envelope state, and from generator version 24 for a
+   * solid body under a supercritical envelope (P14.T53.b part 2), whose air is its envelope.
+   */
+  readonly surface: Section<BodySurface>;
+  /**
+   * A gas-envelope body's air (`ok` from generator version 24 where the generator models it,
+   * P14.T54.b.i, and `not_modelled` below it), a solid body's under a supercritical envelope from
+   * generator version 24 (`not_modelled` until 26, P14.T53.f), and `not_applicable` for every other
+   * body; `not_modelled` where an older server leaves the field out.
+   */
+  readonly envelope: Section<BodyEnvelope>;
   readonly hooks: Section<BodyHooks>;
 }
 

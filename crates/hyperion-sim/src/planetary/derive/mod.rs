@@ -50,9 +50,14 @@
 //!    envelope by the energy delivered, and the radius is the envelope's at the body's age and
 //!    present flux on what is left, or its core's once none is; from it density, surface gravity
 //!    and class.
-//! 4. **The atmosphere** (T12 and T13, three passes, [`ATMOSPHERE_PASSES`]): the equilibrium
+//! 4. **The atmosphere** (T12 and T13, with P14.T51.b's and P14.T51.h's passes): the equilibrium
 //!    temperature at an albedo, from 0.3 on the first pass, gives the atmosphere its escape leaves
-//!    and its greenhouse holds, whose surface state sets the albedo of the next pass.
+//!    and its greenhouse holds, whose area-mix Bond albedo under the light of the body's hosts
+//!    (P14.T51.b) the next pass reads. The passes run until the equilibrium temperature converges,
+//!    and a body they do not settle takes its bracketed fixed point (P14.T51.h). A body whose
+//!    system holds its rotation law takes them over its record from P14.T54.a: its spin's climate,
+//!    and the context the previous pass's own air gives, its basins, water share and heat flow
+//!    (`pass_record`); [`derive_body`] itself takes the passes' stand-in, with no law.
 //! 5. **Rotation and tides** (T14) are not run here: a body's spin reads its drawn pole against
 //!    its orbit's normal and whether it had a giant impact, which only the generator knows (a moon
 //!    of its is a body of its system), so the generator derives it from this assembly's radius,
@@ -81,6 +86,8 @@ pub mod habitable_zone;
 pub mod irradiation;
 pub mod limits;
 pub mod m_dwarfs;
+pub(crate) mod pass_record;
+pub(crate) mod passes;
 pub mod photometry;
 pub mod radius;
 pub mod rocky;
@@ -109,31 +116,54 @@ pub use radius::{
 pub use rotation::tidal_locking_time;
 
 use crate::orbit::KeplerElements;
+use crate::planetary::chem::escape::{moon_impact_speed, planet_impact_speed};
+use crate::planetary::chem::inventory::{
+    ElementInventory, InventoryInputs, Reservoir, element_inventory,
+};
+use crate::planetary::chem::solar_magnesium_to_silicon;
 use crate::planetary::derive::atmosphere::{
-    AtmosphereInputs, Crust, ENVELOPE_LOSS_RADIUS_AGE, Insolation, SurfaceMaterial, VolatileDraws,
-    VolatileInventory, atmosphere, energy_limited_loss, volatile_inventory,
+    AtmosphereInputs, Crust, ENVELOPE_LOSS_RADIUS_AGE, EnvelopeHistory, Gas, Insolation, PassLight,
+    PassMaturity, PassSurface, PassWeathering, PresentClimate, PublishedState, RunawayDeck,
+    SpunClimate, SpunColdTraps, SurfaceMaterial, VolatileDraws, VolatileInventory,
+    atmosphere_and_lid, energy_limited_loss, formation_temperature, helium_left, nitrogen_boosted,
+    pass_regolith, pass_resurfacing, solved_as_a_hothouse, solved_without_the_deck,
 };
 use crate::planetary::derive::composition::{
-    SolveCompositionError, dry_composition, formed_with_envelope,
+    SolveCompositionError, composition_about, dry_composition, formed_with_envelope,
+    radius_window_about,
 };
 use crate::planetary::derive::envelope::radius_with_envelope;
 use crate::planetary::derive::habitable_zone::HabitableLimit;
 use crate::planetary::derive::irradiation::luminosity_flux;
 use crate::planetary::derive::limits::TidalPlanet;
+use crate::planetary::derive::pass_record::{
+    InertiaLid, OpenWater, PassBulk, PassContext, PassRecord, PassRecordOf, RecordCrust,
+    Resurfacing, WaterGate,
+};
+use crate::planetary::derive::passes::Convergence;
+use crate::planetary::derive::photometry::area_mix::{self, HostShade, HostShadeSum, ShadeBook};
+use crate::planetary::derive::rotation::tides;
 use crate::planetary::disc::DiscProfile;
+use crate::planetary::hooks::cold_traps::{FieldSlot, PassTraps};
+use crate::planetary::hooks::crust::{
+    AmmoniaIce, CrustBasis, CrustBasisInputs, CrustLid, DeriveCrustError,
+};
+use crate::planetary::hooks::figures::cover::UNDER_ICE_MELTING_POINT;
+use crate::planetary::hooks::ocean::OceanSolutes;
+use crate::planetary::hooks::surface::{COSMIC_BACKGROUND_TEMPERATURE, OceanWeight, deck};
 use crate::planetary::params::{
-    GAS_GIANT_ENVELOPE_FRACTION, GIANT_LOVE_NUMBER, GIANT_TIDAL_Q, ICE_GIANT_MASS,
-    ICY_WATER_FRACTION, ROCKY_LOVE_NUMBER, ROCKY_TIDAL_Q, THIN_ENVELOPE_FRACTION,
+    GAS_GIANT_ENVELOPE_FRACTION, ICE_GIANT_MASS, ICY_WATER_FRACTION, THIN_ENVELOPE_FRACTION,
 };
 use crate::stellar::Composition;
 use crate::stellar::draws::UnitUniform;
 use crate::stellar::substellar::{EvaluateGiantCoolingError, giant_cooling};
+use crate::substance::Element;
 use crate::time::UniverseTime;
-use crate::units::consts::GM_EARTH;
+use crate::units::consts::{GM_EARTH, GRAVITATIONAL_CONSTANT};
 use crate::units::{
-    EarthFluxes, EarthMasses, EarthRadii, Gigayears, JoulesPerSquareMetre, JupiterMasses, Kelvin,
-    Kilograms, KilogramsPerCubicMetre, Metres, MetresPerSecondSquared, Seconds, SolarMasses, Watts,
-    Years,
+    Dex, EarthFluxes, EarthMasses, EarthRadii, Gigayears, JoulesPerSquareMetre, JupiterMasses,
+    Kelvin, Kilograms, KilogramsPerCubicMetre, Metres, MetresPerSecond, MetresPerSecondSquared,
+    Pascals, Seconds, SolarLuminosities, SolarMasses, Watts, WattsPerSquareMetre, Years,
 };
 
 /// A body as the derivation reads it: its mass and orbit, where it formed, and its one drawn
@@ -154,7 +184,10 @@ pub struct PlacedBody {
     formation_distance: Metres,
     radius_rank: UnitUniform,
     volatiles: VolatileDraws,
+    volatile_zone: Option<FormationZone>,
     molten_until: Option<Years>,
+    bulk: Option<GivenBulk>,
+    solved_lag: SolvedLag,
 }
 
 impl PlacedBody {
@@ -188,7 +221,10 @@ impl PlacedBody {
             formation_distance,
             radius_rank,
             volatiles: VolatileDraws::MEDIAN,
+            volatile_zone: None,
             molten_until: None,
+            bulk: None,
+            solved_lag: SolvedLag::Bare,
         })
     }
 
@@ -201,9 +237,46 @@ impl PlacedBody {
         Self { volatiles, ..self }
     }
 
+    /// The same body with its volatiles formed in `zone` rather than where the body is derived to
+    /// have formed (P14.T56.c): a captured or a giant-impact moon's, which [`derive_body`] reads
+    /// in its planet's circumplanetary disc while its water, carbon and nitrogen came from its
+    /// parent's zone of the star's disc (decision-p14-moons §2.2 (b)).
+    ///
+    /// Only the volatile inventory reads it, with the carbon's carrier that follows the inventory
+    /// ([`AtmosphereInputs::formed`]): the side of the snow line the volatiles formed on and their
+    /// formation temperature are `zone`'s ([`FormationZone::side`],
+    /// [`FormationZone::temperature`]). The radius, composition and every other value are the
+    /// body's own. A body built without it takes its volatiles where it formed.
+    #[must_use]
+    pub const fn with_volatiles_from(self, zone: FormationZone) -> Self {
+        Self {
+            volatile_zone: Some(zone),
+            ..self
+        }
+    }
+
+    /// The same body with the bulk `bulk` its caller states, which its volatile inventory and
+    /// atmosphere read in place of its composition solve's ([`GivenBulk`]): a moon's own
+    /// (P14.T56.c's follow-up). A body built without it is read at its solve's bulk throughout.
+    #[must_use]
+    pub(crate) const fn with_bulk(self, bulk: GivenBulk) -> Self {
+        Self {
+            bulk: Some(bulk),
+            ..self
+        }
+    }
+
+    /// The same body with its surface lag decided as `solved_lag` says where it has no given bulk
+    /// ([`SolvedLag`]): a given bulk's own lag decides where it has one. A body built without it
+    /// is bare under its solve's bulk.
+    #[must_use]
+    pub(crate) const fn with_solved_lag(self, solved_lag: SolvedLag) -> Self {
+        Self { solved_lag, ..self }
+    }
+
     /// The same body with a young magma ocean until its system is `until` old (design note 12;
     /// P14.T28.a's `molten_until`): before then its surface is
-    /// [`SurfaceState::MagmaOcean`](atmosphere::SurfaceState::MagmaOcean). A body built without
+    /// [`SurfaceState::MagmaOcean`]. A body built without
     /// one has a solid crust from its birth.
     #[must_use]
     pub const fn with_magma_ocean_until(self, until: Years) -> Self {
@@ -217,6 +290,13 @@ impl PlacedBody {
     #[must_use]
     pub const fn volatiles(&self) -> &VolatileDraws {
         &self.volatiles
+    }
+
+    /// Where the body's volatiles formed, if not where it formed
+    /// ([`with_volatiles_from`](Self::with_volatiles_from)).
+    #[must_use]
+    pub const fn volatile_zone(&self) -> Option<&FormationZone> {
+        self.volatile_zone.as_ref()
     }
 
     /// The system age until which the body's surface is a young magma ocean, if it has one.
@@ -285,6 +365,253 @@ impl fmt::Display for BuildPlacedBodyError {
 
 impl Error for BuildPlacedBodyError {}
 
+/// A place in a disc where something formed (P14.T56.c): its distance from the disc's host and
+/// the disc's snow line, which together fix the side of the snow line it formed on and the
+/// disc's temperature there, [`formation_temperature`]'s 170 K × √(`d_snow` ÷ `d_form`).
+///
+/// A captured or giant-impact moon's volatiles formed in its parent's zone of the star's disc
+/// ([`PlacedBody::with_volatiles_from`]; decision-p14-moons §2.2 (b)).
+///
+/// - A capture formed in the star's disc, not its planet's. For a giant's irregulars and
+///   Triton-like captures the parent's formation distance is the nearest place the generator has
+///   to the outer planetesimal disc they are captured from in planetary encounters (Nesvorný,
+///   Vokrouhlický and Morbidelli 2007, AJ 133, 1962; Nesvorný et al. 2014, ApJ 784, 22, for
+///   Jupiter's), a warm bound. A rocky planet's small captures take it as the ruling does.
+/// - A giant-impact moon is made of its parent's mantle and the impactor (Canup 2012, Science
+///   338, 1052), so the zone takes the impactor to have formed near its target.
+///
+/// # Examples
+///
+/// A giant formed at 3 au in the zero-age Sun's disc, whose snow line is at 2.26 au, formed beyond
+/// the snow line but inside the ammonia line, so its captures' nitrogen takes no icy boost:
+///
+/// ```
+/// use hyperion_sim::planetary::derive::atmosphere::nitrogen_boosted;
+/// use hyperion_sim::planetary::derive::{FormationZone, SnowLineSide};
+/// use hyperion_sim::units::Metres;
+/// use hyperion_sim::units::consts::METRES_PER_AU;
+///
+/// let au = |x: f64| Metres::new(x * METRES_PER_AU);
+/// let zone = FormationZone::new(au(3.0), au(2.26))?;
+/// assert_eq!(zone.side(), SnowLineSide::Beyond);
+/// assert!((zone.temperature().value() - 147.5).abs() < 0.1);
+/// assert!(!nitrogen_boosted(zone.temperature()));
+/// # Ok::<(), hyperion_sim::planetary::derive::BuildFormationZoneError>(())
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+pub struct FormationZone {
+    distance: Metres,
+    snow_line: Metres,
+}
+
+impl FormationZone {
+    /// The place `distance` from a disc's host whose snow line lies at `snow_line`.
+    ///
+    /// # Errors
+    ///
+    /// [`BuildFormationZoneError::DistanceNotPositive`] or
+    /// [`BuildFormationZoneError::SnowLineNotPositive`] for a value that is not positive and
+    /// finite.
+    pub fn new(distance: Metres, snow_line: Metres) -> Result<Self, BuildFormationZoneError> {
+        let positive = |x: Metres| x.value().is_finite() && x.value() > 0.0;
+        if !positive(distance) {
+            return Err(BuildFormationZoneError::DistanceNotPositive);
+        }
+        if !positive(snow_line) {
+            return Err(BuildFormationZoneError::SnowLineNotPositive);
+        }
+        Ok(Self {
+            distance,
+            snow_line,
+        })
+    }
+
+    /// The distance from the disc's host.
+    #[must_use]
+    pub const fn distance(&self) -> Metres {
+        self.distance
+    }
+
+    /// The disc's snow line.
+    #[must_use]
+    pub const fn snow_line(&self) -> Metres {
+        self.snow_line
+    }
+
+    /// The side of the snow line the place lies on, as [`derive_body`] judges a body's
+    /// formation distance: inside only where it lies strictly inside the line.
+    #[must_use]
+    pub fn side(&self) -> SnowLineSide {
+        if self.distance.value() < self.snow_line.value() {
+            SnowLineSide::Inside
+        } else {
+            SnowLineSide::Beyond
+        }
+    }
+
+    /// The disc's temperature there ([`formation_temperature`]).
+    #[must_use]
+    pub fn temperature(&self) -> Kelvin {
+        formation_temperature(self.distance, self.snow_line)
+    }
+}
+
+/// A [`FormationZone`] could not be built.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BuildFormationZoneError {
+    /// The distance was not positive and finite.
+    DistanceNotPositive,
+    /// The snow line was not positive and finite.
+    SnowLineNotPositive,
+}
+
+impl fmt::Display for BuildFormationZoneError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::DistanceNotPositive => "a formation zone's distance must be positive and finite",
+            Self::SnowLineNotPositive => "a formation zone's snow line must be positive and finite",
+        })
+    }
+}
+
+impl Error for BuildFormationZoneError {}
+
+/// A body's bulk as its caller states it, which [`derive_body`] reads for the body's volatile
+/// inventory and atmosphere in place of its composition solve's (P14.T56.c's follow-up;
+/// [`PlacedBody::with_bulk`]): a moon's own, which phase D derives apart from the planets' curves
+/// (ruling 83.7; P14.T22.a's record of a moon).
+///
+/// With it the inventory reads the body's placed mass and these fractions: the water floor
+/// beyond the snow line, the larger of the drawn water and the bulk's, and the argon by its rock.
+/// The atmosphere reads this radius at that mass, so its Jeans escape, the weight of its air over
+/// the surface (its surface gravity) and an oxygen-losing runaway's escape are the stated bulk's,
+/// and its surface's material is these fractions', or rock under its surface lag ([`GivenLag`],
+/// P14.T56.g; [`surface_material`]), which every reader of its surface takes; a bulk built
+/// without one is bare. The albedo the air's state gives, and the equilibrium and effective
+/// temperatures it sets, follow. Every other value of the derivation stays the solve's: its
+/// radius, density, gravity, class, fractions and core, its moon limit and its Hill radius.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct GivenBulk {
+    radius: Metres,
+    fractions: GivenFractions,
+    lag: GivenLag,
+}
+
+impl GivenBulk {
+    /// The bulk of radius `radius` and mass fractions `fractions`, bare. A radius that is not
+    /// positive and finite gives an airless body, as [`atmosphere::atmosphere`] takes one.
+    #[must_use]
+    pub(crate) const fn new(radius: Metres, fractions: GivenFractions) -> Self {
+        Self {
+            radius,
+            fractions,
+            lag: GivenLag::Stated(SurfaceLag::Bare),
+        }
+    }
+
+    /// The same bulk with its surface lag decided as `lag` says (P14.T56.g).
+    #[must_use]
+    pub(crate) const fn with_lag(self, lag: GivenLag) -> Self {
+        Self { lag, ..self }
+    }
+}
+
+/// Whether a body's heated shell has lost its ice, leaving its rock as a lag over its bulk
+/// (P14.T56.g; decision-p14-t56g §1): the one verdict, decided once a body, that sets its surface
+/// material, rock where it is lagged.
+///
+/// - **Why rock.** A bare ice surface in vacuum near the melting point retreats by free
+///   sublimation, J = `p_sat` √(m ÷ 2πkT), about 4 km a year at 253 K and 24 km a year at
+///   273.15 K at Murphy and Koop's vapour pressure (2005, QJRMS 131, 1539). So above the melting
+///   point the surface is the refractory residue at once, as on comet nuclei (67P's dark,
+///   ice-poor mantle, geometric albedo 6.5%, Fornasier et al. 2015, A&A 583, A30) and, far
+///   colder, on Callisto and Ceres.
+/// - **Who takes it.** A moon whose bulk its retention arm thinned (`t_hot` > 0 with some water,
+///   so that it keeps w′ < w₀; P14.T56.f), `Rocky` ones included: its arm's own verdict, carried, as
+///   a regular moon's [`MoonBulk::Kept`](crate::planetary::moons::regular::MoonBulk::Kept) and a
+///   capture's or a giant-impact moon's
+///   [`MoonBulk::Stated`](crate::planetary::moons::regular::MoonBulk::Stated). An icy belt member
+///   where the zero-albedo temperature at its derivation's flux exceeds the melting point,
+///   273.15 K. No planet: under an air its water is a sea, a cover or vapour, not a sublimation
+///   lag.
+/// - **What it moves.** Only the surface: its material, so its airless albedo, its photometry's
+///   template, its regolith's inertia and stand-in row, its ice-held air, its ice-area rule and
+///   its crust's water, and its crust's ice shell, which a lagged shell cannot hold. Its interior
+///   keeps its ice: its class, its figure's hydrostatic threshold, its moment of inertia, its
+///   tides' rigidity and its crust's thermal history read its bulk's fractions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+pub enum SurfaceLag {
+    /// No lag: its surface is its bulk's material ([`SurfaceMaterial::of`]).
+    #[default]
+    Bare,
+    /// Its heated shell lost its ice: its surface is the rock lag ([`SurfaceMaterial::Rock`]).
+    Lagged,
+}
+
+/// How a [`GivenBulk`]'s surface lag is decided (P14.T56.g).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum GivenLag {
+    /// As its caller states it: a moon's, its retention arm's verdict.
+    Stated(SurfaceLag),
+    /// By the derivation's own zero-albedo equilibrium temperature at its flux: lagged above
+    /// [`UNDER_ICE_MELTING_POINT`], an icy belt member's (decision-p14-t56g §3), whose bulk no arm
+    /// thins. The limit is the retention arm's, `system::moon_ice::HOT_ICE_LIMIT` (a module
+    /// private to the system), and the flux is [`DerivedBody::flux`], to the bit.
+    AboveMelting,
+}
+
+/// Whether a body with no [`GivenBulk`] takes [`GivenLag::AboveMelting`]'s verdict over the ice
+/// bulk its composition solve gives it: P14.T56.g's rule for a rocky belt's member whose solved
+/// bulk is ice, from generator version 25
+/// ([`member_solved_lag`](crate::planetary::system::member_lag::member_solved_lag)).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum SolvedLag {
+    /// No lag: a planet's, and to version 24 every body's with no given bulk.
+    #[default]
+    Bare,
+    /// Lagged where its solved bulk's material is ice ([`SurfaceMaterial::Ice`]) and the
+    /// zero-albedo equilibrium temperature at its flux exceeds [`UNDER_ICE_MELTING_POINT`], as
+    /// [`GivenLag::AboveMelting`] reads it, to the bit; bare otherwise, so that a rock bulk and an
+    /// ice bulk below the melting point keep their surfaces.
+    AboveMeltingOverIce,
+}
+
+/// The surface material of a body of bulk fractions `fractions` whose surface lag is `lag`
+/// (P14.T56.g): rock where its heated shell lost its ice, and its bulk's otherwise
+/// ([`SurfaceMaterial::of`]). The one function every reader of a body's surface material takes:
+/// its air, its cold traps' regolith, its photometry, its spun climate, its record's surface and
+/// the figures' partition ground.
+#[must_use]
+pub(crate) fn surface_material(fractions: &MassFractions, lag: SurfaceLag) -> SurfaceMaterial {
+    match lag {
+        SurfaceLag::Bare => SurfaceMaterial::of(fractions),
+        SurfaceLag::Lagged => SurfaceMaterial::Rock,
+    }
+}
+
+/// The mass fractions of a [`GivenBulk`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum GivenFractions {
+    /// Water of this share of the body's mass, in [0, 1], over the solids its composition solve
+    /// splits between iron and rock ([`MassFractions::with_water`]): a regular moon's ice (ruling
+    /// 83.7), as [`DerivedMoon::fractions`](crate::planetary::moons::DerivedMoon::fractions)
+    /// states it.
+    Water(f64),
+    /// These fractions: a giant-impact moon's or a capture's, as its record's bulk states them.
+    Exactly(MassFractions),
+}
+
+impl GivenFractions {
+    /// The fractions of a body whose composition solve gave `solved`.
+    #[must_use]
+    fn over(self, solved: &MassFractions) -> MassFractions {
+        match self {
+            Self::Water(water) => solved.with_water(water),
+            Self::Exactly(fractions) => fractions,
+        }
+    }
+}
+
 /// A body's hosts as the derivation reads them at the time: the mass it orbits, and the light of
 /// every star (ruling 34: each host as plain values of L, `T_eff` and R from its `StarState`).
 ///
@@ -292,18 +619,41 @@ impl Error for BuildPlacedBodyError {}
 /// one star, or both of a pair for a circumbinary body. Each of the `companions` is another star of
 /// the system, seen at the orbit that separates it from the body's host (design note 10; P14.T12.a).
 /// The system's composition is the one a giant's cooling reads (plan 13's `giant_cooling`).
-#[derive(Debug, Clone, Copy, PartialEq)]
+///
+/// Inside the crate, the hosts may also carry what the shades of their call chain's bodies share
+/// (lever (d), `with_shades`), which moves no value: so their equality ignores it (two hosts that
+/// differ only in a book give every body the same bits), while their `Debug` shows it.
+#[derive(Debug, Clone, Copy)]
 pub struct BodyHosts<'a> {
     primary_mass: Kilograms,
     composition: Composition,
     orbited: &'a [HostLight],
     companions: &'a [Illumination],
+    shades: Option<&'a ShadeBook>,
+    parent_orbital_speed: Option<MetresPerSecond>,
+    host_magnesium_to_silicon: f64,
+    alpha_fe: Dex,
+}
+
+impl PartialEq for BodyHosts<'_> {
+    /// Equal where every value a body reads is: the book of shades, which moves none, is not
+    /// compared (Batch D's review, RD2).
+    fn eq(&self, other: &Self) -> bool {
+        self.primary_mass == other.primary_mass
+            && self.composition == other.composition
+            && self.orbited == other.orbited
+            && self.companions == other.companions
+            && self.parent_orbital_speed == other.parent_orbital_speed
+            && self.host_magnesium_to_silicon == other.host_magnesium_to_silicon
+            && self.alpha_fe == other.alpha_fe
+    }
 }
 
 impl<'a> BodyHosts<'a> {
     /// Hosts of which the body orbits `primary_mass` (a star's mass at the time, or a pair's), in a
     /// system of composition `composition` (plan 06's, as drawn for the system), lit by `orbited`
-    /// at its own distance and by `companions` at theirs.
+    /// at its own distance and by `companions` at theirs. Its host's rock is at the Sun's Mg/Si
+    /// and \[α/Fe\] 0, which move no core share; a system's record gives its own host's.
     ///
     /// # Errors
     ///
@@ -327,7 +677,59 @@ impl<'a> BodyHosts<'a> {
             composition,
             orbited,
             companions,
+            shades: None,
+            parent_orbital_speed: None,
+            host_magnesium_to_silicon: solar_magnesium_to_silicon(),
+            alpha_fe: Dex::ZERO,
         })
+    }
+
+    /// The same hosts, whose rock a body forms of has Mg/Si `host_magnesium_to_silicon` (by
+    /// number) and \[α/Fe\] `alpha_fe`, as the body's crust reads them: what its rocky outcomes'
+    /// core shares answer to from generator version 27 ([`rocky::CoreShareShift::of_host`]).
+    #[must_use]
+    pub(crate) const fn with_host_rock(
+        self,
+        host_magnesium_to_silicon: f64,
+        alpha_fe: Dex,
+    ) -> Self {
+        Self {
+            host_magnesium_to_silicon,
+            alpha_fe,
+            ..self
+        }
+    }
+
+    /// The host's Mg/Si by number, as its bodies' crusts read it
+    /// ([`with_host_rock`](Self::with_host_rock)).
+    #[must_use]
+    pub(crate) const fn host_magnesium_to_silicon(&self) -> f64 {
+        self.host_magnesium_to_silicon
+    }
+
+    /// The host's \[α/Fe\], 0 for none ([`with_host_rock`](Self::with_host_rock)).
+    #[must_use]
+    pub(crate) const fn alpha_fe(&self) -> Dex {
+        self.alpha_fe
+    }
+
+    /// The same hosts, whose body's shade reads its call chain's book `shades` where there is one
+    /// (lever (d), decision-p14-t54a-passes, "Cost escalation (after Batch B)" §C.3): the same bits
+    /// as without it, and equal to them.
+    #[must_use]
+    pub(crate) const fn with_shades(self, shades: Option<&'a ShadeBook>) -> Self {
+        Self { shades, ..self }
+    }
+
+    /// The same hosts, of a moon whose planet orbits its star at `speed` (its circular orbital
+    /// speed there, √(G M ÷ a)), which the moon's mean impact speed reads (P14.T53.a;
+    /// [`AtmosphereInputs::impact_speed`]): a planet's and a member's hosts carry none.
+    #[must_use]
+    pub(crate) const fn with_parent_orbital_speed(self, speed: MetresPerSecond) -> Self {
+        Self {
+            parent_orbital_speed: Some(speed),
+            ..self
+        }
     }
 
     /// The mass the body orbits.
@@ -420,24 +822,37 @@ impl PlanetClass {
         }
     }
 
-    /// Whether a body of this class has a surface section: every class but the giants, whose
-    /// section is not applicable (ruling 34).
+    /// Whether the class is a giant, an ice or a gas giant: what a body's mechanics read of its
+    /// class, its spin family ([`SpinFamily::of`](rotation::SpinFamily::of)) among them
+    /// (decision-p14-t35e-wire §2.3).
+    ///
+    /// A sub-Neptune is no giant, though it has no solid surface either
+    /// ([`has_solid_surface`](Self::has_solid_surface)): the two questions part there.
     #[must_use]
-    pub const fn has_surface(self) -> bool {
+    pub const fn is_giant(self) -> bool {
         match self {
-            Self::Rocky | Self::Icy | Self::SubNeptune => true,
-            Self::IceGiant | Self::GasGiant => false,
+            Self::IceGiant | Self::GasGiant => true,
+            Self::Rocky | Self::Icy | Self::SubNeptune => false,
         }
     }
 
-    /// The Love number k₂ and tidal quality factor Q of the class: a rocky body's for every class
-    /// with a surface, a giant's for the giants (P14.T14.b).
+    /// Whether a body of this class has a solid surface, a rocky or an icy body: exactly the
+    /// classes whose atmosphere is not in the gas-envelope state, since both read the one envelope
+    /// fraction against [`THIN_ENVELOPE_FRACTION`] (decision-p14-t35e-wire §2.3).
+    ///
+    /// The record's surface section is [`Section::Ok`](crate::planetary::record::Section::Ok) for
+    /// a present body of such a class, and [`Section::NotApplicable`](crate::planetary::record::Section::NotApplicable)
+    /// for the others, the sub-Neptunes and the giants, whose air is their `envelope` section's
+    /// (P14.T48.e), or, from generator version 24, a body of such a class under a supercritical
+    /// envelope (P14.T53.b part 2: a condensable above its critical temperature whose liquid-like
+    /// column over its critical isochore holds at least [`THIN_ENVELOPE_FRACTION`] of the mass),
+    /// which the record tags as it tags them. Readers decide from the record's tag, not from this
+    /// predicate.
     #[must_use]
-    const fn tides(self) -> (f64, f64) {
-        if self.has_surface() {
-            (ROCKY_LOVE_NUMBER, ROCKY_TIDAL_Q)
-        } else {
-            (GIANT_LOVE_NUMBER, GIANT_TIDAL_Q)
+    pub const fn has_solid_surface(self) -> bool {
+        match self {
+            Self::Rocky | Self::Icy => true,
+            Self::SubNeptune | Self::IceGiant | Self::GasGiant => false,
         }
     }
 }
@@ -453,13 +868,24 @@ pub struct DerivedBody {
     core: CoreComposition,
     flux: EarthFluxes,
     xuv_fluence: JoulesPerSquareMetre,
+    xuv_flux: WattsPerSquareMetre,
     initial_envelope_fraction: f64,
     envelope_lost: EarthMasses,
     albedo: BondAlbedo,
     equilibrium_temperature: Kelvin,
     effective_temperature: Option<Kelvin>,
-    inventory: VolatileInventory,
+    elements: ElementInventory,
     atmosphere: Atmosphere,
+    atmosphere_passes: u32,
+    convergence: Convergence,
+    spun: Option<SpunPasses>,
+    crust_lid: Option<CrustLid>,
+    weathered: PassMaturity,
+    cold_traps: PassTraps,
+    regolith_albedo: f64,
+    envelope_helium: Option<crate::planetary::chem::escape::EnvelopeHelium>,
+    surface_lag: SurfaceLag,
+    ocean_solutes: OceanSolutes,
     internal_luminosity: Watts,
     radius: EarthRadii,
     density: KilogramsPerCubicMetre,
@@ -469,9 +895,22 @@ pub struct DerivedBody {
     prograde_limit: Metres,
     retrograde_limit: Metres,
     maximum_moon_mass: EarthMasses,
+    /// Its own sky's sums now, at the peak and at the maximum-greenhouse limit
+    /// ([`sky_ratios`](Self::sky_ratios)).
+    #[cfg(test)]
+    sky_ratios: [f64; 3],
 }
 
 impl DerivedBody {
+    /// Σ Fᵢ ÷ `S_eff,i` over its own sky's hosts at the runaway limit now, at the runaway limit at
+    /// the hosts' largest past luminosities, and at the maximum-greenhouse limit now: the sums its
+    /// insolation and its ceiling read, a moon's planet's glow among its hosts. For the audit.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn sky_ratios(&self) -> [f64; 3] {
+        self.sky_ratios
+    }
+
     /// The body's mass at the time: its placed mass less the envelope escape has taken
     /// ([`envelope_lost`](Self::envelope_lost)).
     #[must_use]
@@ -542,6 +981,15 @@ impl DerivedBody {
         self.xuv_fluence
     }
 
+    /// The X-ray and ultraviolet flux the body receives at the time, averaged over its orbit now,
+    /// from every host with a history
+    /// ([`XuvHistory::flux`](crate::planetary::context::XuvHistory::flux)): what P14.T24.a's
+    /// radiation class reads.
+    #[must_use]
+    pub const fn xuv_flux(&self) -> WattsPerSquareMetre {
+        self.xuv_flux
+    }
+
     /// The hydrogen and helium envelope's share of the body's mass at formation (P14.T11.c, the
     /// inventory of P14.T13.a), before escape: zero for a body without one, and a giant's own
     /// from 0.3 Jupiter masses, which escape does not touch.
@@ -557,11 +1005,125 @@ impl DerivedBody {
         self.envelope_lost
     }
 
-    /// The Bond albedo the equilibrium temperature was taken at: the one the body's surface state
-    /// gives, after the fixed three passes of P14.T12 and T13 ([`ATMOSPHERE_PASSES`]).
+    /// The Bond albedo the equilibrium temperature was taken at: the area mix's that the published
+    /// pass of P14.T12 and T13 read (P14.T51.b), the last of the passes, which converge to 10⁻⁹ in
+    /// the equilibrium temperature, or for a body they do not settle, the end of its bracket with
+    /// the smaller residual (P14.T51.h).
     #[must_use]
     pub const fn albedo(&self) -> BondAlbedo {
         self.albedo
+    }
+
+    /// How many passes of P14.T12 and T13 the derivation took: as many as converge, at most
+    /// `PLAIN_PASSES` (P14.T51.b), and for a body they do not settle its bracket's too, under the
+    /// secant steps from generator version 25 (P14.T51.l): at most `MOST_SECANT_PASSES`, 24 + 2 ×
+    /// (2 + 2 + 40) = 112 in all, under a lagged context (P14.T54.a; decision-p14-t54a-passes
+    /// §1.5), and 24 + 2 + 40 = 66 over the stand-in, whose bracket takes one round with its ends
+    /// reused.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "the batch's convergence tests read it until P14.T54.a's bless note"
+        )
+    )]
+    #[must_use]
+    pub(crate) const fn atmosphere_passes(&self) -> u32 {
+        self.atmosphere_passes
+    }
+
+    /// What the passes over the body's record leave for its record (P14.T54.a; rule (f)): the
+    /// context the published pass read, the context its own air gives and θ of its published
+    /// partition. `None` for a derivation over the passes' stand-in, with no rotation law.
+    #[must_use]
+    pub(crate) const fn spun(&self) -> Option<&SpunPasses> {
+        self.spun.as_ref()
+    }
+
+    /// How the derivation's passes ended (P14.T51.h): converged or bracketed, with the published
+    /// pass's residual.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "the batch's convergence tests read it until P14.T54.a's re-check"
+        )
+    )]
+    #[must_use]
+    pub(crate) const fn convergence(&self) -> Convergence {
+        self.convergence
+    }
+
+    /// The helium P14.T53.a's fractionation leaves the body's envelope, as its passes read it
+    /// (P14.T54.b.h): `helium_before_passes`'s, taken once before them (its He/H, its helium mass
+    /// fraction, the shares of hydrogen and helium kept and the start they were fractionated from,
+    /// the host star's own from generator version 24), the one the thin envelope's air was built at
+    /// and the escape's outcome carries (`EscapeOutcome::envelope`); `None` for a body that formed
+    /// with no envelope. The record's envelope section passes its He/H to T50.b (P14.T54.b.i;
+    /// decision-p14-t50b-envelope §5).
+    #[must_use]
+    pub(crate) const fn envelope_helium(
+        &self,
+    ) -> Option<&crate::planetary::chem::escape::EnvelopeHelium> {
+        self.envelope_helium.as_ref()
+    }
+
+    /// The Bond albedo of the body's bare regolith about its hosts' bands, airless (P14.T51.i): the
+    /// published pass's regolith (T51.b's `Regolith`, its lid's row from P14.T54.a, or its
+    /// material's where no lid is known, by the stand-in, and from generator version 24 its lid's
+    /// row weathered at its maturity, P14.T54.b.e, the one its area mix read:
+    /// `atmosphere::pass_regolith`) on an airless body, by the area mix's one predicate for
+    /// the space-weathering cap (`capped_lid`), which its cold traps' flat ground and shadows read,
+    /// so that their field does not move with the area mix (decision-p14-t51-batch §6).
+    /// Dimensionless, 0 to 1.
+    #[must_use]
+    pub(crate) const fn regolith_albedo(&self) -> f64 {
+        self.regolith_albedo
+    }
+
+    /// The published pass's lid (P14.T54.a; decision-pre-23-review item 17): its crust's lid at
+    /// its own climate, whose row its regolith read, and from which the record's crust is built
+    /// (`CrustComposition::of`), so that the record's lid is the row the last pass read, to the
+    /// bit. `None` over the passes' stand-in, for a body with no crust's basis, and where the
+    /// published pass took no lid (one under C₀, or a gas envelope).
+    #[must_use]
+    pub(crate) const fn crust_lid(&self) -> Option<&CrustLid> {
+        self.crust_lid.as_ref()
+    }
+
+    /// The published pass's maturity's outcome (P14.T54.b.e; rule (f)): the modifiers' parts its
+    /// context and its own air gave, its water and its weathered regolith, which the record's
+    /// modifiers read, or why it took none (the passes' stand-in, no figures in its context, no
+    /// lid, no host or no planet's field on the record, a refusal).
+    #[must_use]
+    pub(crate) const fn weathered(&self) -> &PassMaturity {
+        &self.weathered
+    }
+
+    /// The published pass's cold traps (P14.T54.b.f; decision-p14-t54b-f-coldtraps §3): the field
+    /// it read with that field's inputs, which the record publishes over and builds none, or why it
+    /// read none (the passes' stand-in, no sky, no figures in its context, a pass that does not
+    /// qualify).
+    #[must_use]
+    pub(crate) const fn cold_traps(&self) -> &PassTraps {
+        &self.cold_traps
+    }
+
+    /// The body's surface lag (P14.T56.g; [`SurfaceLag`]), decided once before its passes from
+    /// its given bulk ([`GivenBulk`]): whether its heated shell lost its ice, so that its surface
+    /// material is rock ([`surface_material`]). Its record's photometry and surface read it, as its
+    /// passes did; [`SurfaceLag::Bare`] for a body with no given bulk, a planet's.
+    #[must_use]
+    pub(crate) const fn surface_lag(&self) -> SurfaceLag {
+        self.surface_lag
+    }
+
+    /// What the body's ocean would dissolve (P14.T51.g.b; [`OceanSolutes`]), its air's bulk's,
+    /// built once before its passes: its record's subsurface ocean reads them, as a moon's tidal
+    /// branch did at its passes.
+    #[must_use]
+    pub(crate) const fn ocean_solutes(&self) -> OceanSolutes {
+        self.ocean_solutes
     }
 
     /// The body's atmosphere and surface at the time (P14.T13).
@@ -570,11 +1132,22 @@ impl DerivedBody {
         &self.atmosphere
     }
 
-    /// The volatile inventory the atmosphere was derived from (P14.T13.a), at the time: what
-    /// P14.T23's [`BulkComposition`](crate::planetary::hooks::BulkComposition) holds.
+    /// The volatile inventory the atmosphere was derived from (P14.T13.a), at the time: the stored
+    /// carriers of the body's [`element_inventory`](Self::element_inventory), its view
+    /// ([`ElementInventory::volatiles`]).
     #[must_use]
     pub const fn inventory(&self) -> &VolatileInventory {
-        &self.inventory
+        self.elements.volatiles()
+    }
+
+    /// The element inventory at the time (P14.T50.a), what P14.T23's
+    /// [`BulkComposition`](crate::planetary::hooks::BulkComposition) holds: built by
+    /// [`element_inventory`](fn@element_inventory) from the inputs the atmosphere's inventory
+    /// reads, so that its carriers are that inventory to the bit
+    /// ([`inventory`](Self::inventory)).
+    #[must_use]
+    pub const fn element_inventory(&self) -> &ElementInventory {
+        &self.elements
     }
 
     /// The mean surface temperature: the atmosphere's (P14.T13.c).
@@ -644,7 +1217,7 @@ impl DerivedBody {
     }
 
     /// The heaviest moon that, starting at the prograde limit, tides let survive to the time
-    /// (Barnes and O'Brien 2002), with a rocky body's k₂ and Q or a giant's by class.
+    /// (Barnes and O'Brien 2002), with the body's k₂ and Q ([`rotation::tides`], P14.T14.d).
     #[must_use]
     pub const fn maximum_moon_mass(&self) -> EarthMasses {
         self.maximum_moon_mass
@@ -777,7 +1350,11 @@ pub fn rocky_core_mass_fraction(radius_rank: UnitUniform, window: &RadiusWindow)
     let r = radius_rank.value();
     (r <= top).then(|| {
         let share = ((r - iron) / (top - iron)).clamp(0.0, 1.0);
-        rocky::core_mass_fraction_at_least(1.0 - share, window.dry_top_core_mass_fraction())
+        rocky::core_mass_fraction_at_least(
+            1.0 - share,
+            window.dry_top_core_mass_fraction(),
+            window.core_share_shift(),
+        )
     })
 }
 
@@ -851,7 +1428,9 @@ pub fn radius_rank_in_window(rank: UnitUniform, window: &RadiusWindow) -> UnitUn
 /// # Examples
 ///
 /// Earth, at the rank that gives its composition's place in the observed spread (38%), about the
-/// present Sun in the zero-age Sun's disc:
+/// present Sun in the zero-age Sun's disc. Its 255 ± 2 K is the passes' stand-in's (no rotation
+/// law, no basins, the bulk material's regolith), as every call here takes; a system's record
+/// derives the body under its law, its basins and its lid (P14.T54.a):
 ///
 /// ```
 /// use hyperion_sim::orbit::{Eccentricity, KeplerElements, Orientation};
@@ -892,86 +1471,151 @@ pub fn derive_body(
     age: Years,
     t: UniverseTime,
 ) -> Result<DerivedBody, DeriveBodyError> {
-    let age_now = Years::new(age.value() + t.since_epoch().as_julian_years_f64());
-    if age_now.value().is_nan() || age_now.value() <= 0.0 {
-        return Err(DeriveBodyError::NotYetFormed { age: age_now });
-    }
-    let (formed, radius_rank, solved) = formation(placed, disc)?;
+    derive_body_driven(
+        PassDriver::Solve,
+        placed,
+        hosts,
+        disc,
+        age,
+        t,
+        PassRecord::StandIn,
+    )
+}
 
-    // T12, at the time: the light now, the worst it has been, and the X-rays so far.
+/// What drives the passes (P14.T51.h): the bracketed fixed point, and for the tests the loop
+/// P14.T51.b built, to which a body that settles within the plain passes is held bit for bit, and
+/// a single pass at a stated albedo.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum PassDriver {
+    /// [`passes::solve_in_context`], the generator's.
+    Solve,
+    /// P14.T51.b's loop as it was built: at most 64 passes until one settles, the last published.
+    #[cfg(test)]
+    T51b,
+    /// One pass at the albedo given, published, for the tests that hold what a pass reads apart
+    /// from the albedo it reads; over a record, under the first context, C₀.
+    #[cfg(test)]
+    Once(BondAlbedo),
+    /// The solve, then one pass more at its published albedo under the context `under` names,
+    /// published, its count the solve's and one, its outcome the solve's: the joint residual's
+    /// and rule (f)'s tests (decision-p14-t54a-passes §1.5). Over the stand-in, one pass more at
+    /// the published albedo.
+    #[cfg(test)]
+    Again(Under),
+    /// The solve from the albedo given in place of [`BondAlbedo::BEFORE_ATMOSPHERES`], over the
+    /// stand-in or a record, its outcome its own: the bistability re-check's second start
+    /// (decision-pre-23-review item 26; decision-p14-t54a-states §6.3), T13.c's table albedo of
+    /// the other branch.
+    #[cfg(test)]
+    From(BondAlbedo),
+    /// The solve over a record, every pass it takes recorded in order on the thread's trace
+    /// ([`traced`]), its outcome the solve's to the bit: the convergence re-check's per-pass trace
+    /// (decision-p14-t54a-passes §1.8).
+    #[cfg(test)]
+    Traced,
+}
+
+/// Which context [`PassDriver::Again`]'s pass reads (the tests').
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Under {
+    /// The context the published pass read, C: it repeats that pass, to the bit.
+    Read,
+    /// The context the published pass's own air gives, K(P*): the joint residual's pass.
+    Next,
+}
+
+/// [`derive_body`], its passes driven by `driver` (P14.T51.h) over `record` (P14.T54.a):
+/// [`derive_body`] is this under [`PassDriver::Solve`] over the passes' stand-in
+/// ([`PassRecord::StandIn`]).
+///
+/// The passes take the area-mix albedo (P14.T51.b) and run from
+/// [`BondAlbedo::BEFORE_ATMOSPHERES`] until the equilibrium temperature changes by at most
+/// [`ATMOSPHERE_CONVERGENCE`] of itself between passes, at most
+/// [`PLAIN_PASSES`](passes::PLAIN_PASSES) of them, under the light of its hosts built once before
+/// them; a body they do not settle takes its bracketed fixed point ([`passes`]). Over a record
+/// each pass reads its spin's climate and the context the previous pass's own air gives
+/// ([`passes::solve_in_context`]; [`PassBody::passes`]).
+///
+/// # Errors
+///
+/// As [`derive_body`].
+pub(crate) fn derive_body_driven(
+    driver: PassDriver,
+    placed: &PlacedBody,
+    hosts: &BodyHosts<'_>,
+    disc: &DiscProfile,
+    age: Years,
+    t: UniverseTime,
+    record: PassRecord<'_>,
+) -> Result<DerivedBody, DeriveBodyError> {
+    let BeforePasses {
+        age_now,
+        formed,
+        radius_rank,
+        solved,
+        sky,
+        escape,
+        radius,
+        fractions,
+        core,
+        giant,
+    } = BeforePasses::of(placed, hosts, disc, age, t)?;
     let a = placed.orbit_now.semi_major_axis();
     let e = placed.orbit_now.eccentricity().value();
-    let sky = Sky::of(placed, hosts, age_now);
-
-    // T13.b, energy-limited escape, and T11, the radius at the time.
-    let escape = envelope_escape(placed, hosts, disc, solved.as_ref(), sky.xuv_fluence);
     let mass = escape.mass;
-    let (radius, fractions, core, giant) = at_the_time(
-        mass,
-        formed,
-        solved.as_ref(),
-        escape.stripped(),
-        sky.flux,
-        age_now,
-        hosts.composition(),
-    )?;
     let r = Metres::from(radius).value();
     let internal_luminosity = giant.as_ref().map_or(Watts::ZERO, |giant| {
         Watts::from(giant.internal_luminosity())
     });
     let mass_kg = Kilograms::from(mass);
 
-    // T12 and T13, three passes (T13.c): the albedo of one pass's surface state sets the
-    // equilibrium temperature the next pass reads.
-    let inventory = volatile_inventory(mass, &fractions, formed, &placed.volatiles, age_now);
+    // T12 and T13's passes (T13.c, P14.T51.b): the albedo of one pass's surface sets the
+    // equilibrium temperature the next pass reads, at the bulk its air reads, with its inventory.
+    let bulk = placed.air_of(disc, formed, (mass, radius, &fractions), age_now, sky.flux);
     let crust = match placed.molten_until {
         Some(until) if age_now < until => Crust::Molten,
         Some(_) | None => Crust::Solid,
     };
-    let pass = |albedo: BondAlbedo| {
-        let irradiated = equilibrium_temperature(sky.flux, albedo);
-        let heated = if internal_luminosity > Watts::ZERO {
-            with_internal_heat(irradiated, internal_luminosity, Metres::new(r))
-        } else {
-            irradiated
-        };
-        let air = atmosphere(&AtmosphereInputs {
-            mass: mass_kg,
-            radius: Metres::new(r),
-            material: SurfaceMaterial::of(&fractions),
-            envelope_fraction: fractions.envelope(),
-            inventory,
-            equilibrium: irradiated,
-            worst_equilibrium: equilibrium_temperature(sky.peak_flux, albedo),
-            heated,
-            xuv_fluence: sky.xuv_fluence,
-            insolation: sky.insolation,
-            crust,
-            hottest_host: sky.hottest,
-        });
-        (irradiated, heated, air)
-    };
-    let mut albedo = BondAlbedo::BEFORE_ATMOSPHERES;
-    let (mut irradiated, mut heated, mut air) = pass(albedo);
-    for _ in 1..ATMOSPHERE_PASSES {
-        albedo = air.albedo();
-        (irradiated, heated, air) = pass(albedo);
-    }
-
+    let class = PlanetClass::of(mass, &fractions);
+    // The bulk at the time, which no pass moves: what the record's bulk rule reads.
     let volume = 4.0 / 3.0 * core::f64::consts::PI * (r * r * r);
     let density = KilogramsPerCubicMetre::new(mass_kg.value() / volume);
     let surface_gravity = MetresPerSecondSquared::new(GM_EARTH * mass.value() / (r * r));
-    let class = PlanetClass::of(mass, &fractions);
+    let pass_bulk = PassBulk {
+        mass,
+        radius,
+        density,
+        surface_gravity,
+        class,
+        fractions,
+        inventory_water: bulk.elements.volatiles().water(),
+        lag: bulk.lag,
+        ocean_solutes: bulk.ocean_solutes,
+    };
+    let (history, envelope_helium) = envelope_and_helium(&bulk, &escape, &sky, (age_now, hosts));
+    let (passes, regolith_albedo) = PassBody {
+        placed,
+        sky: &sky,
+        bulk: &bulk,
+        pass_bulk: &pass_bulk,
+        class,
+        crust,
+        internal_luminosity,
+        radius: Metres::new(r),
+        age: age_now,
+        formed,
+        impact_speed: impact_speed(placed, hosts, (bulk.mass, bulk.radius)),
+        envelope_history: history,
+        envelope_helium,
+        deck: RunawayDeck::Kept,
+        published: PublishedState::Climate,
+    }
+    .passes(driver, record);
 
     // T15.
-    let hill = hill_radius(a, 0.0, mass_kg, hosts.primary_mass);
-    let prograde_limit = satellite_stability_limit(hill, e, 0.0, OrbitSense::Prograde);
-    let retrograde_limit = satellite_stability_limit(hill, e, 0.0, OrbitSense::Retrograde);
-    let (love_number, tidal_q) = class.tides();
-    let tidal = TidalPlanet::new(mass_kg, Metres::new(r), love_number, tidal_q)
-        .expect("a derived body's mass and radius are positive and finite");
-    let moon =
-        maximum_surviving_moon_mass(&tidal, hosts.primary_mass, a, e, Seconds::from(age_now));
+    let (hill, prograde_limit, retrograde_limit) = satellite_limits(a, e, mass_kg, hosts);
+    let moon = moon_limit(placed, hosts, class, (mass, radius, &fractions), age_now);
 
     Ok(DerivedBody {
         mass,
@@ -982,13 +1626,24 @@ pub fn derive_body(
         core,
         flux: sky.flux,
         xuv_fluence: sky.xuv_fluence,
+        xuv_flux: sky.xuv_flux,
         initial_envelope_fraction: escape.initial,
         envelope_lost: escape.lost,
-        albedo,
-        equilibrium_temperature: irradiated,
-        effective_temperature: (internal_luminosity > Watts::ZERO).then_some(heated),
-        inventory,
-        atmosphere: air,
+        albedo: passes.albedo,
+        equilibrium_temperature: passes.irradiated,
+        effective_temperature: (internal_luminosity > Watts::ZERO).then_some(passes.heated),
+        elements: bulk.elements,
+        atmosphere: passes.air,
+        atmosphere_passes: passes.count,
+        convergence: passes.convergence,
+        spun: passes.spun,
+        crust_lid: passes.crust_lid,
+        weathered: passes.weathered,
+        cold_traps: passes.cold_traps,
+        regolith_albedo,
+        envelope_helium,
+        surface_lag: bulk.lag,
+        ocean_solutes: bulk.ocean_solutes,
         internal_luminosity,
         radius,
         density,
@@ -997,28 +1652,1119 @@ pub fn derive_body(
         hill_radius: hill,
         prograde_limit,
         retrograde_limit,
-        maximum_moon_mass: EarthMasses::from(moon),
+        maximum_moon_mass: moon,
+        #[cfg(test)]
+        sky_ratios: sky.ratios,
     })
 }
 
-/// How many times [`derive_body`] passes between the equilibrium temperature (P14.T12) and the
-/// atmosphere (P14.T13), each taking the albedo the last one's surface state gave: a fixed three
-/// (P14.T13.c), from the 0.3 of [`BondAlbedo::BEFORE_ATMOSPHERES`].
-pub const ATMOSPHERE_PASSES: u32 = 3;
+/// T15's limits of a body of mass `mass` on an orbit of semi-major axis `a` and eccentricity `e`
+/// about `hosts`: its Hill radius and its prograde and retrograde satellites' stability limits.
+#[must_use]
+fn satellite_limits(
+    a: Metres,
+    e: f64,
+    mass: Kilograms,
+    hosts: &BodyHosts<'_>,
+) -> (Metres, Metres, Metres) {
+    let hill = hill_radius(a, 0.0, mass, hosts.primary_mass);
+    (
+        hill,
+        satellite_stability_limit(hill, e, 0.0, OrbitSense::Prograde),
+        satellite_stability_limit(hill, e, 0.0, OrbitSense::Retrograde),
+    )
+}
+
+/// What [`derive_body_driven`] derives of a body before its passes, none of which a pass reads
+/// back (lever (e), decision-p14-t54a-passes, "Cost escalation (after Batch B)" §C.3): its age at
+/// the time, its formation (T10–T11), its sky then (T12), its envelope's escape (T13.b) and its
+/// radius, mass fractions, core and giant's radius at the time (T11).
+struct BeforePasses {
+    age_now: Years,
+    formed: SnowLineSide,
+    radius_rank: UnitUniform,
+    solved: Option<SolvedComposition>,
+    sky: Sky,
+    escape: Escape,
+    radius: EarthRadii,
+    fractions: MassFractions,
+    core: CoreComposition,
+    giant: Option<GiantRadius>,
+}
+
+impl BeforePasses {
+    /// The stage of `placed` about `hosts`, formed in `disc`, in a system aged `age` at the epoch,
+    /// at time `t` ([`derive_body`]'s inputs).
+    ///
+    /// # Errors
+    ///
+    /// As [`derive_body`].
+    fn of(
+        placed: &PlacedBody,
+        hosts: &BodyHosts<'_>,
+        disc: &DiscProfile,
+        age: Years,
+        t: UniverseTime,
+    ) -> Result<Self, DeriveBodyError> {
+        let age_now = Years::new(age.value() + t.since_epoch().as_julian_years_f64());
+        if age_now.value().is_nan() || age_now.value() <= 0.0 {
+            return Err(DeriveBodyError::NotYetFormed { age: age_now });
+        }
+        let (formed, radius_rank, solved) = formation(placed, hosts, disc)?;
+
+        // T12, at the time: the light now, the worst it has been, and the X-rays so far.
+        let sky = Sky::of(placed, hosts, age_now);
+
+        // T13.b, energy-limited escape, and T11, the radius at the time.
+        let escape = envelope_escape(placed, hosts, disc, solved.as_ref(), sky.xuv_fluence);
+        let shift =
+            rocky::CoreShareShift::of_host(hosts.host_magnesium_to_silicon(), hosts.alpha_fe());
+        let (radius, fractions, core, giant) = at_the_time(
+            escape.mass,
+            formed,
+            solved.as_ref(),
+            escape.stripped(),
+            sky.flux,
+            (age_now, hosts.composition()),
+            shift,
+        )?;
+        Ok(Self {
+            age_now,
+            formed,
+            radius_rank,
+            solved,
+            sky,
+            escape,
+            radius,
+            fractions,
+            core,
+            giant,
+        })
+    }
+}
+
+/// P14.T15's largest moon that survives about the body `placed`, about `hosts`, of class `class`
+/// and of mass, radius and mass fractions `bulk` at the age `age_now`: [`maximum_surviving_moon_mass`]
+/// at its own tides ([`tidal_planet`]) on its orbit at the time.
+#[must_use]
+fn moon_limit(
+    placed: &PlacedBody,
+    hosts: &BodyHosts<'_>,
+    class: PlanetClass,
+    (mass, radius, fractions): (EarthMasses, EarthRadii, &MassFractions),
+    age_now: Years,
+) -> EarthMasses {
+    let a = placed.orbit_now.semi_major_axis();
+    let e = placed.orbit_now.eccentricity().value();
+    let r = Metres::from(radius).value();
+    let tidal = tidal_planet(class, Kilograms::from(mass), Metres::new(r), fractions);
+    EarthMasses::from(maximum_surviving_moon_mass(
+        &tidal,
+        hosts.primary_mass,
+        a,
+        e,
+        Seconds::from(age_now),
+    ))
+}
+
+/// The history of the envelope of a body whose air reads the bulk `bulk` and whose envelope's
+/// escape is `escape` (P14.T53.a, [`AtmosphereInputs::envelope_history`]): its envelope at
+/// formation the one it holds now plus the mass escape took, f M + ΔM, which is the formation
+/// solve's share of the formation mass where the body has one (`Escape`'s own balance), and a
+/// giant's envelope where it has none.
+#[must_use]
+fn envelope_history(bulk: &AirBulk, escape: &Escape) -> EnvelopeHistory {
+    let lost = Kilograms::from(escape.lost);
+    EnvelopeHistory {
+        initial: Kilograms::new(bulk.fractions.envelope() * bulk.mass.value() + lost.value()),
+        lost,
+    }
+}
+
+/// The envelope's history of the body of bulk `bulk` after its escape `escape`
+/// ([`envelope_history`]), with the helium it keeps by `age` under the sky `sky` about the hosts
+/// `hosts`, of their composition, taken once before its passes ([`helium_before_passes`];
+/// P14.T54.b.h carries it to the derivation).
+#[must_use]
+fn envelope_and_helium(
+    bulk: &AirBulk,
+    escape: &Escape,
+    sky: &Sky,
+    (age, hosts): (Years, &BodyHosts<'_>),
+) -> (
+    EnvelopeHistory,
+    Option<crate::planetary::chem::escape::EnvelopeHelium>,
+) {
+    let history = envelope_history(bulk, escape);
+    (
+        history,
+        helium_before_passes(history, bulk, sky, (age, hosts.composition())),
+    )
+}
+
+/// The helium the envelope of history `history` of the body of bulk `bulk` under the sky `sky`
+/// keeps by `age`, taken once before its passes, which do not move it
+/// ([`AtmosphereInputs::envelope_helium`]): fractionated from the helium its host of composition
+/// `composition` gives it, the host star's own (`fractionation_start`; P14.T54.b.i).
+#[must_use]
+fn helium_before_passes(
+    history: EnvelopeHistory,
+    bulk: &AirBulk,
+    sky: &Sky,
+    (age, composition): (Years, &Composition),
+) -> Option<crate::planetary::chem::escape::EnvelopeHelium> {
+    use crate::planetary::chem::escape::{XuvExposure, fractionation_start};
+    helium_left(
+        history,
+        (bulk.mass, bulk.radius),
+        &XuvExposure::new(sky.saturated_xuv_flux, sky.xuv_saturation_time),
+        age,
+        fractionation_start(composition),
+    )
+}
+
+/// The mean speed at which the body `placed` about `hosts` is struck, its air weighed at the mass
+/// and radius `bulk` (P14.T53.a, read by the cosmic shoreline's impact term,
+/// [`AtmosphereInputs::impact_speed`]): its escape speed √(2 G M ÷ R) against its circular orbital
+/// speed √(G `M_p` ÷ a) about the mass `M_p` its hosts give it, at its present semi-major axis; for
+/// a moon, whose hosts carry its planet's orbital speed about its star
+/// ([`BodyHosts::with_parent_orbital_speed`]), Zahnle et al.'s (2003) eq. 1
+/// ([`moon_impact_speed`]), and otherwise Zahnle and Catling's (2017) eq. 41 at `v_enc` = `v_orb`
+/// ([`planet_impact_speed`]). A speed that is not finite and positive counts as none.
+#[must_use]
+fn impact_speed(
+    placed: &PlacedBody,
+    hosts: &BodyHosts<'_>,
+    (mass, radius): (Kilograms, Metres),
+) -> MetresPerSecond {
+    let speed = |squared: f64| {
+        let v = squared.sqrt();
+        MetresPerSecond::new(if v.is_finite() && v > 0.0 { v } else { 0.0 })
+    };
+    let escape = speed(2.0 * GRAVITATIONAL_CONSTANT * mass.value() / radius.value());
+    let orbit = speed(
+        GRAVITATIONAL_CONSTANT * hosts.primary_mass.value()
+            / placed.orbit_now.semi_major_axis().value(),
+    );
+    match hosts.parent_orbital_speed {
+        Some(parent) => moon_impact_speed(orbit, parent, escape),
+        None => planet_impact_speed(orbit, escape),
+    }
+}
+
+/// A body's bulk as [`derive_body`] gives it, derived before its passes and without them (lever
+/// (e), decision-p14-t54a-passes, "Cost escalation (after Batch B)" §C.3): its mass, radius, mass
+/// fractions and class at the time, and P14.T15's largest surviving moon, none of which a pass
+/// reads back, so that each is [`derive_body`]'s to the bit ([`derive_bulk`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct DerivedBulk {
+    mass: EarthMasses,
+    radius: EarthRadii,
+    fractions: MassFractions,
+    class: PlanetClass,
+    maximum_moon_mass: EarthMasses,
+}
+
+impl DerivedBulk {
+    /// The body's mass at the time ([`DerivedBody::mass`]).
+    #[must_use]
+    pub(crate) const fn mass(&self) -> EarthMasses {
+        self.mass
+    }
+
+    /// The body's radius at the time ([`DerivedBody::radius`]).
+    #[must_use]
+    pub(crate) const fn radius(&self) -> EarthRadii {
+        self.radius
+    }
+
+    /// The body's mass fractions at the time ([`DerivedBody::fractions`]).
+    #[must_use]
+    pub(crate) const fn fractions(&self) -> MassFractions {
+        self.fractions
+    }
+
+    /// The body's class ([`DerivedBody::class`]).
+    #[must_use]
+    pub(crate) const fn class(&self) -> PlanetClass {
+        self.class
+    }
+
+    /// The largest moon that survives about it ([`DerivedBody::maximum_moon_mass`]).
+    #[must_use]
+    pub(crate) const fn maximum_moon_mass(&self) -> EarthMasses {
+        self.maximum_moon_mass
+    }
+}
+
+impl From<&DerivedBody> for DerivedBulk {
+    fn from(derived: &DerivedBody) -> Self {
+        Self {
+            mass: derived.mass,
+            radius: derived.radius,
+            fractions: derived.fractions,
+            class: derived.class,
+            maximum_moon_mass: derived.maximum_moon_mass,
+        }
+    }
+}
+
+/// [`derive_body`]'s bulk of `placed` about `hosts`, formed in `disc`, in a system aged `age` at
+/// the epoch, at time `t`, without its passes (lever (e), decision-p14-t54a-passes, "Cost
+/// escalation (after Batch B)" §C.3): its stage before the passes and P14.T15's moon limit, the
+/// same bits as [`derive_body`]'s, at a fraction of its cost.
+///
+/// # Errors
+///
+/// As [`derive_body`], whose errors all come from that stage.
+pub(crate) fn derive_bulk(
+    placed: &PlacedBody,
+    hosts: &BodyHosts<'_>,
+    disc: &DiscProfile,
+    age: Years,
+    t: UniverseTime,
+) -> Result<DerivedBulk, DeriveBodyError> {
+    let stage = BeforePasses::of(placed, hosts, disc, age, t)?;
+    let mass = stage.escape.mass;
+    let class = PlanetClass::of(mass, &stage.fractions);
+    let maximum_moon_mass = moon_limit(
+        placed,
+        hosts,
+        class,
+        (mass, stage.radius, &stage.fractions),
+        stage.age_now,
+    );
+    Ok(DerivedBulk {
+        mass,
+        radius: stage.radius,
+        fractions: stage.fractions,
+        class,
+        maximum_moon_mass,
+    })
+}
+
+/// What P14.T15's moon limit reads of a derived body of class `class`, mass `mass`, radius
+/// `radius` and fractions `fractions`: its tides ([`rotation::tides`], P14.T14.d).
+///
+/// The tides are of the mass and radius rounded through the kilograms and metres that
+/// [`SpinningBody::of_class`](rotation::SpinningBody::of_class) reads for the body's locking time,
+/// so that its two readers take one k₂ bit for bit.
+#[must_use]
+fn tidal_planet(
+    class: PlanetClass,
+    mass: Kilograms,
+    radius: Metres,
+    fractions: &MassFractions,
+) -> TidalPlanet {
+    let (love_number, tidal_q) = tides(
+        class,
+        EarthMasses::from(mass),
+        EarthRadii::from(radius),
+        fractions,
+    );
+    TidalPlanet::new(mass, radius, love_number, tidal_q).expect(
+        "a derived body's mass and radius are positive and finite, and so are its tides: each Q \
+         is a constant, and an enveloped class holds at least `THIN_ENVELOPE_FRACTION` of \
+         envelope on a core of more than half its mass, which keeps its k₂ above 0",
+    )
+}
+
+/// The change in the equilibrium temperature between passes, as a share of it, at which the
+/// batch's passes have converged: 10⁻⁹ (plan 14, P14.T51.b, "the passes converge to 10⁻⁹ in
+/// `T_eq`").
+pub(crate) const ATMOSPHERE_CONVERGENCE: f64 = 1e-9;
+
+/// What each of T12's and T13's passes reads of a body (P14.T13.c): its placement, its sky, the
+/// bulk its air reads, its bulk at the time (which its record's bulk rule reads, P14.T54.a), its
+/// class (which a gas envelope's albedo reads), its crust, its own luminosity and radius, its age,
+/// the side of the snow line it formed on (which its crust's basis reads, P14.T54.a), and what
+/// P14.T53.a's escape reads: its mean impact speed and its envelope's history; the deck a
+/// runaway's cloud takes (P14.T53.b part 1 (b)); and the state its passes publish (P14.T53.b part
+/// 1 (c)).
+#[derive(Debug, Clone, Copy)]
+struct PassBody<'a> {
+    placed: &'a PlacedBody,
+    sky: &'a Sky,
+    bulk: &'a AirBulk,
+    pass_bulk: &'a PassBulk,
+    class: PlanetClass,
+    crust: Crust,
+    internal_luminosity: Watts,
+    radius: Metres,
+    age: Years,
+    formed: SnowLineSide,
+    impact_speed: MetresPerSecond,
+    envelope_history: EnvelopeHistory,
+    /// The helium its envelope's escape left, taken once before the passes
+    /// ([`AtmosphereInputs::envelope_helium`]); `None` for a body that formed with no envelope.
+    envelope_helium: Option<crate::planetary::chem::escape::EnvelopeHelium>,
+    /// The deck a runaway's cloud takes in every pass ([`PassSurface::deck`]): Venus's
+    /// ([`RunawayDeck::Kept`]) for the passes' first solve, and [`RunawayDeck::Deckless`] for a
+    /// runaway's second ([`passes`](Self::passes), P14.T53.b part 1 (b)).
+    deck: RunawayDeck,
+    /// The state its passes publish in every pass ([`PassSurface::published`]): the climate's
+    /// ([`PublishedState::Climate`]) for the passes' first solve, and a hothouse's
+    /// ([`PublishedState::Hothouse`]) for the solves after a first one judged a hothouse between
+    /// the limits ([`passes`](Self::passes), P14.T53.b part 1 (c)).
+    published: PublishedState,
+}
+
+/// What the passes leave (P14.T13.c, P14.T51.b, P14.T51.h): the albedo the published pass read,
+/// its equilibrium and heated temperatures and its atmosphere, how many passes were taken and how
+/// they ended, and over a record what its record reads of them, the published pass's lid
+/// (P14.T54.a), its maturity's outcome (P14.T54.b.e) and its cold traps' (P14.T54.b.f).
+#[derive(Debug, Clone, Copy)]
+struct Passes {
+    albedo: BondAlbedo,
+    irradiated: Kelvin,
+    heated: Kelvin,
+    air: Atmosphere,
+    count: u32,
+    convergence: Convergence,
+    spun: Option<SpunPasses>,
+    crust_lid: Option<CrustLid>,
+    weathered: PassMaturity,
+    cold_traps: PassTraps,
+}
+
+/// What a body's passes over its record leave for its record (P14.T54.a; decision-p14-t54a-passes,
+/// "Cost escalation (after Batch B)", rule (f)), crate-private on its derivation.
+///
+/// - The context its published pass read, whose basins, water share, heat flow and crust the
+///   record's conditions, partition and condensates are built on, so that they are that pass's to
+///   the bit.
+/// - The context the published pass's own air gives, K(P*), the last the solve computed
+///   (`Solved::next`): the record's figures reuse its first stage. For a converged body it agrees
+///   with the one read within 10⁻⁹; a bracketed body's differs by its context residual.
+/// - θ of the published pass's partition: the potential ocean its air's condensed water fills of
+///   the read context's basins ([`PassContext::ocean_weight`]), which the record's conditions read.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct SpunPasses {
+    context: PassContext,
+    next: PassContext,
+    ocean_weight: OceanWeight,
+}
+
+impl SpunPasses {
+    /// The context the published pass read.
+    #[must_use]
+    pub(crate) const fn context(&self) -> &PassContext {
+        &self.context
+    }
+
+    /// The context the published pass's own air gives, K(P*).
+    #[must_use]
+    pub(crate) const fn next(&self) -> &PassContext {
+        &self.next
+    }
+
+    /// θ of the published pass's partition.
+    #[must_use]
+    pub(crate) const fn ocean_weight(&self) -> OceanWeight {
+        self.ocean_weight
+    }
+}
+
+/// One pass's output: its equilibrium and heated temperatures, its atmosphere, the lid it took
+/// under the body's own climate (P14.T54.a), `None` where it took none, its maturity's outcome
+/// (P14.T54.b.e), and its cold traps' (P14.T54.b.f): the field it read, which travels with it, so
+/// that a published pass carries its own field whichever evaluation the solver publishes.
+type PassOut = (
+    Kelvin,
+    Kelvin,
+    Atmosphere,
+    Option<CrustLid>,
+    PassMaturity,
+    PassTraps,
+);
+
+impl PassBody<'_> {
+    /// One pass at the albedo `albedo` over the surface `surface`: the equilibrium temperature it
+    /// gives, the temperature with the body's own heat, the atmosphere they hold, and under the
+    /// body's own climate the lid it takes, whose row its regolith read.
+    fn pass(&self, surface: &PassSurface<'_>, albedo: BondAlbedo) -> PassOut {
+        let (sky, bulk) = (self.sky, self.bulk);
+        let irradiated = equilibrium_temperature(sky.flux, albedo);
+        let heated = if self.internal_luminosity > Watts::ZERO {
+            with_internal_heat(irradiated, self.internal_luminosity, self.radius)
+        } else {
+            irradiated
+        };
+        let inputs = AtmosphereInputs {
+            mass: bulk.mass,
+            radius: bulk.radius,
+            material: surface_material(&bulk.fractions, bulk.lag),
+            envelope_fraction: bulk.fractions.envelope(),
+            class: self.class,
+            inventory: *bulk.elements.volatiles(),
+            formed: bulk.side,
+            equilibrium: irradiated,
+            irradiation_temperature: sky.irradiation,
+            heated,
+            xuv_fluence: sky.xuv_fluence,
+            saturated_xuv_flux: sky.saturated_xuv_flux,
+            insolation: sky.insolation,
+            present_insolation: sky.present_insolation,
+            crust: self.crust,
+            molten_for: self.placed.molten_until.unwrap_or(Years::ZERO),
+            age: self.age,
+            hottest_host: sky.hottest,
+            impact_speed: self.impact_speed,
+            xuv_saturation_time: sky.xuv_saturation_time,
+            envelope_history: self.envelope_history,
+            flux: sky.flux,
+            maximum_greenhouse_flux_ratio: sky.maximum_greenhouse_flux_ratio,
+            envelope_helium: self.envelope_helium,
+        };
+        let (air, lid, maturity, cold_traps) = atmosphere_and_lid(&inputs, surface);
+        (irradiated, heated, air, lid, maturity, cold_traps)
+    }
+
+    /// The body's crust's basis (P14.T51.c's first stage; decision-p14-t54a-passes §3.3), once a
+    /// body before any pass, from what its record gives (`record`) and what its derivation does:
+    /// its age, its magma ocean's end, its formation's side of the snow line (a host orbiter's; a
+    /// moon's comes from its record), its ice's ammonia, its mantle's ΔIW, and the thermal
+    /// history's surface temperature, the formation temperature's stand-in: the first pass's own
+    /// equilibrium temperature, at the albedo it reads ([`BondAlbedo::BEFORE_ATMOSPHERES`], 0.3), a
+    /// pure function of the sky, whatever the tide, held at the cosmic background's 2.725 K
+    /// ([`COSMIC_BACKGROUND_TEMPERATURE`]), below which no surface lies: only a body no host
+    /// lights (a remnant's system) reaches it. `None` for a basis refused: a formation time after
+    /// its age (a body seen before its own window ends), which takes no crust.
+    #[must_use]
+    fn crust_basis(&self, record: &RecordCrust) -> Option<CrustBasis> {
+        let stand_in = equilibrium_temperature(self.sky.flux, BondAlbedo::BEFORE_ATMOSPHERES);
+        let formation_temperature = if stand_in < COSMIC_BACKGROUND_TEMPERATURE {
+            COSMIC_BACKGROUND_TEMPERATURE
+        } else {
+            stand_in
+        };
+        let inputs = CrustBasisInputs {
+            origin: record.origin,
+            formation: record.formation,
+            age: self.age,
+            molten_until: self.placed.molten_until,
+            radius: record.radius,
+            mass: record.mass,
+            fractions: record.fractions,
+            snow_line_side: record.snow_line_side.unwrap_or(self.formed),
+            ammonia: self.bulk.ammonia,
+            delta_iw: self.bulk.elements.mantle_delta_iw(),
+            host_magnesium_to_silicon: record.host_magnesium_to_silicon,
+            alpha_fe: record.alpha_fe,
+            fe_h: record.fe_h,
+            formation_temperature,
+            lag: self.bulk.lag,
+        };
+        let basis = CrustBasis::derive(&inputs);
+        // A formation time after the age is the one refusal a record's basis meets (a body seen
+        // before its own window ends), which takes no crust; any other is a bug (a flux that is
+        // not a number past the 2.725 K floor, say), which the debug builds catch, and which then
+        // takes no crust too (Batch D's review, R3-3).
+        debug_assert!(
+            matches!(
+                basis,
+                Ok(_) | Err(DeriveCrustError::FormationOutsideAge { .. })
+            ),
+            "a record's crust's basis refuses only a formation after its age: {basis:?}"
+        );
+        basis.ok()
+    }
+
+    /// The passes, from the 0.3 of [`BondAlbedo::BEFORE_ATMOSPHERES`], each taking the albedo the
+    /// last one's atmosphere gave, until the equilibrium temperature changes by at most
+    /// [`ATMOSPHERE_CONVERGENCE`] of itself, at most [`PLAIN_PASSES`](passes::PLAIN_PASSES) of
+    /// them, a body they do not settle then taking its bracketed fixed point ([`passes::solve`],
+    /// P14.T51.h), as `driver` drives them, over `record`.
+    ///
+    /// - **Over the stand-in** ([`PassRecord::StandIn`]): every pass reads one surface, built once
+    ///   before the first: the passes' stand-in surface ([`PassSurface::stand_in`]) under the
+    ///   body's hosts' light, which [`Sky::of`] builds. So a pass is a function of the albedo it
+    ///   reads alone, which the bisection needs.
+    /// - **Over a record** ([`PassRecord::Record`], P14.T54.a): each pass reads its spin's climate
+    ///   ([`SpunClimate`]) under the context the previous pass's own air gives, K(P), the first the
+    ///   labelled C₀ ([`PassContext::NONE`]), so a pass is a function of the albedo and the context
+    ///   it reads ([`passes::solve_in_context`]).
+    ///
+    /// A published runaway under Venus's deck whose mean surface temperature is below the acid's
+    /// cycling temperature is solved once more, every pass without the deck, and that second solve
+    /// is published ([`solved_without_the_deck`]; P14.T53.b part 1 (b), decision-absurd-states-24
+    /// R3.2): it reads only the first solve's temperature, so there is no feedback, and nothing
+    /// returns to the decked branch.
+    ///
+    /// Beside it, a published `Temperate` that is a hothouse between the limits (a dry one at or
+    /// above water's saturation temperature at its surface pressure, [`solved_as_a_hothouse`];
+    /// P14.T53.b part 1 (c), decision-t53b-arm-c), and from generator version 28 a first solve
+    /// labelled a steam envelope over a `Temperate` or a `Snowball` (part 3's B5), is solved once
+    /// more, every pass a `RunawayGreenhouse` under Venus's deck ([`PublishedState::Hothouse`]),
+    /// and that solve takes (b)'s test: below the cycling temperature it is solved a third time
+    /// without the deck.
+    /// That is at most two solves more, each reading only the solve before's temperature, its
+    /// state and deck fixed within it, and none judges (c) again: no feedback, and nothing returns
+    /// to `Temperate`.
+    ///
+    /// Both cover the stand-in and the record alike, planets and moons, with the driver given.
+    ///
+    /// Beside them, the bare regolith's Bond albedo the cold traps read (P14.T51.i): the published
+    /// pass's regolith on the airless state under the hosts' light, its lid's row where it took
+    /// one and the passes' regolith provider's otherwise.
+    #[must_use]
+    fn passes(&self, driver: PassDriver, record: PassRecord<'_>) -> (Passes, f64) {
+        let shade = &self.sky.shade;
+        let surface = PassSurface::stand_in(PassLight::Shade(shade));
+        let solve = |body: &Self| match record {
+            PassRecord::StandIn => body.stand_in_passes(
+                driver,
+                &surface.with_deck(body.deck).with_published(body.published),
+            ),
+            PassRecord::Record(of) => body.record_passes(driver, of),
+        };
+        // Where the tests' traces and captured lids stood before this body's first solve.
+        #[cfg(test)]
+        let marks = (
+            PASS_TRACE.with(|trace| trace.borrow().len()),
+            crate::planetary::derive::atmosphere::spun_read::mark(),
+        );
+        // A solve after the first: the tests' traces and captured lids list the published solve,
+        // the last, a pass for each it counts. The earlier solves' entries alone are dropped, and
+        // what was collected before the first stays.
+        let solve_again = |body: &Self| {
+            #[cfg(test)]
+            {
+                PASS_TRACE.with(|trace| trace.borrow_mut().truncate(marks.0));
+                crate::planetary::derive::atmosphere::spun_read::rewind(marks.1);
+            }
+            solve(body)
+        };
+        let first = solve(self);
+        let ended = if solved_without_the_deck(&first.air) {
+            let deckless = solve_again(&Self {
+                deck: RunawayDeck::Deckless,
+                ..*self
+            });
+            #[cfg(test)]
+            crate::planetary::derive::atmosphere::count_deckless(first.count, deckless.count);
+            deckless
+        } else if solved_as_a_hothouse(&first.air) {
+            let hothouse = Self {
+                published: PublishedState::Hothouse,
+                ..*self
+            };
+            let decked = solve_again(&hothouse);
+            let deckless = solved_without_the_deck(&decked.air).then(|| {
+                solve_again(&Self {
+                    deck: RunawayDeck::Deckless,
+                    ..hothouse
+                })
+            });
+            #[cfg(test)]
+            crate::planetary::derive::atmosphere::count_hothouse(
+                first.count,
+                decked.count,
+                deckless.map(|deckless| deckless.count),
+            );
+            deckless.unwrap_or(decked)
+        } else {
+            first
+        };
+        // The bare regolith the cold traps read (P14.T51.i): the published pass's regolith on an
+        // airless body, under the hosts' light, by the area mix's one predicate; weathered where
+        // its pass took a maturity (P14.T54.b.e), the regolith its area mix read.
+        let material = surface_material(&self.bulk.fractions, self.bulk.lag);
+        let regolith = match &ended.weathered {
+            Ok(weathered) => weathered.regolith(),
+            Err(_) => pass_regolith(
+                surface.regolith,
+                material,
+                ended.crust_lid.as_ref().map(|lid| (lid, None)),
+            )
+            .with_resurfacing(pass_resurfacing(
+                &ended.air,
+                ended.spun.as_ref().map(SpunPasses::context),
+            )),
+        };
+        let regolith_albedo = regolith.bond(SurfaceState::Airless, shade.bands()).bond;
+        // The field the published pass read reads that regolith, the same one function's bits
+        // (P14.T54.b.f; decision-p14-t54b-f-coldtraps §2 (a)).
+        debug_assert!(
+            ended.cold_traps.as_ref().ok().is_none_or(|traps| traps
+                .inputs()
+                .regolith_albedo()
+                .total_cmp(&regolith_albedo)
+                .is_eq()),
+            "the published pass's field reads its regolith's albedo, {regolith_albedo}"
+        );
+        (ended, regolith_albedo)
+    }
+
+    /// The passes over the stand-in surface `surface`, as `driver` drives them ([`passes`](Self::passes)).
+    #[must_use]
+    fn stand_in_passes(&self, driver: PassDriver, surface: &PassSurface<'_>) -> Passes {
+        match driver {
+            PassDriver::Solve => {
+                self.stand_in_present_passes(BondAlbedo::BEFORE_ATMOSPHERES, surface)
+            }
+            #[cfg(test)]
+            PassDriver::T51b => self.t51b_passes(surface),
+            #[cfg(test)]
+            PassDriver::Once(albedo) => {
+                let (irradiated, heated, air, crust_lid, weathered, cold_traps) =
+                    self.pass(surface, albedo);
+                Passes {
+                    albedo,
+                    irradiated,
+                    heated,
+                    air,
+                    count: 1,
+                    convergence: Convergence::Converged,
+                    spun: None,
+                    crust_lid,
+                    weathered,
+                    cold_traps,
+                }
+            }
+            #[cfg(test)]
+            PassDriver::Again(_) => {
+                let solved = self.stand_in_passes(PassDriver::Solve, surface);
+                let (irradiated, heated, air, crust_lid, weathered, cold_traps) =
+                    self.pass(surface, solved.albedo);
+                Passes {
+                    irradiated,
+                    heated,
+                    air,
+                    count: solved.count + 1,
+                    crust_lid,
+                    weathered,
+                    cold_traps,
+                    ..solved
+                }
+            }
+            #[cfg(test)]
+            PassDriver::From(start) => self.stand_in_present_passes(start, surface),
+            #[cfg(test)]
+            PassDriver::Traced => unreachable!("the re-check traces a record's passes"),
+        }
+    }
+
+    /// The passes over the stand-in surface `surface` from the albedo `start` under P14.T53.e's
+    /// rules 5–7 (from generator version 25): each pass reads the state the previous pass's figures
+    /// gave ([`PassSurface::with_present`]), the first none, so that the stand-in's state-keyed
+    /// branches lag as a record's do ([`passes::solve_in_context`], its context that state alone).
+    #[must_use]
+    fn stand_in_present_passes(&self, start: BondAlbedo, surface: &PassSurface<'_>) -> Passes {
+        let solved = passes::solve_in_context(
+            start,
+            None,
+            |albedo, present: &Option<PresentClimate>| {
+                self.pass(&surface.with_present(*present), albedo)
+            },
+            |&(_, _, air, ..): &PassOut| air.albedo(),
+            |&(_, _, air, ..): &PassOut| air.carried_state(),
+            settled,
+        );
+        let (irradiated, heated, air, crust_lid, weathered, cold_traps) = solved.pass;
+        Passes {
+            albedo: solved.albedo,
+            irradiated,
+            heated,
+            air,
+            count: solved.count,
+            convergence: solved.convergence,
+            spun: None,
+            crust_lid,
+            weathered,
+            cold_traps,
+        }
+    }
+
+    /// The pass surface over the spun climate `spun` under the light `shade`, with this
+    /// derivation's deck and published state (P14.T53.b part 1 (b) and (c); `with_deck`,
+    /// `with_published`).
+    #[must_use]
+    fn spun_surface<'s>(&self, spun: &'s SpunClimate<'s>, shade: &'s HostShade) -> PassSurface<'s> {
+        PassSurface::spun(spun, PassLight::Shade(shade))
+            .with_deck(self.deck)
+            .with_published(self.published)
+    }
+
+    /// That the record's figure bulk `record` shows its derivation's surface material (P14.T56.g;
+    /// decision-p14-t56g §8): its fractions' under the derivation's own lag, as its air reads.
+    fn debug_assert_record_material(&self, record: &pass_record::RecordSpin<'_>) {
+        debug_assert_eq!(
+            record.material,
+            surface_material(&self.bulk.fractions, self.bulk.lag),
+            "a record's figure bulk's surface material is its derivation's"
+        );
+    }
+
+    /// The passes over the record `of`, as `driver` drives them ([`passes`](Self::passes)): each
+    /// pass's surface the body's own climate under its record's spin over the context it reads,
+    /// with its lid at its own climate from the body's crust's basis, built once here before any
+    /// pass ([`crust_basis`](Self::crust_basis)); the context the next reads that pass's air's K(P)
+    /// (`of`'s [`PassRecordOf::context`]) with that pass's own lid and `lid_of`'s unresurfaced test
+    /// on its own surface age ([`PassContext::with_lid`]); and what the record reads of them
+    /// ([`SpunPasses`], and the published pass's lid).
+    ///
+    /// # Panics
+    ///
+    /// Under P14.T51.b's loop ([`PassDriver::T51b`]), the stand-in's alone, which no test drives
+    /// over a record.
+    #[must_use]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one solve over a record: its basis and its maturity's case once a body, its \
+                  passes and contexts, and each test driver's arm"
+    )]
+    fn record_passes(&self, driver: PassDriver, of: &dyn PassRecordOf) -> Passes {
+        let record = of.spin(self.pass_bulk);
+        self.debug_assert_record_material(&record);
+        let shade = &self.sky.shade;
+        // The crust's basis, once a body before any pass, whatever the tide (item 17's
+        // constraint 2): `body.formation`'s word 0 is read here, once a derivation.
+        let basis = of
+            .crust(self.pass_bulk)
+            .and_then(|crust| self.crust_basis(&crust));
+        #[cfg(test)]
+        let basis = basis.filter(|_| !NO_CRUST.with(core::cell::Cell::get));
+        // What the passes' maturity reads of the record, once a body before them (P14.T54.b.e).
+        let wet_epoch =
+            |air: &Atmosphere, equilibrium: Kelvin| of.wet_epoch(self.pass_bulk, air, equilibrium);
+        let weathering = of.weathering(self.pass_bulk).map(|case| PassWeathering {
+            case,
+            gravity: record.surface_gravity,
+            mantle_sulphur: self.bulk.elements.mass(Element::S, Reservoir::Mantle),
+            wet_epoch: &wet_epoch,
+        });
+        // The cold traps' sky and the derivation's one field slot, once a body before its passes,
+        // a local dropped when this solve returns (P14.T54.b.f; decision-p14-t54b-f-coldtraps §4).
+        let slot = FieldSlot::new();
+        let stellar_flux = WattsPerSquareMetre::from(self.sky.flux);
+        let cold_traps = of
+            .cold_trap_sky(stellar_flux)
+            .map(|sky| SpunColdTraps { sky, slot: &slot });
+        let surface = |context: &PassContext| SpunClimate {
+            record,
+            stellar_flux,
+            xuv_flux: self.sky.xuv_flux,
+            context: *context,
+            inventory_water: self.pass_bulk.inventory_water,
+            basis,
+            weathering,
+            cold_traps,
+        };
+        let pass = |albedo: BondAlbedo, context: &PassContext| {
+            let spun = surface(context);
+            self.pass(&self.spun_surface(&spun, shade), albedo)
+        };
+        let next = |&(irradiated, _, air, lid, ..): &PassOut| {
+            let context = of.context(self.pass_bulk, &air, irradiated);
+            let unresurfaced = basis
+                .as_ref()
+                .zip(context.surface_age())
+                .map(|(basis, age)| Resurfacing::of(basis.unresurfaced(age)));
+            // A locked world's deck reads the pass's open water at the next (P14.T24.j), at its
+            // column's pressure, none in the airless and tenuous states: the liquid it lists, or,
+            // solved under the deck, the liquid its warmest zone holds, which its ramp reads.
+            let pressure = match air.state() {
+                SurfaceState::Airless | SurfaceState::Tenuous => Pascals::ZERO,
+                SurfaceState::GasEnvelope
+                | SurfaceState::MagmaOcean
+                | SurfaceState::RunawayGreenhouse
+                | SurfaceState::SteamEnvelope
+                | SurfaceState::Temperate
+                | SurfaceState::Desert
+                | SurfaceState::Snowball => air.surface_pressure().unwrap_or(Pascals::ZERO),
+            };
+            let reads = deck::reads_open_water(&record.spin, record.radius, stellar_flux, pressure);
+            let open_water = if reads && (air.lists_liquid_water() || air.melts_water_under_deck())
+            {
+                OpenWater::Open
+            } else {
+                OpenWater::Dry
+            };
+            context
+                .with_lid(lid.as_ref().map(InertiaLid::of), unresurfaced)
+                .with_present(air.carried_state())
+                .with_open_water(open_water)
+        };
+        let solve = || {
+            let solved = passes::solve_in_context(
+                BondAlbedo::BEFORE_ATMOSPHERES,
+                PassContext::NONE,
+                pass,
+                |&(_, _, air, ..): &PassOut| air.albedo(),
+                next,
+                settled,
+            );
+            (
+                solved.albedo,
+                solved.pass,
+                solved.context,
+                solved.next,
+                solved.count,
+                solved.convergence,
+            )
+        };
+        let (
+            albedo,
+            (irradiated, heated, air, crust_lid, weathered, cold_traps),
+            context,
+            next,
+            count,
+            convergence,
+        ) = match driver {
+            PassDriver::Solve => solve(),
+            #[cfg(test)]
+            PassDriver::T51b => unreachable!("P14.T51.b's loop is the stand-in's"),
+            #[cfg(test)]
+            PassDriver::Once(albedo) => {
+                let out = pass(albedo, &PassContext::NONE);
+                (
+                    albedo,
+                    out,
+                    PassContext::NONE,
+                    next(&out),
+                    1,
+                    Convergence::Converged,
+                )
+            }
+            #[cfg(test)]
+            PassDriver::Again(under) => {
+                let (albedo, _, read, given, count, convergence) = solve();
+                let context = match under {
+                    Under::Read => read,
+                    Under::Next => given,
+                };
+                let out = pass(albedo, &context);
+                (albedo, out, context, next(&out), count + 1, convergence)
+            }
+            #[cfg(test)]
+            PassDriver::From(start) => solved_from(start, pass, next),
+            #[cfg(test)]
+            PassDriver::Traced => solved_from(BondAlbedo::BEFORE_ATMOSPHERES, tracing(pass), next),
+        };
+        let water = WaterGate::of_air(&air, self.pass_bulk.inventory_water, record.bulk());
+        let ocean_weight = context.ocean_weight(&water, air.partial_pressures().of(Gas::Water));
+        Passes {
+            albedo,
+            irradiated,
+            heated,
+            air,
+            count,
+            convergence,
+            spun: Some(SpunPasses {
+                context,
+                next,
+                ocean_weight,
+            }),
+            crust_lid,
+            weathered,
+            cold_traps,
+        }
+    }
+
+    /// The passes over `surface` by P14.T51.b's loop as it was built, for the tests that hold a
+    /// body settling within the plain passes to its bits: from 0.3, until one settles to
+    /// [`ATMOSPHERE_CONVERGENCE`], at most 64, the last published and called converged.
+    #[cfg(test)]
+    #[must_use]
+    fn t51b_passes(&self, surface: &PassSurface<'_>) -> Passes {
+        let mut albedo = BondAlbedo::BEFORE_ATMOSPHERES;
+        let (mut irradiated, mut heated, mut air, mut crust_lid, mut weathered, mut cold_traps) =
+            self.pass(surface, albedo);
+        let mut count = 1;
+        while count < 64 {
+            let next = air.albedo();
+            let (now, warmed, held, lid, maturity, traps) = self.pass(surface, next);
+            count += 1;
+            let change = (now.value() - irradiated.value()).abs();
+            let settled = change <= ATMOSPHERE_CONVERGENCE * now.value();
+            (
+                albedo, irradiated, heated, air, crust_lid, weathered, cold_traps,
+            ) = (next, now, warmed, held, lid, maturity, traps);
+            if settled {
+                break;
+            }
+        }
+        Passes {
+            albedo,
+            irradiated,
+            heated,
+            air,
+            count,
+            convergence: Convergence::Converged,
+            spun: None,
+            crust_lid,
+            weathered,
+            cold_traps,
+        }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Whether the passes over a record take no crust's basis on this thread, so no lid: the
+    /// derivation before P14.T54.a's C3 wired the lid, its material's regolith and inertia (the
+    /// tests' measure of the lid's moves).
+    static NO_CRUST: core::cell::Cell<bool> = const { core::cell::Cell::new(false) };
+}
+
+/// `run`'s result with the passes over every record taking no lid, as before P14.T54.a's C3 (a
+/// test-only switch, set back after).
+#[cfg(test)]
+#[must_use]
+pub(crate) fn without_crust<R>(run: impl FnOnce() -> R) -> R {
+    let before = NO_CRUST.with(|cell| cell.replace(true));
+    let result = run();
+    NO_CRUST.with(|cell| cell.set(before));
+    result
+}
+
+/// What [`PassBody::record_passes`] reads of a solve: the albedo and the pass published, the
+/// context it read and the one its own air gives, the count and how the passes ended.
+#[cfg(test)]
+type RecordSolved = (
+    BondAlbedo,
+    PassOut,
+    PassContext,
+    PassContext,
+    u32,
+    Convergence,
+);
+
+/// The solve over a record of the passes `pass`, each pass's context the one `next` gives of the
+/// pass before, from the albedo `start` ([`PassDriver::From`], [`PassDriver::Traced`]): the
+/// generator's solve but for its first albedo, as [`PassBody::record_passes`] reads it.
+#[cfg(test)]
+fn solved_from(
+    start: BondAlbedo,
+    pass: impl Fn(BondAlbedo, &PassContext) -> PassOut,
+    next: impl Fn(&PassOut) -> PassContext,
+) -> RecordSolved {
+    let solved = passes::solve_in_context(
+        start,
+        PassContext::NONE,
+        pass,
+        |&(_, _, air, ..): &PassOut| air.albedo(),
+        next,
+        settled,
+    );
+    (
+        solved.albedo,
+        solved.pass,
+        solved.context,
+        solved.next,
+        solved.count,
+        solved.convergence,
+    )
+}
+
+/// The passes `pass`, each recorded on the thread's trace as it is taken ([`PassDriver::Traced`]),
+/// each one `pass`'s to the bit.
+#[cfg(test)]
+fn tracing(
+    pass: impl Fn(BondAlbedo, &PassContext) -> PassOut,
+) -> impl Fn(BondAlbedo, &PassContext) -> PassOut {
+    move |read, context| {
+        let out = pass(read, context);
+        let (equilibrium, _, air, lid, ..) = out;
+        PASS_TRACE.with(|trace| {
+            trace.borrow_mut().push(TracedPass {
+                read,
+                context: *context,
+                equilibrium,
+                air,
+                lid,
+            });
+        });
+        out
+    }
+}
+
+/// One pass of a traced solve ([`PassDriver::Traced`]): the albedo and the context it read, and
+/// what it gave: its equilibrium temperature, its atmosphere, whose albedo the next pass reads,
+/// and its lid.
+#[cfg(test)]
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct TracedPass {
+    /// The albedo it read.
+    pub(crate) read: BondAlbedo,
+    /// The context it read.
+    pub(crate) context: PassContext,
+    /// Its equilibrium temperature, at the albedo it read.
+    pub(crate) equilibrium: Kelvin,
+    /// Its atmosphere, with the albedo it gives.
+    pub(crate) air: Atmosphere,
+    /// The lid it took, if any.
+    pub(crate) lid: Option<CrustLid>,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The passes the traced solves on this thread took, in order, a test's own.
+    static PASS_TRACE: core::cell::RefCell<Vec<TracedPass>> =
+        const { core::cell::RefCell::new(Vec::new()) };
+}
+
+/// `run`'s result and the passes every traced solve it ran took ([`PassDriver::Traced`]), in
+/// order: the convergence re-check's per-pass trace (decision-p14-t54a-passes §1.8). The trace is
+/// emptied before and taken after.
+#[cfg(test)]
+#[must_use]
+pub(crate) fn traced<R>(run: impl FnOnce() -> R) -> (R, Vec<TracedPass>) {
+    PASS_TRACE.with(|trace| trace.borrow_mut().clear());
+    let result = run();
+    let trace = PASS_TRACE.with(|trace| core::mem::take(&mut *trace.borrow_mut()));
+    (result, trace)
+}
+
+/// Whether the pass `now` has settled against the pass `last` before it, by P14.T51.b's test: its
+/// equilibrium temperature moved by at most [`ATMOSPHERE_CONVERGENCE`] of itself.
+#[must_use]
+fn settled(&(last, ..): &PassOut, &(now, ..): &PassOut) -> bool {
+    (now.value() - last.value()).abs() <= ATMOSPHERE_CONVERGENCE * now.value()
+}
 
 /// What a body's hosts give it at a time, as its atmosphere reads it.
 #[derive(Debug, Clone, Copy)]
 struct Sky {
     /// The flux now, averaged over the orbit.
     flux: EarthFluxes,
-    /// The flux at every host's largest past luminosity (design note 11).
-    peak_flux: EarthFluxes,
+    /// The irradiation temperature its exobase reads: the equilibrium temperature at zero albedo
+    /// under the flux at every host's largest past luminosity (design note 11), once a body
+    /// before its passes, so that no albedo a pass reads moves it (decision-p14-t54a-ganymede
+    /// §1.4).
+    irradiation: Kelvin,
     /// The X-ray and ultraviolet energy per unit area received so far.
     xuv_fluence: JoulesPerSquareMetre,
-    /// Where the body lies against the hosts' habitable zone.
+    /// The X-ray and ultraviolet flux now, averaged over the orbit (P14.T24.a).
+    xuv_flux: WattsPerSquareMetre,
+    /// The X-ray and ultraviolet flux received while each host is saturated, along the same
+    /// orbits as the fluence (P14.T24.f).
+    saturated_xuv_flux: WattsPerSquareMetre,
+    /// How long the hosts stay saturated, as one: their saturation times weighted by their
+    /// saturated fluxes at the body, Σ `F_s,i` `t_sat,i` ÷ Σ `F_s,i` (P14.T53.a's exposure,
+    /// [`AtmosphereInputs::xuv_saturation_time`]; the lane's), so that the exposure's saturated
+    /// fluence, Σ `F_s,i` `t_sat,i`, and its whole history's, 3 Σ `F_s,i` `t_sat,i`, are the hosts'
+    /// sums exactly.
+    xuv_saturation_time: Years,
+    /// Where the body lies against the hosts' habitable zone, the runaway limit at the hosts'
+    /// largest past luminosities.
     insolation: Insolation,
+    /// Where the body lies against the hosts' habitable zone now, the runaway limit at the hosts'
+    /// present luminosities (P14.T53.b part 1 (a), [`AtmosphereInputs::present_insolation`]).
+    present_insolation: Insolation,
+    /// Σ Fᵢ ÷ `S_eff,max`(`T_eff,i`) now, the sum the insolation's maximum-greenhouse limit reads:
+    /// beyond it below 1 ([`AtmosphereInputs::maximum_greenhouse_flux_ratio`]).
+    maximum_greenhouse_flux_ratio: f64,
+    /// Σ Fᵢ ÷ `S_eff,i` at the runaway limit now, at the runaway limit at the hosts' largest past
+    /// luminosities and at the maximum-greenhouse limit now: the sums its insolation's classes and
+    /// its ceiling read, for the audit's tests ([`DerivedBody::sky_ratios`]).
+    #[cfg(test)]
+    ratios: [f64; 3],
     /// The hottest effective temperature among the luminous hosts; zero if none shines.
     hottest: Kelvin,
+    /// The hosts' light by band as the area mix reads it (P14.T51.b).
+    shade: HostShade,
 }
 
 impl Sky {
@@ -1028,8 +2774,33 @@ impl Sky {
     ///
     /// The zone is judged as Kopparapu et al.'s limits are in a multiple system (P14.T12.b): the
     /// body is inside the runaway limit when Σ Fᵢ ÷ `S_eff,i` reaches 1 at the hosts' largest past
-    /// luminosities, and beyond the maximum-greenhouse limit when it falls below 1 now.
+    /// luminosities, and beyond the maximum-greenhouse limit when it falls below 1 now. Its
+    /// present class reads the runaway limit's sum at their luminosities now too, in a sum of its
+    /// own (P14.T53.b part 1 (a)): inside the runaway limit now where it reaches 1, else beyond the
+    /// maximum-greenhouse limit where that sum falls below 1, else between them. A host's peak
+    /// luminosity includes its present, so the present runaway sum is at most the peak's.
+    ///
+    /// It also sums the luminous hosts' light by band, each weighted by its flux now
+    /// ([`HostShadeSum`]), for the area mix (P14.T51.b): once per body, before its passes, each
+    /// host's light and the shade's constants read off the hosts' book where they carry one
+    /// (lever (d)).
     fn of(placed: &PlacedBody, hosts: &BodyHosts<'_>, age: Years) -> Self {
+        let book = area_mix::book_read(hosts.shades);
+        let sky = Self::of_from(placed, hosts, age, book);
+        #[cfg(test)]
+        area_mix::check_shade(&sky.shade, book, || {
+            Self::of_from(placed, hosts, age, None).shade
+        });
+        sky
+    }
+
+    /// [`of`](Self::of), the shade reading `book` if there is one.
+    fn of_from(
+        placed: &PlacedBody,
+        hosts: &BodyHosts<'_>,
+        age: Years,
+        book: Option<&ShadeBook>,
+    ) -> Self {
         let (a, e) = (
             placed.orbit_now.semi_major_axis(),
             placed.orbit_now.eccentricity().value(),
@@ -1038,28 +2809,43 @@ impl Sky {
             placed.orbit.semi_major_axis(),
             placed.orbit.eccentricity().value(),
         );
-        let mut sky = Self {
+        let mut sums = SkySums {
             flux: EarthFluxes::ZERO,
             peak_flux: EarthFluxes::ZERO,
             xuv_fluence: JoulesPerSquareMetre::ZERO,
-            insolation: Insolation::Habitable,
+            xuv_flux: WattsPerSquareMetre::ZERO,
+            saturated_xuv_flux: WattsPerSquareMetre::ZERO,
+            saturated_fluence_w_yr_per_m2: 0.0,
             hottest: Kelvin::ZERO,
+            shade: HostShadeSum::EMPTY,
         };
-        let (mut runaway, mut maximum) = (0.0, 0.0);
+        let (mut runaway, mut maximum, mut runaway_now) = (0.0, 0.0, 0.0);
         let mut add = |host: &HostLight, (a, e): (Metres, f64), (xuv_a, xuv_e): (Metres, f64)| {
             let flux = luminosity_flux(host.luminosity(), a, e);
             let peak = luminosity_flux(host.peak_luminosity(), a, e);
             let fluence = host.xuv().fluence(age, xuv_a, xuv_e);
-            sky.flux = sky.flux + flux;
-            sky.peak_flux = sky.peak_flux + peak;
-            sky.xuv_fluence = JoulesPerSquareMetre::new(sky.xuv_fluence.value() + fluence.value());
+            let xuv = host.xuv().flux(age, a, e);
+            let saturated = host.xuv().saturated_flux(xuv_a, xuv_e);
+            sums.flux = sums.flux + flux;
+            sums.peak_flux = sums.peak_flux + peak;
+            sums.xuv_fluence =
+                JoulesPerSquareMetre::new(sums.xuv_fluence.value() + fluence.value());
+            sums.xuv_flux = WattsPerSquareMetre::new(sums.xuv_flux.value() + xuv.value());
+            sums.saturated_xuv_flux =
+                WattsPerSquareMetre::new(sums.saturated_xuv_flux.value() + saturated.value());
+            sums.saturated_fluence_w_yr_per_m2 +=
+                saturated.value() * host.xuv().saturation_time().value();
             if host.luminosity().value() > 0.0 {
                 let t_eff = host.effective_temperature();
-                runaway += peak.value() / HabitableLimit::RunawayGreenhouse.flux(t_eff).value();
+                // One runaway limit a host for both sums: the same bits as two calls.
+                let runaway_limit = HabitableLimit::RunawayGreenhouse.flux(t_eff).value();
+                runaway += peak.value() / runaway_limit;
                 maximum += flux.value() / HabitableLimit::MaximumGreenhouse.flux(t_eff).value();
-                if t_eff > sky.hottest {
-                    sky.hottest = t_eff;
+                runaway_now += flux.value() / runaway_limit;
+                if t_eff > sums.hottest {
+                    sums.hottest = t_eff;
                 }
+                sums.shade.add_from(flux, t_eff, book);
             }
         };
         for host in hosts.orbited {
@@ -1069,14 +2855,61 @@ impl Sky {
             let orbit = (companion.semi_major_axis(), companion.eccentricity());
             add(companion.host(), orbit, orbit);
         }
-        sky.insolation = if runaway >= 1.0 {
-            Insolation::InsideRunaway
-        } else if maximum < 1.0 {
-            Insolation::BeyondMaximumGreenhouse
-        } else {
-            Insolation::Habitable
+        let class = |runaway: f64| {
+            if runaway >= 1.0 {
+                Insolation::InsideRunaway
+            } else if maximum < 1.0 {
+                Insolation::BeyondMaximumGreenhouse
+            } else {
+                Insolation::Habitable
+            }
         };
-        sky
+        let (insolation, present_insolation) = (class(runaway), class(runaway_now));
+        Self {
+            flux: sums.flux,
+            irradiation: equilibrium_temperature(sums.peak_flux, BondAlbedo::from_fraction(0.0)),
+            xuv_fluence: sums.xuv_fluence,
+            xuv_flux: sums.xuv_flux,
+            saturated_xuv_flux: sums.saturated_xuv_flux,
+            xuv_saturation_time: sums.saturation_time(),
+            insolation,
+            present_insolation,
+            maximum_greenhouse_flux_ratio: maximum,
+            #[cfg(test)]
+            ratios: [runaway_now, runaway, maximum],
+            hottest: sums.hottest,
+            shade: sums.shade.finish_from(book),
+        }
+    }
+}
+
+/// What [`Sky::of`] sums over a body's hosts, in their order, before the sky is built from it.
+#[derive(Debug, Clone, Copy)]
+struct SkySums {
+    flux: EarthFluxes,
+    peak_flux: EarthFluxes,
+    xuv_fluence: JoulesPerSquareMetre,
+    xuv_flux: WattsPerSquareMetre,
+    saturated_xuv_flux: WattsPerSquareMetre,
+    /// Σ `F_s,i` `t_sat,i`, W m⁻² yr: each host's saturated flux at the body times its saturation
+    /// time, the saturated fluence in those units.
+    saturated_fluence_w_yr_per_m2: f64,
+    hottest: Kelvin,
+    shade: HostShadeSum,
+}
+
+impl SkySums {
+    /// The hosts' saturation time as one, Σ `F_s,i` `t_sat,i` ÷ Σ `F_s,i` ([`Sky`]'s
+    /// `xuv_saturation_time`): a dark host's where no host's saturated flux reaches the body.
+    #[must_use]
+    fn saturation_time(&self) -> Years {
+        let flux = self.saturated_xuv_flux.value();
+        let time = self.saturated_fluence_w_yr_per_m2 / flux;
+        if flux > 0.0 && time.is_finite() {
+            Years::new(time)
+        } else {
+            crate::planetary::context::XuvHistory::DARK.saturation_time()
+        }
     }
 }
 
@@ -1162,27 +2995,216 @@ fn envelope_escape(
     }
 }
 
-/// What [`derive_body`] fixes at formation (T11): the side of the disc's snow line the body formed
-/// on, its confined rank, and its solved composition, which is `None` from 0.414 Jupiter masses,
-/// where there is no window and no solve and the body is a giant (T11.d).
+/// What a body's inventory and atmosphere read (T13; P14.T50.a, T50.c; P14.T56.c and its
+/// follow-up): the bulk its air is weighed at, and the side of the snow line its volatiles formed
+/// on with the element inventory they give.
+#[derive(Debug, Clone, Copy)]
+struct AirBulk {
+    /// The mass its air is weighed at.
+    mass: Kilograms,
+    /// The radius its air is weighed and escapes at.
+    radius: Metres,
+    /// The mass fractions its inventory and its surface read.
+    fractions: MassFractions,
+    /// Its surface lag (P14.T56.g; [`PlacedBody::surface_lag`]), which its surface material
+    /// ([`surface_material`]) and its crust's ice shell read.
+    lag: SurfaceLag,
+    /// The side of the snow line its volatiles formed on, which its carbon's carrier follows: its
+    /// own, or a captured or giant-impact moon's parent's (P14.T56.c).
+    side: SnowLineSide,
+    /// Its element inventory, whose carriers its atmosphere reads.
+    elements: ElementInventory,
+    /// Whether its ice carries ammonia, as its crust's first melt reads it (P14.T51.c): P14.T50.c's
+    /// `nitrogen_boosted` at the formation temperature its volatiles formed at, the one its
+    /// nitrogen's boost reads.
+    ammonia: AmmoniaIce,
+    /// What its ocean would dissolve (P14.T51.g.b): its element inventory's whole chlorine as
+    /// sodium chloride, and its ice's ammonia where its nitrogen took the icy boost (beyond the
+    /// snow line, with [`ammonia`](Self::ammonia) carried), at its nitrogen rank's multiple.
+    ocean_solutes: OceanSolutes,
+}
+
+impl PlacedBody {
+    /// The [`AirBulk`] of this body at age `age`, whose solve gives it the mass, radius and
+    /// fractions `solved` at the time, under its hosts' flux `flux`.
+    ///
+    /// - Its bulk is the one [`with_bulk`](Self::with_bulk) states, at its placed mass, where it
+    ///   has one (a moon's own, P14.T56.c's follow-up), and `solved` otherwise.
+    /// - Its inventory is [`element_inventory`](fn@element_inventory) with its ranks at that mass
+    ///   and those fractions (P14.T50.a), at its [`volatile_zone`](Self::volatile_zone)'s side,
+    ///   distance and snow line where it has one (P14.T56.c: a captured or giant-impact moon's
+    ///   parent's zone of the star's disc), and otherwise at `formed`, the side of `disc`'s snow
+    ///   line it formed on, its formation distance and `disc`'s snow line. Its carriers are
+    ///   therefore
+    ///   [`volatile_inventory`](crate::planetary::derive::atmosphere::volatile_inventory)'s at that
+    ///   side and the [`formation_temperature`] of that distance and snow line, to the bit, which
+    ///   is [`FormationZone::temperature`] for a zone; its ΔIW reads the same distance and snow
+    ///   line.
+    /// - Its surface lag is its given bulk's at `flux`, or with none its [`SolvedLag`]'s over those
+    ///   fractions ([`surface_lag`](Self::surface_lag)).
+    #[must_use]
+    fn air_of(
+        &self,
+        disc: &DiscProfile,
+        formed: SnowLineSide,
+        solved: (EarthMasses, EarthRadii, &MassFractions),
+        age: Years,
+        flux: EarthFluxes,
+    ) -> AirBulk {
+        let (mass, radius, fractions) = match self.bulk {
+            Some(bulk) => (self.mass, bulk.radius, bulk.fractions.over(solved.2)),
+            None => (solved.0, Metres::from(solved.1), *solved.2),
+        };
+        let (side, formation_distance, snow_line) = match self.volatile_zone {
+            Some(zone) => (zone.side(), zone.distance(), zone.snow_line()),
+            None => (formed, self.formation_distance, disc.snow_line()),
+        };
+        let elements = element_inventory(&InventoryInputs {
+            mass,
+            fractions,
+            formed: side,
+            formation_distance,
+            snow_line,
+            draws: self.volatiles,
+            age,
+        });
+        let ammonia = if nitrogen_boosted(formation_temperature(formation_distance, snow_line)) {
+            AmmoniaIce::Carried
+        } else {
+            AmmoniaIce::Absent
+        };
+        // The ice's ammonia is the nitrogen's icy boost's, which only a body formed beyond the
+        // snow line takes (`volatile_inventory`).
+        let icy_ammonia = match side {
+            SnowLineSide::Beyond => ammonia,
+            SnowLineSide::Inside => AmmoniaIce::Absent,
+        };
+        let ocean_solutes = OceanSolutes::of_body(
+            elements.total(crate::substance::Element::Cl),
+            icy_ammonia,
+            self.volatiles.nitrogen,
+        );
+        AirBulk {
+            mass: Kilograms::from(mass),
+            radius,
+            fractions,
+            lag: self.surface_lag(flux, &fractions),
+            side,
+            elements,
+            ammonia,
+            ocean_solutes,
+        }
+    }
+
+    /// The body's surface lag under its hosts' flux `flux` over its bulk's fractions `fractions`
+    /// (P14.T56.g; [`GivenLag`], [`SolvedLag`]): its given bulk's as stated, or for an icy belt
+    /// member's lagged where the zero-albedo equilibrium temperature at `flux` exceeds
+    /// [`UNDER_ICE_MELTING_POINT`]; with no given bulk, the same where its [`SolvedLag`] asks it
+    /// and `fractions` make an ice bulk, and bare otherwise, a planet's.
+    #[must_use]
+    fn surface_lag(&self, flux: EarthFluxes, fractions: &MassFractions) -> SurfaceLag {
+        let above_melting = || {
+            // A temperature that is not a number is not above the melting point.
+            if equilibrium_temperature(flux, BondAlbedo::from_fraction(0.0))
+                > UNDER_ICE_MELTING_POINT
+            {
+                SurfaceLag::Lagged
+            } else {
+                SurfaceLag::Bare
+            }
+        };
+        match (self.bulk.map(|bulk| bulk.lag), self.solved_lag) {
+            (Some(GivenLag::Stated(lag)), _) => lag,
+            (Some(GivenLag::AboveMelting), _) => above_melting(),
+            (None, SolvedLag::AboveMeltingOverIce)
+                if SurfaceMaterial::of(fractions) == SurfaceMaterial::Ice =>
+            {
+                above_melting()
+            }
+            (None, SolvedLag::Bare | SolvedLag::AboveMeltingOverIce) => SurfaceLag::Bare,
+        }
+    }
+}
+
+/// What [`derive_body`] fixes at formation (T11) in `disc` about `hosts`: the side of the disc's
+/// snow line the body formed on, its confined rank, and its solved composition, which is `None`
+/// from 0.414 Jupiter masses, where there is no window and no solve and the body is a giant
+/// (T11.d).
 fn formation(
     placed: &PlacedBody,
+    hosts: &BodyHosts<'_>,
     disc: &DiscProfile,
 ) -> Result<(SnowLineSide, UnitUniform, Option<SolvedComposition>), DeriveBodyError> {
+    formation_about(
+        placed,
+        &FormationHost::of_disc(disc)
+            .with_host_rock(hosts.host_magnesium_to_silicon(), hosts.alpha_fe()),
+    )
+}
+
+/// The host a body formed about, as its formation (T11) reads it: its mass, its zero-age
+/// luminosity and its disc's snow line, a [`DiscProfile`]'s, or for a rogue planet its birth
+/// host's ([`derive_alone`]); and its rock's Mg/Si and \[α/Fe\], to which a rocky outcome's core
+/// share answers from generator version 27 ([`rocky::CoreShareShift::of_host`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct FormationHost {
+    /// The host's mass.
+    pub(crate) mass: SolarMasses,
+    /// The host's zero-age luminosity, which sets the flux of formation.
+    pub(crate) luminosity: SolarLuminosities,
+    /// The snow line of the host's disc.
+    pub(crate) snow_line: Metres,
+    /// The host's Mg/Si by number, as its bodies' crusts read it (its system's
+    /// [`HostAbundances`](crate::planetary::chem::HostAbundances)).
+    pub(crate) magnesium_to_silicon: f64,
+    /// The host's \[α/Fe\], 0 for none.
+    pub(crate) alpha_fe: Dex,
+}
+
+impl FormationHost {
+    /// The host of `disc`, its rock at the Sun's Mg/Si and \[α/Fe\] 0.
+    #[must_use]
+    fn of_disc(disc: &DiscProfile) -> Self {
+        Self {
+            mass: disc.host_mass(),
+            luminosity: disc.host_luminosity(),
+            snow_line: disc.snow_line(),
+            magnesium_to_silicon: solar_magnesium_to_silicon(),
+            alpha_fe: Dex::ZERO,
+        }
+    }
+
+    /// The same host, its rock of Mg/Si `magnesium_to_silicon` and \[α/Fe\] `alpha_fe`.
+    #[must_use]
+    const fn with_host_rock(self, magnesium_to_silicon: f64, alpha_fe: Dex) -> Self {
+        Self {
+            magnesium_to_silicon,
+            alpha_fe,
+            ..self
+        }
+    }
+}
+
+/// [`formation`] about the host `host`.
+fn formation_about(
+    placed: &PlacedBody,
+    host: &FormationHost,
+) -> Result<(SnowLineSide, UnitUniform, Option<SolvedComposition>), DeriveBodyError> {
     let mass = placed.mass;
-    let formed = if placed.formation_distance.value() < disc.snow_line().value() {
+    let formed = if placed.formation_distance.value() < host.snow_line.value() {
         SnowLineSide::Inside
     } else {
         SnowLineSide::Beyond
     };
     let primordial = &placed.orbit;
     let formation_flux = luminosity_flux(
-        disc.host_luminosity(),
+        host.luminosity,
         primordial.semi_major_axis(),
         primordial.eccentricity().value(),
     );
-    let host = disc.host_mass();
-    match radius_window(mass, formed, formation_flux) {
+    let shift = rocky::CoreShareShift::of_host(host.magnesium_to_silicon, host.alpha_fe);
+    let host = host.mass;
+    match radius_window_about(mass, formed, formation_flux, shift) {
         Ok(window) if formed == SnowLineSide::Inside && m_dwarfs::rocky_host_share(host) > 0.0 => {
             let (rank, solved) = rocky_branch(placed.radius_rank, &window, host, formation_flux)?;
             Ok((formed, rank, Some(solved)))
@@ -1204,13 +3226,15 @@ fn formation(
                         share,
                         radius_chen_kipping(mass, rank),
                         formation_flux,
+                        shift,
                     )
                 }
-                None => composition(
+                None => composition_about(
                     mass,
                     radius_chen_kipping(mass, rank),
                     formed,
                     formation_flux,
+                    shift,
                 )?,
             };
             Ok((formed, rank, Some(solved)))
@@ -1256,8 +3280,11 @@ fn rocky_branch(
     };
     if u <= rocky {
         let share = (u / rocky).clamp(0.0, 1.0);
-        let cmf =
-            rocky::core_mass_fraction_at_least(1.0 - share, window.dry_top_core_mass_fraction());
+        let cmf = rocky::core_mass_fraction_at_least(
+            1.0 - share,
+            window.dry_top_core_mass_fraction(),
+            window.core_share_shift(),
+        );
         Ok((
             rank(least + share * (top - least)),
             dry_composition(mass, cmf),
@@ -1266,10 +3293,11 @@ fn rocky_branch(
         let share = (u - rocky) / enveloped;
         let above = rank(top + share * (greatest - top));
         let drawn = radius_chen_kipping(mass, above);
+        let shift = window.core_share_shift();
         let solved = if takes_formation_envelope(mass, SnowLineSide::Inside) {
-            formed_with_envelope(mass, share, drawn, flux)
+            formed_with_envelope(mass, share, drawn, flux, shift)
         } else {
-            composition(mass, drawn, SnowLineSide::Inside, flux)?
+            composition_about(mass, drawn, SnowLineSide::Inside, flux, shift)?
         };
         Ok((above, solved))
     }
@@ -1287,7 +3315,9 @@ fn takes_formation_envelope(mass: EarthMasses, formed: SnowLineSide) -> bool {
 
 /// The composition a body is given at formation (P14.T11, ruling 102.1): the part of
 /// [`derive_body`] that its mass, primordial orbit, formation distance and rank fix in `disc`,
-/// whatever the time. `None` from 0.414 Jupiter masses, a giant's, which has no solve.
+/// whatever the time, about a host of the Sun's Mg/Si and \[α/Fe\] 0, as [`BodyHosts::new`]'s
+/// (a host's own rock moves a rocky outcome's core share from generator version 27). `None` from
+/// 0.414 Jupiter masses, a giant's, which has no solve.
 ///
 /// Its [`radius`](SolvedComposition::radius) is the body's at [`COMPOSITION_REFERENCE_AGE`] and
 /// the flux of its host's zero-age luminosity on its primordial orbit, the radius a survey of
@@ -1303,7 +3333,7 @@ pub fn formation_composition(
     placed: &PlacedBody,
     disc: &DiscProfile,
 ) -> Result<Option<SolvedComposition>, DeriveBodyError> {
-    formation(placed, disc).map(|(_, _, solved)| solved)
+    formation_about(placed, &FormationHost::of_disc(disc)).map(|(_, _, solved)| solved)
 }
 
 /// A body's radius, mass fractions and core at the time (T11), and its giant's radius if it is
@@ -1311,15 +3341,16 @@ pub fn formation_composition(
 /// share `stripped` of its present mass `mass` that escape has left it (T13.b), or its solved
 /// envelope if escape took none (`None`); a giant's from
 /// plan 13's cooling at that age in a system of composition `composition`, inflated for its flux
-/// and blended into the envelope model's below 0.414 Jupiter masses.
+/// and blended into the envelope model's below 0.414 Jupiter masses, its heavy elements on the
+/// Earth-like core of a host of shift `shift` ([`composition::giant_composition_about`]).
 fn at_the_time(
     mass: EarthMasses,
     formed: SnowLineSide,
     solved: Option<&SolvedComposition>,
     stripped: Option<f64>,
     flux: EarthFluxes,
-    age: Years,
-    composition: &Composition,
+    (age, composition): (Years, &Composition),
+    shift: rocky::CoreShareShift,
 ) -> Result<
     (
         EarthRadii,
@@ -1345,7 +3376,7 @@ fn at_the_time(
     }
     let interior = giant_cooling(JupiterMasses::from(mass), age, composition)?;
     let giant = radius_giant(mass, &interior, flux)?;
-    let heavy = giant_composition(mass, formed)?;
+    let heavy = composition::giant_composition_about(mass, formed, shift)?;
     Ok(match solved {
         Some(s) => (
             giant.blended(envelope_radius(s, s.envelope_fraction())),
@@ -1354,6 +3385,215 @@ fn at_the_time(
             Some(giant),
         ),
         None => (giant.radius(), heavy.fractions(), heavy.core(), Some(giant)),
+    })
+}
+
+/// A body derived with no star (P14.T27.b, design note 13): a rogue planet's bulk and its own heat
+/// at a time, [`derive_alone`]'s.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct DerivedAlone {
+    mass: EarthMasses,
+    radius: EarthRadii,
+    density: KilogramsPerCubicMetre,
+    surface_gravity: MetresPerSecondSquared,
+    class: PlanetClass,
+    fractions: MassFractions,
+    internal_luminosity: Watts,
+    maximum_moon_mass: EarthMasses,
+}
+
+impl DerivedAlone {
+    /// Its mass, which no escape moves.
+    #[must_use]
+    pub(crate) const fn mass(&self) -> EarthMasses {
+        self.mass
+    }
+
+    /// Its radius at the time.
+    #[must_use]
+    pub(crate) const fn radius(&self) -> EarthRadii {
+        self.radius
+    }
+
+    /// Its class by composition.
+    #[must_use]
+    pub(crate) const fn class(&self) -> PlanetClass {
+        self.class
+    }
+
+    /// Its effective temperature, at which it radiates its own luminosity (its giant cooling's,
+    /// its solids' radiogenic and residual heat, or both blended: [`derive_alone`]) from its
+    /// radius, at its equilibrium temperature in the cosmic background's light, T⁴ = `T_CMB`⁴ +
+    /// `L_int` ÷ 4πR²σ: `None` for a body that radiates none.
+    #[must_use]
+    pub(crate) fn effective_temperature(&self) -> Option<Kelvin> {
+        (self.internal_luminosity > Watts::ZERO).then(|| {
+            with_internal_heat(
+                COSMIC_BACKGROUND_TEMPERATURE,
+                self.internal_luminosity,
+                Metres::from(self.radius),
+            )
+        })
+    }
+
+    /// The heaviest moon tides let survive about it on its birth orbit (P14.T15), which its moon
+    /// generators read.
+    #[must_use]
+    pub(crate) const fn maximum_moon_mass(&self) -> EarthMasses {
+        self.maximum_moon_mass
+    }
+
+    /// Its bulk section: its radius, density, surface gravity, class and fractions, its
+    /// equilibrium temperature the cosmic background's, the only light that reaches it, and its
+    /// effective temperature.
+    #[must_use]
+    pub(crate) fn bulk(&self) -> crate::planetary::record::BulkProperties {
+        let bulk = crate::planetary::record::BulkProperties::new(
+            self.radius,
+            self.density,
+            self.surface_gravity,
+            self.class,
+            self.fractions,
+            COSMIC_BACKGROUND_TEMPERATURE,
+        );
+        match self.effective_temperature() {
+            Some(t) => bulk.with_effective_temperature(t),
+            None => bulk,
+        }
+    }
+}
+
+/// Where the heavy elements of a body [`derive_alone`] derives come from (P14.T27.b, design note
+/// 13).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum AloneMetals {
+    /// As about any host: P14.T11's formation solve, and a giant's Thorngren et al. (2016) heavy
+    /// elements, fitted to planets that formed in discs. An ejected rogue planet's.
+    DiscFormed,
+    /// Its cloud's own: a bulk metal fraction of its composition's Z, Z☉ × 10^\[Fe/H\]
+    /// ([`Composition::z`]), with no core of a disc's. A rogue planet that formed alone, from one
+    /// Jupiter mass: a giant with no formation solve, its metals its cloud fragment's.
+    Cloud,
+}
+
+/// [`derive_body`] with no star (P14.T27.b, design note 13): the body `placed`, formed on its
+/// primordial orbit about the host `born_about`, in a system of composition `composition`, at the
+/// age `age`, its heavy elements from `metals`, lit by the cosmic background alone.
+///
+/// - **Radius and composition** (T11): fixed at formation as about any host ([`formation`]), and
+///   taken at the age under no flux. No escape strips it: its birth host's X-rays before it was
+///   freed are not modelled, and none reach it after, so a hydrogen envelope survives whole (lean,
+///   2026-10-31). Its metals are its cloud's own where `metals` says so ([`AloneMetals::Cloud`]),
+///   in the mix of iron, rock and water its formation gives its core.
+/// - **Its own heat**, its equilibrium temperature the cosmic background's,
+///   [`COSMIC_BACKGROUND_TEMPERATURE`] (an isotropic blackbody field brings a grey body to its own
+///   temperature, whatever its albedo): from 0.3 Jupiter masses
+///   plan 13's giant cooling at the age ([`GiantRadius::internal_luminosity`], blended in by
+///   [`giant_share`]); below it, and for the rest of the blend, P14.T24.b's radiogenic and
+///   residual heat of its solids ([`non_tidal_heat_flow`](crate::planetary::hooks::figures)) as an
+///   airless body's, and under a hydrogen envelope its core's, which the envelope holds in and
+///   radiates from its top (lean, 2026-10-31: the envelope's own contraction is not modelled).
+/// - **Its moon limit** (T15) on the birth orbit, about the birth host's mass, as its moon
+///   generators read it.
+///
+/// # Errors
+///
+/// [`DeriveBodyError::NotYetFormed`] for an age that is not positive, and as [`derive_body`] for
+/// what is fixed at formation and for a giant's cooling.
+pub(crate) fn derive_alone(
+    placed: &PlacedBody,
+    born_about: &FormationHost,
+    composition: &Composition,
+    age: Years,
+    metals: AloneMetals,
+) -> Result<DerivedAlone, DeriveBodyError> {
+    use crate::planetary::hooks::figures::{HeatInputs, Subsurface, non_tidal_heat_flow};
+    if age.value().is_nan() || age.value() <= 0.0 {
+        return Err(DeriveBodyError::NotYetFormed { age });
+    }
+    let (formed, _, solved) = formation_about(placed, born_about)?;
+    let dark = EarthFluxes::new(0.0);
+    let mass = placed.mass;
+    let shift =
+        rocky::CoreShareShift::of_host(born_about.magnesium_to_silicon, born_about.alpha_fe);
+    let (radius, fractions, core, giant) = at_the_time(
+        mass,
+        formed,
+        solved.as_ref(),
+        None,
+        dark,
+        (age, composition),
+        shift,
+    )?;
+    let fractions = match metals {
+        AloneMetals::DiscFormed => fractions,
+        AloneMetals::Cloud => MassFractions::of(core, 1.0 - composition.z().value()),
+    };
+    let class = PlanetClass::of(mass, &fractions);
+    let mass_kg = Kilograms::from(mass);
+    let r = Metres::from(radius).value();
+    let volume = 4.0 / 3.0 * core::f64::consts::PI * (r * r * r);
+    let density = KilogramsPerCubicMetre::new(mass_kg.value() / volume);
+    let surface_gravity = MetresPerSecondSquared::new(GM_EARTH * mass.value() / (r * r));
+    // The solids' heat, radiated from the radius `outer`: the whole body's where it is solid, its
+    // core's under an envelope. A solid with no rock, or a core of no mass, makes none.
+    let solids_heat = || {
+        let (solid_mass, solid_fractions, solid_radius) = if class.has_solid_surface() {
+            (mass, fractions, Metres::new(r))
+        } else {
+            let core_mass = EarthMasses::new(mass.value() * (1.0 - fractions.envelope()));
+            if !(core_mass.value().is_finite() && core_mass.value() > 0.0) {
+                return Watts::ZERO;
+            }
+            (
+                core_mass,
+                MassFractions::of(core, 0.0),
+                Metres::from(radius_zeng(core_mass, core)),
+            )
+        };
+        let rs = solid_radius.value();
+        let heat = HeatInputs {
+            mass: solid_mass,
+            radius: solid_radius,
+            surface_gravity: MetresPerSecondSquared::new(GM_EARTH * solid_mass.value() / (rs * rs)),
+            class: PlanetClass::of(solid_mass, &solid_fractions),
+            fractions: solid_fractions,
+            inventory_water: Kilograms::new(0.0),
+            fe_h: composition.fe_h(),
+            tidal_heat_flow: WattsPerSquareMetre::new(0.0),
+            subsurface_ocean: Subsurface::NotComputed,
+        };
+        non_tidal_heat_flow(&heat, age, SurfaceState::Airless).map_or(Watts::ZERO, |flow| {
+            Watts::new(flow.value() * 4.0 * core::f64::consts::PI * rs * rs)
+        })
+    };
+    let internal_luminosity = match &giant {
+        Some(giant) if giant.share() >= 1.0 => Watts::from(giant.internal_luminosity()),
+        Some(giant) => Watts::new(
+            Watts::from(giant.internal_luminosity()).value()
+                + (1.0 - giant.share()) * solids_heat().value(),
+        ),
+        None => solids_heat(),
+    };
+    let a = placed.orbit.semi_major_axis();
+    let e = placed.orbit.eccentricity().value();
+    let tidal = tidal_planet(class, mass_kg, Metres::new(r), &fractions);
+    let maximum_moon_mass = EarthMasses::from(maximum_surviving_moon_mass(
+        &tidal,
+        Kilograms::from(born_about.mass),
+        a,
+        e,
+        Seconds::from(age),
+    ));
+    Ok(DerivedAlone {
+        mass,
+        radius,
+        density,
+        surface_gravity,
+        class,
+        fractions,
+        internal_luminosity,
+        maximum_moon_mass,
     })
 }
 
@@ -1376,7 +3616,9 @@ pub(crate) mod solar {
     pub(crate) const SOLAR_AGE: Years = Years::new(4.57e9);
 
     /// The eight planets: name, mass (kg), volumetric mean radius (km), semi-major axis (au) and
-    /// eccentricity, from NASA's planetary fact sheets.
+    /// eccentricity, from NASA's planetary fact sheets. Saturn's 9.5826 au (1,433.53 × 10⁶ km) is
+    /// an edition before the sheet's update of 18 March 2025, which gives 1,432.041 × 10⁶ km,
+    /// 9.5726 au; the table keeps it.
     pub(crate) const PLANETS: [(&str, f64, f64, f64, f64); 8] = [
         ("Mercury", 0.330_10e24, 2_439.7, 0.387_098, 0.205_630),
         ("Venus", 4.867_3e24, 6_051.8, 0.723_332, 0.006_772),
@@ -1506,13 +3748,39 @@ pub(crate) mod solar {
                 .core()
                 .core_mass_fraction();
             let top = chen_kipping_rank(mass, window.dry_top());
-            let below = rocky::core_mass_fraction_rank(window.dry_top_core_mass_fraction());
-            let held = (rocky::core_mass_fraction_rank(cmf) - below) / (1.0 - below);
+            let below = rocky::core_mass_fraction_rank(
+                window.dry_top_core_mass_fraction(),
+                window.core_share_shift(),
+            );
+            let held = (rocky::core_mass_fraction_rank(cmf, window.core_share_shift()) - below)
+                / (1.0 - below);
             least + (1.0 - held) * (top - least)
         } else {
             chen_kipping_rank(mass, radius)
         };
         (confined - least) / (greatest - least)
+    }
+
+    /// Ruling 58's bodies of `derive_body`'s golden: an Earth mass at 4 au of the Sun, beyond the
+    /// snow line of `disc`, at the rank among the rocky outcomes, held to Earth's core fraction and
+    /// above, if `dry`, and otherwise at the rank between the Earth-like and rock curves, which
+    /// keeps Chen and Kipping's radius and its water.
+    pub(crate) fn beyond_the_snow_line(disc: &DiscProfile, dry: bool) -> PlacedBody {
+        let (earths, a_au, eccentricity) = (1.0, 4.0, 0.05);
+        let mass = EarthMasses::new(earths);
+        let axis = Metres::new(a_au * METRES_PER_AU);
+        let flux = luminosity_flux(disc.host_luminosity(), axis, eccentricity);
+        let window = radius_window(mass, SnowLineSide::Beyond, flux).unwrap();
+        let rank = |r: EarthRadii| chen_kipping_rank(mass, r);
+        let (least, greatest) = (rank(window.least()), rank(window.greatest()));
+        let (top, rock) = (rank(window.dry_top()), rank(window.rock()));
+        let target = if dry {
+            f64::midpoint(least, top)
+        } else {
+            f64::midpoint(top, rock)
+        };
+        let u = (target - least) / (greatest - least);
+        placed(earths * EARTH_MASS_KG, a_au, eccentricity, u)
     }
 
     pub(crate) fn derive(
@@ -1551,6 +3819,84 @@ pub(crate) mod solar {
             .collect()
     }
 
+    /// The moons and the dwarf planet of the table, each placed about the Sun at its parent's
+    /// distance, where its light comes from: name, mass (kg), mean radius (km), semi-major axis
+    /// (au) and eccentricity (NASA's fact sheets).
+    pub(crate) const SMALL_BODIES: [(&str, f64, f64, f64, f64); 4] = [
+        ("Moon", 7.342e22, 1_737.4, 1.000_001, 0.016_709),
+        ("Ganymede", 1.481_9e23, 2_634.1, 5.203_8, 0.048_9),
+        ("Titan", 1.345_2e23, 2_574.7, 9.582_6, 0.056_5),
+        ("Ceres", 9.39e20, 469.7, 2.767_5, 0.075_8),
+    ];
+
+    /// A body of `kg` at `a_au` and `e` about the present Sun, formed there, at the rank that keeps
+    /// its radius `km`.
+    pub(crate) fn placed_about_the_sun(
+        disc: &DiscProfile,
+        (kg, km, a, e): (f64, f64, f64, f64),
+    ) -> PlacedBody {
+        let rank = rank_for(disc, kg, km, a, e);
+        assert!(
+            rank > 0.0 && rank < 1.0,
+            "a radius of {km} km is inside its window"
+        );
+        let orbit = orbit(a, e);
+        PlacedBody::new(
+            EarthMasses::new(kg / EARTH_MASS_KG),
+            orbit,
+            orbit.semi_major_axis(),
+            UnitUniform::new(rank).unwrap(),
+        )
+        .unwrap()
+    }
+
+    /// `placed` derived about the present Sun with its history ([`historic_sun`]) at `age`.
+    pub(crate) fn derive_historic(
+        placed: &PlacedBody,
+        disc: &DiscProfile,
+        age: Years,
+    ) -> DerivedBody {
+        let lights = [historic_sun()];
+        let hosts = BodyHosts::new(
+            Kilograms::new(SOLAR_MASS_KG),
+            Composition::SOLAR,
+            &lights,
+            &[],
+        )
+        .unwrap();
+        derive_body(placed, &hosts, disc, age, UniverseTime::EPOCH).unwrap()
+    }
+
+    /// The table's bodies, the eight planets but the giants and the four small bodies.
+    pub(crate) fn table_bodies() -> impl Iterator<Item = &'static (&'static str, f64, f64, f64, f64)>
+    {
+        PLANETS
+            .iter()
+            .filter(|(name, ..)| !matches!(*name, "Jupiter" | "Saturn" | "Uranus" | "Neptune"))
+            .chain(SMALL_BODIES.iter())
+    }
+
+    /// The table's bodies ([`table_bodies`]), each at the rank that keeps its radius, about the
+    /// present Sun with its history at its age.
+    pub(crate) fn historic_table() -> Vec<(&'static str, DerivedBody)> {
+        let disc = solar_disc();
+        table_bodies()
+            .map(|&(name, kg, km, a, e)| {
+                let placed = placed_about_the_sun(&disc, (kg, km, a, e));
+                (name, derive_historic(&placed, &disc, SOLAR_AGE))
+            })
+            .collect()
+    }
+
+    /// The table's body `name` ([`historic_table`]), at the rank that keeps its radius, about the
+    /// present Sun with its history at its age.
+    pub(crate) fn historic(name: &str) -> DerivedBody {
+        let disc = solar_disc();
+        let &(_, kg, km, a, e) = table_bodies().find(|(n, ..)| *n == name).unwrap();
+        let placed = placed_about_the_sun(&disc, (kg, km, a, e));
+        derive_historic(&placed, &disc, SOLAR_AGE)
+    }
+
     pub(crate) fn found<'a>(bodies: &'a [(&str, DerivedBody)], name: &str) -> &'a DerivedBody {
         &bodies.iter().find(|(n, _)| *n == name).unwrap().1
     }
@@ -1568,6 +3914,29 @@ mod tests {
     use crate::planetary::derive::composition::RadiusAdjustment;
     use crate::units::consts::{EARTH_MASS_KG, EARTH_RADIUS_M, METRES_PER_AU, SOLAR_MASS_KG};
     use crate::units::{AstronomicalUnits, Pascals};
+
+    /// A body with no given bulk is bare unless its [`SolvedLag`] asks the lag, and then lagged
+    /// exactly where its solved bulk is ice and its zero-albedo temperature exceeds the melting
+    /// point (`system::member_lag`, at 25): 278 K at 1 S⊕, 234 K at 0.5 S⊕.
+    #[test]
+    fn a_solved_ice_bulk_is_lagged_above_melting_only_where_asked() {
+        let body = placed(EARTH_MASS_KG * 1e-3, 1.0, 0.0, 0.5);
+        let (ice, rock) = (
+            MassFractions::solid(0.2, 0.47, 0.33),
+            MassFractions::solid(0.3, 0.7, 0.0),
+        );
+        let (hot, cold) = (EarthFluxes::new(1.0), EarthFluxes::new(0.5));
+        let asked = body.with_solved_lag(SolvedLag::AboveMeltingOverIce);
+        assert_eq!(asked.surface_lag(hot, &ice), SurfaceLag::Lagged);
+        assert_eq!(asked.surface_lag(cold, &ice), SurfaceLag::Bare);
+        assert_eq!(asked.surface_lag(hot, &rock), SurfaceLag::Bare);
+        assert_eq!(body.with_solved_lag(SolvedLag::Bare), body);
+        for flux in [hot, cold] {
+            for fractions in [&ice, &rock] {
+                assert_eq!(body.surface_lag(flux, fractions), SurfaceLag::Bare);
+            }
+        }
+    }
 
     #[test]
     #[expect(
@@ -1626,9 +3995,12 @@ mod tests {
             (heavy * jupiter.mass().value() - 57.9).abs() < 0.1,
             "{heavy}"
         );
-        // T12: the flux and equilibrium temperature are T12's at the albedo of the body's surface
-        // state (T13.c); a giant adds its internal luminosity, and Jupiter's makes it warmer than
-        // sunlight alone would.
+        // T12: the flux and equilibrium temperature are T12's at the albedo the published pass
+        // read, its atmosphere's area mix to the passes' convergence (P14.T51.b): T_eq ∝
+        // (1 − A)^¼, so a step of `ATMOSPHERE_CONVERGENCE` of it is one of at most 4 ×
+        // `ATMOSPHERE_CONVERGENCE` in the albedo. A giant adds its internal luminosity, and
+        // Jupiter's makes it warmer than sunlight alone would.
+        let bound = 4.0 * ATMOSPHERE_CONVERGENCE;
         for (name, _, _, a, e) in PLANETS {
             let Some((_, body)) = bodies.iter().find(|(n, _)| *n == name) else {
                 continue;
@@ -1636,12 +4008,10 @@ mod tests {
             let light = Illumination::new(sun(), Metres::new(a * METRES_PER_AU), e).unwrap();
             let flux = total_flux(&[light]);
             assert_same_bits(body.flux().value(), flux.value());
-            assert_same_bits(
-                body.albedo().value(),
-                body.atmosphere()
-                    .state()
-                    .albedo(atmosphere::SurfaceMaterial::of(&body.fractions()))
-                    .value(),
+            let (read, gave) = (body.albedo().value(), body.atmosphere().albedo().value());
+            assert!(
+                (read - gave).abs() <= bound,
+                "{name}: read {read}, gave {gave}"
             );
             let t = equilibrium_temperature(flux, body.albedo());
             // Ruling 112.7: the equilibrium temperature is the light's alone, and a giant's
@@ -1692,6 +4062,60 @@ mod tests {
         assert!(earth.maximum_moon_mass().value() > moon_mass);
     }
 
+    /// P14.T14.d: the generated Uranus's modified quality factor Q′ = 3Q ÷ 2k₂ lies in Tittemore
+    /// and Wisdom's 1.6–5.6 × 10⁵, and Neptune's is at least Proteus's bound of 6.7 × 10⁴ (both as
+    /// Ogilvie 2014, §5.4, quotes them) and at most Zhang and Hamilton's 1.32 × 10⁵ (2008, Icarus
+    /// 193, 267, Table 4), from their own mass, radius and fractions.
+    #[test]
+    fn the_ice_giants_dissipate_as_their_satellites_require() {
+        let bodies = solar_system();
+        let q_prime = |name: &str| {
+            let body = found(&bodies, name);
+            assert_eq!(body.class(), PlanetClass::IceGiant, "{name}");
+            let (k2, q) =
+                rotation::tides(body.class(), body.mass(), body.radius(), &body.fractions());
+            1.5 * q / k2
+        };
+        let uranus = q_prime("Uranus");
+        assert!((1.6e5..=5.6e5).contains(&uranus), "Uranus: Q′ {uranus}");
+        let neptune = q_prime("Neptune");
+        assert!(neptune >= 6.7e4, "Neptune: Q′ {neptune}");
+        // Zhang and Hamilton 2008: Q < 36,000 at k₂ = 0.41.
+        assert!(neptune <= 1.5 * 36_000.0 / 0.41, "Neptune: Q′ {neptune}");
+    }
+
+    /// P14.T14.d: the k₂ every reader takes from the 21 → 22 batch's bump, for the generated
+    /// Uranus, Neptune and `hot_sub_neptune`, pinned by its bits, so that a change to the law
+    /// shows here as well as in the goldens that read it.
+    #[test]
+    fn the_enveloped_love_numbers_are_pinned_bit_for_bit() {
+        use hyperion_testkit::float::bits;
+        let bodies = solar_system();
+        let hot = derive(&placed(5.0 * EARTH_MASS_KG, 0.05, 0.01, 0.5), &solar_disc()).unwrap();
+        let k2 = |body: &DerivedBody| {
+            let (k2, q) = rotation::tides(
+                body.class(),
+                EarthMasses::from(Kilograms::from(body.mass())),
+                EarthRadii::from(Metres::from(body.radius())),
+                &body.fractions(),
+            );
+            assert_same_bits(q, 1.03e4);
+            bits(k2)
+        };
+        let got = [
+            k2(found(&bodies, "Uranus")),
+            k2(found(&bodies, "Neptune")),
+            k2(&hot),
+        ];
+        // k₂ = 0.0957, 0.1195 and 0.0601: Q′ = 1.6 × 10⁵, 1.3 × 10⁵ and 2.6 × 10⁵.
+        let pinned = [
+            0x3fb8_7c8b_7279_3a22,
+            0x3fbe_961b_769a_9642,
+            0x3fae_c5de_06f2_45a6,
+        ];
+        assert_eq!(got, pinned, "{got:#018x?}");
+    }
+
     #[test]
     fn above_the_giants_a_body_is_refused_not_derived() {
         // 14 Jupiter masses is a brown dwarf's, outside plan 13's cooling of giant planets.
@@ -1703,6 +4127,62 @@ mod tests {
                 Err(DeriveBodyError::GiantCooling(_) | DeriveBodyError::Giant(_))
             ),
             "{result:?}"
+        );
+    }
+
+    /// Lever (e): a body's bulk before its passes ([`derive_bulk`]) is its whole derivation's, to
+    /// the bit, refusals included: the eight planets and the table's small bodies about the present
+    /// Sun with its history, and masses across the composition solve at three distances and three
+    /// ranks, each at three ages and one before its system is born.
+    #[test]
+    fn the_bulk_before_the_passes_is_the_whole_derivation_s() {
+        let disc = solar_disc();
+        let lights = [historic_sun()];
+        let hosts = BodyHosts::new(
+            Kilograms::new(SOLAR_MASS_KG),
+            Composition::SOLAR,
+            &lights,
+            &[],
+        )
+        .unwrap();
+        let mut bodies: Vec<PlacedBody> = PLANETS
+            .iter()
+            .map(|&(name, kg, km, a, e)| {
+                let rank = if name == "Jupiter" {
+                    0.5
+                } else {
+                    rank_for(&disc, kg, km, a, e)
+                };
+                placed(kg, a, e, rank)
+            })
+            .collect();
+        bodies.extend(
+            SMALL_BODIES
+                .iter()
+                .map(|&(_, kg, km, a, e)| placed_about_the_sun(&disc, (kg, km, a, e))),
+        );
+        for m in MASSES {
+            for a in [0.1, 1.0, 30.0] {
+                for rank in [0.1, 0.5, 0.9] {
+                    bodies.push(placed(m * EARTH_MASS_KG, a, 0.05, rank));
+                }
+            }
+        }
+        let mut compared = 0;
+        let mut refused = 0;
+        for body in &bodies {
+            for age in [5e7, 4.4e9, 4.57e9, -1.0].map(Years::new) {
+                let whole = derive_body(body, &hosts, &disc, age, UniverseTime::EPOCH)
+                    .map(|derived| DerivedBulk::from(&derived));
+                let before = derive_bulk(body, &hosts, &disc, age, UniverseTime::EPOCH);
+                assert_eq!(format!("{before:?}"), format!("{whole:?}"));
+                compared += 1;
+                refused += usize::from(before.is_err());
+            }
+        }
+        assert!(
+            compared > 400 && refused >= bodies.len(),
+            "{compared} {refused}"
         );
     }
 
@@ -1892,6 +4372,74 @@ mod tests {
         );
     }
 
+    /// The hosts' saturation time as one is theirs weighted by their saturated fluxes at the body,
+    /// Σ `F_s,i` `t_sat,i` ÷ Σ `F_s,i` (`SkySums::saturation_time`), summed in their order; a host
+    /// whose saturated flux is zero weighs nothing; and a sky no host's saturated flux reaches
+    /// takes a dark host's.
+    #[test]
+    fn the_hosts_saturation_times_are_weighted_by_their_saturated_fluxes() {
+        use crate::planetary::context::XuvHistory;
+        use crate::units::{SolarLuminosities, SolarMasses, SolarRadii};
+
+        let body = placed(EARTH_MASS_KG, 0.3, 0.1, 0.5);
+        // An M dwarf of 0.2 M☉, saturated 10⁹ yr, beside the Sun's 10⁸ yr.
+        let dwarf = HostLight::new(
+            SolarLuminosities::new(0.005),
+            Kelvin::new(3200.0),
+            SolarRadii::new(0.2),
+        )
+        .unwrap()
+        .with_history(
+            XuvHistory::new(SolarMasses::new(0.2), SolarLuminosities::new(0.004)),
+            SolarLuminosities::new(0.005),
+        );
+        let sky_of = |lights: &[HostLight]| {
+            let hosts = BodyHosts::new(
+                Kilograms::new(SOLAR_MASS_KG),
+                Composition::SOLAR,
+                lights,
+                &[],
+            )
+            .unwrap();
+            Sky::of(&body, &hosts, SOLAR_AGE)
+        };
+        let (a, e) = (
+            body.orbit.semi_major_axis(),
+            body.orbit.eccentricity().value(),
+        );
+        let lights = [historic_sun(), dwarf];
+        let (flux, fluence) = lights.iter().fold((0.0, 0.0), |(flux, fluence), host| {
+            let saturated = host.xuv().saturated_flux(a, e).value();
+            (
+                flux + saturated,
+                fluence + saturated * host.xuv().saturation_time().value(),
+            )
+        });
+        let (sun_time, dwarf_time) = (
+            lights[0].xuv().saturation_time().value(),
+            lights[1].xuv().saturation_time().value(),
+        );
+        assert!(
+            flux > 0.0 && sun_time < dwarf_time,
+            "{sun_time} {dwarf_time}"
+        );
+        let sky = sky_of(&lights);
+        assert_same_bits(sky.saturated_xuv_flux.value(), flux);
+        let time = sky.xuv_saturation_time.value();
+        assert_same_bits(time, fluence / flux);
+        assert!(sun_time < time && time < dwarf_time, "{time}");
+        // The present Sun of no history: its saturated flux is zero, and the dwarf's time stands.
+        let time = sky_of(&[sun(), dwarf]).xuv_saturation_time.value();
+        assert!((time / dwarf_time - 1.0).abs() < 1e-15, "{time}");
+        // No saturated flux at all: a dark host's time, not 0 ÷ 0.
+        let dark = sky_of(&[sun()]);
+        assert_same_bits(dark.saturated_xuv_flux.value(), 0.0);
+        assert_same_bits(
+            dark.xuv_saturation_time.value(),
+            XuvHistory::DARK.saturation_time().value(),
+        );
+    }
+
     #[test]
     fn classes_follow_the_composition() {
         let disc = solar_disc();
@@ -1914,7 +4462,31 @@ mod tests {
         assert_eq!(class(5.0, 0.1, 0.9), PlanetClass::SubNeptune);
         assert_eq!(class(30.0, 5.0, 0.5), PlanetClass::IceGiant);
         assert_eq!(class(90.0, 5.0, 0.5), PlanetClass::GasGiant);
-        assert!(!PlanetClass::GasGiant.has_surface() && PlanetClass::SubNeptune.has_surface());
+    }
+
+    /// P14.T48.e's gas-envelope split (decision-p14-t35e-wire §2.3): `is_giant` is the old
+    /// `!has_surface()` for every class, so that no spin, tide or lock moves, and
+    /// `has_solid_surface` holds exactly where the figure's datum is the solid surface.
+    #[test]
+    fn the_class_predicates_split_at_the_sub_neptune() {
+        for (class, giant, solid) in [
+            (PlanetClass::Rocky, false, true),
+            (PlanetClass::Icy, false, true),
+            (PlanetClass::SubNeptune, false, false),
+            (PlanetClass::IceGiant, true, false),
+            (PlanetClass::GasGiant, true, false),
+        ] {
+            // Version 21's `has_surface`: every class but the giants.
+            let had_surface = !matches!(class, PlanetClass::IceGiant | PlanetClass::GasGiant);
+            assert_eq!(class.is_giant(), giant, "{class:?}");
+            assert_eq!(class.is_giant(), !had_surface, "{class:?}");
+            assert_eq!(class.has_solid_surface(), solid, "{class:?}");
+            assert_eq!(
+                class.has_solid_surface(),
+                figure::Datum::of(class) == figure::Datum::SolidSurface,
+                "{class:?}"
+            );
+        }
     }
 
     #[test]
@@ -2090,6 +4662,184 @@ mod tests {
         );
     }
 
+    /// Under every 27 hold beyond the snow line the rocky part of the window about a host of
+    /// \[α/Fe\] +0.3 starts at its Earth, logistic(logit(0.325) + Δ), 0.194, and about an
+    /// iron-richer host (\[α/Fe\] −0.05) above 0.325; either way the radius is continuous across
+    /// the top's rank, and every rocky outcome is held to the floor.
+    #[test]
+    fn under_27_beyond_the_snow_line_the_rocky_part_starts_at_the_host_s_earth() {
+        {
+            let flux = EarthFluxes::new(0.05);
+            let solar = solar_magnesium_to_silicon();
+            for (alpha, floor) in [(0.3, 0.194), (-0.05, 0.351)] {
+                let shift = rocky::CoreShareShift::of_host(solar, Dex::new(alpha));
+                for m in [0.3, 1.0, 1.6, 3.0, 10.0] {
+                    let mass = EarthMasses::new(m);
+                    let side = SnowLineSide::Beyond;
+                    let window = radius_window_about(mass, side, flux, shift).unwrap();
+                    let earth = window.dry_top_core_mass_fraction();
+                    assert!((earth - floor).abs() < 0.005, "{m} M⊕ {alpha}: {earth}");
+                    assert_same_bits(earth, shift.about_host(radius::EARTH_CORE_MASS_FRACTION));
+                    assert_same_bits(
+                        window.dry_top().value(),
+                        dry_composition(mass, earth).radius().value(),
+                    );
+                    let top = chen_kipping_rank(mass, window.dry_top());
+                    let at = |r: f64| {
+                        confined_radius(mass, UnitUniform::new(r).unwrap(), &window, side, flux)
+                    };
+                    let (below, above) = (at(top * (1.0 - 1e-12)), at(top * (1.0 + 1e-12)));
+                    assert!(
+                        (above / below - 1.0).abs() < 1.1e-5,
+                        "{m} M⊕ {alpha}: {below}, {above}"
+                    );
+                    for i in 1..200_u32 {
+                        let rank = UnitUniform::new(top * f64::from(i) / 200.0).unwrap();
+                        if let Some(cmf) = rocky_core_mass_fraction(rank, &window) {
+                            assert!(cmf >= earth - 1e-12, "{m} M⊕ {alpha}: {cmf}");
+                        }
+                    }
+                }
+            }
+        };
+    }
+
+    /// Under every 27 hold no formation outcome about a host off the Sun's ratios keeps Earth's
+    /// own 0.325 core: water on the host's Earth-like core beyond the snow line, an envelope on it
+    /// (the formation law's, the M-dwarf branch's and Chen and Kipping's) and the rocky outcomes'
+    /// draw all take its shift; and about a host of \[α/Fe\] +0.3 no watery or enveloped outcome's
+    /// mantle clamps to no `FeO`.
+    #[test]
+    fn under_27_no_formation_outcome_about_a_host_keeps_earth_s_own_core() {
+        use crate::planetary::hooks::crust::mantle_iron_oxide_mass_fraction;
+        {
+            let solar = solar_magnesium_to_silicon();
+            let (mut watery, mut enveloped) = (0_u32, 0_u32);
+            for alpha in [0.3, -0.05] {
+                for (disc, a_au) in [
+                    (solar_disc(), 0.1),
+                    (solar_disc(), 1.0),
+                    (solar_disc(), 5.0),
+                    (disc_of(0.3), 0.03),
+                ] {
+                    let host = FormationHost::of_disc(&disc).with_host_rock(solar, Dex::new(alpha));
+                    for earths in [0.3, 1.0, 3.0, 8.0, 15.0] {
+                        for i in 1..100_u32 {
+                            let body =
+                                placed(earths * EARTH_MASS_KG, a_au, 0.0, f64::from(i) / 100.0);
+                            let (_, _, solved) = formation_about(&body, &host).unwrap();
+                            let f = solved.unwrap().fractions();
+                            let core = f.iron() / (f.iron() + f.rock());
+                            let label = format!("{alpha} {a_au} au {earths} M⊕ {i}");
+                            assert!(
+                                (core - radius::EARTH_CORE_MASS_FRACTION).abs() > 1e-6,
+                                "{label}: {core}"
+                            );
+                            let wet = f.water() > 0.0;
+                            let gas = f.envelope() > 0.0;
+                            watery += u32::from(wet && !gas);
+                            enveloped += u32::from(gas);
+                            if alpha > 0.0 && (wet || gas) {
+                                let feo =
+                                    mantle_iron_oxide_mass_fraction(core, solar, Dex::new(alpha));
+                                assert!(feo > 0.03, "{label}: {feo}");
+                            }
+                        }
+                    }
+                }
+            }
+            assert!(watery > 100 && enveloped > 100, "{watery} {enveloped}");
+            // A giant's heavy elements, and a body blended into a giant's, through the derivation.
+            let disc = solar_disc();
+            let lights = [sun()];
+            let hosts = BodyHosts::new(
+                Kilograms::new(SOLAR_MASS_KG),
+                Composition::SOLAR,
+                &lights,
+                &[],
+            )
+            .unwrap()
+            .with_host_rock(solar, Dex::new(0.3));
+            for earths in [110.0, 318.0] {
+                let body = placed(earths * EARTH_MASS_KG, 5.2, 0.05, 0.5);
+                let derived =
+                    derive_body(&body, &hosts, &disc, SOLAR_AGE, UniverseTime::EPOCH).unwrap();
+                let f = derived.fractions();
+                let core = f.iron() / (f.iron() + f.rock());
+                assert!(
+                    (core - radius::EARTH_CORE_MASS_FRACTION).abs() > 0.05,
+                    "{earths} M⊕: {core}"
+                );
+            }
+        };
+    }
+
+    /// Under every 27 hold a body's hosts carry their rock into its formation: about a host of
+    /// \[α/Fe\] +0.3 a rocky outcome, the M-dwarf branch's and a rogue's birth host's among them,
+    /// takes the shifted draw at its rank, and about the Sun's ratios the population's, to the bit.
+    #[test]
+    fn under_27_a_body_s_hosts_carry_their_rock_into_its_draw() {
+        {
+            let (solar, alpha) = (solar_magnesium_to_silicon(), Dex::new(0.3));
+            let shift = rocky::CoreShareShift::of_host(solar, alpha);
+            for (disc, a_au) in [(solar_disc(), 1.0), (disc_of(0.3), 0.03)] {
+                for u in [0.1, 0.3, 0.5] {
+                    let body = placed(EARTH_MASS_KG, a_au, 0.0, u);
+                    let solar_host = FormationHost::of_disc(&disc);
+                    let rich = solar_host.with_host_rock(solar, alpha);
+                    let core = |host: &FormationHost| {
+                        let (_, _, solved) = formation_about(&body, host).unwrap();
+                        solved.unwrap().core().core_mass_fraction()
+                    };
+                    let (population, about_rich) = (core(&solar_host), core(&rich));
+                    assert!(about_rich < population, "{a_au} au {u}: {about_rich}");
+                    // The shifted draw is the population's moved by Δ in its logit.
+                    let back = shift.solar_equivalent(about_rich);
+                    assert!((back - population).abs() < 1e-12, "{back} {population}");
+                    let lights = [sun()];
+                    let hosts = BodyHosts::new(
+                        Kilograms::from(disc.host_mass()),
+                        Composition::SOLAR,
+                        &lights,
+                        &[],
+                    )
+                    .unwrap();
+                    let derived = |hosts: &BodyHosts<'_>| {
+                        derive_body(&body, hosts, &disc, SOLAR_AGE, UniverseTime::EPOCH)
+                            .unwrap()
+                            .core()
+                            .core_mass_fraction()
+                    };
+                    assert_same_bits(derived(&hosts), population);
+                    assert_same_bits(derived(&hosts.with_host_rock(solar, Dex::ZERO)), population);
+                    assert_same_bits(derived(&hosts.with_host_rock(solar, alpha)), about_rich);
+                }
+            }
+            let rogue =
+                crate::planetary::hosts::substellar::birth_host(&Composition::SOLAR, solar, alpha);
+            let body = placed(EARTH_MASS_KG, 1.0, 0.0, 0.5);
+            // A smaller core, a larger radius.
+            let alone = |host: &FormationHost| {
+                derive_alone(
+                    &body,
+                    host,
+                    &Composition::SOLAR,
+                    SOLAR_AGE,
+                    AloneMetals::DiscFormed,
+                )
+                .unwrap()
+                .radius()
+                .value()
+            };
+            let solar_rogue = FormationHost {
+                magnesium_to_silicon: solar,
+                alpha_fe: Dex::ZERO,
+                ..rogue
+            };
+            assert!(alone(&rogue) > alone(&solar_rogue));
+        };
+    }
+
     /// Ruling 58: beyond the snow line only the ranks below the Earth-like curve are rocky
     /// outcomes, held to Earth's core fraction and above, and every rank above that curve keeps
     /// its water; inside the snow line the rocky outcomes still reach the rock curve.
@@ -2196,6 +4946,18 @@ mod tests {
                 &format!("{name}_surface_pressure"),
                 air.surface_pressure().map_or(-1.0, Pascals::value),
             );
+            // P14.T24.f: every gas's partial pressure, and the carbon's carrier.
+            for gas in atmosphere::Gas::ALL {
+                let gas_name = format!("{gas:?}").to_lowercase();
+                w.f64(
+                    &format!("{name}_partial_pressure_{gas_name}"),
+                    air.partial_pressures().of(gas).value(),
+                );
+            }
+            w.line(&format!(
+                "{name}_carbon_carrier = {:?}",
+                air.carbon_carrier()
+            ));
             w.f64(&format!("{name}_xuv_fluence"), d.xuv_fluence().value());
             w.f64(&format!("{name}_envelope_lost"), d.envelope_lost().value());
         };
@@ -2237,21 +4999,7 @@ mod tests {
         // fraction and above, and one between the Earth-like and rock curves, which keeps Chen
         // and Kipping's radius and its water.
         for (name, dry) in [("beyond_dry", true), ("beyond_watery", false)] {
-            let (earths, a_au, eccentricity) = (1.0, 4.0, 0.05);
-            let mass = EarthMasses::new(earths);
-            let axis = Metres::new(a_au * METRES_PER_AU);
-            let flux = luminosity_flux(disc.host_luminosity(), axis, eccentricity);
-            let window = radius_window(mass, SnowLineSide::Beyond, flux).unwrap();
-            let rank = |r: EarthRadii| chen_kipping_rank(mass, r);
-            let (least, greatest) = (rank(window.least()), rank(window.greatest()));
-            let (top, rock) = (rank(window.dry_top()), rank(window.rock()));
-            let target = if dry {
-                f64::midpoint(least, top)
-            } else {
-                f64::midpoint(top, rock)
-            };
-            let u = (target - least) / (greatest - least);
-            let placed = placed(earths * EARTH_MASS_KG, a_au, eccentricity, u);
+            let placed = beyond_the_snow_line(&disc, dry);
             let body = derive(&placed, &disc).unwrap();
             assert_eq!(body.formed(), SnowLineSide::Beyond);
             if dry {
@@ -2262,6 +5010,28 @@ mod tests {
             }
             pin(&mut w, name, &body);
         }
+        // P14.T24.f: a Titan, whose carbon becomes methane, and a runaway world that lost many
+        // oceans, which keeps oxygen; both were carbon dioxide and no oxygen before the 21 → 22
+        // bump.
+        let (kg, km, a_au, eccentricity) = (1.345_2e23, 2_574.7, 9.582_6, 0.056_5);
+        let titan = placed(
+            kg,
+            a_au,
+            eccentricity,
+            rank_for(&disc, kg, km, a_au, eccentricity),
+        );
+        pin(&mut w, "titan", &derive(&titan, &disc).unwrap());
+        let wet = atmosphere::VolatileDraws {
+            water: UnitUniform::new(0.99).unwrap(),
+            ..atmosphere::VolatileDraws::MEDIAN
+        };
+        let runaway = placed(EARTH_MASS_KG, 0.6, 0.0, 0.5).with_volatiles(wet);
+        let runaway = derive(&runaway, &disc).unwrap();
+        assert_eq!(
+            runaway.atmosphere().state(),
+            SurfaceState::RunawayGreenhouse
+        );
+        pin(&mut w, "wet_runaway", &runaway);
         golden!("planetary/derive_body", w.as_str());
     }
 
@@ -2333,7 +5103,8 @@ mod tests {
             let disc = disc_of(0.72);
             for u in [0.1, 0.5, 0.9] {
                 let body = placed(earths * EARTH_MASS_KG, a_au, 0.0, u);
-                let (_, rank, solved) = formation(&body, &disc).unwrap();
+                let (_, rank, solved) =
+                    formation_about(&body, &FormationHost::of_disc(&disc)).unwrap();
                 let window = radius_window(
                     mass,
                     SnowLineSide::Inside,
@@ -2354,6 +5125,7 @@ mod tests {
                             (confined.value() - top) / (greatest - top),
                             radius_chen_kipping(mass, confined),
                             flux,
+                            rocky::CoreShareShift::NONE,
                         )
                     }
                     None => composition(
@@ -2367,5 +5139,320 @@ mod tests {
                 assert_eq!(solved.unwrap(), expected);
             }
         }
+    }
+
+    /// P14.T56.c: a formation zone is a place, two positive, finite distances, and it lies inside
+    /// the snow line only strictly inside it, as `derive_body` judges a formation distance.
+    #[test]
+    fn a_formation_zone_is_a_place_judged_as_a_formation_distance_is() {
+        let au = |x: f64| Metres::new(x * METRES_PER_AU);
+        for bad in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            assert_eq!(
+                FormationZone::new(Metres::new(bad), au(2.0)),
+                Err(BuildFormationZoneError::DistanceNotPositive)
+            );
+            assert_eq!(
+                FormationZone::new(au(2.0), Metres::new(bad)),
+                Err(BuildFormationZoneError::SnowLineNotPositive)
+            );
+        }
+        let text = BuildFormationZoneError::DistanceNotPositive.to_string();
+        assert_eq!(text, text.to_lowercase());
+        assert!(!text.ends_with('.'));
+        let disc = solar_disc();
+        let line = disc.snow_line();
+        for (d, side) in [
+            (line, SnowLineSide::Beyond),
+            (
+                Metres::new(line.value() * (1.0 - 1e-12)),
+                SnowLineSide::Inside,
+            ),
+        ] {
+            let zone = FormationZone::new(d, line).unwrap();
+            assert_eq!(zone.side(), side);
+            let placed =
+                PlacedBody::new(EarthMasses::new(1.0), orbit(1.0, 0.0), d, UnitUniform::HALF)
+                    .unwrap();
+            assert_eq!(
+                formation_about(&placed, &FormationHost::of_disc(&disc))
+                    .unwrap()
+                    .0,
+                side
+            );
+            assert_same_bits(
+                zone.temperature().value(),
+                formation_temperature(d, line).value(),
+            );
+        }
+    }
+
+    /// P14.T56.c: a body's volatiles taken from another zone set its inventory's side and its
+    /// carbon's carrier, and nothing of its bulk. An Earth formed at 2 au, inside the zero-age
+    /// Sun's snow line and beyond the present Sun's maximum-greenhouse limit, carries its carbon
+    /// as carbon dioxide; with its volatiles from 3 au, beyond the line, as methane, with a
+    /// hundred times its carbon.
+    #[test]
+    fn a_body_s_carbon_carrier_follows_where_its_volatiles_formed() {
+        use crate::planetary::derive::atmosphere::CarbonCarrier;
+        let disc = solar_disc();
+        let own = placed(EARTH_MASS_KG, 2.0, 0.0, 0.5);
+        let zone = FormationZone::new(Metres::new(3.0 * METRES_PER_AU), disc.snow_line()).unwrap();
+        let moved = own.with_volatiles_from(zone);
+        assert_eq!(moved.volatile_zone(), Some(&zone));
+        let (a, b) = (derive(&own, &disc).unwrap(), derive(&moved, &disc).unwrap());
+        assert_eq!(a.formed(), SnowLineSide::Inside);
+        assert_eq!(b.formed(), SnowLineSide::Inside);
+        assert_eq!(
+            a.atmosphere().carbon_carrier(),
+            Some(CarbonCarrier::CarbonDioxide)
+        );
+        assert_eq!(
+            b.atmosphere().carbon_carrier(),
+            Some(CarbonCarrier::Methane)
+        );
+        let ratio = b.inventory().carbon_dioxide().value() / a.inventory().carbon_dioxide().value();
+        assert!((ratio / 100.0 - 1.0).abs() < 1e-12, "{ratio}");
+        assert_same_bits(a.radius().value(), b.radius().value());
+        assert_eq!(a.fractions(), b.fractions());
+        assert_same_bits(a.surface_gravity().value(), b.surface_gravity().value());
+    }
+
+    /// P14.T50.a, wired by P14.T54.a: a derived body holds the element inventory of the inputs its
+    /// atmosphere's inventory reads, and its carriers, the view the atmosphere reads, are
+    /// `volatile_inventory`'s of those inputs to the bit, the inventory version 22 read. So for a
+    /// body that keeps its own zone, inside the snow line, between it and the ammonia line and
+    /// beyond both, at the median and the extreme ranks; for one whose volatiles formed in another
+    /// zone (P14.T56.c, a captured moon's), whose ΔIW then reads that zone too; and for one given
+    /// its own bulk, read at its placed mass and that bulk's fractions.
+    #[test]
+    fn a_body_s_element_inventory_keeps_its_atmosphere_s_carriers_to_the_bit() {
+        use crate::planetary::derive::atmosphere::volatile_inventory;
+        let disc = solar_disc();
+        let line = disc.snow_line();
+        let r = |u: f64| UnitUniform::new(u).unwrap();
+        let extreme = VolatileDraws {
+            water: r(1e-6),
+            carbon: r(0.999_999),
+            nitrogen: r(0.841_344_746_068_542_9),
+            sulphur: r(0.158_655_253_931_457_05),
+            chlorine: r(0.999_999),
+            redox: r(1e-6),
+        };
+        let far = FormationZone::new(Metres::new(9.58 * METRES_PER_AU), line).unwrap();
+        let given = MassFractions::solid(0.0, 0.6, 0.4);
+        let titan_bulk = GivenBulk::new(Metres::new(2.575e6), GivenFractions::Exactly(given));
+        let check = |body: &PlacedBody,
+                     zone: Option<FormationZone>,
+                     mass: EarthMasses,
+                     fractions: MassFractions| {
+            let derived = derive(body, &disc).unwrap();
+            let (formed, formation_distance, snow_line) = zone
+                .map_or((derived.formed(), body.formation_distance(), line), |z| {
+                    (z.side(), z.distance(), z.snow_line())
+                });
+            let inputs = InventoryInputs {
+                mass,
+                fractions,
+                formed,
+                formation_distance,
+                snow_line,
+                draws: *body.volatiles(),
+                age: SOLAR_AGE,
+            };
+            assert_eq!(*derived.element_inventory(), element_inventory(&inputs));
+            let carriers = volatile_inventory(
+                mass,
+                &fractions,
+                formed,
+                formation_temperature(formation_distance, snow_line),
+                body.volatiles(),
+                SOLAR_AGE,
+            );
+            let view = derived.inventory();
+            for (a, b) in [
+                (view.water(), carriers.water()),
+                (view.carbon_dioxide(), carriers.carbon_dioxide()),
+                (view.nitrogen(), carriers.nitrogen()),
+                (view.argon(), carriers.argon()),
+            ] {
+                assert_same_bits(a.value(), b.value());
+            }
+            assert_eq!(view, derived.element_inventory().volatiles());
+            derived
+        };
+        let mut checked = 0;
+        for (kg, a_au) in [
+            (EARTH_MASS_KG, 1.0),
+            (0.107 * EARTH_MASS_KG, 1.524),
+            (EARTH_MASS_KG, 3.0),
+            (1.3452e23, 6.0),
+            (1.3452e23, 9.58),
+        ] {
+            for draws in [VolatileDraws::MEDIAN, extreme] {
+                let own = placed(kg, a_au, 0.0, 0.5).with_volatiles(draws);
+                let solved = derive(&own, &disc).unwrap();
+                let at_home = check(&own, None, solved.mass(), solved.fractions());
+                let moved = check(
+                    &own.with_volatiles_from(far),
+                    Some(far),
+                    solved.mass(),
+                    solved.fractions(),
+                );
+                // Inside the snow line, where the redox trend still varies with distance.
+                if a_au < 2.0 {
+                    assert_ne!(
+                        at_home.element_inventory().mantle_delta_iw(),
+                        moved.element_inventory().mantle_delta_iw(),
+                        "{a_au} au"
+                    );
+                }
+                check(&own.with_bulk(titan_bulk), None, own.mass(), given);
+                checked += 3;
+            }
+        }
+        assert_eq!(checked, 30);
+    }
+
+    /// P14.T51.g.b: a derived body's ocean solutes are its element inventory's whole chlorine as
+    /// sodium chloride, and its ice's ammonia, `ACCRETED_AMMONIA` times its nitrogen rank's
+    /// multiple, only where its volatiles formed beyond the snow line at or below ammonia
+    /// hydrate's temperature (the nitrogen's icy boost): none inside the snow line or between it
+    /// and the ammonia line, some beyond both, and some for a body whose volatiles formed in a far
+    /// zone, at the median and the extreme ranks.
+    #[test]
+    fn a_body_s_ocean_solutes_are_its_chlorine_and_its_ice_s_ammonia() {
+        use crate::planetary::derive::atmosphere::nitrogen_boosted;
+        use crate::planetary::hooks::ocean::{ACCRETED_AMMONIA, nitrogen_multiple};
+        use crate::substance::Element;
+        let disc = solar_disc();
+        let line = disc.snow_line();
+        let r = |u: f64| UnitUniform::new(u).unwrap();
+        let ranked = VolatileDraws {
+            nitrogen: r(0.97),
+            chlorine: r(0.03),
+            ..VolatileDraws::MEDIAN
+        };
+        let far = FormationZone::new(Metres::new(9.58 * METRES_PER_AU), line).unwrap();
+        let cl = Element::Cl.standard_atomic_weight_g_per_mol();
+        let salt = Element::Na.standard_atomic_weight_g_per_mol() + cl;
+        for (kg, a_au, at_home) in [
+            (EARTH_MASS_KG, 1.0, Some(false)),
+            (EARTH_MASS_KG, 3.0, None),
+            (1.3452e23, 6.0, None),
+            (1.3452e23, 9.58, Some(true)),
+        ] {
+            for draws in [VolatileDraws::MEDIAN, ranked] {
+                let own = placed(kg, a_au, 0.0, 0.5).with_volatiles(draws);
+                for (body, zone) in [(own, None), (own.with_volatiles_from(far), Some(far))] {
+                    let derived = derive(&body, &disc).unwrap();
+                    let (side, distance, snow_line) = zone
+                        .map_or((derived.formed(), body.formation_distance(), line), |z| {
+                            (z.side(), z.distance(), z.snow_line())
+                        });
+                    let icy = side == SnowLineSide::Beyond
+                        && nitrogen_boosted(formation_temperature(distance, snow_line));
+                    let solutes = derived.ocean_solutes();
+                    let chlorine = derived.element_inventory().total(Element::Cl).value();
+                    assert_same_bits(solutes.sodium_chloride.value(), chlorine * salt / cl);
+                    let ammonia = if icy {
+                        ACCRETED_AMMONIA * nitrogen_multiple(draws.nitrogen)
+                    } else {
+                        0.0
+                    };
+                    assert_same_bits(solutes.ammonia_per_water, ammonia);
+                    // Inside the snow line at 1 au, beyond both lines at 9.58 au and in the far
+                    // zone: none, then some.
+                    let expected = if zone.is_some() { Some(true) } else { at_home };
+                    if let Some(expected) = expected {
+                        assert_eq!(icy, expected, "{a_au} au, {zone:?}");
+                        assert_eq!(solutes.ammonia_per_water > 0.0, expected, "{a_au} au");
+                    }
+                }
+            }
+        }
+    }
+
+    /// P14.T56.c's follow-up: a body given its own bulk ([`PlacedBody::with_bulk`]) has its
+    /// inventory read at its placed mass and that bulk's fractions, and its atmosphere at that
+    /// radius and mass: its Jeans escape and the weight of its air are the bulk's. Every other
+    /// value is its solve's, bit for bit, and given its solve's own radius and fractions it is the
+    /// body without one, bit for bit.
+    ///
+    /// A body of Titan's mass placed at Saturn's 9.58 au, beyond the snow and ammonia lines,
+    /// holds an unsaturated N₂ air, whose partial pressure `M_N₂ G M ÷ (4π R⁴)` gives back the
+    /// radius it was weighed at.
+    #[test]
+    fn a_given_bulk_is_what_the_inventory_and_the_atmosphere_read() {
+        use crate::planetary::derive::atmosphere::{Gas, Retention, volatile_inventory};
+        use crate::units::consts::GRAVITATIONAL_CONSTANT;
+        let disc = solar_disc();
+        let own = placed(1.3452e23, 9.5826, 0.0565, 0.5);
+        let solved = derive(&own, &disc).unwrap();
+        let solved_radius = Metres::from(solved.radius());
+        let as_solved = GivenBulk::new(solved_radius, GivenFractions::Exactly(solved.fractions()));
+        assert_eq!(derive(&own.with_bulk(as_solved), &disc).unwrap(), solved);
+
+        let radius = Metres::new(1.15 * solved_radius.value());
+        let fractions = MassFractions::solid(0.0, 0.6, 0.4);
+        let bulk = GivenBulk::new(radius, GivenFractions::Exactly(fractions));
+        let given = derive(&own.with_bulk(bulk), &disc).unwrap();
+        // Nothing but the inventory and the air, and the albedo and temperatures they set, moves.
+        assert_same_bits(given.radius().value(), solved.radius().value());
+        assert_same_bits(given.density().value(), solved.density().value());
+        assert_same_bits(
+            given.surface_gravity().value(),
+            solved.surface_gravity().value(),
+        );
+        assert_eq!(given.fractions(), solved.fractions());
+        assert_eq!(given.class(), solved.class());
+        assert_same_bits(given.mass().value(), solved.mass().value());
+        assert_same_bits(given.hill_radius().value(), solved.hill_radius().value());
+        assert_same_bits(
+            given.maximum_moon_mass().value(),
+            solved.maximum_moon_mass().value(),
+        );
+        assert_same_bits(given.flux().value(), solved.flux().value());
+        // The inventory: the placed mass and the bulk's fractions, its water floor their ice.
+        let formed = formation_temperature(own.formation_distance(), disc.snow_line());
+        let inventory = volatile_inventory(
+            own.mass(),
+            &fractions,
+            SnowLineSide::Beyond,
+            formed,
+            own.volatiles(),
+            SOLAR_AGE,
+        );
+        assert_eq!(*given.inventory(), inventory);
+        let kg = Kilograms::from(own.mass()).value();
+        assert_same_bits(given.inventory().water().value(), 0.4 * kg);
+        // The air: escape at the bulk's radius, and N₂ weighed at it.
+        let air = given.atmosphere();
+        let mass = Kilograms::from(own.mass());
+        let escape = Retention::of(mass, radius, air.exobase_temperature());
+        assert_eq!(
+            air.retention(),
+            escape.with(air.ice_held()).with_methane_as_nitrogen()
+        );
+        assert!(air.retention().retains(Gas::Nitrogen), "{air:?}");
+        let nitrogen = air.partial_pressures().of(Gas::Nitrogen).value();
+        let weighed_at = crate::math::powf(
+            given.inventory().nitrogen().value() * GRAVITATIONAL_CONSTANT * kg
+                / (4.0 * core::f64::consts::PI * nitrogen),
+            0.25,
+        );
+        assert!(
+            (weighed_at / radius.value() - 1.0).abs() < 1e-12,
+            "{weighed_at} m against {} m",
+            radius.value()
+        );
+        let unweighed = solved
+            .atmosphere()
+            .partial_pressures()
+            .of(Gas::Nitrogen)
+            .value();
+        assert!(
+            (nitrogen / unweighed - crate::math::powi(1.15, -4)).abs() < 1e-9,
+            "{nitrogen} Pa against {unweighed} Pa"
+        );
     }
 }

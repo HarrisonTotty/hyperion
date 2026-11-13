@@ -8,11 +8,17 @@
  */
 
 import type {
+  AtmosphereCheckRecord,
+  CheckPhaseName,
+  HandoverCheckRecord,
+  InspectionTimingRecord,
+  InspectionTimingWindowName,
   SpikeEnd,
   SpikeResultsPaths,
+  TerrainCheckPhaseUpdate,
+  TerrainCheckRecord,
   ViewsCheckApi,
   ViewsCheckLaunch,
-  ViewsCheckPhaseName,
   ViewsCheckRecord,
   ViewsCheckWindow,
 } from "./api";
@@ -24,6 +30,15 @@ export const VIEWS_CHECK_CHANNEL_NAMES = {
   endPhase: "hyperion:views-check:end-phase",
   askRightWayUp: "hyperion:views-check:ask-right-way-up",
   writeResults: "hyperion:views-check:write-results",
+  writeTerrainResults: "hyperion:views-check:write-terrain-results",
+  writeTerrainPhase: "hyperion:views-check:write-terrain-phase",
+  writeHandoverResults: "hyperion:views-check:write-handover-results",
+  writeAtmosphereResults: "hyperion:views-check:write-atmosphere-results",
+  startProfile: "hyperion:views-check:start-profile",
+  endProfile: "hyperion:views-check:end-profile",
+  writeTimingResults: "hyperion:views-check:write-timing-results",
+  capture: "hyperion:views-check:capture",
+  wholeField: "hyperion:views-check:whole-field",
   end: "hyperion:views-check:end",
 } as const;
 
@@ -46,10 +61,10 @@ export function viewsCheckApi(launch: ViewsCheckLaunch, deps: ViewsCheckApiDeps)
   const { invoke } = deps;
   return {
     launch,
-    startPhase: async (name: ViewsCheckPhaseName) => {
+    startPhase: async (name: CheckPhaseName) => {
       await invoke(VIEWS_CHECK_CHANNEL_NAMES.startPhase, name);
     },
-    endPhase: async (name: ViewsCheckPhaseName, window: ViewsCheckWindow) => {
+    endPhase: async (name: CheckPhaseName, window: ViewsCheckWindow) => {
       await invoke(VIEWS_CHECK_CHANNEL_NAMES.endPhase, name, window);
     },
     askRightWayUp: async () => {
@@ -61,6 +76,57 @@ export function viewsCheckApi(launch: ViewsCheckLaunch, deps: ViewsCheckApiDeps)
         throw new Error("the main process wrote no results file");
       }
       return paths;
+    },
+    writeTerrainResults: async (record: TerrainCheckRecord) => {
+      const paths = await invoke(VIEWS_CHECK_CHANNEL_NAMES.writeTerrainResults, record);
+      if (!isPaths(paths)) {
+        throw new Error("the main process wrote no terrain results file");
+      }
+      return paths;
+    },
+    writeTerrainPhase: async (update: TerrainCheckPhaseUpdate) => {
+      const paths = await invoke(VIEWS_CHECK_CHANNEL_NAMES.writeTerrainPhase, update);
+      if (!isPaths(paths)) {
+        throw new Error("the main process wrote no terrain phases file");
+      }
+      return paths;
+    },
+    writeHandoverResults: async (record: HandoverCheckRecord) => {
+      const paths = await invoke(VIEWS_CHECK_CHANNEL_NAMES.writeHandoverResults, record);
+      if (!isPaths(paths)) {
+        throw new Error("the main process wrote no hand-over results file");
+      }
+      return paths;
+    },
+    writeAtmosphereResults: async (record: AtmosphereCheckRecord) => {
+      const paths = await invoke(VIEWS_CHECK_CHANNEL_NAMES.writeAtmosphereResults, record);
+      if (!isPaths(paths)) {
+        throw new Error("the main process wrote no atmosphere results file");
+      }
+      return paths;
+    },
+    wholeField: async () => {
+      const text = await invoke(VIEWS_CHECK_CHANNEL_NAMES.wholeField);
+      if (typeof text !== "string") {
+        throw new Error("the main process read no whole-body field");
+      }
+      return text;
+    },
+    startProfile: async (name: InspectionTimingWindowName) => {
+      await invoke(VIEWS_CHECK_CHANNEL_NAMES.startProfile, name);
+    },
+    endProfile: async (name: InspectionTimingWindowName, window: ViewsCheckWindow) => {
+      await invoke(VIEWS_CHECK_CHANNEL_NAMES.endProfile, name, window);
+    },
+    writeTimingResults: async (record: InspectionTimingRecord) => {
+      const paths = await invoke(VIEWS_CHECK_CHANNEL_NAMES.writeTimingResults, record);
+      if (!isPaths(paths)) {
+        throw new Error("the main process wrote no timing file");
+      }
+      return paths;
+    },
+    capture: async (label: string) => {
+      await invoke(VIEWS_CHECK_CHANNEL_NAMES.capture, label);
     },
     end: async (outcome: SpikeEnd) => {
       await invoke(VIEWS_CHECK_CHANNEL_NAMES.end, outcome);

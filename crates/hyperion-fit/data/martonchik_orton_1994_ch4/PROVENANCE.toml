@@ -1,0 +1,16 @@
+# The optical constants of phase I methane ice at 90 K of Martonchik and Orton (1994), as the
+# refractiveindex.info database tabulates them (lines of λ in µm, n and k at the spectrum's band
+# extrema): the frost `CH4`'s real index beyond 780 nm (plan 14, P14.T49.i), the source of rendering
+# plan R08's methane-ice.json. The database is in the public domain (CC0 1.0), so the file is
+# committed unmodified. Read by `run substance_albedos`, which takes its n alone.
+dataset = "martonchik_orton_1994_ch4"
+class = "committed"
+citation = "J. V. Martonchik and G. S. Orton (1994), Appl. Opt. 33, 8306-8317, DOI 10.1364/AO.33.008306: optical constants of liquid and solid methane; phase I solid at 90 K; via the refractiveindex.info database (M. N. Polyanskiy 2024, Sci. Data 11, 94)"
+url = "https://raw.githubusercontent.com/polyanskiy/refractiveindex.info-database/c5c2f188e848453def5970e347399d653df2ffc2/database/data/organic/CH4%20-%20methane/nk/Martonchik-solid-90K.yml"
+retrieved = "2026-10-16"
+release = "database/data/organic/CH4 - methane/nk/Martonchik-solid-90K.yml at the database's commit c5c2f188, the file R08's methane-ice.json was reduced from (the same SHA-256)"
+licence = "CC0 1.0 Universal (the file's header: \"refractiveindex.info database is in the public domain; copyright and related rights waived via CC0 1.0\")"
+
+[[files]]
+name = "Martonchik-solid-90K.yml"
+sha256 = "6fb859140db36f1039d5c64aafb7cb4d16de7db18b37a9f414f9c061193acfcd"

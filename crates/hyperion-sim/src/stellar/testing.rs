@@ -23,7 +23,7 @@ use crate::galaxy::{Galaxy, PointLy, Population};
 use crate::id::{BodyId, Layer, SystemId};
 use crate::stellar::Composition;
 use crate::stellar::draws::StarDraws;
-use crate::stellar::system::{StarModel, StarSummary, star_summary};
+use crate::stellar::system::{StarModel, StarStreams, StarSummary, star_summary};
 use crate::time::UniverseTime;
 use crate::units::{Dex, HeliumExcess, SolarMasses, Years};
 
@@ -226,7 +226,11 @@ pub fn sample_star(galaxy: &Galaxy, sampling: &Sampling, seed: u64, index: u64) 
         inputs.age,
     )
     .expect("a sampled star is of 0.08–150 M☉ with a finite age");
-    let summary = star_summary(&model, inputs.body, UniverseTime::EPOCH);
+    let summary = star_summary(
+        &model,
+        StarStreams::new(Seed::new(seed), inputs.body),
+        UniverseTime::EPOCH,
+    );
     SampledStar {
         initial_mass: inputs.initial_mass,
         age: inputs.age,
@@ -298,15 +302,21 @@ mod tests {
     use crate::coords::UnitVector;
     use crate::galaxy::ages::AgeDistribution;
     use crate::galaxy::params::GalaxyParams;
+    use crate::galaxy::rules::GalaxyRules;
     use crate::math;
     use crate::stellar::StarState;
-    use crate::stellar::classify::{ClassExtras, Classification, HeliumSurface, classify};
+    use crate::stellar::classify::{
+        ClassExtras, Classification, DredgeUp, HERBIG_AE_BE_MAX_MASS, HeliumSurface, PeculiarClass,
+        T_TAURI_MAX_MASS, carbon_star_window, chemical_class, classify,
+    };
     use crate::stellar::classify::{NeutronStarClass, SpectralLetter, SpectralType};
     use crate::stellar::nebula::planetary_nebula;
     use crate::stellar::premain::PROTOSTAR_YEARS;
+    use crate::stellar::premain::disc_lifetime;
     use crate::stellar::remnant::DeathKind;
     use crate::stellar::remnant::{NeutronStar, RemnantKind};
-    use crate::stellar::sse::{PhasePredicate, Track};
+    use crate::stellar::rules::StellarRules;
+    use crate::stellar::sse::{PhasePredicate, Track, TrackOptions};
     use crate::stellar::variability::VariableKind;
     use crate::stellar::variability::{VariabilityInputs, variability};
     use crate::stellar::{ObjectKind, Phase};
@@ -924,6 +934,15 @@ mod tests {
     /// sampled at their populations' reference positions: bands A–E of the young disc and C–E of
     /// the older components, whose lighter bands hold none of the counted objects.
     fn galaxy_counts(galaxy: &Galaxy, n: u64) -> Tally {
+        galaxy_counts_with(galaxy, n, observe_counts)
+    }
+
+    /// [`galaxy_counts`] with each star read by `observe` in place of [`observe_counts`].
+    fn galaxy_counts_with(
+        galaxy: &Galaxy,
+        n: u64,
+        observe: impl Fn(&SampleInputs, &AgeDistribution, &mut Tally) + Sync,
+    ) -> Tally {
         let mut total = Tally::default();
         for (i, component) in galaxy.fields().components().iter().enumerate() {
             let population = component.population();
@@ -938,7 +957,7 @@ mod tests {
                     n,
                     |k| sample_inputs(galaxy, &sampling, SEED, k),
                     |inputs, t| {
-                        observe_counts(inputs, component.ages(), t);
+                        observe(inputs, component.ages(), t);
                     },
                 );
                 #[expect(clippy::cast_precision_loss, reason = "a sample size")]
@@ -974,7 +993,9 @@ mod tests {
             t.get("Wolf-Rayet stars"),
             (500.0, 8_000.0),
         );
-        checks.within("LBVs", t.get("LBVs"), (100.0, 2_000.0));
+        // A finding from generator version 26, pinned provisionally: under the enforced
+        // Humphreys–Davidson limit the windows are fewer and shorter (P06.T42.b).
+        checks.pinned("LBVs", t.get("LBVs"), (100.0, 2_000.0), 49.06);
         checks.within(
             "classical Cepheids",
             t.get("classical Cepheids"),
@@ -1012,6 +1033,177 @@ mod tests {
             "core collapses a century",
             100.0 * t.get("core collapses") / RATE_YEARS,
             (1.5, 3.0),
+        );
+        checks.finish();
+    }
+
+    /// Samples of a thermally pulsing AGB for the S and carbon stars' counts.
+    const PULSING_SAMPLES: u32 = 400;
+
+    /// What the counts of P06.T24.b's classes read of one star of `inputs`, of a component whose
+    /// ages are `ages`, its tracks built under `rules`: the weight under `ages` of the ages at which
+    /// the star is a classical or weak-lined T Tauri star, a Herbig Ae/Be star (from the
+    /// protostar's end to its arrival on the main sequence, split at its disc's lifetime), an S
+    /// star of any kind or a carbon star (over its full track's thermally pulsing AGB, on the
+    /// track's own pulse count, ⌊φ⌋, which the series' n follows within its noise's bound); the
+    /// protostars, as [`observe_counts`] weighs them; and, of its summaries early and late in its
+    /// accretion, how many are of a protostar and how many of those carry a young class.
+    fn observe_young_and_chemical(
+        inputs: &SampleInputs,
+        ages: &AgeDistribution,
+        rules: StellarRules,
+        t: &mut Tally,
+    ) {
+        let (m0, composition, draws) = (inputs.initial_mass, &inputs.composition, &inputs.draws);
+        if m0 < crate::stellar::sse::MIN_INITIAL_MASS {
+            return;
+        }
+        let options = TrackOptions::default().with_rules(rules);
+        let arrival =
+            Track::to_age_with(m0, composition, draws, options, Years::new(PROTOSTAR_YEARS))
+                .main_sequence_arrival()
+                .expect("a hydrogen star arrives on its main sequence")
+                .value()
+                .max(PROTOSTAR_YEARS);
+        t.add("protostars", weight(ages, 0.0, PROTOSTAR_YEARS));
+        // The young classes are the contraction's, from the protostar's end to the arrival
+        // (`young_class`), split at the disc's end.
+        if m0 < T_TAURI_MAX_MASS {
+            let disc = 1e6 * disc_lifetime(m0, draws.disc_lifetime()).value();
+            let split = disc.clamp(PROTOSTAR_YEARS, arrival);
+            t.add(
+                "classical T Tauri stars",
+                weight(ages, PROTOSTAR_YEARS, split),
+            );
+            t.add("weak-lined T Tauri stars", weight(ages, split, arrival));
+        } else if m0 < HERBIG_AE_BE_MAX_MASS {
+            t.add("Herbig Ae/Be stars", weight(ages, PROTOSTAR_YEARS, arrival));
+        }
+        // No protostar carries a young class: the star's summary early and late in its accretion,
+        // a Class 0 and a Class I protostar.
+        for age in [0.1 * PROTOSTAR_YEARS, 0.9 * PROTOSTAR_YEARS] {
+            let model =
+                StarModel::new_under(m0, *composition, draws.clone(), Years::new(age), rules)
+                    .expect("a sampled star is a star at a finite age");
+            let summary = star_summary(
+                &model,
+                StarStreams::new(Seed::new(SEED), inputs.body),
+                UniverseTime::EPOCH,
+            )
+            .expect("formed");
+            if summary.kind() == ObjectKind::Protostar {
+                t.add("protostars summarised", 1.0);
+                if summary
+                    .classification()
+                    .peculiar_class()
+                    .is_some_and(|class| {
+                        matches!(
+                            class,
+                            PeculiarClass::TTauri { .. } | PeculiarClass::HerbigAeBe
+                        )
+                    })
+                {
+                    t.add("protostars with a young class", 1.0);
+                }
+            }
+        }
+        if !carbon_star_window(composition).contains(&m0) {
+            return;
+        }
+        let track = Track::full_with(m0, composition, draws, options);
+        let (Some(span), Some(dredge_up)) =
+            (track.pulsing_agb(), DredgeUp::of(m0, composition, &track))
+        else {
+            return;
+        };
+        let (start, end) = (span.start().value(), span.end().value());
+        let class_at = |age: f64| {
+            let n = track.pulse_phase_at(age, 0.0).unwrap_or(0.0).floor();
+            #[expect(
+                clippy::cast_possible_truncation,
+                reason = "a whole number of pulses under 10⁴"
+            )]
+            chemical_class(dredge_up.c_to_o(n as i64))
+        };
+        t.add(
+            "S stars",
+            weight_where(ages, (start, end), PULSING_SAMPLES, |age| {
+                matches!(class_at(age), Some(PeculiarClass::SType(_)))
+            }),
+        );
+        t.add(
+            "carbon stars",
+            weight_where(ages, (start, end), PULSING_SAMPLES, |age| {
+                class_at(age) == Some(PeculiarClass::Carbon)
+            }),
+        );
+    }
+
+    /// The galaxy-wide expected counts of P06.T24.b's classes at Milky Way parameters under every
+    /// 26 hold, the galaxy's and its tracks' (A2's Humphreys–Davidson limit and the helium table
+    /// with the classes), as [`galaxy_wide_counts_at_milky_way_values`] counts its objects (T31's
+    /// count checks):
+    ///
+    /// - carbon stars 2 × 10⁴–5 × 10⁵: the solar neighbourhood's surface density of about 100 a
+    ///   kpc² (Groenewegen et al. 1992, recalled) spread over an exponential disc of scale length
+    ///   3 kpc gives some 9 × 10⁴, and AKARI's all-sky count (Ishihara et al. 2011, A&A 534, A79,
+    ///   recalled) brackets above;
+    /// - S stars 0.05–0.5 of the carbon stars: Stephenson's catalogues list some 1,300 S stars to
+    ///   some 6,000 carbon stars (recalled), extrinsic S stars among them;
+    /// - classical T Tauri stars 2–8 per protostar, the mean disc of 2.5 Myr (P06.T15.c) less the
+    ///   protostar's 0.5 Myr over that 0.5 Myr, weak-lined ones 10–200 per classical one, the
+    ///   contraction below a solar mass (to the young population's 100 Myr of ages) over the disc,
+    ///   and Herbig Ae/Be stars 0.05–0.5 per protostar, a few per cent of stars contracting for up
+    ///   to 6.5 Myr after the protostar phase: the model's own ratios, there being no Galactic
+    ///   census of young stars;
+    /// - no protostar, of the kind `Protostar`, with a young class (research-leans-12 §3).
+    #[test]
+    #[ignore = "slow: 1.5 × 10⁶ stars across every component and band, the window's with full tracks"]
+    fn young_s_and_carbon_stars_galaxy_wide_at_milky_way_values() {
+        let mut checks = Checks::default();
+        // Built so: the field share and the carve-out are read when a galaxy is built.
+        let galaxy = Galaxy::from_params_with_rules(
+            Seed::new(SEED),
+            GalaxyParams::milky_way_like(),
+            GalaxyRules::of_version(crate::GENERATOR_VERSION),
+        )
+        .expect("Milky Way parameters build");
+        let rules = StellarRules::of_version(crate::GENERATOR_VERSION);
+        let t = galaxy_counts_with(&galaxy, 4_000, |inputs, ages, t| {
+            observe_young_and_chemical(inputs, ages, rules, t);
+        });
+        let protostars = t.get("protostars");
+        let carbon = t.get("carbon stars");
+        checks.within("carbon stars", carbon, (2e4, 5e5));
+        checks.within(
+            "S stars per carbon star",
+            t.get("S stars") / carbon,
+            (0.05, 0.5),
+        );
+        let classical = t.get("classical T Tauri stars");
+        checks.within(
+            "classical T Tauri stars per protostar",
+            classical / protostars,
+            (2.0, 8.0),
+        );
+        checks.within(
+            "weak-lined T Tauri stars per classical one",
+            t.get("weak-lined T Tauri stars") / classical,
+            (10.0, 200.0),
+        );
+        checks.within(
+            "Herbig Ae/Be stars per protostar",
+            t.get("Herbig Ae/Be stars") / protostars,
+            (0.05, 0.5),
+        );
+        checks.within(
+            "protostars with a young class",
+            t.get("protostars with a young class"),
+            (0.0, 0.0),
+        );
+        assert!(
+            t.get("protostars summarised") > 0.0,
+            "no protostar was summarised"
         );
         checks.finish();
     }
@@ -1065,6 +1257,305 @@ mod tests {
                 (1.0, 8.0),
             );
         }
+        checks.finish();
+    }
+
+    /// The ages under which a star can burst: past 16 Myr no disc lasts, the longest's step ending
+    /// at 15.025 Myr (P06.T28.d).
+    const FU_ORIONIS_YOUNG_YEARS: f64 = 1.6e7;
+
+    /// What the galaxy-wide FU Orionis count reads of one star of `inputs`, of a component whose
+    /// ages are `ages` (P06.T28.d): each component's onsets a year at the epoch, the sum over age
+    /// pieces of its rate at the piece's middle times the piece's weight under `ages`, and the
+    /// protostars, the weight of the ages below `t_p`. The rate is a closed form of the age, the
+    /// mass and the disc rank, so no track is built and no age drawn: one piece on each plateau,
+    /// where the rate is constant, and pieces of 500 years inside the steps.
+    fn observe_fu_orionis_onsets(inputs: &SampleInputs, ages: &AgeDistribution, t: &mut Tally) {
+        use crate::stellar::events::fu_orionis::{
+            CLASS_0_END, FuOrionisRates, OutburstComponent, STEP_WIDTH,
+        };
+        use crate::units::consts::SECONDS_PER_JULIAN_YEAR;
+        let Some(rates) = FuOrionisRates::new(inputs.initial_mass, inputs.draws.disc_lifetime())
+        else {
+            return;
+        };
+        t.add("protostars", weight(ages, 0.0, PROTOSTAR_YEARS));
+        let half = STEP_WIDTH.value() / 2.0;
+        let last = rates.last_age().value();
+        let centres = [
+            CLASS_0_END.value(),
+            PROTOSTAR_YEARS,
+            rates.disc_lifetime().value() * 1e6,
+        ];
+        let mut cuts = vec![0.0, last];
+        for c in centres {
+            cuts.extend([c - half, c + half]);
+        }
+        cuts.retain(|&a| (0.0..=last).contains(&a));
+        cuts.sort_by(f64::total_cmp);
+        cuts.dedup();
+        let labels = [
+            (OutburstComponent::ProtostellarFuOri, "FU Ori protostellar"),
+            (OutburstComponent::V1647Ori, "V1647 Ori"),
+            (OutburstComponent::DiscFuOri, "FU Ori disc"),
+        ];
+        for pair in cuts.windows(2) {
+            let (a, b) = (pair[0], pair[1]);
+            let middle = f64::midpoint(a, b);
+            let pieces: u32 = if centres
+                .iter()
+                .any(|&c| (c - half..c + half).contains(&middle))
+            {
+                100
+            } else {
+                1
+            };
+            for k in 0..pieces {
+                let lo = a + (b - a) * f64::from(k) / f64::from(pieces);
+                let hi = a + (b - a) * f64::from(k + 1) / f64::from(pieces);
+                let w = weight(ages, lo, hi);
+                if w <= 0.0 {
+                    continue;
+                }
+                let age = Years::new(f64::midpoint(lo, hi));
+                for (component, label) in labels {
+                    let per_year = rates.component_rate_at_age(component, age).value()
+                        * SECONDS_PER_JULIAN_YEAR;
+                    t.add(label, per_year * w);
+                }
+            }
+        }
+    }
+
+    /// The galaxy-wide FU Orionis onsets a year at Milky Way values (P06.T28.d, the parent's
+    /// galaxy-wide test, with plan 06's ruling of 2026-10-15 in place of its 240–830 a year), from
+    /// each component's system count × its population's band share × the band's mean onsets a
+    /// year ([`observe_fu_orionis_onsets`]), 10⁴ primaries a band, every band of every component
+    /// whose ages reach below 16 Myr: FU Ori onsets (protostellar and disc) 140–1,000 a year;
+    /// onsets of both classes 650–4,500; and protostellar onsets per protostar, from the same
+    /// weights, (`t_c` ÷ `t_p`) ÷ 438 + (1 − `t_c` ÷ `t_p`) ÷ 1,741 = 1.075 × 10⁻³ a year within
+    /// 5%, with the FU Ori share of them 18.6% within 5% of itself.
+    #[test]
+    #[ignore = "slow: 1.5 × 10⁵ young primaries (4.2 s under slow-test)"]
+    fn fu_orionis_onsets_galaxy_wide_at_milky_way_values() {
+        const N: u64 = 10_000;
+        let mut checks = Checks::default();
+        let galaxy = milky_way();
+        let mut total = Tally::default();
+        let mut included = 0;
+        for (i, component) in galaxy.fields().components().iter().enumerate() {
+            let ages = component.ages();
+            let population = component.population();
+            if ages.min().value() >= FU_ORIONIS_YOUNG_YEARS {
+                // None of its stars is young enough to burst: it contributes nothing.
+                assert!(
+                    weight(ages, 0.0, FU_ORIONIS_YOUNG_YEARS) <= 0.0,
+                    "{population:?} component {i}"
+                );
+                continue;
+            }
+            included += 1;
+            for band in MassBand::ALL {
+                let sampling = banded(&galaxy, i, band);
+                let t = tally(
+                    N,
+                    |k| sample_inputs(&galaxy, &sampling, SEED, k),
+                    |inputs, t| observe_fu_orionis_onsets(inputs, ages, t),
+                );
+                #[expect(clippy::cast_precision_loss, reason = "a sample size")]
+                let per_star =
+                    component.count() * galaxy.shares().share(band, population) / N as f64;
+                total.merge(&t.scaled(per_star));
+            }
+            eprintln!(
+                "included {population:?} component {i}, ages from {} yr",
+                ages.min().value()
+            );
+        }
+        assert!(included > 0);
+        let (proto, v1647, disc) = (
+            total.get("FU Ori protostellar"),
+            total.get("V1647 Ori"),
+            total.get("FU Ori disc"),
+        );
+        let protostars = total.get("protostars");
+        eprintln!(
+            "FU Ori protostellar {proto:.1}, V1647 Ori {v1647:.1}, FU Ori disc {disc:.1} onsets a \
+             year; {protostars:.4e} protostars"
+        );
+        checks.within("FU Ori onsets a year", proto + disc, (140.0, 1_000.0));
+        checks.within(
+            "onsets of both classes a year",
+            proto + v1647 + disc,
+            (650.0, 4_500.0),
+        );
+        let per_protostar = 1.075e-3;
+        checks.within(
+            "protostellar onsets a year per protostar",
+            (proto + v1647) / protostars,
+            (0.95 * per_protostar, 1.05 * per_protostar),
+        );
+        checks.within(
+            "the FU Ori share of protostellar onsets",
+            proto / (proto + v1647),
+            (0.95 * 0.186, 1.05 * 0.186),
+        );
+        checks.finish();
+    }
+
+    /// The ages under which a star can be a luminous blue variable: every LBV window of the
+    /// generator's tracks closes before 10 Myr, the lightest such stars (40 M☉ at [Fe/H] = −1)
+    /// dying at 5.9 Myr (P06.T28.e).
+    const LBV_YOUNG_YEARS: f64 = 1e7;
+
+    /// The giant eruptions of luminous blue variables galaxy-wide in ±H at Milky Way values
+    /// (P06.T28.e): each component's system count × its band-E share × the band's mean weight of
+    /// the ages inside its stars' LBV windows, `galaxy_counts`'s "LBVs" for band E (4,000 primaries
+    /// a component, the same samples), times the eruption rate and 2H: the mean number of luminous
+    /// blue variables times the rate times 2H is the expected count in ±H whatever the windows'
+    /// lengths, since the age distributions change little over 2,000 years. Every component whose
+    /// ages reach below 10 Myr is taken, and the rest are asserted to weigh nothing there. The plan's windows: LBVs 100–2,000 (P06.T31) and giant
+    /// eruptions 15–60 in ±H, from which the rate is retuned.
+    #[test]
+    #[ignore = "slow: 4,000 band-E primaries of each young component, each with its full track"]
+    fn lbv_eruptions_galaxy_wide_at_milky_way_values() {
+        use crate::stellar::events::lbv::ERUPTIONS_PER_YEAR;
+        use crate::time::CLOCK_WINDOW_H;
+        const N: u32 = 4_000;
+        let mut checks = Checks::default();
+        let galaxy = milky_way();
+        let mut lbvs = 0.0;
+        let mut included = 0;
+        for (i, component) in galaxy.fields().components().iter().enumerate() {
+            let ages = component.ages();
+            let population = component.population();
+            if ages.min().value() >= LBV_YOUNG_YEARS {
+                assert!(
+                    weight(ages, 0.0, LBV_YOUNG_YEARS) <= 0.0,
+                    "{population:?} component {i}"
+                );
+                continue;
+            }
+            included += 1;
+            let sampling = banded(&galaxy, i, MassBand::E);
+            let t = tally(
+                u64::from(N),
+                |k| sample_inputs(&galaxy, &sampling, SEED, k),
+                |inputs, t| {
+                    let track =
+                        Track::full(inputs.initial_mass, &inputs.composition, &inputs.draws);
+                    if let Some(lbv) = track.window_where(PhasePredicate::Lbv) {
+                        let w = weight(ages, lbv.start().value(), lbv.end().value());
+                        assert!(
+                            lbv.end().value() < LBV_YOUNG_YEARS || w <= 0.0,
+                            "{} M☉: an LBV window ending at {} yr",
+                            inputs.initial_mass.value(),
+                            lbv.end().value()
+                        );
+                        t.add("LBVs", w);
+                    }
+                },
+            );
+            let per_star =
+                component.count() * galaxy.shares().share(MassBand::E, population) / f64::from(N);
+            lbvs += t.get("LBVs") * per_star;
+        }
+        assert!(included > 0);
+        let eruptions = lbvs * ERUPTIONS_PER_YEAR * 2.0 * CLOCK_WINDOW_H.as_julian_years_f64();
+        // Findings from generator version 26, pinned provisionally: under the enforced
+        // Humphreys–Davidson limit the windows are fewer and shorter (P06.T42.b), and the rate is
+        // not retuned alone, since the ejecta's mass law must move with it (design note 14).
+        checks.pinned("LBVs", lbvs, (100.0, 2_000.0), 49.06);
+        checks.pinned("giant eruptions in ±H", eruptions, (15.0, 60.0), 8.18);
+        checks.finish();
+    }
+
+    /// The ages under which a star can be a magnetar: a field reaches the critical field
+    /// 10¹⁹ G yr ÷ 4.4 × 10¹³ G − τ, under 2.3 × 10⁵ years, after the birth, and the lightest
+    /// progenitor of a neutron star dies by about 50 Myr (P06.T28.c).
+    const MAGNETAR_YOUNG_YEARS: f64 = 1e8;
+
+    /// The Galaxy's giant flares a year at Milky Way values (P06.T28.c; decision-galaxy-25-train
+    /// §5.1): each component's system count × its band share × the band's mean, over 4,000
+    /// primaries a component in each of bands D and E (below solar metallicity a single star from
+    /// about 6.7 M☉ leaves a neutron star), of the weight under its ages of each step of the neutron star's age
+    /// at which it is a magnetar, times the giant-flare rate there, the steps 700 log-spaced edges
+    /// from a year to 10⁷ years (T21's census sweep), the rate over each step the exact e-folds of
+    /// its field over the step's length. The ruling's window is 0.02–0.09 a year; the active
+    /// magnetars, the same weights without the rate, are T21's 20–300.
+    #[test]
+    #[ignore = "slow: 4,000 primaries of bands D and E of each young component, each with its full track"]
+    fn giant_flares_galaxy_wide_at_milky_way_values() {
+        use crate::stellar::events::magnetar::{GIANT_FLARES_PER_E_FOLD, field_e_folds_per_year};
+        use crate::stellar::remnant::neutron_star::QUANTUM_CRITICAL_FIELD;
+        const N: u32 = 4_000;
+        let mut checks = Checks::default();
+        let galaxy = milky_way();
+        let edges: Vec<f64> = (0..=700)
+            .map(|i| math::exp10(f64::from(i) * 0.01))
+            .collect();
+        let (mut magnetars, mut flares, mut included) = (0.0, 0.0, 0);
+        for (i, component) in galaxy.fields().components().iter().enumerate() {
+            let ages = component.ages();
+            let population = component.population();
+            if ages.min().value() >= MAGNETAR_YOUNG_YEARS {
+                assert!(
+                    weight(ages, 0.0, MAGNETAR_YOUNG_YEARS) <= 0.0,
+                    "{population:?} component {i}"
+                );
+                continue;
+            }
+            included += 1;
+            for band in [MassBand::D, MassBand::E] {
+                let sampling = banded(&galaxy, i, band);
+                let t = tally(
+                    u64::from(N),
+                    |k| sample_inputs(&galaxy, &sampling, SEED, k),
+                    |inputs, t| {
+                        let track =
+                            Track::full(inputs.initial_mass, &inputs.composition, &inputs.draws);
+                        if track
+                            .remnant()
+                            .is_none_or(|r| r.kind() != RemnantKind::NeutronStar)
+                        {
+                            return;
+                        }
+                        let ns = NeutronStar::from_draws(&inputs.draws);
+                        if ns.birth_field() <= QUANTUM_CRITICAL_FIELD {
+                            return;
+                        }
+                        let death = track.lifetime().expect("a full track dies").value();
+                        for w in edges.windows(2) {
+                            let middle = (w[0] * w[1]).sqrt();
+                            if !ns.state_at(Years::new(middle)).is_magnetar() {
+                                continue;
+                            }
+                            let weight = weight(ages, death + w[0], death + w[1]);
+                            let field = |age: f64| ns.field_at(Years::new(age)).value();
+                            let e_folds_a_year =
+                                math::ln(field(w[0]) / field(w[1])) / (w[1] - w[0]);
+                            t.add("magnetars", weight);
+                            t.add(
+                                "giant flares a year",
+                                weight * GIANT_FLARES_PER_E_FOLD * e_folds_a_year,
+                            );
+                            debug_assert!(
+                                e_folds_a_year
+                                    <= field_e_folds_per_year(ns.field_at(Years::new(w[0])))
+                                        * (1.0 + 1e-9)
+                            );
+                        }
+                    },
+                );
+                let per_star =
+                    component.count() * galaxy.shares().share(band, population) / f64::from(N);
+                magnetars += t.get("magnetars") * per_star;
+                flares += t.get("giant flares a year") * per_star;
+            }
+        }
+        assert!(included > 0);
+        checks.within("active magnetars", magnetars, (20.0, 300.0));
+        checks.within("giant flares a year", flares, (0.02, 0.09));
         checks.finish();
     }
 }

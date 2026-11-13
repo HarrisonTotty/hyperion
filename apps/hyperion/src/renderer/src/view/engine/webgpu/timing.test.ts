@@ -7,11 +7,12 @@ import { PASSES_PER_FRAME, PassTimer, type TimerHost, TIMING_FRAMES_IN_FLIGHT } 
 /**
  * An engine's creation path that records its query sets and buffers, and hands out buffers
  * holding `stamps` once mapped; a mapping resolves at once, when the test calls `settle`
- * (`held`), or never (`failing`, which rejects).
+ * (`held`), or never (`failing`, which rejects with `failure`'s error).
  */
 function timerDevice(
   stamps: ReadonlyArray<bigint>,
   mapping: "at-once" | "held" | "failing" = "at-once",
+  failure: () => unknown = () => new Error("the mapping failed"),
 ): TimerHost & {
   readonly querySets: GPUQuerySetDescriptor[];
   readonly buffers: BufferSpec[];
@@ -55,9 +56,7 @@ function timerDevice(
               });
             });
           }
-          return mapping === "failing"
-            ? Promise.reject(new Error("the mapping failed"))
-            : Promise.resolve(undefined);
+          return mapping === "failing" ? Promise.reject(failure()) : Promise.resolve(undefined);
         },
         getMappedRange: () => new BigUint64Array(stamps).buffer,
         unmap: () => undefined,
@@ -73,6 +72,21 @@ function timerDevice(
       return buffer;
     },
   };
+}
+
+/** A mapping's failure as WebGPU's validation gives it. */
+function invalidBuffer(): DOMException {
+  return new DOMException("the buffer is invalid", "OperationError");
+}
+
+/** A failure that is no `Error` but carries a name and a message, as a `DOMException` does. */
+function plainError(): unknown {
+  return { name: "OperationError", message: "mapping range too large" };
+}
+
+/** A mapping cut short by its device's loss, as WebGPU's is. */
+function deviceLost(): DOMException {
+  return new DOMException("the device was lost", "AbortError");
 }
 
 /** An encoder that records the resolve and the copy. */
@@ -237,7 +251,7 @@ describe("the pass timer's buffers", () => {
   });
 
   it("are reused after a read that failed", async () => {
-    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const device = timerDevice([0n, 10n], "failing");
     const timer = new PassTimer(device, "quantized");
     for (let frame = 1; frame <= TIMING_FRAMES_IN_FLIGHT + 2; frame += 1) {
@@ -248,7 +262,7 @@ describe("the pass timer's buffers", () => {
       // oxlint-disable-next-line no-await-in-loop
       await vi.waitFor(
         () => {
-          expect(console.error).toHaveBeenCalledTimes(frame);
+          expect(timer.failedReads).toBe(frame);
         },
         { interval: 1 },
       );
@@ -256,3 +270,94 @@ describe("the pass timer's buffers", () => {
     expect(device.buffers).toHaveLength(2);
   });
 });
+
+describe("the pass timer's failed reads", () => {
+  it("drop their resolves' times, with one warning naming the error, never an error", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const timer = new PassTimer(timerDevice([0n, 10n], "failing", invalidBuffer), "quantized");
+    const listener = vi.fn<(times: PassTimes) => void>();
+    timer.listen(listener);
+    for (let frame = 0; frame < 3; frame += 1) {
+      timer.writesFor("cockpit");
+      timer.resolve(recordingEncoder())?.();
+    }
+    await vi.waitFor(() => {
+      expect(timer.failedReads).toBe(3);
+    });
+    expect(console.warn).toHaveBeenCalledExactlyOnceWith(
+      "a resolve's pass times could not be read, and are dropped, as are any later read's that fails: OperationError: the buffer is invalid",
+    );
+    expect([listener.mock.calls, vi.mocked(console.error).mock.calls]).toEqual([[], []]);
+  });
+
+  it("name an error that is no Error by its name and message, as a DOMException of any engine", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const timer = new PassTimer(timerDevice([0n, 10n], "failing", plainError), "quantized");
+    timer.writesFor("cockpit");
+    timer.resolve(recordingEncoder())?.();
+    await vi.waitFor(() => {
+      expect(timer.failedReads).toBe(1);
+    });
+    expect(console.warn).toHaveBeenCalledExactlyOnceWith(
+      "a resolve's pass times could not be read, and are dropped, as are any later read's that fails: OperationError: mapping range too large",
+    );
+  });
+
+  it("are no failure, and no warning, where the device's loss cut them short", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const device = timerDevice([0n, 10n], "failing", deviceLost);
+    const timer = new PassTimer(device, "quantized");
+    timer.writesFor("cockpit");
+    timer.resolve(recordingEncoder())?.();
+    await macrotask();
+    // Its pair is back: the next resolve reuses it.
+    timer.writesFor("cockpit");
+    timer.resolve(recordingEncoder())?.();
+    await macrotask();
+    expect([timer.failedReads, device.buffers.length, vi.mocked(console.warn).mock.calls]).toEqual([
+      0,
+      2,
+      [],
+    ]);
+  });
+
+  it("are not made once the device is lost: each resolve is dropped, keeping its number", () => {
+    const device = timerDevice([0n, 10n], "held");
+    const timer = new PassTimer(device, "quantized");
+    timer.writesFor("before");
+    expect(timer.resolve(recordingEncoder())).not.toBeNull();
+    timer.deviceLost();
+    timer.writesFor("after");
+    const encoder = recordingEncoder();
+    expect([timer.resolve(encoder), encoder.calls, timer.pending, timer.frame]).toEqual([
+      null,
+      [],
+      [],
+      2,
+    ]);
+  });
+
+  it("leave a listener's own failure an error, its times having been read", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const timer = new PassTimer(timerDevice([0n, 10n]), "quantized");
+    timer.listen(() => {
+      throw new TypeError("the listener broke");
+    });
+    timer.writesFor("cockpit");
+    timer.resolve(recordingEncoder())?.();
+    await vi.waitFor(() => {
+      expect(console.error).toHaveBeenCalledExactlyOnceWith(
+        "a listener of the pass times failed: TypeError: the listener broke",
+      );
+    });
+    expect(timer.failedReads).toBe(0);
+  });
+});
+
+/** Runs every microtask queued before it: a read's mapping, its report or failure and its end. */
+function macrotask(): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, 0);
+  });
+}

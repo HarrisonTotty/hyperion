@@ -546,7 +546,9 @@ the call sites here change.
     (decision-r07-t16d-followups)._ Graticule and limb are generated in `f64`, camera-relative,
     subdivided until each chord's sagitta is under 0.25 px, so a body 400 km below the camera has a
     true horizon rather than a polygon's. Rings are their ellipses, inner and outer edge with radial
-    ticks every 10°, as the orbit map draws them.
+    ticks every 10°, as the orbit map draws them. _Since R02.T19 a flattened body's limb and
+    graticule are drawn on its spheroid, about the pole its figure is drawn about, its parallels at
+    planetocentric latitudes (Risks, "Deviations in R02.T19, as built")._
 14. **Rotation waits on plan 14, and says so.** A graticule turns with its body through
     `bodyFixedRotation`. Until P14.T14.c provides it, `FrameOrigins.bodyFixedRotation` is `null`,
     the graticule's pole is the orbit normal (the assumption `displays/system/bodyFrame.ts` already
@@ -625,7 +627,8 @@ the call sites here change.
     target craft, are held in a `craft` `CameraFrame` as an offset from that craft, and
     `relativeToCamera` computes (p − craft) − offset, so that the hull's own offset is exact and
     only far objects carry ulp(D), where it is sub-pixel. The camera's frame selection (Design
-    note 6) then applies to the craft's position, and to the camera's own only in `free`.
+    note 6) then applies to the craft's position (for the server's ship stand-in, `sceneAt`'s local
+    body; R03 Design note 7), and to the camera's own only in `free`.
 
 ## Tasks
 
@@ -635,7 +638,7 @@ T6 → T7 → T8.a → T9 are pure TypeScript, and T8.a needs T4's golden. T10 n
 `pixelSolidAngle`. T11 needs T6 and T7 (its scenes' scripted camera paths are `CameraPose`s). T8.b
 needs T8.a and T11.c, whose frame-change scene and hand-set rotation its tests run on. T12 needs
 T6–T11 and T13 needs T12. T14 needs R01's adapter. T15 needs T12–T14. T16 needs T5 and T15. T17
-needs R03. T18 is last. Every task ends with `just ci` green; TypeScript tasks with
+needs R03. T18 is last of RM1's; T19, added for RM4, follows R10.T16.g. Every task ends with `just ci` green; TypeScript tasks with
 `pnpm typecheck`, `pnpm lint` and `pnpm test`, every export with TSDoc, and component tests by role
 and name with `userEvent.setup()` and no snapshot. Every figure turned into a constant is re-checked
 against the brainstorm's citation and cited in its doc comment.
@@ -1152,12 +1155,71 @@ On the development machine (RTX 3080), and on the UHD 620 by the owner, with the
 - **The server's scene, for the runs that need it.** `just server`, then `just place-ship`, then
   `just client`, F2, `OPEN` the universe `place-ship` names (`Dev Fixture`), and F4: `VIEW` then
   draws the server's scene of FPF 1Z0P1Z D-35 with the system's first planet straight ahead from
-  the seat, and no `TRAINING` (R03.T6's note; the README, "Seeing a generated system in `VIEW`").
-  Without `just place-ship` the stand-in is in no system and `VIEW` stays on its kept scene. Run it
-  again after each server start; `--look-at barycentre` looks at the star of a single system.
+  the seat, and no `TRAINING` (R03.T6's note; `docs/development/running.md`, "Seeing a generated
+  system in `VIEW`"). Without `just place-ship` the stand-in is in no system and `VIEW` stays on its
+  kept scene. Run it again after each server start; `--look-at barycentre` looks at the star of a
+  single system.
 - Files: this plan's Verification, "Recorded runs" table. R12 consolidates.
 - Acceptance: the table has one row per run, and every failure is filed as a finding against the
   task that owns it.
+
+### R02.T19 The datum on the body's spheroid
+
+New, 2026-10-27, from this plan's open ask "An oblate graticule" (Risks), R07's Risks
+("Oblateness beyond the image": off by up to 6,000 km on Saturn) and R10.T16.g's measurement on
+`TEST SATURN` (`decision-r08-approximate-plate.md` §7, item 2). It blocks RM4's close. It is low in
+severity, a visibly wrong picture: seen equator-on at 482 Mm, 1920 × 1080 at 60°, the sphere's
+outline stands 20.53 px beyond the figure's at the poles (an apparent semi-axis of 209.55 px
+against 189.02). Its limb's cased band, stroked inside the sphere since R10.T16.g, leaves the
+figure from 33.7° of position angle to the poles, and so covers the air's glow again there (plan
+10's Risks, "Deferred findings (2026-10-13 rule) (R10.T16.g)").
+
+- **The scope.** A body's limb and graticule are drawn on its spheroid (R07's `BodyFigure`: its
+  equatorial and polar radii and its pole), in both styles, in place of the sphere of its
+  equatorial radius:
+  - the limb is the spheroid's horizon from the camera;
+  - the graticule's runs are faced by the spheroid's normal;
+  - the occluder is the spheroid, with the stretch T16.f's surveyed datum already carries (a ÷ c
+    along the pole).
+- **Over the image**, R10.T16.g's inside rule and its small-body threshold
+  (`DATUM_OVER_IMAGE_RADIUS_PER_REACH`) apply to the spheroid's outline.
+- **A sphere's lines are unchanged**, as the tests show.
+- **Tests:** on `TEST SATURN` (`SATURN_OBLATE_SPHEROID`, 60,268 by 54,364 km) equator-on and
+  pole-on, the limb meets T16.g's tolerance inside the figure's outline at every point (δ_limb to
+  δ_limb + 0.5 px), and every graticule point lies on the spheroid to 10⁻⁹ of its radius. Every
+  graticule run's points stand at least their own reach inside the spheroid's outline, on its
+  conic, at the field's centre, near a corner of a 60° field and in a 120° field, as T16.g's tests
+  do: only the exact cut may end a run (`decision-r02-t19-leans.md`, "Plan 02's T19 entry").
+- **Files:** `view/wireframe/{bodies,drawList,cull,submit}.ts`, `view/shaders/occluderSphereHit.wgsl`
+  and its two users, `smoke/datumFrame.ts`, `smoke/page.ts`, `docs/frontend/ux-guidelines.md`, and
+  their tests.
+- **Acceptance:** `pnpm test` and `just test-render`, with T16.g's render check
+  (`R10.T16.g the datum inside the figure`, moved to part 10) run on `TEST SATURN`.
+- **Ruled** (`decision-r02-t19-leans.md`, 2026-10-27): the parallels planetocentric; the spheroid's
+  axis the image's, `figurePole`, a flattened body with no rotation drawn about it; the cut on the
+  outline's least semi-axis; the occluder's stride named and its altitude stretched; the smoke's
+  `TEST SATURN` frames airless, in T16.g's group, which moves to part 10.
+
+#### R02.T19.b The datum's captures
+
+New, 2026-10-30, assigned by main from the research advice of 2026-10-29 on Electron in the cloud
+pods (its brief B): T19's datum on `TEST SATURN`'s spheroid, saved as `VIEW` draws it, for main's
+look, from the smoke harness, which runs in a pod where `VIEW` itself cannot.
+
+- **The captures.** `just test-render --part=1 --captures=<dir>` also saves
+  `datum-saturn-<style>-<framing>` for each variant: `TEST SATURN` (60,268 × 54,364 km) centred in
+  a 1280 × 720 view at a 60° field from a range where its disc fills about half the view's height,
+  equator-on (the pole up the view) and pole-on (looking down the pole), lit from behind the camera
+  and to one side; through `PhotorealRenderer` with `overlaySubmission` (the datum inside the
+  figure, `datumInsideAt`) and through `WireframeRenderer` (the limb centred). Eight PNGs: two
+  styles × two framings × the two variants.
+- **The captures' time.** If twice the capture groups' new total passes `CAPTURES_WATCHDOG_MS`,
+  it and `testRender.sh`'s `captures_allowance_s` rise together.
+- **Where.** `captureDatum(engine)` in `smoke/datumFrame.ts`, beside `checkDatumFrame`, and the
+  group `R02.T19 the datum captures` in `smoke/page.ts`, part 1, under `captures`. Done when a run
+  of part 1 with the captures saves the eight PNGs and `just test-render` passes.
+
+_Built 2026-10-30._
 
 ## Verification
 
@@ -1175,10 +1237,10 @@ On the development machine (RTX 3080), and on the UHD 620 by the owner, with the
   PSF-weighted colour within 0.5 %: twelve R02 checks in all.
 - The recorded runs of R02.T18, below. No golden image is stored anywhere.
 - **R02.T16.a's census, measured 2026-10-02** (RM1 validation m4), at generator version 18, build
-  e4c5cfc, on the Milky Way fixture with Design note 19's seed `0x0311_1000_0000_0000` at the
-  Sun-like point [0, 26,000, 0] ly and time 0, through the server's own `systems_in_range` path
-  (`range_query`, `range_brief`, `systems_in_range`) with `limit` 20,000 and `include_stellar`, by
-  a scratch test that was not committed. The counts are exact for the seed; the times were taken
+  e4c5cfc, now c18c3708, on the Milky Way fixture with Design note 19's seed `0x0311_1000_0000_0000`
+  at the Sun-like point [0, 26,000, 0] ly and time 0, through the server's own `systems_in_range`
+  path (`range_query`, `range_brief`, `systems_in_range`) with `limit` 20,000 and `include_stellar`,
+  by a scratch test that was not committed. The counts are exact for the seed; the times were taken
   on the shared machine, a release build, and stay provisional.
 
   | Query         | Layers included (expected → returned)                           | Rows   | With V | Range query | Briefs   |
@@ -1219,7 +1281,7 @@ The performance rows were taken by a scratch variant of the smoke page (not comm
 each kept scene in real time for 20 s, builds its draw list as the display does and renders it
 through `WireframeRenderer` into a 1920 × 1080 `rgba16float` target, with Dawn's timestamp
 quantization lifted (`GraphicsStatus.timer` `full`); the GPU time is the `view:wireframe` pass's.
-No run failed, so no finding is filed.
+No run failed, so no finding is filed. The rows dated 2026-10-02 name build 5028cb7, now 8168268f.
 
 ## Generator version
 
@@ -1257,7 +1319,8 @@ bumped. It reserves no stream or tag. It adds the golden files `coords/body_fixe
   on black is identical in both styles, and R07 draws its stars before its full-screen pass.
 - **Asked by R07, not yet a task here.** An oblate graticule for the giants R07 draws oblate from
   plan 14's flattening (R07 Design note 19, whose non-goals name it R02's). Until it exists a
-  graticule is a sphere of the equatorial radius. The roadmap's asks table carries it.
+  graticule is a sphere of the equatorial radius. The roadmap's asks table carries it. Taken up as
+  R02.T19 (2026-10-27, `decision-r08-approximate-plate.md` §7).
 - **Deviations in R02.T3, as built.** `BodyFixedRotation` also has `rows()` (the golden writes it
   and R02.T6.a reads it) and `vector_to_body_fixed`, the inverse of `vector_to_body`.
   `BuildRotationError` has a third variant, `NotFinite`, so that a NaN matrix is refused by name
@@ -1804,6 +1867,19 @@ NOT AVAILABLE: …`, `SCENE PENDING`, `SCENE REJECTED: <reason>`, plain for a re
   `CAMERA REPORT UNANSWERED` and `OWN SHIP`, marked `_Draft (plan R02, R02.T17, nomenclature)…_`
   for the owner. **Pending by eye:** the status line, `RETRY` and the muted stale readings in the
   running client, at 1920 × 1080 and 1280 × 720.
+- **Fixed in R10.T12 (2026-10-20; decision-r10-ship-frame): the own ship held in its local body's
+  frame.** R02.T17 held the server's ship stand-in in the system frame at the observer's present
+  position, so that a `SEAT` or `CHASE` camera beside a body read `FRAME SYSTEM BARYCENTRIC`,
+  against the guide's `BODY` row and Design notes 6 and 22. `viewSceneFromServer` now holds it in
+  the frame of `sceneAt`'s local body (`m` the observer's position less the body's drawn, geometric
+  centre), its velocity against that body's present velocity (`SceneFrame.localBodyVelocityMPerS`,
+  the same `composedVelocity` that `shipObserver` adds), and in the system frame where the frame
+  has no local body or the scene draws none for it; its attitude stays the barycentric velocity's.
+  `frameName`, `frameBody`, `POSITION`, the free camera's detach and the camera report follow
+  unchanged. `fromServer.test.ts`'s pin of the system-held ship is re-pinned to the rule.
+- **Extended by R10.T14.c (2026-10-20; decision-r10-t14c-leans §5): the local body's present
+  velocity**, `ViewBody.presentVelocityMPerS`, set by `viewSceneFromServer` for the local body
+  alone, which the terrain session's contacts chain a craft's frame through.
 - **Fixed in RM1 validation (2026-10-02): R02.T7.b's transparent-layer order (M1).** The text and
   `transparentLayerOrder` drew a body's shells below the camera first and its shells above it last,
   so a high cloud deck and the air were composited over the nearer low deck. Along any ray that meets
@@ -1929,8 +2005,9 @@ highest step`, naming the key held back as the field of view's ends name theirs;
 - **RM1 validation's GPU runs (2026-10-02), for m2 and m3.** `just test-render` on SwiftShader
   passes in both variants with the three new checks. The whole harness, run hidden and offscreen on
   the RTX 3080 under the client's switches, passes 78 of 78 checks in both variants (`default`,
-  `no-subgroups`) at build 1394abb. With the shader's old `max()` form put back, the slope check
-  fails on the RTX 3080 (depth 0.02138445 against 0.02107446), so it is a real regression test.
+  `no-subgroups`) at build 1394abb, now e6b42914. With the shader's old `max()` form
+  put back, the slope check fails on the RTX 3080 (depth 0.02138445 against 0.02107446),
+  so it is a real regression test.
 - **Fixed in RM1 validation (2026-10-02, integration MINOR-2): no anchors outside the view.**
   `buildWireframeDrawList` culled only marks behind the camera, so a mark in front of it but outside
   the view still got a pickable anchor and a DOM label, laid out thousands of pixels off the stage.
@@ -1961,3 +2038,184 @@ highest step`, naming the key held back as the field of view's ends name theirs;
   nothing it wrote is lost. `sphereOutsideView` and `OUTSIDE_VIEW_MARGIN_PX` moved from R07's
   `bodies/regime.ts` into `wireframe/submit.ts`, beside `sphereScreenRect`, for R06's host discs
   and R07's lit bodies as well. Recorded in R07's Risks, "Deviations in T19.e, as built".
+- **Deviations in R02.T19, as built** (2026-10-27; lane `r02-t19` from 1808146a;
+  `decision-r08-approximate-plate.md` §7 item 2, and `decision-r02-t19-leans.md` on the lane's
+  leans).
+  - _The stretch._ A new module, `view/wireframe/spheroid.ts`: `DatumSpheroid { pole, stretch }`
+    (a ÷ c above 1, the pole a unit vector along the camera frame's axes), `datumSpheroidOf`
+    (`null` for a sphere, a prolate figure or radii that are not finite and positive), `stretched`
+    and `unstretched` (L v = v + (s − 1)(v · p) p and its inverse, each returning its very argument
+    for a sphere) and `angularDistortion` (s). Everything the wireframe asks of a body that is not
+    about pixels (which side of a tangent plane the camera is on, where a line of sight meets or
+    grazes the body) is kept by L, so it is answered on the sphere of radius a about L c with R02's
+    closed forms and mapped back.
+  - _The figure and its axis._ `GraticuleBody.spheroid` (optional); `datumSpheroidOfFigure(figure)`
+    takes R07's `BodyFigure` from `ViewBody.appearance.figure` about `figurePole` (the leans'
+    ruling, item 2), with `ViewBody.radiusM` as a. `graticuleRotation` draws a flattened body with
+    no rotation about the spheroid's pole instead of the orbit normal; a sphere keeps the orbit
+    normal. No wire or protocol change: the pole was on the client already.
+  - _The lines._ The limb is the stretched sphere's circle of tangency mapped back, its points
+    added to c after the map. The graticule's facing test is `cosineWindows` on −n · L c > a, and
+    each point c + L⁻¹(a R n). The parallels stand at planetocentric (geocentric) latitudes φ, as
+    R10's `graticulePatch` takes them, at the reduced latitude atan((a ÷ c) tan φ) on the stretched
+    sphere; the meridians are the sphere's. Planetographic parallels would stand up to 5.90° of
+    latitude off them on Saturn (5.87° at 45°; Earth 0.19°, Mars 0.34°, Jupiter 3.84°).
+  - _Over the image._ `limbInside` and `outlineConicOf` take L u and L c in the cone's quadric, so
+    the outline is the spheroid's conic and the inset is exact on it. `insideThresholdM`'s safe cut
+    is the stretched sphere's with its angular inset s times as large: the stretch's map of
+    directions turns two lines of sight apart by at most σ_max ÷ σ_min = s, and maps the grazing
+    lines of sight to the spheroid's, so a line of sight s ε inside the stretched cone stands at
+    least ε inside the real one; θ_min is the sphere of radius a's. The ruling's note that the
+    sphere's argument does not carry through the stretch holds of the argument unscaled; with the
+    factor it does (confirmed, `decision-r02-t19-leans.md` item 8), and the tests check every run
+    point on the spheroid's conic all the same, at the centre, near a corner of a 60° field and in a
+    120° field.
+  - _A window with no safe cut._ On a spheroid, whose safe cut stands farther in, a facing window
+    with none is searched beyond its middle, at its ends and its eight even steps
+    (`windowsInside`'s `searchWhole`): the tilted `TEST SATURN`, centred at (1500, 330) while it
+    was built, lost its 75° parallel's stretch across λ = 0 under the middle alone. In T19's own
+    commit a sphere keeps T16.g's middle-only rule; the commit after it searches the whole window
+    on every body (below, "Fixed in R10.T16.g's follow-up").
+  - _The cut._ `outlineLeastDiameterPx`: twice the least angular semi-axis of the cone of lines of
+    sight that graze the spheroid, from the eigenvalues of uᵀMu ≥ 0, M = L(sin²α′ I − [ĉ′]ₓᵀ[ĉ′]ₓ)L
+    (the normal of the plane of the line of sight and the pole is one eigenvector), at the
+    centre-pixel scale; a sphere's `angularDiameterPx` itself. The regimes and the graticule's step
+    keep the equatorial measure, as the image sizes them. On `TEST SATURN` at 482 Mm it is 376.43 px
+    equator-on and 416.30 pole-on, against 416.91 across the equator.
+  - _The occluder._ `OccluderSphere.spheroid` (optional); a flattened body's occluder is its
+    figure with both radii inset, a′ = `occluderRadius(a, d)` and c′ = `occluderRadius(c, d)`
+    (the ruling's recommendation), its stretch a′ ÷ c′ and its `altitudeM` |L′ c| − a′ in `f64`.
+    `occluderSphereHit.wgsl` intersects the stretched ray with the stretched sphere, divides the
+    distance back by the stretched ray's length, and takes the slope term's normal along
+    L′²(hit − c); a sphere takes the sphere's sums through `select`, the ray never renormalised.
+    **Deviation from the ruling's "a fourth row"** (confirmed, `decision-r02-t19-leans.md` item 8):
+    the axis rides in the third row's three spare lanes as q = √(s′ − 1) p (`spheroidAxis`),
+    L v = v + (v · q) q, so the stride stays 3 and no sphere's row changes; the ruling's conditions
+    are met: `OCCLUDER_SPHERE_ROWS` in TypeScript,
+    `SPHERE_ROWS` in WGSL, and `submit.test.ts` reads the WGSL source for it and for every read of
+    `spheres`. With the stride unchanged, `occluderSphere.wgsl` and `occluderSphereSurveyed.wgsl`
+    read the spheroid through the library's two functions and are not among the changed files;
+    `submit.test.ts`'s sphere rows, `sphereCentres` and `test/beyondView.ts` stand as they were,
+    and the CPU twin `writtenPixelCount` stays a sphere's, for R07.T19.e's off-view test. The
+    surveyed stand-in, min(a, the survey edge's polar radius), is kept for a sphere; a flattened
+    body's survey edge, on its figure, stands outside its inset spheroid.
+  - _`behindLimb`_ is unchanged in `cull.ts`: `drawList.ts`'s `shown` stretches the point and the
+    centre along each limb's pole before it, so `cull.ts` is not among the changed files. A moon
+    seen past `TEST SATURN`'s pole, outside the figure and inside its sphere, keeps its mark.
+  - _The smoke._ `datumFrame.ts` draws `TEST SATURN` airless (the ruling's item 5) in five frames
+    in T16.g's group: equator-on, the view straddling the north pole, with the datum, with none and
+    with the sphere's datum as the control; pole-on with the datum and with none. The group moved
+    from part 11 to part 10, last there (`page.ts`'s one line and its two passages, with
+    1808146a's gate's figures). One more check, in part 1's wireframe group (`smoke/wireframe.ts`):
+    `R02.T19 a body's occluder is its spheroid`, its depth on the GPU against the `f64` quadric at
+    every texel clear of the limb, and the cleared depth where the ray misses the figure inside the
+    sphere of its equatorial radius: added because no WGSL compiler runs in `just ci` and the CPU
+    twin is a sphere's. Its spheroid, 6 by 4 m at 10 m with its pole off every axis, is flatter
+    than the wire allows (f ≤ 0.2), so that the stretch runs obliquely across the view and along
+    it. On the lane's tree before its gate (a load of 3 to 8), part 10 held 116 and 119 s, the
+    group 36 and 34 s, and part 11 119 s on both variants (1808146a's gate: 81 and 85 s, 130 and
+    135 s; e64fcb9b's part 11 153 to 154 s); the gate's figures are in the lane's report.
+  - _The guide._ The ruled sentences: `ROTATION: NOT YET MODELLED`'s "A flattened body's is drawn
+    about the pole its figure is drawn about instead, so that its equator lies on the figure's.",
+    and the datum bullet's "on a flattened body its least,". §8.2 (a)'s "its label" went in its
+    own commit under R10.T16.g's ID, first in the series.
+  - _A sphere's lines are unchanged._ A scratch comparison (not committed) of 20,000 random
+    spheres, in both styles, at both line scales, the low setting among them, with the
+    implementation at 1808146a: every coordinate the same under `Object.is`. The committed tests
+    hold a figure with a = c to a body with none, and the spheroid at a stretch of 1 + 10⁻¹² within
+    (s − 1) d of the sphere's, half a millimetre at 482 Mm. Tilted, `TEST SATURN` is centred at
+    T16.g's place near the corner, (1640, 280).
+  - _`TEST SATURN`'s figures_ (482 Mm, 1920 × 1080 at 60°): equator-on, at a line scale of 2, the
+    sphere's outline stood 20.53 px beyond the figure at the pole and its inside limb's centreline
+    17.00 px (15.50 at 3); the spheroid's limb now stands δ_limb + 0.031 to + 0.278 px inside the
+    figure's outline. Pole-on the sphere's outline stood 0.31 px beyond, its inside limb's
+    centreline 3.22 px inside (δ_limb 3.5, so its casing 0.28 px beyond); now from δ_limb + 0.031
+    to δ_limb + 0.279. Tilted 26.7° near the corner, at (1640, 280), the sphere's outline 25.40 px
+    beyond the figure before, δ_limb + 0.031 to δ_limb + 0.281 after. Every point of every line is
+    on the spheroid to 10⁻¹⁴ of a, and every meridian and parallel point at least its reach + 1/32
+    px inside, its cut ends at it.
+- **Fixed in R10.T16.g's follow-up (2026-10-27; `decision-r02-t19-leans.md` item 7, a blocker of
+  low severity, a visibly wrong picture): a window with no safe cut keeps its far stretch, on every
+  body.** R02.T19 found it. Over the image, T16.g's `windowsInside` kept only the stretch about the
+  middle of a facing window that held no safe window, so a parallel's piece across λ = 0, or a
+  meridian whose middle runs within its reach of the limb, was lost though it stood its reach
+  inside: 114 of 20,000 random spheres in a scratch comparison (0.57%), never a line beyond the
+  figure. The commit after T19's, R10.T16.g's "A window with no safe cut keeps its far stretch, on
+  every body", removes `searchWhole`, so that every body's window is searched at its middle, its
+  ends and its eight even steps, and drops the rounding test's limb-only filter over the image.
+  The scratch comparison after it, against the code at 1808146a, both styles: the 114 spheres gain
+  runs and lose none, and every other sphere's lines are the same.
+  - _Tests_ (`bodies.test.ts`, each failing under the middle-only rule): a sphere whose 30°
+    parallel's facing arc straddles λ = 0, its safe arc on one side, now runs across it, each cut
+    end at its reach + 1/32 px; a sphere whose meridian at 150° runs its middle near the limb keeps
+    its far stretch, its cut end the same. And a completeness property over 213 spheres (the 13
+    poses of the 114 with a rotation, no orbit normal and the high setting, and 200 more from a
+    fixed seed), in four tests of about 3 s each: every point of each facing arc, sampled at 1,024
+    points, on the view and at least its reach + 1/32 + ε px inside the exact outline, with
+    ε = 0.02 px, lies within 0.5 px of a drawn run of its line. Under the middle-only rule three
+    of the four fail (59, 203 and 149 points undrawn), and at ε = 0.25 px one; with the fix none.
+    The eight even steps needed no densifying.
+- **Deferred findings (2026-10-13 rule) (R02.T19)** (recorded, not ruled; each leaves the
+  algorithm and the contracts as built).
+  - _The inside graticule's cost on a spheroid_ was not timed; the conic's sums and the reduced
+    latitude add a few operations a point to T16.g's (about 2.0 ms for a 416 px Earth, Node on a
+    laptop), for R12's budget.
+- **Carried (R02.T19; `decision-r02-t19-leans.md` item 1), with no deadline.** The first latitude a
+  console shows in words takes the graticule's convention, planetocentric, and names it in its
+  glossary row; if it cannot, the guide then states the graticule's.
+- **Deviations in R02.T19.b, as built** (2026-10-30).
+  - _The range_ is 340 Mm, not the advice's 250 Mm: at a 60° horizontal field (`fovXRad`, as
+    the view's) 250 Mm makes the disc some 550 px across of the view's 720; at 340 Mm the figure's
+    polar diameter is 360 px equator-on, its disc 398 px pole-on (lean, 2026-10-30).
+  - _The frames._ `TEST SATURN`'s own medium, `ATMOSPHERE TEST`'s `saturn-oblate` on Saturn's
+    spheroid (`builtOfCase`), its disc a Lambert sphere of its ground albedo; the Sun-like disc at
+    1 au, at 64° of phase; a fixed EV100 of 15, no meter (lean, 2026-10-30).
+  - _The captures' time._ `CAPTURES_WATCHDOG_MS` stays 1,380 s: twice the capture groups' total
+    with the datum's, measured in a pod, stays within it.
+  - _What to look for:_ the limb on the figure's edge, inside it in the photorealistic style and
+    centred on it in the wireframe, and the graticule's meridians ending at the poles.
+  - _Found by the captures_, as built before them: a datum line that projects straight through
+    the sub-camera point is never subdivided, and its chords sag some 100 km behind the occluder's
+    4 × 10⁻⁶ d margin where the depth slope is near zero. At 340 Mm, equator-on in both styles, the
+    equator is gone ±17 px about the disc's centre and the central meridian ±38 px; pole-on, in
+    the wireframe, every meridian within 17 px of the pole. Not fixed here.
+  - _Fixed_ (2026-10-30): `CurveSpec.depthSagWithin` (`DepthSagWithin`), set by `graticule` on its
+    meridians and parallels, halves a span up to 8 times more until its chord sags within half the
+    occluder's margin plus half a pixel of its least depth slope (lean, 2026-10-30: the margin alone
+    cost 13 times the time). `projection.ts` gains `projector`.
+- **The render thread's per-frame terms** (perf-main-thread, 2026-11-04; the owner's M5 profile and
+  the pod's), each bit for bit.
+  - R07's eclipse term keeps each law's annuli (`annuli.ts`' `keptAnnulusEdges`, at most
+    `ANNULUS_SETS_KEPT`, read-only `AnnulusSetView`s), which `eclipseVisible` remade for every star
+    and channel at every frame of the glare and the incident meter.
+  - The graticule's cut over the image takes the camera's rotation and focal length once a body
+    (`bodies.ts`' `OutlineView`), not at each of its bisections' points.
+  - The star sprites take their projector and pixel solid angle once a frame
+    (`projection.ts`' `pixelSolidAngleBy`).
+- **The render thread's next cuts and React's renders** (perf-render-thread-2, 2026-11-05), each
+  bit for bit.
+  - The sky label's darkest band texel is kept a band (`viewSky.ts`), and the sky's sprites keep
+    each selection's names, illuminances and places (`sprites.ts`); `StarSprite.directionF32` is
+    gone.
+  - `useScene` hands out one view a snapshot, and `ViewSceneProvider` makes its children again
+    for their provenance alone; the stage is `memo`'d (`Stage`), so `ViewPanels`' props to it stay
+    stable (`useMemo`, `useCallback`) and a new one must too.
+  - The stage has no `useThrottledValue`: the loop sets `published` and `shown` at its 4 Hz turn;
+    a command sets `published` at once and reaches `shown` at the loop's next turn, or with no loop
+    at once and then at the interval's end.
+  - The inspection timing file is version 5: each window's React commits (`react`, the
+    check-only hook of `reactCommits.ts`) and each thread's `reactMs`.
+- **A served giant's orbits and rings over the image** (R08.T17's fix lane, 2026-11-05).
+  - The moons' orbits, seen nearly edge-on from inside them, drew across the planet they pass
+    behind, in black casings. `curve.ts`' `sampleCurve` halves a span until its ends' reversed
+    depths are within `DEPTH_RATIO_MAX`, 2 (a run cut at the near plane ends 0.1 m ahead and 10⁹ m
+    aside); `Sample` gains `depth`. Orbits and ring edges take `distanceSagWithin`: a chord's
+    nearest point within `CURVE_DEPTH_SAG_SHARE`, 10⁻³ of the curve's distance (lean,
+    2026-11-05), where an edge-on chord cut across the orbit's inside.
+  - `ringEllipse` returns `RingLines` (`edges`, `ticks`); the draw list draws the ticks as
+    `ring:<body>:ticks` with `LineBatch.grid`, which `overlayDrawList` leaves out at GRID OFF, the
+    edges kept as the ring's stand-in (Design note 17; lean, 2026-11-05).
+  - _SwiftShader's alone_: from 243 Mm, one or two of those orbits' casings still cross the planet
+    in black at some view sizes, their strokes hidden. An f64 check, 64 points a chord, finds no
+    chord before the planet, and a casing and its stroke differ in depth by under 1% there. Pending
+    the owner's GPU look.

@@ -6,9 +6,17 @@ import { lookAlong } from "../camera/quaternion";
 import { goldenLevelTable, WGS84_FIGURE } from "../../test/terrainFixtures";
 import { vertexDir } from "./cube";
 import type { GroundContact } from "./grounded";
-import { type PatchKey, patchKeyString } from "./patchKey";
+import { type PatchKey, parentKey, patchKeyString } from "./patchKey";
 import { planetGeometry, surfacePoint } from "./planet";
-import { compareRequests, PRIMARY_VIEW_WEIGHT, SECONDARY_VIEW_WEIGHT } from "./priority";
+import { seededRandom } from "../../test/seededRandom";
+import {
+  compareRequests,
+  fillsHole,
+  joinDemand,
+  LOOKAHEAD_DEMAND_WEIGHT,
+  PRIMARY_VIEW_WEIGHT,
+  SECONDARY_VIEW_WEIGHT,
+} from "./priority";
 import {
   type HeightRangeLookup,
   type PatchRequest,
@@ -92,6 +100,70 @@ describe("the request order", () => {
   });
 });
 
+/** A request's place before its time to need: forced or not, then its priority. */
+function rankOf(r: PatchRequest): string {
+  return `${r.forced ? 0 : 1}/${r.priority}`;
+}
+
+describe("the time to need's tie-break (R10.T14.b)", () => {
+  it("puts the sooner needed first among equal priorities, before the key, absent as 0", () => {
+    const later = { key: KEY(0), priority: 1, forced: false, needS: 0.8 };
+    const sooner = { key: KEY(1), priority: 1, forced: false, needS: 0.2 };
+    const now = { key: KEY(2), priority: 1, forced: false };
+    expect([later, sooner, now].toSorted(compareRequests)).toEqual([now, sooner, later]);
+  });
+
+  it("leaves the order among different priorities, forced first, as it is without it", () => {
+    const random = seededRandom(24);
+    const requests: PatchRequest[] = Array.from({ length: 400 }, (_, n) => ({
+      key: KEY(n),
+      // Few priorities, so that most requests tie with others.
+      priority: Math.floor(random() * 6),
+      forced: random() < 0.1,
+      needS: Math.floor(random() * 4) / 2,
+    }));
+    const withNeed = requests.toSorted(compareRequests);
+    const without = requests
+      .map(({ key, priority, forced }) => ({ key, priority, forced }))
+      .toSorted(compareRequests);
+    expect(withNeed.map(rankOf)).toEqual(without.map(rankOf));
+    // Within each rank, the sooner needed first.
+    const later = withNeed.filter((r, n) => {
+      const next = withNeed[n + 1];
+      return next !== undefined && rankOf(next) === rankOf(r) && (next.needS ?? 0) < (r.needS ?? 0);
+    });
+    expect(later).toEqual([]);
+  });
+});
+
+describe("the lookahead's demand, joined (R10.T14.b)", () => {
+  it("asks each patch once, at the larger priority, forced from either, by the request order", () => {
+    const own = [
+      { key: KEY(0), priority: 4, forced: false },
+      { key: KEY(1), priority: 1, forced: false },
+    ];
+    const ahead = [
+      { key: KEY(1), priority: 3, forced: false },
+      { key: KEY(2), priority: 2, forced: true },
+      { key: KEY(0), priority: 2, forced: false },
+    ];
+    expect(joinDemand(own, ahead, (key) => key.i / 10)).toEqual([
+      { key: KEY(2), priority: 2, forced: true, needS: 0.2 },
+      { key: KEY(0), priority: 4, forced: false, needS: 0 },
+      { key: KEY(1), priority: 3, forced: false, needS: 0.1 },
+    ]);
+  });
+
+  it("adds nothing at the view's own pose: the lookahead's views ask at half their weight", () => {
+    const own = demand([view(above(3_000), PRIMARY_VIEW_WEIGHT)]);
+    const ahead = demand([view(above(3_000), PRIMARY_VIEW_WEIGHT * LOOKAHEAD_DEMAND_WEIGHT)]);
+    expect(LOOKAHEAD_DEMAND_WEIGHT).toBe(0.5);
+    expect(joinDemand(own, ahead, () => 0)).toEqual(
+      own.map(({ key, priority, forced }) => ({ key, priority, forced, needS: 0 })),
+    );
+  });
+});
+
 describe("streaming priority across views", () => {
   const low = above(3_000);
 
@@ -144,6 +216,43 @@ describe("streaming priority across views", () => {
     expect(requests.length).toBeGreaterThan(1);
     for (let n = 1; n < requests.length; n += 1) {
       expect(requests[n]?.priority ?? NaN).toBeLessThanOrEqual(requests[n - 1]?.priority ?? NaN);
+    }
+  });
+});
+
+describe("a hole in a pass's drawn set (R10.T14.b)", () => {
+  /** Face 0's patches baked to level 6, at ±100 m, and nothing of the other faces. */
+  const faceZero: HeightRangeLookup = {
+    heightRangeM: (key) => (key.face === 0 && key.level <= 6 ? [-100, 100] : undefined),
+  };
+
+  /** Whether a patch over `key`, its parent or coarser, is baked. */
+  function bakedOver(key: PatchKey): boolean {
+    for (let up = parentKey(key); up !== null; up = parentKey(up)) {
+      if (faceZero.heightRangeM(up) !== undefined) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  it("is a request with nothing baked over it, a root's, wherever the demand is not forced", () => {
+    // A view of a hemisphere from 20,000 km and one over the grounded craft at 3 km.
+    const contact: GroundContact = { positionM: above(5), radiusM: 20 };
+    const requests = selectPatches({
+      planet: PLANET,
+      views: [view(above(2e7), PRIMARY_VIEW_WEIGHT, 0), view(above(3_000), SECONDARY_VIEW_WEIGHT)],
+      setting: "high",
+      grounded: [contact],
+      heightRanges: faceZero,
+    }).demand;
+    expect([
+      requests.some((r) => fillsHole(r)),
+      requests.some((r) => !r.forced && !fillsHole(r)),
+      requests.some((r) => r.forced),
+    ]).toEqual([true, true, true]);
+    for (const r of requests) {
+      expect(fillsHole(r)).toBe(!r.forced && !bakedOver(r.key));
     }
   });
 });

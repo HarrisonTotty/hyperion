@@ -33,4 +33,8 @@ flight-simulator-level attention to detail.
 
 * `docs/agent/brainstorming/` - Agentic brainstorming documents.
 * `docs/agent/plans` - Agentic action plans for implementing new features.
+* `docs/agent/handoff/README.md` - Where development stands and what comes next; read it first
+  when resuming work.
 * `docs/frontend/ux-guidelines.md` - Visual/UX design guidelines.
+* `docs/development/` - Developer docs: prerequisites and platforms, running and configuring the
+  server and client, and the checks (`just ci`, `just smart-ci`, the hooks).

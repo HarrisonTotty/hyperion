@@ -29,11 +29,25 @@ out/
 dist/
 coverage/
 
-# Local environment
+# Local environment and secrets: never committed. Keep an example as `.env.example`.
 .env
-.env.*.local
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+.netrc
 *.log
 .DS_Store
+
+# Claude Code's personal and machine-local state (the shared `.claude/` config is committed)
+.claude/settings.local.json
+CLAUDE.local.md
+.claude/CLAUDE.local.md
+.claude/worktrees/
+.claude/scheduled_tasks.lock
+.claude/scheduled_tasks.json
 
 # The client's WebAssembly module and glue, built by `just gen-surface` (plan R04, T10.b)
 apps/hyperion/src/renderer/src/generated/

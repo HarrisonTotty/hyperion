@@ -6,6 +6,9 @@ pnpm-lock.yaml
 Cargo.lock
 /target/
 /.claude/
+# package.json's format scripts also exclude these two on the command line: Prettier walks an
+# ignored directory before it filters, and .claude/worktrees/ holds whole checkouts with their
+# targets, which ran Prettier out of heap (2026-10-09).
 
 # Built by `just gen-surface` from crates/hyperion-surface
 apps/hyperion/src/renderer/src/generated/
@@ -15,3 +18,87 @@ apps/hyperion/src/main/fixtures/*.trace.json
 
 # Third-party data committed unmodified, hashed by its PROVENANCE.toml
 crates/hyperion-fit/data/green2008_si/
+crates/hyperion-fit/data/johnson_christy_1974_fe/
+crates/hyperion-fit/data/martonchik_orton_1994_ch4/
+crates/hyperion-fit/data/nasa_cea_thermo/
+crates/hyperion-fit/data/ordal_1988_fe/
+crates/hyperion-fit/data/warren_brandt_2008_h2o/
+
+# The substance registry's public mirror, written by the sim's `tests/substance_golden.rs` under
+# HYPERION_BLESS=1 and checked byte for byte; its grain-density pieces keep a line each (plan 14,
+# P14.T54.a; decision-p14-t54a-grain-density §2.5)
+packages/protocol/fixtures/substances.json
+
+# Tables a bless-style vitest writes and compares byte for byte (`src/renderer/src/test/bless.ts`)
+apps/hyperion/src/renderer/src/test/blessProbe.json
+apps/hyperion/src/renderer/src/view/atmosphere/channels.json
+apps/hyperion/src/renderer/src/view/atmosphere/absorbers/curves.json
+crates/hyperion-fit/src/atmosphere/sphere_matrices/
+crates/hyperion-fit/src/tasks/condensate_extinction/mie_cases.json
+
+# Reduced data a tool writes one row a line (`apps/hyperion/scripts/atmosphereData.mjs cross-sections`)
+apps/hyperion/src/renderer/src/view/atmosphere/absorbers/crossSections.json
+apps/hyperion/src/renderer/src/view/atmosphere/absorbers/oxygenPairs.json
+# The pending absorbers' cell means, one temperature's 381 cells a line (plan R08, R08.T4.c, and
+# R08.T4.h's atoms and ions, `atmosphereData.mjs atomic-bounds`)
+apps/hyperion/src/renderer/src/view/atmosphere/absorbers/bounds.json
+apps/hyperion/src/renderer/src/view/atmosphere/absorbers/atomicBounds.json
+apps/hyperion/src/renderer/src/view/atmosphere/absorbers/exomol/bounds.json
+# The line absorbers' k-distribution sidecars (`atmosphereData.mjs k-distributions-merge`), the
+# line-by-line references (`earth-reference`, `cell-references`) and the Earth paths' bless (plan
+# R08, R08.T4.d)
+apps/hyperion/src/renderer/src/view/atmosphere/absorbers/kDistributions/
+apps/hyperion/src/renderer/src/view/atmosphere/absorbers/exomol/kDistributions/
+apps/hyperion/src/renderer/src/view/atmosphere/absorbers/earthLinePaths.json
+apps/hyperion/src/renderer/src/view/atmosphere/absorbers/earthLineReference.json
+apps/hyperion/src/renderer/src/view/atmosphere/absorbers/lineReferencesO2.json
+apps/hyperion/src/renderer/src/view/atmosphere/absorbers/lineReferencesH2O.json
+# ExoMol's references and N2O's merge record (`exomol-cell-references`,
+# `exomol-k-distributions-merge`; plan R08, R08.T4.g)
+apps/hyperion/src/renderer/src/view/atmosphere/absorbers/exomol/lineReferencesNH3.json
+apps/hyperion/src/renderer/src/view/atmosphere/absorbers/exomol/lineReferencesN2O.json
+# R08.T4.f's hot molecules' references (`exomol-cell-references --into`)
+apps/hyperion/src/renderer/src/view/atmosphere/absorbers/exomol/lineReferencesHot.json
+apps/hyperion/src/renderer/src/view/atmosphere/absorbers/exomol/n2oMerge.json
+# The atoms' and ions' reduced line lists (`atmosphereData.mjs atomic-lines`), the alkali wings' pairs
+# (`alkali-pairs`) and the atoms' line-by-line references (`atomic-cell-references`; plan R08,
+# R08.T4.e)
+apps/hyperion/src/renderer/src/view/atmosphere/absorbers/lines/
+apps/hyperion/src/renderer/src/view/atmosphere/absorbers/alkaliPairs.json
+apps/hyperion/src/renderer/src/view/atmosphere/absorbers/lineReferencesAtoms.json
+# The reference tracer's cases, written by `reference/cases.test.ts`, `thickCases.test.ts` and
+# `venusAlbedo.test.ts` through `bless.ts`, their references, `hyperion-fit atmosphere-reference`'s
+# `serde_json` pretty form, and their refusals and sanity ranges (`references.test.ts`); the curves'
+# shared values the tracer's `absorber` module reads (`absorberCurves.test.ts`; plan R08,
+# R08.T12.b.1 and b.2)
+apps/hyperion/src/renderer/src/view/atmosphere/reference/*.case.json
+apps/hyperion/src/renderer/src/view/atmosphere/reference/*.reference.json
+apps/hyperion/src/renderer/src/view/atmosphere/reference/refusals.json
+apps/hyperion/src/renderer/src/view/atmosphere/reference/sanityRanges.json
+crates/hyperion-fit/src/atmosphere/absorber_curves.json
+# R08.T13's sweep cases, written by `reference/sweepCases.test.ts` through `bless.ts`, and their
+# outputs, `hyperion-fit atmosphere-sweep`'s, a cell or a point a line; the smoke's sweep the
+# tracer's `sweep` module embeds, and the metric's shared values its `metric` module reads
+# (`metricVerdicts.test.ts`; plan R08, R08.T13.a)
+apps/hyperion/src/renderer/src/view/atmosphere/reference/ms-sweep-w*.case.json
+apps/hyperion/src/renderer/src/view/atmosphere/reference/ms-sweep-w*.json
+crates/hyperion-fit/src/atmosphere/sweep_smoke.case.json
+crates/hyperion-fit/src/atmosphere/metric_verdicts.json
+# R08.T13's case gate on the four committed references, written by `reference/caseGate.test.ts`
+# through `bless.ts`, a geometry a line (plan R08, R08.T13.c1)
+apps/hyperion/src/renderer/src/view/atmosphere/reference/caseGate.json
+# R08.T13's recompute of the sweep, its boundary, attribution and classes, written by
+# `reference/sweepBoundary.test.ts` through `bless.ts`, a row a line (plan R08, R08.T13.c2)
+apps/hyperion/src/renderer/src/view/atmosphere/reference/sweepBoundary.json
+# R08.T14.c's recorded runs, written by `reference/thickRuns.test.ts` through `bless.ts` under
+# HYPERION_THICK_RUNS=1, each list on a line (plan R08, R08.T14.c)
+apps/hyperion/src/renderer/src/view/atmosphere/reference/thickRuns.json
+# R08.T14.f's vector gates, written by `reference/vectorGate.test.ts` through `bless.ts` under
+# HYPERION_VECTOR_GATE=1, each list on a line (plan R08, R08.T14.f)
+apps/hyperion/src/renderer/src/view/atmosphere/reference/vectorGate.json
+# R07.T8.a's air bodies at the 3 px switch, their disc tables written by
+# `view/bodies/airSwitchCases.test.ts` through `bless.ts` under HYPERION_AIR_SWITCH=1 (plan R07)
+apps/hyperion/src/renderer/src/view/atmosphere/fixtures/air-switch/
+
+# The lanes' inbox, checked out beside the repository's code but not part of it
+/.lc-inbox/

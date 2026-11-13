@@ -169,19 +169,27 @@ pub fn face_uv_to_xyz(f: FaceUv) -> [f64; 3] {
 #[must_use]
 pub fn xyz_to_face_uv(p: [f64; 3]) -> FaceUv {
     let face = face_of(p);
+    let (u, v) = uv_on_face(face, p);
+    FaceUv { face, u, v }
+}
+
+/// The (u, v) on `face`'s plane of the direction `p`, its central (gnomonic) projection.
+///
+/// They are `p`'s components along the face's u and v axes, each divided by its component along
+/// the face's normal, which must be positive for the point to be in front of the face. On `p`'s
+/// own face ([`face_of`]) they are [`xyz_to_face_uv`]'s (u, v), by the same expressions; on another
+/// face they extend that face's coordinates beyond its edges, as R09's interpolant reads them (plan
+/// R09, Design note 13).
+#[must_use]
+pub(crate) fn uv_on_face(face: Face, p: [f64; 3]) -> (f64, f64) {
     let [x, y, z] = p;
-    let (first, second) = match face {
+    match face {
         Face::PosX => (y / x, z / x),
         Face::PosY => (-x / y, z / y),
         Face::PosZ => (-x / z, -y / z),
         Face::NegX => (z / x, y / x),
         Face::NegY => (z / y, -x / y),
         Face::NegZ => (-y / z, -x / z),
-    };
-    FaceUv {
-        face,
-        u: first,
-        v: second,
     }
 }
 
@@ -392,6 +400,43 @@ impl PatchKey {
             return Err(NewPatchKeyError::IndexOutOfRange { level, i, j });
         }
         Ok(Self { face, level, i, j })
+    }
+
+    /// The patch of `level` that contains the direction `dir`, on the face [`xyz_to_face_uv`]
+    /// gives it (ties to the lowest face index).
+    ///
+    /// Within the face, a direction on the line between two cells belongs to the cell of higher
+    /// index, and one on the face's far edge (s or t = 1) to the last cell, so that every direction
+    /// has exactly one patch at each level and the patch of `level − 1` is this one's parent. A
+    /// coarse field finds the cell of a crater's centre so (plan R09, Design note 10).
+    ///
+    /// # Errors
+    ///
+    /// [`NewPatchKeyError::LevelAboveMax`] above [`MAX_LEVEL`].
+    ///
+    /// # Panics
+    ///
+    /// If `dir` is zero or has a component that is not finite: such a vector has no direction.
+    pub fn containing(level: u8, dir: [f64; 3]) -> Result<Self, NewPatchKeyError> {
+        if level > MAX_LEVEL {
+            return Err(NewPatchKeyError::LevelAboveMax(level));
+        }
+        let FaceUv { face, u, v } = xyz_to_face_uv(dir);
+        let cells = 1_u32 << level;
+        // |u| and |v| are at most 1 on the face of largest |component| (a quotient of a smaller
+        // magnitude by a larger never rounds above 1), so s lies in [0, 1] and s × 2^level in
+        // [0, 2^level].
+        let index = |c: f64| {
+            let cell = (uv_to_st(c) * f64::from(cells)).floor();
+            #[expect(
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                reason = "the floor is an integer in [0, 2^level], 2^24 at most"
+            )]
+            let cell = cell as u32;
+            cell.min(cells - 1)
+        };
+        Self::new(face, level, index(u), index(v))
     }
 
     /// The whole face `face`, the patch of level 0.
@@ -998,6 +1043,50 @@ mod tests {
         assert_eq!(top.to_u64(), 0x00b8_ffff_ffff_ffff);
         assert_eq!(PatchKey::from_u64(top.to_u64()), Ok(top));
         assert_eq!(PatchKey::root(Face::PosX).to_u64(), 0);
+    }
+
+    /// Every cell of level 3 contains its own centre and corners strictly inside it, a direction's
+    /// patch of one level is the parent of its patch of the next, and the cube's corners and edges
+    /// go to the lowest face, in its last or first cell.
+    #[test]
+    fn a_direction_is_contained_by_one_patch_a_level() {
+        for face in Face::ALL {
+            for i in 0..8 {
+                for j in 0..8 {
+                    let cell = PatchKey::new(face, 3, i, j).unwrap();
+                    for (x, y) in [(32, 32), (1, 1), (63, 1), (1, 63), (63, 63)] {
+                        assert_eq!(
+                            PatchKey::containing(3, cell.vertex_dir(x, y)),
+                            Ok(cell),
+                            "vertex ({x}, {y}) of {cell:?}"
+                        );
+                    }
+                }
+            }
+        }
+        let mut rng = Lcg::new(0x636f_6e74);
+        for _ in 0..10_000 {
+            let dir = unit_dir([
+                rng.next_f64() - 0.5,
+                rng.next_f64() - 0.5,
+                rng.next_f64() - 0.5,
+            ]);
+            let level = u8::try_from(rng.next_below(u64::from(MAX_LEVEL))).unwrap() + 1;
+            let patch = PatchKey::containing(level, dir).unwrap();
+            assert_eq!(
+                PatchKey::containing(level - 1, dir).unwrap(),
+                patch.parent().unwrap()
+            );
+        }
+        let corner = PatchKey::containing(4, [1.0, 1.0, 1.0]).unwrap();
+        assert_eq!(corner, PatchKey::new(Face::PosX, 4, 15, 15).unwrap());
+        // On face 3, u = z ÷ x is −0, which the warp takes to the face's middle line, s = ½.
+        let edge = PatchKey::containing(4, [-1.0, -1.0, 0.0]).unwrap();
+        assert_eq!(edge, PatchKey::new(Face::NegX, 4, 8, 15).unwrap());
+        assert_eq!(
+            PatchKey::containing(MAX_LEVEL + 1, [0.0, 0.0, 1.0]),
+            Err(NewPatchKeyError::LevelAboveMax(MAX_LEVEL + 1))
+        );
     }
 
     #[test]

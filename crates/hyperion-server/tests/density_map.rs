@@ -140,10 +140,31 @@ fn at(map: &DensityMap, column: u16, row: u16) -> usize {
     usize::from(row) * usize::from(map.width_px) + usize::from(column)
 }
 
+/// A map's geometry and codes on one server: both views at both depths, each with its own codes and
+/// geometry and one raster per view, and the face-on map's centre and corner.
+///
+/// Nextest runs each test in its own process, and each server builds its galaxy, 4.4 s with its
+/// full potential in a test build, so the two share one server: each takes a client and a universe
+/// of its own, as it did with a server of its own, and its assertions and their messages are
+/// unchanged. The views' and depths' comes first, so that the count of maps it reads is what a
+/// fresh server gives it; the centre's reads no count. The other tests that count maps
+/// (`the_young_disc_and_every_population_give_different_maps`,
+/// `a_repeated_request_is_served_from_the_cache`) each ask the face-on map of every population
+/// first and count it as a new entry, or not yet a hit, so they keep a server of their own. A
+/// server holds one universe of a name, so each property's universe is named apart (no assertion
+/// reads a name), the first keeping its test's.
 #[tokio::test]
-async fn both_views_and_both_depths_carry_their_own_codes_and_geometry() {
+async fn a_maps_views_depths_and_centre_carry_their_own_codes_and_geometry() {
     let server = TestServer::start().await;
-    let mut client = connected(&server).await;
+    both_views_and_both_depths_carry_their_own_codes_and_geometry(&server).await;
+    the_centre_pixel_of_a_face_on_map_holds_the_ceiling(&server).await;
+    server.stop().await;
+}
+
+/// Run first by [`a_maps_views_depths_and_centre_carry_their_own_codes_and_geometry`] on its shared
+/// server, so that the count of maps it reads is its own.
+async fn both_views_and_both_depths_carry_their_own_codes_and_geometry(server: &TestServer) {
+    let mut client = connected(server).await;
     let universe = create(&mut client, "Kepler Reach").await;
 
     for view in [MapView::FaceOn, MapView::EdgeOn] {
@@ -188,14 +209,13 @@ async fn both_views_and_both_depths_carry_their_own_codes_and_geometry() {
     assert_eq!(server.stats().maps().entries(), 2);
 
     client.close().await;
-    server.stop().await;
 }
 
-#[tokio::test]
-async fn the_centre_pixel_of_a_face_on_map_holds_the_ceiling() {
-    let server = TestServer::start().await;
-    let mut client = connected(&server).await;
-    let universe = create(&mut client, "Kepler Reach").await;
+/// Run by [`a_maps_views_depths_and_centre_carry_their_own_codes_and_geometry`] on its shared
+/// server.
+async fn the_centre_pixel_of_a_face_on_map_holds_the_ceiling(server: &TestServer) {
+    let mut client = connected(server).await;
+    let universe = create(&mut client, "Kepler Reach: the centre").await;
     let map = map(
         &mut client,
         &universe.id,
@@ -215,7 +235,6 @@ async fn the_centre_pixel_of_a_face_on_map_holds_the_ceiling() {
     assert_eq!(codes[at(&map, 0, 0)], 0);
 
     client.close().await;
-    server.stop().await;
 }
 
 #[tokio::test]
@@ -480,6 +499,10 @@ const CALIBRATION_PASSES: usize = 5;
 /// How often the build's pool is looked at, to see how many bands it is running at once.
 const RUNNING_POLL: Duration = Duration::from_millis(2);
 
+/// The rows of a map's band, each band one bulk job: the server's crate-private `BAND_ROWS`, so a
+/// 512-pixel map has 32 bands face-on and 16 edge-on.
+const BAND_ROWS: usize = 16;
+
 /// Nanoseconds a call of the sim's `math::exp` takes on each of `threads` threads running at once:
 /// every thread times its own calls, the pass is their mean, and the calibration is the median of
 /// [`CALIBRATION_PASSES`] passes.
@@ -532,9 +555,10 @@ fn exp_ns_at(threads: NonZeroUsize) -> f64 {
 /// and is counted in.
 ///
 /// Two things are checked, because a wall-clock budget alone checks neither. That the bands run in
-/// parallel is read off the pool, which must be seen running as many bands at once as it has workers
-/// (or bands, if fewer): serial bands cost only two to five times the parallel build, which no budget
-/// wide enough for a loaded machine can tell apart. And the cost: the build must finish within
+/// parallel is read off the pool: each map's build must be seen running as many of its bands at
+/// once as the pool has workers, or as the map has bands if fewer, 32 face-on and 16 edge-on.
+/// Serial bands cost only two to five times the parallel build, which no budget wide enough for a
+/// loaded machine can tell apart. And the cost: the build must finish within
 /// [`BUILD_SLACK`] times its expected work, counted in calls of `math::exp` as timed at the pool's
 /// width before and after it, the slower of the two, so that the budget follows the host's clock
 /// and load instead of assuming one.
@@ -558,42 +582,45 @@ async fn density_map_512_builds_within_budget() {
 
     let exp_before = exp_ns_at(workers);
     let started = Instant::now();
-    let build = async {
-        for view in [MapView::FaceOn, MapView::EdgeOn] {
-            let key = MapKey::new(
-                GalaxyKey::new(SEED, GENERATOR_VERSION),
-                view,
-                MapPopulation::All,
-                MapResolution::Px512,
-            );
-            let map = maps.get(key).await.expect("the pool computes the map");
-            assert_eq!(
-                map.log10().len(),
-                usize::from(MapResolution::Px512.width_px())
-                    * usize::from(MapResolution::Px512.height_px(view)),
-                "the {view:?} map holds one value per pixel"
-            );
-        }
-    };
-    tokio::pin!(build);
-    let mut most_running = 0;
-    loop {
-        tokio::select! {
-            () = &mut build => break,
-            () = sleep(RUNNING_POLL) => most_running = most_running.max(pool.counters().running()),
-        }
+    // Each map's view, with the most bands its build was seen running at once.
+    let mut most_running = Vec::new();
+    for view in [MapView::FaceOn, MapView::EdgeOn] {
+        let key = MapKey::new(
+            GalaxyKey::new(SEED, GENERATOR_VERSION),
+            view,
+            MapPopulation::All,
+            MapResolution::Px512,
+        );
+        let build = maps.get(key);
+        tokio::pin!(build);
+        let mut most = 0;
+        let map = loop {
+            tokio::select! {
+                map = &mut build => break map.expect("the pool computes the map"),
+                () = sleep(RUNNING_POLL) => most = most.max(pool.counters().running()),
+            }
+        };
+        assert_eq!(
+            map.log10().len(),
+            usize::from(MapResolution::Px512.width_px())
+                * usize::from(MapResolution::Px512.height_px(view)),
+            "the {view:?} map holds one value per pixel"
+        );
+        most_running.push((view, most));
     }
     let elapsed = started.elapsed();
     let exp_after = exp_ns_at(workers);
     pool.shutdown().await.expect("the pool shuts down");
 
-    // The edge-on map has the fewer bands: 256 rows of 16.
-    let bands = 16;
-    assert_eq!(
-        most_running,
-        workers.get().min(bands),
-        "the pool of {workers} workers ran at most {most_running} bands at once"
-    );
+    for (view, most) in most_running {
+        let bands = usize::from(MapResolution::Px512.height_px(view)).div_ceil(BAND_ROWS);
+        assert_eq!(
+            most,
+            workers.get().min(bands),
+            "the pool of {workers} workers ran at most {most} of the {view:?} map's {bands} bands \
+             at once"
+        );
+    }
     let exp_ns = exp_before.max(exp_after);
     let workers_f64 = f64::from(u32::try_from(workers.get()).expect("fewer than 2³² workers"));
     let budget_calls = BUILD_SLACK

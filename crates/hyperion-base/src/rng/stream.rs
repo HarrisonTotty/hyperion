@@ -72,15 +72,30 @@ impl Stream {
     ///
     /// # Panics
     ///
+    /// If the tag's scope is [`TagScope::SurfaceCoarse`] or [`TagScope::SurfaceDetail`]: a
+    /// surface tag is opened from a body's surface or detail seed, by
+    /// [`SurfaceSeed::stream`](super::SurfaceSeed::stream) or
+    /// [`DetailSeed::stream`](super::DetailSeed::stream), never from the universe seed (plan R09,
+    /// Design note 2).
+    ///
     /// If the key's scope is not the tag's (Design note 3 of the determinism plan): a tag fixes
     /// what its counter word names, which is what lets a cell's word equal its candidate 0's ID
     /// and body 0 share its system's word. A tag of scope [`TagScope::SelfTest`] accepts a key of
     /// any scope, because tests exercise every kind of key; no key has scope [`TagScope::Event`],
-    /// so an event tag is never opened here. The check holds in release builds too: a mismatch
-    /// would silently alias two objects' streams and change a galaxy, and it costs two byte
+    /// so an event tag is never opened here. The checks hold in release builds too: a mismatch
+    /// would silently alias two objects' streams and change a galaxy, and they cost a few byte
     /// comparisons.
     #[must_use]
     pub fn open(seed: Seed, tag: DomainTag, object: ObjectKey) -> Self {
+        assert!(
+            !matches!(
+                tag.scope(),
+                TagScope::SurfaceCoarse | TagScope::SurfaceDetail
+            ),
+            "domain tag {} has scope {:?}, which only a body's surface or detail seed opens",
+            tag.name(),
+            tag.scope(),
+        );
         assert!(
             tag.scope() == object.scope() || tag.scope() == TagScope::SelfTest,
             "domain tag {} has scope {:?}, but the object key has scope {:?}",

@@ -2,14 +2,16 @@
 //!
 //! The server owns everything the sim may not: universes and their saves ([`universe`]), the CPU
 //! pool that runs generation off the async runtime and the caches of galaxies, maps, cells and
-//! systems ([`compute`]), the byte-bounded cache they are built on ([`cache`]), and the WebSocket
-//! clients speak `hyperion-protocol` over. What the crew has detected is in [`knowledge`]. Every
-//! limit it enforces is in [`limits`].
+//! systems ([`compute`]), the bodies' coarse surface fields ([`surface`]), the byte-bounded cache
+//! they are built on ([`cache`]), and the WebSocket clients speak `hyperion-protocol` over. What
+//! the crew has detected is in [`knowledge`], and what a sensor is told of transients as their
+//! light arrives in [`alerts`]. Every limit it enforces is in [`limits`].
 //!
 //! [`Server::start`] builds the shared state from a [`ServerConfig`], [`Server::router`] serves
 //! it, [`Server::stats`] reports on it, and [`Server::shutdown`] is the explicit teardown once
 //! serving has stopped. What asks the process to stop, on each platform, is in [`stop`].
 
+pub mod alerts;
 pub(crate) mod bulk;
 pub mod cache;
 pub mod compute;
@@ -24,6 +26,7 @@ pub mod scene;
 mod stats;
 pub mod stop;
 mod subscriptions;
+pub mod surface;
 #[cfg(test)]
 mod testing;
 pub mod universe;
@@ -31,6 +34,7 @@ mod ws;
 
 use std::error::Error;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::{fmt, io};
@@ -38,19 +42,33 @@ use std::{fmt, io};
 use axum::{Router, routing::get};
 
 use crate::compute::{
-    CpuPool, DensityMapService, GalaxyCache, SharedBodyCache, SharedBriefCache, SharedCellCache,
-    SharedSkyCellCache, SharedSystemCache, ShutDownPoolError, SkyCaps, SkyTablesService,
-    StartPoolError,
+    BulkGate, CpuPool, DensityMapService, ENVELOPE_FILES_DIR, EnvelopeFiles, ExtinctionMapService,
+    GalaxyCache, GalaxyFeaturesService, GlobalListService, SKY_TABLE_FILES_DIR, SharedBodyCache,
+    SharedBriefCache, SharedCellCache, SharedCentreOrbitCache, SharedClassCellCache,
+    SharedClusterModelCache, SharedFeatureCellCache, SharedSightlineCache, SharedSkyCellCache,
+    SharedSprayForces, SharedSystemCache, ShutDownPoolError, SkyCaps, SkyTableFiles,
+    SkyTablesService, SkyTablesSource, StartPoolError, TubeTableCache, TwinPriority,
 };
 use crate::connections::Connections;
-use crate::limits::{BULK_QUEUE_CAPACITY, INTERACTIVE_QUEUE_CAPACITY};
-use crate::requests::{Handler, Handlers};
+use crate::limits::{
+    BULK_QUEUE_CAPACITY, CENTRE_ORBIT_CACHE_BYTES, GALAXY_FEATURES_CACHE_BYTES,
+    GLOBAL_LIST_CACHE_BYTES, INTERACTIVE_QUEUE_CAPACITY, LISTED_HOSTS_CACHE_BYTES,
+    SPRAY_FORCE_CACHE_BYTES, TUBE_TABLE_CACHE_BYTES,
+};
+use crate::requests::{
+    Handler, Handlers, SKY_FILES_DIR, SkyReplyCache, SkyReplyFiles, SkySettings,
+};
 use crate::scene::SceneService;
 use crate::stats::{OutboundStats, RequestStats};
+use crate::surface::SurfaceService;
 use crate::universe::{LoadRegistryError, UniverseRegistry, UniverseStore};
 use crate::ws::ConnectionLimits;
 
-pub use config::{ServerArgs, ServerConfig, ServerConfigBuilder, SkyService};
+pub use config::{
+    FeatureMembers, GlobalListWarmUp, HeldSkies, KeptSkies, ServerArgs, ServerConfig,
+    ServerConfigBuilder, SkyQos, SkyService,
+};
+pub use requests::SkyFileCounters;
 pub use stats::{OutboundCounters, RequestCounters, ServerStats};
 
 /// Address the server listens on when neither `--address` and `--port` nor their variables are
@@ -80,15 +98,22 @@ pub(crate) struct AppState {
     /// The galaxies built from the open universes' seeds, at most
     /// [`GALAXY_CACHE_ENTRIES`](limits::GALAXY_CACHE_ENTRIES) of them.
     ///
-    /// Shared with [`AppState::maps`], which takes the galaxy of each map it computes from it.
+    /// Shared with [`AppState::maps`] and [`AppState::extinction_maps`], which take the galaxy of
+    /// each map they compute from it.
     pub(crate) galaxies: Arc<GalaxyCache>,
     /// The density maps computed so far, in the configured byte budget.
     pub(crate) maps: DensityMapService,
+    /// The extinction maps computed so far, in their own configured byte budget (plan 07,
+    /// P07.T10.a).
+    pub(crate) extinction_maps: ExtinctionMapService,
+    /// The lines of sight `extinction` has marched, in the configured byte budget (plan 07,
+    /// P07.T10.c).
+    pub(crate) sightlines: SharedSightlineCache,
     /// The generated cells a range query reads, in the configured byte budget.
     ///
     /// A query takes its own [`CellCacheHandle`](compute::CellCacheHandle) from this on the pool
     /// job that runs it, since the handle borrows the cache and cannot cross an `.await`.
-    pub(crate) cells: SharedCellCache,
+    pub(crate) cells: Arc<SharedCellCache>,
     /// The systems' stars generated so far, in the configured byte budget: what a
     /// `system_summary` reads (plan 06, P06.T34).
     pub(crate) systems: SharedSystemCache,
@@ -98,6 +123,42 @@ pub(crate) struct AppState {
     /// The planetary systems generated so far, each with its context, in the configured byte
     /// budget: what `system_bodies` and `body_detail` read (plan 14, P14.T36).
     pub(crate) bodies: SharedBodyCache,
+    /// The planet viewer's systems and density grids (rendering plan R15), which [`bodies`] and the
+    /// sky's host discs read for a viewer system's ID in place of the galaxy.
+    ///
+    /// [`bodies`]: AppState::bodies
+    pub(crate) viewer: compute::ViewerSystems,
+    /// Plan 09's feature cells generated so far, in the configured byte budget: what the feature
+    /// requests, the range query's feature members and the extinction request's lines look
+    /// features up in (P09.T40.a). The sky's features' gas reads its tables' own index instead.
+    pub(crate) feature_cells: Arc<SharedFeatureCellCache>,
+    /// Plan 09's feature interiors built so far, in the configured byte budget: what the range
+    /// query's feature members and a feature's detail read (P09.T40.a).
+    ///
+    /// Shared with [`AppState::systems`] and [`AppState::briefs`], which resolve a feature's
+    /// members through it.
+    pub(crate) cluster_models: Arc<SharedClusterModelCache>,
+    /// Plan 09's catalogue class cells made so far, in the configured byte budget: what the
+    /// range query's class hosts are read from, from generator version 27 (P09.T40).
+    pub(crate) class_cells: Arc<SharedClassCellCache>,
+    /// The galactic centre's cells of members and their orbits made so far, in
+    /// [`CENTRE_ORBIT_CACHE_BYTES`]: what the range query's centre members are read from, from
+    /// generator version 27 (P09.T37.b).
+    pub(crate) centre_orbits: Arc<SharedCentreOrbitCache>,
+    /// The galaxy map's globulars of every galaxy asked for, found once each in a bulk job and kept
+    /// (P09.T40.b).
+    pub(crate) galaxy_features: GalaxyFeaturesService,
+    /// Plan 10's global list of every galaxy asked for, built once each in a bulk job and kept
+    /// (P10.T10.a), and its streams' tube tables, kept in their own byte budget (P10.T10.b).
+    pub(crate) global_lists: GlobalListService,
+    /// The tube tables the [`GlobalListService`] keeps, which a range query reads its streams'
+    /// members through ([`ListedTubes`](compute::ListedTubes), P10.T10.b's registration).
+    pub(crate) tube_tables: Arc<TubeTableCache>,
+    /// Whether an open starts its galaxy's global list and warms its tube tables (P10.T10.b).
+    pub(crate) global_list_warm_up: GlobalListWarmUp,
+    /// Whether the range query serves plan 09's feature members, each row its origin, and the sky
+    /// the features' gas (P09.T40.a): every server does, but a test's.
+    pub(crate) feature_members: FeatureMembers,
     /// What answers each request: [`Handlers`], or a test's double.
     pub(crate) handler: Arc<dyn Handler>,
     /// The open WebSocket connections, which shutdown closes and waits for.
@@ -111,7 +172,7 @@ pub(crate) struct AppState {
     /// Each open universe's scene clock and ship stand-in, which `scene_ship` sets (rendering
     /// plan R03, Design note 2).
     pub(crate) scene: SceneService,
-    /// Whether `sky` is answered: the sky's landing switch (rendering plan R06, R06.T11.c).
+    /// Whether `sky` is answered: the sky's switch (rendering plan R06, R06.T11.c), on by default.
     pub(crate) sky_service: SkyService,
     /// How far a sky's census looks, and which luminosity tables it reads (rendering plan R06,
     /// R06.T11.a).
@@ -122,6 +183,30 @@ pub(crate) struct AppState {
     /// The census cells' entries built so far, in blocks, in the configured byte budget: what a
     /// sky's census jobs read and share (rendering plan R06, R06.T11.b and T8.h; Design note 12).
     pub(crate) sky_cells: Arc<SharedSkyCellCache>,
+    /// The last skies' final replies, which a sky asked again exactly is answered with, unless the
+    /// switch turns them off (rendering plan R06, R06.T11.l).
+    pub(crate) sky_replies: SkyReplyCache,
+    /// The same final replies in files under the data directory, which a sky asked again after a
+    /// restart is answered with, unless their budget is 0 or the switch turns them off (rendering
+    /// plan R06, R06.T11.n).
+    pub(crate) sky_files: SkyReplyFiles,
+    /// Whether a sky is also answered from a kept sky of its arrival that holds for it, seen a
+    /// little earlier or from a little way off (rendering plan R06, R06.T11.p).
+    pub(crate) held_skies: HeldSkies,
+    /// The class a sky's census runs at after its first reply (rendering plan R06, R06.T11.o).
+    pub(crate) sky_qos: SkyQos,
+    /// Each body's coarse surface field, computed once on the pool and kept in the configured byte
+    /// budget (rendering plan R09, R09.T17; Design note 19).
+    pub(crate) surface: SurfaceService,
+    /// Each universe's contacts, opened by its first alerts subscription and kept (plan 12,
+    /// P12.T9.a).
+    pub(crate) contacts: alerts::UniverseContacts,
+    /// The alert scans walked so far, shared by the alerts subscriptions, in the configured byte
+    /// budget (plan 12, P12.T8.b).
+    pub(crate) alert_scans: alerts::AlertScans,
+    /// The features' and the centre's lists as the alert walks read them, kept between walks in
+    /// [`LISTED_HOSTS_CACHE_BYTES`] (plan 09's P09.T36 in plan 12's walks).
+    pub(crate) listed_hosts: alerts::SharedListedHostsCache,
 }
 
 impl Server {
@@ -158,14 +243,13 @@ impl Server {
         .map_err(StartServerError::LoadRegistry)?;
         // Starting the pool waits for every worker to probe its floating-point mode, so it runs
         // off the runtime.
-        let workers = config.workers();
+        let (workers, gate) = (config.workers(), config.bulk_gate().cloned());
+        let twins = config.twin_priority();
         let pool = Arc::new(
-            tokio::task::spawn_blocking(move || {
-                CpuPool::new(workers, INTERACTIVE_QUEUE_CAPACITY, BULK_QUEUE_CAPACITY)
-            })
-            .await
-            .map_err(|_| StartServerError::Interrupted)?
-            .map_err(StartServerError::StartPool)?,
+            tokio::task::spawn_blocking(move || start_pool(workers, twins, gate))
+                .await
+                .map_err(|_| StartServerError::Interrupted)?
+                .map_err(StartServerError::StartPool)?,
         );
         let galaxies = Arc::new(GalaxyCache::new(Arc::clone(&pool)));
         let maps = DensityMapService::new(
@@ -173,39 +257,57 @@ impl Server {
             Arc::clone(&galaxies),
             config.map_cache_bytes(),
         );
-        let cells = SharedCellCache::new(config.cell_cache_bytes());
-        let systems = SharedSystemCache::new(config.system_cache_bytes());
-        let briefs = SharedBriefCache::new(config.brief_cache_bytes());
+        let extinction_maps = ExtinctionMapService::new(
+            Arc::clone(&pool),
+            Arc::clone(&galaxies),
+            config.extinction_map_cache_bytes(),
+        );
+        let sightlines = SharedSightlineCache::new(config.sightline_cache_bytes());
+        let cells = Arc::new(SharedCellCache::new(config.cell_cache_bytes()));
+        let tube_tables = Arc::new(TubeTableCache::with_envelope_files(
+            TUBE_TABLE_CACHE_BYTES,
+            envelope_files(&config),
+        ));
+        let (feature_cells, cluster_models, class_cells, map_lists, global_lists) = feature_caches(
+            &config,
+            Arc::clone(&pool),
+            Arc::clone(&galaxies),
+            Arc::clone(&tube_tables),
+        );
+        let centre_orbits = Arc::new(SharedCentreOrbitCache::new(CENTRE_ORBIT_CACHE_BYTES));
+        let (systems, briefs) = system_caches(&config, &cluster_models);
         let bodies = SharedBodyCache::new(Arc::clone(&pool), config.body_cache_bytes());
         let sky_cells = Arc::new(SharedSkyCellCache::new(config.sky_cache_bytes()));
-        let sky_tables = SkyTablesService::new(
+        let sky_tables = sky_tables_service(&config, Arc::clone(&pool));
+        let surface = SurfaceService::new(
             Arc::clone(&pool),
-            config.sky_caps().tables(),
-            config.sky_tables_bytes(),
+            Arc::clone(config.surface_inputs()),
+            config.surface_cache_bytes(),
+            config.surface_passes(),
         );
-        tracing::info!(
-            data_dir = %config.data_dir().display(),
-            workers = config.workers().get(),
-            cell_cache_mib = config.cell_cache_bytes() / (1 << 20),
-            map_cache_mib = config.map_cache_bytes() / (1 << 20),
-            system_cache_mib = config.system_cache_bytes() / (1 << 20),
-            body_cache_mib = config.body_cache_bytes() / (1 << 20),
-            brief_cache_mib = config.brief_cache_bytes() / (1 << 20),
-            sky_cache_mib = config.sky_cache_bytes() / (1 << 20),
-            sky_tables_mib = config.sky_tables_bytes() / (1 << 20),
-            sky_service = ?config.sky_service(),
-            "server started"
-        );
+        log_start(&config);
         Ok(Self {
             state: Arc::new(AppState {
                 registry,
                 pool,
                 galaxies,
                 maps,
+                extinction_maps,
+                sightlines,
                 cells,
                 systems,
                 briefs,
                 bodies,
+                viewer: compute::ViewerSystems::new(),
+                feature_cells,
+                cluster_models,
+                class_cells,
+                centre_orbits,
+                galaxy_features: map_lists,
+                global_lists,
+                tube_tables,
+                global_list_warm_up: config.global_list_warm_up(),
+                feature_members: config.feature_members(),
                 handler,
                 connections: Connections::new(),
                 request_stats: RequestStats::new(),
@@ -219,6 +321,14 @@ impl Server {
                 sky_caps: config.sky_caps(),
                 sky_tables,
                 sky_cells,
+                sky_replies: SkyReplyCache::new(config.kept_skies()),
+                sky_files: sky_files(&config),
+                held_skies: config.held_skies(),
+                sky_qos: config.sky_qos(),
+                surface,
+                contacts: alerts::UniverseContacts::new(),
+                alert_scans: alerts::AlertScans::new(config.alert_cache_bytes()),
+                listed_hosts: alerts::SharedListedHostsCache::new(LISTED_HOSTS_CACHE_BYTES),
             }),
         })
     }
@@ -239,13 +349,14 @@ impl Server {
 
     /// Tears the server down once serving has stopped.
     ///
-    /// Every WebSocket connection is closed with code 1001 (going away), and what it has in
-    /// flight is cancelled. axum's graceful shutdown does neither, nor does it wait for those
-    /// connections, so this does all three. A connection opened meanwhile is refused. Each
-    /// connection has [`CLOSE_TIMEOUT`](limits::CLOSE_TIMEOUT) to finish closing, so a client
-    /// that has stopped reading cannot hold this up. The sky tables' builds that opens started are
-    /// given up. Then the CPU pool stops: queued jobs are dropped and the workers finish the jobs
-    /// in hand.
+    /// Every WebSocket connection is closed with code 1001 (going away), and what it has in flight
+    /// is cancelled. axum's graceful shutdown does neither, nor does it wait for those connections,
+    /// so this does all three. A connection opened meanwhile is refused. Each connection has
+    /// [`CLOSE_TIMEOUT`](limits::CLOSE_TIMEOUT) to finish closing, so a client that has stopped
+    /// reading cannot hold this up. The sky tables' builds and the global lists' warm-ups that
+    /// opens started, and the coarse passes that prefetches started, are given up, and the kept
+    /// skies', the envelopes' and the sky tables' files still queued are written. Then the CPU pool
+    /// stops: queued jobs are dropped and the workers finish the jobs in hand.
     ///
     /// # Errors
     ///
@@ -254,6 +365,15 @@ impl Server {
         self.state.connections.close_all().await;
         // The sky tables' builds started at opens wait on no connection.
         self.state.sky_tables.stop_prefetching();
+        // Nor do the coarse passes started by prefetches.
+        self.state.surface.stop_prefetching();
+        // Nor do the global lists' warm-ups started at opens.
+        self.state.global_lists.stop_warming();
+        // The kept skies' files queued are written before the process can end, and the streams'
+        // envelopes' and the sky tables'.
+        self.state.sky_files.close().await;
+        self.state.tube_tables.close_envelope_files().await;
+        self.state.sky_tables.close_files().await;
         self.state
             .pool
             .shutdown()
@@ -275,8 +395,35 @@ impl Server {
 /// kernel holds little unsent behind a scene push (rendering plan R03, Design note 11).
 ///
 /// Every place that serves the router calls it, through axum's `ListenerExt::tap_io`, so that every
-/// connection is prepared alike. A failure is logged at `warn` and the connection goes on; elsewhere
-/// it does nothing, since socket2 does not expose the option there.
+/// connection is prepared alike. A failure is logged at `warn` and the connection goes on.
+///
+/// Elsewhere it does nothing, a limit Design note 11 states (R03.T17; XNU and Microsoft Learn read
+/// 2026-10-05, the crates rechecked at their locked versions 2026-10-20):
+///
+/// - **macOS.** XNU has the option (`TCP_NOTSENT_LOWAT`, 0x201, in `bsd/netinet/tcp.h`), but it
+///   gates only the writability events: `tcp_notsent_lowat_check()` (`tcp_subr.c`) is read by
+///   `sowriteable()` (`uipc_socket2.c`) and `filt_sowrite_common()` (`uipc_socket.c`) alone, while
+///   `sosendcheck()` (`uipc_socket.c`) lets `send` fill the buffer to its high-water mark
+///   (apple-oss-distributions/xnu, `main`). tokio writes until `WouldBlock` before it waits for
+///   readiness (tokio 1.53.3, `Registration::poll_io`), so the mark would not bound the queue,
+///   only the rhythm of the refills. Setting it would need `unsafe` besides: socket2 0.6.5 gates
+///   it to Linux and Android, libc 0.2.191 has no Apple binding, and rustix 1.1.5 and nix 0.31.3
+///   have none. XNU's send-buffer autosizing starts at `tcp_sendspace`, 128 KiB (`tcp_usrreq.c`),
+///   and grows only while, among its conditions, `min(snd_wnd, snd_cwnd)` covers every unsent
+///   byte (`tcp_output()`), so the unsent bytes stay near one send window.
+/// - **Windows** has no such option. Its dynamic send buffering, on unless an application sets
+///   `SO_SNDBUF`, keeps about one ideal send backlog outstanding, "the ideal value for the amount
+///   of data outstanding (sent but not acknowledged yet)", at most 16 MB (Microsoft Learn,
+///   `SIO_IDEAL_SEND_BACKLOG_QUERY`), so little of it is unsent.
+///
+/// So the kernel's share behind a push is at most 64 KiB unsent on Linux (13.1 ms at 40 Mbit/s),
+/// plus the bytes in flight; on macOS at most max(128 KiB, about one send window) unsent, at
+/// least 26.2 ms at 40 Mbit/s and growing only with the congestion window; on Windows about one
+/// ideal send backlog outstanding in total. Each comes on top of the one-chunk bound,
+/// [`BULK_QUEUED_BYTES`](limits::BULK_QUEUED_BYTES), which holds on every platform, and over
+/// loopback all three are negligible. `SO_SNDBUF` is set on no platform: on macOS it clears
+/// `SB_AUTOSIZE` (`uipc_socket.c`) and pins the buffer, and on Windows it turns dynamic send
+/// buffering off.
 ///
 /// # Examples
 ///
@@ -298,6 +445,174 @@ pub fn tap_socket(tcp: &tokio::net::TcpStream) {
     }
     #[cfg(not(any(target_os = "linux", target_os = "android")))]
     let _ = tcp;
+}
+
+/// The server's CPU pool of `workers`, its twins at `twins`
+/// ([`ServerConfigBuilder::twin_priority`]) and its bulk jobs held at `gate` if a test gave one
+/// ([`ServerConfigBuilder::bulk_gate`]).
+///
+/// # Errors
+///
+/// As [`CpuPool::new`].
+fn start_pool(
+    workers: NonZeroUsize,
+    twins: TwinPriority,
+    gate: Option<BulkGate>,
+) -> Result<CpuPool, StartPoolError> {
+    CpuPool::with_twins(
+        workers,
+        INTERACTIVE_QUEUE_CAPACITY,
+        BULK_QUEUE_CAPACITY,
+        twins,
+        gate,
+    )
+}
+
+/// The caches of plan 09's feature cells and interiors, in the budgets `config` gives (P09.T40.a),
+/// its catalogue class cells (P09.T40), the galaxy map's
+/// feature lists (P09.T40.b), and plan 10's global lists (P10.T10.a) with their streams' tube tables
+/// in `tube_tables` (P10.T10.b), each list and table found on `pool` from the galaxies of
+/// `galaxies`.
+#[must_use]
+fn feature_caches(
+    config: &ServerConfig,
+    pool: Arc<CpuPool>,
+    galaxies: Arc<GalaxyCache>,
+    tube_tables: Arc<TubeTableCache>,
+) -> (
+    Arc<SharedFeatureCellCache>,
+    Arc<SharedClusterModelCache>,
+    Arc<SharedClassCellCache>,
+    GalaxyFeaturesService,
+    GlobalListService,
+) {
+    (
+        Arc::new(SharedFeatureCellCache::new(config.feature_cache_bytes())),
+        Arc::new(SharedClusterModelCache::new(
+            config.cluster_model_cache_bytes(),
+        )),
+        Arc::new(SharedClassCellCache::new(config.class_cell_cache_bytes())),
+        GalaxyFeaturesService::new(
+            Arc::clone(&pool),
+            Arc::clone(&galaxies),
+            GALAXY_FEATURES_CACHE_BYTES,
+        ),
+        GlobalListService::new(
+            pool,
+            galaxies,
+            (
+                Arc::new(SharedSprayForces::new(SPRAY_FORCE_CACHE_BYTES)),
+                tube_tables,
+            ),
+            GLOBAL_LIST_CACHE_BYTES,
+        ),
+    )
+}
+
+/// Logs the configuration a server starts with: where it keeps its data, its workers and every
+/// cache's budget.
+fn log_start(config: &ServerConfig) {
+    tracing::info!(
+        data_dir = %config.data_dir().display(),
+        workers = config.workers().get(),
+        cell_cache_mib = config.cell_cache_bytes() / (1 << 20),
+        map_cache_mib = config.map_cache_bytes() / (1 << 20),
+        system_cache_mib = config.system_cache_bytes() / (1 << 20),
+        body_cache_mib = config.body_cache_bytes() / (1 << 20),
+        brief_cache_mib = config.brief_cache_bytes() / (1 << 20),
+        sky_cache_mib = config.sky_cache_bytes() / (1 << 20),
+        sky_tables_mib = config.sky_tables_bytes() / (1 << 20),
+        surface_cache_mib = config.surface_cache_bytes() / (1 << 20),
+        surface_passes = config.surface_passes().get(),
+        sky_service = ?config.sky_service(),
+        kept_skies = ?config.kept_skies(),
+        kept_skies_disk_mib = config.kept_skies_disk_bytes() / (1 << 20),
+        kept_envelopes_disk_mib = config.kept_envelopes_disk_bytes() / (1 << 20),
+        kept_sky_tables_disk_mib = config.kept_sky_tables_disk_bytes() / (1 << 20),
+        held_skies = ?config.held_skies(),
+        sky_qos = ?config.sky_qos(),
+        extinction_map_cache_mib = config.extinction_map_cache_bytes() / (1 << 20),
+        sightline_cache_mib = config.sightline_cache_bytes() / (1 << 20),
+        alert_cache_mib = config.alert_cache_bytes() / (1 << 20),
+        feature_cache_mib = config.feature_cache_bytes() / (1 << 20),
+        cluster_model_cache_mib = config.cluster_model_cache_bytes() / (1 << 20),
+        class_cell_cache_mib = config.class_cell_cache_bytes() / (1 << 20),
+        feature_members = ?config.feature_members(),
+        "server started"
+    );
+}
+
+/// The kept skies' files under `config`'s data directory, in its budget, keyed by its sky
+/// settings (rendering plan R06, R06.T11.n); none, and no thread for them, where the sky is not
+/// served.
+#[must_use]
+fn sky_files(config: &ServerConfig) -> SkyReplyFiles {
+    if config.sky_service() == SkyService::Unsupported {
+        return SkyReplyFiles::off();
+    }
+    let settings = SkySettings {
+        caps: config.sky_caps(),
+        members: config.feature_members(),
+    };
+    SkyReplyFiles::new(
+        config.data_dir().join(SKY_FILES_DIR),
+        u64::try_from(config.kept_skies_disk_bytes()).unwrap_or(u64::MAX),
+        &settings,
+    )
+}
+
+/// The streams' envelopes' files under `config`'s data directory, in its budget (plan 10,
+/// P10.T10.b; perf-range-envelopes-on-disk).
+#[must_use]
+fn envelope_files(config: &ServerConfig) -> EnvelopeFiles {
+    EnvelopeFiles::new(
+        config.data_dir().join(ENVELOPE_FILES_DIR),
+        u64::try_from(config.kept_envelopes_disk_bytes()).unwrap_or(u64::MAX),
+    )
+}
+
+/// The caches of the systems' stars and of the range briefs' models, in the budgets `config`
+/// gives.
+///
+/// Each resolves a feature member through the feature interiors `cluster_models`, so that a
+/// feature's members share one build of its interior.
+#[must_use]
+fn system_caches(
+    config: &ServerConfig,
+    cluster_models: &Arc<SharedClusterModelCache>,
+) -> (SharedSystemCache, SharedBriefCache) {
+    (
+        SharedSystemCache::new(config.system_cache_bytes())
+            .with_interiors(Arc::clone(cluster_models)),
+        SharedBriefCache::new(config.brief_cache_bytes())
+            .with_interiors(Arc::clone(cluster_models)),
+    )
+}
+
+/// The sky tables' service `config` asks for, on `pool`: one whose tables are built with their
+/// galaxy's features' gas index, which every ray and star sightline of their skies marches beside
+/// the smooth field, where the feature members are served (P09.T40.a's gate), and one whose skies
+/// march the smooth field alone where they are held.
+///
+/// Where the sky is served from the galaxy's own tables, it keeps them on disk under the data
+/// directory, in their own budget (perf-sky-tables-on-disk). A test's tables that hold no star,
+/// built at once, are not kept; nor is anything, and no thread is started for them, where the sky
+/// is not served.
+#[must_use]
+fn sky_tables_service(config: &ServerConfig, pool: Arc<CpuPool>) -> SkyTablesService {
+    let source = config.sky_caps().tables();
+    let service = SkyTablesService::new(pool, source, config.sky_tables_bytes());
+    let service = match config.feature_members() {
+        FeatureMembers::Served => service.with_features(),
+        FeatureMembers::Held => service,
+    };
+    match (config.sky_service(), source) {
+        (SkyService::Served, SkyTablesSource::Galaxy) => service.with_files(SkyTableFiles::new(
+            config.data_dir().join(SKY_TABLE_FILES_DIR),
+            u64::try_from(config.kept_sky_tables_disk_bytes()).unwrap_or(u64::MAX),
+        )),
+        (SkyService::Served, SkyTablesSource::Dark) | (SkyService::Unsupported, _) => service,
+    }
 }
 
 async fn healthz() -> &'static str {
@@ -405,12 +720,91 @@ mod tests {
     async fn start_creates_no_files() {
         let dir = tempfile::tempdir().unwrap();
         let data_dir = dir.path().join("hyperion-data");
-        let server = Server::start(ServerConfig::builder().data_dir(&data_dir).build())
-            .await
-            .unwrap();
+        let server = Server::start(
+            ServerConfig::builder()
+                .data_dir(&data_dir)
+                .workers(std::num::NonZeroUsize::MIN)
+                .build(),
+        )
+        .await
+        .unwrap();
         let _router = server.router();
         server.shutdown().await.unwrap();
         assert!(!data_dir.exists());
+    }
+
+    /// Only a server that serves the sky from its galaxy's own tables keeps them on disk, in their
+    /// budget: one whose tables are a test's that hold no star, or that serves no sky, has no files
+    /// for them and starts no thread (perf-sky-tables-on-disk).
+    #[tokio::test]
+    async fn only_the_galaxy_s_own_sky_tables_are_kept_on_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let forced = SkyCaps::forced(hyperion_sim::units::LightYears::new(10.0)).unwrap();
+        for (service, caps, budget) in [
+            (
+                SkyService::Served,
+                SkyCaps::DERIVED,
+                config::DEFAULT_KEPT_SKY_TABLES_DISK_MIB << 20,
+            ),
+            (SkyService::Served, forced, 0),
+            (SkyService::Unsupported, SkyCaps::DERIVED, 0),
+        ] {
+            let config = ServerConfig::builder()
+                .data_dir(dir.path())
+                .sky_service(service)
+                .sky_caps(caps)
+                .build();
+            let pool =
+                Arc::new(start_pool(NonZeroUsize::MIN, TwinPriority::Lowered, None).unwrap());
+            let tables = sky_tables_service(&config, Arc::clone(&pool));
+            assert_eq!(
+                tables.counters().files().budget(),
+                u64::try_from(budget).unwrap(),
+                "{service:?}, {caps:?}"
+            );
+            tables.close_files().await;
+            pool.shutdown().await.unwrap();
+        }
+        assert!(!dir.path().join(SKY_TABLE_FILES_DIR).exists());
+    }
+
+    /// Asserts that every cache of `fresh` holds nothing and has done nothing yet, its budget the
+    /// configuration's.
+    fn every_cache_is_empty(fresh: &ServerStats) {
+        let defaults = ServerConfig::builder().build();
+        for (cache, budget) in [
+            (fresh.maps(), defaults.map_cache_bytes()),
+            (fresh.cells(), defaults.cell_cache_bytes()),
+            (fresh.systems(), defaults.system_cache_bytes()),
+            (fresh.briefs(), defaults.brief_cache_bytes()),
+            (fresh.sky_cells().cache(), defaults.sky_cache_bytes()),
+            (fresh.sky_tables().cache(), defaults.sky_tables_bytes()),
+            (fresh.surface().cache(), defaults.surface_cache_bytes()),
+            (
+                fresh.extinction_maps(),
+                defaults.extinction_map_cache_bytes(),
+            ),
+            (fresh.sightlines(), defaults.sightline_cache_bytes()),
+            (fresh.feature_cells(), defaults.feature_cache_bytes()),
+            (fresh.cluster_models(), defaults.cluster_model_cache_bytes()),
+            (fresh.class_cells(), defaults.class_cell_cache_bytes()),
+            (fresh.galaxy_features(), GALAXY_FEATURES_CACHE_BYTES),
+            (fresh.global_lists(), GLOBAL_LIST_CACHE_BYTES),
+            (fresh.tube_tables(), TUBE_TABLE_CACHE_BYTES),
+        ] {
+            assert_eq!(
+                (
+                    cache.entries(),
+                    cache.bytes(),
+                    cache.hits(),
+                    cache.misses(),
+                    cache.evictions(),
+                    cache.refused(),
+                    cache.budget()
+                ),
+                (0, 0, 0, 0, 0, 0, budget)
+            );
+        }
     }
 
     #[tokio::test]
@@ -442,30 +836,10 @@ mod tests {
                 crate::compute::GalaxyCounters::default(),
             )
         );
-        let defaults = ServerConfig::builder().build();
-        for (cache, budget) in [
-            (fresh.maps(), defaults.map_cache_bytes()),
-            (fresh.cells(), defaults.cell_cache_bytes()),
-            (fresh.systems(), defaults.system_cache_bytes()),
-            (fresh.briefs(), defaults.brief_cache_bytes()),
-            (fresh.sky_cells().cache(), defaults.sky_cache_bytes()),
-            (fresh.sky_tables().cache(), defaults.sky_tables_bytes()),
-        ] {
-            assert_eq!(
-                (
-                    cache.entries(),
-                    cache.bytes(),
-                    cache.hits(),
-                    cache.misses(),
-                    cache.evictions(),
-                    cache.refused(),
-                    cache.budget()
-                ),
-                (0, 0, 0, 0, 0, 0, budget)
-            );
-        }
+        every_cache_is_empty(&fresh);
         assert_eq!(fresh.sky_cells().rebuilt(), 0);
         assert_eq!(fresh.sky_tables().builds(), 0);
+        assert_eq!(fresh.surface().computed(), 0);
         let mut client = harness.connect().await;
         assert_eq!(stats().connections(), 1);
         client.hello().await;
@@ -544,5 +918,66 @@ mod tests {
             ),
             "{error:?}"
         );
+    }
+
+    /// The gate decides whether the sky's tables carry the features' gas: with the members held, a
+    /// sky marches the smooth field alone; served, as every server but a test's serves them, its
+    /// jobs take the features' gas, as the sim's lookup gives it (P09.T40.a).
+    #[tokio::test]
+    async fn the_sky_takes_the_features_gas_only_once_the_gate_serves_them() {
+        use hyperion_sim::galaxy::gas::modifiers::GasModifierSource;
+        use hyperion_sim::time::UniverseTime;
+        use hyperion_sim::units::LightYears;
+        use hyperion_sim::{GENERATOR_VERSION, Seed};
+
+        use crate::compute::GalaxyKey;
+        use crate::compute::sky::tests::{an_ageing_nursery, feature_gas_at};
+
+        // Its twins at its worker's priority, so that the tables' bulk jobs do not wait on the
+        // neighbouring tests' threads (`TwinPriority`).
+        let pool = Arc::new(
+            CpuPool::with_twins(
+                std::num::NonZeroUsize::MIN,
+                INTERACTIVE_QUEUE_CAPACITY,
+                BULK_QUEUE_CAPACITY,
+                TwinPriority::Workers,
+                None,
+            )
+            .unwrap(),
+        );
+        let galaxy = Arc::new(hyperion_sim::galaxy::Galaxy::new(Seed::new(0x4d2)));
+        let key = GalaxyKey::new(0x4d2, GENERATOR_VERSION);
+        let from = hyperion_sim::coords::GalacticPosition::from_light_years([0.0, 26_000.0, 68.0])
+            .unwrap();
+        let to = an_ageing_nursery(&galaxy, &from);
+        let t = UniverseTime::from_julian_years(1_000).unwrap();
+        assert_eq!(
+            ServerConfig::builder().build().feature_members(),
+            FeatureMembers::Served
+        );
+        for members in [FeatureMembers::Held, FeatureMembers::Served] {
+            let config = ServerConfig::builder()
+                .sky_caps(SkyCaps::forced(LightYears::new(10.0)).unwrap())
+                .feature_members(members)
+                .build();
+            let service = sky_tables_service(&config, Arc::clone(&pool));
+            let tables = tokio::time::timeout(crate::testing::WAIT, service.get(key, &galaxy))
+                .await
+                .unwrap()
+                .unwrap();
+            let mut found = Vec::new();
+            tables
+                .gas(&galaxy, t)
+                .modifiers_near_segment(&from, &to, &mut found);
+            let expected = match members {
+                FeatureMembers::Served => feature_gas_at(&galaxy, 1_000.0, &from, &to),
+                FeatureMembers::Held => Vec::new(),
+            };
+            assert_eq!(found, expected, "{members:?}");
+        }
+        tokio::time::timeout(crate::testing::WAIT, pool.shutdown())
+            .await
+            .unwrap()
+            .unwrap();
     }
 }

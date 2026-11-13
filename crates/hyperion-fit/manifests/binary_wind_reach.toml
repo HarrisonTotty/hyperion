@@ -1,0 +1,21 @@
+# Plan 11's wind reach table (P11.T12's fix, held at 29): what bounds the wind any star of a mass
+# and metallicity interval can have lost by an age, as a wide pair's walk reads it, from the
+# generator's own tracks, on the reach table's grid. The parameters are constants of
+# `hyperion_sim::stellar::binary::reach` and `hyperion_sim::stellar::binary::wind_reach`, recorded
+# here so that the inputs hash covers them; the task refuses a manifest that disagrees with the code.
+task = "binary_wind_reach"
+
+[params]
+mass_cells = 96
+lowest_mass = 0.08
+highest_mass = 150.0
+mass_subdivisions = 8
+fe_h_nodes = [-2.301029995663981, -2.0, -1.5, -1.0, -0.5, -0.25, 0.0, 0.17609125905568124]
+fe_h_subdivisions = 6
+eta_draws = [-7.142857142857142, -3.5, -2.5, -1.5, -0.75, 0.0, 0.75, 1.5, 2.5, 3.5, 7.0]
+first_age_edge_years = 1.0e5
+age_step_dex = 0.05
+age_bins = 105
+age_spread = 1.1
+sum_margin_dex = 0.1
+agb_margin = 0.1

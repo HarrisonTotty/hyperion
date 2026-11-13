@@ -7,6 +7,8 @@
 //! test says so on stderr and checks nothing more; the sim's own tests of the table
 //! (`stellar::remnant::cooling`) run either way, against held-out models they quote.
 
+mod common;
+
 use std::num::NonZeroUsize;
 use std::path::Path;
 
@@ -54,17 +56,12 @@ fn wd_cooling_table_is_reproduced() {
     )
     .expect("the wd_cooling task runs on the downloaded sequences")
     .text;
-    if rendered != COMMITTED {
-        let line = rendered
-            .lines()
-            .zip(COMMITTED.lines())
-            .position(|(a, b)| a != b)
-            .map_or_else(|| "the length".to_owned(), |n| format!("line {}", n + 1));
-        panic!(
-            "crates/hyperion-sim/src/tables/wd_cooling.rs differs from the fit at {line}: run \
-             `just fit wd_cooling`"
-        );
-    }
+    common::assert_reproduced(
+        "crates/hyperion-sim/src/tables/wd_cooling.rs",
+        "wd_cooling",
+        COMMITTED,
+        &rendered,
+    );
 }
 
 /// The table follows the sequences to 0.03 dex in luminosity at every model, held out or not,

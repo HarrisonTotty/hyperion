@@ -5,10 +5,13 @@
  *
  * @remarks
  * The low setting bakes 1,024² faces against 3,072² (34 MB with mips against about 300 MB), asks
- * an N_max of 10⁵ against 3 × 10⁵, and draws 2,048 sprites against 4,096. Those three figures are
- * provisional starting values, not sourced: open question 16 leaves them open and R06.T17 decides
- * them from measurements. A baked star is re-baked once the camera's motion shifts the nearest of
- * them by a tenth of a pixel (Design note 20) on both settings.
+ * an N_max of 10⁵ against 3 × 10⁵, and draws 2,048 sprites against 4,096. R06.T17 kept those
+ * figures from its measurements (open question 16; R06's Risks, "Deviations in T17, as built",
+ * drafted for the owner): the eye's sky the server serves near the Sun lists 66,614 stars at its
+ * final reply, under both N_max; a camera's at V 10.06 some 2–4 × 10⁵, past both, whose overflow
+ * the band holds as points, and 3 × 10⁵ is the protocol's own cap. The sprite budgets wait on the
+ * frame times of the owner's machines. A baked star is re-baked once the camera's motion shifts the
+ * nearest of them by a tenth of a pixel (Design note 20) on both settings.
  */
 
 /** The sky's settings for one quality setting. */

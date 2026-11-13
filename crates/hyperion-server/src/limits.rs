@@ -84,14 +84,23 @@ pub const MAX_BINARY_FRAME_BYTES: usize = 262_144;
 /// note 11). R03.T10.b streams under it.
 pub const BULK_QUEUED_BYTES: usize = 262_144;
 
-/// `TCP_NOTSENT_LOWAT` on every accepted socket, Linux only: 65,536 bytes (rendering plan R03,
-/// Design note 11).
+/// `TCP_NOTSENT_LOWAT` on every accepted socket, Linux and Android only: 65,536 bytes (rendering
+/// plan R03, Design note 11).
 ///
 /// Once that much is unsent the kernel takes no more from the writer, so a push waits behind at
 /// most this much of the send buffer rather than up to `tcp_wmem`'s maximum, up to 4 MB, that Linux autotunes it to (kernel
 /// `ip-sysctl` documentation, `tcp_notsent_lowat`; Cloudflare found 16 KiB kept connections fully
-/// used, P. Meenan 2018, "HTTP/2 Prioritization with NGINX"). About 13 ms at 40 Mbit/s. socket2
-/// does not expose it on macOS, and Windows has none; there the chunk bound alone holds.
+/// used, P. Meenan 2018, "HTTP/2 Prioritization with NGINX"). About 13 ms at 40 Mbit/s.
+///
+/// It is set nowhere else, a limit Design note 11 states (R03.T17;
+/// [`tap_socket`](crate::tap_socket) has the detail). XNU has the option, but it gates only the
+/// writability events while `send` fills the buffer (`tcp_notsent_lowat_check()` and
+/// `sosendcheck()`, apple-oss-distributions/xnu, `main`, read 2026-10-05), and tokio writes until
+/// `WouldBlock` (tokio 1.53.3, `Registration::poll_io`), so it would not bound the queue; XNU's
+/// send-buffer autosizing keeps at most max(128 KiB, about one send window) unsent. Windows has
+/// none, and its dynamic send buffering keeps about one ideal send backlog outstanding (Microsoft
+/// Learn, `SIO_IDEAL_SEND_BACKLOG_QUERY`). There the kernel's share is that much, on top of the
+/// one-chunk bound of [`BULK_QUEUED_BYTES`].
 pub const TCP_NOTSENT_LOWAT_BYTES: u32 = 65_536;
 
 /// Subscriptions one connection may hold at once, those still opening included (rendering plan
@@ -116,6 +125,14 @@ pub const CRAFT_PUSH_INTERVAL: Duration = Duration::from_micros(15_625);
 /// one client, with room (rendering plan R03, Design note 6). A ninth is refused with
 /// `bad_request` naming `cameras`.
 pub const MAX_SCENE_CAMERAS: usize = 8;
+
+/// Cell ranges one `survey_pass` may carry: 256 (rendering plan R09, Design note 16; plan 04's row
+/// R09). A 257th is refused with `bad_request` naming `cells`.
+///
+/// At most 38 bytes a range, the widest `{"start":…,"end":…},` two ten-digit indices make, 256 of
+/// them keep the request under [`MAX_INBOUND_FRAME_BYTES`]; a pass whose cover needs more ranges is
+/// sent as several requests sharing its time span.
+pub const MAX_SURVEY_RANGES: usize = 256;
 
 /// Universes the server holds, counting those on disk and those being created.
 pub const MAX_UNIVERSES: usize = 256;
@@ -145,6 +162,93 @@ pub const MAX_QUERY_RADIUS_LY: f64 = 131_072.0;
 /// 2,000 ly in the outer halo expects a few thousand layer-A systems while visiting 10⁸ cells.
 pub const MAX_QUERY_CELLS: NonZeroU32 = NonZeroU32::new(262_144).expect("262,144 is not zero");
 
+/// Most feature cells one `features_in_range` request may read (plan 09, P09.T40.b).
+///
+/// 512 cells are some 0.7 s of cells cold in a test build at 1.4 ms each (measured 2026-10-30), a
+/// sphere of up to about 10,000 ly. Past it, the catalogue's kinds are left out as over the cell
+/// budget.
+///
+/// The catalogue's lookup reads every 4,096 ly cell within the sphere's radius plus the features'
+/// greatest reach, 4,096 ly, so even a small sphere reads 27 to 64 cells; the root cube holds
+/// 32,768.
+pub const MAX_FEATURE_CELLS: u64 = 512;
+
+/// The byte budget of the galaxy map's feature lists, kept per galaxy (plan 09, P09.T40.b): some
+/// 140 globulars of 168 bytes each, 24 kB a galaxy, so this holds every galaxy the server keeps
+/// ([`GALAXY_CACHE_ENTRIES`]) with room.
+pub const GALAXY_FEATURES_CACHE_BYTES: usize = 1 << 20;
+
+/// The byte budget of plan 10's global lists, kept per galaxy (P10.T10.a): some 320 streams and
+/// cores of about 200 bytes each and as many entries of 40, under 100 kB a galaxy, and the list's
+/// models, about 2.1 kB a stream with its band shares and its tube envelope: 683 kB for the server
+/// tests' galaxy's 321 streams (perf-range-census-streams, 2026-11-05). So this holds every galaxy
+/// the server keeps ([`GALAXY_CACHE_ENTRIES`]) with room for the 1,500 streams of the largest,
+/// some 3.3 MB.
+pub const GLOBAL_LIST_CACHE_BYTES: usize = 8 << 20;
+
+/// The byte budget of plan 10's tube tables, one per stream of every galaxy the server holds
+/// (P10.T10.b's `TubeTableCache`): some 90 kB a table, a Milky Way galaxy's 310 or so some 28 MB,
+/// so this holds two such galaxies' whole sets. The 1,500 streams of the largest galaxies, some 135
+/// MB, do not fit, and their warm-up stops once the cache evicts its own first table: a table
+/// evicted is built again, to the same bits, by the request that reads it.
+pub const TUBE_TABLE_CACHE_BYTES: usize = 64 << 20;
+
+/// The byte budget of the galactic centre's cells of members and their orbits, of every galaxy the
+/// server holds (plan 09, P09.T37.b's `SharedCentreOrbitCache`): some 870 bytes a member under the
+/// exact orbit's law, so this holds some 150,000 members' cells, twice over the 62,443 members a
+/// query a century from the epoch scans in full about the black hole (plan 09's Risks, "P09.T29 as
+/// built"), so that its warm query places none again. A query at ±1,000 years scans some two million,
+/// more than any budget the server should give them: it is cold whatever the cache holds.
+pub const CENTRE_ORBIT_CACHE_BYTES: usize = 128 << 20;
+
+/// The byte budget of the catalogue features' and the galactic centre's lists as the alert walks
+/// read them, of every galaxy the server holds (plan 09's P09.T36 in plan 12's walks; the alerts'
+/// `SharedListedHostsCache`): each feature cell's lists, charged as if every class's hosts were
+/// found. The Milky Way fixture's whole cube comes to 66.5 MB, its 1,556 feature cells and its
+/// centre (fix-p09-alert-walk-features-2), so this holds one such galaxy's whole set, which a
+/// background walk of the whole cube reads, with room.
+pub const LISTED_HOSTS_CACHE_BYTES: usize = 96 << 20;
+
+/// The byte budget of the galaxies' spray tables, which the global lists' shell orbits and every
+/// tube's spray step in (P10.T5.b's `SharedSprayForces`): some 160 kB a galaxy, so this holds
+/// every galaxy the server keeps ([`GALAXY_CACHE_ENTRIES`]) with room.
+pub const SPRAY_FORCE_CACHE_BYTES: usize = 1 << 20;
+
+/// The byte budget of the last skies' final replies, kept (rendering plan R06, R06.T11.l): 16 MiB,
+/// two skies at `N_max`'s 3 × 10⁵ stars, each a payload of 7.49 MB (24 bytes a star and 6 × 64²
+/// texels of 12 bytes) and its body, so that a relaunched client's or a reopened view's sky is
+/// answered from memory. A setting's smaller `N_max` keeps more. Each is charged its payload and
+/// what its response's body holds, some 12 kB a layer of radii by ray.
+pub const SKY_REPLY_CACHE_BYTES: usize = 16 << 20;
+
+/// The kept skies' files' queue: the lookups and replies waiting for the store's thread
+/// (rendering plan R06, R06.T11.n). A sky's lookup waits for room; a reply that finds none is not
+/// written, which only costs its sky again after a restart. A reply is written in some 10 ms a MB,
+/// and skies end minutes apart, so four is room enough.
+pub const SKY_FILE_QUEUE: usize = 4;
+
+/// The streams' envelopes waiting to be written to disk, and the lookups waiting to read them
+/// (plan 10, P10.T10.b; perf-range-envelopes-on-disk). A table's envelope is queued as the table is
+/// kept, some 1.6 kB written in well under a millisecond, and a warm-up keeps a few tables a second,
+/// so 64 is room enough; an envelope that finds none is not written, which only costs its table
+/// after a restart. A list's lookup waits for room.
+pub const ENVELOPE_FILE_QUEUE: usize = 64;
+
+/// The sky tables waiting to be written to disk, and the lookups waiting to read them (rendering
+/// plan R06; perf-sky-tables-on-disk). A galaxy's tables are queued once they are built, some
+/// 70 MB written in well under a second, and a server builds them once a galaxy, so four is room
+/// enough; tables that find none are not written, which only costs their build after a restart.
+/// A lookup waits for room.
+pub const SKY_TABLE_FILE_QUEUE: usize = 4;
+
+/// Most targets one `extinction` request may name (plan 07, P07.T10.c).
+///
+/// A position target is some 130 bytes of JSON, so 64 of them, with the origin and the envelope,
+/// stay well inside [`MAX_INBOUND_FRAME_BYTES`]; and 64 lines of at most
+/// [`SIGHTLINE_QUALITY`](hyperion_sim::galaxy::gas::extinction::SIGHTLINE_QUALITY)'s 256 steps
+/// each are one short pool job (plan 07's Risks, "Cost on long-range charts").
+pub const MAX_EXTINCTION_TARGETS: usize = 64;
+
 /// Galaxies the server keeps built at once (plan 04, design note 23).
 ///
 /// A `Galaxy` is fixed-size, about 1.4 MiB of heap (plan 02, Risks, R19), so bounding the entries
@@ -167,7 +271,8 @@ mod tests {
 
     /// Every limit holds the figure plan 04 gives it: design note 24's, T13.a's frame count, T15's
     /// byte budget and write timeout, design note 16's name length and design note 23's four
-    /// galaxies; `CLOSE_TIMEOUT` and the queue capacities are this server's own choice (T13, T8).
+    /// galaxies, plan 07's P07.T10.c target count, and the rendering plans' (R03's and R09's);
+    /// `CLOSE_TIMEOUT` and the queue capacities are this server's own choice (T13, T8).
     ///
     /// The tests that exercise a limit read its value from here, so that a frame one byte over the
     /// limit is over it whatever the limit is; this is the test that notices the limit itself move.
@@ -185,6 +290,17 @@ mod tests {
         assert_eq!(MAX_CENSUS_LIMIT, 20_000);
         assert_eq!(MAX_QUERY_RADIUS_LY.to_bits(), 131_072.0_f64.to_bits());
         assert_eq!(MAX_QUERY_CELLS.get(), 1 << 18);
+        assert_eq!(MAX_EXTINCTION_TARGETS, 64);
+        assert_eq!(MAX_FEATURE_CELLS, 512);
+        assert_eq!(GALAXY_FEATURES_CACHE_BYTES, 1 << 20, "1 MiB");
+        assert_eq!(
+            SKY_REPLY_CACHE_BYTES,
+            16 << 20,
+            "16 MiB, two skies at N_max"
+        );
+        assert_eq!(SKY_FILE_QUEUE, 4);
+        assert_eq!(ENVELOPE_FILE_QUEUE, 64);
+        assert_eq!(SKY_TABLE_FILE_QUEUE, 4);
         assert_eq!(GALAXY_CACHE_ENTRIES.get(), 4);
         assert_eq!(INTERACTIVE_QUEUE_CAPACITY.get(), 64);
         assert_eq!(BULK_QUEUE_CAPACITY.get(), 256);
@@ -199,6 +315,7 @@ mod tests {
             MAX_SCENE_CAMERAS, 8,
             "one per view of R07's largest layout, with room"
         );
+        assert_eq!(MAX_SURVEY_RANGES, 256, "R09's ranges a survey pass");
         assert_eq!(SCENE_HEARTBEAT, Duration::from_secs(1));
         assert_eq!(
             CRAFT_PUSH_INTERVAL * 64,

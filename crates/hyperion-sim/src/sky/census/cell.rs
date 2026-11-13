@@ -62,6 +62,8 @@
 //! The census reads no luminosity table: its skips read the envelope, and each star's own state.
 //! Readers of the tables (the caps, the band) pass their light ages through
 //! [`LuminosityTables::age_for`](crate::sky::luminosity::LuminosityTables::age_for).
+//!
+//! [`ConeRegion::holds`]: super::ConeRegion::holds
 
 use core::f64::consts::LN_2;
 
@@ -83,16 +85,17 @@ use crate::stellar::multiplicity::{
     HierarchyBound, MAX_COMPANIONS, MultiplicityContext, RedrawAttempt, StarIndex, TIDAL_CUT_SHARE,
     hierarchy_bound, star_positions_at,
 };
+use crate::stellar::photometry::{WHITE_DWARF_BRIGHTEST_V, absolute_v_of_state_under};
 use crate::stellar::system::{SystemStars, draw_metallicity, grid_multiplicity, primary_eta};
 use crate::stellar::{Composition, Phase};
 use crate::time::{CLOCK_WINDOW_H, Span, UniverseTime};
 use crate::units::consts::METRES_PER_LIGHT_YEAR;
-use crate::units::{LightYears, Magnitudes, Metres, SolarMasses, Years};
+use crate::units::{KilometresPerSecond, LightYears, Magnitudes, Metres, SolarMasses, Years};
 
 use super::super::colour::StarColour;
 use super::super::envelope::{BrightnessEnvelope, MAX_AGE_YEARS, always_single, max_star_mass};
 use super::super::phase::PhaseEnvelope;
-use super::super::photometry::{absolute_v_of_state, colour_of_state};
+use super::super::photometry::colour_of_state;
 use super::cache::{
     BlockKey, BlockParams, CACHE_APPROACH_LY, CACHE_CUT_SLACK_MAG, CellNeed, CellOutcome,
     HeldRecord, Lookup, Rebuild, serve_from_block,
@@ -249,7 +252,9 @@ impl LayerTally {
         self.listed
     }
 
-    /// Stars of a generated system that were white dwarfs, dark in V until ask A4.
+    /// Stars of a generated system that were white dwarfs without a V magnitude: every white dwarf
+    /// under A4's interim (to version 25), and under its arm (from 26) those cooler than the
+    /// Montreal grid's 1,500 K.
     #[must_use]
     pub const fn without_photometry(&self) -> u64 {
         self.without_photometry
@@ -276,7 +281,8 @@ impl LayerTally {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CensusTallies {
     layers: [LayerTally; Layer::ALL.len()],
-    /// Plan 09's feature members are not in the census until P09.T40 (R06.T16.a).
+    /// Whether plan 09's feature members are left out: so unless every part's job carried the
+    /// census's sources ([`SkyContext::sources`], R06.T16.a).
     feature_members_absent: bool,
 }
 
@@ -314,13 +320,18 @@ impl CensusTallies {
         self.feature_members_absent |= other.feature_members_absent;
     }
 
-    /// These tallies with plan 09's feature members present: for the merge's tests, until T16.a
-    /// brings the members.
+    /// These tallies with plan 09's feature members present: for the merge's tests.
     #[cfg(test)]
     #[must_use]
     pub(super) const fn with_feature_members_present(mut self) -> Self {
-        self.feature_members_absent = false;
+        self.note_feature_members();
         self
+    }
+
+    /// Notes that plan 09's feature members are in the census: the tallies of a job whose context
+    /// carries the census's sources (R06.T16.a).
+    pub(super) const fn note_feature_members(&mut self) {
+        self.feature_members_absent = false;
     }
 
     /// Sets each layer's [`LayerTally::listed`] to the number of `listed` in it: the merge's.
@@ -344,6 +355,9 @@ pub struct LayerCost {
     held: u64,
     prefiltered: u64,
     star_bounded: u64,
+    star_bounded_multiple: u64,
+    passed_single: u64,
+    passed_multiple: u64,
     unbounded: u64,
     pairs: PairTally,
     generated_listable: u64,
@@ -379,6 +393,35 @@ impl LayerCost {
     #[must_use]
     pub const fn star_bounded(&self) -> u64 {
         self.star_bounded
+    }
+
+    /// Of the records bounded star by star, those whose hierarchy bound lists a companion at some
+    /// attempt ([`StarBounds::companions`]): the multiple systems, as the bound sees them before
+    /// the system is generated.
+    ///
+    /// The rest are single (R06.T17, for T16.b's 25% trigger).
+    #[must_use]
+    pub const fn star_bounded_multiple(&self) -> u64 {
+        self.star_bounded_multiple
+    }
+
+    /// Of the single records bounded star by star, those the census generated: their bounds passed
+    /// before their drift and after it (R06.T17).
+    ///
+    /// The others were skipped.
+    #[must_use]
+    pub const fn passed_single(&self) -> u64 {
+        self.passed_single
+    }
+
+    /// Of the multiple records bounded star by star ([`star_bounded_multiple`]), those the census
+    /// generated, as [`passed_single`] counts the single ones (R06.T17).
+    ///
+    /// [`star_bounded_multiple`]: Self::star_bounded_multiple
+    /// [`passed_single`]: Self::passed_single
+    #[must_use]
+    pub const fn passed_multiple(&self) -> u64 {
+        self.passed_multiple
     }
 
     /// Of the records bounded star by star, those holding a pair that plan 11 cannot bound, which
@@ -441,6 +484,9 @@ impl LayerCost {
         self.held += other.held;
         self.prefiltered += other.prefiltered;
         self.star_bounded += other.star_bounded;
+        self.star_bounded_multiple += other.star_bounded_multiple;
+        self.passed_single += other.passed_single;
+        self.passed_multiple += other.passed_multiple;
         self.unbounded += other.unbounded;
         self.pairs.add(&other.pairs);
         self.generated_listable += other.generated_listable;
@@ -487,9 +533,9 @@ impl CensusCost {
 
 /// A census's tallies and its cost, counted side by side.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
-struct Counts {
-    tallies: CensusTallies,
-    cost: CensusCost,
+pub(super) struct Counts {
+    pub(super) tallies: CensusTallies,
+    pub(super) cost: CensusCost,
 }
 
 /// Whether a record's skips are taken: its flux bound before its system is generated, and each
@@ -546,7 +592,8 @@ pub const GRID_STAR_BOUND: u8 = MAX_COMPANIONS as u8 + 2;
 /// The most stars a system of `record` can hold: one for a forced single (a free-floating brown
 /// dwarf, which takes no companion of any kind), [`GRID_STAR_BOUND`] otherwise (a grid system's
 /// redraws can change its count, so its first attempt's is not a bound). A grid record is a forced
-/// single exactly when its layer is [`always_single`], which a test checks.
+/// single exactly when its layer is [`always_single`] or plan 08 displaced it (P08.T12, from
+/// generator version 27), which a test checks.
 #[must_use]
 fn star_bound(record: &SystemRecord) -> u8 {
     match grid_multiplicity(record) {
@@ -589,13 +636,30 @@ pub fn star_offset_bound(galaxy: &Galaxy, record: &SystemRecord) -> LightYears {
 /// the cell's corner and the table's node.
 #[must_use]
 pub fn cell_offset_bound(galaxy: &Galaxy, key: CellKey) -> LightYears {
-    if always_single(key.layer()) {
+    layer_offset_bound(
+        galaxy,
+        key.layer(),
+        LightYears::new(farthest_from_centre_ly(key)),
+    )
+}
+
+/// [`star_offset_bound`] for every system of `layer` within `from_centre` of the galactic centre:
+/// [`cell_offset_bound`]'s for a cell whose farthest corner lies there, and zero for a layer whose
+/// systems are all single. A feature member's hierarchy keeps the same tidal cut about its own
+/// place, so it bounds a member's stars too, which [`census_members`](super::census_members)
+/// shifts its shells by (R06.T16.a).
+#[must_use]
+pub(super) fn layer_offset_bound(
+    galaxy: &Galaxy,
+    layer: Layer,
+    from_centre: LightYears,
+) -> LightYears {
+    if always_single(layer) {
         return LightYears::ZERO;
     }
-    let radius = galaxy.potential().tidal_radius_bound_within(
-        offset_mass(key.layer()),
-        LightYears::new(farthest_from_centre_ly(key)),
-    );
+    let radius = galaxy
+        .potential()
+        .tidal_radius_bound_within(offset_mass(layer), from_centre);
     LightYears::new(offset_bound_at(LightYears::from(radius).value()))
 }
 
@@ -634,7 +698,7 @@ const OFFSET_OCTAVES: u32 = 21;
 /// barycentre, read in O(1) a cell (R06.T8.f): [`cell_offset_bound`] costs some 40 µs, since its
 /// tidal-radius bound scans the potential's grid points.
 ///
-/// It holds, on galactocentric distance nodes [`OFFSET_NODES_PER_OCTAVE`] to the octave, the
+/// It holds, on galactocentric distance nodes `OFFSET_NODES_PER_OCTAVE` to the octave, the
 /// running maximum of [`cell_offset_bound`]'s quantity at each node, and gives a cell the value at
 /// the first node at or beyond its farthest corner from the centre. The tidal-radius bound within a
 /// radius bounds the tidal radius of every point inside it, so the value bounds every record's
@@ -644,7 +708,7 @@ const OFFSET_OCTAVES: u32 = 21;
 ///
 /// It depends on the galaxy's potential alone, which its parameters fix, so a server builds it once
 /// per galaxy, beside the luminosity tables, and every census job of that galaxy reads it through
-/// its [`SkyContext`](super::SkyContext). Another galaxy's bounds could be too small for this one's
+/// its [`SkyContext`]. Another galaxy's bounds could be too small for this one's
 /// stars, so it keeps the parameters it was built for, and the census checks them in debug builds
 /// ([`is_for`](Self::is_for)).
 #[derive(Debug, Clone, PartialEq)]
@@ -779,8 +843,8 @@ fn flux_bound_over(
 }
 
 /// What a star's pair leaves of the star's own bound (R06.T8.g): plan 11's
-/// [`pair_light_bound`] verdict, read for one of the pair's two stars
-/// (`decision-p11-t16-hierarchy-bound.md` §5).
+/// [`pair_light_bound`] verdict, read for one of the
+/// pair's two stars (`decision-p11-t16-hierarchy-bound.md` §5).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum StarLight {
     /// The star is its own single-star model and takes its own bound: a star of no pair the
@@ -791,7 +855,8 @@ pub enum StarLight {
     /// pair in its place.
     OwnOr(Magnitudes),
     /// Nothing: a star of a [`PairLight::Remnants`] pair, none of whose stars or products lives in
-    /// the window, while white dwarfs are dark in V (ask A4).
+    /// the window, while white dwarfs are dark in V (A4's interim, to version 25). Under A4's arm
+    /// such a star is bounded by the white dwarfs' brightest ([`BoundStar::brightest`]).
     Dark,
 }
 
@@ -874,6 +939,13 @@ impl BoundStar {
     /// ([`PhaseEnvelope::brightest`]), the brighter of that and its pair's, or `None` where it can
     /// shine at none of them. A star of a [`StarLight::OwnOr`] pair takes the pair's magnitude
     /// even where its own model is dark: a departing star can outlive its own model.
+    ///
+    /// A white dwarf has a V (P06.T43.b), which the phase envelope's white-dwarf rows hold for a
+    /// star's own model and plan 11's pair light does not. So a star of a pair that is not its own
+    /// model at some attempt (a [`StarLight::OwnOr`] or [`StarLight::Dark`] star), whose products
+    /// may be white dwarfs at any age, takes the brighter of its bound and the white dwarfs'
+    /// brightest (`stellar::photometry::WHITE_DWARF_BRIGHTEST_V`); a star that is its own model
+    /// takes its own bound alone.
     #[must_use]
     pub fn brightest(
         &self,
@@ -882,10 +954,18 @@ impl BoundStar {
         ages: (Years, Years),
     ) -> Option<Magnitudes> {
         let own = || phase.brightest(self.mass, composition, self.eta, ages);
-        match self.light {
+        let light = match self.light {
             StarLight::Own => own(),
             StarLight::OwnOr(m) => Some(own().map_or(m, |own| brighter(own, m))),
             StarLight::Dark => None,
+        };
+        match self.light {
+            StarLight::OwnOr(_) | StarLight::Dark => {
+                Some(light.map_or(WHITE_DWARF_BRIGHTEST_V, |light| {
+                    brighter(light, WHITE_DWARF_BRIGHTEST_V)
+                }))
+            }
+            StarLight::Own => light,
         }
     }
 }
@@ -993,13 +1073,15 @@ impl RecordLight {
 /// 2. plan 11's [`hierarchy_bound`], the generator's own draw at every redraw attempt it can keep,
 ///    so each star's initial mass is exact, with its body and attempt, and so is each star–star
 ///    pair's drawn periastron;
-/// 3. each such pair's [`pair_light_bound`] over the record's light-time ages;
+/// 3. each such pair's [`pair_light_bound`] over the
+///    record's light-time ages;
 /// 4. for each star, R06.T8.m's phase envelope ([`PhaseEnvelope::brightest`]) at its own mass,
 ///    \[Fe/H\], η and age relative to its lifetime, read by [`brightest`](Self::brightest).
 ///
 /// A star of a [`Detached`](PairLight::Detached) or [`Unchanged`](PairLight::Unchanged) pair, or
 /// of no pair the engine may run, takes its own bound; a [`Remnants`](PairLight::Remnants) pair
-/// gives nothing while white dwarfs are dark (ask A4); a [`Bright`](PairLight::Bright) pair bounds
+/// gives nothing while white dwarfs are dark (A4's interim, to version 25); a
+/// [`Bright`](PairLight::Bright) pair bounds
 /// each of its stars by the brighter of its own bound and the pair's magnitude, which also bounds
 /// the pair's products ([`StarLight`]). A pair that plan 11 cannot bound leaves the record
 /// [`Unbounded`](RecordLight::Unbounded): the widened envelope at `max_star_mass` alone bounds
@@ -1010,6 +1092,10 @@ impl RecordLight {
 /// Each η is its body's [`StarDraws`] at its attempt, and the primary's its record's own (the
 /// generator's `primary_eta`). The bound reads the generator's existing words only, through the
 /// generator's own functions, so nothing generated moves.
+///
+/// A white dwarf has a V magnitude (P06.T43.b), which plan 11's pair light does not hold, so a star
+/// its pair may change is bounded by the brighter of its own bound and the brightest any white
+/// dwarf can be ([`BoundStar::brightest`]).
 #[derive(Debug, Clone, PartialEq)]
 pub struct StarBounds {
     composition: Composition,
@@ -1281,14 +1367,13 @@ fn box_distances_ly(key: CellKey, apex: [f64; 3]) -> (f64, f64) {
     (near_sq.sqrt(), far_sq.sqrt())
 }
 
-/// β of `layer`'s pad: the light-years its records can move in a year of light, at its
-/// [`pad_speed`].
+/// β of a layer's pad of `speed`: the light-years its records can move in a year of light.
 #[must_use]
-fn pad_beta(layer: Layer) -> f64 {
+fn pad_beta(speed: KilometresPerSecond) -> f64 {
     let year = UniverseTime::EPOCH
         .checked_add(Span::from_julian_years(1).expect("a year is a span"))
         .expect("a year after the epoch is a time");
-    pad_for(year, pad_speed(layer)).value()
+    pad_for(year, speed).value()
 }
 
 impl CellReach {
@@ -1302,19 +1387,20 @@ impl CellReach {
     /// most far + β |t − epoch|, within the same sum.
     ///
     /// It rests, as the range query's padding and the cells' floors do, on every grid record moving
-    /// slower than its layer's [`pad_speed`]: plan 08's draw holds every speed below the least of
-    /// the escape speed and 1,000 km/s (`galaxy::kinematics::draw`), and layer E pads at
-    /// 3,000 km/s. P08.T17 owns that premise: plan 08's
-    /// [`epoch_velocity`](crate::galaxy::query::epoch_velocity), through which
-    /// [`Drift::of_record`] reads every grid velocity, debug-asserts each speed below its layer's
-    /// [`pad_speed`] (decided 2026-10-05, `decision-r06-pad-speed.md`), and R06.T8.j tests this pad
-    /// and the plan's cells in a galaxy whose systems move.
+    /// slower than its layer's pad, [`pad_speed`]'s: plan 08's draw holds every speed below the
+    /// least of the escape speed and 1,000 km/s (`galaxy::kinematics::draw`), and layer E pads at
+    /// 3,000 km/s, as from 27 layer D does with the hypervelocity survivors (plan 09, P09.T34.b).
+    /// P08.T17 owns that premise: plan 08's
+    /// [`epoch_velocity`](crate::galaxy::query::epoch_velocity), through which [`Drift::of_record`]
+    /// reads every grid velocity, debug-asserts each speed below its layer's [`pad_speed`] (decided
+    /// 2026-10-05, `decision-r06-pad-speed.md`), and R06.T8.j tests this pad and the plan's cells
+    /// in a galaxy whose systems move.
     #[must_use]
     fn of(offsets: &CellOffsets, key: CellKey, query: &SkyQuery) -> Self {
         let apex = query.observer().position().to_light_years_f64();
         let (near_ly, far_ly) = box_distances_ly(key, apex);
         let t = query.observer().time();
-        let beta = pad_beta(key.layer());
+        let beta = pad_beta(pad_speed(key.layer()));
         let offset = offsets.of(key).value();
         let lead = t.since_epoch().as_julian_years_f64().abs();
         let pad = beta * (lead + far_ly + offset) / (1.0 - beta);
@@ -1369,7 +1455,7 @@ const KEY_SLACK_SHARE: f64 = 2.0 * BEFORE_DRIFT_SLACK_SHARE;
 pub(crate) fn entry_need(offsets: &CellOffsets, key: CellKey, params: &BlockParams) -> CellNeed {
     let (near, far) = box_distances_ly(key, params.at().to_light_years_f64());
     let h = CLOCK_WINDOW_H.as_julian_years_f64();
-    let beta = pad_beta(key.layer());
+    let beta = pad_beta(pad_speed(key.layer()));
     let offset = offsets.of(key).value();
     let pad = beta * (h + far + CACHE_APPROACH_LY + offset) / (1.0 - beta);
     let least = (near * (1.0 - KEY_SLACK_SHARE) - CACHE_APPROACH_LY - pad - offset).max(0.0);
@@ -1497,6 +1583,7 @@ fn star_bounds_before_drift(
     }
     let bounds = drawn.star_bounds(galaxy, record, before.ages);
     cost.star_bounded += 1;
+    cost.star_bounded_multiple += u64::from(!bounds.companions().is_empty());
     cost.pairs.add(bounds.pairs());
     let light = bounds.brightest(PhaseEnvelope::shared(), before.ages);
     if light == RecordLight::Unbounded {
@@ -1779,6 +1866,15 @@ fn bright_retarded(
             tally.centre_members += 1;
             return None;
         }
+        // The global list's members and the catalogue classes' hosts reach the census through
+        // its sources, on their own lines (`census_members`, from version 27 and from the
+        // carve-out), never as a cell's records. A victim's path, which ends at its disruption, is
+        // a centre member's, which no line from its record alone gives.
+        Err(
+            TraceMotionError::GlobalListMember(_)
+            | TraceMotionError::CatalogueMotionNotTraced(_)
+            | TraceMotionError::Disrupted(_),
+        ) => return None,
     };
     let observer = query.observer();
     let r = retarded(observer, &drift);
@@ -1799,6 +1895,13 @@ fn bright_retarded(
         )
     {
         return None;
+    }
+    if let Some(bounds) = &star_bounds {
+        if bounds.companions().is_empty() {
+            cost.passed_single += 1;
+        } else {
+            cost.passed_multiple += 1;
+        }
     }
     Some(r)
 }
@@ -1829,17 +1932,49 @@ fn record_stars(
     ) else {
         return;
     };
+    let stars = SystemStars::generate(galaxy, record);
+    system_stars(
+        galaxy,
+        ctx,
+        (record, &stars, &r),
+        query,
+        (bound, &|_, _| true),
+        counts,
+        out,
+    );
+}
+
+/// Whether a star at an apparent position, a distance (ly) from the observer, lies in a census's
+/// region: [`system_stars`]' test before it measures the star.
+pub(super) type Within<'a> = &'a dyn Fn(&GalacticPosition, f64) -> bool;
+
+/// The stars of `record`'s system, `stars`, seen at `r`, kept for `query`, appended to `out`, with
+/// their counts in `counts`: [`census_record`]'s once its system is generated, for a grid record
+/// and a feature member alike (R06.T16.a). Each star is kept only where `within` holds of its
+/// apparent position and its distance from the observer, ly, before anything else of it is
+/// measured: every star of a grid record, a member's within its shell and cap
+/// ([`census_members`](super::census_members)).
+pub(super) fn system_stars(
+    galaxy: &Galaxy,
+    ctx: &mut SkyContext<'_>,
+    (record, stars, r): (&SystemRecord, &SystemStars, &Retardation),
+    query: &SkyQuery,
+    (bound, within): (Bound, Within<'_>),
+    counts: &mut Counts,
+    out: &mut Vec<SkyStar>,
+) {
+    let layer = record.layer();
     let tally = &mut counts.tallies;
     let observer = query.observer();
     let emitted = r.emitted();
-    let stars = SystemStars::generate(galaxy, record);
     let Some(state) = stars.state_at(emitted) else {
         return;
     };
     tally.layer_mut(layer).generated += 1;
     let mut positions: Vec<(BodyId, SystemPosition)> =
         Vec::with_capacity(usize::from(GRID_STAR_BOUND));
-    star_positions_at(stars.hierarchy(), emitted, &mut positions);
+    // The stars the system shows then, as the state gives them (P11.T10).
+    star_positions_at(&stars.hierarchy_at(emitted), emitted, &mut positions);
     let observer_at = observer.position();
     let cut = query.cut().value();
     let mut modifiers: Vec<GasModifier> = Vec::new();
@@ -1850,7 +1985,7 @@ fn record_stars(
             .and_then(StarIndex::from_body)
             .expect("a hierarchy's bodies are its stars, at most five");
         let star = &state.stars()[usize::from(index.get())];
-        let Some(m_v) = absolute_v_of_state(star) else {
+        let Some(m_v) = absolute_v_of_state_under(star, galaxy.rules().stellar) else {
             if matches!(
                 star.phase(),
                 Phase::HeliumWhiteDwarf
@@ -1865,6 +2000,9 @@ fn record_stars(
             continue;
         };
         let d = observer_at.distance_to(&apparent).value() / METRES_PER_LIGHT_YEAR;
+        if !within(&apparent, d) {
+            continue;
+        }
         let unextinguished = unextinguished_v(m_v, d);
         // What a bound of the record's own realised stars could not skip, whatever the cone
         // (R06.T8.h's cost, `generated_listable`).
@@ -1987,6 +2125,13 @@ pub fn census_cell_with_cost(
 ) -> (CensusTallies, CensusCost) {
     let mut counts = Counts::default();
     counts.tallies.layer_mut(key.layer()).cells += 1;
+    if ctx
+        .sources
+        .iter()
+        .any(|source| source.holds_feature_members())
+    {
+        counts.tallies.note_feature_members();
+    }
     debug_assert!(ctx.offsets.is_for(galaxy), "another galaxy's offset bounds");
     let reach = CellReach::of(ctx.offsets, key, query);
     let floor = floor_at(galaxy, ctx.envelope, key, query, &reach);
@@ -2163,8 +2308,10 @@ fn census_served(
 
 #[cfg(test)]
 mod tests {
+    use super::super::super::photometry::absolute_v_of_state;
     use super::*;
     use crate::coords::UnitVector;
+    use crate::galaxy::displaced::PlacementClass;
     use crate::galaxy::features::centre::testing::milky_way_galaxy;
     use crate::galaxy::gas::modifiers::NoModifiers;
     use crate::galaxy::gas::noise::NoiseCache;
@@ -2241,7 +2388,11 @@ mod tests {
 
     /// At least `n` of `layer`'s records, from the cells of a growing cube about `at`.
     fn records_near(layer: Layer, at: [f64; 3], n: usize) -> Vec<SystemRecord> {
-        let galaxy = milky_way_galaxy();
+        records_near_in(milky_way_galaxy(), layer, at, n)
+    }
+
+    /// [`records_near`] in `galaxy`.
+    fn records_near_in(galaxy: &Galaxy, layer: Layer, at: [f64; 3], n: usize) -> Vec<SystemRecord> {
         let size = f64::from(layer.cell_size_ly());
         let mut out = Vec::new();
         let mut cell = Vec::new();
@@ -2352,8 +2503,9 @@ mod tests {
                 assert!(n <= star_bound(&record), "{record:?} holds {n}");
                 assert_eq!(
                     star_bound(&record) == 1,
-                    always_single(layer),
-                    "{record:?}: a forced single exactly in a layer of singles"
+                    always_single(layer)
+                        || matches!(record.placement_class(), PlacementClass::Displaced { .. }),
+                    "{record:?}: a forced single exactly in a layer of singles or displaced"
                 );
                 let stellar = stars
                     .stars()
@@ -2371,7 +2523,11 @@ mod tests {
                 );
                 let table = milky_way_offsets().of(cell).value();
                 assert!(cell_bound <= table, "{record:?}: {cell_bound} over {table}");
-                star_positions_at(stars.hierarchy(), UniverseTime::EPOCH, &mut positions);
+                star_positions_at(
+                    &stars.hierarchy_at(UniverseTime::EPOCH),
+                    UniverseTime::EPOCH,
+                    &mut positions,
+                );
                 for (_, place) in &positions {
                     let r = place.metres().iter().map(|x| x * x).sum::<f64>().sqrt()
                         / METRES_PER_LIGHT_YEAR;
@@ -2486,7 +2642,15 @@ mod tests {
         );
         let query = query_beside(&record, 6.0);
         let (every, listed) = measured(&record, &query);
-        assert!(every.iter().all(|s| s.star() != StarIndex::PRIMARY));
+        // From generator version 26 a white dwarf shines in V (A4's photometry, P06.T43.b): the
+        // primary is measured, too faint to list.
+        assert!(
+            every
+                .iter()
+                .filter(|s| s.star() == StarIndex::PRIMARY)
+                .all(|s| s.v().value() > 6.0),
+            "{every:?}"
+        );
         assert!(!listed.is_empty(), "{record:?}");
         assert!(listed.iter().all(|s| s.star() != StarIndex::PRIMARY));
         let kept: Vec<SkyStar> = every.into_iter().filter(|s| s.v().value() <= 6.0).collect();
@@ -2502,7 +2666,8 @@ mod tests {
             &mut tally,
             &mut out,
         );
-        assert!(tally.layer(Layer::D).without_photometry() >= 1);
+        // The white dwarf, cooled some 0.6 Gyr, has its V from 26 (it had none until 26).
+        assert_eq!(tally.layer(Layer::D).without_photometry(), 0);
         assert_eq!(
             tally.layer(Layer::D).accepted(),
             u64::try_from(out.len()).expect("few")
@@ -2618,7 +2783,7 @@ mod tests {
                 &mut out,
             );
         }
-        assert!(out.is_empty());
+        assert_eq!(out, []);
         let total: u64 = Layer::ALL
             .iter()
             .map(|&l| tally.layer(l).centre_members())
@@ -2626,23 +2791,123 @@ mod tests {
         assert_eq!(total, 2);
     }
 
+    /// The census reads its galaxy's white dwarfs (P06.T43.b): a white dwarf a light-year away is
+    /// listed at its Montreal V, and the bounds, applied, keep it.
+    #[test]
+    fn the_census_lists_white_dwarfs() {
+        let galaxy = milky_way_galaxy();
+        let record = find_system(Layer::D, SUN, Clone::clone, |_, state| {
+            state.stars().len() == 1
+                && state.stars().iter().any(|s| {
+                    is_white_dwarf(s.phase())
+                        && absolute_v_of_state_under(s, galaxy.rules().stellar)
+                            .is_some_and(|v| v.value() < 13.0)
+                })
+        });
+        let [x, y, z] = record.epoch_position().to_light_years_f64();
+        let query = SkyQuery::builder(observer_at([x + 1.0, y, z]), Magnitudes::new(11.0))
+            .build()
+            .expect("a valid query");
+        let census = |galaxy: &Galaxy, bound: Bound| {
+            let (mut out, mut tally) = (Vec::new(), CensusTallies::default());
+            census_record(
+                galaxy,
+                &mut context(),
+                &record,
+                &query,
+                bound,
+                &mut tally,
+                &mut out,
+            );
+            (out, tally.layer(Layer::D).without_photometry())
+        };
+        let (lit, none) = census(galaxy, Bound::Ignored);
+        assert_eq!(none, 0);
+        assert_eq!(lit.len(), 1, "{lit:?}");
+        let state = SystemStars::generate(galaxy, &record)
+            .state_at(lit[0].emitted())
+            .expect("born");
+        let m_v =
+            absolute_v_of_state_under(&state.stars()[0], galaxy.rules().stellar).expect("lit");
+        let unextinguished = unextinguished_v(m_v, lit[0].distance().value());
+        let v = lit[0].v().value();
+        assert!(
+            v >= unextinguished && v - unextinguished < 0.01,
+            "{v} at {m_v:?}, {unextinguished} unextinguished"
+        );
+        let (applied, _) = census(galaxy, Bound::Applied);
+        assert_eq!(star_bits(&applied), star_bits(&lit));
+    }
+
+    /// The census's bounds hold every white dwarf of 3,000 records of each of layers C, D and E by
+    /// the Sun at the epoch (P06.T43.b): its record's star bounds and the widened envelope's are
+    /// no fainter than its V.
+    #[test]
+    fn the_census_bounds_hold_white_dwarfs() {
+        let galaxy = milky_way_galaxy();
+        let rules = galaxy.rules().stellar;
+        let mut checked = 0;
+        for layer in [Layer::C, Layer::D, Layer::E] {
+            for record in records_near(layer, SUN, 3_000) {
+                let Some(state) =
+                    SystemStars::generate(galaxy, &record).state_at(UniverseTime::EPOCH)
+                else {
+                    continue;
+                };
+                let Some(m_v) = state
+                    .stars()
+                    .iter()
+                    .filter(|s| is_white_dwarf(s.phase()))
+                    .filter_map(|s| absolute_v_of_state_under(s, rules))
+                    .reduce(brighter)
+                else {
+                    continue;
+                };
+                checked += 1;
+                let age = record.age_at(UniverseTime::EPOCH);
+                let light = |galaxy: &Galaxy| {
+                    StarBounds::of(galaxy, &record, (age, age))
+                        .brightest(PhaseEnvelope::shared(), (age, age))
+                };
+                match light(galaxy) {
+                    RecordLight::Unbounded => {}
+                    RecordLight::Brightest(bound) => {
+                        assert!(m_v >= bound, "{:?}: {m_v:?} above {bound:?}", record.id());
+                    }
+                    RecordLight::Dark => panic!("{:?}: a white dwarf of {m_v:?} dark", record.id()),
+                }
+                if let Some(flux) = flux_bound(milky_way_envelope(), &record, UniverseTime::EPOCH) {
+                    assert!(
+                        m_v >= flux,
+                        "{:?}: {m_v:?} above the envelope's {flux:?}",
+                        record.id()
+                    );
+                }
+            }
+        }
+        eprintln!("{checked} records with a white dwarf");
+        assert!(checked > 20, "{checked}");
+    }
+
     #[test]
     fn the_observers_own_system_is_absent() {
+        // A star the census lists at 11 mag from 20 ly: from generator version 26 a white dwarf
+        // has a V too (A4's photometry, P06.T43.b), and the first such is too faint there.
         let record = find_system(Layer::C, SUN, Clone::clone, |_, state| {
             state
                 .stars()
                 .iter()
-                .any(|s| absolute_v_of_state(s).is_some())
+                .any(|s| absolute_v_of_state(s).is_some_and(|v| v.value() < 9.0))
         });
         let query = query_beside(&record, 11.0);
         let (every, _) = measured(&record, &query);
-        assert!(!every.is_empty());
+        assert_ne!(every, []);
         let own = SkyQuery::builder(*query.observer(), Magnitudes::new(11.0))
             .exclude(record.id())
             .build()
             .expect("a valid query");
         let (_, listed) = measured(&record, &own);
-        assert!(listed.is_empty());
+        assert_eq!(listed, []);
     }
 
     #[test]
@@ -2748,6 +3013,9 @@ mod tests {
         b.layer_mut(Layer::E).prefiltered = 2;
         b.layer_mut(Layer::E).generated_listable = 1;
         b.layer_mut(Layer::E).star_bounded = 6;
+        b.layer_mut(Layer::E).star_bounded_multiple = 4;
+        b.layer_mut(Layer::E).passed_single = 1;
+        b.layer_mut(Layer::E).passed_multiple = 3;
         b.layer_mut(Layer::E).unbounded = 2;
         b.layer_mut(Layer::E).pairs.count(Some(PairLight::Detached));
         b.layer_mut(Layer::E).pairs.count(None);
@@ -2792,6 +3060,14 @@ mod tests {
             (7, 9, 2, 1)
         );
         assert_eq!((e.star_bounded(), e.unbounded_records()), (6, 2));
+        assert_eq!(
+            (
+                e.star_bounded_multiple(),
+                e.passed_single(),
+                e.passed_multiple()
+            ),
+            (4, 1, 3)
+        );
         let pairs = e.pairs();
         assert_eq!(
             (
@@ -3042,7 +3318,11 @@ mod tests {
                     continue;
                 };
                 systems += 1;
-                star_positions_at(stars.hierarchy(), r.emitted(), &mut positions);
+                star_positions_at(
+                    &stars.hierarchy_at(r.emitted()),
+                    r.emitted(),
+                    &mut positions,
+                );
                 for (body, place) in &positions {
                     let index = usize::from(body.body_index());
                     let star = &state.stars()[index];
@@ -3412,7 +3692,9 @@ mod tests {
 
     /// What the ruling gives a record whose every pair is answered `verdict`, by a reading apart
     /// from [`StarBounds`]': each star of each attempt by its own bound, or by its pair's verdict,
-    /// the primary at every attempt and again after the last where the fallback is listed.
+    /// the primary at every attempt and again after the last where the fallback is listed. From
+    /// generator version 26 a white dwarf has a V (P06.T43.b), which plan 11's pair light does not
+    /// hold, so a star of a `Remnants` or `Bright` pair takes the white dwarfs' brightest too.
     fn ruled_light(
         record: &SystemRecord,
         composition: &Composition,
@@ -3451,11 +3733,13 @@ mod tests {
                     .pairs()
                     .iter()
                     .any(|p| p.stars().iter().any(|s| usize::from(s.get()) == i));
+                let dwarf = WHITE_DWARF_BRIGHTEST_V;
                 take(match (paired, verdict) {
                     (false, _) | (true, PairLight::Detached | PairLight::Unchanged) => own,
-                    (true, PairLight::Remnants) => None,
+                    (true, PairLight::Remnants) => Some(dwarf),
                     (true, PairLight::Bright(m)) => {
-                        Some(own.map_or(m, |o| if o.value() < m.value() { o } else { m }))
+                        let m = own.map_or(m, |o| if o.value() < m.value() { o } else { m });
+                        Some(if dwarf.value() < m.value() { dwarf } else { m })
                     }
                 });
             }
@@ -3497,7 +3781,8 @@ mod tests {
     /// Every verdict plan 11's pairs can take leaves each star the light the ruling gives it
     /// (`decision-p11-t16-hierarchy-bound.md` §§5–6), on synthetic answers for the verdicts that
     /// P11.T17.c brings: `Detached` and `Unchanged` each star's own bound, `Remnants` nothing,
-    /// `Bright(M)` the brighter of each star's own and M, and none an unbounded record. The
+    /// `Bright(M)` the brighter of each star's own and M, and none an unbounded record; from
+    /// generator version 26 the last two each with the white dwarfs' brightest ([`ruled_light`]). The
     /// records are a triple of D near the Sun whose first attempt holds one pair the engine may
     /// run and a star of none, and a binary of C. Each star's mass and η are the generator's, bit
     /// for bit.
@@ -3780,6 +4065,20 @@ mod tests {
             assert!(c.unbounded_records() <= c.star_bounded(), "{layer:?}");
             assert!(t.generated() <= c.star_bounded(), "{layer:?}");
             assert!(c.generated_listable() <= t.generated(), "{layer:?}");
+            // The pass counts by multiplicity (R06.T17): of the bounded, the multiple; of each,
+            // those generated, every generated record of C to E among them, since by the Sun each
+            // is grid-placed and so bounded star by star.
+            let multiple = c.star_bounded_multiple();
+            assert!(multiple <= c.star_bounded(), "{layer:?}");
+            assert!(c.passed_multiple() <= multiple, "{layer:?}");
+            assert!(
+                c.passed_single() <= c.star_bounded() - multiple,
+                "{layer:?}"
+            );
+            assert!(
+                t.generated() <= c.passed_single() + c.passed_multiple(),
+                "{layer:?}"
+            );
             bounded += c.star_bounded();
             generated += t.generated();
             pairs.add(c.pairs());
@@ -3805,6 +4104,16 @@ mod tests {
         pairs: PairTally,
         /// The least of M<sub>V</sub> less its bound over the stars checked star by star, mag.
         least_margin: f64,
+        /// White dwarfs fainter than the luminosity tables' faintest magnitude that a pair made
+        /// of a star its verdict leaves its own model: from generator version 26 a white dwarf
+        /// shines (P06.T43.b), and plan 11's pair light holds nothing fainter than M<sub>V</sub>
+        /// 20.45, so its bound says it cannot (a finding, counted, not asserted).
+        faint_white_dwarfs: u64,
+        /// Stars a detached partner's wind grew past their initial mass that outshine their bound:
+        /// from generator version 27 a wide pair's star takes its partner's wind (P11.T12), which
+        /// version 28's `Detached` verdict did not bound. The `Detached` verdict takes the wind's
+        /// reach, and there are none (asserted).
+        wind_fed: u64,
     }
 
     impl RealisedCheck {
@@ -3815,15 +4124,16 @@ mod tests {
             self.unbounded += other.unbounded;
             self.pairs.add(&other.pairs);
             self.least_margin = self.least_margin.min(other.least_margin);
+            self.faint_white_dwarfs += other.faint_white_dwarfs;
+            self.wind_fed += other.wind_fed;
         }
     }
 
-    /// Holds every shining star of `records`' realised systems at the epoch and 900 years before
-    /// it no brighter than its bound: its own [`BoundStar`]'s at the attempt the generator kept,
-    /// its pairs' verdicts taken at the system's age then, or the widened envelope's
-    /// ([`flux_bound`]) where a pair of the record has none.
-    fn check_realised_of(records: &[SystemRecord]) -> RealisedCheck {
-        let galaxy = milky_way_galaxy();
+    /// Holds every shining star of `records`' realised systems in `galaxy` at the epoch and 900
+    /// years before it no brighter than its bound: its own [`BoundStar`]'s at the attempt the
+    /// generator kept, its pairs' verdicts taken at the system's age then, or the widened
+    /// envelope's ([`flux_bound`]) where a pair of the record has none.
+    fn check_realised_of(galaxy: &Galaxy, records: &[SystemRecord]) -> RealisedCheck {
         let phase = PhaseEnvelope::shared();
         let envelope = milky_way_envelope();
         let earlier = UniverseTime::EPOCH
@@ -3877,17 +4187,27 @@ mod tests {
                         listed.mass().value(),
                         stars.stars()[i].initial_mass().value(),
                     );
-                    let bound = listed
-                        .brightest(phase, &composition, ages)
-                        .unwrap_or_else(|| {
-                            panic!(
-                                "{}: shines at M_V {} where its bound, {:?}, says it cannot",
-                                what(),
-                                m_v.value(),
-                                listed.light()
-                            )
-                        });
+                    let bound = listed.brightest(phase, &composition, ages);
+                    if bound.is_none()
+                        && is_white_dwarf(star.phase())
+                        && m_v.value() > crate::sky::luminosity::FAINTEST_MAGNITUDE
+                    {
+                        check.faint_white_dwarfs += 1;
+                        continue;
+                    }
+                    let bound = bound.unwrap_or_else(|| {
+                        panic!(
+                            "{}: shines at M_V {} where its bound, {:?}, says it cannot",
+                            what(),
+                            m_v.value(),
+                            listed.light()
+                        )
+                    });
                     let margin = m_v.value() - bound.value();
+                    if margin < 0.0 && star.mass() > stars.stars()[i].initial_mass() {
+                        check.wind_fed += 1;
+                        continue;
+                    }
                     assert!(
                         margin >= 0.0,
                         "{}: M_V {} over its bound {} ({:?})",
@@ -3906,9 +4226,12 @@ mod tests {
     }
 
     /// [`check_realised_of`] over `per_place` records of each layer near the Sun and in the
-    /// bulge, in four shares; prints each layer's figures and returns them all, with the systems
-    /// born of each layer at both places together, by [`Layer::value`].
-    fn check_realised(per_place: usize) -> (RealisedCheck, [u64; Layer::ALL.len()]) {
+    /// bulge of `galaxy`, in four shares; prints each layer's figures and returns them all, with
+    /// the systems born of each layer at both places together, by [`Layer::value`].
+    fn check_realised(
+        galaxy: &Galaxy,
+        per_place: usize,
+    ) -> (RealisedCheck, [u64; Layer::ALL.len()]) {
         let mut all = RealisedCheck {
             least_margin: f64::INFINITY,
             ..RealisedCheck::default()
@@ -3923,30 +4246,17 @@ mod tests {
                 Layer::E,
                 Layer::BrownDwarf,
             ] {
-                let records = records_near(layer, at, per_place);
+                let records = records_near_in(galaxy, layer, at, per_place);
                 let records = &records[..per_place];
-                // Four shares, share k the records k, k + 4, …, on threads of their own, or one
-                // after another on wasm32-wasip1, which has none: the figures are the same.
+                // Four shares, share k the records k, k + 4, …, on threads of their own (the four
+                // slots `.config/nextest.toml` reserves, or the fewer a run grants), or one after
+                // another on wasm32-wasip1, which has none: the figures are the same.
                 let share = |k: usize| {
                     let mine: Vec<SystemRecord> =
                         records.iter().skip(k).step_by(4).copied().collect();
-                    check_realised_of(&mine)
+                    check_realised_of(galaxy, &mine)
                 };
-                #[cfg(not(target_family = "wasm"))]
-                let parts: Vec<RealisedCheck> = std::thread::scope(|scope| {
-                    let handles: Vec<_> = (0..4)
-                        .map(|k| {
-                            let share = &share;
-                            scope.spawn(move || share(k))
-                        })
-                        .collect();
-                    handles
-                        .into_iter()
-                        .map(|h| h.join().expect("a share's thread"))
-                        .collect()
-                });
-                #[cfg(target_family = "wasm")]
-                let parts: Vec<RealisedCheck> = (0..4).map(share).collect();
+                let parts: Vec<RealisedCheck> = crate::planetary::testing::in_shares(4, 4, share);
                 let mut found = RealisedCheck {
                     least_margin: f64::INFINITY,
                     ..RealisedCheck::default()
@@ -3980,11 +4290,19 @@ mod tests {
 
     /// The record of R06.T8.g's slow test whose star shone where its bound was dark (P11.T17.c's
     /// follow-up): `0x61fec2d802000037`, a bulge record of layer D, 8.7 Gyr old at [Fe/H] +0.56,
-    /// whose pair of 6.29 and 5.59 M☉ reaches the engine's cap on segments at 78 Myr (finding
+    /// whose pair of 6.29 and 5.59 M☉ reached the engine's cap on segments at 78 Myr (finding
     /// F15: a helium main-sequence accretor fed by a helium star at its main sequence's end). Its
-    /// stretched last segment holds both stripped stars on the helium main sequence, at
-    /// M<sub>V</sub> 2.52 and 1.30, and plan 11's tables alone read `Remnants`. Both stars, at
-    /// both of the slow test's times, are now no brighter than their bounds.
+    /// stretched last segment held both stripped stars on the helium main sequence, at
+    /// M<sub>V</sub> 2.52 and 1.30, where plan 11's tables alone read `Remnants`; the held floor
+    /// bounded them. Since P11.T4.m (ruling p11-c2-swell of 2026-10-06) the accretor keeps its
+    /// fraction burnt, the pair is not capped, and both stars have died by 8.7 Gyr: at both of the
+    /// slow test's times no star shines, and none is brighter than its bound.
+    ///
+    /// Re-measured at 27: the pair light's layer D, refitted on 27's engine (P14.T54.c), answers
+    /// `None` for the pair of the record's sixth attempt (6.29 and 2.23 M☉, 3.84 au apart at
+    /// periastron), whose cell now holds a thin departing class, so at both times the record is
+    /// unbounded and the census generates it whole, under the widened envelope; its kept attempt,
+    /// the first, still shows no star.
     #[test]
     fn the_capped_bulge_record_is_bounded_star_by_star() {
         let galaxy = milky_way_galaxy();
@@ -3996,20 +4314,23 @@ mod tests {
             .iter()
             .find(|r| r.id().raw() == 0x61fe_c2d8_0200_0037)
             .expect("the record in its cell");
-        let check = check_realised_of(&[record]);
+        let check = check_realised_of(galaxy, &[record]);
         assert_eq!(
-            (check.systems, check.own + check.widened),
-            (1, 4),
+            (check.systems, check.own + check.widened, check.unbounded),
+            (1, 0, 2),
             "{check:?}"
         );
     }
 
     /// The bound star by star holds for realised systems (R06.T8.g): 300 records of each layer
-    /// near the Sun and in the bulge, at two emitted times.
+    /// near the Sun and in the bulge, at two emitted times, `Detached` taking the wind's reach
+    /// (P11.T12's fix; at 27 and 28 bulge system 0x4200217600000090's 0.70 M☉ companion, grown
+    /// to 0.95 M☉, shone at M<sub>V</sub> 4.26 against its bound's 6.02).
     #[test]
     fn the_star_bound_holds_for_some_realised_systems() {
-        let (all, _) = check_realised(300);
+        let (all, _) = check_realised(milky_way_galaxy(), 300);
         assert!(all.own > 3_000 && all.pairs.detached() > 50, "{all:?}");
+        assert_eq!(all.wind_fed, 0, "{all:?}");
     }
 
     /// R06.T8.g's slow test: over 10⁵ records of each layer near the Sun and again in the bulge, at
@@ -4019,11 +4340,16 @@ mod tests {
     /// the widened envelope's. Each pair's verdict is taken at the system's age at that time, the
     /// tightest window the census asks. The figures, with the shares of plan 11's verdicts, are
     /// recorded in R06's Risks.
+    ///
+    /// From 27 a wide pair's star takes its partner's wind, and version 28's `Detached` left it its
+    /// own bound, which a layer C companion on its core helium burning outshone (M<sub>V</sub> 0.79
+    /// against 2.55); the `Detached` verdict takes the wind's reach (P11.T12's fix).
     #[test]
     #[ignore = "slow: generates 1.2 × 10⁶ systems, their pairs run through the binary engine"]
     fn the_star_bound_holds_for_realised_systems() {
-        let (all, per_layer) = check_realised(100_000);
+        let (all, per_layer) = check_realised(milky_way_galaxy(), 100_000);
         eprintln!("all: {all:?}");
+        assert_eq!(all.wind_fed, 0, "{all:?}");
         for layer in [
             Layer::A,
             Layer::B,
@@ -4109,8 +4435,8 @@ mod tests {
     /// envelope's bound and the light star by star over each record's entry window, built for an
     /// observer at the place, against the ages before the drift of three queries the entry holds
     /// (from the place at the epoch, 900 ly along +x at +H, and 600 ly along −x at −H at a cut
-    /// 0.1 fainter), and single ages at each window's ends and middle. R06.T8.n runs it again on
-    /// P11.T17.c's verdicts.
+    /// fainter by the whole [`CACHE_CUT_SLACK_MAG`]), and single ages at each window's ends and
+    /// middle. R06.T8.n ran it again on P11.T17.c's verdicts.
     #[test]
     fn the_entry_light_holds_every_narrower_window() {
         let galaxy = milky_way_galaxy();
@@ -4130,7 +4456,7 @@ mod tests {
             let asked = [
                 builder.clone(),
                 query(at, 900.0, ClockWindow::END, 7.95),
-                query(at, -600.0, ClockWindow::START, 8.05),
+                query(at, -600.0, ClockWindow::START, 7.95 + CACHE_CUT_SLACK_MAG),
             ];
             for layer in [Layer::C, Layer::D, Layer::E] {
                 for record in records_near(layer, at, 10_000).iter().take(10_000) {
@@ -4179,8 +4505,8 @@ mod tests {
     /// Every record the census with no cache generates is held by an entry that serves its query,
     /// and its stored light passes the pre-filter there (R06.T8.h): over cells along x from 2,600
     /// ly on one side to 1,600 ly on the other, entries built at the Sun at V 6 and at V 9, and
-    /// the queries each serves of a census at the Sun, 1,000 ly either way and at ±H, at V 6, and
-    /// at the Sun at V 9.
+    /// the queries each serves of a census at the Sun, 1,000 ly either way and at ±H, at V 6, from
+    /// 1,000 ly along −x at V 6 plus the whole [`CACHE_CUT_SLACK_MAG`], and at the Sun at V 9.
     #[test]
     fn the_prefilter_keeps_every_record_the_census_generates() {
         let galaxy = milky_way_galaxy();
@@ -4215,6 +4541,7 @@ mod tests {
             query(0.0, UniverseTime::EPOCH, 6.0),
             query(1_000.0, UniverseTime::EPOCH, 6.0),
             query(-1_000.0, UniverseTime::EPOCH, 6.0),
+            query(-1_000.0, UniverseTime::EPOCH, 6.0 + CACHE_CUT_SLACK_MAG),
             query(0.0, ClockWindow::END, 6.0),
             query(0.0, ClockWindow::START, 6.0),
             query(0.0, UniverseTime::EPOCH, 9.0),

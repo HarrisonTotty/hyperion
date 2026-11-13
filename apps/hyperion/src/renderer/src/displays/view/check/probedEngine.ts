@@ -7,7 +7,14 @@
  * view, so {@link ProbedEngine} forwards every member to the engine it wraps and wraps only the
  * views and targets it makes: their `render` notes the resolves it took and its CPU time, and their
  * `resize` the size given. Nothing else changes, so `VIEW` draws as it does on any launch. Only the
- * check's launch uses it (`ViewsProbe`).
+ * check's launch uses it (`ViewsProbe`). The terrain run (plan R10, R10.T16.d) also reads each
+ * render's submission and each target made, through the same probe. A depth-layer target's render
+ * (plan R10, R10.T9.b) notes its CPU time as `<owner>:shadows`'s, its owner the view it names: one
+ * target serves every view. An inspection profile's `--composite-probe` (the owner's priority,
+ * 2026-11-01), `--march-probe` (plan R08, R08.T8.d) and `--lit-probe` (R08.T9.b's measurement) are
+ * the changes it makes: the atmosphere's composite, or its march, made under the probe, and every
+ * lit material and kernel under the lit one. It also takes the march's far-limb census beside a
+ * march's dispatch when asked ({@link ProbedEngine.marchCensus}), a dispatch of its own after it.
  */
 
 import type {
@@ -16,12 +23,31 @@ import type {
   MemoryCategory,
   TextureSpec,
 } from "../../../view/engine/memory";
+import {
+  COMPOSITE_MATERIAL,
+  type CompositeProbe,
+  compositeProbedMaterial,
+} from "../../../view/atmosphere/hillaire";
+import {
+  MARCH_CENSUS_BUFFER,
+  MARCH_CENSUS_KERNEL,
+  type MarchCensus,
+  marchCensusBindingsOf,
+  marchCensusOf,
+  type MarchProbe,
+  marchProbedKernel,
+} from "../../../view/atmosphere/marchProbe";
+import { type LitProbe, litProbedWgsl } from "../../../view/atmosphere/surfaceLighting";
 import type { KernelPair } from "../../../view/engine/kernels";
 import type { GraphicsFault } from "../../../view/engine/status";
 import type {
   BufferHandle,
+  CompileEvent,
   ComputeBindings,
   ComputeHandle,
+  DepthLayerPass,
+  DepthLayersSpec,
+  DepthLayerTarget,
   FrameSubmission,
   IndirectArgs,
   MaterialHandle,
@@ -31,11 +57,13 @@ import type {
   PointSplatHandle,
   PointSplatSpec,
   PostProcessHandle,
+  PreparedTarget,
   RenderEngine,
   RenderTarget,
   RenderTargetFormat,
   RenderTargetSpec,
   RenderView,
+  TargetRender,
   TexelRect,
   TextureHandle,
   ViewSize,
@@ -56,7 +84,35 @@ export interface EngineProbe {
   rendered(owner: string, firstResolve: number, lastResolve: number, cpuMs: number): void;
   /** A view or target was made at, or resized to, `size`. */
   sized(owner: string, kind: "view" | "target", size: ViewSize): void;
+  /** A view's or target's `render` of `frame` returned (after {@link EngineProbe.rendered}). */
+  submitted(owner: string, frame: FrameSubmission): void;
+  /** A target was made of `spec`; its attachments are read through it, as a resize replaces them. */
+  madeTarget(spec: RenderTargetSpec, target: RenderTarget): void;
+  /** A material's preparation began, which settles with `prepared` (plan R10, R10.T14.d). */
+  preparing(prepared: Promise<void>): void;
+  /**
+   * A kernel was dispatched under the pass label `pass` (the inspection run's frame profile; the
+   * owner's report, 2026-11-01).
+   *
+   * @param workgroups - Its workgroups, x × y × z, or `null` for an indirect dispatch, whose count
+   *   the GPU holds.
+   * @param air - The tables of the body whose atmosphere it draws, by {@link AIR_BINDING}, or `null`
+   *   for a kernel that binds none.
+   */
+  dispatched(
+    kernel: string,
+    workgroups: number | null,
+    pass: string | undefined,
+    air: object | null,
+  ): void;
 }
+
+/**
+ * The binding by which every per-frame kernel of a body's atmosphere takes its tables' figure of
+ * the body (`hillaire.ts`' `oblateBody`, one texture a body's tables), so that a dispatch's body is
+ * told apart from another's.
+ */
+export const AIR_BINDING = "oblateBody";
 
 /** A view that reports its renders and sizes. */
 class ProbedView implements RenderView {
@@ -84,6 +140,7 @@ class ProbedView implements RenderView {
     const startMs = this.#nowMs();
     this.#inner.render(frame);
     this.#probe.rendered(this.name, first, this.#engine.passTimesFrame, this.#nowMs() - startMs);
+    this.#probe.submitted(this.name, frame);
   }
 
   readBack(): Promise<Float32Array | Uint8Array> {
@@ -94,6 +151,9 @@ class ProbedView implements RenderView {
     this.#inner.dispose();
   }
 }
+
+/** The target each probed target forwards to, for the engine's renders of several at once. */
+const INNER_TARGETS = new WeakMap<RenderTarget, RenderTarget>();
 
 /** A target that reports its renders and sizes. */
 class ProbedTarget implements RenderTarget {
@@ -109,6 +169,7 @@ class ProbedTarget implements RenderTarget {
     this.#engine = engine;
     this.#probe = probe;
     this.#nowMs = nowMs;
+    INNER_TARGETS.set(this, inner);
   }
 
   // Read through, since a resize replaces the attachments.
@@ -130,6 +191,60 @@ class ProbedTarget implements RenderTarget {
     const startMs = this.#nowMs();
     this.#inner.render(frame);
     this.#probe.rendered(this.name, first, this.#engine.passTimesFrame, this.#nowMs() - startMs);
+    this.#probe.submitted(this.name, frame);
+  }
+
+  dispose(): void {
+    this.#inner.dispose();
+  }
+}
+
+/**
+ * A depth-layer target that reports its renders' main-thread time (plan R10, R10.T9.b).
+ *
+ * @remarks
+ * The engine has one set of cascades, drawn again for each view (decision-r10-t9-split §5(i)), so
+ * a render is reported as its owner's, `<owner>:shadows`, which `viewOf` reads as the view. Its
+ * passes take no resolve of their own: their GPU time rides the view's next render's resolve, so
+ * the resolves it reports are normally none, and need no other attribution (decision-r10-t9b-design
+ * D7). It reports no submission: a render is not a {@link FrameSubmission}.
+ */
+class ProbedDepthLayers implements DepthLayerTarget {
+  readonly name: string;
+  readonly sizePx: number;
+  readonly layers: number;
+  readonly depth: TextureHandle;
+  readonly #inner: DepthLayerTarget;
+  readonly #engine: RenderEngine;
+  readonly #probe: EngineProbe;
+  readonly #nowMs: () => number;
+
+  constructor(
+    inner: DepthLayerTarget,
+    engine: RenderEngine,
+    probe: EngineProbe,
+    nowMs: () => number,
+  ) {
+    this.name = inner.name;
+    this.sizePx = inner.sizePx;
+    this.layers = inner.layers;
+    this.depth = inner.depth;
+    this.#inner = inner;
+    this.#engine = engine;
+    this.#probe = probe;
+    this.#nowMs = nowMs;
+  }
+
+  render(owner: string, passes: ReadonlyArray<DepthLayerPass>): void {
+    const first = this.#engine.passTimesFrame;
+    const startMs = this.#nowMs();
+    this.#inner.render(owner, passes);
+    this.#probe.rendered(
+      `${owner}:shadows`,
+      first,
+      this.#engine.passTimesFrame,
+      this.#nowMs() - startMs,
+    );
   }
 
   dispose(): void {
@@ -142,11 +257,156 @@ export class ProbedEngine implements RenderEngine {
   readonly #inner: RenderEngine;
   readonly #probe: EngineProbe;
   readonly #nowMs: () => number;
+  readonly #compositeProbe: CompositeProbe | null;
+  readonly #marchProbe: MarchProbe | null;
+  readonly #litProbe: LitProbe | null;
+  /** The censuses asked for and not yet taken, each settled by the next march's census. */
+  #censusesAsked: Array<{
+    readonly resolve: (census: MarchCensus) => void;
+    readonly reject: (cause: unknown) => void;
+    /** Stops following the ask's signal, once the ask is taken. */
+    readonly release: () => void;
+  }> = [];
 
-  constructor(inner: RenderEngine, probe: EngineProbe, nowMs: () => number) {
+  /**
+   * @param compositeProbe - The inspection profile's probe of the atmosphere's composite
+   *   (`--composite-probe`; the owner's priority, 2026-11-01): each composite made through this
+   *   engine is made under it ({@link compositeProbedMaterial}); `null`, the default, as drawn.
+   * @param marchProbe - The inspection profile's probe of the atmosphere's march (`--march-probe`;
+   *   plan R08, R08.T8.d): each of the march's kernels made through this engine is made under it
+   *   ({@link marchProbedKernel}); `null`, the default, as drawn.
+   * @param litProbe - The inspection profile's probe of the lit passes (`--lit-probe`; R08.T9.b's
+   *   measurement): each material and kernel made through this engine that reads the surface's
+   *   lighting is made under it ({@link litProbedWgsl}); `null`, the default, as drawn.
+   */
+  constructor(
+    inner: RenderEngine,
+    probe: EngineProbe,
+    nowMs: () => number,
+    compositeProbe: CompositeProbe | null = null,
+    marchProbe: MarchProbe | null = null,
+    litProbe: LitProbe | null = null,
+  ) {
     this.#inner = inner;
     this.#probe = probe;
     this.#nowMs = nowMs;
+    this.#compositeProbe = compositeProbe;
+    this.#marchProbe = marchProbe;
+    this.#litProbe = litProbe;
+  }
+
+  /**
+   * The far limb's census of the next march dispatched through this engine over an area
+   * ({@link marchCensusBindingsOf}), taken by a dispatch of its own after it and read back
+   * (`marchCensus.wgsl`; plan R08, R08.T8.d): check-only, for the inspection profile, which asks
+   * once a window has been measured. It waits for that march however long it takes, until
+   * `signal` aborts: the ask is then withdrawn and the promise never settles, so that the caller
+   * bounds the wait and no census is taken later in a window it times.
+   *
+   * @throws Error, as a rejection, as the census's dispatch or its read-back fails.
+   */
+  marchCensus(signal: AbortSignal): Promise<MarchCensus> {
+    return new Promise((resolve, reject) => {
+      if (signal.aborted) {
+        return;
+      }
+      const withdraw = (): void => {
+        this.#censusesAsked = this.#censusesAsked.filter((each) => each !== asked);
+      };
+      const asked = {
+        resolve,
+        reject,
+        release: () => {
+          signal.removeEventListener("abort", withdraw);
+        },
+      };
+      this.#censusesAsked.push(asked);
+      signal.addEventListener("abort", withdraw, { once: true });
+    });
+  }
+
+  /**
+   * The census asked for beside the dispatch of `kernel` over `workgroups` with `bindings`, where
+   * it is a march's over an area: its kernel and buffer made for it, released once it is read.
+   */
+  #takeCensus(
+    kernel: string,
+    bindings: ComputeBindings,
+    workgroups: readonly [number, number, number],
+  ): void {
+    const bound = marchCensusBindingsOf(kernel, bindings);
+    if (bound === null) {
+      return;
+    }
+    const inner = this.#inner;
+    const buffer = inner.createBuffer({
+      name: MARCH_CENSUS_KERNEL.name,
+      ...MARCH_CENSUS_BUFFER,
+      category: "other",
+    });
+    const asked = this.#censusesAsked;
+    this.#censusesAsked = [];
+    let counter: ComputeHandle | null = null;
+    let read: Promise<MarchCensus>;
+    try {
+      counter = inner.createCompute(MARCH_CENSUS_KERNEL);
+      inner.writeBuffer(buffer, 0, new Uint32Array(MARCH_CENSUS_BUFFER.bytes / 4));
+      inner.dispatch(counter, bound(buffer), workgroups, MARCH_CENSUS_KERNEL.name);
+      read = inner
+        .readBuffer(buffer)
+        .then((bytes) => marchCensusOf(kernel, new Uint32Array(bytes)));
+    } catch (error: unknown) {
+      read = Promise.reject(
+        error instanceof Error ? error : new Error(String(error), { cause: error }),
+      );
+    }
+    // Released once read, so that nothing the dispatch holds goes before it has run.
+    const made = counter;
+    const released = read.finally(() => {
+      inner.releaseBuffer(buffer);
+      if (made !== null) {
+        inner.releaseCompute(made);
+      }
+    });
+    for (const { resolve, reject, release } of asked) {
+      release();
+      void released.then(resolve, reject);
+    }
+  }
+
+  /**
+   * `spec`, the composite's under the launch's composite probe where it is the composite and one is
+   * set, its modules under the launch's lit probe where one is set.
+   */
+  #materialOf(spec: WgslMaterialSpec): WgslMaterialSpec {
+    const material =
+      this.#compositeProbe !== null && spec.name === COMPOSITE_MATERIAL.name
+        ? compositeProbedMaterial(this.#compositeProbe)
+        : spec;
+    const lit = this.#litProbe;
+    return lit === null
+      ? material
+      : {
+          ...material,
+          vertexWgsl: litProbedWgsl(material.vertexWgsl, lit),
+          fragmentWgsl: litProbedWgsl(material.fragmentWgsl, lit),
+        };
+  }
+
+  /**
+   * `pair`, the march's under the launch's march probe where it is one of the march's and one is
+   * set, its two paths' modules under the launch's lit probe where one is set.
+   */
+  #kernelOf(pair: KernelPair): KernelPair {
+    const kernel = this.#marchProbe === null ? pair : marchProbedKernel(pair, this.#marchProbe);
+    const lit = this.#litProbe;
+    return lit === null
+      ? kernel
+      : {
+          ...kernel,
+          reference: litProbedWgsl(kernel.reference, lit),
+          subgroup: kernel.subgroup === null ? null : litProbedWgsl(kernel.subgroup, lit),
+        };
   }
 
   get capabilities(): RenderEngine["capabilities"] {
@@ -168,7 +428,37 @@ export class ProbedEngine implements RenderEngine {
   createRenderTarget(spec: RenderTargetSpec): RenderTarget {
     const target = this.#inner.createRenderTarget(spec);
     this.#probe.sized(spec.name, "target", spec.size);
-    return new ProbedTarget(target, this, this.#probe, this.#nowMs);
+    const probed = new ProbedTarget(target, this, this.#probe, this.#nowMs);
+    this.#probe.madeTarget(spec, probed);
+    return probed;
+  }
+
+  /**
+   * Renders through the inner engine in one submission (plan R14), the probe told of each render
+   * as each target's own would tell it: the resolves the submission took and its time are the
+   * first render's, as its frame's passes are timed under one resolve, and each frame submitted.
+   */
+  renderTargets(renders: ReadonlyArray<TargetRender>): void {
+    const first = this.#inner.passTimesFrame;
+    const startMs = this.#nowMs();
+    this.#inner.renderTargets(
+      renders.map(({ target, frame }) => ({ target: INNER_TARGETS.get(target) ?? target, frame })),
+    );
+    const cpuMs = this.#nowMs() - startMs;
+    const last = this.#inner.passTimesFrame;
+    renders.forEach(({ target, frame }, index) => {
+      this.#probe.rendered(target.name, index === 0 ? first : last, last, index === 0 ? cpuMs : 0);
+      this.#probe.submitted(target.name, frame);
+    });
+  }
+
+  createDepthLayers(spec: DepthLayersSpec): DepthLayerTarget {
+    return new ProbedDepthLayers(
+      this.#inner.createDepthLayers(spec),
+      this,
+      this.#probe,
+      this.#nowMs,
+    );
   }
 
   createMesh(spec: MeshSpec): MeshHandle {
@@ -176,7 +466,21 @@ export class ProbedEngine implements RenderEngine {
   }
 
   createMaterial(spec: WgslMaterialSpec): MaterialHandle {
-    return this.#inner.createMaterial(spec);
+    return this.#inner.createMaterial(this.#materialOf(spec));
+  }
+
+  /**
+   * Prepares through the inner engine, the probe counting each preparation in flight until it
+   * settles (R10.T14.d): VIEW's opening ends once those its views made have.
+   */
+  prepareMaterial(
+    material: MaterialHandle,
+    targets: ReadonlyArray<PreparedTarget>,
+    meshes: ReadonlyArray<MeshHandle>,
+  ): Promise<void> {
+    const prepared = this.#inner.prepareMaterial(material, targets, meshes);
+    this.#probe.preparing(prepared);
+    return prepared;
   }
 
   createMaterialAsync(
@@ -184,7 +488,7 @@ export class ProbedEngine implements RenderEngine {
     targets: ReadonlyArray<RenderTargetFormat>,
     meshes?: ReadonlyArray<MeshHandle>,
   ): Promise<MaterialHandle> {
-    return this.#inner.createMaterialAsync(spec, targets, meshes);
+    return this.#inner.createMaterialAsync(this.#materialOf(spec), targets, meshes);
   }
 
   createPostProcess(spec: WgslPostProcessSpec): PostProcessHandle {
@@ -192,11 +496,11 @@ export class ProbedEngine implements RenderEngine {
   }
 
   createCompute(pair: KernelPair): ComputeHandle {
-    return this.#inner.createCompute(pair);
+    return this.#inner.createCompute(this.#kernelOf(pair));
   }
 
   createComputeAsync(pair: KernelPair): Promise<ComputeHandle> {
-    return this.#inner.createComputeAsync(pair);
+    return this.#inner.createComputeAsync(this.#kernelOf(pair));
   }
 
   createBuffer(spec: BufferSpec): BufferHandle {
@@ -225,8 +529,9 @@ export class ProbedEngine implements RenderEngine {
     level: number,
     packed: BufferHandle,
     face?: number,
+    region?: TexelRect,
   ): void {
-    this.#inner.writePackedCubeLevelFromBuffer(cube, level, packed, face);
+    this.#inner.writePackedCubeLevelFromBuffer(cube, level, packed, face, region);
   }
 
   createPointSplat(spec: PointSplatSpec): PointSplatHandle {
@@ -245,6 +550,18 @@ export class ProbedEngine implements RenderEngine {
     this.#inner.releaseTexture(texture);
   }
 
+  releaseMesh(mesh: MeshHandle): void {
+    this.#inner.releaseMesh(mesh);
+  }
+
+  releaseMaterial(material: MaterialHandle): void {
+    this.#inner.releaseMaterial(material);
+  }
+
+  releaseCompute(kernel: ComputeHandle): void {
+    this.#inner.releaseCompute(kernel);
+  }
+
   dispatch(
     kernel: ComputeHandle,
     bindings: ComputeBindings,
@@ -252,6 +569,19 @@ export class ProbedEngine implements RenderEngine {
     pass?: string,
   ): void {
     this.#inner.dispatch(kernel, bindings, workgroups, pass);
+    this.#probe.dispatched(
+      kernel.name,
+      Array.isArray(workgroups) ? workgroups[0] * workgroups[1] * workgroups[2] : null,
+      pass,
+      bindings.sampled[AIR_BINDING] ?? null,
+    );
+    if (this.#censusesAsked.length > 0 && !("buffer" in workgroups)) {
+      this.#takeCensus(kernel.name, bindings, workgroups);
+    }
+  }
+
+  stagedWrites<T>(label: string, write: () => T): T {
+    return this.#inner.stagedWrites(label, write);
   }
 
   writeBuffer(buffer: BufferHandle, offsetBytes: number, data: ArrayBufferView): void {
@@ -286,6 +616,10 @@ export class ProbedEngine implements RenderEngine {
 
   onAllocation(listener: (event: AllocationEvent) => void): () => void {
     return this.#inner.onAllocation(listener);
+  }
+
+  onCompile(listener: (event: CompileEvent) => void): () => void {
+    return this.#inner.onCompile(listener);
   }
 
   onFault(listener: (fault: GraphicsFault) => void): () => void {

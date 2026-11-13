@@ -17,31 +17,39 @@
 //! [`classify`] joins them into a [`Classification`], whose `Display` is the class as an
 //! astronomer writes it: `G2V`, `M5III`, `K1.5IV`, `B8Ia`, `sdM3`, `T6`, `DA4.2`, `NS`. The classes
 //! beyond the MK grid are [`PeculiarClass`]es: P06.T25's Be, Ap, Bp and Am stars follow from the
-//! star's rotation and magnetism draws ([`rotation`](crate::stellar::rotation)); P06.T24.a's
-//! Wolf-Rayet stars (`WN6`, `WN7h`, `WC5`, `WO2`), hot subdwarfs (`sdB0`, `sdO5`) and luminous
-//! blue variables (`B2Ia+ LBV`) follow from the state (`peculiar`), and P06.T24.b's carbon and S
-//! stars and young stars are still to come. What only a star's history knows, a neutron star's
-//! pulsar class and a helium star's surface, arrives through [`ClassExtras`].
+//! star's rotation and magnetism draws ([`rotation`]); P06.T24.a's Wolf-Rayet stars (`WN6`,
+//! `WN7h`, `WC5`, `WO2`), hot subdwarfs (`sdB0`, `sdO5`) and luminous blue variables
+//! (`B2Ia+ LBV`), and T24.c's stripped helium stars (`He-sdO3`), follow from the state
+//! (`peculiar`); P06.T24.b's young stars (`K5IV CTTS`, `A2IV HAeBe`) and its S and carbon stars
+//! of the thermally pulsing AGB (`MS6III`, `S6III`, `SC6III`, `C-N6`) from the state and the
+//! star's track and pulses. What only a star's
+//! history knows, a neutron star's pulsar class, a helium star's surface and a young or AGB star's
+//! class, arrives through [`ClassExtras`].
 
 mod luminosity;
 mod peculiar;
 pub(crate) mod pm13;
 mod scales;
-mod sk81;
 
 use core::fmt;
 
+use crate::GENERATOR_VERSION;
 use crate::stellar::draws::StarDraws;
 use crate::stellar::remnant::wd_spectral::{WhiteDwarfType, white_dwarf_type};
 use crate::stellar::rotation;
+use crate::stellar::rules::StellarRules;
 use crate::stellar::{Composition, Phase, StarState};
 use crate::units::Kelvin;
+use pm13::DwarfSequence;
 
 pub use luminosity::LuminosityClass;
 pub use peculiar::{
-    HeliumSurface, LBV_MIN_LUMINOSITY, WOLF_RAYET_MIN_TEFF, WolfRayetSequence, WolfRayetType,
-    carbon_shows_after, is_luminous_blue_variable,
+    C_TO_O_MS, C_TO_O_S, C_TO_O_SC, CARBON_STAR_C_TO_O, HERBIG_AE_BE_MAX_MASS,
+    HOT_SUBDWARF_MAX_MASS, HeliumSurface, LBV_MIN_LUMINOSITY, MIN_DREDGE_UP_PULSES, SStarType,
+    T_TAURI_MAX_MASS, WOLF_RAYET_MIN_TEFF, WolfRayetSequence, WolfRayetType, carbon_shows_after,
+    carbon_star_window, is_luminous_blue_variable,
 };
+pub(crate) use peculiar::{DredgeUp, chemical_class, young_class};
 
 /// A spectral class letter: the MK sequence O to M and its extension to the brown dwarfs, L, T
 /// and Y, from hottest to coolest.
@@ -226,11 +234,20 @@ impl SpectralCode {
 /// Written to the nearest half subtype: `G2`, `M0.5`, `O9.5`, `T4.5`.
 impl fmt::Display for SpectralCode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let half = self.to_half_subtype();
-        let subtype = half.subtype();
+        write!(f, "{}", self.to_half_subtype().letter().as_char())?;
+        self.write_subtype(f)
+    }
+}
+
+impl SpectralCode {
+    /// The first code of the M class, M0.
+    const M0: Self = Self(60.0);
+
+    /// Writes the subtype alone, to the nearest half subtype: `2`, `0.5`, `9.5`.
+    fn write_subtype(self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let subtype = self.to_half_subtype().subtype();
         // `subtype` is a multiple of one half below ten, exact in binary.
         let whole = subtype.floor();
-        write!(f, "{}", half.letter().as_char())?;
         #[expect(
             clippy::cast_possible_truncation,
             clippy::cast_sign_loss,
@@ -291,14 +308,18 @@ pub enum SpectralType {
 }
 
 /// A class beyond the MK grid: P06.T25's, from rotation and magnetism (the Be, Ap, Bp and Am
-/// stars), P06.T24.a's from the state and track (Wolf-Rayet stars, hot subdwarfs, luminous blue
-/// variables), and later P06.T24.b's (carbon and S stars, T Tauri and Herbig Ae/Be stars).
+/// stars), P06.T24.a's and T24.c's from the state and track (Wolf-Rayet stars, hot subdwarfs,
+/// stripped helium stars, luminous blue variables), and P06.T24.b's from the state, the track and
+/// the thermal pulses (T Tauri and Herbig Ae/Be stars, S and carbon stars).
 ///
 /// P06.T25's are written after the luminosity class with the MK suffix of their kind: `e` for
 /// emission, `p` for peculiar abundances, `m` for metallic lines (`B3Ve`, `A0Vp`, `B8Vp`,
 /// `A2Vm`). A Wolf-Rayet star is written by its own type ([`SpectralType::WolfRayet`]), a hot
-/// subdwarf with the `sd` prefix (`sdB0`, `sdO5`), and a luminous blue variable with ` LBV` after
-/// its class (`B2Ia+ LBV`).
+/// subdwarf with the `sd` prefix (`sdB0`, `sdO5`), a stripped helium star with `He-` before it
+/// ([`prefix`](Self::prefix): `He-sdO3`, `He-sdB1`), a luminous blue variable with ` LBV` after
+/// its class (`B2Ia+ LBV`), and a young star likewise (` CTTS`, ` WTTS`, ` HAeBe`). An S or
+/// carbon star's type takes the M letter's place ([`chemical_letters`](Self::chemical_letters)):
+/// `MS6III`, `S6III`, `SC6III`, and `C-N6` with no luminosity class.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum PeculiarClass {
     /// A Be star: a B-type main-sequence star spinning above 0.7 of its critical speed, whose
@@ -314,15 +335,37 @@ pub enum PeculiarClass {
     Am,
     /// A Wolf-Rayet star: hot, luminous and nearly or fully stripped (P06.T24.a).
     WolfRayet,
-    /// A hot subdwarf, sdB or sdO: a naked helium star below the Wolf-Rayet floor (P06.T24.a).
+    /// A hot subdwarf, sdB or sdO: a naked helium star below the Wolf-Rayet floor, of up to
+    /// 1.7 M☉ (P06.T24.a, with T24.c's edge, [`HOT_SUBDWARF_MAX_MASS`]).
     HotSubdwarf,
+    /// A stripped helium star, He-sdO or He-sdB: a naked helium star below the Wolf-Rayet floor
+    /// and heavier than a hot subdwarf (P06.T24.c).
+    StrippedHeliumStar,
     /// A luminous blue variable: beyond the Humphreys–Davidson limit and hotter than 8,000 K
     /// (P06.T24.a).
     LuminousBlueVariable,
+    /// A T Tauri star: a young star of under 2 M☉ on its contraction to the main sequence, after
+    /// the protostar phase (P06.T24.b), written
+    /// ` CTTS` while its protostellar disc lasts and ` WTTS` after.
+    TTauri {
+        /// Whether its disc still lasts ([`disc_lifetime`](crate::stellar::premain::disc_lifetime)):
+        /// a classical T Tauri star, which accretes from it, and a weak-lined one without.
+        classical: bool,
+    },
+    /// A Herbig Ae/Be star: a young star of 2–8 M☉ on its contraction to the main sequence, after
+    /// the protostar phase (P06.T24.b), written ` HAeBe`.
+    HerbigAeBe,
+    /// An S-type star of the thermally pulsing AGB, its surface C/O raised by third dredge-up to
+    /// 0.95–1 (P06.T24.b): MS, S or SC as the C/O rises.
+    SType(SStarType),
+    /// A carbon star of the thermally pulsing AGB, its surface C/O raised above 1 by third
+    /// dredge-up (P06.T24.b), written `C-N`: the C-N stars of Keenan's (1993) revised MK system.
+    Carbon,
 }
 
 impl PeculiarClass {
-    /// The class's name as astronomers say it: `Be`, `Ap`, `Bp`, `Am`, `WR`, `sd`, `LBV`.
+    /// The class's name as astronomers say it: `Be`, `Ap`, `Bp`, `Am`, `WR`, `sd`, `He-sd`, `LBV`,
+    /// `CTTS`, `WTTS`, `HAeBe`, `MS`, `S`, `SC`, `C`.
     #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
@@ -332,37 +375,93 @@ impl PeculiarClass {
             Self::Am => "Am",
             Self::WolfRayet => "WR",
             Self::HotSubdwarf => "sd",
+            Self::StrippedHeliumStar => "He-sd",
             Self::LuminousBlueVariable => "LBV",
+            Self::TTauri { classical: true } => "CTTS",
+            Self::TTauri { classical: false } => "WTTS",
+            Self::HerbigAeBe => "HAeBe",
+            Self::SType(kind) => kind.letters(),
+            Self::Carbon => "C",
+        }
+    }
+
+    /// The letters an S or carbon star's type is written with in place of the M type's letter:
+    /// `MS`, `S`, `SC` or `C-N`; `None` for every other class.
+    #[must_use]
+    pub const fn chemical_letters(self) -> Option<&'static str> {
+        match self {
+            Self::SType(kind) => Some(kind.letters()),
+            Self::Carbon => Some("C-N"),
+            Self::Be
+            | Self::Ap
+            | Self::Bp
+            | Self::Am
+            | Self::WolfRayet
+            | Self::HotSubdwarf
+            | Self::StrippedHeliumStar
+            | Self::LuminousBlueVariable
+            | Self::TTauri { .. }
+            | Self::HerbigAeBe => None,
+        }
+    }
+
+    /// What the class writes before the rest of the written class, the luminosity class's prefix
+    /// included: `He-` for a stripped helium star, nothing for any other.
+    #[must_use]
+    pub const fn prefix(self) -> &'static str {
+        match self {
+            Self::StrippedHeliumStar => "He-",
+            Self::Be
+            | Self::Ap
+            | Self::Bp
+            | Self::Am
+            | Self::WolfRayet
+            | Self::HotSubdwarf
+            | Self::LuminousBlueVariable
+            | Self::TTauri { .. }
+            | Self::HerbigAeBe
+            | Self::SType(_)
+            | Self::Carbon => "",
         }
     }
 
     /// What the class adds after the rest of the written class: the MK suffix `e`, `p` or `m`,
-    /// ` LBV`, or nothing for a Wolf-Rayet star or hot subdwarf, whose type and prefix say it.
+    /// ` LBV`, ` CTTS`, ` WTTS` or ` HAeBe`, or nothing for a Wolf-Rayet star, hot subdwarf,
+    /// stripped helium star, S star or carbon star, whose type and prefixes say it.
     #[must_use]
     pub const fn suffix(self) -> &'static str {
         match self {
             Self::Be => "e",
             Self::Ap | Self::Bp => "p",
             Self::Am => "m",
-            Self::WolfRayet | Self::HotSubdwarf => "",
+            Self::WolfRayet
+            | Self::HotSubdwarf
+            | Self::StrippedHeliumStar
+            | Self::SType(_)
+            | Self::Carbon => "",
             Self::LuminousBlueVariable => " LBV",
+            Self::TTauri { classical: true } => " CTTS",
+            Self::TTauri { classical: false } => " WTTS",
+            Self::HerbigAeBe => " HAeBe",
         }
     }
 }
 
 /// What [`classify`] reads beyond the state, the composition and the draws: what only the star's
 /// history knows, which is the pulsar state of P06.T21 that tells `PSR` and `MAG` from `NS` (the
-/// neutron star's age since its birth), and the surface of a naked helium star that tells WC from
-/// WN (P06.T24.a: the mass it has lost since it became one).
+/// neutron star's age since its birth), the surface of a naked helium star that tells WC from
+/// WN (P06.T24.a: the mass it has lost since it became one), and the class of a young star or of
+/// an S or carbon star (P06.T24.b: its initial mass and disc, or its thermal pulses).
 ///
 /// The peculiar classes of P06.T25 (Be, Ap, Bp, Am) need no extra: they are a function of the
-/// state and the star's rotation and magnetism draws ([`rotation`](crate::stellar::rotation)).
+/// state and the star's rotation and magnetism draws ([`rotation`]).
 /// The caller that holds a star's model (P06.T29) fills the rest.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub struct ClassExtras {
     neutron_star: Option<NeutronStarClass>,
     helium_surface: Option<HeliumSurface>,
+    peculiar: Option<PeculiarClass>,
 }
 
 impl ClassExtras {
@@ -371,6 +470,7 @@ impl ClassExtras {
     pub const NONE: Self = Self {
         neutron_star: None,
         helium_surface: None,
+        peculiar: None,
     };
 
     /// The extras of a neutron star of `class`, from its pulsar state (P06.T21.c).
@@ -378,7 +478,7 @@ impl ClassExtras {
     pub const fn neutron_star(class: NeutronStarClass) -> Self {
         Self {
             neutron_star: Some(class),
-            helium_surface: None,
+            ..Self::NONE
         }
     }
 
@@ -387,8 +487,21 @@ impl ClassExtras {
     #[must_use]
     pub const fn helium_star(surface: HeliumSurface) -> Self {
         Self {
-            neutron_star: None,
             helium_surface: Some(surface),
+            ..Self::NONE
+        }
+    }
+
+    /// These extras with the class `peculiar` that a young star's initial mass and disc, or an
+    /// AGB star's thermal pulses, give it (P06.T24.b), which [`classify`] puts on a living star of
+    /// the sequence O to M that is neither a Wolf-Rayet star, a subdwarf nor a luminous blue
+    /// variable. Crate-private: only `young_class` and `chemical_class` give one, each on its own
+    /// phases.
+    #[must_use]
+    pub(crate) const fn with_peculiar(self, peculiar: PeculiarClass) -> Self {
+        Self {
+            peculiar: Some(peculiar),
+            ..self
         }
     }
 }
@@ -396,10 +509,10 @@ impl ClassExtras {
 /// An object's classification: its spectral type, its luminosity class where it has one, and any
 /// peculiar class.
 ///
-/// Its `Display` is the class as written: the subdwarf prefix, then the type, then the
-/// luminosity class (`G2V`, `K3III`, `M2Iab`, `B1Ia+`, `sdM3`, `esdK7`); L, T and Y dwarfs,
-/// white dwarfs, neutron stars and black holes carry no luminosity class (`T6`, `DA4.2`, `NS`,
-/// `BH`).
+/// Its `Display` is the class as written: a peculiar class's prefix (`He-`), the subdwarf prefix,
+/// then the type, then the luminosity class (`G2V`, `K3III`, `M2Iab`, `B1Ia+`, `sdM3`, `esdK7`,
+/// `He-sdO3`); L, T and Y dwarfs, white dwarfs, neutron stars and black holes carry no luminosity
+/// class (`T6`, `DA4.2`, `NS`, `BH`).
 ///
 /// # Examples
 ///
@@ -446,7 +559,7 @@ impl Classification {
         self.luminosity
     }
 
-    /// The peculiar class of P06.T25 (and later T24), if the object has one.
+    /// The peculiar class of P06.T25 or T24, if the object has one.
     #[must_use]
     pub const fn peculiar_class(&self) -> Option<PeculiarClass> {
         self.peculiar
@@ -478,12 +591,37 @@ impl Classification {
 
 impl fmt::Display for Classification {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(peculiar) = self.peculiar {
+            f.write_str(peculiar.prefix())?;
+        }
         match self.spectral {
-            SpectralType::Sequence(code) => match self.luminosity {
-                Some(class) if class.is_prefix() => write!(f, "{}{code}", class.as_str())?,
-                Some(class) => write!(f, "{code}{}", class.as_str())?,
-                None => write!(f, "{code}")?,
-            },
+            SpectralType::Sequence(code) => {
+                match (
+                    self.peculiar.and_then(PeculiarClass::chemical_letters),
+                    self.luminosity,
+                ) {
+                    (Some(letters), luminosity) => {
+                        // An S or carbon star's temperature subtype is its M type's, held to
+                        // M0–M9.5: `M6` writes `S6`.
+                        f.write_str(letters)?;
+                        SpectralCode::clamped(
+                            code.value()
+                                .clamp(SpectralCode::M0.0, SpectralCode::LAST_MK.0),
+                        )
+                        .write_subtype(f)?;
+                        if let Some(class) =
+                            luminosity.filter(|_| self.peculiar != Some(PeculiarClass::Carbon))
+                        {
+                            f.write_str(class.as_str())?;
+                        }
+                    }
+                    (None, Some(class)) if class.is_prefix() => {
+                        write!(f, "{}{code}", class.as_str())?;
+                    }
+                    (None, Some(class)) => write!(f, "{code}{}", class.as_str())?,
+                    (None, None) => write!(f, "{code}")?,
+                }
+            }
             SpectralType::WhiteDwarf(wd) => write!(f, "{wd}")?,
             SpectralType::NeutronStar(class) => f.write_str(class.as_str())?,
             SpectralType::WolfRayet(wr) => write!(f, "{wr}")?,
@@ -518,8 +656,15 @@ impl fmt::Display for Classification {
 /// ```
 #[must_use]
 pub fn subtype_from_teff(teff: Kelvin) -> Option<SpectralCode> {
+    subtype_from_teff_under(teff, StellarRules::of_version(GENERATOR_VERSION))
+}
+
+/// [`subtype_from_teff`] on the dwarf sequence the stellar stage's `rules` choose
+/// ([`DwarfSequence::of`]).
+#[must_use]
+pub(crate) fn subtype_from_teff_under(teff: Kelvin, rules: StellarRules) -> Option<SpectralCode> {
     let t = teff.value();
-    (t.is_finite() && t > 0.0).then(|| SpectralCode::clamped(pm13::code_at(t)))
+    (t.is_finite() && t > 0.0).then(|| SpectralCode::clamped(DwarfSequence::of(rules).code_at(t)))
 }
 
 /// Classifies an object from its state, its composition and its draws (plan 06, P06.T23.d).
@@ -535,8 +680,12 @@ pub fn subtype_from_teff(teff: Kelvin) -> Option<SpectralCode> {
 /// - A hot, luminous, nearly or fully stripped star is a Wolf-Rayet star (P06.T24.a): `WN`,
 ///   `WNh`, `WC` or `WO` with a subtype from its temperature, WC where `extras` say its helium
 ///   surface shows carbon. A naked helium star below the Wolf-Rayet floor, from 20,000 K, is a hot
-///   subdwarf (`sdB`, `sdO`), and a star beyond the Humphreys–Davidson limit and hotter than
-///   8,000 K a luminous blue variable (` LBV` after its class).
+///   subdwarf (`sdB`, `sdO`) of up to [`HOT_SUBDWARF_MAX_MASS`] and a stripped helium star
+///   (`He-sdB`, `He-sdO`, P06.T24.c) above it, and a star beyond the Humphreys–Davidson limit and
+///   hotter than 8,000 K a luminous blue variable (` LBV` after its class).
+/// - Any other star of type O to M takes the young star's, S star's or carbon star's class its
+///   `extras` give (P06.T24.b): ` CTTS`, ` WTTS` or ` HAeBe` after its class, or `MS`, `S`, `SC`
+///   or `C-N` for its type's letter.
 /// - Any other main-sequence star may take a peculiar class from its rotation and magnetism draws
 ///   (P06.T25): `p` for a fossil field (Ap, Bp), `e` for a Be star, `m` for an Am star.
 /// - A neutron star is `NS`, or the `PSR` or `MAG` its `extras` give (P06.T21); a black hole is
@@ -551,10 +700,31 @@ pub fn classify(
     draws: &StarDraws,
     extras: &ClassExtras,
 ) -> Classification {
+    classify_under(
+        state,
+        composition,
+        draws,
+        *extras,
+        StellarRules::of_version(GENERATOR_VERSION),
+    )
+}
+
+/// [`classify`] under the stellar stage's `rules` in place of the generator version's: what a star
+/// generated in a galaxy is classified with, from its model's, its pair's or its galaxy's rules
+/// (`stellar::rules`). The rules choose the dwarf sequence its type and its rotation read.
+#[must_use]
+pub(crate) fn classify_under(
+    state: &StarState,
+    composition: &Composition,
+    draws: &StarDraws,
+    extras: ClassExtras,
+    rules: StellarRules,
+) -> Classification {
     let ClassExtras {
         neutron_star,
         helium_surface,
-    } = *extras;
+        peculiar,
+    } = extras;
     match state.phase() {
         Phase::HeliumWhiteDwarf | Phase::CarbonOxygenWhiteDwarf | Phase::OxygenNeonWhiteDwarf => {
             Classification::bare(SpectralType::WhiteDwarf(white_dwarf_type(
@@ -583,16 +753,26 @@ pub fn classify(
             if let Some(wr) = peculiar::wolf_rayet(state, composition, helium_surface) {
                 return peculiar::wolf_rayet_class(wr);
             }
-            if let Some(subdwarf) = peculiar::hot_subdwarf(state, composition) {
+            if let Some(subdwarf) = peculiar::hot_subdwarf(state, composition, rules) {
                 return subdwarf;
             }
-            let (code, class) = luminosity::classify_living(state, composition);
+            if let Some(stripped) = peculiar::stripped_helium_star(state, composition, rules) {
+                return stripped;
+            }
+            let (code, class) = luminosity::classify_living(state, composition, rules);
             let mut classification = Classification::sequence(code, Some(class));
             if is_luminous_blue_variable(state) {
                 classification.peculiar = Some(PeculiarClass::LuminousBlueVariable);
+            } else if peculiar.is_some() && code.to_half_subtype().letter().is_mk() {
+                classification.peculiar = peculiar;
             } else if state.phase() == Phase::MainSequence {
-                classification.peculiar =
-                    rotation_class(state, composition, draws, code.to_half_subtype().letter());
+                classification.peculiar = rotation_class(
+                    state,
+                    composition,
+                    draws,
+                    code.to_half_subtype().letter(),
+                    rules,
+                );
             }
             classification
         }
@@ -602,13 +782,14 @@ pub fn classify(
 /// The peculiar class a main-sequence star in `state` of spectral `letter` takes from its rotation
 /// and magnetism (P06.T25): Ap or Bp for a fossil field at 7,000–20,000 K (Bp for B and O types),
 /// else Be for a B type above 0.7 of its critical speed, else Am for an A star of 7,000–10,000 K
-/// turning under 120 km/s.
+/// turning under 120 km/s. The rotation reads the dwarf sequence `rules` choose.
 #[must_use]
 fn rotation_class(
     state: &StarState,
     composition: &Composition,
     draws: &StarDraws,
     letter: SpectralLetter,
+    rules: StellarRules,
 ) -> Option<PeculiarClass> {
     let teff = state.effective_temperature();
     let within = |(low, high): (Kelvin, Kelvin)| teff >= low && teff <= high;
@@ -629,7 +810,7 @@ fn rotation_class(
     if !is_b && !within(rotation::AM_TEMPERATURES) {
         return None;
     }
-    let spin = rotation::rotation(state, composition, draws, None)?;
+    let spin = rotation::rotation_under(state, composition, draws, None, rules)?;
     if is_b && spin.critical_fraction() > rotation::BE_CRITICAL_FRACTION {
         Some(PeculiarClass::Be)
     } else if within(rotation::AM_TEMPERATURES) && spin.equatorial_speed() < rotation::AM_MAX_SPEED
@@ -874,8 +1055,7 @@ pub(crate) mod tests {
         assert_eq!(SpectralLetter::from_index(10), None);
     }
 
-    /// The dwarf scale's subtype is monotone in temperature from 60,000 K to 100 K, and hits
-    /// every row of the table exactly.
+    /// The dwarf scale's subtype is monotone in temperature from 60,000 K to 100 K.
     #[test]
     fn the_dwarf_subtype_is_monotone_in_teff() {
         let mut previous = SpectralCode::HOTTEST.value();
@@ -885,10 +1065,6 @@ pub(crate) mod tests {
             assert!(code >= previous, "{t} K: {code} after {previous}");
             previous = code;
             t *= 0.9995;
-        }
-        for row in pm13::DWARF_SEQUENCE {
-            let code = subtype_from_teff(Kelvin::new(row.teff_k)).unwrap();
-            assert_eq!(bits(code.value()), bits(row.code()), "{row:?}");
         }
         assert_eq!(subtype_from_teff(Kelvin::ZERO), None);
         assert_eq!(subtype_from_teff(Kelvin::new(f64::INFINITY)), None);
@@ -1044,6 +1220,60 @@ pub(crate) mod tests {
         assert!((0.05..=0.10).contains(&share), "{share} of {a_and_b}");
     }
 
+    /// P06.T24.b's classes as written: a young star's suffix after its class, an S or carbon
+    /// star's letters in the M type's place (the carbon star without a luminosity class), each
+    /// round-tripping through the test parser; a class its extras give only takes on a living star
+    /// of O to M, and neither a luminous blue variable nor a Wolf-Rayet star takes one.
+    #[test]
+    fn the_young_s_and_carbon_classes_are_written_and_round_trip() {
+        let with = |state: &StarState, peculiar: PeculiarClass| {
+            let extras = ClassExtras::NONE.with_peculiar(peculiar);
+            let class = classify(state, &Composition::SOLAR, &StarDraws::median(), &extras);
+            let text = class.to_string();
+            assert_eq!(parse(&text).map(|c| c.to_string()), Some(text.clone()));
+            (text, class.peculiar_class())
+        };
+        let t_tauri = star_g(Phase::PreMainSequence, 0.8, 3.9, 4_200.0);
+        for (classical, suffix) in [(true, " CTTS"), (false, " WTTS")] {
+            let (text, peculiar) = with(&t_tauri, PeculiarClass::TTauri { classical });
+            assert!(text.starts_with('K') && text.ends_with(suffix), "{text}");
+            assert_eq!(peculiar, Some(PeculiarClass::TTauri { classical }));
+        }
+        let herbig = star_g(Phase::PreMainSequence, 2.5, 4.0, 9_500.0);
+        let (text, _) = with(&herbig, PeculiarClass::HerbigAeBe);
+        assert!(text.starts_with('A') && text.ends_with(" HAeBe"), "{text}");
+        let agb = star(Phase::ThermallyPulsingAgb, 2.0, 8_000.0, 3_100.0);
+        let plain = class_at(&agb, 0.0).to_string();
+        assert!(plain.starts_with('M'), "{plain}");
+        let luminosity = &plain[plain.find(['I', 'V']).unwrap()..];
+        for (kind, letters) in [
+            (SStarType::Ms, "MS"),
+            (SStarType::S, "S"),
+            (SStarType::Sc, "SC"),
+        ] {
+            let (text, peculiar) = with(&agb, PeculiarClass::SType(kind));
+            assert_eq!(text, format!("{letters}{}", &plain[1..]));
+            assert!(text.ends_with(luminosity), "{text}");
+            assert_eq!(peculiar, Some(PeculiarClass::SType(kind)));
+        }
+        let (text, _) = with(&agb, PeculiarClass::Carbon);
+        assert_eq!(
+            text,
+            format!("C-N{}", &plain[1..plain.len() - luminosity.len()])
+        );
+        // A warmer giant's subtype is held to M0's: K5 writes `C-N0`.
+        let warm = star(Phase::ThermallyPulsingAgb, 2.0, 3_000.0, 4_300.0);
+        assert_eq!(with(&warm, PeculiarClass::Carbon).0, "C-N0");
+        // A star the extras' class cannot take keeps its own.
+        let lbv = star(Phase::CoreHeliumBurning, 80.0, 1.5e6, 15_000.0);
+        assert_eq!(
+            with(&lbv, PeculiarClass::Carbon).1,
+            Some(PeculiarClass::LuminousBlueVariable)
+        );
+        let dwarf_l = star(Phase::PreMainSequence, 0.08, 1e-4, 1_800.0);
+        assert_eq!(with(&dwarf_l, PeculiarClass::HerbigAeBe).1, None);
+    }
+
     /// A neutron star is `PSR` or `MAG` when its extras say so, and `NS` without them.
     #[test]
     fn a_neutron_stars_class_comes_from_its_extras() {
@@ -1080,13 +1310,32 @@ pub(crate) mod tests {
     /// The test parser: a classification from its written form, with the subtype at the half
     /// step it is written with. `None` where the string is not one `Display` writes.
     pub(crate) fn parse(text: &str) -> Option<Classification> {
-        if let Some(plain) = text.strip_suffix(" LBV") {
-            let mut class = parse_plain(plain)?;
-            class.peculiar = Some(PeculiarClass::LuminousBlueVariable);
-            return Some(class);
+        for peculiar in [
+            PeculiarClass::LuminousBlueVariable,
+            PeculiarClass::TTauri { classical: true },
+            PeculiarClass::TTauri { classical: false },
+            PeculiarClass::HerbigAeBe,
+        ] {
+            if let Some(plain) = text.strip_suffix(peculiar.suffix()) {
+                let mut class = parse_plain(plain)?;
+                class.peculiar = Some(peculiar);
+                return Some(class);
+            }
+        }
+        if let Some(found) = parse_chemical(text) {
+            return Some(found);
         }
         if let Some(found) = parse_wolf_rayet(text) {
             return Some(found);
+        }
+        // A stripped helium star: `He-` before a subdwarf's class (P06.T24.c).
+        if let Some(subdwarf) = text.strip_prefix("He-") {
+            let mut class = parse_plain(subdwarf)?;
+            if class.luminosity_class() != Some(LuminosityClass::Subdwarf) {
+                return None;
+            }
+            class.peculiar = Some(PeculiarClass::StrippedHeliumStar);
+            return Some(class);
         }
         if let Some(found) = parse_plain(text) {
             return Some(found);
@@ -1105,6 +1354,30 @@ pub(crate) mod tests {
             "p" => PeculiarClass::Ap,
             _ => return None,
         });
+        Some(class)
+    }
+
+    /// An S or carbon star (P06.T24.b): `MS`, `S`, `SC` or `C-N` in the M letter's place, the
+    /// M type's subtype, and a luminosity class but for `C-N`.
+    fn parse_chemical(text: &str) -> Option<Classification> {
+        let (peculiar, rest) = [
+            PeculiarClass::Carbon,
+            PeculiarClass::SType(SStarType::Ms),
+            PeculiarClass::SType(SStarType::Sc),
+            PeculiarClass::SType(SStarType::S),
+        ]
+        .into_iter()
+        .find_map(|p| Some((p, text.strip_prefix(p.chemical_letters()?)?)))?;
+        let mut class = parse_plain(&format!("M{rest}"))?;
+        let carbon = peculiar == PeculiarClass::Carbon;
+        if class.luminosity_class().is_some() == carbon {
+            return None;
+        }
+        if carbon {
+            // A carbon star's luminosity class is not written; the test's states are giants.
+            class.luminosity = Some(LuminosityClass::Giant);
+        }
+        class.peculiar = Some(peculiar);
         Some(class)
     }
 

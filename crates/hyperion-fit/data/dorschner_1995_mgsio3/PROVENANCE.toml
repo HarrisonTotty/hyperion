@@ -1,0 +1,20 @@
+# Amorphous MgSiO3's optical constants of Dorschner et al. (1995), as optool's lnk_data copies the
+# pyroxene glass of Mg/(Mg + Fe) = 1: the regolith `MgSiO3`'s infrared index beyond 780 nm (plan 14,
+# P14.T49.i), the file rendering plan R08's enstatite-glass.json was reduced from. Reduced by
+# `reduce.py` from optool's file (git-ignored,
+# `data/cache/dorschner_1995_mgsio3/pyr-mg100-Dorschner1995.lnk`) to its rows over 0.75-5 µm, and
+# committed as measured values with the citation. Reproduced from the raw by hand on 2026-10-16:
+# `python3 -I crates/hyperion-fit/data/dorschner_1995_mgsio3/reduce.py <raw>
+# crates/hyperion-fit/data/dorschner_1995_mgsio3/nk.csv`, from outside the raw's directory. Read by
+# `run substance_albedos`.
+dataset = "dorschner_1995_mgsio3"
+class = "committed"
+citation = "J. Dorschner, B. Begemann, Th. Henning, C. Jäger and H. Mutschke (1995), Astron. Astrophys. 300, 503-520: steps toward interstellar silicate mineralogy II, Mg-Fe-silicate glasses of variable composition; MgSiO3 glass's n and k at room temperature over 0.75-5 µm; via optool's lnk_data (C. Dominik, M. Min and R. Tazaki, ascl:2104.010)"
+url = "https://raw.githubusercontent.com/cdominik/optool/0b1fa6df95e3a694dc64abdbf8e36dad127165ab/lnk_data/pyr-mg100-Dorschner1995.lnk"
+retrieved = "2026-10-16"
+release = "lnk_data/pyr-mg100-Dorschner1995.lnk at optool's commit 0b1fa6df (sha256 9f07f23cb0b233fd48210824c38afe031fd5ad84bd0b182b7fe290caa1fe0de8, the file R08's enstatite-glass.json was reduced from), reduced by reduce.py"
+licence = "none stated for the data (optool's MIT licence covers its software); only the measured constants over the range read, facts, are committed, with the citation (decision-r08-licences.md)"
+
+[[files]]
+name = "nk.csv"
+sha256 = "f14ccc80af9605bbbba6fb481f0c691b8ff534b1ab802ca7b65d0acd6237ed9b"

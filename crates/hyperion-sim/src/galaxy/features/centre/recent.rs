@@ -1,0 +1,861 @@
+//! The galactic centre's recently dead and its luminous blue variables (plan 09, P09.T36.b), on
+//! its feature-level list after the tidal disruptions' victims, from index N + 1, from generator
+//! version 27, and plan 11's binary classes after them (P11.T8.f, `centre::binaries`).
+//!
+//! # The classes
+//!
+//! In Design note 16's order after the victims (research-leans-10, item 4):
+//!
+//! - **`CORE_COLLAPSE`**, from the centre's young classes, the constant component and the burst's
+//!   two tracers: band-E stars whose primary dies in the supernova test's interval and makes a
+//!   shell that the test keeps, in the gas at the site (the smooth gas about the origin; the
+//!   field's surroundings), as a catalogue feature's are drawn
+//!   ([`recent`](crate::galaxy::features::members::recent)): each component's band-E primaries
+//!   times the share of band E in the envelope of masses and ages ([`Candidates`]) whose lifetime
+//!   bracket can put a death in the interval.
+//! - **`TYPE_IA`**, from its old classes: each component's formed mass times its mean Type Ia rate
+//!   over its ages, drawn delay first on a delay-time distribution of its ages.
+//! - **`LUMINOUS_BLUE_VARIABLE`**, from its young classes: band-E stars whose window overlaps the
+//!   source horizon and that the core collapses do not claim. Both or neither: the list holds them
+//!   exactly where the centre's band-E cells carve them, by the one switch of the hold and the one
+//!   claim, [`claimed_at_centre`].
+//!
+//! An entry picks its component by the components' expected candidates, draws its radius from its
+//! tracer's profile inside the centre's reach, where the cells' members end, its direction
+//! isotropically and its velocity from its tracer's distribution function, as a cell's member
+//! does, without the marks (lean, 2026-10-31); its site is its epoch position moved straight along
+//! that velocity to its death.
+//!
+//! # In the range query
+//!
+//! From P09.T37 the centre's source places the entries ([`CentreMemberSource`]): an entry moves on
+//! its one straight line, through its epoch position at its velocity, before its death and after
+//! it, as its member's record and its site say. Each candidate's place, its draws up to its
+//! velocity ([`CentrePlace`]), is cheap, so the source tests a candidate's line against its sphere
+//! first and asks the class's test, a lifetime and a star, only of a candidate the sphere holds.
+//! The census adds each class's expected candidates times the share of its component's tracer
+//! profile inside the reach that the sphere's shell about the black hole holds, which errs high.
+//!
+//! [`CentreMemberSource`]: super::CentreMemberSource
+//!
+//! # The cells' half
+//!
+//! A band-E member of a young class that [`claimed_at_centre`] claims is no member of the cells
+//! ([`list_claims`], which `CentrePlacement::candidate` asks), so a recent death or a variable is
+//! the list's or the cells', and never both. The old classes' Type Ia carve nothing: the centre
+//! draws no binary that a Type Ia could come from (lean, 2026-10-31).
+
+use std::num::NonZeroU16;
+
+use crate::coords::{GalacticDisplacement, GalacticPosition, GalacticVelocity};
+use crate::galaxy::catalogue_classes::CatalogueMotion;
+use crate::galaxy::catalogue_classes::lbv::{horizon_window, may_host};
+use crate::galaxy::catalogue_classes::supernova::{
+    DeathMarks, SupernovaEntry, SupernovaInterval, SupernovaKind, Surroundings, claimed_window,
+};
+use crate::galaxy::catalogue_classes::type_ia::{DelayTimeDistribution, IaLeftover, IaProgenitor};
+use crate::galaxy::displaced::{ExplosionSite, death_in_interval_under};
+use crate::galaxy::features::interior::{ClassProfile, ProfileShape};
+use crate::galaxy::features::members::recent::{
+    Candidates, FeatureClassesRules, ListedDeath, ListedExplosion, RecentClass, moved, uniform_ages,
+};
+use crate::galaxy::features::members::{FeatureLevelList, ListClass, ListIndex, MemberZero};
+use crate::galaxy::imf::{MASS_BAND_EDGES, MassBand, MassFunction};
+use crate::galaxy::placement::{SystemOrigin, SystemRecord};
+use crate::galaxy::query::LayerCounts;
+use crate::galaxy::snr::SHELL_WINDOW_CAP;
+use crate::galaxy::snr::{ShellEnvironment, ShellWindow};
+use crate::galaxy::{Galaxy, Population};
+use crate::id::{CentreMemberId, MemberSlot, SystemId};
+use crate::math;
+use crate::rng::{ObjectKey, Stream, tags};
+use crate::stellar::Composition;
+use crate::stellar::multiplicity::MultiplicityContext;
+use crate::stellar::system::{SystemStars, primary_draws, primary_eta};
+use crate::time::UniverseTime;
+use crate::units::consts::METRES_PER_LIGHT_YEAR;
+use crate::units::{LightYears, SolarMasses, Years};
+
+use super::binaries::CentreBinaries;
+use super::classes::{AgeComponent, CentreClass, CentreClassKind, age_components};
+use super::events::victims::victim_count;
+use super::members::{CentreMemberRecord, centre_composition};
+use super::profile::{REACH, TracerProfile};
+use super::{CentreModel, CentreTracer};
+
+/// The oldest age of a young class: a component whose oldest star is at most this old is young,
+/// 150 Myr, the constant component's (`age_components`); the rest are old.
+const YOUNG_OLDEST: Years = Years::new(1.5e8);
+
+/// One component's part of a class: its expected candidates and, for a core collapse or a
+/// variable, what its candidates draw their masses and ages from.
+#[derive(Debug, Clone, PartialEq)]
+struct Part {
+    component: u8,
+    expected: f64,
+    candidates: Option<Candidates>,
+}
+
+/// The centre's recent classes (module documentation).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct CentreRecent {
+    /// Each class's parts, in list order, those of a class expecting none left out.
+    classes: Vec<(RecentClass, Vec<Part>)>,
+    /// Plan 11's binary classes after them (P11.T8.f): none under P11.T8.f's hold.
+    binaries: CentreBinaries,
+    /// The index of the classes' first entry, past the victims'.
+    first: NonZeroU16,
+}
+
+impl CentreRecent {
+    /// The centre's recent classes in `galaxy`, whose centre is `model` and whose victims are
+    /// `victims`: none where the features list no class (the tests' reference alone).
+    ///
+    /// # Panics
+    ///
+    /// If `victims` is 65,535, which leaves no index past them: the centre's headroom check
+    /// counts the victims against its 65,536, and a Milky Way's are some thirty.
+    #[must_use]
+    pub(crate) fn new(galaxy: &Galaxy, model: &CentreModel, victims: u16) -> Self {
+        let classes = match galaxy.rules().feature_classes {
+            FeatureClassesRules::Unlisted => Vec::new(),
+            FeatureClassesRules::Listed => Self::classes(galaxy, model),
+        };
+        let first = victims
+            .checked_add(1)
+            .and_then(NonZeroU16::new)
+            .expect("the victims leave the centre's list an index past them");
+        Self {
+            classes,
+            binaries: CentreBinaries::new(galaxy, model),
+            first,
+        }
+    }
+
+    /// The parts of each class in `galaxy`, at its window caps.
+    #[must_use]
+    fn classes(galaxy: &Galaxy, model: &CentreModel) -> Vec<(RecentClass, Vec<Part>)> {
+        let caps = galaxy.window_caps();
+        parts(
+            model.classes().primaries_formed(),
+            galaxy.mass_function(),
+            galaxy.mean_formed_mass(),
+            &SupernovaInterval::of_cap(caps, ShellEnvironment::Field),
+            &SupernovaInterval::of_cap(caps, ShellEnvironment::TypeIa),
+        )
+    }
+
+    /// Each class's expected candidates, in list order.
+    #[must_use]
+    pub(crate) fn expected(&self) -> Vec<(RecentClass, f64)> {
+        self.classes
+            .iter()
+            .map(|(class, parts)| (*class, parts.iter().map(|p| p.expected).sum()))
+            .collect()
+    }
+
+    /// The centre's hosts of plan 11's binary classes (P11.T8.f).
+    #[must_use]
+    pub(crate) const fn binaries(&self) -> &CentreBinaries {
+        &self.binaries
+    }
+
+    /// The centre's list of its recent classes, and plan 11's binary classes after them (P11.T8.f),
+    /// from index `victims + 1`: its counts, and its entries' indices (the positions are each
+    /// entry's own, [`entry`](Self::entry), [`CentreBinaries::entry`]).
+    ///
+    /// # Panics
+    ///
+    /// If the victims and the classes' candidates together cannot keep eight standard deviations
+    /// under the centre's 65,536 indices, which the centre's headroom check, counting both, rules
+    /// out for a galaxy that passes it ([`FeatureLevelList::with_classes`]).
+    #[must_use]
+    pub(crate) fn list(&self, galaxy: &Galaxy) -> FeatureLevelList {
+        // The positions are each entry's own draw, so the list's profile is never read.
+        let placeholder = ClassProfile::new(ProfileShape::Plummer { scale: 1.0 }, 128.0, 1.0);
+        let mut classes: Vec<ListClass> = self
+            .expected()
+            .into_iter()
+            .map(|(class, expected)| ListClass::new(class.class(), expected, placeholder.clone()))
+            .collect();
+        classes.extend(self.binaries.list_classes());
+        FeatureLevelList::with_classes_from(
+            galaxy,
+            SystemId::from(CentreMemberId::CENTRAL_BLACK_HOLE).raw(),
+            &GalacticPosition::ORIGIN,
+            MemberZero::Present,
+            ListIndex::Centre,
+            self.first,
+            classes,
+        )
+    }
+
+    /// The entry at list index `index`, of class `class`, if its class's test keeps it (module
+    /// documentation): its [`place`](Self::place), then its class's test ([`CentrePlace::kept`]).
+    #[must_use]
+    pub(crate) fn entry(
+        &self,
+        galaxy: &Galaxy,
+        model: &CentreModel,
+        class: RecentClass,
+        index: u16,
+    ) -> Option<CentreRecentEntry> {
+        let profiles = TracerProfiles::of(model);
+        self.place(galaxy, model, &profiles, class, index)?
+            .kept(galaxy)
+    }
+
+    /// The candidate at list index `index`, of class `class`, placed (module documentation, "In
+    /// the range query"), its tracers' profiles `profiles`: or `None` for an index of no class's
+    /// entry, or a candidate whose draws refuse it (its component or its velocity).
+    #[must_use]
+    pub(crate) fn place(
+        &self,
+        galaxy: &Galaxy,
+        model: &CentreModel,
+        profiles: &TracerProfiles,
+        class: RecentClass,
+        index: u16,
+    ) -> Option<CentrePlace> {
+        let parts = &self.classes.iter().find(|(c, _)| *c == class)?.1;
+        // `IndexTooLarge` is the one error, and an index past the centre's names no entry.
+        let id = CentreMemberId::new(MemberSlot::FeatureLevel { index }).ok()?;
+        let system = SystemId::from(id);
+        let key = ObjectKey::from(system);
+        let seed = galaxy.seed();
+        let mut stream = Stream::open(seed, tags::MEMBER_MASS, key);
+        let weights: Vec<f64> = parts.iter().map(|p| p.expected).collect();
+        let total = weights.iter().fold(0.0, |s, w| s + w);
+        let part = &parts[stream.mark().pick_weighted(&weights, total)?];
+        let component = age_components()[usize::from(part.component)];
+        let drawn = match &part.candidates {
+            Some(candidates) => {
+                let (mass, age, _) = candidates.draw(galaxy.mass_function(), &mut stream)?;
+                Some((mass, age))
+            }
+            None => None,
+        };
+        let class_of = centre_class(model, part.component)?;
+        let at = position_on(profiles.of_tracer(component.tracer), key, seed);
+        let mut velocity = Stream::open(seed, tags::CENTRE_VELOCITY, key);
+        let velocity_km_s = model.distribution(class_of.tracer).draw_velocity(
+            model.profile(),
+            at,
+            &mut velocity,
+        )?;
+        Some(CentrePlace {
+            class,
+            system,
+            component,
+            class_of,
+            drawn,
+            position: galactic(at),
+            velocity_km_s,
+        })
+    }
+
+    /// The census's share of the centre's recent classes in the ball of `radius` about a point
+    /// `distance` from the black hole, added to `counts` by the layer each class's primaries are
+    /// of ([`RecentClass::layer`]; module documentation, "In the range query"): each part's
+    /// expected candidates times the share of its component's tracer profile inside the reach that
+    /// lies between `distance − radius` and `distance + radius` from the black hole, a shell that
+    /// holds the ball. Parts in list order.
+    pub(crate) fn add_expected_within(
+        &self,
+        profiles: &TracerProfiles,
+        (distance, radius): (LightYears, LightYears),
+        counts: &mut LayerCounts,
+    ) {
+        for (class, parts) in &self.classes {
+            let layer = class.layer();
+            for part in parts {
+                let tracer = age_components()[usize::from(part.component)].tracer;
+                let share = profiles.shell_share(tracer, (distance, radius));
+                counts.set(layer, counts.get(layer) + part.expected * share);
+            }
+        }
+    }
+
+    /// The places of every candidate of its classes on its list in `galaxy`, in index order (module
+    /// documentation, "In the range query").
+    #[must_use]
+    pub(crate) fn places(&self, galaxy: &Galaxy, model: &CentreModel) -> Vec<CentrePlace> {
+        let profiles = TracerProfiles::of(model);
+        self.list(galaxy)
+            .entries()
+            .filter_map(|entry| {
+                let class = RecentClass::of(entry.class())?;
+                self.place(galaxy, model, &profiles, class, entry.index())
+            })
+            .collect()
+    }
+}
+
+/// The centre's four tracers' profiles, each built once: what a list's candidates are placed on.
+#[derive(Debug, Clone)]
+pub(crate) struct TracerProfiles([TracerProfile; 4]);
+
+impl TracerProfiles {
+    /// The profiles of `model`'s tracers.
+    #[must_use]
+    pub(crate) fn of(model: &CentreModel) -> Self {
+        Self(CentreTracer::ALL.map(|tracer| tracer.profile(model.profile().stars())))
+    }
+
+    /// The profile of `tracer`.
+    #[must_use]
+    pub(crate) fn of_tracer(&self, tracer: CentreTracer) -> &TracerProfile {
+        let index = CentreTracer::ALL
+            .iter()
+            .position(|&t| t == tracer)
+            .expect("one of the four tracers");
+        &self.0[index]
+    }
+
+    /// The share of `tracer`'s profile inside the reach that lies between `distance − radius` and
+    /// `distance + radius` from the black hole: of an entry placed on it ([`position_on`]), the
+    /// odds it lies in that shell.
+    #[must_use]
+    pub(crate) fn shell_share(
+        &self,
+        tracer: CentreTracer,
+        (distance, radius): (LightYears, LightYears),
+    ) -> f64 {
+        let (distance, radius) = (distance.value(), radius.value());
+        let reach = REACH.value();
+        let profile = self.of_tracer(tracer);
+        let (inner, outer) = ((distance - radius).max(0.0), (distance + radius).min(reach));
+        if outer <= inner {
+            return 0.0;
+        }
+        ((profile.fraction_within(outer) - profile.fraction_within(inner))
+            / profile.fraction_within(reach))
+        .max(0.0)
+    }
+}
+
+/// A candidate of the centre's list placed, before its class's test (module documentation, "In
+/// the range query"): its class, its draws up to its velocity, its epoch position and its velocity.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct CentrePlace {
+    class: RecentClass,
+    system: SystemId,
+    component: AgeComponent,
+    class_of: CentreClass,
+    /// Its primary's initial mass and age, for a core collapse's or a variable's candidate.
+    drawn: Option<(SolarMasses, Years)>,
+    position: GalacticPosition,
+    velocity_km_s: [f64; 3],
+}
+
+impl CentrePlace {
+    /// Its class.
+    #[must_use]
+    pub(crate) const fn class(&self) -> RecentClass {
+        self.class
+    }
+
+    /// Its position at the epoch.
+    #[must_use]
+    pub(crate) const fn position(&self) -> &GalacticPosition {
+        &self.position
+    }
+
+    /// Its velocity, galactic, as its member's ([`CentreMemberRecord::velocity`]).
+    #[must_use]
+    pub(crate) fn velocity(&self) -> GalacticVelocity {
+        GalacticVelocity::new(self.velocity_km_s.map(|c| c * 1e3))
+    }
+
+    /// The entry it is, if its class's test keeps it (module documentation).
+    #[must_use]
+    pub(crate) fn kept(&self, galaxy: &Galaxy) -> Option<CentreRecentEntry> {
+        let CentrePlace {
+            class,
+            system,
+            component,
+            class_of,
+            drawn,
+            position,
+            velocity_km_s,
+        } = *self;
+        let seed = galaxy.seed();
+        let key = ObjectKey::from(system);
+        match class {
+            RecentClass::CoreCollapse | RecentClass::LuminousBlueVariable => {
+                let (mass, age) = drawn?;
+                let record = record(system, position, mass, age);
+                let member = CentreMemberRecord::from_parts(
+                    record,
+                    class_of,
+                    centre_composition(),
+                    velocity_km_s,
+                );
+                let (claim, death) =
+                    claim_at_centre(galaxy, &record, &centre_composition(), member.velocity())?;
+                if claim != class {
+                    return None;
+                }
+                let Some(death) = death else {
+                    return Some(CentreRecentEntry {
+                        class,
+                        member,
+                        death: None,
+                        motion: CatalogueMotion::straight(position, member.velocity()),
+                        explosion: None,
+                    });
+                };
+                Some(CentreRecentEntry::kicked(
+                    (class, system, class_of),
+                    (mass, age),
+                    &death,
+                ))
+            }
+            RecentClass::TypeIa => {
+                let delays = DelayTimeDistribution::of_feature(
+                    galaxy,
+                    Population::NuclearDisc,
+                    uniform_ages(component.youngest, component.oldest),
+                );
+                let first = galaxy.fields().component_id(0)?;
+                let interval =
+                    SupernovaInterval::of_cap(galaxy.window_caps(), ShellEnvironment::TypeIa);
+                let mut stream = Stream::open(seed, tags::CLASS_TYPE_IA_PROGENITOR, key);
+                let progenitor = IaProgenitor::draw_in(
+                    &delays,
+                    &mut stream,
+                    first,
+                    interval.start(),
+                    interval.end(),
+                )?;
+                let mut stream = Stream::open(seed, tags::CLASS_TYPE_IA_LEFTOVER, key);
+                let leftover = IaLeftover::draw(progenitor.channel(), &mut stream);
+                let record = record(
+                    system,
+                    position,
+                    progenitor.primary_mass(),
+                    component.oldest,
+                );
+                let member = CentreMemberRecord::from_parts(
+                    record,
+                    class_of,
+                    centre_composition(),
+                    velocity_km_s,
+                );
+                let site = ExplosionSite::new(
+                    moved(&position, member.velocity(), progenitor.explosion()),
+                    progenitor.explosion(),
+                );
+                let marks = DeathMarks::of_type_ia(
+                    galaxy,
+                    system,
+                    &progenitor,
+                    &leftover,
+                    &site,
+                    member.velocity(),
+                );
+                let window = claimed_window(galaxy, &site, &marks, Surroundings::TypeIa)?;
+                Some(CentreRecentEntry {
+                    class,
+                    member,
+                    death: Some((site, window)),
+                    motion: CatalogueMotion::straight(position, member.velocity()),
+                    explosion: Some(ListedExplosion::TypeIa(progenitor.channel())),
+                })
+            }
+        }
+    }
+}
+
+/// The parts of each class of a centre whose cluster formed `primaries` primaries on
+/// `mass_function`, `formed` per primary, its core collapses and variables drawn over `interval`
+/// and its Type Ia over `ia`: the galaxy's, at its window caps, or the forecast's bound
+/// ([`forecast_candidates`]).
+#[must_use]
+fn parts(
+    primaries: f64,
+    imf: &dyn MassFunction,
+    formed: SolarMasses,
+    interval: &SupernovaInterval,
+    ia: &SupernovaInterval,
+) -> Vec<(RecentClass, Vec<Part>)> {
+    let components = age_components();
+    let shares: f64 = components.iter().map(|c| c.share).sum();
+    let all = imf.integral(MASS_BAND_EDGES[0], MASS_BAND_EDGES[5]);
+    let band = imf.integral(MassBand::E.lo(), MassBand::E.hi());
+    let band_e = |c: &AgeComponent| primaries * c.share / shares * band / all;
+    let ia_years = ia.length().as_julian_years_f64();
+    let (mut core, mut type_ia, mut lbv) = (Vec::new(), Vec::new(), Vec::new());
+    for (component, c) in (0_u8..).zip(&components) {
+        let ages = (c.youngest, c.oldest);
+        if is_young(c) {
+            let part = |candidates: Candidates| Part {
+                component,
+                expected: band_e(c) * candidates.share(),
+                candidates: Some(candidates),
+            };
+            core.extend(Candidates::core_collapse(imf, ages, interval).map(part));
+            lbv.extend(Candidates::luminous_blue_variable(imf, ages).map(part));
+        } else {
+            let mass = primaries * c.share / shares * formed.value();
+            let rate = DelayTimeDistribution::mean_rate_over(&uniform_ages(ages.0, ages.1));
+            type_ia.push(Part {
+                component,
+                expected: mass * rate * ia_years,
+                candidates: None,
+            });
+        }
+    }
+    [
+        (RecentClass::CoreCollapse, core),
+        (RecentClass::TypeIa, type_ia),
+        (RecentClass::LuminousBlueVariable, lbv),
+    ]
+    .into_iter()
+    .map(|(class, parts)| {
+        let parts: Vec<Part> = parts.into_iter().filter(|p| p.expected > 0.0).collect();
+        (class, parts)
+    })
+    .filter(|(_, parts)| !parts.is_empty())
+    .collect()
+}
+
+/// The centre's recent classes' expected candidates at their bound, for the forecast of its list
+/// ([`centre_list_forecast`](crate::galaxy::features::members::centre_list_forecast)) that no galaxy
+/// is built for: every window at its ceiling, [`SHELL_WINDOW_CAP`], so that the interval is the
+/// longest any environment's cap gives.
+#[must_use]
+pub(crate) fn forecast_candidates(
+    primaries: f64,
+    mass_function: &dyn MassFunction,
+    formed: SolarMasses,
+) -> f64 {
+    let bound = SupernovaInterval::of_window(SHELL_WINDOW_CAP);
+    parts(primaries, mass_function, formed, &bound, &bound)
+        .iter()
+        .flat_map(|(_, parts)| parts.iter().map(|p| p.expected))
+        .sum()
+}
+
+/// The member at the centre's list index `index` past its victims, if a recent class's test keeps
+/// it, or plan 11's binary class's draws and test (P11.T8.f): none where the features list no
+/// class, for an index before the classes' or past them.
+#[must_use]
+pub(crate) fn recent_member(
+    galaxy: &Galaxy,
+    model: &CentreModel,
+    index: u16,
+) -> Option<CentreMemberRecord> {
+    recent_listed(galaxy, model, index).map(|(member, _)| member)
+}
+
+/// [`recent_member`] with a core collapse's broken line ([`CentreRecentEntry::motion`]), on which
+/// the centre's source places it (fix-p09-recent-kicks); `None` beside any other member, which
+/// drifts at its velocity.
+#[must_use]
+pub(crate) fn recent_listed(
+    galaxy: &Galaxy,
+    model: &CentreModel,
+    index: u16,
+) -> Option<(CentreMemberRecord, Option<CatalogueMotion>)> {
+    // The disruptions' model refuses only a black hole no galaxy the builder allows has, whose
+    // list holds no entry.
+    let victims = victim_count(galaxy).ok()?;
+    let recent = CentreRecent::new(galaxy, model, victims);
+    let entry = recent.list(galaxy).entry(index)?;
+    match RecentClass::of(entry.class()) {
+        Some(class) => recent.entry(galaxy, model, class, index).map(|entry| {
+            let broken = (entry.class == RecentClass::CoreCollapse).then_some(entry.motion);
+            (entry.member, broken)
+        }),
+        None => recent
+            .binaries
+            .entry(galaxy, model, entry.class(), index)
+            .map(|(_, member)| (member, None)),
+    }
+}
+
+/// One recent entry of the centre's list: its class, its member, for a death its site and the
+/// window of its shell, how it moves, and what it explodes as ([`ListedExplosion`]).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct CentreRecentEntry {
+    class: RecentClass,
+    member: CentreMemberRecord,
+    death: Option<(ExplosionSite, ShellWindow)>,
+    motion: CatalogueMotion,
+    explosion: Option<ListedExplosion>,
+}
+
+impl CentreRecentEntry {
+    /// The core collapse `system` of `class`, its member of `class_of`, whose primary's initial
+    /// mass is `mass` and age `age`, where its `death` leaves it: its remnant where its kick takes
+    /// it (fix-p09-recent-kicks), its member's epoch place and velocity its broken line's.
+    #[must_use]
+    fn kicked(
+        (class, system, class_of): (RecentClass, SystemId, CentreClass),
+        (mass, age): (SolarMasses, Years),
+        death: &ListedDeath,
+    ) -> Self {
+        let after = death.motion.velocity_at(UniverseTime::EPOCH);
+        let member = CentreMemberRecord::from_parts(
+            record(
+                system,
+                death.motion.position_at(UniverseTime::EPOCH),
+                mass,
+                age,
+            ),
+            class_of,
+            centre_composition(),
+            after.metres_per_second().map(|c| c / 1e3),
+        );
+        Self {
+            class,
+            member,
+            death: Some((death.site, *death.supernova.window())),
+            motion: death.motion,
+            explosion: Some(ListedExplosion::CoreCollapse(death.supernova)),
+        }
+    }
+
+    /// Its member.
+    #[must_use]
+    pub(crate) const fn member(&self) -> &CentreMemberRecord {
+        &self.member
+    }
+
+    /// Where and when it explodes or exploded, for a death.
+    #[must_use]
+    pub(crate) fn site(&self) -> Option<&ExplosionSite> {
+        self.death.as_ref().map(|(site, _)| site)
+    }
+
+    /// How it moves: a core collapse on its progenitor's line broken at its death, where its
+    /// remnant takes its natal kick (fix-p09-recent-kicks); any other entry on one straight line at
+    /// its velocity.
+    #[must_use]
+    pub(crate) const fn motion(&self) -> &CatalogueMotion {
+        &self.motion
+    }
+
+    /// Its shell's entry, for a core collapse: its explosion, its kind, its window and its
+    /// remnant's kick, which the remnant's offset, its bow shock and its nebula read.
+    #[must_use]
+    pub(crate) const fn supernova(&self) -> Option<&SupernovaEntry> {
+        ListedExplosion::supernova_of(self.explosion.as_ref())
+    }
+
+    /// What explodes, for a death: a core collapse's shell's kind, or a Type Ia of its channel
+    /// (plan 12's alert walks read its light by it).
+    #[must_use]
+    pub(crate) fn explosion_kind(&self) -> Option<SupernovaKind> {
+        self.explosion.as_ref().map(ListedExplosion::kind)
+    }
+}
+
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the range query and the alert walks read no entry's class or window (P09.T37); \
+                  its tests do"
+    )
+)]
+impl CentreRecentEntry {
+    /// Its class.
+    #[must_use]
+    pub(crate) const fn class(&self) -> RecentClass {
+        self.class
+    }
+
+    /// The window of its shell, for a death: none for a luminous blue variable.
+    #[must_use]
+    pub(crate) fn window(&self) -> Option<&ShellWindow> {
+        self.death.as_ref().map(|(_, window)| window)
+    }
+}
+
+/// The centre's young classes' claim on the member `record`, of composition `composition` moving
+/// at `velocity` (module documentation): the core collapses if the one shared test keeps its death's
+/// shell in the gas at its site, the luminous blue variables if its window overlaps the source
+/// horizon and the core collapses do not claim it.
+///
+/// The cells ask it of each band-E member of a young class, the list of each candidate, so the two
+/// halves agree on every mark set.
+#[must_use]
+pub(crate) fn claimed_at_centre(
+    galaxy: &Galaxy,
+    record: &SystemRecord,
+    composition: &Composition,
+    velocity: GalacticVelocity,
+) -> Option<RecentClass> {
+    claim_at_centre(galaxy, record, composition, velocity).map(|(class, _)| class)
+}
+
+/// [`claimed_at_centre`] with the core collapse's death ([`ListedDeath`]).
+#[must_use]
+fn claim_at_centre(
+    galaxy: &Galaxy,
+    record: &SystemRecord,
+    composition: &Composition,
+    velocity: GalacticVelocity,
+) -> Option<(RecentClass, Option<ListedDeath>)> {
+    let stars = || {
+        SystemStars::generate_with(
+            galaxy,
+            record,
+            composition,
+            MultiplicityContext::ForcedSingle,
+        )
+    };
+    if let Some(death) = death_in_interval_under(
+        record.primary_initial_mass(),
+        composition,
+        primary_eta(galaxy, record),
+        record.age_at_epoch(),
+        || primary_draws(galaxy, record),
+        galaxy.rules().stellar,
+    ) {
+        let site = ExplosionSite::new(moved(record.epoch_position(), velocity, death), death);
+        let stars = stars();
+        if let Some((marks, window)) =
+            DeathMarks::of(galaxy, &stars, &site, velocity).and_then(|marks| {
+                claimed_window(galaxy, &site, &marks, Surroundings::Field)
+                    .map(|window| (marks, window))
+            })
+        {
+            let death = ListedDeath::of(&stars, site, (marks, window), velocity);
+            return Some((RecentClass::CoreCollapse, Some(death)));
+        }
+    }
+    (may_host(record.primary_initial_mass(), record.age_at_epoch())
+        && horizon_window(&stars()).is_some())
+    .then_some((RecentClass::LuminousBlueVariable, None))
+}
+
+/// Whether the centre's list claims `member`, a band-E member of its cells, which the cells then
+/// give up: a member of a young class ([`centre_cells_claim`]) that [`claimed_at_centre`] claims.
+#[must_use]
+pub(crate) fn list_claims(galaxy: &Galaxy, member: &CentreMemberRecord) -> bool {
+    member
+        .class()
+        .is_some_and(|class| centre_cells_claim(galaxy, class.component))
+        && claimed_at_centre(
+            galaxy,
+            member.record(),
+            member.composition(),
+            member.velocity(),
+        )
+        .is_some()
+}
+
+/// Whether the centre's band-E cells give the list the members [`claimed_at_centre`] claims: a
+/// member of a young class (`component`) where the galaxy's features list their classes (every
+/// version's; [`FeatureClassesRules`]), the one switch the list's classes read too, so that the
+/// list holds a class exactly where the cells carve it.
+#[must_use]
+pub(crate) fn centre_cells_claim(galaxy: &Galaxy, component: u8) -> bool {
+    match galaxy.rules().feature_classes {
+        FeatureClassesRules::Unlisted => false,
+        FeatureClassesRules::Listed => is_young(&age_components()[usize::from(component)]),
+    }
+}
+
+/// Whether `component` is one of the young classes': its oldest star at most [`YOUNG_OLDEST`].
+#[must_use]
+fn is_young(component: &AgeComponent) -> bool {
+    component.oldest.value() <= YOUNG_OLDEST.value()
+}
+
+/// The band-E class of the centre's component `component`, a living star's where it has one, or
+/// `None` if it has no band-E class.
+#[must_use]
+pub(super) fn centre_class(model: &CentreModel, component: u8) -> Option<CentreClass> {
+    let classes = model.classes().classes();
+    let band_e = classes
+        .iter()
+        .filter(|c| c.band == MassBand::E && c.component == component);
+    band_e
+        .clone()
+        .find(|c| c.kind == CentreClassKind::Living)
+        .or_else(|| band_e.clone().next())
+        .copied()
+}
+
+/// An entry's local position, ly about the black hole: its radius at a uniform's quantile of its
+/// component's tracer's profile inside the centre's reach ([`position_on`]), on `member.position`,
+/// its profile built afresh.
+#[cfg(test)]
+#[must_use]
+pub(super) fn position(
+    model: &CentreModel,
+    component: &AgeComponent,
+    key: ObjectKey,
+    seed: crate::Seed,
+) -> [f64; 3] {
+    position_on(
+        &component.tracer.profile(model.profile().stars()),
+        key,
+        seed,
+    )
+}
+
+/// An entry's local position on `profile`, ly about the black hole: its radius at a uniform's
+/// quantile of the profile inside the centre's reach, [`REACH`], where the cells' members end, by
+/// bisection, and an isotropic direction, on `member.position`.
+#[must_use]
+pub(super) fn position_on(profile: &TracerProfile, key: ObjectKey, seed: crate::Seed) -> [f64; 3] {
+    let mut stream = Stream::open(seed, tags::MEMBER_POSITION, key);
+    let u = stream.uniform();
+    let reach = REACH.value();
+    let whole = profile.fraction_within(reach);
+    let (mut lo, mut hi) = (0.0_f64, reach);
+    for _ in 0..64 {
+        let mid = f64::midpoint(lo, hi);
+        if profile.fraction_within(mid) < u * whole {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    let r = f64::midpoint(lo, hi);
+    let cos_theta = 2.0 * stream.uniform() - 1.0;
+    let phi = 2.0 * core::f64::consts::PI * stream.uniform();
+    let sin_theta = (1.0 - cos_theta * cos_theta).max(0.0).sqrt();
+    let (s, c) = math::sin_cos(phi);
+    [r * sin_theta * c, r * sin_theta * s, r * cos_theta]
+}
+
+/// The galactic position of the local point `p`, ly about the black hole at the origin.
+///
+/// # Panics
+///
+/// Never for a point within the centre's reach, some hundreds of light-years.
+#[must_use]
+pub(super) fn galactic(p: [f64; 3]) -> GalacticPosition {
+    GalacticPosition::ORIGIN
+        .translated(GalacticDisplacement::new(
+            p.map(|c| c * METRES_PER_LIGHT_YEAR),
+        ))
+        .expect("an entry within the centre's reach is addressable")
+}
+
+/// The centre's record of `system` at `position`, of initial mass `mass` and age `age`.
+#[must_use]
+fn record(
+    system: SystemId,
+    position: GalacticPosition,
+    mass: SolarMasses,
+    age: Years,
+) -> SystemRecord {
+    SystemRecord::from_parts(
+        system,
+        position,
+        SystemOrigin::CentreMember { attempt: 0 },
+        Population::NuclearDisc,
+        mass,
+        age,
+    )
+}
+
+#[cfg(test)]
+mod tests;

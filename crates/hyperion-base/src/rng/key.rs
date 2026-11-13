@@ -111,6 +111,62 @@ impl fmt::Display for ParseSeedError {
 
 impl Error for ParseSeedError {}
 
+/// The faces of a cube sphere, which a surface cell key's 3-bit face field numbers 0 to 5.
+const SURFACE_FACES: u8 = 6;
+
+/// The deepest level a surface cell key holds: its `i` and `j` fields have 28 bits each.
+const SURFACE_CELL_MAX_LEVEL: u8 = 28;
+
+/// Bit position of a surface cell key's face field, its top 3 bits.
+const SURFACE_FACE_SHIFT: u32 = 61;
+
+/// Bit position of a surface cell key's level field, the 5 bits beneath the face.
+const SURFACE_LEVEL_SHIFT: u32 = 56;
+
+/// Bit position of a surface cell key's `i` field, the 28 bits above `j`.
+const SURFACE_I_SHIFT: u32 = 28;
+
+/// [`ObjectKey::surface_cell`] was given a cell that no cube-sphere level up to 28 holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SurfaceCellKeyError {
+    /// The face is not one of the cube's six, 0 to 5.
+    Face {
+        /// The face given.
+        face: u8,
+    },
+    /// The level is above 28, the deepest a 28-bit coordinate holds.
+    Level {
+        /// The level given.
+        level: u8,
+    },
+    /// A coordinate is 2^`level` or more.
+    Coordinate {
+        /// The level given, at most 28.
+        level: u8,
+        /// The `i` given.
+        i: u32,
+        /// The `j` given.
+        j: u32,
+    },
+}
+
+impl fmt::Display for SurfaceCellKeyError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Face { face } => write!(f, "a cube face is 0 to 5, not {face}"),
+            Self::Level { level } => {
+                write!(f, "a surface cell's level is at most 28, not {level}")
+            }
+            Self::Coordinate { level, i, j } => write!(
+                f,
+                "cell ({i}, {j}) is past level {level}, whose coordinates are below 2^{level}"
+            ),
+        }
+    }
+}
+
+impl Error for SurfaceCellKeyError {}
+
 /// The object a stream draws for: its counter word 0, its sub-object number and its scope.
 ///
 /// | Scope                      | Word                                          | Sub              |
@@ -120,13 +176,27 @@ impl Error for ParseSeedError {}
 /// | [`TagScope::Feature`]      | the feature's object word                     | 0                |
 /// | [`TagScope::System`]       | the `SystemId`'s raw value | 0            |
 /// | [`TagScope::Body`]         | the body's system's raw value                 | the body index   |
+/// | [`TagScope::SurfaceCoarse`], a surface cell | face (3 bits), level (5), `i` (28), `j` (28) | the instance |
+/// | [`TagScope::SurfaceCoarse`], a surface item | the item number, such as a plate's | 0         |
 ///
 /// The word becomes counter word 0 and `sub` the top 16 bits of counter word 1. Keys are built
 /// from integers only: float bits are never hashed. A key of one scope may share its word with a
 /// key of another (a cell's word is its candidate 0's ID, and body 0 shares its system's word
 /// and `sub`), which is safe because a domain tag names one scope and [`Stream::open`] checks it.
 ///
+/// The two surface forms are the exception (plan R09, Design note 2). Their streams are opened by
+/// a body's surface or detail seed, which takes the universe seed's place and so carries the body,
+/// and both forms carry [`TagScope::SurfaceCoarse`], which [`SurfaceSeed::stream`] and
+/// [`DetailSeed::stream`] do not read: they check the tag's scope against their seed's, and
+/// [`Stream::open`] refuses both surface scopes, so the key's own scope only keeps a surface key
+/// from every tag but a self-test one. A surface item's word can equal a low surface cell's, so
+/// each surface tag is used with one form and never both, as a tag is used with
+/// [`galaxy`](Self::galaxy) or [`galaxy_item`](Self::galaxy_item) and never both; the surface
+/// crate's registry documents each tag's form, and its tests hold every call site to it.
+///
 /// [`Stream::open`]: super::Stream::open
+/// [`SurfaceSeed::stream`]: super::SurfaceSeed::stream
+/// [`DetailSeed::stream`]: super::DetailSeed::stream
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ObjectKey {
     word: u64,
@@ -189,13 +259,63 @@ impl ObjectKey {
         Self::new(raw_system_id, body_index, TagScope::Body)
     }
 
+    /// A cell of a body's cube sphere: `face` 0–5, `level` 0–28, and the cell's integer
+    /// coordinates `i` and `j` on the face, each below 2^`level`; `instance` numbers the draws of
+    /// one cell, such as a channel level's slot or a crater's index (plan R09, Design note 2).
+    ///
+    /// The word packs face (3 bits), level (5 bits), `i` and `j` (28 bits each), from the top
+    /// bit down, so two cells never share a word; `instance` is `sub`. The body is not in the
+    /// key: it is in the surface or detail seed that opens the stream. 28 bits reach level 28,
+    /// beyond the deepest level the terrain uses.
+    ///
+    /// # Errors
+    ///
+    /// [`SurfaceCellKeyError::Face`] for a face of 6 or more, [`SurfaceCellKeyError::Level`] for a
+    /// level above 28, and [`SurfaceCellKeyError::Coordinate`] for an `i` or `j` of 2^`level` or
+    /// more.
+    pub const fn surface_cell(
+        face: u8,
+        level: u8,
+        i: u32,
+        j: u32,
+        instance: u16,
+    ) -> Result<Self, SurfaceCellKeyError> {
+        if face >= SURFACE_FACES {
+            return Err(SurfaceCellKeyError::Face { face });
+        }
+        if level > SURFACE_CELL_MAX_LEVEL {
+            return Err(SurfaceCellKeyError::Level { level });
+        }
+        // `level` is at most 28 here, so the side fits a `u32`.
+        let side = 1_u32 << level;
+        if i >= side || j >= side {
+            return Err(SurfaceCellKeyError::Coordinate { level, i, j });
+        }
+        // `u64::from` is not `const`; each part widens to `u64` losslessly, and each is below its
+        // field's width, so the fields do not overlap.
+        let word = ((face as u64) << SURFACE_FACE_SHIFT)
+            | ((level as u64) << SURFACE_LEVEL_SHIFT)
+            | ((i as u64) << SURFACE_I_SHIFT)
+            | (j as u64);
+        Ok(Self::new(word, instance, TagScope::SurfaceCoarse))
+    }
+
+    /// Item `n` of a body's surface list, such as plate `n`, crater slot `n`, or a lattice
+    /// corner's word: word `n`, `sub` 0 (plan R09, Design note 2).
+    ///
+    /// The body is not in the key: it is in the surface or detail seed that opens the stream.
+    #[must_use]
+    pub const fn surface_item(n: u64) -> Self {
+        Self::new(n, 0, TagScope::SurfaceCoarse)
+    }
+
     /// Counter word 0 of every stream opened for this object.
     #[must_use]
     pub const fn word(self) -> u64 {
         self.word
     }
 
-    /// The sub-object number: a body's index, otherwise 0.
+    /// The sub-object number: a body's index, a surface cell's instance, otherwise 0.
     #[must_use]
     pub const fn sub(self) -> u16 {
         self.sub
@@ -278,5 +398,139 @@ mod tests {
             (body.word(), body.sub(), body.scope()),
             (0x0200_0800_2000_0007, 3, TagScope::Body)
         );
+        let item = ObjectKey::surface_item(48);
+        assert_eq!(
+            (item.word(), item.sub(), item.scope()),
+            (48, 0, TagScope::SurfaceCoarse)
+        );
+    }
+
+    /// The face, level, `i` and `j` a surface cell key's word holds, read back by its layout.
+    fn unpack(key: ObjectKey) -> (u8, u8, u32, u32, u16) {
+        let word = key.word();
+        let field = |shift: u32, bits: u32| (word >> shift) & ((1 << bits) - 1);
+        (
+            u8::try_from(field(SURFACE_FACE_SHIFT, 3)).unwrap(),
+            u8::try_from(field(SURFACE_LEVEL_SHIFT, 5)).unwrap(),
+            u32::try_from(field(SURFACE_I_SHIFT, 28)).unwrap(),
+            u32::try_from(field(0, 28)).unwrap(),
+            key.sub(),
+        )
+    }
+
+    #[test]
+    fn a_surface_cell_key_round_trips_its_fields() {
+        let cases = [
+            (0, 0, 0, 0, 0),
+            (5, 0, 0, 0, u16::MAX),
+            (2, 8, 255, 17, 3),
+            (3, 19, (1 << 19) - 1, 0, 1),
+            (4, 24, 0x00ab_cdef, 0x0012_3456, 7),
+            (5, 28, (1 << 28) - 1, (1 << 28) - 1, u16::MAX),
+        ];
+        for (face, level, i, j, instance) in cases {
+            let key = ObjectKey::surface_cell(face, level, i, j, instance).unwrap();
+            assert_eq!(unpack(key), (face, level, i, j, instance));
+            assert_eq!(key.scope(), TagScope::SurfaceCoarse);
+        }
+        let top = ObjectKey::surface_cell(5, 28, (1 << 28) - 1, (1 << 28) - 1, 0).unwrap();
+        assert_eq!(
+            top.word(),
+            0xbcff_ffff_ffff_ffff,
+            "face 5, level 28, all ones"
+        );
+    }
+
+    #[test]
+    fn a_surface_cell_key_refuses_what_no_level_holds() {
+        assert_eq!(
+            ObjectKey::surface_cell(6, 0, 0, 0, 0),
+            Err(SurfaceCellKeyError::Face { face: 6 })
+        );
+        assert_eq!(
+            ObjectKey::surface_cell(7, 3, 0, 0, 0),
+            Err(SurfaceCellKeyError::Face { face: 7 })
+        );
+        for level in 29..=u8::MAX {
+            assert_eq!(
+                ObjectKey::surface_cell(0, level, 0, 0, 0),
+                Err(SurfaceCellKeyError::Level { level })
+            );
+        }
+        for level in 0..=SURFACE_CELL_MAX_LEVEL {
+            let side = 1_u32 << level;
+            let last = ObjectKey::surface_cell(1, level, side - 1, side - 1, 0).unwrap();
+            assert_eq!(unpack(last), (1, level, side - 1, side - 1, 0));
+            for (i, j) in [(side, 0), (0, side), (side, side), (u32::MAX, 0)] {
+                assert_eq!(
+                    ObjectKey::surface_cell(1, level, i, j, 0),
+                    Err(SurfaceCellKeyError::Coordinate { level, i, j }),
+                    "level {level}, ({i}, {j})"
+                );
+            }
+        }
+        assert_eq!(
+            SurfaceCellKeyError::Coordinate {
+                level: 3,
+                i: 8,
+                j: 0
+            }
+            .to_string(),
+            "cell (8, 0) is past level 3, whose coordinates are below 2^3"
+        );
+        assert_eq!(
+            SurfaceCellKeyError::Level { level: 29 }.to_string(),
+            "a surface cell's level is at most 28, not 29"
+        );
+        assert_eq!(
+            SurfaceCellKeyError::Face { face: 6 }.to_string(),
+            "a cube face is 0 to 5, not 6"
+        );
+    }
+
+    /// Every cell of every face at levels 0–5, and the corners and centres of every level to 28,
+    /// has a word of its own: a cell at one level never shares a key with a cell at another, as
+    /// a quadtree's parent and child share their `i` and `j` bits.
+    #[test]
+    fn two_surface_cells_never_share_a_key() {
+        let mut words = std::collections::BTreeSet::new();
+        let mut count = 0_u64;
+        for face in 0..SURFACE_FACES {
+            for level in 0..=5 {
+                let side = 1_u32 << level;
+                for i in 0..side {
+                    for j in 0..side {
+                        words.insert(
+                            ObjectKey::surface_cell(face, level, i, j, 0)
+                                .unwrap()
+                                .word(),
+                        );
+                        count += 1;
+                    }
+                }
+            }
+            for level in 6..=SURFACE_CELL_MAX_LEVEL {
+                let last = (1_u32 << level) - 1;
+                let mid = 1_u32 << (level - 1);
+                for (i, j) in [
+                    (0, 0),
+                    (0, last),
+                    (last, 0),
+                    (last, last),
+                    (mid, mid),
+                    (1, 0),
+                ] {
+                    words.insert(
+                        ObjectKey::surface_cell(face, level, i, j, 0)
+                            .unwrap()
+                            .word(),
+                    );
+                    count += 1;
+                }
+            }
+        }
+        assert_eq!(u64::try_from(words.len()).unwrap(), count);
+        // 6 faces × (1 + 4 + 16 + 64 + 256 + 1,024 cells) + 6 × 23 levels × 6 cells.
+        assert_eq!(count, 6 * 1_365 + 6 * 23 * 6);
     }
 }

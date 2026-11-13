@@ -5,8 +5,16 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { ChartSystem } from "../../lib/galaxy/model";
 import { toChartResult } from "../../lib/galaxy/wire";
-import { aStellarBrief, aSystemsInRange } from "../../test/galaxyFixtures";
+import {
+  anUnknownLayer,
+  anUnknownPopulation,
+  aStellarBrief,
+  aSystemsInRange,
+  withRowFields,
+} from "../../test/galaxyFixtures";
+import { stylesheetRule } from "../../test/stylesheet";
 import { SystemList } from "./SystemList";
+import { type ChartDistanceUnit, distanceUnitFor } from "./chartModel";
 
 const CENTRE = [26_000, 0, 0] as const;
 
@@ -37,7 +45,14 @@ function renderList(
   {
     selectedId = null,
     driveRangeLy = 50,
-  }: { selectedId?: SystemIdHex | null; driveRangeLy?: number } = {},
+    stale = false,
+    distanceUnit = distanceUnitFor(50),
+  }: {
+    selectedId?: SystemIdHex | null;
+    driveRangeLy?: number;
+    stale?: boolean;
+    distanceUnit?: ChartDistanceUnit;
+  } = {},
 ) {
   const onSelect = vi.fn<(id: SystemIdHex) => void>();
   const view = render(
@@ -46,7 +61,8 @@ function renderList(
       selectedId={selectedId}
       onSelect={onSelect}
       driveRangeLy={driveRangeLy}
-      distanceDecimals={2}
+      distanceUnit={distanceUnit}
+      stale={stale}
     />,
   );
   const rerenderWith = (id: SystemIdHex | null): void => {
@@ -56,7 +72,8 @@ function renderList(
         selectedId={id}
         onSelect={onSelect}
         driveRangeLy={driveRangeLy}
-        distanceDecimals={2}
+        distanceUnit={distanceUnit}
+        stale={stale}
       />,
     );
   };
@@ -198,6 +215,25 @@ describe("SystemList", () => {
     ).toBeInTheDocument();
   });
 
+  it("reads its distances in AU, under DIST AU, on a chart of the centre's fine steps (plan 09, P09.T42)", () => {
+    stubViewport();
+    const systems = toChartResult(
+      aSystemsInRange({
+        centreLy: CENTRE,
+        radiusLy: 0.001,
+        systems: [{ relLy: [0.0005, 0, 0], layer: "a" }],
+      }),
+    ).systems;
+
+    renderList(systems, { distanceUnit: distanceUnitFor(0.001) });
+
+    expect(screen.getByText("DIST AU")).toBeInTheDocument();
+    expect(firstOption()).toHaveAccessibleName(
+      "H7K 4C0RFZ A-1, DWARF M3V, 1 star, 31.6 AU, 0.29 solar masses, IN RANGE",
+    );
+    expect(firstOption()?.querySelectorAll(".system-list__number")[1]).toHaveTextContent("31.6");
+  });
+
   it("names a system beyond the drive range OUT OF RANGE, though its column shows OUT", () => {
     stubViewport();
     renderList(manySystems(3), { driveRangeLy: 2 });
@@ -298,7 +334,8 @@ describe("SystemList", () => {
         selectedId={null}
         onSelect={onSelect}
         driveRangeLy={50}
-        distanceDecimals={2}
+        distanceUnit={distanceUnitFor(50)}
+        stale={false}
       />,
     );
     expect(firstOption()).toHaveTextContent("12.00");
@@ -308,11 +345,65 @@ describe("SystemList", () => {
         selectedId={null}
         onSelect={onSelect}
         driveRangeLy={50}
-        distanceDecimals={2}
+        distanceUnit={distanceUnitFor(50)}
+        stale={false}
       />,
     );
     expect(firstOption()).toHaveTextContent("13.00");
     expect(firstOption()).not.toHaveTextContent("12.00");
+  });
+});
+
+/** The stale slot at the end of a row's range cell. */
+function rangeSlot(row: HTMLElement): Element | null {
+  return row.querySelector(".system-list__range > .stale-slot:last-child");
+}
+
+describe("SystemList's stale rows (plan 05, P05.T14)", () => {
+  it("keeps an empty slot at the end of each row's range cell while the chart is live", () => {
+    stubViewport();
+    renderList(manySystems(60), { driveRangeLy: 10 });
+
+    const options = screen.getAllByRole("option");
+    expect(options.length).toBeGreaterThan(0);
+    for (const row of options) {
+      // jsdom lays nothing out, so the room is held by the slot and its rule.
+      expect(rangeSlot(row)).toBeEmptyDOMElement();
+      expect(row).not.toHaveAccessibleName(/stale/u);
+    }
+  });
+
+  it("trails each row with one S, in its range cell's slot, while the chart is stale", () => {
+    stubViewport();
+    renderList(manySystems(60), { driveRangeLy: 10, stale: true });
+
+    const options = screen.getAllByRole("option");
+    expect(options.length).toBeGreaterThan(0);
+    for (const row of options) {
+      expect(rangeSlot(row)).toHaveTextContent(/^S\s*stale$/u);
+      // One mark to a row, which stands for each of its values.
+      expect(row.querySelectorAll(".stale-mark")).toHaveLength(1);
+    }
+    // The range's words stand before the slot, `IN` and `OUT` alike.
+    expect(options[0]?.querySelector(".system-list__range")).toHaveTextContent(/^IN S\s*stale$/u);
+    expect(options[20]?.querySelector(".system-list__range")).toHaveTextContent(/^OUT S\s*stale$/u);
+  });
+
+  it("names a stale row so, since its name hides the mark's word", () => {
+    stubViewport();
+    renderList(manySystems(1), { stale: true });
+
+    expect(
+      screen.getByRole("option", {
+        name: "H7K 4C0RFZ A-1, DWARF M3V, 1 star, 1.00 ly, 0.29 solar masses, IN RANGE, stale",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("sets the slot at the range cell's right edge, so that the marks line up down the list", () => {
+    // jsdom applies no stylesheet: the rules are read as written.
+    expect(stylesheetRule(".system-list__range")).toMatch(/display: flex;/u);
+    expect(stylesheetRule(".system-list__range > .stale-slot")).toMatch(/margin-left: auto;/u);
   });
 });
 
@@ -351,5 +442,94 @@ describe("SystemList's free-floating objects (plan 13, P13.T8.d)", () => {
     expect(within(row).getByText("PLANET")).toBeInTheDocument();
     expect(within(row).getByText("—")).toBeInTheDocument();
     expect(within(row).getByRole("img", { name: "Earth masses" })).toBeInTheDocument();
+  });
+});
+
+describe("SystemList's placements (plan 08, P08.T15.a)", () => {
+  it.each([
+    ["field", "FIELD"],
+    ["retained", "RETAINED"],
+    ["displaced_remnant", "DISPLACED REMNANT"],
+    ["runaway", "RUNAWAY"],
+    ["walkaway", "WALKAWAY"],
+    ["hypervelocity_survivor", "HYPERVELOCITY SURVIVOR"],
+  ] as const)(
+    "names a row placed %s with its ORIGIN, as the readout reads it",
+    (placement, words) => {
+      stubViewport();
+      const response = aSystemsInRange({
+        centreLy: CENTRE,
+        systems: [{ relLy: [1, 0, 0], layer: "e" }],
+      });
+      const { systems } = toChartResult(withRowFields(response, { placement }));
+
+      renderList(systems);
+
+      expect(
+        screen.getByRole("option", {
+          name: `H7K 4C0RFZ E-1, DWARF B0V, OLD THIN DISC · ${words}, 2 stars, 1.00 ly, 79.0 solar masses, IN RANGE`,
+        }),
+      ).toBeInTheDocument();
+    },
+  );
+
+  it("names a row whose population it does not know by its placement alone", () => {
+    stubViewport();
+    const response = aSystemsInRange({
+      centreLy: CENTRE,
+      systems: [{ relLy: [1, 0, 0], layer: "e" }],
+    });
+    const { systems } = toChartResult(
+      withRowFields(response, { population: anUnknownPopulation(), placement: "runaway" }),
+    );
+
+    renderList(systems);
+
+    expect(
+      screen.getByRole("option", {
+        name: "H7K 4C0RFZ E-1, DWARF B0V, RUNAWAY, 2 stars, 1.00 ly, 79.0 solar masses, IN RANGE",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("leaves the origin out of the name of a row that does not say how it was placed", () => {
+    stubViewport();
+
+    renderList(manySystems(1));
+
+    expect(
+      screen.getByRole("option", { name: /^H7K 4C0RFZ A-1, DWARF M3V, 1 star, / }),
+    ).toBeInTheDocument();
+  });
+});
+
+describe("SystemList's layers this build does not know (plan 04's reserved list)", () => {
+  it("lists an object of one with its mass Missing, and leaves the mass out of its name", () => {
+    stubViewport();
+    const response = aSystemsInRange({
+      centreLy: CENTRE,
+      systems: [{ relLy: [1, 0, 0], layer: "a" }],
+    });
+    const { systems } = toChartResult(withRowFields(response, { layer: anUnknownLayer() }));
+
+    renderList(systems);
+
+    const row = screen.getByRole("option", { name: /^H7K 4C0RFZ A-1, .+, 1\.00 ly, IN RANGE$/u });
+    expect(within(row).getByText("—")).toHaveClass("readout__missing");
+  });
+
+  it("names one with no brief by its designation and distance alone, not as not yet formed", () => {
+    stubViewport();
+    const response = aSystemsInRange({
+      centreLy: CENTRE,
+      systems: [{ relLy: [1, 0, 0], layer: "a", stellar: null }],
+    });
+    const { systems } = toChartResult(withRowFields(response, { layer: anUnknownLayer() }));
+
+    renderList(systems);
+
+    expect(
+      screen.getByRole("option", { name: "H7K 4C0RFZ A-1, 1.00 ly, IN RANGE" }),
+    ).toBeInTheDocument();
   });
 });

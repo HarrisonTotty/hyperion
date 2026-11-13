@@ -11,7 +11,7 @@
 //! `E(z) = 2 ln s(z) + (1 ÷ σ₀²) ∫₀^z K_z(z′) ÷ s(z′)² dz′`.
 //!
 //! The dispersion rises with height as far as `z_γ` and stays level above it: the heating law's
-//! rise is measured only so far ([`sub_discs`](super::sub_discs)), and carried on to the cube's
+//! rise is measured only so far (`sub_discs`), and carried on to the cube's
 //! edge it would leave every disc a tail falling as `z⁻²` that outnumbers the halo.
 //!
 //! `K_z` vanishes in the plane, so the profile is all but flat there, and it is close to
@@ -20,7 +20,7 @@
 //! the dispersion's rise with `|z|`: an e-fold in 2.5 kpc at Sharma et al.'s γ, against an
 //! exponential disc's e-fold in one scale height. A disc's height is its effective height,
 //! `h = Σ ÷ 2ρ₀ = ∫₀^∞ n ÷ n(0) dz`, and a drawn height is met by choosing `σ₀`, not by stretching
-//! the profile ([`JeansIntegral::solve`]). The shape is solved once at the reference radius and
+//! the profile (`JeansIntegral::solve`). The shape is solved once at the reference radius and
 //! holds at every radius, so a disc's density separates into `exp(−R ÷ L)` times the profile.
 //!
 //! # The table
@@ -47,7 +47,7 @@
 //! written. So `E(|z|)` is non-decreasing bit for bit, by construction:
 //!
 //! - **The segment is found exactly.** Every knot and every segment's width is a small integer
-//!   times a power of two. [`locate`] finds a height's segment from its integer part, and its
+//!   times a power of two. `locate` finds a height's segment from its integer part, and its
 //!   offset `t ∈ [0, 1)` as `z ÷ w − ⌊z ÷ w⌋` with `w` the width: division by a power of two is
 //!   exact, and so is the subtraction (Sterbenz: the two lie within a factor of two). So the
 //!   segment is `k` exactly when `zₖ ≤ z < zₖ₊₁`, and `t` is exactly `(z − zₖ) ÷ w`.

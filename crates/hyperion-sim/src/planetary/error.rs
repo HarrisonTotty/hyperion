@@ -133,7 +133,7 @@ mod tests {
         let first = text.chars().next().expect("a message");
         assert!(!first.is_uppercase(), "{text:?} starts with a capital");
         assert!(!text.ends_with('.'), "{text:?} ends with a full stop");
-        assert!(!text.is_empty());
+        assert_ne!(text, "");
     }
 
     #[test]

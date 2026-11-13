@@ -1,17 +1,23 @@
 import type { MassLayer } from "@hyperion/protocol";
-import { render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactElement } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { aCensus } from "../../test/galaxyFixtures";
 import { ChartControls } from "./ChartControls";
 import { layerBands, type StarFilter } from "./chartModel";
+import { describedText, statusLine } from "../../test/statusLine";
 
 const BANDS = layerBands(aCensus().layers);
 
 type ControlsProps = Parameters<typeof ChartControls>[0];
 
-function renderControls(overrides: Partial<ControlsProps> = {}) {
+/**
+ * Renders the controls, inside a page of `pageClass` where one is given (`local-chart
+ * local-chart--compact`), as the `LOCAL CHART` page holds them.
+ */
+function renderControls(overrides: Partial<ControlsProps> = {}, pageClass?: string) {
   const onQueryRadius = vi.fn<(radiusLy: number) => void>();
   const onMinLayer = vi.fn<(layer: MassLayer) => void>();
   const onDriveRange = vi.fn<(rangeLy: number) => void>();
@@ -33,10 +39,12 @@ function renderControls(overrides: Partial<ControlsProps> = {}) {
     heldBack: null,
     ...overrides,
   };
-  const { rerender } = render(<ChartControls {...props} />);
+  const page = (controls: ReactElement): ReactElement =>
+    pageClass === undefined ? controls : <div className={pageClass}>{controls}</div>;
+  const { rerender } = render(page(<ChartControls {...props} />));
   /** Renders the controls again with some props changed, as the display would. */
   const update = (changes: Partial<ControlsProps>): void => {
-    rerender(<ChartControls {...props} {...changes} />);
+    rerender(page(<ChartControls {...props} {...changes} />));
   };
   return { onQueryRadius, onMinLayer, onDriveRange, onTime, onStarFilter, update };
 }
@@ -59,16 +67,43 @@ function radius(): HTMLSelectElement {
 }
 
 describe("ChartControls", () => {
-  it("offers every query radius from 0.01 ly to 500 ly", () => {
+  it("offers every query radius from 0.001 ly to 500 ly, in AU below 0.01 ly", () => {
     renderControls();
 
     const options = within(radius())
       .getAllByRole("option")
       .map((option) => option.textContent);
 
-    expect(options).toHaveLength(15);
-    expect(options[0]).toBe("0.01 ly");
-    expect(options.at(-1)).toBe("500 ly");
+    expect(options).toEqual([
+      "63.2 AU",
+      "126 AU",
+      "316 AU",
+      "0.01 ly",
+      "0.02 ly",
+      "0.05 ly",
+      "0.1 ly",
+      "0.2 ly",
+      "0.5 ly",
+      "1 ly",
+      "2 ly",
+      "5 ly",
+      "10 ly",
+      "20 ly",
+      "50 ly",
+      "100 ly",
+      "200 ly",
+      "500 ly",
+    ]);
+  });
+
+  it("steps each option 1-2-5 in light-years, the fine steps among them", () => {
+    renderControls();
+
+    const values = within(radius())
+      .getAllByRole("option")
+      .map((option) => Number(option.getAttribute("value")));
+
+    expect(values.slice(0, 6)).toEqual([0.001, 0.002, 0.005, 0.01, 0.02, 0.05]);
   });
 
   it("reports the radius the operator chooses", async () => {
@@ -78,6 +113,22 @@ describe("ChartControls", () => {
     await user.selectOptions(radius(), "20");
 
     expect(onQueryRadius).toHaveBeenCalledWith(20);
+  });
+
+  it("reports the finest radius, 0.001 ly, chosen by its reading in AU", async () => {
+    const user = userEvent.setup();
+    const { onQueryRadius } = renderControls();
+
+    await user.selectOptions(radius(), "63.2 AU");
+
+    expect(onQueryRadius).toHaveBeenCalledWith(0.001);
+  });
+
+  it("shows a fine radius the operator chose", () => {
+    renderControls({ radiusChoiceLy: 0.002, queryRadiusLy: 0.002 });
+
+    expect(radius()).toHaveValue("0.002");
+    expect(within(radius()).getByRole("option", { selected: true })).toHaveTextContent("126 AU");
   });
 
   it("follows the drive range while the operator has not chosen a radius", () => {
@@ -159,7 +210,34 @@ describe("ChartControls", () => {
     await user.clear(screen.getByLabelText("DRIVE RANGE"));
     await user.type(screen.getByLabelText("DRIVE RANGE"), "900{Enter}");
 
-    expect(screen.getByText("DRIVE RANGE INVALID: enter 0.01 to 500 ly")).toBeInTheDocument();
+    expect(
+      screen.getByText(statusLine("DRIVE RANGE INVALID: enter 0.001 to 500 ly")),
+    ).toBeInTheDocument();
+    expect(onDriveRange).not.toHaveBeenCalled();
+  });
+
+  it("enters a drive range below 0.01 ly, down to the narrowest chart's 0.001 ly (plan 09, P09.T42)", async () => {
+    const user = userEvent.setup();
+    const { onDriveRange } = renderControls();
+
+    await user.clear(screen.getByLabelText("DRIVE RANGE"));
+    await user.type(screen.getByLabelText("DRIVE RANGE"), "0.0015{Enter}");
+    await user.clear(screen.getByLabelText("DRIVE RANGE"));
+    await user.type(screen.getByLabelText("DRIVE RANGE"), "0.001{Enter}");
+
+    expect(onDriveRange.mock.calls).toEqual([[0.0015], [0.001]]);
+  });
+
+  it("refuses a drive range narrower than the narrowest chart", async () => {
+    const user = userEvent.setup();
+    const { onDriveRange } = renderControls();
+
+    await user.clear(screen.getByLabelText("DRIVE RANGE"));
+    await user.type(screen.getByLabelText("DRIVE RANGE"), "0.0009{Enter}");
+
+    expect(
+      screen.getByText(statusLine("DRIVE RANGE INVALID: enter 0.001 to 500 ly")),
+    ).toBeInTheDocument();
     expect(onDriveRange).not.toHaveBeenCalled();
   });
 
@@ -180,7 +258,9 @@ describe("ChartControls", () => {
     await user.clear(screen.getByLabelText("CHART TIME"));
     await user.type(screen.getByLabelText("CHART TIME"), "1001{Enter}");
 
-    expect(screen.getByText("CHART TIME INVALID: enter -1000 to 1000 yr")).toBeInTheDocument();
+    expect(
+      screen.getByText(statusLine("CHART TIME INVALID: enter -1000 to 1000 yr")),
+    ).toBeInTheDocument();
     expect(screen.getByLabelText("CHART TIME")).toHaveAttribute("aria-invalid", "true");
     expect(onTime).not.toHaveBeenCalled();
   });
@@ -197,7 +277,7 @@ describe("ChartControls", () => {
 
     expect(field).toHaveValue("50");
     expect(field).not.toHaveAttribute("aria-invalid");
-    expect(screen.queryByText("DRIVE RANGE INVALID: enter 0.01 to 500 ly")).toBeNull();
+    expect(screen.queryByText(statusLine("DRIVE RANGE INVALID: enter 0.001 to 500 ly"))).toBeNull();
     expect(onDriveRange).not.toHaveBeenCalled();
   });
 
@@ -210,7 +290,7 @@ describe("ChartControls", () => {
 
     expect(numberField("CHART TIME")).toHaveValue("+12.50");
     expect(numberField("CHART TIME")).not.toHaveAttribute("aria-invalid");
-    expect(screen.queryByText("CHART TIME INVALID: enter -1000 to 1000 yr")).toBeNull();
+    expect(screen.queryByText(statusLine("CHART TIME INVALID: enter -1000 to 1000 yr"))).toBeNull();
     expect(onTime).not.toHaveBeenCalled();
   });
 
@@ -371,5 +451,100 @@ describe("ChartControls", () => {
 
     expect(onStarFilter).toHaveBeenCalledWith("living");
     expect(screen.getByRole("radio", { name: "LIVING" })).not.toHaveAttribute("aria-disabled");
+  });
+
+  it("writes DRIVE RANGE's hint as a span in words", () => {
+    renderControls();
+
+    expect(describedText(numberField("DRIVE RANGE"))).toBe("0.001 to 500 ly");
+  });
+});
+
+/** The two number fields, which can refuse an entry. */
+const NUMBER_FIELDS = ["DRIVE RANGE", "CHART TIME"] as const;
+
+type NumberFieldName = (typeof NUMBER_FIELDS)[number];
+
+/** Each field's refusal: what is typed, the hint, and what the refusal says is valid. */
+const REFUSALS: Readonly<
+  Record<NumberFieldName, { readonly typed: string; readonly hint: string; readonly says: string }>
+> = {
+  "DRIVE RANGE": { typed: "900", hint: "0.001 to 500 ly", says: "enter 0.001 to 500 ly" },
+  "CHART TIME": { typed: "1001", hint: "±1000 yr", says: "enter -1000 to 1000 yr" },
+};
+
+/** Refuses an entry in both number fields, so that both refusals stand at once. */
+async function refuseBoth(pageClass?: string): Promise<void> {
+  const user = userEvent.setup();
+  renderControls({}, pageClass);
+  // One field after the other, as the operator types: the second's focus leaves the first refused.
+  await user.clear(numberField("DRIVE RANGE"));
+  await user.type(numberField("DRIVE RANGE"), `${REFUSALS["DRIVE RANGE"].typed}{Enter}`);
+  await user.clear(numberField("CHART TIME"));
+  await user.type(numberField("CHART TIME"), `${REFUSALS["CHART TIME"].typed}{Enter}`);
+}
+
+/** The field a number input stands in: its label, input, unit, hint and any refusal. */
+function fieldOf(name: NumberFieldName): HTMLElement {
+  const field = numberField(name).closest<HTMLElement>(".chart-controls__field");
+  if (field === null) {
+    throw new Error(`${name} stands in no field`);
+  }
+  return field;
+}
+
+describe("ChartControls' refusals (plan 12, P12.T11.c)", () => {
+  it.each(NUMBER_FIELDS)(
+    "shows %s's refusal in its own field while both stand, describing its own input",
+    async (name) => {
+      await refuseBoth();
+      const { hint, says } = REFUSALS[name];
+
+      expect(
+        within(fieldOf(name)).getByText(statusLine(`${name} INVALID: ${says}`)),
+      ).toBeInTheDocument();
+      expect(describedText(numberField(name))).toBe(`${hint} ${name} INVALID: ${says}`);
+      expect(fieldOf(name)).toHaveClass("chart-controls__field--refused");
+    },
+  );
+
+  it.each(NUMBER_FIELDS)(
+    "holds %s's name, with its trailing space, in an element the compact layout hides",
+    async (name) => {
+      await refuseBoth();
+
+      const named = within(fieldOf(name)).getByText(
+        (_, element) => element?.classList.contains("chart-controls__error-name") === true,
+      );
+      expect(named.textContent).toBe(`${name} `);
+      expect(named.closest(".status-text__state")?.textContent).toBe(`${name} INVALID:`);
+    },
+  );
+
+  it("says the same refusals and descriptions on a compact page as on a stacked one", async () => {
+    const read = (): string[] =>
+      NUMBER_FIELDS.flatMap((name) => [
+        fieldOf(name).querySelector(".chart-controls__error")?.textContent ?? "",
+        describedText(numberField(name)),
+      ]);
+    await refuseBoth("local-chart");
+    const stacked = read();
+    cleanup();
+
+    await refuseBoth("local-chart local-chart--compact");
+
+    expect(read()).toEqual(stacked);
+    expect(stacked).toContain("DRIVE RANGE INVALID: enter 0.001 to 500 ly");
+  });
+
+  it("drops the refused mark with the refusal, so that the hint comes back", async () => {
+    const user = userEvent.setup();
+    renderControls();
+    await user.clear(numberField("DRIVE RANGE"));
+    await user.type(numberField("DRIVE RANGE"), "900{Enter}");
+
+    await user.keyboard("{Escape}");
+
+    expect(fieldOf("DRIVE RANGE")).not.toHaveClass("chart-controls__field--refused");
   });
 });

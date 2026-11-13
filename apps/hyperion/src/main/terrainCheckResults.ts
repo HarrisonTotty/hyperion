@@ -1,0 +1,1447 @@
+/**
+ * The views check's terrain run's results file and its summary (plan R10, R10.T16.d;
+ * decision-r10-t16-contracts §6): what the renderer measured of each phase on `TERRAIN TEST`,
+ * judged against what the hidden run holds. A `--weathered` run (R10.T1.c's client half) is served
+ * `TEST MOON` weathered's field in its place, which its run block ({@link fixtureRecord}), its
+ * summary and its file's name record; a run on `TERRAIN TEST`'s own writes the file it wrote before.
+ *
+ * @remarks
+ * The run holds, and each is a finding here with its verdict:
+ *
+ * - **The phases**: every phase of the launch's setting ran, in order, and held its views' styles.
+ * - **Every frame drawn**: no view missed an animation frame it was due at its own cadence, in any
+ *   phase, outside the forced loss's restore.
+ * - **No view stopped** (plan R10, R10.T14.d; decision-r10-t16-leans §2,
+ *   decision-r10-t14d-stall §3): over the judged span, from the end of VIEW's opening to the
+ *   teardown's choice of `PHASE TEST`, outside the forced loss's restore, nothing is over
+ *   {@link TERRAIN_GAP_LIMIT_MS}: not the page's longest time between two animation frames over the
+ *   whole span (the scene choices and the configurations between the phases among it), no view's
+ *   longest time between two of its draws in any phase, and no longest time between two animation
+ *   frames while a session made and compiled its materials (each session's phases start after that
+ *   compile), which says which window a stall fell in. A stall of the whole page, when no animation
+ *   frame runs, is no missed frame and shows here alone, so that the run tells the two apart.
+ *   VIEW's opening, until its views' preparations settled, is recorded and not judged.
+ * - **Every frame finite**: every read-back of a photorealistic view's scene target was finite.
+ * - **The terrain drawn once handed over**: the primary handed `TEST MOON` over in the first phase,
+ *   and every view that handed it over with a drawn patch in its view, a photorealistic one to its
+ *   lit pass or a wireframe one to its wireframe pass (plan R10, R10.T11), drew its style's terrain
+ *   material within {@link TERRAIN_DELAY_LIMIT_MS}, and in every such draw after (outside the
+ *   restore), from a phase's first frame where it drew it on the session before the phase; a view
+ *   past the survey, which sees no patch, draws the reference surface alone, and its draws are
+ *   counted apart.
+ * - **The faults**: exactly one `device-lost` with reason `destroyed` inside the loss phase's
+ *   window, then exactly one restore, and no other fault and no exit of the GPU process
+ *   ({@link terrainFaultsVerdict}).
+ * - **No terrain fault**: the terrain session's `terrainFaults` never held a view, of either cause,
+ *   its height workers lost or a guarded computation failing on (plan R10, R10.T16.e;
+ *   decision-r10-t16-leans §8).
+ * - **The loss**: the device destroyed with blocks still to come and bakes in flight; after it the
+ *   terrain drawn again, no `surface_field` asked, no `field-init` posted, no `field-chunk` but the
+ *   answer in flight's blocks, once to each worker; and the mask holding the same cells.
+ * - **The teardown**: the session disposed, no height worker left and no GPU bytes of the terrain's.
+ *
+ * "No pixel drawn by both surfaces on the datum" is held by T16.c's part-20 smoke group
+ * (`R10.T16 the frame's symbology`, on SwiftShader), which reads both surfaces back; the hidden run
+ * records it as held there and probes no production shader.
+ *
+ * The patches drawn, the bakes a second, the frame times and the session's memory are recorded,
+ * provisional: the run is hidden, and a timed figure on a shared machine is provisional (the load
+ * average at the start is recorded with it).
+ */
+
+import type {
+  FramePacingName,
+  InspectionTimingPass,
+  SpikePassTimer,
+  TerrainCheckBytes,
+  TerrainCheckCachePressure,
+  TerrainCheckFault,
+  TerrainCheckMemory,
+  TerrainCheckPhaseName,
+  TerrainCheckPhaseRecord,
+  TerrainCheckRecord,
+  TerrainWholeRecord,
+  TerrainCheckOpeningRecord,
+  TerrainCheckSessionFault,
+  TerrainCheckSessionRecord,
+  TerrainCheckSpanRecord,
+  ViewsCheckStyle,
+  ViewsCheckTerrainFixture,
+  ViewsCheckViewName,
+} from "../preload/api";
+import type { GraphicsLaunchMode } from "../preload/api";
+import { keepsLoadAverage, QUIET_RULE_UNCHECKED, quietOf } from "./machineLoad";
+import {
+  ADDED_FILE_LIMIT_BYTES,
+  formatAsPrettier,
+  freeResultsName,
+  type MachineDescription,
+  type Measured,
+  measuredVsyncOf,
+  NODE_PARTIAL_FILES,
+  PARTIAL_SUFFIX,
+  type PartialResultsFiles,
+  type SpikeSetting,
+  type Verdict,
+} from "./results";
+import { type DurationStats, durationStats, type ViewSlotName } from "./viewsCheckResults";
+import { join } from "node:path";
+
+/** The file's schema name. */
+export const TERRAIN_CHECK_SCHEMA = "hyperion.views-check.terrain-results";
+
+/**
+ * The schema's version; bumped with any change to the file's shape (2: R10.T16.e's
+ * `terrainFaults`; 3: R10.T14.d's `noStall`, each view's `longestGapEndScriptS`, the `sessions`,
+ * the `opening`, the `span` and the `phaseWindows`; 4: each phase's `gpuPasses`, R14's Mac
+ * measurements; 5: each phase's `cachePressure` and the whole finding's `cachePressureDraws` and
+ * `drawnOverBudgetShare`, R10.T16.i's pins; 6: the run's `framePacing` and `frameRateHz` and each
+ * phase's `measuredVsyncMs`, R07.T19. A file of an earlier version lacks each and reads it as
+ * `null`).
+ */
+export const TERRAIN_CHECK_VERSION = 6;
+
+/**
+ * The longest from a view's hand-over to its first terrain draw, ms: the lit material compiles and
+ * the first bakes land. The first compile of a launch took 4.0 s on the development machine
+ * (2026-10-20, hidden, high), the second 0.13 s; the limit catches a terrain that never draws.
+ */
+export const TERRAIN_DELAY_LIMIT_MS = 15_000;
+
+/**
+ * The longest the page may go without an animation frame, and a view between two of its draws,
+ * over the terrain run's judged span outside the forced loss's restore, ms (plan R10, R10.T14.d;
+ * decision-r10-t16-leans §2, decision-r10-t14d-stall §3): the guide's Motion rule that a view never
+ * stops.
+ *
+ * @remarks
+ * Set by decision-r10-t14d-stall §3's rule, from one cold launch a setting (the driver's shader
+ * cache and Dawn's blob cache both empty), under the heavy lock on a quiet machine: 1.5 times the
+ * worst judged gap of the two, rounded up to 50 ms, held within 200 to 500 ms; a gap that would
+ * need more is a defect finding, not a higher limit. One limit for both settings, every view and
+ * every machine; judged on every run, warm or cold. The cold launches of 2026-10-20 (RTX 3080,
+ * hidden, plan 10's T14.d record): the worst judged gap 316.7 ms, high, the page's in the loss
+ * phase's fresh session's making (low's worst 150 ms); 1.5 × 316.7 = 475.1, rounded up to 500,
+ * within the cap. T14.b's quiet session and the owner's UHD 620 run re-read it by the same rule.
+ */
+export const TERRAIN_GAP_LIMIT_MS = 500;
+
+/** One phase a launch runs, and the styles it shows: the primary's, then each open instrument's. */
+export interface TerrainPhasePlan {
+  readonly name: TerrainCheckPhaseName;
+  readonly views: ReadonlyArray<ViewsCheckStyle>;
+}
+
+/**
+ * The phases a launch of each setting runs, in order (decision-r10-t16-contracts §6): on high the
+ * primary alone, with a photorealistic and a wireframe instrument, and the loss; on low the primary
+ * alone, with a wireframe instrument, and the loss.
+ */
+export const TERRAIN_PHASES: Readonly<Record<SpikeSetting, ReadonlyArray<TerrainPhasePlan>>> = {
+  high: [
+    { name: "terrain-alone", views: ["photorealistic"] },
+    {
+      name: "terrain-photoreal-wireframe",
+      views: ["photorealistic", "photorealistic", "wireframe"],
+    },
+    { name: "terrain-loss", views: ["photorealistic"] },
+  ],
+  low: [
+    { name: "terrain-alone", views: ["photorealistic"] },
+    { name: "terrain-wireframe", views: ["photorealistic", "wireframe"] },
+    { name: "terrain-loss", views: ["photorealistic"] },
+  ],
+};
+
+/** What each phase is for, in the summary's words. */
+const PHASE_PURPOSE: Readonly<Record<TerrainCheckPhaseName, string>> = {
+  "terrain-alone":
+    "the photorealistic primary alone, through the hand-over, the descent and the sunset",
+  "terrain-photoreal-wireframe":
+    "the same, with instrument 1 photorealistic and instrument 2 in the wireframe",
+  "terrain-wireframe":
+    "the primary with one wireframe instrument (QUALITY LOW allows one photorealistic view)",
+  "terrain-loss": "a fresh session, its device destroyed by the harness mid-stream",
+};
+
+/** Where "no pixel drawn by both surfaces on the datum" is held (decision-r10-t16-contracts §6). */
+export const BOTH_SURFACES_HELD_BY =
+  "held by T16.c's part-20 smoke group, `R10.T16 the frame's symbology`, on SwiftShader; not probed here";
+
+/** The run, as the main process describes it at its start. */
+export interface TerrainCheckRunInput {
+  readonly startedAt: Date;
+  readonly machine: MachineDescription;
+  readonly versions: {
+    readonly app: string;
+    readonly electron: string;
+    readonly chromium: string;
+    readonly node: string;
+    readonly v8: string;
+  };
+  readonly platform: NodeJS.Platform;
+  readonly launchMode: GraphicsLaunchMode;
+  readonly setting: SpikeSetting;
+  readonly smoke: boolean;
+  /** The field the run was served: the launch's (`ViewsCheckLaunch.fixture`; R10.T1.c). */
+  readonly fixture: ViewsCheckTerrainFixture;
+  readonly switches: ReadonlyArray<string>;
+  readonly shown: boolean;
+  /** How the launch paced `VIEW` (`--frame-pacing`, R07.T19). */
+  readonly framePacing: FramePacingName;
+  /** A hidden run's offscreen frame clock (`--frame-rate`), Hz; `null` shown. */
+  readonly frameRateHz: number | null;
+  /** The window's content size when the run ended, DIP. */
+  readonly window: { readonly widthDip: number; readonly heightDip: number };
+  /** Where the page's captures were saved, or why none were. */
+  readonly captures: Measured<string>;
+}
+
+/**
+ * A served field as a results file's run block records it (plan R10, R10.T1.c's client half): the
+ * weathered fixture by name, and nothing for `TERRAIN TEST`'s, so that a run on it writes the file
+ * it wrote before the option.
+ */
+export function fixtureRecord(fixture: ViewsCheckTerrainFixture): {
+  readonly fixture?: Exclude<ViewsCheckTerrainFixture, "terrain-test">;
+} {
+  return fixture === "terrain-test" ? {} : { fixture };
+}
+
+/**
+ * What a results file's name and summary add for its run block's recorded field: `-weathered`
+ * and a line naming `TEST MOON` weathered for the weathered fixture, `-whole` and a line naming
+ * the whole body for its (plan R10, R10.T14.c), nothing for `TERRAIN TEST`'s.
+ */
+export function fixtureNaming(
+  fixture: Exclude<ViewsCheckTerrainFixture, "terrain-test"> | undefined,
+): {
+  readonly stem: string;
+  readonly lines: ReadonlyArray<string>;
+} {
+  let naming: { readonly stem: string; readonly lines: ReadonlyArray<string> };
+  switch (fixture) {
+    case undefined:
+      naming = { stem: "", lines: [] };
+      break;
+    case "terrain-test-weathered":
+      naming = {
+        stem: "-weathered",
+        lines: [
+          `- **Field:** \`${fixture}\`, TEST MOON weathered (\`terrain_test_weathered.golden\`), served in TERRAIN TEST's place`,
+        ],
+      };
+      break;
+    case "terrain-test-whole":
+      naming = {
+        stem: "-whole",
+        lines: [
+          `- **Field:** \`${fixture}\`, TEST MOON's whole body, every cell surveyed (the native tool's \`whole.golden\`), served in TERRAIN TEST's place`,
+        ],
+      };
+      break;
+  }
+  return naming;
+}
+
+/** Everything the results are built from. */
+export interface TerrainCheckInput {
+  readonly run: TerrainCheckRunInput;
+  readonly record: TerrainCheckRecord;
+  /** The GPU process's exits over the run. */
+  readonly gpuProcessExits: number;
+  /** The page's console errors over the run, in order. */
+  readonly consoleErrors: ReadonlyArray<string>;
+}
+
+/** One view's figures over a phase. */
+export interface TerrainViewFigures {
+  readonly name: ViewsCheckViewName;
+  readonly slot: ViewSlotName;
+  readonly style: ViewsCheckStyle;
+  readonly canvas: { readonly widthPx: number; readonly heightPx: number };
+  readonly draws: number;
+  readonly gpuMs: DurationStats | null;
+  readonly submitMs: DurationStats | null;
+  readonly missedFrames: number;
+  readonly longestGapMs: number;
+  /** The script's time at its longest gap's end, s, or `null` before any was told. */
+  readonly longestGapEndScriptS: number | null;
+  readonly handedOverDraws: number;
+  readonly offSurveyDraws: number;
+  readonly terrainDraws: number;
+  readonly terrainGaps: number;
+  readonly terrainGapSpansS: ReadonlyArray<readonly [number, number]>;
+  readonly firstHandoverScriptS: number | null;
+  /**
+   * From the hand-over it first drew the terrain in to that draw, ms (`terrainHandoverMs`); `null`
+   * where it never drew the terrain.
+   */
+  readonly terrainDelayMs: number | null;
+  readonly readBacks: number;
+  readonly nonFiniteTexels: number;
+}
+
+/** One pass label's GPU time over a phase (R14's Mac measurements). */
+export interface TerrainPassFigures {
+  readonly label: string;
+  /**
+   * Its time in each of the phase's frames whose resolves all arrived, every view's passes of the
+   * label summed, 0 in a frame without one; `null` with no such frame.
+   */
+  readonly gpuMs: DurationStats | null;
+  /** Its mean over the mean of those frames' GPU time, 0 to 1, or `null` with none timed. */
+  readonly shareOfGpu: number | null;
+  /** The kernels its dispatches ran, each once; none for a render pass. */
+  readonly kernels: ReadonlyArray<string>;
+}
+
+/** One phase's figures. */
+export interface TerrainPhaseFigures {
+  readonly name: TerrainCheckPhaseName;
+  readonly purpose: string;
+  /** Whether its views drew the styles the phase asks for when it ended. */
+  readonly held: boolean;
+  readonly windowS: number;
+  readonly script: { readonly startS: number; readonly endS: number };
+  readonly views: ReadonlyArray<TerrainViewFigures>;
+  readonly animationFrames: DurationStats | null;
+  /** The vsync period its animation frames measure by the renderer's rule (R07.T19), or why not. */
+  readonly measuredVsyncMs: Measured<number>;
+  readonly mainThreadMs: DurationStats | null;
+  readonly frameGpuMs: DurationStats | null;
+  /** The patches drawn at the primary's draws while the body had a pass. */
+  readonly patchesDrawn: {
+    readonly draws: number;
+    readonly mean: number;
+    readonly max: number;
+    readonly last: number;
+  } | null;
+  /**
+   * Those draws at which the patch cache's pins passed its slots or it had refused an arrival
+   * (plan R10, R10.T16.i); `null` from a record written before them.
+   */
+  readonly cachePressure: TerrainCheckCachePressure | null;
+  /**
+   * The terrain's triangles a primary draw (plan R14, R14.T1.b): its lit draws', and its shadow
+   * cascades' casters', each over the draws that counted them; `null` where none did.
+   */
+  readonly triangles: CountStats | null;
+  readonly casterTriangles: CountStats | null;
+  readonly bakes: TerrainCheckPhaseRecord["bakes"];
+  /** Bakes answered a second over the window. */
+  readonly bakedPerS: number;
+  readonly fieldPosts: TerrainCheckPhaseRecord["fieldPosts"];
+  readonly fieldAsks: number;
+  readonly blocksSent: number;
+  readonly memory: TerrainCheckMemory | null;
+  /**
+   * Each pass label's GPU time, the dearest by its mean first, on a run given
+   * `--hyperion-gpu-timing` (`ViewsCheckLaunch.passTimes`); `null` on any other.
+   */
+  readonly gpuPasses: ReadonlyArray<TerrainPassFigures> | null;
+}
+
+/** A finding's verdict and why it failed, if it did. */
+export interface TerrainFinding {
+  readonly verdict: Verdict;
+  /** What failed, in words; empty for a pass. */
+  readonly reasons: ReadonlyArray<string>;
+}
+
+/** The faults verdict, with the fault it excludes. */
+export interface TerrainFaultsFinding extends TerrainFinding {
+  /** The forced loss's one `device-lost`, excluded from the verdict, or `null` where none was. */
+  readonly expected: TerrainCheckFault | null;
+  /** Every other fault, each a failure. */
+  readonly others: ReadonlyArray<TerrainCheckFault>;
+  /** The restores after the expected loss inside the loss phase's window. */
+  readonly restores: number;
+  readonly gpuProcessExits: number;
+}
+
+/** A results file of the terrain run. */
+export interface TerrainCheckResults {
+  readonly schema: typeof TERRAIN_CHECK_SCHEMA;
+  readonly version: typeof TERRAIN_CHECK_VERSION;
+  readonly run: {
+    readonly startedAt: string;
+    readonly machine: MachineDescription;
+    readonly versions: TerrainCheckRunInput["versions"];
+    readonly platform: NodeJS.Platform;
+    readonly launchMode: GraphicsLaunchMode;
+    readonly setting: SpikeSetting;
+    readonly smoke: boolean;
+    /** The weathered fixture on a `--weathered` run; absent on `TERRAIN TEST`'s ({@link fixtureRecord}). */
+    readonly fixture?: Exclude<ViewsCheckTerrainFixture, "terrain-test">;
+    readonly switches: ReadonlyArray<string>;
+    readonly shown: boolean;
+    readonly framePacing: TerrainCheckRunInput["framePacing"];
+    readonly frameRateHz: TerrainCheckRunInput["frameRateHz"];
+    readonly window: TerrainCheckRunInput["window"];
+    readonly devicePixelRatio: number;
+    readonly timer: SpikePassTimer;
+    readonly captures: Measured<string>;
+    /** Every figure is provisional: the note says why. */
+    readonly provisional: string;
+  };
+  readonly phases: ReadonlyArray<TerrainPhaseFigures>;
+  readonly findings: {
+    readonly phases: TerrainFinding;
+    readonly framesDrawn: TerrainFinding;
+    /**
+     * No view stopped (R10.T14.d): neither the page over the judged span, nor a view in a phase,
+     * nor the page in a session's compile window, over {@link TERRAIN_GAP_LIMIT_MS}.
+     */
+    readonly noStall: TerrainFinding & { readonly limitMs: number };
+    readonly framesFinite: TerrainFinding & { readonly readBacks: number };
+    readonly terrainDrawn: TerrainFinding;
+    readonly faults: TerrainFaultsFinding;
+    /** The terrain session's faults, each a failure (R10.T16.e). */
+    readonly terrainFaults: TerrainFinding & {
+      readonly record: ReadonlyArray<TerrainCheckSessionFault>;
+    };
+    readonly loss: TerrainFinding & { readonly record: TerrainCheckRecord["loss"] };
+    readonly teardown: TerrainFinding & { readonly record: TerrainCheckRecord["teardown"] };
+    readonly bothSurfaces: string;
+    /** The hand-over's range and script time, and when the primary handed over in the first phase. */
+    readonly handover: {
+      readonly rangeM: number | null;
+      readonly expectedScriptS: number | null;
+      readonly observedScriptS: number | null;
+    };
+    readonly consoleErrors: { readonly count: number; readonly first: ReadonlyArray<string> };
+    /** The whole-body run's finding, on a `--whole` run alone (plan R10, R10.T14.c). */
+    readonly whole?: TerrainWholeFinding;
+  };
+  /**
+   * Each terrain session made over the run and its materials' compile, provisional; its longest
+   * time between animation frames is judged in {@link TerrainCheckResults.findings}' `noStall`
+   * (R10.T14.d).
+   */
+  readonly sessions: ReadonlyArray<TerrainCheckSessionRecord>;
+  /** VIEW's opening, until its views' preparations settled: recorded, not judged (R10.T14.d). */
+  readonly opening: TerrainCheckOpeningRecord;
+  /** The judged span's page-wide longest gap, judged in `noStall` (R10.T14.d). */
+  readonly span: TerrainCheckSpanRecord;
+  /** Each phase's window, `performance.now()` ms, to place the span's longest gap by. */
+  readonly phaseWindows: ReadonlyArray<Pick<TerrainCheckPhaseRecord, "name" | "startMs" | "endMs">>;
+  /** Every finding's verdict together: `pass` only if each passes. */
+  readonly overall: Verdict;
+}
+
+/** The slot a view's engine name stands for. */
+function slotOf(name: ViewsCheckViewName): ViewSlotName {
+  let slot: ViewSlotName;
+  switch (name) {
+    case "view":
+      slot = "PRIMARY";
+      break;
+    case "instrument-1":
+      slot = "INSTRUMENT 1";
+      break;
+    case "instrument-2":
+      slot = "INSTRUMENT 2";
+      break;
+  }
+  return slot;
+}
+
+/** A count's mean and largest, in millions, and its draws; a dash for none. */
+function countText(stats: CountStats | null): string {
+  return stats === null
+    ? "—"
+    : `${(stats.mean / 1e6).toFixed(3)} M, ${(stats.max / 1e6).toFixed(3)} M; ${String(stats.draws)}`;
+}
+
+/** A count's draws, mean and largest. */
+export interface CountStats {
+  readonly draws: number;
+  readonly mean: number;
+  readonly max: number;
+}
+
+/** `counts`' draws, mean and largest; `null` for none. */
+function countStats(counts: ReadonlyArray<number>): CountStats | null {
+  if (counts.length === 0) {
+    return null;
+  }
+  return {
+    draws: counts.length,
+    mean: counts.reduce((sum, count) => sum + count, 0) / counts.length,
+    max: counts.reduce((most, count) => Math.max(most, count), 0),
+  };
+}
+
+/** Each of a phase's pass labels' GPU time, the dearest by its mean first. */
+function passFigures(
+  passes: ReadonlyArray<InspectionTimingPass>,
+  frameGpuMs: ReadonlyArray<number>,
+): ReadonlyArray<TerrainPassFigures> {
+  const frameMeanMs = durationStats(frameGpuMs)?.meanMs ?? null;
+  return passes
+    .map(({ label, ms: times, kernels }): TerrainPassFigures => {
+      const gpuMs = durationStats(times);
+      return {
+        label,
+        gpuMs,
+        shareOfGpu:
+          gpuMs === null || frameMeanMs === null || !(frameMeanMs > 0)
+            ? null
+            : gpuMs.meanMs / frameMeanMs,
+        kernels,
+      };
+    })
+    .toSorted((a, b) => (b.gpuMs?.meanMs ?? 0) - (a.gpuMs?.meanMs ?? 0));
+}
+
+function phaseFigures(record: TerrainCheckPhaseRecord, setting: SpikeSetting): TerrainPhaseFigures {
+  const expected = TERRAIN_PHASES[setting].find((plan) => plan.name === record.name)?.views ?? [];
+  const held =
+    record.views.length === expected.length &&
+    record.views.every((view, i) => view.style === expected[i]);
+  const windowS = (record.endMs - record.startMs) / 1000;
+  const patches = record.patchesDrawn;
+  const last = patches.at(-1);
+  return {
+    name: record.name,
+    purpose: PHASE_PURPOSE[record.name],
+    held,
+    windowS,
+    script: { startS: record.scriptStartS, endS: record.scriptEndS },
+    views: record.views.map((view) => ({
+      name: view.name,
+      slot: slotOf(view.name),
+      style: view.style,
+      canvas: view.canvas,
+      draws: view.draws,
+      gpuMs: durationStats(view.gpuMs),
+      submitMs: durationStats(view.submitMs),
+      missedFrames: view.missedFrames,
+      longestGapMs: view.longestGapMs,
+      longestGapEndScriptS: view.longestGapEndScriptS,
+      handedOverDraws: view.handedOverDraws,
+      offSurveyDraws: view.offSurveyDraws,
+      terrainDraws: view.terrainDraws,
+      terrainGaps: view.terrainGaps,
+      terrainGapSpansS: view.terrainGapSpansS,
+      firstHandoverScriptS: view.firstHandoverScriptS,
+      // From the hand-over it first drew the terrain in, not a lone handed-over draw before it
+      // (R10.T14.d).
+      terrainDelayMs:
+        view.terrainHandoverMs === null || view.firstTerrainMs === null
+          ? null
+          : view.firstTerrainMs - view.terrainHandoverMs,
+      readBacks: view.readBacks,
+      nonFiniteTexels: view.nonFiniteTexels,
+    })),
+    animationFrames: durationStats(record.frameIntervalsMs),
+    measuredVsyncMs: measuredVsyncOf(record.frameIntervalsMs),
+    mainThreadMs: durationStats(record.mainThreadMs),
+    frameGpuMs: durationStats(record.frameGpuMs),
+    patchesDrawn:
+      last === undefined
+        ? null
+        : {
+            draws: patches.length,
+            mean: patches.reduce((sum, count) => sum + count, 0) / patches.length,
+            max: patches.reduce((most, count) => Math.max(most, count), 0),
+            last,
+          },
+    cachePressure: record.cachePressure,
+    triangles: countStats(record.trianglesDrawn),
+    casterTriangles: countStats(record.casterTriangles),
+    bakes: record.bakes,
+    bakedPerS: windowS > 0 ? record.bakes.baked / windowS : 0,
+    fieldPosts: record.fieldPosts,
+    fieldAsks: record.fieldAsks,
+    blocksSent: record.blocksSent,
+    memory: record.memory,
+    gpuPasses: record.passes === null ? null : passFigures(record.passes, record.frameGpuMs),
+  };
+}
+
+/** A finding from its failures: `pass` with none. */
+function finding(reasons: ReadonlyArray<string>): TerrainFinding {
+  return { verdict: reasons.length === 0 ? "pass" : "fail", reasons };
+}
+
+/** What {@link terrainFaultsVerdict} judges. */
+export interface TerrainFaultsInput {
+  readonly faults: ReadonlyArray<TerrainCheckFault>;
+  readonly restoresAtMs: ReadonlyArray<number>;
+  /** The loss phase's window, ms, or `null` where it did not run. */
+  readonly lossWindow: { readonly startMs: number; readonly endMs: number } | null;
+  /**
+   * When the harness destroyed the device (the record's loss), ms, or `null` where it did not: the
+   * loss excluded is the one at or after it, so that a loss of the device's own just before is
+   * not taken for the harness's (the batch review's D-C).
+   */
+  readonly destroyedAtMs: number | null;
+  readonly gpuProcessExits: number;
+}
+
+/**
+ * The faults verdict (decision-r10-t16-contracts §6): the forced loss is expected exactly once, one
+ * `device-lost` with reason `destroyed` inside the loss phase's window, then one restore; that one
+ * fault alone is excluded. Any other fault, a second loss, a loss outside the window, no loss, or
+ * an exit of the GPU process fails it.
+ */
+export function terrainFaultsVerdict(input: TerrainFaultsInput): TerrainFaultsFinding {
+  const { faults, restoresAtMs, lossWindow, destroyedAtMs, gpuProcessExits } = input;
+  const reasons: string[] = [];
+  const losses = faults.filter((fault) => fault.kind === "device-lost");
+  const inside = (atMs: number): boolean =>
+    lossWindow !== null && atMs >= lossWindow.startMs && atMs <= lossWindow.endMs;
+  const harnessed = (atMs: number): boolean => destroyedAtMs !== null && atMs >= destroyedAtMs;
+  const expected =
+    losses.length === 1 &&
+    losses[0]?.reason === "destroyed" &&
+    inside(losses[0].atMs) &&
+    harnessed(losses[0].atMs)
+      ? losses[0]
+      : null;
+  if (losses.length === 0) {
+    reasons.push("no device loss was seen: the forced loss is expected once");
+  } else if (losses.length > 1) {
+    reasons.push(`${String(losses.length)} device losses: the forced loss is expected once`);
+  } else if (expected === null) {
+    const [loss] = losses;
+    reasons.push(
+      loss !== undefined && loss.reason !== "destroyed"
+        ? `the device was lost with reason ${String(loss.reason)}, not destroyed`
+        : loss !== undefined && inside(loss.atMs)
+          ? "the device loss came before the harness destroyed the device"
+          : "the device loss fell outside the loss phase's window",
+    );
+  }
+  const others = faults.filter((fault) => fault !== expected && fault.kind !== "device-lost");
+  for (const fault of others) {
+    reasons.push(`a fault: ${fault.line}`);
+  }
+  const restores =
+    expected === null
+      ? 0
+      : restoresAtMs.filter((atMs) => atMs >= expected.atMs && inside(atMs)).length;
+  if (expected !== null && restores !== 1) {
+    reasons.push(`${String(restores)} restores after the forced loss, where one is expected`);
+  }
+  const stray = restoresAtMs.length - restores;
+  if (expected !== null && stray > 0) {
+    reasons.push(`${String(stray)} restores outside the forced loss's`);
+  }
+  if (gpuProcessExits > 0) {
+    reasons.push(`${String(gpuProcessExits)} exits of the GPU process`);
+  }
+  return { ...finding(reasons), expected, others, restores, gpuProcessExits };
+}
+
+/** The phases ran as the setting's plan, in order, each holding its configuration. */
+function phasesFinding(
+  phases: ReadonlyArray<TerrainPhaseFigures>,
+  setting: SpikeSetting,
+): TerrainFinding {
+  const plan = TERRAIN_PHASES[setting].map((each) => each.name);
+  const ran = phases.map((phase) => phase.name);
+  const reasons: string[] = [];
+  if (ran.join(",") !== plan.join(",")) {
+    const ranText = ran.length === 0 ? "none" : ran.join(", ");
+    reasons.push(`the phases ran ${ranText}, where ${plan.join(", ")} are asked`);
+  }
+  for (const phase of phases.filter((each) => !each.held)) {
+    reasons.push(`${phase.name} did not hold its views' styles`);
+  }
+  return finding(reasons);
+}
+
+function framesDrawnFinding(phases: ReadonlyArray<TerrainPhaseFigures>): TerrainFinding {
+  const reasons = phases.flatMap((phase) =>
+    phase.views.flatMap((view) =>
+      view.draws === 0
+        ? [`${phase.name}: ${view.slot} drew nothing`]
+        : view.missedFrames > 0
+          ? [`${phase.name}: ${view.slot} missed ${String(view.missedFrames)} frames it was due`]
+          : [],
+    ),
+  );
+  return finding(reasons);
+}
+
+/** Where a view's longest gap ended, in the script's time, for a reason or a reading. */
+function gapEnd(view: TerrainViewFigures): string {
+  return view.longestGapEndScriptS === null
+    ? ""
+    : ` to ${view.longestGapEndScriptS.toFixed(1)} s of the script`;
+}
+
+/** The phase whose window holds `atMs`, or that it fell between phases. */
+function windowOf(
+  phases: ReadonlyArray<Pick<TerrainCheckPhaseRecord, "name" | "startMs" | "endMs">>,
+  atMs: number,
+): string {
+  const phase = phases.find((each) => atMs >= each.startMs && atMs <= each.endMs);
+  return phase === undefined ? "between the phases" : `in ${phase.name}`;
+}
+
+/**
+ * No view stopped: not the page's longest time between animation frames over the judged span, no
+ * view's longest time between draws in a phase, and no session's longest time between animation
+ * frames while it compiled, over the limit (R10.T14.d).
+ */
+function noStallFinding(
+  phases: ReadonlyArray<TerrainPhaseFigures>,
+  record: Pick<TerrainCheckRecord, "phases" | "sessions" | "span">,
+): TerrainFinding & { readonly limitMs: number } {
+  const limit = String(TERRAIN_GAP_LIMIT_MS);
+  const { sessions, span } = record;
+  const reasons = [
+    ...(span.longestFrameGapMs > TERRAIN_GAP_LIMIT_MS
+      ? [
+          `the page drew no animation frame for ${span.longestFrameGapMs.toFixed(0)} ms ${windowOf(record.phases, span.longestGapEndMs)}${span.longestGapEndScriptS === null ? "" : `, to ${span.longestGapEndScriptS.toFixed(1)} s of the script`}, over ${limit} ms`,
+        ]
+      : []),
+    ...phases.flatMap((phase) =>
+      phase.views.flatMap((view) =>
+        view.longestGapMs > TERRAIN_GAP_LIMIT_MS
+          ? [
+              `${phase.name}: ${view.slot} drew nothing for ${view.longestGapMs.toFixed(0)} ms${gapEnd(view)}, over ${limit} ms`,
+            ]
+          : [],
+      ),
+    ),
+    ...sessions.flatMap(({ compile }, n) =>
+      compile.kind === "ended" &&
+      compile.longestFrameGapMs !== null &&
+      compile.longestFrameGapMs > TERRAIN_GAP_LIMIT_MS
+        ? [
+            `session ${String(n + 1)}: no animation frame for ${compile.longestFrameGapMs.toFixed(0)} ms while its materials compiled, over ${limit} ms`,
+          ]
+        : [],
+    ),
+  ];
+  return { ...finding(reasons), limitMs: TERRAIN_GAP_LIMIT_MS };
+}
+
+function framesFiniteFinding(
+  phases: ReadonlyArray<TerrainPhaseFigures>,
+): TerrainFinding & { readonly readBacks: number } {
+  const photoreal = phases.flatMap((phase) =>
+    phase.views.filter((view) => view.style === "photorealistic").map((view) => ({ phase, view })),
+  );
+  const readBacks = photoreal.reduce((sum, { view }) => sum + view.readBacks, 0);
+  const reasons = photoreal.flatMap(({ phase, view }) =>
+    view.readBacks === 0
+      ? [`${phase.name}: ${view.slot}'s scene target was never read back`]
+      : view.nonFiniteTexels > 0
+        ? [`${phase.name}: ${view.slot} had ${String(view.nonFiniteTexels)} texels not finite`]
+        : [],
+  );
+  return { ...finding(reasons), readBacks };
+}
+
+function terrainDrawnFinding(phases: ReadonlyArray<TerrainPhaseFigures>): TerrainFinding {
+  const reasons: string[] = [];
+  const primary = phases.find((phase) => phase.name === "terrain-alone")?.views[0];
+  if (primary === undefined || primary.firstHandoverScriptS === null) {
+    reasons.push("terrain-alone: the primary never handed TEST MOON over");
+  }
+  for (const phase of phases) {
+    // A view of either style hands the body over: the photorealistic to its lit pass, the
+    // wireframe to its wireframe pass (R10.T11), and each draws its own terrain's material.
+    for (const view of phase.views.filter((each) => each.handedOverDraws > 0)) {
+      if (view.terrainDelayMs === null) {
+        reasons.push(`${phase.name}: ${view.slot} handed over and never drew the terrain`);
+      } else if (view.terrainDelayMs > TERRAIN_DELAY_LIMIT_MS) {
+        reasons.push(
+          `${phase.name}: ${view.slot} drew the terrain ${view.terrainDelayMs.toFixed(0)} ms after its hand-over, over ${String(TERRAIN_DELAY_LIMIT_MS)} ms`,
+        );
+      }
+      if (view.terrainGaps > 0) {
+        const spans = view.terrainGapSpansS
+          .map(([from, to]) => `${from.toFixed(1)}–${to.toFixed(1)} s`)
+          .join(", ");
+        reasons.push(
+          `${phase.name}: ${view.slot} drew ${String(view.terrainGaps)} handed-over frames without the terrain once drawn (${spans} of the script)`,
+        );
+      }
+    }
+  }
+  return finding(reasons);
+}
+
+function lossFinding(record: TerrainCheckRecord["loss"]): TerrainFinding {
+  const reasons: string[] = [];
+  if (record.destroyedAtMs === null) {
+    reasons.push(`the device was not destroyed: ${record.notDestroyed ?? "no reason given"}`);
+    return finding(reasons);
+  }
+  if (!(record.blocksToCome > 0)) {
+    reasons.push("no block was still to come at the destruction");
+  }
+  if (!(record.bakesInFlight > 0)) {
+    reasons.push("no bake was in flight at the destruction");
+  }
+  if (record.terrainAgainAtMs === null) {
+    reasons.push("the terrain was not drawn again after the restore");
+  }
+  const { after, workers, masks } = record;
+  if (after.fieldAsks > 0) {
+    reasons.push(`${String(after.fieldAsks)} surface_field asks after the loss`);
+  }
+  if (after.fieldInits > 0) {
+    reasons.push(`${String(after.fieldInits)} field-init posts after the loss`);
+  }
+  if (after.fieldChunks !== after.blocksSent * workers) {
+    reasons.push(
+      `${String(after.fieldChunks)} field-chunk posts after the loss, where the ${String(after.blocksSent)} blocks then sent to ${String(workers)} workers make ${String(after.blocksSent * workers)}`,
+    );
+  }
+  if (masks.before === null || masks.afterRestore === null || masks.end === null) {
+    reasons.push("a mask was not read back");
+  } else {
+    if (!masks.beforeKept) {
+      reasons.push("the mask after the restore lost a cell it held before the loss");
+    }
+    if (!masks.endAsExpected) {
+      reasons.push(
+        `the mask holds ${String(masks.end)} cells at the end, not the coverage's ${String(masks.expected)}`,
+      );
+    }
+  }
+  return finding(reasons);
+}
+
+/**
+ * No terrain fault (plan R10, R10.T16.e; decision-r10-t16-leans §8): each time the session's
+ * `terrainFaults` held a view, of either cause, is a failure.
+ */
+function sessionFaultsFinding(record: ReadonlyArray<TerrainCheckSessionFault>): TerrainFinding {
+  return finding(
+    record.map(
+      (fault) =>
+        `the terrain's fault at ${fault.atMs.toFixed(0)} ms on ${fault.views.join(", ")}: ${fault.text}`,
+    ),
+  );
+}
+
+function teardownFinding(record: TerrainCheckRecord["teardown"]): TerrainFinding {
+  const reasons: string[] = [];
+  if (!record.disposed) {
+    reasons.push("the session was not disposed");
+  }
+  if (record.workersLive > 0) {
+    reasons.push(`${String(record.workersLive)} height workers left`);
+  }
+  if (record.sessionGpuBytes > 0) {
+    reasons.push(`${String(record.sessionGpuBytes)} B of the session's textures left`);
+  }
+  for (const entry of record.liveBytes.filter((each) => each.bytes > 0)) {
+    reasons.push(`${String(entry.bytes)} B of the terrain's ${entry.category} left`);
+  }
+  return finding(reasons);
+}
+
+/** The whole-body run's looks, as many as `wholeLooks.ts`' `WHOLE_LOOKS` (plan R10, R10.T14.c). */
+const WHOLE_LOOK_COUNT = 3;
+
+/** The whole-body run's finding (plan R10, R10.T14.c): its own readings, with their peaks. */
+export interface TerrainWholeFinding extends TerrainFinding {
+  readonly record: TerrainWholeRecord;
+  /**
+   * The patch cache's most bytes alive at once over the phases, the most patches selected at once,
+   * and the most drawn at once, a coarsen's held finer patches among them (R10.T16.i).
+   */
+  readonly peakCacheBytes: number;
+  readonly mostPatchesSelected: number;
+  readonly mostPatchesDrawn: number;
+  /**
+   * The share of the primary's draws over the phases that drew more patches than the selection's
+   * budget, its held coarsens' (R10.T16.i; recorded, not judged); `null` with no budget or no draw.
+   */
+  readonly drawnOverBudgetShare: number | null;
+  /**
+   * The primary's draws over the phases at which the patch cache's pins passed its slots or it had
+   * refused an arrival (R10.T16.i), which fail the finding; `null` where no phase's record held
+   * them (one written before them).
+   */
+  readonly cachePressureDraws: number | null;
+  /** The most the height workers held of the field as a phase ended, bytes (recorded). */
+  readonly workerFieldBytes: number;
+}
+
+/**
+ * The whole-body run's finding (plan R10, R10.T14.c; research-leans-20 §2): every cell of the
+ * field held as the first phase ended and in the coverage mask at the loss phase's end, so that no
+ * reference sphere draws past the terrain; no off-survey state read and no survey edge named;
+ * every look read, settled, its disc drawn with no pixel of the sky's and nothing lit beyond its
+ * limb, every texel finite; no selection of more patches than the lit pass's selection budget,
+ * half its cache's slots (R10.T14's sizes); and no primary draw at which the cache's pins passed its
+ * slots or it had refused an arrival (R10.T16.i; research-leans-35 §2). The time morph holds a
+ * coarsen's finer patches until its fade ends, so a draw may pass the selection's budget, but every
+ * drawn patch is resident, so none can pass the slots: those held coarsens spend the cache's other
+ * half, and are judged by its pins. How far the draws pass the budget, and how often, is recorded
+ * beside them, not judged. The cache's GPU bytes are recorded beside its nominal budget, not
+ * judged: the setting fixes its allocation, the patch's and the whole body's alike.
+ */
+function wholeFinding(whole: TerrainWholeRecord, record: TerrainCheckRecord): TerrainWholeFinding {
+  const reasons: string[] = [];
+  const cells = String(whole.cells);
+  if (whole.heldCells !== whole.cells) {
+    reasons.push(
+      `the coverage held ${String(whole.heldCells)} of ${cells} cells as the first phase ended`,
+    );
+  }
+  if (record.loss.masks.end !== whole.cells) {
+    reasons.push(
+      `the coverage mask held ${String(record.loss.masks.end ?? "no")} of ${cells} cells at the loss phase's end`,
+    );
+  }
+  if (whole.textSamples === 0) {
+    reasons.push("the page's text was never sampled");
+  }
+  if (whole.notSurveyedSamples > 0) {
+    reasons.push(
+      `NOT SURVEYED read in ${String(whole.notSurveyedSamples)} of ${String(whole.textSamples)} samples`,
+    );
+  }
+  if (whole.surveyEdgeSamples > 0) {
+    reasons.push(
+      `a SURVEY EDGE named in ${String(whole.surveyEdgeSamples)} of ${String(whole.textSamples)} samples`,
+    );
+  }
+  if (whole.looks.length !== WHOLE_LOOK_COUNT) {
+    reasons.push(`${String(whole.looks.length)} looks of ${String(WHOLE_LOOK_COUNT)}`);
+  }
+  for (const look of whole.looks) {
+    if (look.kind === "failed") {
+      reasons.push(`the ${look.name} look was not read: ${look.failure}`);
+      continue;
+    }
+    if (!look.settled) {
+      reasons.push(`the ${look.name} look's terrain did not settle`);
+    }
+    if (look.discPixels === 0) {
+      reasons.push(`the ${look.name} look read no pixel of its disc`);
+    }
+    if (look.skyPixels > 0) {
+      reasons.push(
+        `the ${look.name} look drew ${String(look.skyPixels)} of its disc's ${String(look.discPixels)} pixels as the sky`,
+      );
+    }
+    if (look.litOutsidePixels > 0) {
+      reasons.push(
+        `the ${look.name} look drew ${String(look.litOutsidePixels)} of ${String(look.outsidePixels)} pixels lit beyond the limb`,
+      );
+    }
+    if (!look.finite) {
+      reasons.push(`the ${look.name} look read a texel that is not finite`);
+    }
+  }
+  const peakCacheBytes = Math.max(
+    0,
+    ...record.phases.flatMap(
+      (phase) =>
+        phase.memory?.peakBytes
+          .filter((each) => each.category === "height-cache")
+          .map((each) => each.bytes) ?? [],
+    ),
+  );
+  const mostPatchesSelected = Math.max(
+    0,
+    ...record.phases.flatMap((phase) => phase.patchesSelected),
+  );
+  const patchesDrawn = record.phases.flatMap((phase) => phase.patchesDrawn);
+  const mostPatchesDrawn = Math.max(0, ...patchesDrawn);
+  const budget = whole.selectionBudget;
+  if (budget === null) {
+    reasons.push("no lit pass's selection budget was read");
+  } else if (mostPatchesSelected > budget) {
+    reasons.push(
+      `${String(mostPatchesSelected)} patches selected at once, over the selection's budget of ${String(budget)}`,
+    );
+  }
+  let cachePressureDraws: number | null = null;
+  for (const phase of record.phases) {
+    const pressure = phase.cachePressure;
+    if (pressure === null) {
+      continue;
+    }
+    cachePressureDraws = (cachePressureDraws ?? 0) + pressure.draws;
+    if (pressure.draws > 0) {
+      reasons.push(
+        `${phase.name}: the patch cache's pins passed its slots or it refused an arrival at ${String(pressure.draws)} of ${String(phase.patchesDrawn.length)} draws, the first at ${pressure.firstScriptS?.toFixed(2) ?? "—"} s of the script`,
+      );
+    }
+  }
+  const workerFieldBytes = Math.max(
+    0,
+    ...record.phases.map((phase) => phase.memory?.workerFieldBytes ?? 0),
+  );
+  return {
+    ...finding(reasons),
+    record: whole,
+    peakCacheBytes,
+    mostPatchesSelected,
+    mostPatchesDrawn,
+    drawnOverBudgetShare:
+      budget === null || patchesDrawn.length === 0
+        ? null
+        : patchesDrawn.filter((count) => count > budget).length / patchesDrawn.length,
+    cachePressureDraws,
+    workerFieldBytes,
+  };
+}
+
+/** A results file's run block: the run's description, its timer and why its figures are provisional. */
+function runBlock(
+  run: TerrainCheckRunInput,
+  timer: SpikePassTimer,
+  devicePixelRatio: number,
+): TerrainCheckResults["run"] {
+  const quiet = quietOf(run.platform, run.machine.loadAverage);
+  const load = run.machine.loadAverage[0];
+  const provisional = [
+    keepsLoadAverage(run.platform)
+      ? `load average ${load.toFixed(2)} at the start`
+      : QUIET_RULE_UNCHECKED,
+    ...(quiet.provisional ? ["a shared machine"] : []),
+    ...(run.shown ? [] : ["a hidden run: no presentation"]),
+    ...(run.smoke ? ["a smoke run: short windows"] : []),
+  ].join("; ");
+  return {
+    startedAt: run.startedAt.toISOString(),
+    machine: run.machine,
+    versions: run.versions,
+    platform: run.platform,
+    launchMode: run.launchMode,
+    setting: run.setting,
+    smoke: run.smoke,
+    ...fixtureRecord(run.fixture),
+    switches: run.switches,
+    shown: run.shown,
+    framePacing: run.framePacing,
+    frameRateHz: run.frameRateHz,
+    window: run.window,
+    devicePixelRatio,
+    timer,
+    captures: run.captures,
+    provisional: `provisional: ${provisional}`,
+  };
+}
+
+/** The schema name of a terrain run's finished phases, written as each ends. */
+export const TERRAIN_PHASES_SCHEMA = "hyperion.views-check.terrain-phases";
+
+/**
+ * The finished phases' schema's version; bumped with any change to the file's shape: 2 with the
+ * run's pacing and each phase's measured vsync, as the results file's version 6 (R07.T19).
+ */
+export const TERRAIN_PHASES_VERSION = 2;
+
+/** What a terrain run's finished phases are built from: its phases' records as each ended. */
+export interface TerrainPhasesInput {
+  readonly run: TerrainCheckRunInput;
+  readonly timer: SpikePassTimer;
+  readonly devicePixelRatio: number;
+  readonly phases: ReadonlyArray<TerrainCheckPhaseRecord>;
+}
+
+/**
+ * A terrain run's phases as each ended (R14's Mac measurements), so that a run stopped part-way
+ * keeps them: their figures as the results give them, judged by nothing; the run's results file,
+ * written as it ends, takes their place.
+ */
+export interface TerrainPhasesResults {
+  readonly schema: typeof TERRAIN_PHASES_SCHEMA;
+  readonly version: typeof TERRAIN_PHASES_VERSION;
+  readonly run: TerrainCheckResults["run"];
+  readonly phases: ReadonlyArray<TerrainPhaseFigures>;
+  readonly phaseWindows: TerrainCheckResults["phaseWindows"];
+}
+
+/** A run's finished phases, unjudged. */
+export function buildTerrainPhases(input: TerrainPhasesInput): TerrainPhasesResults {
+  const { run } = input;
+  return {
+    schema: TERRAIN_PHASES_SCHEMA,
+    version: TERRAIN_PHASES_VERSION,
+    run: runBlock(run, input.timer, input.devicePixelRatio),
+    phases: input.phases.map((phase) => phaseFigures(phase, run.setting)),
+    phaseWindows: input.phases.map(({ name, startMs, endMs }) => ({ name, startMs, endMs })),
+  };
+}
+
+/** The results of a run, judged. */
+export function buildTerrainCheckResults(input: TerrainCheckInput): TerrainCheckResults {
+  const { run, record } = input;
+  const phases = record.phases.map((phase) => phaseFigures(phase, run.setting));
+  const lossPhase = record.phases.find((phase) => phase.name === "terrain-loss");
+  const faults = terrainFaultsVerdict({
+    faults: record.faults,
+    restoresAtMs: record.restoresAtMs,
+    lossWindow:
+      lossPhase === undefined ? null : { startMs: lossPhase.startMs, endMs: lossPhase.endMs },
+    destroyedAtMs: record.loss.destroyedAtMs,
+    gpuProcessExits: input.gpuProcessExits,
+  });
+  const findings: TerrainCheckResults["findings"] = {
+    phases: phasesFinding(phases, run.setting),
+    framesDrawn: framesDrawnFinding(phases),
+    noStall: noStallFinding(phases, record),
+    framesFinite: framesFiniteFinding(phases),
+    terrainDrawn: terrainDrawnFinding(phases),
+    faults,
+    terrainFaults: { ...sessionFaultsFinding(record.terrainFaults), record: record.terrainFaults },
+    loss: { ...lossFinding(record.loss), record: record.loss },
+    teardown: { ...teardownFinding(record.teardown), record: record.teardown },
+    bothSurfaces: BOTH_SURFACES_HELD_BY,
+    handover: {
+      rangeM: record.handover?.rangeM ?? null,
+      expectedScriptS: record.handover?.scriptS ?? null,
+      observedScriptS:
+        phases.find((phase) => phase.name === "terrain-alone")?.views[0]?.firstHandoverScriptS ??
+        null,
+    },
+    consoleErrors: { count: input.consoleErrors.length, first: input.consoleErrors.slice(0, 5) },
+    ...(record.whole === undefined ? {} : { whole: wholeFinding(record.whole, record) }),
+  };
+  const verdicts = [
+    findings.phases,
+    findings.framesDrawn,
+    findings.noStall,
+    findings.framesFinite,
+    findings.terrainDrawn,
+    findings.faults,
+    findings.terrainFaults,
+    findings.loss,
+    findings.teardown,
+    ...(findings.whole === undefined ? [] : [findings.whole]),
+  ].map((each) => each.verdict);
+  return {
+    schema: TERRAIN_CHECK_SCHEMA,
+    version: TERRAIN_CHECK_VERSION,
+    run: runBlock(run, record.timer, record.devicePixelRatio),
+    phases,
+    findings,
+    sessions: record.sessions,
+    opening: record.opening,
+    span: record.span,
+    phaseWindows: record.phases.map(({ name, startMs, endMs }) => ({ name, startMs, endMs })),
+    overall: verdicts.every((verdict) => verdict === "pass") ? "pass" : "fail",
+  };
+}
+
+/** The reasons a run's results failed, as one line; empty for a pass. */
+export function terrainFailures(results: TerrainCheckResults): string {
+  const { findings } = results;
+  return [
+    findings.phases,
+    findings.framesDrawn,
+    findings.noStall,
+    findings.framesFinite,
+    findings.terrainDrawn,
+    findings.faults,
+    findings.terrainFaults,
+    findings.loss,
+    findings.teardown,
+    ...(findings.whole === undefined ? [] : [findings.whole]),
+  ]
+    .flatMap((each) => each.reasons)
+    .join("; ");
+}
+
+/** The whole-body run's row of the checks' table (plan R10, R10.T14.c). */
+function wholeRow(whole: TerrainWholeFinding): string {
+  const { record } = whole;
+  const looks = record.looks
+    .map((look) =>
+      look.kind === "read"
+        ? `${look.name}${look.settled ? "" : " (NOT settled)"} ${String(look.skyPixels)} of ${String(look.discPixels)} disc pixels sky, ${String(look.litOutsidePixels)} of ${String(look.outsidePixels)} lit beyond the limb`
+        : `${look.name} not read`,
+    )
+    .join("; ");
+  const decode =
+    record.decodeMs === null
+      ? "never held whole"
+      : `held whole ${record.decodeMs.toFixed(0)} ms after its first ask, the longest time between animation frames meanwhile ${record.decodeLongestFrameGapMs?.toFixed(0) ?? "—"} ms`;
+  const budget = record.selectionBudget;
+  const overBudget =
+    budget === null
+      ? ""
+      : ` (${String(Math.max(0, whole.mostPatchesDrawn - budget))} over the budget, in ${shareText(whole.drawnOverBudgetShare)} of draws)`;
+  const pins =
+    whole.cachePressureDraws === null
+      ? "not read"
+      : `past its slots at ${String(whole.cachePressureDraws)} draws`;
+  return `| The whole body held and drawn (every cell held, no off-survey state, no sky in its disc, the selection within its budget, the cache's pins within its slots) | ${whole.verdict} | ${String(record.heldCells)} of ${String(record.cells)} cells held; ${String(record.notSurveyedSamples)} NOT SURVEYED and ${String(record.surveyEdgeSamples)} SURVEY EDGE of ${String(record.textSamples)} samples; the field ${decode}; looks: ${looks}; the patch cache's peak ${String(whole.peakCacheBytes)} B (its budget ${String(record.cacheBytes)} B), at most ${String(whole.mostPatchesSelected)} patches selected of the selection's ${String(budget ?? "—")} and ${String(whole.mostPatchesDrawn)} drawn${overBudget}; the cache's pins ${pins}; the height workers' field ${String(whole.workerFieldBytes)} B${reasonsText(whole)} |`;
+}
+
+/** A figure's text, or its reason in brackets. */
+function textOf<T>(figure: Measured<T>, text: (value: T) => string): string {
+  return figure.value === null ? `— (${figure.reason})` : text(figure.value);
+}
+
+function ms(value: number): string {
+  return value >= 10 ? value.toFixed(1) : value.toFixed(2);
+}
+
+function durations(stats: DurationStats | null): string {
+  return stats === null ? "—" : `${ms(stats.p50Ms)} / ${ms(stats.p95Ms)} / ${ms(stats.maxMs)}`;
+}
+
+function mib(bytes: number): string {
+  return `${(bytes / 2 ** 20).toFixed(2)} MiB`;
+}
+
+function bytesText(entries: ReadonlyArray<TerrainCheckBytes>): string {
+  const held = entries.filter((each) => each.bytes > 0);
+  return held.length === 0
+    ? "none"
+    : held.map((each) => `${each.category} ${mib(each.bytes)}`).join(", ");
+}
+
+function reasonsText(entry: TerrainFinding): string {
+  return entry.reasons.length === 0 ? "" : ` — ${entry.reasons.join("; ")}`;
+}
+
+/** A share of the frame's GPU time, as a percentage. */
+function shareText(share: number | null): string {
+  return share === null ? "—" : `${(100 * share).toFixed(1)}%`;
+}
+
+/**
+ * The summary's section of the phases' GPU time by pass (R14's Mac measurements), or a line saying
+ * the run recorded none.
+ */
+function gpuPassLines(phases: ReadonlyArray<TerrainPhaseFigures>): ReadonlyArray<string> {
+  const timed = phases.filter((phase) => phase.gpuPasses !== null);
+  return [
+    "## GPU time by pass (provisional; R14's Mac measurements)",
+    "",
+    ...(timed.length === 0
+      ? ["None recorded: the run was not given `--hyperion-gpu-timing`."]
+      : [
+          "Each pass label's time over the phase's frames whose resolves all arrived, every view's passes of the label summed and 0 in a frame without one, the dearest first; a label a frame repeats is numbered from its second (`terrain shadows #2`). Durations as p50 / p95 / max ms; a `quantized` timer's are multiples of its quantum.",
+          "",
+          "| Phase | Pass | Frames | GPU | Mean (ms) | Share of the frame's GPU |",
+          "| --- | --- | --- | --- | --- | --- |",
+          ...timed.flatMap((phase) =>
+            (phase.gpuPasses ?? []).map(
+              (pass) =>
+                `| ${phase.name} | ${pass.label} | ${String(pass.gpuMs?.count ?? 0)} | ${durations(pass.gpuMs)} | ${pass.gpuMs === null ? "—" : ms(pass.gpuMs.meanMs)} | ${shareText(pass.shareOfGpu)} |`,
+            ),
+          ),
+        ]),
+    "",
+  ];
+}
+
+/** The summary's lines of the run: its machine, versions, launch, field and captures. */
+function runLines(run: TerrainCheckResults["run"]): ReadonlyArray<string> {
+  return [
+    `- **Machine:** ${run.machine.cpu}, ${String(run.machine.logicalCores)} threads; GPU ${textOf(run.machine.gpu, (gpu) => gpu.description ?? `${String(gpu.vendorId)}:${String(gpu.deviceId)}`)}; governor ${textOf(run.machine.governor, (governor) => governor)}; load average ${keepsLoadAverage(run.platform) ? run.machine.loadAverage.map((value) => value.toFixed(2)).join(", ") : "none"} (${run.provisional})`,
+    `- **Versions:** app ${run.versions.app}, Electron ${run.versions.electron}, Chromium ${run.versions.chromium}`,
+    `- **Launch:** ${run.platform}, ${run.launchMode} mode, timer ${run.timer}, setting ${run.setting}, window ${run.shown ? "shown" : "hidden"} ${String(run.window.widthDip)} × ${String(run.window.heightDip)} DIP at a device-pixel ratio of ${String(run.devicePixelRatio)}, pacing ${run.framePacing}${run.frameRateHz === null ? "" : `, offscreen frame clock ${String(run.frameRateHz)} Hz`}`,
+    ...fixtureNaming(run.fixture).lines,
+    `- **Captures (not committed):** ${textOf(run.captures, (dir) => `\`${dir}\``)}`,
+  ];
+}
+
+/**
+ * The summary's sections of the phases' figures, provisional: each phase's frames, its triangles,
+ * its GPU time by pass, its views and the session's memory at its end.
+ */
+function phaseLines(phases: ReadonlyArray<TerrainPhaseFigures>): ReadonlyArray<string> {
+  return [
+    "## Phases (provisional)",
+    "",
+    "Durations as p50 / p95 / max ms.",
+    "",
+    "| Phase | Held | Window (s) | Script (s) | Animation frames | Main thread | GPU frame | Patches drawn (mean, max; at the cache's pins past its slots) | Bakes (a second) | Field posts (init, chunk) | Asks, blocks |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    ...phases.map(
+      (phase) =>
+        `| ${phase.name} | ${phase.held ? "yes" : "NO"} | ${phase.windowS.toFixed(1)} | ${phase.script.startS.toFixed(1)} → ${phase.script.endS.toFixed(1)} | ${durations(phase.animationFrames)} | ${durations(phase.mainThreadMs)} | ${durations(phase.frameGpuMs)} | ${phase.patchesDrawn === null ? "—" : `${phase.patchesDrawn.mean.toFixed(1)}, ${String(phase.patchesDrawn.max)}; ${String(phase.cachePressure?.draws ?? "—")}`} | ${String(phase.bakes.baked)} (${phase.bakedPerS.toFixed(1)}) | ${String(phase.fieldPosts.inits)}, ${String(phase.fieldPosts.chunks)} | ${String(phase.fieldAsks)}, ${String(phase.blocksSent)} |`,
+    ),
+    "",
+    "## Triangles a frame (plan R14)",
+    "",
+    "The terrain's triangles at the primary's draws: its lit draws', and its shadow cascades' casters', every cascade's, over the draws that counted them (`TerrainPass.counts`).",
+    "",
+    "| Phase | Lit (mean, max; draws) | Casters (mean, max; draws) |",
+    "| --- | --- | --- |",
+    ...phases.map(
+      (phase) =>
+        `| ${phase.name} | ${countText(phase.triangles)} | ${countText(phase.casterTriangles)} |`,
+    ),
+    "",
+    ...gpuPassLines(phases),
+    "## Views (provisional)",
+    "",
+    "| Phase | View | Style | Canvas (px) | Draws | GPU (ms) | Submit (ms) | Hand-over (script s) | Terrain draws | Read-backs |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    ...phases.flatMap((phase) =>
+      phase.views.map(
+        (view) =>
+          `| ${phase.name} | ${view.slot} | ${view.style} | ${String(view.canvas.widthPx)} × ${String(view.canvas.heightPx)} | ${String(view.draws)} | ${durations(view.gpuMs)} | ${durations(view.submitMs)} | ${view.firstHandoverScriptS?.toFixed(1) ?? "—"} | ${String(view.terrainDraws)} of ${String(view.handedOverDraws)} | ${String(view.readBacks)} |`,
+      ),
+    ),
+    "",
+    "## The session's memory at each phase's end (provisional)",
+    "",
+    "| Phase | Workers' fields | Kept blocks | Session's textures | Terrain's GPU bytes alive | Their peak |",
+    "| --- | --- | --- | --- | --- | --- |",
+    ...phases.map((phase) =>
+      phase.memory === null
+        ? `| ${phase.name} | — | — | — | — | — |`
+        : `| ${phase.name} | ${mib(phase.memory.workerFieldBytes)} | ${mib(phase.memory.keptFieldBytes)} | ${bytesText(phase.memory.sessionGpuBytes)} | ${bytesText(phase.memory.liveBytes)} | ${bytesText(phase.memory.peakBytes)} |`,
+    ),
+    "",
+  ];
+}
+
+/** The results' summary, for a person reading the record. */
+export function terrainCheckMarkdown(results: TerrainCheckResults): string {
+  const { run, phases, findings } = results;
+  const loss = findings.loss.record;
+  const teardown = findings.teardown.record;
+  const handover = findings.handover;
+  return [
+    `# Terrain run: ${run.machine.name}, ${run.setting}, ${run.startedAt.slice(0, 10)}`,
+    "",
+    `- **Overall:** ${results.overall}`,
+    ...runLines(run),
+    "",
+    "## The hidden run's checks",
+    "",
+    "| Check | Verdict | Reading |",
+    "| --- | --- | --- |",
+    `| The setting's phases ran and held their views | ${findings.phases.verdict} | ${phases.map((phase) => `${phase.name}${phase.held ? "" : " (NOT held)"}`).join(", ")}${reasonsText(findings.phases)} |`,
+    `| Every frame drawn (no frame a view was due missed, outside the restore) | ${findings.framesDrawn.verdict} | missed frames: ${phases.map((phase) => `${phase.name} ${phase.views.map((view) => `${view.slot} ${String(view.missedFrames)}`).join(", ")}`).join("; ")}${reasonsText(findings.framesDrawn)} |`,
+    `| No view stopped (no time without a frame or a view's draw over ${String(findings.noStall.limitMs)} ms from VIEW's opening to the teardown, outside the restore) | ${findings.noStall.verdict} | the page's longest time between animation frames ${results.span.longestFrameGapMs.toFixed(0)} ms (${windowOf(results.phaseWindows, results.span.longestGapEndMs)}); the longest time between draws: ${phases.map((phase) => `${phase.name} ${phase.views.map((view) => `${view.slot} ${view.longestGapMs.toFixed(0)} ms${gapEnd(view)}`).join(", ")}`).join("; ")}${reasonsText(findings.noStall)} |`,
+    `| Every frame finite (the photorealistic scene targets read back) | ${findings.framesFinite.verdict} | ${String(findings.framesFinite.readBacks)} read-backs${reasonsText(findings.framesFinite)} |`,
+    `| The terrain drawn once handed over | ${findings.terrainDrawn.verdict} | ${phases.map((phase) => `${phase.name} ${phase.views.map((view) => `${view.slot} ${String(view.terrainDraws)} of ${String(view.handedOverDraws)} handed-over draws with a patch in view (${String(view.offSurveyDraws)} with none)${view.terrainDelayMs === null ? "" : `, first ${view.terrainDelayMs.toFixed(0)} ms after the hand-over`}`).join(", ")}`).join("; ")}${reasonsText(findings.terrainDrawn)} |`,
+    `| One forced loss, then one restore, and no other fault | ${findings.faults.verdict} | ${findings.faults.expected === null ? "no forced loss excluded" : `excluded: ${findings.faults.expected.line}`}; ${String(findings.faults.restores)} restores; ${String(findings.faults.others.length)} other faults; ${String(findings.faults.gpuProcessExits)} GPU-process exits${reasonsText(findings.faults)} |`,
+    `| No terrain fault (the session's terrainFaults never held a view) | ${findings.terrainFaults.verdict} | ${findings.terrainFaults.record.length === 0 ? "none" : `${String(findings.terrainFaults.record.length)} raised or changed`}${reasonsText(findings.terrainFaults)} |`,
+    `| The loss mid-stream, and after it no field asked again | ${findings.loss.verdict} | ${loss.destroyedAtScriptS === null ? "not destroyed" : `destroyed at ${loss.destroyedAtScriptS.toFixed(1)} s of the script, ${String(loss.blocksToCome)} blocks to come, ${String(loss.bakesInFlight)} bakes in flight`}; after: ${String(loss.after.fieldAsks)} asks, ${String(loss.after.fieldInits)} inits, ${String(loss.after.fieldChunks)} chunks for ${String(loss.after.blocksSent)} blocks to ${String(loss.workers)} workers; the mask ${String(loss.masks.before ?? "—")} cells before, ${String(loss.masks.afterRestore ?? "—")} after the restore, ${String(loss.masks.end ?? "—")} at the end of ${String(loss.masks.expected)}${reasonsText(findings.loss)} |`,
+    `| The session torn down | ${findings.teardown.verdict} | ${teardown.disposed ? "disposed" : "NOT disposed"}; ${String(teardown.workersLive)} of ${String(teardown.workersMade)} workers left; the session's textures ${String(teardown.sessionGpuBytes)} B; the terrain's GPU bytes left: ${bytesText(teardown.liveBytes)}${reasonsText(findings.teardown)} |`,
+    `| No pixel drawn by both surfaces on the datum | — | ${findings.bothSurfaces} |`,
+    ...(findings.whole === undefined ? [] : [wholeRow(findings.whole)]),
+    "",
+    `VIEW's opening (recorded, not judged): its views' ${String(results.opening.preparations)} preparations settled ${results.opening.preparedMs.toFixed(0)} ms after the run's start, the longest time between animation frames meanwhile ${results.opening.longestFrameGapMs === null ? "—" : `${results.opening.longestFrameGapMs.toFixed(0)} ms`}.`,
+    "",
+    `The sessions' materials, compiled as each is made, before its phases (judged by the same limit): ${results.sessions.length === 0 ? "no session made" : results.sessions.map(({ compile }, n) => `session ${String(n + 1)} ${compile.kind === "pending" ? "not compiled by the run's end" : `${String(compile.compiled)} compiled in ${compile.compileMs.toFixed(0)} ms, the longest time between animation frames meanwhile ${compile.longestFrameGapMs === null ? "—" : `${compile.longestFrameGapMs.toFixed(0)} ms`}`}`).join("; ")}.`,
+    "",
+    `The hand-over: ${handover.rangeM === null ? "no range" : `range ${(handover.rangeM / 1000).toFixed(0)} km, crossed at ${handover.expectedScriptS?.toFixed(1) ?? "—"} s of the script`}; the primary handed over at ${handover.observedScriptS?.toFixed(1) ?? "—"} s. Console errors: ${String(findings.consoleErrors.count)}${findings.consoleErrors.first.length === 0 ? "" : ` (${findings.consoleErrors.first.join(" | ")})`}.`,
+    "",
+    ...phaseLines(phases),
+  ].join("\n");
+}
+
+/** The finished phases' summary: the phases' figures so far, and that nothing is judged yet. */
+export function terrainPhasesMarkdown(partial: TerrainPhasesResults): string {
+  const { run, phases } = partial;
+  return [
+    `# Terrain run's finished phases: ${run.machine.name}, ${run.setting}, ${run.startedAt.slice(0, 10)}`,
+    "",
+    `Written as each phase ended, the last ${phases.at(-1)?.name ?? "none"}: the run stopped before it wrote its results, or has not ended yet. No check is judged here; the results file, written as the run ends, takes this file's place.`,
+    "",
+    ...runLines(run),
+    "",
+    ...phaseLines(phases),
+  ].join("\n");
+}
+
+/** The name a run's files are given before a repeat's `-2` or a stopped run's `-partial`. */
+function terrainStem(run: TerrainCheckResults["run"]): string {
+  return `${run.startedAt.slice(0, 10)}-${run.machine.name}-${run.setting}-terrain${fixtureNaming(run.fixture).stem}${run.smoke ? "-smoke" : ""}`;
+}
+
+/**
+ * A terrain run's files in `dir`, under one name taken at the first write: its finished phases as
+ * each phase ends, `<name>-partial.json` and `.md` (R14's Mac measurements), then its results,
+ * `<name>.json` and `.md`, which take their place. The name is
+ * `<date>-<machine>-<setting>-terrain`, `-terrain-weathered` for a run on the weathered fixture
+ * (R10.T1.c), with `-smoke` before the extension for a smoke run, and `-2`, `-3` and so on added
+ * where a run of the same name, or a stopped run's finished phases, is there.
+ */
+export class TerrainResultsWriter {
+  readonly #dir: string;
+  readonly #files: PartialResultsFiles;
+  #name: string | null = null;
+  #wrotePhases = false;
+
+  constructor(dir: string, files: PartialResultsFiles = NODE_PARTIAL_FILES) {
+    this.#dir = dir;
+    this.#files = files;
+  }
+
+  /**
+   * Writes the run's finished phases and their summary, in place of those written before.
+   *
+   * @throws Error if the day's names are used up.
+   */
+  async writePhases(
+    partial: TerrainPhasesResults,
+  ): Promise<{ readonly json: string; readonly markdown: string }> {
+    const paths = this.#paths(`${await this.#nameOf(partial.run)}${PARTIAL_SUFFIX}`);
+    await this.#files.writeFile(paths.json, `${JSON.stringify(partial, null, 2)}\n`);
+    await this.#files.writeFile(paths.markdown, terrainPhasesMarkdown(partial));
+    this.#wrotePhases = true;
+    return paths;
+  }
+
+  /**
+   * Writes the results and their summary, warns of a file over the repository's limit for added
+   * files, and removes the finished phases' files this writer wrote.
+   *
+   * @throws Error if the day's names are used up.
+   */
+  async writeResults(
+    results: TerrainCheckResults,
+  ): Promise<{ readonly json: string; readonly markdown: string }> {
+    const name = await this.#nameOf(results.run);
+    const { json, markdown } = this.#paths(name);
+    const text = `${JSON.stringify(results, null, 2)}\n`;
+    await this.#files.writeFile(json, text);
+    await this.#files.writeFile(markdown, terrainCheckMarkdown(results));
+    const bytes = Buffer.byteLength(formatAsPrettier(text), "utf8");
+    if (bytes > ADDED_FILE_LIMIT_BYTES) {
+      console.warn(
+        `views check: ${json} is ${String(bytes)} B once formatted, over the ${String(ADDED_FILE_LIMIT_BYTES)} B the repository accepts for an added file`,
+      );
+    }
+    if (this.#wrotePhases) {
+      const partial = this.#paths(`${name}${PARTIAL_SUFFIX}`);
+      await this.#files.remove(partial.json);
+      await this.#files.remove(partial.markdown);
+    }
+    return { json, markdown };
+  }
+
+  async #nameOf(run: TerrainCheckResults["run"]): Promise<string> {
+    if (this.#name === null) {
+      await this.#files.mkdir(this.#dir);
+      this.#name = await freeResultsName(this.#dir, terrainStem(run), this.#files);
+    }
+    return this.#name;
+  }
+
+  #paths(name: string): { readonly json: string; readonly markdown: string } {
+    return { json: join(this.#dir, `${name}.json`), markdown: join(this.#dir, `${name}.md`) };
+  }
+}
+
+/**
+ * Writes a run's results and their summary into `dir`, under {@link TerrainResultsWriter}'s name,
+ * where no finished phases were written first.
+ *
+ * @throws Error if the day's names are used up.
+ */
+export async function writeTerrainResults(
+  dir: string,
+  results: TerrainCheckResults,
+  files: PartialResultsFiles = NODE_PARTIAL_FILES,
+): Promise<{ readonly json: string; readonly markdown: string }> {
+  return new TerrainResultsWriter(dir, files).writeResults(results);
+}

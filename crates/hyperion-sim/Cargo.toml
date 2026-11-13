@@ -20,8 +20,9 @@ hyperion-surface.workspace = true
 
 [features]
 # Test helpers (`events::testing`, `planetary::testing`, `stellar::testing`) for this crate's tests
-# and for other crates' tests.
-testing = []
+# and for other crates' tests, with the surface crate's (`hyperion_surface::testing`, rendering plan
+# R09) for the tests of the coarse pass and of the server's surface service.
+testing = ["hyperion-surface/testing"]
 
 [dev-dependencies]
 criterion.workspace = true
@@ -79,9 +80,37 @@ harness = false
 name = "centre"
 harness = false
 
+[[bench]]
+name = "planetary"
+harness = false
+# `planetary::testing::sample_contexts` builds (ii)'s field systems.
+required-features = ["testing"]
+
+[[bench]]
+name = "global_list"
+harness = false
+# `global_list::testing::pal5_like` is the stream the tube table's bench builds (P10.T6.c).
+required-features = ["testing"]
+
 [lints]
 workspace = true
 
 [[bench]]
 name = "sky"
 harness = false
+
+[[bench]]
+name = "surface"
+harness = false
+# `planetary::surface::reference` builds the reference Earth.
+required-features = ["testing"]
+
+[[example]]
+name = "surface_map"
+# `planetary::surface::reference` builds the reference Earth (R09.T15).
+required-features = ["testing"]
+
+[[example]]
+name = "trunk_map"
+# `planetary::surface::reference` builds the reference Mars (R09.T6.c's look).
+required-features = ["testing"]

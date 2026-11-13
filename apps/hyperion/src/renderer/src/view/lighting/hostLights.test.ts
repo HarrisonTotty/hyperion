@@ -8,6 +8,7 @@ import { precisionScene } from "../scenes/precision";
 import { annulusEdges, DISC_ANNULI_HIGH, DISC_ANNULI_LOW } from "./annuli";
 import {
   HOST_ANNULI_KEPT,
+  heldHostDiscs,
   hostAnnuli,
   hostLights,
   lightingState,
@@ -36,13 +37,36 @@ describe("hostLights", () => {
 });
 
 describe("sceneHostDiscs", () => {
+  const server = { ...phase, provenance: { kind: "server" as const } };
+  const hosts = [aHostDisc({ star: 3 })];
+  /** A held sky that left `system` out, or none, carrying `hosts`. */
+  const skyOf = (system: string | null) => ({
+    request: { exclude_system: system },
+    response: { hosts },
+  });
+  const asked = { universe: "000000000000002a", system: phase.system, discs: [aHostDisc()] };
+
   it("lights a kept scene by its own discs and a server scene by its sky's", () => {
-    const sky = [aHostDisc({ star: 3 })];
-    expect(sceneHostDiscs(phase, sky)).toBe(phase.hostDiscs);
-    expect(sceneHostDiscs(precisionScene().sceneAt(0), sky)).toEqual([]);
-    const server = { ...phase, provenance: { kind: "server" as const } };
-    expect(sceneHostDiscs(server, sky)).toBe(sky);
-    expect(sceneHostDiscs(server, null)).toEqual([]);
+    expect(sceneHostDiscs(phase, skyOf(phase.system), asked)).toBe(phase.hostDiscs);
+    expect(sceneHostDiscs(precisionScene().sceneAt(0), skyOf(phase.system), null)).toEqual([]);
+    expect(sceneHostDiscs(server, skyOf(phase.system), null)).toBe(hosts);
+    expect(sceneHostDiscs(server, null, null)).toEqual([]);
+  });
+
+  it("lights a server scene by its system's discs on their own until a sky naming it is held", () => {
+    expect(sceneHostDiscs(server, null, asked)).toBe(asked.discs);
+    // A sky held names the system: its hosts, as before the discs on their own.
+    expect(sceneHostDiscs(server, skyOf(phase.system), asked)).toBe(hosts);
+    // A sky that left no system out, the planet viewer's one sky, or another's, names none.
+    expect(sceneHostDiscs(server, skyOf(null), asked)).toBe(asked.discs);
+    expect(sceneHostDiscs(server, skyOf("0000000000000001"), asked)).toBe(asked.discs);
+    // Another system's discs light nothing.
+    expect(sceneHostDiscs(server, null, { ...asked, system: "0000000000000001" })).toEqual([]);
+  });
+
+  it("says no discs are held while neither names the scene's system", () => {
+    expect(heldHostDiscs(server, skyOf(null), null)).toBeNull();
+    expect(heldHostDiscs(server, skyOf(phase.system), null)).toBe(hosts);
   });
 });
 

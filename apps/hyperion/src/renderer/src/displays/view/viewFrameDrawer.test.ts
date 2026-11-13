@@ -1,9 +1,46 @@
+import type { BodyIdHex } from "@hyperion/protocol";
 import { describe, expect, it, vi } from "vitest";
 
+import { add, norm, normalise, scale, vec3 } from "../../geometry/vec3";
+import { moonLikeHeader } from "../../test/coarseFieldFixtures";
 import { countingRenderEngine } from "../../test/countingRenderEngine";
+import { aViewCraft, NO_TURN } from "../../test/viewFixtures";
+import { rotate } from "../../view/camera/quaternion";
 import { EngineUnavailable } from "../../view/engine/resilientEngine";
-import type { FrameSubmission, RenderView } from "../../view/engine/types";
-import { makeViewFrameDrawer, skyFaceSizePx, type ViewFrameDrawer } from "./viewFrameDrawer";
+import type { DrawItem, FrameSubmission, RenderView, TextureHandle } from "../../view/engine/types";
+import { viewId } from "../../view/camera/state";
+import { relativeToCamera } from "../../view/coords/relative";
+import { IDENTITY_ROTATION, rotateToBodyFixed } from "../../view/coords/rotation";
+import { DEFAULT_EXPOSURE } from "../../view/photometry/exposure";
+import { PHOTOREAL_PASS_LABELS } from "../../view/photoreal/passes";
+import { sceneOrigins, type ViewStar } from "../../view/scene/model";
+import { ATMOSPHERE_STARS } from "../../view/scenes/atmosphereScene";
+import { PHASE_GIANT, PHASE_PLANETS, phaseScene } from "../../view/scenes/phaseScene";
+import { CoverageView, fieldCellIndex } from "../../view/terrain/coverage";
+import { ANNUNCIATION_ONSET_MS } from "../../view/terrain/annunciation";
+import { handoverTauPx, limbDistanceM, pixelAngleRad } from "../../view/terrain/handover";
+import type {
+  FrameTerrainPass,
+  ViewTerrainSession,
+  ViewTerrainSource,
+} from "../../view/terrain/frameTerrain";
+import { PoseIntervals } from "../../view/terrain/poseInterval";
+import type { ResidentHeightsView } from "../../view/terrain/residentHeights";
+import { SETTINGS } from "../../view/quality/qualitySetting";
+import type { TerrainViewFrameInput } from "../../view/terrain/terrainPass";
+import { heightAboveGroundM } from "../../view/terrain/terrainWire";
+import { buildWireframeDrawList, viewStrokesAt } from "../../view/wireframe/drawList";
+import {
+  frameStyleOf,
+  makeViewFrameDrawer,
+  presentedViewport,
+  skyFaceSizePx,
+  terrainReportOf,
+  ViewFrameDrawer,
+  type ViewFrameDrawn,
+  type ViewFrameInputs,
+} from "./viewFrameDrawer";
+import { runPose, startRun, type ViewRun } from "./viewRun";
 
 /** A canvas view that records whether it was disposed. */
 class RecordingView implements RenderView {
@@ -77,6 +114,482 @@ describe("a view's frame drawer, made during a device loss (R07.T19.c)", () => {
   });
 });
 
+/** Stand-in colours, one distinct colour per token, as `readTokens` would read them. */
+const TOKENS = {
+  text: "#e0e0e0",
+  textMuted: "#909090",
+  accent: "#40a0ff",
+  target: "#ff40ff",
+  line: "#404040",
+  surface0: "#000000",
+} as const;
+
+/** The phase scene's run, its planets turning (their rotations the identity) where `rotated`. */
+function phaseRun(rotated: boolean): ReturnType<typeof startRun> {
+  const run = startRun(phaseScene());
+  return rotated
+    ? {
+        ...run,
+        scene: {
+          ...run.scene,
+          bodies: run.scene.bodies.map((body) =>
+            body.kind === "star" ? body : { ...body, rotation: IDENTITY_ROTATION },
+          ),
+        },
+      }
+    : run;
+}
+
+/** The phase scene's frame drawn photorealistically, at 320 × 180, with the view's `sources`. */
+async function drawPhotoreal(
+  sources: Pick<ViewFrameInputs, "classMaps" | "reliefs" | "terrain">,
+  rotated = false,
+): Promise<void> {
+  const engine = await countingRenderEngine();
+  const drawer = new ViewFrameDrawer(engine, new RecordingView("view"), "view");
+  drawer.draw({
+    run: phaseRun(rotated),
+    size: { widthPx: 320, heightPx: 180, devicePixelRatio: 1, remPx: 16 },
+    tokens: TOKENS,
+    exposure: DEFAULT_EXPOSURE,
+    white: null,
+    stars: [],
+    sky: null,
+    hostDiscs: null,
+    selection: null,
+    style: "photorealistic",
+    setting: "low",
+    geometry: undefined,
+    renderScale: 1,
+    availability: { wireframe: true, photorealistic: true },
+    meter: null,
+    ...sources,
+  });
+  drawer.dispose();
+}
+
+describe("a view's photorealistic frame (R10.T10.d, T10.e)", () => {
+  const LIT = [...PHASE_PLANETS, PHASE_GIANT];
+
+  it("shades its lit bodies with the view's class maps", async () => {
+    const asked: string[] = [];
+    await drawPhotoreal({
+      classMaps: {
+        classMapOf: (body) => {
+          asked.push(body);
+          return null;
+        },
+      },
+    });
+    expect(asked).toEqual(LIT);
+  });
+
+  it("hands its lit bodies with a rotation over by the view's reliefs", async () => {
+    const asked: string[] = [];
+    await drawPhotoreal(
+      {
+        reliefs: {
+          reliefM: (body) => {
+            asked.push(body);
+            return null;
+          },
+        },
+      },
+      true,
+    );
+    expect(asked).toEqual(LIT);
+  });
+
+  it("draws its lit bodies over the view's own terrain of the session (R10.T16.c)", async () => {
+    const asked: string[] = [];
+    await drawPhotoreal({
+      terrain: {
+        source: {
+          wanted: new Set(),
+          survey: () => null,
+          drawTerrain: () => null,
+          coverageMask: () => null,
+          coverageWhole: () => false,
+          drawLateTerrain: () => [],
+          wirePass: () => null,
+          drawWireTerrain: () => null,
+          pass: (body) => {
+            asked.push(body);
+            return null;
+          },
+          failComputation: () => undefined,
+        },
+        view: viewId("primary"),
+        nowMs: 0,
+      },
+    });
+    expect(asked).toEqual(LIT);
+  });
+});
+
+/** Each mark a frame drew: its target and its label's kind, `null` for none. */
+function marks(drawn: ViewFrameDrawn | null): ReadonlyArray<readonly [string, string | null]> {
+  return (drawn?.anchors ?? []).map((anchor) => [
+    anchor.target.kind === "body" ? anchor.target.body : anchor.target.craft,
+    anchor.label?.kind ?? null,
+  ]);
+}
+
+describe("a view's photorealistic frame with its GRID at OFF, the picture alone (the owner's request, 2026-11-05)", () => {
+  /**
+   * The phase scene's run with another craft 10⁸ m along the camera's line of sight, and its second
+   * planet, in view, shrunk to 1 m, drawn as its symbol: a scene with a mark of each label's kind.
+   */
+  function markedRun(): ViewRun {
+    const run = phaseRun(false);
+    const pose = runPose(run);
+    if (pose.frame.kind !== "system") {
+      throw new Error("the phase scene's camera is not in its system's frame");
+    }
+    const craft = aViewCraft({
+      id: "other",
+      designation: "OTHER",
+      pose: {
+        position: {
+          kind: "system",
+          system: pose.frame.system,
+          m: add(pose.positionM, scale(rotate(pose.orientation, vec3(0, 0, -1)), 1e8)),
+        },
+        attitude: NO_TURN,
+      },
+    });
+    const [, small] = PHASE_PLANETS;
+    return {
+      ...run,
+      scene: {
+        ...run.scene,
+        bodies: run.scene.bodies.map((body) =>
+          body.id === small ? Object.assign({}, body, { radiusM: 1 }) : body,
+        ),
+        craft: [...run.scene.craft, craft],
+      },
+    };
+  }
+
+  /**
+   * What a drawer whose pipelines are made drew of `run` at `grid`, its readout's point as given:
+   * its passes and its frame.
+   */
+  async function drawnAt(
+    run: ViewRun,
+    grid: boolean,
+    lineOfSightPoint?: ViewFrameInputs["lineOfSightPoint"],
+  ): Promise<{ readonly passes: ReadonlyArray<string>; readonly drawn: ViewFrameDrawn | null }> {
+    const engine = await countingRenderEngine();
+    const view = new RecordingView("view");
+    const drawer = new ViewFrameDrawer(engine, view, "view");
+    const inputs: ViewFrameInputs = {
+      run,
+      size: { widthPx: 1280, heightPx: 720, devicePixelRatio: 1, remPx: 16 },
+      tokens: TOKENS,
+      exposure: DEFAULT_EXPOSURE,
+      white: null,
+      stars: [],
+      sky: null,
+      hostDiscs: null,
+      selection: null,
+      style: "photorealistic",
+      setting: "low",
+      geometry: undefined,
+      renderScale: 1,
+      availability: { wireframe: true, photorealistic: true },
+      meter: null,
+      grid,
+      ...(lineOfSightPoint === undefined ? {} : { lineOfSightPoint }),
+    };
+    // The first photorealistic frame draws the wireframe while its pipelines compile.
+    drawer.draw(inputs);
+    await vi.waitFor(() => {
+      expect(drawer.photorealStatus).toBe("ready");
+    });
+    const from = view.frames.length;
+    const drawn = drawer.draw(inputs);
+    drawer.dispose();
+    return { passes: view.frames.slice(from).map((frame) => frame.label), drawn };
+  }
+
+  it("draws no symbology pass over a frame that holds no stand-in", async () => {
+    const { passes, drawn } = await drawnAt(phaseRun(false), false);
+    expect([drawn?.drawnStyle, passes.includes(PHOTOREAL_PASS_LABELS.symbology)]).toEqual([
+      "photorealistic",
+      false,
+    ]);
+  });
+
+  it("draws the symbology pass over that frame at ON", async () => {
+    const { passes } = await drawnAt(phaseRun(false), true);
+    expect(passes.at(-1)).toBe(PHOTOREAL_PASS_LABELS.symbology);
+  });
+
+  it("marks no line of sight over the picture alone, so that no survey edge keeps its ticks clear of it", async () => {
+    const { drawn } = await drawnAt(phaseRun(false), false, { hasPoint: true, rangeM: null });
+    expect([drawn?.drawnStyle, drawn?.lineOfSight]).toEqual(["photorealistic", null]);
+  });
+
+  it("draws the symbology pass for a craft's stand-in over the image", async () => {
+    const { passes } = await drawnAt(markedRun(), false);
+    expect(passes.at(-1)).toBe(PHOTOREAL_PASS_LABELS.symbology);
+  });
+
+  it("labels no mark, and leaves out a body drawn as its symbol, keeping each disc and craft to pick", async () => {
+    const on = marks((await drawnAt(markedRun(), true)).drawn);
+    const off = marks((await drawnAt(markedRun(), false)).drawn);
+    expect({
+      kinds: [...new Set(on.map(([, kind]) => String(kind)))].toSorted((a, b) =>
+        a.localeCompare(b),
+      ),
+      off,
+    }).toEqual({
+      kinds: ["null", "symbol", "target"],
+      off: on.filter(([, kind]) => kind !== "symbol").map(([target]) => [target, null] as const),
+    });
+  });
+});
+
+describe("a view's hand-over at its frame's internal scale (R10.T10.g)", () => {
+  /** The presented size: 1080 rows, which the low setting renders at 720. */
+  const PRESENTED = { widthPx: 1920, heightPx: 1080 };
+
+  /**
+   * Each lit body of the turning phase scene its relief at `reliefTau` × the setting's τ at its limb,
+   * in the presented centre pixels, where its disc spans 12 presented px or more, and none for a
+   * smaller one, which a frame's internal scale could make a point.
+   */
+  function reliefsOf(
+    run: ViewRun,
+    setting: "high" | "low",
+    reliefTau: number,
+  ): NonNullable<ViewFrameInputs["reliefs"]> {
+    const pose = runPose(run);
+    const origins = sceneOrigins(run.scene);
+    const radPerPx = pixelAngleRad(
+      { orientation: pose.orientation, fovXRad: (run.camera.fovDeg * Math.PI) / 180 },
+      PRESENTED,
+    );
+    return {
+      reliefM: (id) => {
+        const body = run.scene.bodies.find((each) => each.id === id);
+        if (body === undefined) {
+          return null;
+        }
+        const distanceM = norm(
+          relativeToCamera({ kind: "body", body: id, m: vec3(0, 0, 0) }, pose, origins),
+        );
+        if ((2 * Math.asin(body.radiusM / distanceM)) / radPerPx < 12) {
+          return null;
+        }
+        const limbM = limbDistanceM(distanceM, body.radiusM);
+        return reliefTau * handoverTauPx("photorealistic", setting) * limbM * radPerPx;
+      },
+    };
+  }
+
+  /**
+   * The bodies a drawer's photorealistic frame of the phase scene hands over, its stage
+   * {@link PRESENTED}'s size in CSS px at a device-pixel ratio of `ratio`.
+   */
+  async function handedOver(
+    setting: "high" | "low",
+    renderScale: number,
+    reliefTau: number,
+    ratio = 1,
+    planned: (drawer: ViewFrameDrawer, run: ViewRun) => void = () => undefined,
+  ): Promise<string[]> {
+    const run = phaseRun(true);
+    const inputs: ViewFrameInputs = {
+      run,
+      size: { ...PRESENTED, devicePixelRatio: ratio, remPx: 16 },
+      tokens: TOKENS,
+      exposure: DEFAULT_EXPOSURE,
+      white: null,
+      stars: [],
+      sky: null,
+      hostDiscs: null,
+      selection: null,
+      style: "photorealistic",
+      setting,
+      geometry: undefined,
+      renderScale,
+      availability: { wireframe: true, photorealistic: true },
+      meter: null,
+      reliefs: reliefsOf(run, setting, reliefTau),
+    };
+    const engine = await countingRenderEngine();
+    const drawer = new ViewFrameDrawer(engine, new RecordingView("view"), "view");
+    // The first frame draws the wireframe while its pipelines compile, and plans no regimes.
+    drawer.draw(inputs);
+    await vi.waitFor(() => {
+      expect(drawer.photorealStatus).toBe("ready");
+    });
+    drawer.draw(inputs);
+    const handed = [...drawer.regimes].flatMap(([id, regime]) =>
+      regime === "terrain" ? [id] : [],
+    );
+    planned(drawer, run);
+    drawer.dispose();
+    return handed;
+  }
+
+  it("keeps each body it hands over's centre from the camera at its plan (the owner's Mac A/B)", async () => {
+    let from: ReadonlyArray<readonly [string, number[]]> = [];
+    let expected: ReadonlyArray<readonly [string, number[]]> = [];
+    const handed = await handedOver("high", 1, 1.5, 1, (drawer, run) => {
+      from = [...drawer.regimesFromM].map(([id, m]) => [id, [m.x, m.y, m.z]] as const);
+      expected = [...drawer.regimes].flatMap(([id, regime]) => {
+        if (regime !== "terrain") {
+          return [];
+        }
+        const m = relativeToCamera(
+          { kind: "body", body: id, m: vec3(0, 0, 0) },
+          runPose(run),
+          sceneOrigins(run.scene),
+        );
+        return [[id, [m.x, m.y, m.z]] as const];
+      });
+    });
+    expect([handed.length > 0, from]).toEqual([true, expected]);
+  });
+
+  it.each(["high", "low"] as const)(
+    "hands the same bodies over at an internal scale of 0.5 as at 1 on %s, a relief of 1.5 τ",
+    async (setting) => {
+      const whole = await handedOver(setting, 1, 1.5);
+      expect(whole.length).toBeGreaterThan(0);
+      expect(await handedOver(setting, 0.5, 1.5)).toEqual(whole);
+    },
+  );
+
+  it.each(["high", "low"] as const)(
+    "hands the same bodies over at a device-pixel ratio of 2 as at 1 on %s, by its CSS px (lean 2026-11-01)",
+    async (setting) => {
+      const whole = await handedOver(setting, 1, 1.5);
+      expect(whole.length).toBeGreaterThan(0);
+      expect(await handedOver(setting, 1, 1.5, 2)).toEqual(whole);
+    },
+  );
+
+  it("hands none over at a ratio of 2 at a relief of 0.75 τ, which its device px would count as 1.5 τ", async () => {
+    expect(await handedOver("high", 1, 0.75, 2)).toEqual([]);
+  });
+
+  it("hands none over at either scale on either setting at a relief of 0.5 τ", async () => {
+    const handed = await Promise.all(
+      (["high", "low"] as const).flatMap((setting) =>
+        [1, 0.5].map((renderScale) => handedOver(setting, renderScale, 0.5)),
+      ),
+    );
+    expect(handed.flat()).toEqual([]);
+  });
+});
+
+describe("what a view drew, for the terrain session (R10.T16.a)", () => {
+  const LIT = [...PHASE_PLANETS, PHASE_GIANT];
+
+  /** The phase scene's frame inputs at 320 × 180 CSS px and a ratio of `ratio`, in `style`. */
+  function inputsOf(style: "photorealistic" | "wireframe", ratio = 1): ViewFrameInputs {
+    return {
+      run: startRun(phaseScene()),
+      size: { widthPx: 320, heightPx: 180, devicePixelRatio: ratio, remPx: 16 },
+      tokens: TOKENS,
+      exposure: DEFAULT_EXPOSURE,
+      white: null,
+      stars: [],
+      sky: null,
+      hostDiscs: null,
+      selection: null,
+      style,
+      setting: "low",
+      geometry: undefined,
+      renderScale: 1,
+      availability: { wireframe: true, photorealistic: true },
+      meter: null,
+    };
+  }
+
+  /** A drawer that has drawn the phase scene's photorealistic frame, its pipelines made. */
+  async function plannedDrawer(): Promise<ViewFrameDrawer> {
+    const engine = await countingRenderEngine();
+    const drawer = new ViewFrameDrawer(engine, new RecordingView("view"), "view");
+    // The first frame draws the wireframe while its pipelines compile, and plans no regimes.
+    drawer.draw(inputsOf("photorealistic"));
+    await vi.waitFor(() => {
+      expect(drawer.photorealStatus).toBe("ready");
+    });
+    drawer.draw(inputsOf("photorealistic"));
+    return drawer;
+  }
+
+  it("plans no regimes before a photorealistic frame", async () => {
+    const engine = await countingRenderEngine();
+    const drawer = new ViewFrameDrawer(engine, new RecordingView("view"), "view");
+    const regimes = drawer.regimes.size;
+    drawer.dispose();
+    expect(regimes).toBe(0);
+  });
+
+  it("keeps its last photorealistic plan's regimes", async () => {
+    const drawer = await plannedDrawer();
+    const regimes = [...drawer.regimes.keys()];
+    drawer.dispose();
+    expect(regimes).toEqual(LIT);
+  });
+
+  it("keeps them through a frame drawn in the wireframe", async () => {
+    const drawer = await plannedDrawer();
+    const planned = drawer.regimes;
+    drawer.draw(inputsOf("wireframe"));
+    const kept = drawer.regimes;
+    drawer.dispose();
+    expect([planned.size > 0, kept === planned]).toEqual([true, true]);
+  });
+
+  it("reports its scene, pose, field of view, presented and selection sizes, styles, setting and priority", () => {
+    const inputs = inputsOf("wireframe", 1.5);
+    const regimes = new Map();
+    expect(terrainReportOf(inputs, regimes, "secondary", "photorealistic", null)).toEqual({
+      scene: inputs.run.scene,
+      pose: runPose(inputs.run),
+      fovXRad: (inputs.run.camera.fovDeg * Math.PI) / 180,
+      presentedPx: { widthPx: 480, heightPx: 270 },
+      // Its CSS px, at which its terrain selects (lean 2026-11-01).
+      selectionPx: { widthPx: 320, heightPx: 180 },
+      style: "wireframe",
+      drawnStyle: "photorealistic",
+      setting: "low",
+      streamPriority: "secondary",
+      regimes,
+      regimesFromM: null,
+    });
+  });
+
+  it("reports nothing while its stage is not laid out", () => {
+    expect(
+      terrainReportOf(
+        { ...inputsOf("wireframe"), size: null },
+        new Map(),
+        "primary",
+        "wireframe",
+        null,
+      ),
+    ).toBe(null);
+  });
+
+  it("presents at its stage's size times its ratio, rounded, at least a pixel", () => {
+    expect([
+      presentedViewport({ widthPx: 320.4, heightPx: 180, devicePixelRatio: 1.25, remPx: 16 }),
+      presentedViewport({ widthPx: 0.2, heightPx: 0.1, devicePixelRatio: 1, remPx: 16 }),
+    ]).toEqual([
+      { widthPx: 401, heightPx: 225 },
+      { widthPx: 1, heightPx: 1 },
+    ]);
+  });
+});
+
 describe("the sky cube's face size (R07.T17)", () => {
   it.each([
     { setting: "high", blendable: true, faceSizePx: 3_072 },
@@ -89,4 +602,979 @@ describe("the sky cube's face size (R07.T17)", () => {
       expect(skyFaceSizePx(setting, blendable)).toBe(faceSizePx);
     },
   );
+});
+
+describe("the style a view's frame is drawn in, foreseen (the batch review's S8)", () => {
+  it.each([
+    ["photorealistic", true, "ready", "photorealistic"],
+    ["photorealistic", true, "making", "wireframe"],
+    ["photorealistic", true, "failed", "wireframe"],
+    ["photorealistic", false, "ready", "wireframe"],
+    ["wireframe", true, "ready", "wireframe"],
+  ] as const)(
+    "is %s asked, available %s, pipelines %s: %s",
+    (style, photorealistic, status, drawn) => {
+      expect(
+        frameStyleOf({ style, availability: { wireframe: true, photorealistic } }, status),
+      ).toBe(drawn);
+    },
+  );
+});
+
+describe("a view's datum inside its bodies' figures over the image (R10.T16.g)", () => {
+  /** The phase scene's planets at 1280 × 720, the 90° one, 71 px across, with its datum drawn. */
+  const SIZE = { widthPx: 1280, heightPx: 720, devicePixelRatio: 1, remPx: 16 } as const;
+
+  /** The phase scene's frame inputs in `style`, its planets turning. */
+  function inputsIn(style: "photorealistic" | "wireframe"): ViewFrameInputs {
+    return {
+      run: phaseRun(true),
+      size: SIZE,
+      tokens: TOKENS,
+      exposure: DEFAULT_EXPOSURE,
+      white: null,
+      stars: [],
+      sky: null,
+      hostDiscs: null,
+      selection: null,
+      style,
+      setting: "low",
+      geometry: undefined,
+      renderScale: 1,
+      availability: { wireframe: true, photorealistic: true },
+      meter: null,
+    };
+  }
+
+  /**
+   * The style a frame in `style` was drawn in by a drawer whose photorealistic pipelines are made,
+   * and the segments its lines were packed with, eight `f32` each as the wireframe's renderer
+   * writes them, the symbology's over the image.
+   */
+  async function drawnIn(
+    style: "photorealistic" | "wireframe",
+  ): Promise<{ readonly drawnStyle: string | undefined; readonly rows: ReadonlyArray<number> }> {
+    const engine = await countingRenderEngine();
+    const drawer = new ViewFrameDrawer(engine, new RecordingView("view"), "view");
+    // The first photorealistic frame draws the wireframe while its pipelines compile.
+    drawer.draw(inputsIn("photorealistic"));
+    await vi.waitFor(() => {
+      expect(drawer.photorealStatus).toBe("ready");
+    });
+    const from = engine.writes.length;
+    const drawn = drawer.draw(inputsIn(style));
+    drawer.dispose();
+    const written = engine.writes
+      .slice(from)
+      .findLast((write) => write.buffer === "wireframe:segments")?.data;
+    return {
+      drawnStyle: drawn?.drawnStyle,
+      rows:
+        written === undefined
+          ? []
+          : [...new Float32Array(written.buffer, written.byteOffset, written.byteLength / 4)],
+    };
+  }
+
+  /**
+   * The bodies' batches of the frame's list built with its datums inside their figures or not,
+   * packed as the renderer packs them, first in the segments: each end's x, y and z, and a dash's
+   * phase of 0.
+   */
+  function bodyRows(datumInside: boolean): number[] {
+    const run = phaseRun(true);
+    const list = buildWireframeDrawList(
+      run.scene,
+      { pose: runPose(run), fovXRad: (run.camera.fovDeg * Math.PI) / 180 },
+      presentedViewport(SIZE),
+      TOKENS,
+      {
+        lowSetting: true,
+        ev100: 0,
+        selection: null,
+        destination: null,
+        remPx: SIZE.remPx,
+        ...viewStrokesAt(SIZE.devicePixelRatio),
+        datumInside,
+      },
+    );
+    return list.lines
+      .filter((line) => line.body !== undefined)
+      .flatMap((line) => {
+        const s = line.segments;
+        return Array.from({ length: s.length / 6 }, (_, i) => [
+          ...s.subarray(i * 6, i * 6 + 3),
+          0,
+          ...s.subarray(i * 6 + 3, i * 6 + 6),
+          0,
+        ]).flat();
+      });
+  }
+
+  it("builds a photorealistic frame's list with the datum inside the figure", async () => {
+    const inside = bodyRows(true);
+    const drawn = await drawnIn("photorealistic");
+    expect({
+      style: drawn.drawnStyle,
+      datum: inside.length > 0,
+      inside: drawn.rows.slice(0, inside.length),
+    }).toEqual({ style: "photorealistic", datum: true, inside });
+  });
+
+  it("holds a photorealistic frame back when told, drawing nothing onto its view (fix-view-light)", async () => {
+    const engine = await countingRenderEngine();
+    const view = new RecordingView("view");
+    const drawer = new ViewFrameDrawer(engine, view, "view");
+    drawer.draw(inputsIn("photorealistic"));
+    await vi.waitFor(() => {
+      expect(drawer.photorealStatus).toBe("ready");
+    });
+    const from = view.frames.length;
+    const drawn = drawer.draw({ ...inputsIn("photorealistic"), present: false });
+    drawer.dispose();
+    expect([drawn?.drawnStyle, view.frames.length - from]).toEqual(["photorealistic", 0]);
+  });
+
+  it("builds a wireframe frame's list with the datum centred on the limb", async () => {
+    const centred = bodyRows(false);
+    const inside = bodyRows(true);
+    const drawn = await drawnIn("wireframe");
+    expect({
+      style: drawn.drawnStyle,
+      differs: centred.length !== inside.length || centred.some((value, i) => value !== inside[i]),
+      centred: drawn.rows.slice(0, centred.length),
+    }).toEqual({ style: "wireframe", differs: true, centred });
+  });
+});
+
+/**
+ * A session stand-in whose survey throws `error` while `throws` holds, the faults its drawer's
+ * guard raised counted.
+ */
+function failingSource(
+  error: Error,
+  throws: () => boolean = () => true,
+): ViewTerrainSession & { readonly faulted: () => number } {
+  let faulted = 0;
+  return {
+    wanted: new Set(PHASE_PLANETS),
+    survey: () => {
+      if (throws()) {
+        throw error;
+      }
+      return null;
+    },
+    drawTerrain: () => null,
+    coverageMask: () => null,
+    coverageWhole: () => false,
+    drawLateTerrain: () => [],
+    pass: () => null,
+    wirePass: () => null,
+    drawWireTerrain: () => null,
+    failComputation: () => {
+      faulted += 1;
+    },
+    faulted: () => faulted,
+  };
+}
+
+describe("a view's survey edges that cannot be marked (the batch review's S5; R10.T16.e)", () => {
+  /** The phase scene's wireframe frame over `source` at `nowMs`. */
+  function inputsAt(source: ViewTerrainSession, nowMs: number): ViewFrameInputs {
+    return {
+      run: phaseRun(true),
+      size: { widthPx: 320, heightPx: 180, devicePixelRatio: 1, remPx: 16 },
+      tokens: TOKENS,
+      exposure: DEFAULT_EXPOSURE,
+      white: null,
+      stars: [],
+      sky: null,
+      hostDiscs: null,
+      selection: null,
+      style: "wireframe",
+      setting: "low",
+      geometry: undefined,
+      renderScale: 1,
+      availability: { wireframe: true, photorealistic: true },
+      meter: null,
+      terrain: { source, view: viewId("view"), nowMs },
+    };
+  }
+
+  /** `drawer`'s frames over `source` at each of `timesMs`: whether each drew. */
+  function drawAt(
+    drawer: ViewFrameDrawer,
+    source: ViewTerrainSession,
+    timesMs: ReadonlyArray<number>,
+  ): boolean[] {
+    return timesMs.map((nowMs) => drawer.draw(inputsAt(source, nowMs)) !== null);
+  }
+
+  it("draws on without them, saying so once", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const engine = await countingRenderEngine();
+    const drawer = new ViewFrameDrawer(engine, new RecordingView("view"), "view");
+    const drawn = drawAt(drawer, failingSource(new Error("a bug of the source's")), [0, 16]);
+    drawer.dispose();
+    expect([drawn, error.mock.calls.length]).toEqual([[true, true], 1]);
+  });
+
+  it("faults the session's terrain once they have failed for 250 ms, and not before", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const engine = await countingRenderEngine();
+    const drawer = new ViewFrameDrawer(engine, new RecordingView("view"), "view");
+    const source = failingSource(new Error("a bug of the source's"));
+    drawAt(drawer, source, [1_000, 1_100, 1_000 + ANNUNCIATION_ONSET_MS - 1]);
+    const before = source.faulted();
+    drawAt(drawer, source, [1_000 + ANNUNCIATION_ONSET_MS, 1_300]);
+    drawer.dispose();
+    expect([before, source.faulted()]).toEqual([0, 1]);
+  });
+
+  it("raises nothing for a single failed frame", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const engine = await countingRenderEngine();
+    const drawer = new ViewFrameDrawer(engine, new RecordingView("view"), "view");
+    let nowMs = 0;
+    const source = failingSource(new Error("a bug of the source's"), () => nowMs === 0);
+    for (nowMs = 0; nowMs <= 1_000; nowMs += 100) {
+      drawer.draw(inputsAt(source, nowMs));
+    }
+    drawer.dispose();
+    expect(source.faulted()).toBe(0);
+  });
+
+  it("lets a loss pass in silence, however long it lasts", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const engine = await countingRenderEngine();
+    const drawer = new ViewFrameDrawer(engine, new RecordingView("view"), "view");
+    const source = failingSource(new EngineUnavailable("createBuffer"));
+    drawAt(drawer, source, [0, 300, 600]);
+    drawer.dispose();
+    expect([source.faulted(), error.mock.calls.length]).toEqual([0, 0]);
+  });
+
+  it("counts a new session's failures afresh", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const engine = await countingRenderEngine();
+    const drawer = new ViewFrameDrawer(engine, new RecordingView("view"), "view");
+    const first = failingSource(new Error("a bug of the source's"));
+    const second = failingSource(new Error("a bug of the source's"));
+    drawAt(drawer, first, [0, 200]);
+    drawAt(drawer, second, [240, 300]);
+    drawer.dispose();
+    expect([first.faulted(), second.faulted()]).toEqual([0, 0]);
+  });
+});
+
+/** A level-5 coverage of one cell of face 0, so that a body has an edge to mark. */
+function oneCell(): CoverageView {
+  const start = fieldCellIndex({ face: 0, level: 5, i: 16, j: 16 });
+  const merged = CoverageView.empty(5).merged(
+    { ranges: [{ start, end: start + 1, resolution: 8 }] },
+    1,
+  );
+  if (!merged.ok) {
+    throw new Error(merged.message);
+  }
+  return merged.coverage;
+}
+
+describe("what a view's frame gives its label block and list (the batch review's S16)", () => {
+  // The planet at 90°, which the camera looks at.
+  const SURVEYED = PHASE_PLANETS[1];
+
+  /**
+   * A terrain session stand-in: the 90° planet's field wanted and surveyed in part, and each
+   * draw of its terrain annunciating `TERRAIN: STREAMING`.
+   */
+  function streamingSource(): ViewTerrainSession {
+    return {
+      wanted: new Set([SURVEYED]),
+      survey: (body) =>
+        body === SURVEYED ? { coverage: oneCell(), header: moonLikeHeader(SURVEYED) } : null,
+      drawTerrain: () => ({
+        draws: [],
+        opaqueDraws: 0,
+        patches: { interior: 0, edge: 0, fins: 0, edgeStandIns: 0 },
+        conditions: { streaming: true, detailLimited: false },
+        annunciation: "TERRAIN: STREAMING",
+        fault: null,
+        missing: true,
+        standingIn: false,
+        maskReady: false,
+        cascades: null,
+        overlayDepth: null,
+        visibility: null,
+        decorated: false,
+      }),
+      coverageMask: () => null,
+      coverageWhole: () => false,
+      drawLateTerrain: () => [],
+      wirePass: () => null,
+      drawWireTerrain: () => null,
+      pass: () => null,
+      failComputation: () => undefined,
+    };
+  }
+
+  /** The phase scene's frame inputs over {@link streamingSource}, its planets turning. */
+  function inputsIn(style: "photorealistic" | "wireframe"): ViewFrameInputs {
+    return {
+      run: phaseRun(true),
+      size: { widthPx: 320, heightPx: 180, devicePixelRatio: 1, remPx: 16 },
+      tokens: TOKENS,
+      exposure: DEFAULT_EXPOSURE,
+      white: null,
+      stars: [],
+      sky: null,
+      hostDiscs: null,
+      selection: null,
+      style,
+      setting: "low",
+      geometry: undefined,
+      renderScale: 1,
+      availability: { wireframe: true, photorealistic: true },
+      meter: null,
+      // Relief enough that every planet with a rotation is handed over.
+      reliefs: { reliefM: () => 1e9 },
+      terrain: { source: streamingSource(), view: viewId("view"), nowMs: 0 },
+    };
+  }
+
+  /** A frame drawn in `style` by a drawer whose photorealistic pipelines are made. */
+  async function drawnIn(style: "photorealistic" | "wireframe"): Promise<ViewFrameDrawn | null> {
+    const engine = await countingRenderEngine();
+    const drawer = new ViewFrameDrawer(engine, new RecordingView("view"), "view");
+    // The first photorealistic frame draws the wireframe while its pipelines compile.
+    drawer.draw(inputsIn("photorealistic"));
+    await vi.waitFor(() => {
+      expect(drawer.photorealStatus).toBe("ready");
+    });
+    const drawn = drawer.draw(inputsIn(style));
+    drawer.dispose();
+    return drawn;
+  }
+
+  it("gives the terrain's annunciation of a photorealistic frame", async () => {
+    expect((await drawnIn("photorealistic"))?.terrain).toBe("TERRAIN: STREAMING");
+  });
+
+  it("gives no terrain annunciation of a wireframe frame whose source has no wireframe pass", async () => {
+    expect((await drawnIn("wireframe"))?.terrain).toBeNull();
+  });
+
+  it.each(["photorealistic", "wireframe"] as const)(
+    "gives the session's survey edges in the %s style",
+    async (style) => {
+      expect((await drawnIn(style))?.surveyEdges.map((edge) => edge.body)).toEqual([SURVEYED]);
+    },
+  );
+});
+
+/** The camera's height above `body`'s datum in `run`, as its header's figure gives it, m. */
+function datumHeightM(run: ViewRun, body: BodyIdHex): number {
+  const centreM = relativeToCamera(
+    { kind: "body", body, m: vec3(0, 0, 0) },
+    runPose(run),
+    sceneOrigins(run.scene),
+  );
+  const header = moonLikeHeader(body);
+  return heightAboveGroundM(
+    rotateToBodyFixed(IDENTITY_ROTATION, scale(centreM, -1)),
+    { equatorialRadiusM: header.equatorial_radius_m, polarRadiusM: header.polar_radius_m },
+    () => null,
+  );
+}
+
+describe("a view's wireframe frame of its terrain (R10.T11)", () => {
+  // The planet at 90°, which the camera looks at.
+  const HANDED = PHASE_PLANETS[1];
+  const VIEW = viewId("view");
+  const MASK: TextureHandle = { kind: "texture", name: "coverage mask" };
+  /** The wireframe pass's draw, as the session's would name it. */
+  const WIRE_DRAW: DrawItem = {
+    mesh: { kind: "mesh", name: "terrain patches" },
+    material: { kind: "material", name: "terrain-wire-face-differences" },
+    offsetFromCameraM: new Float32Array(3),
+    uniforms: {},
+    textures: {},
+  };
+
+  /** No resident ground: the datum everywhere. */
+  const DATUM: ResidentHeightsView = {
+    rimHeightAtM: () => null,
+    groundHeightAtM: () => null,
+    ceilingM: 0,
+    rimRevision: 0,
+  };
+
+  /**
+   * A terrain session stand-in whose wireframe pass of the 90° planet took the view, over `heights`,
+   * each of its draws annunciating `TERRAIN: STREAMING`, the frame inputs it was given in `asked`;
+   * no field is wanted, so that no survey edge reads it.
+   */
+  function wireSource(
+    heights: ResidentHeightsView = DATUM,
+    overrides: Partial<ViewTerrainSource> = {},
+  ): { readonly source: ViewTerrainSession; readonly asked: TerrainViewFrameInput[] } {
+    const asked: TerrainViewFrameInput[] = [];
+    return {
+      asked,
+      source: {
+        wanted: new Set(),
+        survey: (body) =>
+          body === HANDED ? { coverage: null, header: moonLikeHeader(HANDED) } : null,
+        drawTerrain: () => null,
+        coverageMask: (body) => (body === HANDED ? MASK : null),
+        coverageWhole: () => false,
+        drawLateTerrain: () => [],
+        pass: () => null,
+        wirePass: (body) =>
+          body === HANDED
+            ? {
+                maskReadyFor: () => true,
+                symbologyDepthMaterial: null,
+                geometry: { overlayDepth: "redraw", strides: "off" },
+                heights,
+                viewIds: new Set([VIEW]),
+                faulted: false,
+              }
+            : null,
+        drawWireTerrain: (_view, body, input) => {
+          if (body !== HANDED) {
+            return null;
+          }
+          asked.push(input);
+          return {
+            draws: [WIRE_DRAW],
+            opaqueDraws: 0,
+            patches: { interior: 0, edge: 1, fins: 0, edgeStandIns: 0 },
+            conditions: { streaming: true, detailLimited: false },
+            annunciation: "TERRAIN: STREAMING",
+            fault: null,
+            missing: false,
+            standingIn: false,
+            maskReady: true,
+            cascades: null,
+            overlayDepth: null,
+            visibility: null,
+            decorated: false,
+          };
+        },
+        // Never faulted here: the drawer's guards are R10.T16.e's own tests'.
+        failComputation: () => undefined,
+        ...overrides,
+      },
+    };
+  }
+
+  /** The phase scene's frame inputs over `source` in `style`, its planets turning. */
+  function inputsOver(
+    source: ViewTerrainSession,
+    style: "photorealistic" | "wireframe" = "wireframe",
+  ): ViewFrameInputs {
+    return {
+      run: phaseRun(true),
+      size: { widthPx: 320, heightPx: 180, devicePixelRatio: 1, remPx: 16 },
+      tokens: TOKENS,
+      exposure: DEFAULT_EXPOSURE,
+      white: null,
+      stars: [],
+      sky: null,
+      hostDiscs: null,
+      selection: null,
+      style,
+      setting: "low",
+      geometry: undefined,
+      renderScale: 1,
+      availability: { wireframe: true, photorealistic: true },
+      meter: null,
+      terrain: { source, view: VIEW, nowMs: 0 },
+    };
+  }
+
+  /** A drawer's wireframe frame over `source`, with what its view was given. */
+  async function wireframeOf(source: ViewTerrainSession): Promise<{
+    readonly drawn: ViewFrameDrawn | null;
+    readonly frame: FrameSubmission | undefined;
+  }> {
+    const engine = await countingRenderEngine();
+    const view = new RecordingView("view");
+    const drawer = new ViewFrameDrawer(engine, view, "view");
+    const drawn = drawer.draw(inputsOver(source));
+    drawer.dispose();
+    return { drawn, frame: view.frames.at(-1) };
+  }
+
+  it("draws the wireframe pass's terrain after the occluders and before the lines", async () => {
+    const { frame } = await wireframeOf(wireSource().source);
+    const names = frame?.draws.map((draw) => draw.material.name) ?? [];
+    const at = names.indexOf(WIRE_DRAW.material.name);
+    const occluders = names.flatMap((name, n) =>
+      name.startsWith("wireframe:occluder") ? [n] : [],
+    );
+    const lines = names.flatMap((name, n) => (name.startsWith("wireframe:lines") ? [n] : []));
+    expect([
+      occluders.length > 0 && lines.length > 0,
+      occluders.every((n) => n < at),
+      lines.every((n) => n > at),
+    ]).toEqual([true, true, true]);
+  });
+
+  it("binds the body's coverage mask to its datum's draws, which give way to its terrain", async () => {
+    const { frame } = await wireframeOf(wireSource().source);
+    expect(frame?.draws.some((draw) => draw.textures["coverageMask"] === MASK)).toBe(true);
+  });
+
+  it("gives the datum way over the image too, the symbology binding the mask its plan handed the body over with (R10.T16.f)", async () => {
+    // The lit pass of the 90° planet, which gives its mask, beside the wireframe's.
+    const pass: FrameTerrainPass = {
+      maskReadyFor: () => true,
+      symbologyDepthMaterial: null,
+      geometry: { overlayDepth: "redraw", strides: "off" },
+      heights: DATUM,
+      viewIds: new Set([VIEW]),
+      faulted: false,
+    };
+    const { source } = wireSource(DATUM, { pass: (body) => (body === HANDED ? pass : null) });
+    // Relief enough that every planet with a rotation is handed over, on a view wide enough that
+    // the planet, 71 px across, has its datum over the image (R10.T16.g's least radius, 24 px).
+    const inputs: ViewFrameInputs = {
+      ...inputsOver(source, "photorealistic"),
+      size: { widthPx: 1280, heightPx: 720, devicePixelRatio: 1, remPx: 16 },
+      reliefs: { reliefM: () => 1e9 },
+    };
+    const engine = await countingRenderEngine();
+    const view = new RecordingView("view");
+    const drawer = new ViewFrameDrawer(engine, view, "view");
+    // The first photorealistic frame draws the wireframe while its pipelines compile.
+    drawer.draw(inputs);
+    await vi.waitFor(() => {
+      expect(drawer.photorealStatus).toBe("ready");
+    });
+    const drawn = drawer.draw(inputs);
+    drawer.dispose();
+    const symbology = view.frames.findLast(
+      (frame) => frame.label === PHOTOREAL_PASS_LABELS.symbology,
+    );
+    const surveyed = (symbology?.draws ?? []).filter((draw) =>
+      draw.material.name.endsWith("Surveyed"),
+    );
+    expect([
+      drawn?.drawnStyle,
+      [...new Set(surveyed.map((draw) => draw.material.name))].toSorted(),
+      surveyed.every((draw) => draw.textures["coverageMask"] === MASK),
+    ]).toEqual([
+      "photorealistic",
+      ["wireframe:linesSurveyed", "wireframe:occluderSphereSurveyed"],
+      true,
+    ]);
+  });
+
+  it("leaves out over the image the datum of a body handed over with a whole survey, its occluder still drawn, by the geometry's hiddenMarks, and keeps it drawn at its way back", async () => {
+    const pass: FrameTerrainPass = {
+      maskReadyFor: () => true,
+      symbologyDepthMaterial: { kind: "material", name: "terrain-depth-baked-offsets" },
+      geometry: { overlayDepth: "redraw", strides: "off" },
+      heights: DATUM,
+      viewIds: new Set([VIEW]),
+      faulted: false,
+      innerRadiusM: 1,
+    };
+    const { source } = wireSource(DATUM, {
+      pass: (body) => (body === HANDED ? pass : null),
+      coverageWhole: (body) => body === HANDED,
+      // Its lit terrain drawn, whose depth the symbology's pass takes.
+      drawTerrain: (_view, body) =>
+        body === HANDED
+          ? {
+              draws: [WIRE_DRAW],
+              opaqueDraws: 0,
+              patches: { interior: 0, edge: 1, fins: 0, edgeStandIns: 0 },
+              conditions: { streaming: false, detailLimited: false },
+              annunciation: null,
+              fault: null,
+              missing: false,
+              standingIn: false,
+              maskReady: true,
+              cascades: null,
+              overlayDepth: null,
+              visibility: null,
+              decorated: false,
+            }
+          : null,
+    });
+    const symbologyOf = async (
+      hiddenMarks: "drawn" | "culled",
+    ): Promise<ReadonlyArray<string> | undefined> => {
+      const inputs: ViewFrameInputs = {
+        ...inputsOver(source, "photorealistic"),
+        size: { widthPx: 1280, heightPx: 720, devicePixelRatio: 1, remPx: 16 },
+        reliefs: { reliefM: () => 1e9 },
+        geometry: { ...SETTINGS.high.geometry, hiddenMarks },
+      };
+      const engine = await countingRenderEngine();
+      const view = new RecordingView("view");
+      const drawer = new ViewFrameDrawer(engine, view, "view");
+      // The first photorealistic frame draws the wireframe while its pipelines compile.
+      drawer.draw(inputs);
+      await vi.waitFor(() => {
+        expect(drawer.photorealStatus).toBe("ready");
+      });
+      drawer.draw(inputs);
+      drawer.dispose();
+      const names = view.frames
+        .findLast((frame) => frame.label === PHOTOREAL_PASS_LABELS.symbology)
+        ?.draws.map((draw) => draw.material.name)
+        .filter((name) => name.endsWith("Surveyed"));
+      return names === undefined ? undefined : [...new Set(names)].toSorted();
+    };
+    expect([await symbologyOf("culled"), await symbologyOf("drawn")]).toEqual([
+      ["wireframe:occluderSphereSurveyed"],
+      ["wireframe:linesSurveyed", "wireframe:occluderSphereSurveyed"],
+    ]);
+  });
+
+  it("gives the contour interval its terrain was drawn at, and the terrain's annunciation", async () => {
+    const { source, asked } = wireSource();
+    const { drawn } = await wireframeOf(source);
+    const intervalM = asked[0]?.wire?.intervalM;
+    expect([
+      intervalM !== undefined && intervalM > 0,
+      drawn?.contourIntervalM,
+      drawn?.terrain,
+    ]).toEqual([true, intervalM, "TERRAIN: STREAMING"]);
+  });
+
+  it("gives no contour interval of a photorealistic frame, which draws no wireframe terrain", async () => {
+    const { source, asked } = wireSource();
+    const engine = await countingRenderEngine();
+    const drawer = new ViewFrameDrawer(engine, new RecordingView("view"), "view");
+    // The first photorealistic frame draws the wireframe while its pipelines compile.
+    drawer.draw(inputsOver(source, "photorealistic"));
+    await vi.waitFor(() => {
+      expect(drawer.photorealStatus).toBe("ready");
+    });
+    const before = asked.length;
+    const drawn = drawer.draw(inputsOver(source, "photorealistic"));
+    drawer.dispose();
+    expect([drawn?.drawnStyle, drawn?.contourIntervalM, asked.length - before]).toEqual([
+      "photorealistic",
+      null,
+      0,
+    ]);
+  });
+
+  it("holds the contour interval from frame to frame while the height lies between its thresholds", async () => {
+    // The ground under the camera raised so that it stands 4 km over it, then 7 km: a twentieth of
+    // 7 km is 350 m, past the midpoint 316 m to 500 m but short of its 1.2 × 316 m.
+    const datumM = datumHeightM(phaseRun(true), HANDED);
+    const ground = { aboveM: 4_000 };
+    const heights: ResidentHeightsView = {
+      ...DATUM,
+      groundHeightAtM: () => datumM - ground.aboveM,
+    };
+    const engine = await countingRenderEngine();
+    const drawer = new ViewFrameDrawer(engine, new RecordingView("view"), "view");
+    const fresh = new ViewFrameDrawer(engine, new RecordingView("fresh"), "fresh");
+    const { source } = wireSource(heights);
+    const at4km = drawer.draw(inputsOver(source))?.contourIntervalM;
+    ground.aboveM = 7_000;
+    const at7km = drawer.draw(inputsOver(source))?.contourIntervalM;
+    const freshAt7km = fresh.draw(inputsOver(source))?.contourIntervalM;
+    drawer.dispose();
+    fresh.dispose();
+    expect([at4km, at7km, freshAt7km]).toEqual([200, 200, 500]);
+  });
+
+  describe("through the stage's interval holder (R10.T12.b)", () => {
+    const OTHER = viewId("other");
+
+    /**
+     * The primary's drawer and another's at one camera, over a wireframe pass that took both, the
+     * ground under them first 4 km below and then 7 km: the primary holds 200 m where a view from
+     * no interval states 500 m.
+     */
+    async function twoViews(): Promise<{
+      readonly primary: ViewFrameDrawer;
+      readonly other: ViewFrameDrawer;
+      readonly inputs: (
+        view: typeof OTHER,
+        style: "photorealistic" | "wireframe",
+        nowMs: number,
+      ) => ViewFrameInputs;
+      readonly toSevenKm: () => void;
+    }> {
+      const datumM = datumHeightM(phaseRun(true), HANDED);
+      const ground = { aboveM: 4_000 };
+      const heights: ResidentHeightsView = {
+        ...DATUM,
+        groundHeightAtM: () => datumM - ground.aboveM,
+      };
+      const { source } = wireSource(heights, {
+        wirePass: (body) =>
+          body === HANDED
+            ? {
+                maskReadyFor: () => true,
+                symbologyDepthMaterial: null,
+                geometry: { overlayDepth: "redraw", strides: "off" },
+                heights,
+                viewIds: new Set([VIEW, OTHER]),
+                faulted: false,
+              }
+            : null,
+      });
+      const intervals = new PoseIntervals();
+      const engine = await countingRenderEngine();
+      return {
+        primary: new ViewFrameDrawer(engine, new RecordingView("view"), "view"),
+        other: new ViewFrameDrawer(engine, new RecordingView("other"), "other"),
+        inputs: (view, style, nowMs) => ({
+          ...inputsOver(source, style),
+          terrain: { source, view, nowMs, intervals },
+        }),
+        toSevenKm: () => {
+          ground.aboveM = 7_000;
+        },
+      };
+    }
+
+    it("states the interval another view holds at its camera's point", async () => {
+      const { primary, other, inputs, toSevenKm } = await twoViews();
+      primary.draw(inputs(VIEW, "wireframe", 0));
+      toSevenKm();
+      primary.draw(inputs(VIEW, "wireframe", 16));
+      const otherM = other.draw(inputs(OTHER, "wireframe", 16))?.contourIntervalM;
+      primary.dispose();
+      other.dispose();
+      expect(otherM).toBe(200);
+    });
+
+    it("forgets the view in the holder on a photorealistic frame, so that a view at its point keeps its own", async () => {
+      const { primary, other, inputs, toSevenKm } = await twoViews();
+      primary.draw(inputs(VIEW, "wireframe", 0));
+      toSevenKm();
+      primary.draw(inputs(VIEW, "wireframe", 16));
+      // The first photorealistic frame draws the wireframe while its pipelines compile.
+      primary.draw(inputs(VIEW, "photorealistic", 32));
+      await vi.waitFor(() => {
+        expect(primary.photorealStatus).toBe("ready");
+      });
+      const drawn = primary.draw(inputs(VIEW, "photorealistic", 48));
+      const otherM = other.draw(inputs(OTHER, "wireframe", 64))?.contourIntervalM;
+      primary.dispose();
+      other.dispose();
+      expect([drawn?.drawnStyle, otherM]).toEqual(["photorealistic", 500]);
+    });
+  });
+
+  it.each([
+    ["reports a bug of its source's once", new Error("a bug of the source's"), 1],
+    ["passes a loss in silence", new EngineUnavailable("createMaterial"), 0],
+  ] as const)(
+    "draws on without the wireframe terrain when it cannot be drawn, and %s",
+    async (_case, failure, reports) => {
+      const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      const { source } = wireSource(DATUM, {
+        wirePass: () => {
+          throw failure;
+        },
+      });
+      const engine = await countingRenderEngine();
+      const view = new RecordingView("view");
+      const drawer = new ViewFrameDrawer(engine, view, "view");
+      const drawn = [drawer.draw(inputsOver(source)), drawer.draw(inputsOver(source))];
+      drawer.dispose();
+      expect([
+        drawn.map((each) => each?.contourIntervalM),
+        view.frames.length,
+        error.mock.calls.length,
+      ]).toEqual([[null, null], 2, reports]);
+    },
+  );
+});
+
+describe("a view's line-of-sight mark across its frames (R10.T12)", () => {
+  /**
+   * The phase scene's run with another craft 10⁸ m out, below the view's centre by `belowPx` at
+   * 320 × 180: the camera looks along its −z, its screen's down being its −y.
+   */
+  function runWithCraftBelow(belowPx: number): ViewRun {
+    const run = phaseRun(false);
+    const pose = runPose(run);
+    if (pose.frame.kind !== "system") {
+      throw new Error("the phase scene's camera is not in its system's frame");
+    }
+    const s = 1 / Math.tan((run.camera.fovDeg * Math.PI) / 360);
+    const direction = rotate(pose.orientation, normalise(vec3(0, -belowPx / (s * 160), -1)));
+    const craft = aViewCraft({
+      id: "other",
+      designation: "OTHER",
+      pose: {
+        position: {
+          kind: "system",
+          system: pose.frame.system,
+          m: add(pose.positionM, scale(direction, 1e8)),
+        },
+        attitude: NO_TURN,
+      },
+    });
+    return { ...run, scene: { ...run.scene, craft: [...run.scene.craft, craft] } };
+  }
+
+  /**
+   * The craft below the centre with its upper tick `clearRem` below the end of the tripod's lower
+   * tick, at a ratio of 1 and 16 px a rem: the tripod's ticks from 3.25 to 7.25 px out (0.1875 rem
+   * and δ's 0.25 px; decision-r10-t12-commit3 §3), the craft's upper tick ending 6.25 + 4 px above
+   * its anchor.
+   */
+  function craftClear(clearRem: number): ViewRun {
+    return runWithCraftBelow(0.1875 * 16 + 0.25 + 4 + 10.25 + clearRem * 16);
+  }
+
+  /** A wireframe frame's inputs over `run`, at 320 × 180, its readout's point as given. */
+  function inputsOver(run: ViewRun, lineOfSightPoint?: boolean): ViewFrameInputs {
+    return {
+      run,
+      size: { widthPx: 320, heightPx: 180, devicePixelRatio: 1, remPx: 16 },
+      tokens: TOKENS,
+      exposure: DEFAULT_EXPOSURE,
+      white: null,
+      stars: [],
+      sky: null,
+      hostDiscs: null,
+      selection: null,
+      style: "wireframe",
+      setting: "low",
+      geometry: undefined,
+      renderScale: 1,
+      availability: { wireframe: true, photorealistic: true },
+      meter: null,
+      ...(lineOfSightPoint === undefined
+        ? {}
+        : { lineOfSightPoint: { hasPoint: lineOfSightPoint, rangeM: null } }),
+    };
+  }
+
+  /** Each frame's line-of-sight mark, drawn in turn by one drawer. */
+  async function framesOf(
+    ...inputs: ReadonlyArray<ViewFrameInputs>
+  ): Promise<Array<ViewFrameDrawn["lineOfSight"] | undefined>> {
+    const engine = await countingRenderEngine();
+    const drawer = new ViewFrameDrawer(engine, new RecordingView("view"), "view");
+    const drawn = inputs.map((each) => drawer.draw(each)?.lineOfSight);
+    drawer.dispose();
+    return drawn;
+  }
+
+  it("marks no line of sight for a view that states no readout", async () => {
+    expect(await framesOf(inputsOver(phaseRun(false)))).toEqual([null]);
+  });
+
+  it("draws the tripod at the view's centre where the readout has a point", async () => {
+    const [mark] = await framesOf(inputsOver(phaseRun(false), true));
+    const box = mark?.boxPx ?? null;
+    expect({
+      yielded: mark?.yielded,
+      holdsCentre:
+        box !== null &&
+        box.leftPx < 160 &&
+        box.leftPx + box.widthPx > 160 &&
+        box.topPx < 90 &&
+        box.topPx + box.heightPx > 90,
+    }).toEqual({ yielded: false, holdsCentre: true });
+  });
+
+  it("keeps its give-way from frame to frame, so that a craft between 0.5 and 0.75 rem holds it out", async () => {
+    const [near, between, beyond] = await framesOf(
+      inputsOver(craftClear(0.25), true),
+      inputsOver(craftClear(0.6), true),
+      inputsOver(craftClear(0.9), true),
+    );
+    // A drawer whose first frame has the craft between draws the tripod.
+    const [fresh] = await framesOf(inputsOver(craftClear(0.6), true));
+    expect({
+      near: near?.boxPx ?? null,
+      between: between?.boxPx ?? null,
+      beyond: beyond?.boxPx !== null && beyond?.yielded === false,
+      fresh: fresh?.boxPx !== null && fresh?.yielded === false,
+    }).toEqual({ near: null, between: null, beyond: true, fresh: true });
+  });
+});
+
+describe("a kept scene's own stars, offline (R08.T10.b)", () => {
+  /** One star of an interim field, dead ahead of the phase scene's camera. */
+  const INTERIM_STAR: ViewStar = {
+    id: "0000000000000001",
+    direction: vec3(0, 0, -1),
+    distanceM: 3e17,
+    absoluteV: 0,
+    tEffK: 5_800,
+  };
+
+  /**
+   * The star sprites a wireframe frame of the phase scene draws, the scene carrying `own` stars and
+   * the view given the interim field `interim`.
+   */
+  async function spritesDrawn(
+    own: ReadonlyArray<ViewStar>,
+    interim: ReadonlyArray<ViewStar>,
+  ): Promise<number> {
+    return (await framesStars(own, interim)).sprites;
+  }
+
+  /** The star sprites a frame drew, as {@link spritesDrawn}, and whether it says they were the scene's. */
+  async function framesStars(
+    own: ReadonlyArray<ViewStar>,
+    interim: ReadonlyArray<ViewStar>,
+  ): Promise<{ readonly sprites: number; readonly sceneStars: boolean | undefined }> {
+    const engine = await countingRenderEngine();
+    const view = new RecordingView("view");
+    const drawer = new ViewFrameDrawer(engine, view, "view");
+    const run = phaseRun(false);
+    const drawn = drawer.draw({
+      run: { ...run, scene: { ...run.scene, stars: own } },
+      size: { widthPx: 320, heightPx: 180, devicePixelRatio: 1, remPx: 16 },
+      tokens: TOKENS,
+      exposure: DEFAULT_EXPOSURE,
+      white: null,
+      stars: interim,
+      sky: null,
+      hostDiscs: null,
+      selection: null,
+      style: "wireframe",
+      setting: "high",
+      geometry: undefined,
+      renderScale: 1,
+      availability: { wireframe: true, photorealistic: true },
+      meter: null,
+    });
+    drawer.dispose();
+    const draws = view.frames.at(-1)?.draws ?? [];
+    return {
+      sprites:
+        draws.find((draw) => draw.material.name === "wireframe:starSprite")?.instanceCount ?? 0,
+      sceneStars: drawn?.sceneStars,
+    };
+  }
+
+  it("says which stars it drew: the scene's own field where it stands in, else none of its own", async () => {
+    expect([
+      (await framesStars(ATMOSPHERE_STARS, [])).sceneStars,
+      (await framesStars(ATMOSPHERE_STARS, [INTERIM_STAR])).sceneStars,
+      (await framesStars([], [])).sceneStars,
+    ]).toEqual([true, false, false]);
+  });
+
+  it("draws a kept scene's own stars where the interim field is empty", async () => {
+    expect([await spritesDrawn([], []), (await spritesDrawn(ATMOSPHERE_STARS, [])) > 0]).toEqual([
+      0,
+      true,
+    ]);
+  });
+
+  it("draws the interim field, not the scene's own stars, where it has stars", async () => {
+    expect(await spritesDrawn(ATMOSPHERE_STARS, [INTERIM_STAR])).toBe(1);
+  });
 });

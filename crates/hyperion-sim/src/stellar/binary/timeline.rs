@@ -14,19 +14,23 @@ use std::error::Error;
 use std::fmt;
 use std::sync::Arc;
 
+use crate::GENERATOR_VERSION;
 use crate::coords::SystemVelocity;
 use crate::orbit::{Eccentricity, KeplerElements, Orientation};
 use crate::stellar::draws::StarDraws;
 use crate::stellar::remnant::{CompactRemnant, NatalKick};
-use crate::stellar::sse::{self, ZCoeffs};
-use crate::stellar::{Composition, StarState, substellar};
+use crate::stellar::rules::StellarRules;
+use crate::stellar::sse::{self, TrackOptions, ZCoeffs};
+use crate::stellar::{Composition, Phase, StarState, substellar};
 use crate::units::consts::SOLAR_RADIUS_M;
 use crate::units::{
-    GravitationalParameter, Metres, Radians, SolarMasses, SolarMassesPerYear, Years,
+    GravitationalParameter, Metres, Radians, SolarLuminosities, SolarMasses, SolarMassesPerYear,
+    SolarRadii, Years,
 };
 
 use super::params::BinaryParams;
 use super::star::{Member, Path};
+use super::wind_accretion::WindAccretionRules;
 
 /// Which member of a pair: the one the input names first (the inner member's star, body index
 /// order) or the other.
@@ -216,7 +220,7 @@ impl FixedOrbit {
 
 /// The largest eccentricity a bound orbit is reported with: plan 14 carries bound orbits from
 /// 0.9999 up as open ones (ruling 39 of 2026-09-22), which a secular binary never needs.
-const MAX_REPORTED_ECCENTRICITY: f64 = 0.9998;
+pub(super) const MAX_REPORTED_ECCENTRICITY: f64 = 0.9998;
 
 impl OrbitPath {
     /// The elements at `age` for a pair of total mass `total` M☉, or `None` if they cannot be
@@ -259,6 +263,12 @@ pub struct BinaryInput {
     draws: [StarDraws; 2],
     age_at_epoch: Years,
     params: BinaryParams,
+    /// The stellar stage's rules the engine's kicks and tracks read (`stellar::rules`).
+    rules: StellarRules,
+    /// The share of its partner's wind a passed-over pair's star takes (`wind_accretion`): 27's,
+    /// or in the tests that hold the closed form against the engine's own wind, the Bondi–Hoyle
+    /// share alone.
+    wind: WindAccretionRules,
 }
 
 /// Why [`BinaryInput::new`] refused its inputs.
@@ -292,7 +302,7 @@ impl Error for BuildBinaryInputError {}
 impl BinaryInput {
     /// A pair of initial masses `m1` and `m2` of composition `comp` on `orbit` at zero age, with
     /// the stars' draws `draws` and the system's age at the epoch `age_at_epoch`, under the
-    /// generator's [`BinaryParams`].
+    /// generator's [`BinaryParams`] and the generator version's stellar rules.
     ///
     /// # Errors
     ///
@@ -323,6 +333,8 @@ impl BinaryInput {
             draws,
             age_at_epoch,
             params: BinaryParams::default(),
+            rules: StellarRules::of_version(GENERATOR_VERSION),
+            wind: WindAccretionRules::WindRocheLobe,
         })
     }
 
@@ -330,6 +342,28 @@ impl BinaryInput {
     #[must_use]
     pub const fn with_params(self, params: BinaryParams) -> Self {
         Self { params, ..self }
+    }
+
+    /// The same input under the stellar stage's `rules`: those of the galaxy whose system the pair
+    /// is, which `SystemStars` sets (`stellar::rules`).
+    #[must_use]
+    pub(crate) const fn with_rules(self, rules: StellarRules) -> Self {
+        Self { rules, ..self }
+    }
+
+    /// The same input whose passed-over stars take the share `wind` of each other's wind, for the
+    /// tests that hold the closed form against the engine's own Bondi–Hoyle wind.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn with_wind(self, wind: WindAccretionRules) -> Self {
+        Self { wind, ..self }
+    }
+
+    /// The share of its partner's wind a passed-over pair's star takes (`wind_accretion`): 27's, or
+    /// in a test the one [`with_wind`](Self::with_wind) set.
+    #[must_use]
+    pub(crate) const fn wind(&self) -> WindAccretionRules {
+        self.wind
     }
 
     /// The initial masses, M☉, primary first.
@@ -367,6 +401,19 @@ impl BinaryInput {
     pub const fn params(&self) -> &BinaryParams {
         &self.params
     }
+
+    /// The stellar stage's rules the engine runs under.
+    #[must_use]
+    pub(crate) const fn rules(&self) -> StellarRules {
+        self.rules
+    }
+
+    /// The options the engine builds its stars' tracks with: the generator's, under the input's
+    /// stellar rules, whose helium table a star with a helium excess reads (P15.T7.b's hold).
+    #[must_use]
+    pub(crate) fn track_options(&self) -> TrackOptions {
+        TrackOptions::default().with_rules(self.rules)
+    }
 }
 
 /// What every segment of one timeline shares: the pair's composition, coefficients, draws and
@@ -378,6 +425,8 @@ pub(crate) struct Context {
     draws: [StarDraws; 2],
     params: BinaryParams,
     age_at_epoch: Years,
+    /// The stellar stage's rules the engine's kicks and tracks read.
+    rules: StellarRules,
     /// The lightest helium main-sequence star that burns helium, M☉.
     lightest_helium_star: f64,
     /// x of HPT equation 47, for BSE equation 57.
@@ -385,19 +434,23 @@ pub(crate) struct Context {
 }
 
 impl Context {
-    /// The context of `input`.
+    /// The context of `input`, under its stellar rules.
     #[must_use]
     pub(crate) fn of(input: &BinaryInput) -> Self {
-        Self::from_parts(
-            input.composition,
-            input.draws.clone(),
-            input.params,
-            input.age_at_epoch,
-        )
+        Self {
+            rules: input.rules,
+            ..Self::from_parts(
+                input.composition,
+                input.draws.clone(),
+                input.params,
+                input.age_at_epoch,
+            )
+        }
     }
 
     /// The context of a pair of `composition`, `draws` and `params` whose system is
-    /// `age_at_epoch` old at the epoch, without an input: a timeline built from marks (P11.T5).
+    /// `age_at_epoch` old at the epoch, without an input: a timeline built from marks (P11.T5),
+    /// which runs no engine, under the generator version's stellar rules.
     #[must_use]
     pub(crate) fn from_parts(
         composition: Composition,
@@ -414,6 +467,7 @@ impl Context {
             draws,
             params,
             age_at_epoch,
+            rules: StellarRules::of_version(GENERATOR_VERSION),
         }
     }
 
@@ -442,6 +496,22 @@ impl Context {
         self.age_at_epoch
     }
 
+    /// The stellar stage's rules the engine's kicks read ([`StandardKickLaw::under`]), and its
+    /// tracks ([`track_options`](Self::track_options)).
+    ///
+    /// [`StandardKickLaw::under`]: crate::stellar::remnant::StandardKickLaw::under
+    #[must_use]
+    pub(crate) const fn rules(&self) -> StellarRules {
+        self.rules
+    }
+
+    /// The options the engine builds a hydrogen star's track with in the middle of its timeline:
+    /// [`BinaryInput::track_options`]'s.
+    #[must_use]
+    pub(crate) fn track_options(&self) -> TrackOptions {
+        TrackOptions::default().with_rules(self.rules)
+    }
+
     #[must_use]
     pub(crate) const fn lightest_helium_star(&self) -> f64 {
         self.lightest_helium_star
@@ -461,7 +531,9 @@ pub enum IaPoolChannel {
     Merger,
     /// An accreting white dwarf reaches ignition: the Chandrasekhar mass, 0.15 M☉ of accreted
     /// helium on a carbon–oxygen dwarf (an edge-lit detonation), or 0.7 M☉ for a helium dwarf
-    /// (Hurley, Tout and Pols 2002, section 2.6.6).
+    /// (Hurley, Tout and Pols 2002, section 2.6.6); and any carbon–oxygen white dwarf or
+    /// core that reaches the Chandrasekhar mass, a merger's product's and a giant's whose core is a
+    /// dwarf's among them (P11.T4's `co_chandrasekhar`).
     Accretion,
 }
 
@@ -669,6 +741,356 @@ impl BinaryTimeline {
         }
     }
 
+    /// The largest luminosity `component` has had up to `age`, L☉, never below its luminosity at
+    /// `age`: the peak plan 14's atmospheres read for a star of a pair the engine ran (design note
+    /// 11, P14.T1.e), as [`StarModel::max_luminosity_until`] is a single star's.
+    ///
+    /// Each segment up to `age` gives its member's largest. A star on its track gives the track's
+    /// own ([`Track::max_luminosity_until`]) at its track age at the segment's end: exact on the
+    /// track it has held from zero age, and an upper bound on one the binary placed it on later,
+    /// where it takes in the track's life before its placement too. A held star gives its held
+    /// state's, nothing gives none, and every other form its states at the segment's ends and at
+    /// each knot of its mass and τ between, its paths joined linearly between their knots.
+    ///
+    /// [`StarModel::max_luminosity_until`]: crate::stellar::system::StarModel::max_luminosity_until
+    /// [`Track::max_luminosity_until`]: crate::stellar::sse::Track::max_luminosity_until
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, as [`state_at`](Self::state_at).
+    #[must_use]
+    pub(crate) fn max_luminosity_until(
+        &self,
+        component: Component,
+        age: Years,
+    ) -> SolarLuminosities {
+        let now = self.state_at(age).stars()[component.index()].luminosity();
+        let peak = self.max_until(
+            component,
+            age,
+            |state| state.luminosity().value(),
+            |track, at| track.max_luminosity_until(at).value(),
+        );
+        SolarLuminosities::new(peak.max(now.value()))
+    }
+
+    /// The largest radius `component` has had up to `age`, R☉, never below its radius at `age`:
+    /// what plan 14's engulfment reads for a star of a pair the engine ran (P14.T28.g), as
+    /// [`StarModel::max_radius_until`] is a single star's, read over the segments as
+    /// [`max_luminosity_until`](Self::max_luminosity_until) reads the luminosity
+    /// ([`Track::max_radius_until`] on a track).
+    ///
+    /// [`StarModel::max_radius_until`]: crate::stellar::system::StarModel::max_radius_until
+    /// [`Track::max_radius_until`]: crate::stellar::sse::Track::max_radius_until
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, as [`state_at`](Self::state_at).
+    #[must_use]
+    pub(crate) fn max_radius_until(&self, component: Component, age: Years) -> SolarRadii {
+        let now = self.state_at(age).stars()[component.index()].radius();
+        let peak = self.max_until(
+            component,
+            age,
+            |state| state.radius().value(),
+            |track, at| track.max_radius_until(at).value(),
+        );
+        SolarRadii::new(peak.max(now.value()))
+    }
+
+    /// The largest mass `component` has had up to `age`, M☉, never below its mass at `age`: what
+    /// plan 14's evaporation bounds a host's mass by for a star of a pair the engine ran
+    /// (P14.T55.b.a), read over the segments as [`max_luminosity_until`](Self::max_luminosity_until)
+    /// reads the luminosity, a star on its track at its track's initial mass, which its winds only
+    /// lower.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, as [`state_at`](Self::state_at).
+    #[must_use]
+    pub(crate) fn max_mass_until(&self, component: Component, age: Years) -> SolarMasses {
+        let now = self.state_at(age).stars()[component.index()].mass();
+        let peak = self.max_until(
+            component,
+            age,
+            |state| state.mass().value(),
+            |track, _| track.initial_mass().value(),
+        );
+        SolarMasses::new(peak.max(now.value()))
+    }
+
+    /// The largest of `quantity` that `component` has had over the segments up to `age`, as
+    /// [`max_luminosity_until`](Self::max_luminosity_until) reads them: `on_track` of a star's track
+    /// at its track age, and `quantity` of its states elsewhere.
+    #[must_use]
+    fn max_until(
+        &self,
+        component: Component,
+        age: Years,
+        quantity: impl Fn(&StarState) -> f64,
+        on_track: impl Fn(&sse::Track, Years) -> f64,
+    ) -> f64 {
+        let slot = component.index();
+        let age = age.value();
+        let age = if age > 0.0 { age.min(self.until) } else { 0.0 };
+        let mut peak = 0.0_f64;
+        for segment in self.segments.iter().take_while(|s| s.start <= age) {
+            let end = segment.end.min(age);
+            let member = &segment.members[slot];
+            let at = |a: f64| quantity(&member.state_at(&self.context, slot, a));
+            let largest = match member {
+                Member::Track { track, offset } => {
+                    on_track(track, Years::new((end - offset).max(0.0)))
+                }
+                Member::Frozen { state, .. } => quantity(state),
+                Member::Gone => 0.0,
+                Member::Shaped { mass, .. }
+                | Member::Cooling { mass, .. }
+                | Member::Remnant { mass, .. } => knots_between(mass, None, segment.start, end)
+                    .map(at)
+                    .fold(at(segment.start).max(at(end)), f64::max),
+                Member::MainSequence { mass, tau, .. } => {
+                    knots_between(mass, Some(tau), segment.start, end)
+                        .map(at)
+                        .fold(at(segment.start).max(at(end)), f64::max)
+                }
+            };
+            peak = peak.max(largest);
+        }
+        peak
+    }
+
+    /// The time `component` has left on its hydrogen main sequence at `age`, Julian years, if it is
+    /// on it or before it then: its own clock, as plan 14's habitability reads it for a star of a
+    /// pair the engine ran (P14.T1.g). A star on its track has its track's main-sequence end less
+    /// its track age, as a single star's model has; a star whose mass and fractional age τ the
+    /// binary carries, an accretor or a merger's product, has (1 − τ) of the main-sequence lifetime
+    /// of its mass then (Hurley, Pols and Tout 2000, §7.1's effective age); `None` for any other
+    /// star and for one past its main sequence.
+    ///
+    /// # Panics
+    ///
+    /// Never: an age outside the timeline is read at its nearer end.
+    #[must_use]
+    pub(crate) fn main_sequence_left(&self, component: Component, age: Years) -> Option<Years> {
+        let slot = component.index();
+        let age = age.value().clamp(0.0, self.until);
+        let segment = &self.segments[self
+            .segments
+            .partition_point(|s| s.start <= age)
+            .saturating_sub(1)];
+        let member = &segment.members[slot];
+        match member.state_at(&self.context, slot, age).phase() {
+            Phase::Protostar | Phase::PreMainSequence | Phase::MainSequence => {}
+            Phase::Substellar
+            | Phase::HertzsprungGap
+            | Phase::FirstGiantBranch
+            | Phase::CoreHeliumBurning
+            | Phase::EarlyAgb
+            | Phase::ThermallyPulsingAgb
+            | Phase::HeliumMainSequence
+            | Phase::HeliumHertzsprungGap
+            | Phase::HeliumGiantBranch
+            | Phase::PostAgb
+            | Phase::HeliumWhiteDwarf
+            | Phase::CarbonOxygenWhiteDwarf
+            | Phase::OxygenNeonWhiteDwarf
+            | Phase::NeutronStar
+            | Phase::BlackHole
+            | Phase::NoRemnant => return None,
+        }
+        let left = match member {
+            Member::Track { track, offset } | Member::Shaped { track, offset, .. } => {
+                track.main_sequence_ends()?.value() - (age - offset)
+            }
+            Member::MainSequence {
+                helium: false,
+                mass,
+                tau,
+            } => {
+                let lifetime =
+                    sse::main_sequence_lifetime(self.context.coeffs(), false, mass.at(age));
+                (1.0 - tau.at(age).clamp(0.0, 1.0)) * lifetime
+            }
+            Member::MainSequence { helium: true, .. }
+            | Member::Cooling { .. }
+            | Member::Frozen { .. }
+            | Member::Remnant { .. }
+            | Member::Gone => return None,
+        };
+        Some(Years::new(left.max(0.0)))
+    }
+
+    /// The age, Julian years, at which `component` last left its hydrogen main sequence by `age`,
+    /// with its luminosity then, the first age off it, if it had one and is off it at `age`: the
+    /// main-sequence end plan 14's hot history reads for a star of a pair the engine ran
+    /// (P14.T1.g), a merger's product's its own. For a star on its own track it is its track's end
+    /// and its track's state there, which a single star's model reads, to the bit.
+    ///
+    /// The phase is read at each segment's start and just before its end, and at a track's own
+    /// main-sequence end inside a segment; the last of those on the main sequence and the next off
+    /// it bracket the end, which [`TRANSITION_STEPS`] halvings find.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, if `age` is not finite.
+    #[must_use]
+    pub(crate) fn main_sequence_end_before(
+        &self,
+        component: Component,
+        age: Years,
+    ) -> Option<(Years, SolarLuminosities)> {
+        let slot = component.index();
+        let age = age.value().clamp(0.0, self.until);
+        let state = |at: f64| self.member_state_at(slot, at);
+        let on = |at: f64| state(at).phase() == Phase::MainSequence;
+        if on(age) {
+            return None;
+        }
+        let samples = self.phase_samples(slot, age);
+        let last = samples.iter().rposition(|&at| on(at))?;
+        let (mut before, mut after) =
+            (samples[last], samples.get(last + 1).copied().unwrap_or(age));
+        for _ in 0..TRANSITION_STEPS {
+            let mid = f64::midpoint(before, after);
+            if mid <= before || mid >= after {
+                break;
+            }
+            if on(mid) {
+                before = mid;
+            } else {
+                after = mid;
+            }
+        }
+        Some((Years::new(after), state(after).luminosity()))
+    }
+
+    /// The age, Julian years, at which `component` first has no living star, a remnant or
+    /// nothing, by the age the binary was run to: its death as plan 14's cometary halo reads it
+    /// (P14.T1.g), [`first_age_where`](Self::first_age_where) of it.
+    #[must_use]
+    pub(crate) fn first_death_age(&self, component: Component) -> Option<Years> {
+        self.first_age_where(component, |phase| {
+            phase.is_remnant() || phase == Phase::NoRemnant
+        })
+    }
+
+    /// The first age, Julian years, by the age the binary was run to at which `component`'s phase
+    /// passes `test`, if it ever does: found as
+    /// [`main_sequence_end_before`](Self::main_sequence_end_before) finds a main sequence's end,
+    /// between the samples its phase is read at and by [`TRANSITION_STEPS`] halvings. Plan 14
+    /// reads a star's death (P14.T1.g) and the birth of the remnant it ends as (P14.T1.h) so.
+    #[must_use]
+    pub(crate) fn first_age_where(
+        &self,
+        component: Component,
+        test: impl Fn(Phase) -> bool,
+    ) -> Option<Years> {
+        let slot = component.index();
+        let passes = |at: f64| test(self.member_state_at(slot, at).phase());
+        let samples = self.phase_samples(slot, self.until);
+        let first = samples.iter().position(|&at| passes(at))?;
+        let Some(previous) = first.checked_sub(1) else {
+            return Some(Years::new(samples[first]));
+        };
+        let (mut before, mut after) = (samples[previous], samples[first]);
+        for _ in 0..TRANSITION_STEPS {
+            let mid = f64::midpoint(before, after);
+            if mid <= before || mid >= after {
+                break;
+            }
+            if passes(mid) {
+                after = mid;
+            } else {
+                before = mid;
+            }
+        }
+        Some(Years::new(after))
+    }
+
+    /// The state of slot `slot`'s member at `age`, Julian years, as [`state_at`](Self::state_at)
+    /// gives it, bit for bit, without the other member's and the orbit's.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, if `age` is not finite.
+    #[must_use]
+    fn member_state_at(&self, slot: usize, age: f64) -> StarState {
+        debug_assert!(
+            age.is_finite(),
+            "a timeline is read at a finite age, not {age}"
+        );
+        let age = if age > 0.0 { age.min(self.until) } else { 0.0 };
+        let index = self
+            .segments
+            .partition_point(|s| s.start <= age)
+            .saturating_sub(1);
+        self.segments[index].members[slot].state_at(&self.context, slot, age)
+    }
+
+    /// The ages up to `age`, Julian years, at which slot `slot`'s phase is sampled for its
+    /// transitions, ascending and without repeats: each segment's start and the age just before its
+    /// end, a track's own main-sequence end and death inside its segment and the ages just before
+    /// them, and `age` itself.
+    #[must_use]
+    fn phase_samples(&self, slot: usize, age: f64) -> Vec<f64> {
+        let mut samples = Vec::with_capacity(1 + 6 * self.segments.len());
+        samples.push(age);
+        for segment in self.segments.iter().take_while(|s| s.start <= age) {
+            let end = segment.end.min(age);
+            samples.extend([segment.start, end.next_down().max(segment.start)]);
+            if let Member::Track { track, offset } | Member::Shaped { track, offset, .. } =
+                &segment.members[slot]
+            {
+                for own in [track.main_sequence_ends(), track.lifetime()]
+                    .into_iter()
+                    .flatten()
+                {
+                    let at = own.value() + offset;
+                    if segment.start < at && at < end {
+                        samples.extend([at.next_down(), at]);
+                    }
+                }
+            }
+        }
+        samples.retain(|&at| at <= age);
+        samples.sort_by(f64::total_cmp);
+        samples.dedup_by(|a, b| a.total_cmp(b).is_eq());
+        samples
+    }
+
+    /// The ages strictly between `from` and `to`, Julian years, at which the pair's orbit or its
+    /// members' masses may turn, ascending and without repeats: its segments' starts and the
+    /// knots of each segment's orbit and of its members' mass and τ paths. Plan 14's zones at the
+    /// evaluated state are scanned at them (P14.T9.d).
+    #[must_use]
+    pub(crate) fn knot_ages(&self, from: f64, to: f64) -> Vec<f64> {
+        let mut ages: Vec<f64> = Vec::new();
+        for segment in &self.segments {
+            ages.push(segment.start);
+            if let Some(orbit) = &segment.orbit {
+                ages.extend(orbit.axis.knots().iter().map(|knot| knot[0]));
+                ages.extend(orbit.eccentricity.knots().iter().map(|knot| knot[0]));
+            }
+            for member in &segment.members {
+                let (first, second) = match member {
+                    Member::Shaped { mass, .. }
+                    | Member::Cooling { mass, .. }
+                    | Member::Remnant { mass, .. } => (Some(mass), None),
+                    Member::MainSequence { mass, tau, .. } => (Some(mass), Some(tau)),
+                    Member::Track { .. } | Member::Frozen { .. } | Member::Gone => (None, None),
+                };
+                if let Some(first) = first {
+                    ages.extend(knots_between(first, second, from, to));
+                }
+            }
+        }
+        ages.retain(|&age| from < age && age < to);
+        ages.sort_by(f64::total_cmp);
+        ages.dedup_by(|a, b| a.total_cmp(b).is_eq());
+        ages
+    }
+
     /// The age at which the pair coalesced, if it did by the age it was run to.
     #[must_use]
     pub fn merger_age(&self) -> Option<Years> {
@@ -706,6 +1128,101 @@ impl BinaryTimeline {
     #[must_use]
     pub fn supernovae(&self) -> &[SupernovaRecord] {
         &self.supernovae
+    }
+
+    /// The mass, M☉, that `component` had when it became a naked helium star in the unbroken
+    /// helium-star life (helium main sequence, Hertzsprung gap or giant branch) it is in at `age`,
+    /// or `None` if it is no naked helium star then (plan 11, P11.T11.b): what tells a helium
+    /// star's WC surface from its WN one
+    /// ([`HeliumSurface::of`](crate::stellar::classify::HeliumSurface::of)), as a single star's
+    /// track tells it.
+    ///
+    /// It walks back over the segments the life spans to the earliest, and takes the member's mass
+    /// at that segment's start: there the pair made it a helium star (a star its companion strips
+    /// is placed on a helium star's track built from its mass then,
+    /// [`Track::remains_at`](crate::stellar::sse::Track::remains_at)), or a merger made a new one,
+    /// which the mass's rise across the boundary marks. A member that becomes one inside a segment
+    /// takes its own track's entry mass, as a single star does
+    /// ([`Track::helium_star_entry_mass`](crate::stellar::sse::Track::helium_star_entry_mass)), or,
+    /// where the binary sets its mass on that track (a merger's product), its mass where the
+    /// track's phase turns, by bisection.
+    ///
+    /// Mass lost since, to its wind or to a companion (case BB transfer, and the helium star's
+    /// track the engine builds from its mass after it), counts as lost: Langer's (1989b, A&A 220,
+    /// 135) criterion is set in mass, so a companion's share counts as the wind's does. It reads
+    /// the timeline and draws nothing.
+    #[must_use]
+    pub(crate) fn helium_star_entry_mass(
+        &self,
+        component: Component,
+        age: Years,
+    ) -> Option<SolarMasses> {
+        let slot = component.index();
+        let state = |index: usize, at: f64| {
+            self.segments[index].members[slot].state_at(&self.context, slot, at)
+        };
+        let age = age.value();
+        let age = if age > 0.0 { age.min(self.until) } else { 0.0 };
+        let mut index = self
+            .segments
+            .partition_point(|s| s.start <= age)
+            .saturating_sub(1);
+        if !is_helium_star(&state(index, age)) {
+            return None;
+        }
+        // An age in segment `index` at which the member is a naked helium star.
+        let mut at = age;
+        loop {
+            let segment = &self.segments[index];
+            let first = state(index, segment.start);
+            if !is_helium_star(&first) {
+                // It became one inside the segment, where its track's phase turns.
+                return match &segment.members[slot] {
+                    Member::Track { track, .. } => track.helium_star_entry_mass(),
+                    Member::Shaped { .. }
+                    | Member::MainSequence { .. }
+                    | Member::Cooling { .. }
+                    | Member::Frozen { .. }
+                    | Member::Remnant { .. }
+                    | Member::Gone => {
+                        let (mut before, mut after) = (segment.start, at);
+                        for _ in 0..HELIUM_ONSET_STEPS {
+                            let mid = f64::midpoint(before, after);
+                            if mid <= before || mid >= after {
+                                break;
+                            }
+                            if is_helium_star(&state(index, mid)) {
+                                after = mid;
+                            } else {
+                                before = mid;
+                            }
+                        }
+                        Some(state(index, after).mass())
+                    }
+                };
+            }
+            // A helium star from the segment's start: was it the same one at the end of the
+            // segment before?
+            let Some(previous) = index.checked_sub(1) else {
+                return Some(first.mass());
+            };
+            let (from, to) = (self.segments[previous].start, self.segments[previous].end);
+            let end = state(previous, to);
+            let (was, then) = if is_helium_star(&end) {
+                (end, to)
+            } else {
+                // A held or dying star, whose own state at the boundary is past its life.
+                let start = state(previous, from);
+                if !is_helium_star(&start) {
+                    return Some(first.mass());
+                }
+                (start, from)
+            };
+            if first.mass().value() > was.mass().value() * (1.0 + MERGER_MASS_RISE) {
+                return Some(first.mass());
+            }
+            (index, at) = (previous, then);
+        }
     }
 
     /// The pair's total recoil after its supernovae, the sum of each one's (their equation A14),
@@ -751,6 +1268,48 @@ impl BinaryTimeline {
             + self.segments.iter().map(Segment::heap_bytes).sum::<usize>()
             + self.supernovae.capacity() * size_of::<SupernovaRecord>()
     }
+}
+
+/// The halvings of [`BinaryTimeline::main_sequence_end_before`] and
+/// [`BinaryTimeline::first_death_age`] for the age of a transition between two of their samples:
+/// 64, past the resolution of an `f64` age, at which the loop stops.
+const TRANSITION_STEPS: u32 = 64;
+
+/// The bisections of [`BinaryTimeline::helium_star_entry_mass`] for the age at which a star
+/// becomes a naked helium star inside a segment: 64 halvings, past the resolution of an `f64`
+/// age, at which the loop stops.
+const HELIUM_ONSET_STEPS: u32 = 64;
+
+/// The relative rise of a helium star's mass across a segment's start from which
+/// [`BinaryTimeline::helium_star_entry_mass`] takes it for a merger's new star: 10⁻⁶, far above the
+/// rounding of a mass the engine carries across a boundary and far below what a merger adds (the
+/// lane's choice).
+const MERGER_MASS_RISE: f64 = 1e-6;
+
+/// Whether `state` is a naked helium star's: on the helium main sequence, Hertzsprung gap or
+/// giant branch.
+#[must_use]
+fn is_helium_star(state: &StarState) -> bool {
+    matches!(
+        state.phase(),
+        Phase::HeliumMainSequence | Phase::HeliumHertzsprungGap | Phase::HeliumGiantBranch
+    )
+}
+
+/// The ages of the knots of `first` and of `second`, if given, strictly between `start` and `end`,
+/// in no particular order.
+fn knots_between<'p>(
+    first: &'p Path,
+    second: Option<&'p Path>,
+    start: f64,
+    end: f64,
+) -> impl Iterator<Item = f64> + 'p {
+    first
+        .knots()
+        .iter()
+        .chain(second.map_or(&[][..], Path::knots))
+        .map(|knot| knot[0])
+        .filter(move |&at| start < at && at < end)
 }
 
 /// The value of a piecewise-constant path at `age`: the value recorded at the end of the step

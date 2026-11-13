@@ -13,25 +13,23 @@
 mod common;
 
 use std::process::Stdio;
-use std::time::Duration;
 
+use common::patiently;
 use common::process::{Running, Stopped};
 use hyperion_server::config::ENV_STOP_ON_STDIN_CLOSE;
 use hyperion_server::stop::StopReason;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::process::Command;
-use tokio::time::timeout;
-
-/// Upper bound on an answer from `/healthz`, which does no work.
-const ANSWER_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// What these tests ask of a running server, beside [`common::process`]'s own.
 impl Running {
     /// Asks `/healthz` over HTTP/1.1, and checks that the server answers `ok`.
+    ///
+    /// It waits for the answer under the harness's [`patience`](common::patience).
     async fn assert_healthy(&self) {
         let addr = self.addr();
-        let response = timeout(ANSWER_TIMEOUT, async {
+        let response = patiently("asking `/healthz`", async {
             let mut tcp = TcpStream::connect(addr)
                 .await
                 .expect("the server accepts a connection");
@@ -44,8 +42,7 @@ impl Running {
                 .expect("the response reads");
             response
         })
-        .await
-        .expect("the server answers within ANSWER_TIMEOUT");
+        .await;
         assert!(response.starts_with("HTTP/1.1 200 OK\r\n"), "{response:?}");
         assert!(response.ends_with("\r\n\r\nok"), "{response:?}");
     }

@@ -10,7 +10,9 @@ import { add, cross, dot, norm, scale, sub, type Vec3 } from "../geometry/vec3";
 import {
   type BodyPlacement,
   composePosition,
+  fractionOfPeriod,
   type KeplerOrbit,
+  meanAnomalyAt,
   NEAR_PARABOLIC_ECCENTRICITY,
   orbitPolyline,
   positionAt,
@@ -280,6 +282,82 @@ describe("the server's drifting orbits (P14.T45.c)", () => {
     const want = scale(stateAt(shifted, at).velocityMPerS, factor);
 
     expect(relativeError(stateAt(drifting, at).velocityMPerS, want)).toBeLessThan(1e-12);
+  });
+});
+
+/**
+ * The orbit `orbit` takes at `time` held still: its axis and eccentricity drifted to `time`, as
+ * `stateAt` drifts them, and its mean anomaly at the epoch `meanAnomalyRad`, so that at the epoch,
+ * where the fraction of a period is 0, it is placed at that phase alone.
+ */
+function heldAt(orbit: KeplerOrbit, time: UniverseTime, meanAnomalyRad: number): KeplerOrbit {
+  const { drift, ...fixed } = orbit;
+  if (drift === undefined) {
+    return { ...fixed, meanAnomalyAtEpochRad: meanAnomalyRad };
+  }
+  const sinceS =
+    time.seconds - drift.reference.seconds + (time.nanos - drift.reference.nanos) / 1e9;
+  return {
+    ...fixed,
+    semiMajorAxisM: fixed.semiMajorAxisM + drift.semiMajorAxisRateMPerS * sinceS,
+    eccentricity: fixed.eccentricity + drift.eccentricityRatePerS * sinceS,
+    meanAnomalyAtEpochRad: meanAnomalyRad,
+  };
+}
+
+describe("meanAnomalyAt (R10.T12)", () => {
+  it.each([...CASES, ...DRIFT_CASES].map((entry) => [entry.label, entry] as const))(
+    "is the phase stateAt places the body at for %s, to the bit",
+    (_, { orbit, time }) => {
+      const held = heldAt(orbit, time, meanAnomalyAt(orbit, time));
+
+      expect(stateAt(held, EPOCH).positionM).toEqual(stateAt(orbit, time).positionM);
+    },
+  );
+
+  it("is M₀ plus 2π times the fraction of a period, unreduced", () => {
+    const orbit = orbitOf({ meanAnomalyAtEpochRad: 6 });
+    const time: UniverseTime = { seconds: Math.round(0.4 * orbit.periodS) + 31, nanos: 0 };
+
+    expect(meanAnomalyAt(orbit, time)).toBe(
+      6 + 2 * Math.PI * fractionOfPeriod(time, orbit.periodS),
+    );
+    expect(meanAnomalyAt(orbit, time)).toBeGreaterThan(2 * Math.PI);
+  });
+
+  it("adds half the mean motion's rate times the time squared since the drift's reference", () => {
+    const reference: UniverseTime = { seconds: 1_000, nanos: 0 };
+    const meanMotionRateRadPerS2 = 2e-20;
+    const drifting = orbitOf({
+      drift: {
+        reference,
+        semiMajorAxisRateMPerS: 5,
+        eccentricityRatePerS: 0,
+        meanMotionRateRadPerS2,
+      },
+    });
+    const time: UniverseTime = { seconds: 10_001_000, nanos: 0 };
+
+    expect(meanAnomalyAt(drifting, time) - meanAnomalyAt(orbitOf(), time)).toBeCloseTo(
+      0.5 * meanMotionRateRadPerS2 * 1e14,
+      12,
+    );
+  });
+
+  it("crosses a month's edge, from below its mean anomaly to above, on an eccentric orbit", () => {
+    // Month 3's edge on a seasonal orbit of e = 0.3 from periapsis at the epoch: M₃ = 90° − e sin 90°
+    // (the surface crate's `month_edges`), which the module's `month_at` takes month 3 from.
+    const orbit = orbitOf({ meanAnomalyAtEpochRad: 0 });
+    const edge = Math.PI / 2 - 0.3;
+    const atEdgeS = Math.round((edge / (2 * Math.PI)) * orbit.periodS);
+    const before = meanAnomalyAt(orbit, { seconds: atEdgeS - 60, nanos: 0 });
+    const after = meanAnomalyAt(orbit, { seconds: atEdgeS + 60, nanos: 0 });
+
+    expect([before < edge, after > edge]).toEqual([true, true]);
+  });
+
+  it("refuses a malformed time, as the phase does", () => {
+    expect(() => meanAnomalyAt(orbitOf(), { seconds: 0.5, nanos: 0 })).toThrow(RangeError);
   });
 });
 

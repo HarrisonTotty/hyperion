@@ -29,7 +29,8 @@
 //!   threshold, found once by bisection on the law's own rank table and speed map, and the share
 //!   beyond it is the truncated normal's tail at the threshold over c. Design note 18 took 64
 //!   quantile midpoints; a midpoint rule on a step function errs by up to half a cell at each
-//!   edge, 1 ÷ 128, far outside the 3σ of P08.T8.b's 10⁶-draw check.
+//!   edge, 1 ÷ 128, far outside the σ of 10⁶ draws (about 3 × 10⁻⁴) that P08.T8.b's check
+//!   resolves.
 //!
 //! Tracks stop at [`MAX_INITIAL_MASS`] (150 M☉ since P06.T14), so a star above it is taken as one
 //! of that mass, as `StarModel` does.
@@ -798,6 +799,7 @@ fn maxwell_cdf(x: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use hyperion_testkit::lcg::Lcg;
+    use hyperion_testkit::stats::{ALPHA, assert_p_value, chi_square_gof};
 
     use super::*;
     use crate::galaxy::imf::MassFunctionKind;
@@ -955,13 +957,28 @@ mod tests {
         }
     }
 
-    /// P08.T8.b: against 10⁶ direct draws of plan 06's law at five masses, every bin of every kind
-    /// and mode agrees within 3σ of the Monte Carlo error.
+    /// P08.T8.b: against 10⁶ direct draws of plan 06's law at five masses, the counts of every
+    /// kind, mode and bin, and of no remnant, follow the shares: one chi-square test a mass, each
+    /// at α ÷ 5, so that the five hold the skill's α = 10⁻³ family-wise, to within the 1.1 × 10⁻³
+    /// that `decision-test-coverage.md` allows (the kick bins' ruling and its §3.2 addendum). A 3σ
+    /// check of each cell, as this test made before, fails on some 15% or more of the fresh draws
+    /// of a true law (61 of the 485 cells have a share, at 0.27% each before the counts'
+    /// discreteness), far above 10⁻³. Each (kind, mode)'s bins are merged in bin order until every
+    /// cell expects at least [`MERGE_FLOOR`] draws ([`merged_cells`]), where the χ² law's tail
+    /// puts each mass's real false-failure rate within the addendum's 2.2 × 10⁻⁴.
+    ///
+    /// The cells whose share is all but nought (expected under [`NO_SHARE`] draws: a kind's modes
+    /// it never takes, and the vanishing tails) hold no draw at all, and their expectations sum
+    /// under [`NO_SHARE`]: a true law draws none there but once in 10⁶ runs, so the check costs no
+    /// α, and a draw in a cell the law cannot reach fails it, as it failed the 3σ check. They are
+    /// left out of the χ².
     #[test]
     fn the_shares_match_direct_draws_of_the_law() {
         let law = StandardKickLaw::default();
         let n = 1_000_000_u32;
-        for (i, m) in [8.5, 11.0, 16.0, 24.0, 38.0].into_iter().enumerate() {
+        let masses = [8.5, 11.0, 16.0, 24.0, 38.0];
+        let alpha = ALPHA / f64::from(u32::try_from(masses.len()).expect("five masses"));
+        for (i, m) in masses.into_iter().enumerate() {
             let direct = Direct::new(m);
             let mut lcg = Lcg::new(0x08b0 + u64::try_from(i).unwrap());
             let mut counts = [[[0_u32; SPEED_BINS]; MODES.len()]; KINDS.len()];
@@ -979,23 +996,138 @@ mod tests {
                 KilometresPerSecond::new(V_C),
             );
             let total = f64::from(n);
+            // Each (kind, mode)'s cells in bin order, then no remnant as a group of its own.
+            let mut groups: Vec<Vec<(String, u64, f64)>> = Vec::new();
             for (k, &kind) in KINDS.iter().enumerate() {
                 for (j, &mode) in MODES.iter().enumerate() {
                     let bins = shares.mode_bins(kind, mode);
-                    for (bin, &p) in bins.iter().enumerate() {
-                        let measured = f64::from(counts[k][j][bin]) / total;
-                        let sigma = (p * (1.0 - p) / total).sqrt().max(1.0 / total);
-                        assert!(
-                            (measured - p).abs() <= 3.0 * sigma,
-                            "{m} M☉ {kind:?} {mode:?} bin {bin}: {measured} against {p} (σ {sigma})"
-                        );
-                    }
+                    let group = bins.iter().enumerate().map(|(bin, &p)| {
+                        let label = format!("{kind:?} {mode:?} bin {bin}");
+                        (label, u64::from(counts[k][j][bin]), p * total)
+                    });
+                    groups.push(group.collect());
                 }
             }
-            let measured = f64::from(none) / total;
-            let p = shares.no_remnant();
-            assert!((measured - p).abs() <= 3.0 * (p * (1.0 - p) / total).sqrt().max(1.0 / total));
+            groups.push(vec![(
+                "no remnant".to_owned(),
+                u64::from(none),
+                shares.no_remnant() * total,
+            )]);
+            let cells = || groups.iter().flatten();
+            let mut no_share = 0.0;
+            for (label, o, e) in cells().filter(|&&(_, _, e)| e < NO_SHARE) {
+                assert_eq!(*o, 0, "{m} M☉ {label}: drawn where the law expects {e:e}");
+                no_share += e;
+            }
+            assert!(
+                no_share < NO_SHARE,
+                "{m} M☉: the cells of no share expect {no_share:e} draws"
+            );
+            let merged = merged_cells(groups.iter().map(|group| {
+                group
+                    .iter()
+                    .filter(|&&(_, _, e)| e >= NO_SHARE)
+                    .map(|&(_, o, e)| (o, e))
+            }));
+            let observed: Vec<u64> = merged.iter().map(|&(o, _)| o).collect();
+            let expected: Vec<f64> = merged.iter().map(|&(_, e)| e).collect();
+            let fit = chi_square_gof(&observed, &expected);
+            assert_eq!(
+                fit.bins,
+                merged.len(),
+                "{m} M☉: chi_square_gof merged the merged cells again"
+            );
+            // The least expected count of the merged cells: the χ² law's approximation, and so
+            // the test's real α, rests on it.
+            let least = expected
+                .iter()
+                .copied()
+                .min_by(f64::total_cmp)
+                .expect("cells left");
+            assert!(
+                least >= MERGE_FLOOR,
+                "{m} M☉: a merged cell expects {least}"
+            );
+            // The cell at the merge floor or more furthest from its share, in standard
+            // deviations, named should the test fail.
+            let (label, o, e) = cells()
+                .filter(|&&(_, _, e)| e >= MERGE_FLOOR)
+                .max_by(|a, b| {
+                    let z = |&(_, o, e): &(String, u64, f64)| (count(o) - e).abs() / e.sqrt();
+                    z(a).total_cmp(&z(b))
+                })
+                .expect("a cell at the merge floor or more");
+            let name = format!(
+                "{m} M☉: {} cells, {} with a share, merged to {} (the least expecting {least:.1}), \
+                 χ² {:.1} on {} degrees of freedom; furthest {label}, {o} drawn against {e:.1}",
+                cells().count(),
+                cells().filter(|&&(_, _, e)| e >= NO_SHARE).count(),
+                fit.bins,
+                fit.statistic,
+                fit.dof
+            );
+            eprintln!("{name}: p {:.3}", fit.p_value);
+            assert_p_value(&name, fit.p_value, alpha);
         }
+    }
+
+    /// Expected draws below which a cell has no share: a kind's modes it never takes, and the
+    /// tails of under 10⁻¹² of the law.
+    const NO_SHARE: f64 = 1e-6;
+
+    /// The least expected draws of a merged cell (`decision-test-coverage.md` §3.2 addendum).
+    ///
+    /// The testkit's floor of 5 left merged cells expecting as few as 9.0 draws, whose skewed
+    /// counts put a mass's real false-failure rate at up to about 2.5 × 10⁻⁴ against
+    /// α ÷ 5 = 2 × 10⁻⁴. At 50 the merged cells expect 244 draws or more, and an exact Monte Carlo
+    /// of the test under the law's shares (10⁸ multinomial samples of 10⁶ draws a mass) puts the
+    /// rates at 1.99–2.03 × 10⁻⁴; a mass whose least cell sat at exactly 50 would be at about
+    /// 2.2 × 10⁻⁴, the addendum's bound (P08's as-built note).
+    const MERGE_FLOOR: f64 = 50.0;
+
+    /// The (drawn, expected) cells of `groups`, each merged in bin order to the merge floor.
+    ///
+    /// A run of bins closes once it expects [`MERGE_FLOOR`] draws, and the thin run left at a
+    /// group's end joins the group's last cell. Merged, a multinomial's cells are still a
+    /// multinomial's, and the merge reads only the expectations, so the null stays exact; the
+    /// test's α is then the χ² law's approximation, which P08's as-built note measures.
+    ///
+    /// # Panics
+    ///
+    /// If a group with a share expects under the floor in all: the addendum merges only within a
+    /// (kind, mode), so such a group, of which there is none today, needs a ruling on where it
+    /// goes.
+    #[must_use]
+    fn merged_cells<G: IntoIterator<Item = (u64, f64)>>(
+        groups: impl IntoIterator<Item = G>,
+    ) -> Vec<(u64, f64)> {
+        let add = |a: (u64, f64), b: (u64, f64)| (a.0 + b.0, a.1 + b.1);
+        let mut cells: Vec<(u64, f64)> = Vec::new();
+        for group in groups {
+            let start = cells.len();
+            let mut run = (0, 0.0);
+            for cell in group {
+                run = add(run, cell);
+                if run.1 >= MERGE_FLOOR {
+                    cells.push(run);
+                    run = (0, 0.0);
+                }
+            }
+            match cells[start..].last_mut() {
+                Some(last) => *last = add(*last, run),
+                None => assert!(
+                    run.1 <= 0.0,
+                    "a (kind, mode) expects {} draws in all, under the merge floor",
+                    run.1
+                ),
+            }
+        }
+        cells
+    }
+
+    /// A count as an `f64`, exactly: the counts here are at most 10⁶.
+    fn count(n: u64) -> f64 {
+        f64::from(u32::try_from(n).expect("a count of at most 10⁶ draws"))
     }
 
     /// The bins averaged over layer E's band, weighted by the mass function over 33 log-spaced
@@ -1048,8 +1180,10 @@ mod tests {
     /// 224 km/s, solar metallicity), each neutron-star bin lies within 0.03 of `w + (1 − w) ×` the
     /// truncated DM25 share of the bin (the `w` term in the first bin only), `w` the measured
     /// low-mode share of neutron stars, which lies below a quarter of `v_c` bar a Maxwellian tail
-    /// of about 10⁻²⁵; and the black holes' first bin holds 0.78–0.88. The research's scratch 0.20, 0.10,
-    /// 0.155, … are withdrawn (ruling 120.2).
+    /// of about 10⁻²⁵; and the black holes' first bin holds 0.76–0.88 (0.78–0.88 until generator
+    /// version 26; from 26, under the enforced Humphreys–Davidson limit, which leaves fewer black
+    /// holes a complete fallback, it holds 0.774). The research's scratch 0.20, 0.10, 0.155, … are
+    /// withdrawn (ruling 120.2).
     #[test]
     fn the_band_averaged_shares_at_milky_way_values() {
         let ((ns, w), (bh, _)) = (
@@ -1069,7 +1203,7 @@ mod tests {
             );
         }
         assert!(
-            (0.78..=0.88).contains(&bh[0]),
+            (0.76..=0.88).contains(&bh[0]),
             "black holes' first bin {}",
             bh[0]
         );

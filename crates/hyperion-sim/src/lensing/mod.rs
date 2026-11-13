@@ -17,8 +17,8 @@ mod walk;
 
 pub use point_lens::{einstein_angle, point_lens_magnification};
 pub use walk::{
-    BuildLensQueryError, DEFAULT_LENS_CELL_BUDGET, DEFAULT_MAX_IMPACT, FindLensesError,
-    LensCandidateChunk, LensCandidates, LensCensus, LensEvent, LensQuery, LensQueryBuilder,
-    LensResult, LensSightline, LensWalkPlan, lens_candidates, lens_mass_at, lenses_along,
-    lenses_among, magnification_at,
+    BuildLensQueryError, CHUNKS_PER_THREAD, DEFAULT_LENS_CELL_BUDGET, DEFAULT_MAX_IMPACT,
+    FindLensesError, LensCandidateChunk, LensCandidates, LensCensus, LensEvent, LensQuery,
+    LensQueryBuilder, LensResult, LensSightline, LensWalkPlan, lens_candidates, lens_mass_at,
+    lenses_along, lenses_among, magnification_at,
 };

@@ -16,6 +16,7 @@ describe("packGlareSources", () => {
     direction: { x: 0, y: 0.6, z: -0.8 },
     angularRadiusRad: 0.267 * DEG,
     excessLuminance: [2e9, 1e9, 5e8],
+    luminance: [3e9, 2e9, 1e9],
   };
   const star: GlareSource = { ...sun, angularRadiusRad: 1e-9 };
 
@@ -28,7 +29,8 @@ describe("packGlareSources", () => {
       [2e5, 1e5, 5e4, glareSourceSolidAngleSr(sun)].map(Math.fround),
     );
     expect(packed[8]).toBe(Math.fround(rectangleInsideLevel(sun.angularRadiusRad, 0.0046 * DEG)));
-    expect(packed[11]).toBe(0);
+    // The whole luminance through the meter's weights, pre-exposed, for the histogram alone.
+    expect(packed[11]).toBe(Math.fround((0.2126 * 3e9 + 0.7152 * 2e9 + 0.0722 * 1e9) * 1e-4));
   });
 
   it("marks a source that is a point for a term with a level of −1", () => {

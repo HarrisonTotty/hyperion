@@ -8,10 +8,13 @@ import type {
   DescentSpikeReport,
   SpikeLatePipeline,
   SpikePassSeries,
+  SpikeReportPart,
   SpikeSegmentSpan,
   SpikeStreamingSegment,
   SpikeTraceWindow,
 } from "../preload/api";
+import { readGeometryReport } from "./geometryResults";
+import { isSpikeSizesReport, sizesReportProblems } from "./sizesSchema";
 
 type Rec = Readonly<Record<string, unknown>>;
 
@@ -160,10 +163,68 @@ function latePipeline(value: unknown): SpikeLatePipeline | null {
     : null;
 }
 
+/** A `sizes` block the check refused (R10.T14.b): as the renderer sent it, and its problems. */
+export interface RejectedSizes {
+  readonly block: unknown;
+  readonly problems: ReadonlyArray<string>;
+}
+
+/** The renderer's report as read: the report, and its `sizes` block where that alone was refused. */
+export interface SpikeReportReading {
+  readonly report: DescentSpikeReport;
+  /** The malformed `sizes` block left out of {@link SpikeReportReading.report}, or `null`. */
+  readonly rejectedSizes: RejectedSizes | null;
+}
+
+/**
+ * `value` as the renderer's report ({@link readDescentSpikeReport}), with a malformed `sizes` block
+ * (R10.T14.b) left out of it and given beside it with its problems, so that a measured run whose
+ * block alone is wrong keeps its results.
+ */
+export function readSpikeReport(value: unknown): SpikeReportReading | null {
+  const report = readDescentSpikeReport(value);
+  if (report === null || !isRecord(value)) {
+    return null;
+  }
+  const given = value["sizes"];
+  const problems =
+    given === undefined || report.sizes !== undefined ? [] : sizesReportProblems(given);
+  return {
+    report,
+    rejectedSizes: problems.length === 0 ? null : { block: given, problems },
+  };
+}
+
+/**
+ * `value` as a part of the renderer's report (R14's Mac measurements), or `null` if it is not one:
+ * a count of the frames before it, a finite script time, and a report ({@link readDescentSpikeReport})
+ * that carries neither the geometry block nor the sizes block, which only the whole report does.
+ */
+export function readSpikeReportPart(value: unknown): SpikeReportPart | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const { fromFrame, throughS } = value;
+  const report = readDescentSpikeReport(value["report"]);
+  return typeof fromFrame === "number" &&
+    Number.isInteger(fromFrame) &&
+    fromFrame >= 0 &&
+    typeof throughS === "number" &&
+    Number.isFinite(throughS) &&
+    report !== null &&
+    report.geometry === undefined &&
+    report.sizes === undefined
+    ? { fromFrame, throughS, report }
+    : null;
+}
+
 /**
  * `value` as the renderer's report, or `null` if any part of it is missing or of the wrong type:
  * every series as long as the frames', every figure finite, each frame's missing resolves a whole
  * count and those still being read at the report no more than them, the trace's windows in order.
+ * The measured sizes, where given (R10.T14.b), are kept only well formed to the last field
+ * (`sizesReportProblems`): a malformed block is left out, and refuses nothing else
+ * ({@link readSpikeReport} gives it with its problems).
  */
 export function readDescentSpikeReport(value: unknown): DescentSpikeReport | null {
   if (!isRecord(value)) {
@@ -210,6 +271,14 @@ export function readDescentSpikeReport(value: unknown): DescentSpikeReport | nul
   const windows = traceWindows(value["traceWindows"]);
   const canvas = value["canvas"];
   const terrain = value["terrain"];
+  const given = value["sizes"];
+  // The measured sizes (R10.T14.b) are checked whole and strictly: an object with exactly its
+  // fields, every figure of its kind; a malformed block is left out.
+  const sizes = given !== undefined && isSpikeSizesReport(given) ? given : undefined;
+  // A generated world's geometry by segment (plan R14), checked whole; a malformed one refuses the
+  // report.
+  const geometry =
+    value["geometry"] === undefined ? undefined : readGeometryReport(value["geometry"]);
   const terrainOk =
     terrain === undefined ||
     (isRecord(terrain) &&
@@ -242,7 +311,8 @@ export function readDescentSpikeReport(value: unknown): DescentSpikeReport | nul
     !isRecord(canvas) ||
     !isCount(canvas["widthPx"]) ||
     !isCount(canvas["heightPx"]) ||
-    !terrainOk
+    !terrainOk ||
+    geometry === null
   ) {
     return null;
   }
@@ -274,6 +344,8 @@ export function readDescentSpikeReport(value: unknown): DescentSpikeReport | nul
     (terrain["normals"] === "double" || terrain["normals"] === "mesh")
       ? { terrain: { vertexPath: terrain["vertexPath"], normals: terrain["normals"] } }
       : {}),
+    ...(sizes === undefined ? {} : { sizes }),
+    ...(geometry === undefined ? {} : { geometry }),
   };
 }
 

@@ -44,18 +44,25 @@
 //! dissolution time is Baumgardt and Makino's (2003, MNRAS 340, 227, eqs. 10 and 12): `t_dis = 1.91
 //! Myr × (N ÷ ln 0.02N)^0.75 × (R_A ÷ kpc)(V_c ÷ 220 km/s)^−1 (1 − ε)`, `N = M₀ ÷ 0.547 M☉`, `R_A` the
 //! apocentre, `V_c` the circular speed there and ε the eccentricity. The initial mass solves `M =
-//! 0.70 M₀ (1 − t ÷ t_dis(M₀))` by 40 bisections in `log M₀`, and the mass lost to the tails is
-//! `0.70 M₀ ÷ t_dis`. The birth half-mass radius is today's (ruling 126.2): Gieles, Heggie and
-//! Zhao's (2011, MNRAS 413, 2509, eq. 28) expansion is an upper envelope in which clusters forget
-//! their start, and cannot be inverted once a cluster evaporates, so the birth escape speed is
-//! today's times `√(M₀ ÷ M)`. BM03's models span about 4.5 × 10³–7.2 × 10⁴ M☉, 2.8–15 kpc and ε ≤
-//! 0.8; the globulars above and beyond are an extrapolation of its `N` scaling, as Baumgardt et
-//! al. 2019 also make.
+//! μ M₀ (1 − t ÷ t_dis(M₀))` by 40 bisections in `log M₀`, and the mass lost to the tails is
+//! `μ M₀ ÷ t_dis`. μ is the share of the birth mass that stellar evolution leaves: until version 26
+//! BM03's 0.70, the intercept of their linear law for their Kroupa function from 0.1 to 15 M☉;
+//! then the cluster's own population's at its age under the galaxy's mass function and fates, about
+//! 0.47 (ruling 145.5; `bound_share`). BM03 calibrated `t_dis` on clusters that lose about a third
+//! of their mass to stellar evolution, and the own μ loses about half, so it is read beyond its
+//! calibration, as the mass range below is. The birth half-mass radius is today's (ruling 126.2):
+//! Gieles, Heggie and Zhao's (2011, MNRAS 413, 2509, eq. 28) expansion is an upper envelope in
+//! which clusters forget their start, and cannot be inverted once a cluster evaporates, so the
+//! birth escape speed is today's times `√(M₀ ÷ M)`. BM03's models span about 4.5 × 10³–7.2 × 10⁴
+//! M☉, 2.8–15 kpc and ε ≤ 0.8; the globulars above and beyond are an extrapolation of its `N`
+//! scaling, as Baumgardt et al. 2019 also make.
 
 use crate::coords::{GalacticPosition, GalacticVelocity};
 use crate::galaxy::consts::LIGHT_YEARS_PER_KILOPARSEC;
+use crate::galaxy::fates::{CensusFates, Counted, fates_for, present_share_of_formed_with};
 use crate::galaxy::fields::ComponentId;
 use crate::galaxy::params::{HaloComponentKind, ProgenitorKind};
+use crate::galaxy::potential::PotentialTables;
 use crate::galaxy::quad::gl_panels;
 use crate::galaxy::{Galaxy, PointLy, Population};
 use crate::math;
@@ -572,8 +579,34 @@ const BM03_BETA: f64 = 1.91e6;
 const BM03_EXPONENT: f64 = 0.75;
 /// Their mean stellar mass, M☉.
 const BM03_MEAN_MASS: f64 = 0.547;
-/// The bound share of the inverted mass law, `M = 0.70 M₀ (1 − t ÷ t_dis)`.
+/// The bound share of BM03's inverted mass law, `M = 0.70 M₀ (1 − t ÷ t_dis)`: the intercept of
+/// their linear law, for their Kroupa function from 0.1 to 15 M☉, which `bound_share` replaced
+/// at 26 by the cluster's own population's (ruling 145.5).
 pub const BOUND_SHARE: f64 = 0.70;
+
+/// The share μ of a globular's birth mass that stellar evolution leaves at `age`, in its history
+/// `M = μ M₀ (1 − t ÷ t_dis)`, for a cluster of `population` in `galaxy`.
+///
+/// It is the present mass per mass formed of systems born `age` ago
+/// ([`present_share_of_formed`](crate::galaxy::fates::present_share_of_formed)) under the
+/// galaxy's mass function and `population`'s fates ([`fates_for`]), the stars, lifetimes and
+/// remnants that count the galaxy's systems (ruling 145.5, in place of BM03's [`BOUND_SHARE`]). It counts the living stars and the
+/// white dwarfs ([`Counted::StarsAndWhiteDwarfs`]). A globular keeps few of its neutron stars past
+/// their kicks. BM03's models, whose function stops at 15 M☉, hold no black holes, and the
+/// cluster's model counts its own as a class apart (`M − M_BH`, ruling 145.1). At 12 Gyr under the
+/// default function it is 0.473 for the halo, 0.472 for the thick disc and 0.476 for the bulge, the
+/// ruling's "about 0.46"; with every remnant kept the halo's would be 0.552. It costs one
+/// quadrature over the stellar range, about 0.5 ms, on the galaxy's companions
+/// (`Galaxy::companions`, built once a galaxy).
+#[must_use]
+pub(crate) fn bound_share(galaxy: &Galaxy, population: Population, age: Years) -> f64 {
+    present_share_of_formed_with(
+        galaxy.mass_function(),
+        &CensusFates::new(fates_for(population), Counted::StarsAndWhiteDwarfs),
+        galaxy.companions(),
+        age,
+    )
+}
 
 /// Baumgardt and Makino's dissolution time of a cluster of initial mass `m0` on an orbit of
 /// apocentre `apo` (ly) and eccentricity `e`, in a galaxy whose circular speed at the apocentre is
@@ -600,51 +633,114 @@ pub fn orbit(
     position: &GalacticPosition,
     velocity: Option<GalacticVelocity>,
 ) -> (LightYears, LightYears) {
-    let tables = galaxy.potential();
-    let p = PointLy::from(position);
-    let r = (p.x * p.x + p.y * p.y + p.z * p.z).sqrt().max(1.0);
-    let phi = |x: f64| tables.potential_in_plane(LightYears::new(x.max(1.0)));
     let Some(v) = velocity else {
-        return (LightYears::new(r), LightYears::new(r));
+        let r = LightYears::new(distance_ly(position));
+        return (r, r);
     };
-    let [vx, vy, vz] = v.metres_per_second().map(|c| c * 1e-3);
-    let energy = 0.5 * (vx * vx + vy * vy + vz * vz) + phi(r);
-    // L = |r × v| in ly km/s.
-    let (lx, ly, lz) = (
-        p.y * vz - p.z * vy,
-        p.z * vx - p.x * vz,
-        p.x * vy - p.y * vx,
-    );
-    let l2 = lx * lx + ly * ly + lz * lz;
-    let g = |x: f64| 2.0 * (energy - phi(x)) - l2 / (x * x);
-    (
-        LightYears::new(turning_point(&g, 1.0, r)),
-        LightYears::new(turning_point(&g, 1e7, r)),
-    )
+    let motion = RadialMotion::new(galaxy, position, v);
+    (motion.pericentre(), motion.apocentre())
 }
 
-/// The history of a globular of present `mass`, `half_mass_radius` and `age` at `position` moving
-/// at `velocity` (galactic, m/s) in `galaxy`, or on a circular orbit where `velocity` is `None`
-/// (module documentation).
+/// The distance of `position` from the galactic centre, ly, at least 1.
+#[must_use]
+fn distance_ly(position: &GalacticPosition) -> f64 {
+    let p = PointLy::from(position);
+    (p.x * p.x + p.y * p.y + p.z * p.z).sqrt().max(1.0)
+}
+
+/// The radial motion of a body through a position at a velocity in a galaxy's mid-plane potential
+/// taken as spherical, whose turning points [`orbit`] gives: each is found when asked for, so a
+/// caller that tests one first may skip the other's search.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct RadialMotion<'a> {
+    tables: &'a PotentialTables,
+    /// The body's distance from the centre, at least 1 ly.
+    r_ly: f64,
+    /// Its energy.
+    energy_km2_s2: f64,
+    /// Its squared angular momentum.
+    l2_ly2_km2_s2: f64,
+}
+
+impl<'a> RadialMotion<'a> {
+    /// The motion of a body at `position` moving at `velocity` (galactic, m/s) in `galaxy`.
+    #[must_use]
+    pub(crate) fn new(
+        galaxy: &'a Galaxy,
+        position: &GalacticPosition,
+        velocity: GalacticVelocity,
+    ) -> Self {
+        let tables = galaxy.potential();
+        let p = PointLy::from(position);
+        let r = distance_ly(position);
+        let [vx, vy, vz] = velocity.metres_per_second().map(|c| c * 1e-3);
+        // L = |r × v| in ly km/s.
+        let (lx, ly, lz) = (
+            p.y * vz - p.z * vy,
+            p.z * vx - p.x * vz,
+            p.x * vy - p.y * vx,
+        );
+        Self {
+            tables,
+            r_ly: r,
+            energy_km2_s2: 0.5 * (vx * vx + vy * vy + vz * vz) + potential_km2_s2(tables, r),
+            l2_ly2_km2_s2: lx * lx + ly * ly + lz * lz,
+        }
+    }
+
+    /// The pericentre, ly.
+    #[must_use]
+    pub(crate) fn pericentre(&self) -> LightYears {
+        LightYears::new(turning_point(&|x| self.g(x), 1.0, self.r_ly))
+    }
+
+    /// The apocentre, ly.
+    #[must_use]
+    pub(crate) fn apocentre(&self) -> LightYears {
+        LightYears::new(turning_point(&|x| self.g(x), 1e7, self.r_ly))
+    }
+
+    /// `2 (E − Φ(x)) − L² ÷ x²`, the squared radial speed at radius `x`, ly, in (km/s)²: zero at
+    /// the turning points.
+    #[must_use]
+    fn g(&self, x: f64) -> f64 {
+        2.0 * (self.energy_km2_s2 - potential_km2_s2(self.tables, x)) - self.l2_ly2_km2_s2 / (x * x)
+    }
+}
+
+/// The mid-plane potential of `tables` at radius `x_ly` (at least 1 ly).
+#[must_use]
+fn potential_km2_s2(tables: &PotentialTables, x_ly: f64) -> f64 {
+    tables.potential_in_plane(LightYears::new(x_ly.max(1.0)))
+}
+
+/// The history of a globular of `population` and present `mass`, `half_mass_radius` and `age` at
+/// `position` moving at `velocity` (galactic, m/s) in `galaxy`, or on a circular orbit where
+/// `velocity` is `None` (module documentation).
 #[must_use]
 pub fn history(
     galaxy: &Galaxy,
     position: &GalacticPosition,
     velocity: Option<GalacticVelocity>,
+    population: Population,
     mass: SolarMasses,
     half_mass_radius: LightYears,
     age: Years,
 ) -> GlobularHistory {
     let (peri, apo) = orbit(galaxy, position, velocity);
-    history_on_orbit(galaxy, peri, apo, mass, half_mass_radius, age)
+    history_on_orbit(galaxy, peri, apo, population, mass, half_mass_radius, age)
 }
 
-/// The history of a globular on an orbit of `peri`- and `apo`centre (module documentation).
+/// The history of a globular of `population` on an orbit of `peri`- and `apo`centre (module
+/// documentation).
+///
+/// Its population chooses the fates of its bound share (`bound_share`).
 #[must_use]
 pub fn history_on_orbit(
     galaxy: &Galaxy,
     peri: LightYears,
     apo: LightYears,
+    population: Population,
     mass: SolarMasses,
     half_mass_radius: LightYears,
     age: Years,
@@ -662,9 +758,10 @@ pub fn history_on_orbit(
         .max(1.0);
     let t = age.value();
     let m = mass.value();
-    // Solve M = 0.70 M₀ (1 − t ÷ t_dis(M₀)) in log M₀.
-    let bound = |m0: f64| BOUND_SHARE * m0 * (1.0 - t / dissolution_time(m0, apo, v_c, e).value());
-    let (mut lo, mut hi) = (math::log10(m / BOUND_SHARE), 9.0_f64);
+    let mu = bound_share(galaxy, population, age);
+    // Solve M = μ M₀ (1 − t ÷ t_dis(M₀)) in log M₀.
+    let bound = |m0: f64| mu * m0 * (1.0 - t / dissolution_time(m0, apo, v_c, e).value());
+    let (mut lo, mut hi) = (math::log10(m / mu), 9.0_f64);
     let initial = if bound(math::exp10(hi)) < m {
         math::exp10(hi)
     } else {
@@ -687,7 +784,7 @@ pub fn history_on_orbit(
         dissolution_time: t_dis,
         initial_mass: SolarMasses::new(initial),
         birth_half_mass_radius: LightYears::new(birth_radius),
-        mass_loss_rate: BOUND_SHARE * initial / t_dis.value(),
+        mass_loss_rate: mu * initial / t_dis.value(),
     }
 }
 
@@ -711,10 +808,88 @@ fn turning_point(g: &impl Fn(f64) -> f64, from: f64, r: f64) -> f64 {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::OnceLock;
+
+    use hyperion_testkit::float::{assert_same_bits, bits};
+    use hyperion_testkit::order::assert_order_independent;
     use hyperion_testkit::stats::{ALPHA, assert_p_value, ks_one_sample};
 
     use super::*;
+
+    use crate::galaxy::fates::present_share_of_formed;
+    use crate::galaxy::params::GalaxyParams;
+
     use crate::rng::{ObjectKey, Seed, Stream, tags};
+
+    /// The Milky Way fixture.
+    fn fixture() -> &'static Galaxy {
+        static GALAXY: OnceLock<Galaxy> = OnceLock::new();
+        GALAXY.get_or_init(|| {
+            Galaxy::from_params(
+                Seed::new(0x0913_0000_0000_0145),
+                GalaxyParams::milky_way_like(),
+            )
+            .expect("the Milky Way fixture builds")
+        })
+    }
+
+    /// Ruling 145.5: μ is the population's stars and white dwarfs per mass formed, 0.46–0.49 at the
+    /// globulars' ages under the default function, falling with age, and the galaxy's companions
+    /// give a fresh integral's bits whichever population and age is asked first, built or not.
+    #[test]
+    fn the_bound_share_is_the_population_s_own() {
+        let ages = [ACCRETED_AGES.0, 12e9, IN_SITU_AGE, ACCRETED_AGES.1].map(Years::new);
+        let populations = [Population::Bulge, Population::ThickDisc, Population::Halo];
+        for p in populations {
+            let mut previous = 1.0;
+            for age in ages {
+                let mu = bound_share(fixture(), p, age);
+                eprintln!("{p:?} at {:.1} Gyr: μ {mu:.4}", age.value() / 1e9);
+                assert!((0.46..=0.49).contains(&mu), "{p:?} at {age:?}: {mu}");
+                assert!(mu < previous, "{p:?} at {age:?}: {mu} after {previous}");
+                previous = mu;
+                let fates = CensusFates::new(fates_for(p), Counted::StarsAndWhiteDwarfs);
+                assert_same_bits(
+                    mu,
+                    present_share_of_formed(fixture().mass_function(), &fates, age),
+                );
+            }
+        }
+        let keys: Vec<(Population, Years)> = populations
+            .iter()
+            .flat_map(|&p| ages.map(|a| (p, a)))
+            .collect();
+        assert_order_independent(&keys, |&(p, a)| bits(bound_share(fixture(), p, a)));
+        // Each on a galaxy whose companions are not yet built.
+        let cold = || {
+            Galaxy::from_params(
+                Seed::new(0x0913_0000_0000_0145),
+                GalaxyParams::milky_way_like(),
+            )
+            .expect("the Milky Way fixture builds")
+        };
+        assert_order_independent(&keys, |&(p, a)| bits(bound_share(&cold(), p, a)));
+    }
+
+    /// Ruling 145.5: on its orbit the history solves `M = μ M₀ (1 − t ÷ t_dis)` at the cluster's
+    /// own μ, with `Ṁ = μ M₀ ÷ t_dis`, and the cluster is born heavier than it is now.
+    #[test]
+    fn the_history_solves_its_law_at_the_own_mu() {
+        let (peri, apo) = (
+            LightYears::new(2.0 * LIGHT_YEARS_PER_KILOPARSEC),
+            LightYears::new(8.0 * LIGHT_YEARS_PER_KILOPARSEC),
+        );
+        let (m, r_h) = (SolarMasses::new(2e5), LightYears::new(10.0));
+        let age = Years::new(12e9);
+        let h = history_on_orbit(fixture(), peri, apo, Population::Halo, m, r_h, age);
+        let mu = bound_share(fixture(), Population::Halo, age);
+        let m0 = h.initial_mass.value();
+        let t_dis = h.dissolution_time.value();
+        let law = mu * m0 * (1.0 - age.value() / t_dis);
+        assert!((law / m.value() - 1.0).abs() < 1e-9, "{law} against {m:?}");
+        assert_same_bits(h.mass_loss_rate, mu * m0 / t_dis);
+        assert!(m0 > m.value(), "{m0}");
+    }
 
     /// P09.T12.a (ruling 126.5): 0.874 of the count placed; the metal-poor median inside the cut
     /// 5.0–5.6 kpc.

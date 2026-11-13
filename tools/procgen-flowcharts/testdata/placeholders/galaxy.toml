@@ -1,0 +1,31 @@
+# Test fixture: a galaxy part with an unresolved reference into its own stage.
+
+[meta]
+stage = "galaxy"
+part = "galaxy"
+prefix = "g"
+title = "Galactic Properties & Megastructures"
+snapshot = "a6d3f6dd"
+
+[[node]]
+id = "g.metallicity"
+label = "Metallicity gradient"
+kind = "model"
+summary = "[Fe/H] falls 0.06 dex/kpc outward, +0.3 at the centre"
+status = "built"
+
+[[node]]
+id = "g.system"
+label = "Star system placement record"
+kind = "entity"
+summary = "Position, birth time, [Fe/H] and population of a system"
+status = "built"
+
+[[edge]]
+from = "g.metallicity"
+to = "g.system"
+label = "[Fe/H] at position"
+
+[[edge]]
+from = "@galaxy:bulge & bar density"
+to = "g.system"

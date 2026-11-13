@@ -7,15 +7,27 @@ import { MOON_SIZE_CLASS } from "../../lib/system/bodySymbols";
 import { orbitNormal } from "../../lib/system/hierarchy";
 import type { SystemBody } from "../../lib/system/model";
 import { localFrameAt } from "../../geometry/frame";
-import { dot, norm, scale, sub, vec3 } from "../../geometry/vec3";
-import { FIXTURE_SYSTEM, populatedBodies } from "../../test/planetaryFixture";
+import { dot, norm, scale, sub, vec3, type Vec3 } from "../../geometry/vec3";
+import {
+  FIXTURE_RING_NORMAL,
+  FIXTURE_SYSTEM,
+  populatedBodies,
+  populatedBodiesWith,
+  tiltedPole,
+  withBodyRotation,
+  withoutRingNormal,
+  withRingNormal,
+} from "../../test/planetaryFixture";
 import {
   bodyFitAu,
   bodyFrameName,
   bodyPlane,
   bodyScene,
+  equatorNormal,
   focusHeldReason,
   focusTarget,
+  inspectionHeldReason,
+  inspectionTarget,
   LONE_BODY_FIT_RADII,
 } from "./bodyFrame";
 import { METRES_PER_AU } from "./orbitScale";
@@ -48,8 +60,60 @@ function body(id: string, bodies = bodiesOf()): SystemBody {
   return found;
 }
 
-function sceneOf(selectedId: string | null = null) {
-  const bodies = bodiesOf();
+/** The tilt of {@link tiltedPlanet}'s pole from its planet's orbit normal, rad. */
+const OBLIQUITY_RAD = 0.4;
+
+/**
+ * A close-in giant's ring's tilt from its planet's equator, rad: the local Laplace plane of
+ * P14.T56.a's `laplace_angle`, tan 2φ = sin 2ε′ ÷ (cos 2ε′ + 2 (r_L ÷ a)⁵), with ε′ the acute
+ * angle between the pole and the orbit's normal, for a ring at half its planet's Laplace radius;
+ * about 5.5 × 10⁻³ rad at {@link OBLIQUITY_RAD}.
+ */
+function ringTiltRad(obliquityRad: number): number {
+  const acute = Math.min(obliquityRad, Math.PI - obliquityRad);
+  return 0.5 * Math.atan2(Math.sin(2 * acute), Math.cos(2 * acute) + 2 * 2 ** 5);
+}
+
+/** What {@link tiltedPlanet} builds. */
+interface TiltedPlanet {
+  readonly bodies: ReadonlyArray<SystemBody>;
+  readonly pole: Vec3;
+  readonly orbitNormal: Vec3;
+  /** The ring's normal on the wire; `null` where it is left out, as below version 23. */
+  readonly ringNormal: Vec3 | null;
+}
+
+/**
+ * The populated answer with its planet `A b` spinning about a pole `obliquityRad` from its orbit's
+ * normal (`tiltedPole`), and, with `ring`, its ring given the plane's normal a server from the
+ * 22 → 23 batch sends for it: the local Laplace pole on the spin's side, turned
+ * {@link ringTiltRad} from the pole towards the end of the orbit normal's axis within 90° of it;
+ * without, its ring's normal left out, as an older server sends it.
+ */
+function tiltedPlanet({
+  obliquityRad = OBLIQUITY_RAD,
+  ring = false,
+}: { readonly obliquityRad?: number; readonly ring?: boolean } = {}): TiltedPlanet {
+  const tilted = tiltedPole(populatedBodies(), PLANET, obliquityRad);
+  // Towards the orbit normal about a prograde spin, towards its other end about a retrograde one.
+  const towardsAxis = obliquityRad <= Math.PI / 2 ? -1 : 1;
+  const ringNormal = ring
+    ? tilted.turned(obliquityRad + towardsAxis * ringTiltRad(obliquityRad))
+    : null;
+  const rotate = withBodyRotation(PLANET, tilted.rotation);
+  const tiltRing =
+    ringNormal === null
+      ? withoutRingNormal
+      : withRingNormal([ringNormal.x, ringNormal.y, ringNormal.z]);
+  return {
+    bodies: bodiesOf(populatedBodiesWith((each) => tiltRing(rotate(each)))),
+    pole: tilted.pole,
+    orbitNormal: tilted.orbitNormal,
+    ringNormal,
+  };
+}
+
+function sceneOf(selectedId: string | null = null, bodies = bodiesOf()) {
   const planet = body(PLANET, bodies);
   return bodyScene({
     body: planet,
@@ -76,6 +140,66 @@ describe("focusTarget", () => {
     expect(focusTarget(body(BELT, bodies), bodies)).toBeNull();
     expect(focusTarget(body(DESTROYED_PLANET, bodies), bodies)).toBeNull();
     expect(focusTarget(null, bodies)).toBeNull();
+  });
+});
+
+describe("inspectionTarget, VIEW BODY's body (the owner's request)", () => {
+  it("is the focused planet, or a moon of it that is selected", () => {
+    const bodies = bodiesOf();
+    const planet = body(PLANET, bodies);
+
+    expect(inspectionTarget(planet, null)?.id).toBe(PLANET);
+    expect(inspectionTarget(planet, body(MOON, bodies))?.id).toBe(MOON);
+    expect(inspectionTarget(planet, body(RING, bodies))?.id).toBe(PLANET);
+  });
+
+  it("is the focused planet for a moon of another planet, and none with no focus", () => {
+    const bodies = bodiesOf();
+    const elsewhere: SystemBody = {
+      ...body(MOON, bodies),
+      parent: { kind: "body", id: DESTROYED_PLANET },
+    };
+
+    expect(inspectionTarget(body(PLANET, bodies), elsewhere)?.id).toBe(PLANET);
+    expect(inspectionTarget(null, body(MOON, bodies))).toBeNull();
+  });
+});
+
+describe("inspectionHeldReason, why VIEW BODY is held back (the owner's request)", () => {
+  /** The moon of the focused planet with `change` made, as the selection. */
+  function heldFor(change: Partial<SystemBody>): string | null {
+    const bodies = bodiesOf();
+    return inspectionHeldReason(body(PLANET, bodies), { ...body(MOON, bodies), ...change });
+  }
+
+  it("holds nothing back for a focused planet and a selected moon of it", () => {
+    const bodies = bodiesOf();
+    expect(inspectionHeldReason(body(PLANET, bodies), null)).toBeNull();
+    expect(inspectionHeldReason(body(PLANET, bodies), body(MOON, bodies))).toBeNull();
+  });
+
+  it("says no body is focused before one is", () => {
+    expect(inspectionHeldReason(null, body(PLANET))).toBe("NO BODY FOCUSED");
+  });
+
+  it("names a body not present by its kind and state", () => {
+    expect(heldFor({ state: body(DESTROYED_PLANET).state })).toBe("MOON DESTROYED");
+  });
+
+  it("names the section it would be drawn from as its state stands", () => {
+    expect(heldFor({ orbit: { state: "not_resolved" } })).toBe("ORBIT NOT RESOLVED");
+    expect(heldFor({ figure: { state: "not_modelled" }, bulk: { state: "not_modelled" } })).toBe(
+      "BULK NOT YET MODELLED",
+    );
+    expect(heldFor({ massMearth: { state: "not_resolved" } })).toBe("MASS NOT RESOLVED");
+  });
+
+  it("says what is missing where a section does not apply", () => {
+    expect(heldFor({ orbit: { state: "not_applicable" } })).toBe("NO ORBIT");
+    expect(
+      heldFor({ figure: { state: "not_applicable" }, bulk: { state: "not_applicable" } }),
+    ).toBe("NO RADIUS");
+    expect(heldFor({ massMearth: { state: "not_applicable" } })).toBe("NO MASS");
   });
 });
 
@@ -140,7 +264,15 @@ describe("bodyFrameName", () => {
 });
 
 describe("bodyPlane", () => {
-  it("lies in the planet's orbital plane, its normal the orbit's", () => {
+  it("lies in the planet's equatorial plane, normal to its rotation section's pole", () => {
+    const { bodies, pole } = tiltedPlanet();
+    const plane = bodyPlane(body(PLANET, bodies), GALACTIC);
+
+    expect(plane.name).toBe("EQUATORIAL PLANE");
+    expect(norm(sub(plane.frame.north, pole))).toBeLessThan(1e-12);
+  });
+
+  it("lies in the planet's orbital plane without a rotation section, its pole the orbit's normal", () => {
     const planet = body(PLANET);
     if (planet.orbit.state !== "ok") {
       throw new Error("the planet has an orbit");
@@ -149,6 +281,42 @@ describe("bodyPlane", () => {
 
     expect(plane.name).toBe("EQUATORIAL PLANE");
     expect(dot(plane.frame.north, orbitNormal(planet.orbit.value.orbit))).toBeCloseTo(1, 12);
+  });
+
+  it("stands on the planet's orbital plane where its rotation is withheld", () => {
+    const { bodies, orbitNormal: normal } = tiltedPlanet();
+    const withheld: SystemBody = { ...body(PLANET, bodies), rotation: { state: "not_resolved" } };
+
+    expect(dot(bodyPlane(withheld, GALACTIC).frame.north, normal)).toBeCloseTo(1, 12);
+  });
+});
+
+describe("equatorNormal", () => {
+  it("is a body's pole", () => {
+    const { bodies, pole } = tiltedPlanet();
+
+    expect(equatorNormal(body(PLANET, bodies))).toEqual(pole);
+  });
+
+  it("is a body's orbit normal where its rotation is not modelled", () => {
+    const planet = body(PLANET);
+    if (planet.orbit.state !== "ok") {
+      throw new Error("the planet has an orbit");
+    }
+
+    expect(equatorNormal(planet)).toEqual(orbitNormal(planet.orbit.value.orbit));
+  });
+
+  it("is null where a body's rotation is withheld, which its orbit does not stand in for", () => {
+    const { bodies } = tiltedPlanet();
+
+    expect(
+      equatorNormal({ ...body(PLANET, bodies), rotation: { state: "not_resolved" } }),
+    ).toBeNull();
+  });
+
+  it("is null for a body with neither a rotation section nor an orbit", () => {
+    expect(equatorNormal({ ...body(PLANET), orbit: { state: "not_resolved" } })).toBeNull();
   });
 });
 
@@ -217,9 +385,68 @@ describe("bodyScene", () => {
     ).toEqual([["MASSIVE RING", 66_000_000, 136_800_000, true, undefined]]);
   });
 
+  it("draws the ring on the reference plane without a pole or a ring normal, as before", () => {
+    const scene = sceneOf(null, bodiesOf(populatedBodiesWith(withoutRingNormal)));
+    const [ring] = scene.annuli ?? [];
+
+    expect(dot(ring?.normal ?? vec3(0, 0, 0), scene.frame.north)).toBeCloseTo(1, 12);
+  });
+
+  it("draws the fixture's ring in the plane its normal gives, without a pole", () => {
+    const [ring] = sceneOf().annuli ?? [];
+
+    expect(ring?.normal).toEqual(FIXTURE_RING_NORMAL);
+  });
+
+  it("draws a ring under a tilted pole in the plane its normal gives, not the equator's", () => {
+    const { bodies, ringNormal } = tiltedPlanet({ ring: true });
+    const scene = sceneOf(null, bodies);
+    const normal = scene.annuli?.[0]?.normal ?? vec3(0, 0, 0);
+
+    expect(normal).toEqual(ringNormal);
+    expect(Math.acos(dot(normal, scene.frame.north))).toBeCloseTo(ringTiltRad(OBLIQUITY_RAD), 12);
+  });
+
+  it("keeps a retrograde spinner's ring normal on the spin's side, never turned to the orbit's", () => {
+    const {
+      bodies,
+      pole,
+      orbitNormal: normalOfOrbit,
+      ringNormal,
+    } = tiltedPlanet({
+      obliquityRad: 2.6,
+      ring: true,
+    });
+    const normal = sceneOf(null, bodies).annuli?.[0]?.normal ?? vec3(0, 0, 0);
+
+    expect(normal).toEqual(ringNormal);
+    expect([dot(normal, pole) > 0, dot(normal, normalOfOrbit) < 0]).toEqual([true, true]);
+  });
+
+  it("draws a ring without a normal in its planet's orbital plane, tilted to a tilted pole's equator", () => {
+    const { bodies } = tiltedPlanet();
+    const planet = body(PLANET, bodies);
+    if (planet.orbit.state !== "ok") {
+      throw new Error("the planet has an orbit");
+    }
+    const scene = sceneOf(null, bodies);
+    const normal = scene.annuli?.[0]?.normal ?? vec3(0, 0, 0);
+
+    expect(normal).toEqual(orbitNormal(planet.orbit.value.orbit));
+    expect(Math.acos(dot(normal, scene.frame.north))).toBeCloseTo(OBLIQUITY_RAD, 12);
+  });
+
   it("draws the ring as selected once it is selected, as a selected orbit is", () => {
     expect(sceneOf().annuli?.map((annulus) => annulus.selected)).toEqual([false]);
     expect(sceneOf(RING).annuli?.map((annulus) => annulus.selected)).toEqual([true]);
+  });
+
+  it("draws every ring about the planet's mark, selected or not (plan 14, P14.T42.g)", () => {
+    expect([
+      sceneOf().points[0]?.id,
+      sceneOf().annuli?.map((annulus) => annulus.aboutId),
+      sceneOf(RING).annuli?.map((annulus) => annulus.aboutId),
+    ]).toEqual([PLANET, [PLANET], [PLANET]]);
   });
 
   it("draws no reticle for a selection outside the body's frame", () => {

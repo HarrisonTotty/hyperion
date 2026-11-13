@@ -5,7 +5,9 @@
  *
  * The wire carries only units that the bridge client displays, so it formats and never converts:
  * lengths in light-years, masses in solar masses, times in megayears or gigayears, speeds in
- * kilometres per second, angles in degrees and densities per cubic light-year. The kiloparsec is
- * never sent.
+ * kilometres per second, angles in degrees and densities per cubic light-year, and for the gas
+ * the astronomers' units the console shows beside them (plan 07, P07.T10.b): hydrogen per cubic
+ * centimetre, pressure over Boltzmann's constant in kelvin per cubic centimetre, and magnitudes.
+ * The kiloparsec is never sent.
  */
-export type Unit = "none" | "count" | "msun" | "ly" | "myr" | "gyr" | "km_per_s" | "deg_per_myr" | "deg" | "per_ly3";
+export type Unit = "none" | "count" | "msun" | "ly" | "myr" | "gyr" | "km_per_s" | "deg_per_myr" | "deg" | "per_ly3" | "per_cm3" | "k_per_cm3" | "mag";

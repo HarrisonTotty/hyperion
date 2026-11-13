@@ -192,10 +192,13 @@ pub fn cells_in_sphere_slab(
 /// centre, so they are skipped without being visited, and the shells of a nest of spheres, the
 /// innermost's own cells first, partition the outermost's cells exactly.
 ///
+/// `pub` for `hyperion-sky` alone (the crate split, CS.T1); not part of the sim's API.
+///
 /// # Panics
 ///
 /// Unless `inner` shares `outer`'s centre and its padded radius is at most `outer`'s.
-pub(crate) fn cells_in_shell_slab(
+#[doc(hidden)]
+pub fn cells_in_shell_slab(
     layer: Layer,
     outer: &QuerySphere,
     inner: Option<&QuerySphere>,

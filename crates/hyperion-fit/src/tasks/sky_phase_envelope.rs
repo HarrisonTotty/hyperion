@@ -683,8 +683,10 @@ mod tests {
     /// refit that grows it past 400 kB fails here before the 500 kB hook refuses it.
     #[test]
     fn the_committed_table_stays_under_its_ceiling() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../hyperion-sim/src/tables/sky_phase_envelope.rs");
+        let task = SkyPhaseEnvelopeTask;
+        let path = crate::emit::Workspace::repository()
+            .tables_dir(task.table_crate())
+            .join(task.table_path());
         let bytes = std::fs::metadata(&path)
             .expect("the committed table is there")
             .len();

@@ -1,9 +1,12 @@
 import {
-  type DecodedDensityMap,
   decodeDensityMap,
+  decodeExtinctionMap,
   type DensityMap,
+  type ExtinctionMap,
+  type MapFeatureKindWire,
   type MapPopulation,
   type MapView,
+  type RequestKind,
   type RequestOf,
   type UniverseIdHex,
 } from "@hyperion/protocol";
@@ -21,18 +24,36 @@ import {
 import { RequestStatus } from "../../components/RequestStatus";
 import { StaleMark } from "../../components/StaleMark";
 import { StatusLine } from "../../components/StatusLine";
-import { formatSci } from "../../lib/format";
-import { type MapGeometry, mapGeometry, pixelToLy } from "../../lib/galaxy/mapGeometry";
+import { formatNumber, formatSci } from "../../lib/format";
+import { crossBoxes, labelBoxes, placeMapFeatures } from "../../lib/galaxy/mapFeatures";
+import { placeStreamOverlay, type StreamOverlayKind } from "../../lib/galaxy/streamTracks";
 import {
+  type MapGeometry,
+  mapGeometry,
+  type MapRaster,
+  pixelToLy,
+} from "../../lib/galaxy/mapGeometry";
+import {
+  dustOverlay,
   mapResolutionFor,
   paintLevels,
   reducedLevels,
   turnClockwise,
 } from "../../lib/galaxy/mapPicture";
-import type { CentreLy } from "../../lib/galaxy/model";
+import type {
+  CentreLy,
+  GlobalListModel,
+  MapFeatureLayer,
+  StreamTrack,
+} from "../../lib/galaxy/model";
 import { buildRamp, type DecodedCodes, parseHexColour, rasterise } from "../../lib/galaxy/ramp";
-import { useServerRequest } from "../../lib/useServerRequest";
+import { linkDownReason, useServerLink } from "../../lib/serverLink";
+import { type RequestState, useServerRequest } from "../../lib/useServerRequest";
 import { DensityLegend } from "./DensityLegend";
+import { RemnantsCount } from "./RemnantsCount";
+import { ExtinctionLegend } from "./ExtinctionLegend";
+import { MapFeatureOverlay } from "./MapFeatureOverlay";
+import { StreamTrackOverlay } from "./StreamTrackOverlay";
 import {
   ARROW_KEYS,
   cursorInView,
@@ -51,9 +72,30 @@ import {
   stepCursor,
 } from "./mapCursor";
 import { usePageTabFocus } from "./pageTabFocus";
+import type { StaleWait, StaleWaits } from "./staleWaits";
 
-/** Bits per code of the map the display asks for: the ramp has 256 levels (plan 05, D5). */
+/** Bits per code of the density map the display asks for: the ramp has 256 levels (plan 05, D5). */
 const MAP_BITS = 8;
+
+/**
+ * Bits per code of the extinction map the display asks for: 16, so that the map holds the two
+ * decimals A(V) is written to (decision-gg-port-a2 §4).
+ *
+ * @remarks
+ * `CURSOR A(V)` writes A(V) in `mag` to two decimals, as the readout's `FROM CHART CENTRE` rows
+ * do. The map's codes are linear in log₁₀ A(V) from the floor of 0.01 mag to the map's own
+ * ceiling (plan 04's quantiser with plan 07's floor, design note 19), so a code step is the span
+ * ÷ 254 dex at 8 bits. With the centres the ruling read at 1920 × 1080, 40.47 mag edge-on and
+ * 2.12 mag face-on, that is at least 3.3 % edge-on, about 1.3 mag at 40.47 mag, and 2.1 %
+ * face-on, so that the second decimal would not be held above about 0.3 mag edge-on and 0.5 mag
+ * face-on. At 16 bits the step is the span ÷ 65,534 dex, 0.013 % edge-on (0.005 mag at 40.47 mag)
+ * and 0.008 % face-on, and the second decimal is held up to about 79 mag edge-on and 120 mag
+ * face-on. The picture keeps the ramp's 256 levels: under `EXTINCTION` it is unchanged but for one
+ * level where a code's rounding falls on a boundary, and under the dust overlay the dimming is read
+ * at the finer step, which moves a dusty edge-on pixel by up to 4 levels towards the value
+ * computed for it. The density map stays at {@link MAP_BITS}.
+ */
+const EXTINCTION_MAP_BITS = 16;
 
 /**
  * How long a map may take before it is reported as timed out, in milliseconds.
@@ -77,6 +119,29 @@ const VIEW_NAME: Readonly<Record<MapView, string>> = {
   edge_on: "edge-on",
 };
 
+/** What a view's raster shows, for the picture's accessible name. */
+type LayerKind = "density" | "extinction" | "overlay";
+
+function layerKind(question: MapQuestion): LayerKind {
+  let kind: LayerKind;
+  switch (question.quantity) {
+    case "column_density":
+      kind = question.overlay ? "overlay" : "density";
+      break;
+    case "extinction":
+      kind = "extinction";
+      break;
+  }
+  return kind;
+}
+
+/** What the picture's name adds for each raster: nothing for the density map alone. */
+const LAYER_NAME: Readonly<Record<LayerKind, string>> = {
+  density: "",
+  extinction: ", extinction",
+  overlay: ", dust overlay",
+};
+
 /** The keys that move the cursor on each view: edge-on sets only z (plan 05, design note D19). */
 const KEY_HINT: Readonly<Record<MapView, string>> = {
   face_on: "ARROWS MOVE CURSOR",
@@ -97,14 +162,72 @@ const AXIS_LABELS: Readonly<
   edge_on: { across: "+X", vertical: "+Z NORTH", end: "top" },
 };
 
-/** A density map that decoded and whose geometry holds, ready to paint. */
-interface MapPicture {
+/**
+ * Which quantity a view's raster shows (plan 07, P07.T11.b): the column density of systems, which
+ * may carry the dust overlay, or the visual extinction through the galaxy.
+ */
+export type MapQuantity = "column_density" | "extinction";
+
+/**
+ * The label the page shows while the overlay is on, naming it and its quantity, as the guide
+ * requires; once for the page, not in each view.
+ */
+export const DUST_OVERLAY_LABEL = "DUST OVERLAY: A(V), WHOLE LINE OF SIGHT";
+
+/**
+ * What the picture's brightness shows while the overlay is on, which the page says once after
+ * {@link DUST_OVERLAY_LABEL} (decision-gg-port-a2 §5; signed off as drafted, `signoff-11.md`, item
+ * 22 (j), the guide's raster rule).
+ *
+ * @remarks
+ * No pixel is then painted by the A(V) ramp, although the A(V) legend stands beside the density's
+ * with a bar of the same look, so the page says what the one ramp shows: the density's ramp at
+ * log₁₀ N − 0.4 A(V) ({@link dustOverlay}), and "dimmed by A(V)" is exactly the factor
+ * 10^(−0.4 A(V)). A sentence, so in mixed case without the labels' letter-spacing, the names on
+ * the guide's list in upper case.
+ */
+export const DUST_OVERLAY_BRIGHTNESS = "Brightness is COLUMN DENSITY dimmed by A(V)";
+
+/** Whether the dust overlay may dim a quantity's picture: the column density's alone. */
+export function takesOverlay(quantity: MapQuantity): boolean {
+  let takes: boolean;
+  switch (quantity) {
+    case "column_density":
+      takes = true;
+      break;
+    case "extinction":
+      takes = false;
+      break;
+  }
+  return takes;
+}
+
+/** One map that decoded and whose geometry holds: a density map's or an extinction map's. */
+interface MapLayer {
   readonly geometry: MapGeometry;
-  readonly decoded: DecodedDensityMap;
+  /** The codes as the map has them, row by row from the top: what the cursor reads. */
+  readonly codes: DecodedCodes;
   /** The codes turned as the screen shows them. */
   readonly onScreen: DecodedCodes;
-  readonly floorLog10PerLy2: number;
-  readonly ceilingLog10PerLy2: number;
+  /** log₁₀ of the quantity of code 1, in the map's unit. */
+  readonly floorLog10: number;
+  /** log₁₀ of the quantity of the largest code, in the map's unit. */
+  readonly ceilingLog10: number;
+  /** The map's rule from a code to log₁₀ of its quantity, `null` for code 0. */
+  readonly log10Of: (code: number) => number | null;
+}
+
+/** What a view paints, and the maps it was made from, ready to paint. */
+interface MapPicture {
+  readonly geometry: MapGeometry;
+  /** The codes painted, as the screen shows them: a map's own, or the density the dust dims. */
+  readonly onScreen: DecodedCodes;
+  /** The painted scale's ceiling less its floor, in dex. */
+  readonly spanLog10: number;
+  /** The density map, under `COLUMN DENSITY`. */
+  readonly density: MapLayer | null;
+  /** The extinction map, under `EXTINCTION` or with the dust overlay. */
+  readonly extinction: MapLayer | null;
 }
 
 /**
@@ -117,11 +240,42 @@ type Decoding =
 
 const NO_MAP: Decoding = { kind: "none" };
 
-/** What a map request asked for, which its answer must echo. */
+/** What a view asked for: the maps it needs, which their answers echo, and how it paints them. */
 interface MapQuestion {
   readonly universe: UniverseIdHex;
   readonly view: MapView;
   readonly population: MapPopulation;
+  readonly quantity: MapQuantity;
+  /** Whether the density is dimmed by the dust, which it is only under `COLUMN DENSITY`. */
+  readonly overlay: boolean;
+}
+
+/** Whether a question needs the density map: under `COLUMN DENSITY`, overlay or none. */
+function needsDensity(question: MapQuestion): boolean {
+  let needs: boolean;
+  switch (question.quantity) {
+    case "column_density":
+      needs = true;
+      break;
+    case "extinction":
+      needs = false;
+      break;
+  }
+  return needs;
+}
+
+/** Whether a question needs the extinction map: under `EXTINCTION`, or for the overlay. */
+function needsExtinction(question: MapQuestion): boolean {
+  let needs: boolean;
+  switch (question.quantity) {
+    case "column_density":
+      needs = question.overlay;
+      break;
+    case "extinction":
+      needs = true;
+      break;
+  }
+  return needs;
 }
 
 function isPositiveFinite(value: number): boolean {
@@ -136,13 +290,67 @@ function invalid(cause: string): Decoding {
  * Whether a map has its view's shape on screen and spans the root cube's edge across it, so that
  * it can be drawn in its view's box at the scale both views share.
  */
-function hasScreenShape(map: DensityMap): boolean {
+function hasScreenShape(map: MapRaster): boolean {
   const onScreen = screenSizePx(map.view, { widthPx: map.width_px, heightPx: map.height_px });
   const acrossLy = onScreen.widthPx * map.ly_per_px;
   return (
     onScreen.widthPx === SCREEN_ASPECT[map.view] * onScreen.heightPx &&
     Math.abs(acrossLy - MAP_ACROSS_LY) <= SPAN_TOLERANCE * MAP_ACROSS_LY
   );
+}
+
+/** What became of one map's answer: none yet, invalid with its cause in words, or a layer. */
+type LayerDecoding =
+  | { readonly kind: "none" }
+  | { readonly kind: "invalid"; readonly cause: string }
+  | { readonly kind: "ok"; readonly layer: MapLayer };
+
+/**
+ * The cause, in words, of a raster that is not the one asked for or cannot be drawn, or `null`
+ * for one that can: of another universe or view, or not of the M1 extents.
+ */
+function rasterFault(
+  map: MapRaster & { readonly universe: UniverseIdHex },
+  question: MapQuestion,
+): string | null {
+  if (map.universe !== question.universe || map.view !== question.view) {
+    return "not the map requested";
+  }
+  const sizeValid =
+    Number.isInteger(map.width_px) &&
+    Number.isInteger(map.height_px) &&
+    map.width_px > 0 &&
+    map.height_px > 0 &&
+    isPositiveFinite(map.ly_per_px) &&
+    map.centre_ly.every((ly) => Number.isFinite(ly)) &&
+    hasScreenShape(map);
+  return sizeValid ? null : "size or scale unusable";
+}
+
+/** Whether a floor and ceiling can be drawn: finite, and the ceiling not below the floor. */
+function rangeValid(floorLog10: number, ceilingLog10: number): boolean {
+  return Number.isFinite(floorLog10) && Number.isFinite(ceilingLog10) && ceilingLog10 >= floorLog10;
+}
+
+/** A decoded map, with its turn for the screen, as a layer. */
+function layerOf(
+  map: MapRaster,
+  codes: DecodedCodes,
+  floorLog10: number,
+  ceilingLog10: number,
+  log10Of: (code: number) => number | null,
+): LayerDecoding {
+  return {
+    kind: "ok",
+    layer: {
+      geometry: mapGeometry(map),
+      codes,
+      onScreen: SCREEN_TURN[map.view] === "clockwise" ? turnClockwise(codes) : codes,
+      floorLog10,
+      ceilingLog10,
+      log10Of,
+    },
+  };
 }
 
 /**
@@ -154,51 +362,122 @@ function hasScreenShape(map: DensityMap): boolean {
  * extents, since both views are drawn at one scale. Plan 04's map of an empty galaxy, with floor
  * and ceiling equal, is drawn.
  */
-function decodeMap(map: DensityMap | null, question: MapQuestion): Decoding {
+function decodeDensity(map: DensityMap | null, question: MapQuestion): LayerDecoding {
   if (map === null) {
-    return NO_MAP;
+    return { kind: "none" };
   }
-  if (
-    map.universe !== question.universe ||
-    map.view !== question.view ||
-    map.population !== question.population
-  ) {
-    return invalid("not the map requested");
+  const fault =
+    map.population === question.population ? rasterFault(map, question) : "not the map requested";
+  if (fault !== null) {
+    return { kind: "invalid", cause: fault };
   }
-  const sizeValid =
-    Number.isInteger(map.width_px) &&
-    Number.isInteger(map.height_px) &&
-    map.width_px > 0 &&
-    map.height_px > 0 &&
-    isPositiveFinite(map.ly_per_px) &&
-    map.centre_ly.every((ly) => Number.isFinite(ly)) &&
-    hasScreenShape(map);
-  if (!sizeValid) {
-    return invalid("size or scale unusable");
+  if (!rangeValid(map.floor_log10_per_ly2, map.ceiling_log10_per_ly2)) {
+    return { kind: "invalid", cause: "density range unusable" };
   }
-  const rangeValid =
-    Number.isFinite(map.floor_log10_per_ly2) &&
-    Number.isFinite(map.ceiling_log10_per_ly2) &&
-    map.ceiling_log10_per_ly2 >= map.floor_log10_per_ly2;
-  if (!rangeValid) {
-    return invalid("density range unusable");
-  }
-  let decoded: DecodedDensityMap;
   try {
-    decoded = decodeDensityMap(map);
+    const decoded = decodeDensityMap(map);
+    return layerOf(map, decoded, map.floor_log10_per_ly2, map.ceiling_log10_per_ly2, (code) =>
+      decoded.log10PerLy2(code),
+    );
   } catch {
     // Bad base64, a bit depth other than 8 or 16, or a byte count that does not fill the map: the
     // server's fault, reported to the operator in words.
-    return invalid("pixel codes unreadable");
+    return { kind: "invalid", cause: "pixel codes unreadable" };
+  }
+}
+
+/** Checks and decodes an extinction map's answer, as {@link decodeDensity} does a density map's. */
+function decodeExtinction(map: ExtinctionMap | null, question: MapQuestion): LayerDecoding {
+  if (map === null) {
+    return { kind: "none" };
+  }
+  const fault = rasterFault(map, question);
+  if (fault !== null) {
+    return { kind: "invalid", cause: `extinction ${fault}` };
+  }
+  if (!rangeValid(map.floor_log10_mag, map.ceiling_log10_mag)) {
+    return { kind: "invalid", cause: "extinction range unusable" };
+  }
+  try {
+    const decoded = decodeExtinctionMap(map);
+    return layerOf(map, decoded, map.floor_log10_mag, map.ceiling_log10_mag, (code) =>
+      decoded.log10Mag(code),
+    );
+  } catch {
+    return { kind: "invalid", cause: "extinction pixel codes unreadable" };
+  }
+}
+
+/** Whether two layers cover the same pixels, so that one can dim the other. */
+function sameRaster(a: MapLayer, b: MapLayer): boolean {
+  return (
+    a.codes.widthPx === b.codes.widthPx &&
+    a.codes.heightPx === b.codes.heightPx &&
+    a.geometry.lyPerPx === b.geometry.lyPerPx &&
+    a.geometry.centreLy[0] === b.geometry.centreLy[0] &&
+    a.geometry.centreLy[1] === b.geometry.centreLy[1]
+  );
+}
+
+/**
+ * Checks and decodes the maps a question needs, and makes the picture from them.
+ *
+ * @remarks
+ * Under `COLUMN DENSITY` the picture is the density map's, and with the dust overlay its codes
+ * dimmed by the extinction map's ({@link dustOverlay}), once, as the screen shows them, before
+ * either way of painting them. Under `EXTINCTION` it is the extinction map's. A picture that needs
+ * two maps waits for both, and is invalid if either is or if they do not cover the same pixels.
+ */
+function decodePicture(
+  densityMap: DensityMap | null,
+  extinctionMap: ExtinctionMap | null,
+  question: MapQuestion,
+): Decoding {
+  const density = needsDensity(question) ? decodeDensity(densityMap, question) : null;
+  const extinction = needsExtinction(question) ? decodeExtinction(extinctionMap, question) : null;
+  for (const decoding of [density, extinction]) {
+    if (decoding?.kind === "invalid") {
+      return invalid(decoding.cause);
+    }
+  }
+  if (density?.kind === "none" || extinction?.kind === "none") {
+    return NO_MAP;
+  }
+  const densityLayer = density?.kind === "ok" ? density.layer : null;
+  const extinctionLayer = extinction?.kind === "ok" ? extinction.layer : null;
+  if (densityLayer !== null && extinctionLayer !== null) {
+    if (!sameRaster(densityLayer, extinctionLayer)) {
+      return invalid("density and extinction maps do not match");
+    }
+    const spanLog10 = densityLayer.ceilingLog10 - densityLayer.floorLog10;
+    return {
+      kind: "ok",
+      picture: {
+        geometry: densityLayer.geometry,
+        onScreen: dustOverlay(
+          densityLayer.onScreen,
+          spanLog10,
+          extinctionLayer.onScreen,
+          extinctionLayer.log10Of,
+        ),
+        spanLog10,
+        density: densityLayer,
+        extinction: extinctionLayer,
+      },
+    };
+  }
+  const shown = densityLayer ?? extinctionLayer;
+  if (shown === null) {
+    return NO_MAP;
   }
   return {
     kind: "ok",
     picture: {
-      geometry: mapGeometry(map),
-      decoded,
-      onScreen: SCREEN_TURN[map.view] === "clockwise" ? turnClockwise(decoded) : decoded,
-      floorLog10PerLy2: map.floor_log10_per_ly2,
-      ceilingLog10PerLy2: map.ceiling_log10_per_ly2,
+      geometry: shown.geometry,
+      onScreen: shown.onScreen,
+      spanLog10: shown.ceilingLog10 - shown.floorLog10,
+      density: densityLayer,
+      extinction: extinctionLayer,
     },
   };
 }
@@ -231,7 +510,13 @@ function sameRamps(a: Ramps, b: Ramps): boolean {
 }
 
 function sameQuestion(a: MapQuestion, b: MapQuestion): boolean {
-  return a.universe === b.universe && a.view === b.view && a.population === b.population;
+  return (
+    a.universe === b.universe &&
+    a.view === b.view &&
+    a.population === b.population &&
+    a.quantity === b.quantity &&
+    a.overlay === b.overlay
+  );
 }
 
 /** The last picture a view drew, with the question it answered. */
@@ -249,8 +534,8 @@ interface PictureSource {
 
 /**
  * The map reduced to a backing store of `widthPx` by `heightPx` device pixels, which is smaller
- * than it, by area-weighted averaging of linear density (see `mapPicture.ts`), so that no map pixel
- * is dropped.
+ * than it, by area-weighted averaging of the linear quantity (see `mapPicture.ts`), so that no map
+ * pixel is dropped.
  */
 function reducedSource(
   picture: MapPicture,
@@ -261,12 +546,7 @@ function reducedSource(
   const { onScreen } = picture;
   const reducedWidthPx = Math.min(onScreen.widthPx, widthPx);
   const reducedHeightPx = Math.min(onScreen.heightPx, heightPx);
-  const levels = reducedLevels(
-    onScreen,
-    picture.ceilingLog10PerLy2 - picture.floorLog10PerLy2,
-    reducedWidthPx,
-    reducedHeightPx,
-  );
+  const levels = reducedLevels(onScreen, picture.spanLog10, reducedWidthPx, reducedHeightPx);
   return { rgba: paintLevels(levels, ramp), widthPx: reducedWidthPx, heightPx: reducedHeightPx };
 }
 
@@ -288,81 +568,139 @@ function sourceCanvas(source: PictureSource): HTMLCanvasElement | null {
   return canvas;
 }
 
-/** The column density under the cursor on one view, as the operator reads it. */
-type CursorDensity =
-  | { readonly kind: "density"; readonly log10PerLy2: number }
+/** The value of a map under the cursor on one view, as the operator reads it. */
+type CursorValue =
+  | { readonly kind: "value"; readonly log10: number }
   | { readonly kind: "below_floor" }
   | { readonly kind: "off_map" };
 
 /**
- * The column density of the map pixel under the cursor.
+ * The value of the map pixel under the cursor.
  *
  * @remarks
  * It is the value the pixel's code stands for, which is the centre of the code's step, since plan
  * 04's quantiser rounds to the nearest code. The guide keeps `~` for estimated values, derived or
  * sensor-limited, and says nothing of a value rounded for the wire, which every shown value is at
- * some precision, so it carries no `~`.
+ * some precision, so it carries no `~`. Under the overlay the density is the map's own, undimmed:
+ * the dimmed picture is no quantity a reading could name.
  */
-function densityUnder(picture: MapPicture, view: MapView, cursorLy: CentreLy): CursorDensity {
-  const index = pixelIndexAt(picture.geometry, cursorInView(view, cursorLy));
+function valueUnder(layer: MapLayer, view: MapView, cursorLy: CentreLy): CursorValue {
+  const index = pixelIndexAt(layer.geometry, cursorInView(view, cursorLy));
   if (index === null) {
     return { kind: "off_map" };
   }
-  const code = picture.decoded.codes[index];
+  const code = layer.codes.codes[index];
   if (code === undefined) {
     throw new Error(`the decoded map has no code for its pixel ${index}`);
   }
-  const log10PerLy2 = picture.decoded.log10PerLy2(code);
-  return log10PerLy2 === null ? { kind: "below_floor" } : { kind: "density", log10PerLy2 };
+  const log10 = layer.log10Of(code);
+  return log10 === null ? { kind: "below_floor" } : { kind: "value", log10 };
 }
 
-interface CursorDensityReadingProps {
-  readonly density: CursorDensity;
+/** One reading under the cursor: its label, its value, and how a value is written. */
+interface CursorRow {
+  readonly label: "CURSOR DENSITY" | "CURSOR A(V)";
+  readonly value: CursorValue;
+  /** The digits of a value of log₁₀ `log10`. */
+  readonly digits: (log10: number) => string;
+  readonly unit: string;
+}
+
+function densityDigits(log10PerLy2: number): string {
+  return formatSci(10 ** log10PerLy2);
+}
+
+/** A(V) to two decimals, as every A(V) on the console is written. */
+function extinctionDigits(log10Mag: number): string {
+  return formatNumber(10 ** log10Mag, 2);
+}
+
+/** The readings under the cursor that a picture offers: the density, the extinction, or both. */
+function cursorRows(picture: MapPicture, view: MapView, cursorLy: CentreLy): CursorRow[] {
+  const rows: CursorRow[] = [];
+  if (picture.density !== null) {
+    rows.push({
+      label: "CURSOR DENSITY",
+      value: valueUnder(picture.density, view, cursorLy),
+      digits: densityDigits,
+      unit: "SYSTEMS/ly²",
+    });
+  }
+  if (picture.extinction !== null) {
+    rows.push({
+      label: "CURSOR A(V)",
+      value: valueUnder(picture.extinction, view, cursorLy),
+      digits: extinctionDigits,
+      unit: "mag",
+    });
+  }
+  return rows;
+}
+
+interface CursorReadingValueProps {
+  readonly row: CursorRow;
   /** Whether it is read from a stale picture: then in `--text-muted` with a trailing `S`. */
   readonly stale: boolean;
-  /** Whether it announces its changes, which only the view whose picture has focus does. */
-  readonly announce: boolean;
 }
 
-/** The column density under the cursor: a value, `BELOW FLOOR`, or an em dash off the map. */
-function CursorDensityReading({ density, stale, announce }: CursorDensityReadingProps) {
-  let value: ReactNode;
-  switch (density.kind) {
-    case "density":
-      value = (
+/** One reading under the cursor: a value, `BELOW FLOOR`, or an em dash off the map. */
+function CursorReadingValue({ row, stale }: CursorReadingValueProps) {
+  const { value } = row;
+  let shown: ReactNode;
+  switch (value.kind) {
+    case "value":
+      shown = (
         <>
           <span className={`field__value map-view__density${stale ? " stale" : ""}`}>
-            {formatSci(10 ** density.log10PerLy2)}
+            {row.digits(value.log10)}
           </span>{" "}
-          <span className="map-view__unit">SYSTEMS/ly²</span>
+          <span className="map-view__unit">{row.unit}</span>
           {stale ? <StaleMark /> : null}
         </>
       );
       break;
     case "below_floor":
-      value = (
+      shown = (
         <span className={stale ? "stale" : undefined}>
           BELOW FLOOR{stale ? <StaleMark /> : null}
         </span>
       );
       break;
     case "off_map":
-      value = <span className="readout__missing">—</span>;
+      shown = <span className="readout__missing">—</span>;
       break;
   }
-  return (
-    /*
-     * Read out as a whole when it changes, but only beside the picture the operator is moving the
-     * cursor over. The cursor is shared by both views and its x is in both, so one arrow key that
-     * moves x changes both readings, and two live regions changing on one key press is two
-     * announcements of the same reading — which is a defect, not verbosity (the orchestrator's
-     * ruling 16). The arrow keys reach a picture only while it has focus, so the focused view's
-     * reading is the one the key asked for; the other stays on screen to be read on demand.
-     */
-    <p className="field" aria-live={announce ? "polite" : "off"} aria-atomic="true">
-      <span className="field__label">CURSOR DENSITY</span> {value}
+  return shown;
+}
+
+interface CursorReadingsProps {
+  readonly rows: ReadonlyArray<CursorRow>;
+  readonly stale: boolean;
+  /** Whether they announce their changes, which only the view whose picture has focus does. */
+  readonly announce: boolean;
+}
+
+/**
+ * The readings under the cursor, one live region for them all.
+ *
+ * @remarks
+ * Read out as a whole when they change, but only beside the picture the operator is moving the
+ * cursor over. The cursor is shared by both views and its x is in both, so one arrow key that moves
+ * x changes both views' readings, and two live regions changing on one key press is two
+ * announcements of the same reading — which is a defect, not verbosity (the orchestrator's ruling
+ * 16). The arrow keys reach a picture only while it has focus, so the focused view's readings are
+ * the ones the key asked for; the other's stay on screen to be read on demand. Under the dust
+ * overlay a view has two readings, which share one region for the same reason.
+ */
+function CursorReadings({ rows, stale, announce }: CursorReadingsProps) {
+  const live = { "aria-live": announce ? "polite" : "off", "aria-atomic": "true" } as const;
+  const lines = rows.map((row) => (
+    <p key={row.label} className="field" {...(rows.length === 1 ? live : {})}>
+      <span className="field__label">{row.label}</span>{" "}
+      <CursorReadingValue row={row} stale={stale} />
     </p>
-  );
+  ));
+  return rows.length === 1 ? lines : <div {...live}>{lines}</div>;
 }
 
 /** The marks drawn over a map: the cursor, and the chart's centre. */
@@ -426,6 +764,15 @@ interface GalaxyMapViewProps {
   readonly view: MapView;
   readonly population: MapPopulation;
   /**
+   * Whether this view's legend states what the `REMNANTS` map counts, which the page states once,
+   * in the view whose words have the room (`remnantsLegendView`, plan 08, P08.T15.b).
+   */
+  readonly statesPopulation: boolean;
+  /** The quantity the raster shows. */
+  readonly quantity: MapQuantity;
+  /** Whether the density is dimmed by the dust; read only under `COLUMN DENSITY`. */
+  readonly dustOverlay: boolean;
+  /**
    * The picture's width in CSS pixels, which both views share so that they are at one scale; 0
    * before the display is laid out, when no map is asked for.
    */
@@ -438,6 +785,54 @@ interface GalaxyMapViewProps {
   readonly onCursor: (cursorLy: CentreLy) => void;
   /** The chart's centre, marked with a small diagonal cross, or `null` before one is chosen. */
   readonly centreLy: CentreLy | null;
+  /** Where the view reports its stale wait, which the page states once for both views. */
+  readonly staleWaits: StaleWaits;
+  /**
+   * The ID of the page's line that states the views' wait, the link's state or `PENDING`, which
+   * describes the canvas while its picture is stale.
+   */
+  readonly pageWaitId: string;
+  /** The root's rem, CSS px, which the feature overlay's marks and labels are sized by. */
+  readonly remPx: number;
+  /**
+   * The feature overlay's layers, from the page's one request (plan 09, P09.T41.b), or `null`
+   * while it has none to draw.
+   */
+  readonly featureLayers: ReadonlyArray<MapFeatureLayer> | null;
+  /** The kinds the overlay draws. */
+  readonly featureKinds: ReadonlySet<MapFeatureKindWire>;
+  /**
+   * The global list the stream overlay draws the dwarf cores of, from the page's one request (plan
+   * 10, P10.T11), or `null` while it has none.
+   */
+  readonly globalList: GlobalListModel | null;
+  /** The tracks on hand, by stream number. */
+  readonly streamTracks: ReadonlyMap<number, StreamTrack>;
+  /** The kinds the stream overlay draws. */
+  readonly streamKinds: ReadonlySet<StreamOverlayKind>;
+  /** The overlay's `FEATURES` toggles, which the face-on view stands under its legends. */
+  readonly featureControls?: ReactNode;
+}
+
+/**
+ * Whether a request state is a failure, which leaves no answer to the question the view asks: a
+ * refusal, a fault or a timeout, never a wait.
+ */
+function isFailure(state: RequestState<RequestKind>): boolean {
+  let failure: boolean;
+  switch (state.kind) {
+    case "rejected":
+    case "timed_out":
+      failure = true;
+      break;
+    case "idle":
+    case "pending":
+    case "ok":
+    case "link_down":
+      failure = false;
+      break;
+  }
+  return failure;
 }
 
 interface MapViewBodyProps extends GalaxyMapViewProps {
@@ -450,48 +845,108 @@ function MapViewBody({
   universe,
   view,
   population,
+  statesPopulation,
+  quantity,
+  dustOverlay: overlayAsked,
   pictureWidthPx,
   devicePixelRatio,
   cursorLy,
   onCursor,
   centreLy,
+  staleWaits,
+  pageWaitId,
+  remPx,
+  featureLayers,
+  featureKinds,
+  globalList,
+  streamTracks,
+  streamKinds,
+  featureControls,
   onRetry,
 }: MapViewBodyProps) {
   const titleId = useId();
   const hintId = useId();
+  const { status: linkStatus } = useServerLink();
+  const linkDown = linkDownReason(linkStatus) !== null;
   const pictureHeightPx = pictureWidthPx / SCREEN_ASPECT[view];
   const backingWidthPx = Math.round(pictureWidthPx * devicePixelRatio);
   const backingHeightPx = Math.round(pictureHeightPx * devicePixelRatio);
   // The narrowest map that, enlarged at most 1.25 times, covers the picture's device pixels.
   const resolution = mapResolutionFor(backingWidthPx);
-  const body: RequestOf<"density_map"> | null =
-    backingWidthPx > 0
+  const overlay = takesOverlay(quantity) && overlayAsked;
+  const question: MapQuestion = { universe, view, population, quantity, overlay };
+  const densityBody: RequestOf<"density_map"> | null =
+    backingWidthPx > 0 && needsDensity(question)
       ? { kind: "density_map", universe, view, population, resolution, bits: MAP_BITS }
       : null;
-  const state = useServerRequest<"density_map">(body, MAP_TIMEOUT_MS);
-  const map = state.kind === "ok" ? state.response : null;
+  const extinctionBody: RequestOf<"extinction_map"> | null =
+    backingWidthPx > 0 && needsExtinction(question)
+      ? { kind: "extinction_map", universe, view, resolution, bits: EXTINCTION_MAP_BITS }
+      : null;
+  const densityState = useServerRequest<"density_map">(densityBody, MAP_TIMEOUT_MS);
+  const extinctionState = useServerRequest<"extinction_map">(extinctionBody, MAP_TIMEOUT_MS);
+  const densityMap = densityState.kind === "ok" ? densityState.response : null;
+  const extinctionMap = extinctionState.kind === "ok" ? extinctionState.response : null;
+  // What the status line reports: the first map the picture needs that has not answered.
+  const densityWaits = needsDensity(question) && densityState.kind !== "ok";
+  const state: RequestState<RequestKind> = densityWaits ? densityState : extinctionState;
+  // With two maps asked for, the extinction map's state is named, so that one is told apart.
+  const stateSubject = overlay && !densityWaits ? "EXTINCTION" : undefined;
   // Decoding 350 kB of base64 takes milliseconds, and the picture's identity decides when the
-  // canvas is painted again, so it is kept until the map changes.
+  // canvas is painted again, so it is kept until a map changes.
   const decoding = useMemo(
-    () => decodeMap(map, { universe, view, population }),
-    [map, universe, view, population],
+    () =>
+      decodePicture(densityMap, extinctionMap, {
+        universe,
+        view,
+        population,
+        quantity,
+        overlay,
+      }),
+    [densityMap, extinctionMap, universe, view, population, quantity, overlay],
   );
   const answered = decoding.kind === "ok" ? decoding.picture : null;
 
   // The last picture drawn stays, stale, while a map of another resolution for the same question is
-  // on its way, or failed: a resize past a resolution step never blanks the view. A map of another
-  // universe, view or population is other data, and is waited for from `PENDING`.
-  const question: MapQuestion = { universe, view, population };
+  // awaited, from the server or from the link: a resize past a resolution step never blanks the
+  // view. A new map that fails leaves no answer to the question the view now asks, since the
+  // resolution is part of it, so the stale picture goes and the failure stands in its place
+  // (decision-gg-port-a2 §2). A map of another universe, view, population or quantity, or with the
+  // overlay put on or taken off, is other data, and is waited for from `PENDING`.
   const [shown, setShown] = useState<ShownPicture | null>(null);
   if (answered !== null && shown?.picture !== answered) {
     setShown({ picture: answered, question });
   }
-  const stale = answered === null && shown !== null && sameQuestion(shown.question, question);
-  const picture = answered ?? (stale ? shown.picture : null);
+  const failed = decoding.kind === "invalid" || isFailure(state);
+  const kept =
+    answered === null && !failed && shown !== null && sameQuestion(shown.question, question)
+      ? shown.picture
+      : null;
+  const picture = answered ?? kept;
+  // A kept picture is stale, and so is any picture while the link is down: the guide's "loss of
+  // the server link makes every live value on the console stale at once", as the local chart is
+  // (plan 05's T11 ruling (8); decision-gg-port-a2 §3). The answer itself is kept, and is current
+  // again when the link returns.
+  const stale = picture !== null && (kept !== null || linkDown);
+  // What the page states for this view, once for both: a kept picture's new map in flight. A wait
+  // on the link is the page's own to state, and a failure stands in the picture's place.
+  let staleWait: StaleWait | null = null;
+  if (kept !== null && state.kind === "pending") {
+    staleWait = stateSubject === undefined ? "map" : "extinction";
+  }
+  // The page holds no request, so the view keeps the page's record of its wait in step with it,
+  // before the browser paints (see `StaleWaits`, a recorded exception:
+  // decision-p07-t11d-stale-waits); it has none once the view goes.
+  useLayoutEffect(() => {
+    staleWaits.report(view, staleWait);
+    return () => {
+      staleWaits.report(view, null);
+    };
+  }, [staleWaits, view, staleWait]);
 
   const rootRef = useRef<HTMLElement>(null);
   // Whether the picture has focus, which decides whether this view's density reading announces
-  // (see `CursorDensityReading`): the arrow keys move the cursor only on the focused picture.
+  // (see `CursorReadings`): the arrow keys move the cursor only on the focused picture.
   const [focused, setFocused] = useState(false);
   // With no picture there is no canvas, and one removed while it had focus fires no `blur`, so the
   // flag is dropped here; otherwise the next picture's reading would announce without focus.
@@ -609,11 +1064,57 @@ function MapViewBody({
       ? null
       : markOnPicture(picture.geometry, cursorInView(view, centreLy));
   const axes = AXIS_LABELS[view];
+  const geometry = picture?.geometry ?? null;
+  // Placed once per picture, layers, kinds and size: a few hundred marks and their labels.
+  const featurePlaces = useMemo(
+    () =>
+      geometry === null || featureLayers === null
+        ? []
+        : placeMapFeatures(view, geometry, featureLayers, featureKinds, {
+            widthPx: pictureWidthPx,
+            heightPx: pictureHeightPx,
+            remPx,
+          }),
+    [view, geometry, featureLayers, featureKinds, pictureWidthPx, pictureHeightPx, remPx],
+  );
+  // Placed once per picture, list, tracks, kinds and size, its labels clear of the features'.
+  const streamPlaces = useMemo(() => {
+    if (geometry === null || globalList === null) {
+      return null;
+    }
+    const picturePx = { widthPx: pictureWidthPx, heightPx: pictureHeightPx, remPx };
+    const masses = new Map(globalList.streams.map((stream) => [stream.number, stream.massMsun]));
+    return placeStreamOverlay(
+      view,
+      geometry,
+      picturePx,
+      {
+        tracks: [...streamTracks.values()].map((track) => ({
+          track,
+          massMsun: masses.get(track.number) ?? 0,
+        })),
+        cores: globalList.cores,
+        streamsShown: streamKinds.has("stream"),
+        coresShown: streamKinds.has("dwarf_core"),
+      },
+      [...labelBoxes(featurePlaces, picturePx), ...crossBoxes(featurePlaces, picturePx)],
+    );
+  }, [
+    view,
+    geometry,
+    globalList,
+    streamTracks,
+    streamKinds,
+    featurePlaces,
+    pictureWidthPx,
+    pictureHeightPx,
+    remPx,
+  ]);
 
   let status: ReactNode;
   switch (decoding.kind) {
     case "none":
-      status = <RequestStatus state={state} onRetry={onRetry} />;
+      status = <RequestStatus state={state} onRetry={onRetry} subject={stateSubject} />;
       break;
     case "invalid":
       // A server fault, like a failed request, so it reads in caution and offers RETRY.
@@ -645,8 +1146,10 @@ function MapViewBody({
           // oxlint-disable-next-line jsx-a11y/no-interactive-element-to-noninteractive-role
           role="application"
           tabIndex={0}
-          aria-label={`Galaxy map, ${VIEW_NAME[view]}${stale ? ", stale" : ""}`}
-          aria-describedby={hintId}
+          aria-label={`Galaxy map, ${VIEW_NAME[view]}${LAYER_NAME[layerKind(question)]}${stale ? ", stale" : ""}`}
+          // A stale picture is described by why, too: the page's line, the link's state or the
+          // new map's PENDING (decision-gg-port-a2 §2).
+          aria-describedby={stale ? `${hintId} ${pageWaitId}` : hintId}
           onClick={pick}
           onKeyDown={step}
           onFocus={() => {
@@ -656,6 +1159,24 @@ function MapViewBody({
             setFocused(false);
           }}
         />
+        {streamPlaces === null ? null : (
+          <StreamTrackOverlay
+            places={streamPlaces}
+            widthPx={pictureWidthPx}
+            heightPx={pictureHeightPx}
+            remPx={remPx}
+            stale={linkDown}
+          />
+        )}
+        {featureLayers === null ? null : (
+          <MapFeatureOverlay
+            places={featurePlaces}
+            widthPx={pictureWidthPx}
+            heightPx={pictureHeightPx}
+            remPx={remPx}
+            stale={linkDown}
+          />
+        )}
         {centrePlace === null ? null : <MapMark kind="centre" view={view} place={centrePlace} />}
         {cursorPlace === null ? null : <MapMark kind="cursor" view={view} place={cursorPlace} />}
         <span className="map-view__axis map-view__axis--across">{axes.across}</span>
@@ -683,24 +1204,55 @@ function MapViewBody({
             </p>
           )}
         </div>
-        {stale ? status : null}
         {view === "face_on" ? (
           <p className="map-view__rotation">ROTATION COUNTER-CLOCKWISE</p>
         ) : null}
         {picture === null ? null : (
-          <CursorDensityReading
-            density={densityUnder(picture, view, cursorLy)}
+          <CursorReadings
+            rows={cursorRows(picture, view, cursorLy)}
             stale={stale}
             announce={focused}
           />
         )}
         {picture === null || ramp === null ? null : (
-          <DensityLegend
-            ramp={ramp}
-            floorLog10PerLy2={picture.floorLog10PerLy2}
-            ceilingLog10PerLy2={picture.ceilingLog10PerLy2}
-          />
+          <div
+            className={`map-view__legends${
+              picture.density !== null && picture.extinction !== null
+                ? " map-view__legends--pair"
+                : ""
+            }`}
+          >
+            {picture.density === null ? null : (
+              <DensityLegend
+                population={population}
+                statesCount={statesPopulation}
+                ramp={ramp}
+                floorLog10PerLy2={picture.density.floorLog10}
+                ceilingLog10PerLy2={picture.density.ceilingLog10}
+              />
+            )}
+            {picture.extinction === null ? null : (
+              <ExtinctionLegend
+                ramp={ramp}
+                floorLog10Mag={picture.extinction.floorLog10}
+                ceilingLog10Mag={picture.extinction.ceilingLog10}
+              />
+            )}
+          </div>
         )}
+        {/*
+         * The view that states what the REMNANTS map counts says so while it has no density legend
+         * to say it in, pending or failed, so that the other view's picture is never read alone.
+         */}
+        {statesPopulation &&
+        population === "layer_e_remnants" &&
+        needsDensity(question) &&
+        (picture?.density ?? null) === null ? (
+          <p className="map-view__counted">
+            <RemnantsCount />
+          </p>
+        ) : null}
+        {featureControls}
       </div>
       <div className="map-view__area">{content}</div>
     </section>
@@ -712,14 +1264,33 @@ function MapViewBody({
  * the single-hue logarithmic ramp, with its title, axes and legend.
  *
  * @remarks
+ * The quantity is the page's choice (plan 07, P07.T11.b). Under `COLUMN DENSITY` the view asks for
+ * the `density_map`, and with the dust overlay the `extinction_map` of the same resolution too: the
+ * density's codes are then lowered by 0.4 A(V) in dex before the ramp ({@link dustOverlay}), and
+ * both legends are shown, side by side (the page names the overlay once, `DUST OVERLAY: A(V),
+ * WHOLE LINE OF SIGHT`, as the guide requires, and says what the brightness shows,
+ * {@link DUST_OVERLAY_BRIGHTNESS}); the density read under the cursor stays the map's
+ * own, with A(V) beside it. Under `EXTINCTION` it asks for the `extinction_map` alone and shows
+ * A(V) on the same ramp, logarithmic in magnitudes, with `ExtinctionLegend`. Each map is checked
+ * as a density map is, and waits, goes stale and fails as one does, below; a picture of two maps
+ * waits for both.
+ *
  * The picture is `pictureWidthPx` wide, in its view's proportions. It asks for the narrowest
- * `density_map` at 8 bits (plan 05, design note D5) that, enlarged at most 1.25 times, covers the
- * picture's device pixels (`mapResolutionFor`), allowing it two minutes, and shows the request's state until it is answered, asking
- * again when the picture grows or shrinks past a resolution the protocol offers. Until that map
- * arrives the last picture stays, resampled to the new size and marked stale as the guide has a
- * stale value shown: painted on a ramp up to `--text-muted`, with a trailing `S` and its legend and
- * density reading likewise, the request's state beside it; a failure of the new request leaves it
- * so, with the failure and `RETRY`, which asks again from `PENDING`. A map of another universe or
+ * map that, enlarged at most 1.25 times, covers the picture's device pixels (`mapResolutionFor`):
+ * the `density_map` at 8 bits (plan 05, design note D5), the `extinction_map` at 16 bits
+ * (decision-gg-port-a2 §4), or both, allowing each two minutes, and shows the request's
+ * state until it is answered, asking again when the picture grows or shrinks past a resolution the
+ * protocol offers. Until that map arrives the last picture stays, resampled to the new size and
+ * marked stale as the guide has a stale value shown: painted on a ramp up to `--text-muted`, with a
+ * trailing `S` and its legend and readings likewise, and its canvas named `…, stale`. While the
+ * link is down a picture on show is marked stale the same way, the answer kept and not asked for
+ * again, and current once the link returns (plan 05's T11 ruling (8); decision-gg-port-a2 §3). A
+ * stale view sets no status line among its words: it reports a new map in flight to the page
+ * (`staleWaits`), which states it once for both views where the link's state stands, `PENDING`,
+ * or `EXTINCTION PENDING` while only the overlay's extinction map is awaited, and its canvas is
+ * described by that line (`pageWaitId`) beside its hint. A failure of the new request drops the
+ * stale picture and stands in its place with `RETRY`, as a first load's failure does, which
+ * amends plan 05's T10 ruling (3) (decision-gg-port-a2 §2). A map of another universe or
  * population is other data and is waited for from `PENDING`. A map that is not the one asked for,
  * is not of the M1 extents, cannot be drawn or does not decode reads `MAP DATA INVALID` with the
  * cause, a server fault. After any failure `RETRY` asks again from `PENDING`: the view is mounted
@@ -749,6 +1320,20 @@ function MapViewBody({
  * the shared cursor's x. The chart's centre is drawn as a small diagonal cross in `--text`. A mark
  * whose point lies above or below the map is pegged to its edge with `↑` or `↓`. Moving either
  * paints nothing.
+ *
+ * Over the picture, under those two marks, stands the page's feature overlay (plan 09,
+ * P09.T41.b; {@link MapFeatureOverlay}): the globulars and the centre as the open Greek cross, the
+ * bright shells as circles at true radius, each labelled with its kind where its label fits,
+ * placed on this view's picture by `placeMapFeatures`; a feature beyond the view's extent is not
+ * drawn, and none is pegged. It is muted while the link is down, as the picture is stale then.
+ * The face-on view stands the page's `FEATURES` toggles under its legends.
+ *
+ * Under the feature overlay stands the page's stream overlay (plan 10, P10.T11;
+ * {@link StreamTrackOverlay}): each track on hand as a thin cased line, cut at the view's extent
+ * and labelled `STREAM` at a tip inside the view, and each dwarf core as the open cross, labelled
+ * `DWARF CORE`, placed by `placeStreamOverlay` with their labels clear of the features' labels and
+ * marks; muted while the link
+ * is down, as the features are.
  */
 export function GalaxyMapView(props: GalaxyMapViewProps) {
   const [attempt, setAttempt] = useState(0);

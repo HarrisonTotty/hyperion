@@ -1,14 +1,25 @@
 import { describe, expect, it } from "vitest";
 
-import { EARTH_REFERENCE } from "./earth";
+import {
+  amountValue,
+  fourAbsorberMedium,
+  r05EarthWithOzoneAbsorber,
+} from "../../test/atmosphereFixtures";
+import { R05_EARTH_REFERENCE } from "./earth";
 import type { AtmosphereMedium } from "./medium";
 import {
+  absorberAmounts,
+  absorberAmountsToTop,
+  curvesOpticalDepth,
   distanceToTopM,
   intersectsGround,
   maxDistanceM,
   opticalDepth,
+  opticalDepthToTop,
+  texelUvFromUnit,
   transmittanceRMuToUv,
   transmittanceUvToRMu,
+  unitFromTexelUv,
 } from "./opticalDepth";
 
 const R = 6_360_000;
@@ -27,7 +38,7 @@ function exponential(topM: number): AtmosphereMedium {
         density: { kind: "exponential", scaleHeightM: H },
         scattering: [BETA, 2 * BETA, 3 * BETA],
         absorption: [0, 0, 0],
-        phase: { kind: "rayleigh" },
+        phase: { kind: "rayleigh", depolarisation: [0, 0, 0] },
       },
     ],
   };
@@ -71,7 +82,7 @@ describe("the oracle against closed forms", () => {
 
 describe("Earth's zenith optical depth", () => {
   it("is the sum of its terms' columns: about 0.22 at 550 nm", () => {
-    const [, green] = opticalDepth(EARTH_REFERENCE, R, R, 1);
+    const [, green] = opticalDepth(R05_EARTH_REFERENCE, R, R, 1);
     // Rayleigh 11.487e-6 × 8,434.5 m (1 − e^(−100 km ÷ H)), aerosol 0.1, ozone 1.881e-6 × 15 km.
     const expected =
       11.487e-6 * 8_434.5 * -Math.expm1(-100_000 / 8_434.5) + 0.1 + 1.881e-6 * 15_000;
@@ -102,5 +113,106 @@ describe("the transmittance table's parameterisation", () => {
       expect(u2).toBeCloseTo(u, 9);
       expect(v2).toBeCloseTo(v, 9);
     }
+  });
+});
+
+describe("Bruneton's texel mapping (Design note 19)", () => {
+  it("puts 0 and 1 at the first and last texels' centres and inverts itself", () => {
+    for (const n of [2, 32, 54, 64, 96, 108, 128, 192, 256]) {
+      expect(unitFromTexelUv(0.5 / n, n)).toBeCloseTo(0, 14);
+      expect(unitFromTexelUv((n - 0.5) / n, n)).toBeCloseTo(1, 14);
+      for (let i = 0; i < n; i += 1) {
+        const unit = unitFromTexelUv((i + 0.5) / n, n);
+        expect(unit).toBeCloseTo(i / (n - 1), 14);
+        expect(texelUvFromUnit(unit, n)).toBeCloseTo((i + 0.5) / n, 14);
+      }
+    }
+  });
+});
+
+describe("opticalDepthToTop", () => {
+  it("is opticalDepth for a ray that misses the ground", () => {
+    const medium = exponential(100_000);
+    for (const [rM, mu] of [
+      [R, 1],
+      [R + 1_000, 0],
+      [R + 20_000, -0.05],
+    ] as const) {
+      expect(opticalDepthToTop(medium, R, rM, mu)).toEqual(opticalDepth(medium, R, rM, mu));
+    }
+  });
+
+  it("takes the ray tangent to the ground through to the top, the table's last column", () => {
+    const medium = exponential(100_000);
+    const rM = R + 5_000;
+    const mu = -Math.sqrt(1 - (R / rM) ** 2);
+    // The tangent ray's grazing path is longer than its part to the tangent point.
+    const [whole] = opticalDepthToTop(medium, R, rM, mu);
+    const shell = { bottomRadiusM: R, topRadiusM: R + 100_000 };
+    const toTangent = Math.sqrt(rM * rM - R * R);
+    expect(distanceToTopM(shell, rM, mu)).toBeGreaterThan(2 * toTangent);
+    const [half] = opticalDepthToTop(medium, R, rM, -mu);
+    expect(whole).toBeGreaterThan(half);
+  });
+});
+
+describe("the absorbers' columns and curves (R08.T6.c)", () => {
+  const { medium, curves } = r05EarthWithOzoneAbsorber();
+  const ozone = medium.terms.find((term) => term.absorber !== undefined);
+  const columnPerM2 =
+    ozone?.absorber?.kind === "column" ? ozone.absorber.spec.columnPerM2 : Number.NaN;
+  const withoutOzone = { ...medium, terms: medium.terms.filter((term) => term !== ozone) };
+
+  it("leaves an absorber out of the optical depth, its coefficients 0", () => {
+    expect(opticalDepth(medium, R, R + 2, 1)).toEqual(opticalDepth(withoutOzone, R, R + 2, 1));
+  });
+
+  it("gives the absorber's whole column from the ground straight up", () => {
+    const [ground] = absorberAmounts(medium, R, R, 1);
+    expect(ground?.kind).toBe("column");
+    expect((ground === undefined ? Number.NaN : amountValue(ground)) / columnPerM2).toBeCloseTo(
+      1,
+      9,
+    );
+  });
+
+  it("gives half the column to the top from the tent's peak straight up", () => {
+    const [peak] = absorberAmountsToTop(medium, R, R + 25_000, 1);
+    expect((peak === undefined ? Number.NaN : amountValue(peak)) / columnPerM2).toBeCloseTo(0.5, 9);
+  });
+
+  it("gives a pair absorber its pair column, from the ground straight up its whole (R08.T4.c)", () => {
+    const four = fourAbsorberMedium().medium;
+    const amounts = absorberAmounts(four, R, R, 1);
+    expect(amounts.map((amount) => amount.kind)).toEqual(["column", "column", "pair", "column"]);
+    const pair = four.terms.find((term) => term.absorber?.kind === "pair")?.absorber;
+    const vertical = pair?.kind === "pair" ? pair.spec.pairColumnPerM5 : Number.NaN;
+    const [, , ground] = amounts;
+    expect((ground === undefined ? Number.NaN : amountValue(ground)) / vertical).toBeCloseTo(1, 4);
+  });
+
+  it("refuses an amount of the other kind than its curve's", () => {
+    const [curve] = curves[0] ?? [];
+    if (curve === undefined) {
+      throw new Error("the medium has its ozone's curve");
+    }
+    expect(() => curvesOpticalDepth([curve], [{ kind: "pair", pairColumnPerM5: 1 }], [])).toThrow(
+      Error,
+    );
+  });
+
+  it("reads a linear curve as σ u, R05's ozone depth", () => {
+    const depth = curvesOpticalDepth(curves[0] ?? [], absorberAmounts(medium, R, R, 1), []);
+    const r05 = opticalDepth(R05_EARTH_REFERENCE, R, R, 1);
+    const others = opticalDepth(withoutOzone, R, R, 1);
+    for (const c of [0, 1, 2] as const) {
+      expect(depth[c] / (r05[c] - others[c])).toBeCloseTo(1, 6);
+    }
+  });
+
+  it("refuses curves that do not match the columns one to one", () => {
+    expect(() => curvesOpticalDepth([], [{ kind: "column", columnPerM2: 1 }], [])).toThrow(
+      RangeError,
+    );
   });
 });

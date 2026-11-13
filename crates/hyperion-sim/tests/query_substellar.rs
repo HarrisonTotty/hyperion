@@ -18,11 +18,12 @@ use common::{WarmCellCache, reference_density_point, sunlike_point};
 use hyperion_sim::Seed;
 use hyperion_sim::coords::GalacticPosition;
 use hyperion_sim::galaxy::Galaxy;
+use hyperion_sim::galaxy::imf::MassBand;
 use hyperion_sim::galaxy::params::GalaxyParams;
 use hyperion_sim::galaxy::placement::{NoCache, SystemKind, rogue_planet_saturation_density};
 use hyperion_sim::galaxy::query::{
     CensusStop, MassFloor, PAD_SPEED, QuerySphere, RangeQuery, RangeResult, SubstellarRequest,
-    count_cells_in_sphere, pad_for, range_query,
+    count_cells_in_sphere, expected_counts, pad_for, range_query,
 };
 use hyperion_sim::galaxy::substellar::SubstellarParams;
 use hyperion_sim::id::Layer;
@@ -234,7 +235,9 @@ fn a_10_ly_query_keeps_the_rogue_planets() {
 
 /// Near the galactic centre, 0.5 ly: the expected count drives the census, which counts the
 /// saturated density where the rogue planets saturate (ruling 125), and the answer is the same
-/// across runs and cache states.
+/// across runs and cache states. From generator version 27 the field thins the saturated density by
+/// each component's field factor (P09.T2.c), the share of its budget the features and the halo's
+/// streams leave it, so the count is C times the volume times a mean of the factors.
 ///
 /// At (2, 2, 2) ly the sphere lies inside one cell of every layer, some 63,500 rogue-planet
 /// candidates; [`a_query_at_the_very_centre_counts_the_saturated_density`] takes the origin itself,
@@ -268,12 +271,28 @@ fn assert_centre_census(centre: GalacticPosition) {
     let cold = run(galaxy, &full);
     assert_eq!(cold.census().complete_down_to(), Some(Layer::RoguePlanet));
     let expected = cold.census().expected().get(Layer::RoguePlanet);
-    // Every node saturates, so the count is C times the volume; unsaturated, 60 per star would
-    // give 1.66 times that.
+    // Every node saturates, so the count is C times the volume times the field's mean factor there,
+    // between the least and the greatest of the components' (that of each with rogue planets);
+    // unsaturated, 60 per star would give 1.66 times C times the volume.
+    let (least, most) = galaxy
+        .fields()
+        .component_ids()
+        .filter_map(|id| {
+            let budget = galaxy
+                .shares()
+                .component_share(MassBand::RoguePlanet, galaxy.fields().component(id));
+            (budget > 0.0).then(|| galaxy.field_component_share(MassBand::RoguePlanet, id) / budget)
+        })
+        .fold((f64::INFINITY, 0.0_f64), |(lo, hi), f| {
+            (lo.min(f), hi.max(f))
+        });
+    let saturated = saturation * volume;
+    println!(
+        "{expected} rogue planets against C × V = {saturated}, the field factors {least}–{most}"
+    );
     assert!(
-        (expected / (saturation * volume) - 1.0).abs() < 1e-9,
-        "{expected} against C × V = {}",
-        saturation * volume
+        expected >= saturated * least * (1.0 - 1e-9) && expected <= saturated * most * (1.0 + 1e-9),
+        "{expected} against C × V = {saturated} times {least}–{most}"
     );
     let found = kinds(&cold).get("rogue planet").copied().unwrap_or(0);
     assert_poisson_count(
@@ -295,19 +314,24 @@ fn assert_centre_census(centre: GalacticPosition) {
 
 /// The Milky Way fixture's own centre does not saturate (ruling 125): its count there is the
 /// linear one, below C times the volume.
+///
+/// The count is the census's expectation, `expected_counts` at the query's centre, radius and
+/// request, as the census takes it, which needs no walk of the cells (`decision-test-coverage.md`,
+/// Q6's ruling; the two were checked equal bit for bit in every layer at this query, P13.T4's
+/// as-built note). The walk of rogue-planet cells at the centre is
+/// [`a_query_near_the_centre_counts_the_saturated_density`]'s, and the slow
+/// [`a_query_at_the_very_centre_counts_the_saturated_density`]'s, on the saturated galaxy.
 #[test]
 fn the_fixture_s_centre_does_not_saturate() {
-    let result = run(
-        galaxy(),
-        &query(
-            GalacticPosition::ORIGIN,
-            0.5,
-            SubstellarRequest::BrownDwarfsAndRoguePlanets,
-            4_096,
-        ),
+    let asked = query(
+        GalacticPosition::ORIGIN,
+        0.5,
+        SubstellarRequest::BrownDwarfsAndRoguePlanets,
+        4_096,
     );
     let volume = 4.0 / 3.0 * core::f64::consts::PI * 0.125;
-    let expected = result.census().expected().get(Layer::RoguePlanet);
+    let expected = expected_counts(galaxy(), asked.centre(), asked.radius(), asked.substellar())
+        .get(Layer::RoguePlanet);
     assert!(
         expected < 0.8 * rogue_planet_saturation_density() * volume,
         "{expected}"

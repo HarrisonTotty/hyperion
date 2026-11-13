@@ -4,21 +4,22 @@
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
-use std::num::NonZeroU32;
+use std::num::{NonZeroU32, NonZeroUsize};
 
 use super::point_lens::{einstein_angle, point_lens_magnification};
 use crate::coords::{GalacticDisplacement, GalacticPosition, GalacticVelocity};
 use crate::events::TimeWindow;
 use crate::galaxy::Galaxy;
+use crate::galaxy::catalogue_classes::system_of_record;
 use crate::galaxy::features::members::{NoInteriorCache, resolve_member};
 use crate::galaxy::imf::MassBand;
 use crate::galaxy::placement::{
     CellCache, CellKey, Existence, ResolveSystemError, SystemKind, SystemOrigin, SystemRecord,
-    resolve,
+    Visited, resolve, visit_cell,
 };
 use crate::galaxy::query::{
-    LayerSet, MassFloor, PAD_SPEED, QuerySphere, SubstellarRequest, SystemHit, SystemSource,
-    UNBOUND_PAD_SPEED, cells_along_segment, escape_cut_holds, pad_speed,
+    LayerSet, MassFloor, PAD_SPEED, QuerySphere, SpeedCut, SubstellarRequest, SystemHit,
+    SystemSource, UNBOUND_PAD_SPEED, cells_along_segment, escape_cut_holds, pad_speed,
 };
 use crate::id::{Layer, SystemId, SystemIdKind};
 use crate::math;
@@ -307,6 +308,20 @@ impl LensEvent {
         self.peak_magnification
     }
 
+    /// The observer time of the closest approach, t₀, in seconds since the epoch, unclamped: it
+    /// may lie outside the window, where [`peak`](Self::peak) does not.
+    #[must_use]
+    pub const fn closest_seconds(&self) -> f64 {
+        self.closest_s
+    }
+
+    /// The impact at the closest approach, u₀, in Einstein radii, unclamped: at most
+    /// [`impact`](Self::impact), which is the least within the window.
+    #[must_use]
+    pub const fn closest_impact(&self) -> f64 {
+        self.closest_impact
+    }
+
     /// The magnification of the source at observer time `t`.
     #[must_use]
     pub fn magnification_at(&self, t: UniverseTime) -> f64 {
@@ -392,7 +407,8 @@ pub enum FindLensesError {
     /// The source does not resolve.
     SourceNotFound(ResolveSystemError),
     /// The source's motion cannot be traced yet: a member of the galactic centre, whose orbit
-    /// waits for plan 09's P09.T28.
+    /// waits for plan 09's P09.T28, or a catalogue system, whose line breaks at its explosion
+    /// (P09.T33.a).
     SourceMotionNotTraced(TraceMotionError),
     /// The walk would take more cells than the budget allows; nothing was generated.
     OverCellBudget {
@@ -438,7 +454,7 @@ impl Error for FindLensesError {
 ///
 /// # Panics
 ///
-/// If `record` is a feature member that does not resolve in `galaxy`.
+/// If `record` is a feature member or a catalogue system that does not resolve in `galaxy`.
 #[must_use]
 pub fn lens_mass_at(
     galaxy: &Galaxy,
@@ -469,7 +485,15 @@ pub fn lens_mass_at(
                         .expect("a feature member's record resolves in the galaxy that placed it")
                         .stars(galaxy)
                 }
-                SystemOrigin::CentreMember { .. } => return None,
+                // A global-list member's stars are its member record's, which its list and tube
+                // tables give (plan 10): no lens from the system record alone.
+                SystemOrigin::CentreMember { .. } | SystemOrigin::GlobalListMember { .. } => {
+                    return None;
+                }
+                // A catalogue system's stars are its class's (plan 09, P09.T33.a).
+                SystemOrigin::CatalogueSystem(_) => {
+                    system_of_record(galaxy, record).stars(galaxy)?
+                }
             };
             let mass = stars
                 .stars()
@@ -551,9 +575,9 @@ struct Candidate {
 /// cut into 64 pieces each as wide as its far end needs. The speed is the local escape speed's
 /// bound over the piece's reach ([`LensWalkPlan`]), because plan 08 cuts every grid velocity
 /// below the escape speed at its epoch position in every layer where [`escape_cut_holds`] is
-/// true. The other layers, layer E for the exempt classes plan 08 will place there, keep their
-/// [`pad_speed`] (P08.T17). A galaxy built without its kinematic tables has no motion and needs
-/// no pad.
+/// true. The other layers, layer E for plan 08's exempt classes and from generator version 27
+/// layer D for the hypervelocity survivors (P09.T34.b), keep their [`pad_speed`] (P08.T17). A
+/// galaxy built without its kinematic tables has no motion and needs no pad.
 ///
 /// The result does not depend on the cache or on the order of the sources: every candidate is
 /// taken once, by ID, and the events are sorted by peak and then by lens.
@@ -561,7 +585,8 @@ struct Candidate {
 /// # Errors
 ///
 /// [`FindLensesError::SourceNotFound`] if the sightline's source does not resolve,
-/// [`FindLensesError::SourceMotionNotTraced`] if it is a member of the galactic centre, and
+/// [`FindLensesError::SourceMotionNotTraced`] if it is a member of the galactic centre or a
+/// catalogue system, and
 /// [`FindLensesError::OverCellBudget`] if the tube's cells exceed the budget, which is decided
 /// before any cell is generated.
 ///
@@ -717,6 +742,11 @@ pub fn lenses_among(
     Ok(LensResult { events, walked })
 }
 
+/// The runs of each layer's cells [`LensWalkPlan::chunks`] gives each thread of a pool: 4, so that
+/// each run is a quarter of a thread's share of its layer's cells, and the dearer runs of a layer,
+/// its cells nearest the bulge, are shared out among the threads as they finish.
+pub const CHUNKS_PER_THREAD: usize = 4;
+
 /// How far, beyond the reach, a candidate's least approach may pass and still be kept: 0.05 ly,
 /// which is fifty to a thousand Einstein radii, so that a window inside the candidates' own is
 /// judged on the same line to far better than that (ruling 143.3 as built).
@@ -828,13 +858,20 @@ impl LensCandidateChunk {
 /// table's resolution, which a slow test checks at 10⁵ random points; nothing under it is dropped
 /// between samples unless the escape speed rises by more than 2% within an eighth of an octave
 /// outward. The escape speed bounds the layers where [`escape_cut_holds`] is true. The others,
-/// layer E today and layer D once plan 09 raises its pad (P09.T34.b), keep their [`pad_speed`]
-/// (P08.T17).
+/// layer E and from generator version 27 layer D, whose pad plan 09 raises (P09.T34.b), keep
+/// their [`pad_speed`] (P08.T17) for their cells, which must hold the classes the escape cut
+/// exempts.
 ///
 /// **The prefilter** (ruling 143.3). Each system is tested first by its epoch position against the
-/// cone at its own distance, with its own speed bound; the survivors' velocities are drawn and
-/// their retarded positions estimated in plain `f64`, two light-time steps, and tested with a
-/// margin for that estimate; only the survivors of both take the exact retarded step.
+/// cone at its own distance, with its own speed bound: the escape speed's for every system but a
+/// member of the classes the escape cut exempts, whose bound is its layer's pad, read from the
+/// candidate's pick before its marks (`SpeedCut`). Only a system that passes is made whole
+/// (`visit_cell`); the others are counted, for the census, from what decides that they are systems,
+/// which in layer E is plan 08's marks without the track a dead record's fate may need. In the
+/// bulge that leaves some 3% of layer E's systems and 4% of layer D's to make whole (2026-11-05).
+/// The survivors' velocities are drawn and their retarded positions estimated in plain `f64`, two
+/// light-time steps, and tested with a margin for that estimate; only the survivors of both take
+/// the exact retarded step.
 ///
 /// # Examples
 ///
@@ -928,8 +965,69 @@ impl LensWalkPlan {
         &self.cells
     }
 
+    /// The cells in chunks for a pool of `threads` that each take the next chunk as they finish
+    /// one: layer by layer, the largest cells first, each layer's cells in [`CHUNKS_PER_THREAD`]
+    /// times `threads` runs of about one length (a cell each where the layer has fewer).
+    ///
+    /// A larger layer's cell costs more to walk: about 1 ms for one of layer E's 128 ly cells
+    /// towards the bulge against some 10 µs for one of layer A's 8 ly cells (pod, 2026-11-05). So
+    /// a pool handed the plan's cells in runs of one length leaves layer E's, a few thousand cells
+    /// at the end of the list, to its last thread or two; given the large cells first, spread over
+    /// every thread, it finishes together. Every cell is in one chunk, so
+    /// [`finish`](Self::finish) of their walks is the one-thread walk's.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::num::NonZeroUsize;
+    ///
+    /// use hyperion_sim::Seed;
+    /// use hyperion_sim::coords::GalacticPosition;
+    /// use hyperion_sim::events::TimeWindow;
+    /// use hyperion_sim::galaxy::Galaxy;
+    /// use hyperion_sim::galaxy::placement::{CellKey, NoCache, generate_cell};
+    /// use hyperion_sim::id::Layer;
+    /// use hyperion_sim::lensing::{LensQuery, LensSightline, LensWalkPlan, lens_candidates};
+    /// use hyperion_sim::time::UniverseTime;
+    ///
+    /// let galaxy = Galaxy::new(Seed::new(4));
+    /// let mut cell = Vec::new();
+    /// generate_cell(&galaxy, CellKey::new(Layer::C, [0, 790, 0])?, &mut cell);
+    /// let source = cell.first().ok_or("a layer-C cell of the disc holds a system")?;
+    /// let sun = GalacticPosition::from_light_years([0.0, 26_000.0, 0.0]).ok_or("in range")?;
+    /// let year = UniverseTime::from_julian_years(1).ok_or("in range")?;
+    /// let window = TimeWindow::new(UniverseTime::EPOCH, year)?;
+    /// let query = LensQuery::builder(LensSightline::new(sun, source.id()), window).build()?;
+    /// let plan = LensWalkPlan::new(&galaxy, &query)?;
+    /// let threads = NonZeroUsize::new(4).ok_or("four")?;
+    /// // Layer E's cells come first.
+    /// let first = plan.chunks(threads).next().ok_or("cells to walk")?;
+    /// assert_eq!(first[0].layer(), Layer::E);
+    /// // A pool's threads would take these in turn; walked on this one, they are the walk.
+    /// let walked: Vec<_> = plan
+    ///     .chunks(threads)
+    ///     .map(|cells| plan.walk(&galaxy, &mut NoCache::new(), cells))
+    ///     .collect();
+    /// assert_eq!(plan.finish(walked), lens_candidates(&galaxy, &mut NoCache::new(), &query)?);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn chunks(&self, threads: NonZeroUsize) -> impl Iterator<Item = &[CellKey]> + '_ {
+        let mut layers: Vec<&[CellKey]> =
+            self.cells.chunk_by(|a, b| a.layer() == b.layer()).collect();
+        layers.sort_by_key(|cells| core::cmp::Reverse(cells[0].layer().cell_size_ly()));
+        let runs = threads.get().saturating_mul(CHUNKS_PER_THREAD);
+        layers
+            .into_iter()
+            .flat_map(move |cells| cells.chunks(cells.len().div_ceil(runs)))
+    }
+
     /// The candidates among `cells`, which should be some of [`cells`](Self::cells), each walked
     /// in one chunk only.
+    ///
+    /// Each cell is generated in part (`visit_cell`): only a system whose epoch position passes
+    /// the cone at its own distance, with its own speed bound, is made whole and examined; the
+    /// others are counted, the census's, from no more of them than shows that they are systems.
+    /// So the walk asks `cache` for no cell, which it would have to generate whole.
     ///
     /// # Panics
     ///
@@ -939,22 +1037,31 @@ impl LensWalkPlan {
     pub fn walk<C: CellCache>(
         &self,
         galaxy: &Galaxy,
-        cache: &mut C,
+        _cache: &mut C,
         cells: &[CellKey],
     ) -> LensCandidateChunk {
         let mut chunk = LensCandidateChunk::default();
+        let source = self.query.sightline.source;
         for &key in cells {
-            cache.with_cell(galaxy, key, |records| {
-                for record in records {
-                    if record.id() == self.query.sightline.source {
-                        continue;
+            let layer = key.layer();
+            visit_cell(
+                galaxy,
+                key,
+                |position, cut| self.epoch_reach(layer, position, cut).is_some(),
+                |system| match system {
+                    Visited::Read(record, cut) => {
+                        if record.id() != source {
+                            chunk.systems_examined += 1;
+                            chunk.candidates.extend(self.keep(galaxy, &record, cut));
+                        }
                     }
-                    chunk.systems_examined += 1;
-                    if let Some(candidate) = self.keep(galaxy, record) {
-                        chunk.candidates.push(candidate);
+                    Visited::Counted(id) => {
+                        if id != source {
+                            chunk.systems_examined += 1;
+                        }
                     }
-                }
-            });
+                },
+            );
             chunk.cells += 1;
         }
         chunk
@@ -983,27 +1090,31 @@ impl LensWalkPlan {
         }
     }
 
-    /// The speed bound, over c, of a lens of `layer` whose epoch position is `radius_ly` from the
-    /// centre.
-    fn beta_at(&self, layer: Layer, radius_ly: f64) -> f64 {
+    /// The speed bound, over c, of a lens of `layer` cut by `cut` whose epoch position is
+    /// `radius_ly` from the centre.
+    fn beta_at(&self, layer: Layer, cut: SpeedCut, radius_ly: f64) -> f64 {
         let Some(envelope) = &self.envelope else {
             return 0.0;
         };
-        MetresPerSecond::from(envelope.speed_bound(layer, radius_ly)).value() / SPEED_OF_LIGHT
+        MetresPerSecond::from(envelope.speed_bound_of(layer, cut, radius_ly)).value()
+            / SPEED_OF_LIGHT
     }
 
-    /// `record` as a candidate, if its line passes within the kept reach during the span: the
-    /// epoch position's test, the `f64` estimate's and the exact one's, in that order.
-    fn keep(&self, galaxy: &Galaxy, record: &SystemRecord) -> Option<Candidate> {
+    /// The epoch position's test of a lens of `layer` at `position` cut by `cut`: whether its line
+    /// can pass within the kept reach during the span, from the farthest its speed bound lets it
+    /// move, and if so its offset from the observer, metres, with that bound over c and that
+    /// distance.
+    #[must_use]
+    fn epoch_reach(
+        &self,
+        layer: Layer,
+        position: &GalacticPosition,
+        cut: SpeedCut,
+    ) -> Option<EpochReach> {
         let g = &self.geometry;
-        let layer = record.layer();
-        let w = g
-            .observer
-            .position()
-            .displacement_to(record.epoch_position())
-            .metres();
+        let w = g.observer.position().displacement_to(position).metres();
         let w_norm = norm(w);
-        let beta = self.beta_at(layer, norm(record.epoch_position().to_light_years_f64()));
+        let beta = self.beta_at(layer, cut, norm(position.to_light_years_f64()));
         let half = g.tau.1;
         let t_abs = g.observer.time().since_epoch().as_seconds_f64().abs() + half;
         // The farthest the retarded position at any time of the span lies from the epoch
@@ -1020,9 +1131,26 @@ impl LensWalkPlan {
             + moved
             + g.source_speed * half * (d_e.abs() + moved) / g.d_s_m
             + 1e-6 * METRES_PER_LIGHT_YEAR;
-        if across > limit {
-            return None;
-        }
+        (across <= limit).then_some(EpochReach {
+            w,
+            w_norm,
+            beta,
+            moved,
+        })
+    }
+
+    /// `record`, whose speed `cut` bounds, as a candidate, if its line passes within the kept reach
+    /// during the span: the epoch position's test, the `f64` estimate's and the exact one's, in
+    /// that order.
+    fn keep(&self, galaxy: &Galaxy, record: &SystemRecord, cut: SpeedCut) -> Option<Candidate> {
+        let g = &self.geometry;
+        let layer = record.layer();
+        let EpochReach {
+            w,
+            w_norm,
+            beta,
+            moved,
+        } = self.epoch_reach(layer, record.epoch_position(), cut)?;
         let line = Drift::of_record(galaxy, record)
             .expect("a grid cell holds grid records, whose lines are traced");
         let v = line.velocity().metres_per_second();
@@ -1057,6 +1185,16 @@ impl LensWalkPlan {
             line,
         })
     }
+}
+
+/// What the epoch position's test leaves for the next: the lens's offset from the observer at the
+/// epoch, metres, and its length, its speed bound over c, and the farthest the bound lets its
+/// retarded position lie from its epoch position, metres.
+struct EpochReach {
+    w: [f64; 3],
+    w_norm: f64,
+    beta: f64,
+    moved: f64,
 }
 
 /// How far beyond either end of the sightline a lens moving at `lens_speed` m/s may lie at the
@@ -1263,17 +1401,33 @@ impl EscapeEnvelope {
     /// The speed bound of a grid lens of `layer` whose epoch position is at least `radius_ly` from
     /// the centre (P08.T17).
     ///
-    /// Where [`escape_cut_holds`] is true for the layer, every grid record of it is drawn below the
-    /// escape speed at its epoch position, so the bound is the table's, at most the layer's
-    /// [`pad_speed`], which is then plan 03's. Elsewhere a record may outrun the escape speed, and
-    /// the bound is the layer's [`pad_speed`]. So when plan 09 raises layer D's pad
-    /// (P09.T34.b), layer D follows with no edit here.
+    /// Where [`escape_cut_holds`] is true for the layer, every grid record of it is drawn below
+    /// the escape speed at its epoch position, so the bound is the table's, at most the layer's
+    /// [`pad_speed`], which is then plan 03's. Elsewhere a record may outrun the escape speed,
+    /// and the bound is the layer's pad. So from generator version 27, where plan 09 raises layer
+    /// D's pad (P09.T34.b), layer D follows with no edit here.
     #[must_use]
     fn speed_bound(&self, layer: Layer, radius_ly: f64) -> KilometresPerSecond {
+        let pad = pad_speed(layer);
         if escape_cut_holds(layer) {
-            KilometresPerSecond::new(self.bound(radius_ly).min(pad_speed(layer).value()))
+            KilometresPerSecond::new(self.bound(radius_ly).min(pad.value()))
         } else {
-            pad_speed(layer)
+            pad
+        }
+    }
+
+    /// The speed bound of one grid lens of `layer` whose epoch position is at least `radius_ly`
+    /// from the centre, cut by `cut`: the table's, at most [`PAD_SPEED`], for a lens the escape
+    /// cut holds, and the layer's [`pad_speed`] for one of the classes it exempts. In a layer where
+    /// [`escape_cut_holds`] it is [`speed_bound`](Self::speed_bound), since no class there is
+    /// exempt; in layers D and E it bounds all but the exempt classes by the escape speed.
+    #[must_use]
+    fn speed_bound_of(&self, layer: Layer, cut: SpeedCut, radius_ly: f64) -> KilometresPerSecond {
+        match cut {
+            SpeedCut::Escape => {
+                KilometresPerSecond::new(self.bound(radius_ly).min(PAD_SPEED.value()))
+            }
+            SpeedCut::Pad => pad_speed(layer),
         }
     }
 
@@ -1604,7 +1758,7 @@ mod tests {
     use crate::galaxy::Population;
     use crate::galaxy::params::GalaxyParams;
     use crate::galaxy::placement::{NoCache, generate_cell};
-    use crate::galaxy::query::LayerCounts;
+    use crate::galaxy::query::{LayerCounts, escape_cut_holds, pad_speed};
     use crate::observe::{Trajectory, light_time};
     use hyperion_testkit::float::assert_same_bits;
 
@@ -2005,7 +2159,7 @@ mod tests {
             "the wide reach finds grid lenses"
         );
         let replaced = lenses_along(galaxy, &mut NoCache::new(), &[&Everything], &query).unwrap();
-        assert!(replaced.events().is_empty());
+        assert_eq!(replaced.events(), []);
         assert_eq!(replaced.walked().cells(), open.walked().cells());
     }
 
@@ -2280,6 +2434,29 @@ mod tests {
         );
     }
 
+    /// From generator version 27, with the hypervelocity survivors' weight, the walk's bound puts
+    /// layer D off the escape envelope at `UNBOUND_PAD_SPEED` at every radius, as plan 09's
+    /// P09.T34.b says it does.
+    #[test]
+    fn the_lens_speed_bound_moves_layer_d_with_the_survivors() {
+        use crate::galaxy::rules::GalaxyRules;
+
+        let weighted = Galaxy::from_params_with_rules(
+            Seed::new(0x0934_b0e0_0000_0001),
+            GalaxyParams::milky_way_like(),
+            GalaxyRules::of_version(crate::GENERATOR_VERSION),
+        )
+        .expect("the Milky Way fixture builds")
+        .with_full_potential();
+        let envelope = EscapeEnvelope::of(&weighted).expect("the galaxy moves");
+        for radius_ly in [0.01, 1.0, 100.0, 26_000.0, 300_000.0] {
+            assert_same_bits(
+                envelope.speed_bound(Layer::D, radius_ly).value(),
+                UNBOUND_PAD_SPEED.value(),
+            );
+        }
+    }
+
     /// A Milky Way galaxy whose systems move: its full potential and kinematic tables, built once
     /// for the slow tests.
     fn moving_galaxy() -> &'static Galaxy {
@@ -2418,6 +2595,72 @@ mod tests {
                 let (expected, _) = brute_force(galaxy, &window, &source_line);
                 assert_eq!(renewed.events(), &expected[..]);
             }
+        }
+    }
+
+    /// `cells` walked as before the walk read them in part: each whole, every system counted, and
+    /// each tested with its layer's pad alone, the widest bound any of its lenses can need.
+    fn walk_whole(galaxy: &Galaxy, plan: &LensWalkPlan, cells: &[CellKey]) -> LensCandidateChunk {
+        let mut chunk = LensCandidateChunk::default();
+        let mut cell = Vec::new();
+        for &key in cells {
+            generate_cell(galaxy, key, &mut cell);
+            for record in &cell {
+                if record.id() != plan.query.sightline.source {
+                    chunk.systems_examined += 1;
+                    chunk
+                        .candidates
+                        .extend(plan.keep(galaxy, record, SpeedCut::Pad));
+                }
+            }
+            chunk.cells += 1;
+        }
+        chunk
+    }
+
+    /// Ruling 143.3 at speed: the walk, which reads in full only the systems near the cone, each
+    /// with its own speed cut, finds the candidates and counts the systems of a walk of whole
+    /// cells whose every lens is bound by its layer's pad alone, in a galaxy whose systems move:
+    /// for the golden's disc sightline of 5,000 ly over a century, and every 37th cell of the
+    /// bench's bulge sightline over two centuries, layer E's dead records among them counted
+    /// without their tracks, both at a reach of 3 × 10⁴, which keeps some hundreds of candidates.
+    #[test]
+    #[ignore = "slow: builds the full potential and walks some 13,000 cells twice"]
+    fn lensing_walk_in_part_equals_a_walk_of_whole_cells() {
+        let galaxy = moving_galaxy();
+        let sun = GalacticPosition::from_light_years([0.0, 26_000.0, 20.0]).unwrap();
+        let mut cell = Vec::new();
+        let year = |y| UniverseTime::from_julian_years(y).unwrap();
+        let cases = [
+            ([0, 968, 3], (0, 100), 30_000.0, 1),
+            ([0, 0, -56], (-100, 100), 30_000.0, 37),
+        ];
+        for (source_cell, (from, to), reach, every) in cases {
+            generate_cell(
+                galaxy,
+                CellKey::new(Layer::C, source_cell).unwrap(),
+                &mut cell,
+            );
+            let source = cell.first().unwrap().id();
+            let query = LensQuery::builder(
+                LensSightline::new(sun, source),
+                TimeWindow::new(year(from), year(to)).unwrap(),
+            )
+            .max_impact(reach)
+            .build()
+            .unwrap();
+            let plan = LensWalkPlan::new(galaxy, &query).unwrap();
+            let cells: Vec<CellKey> = plan.cells().iter().copied().step_by(every).collect();
+            let walked = plan.walk(galaxy, &mut NoCache::new(), &cells);
+            let whole = walk_whole(galaxy, &plan, &cells);
+            assert_eq!(walked, whole, "{source_cell:?}");
+            println!(
+                "{source_cell:?}: {} cells, {} systems, {} candidates",
+                walked.cells,
+                walked.systems_examined,
+                walked.candidates.len()
+            );
+            assert!(!walked.candidates.is_empty(), "{source_cell:?}");
         }
     }
 

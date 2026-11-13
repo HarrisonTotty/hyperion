@@ -36,47 +36,89 @@
 //! bytes, and the count and length checks catch the server's own bugs. The frames are not a type
 //! here, since this crate holds JSON wire types.
 
+mod alerts;
 mod bulk;
 mod envelope;
+mod features;
 mod galaxy;
+mod global_list;
 mod modelled;
+mod observe;
 mod orbit;
 mod planetary;
 mod primitives;
 mod scene;
 mod sky;
 mod stellar;
+mod surface;
 #[cfg(test)]
 pub(crate) mod testing;
 mod universe;
+mod viewer;
 
+pub use alerts::{
+    AlertBandDto, AlertsAcknowledgeRequest, AlertsNotification, AlertsObserverRequest,
+    AlertsSubscribeRequest, AlertsSubscribed, BandLimitsDto, BearingContactDto, BearingDto,
+    BearingFrameDto, ClassCensusDto, ClassCensusStatusDto, ContactDto, DetectionPhaseDto,
+    ResolvedContactDto, SensorDto, TransientKindDto,
+};
 pub use bulk::BulkManifestDto;
 pub use envelope::{
     ClientMessage, ErrorCode, NotificationBody, REQUEST_KINDS, RequestBody, RequestError,
     RequestId, ResponseBody, ServerMessage, SubscribeRequest, Subscribed, SubscriptionState,
     SubscriptionTopic, UnsubscribeRequest,
 };
+pub use features::{
+    AssociationStructure, BlackHoleLuminosityWire, BlackHoleState, BlackHoleStateRequest,
+    BrightShell, CatalogueClassWire, CentreStructure, CentreTracerWire, ClassCountWire,
+    ClassKindWire, CloudStructure, ClusterStructure, DisruptionOutcomeWire, EmissionClassWire,
+    FeatureDetail, FeatureDetailRequest, FeatureKindCensus, FeatureKindStatus, FeatureKindWire,
+    FeatureStructure, FeatureSummary, FeaturesInRange, FeaturesInRangeRequest, GalaxyFeatures,
+    GalaxyFeaturesRequest, GenerationWire, MapFeatureKindWire, MapFeatureList, MapFeatures,
+    MapShells, MemberClassWire, MultiplicityWire, PulsarWindNebulaWire, RemnantSummary,
+    ShellEmissionWire, ShellPhaseWire, ShellSummary, SupernovaStateWire, SystemOriginWire,
+    TidalDisruptionWire,
+};
 pub use galaxy::{
-    Census, DensityMap, DensityMapRequest, GalaxyParameters, GalaxyParametersRequest, LayerCensus,
+    Census, DensityMap, DensityMapRequest, ExtinctionMap, ExtinctionMapRequest, ExtinctionRequest,
+    ExtinctionResult, ExtinctionTarget, GalaxyParameters, GalaxyParametersRequest, LayerCensus,
     LayerStatus, MapPopulation, MapView, MassLayer, Parameter, ParameterGroup, ParameterOrigin,
-    ParameterValue, Population, SystemRecord, SystemsInRange, SystemsInRangeRequest, Unit,
+    ParameterValue, PlacementKind, Population, SystemRecord, SystemsInRange, SystemsInRangeRequest,
+    TargetExtinction, Unit,
+};
+pub use global_list::{
+    AccretedProgenitorWire, GlobalEntryWire, GlobalFeatures, GlobalFeaturesRequest,
+    ProgenitorKindWire, ShellWire, StreamTrackRequest, StreamTrackWire, TrackPointWire,
+    TrackStatusWire, TrackWire,
 };
 pub use modelled::Modelled;
+pub use observe::{ObservedDto, QueryModeDto, ResolveSystemRequest, ResolvedSystem};
 pub use orbit::{HierarchyDto, HierarchyNodeDto, OrbitDto};
 pub use planetary::{
-    ArchitectureClassDto, BandsDto, BeltComponentDto, BeltCompositionDto, BeltDto, BeltGapDto,
-    BeltKindDto, BeltSiteDto, BodyDetailDto, BodyDetailRequest, BodyEventDto, BodyEventsDto,
-    BodyEventsRequest, BodyFigureDto, BodyHooksDto, BodyKindDto, BodyOrbitDto, BodyPhotometryDto,
-    BodyRecordDto, BodyRotationDto, BodyStateDto, BodySummaryDto, BodySurfaceDto,
-    BulkPropertiesDto, CometaryHaloDto, DestructionCauseDto, DetailLevelDto, FigureDatumDto,
-    FigureLawDto, HabitableZoneDto, MassFractionsDto, MoonOriginDto, OrbitDriftDto, OrbitHostDto,
-    PhaseTemplateDto, PlanetClassDto, PopulationDto, RingDto, RingGapDto, RingKindDto,
-    RingMaterialDto, SectionDto, SpinResonanceDto, SystemBodiesDto, SystemBodiesRequest,
-    SystemPlaneDto, ZoneDto,
+    AbsorberDto, AerosolInventoryDto, AerosolModeDto, AerosolNotModelledDto, AerosolShapeDto,
+    AerosolTauBasisDto, ArchitectureClassDto, BandsDto, BeltComponentDto, BeltCompositionDto,
+    BeltDto, BeltGapDto, BeltKindDto, BeltSiteDto, BiosphereDto, BiosphereFluxDto, BodyDetailDto,
+    BodyDetailRequest, BodyEnvelopeDto, BodyEventDto, BodyEventsDto, BodyEventsRequest,
+    BodyFigureDto, BodyHooksDto, BodyKindDto, BodyOrbitDto, BodyPhotometryDto, BodyRecordDto,
+    BodyRotationDto, BodyStateDto, BodySummaryDto, BodySurfaceDto, BulkPropertiesDto,
+    ClimateForcingDto, ClimateRegimeDto, CometEventDto, CometTrackPointDto, CometaryHaloDto,
+    CondensateDeckDto, CraterContractDto, CraterScreeningDto, CraterTargetClassDto,
+    CrustCompositionDto, CrustLidDto, DebrisDiscDto, DestructionCauseDto, DetailLevelDto,
+    DiscGapDto, FigureDatumDto, FigureLawDto, GasShareDto, GuillotProfileDto, HabitabilityClassDto,
+    HabitabilityDto, HabitabilityLimitDto, HabitableZoneDto, MagneticFieldClassDto,
+    MassFractionsDto, MixingRatioNodeDto, MoonOriginDto, NotFormedCondensateDto,
+    NotFormedReasonDto, OceanFloorDto, OrbitDriftDto, OrbitHostDto, PhaseTemplateDto,
+    PlanetClassDto, PopulationDto, ProfileNodeDto, ProtoplanetaryDiscDto, RadiationClassDto,
+    RadioisotopesDto, RedoxClassDto, ResourceAbundancesDto, RingDto, RingGapDto, RingKindDto,
+    RingMaterialDto, SectionDto, SilicateVapourDto, SizeDistributionDto, SpinResonanceDto,
+    StormBandDto, SubstanceAreaDto, SubstancePhaseDto, SubsurfaceOceanDto, SurfaceCondensateDto,
+    SurfaceMaterialDto, SurfaceModifiersDto, SurfaceStateDto, SystemBodiesDto, SystemBodiesRequest,
+    SystemPlaneDto, TaxonomicClassDto, TectonicRegimeDto, ThermalRegimeDto, VerticalStructureDto,
+    WetEpochDto, ZoneDto,
 };
 pub use primitives::{
-    BodyIdHex, DetailSeedHex, GalacticPosition, ParseBodyIdHexError, ParseHex64Error, SeedHex,
-    SystemIdHex, UniverseIdHex, UniverseTime,
+    BodyIdHex, DetailSeedHex, EventIdHex, FeatureIdHex, GalacticPosition, ParseBodyIdHexError,
+    ParseEventIdHexError, ParseHex64Error, SeedHex, SystemIdHex, UniverseIdHex, UniverseTime,
 };
 pub use scene::{
     BodyGrantDto, CameraReportDto, FramePositionDto, KinematicsDto, SceneArrivalDto, SceneBodyDto,
@@ -85,9 +127,9 @@ pub use scene::{
     SeenPositionDto, SystemPlaceDto,
 };
 pub use sky::{
-    BandSpecDto, ConeDto, EyeDto, HostDiscDto, MAX_CUT_V, MAX_SKY_STARS, PowerTwoDto,
-    SKY_BAKE_BINS, SKY_STAR_BYTES, SKY_TEXEL_BYTES, SkyGapDto, SkyLayerCensusDto, SkyRequest,
-    SkyResponse,
+    BandSpecDto, ConeDto, EyeDto, HostDiscDto, HostDiscsDto, HostDiscsRequest, MAX_CUT_V,
+    MAX_SKY_STARS, PowerTwoDto, SKY_BAKE_BINS, SKY_STAR_BYTES, SKY_TEXEL_BYTES, SkyGapDto,
+    SkyLayerCensusDto, SkyRequest, SkyResponse,
 };
 pub use stellar::{
     BinaryClassDto, CataclysmicKindDto, HighMassXrayBinaryKindDto, KickModeDto, NatalKickDto,
@@ -95,8 +137,18 @@ pub use stellar::{
     StarEventKindDto, StarSummaryDto, StellarBriefDto, SystemExistenceDto, SystemSummaryDto,
     SystemSummaryRequest, VariabilityDto, VariableKindDto, XrayBinaryKindDto,
 };
+pub use surface::{
+    CellRangeDto, ClimateModelDto, CoverDto, CoverRangeDto, LiquidBasisDto, LiquidDto,
+    PaletteEntryDto, PaletteRoleDto, PrecipitationSourceDto, RecordSectionDto, SURFACE_LIQUID_BINS,
+    SurfaceFieldDto, SurfaceFieldRequest, SurfaceHeaderDto, SurfaceRevisionDto, SurveyPassDto,
+    SurveyPassRequest, SurveyScopeDto, SurveySourceDto,
+};
 pub use universe::{
     CreateUniverseRequest, OpenUniverseRequest, UniverseInfo, UniverseList, UniverseStatus,
+};
+pub use viewer::{
+    PlanetInputsDto, ViewerDrawDto, ViewerDrawnDto, ViewerInputsRequest, ViewerPlanetDto,
+    ViewerPlanetRequest, ViewerRandomizeRequest, ViewerReadDto,
 };
 
 /// The version of the wire protocol, sent in every `welcome`.
@@ -121,7 +173,60 @@ pub use universe::{
 /// them is ever sent unasked; `crates/hyperion-server/tests/websocket.rs`'s
 /// `a_client_that_asks_for_no_push_and_no_bulk_receives_only_known_text_frames` pins it (open
 /// question 21, closed 2026-09-30 by a delegated decision).
-pub const PROTOCOL_VERSION: u32 = 2;
+///
+/// Giving a body's surface section its form (galaxy plan 14, P14.T35.e) leaves it at 2 as well:
+/// `BodySurfaceDto` had no value before, so no build sent an `ok` surface, and the first build that
+/// sends one sets its shape, while `not_resolved`, `not_modelled` and `not_applicable` keep their
+/// bytes and meanings; the new `envelope` is an optional field, read absent as `not_modelled`. That
+/// holds because both readers ignore what they do not know: serde an unknown field, since no wire
+/// type is `deny_unknown_fields`, and the client, whose decoder trusts the generated types and
+/// whose adapters read named fields only. A wire type made to refuse unknown fields, or a client
+/// check that refused an unknown key, would end it and so would bump the version; and a wire
+/// type's shape is frozen from the first build that sends a value of it
+/// (`decision-p14-t35e-wire.md`; galaxy plan 04's Design note 15).
+///
+/// An enum that galaxy plan 04's reserved list names as growing (`MassLayer`, `Population`,
+/// `LayerStatus`, `Unit`, `ErrorCode`, plan 09's `SystemOriginWire`, `CatalogueClassWire` and
+/// `MemberClassWire`, and plan 14's `PopulationDto`, `HabitabilityLimitDto`, `SurfaceStateDto` and
+/// `DestructionCauseDto`)
+/// takes a new string without a bump, as `MassLayer` took `brown_dwarf` and `rogue_planet` and
+/// `Unit` takes `per_cm3`, `k_per_cm3` and `mag` for the gas
+/// parameters (galaxy plan 07, P07.T10.b): every string a build already sends keeps its bytes and
+/// its meaning, and a client that does not know the new one misreads nothing (one built before
+/// P07.T10.b leaves the value's cells empty, one built since shows it Missing). Every other enum
+/// is closed: it carries all its variants from the first build that sends a value of it, and a
+/// variant added after that bumps (`decision-gg-port-d0.md` §1).
+///
+/// A defaulted field is an optional one: `mode` on `systems_in_range` and `resolve_system`
+/// (galaxy plan 12, P12.T6) and on `system_summary` (P12.T6.b) reads absent as `now`, so a request
+/// built before it is answered as before; a server built before it ignores the field and answers
+/// `now`, so a client reads an answer without `observed`, a row or a summary, as not observed,
+/// whatever it asked.
+///
+/// Version 3 added `stripped_helium_star` to [`ObjectKindDto`] (galaxy plan 06, P06.T24.c): a
+/// naked helium star between the hot subdwarfs, which end at 1.7 M☉, and the Wolf-Rayet stars,
+/// which a version 2 server sent as `hot_subdwarf`. `ObjectKindDto` is closed, so the new string
+/// bumps the version (`decision-gg-port-d0.md` §1, `decision-stripped-star-class.md` §2.5): a
+/// version 2 client could not place it on its chart, its legend or its H-R diagram, and a version
+/// 2 and a version 3 build read each other as incompatible. The rulings above that left the
+/// version at 2 hold at 3 as they did at 2.
+///
+/// Giving the alerts' census its `unwalked` status and an optional `expected_hosts` (galaxy plan
+/// 12, P12.T8.b) leaves it at 3: P12.T9.a's build answered every census empty, so no build sent a
+/// `ClassCensusDto`, and the first that sends one sets its shape, as the surface section's did.
+///
+/// Giving a range row its `placement` (galaxy plan 08, P08.T15.a) leaves it at 3 as well: it is an
+/// optional field, absent from every row of a server built before it and of a galaxy below
+/// generator version 26, which a client reads as a row that does not say, and an older client
+/// ignores it. [`PlacementKind`] is closed, and carries every one of the sim's placement classes
+/// from the first build that sends a value of it.
+///
+/// So does [`MapPopulation`]'s `layer_e_remnants` (galaxy plan 08, P08.T15.b), although the enum is
+/// closed and sent: a server sends the string only in the map answering a request that names it,
+/// which no client built before it asks, as `partial_response` is sent only in answer to a `sky`;
+/// a server built before it refuses such a request as `bad_request`, which the client shows as the
+/// map's refusal.
+pub const PROTOCOL_VERSION: u32 = 3;
 
 #[cfg(test)]
 mod tests {
@@ -156,7 +261,7 @@ mod tests {
     }
 
     #[test]
-    fn protocol_version_is_two() {
-        assert_eq!(PROTOCOL_VERSION, 2);
+    fn protocol_version_is_three() {
+        assert_eq!(PROTOCOL_VERSION, 3);
     }
 }

@@ -1,0 +1,5978 @@
+# generator_version = 31
+# features in range, epoch
+{
+  "type": "response",
+  "id": 2,
+  "body": {
+    "kind": "features_in_range",
+    "universe": "5eed000000000001",
+    "centre": {
+      "cell_ly": [
+        0,
+        26000,
+        0
+      ],
+      "offset_m": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "radius_ly": 300.0,
+    "time": {
+      "seconds": 0,
+      "nanos": 0
+    },
+    "census": [
+      {
+        "kind": "globular",
+        "returned": 0,
+        "status": "included"
+      },
+      {
+        "kind": "open_cluster",
+        "returned": 3,
+        "status": "included"
+      },
+      {
+        "kind": "association",
+        "returned": 27,
+        "status": "included"
+      },
+      {
+        "kind": "star_forming_region",
+        "returned": 3,
+        "status": "included"
+      },
+      {
+        "kind": "molecular_cloud",
+        "returned": 0,
+        "status": "included"
+      },
+      {
+        "kind": "galactic_centre",
+        "returned": 0,
+        "status": "included"
+      },
+      {
+        "kind": "stream",
+        "returned": 0,
+        "status": "not_generated"
+      },
+      {
+        "kind": "dwarf_core",
+        "returned": 0,
+        "status": "not_generated"
+      }
+    ],
+    "features": [
+      {
+        "id": "e859e06780000000",
+        "designation": "GPF F207",
+        "kind": "open_cluster",
+        "position": {
+          "cell_ly": [
+            106,
+            26115,
+            -22
+          ],
+          "offset_m": [
+            6814297182197701.0,
+            1813335634579622.8,
+            2887324945430551.5
+          ]
+        },
+        "extent_ly": 26.907211220412645,
+        "age_myr": 8.408509092144168,
+        "mass_msun": 267.61955894113163,
+        "expected_members": 424.67306095087673,
+        "emission": null,
+        "bubble_radius_ly": 98.51478945481962
+      },
+      {
+        "id": "e85a00a800000000",
+        "designation": "GPG F336",
+        "kind": "star_forming_region",
+        "position": {
+          "cell_ly": [
+            33,
+            26169,
+            66
+          ],
+          "offset_m": [
+            6126530108715611.0,
+            5041680142170773.0,
+            9060956692137820.0
+          ]
+        },
+        "extent_ly": 10.786549084657327,
+        "age_myr": 3.1733891583230527,
+        "mass_msun": 112.27919737982515,
+        "expected_members": 0.0,
+        "emission": "reflection_nebula",
+        "bubble_radius_ly": null
+      },
+      {
+        "id": "e859e05c80000000",
+        "designation": "GPF F185",
+        "kind": "association",
+        "position": {
+          "cell_ly": [
+            62,
+            26172,
+            -83
+          ],
+          "offset_m": [
+            4305801520658463.0,
+            4009220236013484.0,
+            6181868922170078.0
+          ]
+        },
+        "extent_ly": 143.56765209223417,
+        "age_myr": 22.55235771667973,
+        "mass_msun": 131.80975619877387,
+        "expected_members": 0.0,
+        "emission": null,
+        "bubble_radius_ly": 68.10220229301876
+      },
+      {
+        "id": "e7d9e07480000000",
+        "designation": "FPF F233",
+        "kind": "association",
+        "position": {
+          "cell_ly": [
+            -3,
+            25849,
+            -138
+          ],
+          "offset_m": [
+            489301667354475.3,
+            1200977958959833.0,
+            5027032335041732.0
+          ]
+        },
+        "extent_ly": 117.93529015397375,
+        "age_myr": 59.3773394644437,
+        "mass_msun": 138.57431851847002,
+        "expected_members": 0.0,
+        "emission": null,
+        "bubble_radius_ly": null
+      },
+      {
+        "id": "e85a003c00000000",
+        "designation": "GPG F120",
+        "kind": "association",
+        "position": {
+          "cell_ly": [
+            3,
+            26176,
+            149
+          ],
+          "offset_m": [
+            23835231232127.145,
+            7874436708724286.0,
+            6641348219986791.0
+          ]
+        },
+        "extent_ly": 109.26573828719597,
+        "age_myr": 61.48206554465321,
+        "mass_msun": 419.1262629904886,
+        "expected_members": 0.0,
+        "emission": null,
+        "bubble_radius_ly": null
+      },
+      {
+        "id": "e7d9e0c980000000",
+        "designation": "FPF F403",
+        "kind": "association",
+        "position": {
+          "cell_ly": [
+            -160,
+            25824,
+            -29
+          ],
+          "offset_m": [
+            4123338197768799.0,
+            855326804391707.6,
+            2660439838561309.5
+          ]
+        },
+        "extent_ly": 68.14851848585813,
+        "age_myr": 9.468310755105797,
+        "mass_msun": 148.33349762615774,
+        "expected_members": 0.0,
+        "emission": null,
+        "bubble_radius_ly": 66.07963712688982
+      },
+      {
+        "id": "e85a00cc80000000",
+        "designation": "GPG F409",
+        "kind": "star_forming_region",
+        "position": {
+          "cell_ly": [
+            208,
+            26048,
+            128
+          ],
+          "offset_m": [
+            5598816893358759.0,
+            1390924482804685.0,
+            2995649546217557.5
+          ]
+        },
+        "extent_ly": 16.579367943733505,
+        "age_myr": 4.087148139815623,
+        "mass_msun": 155.44519610828394,
+        "expected_members": 0.0,
+        "emission": "reflection_nebula",
+        "bubble_radius_ly": 73.42650236917346
+      },
+      {
+        "id": "e859e03a00000000",
+        "designation": "GPF F116",
+        "kind": "association",
+        "position": {
+          "cell_ly": [
+            108,
+            25945,
+            -225
+          ],
+          "offset_m": [
+            3075075642325704.0,
+            3020262226119459.0,
+            5387757020800701.0
+          ]
+        },
+        "extent_ly": 150.0,
+        "age_myr": 39.41366451137882,
+        "mass_msun": 155.38311621007756,
+        "expected_members": 0.0,
+        "emission": null,
+        "bubble_radius_ly": 76.79763300889658
+      },
+      {
+        "id": "e7da008180000000",
+        "designation": "FPG F259",
+        "kind": "star_forming_region",
+        "position": {
+          "cell_ly": [
+            -217,
+            26139,
+            32
+          ],
+          "offset_m": [
+            7584498326139722.0,
+            2469514480413509.5,
+            3521973250643365.0
+          ]
+        },
+        "extent_ly": 6.834072049475835,
+        "age_myr": 3.2721373364336657,
+        "mass_msun": 246.70221073264605,
+        "expected_members": 0.0,
+        "emission": "hii_region",
+        "bubble_radius_ly": 89.57570439900219
+      },
+      {
+        "id": "e7da00d300000000",
+        "designation": "FPG F422",
+        "kind": "association",
+        "position": {
+          "cell_ly": [
+            -219,
+            26133,
+            122
+          ],
+          "offset_m": [
+            4190587940485828.0,
+            2143394359688291.5,
+            4020150604218896.5
+          ]
+        },
+        "extent_ly": 70.81666997751788,
+        "age_myr": 38.58887206578429,
+        "mass_msun": 150.71445189213446,
+        "expected_members": 0.0,
+        "emission": null,
+        "bubble_radius_ly": 74.29768451377667
+      },
+      {
+        "id": "e7d9e03c00000000",
+        "designation": "FPF F120",
+        "kind": "open_cluster",
+        "position": {
+          "cell_ly": [
+            -71,
+            25760,
+            -153
+          ],
+          "offset_m": [
+            8598703959668776.0,
+            2918609464156584.0,
+            7529152813302044.0
+          ]
+        },
+        "extent_ly": 15.607251366671505,
+        "age_myr": 75.42755801673007,
+        "mass_msun": 53.68786674197775,
+        "expected_members": 321.9507263322321,
+        "emission": null,
+        "bubble_radius_ly": null
+      },
+      {
+        "id": "e7da008380000000",
+        "designation": "FPG F263",
+        "kind": "association",
+        "position": {
+          "cell_ly": [
+            -292,
+            26040,
+            35
+          ],
+          "offset_m": [
+            6810460220391403.0,
+            5733389350492143.0,
+            3897871317573011.5
+          ]
+        },
+        "extent_ly": 21.095057135707368,
+        "age_myr": 11.950354225038065,
+        "mass_msun": 158.0922660776969,
+        "expected_members": 0.0,
+        "emission": null,
+        "bubble_radius_ly": 72.34969848391724
+      },
+      {
+        "id": "e85a00c380000000",
+        "designation": "GPG F391",
+        "kind": "open_cluster",
+        "position": {
+          "cell_ly": [
+            36,
+            26206,
+            222
+          ],
+          "offset_m": [
+            7847450940195368.0,
+            8036291244391732.0,
+            7411003953154061.0
+          ]
+        },
+        "extent_ly": 22.6427678337899,
+        "age_myr": 81.1536916207397,
+        "mass_msun": 158.33859466338401,
+        "expected_members": 588.7022290949755,
+        "emission": null,
+        "bubble_radius_ly": null
+      },
+      {
+        "id": "e85a006780000000",
+        "designation": "GPG F207",
+        "kind": "association",
+        "position": {
+          "cell_ly": [
+            239,
+            26186,
+            77
+          ],
+          "offset_m": [
+            8455937572785085.0,
+            4384006347989856.0,
+            5874004726754206.0
+          ]
+        },
+        "extent_ly": 92.5193732099583,
+        "age_myr": 18.898129592590863,
+        "mass_msun": 138.7236796310171,
+        "expected_members": 0.0,
+        "emission": null,
+        "bubble_radius_ly": 69.63803763696038
+      },
+      {
+        "id": "e7d9e0c900000000",
+        "designation": "FPF F402",
+        "kind": "association",
+        "position": {
+          "cell_ly": [
+            -292,
+            26107,
+            -54
+          ],
+          "offset_m": [
+            4638000972154305.0,
+            7117598279649315.0,
+            4273937744842514.5
+          ]
+        },
+        "extent_ly": 150.0,
+        "age_myr": 76.36436894548524,
+        "mass_msun": 313.21577488678787,
+        "expected_members": 0.0,
+        "emission": null,
+        "bubble_radius_ly": null
+      },
+      {
+        "id": "e85a010900000000",
+        "designation": "GPG F530",
+        "kind": "association",
+        "position": {
+          "cell_ly": [
+            192,
+            25735,
+            8
+          ],
+          "offset_m": [
+            869490455204198.9,
+            6559070329217107.0,
+            3266103891463669.0
+          ]
+        },
+        "extent_ly": 52.82086204662667,
+        "age_myr": 9.011037437136846,
+        "mass_msun": 12319.572113971775,
+        "expected_members": 0.0,
+        "emission": "hii_region",
+        "bubble_radius_ly": 525.7361812616494
+      },
+      {
+        "id": "e7d9e09700000000",
+        "designation": "FPF F302",
+        "kind": "association",
+        "position": {
+          "cell_ly": [
+            -89,
+            25882,
+            -297
+          ],
+          "offset_m": [
+            7128060752179543.0,
+            6422525073371214.0,
+            1719346397286040.8
+          ]
+        },
+        "extent_ly": 82.47372160661527,
+        "age_myr": 21.470227746937827,
+        "mass_msun": 149.27393372751584,
+        "expected_members": 0.0,
+        "emission": null,
+        "bubble_radius_ly": 77.27405761318168
+      },
+      {
+        "id": "e7d9e0e500000000",
+        "designation": "FPF F458",
+        "kind": "association",
+        "position": {
+          "cell_ly": [
+            -291,
+            26002,
+            -197
+          ],
+          "offset_m": [
+            3056839641835694.5,
+            2871470589604993.5,
+            7239600522094977.0
+          ]
+        },
+        "extent_ly": 150.0,
+        "age_myr": 65.39557534493252,
+        "mass_msun": 276.36399177226076,
+        "expected_members": 0.0,
+        "emission": null,
+        "bubble_radius_ly": null
+      },
+      {
+        "id": "e85a014600000000",
+        "designation": "GPG F652",
+        "kind": "association",
+        "position": {
+          "cell_ly": [
+            286,
+            25822,
+            98
+          ],
+          "offset_m": [
+            2886840065435619.0,
+            2508330816468455.0,
+            8050897308695812.0
+          ]
+        },
+        "extent_ly": 150.0,
+        "age_myr": 35.976744594972345,
+        "mass_msun": 134.10744488379282,
+        "expected_members": 0.0,
+        "emission": null,
+        "bubble_radius_ly": 61.567247642511234
+      },
+      {
+        "id": "e7d9e02e00000000",
+        "designation": "FPF F92",
+        "kind": "association",
+        "position": {
+          "cell_ly": [
+            -64,
+            25652,
+            -33
+          ],
+          "offset_m": [
+            2901863378196608.0,
+            5656285885287189.0,
+            8339942233016564.0
+          ]
+        },
+        "extent_ly": 150.0,
+        "age_myr": 43.33675915150634,
+        "mass_msun": 3203.2999975891485,
+        "expected_members": 0.0,
+        "emission": null,
+        "bubble_radius_ly": null
+      },
+      {
+        "id": "e7d9e03b00000000",
+        "designation": "FPF F118",
+        "kind": "association",
+        "position": {
+          "cell_ly": [
+            -286,
+            25825,
+            -139
+          ],
+          "offset_m": [
+            3228675206631617.5,
+            5688345997928400.0,
+            2370992103507957.0
+          ]
+        },
+        "extent_ly": 138.70706573999672,
+        "age_myr": 22.425617537413192,
+        "mass_msun": 126.27944367207458,
+        "expected_members": 0.0,
+        "emission": null,
+        "bubble_radius_ly": 65.56949726150746
+      },
+      {
+        "id": "e7da001b80000000",
+        "designation": "FPG F55",
+        "kind": "association",
+        "position": {
+          "cell_ly": [
+            -130,
+            25693,
+            156
+          ],
+          "offset_m": [
+            7350088136473549.0,
+            5016610029622426.0,
+            4206786513361624.5
+          ]
+        },
+        "extent_ly": 150.0,
+        "age_myr": 46.933226130215395,
+        "mass_msun": 800.3953059391621,
+        "expected_members": 0.0,
+        "emission": null,
+        "bubble_radius_ly": null
+      },
+      {
+        "id": "e7d9e0bd80000000",
+        "designation": "FPF F379",
+        "kind": "association",
+        "position": {
+          "cell_ly": [
+            -215,
+            26234,
+            -194
+          ],
+          "offset_m": [
+            49722686666747.1,
+            5191684457099793.0,
+            3679541043880517.5
+          ]
+        },
+        "extent_ly": 150.0,
+        "age_myr": 62.416796841809294,
+        "mass_msun": 901.0225627721741,
+        "expected_members": 0.0,
+        "emission": null,
+        "bubble_radius_ly": null
+      },
+      {
+        "id": "e7d9e0e480000000",
+        "designation": "FPF F457",
+        "kind": "association",
+        "position": {
+          "cell_ly": [
+            -345,
+            25967,
+            -143
+          ],
+          "offset_m": [
+            2340733692441905.5,
+            7283095792634200.0,
+            1003420250143239.6
+          ]
+        },
+        "extent_ly": 75.3594580250789,
+        "age_myr": 28.02063333464382,
+        "mass_msun": 369.7127935349965,
+        "expected_members": 0.0,
+        "emission": null,
+        "bubble_radius_ly": 116.29242326466029
+      },
+      {
+        "id": "e85a00c980000000",
+        "designation": "GPG F403",
+        "kind": "association",
+        "position": {
+          "cell_ly": [
+            365,
+            25972,
+            98
+          ],
+          "offset_m": [
+            3812445783313788.5,
+            7013257848244886.0,
+            8350015535159340.0
+          ]
+        },
+        "extent_ly": 150.0,
+        "age_myr": 70.3235500110231,
+        "mass_msun": 299.9241505278145,
+        "expected_members": 0.0,
+        "emission": null,
+        "bubble_radius_ly": null
+      },
+      {
+        "id": "e859e10180000000",
+        "designation": "GPF F515",
+        "kind": "association",
+        "position": {
+          "cell_ly": [
+            31,
+            25618,
+            -75
+          ],
+          "offset_m": [
+            4721041742124311.0,
+            2108840458967539.2,
+            2119039516812575.0
+          ]
+        },
+        "extent_ly": 150.0,
+        "age_myr": 32.55071501462572,
+        "mass_msun": 137.70175548180833,
+        "expected_members": 0.0,
+        "emission": null,
+        "bubble_radius_ly": 53.472279573648436
+      },
+      {
+        "id": "e85a00e500000000",
+        "designation": "GPG F458",
+        "kind": "association",
+        "position": {
+          "cell_ly": [
+            35,
+            26342,
+            190
+          ],
+          "offset_m": [
+            2895293164561921.0,
+            7174040193897473.0,
+            2661053399703552.5
+          ]
+        },
+        "extent_ly": 150.0,
+        "age_myr": 42.73752942811598,
+        "mass_msun": 111.59566037622969,
+        "expected_members": 0.0,
+        "emission": null,
+        "bubble_radius_ly": null
+      },
+      {
+        "id": "e85a009480000000",
+        "designation": "GPG F297",
+        "kind": "association",
+        "position": {
+          "cell_ly": [
+            284,
+            26083,
+            259
+          ],
+          "offset_m": [
+            9343216388692038.0,
+            6914772334386553.0,
+            4787773332681429.0
+          ]
+        },
+        "extent_ly": 150.0,
+        "age_myr": 51.38590201472606,
+        "mass_msun": 875.4862943840624,
+        "expected_members": 0.0,
+        "emission": null,
+        "bubble_radius_ly": null
+      },
+      {
+        "id": "e85a00c880000000",
+        "designation": "GPG F401",
+        "kind": "association",
+        "position": {
+          "cell_ly": [
+            402,
+            25899,
+            51
+          ],
+          "offset_m": [
+            4969198928345793.0,
+            3605303103939212.0,
+            2159269319381503.8
+          ]
+        },
+        "extent_ly": 150.0,
+        "age_myr": 55.39761567430818,
+        "mass_msun": 100.18434515176324,
+        "expected_members": 0.0,
+        "emission": null,
+        "bubble_radius_ly": null
+      },
+      {
+        "id": "e859e13880000000",
+        "designation": "GPF F625",
+        "kind": "association",
+        "position": {
+          "cell_ly": [
+            270,
+            26313,
+            -71
+          ],
+          "offset_m": [
+            7330891013656305.0,
+            6075421303106670.0,
+            7562750843496721.0
+          ]
+        },
+        "extent_ly": 150.0,
+        "age_myr": 45.699300268977495,
+        "mass_msun": 118.25963235867489,
+        "expected_members": 0.0,
+        "emission": null,
+        "bubble_radius_ly": null
+      },
+      {
+        "id": "e859e03180000000",
+        "designation": "GPF F99",
+        "kind": "association",
+        "position": {
+          "cell_ly": [
+            312,
+            26171,
+            -240
+          ],
+          "offset_m": [
+            3709697993364303.0,
+            7580034172091150.0,
+            7838314982826646.0
+          ]
+        },
+        "extent_ly": 150.0,
+        "age_myr": 47.36242775134177,
+        "mass_msun": 488.4237912628749,
+        "expected_members": 0.0,
+        "emission": null,
+        "bubble_radius_ly": null
+      },
+      {
+        "id": "e85a012280000000",
+        "designation": "GPG F581",
+        "kind": "association",
+        "position": {
+          "cell_ly": [
+            217,
+            25629,
+            4
+          ],
+          "offset_m": [
+            9070761864000786.0,
+            5657545939470532.0,
+            4236598722015517.5
+          ]
+        },
+        "extent_ly": 150.0,
+        "age_myr": 65.69457456715169,
+        "mass_msun": 204.2793940736621,
+        "expected_members": 0.0,
+        "emission": null,
+        "bubble_radius_ly": null
+      },
+      {
+        "id": "e7d9e12100000000",
+        "designation": "FPF F578",
+        "kind": "association",
+        "position": {
+          "cell_ly": [
+            -226,
+            25622,
+            -83
+          ],
+          "offset_m": [
+            8681180420263160.0,
+            1161451727807245.8,
+            7980444826486731.0
+          ]
+        },
+        "extent_ly": 150.0,
+        "age_myr": 75.07001826695704,
+        "mass_msun": 161.78916426877686,
+        "expected_members": 0.0,
+        "emission": null,
+        "bubble_radius_ly": null
+      }
+    ]
+  }
+}
+# features in range, +1,000 yr
+{
+  "type": "response",
+  "id": 3,
+  "body": {
+    "kind": "features_in_range",
+    "universe": "5eed000000000001",
+    "centre": {
+      "cell_ly": [
+        0,
+        26000,
+        0
+      ],
+      "offset_m": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "radius_ly": 300.0,
+    "time": {
+      "seconds": 31557600000,
+      "nanos": 0
+    },
+    "census": [
+      {
+        "kind": "globular",
+        "returned": 0,
+        "status": "included"
+      },
+      {
+        "kind": "open_cluster",
+        "returned": 3,
+        "status": "included"
+      },
+      {
+        "kind": "association",
+        "returned": 27,
+        "status": "included"
+      },
+      {
+        "kind": "star_forming_region",
+        "returned": 3,
+        "status": "included"
+      },
+      {
+        "kind": "molecular_cloud",
+        "returned": 0,
+        "status": "included"
+      },
+      {
+        "kind": "galactic_centre",
+        "returned": 0,
+        "status": "included"
+      },
+      {
+        "kind": "stream",
+        "returned": 0,
+        "status": "not_generated"
+      },
+      {
+        "kind": "dwarf_core",
+        "returned": 0,
+        "status": "not_generated"
+      }
+    ],
+    "features": [
+      {
+        "id": "e859e06780000000",
+        "designation": "GPF F207",
+        "kind": "open_cluster",
+        "position": {
+          "cell_ly": [
+            105,
+            26115,
+            -22
+          ],
+          "offset_m": [
+            8332739237769217.0,
+            2448523891899794.5,
+            2779377850177132.0
+          ]
+        },
+        "extent_ly": 26.907211220412645,
+        "age_myr": 8.409509092144168,
+        "mass_msun": 267.61602556202314,
+        "expected_members": 424.67306095087673,
+        "emission": null,
+        "bubble_radius_ly": 98.51489924789794
+      },
+      {
+        "id": "e85a00a800000000",
+        "designation": "GPG F336",
+        "kind": "star_forming_region",
+        "position": {
+          "cell_ly": [
+            32,
+            26169,
+            66
+          ],
+          "offset_m": [
+            7752235769515156.0,
+            4959503631339340.0,
+            9281404925185330.0
+          ]
+        },
+        "extent_ly": 10.789948147472035,
+        "age_myr": 3.1743891583230526,
+        "mass_msun": 112.27919737982515,
+        "expected_members": 0.0,
+        "emission": "reflection_nebula",
+        "bubble_radius_ly": null
+      },
+      {
+        "id": "e859e05c80000000",
+        "designation": "GPF F185",
+        "kind": "association",
+        "position": {
+          "cell_ly": [
+            61,
+            26172,
+            -83
+          ],
+          "offset_m": [
+            6143685156805944.0,
+            3729911958249794.0,
+            6091477112952270.0
+          ]
+        },
+        "extent_ly": 143.5740180630961,
+        "age_myr": 22.55335771667973,
+        "mass_msun": 131.80975619877387,
+        "expected_members": 0.0,
+        "emission": null,
+        "bubble_radius_ly": 68.10221272209155
+      },
+      {
+        "id": "e7d9e07480000000",
+        "designation": "FPF F233",
+        "kind": "association",
+        "position": {
+          "cell_ly": [
+            -4,
+            25849,
+            -138
+          ],
+          "offset_m": [
+            2120286137862327.2,
+            908146405410336.0,
+            4918065077119232.0
+          ]
+        },
+        "extent_ly": 117.93727635428549,
+        "age_myr": 59.3783394644437,
+        "mass_msun": 138.57431851847002,
+        "expected_members": 0.0,
+        "emission": null,
+        "bubble_radius_ly": null
+      },
+      {
+        "id": "e85a003c00000000",
+        "designation": "GPG F120",
+        "kind": "association",
+        "position": {
+          "cell_ly": [
+            2,
+            26176,
+            149
+          ],
+          "offset_m": [
+            1408371711053126.2,
+            6986753156526426.0,
+            6921569509901334.0
+          ]
+        },
+        "extent_ly": 109.26751548412842,
+        "age_myr": 61.483065544653215,
+        "mass_msun": 419.1262629904886,
+        "expected_members": 0.0,
+        "emission": null,
+        "bubble_radius_ly": null
+      },
+      {
+        "id": "e7d9e0c980000000",
+        "designation": "FPF F403",
+        "kind": "association",
+        "position": {
+          "cell_ly": [
+            -161,
+            25824,
+            -29
+          ],
+          "offset_m": [
+            6127724719822710.0,
+            1213545382803032.0,
+            2724949764356773.5
+          ]
+        },
+        "extent_ly": 68.1557160230164,
+        "age_myr": 9.469310755105797,
+        "mass_msun": 148.33349762615774,
+        "expected_members": 0.0,
+        "emission": null,
+        "bubble_radius_ly": 66.07969508707444
+      },
+      {
+        "id": "e85a00cc80000000",
+        "designation": "GPG F409",
+        "kind": "star_forming_region",
+        "position": {
+          "cell_ly": [
+            207,
+            26048,
+            128
+          ],
+          "offset_m": [
+            8069913396956026.0,
+            1400326177952641.0,
+            2745767169560258.0
+          ]
+        },
+        "extent_ly": 16.58342440740367,
+        "age_myr": 4.088148139815623,
+        "mass_msun": 155.44519610828394,
+        "expected_members": 0.0,
+        "emission": "reflection_nebula",
+        "bubble_radius_ly": 73.42685568393357
+      },
+      {
+        "id": "e859e03a00000000",
+        "designation": "GPF F116",
+        "kind": "association",
+        "position": {
+          "cell_ly": [
+            107,
+            25945,
+            -225
+          ],
+          "offset_m": [
+            4876875114732171.0,
+            2654576728275664.0,
+            5496199274063914.0
+          ]
+        },
+        "extent_ly": 150.0,
+        "age_myr": 39.41466451137882,
+        "mass_msun": 155.38311621007756,
+        "expected_members": 0.0,
+        "emission": null,
+        "bubble_radius_ly": 76.79763684817338
+      },
+      {
+        "id": "e7da008180000000",
+        "designation": "FPG F259",
+        "kind": "star_forming_region",
+        "position": {
+          "cell_ly": [
+            -218,
+            26139,
+            32
+          ],
+          "offset_m": [
+            9081928555080724.0,
+            1848663254083688.0,
+            3624468324427441.0
+          ]
+        },
+        "extent_ly": 6.834072049475835,
+        "age_myr": 3.2731373364336656,
+        "mass_msun": 246.70221073264605,
+        "expected_members": 0.0,
+        "emission": "hii_region",
+        "bubble_radius_ly": 89.57570439900222
+      },
+      {
+        "id": "e7da00d300000000",
+        "designation": "FPG F422",
+        "kind": "association",
+        "position": {
+          "cell_ly": [
+            -220,
+            26133,
+            122
+          ],
+          "offset_m": [
+            5787433450948627.0,
+            2030686355798914.0,
+            4392660838079717.0
+          ]
+        },
+        "extent_ly": 70.81850513532856,
+        "age_myr": 38.58987206578429,
+        "mass_msun": 150.71445189213446,
+        "expected_members": 0.0,
+        "emission": null,
+        "bubble_radius_ly": 74.29768838887455
+      },
+      {
+        "id": "e7d9e03c00000000",
+        "designation": "FPF F120",
+        "kind": "open_cluster",
+        "position": {
+          "cell_ly": [
+            -71,
+            25760,
+            -153
+          ],
+          "offset_m": [
+            1192190447924452.0,
+            2415489130949640.0,
+            7520142319593684.0
+          ]
+        },
+        "extent_ly": 15.607251366671505,
+        "age_myr": 75.42855801673008,
+        "mass_msun": 53.68628839462534,
+        "expected_members": 321.9507263322321,
+        "emission": null,
+        "bubble_radius_ly": null
+      },
+      {
+        "id": "e7da008380000000",
+        "designation": "FPG F263",
+        "kind": "association",
+        "position": {
+          "cell_ly": [
+            -293,
+            26040,
+            35
+          ],
+          "offset_m": [
+            8310030976474635.0,
+            5647002013209528.0,
+            3777037920055678.0
+          ]
+        },
+        "extent_ly": 21.09682236012988,
+        "age_myr": 11.951354225038065,
+        "mass_msun": 158.0922660776969,
+        "expected_members": 0.0,
+        "emission": null,
+        "bubble_radius_ly": 72.34973818442634
+      },
+      {
+        "id": "e85a00c380000000",
+        "designation": "GPG F391",
+        "kind": "open_cluster",
+        "position": {
+          "cell_ly": [
+            36,
+            26206,
+            222
+          ],
+          "offset_m": [
+            194309987196304.0,
+            8389317706391367.0,
+            7312034714213040.0
+          ]
+        },
+        "extent_ly": 22.6427678337899,
+        "age_myr": 81.15469162073971,
+        "mass_msun": 158.33617738710333,
+        "expected_members": 588.7022290949755,
+        "emission": null,
+        "bubble_radius_ly": null
+      },
+      {
+        "id": "e85a006780000000",
+        "designation": "GPG F207",
+        "kind": "association",
+        "position": {
+          "cell_ly": [
+            239,
+            26186,
+            77
+          ],
+          "offset_m": [
+            711590006936314.0,
+            4904681745053656.0,
+            5892124744808208.0
+          ]
+        },
+        "extent_ly": 92.5242688993839,
+        "age_myr": 18.89912959259086,
+        "mass_msun": 138.7236796310171,
+        "expected_members": 0.0,
+        "emission": null,
+        "bubble_radius_ly": 69.63805284432829
+      },
+      {
+        "id": "e7d9e0c900000000",
+        "designation": "FPF F402",
+        "kind": "association",
+        "position": {
+          "cell_ly": [
+            -293,
+            26107,
+            -54
+          ],
+          "offset_m": [
+            6887152890550977.0,
+            6735133003420936.0,
+            4442755057350877.5
+          ]
+        },
+        "extent_ly": 150.0,
+        "age_myr": 76.36536894548524,
+        "mass_msun": 313.21577488678787,
+        "expected_members": 0.0,
+        "emission": null,
+        "bubble_radius_ly": null
+      },
+      {
+        "id": "e85a010900000000",
+        "designation": "GPG F530",
+        "kind": "association",
+        "position": {
+          "cell_ly": [
+            191,
+            25735,
+            8
+          ],
+          "offset_m": [
+            2403692718389079.0,
+            6308256397627692.0,
+            2857616675562972.0
+          ]
+        },
+        "extent_ly": 52.82672384249813,
+        "age_myr": 9.012037437136847,
+        "mass_msun": 12319.572113971775,
+        "expected_members": 0.0,
+        "emission": "hii_region",
+        "bubble_radius_ly": 525.7366908145749
+      },
+      {
+        "id": "e7d9e09700000000",
+        "designation": "FPF F302",
+        "kind": "association",
+        "position": {
+          "cell_ly": [
+            -90,
+            25882,
+            -297
+          ],
+          "offset_m": [
+            9052404453163652.0,
+            6130634655376284.0,
+            1772264987910551.0
+          ]
+        },
+        "extent_ly": 82.47756291293855,
+        "age_myr": 21.471227746937824,
+        "mass_msun": 149.27393372751584,
+        "expected_members": 0.0,
+        "emission": null,
+        "bubble_radius_ly": 77.27407067426238
+      },
+      {
+        "id": "e85a014600000000",
+        "designation": "GPG F652",
+        "kind": "association",
+        "position": {
+          "cell_ly": [
+            285,
+            25822,
+            98
+          ],
+          "offset_m": [
+            4729830387460284.0,
+            2244025539555436.0,
+            7996486890704762.0
+          ]
+        },
+        "extent_ly": 150.0,
+        "age_myr": 35.97774459497234,
+        "mass_msun": 134.10744488379282,
+        "expected_members": 0.0,
+        "emission": null,
+        "bubble_radius_ly": 61.56725133793043
+      },
+      {
+        "id": "e7d9e0e500000000",
+        "designation": "FPF F458",
+        "kind": "association",
+        "position": {
+          "cell_ly": [
+            -292,
+            26002,
+            -197
+          ],
+          "offset_m": [
+            5026916076499420.0,
+            2762462569960324.0,
+            7428376160723840.0
+          ]
+        },
+        "extent_ly": 150.0,
+        "age_myr": 65.39657534493253,
+        "mass_msun": 276.36399177226076,
+        "expected_members": 0.0,
+        "emission": null,
+        "bubble_radius_ly": null
+      },
+      {
+        "id": "e7d9e02e00000000",
+        "designation": "FPF F92",
+        "kind": "association",
+        "position": {
+          "cell_ly": [
+            -65,
+            25652,
+            -33
+          ],
+          "offset_m": [
+            4917333425744929.0,
+            6683039584356191.0,
+            8441629420073699.0
+          ]
+        },
+        "extent_ly": 150.0,
+        "age_myr": 43.33775915150634,
+        "mass_msun": 3203.2999975891485,
+        "expected_members": 0.0,
+        "emission": null,
+        "bubble_radius_ly": null
+      },
+      {
+        "id": "e7d9e03b00000000",
+        "designation": "FPF F118",
+        "kind": "association",
+        "position": {
+          "cell_ly": [
+            -287,
+            25825,
+            -139
+          ],
+          "offset_m": [
+            5158784286879374.0,
+            5183080430973464.0,
+            2339880560141136.0
+          ]
+        },
+        "extent_ly": 138.7132509460678,
+        "age_myr": 22.42661753741319,
+        "mass_msun": 126.27944367207458,
+        "expected_members": 0.0,
+        "emission": null,
+        "bubble_radius_ly": 65.56950741693757
+      },
+      {
+        "id": "e7da001b80000000",
+        "designation": "FPG F55",
+        "kind": "association",
+        "position": {
+          "cell_ly": [
+            -131,
+            25693,
+            156
+          ],
+          "offset_m": [
+            9044710837639196.0,
+            5091541071359690.0,
+            4032928079332636.0
+          ]
+        },
+        "extent_ly": 150.0,
+        "age_myr": 46.93422613021539,
+        "mass_msun": 800.3953059391621,
+        "expected_members": 0.0,
+        "emission": null,
+        "bubble_radius_ly": null
+      },
+      {
+        "id": "e7d9e0bd80000000",
+        "designation": "FPF F379",
+        "kind": "association",
+        "position": {
+          "cell_ly": [
+            -216,
+            26234,
+            -194
+          ],
+          "offset_m": [
+            2223301281971575.0,
+            4691942798492300.0,
+            3670326521144442.0
+          ]
+        },
+        "extent_ly": 150.0,
+        "age_myr": 62.41779684180929,
+        "mass_msun": 901.0225627721741,
+        "expected_members": 0.0,
+        "emission": null,
+        "bubble_radius_ly": null
+      },
+      {
+        "id": "e7d9e0e480000000",
+        "designation": "FPF F457",
+        "kind": "association",
+        "position": {
+          "cell_ly": [
+            -346,
+            25967,
+            -143
+          ],
+          "offset_m": [
+            4010395362718178.5,
+            7188976566672212.0,
+            1157335599640883.5
+          ]
+        },
+        "extent_ly": 75.36214745244212,
+        "age_myr": 28.021633334643816,
+        "mass_msun": 369.7127935349965,
+        "expected_members": 0.0,
+        "emission": null,
+        "bubble_radius_ly": 116.29243478546181
+      },
+      {
+        "id": "e85a00c980000000",
+        "designation": "GPG F403",
+        "kind": "association",
+        "position": {
+          "cell_ly": [
+            364,
+            25972,
+            98
+          ],
+          "offset_m": [
+            5362183408984866.0,
+            6911180938913038.0,
+            8717085180784404.0
+          ]
+        },
+        "extent_ly": 150.0,
+        "age_myr": 70.3245500110231,
+        "mass_msun": 299.9241505278145,
+        "expected_members": 0.0,
+        "emission": null,
+        "bubble_radius_ly": null
+      },
+      {
+        "id": "e859e10180000000",
+        "designation": "GPF F515",
+        "kind": "association",
+        "position": {
+          "cell_ly": [
+            30,
+            25618,
+            -75
+          ],
+          "offset_m": [
+            6717578189147906.0,
+            1867843590773536.0,
+            2223771118513062.2
+          ]
+        },
+        "extent_ly": 150.0,
+        "age_myr": 32.55171501462572,
+        "mass_msun": 137.70175548180833,
+        "expected_members": 0.0,
+        "emission": null,
+        "bubble_radius_ly": 53.472283496135525
+      },
+      {
+        "id": "e85a00e500000000",
+        "designation": "GPG F458",
+        "kind": "association",
+        "position": {
+          "cell_ly": [
+            34,
+            26342,
+            190
+          ],
+          "offset_m": [
+            4202583374396896.0,
+            7548674928123506.0,
+            2551990543885316.0
+          ]
+        },
+        "extent_ly": 150.0,
+        "age_myr": 42.738529428115974,
+        "mass_msun": 111.59566037622969,
+        "expected_members": 0.0,
+        "emission": null,
+        "bubble_radius_ly": null
+      },
+      {
+        "id": "e85a009480000000",
+        "designation": "GPG F297",
+        "kind": "association",
+        "position": {
+          "cell_ly": [
+            284,
+            26083,
+            259
+          ],
+          "offset_m": [
+            1124128739764548.0,
+            6883080858065708.0,
+            4555111866595900.0
+          ]
+        },
+        "extent_ly": 150.0,
+        "age_myr": 51.386902014726054,
+        "mass_msun": 875.4862943840624,
+        "expected_members": 0.0,
+        "emission": null,
+        "bubble_radius_ly": null
+      },
+      {
+        "id": "e85a00c880000000",
+        "designation": "GPG F401",
+        "kind": "association",
+        "position": {
+          "cell_ly": [
+            401,
+            25899,
+            51
+          ],
+          "offset_m": [
+            6853249672107898.0,
+            3899378726360549.5,
+            2235472696828858.8
+          ]
+        },
+        "extent_ly": 150.0,
+        "age_myr": 55.398615674308175,
+        "mass_msun": 100.18434515176324,
+        "expected_members": 0.0,
+        "emission": null,
+        "bubble_radius_ly": null
+      },
+      {
+        "id": "e859e13880000000",
+        "designation": "GPF F625",
+        "kind": "association",
+        "position": {
+          "cell_ly": [
+            269,
+            26313,
+            -71
+          ],
+          "offset_m": [
+            9121924830050348.0,
+            6009670700152382.0,
+            7323780194723056.0
+          ]
+        },
+        "extent_ly": 150.0,
+        "age_myr": 45.7003002689775,
+        "mass_msun": 118.25963235867489,
+        "expected_members": 0.0,
+        "emission": null,
+        "bubble_radius_ly": null
+      },
+      {
+        "id": "e859e03180000000",
+        "designation": "GPF F99",
+        "kind": "association",
+        "position": {
+          "cell_ly": [
+            311,
+            26171,
+            -240
+          ],
+          "offset_m": [
+            5157020611213586.0,
+            7461787358414542.0,
+            7781924343629290.0
+          ]
+        },
+        "extent_ly": 150.0,
+        "age_myr": 47.36342775134177,
+        "mass_msun": 488.4237912628749,
+        "expected_members": 0.0,
+        "emission": null,
+        "bubble_radius_ly": null
+      },
+      {
+        "id": "e85a012280000000",
+        "designation": "GPG F581",
+        "kind": "association",
+        "position": {
+          "cell_ly": [
+            217,
+            25629,
+            4
+          ],
+          "offset_m": [
+            1791490953904734.0,
+            5898989673200795.0,
+            4006603319142104.0
+          ]
+        },
+        "extent_ly": 150.0,
+        "age_myr": 65.69557456715168,
+        "mass_msun": 204.2793940736621,
+        "expected_members": 0.0,
+        "emission": null,
+        "bubble_radius_ly": null
+      },
+      {
+        "id": "e7d9e12100000000",
+        "designation": "FPF F578",
+        "kind": "association",
+        "position": {
+          "cell_ly": [
+            -226,
+            25622,
+            -83
+          ],
+          "offset_m": [
+            991259795605922.0,
+            1141212710256212.0,
+            7901169295693992.0
+          ]
+        },
+        "extent_ly": 150.0,
+        "age_myr": 75.07101826695704,
+        "mass_msun": 161.78916426877686,
+        "expected_members": 0.0,
+        "emission": null,
+        "bubble_radius_ly": null
+      }
+    ]
+  }
+}
+# a cluster's detail, +100 yr
+{
+  "type": "response",
+  "id": 4,
+  "body": {
+    "kind": "feature_detail",
+    "universe": "5eed000000000001",
+    "time": {
+      "seconds": 3155760000,
+      "nanos": 0
+    },
+    "feature": {
+      "id": "e859e06780000000",
+      "designation": "GPF F207",
+      "kind": "open_cluster",
+      "position": {
+        "cell_ly": [
+          106,
+          26115,
+          -22
+        ],
+        "offset_m": [
+          6020068340496772.0,
+          1876854460311640.0,
+          2876530235905210.0
+        ]
+      },
+      "extent_ly": 26.907211220412645,
+      "age_myr": 8.408609092144168,
+      "mass_msun": 267.6192056021592,
+      "expected_members": 424.67306095087673,
+      "emission": null,
+      "bubble_radius_ly": 98.51480043530809
+    },
+    "structure": {
+      "type": "cluster",
+      "core_radius_ly": 0.9164285316730842,
+      "half_mass_radius_ly": 2.1103499461059028,
+      "tidal_radius_ly": 26.907211220412645,
+      "central_escape_speed_km_s": 2.055222671943683,
+      "relaxation_time_myr": 3.8930002827364265,
+      "core_collapsed": false,
+      "black_holes": 0.0,
+      "classes": [
+        {
+          "class": {
+            "type": "cluster",
+            "kind": "living",
+            "band": "a",
+            "generation": "first",
+            "multiplicity": "single"
+          },
+          "initial_mass_min_msun": 0.08,
+          "initial_mass_max_msun": 0.5,
+          "mean_mass_msun": 0.28767242113987773,
+          "expected": 39.48848556526328
+        },
+        {
+          "class": {
+            "type": "cluster",
+            "kind": "living",
+            "band": "a",
+            "generation": "first",
+            "multiplicity": "binary"
+          },
+          "initial_mass_min_msun": 0.08,
+          "initial_mass_max_msun": 0.5,
+          "mean_mass_msun": 0.43150863170981657,
+          "expected": 14.905129456905767
+        },
+        {
+          "class": {
+            "type": "cluster",
+            "kind": "living",
+            "band": "b",
+            "generation": "first",
+            "multiplicity": "single"
+          },
+          "initial_mass_min_msun": 0.5,
+          "initial_mass_max_msun": 0.75,
+          "mean_mass_msun": 0.6244102617282977,
+          "expected": 21.822009439365637
+        },
+        {
+          "class": {
+            "type": "cluster",
+            "kind": "living",
+            "band": "b",
+            "generation": "first",
+            "multiplicity": "binary"
+          },
+          "initial_mass_min_msun": 0.5,
+          "initial_mass_max_msun": 0.75,
+          "mean_mass_msun": 0.9366153925924465,
+          "expected": 11.935560223518962
+        },
+        {
+          "class": {
+            "type": "cluster",
+            "kind": "living",
+            "band": "c",
+            "generation": "first",
+            "multiplicity": "single"
+          },
+          "initial_mass_min_msun": 0.75,
+          "initial_mass_max_msun": 2.5,
+          "mean_mass_msun": 1.2474198491343977,
+          "expected": 38.9285431509464
+        },
+        {
+          "class": {
+            "type": "cluster",
+            "kind": "living",
+            "band": "c",
+            "generation": "first",
+            "multiplicity": "binary"
+          },
+          "initial_mass_min_msun": 0.75,
+          "initial_mass_max_msun": 2.5,
+          "mean_mass_msun": 1.8711297737015966,
+          "expected": 31.936783509738397
+        },
+        {
+          "class": {
+            "type": "cluster",
+            "kind": "living",
+            "band": "d",
+            "generation": "first",
+            "multiplicity": "single"
+          },
+          "initial_mass_min_msun": 2.5,
+          "initial_mass_max_msun": 8.0,
+          "mean_mass_msun": 4.0910701842135815,
+          "expected": 3.9480508456522907
+        },
+        {
+          "class": {
+            "type": "cluster",
+            "kind": "living",
+            "band": "d",
+            "generation": "first",
+            "multiplicity": "binary"
+          },
+          "initial_mass_min_msun": 2.5,
+          "initial_mass_max_msun": 8.0,
+          "mean_mass_msun": 6.136605276320372,
+          "expected": 10.253106738229267
+        },
+        {
+          "class": {
+            "type": "cluster",
+            "kind": "living",
+            "band": "e",
+            "generation": "first",
+            "multiplicity": "single"
+          },
+          "initial_mass_min_msun": 8.0,
+          "initial_mass_max_msun": 22.37706829293803,
+          "mean_mass_msun": 11.672285007469934,
+          "expected": 0.18806305035678028
+        },
+        {
+          "class": {
+            "type": "cluster",
+            "kind": "living",
+            "band": "e",
+            "generation": "first",
+            "multiplicity": "binary"
+          },
+          "initial_mass_min_msun": 8.0,
+          "initial_mass_max_msun": 22.37706829293803,
+          "mean_mass_msun": 17.5084275112049,
+          "expected": 2.024059527232424
+        },
+        {
+          "class": {
+            "type": "cluster",
+            "kind": "neutron_star",
+            "band": "e",
+            "generation": "first",
+            "multiplicity": "single"
+          },
+          "initial_mass_min_msun": 8.0,
+          "initial_mass_max_msun": 150.0,
+          "mean_mass_msun": 1.35,
+          "expected": 0.000036797474994071596
+        },
+        {
+          "class": {
+            "type": "cluster",
+            "kind": "neutron_star",
+            "band": "e",
+            "generation": "first",
+            "multiplicity": "binary"
+          },
+          "initial_mass_min_msun": 8.0,
+          "initial_mass_max_msun": 150.0,
+          "mean_mass_msun": 2.0250000000000004,
+          "expected": 0.000396038880038097
+        },
+        {
+          "class": {
+            "type": "cluster",
+            "kind": "tail",
+            "band": "a",
+            "generation": "first",
+            "multiplicity": "single"
+          },
+          "initial_mass_min_msun": 0.08,
+          "initial_mass_max_msun": 0.5,
+          "mean_mass_msun": 0.24678089429409228,
+          "expected": 232.05402412011279
+        },
+        {
+          "class": {
+            "type": "cluster",
+            "kind": "tail",
+            "band": "b",
+            "generation": "first",
+            "multiplicity": "single"
+          },
+          "initial_mass_min_msun": 0.5,
+          "initial_mass_max_msun": 0.75,
+          "mean_mass_msun": 0.6894780854208014,
+          "expected": 16.856551729364732
+        },
+        {
+          "class": {
+            "type": "cluster",
+            "kind": "tail",
+            "band": "c",
+            "generation": "first",
+            "multiplicity": "single"
+          },
+          "initial_mass_min_msun": 0.75,
+          "initial_mass_max_msun": 2.5,
+          "mean_mass_msun": 0.9391007273788203,
+          "expected": 0.33226075783498743
+        }
+      ]
+    }
+  }
+}
+# a cloud's detail
+{
+  "type": "response",
+  "id": 5,
+  "body": {
+    "kind": "feature_detail",
+    "universe": "5eed000000000001",
+    "time": {
+      "seconds": 0,
+      "nanos": 0
+    },
+    "feature": {
+      "id": "e7d5e08200000000",
+      "designation": "FNF F260",
+      "kind": "molecular_cloud",
+      "position": {
+        "cell_ly": [
+          -1690,
+          24463,
+          -307
+        ],
+        "offset_m": [
+          8378351580031907.0,
+          4857206139830433.0,
+          7449808021708336.0
+        ]
+      },
+      "extent_ly": 20.589191396493003,
+      "age_myr": null,
+      "mass_msun": 17637.560149237426,
+      "expected_members": 0.0,
+      "emission": "dark_cloud",
+      "bubble_radius_ly": null
+    },
+    "structure": {
+      "type": "cloud",
+      "core_radius_ly": 15.779983166698207,
+      "central_density_per_cm3": 1073.989208075869
+    }
+  }
+}
+# the centre's detail
+{
+  "type": "response",
+  "id": 6,
+  "body": {
+    "kind": "feature_detail",
+    "universe": "5eed000000000001",
+    "time": {
+      "seconds": 0,
+      "nanos": 0
+    },
+    "feature": {
+      "id": "f000000000000000",
+      "designation": "CENTRE",
+      "kind": "galactic_centre",
+      "position": {
+        "cell_ly": [
+          0,
+          0,
+          0
+        ],
+        "offset_m": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "extent_ly": 128.0,
+      "age_myr": null,
+      "mass_msun": 38086578.590371355,
+      "expected_members": 91669667.47817504,
+      "emission": null,
+      "bubble_radius_ly": null
+    },
+    "structure": {
+      "type": "centre",
+      "influence_radius_ly": 117.35855228124117,
+      "loss_cone_radius_ly": 0.00008723700019147823,
+      "classes": [
+        {
+          "class": {
+            "type": "centre",
+            "kind": "living",
+            "band": "a",
+            "episode": 0,
+            "tracer": "stars"
+          },
+          "initial_mass_min_msun": 0.08,
+          "initial_mass_max_msun": 0.5,
+          "mean_mass_msun": 0.23045516054048373,
+          "expected": 49819164.649904974
+        },
+        {
+          "class": {
+            "type": "centre",
+            "kind": "living",
+            "band": "a",
+            "episode": 1,
+            "tracer": "stars"
+          },
+          "initial_mass_min_msun": 0.08,
+          "initial_mass_max_msun": 0.5,
+          "mean_mass_msun": 0.2304551605404838,
+          "expected": 9341093.371857181
+        },
+        {
+          "class": {
+            "type": "centre",
+            "kind": "living",
+            "band": "a",
+            "episode": 2,
+            "tracer": "stars"
+          },
+          "initial_mass_min_msun": 0.08,
+          "initial_mass_max_msun": 0.5,
+          "mean_mass_msun": 0.23045516054048376,
+          "expected": 1868218.6743714365
+        },
+        {
+          "class": {
+            "type": "centre",
+            "kind": "living",
+            "band": "a",
+            "episode": 3,
+            "tracer": "stars"
+          },
+          "initial_mass_min_msun": 0.08,
+          "initial_mass_max_msun": 0.5,
+          "mean_mass_msun": 0.23045516054048382,
+          "expected": 622739.5581238122
+        },
+        {
+          "class": {
+            "type": "centre",
+            "kind": "living",
+            "band": "a",
+            "episode": 4,
+            "tracer": "young_disc"
+          },
+          "initial_mass_min_msun": 0.08,
+          "initial_mass_max_msun": 0.5,
+          "mean_mass_msun": 0.2304551605404838,
+          "expected": 12454.791162476242
+        },
+        {
+          "class": {
+            "type": "centre",
+            "kind": "living",
+            "band": "a",
+            "episode": 5,
+            "tracer": "young_isotropic"
+          },
+          "initial_mass_min_msun": 0.08,
+          "initial_mass_max_msun": 0.5,
+          "mean_mass_msun": 0.2304551605404838,
+          "expected": 24909.58232495249
+        },
+        {
+          "class": {
+            "type": "centre",
+            "kind": "living",
+            "band": "b",
+            "episode": 0,
+            "tracer": "stars"
+          },
+          "initial_mass_min_msun": 0.5,
+          "initial_mass_max_msun": 0.75,
+          "mean_mass_msun": 0.6115849703354811,
+          "expected": 8802841.785678891
+        },
+        {
+          "class": {
+            "type": "centre",
+            "kind": "living",
+            "band": "b",
+            "episode": 1,
+            "tracer": "stars"
+          },
+          "initial_mass_min_msun": 0.5,
+          "initial_mass_max_msun": 0.75,
+          "mean_mass_msun": 0.6115849703354811,
+          "expected": 1650532.834814792
+        },
+        {
+          "class": {
+            "type": "centre",
+            "kind": "living",
+            "band": "b",
+            "episode": 2,
+            "tracer": "stars"
+          },
+          "initial_mass_min_msun": 0.5,
+          "initial_mass_max_msun": 0.75,
+          "mean_mass_msun": 0.6115849703354812,
+          "expected": 330106.56696295843
+        },
+        {
+          "class": {
+            "type": "centre",
+            "kind": "living",
+            "band": "b",
+            "episode": 3,
+            "tracer": "stars"
+          },
+          "initial_mass_min_msun": 0.5,
+          "initial_mass_max_msun": 0.75,
+          "mean_mass_msun": 0.611584970335481,
+          "expected": 110035.52232098617
+        },
+        {
+          "class": {
+            "type": "centre",
+            "kind": "living",
+            "band": "b",
+            "episode": 4,
+            "tracer": "young_disc"
+          },
+          "initial_mass_min_msun": 0.5,
+          "initial_mass_max_msun": 0.75,
+          "mean_mass_msun": 0.6115849703354811,
+          "expected": 2200.7104464197228
+        },
+        {
+          "class": {
+            "type": "centre",
+            "kind": "living",
+            "band": "b",
+            "episode": 5,
+            "tracer": "young_isotropic"
+          },
+          "initial_mass_min_msun": 0.5,
+          "initial_mass_max_msun": 0.75,
+          "mean_mass_msun": 0.611584970335481,
+          "expected": 4401.420892839446
+        },
+        {
+          "class": {
+            "type": "centre",
+            "kind": "living",
+            "band": "c",
+            "episode": 0,
+            "tracer": "stars"
+          },
+          "initial_mass_min_msun": 0.75,
+          "initial_mass_max_msun": 1.0516086347615845,
+          "mean_mass_msun": 0.8723824233615795,
+          "expected": 5188146.577527017
+        },
+        {
+          "class": {
+            "type": "centre",
+            "kind": "living",
+            "band": "c",
+            "episode": 1,
+            "tracer": "stars"
+          },
+          "initial_mass_min_msun": 0.75,
+          "initial_mass_max_msun": 1.5772083270689978,
+          "mean_mass_msun": 1.0291513143574131,
+          "expected": 1747398.3658170528
+        },
+        {
+          "class": {
+            "type": "centre",
+            "kind": "living",
+            "band": "c",
+            "episode": 2,
+            "tracer": "stars"
+          },
+          "initial_mass_min_msun": 0.75,
+          "initial_mass_max_msun": 2.5,
+          "mean_mass_msun": 1.2451750707854108,
+          "expected": 464352.4477414269
+        },
+        {
+          "class": {
+            "type": "centre",
+            "kind": "living",
+            "band": "c",
+            "episode": 3,
+            "tracer": "stars"
+          },
+          "initial_mass_min_msun": 0.75,
+          "initial_mass_max_msun": 2.5,
+          "mean_mass_msun": 1.2451750707854106,
+          "expected": 154784.1492471423
+        },
+        {
+          "class": {
+            "type": "centre",
+            "kind": "living",
+            "band": "c",
+            "episode": 4,
+            "tracer": "young_disc"
+          },
+          "initial_mass_min_msun": 0.75,
+          "initial_mass_max_msun": 2.5,
+          "mean_mass_msun": 1.2451750707854108,
+          "expected": 3095.682984942845
+        },
+        {
+          "class": {
+            "type": "centre",
+            "kind": "living",
+            "band": "c",
+            "episode": 5,
+            "tracer": "young_isotropic"
+          },
+          "initial_mass_min_msun": 0.75,
+          "initial_mass_max_msun": 2.5,
+          "mean_mass_msun": 1.2451750707854106,
+          "expected": 6191.365969885692
+        },
+        {
+          "class": {
+            "type": "centre",
+            "kind": "white_dwarf",
+            "band": "c",
+            "episode": 0,
+            "tracer": "stars"
+          },
+          "initial_mass_min_msun": 0.9917675962214345,
+          "initial_mass_max_msun": 2.5,
+          "mean_mass_msun": 0.5590262878118166,
+          "expected": 7194585.362244365
+        },
+        {
+          "class": {
+            "type": "centre",
+            "kind": "white_dwarf",
+            "band": "c",
+            "episode": 1,
+            "tracer": "stars"
+          },
+          "initial_mass_min_msun": 1.4370025632422354,
+          "initial_mass_max_msun": 2.5,
+          "mean_mass_msun": 0.6013603291243528,
+          "expected": 574363.8728900816
+        },
+        {
+          "class": {
+            "type": "centre",
+            "kind": "living",
+            "band": "d",
+            "episode": 2,
+            "tracer": "stars"
+          },
+          "initial_mass_min_msun": 2.5,
+          "initial_mass_max_msun": 4.100306775932645,
+          "mean_mass_msun": 2.9241654336624356,
+          "expected": 36099.703936162565
+        },
+        {
+          "class": {
+            "type": "centre",
+            "kind": "living",
+            "band": "d",
+            "episode": 3,
+            "tracer": "stars"
+          },
+          "initial_mass_min_msun": 2.5,
+          "initial_mass_max_msun": 8.0,
+          "mean_mass_msun": 3.7154660581514687,
+          "expected": 27072.460872508218
+        },
+        {
+          "class": {
+            "type": "centre",
+            "kind": "living",
+            "band": "d",
+            "episode": 4,
+            "tracer": "young_disc"
+          },
+          "initial_mass_min_msun": 2.5,
+          "initial_mass_max_msun": 8.0,
+          "mean_mass_msun": 4.0935737605717115,
+          "expected": 635.0544453837331
+        },
+        {
+          "class": {
+            "type": "centre",
+            "kind": "living",
+            "band": "d",
+            "episode": 5,
+            "tracer": "young_isotropic"
+          },
+          "initial_mass_min_msun": 2.5,
+          "initial_mass_max_msun": 8.0,
+          "mean_mass_msun": 4.0935737605717115,
+          "expected": 1270.1088907674664
+        },
+        {
+          "class": {
+            "type": "centre",
+            "kind": "white_dwarf",
+            "band": "d",
+            "episode": 0,
+            "tracer": "stars"
+          },
+          "initial_mass_min_msun": 2.5,
+          "initial_mass_max_msun": 8.0,
+          "mean_mass_msun": 0.8401995399023166,
+          "expected": 2540217.7815349326
+        },
+        {
+          "class": {
+            "type": "centre",
+            "kind": "white_dwarf",
+            "band": "d",
+            "episode": 1,
+            "tracer": "stars"
+          },
+          "initial_mass_min_msun": 2.5,
+          "initial_mass_max_msun": 8.0,
+          "mean_mass_msun": 0.8401995399023166,
+          "expected": 476290.8340377998
+        },
+        {
+          "class": {
+            "type": "centre",
+            "kind": "white_dwarf",
+            "band": "d",
+            "episode": 2,
+            "tracer": "stars"
+          },
+          "initial_mass_min_msun": 2.8141670119060964,
+          "initial_mass_max_msun": 8.0,
+          "mean_mass_msun": 0.9179815995483039,
+          "expected": 59158.46287139745
+        },
+        {
+          "class": {
+            "type": "centre",
+            "kind": "white_dwarf",
+            "band": "d",
+            "episode": 3,
+            "tracer": "stars"
+          },
+          "initial_mass_min_msun": 4.474439327963545,
+          "initial_mass_max_msun": 8.0,
+          "mean_mass_msun": 1.0785959150583582,
+          "expected": 4680.26139667845
+        },
+        {
+          "class": {
+            "type": "centre",
+            "kind": "living",
+            "band": "e",
+            "episode": 3,
+            "tracer": "stars"
+          },
+          "initial_mass_min_msun": 8.0,
+          "initial_mass_max_msun": 16.491460627659276,
+          "mean_mass_msun": 11.095303405813572,
+          "expected": 951.937782259145
+        },
+        {
+          "class": {
+            "type": "centre",
+            "kind": "living",
+            "band": "e",
+            "episode": 4,
+            "tracer": "young_disc"
+          },
+          "initial_mass_min_msun": 8.0,
+          "initial_mass_max_msun": 94.17612758332655,
+          "mean_mass_msun": 14.75758394413941,
+          "expected": 148.8524614739499
+        },
+        {
+          "class": {
+            "type": "centre",
+            "kind": "living",
+            "band": "e",
+            "episode": 5,
+            "tracer": "young_isotropic"
+          },
+          "initial_mass_min_msun": 8.0,
+          "initial_mass_max_msun": 94.17612758332655,
+          "mean_mass_msun": 14.757583944139409,
+          "expected": 297.70492294789983
+        },
+        {
+          "class": {
+            "type": "centre",
+            "kind": "neutron_star",
+            "band": "e",
+            "episode": 0,
+            "tracer": "stars"
+          },
+          "initial_mass_min_msun": 8.0,
+          "initial_mass_max_msun": 100.0,
+          "mean_mass_msun": 1.35,
+          "expected": 287818.0472710001
+        },
+        {
+          "class": {
+            "type": "centre",
+            "kind": "neutron_star",
+            "band": "e",
+            "episode": 1,
+            "tracer": "stars"
+          },
+          "initial_mass_min_msun": 8.0,
+          "initial_mass_max_msun": 100.0,
+          "mean_mass_msun": 1.35,
+          "expected": 53965.88386331251
+        },
+        {
+          "class": {
+            "type": "centre",
+            "kind": "neutron_star",
+            "band": "e",
+            "episode": 2,
+            "tracer": "stars"
+          },
+          "initial_mass_min_msun": 8.0,
+          "initial_mass_max_msun": 100.0,
+          "mean_mass_msun": 1.35,
+          "expected": 10793.176772662504
+        },
+        {
+          "class": {
+            "type": "centre",
+            "kind": "neutron_star",
+            "band": "e",
+            "episode": 3,
+            "tracer": "stars"
+          },
+          "initial_mass_min_msun": 8.0,
+          "initial_mass_max_msun": 100.0,
+          "mean_mass_msun": 1.35,
+          "expected": 2986.101425288046
+        },
+        {
+          "class": {
+            "type": "centre",
+            "kind": "neutron_star",
+            "band": "e",
+            "episode": 4,
+            "tracer": "stars"
+          },
+          "initial_mass_min_msun": 8.0,
+          "initial_mass_max_msun": 100.0,
+          "mean_mass_msun": 1.3500000000000003,
+          "expected": 0.33688504285243326
+        },
+        {
+          "class": {
+            "type": "centre",
+            "kind": "neutron_star",
+            "band": "e",
+            "episode": 5,
+            "tracer": "stars"
+          },
+          "initial_mass_min_msun": 8.0,
+          "initial_mass_max_msun": 100.0,
+          "mean_mass_msun": 1.3499999999999999,
+          "expected": 0.6737700857048667
+        },
+        {
+          "class": {
+            "type": "centre",
+            "kind": "black_hole",
+            "band": "e",
+            "episode": 0,
+            "tracer": "black_holes"
+          },
+          "initial_mass_min_msun": 8.0,
+          "initial_mass_max_msun": 100.0,
+          "mean_mass_msun": 14.999999999999996,
+          "expected": 198521.97152544715
+        },
+        {
+          "class": {
+            "type": "centre",
+            "kind": "black_hole",
+            "band": "e",
+            "episode": 1,
+            "tracer": "black_holes"
+          },
+          "initial_mass_min_msun": 8.0,
+          "initial_mass_max_msun": 100.0,
+          "mean_mass_msun": 14.999999999999998,
+          "expected": 37222.86966102133
+        },
+        {
+          "class": {
+            "type": "centre",
+            "kind": "black_hole",
+            "band": "e",
+            "episode": 2,
+            "tracer": "black_holes"
+          },
+          "initial_mass_min_msun": 8.0,
+          "initial_mass_max_msun": 100.0,
+          "mean_mass_msun": 15.0,
+          "expected": 7444.573932204267
+        },
+        {
+          "class": {
+            "type": "centre",
+            "kind": "black_hole",
+            "band": "e",
+            "episode": 3,
+            "tracer": "black_holes"
+          },
+          "initial_mass_min_msun": 8.0,
+          "initial_mass_max_msun": 100.0,
+          "mean_mass_msun": 14.999999999999998,
+          "expected": 2412.9642885695944
+        },
+        {
+          "class": {
+            "type": "centre",
+            "kind": "black_hole",
+            "band": "e",
+            "episode": 4,
+            "tracer": "black_holes"
+          },
+          "initial_mass_min_msun": 8.0,
+          "initial_mass_max_msun": 100.0,
+          "mean_mass_msun": 15.0,
+          "expected": 20.14078149731475
+        },
+        {
+          "class": {
+            "type": "centre",
+            "kind": "black_hole",
+            "band": "e",
+            "episode": 5,
+            "tracer": "black_holes"
+          },
+          "initial_mass_min_msun": 8.0,
+          "initial_mass_max_msun": 100.0,
+          "mean_mass_msun": 14.999999999999998,
+          "expected": 40.281562994629525
+        }
+      ]
+    }
+  }
+}
+# the black hole
+{
+  "type": "response",
+  "id": 7,
+  "body": {
+    "kind": "black_hole_state",
+    "universe": "5eed000000000001",
+    "time": {
+      "seconds": 0,
+      "nanos": 0
+    },
+    "id": "f000000700000000",
+    "mass_msun": 90256484.12258898,
+    "luminosity": {
+      "quiescent_w": 3.6e+26,
+      "flares_w": 0.0,
+      "tails_w": 2.945922472755601e+24,
+      "total_w": 3.629459224727556e+26
+    },
+    "disruptions": [
+      {
+        "victim": "f000000700000009",
+        "time": {
+          "seconds": -1372618232176,
+          "nanos": 856405493
+        },
+        "star_mass_msun": 0.13490570554625803,
+        "outcome": "swallowed_whole",
+        "peak_luminosity_w": null
+      },
+      {
+        "victim": "f000000700000008",
+        "time": {
+          "seconds": -1396191207374,
+          "nanos": 572342006
+        },
+        "star_mass_msun": 0.1883846207499284,
+        "outcome": "swallowed_whole",
+        "peak_luminosity_w": null
+      },
+      {
+        "victim": "f000000700000007",
+        "time": {
+          "seconds": -2334226474349,
+          "nanos": 831426568
+        },
+        "star_mass_msun": 0.12262235193417548,
+        "outcome": "swallowed_whole",
+        "peak_luminosity_w": null
+      },
+      {
+        "victim": "f000000700000006",
+        "time": {
+          "seconds": -4356339934047,
+          "nanos": 589385057
+        },
+        "star_mass_msun": 0.12041351019510999,
+        "outcome": "swallowed_whole",
+        "peak_luminosity_w": null
+      },
+      {
+        "victim": "f000000700000005",
+        "time": {
+          "seconds": -4476484284862,
+          "nanos": 554907608
+        },
+        "star_mass_msun": 0.6043681840984675,
+        "outcome": "swallowed_whole",
+        "peak_luminosity_w": null
+      },
+      {
+        "victim": "f000000700000004",
+        "time": {
+          "seconds": -5474219971077,
+          "nanos": 223110075
+        },
+        "star_mass_msun": 0.10508749016978752,
+        "outcome": "swallowed_whole",
+        "peak_luminosity_w": null
+      },
+      {
+        "victim": "f000000700000003",
+        "time": {
+          "seconds": -5924397874185,
+          "nanos": 256433890
+        },
+        "star_mass_msun": 0.872783744753429,
+        "outcome": "disrupted",
+        "peak_luminosity_w": 1.0441861285259572e+37
+      },
+      {
+        "victim": "f000000700000002",
+        "time": {
+          "seconds": -6993284724035,
+          "nanos": 685560362
+        },
+        "star_mass_msun": 0.2783777901951732,
+        "outcome": "swallowed_whole",
+        "peak_luminosity_w": null
+      },
+      {
+        "victim": "f000000700000001",
+        "time": {
+          "seconds": -7174063482502,
+          "nanos": 202350365
+        },
+        "star_mass_msun": 0.3537950437392618,
+        "outcome": "swallowed_whole",
+        "peak_luminosity_w": null
+      }
+    ]
+  }
+}
+# the galaxy map
+{
+  "type": "response",
+  "id": 8,
+  "body": {
+    "kind": "galaxy_features",
+    "universe": "5eed000000000001",
+    "time": {
+      "seconds": 0,
+      "nanos": 0
+    },
+    "lists": [
+      {
+        "kind": "globular",
+        "status": "complete",
+        "features": [
+          {
+            "id": "e2be000000000000",
+            "designation": "5FG F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -43146,
+                -4068,
+                3191
+              ],
+              "offset_m": [
+                2389853666176678.5,
+                7073204358720961.0,
+                1265109897788180.0
+              ]
+            },
+            "extent_ly": 205.48579983957157,
+            "age_myr": 12667.937550744378,
+            "mass_msun": 37665.87953648125,
+            "expected_members": 88527.6844814819,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e2d9400000000000",
+            "designation": "5PA F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -44374,
+                26820,
+                -23209
+              ],
+              "offset_m": [
+                6248652903874879.0,
+                7795790662882797.0,
+                5082418214664520.0
+              ]
+            },
+            "extent_ly": 429.83061010215135,
+            "age_myr": 12800.0,
+            "mass_msun": 181694.55244882128,
+            "expected_members": 401195.4169448707,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e312400000000000",
+            "designation": "64J F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -37069,
+                -48451,
+                10831
+              ],
+              "offset_m": [
+                4613042258142278.0,
+                8152330801823633.0,
+                1304822532575254.0
+              ]
+            },
+            "extent_ly": 587.5057585112642,
+            "age_myr": 12015.647457338504,
+            "mass_msun": 378805.1859269867,
+            "expected_members": 1061160.484894105,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e32d000000000000",
+            "designation": "6B8 F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -40590,
+                -19116,
+                -30909
+              ],
+              "offset_m": [
+                174784207180364.12,
+                7829138343580256.0,
+                2454679200633035.5
+              ]
+            },
+            "extent_ly": 233.52243591783022,
+            "age_myr": 10895.93261437104,
+            "mass_msun": 32162.044314573584,
+            "expected_members": 55539.80781439788,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e32da00000000000",
+            "designation": "6BD F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -37242,
+                -19108,
+                -10881
+              ],
+              "offset_m": [
+                762176164081510.9,
+                4736772135039498.0,
+                2325198227238111.0
+              ]
+            },
+            "extent_ly": 204.70961131908106,
+            "age_myr": 10761.489420598742,
+            "mass_msun": 37666.9331008172,
+            "expected_members": 65890.289350377,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e36a800000000000",
+            "designation": "6TM F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -39259,
+                44129,
+                19807
+              ],
+              "offset_m": [
+                5721265116130266.0,
+                1131523549434391.5,
+                6810522866085725.0
+              ]
+            },
+            "extent_ly": 425.2171842257127,
+            "age_myr": 12310.347007323173,
+            "mass_msun": 141817.70771507398,
+            "expected_members": 320702.6857460905,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e45e400000000000",
+            "designation": "8QJ F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -29706,
+                29502,
+                8873
+              ],
+              "offset_m": [
+                5150207031132127.0,
+                9123922768297472.0,
+                2747671168375545.5
+              ]
+            },
+            "extent_ly": 477.66431441458116,
+            "age_myr": 12920.062768360382,
+            "mass_msun": 490736.17497700494,
+            "expected_members": 1022119.9781061125,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e4b5400000000000",
+            "designation": "9DA F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -26703,
+                -11312,
+                -23121
+              ],
+              "offset_m": [
+                9317822740644826.0,
+                5701795190987189.0,
+                2692481044358480.0
+              ]
+            },
+            "extent_ly": 253.91043302707436,
+            "age_myr": 10867.728635740299,
+            "mass_msun": 103568.81144022041,
+            "expected_members": 287477.1965066779,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e4bde00000000000",
+            "designation": "9FF F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -26776,
+                -676,
+                -2999
+              ],
+              "offset_m": [
+                7623658423313184.0,
+                5457681883763609.0,
+                9380621880335068.0
+              ]
+            },
+            "extent_ly": 204.8477702525482,
+            "age_myr": 12064.887249920333,
+            "mass_msun": 110714.45662201649,
+            "expected_members": 223773.91205799446,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e4e6000000000000",
+            "designation": "9SG F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -24705,
+                40845,
+                563
+              ],
+              "offset_m": [
+                3577548074868168.0,
+                6669163587625912.0,
+                851743959388033.9
+              ]
+            },
+            "extent_ly": 534.5266771275918,
+            "age_myr": 12620.10226328227,
+            "mass_msun": 528920.0986915468,
+            "expected_members": 1319261.712410609,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e526200000000000",
+            "designation": "A9H F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -21992,
+                -25908,
+                4805
+              ],
+              "offset_m": [
+                9417412188970962.0,
+                719644111832428.0,
+                4084237948381256.0
+              ]
+            },
+            "extent_ly": 255.04866185601634,
+            "age_myr": 12800.0,
+            "mass_msun": 125703.47234952122,
+            "expected_members": 283201.7807016743,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e53ae00000000000",
+            "designation": "AEQ F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -22962,
+                -4923,
+                30410
+              ],
+              "offset_m": [
+                7293619048331032.0,
+                609991338528630.4,
+                2869524738416142.5
+              ]
+            },
+            "extent_ly": 222.58762450582245,
+            "age_myr": 10731.792116878105,
+            "mass_msun": 64201.43372159472,
+            "expected_members": 145068.33629930456,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e53fc00000000000",
+            "designation": "AFY F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -20820,
+                -1856,
+                59315
+              ],
+              "offset_m": [
+                7202353459063588.0,
+                3300770936052569.0,
+                7809624137554557.0
+              ]
+            },
+            "extent_ly": 316.6239024461469,
+            "age_myr": 11914.638008918013,
+            "mass_msun": 57282.84997345768,
+            "expected_members": 161159.82323470974,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e54a600000000000",
+            "designation": "AJK F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -24057,
+                11841,
+                14486
+              ],
+              "offset_m": [
+                1082925660111179.8,
+                2175377452277147.5,
+                7168037194105595.0
+              ]
+            },
+            "extent_ly": 148.68415804360598,
+            "age_myr": 10531.247930754602,
+            "mass_msun": 32552.50788897357,
+            "expected_members": 87361.59994589988,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e562400000000000",
+            "designation": "ARJ F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -21970,
+                35246,
+                8857
+              ],
+              "offset_m": [
+                7485317467158082.0,
+                1159859945843626.8,
+                6762308591803228.0
+              ]
+            },
+            "extent_ly": 178.3352027669969,
+            "age_myr": 12645.04986191018,
+            "mass_msun": 26017.020679437,
+            "expected_members": 64597.81947547105,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e562800000000000",
+            "designation": "ARM F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -20959,
+                35532,
+                19928
+              ],
+              "offset_m": [
+                8596021153394329.0,
+                648903745497885.2,
+                7277060268745421.0
+              ]
+            },
+            "extent_ly": 304.1730816259052,
+            "age_myr": 12311.151089026545,
+            "mass_msun": 107597.44824614176,
+            "expected_members": 268902.05501614505,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e599e00000000000",
+            "designation": "B6F F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -17372,
+                -39857,
+                -679
+              ],
+              "offset_m": [
+                2837131993850730.5,
+                4034957591792015.0,
+                2413107449280696.5
+              ]
+            },
+            "extent_ly": 332.39128922151104,
+            "age_myr": 12800.0,
+            "mass_msun": 159170.2092075088,
+            "expected_members": 343495.23652375455,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e5a2600000000000",
+            "designation": "B8K F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -16458,
+                -30872,
+                15294
+              ],
+              "offset_m": [
+                2468047091154218.0,
+                6349748729960237.0,
+                9363349237440132.0
+              ]
+            },
+            "extent_ly": 75.97006674221569,
+            "age_myr": 11266.046679009229,
+            "mass_msun": 2590.6253547905026,
+            "expected_members": 6417.3316991952015,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e5b9a00000000000",
+            "designation": "BED F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -17892,
+                -7685,
+                -11471
+              ],
+              "offset_m": [
+                2627690576322503.0,
+                441828536066246.2,
+                4479931939557793.5
+              ]
+            },
+            "extent_ly": 194.19993751152316,
+            "age_myr": 10997.21149721929,
+            "mass_msun": 132983.56820803374,
+            "expected_members": 368860.8831384987,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e5ba200000000000",
+            "designation": "BEH F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -17322,
+                -4309,
+                4559
+              ],
+              "offset_m": [
+                7337705248198383.0,
+                4277554500505713.5,
+                2006841290831957.8
+              ]
+            },
+            "extent_ly": 294.7837051070687,
+            "age_myr": 12523.651907588044,
+            "mass_msun": 656915.7507986431,
+            "expected_members": 1616128.1733345655,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e5c6000080000000",
+            "designation": "BHG F1",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -17865,
+                8052,
+                1646
+              ],
+              "offset_m": [
+                8630831092624949.0,
+                206148316980389.94,
+                5387210530206710.0
+              ]
+            },
+            "extent_ly": 176.8716261435382,
+            "age_myr": 12190.125383649738,
+            "mass_msun": 127813.19572794245,
+            "expected_members": 345088.2349259727,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e636800000000000",
+            "designation": "CDM F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -12362,
+                -10482,
+                16922
+              ],
+              "offset_m": [
+                8715565986669347.0,
+                820688625653046.9,
+                4898298267431640.0
+              ]
+            },
+            "extent_ly": 112.34750262178969,
+            "age_myr": 11934.33800253604,
+            "mass_msun": 24080.966043229182,
+            "expected_members": 63876.0616090081,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e64a400000000000",
+            "designation": "CJJ F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -12550,
+                10392,
+                8883
+              ],
+              "offset_m": [
+                1325787323945266.2,
+                9456455206040026.0,
+                362971099003242.3
+              ]
+            },
+            "extent_ly": 324.8026919161678,
+            "age_myr": 12800.0,
+            "mass_msun": 868616.3246704929,
+            "expected_members": 1644241.4804268004,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e64da00000000000",
+            "designation": "CKD F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -13382,
+                13944,
+                -12101
+              ],
+              "offset_m": [
+                1948811055338984.5,
+                4628799557091033.0,
+                8791611475175936.0
+              ]
+            },
+            "extent_ly": 101.54566472000437,
+            "age_myr": 12963.838521440033,
+            "mass_msun": 18704.437885853957,
+            "expected_members": 41300.92810264818,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e652000000000000",
+            "designation": "CMG F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -13151,
+                18339,
+                1055
+              ],
+              "offset_m": [
+                6961077109237880.0,
+                6465080155166501.0,
+                7860911209529069.0
+              ]
+            },
+            "extent_ly": 254.8546885280891,
+            "age_myr": 12800.0,
+            "mass_msun": 300750.0099941419,
+            "expected_members": 671134.2378240867,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e6bdc00080000000",
+            "designation": "DFE F1",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -8333,
+                -3800,
+                -4153
+              ],
+              "offset_m": [
+                9446507672833898.0,
+                5104477560018189.0,
+                7576698215316040.0
+              ]
+            },
+            "extent_ly": 126.0094451549496,
+            "age_myr": 12800.0,
+            "mass_msun": 122508.7307176016,
+            "expected_members": 271006.53154970735,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e6be000000000000",
+            "designation": "DFG F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -10739,
+                -2524,
+                1697
+              ],
+              "offset_m": [
+                5190510610583577.0,
+                6114199025273292.0,
+                4989090277095565.0
+              ]
+            },
+            "extent_ly": 180.36084721189533,
+            "age_myr": 12800.0,
+            "mass_msun": 308970.0879508399,
+            "expected_members": 620826.1335648356,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e6c1c00000000000",
+            "designation": "DGE F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -10757,
+                3809,
+                -6217
+              ],
+              "offset_m": [
+                942527921149851.0,
+                6323081002869851.0,
+                3091468598047434.0
+              ]
+            },
+            "extent_ly": 119.63880106688705,
+            "age_myr": 12800.0,
+            "mass_msun": 72789.23089027306,
+            "expected_members": 196901.71326558184,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e6c2600000000000",
+            "designation": "DGK F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -9645,
+                897,
+                12472
+              ],
+              "offset_m": [
+                5895787064374388.0,
+                2148550100349544.5,
+                9182084843185434.0
+              ]
+            },
+            "extent_ly": 173.28036607764935,
+            "age_myr": 11721.211219295705,
+            "mass_msun": 168021.30973271877,
+            "expected_members": 404619.3013327752,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e6c5c00000000000",
+            "designation": "DHE F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -9644,
+                4600,
+                -6037
+              ],
+              "offset_m": [
+                3747120041712351.5,
+                2219231990775719.0,
+                9131104423257576.0
+              ]
+            },
+            "extent_ly": 138.94587118328124,
+            "age_myr": 12800.0,
+            "mass_msun": 123536.3330910647,
+            "expected_members": 223859.69330112092,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e6c5c00080000000",
+            "designation": "DHE F1",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -8415,
+                6747,
+                -7702
+              ],
+              "offset_m": [
+                5334927959905719.0,
+                9292634663325384.0,
+                5627383280467638.0
+              ]
+            },
+            "extent_ly": 154.7015946299757,
+            "age_myr": 11387.877387723764,
+            "mass_msun": 153106.30625710308,
+            "expected_members": 297465.16383539164,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e6dae00000000000",
+            "designation": "DPQ F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -11153,
+                25838,
+                30221
+              ],
+              "offset_m": [
+                3991609447530073.0,
+                6635941958222365.0,
+                8367752205195514.0
+              ]
+            },
+            "extent_ly": 80.94055139654189,
+            "age_myr": 11447.243081153158,
+            "mass_msun": 2600.577674077505,
+            "expected_members": 5060.289151594795,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e725e00000000000",
+            "designation": "E9F F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -6595,
+                -25044,
+                -53
+              ],
+              "offset_m": [
+                2203625786496266.5,
+                452869170012689.25,
+                4935179717422225.0
+              ]
+            },
+            "extent_ly": 146.3355825019606,
+            "age_myr": 12800.0,
+            "mass_msun": 43783.68845623171,
+            "expected_members": 96046.5953464373,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e731e00000000000",
+            "designation": "ECF F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -4227,
+                -14913,
+                -3344
+              ],
+              "offset_m": [
+                5800884461151173.0,
+                1980694888043545.0,
+                6639980813477693.0
+              ]
+            },
+            "extent_ly": 168.4746087090729,
+            "age_myr": 12800.0,
+            "mass_msun": 153522.634101528,
+            "expected_members": 275495.2221415734,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e736000000000000",
+            "designation": "EDG F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -5984,
+                -9006,
+                566
+              ],
+              "offset_m": [
+                9087874811988520.0,
+                3281574962161443.0,
+                7683708001787976.0
+              ]
+            },
+            "extent_ly": 130.11140855259043,
+            "age_myr": 12800.0,
+            "mass_msun": 121153.15556705209,
+            "expected_members": 235727.78030507482,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e73a200000000000",
+            "designation": "EEH F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -7348,
+                -7369,
+                6091
+              ],
+              "offset_m": [
+                7354174799529931.0,
+                9353058195895422.0,
+                9258080594958442.0
+              ]
+            },
+            "extent_ly": 73.59253371948567,
+            "age_myr": 11666.349442823994,
+            "mass_msun": 18814.776349750162,
+            "expected_members": 36073.89937576924,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e73dc00000000000",
+            "designation": "EFE F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -5355,
+                -3618,
+                -4903
+              ],
+              "offset_m": [
+                1264424948632200.5,
+                7634540024998257.0,
+                3798990035538581.0
+              ]
+            },
+            "extent_ly": 113.36037553649624,
+            "age_myr": 12800.0,
+            "mass_msun": 122850.2452111267,
+            "expected_members": 334186.1831849532,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e73dc00080000000",
+            "designation": "EFE F1",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -8019,
+                -2613,
+                -8006
+              ],
+              "offset_m": [
+                6546525370198705.0,
+                1724444253968497.5,
+                698662620282504.9
+              ]
+            },
+            "extent_ly": 166.73110789632162,
+            "age_myr": 11115.396691005599,
+            "mass_msun": 230267.92472687675,
+            "expected_members": 458119.9594345723,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e73e000000000000",
+            "designation": "EFG F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -4751,
+                -3404,
+                879
+              ],
+              "offset_m": [
+                7338401292526889.0,
+                8209326034341656.0,
+                1310824229746956.8
+              ]
+            },
+            "extent_ly": 41.48008178698372,
+            "age_myr": 12800.0,
+            "mass_msun": 9705.89700699143,
+            "expected_members": 21542.24923986335,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e73e200080000000",
+            "designation": "EFH F1",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -4175,
+                -2081,
+                7655
+              ],
+              "offset_m": [
+                5492994488633402.0,
+                6284441475957545.0,
+                1783004432028639.2
+              ]
+            },
+            "extent_ly": 187.55838010049013,
+            "age_myr": 11830.695004879059,
+            "mass_msun": 478733.4364983769,
+            "expected_members": 1331316.0792980364,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e73e400000000000",
+            "designation": "EFJ F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -5606,
+                -3378,
+                9811
+              ],
+              "offset_m": [
+                4355435154051506.0,
+                6517416937779906.0,
+                4314785366872647.0
+              ]
+            },
+            "extent_ly": 114.5033453608472,
+            "age_myr": 12800.0,
+            "mass_msun": 73108.58033170896,
+            "expected_members": 191543.62263939503,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e741e00000000000",
+            "designation": "EGF F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -5613,
+                1021,
+                -3112
+              ],
+              "offset_m": [
+                4779412339588420.0,
+                4707098673135931.0,
+                5566222664678793.0
+              ]
+            },
+            "extent_ly": 99.17400345737308,
+            "age_myr": 12996.286646817605,
+            "mass_msun": 115051.12129310986,
+            "expected_members": 233551.68062583552,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e742000080000000",
+            "designation": "EGG F1",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -8070,
+                2126,
+                1213
+              ],
+              "offset_m": [
+                6333590845966254.0,
+                7281013545214631.0,
+                5553592231492600.0
+              ]
+            },
+            "extent_ly": 38.46730989620476,
+            "age_myr": 12800.0,
+            "mass_msun": 4526.950996913741,
+            "expected_members": 13231.949841474026,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e742000100000000",
+            "designation": "EGG F2",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -4588,
+                2483,
+                1739
+              ],
+              "offset_m": [
+                1186943845732321.2,
+                4098842242503907.0,
+                3571326871353818.0
+              ]
+            },
+            "extent_ly": 58.99788582565767,
+            "age_myr": 11869.710596788967,
+            "mass_msun": 31075.783031273146,
+            "expected_members": 66797.27083224885,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e742400000000000",
+            "designation": "EGJ F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -4593,
+                2234,
+                12208
+              ],
+              "offset_m": [
+                1004671791503548.4,
+                4559120428297991.0,
+                9435805988078476.0
+              ]
+            },
+            "extent_ly": 100.31377935765815,
+            "age_myr": 11148.373528671616,
+            "mass_msun": 41827.29683930159,
+            "expected_members": 109472.09345622355,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e745a00000000000",
+            "designation": "EHD F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -5908,
+                5149,
+                -9268
+              ],
+              "offset_m": [
+                6088816833218571.0,
+                1824753781676917.8,
+                3012130774565216.0
+              ]
+            },
+            "extent_ly": 168.73402209001713,
+            "age_myr": 12800.0,
+            "mass_msun": 224700.84386707176,
+            "expected_members": 599673.7256885716,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e745e00000000000",
+            "designation": "EHF F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -5054,
+                5420,
+                -1466
+              ],
+              "offset_m": [
+                1548422076828920.8,
+                6901183530834198.0,
+                6079578242452607.0
+              ]
+            },
+            "extent_ly": 104.9191364223085,
+            "age_myr": 12800.0,
+            "mass_msun": 108471.05130837411,
+            "expected_members": 216054.46377827713,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e746000000000000",
+            "designation": "EHG F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -4119,
+                6310,
+                3536
+              ],
+              "offset_m": [
+                3341234478363153.5,
+                6929943938015720.0,
+                102620452846072.38
+              ]
+            },
+            "extent_ly": 166.84876879635183,
+            "age_myr": 12574.95667782042,
+            "mass_msun": 376684.07112575695,
+            "expected_members": 763445.9853081312,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e746000080000000",
+            "designation": "EHG F1",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -4975,
+                7124,
+                4094
+              ],
+              "offset_m": [
+                747752756252975.0,
+                8224808715131841.0,
+                8592756336854538.0
+              ]
+            },
+            "extent_ly": 168.25443026183794,
+            "age_myr": 12574.644743171155,
+            "mass_msun": 311855.4353274177,
+            "expected_members": 695405.8757864354,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e746200000000000",
+            "designation": "EHH F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -6827,
+                5225,
+                5130
+              ],
+              "offset_m": [
+                475245515781665.5,
+                6401549345693517.0,
+                5077502299043756.0
+              ]
+            },
+            "extent_ly": 105.89482629219675,
+            "age_myr": 12800.0,
+            "mass_msun": 73164.27660844821,
+            "expected_members": 141446.08545326648,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e7a2400000000000",
+            "designation": "F8J F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -2814,
+                -30192,
+                12044
+              ],
+              "offset_m": [
+                550987874571785.06,
+                8603014888969951.0,
+                1730940425262300.2
+              ]
+            },
+            "extent_ly": 204.16664566056653,
+            "age_myr": 10648.022241981624,
+            "mass_msun": 72379.0444066345,
+            "expected_members": 170750.79339398813,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e7a5e00000000000",
+            "designation": "F9F F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -415,
+                -25922,
+                -945
+              ],
+              "offset_m": [
+                5192654541955768.0,
+                8713818925677772.0,
+                90731868284983.08
+              ]
+            },
+            "extent_ly": 330.12692594063867,
+            "age_myr": 12800.0,
+            "mass_msun": 500982.1858535684,
+            "expected_members": 1104385.141843689,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e7b1e00000000000",
+            "designation": "FCF F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -3029,
+                -14893,
+                -2970
+              ],
+              "offset_m": [
+                3046561976578867.0,
+                1488250848794935.5,
+                5051078940995384.0
+              ]
+            },
+            "extent_ly": 155.56421451375994,
+            "age_myr": 12800.0,
+            "mass_msun": 125051.67848946402,
+            "expected_members": 290548.3866862594,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e7b9c00100000000",
+            "designation": "FEE F2",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -3217,
+                -4476,
+                -7775
+              ],
+              "offset_m": [
+                4902883693955372.0,
+                2063841918906301.5,
+                7427038525934336.0
+              ]
+            },
+            "extent_ly": 231.38667516726494,
+            "age_myr": 12800.0,
+            "mass_msun": 820728.8392069349,
+            "expected_members": 2210442.915670391,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e7ba000080000000",
+            "designation": "FEG F1",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -3806,
+                -5196,
+                2025
+              ],
+              "offset_m": [
+                931703193193998.9,
+                618707791390615.4,
+                4645925863317915.0
+              ]
+            },
+            "extent_ly": 80.31051062650155,
+            "age_myr": 12800.0,
+            "mass_msun": 57670.03291184394,
+            "expected_members": 107662.37962944662,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e7ba600000000000",
+            "designation": "FEK F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -1148,
+                -4211,
+                13296
+              ],
+              "offset_m": [
+                5749958368512510.0,
+                7165805046003571.0,
+                6980020692515622.0
+              ]
+            },
+            "extent_ly": 42.54713811719271,
+            "age_myr": 12800.0,
+            "mass_msun": 2951.601177194017,
+            "expected_members": 6895.514199312743,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e7bd800000000000",
+            "designation": "FFC F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -1927,
+                -569,
+                -14112
+              ],
+              "offset_m": [
+                676498050873499.5,
+                3084688071141069.5,
+                2719381878156106.0
+              ]
+            },
+            "extent_ly": 222.08398932391637,
+            "age_myr": 11393.39364580478,
+            "mass_msun": 409078.96395818214,
+            "expected_members": 879470.1267628089,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e7bdc00000000000",
+            "designation": "FFE F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -2776,
+                -1740,
+                -7192
+              ],
+              "offset_m": [
+                8967543554794797.0,
+                4934434862238699.0,
+                1694421287069381.0
+              ]
+            },
+            "extent_ly": 58.71225295663496,
+            "age_myr": 11372.275353708856,
+            "mass_msun": 17754.933203054705,
+            "expected_members": 43180.769019656145,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e7bde00180000000",
+            "designation": "FFF F3",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -3121,
+                -3605,
+                -188
+              ],
+              "offset_m": [
+                7990804681177173.0,
+                3760293336018462.0,
+                5252554282677220.0
+              ]
+            },
+            "extent_ly": 162.4588702251863,
+            "age_myr": 11419.065779451934,
+            "mass_msun": 799401.9539515032,
+            "expected_members": 1787473.7407547776,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e7be000180000000",
+            "designation": "FFG F3",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -226,
+                -1275,
+                575
+              ],
+              "offset_m": [
+                5866332873824421.0,
+                4188256247377237.0,
+                7037299932512466.0
+              ]
+            },
+            "extent_ly": 39.61693576495104,
+            "age_myr": 11815.42854375404,
+            "mass_msun": 107460.61356248955,
+            "expected_members": 233288.3747785927,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e7c1c00100000000",
+            "designation": "FGE F2",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -3794,
+                2192,
+                -5850
+              ],
+              "offset_m": [
+                2861042337751674.0,
+                1693286984285578.8,
+                7403484678587937.0
+              ]
+            },
+            "extent_ly": 84.73424917420152,
+            "age_myr": 12800.0,
+            "mass_msun": 60083.38878542955,
+            "expected_members": 111851.23924176188,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e7c1e00080000000",
+            "designation": "FGF F1",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -2990,
+                2642,
+                -1106
+              ],
+              "offset_m": [
+                3836559265682309.5,
+                431960381227178.3,
+                8979374391643965.0
+              ]
+            },
+            "extent_ly": 83.57198976066391,
+            "age_myr": 12800.0,
+            "mass_msun": 134084.42034163704,
+            "expected_members": 259909.51377375142,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e7c1e00180000000",
+            "designation": "FGF F3",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -22,
+                447,
+                -1665
+              ],
+              "offset_m": [
+                8449636753878234.0,
+                718726566496780.4,
+                733020338297716.1
+              ]
+            },
+            "extent_ly": 19.70117781572211,
+            "age_myr": 12800.0,
+            "mass_msun": 8978.956752418726,
+            "expected_members": 14905.007696637334,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e7c1e00200000000",
+            "designation": "FGF F4",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -2838,
+                932,
+                -2059
+              ],
+              "offset_m": [
+                1428225623302176.8,
+                2324886694115089.5,
+                5505457864502251.0
+              ]
+            },
+            "extent_ly": 37.697116863216635,
+            "age_myr": 12837.045274497304,
+            "mass_msun": 15045.214966034162,
+            "expected_members": 27600.05482954202,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e7c2000000000000",
+            "designation": "FGG F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -3995,
+                212,
+                116
+              ],
+              "offset_m": [
+                146092185861366.34,
+                4702996047107530.0,
+                4484756414542504.5
+              ]
+            },
+            "extent_ly": 25.38023786854625,
+            "age_myr": 12800.0,
+            "mass_msun": 3950.159666434361,
+            "expected_members": 7301.671698201959,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e7c2000100000000",
+            "designation": "FGG F2",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -568,
+                1911,
+                3217
+              ],
+              "offset_m": [
+                8598731547718462.0,
+                3522923163579760.5,
+                7666831774080956.0
+              ]
+            },
+            "extent_ly": 93.78182172790565,
+            "age_myr": 12800.0,
+            "mass_msun": 216862.46319342323,
+            "expected_members": 387475.18943794316,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e7c5600000000000",
+            "designation": "FHB F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -3400,
+                7065,
+                -17890
+              ],
+              "offset_m": [
+                8047275986786882.0,
+                3863388259268941.0,
+                4716144465803792.0
+              ]
+            },
+            "extent_ly": 169.23361463675616,
+            "age_myr": 10734.267895672963,
+            "mass_msun": 113198.04330431769,
+            "expected_members": 229726.51210663692,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e7c5e00080000000",
+            "designation": "FHF F1",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -2302,
+                5732,
+                -1079
+              ],
+              "offset_m": [
+                2411700263985686.0,
+                3938787498454001.0,
+                5970356458305664.0
+              ]
+            },
+            "extent_ly": 72.28194108336595,
+            "age_myr": 12800.0,
+            "mass_msun": 46992.45960489596,
+            "expected_members": 116090.16269110456,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e7c6200000000000",
+            "designation": "FHH F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -3017,
+                5528,
+                6180
+              ],
+              "offset_m": [
+                7925698171069009.0,
+                7465895936734704.0,
+                4824560940694691.0
+              ]
+            },
+            "extent_ly": 63.20282177126176,
+            "age_myr": 11775.827495190188,
+            "mass_msun": 18755.695290529355,
+            "expected_members": 39785.28537747361,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e7ca400000000000",
+            "designation": "FJJ F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -4008,
+                10619,
+                9163
+              ],
+              "offset_m": [
+                6944380848611669.0,
+                831225263283200.9,
+                7957223102176208.0
+              ]
+            },
+            "extent_ly": 177.36884339952184,
+            "age_myr": 12800.0,
+            "mass_msun": 201726.37487334467,
+            "expected_members": 486672.57981171244,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e7cd800000000000",
+            "designation": "FKC F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -3661,
+                15190,
+                -13392
+              ],
+              "offset_m": [
+                4381817134277607.0,
+                883739122506278.6,
+                8261243978236301.0
+              ]
+            },
+            "extent_ly": 250.64508993572198,
+            "age_myr": 12042.143466959931,
+            "mass_msun": 337167.17480872374,
+            "expected_members": 746915.8284824955,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e7ce600000000000",
+            "designation": "FKK F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -1211,
+                13011,
+                14210
+              ],
+              "offset_m": [
+                862845709935240.5,
+                4423376628835392.5,
+                2714428681329183.0
+              ]
+            },
+            "extent_ly": 229.52222138355845,
+            "age_myr": 12800.0,
+            "mass_msun": 287807.67224779533,
+            "expected_members": 618438.4400767063,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e7d5800000000000",
+            "designation": "FNC F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -820,
+                22777,
+                -13062
+              ],
+              "offset_m": [
+                3902281583620109.0,
+                8194349446625903.0,
+                8825537459872673.0
+              ]
+            },
+            "extent_ly": 262.73737258358165,
+            "age_myr": 12800.0,
+            "mass_msun": 246197.08660891576,
+            "expected_members": 610912.8974358375,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e7dee00000000000",
+            "designation": "FQQ F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                -3104,
+                31187,
+                29386
+              ],
+              "offset_m": [
+                1402072556301447.8,
+                2868103990304416.5,
+                7365080232249556.0
+              ]
+            },
+            "extent_ly": 337.78024131090143,
+            "age_myr": 12654.934621101434,
+            "mass_msun": 171924.26731696012,
+            "expected_members": 455265.7080553402,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e831800000000000",
+            "designation": "GCC F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                1823,
+                -14108,
+                -15752
+              ],
+              "offset_m": [
+                7118607164567060.0,
+                8938903317195604.0,
+                2335108255555663.0
+              ]
+            },
+            "extent_ly": 101.65455737210988,
+            "age_myr": 12814.25435153169,
+            "mass_msun": 21330.665796616642,
+            "expected_members": 51832.99294759662,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e835c00080000000",
+            "designation": "GDE F1",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                2428,
+                -9830,
+                -7435
+              ],
+              "offset_m": [
+                794829757235457.5,
+                995448238516528.1,
+                8473151179298561.0
+              ]
+            },
+            "extent_ly": 99.51626983823591,
+            "age_myr": 12945.625953182043,
+            "mass_msun": 43928.483804843905,
+            "expected_members": 100767.84129780276,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e835e00000000000",
+            "designation": "GDF F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                1797,
+                -10886,
+                -2564
+              ],
+              "offset_m": [
+                5768389642323602.0,
+                2162069341270181.0,
+                3600083795682826.5
+              ]
+            },
+            "extent_ly": 72.79119756078356,
+            "age_myr": 12800.0,
+            "mass_msun": 19887.18785764887,
+            "expected_members": 37045.19566863836,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e839c00000000000",
+            "designation": "GEE F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                776,
+                -5954,
+                -4474
+              ],
+              "offset_m": [
+                595428614150974.1,
+                2063604616612601.8,
+                6421426647405970.0
+              ]
+            },
+            "extent_ly": 149.85296667846168,
+            "age_myr": 12800.0,
+            "mass_msun": 320359.66276369314,
+            "expected_members": 637904.9139023556,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e83a000000000000",
+            "designation": "GEG F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                451,
+                -4407,
+                168
+              ],
+              "offset_m": [
+                4416676629227563.0,
+                3824841642860351.0,
+                250887234681429.78
+              ]
+            },
+            "extent_ly": 125.12335541336039,
+            "age_myr": 12800.0,
+            "mass_msun": 406790.6003275947,
+            "expected_members": 830513.8086099484,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e83a000080000000",
+            "designation": "GEG F1",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                2735,
+                -5129,
+                2766
+              ],
+              "offset_m": [
+                2183817046023346.8,
+                6317327192673694.0,
+                8639915283265893.0
+              ]
+            },
+            "extent_ly": 71.73809068094278,
+            "age_myr": 12507.256550298458,
+            "mass_msun": 44166.74836296343,
+            "expected_members": 120001.45213953905,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e83a200080000000",
+            "designation": "GEH F1",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                1404,
+                -4775,
+                6766
+              ],
+              "offset_m": [
+                2207278003809985.2,
+                8766062953971197.0,
+                9217622467443244.0
+              ]
+            },
+            "extent_ly": 170.14844526740575,
+            "age_myr": 12788.027035133904,
+            "mass_msun": 394071.90491992934,
+            "expected_members": 1104593.2778752828,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e83de00080000000",
+            "designation": "GFF F1",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                439,
+                -3674,
+                -2581
+              ],
+              "offset_m": [
+                6564547433377695.0,
+                4619554040158056.0,
+                4888349817201601.0
+              ]
+            },
+            "extent_ly": 51.04784119207667,
+            "age_myr": 12379.33820845544,
+            "mass_msun": 26926.338094949515,
+            "expected_members": 49917.56091838887,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e83e000000000000",
+            "designation": "GFG F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                2678,
+                -1219,
+                1852
+              ],
+              "offset_m": [
+                6313764723957373.0,
+                6186941897522993.0,
+                1362696799841831.2
+              ]
+            },
+            "extent_ly": 70.31526548604367,
+            "age_myr": 12800.0,
+            "mass_msun": 104422.24351737606,
+            "expected_members": 202966.88914324343,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e841c00000000000",
+            "designation": "GGE F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                2107,
+                707,
+                -6914
+              ],
+              "offset_m": [
+                6025998919450366.0,
+                3643448574303983.5,
+                6174135885744565.0
+              ]
+            },
+            "extent_ly": 128.8421157389286,
+            "age_myr": 12800.0,
+            "mass_msun": 213271.07798990989,
+            "expected_members": 422904.29133446893,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e841c00080000000",
+            "designation": "GGE F1",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                1062,
+                2004,
+                -5510
+              ],
+              "offset_m": [
+                8615138130308653.0,
+                2321243411228888.5,
+                5825106733593522.0
+              ]
+            },
+            "extent_ly": 124.2874226395475,
+            "age_myr": 12927.454189806514,
+            "mass_msun": 257898.29277226454,
+            "expected_members": 527777.7680932088,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e841c00100000000",
+            "designation": "GGE F2",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                3498,
+                1790,
+                -4456
+              ],
+              "offset_m": [
+                6933621420722755.0,
+                2282884399355937.5,
+                6539864080421018.0
+              ]
+            },
+            "extent_ly": 112.5277681885972,
+            "age_myr": 12856.064878457395,
+            "mass_msun": 192227.78115736644,
+            "expected_members": 538817.0142196049,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e841e00000000000",
+            "designation": "GGF F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                1141,
+                934,
+                -1761
+              ],
+              "offset_m": [
+                6231160853191827.0,
+                7481702061304988.0,
+                1056873113790802.2
+              ]
+            },
+            "extent_ly": 25.293008897417604,
+            "age_myr": 12673.92650431849,
+            "mass_msun": 10461.256574891737,
+            "expected_members": 20294.813264039378,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e842000100000000",
+            "designation": "GGG F2",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                697,
+                133,
+                1413
+              ],
+              "offset_m": [
+                8258115471447117.0,
+                6854794865865316.0,
+                6431109384693019.0
+              ]
+            },
+            "extent_ly": 68.82474173236591,
+            "age_myr": 12800.0,
+            "mass_msun": 454963.1932381783,
+            "expected_members": 852656.864247582,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e842200000000000",
+            "designation": "GGH F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                768,
+                1297,
+                4154
+              ],
+              "offset_m": [
+                8440719362526619.0,
+                3862495715266.04,
+                4831626282881727.0
+              ]
+            },
+            "extent_ly": 121.88739130771934,
+            "age_myr": 12662.075697834814,
+            "mass_msun": 377689.1350727439,
+            "expected_members": 882825.3471868349,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e845c00080000000",
+            "designation": "GHE F1",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                2015,
+                5680,
+                -7414
+              ],
+              "offset_m": [
+                4115369867667587.5,
+                1034082426773014.1,
+                2394036719544548.0
+              ]
+            },
+            "extent_ly": 121.95354441829653,
+            "age_myr": 12800.0,
+            "mass_msun": 119702.55558654692,
+            "expected_members": 326908.80565893,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e845e00000000000",
+            "designation": "GHF F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                1273,
+                4530,
+                -2655
+              ],
+              "offset_m": [
+                6591427235390453.0,
+                1407381214165054.8,
+                7863226900029402.0
+              ]
+            },
+            "extent_ly": 60.2943988340728,
+            "age_myr": 12800.0,
+            "mass_msun": 34049.25407899383,
+            "expected_members": 68840.27275926624,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e849a00000000000",
+            "designation": "GJD F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                2166,
+                11257,
+                -11801
+              ],
+              "offset_m": [
+                6261946981852543.0,
+                951160595786478.2,
+                8184481572198883.0
+              ]
+            },
+            "extent_ly": 167.40107785807163,
+            "age_myr": 12861.363231333968,
+            "mass_msun": 142748.47747191455,
+            "expected_members": 297132.72306185745,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e849e00000000000",
+            "designation": "GJF F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                2313,
+                10311,
+                -2461
+              ],
+              "offset_m": [
+                104823894764351.39,
+                5147971511310697.0,
+                3585727800265749.5
+              ]
+            },
+            "extent_ly": 79.55614200317834,
+            "age_myr": 12800.0,
+            "mass_msun": 27608.803779076738,
+            "expected_members": 52896.343438586606,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e84a000000000000",
+            "designation": "GJG F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                3667,
+                8439,
+                1270
+              ],
+              "offset_m": [
+                8484633278953476.0,
+                7846654100120629.0,
+                3615310490198198.0
+              ]
+            },
+            "extent_ly": 70.51944201696152,
+            "age_myr": 12800.0,
+            "mass_msun": 24128.3819099568,
+            "expected_members": 42185.48053374066,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e84a200000000000",
+            "designation": "GJH F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                520,
+                8432,
+                6327
+              ],
+              "offset_m": [
+                4252348273162428.0,
+                6289193741372695.0,
+                4731391462997615.0
+              ]
+            },
+            "extent_ly": 94.12114254087207,
+            "age_myr": 12800.0,
+            "mass_msun": 47570.87520260874,
+            "expected_members": 84461.37934066424,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e84a600000000000",
+            "designation": "GJK F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                3188,
+                9280,
+                14062
+              ],
+              "offset_m": [
+                3977372324465213.0,
+                3826732277071774.5,
+                2751095883086565.5
+              ]
+            },
+            "extent_ly": 167.42029119364722,
+            "age_myr": 11592.91251477621,
+            "mass_msun": 134296.04155612772,
+            "expected_members": 355744.90395760786,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e851c00000000000",
+            "designation": "GME F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                3261,
+                18208,
+                -7809
+              ],
+              "offset_m": [
+                2930240546031794.5,
+                4755288707908112.0,
+                2119974109749712.8
+              ]
+            },
+            "extent_ly": 234.41335097832626,
+            "age_myr": 12316.144635501294,
+            "mass_msun": 287443.7978202696,
+            "expected_members": 673639.8610318692,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e852000000000000",
+            "designation": "GMG F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                30,
+                18025,
+                1458
+              ],
+              "offset_m": [
+                1673848289767711.8,
+                7482864076492851.0,
+                2562012589786404.0
+              ]
+            },
+            "extent_ly": 136.53532628400123,
+            "age_myr": 12800.0,
+            "mass_msun": 67176.97809841397,
+            "expected_members": 162288.716632856,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e8a5200000000000",
+            "designation": "H99 F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                5458,
+                -27549,
+                -25328
+              ],
+              "offset_m": [
+                7678920816252488.0,
+                492942409101575.8,
+                2259241041016745.0
+              ]
+            },
+            "extent_ly": 531.0782701402961,
+            "age_myr": 12544.43337303007,
+            "mass_msun": 905189.4193075763,
+            "expected_members": 2112916.3474550354,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e8a9400000000000",
+            "designation": "HAA F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                6085,
+                -22503,
+                -21750
+              ],
+              "offset_m": [
+                2305793756758057.5,
+                7598826698593421.0,
+                8923501925906047.0
+              ]
+            },
+            "extent_ly": 114.08906344557782,
+            "age_myr": 11929.726219209793,
+            "mass_msun": 13304.77001277647,
+            "expected_members": 31733.09790722486,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e8ae000000000000",
+            "designation": "HBG F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                5493,
+                -19592,
+                2208
+              ],
+              "offset_m": [
+                4223601418954459.5,
+                4387719099277128.0,
+                7704558434437539.0
+              ]
+            },
+            "extent_ly": 165.6302803435568,
+            "age_myr": 12098.300940999206,
+            "mass_msun": 98193.53228304605,
+            "expected_members": 198453.1210581702,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e8b2000000000000",
+            "designation": "HCG F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                5230,
+                -14761,
+                1926
+              ],
+              "offset_m": [
+                3553473932669728.5,
+                6149051388942687.0,
+                3334765443336679.0
+              ]
+            },
+            "extent_ly": 128.47305882695733,
+            "age_myr": 10540.92040422812,
+            "mass_msun": 68569.02294970174,
+            "expected_members": 155566.9574293584,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e8b6600000000000",
+            "designation": "HDK F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                5492,
+                -9033,
+                15023
+              ],
+              "offset_m": [
+                8863325466861861.0,
+                4077705831664703.0,
+                4980214156349115.0
+              ]
+            },
+            "extent_ly": 174.17317973144492,
+            "age_myr": 10931.008399765322,
+            "mass_msun": 136099.9939520276,
+            "expected_members": 377766.1182010012,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e8b8400000000000",
+            "designation": "HE2 F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                5735,
+                -7670,
+                -57044
+              ],
+              "offset_m": [
+                6891713236924261.0,
+                7303076901440401.0,
+                4811771600794461.0
+              ]
+            },
+            "extent_ly": 515.0657680895216,
+            "age_myr": 12291.762099419382,
+            "mass_msun": 299629.5701991973,
+            "expected_members": 665485.6405298831,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e8b9e00000000000",
+            "designation": "HEF F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                8051,
+                -6231,
+                -1966
+              ],
+              "offset_m": [
+                8416060881622135.0,
+                1743746584042744.8,
+                3929250223626078.5
+              ]
+            },
+            "extent_ly": 268.8556647134634,
+            "age_myr": 12800.0,
+            "mass_msun": 1137735.562257604,
+            "expected_members": 2480780.9815636845,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e8ba200000000000",
+            "designation": "HEH F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                6828,
+                -7097,
+                5327
+              ],
+              "offset_m": [
+                6628915643999482.0,
+                1155799495027068.8,
+                9368763508932468.0
+              ]
+            },
+            "extent_ly": 130.04363698532148,
+            "age_myr": 12800.0,
+            "mass_msun": 115271.41600497559,
+            "expected_members": 250544.30761975236,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e8bd600000000000",
+            "designation": "HFB F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                7644,
+                -150,
+                -19643
+              ],
+              "offset_m": [
+                3385744484339528.5,
+                6481380166640835.0,
+                5802466015656720.0
+              ]
+            },
+            "extent_ly": 176.61627837728477,
+            "age_myr": 10788.012486743657,
+            "mass_msun": 113215.87390040702,
+            "expected_members": 251335.3666257025,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e8c1e00000000000",
+            "designation": "HGF F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                5239,
+                923,
+                -993
+              ],
+              "offset_m": [
+                3565579960459759.0,
+                5322726062630032.0,
+                1604257525164965.2
+              ]
+            },
+            "extent_ly": 19.950192472151162,
+            "age_myr": 12800.0,
+            "mass_msun": 1230.312114205211,
+            "expected_members": 2865.4361575834223,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e8c2200000000000",
+            "designation": "HGH F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                4849,
+                321,
+                4717
+              ],
+              "offset_m": [
+                8359260687395492.0,
+                6488521170565469.0,
+                8880565408534550.0
+              ]
+            },
+            "extent_ly": 127.77091786076933,
+            "age_myr": 12800.0,
+            "mass_msun": 231094.30867464855,
+            "expected_members": 520549.81205109373,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e8c2200080000000",
+            "designation": "HGH F1",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                5829,
+                3275,
+                5132
+              ],
+              "offset_m": [
+                1588741745130315.8,
+                950822895376145.6,
+                3128152196800698.0
+              ]
+            },
+            "extent_ly": 46.8729647665974,
+            "age_myr": 12800.0,
+            "mass_msun": 8195.79287739666,
+            "expected_members": 16461.182341403834,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e8c5c00100000000",
+            "designation": "HHE F2",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                4332,
+                4610,
+                -5105
+              ],
+              "offset_m": [
+                8172195974743090.0,
+                2122309745944083.8,
+                3612036648649772.0
+              ]
+            },
+            "extent_ly": 128.0869710660742,
+            "age_myr": 12978.050303152222,
+            "mass_msun": 176627.9618267323,
+            "expected_members": 368715.3655922228,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e8c5c00180000000",
+            "designation": "HHE F3",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                4419,
+                6945,
+                -5492
+              ],
+              "offset_m": [
+                559213499021298.75,
+                3480812580250676.5,
+                592082872728988.8
+              ]
+            },
+            "extent_ly": 201.86724731343605,
+            "age_myr": 12792.014411301237,
+            "mass_msun": 515568.2014262922,
+            "expected_members": 1077814.566789132,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e8c9a00000000000",
+            "designation": "HJD F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                7328,
+                11799,
+                -8859
+              ],
+              "offset_m": [
+                6219430753392753.0,
+                9427046916837348.0,
+                3308839797968881.0
+              ]
+            },
+            "extent_ly": 273.96948777306415,
+            "age_myr": 11272.79467518273,
+            "mass_msun": 624459.7010817025,
+            "expected_members": 1644524.5285317162,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e8cac00000000000",
+            "designation": "HJP F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                6894,
+                10729,
+                25368
+              ],
+              "offset_m": [
+                7727232790389018.0,
+                4781198898636452.0,
+                7936591306680233.0
+              ]
+            },
+            "extent_ly": 205.6817498810688,
+            "age_myr": 11024.091040790312,
+            "mass_msun": 100454.55953021762,
+            "expected_members": 257699.82442047994,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e92a200000000000",
+            "designation": "JAH F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                9857,
+                -21845,
+                6869
+              ],
+              "offset_m": [
+                1007630717650323.5,
+                3469505276850320.5,
+                87333378985947.95
+              ]
+            },
+            "extent_ly": 166.43376744757703,
+            "age_myr": 12841.878713590146,
+            "mass_msun": 69488.52737124021,
+            "expected_members": 148250.70675135872,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e931200000000000",
+            "designation": "JC9 F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                9581,
+                -14048,
+                -25244
+              ],
+              "offset_m": [
+                7448653389739727.0,
+                4034874277149822.0,
+                4801037579562390.0
+              ]
+            },
+            "extent_ly": 251.84958219531447,
+            "age_myr": 12473.947399438017,
+            "mass_msun": 158660.89822688588,
+            "expected_members": 443198.20931882533,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e931a00000000000",
+            "designation": "JCD F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                8265,
+                -12826,
+                -11970
+              ],
+              "offset_m": [
+                5794175310436013.0,
+                5335336251510338.0,
+                883022631999696.2
+              ]
+            },
+            "extent_ly": 304.7073765835451,
+            "age_myr": 11333.995378192785,
+            "mass_msun": 668475.1106676217,
+            "expected_members": 1700584.6727361854,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e932e00000000000",
+            "designation": "JCQ F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                8598,
+                -14086,
+                28757
+              ],
+              "offset_m": [
+                3520953204822499.0,
+                440819168257999.44,
+                9193554747287584.0
+              ]
+            },
+            "extent_ly": 350.94616972419675,
+            "age_myr": 12800.0,
+            "mass_msun": 354397.69262689044,
+            "expected_members": 991709.0536340821,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e93a400000000000",
+            "designation": "JEJ F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                8405,
+                -6292,
+                10448
+              ],
+              "offset_m": [
+                7117630724690953.0,
+                4199382451901060.5,
+                9245442245263252.0
+              ]
+            },
+            "extent_ly": 168.63786187221103,
+            "age_myr": 11138.216180805422,
+            "mass_msun": 169672.2486790749,
+            "expected_members": 470296.1767065418,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e941e00000000000",
+            "designation": "JGF F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                8320,
+                3738,
+                -2314
+              ],
+              "offset_m": [
+                7747973836929613.0,
+                8658548479637323.0,
+                3051514365645852.0
+              ]
+            },
+            "extent_ly": 139.7004408857523,
+            "age_myr": 12800.0,
+            "mass_msun": 184005.5485029954,
+            "expected_members": 331524.6341291261,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e942200000000000",
+            "designation": "JGH F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                10101,
+                3997,
+                6206
+              ],
+              "offset_m": [
+                2613846908894999.0,
+                551707877737188.0,
+                725779245222530.1
+              ]
+            },
+            "extent_ly": 121.7795335588289,
+            "age_myr": 12800.0,
+            "mass_msun": 80951.53944184449,
+            "expected_members": 173348.98753738363,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e946000000000000",
+            "designation": "JHG F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                11415,
+                7849,
+                703
+              ],
+              "offset_m": [
+                7227870085012611.0,
+                9309736714907420.0,
+                5162196276330452.0
+              ]
+            },
+            "extent_ly": 64.62384605595027,
+            "age_myr": 12800.0,
+            "mass_msun": 10470.470718190823,
+            "expected_members": 25198.431423272086,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e949c00000000000",
+            "designation": "JJE F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                11970,
+                9124,
+                -7822
+              ],
+              "offset_m": [
+                5626867018846708.0,
+                3572461157471437.5,
+                3021614839073957.0
+              ]
+            },
+            "extent_ly": 221.80175088167528,
+            "age_myr": 12454.444756541881,
+            "mass_msun": 317373.9854500494,
+            "expected_members": 724173.6063305673,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e956000000000000",
+            "designation": "JNG F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                9505,
+                22154,
+                2561
+              ],
+              "offset_m": [
+                8462041160408772.0,
+                35060862880054.312,
+                7667137721294704.0
+              ]
+            },
+            "extent_ly": 130.49924602222558,
+            "age_myr": 12800.0,
+            "mass_msun": 35372.41174944702,
+            "expected_members": 77062.77459254704,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e9aa600000000000",
+            "designation": "KAK F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                15797,
+                -21096,
+                15447
+              ],
+              "offset_m": [
+                2097043068215276.5,
+                2891873791783409.5,
+                4271571954736103.0
+              ]
+            },
+            "extent_ly": 252.24645365428375,
+            "age_myr": 12332.78428219581,
+            "mass_msun": 158128.00387719244,
+            "expected_members": 409022.8365820783,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e9b6a00000000000",
+            "designation": "KDN F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                12645,
+                -11251,
+                21403
+              ],
+              "offset_m": [
+                754263971438677.5,
+                3477953257975449.0,
+                7137181037187170.0
+              ]
+            },
+            "extent_ly": 210.25766755034397,
+            "age_myr": 12982.132902657151,
+            "mass_msun": 116679.7219139833,
+            "expected_members": 324653.5723416192,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e9bde00000000000",
+            "designation": "KFF F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                12701,
+                -809,
+                -151
+              ],
+              "offset_m": [
+                9420373154577526.0,
+                6702297211784761.0,
+                6580346641323176.0
+              ]
+            },
+            "extent_ly": 82.27047976151712,
+            "age_myr": 12800.0,
+            "mass_msun": 24364.782077749613,
+            "expected_members": 46870.958897863224,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e9c1e00000000000",
+            "designation": "KGF F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                14950,
+                1444,
+                -536
+              ],
+              "offset_m": [
+                7440226922777597.0,
+                992996143855135.2,
+                953052317811232.0
+              ]
+            },
+            "extent_ly": 176.39325789116015,
+            "age_myr": 11594.744800746925,
+            "mass_msun": 190218.42031301418,
+            "expected_members": 528501.8839196757,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e9c2000000000000",
+            "designation": "KGG F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                15068,
+                3481,
+                2929
+              ],
+              "offset_m": [
+                3084905098268694.0,
+                4248841739769999.5,
+                7721995413937526.0
+              ]
+            },
+            "extent_ly": 104.58638485053685,
+            "age_myr": 12800.0,
+            "mass_msun": 37119.18940028413,
+            "expected_members": 85459.91786568768,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e9c2400000000000",
+            "designation": "KGJ F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                13668,
+                2781,
+                8776
+              ],
+              "offset_m": [
+                2458186152315588.0,
+                9360112270995438.0,
+                872375406880528.4
+              ]
+            },
+            "extent_ly": 334.0203228545393,
+            "age_myr": 12800.0,
+            "mass_msun": 1131185.1036959183,
+            "expected_members": 2238304.192878898,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "e9c5400000000000",
+            "designation": "KHA F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                12602,
+                7284,
+                -21559
+              ],
+              "offset_m": [
+                7404504483916960.0,
+                3373863092174672.0,
+                250580428084073.06
+              ]
+            },
+            "extent_ly": 379.24003019907076,
+            "age_myr": 12117.501857817619,
+            "mass_msun": 755277.9065808809,
+            "expected_members": 1474308.9447603638,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "ea19a00000000000",
+            "designation": "M6D F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                16651,
+                -39564,
+                -9061
+              ],
+              "offset_m": [
+                7399154293358948.0,
+                8116618037560928.0,
+                5738982597559623.0
+              ]
+            },
+            "extent_ly": 381.2359231663456,
+            "age_myr": 12411.973747197742,
+            "mass_msun": 235099.72161157115,
+            "expected_members": 478844.30094772985,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "ea35c00000000000",
+            "designation": "MDE F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                16967,
+                -11331,
+                -7566
+              ],
+              "offset_m": [
+                4091744699722410.0,
+                7283481327426151.0,
+                4904869066717693.0
+              ]
+            },
+            "extent_ly": 218.33463535002318,
+            "age_myr": 12800.0,
+            "mass_msun": 202291.49621970186,
+            "expected_members": 371849.05765177665,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "ea47800000000000",
+            "designation": "MHW F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                16715,
+                4184,
+                49943
+              ],
+              "offset_m": [
+                2554121637421172.0,
+                196789840528453.03,
+                8897398506386357.0
+              ]
+            },
+            "extent_ly": 308.38231096659314,
+            "age_myr": 10884.345206958229,
+            "mass_msun": 79682.15835956244,
+            "expected_members": 164492.91192283068,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "eab5a00000000000",
+            "designation": "NDD F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                21652,
+                -9739,
+                -9049
+              ],
+              "offset_m": [
+                8768736247086004.0,
+                6206309836917267.0,
+                5047110237002014.0
+              ]
+            },
+            "extent_ly": 266.86230380963536,
+            "age_myr": 12708.72223824185,
+            "mass_msun": 275898.3176805446,
+            "expected_members": 545615.3207347419,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "eabaa00000000000",
+            "designation": "NEN F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                22089,
+                -7078,
+                20632
+              ],
+              "offset_m": [
+                3133072200234702.5,
+                2710402551378099.0,
+                4504977137127289.0
+              ]
+            },
+            "extent_ly": 176.3096571897425,
+            "age_myr": 12800.0,
+            "mass_msun": 52106.829207939525,
+            "expected_members": 121209.12897010878,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "eb31e00000000000",
+            "designation": "PCF F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                24974,
+                -13912,
+                -3171
+              ],
+              "offset_m": [
+                8149929566498547.0,
+                8954689819796440.0,
+                3251081970074922.5
+              ]
+            },
+            "extent_ly": 208.2628896305505,
+            "age_myr": 12181.18906912546,
+            "mass_msun": 101450.17429294984,
+            "expected_members": 213441.6468581989,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "ec26e00000000000",
+            "designation": "R9Q F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                36561,
+                -27020,
+                31159
+              ],
+              "offset_m": [
+                4482234350029885.5,
+                6475533223591538.0,
+                4729587536289219.0
+              ]
+            },
+            "extent_ly": 731.6357802694066,
+            "age_myr": 10821.292961043042,
+            "mass_msun": 962376.4533992258,
+            "expected_members": 2117028.3702533385,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "ec46000000000000",
+            "designation": "RHG F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                34444,
+                4366,
+                305
+              ],
+              "offset_m": [
+                6883569294714962.0,
+                5648214975813593.0,
+                6944867443643441.0
+              ]
+            },
+            "extent_ly": 165.6276016738219,
+            "age_myr": 12800.0,
+            "mass_msun": 33515.97736668499,
+            "expected_members": 71049.4606981403,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "ecddc00000000000",
+            "designation": "SQE F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                37230,
+                29263,
+                -7976
+              ],
+              "offset_m": [
+                8193534052284254.0,
+                2770472381936459.0,
+                5618485199026735.0
+              ]
+            },
+            "extent_ly": 296.1161383733281,
+            "age_myr": 12521.259690701989,
+            "mass_msun": 88655.93046612863,
+            "expected_members": 213340.21185422182,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "ed3d800000000000",
+            "designation": "TFC F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                42444,
+                -2871,
+                -14706
+              ],
+              "offset_m": [
+                4358259263259329.0,
+                523583585930019.6,
+                1450070863698675.2
+              ]
+            },
+            "extent_ly": 297.00050795932384,
+            "age_myr": 11703.541471527482,
+            "mass_msun": 104509.80812727615,
+            "expected_members": 204907.94527025713,
+            "emission": null,
+            "bubble_radius_ly": null
+          },
+          {
+            "id": "eea9e00000000000",
+            "designation": "XAF F0",
+            "kind": "globular",
+            "position": {
+              "cell_ly": [
+                54906,
+                -22009,
+                -173
+              ],
+              "offset_m": [
+                370696641249421.25,
+                406371898436428.2,
+                4329823665252042.5
+              ]
+            },
+            "extent_ly": 449.43162393964104,
+            "age_myr": 12800.0,
+            "mass_msun": 188873.49932639164,
+            "expected_members": 524987.0380825909,
+            "emission": null,
+            "bubble_radius_ly": null
+          }
+        ]
+      },
+      {
+        "kind": "galactic_centre",
+        "status": "complete",
+        "features": [
+          {
+            "id": "f000000000000000",
+            "designation": "CENTRE",
+            "kind": "galactic_centre",
+            "position": {
+              "cell_ly": [
+                0,
+                0,
+                0
+              ],
+              "offset_m": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            "extent_ly": 128.0,
+            "age_myr": null,
+            "mass_msun": 38086578.590371355,
+            "expected_members": 91669667.47817504,
+            "emission": null,
+            "bubble_radius_ly": null
+          }
+        ]
+      },
+      {
+        "kind": "bright_shell",
+        "status": "not_generated"
+      }
+    ]
+  }
+}

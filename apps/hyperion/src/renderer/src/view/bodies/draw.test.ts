@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import type { BodyIdHex } from "@hyperion/protocol";
+import { describe, expect, it, vi } from "vitest";
 
 import { add, cross, dot, norm, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
 import {
@@ -9,11 +10,18 @@ import {
   SUN_RADIUS_M,
 } from "../../test/litFixtures";
 import { PROVISIONAL_PHOTOMETRY } from "../appearance/fromWire";
-import { phaseFactorFromTable, phaseFactorTableOf } from "../appearance/law";
+import { limbShareAt, phaseFactorFromTable, phaseFactorTableOf } from "../appearance/law";
 import { brdf } from "../appearance/brdf";
 import { lawFor } from "../appearance/phase";
 import { IDENTITY_QUATERNION } from "../camera/quaternion";
-import { pixelSolidAngle, type ProjectionCamera, type Viewport } from "../camera/projection";
+import {
+  NEAR_PLANE_M,
+  perspectiveReversedInfinite,
+  pixelSolidAngle,
+  type ProjectionCamera,
+  type Viewport,
+  viewRotation4,
+} from "../camera/projection";
 import { DISC_ANNULI_HIGH } from "../lighting/annuli";
 import {
   litNeighbours,
@@ -29,24 +37,62 @@ import { AU_M } from "../scenes/kept";
 import { METER_CLASS } from "../post/meter";
 import {
   compositeDiscPixels,
+  discRadianceAlong,
   DISC_ROWS,
+  type DiscRecord,
+  drawnThroughCells,
   packDiscRecords,
   rasteriseDisc,
   viewRay,
 } from "./discShading";
 import { hostAnnuli, type PlacedLight } from "../lighting/hostLights";
 import {
+  BODY_DISC_CELLS_KERNEL,
   type BodyFrameOptions,
+  type BodyFramePlan,
+  bodyLightSources,
+  type DiscCellFrame,
+  insideFigure,
   LitBodyRenderer,
   type LitBodyInput,
   planLitBodies,
   pointFlux,
+  SMOOTH_MESH_CLUSTER_MATERIAL,
+  SMOOTH_MESH_MATERIAL,
+  BODY_DISC_MATERIALS,
 } from "./draw";
+import { bindingStages } from "../../test/wgslStages";
+import { datumNormalMap, UNREAD_TEXTURES, unreadNormalMap } from "../../test/normalMapFixtures";
+import type { DiscSurface } from "../appearance/bodyAppearance";
+import { IDENTITY_ROTATION, rotation3FromRows } from "../coords/rotation";
 import { countingRenderEngine } from "../../test/countingRenderEngine";
+import { microtasks } from "../../test/opticsFakes";
 import { WIREFRAME_MATERIALS } from "../wireframe/submit";
-import type { DrawItem } from "../engine/types";
-import { sphereFootprint } from "./regime";
+import type { DrawItem, TextureHandle } from "../engine/types";
+import bodyDiscWgsl from "../shaders/bodyDisc.wgsl?raw";
+import terrainPatchWgsl from "../terrain/shaders/terrainPatch.wgsl?raw";
+import { classMapSurface, type ClassMapTexels, packClassMap } from "./discSurface";
+import { stepAirPoints } from "./airPoint";
+import {
+  AIR_SWITCH_CASES,
+  AIR_SWITCH_FIXTURES,
+  type AirSwitchBody,
+  airSwitchBodyOf,
+  airSwitchFixtureOf,
+} from "../../test/airSwitchCases";
+import {
+  surfaceLightingDrawTextures,
+  type SurfaceLightingTables,
+} from "../atmosphere/surfaceLighting";
+import { type LitRegime, sphereFootprint } from "./regime";
+import { limbDistanceM } from "../terrain/handover";
 import { DISC_LIMB_DEPTHS, rotationColumns } from "./smoothMesh";
+import type { DiscGround } from "../atmosphere/AtmosphereCache";
+import type { SpheroidFigure } from "../atmosphere/oblate";
+import type { DiscAir } from "../atmosphere/discReflectance";
+import { DISC_LAYER_VALUES } from "../atmosphere/discTable";
+import { surfaceTemperatureFieldOf } from "../atmosphere/thermal";
+import { lavaWorldSurface } from "../../test/thermalSurfaces";
 
 const VIEWPORT: Viewport = { widthPx: 1920, heightPx: 1080 };
 const CAMERA: ProjectionCamera = { orientation: IDENTITY_QUATERNION, fovXRad: Math.PI / 3 };
@@ -78,9 +124,15 @@ function scene(
   };
 }
 
+/** A plan's point sprites, in its steps' order. */
+function pointSprites(plan: BodyFramePlan): ReadonlyArray<unknown> {
+  return plan.steps.flatMap((step) => (step.kind === "points" ? step.sprites : []));
+}
+
 const OPTIONS = {
   camera: CAMERA,
   viewport: VIEWPORT,
+  presentedPx: VIEWPORT,
   exposureScale: EXPOSURE,
   annuli: 4,
   planetshine: PLANETSHINE_SOURCES_HIGH,
@@ -96,6 +148,7 @@ function discFlux(
   hosts: ReadonlyArray<PlacedLight>,
   others: ReadonlyArray<LitBodyInput> = [],
   options: BodyFrameOptions = OPTIONS,
+  classMap: ClassMapTexels | null = null,
 ): [number, number, number] {
   const plan = planLitBodies([body, ...others], hosts, options, new Map([[body.id, "disc"]]));
   const record = plan.discs.find((each) => each.body === body.id);
@@ -103,7 +156,7 @@ function discFlux(
     throw new Error("the body was not drawn as a disc");
   }
   const flux: [number, number, number] = [0, 0, 0];
-  const drawn = rasteriseDisc(record, CAMERA, VIEWPORT);
+  const drawn = rasteriseDisc(record, CAMERA, VIEWPORT, classMap);
   for (const pixel of compositeDiscPixels(drawn)) {
     const ray = viewRay(pixel.xPx + 0.5, pixel.yPx + 0.5, CAMERA, VIEWPORT);
     const omega = pixelSolidAngle(ray, CAMERA, VIEWPORT);
@@ -120,9 +173,15 @@ const ORACLE_PHI = 800;
 
 /**
  * The body's exact flux at the camera per channel, lx, from a finite distance: the disc's own law
- * (its horizon term, the Lommel–Seeliger floor and its oblate albedo scale) integrated over the
- * visible, lit spheroid in `f64`, each element weighted by μ dA ÷ r² (decision-r07-t8a, follow-up
- * (b)). No eclipses: the bodies tested have no occluders.
+ * (its horizon term, the Lommel–Seeliger floor, its oblate albedo scale at L(0) and its L(α) at
+ * each element's phase) integrated over the visible, lit spheroid in `f64`, each element weighted
+ * by μ dA ÷ r² (decision-r07-t8a, follow-up (b)). No eclipses: the bodies tested have no
+ * occluders.
+ *
+ * Each element's vectors are written out in scalars, each component by the very operations of
+ * `vec3`'s `add`, `sub`, `scale`, `dot`, `norm` and `normalise`, in their order, and cos φ and
+ * sin φ are tabulated once: the same sum, bit for bit, as through those functions, without a
+ * dozen objects for each of the 320,000 elements.
  */
 function nearFieldFlux(
   body: LitBodyInput,
@@ -139,36 +198,68 @@ function nearFieldFlux(
   const flux: [number, number, number] = [0, 0, 0];
   const dTheta = Math.PI / ORACLE_THETA;
   const dPhi = (2 * Math.PI) / ORACLE_PHI;
+  const cosPhi = new Float64Array(ORACLE_PHI);
+  const sinPhi = new Float64Array(ORACLE_PHI);
+  for (let j = 0; j < ORACLE_PHI; j += 1) {
+    const phi = (j + 0.5) * dPhi;
+    cosPhi[j] = Math.cos(phi);
+    sinPhi[j] = Math.sin(phi);
+  }
+  const centre = body.centreM;
   for (const host of hosts) {
     const e = starIlluminance(host.disc, norm(sub(host.centreM, body.centreM)));
+    const star = host.centreM;
     for (let i = 0; i < ORACLE_THETA; i += 1) {
       const theta = (i + 0.5) * dTheta;
       const sinT = Math.sin(theta);
       const cosT = Math.cos(theta);
       for (let j = 0; j < ORACLE_PHI; j += 1) {
-        const phi = (j + 0.5) * dPhi;
-        const sx = sinT * Math.cos(phi);
-        const sy = sinT * Math.sin(phi);
-        const local = (u: number, v: number, w: number) =>
-          vec3(
-            u * ex.x + v * ey.x + w * pole.x,
-            u * ex.y + v * ey.y + w * pole.y,
-            u * ex.z + v * ey.z + w * pole.z,
-          );
-        const x = add(body.centreM, local(a * sx, a * sy, c * cosT));
-        const normal = normalise(local(sx / a, sy / a, cosT / c));
+        const sx = sinT * (cosPhi[j] ?? 0);
+        const sy = sinT * (sinPhi[j] ?? 0);
+        // The point x = centre + local(a sx, a sy, c cos θ).
+        const pu = a * sx;
+        const pv = a * sy;
+        const pw = c * cosT;
+        const xx = centre.x + (pu * ex.x + pv * ey.x + pw * pole.x);
+        const xy = centre.y + (pu * ex.y + pv * ey.y + pw * pole.y);
+        const xz = centre.z + (pu * ex.z + pv * ey.z + pw * pole.z);
+        // The normal, local(sx ÷ a, sy ÷ a, cos θ ÷ c) normalised.
+        const nu = sx / a;
+        const nv = sy / a;
+        const nw = cosT / c;
+        const mx = nu * ex.x + nv * ey.x + nw * pole.x;
+        const my = nu * ex.y + nv * ey.y + nw * pole.y;
+        const mz = nu * ex.z + nv * ey.z + nw * pole.z;
+        const length = Math.hypot(mx, my, mz);
+        if (!(length > 0) || !Number.isFinite(length)) {
+          throw new RangeError(`cannot normalise a normal of length ${String(length)}`);
+        }
+        const inverseLength = 1 / length;
+        const nx = mx * inverseLength;
+        const ny = my * inverseLength;
+        const nz = mz * inverseLength;
         const area =
           a * sinT * Math.sqrt(c * c * sinT * sinT + a * a * cosT * cosT) * dTheta * dPhi;
-        const r = norm(x);
-        const toCamera = scale(x, -1 / r);
-        const mu = dot(normal, toCamera);
+        const r = Math.hypot(xx, xy, xz);
+        // The unit vector to the camera, x × (−1 ÷ r).
+        const toR = -1 / r;
+        const cx = xx * toR;
+        const cy = xy * toR;
+        const cz = xz * toR;
+        const mu = nx * cx + ny * cy + nz * cz;
         if (mu <= 0) {
           continue;
         }
-        const toStar = sub(host.centreM, x);
-        const d = norm(toStar);
-        const towards = scale(toStar, 1 / d);
-        const mu0 = dot(normal, towards);
+        // The unit vector to the star, (star − x) × (1 ÷ d).
+        const sxM = star.x - xx;
+        const syM = star.y - xy;
+        const szM = star.z - xz;
+        const d = Math.hypot(sxM, syM, szM);
+        const toD = 1 / d;
+        const tx = sxM * toD;
+        const ty = syM * toD;
+        const tz = szM * toD;
+        const mu0 = nx * tx + ny * ty + nz * tz;
         const horizon = sphereIrradianceFactor(
           d / host.disc.radius_m,
           Math.acos(Math.min(1, Math.max(-1, mu0))),
@@ -176,9 +267,10 @@ function nearFieldFlux(
         if (horizon <= 0) {
           continue;
         }
-        const alpha = Math.acos(Math.min(1, Math.max(-1, dot(towards, toCamera))));
+        const alpha = Math.acos(Math.min(1, Math.max(-1, tx * cx + ty * cy + tz * cz)));
         const f = phaseFactorFromTable(table, alpha);
-        const share = law.lommelSeeligerShare;
+        // L(α) at the element's own phase, the law's (R10.T10.b; decision-r07-t8b).
+        const share = limbShareAt(law, alpha);
         const floor = Math.asin(Math.min(1, host.disc.radius_m / d));
         const discTerm =
           (share * 2 * horizon) / Math.max(Math.max(mu0, 0) + mu, floor) + (1 - share) * horizon;
@@ -296,7 +388,10 @@ describe("the disc and the point at the 3 px switch", () => {
     }
   });
 
-  /** The lunar law (L = 1) and the f = 0.098 spheroid seen from 45° latitude. */
+  /**
+   * The lunar law (L(0) = 1, under McEwen's L(α) since R10.T10.b) and the f = 0.098 spheroid seen
+   * from 45° latitude.
+   */
   const moon = {
     ...PROVISIONAL_PHOTOMETRY,
     law: lawFor([0.12, 0.12, 0.12], [0.6, 0.6, 0.6], "moon"),
@@ -307,8 +402,16 @@ describe("the disc and the point at the 3 px switch", () => {
     pole: vec3(0, Math.SQRT1_2, Math.SQRT1_2),
   };
 
-  it("holds for a lunar law (L = 1)", () => {
+  it("holds for a lunar law (L(0) = 1)", () => {
     for (const phaseDeg of [0, 90, 150]) {
+      expect(worstOver(3, phaseDeg, { photometry: moon })).toBeLessThan(0.01);
+    }
+  });
+
+  // R10.T10.b: McEwen's L(α) moves the Moon's limb profile, not its flux (decision-r07-t8b).
+  it("holds for the Moon template under McEwen's L(α) at 30°, 90° and 120°", () => {
+    expect(moon.law.lommelSeeligerCurve).toBe("mcewen-1996");
+    for (const phaseDeg of [30, 90, 120]) {
       expect(worstOver(3, phaseDeg, { photometry: moon })).toBeLessThan(0.01);
     }
   });
@@ -321,7 +424,7 @@ describe("the disc and the point at the 3 px switch", () => {
 
   // From 4 to 32 px at 150°, against the near field (decision-r07-small-disc-cost, G2′).
   for (const px of [4.01, 8, 13, 24]) {
-    it(`holds the near-field flux for a lunar law (L = 1) to 1% at ${String(px)} px and 150°`, () => {
+    it(`holds the near-field flux for a lunar law (L(0) = 1) to 1% at ${String(px)} px and 150°`, () => {
       expect(worstOver(px, 150, { photometry: moon }, "near-field")).toBeLessThan(0.01);
     });
 
@@ -339,6 +442,171 @@ describe("the disc and the point at the 3 px switch", () => {
     const point = pointFlux(body, hosts, [], DISC_ANNULI_HIGH);
     expect(Math.abs(disc[1] / point[1] - 1)).toBeLessThan(0.01);
   });
+});
+
+/** Finds every queued air point's ratio at once. */
+const drainAirPoints = (): void => {
+  while (stepAirPoints(Number.POSITIVE_INFINITY, () => 0, "all")) {
+    // Every queued ratio found.
+  }
+};
+/** The point's flux once each star's ratio is found in the frames' slices, as at its first frame. */
+const airPointFlux = (body: LitBodyInput, hosts: ReadonlyArray<PlacedLight>): Rgb => {
+  // No other test's work left queued.
+  drainAirPoints();
+  pointFlux(body, hosts, [], DISC_ANNULI_HIGH);
+  drainAirPoints();
+  return pointFlux(body, hosts, [], DISC_ANNULI_HIGH);
+};
+/**
+ * The tabled disc's own exact flux, Σ L Ω ÷ exposure over its record's figure at Gauss–Legendre
+ * nodes in t = √(1 − ρ²), 64 of them by 128 azimuths, ρ the outline made a unit circle: within
+ * 2 × 10⁻⁴ of 256 by 512 on TEST EARTH, TEST MARS and TEST VENUS at 90°, 150° and 165°
+ * (2026-11-06), where the pixels' 8 × 8 cells are not (TEST VENUS's crescent).
+ */
+const exactDiscFlux = (record: DiscRecord, classMap: ClassMapTexels | null): Rgb => {
+  const radiance = discRadianceAlong(record, CAMERA, classMap);
+  const c = record.direction;
+  const along = dot(record.pole, c);
+  const v = normalise(sub(record.pole, scale(c, along)));
+  const u = normalise(cross(v, c));
+  const a = Math.tan(Math.asin(record.radiusOverDistance));
+  const b = a * Math.hypot(along, record.polarOverEquatorial * Math.sqrt(1 - along * along));
+  const rings = 64;
+  const azimuths = 128;
+  // Gauss–Legendre on [0, 1] by Newton's method from Chebyshev's guesses.
+  const nodes: Array<readonly [number, number]> = [];
+  for (let i = 0; i < rings; i += 1) {
+    let x = Math.cos((Math.PI * (i + 0.75)) / (rings + 0.5));
+    let slope = 1;
+    for (let step = 0; step < 100; step += 1) {
+      let p0 = 1;
+      let p1 = x;
+      for (let k = 2; k <= rings; k += 1) {
+        [p0, p1] = [p1, ((2 * k - 1) * x * p1 - (k - 1) * p0) / k];
+      }
+      slope = (rings * (x * p1 - p0)) / (x * x - 1);
+      x -= p1 / slope;
+    }
+    nodes.push([0.5 * (x + 1), 1 / ((1 - x * x) * slope * slope)]);
+  }
+  const flux: [number, number, number] = [0, 0, 0];
+  for (const [t, weight] of nodes) {
+    const rho = Math.sqrt(1 - t * t);
+    for (let j = 0; j < azimuths; j += 1) {
+      const phi = ((j + 0.5) / azimuths) * 2 * Math.PI;
+      const x = a * rho * Math.cos(phi);
+      const y = b * rho * Math.sin(phi);
+      const light = radiance(normalise(add(c, add(scale(u, x), scale(v, y)))));
+      if (light === null) {
+        continue;
+      }
+      const omega = (a * b * t * weight * 2 * Math.PI) / azimuths / (1 + x * x + y * y) ** 1.5;
+      for (const ch of [0, 1, 2] as const) {
+        flux[ch] += (light[ch] * omega) / EXPOSURE;
+      }
+    }
+  }
+  return flux;
+};
+/**
+ * The worst |disc ÷ point − 1| at 3 px a case allows: 1%, but TEST VENUS's at 150°, where the
+ * disc's 8 × 8 cells and its limb's profile take 3.2% less than its own exact flux (its deck's
+ * glow rising at the limb faster than the profile's √δ) and the point, a far field, 0.6% more:
+ * pinned as measured (2026-11-06), a finding of the disc's.
+ */
+const boundOf = (name: string, phaseDeg: number): number =>
+  name === "test-venus" && phaseDeg === 150 ? 0.04 : 0.01;
+describe("an air body's disc drawn by its table and its point at the 3 px switch (R08.T16.b)", () => {
+  /** A rotation whose body-fixed z, a class map's pole, is the view's +y. */
+  const POLE_UP = rotation3FromRows([vec3(1, 0, 0), vec3(0, 0, 1), vec3(0, -1, 0)]);
+  const options: BodyFrameOptions = { ...OPTIONS, drawsAir: true };
+  /**
+   * The case's body `px` across at the centre pixel's scale at phase `phaseDeg`, equator-on, its
+   * centre and its star moved `offsetPx` across the view at its distance.
+   */
+  const sceneOf = (
+    item: AirSwitchBody,
+    px: number,
+    phaseDeg: number,
+    offsetPx: readonly [number, number],
+  ): { readonly body: LitBodyInput; readonly hosts: PlacedLight[] } => {
+    const distance = item.figure.equatorialRadiusM / Math.sin(px / 2 / PX_PER_RAD);
+    const offset = vec3(
+      (offsetPx[0] * distance) / PX_PER_RAD,
+      (offsetPx[1] * distance) / PX_PER_RAD,
+      0,
+    );
+    const placed = scene(distance, phaseDeg, {
+      figure: { ...item.figure, pole: vec3(0, 1, 0) },
+      photometry: item.photometry,
+      air: item.air,
+      ...(item.surface === undefined ? {} : { surface: item.surface, rotation: POLE_UP }),
+    });
+    return {
+      body: { ...placed.body, centreM: add(placed.body.centreM, offset) },
+      hosts: placed.hosts.map((host) => ({ disc: host.disc, centreM: add(host.centreM, offset) })),
+    };
+  };
+  for (const name of AIR_SWITCH_CASES) {
+    const fixture = airSwitchFixtureOf(AIR_SWITCH_FIXTURES[name].json);
+    /** The case decoded anew, its table its own, so that no other test's held ratios are its. */
+    const caseOf = (): { readonly item: AirSwitchBody; readonly map: ClassMapTexels | null } => {
+      const item = airSwitchBodyOf(fixture);
+      return { item, map: item.surface?.kind === "class-map" ? item.surface.texels : null };
+    };
+    for (const phaseDeg of [0, 45, 90, 150]) {
+      it(`meets the tabled disc's own exact flux per channel with ${fixture.name}'s point, to 1%, at ${String(phaseDeg)}°`, () => {
+        const { item, map } = caseOf();
+        const disc = sceneOf(item, 3.01, phaseDeg, [0, 0]);
+        const point = sceneOf(item, 2.99, phaseDeg, [0, 0]);
+        const plan = planLitBodies(
+          [disc.body],
+          disc.hosts,
+          options,
+          new Map([[disc.body.id, "disc"]]),
+        );
+        const record = plan.discs[0];
+        if (record?.air === undefined) {
+          throw new Error("the disc is drawn by its table");
+        }
+        const exact = exactDiscFlux(record, map);
+        const flux = airPointFlux(point.body, point.hosts);
+        const k = (norm(point.body.centreM) / norm(disc.body.centreM)) ** 2;
+        for (const c of [0, 1, 2] as const) {
+          expect(Math.abs(exact[c] / (flux[c] * k) - 1)).toBeLessThan(0.01);
+        }
+      });
+      it(`draws one flux per channel on ${fixture.name}'s tabled disc at 3.01 px and its point at 2.99 px, to ${String(100 * boundOf(name, phaseDeg))}%, at ${String(phaseDeg)}°`, () => {
+        const { item, map } = caseOf();
+        let worst = 0;
+        for (const offsetPx of [
+          [0, 0],
+          [0.5, 0],
+          [0, 0.5],
+          [0.5, 0.5],
+        ] as const) {
+          const disc = sceneOf(item, 3.01, phaseDeg, offsetPx);
+          const point = sceneOf(item, 2.99, phaseDeg, offsetPx);
+          const plan = planLitBodies(
+            [disc.body],
+            disc.hosts,
+            options,
+            new Map([[disc.body.id, "disc"]]),
+          );
+          expect(plan.tabled.has(disc.body.id)).toBe(true);
+          const drawn = discFlux(disc.body, disc.hosts, [], options, map);
+          const flux = airPointFlux(point.body, point.hosts);
+          // Both at one distance: F Δ².
+          const k = (norm(point.body.centreM) / norm(disc.body.centreM)) ** 2;
+          for (const c of [0, 1, 2] as const) {
+            worst = Math.max(worst, Math.abs(drawn[c] / (flux[c] * k) - 1));
+          }
+        }
+        expect(worst).toBeLessThan(boundOf(name, phaseDeg));
+      });
+    }
+  }
 });
 
 describe("the disc's geometry", () => {
@@ -500,10 +768,374 @@ describe("the plan", () => {
     expect(planet?.occluders[0]?.radius).toBeCloseTo(1.737e6 / 6.371e6, 9);
   });
 
+  it("gives each drawn body's stars and planetshine, the arrays its record shades with (R08.T10.b)", () => {
+    const { body, hosts } = scene(6.371e6 / Math.sin(40 / PX_PER_RAD), 30);
+    const star = hosts[0]?.centreM ?? vec3(0, 0, 0);
+    const towards = scale(add(star, scale(body.centreM, -1)), 1 / AU_M);
+    const moon: LitBodyInput = {
+      ...body,
+      id: "0200080020000000.0301",
+      centreM: add(body.centreM, scale(towards, -3.844e8)),
+      figure: { equatorialRadiusM: 1.737e6, polarRadiusM: 1.737e6, pole: null },
+    };
+    const plan = planLitBodies([body, moon], hosts, OPTIONS, new Map([[body.id, "disc"]]));
+    const sources = plan.sources.get(body.id);
+    const record = plan.discs.find((each) => each.body === body.id);
+    expect(sources?.stars.map((light) => light.illuminance)).toEqual(
+      record?.lights.map((light) => light.illuminance),
+    );
+    expect(sources?.planetshine.map((source) => source.illuminance)).toEqual(
+      record?.secondaries.map((source) => source.illuminance),
+    );
+    // A body the plan holds no record of takes its sources as the plan would.
+    expect(bodyLightSources(body, [body, moon], hosts, OPTIONS)).toEqual(sources);
+  });
+
+  it("draws a disc whose air is drawn as a mesh, with depth (R08.T10.b)", () => {
+    const { body, hosts } = scene(6.371e6 / Math.sin(40 / PX_PER_RAD), 0);
+    const plan = planLitBodies(
+      [body],
+      hosts,
+      { ...OPTIONS, depthBodyShellRadiiM: new Map([[body.id, body.figure.equatorialRadiusM]]) },
+      new Map([[body.id, "disc"]]),
+    );
+    expect(plan.regimes.get(body.id)).toBe("mesh");
+    expect(plan.meshes).toHaveLength(1);
+  });
+
+  describe("a body whose air is drawn (decision-r08-t10b-depth §6)", () => {
+    /** A body of the frame at `centreM`, as `scene`'s. */
+    function bodyAt(id: string, centreM: Vec3, radiusM = 6.371e6): LitBodyInput {
+      const { body } = scene(1e8, 0);
+      return {
+        ...body,
+        id,
+        centreM,
+        figure: { equatorialRadiusM: radiusM, polarRadiusM: radiusM, pole: null },
+      };
+    }
+    /** The distance at which a body of `radiusM` spans `diameterPx` at the centre. */
+    function atDiameterPx(diameterPx: number, radiusM = 6.371e6): number {
+      return radiusM / Math.sin(diameterPx / 2 / PX_PER_RAD);
+    }
+
+    it("promotes an airless disc overlapping its footprint, and leaves one clear of it", () => {
+      const { hosts } = scene(1e8, 0);
+      const d = atDiameterPx(40);
+      const airBody = bodyAt("0200080020000000.0300", vec3(0, 0, -d));
+      const near = bodyAt("0200080020000000.0301", vec3(0, 0, -d / 2), 1.737e6);
+      const clear = bodyAt("0200080020000000.0302", vec3(0.4 * d, 0, -d), 1.737e6);
+      const plan = planLitBodies(
+        [airBody, near, clear],
+        hosts,
+        {
+          ...OPTIONS,
+          depthBodyShellRadiiM: new Map([[airBody.id, airBody.figure.equatorialRadiusM]]),
+        },
+        new Map([
+          [airBody.id, "disc"],
+          [near.id, "disc"],
+          [clear.id, "disc"],
+        ]),
+      );
+      expect([airBody, near, clear].map((body) => plan.regimes.get(body.id))).toEqual([
+        "mesh",
+        "mesh",
+        "disc",
+      ]);
+    });
+
+    it("promotes a disc clear of its figure but over its air's shell (decision-r08-t10b-leans §3)", () => {
+      const { hosts } = scene(1e8, 0);
+      const d = atDiameterPx(40);
+      const airBody = bodyAt("0200080020000000.0300", vec3(0, 0, -d));
+      // 50 px off the air body's centre: clear of its figure's footprint, about 31 px, and the
+      // moon's, about 11 px, but within its shell's at 1.5 a, about 45 px.
+      const moon = bodyAt(
+        "0200080020000000.0301",
+        vec3(d * Math.tan(50 / PX_PER_RAD), 0, -d),
+        1.737e6,
+      );
+      const regimeOf = (shellM: number): LitRegime | undefined =>
+        planLitBodies(
+          [airBody, moon],
+          hosts,
+          { ...OPTIONS, depthBodyShellRadiiM: new Map([[airBody.id, shellM]]) },
+          new Map([
+            [airBody.id, "disc"],
+            [moon.id, "disc"],
+          ]),
+        ).regimes.get(moon.id);
+      expect([regimeOf(airBody.figure.equatorialRadiusM), regimeOf(1.5 * 6.371e6)]).toEqual([
+        "disc",
+        "mesh",
+      ]);
+    });
+
+    it("leaves one under the 3 px switch a point, with no sources", () => {
+      const { hosts } = scene(1e8, 0);
+      const airBody = bodyAt("0200080020000000.0300", vec3(0, 0, -atDiameterPx(2)));
+      const plan = planLitBodies(
+        [airBody],
+        hosts,
+        {
+          ...OPTIONS,
+          depthBodyShellRadiiM: new Map([[airBody.id, airBody.figure.equatorialRadiusM]]),
+        },
+        new Map(),
+      );
+      expect([plan.regimes.get(airBody.id), plan.sources.has(airBody.id)]).toEqual([
+        "point",
+        false,
+      ]);
+    });
+
+    it("keeps the regimes independent of the bodies' order, and a mesh the disc side at 2.75 px", () => {
+      const { hosts } = scene(1e8, 0);
+      // Just above the 2.7 px the hysteresis holds a disc's side down to.
+      const airBody = bodyAt("0200080020000000.0300", vec3(0, 0, -atDiameterPx(2.75)));
+      const other = bodyAt("0200080020000000.0301", vec3(3e9, 0, -atDiameterPx(40)));
+      const options = {
+        ...OPTIONS,
+        depthBodyShellRadiiM: new Map([[airBody.id, airBody.figure.equatorialRadiusM]]),
+      };
+      const previous = new Map<BodyIdHex, LitRegime>([
+        [airBody.id, "mesh"],
+        [other.id, "disc"],
+      ]);
+      const one = planLitBodies([airBody, other], hosts, options, previous);
+      const two = planLitBodies([other, airBody], hosts, options, previous);
+      expect(one.regimes.get(airBody.id)).toBe("mesh");
+      expect(new Map(one.regimes)).toEqual(new Map(two.regimes));
+    });
+
+    it("changes nothing in a frame that draws no atmosphere", () => {
+      const { body, hosts } = scene(atDiameterPx(40), 30);
+      const previous = new Map<BodyIdHex, LitRegime>([[body.id, "disc"]]);
+      const without = planLitBodies([body], hosts, OPTIONS, previous);
+      const empty = planLitBodies(
+        [body],
+        hosts,
+        { ...OPTIONS, depthBodyShellRadiiM: new Map() },
+        previous,
+      );
+      expect(empty).toEqual(without);
+    });
+  });
+
+  describe("a body drawn by its disc table beyond 10⁹ m (R08.T16.b)", () => {
+    /** A body's disc air: a table of one band and slot, its texture a stand-in. */
+    const AIR: DiscAir = {
+      table: {
+        bands: 1,
+        slots: 1,
+        sunFloor: -0.18,
+        values: new Float32Array(DISC_LAYER_VALUES),
+      },
+      texture: { kind: "texture", name: "disc table" },
+      lnBands: [0],
+      gravity: null,
+    };
+    /** A body with air `distanceM` ahead, its air's shell given as a frame that draws its air does. */
+    function airPlan(
+      distanceM: number,
+      options: Partial<BodyFrameOptions>,
+      body: Partial<LitBodyInput> = {},
+    ): { readonly plan: BodyFramePlan; readonly id: BodyIdHex } {
+      const radiusM = 6e7;
+      const { body: lit, hosts } = scene(distanceM, 30, {
+        figure: { equatorialRadiusM: radiusM, polarRadiusM: radiusM, pole: null },
+        air: AIR,
+        ...body,
+      });
+      const plan = planLitBodies(
+        [lit],
+        hosts,
+        { ...OPTIONS, depthBodyShellRadiiM: new Map([[lit.id, 1.01 * radiusM]]), ...options },
+        new Map([[lit.id, "disc"]]),
+      );
+      return { plan, id: lit.id };
+    }
+
+    it("draws it as a disc whose record carries its air past 1.1 × 10⁹ m, and names it tabled", () => {
+      const { plan, id } = airPlan(1.2e9, { drawsAir: true });
+      expect([plan.regimes.get(id), plan.discs[0]?.air, [...plan.tabled]]).toEqual([
+        "disc",
+        AIR,
+        [id],
+      ]);
+      // A body drawn by its table is not drawn as a mesh for its air: none of it is meshed.
+      expect(plan.meshes).toHaveLength(0);
+    });
+
+    it("keeps its full passes inside 1.1 × 10⁹ m until it was tabled, and then to 0.9 × 10⁹ m", () => {
+      const tabled = (distanceM: number, was: boolean): boolean =>
+        airPlan(distanceM, {
+          drawsAir: true,
+          previousTabled: was ? new Set([aLitBody().body]) : new Set(),
+        }).plan.tabled.size > 0;
+      expect([tabled(1.05e9, false), tabled(1.15e9, false)]).toEqual([false, true]);
+      expect([tabled(0.95e9, true), tabled(0.85e9, true)]).toEqual([true, false]);
+      const inside = airPlan(1.05e9, { drawsAir: true });
+      expect([inside.plan.regimes.get(inside.id), inside.plan.discs[0]?.air]).toEqual([
+        "mesh",
+        undefined,
+      ]);
+    });
+
+    it("keeps its full passes while the air forms are not prepared", () => {
+      const { plan, id } = airPlan(1.2e9, {});
+      expect([plan.regimes.get(id), plan.discs[0]?.air, plan.tabled.size]).toEqual([
+        "mesh",
+        undefined,
+        0,
+      ]);
+    });
+
+    it("gives a record drawn by its table its emission beside its air (R08.T18.b)", () => {
+      const field = surfaceTemperatureFieldOf(lavaWorldSurface());
+      const { plan } = airPlan(1.2e9, { drawsAir: true }, { thermal: field });
+      expect([plan.discs[0]?.air, plan.discs[0]?.emission === undefined]).toEqual([AIR, false]);
+      // Inside the boundary the same body's record carries its emission and no air.
+      const inside = airPlan(1.05e9, { drawsAir: true }, { thermal: field }).plan.discs[0];
+      expect([inside?.air, inside?.emission === undefined]).toEqual([undefined, false]);
+    });
+  });
+
+  describe("a disc beneath a gas envelope's air (R08.T16.a.2 and R08.T16.b.2)", () => {
+    const RADIUS_M = 6e7;
+    /** Its ground: the medium's datum under the full passes, its table's figure above it. */
+    const GROUND: DiscGround = {
+      figure: { equatorialRadiusM: 5.9e7, polarRadiusM: 5.5e7 },
+      tableFigure: { equatorialRadiusM: 5.95e7, polarRadiusM: 5.6e7 },
+    };
+    /** Its disc air: a table of one band and slot, its texture a stand-in. */
+    const AIR: DiscAir = {
+      table: { bands: 1, slots: 1, sunFloor: -0.18, values: new Float32Array(DISC_LAYER_VALUES) },
+      texture: { kind: "texture", name: "disc table" },
+      lnBands: [0],
+      gravity: null,
+    };
+    /**
+     * The body `distanceM` ahead, its air and disc table drawn, with or without its ground, on its
+     * own figure of {@link RADIUS_M} or `figure`, beside `others`.
+     */
+    function groundPlan(
+      distanceM: number,
+      ground: DiscGround | null,
+      options: Partial<BodyFrameOptions> = {},
+      figure: SpheroidFigure = { equatorialRadiusM: RADIUS_M, polarRadiusM: RADIUS_M },
+      others: ReadonlyArray<LitBodyInput> = [],
+    ): { readonly plan: BodyFramePlan; readonly body: LitBodyInput } {
+      const { body, hosts } = scene(distanceM, 30, {
+        figure: { ...figure, pole: null },
+        air: AIR,
+        ...(ground === null ? {} : { ground }),
+      });
+      const plan = planLitBodies(
+        [body, ...others],
+        hosts,
+        { ...OPTIONS, depthBodyShellRadiiM: new Map([[body.id, 1.01 * RADIUS_M]]), ...options },
+        new Map([[body.id, "disc"]]),
+      );
+      return { plan, body };
+    }
+
+    it("draws its disc and mesh black on its ground's figure under the full passes", () => {
+      const distanceM = 5e8;
+      const { plan } = groundPlan(distanceM, GROUND);
+      const record = plan.discs[0];
+      const law = plan.laws[record?.tableRows[0] ?? -1];
+      expect([
+        record?.radiusOverDistance,
+        record?.polarOverEquatorial,
+        record?.surface.kind,
+        law?.a,
+        plan.meshes[0]?.mesh.figure,
+      ]).toEqual([
+        5.9e7 / distanceM,
+        5.5e7 / 5.9e7,
+        "uniform",
+        [0, 0, 0],
+        { ...GROUND.figure, pole: null },
+      ]);
+      // Its mesh and its limb's depths are those of a body whose own figure the ground's is.
+      expect(plan.meshes).toEqual(groundPlan(distanceM, null, {}, GROUND.figure).plan.meshes);
+    });
+
+    it("draws it by its table on the table's figure, past the boundary", () => {
+      const distanceM = 1.2e9;
+      const { plan } = groundPlan(distanceM, GROUND, { drawsAir: true });
+      expect([plan.tabled.size, plan.discs[0]?.radiusOverDistance, plan.meshes]).toEqual([
+        1,
+        5.95e7 / distanceM,
+        [],
+      ]);
+    });
+
+    it("keeps its point's flux and its regime on its own figure and photometry", () => {
+      const far = (ground: DiscGround | null): BodyFramePlan => groundPlan(2e12, ground).plan;
+      expect(far(GROUND).regimes).toEqual(far(null).regimes);
+      expect(pointSprites(far(GROUND))).toEqual(pointSprites(far(null)));
+      expect(pointSprites(far(GROUND))).toHaveLength(1);
+    });
+
+    it("keeps the planetshine it gives and the eclipse it casts on a moon behind it", () => {
+      const distanceM = 5e8;
+      // A moon behind the giant from its star, a little off its shadow's axis, in the view.
+      const moon: LitBodyInput = {
+        ...scene(distanceM, 30).body,
+        id: "0200080020000000.0402",
+        centreM: vec3(-1e8, 2e7, -distanceM - 1.73e8),
+        figure: { equatorialRadiusM: 2e6, polarRadiusM: 2e6, pole: null },
+      };
+      const moonRecord = (ground: DiscGround | null): DiscRecord | undefined =>
+        groundPlan(distanceM, ground, {}, undefined, [moon]).plan.discs.find(
+          (record) => record.body === moon.id,
+        );
+      const grounded = moonRecord(GROUND);
+      const own = moonRecord(null);
+      expect([grounded?.occluders, grounded?.secondaries]).toEqual([
+        own?.occluders,
+        own?.secondaries,
+      ]);
+      expect([grounded?.occluders.length, grounded?.secondaries.length]).toEqual([1, 1]);
+    });
+  });
+
   it("does not draw a body seen from inside it", () => {
     const { body, hosts } = scene(1e6, 0);
     const plan = planLitBodies([body], hosts, OPTIONS, new Map());
     expect(plan.discs).toHaveLength(0);
+  });
+
+  /** A Saturn-like f = 0.098 figure about +z, m. */
+  const SATURN_LIKE = {
+    equatorialRadiusM: 6.0268e7,
+    polarRadiusM: 6.0268e7 * (1 - 0.098),
+    pole: vec3(0, 0, 1),
+  };
+
+  it("draws an oblate body from 4 km over its pole, within its equatorial sphere, and none from 4 km beneath it (fix-mac-batch-tools)", () => {
+    // 4 km over the pole stands 5,900 km within the equatorial sphere.
+    const discsAt = (distanceM: number): number => {
+      const { body, hosts } = scene(distanceM, 0, { figure: SATURN_LIKE });
+      return planLitBodies([body], hosts, OPTIONS, new Map([[body.id, "disc"]])).discs.length;
+    };
+    expect([
+      discsAt(SATURN_LIKE.polarRadiusM + 4_000),
+      discsAt(SATURN_LIKE.polarRadiusM - 4_000),
+    ]).toEqual([1, 0]);
+  });
+
+  it("finds the camera within a figure by its spheroid, not its equatorial sphere", () => {
+    const { polarRadiusM: c, equatorialRadiusM: a, pole } = SATURN_LIKE;
+    expect([
+      insideFigure(vec3(0, 0, -(c + 4_000)), SATURN_LIKE, pole),
+      insideFigure(vec3(0, 0, -(c - 4_000)), SATURN_LIKE, pole),
+      insideFigure(vec3(-(a + 4_000), 0, 0), SATURN_LIKE, pole),
+      insideFigure(vec3(-(a - 4_000), 0, 0), SATURN_LIKE, pole),
+    ]).toEqual([false, true, false, true]);
   });
 
   it("draws no disc wholly off the view, beside the camera or behind it, and keeps its regime", () => {
@@ -671,6 +1303,32 @@ describe("an eclipse", () => {
     const point =
       pointFlux(body, hosts, [occluder], DISC_ANNULI_HIGH)[1] /
       pointFlux(body, hosts, [], DISC_ANNULI_HIGH)[1];
+    expect(Math.abs(disc / point - 1)).toBeLessThan(0.01);
+  });
+
+  it("darkens a lunar law under McEwen's L(α) on the disc and the point alike at 60°, to 1%", () => {
+    // R10.T10.b: the point's eclipse takes the law's L(α) at its phase, as the disc's pixels do.
+    const moon = {
+      ...PROVISIONAL_PHOTOMETRY,
+      law: lawFor([0.12, 0.12, 0.12], [0.6, 0.6, 0.6], "moon"),
+    };
+    expect(moon.law.lommelSeeligerCurve).toBe("mcewen-1996");
+    const lit = scene(moonRadius / Math.sin(1.5 / PX_PER_RAD), 60, {
+      figure: body.figure,
+      photometry: moon,
+    });
+    const sun = lit.hosts[0]?.centreM ?? vec3(0, 0, 0);
+    const toSun = normalise(sub(sun, lit.body.centreM));
+    const shadowing: LitBodyInput = {
+      ...earth,
+      centreM: add(add(lit.body.centreM, scale(toSun, 3.844e8)), vec3(0, 6.5e6, 0)),
+    };
+    const blocker = { id: shadowing.id, centreM: shadowing.centreM, radiusM: 6.371e6 };
+    const disc = discFlux(lit.body, lit.hosts, [shadowing])[1] / discFlux(lit.body, lit.hosts)[1];
+    const point =
+      pointFlux(lit.body, lit.hosts, [blocker], DISC_ANNULI_HIGH)[1] /
+      pointFlux(lit.body, lit.hosts, [], DISC_ANNULI_HIGH)[1];
+    expect(disc).toBeLessThan(0.9);
     expect(Math.abs(disc / point - 1)).toBeLessThan(0.01);
   });
 
@@ -1099,6 +1757,11 @@ describe("planetshine", () => {
   });
 });
 
+/** A stand-in for one of a body's atmosphere tables (R08.T9.b). */
+function air(name: string): TextureHandle {
+  return { kind: "texture", name: `air ${name}` };
+}
+
 describe("the renderer", () => {
   /** A plan of two discs and a point between them, and another point after. */
   function planOf(count = 2): ReturnType<typeof planLitBodies> {
@@ -1172,6 +1835,78 @@ describe("the renderer", () => {
     renderer.dispose();
   });
 
+  it("binds a body's atmosphere tables to its disc draws, and the defaults to a body without one (R08.T9.b)", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
+    const tables: SurfaceLightingTables = {
+      body: air("body"),
+      transmittance: air("transmittance"),
+      absorberColumns: air("columns"),
+      absorberPressureColumns: air("pressure columns"),
+      lastAbsorberPressureColumn: air("last pressure column"),
+      absorberCurves: air("curves"),
+      irradiance: air("irradiance"),
+      belowDeck: air("below deck"),
+      sourceTransmittance: air("sources' transmittance"),
+    };
+    const plain = planOf();
+    const first = plain.discs[0];
+    if (first === undefined) {
+      throw new Error("the plan has discs");
+    }
+    // The first disc's body has an atmosphere, the second none.
+    const plan = { ...plain, discs: [{ ...first, atmosphere: tables }, ...plain.discs.slice(1)] };
+    const discDraws = renderer.draws(plan).filter((d) => d.material.name.startsWith("bodies:disc"));
+    const withAir = discDraws.filter((d) => d.uniforms["disc"]?.[0] === 0);
+    const without = discDraws.filter((d) => d.uniforms["disc"]?.[0] === 1);
+    expect(withAir).toHaveLength(2);
+    expect(without).toHaveLength(2);
+    for (const draw of withAir) {
+      expect(draw.textures).toMatchObject(surfaceLightingDrawTextures(tables));
+    }
+    const defaults = without[0]?.textures["atmosphereBody"];
+    expect(defaults?.name).toBe("bodies:no atmosphere");
+    for (const draw of without) {
+      for (const name of Object.keys(surfaceLightingDrawTextures(tables))) {
+        expect(draw.textures[name]).toBe(defaults);
+      }
+    }
+    renderer.dispose();
+  });
+
+  it("carries a body's atmosphere into its record, whose cells the pass takes since R07.T8.e (R08.T9.b)", () => {
+    const { body, hosts } = scene(6.371e6 / Math.sin(10 / PX_PER_RAD), 30);
+    const table = air("any");
+    const tables: SurfaceLightingTables = {
+      body: table,
+      transmittance: table,
+      absorberColumns: table,
+      absorberPressureColumns: table,
+      lastAbsorberPressureColumn: table,
+      absorberCurves: table,
+      irradiance: table,
+      belowDeck: table,
+      sourceTransmittance: table,
+    };
+    const regimes = new Map([[body.id, "disc" as const]]);
+    const [withAir] = planLitBodies(
+      [{ ...body, atmosphere: tables }],
+      hosts,
+      OPTIONS,
+      regimes,
+    ).discs;
+    const [without] = planLitBodies([body], hosts, OPTIONS, regimes).discs;
+    if (withAir === undefined || without === undefined) {
+      throw new Error("each plan has its disc");
+    }
+    expect(withAir.atmosphere).toBe(tables);
+    expect("atmosphere" in without).toBe(false);
+    // A disc under 32 px: its cells through the pass, with an atmosphere or without, the pass
+    // binding its tables (R07.T8.e).
+    expect(drawnThroughCells(without)).toBe(true);
+    expect(drawnThroughCells(withAir)).toBe(true);
+  });
+
   it("writes the phase table once for the same laws, and grows the disc buffer by doubling", async () => {
     const engine = await countingRenderEngine();
     const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
@@ -1184,7 +1919,7 @@ describe("the renderer", () => {
         released.push(event.name);
       }
     });
-    // Sixteen discs need 16 × 832 bytes, past the first 4,096.
+    // Sixteen discs need 16 × 4,928 bytes (DISC_ROWS rows of 16), past the 16,384 two took.
     const many = planOf(16);
     expect(many.discs).toHaveLength(16);
     renderer.draws(many);
@@ -1211,9 +1946,18 @@ describe("the renderer", () => {
         "bodies:mesh slots",
         "bodies:mesh instances",
         "bodies:disc cell jobs",
+        // R07.T8.g's workgroups' runs of the jobs.
+        "bodies:disc cell groups",
         "bodies:disc cell sums",
         "bodies:phase table",
         "bodies:no class map",
+        "bodies:no atmosphere",
+        // R10.T10.c's mask of no surveyed cell, bound where a mesh body has no survey.
+        "bodies:no coverage",
+        // R08.T16.b's disc table of zeros, bound where a record carries no air.
+        "bodies:no disc table",
+        // Plan R14's figures' cluster records (R14.T4.a); their buckets are made at a first cull.
+        "bodies:figure cluster records",
       ].toSorted(),
     );
   });
@@ -1226,8 +1970,9 @@ describe("the renderer", () => {
     renderer.draws(plan);
     const materials = engine.counts.materials;
     engine.restore();
-    // The disc's two, the sprite's and the mesh regime's.
-    expect(engine.counts.materials).toBe(materials + 4);
+    // The disc's two, the sprite's and the mesh regime's, instanced and on the cluster path, and its
+    // figure's raster, likewise, and resolve (`figureShading` `screen`).
+    expect(engine.counts.materials).toBe(materials + 8);
     const writes = engine.writes.length;
     renderer.draws(plan);
     expect(engine.textureWritten.filter((w) => w.texture === "bodies:phase table")).toHaveLength(2);
@@ -1277,6 +2022,62 @@ describe("mesh bodies (T9)", () => {
   }
 
   const [PLANET, MOON, CLEAR] = sceneOfThree().bodies.map((b) => b.id);
+
+  it("readies the figure's screen path once its raster and resolve are prepared, and keeps it unready where they are refused, reporting each refusal once (plan R07)", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
+    const prepare = engine.prepareMaterial.bind(engine);
+    let refuse = false;
+    const asks = vi
+      .spyOn(engine, "prepareMaterial")
+      .mockImplementation(async (material, targets, meshes) =>
+        refuse && material.name.startsWith("bodies:smoothMeshIds")
+          ? Promise.reject(new Error("refused"))
+          : prepare(material, targets, meshes),
+      );
+    const reported = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const plan = promotedPlan();
+    const first = renderer.screenReady(plan);
+    await microtasks();
+    const ready = renderer.screenReady(plan);
+    // A refusal on the next device leaves the path unready, asked and reported once a material.
+    refuse = true;
+    engine.restore();
+    renderer.screenReady(plan);
+    await microtasks();
+    const refused = [renderer.screenReady(plan), renderer.screenReady(plan)];
+    // Each raster asked once a device, the refused ones not again.
+    const idsAsked = asks.mock.calls.filter(([material]) =>
+      material.name.startsWith("bodies:smoothMeshIds"),
+    );
+    expect([
+      first,
+      ready,
+      engine.prepares.some(({ name }) => name === "bodies:figureResolve"),
+      refused,
+      idsAsked.length,
+      reported.mock.calls.filter(([text]) => String(text).includes("could not be prepared")).length,
+    ]).toEqual([false, true, true, [false, false], 4, 2]);
+    renderer.dispose();
+  });
+
+  it("reports no loss of the figure's screen pipelines, and prepares them again on the restored device (plan R07)", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
+    const reported = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const plan = promotedPlan();
+    engine.loseDevice();
+    renderer.screenReady(plan);
+    await microtasks();
+    engine.restore();
+    renderer.screenReady(plan);
+    await microtasks();
+    expect([
+      renderer.screenReady(plan),
+      reported.mock.calls.filter(([text]) => String(text).includes("could not be prepared")).length,
+    ]).toEqual([true, 0]);
+    renderer.dispose();
+  });
 
   it("promotes a disc over a depth writer, and a disc overlapping it, but not one clear of both", () => {
     const plan = promotedPlan();
@@ -1390,6 +2191,189 @@ describe("mesh bodies (T9)", () => {
     renderer.dispose();
   });
 
+  const SURVEY_MASK: TextureHandle = { kind: "texture", name: "coverage mask" };
+  const SURVEY_ROTATION = rotation3FromRows([vec3(0, 1, 0), vec3(-1, 0, 0), vec3(0, 0, 1)]);
+
+  /**
+   * The three bodies with the planet handed over to its terrain (R10.T10.e: a relief of 2 px from
+   * here) and the moon a mesh by its overlap alone, each with its survey's mask and rotation, the
+   * mask `whole` or not.
+   */
+  function surveyedPlan(whole = false): BodyFramePlan {
+    const { bodies, hosts } = sceneOfThree();
+    const surveyed: LitBodyInput[] = bodies.map((body) =>
+      body.id === PLANET || body.id === MOON
+        ? {
+            ...body,
+            rotation: SURVEY_ROTATION,
+            surveyCoverage: { mask: SURVEY_MASK, rotation: SURVEY_ROTATION, whole },
+            ...(body.id === PLANET
+              ? { handoverReliefM: (2 * norm(body.centreM)) / PX_PER_RAD }
+              : {}),
+          }
+        : body,
+    );
+    return planLitBodies(
+      surveyed,
+      hosts,
+      OPTIONS,
+      new Map(bodies.map((b) => [b.id, "disc" as const])),
+    );
+  }
+
+  /** The figures' draws of {@link surveyedPlan}, by body, and the engine that took them. */
+  async function surveyedDraws(): Promise<{
+    readonly byBody: ReadonlyMap<string | undefined, DrawItem>;
+    readonly engine: Awaited<ReturnType<typeof countingRenderEngine>>;
+  }> {
+    const engine = await countingRenderEngine();
+    const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
+    const plan = surveyedPlan();
+    const draws = renderer.meshDraws(plan);
+    renderer.dispose();
+    return {
+      byBody: new Map(
+        draws.map((draw) => [plan.discs[draw.uniforms["disc"]?.[0] ?? -1]?.body, draw]),
+      ),
+      engine,
+    };
+  }
+
+  it("hands the surveyed planet over to its terrain and draws the overlapped moon as a mesh (R10.T10.c)", () => {
+    const plan = surveyedPlan();
+    expect(
+      [PLANET, MOON, CLEAR].map((id) => (id === undefined ? id : plan.regimes.get(id))),
+    ).toEqual(["terrain", "mesh", "disc"]);
+  });
+
+  it("shades none of the cells of a body handed over under a mask of every cell surveyed, and a promoted one's as before (R07.T8.h)", async () => {
+    const frame: DiscCellFrame = {
+      viewRotation: viewRotation4(CAMERA.orientation),
+      projection: perspectiveReversedInfinite(
+        CAMERA.fovXRad,
+        VIEWPORT.widthPx / VIEWPORT.heightPx,
+        NEAR_PLANE_M,
+      ),
+      size: VIEWPORT,
+    };
+    const shaded = async (whole: boolean): Promise<readonly [string[], number[]]> => {
+      const engine = await countingRenderEngine();
+      const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
+      const plan = surveyedPlan(whole);
+      renderer.dispatchCells(plan, engine.createCompute(BODY_DISC_CELLS_KERNEL), frame);
+      const jobs = engine.writes.findLast((w) => w.buffer === "bodies:disc cell jobs")?.data;
+      const records = new Set<number>();
+      const values = jobs === undefined ? new Int32Array() : new Int32Array(jobs.buffer);
+      for (let at = 0; at < values.length; at += 4) {
+        records.add(values[at] ?? -1);
+      }
+      const discs = engine.writes.findLast((w) => w.buffer === "bodies:discs")?.data;
+      const packed = discs === undefined ? new Float32Array() : new Float32Array(discs.buffer);
+      renderer.dispose();
+      return [
+        [...records].map((index) => plan.discs[index]?.body ?? "none").toSorted(),
+        plan.discs.map((_, index) => packed[(index * DISC_ROWS + 51) * 4] ?? Number.NaN),
+      ];
+    };
+    const [partly, whole] = [await shaded(false), await shaded(true)];
+    const planet = surveyedPlan().discs.findIndex((record) => record.body === PLANET);
+    expect([partly[0].includes(PLANET ?? ""), whole[0], whole[1][planet]]).toEqual([
+      true,
+      partly[0].filter((body) => body !== PLANET),
+      -1,
+    ]);
+  });
+
+  it("gives the coverage mask to a mesh body handed over, and none to one promoted (R10.T10.c)", () => {
+    const plan = surveyedPlan();
+    expect(plan.meshes.map((m) => [plan.discs[m.index]?.body, m.role])).toEqual(
+      expect.arrayContaining([
+        [
+          PLANET,
+          {
+            kind: "handed-over",
+            coverage: { mask: SURVEY_MASK, rotation: SURVEY_ROTATION, whole: false },
+            detailShare: 1,
+          },
+        ],
+        [MOON, { kind: "promoted" }],
+      ]),
+    );
+  });
+
+  it("draws a surveyed body's figure as the reference surface beneath its terrain, with the coverage mask in its axes (R10.T10.c)", async () => {
+    const planetDraw = (await surveyedDraws()).byBody.get(PLANET);
+    expect([
+      planetDraw?.textures["coverageMask"]?.name,
+      Array.from(planetDraw?.uniforms["coverageAxes"] ?? []),
+    ]).toEqual(["coverage mask", Array.from(rotationColumns(SURVEY_ROTATION))]);
+  });
+
+  it("binds the mask of no surveyed cell for a body not handed over, which draws its figure whole (R10.T10.c)", async () => {
+    const { byBody, engine } = await surveyedDraws();
+    expect([
+      byBody.get(MOON)?.textures["coverageMask"]?.name,
+      engine.textureWritten.find((w) => w.texture === "bodies:no coverage")?.data,
+    ]).toEqual(["bodies:no coverage", new Uint8Array(6)]);
+  });
+
+  it("reads the coverage mask in the mesh material's fragment stage alone", () => {
+    expect(SMOOTH_MESH_MATERIAL.textures?.find((t) => t.name === "coverageMask")).toEqual({
+      name: "coverageMask",
+      binding: 13,
+      viewDimension: "2d-array",
+    });
+    expect([...(bindingStages(SMOOTH_MESH_MATERIAL.vertexWgsl).get(13) ?? [])]).toEqual([
+      "fragment",
+    ]);
+    expect(SMOOTH_MESH_MATERIAL.uniforms.map((u) => u.name)).toEqual([
+      "disc",
+      "firstInstance",
+      "bodyRotation",
+      "coverageAxes",
+    ]);
+  });
+
+  it("gives a surveyed body's limb its coverage mask in its axes, and every other disc draw the mask of no surveyed cell (R10.T10.c)", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
+    const plan = surveyedPlan();
+    const sequence = renderer.draws(plan);
+    renderer.dispose();
+    const bound = sequence
+      .filter((draw) => draw.material.name.startsWith("bodies:disc"))
+      .map((draw) => [
+        plan.discs[draw.uniforms["disc"]?.[0] ?? -1]?.body,
+        draw.uniforms["edgePass"]?.[0],
+        draw.textures["coverageMask"]?.name,
+        Array.from(draw.uniforms["coverageAxes"] ?? []),
+      ]);
+    const identity = Array.from(rotationColumns(IDENTITY_ROTATION));
+    expect(bound).toEqual(
+      expect.arrayContaining([
+        [PLANET, 1, "coverage mask", Array.from(rotationColumns(SURVEY_ROTATION))],
+        [MOON, 1, "bodies:no coverage", identity],
+        [CLEAR, 0, "bodies:no coverage", identity],
+        [CLEAR, 1, "bodies:no coverage", identity],
+      ]),
+    );
+    expect(bound).toHaveLength(4);
+  });
+
+  it("reads the coverage mask in the disc draws' fragment stage alone, at the mesh's binding", () => {
+    for (const material of [BODY_DISC_MATERIALS.interior, BODY_DISC_MATERIALS.limb]) {
+      expect([
+        material.textures?.find((t) => t.name === "coverageMask"),
+        [...(bindingStages(material.vertexWgsl).get(13) ?? [])],
+        material.uniforms.map((u) => u.name),
+      ]).toEqual([
+        { name: "coverageMask", binding: 13, viewDimension: "2d-array" },
+        ["fragment"],
+        ["disc", "edgePass", "depths", "coverageAxes"],
+      ]);
+    }
+  });
+
   it("writes a plan's records once for its figures and its sequence", async () => {
     const engine = await countingRenderEngine();
     const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
@@ -1400,4 +2384,298 @@ describe("mesh bodies (T9)", () => {
     expect(engine.writes.length).toBe(writes);
     renderer.dispose();
   });
+
+  it("prepares its regime materials for the scene target as it is made, and after a restore (R10.T14.d; plan R14, R14.T4.a)", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
+    const made = [...engine.prepares];
+    engine.loseDevice();
+    engine.restore();
+    const targets = [{ colour: "rgba16float", depth: true }];
+    const prepared = [
+      { name: SMOOTH_MESH_MATERIAL.name, targets, meshes: ["bodies:smooth patch"] },
+      { name: SMOOTH_MESH_CLUSTER_MATERIAL.name, targets, meshes: ["figure clusters"] },
+      { name: BODY_DISC_MATERIALS.interior.name, targets, meshes: ["bodies:quad"] },
+      { name: BODY_DISC_MATERIALS.limb.name, targets, meshes: ["bodies:quad"] },
+    ];
+    expect([made, engine.prepares]).toEqual([prepared, [...prepared, ...prepared]]);
+    renderer.dispose();
+  });
 });
+
+/** The detail share of the plan's first mesh body where it is handed over (R10.T15.b.2), else `null`. */
+function detailShareOf(plan: BodyFramePlan): number | null {
+  const role = plan.meshes[0]?.role;
+  return role?.kind === "handed-over" ? role.detailShare : null;
+}
+
+describe("the hand-over to terrain (R10.T10.e)", () => {
+  /** A body 10⁸ m ahead, 212 px across, whose relief subtends `reliefPx` at its limb. */
+  function bodyWithRelief(reliefPx: number | null): ReturnType<typeof scene> {
+    const distanceM = 1e8;
+    const limbM = limbDistanceM(distanceM, 6.371e6);
+    return scene(
+      distanceM,
+      30,
+      reliefPx === null ? {} : { handoverReliefM: (reliefPx * limbM) / PX_PER_RAD },
+    );
+  }
+
+  function regimeOf(
+    reliefPx: number | null,
+    setting: "high" | "low",
+    previous: LitRegime = "disc",
+  ): LitRegime | undefined {
+    const { body, hosts } = bodyWithRelief(reliefPx);
+    return planLitBodies(
+      [body],
+      hosts,
+      { ...OPTIONS, setting },
+      new Map([[body.id, previous]]),
+    ).regimes.get(body.id);
+  }
+
+  it("hands a disc over once its relief subtends the setting's τ, 1 px high and 2 px low", () => {
+    expect(regimeOf(1.5, "high")).toBe("terrain");
+    expect(regimeOf(1.5, "low")).toBe("disc");
+    expect(regimeOf(2.5, "low")).toBe("terrain");
+    expect(regimeOf(null, "high")).toBe("disc");
+  });
+
+  it("keeps a body handed over, or not, within R07's 10% about τ", () => {
+    expect(regimeOf(1, "high", "disc")).toBe("disc");
+    expect(regimeOf(1, "high", "terrain")).toBe("terrain");
+    expect(regimeOf(0.89, "high", "terrain")).toBe("disc");
+    expect(regimeOf(1.11, "high", "disc")).toBe("terrain");
+  });
+
+  /** The frame's internal viewport at half the presented 1920 × 1080. */
+  const HALF: Viewport = { widthPx: 960, heightPx: 540 };
+
+  it("measures the relief in the presented pixels, whatever the frame's internal scale (R10.T10.g)", () => {
+    // 1.5 presented px on high, which the internal pixel alone would see as 0.75 px.
+    const { body, hosts } = bodyWithRelief(1.5);
+    const regime = (options: BodyFrameOptions): LitRegime | undefined =>
+      planLitBodies([body], hosts, options, new Map([[body.id, "disc"]])).regimes.get(body.id);
+    expect([
+      regime({ ...OPTIONS, viewport: HALF, presentedPx: VIEWPORT }),
+      regime(OPTIONS),
+      regime({ ...OPTIONS, viewport: HALF, presentedPx: HALF }),
+    ]).toEqual(["terrain", "terrain", "disc"]);
+  });
+
+  it("keeps R07's 3 px switch on the frame's own pixels (R10.T10.g)", () => {
+    // 4 presented px across, 2 of the internal pixels, in which the disc's flux meets the point's.
+    const { body, hosts } = scene(6.371e6 / Math.sin(2 / PX_PER_RAD), 30);
+    const regime = (options: BodyFrameOptions): LitRegime | undefined =>
+      planLitBodies([body], hosts, options, new Map([[body.id, "disc"]])).regimes.get(body.id);
+    expect([
+      regime({ ...OPTIONS, viewport: HALF, presentedPx: VIEWPORT }),
+      regime(OPTIONS),
+    ]).toEqual(["point", "disc"]);
+  });
+
+  it("draws the terrain almost as the disc at the switch on high, its own detail whole by τ (1 + 3h), on low and without a normal map (R10.T15.b.2)", () => {
+    const shareOf = (reliefPx: number, setting: "high" | "low", normals = true): number | null => {
+      const { body, hosts } = bodyWithRelief(reliefPx);
+      const mapped: LitBodyInput = {
+        ...body,
+        rotation: IDENTITY_ROTATION,
+        surface: surfaceWith(normals),
+      };
+      const plan = planLitBodies(
+        [mapped],
+        hosts,
+        { ...OPTIONS, setting },
+        new Map([[body.id, "disc"]]),
+      );
+      const role = plan.meshes[0]?.role;
+      return role?.kind === "handed-over" ? role.detailShare : null;
+    };
+    expect(shareOf(1.11, "high")).toBeCloseTo(0.05, 9);
+    expect(shareOf(1.2, "high")).toBeCloseTo(0.5, 9);
+    expect(shareOf(1.31, "high")).toBe(1);
+    // The low setting's τ of 2 px: handed over by 2.3 px, its detail whole there.
+    expect(shareOf(2.3, "low")).toBe(1);
+    // A disc with no normal map gives the terrain none to fade from.
+    expect(shareOf(1.2, "high", false)).toBe(1);
+  });
+
+  it("fades the terrain's own detail in from the subtense where the body handed over, which it carries frame to frame (R10.T15.b.2)", () => {
+    const planAt = (
+      reliefPx: number,
+      previousHandedOver: ReadonlyMap<string, number>,
+      previous: LitRegime,
+    ): BodyFramePlan => {
+      const { body, hosts } = bodyWithRelief(reliefPx);
+      const mapped: LitBodyInput = {
+        ...body,
+        rotation: IDENTITY_ROTATION,
+        surface: surfaceWith(true),
+      };
+      return planLitBodies(
+        [mapped],
+        hosts,
+        { ...OPTIONS, previousHandedOver },
+        new Map([[body.id, previous]]),
+      );
+    };
+    // First handed over at 1.25 τ, as a hand-over at the field's cells may be: none there.
+    const first = planAt(1.25, new Map(), "disc");
+    const [[id, start] = ["", 0]] = [...first.handedOver];
+    expect([detailShareOf(first), start]).toEqual([0, expect.closeTo(1.25, 9)]);
+    // Half a span on, from the start it carries.
+    expect(detailShareOf(planAt(1.35, first.handedOver, "terrain"))).toBeCloseTo(0.5, 9);
+    expect(planAt(1.35, first.handedOver, "terrain").handedOver.get(id)).toBe(start);
+    // A disc keeps no start.
+    expect(planAt(0.5, first.handedOver, "terrain").handedOver.size).toBe(0);
+  });
+
+  it("draws a body handed over as a mesh body, its limb in the sequence and its figure the reference surface", () => {
+    const { body, hosts } = bodyWithRelief(4);
+    const plan = planLitBodies([body], hosts, OPTIONS, new Map([[body.id, "disc"]]));
+    expect(plan.meshes).toHaveLength(1);
+    expect(plan.meshes[0]?.role.kind).toBe("handed-over");
+    expect(plan.steps.filter((step) => step.kind === "limb")).toEqual([{ kind: "limb", mesh: 0 }]);
+    expect(plan.steps.filter((step) => step.kind === "disc")).toEqual([]);
+    expect(plan.discs.map((record) => record.body)).toEqual([body.id]);
+  });
+
+  it("draws the figure of a body promoted but not handed over whole, its survey's mask unread", () => {
+    const { body, hosts } = bodyWithRelief(null);
+    const surveyed: LitBodyInput = {
+      ...body,
+      rotation: rotation3FromRows([vec3(1, 0, 0), vec3(0, 1, 0), vec3(0, 0, 1)]),
+      surveyCoverage: {
+        mask: { kind: "texture", name: "coverage mask" },
+        rotation: rotation3FromRows([vec3(1, 0, 0), vec3(0, 1, 0), vec3(0, 0, 1)]),
+        whole: false,
+      },
+    };
+    const writer = sphereFootprint(body.centreM, 6.371e6, CAMERA, VIEWPORT);
+    const plan = planLitBodies(
+      [surveyed],
+      hosts,
+      { ...OPTIONS, depthWriters: writer === null ? [] : [writer] },
+      new Map([[body.id, "disc"]]),
+    );
+    expect(plan.regimes.get(body.id)).toBe("mesh");
+    expect(plan.meshes.map((m) => m.role)).toEqual([{ kind: "promoted" }]);
+  });
+});
+
+/** A one-class map surveyed whole, with the field's normal map (R10.T10.g) or none. */
+function surfaceWith(normals: boolean): DiscSurface {
+  return classMapSurface(
+    UNREAD_TEXTURES,
+    normals ? "with normals" : "without",
+    packClassMap(64, 1, () => [1]),
+    [lawFor([0.12, 0.12, 0.12], [0.6, 0.6, 0.6], "moon")],
+    PROVISIONAL_PHOTOMETRY.law,
+    normals ? unreadNormalMap(datumNormalMap(5), "class map normals") : null,
+  );
+}
+
+describe("a class map's normal map in the draws (R10.T10.g)", () => {
+  /** Three discs abreast: a class map with normals (…0200), one without (…0201), and a uniform body. */
+  function planOfThree(): BodyFramePlan {
+    const { body, hosts } = scene(6.371e6 / Math.sin(20 / PX_PER_RAD), 30);
+    const rotation = rotation3FromRows([vec3(1, 0, 0), vec3(0, 1, 0), vec3(0, 0, 1)]);
+    const surfaces = [surfaceWith(true), surfaceWith(false), undefined];
+    const bodies: LitBodyInput[] = [];
+    for (const [i, surface] of surfaces.entries()) {
+      const drawn: LitBodyInput = {
+        id: `0200080020000000.${(0x200 + i).toString(16).padStart(4, "0")}`,
+        centreM: vec3((i - 1) * 4e7, 0, body.centreM.z),
+        figure: body.figure,
+        photometry: body.photometry,
+        rotation,
+        lighting: undefined,
+      };
+      bodies.push(surface === undefined ? drawn : { ...drawn, surface });
+    }
+    return planLitBodies(
+      bodies,
+      hosts,
+      OPTIONS,
+      new Map(bodies.map((b) => [b.id, "disc" as const])),
+    );
+  }
+
+  /** The normal map each of the three discs' two draws binds, by the body's last four digits. */
+  async function boundNormals(): Promise<ReadonlyArray<readonly [string, string]>> {
+    const engine = await countingRenderEngine();
+    const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
+    const plan = planOfThree();
+    const draws = renderer.draws(plan).filter((d) => d.material.name.startsWith("bodies:disc"));
+    renderer.dispose();
+    return draws.map((d) => [
+      plan.discs[d.uniforms["disc"]?.[0] ?? -1]?.body.slice(-4) ?? "",
+      d.textures["surfaceNormals"]?.name ?? "",
+    ]);
+  }
+
+  it("binds a class map's normal map to both its draws", async () => {
+    const bound = await boundNormals();
+    expect(bound.filter(([body]) => body === "0200")).toEqual([
+      ["0200", "class map normals"],
+      ["0200", "class map normals"],
+    ]);
+  });
+
+  it("binds the texel of no weight where a disc carries no normal map, a class map's or a uniform one's", async () => {
+    const bound = await boundNormals();
+    expect(
+      bound.filter(([body]) => body !== "0200").toSorted(([a], [b]) => a.localeCompare(b)),
+    ).toEqual([
+      ["0201", "bodies:no class map"],
+      ["0201", "bodies:no class map"],
+      ["0202", "bodies:no class map"],
+      ["0202", "bodies:no class map"],
+    ]);
+  });
+
+  it("declares it at group 2 binding 14 in the disc's materials and the mesh's, read in their fragment stages alone", () => {
+    expect(bodyDiscWgsl).toMatch(
+      /@group\(2\) @binding\(14\) var surface_normals : texture_2d_array<f32>;/u,
+    );
+    for (const spec of [
+      BODY_DISC_MATERIALS.interior,
+      BODY_DISC_MATERIALS.limb,
+      SMOOTH_MESH_MATERIAL,
+    ]) {
+      expect(spec.textures?.find((t) => t.name === "surfaceNormals")).toEqual({
+        name: "surfaceNormals",
+        binding: 14,
+        viewDimension: "2d-array",
+      });
+      expect([...(bindingStages(spec.vertexWgsl).get(14) ?? [])]).toEqual(["fragment"]);
+    }
+  });
+
+  it("decodes the map's pairs by the terrain's own decode, operation for operation", () => {
+    expect(wgslBody(bodyDiscWgsl, "disc_sign_not_zero")).toBe(
+      wgslBody(terrainPatchWgsl, "signNotZero"),
+    );
+    expect(wgslBody(bodyDiscWgsl, "disc_decode_octahedral")).toBe(
+      wgslBody(terrainPatchWgsl, "decodeOctahedral").replace("signNotZero", "disc_sign_not_zero"),
+    );
+  });
+});
+
+/** A WGSL function's body, braces and all, its whitespace collapsed. */
+function wgslBody(source: string, name: string): string {
+  const start = source.indexOf(`fn ${name}(`);
+  if (start < 0) {
+    throw new Error(`no function ${name}`);
+  }
+  const open = source.indexOf("{", start);
+  let depth = 0;
+  for (let end = open; end < source.length; end += 1) {
+    depth += source[end] === "{" ? 1 : source[end] === "}" ? -1 : 0;
+    if (depth === 0) {
+      return source.slice(open, end + 1).replaceAll(/\s+/gu, " ");
+    }
+  }
+  throw new Error(`function ${name} is not closed`);
+}

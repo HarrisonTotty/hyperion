@@ -10,10 +10,14 @@ import { viewRay } from "../bodies/discShading";
 import { limbDepthAt, limbDepths } from "../bodies/smoothMesh";
 import { NEAR_PLANE_M, pixelSolidAngle, type Viewport } from "../camera/projection";
 import { quaternionFromAxisAngle, rotate } from "../camera/quaternion";
-import { HALF_FLOAT_MAX } from "../photometry/toneCurve";
+import { DISC_ANNULI_HIGH } from "../lighting/annuli";
+import { HALF_FLOAT_MAX, type Rgb } from "../photometry/toneCurve";
+import { BLOOM_THRESHOLD_EXPOSED } from "../post/bloom";
+import { DISC_AIR_RULE } from "../post/glareAir";
 import { OUTSIDE_VIEW_MARGIN_PX, type ScreenRect, sphereScreenRect } from "../wireframe/submit";
 import {
   DISC_MIN_DIAMETER_PX,
+  eyeGlareShare,
   HostDiscLayer,
   type HostPlacement,
   hostDiscRecord,
@@ -22,7 +26,9 @@ import {
 } from "./disc";
 import {
   angularRadiusRad,
-  discExcessLuminanceRgb,
+  discLuminanceAboveRgb,
+  discLightThroughAir,
+  discLuminanceAboveThroughRgb,
   discIlluminanceRgbLx,
   discLuminanceRgb,
 } from "./discFlux";
@@ -151,10 +157,27 @@ describe("the host discs", () => {
     expect(DISC_MIN_DIAMETER_PX).toBe(3);
   });
 
-  it("hand R07 the light above a half's 65,504, and none while the disc fits", () => {
+  it("hand R07 a disc's light above the bloom threshold (fix-view-light)", async () => {
+    const engine = await countingRenderEngine();
+    const layer = new HostDiscLayer(engine);
     const host = sunHost();
-    expect(discExcessLuminanceRgb(host, 1e-6)).toEqual([0, 0, 0]);
-    const [, excess] = discExcessLuminanceRgb(host, 1);
+    const exposureScale = 1e-8;
+    layer.frame(
+      [{ host, direction: vec3(0, 0, -1), distanceM: AU_M }],
+      LOOK,
+      VIEWPORT,
+      exposureScale,
+    );
+    const [source] = layer.glareSources(LOOK, VIEWPORT, "eye");
+    expect(source?.excessLuminance).toEqual(
+      discLuminanceAboveRgb(host, BLOOM_THRESHOLD_EXPOSED / exposureScale),
+    );
+  });
+
+  it("hold a disc's light above a level, and none while the disc is below it", () => {
+    const host = sunHost();
+    expect(discLuminanceAboveRgb(host, HALF_FLOAT_MAX / 1e-6)).toEqual([0, 0, 0]);
+    const [, excess] = discLuminanceAboveRgb(host, HALF_FLOAT_MAX);
     // Almost all of the mean is above 65,504 cd/m² at a scale of 1.
     expect(Math.abs(excess / (2e9 - 65_504) - 1)).toBeLessThan(0.01);
   });
@@ -188,6 +211,122 @@ describe("the host discs", () => {
     ]).toEqual([1, 0, 1, 0, 0, 1]);
   });
 
+  it.each([
+    { outsideDeg: 30, share: 1 },
+    { outsideDeg: 40, share: 0.5 },
+    { outsideDeg: 45, share: 0 },
+  ])(
+    "fade an eye view's glare from a disc $outsideDeg° outside its frame to a share of $share (fix-view-light)",
+    ({ outsideDeg, share }) => {
+      expect(eyeGlareShare((outsideDeg * Math.PI) / 180)).toBeCloseTo(share, 12);
+    },
+  );
+
+  it.each([
+    { name: "a disc behind a planet's limb casts no glare", offsetRad: 0, sources: 0 },
+    { name: "a disc clear of the planet casts its whole glare", offsetRad: 0.1, sources: 1 },
+  ])("$name (fix-view-light)", async ({ offsetRad, sources }) => {
+    const engine = await countingRenderEngine();
+    const layer = new HostDiscLayer(engine);
+    layer.frame(
+      [{ host: sunHost(), direction: vec3(0, 0, -1), distanceM: AU_M }],
+      LOOK,
+      VIEWPORT,
+      1,
+    );
+    // An Earth 10⁸ m off, 3.6° across, against the Sun's 0.53°.
+    const planet = {
+      centreM: vec3(1e8 * Math.sin(offsetRad), 0, -1e8 * Math.cos(offsetRad)),
+      radiusM: 6.371e6,
+    };
+    const cast = layer.glareSources(LOOK, VIEWPORT, "eye", [planet], 4);
+    expect(cast.length).toBe(sources);
+  });
+
+  it("dim a disc's glare by the air between: its whole light by the transmittance, its excess the dimmed disc's (fix-view-light)", async () => {
+    const engine = await countingRenderEngine();
+    const layer = new HostDiscLayer(engine);
+    const host = sunHost();
+    const exposureScale = 1e-8;
+    layer.frame(
+      [{ host, direction: vec3(0, 0, -1), distanceM: AU_M }],
+      LOOK,
+      VIEWPORT,
+      exposureScale,
+    );
+    const [clear] = layer.glareSources(LOOK, VIEWPORT, "eye");
+    const air: Rgb = [0.5, 0.25, 0.125];
+    const [dimmed] = layer.glareSources(LOOK, VIEWPORT, "eye", [], DISC_ANNULI_HIGH, () => [
+      { kind: "uniform", transmittance: air },
+    ]);
+    for (const c of [0, 1, 2] as const) {
+      expect((dimmed?.luminance[c] ?? 0) / (clear?.luminance[c] ?? 1)).toBeCloseTo(air[c], 12);
+    }
+    expect(dimmed?.excessLuminance).toEqual(
+      discLuminanceAboveThroughRgb(host, BLOOM_THRESHOLD_EXPOSED / exposureScale, air),
+    );
+    expect(
+      layer.glareSources(LOOK, VIEWPORT, "eye", [], DISC_ANNULI_HIGH, () => [
+        { kind: "uniform", transmittance: [0, 0, 0] },
+      ]),
+    ).toEqual([]);
+  });
+
+  it("multiply the light of the bodies' airs the same across the disc (fix-view-light)", () => {
+    const host = sunHost();
+    const through = discLightThroughAir(
+      host,
+      [
+        { kind: "uniform", transmittance: [0.5, 0.5, 0.5] },
+        { kind: "uniform", transmittance: [0.5, 0.25, 0.125] },
+      ],
+      vec3(0, 0, -1),
+      1e3,
+    );
+    expect(through.light).toEqual([0.25, 0.125, 0.0625]);
+    expect(through.excess).toEqual(discLuminanceAboveThroughRgb(host, 1e3, [0.25, 0.125, 0.0625]));
+  });
+
+  it("integrate air that changes across the disc as the same air taken whole, where it does not change (fix-view-light)", () => {
+    const host = sunHost();
+    const transmittance: Rgb = [0.5, 0.25, 0.125];
+    const level = 0.1 * host.central_luminance_cd_m2[1];
+    const through = discLightThroughAir(
+      host,
+      [
+        {
+          kind: "across",
+          vertical: vec3(0, 1, 0),
+          offsets: [...DISC_AIR_RULE.x],
+          weights: [...DISC_AIR_RULE.w],
+          lines: [...DISC_AIR_RULE.x].map(() => ({ transmittance, clear: true })),
+          groundBy: "lines",
+        },
+      ],
+      vec3(0, 0, -1),
+      level,
+    );
+    const whole = discLuminanceAboveThroughRgb(host, level, transmittance);
+    for (const c of [0, 1, 2] as const) {
+      expect(through.light[c]).toBeCloseTo(transmittance[c], 12);
+      expect(Math.abs(through.excess[c] / whole[c] - 1)).toBeLessThan(0.01);
+    }
+  });
+
+  it("hold the dimmed disc's light above a level: T ∫ max(0, I − level ÷ T), less than T times the clear disc's", () => {
+    const host = sunHost();
+    const level = 0.5 * host.central_luminance_cd_m2[1];
+    expect(discLuminanceAboveThroughRgb(host, level, [1, 1, 1])).toEqual(
+      discLuminanceAboveRgb(host, level),
+    );
+    const [, half] = discLuminanceAboveThroughRgb(host, level, [0.5, 0.5, 0.5]);
+    const [, clearAt2] = discLuminanceAboveRgb(host, 2 * level);
+    const [, clearAt1] = discLuminanceAboveRgb(host, level);
+    expect(half).toBeCloseTo(0.5 * clearAt2, 6);
+    expect(half).toBeLessThan(0.5 * clearAt1);
+    expect(discLuminanceAboveThroughRgb(host, level, [0.5, 0, 0.25])[1]).toBe(0);
+  });
+
   it("cast no glare source from a host drawn as a sprite", async () => {
     const engine = await countingRenderEngine();
     const layer = new HostDiscLayer(engine);
@@ -200,7 +339,7 @@ describe("the host discs", () => {
     expect(layer.glareSources(LOOK, VIEWPORT, "eye")).toEqual([]);
   });
 
-  it("hand R07 the excess of a partly clamped disc as a fine integration gives it", () => {
+  it("hold the light above a level inside the disc as a fine integration gives it", () => {
     const host = sunHost();
     const centralG = host.central_luminance_cd_m2[1];
     // The limit falls inside the disc: 65,504 ÷ exposureScale = 0.6 I(1).
@@ -212,7 +351,7 @@ describe("the host discs", () => {
       const [, g] = discLuminanceRgb(host, Math.sqrt(1 - r * r));
       reference += Math.max(0, g - 0.6 * centralG) * ((2 * r) / rings);
     }
-    const [, excess] = discExcessLuminanceRgb(host, exposureScale);
+    const [, excess] = discLuminanceAboveRgb(host, HALF_FLOAT_MAX / exposureScale);
     expect(Math.abs(excess / reference - 1)).toBeLessThan(0.01);
   });
 });

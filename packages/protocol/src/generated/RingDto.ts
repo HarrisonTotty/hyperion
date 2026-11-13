@@ -4,11 +4,12 @@ import type { RingKindDto } from "./RingKindDto";
 import type { RingMaterialDto } from "./RingMaterialDto";
 
 /**
- * A giant's ring: its kind, material, edges and optical depth (P14.T20).
+ * A giant's ring: its kind, material, edges and optical depth (P14.T20), and its plane's normal
+ * (P14.T56.a).
  *
- * Its edges are distances from its planet's centre in the planet's equatorial plane, which this
- * generator version takes to be the planet's orbital plane until P14.T14 gives planets their
- * poles. The ring's record's `position_m` is its planet's.
+ * Its edges are distances from its planet's centre in its plane, the plane `normal` is normal to,
+ * or without `normal` the planet's orbital plane. The ring's record's `position_m` is its
+ * planet's.
  */
 export type RingDto = { 
 /**
@@ -35,4 +36,13 @@ optical_depth: number,
 /**
  * The gaps the planet's moons clear in it, inside out; none in a dusty ring.
  */
-gaps: Array<RingGapDto>, };
+gaps: Array<RingGapDto>, 
+/**
+ * The normal of its plane, a unit vector along the galactic axes (P14.T56.a): the planet's
+ * local Laplace plane at the geometric mean of its edges, on the spin's side, its equator
+ * well inside its Laplace radius. Absent from a server of a generator version that does
+ * not place rings on the Laplace surface, whose rings lie in their planet's orbital plane.
+ * Optional on the wire, so [`PROTOCOL_VERSION`](crate::PROTOCOL_VERSION) stays 2 (plan 04,
+ * Design note 15).
+ */
+normal?: [number, number, number], };

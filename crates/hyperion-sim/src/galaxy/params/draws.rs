@@ -253,7 +253,7 @@ pub(super) const RECENT_PROGENITOR_MEAN: f64 = 8.0;
 /// The slope of the recent progenitors' stellar mass function, M^−1.45.
 const RECENT_MASS_SLOPE: f64 = 1.45;
 /// The recent progenitors' stellar masses, M☉: 10⁵–10⁹·⁵ (the upper end is `10^9.5`).
-pub(super) const RECENT_MASS: (f64, f64) = (1e5, 3_162_277_660.168_379_5);
+pub(crate) const RECENT_MASS: (f64, f64) = (1e5, 3_162_277_660.168_379_5);
 /// The ends of a lesser progenitor's accretion time, years ago, before [`lesser_accretion`]
 /// lowers the upper end to its youngest stars' age.
 const LESSER_ACCRETED_RANGE: (f64, f64) = (6.0 * GYR, 12.0 * GYR);
@@ -706,6 +706,20 @@ mod tests {
     use super::*;
 
     const SEEDS: u64 = 10_000;
+
+    /// The bulge's drawn boxiness lies within `MGE_BOXY`'s rows, so that the mass model's expansion
+    /// of the bulge never refuses a drawn galaxy (plan 15, P15.T3.c).
+    #[test]
+    fn the_bulge_s_boxiness_lies_within_the_boxy_table() {
+        let (lo, hi) = BULGE_BOXINESS.bounds();
+        let rows = &crate::tables::mge::MGE_BOXY;
+        assert!(
+            rows[0].0 <= lo && hi <= rows[rows.len() - 1].0,
+            "{lo}–{hi} against {}–{}",
+            rows[0].0,
+            rows[rows.len() - 1].0
+        );
+    }
 
     fn seed(n: u64) -> Seed {
         Seed::new(0x9a1a_0000_0000_0000 ^ n.wrapping_mul(0x9e37_79b9_7f4a_7c15))

@@ -4,6 +4,8 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 
 import { App } from "./App";
+import { MAXIMIZE_KEY } from "./displays/view/displayKeys";
+import { FakeLinkWorker } from "./test/FakeLinkWorker";
 import { FakeWebSocket } from "./test/FakeWebSocket";
 import { aDensityMap, anOpenedUniverse, aUniverseList } from "./test/galaxyFixtures";
 import {
@@ -16,12 +18,28 @@ import {
 import { stubCanvas } from "./test/RecordingContext2D";
 import { stubHyperionApi, TEST_GRAPHICS, TEST_SERVER_URL } from "./test/stubHyperionApi";
 import type { ViewsCheckApi } from "../../preload/api";
+import { statusLine } from "./test/statusLine";
+import { FIXTURE_EARTH } from "./test/planetaryFixture";
+import {
+  answerServedField,
+  answerServedRecord,
+  answerServedScene,
+  answerServedSky,
+} from "./test/servedHandoverFixtures";
 
 /** Plays the server's side, letting the outcomes it settles reach React. */
 async function answer(play: () => void): Promise<void> {
   await act(async () => {
     play();
     await Promise.resolve();
+  });
+}
+
+/** Plays the server's part, then lets every outcome it settles, and their effects, run on. */
+async function served(play: () => void): Promise<void> {
+  await act(async () => {
+    play();
+    await vi.advanceTimersByTimeAsync(0);
   });
 }
 
@@ -34,13 +52,33 @@ function modeBanner(): HTMLElement | null {
   return screen.queryByRole("status", { name: "Mode" });
 }
 
+/** The words of the header strip's mode banner, which must stand. */
+function standingModeBanner(): string | null {
+  return screen.getByRole("status", { name: "Mode" }).textContent;
+}
+
 /** A views-check launch's functions, each a mock. */
 function viewsCheckApi(): ViewsCheckApi & { readonly end: Mock<ViewsCheckApi["end"]> } {
   return {
-    launch: { setting: "high", smoke: true, out: null },
+    launch: {
+      setting: "high",
+      smoke: true,
+      out: null,
+      run: "several-views",
+      fixture: "terrain-test",
+    },
     startPhase: () => Promise.resolve(),
     endPhase: () => Promise.resolve(),
     askRightWayUp: () => Promise.resolve(),
+    writeTerrainResults: () => Promise.resolve({ json: "a", markdown: "b" }),
+    writeTerrainPhase: () => Promise.resolve({ json: "a", markdown: "b" }),
+    writeHandoverResults: () => Promise.resolve({ json: "a", markdown: "b" }),
+    writeAtmosphereResults: () => Promise.resolve({ json: "a", markdown: "b" }),
+    startProfile: () => Promise.resolve(),
+    endProfile: () => Promise.resolve(),
+    writeTimingResults: () => Promise.resolve({ json: "a", markdown: "b" }),
+    capture: () => Promise.resolve(),
+    wholeField: () => Promise.reject(new Error("no whole-body field")),
     writeResults: () => Promise.resolve({ json: "a", markdown: "b" }),
     end: vi.fn<ViewsCheckApi["end"]>(() => Promise.resolve()),
   };
@@ -67,6 +105,21 @@ describe("App", () => {
     );
   });
 
+  it("reads the server link's socket in a worker, off the page's thread (fix-night-sky-stars)", () => {
+    FakeLinkWorker.instances = [];
+    vi.stubGlobal("Worker", FakeLinkWorker);
+
+    render(<App />);
+
+    // No socket of the page's own, whose frames a long task of the page's would leave unread until
+    // the server's write timeout closed the connection in the middle of a sky's reply.
+    expect(FakeWebSocket.instances).toHaveLength(0);
+    expect(FakeLinkWorker.instances.flatMap((worker) => worker.posted)).toContainEqual({
+      kind: "open",
+      url: TEST_SERVER_URL,
+    });
+  });
+
   it("links to the server the client was launched to link to", () => {
     stubHyperionApi("ws://10.0.0.5:9100/ws");
 
@@ -81,7 +134,9 @@ describe("App", () => {
 
     const panel = screen.getByRole("region", { name: "Graphics" });
     expect(within(panel).getByText("VULKAN")).toBeInTheDocument();
-    expect(await within(panel).findByText("GRAPHICS NOT AVAILABLE: no WebGPU")).toBeInTheDocument();
+    expect(
+      await within(panel).findByText(statusLine("GRAPHICS NOT AVAILABLE: no WebGPU")),
+    ).toBeInTheDocument();
   });
 
   it("opens a views-check launch on VIEW", () => {
@@ -94,6 +149,31 @@ describe("App", () => {
       "page",
     );
   });
+
+  it.each([
+    ["T20's", "several-views"],
+    ["the terrain run's", "terrain"],
+  ] as const)(
+    "shows MEASUREMENT on every display of %s views-check launch (R10.T16.e)",
+    async (_name, run) => {
+      const api = { ...viewsCheckApi(), launch: { ...viewsCheckApi().launch, run } };
+      stubHyperionApi(TEST_SERVER_URL, TEST_GRAPHICS, undefined, api);
+      const user = userEvent.setup();
+      render(<App />);
+      const opened = standingModeBanner();
+      await user.keyboard("{F1}");
+      const link = standingModeBanner();
+      await user.keyboard("{F2}");
+      const galaxy = standingModeBanner();
+      await user.keyboard("{F3}");
+      const system = standingModeBanner();
+      await user.keyboard("{F4}");
+      const view = standingModeBanner();
+      expect([opened, link, galaxy, system, view]).toEqual(
+        Array.from({ length: 5 }, () => "MEASUREMENT"),
+      );
+    },
+  );
 
   it("fails a views-check run whose VIEW cannot be drawn", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
@@ -109,6 +189,192 @@ describe("App", () => {
     expect(api.end).toHaveBeenCalledWith({
       status: "fail",
       reason: expect.stringContaining("VIEW did not show its primary view"),
+    });
+  });
+
+  it("runs a terrain launch's terrain run (R10.T16.d), which ends as T20's does when VIEW cannot be drawn", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const api = {
+      ...viewsCheckApi(),
+      launch: { ...viewsCheckApi().launch, run: "terrain" as const },
+    };
+    const writeTerrainResults = vi.spyOn(api, "writeTerrainResults");
+    stubHyperionApi(TEST_SERVER_URL, TEST_GRAPHICS, undefined, api);
+    render(<App />);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(61_000);
+    });
+    expect(api.end).toHaveBeenCalledWith({
+      status: "fail",
+      reason: expect.stringContaining("VIEW did not show its primary view"),
+    });
+    expect(writeTerrainResults).not.toHaveBeenCalled();
+  });
+
+  describe("the hand-over check's looks (R10.T10.g)", () => {
+    it("draw a look chosen by hand before the run measures the primary, the console kept", async () => {
+      const api = {
+        ...viewsCheckApi(),
+        launch: { ...viewsCheckApi().launch, run: "handover" as const },
+      };
+      stubHyperionApi(TEST_SERVER_URL, TEST_GRAPHICS, undefined, api);
+      const user = userEvent.setup();
+      render(<App />);
+      await user.click(screen.getByRole("button", { name: "HAND-OVER 30°" }));
+      expect(screen.getByRole("button", { name: "HAND-OVER 30°" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+    });
+
+    const LOOK_SCENES = [
+      "HAND-OVER 30°",
+      "HAND-OVER 90°",
+      "HAND-OVER TERMINATOR",
+      "HAND-OVER HALO",
+    ];
+
+    /** Each look's `SCENE` button, `null` where `VIEW` offers none, its kept scenes drawn. */
+    function lookButtons(): ReadonlyArray<HTMLElement | null> {
+      // The kept scenes stand, so that an absent look is one not offered, not a list not drawn.
+      screen.getByRole("button", { name: "TERRAIN TEST" });
+      return LOOK_SCENES.map((name) => screen.queryByRole("button", { name }));
+    }
+
+    it("are offered on no ordinary launch", async () => {
+      const user = userEvent.setup();
+      render(<App />);
+      await user.keyboard("{F4}");
+      expect(lookButtons()).toEqual(LOOK_SCENES.map(() => null));
+    });
+
+    it("are offered on no terrain run's launch", () => {
+      const api = {
+        ...viewsCheckApi(),
+        launch: { ...viewsCheckApi().launch, run: "terrain" as const },
+      };
+      stubHyperionApi(TEST_SERVER_URL, TEST_GRAPHICS, undefined, api);
+      render(<App />);
+      expect(lookButtons()).toEqual(LOOK_SCENES.map(() => null));
+    });
+
+    it("are made on a served world, read from the server, on a hand-over launch naming one (R10.T15.b)", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      const api = {
+        ...viewsCheckApi(),
+        launch: {
+          ...viewsCheckApi().launch,
+          run: "handover" as const,
+          served: { universe: "000000000000002a", body: FIXTURE_EARTH },
+        },
+      };
+      stubHyperionApi(TEST_SERVER_URL, TEST_GRAPHICS, undefined, api);
+      render(<App />);
+      const socket = FakeWebSocket.latest();
+      await served(() => {
+        socket.serverWelcomes();
+      });
+      // No look before the world is read.
+      expect(screen.queryByRole("button", { name: "HAND-OVER 30°" })).toBeNull();
+      await served(() => {
+        answerServedScene(socket);
+      });
+      await served(() => {
+        answerServedSky(socket);
+      });
+      await served(() => {
+        answerServedField(socket, FIXTURE_EARTH, 64);
+      });
+      await served(() => {
+        answerServedRecord(socket);
+      });
+      for (const name of LOOK_SCENES) {
+        screen.getByRole("button", { name });
+      }
+      expect(api.end).not.toHaveBeenCalled();
+    });
+
+    it("ends a served hand-over launch failed where the server serves no surface (R10.T15.b)", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      vi.spyOn(console, "error").mockImplementation(() => undefined);
+      const api = {
+        ...viewsCheckApi(),
+        launch: {
+          ...viewsCheckApi().launch,
+          run: "handover" as const,
+          served: { universe: "000000000000002a", body: FIXTURE_EARTH },
+        },
+      };
+      stubHyperionApi(TEST_SERVER_URL, TEST_GRAPHICS, undefined, api);
+      render(<App />);
+      const socket = FakeWebSocket.latest();
+      await served(() => {
+        socket.serverWelcomes();
+      });
+      await served(() => {
+        answerServedScene(socket);
+      });
+      await served(() => {
+        answerServedSky(socket);
+      });
+      await served(() => {
+        socket.serverAnswers("surface_field", () => ({
+          kind: "surface_field",
+          state: "not_modelled",
+          section: "surface",
+        }));
+      });
+      expect(api.end).toHaveBeenCalledWith({
+        status: "fail",
+        reason: `the server serves no surface for ${FIXTURE_EARTH}: its field is not modelled (surface)`,
+      });
+      expect(screen.queryByRole("button", { name: "HAND-OVER 30°" })).toBeNull();
+    });
+
+    it("are offered after the kept scenes on a hand-over launch", () => {
+      const api = {
+        ...viewsCheckApi(),
+        launch: { ...viewsCheckApi().launch, run: "handover" as const },
+      };
+      stubHyperionApi(TEST_SERVER_URL, TEST_GRAPHICS, undefined, api);
+      render(<App />);
+      for (const name of LOOK_SCENES) {
+        screen.getByRole("button", { name });
+      }
+      const scenes = within(screen.getByRole("group", { name: "Scene" }))
+        .getAllByRole("button")
+        .map((button) => button.textContent);
+      expect(scenes.slice(scenes.indexOf("TERRAIN TEST"))).toEqual([
+        "TERRAIN TEST",
+        "ATMOSPHERE TEST",
+        ...LOOK_SCENES,
+      ]);
+    });
+  });
+
+  describe("the atmosphere run's places (R08.T17)", () => {
+    /** The `SCENE` selector's buttons after `ATMOSPHERE TEST`, on an atmosphere launch in `mode`. */
+    function scenesAfterAtmosphere(mode: "vulkan" | "software"): ReadonlyArray<string> {
+      const api = {
+        ...viewsCheckApi(),
+        launch: { ...viewsCheckApi().launch, run: "atmosphere" as const },
+      };
+      stubHyperionApi(TEST_SERVER_URL, { ...TEST_GRAPHICS, launchMode: mode }, undefined, api);
+      render(<App />);
+      const scenes = within(screen.getByRole("group", { name: "Scene" }))
+        .getAllByRole("button")
+        .map((button) => button.textContent);
+      return scenes.slice(scenes.indexOf("ATMOSPHERE TEST") + 1);
+    }
+
+    it("are offered as two scenes after the kept scenes on a software launch", () => {
+      expect(scenesAfterAtmosphere("software")).toEqual(["PLACE A", "PLACE B"]);
+    });
+
+    it("are not offered on a GPU launch, whose run flies the tour", () => {
+      expect(scenesAfterAtmosphere("vulkan")).toEqual([]);
     });
   });
 
@@ -233,12 +499,63 @@ describe("App", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Link" })).toBeInTheDocument();
   });
 
+  describe("the PLANET VIEWER (plan R15)", () => {
+    it("is offered on F5 where the launch offers it, under the TRAINING banner", async () => {
+      vi.stubGlobal("hyperion", { ...window.hyperion, planetViewer: true });
+      const user = userEvent.setup();
+      render(<App />);
+      const navigation = screen.getByRole("navigation", { name: "Displays" });
+      expect(
+        within(navigation).getByRole("button", { name: "F5 Planet Viewer" }),
+      ).toBeInTheDocument();
+      await user.keyboard("{F5}");
+      expect(screen.getByRole("heading", { level: 1, name: "Planet Viewer" })).toBeInTheDocument();
+      expect(screen.getByRole("region", { name: "INPUTS" })).toBeInTheDocument();
+      expect(modeBanner()).toHaveTextContent("TRAINING");
+    });
+
+    it("is not offered where the launch does not offer it, and F5 does nothing", async () => {
+      const user = userEvent.setup();
+      render(<App />);
+      const navigation = screen.getByRole("navigation", { name: "Displays" });
+      expect(within(navigation).queryByRole("button", { name: "F5 Planet Viewer" })).toBeNull();
+      await user.keyboard("{F5}");
+      expect(screen.getByRole("heading", { level: 1, name: "Link" })).toBeInTheDocument();
+    });
+
+    it("asks the server nothing while it is not shown", async () => {
+      vi.stubGlobal("hyperion", { ...window.hyperion, planetViewer: true });
+      render(<App />);
+      const socket = FakeWebSocket.latest();
+      act(() => {
+        socket.serverWelcomes();
+      });
+      expect(socket.requestsOfKind("viewer_planet")).toHaveLength(0);
+      expect(socket.requestsOfKind("viewer_randomize")).toHaveLength(0);
+    });
+  });
+
   it("switches to the view display on F4", async () => {
     const user = userEvent.setup();
     render(<App />);
 
     await user.keyboard("{F4}");
     expect(screen.getByRole("heading", { level: 1, name: "View" })).toBeInTheDocument();
+  });
+
+  it("keeps VIEW's MAXIMIZE VIEW its own while another display is shown (the owner's request, 2026-11-01)", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.keyboard("{F4}");
+    await user.click(screen.getByRole("button", { name: `${MAXIMIZE_KEY} MAXIMIZE VIEW` }));
+    await user.keyboard("{F3}");
+    // Its key on SYSTEM is not VIEW's.
+    await user.keyboard(MAXIMIZE_KEY);
+    await user.keyboard("{F4}");
+    expect(screen.getByRole("button", { name: `${MAXIMIZE_KEY} MAXIMIZE VIEW` })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
   });
 
   describe("the TRAINING banner, which follows what VIEW draws", () => {
@@ -322,7 +639,9 @@ describe("App", () => {
       });
 
       expect(modeBanner()).toHaveTextContent("TRAINING");
-      expect(screen.getByText("SCENE NOT AVAILABLE: the ship is in no system")).toBeInTheDocument();
+      expect(
+        screen.getByText(statusLine("SCENE NOT AVAILABLE: the ship is in no system")),
+      ).toBeInTheDocument();
     });
   });
 

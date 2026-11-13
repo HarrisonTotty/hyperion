@@ -1,0 +1,355 @@
+# generator_version = 31
+CoreCollapse: OneShot over ["CORE_COLLAPSE"], pending None, lasting Some(Unending), curve Some(SupernovaTemplate)
+CoreCollapse in Photometric(U) = 0x470cfec9645d155b  # 1.8819e34
+CoreCollapse in Photometric(B) = 0x4714b165f00725c3  # 2.6861e34
+CoreCollapse in Photometric(V) = 0x4710e35a29318cc6  # 2.1922e34
+CoreCollapse in Photometric(R) = 0x471bb639e30b07b1  # 3.5972e34
+CoreCollapse in Photometric(I) = 0x4713bed2cea162f9  # 2.5631e34
+CoreCollapse in Photometric(J) = 0x4707181e38cc756a  # 1.4989e34
+CoreCollapse in Photometric(H) = 0x46f6bbfaa653b835  # 7.3777e33
+CoreCollapse in Photometric(K) = 0x46e96ce42e22ccee  # 4.1255e33
+CoreCollapse in Photometric(MidInfrared) = 0x46a33e475114569e  # 1.9515e32
+CoreCollapse in XRay = 0x47985ab28c4a73a2  # 8.0931e36
+TypeIa: OneShot over ["TYPE_IA"], pending None, lasting Some(Unending), curve Some(SupernovaTemplate)
+TypeIa in Photometric(U) = 0x4742f203f4b8d762  # 1.9674e35
+TypeIa in Photometric(B) = 0x4749f17821bdf4a2  # 2.6941e35
+TypeIa in Photometric(V) = 0x473b1e7810a59782  # 1.4081e35
+TypeIa in Photometric(R) = 0x473d79f295af3dab  # 1.5305e35
+TypeIa in Photometric(I) = 0x4726f6b0a8a525d0  # 5.9617e34
+TypeIa in Photometric(J) = 0x4720918203e8b63d  # 4.3014e34
+TypeIa in Photometric(H) = 0x470c82ef7e9a59a8  # 1.8505e34
+TypeIa in Photometric(K) = 0x46fcf6588b5436df  # 9.3988e33
+TypeIa in Photometric(MidInfrared) = 0x46b1f903f4b1a70c  # 3.6453e32
+LuminousRedNova: OneShot over ["STELLAR_MERGER"], pending None, lasting Some(AtMost(Span { seconds: 24192000, nanos: 0 })), curve Some(BinaryCurve)
+LuminousRedNova in Photometric(U) = 0x46dc58e3a52ff70a  # 2.2998e33
+LuminousRedNova in Photometric(B) = 0x46f1b51c3cff9872  # 5.7464e33
+LuminousRedNova in Photometric(V) = 0x46f783e05f47412a  # 7.6311e33
+LuminousRedNova in Photometric(R) = 0x4707682ffbcf3ea9  # 1.5192e34
+LuminousRedNova in Photometric(I) = 0x4704f768db7cf90a  # 1.3608e34
+LuminousRedNova in Photometric(J) = 0x47011180244ee647  # 1.1078e34
+LuminousRedNova in Photometric(H) = 0x46f313fee207034c  # 6.1912e33
+LuminousRedNova in Photometric(K) = 0x46e7590a93131188  # 3.7884e33
+LuminousRedNova in Photometric(MidInfrared) = 0x46a529035f4ba671  # 2.1459e32
+Kilonova: OneShot over ["NEUTRON_STAR_MERGER"], pending None, lasting Some(AtMost(Span { seconds: 3024000, nanos: 0 })), curve Some(BinaryCurve)
+Kilonova in Photometric(U) = 0x46d76f71e8a9699f  # 1.9013e33
+Kilonova in Photometric(B) = 0x46e903d0a78953d6  # 4.0589e33
+Kilonova in Photometric(V) = 0x46ecda432e774ddc  # 4.6816e33
+Kilonova in Photometric(R) = 0x46fa95e5bfecd1e8  # 8.6275e33
+Kilonova in Photometric(I) = 0x46f5bf3a628f8718  # 7.0573e33
+Kilonova in Photometric(J) = 0x46eeff77a6dea7a3  # 5.0297e33
+Kilonova in Photometric(H) = 0x46e0754e5c3a54df  # 2.6705e33
+Kilonova in Photometric(K) = 0x46d36c0852ccc99e  # 1.5757e33
+Kilonova in Photometric(MidInfrared) = 0x46905f4993a635d3  # 8.3017e31
+Nova: Recurrent over ["ACCRETING_WHITE_DWARF", "ACCRETING_WHITE_DWARF_SLOW"], pending None, lasting Some(AtMost(Span { seconds: 41453750, nanos: 0 })), curve Some(BinaryCurve)
+Nova in Photometric(U) = 0x467e0dd46fa1fa33  # 3.8098e31
+Nova in Photometric(B) = 0x4682f3344acbc56e  # 4.8044e31
+Nova in Photometric(V) = 0x467b45f63515b113  # 3.4573e31
+Nova in Photometric(R) = 0x4683a4d16060363b  # 4.9803e31
+Nova in Photometric(I) = 0x4677e5d317a07cb2  # 3.0294e31
+Nova in Photometric(J) = 0x46665c6dda4b7b49  # 1.4173e31
+Nova in Photometric(H) = 0x465434de1f45515c  # 6.4037e30
+Nova in Photometric(K) = 0x464542e9bde99774  # 3.369e30
+Nova in Photometric(MidInfrared) = 0x45fc66eae6ceb067  # 1.4064e29
+DwarfNova: Local over ["ACCRETING_WHITE_DWARF", "ACCRETING_WHITE_DWARF_SLOW"], pending None, lasting Some(AtMost(Span { seconds: 204745708800, nanos: 0 })), curve Some(BinaryCurve)
+DwarfNova in Photometric(U) = 0x457d9e44b3b18ce9  # 5.729e26
+DwarfNova in Photometric(B) = 0x4575e45067f38127  # 4.2345e26
+DwarfNova in Photometric(V) = 0x4563a149a3ea08ce  # 1.8985e26
+DwarfNova in Photometric(R) = 0x45667a43f0714e1c  # 2.1739e26
+DwarfNova in Photometric(I) = 0x455486c7d8736f37  # 9.926e25
+DwarfNova in Photometric(J) = 0x4539c959ed1eed44  # 3.1174e25
+DwarfNova in Photometric(H) = 0x4523f17db80be14d  # 1.2055e25
+DwarfNova in Photometric(K) = 0x4512bf1e88a5643a  # 5.6658e24
+DwarfNova in Photometric(MidInfrared) = 0x44c3ac1e7cc2b47d  # 1.858e23
+XrayTransient: Recurrent over ["XRAY_BINARY"], pending None, lasting Some(AtMost(Span { seconds: 12368602, nanos: 0 })), curve Some(BinaryCurve)
+XrayTransient in Photometric(U) = 0x4604eb7a3c0637fe  # 2.0718e29
+XrayTransient in Photometric(B) = 0x45feeca2acda2a0b  # 1.5313e29
+XrayTransient in Photometric(V) = 0x45ebbac2b7f3300d  # 6.8655e28
+XrayTransient in Photometric(R) = 0x45efc099b92feaac  # 7.8615e28
+XrayTransient in Photometric(I) = 0x45dcff1e6acb53b2  # 3.5896e28
+XrayTransient in Photometric(J) = 0x45c236d12e50a66c  # 1.1274e28
+XrayTransient in Photometric(H) = 0x45ac2c3011185591  # 4.3595e27
+XrayTransient in Photometric(K) = 0x459a7b928248d8e8  # 2.049e27
+XrayTransient in Photometric(MidInfrared) = 0x454bc9e97e8276a3  # 6.7189e25
+XrayTransient in XRay = 0x469447155a54afea  # 1.0282e32
+XrayBurst: Recurrent over ["XRAY_BINARY"], pending None, lasting Some(AtMost(Span { seconds: 144, nanos: 0 })), curve Some(BinaryCurve)
+XrayBurst in Photometric(U) = 0x45e4dd1aef630ed6  # 5.1656e28
+XrayBurst in Photometric(B) = 0x45ded7a54f588a7b  # 3.8181e28
+XrayBurst in Photometric(V) = 0x45cba7d6bfb7157d  # 1.7118e28
+XrayBurst in Photometric(R) = 0x45cfab327aa063b6  # 1.9602e28
+XrayBurst in Photometric(I) = 0x45bceb2f0b2d289a  # 8.9499e27
+XrayBurst in Photometric(J) = 0x45a22a141aa468e5  # 2.8108e27
+XrayBurst in Photometric(H) = 0x458c1929a098c128  # 1.087e27
+XrayBurst in Photometric(K) = 0x457a694ee3160cfe  # 5.1087e26
+XrayBurst in Photometric(MidInfrared) = 0x452bb72be649e3bc  # 1.6753e25
+XrayBurst in XRay = 0x467ec8a1d0b2d179  # 3.9023e31
+BeXOutburst: Recurrent over ["XRAY_BINARY"], pending None, lasting Some(AtMost(Span { seconds: 8821735, nanos: 0 })), curve Some(BinaryCurve)
+BeXOutburst in XRay = 0x4642997559c4bb62  # 2.9472e30
+GiantEruption: Recurrent over ["LUMINOUS_BLUE_VARIABLE"], pending None, lasting Some(AtMost(Span { seconds: 631152000, nanos: 0 })), curve Some(GiantEruption)
+GiantEruption in Photometric(U) = 0x46b6d3a10ffff2f1  # 4.6298e32
+GiantEruption in Photometric(B) = 0x46c85dae52b944d1  # 9.884e32
+GiantEruption in Photometric(V) = 0x46cc1b0ae42f9417  # 1.1401e33
+GiantEruption in Photometric(R) = 0x46d9e59648be548f  # 2.101e33
+GiantEruption in Photometric(I) = 0x46d52ef2062ef3d9  # 1.7186e33
+GiantEruption in Photometric(J) = 0x46ce31931f20a225  # 1.2248e33
+GiantEruption in Photometric(H) = 0x46c0080878131e36  # 6.5031e32
+GiantEruption in Photometric(K) = 0x46b2eaf991095e67  # 3.837e32
+GiantEruption in Photometric(MidInfrared) = 0x466fe52d686d8b22  # 2.0216e31
+TidalDisruption: Centre over ["TIDAL_DISRUPTION_VICTIM"], pending None, lasting Some(Unending), curve Some(DisruptionTail)
+TidalDisruption in Photometric(U), Eddington share = 0x3ff0000000000000  # 1.0
+TidalDisruption in Photometric(B), Eddington share = 0x3ff0000000000000  # 1.0
+TidalDisruption in Photometric(V), Eddington share = 0x3ff0000000000000  # 1.0
+TidalDisruption in Photometric(R), Eddington share = 0x3ff0000000000000  # 1.0
+TidalDisruption in Photometric(I), Eddington share = 0x3ff0000000000000  # 1.0
+TidalDisruption in Photometric(J), Eddington share = 0x3ff0000000000000  # 1.0
+TidalDisruption in Photometric(H), Eddington share = 0x3ff0000000000000  # 1.0
+TidalDisruption in Photometric(K), Eddington share = 0x3ff0000000000000  # 1.0
+TidalDisruption in Photometric(MidInfrared), Eddington share = 0x3ff0000000000000  # 1.0
+TidalDisruption in Photometric(Radio), Eddington share = 0x3ff0000000000000  # 1.0
+TidalDisruption in XRay, Eddington share = 0x3fb033d91d2a2067  # 0.06329113924050632
+CentralFlare: Centre over [], pending None, lasting Some(AtMost(Span { seconds: 8175, nanos: 0 })), curve Some(CentreFlare)
+CentralFlare in XRay = 0x45dd0d633f2b0301  # 3.5965e28
+Flare: Local over [], pending None, lasting Some(AtMost(Span { seconds: 86400, nanos: 0 })), curve Some(StarFlare)
+Flare in Photometric(U): per host
+Flare in Photometric(B): per host
+Flare in Photometric(V): per host
+Flare in Photometric(R): per host
+Flare in Photometric(I): per host
+Flare in Photometric(J): per host
+Flare in Photometric(H): per host
+Flare in Photometric(K): per host
+Flare in Photometric(MidInfrared): per host
+Flare in Photometric(Radio): per host
+Glitch: Local over [], pending None, lasting Some(AtMost(Span { seconds: 0, nanos: 0 })), curve None
+MagnetarBurst: Recurrent over ["CORE_COLLAPSE"], pending None, lasting Some(AtMost(Span { seconds: 3, nanos: 0 })), curve Some(MagnetarBurst)
+MagnetarBurst in XRay = 0x47e0ed57a5e12b1f  # 1.8e38
+FuOrionisOutburst: Local over [], pending None, lasting Some(AtMost(Span { seconds: 15778800000, nanos: 0 })), curve Some(FuOrionisOutburst)
+FuOrionisOutburst in Photometric(U): per host
+FuOrionisOutburst in Photometric(B): per host
+FuOrionisOutburst in Photometric(V): per host
+FuOrionisOutburst in Photometric(R): per host
+FuOrionisOutburst in Photometric(I): per host
+FuOrionisOutburst in Photometric(J): per host
+FuOrionisOutburst in Photometric(H): per host
+FuOrionisOutburst in Photometric(K): per host
+FuOrionisOutburst in Photometric(MidInfrared): per host
+FuOrionisOutburst in Photometric(Radio): per host
+CoreCollapse(IIP) peak in Photometric(U) = 0x47001e67298f9520  # 1.0461674423483972e34
+CoreCollapse(IIP) at 20 d in Photometric(U) = 0x46fcbcbfdb48d6fc  # 9.32578784304856e33
+CoreCollapse(IIP) peak in Photometric(B) = 0x470a80f34cc62f9b  # 1.7201892869389596e34
+CoreCollapse(IIP) at 20 d in Photometric(B) = 0x470801e0783631fe  # 1.5581648915820246e34
+CoreCollapse(IIP) peak in Photometric(V) = 0x4708417019db682e  # 1.574279534820585e34
+CoreCollapse(IIP) at 20 d in Photometric(V) = 0x4706400ff3388f3e  # 1.4441233599758913e34
+CoreCollapse(IIP) peak in Photometric(R) = 0x4713c814cdf6e59b  # 2.5677942634762348e34
+CoreCollapse(IIP) at 20 d in Photometric(R) = 0x47124121135fe3e1  # 2.3695580150841623e34
+CoreCollapse(IIP) peak in Photometric(I) = 0x470bff90db98f1be  # 1.817193830586113e34
+CoreCollapse(IIP) at 20 d in Photometric(I) = 0x470a02934f3c5c65  # 1.6881494275411258e34
+CoreCollapse(IIP) peak in Photometric(J) = 0x47003af868d06491  # 1.0534101314530635e34
+CoreCollapse(IIP) at 20 d in Photometric(J) = 0x46fe6a4d77ab48e4  # 9.870311173645763e33
+CoreCollapse(IIP) peak in Photometric(H) = 0x46efdb237661e962  # 5.1689331231583267e33
+CoreCollapse(IIP) at 20 d in Photometric(H) = 0x46edf0719a678759  # 4.857918367831267e33
+CoreCollapse(IIP) peak in Photometric(K) = 0x46e1c674e3d5eacc  # 2.884194521099187e33
+CoreCollapse(IIP) at 20 d in Photometric(K) = 0x46e0bd8802374ab0  # 2.7162781521113434e33
+CoreCollapse(IIP) peak in Photometric(MidInfrared) = 0x469acb64e76cf31a  # 1.358642987406714e32
+CoreCollapse(IIP) at 20 d in Photometric(MidInfrared) = 0x4699561965a854fc  # 1.2847043052229927e32
+CoreCollapse(IIP) peak in Photometric(Radio) = 0x0000000000000000  # 0.0
+CoreCollapse(IIP) at 20 d in Photometric(Radio) = 0x0000000000000000  # 0.0
+CoreCollapse(IIP) peak in XRay = 0x419bffb9465eb08d  # 117435985.59247036
+CoreCollapse(IIP) at 20 d in XRay = 0x0000000000000000  # 0.0
+CoreCollapse(IIL) peak in Photometric(U) = 0x4705d166ca8d72e1  # 1.4160675199493007e34
+CoreCollapse(IIL) at 20 d in Photometric(U) = 0x470372a921f9c0ad  # 1.2622404385172583e34
+CoreCollapse(IIL) peak in Photometric(B) = 0x471238b71bea82f1  # 2.365291644619344e34
+CoreCollapse(IIL) at 20 d in Photometric(B) = 0x470fff4f793e2a23  # 2.0767439201398504e34
+CoreCollapse(IIL) peak in Photometric(V) = 0x4710e34686855acd  # 2.1921611080042354e34
+CoreCollapse(IIL) at 20 d in Photometric(V) = 0x470d4c25a6da48e2  # 1.9015131888475274e34
+CoreCollapse(IIL) peak in Photometric(R) = 0x471bb62a55c72999  # 3.5971691964532265e34
+CoreCollapse(IIL) at 20 d in Photometric(R) = 0x4717e61d92088b6e  # 3.102253119174878e34
+CoreCollapse(IIL) peak in Photometric(I) = 0x4713bea7534675d1  # 2.5630138753108105e34
+CoreCollapse(IIL) at 20 d in Photometric(I) = 0x4710ead2e6428f46  # 2.195988568998942e34
+CoreCollapse(IIL) peak in Photometric(J) = 0x470717ef15bb9cc5  # 1.4988533178002574e34
+CoreCollapse(IIL) at 20 d in Photometric(J) = 0x47039ebbbc3642d9  # 1.2734141868088547e34
+CoreCollapse(IIL) peak in Photometric(H) = 0x46f6bbede5abbd46  # 7.377636852365771e33
+CoreCollapse(IIL) at 20 d in Photometric(H) = 0x46f341bdc666b1f7  # 6.249189528831067e33
+CoreCollapse(IIL) peak in Photometric(K) = 0x46e96cc855ba4ebe  # 4.1254310582664316e33
+CoreCollapse(IIL) at 20 d in Photometric(K) = 0x46e57de549699f39  # 3.4872406624687013e33
+CoreCollapse(IIL) peak in Photometric(MidInfrared) = 0x46a33e2672e93868  # 1.9514491394726734e32
+CoreCollapse(IIL) at 20 d in Photometric(MidInfrared) = 0x46a03370d93ccf7e  # 1.642970574459133e32
+CoreCollapse(IIL) peak in Photometric(Radio) = 0x0000000000000000  # 0.0
+CoreCollapse(IIL) at 20 d in Photometric(Radio) = 0x0000000000000000  # 0.0
+CoreCollapse(IIL) peak in XRay = 0x419bffb9465eb08d  # 117435985.59247036
+CoreCollapse(IIL) at 20 d in XRay = 0x0000000000000000  # 0.0
+CoreCollapse(IIb) peak in Photometric(U) = 0x4707b38d10ee0a0a  # 1.5383069434475138e34
+CoreCollapse(IIb) at 20 d in Photometric(U) = 0x47076a1623496b43  # 1.519681463807461e34
+CoreCollapse(IIb) peak in Photometric(B) = 0x4710ea47cbfa877e  # 2.1957130477919635e34
+CoreCollapse(IIb) at 20 d in Photometric(B) = 0x4710b5d9b27ef20e  # 2.1691278406970816e34
+CoreCollapse(IIb) peak in Photometric(V) = 0x470b31994c2b0ce1  # 1.7649749841598667e34
+CoreCollapse(IIb) at 20 d in Photometric(V) = 0x470add4f2fc10b0b  # 1.7436050581040182e34
+CoreCollapse(IIb) peak in Photometric(R) = 0x4714b7571fbba244  # 2.6891130199793565e34
+CoreCollapse(IIb) at 20 d in Photometric(R) = 0x47147720efbfdf20  # 2.6565538353401854e34
+CoreCollapse(IIb) peak in Photometric(I) = 0x470afb98145abcfa  # 1.7512831514065024e34
+CoreCollapse(IIb) at 20 d in Photometric(I) = 0x470aa7f55c773058  # 1.730079003028034e34
+CoreCollapse(IIb) peak in Photometric(J) = 0x46fbc7076354db08  # 9.014300001894045e33
+CoreCollapse(IIb) at 20 d in Photometric(J) = 0x46fb70ee1adf41ad  # 8.905156854702412e33
+CoreCollapse(IIb) peak in Photometric(H) = 0x46ea0963b8d5c198  # 4.2246925250026413e33
+CoreCollapse(IIb) at 20 d in Photometric(H) = 0x46e9b8afbd1ca840  # 4.17354088394356e33
+CoreCollapse(IIb) peak in Photometric(K) = 0x46dc1e9f6ed89a53  # 2.2813346235958176e33
+CoreCollapse(IIb) at 20 d in Photometric(K) = 0x46dbc776a5033036  # 2.2537127294316372e33
+CoreCollapse(IIb) peak in Photometric(MidInfrared) = 0x4693d1a0fd022615  # 1.004935729762035e32
+CoreCollapse(IIb) at 20 d in Photometric(MidInfrared) = 0x46939432d0029c29  # 9.927681906021995e31
+CoreCollapse(IIb) peak in Photometric(Radio) = 0x0000000000000000  # 0.0
+CoreCollapse(IIb) at 20 d in Photometric(Radio) = 0x0000000000000000  # 0.0
+CoreCollapse(IIb) peak in XRay = 0x419bffb9465eb08d  # 117435985.59247036
+CoreCollapse(IIb) at 20 d in XRay = 0x0000000000000000  # 0.0
+CoreCollapse(Ib) peak in Photometric(U) = 0x470cfea1e9166b30  # 1.8818608993697166e34
+CoreCollapse(Ib) at 20 d in Photometric(U) = 0x470a6cb92c4fa135  # 1.7150611185346486e34
+CoreCollapse(Ib) peak in Photometric(B) = 0x4714b15f74a8f6ac  # 2.6860871612626826e34
+CoreCollapse(Ib) at 20 d in Photometric(B) = 0x4712dbd65964f2c4  # 2.4480043412452388e34
+CoreCollapse(Ib) peak in Photometric(V) = 0x4710a22cd2aca2d0  # 2.15915128330139e34
+CoreCollapse(Ib) at 20 d in Photometric(V) = 0x470e517fafb005b0  # 1.9677737160406806e34
+CoreCollapse(Ib) peak in Photometric(R) = 0x471957bfa7adf584  # 3.289679389305721e34
+CoreCollapse(Ib) at 20 d in Photometric(R) = 0x471718b416491d68  # 2.998096838577548e34
+CoreCollapse(Ib) peak in Photometric(I) = 0x471081246751c6a7  # 2.1424016191273983e34
+CoreCollapse(Ib) at 20 d in Photometric(I) = 0x470e1549ed26ef80  # 1.9525086676075321e34
+CoreCollapse(Ib) peak in Photometric(J) = 0x4700fd938f2c8a0f  # 1.1027486277046477e34
+CoreCollapse(Ib) at 20 d in Photometric(J) = 0x46fef8193d347154  # 1.0050058936487389e34
+CoreCollapse(Ib) peak in Photometric(H) = 0x46efd9fcdc561df3  # 5.1682037245730274e33
+CoreCollapse(Ib) at 20 d in Photometric(H) = 0x46ed074128b96258  # 4.710117131212971e33
+CoreCollapse(Ib) peak in Photometric(K) = 0x46e133279746d86d  # 2.7908308187843654e33
+CoreCollapse(Ib) at 20 d in Photometric(K) = 0x46df59c1d8a6a7bb  # 2.543463986795403e33
+CoreCollapse(Ib) peak in Photometric(MidInfrared) = 0x46983ebc3281382c  # 1.2293705520047083e32
+CoreCollapse(Ib) at 20 d in Photometric(MidInfrared) = 0x4696189905ded4bc  # 1.1204046137102512e32
+CoreCollapse(Ib) peak in Photometric(Radio) = 0x0000000000000000  # 0.0
+CoreCollapse(Ib) at 20 d in Photometric(Radio) = 0x0000000000000000  # 0.0
+CoreCollapse(Ib) peak in XRay = 0x47985aa931f15e10  # 8.093052575052174e36
+CoreCollapse(Ib) at 20 d in XRay = 0x0000000000000000  # 0.0
+TypeIa(Merger) peak in Photometric(U) = 0x4742f1cf9c887c43  # 1.967317056848193e35
+TypeIa(Merger) at 20 d in Photometric(U) = 0x47412fccc7a752ab  # 1.7847708836282913e35
+TypeIa(Merger) peak in Photometric(B) = 0x4749f16fe3022553  # 2.6940869351916233e35
+TypeIa(Merger) at 20 d in Photometric(B) = 0x4747892e9d1ac2ad  # 2.4441042195794983e35
+TypeIa(Merger) peak in Photometric(V) = 0x473b1e182204146f  # 1.4080239947187277e35
+TypeIa(Merger) at 20 d in Photometric(V) = 0x473899f105b45a89  # 1.2773742902681974e35
+TypeIa(Merger) peak in Photometric(R) = 0x473d79b7708f8473  # 1.5304531404911493e35
+TypeIa(Merger) at 20 d in Photometric(R) = 0x473abd8dd52c64be  # 1.3884433088188576e35
+TypeIa(Merger) peak in Photometric(I) = 0x4726f69a2f1a795f  # 5.96161096825462e34
+TypeIa(Merger) at 20 d in Photometric(I) = 0x4724d5215ac1341f  # 5.408436651642852e34
+TypeIa(Merger) peak in Photometric(J) = 0x472091797c83a821  # 4.301366213602771e34
+TypeIa(Merger) at 20 d in Photometric(J) = 0x471e0fd24327123f  # 3.902245014923938e34
+TypeIa(Merger) peak in Photometric(H) = 0x470c82a6b1227bb3  # 1.8504278997870203e34
+TypeIa(Merger) at 20 d in Photometric(H) = 0x4709dd69e5ffa1b9  # 1.6787278015493594e34
+TypeIa(Merger) peak in Photometric(K) = 0x46fcf6456e918c7a  # 9.39870536024973e33
+TypeIa(Merger) at 20 d in Photometric(K) = 0x46fa464e3064019d  # 8.52660511043862e33
+TypeIa(Merger) peak in Photometric(MidInfrared) = 0x46b1f8f6d7667b82  # 3.645259412810429e32
+TypeIa(Merger) at 20 d in Photometric(MidInfrared) = 0x46b04e0b232a3e7e  # 3.3070179718154324e32
+TypeIa(Merger) peak in Photometric(Radio) = 0x0000000000000000  # 0.0
+TypeIa(Merger) at 20 d in Photometric(Radio) = 0x0000000000000000  # 0.0
+TypeIa(Merger) peak in XRay = 0x0000000000000000  # 0.0
+TypeIa(Merger) at 20 d in XRay = 0x0000000000000000  # 0.0
+TypeIa(Iax) peak in Photometric(U) = 0x470432dc40657d79  # 1.3109688472045867e34
+TypeIa(Iax) at 20 d in Photometric(U) = 0x46f9382c05d5b3cc  # 8.18417026538132e33
+TypeIa(Iax) peak in Photometric(B) = 0x470cd4a9cc106071  # 1.871220444864431e34
+TypeIa(Iax) at 20 d in Photometric(B) = 0x4701ffa17e905080  # 1.1681731993470594e34
+TypeIa(Iax) peak in Photometric(V) = 0x47072cc8190151cf  # 1.5041388392510633e34
+TypeIa(Iax) at 20 d in Photometric(V) = 0x46fcef7b8fa1ac36  # 9.390099840627743e33
+TypeIa(Iax) peak in Photometric(R) = 0x4711a79696417ee4  # 2.291703493130248e34
+TypeIa(Iax) at 20 d in Photometric(R) = 0x47060b03a7a39caa  # 1.4306740869960662e34
+TypeIa(Iax) peak in Photometric(I) = 0x4706fec208bdf498  # 1.4924704487017952e34
+TypeIa(Iax) at 20 d in Photometric(I) = 0x46fcb604d9d1badf  # 9.317255931955308e33
+TypeIa(Iax) peak in Photometric(J) = 0x46f7ac20d27bd90c  # 7.682125165056531e33
+TypeIa(Iax) at 20 d in Photometric(J) = 0x46ed8e7bca3bf09c  # 4.795828709801645e33
+TypeIa(Iax) peak in Photometric(H) = 0x46e63058f774bb34  # 3.6003479753424877e33
+TypeIa(Iax) at 20 d in Photometric(H) = 0x46dbb44d2c36b5dc  # 2.24764004939207e33
+TypeIa(Iax) peak in Photometric(K) = 0x46d7f6c6f0393a15  # 1.9441884692275404e33
+TypeIa(Iax) at 20 d in Photometric(K) = 0x46cdebb012eb08d1  # 1.2137259778581253e33
+TypeIa(Iax) peak in Photometric(MidInfrared) = 0x4690e3d317e1d107  # 8.56421691894798e31
+TypeIa(Iax) at 20 d in Photometric(MidInfrared) = 0x468516970aa92990  # 5.346504579707334e31
+TypeIa(Iax) peak in Photometric(Radio) = 0x0000000000000000  # 0.0
+TypeIa(Iax) at 20 d in Photometric(Radio) = 0x0000000000000000  # 0.0
+TypeIa(Iax) peak in XRay = 0x0000000000000000  # 0.0
+TypeIa(Iax) at 20 d in XRay = 0x0000000000000000  # 0.0
+LuminousRedNova of 2 M☉ peak in Photometric(U) = 0x461cb481f204a5e1  # 5.685632366241006e29
+LuminousRedNova of 2 M☉ at 1 d in Photometric(U) = 0x45e6f6ce5b36eb1a  # 5.685632366241006e28
+LuminousRedNova of 2 M☉ peak in Photometric(B) = 0x4631ee760ceeee9c  # 1.420678909402605e30
+LuminousRedNova of 2 M☉ at 1 d in Photometric(B) = 0x45fcb0bce17e4a93  # 1.4206789094026049e29
+LuminousRedNova of 2 M☉ peak in Photometric(V) = 0x4637d00ae6ea0cda  # 1.886633799590871e30
+LuminousRedNova of 2 M☉ at 1 d in Photometric(V) = 0x46030cd585880a47  # 1.8866337995908706e29
+LuminousRedNova of 2 M☉ peak in Photometric(R) = 0x4647b3bfbcdcc370  # 3.7557547025898243e30
+LuminousRedNova of 2 M☉ at 1 d in Photometric(R) = 0x4612f632fd7d6926  # 3.755754702589824e29
+LuminousRedNova of 2 M☉ peak in Photometric(I) = 0x46453b5645badd71  # 3.364310650579671e30
+LuminousRedNova of 2 M☉ at 1 d in Photometric(I) = 0x4610fc4504957df4  # 3.364310650579671e29
+LuminousRedNova of 2 M☉ peak in Photometric(J) = 0x464148841cebbcc8  # 2.7386427964653384e30
+LuminousRedNova of 2 M☉ at 1 d in Photometric(J) = 0x460ba739c7df9472  # 2.738642796465338e29
+LuminousRedNova of 2 M☉ peak in Photometric(H) = 0x463351c9a8806112  # 1.530647163382041e30
+LuminousRedNova of 2 M☉ at 1 d in Photometric(H) = 0x45fee942a733ce83  # 1.5306471633820409e29
+LuminousRedNova of 2 M☉ peak in Photometric(K) = 0x4627a4b692978997  # 9.366119980994147e29
+LuminousRedNova of 2 M☉ at 1 d in Photometric(K) = 0x45f2ea2ba8793adf  # 9.366119980994147e28
+LuminousRedNova of 2 M☉ peak in Photometric(MidInfrared) = 0x45e56d971821cfec  # 5.30533731446675e28
+LuminousRedNova of 2 M☉ at 1 d in Photometric(MidInfrared) = 0x45b12478e01b0cbd  # 5.30533731446675e27
+LuminousRedNova of 2 M☉ peak in Photometric(Radio) = 0x0000000000000000  # 0.0
+LuminousRedNova of 2 M☉ at 1 d in Photometric(Radio) = 0x0000000000000000  # 0.0
+LuminousRedNova of 2 M☉ peak in XRay = 0x0000000000000000  # 0.0
+LuminousRedNova of 2 M☉ at 1 d in XRay = 0x0000000000000000  # 0.0
+LuminousRedNova of 300 M☉ peak in Photometric(U) = 0x46dc589d25eeb3e0  # 2.2997127288301626e33
+LuminousRedNova of 300 M☉ at 1 d in Photometric(U) = 0x46a6ad4a84bef64c  # 2.2997127288301623e32
+LuminousRedNova of 300 M☉ peak in Photometric(B) = 0x46f1b50e984b6a83  # 5.746332441282634e33
+LuminousRedNova of 300 M☉ at 1 d in Photometric(B) = 0x46bc54e426df10d0  # 5.7463324412826325e32
+LuminousRedNova of 300 M☉ peak in Photometric(V) = 0x46f783cf9fda6050  # 7.631017069133567e33
+LuminousRedNova of 300 M☉ at 1 d in Photometric(V) = 0x46c2cfd94caeb373  # 7.631017069133567e32
+LuminousRedNova of 300 M☉ peak in Photometric(R) = 0x470767df095cc8f5  # 1.5191198339156637e34
+LuminousRedNova of 300 M☉ at 1 d in Photometric(R) = 0x46d2b97f3ab0a0c4  # 1.5191198339156637e33
+LuminousRedNova of 300 M☉ peak in Photometric(I) = 0x4704f75e1d05d7f6  # 1.3607893596525577e34
+LuminousRedNova of 300 M☉ at 1 d in Photometric(I) = 0x46d0c5e4e404acc4  # 1.3607893596525575e33
+LuminousRedNova of 300 M☉ peak in Photometric(J) = 0x4701112fe5d2cd29  # 1.1077205301112854e34
+LuminousRedNova of 300 M☉ at 1 d in Photometric(J) = 0x46cb4eb309514841  # 1.1077205301112853e33
+LuminousRedNova of 300 M☉ peak in Photometric(H) = 0x46f313f0b1d1e89d  # 6.191129742890328e33
+LuminousRedNova of 300 M☉ at 1 d in Photometric(H) = 0x46be864de94fda94  # 6.1911297428903275e32
+LuminousRedNova of 300 M☉ peak in Photometric(K) = 0x46e75906016f4933  # 3.788388687938205e33
+LuminousRedNova of 300 M☉ at 1 d in Photometric(K) = 0x46b2ad9e678c3a8f  # 3.788388687938205e32
+LuminousRedNova of 300 M☉ peak in Photometric(MidInfrared) = 0x46a528fe0f3c671b  # 2.1458917789444076e32
+LuminousRedNova of 300 M☉ at 1 d in Photometric(MidInfrared) = 0x4670ed980c30527c  # 2.1458917789444076e31
+LuminousRedNova of 300 M☉ peak in Photometric(Radio) = 0x0000000000000000  # 0.0
+LuminousRedNova of 300 M☉ at 1 d in Photometric(Radio) = 0x0000000000000000  # 0.0
+LuminousRedNova of 300 M☉ peak in XRay = 0x0000000000000000  # 0.0
+LuminousRedNova of 300 M☉ at 1 d in XRay = 0x0000000000000000  # 0.0
+Kilonova of 0.05 M☉ peak in Photometric(U) = 0x46d76f2a1534c665  # 1.901211083720597e33
+Kilonova of 0.05 M☉ at 1 d in Photometric(U) = 0x46d76f2a1534c665  # 1.901211083720597e33
+Kilonova of 0.05 M☉ peak in Photometric(B) = 0x46e903c5ff305459  # 4.058873613040663e33
+Kilonova of 0.05 M☉ at 1 d in Photometric(B) = 0x46e903c5ff305459  # 4.058873613040663e33
+Kilonova of 0.05 M☉ peak in Photometric(V) = 0x46ecda29c73164cd  # 4.6815371042020206e33
+Kilonova of 0.05 M☉ at 1 d in Photometric(V) = 0x46ecda29c73164cd  # 4.6815371042020206e33
+Kilonova of 0.05 M☉ peak in Photometric(R) = 0x46fa95df3b195631  # 8.627467720208503e33
+Kilonova of 0.05 M☉ at 1 d in Photometric(R) = 0x46fa95df3b195631  # 8.627467720208503e33
+Kilonova of 0.05 M☉ peak in Photometric(I) = 0x46f5bf2714a52c40  # 7.057204409453052e33
+Kilonova of 0.05 M☉ at 1 d in Photometric(I) = 0x46f5bf2714a52c40  # 7.057204409453052e33
+Kilonova of 0.05 M☉ peak in Photometric(J) = 0x46eeff51f3f07050  # 5.029606661927176e33
+Kilonova of 0.05 M☉ at 1 d in Photometric(J) = 0x46eeff51f3f07050  # 5.029606661927176e33
+Kilonova of 0.05 M☉ peak in Photometric(H) = 0x46e07543e2042ac6  # 2.6704740592413393e33
+Kilonova of 0.05 M☉ at 1 d in Photometric(H) = 0x46e07543e2042ac6  # 2.6704740592413393e33
+Kilonova of 0.05 M☉ peak in Photometric(K) = 0x46d36bd9f70d9589  # 1.5756426110974636e33
+Kilonova of 0.05 M☉ at 1 d in Photometric(K) = 0x46d36bd9f70d9589  # 1.5756426110974636e33
+Kilonova of 0.05 M☉ peak in Photometric(MidInfrared) = 0x46905f4716ac16b6  # 8.301680748550329e31
+Kilonova of 0.05 M☉ at 1 d in Photometric(MidInfrared) = 0x46905f4716ac16b6  # 8.301680748550329e31
+Kilonova of 0.05 M☉ peak in Photometric(Radio) = 0x0000000000000000  # 0.0
+Kilonova of 0.05 M☉ at 1 d in Photometric(Radio) = 0x0000000000000000  # 0.0
+Kilonova of 0.05 M☉ peak in XRay = 0x0000000000000000  # 0.0
+Kilonova of 0.05 M☉ at 1 d in XRay = 0x0000000000000000  # 0.0
+Kilonova of 0.01 M☉ peak in Photometric(U) = 0x46caaef3cdea7c7c  # 1.0824076075338702e33
+Kilonova of 0.01 M☉ at 1 d in Photometric(U) = 0x46b2bf54ddc3d1ea  # 3.802422167441194e32
+Kilonova of 0.01 M☉ peak in Photometric(B) = 0x46dc7ba923bce965  # 2.3108195162507002e33
+Kilonova of 0.01 M☉ at 1 d in Photometric(B) = 0x46c40304cc26a9e0  # 8.117747226081325e32
+Kilonova of 0.01 M☉ peak in Photometric(V) = 0x46e06d2135607182  # 2.665317607250521e33
+Kilonova of 0.01 M☉ at 1 d in Photometric(V) = 0x46c714ee38f450a3  # 9.36307420840404e32
+Kilonova of 0.01 M☉ peak in Photometric(R) = 0x46ee4582afd7a805  # 4.911835815637902e33
+Kilonova of 0.01 M☉ at 1 d in Photometric(R) = 0x46d544b295adde8d  # 1.7254935440417005e33
+Kilonova of 0.01 M☉ peak in Photometric(I) = 0x46e8c30abc059ba8  # 4.017845154660457e33
+Kilonova of 0.01 M☉ at 1 d in Photometric(I) = 0x46d165b8dd50f033  # 1.4114408818906103e33
+Kilonova of 0.01 M☉ peak in Photometric(J) = 0x46e1a5c756b67179  # 2.863482419384567e33
+Kilonova of 0.01 M☉ at 1 d in Photometric(J) = 0x46c8cc418ff38d0c  # 1.005921332385435e33
+Kilonova of 0.01 M☉ peak in Photometric(H) = 0x46d2bd6fe41f025e  # 1.5203684967941604e33
+Kilonova of 0.01 M☉ at 1 d in Photometric(H) = 0x46ba553969a0446f  # 5.340948118482678e32
+Kilonova of 0.01 M☉ peak in Photometric(K) = 0x46c61d33a9537cc5  # 8.970532328629457e32
+Kilonova of 0.01 M☉ at 1 d in Photometric(K) = 0x46af12f65815bc0e  # 3.151285222194927e32
+Kilonova of 0.01 M☉ peak in Photometric(MidInfrared) = 0x4682a466a92dfde5  # 4.726357043934059e31
+Kilonova of 0.01 M☉ at 1 d in Photometric(MidInfrared) = 0x466a320b5779bdef  # 1.6603361497100656e31
+Kilonova of 0.01 M☉ peak in Photometric(Radio) = 0x0000000000000000  # 0.0
+Kilonova of 0.01 M☉ at 1 d in Photometric(Radio) = 0x0000000000000000  # 0.0
+Kilonova of 0.01 M☉ peak in XRay = 0x0000000000000000  # 0.0
+Kilonova of 0.01 M☉ at 1 d in XRay = 0x0000000000000000  # 0.0

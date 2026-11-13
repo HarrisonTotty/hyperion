@@ -119,7 +119,7 @@ fn an_offscreen_replay_writes_a_results_file_in_the_schema() {
     let rows = results["criteria"]["whole"]
         .as_array()
         .expect("criteria rows");
-    assert!(!rows.is_empty());
+    assert_ne!(rows.as_slice(), [] as [serde_json::Value; 0]);
     for row in rows {
         let verdict = row["verdict"].as_str().expect("a verdict");
         assert!(

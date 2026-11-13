@@ -29,6 +29,7 @@ mod bench {
             .collect()
     }
 
+    #[expect(deprecated, reason = "R05's T3.c bench of its own provisional height")]
     pub fn test_planet(c: &mut Criterion) {
         let key = key();
         let dirs = directions(key);

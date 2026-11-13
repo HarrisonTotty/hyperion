@@ -124,6 +124,12 @@ pub mod consts {
     /// exact in the 2019 SI, which fixes h, c and k, to the digits given).
     pub const STEFAN_BOLTZMANN: f64 = 5.670_374_419e-8;
 
+    /// The cosmic microwave background's temperature today, K: 2.725 48 ± 0.000 57 (Fixsen 2009,
+    /// ApJ 707, 916, from COBE/FIRAS with WMAP's calibration). An isotropic blackbody field brings
+    /// a grey body to its own temperature whatever the body's albedo, so it is the floor of a
+    /// body's temperature far from any star.
+    pub const COSMIC_BACKGROUND_TEMPERATURE_K: f64 = 2.725_48;
+
     /// The irradiance at 1 au from the nominal Sun, W m⁻²: L☉ ÷ 4π au² = 1,361.2 W m⁻², the unit
     /// [`EarthFluxes`](super::EarthFluxes) counts in.
     ///
@@ -604,6 +610,20 @@ unit!(
     /// 14, P14.T13.b).
     JoulesPerSquareMetre
 );
+unit!(
+    /// An area in square metres, the SI unit, such as a coarse cell's drainage area; also the unit
+    /// of a length's variance, such as the variance of a surface's height about its mean, m²
+    /// (rendering plan R09, Design note 7).
+    SquareMetres
+);
+unit!(
+    /// A number of objects per square kilometre of a body's surface, the unit cumulative crater
+    /// densities N(>D) are quoted in (Neukum, Ivanov and Hartmann 2001, Space Science Reviews 96,
+    /// 55). One per square kilometre is 10⁻⁶ per square metre, the SI unit; the crater literature's
+    /// figures, such as the 0.018 km⁻² of N(>1 km) on a 3.8 Gyr lunar surface, are kept in this unit
+    /// rather than converted (rendering plan R09, Design note 12).
+    PerSquareKilometre
+);
 
 #[cfg(test)]
 mod tests {
@@ -822,5 +842,18 @@ mod tests {
         assert_same_bits(Metres::new(-2.0).abs().value(), 2.0);
         assert_eq!(a.total_cmp(&b), Ordering::Greater);
         assert_eq!(Metres::ZERO.total_cmp(&Metres::default()), Ordering::Equal);
+    }
+
+    /// The surface plan's two units (R09.T2) are plain units of the macro: they hold their value,
+    /// add within themselves and scale by a number.
+    #[test]
+    fn areas_and_surface_densities_stay_within_their_units() {
+        let area = SquareMetres::new(1.5e9) + SquareMetres::new(0.5e9);
+        assert_same_bits(area.value(), 2.0e9);
+        assert_same_bits((area / 4.0).value(), 5.0e8);
+        let density = PerSquareKilometre::new(0.018) * 2.0;
+        assert_same_bits(density.value(), 0.036);
+        assert_same_bits(density / PerSquareKilometre::new(0.018), 2.0);
+        assert_same_bits(PerSquareKilometre::ZERO.value(), 0.0);
     }
 }

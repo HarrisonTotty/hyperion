@@ -1,6 +1,7 @@
 //! A system's summary over a real socket: every star of pinned systems, companions included, and
 //! the orbits that hold them, against the sim's own; the refusals; cancellation; and the cache
-//! (plan 06, P06.T34, with plan 11's P11.T13 slice).
+//! (plan 06, P06.T34, with plan 11's P11.T13 slice); and one system asked in both of plan 12's
+//! modes (P12.T6.b).
 //!
 //! Every universe here has one fixed seed, so the systems are the ones the sim generates for that
 //! seed: the test builds the same galaxy and checks the wire against it.
@@ -9,20 +10,27 @@ mod common;
 
 use std::sync::OnceLock;
 
+use common::scene::TIME;
 use common::{TestClient, TestServer};
 use hyperion_protocol::{
-    ErrorCode, HierarchyNodeDto, Modelled, ObjectKindDto, OrbitDto, PhaseDto, RemnantDto,
-    RequestBody, RequestError, ResponseBody, ServerMessage, StarSummaryDto, SystemExistenceDto,
-    SystemIdHex, SystemSummaryDto, SystemSummaryRequest, UniverseIdHex, UniverseTime,
+    DetailLevelDto, ErrorCode, GalacticPosition, HierarchyNodeDto, Modelled, ObjectKindDto,
+    ObservedDto, OrbitDto, PhaseDto, QueryModeDto, RemnantDto, RequestBody, RequestError,
+    ResolveSystemRequest, ResolvedSystem, ResponseBody, ServerMessage, StarSummaryDto,
+    SystemBodiesRequest, SystemExistenceDto, SystemIdHex, SystemSummaryDto, SystemSummaryRequest,
+    UniverseIdHex, UniverseTime,
 };
+use hyperion_sim::coords::LyCell;
 use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::placement::{CellKey, candidate_count, resolve};
-use hyperion_sim::id::SystemId;
+use hyperion_sim::id::{CentreMemberId, SystemId};
+use hyperion_sim::observe::{
+    CurvatureError, Observer, Retardation, curvature_error, summary_observed,
+};
 use hyperion_sim::orbit::KeplerElements;
 use hyperion_sim::stellar::multiplicity::HierarchyNode;
 use hyperion_sim::stellar::remnant::RemnantKind;
 use hyperion_sim::stellar::system::{RemnantDetail, SystemExistence, SystemStars};
-use hyperion_sim::units::consts::GM_SUN;
+use hyperion_sim::units::consts::{GM_SUN, METRES_PER_LIGHT_YEAR};
 use hyperion_sim::units::{Megayears, Years};
 use hyperion_sim::{Seed, time};
 
@@ -55,6 +63,14 @@ fn galaxy() -> &'static Galaxy {
     GALAXY.get_or_init(|| Galaxy::new(Seed::new(SEED)))
 }
 
+/// The galaxy of [`SEED`] as the server builds it, with its full potential and so its velocities,
+/// which an observed summary's retardation needs: [`galaxy`] is enough for the stars alone, and
+/// cheaper to build.
+fn moving_galaxy() -> &'static Galaxy {
+    static GALAXY: OnceLock<Galaxy> = OnceLock::new();
+    GALAXY.get_or_init(|| Galaxy::new(Seed::new(SEED)).with_full_potential())
+}
+
 /// The sim's stars of the system `raw` names.
 fn sim_stars(raw: u64) -> SystemStars {
     let id = SystemId::from_raw(raw).expect("a pinned ID is a system ID");
@@ -76,19 +92,36 @@ fn sim_time(time: UniverseTime) -> time::UniverseTime {
 }
 
 fn request(universe: &UniverseIdHex, system: u64, time: UniverseTime) -> RequestBody {
+    request_in(universe, system, time, QueryModeDto::Now)
+}
+
+fn request_in(
+    universe: &UniverseIdHex,
+    system: u64,
+    time: UniverseTime,
+    mode: QueryModeDto,
+) -> RequestBody {
     RequestBody::SystemSummary(SystemSummaryRequest {
         universe: universe.clone(),
         system: SystemIdHex::from_u64(system),
         time,
+        mode,
     })
 }
 
 /// A server, a client that has said hello, and a universe of [`SEED`].
 async fn started() -> (TestServer, TestClient, UniverseIdHex) {
     let server = TestServer::start().await;
-    let mut client = server.connected().await;
-    let universe = client.create_universe("Kepler Reach", SEED).await.id;
+    let (client, universe) = joined(&server, "Kepler Reach").await;
     (server, client, universe)
+}
+
+/// A client of `server` that has said hello, and a universe of [`SEED`] of its own, named `name`,
+/// which no other universe of the server may have.
+async fn joined(server: &TestServer, name: &str) -> (TestClient, UniverseIdHex) {
+    let mut client = server.connected().await;
+    let universe = client.create_universe(name, SEED).await.id;
+    (client, universe)
 }
 
 async fn summary(
@@ -97,7 +130,20 @@ async fn summary(
     system: u64,
     time: UniverseTime,
 ) -> SystemSummaryDto {
-    match client.request(request(universe, system, time)).await {
+    summary_in(client, universe, system, time, QueryModeDto::Now).await
+}
+
+async fn summary_in(
+    client: &mut TestClient,
+    universe: &UniverseIdHex,
+    system: u64,
+    time: UniverseTime,
+    mode: QueryModeDto,
+) -> SystemSummaryDto {
+    match client
+        .request(request_in(universe, system, time, mode))
+        .await
+    {
         Ok(ResponseBody::SystemSummary(summary)) => summary,
         other => panic!("expected the summary of {system:#018x}, got {other:?}"),
     }
@@ -353,9 +399,13 @@ fn assert_details_are_the_sims(
     }
 }
 
-/// Holds a whole summary on the wire to the sim's summary of the same system at the same time.
-fn assert_summary_is_the_sims(wire: &SystemSummaryDto, stars: &SystemStars) {
-    let time = sim_time(wire.time);
+/// Holds a whole summary on the wire to the sim's summary of the same system at `time`: the
+/// request's in `now`, and in observed mode the time its light left.
+fn assert_summary_is_the_sims(
+    wire: &SystemSummaryDto,
+    stars: &SystemStars,
+    time: time::UniverseTime,
+) {
     let sim = stars.summary_at(time);
     assert_eq!(
         wire.existence,
@@ -375,7 +425,7 @@ fn assert_summary_is_the_sims(wire: &SystemSummaryDto, stars: &SystemStars) {
         assert_star_is_the_sims(star, stars, summary);
     }
     let Some(hierarchy) = sim.hierarchy() else {
-        assert!(wire.hierarchy.nodes.is_empty());
+        assert_eq!(wire.hierarchy.nodes, []);
         return;
     };
     assert_eq!(wire.hierarchy.nodes.len(), hierarchy.nodes().len());
@@ -412,9 +462,338 @@ fn assert_summary_is_the_sims(wire: &SystemSummaryDto, stars: &SystemStars) {
     }
 }
 
+/// Pinned systems' summaries on one server: the refusals, every star of pinned systems with their
+/// companions, a pinned triple's three stars and two orbits, and one system asked in both of plan
+/// 12's modes, all against the sim's, and the observed mode's refusals.
+///
+/// Nextest runs each test in its own process, and each server builds its galaxy, 4.4 s with its
+/// full potential in a test build, so the five share one server: each takes a client and a
+/// universe of its own, as it did with a server of its own, and its assertions and their messages
+/// are unchanged. The refusals come first, so that the count of systems they read is what a fresh
+/// server gives them; the others read no count. The cancellation, which needs the galaxy's build
+/// still running, and the cache's test, which counts from a fresh server too, keep a server each. A
+/// server holds one universe of a name, so each property's universe is named apart (no assertion
+/// reads a name), the first keeping its test's.
 #[tokio::test]
-async fn a_pinned_systems_summary_is_the_sims_companions_included() {
-    let (server, mut client, universe) = started().await;
+async fn pinned_summaries_are_the_sims_and_refusals_name_their_field() {
+    let server = TestServer::start().await;
+    a_bad_time_or_an_id_that_names_no_system_is_refused_naming_the_field(&server).await;
+    a_pinned_systems_summary_is_the_sims_companions_included(&server).await;
+    a_pinned_triple_returns_three_stars_and_two_orbits(&server).await;
+    a_summary_asked_in_both_modes_is_the_sims_now_and_when_its_light_left(&server).await;
+    an_observed_summary_names_the_mode_for_a_bad_observer_and_the_system_for_the_centre(&server)
+        .await;
+    server.stop().await;
+}
+
+/// Whether two floats agree to 1e-15 relative, as `tests/observed.rs` holds a row's observation.
+fn close(a: f64, b: f64) -> bool {
+    (a - b).abs() <= 1e-15 * a.abs().max(b.abs())
+}
+
+/// Holds a summary's observation on the wire to the sim's retardation and stated error, as
+/// `tests/observed.rs` holds a row's: the emitted time exactly, the floats to 1e-15 relative.
+fn assert_observed_is_the_sims(wire: &ObservedDto, r: &Retardation, error: CurvatureError) {
+    assert_eq!(
+        (wire.emitted.seconds, wire.emitted.nanos),
+        (r.emitted().seconds(), r.emitted().subsec_nanos())
+    );
+    assert!(
+        close(wire.light_age_yr, r.light_age().as_julian_years_f64()),
+        "light age {} against {:?}",
+        wire.light_age_yr,
+        r.light_age()
+    );
+    assert_eq!(
+        wire.apparent_position.cell_ly,
+        r.apparent_position().cell().to_array()
+    );
+    for (wire, sim) in wire
+        .apparent_position
+        .offset_m
+        .iter()
+        .zip(r.apparent_position().offset_metres())
+    {
+        assert!(close(*wire, sim), "offset {wire} against {sim}");
+    }
+    assert!(
+        close(wire.curvature_error_ly, error.length().value()),
+        "{} ly against {error:?}",
+        wire.curvature_error_ly
+    );
+    assert!(
+        close(wire.curvature_error_arcsec, error.angle().value()),
+        "{} arcsec against {error:?}",
+        wire.curvature_error_arcsec
+    );
+}
+
+/// The light-year cell 3,000 ly coreward of the pinned systems, the observer of plan 12's tests.
+const COREWARD: [i32; 3] = [0, 23_000, 0];
+
+/// Observed mode from the centre of the light-year cell `cell_ly`.
+fn observed_from(cell_ly: [i32; 3]) -> QueryModeDto {
+    QueryModeDto::Observed {
+        observer: GalacticPosition {
+            cell_ly,
+            offset_m: [0.0; 3],
+        },
+    }
+}
+
+/// P12.T6.b: one pinned system's summary asked in both modes, at one time and from 3,000 ly
+/// coreward, so that its light left before the clock window's start and the source horizon is
+/// read. Both answers echo the request's `system` and `time`, only the observed one has
+/// `observed`, the `now` answer is the sim's summary at `time`, and the observed answer's state is
+/// the sim's `summary_observed` at the emitted time, bit for bit, with the sim's retardation and
+/// stated error.
+///
+/// Run by [`pinned_summaries_are_the_sims_and_refusals_name_their_field`] on its shared server.
+async fn a_summary_asked_in_both_modes_is_the_sims_now_and_when_its_light_left(
+    server: &TestServer,
+) {
+    let (mut client, universe) = joined(server, "Kepler Reach: as observed").await;
+    let raw = PINNED[1];
+    let at = at_years(100);
+    let now = summary_in(&mut client, &universe, raw, at, QueryModeDto::Now).await;
+    let seen = summary_in(&mut client, &universe, raw, at, observed_from(COREWARD)).await;
+    assert_eq!(
+        (&seen.universe, &seen.system, seen.time),
+        (&now.universe, &now.system, now.time)
+    );
+    assert_eq!((&now.system, now.time), (&SystemIdHex::from_u64(raw), at));
+    assert_eq!(now.observed, None);
+    let Some(light) = seen.observed else {
+        panic!("an observed summary carries its observation: {seen:?}");
+    };
+
+    // The present, as plan 06's summary has it.
+    assert_summary_is_the_sims(&now, &sim_stars(raw), sim_time(at));
+
+    // As observed: the sim's own reading over the server's galaxy, whose systems move.
+    let galaxy = moving_galaxy();
+    let record = resolve(
+        galaxy,
+        SystemId::from_raw(raw).expect("a pinned ID is a system ID"),
+    )
+    .expect("a pinned ID names a system");
+    let stars = SystemStars::generate(galaxy, &record);
+    let observer = Observer::new(
+        hyperion_sim::coords::GalacticPosition::new(LyCell::new(COREWARD), [0.0; 3])
+            .expect("a cell's centre is canonical"),
+        sim_time(at),
+    )
+    .expect("the observer is in the cube and its time in the clock window");
+    let (then, retardation) = summary_observed(galaxy, &record, &stars, &observer)
+        .expect("a grid system's motion is traced");
+    let error = curvature_error(galaxy, observer.position(), &retardation);
+    assert_eq!(then.time(), retardation.emitted());
+    assert_eq!(then, stars.summary_at(retardation.emitted()));
+    assert_summary_is_the_sims(&seen, &stars, then.time());
+    assert_observed_is_the_sims(&light, &retardation, error);
+    // The light left before the clock window's start, which is never checked.
+    assert!(
+        light.emitted.seconds < -1_000 * SECONDS_PER_JULIAN_YEAR,
+        "{:?}",
+        light.emitted
+    );
+    assert!(
+        (2_900.0..3_100.0).contains(&light.light_age_yr),
+        "{} years",
+        light.light_age_yr
+    );
+    // The age is already the emitted time's: the present's less the light's age.
+    assert!(
+        ((now.age_myr - seen.age_myr) - light.light_age_yr / 1e6).abs() < 1e-9,
+        "{} Myr now, {} Myr then, {} years of light",
+        now.age_myr,
+        seen.age_myr,
+        light.light_age_yr
+    );
+    assert_eq!(seen.fe_h_dex.to_bits(), now.fe_h_dex.to_bits());
+    client.close().await;
+}
+
+/// P12.T6.b: an observer outside the root cube or off the position grid is `bad_request` naming
+/// `mode`, with a time outside the clock window named first; and the central black hole asked from
+/// a valid observer is `unknown_system` naming `system`, as it is in `now`.
+///
+/// Run by [`pinned_summaries_are_the_sims_and_refusals_name_their_field`] on its shared server.
+async fn an_observed_summary_names_the_mode_for_a_bad_observer_and_the_system_for_the_centre(
+    server: &TestServer,
+) {
+    let (mut client, universe) = joined(server, "Kepler Reach: observed refusals").await;
+    let pinned = PINNED[0];
+    let outside = observed_from([70_000, 0, 0]);
+    let off_grid = QueryModeDto::Observed {
+        observer: GalacticPosition {
+            cell_ly: COREWARD,
+            offset_m: [2.0 * METRES_PER_LIGHT_YEAR, 0.0, 0.0],
+        },
+    };
+    for mode in [outside, off_grid] {
+        let error = refused(
+            &mut client,
+            request_in(&universe, pinned, at_years(0), mode),
+        )
+        .await;
+        assert_eq!(
+            (error.code, error.field.as_deref()),
+            (ErrorCode::BadRequest, Some("mode")),
+            "{mode:?}: {error:?}"
+        );
+        let error = refused(
+            &mut client,
+            request_in(&universe, pinned, at_years(1_001), mode),
+        )
+        .await;
+        assert_eq!(
+            (error.code, error.field.as_deref()),
+            (ErrorCode::BadRequest, Some("time")),
+            "{mode:?}: {error:?}"
+        );
+    }
+    let black_hole = SystemId::from(CentreMemberId::CENTRAL_BLACK_HOLE).raw();
+    for mode in [QueryModeDto::Now, observed_from(COREWARD)] {
+        let error = refused(
+            &mut client,
+            request_in(&universe, black_hole, at_years(0), mode),
+        )
+        .await;
+        assert_eq!(
+            (error.code, error.field.as_deref()),
+            (ErrorCode::UnknownSystem, Some("system")),
+            "{mode:?}: {error:?}"
+        );
+    }
+    // Refusals are answers, and the connection carries on.
+    let answer = summary_in(
+        &mut client,
+        &universe,
+        pinned,
+        at_years(0),
+        observed_from(COREWARD),
+    )
+    .await;
+    assert!(answer.observed.is_some(), "{answer:?}");
+    client.close().await;
+}
+
+/// `system` at [`TIME`] in `mode`, as `resolve_system` answers it.
+async fn resolved_in(
+    client: &mut TestClient,
+    universe: &UniverseIdHex,
+    system: &SystemIdHex,
+    mode: QueryModeDto,
+) -> ResolvedSystem {
+    let request = RequestBody::ResolveSystem(ResolveSystemRequest {
+        universe: universe.clone(),
+        system: system.clone(),
+        time: TIME,
+        mode,
+    });
+    match client.request(request).await {
+        Ok(ResponseBody::ResolveSystem(resolved)) => *resolved,
+        other => panic!("expected {system:?} resolved, got {other:?}"),
+    }
+}
+
+/// P14.T27.b: a rogue planet's `system_summary` is the hosts `system_bodies` answers with its
+/// bodies at the same time, its starless summary, at the scene's time and 900 years before it.
+#[tokio::test]
+async fn a_rogue_planet_s_summary_is_the_hosts_of_its_bodies() {
+    let server = TestServer::start().await;
+    let [_, rogue] = common::scene::free_floating();
+    let (mut client, universe) = joined(&server, "Summary: rogue planet").await;
+    let before = UniverseTime {
+        seconds: TIME.seconds - 900 * SECONDS_PER_JULIAN_YEAR,
+        nanos: 0,
+    };
+    for time in [TIME, before] {
+        // The summary first, so that it is answered from a body cache that has not seen the planet.
+        let summary = summary_in(
+            &mut client,
+            &universe,
+            rogue.to_u64(),
+            time,
+            QueryModeDto::Now,
+        )
+        .await;
+        let answer = client
+            .request(RequestBody::SystemBodies(SystemBodiesRequest {
+                universe: universe.clone(),
+                system: rogue.clone(),
+                time,
+                detail: DetailLevelDto::Bulk,
+            }))
+            .await;
+        let Ok(ResponseBody::SystemBodies(bodies)) = answer else {
+            panic!("system_bodies answers for the rogue planet: {answer:?}");
+        };
+        assert_eq!(summary, bodies.hosts, "{time:?}");
+        assert_eq!(summary.existence, SystemExistenceDto::Exists);
+        assert!(summary.stars.is_empty() && summary.hierarchy.nodes.is_empty());
+        assert_eq!(summary.observed, None);
+    }
+    client.close().await;
+    server.stop().await;
+}
+
+/// P14.T27.b: a rogue planet's summary asked from 300 ly away is its starless summary when the light
+/// the observer receives left it, as `now` answers it at that time, with the observation
+/// `resolve_system` gives the same observer, on the same line (lean, 2026-11-01).
+#[tokio::test]
+async fn a_rogue_planet_s_observed_summary_is_its_summary_when_its_light_left() {
+    let server = TestServer::start().await;
+    let [_, rogue] = common::scene::free_floating();
+    let (mut client, universe) = joined(&server, "Observed summary: rogue planet").await;
+    let here = resolved_in(&mut client, &universe, &rogue, QueryModeDto::Now).await;
+    let [x, y, z] = here.record.position.cell_ly;
+    let mode = QueryModeDto::Observed {
+        observer: GalacticPosition {
+            cell_ly: [x, y + 300, z],
+            offset_m: [0.0; 3],
+        },
+    };
+    let seen = summary_in(&mut client, &universe, rogue.to_u64(), TIME, mode).await;
+    assert_eq!(
+        (&seen.universe, &seen.system, seen.time),
+        (&universe, &rogue, TIME)
+    );
+    let Some(light) = seen.observed else {
+        panic!("an observed summary carries its observation: {seen:?}");
+    };
+    let traced = resolved_in(&mut client, &universe, &rogue, mode).await;
+    assert_eq!(traced.record.observed.as_ref(), Some(&light));
+    assert!(
+        (299.0..301.0).contains(&light.light_age_yr),
+        "{} years",
+        light.light_age_yr
+    );
+    // The light left inside the clock window, so `now` is asked at the emitted time itself.
+    let then = summary_in(
+        &mut client,
+        &universe,
+        rogue.to_u64(),
+        light.emitted,
+        QueryModeDto::Now,
+    )
+    .await;
+    assert_eq!(
+        SystemSummaryDto {
+            time: light.emitted,
+            observed: None,
+            ..seen
+        },
+        then
+    );
+    client.close().await;
+    server.stop().await;
+}
+
+/// Run by [`pinned_summaries_are_the_sims_and_refusals_name_their_field`] on its shared server.
+async fn a_pinned_systems_summary_is_the_sims_companions_included(server: &TestServer) {
+    let (mut client, universe) = joined(server, "Kepler Reach: pinned systems").await;
     let mut shapes = Vec::new();
     for raw in PINNED {
         let stars = sim_stars(raw);
@@ -425,11 +804,22 @@ async fn a_pinned_systems_summary_is_the_sims_companions_included() {
             assert_eq!(answer.time, at_years(years));
             assert_eq!(answer.existence, SystemExistenceDto::Exists);
             assert_eq!(answer.stars.len(), usize::from(stars.star_count()));
-            assert_summary_is_the_sims(&answer, &stars);
-            // Nothing this generator version does not compute is sent as a value.
-            for star in &answer.stars {
-                assert!(star.active_events.is_none());
+            assert_summary_is_the_sims(&answer, &stars, sim_time(answer.time));
+            // From version 26 every star's running events are computed and sent (P06.T28.g), but
+            // a star its pair has changed, whose events are not composed (`None`): from 27 the
+            // pairs' timelines change some of the pinned systems' stars (P14.T1.e–g).
+            let sim = stars.summary_at(sim_time(answer.time));
+            for (star, own) in answer.stars.iter().zip(sim.stars()) {
+                assert_eq!(
+                    star.active_events.is_some(),
+                    own.active_events().is_some(),
+                    "{raw:#x} at {years} yr"
+                );
             }
+            assert!(
+                answer.stars.iter().any(|star| star.active_events.is_some()),
+                "{raw:#x} at {years} yr"
+            );
         }
         shapes.push(stars.star_count());
     }
@@ -439,7 +829,6 @@ async fn a_pinned_systems_summary_is_the_sims_companions_included() {
         "the pinned systems are what their names say"
     );
     client.close().await;
-    server.stop().await;
 }
 
 /// A node's total mass, M☉, summed from its stars' masses as a client sums them.
@@ -455,9 +844,10 @@ fn mass_under(nodes: &[HierarchyNodeDto], index: u8) -> f64 {
 /// P11.T13's test: a pinned triple returns three stars and two orbits, each orbit with its whole
 /// element set and its μ, and each star's mass, so that a client can place the stars about each
 /// barycentre as the server does.
-#[tokio::test]
-async fn a_pinned_triple_returns_three_stars_and_two_orbits() {
-    let (server, mut client, universe) = started().await;
+///
+/// Run by [`pinned_summaries_are_the_sims_and_refusals_name_their_field`] on its shared server.
+async fn a_pinned_triple_returns_three_stars_and_two_orbits(server: &TestServer) {
+    let (mut client, universe) = joined(server, "Kepler Reach: the triple").await;
     let answer = summary(&mut client, &universe, TRIPLE, at_years(0)).await;
     assert_eq!(answer.stars.len(), 3);
     assert_eq!(
@@ -517,14 +907,14 @@ async fn a_pinned_triple_returns_three_stars_and_two_orbits() {
         }
     }
     assert_eq!(pairs, 2);
-    assert_summary_is_the_sims(&answer, &sim_stars(TRIPLE));
+    assert_summary_is_the_sims(&answer, &sim_stars(TRIPLE), sim_time(answer.time));
     client.close().await;
-    server.stop().await;
 }
 
-#[tokio::test]
-async fn a_bad_time_or_an_id_that_names_no_system_is_refused_naming_the_field() {
-    let (server, mut client, universe) = started().await;
+/// Run first by [`pinned_summaries_are_the_sims_and_refusals_name_their_field`] on its shared
+/// server, so that the count of systems it reads is its own.
+async fn a_bad_time_or_an_id_that_names_no_system_is_refused_naming_the_field(server: &TestServer) {
+    let (mut client, universe) = joined(server, "Kepler Reach").await;
     let pinned = PINNED[0];
 
     // A time outside the clock window, either way, or with too many nanoseconds.
@@ -594,7 +984,6 @@ async fn a_bad_time_or_an_id_that_names_no_system_is_refused_naming_the_field() 
         "no refused ID was cached"
     );
     client.close().await;
-    server.stop().await;
 }
 
 /// A cancelled summary ends with exactly one terminal message, and nothing follows it.
@@ -693,7 +1082,7 @@ async fn the_same_request_twice_is_identical_whether_cached_or_not() {
     assert!(systems.bytes() > 0 && systems.bytes() <= systems.budget());
 
     let earlier = summary(&mut client, &universe, TRIPLE, at_years(-250)).await;
-    assert_summary_is_the_sims(&earlier, &sim_stars(TRIPLE));
+    assert_summary_is_the_sims(&earlier, &sim_stars(TRIPLE), sim_time(earlier.time));
     assert_eq!(server.stats().systems().hits(), 2);
 
     // A second universe of the same seed shares the entry (plan 04, design note 23).

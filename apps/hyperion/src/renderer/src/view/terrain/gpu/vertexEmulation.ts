@@ -144,3 +144,44 @@ export function faceDifferenceMorphF32(
         : [at(x - 1, y - 1), at(x + 1, y + 1)];
   return { x: f(0.5 * f(a.x + b.x)), y: f(0.5 * f(a.y + b.y)), z: f(0.5 * f(a.z + b.z)) };
 }
+
+/**
+ * The place of a sub-patch instance's grid vertex (`x`, `y`) in its slot's patch's grid, quads from
+ * its corner: `terrainPatch.wgsl`'s `sourceGridOf` for a sub-patch `levels` deeper at (`i`, `j`) of
+ * the patch's parts, ((i, j) 64 + (x, y)) ÷ 2^levels, exact in `f32` (`uniforms.ts`'
+ * `subPatchWord`).
+ */
+export function sourceGridF32(
+  levels: number,
+  i: number,
+  j: number,
+  x: number,
+  y: number,
+): readonly [number, number] {
+  const side = 2 ** levels;
+  return [f(f(i * 64 + x) / side), f(f(j * 64 + y) / side)];
+}
+
+/**
+ * The slot's surface at the place `at` of its grid, `terrainPatch.wgsl`'s `surfacePointAt` in `f32`:
+ * `vertexAt` at the corners of the mesh's triangle holding it, each quad split on its (0, 0)–(1, 1)
+ * diagonal, mixed by their barycentric weights 1 − max(fx, fy), |fx − fy| and min(fx, fy), the
+ * middle corner (1, 0) where fx ≥ fy and (0, 1) otherwise, summed in the shader's order.
+ */
+export function surfacePointF32(
+  at: readonly [number, number],
+  vertexAt: (x: number, y: number) => Vec3,
+): Vec3 {
+  const qx = Math.min(Math.floor(at[0]), 63);
+  const qy = Math.min(Math.floor(at[1]), 63);
+  const fx = f(at[0] - qx);
+  const fy = f(at[1] - qy);
+  const below = fx >= fy;
+  const w0 = f(1 - Math.max(fx, fy));
+  const w1 = f(Math.abs(f(fx - fy)));
+  const w2 = Math.min(fx, fy);
+  const a = vertexAt(qx, qy);
+  const b = below ? vertexAt(qx + 1, qy) : vertexAt(qx, qy + 1);
+  const c = vertexAt(qx + 1, qy + 1);
+  return add(add(scaled(a, w0), scaled(b, w1)), scaled(c, w2));
+}

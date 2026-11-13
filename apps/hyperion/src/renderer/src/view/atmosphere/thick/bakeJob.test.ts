@@ -1,0 +1,290 @@
+/**
+ * The thick bake as the optics worker answers it (plan R08, R08.T14.b): a `thick-bake` request
+ * through `opticsJobs.ts`'s `OpticsJobs`, in process, on the generated Earth's toy line tables; and
+ * a kept `TEST EARTH`'s, its lights carried by the request (R08.T14.c).
+ */
+import { describe, expect, it } from "vitest";
+
+import { detailOf, recordInput } from "../../../test/atmosphereRecords";
+import { toyLoader } from "../../../test/opticsFakes";
+import { leastZerothModes } from "../../../test/thickTables";
+import { earthDetail } from "../../../test/planetaryFixture";
+import { absorberCurvesBySun } from "../absorbers";
+import type { AssembledMedium } from "../assemble";
+import type { BodyAtmosphereInput } from "../atmosphereInput";
+import { EARTH_COLUMN } from "../earth";
+import { CHANNEL_WAVELENGTHS_NM, type MediumTerm } from "../medium";
+import { OpticsJobs } from "../opticsJobs";
+import type { KeptBakeLights, OpticsRequest } from "../opticsMessages";
+import { molecularMixture } from "../rayleigh";
+import { EARTH_CASE, EARTH_REFERENCE_RADIUS_M, referenceCaseBakeLights } from "../reference/cases";
+import { bakeMultipleScattering, HORIZON_TERMS, prepareBake, type ThickBakeBody } from "./bake";
+import { bakeKeptCase, keptColumnOf, sphereBakeBody } from "./keptBake";
+import type { SpectralColumn } from "./spectralColumn";
+
+/** The generated Earth under the Sun, its water's and CO₂'s lines on the toy tables. */
+function earthInput(): BodyAtmosphereInput {
+  return recordInput(detailOf(earthDetail()));
+}
+
+/** The Earth's assembly, as a worker answers it. */
+async function assembled(jobs: OpticsJobs, input: BodyAtmosphereInput): Promise<AssembledMedium> {
+  const { reply } = await jobs.answer({ kind: "assemble", id: 1, input });
+  if (reply.kind !== "assembled") {
+    throw new Error(`the Earth was answered ${reply.kind}`);
+  }
+  return reply.assembled;
+}
+
+/**
+ * A column of the Earth's molecular term and its first lined absorber, by their sources: the
+ * record's gases with n_s read from the term's green coefficient, and the absorber's amount.
+ */
+function columnOf(
+  input: BodyAtmosphereInput,
+  assembly: AssembledMedium,
+): {
+  readonly column: SpectralColumn;
+  readonly body: ThickBakeBody;
+  readonly absorber: MediumTerm;
+} {
+  if (assembly.medium === undefined || input.kind !== "record") {
+    throw new Error("the Earth draws a medium");
+  }
+  const surface = input.detail.record.surface;
+  if (surface.state !== "ok") {
+    throw new Error("the Earth has a surface");
+  }
+  const { medium, drawn } = assembly;
+  const rayleigh = medium.terms.find((t) => t.name === "rayleigh");
+  const lined = drawn.absorbers.find(
+    (spec) => spec.kind === "column" && spec.species.some((s) => s.lines !== undefined),
+  );
+  const absorber = medium.terms.find((t) => t.name === lined?.name);
+  if (rayleigh === undefined || absorber?.absorber?.kind !== "column") {
+    throw new Error("the Earth has a molecular term and a lined absorber");
+  }
+  const gases = surface.value.gases;
+  return {
+    column: {
+      name: "the Earth's air and one absorber",
+      topHeightM: medium.topHeightM,
+      groundAlbedo: medium.groundAlbedo,
+      terms: [
+        {
+          name: rayleigh.name,
+          density: rayleigh.density,
+          source: {
+            kind: "molecular",
+            fractions: gases,
+            numberDensityPerM3:
+              rayleigh.scattering[1] /
+              molecularMixture(gases).crossSectionM2(CHANNEL_WAVELENGTHS_NM[1]),
+          },
+        },
+        {
+          name: absorber.name,
+          density: absorber.density,
+          source: {
+            kind: "absorber",
+            amount: { kind: "column", numberDensityPerM3: absorber.absorber.numberDensityPerM3 },
+          },
+        },
+      ],
+      ...(medium.pressureBar === undefined ? {} : { pressureBar: medium.pressureBar }),
+    },
+    body: { ...drawn.body, bottomRadiusM: drawn.bottomRadiusM },
+    absorber,
+  };
+}
+
+/**
+ * A kept `TEST EARTH`'s bake request: a kept input, which no assembly gives specs or spectra, its
+ * column by the case's sources, one band on the case's sphere, and its lights where given.
+ */
+function keptEarthRequest(kept?: KeptBakeLights): OpticsRequest {
+  return {
+    kind: "thick-bake",
+    id: 7,
+    input: { kind: "kept", atmosphere: { kind: "unset" } },
+    slots: [0],
+    bands: [0],
+    column: keptColumnOf(EARTH_CASE),
+    body: sphereBakeBody(EARTH_REFERENCE_RADIUS_M, EARTH_COLUMN.referenceGravityMS2),
+    ...(kept === undefined ? {} : { kept }),
+  };
+}
+
+/** A bake request of the Earth's column. */
+function bakeRequest(
+  input: BodyAtmosphereInput,
+  column: SpectralColumn,
+  body: ThickBakeBody,
+  bands: ReadonlyArray<number> = [0],
+): OpticsRequest {
+  return { kind: "thick-bake", id: 5, input, slots: [0], bands, column, body };
+}
+
+describe("the optics worker's thick bake", () => {
+  it(
+    "answers a bake with each band's table, the bake's own, its buffers transferred",
+    { timeout: 120_000 },
+    async () => {
+      const jobs = new OpticsJobs(toyLoader());
+      const input = earthInput();
+      const assembly = await assembled(jobs, input);
+      const { column, body, absorber } = columnOf(input, assembly);
+      const answer = await jobs.answer(bakeRequest(input, column, body));
+      const { reply } = answer;
+      if (reply.kind !== "thick-baked") {
+        throw new Error(`the bake was answered ${reply.kind}`);
+      }
+      expect(reply.tables.length).toBe(1);
+      const values = reply.tables[0]?.slots[0]?.values;
+      expect(answer.transfer.some((buffer) => buffer === values?.buffer)).toBe(true);
+      // The same bake, made directly from the same specs and curves.
+      const spec = assembly.drawn?.absorbers.find((each) => each.name === absorber.name);
+      const sun = input.kind === "record" ? input.lights[0]?.spectrum : undefined;
+      if (spec === undefined || sun === undefined) {
+        throw new Error("the Earth has the absorber's spec and a sun");
+      }
+      const bins = absorberCurvesBySun(spec, [sun])[0]?.bins;
+      if (bins === undefined) {
+        throw new Error("the absorber has its bins' curves");
+      }
+      const direct = bakeMultipleScattering(
+        prepareBake(column, [{ spectrum: sun, absorbers: [bins] }]),
+        body,
+        0,
+      );
+      expect(values).toEqual(direct.slots[0]?.values);
+      const copy = structuredClone(reply, { transfer: answer.transfer });
+      expect([copy.kind, answer.transfer.every((buffer) => buffer.byteLength === 0)]).toEqual([
+        "thick-baked",
+        true,
+      ]);
+    },
+  );
+
+  it("answers a bake that fails with its own failure, never failed", async () => {
+    const jobs = new OpticsJobs(toyLoader());
+    const input = earthInput();
+    const { column, body } = columnOf(input, await assembled(jobs, input));
+    const noBand = await jobs.answer(bakeRequest(input, column, body, [3]));
+    expect(noBand.reply).toEqual({
+      kind: "thick-bake-failed",
+      id: 5,
+      bands: [3],
+      message: expect.stringMatching(/band/u),
+    });
+    const [molecular, absorber] = column.terms;
+    if (molecular === undefined || absorber === undefined) {
+      throw new Error("the column has its two terms");
+    }
+    const renamed = {
+      name: "absorber:not-on-the-body",
+      density: absorber.density,
+      source: absorber.source,
+    };
+    const unknown: SpectralColumn = { ...column, terms: [molecular, renamed] };
+    const noSpec = await jobs.answer(bakeRequest(input, unknown, body));
+    expect(noSpec.reply).toEqual({
+      kind: "thick-bake-failed",
+      id: 5,
+      bands: [0],
+      message: expect.stringMatching(/absorber:not-on-the-body/u),
+    });
+  });
+
+  it(
+    "answers a kept TEST EARTH's bake from its request's own absorbers and spectra, finite, J⁰ at least 0 above the horizontal and at least −10⁻⁶ of its largest below it",
+    // The job takes no grid of its own: the full grid, 1.3 s at load 2.4 (2026-10-27).
+    { timeout: 60_000 },
+    async () => {
+      const jobs = new OpticsJobs(toyLoader());
+      const request = keptEarthRequest(referenceCaseBakeLights(EARTH_CASE));
+      const { reply } = await jobs.answer(request);
+      if (reply.kind !== "thick-baked") {
+        throw new Error(`the kept bake was answered ${reply.kind}`);
+      }
+      const table = reply.tables[0];
+      const values = table?.slots[0]?.values;
+      expect([reply.tables.length, table?.slots.length]).toEqual([1, 1]);
+      expect(values?.every(Number.isFinite)).toBe(true);
+      // J⁰ at least 0 above the horizontal, and below it at least −10⁻⁶ of the largest
+      // (`leastZerothModes`, R08.T14.d.2).
+      const { above, belowShare } = leastZerothModes(
+        values ?? [],
+        table?.sunCosines ?? new Float64Array(0),
+      );
+      expect(above).toBeGreaterThanOrEqual(0);
+      expect(belowShare).toBeGreaterThanOrEqual(-1e-6);
+    },
+  );
+
+  it(
+    "bakes a request that asks the horizon's terms as the kept bake with both, to the bit (R08.T14.d.4)",
+    // Two full-grid bakes with the terms, some 2 s each on a pod (2026-11-01).
+    { timeout: 60_000 },
+    async () => {
+      const jobs = new OpticsJobs(toyLoader());
+      const lights = referenceCaseBakeLights(EARTH_CASE);
+      const request = keptEarthRequest(lights);
+      if (request.kind !== "thick-bake") {
+        throw new Error("a kept request is a thick bake");
+      }
+      const { reply } = await jobs.answer({ ...request, horizonTerms: true });
+      if (reply.kind !== "thick-baked") {
+        throw new Error(`the kept bake was answered ${reply.kind}`);
+      }
+      const direct = bakeKeptCase(EARTH_CASE, lights, request.body, {
+        bands: [0],
+        horizonTerms: HORIZON_TERMS,
+      });
+      const values = reply.tables[0]?.slots[0]?.values ?? new Float32Array(0);
+      const expected = direct[0]?.slots[0]?.values ?? new Float32Array(1);
+      // Compared entry by entry: a failing toEqual of some 900,000 floats takes minutes to print.
+      expect([
+        values.length === expected.length,
+        values.every((value, i) => Object.is(value, expected[i])),
+      ]).toEqual([true, true]);
+    },
+  );
+
+  it("answers a kept body's bake that carries no lights of its own as failed: a kept input has none", async () => {
+    const jobs = new OpticsJobs(toyLoader());
+    expect((await jobs.answer(keptEarthRequest())).reply).toEqual({
+      kind: "thick-bake-failed",
+      id: 7,
+      bands: [0],
+      message: expect.stringMatching(/light slot 0/u),
+    });
+  });
+
+  it(
+    "leaves the other kinds' answers as they were: a worker that baked assembles and shares as a fresh one",
+    { timeout: 120_000 },
+    async () => {
+      const input = earthInput();
+      const share: OpticsRequest = {
+        kind: "curve-sums",
+        id: 2,
+        input,
+        slots: [0],
+        share: { index: 0, count: 2 },
+      };
+      const fresh = new OpticsJobs(toyLoader());
+      const expected = [
+        (await fresh.answer({ kind: "assemble", id: 1, input })).reply,
+        (await fresh.answer(share)).reply,
+      ];
+      const baker = new OpticsJobs(toyLoader());
+      const { column, body } = columnOf(input, await assembled(new OpticsJobs(toyLoader()), input));
+      expect((await baker.answer(bakeRequest(input, column, body))).reply.kind).toBe("thick-baked");
+      expect([
+        (await baker.answer({ kind: "assemble", id: 1, input })).reply,
+        (await baker.answer(share)).reply,
+      ]).toEqual(expected);
+    },
+  );
+});

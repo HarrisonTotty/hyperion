@@ -1525,10 +1525,10 @@ warnings` with "use of a disallowed method", and was reverted.
     `galaxy_features` `field_and_features_add_up_to_every_budget`; `planetary_placement`
     `the_statistics_of_architecture_meet_their_surveys`; and `stellar_system`
     `multiple_systems_follow_the_model_over_ten_thousand_systems`. All seven fail identically on
-    `main` (899db5e): they are pre-existing galaxy-plan failures, which the owner is handling, and
-    **`just ci-slow` currently fails on them, independently of the wasm suites**. Since `ci-slow`
-    stops at `test-slow`, the slow wasip1 suite was timed by its own run (`just test-wasm-slow`,
-    below).
+    `main` (899db5e, now 9d955b26): they are pre-existing galaxy-plan failures, which the
+    owner is handling, and **`just ci-slow` currently fails on them, independently of the
+    wasm suites**. Since `ci-slow` stops at `test-slow`, the slow wasip1 suite was timed by
+    its own run (`just test-wasm-slow`, below).
   - Beyond the listed files, `.claude/skills/implement-task/SKILL.md`'s example of a skipped check
     is now the AArch64 run, since the wasm checks can no longer be skipped; the README's `just ci`
     sentence now also names `fit-check`, which `ci` already ran.
@@ -1618,6 +1618,17 @@ warnings` with "use of a disallowed method", and was reverted.
   `cargo tree -p hyperion-sim --target wasm32-wasip1 -e normal` lists no `wasm-bindgen`;
   `just gen-surface` leaves `git status --porcelain` unchanged; the surface crate's test passes
   natively, under wasip1 and on the browser target, and `_browser-clippy` covers `src/wasm.rs`.
+  Amended 2026-10-10 (perf-build Q1): the manifest's `crate-type` is `["lib"]` alone, and
+  `gen-surface` asks for the `cdylib` itself (`cargo rustc … --crate-type lib,cdylib`), since a
+  `cdylib` in the manifest gave the native library a name without a hash, so that the test build
+  and `_browser`'s native lists, built with and without `testing`, overwrote each other and rebuilt
+  the sim, the server and the fitting crate inside the heavy-test lock. The module is byte for byte
+  the one the manifest built (`cmp`); `cdylib` alone would add the release profile's thin LTO and
+  change it. `_browser`'s native lists are now built from a cargo selection it is given: by default
+  `browser_native`, the three crates with the features `--workspace` gives them, which links the
+  test build's libraries of those crates but builds the surface crate's test executables again
+  (outside `--workspace`, Criterion's dependencies resolve with fewer features); under
+  `just smart-ci`, the selection of its own test build, which builds nothing again.
 - **T8 review fixes, as built (2026-09-30).** The review found that `just bless`
   (`HYPERION_BLESS=1 cargo test`) failed on the testkit's new tests, since `check_embedded` reads
   the environment natively: every test of the embedded arm now calls
@@ -1677,7 +1688,7 @@ warnings` with "use of a disallowed method", and was reverted.
     by the ruling (edited directly, not through a researching agent), and the roadmap's table row
     for R04's loader says it is met. R05's and R12's own mentions of the pending ruling are left
     to their lanes.
-- **T10.b, checked later (2026-09-30).** In a fresh `git worktree` at 7beb6ec (after
+- **T10.b, checked later (2026-09-30).** In a fresh `git worktree` at 7beb6ec, now a8af81a2 (after
   `pnpm install`), a trivial commit to a TypeScript file passed every commit hook, the oxlint and
   `tsc` hooks building the module through `_with-surface`; the worktree was removed after.
 - **As built, R04.T7.d (2026-09-30): what the slow wasip1 suite found.** `just test-wasm-slow`
@@ -1706,8 +1717,8 @@ warnings` with "use of a disallowed method", and was reverted.
   (provisional); the wasip1 suites took 136 s of nextest, and the browser target's three crates
   (124, 1 and 52 tests, matching their native lists less `native_only`) under a second of tests
   after their builds and listings. This is the full-`ci` record T8.c's acceptance asks for.
-- **The verification pass, R04.T11 (2026-10-02, at `3c4d865`, with R01.T9–T10 merged).** Each item
-  of Verification, against the tree:
+- **The verification pass, R04.T11 (2026-10-02, at `3c4d865`, now `930ac6b5`, with R01.T9–T10
+  merged).** Each item of Verification, against the tree:
   - **`just ci`** passed: 2,711 s wall, of which 1,471 s waiting for the heavy-test lock, so about
     1,240 s of work, under load 8.6 at the start and 13 to 23 at the end (provisional). It ran,
     besides what it ran before: the relaxed-SIMD refusal, `_browser-clippy` (base, the surface
@@ -1726,14 +1737,14 @@ warnings` with "use of a disallowed method", and was reverted.
     slow wasip1 suite was last run whole by T7.d (2,518 s of nextest; its nine thread-spawning tests
     fixed and passing; six failing alike on both targets with the native seven). **Pending:**
     T11's acceptance, `just ci-slow` passing, waits on the galaxy plans' fix of those seven.
-  - **Goldens.** `golden_diff.py --base 0cf99da~1` (the commit before T4.a) reports
-    `GENERATOR_VERSION` 16 → 16, the three relocated goldens under "Renamed goldens", and new
-    goldens of which only `math/bessel` is R04's (T4.c; the others are R02's and R03's). It also
-    reports one changed golden and so a Problem, the server's
-    `systems_in_range_briefs.golden`; that change is R02.T5's (`8dfe57b`, the brief's
-    `absolute_v_mag`, a new field, with `star_count` gaining a comma), recorded in R02. Per commit,
-    R04's own commits touch goldens only by the three 100% renames and the one addition, so R04
-    changed no pinned value.
+  - **Goldens.** `golden_diff.py --base 0cf99da~1` (the commit before T4.a; `0cf99da` is
+    now `6d4a6e96`) reports `GENERATOR_VERSION` 16 → 16, the three relocated goldens under
+    "Renamed goldens", and new goldens of which only `math/bessel` is R04's (T4.c; the others
+    are R02's and R03's). It also reports one changed golden and so a Problem, the server's
+    `systems_in_range_briefs.golden`; that change is R02.T5's (`8dfe57b`, now `3f5b34d4`, the
+    brief's `absolute_v_mag`, a new field, with `star_count` gaining a comma), recorded in
+    R02. Per commit, R04's own commits touch goldens only by the three 100% renames and the
+    one addition, so R04 changed no pinned value.
   - **Parity.** Base's goldens compare on native, wasip1 and the browser target; the sim's on native
     and wasip1 (T8.c's hand check, one character of `math/functions.golden`, failed all three).
   - **The shim.** `test-wasm-browser`'s first line in this `ci` run: "wasm-bindgen-test on Electron

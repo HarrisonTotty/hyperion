@@ -7,9 +7,12 @@
  * `engineBoundary.test.ts` refuses a static import of it anywhere.
  *
  * The engine it returns survives a lost device: it re-creates the engine on a fresh
- * adapter through the same import, and its views with it (`ResilientEngine`, Design note 9).
+ * adapter through the same import, and its views with it (`ResilientEngine`, Design note 9). It
+ * draws a lit body of one latitude band by its modules' table-only twins (plan R08, R08.T9.b's
+ * lever; `SourceTableEngine`), which draw their modules' bytes.
  */
 
+import { SourceTableEngine } from "../atmosphere/sourceTableEngine";
 import type { AdapterOutcome } from "./platform";
 import { ResilientEngine } from "./resilientEngine";
 import { type GraphicsStatusStore, navigatorGpu } from "./status";
@@ -30,7 +33,9 @@ export async function loadRenderEngine(
   const importEngine = options.importEngine ?? (() => import("./webgpu/engine"));
   const { createWebGpuEngine } = await importEngine();
   const create = (fresh: AdapterOutcome & { readonly kind: "adapter" }): Promise<RenderEngine> =>
-    createWebGpuEngine(fresh, status, options.overrides);
+    createWebGpuEngine(fresh, status, options.overrides, options.compileBudget);
   const engine = await create(outcome);
-  return new ResilientEngine(engine, status, options.gpu ?? navigatorGpu(), create);
+  return new SourceTableEngine(
+    new ResilientEngine(engine, status, options.gpu ?? navigatorGpu(), create),
+  );
 }

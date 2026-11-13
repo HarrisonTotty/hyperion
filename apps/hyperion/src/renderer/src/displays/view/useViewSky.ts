@@ -1,14 +1,14 @@
 /**
  * The `VIEW` display's sky (plan R06, T13.c, with T12's view wiring): asked about the scene's
- * system where its position is known, culled to the view's limit, and split between sprites and
- * the bake.
+ * system where its position is known, from the camera's place in it, culled to the view's limit,
+ * and split between sprites and the bake.
  */
 
 import type { UniverseIdHex } from "@hyperion/protocol";
 import { useMemo } from "react";
 
-import { barycentreAt } from "../../lib/scene/place";
 import type { SystemPlace } from "../../lib/scene/model";
+import type { ServedSky } from "../../view/scene/model";
 import type { ExposureControl } from "../../view/photometry/exposure";
 import { type QualitySetting, SETTINGS } from "../../view/quality/qualitySetting";
 import { cameraGalacticPosition } from "../../view/sky/camera";
@@ -16,19 +16,22 @@ import type { BakeInput } from "../../view/sky/bake";
 import { cullSky } from "../../view/sky/cull";
 import { starIlluminanceRgbLx } from "../../view/sky/photometry";
 import {
+  detailLimited,
   SKY_EDGE_FIELD_CH,
+  SKY_LIMIT_FIELD_CH,
   SKY_PENDING,
   skyEdgeReading,
   skyLabelValue,
+  skyLimitReading,
   skyLineNotes,
   type SkyLinePlace,
   streamingEdgeLy,
 } from "../../view/sky/label";
 import type { SkyCamera, SkyModel } from "../../view/sky/model";
 import { selectSkySprites, type SkySelection } from "../../view/sky/select";
-import { useSky } from "../../view/sky/useSky";
+import { type SkyKeep, type UseSkyOptions, useSky } from "../../view/sky/useSky";
 import { viewSkyLabelV, viewSkyLimit, viewSkyRequest } from "../../view/sky/viewSky";
-import { type LabelLine, runPose, type ViewRun } from "./viewRun";
+import { type LabelField, type LabelLine, runPose, type ViewRun } from "./viewRun";
 
 /** The sky as the drawing loop draws it: the model and which of its stars are sprites. */
 export interface DrawnSky {
@@ -41,8 +44,11 @@ export interface DrawnSky {
   readonly bandIlluminanceLx: Float64Array;
 }
 
-/** A `STARS` line's reading of the sky: its value, and the edge's field while it streams. */
-export type SkyLineReading = Pick<LabelLine, "value" | "field">;
+/**
+ * A `STARS` line's reading of the sky: its value, and once a reply is held its fields, the limit's
+ * and, while the sky streams, the edge's, with its dots leading its notes.
+ */
+export type SkyLineReading = Pick<LabelLine, "value" | "fields" | "dotsLead">;
 
 /** The view's sky, or `null` while R02's interim field stands in. */
 export interface ViewSky {
@@ -55,11 +61,17 @@ export interface ViewSky {
    */
   readonly label: (place: SkyLinePlace) => SkyLineReading | null;
   /**
-   * Whether the view's sky is asked and none of its replies is held yet, so that every view's
-   * `STARS` line reads {@link SKY_PENDING} (R06.T11.f).
+   * Whether the view's sky is asked and no sky of its arrival is held yet, so that every view's
+   * `STARS` line reads {@link SKY_PENDING} (R06.T11.f); also while the place's position is known
+   * and the published run's scene does not yet carry it, from whose camera the sky is asked: after
+   * a jump, until the run reaches the system arrived at, or once a system's place is first known.
    */
   readonly awaiting: boolean;
-  /** Whether a sky has been asked and not yet answered (R07's lighting label reads it). */
+  /**
+   * Whether a sky is asked, or waits for the published run as {@link ViewSky.awaiting} says, and no
+   * sky of its arrival is held (R07's lighting label reads it): never through a re-ask within the
+   * arrival, whose held sky stands meanwhile (R06.T12.b).
+   */
   readonly pending: boolean;
 }
 
@@ -86,7 +98,7 @@ export function bakeInputOf(sky: DrawnSky, faceSizePx: number): BakeInput {
 /** A view's culled sky: what its loop draws, and its label block's `STARS` reading. */
 export interface CulledViewSky {
   readonly drawn: DrawnSky;
-  readonly labelValue: string;
+  readonly label: SkyLineReading;
 }
 
 /**
@@ -105,7 +117,7 @@ export function primarySkyPlace(
   instruments: ReadonlyArray<{
     readonly open: boolean;
     readonly shown: object | null;
-    readonly skyLabel: string | null;
+    readonly skyLabel: SkyLineReading | null;
   }>,
 ): SkyLinePlace {
   const open = instruments.filter((instrument) => instrument.open);
@@ -124,8 +136,8 @@ export function primarySkyPlace(
  * primary's sky for its own camera (R07.T19).
  *
  * @remarks
- * A camera's limit is the view camera's deepest at every exposure (R07.T13.e), so the cull, the
- * selection and the bake never depend on the exposure.
+ * A camera's limit is its band texel's at the view camera's deepest triple, at every exposure
+ * (R07.T13.e; R06.T13.i), so the cull, the selection and the bake never depend on the exposure.
  *
  * @param setting - The quality setting `VIEW` is given, whose sprite budget the selection keeps
  *   (R06 Design note 22; R07.T17).
@@ -150,10 +162,13 @@ export function cullViewSky(
 }
 
 /**
- * A view's label block's `STARS` reading of a sky it holds: its role's limit, a camera's at the
- * exposure shown (R07.T13.e), then the notes its place holds: while the reply held is not final,
- * the stars-arriving note, its edge in its field and stale with the sky (R06.T11.f); and what the
- * sky leaves out.
+ * A view's label block's `STARS` reading of a sky it holds: its role's limit quoted at its deepest
+ * over the sky, a camera's at the exposure shown and never deeper than the reply's cut (R07.T13.e;
+ * R06.T13.i), in its field and stale with the sky, its `S` before its kind (R06.T13.j); then the
+ * notes its place holds: while the reply held is not final, the stars-arriving note, its edge in
+ * its field and stale with the sky (R06.T11.f); while it holds the sky at a synthetic ceiling, the
+ * interim note (R13.T2.b), which names no figure and so takes no field; and what the sky leaves
+ * out, which takes no mark either. Each note's dot leads it (`dotsLead`, R06.T13.j).
  *
  * @param exposure - The control as the readout shows it (4 Hz, EV100 to 0.1).
  */
@@ -165,19 +180,35 @@ export function viewSkyLabel(
   place: SkyLinePlace,
 ): SkyLineReading {
   const gaps = model.response.not_modelled;
-  const standing = { place, streamingEdgeLy: streamingEdgeLy(model.response) };
-  const value = skyLabelValue(viewSkyLabelV(model, role, exposure, fovDeg), role, gaps, standing);
+  const standing = {
+    place,
+    streamingEdgeLy: streamingEdgeLy(model.response),
+    detailLimited: detailLimited(model.response),
+  };
+  const limitV = viewSkyLabelV(model, role, exposure, fovDeg);
+  const value = skyLabelValue(limitV, role, gaps, standing);
+  const limit: LabelField = {
+    text: skyLimitReading(limitV),
+    widthCh: SKY_LIMIT_FIELD_CH,
+    stale: model.stale,
+  };
   // The edge's field only where its note stands: a line holding one note may have given it up.
   const streaming = skyLineNotes(gaps, standing).find((note) => note.kind === "streaming");
+  // Each note's dot leads it, so that beside the slots, where the limit's run fills the column, no
+  // dot ends a line alone (R06.T13.j).
   return streaming === undefined
-    ? { value }
+    ? { value, fields: [limit], dotsLead: true }
     : {
         value,
-        field: {
-          text: skyEdgeReading(streaming.edgeLy),
-          widthCh: SKY_EDGE_FIELD_CH,
-          stale: model.stale,
-        },
+        fields: [
+          limit,
+          {
+            text: skyEdgeReading(streaming.edgeLy),
+            widthCh: SKY_EDGE_FIELD_CH,
+            stale: model.stale,
+          },
+        ],
+        dotsLead: true,
       };
 }
 
@@ -187,7 +218,15 @@ export interface ViewSkyInput {
   readonly universe: UniverseIdHex | null;
   /** The server scene's system place, or `null` for a kept scene: nothing is asked. */
   readonly place: SystemPlace | null;
-  /** The run as last published: its scene's time, its camera's pose, role and field of view. */
+  /**
+   * Whose sky is asked (plan R15): the place's system's own, which leaves it out, or the one every
+   * generated planet shares, which leaves none out; absent, the system's own.
+   */
+  readonly sky?: ServedSky | undefined;
+  /**
+   * The run as last published: its scene's time, its camera's pose, role and field of view. The
+   * sky is asked from its camera's galactic position, once its scene is the place's system.
+   */
   readonly run: ViewRun;
   /**
    * The display's control as its readout shows it (4 Hz, EV100 to 0.1), at which a camera's label
@@ -198,7 +237,16 @@ export interface ViewSkyInput {
   readonly widthPx: number | null;
   /** The quality setting `VIEW` is given, whose N_max and sprite budget the sky takes (R07.T17). */
   readonly setting: QualitySetting;
+  /**
+   * Where the sky is kept above the stage that a new scene remounts (`useSky`'s `SkyKeep`; plan
+   * R15), so that a new scene of the same arrival keeps the stars drawn and the request in flight;
+   * absent, the stage's own.
+   */
+  readonly keep?: SkyKeep | undefined;
 }
+
+/** `useSky`'s options for a stage that keeps its own sky. */
+const NO_SKY_OPTIONS: UseSkyOptions = {};
 
 /** The view's width the parallax rule reads before the view is measured: 1080p's. */
 const DEFAULT_WIDTH_PX = 1_920;
@@ -209,32 +257,50 @@ const DEFAULT_WIDTH_PX = 1_920;
  * @remarks
  * Asked at the setting's N_max and culled to its sprite budget (R06 Design note 22; R07.T17), on
  * the published run (4 Hz), which is often enough: the request rule holds a sky for a year or until
- * a camera moves its nearest baked star by a tenth of a pixel. A sky arriving nearest first is
- * labelled as its replies are held (R06.T11.f): `PENDING` until the first, then the held reply's
- * limit and notes, which the display places among its instruments (`label`).
+ * a camera moves its nearest baked star by a tenth of a pixel. The sky is asked from the camera's
+ * galactic position, its system's barycentre plus its offset (R06.T12), the point the rule measures
+ * the camera from, so that a camera at rest is asked once however far it is from the barycentre;
+ * after a jump, once the published run has reached the system arrived at. A sky arriving nearest
+ * first is labelled as its replies are held (R06.T11.f): `PENDING` until the first, then the held
+ * reply's limit and notes, which the display places among its instruments (`label`).
  */
 export function useViewSky(input: ViewSkyInput): ViewSky {
   const { universe, place, run, exposure, setting } = input;
   const settings = SETTINGS[setting].sky;
   const widthPx = input.widthPx ?? DEFAULT_WIDTH_PX;
   const time = run.scene.time;
-  const observer = place === null ? null : barycentreAt(place, time);
+  // The camera's galactic position, its system's barycentre plus its offset, kept as a light-year
+  // cell and a metre offset (2 m anywhere in the galaxy): the sky's observer (R06.T12), from which
+  // the parallax rule measures the camera, so that a camera at rest is asked once.
+  const position = cameraGalacticPosition(runPose(run), run.scene);
+  // A place states where its system is unless it is `unknown`, which asks nothing (R03.T16).
+  const known = place !== null && place.kind !== "unknown";
+  // The place moves a readout or two before the published run follows it: after a jump the run's
+  // camera is in the system left until then, and the system arrived at is never asked from there;
+  // nor is a sky asked before the run's scene carries the place's barycentre.
+  const observer = known && place.system === run.scene.system ? position : null;
   const request =
     universe === null || place === null || observer === null
       ? null
       : viewSkyRequest({
           universe,
           observer,
-          system: place.system,
+          system: input.sky === "shared" ? null : place.system,
           time,
           role: run.camera.role,
           fovDeg: run.camera.fovDeg,
           nMax: settings.nMax,
         });
-  const position = cameraGalacticPosition(runPose(run), run.scene);
+  // A place whose position is known, before the run has followed it: its sky is awaited, and is
+  // asked once the camera's place in it is.
+  const following = universe !== null && known && observer === null;
   const cameras: ReadonlyArray<SkyCamera> =
     position === null ? [] : [{ position, fovDeg: run.camera.fovDeg, widthPx }];
-  const { model, pending } = useSky(request, cameras);
+  const { model, pending } = useSky(
+    request,
+    cameras,
+    input.keep === undefined ? NO_SKY_OPTIONS : { keep: input.keep },
+  );
   const role = run.camera.role;
   const fovDeg = run.camera.fovDeg;
   // A cull of up to 3 × 10⁵ stars, kept until the sky, the view's role, field of view, size or
@@ -244,7 +310,8 @@ export function useViewSky(input: ViewSkyInput): ViewSky {
     () => (model === null ? null : cullViewSky(model, role, fovDeg, widthPx, setting)),
     [model, role, fovDeg, widthPx, setting],
   );
-  // A sky is this view's only for the system it was asked about, whose position is known.
+  // A sky is this view's only for the system it was asked about, whose position is known, or, the
+  // planet viewer's shared sky, for any generated planet's, each leaving no system out.
   const ours =
     drawn !== null &&
     request !== null &&
@@ -257,12 +324,14 @@ export function useViewSky(input: ViewSkyInput): ViewSky {
       pending,
     };
   }
-  // Asked and not yet answered, after a jump too: no reply of this arrival is held.
-  const awaiting = request !== null && pending;
+  // Asked and not yet answered, after a jump too, or awaiting the run there: no reply of this
+  // arrival is held.
+  const awaiting = (request !== null && pending) || following;
   return {
     drawn: null,
+    // `PENDING` holds no figure, so it takes no field and no mark.
     label: () => (awaiting ? { value: SKY_PENDING } : null),
     awaiting,
-    pending,
+    pending: pending || following,
   };
 }

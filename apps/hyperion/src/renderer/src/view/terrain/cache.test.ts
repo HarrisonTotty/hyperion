@@ -3,18 +3,32 @@ import { describe, expect, it } from "vitest";
 import { normalise, type Vec3, vec3 } from "../../geometry/vec3";
 import { goldenLevelTable, selectionOf, WGS84_FIGURE } from "../../test/terrainFixtures";
 import { lookAlong } from "../camera/quaternion";
+import { TERRAIN_SETTINGS, WIREFRAME_TERRAIN_TAU_PX } from "../quality/qualitySetting";
+import { recordProfile, SETTING_VIEWS } from "../spike/demandRecord";
+import { craftContacts } from "../spike/fixedStep";
+import { TEST_PLANET_FIGURE } from "../spike/testPlanetFigure";
 import {
   type CacheInsert,
+  type DrawSet,
   DrawSetResolver,
   PatchCache,
   type ResidentPatch,
   resolveDrawSet,
 } from "./cache";
 import { vertexDir } from "./cube";
+import { MAX_SUB_PATCH_LEVELS } from "./gpu/uniforms";
+import { finestPatchSizeM } from "./grounded";
 import { childKeys, FACES, type PatchKey, patchKeyString, rootKey } from "./patchKey";
-import { planetGeometry, surfacePoint } from "./planet";
+import { levelHeightRangeM, planetGeometry, surfacePoint } from "./planet";
 import { type Selection, selectPatches } from "./select";
-import { PATCH_VERTICES_PER_SIDE, slotLayout } from "./slotLayout";
+import { selectionTolerancePx } from "./selectionTolerance";
+import {
+  PATCH_VERTICES_PER_SIDE,
+  type SlotLayout,
+  slotLayout,
+  terrainSlotLayout,
+} from "./slotLayout";
+import { wireframeTerrainSettings } from "./terrainWire";
 import type { BakedPatch } from "./workers/messages";
 
 /** A cache of `slots` slots of 100 B each. */
@@ -43,6 +57,7 @@ function bakeOf(key: PatchKey, generation = 1): BakedPatch {
     normals: new Float16Array(PATCH_VERTICES_PER_SIDE ** 2 * 2),
     originHeightM: 0,
     skirtDepthM: 1,
+    layers: null,
   };
 }
 
@@ -144,16 +159,33 @@ describe("the patch cache", () => {
     expect(unpinnedFirst).not.toContain(patchKeyString(AA));
   });
 
-  it("evicts a drawn patch once only forced patches remain beside it", () => {
+  it("refuses an arrival once only forced patches and the selection remain beside it", () => {
     const cache = cacheOf(6);
     const forced = [B, C, D, AA, AB];
     insertAll(cache, [A, ...forced]);
     frame(cache, selectionOf([A, ...forced], forced));
-    expect(cache.insert(resident(AC))).toEqual({
-      kind: "stored",
-      slot: expect.any(Number),
-      evicted: patchKeyString(A),
-    });
+    expect(cache.insert(resident(AC))).toEqual({ kind: "refused" });
+    expect(cache.has(patchKeyString(A))).toBe(true);
+  });
+
+  it("refuses an arrival rather than evict the selection or its resident ancestors, and reports it", () => {
+    const cache = cacheOf(7);
+    const [BA] = childKeys(B);
+    insertAll(cache, [ROOT, A, AA, AB, AC, B, C]);
+    // AD and B's children are selected and unbaked, so A stands in for AD, over AA, AB and AC, and B
+    // for its children; the root is pinned as their ancestor, and C alone is unpinned.
+    frame(cache, selectionOf([AA, AB, AC, AD, ...childKeys(B)]));
+    expect(cache.pressure()).toEqual({ forced: 0, drawn: 6, exceeded: false });
+    const elsewhere: PatchKey = { face: 1, level: 10, i: 0, j: 0 };
+    const results = [AD, BA, elsewhere].map((key) => cache.insert(resident(key)));
+    expect(results.map((r) => (r.kind === "stored" ? r.evicted : r.kind))).toEqual([
+      patchKeyString(C),
+      "refused",
+      "refused",
+    ]);
+    expect([ROOT, A, AA, AB, AC, AD, B].every((k) => cache.has(patchKeyString(k)))).toBe(true);
+    expect(cache.pressure().exceeded).toBe(true);
+    expect(cache.refusals).toBe(2);
   });
 
   it("keeps a forced-region patch under any eviction pressure", () => {
@@ -304,6 +336,49 @@ describe("the patch cache", () => {
     expect(cache.heldBytes).toBe(300);
   });
 
+  it("stores a rebake in a spare slot, keeping the older bake's slot retired until it is released", () => {
+    const cache = cacheOf(6);
+    insertAll(cache, [A, B]);
+    const was = cache.get(patchKeyString(A))?.slot;
+    const replaced = cache.replace(resident(A, 2));
+    const now = cache.get(patchKeyString(A));
+    expect([replaced.kind === "stored" ? replaced.retired : "refused", now?.generation]).toEqual([
+      was,
+      2,
+    ]);
+    expect([now?.slot !== was, cache.usedSlots]).toEqual([true, 3]);
+    expect([
+      cache.releaseRetired(was ?? -1),
+      cache.releaseRetired(was ?? -1),
+      cache.usedSlots,
+    ]).toEqual([true, false, 2]);
+  });
+
+  it("stores a rebake in its own slot, retiring none, where no slot is spare", () => {
+    const cache = cacheOf(6);
+    const forced = [A, B, C, D, AA, AB];
+    insertAll(cache, forced);
+    frame(cache, selectionOf(forced, forced));
+    const was = cache.get(patchKeyString(A))?.slot;
+    expect(cache.replace(resident(A, 2))).toEqual({
+      kind: "stored",
+      slot: was,
+      evicted: null,
+      retired: null,
+    });
+  });
+
+  it("evicts no patch of the selection's chain for a rebake's spare slot", () => {
+    const cache = cacheOf(6);
+    insertAll(cache, [ROOT, A, AA, AB, AC, AD]);
+    frame(cache, selectionOf([AA, AB, AC, AD]));
+    const replaced = cache.replace(resident(AA, 2));
+    expect(replaced.kind === "stored" ? [replaced.retired, replaced.evicted] : "refused").toEqual([
+      null,
+      null,
+    ]);
+  });
+
   it("never evicts a root", () => {
     const cache = cacheOf(6);
     insertAll(cache, FACES.map(rootKey));
@@ -365,6 +440,39 @@ describe("the draw set's resolver", () => {
   });
 });
 
+/** Each drawn patch's key, the area it draws (a sub-patch's `within`) and whether it stands in. */
+function drawnAreas(draw: DrawSet): Array<[string, string, boolean]> {
+  return draw.patches.map((p) => [p.keyString, patchKeyString(p.within ?? p.patch.key), p.standIn]);
+}
+
+/** Whether one of two patches lies in or over the other. */
+function inOrOver(a: PatchKey, b: PatchKey): boolean {
+  const [coarse, fine] = a.level <= b.level ? [a, b] : [b, a];
+  const shift = fine.level - coarse.level;
+  return a.face === b.face && fine.i >> shift === coarse.i && fine.j >> shift === coarse.j;
+}
+
+/** Every pair of drawn areas one of which lies in or over the other. */
+function overlaps(draw: DrawSet): string[] {
+  const areas = draw.patches.map((p) => p.within ?? p.patch.key);
+  return areas.flatMap((a, n) =>
+    areas
+      .slice(n + 1)
+      .filter((b) => inOrOver(a, b))
+      .map((b) => `${patchKeyString(a)} and ${patchKeyString(b)}`),
+  );
+}
+
+/** `key`'s ancestors, its parent first. */
+function ancestorsOf(key: PatchKey): PatchKey[] {
+  const out: PatchKey[] = [];
+  for (let level = key.level - 1; level >= 0; level -= 1) {
+    const shift = key.level - level;
+    out.push({ face: key.face, level, i: key.i >> shift, j: key.j >> shift });
+  }
+  return out;
+}
+
 describe("the draw set", () => {
   it("draws a resident patch as itself and lists its slot", () => {
     const cache = cacheOf(6);
@@ -376,32 +484,108 @@ describe("the draw set", () => {
     expect(draw.standingIn).toBe(0);
   });
 
-  it("stands the nearest resident ancestor in for a missing patch and marks it", () => {
+  it("stands the nearest resident ancestor in for each missing patch over its area alone, marked", () => {
     const cache = cacheOf(6);
     insertAll(cache, [ROOT, A]);
     const draw = resolveDrawSet(selectionOf([AA, AB, AC, AD]), cache);
-    expect(draw.patches.map((p) => [p.keyString, p.standIn])).toEqual([[patchKeyString(A), true]]);
-    expect(draw.standingIn).toBe(4);
-    expect(draw.missing).toBe(0);
+    expect(drawnAreas(draw)).toEqual(
+      [AA, AB, AC, AD].map((k) => [patchKeyString(A), patchKeyString(k), true]),
+    );
+    expect([...draw.slots.subarray(0, draw.count)]).toEqual(
+      Array.from({ length: 4 }, () => cache.get(patchKeyString(A))?.slot),
+    );
+    expect([draw.standingIn, draw.missing]).toEqual([4, 0]);
   });
 
-  it("draws an ancestor in place of the resident siblings it covers, never over them", () => {
+  it("draws a missing patch by its ancestor's part alone, and its resident siblings as themselves", () => {
     const cache = cacheOf(6);
     insertAll(cache, [A, AA, AB]);
-    const draw = resolveDrawSet(selectionOf([AA, AB, AC, AD]), cache);
-    expect(draw.patches.map((p) => p.keyString)).toEqual([patchKeyString(A)]);
-    expect(draw.standingIn).toBe(4);
+    const selection = seenBy(
+      selectionOf([AA, AB, AC, AD]),
+      new Map([
+        [AA, 0b01],
+        [AB, 0b01],
+        [AC, 0b10],
+        [AD, 0b11],
+      ]),
+    );
+    const draw = resolveDrawSet(selection, cache);
+    expect(drawnAreas(draw)).toEqual([
+      [patchKeyString(AA), patchKeyString(AA), false],
+      [patchKeyString(AB), patchKeyString(AB), false],
+      [patchKeyString(A), patchKeyString(AC), true],
+      [patchKeyString(A), patchKeyString(AD), true],
+    ]);
+    expect([...draw.views.subarray(0, draw.count)]).toEqual([0b01, 0b01, 0b10, 0b11]);
+    expect([draw.standingIn, draw.standingInViews, draw.missingViews]).toEqual([2, 0b11, 0]);
+    expect(overlaps(draw)).toEqual([]);
   });
 
-  it("is the six roots when nothing else is resident", () => {
-    const cache = cacheOf(10);
+  it("covers every seen selected patch once, by itself or a part of an ancestor, whatever is resident", () => {
+    let seed = 7;
+    const next = (n: number): number => {
+      seed = (Math.imul(seed, 1_103_515_245) + 12_345) >>> 0;
+      return (seed >>> 8) % n;
+    };
+    // A cut of face 0 to level 3, split at random, with a random part of its patches and their
+    // ancestors resident, the root always.
+    const cut = (key: PatchKey): PatchKey[] =>
+      key.level < 3 && next(3) > 0 ? childKeys(key).flatMap(cut) : [key];
+    for (let trial = 0; trial < 50; trial += 1) {
+      const selected = cut(ROOT);
+      const cache = cacheOf(85);
+      const keys = new Map(
+        [...selected, ...selected.flatMap(ancestorsOf)].map((k) => [patchKeyString(k), k]),
+      );
+      insertAll(
+        cache,
+        [...keys.values()].filter((k) => k.level === 0 || next(2) === 0),
+      );
+      const draw = resolveDrawSet(selectionOf(selected), cache);
+      expect(overlaps(draw)).toEqual([]);
+      expect(
+        drawnAreas(draw)
+          .map(([, area]) => area)
+          .toSorted(),
+      ).toEqual(selected.map(patchKeyString).toSorted());
+    }
+  });
+
+  it("stands an ancestor in whole for a patch more levels below it than a sub-patch holds", () => {
+    const cache = cacheOf(6);
+    insertAll(cache, [ROOT]);
+    const deepest = descendant(ROOT, MAX_SUB_PATCH_LEVELS + 1, 0);
+    const deep = descendant(ROOT, MAX_SUB_PATCH_LEVELS, 0);
+    expect([
+      drawnAreas(resolveDrawSet(selectionOf([deepest]), cache)),
+      drawnAreas(resolveDrawSet(selectionOf([deep]), cache)),
+    ]).toEqual([
+      [[patchKeyString(ROOT), patchKeyString(ROOT), true]],
+      [[patchKeyString(ROOT), patchKeyString(deep), true]],
+    ]);
+  });
+
+  it("stands an ancestor in whole where the selection holds more patches than the slots", () => {
+    const cache = cacheOf(6);
+    insertAll(cache, [A]);
+    // Seven selected patches for six slots: three of them with nothing resident over them.
+    const elsewhere = childKeys(rootKey(1)).slice(0, 3);
+    const draw = resolveDrawSet(selectionOf([AA, AB, AC, AD, ...elsewhere]), cache);
+    expect([drawnAreas(draw), draw.standingIn, draw.missing]).toEqual([
+      [[patchKeyString(A), patchKeyString(A), true]],
+      4,
+      3,
+    ]);
+  });
+
+  it("is the six roots' parts when nothing else is resident", () => {
+    const cache = cacheOf(24);
     insertAll(cache, FACES.map(rootKey));
     const selected = FACES.flatMap((f) => childKeys(rootKey(f)));
     const draw = resolveDrawSet(selectionOf(selected), cache);
-    expect(draw.patches.map((p) => p.keyString)).toEqual(
-      FACES.map((f) => patchKeyString(rootKey(f))),
+    expect(drawnAreas(draw)).toEqual(
+      selected.map((k) => [patchKeyString(rootKey(k.face)), patchKeyString(k), true]),
     );
-    expect(draw.patches.every((p) => p.standIn)).toBe(true);
   });
 
   it("counts selected patches with no resident ancestor as missing", () => {
@@ -409,6 +593,140 @@ describe("the draw set", () => {
     const draw = resolveDrawSet(selectionOf([A, B]), cache);
     expect(draw.patches).toHaveLength(0);
     expect(draw.missing).toBe(2);
+  });
+});
+
+/** `selection` with each patch seen by the views `views` gives it, view 0 alone by default. */
+function seenBy(selection: Selection, views: ReadonlyMap<PatchKey, number>): Selection {
+  const patches = new Map(selection.patches);
+  for (const [key, mask] of views) {
+    const selected = patches.get(patchKeyString(key));
+    if (selected === undefined) {
+      throw new Error(`${patchKeyString(key)} is not selected`);
+    }
+    patches.set(patchKeyString(key), { ...selected, views: mask });
+  }
+  return { ...selection, patches };
+}
+
+describe("the draw set's views (R10.T16.b; decision-r10-t16-contracts §3)", () => {
+  it("gives each drawn patch the views of the selected patches it draws", () => {
+    const cache = cacheOf(10);
+    insertAll(cache, [ROOT, A, B]);
+    const selection = seenBy(
+      selectionOf([A, B]),
+      new Map([
+        [A, 0b01],
+        [B, 0b10],
+      ]),
+    );
+    const draw = resolveDrawSet(selection, cache);
+    const views = new Map(draw.patches.map((p, n) => [p.keyString, draw.views[n]] as const));
+    expect([views.get(patchKeyString(A)), views.get(patchKeyString(B))]).toEqual([0b01, 0b10]);
+    expect([draw.standingInViews, draw.missingViews]).toEqual([0, 0]);
+  });
+
+  it("gives each part of a stand-in the views of the patch it stands in for, and marks them standing in", () => {
+    const cache = cacheOf(10);
+    insertAll(cache, [A, B]);
+    const selection = seenBy(
+      selectionOf([AA, AB, B]),
+      new Map([
+        [AA, 0b001],
+        [AB, 0b100],
+        [B, 0b010],
+      ]),
+    );
+    const draw = resolveDrawSet(selection, cache);
+    expect([drawnAreas(draw), [...draw.views.subarray(0, draw.count)]]).toEqual([
+      [
+        [patchKeyString(A), patchKeyString(AA), true],
+        [patchKeyString(A), patchKeyString(AB), true],
+        [patchKeyString(B), patchKeyString(B), false],
+      ],
+      [0b001, 0b100, 0b010],
+    ]);
+    expect([draw.standingInViews, draw.missingViews]).toEqual([0b101, 0]);
+  });
+
+  it("gives a stand-in drawn whole the union of the views it stands in for, below what a sub-patch holds", () => {
+    const cache = cacheOf(10);
+    insertAll(cache, [A, B]);
+    // Two patches 14 levels under A: each stood in for by A whole.
+    const [far0, far1] = [0, 1].map((n) => descendant(A, MAX_SUB_PATCH_LEVELS + 1, n));
+    if (far0 === undefined || far1 === undefined) {
+      throw new Error("no deep patches");
+    }
+    const selection = seenBy(
+      selectionOf([far0, far1, B]),
+      new Map([
+        [far0, 0b001],
+        [far1, 0b100],
+        [B, 0b010],
+      ]),
+    );
+    const draw = resolveDrawSet(selection, cache);
+    expect(draw.patches.map((p, n) => [p.keyString, p.standIn, draw.views[n]])).toEqual([
+      [patchKeyString(A), true, 0b101],
+      [patchKeyString(B), false, 0b010],
+    ]);
+    expect([draw.standingInViews, draw.missingViews]).toEqual([0b101, 0]);
+  });
+
+  it("gives a coarsest chosen ancestor the views of every chosen patch it draws in place of", () => {
+    const cache = cacheOf(10);
+    insertAll(cache, [ROOT, A]);
+    // A patch 14 levels under the root in B's place: the root stands in for it whole.
+    const far = descendant(B, MAX_SUB_PATCH_LEVELS, 0);
+    const selection = seenBy(
+      selectionOf([AA, AB, far]),
+      new Map([
+        [AA, 0b001],
+        [AB, 0b100],
+        [far, 0b010],
+      ]),
+    );
+    const draw = resolveDrawSet(selection, cache);
+    // The root covers A's parts too: they are drawn by the root, which takes their views.
+    expect(draw.patches.map((p, n) => [p.keyString, p.standIn, draw.views[n]])).toEqual([
+      [patchKeyString(ROOT), true, 0b111],
+    ]);
+    expect(draw.standingInViews).toBe(0b111);
+  });
+
+  it("gives an ancestor drawn whole in place of a resident patch that patch's views, standing in", () => {
+    const cache = cacheOf(10);
+    insertAll(cache, [A, AA, AB]);
+    // A patch 14 levels under A in AC's place: A stands in for it whole, over AA, AB and AD's part.
+    const far = descendant(AC, MAX_SUB_PATCH_LEVELS, 0);
+    const selection = seenBy(
+      selectionOf([AA, AB, far, AD]),
+      new Map([
+        [AA, 0b01],
+        [AB, 0b01],
+        [far, 0b10],
+        [AD, 0b10],
+      ]),
+    );
+    const draw = resolveDrawSet(selection, cache);
+    expect(draw.patches.map((p, n) => [p.keyString, p.within, draw.views[n]])).toEqual([
+      [patchKeyString(A), null, 0b11],
+    ]);
+    expect([draw.standingIn, draw.standingInViews]).toEqual([4, 0b11]);
+  });
+
+  it("marks the views of a selected patch with no resident ancestor missing, and only those", () => {
+    const cache = cacheOf(10);
+    insertAll(cache, [B]);
+    const selection = seenBy(
+      selectionOf([A, B]),
+      new Map([
+        [A, 0b10],
+        [B, 0b01],
+      ]),
+    );
+    const draw = resolveDrawSet(selection, cache);
+    expect([draw.missingViews, draw.standingInViews, draw.missing]).toEqual([0b10, 0, 1]);
   });
 });
 
@@ -505,7 +823,8 @@ describe("the patch cache under churn (the high-bound ruling's F3)", () => {
       frame(cache, selectionOf(selected, [], hidden));
       for (const key of selected) {
         if (!cache.has(patchKeyString(key))) {
-          evictedBy(cache.insert(resident(key)));
+          // Refused where the selection's chain fills the slots.
+          cache.insert(resident(key));
         }
         expect(cache.usedSlots).toBeLessThanOrEqual(cache.slotCount);
         expect(cache.heldBytes).toBe(cache.usedSlots * cache.layout.bytesPerSlot);
@@ -636,4 +955,174 @@ describe("selection and the cache over a low pass (the high-bound ruling's F3)",
     expect(second.evictions).toEqual(first.evictions);
     expect(second.bakes).toBe(first.bakes);
   });
+});
+
+/** R05's test planet with ridges off, under the descent's figure (`recordProfile`'s). */
+const DESCENT_PLANET = planetGeometry(TEST_PLANET_FIGURE, goldenLevelTable("off"));
+
+/** The descent's sampling rate for the replay, Hz. */
+const REPLAY_RATE_HZ = 4;
+
+/** What a replay of the descent found, frame by frame over the frames with a contact. */
+interface DescentReplay {
+  readonly frames: number;
+  /** The most forced patches one frame's selection held. */
+  readonly peakForced: number;
+  /** The most pins (`pressure()`'s forced and drawn) after one frame's bakes. */
+  readonly peakPins: number;
+  /** Frames whose pins exceeded the slots (`pressure().exceeded`). */
+  readonly exceededFrames: number;
+  /** Inserts of a forced patch the cache refused. */
+  readonly refusedForced: number;
+  /** Forced patches selected and not resident after their frame's bakes, over every frame. */
+  readonly forcedNotResident: number;
+}
+
+/**
+ * Replays R05's descent (`recordProfile()`) over the test planet through selection and a cache of
+ * `layout`, at {@link REPLAY_RATE_HZ}, on every frame where the craft has a contact
+ * (`craftContacts`): selected at τ_sel with half the slots as the budget, as the terrain pass
+ * selects, though without its motion margin, as `runFixedStep` selects; then the draw set, the
+ * retain and the bakes, as `runFixedStep` runs them, an ideal pool baking every request the frame
+ * it is made, each at its level's height range, the loosest bounds.
+ */
+function replayDescent(
+  layout: SlotLayout,
+  view: {
+    readonly fovXRad: number;
+    readonly widthPx: number;
+    readonly heightPx: number;
+    readonly tauPx: number;
+  },
+): DescentReplay {
+  const profile = recordProfile();
+  const patchSizeM = finestPatchSizeM(DESCENT_PLANET);
+  const cache = new PatchCache(layout);
+  const resolver = new DrawSetResolver(cache);
+  const endS = profile.segmentSpans().at(-1)?.endS ?? 0;
+  let frames = 0;
+  let peakForced = 0;
+  let peakPins = 0;
+  let exceededFrames = 0;
+  let refusedForced = 0;
+  let forcedNotResident = 0;
+  for (let step = 0; step <= endS * REPLAY_RATE_HZ; step += 1) {
+    const pose = profile.poseAt(step / REPLAY_RATE_HZ);
+    const grounded = craftContacts(pose, patchSizeM);
+    if (grounded.length === 0) {
+      continue;
+    }
+    const selection = selectPatches({
+      planet: DESCENT_PLANET,
+      views: [
+        {
+          camera: { positionM: pose.positionM, orientation: pose.orientation },
+          fovXRad: view.fovXRad,
+          viewport: { widthPx: view.widthPx, heightPx: view.heightPx },
+          weight: 1,
+          tauPx: selectionTolerancePx(view.tauPx),
+        },
+      ],
+      setting: "high",
+      grounded,
+      heightRanges: cache,
+      maxPatches: Math.floor(layout.slotCount / 2),
+    });
+    cache.retain(selection, resolver.resolve(selection));
+    for (const request of selection.demand) {
+      if (cache.has(patchKeyString(request.key))) {
+        continue;
+      }
+      const stored = cache.insert({
+        ...resident(request.key),
+        heightRangeM: levelHeightRangeM(DESCENT_PLANET, request.key.level),
+      });
+      refusedForced += stored.kind === "refused" && request.forced ? 1 : 0;
+    }
+    let forced = 0;
+    for (const [keyString, patch] of selection.patches) {
+      if (patch.forced) {
+        forced += 1;
+        forcedNotResident += cache.has(keyString) ? 0 : 1;
+      }
+    }
+    const pressure = cache.pressure();
+    frames += 1;
+    peakForced = Math.max(peakForced, forced);
+    peakPins = Math.max(peakPins, pressure.forced + pressure.drawn);
+    exceededFrames += pressure.exceeded ? 1 : 0;
+  }
+  return { frames, peakForced, peakPins, exceededFrames, refusedForced, forcedNotResident };
+}
+
+describe("the cache at its sizes over R05's descent (plan R10, R10.T14.a)", () => {
+  const [high, low] = SETTING_VIEWS;
+  if (high === undefined || low === undefined) {
+    throw new Error("SETTING_VIEWS holds the high and the low setting");
+  }
+  /** A case replayed once, as the suite is collected (about 1–2.3 s), for both tests below. */
+  function replayed(
+    name: string,
+    layout: SlotLayout,
+    view: Parameters<typeof replayDescent>[1],
+    record: Pick<DescentReplay, "frames" | "peakForced" | "peakPins" | "exceededFrames">,
+  ): {
+    readonly name: string;
+    readonly layout: SlotLayout;
+    readonly record: typeof record;
+    readonly replay: DescentReplay;
+  } {
+    return { name, layout, record, replay: replayDescent(layout, view) };
+  }
+
+  // `record` is T14.a's record in plan 10, the sizing rule's forced term and the pins, as R10.T14.e's
+  // normal margin, which tightens the boxes, moved it (2026-10-20): low past its slots in 107 frames,
+  // from 136, and high's pins peaking at 887, from 884, its freed budget refining elsewhere; the
+  // forced peak and the wireframe's case are as they were. R09.T8.d's boxes, over the subtree's
+  // range with its skirts, moved it again (2026-10-20): low past its slots in 110 frames, from 107;
+  // the rest as it was. R10.T1.c's maturity layer, which grows the lit slot by 19,972 B, moved it
+  // again (2026-10-22): low past its 375 slots (422 before) in 242 frames, from 110, and high's pins
+  // peaking at 832 of its 1,208 slots (1,286 before), from 887; the forced peak as it was. An arrival
+  // outside the forced region refused, not given a slot of the selection's chain, reports the pins
+  // exceeded (2026-11-01, the seamless lane): low past its slots in 702 frames, from 242, and the
+  // wireframe's in 149, from 4; the forced patches all kept resident, as before.
+  const REPLAYS = [
+    replayed("the low setting's lit", terrainSlotLayout(TERRAIN_SETTINGS.low, "lit"), low.view, {
+      frames: 723,
+      peakForced: 71,
+      peakPins: 375,
+      exceededFrames: 702,
+    }),
+    replayed("the high setting's lit", terrainSlotLayout(TERRAIN_SETTINGS.high, "lit"), high.view, {
+      frames: 723,
+      peakForced: 71,
+      peakPins: 832,
+      exceededFrames: 0,
+    }),
+    replayed(
+      "the wireframe's",
+      terrainSlotLayout(wireframeTerrainSettings("high"), "wire"),
+      { ...high.view, tauPx: WIREFRAME_TERRAIN_TAU_PX },
+      { frames: 723, peakForced: 71, peakPins: 520, exceededFrames: 149 },
+    ),
+  ];
+
+  it.each(REPLAYS)(
+    "keeps every forced patch under the craft resident in $name $layout.slotCount slots",
+    ({ replay }) => {
+      expect({
+        forced: replay.peakForced > 0,
+        refusedForced: replay.refusedForced,
+        forcedNotResident: replay.forcedNotResident,
+      }).toEqual({ forced: true, refusedForced: 0, forcedNotResident: 0 });
+    },
+  );
+
+  it.each(REPLAYS)(
+    "peaks at the record's forced patches and pins in $name $layout.slotCount slots",
+    ({ replay, record }) => {
+      const { frames, peakForced, peakPins, exceededFrames } = replay;
+      expect({ frames, peakForced, peakPins, exceededFrames }).toEqual(record);
+    },
+  );
 });

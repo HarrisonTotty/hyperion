@@ -20,9 +20,13 @@
 //! - the caps' 1,536 rays, each through its three sub-rays (R06.T7.b), are measured
 //!   [`CAP_JOB_RAYS`] to a job, each with its own noise cache, then counted [`CAP_COUNT_JOB_RAYS`]
 //!   to a job, every layer at once, and each layer's cap drawn from the count in a job of its own;
-//!   one more job makes the census's plan (decided 2026-10-03, `decision-r06-tables.md`, item B.4);
+//!   where the query states a synthetic ceiling ([`SYNTHETIC_CEILING_V`]; rendering plan R13), the
+//!   same rays are counted a second time at the ceiling, split as the first, and one job takes
+//!   C's, D's and E's real boundary from the two (`real_boundary`); one more job makes the
+//!   census's plan (decided 2026-10-03, `decision-r06-tables.md`, item B.4);
 //! - the census runs its plan's shells nearest first, step by step ([`delivery_steps`]; R06.T11.d),
-//!   each shell's slabs as jobs of about [`CENSUS_JOB_SLICE`] ([`census_in_steps`]);
+//!   E's beyond 1,000 ly a step ahead of C's and D's (R06.T11.h), each shell's slabs as jobs of
+//!   about [`CENSUS_JOB_SLICE`] ([`census_in_steps`]);
 //! - while it runs, the band's rays are marched [`BAND_JOB_ROWS`] rows of a face to a job (R06.T9.f's
 //!   `march_rows`), once a request for every reply its shells can state, which reads no census;
 //! - after each step, its census is merged ([`merge_step`]), and each march is summed with that
@@ -44,7 +48,10 @@
 //! shared between threads, so each job builds its own [`SkyContext`] over the [`SkyTables`] they
 //! all read, and the census's jobs over the server's [`SharedSkyCellCache`], which every job and
 //! request shares (R06.T11.b; Design note 12): a census cancelled or superseded keeps the cells it
-//! built there, so that a moving ship's outer shells still converge through the cache.
+//! built there. At version 21 that does not make a moving ship's outer shells converge through the
+//! cache, since a warm census still generates every system a cold one does, so the cache is off by
+//! default (R06.T8.o; decided 2026-10-10, `decision-r06-t8n.md`). Off, at a budget of 0, each
+//! census job reads [`NoSkyCellCache`], R06.T8.g's path, and keeps no cell.
 //!
 //! [`SkyCaps`] says how far the census looks: each layer's derived cap (Design note 9), or radii
 //! forced on the layers, which keep a test's census small, and, for a test alone, nearer shell
@@ -54,15 +61,21 @@ use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
 use std::iter::Peekable;
+use std::num::NonZeroU32;
 use std::ops::Range;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
 use futures_util::stream::FuturesUnordered;
+use hyperion_sim::coords::GalacticPosition;
 use hyperion_sim::galaxy::Galaxy;
-use hyperion_sim::galaxy::gas::modifiers::NoModifiers;
+use hyperion_sim::galaxy::catalogue_classes::CatalogueClassSource;
+use hyperion_sim::galaxy::features::gas_overlay::{FeatureGas, FeatureGasIndex};
+use hyperion_sim::galaxy::features::members::source::FeatureMemberSource;
+use hyperion_sim::galaxy::gas::modifiers::{GasModifier, GasModifierSource};
 use hyperion_sim::galaxy::gas::noise::NoiseCache;
+use hyperion_sim::galaxy::global_list::GlobalListSource;
 use hyperion_sim::galaxy::placement::CellKey;
 use hyperion_sim::id::Layer;
 use hyperion_sim::observe::Observer;
@@ -71,12 +84,14 @@ use hyperion_sim::sky::band::{
     BandMarch, BandSpec, BandTexel, CompleteTo, CubeFace, march_rows, sum_rows,
 };
 use hyperion_sim::sky::caps::{
-    CAP_RAYS, CAPPED_LAYERS, CapCount, CapLattice, LayerCap, RayExtinctions, SUB_RAYS,
+    CAP_RAYS, CAPPED_LAYERS, CapCount, CapCountPart, CapCountPlan, CapLattice, LayerCap,
+    RayExtinctions, SUB_RAYS, SYNTHETIC_CEILING_V, real_boundary, served_ceiling,
 };
 use hyperion_sim::sky::census::{
-    CellOffsets, CellSlab, CensusCost, CensusPlan, CensusTallies, MAX_FORCED_CAP_LY,
-    NoSkyCellCache, SHELL_EDGES_LY, Shell, SkyCellCache, SkyCensus, SkyContext, SkyQuery, SkyStar,
-    census_cell_with_cost, census_plan_with_edges, merge_shells,
+    CellOffsets, CellSlab, CensusCost, CensusPlan, CensusTallies, MAX_FORCED_CAP_LY, MemberPart,
+    NoSkyCellCache, SHELL_EDGES_LY, Shell, SkyCellCache, SkyCensus, SkyContext, SkyQuery,
+    SkySource, SkyStar, census_cell_with_cost, census_members, census_plan_with_edges,
+    merge_shells, takes_class_hosts, takes_feature_members,
 };
 use hyperion_sim::sky::dgl::{ILLUMINATION_SPEC, Illumination};
 use hyperion_sim::sky::envelope::BrightnessEnvelope;
@@ -84,13 +99,15 @@ use hyperion_sim::sky::limits::{
     self, EyeCutSteps, EyeVisibility, Glare, PRE_PASS_SPEC, PrePassRows,
 };
 use hyperion_sim::sky::luminosity::LuminosityTables;
-use hyperion_sim::units::{LightYears, Magnitudes};
-use tokio::sync::mpsc;
+use hyperion_sim::time::UniverseTime;
+use hyperion_sim::units::{LightYears, Magnitudes, Years};
 use tokio::sync::oneshot::error::RecvError;
+use tokio::sync::{mpsc, watch};
 
 use super::{
-    CancelOnDrop, CancelToken, ComputeError, CpuPool, GalaxyKey, JobError, JobReceiver, Priority,
-    SharedSkyCellCache,
+    CancelOnDrop, CancelToken, ComputeError, CpuPool, GalaxyKey, JobError, JobReceiver,
+    ListedTubes, Priority, Promotion, SharedCentreOrbitCache, SharedClassCellCache,
+    SharedClusterModelCache, SharedFeatureCellCache, SharedSkyCellCache,
 };
 use crate::limits::BULK_QUEUE_CAPACITY;
 
@@ -139,6 +156,13 @@ pub(crate) const CAP_COUNT_JOB_RAYS: usize = 32;
 /// milliseconds, so `N_max`'s 3 × 10⁵ take 15 jobs.
 pub(crate) const EYE_OFFSET_JOB_STARS: usize = 20_000;
 
+/// The synthetic ceiling a sky is served at, the sim's [`SYNTHETIC_CEILING_V`] as a magnitude
+/// (rendering plan R13, R13.T2.b): every sky's query states it, or the request's cut where the cut
+/// is brighter, and none only where the cut is at or brighter than it and the cut's own C, D and E
+/// caps already lie within the real limit (decided 2026-10-09, `decision-r13-t2b-ceiling.md`;
+/// `sky::caps::served_ceiling`).
+pub(crate) const SYNTHETIC_CEILING: Magnitudes = Magnitudes::new(SYNTHETIC_CEILING_V);
+
 /// Noise-cache slots of a census job: 256 KiB, a cache's worth for the sightlines of a few hundred
 /// cells' stars. The cache changes no value, only how often a normal is drawn again.
 const CENSUS_NOISE_SLOTS: usize = 1 << 14;
@@ -168,7 +192,12 @@ pub struct SkyCaps {
     shell_edges_ly: Option<&'static [u32]>,
     /// A test's edge, ly, from which layer C's shells come a step late, in place of
     /// [`C_DEFERRED_BEYOND_LY`].
-    c_deferred_beyond_ly: Option<u32>,
+    c_deferred_beyond_ly: Option<NonZeroU32>,
+    /// A test's edge, ly, from which [`FAR_FIRST_LAYERS`]' shells come a step ahead of the other
+    /// layers', in place of [`FAR_FIRST_FROM_LY`].
+    far_first_from_ly: Option<NonZeroU32>,
+    /// A test's band, in place of [`BandSpec::STANDARD`].
+    band: Option<BandSpec>,
 }
 
 /// The luminosity tables a sky reads (Design note 7).
@@ -189,6 +218,8 @@ impl SkyCaps {
         tables: SkyTablesSource::Galaxy,
         shell_edges_ly: None,
         c_deferred_beyond_ly: None,
+        far_first_from_ly: None,
+        band: None,
     };
 
     /// Every layer's cap forced to `radius`, over tables that hold no star.
@@ -221,6 +252,8 @@ impl SkyCaps {
                 tables: SkyTablesSource::Dark,
                 shell_edges_ly: None,
                 c_deferred_beyond_ly: None,
+                far_first_from_ly: None,
+                band: None,
             })
         } else {
             Err(ForceSkyCapsError)
@@ -261,24 +294,69 @@ impl SkyCaps {
     }
 
     /// The same caps with layer C's shells whose inner edge is at or beyond `edge_ly` censused a
-    /// step late ([`delivery_steps`]), in place of [`C_DEFERRED_BEYOND_LY`]: for a test whose
+    /// step late (`delivery_steps`), in place of `C_DEFERRED_BEYOND_LY`: for a test whose
     /// nearer shell edges ([`with_shell_edges`](Self::with_shell_edges)) never reach 2,000 ly, so
     /// that its sky still has a step in which C's edge stays where it was (R06.T11.g). No sky a
-    /// client asks is delivered so.
+    /// client asks is delivered so. The edge is above nought, so that every layer's first shell
+    /// stays in the first step.
     #[must_use]
-    pub const fn with_c_deferred_beyond(self, edge_ly: u32) -> Self {
+    pub const fn with_c_deferred_beyond(self, edge_ly: NonZeroU32) -> Self {
         Self {
             c_deferred_beyond_ly: Some(edge_ly),
             ..self
         }
     }
 
-    /// The edge, ly, from which layer C's shells come a step late: [`C_DEFERRED_BEYOND_LY`] unless
-    /// a test's ([`with_c_deferred_beyond`](Self::with_c_deferred_beyond)).
+    /// The same caps with E's shells from `edge_ly` censused a step ahead of C's and D's of the
+    /// same edge, in place of `FAR_FIRST_FROM_LY` (`delivery_steps`; R06.T11.h).
+    ///
+    /// For a test whose nearer shell edges ([`with_shell_edges`](Self::with_shell_edges)) never
+    /// reach 1,000 ly, so that its sky still has a step in which E's shell runs ahead of C's and
+    /// D's. No sky a client asks is delivered so. The edge is above nought, so that every layer's
+    /// first shell stays in the first step.
     #[must_use]
-    pub fn c_deferred_beyond_ly(&self) -> f64 {
-        self.c_deferred_beyond_ly
-            .map_or(C_DEFERRED_BEYOND_LY, f64::from)
+    pub const fn with_far_first_from(self, edge_ly: NonZeroU32) -> Self {
+        Self {
+            far_first_from_ly: Some(edge_ly),
+            ..self
+        }
+    }
+
+    /// Where the sky's delivery defers shells by their inner edge ([`delivery_steps`]): from
+    /// [`FAR_FIRST_FROM_LY`] and [`C_DEFERRED_BEYOND_LY`], unless a test's
+    /// ([`with_far_first_from`](Self::with_far_first_from),
+    /// [`with_c_deferred_beyond`](Self::with_c_deferred_beyond)).
+    #[must_use]
+    pub(crate) fn delivery_order(&self) -> DeliveryOrder {
+        let served = DeliveryOrder::SERVED;
+        let edge = |edge_ly: NonZeroU32| LightYears::new(f64::from(edge_ly.get()));
+        DeliveryOrder {
+            far_first_from: self.far_first_from_ly.map_or(served.far_first_from, edge),
+            c_deferred_beyond: self
+                .c_deferred_beyond_ly
+                .map_or(served.c_deferred_beyond, edge),
+        }
+    }
+
+    /// The same caps with the sky's band marched at `spec`, in place of [`BandSpec::STANDARD`].
+    ///
+    /// For a test that never reads the band's texels, whose sky then marches the few rays of a
+    /// coarse band rather than the standard band's 24,576 (64² texels a face), some 27 CPU-s in a
+    /// test build. The reply states the band it sends (`band.face_texels`) and its bytes. No sky a
+    /// client asks is marched so: every machine sends the standard band (Design note 14).
+    #[must_use]
+    pub const fn with_band_spec(self, spec: BandSpec) -> Self {
+        Self {
+            band: Some(spec),
+            ..self
+        }
+    }
+
+    /// The band the sky is marched at: [`BandSpec::STANDARD`] unless a test's
+    /// ([`with_band_spec`](Self::with_band_spec)).
+    #[must_use]
+    pub(crate) fn band_spec(&self) -> BandSpec {
+        self.band.unwrap_or(BandSpec::STANDARD)
     }
 
     /// The radius each layer's cap is forced to, in [`CAPPED_LAYERS`]' order, or `None` for the
@@ -331,7 +409,8 @@ impl fmt::Display for ForceSkyCapsError {
 impl Error for ForceSkyCapsError {}
 
 /// What a sky's jobs read beside the galaxy: its luminosity tables, the brightness envelope and its
-/// cells' offset bounds (Design notes 7, 8 and 10).
+/// cells' offset bounds (Design notes 7, 8 and 10), and, where the feature members are served, the
+/// galaxy's nurseries and clouds that its jobs' gas looks features up in (P09.T40.a).
 ///
 /// Built once per galaxy and kept by the [`SkyTablesService`](super::SkyTablesService).
 #[derive(Debug)]
@@ -339,6 +418,7 @@ pub(crate) struct SkyTables {
     tables: LuminosityTables,
     envelope: BrightnessEnvelope,
     offsets: CellOffsets,
+    features: Option<FeatureGasIndex>,
 }
 
 impl SkyTables {
@@ -350,38 +430,122 @@ impl SkyTables {
             tables,
             envelope: BrightnessEnvelope::build(galaxy),
             offsets: CellOffsets::build(galaxy),
+            features: None,
         }
     }
 
-    /// The bytes the tables, the envelope and the offset bounds own on the heap.
+    /// These tables, whose jobs take plan 09's features' gas from `index`, their galaxy's
+    /// (P09.T40.a): what the [`SkyTablesService`](super::SkyTablesService) builds where the
+    /// feature members are served.
+    #[must_use]
+    pub(crate) fn with_features(self, index: FeatureGasIndex) -> Self {
+        Self {
+            features: Some(index),
+            ..self
+        }
+    }
+
+    /// The luminosity tables: what a store keeps of them, with the [`features`](Self::features)'
+    /// index, since the envelope and the offset bounds are made again in a few milliseconds.
+    #[must_use]
+    pub(crate) fn luminosity(&self) -> &LuminosityTables {
+        &self.tables
+    }
+
+    /// The features' gas index the tables' jobs march, if they carry one.
+    #[must_use]
+    pub(crate) fn features(&self) -> Option<&FeatureGasIndex> {
+        self.features.as_ref()
+    }
+
+    /// The bytes the tables, the envelope, the offset bounds and the features' gas index own on
+    /// the heap.
     #[must_use]
     pub(crate) fn heap_bytes(&self) -> usize {
-        self.tables.heap_bytes() + self.envelope.heap_bytes() + self.offsets.heap_bytes()
+        self.tables.heap_bytes()
+            + self.envelope.heap_bytes()
+            + self.offsets.heap_bytes()
+            + self
+                .features
+                .as_ref()
+                .map_or(0, FeatureGasIndex::heap_bytes)
+    }
+
+    /// The gas a job at `t` marches through beside `galaxy`'s smooth field: plan 09's features' at
+    /// `t` ([`FeatureGas`]), looked up in the tables' index, if they have one, and nothing
+    /// otherwise, where the feature members are held (P09.T40.a).
+    ///
+    /// # Panics
+    ///
+    /// If `galaxy` is not the galaxy whose index the tables hold.
+    #[must_use]
+    pub(crate) fn gas<'a>(&'a self, galaxy: &'a Galaxy, t: UniverseTime) -> SkyGas<'a> {
+        match &self.features {
+            None => SkyGas::Smooth,
+            Some(index) => SkyGas::Features(FeatureGas::indexed(
+                galaxy,
+                index,
+                Years::new(t.since_epoch().as_julian_years_f64()),
+            )),
+        }
     }
 
     /// A job's own context over these tables, with a noise cache of `noise_slots`, the cells'
-    /// entries from `cells`, no sources beyond the grid and no gas modifiers (plan 09's
-    /// feature members and their gas, from R06.T16.a).
+    /// entries from `cells`, the sources beyond the grid `sources` (plan 09's feature members where
+    /// the census takes them, R06.T16.a; [`SkyMembers`]) and the gas modifiers `modifiers`, the
+    /// job's [`gas`](Self::gas).
     #[must_use]
-    fn context<'a>(&'a self, noise_slots: usize, cells: &'a dyn SkyCellCache) -> SkyContext<'a> {
+    fn context<'a>(
+        &'a self,
+        noise_slots: usize,
+        cells: &'a dyn SkyCellCache,
+        sources: &'a [&'a dyn SkySource],
+        modifiers: &'a dyn GasModifierSource,
+    ) -> SkyContext<'a> {
         SkyContext {
             tables: &self.tables,
             envelope: &self.envelope,
             offsets: &self.offsets,
             noise: NoiseCache::with_capacity(noise_slots),
             cells,
-            sources: &[],
-            modifiers: &NoModifiers,
+            sources,
+            modifiers,
         }
     }
 
-    /// A context for a job that marches many rays: the eye's pre-pass, the illumination and the
-    /// band.
+    /// A context for a job that marches many rays through `modifiers`: the eye's pre-pass, the
+    /// illumination and the band.
     ///
     /// They read no cell, so it has no cell cache.
     #[must_use]
-    pub(crate) fn march_context(&self) -> SkyContext<'_> {
-        self.context(MARCH_NOISE_SLOTS, &NoSkyCellCache)
+    pub(crate) fn march_context<'a>(
+        &'a self,
+        modifiers: &'a dyn GasModifierSource,
+    ) -> SkyContext<'a> {
+        self.context(MARCH_NOISE_SLOTS, &NoSkyCellCache, &[], modifiers)
+    }
+}
+
+/// The gas a sky's job marches through beside the smooth field ([`SkyTables::gas`]).
+#[derive(Debug)]
+pub(crate) enum SkyGas<'a> {
+    /// None: plan 07's field alone, as a sky has it where the feature members are held.
+    Smooth,
+    /// Plan 09's features' superbubbles, clouds and embedded regions at the job's time.
+    Features(FeatureGas<'a>),
+}
+
+impl GasModifierSource for SkyGas<'_> {
+    fn modifiers_near_segment(
+        &self,
+        a: &GalacticPosition,
+        b: &GalacticPosition,
+        out: &mut Vec<GasModifier>,
+    ) {
+        match self {
+            Self::Smooth => {}
+            Self::Features(gas) => gas.modifiers_near_segment(a, b, out),
+        }
     }
 }
 
@@ -401,7 +565,49 @@ where
     F: FnOnce(&CancelToken) -> T + Send + 'static,
     T: Send + 'static,
 {
-    received(pool.submit(Priority::Bulk, token.clone(), job).await?).await
+    queued(pool, Priority::Bulk, token, job).await
+}
+
+/// Runs `job` at `priority` under `token` and waits for it, waiting for a place in its queue
+/// first: [`bulk`] at any priority.
+///
+/// # Errors
+///
+/// As [`bulk`], and [`ComputeError::Submit`] never for a full queue, since it waits for a place.
+pub(crate) async fn queued<F, T>(
+    pool: &CpuPool,
+    priority: Priority,
+    token: &CancelToken,
+    job: F,
+) -> Result<T, ComputeError>
+where
+    F: FnOnce(&CancelToken) -> T + Send + 'static,
+    T: Send + 'static,
+{
+    received(pool.submit(priority, token.clone(), job).await?).await
+}
+
+/// Runs `job` in the background queue under `token`, moved to the bulk queue once `promotion` is
+/// raised ([`CpuPool::submit_promotable`]), and waits for it.
+///
+/// # Errors
+///
+/// As [`bulk`].
+pub(crate) async fn promotable<F, T>(
+    pool: &CpuPool,
+    promotion: Promotion,
+    token: &CancelToken,
+    job: F,
+) -> Result<T, ComputeError>
+where
+    F: FnOnce(&CancelToken) -> T + Send + 'static,
+    T: Send + 'static,
+{
+    received(
+        pool.submit_promotable(promotion, token.clone(), job)
+            .await?,
+    )
+    .await
 }
 
 /// What a job sent back, or why it sent nothing.
@@ -493,7 +699,14 @@ pub(crate) async fn illumination(
     let jobs = row_jobs(ILLUMINATION_SPEC, ILLUMINATION_JOB_ROWS).map(move |(face, rows)| {
         let (galaxy, tables) = (Arc::clone(&galaxy), Arc::clone(&tables));
         move || {
-            Illumination::march_rows(&galaxy, &mut tables.march_context(), &observer, face, rows)
+            let gas = tables.gas(&galaxy, observer.time());
+            Illumination::march_rows(
+                &galaxy,
+                &mut tables.march_context(&gas),
+                &observer,
+                face,
+                rows,
+            )
         }
     });
     let parts = BulkJobs::submit(pool, token, jobs).await?.results().await?;
@@ -582,9 +795,10 @@ async fn pre_pass(
             Arc::clone(illumination),
         );
         move || {
+            let gas = tables.gas(&galaxy, observer.time());
             limits::pre_pass_rows(
                 &galaxy,
-                &mut tables.march_context(),
+                &mut tables.march_context(&gas),
                 &observer,
                 &eye,
                 band_cut,
@@ -597,19 +811,34 @@ async fn pre_pass(
     BulkJobs::submit(pool, token, jobs).await?.results().await
 }
 
-/// The census's plan for `query` (Design notes 9 and 10): each layer's cap and the cells they open,
-/// in shells to `edges_ly` ([`SkyCaps::shell_edges_ly`]: [`SHELL_EDGES_LY`] for every sky a client
-/// asks, R06.T8.i).
+/// The census's plan for `query` (Design notes 9 and 10), at the synthetic ceiling the server
+/// states for it, and the query at that ceiling, which its census, band and replies read: each
+/// layer's cap and the cells they open, in shells to `edges_ly` ([`SkyCaps::shell_edges_ly`]:
+/// [`SHELL_EDGES_LY`] for every sky a client asks, R06.T8.i).
 ///
-/// The query's forced caps are the plan's at once, in one bulk job. Derived caps count the galaxy's
-/// stars along [`CAP_RAYS`] rays, each through the clearest of its [`SUB_RAYS`] sub-rays, whose
-/// extinction profiles are measured [`CAP_JOB_RAYS`] to a bulk job after one job sets the rays'
-/// lattice, each with its own noise cache, and joined in ray order (decided 2026-10-03,
-/// `decision-r06-tables.md`, item B.4; R06.T7.b). One job then plans the count over them, by the
-/// eye's visibility where the query asks it; the count's rays are counted [`CAP_COUNT_JOB_RAYS`] to
-/// a job and joined in ray order; each layer's cap is drawn from the count in a job of its own; and
-/// one more job makes the plan (R06.T11.g). The caps are so `layer_caps`' (or
-/// `layer_caps_by_visibility`'s) bit for bit.
+/// The ceiling (rendering plan R13, R13.T2.b; decided 2026-10-09, `decision-r13-t2b-ceiling.md`)
+/// is [`SYNTHETIC_CEILING_V`] where the cut is deeper, and otherwise the cut itself, unless the
+/// cut's own C, D and E caps lie within the real limit on every ray, where a ceiling would hold
+/// nothing and the query states none (`served_ceiling`): that plan is R06's, bit for bit. A query
+/// that states a ceiling already, a test's, keeps it.
+///
+/// The query's forced caps are the plan's at once, in one bulk job, at the ceiling `served_ceiling`
+/// gives for them. Derived caps count the galaxy's stars along [`CAP_RAYS`] rays, each through the
+/// clearest of its [`SUB_RAYS`] sub-rays, whose extinction profiles are measured [`CAP_JOB_RAYS`]
+/// to a bulk job after one job sets the rays' lattice, each with its own noise cache, and joined in
+/// ray order (decided 2026-10-03, `decision-r06-tables.md`, item B.4; R06.T7.b). One job then plans
+/// the count over them, by the eye's visibility where the query asks it; the count's rays are
+/// counted [`CAP_COUNT_JOB_RAYS`] to a job and joined in ray order; each layer's cap is drawn from
+/// the count in a job of its own; and one more job makes the plan (R06.T11.g). The caps are so
+/// `layer_caps`' (or `layer_caps_by_visibility`'s) bit for bit.
+///
+/// At a ceiling a second count runs over the same rays, split as the first. Where the cut is deeper
+/// than [`SYNTHETIC_CEILING_V`], the same job plans it and its rays are queued behind the first's;
+/// otherwise it is planned once the cut's caps show that a ceiling at the cut holds some ray. One
+/// job then takes C's, D's and E's real boundary from the two counts and the cut's caps
+/// (`real_boundary`), and the plan is the query's at the ceiling: their cones widened by the band
+/// texel's largest radius and every reply listed by each star's texel. Plan and caps are so the
+/// sim's `census_plan` of the query at the ceiling, bit for bit.
 ///
 /// # Errors
 ///
@@ -618,29 +847,52 @@ pub(crate) async fn plan(
     pool: &CpuPool,
     galaxy: &Arc<Galaxy>,
     tables: &Arc<SkyTables>,
-    query: &Arc<SkyQuery>,
+    query: Arc<SkyQuery>,
     edges_ly: &'static [u32],
     token: &CancelToken,
-) -> Result<CensusPlan, ComputeError> {
-    if let Some(forced) = query.forced_caps() {
+) -> Result<(Arc<SkyQuery>, CensusPlan), ComputeError> {
+    let (ceiling, caps) = match query.forced_caps() {
         // A forced query's plan reads no table and marches no ray: `census_plan`'s for it.
-        let (caps, query) = (forced.to_vec(), Arc::clone(query));
-        return bulk(pool, token, move |_: &CancelToken| {
-            census_plan_with_edges(&query, caps, edges_ly)
-        })
-        .await;
-    }
-    let caps = derived_caps(pool, galaxy, tables, query, token).await?;
-    let query = Arc::clone(query);
-    bulk(pool, token, move |_: &CancelToken| {
-        census_plan_with_edges(&query, caps, edges_ly)
+        Some(forced) => {
+            let ceiling = query
+                .synthetic_ceiling()
+                .or_else(|| served_ceiling(query.cut(), SYNTHETIC_CEILING, forced));
+            (ceiling, forced.to_vec())
+        }
+        None => derived_caps(pool, galaxy, tables, &query, token).await?,
+    };
+    let query = at(query, ceiling);
+    let planned = Arc::clone(&query);
+    let plan = bulk(pool, token, move |_: &CancelToken| {
+        census_plan_with_edges(&planned, caps, edges_ly)
     })
-    .await
+    .await?;
+    Ok((query, plan))
 }
 
-/// Each layer's cap for `query`, derived from the galaxy's tables and dust as [`plan`] sets out:
-/// the rays measured, then counted, in jobs, and each layer's cap drawn in a job of its own, in
-/// [`CAPPED_LAYERS`]' order.
+/// `query` at the synthetic ceiling `ceiling`, or as it is where it states one already, the
+/// ceiling being then its own, or where `ceiling` is none. The query is copied only where another
+/// holder shares it.
+///
+/// # Panics
+///
+/// If `ceiling` is fainter than the cut or not finite, which no served ceiling is.
+#[must_use]
+fn at(query: Arc<SkyQuery>, ceiling: Option<Magnitudes>) -> Arc<SkyQuery> {
+    match ceiling {
+        Some(v) if query.synthetic_ceiling().is_none() => Arc::new(
+            Arc::unwrap_or_clone(query)
+                .with_synthetic_ceiling(v)
+                .expect("a served ceiling is finite and no fainter than the cut"),
+        ),
+        Some(_) | None => query,
+    }
+}
+
+/// The ceiling `query` is served at, and each layer's cap for it, derived from the galaxy's tables
+/// and dust as [`plan`] sets out: the rays measured, then counted, in jobs, and each layer's cap
+/// drawn in a job of its own, in [`CAPPED_LAYERS`]' order; at a ceiling, the rays counted again
+/// at it and the real boundary taken in one more job.
 ///
 /// # Errors
 ///
@@ -651,7 +903,7 @@ async fn derived_caps(
     tables: &Arc<SkyTables>,
     query: &Arc<SkyQuery>,
     token: &CancelToken,
-) -> Result<Vec<LayerCap>, ComputeError> {
+) -> Result<(Option<Magnitudes>, Vec<LayerCap>), ComputeError> {
     let origin = *query.observer().position();
     // The lattice's spacing, which sets each ray's sub-rays, is some 0.1 s: one job, shared.
     let lattice = bulk(pool, token, |_: &CancelToken| {
@@ -672,9 +924,14 @@ async fn derived_caps(
         .await?
         .results()
         .await?;
-    // The count's plan: the rays joined, each ray's cut, the rule bounds and the radial nodes, some
-    // milliseconds.
-    let (counting, rays) = {
+    // The ceiling known before any cap: the query's own, or the server's where the cut is deeper.
+    let early = query
+        .synthetic_ceiling()
+        .or_else(|| (query.cut().value() > SYNTHETIC_CEILING.value()).then_some(SYNTHETIC_CEILING));
+    // The counts' plans: the rays joined, each ray's cut, the rule bounds and the radial nodes, some
+    // milliseconds each. At a ceiling the second counts the same rays at it, one cut for every ray,
+    // as the sim's `census_plan` counts them (R13.T2.a).
+    let (counting, at_early, rays) = {
         let (galaxy, tables, query) = (Arc::clone(galaxy), Arc::clone(tables), Arc::clone(query));
         bulk(pool, token, move |_: &CancelToken| {
             let rays = RayExtinctions::join(shares);
@@ -688,33 +945,156 @@ async fn derived_caps(
                     CapCount::plan_over(&galaxy, luminosity, envelope, observer, query.cut(), &rays)
                 }
             };
-            (Arc::new(counting), Arc::new(rays))
+            let at_early = early.map(|ceiling| {
+                let plan =
+                    CapCount::plan_over(&galaxy, luminosity, envelope, observer, ceiling, &rays);
+                (ceiling, Arc::new(plan))
+            });
+            (Arc::new(counting), at_early, Arc::new(rays))
         })
         .await?
     };
-    let counts = (0..counting.rays())
+    // Both counts' rays are queued before either is joined, the ceiling's behind the cut's, so that
+    // the workers count the second while the first is joined and its caps drawn.
+    let at_cut_parts = count_jobs(pool, galaxy, tables, &counting, &rays, token).await?;
+    let early_parts = match at_early {
+        Some((ceiling, plan)) => {
+            let parts = count_jobs(pool, galaxy, tables, &plan, &rays, token).await?;
+            Some((ceiling, plan, parts))
+        }
+        None => None,
+    };
+    let count = joined(pool, &counting, at_cut_parts, token).await?;
+    let caps = CAPPED_LAYERS.map(|layer| {
+        let count = Arc::clone(&count);
+        move || count.cap(layer)
+    });
+    let caps = BulkJobs::submit(pool, token, caps).await?;
+    let early_count = match early_parts {
+        Some((ceiling, plan, parts)) => Some((ceiling, joined(pool, &plan, parts, token).await?)),
+        None => None,
+    };
+    let caps = caps.results().await?;
+    let (ceiling, at_ceiling) = match early_count {
+        Some((ceiling, count)) => {
+            debug_assert!(
+                query.synthetic_ceiling().is_some()
+                    || served_ceiling(query.cut(), SYNTHETIC_CEILING, &caps) == Some(ceiling),
+                "the ceiling known before the caps is the served one"
+            );
+            (Some(ceiling), Some(count))
+        }
+        // The cut is at or brighter than the server's ceiling: the cut itself, unless its caps
+        // already lie within the real limit, where a ceiling would hold no ray.
+        None => match served_ceiling(query.cut(), SYNTHETIC_CEILING, &caps) {
+            Some(ceiling) => {
+                let count = counted_at(pool, galaxy, tables, query, &rays, ceiling, token).await?;
+                (Some(ceiling), Some(count))
+            }
+            None => (None, None),
+        },
+    };
+    let caps = match at_ceiling {
+        // C's, D's and E's real boundary from the two counts and the cut's caps, in one job: three
+        // caps drawn at the ceiling and the counts beyond each layer's boundary.
+        Some(at_ceiling) => {
+            bulk(pool, token, move |_: &CancelToken| {
+                real_boundary(&at_ceiling, &count, &caps)
+            })
+            .await?
+        }
+        None => caps,
+    };
+    Ok((ceiling, caps))
+}
+
+/// The count over `rays` at the uniform cut `ceiling` for `query`'s observer: planned in one bulk
+/// job under `token`, its rays counted in jobs ([`count_jobs`]) and joined ([`joined`]).
+///
+/// # Errors
+///
+/// Those of [`bulk`] and [`BulkJobs`].
+async fn counted_at(
+    pool: &CpuPool,
+    galaxy: &Arc<Galaxy>,
+    tables: &Arc<SkyTables>,
+    query: &Arc<SkyQuery>,
+    rays: &Arc<RayExtinctions>,
+    ceiling: Magnitudes,
+    token: &CancelToken,
+) -> Result<Arc<CapCount>, ComputeError> {
+    let plan = {
+        let (galaxy, tables, query, rays) = (
+            Arc::clone(galaxy),
+            Arc::clone(tables),
+            Arc::clone(query),
+            Arc::clone(rays),
+        );
+        bulk(pool, token, move |_: &CancelToken| {
+            let (luminosity, envelope) = (&tables.tables, &tables.envelope);
+            CapCount::plan_over(
+                &galaxy,
+                luminosity,
+                envelope,
+                query.observer(),
+                ceiling,
+                &rays,
+            )
+        })
+        .await?
+    };
+    let plan = Arc::new(plan);
+    let parts = count_jobs(pool, galaxy, tables, &plan, rays, token).await?;
+    joined(pool, &plan, parts, token).await
+}
+
+/// The rays of `counting`, a count's plan over `rays`, counted [`CAP_COUNT_JOB_RAYS`] to a bulk job
+/// under `token`, every layer at once, queued in ray order (R06.T11.g).
+///
+/// # Errors
+///
+/// Those of [`BulkJobs::submit`].
+async fn count_jobs(
+    pool: &CpuPool,
+    galaxy: &Arc<Galaxy>,
+    tables: &Arc<SkyTables>,
+    counting: &Arc<CapCountPlan>,
+    rays: &Arc<RayExtinctions>,
+    token: &CancelToken,
+) -> Result<BulkJobs<CapCountPart>, ComputeError> {
+    let jobs = (0..counting.rays())
         .step_by(CAP_COUNT_JOB_RAYS)
         .map(|first| {
             let which = first..(first + CAP_COUNT_JOB_RAYS).min(counting.rays());
             let (galaxy, tables, counting, rays) = (
                 Arc::clone(galaxy),
                 Arc::clone(tables),
-                Arc::clone(&counting),
-                Arc::clone(&rays),
+                Arc::clone(counting),
+                Arc::clone(rays),
             );
             move || counting.count_rays(&galaxy, &tables.tables, &rays, which)
         })
         .collect::<Vec<_>>();
-    let counts = BulkJobs::submit(pool, token, counts)
-        .await?
-        .results()
-        .await?;
-    let count = Arc::new(bulk(pool, token, move |_: &CancelToken| counting.join(counts)).await?);
-    let caps = CAPPED_LAYERS.map(|layer| {
-        let count = Arc::clone(&count);
-        move || count.cap(layer)
-    });
-    BulkJobs::submit(pool, token, caps).await?.results().await
+    BulkJobs::submit(pool, token, jobs).await
+}
+
+/// The count `counting` plans, from its rays counted in `parts` ([`count_jobs`]'), joined in one
+/// bulk job under `token`.
+///
+/// # Errors
+///
+/// Those of [`bulk`] and [`BulkJobs::results`].
+async fn joined(
+    pool: &CpuPool,
+    counting: &Arc<CapCountPlan>,
+    parts: BulkJobs<CapCountPart>,
+    token: &CancelToken,
+) -> Result<Arc<CapCount>, ComputeError> {
+    let parts = parts.results().await?;
+    let counting = Arc::clone(counting);
+    Ok(Arc::new(
+        bulk(pool, token, move |_: &CancelToken| counting.join(parts)).await?,
+    ))
 }
 
 /// Adds `tallies` to `sum`, starting the sum from the first, as the census's merge starts from its
@@ -731,37 +1111,49 @@ fn add_tallies(sum: &mut Option<CensusTallies>, tallies: &CensusTallies) {
 /// `decision-r06-census-cost-signoff.md`).
 ///
 /// Step k holds each layer's k-th shell, nearest first within each layer, as
-/// [`CensusPlan::shells`] ranks them, except that layer C's shells beyond `c_deferred_beyond_ly`
-/// ([`C_DEFERRED_BEYOND_LY`] for every sky a client asks, [`SkyCaps::c_deferred_beyond_ly`]),
-/// those whose inner edge is at or beyond it, come one step later: D's and E's shells to 4,000 ly
-/// then run before C's beyond 2,000 ly, whose cells are mostly walk and hold few of the brightest
-/// distant stars. C's shells are deferred by their edge, not by their place, so that the shells
-/// R06.T11.g put inside 500 ly move none of C's nearer ones (decided 2026-10-08,
-/// `decision-r06-t11d-first-sky.md` §1.4). Within a step the shells keep [`CensusPlan::shells`]'
-/// order. The first step holds every layer's first shell, so A, B and the brown dwarfs, one shell
-/// each, are final from the first reply, and every layer states a radius in it. Near the Sun the
-/// steps are 125, 250, 500, 1,000 and 2,000 ly for every layer, then D's and E's 4,000 ly before
-/// C's. The order is a function of the plan alone: every machine and worker count censuses the same
-/// steps and sends the same replies, only at its own pace. A plan of no shell, every cap of no
-/// radius, is one step of none, its one reply final.
+/// [`CensusPlan::shells`] ranks them, except for two deferrals, each by the shell's inner edge, the
+/// edge of the layer's shell before it, and not by its place, so that the shells R06.T11.g put
+/// inside 500 ly move none of the nearer ones (decided 2026-10-08, `decision-r06-t11d-first-sky.md`
+/// §1.4):
+///
+/// - every layer's shell but [`FAR_FIRST_LAYERS`]' whose inner edge is at or beyond `order`'s
+///   first edge ([`FAR_FIRST_FROM_LY`], 1,000 ly, for every sky a client asks)
+///   comes one step later, so that E's shells from there run a step ahead of C's and D's of the
+///   same edge (R06.T11.h; decided 2026-10-13, `decision-r06-t17-findings.md` §1). Near the Sun
+///   E's 1,000–2,000 ly shell, the real boundary's last, holds nearly all of the stars brighter
+///   than V 3.0 that the census's last step lists, and C's and D's of the same edge more than
+///   twice its job-seconds (R06.T17), so the far bright stars arrive about half the census's wall
+///   time sooner;
+/// - layer C's shells whose inner edge is at or beyond `order`'s second
+///   ([`C_DEFERRED_BEYOND_LY`], 2,000 ly) come one step later again: D's and E's shells to
+///   4,000 ly then run before C's beyond 2,000 ly, whose cells are mostly walk and hold few of the
+///   brightest distant stars (`decision-r06-census-cost-signoff.md`, condition 3).
+///
+/// Within a step the shells keep [`CensusPlan::shells`]' order. The first step holds every layer's
+/// first shell, so A, B and the brown dwarfs, one shell each, are final from the first reply, and
+/// every layer states a radius in it. Near the Sun, at the real boundary of 2,000 ly (rendering
+/// plan R13), the steps are 125, 250, 500 and 1,000 ly for every layer, then E's 2,000 ly, then
+/// C's and D's. The order is a function of the plan and `order` alone, never of the pool or its
+/// timing: every machine and worker count censuses the same steps and sends the same replies, only
+/// at its own pace. A plan of no shell, every cap of no radius, is one step of none, its one reply
+/// final.
 #[must_use]
-pub(crate) fn delivery_steps(plan: &CensusPlan, c_deferred_beyond_ly: f64) -> Vec<Vec<Shell>> {
+pub(crate) fn delivery_steps(plan: &CensusPlan, order: DeliveryOrder) -> Vec<Vec<Shell>> {
     let mut steps: Vec<Vec<Shell>> = Vec::new();
     // Each layer's edge before the shell at hand: its shells come nearest first within a layer.
     let mut inner: BTreeMap<Layer, LightYears> = BTreeMap::new();
     for shell in plan.shells() {
-        let from = inner
-            .get(&shell.layer())
-            .copied()
-            .unwrap_or(LightYears::ZERO);
-        let deferred = shell.layer() == Layer::C && from.value() >= c_deferred_beyond_ly;
-        let step = usize::from(shell.index()) + usize::from(deferred);
+        let layer = shell.layer();
+        let from = inner.get(&layer).copied().unwrap_or(LightYears::ZERO);
+        let behind = !FAR_FIRST_LAYERS.contains(&layer) && from >= order.far_first_from;
+        let deferred = layer == Layer::C && from >= order.c_deferred_beyond;
+        let step = usize::from(shell.index()) + usize::from(behind) + usize::from(deferred);
         if steps.len() <= step {
             steps.resize_with(step + 1, Vec::new);
         }
         steps[step].push(shell);
         if let Some(edge) = shell.edge() {
-            inner.insert(shell.layer(), edge);
+            inner.insert(layer, edge);
         }
     }
     steps.retain(|step| !step.is_empty());
@@ -771,12 +1163,73 @@ pub(crate) fn delivery_steps(plan: &CensusPlan, c_deferred_beyond_ly: f64) -> Ve
     steps
 }
 
+/// Where a sky's delivery defers shells by their inner edge ([`delivery_steps`]): from
+/// [`FAR_FIRST_FROM_LY`] and [`C_DEFERRED_BEYOND_LY`] for every sky a client asks, or a test's
+/// nearer edges ([`SkyCaps::delivery_order`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct DeliveryOrder {
+    /// The inner edge from which [`FAR_FIRST_LAYERS`]' shells run a step ahead of the other
+    /// layers' of the same edge.
+    far_first_from: LightYears,
+    /// The inner edge from which layer C's shells come one step later again.
+    c_deferred_beyond: LightYears,
+}
+
+impl DeliveryOrder {
+    /// The order of every sky a client asks: [`FAR_FIRST_FROM_LY`] and [`C_DEFERRED_BEYOND_LY`].
+    pub(crate) const SERVED: Self = Self {
+        far_first_from: LightYears::new(FAR_FIRST_FROM_LY),
+        c_deferred_beyond: LightYears::new(C_DEFERRED_BEYOND_LY),
+    };
+}
+
 /// The edge, ly, beyond which layer C's shells are censused a step late ([`delivery_steps`]):
 /// 2,000 ly (`decision-r06-census-cost-signoff.md`, condition 3).
 pub(crate) const C_DEFERRED_BEYOND_LY: f64 = 2_000.0;
 
-/// One census job's share of a shell: cells of one of its slabs not yet censused, in order, the
-/// slab still to walk or some of its cells walked already, all of one layer.
+/// The inner edge, ly, from which [`FAR_FIRST_LAYERS`]' shells are censused a step ahead of the
+/// other layers' of the same edge ([`delivery_steps`]; R06.T11.h, decided 2026-10-13,
+/// `decision-r06-t17-findings.md` §1): 1,000 ly, one of the fixed shell edges
+/// ([`SHELL_EDGES_LY`]).
+///
+/// Between 1,000 and 2,000 ly, distance moduli of 7.4–8.9 before the plane's dust, a star brighter
+/// than V 3.0 needs M<sub>V</sub> of about −4.4 to −6: supergiants and the brightest B stars, E's.
+pub(crate) const FAR_FIRST_FROM_LY: f64 = 1_000.0;
+
+/// The layers whose shells from [`FAR_FIRST_FROM_LY`] are censused a step ahead of the other
+/// layers' of the same edge ([`delivery_steps`]; R06.T11.h): E alone.
+///
+/// D would join E only if the caps' count gave D more than a third of C's, D's and E's expected
+/// stars brighter than V 3.0 between 1,000 ly and the real boundary (decided 2026-10-13,
+/// `decision-r06-t17-findings.md` §1). Near the Sun at the served eye's cut and ceiling it gives D
+/// 12.0% of them on the test fixture (1.07 of 8.93, E 7.80) and 4.3% on the server's galaxy for
+/// the sky tests' seed (2.52 of 58.6, E 56.0), so D's shells stay with C's (the sim's slow test
+/// `far_bright::beyond_1000_ly_d_holds_at_most_a_third_of_the_far_stars_brighter_than_v_3`, in
+/// `tests/sky_caps.rs`, which holds the rule; R06's Risks, "Deviations in T11.h, as built").
+pub(crate) const FAR_FIRST_LAYERS: [Layer; 1] = [Layer::E];
+
+/// One census job's share of a shell: some of its cells, or its feature members (R06.T16.a).
+enum Work {
+    /// Cells of one of the shell's slabs.
+    Cells(CellWork),
+    /// One part of the shell's feature members: the plan they are taken in, the shell and the
+    /// part.
+    Members(Arc<CensusPlan>, Shell, MemberPart),
+}
+
+impl Work {
+    /// The layer of the shell the work is of.
+    #[must_use]
+    fn layer(&self) -> Layer {
+        match self {
+            Self::Cells(cells) => cells.layer,
+            Self::Members(_, shell, _) => shell.layer(),
+        }
+    }
+}
+
+/// Cells of one of a shell's slabs not yet censused, in order, the slab still to walk or some of
+/// its cells walked already, all of one layer.
 struct CellWork {
     layer: Layer,
     cells: Cells,
@@ -877,7 +1330,8 @@ pub(crate) struct CensusStep {
     pub(crate) done: Vec<Shell>,
     /// Each step's part, from the first.
     pub(crate) parts: Vec<Arc<StepPart>>,
-    /// Whether it is the last step: the census is then the one-shot census of its plan.
+    /// Whether it is the last step: the census is then its whole plan's, the one-shot census of
+    /// it, or at a synthetic ceiling that census under the texel rule.
     pub(crate) last: bool,
     /// The time its census jobs ran, summed over them, per layer of [`Layer::ALL`] by its value:
     /// the step's census work, for the server's log (T17 times each reply; R06.T11.g prints it a
@@ -944,7 +1398,7 @@ struct Slice {
     tallies: Option<CensusTallies>,
     cost: CensusCost,
     rest: Vec<CellWork>,
-    /// The layer of its cells, and how long the job ran.
+    /// The layer of its work, and how long the job ran.
     worked: (Layer, Duration),
 }
 
@@ -952,7 +1406,10 @@ struct Slice {
 /// [`delivery_steps`]; R06.T11.d), as bulk jobs of about `slice` ([`CENSUS_JOB_SLICE`]) under
 /// `token`, its progress sent to `sink` after each step, in order (Design notes 10 and 11).
 ///
-/// Each shell's slabs are queued in its step's order, and a job takes one slab's cells, or a part
+/// Where the inputs take plan 09's feature members ([`SkyMembers`]; R06.T16.a), each shell's are
+/// one job a worker ([`census_members`], each a [`MemberPart`]), queued ahead of its slabs, since a
+/// slice cannot split a part, and every job's context carries the members' source, so that every
+/// part's tallies say the members are in. Which part holds which members changes no star. Each shell's slabs are queued in its step's order, and a job takes one slab's cells, or a part
 /// of them, censuses them in order until its slice is spent, and hands back the cells it had no
 /// time for, walked and split in two halves, which go back in the queue behind the step's other
 /// work and ahead of every later step's: a slab of dear cells so spreads over the workers in a few
@@ -971,6 +1428,13 @@ struct Slice {
 /// which job held which cells, nor on their order, nor on what the cache held: the merge is total,
 /// and the tallies are sums.
 ///
+/// From generator version 27 the members' jobs read the global list's tube tables, which a sky's
+/// handler builds on the pool beside the census, its earlier steps' first (R06.T16.a's cost). A
+/// step's members' jobs wait until `tables` says its tables are built, apart from the queue, so
+/// that the cells behind them go on; a census whose members read no table is given
+/// [`TablesBuilt::all`]. Should the tables' builder go before it says so, its error ends the
+/// request, and meanwhile the jobs build what they lack themselves, to the same bits.
+///
 /// It returns once the last step is sent, or once `sink` has gone, the replies having been given
 /// up.
 ///
@@ -985,8 +1449,8 @@ struct Slice {
 pub(crate) async fn census_in_steps(
     pool: &CpuPool,
     inputs: &CensusInputs,
-    plan: &CensusPlan,
-    steps: &[Vec<Shell>],
+    plan: &Arc<CensusPlan>,
+    (steps, mut tables): (&[Vec<Shell>], TablesBuilt),
     slice: Duration,
     sink: mpsc::Sender<CensusStep>,
     token: &CancelToken,
@@ -999,14 +1463,21 @@ pub(crate) async fn census_in_steps(
         .saturating_mul(CENSUS_JOBS_PER_WORKER)
         .min(BULK_QUEUE_CAPACITY.get());
     // The work not yet in a job, by step and then in the order queued.
-    let mut queued: BTreeMap<(usize, u64), CellWork> = BTreeMap::new();
+    let mut queued: BTreeMap<(usize, u64), Work> = BTreeMap::new();
     let mut order = 0_u64;
     // Per step, its work queued and its jobs outstanding: done at nought.
     let mut open = vec![0_usize; steps.len()];
+    let parts = NonZeroU32::try_from(pool.workers()).unwrap_or(NonZeroU32::MAX);
     for (step, shells) in steps.iter().enumerate() {
         for &shell in shells {
-            for slab in plan.shell_slabs(shell) {
-                queued.insert((step, order), CellWork::of(&slab));
+            let members = MemberPart::all(parts)
+                .filter(|_| inputs.members.is_some())
+                .map(|part| Work::Members(Arc::clone(plan), shell, part));
+            let slabs = plan
+                .shell_slabs(shell)
+                .map(|slab| Work::Cells(CellWork::of(&slab)));
+            for work in members.chain(slabs) {
+                queued.insert((step, order), work);
                 order += 1;
                 open[step] += 1;
             }
@@ -1016,6 +1487,8 @@ pub(crate) async fn census_in_steps(
     let mut found: Vec<StepPart> = steps.iter().map(|_| StepPart::default()).collect();
     let mut worked = vec![[Duration::ZERO; Layer::ALL.len()]; steps.len()];
     let (mut sent, mut done, mut parts) = (0, Vec::new(), Vec::new());
+    // The members' work of the steps whose tables are not yet built, by step and order queued.
+    let mut waiting: BTreeMap<(usize, u64), Work> = BTreeMap::new();
     loop {
         // Every step whose cells, and every earlier step's, are censused is sent, in order.
         while sent < steps.len() && open[sent] == 0 {
@@ -1036,19 +1509,35 @@ pub(crate) async fn census_in_steps(
         if sent == steps.len() {
             return Ok(());
         }
+        let built = tables.steps();
+        while let Some(entry) = waiting.first_entry()
+            && entry.key().0 < built
+        {
+            let (key, work) = entry.remove_entry();
+            queued.insert(key, work);
+        }
         while outstanding.len() < window {
-            let Some(((step, _), work)) = queued.pop_first() else {
+            let Some(((step, order), work)) = queued.pop_first() else {
                 break;
             };
+            if step >= built && matches!(work, Work::Members(..)) {
+                waiting.insert((step, order), work);
+                continue;
+            }
             // The work, queued, is now a job: the step's count is unchanged.
             let job = census_job(inputs.clone(), work, abandoned.token().clone(), slice);
             let receiver = pool.submit(Priority::Bulk, token.clone(), job).await?;
             outstanding.push(async move { (step, receiver.await) });
         }
-        let (step, finished) = outstanding
-            .next()
-            .await
-            .expect("a step not yet censused has its work in jobs");
+        let finished = if waiting.is_empty() {
+            outstanding.next().await
+        } else {
+            tokio::select! {
+                finished = outstanding.next(), if !outstanding.is_empty() => finished,
+                () = tables.changed() => continue,
+            }
+        };
+        let (step, finished) = finished.expect("a step not yet censused has its work in jobs");
         let slice = finished
             .unwrap_or_else(|closed: RecvError| Err(JobError::from(closed)))?
             .ok_or(JobError::Cancelled)?;
@@ -1062,15 +1551,83 @@ pub(crate) async fn census_in_steps(
         worked[step][usize::from(layer.value())] += ran;
         open[step] = open[step] - 1 + rest.len();
         for cells in rest {
-            queued.insert((step, order), cells);
+            queued.insert((step, order), Work::Cells(cells));
             order += 1;
         }
         found[step].absorb(stars, tallies.as_ref(), &cost);
     }
 }
 
+/// How many of a sky's steps, from the first, have the tube tables built that their members' jobs
+/// read (R06.T16.a's cost): what [`census_in_steps`] holds each step's members' jobs back by. The
+/// count only rises.
+#[derive(Debug)]
+pub(crate) struct TablesBuilt {
+    steps: watch::Receiver<usize>,
+    /// Whether the builder has gone, its count no longer rising.
+    gone: bool,
+}
+
+impl TablesBuilt {
+    /// Every step's tables built: a census whose members read none, or whose galaxy's are held.
+    #[must_use]
+    pub(crate) fn all() -> Self {
+        Self {
+            steps: watch::channel(usize::MAX).1,
+            gone: true,
+        }
+    }
+
+    /// None yet, and the builder's side, through which it says each step's tables built.
+    #[must_use]
+    pub(crate) fn none() -> (StepTablesBuilt, Self) {
+        let (sender, steps) = watch::channel(0);
+        (StepTablesBuilt(sender), Self { steps, gone: false })
+    }
+
+    /// How many steps, from the first, have their tables built; every step once the builder has
+    /// gone, whose jobs then build what they lack themselves.
+    #[must_use]
+    fn steps(&self) -> usize {
+        if self.gone {
+            usize::MAX
+        } else {
+            *self.steps.borrow()
+        }
+    }
+
+    /// Waits until the count rises or the builder goes; never, once it has gone.
+    async fn changed(&mut self) {
+        if self.gone {
+            std::future::pending::<()>().await;
+        }
+        if self.steps.changed().await.is_err() {
+            self.gone = true;
+        }
+    }
+}
+
+/// The tube tables' builder's side of a [`TablesBuilt`]: it says a step's tables built, and the
+/// count it raises never falls. Dropped, the census takes every step's as built.
+#[derive(Debug)]
+pub(crate) struct StepTablesBuilt(watch::Sender<usize>);
+
+impl StepTablesBuilt {
+    /// Says that every step to `step` has its tables built.
+    pub(crate) fn built_through(&self, step: usize) {
+        let through = step.saturating_add(1);
+        self.0.send_if_modified(|steps| {
+            let rises = through > *steps;
+            if rises {
+                *steps = through;
+            }
+            rises
+        });
+    }
+}
+
 /// What every job of one sky reads, each shared: the galaxy and its key, the tables, the cell
-/// cache and the query.
+/// cache, the feature members' caches where the census takes them, and the query.
 #[derive(Debug, Clone)]
 pub(crate) struct CensusInputs {
     /// The galaxy censused.
@@ -1081,17 +1638,76 @@ pub(crate) struct CensusInputs {
     pub(crate) tables: Arc<SkyTables>,
     /// The cells' entries every request shares (Design note 12, R06.T8.h).
     pub(crate) cells: Arc<SharedSkyCellCache>,
+    /// The caches the census's members beyond the grid are drawn through, plan 09's features', the
+    /// catalogue classes' and from generator version 27 the global list's, where the census takes
+    /// them ([`SkyMembers::of`]; R06.T16.a), and `None` elsewhere.
+    pub(crate) members: Option<SkyMembers>,
     /// The query censused.
     pub(crate) query: Arc<SkyQuery>,
 }
 
+/// The server's caches a sky's members beyond the grid are drawn through (R06.T16.a), which the
+/// range queries share, so that each is built once for both: plan 09's feature cells and
+/// interiors (P09.T40.a), its catalogue classes' cells (P09.T40), and from generator version 27
+/// the galaxy's global list with its tube tables and the galactic centre's orbits (P10.T10.b,
+/// P09.T37.b).
+#[derive(Debug, Clone)]
+pub(crate) struct SkyMembers {
+    /// The feature cells and interiors, where the census takes the features' members.
+    features: Option<(Arc<SharedFeatureCellCache>, Arc<SharedClusterModelCache>)>,
+    /// The catalogue classes' cells, where it takes the classes' hosts.
+    classes: Option<Arc<SharedClassCellCache>>,
+    /// The global list with its tube tables, and the centre's orbits, where it takes the list's.
+    list: Option<(ListedTubes, Arc<SharedCentreOrbitCache>)>,
+}
+
+impl SkyMembers {
+    /// The caches `galaxy`'s census takes its members through, or `None` where it takes none:
+    /// `features` and `interiors` exactly where its field gives up the features' members
+    /// ([`takes_feature_members`]), `classes` exactly where it gives up some catalogue class's
+    /// hosts ([`takes_class_hosts`]), and `list` exactly where the range
+    /// query registers the global list's source ([`GlobalListSource::is_registered_in`]), the
+    /// hold under which the halo's field gives up the list's share. So the sky and the field flip
+    /// together, whatever version holds each.
+    #[must_use]
+    pub(crate) fn of(
+        galaxy: &Galaxy,
+        (features, interiors, classes): (
+            Arc<SharedFeatureCellCache>,
+            Arc<SharedClusterModelCache>,
+            Arc<SharedClassCellCache>,
+        ),
+        list: Option<(ListedTubes, Arc<SharedCentreOrbitCache>)>,
+    ) -> Option<Self> {
+        let features = takes_feature_members(galaxy).then_some((features, interiors));
+        let classes = takes_class_hosts(galaxy).then_some(classes);
+        let list = list.filter(|_| GlobalListSource::is_registered_in(galaxy));
+        (features.is_some() || classes.is_some() || list.is_some()).then_some(Self {
+            features,
+            classes,
+            list,
+        })
+    }
+}
+
 /// One census job: `work`'s cells, in order, each with [`census_cell_with_cost`], in a context of
-/// its own over the shared cell cache, until `slice` is spent, and at least one cell. The cells it
-/// had no time for come back, walked and split in two. `None` if the job stopped early because its
-/// request's token was cancelled or its census `abandoned` it.
+/// its own over the shared cell cache, or over [`NoSkyCellCache`] when that cache is off
+/// ([`SharedSkyCellCache::is_off`]; R06.T8.o), until `slice` is spent, and at least one cell. The
+/// cells it had no time for come back, walked and split in two. Or a part of a shell's members
+/// beyond the grid, at once, with [`census_members`] (R06.T16.a). Where the inputs take the
+/// members, the context carries their sources: plan 09's [`FeatureMemberSource`] over the
+/// server's feature caches, its interiors kept for the job, the catalogue classes'
+/// [`CatalogueClassSource`] over the server's class cells, and from generator version 27 the
+/// global list's [`GlobalListSource`] over its tube tables and the centre's orbits. `None` if the
+/// job stopped early because its request's token was cancelled or its census `abandoned` it.
+///
+/// # Panics
+///
+/// If the galaxy's centre cannot be built ([`GlobalListSource::new`]), which no galaxy the server
+/// builds reaches, as `Galaxy::centre`'s documentation says.
 fn census_job(
     inputs: CensusInputs,
-    mut work: CellWork,
+    work: Work,
     abandoned: CancelToken,
     slice: Duration,
 ) -> impl FnOnce(&CancelToken) -> Option<Slice> + Send + 'static {
@@ -1102,12 +1718,65 @@ fn census_job(
             key,
             tables,
             cells,
+            members,
             query,
         } = inputs;
         let handle = cells.handle(key);
-        let mut ctx = tables.context(CENSUS_NOISE_SLOTS, &handle);
+        let cache: &dyn SkyCellCache = if cells.is_off() {
+            &NoSkyCellCache
+        } else {
+            &handle
+        };
+        let gas = tables.gas(&galaxy, query.observer().time());
+        let caches = members
+            .as_ref()
+            .and_then(|members| members.features.as_ref())
+            .map(|(features, interiors)| (features.handle(key), interiors.kept(key)));
+        let features = caches
+            .as_ref()
+            .map(|(features, interiors)| FeatureMemberSource::new(features, interiors));
+        let class_cells = members
+            .as_ref()
+            .and_then(|members| members.classes.as_ref())
+            .map(|classes| classes.handle(key));
+        let classes = class_cells
+            .as_ref()
+            .map(|cells| CatalogueClassSource::new().with_cells(cells));
+        let orbits = members
+            .as_ref()
+            .and_then(|members| members.list.as_ref())
+            .map(|(tubes, orbits)| (tubes, orbits.handle(key)));
+        let list = orbits.as_ref().map(|(tubes, orbits)| {
+            GlobalListSource::new(&galaxy, *tubes, orbits)
+                .expect("a galaxy the server builds has a centre that builds")
+        });
+        let sources: Vec<&dyn SkySource> = features
+            .iter()
+            .map(|source| source as &dyn SkySource)
+            .chain(classes.iter().map(|source| source as &dyn SkySource))
+            .chain(list.iter().map(|source| source as &dyn SkySource))
+            .collect();
+        let mut ctx = tables.context(CENSUS_NOISE_SLOTS, cache, &sources, &gas);
+        let layer = work.layer();
+        let mut work = match work {
+            Work::Members(plan, shell, part) => {
+                if token.is_cancelled() || abandoned.is_cancelled() {
+                    return None;
+                }
+                let mut stars = Vec::new();
+                let tallies =
+                    census_members(&galaxy, &mut ctx, &plan, (shell, part), &query, &mut stars);
+                return Some(Slice {
+                    stars,
+                    tallies: Some(tallies),
+                    cost: CensusCost::default(),
+                    rest: Vec::new(),
+                    worked: (layer, started.elapsed()),
+                });
+            }
+            Work::Cells(work) => work,
+        };
         let (mut stars, mut tallies, mut cost) = (Vec::new(), None, CensusCost::default());
-        let layer = work.layer;
         loop {
             if token.is_cancelled() || abandoned.is_cancelled() {
                 return None;
@@ -1142,7 +1811,11 @@ fn census_job(
 
 /// The census of a sky after `step` (R06.T8.i's `merge_shells`), in one bulk job under `token`:
 /// every step's stars to it, merged at `n_max` and listed to the completeness of the shells done,
-/// as `plan` states it. The last step's is the one-shot census of `plan`, star for star.
+/// as `plan` states it. The last step's is the one-shot census of `plan`, star for star, but at a
+/// synthetic ceiling, where C, D and E list only within their real boundary towards each star's
+/// texel at every reply, the final one included (rendering plan R13, Design note 3): the last
+/// reply is merged by `merge_shells` too, to the plan's whole completeness, never by
+/// `merge_census`, which would list their stars beyond it.
 ///
 /// # Errors
 ///
@@ -1221,7 +1894,8 @@ pub(crate) async fn march(
             Arc::clone(&replies),
         );
         move || {
-            let mut ctx = tables.march_context();
+            let gas = tables.gas(&galaxy, query.observer().time());
+            let mut ctx = tables.march_context(&gas);
             Arc::new(march_rows(
                 &galaxy,
                 &mut ctx,
@@ -1389,19 +2063,26 @@ async fn eye_offsets(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::num::NonZeroUsize;
 
     use hyperion_sim::coords::GalacticPosition;
-    use hyperion_sim::sky::caps::{LayerCap, layer_caps};
-    use hyperion_sim::sky::census::{
-        Completeness, census_cell, census_plan, census_plan_of, merge_census,
+    use hyperion_sim::galaxy::catalogue_classes::{
+        ClassId, ClassLookup, ClassVisitor, ProductionClasses,
     };
+    use hyperion_sim::galaxy::query::{LayerSet, QuerySphere, SystemSource};
+    use hyperion_sim::sky::caps::{LayerCap, layer_caps};
+    use hyperion_sim::sky::census::{Completeness, census_cell, census_plan, census_plan_of};
     use hyperion_sim::time::UniverseTime;
     use hyperion_sim::{GENERATOR_VERSION, Seed};
+    use tokio::sync::mpsc::error::TryRecvError;
+    use tokio::sync::oneshot;
     use tokio::time::timeout;
 
+    use hyperion_sim::galaxy::gas::modifiers::NoModifiers;
+
     use super::*;
+    use crate::compute::{SkyCellCounters, TwinPriority};
     use crate::limits::INTERACTIVE_QUEUE_CAPACITY;
     use crate::testing::WAIT;
 
@@ -1410,11 +2091,15 @@ mod tests {
         Observer::new(at, UniverseTime::EPOCH).unwrap()
     }
 
+    /// A pool of `workers`, its twins at their workers' priority, so that its bulk jobs do not
+    /// wait on the neighbouring tests' threads ([`TwinPriority`]).
     fn pool(workers: usize) -> CpuPool {
-        CpuPool::new(
+        CpuPool::with_twins(
             NonZeroUsize::new(workers).unwrap(),
             INTERACTIVE_QUEUE_CAPACITY,
             BULK_QUEUE_CAPACITY,
+            TwinPriority::Workers,
+            None,
         )
         .unwrap()
     }
@@ -1431,16 +2116,56 @@ mod tests {
             .collect()
     }
 
-    /// The sim's census of `plan`'s `shells`, serially in the shells' order with no cell cache,
-    /// merged to the completeness of those shells.
+    /// The features' gas index of `galaxy`, the galaxy of seed 0x4d2 at `version`, the build's or
+    /// 27, as the sky tables of a server that serves the feature members hold it (P09.T40.a): built
+    /// once for the binary a version, some 7 s in a test build.
+    fn gas_index(
+        galaxy: &Galaxy,
+        version: hyperion_sim::GeneratorVersion,
+    ) -> &'static FeatureGasIndex {
+        static AT_BUILD: std::sync::OnceLock<FeatureGasIndex> = std::sync::OnceLock::new();
+        static AT_27: std::sync::OnceLock<FeatureGasIndex> = std::sync::OnceLock::new();
+        let index = if version == GENERATOR_VERSION {
+            &AT_BUILD
+        } else {
+            assert_eq!(
+                version,
+                hyperion_sim::GeneratorVersion::new(27),
+                "an index kept for the build's version or 27"
+            );
+            &AT_27
+        };
+        index.get_or_init(|| {
+            FeatureGasIndex::build(
+                galaxy,
+                &hyperion_sim::galaxy::features::catalogue::NoFeatureCache,
+            )
+        })
+    }
+
+    /// `galaxy`'s tables of no star with its features' gas index ([`gas_index`]), as a server that
+    /// serves the feature members builds them for forced caps (P09.T40.a).
+    fn featured_tables(galaxy: &Galaxy, version: hyperion_sim::GeneratorVersion) -> SkyTables {
+        SkyTables::new(LuminosityTables::dark(galaxy), galaxy)
+            .with_features(gas_index(galaxy, version).clone())
+    }
+
+    /// `galaxy`'s features' gas at the epoch over [`gas_index`], as the sim marches it: the sim's
+    /// side of a job's gas over [`featured_tables`] (P09.T40.a).
+    fn epoch_gas(galaxy: &Galaxy, version: hyperion_sim::GeneratorVersion) -> FeatureGas<'_> {
+        FeatureGas::indexed(galaxy, gas_index(galaxy, version), Years::ZERO)
+    }
+
+    /// The sim's census of `plan`'s `shells` through `modifiers`, serially in the shells' order
+    /// with no cell cache, merged to the completeness of those shells.
     fn serial_census(
         galaxy: &Galaxy,
-        tables: &SkyTables,
+        (tables, modifiers): (&SkyTables, &dyn GasModifierSource),
         query: &SkyQuery,
         plan: &CensusPlan,
         shells: &[Shell],
     ) -> SkyCensus {
-        let mut ctx = tables.context(CENSUS_NOISE_SLOTS, &NoSkyCellCache);
+        let mut ctx = tables.context(CENSUS_NOISE_SLOTS, &NoSkyCellCache, &[], modifiers);
         let mut stars = Vec::new();
         let mut tallies = None;
         for &shell in shells {
@@ -1467,11 +2192,30 @@ mod tests {
         steps: &[Vec<Shell>],
         slice: Duration,
     ) -> Vec<(CensusStep, SkyCensus)> {
+        steps_censused_within(pool, inputs, (plan, steps), slice, WAIT).await
+    }
+
+    /// [`steps_censused`], its census given `wait` to finish.
+    async fn steps_censused_within(
+        pool: &CpuPool,
+        inputs: &CensusInputs,
+        (plan, steps): (&Arc<CensusPlan>, &[Vec<Shell>]),
+        slice: Duration,
+        wait: Duration,
+    ) -> Vec<(CensusStep, SkyCensus)> {
         let token = CancelToken::new();
         let (sink, mut sent) = mpsc::channel(steps.len());
         timeout(
-            WAIT,
-            census_in_steps(pool, inputs, plan, steps, slice, sink, &token),
+            wait,
+            census_in_steps(
+                pool,
+                inputs,
+                plan,
+                (steps, TablesBuilt::all()),
+                slice,
+                sink,
+                &token,
+            ),
         )
         .await
         .expect("timed out censusing")
@@ -1492,36 +2236,53 @@ mod tests {
 
     /// The census its jobs run step by step is, after each step, the sim's census of the shells
     /// done, serially, star for star and tally for tally, cold and warm, and its last step's is
-    /// the sim's one pass over the whole plan: the split into steps and jobs, the jobs' slices
-    /// and their order, the joined parts and the cache change nothing (R06.T11.d).
+    /// the sim's one pass over the whole plan, merged to its whole completeness: the split into
+    /// steps and jobs, the jobs' slices and their order, the joined parts and the cache change
+    /// nothing (R06.T11.d). The jobs and the sim march every star's sightline through the
+    /// features' gas, as a server that serves the feature members does (P09.T40.a). The plan is
+    /// served at RM3's synthetic ceiling (R13.T2.b), so C, D and E list within their caps in the
+    /// last step too, which `merge_shells` gives and `merge_census`, the one-shot rule, would not.
     ///
     /// The census to 30 ly is one shell a layer, so the steps here split its one rank three ways;
     /// a slice of nought hands each job's cells back after one, so that every cell is a job of its
     /// own, queued again behind its step's other slabs.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one census in steps, cold and warm, against its serial and one-pass forms"
+    )]
     async fn each_step_of_the_jobs_census_is_the_sims_census_of_its_shells() {
         let galaxy = Arc::new(Galaxy::new(Seed::new(0x4d2)));
         let caps = SkyCaps::forced(LightYears::new(30.0)).unwrap();
-        let tables = Arc::new(SkyTables::new(LuminosityTables::dark(&galaxy), &galaxy));
+        let tables = Arc::new(featured_tables(&galaxy, GENERATOR_VERSION));
+        let gas = epoch_gas(&galaxy, GENERATOR_VERSION);
         let query = caps.on(SkyQuery::builder(sun(), Magnitudes::new(9.0))
             .build()
             .unwrap());
-        let query = Arc::new(query);
         let pool = pool(3);
         let token = CancelToken::new();
-        let plan = timeout(
+        let (query, plan) = timeout(
             WAIT,
-            plan(&pool, &galaxy, &tables, &query, &SHELL_EDGES_LY, &token),
+            plan(
+                &pool,
+                &galaxy,
+                &tables,
+                Arc::new(query),
+                &SHELL_EDGES_LY,
+                &token,
+            ),
         )
         .await
         .expect("timed out planning")
         .unwrap();
+        assert_eq!(query.synthetic_ceiling(), Some(SYNTHETIC_CEILING));
         let plan = Arc::new(plan);
         let inputs = CensusInputs {
             galaxy: Arc::clone(&galaxy),
             key: GalaxyKey::new(0x4d2, GENERATOR_VERSION),
             tables: Arc::clone(&tables),
             cells: Arc::new(SharedSkyCellCache::new(256 << 20)),
+            members: None,
             query: Arc::clone(&query),
         };
         let shells: Vec<Shell> = plan.shells().collect();
@@ -1531,7 +2292,7 @@ mod tests {
             "one shell a layer to 30 ly"
         );
         assert_eq!(
-            delivery_steps(&plan, C_DEFERRED_BEYOND_LY),
+            delivery_steps(&plan, DeliveryOrder::SERVED),
             vec![shells.clone()]
         );
         let steps: Vec<Vec<Shell>> = shells.chunks(2).map(<[Shell]>::to_vec).collect();
@@ -1564,19 +2325,25 @@ mod tests {
             pool.counters()
         );
 
+        // Each step's serial census, of the same shells for the cold census and the warm one.
+        let serials: Vec<(Vec<Shell>, SkyCensus)> = (0..steps.len())
+            .map(|k| {
+                let done: Vec<Shell> = steps[..=k].concat();
+                let serial = serial_census(&galaxy, (&tables, &gas), &query, &plan, &done);
+                (done, serial)
+            })
+            .collect();
         for censused in [&cold, &warm] {
             assert_eq!(censused.len(), steps.len());
-            for (k, (step, census)) in censused.iter().enumerate() {
-                let done: Vec<Shell> = steps[..=k].concat();
-                assert_eq!(step.done, done);
+            for (k, ((step, census), (done, serial))) in censused.iter().zip(&serials).enumerate() {
+                assert_eq!(&step.done, done);
                 assert_eq!(step.last, k + 1 == steps.len());
-                let serial = serial_census(&galaxy, &tables, &query, &plan, &done);
-                assert_eq!(census, &serial, "step {k}");
-                assert_eq!(bits(census), bits(&serial), "step {k}");
+                assert_eq!(census, serial, "step {k}");
+                assert_eq!(bits(census), bits(serial), "step {k}");
             }
         }
-        // The last step's is the one-shot census.
-        let mut ctx = tables.context(CENSUS_NOISE_SLOTS, &NoSkyCellCache);
+        // The last step's is the one pass over the plan's cells, merged to its whole completeness.
+        let mut ctx = tables.context(CENSUS_NOISE_SLOTS, &NoSkyCellCache, &[], &gas);
         let mut stars = Vec::new();
         let mut tallies = None;
         for key in plan.cells() {
@@ -1585,15 +2352,712 @@ mod tests {
                 &census_cell(&galaxy, &mut ctx, key, &query, &mut stars),
             );
         }
-        let one_pass = merge_census(tallies.map(|tallies| (stars, tallies)), query.n_max());
+        let one_pass = merge_shells(
+            tallies.map(|tallies| (stars, tallies)),
+            query.n_max(),
+            plan.complete(),
+        );
         let (_, last) = cold.last().expect("a step");
-        assert!(!one_pass.listed().is_empty());
+        assert_ne!(one_pass.listed(), []);
         assert!(last.completeness().is_some_and(Completeness::is_final));
         assert_eq!(
             (last.listed(), last.overflow(), last.tallies()),
             (one_pass.listed(), one_pass.overflow(), one_pass.tallies())
         );
         assert_eq!(bits(last), bits(&one_pass));
+        pool.shutdown().await.unwrap();
+    }
+
+    /// Fresh caches of 64 MiB each that a census's members are drawn through: the features' cells,
+    /// their interiors and the classes' cells.
+    fn member_caches() -> (
+        Arc<SharedFeatureCellCache>,
+        Arc<SharedClusterModelCache>,
+        Arc<SharedClassCellCache>,
+    ) {
+        (
+            Arc::new(SharedFeatureCellCache::new(64 << 20)),
+            Arc::new(SharedClusterModelCache::new(64 << 20)),
+            Arc::new(SharedClassCellCache::new(64 << 20)),
+        )
+    }
+
+    /// The sim's census of `plan`'s `shells` through `modifiers` as [`serial_census`] takes it, and
+    /// each shell's members beyond the grid in one part through sources over `features` and
+    /// `interiors`, over `classes` if given and over `list` if given (R06.T16.a).
+    fn serial_census_with_members(
+        galaxy: &Galaxy,
+        (tables, modifiers): (&SkyTables, &dyn GasModifierSource),
+        (query, key): (&SkyQuery, GalaxyKey),
+        (features, interiors, classes): (
+            &SharedFeatureCellCache,
+            &SharedClusterModelCache,
+            Option<&SharedClassCellCache>,
+        ),
+        list: Option<(&ListedTubes, &SharedCentreOrbitCache)>,
+        (plan, shells): (&CensusPlan, &[Shell]),
+    ) -> SkyCensus {
+        let (cells, kept) = (features.handle(key), interiors.kept(key));
+        let source = FeatureMemberSource::new(&cells, &kept);
+        let class_cells = classes.map(|classes| classes.handle(key));
+        let hosts = class_cells
+            .as_ref()
+            .map(|cells| CatalogueClassSource::new().with_cells(cells));
+        let orbits = list.map(|(tubes, orbits)| (tubes, orbits.handle(key)));
+        let listed = orbits.as_ref().map(|(tubes, orbits)| {
+            GlobalListSource::new(galaxy, *tubes, orbits).expect("the fixture's centre builds")
+        });
+        let mut sources: Vec<&dyn SkySource> = vec![&source];
+        sources.extend(hosts.iter().map(|hosts| hosts as &dyn SkySource));
+        sources.extend(listed.iter().map(|listed| listed as &dyn SkySource));
+        let mut ctx = tables.context(CENSUS_NOISE_SLOTS, &NoSkyCellCache, &sources, modifiers);
+        let mut stars = Vec::new();
+        let mut tallies = None;
+        for &shell in shells {
+            add_tallies(
+                &mut tallies,
+                &census_members(
+                    galaxy,
+                    &mut ctx,
+                    plan,
+                    (shell, MemberPart::WHOLE),
+                    query,
+                    &mut stars,
+                ),
+            );
+            for key in plan.shell_slabs(shell).flat_map(|slab| slab.cells()) {
+                add_tallies(
+                    &mut tallies,
+                    &census_cell(galaxy, &mut ctx, key, query, &mut stars),
+                );
+            }
+        }
+        merge_shells(
+            tallies.map(|tallies| (stars, tallies)),
+            query.n_max(),
+            plan.completeness(shells.iter().copied()),
+        )
+    }
+
+    /// Where the galaxy's field gives up its features' members, its census's jobs take them
+    /// (R06.T16.a): after each step the census is the sim's of the shells done with their members,
+    /// serially and in one part a shell, star for star, though the jobs take each shell's in one
+    /// part a worker; every step says the members are in, and the last lists some. Without the
+    /// member caches the same sky leaves them out. The place is inside an open cluster near the
+    /// Sun, to 12 ly, in shells to 4, 8 and 12 ly, and every sightline takes the features' gas
+    /// (P09.T40.a).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_jobs_census_takes_the_feature_members_where_the_field_gives_them_up() {
+        // φ is held to 27 at the latest, so a galaxy of 27 gives it up whichever train opens it.
+        let version = hyperion_sim::GeneratorVersion::new(27);
+        let galaxy = Arc::new(
+            Galaxy::from_params_at_version(
+                Seed::new(0x4d2),
+                hyperion_sim::galaxy::params::GalaxyParams::milky_way_like(),
+                version,
+            )
+            .unwrap()
+            .with_full_potential(),
+        );
+        let key = GalaxyKey::new(0x4d2, version);
+        let (features, interiors, classes) = member_caches();
+        let caches = || {
+            (
+                Arc::clone(&features),
+                Arc::clone(&interiors),
+                Arc::clone(&classes),
+            )
+        };
+        let members = SkyMembers::of(&galaxy, caches(), None);
+        assert!(members.is_some(), "a galaxy of 27 gives up φ");
+
+        let near = sun().position().to_owned();
+        let cluster = hyperion_sim::galaxy::features::catalogue::FeatureCatalogue::near(
+            &galaxy,
+            &near,
+            LightYears::new(1_500.0),
+            &hyperion_sim::galaxy::features::catalogue::NoFeatureCache,
+        )
+        .find(|feature| {
+            feature.kind_at(Years::ZERO)
+                == Some(hyperion_sim::galaxy::features::FeatureKind::OpenCluster)
+        })
+        .expect("an open cluster near the Sun");
+        let [x, y, z] = cluster.position().to_light_years_f64();
+        let at = GalacticPosition::from_light_years([x + 3.0, y, z]).unwrap();
+        let observer = Observer::new(at, UniverseTime::EPOCH).unwrap();
+        let caps = SkyCaps::forced(LightYears::new(12.0)).unwrap();
+        let tables = Arc::new(featured_tables(&galaxy, version));
+        let gas = epoch_gas(&galaxy, version);
+        let query = caps.on(SkyQuery::builder(observer, Magnitudes::new(9.0))
+            .build()
+            .unwrap());
+        let pool = pool(3);
+        let token = CancelToken::new();
+        let (query, plan) = timeout(
+            WAIT,
+            plan(&pool, &galaxy, &tables, Arc::new(query), &[4, 8], &token),
+        )
+        .await
+        .expect("timed out planning")
+        .unwrap();
+        let plan = Arc::new(plan);
+        let inputs = CensusInputs {
+            galaxy: Arc::clone(&galaxy),
+            key,
+            tables: Arc::clone(&tables),
+            cells: Arc::new(SharedSkyCellCache::new(0)),
+            members,
+            query: Arc::clone(&query),
+        };
+        let shells: Vec<Shell> = plan.shells().collect();
+        assert!(shells.len() > CAPPED_LAYERS.len(), "C, D and E in shells");
+        let steps: Vec<Vec<Shell>> = shells.chunks(4).map(<[Shell]>::to_vec).collect();
+        let censused = steps_censused(&pool, &inputs, &plan, &steps, CENSUS_JOB_SLICE).await;
+        assert_eq!(censused.len(), steps.len());
+        for (k, (step, census)) in censused.iter().enumerate() {
+            let serial = serial_census_with_members(
+                &galaxy,
+                (&tables, &gas),
+                (&query, key),
+                (&features, &interiors, Some(&classes)),
+                None,
+                (&plan, &step.done),
+            );
+            assert!(!census.tallies().feature_members_absent(), "step {k}");
+            assert_eq!(census, &serial, "step {k}");
+            assert_eq!(bits(census), bits(&serial), "step {k}");
+        }
+        let (_, last) = censused.last().expect("a step");
+        let is_member = |star: &&SkyStar| {
+            matches!(
+                star.system().kind(),
+                hyperion_sim::id::SystemIdKind::FeatureMember(_)
+            )
+        };
+        assert!(last.listed().iter().any(|star| is_member(&star)));
+
+        let without = CensusInputs {
+            members: None,
+            ..inputs
+        };
+        let censused = steps_censused(&pool, &without, &plan, &steps, CENSUS_JOB_SLICE).await;
+        let (_, last) = censused.last().expect("a step");
+        assert!(last.tallies().feature_members_absent());
+        assert!(!last.listed().iter().any(|star| is_member(&star)));
+        pool.shutdown().await.unwrap();
+    }
+
+    /// The luminous blue variables' class of the production lookup, alone.
+    struct Lbvs;
+
+    impl ClassLookup for Lbvs {
+        fn visit_class<V: ClassVisitor>(
+            &self,
+            galaxy: &Galaxy,
+            class: ClassId,
+            visitor: V,
+        ) -> Option<V::Output> {
+            if class == ClassId::LUMINOUS_BLUE_VARIABLE {
+                ProductionClasses.visit_class(galaxy, class, visitor)
+            } else {
+                None
+            }
+        }
+    }
+
+    /// The luminous blue variable the range query returns nearest the Sun in `galaxy`.
+    fn nearest_lbv(galaxy: &Galaxy) -> hyperion_sim::galaxy::query::SystemHit {
+        let sphere = QuerySphere::new(
+            *sun().position(),
+            LightYears::new(20_000.0),
+            UniverseTime::EPOCH,
+            LightYears::ZERO,
+        )
+        .unwrap();
+        let every_layer = Layer::ALL.into_iter().fold(LayerSet::EMPTY, LayerSet::with);
+        let mut hits = Vec::new();
+        CatalogueClassSource::with_lookup(Lbvs).systems_in_sphere(
+            galaxy,
+            &sphere,
+            every_layer,
+            &mut hits,
+        );
+        hits.into_iter()
+            .min_by(|a, b| a.distance().value().total_cmp(&b.distance().value()))
+            .expect("a luminous blue variable within 20,000 ly of the Sun")
+    }
+
+    /// Where the galaxy's field gives up the catalogue classes' hosts, at 27 (the carve-out's and
+    /// φ's holds, retargeted from 26 by train 26), its census's jobs take them (R06.T16.a): 10 ly from the luminous blue variable nearest the
+    /// Sun, A to 5 ly, B to 10 and C, D and E to 30 ly in shells to 20 and 30 ly at V 11, after
+    /// each step the census is the sim's of the shells done with the features' and the classes'
+    /// sources, serially and in one part a shell, star for star, and the last lists the variable;
+    /// without the member caches the same sky lists no class host. Every sightline takes the
+    /// features' gas (P09.T40.a).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn where_the_field_gives_up_the_class_hosts_the_jobs_census_takes_them() {
+        let version = hyperion_sim::GeneratorVersion::new(27);
+        let galaxy = Arc::new(
+            Galaxy::from_params_at_version(
+                Seed::new(0x4d2),
+                hyperion_sim::galaxy::params::GalaxyParams::milky_way_like(),
+                version,
+            )
+            .unwrap()
+            .with_full_potential(),
+        );
+        assert!(takes_class_hosts(&galaxy));
+        let key = GalaxyKey::new(0x4d2, version);
+        let (features, interiors, classes) = member_caches();
+        let members = SkyMembers::of(
+            &galaxy,
+            (
+                Arc::clone(&features),
+                Arc::clone(&interiors),
+                Arc::clone(&classes),
+            ),
+            None,
+        );
+        assert!(
+            members
+                .as_ref()
+                .is_some_and(|members| members.classes.is_some())
+        );
+
+        let lbv = nearest_lbv(&galaxy);
+        let [x, y, z] = lbv.position().to_light_years_f64();
+        let at = GalacticPosition::from_light_years([x, y, z + 10.0]).unwrap();
+        let observer = Observer::new(at, UniverseTime::EPOCH).unwrap();
+        let caps =
+            SkyCaps::forced_per_layer([5.0, 10.0, 30.0, 30.0, 30.0, 0.0].map(LightYears::new))
+                .unwrap();
+        let tables = Arc::new(featured_tables(&galaxy, version));
+        let gas = epoch_gas(&galaxy, version);
+        let query = caps.on(SkyQuery::builder(observer, Magnitudes::new(11.0))
+            .build()
+            .unwrap());
+        let pool = pool(3);
+        let token = CancelToken::new();
+        let (query, plan) = timeout(
+            WAIT,
+            plan(&pool, &galaxy, &tables, Arc::new(query), &[20], &token),
+        )
+        .await
+        .expect("timed out planning")
+        .unwrap();
+        let plan = Arc::new(plan);
+        let inputs = CensusInputs {
+            galaxy: Arc::clone(&galaxy),
+            key,
+            tables: Arc::clone(&tables),
+            cells: Arc::new(SharedSkyCellCache::new(0)),
+            members,
+            query: Arc::clone(&query),
+        };
+        let shells: Vec<Shell> = plan.shells().collect();
+        let steps: Vec<Vec<Shell>> = shells.chunks(4).map(<[Shell]>::to_vec).collect();
+        let censused = steps_censused(&pool, &inputs, &plan, &steps, CENSUS_JOB_SLICE).await;
+        assert_eq!(censused.len(), steps.len());
+        for (k, (step, census)) in censused.iter().enumerate() {
+            let serial = serial_census_with_members(
+                &galaxy,
+                (&tables, &gas),
+                (&query, key),
+                (&features, &interiors, Some(&classes)),
+                None,
+                (&plan, &step.done),
+            );
+            assert_eq!(census, &serial, "step {k}");
+            assert_eq!(bits(census), bits(&serial), "step {k}");
+        }
+        let is_host = |star: &&SkyStar| {
+            matches!(
+                star.system().kind(),
+                hyperion_sim::id::SystemIdKind::Catalogue(_)
+            )
+        };
+        let (_, last) = censused.last().expect("a step");
+        assert!(last.listed().iter().any(|star| star.system() == lbv.id()));
+
+        let without = CensusInputs {
+            members: None,
+            ..inputs
+        };
+        let censused = steps_censused(&pool, &without, &plan, &steps, CENSUS_JOB_SLICE).await;
+        let (_, last) = censused.last().expect("a step");
+        assert!(!last.listed().iter().any(|star| is_host(&star)));
+        pool.shutdown().await.unwrap();
+    }
+
+    /// A step's members' jobs wait for its tube tables (R06.T16.a's cost): with the tables said
+    /// built one step at a time, each step is sent only once its tables are, and no later step
+    /// before them, and each is the census whose tables were all held from the start, star for
+    /// star and tally for tally. The sky is the one inside an open cluster near the Sun at 27 of
+    /// [`the_jobs_census_takes_the_feature_members_where_the_field_gives_them_up`], whose every
+    /// shell's members are a job of the census.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one census in gated steps against the held one, and with its builder gone"
+    )]
+    async fn a_steps_members_wait_for_its_tables() {
+        let version = hyperion_sim::GeneratorVersion::new(27);
+        let galaxy = Arc::new(
+            Galaxy::from_params_at_version(
+                Seed::new(0x4d2),
+                hyperion_sim::galaxy::params::GalaxyParams::milky_way_like(),
+                version,
+            )
+            .unwrap()
+            .with_full_potential(),
+        );
+        let key = GalaxyKey::new(0x4d2, version);
+        let (features, interiors, classes) = member_caches();
+        let members = SkyMembers::of(&galaxy, (features, interiors, classes), None);
+        let cluster = hyperion_sim::galaxy::features::catalogue::FeatureCatalogue::near(
+            &galaxy,
+            sun().position(),
+            LightYears::new(1_500.0),
+            &hyperion_sim::galaxy::features::catalogue::NoFeatureCache,
+        )
+        .find(|feature| {
+            feature.kind_at(Years::ZERO)
+                == Some(hyperion_sim::galaxy::features::FeatureKind::OpenCluster)
+        })
+        .expect("an open cluster near the Sun");
+        let [x, y, z] = cluster.position().to_light_years_f64();
+        let at = GalacticPosition::from_light_years([x + 3.0, y, z]).unwrap();
+        let observer = Observer::new(at, UniverseTime::EPOCH).unwrap();
+        let caps = SkyCaps::forced(LightYears::new(12.0)).unwrap();
+        let tables = Arc::new(SkyTables::new(LuminosityTables::dark(&galaxy), &galaxy));
+        let query = caps.on(SkyQuery::builder(observer, Magnitudes::new(9.0))
+            .build()
+            .unwrap());
+        let pool = pool(3);
+        let token = CancelToken::new();
+        let (query, plan) = timeout(
+            WAIT,
+            plan(&pool, &galaxy, &tables, Arc::new(query), &[4, 8], &token),
+        )
+        .await
+        .expect("timed out planning")
+        .unwrap();
+        let plan = Arc::new(plan);
+        let inputs = CensusInputs {
+            galaxy: Arc::clone(&galaxy),
+            key,
+            tables: Arc::clone(&tables),
+            cells: Arc::new(SharedSkyCellCache::new(0)),
+            members,
+            query: Arc::clone(&query),
+        };
+        let shells: Vec<Shell> = plan.shells().collect();
+        let steps: Vec<Vec<Shell>> = shells.chunks(4).map(<[Shell]>::to_vec).collect();
+        assert!(steps.len() > 2, "{} steps", steps.len());
+        let held = steps_censused(&pool, &inputs, &plan, &steps, CENSUS_JOB_SLICE).await;
+
+        let (built, gate) = TablesBuilt::none();
+        let (sink, mut sent) = mpsc::channel(steps.len());
+        let census = census_in_steps(
+            &pool,
+            &inputs,
+            &plan,
+            (&steps, gate),
+            CENSUS_JOB_SLICE,
+            sink,
+            &token,
+        );
+        let each = async {
+            let mut gated = Vec::new();
+            for k in 0..steps.len() {
+                // Step k's tables are built: its members' jobs may run, and no later step's.
+                built.built_through(k);
+                let step = sent.recv().await.expect("a step");
+                assert_eq!(
+                    step.done.len(),
+                    steps[..=k].iter().map(Vec::len).sum::<usize>()
+                );
+                if k + 1 < steps.len() {
+                    assert_eq!(
+                        sent.try_recv().err(),
+                        Some(TryRecvError::Empty),
+                        "a step after {k} before its tables"
+                    );
+                }
+                let census = merge_step(&pool, &plan, step, query.n_max(), &token)
+                    .await
+                    .unwrap();
+                gated.push(census);
+            }
+            gated
+        };
+        let (censused, gated) = timeout(WAIT, futures_util::future::join(census, each))
+            .await
+            .expect("timed out censusing");
+        censused.unwrap();
+        assert_eq!(gated.len(), held.len());
+        for (k, (gated, (_, held))) in gated.iter().zip(&held).enumerate() {
+            assert_eq!(gated, held, "step {k}");
+            assert_eq!(bits(gated), bits(held), "step {k}");
+        }
+
+        // A builder that goes after the first step's tables leaves the rest to the jobs: every
+        // step is still sent, and is the same census.
+        let (built, gate) = TablesBuilt::none();
+        built.built_through(0);
+        drop(built);
+        let (sink, mut sent) = mpsc::channel(steps.len());
+        timeout(
+            WAIT,
+            census_in_steps(
+                &pool,
+                &inputs,
+                &plan,
+                (&steps, gate),
+                CENSUS_JOB_SLICE,
+                sink,
+                &token,
+            ),
+        )
+        .await
+        .expect("timed out censusing")
+        .unwrap();
+        for (k, (_, held)) in held.iter().enumerate() {
+            let step = sent.recv().await.expect("every step");
+            let census = merge_step(&pool, &plan, step, query.n_max(), &token)
+                .await
+                .unwrap();
+            assert_eq!(bits(&census), bits(held), "step {k}");
+        }
+        pool.shutdown().await.unwrap();
+    }
+
+    /// From generator version 27, where the range query registers the global list's source, the
+    /// census's jobs take the list's members too (R06.T16.a): at the centre of the list's
+    /// lightest dwarf core, in the halo, where the grid's cells are cheap (by the galactic
+    /// centre a cell costs too much for a fast test; the sim's tests hold the centre's members),
+    /// C, D and E to 50 ly in shells to 20 and 50 ly at V 11, after each step the census is the
+    /// sim's of the shells done with the features', the classes' and the list's sources, serially
+    /// and in one part a shell, star for star, and the last lists the core's members; without the
+    /// list the same sky lists none of them. Every sightline takes the features' gas (P09.T40.a).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[ignore = "slow: builds a Milky Way galaxy's list and the tables of the 158 streams that reach the core"]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one census in steps against its serial form, with the list and without"
+    )]
+    async fn from_27_the_jobs_census_takes_the_lists_members() {
+        /// The census's time, on three workers.
+        const CENSUS_WAIT: Duration = Duration::from_mins(30);
+        let version = hyperion_sim::GeneratorVersion::new(27);
+        let galaxy = Arc::new(
+            Galaxy::from_params_at_version(
+                Seed::new(0x4d2),
+                hyperion_sim::galaxy::params::GalaxyParams::milky_way_like(),
+                version,
+            )
+            .unwrap()
+            .with_full_potential(),
+        );
+        assert!(GlobalListSource::is_registered_in(&galaxy));
+        let key = GalaxyKey::new(0x4d2, version);
+        let (features, interiors, classes) = member_caches();
+        let global_list = hyperion_sim::galaxy::global_list::GlobalList::build(&galaxy);
+        let core = global_list
+            .debris()
+            .cores()
+            .iter()
+            .min_by(|a, b| a.mass().value().total_cmp(&b.mass().value()))
+            .expect("a dwarf core");
+        let at = GalacticPosition::ORIGIN
+            .translated(core.position())
+            .expect("a core in the cube");
+        let held = Arc::new(crate::compute::HeldGlobalList::new(&galaxy, global_list));
+        let listed = ListedTubes::new(
+            (Arc::clone(&galaxy), key),
+            held,
+            Arc::new(crate::compute::TubeTableCache::new(64 << 20)),
+        );
+        let orbits = Arc::new(SharedCentreOrbitCache::new(64 << 20));
+        let caches = || {
+            (
+                Arc::clone(&features),
+                Arc::clone(&interiors),
+                Arc::clone(&classes),
+            )
+        };
+        let members = SkyMembers::of(
+            &galaxy,
+            caches(),
+            Some((listed.clone(), Arc::clone(&orbits))),
+        );
+        assert!(
+            members
+                .as_ref()
+                .is_some_and(|members| members.list.is_some())
+        );
+
+        let observer = Observer::new(at, UniverseTime::EPOCH).unwrap();
+        let caps =
+            SkyCaps::forced_per_layer([5.0, 10.0, 50.0, 50.0, 50.0, 0.0].map(LightYears::new))
+                .unwrap();
+        let tables = Arc::new(featured_tables(&galaxy, version));
+        let gas = epoch_gas(&galaxy, version);
+        let query = caps.on(SkyQuery::builder(observer, Magnitudes::new(11.0))
+            .build()
+            .unwrap());
+        let pool = pool(3);
+        let token = CancelToken::new();
+        let (query, plan) = timeout(
+            WAIT,
+            plan(&pool, &galaxy, &tables, Arc::new(query), &[20], &token),
+        )
+        .await
+        .expect("timed out planning")
+        .unwrap();
+        let plan = Arc::new(plan);
+        // The tables of the streams the census reads, built first, off the runtime, as the
+        // handler has the pool build them.
+        let streams = hyperion_sim::sky::census::streams_seen(
+            &galaxy,
+            hyperion_sim::galaxy::global_list::TubeLookup::global_list(&listed),
+            &plan,
+            &query,
+        );
+        let building = listed.clone();
+        tokio::task::spawn_blocking(move || {
+            for number in streams {
+                drop(hyperion_sim::galaxy::global_list::TubeLookup::tube(
+                    &building, number,
+                ));
+            }
+        })
+        .await
+        .unwrap();
+        let inputs = CensusInputs {
+            galaxy: Arc::clone(&galaxy),
+            key,
+            tables: Arc::clone(&tables),
+            cells: Arc::new(SharedSkyCellCache::new(0)),
+            members,
+            query: Arc::clone(&query),
+        };
+        let shells: Vec<Shell> = plan.shells().collect();
+        let steps: Vec<Vec<Shell>> = shells.chunks(4).map(<[Shell]>::to_vec).collect();
+        let censused = steps_censused_within(
+            &pool,
+            &inputs,
+            (&plan, &steps),
+            CENSUS_JOB_SLICE,
+            CENSUS_WAIT,
+        )
+        .await;
+        assert_eq!(censused.len(), steps.len());
+        for (k, (step, census)) in censused.iter().enumerate() {
+            let serial = serial_census_with_members(
+                &galaxy,
+                (&tables, &gas),
+                (&query, key),
+                (&features, &interiors, Some(&classes)),
+                Some((&listed, &orbits)),
+                (&plan, &step.done),
+            );
+            assert_eq!(census, &serial, "step {k}");
+            assert_eq!(bits(census), bits(&serial), "step {k}");
+        }
+        let in_core = |star: &&SkyStar| {
+            matches!(
+                star.system().kind(),
+                hyperion_sim::id::SystemIdKind::DwarfCore(_)
+            )
+        };
+        let (_, last) = censused.last().expect("a step");
+        assert!(last.listed().iter().any(|star| in_core(&star)));
+
+        let without = CensusInputs {
+            members: SkyMembers::of(&galaxy, caches(), None),
+            ..inputs
+        };
+        let censused = steps_censused_within(
+            &pool,
+            &without,
+            (&plan, &steps),
+            CENSUS_JOB_SLICE,
+            CENSUS_WAIT,
+        )
+        .await;
+        let (_, last) = censused.last().expect("a step");
+        assert!(!last.listed().iter().any(|star| in_core(&star)));
+        pool.shutdown().await.unwrap();
+    }
+
+    /// At a budget of nought, the server's default since R06.T8.o, the census's jobs read no
+    /// cache, R06.T8.g's path: no cell is looked up, served, missed or rebuilt, and no block is
+    /// kept. Its stars and tallies are those of the same sky's census at R06.T8.n's sized budget,
+    /// 1,280 MiB, bit for bit, both when it is asked first and when it is asked again, the second
+    /// time served from the sized cache's entries (decided 2026-10-10, `decision-r06-t8n.md`).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn at_a_budget_of_nought_the_census_reads_no_cache_and_is_the_cached_census() {
+        let galaxy = Arc::new(Galaxy::new(Seed::new(0x4d2)));
+        let caps = SkyCaps::forced(LightYears::new(30.0)).unwrap();
+        let tables = Arc::new(SkyTables::new(LuminosityTables::dark(&galaxy), &galaxy));
+        let query = caps.on(SkyQuery::builder(sun(), Magnitudes::new(9.0))
+            .build()
+            .unwrap());
+        let pool = pool(3);
+        let token = CancelToken::new();
+        let (query, plan) = timeout(
+            WAIT,
+            plan(
+                &pool,
+                &galaxy,
+                &tables,
+                Arc::new(query),
+                &SHELL_EDGES_LY,
+                &token,
+            ),
+        )
+        .await
+        .expect("timed out planning")
+        .unwrap();
+        let plan = Arc::new(plan);
+        let inputs = |budget_bytes| CensusInputs {
+            galaxy: Arc::clone(&galaxy),
+            key: GalaxyKey::new(0x4d2, GENERATOR_VERSION),
+            tables: Arc::clone(&tables),
+            cells: Arc::new(SharedSkyCellCache::new(budget_bytes)),
+            members: None,
+            query: Arc::clone(&query),
+        };
+        let (off, sized) = (inputs(0), inputs(1_280 << 20));
+        assert!(off.cells.is_off() && !sized.cells.is_off());
+        let steps = delivery_steps(&plan, DeliveryOrder::SERVED);
+
+        for asked in ["first", "again"] {
+            let without = steps_censused(&pool, &off, &plan, &steps, CENSUS_JOB_SLICE).await;
+            let with = steps_censused(&pool, &sized, &plan, &steps, CENSUS_JOB_SLICE).await;
+            assert_eq!(without.len(), steps.len(), "asked {asked}");
+            for (k, ((_, without), (_, with))) in without.iter().zip(&with).enumerate() {
+                assert_eq!(without, with, "asked {asked}, step {k}");
+                assert_eq!(bits(without), bits(with), "asked {asked}, step {k}");
+            }
+        }
+        assert_eq!(
+            off.cells.counters(),
+            SkyCellCounters::default(),
+            "no cell looked up, served, missed or rebuilt, and no block kept"
+        );
+        let counters = sized.cells.counters();
+        assert!(
+            counters.missed() > 0 && counters.cache().entries() > 0,
+            "the sized cache built cells and kept them: {counters:?}"
+        );
+        assert_eq!(
+            (counters.served(), counters.rebuilt()),
+            (counters.missed(), 0),
+            "the sized cache built every cell first and served it again: {counters:?}"
+        );
         pool.shutdown().await.unwrap();
     }
 
@@ -1612,57 +3076,98 @@ mod tests {
         census_plan_of(&query, caps)
     }
 
-    /// The delivery runs every shell once, nearest first within each layer, every layer's first in
-    /// the first step, and D's and E's shells to 4,000 ly before C's beyond 2,000 ly (R06.T11.d),
-    /// C's deferred by its edge: near the Sun the steps are 125, 250, 500, 1,000 and 2,000 ly for
-    /// every layer, then D's and E's 4,000 ly before C's (R06.T11.g).
-    #[test]
-    fn the_delivery_is_nearest_first_with_d_and_e_to_4000_ly_before_c_beyond_2000() {
-        use Layer::{A, B, BrownDwarf, C, D, E};
-        let plan = near_sun_plan();
-        let steps = delivery_steps(&plan, C_DEFERRED_BEYOND_LY);
-        let shape: Vec<Vec<(Layer, u8)>> = steps
+    /// Each step's shells as (layer, place in its layer).
+    fn shape(steps: &[Vec<Shell>]) -> Vec<Vec<(Layer, u8)>> {
+        steps
             .iter()
             .map(|step| step.iter().map(|s| (s.layer(), s.index())).collect())
-            .collect();
+            .collect()
+    }
+
+    /// The least edge each reply of `steps` reaches over its layers not yet final, ly, or `None`
+    /// for the final reply.
+    fn least_edges(plan: &CensusPlan, steps: &[Vec<Shell>]) -> Vec<Option<f64>> {
+        (1..=steps.len())
+            .map(|k| {
+                plan.completeness(steps[..k].concat())
+                    .least_edge()
+                    .map(LightYears::value)
+            })
+            .collect()
+    }
+
+    /// The delivery runs every shell once, nearest first within each layer, every layer's first in
+    /// the first step (R06.T11.d), E's shells from 1,000 ly a step ahead of C's and D's of the same
+    /// edge (R06.T11.h), and D's and E's shells to 4,000 ly before C's beyond 2,000 ly, C's
+    /// deferred by its inner edge (R06.T11.g): near the Sun the steps are 125, 250, 500 and
+    /// 1,000 ly for every layer, then E's 2,000 ly, then C's and D's with E's 4,000 ly, then D's
+    /// 4,000 ly before C's.
+    #[test]
+    fn the_delivery_is_nearest_first_e_ahead_from_1000_ly_c_beyond_2000_after_d_and_e_to_4000() {
+        use Layer::{A, B, BrownDwarf, C, D, E};
+        let plan = near_sun_plan();
+        let steps = delivery_steps(&plan, DeliveryOrder::SERVED);
         assert_eq!(
-            shape,
+            shape(&steps),
             vec![
                 vec![(A, 0), (B, 0), (C, 0), (D, 0), (E, 0), (BrownDwarf, 0)],
                 vec![(C, 1), (D, 1), (E, 1)],
                 vec![(C, 2), (D, 2), (E, 2)],
                 vec![(C, 3), (D, 3), (E, 3)],
-                vec![(C, 4), (D, 4), (E, 4)],
-                vec![(D, 5), (E, 5)],
-                vec![(C, 5), (D, 6), (E, 6)],
-                vec![(C, 6), (D, 7), (E, 7)],
-                vec![(C, 7), (E, 8)],
-                vec![(E, 9)],
+                vec![(E, 4)],
+                vec![(C, 4), (D, 4), (E, 5)],
+                vec![(D, 5), (E, 6)],
+                vec![(C, 5), (D, 6), (E, 7)],
+                vec![(C, 6), (D, 7), (E, 8)],
+                vec![(C, 7), (E, 9)],
             ]
         );
-        // Each step's edges, nearest first: C's first beyond 2,000 ly, its 4,000 ly shell, comes a
-        // step after D's and E's.
+        // Each step's edges, nearest first: E's first shell beyond 1,000 ly is its 2,000 ly shell,
+        // and C's first beyond 2,000 ly its 4,000 ly shell.
         let edge_of = |layer: Layer, index: u8| {
             plan.shells()
                 .find(|s| s.layer() == layer && s.index() == index)
                 .and_then(|s| s.edge())
                 .map(LightYears::value)
         };
-        assert_eq!(edge_of(C, 4), Some(2_000.0));
-        assert_eq!(edge_of(C, 5), Some(4_000.0));
-        assert_eq!(edge_of(D, 5), Some(4_000.0));
+        for layer in [C, D, E] {
+            assert_eq!(edge_of(layer, 3), Some(1_000.0), "{layer:?}");
+            assert_eq!(edge_of(layer, 4), Some(2_000.0), "{layer:?}");
+            assert_eq!(edge_of(layer, 5), Some(4_000.0), "{layer:?}");
+        }
         let mut all: Vec<Shell> = steps.concat();
         let mut planned: Vec<Shell> = plan.shells().collect();
         all.sort_unstable();
         planned.sort_unstable();
         assert_eq!(all, planned, "every shell once");
+        let step_of = |layer: Layer, index: u8| {
+            steps.iter().position(|step| {
+                step.iter()
+                    .any(|s| s.layer() == layer && s.index() == index)
+            })
+        };
+        // The shells to 1,000 ly come by their place; E's from 1,000 ly a step ahead of C's and D's
+        // of the same edge, and D's a step ahead of C's from 2,000 ly.
+        for index in 0..8 {
+            let at = (step_of(C, index), step_of(D, index), step_of(E, index));
+            let k = usize::from(index);
+            let expected = match index {
+                0..=3 => (Some(k), Some(k), Some(k)),
+                4 => (Some(k + 1), Some(k + 1), Some(k)),
+                _ => (Some(k + 2), Some(k + 1), Some(k)),
+            };
+            assert_eq!(
+                at, expected,
+                "the shells of place {index}: C's, D's and E's steps"
+            );
+        }
         let edge = |shell: &Shell| shell.edge().map_or(f64::INFINITY, LightYears::value);
         // D's and E's shells to 4,000 ly all come before C's first beyond 2,000 ly.
         let c_beyond = steps
             .iter()
             .position(|step| step.iter().any(|s| s.layer() == C && edge(s) > 2_000.0))
             .unwrap();
-        assert_eq!(c_beyond, 6);
+        assert_eq!(c_beyond, 7);
         for (k, step) in steps.iter().enumerate() {
             for shell in step {
                 if matches!(shell.layer(), D | E) && edge(shell) <= 4_000.0 {
@@ -1673,25 +3178,18 @@ mod tests {
         // The first reply has every layer's first shell: A, B and the brown dwarfs are final.
         let first = plan.completeness(steps[0].iter().copied());
         assert_eq!(first.least_edge(), Some(LightYears::new(125.0)));
-        let reached: Vec<Option<f64>> = (1..=steps.len())
-            .map(|k| {
-                plan.completeness(steps[..k].concat())
-                    .least_edge()
-                    .map(LightYears::value)
-            })
-            .collect();
         assert_eq!(
-            reached,
+            least_edges(&plan, &steps),
             [
                 Some(125.0),
                 Some(250.0),
                 Some(500.0),
                 Some(1_000.0),
+                Some(1_000.0),
                 Some(2_000.0),
                 Some(2_000.0),
                 Some(4_000.0),
                 Some(8_000.0),
-                Some(32_000.0),
                 None
             ]
         );
@@ -1702,36 +3200,135 @@ mod tests {
         assert!(last.is_final());
     }
 
+    /// Caps as the served sky near the Sun puts them on the server's galaxy at the eye's cut and
+    /// RM3's ceiling, uniform here (R06.T17's final reply): C to 1,893 ly, D and E to the real
+    /// limit of 2,000 ly, each with shells to 125–1,000 ly and its last, and A, B and the brown
+    /// dwarfs one each.
+    fn near_sun_served_plan() -> CensusPlan {
+        let query = SkyQuery::builder(sun(), Magnitudes::new(7.766))
+            .synthetic_ceiling(SYNTHETIC_CEILING)
+            .build()
+            .unwrap();
+        let caps = [11.0, 56.0, 1_893.0, 2_000.0, 2_000.0, 1.0]
+            .iter()
+            .zip(CAPPED_LAYERS)
+            .map(|(&r, layer)| LayerCap::forced(layer, LightYears::new(r)))
+            .collect();
+        census_plan_of(&query, caps)
+    }
+
+    /// Near the Sun at the real boundary of 2,000 ly (rendering plan R13; R06.T17's served caps,
+    /// C's to 1,893 ly), each layer's 1,000–2,000 ly shell its last, E's comes a step before C's
+    /// and D's, the steps to 1,000 ly as before, and its reply holds E final with C and D still
+    /// complete to 1,000 ly (R06.T11.h; decided 2026-10-13, `decision-r06-t17-findings.md` §1).
+    #[test]
+    fn near_the_sun_es_last_shell_comes_a_step_before_cs_and_ds() {
+        use Layer::{A, B, BrownDwarf, C, D, E};
+        let plan = near_sun_served_plan();
+        let steps = delivery_steps(&plan, DeliveryOrder::SERVED);
+        assert_eq!(
+            shape(&steps),
+            vec![
+                vec![(A, 0), (B, 0), (C, 0), (D, 0), (E, 0), (BrownDwarf, 0)],
+                vec![(C, 1), (D, 1), (E, 1)],
+                vec![(C, 2), (D, 2), (E, 2)],
+                vec![(C, 3), (D, 3), (E, 3)],
+                vec![(E, 4)],
+                vec![(C, 4), (D, 4)],
+            ]
+        );
+        assert!(steps[4..].concat().iter().all(Shell::is_last));
+        assert_eq!(
+            least_edges(&plan, &steps),
+            [
+                Some(125.0),
+                Some(250.0),
+                Some(500.0),
+                Some(1_000.0),
+                Some(1_000.0),
+                None
+            ]
+        );
+        let e_first = plan.completeness(steps[..5].concat());
+        assert_eq!(
+            [C, D, E].map(|layer| e_first.edge(layer).map(LightYears::value)),
+            [Some(1_000.0), Some(1_000.0), None]
+        );
+    }
+
     /// One march of the plan's replies holds every step's radii, whatever the delivery's order
-    /// (R06.T9.f: one march a request; R06.T11.d).
+    /// (R06.T9.f: one march a request; R06.T11.d), at the derived caps and at the served ones,
+    /// whose E shell runs alone ahead of C's and D's (R06.T11.h).
     #[test]
     fn one_march_of_the_plans_replies_holds_every_steps_radii() {
         let galaxy = Galaxy::new(Seed::new(0x4d2));
         let tables = SkyTables::new(LuminosityTables::dark(&galaxy), &galaxy);
-        let plan = near_sun_plan();
         let query = SkyQuery::builder(sun(), Magnitudes::new(7.95))
             .build()
             .unwrap();
         let spec = BandSpec::new(2, 12).unwrap();
-        let march = march_rows(
-            &galaxy,
-            &mut tables.march_context(),
-            &query,
-            plan.replies(),
-            &spec,
-            CubeFace::PosZ,
-            0..1,
-        );
-        let mut done = Vec::new();
-        for step in delivery_steps(&plan, C_DEFERRED_BEYOND_LY) {
-            done.extend(step);
-            let completeness = plan.completeness(done.iter().copied());
-            assert!(
-                march.holds(completeness.complete_to()),
-                "after {} shells",
-                done.len()
+        for (what, plan) in [
+            ("derived", near_sun_plan()),
+            ("served", near_sun_served_plan()),
+        ] {
+            let march = march_rows(
+                &galaxy,
+                &mut tables.march_context(&NoModifiers),
+                &query,
+                plan.replies(),
+                &spec,
+                CubeFace::PosZ,
+                0..1,
             );
+            let mut done = Vec::new();
+            for step in delivery_steps(&plan, DeliveryOrder::SERVED) {
+                done.extend(step);
+                let completeness = plan.completeness(done.iter().copied());
+                assert!(
+                    march.holds(completeness.complete_to()),
+                    "{what} caps, after {} shells",
+                    done.len()
+                );
+            }
         }
+    }
+
+    /// A sky a client asks is delivered in the served order, from 1,000 and 2,000 ly (R06.T11.h,
+    /// R06.T11.g), and each test seam moves only its own edge.
+    #[test]
+    fn a_served_sky_takes_the_served_delivery_order_and_each_seam_its_own_edge() {
+        let edge = |ly| NonZeroU32::new(ly).unwrap();
+        let ly = LightYears::new;
+        assert_eq!(SkyCaps::DERIVED.delivery_order(), DeliveryOrder::SERVED);
+        assert_eq!(
+            SkyCaps::forced(ly(30.0)).unwrap().delivery_order(),
+            DeliveryOrder::SERVED
+        );
+        assert_eq!(
+            (
+                DeliveryOrder::SERVED.far_first_from,
+                DeliveryOrder::SERVED.c_deferred_beyond
+            ),
+            (ly(1_000.0), ly(2_000.0))
+        );
+        assert_eq!(
+            SkyCaps::DERIVED
+                .with_far_first_from(edge(15))
+                .delivery_order(),
+            DeliveryOrder {
+                far_first_from: ly(15.0),
+                ..DeliveryOrder::SERVED
+            }
+        );
+        assert_eq!(
+            SkyCaps::DERIVED
+                .with_c_deferred_beyond(edge(20))
+                .delivery_order(),
+            DeliveryOrder {
+                c_deferred_beyond: ly(20.0),
+                ..DeliveryOrder::SERVED
+            }
+        );
     }
 
     /// The derived caps, their rays measured in jobs and counted in ray order, are `layer_caps`'
@@ -1740,47 +3337,95 @@ mod tests {
     /// both taken in jobs with the request's illumination (R06.T9.g). Over tables that hold no
     /// star every count is nought, so each cap is the count's nearest radius, but each rule bound
     /// reads every ray's extinction.
+    ///
+    /// The plan is served at the ceiling the server states (rendering plan R13, R13.T2.b;
+    /// `decision-r13-t2b-ceiling.md`): at a cut of 8.0, and at the eye's own, RM3's V 5.0, the
+    /// second count over the same rays and the real boundary in jobs being the sim's
+    /// `census_plan` of the query at it, bit for bit; at 4.6, whose caps lie within the real limit,
+    /// none, the plan R06's, bit for bit.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the caps at three cuts and by the eye's visibility, each against the sim's"
+    )]
     async fn the_caps_rays_measured_in_jobs_are_the_sims_caps() {
         let galaxy = Arc::new(Galaxy::new(Seed::new(0x4d2)));
-        let tables = Arc::new(SkyTables::new(LuminosityTables::dark(&galaxy), &galaxy));
-        let query = Arc::new(
-            SkyQuery::builder(sun(), Magnitudes::new(8.0))
-                .build()
-                .unwrap(),
-        );
+        let tables = Arc::new(featured_tables(&galaxy, GENERATOR_VERSION));
         let pool = pool(3);
         let token = CancelToken::new();
-        let planned = timeout(
-            WAIT,
-            plan(&pool, &galaxy, &tables, &query, &SHELL_EDGES_LY, &token),
-        )
-        .await
-        .expect("timed out planning")
-        .unwrap();
+        let served = async |query: SkyQuery| {
+            timeout(
+                WAIT,
+                plan(
+                    &pool,
+                    &galaxy,
+                    &tables,
+                    Arc::new(query),
+                    &SHELL_EDGES_LY,
+                    &token,
+                ),
+            )
+            .await
+            .expect("timed out planning")
+            .unwrap()
+        };
         let mut noise = NoiseCache::with_capacity(MARCH_NOISE_SLOTS);
+        let sims = |query: &SkyQuery, noise: &mut NoiseCache| {
+            census_plan(&galaxy, &tables.tables, &tables.envelope, query, noise)
+        };
+        let uniform = |cut: f64| {
+            SkyQuery::builder(sun(), Magnitudes::new(cut))
+                .build()
+                .unwrap()
+        };
+
+        // At 4.6 the caps lie within the limit: no ceiling, and R06's plan.
+        let shallow = uniform(4.6);
+        let (stated, planned) = served(shallow.clone()).await;
+        assert_eq!(stated.synthetic_ceiling(), None);
         let caps = layer_caps(
             &galaxy,
             &tables.tables,
             &tables.envelope,
-            query.observer(),
-            query.cut(),
+            shallow.observer(),
+            shallow.cut(),
             &mut noise,
         );
         assert_eq!(planned.caps(), caps.as_slice());
+        assert_eq!(cap_bits(planned.caps()), cap_bits(&caps));
         assert!(
             caps.iter().any(|cap| cap.rule_bound().value() > 1.0),
             "a rule bound reads the rays: {caps:?}"
         );
-        assert_eq!(planned, census_plan_of(&query, caps));
+        assert!(caps.iter().all(|cap| cap.bright_beyond().is_none()));
+        assert_eq!(planned, census_plan_of(&shallow, caps));
+
+        // At 8.0, RM3's ceiling.
+        let (stated, planned) = served(uniform(8.0)).await;
+        assert_eq!(stated.synthetic_ceiling(), Some(SYNTHETIC_CEILING));
+        let sim = sims(&stated, &mut noise);
+        assert_eq!(planned, sim);
+        assert_eq!(cap_bits(planned.caps()), cap_bits(sim.caps()));
+        assert!(
+            planned
+                .caps()
+                .iter()
+                .all(|cap| cap.bright_beyond().is_some()),
+            "a real boundary states every layer's count beyond it: {:?}",
+            planned.caps()
+        );
+
         // An eye-only request capped by the eye's visibility (R06.T7.b) takes the sim's caps by
-        // it, bit for bit, its cut and visibility from jobs, with the request's illumination.
+        // it, bit for bit, its cut and visibility from jobs, with the request's illumination, at
+        // RM3's ceiling, the jobs and the sim marching their rays through the features' gas
+        // (P09.T40.a).
         let eye = EyeObserver::default();
         let light = timeout(WAIT, illumination(&pool, &galaxy, &tables, sun(), &token))
             .await
             .expect("timed out lighting")
             .unwrap();
-        let mut ctx = tables.march_context();
+        let gas = epoch_gas(&galaxy, GENERATOR_VERSION);
+        let mut ctx = tables.march_context(&gas);
         assert_eq!(
             *light,
             Illumination::march(&galaxy, &mut ctx, &sun()),
@@ -1810,24 +3455,299 @@ mod tests {
             visibility,
             limits::eye_visibility(&galaxy, &mut ctx, &sun(), &eye, cut, Some(&light))
         );
-        let seen = Arc::new(
-            SkyQuery::builder(sun(), cut)
-                .eye(eye)
-                .illumination(Arc::clone(&light))
-                .eye_visibility(visibility)
-                .build()
+        let seen = SkyQuery::builder(sun(), cut)
+            .eye(eye)
+            .illumination(Arc::clone(&light))
+            .eye_visibility(visibility)
+            .build()
+            .unwrap();
+        let (stated, planned) = served(seen).await;
+        assert_eq!(stated.synthetic_ceiling(), Some(SYNTHETIC_CEILING));
+        assert!(stated.eye_visibility().is_some());
+        let sim = sims(&stated, &mut noise);
+        assert_eq!(planned, sim);
+        assert_eq!(cap_bits(planned.caps()), cap_bits(sim.caps()));
+        pool.shutdown().await.unwrap();
+    }
+
+    /// The ceiling a plan is served at is the lesser of RM3's V 5.0 and the cut, and none where the
+    /// cut is at or brighter than 5.0 and its C, D and E caps lie within the real limit, here
+    /// forced caps standing for them; a query that states a ceiling keeps it; and the plan is the
+    /// sim's of the query at the ceiling stated (rendering plan R13, R13.T2.b;
+    /// `decision-r13-t2b-ceiling.md`).
+    #[tokio::test]
+    async fn the_served_ceiling_is_the_lesser_of_the_servers_and_the_cut() {
+        let galaxy = Arc::new(Galaxy::new(Seed::new(0x4d2)));
+        let tables = Arc::new(SkyTables::new(LuminosityTables::dark(&galaxy), &galaxy));
+        let pool = pool(2);
+        let token = CancelToken::new();
+        let cases = [
+            (9.0, 30.0, None, Some(5.0)),
+            (5.4, 30.0, None, Some(5.0)),
+            (5.0, 30.0, None, None),
+            (4.6, 30.0, None, None),
+            (5.4, 3_000.0, None, Some(5.0)),
+            (5.0, 3_000.0, None, Some(5.0)),
+            (4.6, 3_000.0, None, Some(4.6)),
+            (4.6, 2_000.0, None, None),
+            (9.0, 30.0, Some(7.0), Some(7.0)),
+            (4.6, 30.0, Some(4.6), Some(4.6)),
+        ];
+        for (cut, cap_ly, asked, expected) in cases {
+            let builder = SkyQuery::builder(sun(), Magnitudes::new(cut));
+            let builder = match asked {
+                Some(v) => builder.synthetic_ceiling(Magnitudes::new(v)),
+                None => builder,
+            };
+            let caps = SkyCaps::forced(LightYears::new(cap_ly)).unwrap();
+            let query = Arc::new(caps.on(builder.build().unwrap()));
+            let (stated, planned) = timeout(
+                WAIT,
+                plan(
+                    &pool,
+                    &galaxy,
+                    &tables,
+                    Arc::clone(&query),
+                    &SHELL_EDGES_LY,
+                    &token,
+                ),
+            )
+            .await
+            .expect("timed out planning")
+            .unwrap();
+            let what = format!("cut {cut}, caps {cap_ly} ly, asked {asked:?}");
+            assert_eq!(
+                stated.synthetic_ceiling().map(Magnitudes::value),
+                expected,
+                "{what}"
+            );
+            assert_eq!(stated.forced_caps(), query.forced_caps(), "{what}");
+            let forced = stated.forced_caps().unwrap().to_vec();
+            assert_eq!(
+                planned,
+                census_plan_with_edges(&stated, forced, &SHELL_EDGES_LY),
+                "{what}"
+            );
+        }
+        timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
+    }
+
+    /// Runs `work` on a thread of its own and returns the receiver of its result. A wait on it that
+    /// runs out fails the test and leaves the thread behind, where a `spawn_blocking` task, which
+    /// cannot be aborted, would hold the runtime's drop until it returned.
+    fn on_a_thread<T: Send + 'static>(
+        work: impl FnOnce() -> T + Send + 'static,
+    ) -> oneshot::Receiver<T> {
+        let (sent, received) = oneshot::channel();
+        // Detached: the receiver is the test's only hold on the work.
+        std::thread::spawn(move || {
+            // A test that has stopped waiting has dropped the receiver, and wants nothing.
+            let _ = sent.send(work());
+        });
+        received
+    }
+
+    /// Each cap's radii, rule bound and counts beyond it, by their bits.
+    fn cap_bits(caps: &[LayerCap]) -> Vec<u64> {
+        caps.iter()
+            .flat_map(|cap| {
+                let rays = cap.rays().map_or(&[][..], |rays| rays.radii_ly());
+                [
+                    cap.radius().value(),
+                    cap.rule_bound().value(),
+                    cap.expected_beyond(),
+                    cap.bright_beyond().unwrap_or(f64::NAN),
+                ]
+                .into_iter()
+                .chain(rays.iter().copied())
+                .map(f64::to_bits)
+                .collect::<Vec<_>>()
+            })
+            .collect()
+    }
+
+    /// The median of `values`.
+    fn median(values: &[f64]) -> f64 {
+        let mut sorted = values.to_vec();
+        sorted.sort_by(f64::total_cmp);
+        sorted[sorted.len() / 2]
+    }
+
+    /// Near the Sun on the server's galaxy, over its own tables, at RM3's synthetic ceiling of
+    /// V 5.0 and the eye's cut near the Sun, 7.95: the caps' two counts in jobs over one measure of
+    /// the rays, the real boundary in one more, and the plan are the sim's `census_plan` at the
+    /// ceiling, bit for bit (rendering plan R13, R13.T2.b). Each of C's, D's and E's rays lies
+    /// within its cut's cap and the real limit, and the limit holds E's rays here, so E states more
+    /// than one star brighter than V 5.0 beyond its boundary (R13.T1.b: 966 of E's 1,536 rays
+    /// held on this galaxy). It prints each layer's boundary and counts beyond it.
+    ///
+    /// At a cut of 4.6, brighter than the ceiling, whose D and E caps reach past the limit, the
+    /// ceiling is the cut, counted once the cut's caps are drawn (`decision-r13-t2b-ceiling.md`):
+    /// that plan is the sim's too, bit for bit, and C's, D's and E's counts beyond their boundary
+    /// brighter than the ceiling are their counts brighter than the cut, bit for bit.
+    ///
+    /// The tables are built on the test's pool, as the server builds them, the serial build's bit
+    /// for bit (`compute::sky_tables`), and the sim's three references, each serial in itself, run
+    /// side by side on threads of their own, each with its own noise cache, which changes no value:
+    /// the test holds four slots (`.config/nextest.toml`), which a serial build and serial
+    /// references, a minute and some 45 s in a test build, left idle.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "two cuts' plans against the sim's, then each layer's boundary checked and printed"
+    )]
+    async fn at_the_ceiling_the_caps_counts_in_jobs_are_the_sims_real_boundary() {
+        use hyperion_sim::sky::caps::REAL_LIMIT_LY;
+
+        use crate::compute::sky_tables::build_on_pool;
+
+        // Bounds only a hang: the tables take about a minute to build serially in a test build,
+        // less on the pool, and each reference about 15 s (measured 2026-10-10 at a load of about
+        // 20).
+        let patience = Duration::from_secs(600);
+        let galaxy = Arc::new(Galaxy::new(Seed::new(0x4d2)).with_full_potential());
+        let pool = pool(3);
+        let token = CancelToken::new();
+        let tables = Arc::new(
+            timeout(patience, build_on_pool(&pool, &galaxy, &token))
+                .await
+                .expect("timed out building the tables")
                 .unwrap(),
         );
-        let planned = timeout(
-            WAIT,
-            plan(&pool, &galaxy, &tables, &seen, &SHELL_EDGES_LY, &token),
-        )
-        .await
-        .expect("timed out planning")
-        .unwrap();
-        let sims = census_plan(&galaxy, &tables.tables, &tables.envelope, &seen, &mut noise);
-        assert_eq!(planned, sims);
+        let served = async |cut: f64| {
+            let asked = SkyQuery::builder(sun(), Magnitudes::new(cut))
+                .build()
+                .unwrap();
+            timeout(
+                WAIT,
+                plan(
+                    &pool,
+                    &galaxy,
+                    &tables,
+                    Arc::new(asked),
+                    &SHELL_EDGES_LY,
+                    &token,
+                ),
+            )
+            .await
+            .expect("timed out planning")
+            .unwrap()
+        };
+
+        // A shallow cut: the ceiling is the cut, decided once the cut's caps are drawn.
+        let (shallow, planned_shallow) = served(4.6).await;
+        assert_eq!(shallow.synthetic_ceiling(), Some(Magnitudes::new(4.6)));
+        let (query, planned) = served(7.95).await;
+        assert_eq!(query.synthetic_ceiling(), Some(SYNTHETIC_CEILING));
         pool.shutdown().await.unwrap();
+
+        // The sim's three references, each serial in itself, side by side on threads of their own,
+        // each with its own noise cache: its plan of each query, and its caps at the second's cut.
+        let sim_plan = |query: &Arc<SkyQuery>| {
+            let (galaxy, tables, query) =
+                (Arc::clone(&galaxy), Arc::clone(&tables), Arc::clone(query));
+            on_a_thread(move || {
+                let mut noise = NoiseCache::with_capacity(MARCH_NOISE_SLOTS);
+                census_plan(
+                    &galaxy,
+                    &tables.tables,
+                    &tables.envelope,
+                    &query,
+                    &mut noise,
+                )
+            })
+        };
+        let (sims_shallow, sims) = (sim_plan(&shallow), sim_plan(&query));
+        let at_cut = {
+            let (galaxy, tables, query) =
+                (Arc::clone(&galaxy), Arc::clone(&tables), Arc::clone(&query));
+            on_a_thread(move || {
+                let mut noise = NoiseCache::with_capacity(MARCH_NOISE_SLOTS);
+                layer_caps(
+                    &galaxy,
+                    &tables.tables,
+                    &tables.envelope,
+                    query.observer(),
+                    query.cut(),
+                    &mut noise,
+                )
+            })
+        };
+        let sims_shallow = timeout(patience, sims_shallow)
+            .await
+            .expect("timed out on the sim's plan at 4.6")
+            .expect("the sim's plan at 4.6");
+        let sims = timeout(patience, sims)
+            .await
+            .expect("timed out on the sim's plan at 7.95")
+            .expect("the sim's plan at 7.95");
+        let at_cut = timeout(patience, at_cut)
+            .await
+            .expect("timed out on the sim's caps at 7.95")
+            .expect("the sim's caps at 7.95");
+
+        assert_eq!(planned_shallow, sims_shallow);
+        assert_eq!(
+            cap_bits(planned_shallow.caps()),
+            cap_bits(sims_shallow.caps())
+        );
+        for cap in planned_shallow.caps() {
+            if matches!(cap.layer(), Layer::C | Layer::D | Layer::E) {
+                let bright = cap.bright_beyond().expect("a real boundary states it");
+                assert_eq!(
+                    bright.to_bits(),
+                    cap.expected_beyond().to_bits(),
+                    "{:?}",
+                    cap.layer()
+                );
+            }
+        }
+
+        assert_eq!(planned, sims);
+        assert_eq!(cap_bits(planned.caps()), cap_bits(sims.caps()));
+
+        for (real, cut) in planned.caps().iter().zip(&at_cut) {
+            let layer = real.layer();
+            assert_eq!(layer, cut.layer());
+            let bright = real
+                .bright_beyond()
+                .expect("a real boundary's count beyond");
+            if !matches!(layer, Layer::C | Layer::D | Layer::E) {
+                // The cut's cap, bit for bit, stating its count beyond brighter than V 5.0 too.
+                let mut real_bits = cap_bits(std::slice::from_ref(real));
+                real_bits[3] = f64::NAN.to_bits();
+                assert_eq!(real_bits, cap_bits(std::slice::from_ref(cut)), "{layer:?}");
+                continue;
+            }
+            let (rays, cut_rays) = (real.rays().unwrap(), cut.rays().unwrap());
+            assert!(
+                rays.radii_ly()
+                    .iter()
+                    .zip(cut_rays.radii_ly())
+                    .all(|(&r, &c)| r <= c && r <= REAL_LIMIT_LY),
+                "{layer:?}'s real boundary lies within its cut's cap and the limit"
+            );
+            let held = rays
+                .radii_ly()
+                .iter()
+                .filter(|&&r| r.total_cmp(&REAL_LIMIT_LY).is_eq())
+                .count();
+            eprintln!(
+                "{layer:?}: R(u) median {:.0} ly, largest {:.0} ly, {held} of {} rays at the \
+                 limit; beyond it {:.4} brighter than V 5.0 and {:.1} than the cut",
+                median(rays.radii_ly()),
+                rays.largest().value(),
+                rays.radii_ly().len(),
+                bright,
+                real.expected_beyond()
+            );
+            if layer == Layer::E {
+                assert!(
+                    held > 0 && bright > 1.0,
+                    "E's rays at the limit: {held}, {bright}"
+                );
+            }
+        }
     }
 
     /// The listed stars' eye offsets in jobs of a few stars each, joined in order, are
@@ -1842,14 +3762,14 @@ mod tests {
         let query = caps.on(SkyQuery::builder(sun(), cut).build().unwrap());
         let plan = census_plan_of(&query, query.forced_caps().unwrap().to_vec());
         let shells: Vec<Shell> = plan.shells().collect();
-        let census = serial_census(&galaxy, &tables, &query, &plan, &shells);
+        let census = serial_census(&galaxy, (&tables, &NoModifiers), &query, &plan, &shells);
         let (eye, spec) = (EyeObserver::default(), BandSpec::new(2, 12).unwrap());
         let glare = Glare::of_listed(query.observer(), census.listed(), &spec, cut);
         let mut texels = Vec::new();
         for face in CubeFace::ALL {
             hyperion_sim::sky::band::band_rows(
                 &galaxy,
-                &mut tables.march_context(),
+                &mut tables.march_context(&NoModifiers),
                 &query,
                 &SkyCensus::empty(),
                 &CompleteTo::nowhere(),
@@ -2026,5 +3946,76 @@ mod tests {
             .build()
             .unwrap());
         assert!(derived.forced_caps().is_none());
+    }
+
+    /// The modifiers `FeatureGas` gives at `years` along the segment from `from` to `to`, its cells
+    /// looked up through none: what a job's gas must give.
+    pub(crate) fn feature_gas_at(
+        galaxy: &Galaxy,
+        years: f64,
+        from: &GalacticPosition,
+        to: &GalacticPosition,
+    ) -> Vec<GasModifier> {
+        let mut out = Vec::new();
+        FeatureGas::new(
+            galaxy,
+            &hyperion_sim::galaxy::features::catalogue::NoFeatureCache,
+            Years::new(years),
+        )
+        .modifiers_near_segment(from, to, &mut out);
+        out
+    }
+
+    /// A nursery within reach of `from` whose gas along the segment to it differs between the
+    /// epoch and a thousand years on: its bubble grows, or its gas disperses.
+    pub(crate) fn an_ageing_nursery(galaxy: &Galaxy, from: &GalacticPosition) -> GalacticPosition {
+        use hyperion_sim::galaxy::features::catalogue::{
+            FeatureCatalogue, FeatureMarks, NoFeatureCache,
+        };
+        FeatureCatalogue::near(galaxy, from, LightYears::new(3_000.0), &NoFeatureCache)
+            .filter(|feature| matches!(feature.marks(), FeatureMarks::Nursery(_)))
+            .map(|feature| *feature.position())
+            .find(|to| {
+                let now = feature_gas_at(galaxy, 0.0, from, to);
+                !now.is_empty() && now != feature_gas_at(galaxy, 1_000.0, from, to)
+            })
+            .expect("a nursery near the Sun whose gas changes within a thousand years")
+    }
+
+    /// A sky's job marches through plan 09's features' gas at its own time once its tables carry
+    /// the galaxy's index, the gas [`FeatureGas`] gives through the sim's own lookup, and through
+    /// none otherwise (P09.T40.a). The tables are one galaxy's, shared by every request, so a
+    /// nursery that ages between two jobs' times shows that each takes its own.
+    #[test]
+    fn a_job_s_gas_is_the_features_at_its_own_time_once_the_tables_carry_their_index() {
+        let galaxy = Galaxy::new(Seed::new(0x4d2));
+        let from = *sun().position();
+        let to = an_ageing_nursery(&galaxy, &from);
+        let smooth = SkyTables::new(LuminosityTables::dark(&galaxy), &galaxy);
+        let featured = featured_tables(&galaxy, GENERATOR_VERSION);
+        assert!(featured.heap_bytes() > smooth.heap_bytes() + (40 << 20));
+        let mut found = Vec::new();
+        for years in [0_i32, 1_000] {
+            let t = UniverseTime::from_julian_years(i64::from(years)).unwrap();
+            let mut none = Vec::new();
+            smooth
+                .gas(&galaxy, t)
+                .modifiers_near_segment(&from, &to, &mut none);
+            assert!(
+                none.is_empty(),
+                "no feature's gas without the cells: {none:?}"
+            );
+            let mut at = Vec::new();
+            featured
+                .gas(&galaxy, t)
+                .modifiers_near_segment(&from, &to, &mut at);
+            assert_eq!(
+                at,
+                feature_gas_at(&galaxy, f64::from(years), &from, &to),
+                "{years} y"
+            );
+            found.push(at);
+        }
+        assert_ne!(found[0], found[1], "each job's own time");
     }
 }

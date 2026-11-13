@@ -26,8 +26,11 @@ fn excess(value : vec3f) -> vec3f {
   return value - min(value, vec3f(draw.threshold));
 }
 
+// A texel's light above the threshold, but none of a host disc's (meter class 0 in alpha), whose
+// glare its source draws in closed form; every mip level's alpha is 1.
 fn texel(at : vec2i, size : vec2i) -> vec3f {
-  return excess(textureLoad(source, clamp(at, vec2i(0), size - 1), 0).rgb);
+  let value = textureLoad(source, clamp(at, vec2i(0), size - 1), 0);
+  return clamp(value.a, 0.0, 1.0) * excess(value.rgb);
 }
 
 // A bilinear sample at continuous texel coordinates (texel n's centre at n + 0.5), clamped.

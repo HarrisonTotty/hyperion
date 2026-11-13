@@ -104,6 +104,11 @@ struct Hermite {
 }
 
 impl Hermite {
+    /// The bytes its three tables own on the heap.
+    fn heap_bytes(&self) -> usize {
+        size_of_val(&*self.x) + size_of_val(&*self.y) + size_of_val(&*self.d)
+    }
+
     fn new(x: Vec<f64>, y: Vec<f64>) -> Self {
         let n = x.len();
         let secant: Vec<f64> = (0..n - 1)
@@ -732,6 +737,21 @@ impl DistributionFunction {
             return 0.0;
         }
         math::exp(self.log_density.eval(math::ln(r)))
+    }
+
+    /// The bytes its tables own on the heap, for [`Galaxy::heap_bytes`](crate::galaxy::Galaxy::heap_bytes)
+    /// once the galaxy holds its centre (P09.T29).
+    #[must_use]
+    pub(crate) fn heap_bytes(&self) -> usize {
+        size_of_val(&*self.energies)
+            + size_of_val(&*self.values)
+            + self.log_f.heap_bytes()
+            + size_of_val(&*self.panel_energy)
+            + size_of_val(&*self.panel_weight)
+            + size_of_val(&*self.panel_f)
+            + self.log_density.heap_bytes()
+            + self.cumulative.heap_bytes()
+            + size_of_val(&*self.panel_max)
     }
 
     /// The lowest energy with members, `E_out`, (km/s)²: the outer cut's (module documentation).

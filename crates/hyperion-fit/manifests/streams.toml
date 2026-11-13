@@ -1,0 +1,24 @@
+# Globular-cluster streams per globular cluster (plan 15, P15.T11.b), the multiplier plan 10's
+# `global_list::orphans` reads from generator version 27. Plan 10's generator at the Milky Way's
+# values under version 27's rules (`generator_version`, the task's `FIT_VERSION`): eight galaxies'
+# living globulars' tubes and 256 orphans each, sprayed and reduced to their tube tables, seen by
+# eight observers in the plane at 8 kpc through the detectability cut, and k chosen on the grid
+# where the count meets the census's globular-like streams inside the same distance and latitude. The cut: above 10³ M☉ of a stream within 30 kpc of the observer, where its
+# axis is at least ten times as dense as the smooth halo and more than 15° from the plane.
+task = "streams"
+datasets = ["stream_census"]
+
+[params]
+generator_version = 27
+grid_low = 0.5
+grid_high = 4.5
+grid_steps = 40
+seed = 0x0f11_b000_0000_0000
+galaxies = 8
+orphans_per_galaxy = 256
+observer_kpc = 8.0
+observers = 8
+min_mass_msun = 1000.0
+max_distance_kpc = 30.0
+min_contrast = 10.0
+min_latitude_deg = 15.0

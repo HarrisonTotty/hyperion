@@ -90,6 +90,8 @@ use std::error::Error;
 use std::fmt;
 
 use super::PointLy;
+#[cfg(doc)]
+use super::displaced::DisplacedFields;
 use super::fields::arms::Arm;
 #[cfg(doc)]
 use super::fields::arms::{ArmAcross, ArmGeometry, GentleArm, SharpArm};
@@ -470,13 +472,31 @@ impl Fields {
     /// It reads the nearest corner and the cell's ranges of radius and phase once for every
     /// component, and the arm factor's bound once for the sub-discs, which share one arm.
     pub fn component_bounds(&self, cell: &CellBox, out: &mut [f64; MAX_COMPONENTS]) {
+        self.component_bounds_of(cell, &[true; MAX_COMPONENTS], out);
+    }
+
+    /// [`component_bounds`](Self::component_bounds) for the components `wanted` marks, by index
+    /// (P09.T40.a).
+    ///
+    /// Those entries are the same bits, and every other is set to 0. Plan 09's catalogue reads it
+    /// for its disc processes' columns, so that the components it does not follow cost nothing.
+    pub(crate) fn component_bounds_of(
+        &self,
+        cell: &CellBox,
+        wanted: &[bool; MAX_COMPONENTS],
+        out: &mut [f64; MAX_COMPONENTS],
+    ) {
         let corner = Site::new(&cell.nearest_corner());
         let radii = cell.r_cyl_range();
         // Every arm follows the galaxy's geometry, which `Fields::new` asserts.
         let phase = self.arms().phase_range(cell);
         let mut last: Option<(&Arm, f64)> = None;
         let (used, rest) = out.split_at_mut(self.components().len());
-        for (slot, component) in used.iter_mut().zip(self.components()) {
+        for ((slot, component), &want) in used.iter_mut().zip(self.components()).zip(wanted) {
+            if !want {
+                *slot = 0.0;
+                continue;
+            }
             let envelope = component.shape().envelope_sup(&corner, radii.hi) * (1.0 + BOUND_MARGIN);
             *slot = match component.arm() {
                 Some(arm) => {
@@ -523,16 +543,43 @@ impl Fields {
     /// assert!((0.5..3.0).contains(&(bound * 512.0)));
     /// # Ok::<(), hyperion_sim::galaxy::bounds::BuildCellBoxError>(())
     /// ```
+    ///
+    /// Where the galaxy's build has installed plan 08's displaced classes (P08.T12.a), the sum runs
+    /// on over the band's classes in their order, each weighted by its systems inside the cube,
+    /// as [`layer_density`](Self::layer_density) does: [`DisplacedFields::bound`] for each.
     #[must_use]
     pub fn layer_bound(&self, shares: &ShareMatrix, band: MassBand, cell: &CellBox) -> f64 {
+        self.layer_bound_each(shares, band, cell, |_| {})
+    }
+
+    /// [`layer_bound`](Self::layer_bound), bit for bit, handing each displaced class's term,
+    /// `share × bound`, to `each` in the band's order as the sum takes it: the candidate pick's
+    /// early rejection reads them (P08.T12.b).
+    #[must_use]
+    pub(crate) fn layer_bound_each(
+        &self,
+        shares: &ShareMatrix,
+        band: MassBand,
+        cell: &CellBox,
+        mut each: impl FnMut(f64),
+    ) -> f64 {
         let mut bounds = [0.0; MAX_COMPONENTS];
         self.component_bounds(cell, &mut bounds);
-        self.components()
+        let field = self
+            .components()
             .iter()
             .zip(bounds)
             .fold(0.0, |sum, (c, bound)| {
                 sum + shares.component_share(band, c) * bound
-            })
+            });
+        match self.displaced() {
+            None => field,
+            Some(displaced) => displaced.order(band).iter().fold(field, |sum, &id| {
+                let term = shares.displaced_share(band, id) * displaced.bound(id, cell);
+                each(term);
+                sum + term
+            }),
+        }
     }
 }
 

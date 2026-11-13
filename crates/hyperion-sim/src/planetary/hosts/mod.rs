@@ -1,12 +1,24 @@
-//! Special hosts: the closed forms behind a body's fate on a young or evolved host (plan 14, phase
-//! F).
+//! Special hosts: the closed forms behind a body's fate on a young or evolved host, and the
+//! substellar hosts (plan 14, phase F).
 //!
 //! - [`young`]: when each planet forms, below its disc's lifetime (design note 12, P14.T28.a).
+//! - [`second_generation`]: a neutron star's fallback-disc planets (design note 11, P14.T28.e),
+//!   behind their hold at generator version 26.
 //! - [`evolved`]: circularisation, adiabatic expansion, engulfment by an expanding giant, and what
 //!   a supernova leaves of an orbit (design note 11, P14.T28.b and c).
+//! - [`substellar`]: a free-floating brown dwarf's planets (design note 13, P14.T27.a), behind
+//!   their hold at generator version 26.
+//! - [`strip`]: the radius beyond which a system keeps nothing, its tidal and encounter cuts
+//!   (design note 14, P14.T29).
+//! - [`white_dwarfs`]: a white dwarf's pollution and dusty debris disc (design note 11,
+//!   P14.T28.d), behind their hold at generator version 26.
 //!
-//! [`fate`](crate::planetary::fate) strings them together into a body's state at a time. The
-//! substellar hosts of P14.T27 and the stripping of P14.T29 will join them here.
+//! [`fate`](crate::planetary::fate) strings the first two together into a body's state at a time.
+//! The rogue planets of P14.T27.b will join them here.
 
 pub mod evolved;
+pub mod second_generation;
+pub mod strip;
+pub mod substellar;
+pub mod white_dwarfs;
 pub mod young;

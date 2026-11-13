@@ -1,0 +1,6 @@
+# generator_version = 31
+TypeIa Some(ClassId(1)) Onset in Photometric(V)
+event e9c9e11df0000001:0202000000000000
+host = 0xe9c9e11df0000001
+arrival 23449513673 s 771919908 ns
+flux = 0x40a87792a26d6cc7  # 3131.7863954730306

@@ -6,20 +6,31 @@
  * cells` pass against their in-fragment draws (T8.d's G11); its summed flux against the point's at
  * the 3 px switch, over phases and sub-pixel placements; a Saturn-like f = 0.098 disc's extents at
  * 100 px; a disc under a half-surveyed two-class map, and under a map of one class equal to the
- * uniform law against the uniform disc; a moon's night side lit by its planet's planetshine (T11).
+ * uniform law against the uniform disc; a moon's night side lit by its planet's planetshine (T11);
+ * and a class map's disc under the field's normal map (plan R10, R10.T10.g), of sloped cells and of
+ * the datum's own normals, and of sloped cells lit by planetshine alone, its source's disc cut by
+ * the datum's plane.
  */
 
-import { add, scale, vec3 } from "../geometry/vec3";
+import { add, scale, type Vec3, vec3 } from "../geometry/vec3";
+import { checkerNormalMap, datumNormalMap, type FieldCell } from "../test/normalMapFixtures";
 import type { ClassMapDiscSurface } from "../view/appearance/bodyAppearance";
 import { PROVISIONAL_PHOTOMETRY } from "../view/appearance/fromWire";
 import { lawFor } from "../view/appearance/phase";
+import type { PhotometricLaw } from "../view/appearance/law";
+import { normalMapTexture } from "../view/bodies/discNormals";
 import {
   compositeDiscPixels,
   type CompositePixel,
   rasteriseDisc,
   viewRay,
 } from "../view/bodies/discShading";
-import { type ClassMapTexels, classMapSurface, packClassMap } from "../view/bodies/discSurface";
+import {
+  type ClassMapTexel,
+  type ClassMapTexels,
+  classMapSurface,
+  packClassMap,
+} from "../view/bodies/discSurface";
 import {
   BODY_DISC_CELLS_KERNEL,
   LitBodyRenderer,
@@ -37,6 +48,7 @@ import {
   viewRotation4,
 } from "../view/camera/projection";
 import { IDENTITY_QUATERNION } from "../view/camera/quaternion";
+import { MATURITY_NODES } from "../view/terrain/maturityNodes";
 import type { BodyFigure } from "../view/terrain/planet";
 import type { ComputeHandle, RenderEngine } from "../view/engine/types";
 import { DISC_ANNULI_HIGH } from "../view/lighting/annuli";
@@ -51,6 +63,7 @@ import { WIREFRAME_MATERIALS, WIREFRAME_MESHES } from "../view/wireframe/submit"
 import { BUFFER_USAGE } from "../view/engine/gpuFlags";
 import { PhotorealRenderer } from "../view/photoreal/renderer";
 import { SKY_SPRITE_HDR_MATERIAL } from "../view/sky/spriteHdr";
+import type { CapturedImage } from "./atmosphere";
 import { addCanvas } from "./frames";
 import {
   type Checks,
@@ -63,6 +76,7 @@ import {
   NEAR_M,
   pause,
 } from "./harness";
+import { hdrCapture } from "./hdrCapture";
 
 const CAMERA: ProjectionCamera = { orientation: IDENTITY_QUATERNION, fovXRad: Math.PI / 3 };
 
@@ -93,8 +107,15 @@ interface MappedSurface {
 interface DrawExtras {
   /** The pre-exposure, 1 ÷ (cd/m²). */
   readonly exposure?: number;
-  /** A neighbour on the body's anti-solar side, full from it: its radius and distance, m. */
-  readonly shine?: { readonly radiusM: number; readonly distanceM: number };
+  /**
+   * A neighbour that lights the body by planetshine: its radius and distance, m, and its unit
+   * direction from the body's centre, the anti-solar one, full from the body, where none is given.
+   */
+  readonly shine?: {
+    readonly radiusM: number;
+    readonly distanceM: number;
+    readonly direction?: Vec3;
+  };
   /**
    * The `disc cells` kernel, dispatched before the draws so that a small disc reads its pixels'
    * sums (R07.T8.d); absent, every disc sums its own cells in its draws.
@@ -155,6 +176,7 @@ async function drawDisc(
   const options = {
     camera,
     viewport,
+    presentedPx: viewport,
     exposureScale: extras.exposure ?? EXPOSURE,
     annuli: DISC_ANNULI_HIGH,
     planetshine: PLANETSHINE_SOURCES_HIGH,
@@ -173,10 +195,10 @@ async function drawDisc(
           },
         ];
   if (extras.shine !== undefined) {
-    const { radiusM, distanceM } = extras.shine;
+    const { radiusM, distanceM, direction = scale(towards, -1) } = extras.shine;
     others.push({
       id: "0200080020000000.0003",
-      centreM: add(centreM, scale(towards, -distanceM)),
+      centreM: add(centreM, scale(direction, distanceM)),
       figure: { equatorialRadiusM: radiusM, polarRadiusM: radiusM, pole: null },
       photometry: PROVISIONAL_PHOTOMETRY,
       lighting: undefined,
@@ -606,7 +628,10 @@ function worstRelative(a: Float32Array, b: Float32Array): number {
 /**
  * T8.b: a disc under a class map on the GPU: a half-surveyed two-class map (a dark lunar and a
  * bright terrestrial class, the provisional Lambert law elsewhere) against the CPU rasteriser, and a
- * map of one class equal to the uniform law against the uniform disc.
+ * map of one class equal to the uniform law against the uniform disc. R10.T10.d: each read by the
+ * survey-masked bilinear reconstruction with the face gutter, and a half-surveyed map at R10's 64
+ * texels a face, its survey's edge column partly surveyed, against the rasteriser, every texel
+ * finite.
  */
 export async function checkClassMap(engine: RenderEngine, checks: Checks): Promise<void> {
   const uniform = PROVISIONAL_PHOTOMETRY.law;
@@ -663,6 +688,89 @@ export async function checkClassMap(engine: RenderEngine, checks: Checks): Promi
       agreement.worst <= 1 && agreement.classes && drawn.expected.length > 0,
       `${String(drawn.expected.length)} pixels; worst error ${agreement.worst.toFixed(3)} of the tolerance; classes as the rasteriser's ${String(agreement.classes)}${agreement.mismatches.length > 0 ? `: ${agreement.mismatches.slice(0, 6).join("; ")}` : ""}`,
     );
+    // R10.T10.d: a map at R10's level, 64 texels a face with its gutter, half of every face
+    // surveyed (i < 32), the column at the survey's edge (i = 31) half surveyed, its weights halved,
+    // two classes in a pattern that varies texel to texel; read by the survey-masked bilinear
+    // reconstruction on the GPU and in the rasteriser alike.
+    const level = levelClassMap();
+    const atLevel = classMapSurface(
+      engine,
+      "smoke class map at R10's level",
+      level,
+      levelClassLaws(),
+      uniform,
+    );
+    made.push(atLevel);
+    const reconstructed = await drawDisc(
+      engine,
+      renderer,
+      viewport,
+      40,
+      60,
+      TILTED_OBLATE,
+      [0, 0],
+      CAMERA,
+      null,
+      { surface: atLevel, rotation: TILTED, texels: level },
+    );
+    const finite = reconstructed.texels.every((value) => Number.isFinite(value));
+    const levelAgreement = texelAgreement(reconstructed);
+    checks.check(
+      "R10.T10.d a disc under a half-surveyed class map at 64 texels a face equals the CPU rasteriser's, every texel finite",
+      finite &&
+        levelAgreement.worst <= 1 &&
+        levelAgreement.classes &&
+        reconstructed.expected.length > 0,
+      `${String(reconstructed.expected.length)} pixels; every texel finite ${String(finite)}; worst error ${levelAgreement.worst.toFixed(3)} of the tolerance; classes as the rasteriser's ${String(levelAgreement.classes)}${levelAgreement.mismatches.length > 0 ? `: ${levelAgreement.mismatches.slice(0, 6).join("; ")}` : ""}`,
+    );
+    await checkNormalMap(engine, renderer, checks, level, atLevel, reconstructed, made);
+    // Lane fix-coast-class-map: a map of four texels a face with a fine page, half its texels
+    // refined in a pattern that varies cell to cell, a cell of each not surveyed, read at the
+    // field's level in its refined texels and across their edges, on the GPU and in the rasteriser
+    // alike: a level-8 field's 4 × 4 cells, and a level-7 field's 2 × 2 under a maturity, whose
+    // codes the cells and the tiles' gutters carry; each at its cells' centres and, as the worker
+    // answers from generator version 28, at their corners.
+    for (const [side, matured, corners] of [
+      [4, false, false],
+      [2, true, false],
+      [4, false, true],
+      [2, true, true],
+    ] as const) {
+      const fine = corners ? fineCornerMap(side, matured) : fineClassMap(side, matured);
+      const withFine = classMapSurface(
+        engine,
+        `smoke class map with a fine page of ${String(side)} cells a side${corners ? " at their corners" : ""}`,
+        fine,
+        levelClassLaws(),
+        uniform,
+      );
+      made.push(withFine);
+      // The harness reads its targets back in order: each before the next draws.
+      // oxlint-disable-next-line no-await-in-loop
+      const refined = await drawDisc(
+        engine,
+        renderer,
+        viewport,
+        40,
+        60,
+        TILTED_OBLATE,
+        [0, 0],
+        CAMERA,
+        null,
+        { surface: withFine, rotation: TILTED, texels: fine },
+      );
+      const fineFinite = refined.texels.every((value) => Number.isFinite(value));
+      const fineAgreement = texelAgreement(refined);
+      checks.check(
+        `fix-coast-class-map a disc under a class map with a fine page of ${String(side)} × ${String(side)} cells${corners ? " at their corners" : ""}${matured ? " and a maturity" : ""} equals the CPU rasteriser's, every texel finite`,
+        fineFinite &&
+          fineAgreement.worst <= 1 &&
+          fineAgreement.classes &&
+          refined.expected.length > 0 &&
+          fine.fine !== undefined,
+        `${String(refined.expected.length)} pixels; ${String(fine.fine?.tiles ?? 0)} tiles; every texel finite ${String(fineFinite)}; worst error ${fineAgreement.worst.toFixed(3)} of the tolerance; classes as the rasteriser's ${String(fineAgreement.classes)}${fineAgreement.mismatches.length > 0 ? `: ${fineAgreement.mismatches.slice(0, 6).join("; ")}` : ""}`,
+      );
+    }
     const results: string[] = [];
     let worst = 0;
     for (const diameterPx of [20, 40]) {
@@ -699,6 +807,329 @@ export async function checkClassMap(engine: RenderEngine, checks: Checks): Promi
   } finally {
     for (const surface of made) {
       engine.releaseTexture(surface.weights);
+      if (surface.normals !== null) {
+        engine.releaseTexture(surface.normals.texture);
+      }
+    }
+    renderer.dispose();
+  }
+}
+
+/**
+ * R10.T10.d's map at R10's level: 64 texels a face, half of every face surveyed (i < 32), the
+ * column at the survey's edge (i = 31) half surveyed, two classes in a pattern that varies texel to
+ * texel.
+ */
+function levelClassMap(): ClassMapTexels {
+  return packClassMap(64, 2, ({ i, j }) => {
+    if (i >= 32) {
+      return null;
+    }
+    const w = ((i + 2 * j) % 8) / 7;
+    const share = i === 31 ? 0.5 : 1;
+    return [w * share, (1 - w) * share];
+  });
+}
+
+/**
+ * Lane fix-coast-class-map's map: four texels a face of two classes, every texel surveyed, those
+ * with i + j even refined to `r` × `r` cells, cell (ci, cj) class 0's where ci + 2 cj + face is odd
+ * mod 3 and class 1's otherwise, the last cell of each not surveyed; the others class 0 at a
+ * quarter and class 1 at the rest, their own the mean of their cells' for the refined. Where
+ * `matured`, texel (i, j)'s code is 5,000 + 7,000 i + 3,000 j and cell c's of a refined one
+ * 10,000 + 3,000 c, each class drawn from nodes rising with their maturity.
+ */
+function fineClassMap(r: 2 | 4, matured: boolean): ClassMapTexels {
+  const refined = ([0, 1, 2, 3, 4, 5] as const).flatMap((face) =>
+    Array.from({ length: 16 }, (_, k) => ({ i: k % 4, j: Math.floor(k / 4) }))
+      .filter(({ i, j }) => (i + j) % 2 === 0)
+      .map(({ i, j }) => ({
+        texel: { face, i, j },
+        cells: Array.from({ length: r * r }, (_, c) => {
+          if (c === r * r - 1) {
+            return null;
+          }
+          const w = ((c % r) + 2 * Math.floor(c / r) + face) % 3 === 1 ? 1 : 0;
+          return [w, 1 - w];
+        }),
+        codes: Array.from({ length: r * r }, (_, c) => 10_000 + 3_000 * c),
+      })),
+  );
+  const ownOf = ({ face, i, j }: ClassMapTexel): ReadonlyArray<number> => {
+    const input = refined.find(
+      ({ texel }) => texel.face === face && texel.i === i && texel.j === j,
+    );
+    if (input === undefined) {
+      return [0.25, 0.75];
+    }
+    const cells = input.cells.filter((cell) => cell !== null);
+    const w = cells.reduce((sum, cell) => sum + (cell[0] ?? 0), 0) / cells.length;
+    return [w, 1 - w];
+  };
+  const maturity = matured
+    ? {
+        codeOf: ({ i, j }: ClassMapTexel): number => 5_000 + 7_000 * i + 3_000 * j,
+        nodes: Float32Array.from(
+          { length: 3 * MATURITY_NODES * 2 },
+          (_, at) =>
+            0.05 +
+            0.04 * (Math.floor(at / 3) % MATURITY_NODES) +
+            0.3 * Math.floor(at / (3 * MATURITY_NODES)) +
+            0.01 * (at % 3),
+        ),
+        drawn: [true, true],
+      }
+    : undefined;
+  return packClassMap(4, 2, ownOf, maturity, { side: r, refined });
+}
+
+/**
+ * {@link fineClassMap} at its refined texels' cells' corners (the worker's map from generator version 28):
+ * four texels a face of two classes, every texel surveyed, those with i + j even refined to `r` ×
+ * `r` cells, their corner (ca, cb) class 0's where ca + 2 cb + face
+ * is 1 mod 3 and class 1's otherwise, the last cell of each not surveyed and its first corner none;
+ * the others class 0 at a quarter and class 1 at the rest, their own the mean of their corners' for
+ * the refined. Where `matured`, texel (i, j)'s code is 5,000 + 7,000 i + 3,000 j and corner c's of a
+ * refined one 10,000 + 2,000 c, each class drawn from nodes rising with their maturity.
+ */
+function fineCornerMap(r: 2 | 4, matured: boolean): ClassMapTexels {
+  const refined = ([0, 1, 2, 3, 4, 5] as const).flatMap((face) =>
+    Array.from({ length: 16 }, (_, k) => ({ i: k % 4, j: Math.floor(k / 4) }))
+      .filter(({ i, j }) => (i + j) % 2 === 0)
+      .map(({ i, j }) => ({
+        texel: { face, i, j },
+        surveyed: Array.from({ length: r * r }, (_, c) => c !== r * r - 1),
+        corners: Array.from({ length: (r + 1) ** 2 }, (_, c) => {
+          // The last cell's first corner, which a cell not surveyed holds, none.
+          if (c === (r - 1) * (r + 2)) {
+            return null;
+          }
+          const w = ((c % (r + 1)) + 2 * Math.floor(c / (r + 1)) + face) % 3 === 1 ? 1 : 0;
+          return [w, 1 - w];
+        }),
+        codes: Array.from({ length: (r + 1) ** 2 }, (_, c) => 10_000 + 2_000 * c),
+      })),
+  );
+  const ownOf = ({ face, i, j }: ClassMapTexel): ReadonlyArray<number> => {
+    const input = refined.find(
+      ({ texel }) => texel.face === face && texel.i === i && texel.j === j,
+    );
+    if (input === undefined) {
+      return [0.25, 0.75];
+    }
+    const corners = input.corners.filter((corner) => corner !== null);
+    const w = corners.reduce((sum, corner) => sum + (corner[0] ?? 0), 0) / corners.length;
+    return [w, 1 - w];
+  };
+  const maturity = matured
+    ? {
+        codeOf: ({ i, j }: ClassMapTexel): number => 5_000 + 7_000 * i + 3_000 * j,
+        nodes: Float32Array.from(
+          { length: 3 * MATURITY_NODES * 2 },
+          (_, at) =>
+            0.05 +
+            0.04 * (Math.floor(at / 3) % MATURITY_NODES) +
+            0.3 * Math.floor(at / (3 * MATURITY_NODES)) +
+            0.01 * (at % 3),
+        ),
+        drawn: [true, true],
+      }
+    : undefined;
+  return packClassMap(4, 2, ownOf, maturity, { side: r, lattice: "corners", refined });
+}
+
+/** {@link levelClassMap}'s two classes' laws: a dark lunar class and a bright terrestrial one. */
+function levelClassLaws(): PhotometricLaw[] {
+  return [
+    lawFor([0.12, 0.12, 0.12], [0.6, 0.6, 0.6], "moon"),
+    lawFor([0.5, 0.45, 0.4], [1.3, 1.3, 1.3], "earth"),
+  ];
+}
+
+/**
+ * A neighbour seen as Jupiter is from Io, 5.9 of its radii away (Jupiter's equatorial radius
+ * 71,492 km, Archinal et al. 2018, Celest. Mech. Dyn. Astron. 130, 22, Table 4; Io's semi-major
+ * axis 421.8 × 10³ km, NASA GSFC's Jovian Satellite Fact Sheet), to the camera's right: the R10.T10.g
+ * record's case of planetshine on a slope, whose source's disc is about 9.8° in radius.
+ */
+const NEIGHBOUR_AS_FROM_IO = {
+  radiusM: 7.1492e7,
+  distanceM: 4.218e8,
+  direction: vec3(1, 0, 0),
+} as const;
+
+/** The pre-exposure of a disc lit by {@link NEIGHBOUR_AS_FROM_IO} alone. */
+const PLANETSHINE_EXPOSURE = 5e-3;
+
+/** Whether a level-7 cell lies in the R10.T10.d map's survey, half of every face (i < 64). */
+function inLevelSurvey(cell: FieldCell): boolean {
+  return cell.i < 64;
+}
+
+/**
+ * R10.T10.g: the R10.T10.d disc's class map (`map`, its surface `plain`, drawn as `drawnPlain`)
+ * with the field's normal map at level 7 (128 texels a face, so that the shader reads the map's own
+ * N, not the class map's 64), surveyed where the class map is (half of every face): first a map of
+ * cells tilted ±12° in a checkerboard, against the CPU rasteriser at the texel tolerance, every
+ * texel finite; then a map of the datum's own normals, against the rasteriser of the same map and
+ * the disc without one by its flux.
+ *
+ * @remarks
+ * A map of the datum's normals draws the disc without one to 1.3 × 10⁻⁵ in flux on the CPU twin
+ * (2026-10-21), but not texel for texel: near the cube's edges its reconstruction tilts a normal by
+ * up to 2.7 × 10⁻³ rad at level 7 (the gutter's neighbouring texels stand at their own centres, not
+ * on the face's extended grid), which moves a texel at oblique light by up to about a percent (the
+ * record's deferred finding).
+ *
+ * @param made - The surfaces the caller releases; the two made here are added.
+ */
+async function checkNormalMap(
+  engine: RenderEngine,
+  renderer: LitBodyRenderer,
+  checks: Checks,
+  map: ClassMapTexels,
+  plain: ClassMapDiscSurface,
+  drawnPlain: Drawn,
+  made: ClassMapDiscSurface[],
+): Promise<void> {
+  const viewport = drawnPlain.viewport;
+  const sloped = classMapSurface(
+    engine,
+    "smoke class map with sloped cells",
+    map,
+    plain.laws,
+    plain.elsewhere,
+    normalMapTexture(
+      engine,
+      "smoke normal map of sloped cells",
+      checkerNormalMap(7, 12 * RAD_PER_DEG, 0.9, inLevelSurvey),
+    ),
+  );
+  made.push(sloped);
+  const drawnSloped = await drawDisc(
+    engine,
+    renderer,
+    viewport,
+    40,
+    60,
+    TILTED_OBLATE,
+    [0, 0],
+    CAMERA,
+    null,
+    { surface: sloped, rotation: TILTED, texels: map },
+  );
+  const finite = drawnSloped.texels.every((value) => Number.isFinite(value));
+  const agreement = texelAgreement(drawnSloped);
+  checks.check(
+    "R10.T10.g a disc under a half-surveyed class map with a normal map of sloped cells equals the CPU rasteriser's, every texel finite",
+    finite && agreement.worst <= 1 && agreement.classes && drawnSloped.expected.length > 0,
+    `${String(drawnSloped.expected.length)} pixels; every texel finite ${String(finite)}; worst error ${agreement.worst.toFixed(3)} of the tolerance; classes as the rasteriser's ${String(agreement.classes)}; the slopes move the flux by ${(texelFlux(drawnSloped) / texelFlux(drawnPlain) - 1).toExponential(2)}${agreement.mismatches.length > 0 ? `: ${agreement.mismatches.slice(0, 6).join("; ")}` : ""}`,
+  );
+  const datum = classMapSurface(
+    engine,
+    "smoke class map with the datum's normals",
+    map,
+    plain.laws,
+    plain.elsewhere,
+    normalMapTexture(
+      engine,
+      "smoke normal map of the datum",
+      datumNormalMap(7, 0.9, inLevelSurvey),
+    ),
+  );
+  made.push(datum);
+  const drawnDatum = await drawDisc(
+    engine,
+    renderer,
+    viewport,
+    40,
+    60,
+    TILTED_OBLATE,
+    [0, 0],
+    CAMERA,
+    null,
+    { surface: datum, rotation: TILTED, texels: map },
+  );
+  const datumAgreement = texelAgreement(drawnDatum);
+  const fluxMoved = texelFlux(drawnDatum) / texelFlux(drawnPlain) - 1;
+  checks.check(
+    "R10.T10.g a normal map of the datum's normals draws the disc without one: its texels the CPU rasteriser's, its flux the plain disc's to 1e-3",
+    datumAgreement.worst <= 1 && datumAgreement.classes && Math.abs(fluxMoved) <= 1e-3,
+    `${String(drawnDatum.expected.length)} pixels; worst error ${datumAgreement.worst.toFixed(3)} of the tolerance; classes as the rasteriser's ${String(datumAgreement.classes)}; flux against the disc without one ${fluxMoved.toExponential(2)}`,
+  );
+  // Planetshine on the slopes, its source's disc cut by the datum's plane as a star's is (the
+  // record's deferred finding): the night side towards the camera, the Sun behind the body, lit by
+  // the neighbour alone from the right, so that planetshine's terminator crosses the disc.
+  const drawnShine = await drawDisc(
+    engine,
+    renderer,
+    viewport,
+    40,
+    180,
+    TILTED_OBLATE,
+    [0, 0],
+    CAMERA,
+    null,
+    { surface: sloped, rotation: TILTED, texels: map },
+    { exposure: PLANETSHINE_EXPOSURE, shine: NEIGHBOUR_AS_FROM_IO },
+  );
+  const shineFinite = drawnShine.texels.every((value) => Number.isFinite(value));
+  const shineAgreement = texelAgreement(drawnShine);
+  const shone = drawnShine.expected.filter(
+    (p) => (drawnShine.texels[(p.yPx * viewport.widthPx + p.xPx) * 4 + 1] ?? 0) > 0,
+  );
+  checks.check(
+    "R10.T10.g a disc under a normal map of sloped cells lit by planetshine alone equals the CPU rasteriser's, every texel finite",
+    shineFinite &&
+      shineAgreement.worst <= 1 &&
+      shineAgreement.classes &&
+      shone.length > 0 &&
+      shone.length < drawnShine.expected.length,
+    `${String(drawnShine.expected.length)} pixels, ${String(shone.length)} lit by planetshine; every texel finite ${String(shineFinite)}; worst error ${shineAgreement.worst.toFixed(3)} of the tolerance; classes as the rasteriser's ${String(shineAgreement.classes)}${shineAgreement.mismatches.length > 0 ? `: ${shineAgreement.mismatches.slice(0, 6).join("; ")}` : ""}`,
+  );
+}
+
+/**
+ * R10.T10.g's capture of planetshine on slopes: {@link checkNormalMap}'s disc under the normal map
+ * of sloped cells, 160 px across, its night side towards the camera, lit by
+ * {@link NEIGHBOUR_AS_FROM_IO} alone from the right, so that planetshine's terminator runs down the
+ * disc's middle; each pixel 2 × 2.
+ */
+export async function capturePlanetshineSlopes(engine: RenderEngine): Promise<CapturedImage[]> {
+  const viewport = { widthPx: 192, heightPx: 192 };
+  const map = levelClassMap();
+  const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
+  const sloped = classMapSurface(
+    engine,
+    "smoke capture's class map with sloped cells",
+    map,
+    levelClassLaws(),
+    PROVISIONAL_PHOTOMETRY.law,
+    normalMapTexture(
+      engine,
+      "smoke capture's normal map of sloped cells",
+      checkerNormalMap(7, 12 * RAD_PER_DEG, 0.9, inLevelSurvey),
+    ),
+  );
+  try {
+    const drawn = await drawDisc(
+      engine,
+      renderer,
+      viewport,
+      160,
+      180,
+      TILTED_OBLATE,
+      [0, 0],
+      CAMERA,
+      null,
+      { surface: sloped, rotation: TILTED, texels: map },
+      { exposure: PLANETSHINE_EXPOSURE, shine: NEIGHBOUR_AS_FROM_IO },
+    );
+    return [hdrCapture("r10-t10g-planetshine-slopes", drawn.texels, viewport, 1, 2)];
+  } finally {
+    engine.releaseTexture(sloped.weights);
+    if (sloped.normals !== null) {
+      engine.releaseTexture(sloped.normals.texture);
     }
     renderer.dispose();
   }
@@ -792,6 +1223,7 @@ export async function checkPhotorealFrame(engine: RenderEngine, checks: Checks):
     const plan = renderer.render(view, {
       camera: CAMERA,
       viewport,
+      presentedPx: viewport,
       role: "eye",
       setting: "high",
       exposureScale: 1e-4,

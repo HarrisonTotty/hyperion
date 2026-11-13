@@ -5,16 +5,21 @@
 //! reference time +H, serves every query of the clock window, each reading its own light ages
 //! through [`LuminosityTables::age_for`]. So [`SkyTablesService`] keys them by [`GalaxyKey`] alone,
 //! never by a request's time or place, and keeps them in a [`SharedByteLru`] of their own budget,
-//! `HYPERION_SKY_TABLES_MB` (160 MiB by default: two galaxies), separate from the census cells'
-//! `HYPERION_SKY_CACHE_MB`. Callers that ask for one galaxy's tables at once share one build
-//! through a [`SingleFlight`], and if every one of them gives up, the build is given up too: its
-//! jobs still queued are skipped.
+//! `HYPERION_SKY_TABLES_MB` (160 MiB by default: one galaxy's with its features' gas index, two
+//! without), separate from the census cells' `HYPERION_SKY_CACHE_MB`. Callers that ask for one
+//! galaxy's tables at once share one build through a [`SingleFlight`], and if every one of them
+//! gives up, the build is given up too: its jobs still queued are skipped.
 //!
-//! The build runs as bulk jobs from [`LuminosityTables::plan`], which the sim splits so that the
-//! server's pool can run it (the sim spawns no threads): one job makes the plan, some 5 CPU-s for
-//! the Milky Way; then, stage by stage, one metallicity at a time from the lowest, the stage's
-//! track samples, a dozen jobs of at most 64 mass nodes, and its accumulation, one job per
-//! component bin that reads the stage; then one job assembles the tables. While a stage
+//! The build runs as bulk jobs from [`LuminosityTables::plan_search`], which the sim splits so that
+//! the server's pool can run it (the sim spawns no threads). The plan, some 5 CPU-s for the Milky
+//! Way, which one job made while the other workers idled, 5.05 of a cold build's 13.2 s on eight
+//! workers (release, pod, 16 vCPU, 2026-11-05), is searched in jobs
+//! ([`PlanSearch`](hyperion_sim::sky::luminosity::PlanSearch)): one job makes the search; then
+//! each stage's ends, a job each; then one job splits the companions' integrals that every stage's
+//! grid reads, made in a job for each worker; then one job finishes the plan. Then, stage by
+//! stage, one metallicity at a time from the lowest, the stage's track samples, a dozen jobs of at
+//! most 64 mass nodes, and its accumulation, one job per component bin that reads the stage; then
+//! one job assembles the tables. While a stage
 //! accumulates, the next stage's samples are made, one stage ahead, which holds two stages' samples
 //! at once and keeps every worker busy through each stage's few accumulation jobs (R06's Risks,
 //! "The job split in stages": about 440 MiB on 16 threads, against 240 MiB without). A bin adds its
@@ -29,10 +34,25 @@
 //! machine, is a per-galaxy cost under its own 30 CPU-s budget, not a sky's, and a sky asked
 //! meanwhile joins it. The open answers without waiting for it.
 //!
+//! Where the feature members are served, as every server but a test's serves them, the sky marches
+//! plan 09's features' gas (P09.T40.a), and a galaxy's tables are built with its
+//! [`FeatureGasIndex`]: its nurseries and clouds, made one slab of feature cells to a bulk job,
+//! [`FeatureGasIndex::SLABS`]' 32, queued ahead of the tables' own jobs, and assembled in one more,
+//! some 7 CPU-s and 52 MB for the Milky Way-like galaxy.
+//! Each slab makes its cells afresh, not through the server's feature cell cache, whose budget a
+//! galaxy's 32,768 cells would sweep. The index is a pure function of the galaxy, so where its
+//! jobs run changes no bit of it.
+//!
 //! A server whose sky's caps are forced for a test ([`SkyCaps::forced`](super::SkyCaps::forced))
 //! is given tables that hold no star, built in one job at once, unless its caps ask for the
 //! galaxy's own ([`SkyCaps::with_galaxy_tables`](super::SkyCaps::with_galaxy_tables)). The service
 //! is made with the one source its server's caps name, so its cache holds one kind of tables.
+//!
+//! A service with files ([`SkyTablesService::with_files`]; perf-sky-tables-on-disk) looks for a
+//! galaxy's tables in them inside the flight, before it builds, and writes what it builds there,
+//! so that a server started again over its data directory reads its galaxies' tables back rather
+//! than building them: the server's, where its tables are the galaxy's own. Tables read so count
+//! no build.
 
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -41,6 +61,8 @@ use std::time::Instant;
 
 use hyperion_protocol::SeedHex;
 use hyperion_sim::galaxy::Galaxy;
+use hyperion_sim::galaxy::features::catalogue::NoFeatureCache;
+use hyperion_sim::galaxy::features::gas_overlay::{FeatureGasIndex, FeatureGasSlab};
 use hyperion_sim::sky::luminosity::{
     BinSums, LuminosityTables, SampleChunk, Stage, TablesPlan, TrackSamples,
 };
@@ -48,7 +70,10 @@ use hyperion_sim::sky::luminosity::{
 use tokio::task::JoinSet;
 
 use super::sky::{BulkJobs, SkyTables, SkyTablesSource, bulk};
-use super::{CancelOnDrop, CancelToken, ComputeError, CpuPool, Flight, GalaxyKey, SingleFlight};
+use super::{
+    CancelOnDrop, CancelToken, ComputeError, CpuPool, Flight, GalaxyKey, SingleFlight,
+    SkyTableFileCounters, SkyTableFiles,
+};
 use crate::cache::{HeapBytes, LruCounters, SharedByteLru};
 
 impl HeapBytes for SkyTables {
@@ -58,11 +83,13 @@ impl HeapBytes for SkyTables {
     }
 }
 
-/// The sky tables' counters: the cache's size and use, and the builds that filled it.
+/// The sky tables' counters: the cache's size and use, the builds that filled it, and the files
+/// they are kept in on disk.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct SkyTablesCounters {
     cache: LruCounters,
     builds: u64,
+    files: SkyTableFileCounters,
 }
 
 impl SkyTablesCounters {
@@ -83,6 +110,14 @@ impl SkyTablesCounters {
     pub fn builds(&self) -> u64 {
         self.builds
     }
+
+    /// The files the tables are kept in under the data directory, and their use: a hit is a
+    /// galaxy's tables read back rather than built (perf-sky-tables-on-disk). All zeros where the
+    /// server keeps none: the sky not served, or its tables a test's that hold no star.
+    #[must_use]
+    pub fn files(&self) -> SkyTableFileCounters {
+        self.files
+    }
 }
 
 /// The sky tables of every galaxy the server holds, in one byte budget, each built once on the
@@ -98,6 +133,21 @@ pub(crate) struct SkyTablesService {
     /// flight lives with no sky waiting ([`prefetch`](Self::prefetch)); aborted at shutdown or when
     /// the service is dropped.
     prefetching: Mutex<JoinSet<()>>,
+    /// Whether every table this service builds carries its galaxy's features' gas index, which
+    /// its jobs march (P09.T40.a), or lends them the smooth field alone.
+    features: TablesGas,
+    /// Where the tables are looked for before they are built, and written once they are: none
+    /// unless [`with_files`](Self::with_files).
+    files: Arc<SkyTableFiles>,
+}
+
+/// The gas a service's tables lend their jobs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TablesGas {
+    /// The smooth field alone.
+    Smooth,
+    /// Plan 09's features' too, from the galaxy's [`FeatureGasIndex`].
+    Indexed,
 }
 
 impl SkyTablesService {
@@ -115,6 +165,29 @@ impl SkyTablesService {
             flights: SingleFlight::new(),
             builds: Arc::new(AtomicU64::new(0)),
             prefetching: Mutex::new(JoinSet::new()),
+            features: TablesGas::Smooth,
+            files: Arc::new(SkyTableFiles::off()),
+        }
+    }
+
+    /// This service, whose tables are built with their galaxy's features' gas index, which their
+    /// jobs march ([`SkyTables::with_features`]): the server's, where the feature members are
+    /// served (P09.T40.a).
+    #[must_use]
+    pub(crate) fn with_features(self) -> Self {
+        Self {
+            features: TablesGas::Indexed,
+            ..self
+        }
+    }
+
+    /// This service, which looks for its tables in `files` before it builds them and writes those
+    /// it builds there (perf-sky-tables-on-disk): the server's, under its data directory.
+    #[must_use]
+    pub(crate) fn with_files(self, files: SkyTableFiles) -> Self {
+        Self {
+            files: Arc::new(files),
+            ..self
         }
     }
 
@@ -208,15 +281,25 @@ impl SkyTablesService {
             .abort_all();
     }
 
+    /// Writes the tables queued for the service's files, then closes them: for the server's
+    /// shutdown, after [`stop_prefetching`](Self::stop_prefetching). Tables built after it are not
+    /// written, and none is looked for.
+    pub(crate) async fn close_files(&self) {
+        self.files.close().await;
+    }
+
     /// The build of `galaxy`'s tables under `key`, joined if one is in progress: it looks for them
-    /// once more inside the flight, then builds them from the service's source and keeps them.
+    /// once more inside the flight, then in the service's files, then builds them from the
+    /// service's source, keeps them and writes them to the files.
     fn flight(&self, key: GalaxyKey, galaxy: &Arc<Galaxy>) -> Flight<SkyTables, ComputeError> {
         let source = self.source;
-        let (pool, held, builds, galaxy) = (
+        let (pool, held, builds, galaxy, features, files) = (
             Arc::clone(&self.pool),
             Arc::clone(&self.held),
             Arc::clone(&self.builds),
             Arc::clone(galaxy),
+            self.features,
+            Arc::clone(&self.files),
         );
         self.flights.run(key, move || async move {
             // As in `GalaxyCache::get`: a caller can arrive just after another flight has
@@ -230,7 +313,35 @@ impl SkyTablesService {
             // Cancels the build's queued jobs once every waiter on this flight has gone.
             let _cancel_on_drop = CancelOnDrop::new(token.clone());
             let started = Instant::now();
-            let tables = Arc::new(match source {
+            let kind = (source, features);
+            if let Some(file) = files.get(key, kind).await {
+                // Made whole on the pool, whose workers alone are probed for a floating-point
+                // mode that flushes subnormals.
+                let galaxy = Arc::clone(&galaxy);
+                let read = bulk(&pool, &token, move |_: &CancelToken| file.tables(&galaxy)).await?;
+                match read {
+                    Some(tables) => {
+                        let tables = Arc::new(tables);
+                        tracing::info!(
+                            seed = %SeedHex::from_u64(key.seed()),
+                            generator_version = %key.generator_version(),
+                            read_ms = started.elapsed().as_secs_f64() * 1e3,
+                            heap_mib = SkyTables::heap_bytes(&tables) / (1 << 20),
+                            "read a galaxy's sky tables from their file"
+                        );
+                        drop(held.insert(key, Arc::clone(&tables)));
+                        return Ok(tables);
+                    }
+                    None => files.remove_bad(key, kind),
+                }
+            }
+            // The index's slabs are queued first, so that the tables' stages find the workers
+            // they leave.
+            let slabs = match features {
+                TablesGas::Smooth => None,
+                TablesGas::Indexed => Some(gas_slabs(&pool, &galaxy, &token).await?),
+            };
+            let tables = match source {
                 SkyTablesSource::Galaxy => build_on_pool(&pool, &galaxy, &token).await?,
                 SkyTablesSource::Dark => {
                     let galaxy = Arc::clone(&galaxy);
@@ -239,6 +350,18 @@ impl SkyTablesService {
                     })
                     .await?
                 }
+            };
+            let tables = Arc::new(match slabs {
+                Some(slabs) => {
+                    let slabs = slabs.results().await?;
+                    let galaxy = Arc::clone(&galaxy);
+                    let index = bulk(&pool, &token, move |_: &CancelToken| {
+                        FeatureGasIndex::assemble(&galaxy, slabs)
+                    })
+                    .await?;
+                    tables.with_features(index)
+                }
+                None => tables,
             });
             builds.fetch_add(1, Ordering::Relaxed);
             tracing::info!(
@@ -252,6 +375,7 @@ impl SkyTablesService {
             // Tables larger than the whole budget are handed back and not stored; the waiters
             // get them either way.
             drop(held.insert(key, Arc::clone(&tables)));
+            files.keep(key, kind, &tables);
             Ok(tables)
         })
     }
@@ -263,6 +387,7 @@ impl SkyTablesService {
         SkyTablesCounters {
             cache: self.held.counters(),
             builds: self.builds.load(Ordering::Relaxed),
+            files: self.files.counters(),
         }
     }
 }
@@ -282,27 +407,20 @@ impl fmt::Debug for SkyTablesService {
     }
 }
 
-/// The tables of `galaxy`, built as bulk jobs under `token` from [`LuminosityTables::plan`] (see
-/// the [module](self) documentation): the plan, then stage by stage its samples and their
-/// accumulation, the next stage's samples made while a stage accumulates, then the assembly.
+/// The tables of `galaxy`, built as bulk jobs under `token` from [`LuminosityTables::plan_search`]
+/// (see the [module](self) documentation): the plan's search ([`plan_on_pool`]), then stage by
+/// stage its samples and their accumulation, the next stage's samples made while a stage
+/// accumulates, then the assembly.
 ///
 /// # Errors
 ///
 /// Those of [`bulk`].
-async fn build_on_pool(
+pub(crate) async fn build_on_pool(
     pool: &CpuPool,
     galaxy: &Arc<Galaxy>,
     token: &CancelToken,
 ) -> Result<SkyTables, ComputeError> {
-    let plan = {
-        let galaxy = Arc::clone(galaxy);
-        Arc::new(
-            bulk(pool, token, move |_: &CancelToken| {
-                LuminosityTables::plan(&galaxy)
-            })
-            .await?,
-        )
-    };
+    let plan = Arc::new(plan_on_pool(pool, galaxy, token).await?);
     let mut sums: Vec<Option<BinSums>> = plan.bin_sums().into_iter().map(Some).collect();
     let stages: Vec<Stage> = plan.stages().collect();
     let mut sampling = match stages.first() {
@@ -335,6 +453,75 @@ async fn build_on_pool(
         SkyTables::new(plan.assemble(sums), &galaxy)
     })
     .await
+}
+
+/// The plan of `galaxy`'s tables, [`LuminosityTables::plan`]'s bit for bit, searched as bulk jobs
+/// under `token` ([`PlanSearch`](hyperion_sim::sky::luminosity::PlanSearch)): the search in one
+/// job, each stage's ends in one each, the companions' integrals split in one and made in a job
+/// for each of the pool's workers, and the plan finished in one.
+///
+/// # Errors
+///
+/// Those of [`bulk`].
+async fn plan_on_pool(
+    pool: &CpuPool,
+    galaxy: &Arc<Galaxy>,
+    token: &CancelToken,
+) -> Result<TablesPlan, ComputeError> {
+    let search = {
+        let galaxy = Arc::clone(galaxy);
+        Arc::new(
+            bulk(pool, token, move |_: &CancelToken| {
+                LuminosityTables::plan_search(&galaxy)
+            })
+            .await?,
+        )
+    };
+    let ends = search.stages().map(|stage| {
+        let (search, galaxy) = (Arc::clone(&search), Arc::clone(galaxy));
+        move || search.run_ends(&galaxy, stage)
+    });
+    let ends = Arc::new(BulkJobs::submit(pool, token, ends).await?.results().await?);
+    let jobs = {
+        let (search, galaxy, ends) = (Arc::clone(&search), Arc::clone(galaxy), Arc::clone(&ends));
+        let workers = pool.workers();
+        bulk(pool, token, move |_: &CancelToken| {
+            search.companions_jobs(&galaxy, &ends, workers)
+        })
+        .await?
+    };
+    let parts = jobs.into_iter().map(|job| {
+        let (search, galaxy) = (Arc::clone(&search), Arc::clone(galaxy));
+        move || search.run_companions(&galaxy, &job)
+    });
+    let parts = BulkJobs::submit(pool, token, parts)
+        .await?
+        .results()
+        .await?;
+    let galaxy = Arc::clone(galaxy);
+    bulk(pool, token, move |_: &CancelToken| {
+        // Every other job of the search has run, so the search is this job's alone.
+        Arc::unwrap_or_clone(search).finish(&galaxy, &ends, parts)
+    })
+    .await
+}
+
+/// Queues the jobs of `galaxy`'s features' gas index, one slab of feature cells each, in
+/// [`FeatureGasIndex::SLABS`]' order, each making its cells afresh.
+///
+/// # Errors
+///
+/// [`ComputeError::Submit`] if the pool is shutting down or faulted.
+async fn gas_slabs(
+    pool: &CpuPool,
+    galaxy: &Arc<Galaxy>,
+    token: &CancelToken,
+) -> Result<BulkJobs<FeatureGasSlab>, ComputeError> {
+    let jobs = FeatureGasIndex::SLABS.map(|x| {
+        let galaxy = Arc::clone(galaxy);
+        move || FeatureGasIndex::slab(&galaxy, &NoFeatureCache, x)
+    });
+    BulkJobs::submit(pool, token, jobs).await
 }
 
 /// Queues `stage`'s sample jobs, in their order.
@@ -664,5 +851,170 @@ mod tests {
         let (_, galaxy) = galaxy();
         let other = GalaxyKey::new(SEED + 1, GENERATOR_VERSION);
         drop(service.get(other, &galaxy).await);
+    }
+
+    /// The plan searched in jobs on a pool of three workers equals the sim's serial plan, whose
+    /// bits the sim's `a_plan_searched_in_jobs_is_the_plan` pins (perf-sky-tables-on-disk, part 2).
+    #[tokio::test]
+    async fn a_plan_searched_on_the_pool_is_the_sim_s() {
+        let pool = Arc::new(
+            CpuPool::new(
+                NonZeroUsize::new(3).expect("three"),
+                INTERACTIVE_QUEUE_CAPACITY,
+                BULK_QUEUE_CAPACITY,
+            )
+            .unwrap(),
+        );
+        let (_, galaxy) = galaxy();
+        let searched = timeout(WAIT, plan_on_pool(&pool, &galaxy, &CancelToken::new()))
+            .await
+            .expect("timed out searching the plan")
+            .unwrap();
+        let serial = {
+            let galaxy = Arc::clone(&galaxy);
+            timeout(
+                WAIT,
+                tokio::task::spawn_blocking(move || LuminosityTables::plan(&galaxy)),
+            )
+            .await
+            .expect("timed out making the plan")
+            .unwrap()
+        };
+        // Compared whole, not printed: some 10⁴ nodes.
+        assert!(searched == serial, "the plan searched on the pool differs");
+        timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
+    }
+
+    /// A service with files writes the tables it builds there, and a service started again over
+    /// them, as a restarted server's, reads them back at an open, made whole in one job, and builds
+    /// none: the same tables, bit for bit, counted a file's hit (perf-sky-tables-on-disk).
+    #[tokio::test]
+    async fn a_service_started_again_reads_the_tables_it_built_from_its_files() {
+        use crate::compute::SKY_TABLE_FILES_DIR;
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let (key, galaxy) = galaxy();
+        let with_files = |pool: &Arc<CpuPool>| {
+            SkyTablesService::new(Arc::clone(pool), SkyTablesSource::Dark, 64 << 20).with_files(
+                SkyTableFiles::new(dir.path().join(SKY_TABLE_FILES_DIR), 1 << 30),
+            )
+        };
+        let pool = one_worker();
+        let service = with_files(&pool);
+        let built = timeout(WAIT, service.get(key, &galaxy))
+            .await
+            .unwrap()
+            .unwrap();
+        until("the tables are written", || {
+            service.counters().files().written() == 1
+        })
+        .await;
+        timeout(WAIT, service.close_files()).await.unwrap();
+        let counters = service.counters();
+        assert_eq!(
+            (counters.builds(), counters.files().misses()),
+            (1, 1),
+            "{counters:?}"
+        );
+        timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
+
+        let pool = one_worker();
+        let restarted = with_files(&pool);
+        assert!(restarted.prefetch(key, &galaxy), "an open starts the read");
+        until("the tables are read", || {
+            restarted.counters().cache().entries() == 1
+        })
+        .await;
+        let read = timeout(WAIT, restarted.get(key, &galaxy))
+            .await
+            .unwrap()
+            .unwrap();
+        let counters = restarted.counters();
+        assert_eq!(
+            (
+                counters.builds(),
+                counters.files().hits(),
+                counters.cache().hits()
+            ),
+            (0, 1, 1),
+            "{counters:?}"
+        );
+        assert_eq!(
+            pool.counters().completed(),
+            1,
+            "the read's one job: {:?}",
+            pool.counters()
+        );
+        let words = |tables: &SkyTables| {
+            let mut words = Vec::new();
+            tables.luminosity().write_words(&mut Words(&mut words));
+            words
+        };
+        // Some 9 × 10⁶ words, compared whole rather than printed.
+        assert!(words(&read) == words(&built), "the tables read back differ");
+        assert_eq!(read.heap_bytes(), built.heap_bytes());
+        timeout(WAIT, restarted.close_files()).await.unwrap();
+        timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
+    }
+
+    /// The tables' words, each float by its bits.
+    struct Words<'a>(&'a mut Vec<u64>);
+
+    impl hyperion_sim::words::WordSink for Words<'_> {
+        fn word(&mut self, word: u64) {
+            self.0.push(word);
+        }
+
+        fn float(&mut self, value: f64) {
+            self.0.push(value.to_bits());
+        }
+    }
+
+    /// A service with the features' gas builds tables with their galaxy's index on the pool, whose
+    /// jobs' gas is the sim's own lookup's, and one without builds tables whose jobs march the
+    /// smooth field alone (P09.T40.a).
+    #[tokio::test]
+    async fn a_service_with_the_features_gas_builds_its_tables_index() {
+        use super::super::sky::tests::{an_ageing_nursery, feature_gas_at};
+        use hyperion_sim::time::UniverseTime;
+
+        let pool = one_worker();
+        let (key, galaxy) = galaxy();
+        let budget = 128 << 20;
+        let smooth = SkyTablesService::new(Arc::clone(&pool), SkyTablesSource::Dark, budget);
+        let featured =
+            SkyTablesService::new(Arc::clone(&pool), SkyTablesSource::Dark, budget).with_features();
+        let from = hyperion_sim::coords::GalacticPosition::from_light_years([0.0, 26_000.0, 68.0])
+            .unwrap();
+        let to = an_ageing_nursery(&galaxy, &from);
+        let t = UniverseTime::from_julian_years(1_000).unwrap();
+        for (service, featured) in [(&smooth, false), (&featured, true)] {
+            let tables = timeout(WAIT, service.get(key, &galaxy))
+                .await
+                .unwrap()
+                .unwrap();
+            let mut found = Vec::new();
+            hyperion_sim::galaxy::gas::modifiers::GasModifierSource::modifiers_near_segment(
+                &tables.gas(&galaxy, t),
+                &from,
+                &to,
+                &mut found,
+            );
+            let expected = if featured {
+                feature_gas_at(&galaxy, 1_000.0, &from, &to)
+            } else {
+                Vec::new()
+            };
+            assert_eq!(found, expected, "featured: {featured}");
+        }
+        // The index is charged to the tables: some 52 MB.
+        let charged = |service: &SkyTablesService| service.counters().cache().bytes();
+        assert!(
+            charged(&featured) > charged(&smooth) + (40 << 20),
+            "{} against {} bytes",
+            charged(&featured),
+            charged(&smooth)
+        );
+        timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
     }
 }

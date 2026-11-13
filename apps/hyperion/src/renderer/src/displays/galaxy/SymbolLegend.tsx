@@ -4,8 +4,15 @@ import { RINGED_CIRCLE_MIN_SIZE_CLASS } from "../../lib/galaxy/starSymbols";
 import { LegendReticle } from "../../spatial/LegendReticle";
 import { LegendSymbol } from "../../spatial/LegendSymbol";
 import { SIZE_CLASS_REM } from "../../spatial/symbols";
-import { formatBandMsun, type LayerBand } from "./chartModel";
+import { TRANSIENT_LABEL, TRANSIENT_SIZE_CLASS } from "./alertMarks";
+import { FEATURE_SIZE_CLASS, formatBandMsun, type LayerBand, OBSERVER_LABEL } from "./chartModel";
 import { StarShapeLegend } from "./StarShapeLegend";
+
+/**
+ * What the legend calls an apparent position's marks in words (plan 12, P12.T11): the tick, where
+ * the light shows the system, and the dashed joiner to where it is now.
+ */
+export const APPARENT_LEGEND = "TICK APPARENT POSITION, DASHED TO PRESENT";
 
 interface SymbolLegendProps {
   /** The mass bands of the last census; `null` before the first answer. */
@@ -15,6 +22,123 @@ interface SymbolLegendProps {
    * objects take the smallest size; `null` when it did not. None when absent.
    */
   readonly brownDwarfFloorMsun?: number | null;
+  /**
+   * Whether the chart on show was asked in observed mode, which draws the observer and the
+   * apparent positions (plan 12, P12.T11); `false` when absent.
+   */
+  readonly observed?: boolean;
+  /**
+   * Whether the systems shown, those the `STARS` filter passes, hold an object of a mass layer this
+   * build does not know, listed and not drawn; `false` when absent.
+   */
+  readonly unlistedLayer?: boolean;
+  /**
+   * Whether the chart on show draws a large feature, its Greek cross and its circle at true radius
+   * (plan 09, P09.T41.a); `false` when absent.
+   */
+  readonly features?: boolean;
+  /**
+   * Whether the chart on show draws a transient's four-point star on a resolved host (plan 12,
+   * P12.T12); `false` when absent.
+   */
+  readonly transients?: boolean;
+  /**
+   * Whether the chart on show draws a contact's bearing ray from the observer (plan 12, P12.T12);
+   * `false` when absent.
+   */
+  readonly bearings?: boolean;
+}
+
+/**
+ * What the legend calls a bearing ray in words (plan 12, P12.T12): a solid line from the observer
+ * towards a contact, ending at the display's edge with its label, or with its range at the place
+ * a resolved host's light left it.
+ */
+export const BEARING_LEGEND = "SOLID BEARING TO TRANSIENT";
+
+/**
+ * A bearing ray as the chart draws it: a solid 1 px `--text` line, at the line scale, from the
+ * observer's side.
+ */
+function BearingSample() {
+  return (
+    <svg
+      className="symbol-legend__mark symbol-legend__bearing"
+      style={{ width: "1.5rem", height: "0.5rem" }}
+      viewBox="0 0 24 8"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M 0 4 H 24" />
+    </svg>
+  );
+}
+
+/** What the legend calls a feature's mark, the Greek cross (plan 09, P09.T41.a). */
+export const FEATURE_LEGEND = "FEATURE";
+
+/** What the legend calls a circle at true radius: a feature's, a shell's or a superbubble's. */
+export const TRUE_RADIUS_LEGEND = "TRUE RADIUS";
+
+/**
+ * A circle at true radius as the chart draws it: an arc of a circle wider than any mark, 1 px at
+ * the line scale, in the legend's `--text-muted`, as the chart's is.
+ */
+function TrueRadiusSample() {
+  return (
+    <svg
+      className="symbol-legend__mark symbol-legend__true-radius"
+      style={{ width: "1rem", height: "1rem" }}
+      viewBox="-5 -5 10 10"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M -4.5 4.5 A 9 9 0 0 1 4.5 -4.5" />
+    </svg>
+  );
+}
+
+/** The observer's eye as the chart draws it, open, at its 1 rem width. */
+function ObserverSample() {
+  return (
+    <svg
+      className="symbol-legend__mark"
+      style={{ width: "1rem", height: "1rem" }}
+      viewBox="-5 -5 10 10"
+      aria-hidden="true"
+      focusable="false"
+    >
+      {/* Two quadratic arcs, their control points the half-width above and below: `eyePoints`. */}
+      <path d="M -4.25 0 Q 0 -4.25 4.25 0 Q 0 4.25 -4.25 0 Z" />
+    </svg>
+  );
+}
+
+/**
+ * An apparent position as the chart draws it: the dashed joiner, 1 px with a predicted path's dash,
+ * and the tick across its end, at the line scale.
+ *
+ * @remarks
+ * 2.75 rem long, 16 of its units a rem, so that the joiner's 42 units show two whole dashes and the
+ * gap between them at every line factor in use, up to 2.56 at a device-pixel ratio of 0.78125:
+ * (6 + 4 + 6) px × 2.56 = 41 px (P12.T11.c). The joiner is drawn from the tick out, so that its
+ * dash pattern starts there and a dash meets the tick, which is the chart's 0.5 rem
+ * (`SEGMENT_TICK_REM`).
+ */
+function ApparentSample() {
+  return (
+    <svg
+      className="symbol-legend__mark symbol-legend__apparent"
+      style={{ width: "2.75rem", height: "0.5rem" }}
+      viewBox="0 0 44 8"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path className="symbol-legend__joiner" d="M 42 4 H 0" />
+      {/* 8 of the box's 16 units a rem: the chart's 0.5 rem. */}
+      <path className="symbol-legend__tick" d="M 42 0 V 8" />
+    </svg>
+  );
 }
 
 /**
@@ -39,8 +163,24 @@ interface SymbolLegendProps {
  * includes the brown dwarfs the size scale starts from their floor, `INIT MASS M☉ 0.012`, and the
  * smallest circle no longer claims 0.08 M☉ (the orchestrator's ruling 134.7); a planet's size is
  * the guide's to explain, and the size row, drawn in circles, claims nothing of triangles.
+ *
+ * A chart asked in observed mode also draws the observer's eye and the apparent positions' ticks
+ * and dashed joiners, so the legend then names them in words, as it names every mark the chart can
+ * draw (plan 12, P12.T11): `OBSERVER`, and `TICK APPARENT POSITION, DASHED TO PRESENT`. So does a
+ * chart that draws a large feature (plan 09, P09.T41.a): `FEATURE` beside the Greek cross, at its
+ * size, and `TRUE RADIUS` beside an arc of the circle a feature, or a superbubble, is drawn at.
+ * And so does a chart that marks a sensor detection (plan 12, P12.T12): `TRANSIENT` beside the
+ * four-point star, at its size, and `SOLID BEARING TO TRANSIENT` beside a ray's sample.
  */
-export function SymbolLegend({ bands, brownDwarfFloorMsun = null }: SymbolLegendProps) {
+export function SymbolLegend({
+  bands,
+  brownDwarfFloorMsun = null,
+  observed = false,
+  unlistedLayer = false,
+  features = false,
+  transients = false,
+  bearings = false,
+}: SymbolLegendProps) {
   const lightest = bands?.[0];
   const heaviest = bands?.at(-1);
   const floorBand = bands?.find((band) => band.index === RINGED_CIRCLE_MIN_SIZE_CLASS);
@@ -50,7 +190,7 @@ export function SymbolLegend({ bands, brownDwarfFloorMsun = null }: SymbolLegend
     // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role
     <div className="symbol-legend" role="group" aria-label="Chart legend">
       <p className="symbol-legend__item">SYMBOLS NOT TO SCALE</p>
-      <StarShapeLegend compactRemnants planets />
+      <StarShapeLegend compactRemnants planets unlistedLayer={unlistedLayer} />
       {lightest === undefined || heaviest === undefined ? null : (
         <p className="symbol-legend__item">
           INIT MASS <SolarMassUnit />{" "}
@@ -96,6 +236,50 @@ export function SymbolLegend({ bands, brownDwarfFloorMsun = null }: SymbolLegend
         <LegendReticle />
         BRACKET SELECTED
       </p>
+      {features ? (
+        <>
+          <p className="symbol-legend__item">
+            <LegendSymbol
+              shape="greek-cross"
+              diameterRem={SIZE_CLASS_REM[FEATURE_SIZE_CLASS]}
+              filled
+            />
+            {FEATURE_LEGEND}
+          </p>
+          <p className="symbol-legend__item">
+            <TrueRadiusSample />
+            {TRUE_RADIUS_LEGEND}
+          </p>
+        </>
+      ) : null}
+      {transients ? (
+        <p className="symbol-legend__item">
+          <LegendSymbol
+            shape="transient"
+            diameterRem={SIZE_CLASS_REM[TRANSIENT_SIZE_CLASS]}
+            filled
+          />
+          {TRANSIENT_LABEL}
+        </p>
+      ) : null}
+      {bearings ? (
+        <p className="symbol-legend__item">
+          <BearingSample />
+          {BEARING_LEGEND}
+        </p>
+      ) : null}
+      {observed ? (
+        <>
+          <p className="symbol-legend__item">
+            <ObserverSample />
+            {OBSERVER_LABEL}
+          </p>
+          <p className="symbol-legend__item">
+            <ApparentSample />
+            {APPARENT_LEGEND}
+          </p>
+        </>
+      ) : null}
     </div>
   );
 }

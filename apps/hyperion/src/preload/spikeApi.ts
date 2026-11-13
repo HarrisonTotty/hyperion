@@ -12,6 +12,7 @@ import type {
   SpikeApi,
   SpikeEnd,
   SpikeLaunch,
+  SpikeReportPart,
   SpikeResultsAnswer,
   SpikeResultsPaths,
 } from "./api";
@@ -24,6 +25,7 @@ export const SPIKE_CHANNEL_NAMES = {
   stopTrace: "hyperion:spike:stop-trace",
   memory: "hyperion:spike:memory",
   writeResults: "hyperion:spike:write-results",
+  writePart: "hyperion:spike:write-part",
   writeCapture: "hyperion:spike:write-capture",
   end: "hyperion:spike:end",
 } as const;
@@ -93,6 +95,9 @@ export function spikeApi(launch: SpikeLaunch, deps: SpikeApiDeps): SpikeApi {
         );
       }
       return answer;
+    },
+    writePart: async (part: SpikeReportPart) => {
+      await invoke(SPIKE_CHANNEL_NAMES.writePart, part);
     },
     writeCapture: async (capture) => {
       const dir = await invoke(SPIKE_CHANNEL_NAMES.writeCapture, capture);

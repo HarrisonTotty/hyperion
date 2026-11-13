@@ -1,0 +1,1218 @@
+//! The coarse field's header: what a body's field holds once, not per cell (plan R09, Design notes
+//! 4, 7, 8, 17 and 18).
+
+use hyperion_base::units::{Gigayears, Kelvin, Metres, Pascals};
+
+use super::cells::{ClimateCell, Crust, QuantiseValueError};
+use super::palette::{MaterialPalette, PaletteEntry, PaletteRole};
+use super::{CoarseLevel, boundary_diameter, coarse_level};
+use crate::craters::CraterParams;
+use crate::spheroid::Spheroid;
+use crate::synth::BandSpectrum;
+
+/// A body, as the surface crate names it: the raw 64-bit ID of its system and its index there,
+/// the two halves of the sim's `BodyId`, which this crate cannot see.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+pub struct BodyRef {
+    raw_system_id: u64,
+    body_index: u16,
+}
+
+impl BodyRef {
+    /// Body `body_index` of the system whose raw ID is `raw_system_id`.
+    #[must_use]
+    pub const fn new(raw_system_id: u64, body_index: u16) -> Self {
+        Self {
+            raw_system_id,
+            body_index,
+        }
+    }
+
+    /// The system's raw 64-bit ID.
+    #[must_use]
+    pub const fn raw_system_id(self) -> u64 {
+        self.raw_system_id
+    }
+
+    /// The body's index in its system.
+    #[must_use]
+    pub const fn body_index(self) -> u16 {
+        self.body_index
+    }
+}
+
+coded_enum! {
+    /// The coarse model a body's climate step ran, by its climate regime (Design note 8, open
+    /// question 9's classifier), one byte in the header.
+    ClimateModelKind {
+        /// Design note 8's seasonal moist energy-balance model, diffusing near-surface moist static
+        /// energy in latitude and longitude, for a world with a seasonal water cycle or one like
+        /// it.
+        EnergyBalance = 0,
+        /// The same model in tidally locked coordinates about the substellar axis, with seasons
+        /// wherever its orbit is eccentric or it has obliquity (R09.T13.b).
+        LockedEnergyBalance = 1,
+        /// Radiative equilibrium with thermal inertia, for an airless or thin-aired world
+        /// (R09.T13.c).
+        RadiativeEquilibrium = 2,
+        /// An isothermal surface under a thick atmosphere, as on Venus (R09.T13.c).
+        Isothermal = 3,
+    }
+}
+
+coded_enum! {
+    /// Where a field's precipitation came from, one byte in the header, so that a console labels it
+    /// (Design note 8).
+    PrecipitationSource {
+        /// The documented monthly heuristic of Design note 8, after Siler, Roe and Armour (2018)
+        /// and Hergarten and Robl (2022), labelled as a heuristic wherever it is shown: simple
+        /// climate models cannot solve precipitation. Every field's precipitation is this one.
+        Heuristic = 0,
+    }
+}
+
+// `FieldHeaderParts::crust_palette` holds one entry a crust: a new `Crust` code lengthens it,
+// which changes the payload's layout, so it takes a new `SURFACE_PAYLOAD_FORMAT`.
+const _: () = assert!(
+    Crust::ALL.len() == 4,
+    "crust_palette has one entry a Crust variant: resize it, under a new payload format"
+);
+
+/// The parts of a [`FieldHeader`], as the coarse pass or a decoder has them, each in the SI unit
+/// its type or name states.
+///
+/// Plain data with public fields: [`FieldHeader::new`] validates them and derives the field's
+/// level and boundary diameter from the radius.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FieldHeaderParts {
+    /// The body the field is of.
+    pub body: BodyRef,
+    /// The body's volumetric mean radius, metres: plan 14's, from which the field's level and
+    /// boundary diameter follow (Design note 4).
+    pub radius: Metres,
+    /// The body's rotational spheroid, its equatorial radius a and polar radius c in metres, the
+    /// datum every height of the field is measured from along its normal (R07's Design note 19;
+    /// Design note 17): plan 14's `figure()`. Its volumetric radius ∛(a² c) is `radius`.
+    pub figure: Spheroid,
+    /// The height of the sea surface above the datum, metres: the level of the connected ocean
+    /// that covers plan 14's ocean fraction (Design note 7; R09.T12.e, main's ruling R8). The
+    /// ocean grows by a priority flood from the largest connected region of cells at or below the
+    /// area-weighted elevation quantile that leaves the fraction below it, and the sea level is the
+    /// lowest filled level at which it covers the fraction, every cell of that level taken; the
+    /// cells it took whose ground lies below it are under water, and enclosed depressions below it
+    /// stay dry. On a world with no sea, an ocean fraction of zero, it is the lowest cell's
+    /// elevation when the pass placed the sea, and on one wholly sea, the highest cell's. The
+    /// climate layer's temperatures are reduced to it.
+    pub sea_level: Metres,
+    /// The rate at which the surface temperature falls with height, kelvin per metre (positive
+    /// for a fall): the climate step reduces each temperature to sea level with it, and the
+    /// synthesis re-applies it from a point's elevation (Design note 17). 0.0065 K m⁻¹ in Earth's
+    /// standard atmosphere (ICAO 1993), 0 on an airless body.
+    pub lapse_rate_k_per_m: f64,
+    /// The body's spectrum of relief finer than its coarse cells, which fixes the synthesis's
+    /// structural amplitudes (Design note 7).
+    pub spectrum: BandSpectrum,
+    /// The body's crater contract with plan 14, which fixes the density of every crater narrower
+    /// than the boundary diameter that the synthesis draws (Design note 12).
+    pub craters: CraterParams,
+    /// The coarse model the climate step ran (Design note 8).
+    pub climate_model: ClimateModelKind,
+    /// Where the precipitation came from: always the labelled heuristic (Design note 8).
+    pub precipitation: PrecipitationSource,
+    /// The realised hypsometric standard deviation `σ_h` of the whole surface at its band limit,
+    /// metres: √(`Var_recon` + `S_s` + `K_w` + `R_inc` + `C_c`), the reconstructed field's
+    /// area-weighted variance about its mean with the shares the synthesis adds below the cells
+    /// (R09.T12.e), which the pass constrains to plan 14's (Design note 7). Finite and
+    /// non-negative.
+    pub realised_sigma_h: Metres,
+    /// The realised greatest relief, metres: the highest elevation less the lowest, reported
+    /// rather than matched, since a greatest relief grows with resolution (Design note 3); about
+    /// 7–15 `σ_h` on every body measured. Finite and non-negative.
+    pub realised_relief: Metres,
+    /// The months of the body's year (Design note 8): 12, the twelve equal spans of the seasonal
+    /// orbit's eccentric anomaly from periapsis ([`month_edges`](super::month_edges)), or 1 for a
+    /// world with no seasonal forcing, a locked world on a circular orbit or one on a circular
+    /// orbit with no obliquity.
+    pub months: u8,
+    /// The eccentricity e of the seasonal orbit, the one that sets the sun's declination and
+    /// distance: the body's own about its star or stars, or its planet's for a moon (Design note
+    /// 8; `decision-r09-t2.md` item 1). Its months are what the header's twelve span. At least 0
+    /// and below 1, and 0 in a one-month year, whose orbit is circular.
+    pub season_eccentricity: f64,
+    /// The zero of every climate record's sea-level temperature, kelvin: plan 14's mean surface
+    /// temperature, which the climate step imposes on the field (Design note 8). Finite and
+    /// positive.
+    pub reference_temperature: Kelvin,
+    /// The step of every climate record's sea-level temperature, as n in 0.01 K × 2ⁿ, 0 to 15: the
+    /// finest step that holds the body's largest departure from `reference_temperature` in an
+    /// `i16`, so that none saturates ([`FieldHeader::temperature_step_for`]).
+    pub temperature_step: u8,
+    /// The step of every climate record's monthly anomaly, as n in 0.25 K × 2ⁿ, 0 to 15: the
+    /// finest step that holds the body's largest anomaly in 127 steps (Design note 17;
+    /// [`FieldHeader::anomaly_step_for`]), 0.25 K on an Earth, whose extremes are Verkhoyansk's
+    /// −30.8 and +30.6 K about its annual mean of −13.9 °C (WMO 1991–2020 normals, station 24266),
+    /// within the 31.75 K a 0.25 K step holds, 0.5 K on a Mars and 1 K on a high-obliquity world
+    /// with land.
+    pub anomaly_step: u8,
+    /// The body's surface age, thousands of millions of years: plan 14's, carried for R11's rock
+    /// abundance (Design note 18) and the craters' ages (R09.T7.b). Finite and non-negative, and
+    /// at most the crater contract's system age.
+    pub surface_age: Gigayears,
+    /// The body's mean surface pressure, pascals: plan 14's, carried for R11's atmosphere class
+    /// (Design note 18). Finite and non-negative.
+    ///
+    /// Exactly 0 where the body's surface state is airless, as R10's classifier takes it, and a
+    /// tenuous body's own pressure, positive and below the airless line of 100 Pa
+    /// (decision-r11-palette-liquids §2, item 5), so that the pressure gives three classes: 0 is
+    /// airless, below 100 Pa tenuous, and at or above it an atmosphere. 0 also on a surface
+    /// holding melt whose volatiles are gone, whose own vapour is not modelled (P14.T55.b;
+    /// decision-backlog-2 §2.5).
+    pub surface_pressure: Pascals,
+    /// R10's albedo scale (Design note 18; R10's Design note 8, T10.a): the one factor c,
+    /// dimensionless, finite and positive, on the palette's class albedos in B, V and R that makes
+    /// the body's materials, over their area fractions on every cell, give its geometric albedo in
+    /// V, each scaled albedo clamped to its material's range
+    /// ([`albedo_scale`](crate::material::albedo_scale)).
+    ///
+    /// `None` means no scale: the palette entries' albedos as resolved, c = 1. The server never fits
+    /// the ground to a cloud deck's geometric albedo, and sends `None` (main's rulings,
+    /// 2026-10-14):
+    /// - where the body's photometry is not modelled;
+    /// - where its air hides its ground: a surface pressure of 30 kPa or more
+    ///   ([`THIN_ATMOSPHERE_PRESSURE`](crate::material::THIN_ATMOSPHERE_PRESSURE)), whose geometric
+    ///   albedo is the cloudy disc's and whose ground R08's medium covers;
+    /// - where its photometric law has no ground term, at any pressure: a Lommel–Seeliger share of
+    ///   0, a cloud deck's template (Venus's, which a runaway greenhouse takes, Earth's and the
+    ///   giants');
+    /// - where the palette names no substance for the ground.
+    pub albedo_scale: Option<f64>,
+    /// The substances the field names, their values resolved by the server from plan 14's
+    /// registry (decision-composition §1.7). A header's may be empty, a composition not modelled,
+    /// but a field's is not: each crust its cells have names an entry (`crust_palette`).
+    pub palette: MaterialPalette,
+    /// The palette entry of each [`Crust`] variant, in code order (continental, oceanic, lid,
+    /// province), whose lithology it names, or `None` where the field names none: an entry of a
+    /// role a [`Crust`] variant may take ([`PaletteRole::is_crust`]: a crust's, a province's or an
+    /// undifferentiated body's bulk material). A field has no cell of a crust that names none
+    /// ([`BuildFieldError::CrustWithoutEntry`](super::BuildFieldError::CrustWithoutEntry),
+    /// R09.T10.c).
+    pub crust_palette: [Option<u8>; 4],
+    /// The palette entry of the body's main liquid, its sea's, or `None`: a
+    /// [`PaletteRole::Liquid`] entry.
+    pub main_liquid: Option<u8>,
+    /// The ground's space-weathering maturity, dimensionless in [+0, 1]: 0 for fresh ground and 1
+    /// for saturated weathering, which R10.T1.c's cover term reads on both sides
+    /// (decision-r11-palette-liquids §2, item 4). Reserved for P14.T51.d's figure, whose builder
+    /// fixes its exact definition within this contract, which P14.T54.b fills from generator
+    /// version 24; `None` where the record gives none.
+    pub maturity: Option<f64>,
+    /// The organic cover: the covered fraction of the ground that can take one, dimensionless in
+    /// [+0, 1] (decision-r11-palette-liquids §2, item 4). Reserved for P14.T51.d's figure, as
+    /// [`maturity`](Self::maturity) is, which P14.T54.b fills from generator version 24; `None`
+    /// where the record gives none.
+    pub organic_cover: Option<f64>,
+    /// The weathering rate k: the body's orbit-mean, surface-reaching space-weathering dose rate
+    /// relative to the Moon's present one, computed by the same rules, so that the Moon's is
+    /// exactly 1 (decision-p14-t51d-weathering §2.2):
+    /// `k = s_w Φ_w ÷ Φ_w,Moon + s_d Φ_d ÷ Φ_d,Moon`, the stellar wind's and the micrometeoroids'
+    /// shares of the Moon's weathering times their fluxes at the surface relative to the Moon's,
+    /// P14.T51.d's `SurfaceModifiers::weathering_rate`. Dimensionless, finite and at least +0 (a −0
+    /// is refused), with no upper bound: a close-in world of an active M dwarf may reach 10³.
+    ///
+    /// R10.T1.c fades a crater's ejecta to the background as `min(m_body, maturity_after(t_c, k))`
+    /// ([`maturity_after`](crate::material::maturity_after)), `t_c` the crater's age and `m_body`
+    /// the [`maturity`](Self::maturity), which saturates on old ground, so that k cannot be
+    /// recovered from it (§2.1, §2.3). Present exactly when the maturity is, which P14.T54.b
+    /// fills from generator version 24, and `None` where the record gives neither.
+    pub weathering_rate: Option<f64>,
+}
+
+/// A coarse field's header: [`FieldHeaderParts`], validated, with the level and the boundary
+/// diameter that follow from the radius.
+///
+/// The format and the generator version a field was computed under are not in it: the payload
+/// ([`crate::wire`]) carries them in every block's own header and refuses another's, so a header
+/// in memory is always this build's.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FieldHeader {
+    parts: FieldHeaderParts,
+    level: CoarseLevel,
+    boundary_diameter: Metres,
+}
+
+/// Why [`FieldHeader::new`] refused its parts.
+#[derive(Debug, Clone, PartialEq)]
+pub enum BuildFieldHeaderError {
+    /// The radius is not finite and positive.
+    Radius(f64),
+    /// The figure's radii are not finite with 0 < c ≤ a, or its volumetric radius is not the
+    /// radius.
+    Figure(Spheroid),
+    /// The months are neither 1 nor 12.
+    Months(u8),
+    /// The season eccentricity is not at least +0 and below 1.
+    SeasonEccentricity(f64),
+    /// A one-month year's season eccentricity is not 0: its orbit is circular.
+    EccentricOneMonthYear(f64),
+    /// A step's exponent is above 15.
+    StepExponent {
+        /// The part's name.
+        part: &'static str,
+        /// The exponent.
+        exponent: u8,
+    },
+    /// A part is not finite.
+    NotFinite {
+        /// The part's name.
+        part: &'static str,
+    },
+    /// A part that cannot be negative is: for the weathering rate, a −0 too, so that its value has
+    /// one wire form.
+    Negative {
+        /// The part's name.
+        part: &'static str,
+    },
+    /// A part that must be positive is not.
+    NotPositive {
+        /// The part's name.
+        part: &'static str,
+    },
+    /// A part that is a fraction is not within +0 to 1 (a −0 is refused, so that a value has one
+    /// wire form).
+    NotAFraction {
+        /// The part's name.
+        part: &'static str,
+    },
+    /// A crust's palette entry is past the palette or of a role no [`Crust`] variant may take.
+    CrustPalette {
+        /// The crust.
+        crust: Crust,
+        /// The entry it names.
+        entry: u8,
+    },
+    /// The maturity and the weathering rate are not both present or both absent
+    /// (decision-p14-t51d-weathering §2.3): R10.T1.c reads them together.
+    WeatheringParts {
+        /// The part that is absent while the other is present.
+        missing: &'static str,
+    },
+    /// The main liquid's entry is past the palette or not a liquid's.
+    MainLiquid(u8),
+    /// The surface is older than its system, the crater contract's system age, which the
+    /// chronology cannot count (R09.T7.e).
+    SurfaceOlderThanSystem {
+        /// The surface age.
+        surface: Gigayears,
+        /// The system age.
+        system: Gigayears,
+    },
+}
+
+impl std::fmt::Display for BuildFieldHeaderError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Radius(r) => write!(f, "radius {r} m is not finite and positive"),
+            Self::Figure(s) => write!(
+                f,
+                "figure a = {} m, c = {} m is not a valid datum for the radius",
+                s.equatorial_radius_m, s.polar_radius_m
+            ),
+            Self::Months(m) => write!(f, "a year of {m} months is neither 1 nor 12"),
+            Self::SeasonEccentricity(e) => {
+                write!(f, "season eccentricity {e} is not at least 0 and below 1")
+            }
+            Self::EccentricOneMonthYear(e) => {
+                write!(f, "a one-month year's orbit has eccentricity {e}, not 0")
+            }
+            Self::StepExponent { part, exponent } => {
+                write!(f, "{part} exponent {exponent} is above {MAX_STEP_EXPONENT}")
+            }
+            Self::NotFinite { part } => write!(f, "{part} is not finite"),
+            Self::Negative { part } => write!(f, "{part} is negative"),
+            Self::NotPositive { part } => write!(f, "{part} is not positive"),
+            Self::NotAFraction { part } => write!(f, "{part} is not within 0 to 1"),
+            Self::WeatheringParts { missing } => write!(
+                f,
+                "{missing} is absent while the other of the maturity and the weathering rate is \
+                 present"
+            ),
+            Self::CrustPalette { crust, entry } => write!(
+                f,
+                "the {crust:?} crust's palette entry {entry} is past the palette or not a \
+                 crust's, a province's or a bulk material's"
+            ),
+            Self::MainLiquid(entry) => write!(
+                f,
+                "the main liquid's palette entry {entry} is past the palette or not a liquid's"
+            ),
+            Self::SurfaceOlderThanSystem { surface, system } => write!(
+                f,
+                "a surface of {} Gyr is older than its system of {} Gyr",
+                surface.value(),
+                system.value()
+            ),
+        }
+    }
+}
+
+impl std::error::Error for BuildFieldHeaderError {}
+
+/// The largest exponent of a step, 2¹⁵ times its base: 328 K for a temperature, 8,192 K for an
+/// anomaly, beyond any body's range.
+const MAX_STEP_EXPONENT: u8 = 15;
+
+/// The base of the sea-level temperature's step, kelvin (Design note 17's 0.01 K).
+const TEMPERATURE_STEP_BASE_K: f64 = 0.01;
+
+/// The base of the monthly anomaly's step, kelvin (Design note 17's 0.25 K).
+const ANOMALY_STEP_BASE_K: f64 = 0.25;
+
+/// How far the figure's volumetric radius may differ from the radius, relative: the rounding of
+/// `Spheroid::from_volumetric`'s cube root, far below any figure of another body.
+const FIGURE_TOLERANCE: f64 = 1e-9;
+
+/// `base` × 2^`exponent`, exact.
+#[must_use]
+fn step(base: f64, exponent: u8) -> f64 {
+    base * f64::from(1_u32 << exponent)
+}
+
+/// The finest exponent n at most 15 whose step `base` × 2ⁿ holds `largest` in `limit` steps.
+#[must_use]
+fn finest_step(largest: f64, base: f64, limit: f64) -> Option<u8> {
+    if !(largest.is_finite() && largest >= 0.0) {
+        return None;
+    }
+    (0..=MAX_STEP_EXPONENT).find(|&n| (largest / step(base, n)).round() <= limit)
+}
+
+/// Checks a reserved fraction of the header, absent or within +0 to 1.
+fn check_fraction(part: &'static str, fraction: Option<f64>) -> Result<(), BuildFieldHeaderError> {
+    match fraction {
+        Some(f) if !f.is_finite() => Err(BuildFieldHeaderError::NotFinite { part }),
+        Some(f) if !(0.0..=1.0).contains(&f) || f.is_sign_negative() => {
+            Err(BuildFieldHeaderError::NotAFraction { part })
+        }
+        Some(_) | None => Ok(()),
+    }
+}
+
+/// Checks the weathering rate, absent or finite and at least +0, and that it is present exactly
+/// when the maturity is.
+fn check_weathering(maturity: Option<f64>, rate: Option<f64>) -> Result<(), BuildFieldHeaderError> {
+    let part = "weathering rate";
+    match rate {
+        Some(k) if !k.is_finite() => return Err(BuildFieldHeaderError::NotFinite { part }),
+        Some(k) if k < 0.0 || k.is_sign_negative() => {
+            return Err(BuildFieldHeaderError::Negative { part });
+        }
+        Some(_) | None => {}
+    }
+    match (maturity, rate) {
+        (Some(_), None) => Err(BuildFieldHeaderError::WeatheringParts { missing: part }),
+        (None, Some(_)) => Err(BuildFieldHeaderError::WeatheringParts {
+            missing: "maturity",
+        }),
+        (Some(_), Some(_)) | (None, None) => Ok(()),
+    }
+}
+
+/// `value` ÷ `step`, rounded, if it lies within `min` to `max`.
+fn quantise(value: f64, step: f64, min: f64, max: f64) -> Result<f64, QuantiseValueError> {
+    if !value.is_finite() {
+        return Err(QuantiseValueError::NotFinite(value));
+    }
+    let q = (value / step).round();
+    if q < min || q > max {
+        return Err(QuantiseValueError::OutOfRange(value));
+    }
+    Ok(q)
+}
+
+impl FieldHeader {
+    /// The header of `parts`, with the level of [`coarse_level`] and the boundary diameter of
+    /// [`boundary_diameter`] at the radius.
+    ///
+    /// # Errors
+    ///
+    /// [`BuildFieldHeaderError`] if the radius is not finite and positive, the figure is not the
+    /// radius's spheroid, the months are neither 1 nor 12, the season eccentricity is outside
+    /// [0, 1) or not 0 in a one-month year, a step's exponent is above 15, a part is not finite
+    /// or out of its range (each part's documentation states it; a reserved fraction outside +0 to
+    /// 1 is [`BuildFieldHeaderError::NotAFraction`], and a weathering rate below +0
+    /// [`BuildFieldHeaderError::Negative`]), the maturity and the weathering rate are not both
+    /// present or both absent ([`BuildFieldHeaderError::WeatheringParts`], checked after each one's
+    /// range), a crust's palette entry is past the palette or of a role no [`Crust`] variant may
+    /// take, the main liquid's is past it or not a liquid's, or the surface is older than the
+    /// crater contract's system.
+    pub fn new(parts: FieldHeaderParts) -> Result<Self, BuildFieldHeaderError> {
+        let r = parts.radius.value();
+        if !(r.is_finite() && r > 0.0) {
+            return Err(BuildFieldHeaderError::Radius(r));
+        }
+        let Spheroid {
+            equatorial_radius_m: a,
+            polar_radius_m: c,
+        } = parts.figure;
+        let figure_ok = a.is_finite()
+            && c.is_finite()
+            && c > 0.0
+            && c <= a
+            && (parts.figure.volumetric_radius_m() / r - 1.0).abs() <= FIGURE_TOLERANCE;
+        if !figure_ok {
+            return Err(BuildFieldHeaderError::Figure(parts.figure));
+        }
+        if parts.months != 1 && parts.months != 12 {
+            return Err(BuildFieldHeaderError::Months(parts.months));
+        }
+        let e = parts.season_eccentricity;
+        // A −0 is refused too, so that a circular orbit has one wire form.
+        if !(0.0..1.0).contains(&e) || e.is_sign_negative() {
+            return Err(BuildFieldHeaderError::SeasonEccentricity(e));
+        }
+        if parts.months == 1 && e > 0.0 {
+            return Err(BuildFieldHeaderError::EccentricOneMonthYear(e));
+        }
+        for (part, exponent) in [
+            ("temperature step", parts.temperature_step),
+            ("anomaly step", parts.anomaly_step),
+        ] {
+            if exponent > MAX_STEP_EXPONENT {
+                return Err(BuildFieldHeaderError::StepExponent { part, exponent });
+            }
+        }
+        let finite = [
+            ("sea level", parts.sea_level.value()),
+            ("lapse rate", parts.lapse_rate_k_per_m),
+            ("realised sigma_h", parts.realised_sigma_h.value()),
+            ("realised relief", parts.realised_relief.value()),
+            ("reference temperature", parts.reference_temperature.value()),
+            ("surface age", parts.surface_age.value()),
+            ("surface pressure", parts.surface_pressure.value()),
+            ("albedo scale", parts.albedo_scale.unwrap_or(1.0)),
+        ];
+        if let Some(&(part, _)) = finite.iter().find(|(_, v)| !v.is_finite()) {
+            return Err(BuildFieldHeaderError::NotFinite { part });
+        }
+        let non_negative = [
+            ("realised sigma_h", parts.realised_sigma_h.value()),
+            ("realised relief", parts.realised_relief.value()),
+            ("surface age", parts.surface_age.value()),
+            ("surface pressure", parts.surface_pressure.value()),
+        ];
+        if let Some(&(part, _)) = non_negative.iter().find(|(_, v)| *v < 0.0) {
+            return Err(BuildFieldHeaderError::Negative { part });
+        }
+        let positive = [
+            ("reference temperature", parts.reference_temperature.value()),
+            ("albedo scale", parts.albedo_scale.unwrap_or(1.0)),
+        ];
+        if let Some(&(part, _)) = positive.iter().find(|(_, v)| *v <= 0.0) {
+            return Err(BuildFieldHeaderError::NotPositive { part });
+        }
+        for (part, fraction) in [
+            ("maturity", parts.maturity),
+            ("organic cover", parts.organic_cover),
+        ] {
+            check_fraction(part, fraction)?;
+        }
+        check_weathering(parts.maturity, parts.weathering_rate)?;
+        for (&crust, &entry) in Crust::ALL.iter().zip(&parts.crust_palette) {
+            if let Some(entry) = entry
+                && !parts.palette.get(entry).is_some_and(|e| e.role.is_crust())
+            {
+                return Err(BuildFieldHeaderError::CrustPalette { crust, entry });
+            }
+        }
+        if let Some(entry) = parts.main_liquid
+            && !parts.palette.has_role(entry, PaletteRole::Liquid)
+        {
+            return Err(BuildFieldHeaderError::MainLiquid(entry));
+        }
+        let (surface, system) = (parts.surface_age, parts.craters.system_age());
+        if surface.value() > system.value() {
+            return Err(BuildFieldHeaderError::SurfaceOlderThanSystem { surface, system });
+        }
+        let level = coarse_level(parts.radius);
+        let boundary_diameter = boundary_diameter(level, parts.radius);
+        Ok(Self {
+            parts,
+            level,
+            boundary_diameter,
+        })
+    }
+
+    /// The validated parts.
+    #[must_use]
+    pub fn parts(&self) -> &FieldHeaderParts {
+        &self.parts
+    }
+
+    /// The validated parts, by value.
+    #[must_use]
+    pub fn into_parts(self) -> FieldHeaderParts {
+        self.parts
+    }
+
+    /// The header with its albedo scale set to `albedo_scale` (R10's, Design note 18), every other
+    /// part kept.
+    ///
+    /// # Errors
+    ///
+    /// [`BuildFieldHeaderError::NotFinite`] or [`BuildFieldHeaderError::NotPositive`] for a scale
+    /// that is not finite and positive.
+    pub fn with_albedo_scale(
+        mut self,
+        albedo_scale: Option<f64>,
+    ) -> Result<Self, BuildFieldHeaderError> {
+        if let Some(scale) = albedo_scale {
+            let part = "albedo scale";
+            if !scale.is_finite() {
+                return Err(BuildFieldHeaderError::NotFinite { part });
+            }
+            if scale <= 0.0 {
+                return Err(BuildFieldHeaderError::NotPositive { part });
+            }
+        }
+        self.parts.albedo_scale = albedo_scale;
+        Ok(self)
+    }
+
+    /// The body the field is of.
+    #[must_use]
+    pub fn body(&self) -> BodyRef {
+        self.parts.body
+    }
+
+    /// The body's volumetric mean radius ([`FieldHeaderParts::radius`]).
+    #[must_use]
+    pub fn radius(&self) -> Metres {
+        self.parts.radius
+    }
+
+    /// The datum ([`FieldHeaderParts::figure`]).
+    #[must_use]
+    pub fn figure(&self) -> Spheroid {
+        self.parts.figure
+    }
+
+    /// The field's level, [`coarse_level`] of the radius.
+    #[must_use]
+    pub fn level(&self) -> CoarseLevel {
+        self.level
+    }
+
+    /// The boundary diameter `D_b`, [`boundary_diameter`] at the level and radius, metres: the
+    /// field lists every crater of `D_b` and wider.
+    #[must_use]
+    pub fn boundary_diameter(&self) -> Metres {
+        self.boundary_diameter
+    }
+
+    /// The sea surface's height above the datum ([`FieldHeaderParts::sea_level`]).
+    #[must_use]
+    pub fn sea_level(&self) -> Metres {
+        self.parts.sea_level
+    }
+
+    /// The lapse rate, kelvin per metre ([`FieldHeaderParts::lapse_rate_k_per_m`]).
+    #[must_use]
+    pub fn lapse_rate_k_per_m(&self) -> f64 {
+        self.parts.lapse_rate_k_per_m
+    }
+
+    /// The spectrum of relief finer than the cells ([`FieldHeaderParts::spectrum`]).
+    #[must_use]
+    pub fn spectrum(&self) -> &BandSpectrum {
+        &self.parts.spectrum
+    }
+
+    /// The crater contract ([`FieldHeaderParts::craters`]).
+    #[must_use]
+    pub fn craters(&self) -> &CraterParams {
+        &self.parts.craters
+    }
+
+    /// The climate model ([`FieldHeaderParts::climate_model`]).
+    #[must_use]
+    pub fn climate_model(&self) -> ClimateModelKind {
+        self.parts.climate_model
+    }
+
+    /// The precipitation's source ([`FieldHeaderParts::precipitation`]).
+    #[must_use]
+    pub fn precipitation(&self) -> PrecipitationSource {
+        self.parts.precipitation
+    }
+
+    /// The realised `σ_h` ([`FieldHeaderParts::realised_sigma_h`]).
+    #[must_use]
+    pub fn realised_sigma_h(&self) -> Metres {
+        self.parts.realised_sigma_h
+    }
+
+    /// The realised greatest relief ([`FieldHeaderParts::realised_relief`]).
+    #[must_use]
+    pub fn realised_relief(&self) -> Metres {
+        self.parts.realised_relief
+    }
+
+    /// The months of the year, 1 or 12 ([`FieldHeaderParts::months`]).
+    #[must_use]
+    pub fn months(&self) -> u8 {
+        self.parts.months
+    }
+
+    /// The seasonal orbit's eccentricity, 0 to below 1
+    /// ([`FieldHeaderParts::season_eccentricity`]).
+    #[must_use]
+    pub fn season_eccentricity(&self) -> f64 {
+        self.parts.season_eccentricity
+    }
+
+    /// The zero of the sea-level temperatures ([`FieldHeaderParts::reference_temperature`]).
+    #[must_use]
+    pub fn reference_temperature(&self) -> Kelvin {
+        self.parts.reference_temperature
+    }
+
+    /// The sea-level temperature's step exponent ([`FieldHeaderParts::temperature_step`]).
+    #[must_use]
+    pub fn temperature_step(&self) -> u8 {
+        self.parts.temperature_step
+    }
+
+    /// The monthly anomaly's step exponent ([`FieldHeaderParts::anomaly_step`]).
+    #[must_use]
+    pub fn anomaly_step(&self) -> u8 {
+        self.parts.anomaly_step
+    }
+
+    /// The step of the sea-level temperatures, kelvin: 0.01 K × 2ⁿ.
+    #[must_use]
+    pub fn temperature_step_k(&self) -> f64 {
+        step(TEMPERATURE_STEP_BASE_K, self.parts.temperature_step)
+    }
+
+    /// The step of the monthly anomalies, kelvin: 0.25 K × 2ⁿ.
+    #[must_use]
+    pub fn anomaly_step_k(&self) -> f64 {
+        step(ANOMALY_STEP_BASE_K, self.parts.anomaly_step)
+    }
+
+    /// The surface age ([`FieldHeaderParts::surface_age`]).
+    #[must_use]
+    pub fn surface_age(&self) -> Gigayears {
+        self.parts.surface_age
+    }
+
+    /// The mean surface pressure ([`FieldHeaderParts::surface_pressure`]).
+    #[must_use]
+    pub fn surface_pressure(&self) -> Pascals {
+        self.parts.surface_pressure
+    }
+
+    /// Whether the body is airless: a surface pressure of exactly 0 Pa, an airless surface state or
+    /// a melt surface whose volatiles are gone ([`FieldHeaderParts::surface_pressure`]); a tenuous
+    /// body, above 0 and below 100 Pa, is not.
+    ///
+    /// Such a body has had no wet epoch in this generator, so no cell of its field sheds runoff and
+    /// its channel network cuts nothing (R09.T8.d; decision-r09-t8d-reach §2). The chain, in
+    /// hyperion-sim: a cell's runoff is its climate's on a world wet now and its wet epoch's on one
+    /// dry now, and none elsewhere (the coarse pass's cell state, `steps/mod.rs`); a wet epoch needs
+    /// `holds_water`, a solid surface and `keeps_atmosphere()` (plan 14, P14.T48.b,
+    /// `hooks/figures/wet_epoch.rs`), which is the *present* state's, not `Airless`, since "the
+    /// atmosphere's own history" is not modelled; and the pass writes a pressure of exactly 0 for an
+    /// `Airless` state (`surface_pressure_of`), while a melt surface is no solid one. The field's
+    /// records are held to it ([`BuildFieldError::RunoffWithoutAir`](super::BuildFieldError::RunoffWithoutAir),
+    /// and for an epoch's incision [`BuildFieldError::IncisionWithoutAir`](super::BuildFieldError::IncisionWithoutAir))
+    /// and the level bound counts on it. A model that lets such a body carry runoff (an atmosphere lost
+    /// since a wet epoch, lava channels) must replace this certificate with a header figure.
+    #[must_use]
+    pub(crate) fn is_airless(&self) -> bool {
+        self.parts.surface_pressure.value() <= 0.0
+    }
+
+    /// R10's albedo scale on the class albedos, `None` for none, the palette's albedos unscaled
+    /// ([`FieldHeaderParts::albedo_scale`]).
+    #[must_use]
+    pub fn albedo_scale(&self) -> Option<f64> {
+        self.parts.albedo_scale
+    }
+
+    /// The body's palette ([`FieldHeaderParts::palette`]).
+    #[must_use]
+    pub fn palette(&self) -> &MaterialPalette {
+        &self.parts.palette
+    }
+
+    /// Each crust's palette entry, in [`Crust`]'s code order ([`FieldHeaderParts::crust_palette`]).
+    #[must_use]
+    pub fn crust_palette(&self) -> [Option<u8>; 4] {
+        self.parts.crust_palette
+    }
+
+    /// The palette entry of `crust`'s lithology, or `None` where the field names none.
+    #[must_use]
+    pub fn crust_entry(&self, crust: Crust) -> Option<&PaletteEntry> {
+        let at = usize::from(u8::from(crust));
+        let entry = self.parts.crust_palette.get(at).copied().flatten()?;
+        self.parts.palette.get(entry)
+    }
+
+    /// The main liquid's palette entry index ([`FieldHeaderParts::main_liquid`]).
+    #[must_use]
+    pub fn main_liquid(&self) -> Option<u8> {
+        self.parts.main_liquid
+    }
+
+    /// The ground's space-weathering maturity, 0 to 1, `None` until plan 14 fills it
+    /// ([`FieldHeaderParts::maturity`]).
+    #[must_use]
+    pub fn maturity(&self) -> Option<f64> {
+        self.parts.maturity
+    }
+
+    /// The organic cover, 0 to 1, `None` until plan 14 fills it
+    /// ([`FieldHeaderParts::organic_cover`]).
+    #[must_use]
+    pub fn organic_cover(&self) -> Option<f64> {
+        self.parts.organic_cover
+    }
+
+    /// The weathering rate relative to the Moon's, finite and at least 0, present exactly when the
+    /// maturity is, and `None` until plan 14 fills it ([`FieldHeaderParts::weathering_rate`]).
+    #[must_use]
+    pub fn weathering_rate(&self) -> Option<f64> {
+        self.parts.weathering_rate
+    }
+
+    /// The annual mean surface temperature of `cell`, reduced to sea level, kelvin: its code times
+    /// the temperature step, about the reference temperature.
+    #[must_use]
+    pub fn sea_level_temperature(&self, cell: &ClimateCell) -> Kelvin {
+        Kelvin::new(
+            self.parts.reference_temperature.value()
+                + f64::from(cell.sea_level_temperature) * self.temperature_step_k(),
+        )
+    }
+
+    /// The mean surface temperature of month `month` (from 0) of `cell`, reduced to sea level,
+    /// kelvin: the annual mean plus the month's anomaly, or `None` for a month past the year.
+    #[must_use]
+    pub fn month_temperature(&self, cell: &ClimateCell, month: u8) -> Option<Kelvin> {
+        if month >= self.parts.months {
+            return None;
+        }
+        let anomaly = f64::from(cell.month_anomaly[usize::from(month)]) * self.anomaly_step_k();
+        Some(Kelvin::new(
+            self.sea_level_temperature(cell).value() + anomaly,
+        ))
+    }
+
+    /// The code of an annual mean sea-level temperature `temperature`: its departure from the
+    /// reference temperature in temperature steps, rounded half away from zero.
+    ///
+    /// # Errors
+    ///
+    /// [`QuantiseValueError::NotFinite`] for a temperature that is not finite, and
+    /// [`QuantiseValueError::OutOfRange`] for one whose code would not fit an `i16`, which a
+    /// step chosen by [`temperature_step_for`](Self::temperature_step_for) rules out.
+    pub fn quantise_sea_level_temperature(
+        &self,
+        temperature: Kelvin,
+    ) -> Result<i16, QuantiseValueError> {
+        let t = temperature.value();
+        if !t.is_finite() {
+            return Err(QuantiseValueError::NotFinite(t));
+        }
+        let q = quantise(
+            t - self.parts.reference_temperature.value(),
+            self.temperature_step_k(),
+            f64::from(i16::MIN),
+            f64::from(i16::MAX),
+        )
+        .map_err(|_| QuantiseValueError::OutOfRange(t))?;
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "q is an integer within the i16 range, checked above"
+        )]
+        Ok(q as i16)
+    }
+
+    /// The code of a monthly anomaly of `anomaly_k` kelvin about the annual mean: the anomaly in
+    /// anomaly steps, rounded half away from zero.
+    ///
+    /// # Errors
+    ///
+    /// [`QuantiseValueError::NotFinite`] for an anomaly that is not finite, and
+    /// [`QuantiseValueError::OutOfRange`] for one beyond 127 steps, which a step chosen by
+    /// [`anomaly_step_for`](Self::anomaly_step_for) rules out.
+    pub fn quantise_month_anomaly(&self, anomaly_k: f64) -> Result<i8, QuantiseValueError> {
+        let q = quantise(anomaly_k, self.anomaly_step_k(), -127.0, 127.0)?;
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "q is an integer within ±127, checked above"
+        )]
+        Ok(q as i8)
+    }
+
+    /// The exponent of the finest sea-level temperature step, 0.01 K × 2ⁿ, that holds a largest
+    /// departure of `largest_k` kelvin from the reference temperature in an `i16`; `None` if
+    /// `largest_k` is not finite and non-negative or no step to 2¹⁵ holds it.
+    #[must_use]
+    pub fn temperature_step_for(largest_k: f64) -> Option<u8> {
+        finest_step(largest_k, TEMPERATURE_STEP_BASE_K, f64::from(i16::MAX))
+    }
+
+    /// The exponent of the finest anomaly step, 0.25 K × 2ⁿ, that holds a largest anomaly of
+    /// `largest_k` kelvin in 127 steps (Design note 17); `None` if `largest_k` is not finite and
+    /// non-negative or no step to 2¹⁵ holds it.
+    #[must_use]
+    pub fn anomaly_step_for(largest_k: f64) -> Option<u8> {
+        finest_step(largest_k, ANOMALY_STEP_BASE_K, 127.0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use hyperion_testkit::float::assert_same_bits;
+
+    use super::*;
+    use crate::field::{FieldView, LogPrecipitation, Wind};
+    use crate::testing::{SyntheticWorld, synthetic_field};
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    use wasm_bindgen_test::wasm_bindgen_test as test;
+
+    fn parts() -> FieldHeaderParts {
+        synthetic_field(SyntheticWorld::CeresLike)
+            .header()
+            .parts()
+            .clone()
+    }
+
+    /// The header derives its level and `D_b` from the radius and keeps every part it was given.
+    #[test]
+    fn a_field_header_derives_its_level_and_boundary_diameter() {
+        let parts = parts();
+        let header = FieldHeader::new(parts.clone()).unwrap();
+        assert_eq!(header.level(), coarse_level(parts.radius));
+        assert_eq!(
+            header.boundary_diameter(),
+            boundary_diameter(header.level(), parts.radius)
+        );
+        assert_eq!(header.parts(), &parts);
+        assert_eq!(header.clone().into_parts(), parts);
+        assert_eq!(header.precipitation(), PrecipitationSource::Heuristic);
+    }
+
+    /// Each rule of the parts has its own refusal.
+    #[test]
+    fn a_field_header_refuses_parts_out_of_their_ranges() {
+        let refuse = |edit: fn(&mut FieldHeaderParts)| {
+            let mut p = parts();
+            edit(&mut p);
+            FieldHeader::new(p).unwrap_err()
+        };
+        assert_eq!(
+            refuse(|p| p.radius = Metres::new(-1.0)),
+            BuildFieldHeaderError::Radius(-1.0)
+        );
+        assert!(matches!(
+            refuse(|p| p.radius = p.radius * 1.01),
+            BuildFieldHeaderError::Figure(_)
+        ));
+        assert!(matches!(
+            refuse(|p| p.figure = Spheroid {
+                equatorial_radius_m: p.figure.polar_radius_m * 0.9,
+                polar_radius_m: p.figure.polar_radius_m,
+            }),
+            BuildFieldHeaderError::Figure(_)
+        ));
+        assert_eq!(refuse(|p| p.months = 6), BuildFieldHeaderError::Months(6));
+        assert_eq!(
+            refuse(|p| p.season_eccentricity = 1.0),
+            BuildFieldHeaderError::SeasonEccentricity(1.0)
+        );
+        assert_eq!(
+            refuse(|p| p.season_eccentricity = -0.1),
+            BuildFieldHeaderError::SeasonEccentricity(-0.1)
+        );
+        assert!(matches!(
+            refuse(|p| p.season_eccentricity = -0.0),
+            BuildFieldHeaderError::SeasonEccentricity(e) if e.is_sign_negative()
+        ));
+        assert!(matches!(
+            refuse(|p| p.season_eccentricity = f64::NAN),
+            BuildFieldHeaderError::SeasonEccentricity(e) if e.is_nan()
+        ));
+        assert_eq!(
+            refuse(|p| {
+                p.months = 1;
+                p.season_eccentricity = 0.05;
+            }),
+            BuildFieldHeaderError::EccentricOneMonthYear(0.05)
+        );
+        assert_eq!(
+            refuse(|p| p.anomaly_step = 16),
+            BuildFieldHeaderError::StepExponent {
+                part: "anomaly step",
+                exponent: 16
+            }
+        );
+        assert_eq!(
+            refuse(|p| p.sea_level = Metres::new(f64::NAN)),
+            BuildFieldHeaderError::NotFinite { part: "sea level" }
+        );
+        assert_eq!(
+            refuse(|p| p.surface_pressure = Pascals::new(-1.0)),
+            BuildFieldHeaderError::Negative {
+                part: "surface pressure"
+            }
+        );
+        assert_eq!(
+            refuse(|p| p.albedo_scale = Some(0.0)),
+            BuildFieldHeaderError::NotPositive {
+                part: "albedo scale"
+            }
+        );
+        // The Ceres-like palette: its crust (0), water ice (1) and sodium carbonate (2).
+        assert_eq!(
+            refuse(|p| p.crust_palette[0] = Some(1)),
+            BuildFieldHeaderError::CrustPalette {
+                crust: Crust::Continental,
+                entry: 1
+            }
+        );
+        assert_eq!(
+            refuse(|p| p.crust_palette[1] = Some(2)),
+            BuildFieldHeaderError::CrustPalette {
+                crust: Crust::Oceanic,
+                entry: 2
+            }
+        );
+        assert_eq!(
+            refuse(|p| p.crust_palette[3] = Some(3)),
+            BuildFieldHeaderError::CrustPalette {
+                crust: Crust::Province,
+                entry: 3
+            }
+        );
+        assert_eq!(
+            refuse(|p| p.main_liquid = Some(1)),
+            BuildFieldHeaderError::MainLiquid(1)
+        );
+        assert_eq!(
+            refuse(|p| p.main_liquid = Some(9)),
+            BuildFieldHeaderError::MainLiquid(9)
+        );
+    }
+
+    /// The two reserved parts, the maturity and the organic cover, are absent until plan 14 fills
+    /// them, keep any value from +0 to 1, and refuse one outside it, a −0 or a NaN
+    /// (decision-r11-palette-liquids §2, item 4).
+    #[test]
+    fn a_field_header_holds_its_reserved_fractions_within_zero_to_one() {
+        let header = FieldHeader::new(parts()).unwrap();
+        assert_eq!((header.maturity(), header.organic_cover()), (None, None));
+        let mut filled = parts();
+        filled.maturity = Some(1.0);
+        filled.weathering_rate = Some(1.0);
+        filled.organic_cover = Some(0.0);
+        let header = FieldHeader::new(filled).unwrap();
+        assert_eq!(header.maturity(), Some(1.0));
+        assert_eq!(header.organic_cover(), Some(0.0));
+        let refuse = |edit: fn(&mut FieldHeaderParts)| {
+            let mut p = parts();
+            edit(&mut p);
+            FieldHeader::new(p).unwrap_err()
+        };
+        let maturity = BuildFieldHeaderError::NotAFraction { part: "maturity" };
+        assert_eq!(refuse(|p| p.maturity = Some(1.000_001)), maturity);
+        assert_eq!(refuse(|p| p.maturity = Some(-0.0)), maturity);
+        assert_eq!(
+            refuse(|p| p.organic_cover = Some(-0.25)),
+            BuildFieldHeaderError::NotAFraction {
+                part: "organic cover"
+            }
+        );
+        assert_eq!(
+            refuse(|p| p.organic_cover = Some(f64::NAN)),
+            BuildFieldHeaderError::NotFinite {
+                part: "organic cover"
+            }
+        );
+    }
+
+    /// The weathering rate is absent until plan 14 fills it, keeps any finite value from +0 up, a
+    /// close-in world's 10³ among them, refuses a −0, a negative value, a NaN or an infinity, and
+    /// is present exactly when the maturity is, each part's range checked before the pairing
+    /// (decision-p14-t51d-weathering §2.3).
+    #[test]
+    fn a_field_header_holds_its_weathering_rate_beside_its_maturity() {
+        let header = FieldHeader::new(parts()).unwrap();
+        assert_eq!(header.weathering_rate(), None);
+        let with = |maturity: Option<f64>, rate: Option<f64>| {
+            let mut p = parts();
+            (p.maturity, p.weathering_rate) = (maturity, rate);
+            FieldHeader::new(p)
+        };
+        for rate in [0.0, 1.0, 1e3, f64::MAX] {
+            let header = with(Some(0.5), Some(rate)).unwrap();
+            assert_same_bits(header.weathering_rate().unwrap(), rate);
+            assert_same_bits(header.maturity().unwrap(), 0.5);
+        }
+        let part = "weathering rate";
+        for rate in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert_eq!(
+                with(Some(0.5), Some(rate)),
+                Err(BuildFieldHeaderError::NotFinite { part }),
+                "{rate}"
+            );
+        }
+        for rate in [-0.0, -1e-300, -1.0] {
+            assert_eq!(
+                with(Some(0.5), Some(rate)),
+                Err(BuildFieldHeaderError::Negative { part }),
+                "{rate:e}"
+            );
+        }
+        assert_eq!(
+            with(Some(0.5), None),
+            Err(BuildFieldHeaderError::WeatheringParts { missing: part })
+        );
+        assert_eq!(
+            with(None, Some(1.0)),
+            Err(BuildFieldHeaderError::WeatheringParts {
+                missing: "maturity"
+            })
+        );
+        // Each part's own range comes first.
+        assert_eq!(
+            with(None, Some(-1.0)),
+            Err(BuildFieldHeaderError::Negative { part })
+        );
+        assert_eq!(
+            with(Some(2.0), None),
+            Err(BuildFieldHeaderError::NotAFraction { part: "maturity" })
+        );
+        assert_eq!(
+            BuildFieldHeaderError::WeatheringParts { missing: part }.to_string(),
+            "weathering rate is absent while the other of the maturity and the weathering rate is \
+             present"
+        );
+    }
+
+    /// A surface older than its system, the crater contract's system age, which the chronology
+    /// cannot count, is refused; one as old is not (R09.T7.e).
+    #[test]
+    fn a_field_header_refuses_a_surface_older_than_its_system() {
+        let system = parts().craters.system_age();
+        let mut older = parts();
+        older.surface_age = Gigayears::new(5.0);
+        assert_eq!(
+            FieldHeader::new(older).unwrap_err(),
+            BuildFieldHeaderError::SurfaceOlderThanSystem {
+                surface: Gigayears::new(5.0),
+                system
+            }
+        );
+        let mut as_old = parts();
+        as_old.surface_age = as_old.craters.system_age();
+        assert!(FieldHeader::new(as_old).is_ok());
+    }
+
+    /// A crust's entry names its lithology, and a crust with none names nothing.
+    #[test]
+    fn a_field_header_names_each_crusts_lithology() {
+        let header = FieldHeader::new(parts()).unwrap();
+        let lid = header.crust_entry(Crust::Lid).unwrap();
+        assert_eq!(lid.substance.as_str(), "phyllosilicate");
+        assert_eq!(lid.role, PaletteRole::PrimaryCrust);
+        assert_eq!(header.crust_entry(Crust::Continental), None);
+        assert_eq!(header.crust_palette(), [None, None, Some(0), Some(0)]);
+        assert_eq!(header.main_liquid(), None);
+        assert_eq!(header.palette().len(), 3);
+    }
+
+    /// An undifferentiated body's bulk material is a lithology a [`Crust`] variant's entry may
+    /// name, though not a crust: its `Bulk` entry is the lid's and the provinces'
+    /// (science-composition-crusts.md §1).
+    #[test]
+    fn a_field_header_takes_a_bulk_entry_for_the_lid_and_the_provinces() {
+        let mut parts = parts();
+        // The Ceres-like palette's water ice and sodium carbonate, then a bulk material.
+        let mut entries = parts.palette.entries()[1..].to_vec();
+        entries.push(PaletteEntry {
+            substance: crate::substance_key::SubstanceKey::new("cometary").unwrap(),
+            role: PaletteRole::Bulk,
+            ..parts.palette.entries()[0].clone()
+        });
+        parts.palette = MaterialPalette::new(entries).unwrap();
+        parts.crust_palette = [None, None, Some(2), Some(2)];
+        let header = FieldHeader::new(parts).unwrap();
+        for crust in [Crust::Lid, Crust::Province] {
+            let entry = header.crust_entry(crust).unwrap();
+            assert_eq!(
+                (entry.substance.as_str(), entry.role),
+                ("cometary", PaletteRole::Bulk)
+            );
+        }
+    }
+
+    /// Design note 17's steps: 0.25 K for an Earth's ±31 K, 0.5 K for a Mars's ±60 K and 1 K for
+    /// ±70 K; 0.01 K for a departure of 300 K, 0.02 K for 600 K.
+    #[test]
+    fn the_finest_step_holds_the_largest_anomaly() {
+        assert_eq!(FieldHeader::anomaly_step_for(31.0), Some(0));
+        assert_eq!(FieldHeader::anomaly_step_for(60.0), Some(1));
+        assert_eq!(FieldHeader::anomaly_step_for(70.0), Some(2));
+        assert_eq!(FieldHeader::temperature_step_for(300.0), Some(0));
+        assert_eq!(FieldHeader::temperature_step_for(600.0), Some(1));
+        assert_eq!(FieldHeader::anomaly_step_for(f64::NAN), None);
+        assert_eq!(FieldHeader::anomaly_step_for(1e7), None);
+    }
+
+    /// A temperature and an anomaly come back from their codes to within half a step.
+    #[test]
+    fn field_temperatures_round_trip_to_half_a_step() {
+        let mut p = parts();
+        p.months = 12;
+        p.reference_temperature = Kelvin::new(250.0);
+        p.temperature_step = 1;
+        p.anomaly_step = 2;
+        let header = FieldHeader::new(p).unwrap();
+        assert!((header.temperature_step_k() - 0.02).abs() < 1e-15);
+        assert!((header.anomaly_step_k() - 1.0).abs() < 1e-15);
+        let mut cell = ClimateCell {
+            sea_level_temperature: 0,
+            month_anomaly: [0; 12],
+            month_precipitation: [LogPrecipitation::NONE; 12],
+            wind: [Wind::CALM; 12],
+        };
+        for t in [-400.0, -1.234, 0.0, 17.777, 600.0] {
+            let code = header
+                .quantise_sea_level_temperature(Kelvin::new(250.0 + t))
+                .unwrap();
+            cell.sea_level_temperature = code;
+            let back = header.sea_level_temperature(&cell).value();
+            assert!((back - (250.0 + t)).abs() <= 0.01 + 1e-9, "{t} K → {back}");
+        }
+        for a in [-127.0, -30.4, 0.6, 126.9] {
+            let code = header.quantise_month_anomaly(a).unwrap();
+            cell.month_anomaly[5] = code;
+            let back = header.month_temperature(&cell, 5).unwrap().value()
+                - header.sea_level_temperature(&cell).value();
+            assert!((back - a).abs() <= 0.5 + 1e-9, "{a} K → {back}");
+        }
+        assert_eq!(header.month_temperature(&cell, 12), None);
+        assert_eq!(
+            header.quantise_month_anomaly(128.0),
+            Err(QuantiseValueError::OutOfRange(128.0))
+        );
+        assert_eq!(
+            header.quantise_sea_level_temperature(Kelvin::new(2_000.0)),
+            Err(QuantiseValueError::OutOfRange(2_000.0))
+        );
+    }
+}

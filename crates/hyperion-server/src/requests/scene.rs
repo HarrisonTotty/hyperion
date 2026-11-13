@@ -6,18 +6,23 @@ use std::sync::Arc;
 use hyperion_protocol::{
     ErrorCode, RequestError, ResponseBody, SceneClockDto, SceneShipRequest, SceneShipSet,
 };
+use hyperion_sim::coords::SystemPosition;
 use hyperion_sim::galaxy::Galaxy;
-use hyperion_sim::galaxy::placement::resolve;
-use hyperion_sim::galaxy::query::position_at;
-use hyperion_sim::id::BodyId;
+use hyperion_sim::galaxy::global_list::GlobalListSource;
+use hyperion_sim::id::{BodyId, SystemId};
 use hyperion_sim::planetary::{BodyIndex, ResolveBodyError};
+use hyperion_sim::time::{ClockWindow, UniverseTime};
 use tokio::time::Instant;
 
+use super::global_list::listing_refused;
 use super::system::bodies_of;
 use super::universe::openable_universe;
 use crate::AppState;
-use crate::compute::{CancelToken, GalaxyKey, GenerateBodiesError, JobError, Priority};
-use crate::convert::{ShipRequest, unknown_frame_body, unknown_frame_system};
+use crate::compute::{CancelToken, GalaxyKey, GenerateBodiesError, JobError, Listing, Priority};
+use crate::convert::{
+    MotionReads, ShipRequest, SystemLine, unknown_frame_body, unknown_frame_system,
+    untraced_frame_system,
+};
 use crate::scene::{SceneClock, SceneSetting, ShipPosition, ShipStandIn};
 
 /// Sets the universe's ship stand-in and scene clock, and answers the clock as set (Design
@@ -30,11 +35,15 @@ use crate::scene::{SceneClock, SceneSetting, ShipPosition, ShipStandIn};
 ///
 /// Those of [`openable_universe`]; the field checks of [`ShipRequest`] (`bad_request` naming
 /// `time_rate`, `ship.time`, `ship.velocity_m_s` or `ship.position`); for a system frame,
-/// `unknown_system` naming `ship.position` if plan 03's `resolve` refuses the ID, and
-/// `bad_request` if the offset takes the ship out of the galactic frame's range; for a body frame,
-/// `unknown_system` likewise and `unknown_body` if the system holds no such body or the body is not
-/// present at the pose's time; those of the galaxy cache; and `queue_full`, `internal` or
-/// `cancelled` from the pool job that resolves the frame.
+/// `unknown_system` naming `ship.position` if plan 03's `resolve` refuses the ID (from generator
+/// version 27 a list member's through plan 10's `resolve_with`) or the system cannot be placed at
+/// every time of the clock window (below 27 a member of the galactic centre or the global list, or
+/// a catalogue system, at every time, the epoch included; P07.T10.c and P09.T33.a; a tidal
+/// disruption's victim disrupted inside the window), and `bad_request` if the offset takes the
+/// ship out of the galactic frame's range; for a body frame, `unknown_system` likewise and
+/// `unknown_body` if the system holds no such body or the body is not present at the pose's time;
+/// those of the galaxy cache, and of the global list's service for a list member's frame; and
+/// `queue_full`, `internal` or `cancelled` from the pool job that resolves the frame.
 pub(crate) async fn ship(
     state: Arc<AppState>,
     request: SceneShipRequest,
@@ -44,12 +53,12 @@ pub(crate) async fn ship(
     let checked = ShipRequest::try_from(&request)?;
     let key = universe.key();
     let galaxy = state.galaxies.get(key).await?;
-    check_frame(&state, key, &galaxy, &checked, token).await?;
+    let frame = check_frame(&state, key, &galaxy, &checked, token).await?;
     let anchor = Instant::now();
     let clock = SceneClock::new(checked.time(), anchor, checked.rate())
         .expect("the request's time was checked to lie inside the clock window");
     let set = clock.at_instant(anchor);
-    let ship = ShipStandIn::from(checked);
+    let ship = ShipStandIn::from(checked).with_frame(frame);
     state.scene.set(universe.id(), SceneSetting { clock, ship });
     tracing::debug!(time = %set.time(), rate = set.rate().get(), "scene ship set");
     Ok(ResponseBody::SceneShip(SceneShipSet {
@@ -57,18 +66,25 @@ pub(crate) async fn ship(
     }))
 }
 
-/// Resolves the frame the pose is in, as plan 04 requires of every ID read from a client, and
-/// checks that the pose can be placed in the galactic frame at its time.
+/// Resolves the frame the pose is in, as plan 04 requires of every ID read from a client, finds
+/// its system's path by its origin ([`SystemLine::of`], as
+/// [`system_motion`](crate::convert::system_motion) does), and checks that
+/// the pose can be placed in the galactic frame at its time; answers the path, `None` for a pose
+/// in the galactic frame.
+///
+/// The path is placed at the clock window's end too, since the scene's core places the frame at
+/// every time its clock reads, and the only system whose place ends is a tidal disruption's victim,
+/// at its disruption: one disrupted before the window's end is refused, at every time.
 async fn check_frame(
     state: &Arc<AppState>,
     key: GalaxyKey,
     galaxy: &Arc<Galaxy>,
     checked: &ShipRequest,
     token: CancelToken,
-) -> Result<(), RequestError> {
+) -> Result<Option<Arc<SystemLine>>, RequestError> {
     let t = checked.time();
     let (system, offset, body) = match checked.position() {
-        ShipPosition::Galactic(_) => return Ok(()),
+        ShipPosition::Galactic(_) => return Ok(None),
         ShipPosition::System { system, offset } => (system, offset, None),
         ShipPosition::Body { body, offset } => {
             let generated = bodies_of(state, key, galaxy, body.system()).await.map_err(
@@ -105,28 +121,71 @@ async fn check_frame(
             (body.system(), offset.to_system(&centre), Some(body))
         }
     };
-    let galaxy = Arc::clone(galaxy);
+    // A stream's or a dwarf core's member resolves through its galaxy's list, from generator
+    // version 27, when the server places it (plan 10, P10.T10.b).
+    let listing = if GlobalListSource::is_registered_in(galaxy) {
+        state
+            .global_lists
+            .listing(key, system)
+            .await
+            .map_err(|error| listing_refused(system, error))?
+    } else {
+        Listing::Unlisted
+    };
+    let (galaxy, shared) = (Arc::clone(galaxy), Arc::clone(state));
     let check = move |_: &CancelToken| {
-        let record = resolve(&galaxy, system).map_err(|error| {
-            let what = body.map_or_else(|| format!("system {:016x}", system.raw()), body_name);
-            unknown_frame_system(&what, error)
-        })?;
-        let barycentre = position_at(&galaxy, &record, t);
-        offset
-            .to_galactic(&barycentre)
-            .map(|_| ())
-            .ok_or_else(|| RequestError {
-                code: ErrorCode::BadRequest,
-                message: "invalid ship.position: the offset takes the ship out of the galactic \
-                          frame's range"
-                    .to_owned(),
-                field: Some("ship.position".to_owned()),
-            })
+        let what = body.map_or_else(|| format!("system {:016x}", system.raw()), body_name);
+        let (interiors, orbits) = (
+            shared.cluster_models.handle(key),
+            shared.centre_orbits.handle(key),
+        );
+        let reads = MotionReads::new(&interiors, &orbits).with_listing(&listing);
+        frame_line(&galaxy, (&listing, reads), (system, &what), offset, t).map(Some)
     };
     let receiver = state.pool.try_submit(Priority::Interactive, token, check)?;
     receiver
         .await
         .unwrap_or_else(|closed| Err(JobError::from(closed)))?
+}
+
+/// The path of the system `system` a pose names as its frame, which the refusals call `what`,
+/// resolved through `listing` and found through `reads` ([`SystemLine::of`]), placed at the pose's
+/// time `t` and at the clock window's end, and the pose `offset` from it in the galactic frame's
+/// range ([`check_frame`]).
+///
+/// # Errors
+///
+/// `unknown_system` naming `ship.position` if the ID resolves to no system or the system cannot be
+/// placed at both times, and `bad_request` naming it if the offset takes the ship out of the
+/// galactic frame's range.
+pub(super) fn frame_line(
+    galaxy: &Galaxy,
+    (listing, reads): (&Listing, MotionReads<'_>),
+    (system, what): (SystemId, &str),
+    offset: SystemPosition,
+    t: UniverseTime,
+) -> Result<Arc<SystemLine>, RequestError> {
+    let record = listing
+        .resolve(galaxy, system)
+        .map_err(|error| unknown_frame_system(what, error))?;
+    // Placed by its origin, as every system named by a client: a feature member on its own line,
+    // the rest as their range rows; below generator version 27 a member of the galactic centre or
+    // the global list or a catalogue system is refused at every time, the epoch included, so that
+    // the scene's core can place every frame this accepts at every later time.
+    let untraced = |error| untraced_frame_system(what, error);
+    let line = SystemLine::of(galaxy, reads, &record).map_err(untraced)?;
+    let (barycentre, _) = line.at(galaxy, t).map_err(untraced)?;
+    line.at(galaxy, ClockWindow::END).map_err(untraced)?;
+    offset
+        .to_galactic(&barycentre)
+        .map(|_| Arc::new(line))
+        .ok_or_else(|| RequestError {
+            code: ErrorCode::BadRequest,
+            message: "invalid ship.position: the offset takes the ship out of the galactic \
+                      frame's range"
+                .to_owned(),
+            field: Some("ship.position".to_owned()),
+        })
 }
 
 /// A body's ID as the refusals name it.

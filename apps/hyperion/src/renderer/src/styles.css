@@ -187,7 +187,10 @@ body {
   text-transform: uppercase;
 }
 
-/* What a panel says when it has nothing to show, such as NO UNIVERSE OPEN. */
+/*
+ * What a panel says when it has nothing to show, such as NO UNIVERSE OPEN, or why and what to do,
+ * through StatusText (NO CHART: centre one to list its systems).
+ */
 .panel__empty {
   margin: 0;
   font-size: 0.875rem;
@@ -316,6 +319,21 @@ body {
   color: var(--text-muted);
 }
 
+/* What a map counts where its title alone does not say: the REMNANTS map's line (plan 08). */
+.density-legend__counted {
+  margin: -0.25rem 0 0.5rem;
+  color: var(--text-muted);
+  letter-spacing: 0.15em;
+}
+
+/* The same line where the view has no legend to hold it, pending or failed. */
+.map-view__counted {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  letter-spacing: 0.15em;
+}
+
 /* A display with a fixed layout of its own fills the work area as one cell. */
 .console__work--galaxy {
   grid-template-columns: minmax(0, 1fr);
@@ -395,6 +413,21 @@ body {
 .request-status__text--fault,
 .census-readout__state--fault {
   color: var(--status-caution);
+}
+
+/*
+ * A status that names its state and then, after a colon, says in a sentence its cause, its
+ * consequence or what the operator can do (StatusText; the guide's Typography, P05.T13): the state
+ * and its colon tracked as an annunciation is, and the sentence untracked, a name inside it
+ * included. A line upper case whole is one state, tracked whole. Both parts keep the line's size,
+ * face and colour, and set their spacing whatever their container's.
+ */
+.status-text__state {
+  letter-spacing: 0.15em;
+}
+
+.status-text__sentence {
+  letter-spacing: 0;
 }
 
 /*
@@ -858,6 +891,15 @@ body {
 }
 
 /*
+ * A select's hovered state, which a styled select otherwise lacks: its outline in --text-muted
+ * (6.04:1 on --surface-2), since its resting surface is already the hovered control's. Lean of
+ * P08.T15.b, for QUERY RADIUS and POPULATION alike; the look is the owner's to confirm.
+ */
+select.form-field__input:not([aria-disabled="true"]):hover {
+  border-color: var(--text-muted);
+}
+
+/*
  * Disabled: the outline keeps its 3:1, and the field reads as inert by its surface and text. A field
  * held back with `aria-disabled`, which keeps its focus and is described by the visible reason,
  * reads the same way, since the guide has every control show disabled distinctly.
@@ -1001,8 +1043,9 @@ body {
 
 /*
  * The PARAMETERS and GALAXY MAP pages, sharing a panel. The page selector is the panel's title, at
- * its top left; the map's pictures run from the panel's top beside it, so the map page spans the
- * selector's row and keeps its first 2.5rem of words clear of the selector, which stands above it.
+ * its top left; the map page spans the selector's row, keeping its first 2.5rem clear of the
+ * selector, which stands above it: its words start under it, and its pictures too, since the
+ * selector is wider than the words column.
  */
 .galaxy__column > .galaxy-pages {
   display: grid;
@@ -1107,16 +1150,31 @@ body {
 /*
  * The words beside the pictures, then the gutter for the vertical axes' labels, the pictures, and
  * the gutter for the horizontal axes' labels. Face-on above edge-on, 0.5rem apart: the face-on
- * picture spans the page's controls and its own words, the edge-on picture its words. The
- * pictures' width, --map-picture, is the page's to set (GalaxyMapPanel.tsx, which restates these
- * widths), even, and as large as the page allows.
+ * picture spans the page's controls and its own words, the edge-on picture its words, and the
+ * pictures start 2.5rem down, clear of the page tabs. The pictures' width, --map-picture, and the
+ * views' heights, --map-face-row and --map-edge-row, are the page's to set (mapLayout.ts, which
+ * restates these widths): each view as tall as its picture or, on a page too narrow for that, its
+ * tallest plain words, from the page's size alone.
  */
 .galaxy-map__grid {
   display: grid;
   grid-template-columns: minmax(24rem, 1fr) 3.75rem var(--map-picture) 1.75rem;
-  grid-template-rows: auto minmax(0, 1fr) 0.5rem calc(var(--map-picture) / 2);
-  height: calc(var(--map-picture) * 1.5 + 0.5rem);
+  grid-template-rows: auto minmax(0, 1fr) 0.5rem var(--map-edge-row);
+  height: calc(var(--map-face-row) + 0.5rem + var(--map-edge-row));
   font-size: 0.875rem;
+}
+
+/*
+ * A page too short for that (mapLayout.ts): the controls in a row across the page, 7.5rem tall
+ * with the tabs' clearance, then face-on above edge-on beside a wider words column, at least 27rem,
+ * each row as tall as its picture or its words, whichever is taller. Nothing scrolls: the pictures
+ * are never so wide that a plain state's words pass the page's foot, and the overlay is offered
+ * only where its words fit beside them (decision-gg-port-d0 §3.2).
+ */
+.galaxy-map__grid--compact {
+  grid-template-columns: minmax(0, 1fr) 3.75rem var(--map-picture) 1.75rem;
+  grid-template-rows: auto auto 0.5rem auto;
+  height: auto;
 }
 
 /* Above the face-on view's box, which spans this row too, so that its controls take the pointer. */
@@ -1127,8 +1185,123 @@ body {
   padding: 2.5rem 0 0.5rem;
 }
 
+/*
+ * Compact, the controls flow along the row in their order: the population and the quantity, then
+ * the overlay's toggle, why it is held back or its name, and the frame and scale.
+ */
+.galaxy-map__grid--compact > .galaxy-map__controls {
+  display: flex;
+  flex-wrap: wrap;
+  grid-column: 1 / -1;
+  align-items: center;
+  align-content: flex-start;
+  gap: 0.25rem 1.5rem;
+  box-sizing: border-box;
+  min-height: 7.5rem;
+}
+
+/*
+ * The page's one line for the views' wait (GalaxyMapPanel): the link's state, why the choices are
+ * held back, or a stale view's new map in flight, in the same place and the same look, so that
+ * nothing moves as it changes. A block, the output for PENDING included.
+ */
+.galaxy-map__wait {
+  display: block;
+}
+
+/* How the stream overlay stands, under its toggles in the face-on view's words (plan 10, P10.T11). */
+.map-view__stream-status {
+  margin-top: 0.25rem;
+}
+
+/* A status's figures, in B612 Mono, their padding kept, so that a count holds its field. */
+.status-text__figures {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: pre;
+}
+
+/* Compact, it stands in the tabs' row at its right, so that the row keeps its height. */
+.galaxy-map__grid--compact > .galaxy-map__controls > .galaxy-map__wait {
+  position: absolute;
+  top: 0;
+  right: 0;
+  margin: 0;
+  line-height: 2rem;
+}
+
+.galaxy-map__grid--compact :is(.galaxy-map__population, .galaxy-map__quantity, .form-choice) {
+  margin-bottom: 0;
+}
+
+.galaxy-map__grid--compact .galaxy-map__quantity {
+  display: contents;
+}
+
 .galaxy-map__population {
   margin-bottom: 0.25rem;
+}
+
+/* The three choices' select and its label on one line, as QUERY RADIUS stands (plan 08). */
+.galaxy-map__population-field {
+  display: flex;
+  align-items: center;
+  gap: 0 0.5rem;
+}
+
+/* As wide as its longest choice, so that a choice moves nothing; spaced as the radio labels are. */
+.galaxy-map__population-select {
+  width: auto;
+  letter-spacing: 0.1em;
+}
+
+/* The quantity the maps show, and beside it the dust overlay's toggle, held back under EXTINCTION. */
+.galaxy-map__quantity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.25rem 1rem;
+  margin-bottom: 0.25rem;
+}
+
+/* On, it is underlined in --accent, as the other toggles on the ship are. */
+.galaxy-map__overlay {
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+}
+
+.galaxy-map__overlay[aria-pressed="true"] {
+  border-bottom-color: var(--accent);
+}
+
+/*
+ * Why the overlay is held back, set as the VIEW display sets its own reasons
+ * (.view-instruments-panel__reason): through StatusText, NOT AVAILABLE: tracked and its sentence
+ * untracked, so that the room's reason takes two lines of the compact controls' row, as the
+ * overlay's name does (P05.T13's measurements).
+ */
+.galaxy-map__overlay-reason {
+  flex: 1 1 12rem;
+  color: var(--text-muted);
+}
+
+/*
+ * The overlay's name and quantity, which the guide has the display show while it is applied: once
+ * for the page, beside its toggle, taking what the line leaves it.
+ */
+.galaxy-map__overlay-name {
+  flex: 1 1 12rem;
+  margin: 0;
+  letter-spacing: 0.15em;
+}
+
+/*
+ * What the overlay's pictures show, a sentence after the overlay's name, on a line of its own: in
+ * mixed case and without the labels' letter-spacing (decision-gg-port-a2 §5).
+ */
+.galaxy-map__overlay-brightness {
+  flex: 1 1 100%;
+  margin: 0;
 }
 
 /* The frame and the scale, which the two pictures share. */
@@ -1160,6 +1333,10 @@ body {
   grid-row: 4;
 }
 
+.galaxy-map__grid--compact > .map-view--face_on {
+  grid-row: 2;
+}
+
 .map-view__side {
   display: flex;
   grid-column: 1;
@@ -1173,7 +1350,8 @@ body {
   grid-row: 2;
 }
 
-.map-view--edge_on > .map-view__side {
+.map-view--edge_on > .map-view__side,
+.galaxy-map__grid--compact .map-view > .map-view__side {
   grid-row: 1;
 }
 
@@ -1181,6 +1359,15 @@ body {
   grid-column: 3;
   grid-row: 1 / -1;
   min-width: 0;
+}
+
+/* Stacked, the face-on picture starts clear of the page tabs, beside the controls. */
+.galaxy-map__grid--stacked .map-view--face_on > .map-view__area {
+  padding-top: 2.5rem;
+}
+
+.galaxy-map__grid--compact .map-view__area {
+  align-self: start;
 }
 
 .map-view__head {
@@ -1209,6 +1396,27 @@ body {
 
 .map-view__unit {
   color: var(--text-muted);
+}
+
+/*
+ * A view's legend; under the overlay its two legends side by side, so that the edge-on view's
+ * words fit beside its picture at 1920 × 1080 (decision-gg-port-d0 §3.2.4).
+ */
+.map-view__legends {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.map-view__legends--pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 1rem;
+}
+
+.map-view__legends--pair .density-legend__caption {
+  flex-wrap: wrap;
+  row-gap: 0;
 }
 
 /* Room for the longest reading, 4.89E-10, so that the unit never moves as the cursor does. */
@@ -1289,6 +1497,96 @@ body {
   stroke: var(--text);
 }
 
+/*
+ * The feature overlay over a map's picture (plan 09, P09.T41.b): one SVG in the picture's CSS px,
+ * under the cursor and the chart's centre, taking no pointer, so that a pick reaches the picture.
+ * Every line is cased in --surface-0, as any line over a raster is: the crosses at a mark's
+ * outline in --text, open, the circles at true radius 1 px in --text-muted, and the labels in
+ * --text, set as the views' labels are. Stale, the crosses and the labels are muted too.
+ */
+.map-features {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  fill: none;
+  pointer-events: none;
+}
+
+.map-features :is(path, circle, polyline) {
+  vector-effect: non-scaling-stroke;
+}
+
+/* A stream's track (plan 10, P10.T11): the guide's solid 1px --text-muted line, cased as a line
+   over a raster is, its corners round so that a sharp turn of a tip keeps its casing. */
+.map-streams__casing {
+  stroke: var(--surface-0);
+  stroke-width: calc(3px * var(--line-scale));
+  stroke-linejoin: round;
+}
+
+.map-streams__line {
+  stroke: var(--text-muted);
+  stroke-width: calc(1px * var(--line-scale));
+  stroke-linejoin: round;
+}
+
+.map-features__casing {
+  stroke: var(--surface-0);
+  stroke-width: calc(var(--mark-stroke) + 2px * var(--line-scale));
+}
+
+.map-features__cross {
+  stroke: var(--text);
+  stroke-width: var(--mark-stroke);
+}
+
+.map-features__circle-casing {
+  stroke: var(--surface-0);
+  stroke-width: calc(3px * var(--line-scale));
+}
+
+.map-features__circle {
+  stroke: var(--text-muted);
+  stroke-width: calc(1px * var(--line-scale));
+}
+
+.map-features__label {
+  fill: var(--text);
+  stroke: var(--surface-0);
+  stroke-width: calc(2px * var(--line-scale));
+  paint-order: stroke;
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
+  letter-spacing: 0.1em;
+}
+
+.map-features--stale :is(.map-features__cross, .map-features__label) {
+  stroke: var(--text-muted);
+}
+
+.map-features--stale .map-features__label {
+  fill: var(--text-muted);
+  stroke: var(--surface-0);
+}
+
+/* The overlay's toggles under the face-on view's legends, each kind's sample beside its name. */
+.map-view__features {
+  margin-bottom: 0;
+}
+
+.map-features__sample circle {
+  stroke-width: calc(1px * var(--line-scale));
+}
+
+/* A stream's sample: a short run of its line, as the map draws it, at its width. */
+.map-features__sample line {
+  stroke: var(--text-muted);
+  stroke-width: calc(1px * var(--line-scale));
+  vector-effect: non-scaling-stroke;
+}
+
 /* A mark pegged to the picture's edge: the arrow beside it says which way its point lies. */
 .map-view__peg {
   position: absolute;
@@ -1306,14 +1604,41 @@ body {
 }
 
 /*
+ * Room after a value for its stale `S` (`StaleSlot`): a space and the mark, 2 ch of the value's
+ * figures, the mark set at the slot's right. It is kept while the value is live, empty, so that the
+ * mark's coming moves nothing after it (the guide's "Numbers": a field is sized for its longest
+ * value and its status marks; plan 05, P05.T14). The spatial readings keep it after each value read
+ * from a source that can go stale (plan 12, P12.T11.d), and an em dash keeps its slot, empty.
+ */
+.stale-slot {
+  display: inline-block;
+  min-width: 2ch;
+  text-align: right;
+}
+
+/*
  * A chart the link no longer backs is a stale snapshot: every value read from the answer is muted,
- * as the guide's "Data states" asks, and the trailing `S` in each block says so in a mark as well.
- * The camera's own angles and the controls are live and are left alone.
+ * as the guide's "Data states" asks, and a trailing `S` says so in a mark as well. The view's
+ * furniture (plan 12, P12.T11.d), the HR page's counts and the system readout mark each value, in
+ * the slot each keeps while live; the system list marks each row once, at the end of its range
+ * cell, in a slot kept while live; the census marks each value with an `S` while stale only, since
+ * its counts keep no fixed width (plan 05, P05.T14). The `Bodies` panel and the star list's
+ * captions still mark once a block. The camera's own angles, a time the console keeps itself and
+ * the controls are live and are left alone.
  */
 .spatial-view--stale :is(.spatial-view__readings, .spatial-view__labels),
 .census-readout--stale,
 .systems-panel--stale :is(.system-list, .system-readout) {
   color: var(--text-muted);
+}
+
+/*
+ * A time the console keeps itself, the orbit map's display time, which `RUN` and `HOLD` move, is
+ * live while the answer it is shown with is stale: its value takes no `S` and stays in `--text`.
+ * Its label and unit stay muted, as every label and unit is (plan 12, P12.T11.d's ruling).
+ */
+.spatial-view--stale .spatial-reading--own {
+  color: var(--text);
 }
 
 /* The accent marking what is within the drive range is not live either once the answer is stale. */
@@ -1416,14 +1741,48 @@ body {
 
 /*
  * A page too short to stack them (the orchestrator's rulings 134.9 and 149.1, at 1280 x 720): the
- * preset views across the page; the chart, with the camera's angles and keys and what the chart is
- * asked for in a column beside it; then, across the page, the chart's frame, centre, time and
- * scale, the census line and its toggle, the census's hint, and the legend, which is on show in
- * every state.
+ * preset views across the page, with the camera's angles and keys on the presets' row, as the
+ * stacked page sets them, here at its end; the chart, with what the chart is asked for in a column
+ * beside it; then, across the page, the chart's frame, centre, time and scale (and on the galactic
+ * axis the axis note), the census line with its toggle and its hint, and the legend, which is on
+ * show in every state.
  * Shown, the census table takes the place of the query controls in the column, which keeps one
  * width, the table's, so that nothing but the two moves when the toggle is pressed. The spatial
  * view, its row of controls and the census are no boxes of their own here, so that their parts take
  * the page's grid; the parts keep their order, and so the tab order, of the stacked page.
+ *
+ * The column must end above the stage's foot, or its last rows are drawn over the furniture. Plan
+ * 12's mode row (P12.T11) made it 2rem taller, and observed mode puts the observer in the furniture
+ * and two entries in the legend under the stage. So the column's choices drop their bottom margin,
+ * the link's reason stands beside QUERY RADIUS, the readings sit closer so that the furniture keeps
+ * two lines in `NOW` and three in `OBSERVED`, and the legend runs on as one text (look-72's
+ * ruling). The stale slots after the furniture's values (P12.T11.d) add no line, by reckoning,
+ * since the scale bar follows the time and the mode the scale bar: the frame and the centre fill
+ * the first line, the time, the scale bar and in `NOW` the mode the second, and observed mode's
+ * `MODE OBSERVED FROM` and the observer the third (plan 12's ruling of 2026-10-22, recorded under
+ * P12.T11.d); on the galactic axis the note follows the scale bar on the second line, and `MODE`
+ * stands on the third in both modes (P12.T11.g). A refused entry stands in its field's hint's
+ * place, on the field's own row, and never wraps, and the mode and the command that moves the
+ * observer keep one row while a chart is on show, so that no refusal, nor two at once, adds a line
+ * to the column (P12.T11.c). The
+ * circle's seventh kind, `STRIPPED HELIUM STAR` (P06.T24.c), gave the legend a seventh line in
+ * `OBSERVED`, so the angles and keys left the column for the presets' row and the furniture's
+ * lines are 1rem: the stage keeps at least 14rem at 80 x 45 rem, ruling 134.9's 15rem lowered for
+ * the legend's seventh line (decision-stripped-star-class.md, 2026-10-21). Measured hidden at
+ * 1280 x 720, 100%, at P06.T24.c's landing: in `NOW` the stage is 262 px tall and the column ends
+ * 52 px above its foot; in `OBSERVED` 228 px and 18 px, the same with one refused entry or two.
+ * A line that stands only in some states took its room from the stage: the census's hint, 22 px,
+ * the census summary on two lines under a `STARS` filter, 18 px, and the galactic axis's note,
+ * 16 px. Two at once ran the column's mode row onto the furniture's first line (188 px in
+ * `OBSERVED`, at the landing look of #79 to #81). So the hint now stands in the census row under
+ * the summary, which wraps beside `CENSUS BY LAYER` at 1rem a line, and the axis note in the
+ * furniture's run after the scale bar (plan 12, P12.T11.g): the stage keeps 14rem in every state
+ * with at most one of the hint and the summary's second line, and 13.25rem with both, the column
+ * ending above its foot in every state (decision-p12-t11-look-followups §14). Measured hidden at
+ * 1280 x 720 and 150% (look-79-81), live and stale: in `OBSERVED` 228 and 232 px with at most one
+ * of those lines, the axis note included, and 212 and 216 px with both, the column 2.5 and
+ * 6.5 px above the stage's foot; in `NOW` 262 and 266 px, 246 and 250 with both, and on the axis
+ * 246 and 250, 230 and 234 with both; one refused entry or two change nothing.
  */
 .local-chart--compact {
   /*
@@ -1445,15 +1804,12 @@ body {
   grid-template-areas:
     "note    note"
     "presets presets"
-    "stage   angles"
-    "stage   keys"
     "stage   controls"
     "furn    furn"
     "census  census"
-    "hint    hint"
     "legend  legend";
   grid-template-columns: minmax(0, 1fr) max(24rem, var(--census-table-width));
-  grid-template-rows: auto auto auto auto minmax(0, 1fr) auto auto auto auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto auto auto;
   gap: 0 1rem;
 }
 
@@ -1469,49 +1825,163 @@ body {
 
 .local-chart--compact .preset-buttons {
   grid-area: presets;
+  justify-self: start;
   margin-bottom: 0.25rem;
 }
 
+/*
+ * The camera's angles and keys at the end of the presets' row, one 1rem line each, in their order:
+ * `AZM 030° ELV +30°` over `ARROWS ROTATE +/- ZOOM Z FIT`, which measure 176 px and 324 px at
+ * 1280 x 720, 121 px clear of the presets' 353 px of the page's 798. The keys stand 1rem down, so
+ * that the pair sets its own height rather than lean on the preset buttons' 2rem.
+ */
 .local-chart--compact .spatial-view__angles {
-  grid-area: angles;
-  margin-bottom: 0.25rem;
+  grid-area: presets;
+  align-self: start;
+  justify-self: end;
+  line-height: 1rem;
 }
 
 .local-chart--compact .spatial-view__keys {
-  grid-area: keys;
+  grid-area: presets;
+  align-self: start;
+  justify-self: end;
+  margin-top: 1rem;
   margin-bottom: 0.25rem;
+  line-height: 1rem;
 }
 
 .local-chart--compact .spatial-view__stage {
   grid-area: stage;
 }
 
+/*
+ * The furniture's lines 1rem apart, as the narrow systems list's rows are, so that the stage keeps
+ * its 14rem; the legend keeps 1.125rem, which holds its 1rem marks.
+ */
 .local-chart--compact .spatial-view__furniture {
   display: block;
   grid-area: furn;
   align-self: start;
   margin-top: 0.25rem;
+  line-height: 1rem;
 }
 
-/* The frame, the centre, the time and the scale bar run on as one text, so that none waits a line. */
+/*
+ * The frame, the centre, the time, the scale bar and the mode run on as one text, so that none
+ * waits a line.
+ */
 .local-chart--compact .spatial-view__readings {
   display: inline;
 }
 
+/*
+ * 0.75rem apart, so that the frame and the centre, each value with its stale slot, fill the first
+ * line (`HEIGHT` ends near 718 px of the page's 831 at 1280 x 720; with `UT` the five readings come
+ * to 802 px with no gap, past the line's 798), the time, the scale bar and `MODE NOW` share the
+ * second, and observed mode's `MODE OBSERVED FROM` and the observer, near 729 px, take the third
+ * (P12.T11.d); on the galactic axis the note takes the second line's room after the scale bar, and
+ * `MODE NOW` the third (P12.T11.g).
+ */
 .local-chart--compact .spatial-view__readings > .spatial-reading {
   display: inline-flex;
-  margin-right: 1.25rem;
+  margin-right: 0.75rem;
 }
 
+.local-chart--compact .spatial-view__observer {
+  gap: 0 0.75rem;
+  margin-left: 0.75rem;
+}
+
+/*
+ * The scale bar stands between the time and the mode, the readings' own 0.75rem from what follows
+ * it: the mode, or on the galactic axis the note (P12.T11.g).
+ */
 .local-chart--compact .spatial-view__furniture > .scale-bar {
   display: inline-flex;
+  margin-right: 0.75rem;
   vertical-align: bottom;
+}
+
+/*
+ * On the galactic axis, why the centre's directions are undefined, after the scale bar in the
+ * furniture's run, so that it shares the time's and the bar's line (396.8 to 733.9 px of 831 at
+ * 1280 x 720, measured) and observed mode keeps three lines (plan 12, P12.T11.g).
+ */
+.local-chart--compact .spatial-view__axis-note {
+  display: inline-block;
+  margin-right: 0.75rem;
+  white-space: nowrap;
 }
 
 .local-chart--compact > .chart-controls {
   grid-area: controls;
   align-content: flex-start;
   min-height: 0;
+}
+
+/* The fields carry no bottom margin, and here neither do the choices, MIN MASS and STARS. */
+.local-chart--compact .chart-controls > .form-choice {
+  margin-bottom: 0;
+}
+
+/*
+ * A refused entry stands in its field's format hint's place, on the field's own row, and the hint
+ * gives way while it stands (`display: none`, which the input's `aria-describedby` still reaches):
+ * `DRIVE RANGE [ 9999 ] ly INVALID: enter 0.01 to 500 ly` (P12.T11.c). It never wraps, so that no
+ * refusal, nor two at once, adds a line to the column: at 1280 x 720, reckoned, the refusal ends
+ * near 775 px across the page for DRIVE RANGE and 801 px for CHART TIME, inside the column, which
+ * ends at 831.
+ */
+.local-chart--compact .chart-controls__field--refused > .chart-controls__hint {
+  display: none;
+}
+
+.local-chart--compact .chart-controls__error {
+  flex-basis: auto;
+  margin: 0;
+  white-space: nowrap;
+}
+
+/*
+ * The refusal's field name, which the row's label already shows, hidden from sight alone, in the
+ * `.visually-hidden` pattern, so that the refusal's text, and what a screen reader says, keep it.
+ */
+.local-chart--compact .chart-controls__error-name {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/*
+ * The mode and `OBSERVER TO CHART CENTRE` 0.5rem apart, a field's own gap, which leaves some 5-8 px
+ * of the column's 526 at 1280 x 720, reckoned, room for the command's 3 px focus ring (P12.T11.c),
+ * and on one row, unshrunk, while a chart is on show. With none on show their held-back reasons,
+ * `NO CHART: centre one to observe from it`, may still wrap under them, as there is then no stage
+ * to run over.
+ */
+.local-chart--compact .chart-controls__modes {
+  gap: 0 0.5rem;
+}
+
+.local-chart--compact .chart-controls__modes:not(.chart-controls__modes--reason) {
+  flex-wrap: nowrap;
+}
+
+.local-chart--compact .chart-controls__modes:not(.chart-controls__modes--reason) > * {
+  flex: none;
+}
+
+/*
+ * The link's reason, while it holds the controls back, beside QUERY RADIUS, which leaves it some
+ * 274 px of the column, rather than on a row of its own that the column has no room for.
+ */
+.local-chart--compact .chart-controls > .panel__inhibit {
+  flex-basis: auto;
+  align-self: center;
 }
 
 /* The mass floors' legend over its seven steps, so that they take one line of the column. */
@@ -1525,14 +1995,68 @@ body {
   display: none;
 }
 
+/*
+ * The census row as a grid (plan 12, P12.T11.g): the summary in a column as wide as it is, up to
+ * what `RETRY` and `CENSUS BY LAYER` leave, its parts wrapping inside it; `RETRY` and the toggle in
+ * columns of their own, 1rem after it by margin, so that an empty `RETRY` column adds no space; and
+ * a hint under the summary, in its column, the toggle spanning both lines from the top. So a hint
+ * and a summary on two lines take one line from the stage between them, beside the toggle's 2rem:
+ * the stage keeps 14rem in every state with at most one of them, and 13.25rem with both. The
+ * census's lines are 1rem, as the furniture's are. No margin above, and no hairline: with a hint or
+ * a summary on two lines the census's first line meets the furniture's last, but at 13.25rem the
+ * stage has no room left to give, and the column ends 2.5 px above its foot (measured,
+ * look-79-81), so any space or rule here would come out of the stage's floor.
+ */
 .local-chart--compact .census-readout__row {
+  display: grid;
   grid-area: census;
-  margin-top: 0.25rem;
+  grid-template-columns: minmax(0, max-content) max-content max-content;
+  justify-content: start;
+  align-items: center;
+  gap: 0;
+  margin-top: 0;
 }
 
+.local-chart--compact :is(.census-readout__summary, .census-readout__hint) {
+  line-height: 1rem;
+}
+
+/*
+ * The census line one 1rem line high: the drawn sun of its `M☉`, set as a subscript, hangs 0.8 px
+ * below a 1rem line's box and would make the line 16.8 px, and the summary on two lines with a
+ * hint 0.8 px short of its 13.25rem floor (measured, look-79-81). It overhangs the next line's
+ * leading alone, clear of its glyphs.
+ */
+.local-chart--compact .census-readout__line {
+  height: 1rem;
+}
+
+.local-chart--compact .census-readout__summary {
+  grid-area: 1 / 1;
+}
+
+.local-chart--compact .census-readout__retry {
+  grid-area: 1 / 2;
+  margin-left: 1rem;
+}
+
+.local-chart--compact .census-readout__toggle {
+  grid-area: 1 / 3;
+  margin-left: 1rem;
+}
+
+.local-chart--compact .census-readout__row:has(> .census-readout__hint) > .census-readout__toggle {
+  grid-row: 1 / span 2;
+  align-self: start;
+}
+
+/*
+ * Under the summary, in the summary's column alone: across `RETRY`'s too, the grid sized the hint
+ * into `RETRY`'s column, whose minimum is its content, so that the column took the hint's width
+ * even with no `RETRY` on show and left the summary some 203 px (measured, look-79-81).
+ */
 .local-chart--compact .census-readout__hint {
-  grid-area: hint;
-  margin-top: 0.25rem;
+  grid-area: 2 / 1 / 3 / 2;
 }
 
 /* Shown, the table takes the controls' area and its height, about nine rows at 1280 x 720. */
@@ -1570,9 +2094,41 @@ body {
   letter-spacing: 0.1em;
 }
 
+/*
+ * The legend runs on as one text, as the furniture does, its lines 1.125rem apart, which hold its
+ * 1rem marks (the bracket's 1.5rem line stands taller): six lines in `NOW` and seven in `OBSERVED`
+ * at 1280 x 720 since the circle's seventh kind (P06.T24.c). Each entry stays whole but one of
+ * several kinds (the circle's, the ringed circle's), which breaks only after a comma, never after
+ * its mark, each kind kept whole.
+ */
 .local-chart--compact > .symbol-legend {
+  display: block;
   grid-area: legend;
-  margin-top: 0.25rem;
+  margin-top: 0;
+  line-height: 1.125rem;
+}
+
+.local-chart--compact .symbol-legend__item {
+  margin-right: 1rem;
+  vertical-align: top;
+}
+
+.local-chart--compact .symbol-legend__item--kinds {
+  display: inline;
+  white-space: nowrap;
+}
+
+.local-chart--compact .symbol-legend__kinds {
+  white-space: normal;
+}
+
+.local-chart--compact .symbol-legend__item--kinds > .symbol-legend__mark {
+  margin-right: 0.25rem;
+  vertical-align: top;
+}
+
+.local-chart--compact .symbol-legend__kind {
+  white-space: nowrap;
 }
 
 /*
@@ -1670,6 +2226,16 @@ body {
   translate: calc(-100% - 0.25rem) -50%;
 }
 
+/*
+ * The answer's time and mode under the plot, where the chart's furniture stands (plan 12,
+ * P12.T11.b). The line is the furniture's own readings in its own classes, so that it is set as the
+ * furniture is: wrapping between readings and never inside one, each value right-aligned in its
+ * slot and trailed by its stale slot (P12.T11.d).
+ */
+.hr-diagram__readings {
+  flex: none;
+}
+
 .hr-diagram__counts {
   display: flex;
   flex: none;
@@ -1712,7 +2278,7 @@ body {
   flex: none;
 }
 
-.hr-diagram--stale :is(.hr-diagram__labels, .hr-diagram__counts) {
+.hr-diagram--stale :is(.hr-diagram__labels, .hr-diagram__readings, .hr-diagram__counts) {
   color: var(--text-muted);
 }
 
@@ -1783,9 +2349,17 @@ body {
   white-space: nowrap;
 }
 
-/* An entry whose words may outrun the legend's row, such as a shape naming six kinds of star. */
+/* An entry whose words may outrun the legend's row, such as a shape naming seven kinds of star. */
 .symbol-legend__item--wraps {
   white-space: normal;
+}
+
+/*
+ * One kind of such an entry, kept whole wherever the entry wraps, so that the HR diagram's legend
+ * breaks the circle's kinds only after a comma, never inside `STRIPPED HELIUM STAR` (P06.T24.c).
+ */
+.symbol-legend__kind {
+  white-space: nowrap;
 }
 
 /*
@@ -1811,6 +2385,21 @@ body {
 
 .symbol-legend__filled {
   fill: currentColor;
+}
+
+/*
+ * An apparent position's sample: the joiner 1 px, dashed 6 on and 4 off as a predicted path is, and
+ * the tick across its end as wide, both at the line scale, as the chart draws them (plan 12,
+ * P12.T11; R07.T16.f).
+ */
+.symbol-legend__apparent path,
+.symbol-legend__true-radius path,
+.symbol-legend__bearing path {
+  stroke-width: calc(1px * var(--line-scale));
+}
+
+.symbol-legend__apparent .symbol-legend__joiner {
+  stroke-dasharray: calc(6px * var(--line-scale)) calc(4px * var(--line-scale));
 }
 
 .chart-controls__floors,
@@ -1842,10 +2431,76 @@ body {
 }
 
 /*
+ * The chart's mode and, while observing, the command that moves its observer: one line where the
+ * column has the room, the command wrapping under the mode where it has not (plan 12, P12.T11).
+ */
+.chart-controls__modes {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 1rem;
+}
+
+/*
+ * NOW and OBSERVED beside their legend, `M MODE`, floated as a choice's legend is so that it
+ * stands on their line rather than over the group.
+ */
+.mode-control {
+  min-width: 0;
+  margin: 0;
+  border: 0;
+  padding: 0;
+  font-size: 0.875rem;
+}
+
+.mode-control__legend {
+  float: left;
+  margin-right: 0.5rem;
+  padding: 0;
+  color: var(--text-muted);
+  letter-spacing: 0.15em;
+  line-height: 2rem;
+}
+
+.mode-control__options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 0.25rem;
+}
+
+/*
+ * The chosen mode carries a rule under it, a shape as well as its pressed state; the other keeps
+ * room for it, so that nothing moves.
+ */
+.mode-control__button {
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+}
+
+.mode-control__button[aria-pressed="true"] {
+  border-bottom-color: var(--accent);
+}
+
+.mode-control__reason,
+.chart-controls__observer-reason {
+  margin-left: 0.5rem;
+  color: var(--text-muted);
+}
+
+.chart-controls__observer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  margin: 0;
+}
+
+/*
  * What the range query returned: the census line, the request's state and the counts, then RETRY
- * after a failure and the control that shows the census layer by layer, all on one row, then the
- * hint and the table on rows of their own. A column, so that the table is the part that gives way
- * when the page is short.
+ * after a failure and the control that shows the census layer by layer, all on one row, the hint
+ * after them in the same row on a line of its own (under the summary on the compact page, plan 12,
+ * P12.T11.g), then the table on a row of its own. A column, so that the table is the part that
+ * gives way when the page is short.
  */
 .census-readout {
   display: flex;
@@ -1862,8 +2517,9 @@ body {
 }
 
 /*
- * What the answer says, on one line with the control beside it. A box of its own because it is the
- * announced region and the control is not, so it lays its own three parts out as the row would.
+ * What the answer says, on one line with the control beside it, or on the compact page wrapping in
+ * its column beside the control (P12.T11.g). A box of its own because it is the announced region
+ * and the control is not, so it lays its own three parts out as the row would.
  */
 .census-readout__summary {
   display: flex;
@@ -1905,8 +2561,12 @@ body {
   padding-left: 0;
 }
 
-.census-readout__hint {
-  flex: none;
+/*
+ * A line of its own under the row's controls, where it stood before it joined the row
+ * (P12.T11.g).
+ */
+.census-readout__row > .census-readout__hint {
+  flex: 0 0 100%;
 }
 
 /* The table gives way to the chart and scrolls in what is left; its position line never does. */
@@ -2020,19 +2680,24 @@ body {
 
 /*
  * Columns shared by the head and every row: designation, spectral class, star count, distance,
- * mass, and range in words. The class is sized for the longest the server writes, seven characters
- * (`B9.5Iab`, `esdM9.5`), in the monospaced figures, with room for their being wider than the row's
- * own `ch`. The count takes its header's width with its letter spacing. The range, `IN` or `OUT`
+ * mass, and range in words. The class is sized for the longest the server writes, eleven
+ * characters (`B1.5Ia+ LBV`: a luminous blue variable's class is written to the half subtype with
+ * `Ia+` and ` LBV` after it; P06.T24.c's stripped helium stars run to nine, `He-sdO5.5`), in the
+ * monospaced figures, with room for their being wider than the row's own `ch`; one that does not
+ * fit is cut with an ellipsis, never silently, so that a cut `He-sdO3` cannot read as `He-sdC`.
+ * The count takes its header's width with its letter spacing. The range, `IN` or `OUT`
  * under a header that names the setting, wraps that header onto two lines as `INIT MASS` does and
  * is as wide as its longer word, `RANGE`, with its letter spacing: ruling 115.5's 4ch holds `OUT`
  * but not the header's words, which ran past the panel's edge at both sizes. A fixed width, since
  * the head and each row are grids of their own and must share their columns. The mass holds a
- * free-floating planet's `4132 M⊕` on one line, its unit drawn in the cell (plan 13, P13.T8.d).
+ * free-floating planet's `4132 M⊕` on one line, its unit drawn in the cell (plan 13, P13.T8.d). The
+ * distance holds the longest as observed, Estimated, `~500.00` (plan 12, P12.T11), as the guide
+ * sizes a field for its longest Estimated reading with its marks.
  */
 .system-list__head,
 .system-list__row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 8ch 6ch 6ch 8.5ch 6.5ch;
+  grid-template-columns: minmax(0, 1fr) 12.5ch 6ch 7ch 8.5ch 6.5ch;
   align-items: center;
   gap: 0 0.375rem;
 }
@@ -2041,12 +2706,23 @@ body {
  * In a narrow list, as the SYSTEMS column is at 1280 x 720, six columns leave the designation too
  * little room to read, so it takes a line of its own across the row and the other five share the
  * second line under it, each row still 2 rem tall (the UX reviewer's should-fix, ruled by the
- * orchestrator: the designation wraps onto its own line rather than being cut to `9G…`).
+ * orchestrator: the designation wraps onto its own line rather than being cut to `9G…`). The
+ * breakpoint is the longest designation's: `STREAM 4095 E-16383-63.63-8191`, about 251 px, beside
+ * the five fixed columns' 40.5ch of the row's B612 (9.1 px each at 0.875rem), their five 0.375rem
+ * gaps, the rows' 0.25rem padding and about 15 px of scroll bar, 669 px or 41.8rem, so 42rem, and
+ * a wide row cuts no designation. In the narrow rows the gaps are 0.25rem and the second line is
+ * set in 0.5rem, so that the class holds seven characters whole (`He-sdO3`, `B9.5Iab`, `esdM9.5`)
+ * and the range stands an eighth of a rem off the mass's unit. A longer class is cut with an
+ * ellipsis: the designation is the row's identity and keeps its line, no split of two lines holds
+ * the longest designation and the longest class, and a third line would break the list's four rows
+ * at its least; the selected system's `CLASS` reading shows it whole
+ * (decision-stripped-star-class.md, 2026-10-21).
  */
-@container (max-width: 30rem) {
+@container (max-width: 42rem) {
   .system-list__head,
   .system-list__row {
-    grid-template-columns: minmax(0, 1fr) 6ch 6ch 8.5ch 6.5ch;
+    grid-template-columns: minmax(0, 1fr) 6ch 7ch 8.5ch 6.5ch;
+    gap: 0 0.25rem;
   }
 
   .system-list__row {
@@ -2063,7 +2739,12 @@ body {
   /* The second line set in under the designation, so that each two-line row reads as one. */
   .system-list__head > :nth-child(2),
   .system-list__row > :nth-child(2) {
-    padding-left: 1rem;
+    padding-left: 0.5rem;
+  }
+
+  /* The range kept apart from the mass's unit, which the closer gaps would join to it. */
+  .system-list__row > .system-list__range {
+    padding-left: 0.125rem;
   }
 }
 
@@ -2127,14 +2808,270 @@ body {
   white-space: nowrap;
 }
 
+/*
+ * The range in words, then the row's one stale slot at the cell's right edge, so that the rows'
+ * marks line up down the list (plan 05, P05.T14): `OUT` with its tracking, about 33.6 px, and the
+ * 2 ch slot, 18.2 px, stand in the 6.5 ch cell, 59.15 px, and in the 57.15 px the narrow rows'
+ * padding leaves it, with no column, gap or padding changed.
+ */
 .system-list__range {
+  display: flex;
   letter-spacing: 0.1em;
+}
+
+.system-list__range > .stale-slot {
+  margin-left: auto;
+}
+
+/*
+ * The chart's features' list (plan 09, P09.T41.c), the system list's twin with its own columns:
+ * designation, kind's abbreviation (`DWARF CORE`, ten characters), distance, extent in light-years to
+ * three figures (`1.23E-4`, seven), and mass to three figures with its unit and the row's one stale
+ * slot (`3.80E7 M☉ S`). In a narrow list the designation takes a line of its own, as a system's
+ * does.
+ */
+.feature-list .system-list__head,
+.feature-list .system-list__row {
+  grid-template-columns: minmax(0, 1fr) 10.5ch 7ch 7.5ch 11.5ch;
+}
+
+@container (max-width: 42rem) {
+  .feature-list .system-list__head,
+  .feature-list .system-list__row {
+    grid-template-columns: minmax(0, 1fr) 7ch 7.5ch 11.5ch;
+  }
+}
+
+.feature-list__mass {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.25ch;
+}
+
+/* What the features' census says beyond the list: a kind left out, or none in range. */
+.feature-list__census {
+  flex: none;
+  margin: 0;
+  color: var(--text-muted);
+}
+
+/*
+ * The station's alert list (plan 12, P12.T12), the SYSTEMS panel's third list: its order's choice,
+ * the rows, the position, the acknowledgement command and the census per class. It takes the
+ * list's half of the panel as the systems' list does, its scrolling region never under three rows.
+ */
+.alert-list {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-height: 0;
+}
+
+.alert-list__head {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.alert-list__sort {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 0.25rem;
+  margin: 0;
+}
+
+.alert-list__sort > legend {
+  margin-right: 0.25rem;
+  color: var(--text-muted);
+  letter-spacing: 0.15em;
+}
+
+.alert-list__empty {
+  margin: 0;
+  letter-spacing: 0.15em;
+}
+
+.alert-list__scroll {
+  flex: 1 1 0;
+  min-height: 9rem;
+  overflow-y: auto;
+}
+
+.alert-list__scroll:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* As tall as every row, so that the scrollbar measures the whole list, not the window rendered. */
+.alert-list__rows {
+  position: relative;
+}
+
+/*
+ * Three 1 rem lines: the alert's text across the row; what it is, and its acknowledgement at the
+ * right; when it was raised, and its flux at the right with the row's one stale slot. Each line
+ * lays out its own parts, so that the first line's length takes no room from the others'.
+ */
+.alert-list__row {
+  display: flex;
+  position: absolute;
+  top: 0;
+  left: 0;
+  flex-direction: column;
+  justify-content: center;
+  width: 100%;
+  height: 3rem;
+  padding: 0 0.125rem;
+  line-height: 1rem;
+  cursor: pointer;
+}
+
+.alert-list__line {
+  display: flex;
+  justify-content: space-between;
+  gap: 0 0.5rem;
+  min-width: 0;
+  height: 1rem;
+}
+
+.alert-list__row:hover {
+  background: var(--surface-2);
+}
+
+/* The active row carries a rule down its edge, a shape as well as its surface. */
+.alert-list__row[aria-selected="true"] {
+  border-left: 2px solid var(--accent);
+  background: var(--surface-2);
+  padding-left: 0;
+}
+
+/* An Advisory alert is coloured text in the alert list (the guide's "Alerts"). */
+.alert-list__text {
+  overflow: hidden;
+  color: var(--status-advisory);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.alert-list__what {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.alert-list__ack {
+  flex: none;
+  letter-spacing: 0.15em;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.alert-list__number {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.alert-list__flux {
+  display: flex;
+}
+
+/* A snapshot the link no longer backs: muted, the alert's colour with it, each row's S at its end. */
+.alert-list--stale :is(.alert-list__scroll, .alert-list__text) {
+  color: var(--text-muted);
+}
+
+.alert-list__actions {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 0.75rem;
+}
+
+.alert-list__reason {
+  color: var(--text-muted);
+  letter-spacing: 0.15em;
+}
+
+.alert-list__result {
+  letter-spacing: 0.15em;
+}
+
+/* A census line per class, each kept whole and the lines set one after another. */
+.alert-list__census {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: 0 1rem;
+  margin: 0;
+  padding: 0;
+  color: var(--text-muted);
+  list-style: none;
+  letter-spacing: 0.1em;
+}
+
+.alert-list__census > li {
+  white-space: nowrap;
+}
+
+/* What stands in the census's place before a scan is a sentence, and wraps as one. */
+.alert-list__census > .alert-list__census-none {
+  white-space: normal;
+}
+
+/* The panel's title, and beside it the choice of which of the chart's lists it shows. */
+.systems-panel__head {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0 1rem;
+}
+
+.systems-panel__head > .panel__title {
+  margin-bottom: 0;
+}
+
+/* A group of two display controls, unframed, its legend for assistive technology alone. */
+.systems-panel__lists {
+  display: flex;
+  gap: 0.25rem;
+  margin: 0;
+}
+
+/*
+ * The `ALERTS` choice's count of unacknowledged alerts after its name, `ALERTS 2` (ux-calls-data's
+ * ruling 5): B612 Mono's tabular figures, untracked so that `ch` sizes them, in a place kept for
+ * four figures and the stale slot straight after them, `9999 S`, set from its left, so that the
+ * count stands one space after the name and its `S` after the count, and empty with none, so that
+ * the choice never changes width.
+ */
+.systems-panel__alert-count {
+  display: inline-block;
+  width: 6ch;
+  margin-left: 1ch;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  text-align: left;
+}
+
+/* A count past its four places, the guide's Overflow. */
+.systems-panel__alert-figure--overflow {
+  color: var(--status-caution);
 }
 
 .system-list__class {
   overflow: hidden;
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -2145,8 +3082,8 @@ body {
  */
 /*
  * The readout gives up one line, but no more, while `OPEN SYSTEM`'s held reason wraps under the
- * button at 1280 x 720 (`BODIES NOT YET MODELLED`, the orchestrator's ruling 134.5), so that the
- * reason is never pushed out of the panel.
+ * button at 1280 x 720 (the orchestrator's ruling 134.5), so that the reason is never pushed out of
+ * the panel.
  */
 .system-readout__scroll {
   position: relative;
@@ -2272,6 +3209,22 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* A value whose digits vary, right-aligned in a slot that holds its longest (§ Numbers). */
+.system-readout__value--fixed {
+  display: inline-block;
+  text-align: right;
+}
+
+/*
+ * A readout's state, as `AS OBSERVED` qualifies every reading under it (plan 12, P12.T11): above
+ * the readings' scrolling region, and never giving way to it.
+ */
+.system-readout__state {
+  flex: none;
+  margin: 0;
+  letter-spacing: 0.15em;
+}
+
 .system-readout__unit {
   color: var(--text-muted);
 }
@@ -2280,6 +3233,26 @@ body {
   margin-left: 0.5rem;
   color: var(--text-muted);
   letter-spacing: 0.1em;
+}
+
+/*
+ * A value inside the words beside a reading, such as the time after `AGE`'s `· AT UT`, is set as a
+ * value is, in `--text` and untracked, so that a slot in `ch` holds its longest, its words and unit
+ * staying muted (plan 12, P12.T11.c). A stale answer's readout mutes it with the rest.
+ */
+.system-readout__beside .system-readout__value {
+  color: var(--text);
+  letter-spacing: 0;
+}
+
+.systems-panel--stale .system-readout__beside .system-readout__value,
+.stale .system-readout__beside .system-readout__value {
+  color: var(--text-muted);
+}
+
+/* A time beside a reading kept whole with its system's label and its unit: `UT -20,012.75 yr`. */
+.system-readout__whole {
+  white-space: nowrap;
 }
 
 /* The CURSOR panel: the cursor's coordinates to enter, CENTRE CHART, and its GALACTIC reading. */
@@ -2315,9 +3288,9 @@ body {
   gap: 0.5rem;
 }
 
-/* Room for the longest entry, -65,535.9999, in the field's own monospaced figures. */
+/* Room for the longest entry, -65,535.99999, in the field's own monospaced figures. */
 .centre-entry__input {
-  width: calc(12ch + 1rem + 2px);
+  width: calc(13ch + 1rem + 2px);
 }
 
 .centre-entry__unit {
@@ -2483,6 +3456,20 @@ body {
   white-space: nowrap;
 }
 
+/*
+ * The display's mode and where it observes from, `MODE OBSERVED FROM RADIUS … ANGLE … HEIGHT …`,
+ * one reading whose observer's coordinates run on after its name (plan 12, P12.T11).
+ */
+.spatial-view__mode > dd {
+  display: inline;
+}
+
+.spatial-view__observer {
+  display: inline-flex;
+  gap: 0 1.25rem;
+  margin: 0 0 0 1.25rem;
+}
+
 .spatial-reading dd {
   margin: 0;
 }
@@ -2499,7 +3486,8 @@ body {
 
 /*
  * Below the view, in the same place on every spatial display: the frame, the centre and the time,
- * the scale bar, and on the galactic axis why the directions are undefined.
+ * the scale bar, on the galactic axis why the directions are undefined, and the mode where the
+ * display has one (plan 12, P12.T11.g).
  */
 .spatial-view__furniture {
   display: flex;
@@ -2510,11 +3498,12 @@ body {
 
 /*
  * Why the named directions are undefined, in the create form's plain-text voice: not an alert, a
- * limit nor a failed system, and unspaced, since what follows the annunciated condition is a
- * sentence in mixed case.
+ * limit nor a failed system. Through StatusText, DIRECTIONS UNDEFINED: is tracked as an annunciation
+ * and the sentence in mixed case after it is not (P05.T13, superseding plan 05's T10 ruling (8) for
+ * the head). It stands in the furniture's run, after the scale bar and before the mode (plan 12,
+ * P12.T11.g).
  */
 .spatial-view__axis-note {
-  flex-basis: 100%;
   margin: 0;
 }
 
@@ -2889,6 +3878,11 @@ body {
   text-transform: none;
 }
 
+/* A readout label that is an isotope's symbol keeps its case, as [Fe/H] does: `He-3`, never `HE-3`. */
+.readout dt .readout__symbol {
+  text-transform: none;
+}
+
 /*
  * The list and the readout share what the panel leaves, each from its own content's height, and
  * give way in proportion to it, each scrolling inside itself: neither falls below three rows'
@@ -3008,9 +4002,15 @@ body {
   flex: none;
 }
 
-/* Everything known about the selected body, two labelled values to a line. */
+/*
+ * Everything known about the selected body, two labelled values to a line. A label's track holds
+ * the readouts' labels on one line, up to `SUBSURFACE OCEAN`, the widest, then `COMETS OVER 1 km`
+ * and `NEBULA EXPANSION` (each about 10.8rem in B612 at this size), and a longer one would wrap at
+ * its spaces, so that no label pushes the values past the column (the guide's § Layout: never
+ * scroll horizontally).
+ */
 .body-readout__values {
-  grid-template-columns: repeat(2, max-content minmax(0, 1fr));
+  grid-template-columns: repeat(2, fit-content(11.5rem) minmax(0, 1fr));
   gap: 0.25rem 0.75rem;
 }
 
@@ -3032,7 +4032,7 @@ body {
  */
 @container (max-width: 30rem) {
   .body-readout__values {
-    grid-template-columns: max-content minmax(0, 1fr);
+    grid-template-columns: fit-content(11.5rem) minmax(0, 1fr);
   }
 
   .body-readout__wide {
@@ -3064,6 +4064,168 @@ body {
 }
 
 /*
+ * The events stand under the display time in the map's column (P14.T43.c), 14rem tall where the
+ * column has room, the map taking the rest, and 11rem at the least, two rows of the list with its
+ * head, its span and its position, so that at 1280 x 720 the map keeps its stage.
+ */
+.system .system__events {
+  flex: 0 1 14rem;
+  min-height: 11rem;
+}
+
+/* The span listed, and the century asked for when a busy system's list holds less of it. */
+.events-panel__span {
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0.25rem 0.75rem;
+}
+
+/*
+ * One reading a line, never broken inside a time: the widest, the clock window's edges,
+ * `UT -1000 yr 000/00:00:00 – +1000 yr 000/00:00:00`, and its S.
+ */
+.events-panel__value {
+  min-width: 50ch;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.event-list {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/*
+ * Columns shared by the head and every row: the time, its widest the clock window's edge,
+ * `UT -1000 yr 000/00:00:00`; the countdown, `T-2000 yr 000/00:00:00` at the widest, an event at
+ * one edge of the window and the display time at the other; the kind, `GREAT STORM` with its
+ * letter spacing; and the body. The times are right-aligned, so that their days and clocks line up
+ * whatever their years.
+ */
+.event-list__head,
+.event-list__row {
+  display: grid;
+  grid-template-columns: 24ch 22ch 13ch minmax(0, 1fr);
+  align-items: center;
+  gap: 0 0.75rem;
+}
+
+.event-list__head > :is(:first-child, :nth-child(2)) {
+  text-align: right;
+}
+
+.event-list__head {
+  color: var(--text-muted);
+  letter-spacing: 0.15em;
+}
+
+.event-list__scroll {
+  flex: 1 1 0;
+  min-height: 4rem;
+  overflow-y: auto;
+}
+
+.event-list__scroll:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* As tall as every row, so that the scrollbar measures the whole list, not the window rendered. */
+.event-list__rows {
+  position: relative;
+}
+
+.event-list__row {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 2rem;
+  padding: 0 0.125rem;
+  cursor: pointer;
+}
+
+.event-list__row:hover {
+  background: var(--surface-2);
+}
+
+/* A row whose body is not on show chooses nothing, so it offers nothing to the pointer. */
+.event-list__row[aria-disabled="true"] {
+  cursor: default;
+}
+
+.event-list__row[aria-disabled="true"]:hover {
+  background: none;
+}
+
+/* The row the keys have reached, while the list has the focus: an inset rule, not a colour. */
+.event-list__scroll:focus-visible .event-list__row--active {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+/* The event chosen, whose body the display selected, carries a rule down its edge. */
+.event-list__row[aria-selected="true"] {
+  border-left: 2px solid var(--accent);
+  background: var(--surface-2);
+  padding-left: 0;
+}
+
+.event-list__number {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.event-list__kind {
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+}
+
+/* The designation, cut at its end where it is long, and the stale S after it, never cut. */
+.event-list__body {
+  display: flex;
+  min-width: 0;
+}
+
+.event-list__designation {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.event-list__body > .stale-slot {
+  flex: none;
+  margin-left: auto;
+}
+
+/* Why the active row chooses nothing, on the line of the position and total. */
+.event-list__foot {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+}
+
+.event-list__foot > .list-position {
+  margin-left: auto;
+}
+
+.event-list__note {
+  margin: 0.25rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  letter-spacing: 0.1em;
+}
+
+/* An answer the link no longer backs: muted, as the bodies' list is, with its S. */
+.events-panel--stale :is(.events-panel__span, .event-list) {
+  color: var(--text-muted);
+}
+
+/*
  * The VIEW display (plan R02, R02.T15): the scene bar over the view and its side columns, the view
  * taking what they leave. Clipped, never scrolled: a control focused below the foot of a column
  * too long for a window under the least size cannot move the console frame (R07.T19.b).
@@ -3073,6 +4235,264 @@ body {
   grid-template-rows: minmax(0, 1fr);
   align-content: stretch;
   overflow: clip;
+}
+
+/*
+ * The PLANET VIEWER (plan R15): its INPUTS panel in a column of its own on the left, its volatile
+ * ranks folded as it opens, one of its parts open at a time where the column is too short for all
+ * of them (`inputsLayout.ts`), so that it stands whole at 1280 x 720, and its bar above VIEW's
+ * display, which fills the rest. The work area and the column are held to the window, never to
+ * what they hold, so that the column's height, which decides its layout, does not follow it.
+ */
+.console__work--planet {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  align-content: stretch;
+  min-height: 0;
+  overflow: clip;
+}
+
+.planet-viewer {
+  display: grid;
+  grid-template-columns: 26rem minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  gap: 1rem;
+  min-height: 0;
+}
+
+.planet-viewer__inputs {
+  min-height: 0;
+}
+
+.planet-viewer__view {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.planet-viewer__view > .view-display {
+  flex: 1 1 auto;
+}
+
+/* Spaced closer than a panel's default, so that the column stands whole at 1280×720. */
+.planet-inputs {
+  padding-block: 0.5rem;
+  font-size: 0.875rem;
+}
+
+/* The title and SHOWN, its disclosure and what it says, on one line. */
+.planet-inputs__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 1rem;
+  margin-bottom: 0.25rem;
+}
+
+.planet-inputs__head > .panel__title {
+  margin: 0;
+}
+
+.planet-inputs__shown {
+  margin-bottom: 0.25rem;
+}
+
+.planet-inputs__groups {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.planet-inputs__group {
+  margin: 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+  padding: 0.125rem 0 0;
+}
+
+.planet-inputs__legend {
+  padding: 0 0.5rem 0 0;
+  color: var(--text-muted);
+  letter-spacing: 0.15em;
+}
+
+/* A row: the label, the field, its unit and its provenance, on the 0.25rem grid. */
+.planet-inputs__row {
+  display: grid;
+  grid-template-columns: 7rem minmax(0, 1fr) 2.5rem 4.5rem;
+  align-items: center;
+  gap: 0.25rem 0.5rem;
+  margin-top: 0.25rem;
+}
+
+.planet-inputs__row--seed {
+  grid-template-columns: 7rem minmax(0, 1fr);
+  margin-top: 0.5rem;
+}
+
+.planet-inputs__label {
+  color: var(--text-muted);
+  letter-spacing: 0.15em;
+}
+
+.planet-inputs__unit {
+  color: var(--text-muted);
+}
+
+/* What a folded part's disclosure says of it, beside it: its rows' values, or the planet shown. */
+.planet-inputs__summary {
+  margin-left: 0.5rem;
+}
+
+/* A folded group's summary, read as its rows are: its values in the text's colour, untracked. */
+.planet-inputs__legend > .planet-inputs__summary {
+  color: var(--text);
+  letter-spacing: 0;
+}
+
+/* One row's part of a folded group's summary, which breaks only between rows. */
+.planet-inputs__summary-input {
+  white-space: nowrap;
+}
+
+/* A value in a folded group's summary, set as its field sets it. */
+.planet-inputs__value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+
+/*
+ * A moon on show has none of the inputs: the groups' and SEED's last values, which are another
+ * planet's, read muted, as values not of the body shown, until an input is entered.
+ */
+.planet-inputs--none .planet-inputs__groups .form-field__input,
+.planet-inputs--none .planet-inputs__legend > .planet-inputs__summary,
+.planet-inputs--none .planet-inputs__parts > .planet-inputs__generate .form-field__input {
+  color: var(--text-muted);
+}
+
+/* SUN's legend holds its two settings beside its name. */
+.planet-sun__legend {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.planet-sun__modes {
+  display: inline-flex;
+  gap: 0.5rem;
+}
+
+/* SEED and GENERATE on one row, the seed's field taking what the button leaves. */
+.planet-inputs__generate {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+.planet-inputs__generate > .planet-inputs__row--seed {
+  flex: 1 1 auto;
+  grid-template-columns: max-content minmax(0, 1fr);
+  margin-top: 0;
+}
+
+/*
+ * GENERATE keeps its key and name on one line, the seed's field beside it giving way; OPEN BODY may
+ * wrap, so that its field holds a body's whole ID.
+ */
+.planet-inputs__parts > .planet-inputs__generate > .command {
+  flex: none;
+  white-space: nowrap;
+}
+
+/* A body's ID, an identifier read character by character: monospaced, from the left. */
+.planet-inputs__body,
+.planet-inputs__id {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.planet-inputs__id {
+  letter-spacing: 0;
+}
+
+/* Why the commands are held back, on a line of its own under the bar's rows. */
+.planet-viewer__held {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.planet-inputs__note {
+  margin: 0.25rem 0 0;
+}
+
+.planet-inputs__draw-one {
+  padding: 0 0.5rem;
+}
+
+.planet-inputs__error {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.planet-inputs__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  margin-top: 0.5rem;
+}
+
+/* The bar above the view, where VIEW's SCENE selector stands on VIEW: RANDOMIZE, then SHARE. */
+.planet-viewer__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1.5rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.875rem;
+}
+
+.planet-viewer__draw {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+}
+
+.planet-viewer__draw > .planet-inputs__row--seed {
+  grid-template-columns: max-content 12rem;
+  margin-top: 0;
+}
+
+.planet-viewer__share {
+  display: grid;
+  flex: 1 1 24rem;
+  grid-template-columns: max-content minmax(0, 1fr) max-content;
+  align-items: center;
+  gap: 0.25rem 0.5rem;
+}
+
+.planet-viewer__string {
+  font-family: var(--font-mono);
+}
+
+/* A moon on show: the string shown is another planet's, muted until one is pasted over it. */
+.planet-viewer__string--held {
+  color: var(--text-muted);
+}
+
+/* Why that string is held, and a copy of it refused, under the field's row. */
+.planet-viewer__share-note {
+  display: block;
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.planet-viewer__empty {
+  margin-top: 1rem;
 }
 
 .view-display {
@@ -3089,13 +4509,39 @@ body {
   gap: 0.5rem 1rem;
 }
 
+/*
+ * The SCENE selector wraps between its buttons, each label kept on one line, so that the row holds
+ * at 150% interface scale in a 1280 × 720 window (the guide's Accessibility; R10.T16's batch
+ * review, D-D: `TERRAIN TEST` made it need about 1,350 CSS px).
+ */
 .view-display__bar .preset-buttons {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.25rem;
   margin: 0;
   border: 0;
   padding: 0;
+}
+
+.view-display__bar .preset-buttons__button {
+  white-space: nowrap;
+}
+
+/*
+ * The body inspection's choice and its CLOSE, kept on one line as the selector wraps, CLOSE set
+ * apart from the scenes by a space and a hairline, since it chooses no scene (the owner's request,
+ * 2026-11-01).
+ */
+.view-display__inspection {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.view-display__inspection-close {
+  margin-inline-start: 0.5rem;
+  border-inline-start: 1px solid var(--line);
 }
 
 /* Where the server's scene stands, beside the SCENE selector: one line per condition. */
@@ -3176,6 +4622,62 @@ body {
 }
 
 /*
+ * The view's foot (the owner's request, 2026-11-01): the key legend, taking the row's room and
+ * wrapping beside MAXIMIZE VIEW where the stage is narrow, and the toggle at the row's end, in one
+ * place whether it is on or off and at every size, so that the SCENE bar never takes a row for it.
+ */
+.view__foot {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.view__foot-lines {
+  display: flex;
+  flex: 1 1 0;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.5rem;
+  min-width: 0;
+}
+
+/*
+ * Under MAXIMIZE VIEW, each part after the legend on the foot's row: its line, then the hidden
+ * panels' standing lines, each after a middle dot that leads it, so that where they wrap no dot ends
+ * a line; the first part's dot stands only after the legend.
+ */
+.view__foot-item {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin: 0;
+}
+
+.view__foot-item > .view-folds__standing {
+  margin: 0;
+}
+
+.view__foot-dot {
+  color: var(--text-muted);
+}
+
+.view__foot-lines > .view__foot-item:first-child > .view__foot-dot {
+  display: none;
+}
+
+.view__maximize {
+  flex: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  white-space: nowrap;
+}
+
+/* On, its 2px --accent rule under it, as every pressed toggle has, beside its aria-pressed. */
+.view__maximize[aria-pressed="true"] {
+  border-bottom-color: var(--accent);
+}
+
+/*
  * The list takes what the controls leave, and scrolls within itself; the column never does, and is
  * clipped rather than scrolled, so that no focused control can scroll it. It sets its own line box,
  * 17.5 px at 0.875rem and 20 px at 1rem, the same on every platform and at every scale, so that the
@@ -3224,6 +4726,18 @@ body {
 /* The compact layout: both columns' panels in one, in the same order. */
 .view--compact .view__column {
   display: contents;
+}
+
+/*
+ * MAXIMIZE VIEW on (the owner's request, 2026-11-01): the side columns hidden, their panels kept,
+ * and the stage the display's whole width, with no gap left for them.
+ */
+.view--maximized {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.view--maximized > .view__side {
+  display: none;
 }
 
 /* The descent spike fills the window and never scrolls: its lists scroll within themselves. */
@@ -3296,6 +4810,18 @@ body {
   text-align: right;
 }
 
+/*
+ * Over a generated world SITE ELEVATION holds its longest Estimated reading, `~-99,999.9 m` and
+ * ` ± 100,000 m`: the terrain readout's ELEVATION_FIELD_CH and ELEVATION_UNCERTAINTY_CH, 24 ch
+ * (plan R10, R10.T14.c). Beside its label that would run past the panel at 1280 × 720, where the
+ * longest label, FINEST TERRAIN HELD, leaves the values about 17.5 ch, so it stands under its label,
+ * the readout's whole width.
+ */
+.spike__panel .readout dd.spike__site-survey {
+  grid-column: 1 / -1;
+  min-width: 24ch;
+}
+
 .spike__targets {
   display: flex;
   flex: 1 1 auto;
@@ -3344,6 +4870,38 @@ body {
 .view-label__statement {
   margin: 0.25rem 0 0;
   letter-spacing: 0.15em;
+}
+
+/*
+ * A statement that is a description, not a state, such as ATMOSPHERE: APPROXIMATE's reasons: set
+ * whole as a sentence, its head included, with no letter spacing (the guide's Typography; plan R08,
+ * R08.T10.d).
+ */
+.view-label__statement--sentence {
+  letter-spacing: 0;
+}
+
+/*
+ * A note whose reasons fold behind it, ATMOSPHERE: APPROXIMATE (the owner's request, 2026-11-01):
+ * the note, then on its line the display control that opens them, which takes the pointer that the
+ * plate over the canvas does not; the control's 2rem target sets the line's height.
+ */
+.view-label__statement--folds {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 0.5rem;
+}
+
+.view-label__reasons {
+  pointer-events: auto;
+  /* Its focus ring stays clear of a scrolling plate's edge. */
+  scroll-margin: 0.25rem;
+}
+
+/* Pressed on the plate's own --surface-0, a control fills a step above it, not with it. */
+.view-label .control:not([aria-disabled="true"]):active {
+  background: var(--surface-1);
 }
 
 /* The stars' count line: numbers, in B612 Mono with tabular figures. */
@@ -3454,6 +5012,29 @@ body {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   text-align: right;
+  white-space: nowrap;
+}
+
+/*
+ * The list's notes (R10.T16.c; decision-r10-t16-review §1): after the options and their position,
+ * never windowed or clipped, each plain `--text` wrapping at its spaces.
+ */
+.view-list__notes {
+  flex: none;
+  margin: 0.25rem 0 0;
+}
+
+.view-list__note {
+  margin: 0;
+  color: var(--text);
+  overflow-wrap: normal;
+  white-space: normal;
+}
+
+/* A note's range in the figures the list's ranges take, its digits and unit kept on one line. */
+.view-list__note-range {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
@@ -3626,6 +5207,24 @@ body {
   contain: inline-size;
 }
 
+/*
+ * The photorealistic style's white balance after the exposure's commands (the owner's report,
+ * 2026-11-05): its reading and its choice, set as the meter's are.
+ */
+.view-exposure__balance {
+  margin: 0.75rem 0 0;
+}
+
+.view-exposure__balance > .field {
+  margin: 0;
+}
+
+/* Room for the longest reading a host allows, `HOST · T EFF 200,000 K`, so that it keeps its width. */
+.view-exposure__balance-reading {
+  display: inline-block;
+  min-width: 22ch;
+}
+
 /* The exposure meter beside the exposure panel (plan R07, T13.b). */
 .view-meter__reading,
 .view-meter__value {
@@ -3788,6 +5387,154 @@ body {
   margin: 0;
 }
 
+/*
+ * The camera panel's place's head while CONTROLS names an instrument (plan R10, R10.T12.d; guide
+ * draft D2): its CAMERA and GROUND page tabs, then the designator at the row's end.
+ */
+.view-place__head {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 0.5rem;
+}
+
+.view-place__head > .panel__designator {
+  margin-left: auto;
+}
+
+/* The page tabs: a tab list as GALAXY's pages' (ux-reviewer's ruling, 2026-10-31). */
+.view-place__tabs {
+  display: flex;
+  gap: 0.25rem;
+}
+
+/*
+ * A page's name: a display control, so no --line-strong outline. The chosen page's name is --accent
+ * over a 2px --accent rule, a shape as well as a colour, as GALAXY's page tabs are.
+ */
+.view-place__tab {
+  display: flex;
+  align-items: center;
+  height: 2rem;
+  margin: 0;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: none;
+  padding: 0 0.75rem;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 0.875rem;
+  letter-spacing: 0.15em;
+  cursor: pointer;
+}
+
+.view-place__tab:first-child {
+  padding-left: 0;
+}
+
+.view-place__tab:hover {
+  background: var(--surface-2);
+}
+
+.view-place__tab:active {
+  background: var(--surface-0);
+}
+
+.view-place__tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.view-place__tab[aria-selected="true"] {
+  border-bottom-color: var(--accent);
+  color: var(--accent);
+}
+
+/*
+ * A held-back GROUND: kept focusable so that it can say why, the pointer refused, and struck
+ * through in every state, so that at rest it reads as held back and not as a page not chosen, by a
+ * shape as well as its --text-muted, taking no room (fix-r10-t12d-held-tab; lean, 2026-11-01).
+ */
+.view-place__tab[aria-disabled="true"] {
+  cursor: not-allowed;
+  text-decoration: line-through;
+}
+
+.view-place__tab[aria-disabled="true"]:hover {
+  background: none;
+}
+
+/*
+ * The held-back GROUND's reason, over the place while its tab is hovered or focused, by the keyboard
+ * or by a press (a click or a tap focuses it without :focus-visible, and touch has no stable hover),
+ * taking none of the place's room, which at the floor has no line to spare (guide draft D2;
+ * R10.T12.d's lean). A press passes through it to the camera control it covers, which takes the
+ * focus and so puts the reason away (the ux-reviewer's, 2026-11-01).
+ */
+.view-place__reason {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  left: 0;
+  z-index: 1;
+  margin: 0;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  padding: 0.25rem 0.5rem;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  letter-spacing: normal;
+  text-transform: none;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.view-place__head:has(.view-place__tab[aria-disabled="true"]:is(:hover, :focus))
+  > .view-place__reason {
+  visibility: visible;
+}
+
+/*
+ * In the compact layout the tabs stand at the panel's top edge, with no block padding above them,
+ * and 0.25rem, the side's title margin, between them and the presets (T19.f's fallback; R10.T12.d).
+ */
+.view--compact .view__column > .view-camera:has(> .view-place__head) {
+  padding-top: 0;
+}
+
+/*
+ * An instrument's GROUND page (R10.T12.d): the lower plate's parts as the place's tab panel's content,
+ * set as the plate sets them but standing in the panel, not over a picture; its forms' copies laid
+ * out at the panel's width, the plate's, under it, never seen.
+ */
+.view-ground {
+  position: relative;
+}
+
+.view-label.view-ground__plate {
+  position: static;
+  max-width: none;
+  background: none;
+  padding: 0;
+}
+
+/*
+ * No height and clipped, so that the copies, laid out in full at the plate's width, add nothing to
+ * the column's scroll, which the page's room is reckoned against.
+ */
+.view-ground__sizer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
+}
+
 /* A view's style switch (plan R07, T7): its buttons are the presets' (`.preset-buttons`). */
 .view-style__reason {
   margin: 0.5rem 0 0;
@@ -3798,6 +5545,36 @@ body {
 /* A fault of the console's own graphics, while it lasts: caution, never an alert. */
 .view-style__reason--fault {
   color: var(--status-caution);
+}
+
+/*
+ * The style panel's BASELINE row (plan R10, R10.T12.a; decision-r10-t12a-scope §3.1), and its GRID
+ * row in the same form (the owner's request, 2026-10-31): one 2rem row in the instruments panel's
+ * row form, 0.5rem under the row above, its buttons the presets', 0.25rem apart, which may wrap
+ * under the legend with no gap between rows, as the instruments panel's rows do.
+ */
+.view-style__baseline {
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 0.25rem;
+  margin-top: 0.5rem;
+}
+
+/*
+ * Floated, so that the legend sits on the left of its buttons, as a form's choice does, 0.5rem
+ * before the first; at its own width, so that GRID's buttons and BASELINE's do not line up, as
+ * no two rows of the panel do.
+ */
+.view-style__baseline-label {
+  float: left;
+  margin-inline-end: 0.25rem;
+  padding: 0;
+  line-height: 2rem;
+}
+
+/* A baseline's figure and its unit stay on one line. */
+.view-style__baseline-button {
+  white-space: nowrap;
 }
 
 /*
@@ -3839,6 +5616,61 @@ body {
 .view-label__field {
   display: inline-block;
   text-align: right;
+}
+
+/*
+ * A label block's reading, its label kept whole (plan R10, R10.T12.a; decision-r10-t12a-scope §4.3):
+ * the label never shrinks, and breaks only where it alone is wider than the plate; the value stands
+ * beside it, taking the rest of the line and breaking at its middle dots, then its spaces, wherever
+ * the label and the value's widest unbroken run share a line, and otherwise wraps under the label
+ * from the plate's left edge. The lower plate's readings since R10.T12.a, and the upper plate's and
+ * the instruments' since R10.T12.c (§7 item 5).
+ */
+.view-label__line--whole {
+  flex-wrap: wrap;
+  gap: 0 0.5rem;
+}
+
+.view-label__line--whole > dt {
+  flex: none;
+  max-width: 100%;
+}
+
+.view-label__line--whole > dd {
+  flex: 1 1 0;
+  min-width: min-content;
+}
+
+/*
+ * A terrain reading's value in its fixed field (plan R10, R10.T12): as wide as its longest reading
+ * in ch of B612 Mono, right-aligned, or left-aligned for an uncertainty after its `±`, never
+ * broken, so that its unit and the part after it keep their places from Estimated to resolved and
+ * stale (the guide's "Numbers").
+ */
+.terrain-field {
+  display: inline-block;
+  white-space: nowrap;
+  text-align: right;
+}
+
+.terrain-field--start {
+  text-align: left;
+}
+
+/* The place kept after a terrain value for its S: a space and the mark, blank while it is live. */
+.terrain-mark {
+  display: inline-block;
+  width: 2ch;
+  white-space: pre;
+}
+
+/* The terrain readout's heading, GROUND AT LINE OF SIGHT, set as a readout's heading is. */
+.view-label__heading {
+  margin: 0.25rem 0 0;
+  color: var(--text-muted);
+  font-size: inherit;
+  font-weight: 400;
+  letter-spacing: 0.2em;
 }
 
 /*
@@ -3918,11 +5750,91 @@ body {
 }
 
 /*
- * With instruments open, the primary's label block takes the width left of them: a slot is at
- * most 18 + 0.5 + 15 rem inside its 0.5 rem padding and border, inset 0.5 rem from the stage.
+ * Beside the slots that stand, whole or as a stub, each of the primary's plates takes the width left
+ * of them: a slot is at most 18 + 0.5 + 15 rem inside its 0.5 rem padding and border, inset 0.5 rem
+ * from the stage (R10.T12.b; decision-r10-view-block-room §3).
  */
-.view__overlay:has(.view-instrument) > .view-label {
+.view-label--beside {
   max-width: calc(100% - 36.5rem);
+}
+
+/*
+ * The primary's lower plate stands on the stage's foot, inset 0.5 rem, so that it grows upward and
+ * nothing on it moves as the upper plate's statements come and go (R10.T12.b).
+ */
+.view-label--lower {
+  top: auto;
+  bottom: 0.5rem;
+}
+
+/*
+ * The primary's plates in columns (R10.T12.c), while no slot stands on a stage under 40 rem tall
+ * and at least 48 rem wide (`viewRoom.ts`' `columnsFit`): either side of the picture's centre, each
+ * at most as wide as its half less its 0.5 rem inset and 1 rem from the centre, the upper plate at
+ * the top left and the lower plate at the bottom right, so that neither covers the point the
+ * readout reads and each has the stage's whole height. The lower plate starts 1 rem past the
+ * centre, so that its lines keep their places as its widest line changes.
+ */
+.view-label--columns {
+  max-width: calc(50% - 1.5rem);
+}
+
+.view-label--lower.view-label--columns {
+  left: calc(50% + 1rem);
+}
+
+/*
+ * A part of the upper plate that scrolls where the stage cannot hold the plates whole: its lines
+ * before STARS, or below the floor everything under its VIEW line (R10.T12.b). It is its items'
+ * offset parent, for its position line, and takes the pointer, which the overlay does not, so that
+ * the wheel scrolls it and a drag that starts on it turns no camera.
+ */
+.view-label__scroll {
+  position: relative;
+  overflow-y: auto;
+  pointer-events: auto;
+}
+
+/* Inset, so that the plate's edge never clips its ring. */
+.view-label__scroll:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/*
+ * The room's hidden copies of the plates, laid out over the stage as the live ones are, never seen
+ * and never taking the pointer (R10.T12.b).
+ */
+.view-room-sizers {
+  position: absolute;
+  inset: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* A copy's lines before STARS are set at a scroll's width, a scroll bar beside them. */
+.view-room-sizers .view-label__middle {
+  overflow-y: scroll;
+}
+
+/*
+ * A held INSTRUMENT 2 while INSTRUMENT 1 stands: its title row with its CLOSE, and its reason
+ * under it, in its corner at the stage's foot (R10.T12.b).
+ */
+.view-instrument__stub-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.view-instrument__stub-row > .view-instrument__title {
+  margin: 0;
+}
+
+.view-instrument__reason {
+  margin: 0.25rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.875rem;
 }
 
 /*
@@ -3985,4 +5897,9 @@ body {
   margin: 0;
   color: var(--text-muted);
   font-size: 0.875rem;
+}
+
+/* A slot held whole, under the folded panel's disclosure row, as a folded panel's statuses stand. */
+.view-instruments-panel__standing {
+  margin-top: 0.25rem;
 }

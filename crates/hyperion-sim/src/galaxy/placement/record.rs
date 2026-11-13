@@ -19,18 +19,26 @@
 //! it unchanged (plan 13, Design note 10). Its [`SystemKind`] follows from its layer and is never
 //! stored, and its mass mark is the object's mass, drawn on `substellar.mass` (Design note 11).
 
+use std::fmt;
+
 use super::CellKey;
+use super::marks::{DrawnMarks, Vertical};
 use crate::coords::GalacticPosition;
+use crate::galaxy::catalogue_classes::ClassId;
+use crate::galaxy::displaced::class_table::CLASS_COUNT;
+use crate::galaxy::displaced::marks::{MARK_KINDS, kind_index};
+use crate::galaxy::displaced::{DisplacedClassId, PlacementClass, SPEED_EDGES, SpeedBin};
 use crate::galaxy::features::ids::PackedFeature;
 use crate::galaxy::fields::{Component, ComponentId};
 use crate::galaxy::imf::MassBand;
 use crate::galaxy::substellar::draw_brown_dwarf_mass;
-use crate::galaxy::{Galaxy, Population};
+use crate::galaxy::{Galaxy, PointLy, Population};
 use crate::id::{Layer, MemberSlot, SystemId, SystemIdKind};
 use crate::planetary::HostKind;
 use crate::rng::{ObjectKey, Stream, tags};
+use crate::stellar::Composition;
 use crate::time::UniverseTime;
-use crate::units::{SolarMasses, Years};
+use crate::units::{KilometresPerSecond, LightYears, SolarMasses, Years};
 
 /// A system as placed: its state at the epoch.
 ///
@@ -64,7 +72,7 @@ use crate::units::{SolarMasses, Years};
 /// assert!(at_epoch.total_cmp(&system.age_at_epoch()).is_eq());
 /// # Ok::<(), hyperion_sim::galaxy::placement::BuildCellKeyError>(())
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct SystemRecord {
     id: SystemId,
     epoch_position: GalacticPosition,
@@ -72,6 +80,171 @@ pub struct SystemRecord {
     population: Population,
     primary_initial_mass: SolarMasses,
     age_at_epoch: Years,
+    /// The placement class, and whether the record carries its own metallicity age (plan 08,
+    /// P08.T12.c), packed so that the record keeps its 80 bytes.
+    placement: PackedPlacement,
+    /// The attempt whose marks were kept: layer D's runaway reduction (plan 08, Design note 17),
+    /// 0 everywhere else.
+    mark_attempt: u8,
+    /// The age, years, at which the record's metallicity is read where its conditional marks set
+    /// one (plan 08, Design note 19), at single precision; 0 where they set none. Placement and
+    /// the stellar stage read the same stored value, so its rounding is part of the draw.
+    metallicity_age_years: f32,
+}
+
+/// The record's fields as `#[derive(Debug)]` writes them, with the marks of plan 08 (P08.T12.c)
+/// after them only where they are not a field record's defaults, so that a record no displaced
+/// class touched prints as it did before them (decision-galaxy-25-train §1.2, E4).
+#[expect(
+    clippy::missing_fields_in_debug,
+    reason = "the marks print only where they are not a field record's, so that the held arm's \
+              Debug is the derive's; the metallicity age prints through its accessor"
+)]
+impl fmt::Debug for SystemRecord {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut out = f.debug_struct("SystemRecord");
+        out.field("id", &self.id)
+            .field("epoch_position", &self.epoch_position)
+            .field("origin", &self.origin)
+            .field("population", &self.population)
+            .field("primary_initial_mass", &self.primary_initial_mass)
+            .field("age_at_epoch", &self.age_at_epoch);
+        if self.placement != PackedPlacement::FIELD || self.mark_attempt != 0 {
+            out.field("placement", &self.placement_class())
+                .field("mark_attempt", &self.mark_attempt)
+                .field("metallicity_age", &self.metallicity_age());
+        }
+        out.finish()
+    }
+}
+
+/// A record's [`PlacementClass`] and the flag that it carries its own metallicity age, in sixteen
+/// bits (plan 08, P08.T12.c).
+///
+/// Bits 0–1 hold the class: 0 alive, 1 retained, 2 displaced. A retained record keeps its speed
+/// bin in bits 2–4; a displaced one its class in bits 2–8 and its kind, in [`MARK_KINDS`]'s order,
+/// in bits 9–10. Bit 15 is set where the conditional marks drew the metallicity at an age of their
+/// own ([`SystemRecord::metallicity_age`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct PackedPlacement(u16);
+
+const _: () = assert!(
+    CLASS_COUNT <= 1 << 7,
+    "a displaced class's index packs into seven bits"
+);
+
+impl PackedPlacement {
+    /// A field record's: alive, with no metallicity age of its own.
+    const FIELD: Self = Self(0);
+
+    /// The flag that the record carries its own metallicity age.
+    const OWN_METALLICITY_AGE: u16 = 1 << 15;
+
+    /// `class`, with the flag that the record carries its own metallicity age where the marks
+    /// drew one, `metallicity_age_years`.
+    ///
+    /// # Panics
+    ///
+    /// If a displaced class's index is not below 128, which the class list's 97 never reach.
+    #[must_use]
+    fn new(class: PlacementClass, metallicity_age_years: Option<f32>) -> Self {
+        let bits = match class {
+            PlacementClass::Alive => 0,
+            PlacementClass::Retained { speed } => {
+                1 | (u16::try_from(speed.index()).expect("under eight bins") << 2)
+            }
+            PlacementClass::Displaced { class, kind } => {
+                let index = u16::try_from(class.index())
+                    .ok()
+                    .filter(|&i| i < 1 << 7)
+                    .expect("a displaced class's index is under 128");
+                let kind = u16::try_from(kind_index(kind)).expect("under four kinds");
+                2 | (index << 2) | (kind << 9)
+            }
+        };
+        let flag = if metallicity_age_years.is_some() {
+            Self::OWN_METALLICITY_AGE
+        } else {
+            0
+        };
+        Self(bits | flag)
+    }
+
+    /// The placement class.
+    #[must_use]
+    fn class(self) -> PlacementClass {
+        let bits = self.0;
+        match bits & 0b11 {
+            0 => PlacementClass::Alive,
+            1 => PlacementClass::Retained {
+                speed: SpeedBin::new(u8::try_from((bits >> 2) & 0b111).expect("three bits"))
+                    .expect("three bits hold a bin"),
+            },
+            _ => PlacementClass::Displaced {
+                class: DisplacedClassId::new((bits >> 2) & 0x7F),
+                kind: MARK_KINDS[usize::from((bits >> 9) & 0b11)],
+            },
+        }
+    }
+
+    /// Whether the record carries its own metallicity age.
+    #[must_use]
+    fn has_own_metallicity_age(self) -> bool {
+        self.0 & Self::OWN_METALLICITY_AGE != 0
+    }
+}
+
+/// The natal kick a record's remnant must have (plan 08, Design note 17): the speed range of its
+/// speed bin, and in the ballistic classes the height and time since death its velocity's vertical
+/// component is read from (Design note 22).
+///
+/// [`SystemStars::generate`](crate::stellar::system::SystemStars::generate) repeats the remnant,
+/// stripped-mark and kick draws of a record that has one on its one built track until the kick's
+/// speed falls in the range.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct KickConstraint {
+    speed: (KilometresPerSecond, KilometresPerSecond),
+    vertical: Option<(LightYears, Years)>,
+}
+
+impl KickConstraint {
+    /// The kick speeds of speed bin `bin` against the speed scale `v_ref` (km/s), with `vertical`.
+    #[must_use]
+    pub(crate) fn of_bin(
+        bin: SpeedBin,
+        v_ref: KilometresPerSecond,
+        vertical: Option<(LightYears, Years)>,
+    ) -> Self {
+        let (s, v) = (bin.index(), v_ref.value());
+        let lo = if s == 0 { 0.0 } else { SPEED_EDGES[s - 1] * v };
+        let hi = SPEED_EDGES.get(s).map_or(f64::INFINITY, |edge| edge * v);
+        Self {
+            speed: (KilometresPerSecond::new(lo), KilometresPerSecond::new(hi)),
+            vertical,
+        }
+    }
+
+    /// The kick's least speed and the speed it stays below, km/s: `[lo, hi)`, `hi` infinite for the
+    /// fastest bin.
+    #[must_use]
+    pub const fn speed(&self) -> (KilometresPerSecond, KilometresPerSecond) {
+        self.speed
+    }
+
+    /// Whether a kick of `speed` (km/s) lies in the range.
+    #[must_use]
+    pub fn holds(&self, speed: KilometresPerSecond) -> bool {
+        let (lo, hi) = self.speed;
+        speed.value() >= lo.value() && speed.value() < hi.value()
+    }
+
+    /// In a ballistic class, the record's height above the midplane at the epoch and its time since
+    /// death, from which its velocity's vertical component is read (Design note 22); `None`
+    /// elsewhere.
+    #[must_use]
+    pub const fn vertical(&self) -> Option<(LightYears, Years)> {
+        self.vertical
+    }
 }
 
 /// What made a record (plan 03, Design note 18).
@@ -79,9 +252,9 @@ pub struct SystemRecord {
 /// The members of the galactic centre, of streams and of dwarf cores belong to no density
 /// component, so a record carries where it came from instead of a component that some sources
 /// could not supply. [`Grid`](Self::Grid) is the only variant of the first milestone; plan 09 adds
-/// `FeatureMember(FeatureId)`, `CentreMember` and `CatalogueSystem(ClassId)` and plan 10
-/// `GlobalListMember`, none of which carries a component, and no grid record changes when they
-/// arrive.
+/// [`FeatureMember`](Self::FeatureMember), [`CentreMember`](Self::CentreMember) and
+/// [`CatalogueSystem`](Self::CatalogueSystem) and plan 10 `GlobalListMember`, none of which carries
+/// a component, and no grid record changes when they arrive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum SystemOrigin {
@@ -102,6 +275,24 @@ pub enum SystemOrigin {
         /// The primary's redraw attempt ([`StarDraws::for_attempt`](crate::stellar::draws::StarDraws::for_attempt)).
         attempt: u16,
     },
+    /// A member of the global list (plan 10, Design note 13): a stream's or a dwarf core's, its ID
+    /// saying which, and the attempt its primary's draws are read at, as a feature member's. Its
+    /// age, metallicity and velocity are its stream's or core's, so it carries no component.
+    GlobalListMember {
+        /// The primary's redraw attempt ([`StarDraws::for_attempt`](crate::stellar::draws::StarDraws::for_attempt)).
+        attempt: u16,
+    },
+    /// A member of an entry of a catalogue class (plan 09, P09.T33.a), placed on the class's own
+    /// grid under the `111` prefix: its ID says which class, cell, candidate and member it is.
+    ///
+    /// Its stars and its motion are its class's, read through the class
+    /// ([`catalogue_classes::system_of`](crate::galaxy::catalogue_classes::system_of)): no
+    /// density component's laws apply to it, so [`component`](SystemRecord::component) is `None`.
+    /// It counts in the layer its primary's initial mass gives it, and its primary is read at
+    /// attempt 0: the core collapses (P09.T33.a) and the luminous blue variables (P09.T43) thin
+    /// their candidates on their first draws and redraw none (a class that redraws adds the
+    /// attempt to the variant).
+    CatalogueSystem(ClassId),
 }
 
 /// What a system is, as its layer says (plan 13, Design note 10): a star system, a free-floating
@@ -164,6 +355,20 @@ pub enum Existence {
     Exists,
 }
 
+#[cfg(test)]
+impl SystemRecord {
+    /// This record with its primary's initial mass `mass`, every other mark kept: with
+    /// [`with_age_at_epoch`](Self::with_age_at_epoch), a test's way to sample the marks of a
+    /// layer-E record across its band (plan 09, P09.T38's complementarity).
+    #[must_use]
+    pub(crate) const fn with_primary_initial_mass(self, mass: SolarMasses) -> Self {
+        Self {
+            primary_initial_mass: mass,
+            ..self
+        }
+    }
+}
+
 impl SystemRecord {
     /// A record from its parts, for non-grid sources (plans 09 and 10) and for tests.
     ///
@@ -173,7 +378,10 @@ impl SystemRecord {
     /// # Panics
     ///
     /// If `origin` is [`SystemOrigin::Grid`] and `id` is not a grid ID, which would leave
-    /// [`layer`](Self::layer) with no answer.
+    /// [`layer`](Self::layer) with no answer; if any other origin's `id` is not of its kind: a
+    /// feature member's of its feature, a centre member's of the centre, a global-list member's a
+    /// stream's or a dwarf core's member ID, a catalogue system's of its class; and if a catalogue
+    /// system's primary is not of 0.08–150 M☉, the mass its layer is read from.
     #[must_use]
     pub fn from_parts(
         id: SystemId,
@@ -197,6 +405,25 @@ impl SystemRecord {
                 matches!(id.kind(), SystemIdKind::Centre(_)),
                 "a centre member's record needs a centre member ID, got {id:?}"
             ),
+            SystemOrigin::GlobalListMember { .. } => assert!(
+                matches!(
+                    id.kind(),
+                    SystemIdKind::Stream(_) | SystemIdKind::DwarfCore(_)
+                ),
+                "a global-list member's record needs a stream's or a dwarf core's member ID, got \
+                 {id:?}"
+            ),
+            SystemOrigin::CatalogueSystem(class) => {
+                assert!(
+                    matches!(id.kind(), SystemIdKind::Catalogue(system)
+                        if system.class() == class.value()),
+                    "a catalogue system's record needs an ID of its class {class}, got {id:?}"
+                );
+                assert!(
+                    super::layer_for_initial_mass(primary_initial_mass).is_some(),
+                    "a catalogue system's primary is of 0.08-150 M_sun, got {primary_initial_mass:?}"
+                );
+            }
         }
         Self {
             id,
@@ -205,6 +432,24 @@ impl SystemRecord {
             population,
             primary_initial_mass,
             age_at_epoch,
+            placement: PackedPlacement::FIELD,
+            mark_attempt: 0,
+            metallicity_age_years: 0.0,
+        }
+    }
+
+    /// This record with its age at the epoch `age`, every other mark kept, its placement class
+    /// and metallicity age among them: the tests' way to move a real record's history on the
+    /// clock, as a living grid runaway's death into the supernova test's interval (plan 09,
+    /// P09.T33.b), or a stripped primary's stripping to the epoch. Unlike a record rebuilt by
+    /// [`from_parts`](Self::from_parts), which is a field record, a retained or displaced record so
+    /// re-aged keeps its class's composition and kick (P08.T12.c), and a living layer-E record its
+    /// drawn metallicity.
+    #[must_use]
+    pub const fn with_age_at_epoch(self, age: Years) -> Self {
+        Self {
+            age_at_epoch: age,
+            ..self
         }
     }
 
@@ -219,12 +464,13 @@ impl SystemRecord {
     /// mass function draws from the closed band, so a primary can sit on its band's upper edge.
     ///
     /// A feature member's is its slot's band, or for a member at feature level the band of its
-    /// primary's initial mass.
+    /// primary's initial mass. A catalogue system counts in the band of its primary's initial mass
+    /// (plan 09, P09.T37: "each merged system counts in the layer its initial mass gives it").
     ///
     /// # Panics
     ///
-    /// Never: a grid origin is built with a grid ID, which names a layer, and a member's primary
-    /// is of 0.08–150 M☉, which a band holds.
+    /// Never: a grid origin is built with a grid ID, which names a layer, and a member's or a
+    /// catalogue system's primary is of 0.08–150 M☉, which a band holds.
     #[must_use]
     pub fn layer(&self) -> Layer {
         match self.origin {
@@ -255,6 +501,28 @@ impl SystemRecord {
                         super::layer_for_initial_mass(self.primary_initial_mass).unwrap_or(Layer::E)
                     }
                 }
+            }
+            // A stream member's ID carries its band; a dwarf core's slot is a feature member's.
+            SystemOrigin::GlobalListMember { .. } => match self.id.kind() {
+                SystemIdKind::Stream(member) => member.band(),
+                SystemIdKind::DwarfCore(member) => match member.slot() {
+                    MemberSlot::InCell { band, .. } => band,
+                    MemberSlot::FeatureLevel { .. } => {
+                        super::layer_for_initial_mass(self.primary_initial_mass)
+                            .expect("a member's primary is of 0.08-150 M_sun")
+                    }
+                },
+                SystemIdKind::Grid(_)
+                | SystemIdKind::FeatureMember(_)
+                | SystemIdKind::Centre(_)
+                | SystemIdKind::Pinned(_)
+                | SystemIdKind::Catalogue(_) => {
+                    unreachable!("a global-list member's record is built with its member ID")
+                }
+            },
+            SystemOrigin::CatalogueSystem(_) => {
+                super::layer_for_initial_mass(self.primary_initial_mass)
+                    .expect("a catalogue system's primary is of 0.08-150 M_sun")
             }
         }
     }
@@ -288,7 +556,10 @@ impl SystemRecord {
     pub fn component(&self) -> Option<ComponentId> {
         match self.origin {
             SystemOrigin::Grid(component) => Some(component),
-            SystemOrigin::FeatureMember { .. } | SystemOrigin::CentreMember { .. } => None,
+            SystemOrigin::FeatureMember { .. }
+            | SystemOrigin::CentreMember { .. }
+            | SystemOrigin::GlobalListMember { .. }
+            | SystemOrigin::CatalogueSystem(_) => None,
         }
     }
 
@@ -336,6 +607,80 @@ impl SystemRecord {
         }
     }
 
+    /// The system's placement class (plan 08, P08.T12.c), the derived mark plans 09 and 11 read:
+    /// alive, a remnant retained in its field component with its kick in a speed bin, or a member
+    /// of a displaced class.
+    ///
+    /// It is [`PlacementClass::Alive`] for every record but those of layers D and E that a galaxy
+    /// holding plan 08's displaced classes placed. In layer E such a record is alive, retained or
+    /// displaced; in layer D it is displaced (a runaway or a walkaway) or alive, the field's dead
+    /// white dwarfs among the alive, since the runaway reduction tells the living from the dead
+    /// only where it must (Design note 17).
+    #[must_use]
+    pub fn placement_class(&self) -> PlacementClass {
+        self.placement.class()
+    }
+
+    /// The attempt whose marks were kept (plan 08, Design note 17): the primary's draws are
+    /// [`StarDraws::for_attempt`](crate::stellar::draws::StarDraws::for_attempt) of body 0 at it.
+    /// Layer D's runaway reduction takes a living star's mass, age and draws at the next attempt
+    /// when it rejects one; every other record is at attempt 0.
+    #[must_use]
+    pub fn mark_attempt(&self) -> u16 {
+        u16::from(self.mark_attempt)
+    }
+
+    /// Where the system's primary formed, where its metallicity is read (plan 08, Design note 19):
+    /// its epoch position for a field system, and for a displaced one its birth source's reference
+    /// site, the class table's (3 `R_d` in the plane for a disc or the halo, the centre for the
+    /// bulge, the bar and the nuclear disc), at which the class table read the source's
+    /// metallicity.
+    #[must_use]
+    pub fn formation_site(&self, galaxy: &Galaxy) -> PointLy {
+        super::marks::formation_site(galaxy, self)
+    }
+
+    /// The natal kick the primary's remnant must have, if the record's class constrains it (plan
+    /// 08, Design note 17): a retained record's speed bin, or a displaced remnant's origin bin,
+    /// with the vertical component of a ballistic class's; `None` for every other record.
+    ///
+    /// The origin bin is the class's own, but for the fastest class of an age bin, which also
+    /// holds the unbound of every bin (Design note 23): it is drawn on `displaced.origin_bin`
+    /// from the class's odds.
+    #[must_use]
+    pub fn kick_constraint(&self, galaxy: &Galaxy) -> Option<KickConstraint> {
+        super::marks::kick_constraint(galaxy, self, Vertical::Read)
+    }
+
+    /// [`kick_constraint`](Self::kick_constraint) without its vertical component, which the kick
+    /// loop does not read and which costs a ballistic remnant a lifetime.
+    #[must_use]
+    pub(crate) fn kick_range(&self, galaxy: &Galaxy) -> Option<KickConstraint> {
+        super::marks::kick_constraint(galaxy, self, Vertical::Skipped)
+    }
+
+    /// The composition a dead record's progenitor had, where its conditional marks fixed it (plan
+    /// 08, P08.T12.c): a retained record's and a displaced remnant's is its birth source's
+    /// reference composition, the class table's, at which the table weighed its class (its fate
+    /// and its kick's speed bin, Design notes 17 and 18), so that its own star dies as its class
+    /// says, and a hypervelocity survivor's its birth component's source's, at which its marks
+    /// made it a white dwarf before its launch (plan 09, P09.T34.b); `None` for every other record,
+    /// whose metallicity is drawn.
+    #[must_use]
+    pub(crate) fn progenitor_composition(&self, galaxy: &Galaxy) -> Option<Composition> {
+        super::marks::progenitor_composition(galaxy, self)
+    }
+
+    /// The age at which the record's metallicity is read, where its conditional marks drew one
+    /// (plan 08, Design note 19): a living layer-E record's and a runaway's or a walkaway's; `None`
+    /// for every other record, whose metallicity is read at its age at the epoch or not drawn.
+    #[must_use]
+    pub(crate) fn metallicity_age(&self) -> Option<Years> {
+        self.placement
+            .has_own_metallicity_age()
+            .then(|| Years::new(f64::from(self.metallicity_age_years)))
+    }
+
     /// The record of an accepted candidate: its marks, drawn on their own streams, around the
     /// position and component the thinning settled (plan 03, Design note 4).
     #[must_use]
@@ -356,6 +701,33 @@ impl SystemRecord {
             population: component_laws.population(),
             primary_initial_mass,
             age_at_epoch,
+            placement: PackedPlacement::FIELD,
+            mark_attempt: 0,
+            metallicity_age_years: 0.0,
+        }
+    }
+
+    /// The record of an accepted candidate of layer D or E in a galaxy that holds plan 08's
+    /// displaced classes: the conditional marks `marks` drew for it, around the position the
+    /// thinning settled (plan 08, P08.T12.c). Its component is the one it was born in, and its
+    /// population that component's.
+    #[must_use]
+    pub(super) fn of_marks(
+        galaxy: &Galaxy,
+        id: SystemId,
+        epoch_position: GalacticPosition,
+        marks: &DrawnMarks,
+    ) -> Self {
+        Self {
+            id,
+            epoch_position,
+            origin: SystemOrigin::Grid(marks.component),
+            population: galaxy.fields().component(marks.component).population(),
+            primary_initial_mass: marks.mass,
+            age_at_epoch: marks.age,
+            placement: PackedPlacement::new(marks.placement, marks.metallicity_age_years),
+            mark_attempt: marks.attempt,
+            metallicity_age_years: marks.metallicity_age_years.unwrap_or(0.0),
         }
     }
 }
@@ -481,6 +853,9 @@ mod tests {
         population: Population,
         primary_initial_mass: SolarMasses,
         age_at_epoch: Years,
+        placement: PackedPlacement,
+        mark_attempt: u8,
+        metallicity_age: f32,
     }
 
     /// An origin whose widest variant carries eight bytes at four-byte alignment.
@@ -488,6 +863,34 @@ mod tests {
     enum OriginOfEightBytes {
         Grid(ComponentId),
         Wide(u32),
+    }
+
+    /// P08.T12.c: every placement class packs into its sixteen bits and back, with and without its
+    /// metallicity age's flag.
+    #[test]
+    fn a_placement_class_packs_and_unpacks() {
+        use crate::galaxy::displaced::marks::MARK_KINDS;
+        let mut classes = vec![PlacementClass::Alive];
+        classes.extend(SpeedBin::all().map(|speed| PlacementClass::Retained { speed }));
+        for index in [0_u16, 1, 55, 96, 127] {
+            for kind in MARK_KINDS {
+                classes.push(PlacementClass::Displaced {
+                    class: DisplacedClassId::new(index),
+                    kind,
+                });
+            }
+        }
+        for class in classes {
+            for age in [None, Some(4.5e9_f32)] {
+                let packed = PackedPlacement::new(class, age);
+                assert_eq!(packed.class(), class);
+                assert_eq!(packed.has_own_metallicity_age(), age.is_some());
+            }
+        }
+        assert_eq!(
+            PackedPlacement::new(PlacementClass::Alive, None),
+            PackedPlacement::FIELD
+        );
     }
 
     #[test]
@@ -548,6 +951,80 @@ mod tests {
             Population::Bulge,
             SolarMasses::new(10.0),
             Years::new(1.0),
+        );
+    }
+
+    /// P09.T33.a: a catalogue system's record carries its class and its own `111` ID, counts in
+    /// the layer of its primary's initial mass, and has no density component.
+    #[test]
+    fn a_catalogue_system_counts_in_its_mass_s_layer_with_no_component() {
+        use crate::id::CatalogueSystemId;
+        let class = ClassId::CORE_COLLAPSE;
+        let id = SystemId::from(CatalogueSystemId::new(class.value(), [0, 50, 0], 7, 0).unwrap());
+        for (mass, layer) in [
+            (9.0, Layer::E),
+            (150.0, Layer::E),
+            (3.0, Layer::D),
+            (0.3, Layer::A),
+        ] {
+            let record = SystemRecord::from_parts(
+                id,
+                sunlike(),
+                SystemOrigin::CatalogueSystem(class),
+                Population::YoungThinDisc,
+                SolarMasses::new(mass),
+                Years::new(1e7),
+            );
+            assert_eq!(record.layer(), layer, "{mass} M☉");
+            assert_eq!(record.component(), None);
+            assert_eq!(record.kind(), SystemKind::Stellar);
+        }
+        // Still eight bytes: the class is one.
+        assert_eq!(size_of::<SystemOrigin>(), 8);
+    }
+
+    #[test]
+    #[should_panic(expected = "a catalogue system's record needs an ID of its class")]
+    fn a_catalogue_system_s_record_refuses_another_class_s_id() {
+        use crate::id::CatalogueSystemId;
+        let id = CatalogueSystemId::new(ClassId::TYPE_IA.value(), [0, 50, 0], 7, 0).unwrap();
+        let _ = SystemRecord::from_parts(
+            SystemId::from(id),
+            sunlike(),
+            SystemOrigin::CatalogueSystem(ClassId::CORE_COLLAPSE),
+            Population::YoungThinDisc,
+            SolarMasses::new(10.0),
+            Years::new(1e7),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "a catalogue system's primary is of 0.08-150 M_sun")]
+    fn a_catalogue_system_s_record_refuses_a_mass_no_layer_holds() {
+        use crate::id::CatalogueSystemId;
+        let class = ClassId::CORE_COLLAPSE;
+        let id = CatalogueSystemId::new(class.value(), [0, 50, 0], 7, 0).unwrap();
+        let _ = SystemRecord::from_parts(
+            SystemId::from(id),
+            sunlike(),
+            SystemOrigin::CatalogueSystem(class),
+            Population::YoungThinDisc,
+            SolarMasses::new(200.0),
+            Years::new(1e7),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "a catalogue system's record needs an ID of its class")]
+    fn a_catalogue_system_s_record_refuses_a_grid_id() {
+        let key = CellKey::new(Layer::E, [0, 203, 0]).unwrap();
+        let _ = SystemRecord::from_parts(
+            key.candidate_id(0).unwrap(),
+            sunlike(),
+            SystemOrigin::CatalogueSystem(ClassId::CORE_COLLAPSE),
+            Population::YoungThinDisc,
+            SolarMasses::new(10.0),
+            Years::new(1e7),
         );
     }
 

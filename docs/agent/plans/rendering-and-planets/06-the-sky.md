@@ -220,7 +220,22 @@ pub enum CellOutcome { Served, Missed, Rebuilt(Rebuild) }
 pub enum Rebuild { Key, Window, Parameters }
 pub struct SkyContext<'a> { /* tables: &'a LuminosityTables, envelope: &'a BrightnessEnvelope,
     noise: NoiseCache (the job's own), cells: &'a dyn SkyCellCache,
-    sources: &'a [&'a dyn SystemSource], modifiers: &'a dyn GasModifierSource */ }
+    sources: &'a [&'a dyn SkySource], modifiers: &'a dyn GasModifierSource */ }
+pub trait SkySource { fn members_seen(&self, galaxy: &Galaxy, observer: &Observer,
+    seen: ((MassBand, LightYears, LightYears), MemberPart), each: &mut dyn FnMut(SkyMember<'_>));
+    fn holds_feature_members(&self) -> bool { false } } // R06.T16.a at 27, as built
+pub enum SkyMember<'a> { Feature(&'a MemberRecord), Listed(&'a GlobalMemberRecord),
+    Centre(&'a CentreMemberLight, &'a Trajectory), Class(&'a CatalogueSystem) }
+impl<L: ClassLookup> SkySource for CachedClassSource<'_, L> { /* R06.T16.a, as built */ }
+pub fn streams_seen(galaxy: &Galaxy, list: &GlobalList, plan: &CensusPlan, query: &SkyQuery)
+    -> Vec<StreamNumber>;
+pub fn streams_seen_in(galaxy: &Galaxy, list: &GlobalList,
+    shells: (&CensusPlan, impl IntoIterator<Item = Shell>), query: &SkyQuery)
+    -> Vec<StreamNumber>; // R06.T16.a's cost, as built
+pub fn census_members(galaxy: &Galaxy, ctx: &mut SkyContext<'_>, plan: &CensusPlan,
+    shell: (Shell, MemberPart), query: &SkyQuery, out: &mut Vec<SkyStar>) -> CensusTallies;
+pub fn takes_feature_members(galaxy: &Galaxy) -> bool; // R06.T16.a, as built
+pub fn takes_class_hosts(galaxy: &Galaxy) -> bool; // R06.T16.a, as built
 pub struct CensusPlan { /* caps: Vec<LayerCap>, cells: Vec<CellKey> (canonical order) */ }
 pub fn census_plan(galaxy: &Galaxy, tables: &LuminosityTables, envelope: &BrightnessEnvelope,
     query: &SkyQuery, cache: &mut NoiseCache) -> CensusPlan;
@@ -441,10 +456,12 @@ the call sites here change.
   The scene's host stars' drawn positions (light-time and aberration) for the discs. Chunks are
   assembled and decoded only once complete, off the main thread (R03's Design note 11). The sky
   request's `observer` is the scene system's barycentre, `barycentreAt(place, t)` over
-  `SceneSystem.place` (R03.T16), plus the ship's offset in the system's frame. As built: the
-  server's seam is `BulkPayload::new(bytes)` (`Result<_, BuildBulkPayloadError>`), carried as
-  `Answer { body, bulk: Some(payload) }`, whose `frames` use `chunk(payload: Bytes, request)`;
-  `BulkPayload::new` still carries `expect(dead_code)` "until R06 and R09", which T11.b removes.
+  `SceneSystem.place` (R03.T16), plus the ship's offset in the system's frame. _As built
+  (2026-10-13), the camera's offset, as T12 says (Risks, "The view asks from its camera")._ As
+  built: the server's seam is `BulkPayload::new(bytes)` (`Result<_, BuildBulkPayloadError>`),
+  carried as `Answer { body, bulk: Some(payload) }`, whose `frames` use
+  `chunk(payload: Bytes, request)`; `BulkPayload::new` still carries `expect(dead_code)` "until
+  R06 and R09", which T11.b removes.
   `BulkManifestDto.bytes` is a JSON number. The client's request is the method
   `RequestClient.requestBulk(body, manifestOf)`, and `BulkAssembler` refuses more than
   `MAX_BULK_CHUNKS` (257) or `MAX_BULK_PAYLOAD_BYTES` (64 MiB), which the sky's 7.5 MB at N_max
@@ -539,10 +556,11 @@ CompanionMasses, StellarFates}` (`fates_for` returns `&'static MultiplicityFates
 - **Galaxy plan 07:** `galaxy::gas::extinction::{sightline, horizon, NoiseMode, Quality}`
   (`Quality::Budget(NonZeroU32)`), `NoiseCache`, `ccm::extinction_ratio(wavelength:
 Micrometres)`, `ccm::Band`, `GasModifier`, `GasModifierSource`. P07.T10.a–c (the
-  `extinction_map` and `extinction` kinds, the server's `compute::sightlines::{SIGHTLINE_QUALITY,
-SightlineMarcher, SharedSightlineCache}`) is on `origin/galaxy-generation` only, not on `main`
-  (re-validated 2026-10-02); this plan needs none of it, and T11 reuses `SIGHTLINE_QUALITY` once it
-  merges.
+  `extinction_map` and `extinction` kinds, the server's `compute::sightlines::{SightlineMarcher,
+SharedSightlineCache}`) was on `origin/galaxy-generation` only, not on `main` (re-validated
+  2026-10-02), and is ported since (`decision-gg-port-d0.md`, batch A1); this plan needs none of it,
+  and T11 reads `galaxy::gas::extinction::SIGHTLINE_QUALITY` since P07.T10.c's port, which moved the
+  constant into the sim (`decision-gg-port-d0.md` §5).
 - **Galaxy plan 09:** `FeatureMemberSource` through the server once P09.T40 registers it (R06.T16).
   As built, neither `SystemSource` nor `FeatureMemberSource` is `Sync`, so each census job builds
   its own `SkyContext` and sources over shared caches, as `range_query`'s callers do; P09.T40 is not
@@ -555,7 +573,10 @@ SightlineMarcher, SharedSightlineCache}`) is on `origin/galaxy-generation` only,
   (`hierarchy()`); and the rule that every star's mass is at most the pair's total (Design note
   8). **P11.T11 is built** (version 16): `SystemStars::state_at(t) -> Option<SystemState>` gives
   every star's state from its pair's timeline where the engine ran one (a merged-away star is
-  `NoRemnant`, so the list keeps its length), while `stars()` and `brief_at` stay single-star. The
+  `NoRemnant`, so the list keeps its length), while `stars()` and `brief_at` stay single-star
+  (_since P11.T11.a, `85d3e054`, `brief_at` is the summary's primary, from its pair's state where
+  the engine changed it, and the range brief keeps galaxy plan 06's single-star model only where a
+  gate certifies it; galaxy plan 11's Risks, "P11.T11.a as built"_). The
   census therefore reads `SystemState::stars()` for each star's state, and R06.T16.b is due now
   (its ordering note). P11.T6 and T8–T10 are not built and move no star's mass.
 - **Galaxy plan 12:** `observe::{Observer, retarded, Drift::of_record, Retardation,
@@ -598,11 +619,14 @@ holds.
   magnitude. Interim: the census and the luminosity function apply the rule themselves, in one
   function, `sky::photometry::is_dark_in_v`, which A3 replaces with plan 06's.
 - **A4, V magnitudes of white dwarfs and of M giants**: an absolute V for white dwarfs from the
-  Montreal grids (Bédard et al. 2020) and giant bolometric corrections for late M giants (up to 1.7
-  mag too bright today, `photometry.rs`'s own note); and a check of `photometry.rs`'s "Table III"
-  citation of Straižys and Kuriliene, as the roadmap's asks table records. Interim: a white dwarf
-  is left out of the census and counted in `without_photometry`, which the response reports; M
-  giants are as bright as plan 06 says.
+  Montreal grids (Bédard et al. 2020) and giant bolometric corrections for late M giants (up to
+  1.34 mag too bright at M6 III by plan 06's giants' correction, P06.T43.a; 1.7 by `photometry.rs`'s
+  note); and a check of `photometry.rs`'s "Table III" citation of Straižys and Kuriliene, as the
+  roadmap's asks table records. Interim: a white dwarf is left out of the census and counted in
+  `without_photometry`, which the response reports; M giants are as bright as plan 06 says. _Ended
+  under the 26 arm (P06.T43.b, `V_MAGNITUDE_VERSION`):_ white dwarfs take the Montreal grid's V,
+  evolved stars the giants' correction, and the census's bounds a white-dwarf ceiling; the
+  interim stands to version 25.
 
 ## Design notes
 
@@ -629,7 +653,9 @@ holds.
    L(μ′), which is conservative and, since B_equiv rises with B, closed-form: for B_equiv in
    0.0216–0.0649 cd/m² the limit is 5.2446 − 2.5 log₁₀(F ÷ 1.4) (researched 2026-09-29, high
    confidence on the numbers, medium-high that the dip is an artefact). So the limit is 5.24 at μ
-   16.5 and 5.25 at 17.5, where the brainstorm has 5.3 for both.
+   16.5 and 5.25 at 17.5, where the brainstorm had 5.3 for both. _Resolved 2026-10-09 (the
+   brainstorm sign-off, `signoff-brainstorm.md`, rows 625–628): the brainstorm's threshold table
+   now reads 5.24 at μ 16.5 and 5.25 at 17.5, eq. 34 from μ 15 to 25._
    Eq. 34 is written without F in the paper and takes it as eq. 53 does, so F moves every limit by
    exactly −2.5 log₁₀ F; the client applies a field factor other than the request's as that offset.
    Eq. 34 has no absolute threshold: as B → 0, ΔI tends to F(√a₁ + a₄)² B^½ and the limit
@@ -646,6 +672,9 @@ holds.
    in mesopic backgrounds (the research agent's construction, not Crumey's: under 0.03 mag of
    difference between μ 16 and 19). ρ comes from real spectra, not from B − V through eq. 18,
    which gives an M dwarf about 0.2–0.3 mag where the blackbody gives the brainstorm's 0.3–0.4.
+   _Resolved 2026-10-09 (the brainstorm sign-off, `signoff-brainstorm.md`, row 630): the
+   brainstorm now says "a blackbody's ratio (Crumey eq. 7) gives an M star about 0.3–0.4 mag and
+   an O star about 0.4, and Crumey's eq. 18 through B − V about 0.2–0.3 and 0.26"._
 4. **Glare from resolved stars** (researched 2026-09-29; CIE 146:2002 general disability glare via
    Vos 2003; Adrian 1989 as Crumey's "standard way"). L_veil = E [10 ÷ θ³ + (5 ÷ θ² + 0.1 p ÷ θ)(1 +
    (A ÷ 62.5)⁴) + 0.0025 p], θ in degrees clamped at 0.1°, summed over every listed star within
@@ -740,7 +769,9 @@ holds.
    computes, not from a luminosity-class guess, and the grid is chosen by the star's kind. That
    departs from the brainstorm's "the gravity from the brief's luminosity class": the brief has no
    gravity, and plan 06's mass and radius give it exactly, so the roadmap's corrections should carry
-   it.
+   it. _Resolved 2026-10-09 (the brainstorm sign-off, `signoff-brainstorm.md`, row 632):_ the
+   brainstorm now takes "the gravity from the star's own mass and radius, which plan 06 computes
+   (the brief has no luminosity class)".
 7. **The cumulative luminosity function.** For each density component (which fixes the age
    distribution; a population's is the sum) and each layer: per system, the V light of stars fainter
    than M_V, and the number brighter, primaries and companions both, as a table in M_V from −12 to
@@ -797,7 +828,11 @@ M☉)` (mass comes only from the pair, m₁ + m₂ ≤ 2 m₁) and the age range
    component over the cell's light-time interval, would pass every C–E record near the Sun, before
    and after T16.b. Any system at or above its turnoff mass can hold a companion at the turnoff,
    whose giant branches the envelope's running maximum holds: M_V −5.7 to −6.8 at 1–10 Gyr in the
-   fitted table. So it is not taken, and the departure above needs no ruling. From R06.T8.g the
+   fitted table. So it is not taken, and the departure above needs no ruling. _Resolved 2026-10-09
+   (the brainstorm sign-off, `signoff-brainstorm.md`, row 635):_ open question 13 now says "Age
+   enters only through that mass floor" and that "a per-candidate age test would need the
+   component, which needs the density the skip avoids, and near the Sun it would pass every record
+   of layers C to E anyway". From R06.T8.g the
    per-record bound is star by star (Design note 10). `max_star_mass` stays for the cell floor.
 9. **Caps, derived.** Each layer's radius is the least beyond which its expected number of stars
    brighter than the cut falls below one, from its luminosity function (whose counts take
@@ -820,9 +855,12 @@ M☉)` (mass comes only from the pair, m₁ + m₂ ≤ 2 m₁) and the age range
    and an eye-only request may count each ray to the eye's own limit about it, the eye-cut
    pre-pass's, rather than the uniform cut (R06.T7.b's visibility-based caps). From R13.T2, RM3's
    interim, layers C to E take their caps by ray at the synthetic ceiling V_P rather than at the
-   cut, never beyond the cut's own: V 5.0 in RM3, 4.5 from R13.T7. Beyond them the band holds all
-   of the light until R13's synthetic stars fill [V_P, cut) (decided by the owner 2026-10-08;
-   R13 Design notes 2–3, `feasibility-hybrid-sky.md`).
+   cut (V 5.0 in RM3, 4.5 from R13.T7), or at the cut where the cut is brighter, never beyond the
+   cut's own nor beyond R13's real limit of 2,000 ly, at every cut; a sky whose own caps lie within
+   the limit at a cut no deeper than V<sub>P</sub> keeps them (`decision-r13-t2b-ceiling.md`).
+   Beyond them the band holds all of the light until R13's synthetic stars take every star
+   brighter than the cut (decided by the owner 2026-10-08, and the limit 2026-10-09; R13 Design
+   notes 2–3, `feasibility-hybrid-sky.md`, `decision-r13-guard-trip.md`).
 10. **The census, per cell.** Cells are those of `cells_in_sphere` to each cap, padded by
     `pad_for(|t_emit − epoch|, pad_speed(layer))` as the range query pads, in canonical order. For
     each record the skip keeps: `retarded` on `Drift::of_record` (a centre member's
@@ -879,14 +917,15 @@ M☉)` (mass comes only from the pair, m₁ + m₂ ≤ 2 m₁) and the age range
     mass floor it was built with, in candidate order. A later query whose floor is at or above the
     cached one filters the cached list; a lower floor rebuilds the cell. Records are epoch state, so
     a jump of up to 1,000 ly reuses most cells, and the cache never changes a reply (tested, as plan
-    09's caches are). The server's is a `ByteLru` under `HYPERION_SKY_CACHE_MB` (default 64),
-    behind a lock so that the census's parallel bulk jobs share it through `&self`, as P09.T40's
-    caches do for `SystemSource`. It is not the server's existing cell cache
-    (`HYPERION_CELL_CACHE_MB`): that holds whole cells from `generate_cell`, and the near-Sun caps
-    enclose some 2.6 × 10⁷ systems in C to E (the brainstorm's count at version 14), where the sky
-    keeps only the bright subset above each floor. From R06.T8.h the cache holds blocks of 4³
-    cells, each built for one observer and cut (decided 2026-10-05, `decision-r06-census-cost.md`;
-    amended 2026-10-08, `decision-r06-t8h-warm.md`).
+    09's caches are). The server's is a `ByteLru` under `HYPERION_SKY_CACHE_MB` (default 0, off,
+    since R06.T8.o; R06.T8.n's sized budget is 1,280 MiB), behind a lock so that the census's
+    parallel bulk jobs share it through `&self`, as P09.T40's caches do for `SystemSource`. It is
+    not the server's existing cell cache (`HYPERION_CELL_CACHE_MB`): that holds whole cells from
+    `generate_cell`, and the near-Sun caps enclose some 2.6 × 10⁷ systems in C to E (the
+    brainstorm's count at version 14), where the sky keeps only the bright subset above each
+    floor. From R06.T8.h the cache holds blocks of 4³ cells, each built for one observer and cut
+    (decided 2026-10-05, `decision-r06-census-cost.md`; amended 2026-10-08,
+    `decision-r06-t8h-warm.md`).
 
     - A cell's key is the faintest absolute V listable at its least distance from any observer
       within 1,000 ly of the builder's, and its window is every emitted time that such an observer,
@@ -896,8 +935,16 @@ M☉)` (mass comes only from the pair, m₁ + m₂ ≤ 2 m₁) and the age range
       serves a query whose key is no fainter and whose window it holds.
     - The stored bound only skips records. Every record it passes takes the census's own steps, so
       a warm census generates the same systems as a cold one, and its reply is the same bit for bit.
-    - R06.T8.n sets `HYPERION_SKY_CACHE_MB`'s default so that one near-Sun sky and a jump's new
-      cells fit (`decision-r06-census-cost-signoff.md`), at most 2,048 MiB.
+    - R06.T8.n sized the budget that holds one near-Sun sky and a jump's new cells
+      (`decision-r06-census-cost-signoff.md`), at most 2,048 MiB: 1,280 MiB on the served sky.
+      A warm census still generates every system, so the cache saves little. From R06.T8.o the
+      default is 0, off, until the cache pays (decided 2026-10-10, `decision-r06-t8n.md`). A
+      camera's sky holds more. Near the Sun at 10.06 its entries are 862 MB on the server's galaxy
+      and 465 MB on the fixture, 1.22–1.23 times the eye's (R06.T17). With a jump's new cells that
+      is about 1.16 GB (_estimate_, at the eye's ratio), so 1,536 MiB by the rule, and 1,280 MiB
+      stays the eye's. The re-measure sizes the one budget on the camera's sky, which the bridge's
+      main screen always asks, and the default returns only if client and server together then stay
+      within 8 GB on the minimum machine (decided 2026-10-13, `decision-r06-camera-budget.md`).
 
 13. **Time.** The sky is asked at a time, like every query, within ±H. The response's
     `valid_until` is the least of one Julian year and the time at which the fastest-moving listed
@@ -907,7 +954,9 @@ M☉)` (mass comes only from the pair, m₁ + m₂ ≤ 2 m₁) and the age range
     t_ref = +H, which serves the whole ±H window (Design note 7; decided 2026-10-03). From R06.T8.i
     and T11.d a sky may arrive as several replies, nearest first. Each states each layer's
     complete-to radius and whether it is final, the band carries the rest, and the client replaces
-    its sky with each (decided 2026-10-05; Design note 11).
+    its sky with each (decided 2026-10-05; Design note 11). _Since R06.T12.b a sky re-asked within
+    an arrival for `partial`, `limits` or `parallax` is held until a reply is as complete, or until
+    an open camera's shift reaches 1 px (T12.b's record, "Deviations in T12.b, as built")._
 14. **The band's rays and the extinction profile.** The band map is a cube map on the galactic
     axes of `face_texels` (64) a face, one ray per texel centre, 24,576 rays, marched outward to the
     root cube's edge on distance nodes spaced geometrically from 0.01 ly (twelve a decade). Along
@@ -1020,6 +1069,31 @@ M☉)` (mass comes only from the pair, m₁ + m₂ ≤ 2 m₁) and the age range
     digitally and the limit stays at the high-gain figure. The sensitivity never falls below base,
     where the gain term would not hold. The brainstorm's "about V 10" is the 60° figure to 0.1 mag;
     the plan's figure is always stated with the field of view.
+
+    **The limit by texel** (decided 2026-10-13, `decision-r06-camera-budget.md`; R06.T13.i). A
+    camera view culls each star against the limit at the background of the band texel it lies in, at
+    the deepest triple. The background is the reply's band as sent, before the view adds the stars
+    it culls, whose photons fall on their own pixels. Near the Sun the camera's lit band at 10.06,
+    at the caps by ray, runs μ 21.26–25.25 (R06.T17; 10th–90th 22.17–24.59, median 23.72), so the
+    limit at 60° runs from V 9.55 in the brightest texel to 10.12 in the darkest (10th–90th
+    9.79–10.10, median 10.03), against 10.06 at μ 24. Over a black sky, where read noise alone sets
+    it, the limit is 10.15, 0.095 mag deeper than μ 24's at every field. A camera's request asks
+    that black-sky limit, clamped at `MAX_CUT_V`, so no texel's cull is deeper than its census, and
+    the cull, as the label, never keeps a star whose V plus its band term lies past the reply's
+    cut: a hot star there goes to the band with its light (at about 43° and narrower, or for a
+    camera culling a sky asked at a shallower cut; decided 2026-10-13,
+    `decision-r06-camera-budget.md` §10.1). The field moves every texel's limit alike, by 5 log₁₀ of
+    the focal lengths' ratio (+1.67 mag at 30°, −1.19 at 90°). So near the Sun the clamp holds the
+    request at 11.0 below about 43°, and the limit by texel matters at 45°, 60°, 90° and 120°, and
+    at every field where the band is bright (at 60°, 9.11 at μ 20 and 8.25 at μ 18). Where the band
+    also holds light a sensor would resolve, its background reads brighter and the limit shallower:
+    the pending region's light in a reply not yet final; in RM3's interim, the light of the stars
+    brighter than the cut beyond the real boundary (from R13.T7 the band there holds only the light
+    fainter than the cut); and the overflow's. A share f of such light over the unresolved light
+    takes 0.06 mag at f = 0.2 and 0.14 at f = 0.5 off the brightest texels, and a third of that at
+    the median. The label quotes the limit at its deepest, as the eye's is quoted: the darkest
+    texel's at the exposure shown, never deeper than the reply's cut.
+
 19. **Humphreys–Davidson, protostars and giants: the leans handed to plan 06** (researched
     2026-09-29, a physics ruling left to plan 06). The cause of the excess is in the code: under the
     default `WindRecipe::Modern` (`stellar/sse/wind.rs`) a star beyond the limit loses a constant
@@ -1038,19 +1112,20 @@ M☉)` (mass comes only from the pair, m₁ + m₂ ≤ 2 m₁) and the age range
     for M giants and Levesque et al. 2005's column for supergiants. Each is a generator-version
     change in plan 06; this plan reads whatever the envelope and photometry then give.
 20. **Culling, bake and sprites.** Each view culls the stars fainter than its limit in their
-    direction (eye) or overall (camera) and adds their flux into the band layer's texel, so its
-    total light is kept. Of those it keeps, a star is a sprite if it is among the view's sprite
-    budget brightest or its parallax across the system (206,265 × 30 au ÷ d arcseconds, the
-    brainstorm's 30 au journey as the baseline, which takes every star within about 9 ly at a tenth
-    of a 110″ pixel) exceeds a tenth of a pixel; the rest are baked. A sprite is drawn by R02's
-    `starSprite.wgsl` with R02's `psfPixelWeights`: the pixel-integrated Gaussian of σ = 0.64 px,
-    whose erf-differenced weights sum to one, so its flux is the same at every sub-pixel position
-    and it cannot alias or flash, and whose luminance takes the pixel's true solid angle through
-    `pixelLuminance`, so point sources brighten with resolution (R02's Design note 10). This plan
-    adds only the selection, the per-frame parallax positions and instancing; a change to the PSF
-    would be an ask of R02. The hand-over between bake and sprite is at the same total flux. Where
-    parallax sprites outrun the budget (the nuclear disc and cluster), the bake is redone whenever
-    the nearest baked star's accumulated shift reaches a tenth of a pixel.
+    direction, the eye's by the limit map and a camera's by its band texel's background (Design note
+    18; R06.T13.i, decided 2026-10-13, `decision-r06-camera-budget.md`), and adds their flux into
+    the band layer's texel, so its total light is kept. Of those it keeps, a star is a sprite if it
+    is among the view's sprite budget brightest or its parallax across the system (206,265 × 30 au ÷
+    d arcseconds, the brainstorm's 30 au journey as the baseline, which takes every star within
+    about 9 ly at a tenth of a 110″ pixel) exceeds a tenth of a pixel; the rest are baked. A sprite
+    is drawn by R02's `starSprite.wgsl` with R02's `psfPixelWeights`: the pixel-integrated Gaussian
+    of σ = 0.64 px, whose erf-differenced weights sum to one, so its flux is the same at every
+    sub-pixel position and it cannot alias or flash, and whose luminance takes the pixel's true
+    solid angle through `pixelLuminance`, so point sources brighten with resolution (R02's Design
+    note 10). This plan adds only the selection, the per-frame parallax positions and instancing; a
+    change to the PSF would be an ask of R02. The hand-over between bake and sprite is at the same
+    total flux. Where parallax sprites outrun the budget (the nuclear disc and cluster), the bake is
+    redone whenever the nearest baked star's accumulated shift reaches a tenth of a pixel.
 21. **The cubemap** (researched 2026-09-29; WebGPU §26.1.3 packed formats;
     EXT_texture_shared_exponent). `rgb9e5ufloat` is filterable and copyable but neither renderable
     nor a storage format, so the bake draws the baked stars as a `point-list` with additive blending
@@ -1122,17 +1197,25 @@ Decided 2026-10-05 (`decision-r06-census-cost.md`), the census's cost work runs 
 T16.b; T8.f; T9.b; T9.e; T9.c, T9.h, T9.d and T9.i; T8.k with T8.j; T9.f; T9.j; T8.l; T8.m, which
 needs no plan-11 task; T7.b and T8.i, which no longer wait for T8.g; T8.g, once T8.m, P11.T16 and
 P11.T17.c are on `rendering-and-planets`; T8.h, built on T8.g as committed (decided 2026-10-08,
-`decision-r06-t8h-warm.md`); T8.g's final gates once P11.T17.c lands, then T8.n; T11.d, after
-T8.g, T8.i and T11.a–c (T11.c on T9.f); T11.f, the stars-arriving note split from T11.d
-(2026-10-08), after it; T11.g, the first sky within its budget, after T11.d, beside R13.T2; T7.c,
-the visibility caps' safety with the illumination, before the default switch (both decided
-2026-10-08, `decision-r06-t11d-first-sky.md`); T5.f and T9.g before T17's goldens; then T17
+`decision-r06-t8h-warm.md`); T8.g's final gates once P11.T17.c lands, then T8.n, then T8.o
+(decided 2026-10-10, `decision-r06-t8n.md`); T11.d, after T8.g, T8.i and T11.a–c (T11.c on
+T9.f); T11.f, the stars-arriving note split from T11.d (2026-10-08), after it; T11.g, the first
+sky within its budget, after T11.d, beside R13.T2; T7.c, the visibility caps' safety with the
+illumination, before the default switch (both decided 2026-10-08,
+`decision-r06-t11d-first-sky.md`); T5.f and T9.g before T17's goldens; then T17
 (the order amended 2026-10-06, `decision-r06-t9b-band.md`, `decision-r06-t9c-glare.md` and
 `decision-r06-t8k-cone.md`, and 2026-10-07, `decision-p11-t16-hierarchy-bound.md`).
 T7.b, T8.i and T11.d waited on the owner's sign-off. A decision agent advised on it, and its
 advice was adopted on 2026-10-05 under the owner's standing delegation
 (`decision-r06-census-cost-signoff.md`). T8.j, the census in motion (decided 2026-10-05,
 `decision-r06-pad-speed.md`), runs after T9.b–d and before T8.g.
+
+After T17 (decided 2026-10-13, `decision-r06-t17-findings.md`): T12.b, then T11.h, on the sky
+lane, neither waiting on R13; T11.i after RM4/RM5's close, or before it if the owner's laptop run
+finds the session's start objectionable (T17's trigger for T11.e). Then T13.i and T11.j, in either
+order, on the sky lane, before any bridge play-test (decided 2026-10-13,
+`decision-r06-camera-budget.md`). Neither waits on R13, and neither holds T17. T13.j follows
+T13.i on the sky lane, before any bridge play-test.
 
 Rust files are under `crates/hyperion-sim/src/` unless a path says otherwise.
 
@@ -1193,7 +1276,10 @@ surface_gravity, StarColour, AtmosphereGrid}`, bilinear in log T_eff and log g w
   G2V, K5V, M2V, K0III and M3III, integrated by the same code, lie within Δ(u′, v′) < 0.005 of the
   table at their types' T_eff and log g; an M dwarf's chroma is less red than its blackbody's by
   0.01–0.02 in uv (the brainstorm's figure, re-checked); lux per V0 is 1 within 0.08 mag from O5 to
-  M6 (Pickles against CIE 1924, as the brainstorm states). Files: `tables/{star_colour,mod}.rs`,
+  M6 (Pickles against CIE 1924, as the brainstorm stated). _Corrected as built (Risks, "Corrected
+  figures") and in the brainstorm 2026-10-09 (the brainstorm sign-off, row 633):_ the
+  brainstorm now says a V = 0 star's photopic illuminance "departs from 2.54 µlx by 0 to 0.10 mag
+  from O5 to M6", and the test holds |m| < 0.11. Files: `tables/{star_colour,mod}.rs`,
   `sky/colour.rs`, `crates/hyperion-fit/tables.lock`. Acceptance: `cargo test -p hyperion-sim
 sky::colour` and `just fit-check`.
 - **R06.T3.c The camera, reddening and bake columns.** The default sensor's response for
@@ -1693,10 +1779,11 @@ test -p hyperion-sim sky::census sky::envelope`, `cargo test -p hyperion-sim --t
 
 - **R06.T8.g Census cost: a bound star by star (new; after T8.f, T8.m, P11.T16 and
   P11.T17.c).** Its landing leaves the server's sky off by default. R06.T11.d turns T11.c's switch
-  on (decided 2026-10-08, `decision-p11-t17c-bright.md`): at P11.T17.c's verdicts the cold census
-  stays near 10⁶ CPU-s, and only T11.d delivers it nearest first. Decided 2026-10-05
-  (`decision-r06-census-cost.md`), under decision item 2's trigger. Its inputs and gates were
-  amended 2026-10-07 (`decision-p11-t16-hierarchy-bound.md`).
+  on (decided 2026-10-08, `decision-p11-t17c-bright.md`; moved again on 2026-10-08 to after
+  R13.T2: R06.T11.d, "The default switch and the interim"; built 2026-10-10): at P11.T17.c's
+  verdicts the cold census stays near 10⁶ CPU-s, and only T11.d delivers it nearest first. Decided
+  2026-10-05 (`decision-r06-census-cost.md`), under decision item 2's trigger. Its inputs and gates
+  were amended 2026-10-07 (`decision-p11-t16-hierarchy-bound.md`).
   Near the Sun, the multiple-system bound left 98% of the census in generation. The per-record
   bound becomes one per star, computed before generation. The order is:
   1. the record's composition (`draw_metallicity`);
@@ -1889,6 +1976,53 @@ the_census_is_its_oracle_for_d_and_e_in_the_nuclear_disc`;
   - `cargo test -p hyperion-server`;
   - `just ci`.
 
+  As built (Risks, "Deviations in T8.n, as built"): sized on the sky served since R13.T2.b, the
+  real tier at the ceiling, by new warm benches of it; `CACHE_CUT_SLACK_MAG` 0.2; the sized
+  budget 1,280 MiB, from 949 MB held after the Sun's sky and the jump on the server's galaxy;
+  the warm ratios about 100%, reported. Ruled 2026-10-10 (`decision-r06-t8n.md`): T17's warm gate
+  reads the served sky at 1,280 MiB, set explicitly; the slack stays 0.2; and since the cache
+  saves nothing a player feels at version 21, R06.T8.o makes the default 0, off.
+
+- **R06.T8.o The sky cache off by default (new; after T8.n, before T17; decided 2026-10-10,
+  `decision-r06-t8n.md`).** At version 21 a warm census generates every system a cold one
+  does. So the cache saves less than the runs' spread (warm ÷ cold 96–108%, R06.T8.n), and it
+  would hold up to 1,280 MiB to do so.
+  - **The default.** `DEFAULT_SKY_CACHE_MIB` is 0. Its doc keeps T8.n's sizing: 1,280 MiB holds
+    one near-Sun served sky and a 1,000 ly jump's new cells. It is the value to set for a warm
+    sky, and the budget at which T17's warm gate is judged.
+  - **A budget of 0 takes T8.g's path.** Each census job's context reads `NoSkyCellCache`
+    (`compute/sky.rs`, where the job takes `cells.handle(key)`). So no entry is built and no
+    verdict is taken twice, and the reply is the cached census's, bit for bit.
+  - **What brings it back.** The default returns to the sized budget, measured again, once
+    `census_near_sun_served/served_warm_5.0` (the repeat) is at most 50% of its cold by the
+    threads' CPU time (`deferred-corrections.md`, "Census cost").
+  - **Docs.** These follow:
+    - `config.rs`'s module table, the constant's doc and the option's help ("0 keeps no
+      cells");
+    - the root README's row;
+    - `compute/sky.rs`'s module docs on a superseded census;
+    - Design note 12's default, and the pointer under T11.d's "The jobs".
+
+    The sim bench's default budget stays 1,280 MiB, the gate's.
+
+  Tests:
+  - `config`'s default (`DEFAULT_SKY_CACHE.to_string()` is "0") and `defaults_match_the_builder`;
+  - a server test: at a budget of 0, a sky's census counts no cell served, missed or rebuilt and
+    keeps no block, and its stars and `CensusTallies` equal the same sky's at 1,280 MiB;
+  - the server's warm tests that read the default budget (`tests/sky.rs`, through
+    `TestServer::config`) set an explicit budget that holds their skies.
+
+  Acceptance:
+  - `cargo test -p hyperion-server`;
+  - `cargo test -p hyperion-sim --lib -- sky::census`;
+  - `just ci`.
+
+  No `GENERATOR_VERSION` bump, no protocol change, and no golden moves.
+
+  As built (Risks, "Deviations in T8.o, as built"): the switch is `SharedSkyCellCache::is_off`,
+  read by each census job and by the handle's `keeps_entries`; the warm server test runs at an
+  explicit 1,280 MiB, and the default's server test checks that its counters stay at nought.
+
 - **R06.T8.i Nearest first: the shell plan (new; signed off; it may precede T8.g, and T11.d builds
   on it; decided 2026-10-07).** Decided 2026-10-05 (`decision-r06-census-cost.md`). The sign-off
   was advised by a decision agent and adopted on 2026-10-05 under the owner's standing delegation
@@ -1956,7 +2090,9 @@ systems. The budget is T17's.
   `Budget(256)`. `galaxy::gas::extinction::profile` (Design note 14), under
   plan 07's rules, with `horizon`'s `#[expect(clippy::too_many_arguments, reason = …)]` (nine
   arguments) and the quality `Quality::Budget(NonZeroU32::new(256))`, the value of P07.T10.c's
-  `SIGHTLINE_QUALITY` (on `origin/galaxy-generation` only at re-validation). Tests: its last node equals `sightline` over the same segment to 10⁻¹²
+  `SIGHTLINE_QUALITY` (on `origin/galaxy-generation` only at re-validation; the band reads
+  `galaxy::gas::extinction::SIGHTLINE_QUALITY` since P07.T10.c's port, `decision-gg-port-d0.md` §5).
+  Tests: its last node equals `sightline` over the same segment to 10⁻¹²
   relative; it is monotone in distance; at `Mean` it reads no cache. Files:
   `galaxy/gas/extinction.rs`. Acceptance: `cargo test -p hyperion-sim gas::extinction`.
 - **R06.T9.b The band.** `sky::band::{CubeFace, BandSpec, BandTexel, band_rows}` (Design note 15),
@@ -2293,7 +2429,10 @@ star_colour` and `just fit-check`, and once on the fetched spectra the four slow
       light").
   - Bench: `sky/illumination`, and `sky/band_near_sun/march` with and without it. Gate,
     provisional: the illumination and the march's increase together at most 10% of the march
-    without them, in one run (the ruling's estimate: 6–9%).
+    without them, read as the median of at least five interleaved pairs of runs, with and without,
+    on a quiet machine (the ruling's estimate: 6–9%). One run's reading is recorded, not judged,
+    since the march alone spreads ±2 CPU-s in a run, ±7 points of the share (decided 2026-10-13,
+    `decision-r06-t17-findings.md` §6; T9.g read 8.4% and 9.7%, T17 10.4%).
   - Files: `sky/{dgl,band,limits,mod}.rs`, `sky/census/query.rs`, `benches/sky.rs`. Acceptance:
     `cargo test -p hyperion-sim sky::dgl`, `cargo test -p hyperion-sim sky::band` and
     `cargo test -p hyperion-sim sky::limits`, as three commands.
@@ -2397,14 +2536,17 @@ sky`, `cargo test -p hyperion-server bulk::sky`, `pnpm --filter @hyperion/protoc
   `sky::limits::eye_offsets`', its own eye limit less its texel's (R06.T9.h; decided 2026-10-06,
   `decision-r06-t9c-glare.md`). The wire's V is the star's own, M_V + DM + v★(A_V) A_V, which the
   census cuts, and its camera term is relative to it (addendum item 4). As built: Risks,
-  "Deviations in T11.c, as built" (the switch is `--serve-sky`, `HYPERION_SERVE_SKY`, off).
+  "Deviations in T11.c, as built" (the switch is `--serve-sky`, `HYPERION_SERVE_SKY`, off; on by
+  default since R13.T2: R13's Risks, "The sky on by default, as built").
 - **R06.T11.d Delivery nearest first (new; after T8.g, T8.i, T10 and T11.a–c; signed off).** Decided
   2026-10-05 (`decision-r06-census-cost.md`). The sign-off was advised by a decision agent and
   adopted on 2026-10-05 under the owner's standing delegation
   (`decision-r06-census-cost-signoff.md`, question 2), with its amendments here. The server runs a
   sky request's census shell by shell as bulk jobs. After each shell it sends a sky reply with that
   census and the band for that completeness, and it marks the last reply final. The client
-  replaces its sky with each reply (T12, T13).
+  replaces its sky with each reply (T12, T13). _Since R06.T12.b a sky re-asked within an arrival
+  for `partial`, `limits` or `parallax` is held until a reply is as complete, or until an open
+  camera's shift reaches 1 px (T12.b's record, "Deviations in T12.b, as built")._
   - **The default** (decided 2026-10-08, `decision-p11-t17c-bright.md`). T11.d's landing turns
     T11.c's switch on by default if two things hold:
     - near the Sun, its first reply meets T17's first-sky budget on the dev machine (the test
@@ -2418,12 +2560,15 @@ sky`, `cargo test -p hyperion-server bulk::sky`, `pnpm --filter @hyperion/protoc
     decision agent rules from the measured figure. Its levers are the order of the first reply's
     layers and the first shell's edge.
 
-  - **The order.** Within a layer, nearest first. Across layers, D's and E's shells to 4,000 ly run
-    before C's beyond 2,000 ly, or any order that passes T17's V 3.0 gate. The order changes no
-    reply's contents: each reply is still the exact census to its radii.
+  - **The order.** Within a layer, nearest first. Across layers, D's and E's shells to 4,000 ly
+    run before C's beyond 2,000 ly, and E's shells beyond 1,000 ly a step ahead of C's and D's of
+    the same edge (R06.T11.h; decided 2026-10-13, `decision-r06-t17-findings.md` §1), or any order
+    that passes T17's V 3.0 gate. The order changes no reply's contents: each reply is still the
+    exact census to its radii.
   - **The jobs.** Census jobs are sized to about 50 ms of expected work, since the pool never
     preempts a running job. A cancelled or superseded census keeps its finished cells, so that a
-    moving ship's outer shells still converge through the cache.
+    moving ship's outer shells still converge through the cache. At version 21 they do not,
+    since a warm census still generates every system (Risks, "The sky cache at version 21").
   - **The band.** Each reply's band is re-summed from one march per request (R06.T9.f's
     `BandMarch`): the rays keep their integrals over the fixed shell intervals, and each reply sums
     the light fainter than the cut inside its radii and all the light beyond them.
@@ -2444,12 +2589,15 @@ sky`, `cargo test -p hyperion-server bulk::sky`, `pnpm --filter @hyperion/protoc
   - **The default switch and the interim** (decided by the owner 2026-10-08, answering
     `decision-p11-t17c-bright.md` §4: the hybrid sky, `feasibility-hybrid-sky.md` §10–11). The
     owner's condition for turning T11.c's switch on is met by RM3's interim, R13.T2: layers C to E
-    capped at V_P 5.0, the band for the rest, labelled. Once R13.T2 and T11.d, with its follow-up
-    R06.T11.g, have landed, the server's sky is on by default: `SkyService`'s default becomes
-    `Served`, and `--serve-sky` takes a value (`--serve-sky=false`) so that it can still be turned
-    off. The README and `config`'s tests follow. The first reply's time is still measured against
-    T17's first-sky budget. Its levers were ruled on 2026-10-08 (`decision-r06-t11d-first-sky.md`):
-    R06.T11.g. A miss after T11.g is recorded as a miss and goes to T17 and a decision agent.
+    capped at V_P 5.0, the band for the rest, labelled. Once R13.T2 (with its real limit of
+    2,000 ly, decided 2026-10-09) and T11.d, with its follow-up R06.T11.g, have landed, the server's
+    sky is on by default: `SkyService`'s default becomes `Served`, and `--serve-sky` takes a value
+    (`--serve-sky=false`) so that it can still be turned off. The README and `config`'s tests
+    follow. The first reply's time is still measured against T17's first-sky budget. Its levers were
+    ruled on 2026-10-08 (`decision-r06-t11d-first-sky.md`): R06.T11.g. A miss after T11.g is
+    recorded as a miss and goes to T17 and a decision agent. As built (2026-10-10, after R13.T2.b):
+    on by default, with `--serve-sky=false` to turn it off (R13's Risks, "The sky on by default, as
+    built").
 
   The protocol (T10) gains each layer's `complete_to_ly`, a per-ray table once T7.b lands, and
   `final`. A request for a new sky supersedes the old one. Any later consumer of the sky's list
@@ -2494,7 +2642,10 @@ sky`, `cargo test -p hyperion-server bulk::sky`, `pnpm --filter @hyperion/protoc
     (decision-r06-t11f-stars-line).
   - **Before the first reply** the line reads `STARS: PENDING`, as `LIGHTING: PENDING` does, in
     place of R02's interim reading, including after a jump. `useSky`'s `pending` (true until the
-    request's first reply is held, since T11.d) says when.
+    request's first reply is held, since T11.d) says when. _Since R06.T12.b `pending` is true only
+    while no sky of the arrival is held: a re-ask within an arrival reads no `STARS: PENDING`, and
+    a `partial`, `limits` or `parallax` re-ask keeps the held sky until a reply is as complete
+    (T12.b's record, "Deviations in T12.b, as built")._
   - **On loss of the link** the radius takes its `S` (the model's `stale`) and the note holds until
     a final reply; T11.d's request rule asks again for a sky held at a reply that is not final
     (`SkyRequestReason` `"partial"`).
@@ -2502,7 +2653,9 @@ sky`, `cargo test -p hyperion-server bulk::sky`, `pnpm --filter @hyperion/protoc
     bake's whole-cube swap, T11.d).
   - **The guide rows** (`docs/frontend/ux-guidelines.md`, the `STARS` row and a `STREAMING` and
     `PENDING` entry beside `TERRAIN: STREAMING`) are drafted here and go to the UX decision agent
-    for the owner's sign-off, as T15's rows did. Build to the draft.
+    for the owner's sign-off, as T15's rows did. Build to the draft. _Signed off 2026-10-09 by
+    the sign-off agent (owner's delegation), with amendments (`signoff-ux-guide.md` in the RM4/RM5
+    orchestration directory; see Risks, "Deviations in T11.f, as built")._
   - Tests (decision-r06-t11f-stars-line, 1e). `label.ts`: every reading, pending, the note at each
     fixed edge with its grouping and its 12ch field, the primary's composition with no instrument
     open and with one open, an instrument's, final and stale. `displays/view`: in `ViewDisplay`,
@@ -2511,7 +2664,8 @@ sky`, `cargo test -p hyperion-server bulk::sky`, `pnpm --filter @hyperion/protoc
     the guard, the primary keeping the not-modelled note while no open instrument's line shows it.
     By hand, hidden, never on `:0`, with the lane's `page/run.sh` (capped, through the GPU lock): at
     1280 × 720, none, one and two instruments, `PRECISION TEST` and `PHASE TEST`, wireframe and
-    photorealistic; at 1920 × 1080 and at the full layout's least box (98.5 × 45.75rem), two
+    photorealistic; at 1920 × 1080 and at the full layout's least box (98.5 × 45.75rem then;
+    99 × 49.5rem since R06.T13.j and R10.T12.a), two
     instruments; in each, every block's line in each state as composed, passing when no block runs
     past the stage and nothing overflows, each block's spare recorded beside the final's; and a
     server-scene capture, if the harness can reach one. R07.T19.f was editing `ViewLabelBlock.tsx`
@@ -2563,6 +2717,168 @@ sky`, `cargo test -p hyperion-server bulk::sky`, `pnpm --filter @hyperion/protoc
   46.9 CPU-s on 15 workers, over their own 30 CPU-s: a finding for T17. The caps' count is split
   by rays for every layer at once, then a cap job a layer.
 
+- **R06.T11.h E's far shell first (new; after T17 and T12.b; decided 2026-10-13,
+  `decision-r06-t17-findings.md` §1).** T17 found the V 3.0 delivery missed. Near the Sun on the
+  server's galaxy the final reply's 805 stars brighter than V 3.0 all came with the final reply,
+  at 1,987 s on 15 workers, 32 of them in the 1,000–2,000 ly step. That step is 76% of the
+  census's job-seconds (C 15%, D 37%, E 24%).
+  - **The order.** `delivery_steps` puts E's shells whose inner edge is at or beyond 1,000 ly a
+    step ahead of C's and D's of the same edge, each step with its reply. D's and E's shells to
+    4,000 ly stay ahead of C's beyond 2,000 ly.
+  - **The record first.** From `CapCount` alone (no census), near the Sun on the fixture and on
+    the server's galaxy, at the served eye's cut and ceiling, record each layer's expected count
+    brighter than V 3.0 between 1,000 ly and its real boundary. If D's is more than a third of C's,
+    D's and E's together, D's shells move with E's.
+  - **Tests:** the delivery order's test at the new deferral (E's 2,000 ly shell a step before
+    C's and D's, the steps otherwise as before); every reply's stars are the census to its stated
+    radii, and the final reply equals the one-shot census, as T11.d's tests hold them.
+  - **Bench:** `sky_near_sun_cold/first_reply` once to the final reply
+    (`HYPERION_SKY_BENCH_UNTIL_LY=final`, 15 workers, under the heavy lock), recording each
+    reply's time and the V 3.0 delivery against T17's figures. _Estimate:_ E's stars by about 48%
+    of the wall, some 16 minutes. The V 3.0 gate stays recorded, not gated, at version 21 (T17).
+  - **Files:** `crates/hyperion-server/src/compute/sky.rs`, `crates/hyperion-server/benches/sky.rs`
+    (its doc's figures), the slow test that prints the caps' records for the count, this plan.
+  - **Acceptance:** `cargo test -p hyperion-server compute::sky`,
+    `cargo test -p hyperion-server --test sky`, the bench recorded, `just smart-ci`.
+
+  As built (Risks, "Deviations in T11.h, as built"): E alone runs a step ahead from 1,000 ly.
+  D's share of the far stars brighter than V 3.0 is 12.0% on the fixture and 4.3% on the server's
+  galaxy, so D stays with C. E's far reply came at 1,160 s, 45.2% of the 2,567 s wall, with 804 of
+  the 805 stars brighter than V 3.0.
+
+- **R06.T11.i The tables' schedule (new; after T17; decided 2026-10-13,
+  `decision-r06-t17-findings.md` §4).** T17 measured the per-galaxy tables at the open:
+  - 11.6 s wall and 47.0 CPU-s on 15 workers, and 17.9 s and 45.8 CPU-s on four;
+  - serially 34.3 s at load 4–15, against T5.e's quiet 31.3–31.7;
+  - against their 30 CPU-s and T11.g's 5 s trigger. The session's first sky, which waits on them,
+    came 18.0 s after the open's answer.
+
+  In order:
+  1. **The schedule.** `SkyTablesService` logs each stage of `LuminosityTables::plan` as it
+     starts and ends: its jobs, their job-seconds and the pool's idle workers. The bench
+     `sky_near_sun_cold/session_first_reply` prints the schedule at 15 and at four workers. No
+     output moves.
+  2. **The critical path.** Any stage or job whose length sets the wall is split as R06.T11.g
+     split the request's path, each split giving its one-job form's bits. Targets:
+     - the tables' wall at the open at most 5 s on 15 workers;
+     - their CPU-s on 15 workers within 1.25 times the serial build's;
+     - the serial build at most 30 CPU-s on a quiet machine, re-taken quiet.
+  3. **If it still misses**, a decision agent rules from the schedule between two options:
+     - deeper node cuts of `BuildOptions::STANDARD`, which must pass T5.e's two slow tests;
+     - a disk cache of the tables, outside the universe's directory and bounded by size. It is
+       keyed by `GalaxyKey`, `GENERATOR_VERSION`, the fit-check fingerprints of every committed
+       table the build reads and a `SKY_CACHE_VERSION`, with T17's start probe (T17's step 2).
+
+  Tests: `parallel_build_equals_serial`, and each split against its one-job form, bit for bit.
+  Files: `crates/hyperion-server/src/compute/sky_tables.rs`,
+  `crates/hyperion-sim/src/sky/luminosity.rs` (a split stage),
+  `crates/hyperion-server/benches/sky.rs`, this plan. Acceptance:
+  `cargo test -p hyperion-sim sky::luminosity`, `cargo test -p hyperion-server compute::sky_tables`,
+  `just test-slow standard_nodes_match_the_full_build_where_the_tables_are_read
+the_full_build_matches_thirty_two_nodes_a_panel_where_the_tables_are_read` if a stage's
+  arithmetic moves, the bench recorded, `just smart-ci`.
+
+- **R06.T11.j The camera's sky measured (new; after T17 and T11.h; decided 2026-10-13,
+  `decision-r06-camera-budget.md`).** T17 benched the first sky at the eye's cut alone and ran no
+  camera census whole. The request throughout is the eye at its defaults with `camera_limit_v`
+  10.153, the black-sky limit at 60° (R06.T13.i's request; a literal whose doc comment names
+  `cameraLimitV`'s value), on the server's galaxy. No output moves.
+  - **The camera's first sky.** `sky_near_sun_cold/camera_first_reply`, at 15 workers and at
+    `HYPERION_WORKERS=4`, under the heavy lock. Record the wall, the CPU-s and each layer's cap,
+    cells, generated and listed, against the first-sky budget (150 CPU-s and 10 s on 15 workers).
+    _Estimate:_ 130–175 CPU-s and 9.5–12.5 s, since A's and B's single shells (161 and 286 ly here,
+    sampled) lie in the first step.
+  - **If it misses,** report to main. The ruled lever is a new task: A's and B's caps get shells at
+    `SHELL_EDGES_LY`, as C's to E's have. It moves no final reply, and it re-blesses T8.i's
+    partial-reply golden with no `GENERATOR_VERSION` bump.
+  - **The camera's census whole** (`HYPERION_SKY_BENCH_UNTIL_LY=final`, 15 workers, about 35 minutes
+    under the heavy lock). Record:
+    - each reply's time, listed and overflow, and the V 3.0 delivery;
+    - the bench process's peak resident memory, and its resident with the tables held before the
+      request (Linux's `VmHWM` and `VmRSS`; elsewhere printed as not measured), so that their
+      difference is the sky's share;
+    - the final band's μ distribution (least, 10th percentile, median, 90th, greatest), decoded from
+      its band bytes, against T17's at the caps (μ 21.26–25.25);
+    - the camera band terms of the listed stars within 0.5 mag of the cut (10th percentile, median,
+      90th, and the shares below −0.3 and −0.7).
+
+    It takes the place of T17's pending camera census whole.
+
+  - **Files:** `crates/hyperion-server/benches/sky.rs` (its doc's figures), this plan.
+  - **Acceptance:** the bench recorded, `just smart-ci`.
+
+- **R06.T11.k The pool's bulk work below the client (new; the owner's priority, 2026-11-01; no
+  output moves).** With VIEW open, the server held 450–540% CPU on the owner's Mac: VIEW's
+  camera-role sky runs the full cold census as bulk jobs on default-priority workers. Bulk and
+  background jobs run at a lower OS priority than interactive ones: macOS's `QOS_CLASS_UTILITY`,
+  Linux's nice 10, Windows's below normal, set through gdt-cpus (no `unsafe`).
+  - **Tests:** the thread each priority's job runs on, one after another on one worker; on Linux
+    each job's nice, an interactive job after a bulk one at the worker's own; on macOS and Windows
+    the priority a lowered thread is given; a twin's failed probe at start.
+  - **Files:** `crates/hyperion-server/src/compute/{pool,thread_priority}.rs`, the manifests.
+  - **Acceptance:** `cargo test -p hyperion-server compute::`, `just cross-clippy`, `just smart-ci`.
+
+- **R06.T11.l The last skies kept (new; the owner's priority, 2026-11-01; no output moves).** A
+  relaunch or a reopened inspection asks VIEW's sky again, and with `--sky-cache` 0 paid its whole
+  census again. The server keeps the last skies' final replies, exactly, keyed by the galaxy and
+  every field of the request, in `limits::SKY_REPLY_CACHE_BYTES` (16 MiB, two skies at `N_max`),
+  under its own switch, `--keep-skies` (on by default). A hit is answered with the final reply
+  alone and runs no sky job.
+  - **Tests:** the key holds every field the reply depends on; a repeated identical sky queues no
+    census job (the pool's counters) and is the first's reply, bytes and all; the budget keeps two
+    skies at `N_max`; the switch.
+  - **Files:** `crates/hyperion-server/src/requests/sky{,/kept}.rs`, `config.rs`, `limits.rs`,
+    `stats.rs`, `lib.rs`, `tests/sky.rs`.
+  - **Acceptance:** `cargo test -p hyperion-server`, `just smart-ci`.
+
+- **R06.T11.m The sky's log at info (new; the owner's priority, 2026-11-01; no output moves).**
+  Every sky line was at debug and `Server::stats()` is never printed, so the Mac's 450–540% showed
+  nothing in the log. At info: each sky's start, its first and final replies (or its end without
+  one) with the wall time and its jobs' seconds, a kept hit, and every 30 s while the pool stays
+  busy its busy workers and queued jobs.
+  - **Tests:** a token counts its jobs' running time and a skipped job none; a sky's start and
+    final-reply lines, and a repeat's kept-reply line, read back from a subscriber.
+  - **Files:** `crates/hyperion-server/src/compute/{cancel,pool}.rs`, `requests/sky.rs`,
+    `tests/sky.rs`.
+  - **Acceptance:** `cargo test -p hyperion-server`, `just smart-ci`.
+
+- **R06.T11.n The kept skies on disk (new; the owner's priority, 2026-11-05; no output moves).** A
+  restart lost the kept skies, and near the Sun a camera's sky is some 2.5 × 10⁴ CPU-s. Each final
+  reply is also written under the data directory (`skies/`), keyed by `SkyReplyKey`, the build's
+  generator and protocol versions and the server's sky settings, in `--kept-skies-disk` (256 MiB),
+  its I/O on a thread of its own; a bad or mismatched file is a miss, never an error.
+  - **Tests:** a restart answered from its file with the same JSON and payload bytes; a miss for
+    each key field, version and setting; a bad file removed; the budget, least recently used first;
+    the switches.
+  - **Files:** `crates/hyperion-server/src/requests/sky{,/kept,/kept/disk}.rs`, `config.rs`,
+    `limits.rs`, `stats.rs`, `lib.rs`, `bulk.rs`, `tests/{sky,common/mod}.rs`, the root README.
+  - **Acceptance:** `cargo test -p hyperion-server`, `just smart-ci`.
+
+- **R06.T11.o A sky's later steps off the performance cores (new; the owner's priority,
+  2026-11-05; no output moves).** After a sky's first reply its jobs are lowered to the background
+  class, which a macOS twin runs at `QOS_CLASS_BACKGROUND`, behind `--sky-qos utility|background`
+  (background on macOS); Linux and Windows unchanged.
+  - **Tests:** a lowered token's jobs counted, on the twin, at nice 10 on Linux; a macOS twin's
+    class job by job; a sky's jobs lowered after its first reply only where the server says; the
+    switch.
+  - **Files:** `crates/hyperion-server/src/compute/{cancel,pool,thread_priority}.rs`,
+    `requests/sky.rs`, `config.rs`, `lib.rs`, `tests/sky.rs`, the root README.
+  - **Acceptance:** `cargo test -p hyperion-server`, `just cross-clippy`, `just smart-ci`.
+
+- **R06.T11.p A re-asked sky answered from the kept sky its client would still hold (new;
+  perf-sky-beside-client's brief, 2026-11-05; no output moves).** A sky that no kept reply
+  answers exactly is answered with a kept final reply of the same request but for `time` and
+  `observer`, asked in [its `time`, its `valid_until`) and from within Design note 13's tenth of a
+  pixel at 1080p across 60° of its nearest listed star's parallax, sent as kept, behind
+  `--hold-kept-skies` (on): memory first, then the files.
+  - **Tests:** the arrival is the key but its observer and time; the hold's times and bound, none
+    listed; the latest, then the nearest, of several, in memory and in files after a restart; a bad
+    file read for its hold removed; an hour later answered with no census job, one past the bound
+    computed; the switch.
+  - **Files:** `crates/hyperion-server/src/requests/sky/kept{,/disk}.rs`, `requests/sky.rs`,
+    `bulk/sky.rs`, `cache/byte_lru.rs`, `config.rs`, `lib.rs`, `tests/sky.rs`, the root README.
+  - **Acceptance:** `cargo test -p hyperion-server`, `just smart-ci`.
+
 Files: `crates/hyperion-server/src/requests/{mod,sky}.rs`,
 `crates/hyperion-server/src/compute/sky.rs`, `crates/hyperion-server/src/config.rs`, `stats.rs`,
 `crates/hyperion-server/tests/sky.rs`. Bench (server, Criterion): `sky_near_sun_cold` with the
@@ -2589,6 +2905,40 @@ importing a `*.worker` module), any non-worker helper it imports joins `tsconfig
 until T13.f. Tests: the re-request rules; a field factor of 2 lowers every eye limit by 0.387
 mag; stale on link loss; the worker's decode equals the main-thread decoder's. Acceptance: `pnpm
 --filter hyperion exec vitest run src/renderer/src/view/sky`, `just ci`.
+
+- **R06.T12.b A re-asked sky never shows less than it held (new; after T17; decided 2026-10-13,
+  `decision-r06-t17-findings.md` §2).** T17 found that a sky asked again within one arrival is
+  held from the new request's first reply. Near the Sun on the server's galaxy a final sky of
+  66,614 stars falls back to the 3,192 within 125 ly, the rest to the band, and climbs back over
+  some 33 minutes on 15 workers (about 1.85 h on four).
+  - **The hold.** Through a re-ask for `parallax`, `limits` or `partial`, `useSky` keeps the held
+    sky until a reply of the new request is final, or is at least as complete as the held one in
+    every layer: each layer final, or its `complete_to_ly` at least the held one's where the held
+    one is not final. It then holds that reply and each later one, as T11.d does.
+  - **Where the hold ends at once.** The held sky gives way to the newest reply when its parallax
+    shift for an open camera, by `skyRequestReason`'s measure, reaches `PARALLAX_HOLD_PX`, 1 px
+    (ten times `PARALLAX_THRESHOLD_PX`). For `expired` and `jump`, whose held sky stands for
+    another time, each reply is held as built. A new arrival is unchanged: `STARS: PENDING`, then
+    each reply.
+  - **The rule and the flags.** The rule is a pure function in `model.ts`, beside
+    `skyRequestReason`. `pending` is true only while no sky of the arrival is held, so neither
+    `STARS: PENDING` nor `LIGHTING: PENDING` returns during a hold. The labels are unchanged: the
+    held reply sets the `STARS` line, as signed off (R06.T11.f).
+  - **Tests** (`FakeWebSocket`, the fake worker):
+    - a final sky re-asked for parallax, and for a deeper camera limit, stays held through the
+      new request's partial replies and gives way to its final; no reply of fewer stars is ever
+      held;
+    - a reply as complete as the held one in every layer is held before the final;
+    - at a shift of 1 px the newest reply is held;
+    - `expired` and a time `jump` hold each reply;
+    - a partial sky left by a lost link gives way once a new reply reaches it;
+    - `pending` stays false through a hold;
+    - a new arrival reads `STARS: PENDING` before its first reply.
+  - **Files:** `apps/hyperion/src/renderer/src/view/sky/{model,useSky}.ts`, `model.test.ts`,
+    `useSky.test.tsx`.
+  - **Acceptance:**
+    `pnpm --filter hyperion exec vitest run src/renderer/src/view/sky src/renderer/src/displays/view`,
+    `just smart-ci`.
 
 ### R06.T13 Drawing the sky
 
@@ -2689,6 +3039,56 @@ run src/renderer/src/view/sky`, `just test-render`. _Since 2026-10-06 the disc l
   catalogue test covers the new kind. Files: `view/engine/{types,memory,catalogue,resilientEngine}.ts`,
   `view/engine/webgpu/{engine,resources,pointSplat}.ts`, `smoke/catalogue.ts`. Acceptance: `pnpm
 --filter hyperion exec vitest run src/renderer/src/view/engine`, `just test-render`.
+- **R06.T13.i The camera's limit by texel (new; after T17; decided 2026-10-13,
+  `decision-r06-camera-budget.md`).** A camera view's request and cull both read Design note 18's
+  limit over a uniform μ 24 sky (`viewSky.ts`' `DARK_SKY_CD_M2`), V 10.06 at 60°. Design note 18
+  reads each band texel's background, and T17 measured that limit at 60° near the Sun at 9.55–10.12
+  over the camera's lit band. The change is client-only: nothing moves on the server or the wire.
+  - **The cull.** `viewSkyLimit` gives a camera a limit by direction, as the eye has one. It is
+    `cameraLimitV` at the deepest triple and the view's field over the luminance of the band texel
+    the star lies in (`cubeTexelOf`), never deeper than the reply's `cut_v`. The luminance is the
+    reply's band as sent, before the view adds its culled stars. The limits are computed once per
+    held reply and field. The culled stars' light reaches the band layer as before.
+  - **The request.** `camera_limit_v` is the black-sky limit: `cameraLimitV` at the deepest triple
+    over a background of 0. That is V 10.15 at 60°, 10.87 at 45°, 8.96 at 90° and 7.77 at 120°,
+    clamped at `MAX_CUT_V` (11.0 at 30° and narrower). So no texel's cull is deeper than its census
+    (`decision-r06-t7b-brackets.md`'s invariant). `DARK_SKY_CD_M2` and its comment ("which asks the
+    deepest limit") go.
+  - **The label.** A camera's figure is its limit quoted at its deepest, as the eye's is: the
+    darkest texel's limit over all six faces at the exposure shown, never deeper than the reply's
+    `cut_v`. At 30° near the Sun it reads `V 11.0 mag CAM`, where it read 11.7. Build to the guide's
+    `EYE`, `CAM` row (signed off 2026-10-13, `signoff-8.md`).
+  - **Tests:**
+    - in one sky a camera keeps a star whose V plus band term is brighter than its own texel's limit
+      and drops it otherwise, in a bright texel and a dark one;
+    - over a uniform μ 24 band the cull keeps what the uniform cull at 10.06 kept;
+    - the dropped stars' light reaches the band layer to 10⁻⁶ relative;
+    - the request asks the black-sky limit at every step of `FOV_STEPS_DEG`, clamped at 11.0;
+    - over bands of μ 15 to 30, no texel's limit is deeper than the request's cut;
+    - the label states the darkest texel's limit over all six faces at the exposure shown, the same
+      wherever the camera points, and at most `cut_v`, including on a reply that overflows.
+  - **Files:** `apps/hyperion/src/renderer/src/view/sky/{viewSky,cull}.ts` and their tests,
+    `displays/view/useViewSky.ts` if the label's path moves, this plan.
+  - **Acceptance:** `pnpm --filter hyperion exec vitest run src/renderer/src/view/sky
+src/renderer/src/displays/view`, `just smart-ci`.
+- **R06.T13.j The star limit's stale mark (new; after T13.i; decided 2026-10-13,
+  `decision-r06-camera-budget.md` §10.2).** While a view's sky is stale (the link down,
+  `SkyModel.stale`), the `STARS` line's limit, `EYE` or `CAM`, is stale in the guide's form:
+  muted, with its trailing `S`, after its unit and before its kind, in a field of its own sized
+  for its widest reading with the mark (`V -20.2 mag S`, a camera's limit at `EV100 42` and 120°;
+  corrected 2026-10-13 from `V 11.0 mag S`). The edge's field and every note are unchanged. Built
+  to sign-off queue item 15's draft of the `EYE`, `CAM` row, signed off 2026-10-19
+  (`signoff-12.md`, item 15: adopted) and applied to the guide.
+  - **Tests:** with the link down, the primary's line and an instrument's line each read the
+    limit muted with its `S`, for an eye and for a camera; `STARS: PENDING` takes none; the
+    mark clears when the link returns; the line's breaks do not move when it goes stale.
+  - **Layout:** the composed line fits at 1280 × 720 and in the instrument slots when stale,
+    with the edge's note beside it and at the full layout's least box (the hidden layout harness
+    R13.T2.b used).
+  - **Files:** `apps/hyperion/src/renderer/src/view/sky/label.ts`,
+    `displays/view/{useViewSky,viewRun}.ts` and their tests, this plan.
+  - **Acceptance:** `pnpm --filter hyperion exec vitest run src/renderer/src/view/sky
+src/renderer/src/displays/view`, `just smart-ci`.
 
 Acceptance for T13 as a whole: `pnpm test`, `just ci`, `just test-render`, and by hand, recorded
 in the plan: near the Sun the brightest stars the census lists match the brainstorm's statistics
@@ -2750,7 +3150,8 @@ draft, and the owner's sign-off recorded in this plan.
       in `SystemsInRange`, and `FeatureGas` passed where `NoModifiers` is.
 
     P09.T40's centre and catalogue-class sources wait on P09.T29 and T37, and are not needed. The
-    centre's members join with P09.T28.b–T29, which clears the `centre_members` gap.
+    centre's members join with P09.T28.b–T29, which clears the `centre_members` gap. _Both joined
+    the census on 2026-11-02 (Risks, "R06.T16.a at 27" and "the catalogue classes' hosts")._
 
   - **The census.** The sky handler builds the same sources over P09.T40's caches. The census
     reads `FeatureMemberSource` through the `SystemSource` hook, with the same skips (a member's
@@ -2770,6 +3171,12 @@ draft, and the owner's sign-off recorded in this plan.
        findings). A query in the disc visits every feature whose reach touches it, a nursery's
        1,750 ly included. Before this subtask lands, the census near the Sun is benched with
        members against T17's budget.
+    3. **Helium-rich members** (decision-p15-revalidation Q7, 2026-10-23). Feature members are
+       the only stars with a helium excess. The phase envelope bounds them by its brightest value.
+       The brightness envelope reads no composition: if P15.T7.b's fitted `tables::helium` has
+       landed, this subtask refits `sky_envelope` with helium-excess nodes in its build, up to
+       `HELIUM_EXCESS_MAX`, and a ΔY > 0 fingerprint probe; if it has not, P15.T7.b's swap does.
+       The dense bound test gains helium-rich tracks.
   - **The label.** `CLUSTERS` leaves the label's composed `NOT YET MODELLED` note once neither
     `feature_members` nor `centre_members` is listed. `CLUSTERS: NOT YET MODELLED` is then
     withdrawn, and `CLUSTERS AND WHITE DWARFS: NOT YET MODELLED` becomes
@@ -2782,14 +3189,17 @@ draft, and the owner's sign-off recorded in this plan.
       from the field and the members together (item 1's design).
 
     Acceptance: `cargo test -p hyperion-sim sky::census::features`, the member-cost bench of
-    item 2, and `just ci`.
+    item 2, and `just ci`. _Built 2026-11-01, in force wherever the galaxy's field gives up φ:
+    Risks, "R06.T16.a, re-validated alone at 3208734 and built", with the items' leans._
 - **R06.T16.b Binaries (after P11.T6–T11; due now, after T8.e).** When plan 11 wires binary
   evolution into `SystemStars`, `max_star_mass` returns min(2 m₁, 150 M☉), the envelope's age
   range starts at zero, and the n × F₁ bound requires a system that cannot have interacted (Design
   notes 8 and 10). Re-validated 2026-10-02: P11.T11 has done that wiring (version 16; the pair
   timelines reach `SystemStars::state_at`), and P11.T6 and T8–T10 move no star's mass, so this
   subtask runs straight after T8.e. The brief (`brief_at`) is the primary's single-star model and
-  cannot tell whether a multiple system has interacted, and P11's `can_interact` is crate-private
+  cannot tell whether a multiple system has interacted (_since P11.T11.a, `85d3e054`, the brief
+  reads the pair, but only by generating the system wherever its gate does not certify the
+  single-star model, so the decision below stands_), and P11's `can_interact` is crate-private
   and reads the models' tracks, which need `SystemStars::generate`. Decided 2026-10-02
   (decision record item 2): for n ≥ 2 the bound is n × F_env at `max_star_mass(m₁)` over ages
   from zero; n × F₁ only for single stars. No ask of plan 11 unless T17 finds the multiple-system
@@ -2823,6 +3233,14 @@ ci`. Decided 2026-10-05 (`decision-r06-census-cost.md`): the widened bound is th
   bound's 2.35, 267 Myr) are T16.b's pinned systems. As built: Risks, "Deviations in T16.b, as
   built".
 
+  **The trigger is met (R06.T17, 2026-10-12).** Multiples pass the star bound at C 0.60, D 7.4
+  and E 266 generated per skipped record, and are 86–99.6% of the systems C to E generate. The
+  ask is answered in the form plan 11 built for R06.T8.g: P11.T16's `hierarchy_bound` and P11.T17's
+  `pair_light_bound`. What remains is their tightness in E, whose pairs are 96.9% `Bright`. That is
+  the census-cost levers' work (`deferred-corrections.md`, "Census cost": T8.g's levers 1–3 and 5,
+  and lever 13), taken with plan 11's refit batch (decided 2026-10-13,
+  `decision-r06-t17-findings.md` §8).
+
 ### R06.T17 Verification pass
 
 Run the slow tests and benches this plan creates (by name, not the whole slow suite or every bench,
@@ -2837,9 +3255,10 @@ the_star_bound_holds_for_realised_systems`,
 `just bench -- sky`) and record the
 figures in the doc comments that own them and in this plan: the caps (at the six points of
 `caps_converge_in_rays`, against the brainstorm's C 3,000, D 4,300, E 10,000 ly near the Sun and
-"a few hundred to about 1,000" in the nuclear disc, with what sets each: C the M_V −2 to −4 AGB tips
-and post-AGB crossings, D post-AGB and bright giants through clear windows, E supergiants; since
-R06.T7.b, for each layer, the sphere at the same count (`CapCount::spheres`, the radius the
+"a few hundred to about 1,000" in the nuclear disc, with what sets each: C post-AGB crossings and
+pair-channel products (R CrB-like; the M_V −2 to −4 AGB tips count only nearer in, Risks,
+"Deviations in T17, as built"), D post-AGB and bright giants through clear windows, E supergiants;
+since R06.T7.b, for each layer, the sphere at the same count (`CapCount::spheres`, the radius the
 brainstorm's figures describe), the rays' median, 10th and 90th percentiles and largest, the median
 of the rays within 10° of the plane, and the largest ray's galactic longitude and latitude
 (`decision-r06-t7b-brackets.md`; a D or E ray beyond 10,000 ly at |b| above 30° is a finding for the
@@ -2893,38 +3312,72 @@ eye's cut as T9.d computes it (about 8.0 on the fixture with the diffuse light, 
 before it; 8.18 as built, Risks, "Deviations in T9.g, as built"), benched also at 7.95, its
 estimate when
 the budget was set (decided 2026-10-06, `decision-r06-t9b-band.md`; the eye's cut; the camera's
-cut, 10.06 at 60°, is benched beside it and its budget ruled from that figure,
-`decision-r06-census-cost-signoff.md`), at the current caps, on a quiet machine:
+cut, 10.06 at 60°, is benched beside it, and its budget, ruled from that figure on 2026-10-13, is
+the eye's, `decision-r06-census-cost-signoff.md` and `decision-r06-camera-budget.md`), at the
+current caps, on a quiet machine:
 
 - the first sky in at most 150 CPU-s and 10 s wall on the dev machine's default workers;
-- the full cold census at the hybrid's real boundary (R13.T2, RM3's interim: layers C to E at
-  T7.b's caps by ray computed at V_P 5.0, the band for the rest; decided by the owner 2026-10-08,
-  `feasibility-hybrid-sky.md` §10–11): recorded, not gated.
-  - About 1.0–1.25 × 10⁴ CPU-s is estimated near the Sun at the eye's cut with spherical caps,
-    and less by ray.
-  - The ruled 4,000 CPU-s stays the target, for R13's V_P of 4.5 (about 4.5–5.8 × 10³
-    estimated).
-  - The exact census to the cut's caps, about 0.4–1.0 × 10⁶ CPU-s at P11.T17.c's verdicts
-    (`decision-p11-t17c-bright.md` §2), is recorded beside it, sampled, as R13.T1's reference. Its
-    first gate, 2.5 × 10⁴ CPU-s at version 21 (decided 2026-10-07,
-    `decision-p11-t16-hierarchy-bound.md`), is withdrawn: P11.T17.c's tables put it out of reach;
+- the full cold census at the hybrid's real boundary: recorded, not gated.
+  - The boundary is R13.T2's: layers C to E within the lesser of their caps by ray at V_P 5.0 and
+    2,000 ly, and the band for the rest. Decided by the owner on 2026-10-08 and 2026-10-09
+    (`feasibility-hybrid-sky.md` §10–11, `decision-r13-guard-trip.md`).
+  - R13.T1.b measured about 1.31 × 10⁴ CPU-s near the Sun on the fixture and 2.82 × 10⁴ on the
+    server's galaxy (sampled, by thread CPU time).
+  - Recorded beside it:
+    - the real tier at the ceiling's caps without the limit (R13.T1: 1.43–1.45 × 10⁵ CPU-s at
+      5.0);
+    - the exact census (0.4–1.0 × 10⁶);
+    - and, sampled, the inner disc at the limit.
+  - The ruled 4,000 CPU-s stays the target, for the version that lands the census levers
+    (`deferred-corrections.md`, "Census cost"). At that version the limit is re-measured for
+    lifting.
 
-- after a jump of up to 1,000 ly, at the default `HYPERION_SKY_CACHE_MB` (R06.T8.n):
-  - every cell both plans open is served from the cache, none rebuilt;
+- after a jump of 1,000 ly toward the galactic centre, on the sky the server serves (R13.T2's
+  real tier at the ceiling: `census_near_sun_served/served_warm_jump_5.0` on the server's galaxy
+  and `…/warm_jump_5.0` on the fixture), with `HYPERION_SKY_CACHE_MB` at R06.T8.n's sized budget,
+  1,280 MiB, set explicitly (the default is 0, off, from R06.T8.o):
+  - every cell both plans open is served from the cache, and none is rebuilt;
   - the warm census's stars and tallies are the destination's cold census's, bit for bit;
-  - one near-Sun sky's entries and the jump's fit the default.
+  - one near-Sun sky's entries and the jump's fit the sized budget.
 
-  This is the gate (decided 2026-10-08, `decision-r06-t8h-warm.md`). Warm ÷ cold, sampled with
-  the cache budget scaled, is recorded against the target of at most 25%, with the repeat's.
-  About 30–45% is expected at version 21 after P11.T17.c, since a warm census still generates
-  every system its bound passes, and a jump's new cells are cold. A miss of the target is
-  deferred (`deferred-corrections.md`, "Census cost": lever 13, then the realised window bound)
-  and does not hold T17. Above 50%, it is reported before T17 closes.
+  This is the gate on the cache working (decided 2026-10-08, `decision-r06-t8h-warm.md`;
+  re-stated 2026-10-10, `decision-r06-t8n.md` §1).
+  - **Other jumps.** The tests hold the same reply after every other jump of up to 1,000 ly. A
+    jump whose eye's cut deepens by more than `CACHE_CUT_SLACK_MAG` (0.2) rebuilds the cells
+    whose key binds. That is recorded, not a failure.
+  - **The served sky's ratio.** Warm ÷ cold is recorded by the jobs' threads' CPU time, sampled
+    with the budget scaled, with the repeat's (`…/served_warm_5.0`). R06.T8.n measured 96–108%,
+    reported and ruled (`decision-r06-t8n.md` §3).
+  - **The exact census.** Its `census_near_sun/{warm,warm_jump}` (T7.b's caps at the fixed cut,
+    which no server serves until R13's real limit lifts) are recorded against the target of at
+    most 25%, with the repeat's. They run at a budget that holds their entries (13.2–14.0 GB at
+    R06.T8.n, so no shippable size).
+  - **Why the target is read there.** On the served sky a jump's new cells, some 45% of those
+    it opens, are cold under any cell cache. So the target is read on the exact census alone.
+  - **A miss.** A miss of the target is deferred (`deferred-corrections.md`, "Census cost": the
+    realised window bound, then the kept attempt) and does not hold T17.
 
 The budget was accepted as the eye's only. A decision agent advised that, and the advice was
 adopted on 2026-10-05 under the owner's standing delegation (`decision-r06-census-cost-signoff.md`,
-question 1). A decision agent rules the camera's budget from the cut-10.06 bench, and reports it to
-the owner, before T17 closes and before any bridge play-test.
+question 1). **The camera's budget is the eye's** (ruled 2026-10-13 from T17's cut-10.06 figures,
+`decision-r06-camera-budget.md`, and reported to the owner). On the served sky a camera's census
+costs what the eye's does, since R13's real boundary does not depend on the cut: at 10.06 near the
+Sun 0.99 times the eye's on both galaxies (2.75 × 10⁴ CPU-s on the server's galaxy and 1.46 × 10⁴
+on the fixture, sampled).
+
+- The camera's first sky, asked at its black-sky cut with the eye beside it, in at most 150 CPU-s
+  and 10 s wall on the dev machine's default workers. R06.T11.j benches it before any bridge
+  play-test, and names the lever if it misses.
+- Its full cold census: recorded, not gated, under the eye's 4,000 CPU-s target for the census
+  levers' version.
+- Its limit: Design note 18's by texel, with the request at the black-sky limit (R06.T13.i). The cut
+  stays in V (Risks, "The camera cut is in V").
+- Its served entries: the sky cache stays off by default. With a camera open the value to set for a
+  warm sky is 1,536 MiB (_estimate_), and the re-measure sizes the one budget on the camera's sky
+  (Design note 12).
+- Its memory: the server holds about 1.0–1.2 GB with a camera's sky at its defaults (_estimate_),
+  within the envelope client and server share, 8 GB on the minimum machine (Risks, "The camera's
+  budget, ruled").
 
 Run the census benches sampled (`HYPERION_SKY_BENCH_SAMPLE`), at the eye's cut as T9.d computes it
 and at 7.95 (`decision-r06-t9b-band.md`), and beside them at 10.06, with, near the Sun, the caps by
@@ -2942,7 +3395,9 @@ records near the Sun until T8.g's bound rejects most of them before their drift 
 - each layer's cells, candidates, records, generated and listed;
 - the share of pairs in each of T8.g's cases;
 - the time to each shell's reply;
-- the first reply, the full census and a warm jump at `HYPERION_WORKERS=4`, the laptop's proxy;
+- the first reply and the full census at `HYPERION_WORKERS=4`, the laptop's proxy, at the
+  default `HYPERION_SKY_CACHE_MB` (0), and the warm jump at the same workers, at the gate's
+  budget (1,280 MiB);
 - the photorealistic view's frame time, p95 and p99, while a census runs: on the dev machine here,
   and by the owner on the laptop. A census that breaks the frame budget is a finding. Its remedy is
   for the server to lower its bulk work's priority, or the workers it gives bulk work, beside a
@@ -2958,8 +3413,13 @@ records near the Sun until T8.g's bound rejects most of them before their drift 
   and the camera's, per layer: the bound on what a camera's census adds to the eye's sky
   (`decision-r06-t9c-glare.md`, addendum 2). Where a whole camera census runs, the realised count,
   and how many of those stars the eye sees;
-- the delivery time of the final reply's stars brighter than V 3.0, against 25% of the full
-  census's wall time;
+- the delivery time of the final reply's stars brighter than V 3.0, against 25% of the capped
+  census's wall time (R13.T2's real boundary, decided 2026-10-09). At version 21 this is
+  recorded, not gated. At the 2,000 ly limit no order passes it, since E's 1,000–2,000 ly shell
+  alone is 24% of the census's job-seconds and the replies before it another 24% (decided
+  2026-10-13, `decision-r06-t17-findings.md` §1). Its lever, E's 1,000–2,000 ly shell first, is
+  R06.T11.h's. The 25% target is read again at the version that lands the census levers, with
+  the 4,000 CPU-s target;
 - R03.T15's transfer check at the sky's largest payload: a real sky near the Sun at N_max
   (3 × 10⁵ stars with the band; 7,494,912 bytes, 29 chunks), with T11.c's switch on, asked in the
   real renderer, hidden. Its chunks arrive in order before the response, and its bytes are the
@@ -3012,9 +3472,13 @@ bench -- sky` runs above complete.
   (T3), the solar limb and the discs' flux (T4), and the camera model at 60°, 30° and 13° (T13.a).
   The camera model's agreement with measured cameras (Vida et al. 2021; Jenniskens et al. 2011) is
   Design note 18's research, re-checked by hand in T17, not a test.
-- **The galaxy's statistics:** the star-count slope and the band's surface brightness near the Sun
-  (T5, T9); the brainstorm's sky table rows re-derived at the current version (T17), all but the
-  globular core's, which waits on R06.T16.a.
+- **The galaxy's statistics:** the star-count slope and the band's surface brightness near the
+  Sun (T5, T9), on `milky_way_like` at its Sun, the one place Milky Way catalogues are compared
+  with. A drawn galaxy is judged by its own tables (`decision-r06-t17-findings.md` §3). The
+  brainstorm's sky counts are re-derived at the current version (T17; sign-off queue item 11).
+  The sky table's near-Sun row is checked by R13.T1.b's count, 9,430 to V 6.5 on the fixture
+  against 8,874. Its rows away from the Sun stay the hand model's until R13.T9's benches, and the
+  globular core's until R06.T16.a.
 - **Conservation:** light moves between points, overflow and band without loss (T9, T13).
 - **Order independence** of the census over jobs and cells (T8.c) and of the band over rows (T9.b).
 - **Benches:** `sky/luminosity_tables`, `sky/census_near_sun`, `sky/census_nuclear_disc`,
@@ -3057,14 +3521,15 @@ it needs no bump.
 
 ## Risks and open points
 
-- **Re-validated at ce7aeb3** (2026-10-02, `main` and `rendering-and-planets` at RM1's close, R05
-  not built; `origin/galaxy-generation` compared). Consumes now record the as-built names of R01
-  (positional `createPackedCube`, the padded-row buffer layout, `main`-entry kernels and splat, no
-  splat catalogue kind, no per-resource destroy, the readback guard), R02 (no viewport or galactic
-  position on `CameraState`, no HDR target in the wireframe, the interim's real files and labels,
-  the sprites' storage layout), R03 (`BulkPayload`, `requestBulk(body, manifestOf)`, the client's
-  64 MiB / 257-chunk limits, `FakeWebSocket`'s path, the `SystemPlace` union, R03.T15's pending
-  transfer check), R04 (units in base, four of this plan's missing; `Span` and `UniverseTime` in
+- **Re-validated at ce7aeb3**, now 2b75d16c (2026-10-02, `main` and `rendering-and-planets`
+  at RM1's close, R05 not built; `origin/galaxy-generation` compared). Consumes now record
+  the as-built names of R01 (positional `createPackedCube`, the padded-row buffer layout,
+  `main`-entry kernels and splat, no splat catalogue kind, no per-resource destroy, the
+  readback guard), R02 (no viewport or galactic position on `CameraState`, no HDR target
+  in the wireframe, the interim's real files and labels, the sprites' storage layout),
+  R03 (`BulkPayload`, `requestBulk(body, manifestOf)`, the client's 64 MiB / 257-chunk
+  limits, `FakeWebSocket`'s path, the `SystemPlace` union, R03.T15's pending transfer
+  check), R04 (units in base, four of this plan's missing; `Span` and `UniverseTime` in
   the sim) and the galaxy plans (the candidate's word order confirmed; `query_time` private;
   `Quality::Budget(NonZeroU32)`; fit tasks registered in `task.rs`'s `REGISTRY`; `SystemSource`
   and `FeatureMemberSource` not `Sync`; generator version 19, not 15). Task edits: T16.b is due
@@ -3074,8 +3539,9 @@ it needs no bump.
   T13.g's transient scratch and T14's release need; T10 classifies `Sky` in `kind()` and
   `is_large()` and builds its encoder over plain values; T11 reuses `query_time` and removes
   `BulkPayload`'s `expect(dead_code)`; T15 extends the guide's existing `STARS` row; T17 runs its
-  named slow tests and benches only; `HostDiscDto`'s field names are pinned for R07. Brainstorm drift since the plan's creation (899db5e): only the
-  CSP ruling (R04.T10.a), which the sky's decode worker, a same-origin module worker compiling no
+  named slow tests and benches only; `HostDiscDto`'s field names are pinned for R07.
+  Brainstorm drift since the plan's creation (899db5e, now 9d955b26): only the CSP ruling
+  (R04.T10.a), which the sky's decode worker, a same-origin module worker compiling no
   WebAssembly, meets as it is. No generator-version bump and no protocol-version change follow.
   **Pending re-validation:** T13.f waits on R05 (`QualitySetting`, `ViewSettings`, `SETTINGS`,
   `AllocationTally`, being re-validated in parallel); T16.a waits on P09.T40 (not built on `main`
@@ -3172,6 +3638,8 @@ it needs no bump.
   texels in `f64` (`bandIlluminanceLx`, three channels a texel). `photometry.ts` exports
   `unitLuminanceRgb` (the wire's chromaticity to unit luminance by Rec. 709's weights),
   `starIlluminanceRgbLx` and `starPixelLuminanceRgb`. A black background (0 cd/m²) is allowed and reads as read noise alone.
+  _Since R06.T13.i the camera's variant holds `limitAt(x, y, z)` too, its band texel's limit, in
+  place of `limitV` (T13.i's record, after T13.g's)._
 - **Deviations in T13.f, as built (2026-10-03).** `view/sky/setting.ts` exports `SkySettings`
   (`faceSizePx`, `spriteBudget`, `nMax`, `rebakeShiftPx`), `HIGH_SKY` (3,072, 4,096, 3 × 10⁵,
   0.1 px) and `LOW_SKY` (1,024, 2,048, 10⁵, 0.1 px), wired as R05's `ViewSettings.sky` (appended
@@ -3208,6 +3676,64 @@ requestFieldFactor }`, `fieldFactorOffsetMag`, `DEFAULT_FIELD_FACTOR`), `decodeP
   interim field and its label where the sky has arrived, and composing the request's observer
   from `barycentreAt` and the camera, so that the label never claims the sky while the view still
   draws the interim field.
+- **Deviations in T12.b, as built (2026-10-13).** A re-asked sky is held until its replies hold
+  as much (`decision-r06-t17-findings.md` §2 (a)). Client only: no golden, protocol, label or
+  generator change.
+  - **The rule** (`view/sky/model.ts`): `PARALLAX_HOLD_PX` (1); `parallaxShiftPx(sky, camera)`,
+    `skyRequestReason`'s parallax measure lifted out so that both rules read it;
+    `asCompleteAs(reply, held)`, true for a final reply, else layer by layer final, or complete at
+    least to the held layer's `complete_to_ly` where that is not final, a layer the held sky
+    states and the reply lacks counting as short; and `keepsHeldSky(reason, held, reply,
+cameras)`, true only through `partial`, `limits` or `parallax` (an exhaustive switch), with
+    the reply not as complete and every open camera's shift under 1 px.
+  - **The reasons' order.** `skyRequestReason` now names `partial` after `expired` and `jump`
+    (since T11.d it came first). A held reply that is not final and also stands for another time
+    is asked again for that time, and its replies are held as built: its time is what is wrong,
+    not its completeness. The request sent is the same; only the hold reads the reason.
+  - **The hook** (`useSky.ts`). Each request is kept with its reason. The newest decoded reply
+    waits apart from the held sky and takes its place during render: where `keepsHeldSky` allows,
+    once a reply of its request is held, with none held, or for another arrival. The hold is judged
+    at each render (the view's published run, 4 Hz), so a camera that passes 1 px between replies
+    lets the waiting reply in at once. Asking again drops a reply still waiting. A reply left
+    waiting when its request ended without its final (link lost, refused) stays behind the hold
+    until a re-ask drops it or 1 px lets it in. During a hold two decoded skies are in memory.
+    Coming back to the held sky's arrival before another arrival's first reply asks the request
+    rule of the held sky, not `arrival`: usually nothing, which cancels the other request and keeps
+    the sky (TypeScript review).
+  - **`pending`** is true while a request is asked and no sky of its arrival is held, so no re-ask
+    within an arrival is pending, `expired` and `jump` included. That replaces T11.d's "true until
+    the request's first reply is held" (also T11.f's `STARS: PENDING` bullet and Design note 13's
+    "replaces its sky with each": T12.b qualifies both). `ViewSky.pending`'s and `lightingState`'s
+    docs follow.
+  - **Tests:** `model.test.ts`, 16 (the reasons' order, `parallaxShiftPx`, `asCompleteAs` 5,
+    `keepsHeldSky` 9, held at 0.5 and 0.999 px, given way at 1.001 px for any camera);
+    `useSky.test.tsx`, 8 (the task's seven and the return to the held arrival; the parallax
+    re-asks are asked from the camera, so the final stands); and, beyond the file list,
+    `displays/view/useViewSky.test.tsx`, 3 (the `STARS` line through a `limits` re-ask, neither
+    `PENDING` nor `STREAMING`; a partial sky's edge kept through the re-ask after a lost link;
+    `PENDING` on every block on a new arrival), since the task's last test reads a label. Six of
+    the seven `useSky` tests of the task's list fail on the hook as it was (the new arrival's
+    passes, its behaviour unchanged). Acceptance: the vitest run over `view/sky` and
+    `displays/view`, tsc, oxlint, and `just smart-ci` (exit 0).
+  - **Open, for "main" (found here, not built):**
+    - **The view asks from the barycentre.** T12's text and as-built have the request's observer
+      `barycentreAt(place, t)` plus the camera's offset, but T13.c's `useViewSky` asks from
+      `barycentreAt` alone, while the parallax rule measures the camera from the held sky's
+      observer. A camera some 30 au or more from the barycentre (more where the nearest baked star
+      is farther) is asked again for `parallax` after every final reply, from the same place, so
+      the server runs the census without end. T12.b holds the sky through that until the 1 px cap,
+      about 310 au at 1080p and 60° for a nearest baked star at 9 ly; beyond it every re-ask gives
+      way at once and the sky falls to its first reply after each final. The fix is in
+      `useViewSky.ts`: ask from the camera's galactic position. **Fixed 2026-10-13:** see "The
+      view asks from its camera" below, a correction to T13.c.
+    - **A `limits` hold with no note.** The ruling allows a deepened camera's hold since its line
+      carries no streaming note. Today a `limits` re-ask comes only from the setting's N_max (the
+      `PRIMARY` view asks the eye, whose request reads no field of view, and the instruments cull
+      its sky). Once a camera view asks a sky of its own, its narrower field of view (or a view
+      that changes role and asks the eye) would hold a final sky without the deeper stars (or
+      eye limits) for the whole census, with no note (UX review). For a decision agent then.
+    - **One camera.** `useViewSky` passes the primary's camera alone, so an instrument flown far
+      off neither re-asks nor ends a hold at 1 px, as before T12.b.
 - **Deviations in T13.c, as built (2026-10-03), with T12's view wiring.** `select.ts`
   (`selectSkySprites(stars, kept, spriteBudget, camera)` → `SkySelection { sprites, baked }`:
   the budget's brightest of the kept stars, and any star nearer than `bakedBeyondM`, about 9 ly at
@@ -3239,7 +3765,65 @@ requestFieldFactor }`, `fieldFactorOffsetMag`, `DEFAULT_FIELD_FACTOR`), `decodeP
   the effect still live), so that a request never answered starts no worker. A sky is drawn and
   labelled only for the system it was asked about while that system's position is known; otherwise
   the interim field and its labels stand. `just test-render` compiles `STAR SPRITES HDR`
-  (2026-10-03, exit 0).
+  (2026-10-03, exit 0). _Since 2026-10-13 the sky is asked from the camera's galactic position,
+  not the barycentre (the entry after this one), and a camera view culls by its band texel's limit
+  and asks the black-sky limit, with no `DARK_SKY_CD_M2` (T13.i's record, after T13.g's)._
+- **The view asks from its camera (2026-10-13, a correction to T13.c; T12.b's open point 1).**
+  T13.c's `useViewSky` asked the sky from `barycentreAt(place, t)` alone, where T12 has the
+  observer the barycentre plus the camera's offset, while the parallax rule measures the camera
+  from the held sky's observer. A camera some 30 au or more from the barycentre was asked again for
+  `parallax` after every final reply, from the same place, so the server ran the census without
+  end; beyond T12.b's 1 px cap (about 310 au at 1080p and 60° for a nearest baked star at 9 ly)
+  the sky fell back to its first reply after each final. Client only: no protocol, golden, label
+  or generator change.
+  - **The fix** (`displays/view/useViewSky.ts`). The request's observer is
+    `cameraGalacticPosition(runPose(run), run.scene)`, the position the rule's `SkyCamera` already
+    read, so the rule measures the camera from the point actually asked. Its precision: it is the
+    protocol's own split form, `GalacticPosition` (a whole light-year cell and a metre offset in
+    [0, 1 ly), about 2 m anywhere in the galaxy), composed by `expressIn` and `galacticTranslated`
+    from the scene's barycentre (`barycentreAt(place, t)`, as `view/scene/fromServer.ts` sets it)
+    and the camera's `f64` metre offset, which carries into the next cell or borrows from the one
+    below. No single `f64` of light-years (65 km at 50,000 ly) is formed, so an offset in au keeps
+    its precision. `ViewSkyInput.observer`'s doc (`view/sky/viewSky.ts`) now says so. The
+    observer is the camera's, as T12 and `SkyRequest.observer`'s doc in `hyperion-protocol` have
+    it, not the ship's that the Consumes entry for R03 named (now noted there): the brainstorm's
+    "the observer is the ship" is the light-time and aberration observer of drawn bodies, while
+    the sky is asked from the camera, since the parallax rule measures cameras. A sky's sprites
+    are differenced against its own request's observer (`viewFrameDrawer.ts`), so they are
+    unchanged.
+  - **A jump.** A jump moves the place a readout or two before the published run (4 Hz, then
+    throttled) follows it, and until then the run's camera is in the system left. Asked from
+    there, the system arrived at would be asked from the old system's camera, the old host star a
+    few au away and not excluded. So the sky is asked only once the run's scene is the place's
+    system and carries its barycentre, and never for an `unknown` place, as before. Meanwhile, for
+    a place whose position is known, `ViewSky.awaiting` and `pending` are true, so
+    `STARS: PENDING` and `LIGHTING: PENDING` read from the jump as they did, and the request goes
+    out up to about 0.5 s later. `ViewSky.pending` is therefore also true with nothing asked,
+    which qualifies T12.b's "true while a request is asked"; `useSky`'s `pending` is unchanged. If
+    the run cannot follow (its scene cannot be drawn), the line reads `PENDING` until it can, or
+    until a kept scene stands in. No display state changes.
+  - **Tests** (`displays/view/useViewSky.test.tsx`, 7 new; the first six fail on the code before
+    the fix):
+    - a camera 100 au out, its nearest baked star at 10 ly (0.29 px), is asked once, holds its
+      final, and is not asked again over eight published runs at rest;
+    - a camera moving past the rule's 0.1 px (200 au, to 0.58 px) is asked again from its new
+      place and keeps its final through the re-ask's first reply;
+    - past the 1 px cap (400 au, to 1.16 px), the re-ask's first reply, asked from the new place,
+      is held at once;
+    - the observer is the barycentre plus an offset of (100, −37.25, 12.5) au to 2 m, from a
+      barycentre just short of a cell's edge along x and just past one along y (a carry and a
+      borrow);
+    - after a jump, nothing is asked and the view reads `PENDING` while the published run is in
+      the system left;
+    - the system arrived at is then asked from the camera there;
+    - an `unknown` place asks nothing though the run's scene still carries a barycentre (passes
+      before the fix too: it pins the new guard's clause);
+    - and, changed, T12.b's "PENDING on a new arrival" test now moves its run into the system
+      arrived at, as a jump does: it had left the run in the system left, which the guard reads as
+      waiting.
+  - **Acceptance:** vitest over `view/sky` and `displays/view` (48 files, 766 tests), and
+    `just smart-ci` (Prettier, tsc, oxlint, and vitest over the 116 files that reach the change,
+    2,739 tests; exit 0).
 - **Deviations in T13.d, as built (2026-10-03).** `view/sky/band.ts` exports `BAND_MATERIAL`
   (`STAR BAND`: a full-screen triangle at infinity whose fragment turns its view ray back to the
   galactic axes by the transpose of `frame.viewRotation` and samples the band cube, bilinear,
@@ -3346,6 +3930,193 @@ cube, peak, faceSizePx, path }`, and `bakeSkyCubeOnCpu`, `releaseBakedCube`, `pa
   packer bit for bit over 10⁴ texels, the GPU splat against the CPU splat to 10⁻⁶, the whole bake
   against the CPU bake to one mantissa step at levels 0 and 5 (each cube's own scale undone),
   finiteness, and the two memory categories.
+- **Deviations in T13.i, as built (2026-10-13).** A camera view culls each star by its band
+  texel's limit and asks the black-sky limit (`decision-r06-camera-budget.md` §1–§3; the label to
+  `signoff-8.md`). Client only: no protocol, golden or generator change.
+  - **The limits** (`view/sky/viewSky.ts`). New export `cameraTexelLimitsV(model, fovDeg)`, a
+    `Float64Array` in the band's texel order: `cameraLimitV` at `deepestTriple(VIEW_CAMERA)` over
+    each texel's `luminanceCdM2` as sent, each capped at `cut_v`. `viewSkyLimit` computes it on each
+    call (once per held reply, role, field, width and setting, through `cullViewSky`'s `useMemo`:
+    6 × 64² calls, about 10 ms here) and looks a star's texel up by `cubeTexelOf`. A texel that is
+    not finite or is below 0, or lies past a short band (the decoder does not check the count),
+    reads as a black sky, the deepest limit, as the eye keeps every star where it has no limit; the
+    server sends none of these. `DARK_SKY_CD_M2` and the module's μ 24 comment are gone (the
+    deferred list's sub-bullet); tests that read μ 24 state it themselves.
+  - **`ViewStarLimit`** (`cull.ts`): the camera variant's `limitV` becomes `limitAt(x, y, z)`, as
+    the eye's. `starIsSeen` reads the direction once for both kinds.
+  - **The cut caps the limit V + c is compared with**, as the task's cull bullet reads. So a listed
+    star with a positive band term (to A0V's +0.14) whose V + c lies past `cut_v` goes to the band,
+    its light kept, even where its texel's limit is deeper. That happens only where the cut is
+    shallower than the texel's limit: at about 43° and narrower (cut 11.0), and for an instrument's
+    camera culling the primary eye's sky. Kept, as ruled 2026-10-13
+    (`decision-r06-camera-budget.md` §10.1): the sky is complete past the cut in V plus band term
+    only for hot stars, so without the cap a blue-only sliver would be drawn past the label's
+    figure.
+  - **The request** asks `min(MAX_CUT_V, cameraLimitV(deepest, fov, 0))`: 11.0 at 10°–30°, 10.87
+    at 45°, 10.15 (10.1533) at 60°, 8.96 at 90°, 7.77 at 120°. Today no running view asks it: the
+    `PRIMARY` view is the eye, and the instruments cull its sky (R07.T19).
+  - **The label** (`viewSkyLabelV`): `cameraLimitV` at `shownTriple(exposure)` and the view's
+    field over the darkest texel's luminance, capped at `cut_v`. The limit falls as the background
+    brightens, so that is the deepest of all six faces', and it reads no pointing. Over T17's band
+    at 60° it is V 10.1 (10.12); at 30° V 11.0, the cut, where it read 11.7. An instrument's camera
+    on the eye's sky now reads the eye's cut (V 9.5 in the fixtures, where it read 10.1).
+    `label.ts`'s `@param limitV` says "over the sky" (`signoff-8.md`, For main 3). `useViewSky.ts`:
+    docs only, the label's path unchanged.
+  - **The fixture** (`test/skyFixtures.ts`). `skyResponse` states `cut_v` as the server does, the
+    deeper of the eye's 9.5 and the request's camera limit, the camera's alone where no eye is
+    asked (it was 9.5 for every request). `skyPayload` takes an optional `luminanceOf(texel)`, and
+    `FIXTURE_BAND_CD_M2` (2.5 × 10⁻⁴ cd/m², μ 21.6) names its default. So the camera lines of
+    `displays/view/useViewSky.test.tsx` read V 9.6 (that band's limit at 60°) and the instrument
+    lines of `InstrumentView.test.tsx` V 9.5 (the eye's cut); the request there is 10.15.
+  - **Tests.** `viewSky.test.ts`: the task's six (a bright and a dark texel, by V plus band term;
+    a uniform μ 24 band keeps the 10.06 cull's set of 2,000 stars; the dropped light through
+    `bandTexels` to 10⁻⁶; the request at every `FOV_STEPS_DEG` step, exactly the black-sky limit
+    and to 0.01 the figures above; μ 15 to 30 and a black texel on a reply cut at 11, none deeper
+    than the request at any step; the label equal to the deepest of all 96 texels at six exposures,
+    and the cut on a final and an overflowing reply at 30°), with `cameraTexelLimitsV`'s 9.55 and
+    10.12, its cap, the unsent texels and the short band, the instrument at the eye's cut, and
+    `deepestTriple` over three skies. `displays/view/useViewSky.test.tsx`: the same label at three
+    pointings with the darkest texel on −Z, and one request. `cull.test.ts`: a camera's star by
+    the limit in its own direction. `cameraLimit.test.ts`: a black sky 0.095 mag deeper than μ 24
+    at every step. R07.T13.e's 13° figures are gone, 13° being no step of `FOV_STEPS_DEG`.
+  - **R07.T13.e's deeper cull, checked texel by texel.** The cull stays at the deepest triple and
+    the label at the shown one. Over uniform bands of μ 17, 21.26, 24, 25.25 and a black sky (the
+    tests' set; μ 18 to 30 computed too), the two part by 0.05 mag from EV100 6.0, 4.3, 3.5, 3.4
+    and 3.3; a centred Sun-coloured star at the shown limit stays at least 2.8 EV below AgX's floor
+    at 1080p and 0.8 EV at 4K (60°), and the bluest at a 4K corner moves under 0.01 of an 8-bit
+    code. **Finding, measured once and not tested:** brighter than about μ 16.5 the margin narrows.
+    The 4K corner's bluest moves 0.022 of a code at μ 16.5, 0.08 at 16 and 0.28 at 15, and at μ 15
+    a centred 4K star stands 0.33 EV above the floor, all under half a code. T17's band near the
+    Sun is μ 21.26–25.25; how bright the generated galaxy's band gets towards the bulge is not
+    measured. The floor test is a star over black, where a texel that bright draws its own light.
+    For "main".
+  - **Acceptance:** vitest over `view/sky` and `displays/view` (48 files, 797 tests); tsc from a
+    clean cache, oxlint, Prettier; `just smart-ci` exit 0. ux_lint and glyphs clean.
+  - **Open, for "main":** R07's record of T13.e still lists the request and cull at 10.06 and the
+    `V 10.1 mag CAM` test lines, now changed here. The UX review's two considers: the `CAM` figure
+    now reads the held reply, as `EYE` does, and neither takes the stale mark while the link is
+    down; and "Views"' reason clause (`signoff-8.md`, Seen 1). Pending by hand: the camera and
+    instrument lines in a running client against a served band.
+- **Deviations in T13.j, as built (2026-10-13).** The `STARS` limit's stale mark
+  (`decision-r06-camera-budget.md` §10.2), built to sign-off queue item 15's draft of the `EYE`,
+  `CAM` row as the desktop amended it ("…, `STARS V 10.1 mag S CAM`, in a field sized for
+  `V -20.2 mag S` (a camera's limit at `EV100 42` and 120°), and the sky stays drawn;
+  `STARS: PENDING` takes no mark") and the "Views" clause as drafted. Both were signed off
+  2026-10-19 (`signoff-12.md`, item 15: adopted) and applied to the guide. Client only: no
+  protocol, golden or generator change. The lane's three questions were ruled by the desktop on
+  issue #8 the same day, and the rulings are built here.
+  - **The `fields` array** (Q1, ruled as built). `LabelLine.field` becomes
+    `fields?: ReadonlyArray<LabelField>`, in the reading's order, and `LabelField.text` may be the
+    start of a run before a space. `ViewLabelBlock`'s `unbrokenRuns` and `readingParts` take the
+    list and default to none. The fields are matched to runs in order, each once: a queue that the
+    runs of every part take from in turn. A field that starts a run is set inside it as
+    `.view-label__field` alone (inline-block, right-aligned at its `min-width`, its `S` inside),
+    with the run's rest, ` CAM`, after it on the run's line, so the limit and its kind stay in one
+    unbroken run. `viewSkyLabel` gives every held reply's line the limit's field, stale with
+    `SkyModel.stale`, before the edge's. `SkyLineReading` picks `fields` and `dotsLead`.
+    `CulledViewSky.labelValue` becomes `label`, and `Instrument.skyLabel` and `primarySkyPlace`'s
+    slots take a `SkyLineReading | null`, so an instrument's line carries its own fields.
+    `PENDING` stays a bare `{ value }`. Files beyond the task's list: `ViewLabelBlock.tsx` and its
+    test, `useInstruments.ts`, `InstrumentView.tsx` and its test, `ViewDisplay.tsx` (a doc
+    comment), and `viewLayout.ts` and its test.
+  - **The 13ch width** (Q2, ruled 13ch), against the task's `V 11.0 mag S`. `skyLimitReading`
+    writes the field's text, `V 9.5 mag`, and `skyLabelValue` composes the line from it.
+    `SKY_LIMIT_FIELD_CH` is computed as the longer of two readings with ` S`:
+    - a camera at the program's triple for `MAN_EV100_MAX` and the widest step of
+      `FOV_STEPS_DEG`, over a black sky: `V -20.2 mag S`;
+    - `MAX_CUT_V`'s `V 11.0 mag S` (12).
+
+    Above EV100 13.94 the camera holds 1/8,000 s and ISO 100 and adds ND, so its limit brightens
+    by 0.753 mag per EV. It passes V -10 near EV100 28 at 120°, and a body lit at 10⁸–10⁹ lx
+    meters at EV100 28–33. Two integer digits always suffice, since V -100 would need EV100 near 148. Every reading is shown, never clamped or reformatted. A test pins the field at 13 and
+    the widest text at `V -20.2 mag S`. The `@param limitV` comment already read "over the sky"
+    (T13.i's record), so the brief's edit had nothing left to change.
+
+  - **`FULL_MIN_WIDTH_REM` 99** (`displays/view/viewLayout.ts`), where it was 98.5. The full
+    layout now starts at a 51 rem stage: the 35 rem slot, three 0.5 rem insets, and the 14.5 rem
+    block the primary has at 1280 × 720 with the slots open. At 98.5 rem the primary's 14 rem
+    block beside the slots set the 13ch run 2.5 px past its plate. Boxes from 98.5 to 99 rem
+    (about 8 px of window width) are compact, which already serves every narrower box.
+    `PRIMARY_LABEL_MIN_REM` stays 14. Stated limit: below the guide's least size the limit's run
+    may pass its plate. R07's 98.5 rem is corrected by the desktop. _Done: R07.T19.b's entry gives
+    99rem._
+  - **The leading dot on `STARS` readings** (Q3, ruled for this reading alone). `readingParts`
+    takes `ReadingOptions.dotsLead`, off by default. With it on, each middle dot is set at the
+    head of the part after it, inside that part's box, on one nowrap run with the part's first
+    word or run. The break is the space before it, so the dot never stands alone, and the text is
+    unchanged (`A · B`). `LabelLine.dotsLead?: true` carries the option, and `viewSkyLabel` sets
+    it on the primary's and each instrument's held reading. `STARS: PENDING`, R02's interim
+    `STARS` readings, every other label line, the exposure panel, the meter and the camera
+    readings keep today's form. This amends T11.f's lone-dot ruling for this reading alone; the
+    follow-up keeps every other reading.
+  - **Tests.**
+    - `label.test.ts`: the reading; the line composed from it; the pin (13, `V -20.2 mag S`); the
+      cut's reading narrower; every camera limit fitting the field with its mark, over EV100 -14
+      to 60, every step of `FOV_STEPS_DEG` and backgrounds from black to 10,000 cd/m².
+    - `useViewSky.test.tsx`: 6 new and 9 updated. An eye's and a camera's limit stale at `alone`
+      and at `instrument`, with the sky still drawn. `PENDING` unmarked before the first reply,
+      and after a jump with the link down and the sky left stale. The mark clearing with the
+      edge's when the link returns. Going stale: the same reading and field widths, each field
+      wide enough for its text with ` S`. Every held reading carries `dotsLead`.
+    - `ViewLabelBlock.test.tsx`, 8 new:
+      - the limit's field at the head of its run;
+      - muted with its `S` before the kind;
+      - the same parts, runs and widths when stale;
+      - every dot the first text of the part after it, with none between parts and the text
+        unchanged;
+      - each dot on one run with its part's first word, and the limit with its kind;
+      - a dot kept with a run that heads its part;
+      - other readings' dots kept between parts;
+      - each field taken once, in order.
+    - `InstrumentView.test.tsx`: 3 new, on the served scene's blocks. On link loss, the primary
+      eye's and an instrument camera's limits are muted, `S` after unit and before kind. Both sit
+      in 13ch fields, unmarked, while the link is up. Each note on both lines is led by its dot.
+      The edge's link-loss test is updated.
+    - `viewLayout.test.ts`: the full layout starts at 99 rem, and the 98.5 rem box is compact.
+
+    The exposure panel's, meter's and camera readings' tests pass unchanged.
+
+  - **The measures, hidden** (2026-10-13). R13.T2.b's harness was not on this machine (its `page/`
+    scripts lived in another checkout's `.git/rm23-scratch`), so a scratch harness in `/tmp`, not
+    committed, stood in for it.
+    - **Method.** The built client ran in an offscreen Electron window, never shown, with the view
+      emulated at the exact size. It covered `PRECISION TEST` and `PHASE TEST`, both styles, and
+      none, one or two slots open. Each `STARS` line got the block's own markup (rendered by
+      `ViewLabelBlock`) at the worst limit and edge, `V 10.0 mag CAM` and `128,000 ly`, in three
+      states: live, stale, and the reading from before this task. A case passed when no block
+      passed the stage or its plate and none scrolled.
+    - **The result.** Every case passed at every size, and live and stale lay out alike.
+    - **1280 × 720 (compact).** Every primary line keeps its line count and spare from before the
+      task. With slots open, `L · N` and `L · S` take 4 lines and `L · I` 3. The spare is 14 px at
+      worst (`PRECISION TEST`, photorealistic), then 54, 112 and 130. With none open, `L · S · I · N`
+      takes 2 lines. The instrument lines take 3 lines, as before.
+    - **The new least box (1616 × 890, `.view` 99 rem, full), one and two slots open.** The same
+      counts. The spare is 184 px or more, and the limit's run stays inside its plate.
+    - **1608 × 890.** Now compact, and it fits.
+    - **1920 × 1080.** Fits with 554 px or more to spare. Beside the slots, `L · S` takes 2 lines
+      where it took 1: the field's 3ch, not the dots.
+  - **Acceptance.**
+    - `pnpm --filter hyperion exec vitest run src/renderer/src/view/sky src/renderer/src/displays/view`
+      ran 48 files and passed 819 of 820 tests. The one failure is `decoder.test.ts`'s, deferred
+      below.
+    - `just smart-ci` against `origin/rendering-and-planets` exits 0: Prettier, tsc, oxlint, and
+      vitest over the 34 files that read the change (742 tests).
+    - ux_lint and glyphs are clean.
+    - The TypeScript and UX rules checks found no must-fix or should-fix. Applied: `isRun`'s values
+      documented, `InstrumentView`'s comment reflowed.
+- **Deferred findings (2026-10-13 rule)** (R06.T13.j; recorded, not ruled; each for "main"'s list).
+  - The lone dot after any other reading's part that fills or wraps its line stays the views
+    lane's follow-up.
+  - The limit's `S` sits inside its right-aligned field, as the edge's does, so the value moves 2ch
+    left when it goes stale: the same as the edge's shift already deferred.
+  - The layout check ran on kept-scene stand-ins in a scratch hidden harness, so a served scene's
+    worst block is still unmeasured.
+  - `decoder.test.ts`'s worker-failure test times out on this machine's Node 22.23, which has no
+    global `ErrorEvent`. It fails the same way at 6c7ec2e0 and is not reached by this change.
+  - While stale, the `CAM` figure is still recomputed from the live exposure and field of view, so
+    a muted `V 9.6 mag S CAM` can change under `AUTO` (UX review's consider, for the sign-off).
+  - A link loss or return re-culls the held sky once (the model's identity follows `stale`). The
+    cube is shared, not baked again.
 - **Deviations in T14, as built (2026-10-03).** `view/sky/cache.ts` exports `SkyCubeCache`
   (`acquire(view, request)`, `release(view)`, `size`) over `CubeRequest { stars, baked,
 bakeInput }`, and `skyCubeCacheOf(engine)`, one cache per engine's device. A cube is shared by
@@ -3493,7 +4264,8 @@ bakeInput }`, and `skyCubeCacheOf(engine)`, one cache per engine's device. A cub
   decides whether the remedy is due. _Ruled 2026-10-05 (`decision-r06-census-cost.md`): the age
   skip would pass every C–E record near the Sun, so it is not built, and the departure needs no
   ruling (Design note 8). T8.f made the floor O(1), T8.g bounds each star, and T8.h keys the cache
-  by magnitude._
+  by magnitude. The brainstorm's open question 13 says so since 2026-10-09 (the brainstorm
+  sign-off, row 635), so no departure remains._
 - **Extinction per candidate.** Each star that passes the skip takes one `sightline`. Plan 07's
   noise is log-normal with no floor, so no cheaper exact lower bound exists; in the nuclear disc,
   where the zero-extinction test passes almost everything, this may dominate. A per-direction
@@ -3520,16 +4292,22 @@ bakeInput }`, and `skyCubeCacheOf(engine)`, one cache per engine's device. A cub
   old analogue cameras by about 2.5 mag (CAMS, Design note 18), and the split of a large exposure
   change between gain and photons is R07's view camera (decision-r07-exposure-camera): 12 stops of
   gain, then shutter and ND, which takes the limit to V 2.56 at 60° for a sunlit planet at
-  EV100 15. A camera view's request asks the camera's deepest limit, V 10.06 at 60°, so it holds
-  fewer stars than under R02's old f/1, 2 s default (V 13.7, cut at `MAX_CUT_V`'s 11).
+  EV100 15. A camera view's request asks the camera's deepest limit, V 10.06 at 60° under μ 24 (from
+  R06.T13.i its black-sky limit, 10.15), so it holds fewer stars than under R02's old f/1, 2 s
+  default (V 13.7, cut at `MAX_CUT_V`'s 11).
 - **The camera cut is in V.** The census and `camera_limit_v` cut in V, so a star redder than the
   Sun that only its camera band term lifts over a camera's limit is not listed (a late M dwarf up
   to 2–3 mag below the cut); its light is in the band. Padding the flux bound by the most negative
   term would cost more census than those stars are worth (decision-camera-eta.md). Reddening
   widens it (decided 2026-10-06, `decision-r06-t9b-band.md`, addendum): the camera term reaches
   about −3 mag at A_V 10 and −8 at A_V 20, so a camera towards the galactic centre misses many
-  near-infrared-bright stars, and the band carries their light at its photopic colour. For the
-  camera's budget decision before any bridge play-test (T17).
+  near-infrared-bright stars, and the band carries their light at its photopic colour. Ruled
+  2026-10-13 (`decision-r06-camera-budget.md` §4): the cut stays in V. The census-cost sign-off's
+  pad of the flux bound stays declined. On the served sky a pad in the request would cost little
+  census, but `sky_order` keeps the brightest N_max by V, so the padded red stars are the first
+  overflowed, and near the Sun a camera's listing already passes N_max on the server's galaxy at
+  high and on both galaxies at low. The gap is the N_max ruling's, with R06.T11.j's record of the
+  listed stars' camera band terms near the cut.
 - **Binaries.** The flux bound and the envelope are exact for single-star systems today; once plan
   11 wires binary evolution in, R06.T16.b must land with it or the census can miss blue
   stragglers and mergers (P11.T11 has wired it, so T16.b follows T8.e; re-validated 2026-10-02), and its cost (up to about 2.5 times the
@@ -3571,7 +4349,7 @@ bakeInput }`, and `skyCubeCacheOf(engine)`, one cache per engine's device. A cub
   choose; the ask stays open in the roadmap's between-plans table (R06 owner, R08 asking).
 - **Deviations in T1, as built.** None: the R06 row of galaxy plan 04's reserved kinds and plan 06's
   "Asked by rendering plan R06" heading with A1–A4 are drafted for the galaxy plans' owner
-  (`fb5b47c`).
+  (`fb5b47c`, now `39c88c18`). _Accepted 2026-10-19 (`signoff-12.md`, item 29), A2 amended._
 - **Deviations in T6.a, as built.** `generate_cell_where` draws each candidate's mass through
   `placement::record::candidate_mass` (factored out of `SystemRecord::of_candidate` with the same
   calls) and evaluates a kept candidate whole, drawing its mass word a second time. The 500-cell
@@ -4173,8 +4951,10 @@ ages)` as sketched; the envelope is one for every component (layer and component
   - **Science check (2026-10-04).** The extremes bound this generator, not nature. The −12.85 at
     150 M☉ and about −5.7 for old stars of at most 1 M☉ likely come from the tracks'
     super-Eddington excursions after the main sequence and the η = 0 late giants. Both are 2–3 mag
-    brighter than observed steady stars. A refit is due when P06.T39's wind lands, and when
-    P15.T7 fits `tables::helium` (the envelope is built at ΔY = 0).
+    brighter than observed steady stars. A refit is due when P06.T39's wind lands. The envelope
+    is built at ΔY = 0 and reads no composition, so whichever of P15.T7.b's swap and R06.T16.a
+    lands second refits it with helium-excess nodes in its build, in the same 198 × 193 storage,
+    and adds a ΔY > 0 probe to its fingerprint (decision-p15-revalidation Q7, 2026-10-23).
   - **Loose but still a bound.** The envelope is about 2 mag loose for 0.1–0.19 M☉ at
     3.5–28 Myr. Each long phase is cut into parts equal in linear age, so its first part carries
     its young end's magnitude for some 15 Myr. That costs only skip efficiency. Cutting in log age
@@ -4881,7 +5661,9 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
     atan2 area of `texelSolidAnglesSr`; both texel functions panic off the face. `CubeFace` gains
     `ALL` and `layer()`.
   - **The rays.** `FIRST_NODE_LY` 0.01 ly; `BAND_PROFILE_QUALITY` `Budget(256)` (P07.T10.c's
-    `SIGHTLINE_QUALITY` value), with the modifiers near each ray. The light is the trapezoid
+    `SIGHTLINE_QUALITY` value; deleted since P07.T10.c's port, the band reading
+    `galaxy::gas::extinction::SIGHTLINE_QUALITY`, `decision-gg-port-d0.md` §5), with the modifiers
+    near each ray. The light is the trapezoid
     rule's in distance; twelve nodes a decade agree with 48 to 0.02 mag (_per texel, R06.T9.f
     measured up to 0.012–0.026 mag near the Sun at 8², and 0.005–0.007 over the band; Risks,
     "Deviations in T9.f, as built"_). The light nearer than 0.01 ly, at most some 10⁻⁵ of a ray's,
@@ -5231,10 +6013,11 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
 - **Deviations in T9.e, as built (2026-10-06; amended the same day to the band ruling's
   addendum).** `StarColour::reddened` and the band's five reddened sums, as
   `decision-r06-t9b-band.md`'s item 3 and its addendum rule them, with these differences. T9.e's
-  first build (62e2074: four columns at revision 0, A_P ÷ A_V and A_S ÷ A_V at effective
-  wavelengths, the camera's at A_V → 0 and 2) never reached the integration branch; the amendment
-  replaced it in one regeneration, as the addendum asked, and took the node at A_V 7.5 the same
-  day (the ruling's "Amendment, 2026-10-06: test 3's reference and the node at 7.5").
+  first build (62e2074 on the lane, landed as 280443ac: four columns at revision 0, A_P ÷ A_V and
+  A_S ÷ A_V at effective wavelengths, the camera's at A_V → 0 and 2) reached the integration
+  branch just before the amendment (b606d326), which replaced it in one regeneration, as the
+  addendum asked; the node at A_V 7.5 followed the same day (ba125179; the ruling's "Amendment,
+  2026-10-06: test 3's reference and the node at 7.5").
   - **Five companion tables, split by node.** `tables::star_colour_reddening` holds the curves at
     A_V → 0 (`NORMAL_REDDENING`, `WHITE_DWARF_REDDENING`, `[[f64; 15]; N]`: the six parts' values
     at unit luminance, r⁺, r⁻, g⁺, g⁻, b⁺ and b⁻, then the nine bands' moments).
@@ -6148,9 +6931,11 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
   - **Helium excess.** The table is built at ΔY = 0, as `sky_envelope` is, and reads a
     composition by its clamped Z alone. `tables::helium` (P06.T17) is the identity today, so it
     bounds every star; the ruled bracket would refuse any ΔY ≠ 0. A star with a helium excess reads
-    the table's brightest value, which skips nothing. When P15.T7 fits `tables::helium`, the table
-    must be refitted with helium-excess nodes. That axis would grow the table past the approved
-    ceiling, so its storage needs a ruling before P15.T7 lands.
+    the table's brightest value, which skips nothing, and so stays bounded under any fitted
+    `tables::helium`. Ruled 2026-10-23 (decision-p15-revalidation Q7): the table gains no helium
+    axis and is not refitted for P15.T7.b, so its storage needs no ruling. Only feature members
+    carry a helium excess, R06.T16.a brings them in, and its cost bench shows what the rule costs
+    them, a deferred finding if it matters.
   - **The mass axis.** Format 1 stores no masses. It reads `tables::sky_envelope::MASSES`, checked
     by count in `fitted()`, by value in `every_cell_of_the_fitted_table_covers_every_bin`, and by
     the fingerprint's `mass_nodes` probes (count, ends and sum). A refit of `sky_envelope` on new
@@ -6370,11 +7155,11 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
       - The census could therefore drop such a star from a sky within reach of it. T17.c's tables
         widen; the test does not (the census handoff). A P11 lane diagnoses it, widens the bound
         at version 21 and re-runs the test. T8.g lands after that fix.
-      - _Resolved 2026-10-08 by P11.T17.c's fix (66c59b29, plan 11's T17.c as built)._ The pair
-        is F15's: it reaches the engine's 64-segment cap at 78 Myr, and its last segment holds
-        both helium stars alive at every later age. The fix is a read-side floor, the brightest
-        hydrogen or helium main-sequence star of at most the pair's mass, for any pair that may
-        have interacted by the window's end. It keeps inclusion monotonicity and moves no
+      - _Resolved 2026-10-08 by P11.T17.c's fix (66c59b29, landed as 38ca80a3; plan 11's T17.c as
+        built)._ The pair is F15's: it reaches the engine's 64-segment cap at 78 Myr, and its last
+        segment holds both helium stars alive at every later age. The fix is a read-side floor, the
+        brightest hydrogen or helium main-sequence star of at most the pair's mass, for any pair
+        that may have interacted by the window's end. It keeps inclusion monotonicity and moves no
         generated system. With it, `the_star_bound_holds_for_realised_systems` passes over
         1.2 × 10⁶ systems, the bulge D case included, under the heavy-test lock. The floor costs
         generation near the Sun: D 48.98% → 52.55% and E 69.37% → 84.06% of records, C
@@ -6620,6 +7405,184 @@ CensusCost)`.
     - No generated output moves: `GENERATOR_VERSION` stays 21, and no golden or protocol type
       moves (determinism audit, `golden_diff` 0).
     - The ruling's `deferred-corrections.md` text (§4) is the orchestrator's to add.
+- **Deviations in T8.n, as built (2026-10-10).** The sky cache's default from measured entries, by
+  the warm ruling's fixed rule (`decision-r06-t8h-warm.md` §2.2), at P11.T17.c's verdicts, with
+  R13.T2's served sky on by default.
+  - **Sized on the served sky.** Since R13.T2.b every served sky's census of C, D and E stops at
+    R13's real boundary, within `REAL_LIMIT_LY` (2,000 ly), so the server's cache holds that
+    tier's blocks: those of the census at the ceiling's caps, planned from both counts and merged
+    by shells (R13's Risks, "Deviations in T2.a, as built" and "Deviations in T2.b, as built").
+    The ruling measured on the exact census to T7.b's caps (C 14,563, D 13,232 and E 46,010 ly at
+    most), which no server serves until the census levers lift the limit. So B is the served
+    sky's, and the exact census's warm benches are recorded beside it, as step 2 names them.
+    - **So T17's warm gate reads the served sky** (adopted 2026-10-10, `decision-r06-t8n.md` §1).
+      S1–S3 (`decision-r06-t8h-warm.md` §2.3) are judged on
+      `census_near_sun_served/*warm_jump_5.0` at the sized budget, 1,280 MiB, set explicitly,
+      since R06.T8.o makes the default 0. The exact census's `census_near_sun/{warm,warm_jump}`
+      are recorded against the 25% target only, at a budget that holds them. No budget under
+      the cap holds S3 there, since their entries are some ten times 1,280 MiB (below). T17's
+      gate states it.
+    - **B is taken again when the limit lifts.** Once the census levers lift R13's real limit
+      (`deferred-corrections.md`, "Census cost"), the served sky is the exact census again. B, the
+      default and step 4's ordinal form are then measured again. At R13.T7's V<sub>P</sub> 4.5 the
+      tier shrinks, and the default still holds. Deferred (`deferred-corrections.md`, "Census
+      cost"; `decision-r06-t8n.md` §4).
+  - **Step 1, the window test**, on T17.c's verdicts:
+    `the_entry_light_holds_every_narrower_window` and
+    `the_prefilter_keeps_every_record_the_census_generates` pass (9.8 s). Test 4 now asks its third
+    query at a cut fainter by the whole `CACHE_CUT_SLACK_MAG`, not by 0.1, and passes at 0.2.
+    The bench's jump toward the centre needs no slack, so the slack's own case is held by tests
+    (the reviews'): T8.h's test 2 serves a census at the Sun and from 1,000 ly along −x at V 6
+    plus the whole slack from the V 6 entries, every cell and bit for bit, and test 5 asks the
+    second of them too.
+  - **Step 3, `CACHE_CUT_SLACK_MAG` is 0.2.** R06.T9.d's `eye_cut` with each place's illumination
+    moves over the jump toward the centre by −0.169 mag on the fixture (8.179 to 8.010) and by
+    −0.040 on the server's galaxy (7.766 to 7.726). The jump itself needs no slack, since its
+    cut is shallower. A sky first served at the destination and then at the Sun reads blocks
+    built at the destination's cut, so the slack covers the larger change, 0.169, rounded up to a
+    multiple of 0.05.
+    - **The other jumps of 1,000 ly**, measured beside it (the jump bench prints them), change the
+      cut by: away from the centre +0.027 on the fixture and +0.046 on the server's galaxy; along
+      +x −0.030 and −0.152; along −x −0.036 and −0.201; above the plane +0.361 and +0.774; below
+      it +0.361 and +0.710. Above and below the plane on the fixture and above it on the
+      server's galaxy the cut is the same V 8.540.
+    - So 0.2 covers every jump in the plane but the server's galaxy's along −x, by 0.0007 mag.
+      Jumps out of the plane deepen the cut beyond the ruled 0.25. Those jumps, or their returns,
+      rebuild the cells whose key binds, at a cold cell's cost and with the same reply. 0.25
+      would cover the plane with margin, at a little more held, and would need B measured again.
+      Kept at 0.2, with no re-measure (ruled 2026-10-10, `decision-r06-t8n.md` §2).
+  - **The benches** (`benches/sky.rs`):
+    - new: `census_near_sun_served/{,served_}warm_5.0` and `…/warm_jump_5.0`, in their own
+      function (`census_near_sun_served_warm`), with the served query (`served_query`) and
+      `census_with`, `census`'s body with the jobs' threads' CPU time where asked;
+    - `ceiling_query` takes the place, for the jump's destination;
+    - the pool's width reads `HYPERION_WORKERS` where it is set, so that a run inside a 400%
+      quota takes the ruled 4 workers;
+    - `report_ratio` adds the ratio by the threads' CPU time where both runs measured it, and both
+      walls;
+    - the module's table and its default budget, 1,280 MiB.
+  - **Step 2, the served sky's runs** (2026-10-10; sampled 1 block in 20, `HYPERION_WORKERS` 4 at
+    `CPUQuota=400%`, under the heavy-test lock while other lanes built, load 8–109, so
+    provisional; the budget 65,536 MiB so that the sample was held). CPU-s by the jobs' wall time,
+    by their threads' CPU time in brackets.
+    - **The sample is 1 in 20, not the ruled 1 in 1,000** (R13.T2.b's sample on the server's
+      galaxy). The served tier opens under 10⁶ cells near the Sun, some 2 × 10⁴ blocks, so 1 in
+      1,000 takes some 20–35 blocks, too few for the held bytes to scale: a trial at 1 in 1,000
+      read the fixture's Sun's sky at 516 MB against 379 MB at 1 in 20. 1 in 20 takes 781–1,213
+      blocks. The exact census's benches keep 1 in 1,000.
+
+    | Census, near the Sun                    | Server's galaxy | Fixture         |
+    | --------------------------------------- | --------------- | --------------- |
+    | The Sun, cold through an empty cache    | 22,968 (22,705) | 12,473 (12,247) |
+    | The Sun again, warm                     | 22,142, 96.4%   | 13,495, 108.2%  |
+    | 1,000 ly toward the centre, cold        | 23,989 (23,882) | 13,332 (13,217) |
+    | The same, through the Sun's entries     | 24,451, 101.9%  | 13,080, 98.1%   |
+    | Entries after the Sun's sky             | 705 MB          | 379 MB          |
+    | Entries after the jump (B)              | **949 MB**      | 525 MB          |
+    | The jump's cells new, of those it opens | 44.7%           | 36.1%           |
+    - **S1 and S2 are met.** No cell was rebuilt, and both warm replies equal their cold ones,
+      stars and tallies, with the same systems generated (246,556 and 134,955 in the samples).
+    - The entries are 7.29 × 10⁶ records after the Sun's sky and 9.81 × 10⁶ after the jump on the
+      server's galaxy, at 5.5 bytes a built cell beyond its records.
+    - A jump to 1,000 ly opens many new cells, since the tier is a ball of at most 2,000 ly.
+
+  - **Step 4, the default is 1,280 MiB** (`DEFAULT_SKY_CACHE_MIB`). B is the server's galaxy's 949
+    MB, the larger. 1.25 × B is 1,131 MiB, rounded up to 1,280, within the 2,048 MiB cap, so the
+    ordinal form is not needed. **S3 is met** there: the Sun's sky and the jump's fit, with 29% to
+    spare. `config.rs`'s docs and table, its test and the README's table follow, and the
+    option's help no longer says "provisional". _From R06.T8.o the default is 0, off, and
+    1,280 MiB is the sized budget (`decision-r06-t8n.md` §3)._
+  - **Step 5, T17's warm figures, judged.**
+    - The jump at 4 workers: about 24,200 CPU-s on the server's galaxy against the destination's
+      cold 23,900, so some 100 minutes of wall on 4 workers before its last shell (_estimate_: the
+      CPU-s ÷ 4; a sampled run's wall is not the sky's).
+    - Generated warm ÷ cold is 1.00 in all four. Pre-filtered: 2.32 × 10⁶ of 1.20 × 10⁷ records
+      past the floor on the server's galaxy's jump. `generated_listable` (a star past the cut
+      unextinguished) is 87,500 of 4.93 × 10⁶ generated there.
+    - The ratios, 96–108%, are over 50% with S1–S3 met, so they go to "main" before T17 closes
+      (`decision-r06-t8h-warm.md` §2.3: a decision agent then rules whether the realised window
+      bound comes into RM3). They are the ruled expectation (`decision-p11-t17c-bright.md` §2,
+      "T8.n": about 95–100%), the same root cause as its §4, which the owner has since answered
+      with the hybrid sky: a warm census still generates every system. T17's text still expects
+      30–45%; a pointer there gives these. _Ruled 2026-10-10 (`decision-r06-t8n.md` §3): the
+      realised window bound stays deferred; the cache saves nothing a player feels at version
+      21, so R06.T8.o turns it off by default; T17's gate is re-stated._
+  - **The exact census's warm benches, recorded** (2026-10-10, `census_near_sun/{warm,warm_jump}`,
+    sampled 1 block in 1,000 as ruled, `HYPERION_WORKERS` 4 at `CPUQuota=400%`, under the
+    heavy-test lock, load 3–31, so provisional). They are T8.h's benches: the fixture, the fixed
+    cut V 7.95 with no illumination or eye's visibility, on T7.b's caps by ray at that cut (C
+    14,563, D 13,232 and E 46,010 ly at most, 1.04 × 10⁸ cells), not T9.d's eye's cut.
+    - The Sun's fill 8.49 × 10⁵ CPU-s, its repeat 99.9% of it; 1,000 ly toward the centre cold
+      8.74 × 10⁵, through the Sun's entries 8.33 × 10⁵, 95.2%. 84,581 of the sample's 93,514 cells
+      were served and 8,933 (9.6%) built new, none rebuilt, and both replies were their cold
+      ones, with the same systems generated (128,823 and 128,849 in the sample).
+    - The entries: 1.32 × 10⁸ records, 13.2 GB, after the Sun's sky, and 1.40 × 10⁸, 14.0 GB,
+      after the jump, 5.0 bytes a built cell beyond its records: 3% under T17.a's 13.6 and
+      14.4 GB.
+    - By the rule, 1.25 × 14.0 GB is over the 2,048 MiB cap. The ordinal form would hold the
+      records in some 1.1 GB and the cells in 0.6 GB (_estimate_, 8 and 5 bytes), so about
+      2,000 MiB at 1.25 times: the cap, with no margin. That is for when the limit lifts.
+  - **Not changed.** No generated output moves: the slack only widens what an entry holds, and a
+    warm reply is the cold one bit for bit. `GENERATOR_VERSION` stays 21, and no golden, protocol
+    type or plan Provides name moves (the constants are crate-private).
+- **The sky cache at version 21** (ruled 2026-10-10, `decision-r06-t8n.md`). A warm census
+  generates every system its cold census generates, which is what keeps its reply the cold one.
+  It skips only each served cell's placement and bounds, and still costs 96–108% of cold
+  (R06.T8.n). So nearly all of cold is work a warm census repeats.
+  - **What it does not save:**
+    - a revisit's final reply, which still waits for every system: about half an hour on 15
+      workers and 100 minutes on 4 on the server's galaxy (_estimates_);
+    - the first sky after a jump, which is mostly generation;
+    - a superseded census's outer shells, which converge only if the ship holds still for a
+      whole census. The sign-off's condition 5 keeps the cells, but not its purpose;
+    - a second client's identical sky.
+  - **What it would cost.** 705 MB after the first full sky and 949 MB after a jump, up to
+    1,280 MiB, on the laptop's 16 GB, which the CPU and the GPU share. Beside it sit the language
+    model and the server's other caches and tables (800 MiB). So R06.T8.o sets the default to 0,
+    which takes T8.g's path. The cache and its tests stay.
+  - **What brings it back.** The realised window bound with the kept attempt
+    (`deferred-corrections.md`, "Census cost"), the only remedy that moves the ratio.
+    - A repeat could fall to about 5–15% of cold. Its floor is `generated_listable`, 1.8% of
+      the systems generated on the server galaxy's jump, plus the work outside generation
+      (_estimate_).
+    - A 1,000 ly jump on the served sky could fall no lower than its new cells' share, about 45%.
+    - Lever 13 speeds warm and cold alike.
+    - The default returns to the sized budget once the repeat is at most 50% of cold.
+  - **Open point, not ruled.** Identical sky queries in flight, such as several clients at one
+    place, could share one census, since a reply is a pure function of its query. The cell cache
+    does not help them. It is for a decision agent when several clients share a server's sky.
+- **Deviations in T8.o, as built (2026-10-10).** The sky cache off by default, as ruled
+  (`decision-r06-t8n.md` §3).
+  - **The switch.** `SharedSkyCellCache` notes a budget of 0 when it is built, and the
+    crate-private `is_off` reports it. `census_job` passes `&NoSkyCellCache` when it is set, and
+    the handle otherwise. The handle's `keeps_entries` is `!is_off()` too (the Rust review's), so
+    that any other caller of `handle` takes T8.g's path at 0; no other census context reads the
+    cell cache today. `lib.rs` is unchanged.
+  - **Docs beyond the list.** A paragraph under the README's table and one in `config.rs`'s
+    module docs, beside `--serve-sky`'s, say why the default is 0 and that 1280 is the value for
+    a warm sky. `sky_cells.rs`'s module docs, `new`'s doc and the builder's `sky_cache_bytes` say
+    that 0 turns the cache off. The option's help reads "0, the default, keeps no cells, and 1280
+    holds a warm sky". The sim bench's docs, which called 1,280 MiB the server's default, are
+    corrected in a commit of their own (`docs(sim): R06.T8.o …`), since a bench's doc comment
+    reaches no test: they call it R06.T8.n's sized budget and the gate's, and condition 4's "the
+    shipped size's" there reads "the whole budget's", since the shipped size is 0.
+  - **The tests.**
+    - The server test is `compute::sky`'s
+      `at_a_budget_of_nought_the_census_reads_no_cache_and_is_the_cached_census`: a 30 ly forced
+      cap at V 9.0, censused in its delivery steps at 0 and at 1,280 MiB, asked twice. At 0 the
+      counters stay `SkyCellCounters::default()`; at 1,280 MiB every cell is missed first and
+      served again, none rebuilt; each step's census is the other's, bit for bit. Run with the
+      branch forced off, it fails (1,052 cells looked up and refused at 0).
+    - `a_cache_of_no_bytes_keeps_no_block` is renamed `…_is_off_and_keeps_no_block`, and checks
+      `is_off` at 0 bytes and not at 1.
+    - In `tests/sky.rs`, `a_skys_manifest_matches_what_was_sent` runs at `SIZED_SKY_CACHE_BYTES`
+      through `cached_sky_server` and a shared `sky_config`. It is the only server test that
+      reads the cache.
+    - `a_sky_near_the_sun_returns_the_stars_texels_and_host_discs_the_sim_returns`, at the
+      default, checks that the server's sky-cell counters stay at their defaults: the default end
+      to end.
+  - **Not changed.** No generated output moves. `GENERATOR_VERSION` stays 21, and no golden,
+    protocol type or Provides name moves (`is_off` is crate-private).
 - **Deviations in T9.f, as built (2026-10-07).** The band's march kept, as the band ruling
   (`decision-r06-t9b-band.md`, item 7) sets it out, with these details.
   - **The API** (`sky/band.rs`):
@@ -7043,9 +8006,11 @@ CensusCost)`.
       - the request asks the black-sky limit, so that no cull is deeper than its census.
 
       Near the Sun its extra stars are N_max overflow, and it costs about 9–14% more of a camera
-      census. The camera-budget ruling adopts or defers it with T17's figures. Until then the
-      request and the cull stay at μ 24 together. Nothing changes in T7.b, the census or the
-      server.
+      census. Adopted 2026-10-13 (`decision-r06-camera-budget.md` §2–§3) as R06.T13.i. T17 measured
+      the black-sky caps at +4.8% of the systems at 10.06, not 9–14%, and on the served sky they
+      cost about none. Until T13.i lands the request and the cull stay at μ 24 together. Nothing
+      changes in T7.b, the census or the server. _T13.i landed 2026-10-13 (its record, after
+      T13.g's)._
   - **The caps' move from v☉** (R06.T7's spheres): none near the Sun (A 11, B 68, C 8,193, D 9,925,
     E 21,369 ly). In the nuclear disc B–E stay on the same radial nodes. Every radius there moves
     about 3% (17 → 18, 127 → 131, 225 → 232, 362 → 374 ly), because the farthest rule bound, which
@@ -7071,9 +8036,9 @@ CensusCost)`.
     - `--lib -- sky::`: 248 passed;
     - `--test sky_census` 6/6, and the sky doctests 31/31;
     - the server's `--test sky` 11/11 and `compute::sky` 17/17;
-    - `just test-slow caps_converge_in_rays` passed on 9c84ca04 (640 s, under the heavy lock;
-      2026-10-08). Every one of its 144 recounts at 3,072 rays is under 1.0, the worst 0.996 (A,
-      above the Sun at 8.54).
+    - `just test-slow caps_converge_in_rays` passed on 9c84ca04, landed as 51abb8e7 (640 s, under
+      the heavy lock; 2026-10-08). Every one of its 144 recounts at 3,072 rays is under 1.0, the
+      worst 0.996 (A, above the Sun at 8.54).
   - **`caps_converge_in_rays`'s figures** (recounted at 3,072 rays and 48 steps a decade): the
     worst layer at each point, for the uniform caps at 7.95, 8.54 and 10.06, and for the caps by
     the eye's visibility at the point's own eye cut.
@@ -7353,15 +8318,15 @@ CensusCost)`.
 - **Generator version 21 (the galaxy plans' Phase J lane, 2026-10-06 and 07; R06's code is
   unchanged; its three pair-light tables are refitted at 21, twice, their young probe cells move,
   and two of its test pins move).** The 20 → 21 bump lands plan 11's P11.T4.h–k, 9a0950e's
-  protostar and build-age fixes, and plan 14's P14.T47.e and T13.c (galaxy plan 11's Risks, "The
-  20 → 21 bump, as built"). Two of this plan's pins move with them. Each was bisected on
-  `rendering-and-planets` (a50d8a73), with each held commit's code applied in turn:
+  protostar and build-age fixes (landed as ff65e543), and plan 14's P14.T47.e and T13.c (galaxy plan
+  11's Risks, "The 20 → 21 bump, as built"). Two of this plan's pins move with them. Each was
+  bisected on `rendering-and-planets` (a50d8a73), with each held commit's code applied in turn:
   - `sky::luminosity`'s `SERIAL_FINGERPRINT`, `FULL_SERIAL_FINGERPRINT` and
     `PAIR_SERIAL_FINGERPRINT` moved in the bump with P11.T4.h alone: the early AGB's core and
-    small-envelope remnant at SSE's τ, which the single-star tracks read. 2ecdeb4a pinned them at
-    `0x5c11_7d93_64a9_5339`, `0xb581_e39e_74e3_414c` and `0xffe0_8298_a09d_eb2e`. The refit below
-    moved them again, to `0x9d13_13d6_2725_9e79`, `0xd063_b6fb_cde6_ee63` and
-    `0xc6c9_59ed_9001_fd37`.
+    small-envelope remnant at SSE's τ, which the single-star tracks read. The bump (2ecdeb4a, landed
+    as a1110def) pinned them at `0x5c11_7d93_64a9_5339`, `0xb581_e39e_74e3_414c` and
+    `0xffe0_8298_a09d_eb2e`. The refit below moved them again, to `0x9d13_13d6_2725_9e79`,
+    `0xd063_b6fb_cde6_ee63` and `0xc6c9_59ed_9001_fd37`.
   - `sky_census`'s `the_merged_giants_near_the_sun_are_listed_as_their_oracle_lists_them` moves
     with P11.T4.i alone, which starts a pair at its first arrival:
     - 0x4204_6c99_ff00_000a's pair merges at 58.4 Myr, not 144.2 Myr. At the census time
@@ -7728,6 +8693,7 @@ CensusCost)`.
       `decision-p11-t17c-bright.md`, a pointer in T11.d): `SkyService`'s default becomes `Served`. A
       clap `SetTrue` switch cannot then be turned off on the command line, so the option takes a
       value too (for example `--serve-sky=false`); the variable already takes `0` or `false`.
+      _Done 2026-10-10, after R13.T2.b (R13's Risks, "The sky on by default, as built")._
   - **The tables** (`compute/sky_tables.rs`, new).
     - `SkyTablesService`: a `SharedByteLru<GalaxyKey, SkyTables>` behind a `SingleFlight`, keyed by
       `GalaxyKey` alone and made with the one source its server's caps name. Its budget is
@@ -7877,7 +8843,9 @@ CensusCost)`.
     first shell, so A, B and the brown dwarfs are final from the first reply, and the march needs
     no `nowhere()`. A plan of no shell is one step of none. The order is the plan's alone. Later
     steps' jobs may run while an earlier step's last ones do; the replies go out in order. T17's
-    V 3.0 gate is not measured (T17's).
+    V 3.0 gate is not measured (T17's). _Since R06.T11.h (2026-10-13) E's shells from 1,000 ly
+    also run a step ahead of C's and D's of the same edge: Risks, "Deviations in T11.h, as
+    built"._
   - **The census in steps** (`census_in_steps`).
     - **Jobs by time, not by expected work (deviation).** A cell's cost is unknown until its
       records' bounds are read: most are skipped in microseconds, a few generated for seconds. So
@@ -8040,7 +9008,8 @@ CensusCost)`.
     primary holds one note while an instrument is open. The instruments keep
     `L · NOT YET MODELLED`.
   - Stated exception, for the owner: the primary's line gives up `NOT YET MODELLED` while the note
-    stands and an instrument is open.
+    stands and an instrument is open. _Signed off 2026-10-09 by the sign-off agent (owner's
+    delegation), with the guard stated beside it._
   - The lone `·` is a views-lane follow-up.
 - **Deviations in T11.f, as built (2026-10-09).** The stars-arriving note and `STARS: PENDING`, to
   the ruling's 1d. No golden, protocol or generator change; client only.
@@ -8133,18 +9102,29 @@ CensusCost)`.
     refuses still shows its cull's line (a trial of the display test with a refused canvas, not
     kept). Its consider not applied, deferred as polish: with the `S` inside the right-aligned
     field, the edge's digits move two characters left while stale; the line itself does not move.
+  - **Signed off 2026-10-09 by the sign-off agent (owner's delegation)** (`signoff-ux-guide.md` in
+    the RM4/RM5 orchestration directory). The `STARS` row, the `STREAMING` and `PENDING` row, the
+    `CLUSTERS` row and the stated exception are accepted. Amended: the star-limit bullet states the
+    guard (the primary keeps what the sky leaves out until an open instrument's line shows it) and
+    that a view seen apart from the stage, an instrument in a window of its own or the main
+    screen's view, carries the whole line; the interim source row ends "while the interim field is
+    still drawn and its count line still stands".
 - **Deviations in T11.g, as built (2026-10-09).** The first sky within its budget, as the ruling
   (`decision-r06-t11d-first-sky.md` §1.4 and §2) sets it out. Built on `rendering-and-planets`
   4dec82b4, merged by name (73098c08; the one conflict, the protocol's version note, took this
-  branch's 28efea9d). No golden moves and no bump (determinism audit, `golden_diff` 0;
-  GENERATOR_VERSION 21); `PROTOCOL_VERSION` stays 2, its note corrected in 28efea9d.
+  branch's 28efea9d, landed as 82b1ca80). No golden moves and no bump (determinism audit,
+  `golden_diff` 0; GENERATOR_VERSION 21); `PROTOCOL_VERSION` stays 2, its note corrected in
+  28efea9d.
   - **The edges.** `SHELL_EDGES_LY` is `[u32; 11]`, 125 to 128,000 ly. `delivery_steps` defers a C
     shell whose inner edge is at or beyond `C_DEFERRED_BEYOND_LY` (2,000 ly). Near the Sun that is
     10 steps, least edges 125, 250, 500, 1,000, 2,000, 2,000, 4,000, 8,000 and 32,000 ly, then
     none. T8.i's identity tests keep the test's 40 and 80 ly; the fixed edges are held by
     `the_shells_take_the_fixed_edges_below_each_cap` and the sphere and completeness tests.
     `--test sky`'s 10–25 ly defer C from 20 ly (`SkyCaps::with_c_deferred_beyond`, a test seam
-    beyond the plan), so its 6 replies keep a step whose least edge stays at 20 ly.
+    beyond the plan), so its 6 replies keep a step whose least edge stays at 20 ly. _Since
+    R06.T11.h (2026-10-13) the steps near the Sun keep their 10, with E's 2,000 ly shell a step
+    ahead of C's and D's, and `--test sky` has 7 replies: Risks, "Deviations in T11.h, as
+    built"._
   - **Every reply's band moves (determinism audit; not in the ruling's "Nothing generated
     moves").** The request's march keeps every radius a reply can state as a node of each ray, so
     125 and 250 ly are two new nodes: each reply's texels, the final one's too, and so their eye
@@ -8438,3 +9418,761 @@ CensusCost)`.
     the behaviour name, since the plan's acceptance names the test.
   - **Logs**: `.git/rm23-scratch/r06-census/t5f/record2/` (the record's binary, its tree's diff,
     `record.log` and memory samples), `record.log` (the first record) and `pilot.log`.
+- **Deviations in T17, as built (2026-10-10 to 2026-10-12).** The verification pass. Every timing
+  below is provisional: the machine was shared and busy (loads stated with each run), whatever lock
+  a run held. Logs: `.git/rm23-scratch/r06-t17/`.
+  - **The goldens** (header 21; `golden_diff.py`: four new goldens, no previously pinned value
+    changed, no inconsistency; GENERATOR_VERSION 21, no bump). A new fast golden landed during the
+    pass, `sky::pins::near_the_sun_golden` (`sky/near_sun.golden`, decision-test-coverage.md W-R1),
+    which pins the eye's two pre-pass band cuts and its cut near the Sun, a 30 ly census at the
+    eye's cut at the synthetic ceiling and every texel of a 16² band. By the owner's rule for the
+    test-speed push, T17's goldens were de-duplicated against it
+    (`.git/rm45-orchestration/handoff/handoff-wasm-coverage.md`):
+    - `sky/colour_reddened.golden` (`sky::colour::tests::the_reddened_light_is_pinned`): every
+      field of `reddened` at twelve points, off the nodes on both grids and clamped at each grid's
+      edge, at A<sub>V</sub> 0.5, 1, 2, 5, 7, 17, 25 and 40. No overlap.
+    - `sky/eye_cut.golden`: the largest colour offset (0.4526); near the Sun each pass's darkest
+      limit (7.5987, then 7.6261); in the nuclear disc (0, 150, 0) its darkest limit 5.2546, cut
+      and eye's cut 5.8072, with no repeat; and near the Sun the caps the served eye-only request
+      is planned to (its visibility, the ceiling V 5.0, `census_plan`): each layer's radius, rule
+      bound, expected and bright beyond (C 0.854, D 8.601, E 162.43, R13.T2.b's) and rays' digest,
+      and its 994,423 cells. That closes T11.g's review leftover (the near-Sun cut and caps against
+      T11.d's). The near-Sun passes' cuts and the eye's cut (8.1787) are `near_sun.golden`'s and are
+      not written again.
+    - `sky/band_face_row.golden`: a camera's request at V 10.06 with the eye at 8.15 beside it, lit
+      by its illumination, its six faces at 16² marched by `march_rows` for four stated replies
+      (nowhere; 100 ly; caps of one radius a ray drawn in 100–400 ly; everywhere), summed by
+      `sum_rows` for the reply by ray with the census of the stars within 100 ly (1,514 listed, 24
+      overflowing as points), every face's limits set by `limit_rows` against the glare of its
+      listed stars at the eye's cut (922 glaring), and the listed stars' eye offsets. It writes
+      every value of the first face row with a glaring star within 1° of a texel centre and one at
+      89–91° (+X, row 0), the row's listed stars with their eye offsets, and digests of the whole
+      map and of every offset (each value asserted finite first). Its band is at 16², not 64²: the
+      eye offsets read a whole band. No overlap (`near_sun.golden` sets no limit map).
+    - `sky/census_near_sun.golden`: the census of the fixture's Sun at the epoch to V 7, every cap
+      forced to 130 ly (the census's own caps there reach thousands of light-years, some 10⁵
+      CPU-s), each shell's cells censused in the plan's order on one thread: the tallies, the first
+      reply's complete-to radii (C to E 125 ly; T8.i's partial-reply golden, folded in) and its
+      1,320 stars (ID, star index, layer, V's bits and to 10⁻⁶, and whether the first reply's 914
+      list it). It is R06's one-shot census with no ceiling; 34 of its stars, those within 30 ly at
+      V ≤ 7, are also in `near_sun.golden`, and the determinism audit agreed to keep them. 150 ly
+      first (26 s natively, 131 kB), cut to 130 ly (18–21 s, 85 kB) for the push.
+    - The eye cut's and the band row's goldens are one test,
+      `sky::limits::tests::the_eye_cut_and_a_band_face_row_are_pinned`, so that they share one
+      tables build (80–92 s against 62–67 s each alone). The names keep "pinned" so that W-R1's
+      filter leaves them in `ci`'s wasip1 run. Costs natively, at load 5–22: 0 s, 18–21 s and
+      80–92 s.
+  - **Instrumentation** (no output moves): `LayerCost`'s `star_bounded_multiple`, `passed_single`
+    and `passed_multiple` (`sky/census/cell.rs`), for the pass rates by multiplicity; the sim bench
+    prints them, each census's A<sub>V</sub> shares and each band march's final μ distribution, and
+    gains `census_near_sun/cold_eye_cut`, `band_near_sun/march_camera_lit` and
+    `census_near_sun_served/{,served_}camera_fill_5.0`; the server bench takes
+    `HYPERION_SKY_BENCH_UNTIL_LY` and `HYPERION_WORKERS` and times the V 3.0 delivery;
+    `caps_converge_in_rays` prints the caps record, the camera's black-sky record and the range
+    check; `standard_nodes_match_the_full_build_where_the_tables_are_read` prints the band's pair
+    correction. Files beyond T17's list: `benches/sky.rs` of both crates, `tests/sky_caps.rs`,
+    `sky/{caps,luminosity,colour,limits}.rs`, `sky/census/{cell,query}.rs`.
+  - **The twelve slow tests** (`just test-slow`, by name; 2026-10-11, the heavy lock 5,098 s with
+    the fit check, load 5–50): all pass. `the_census_is_its_oracle_for_d_and_e_in_the_nuclear_disc`
+    2,400 s, `_1000_ly_from_the_sun` 760 s, `the_star_bound_holds_for_realised_systems` 863 s,
+    `standard_nodes_match…` 861 s, `the_full_build_matches…` 624 s, `caps_converge_in_rays` 724 s
+    (alone at a 400% quota, 759 s again for the high-latitude count and 777 s on 2026-10-12 for
+    the longitudes seen from each point), `luminosity_matches…` 475 s, the rest under 45 s. `hyperion-fit check --rerun-fast`: 26 fresh, 8 warnings (provisional or
+    unfetched fits outside the sky), 0 failures; `sky_binary_light_{c,d,e}`, `sky_envelope` and
+    `sky_phase_envelope` are on its list and fresh.
+  - **The caps** (version 21, cut 7.95, 1,536 rays of three sub-rays; `layer_caps`' doc table holds
+    all six points). Near the Sun the spheres at the same count are A 11, B 68, C 8,193, D 9,925 and
+    E 23,519 ly against the brainstorm's version-14 C 3,000, D 4,300 and E 10,000; the rays'
+    medians C 8,193, D 6,764, E 4,610 (10th–90th 6,764–9,018, 6,146–9,925, 4,188–14,563), within
+    10° of the plane 8,193, 9,925 and 16,029. In the nuclear disc the medians are C 74, D 99, E 235
+    ly (spheres 132, 235, 379) against "a few hundred to about 1,000". What sets each: the moduli
+    put the faintest M<sub>V</sub> counted at about −4.05 for C (at 8,193 ly), −4.47 for D and −6.3
+    for E, so C rests on post-AGB crossings and the rare pair-channel phases (not the AGB tips,
+    below; T5.d's record: some 3 stars of C's 2.6 × 10⁷ fitted systems brighter than −4.05), D on
+    post-AGB stars and bright giants through the clear windows, and E on supergiants. C's sphere
+    sits 2.7 times the brainstorm's 3,000 ly: the version-14 estimate predates plan 06's track
+    fates, and T5.d's pair-evolved excess moved C from 6,764 to 8,193 ly ("T5.d caps after the pair
+    correction" above). Since each ray is widened to its neighbours', a layer's largest radius is
+    held by a patch of rays; its direction is the patch's centre (the science check: the first
+    record printed the patch's last ray, some 6–8° towards −z). C's, D's and E's largest rays all
+    lie within 5° of the plane but the nuclear disc's, which leave its central dust upwards (b +31°
+    to +51°): E's 61,341 ly near the Sun runs at l 164°, b +1°, along the outer disc towards the
+    anticentre, not "towards the poles" (corrected in `caps.rs`'s test comment). Seen from each
+    point, the largest rays on the solar circle all run out along the outer disc, within 41° of the
+    anticentre (l 139°–206°), and those of the inner disc towards the centre (l 11°–17°). b is
+    towards the frame's +z, the IAU's south galactic pole, so the IAU's b is −b. Near the Sun the
+    rays open 61% of the systems of the spheres at the same count (C 94%, D 77%, E 21%), the
+    count's trapezoid over-counting a sphere by about 1%.
+  - **What sets C's cap, corrected (the science check).** At 8,193 ly only stars brighter than
+    M<sub>V</sub> −4.05 count (about −6.5 in the plane behind the dust), so the AGB tips, −2 to −4,
+    cannot set C's cap, as T17's own text says: they count only nearer in. C's cap rests on
+    post-AGB crossings and pair-channel products (R CrB-like), as the brainstorm's "some tens of
+    yellow post-AGB stars within reach" already has it. The real sky agrees: nine post-AGB and R CrB
+    stars of 0.75–2.5 M☉ progenitors brighter than V 7.95 lie at 4,290–6,500 ly (89 Her, HR 4049,
+    XX Cam, AC Her, RY Sgr, HD 133656, HD 101584, HD 52961, HD 161796; SIMBAD V, Gaia DR3
+    parallaxes), which a 3,000 ly cap would leave out, so a C sphere of 7–8 kly is Milky Way-like.
+    T17's wording is "main"'s to correct. **For the owner (drafted):** the brainstorm's sky table
+    and open question 19 at version 21: the spheres near the Sun C 8,193, D 9,925 and E 23,519 ly
+    against 3,000, 4,300 and 10,000; the candidates and systems held below; the range check's
+    37,668; D's post-AGB count still unmeasured (below). E's in-plane reach stands pending plan 06's
+    open question 17 (the cool supergiants above the Humphreys–Davidson limit).
+  - **A finding (deferred, as `decision-r06-t7b-brackets.md` rules it: for the discs' vertical
+    profiles or the tables, not the caps).** No D or E ray reaches beyond 10,000 ly at |b| over 30°
+    at 7.95 or at any point's eye cut. At 8.54, 63 of D's and 7 of E's 768 such rays do 2,000 ly
+    above the Sun, and 12 of D's in the inner disc. At the camera's 10.06 nearly all do at five of
+    the six points (768 of 768 near the Sun; none in the nuclear disc). A ray's length is its yield
+    per system, not a count, so the count was taken too: the expected stars of D and E brighter
+    than the cut beyond 10,000 ly at |b| over 30° are 0 at 7.95 and under 0.006 at 8.54 everywhere;
+    at 10.06 D 0.56–0.91 and E 0.04–0.07 on the solar circle and above it, and D 3.18 and E 0.28 in
+    the inner disc. So the long high-latitude rays are mostly the selection rule letting sparse,
+    dust-free intervals pass at a deep cut, nothing to fix, but the inner disc's D at the camera's
+    cut expects three such stars, more than one: old components' evolved D systems (a D primary
+    with a giant companion at the old turnoff), or a profile or table error, which the counts by
+    component would tell apart (not printed). Deferred to the tables lane with this figure.
+  - **The camera's black-sky limit** (for the camera-budget ruling), near the Sun from the caps'
+    count alone: at 10.06 the caps by ray open 9.49 × 10⁸ systems (rays' medians A 46, B 260, C
+    21,369, D 17,641, E 13,232 ly; E's largest 109,031 at l 197°, b 0°), at the black-sky 10.15
+    9.94 × 10⁸ (+4.8%; C 23,519, D 19,416, E 13,232).
+  - **Open question 19's range check.** `range_500ly_floor_d`'s pin had gone stale: at version 21
+    it walks 37,668 systems (29,412 of D, 8,256 of E) over the same 3,008 cells, not 37,675 (its
+    assertion panicked; re-pinned, with its module docs, in 72.7 ms under the lock at load 5–10).
+    That is 0.13% under the range query's own expected 37,715 (29,545 and 8,170), 0.24σ of
+    Poisson. The caps' count gives 38,147 within 500 ly of the same point (29,884 and 8,264),
+    1.15% over the range query's expectation in both layers alike: its trapezoid in ln r and its
+    even split of the boundary's interval over-count a sphere by about 1% (the science check), so
+    every `systems_within` figure above carries that bias, harmless as a cost estimate.
+  - **Open question 19's counts.** Near the Sun at 7.95 the exact census opens 3.28 × 10⁸
+    candidates in C to E (records past the floor: C 2.05 × 10⁸, D 4.67 × 10⁷, E 7.60 × 10⁷) and
+    generates 1.29 × 10⁸, against 2.74 × 10⁸ systems the caps by ray hold (C 1.85 × 10⁸, D 4.82 ×
+    10⁷, E 4.08 × 10⁷; the brainstorm's version-14 6 × 10⁷ and 2.6 × 10⁷). The candidates exceed
+    the systems by a fifth, E's by 1.9 times: a cell is opened whole when it meets a ray's cone
+    padded by the offset bound, and E's cells are 128 ly cubes on rays widened to their
+    neighbours'. In the nuclear disc (0, 150, 0) at the stand-in 7.95 (its eye's own cut is 5.81)
+    the census opens 5.6 × 10⁷ candidates in C to E and lists some 2.4 × 10⁵ stars (sampled 1 in
+    10); the brainstorm's 5 × 10⁹ in the inner bulge was under the near-Sun caps held fixed.
+  - **T5.d's residuals** (`luminosity_matches_realised_cells`), realised light against the
+    single-star tables then the corrected: solar circle C −6.4% → −4.4%, D −28.7% → −20.2%, E
+    +16.2% → +49.2% (7,089 systems, 6 brighter than M<sub>V</sub> −3); bulge C −6.5% → −3.3%, D
+    −9.8% → +0.3%, E −17.6% → −4.0%: T5.d's record to its rounding.
+  - **The band's pair correction and its 1σ** (`pair_light`, `pair_light_sigma`; along 768 rays to
+    120,000 ly, no cut, no extinction): near the Sun −6.64% ± 0.53% of the band's light (C −2.97%,
+    D −12.46%, E −17.94%), the inner disc −6.27% ± 0.51%, the bulge (0, 3,000, 0) −6.25% ± 0.47%,
+    the halo (0, 26,000, 15,000) −6.45% ± 0.53%. No 1σ is over 2%: no finding.
+  - **The census oracles' tallies**: A within 300 ly and B within 500 ly, 2,720 of 249,096 systems
+    generated; C to E within 1,000 ly, 453,269 of 1,411,018 (C 251,638 of 1,097,274, D 137,061 of
+    238,967, E 64,570 of 74,777); D and E within 20 ly in the nuclear disc, 655,382 of 878,168.
+  - **The benches** (the sim's `sky` bench and the server's `sky_near_sun_cold`, each under the
+    heavy lock, criterion's `--test` but where it timed them, by name, not `just bench -- sky`
+    whole: its warm and ceiling benches would hold the lock for days; logs
+    `.git/rm23-scratch/r06-t17/bench/`, each with its load beside it). The sim bench's table holds
+    every figure; the budgets, against their targets:
+    - **The first sky** (the dev machine's default 15 workers, no quota, at the eye's cut V 7.766
+      of the server's galaxy, timed from the request with the tables held; load 6–14): **6.95 s
+      wall and 93.9 CPU-s, within 10 s and 150 CPU-s: met** (provisional). 3,192 stars, 183 of them
+      brighter than V 3.0; complete to 250 ly at 16.6 s (238.6 CPU-s, 11,129 stars) and to 500 ly
+      at 69.1 s (1,020.9 CPU-s, 28,549 stars). The session's first sky, asked as the open
+      answered: 18.0 s and 140.3 CPU-s from the open's answer.
+    - **The laptop's proxy, `HYPERION_WORKERS` 4**, the cache at its default of 0 (no quota, under
+      the lock, load 14–22): the first reply 17.9 s and 64.9 CPU-s, complete to 250 ly at 50.2 s
+      and to 500 ly at 223.8 s (849 CPU-s); the tables at the open 17.9 s and 45.8 CPU-s. The full
+      census on four workers is the whole run's 25,286 CPU-s ÷ 4, about 1.8 h (an estimate; not
+      run; R13.T2.b's 2.0 h). The warm jump at four workers and 1,280 MiB is the warm gate's, below.
+    - **The served sky's census whole** (the server bench to its final reply,
+      `HYPERION_SKY_BENCH_UNTIL_LY=final`, the server's galaxy, 15 workers, no quota, under the lock
+      on 2026-10-12, load 10–47 with the run's own 15 workers in it): complete to 125, 250, 500 and
+      1,000 ly at 7.94, 19.19, 92.29 and 485.75 s (95.4, 242.7, 1,030.7 and 5,671.9 CPU-s; 3,192,
+      11,129, 28,549 and 56,708 stars listed), and final at **1,987 s, 33.1 minutes, and 25,286
+      CPU-s**, 0.92 times the sampled 2.75 × 10⁴ and R13.T2.b's 31 minutes. It lists 66,614 stars,
+      none overflowing: C 38,338 to 1,893 ly (its cap), D 22,903 and E 5,299 to the
+      limit, A 10, B 64; over 691,965, 108,303 and 16,908 cells of C, D and E, generating 1.90 ×
+      10⁶, 1.47 × 10⁶ and 7.0 × 10⁵ systems. The first run of it timed out at the test client's
+      180 s wait for a frame; the bench now takes `HYPERION_TEST_PATIENCE_SECS`.
+    - **The V 3.0 delivery: missed.** The final reply's 805 stars brighter than V 3.0 are all
+      listed only by the final reply, at 1,987 s, against 25% of the census's wall, 497 s: 183 of
+      them by the first reply, 355, 600 and 773 by 250, 500 and 1,000 ly, so 32 lie in the last
+      step, the 1,000–2,000 ly shells. Its lever is the per-layer order, E's 1,000–2,000 ly shell
+      first (T11.d allows any order that passes), not pulled here: for "main". The wire carries no
+      star's layer, so whether E's shell first is enough, or D's must come with it, the sim's
+      served census would tell (not run).
+    - **A moving ship's sky never finishes** (`decision-r06-t8n.md` §8, watched for, found). A
+      superseded census starts again and generates every system again (warm ≈ cold at version 21),
+      so a ship whose sky is asked again within 33 minutes on the dev machine (a jump, an arrival or
+      Design note 13's parallax rule), or within some 1.8 h on four workers, never has its final
+      reply. It has the 1,000 ly reply after 8.1 minutes: 85% of the final's stars and 96% of those
+      brighter than V 3.0. A finding for "main" and the census levers; nothing changed.
+    - **A finding for the galaxy plans (not chased): the server's galaxy's bright end.** Near the
+      Sun on the server's galaxy (`Galaxy::new`'s, its parameters drawn from its seed, not the
+      fixture's `milky_way_like`) the final reply is about 1.9 times the real sky at its cut V 7.766
+      (66,614 stars against about 3.55 × 10⁴, Tycho-2: Høg et al. 2000, A&A 355, L27; VizieR I/259)
+      and 4.7 times at V 3.0 (805 against the Hipparcos Catalogue's 172: ESA 1997, VizieR I/239).
+      The ratio rises with distance, against Hipparcos's parallaxes: about 2.9 times within 125 ly
+      (183 against 64), 3.6 within 250 ly, 4.4 within 500 ly and 4.8 by 1,000 ly, each an upper
+      bound, since a reply lists stars past the radius it is complete to. The fixture's own counts
+      are near the real (R13's record of its boundary, at the eye's 8.179: 138 brighter than V 3.0
+      against 172, 9,430 to V 6.5 against 8,874; its census within 130 ly, `census_near_sun.golden`,
+      74 brighter than V 3.0 against 66), so the excess belongs to the server's galaxy, whose sky
+      near the Sun lists some 2.3–2.5 times the fixture's at the same cut. The census lists
+      unresolved pairs' components singly, a few per cent at V 3.0. The check is the server galaxy's
+      caps count against its census by magnitude, distance and layer, for plans 02 and 06's light
+      row (the "calibration finding" above): whether the drawn galaxy's disc near its Sun is denser
+      or brighter than the Milky Way's, as its draw allows, or its parameters over-produce bright
+      stars. Not taken.
+    - **The tables** at the open on 15 workers: 11.6 s wall and 47.0 CPU-s, 68 MiB, against their
+      30 CPU-s and the tables ruling's 2–4 s wall: missed, as T11.g found; serially
+      (`sky/luminosity_tables`, criterion's ten builds, load 4–15) 34.3 s (32.4–37.6), over the
+      30 CPU-s by about 14% (T5.e's 31.3–31.7 on a quiet machine). Above 5 s the stage chain's
+      schedule is to be measured before any cut (T11.g's ruling §2); it is not, here: the server
+      logs only the build's end, so its stages need their timings logged first (not instrumented;
+      pending). **A proposal, as T17 asks of a miss (drafted for "main"'s decision agent):** first
+      the stage chain's schedule, logged and measured; then either the disk cache of the tables,
+      keyed by `GalaxyKey` and a sim fingerprint (the fit-check fingerprints of the tables they
+      read, and a `SKY_CACHE_VERSION`), which takes the build off every open after a galaxy's first,
+      or deeper node cuts of `BuildOptions::STANDARD`, which must pass T5.e's two slow tests (they
+      pass at today's nodes, above). The first sky meets its own budget with the tables held, and
+      the session's first sky, which waits on them, does not (18.0 s).
+    - **The full cold census at the real boundary** (`census_near_sun_served/{,served_}eye_5.0`,
+      sampled 1 in 20, 15 workers, load 6–14, by the threads' CPU time): 2.75 × 10⁴ CPU-s on the
+      server's galaxy (C 5,823, D 11,302, E 10,356 for the census) and 1.41 × 10⁴ on the fixture,
+      R13.T1.b's capped tier again (0.97–1.12 times it). Recorded beside it: the exact census at
+      7.95 1.08 × 10⁶ CPU-s (T7.b's caps by ray), at the eye's own cut 8.18 by its visibility 7.19 ×
+      10⁵, the camera's at 10.06 2.62 × 10⁶; the real tier at the ceiling's caps without the limit
+      stays R13.T1's 1.43–1.45 × 10⁵ (not re-run); the nuclear disc at 7.95, sampled 1 in 10, 6.27
+      × 10⁴ (its 935 cells; the sample 1 in 1,000 opened none). **Sampled, the inner disc at the
+      limit** (`census_inner_disc_served/{,served_}eye_5.0`, (0, 8,000, 0), 1 in 20, 15 workers,
+      under the lock on 2026-10-12, load 13–151): 2.42 × 10⁵ CPU-s on the server's galaxy at its
+      eye's cut 6.679 (C 6.01, D 9.93, E 8.27 × 10⁴) and 1.70 × 10⁵ on the fixture at 6.722 (C
+      4.22, D 6.97, E 5.79 × 10⁴), 0.81–1.21 and 0.57–0.85 times `decision-r13-guard-trip.md`'s 2–3
+      × 10⁵. Over 1.05–1.08 × 10⁶ cells, D's and E's rays reach the 2,000 ly limit on 871–999 and
+      1,116–1,305 of 1,536, C's on 330–539; some 1.2 × 10⁵ and 1.0 × 10⁵ stars are listed
+      (sampled), none behind A<sub>V</sub> 5, and the band holds 871 and 882 stars of C to E
+      brighter than V 5.0 beyond the boundary. Multiples pass the star bound at C 0.57–0.61, D
+      7.0–7.1 and E 257–272, as near the Sun. The 4,000 CPU-s target stays for the version that
+      lands the census levers (lever 13): at version 21 it is not a gate, and its step 1 is the
+      deferral already listed.
+    - **The warm gate**, on the served sky's ruled jump at 1,280 MiB set explicitly
+      (`census_near_sun_served/{,served_}warm_jump_5.0`, 1 in 20, 4 workers at `CPUQuota=400%`,
+      load 3–123): **S1 met** (none rebuilt: 24,711 of the server galaxy's sampled cells served and
+      20,004 new, 30,055 and 16,957 on the fixture; none evicted), **S2 met** (the destination's
+      reply, 246,556 and 134,955 systems generated warm and cold), **S3 met** (949 MB held after the
+      Sun's sky and the jump on the server's galaxy, 525 MB on the fixture, within 1,342 MB). The
+      eye's cut moves −0.040 and −0.169 mag over the jump, within the slack of 0.2. Warm ÷ cold by
+      the threads' CPU time: the repeat 95.4% and 98.9%, the jump 97.3% and 101.7%, over 50% as
+      R06.T8.n found and ruled (`decision-r06-t8n.md` §3; the cache stays off by default). The
+      exact census against the 25% target (`census_near_sun/{warm,warm_jump}`, 1 in 1,000, 15
+      workers, 65,536 MiB, no shippable size): the repeat 115.9% and the jump 99.7%, 9.6% of its
+      cells new, none rebuilt, the same reply, entries of 13.2 and 14.0 GB: **missed, deferred**
+      (`deferred-corrections.md`, "Census cost": the realised window bound, then the kept attempt),
+      which does not hold T17.
+    - **The camera's served entries at 10.06** (still open from T8.n; `…/{,served_}camera_fill_5.0`,
+      one camera sky with the eye at its own cut, 1 in 20, 65,536 MiB): 862 MB on the server's
+      galaxy and 465 MB on the fixture, against the eye's 705 and 379 MB, so a camera's sky and a
+      jump would be about 1.16 GB (_estimate_, at the eye's jump ratio; corrected 2026-10-13,
+      `decision-r06-camera-budget.md` §6), for the camera-budget ruling. Its served census costs
+      2.75 × 10⁴ CPU-s too and lists some 4.0 × 10⁵ stars on the server's galaxy, past high's
+      N_max, and 2.3 × 10⁵ on the fixture, past low's only (sampled; corrected 2026-10-13, the
+      same ruling's §7).
+    - **The pass rates by multiplicity** (T16.b's 25% trigger; generated ÷ skipped of the records
+      bounded star by star, the served sky on the server's galaxy): single C 0.063, D 0.018, E
+      0.024; multiple C 0.60, D 7.4, E 266. Multiple systems are 86%, 99% and 99.6% of the systems
+      C, D and E generate, and so most of the census's time: **the trigger is met.** T16.b's
+      remedy, a public period-and-mass interaction test asked of plan 11, joins lever 13's asks
+      (plan 11's hierarchy draw and pair evolution); for "main". The exact census and the nuclear
+      disc read alike (multiple E 35–302, single 0.025).
+    - **A<sub>V</sub> of the listed stars** (`decision-r06-t9b-band.md`, addendum item 2): near the
+      Sun none of the served sky's stars lies behind A<sub>V</sub> 2 on the fixture (largest 0.79)
+      and 0.11% on the server's galaxy (largest 2.60), none at the exact census's 7.95 or 8.18
+      (largest 0.69), none for the camera's 10.06 on the fixture and 0.27% on the server's galaxy
+      (largest 3.08); in the nuclear disc 90.1% above 2, 15.1% above 5, none above 10 (largest
+      9.63). The node tables to A<sub>V</sub> 30 cover every listed star with room.
+    - **The band and the limit map per reply** (`band_near_sun/*`, `limit_map/*`, 15 workers):
+      the march 30.2 CPU-s (2.04 s wall) over ten replies, 30.2 MB, and 0.009 CPU-s a reply's sum;
+      the camera's 37.3 CPU-s, 63.7 MB; the limit map 0.33 CPU-s near the Sun and 1.22 CPU-s at
+      300,000 stars (met, ≤ 3). The illumination 1.26 CPU-s, the light and the march's increase
+      10.4% of the unlit march's 28.5 CPU-s: over R06.T9.g's 10% by 0.4 point, within one run's
+      ±2 CPU-s of the march; provisional, a finding for T9.g to re-take on a quiet machine. Per
+      reply in the first sky (the server's phases): the illumination 0.25 s, the eye's cut 0.12 s
+      and visibility 0.12 s, the caps and plan 1.37 s, the march 2.17 s, the first step of shells
+      2.5 s, then the band, limit map and eye offsets 0.26 s and the payload 0.15 s, all within its
+      6.95 s.
+    - **`sky/star_bound`** (criterion's medians, load 4–15; µs a record in A–E):
+      `hierarchy_bound` 4.45, 6.88, 15.9, 51.9 and 138; the whole 5.1, 7.8, 17.2, 53.9 and 142,
+      T8.g's figures again.
+  - **Design note 18's camera limit over the final 64² band** (for the camera-budget ruling): the
+    camera's lit request at 10.06 (`band_near_sun/march_camera_lit`), its final band with no census
+    at the caps, μ 21.26–25.25 mag arcsec⁻² (10th–90th 22.17–24.59, median 23.72); 36.5% of the
+    texels are darker than μ 24 (65.7% without the diffuse light). `cameraLimit.ts`' limit at 60°
+    (f/1.4, 1/30 s, high gain) over that range: V 9.55 in the brightest texel to 10.12 in the
+    darkest (10th–90th 9.79–10.10, median 10.03), against the request's 10.06 (μ 24) and the black
+    sky's 10.15; T7.b measured 9.68–10.13 over the 16² pre-pass without the light (a one-off vitest
+    probe of `cameraLimitV`, not committed).
+  - **N_max and the sprite budget per setting** (open question 16; drafted for the owner, through
+    "main"'s decision agent): kept, high 3 × 10⁵ and 4,096 sprites, low 10⁵ and 2,048. The eye's
+    sky the server serves near the Sun lists 66,614 stars at its final reply (the server's galaxy,
+    run whole, above), under both N_max; a camera's at 10.06 some 4.0 × 10⁵ on the server's
+    galaxy, past high's N_max, and 2.3 × 10⁵ on the fixture, past low's only (corrected
+    2026-10-13, `decision-r06-camera-budget.md` §7), whose overflow the band holds as points with
+    its light; the nuclear disc's eye at the stand-in 7.95 some 2.4 × 10⁵. 3 × 10⁵ is the
+    protocol's own cap (`MAX_SKY_STARS`, 7.2 MB). The sprite budgets need the frame times by hand
+    (below). `view/sky/setting.ts`' remark says so.
+  - **Further records, from the benches' logs.**
+    - `layer_caps`' CPU per call (the plan's counts of the caps, on one thread): 11.7–11.8 s for
+      the exact census near the Sun (at 7.95 and at the eye's 8.18), 12.4 s on the fixture and
+      13.1 s on the server's galaxy for the served sky's two counts and its plan, 29.0 s in the
+      nuclear disc (load 25), 1.37 s wall on the server's pool in the first sky. Under 0.1% of
+      each census, far under the 10% trigger: no change proposed. T7's "about 2.5 CPU-s a call"
+      was the 768-ray count before T7.b's 1,536 rays of three sub-rays.
+    - Per layer, the served sky on the server's galaxy at its eye's cut V 7.766 (sampled 1 in
+      20, the sky's estimate): C 7.24 × 10⁵ cells, 9.20 × 10⁶ records past the floor, 1.97 × 10⁶
+      generated (21.4%), 3.40 × 10⁴ accepted and listed; D 1.00 × 10⁵, 2.55 × 10⁶, 1.44 × 10⁶
+      (56.7%), 2.55 × 10⁴; E 2.12 × 10⁴, 1.09 × 10⁶, 9.35 × 10⁵ (86.2%), 1.29 × 10⁴; A and B a few
+      hundred. The pairs in T8.g's cases (detached / unchanged / remnants / bright / none): C 72.5 /
+      0.0 / 0.2 / 25.1 / 2.2%, D 21.8 / 0.0 / 2.0 / 72.5 / 3.7%, E 0.8 / 0.0 / 0.0 / 96.9 / 2.4%.
+      The fixture's, the camera's, the exact census's and the nuclear disc's are in the logs and
+      read alike.
+    - The listed stars (sampled, so ±1/√n): the served sky near the Sun some 7.3 × 10⁴ on the
+      server's galaxy and 4.6 × 10⁴ on the fixture; the exact census some 5.1 × 10⁴ at 7.95 and
+      5.7 × 10⁴ at 8.18, and 4.9 × 10⁵ for the camera's 10.06.
+    - In the nuclear disc the caps by ray hold 1.0 × 10⁷ systems of C to E (C 5.0, D 2.3, E 2.7 ×
+      10⁶) against 5.6 × 10⁷ candidates opened, 5.6 times: its caps (74–235 ly on the median ray)
+      are a few cells across, and a cell is opened whole.
+    - The candidates T16.b's binary rule costs: since R06.T8.g its widened bound (n × F_env at
+      max_star_mass(m₁) over ages from zero) only passes records to the bound star by star, which
+      draws each one's hierarchy before anything is generated: on the served sky near the Sun 5.5
+      × 10⁶ C, 1.3 × 10⁶ D and 5.3 × 10⁵ E records at `hierarchy_bound`'s 15.9, 51.9 and 138 µs,
+      some 230 CPU-s of 2.75 × 10⁴ (0.8%). The rest of what binaries cost is the multiples the star
+      bound passes, above.
+    - The expected count of stars brighter than the eye's cut between the eye-only caps and a
+      camera's near the Sun (`decision-r06-t9c-glare.md`, addendum 2), per layer: at most each
+      eye-only cap's own count beyond it, since a camera's caps reach farther on every ray. At
+      7.95 by ray: A 0.995, B 0.968, C 0.421, D 0.334, E 0.293 (3.0 in all); by the eye's
+      visibility at its cut, 8.28 without the light: A 0.909, B 0.855, C 0.547, D 0.350, E 0.359
+      (3.0). The realised count needs a whole camera census (not run).
+  - **Deviations.**
+    - The benches ran by name (above), the sim's sampled and the server's whole, not `just bench
+-- sky` whole.
+    - The exact census's and the nuclear disc's benches ran on the static fixture, as before
+      (no kinematic tables: its records stand still and the drift costs 0.05–0.08 µs against some
+      0.72 µs drawn, under 0.03% of 1.08 × 10⁶ CPU-s); the served sky's on the server's galaxy with
+      its full potential, as T17 asks. The 1,000 ly identity test ran once in motion, a one-off
+      variant on the fixture built with its kinematic tables (not committed), and passed: the
+      census is its oracle, generating 453,260 of 1,411,018 systems (C 251,630, D 137,060, E 64,570,
+      9 fewer than at rest) and accepting C 20,100, D 7,111 and E 1,158 (1,710 s at a 400% quota,
+      load 30–45, 2026-10-12).
+    - The first sky was benched at the served eye's cut alone (the server bench asks the eye); a
+      camera's first sky at 10.06 is not benched.
+    - Files beyond T17's list also `benches/range_query.rs` (the re-pin) and
+      `apps/hyperion/src/renderer/src/view/sky/setting.ts` (open question 16's remark).
+  - **Pending, with the reasons.**
+    - The sky's total light (listed, overflow and band) in the first reply against the final's,
+      within 1% (T9.b's amendment, a gate): neither the wire nor the benches carry a reply's light,
+      and it needs the sim's whole served census summed at both completenesses, some half an hour
+      of the machine. The band's own tests hold its light independent of the complete-to radius to
+      within 1% out to 400 ly. Pending a quiet machine.
+    - D's post-AGB count (the brainstorm's "yet to be counted"): the census tallies no phase.
+    - The photorealistic view's frame time, p95 and p99, while a census runs: by hand, the owner,
+      on the dev machine and on the laptop.
+    - R03.T15's transfer check at N_max: a camera's served sky near the Sun lists some 4 × 10⁵
+      stars, so a camera sky at 10.06 run to its final reply in the hidden real renderer reaches
+      N_max (7,494,912 bytes, 29 chunks); its harness is not built.
+    - The camera-budget ruling: ruled 2026-10-13 (`decision-r06-camera-budget.md`; Risks, "The
+      camera's budget, ruled"). It no longer holds T17. Owed from it before any bridge play-test:
+      R06.T13.i and R06.T11.j.
+    - The tables' stage chain's schedule (above).
+    - T9.f's largest per-texel difference at 64² between the march's sum and `band_rows`
+      (Deviations in T9.f), T7.b's dropped and gained stars on the final census (Deviations in
+      T7.b) and the CPU splat bake at 3,072² (T13's record): not taken.
+    - The fixture's and the camera's served censuses whole (each under an hour, so owed once):
+      not run; the server's galaxy's eye census ran whole (the server bench, above).
+    - The brainstorm's globular-core row (47 Tuc): pending R06.T16.a, as T17 rules.
+    - `just ci`: integration's.
+- **Rulings on T17's findings (2026-10-13, `decision-r06-t17-findings.md`).**
+  - **The V 3.0 delivery** is recorded, not gated, at version 21. No order passes it at the
+    2,000 ly limit. R06.T11.h runs E's far shell first, and the 25% target is read again with the
+    census levers.
+  - **A moving ship's sky:**
+    - Within one arrival, R06.T12.b keeps the held sky through a re-ask.
+    - A ship that jumps again sooner than the census's wall never has its final reply: 33
+      minutes on 15 workers and some 1.85 h on four at the server galaxy's point, about half that
+      at the fixture's density. Until then the stars beyond the edge reached are band light and
+      the `STREAMING` note holds. The remedies are prefetch on a plotted jump (with the
+      jump-drive plan), lever 13 and the realised window bound, all deferred.
+  - **The server galaxy's bright end** (4.7 times Hipparcos at V 3.0) is not a model error on
+    present evidence. (0, 26,000, 68) ly is the fixture's solar radius, not the drawn galaxy's
+    own, and its density, young arms and dust there are draws. The fixture meets Hipparcos and
+    Tycho-2 at its Sun. Milky Way catalogues are compared on `milky_way_like` alone, and figures
+    on the server's galaxy are a denser place's, about twice the fixture's cost. Plan 02's Risks
+    carry the confirming measurement.
+  - **The tables at the open:** R06.T11.i.
+  - **The exact census's warm ratio:** deferred, as T17 rules.
+  - **The illumination's 10.4%:** within one run's spread. T9.g's gate is now read as a median of
+    interleaved pairs.
+  - **The inner disc's D beyond 10,000 ly:** for the tables lane, by component, before R13.T9's
+    gate.
+  - **T16.b's trigger:** met, its remedy the census-cost levers (T16.b).
+  - **The brainstorm's C-cap wording and sky counts:** sign-off queue items 10 and 11.
+- **The camera's budget, ruled (2026-10-13, `decision-r06-camera-budget.md`).**
+  - **The budget is the eye's.** On the served sky the camera's census costs 0.99 times the eye's.
+    Its full census is recorded, not gated. Its first sky is held to 150 CPU-s and 10 s and is
+    benched by R06.T11.j (_estimate_ 130–175 CPU-s and 9.5–12.5 s on the server's galaxy, A's and
+    B's whole caps, 161 and 286 ly, lying in the first step). If it misses, A's and B's caps get
+    shells at the fixed edges, which moves no final reply.
+  - **The limit by texel** (Design note 18; R06.T13.i). At 60° near the Sun, V 9.55–10.12 over the
+    band, median 10.03, against the uniform 10.06. The request asks the black-sky 10.15, and the
+    label quotes the darkest texel's limit, never deeper than the cut.
+  - **The black-sky caps stand.** +4.8% of the systems at T7.b's caps, which no server serves. On
+    the served sky about 0.04% more systems generated, some 9% more stars listed and about 1% more
+    entries (_estimates_).
+  - **The cut stays in V** (Risks, "The camera cut is in V").
+  - **Memory.** The record's camera paragraph is corrected:
+    - A camera's sky and a jump would be about 1.16 GB (_estimate_, at the eye's jump ratio). That
+      fits 1,280 MiB with 13.5% spare, but not the rule's margin, so 1,536 MiB by the rule. The
+      default stays 0.
+    - The camera's served sky near the Sun lists some 4.0 × 10⁵ stars on the server's galaxy, past
+      high's N_max, and 2.3 × 10⁵ on the fixture, past low's only.
+  - **The envelope** (provisional; no plan states a host-memory limit). HYPERION's client and server
+    together, with the UHD 620's GPU-resident memory in them, may use at most 8 GB of the minimum
+    machine's 16 GB, at their defaults with every cache full. The same 8 GB of host memory holds on
+    the RTX 3080 machine. With a camera's sky, the server holds about 1.0–1.2 GB on either machine
+    (0.67 GB of other caches full, the tables' 68 MiB, the camera's census in flight), and
+    2.6–2.8 GB with the sky cache at 1,536 MiB. The client holds about 2 GB on the laptop, the
+    GPU's 1 GB ceiling included. So 3.0–3.2 GB in all, within the envelope (_estimates_).
+    R06.T11.j measures the server's sky share, and R12's resident-memory run measures both.
+  - **N_max** binds a dense sky's camera before its sensor does: on the server's galaxy at high, the
+    points end near V 9.7 (_estimate_). That is for the N_max ruling.
+- **Deviations in T11.h, as built (2026-10-13).** E's far shell first, as the ruling
+  (`decision-r06-t17-findings.md` §1 and §10.3) sets it out. Built, benched and recorded on
+  `rendering-and-planets` 13c4be40 with docs-batch-11's 2f273e59 and fd650d54 (landed as 5e79ceb5
+  and 81f2b175) merged by name, then ea127bc5 merged by name before the commit (c9138be2). The
+  merge's conflicts, all in this plan, took integration's side, which holds docs-batch-11 as
+  cherry-picks; this record follows the camera budget's ruling at the Risks' end. No golden moves
+  and no bump (determinism audit; `golden_diff` against `rendering-and-planets`: no golden file
+  changed; GENERATOR_VERSION 21). `PROTOCOL_VERSION` stays 2, and no wire type changes.
+  - **The order.** `delivery_steps(plan, DeliveryOrder)` defers by the shell's inner edge, as
+    T11.g's deferral does. A shell of any layer but `FAR_FIRST_LAYERS`' (E alone) whose inner edge
+    is at or beyond `FAR_FIRST_FROM_LY` (1,000 ly) comes a step later. C's shells from
+    `C_DEFERRED_BEYOND_LY` (2,000 ly) come a step later again.
+    - Near the Sun at the served caps (C 1,893, D and E 2,000 ly) there are six steps. The first
+      four take every layer to 125, 250, 500 and 1,000 ly. Then E's 1,000–2,000 ly shell comes
+      alone: E is final, C and D stay complete to 1,000 ly, and the note's least edge stays at
+      1,000 ly. Then C's and D's last shells. That is one reply more than T17's five.
+    - At T11.g's test caps (C 14,563, D 13,232, E 61,341 ly) there are still ten steps. Their
+      least edges are 125, 250, 500, 1,000, 1,000, 2,000, 2,000, 4,000 and 8,000 ly, then none.
+      From 1,000 ly E runs a step ahead of D, and from 2,000 ly two ahead of C. D's and E's shells
+      to 4,000 ly still come before C's beyond 2,000 ly.
+    - No reply states a radius that a layer could not state before. So the request's one march
+      (`CensusPlan::replies`, which keeps each layer's radii) holds every step's radii, tested at
+      both caps. Every earlier reply is as it was, bit for bit, the final reply included, and the
+      new reply is the exact census to its stated radii.
+  - **The record first (deviation: a slow test of its own).** It is
+    `far_bright::beyond_1000_ly_d_holds_at_most_a_third_of_the_far_stars_brighter_than_v_3`, in
+    `crates/hyperion-sim/tests/sky_caps.rs`, beside `caps_converge_in_rays` rather than inside its
+    12-minute run. Near the Sun at the epoch, it takes the default eye's cut with the request's
+    illumination, the caps by the eye's visibility, the served ceiling of V 5.0 and
+    `real_boundary`, all over one set of rays. It then counts the same rays at V 3.0. Each layer's
+    expected stars brighter than V 3.0:
+
+    | Galaxy                                  | Cut     | C, 1,000 ly to R(u) | D     | E      | D's share | C, D and E within 1,000 ly |
+    | --------------------------------------- | ------- | ------------------- | ----- | ------ | --------- | -------------------------- |
+    | Fixture (`milky_way_like`, 0x0926_0000) | V 8.179 | 0.056               | 1.071 | 7.803  | 12.0%     | 45.5, 55.7, 21.9           |
+    | Server's galaxy (0x4d2, full potential) | V 7.766 | 0.050               | 2.518 | 55.997 | 4.3%      | 108.7, 334.3, 366.3        |
+    - So D stays with C. The test asserts D's share is at most a third on both galaxies, so that a
+      later version that breaks the rule fails it.
+    - It counts the two galaxies on two threads, one each, and prints both records after, in
+      order. It runs natively only: it pins no bit, and wasm32-wasip1 has no threads. It took
+      97–106 s in the slow profile, at a load of about 17.
+    - The fixture's 8.93 matches the ruling's "some 8.8" (R13.T1.b). The server galaxy's 58.6 is
+      high beside the 32 that T17 realised in the last step: the caps' count reads each ray through
+      the clearest of its three sub-rays (R06.T7.b), an upper count, most of all far out. Only the
+      share decides here, so it is not a finding against the caps.
+
+  - **Seams and names beyond the plan.**
+    - `SkyCaps::with_far_first_from(NonZeroU32)` is a test seam like `with_c_deferred_beyond`,
+      which now takes a `NonZeroU32` too: an edge of 0 would move every layer's first shell out of
+      the first step (both reviews). `--test sky`'s 10–25 ly edges put E first from 15 ly. Its sky
+      arrives in 7 replies (6 before), the third E's 15–20 ly shell alone, with least edges 10, 15,
+      15, 20, 20 and 25 ly, then none.
+    - `SkyCaps::c_deferred_beyond_ly()` (pub) gives way to `pub(crate) SkyCaps::delivery_order()`
+      and `DeliveryOrder` (`SERVED`). A test holds that a sky a client asks takes `SERVED`, and
+      that each seam moves only its own edge.
+    - The order's unit test is renamed
+      `the_delivery_is_nearest_first_e_ahead_from_1000_ly_c_beyond_2000_after_d_and_e_to_4000`.
+      `near_the_sun_es_last_shell_comes_a_step_before_cs_and_ds` is new, at the served caps, and
+      `one_march_of_the_plans_replies_holds_every_steps_radii` now runs at both caps.
+  - **The bench.** For a run to the final reply, `report_bright_delivery` also prints each reply's
+    time, its share of the final's wall, and how many of the final reply's stars brighter than
+    V 3.0 it lists.
+    - **Measured** (2026-10-13, `sky_near_sun_cold/first_reply`, one iteration,
+      `HYPERION_SKY_BENCH_UNTIL_LY=final`, release, 15 workers, under the heavy lock, held
+      2,585 s after 4,783 s of waiting; the 1-minute load 10.9–42.3 during the run, the bench's
+      own workers and other lanes' builds; provisional). Log:
+      `.git/rm45-scratch/r06-census/bench/full-15.log`.
+
+      | Reply | Complete to                  | Wall       | Share of the final's wall | CPU-s    | Listed | Of the final's 805 brighter than V 3.0 |
+      | ----- | ---------------------------- | ---------- | ------------------------- | -------- | ------ | -------------------------------------- |
+      | 0     | 125 ly                       | 7.01 s     | 0.3%                      | 95.7     | 3,192  | 183                                    |
+      | 1     | 250 ly                       | 17.06 s    | 0.7%                      | 244.2    | 11,129 | 355                                    |
+      | 2     | 500 ly                       | 75.18 s    | 2.9%                      | 1,038.6  | 28,549 | 600                                    |
+      | 3     | 1,000 ly                     | 563.63 s   | 22.0%                     | 5,758.3  | 56,708 | 773                                    |
+      | 4     | E final, C and D to 1,000 ly | 1,159.70 s | 45.2%                     | 12,086.1 | 58,608 | 804                                    |
+      | 5     | final                        | 2,566.81 s | 100%                      | 25,424.6 | 66,614 | 805                                    |
+
+    - **E's far stars by 45.2% of the wall** (the ruling's estimate: about 48%), 19.3 minutes into
+      this run. At T17's 1,987 s wall that share would be some 15 minutes, against T17's 33 for
+      them. 31 of the 32 stars brighter than V 3.0 beyond 1,000 ly came with E's reply. The last
+      lies in C's or D's last shell (the wire carries no layer), as the count's 2.57 expected
+      there allows.
+    - **The V 3.0 delivery:** all 805 come only with the final reply, so the delivery is still
+      missed against a quarter of the wall (642 s). It is recorded, not gated, at version 21.
+    - Each step's census job-seconds were 34, 145, 865, 7,262, 8,994 (E's shell) and 21,034 (C
+      5,813, D 15,221), 38,333 in all, against T17's 29,700. The process's CPU (25,425 s against
+      25,286) and the final reply's every layer (C 38,338 listed in 691,965 cells, D 22,903 in
+      108,303, E 5,299 in 16,908) are T17's, so the work is the same. The wall and the jobs'
+      times are longer at this run's heavier load. E's share of the job-seconds to its reply,
+      45.1%, is its share of the wall.
+    - The tables were held 11.70 s after the open's answer, at 47.8 CPU-s (T17: 11.6 s and
+      47.0).
+  - **Not taken (a consider):** a nextest `threads-required = 2` for the two-thread slow test.
+    Editing `.config/nextest.toml` makes smart-ci run every crate's tests, so the reviewer's
+    advice is left for the orchestrator's next change there. The bench's second pass over each
+    reply's stars (the Rust review's consider) is kept, at milliseconds a reply.
+  - **Files beyond T11.h's list:** the server's `requests/sky.rs` (the call) and `tests/sky.rs`
+    (T11.d's test, at the seam).
+  - **Gates.** `just smart-ci` passed before the merge and again after it: rustfmt, Prettier,
+    Clippy for the other platforms, Clippy on the server and the sim with `testing`, the fitted
+    tables fresh, and under the heavy lock 430 (then 431) native tests, the doctests and 114
+    (then 115) wasip1 tests. The server's `compute::sky` and
+    `--test sky` (28 tests) and the slow test above passed by name. Reviews: Rust (no must-fix;
+    three should-fixes and two considers applied), determinism (no must-fix or should-fix; its
+    three considers applied) and plan conformance (the record and the bench, done here).
+- **R06.T13.g: the bake a tile at a time (the owner's priority, 2026-11-01).** A face over
+  `BAKE_TILE_PX` (1,024) is baked in tiles (`bakeTiling`): high's 3,072² in nine of 1,024², a
+  tile's levels 0–2 in a scratch tile, the face's levels from 3 (384²) whole. The cube is the
+  whole-face bake's bit for bit: SHA-256 of every face and level against the tree before, both
+  settings, SwiftShader; test-render's tiled-against-whole check. Contracts changed:
+  `writePackedCubeLevelFromBuffer` takes an optional `region` of one face; the splat's header is
+  (face, size, tile side, tile); the mip and pack kernels' uniform is two `vec4u`; the solid angles
+  are the face's lower triangle (`texelSolidAnglesLowerF32`, `lowerTriangleIndex`,
+  `bakeOmega.wgsl`), exact by the transpose symmetry the tests check at 1,024² and 3,072².
+  - The first bake's peak by the engine's tally (pod, SwiftShader; 300,000 stars on 3,072², 100,000
+    on 1,024²): `sky-scratch` 286.4 → 57.8 MB on high (face levels 201.3 → 3.1, tile levels 22.0,
+    solid angles 37.7 → 18.9, staging 37.7 → 4.2, points 9.6), 34.0 → 31.9 MB on low (solid angles
+    4.2 → 2.1); with the 302.0 MB cube, 588.4 → 360.0 MB live on high. Written: 47.4 → 28.5 MB on
+    high, 7.4 → 5.3 MB on low.
+  - The frame profile at low (orbit window; each run's bake fell in its window on one of two
+    runs): before, "Written: 1540, 10.92 MiB; made: 88, 69.07 MiB; released: 20, 30.54 MiB", the
+    view's solid angles 4,194,304 B of it; after, "Written: 1679, 7.57 MiB; made: 6, 59.67 MiB;
+    released: 6, 59.67 MiB", 2,099,200 B. High's profile: pending the owner's Mac.
+
+- **Deviations in T11.k, as built (2026-11-01).**
+  - Each worker `hyperion-cpu-N` hands its bulk and background jobs to a twin thread,
+    `hyperion-low-N`, lowered once at start, and waits for it, rather than lowering and restoring
+    its own priority per job: Linux never lets an unprivileged thread lower its nice again
+    (`RLIMIT_NICE` 0), so a restore would fail there (lean, 2026-11-01).
+  - `StartPoolError::FloatingPointMode` gains `thread: PoolThread` (`Worker`, `Twin`; exported from
+    `compute`); the pool starts and probes twice as many threads. A test probe that counts calls
+    counts the twins' starts too (`surface/{service,spread}.rs`, `tests/flush_to_zero.rs`).
+  - An interactive job still waits for the bulk job its worker's twin runs, now lowered: a census
+    job ends at 50 ms of wall time, but an unsliced bulk or background job holds longer under
+    contention.
+
+- **Deviations in T11.l, as built (2026-11-01).**
+  - `ServerConfigBuilder::kept_skies(KeptSkies)` (`KeptSkies::{Off, Kept}`, exported) and
+    `ServerStats::sky_replies() -> LruCounters`. A test that asks one sky twice to read the cell
+    cache sets `KeptSkies::Off`, as `tests/sky.rs`'s `cached_sky_server` now does.
+  - A hit still runs one interactive job, its response's frame (large responses serialise on the
+    pool). Only final replies are kept: two identical skies at once both compute.
+  - A kept reply is charged its payload and its body's lists by their lengths, never its JSON, so
+    keeping one serialises nothing on the runtime. A reply that comes to depend on anything but
+    the request, the galaxy and the server's fixed configuration must join `SkyReplyKey`.
+  - Also changed: `bulk.rs` (`BulkPayload::len`), `requests/mod.rs` (the re-export), the root
+    README's options.
+
+- **Deviations in T11.m, as built (2026-11-01).**
+  - `CancelToken::worked() -> Duration` (`pub(crate)`): the time workers spent running jobs queued
+    under the token or its clones, counted before each result is sent. A sky's `job_s` is its own jobs';
+    the galaxy's and the sky tables' shared builds have tokens of their own.
+  - `job_s` is wall time on the workers (no per-thread CPU clock without `unsafe`), so it overstates
+    CPU-s while a lowered twin is preempted. The busy line's 30 s count from the pool's first job
+    after it was last idle, and it is written as a job finishes, so none comes during one job.
+  - A sky cancelled, superseded or whose connection closed logs "given up before its final reply"
+    from a drop guard, since its aborted task never returns.
+- **R06.T16.a, re-validated alone at 3208734 and built (2026-11-01).**
+  - **Its hook.** `SystemHit` carries no member's velocity, composition or multiplicity, so the
+    census reads members through `sky::census::SkySource` (`MemberRecord`s a shell and a
+    `MemberPart` at a time), which `FeatureMemberSource` implements; the centre's join at 27.
+  - **The switch.** `takes_feature_members(galaxy)`, its own `field_share`, no version; the server's
+    `SkyMembers::of`. The sightlines' `FeatureGas` stays on `FEATURE_MEMBERS_FROM`, which its
+    tripwire opens with φ's train or before it.
+  - **Item 1 (lean, 2026-11-01).** The band and the caps stay on the budget, field and members'
+    expectation together; listed members are kept within the band's boundary
+    (`Completeness::radius_at`). A globular's unresolved glow is not gathered at it: a follow-up.
+  - **Item 2 (lean, 2026-11-01).** Members are always generated; each shell's in one part a worker,
+    split by cell (`part_of_cell`), ahead of its slabs. Near the Sun, served: 1.33 CPU-s in the
+    first shells, 31.3 in all (`sky/census_near_sun_members/served_5.0`, pod, 16 vCPU).
+  - **Item 3 (lean, 2026-11-01).** Under the fitted helium arm (26) the envelope's build takes
+    `HELIUM_EXCESS_NODES` and the fit's fingerprint helium-rich probes; nothing moves at 24–25,
+    and train 26's refit of `sky_envelope` takes them.
+  - **The tests (lean, 2026-11-01).** The three are slow (`just test-slow` by name). Near the Sun,
+    3σ of the budget's Poisson error below and of its clumps' compound error above; the core one
+    of twice 47 Tuc's density, its analogue by mass and density giving 1.24 × 10⁵ (a finding).
+  - **The label.** No client change: `feature_members` leaves `not_modelled` wherever the census
+    takes members; `centre_members` stays where a census meets one, until 27.
+- **R06.T16.a at 27: the global list's members (2026-11-02).**
+  - **The hook.** `SkySource` gives `SkyMember`s: a feature's, a list's (`GlobalMemberRecord`, on
+    `Drift::of_global_member`) or the centre's (`CentreMemberLight` and its cell's `Trajectory`,
+    retarded on `CellPath`, `CentrePath`'s law); `GlobalListSource` implements it.
+  - **The switch.** `GlobalListSource::is_registered_in` (`list_source`, 27), under which the halo's
+    field gives up the list's share; the server's `SkyMembers::of` takes the list's caches there.
+  - **The centre (lean, 2026-11-02).** Only its living members, each a single star at its own
+    composition: no multiplicity is ruled for its cells, and its remnants are dark. Its black hole,
+    its disruptions' victims and its recent entries are left out (findings).
+  - **Streams' tables.** `sky::census::streams_seen` names those a census reads; the sky's handler
+    builds them on the pool before the census, as `list_for` does.
+  - **The flag.** `SkySource::holds_feature_members` says which source clears
+    `feature_members_absent`; the list's does not.
+  - **Left (finding).** The catalogue classes' hosts: the grid gives them up from 26
+    (`CARVE_OUT_VERSION`), and no census source places them yet. _Closed 2026-11-02 (below)._
+  - **Cost.** `sky/census_near_sun_members/served_5.0_27`: the measurements in the lane's outbox;
+    the centre's cached cells keep 32 bytes more a member (`CentreMemberLight`).
+  - _Movers at 27._ Sky replies list the streams', dwarf cores' and centre's living members' stars,
+    with their tallies and overflow; the sky's pins move only with the field's own 27 holds.
+- **R06.T16.a: the catalogue classes' hosts (2026-11-02).**
+  - **The switch (lean, 2026-11-02).** Each class's own (`sky::census::takes_hosts_of`): the core
+    collapses', luminous blue variables' and Type Ia's under the carve-out (`CARVE_OUT_VERSION`),
+    and plan 11's binary classes' under φ (`field_share`), whose `class_share` the field gives up.
+    Both are at 26; the server's `SkyMembers::of` takes its class cells where any class's holds.
+  - **Not in range replies.** The range query registers the classes only at 27, so at 26 a host is
+    in the sky and in no range reply (finding).
+  - **The source.** `CachedClassSource` is a `SkySource` (`SkyMember::Class`), on each host's broken
+    line, with its class's own stars and multiplicity, seen as the range query lists it
+    (`CatalogueSystem::shown_at`, which `push_hit` now reads too).
+  - **The walk.** The hits' cells about the shell's sphere at the window's farthest time, in parts
+    by cell key; a placed class's candidate built only where its place, padded by its drift, meets
+    the shell; each host's line tested against the shell from before the window by twice the
+    light-cone step's residual, (v ÷ c)² of the light time.
+  - **The test.** Every host with stars the range query returns within the shells is in the census
+    once, at 26 and 27: from the Sun to 400 ly (some hundred, mostly accreting white dwarfs; none
+    with φ held), and 30 ly from the nearest luminous blue variable, which is listed.
+  - **Left (finding).** The Type Ia class's progenitors and survivors have no stars, so the sky
+    lists none of them, though the range query returns them.
+  - **Cost.** `sky/census_near_sun_members/*`: the measurements in the lane's outbox.
+  - _Movers at 26._ Sky replies list the classes' hosts' stars, with their tallies and overflow; the
+    sky's pins census with no sources and do not move.
+- **R06.T16.a's cost: the tables step by step, and no prune (perf-sky-census, 2026-11-02).**
+  - **The tables.** The open's warm-up already builds every table (P10.T10.b). The handler's
+    "before the census" is replaced: it builds each step's tables beside the census
+    (`streams_seen_in`, `GlobalListService::tubes`). `census_in_steps` takes the steps with a
+    `TablesBuilt` and holds a step's members' jobs until its tables are built.
+  - **Left (lean, 2026-11-02).** No prune before generating is built. The field's generated
+    systems pass their bound by 4 mag or more (92%), so its least extinction would prune about
+    0.1%. A member's exact bound, keeping its tallies, cost as much as the generation it skipped.
+    Both are findings; the members' draft is in the lane's outbox.
+- **R06.T16.a's cost: plan 11's engine and the stragglers' draws, bit for bit (perf-sky-census,
+  2026-11-02).**
+  - **The engine.** It is two thirds of the field census's instructions near the Sun. Four exact
+    cuts: memos of the main-sequence lifetimes and of `Engine::structure`, keyed by what an
+    evaluation reads; the main sequence's radius alone (`MainSequenceRadius`); and each transfer
+    step's donor radius prepared once for its bisection (`Track::radius_at_age`). The tests check
+    every memo's hits afresh.
+  - **The stragglers.** `bearing_attempt` builds the primary once and does not generate an attempt
+    whose stars weigh no more than the turn-off (`may_straggle`).
+  - **Cost.** The measurements are in the lane's outbox; no star moves.
+  - **Left (finding).** No `Member::radius` is asked twice at one mass in a step: each trial of
+    the bisection has a mass of its own.
+- **R06.T16.a's step tables by the kept envelopes (perf-range-cold-tables, 2026-11-05; no star
+  moves).** New `sky::census::streams_seen_in_with` (and `GlobalListSource::streams_seen_with`)
+  names the streams of `streams_seen_in` whose kept tube envelopes the sky's reach meets, or that
+  keep none; the handler's `streams_by_step` takes the held list's models, so a sky builds no table
+  whose kept envelope it misses. A cold galaxy's first sky still builds every table its shells meet.
+- **Deviations in T11.n, as built (2026-11-05).**
+  - `ServerConfigBuilder::kept_skies_disk_bytes`, `ServerConfig::kept_skies_disk_bytes()` (0 under
+    `KeptSkies::Off`), `ServerStats::sky_files() -> SkyFileCounters` (exported). A test that must
+    compute one sky twice across a restart sets `kept_skies_disk_bytes(0)`.
+  - `Server::shutdown` writes the files still queued; a reply that finds the queue
+    (`limits::SKY_FILE_QUEUE`, 4) full is not written. No file is synced; a torn one fails its
+    checksum and is removed.
+  - The key's settings are `SkyCaps`, `FeatureMembers` and `SkyFeatureGas` by their `Debug` form: a
+    setting that comes to change a final reply must join `SkySettings` (lean, 2026-11-05).
+  - `tests/common`: `RawFrame`, `TestClient::next_raw_frame`.
+- **Deviations in T11.o, as built (2026-11-05).**
+  - `CancelToken::{lower_to_background, is_lowered}` (`pub(crate)`), `PoolCounters::lowered()`,
+    `SkyQos::{Utility, Background}` (exported), `ServerConfigBuilder::sky_qos`. A twin follows a
+    job's class only where `thread_priority::FOLLOWS_EACH_JOB` (macOS), and stops after a refusal.
+  - The token is lowered as the first reply is made; jobs queued before it and taken after it run
+    lowered.
+  - Pending: the owner's Mac run (fps and the P/E split beside a cold sky, utility against
+    background). Apple's own page on the background class was not read (no web from the pod).
+- **Deviations in T11.p, as built (2026-11-05).**
+  - `SkyReplyKey` is `{arrival: SkyArrival, observer, time}`, its bytes unchanged; `SkyHold`,
+    `HeldSky`, `SkyReplyCache::held`, `SkyReplyFiles::held` (`pub(crate)`);
+    `ByteLru::get_best`, `SharedByteLru::get_best`; `HeldSkies::{Exact, Held}` (exported),
+    `ServerConfig{,Builder}::held_skies`; `SkyFileCounters::held()`.
+  - The index of arrivals is the files' names: `<arrival hash>-<key hash>.sky` (lean, 2026-11-05).
+    Files named before T11.p are never read again and go first under the budget.
+  - The bound reads the nearest listed star on the wire, sprites included: tighter than the
+    client's, which skips its parallax sprites, within some 4.9 ly at 1080p across 60° (lean,
+    2026-11-05). With none listed a sky holds at its own observer alone.
+  - Of several that hold, the latest seen, then the nearest (lean, 2026-11-05).
+  - The bound is the brief's, 1080p across 60°: a camera of finer pixels (a narrower field, or
+    more than 1,080 across it) can hold a held sky more than a tenth of its own pixel off (lean,
+    2026-11-05). An hour's orbital motion is some 10⁻³ au against a bound of tens of au.
+  - The end at `valid_until` is tested on the hold, the memory and the files; `tests/sky.rs` skips
+    it, a sky a year on being in another time bucket, some 40 s more in a test build.
+- **T5.c's test moved (2026-11-05).** `luminosity_matches_realised_cells` is now
+  `sky::luminosity::realised_cells`'s (was `tests/sky_luminosity.rs`), on the budget's grid
+  (`FieldShareRules::None`, `CarveOutRules::Unclaimed`, `DisplacedRules::FieldOnly`); the tables
+  stay on the whole budget.
+- **R06, a galaxy's sky tables on disk (lane `perf-sky-tables-on-disk`, 2026-11-05, at 28; no
+  output moved).**
+  - _Sim._ `words::{WordSink, WordSource}`; `LuminosityTables::{FORMAT, write_words, read_words}`
+    and `FeatureGasIndex::{FORMAT, write_words, read_words(source, galaxy)}`, whose readers give
+    `None` for words their readers would index out of. The tests' `luminosity::file` frames them.
+  - _Server._ `SkyTableFiles` under `<data>/sky-tables/`, keyed as the kept skies' are, plus the
+    tables' source and gas and both formats; `SkyTablesService::{with_files, close_files}`;
+    `SkyTablesCounters::files() -> SkyTableFileCounters` (exported);
+    `ServerConfig{,Builder}::kept_sky_tables_disk_bytes` (160 MiB, no option);
+    `limits::SKY_TABLE_FILE_QUEUE` (4). Only `SkyTablesSource::Galaxy` tables are kept (lean,
+    2026-11-05). A read counts no build: a test that waits on `builds() > 0` after a relaunch waits
+    on `files().hits()`.
+  - _Left._ A cold build's plan job (5.1 s on one worker) leads it; after the tables, a relaunched
+    first reply waits on the census plan (2.0 s), its first step's march (2.2 s) and the band
+    (4.9 s).
+- **R06, the tables' plan searched in jobs and the tables pinned whole (lane
+  `perf-sky-tables-on-disk`, part 2, 2026-11-05, at 28; no output moved).**
+  - _Sim._ `LuminosityTables::plan_search`;
+    `PlanSearch::{stages, run_ends, companions_jobs, run_companions, finish}`, `StageEnds`,
+    `CompanionsJob`, `CompanionsPart`. `TablesPlan::new` runs the search in turn; `stage_grids`
+    is gone. The golden `sky/tables_words` (`sky::pins::tables_and_gas_index_words_golden`) pins
+    the tables and the features' gas index by their words, capacities left out: a change that
+    moves it needs the version bump that renames the server's files.
+  - _Server._ `build_on_pool`'s plan is `plan_on_pool`: the search, a job a stage's ends, the
+    companions' integrals in a job a worker, then the finish.
+  - _Left._ With the global list warmed at the open (the default), a cold galaxy's first sky
+    waits on the list's tube tables, which the warm-up builds at the sky's own bulk priority; the
+    split's gain reaches its first reply only with the warm-up off.
+- **R06, a cold sky's step tables ahead of the warm-up's (lane `perf-sky-tables-on-disk`, part 3,
+  2026-11-06, at 29; no output moved).**
+  - _Server._ `GlobalListService::tubes` holds a claim (`Lists::asking`) under which every
+    warm-up starts no table; `GlobalListService::prefer_near(key, at)`, called where a sky starts,
+    has its galaxy's warm-up start the streams whose shells come nearest the observer first
+    (lean, 2026-11-06). Neither uses the pool's background class.
+  - _Left._ The warm-up's budget counts no table built beside it once it has begun (as before).
+    A relaunched range test that stops before its first launch's tables are written rebuilds them
+    beside its query.
+
+- **R06, the server's tests' twins at their workers' priority (lane `fix-server-test-timeouts`,
+  2026-11-06; no output moved).**
+  - `compute::TwinPriority::{Lowered, Workers}` (`Lowered` by default), the crate's
+    `CpuPool::with_twins`, and `ServerConfig{,Builder}::twin_priority` (no option or variable).
+    `TestServer::config` and the pool helpers of `lib.rs`'s, `compute/sky.rs`'s and
+    `surface/service.rs`'s tests keep the workers'; a test of the lowering builds its pool with
+    `CpuPool::new`.
+  - `tests/common/alerts.rs`'s `walking_server` (`WALK_WORKERS`, 4) for the two whole-galaxy walks,
+    which take four nextest slots, and the caps' rays test three.
+- **A system's discs on their own (feat-host-discs-at-once, 2026-11-06).**
+  - Protocol: `host_discs {universe, system, time}` answers `HostDiscsDto`, its `hosts` the bytes
+    a sky leaving the system out carries as `hosts` at that time; additive, after R15's kinds.
+  - Server: `requests::sky::host_discs_answer`, its lookup and discs interactive jobs; `discs_of`
+    is the one body of both; `unknown_system_named(field, …)` replaces `unknown_exclude`, and
+    `check_exclude` takes `(field, value)`.
+  - Served with `--serve-sky=false` too (lean, 2026-11-06): it reads no table or census.

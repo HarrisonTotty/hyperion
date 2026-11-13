@@ -1,6 +1,7 @@
 //! Bounds for the flared displaced classes (plan 08, P08.T11): the flare factor's supremum and
-//! the radial envelope's nearest corner, checked by sampling and by a hunt for violations in the
-//! inner galaxy, against the test-only form table (`displaced_support`).
+//! the radial envelope's supremum over the cell's radii (its nearest corner without a hole,
+//! P15.T6.c), checked by sampling and by a hunt for violations in the inner galaxy, against the
+//! test-only form table (`displaced_support`).
 
 #[expect(
     dead_code,
@@ -70,15 +71,36 @@ fn interior(cell: &CellBox, lcg: &mut Lcg) -> PointLy {
     )
 }
 
-/// P08.T11: over 10⁵ random (cell, class) pairs of 512 interior points each, no density exceeds its
-/// class's bound, and the bound lies within a factor of 1.6 of the sampled maximum on average.
+/// P08.T11: over 10⁴ random (cell, class) pairs of 512 interior points each, the first 10⁴ of
+/// [`flare_bound_is_tight_and_safe_over_100_000_pairs`]' sequence, no density exceeds its class's
+/// bound, and the bound lies within a factor of 1.6 of the sampled maximum on average.
+///
+/// The tightness keeps its power at 10⁴ (a mean of 1.008 against 1.6, its standard error printed
+/// beside it), and the 5.1 × 10⁶ probes of the safety hunt find a violating share of about 6 × 10⁻⁷ at
+/// 95%; the plan's 10⁵ pairs run in the slow pass (`decision-test-coverage.md`, N2).
 #[test]
 fn flare_bound_is_tight_and_safe() {
+    assert_flare_bound_is_tight_and_safe(10_000);
+}
+
+/// P08.T11 as the plan states it: over 10⁵ random (cell, class) pairs of 512 interior points each,
+/// no density exceeds its class's bound, and the bound lies within a factor of 1.6 of the sampled
+/// maximum on average. A slow test since `decision-test-coverage.md`'s N2, which keeps the first
+/// 10⁴ pairs per commit ([`flare_bound_is_tight_and_safe`]).
+#[test]
+#[ignore = "slow: 10⁵ pairs of 512 points"]
+fn flare_bound_is_tight_and_safe_over_100_000_pairs() {
+    assert_flare_bound_is_tight_and_safe(100_000);
+}
+
+/// Over `pairs` random (cell, class) pairs of 512 interior points each, from the LCG seed
+/// `0x0811_0000`, no density exceeds its class's bound, and the bound lies within a factor of 1.6
+/// of the sampled maximum on average.
+fn assert_flare_bound_is_tight_and_safe(pairs: u32) {
     let (scales, fields) = scales_and_fields(&GalaxyParams::milky_way_like());
     let forms = classes(&scales, &fields);
     let mut lcg = Lcg::new(0x0811_0000);
-    let pairs = 100_000;
-    let mut ratio_sum = 0.0;
+    let (mut ratio_sum, mut ratio_squares) = (0.0, 0.0);
     for _ in 0..pairs {
         let cell = random_cell(&mut lcg);
         let pick = usize::try_from(lcg.next_u64() % u64::try_from(forms.len()).unwrap()).unwrap();
@@ -95,10 +117,15 @@ fn flare_bound_is_tight_and_safe() {
             best = best.max(d);
         }
         assert!(best > 0.0, "class {pick} over {cell:?}");
-        ratio_sum += bound / best;
+        let ratio = bound / best;
+        ratio_sum += ratio;
+        ratio_squares += ratio * ratio;
     }
-    let mean = ratio_sum / f64::from(pairs);
-    eprintln!("mean bound ÷ sampled maximum: {mean:.4}");
+    let n = f64::from(pairs);
+    let mean = ratio_sum / n;
+    // The mean's standard error, printed beside it (the power the split keeps at 10⁴ pairs).
+    let error = ((ratio_squares / n - mean * mean).max(0.0) / (n - 1.0)).sqrt();
+    eprintln!("mean bound ÷ sampled maximum: {mean:.4} ± {error:.1e}");
     assert!(mean <= 1.6, "the bound is loose: {mean}");
 }
 

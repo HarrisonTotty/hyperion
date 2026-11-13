@@ -1,0 +1,31 @@
+# generator_version = 31
+cloud.tracers 300 300
+cloud.mass = 0x40d3880000000002  # 20000.000000000007
+cloud.trailing.mass = 0x40c3880000000002  # 10000.000000000004
+cloud.span.low = 0xbfeff82ef958daa7  # -0.9990458364544182
+cloud.span.high = 0x3feff39ddbb403d2  # 0.9984883586004065
+cloud.knots.digest = 0xbf1d0f43fb556aab
+cloud.trailing.first.psi = 0xbfeee897255d2d3c  # -0.9658923845067089
+cloud.trailing.last.psi = 0x3feff39ddbb403d2  # 0.9984883586004065
+cloud.leading.first.psi = 0xbfeff82ef958daa7  # -0.9990458364544182
+cloud.leading.last.psi = 0x3feedb65c01d4a00  # 0.9642819168314531
+cloud.along_cells 512
+cloud.noise.0 = 0x3fe7a79f9c21f62a  # 0.7392118501154006
+cloud.noise.170 = 0x3fe981cc55e7f594  # 0.7970945051053371
+cloud.noise.256 = 0x3fe4f665617705b7  # 0.6550776389705594
+cloud.noise.511 = 0x3ff663db97cc7a8e  # 1.3993793420446852
+epoch.tracers 1000 1000
+epoch.mass = 0x40e3e509fa884360  # 40744.311832553474
+epoch.trailing.mass = 0x40d3e509fa884360  # 20372.155916276737
+epoch.span.low = 0xbf62fb1eef9271c0  # -0.0023170093741795295
+epoch.span.high = 0x3f623821394b24c0  # 0.002224030390014592
+epoch.knots.digest = 0x14fc9c30b1b9bbf0
+epoch.trailing.first.psi = 0xbf62fb1eef9271c0  # -0.0023170093741795295
+epoch.trailing.last.psi = 0x0000000000000000  # 0.0
+epoch.leading.first.psi = 0x0000000000000000  # 0.0
+epoch.leading.last.psi = 0x3f623821394b24c0  # 0.002224030390014592
+epoch.along_cells 1024
+epoch.noise.0 = 0x3ff3cb9ff68f959a  # 1.2372130996021498
+epoch.noise.341 = 0x3fe2be57512951b0  # 0.5857349953826567
+epoch.noise.512 = 0x3fe9b71e37203bb5  # 0.8036032749822569
+epoch.noise.1023 = 0x3ff74197c059f9e9  # 1.4535138620118409

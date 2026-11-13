@@ -13,6 +13,9 @@ import {
   windowFile,
   windowTrace,
 } from "./fixtures/traces";
+import { parseClientArgs } from "./cli";
+import { type SizesFixtureOptions, sizesReportOf } from "./fixtures/sizesReport";
+import { SIZES_BLOCK_BUDGET_BYTES } from "./sizesResults";
 import type { GpuClockSample } from "./gpuClocks";
 import type { Measured } from "./measured";
 import { type TraceFigures, TraceReducer } from "./reduceTrace";
@@ -43,13 +46,16 @@ import {
   RESULTS_SCHEMA,
   RESULTS_VERSION,
   row,
+  runOptionsOf,
   type ResultsFiles,
   type RunDescription,
   sampleMemory,
   summaryMarkdown,
   TERRAIN_ATMOSPHERE_ROW,
   TIMESTAMP_QUANTUM_MS,
+  UNTIMED_NOT_COUNTED,
   validateResults,
+  worldOfRun,
   writeResults,
 } from "./results";
 import {
@@ -94,10 +100,13 @@ function runOf(overrides: Partial<RunDescription> = {}): RunDescription {
     launchMode: "vulkan",
     setting: "low",
     seed: "18446744073709551615",
+    world: "test-planet",
+    style: null,
     options: { setting: "low", seed: "18446744073709551615", workers: 3 },
     switches: ["--disable-dawn-features=timestamp_quantization"],
     shown: true,
     displayHz: 60,
+    framePacing: "display",
     nvidiaBaselineBytes: 168 * MIB,
     ...overrides,
   };
@@ -433,6 +442,23 @@ describe("a results file", () => {
     expect(second.json).toBe("/runs/2026-10-02-devbox-low-2.json");
   });
 
+  it("takes no name a stopped run's finished segments hold, and writes under a name given (R14's Mac measurements)", async () => {
+    const files = memoryFiles();
+    files.written.set("/runs/2026-10-02-devbox-low-partial.json", "{}");
+    const results = buildResults({
+      run: runOf(),
+      report: reportOf(),
+      trace: traceOf(),
+      memory: MEMORY,
+    });
+    const free = await writeResults("/runs", results, files);
+    const named = await writeResults("/runs", results, files, "2026-10-02-devbox-low-7-partial");
+    expect([free.json, named.markdown]).toEqual([
+      "/runs/2026-10-02-devbox-low-2.json",
+      "/runs/2026-10-02-devbox-low-7-partial.md",
+    ]);
+  });
+
   it("reads frames from presentation times by segment, after the warm-up, against T", () => {
     const results = buildResults({
       run: runOf(),
@@ -461,6 +487,48 @@ describe("a results file", () => {
     expect(results.criteria.segments.map(({ segment }) => segment)).toEqual([
       "orbit coast",
       "descent arc",
+    ]);
+  });
+
+  it("reads T as the vsyncs its pacing draws the setting's rate on, and records the pacing and the vsync its frames measure (R07.T19)", () => {
+    const runAt = (
+      framePacing: RunDescription["framePacing"],
+      setting: RunDescription["setting"],
+    ): DescentResults["run"] =>
+      buildResults({
+        run: runOf({ framePacing, setting, displayHz: 120 }),
+        report: reportOf(),
+        trace: traceOf(),
+        memory: MEMORY,
+      }).run;
+    const counted = runAt("display", "low");
+    const rate = runAt("rate", "low");
+    expect([
+      counted.periodMs.value?.toFixed(2),
+      rate.periodMs.value?.toFixed(2),
+      runAt("rate", "high").periodMs.value?.toFixed(2),
+      // The frames after the warm-up, 33.3 ms apart but for a long one in each hundred.
+      rate.pacing,
+    ]).toEqual([
+      "16.67",
+      "33.33",
+      "16.67",
+      { framePacing: "rate", measuredVsyncMs: measured(33.3) },
+    ]);
+  });
+
+  it("refuses a version 9 file whose pacing is neither, and reads a version 8 file without one (R07.T19)", () => {
+    const { pacing, ...unpaced } = twoWindowResults().run;
+    const file = (version: number, run: object): unknown =>
+      JSON.parse(JSON.stringify({ ...twoWindowResults(), version, run }));
+    expect([
+      validateResults(file(9, { ...unpaced, pacing: { ...pacing, framePacing: "vsync" } })),
+      validateResults(file(9, unpaced)),
+      validateResults(file(8, unpaced)),
+    ]).toEqual([
+      ["run.pacing.framePacing is neither rate nor display"],
+      ["run.pacing.framePacing is neither rate nor display"],
+      [],
     ]);
   });
 
@@ -1317,6 +1385,360 @@ describe("the memory series", () => {
   });
 });
 
+/** `value`'s fields, which must be an object's. */
+function fieldsOf(value: unknown): Record<string, unknown> {
+  if (typeof value !== "object" || value === null) {
+    throw new Error("expected an object");
+  }
+  return { ...value };
+}
+
+describe("a results file's world and style (R10.T14.c)", () => {
+  /** A run's results over `world` in `style`, as JSON reads them back. */
+  function parsedOver(
+    world: RunDescription["world"],
+    style: RunDescription["style"],
+  ): Record<string, unknown> {
+    const results = buildResults({
+      run: runOf({ world, style }),
+      report: reportOf(),
+      trace: traceOf(),
+      memory: MEMORY,
+    });
+    return fieldsOf(JSON.parse(JSON.stringify(results)));
+  }
+
+  it("records them in the run block and on the summary's launch line", () => {
+    const results = buildResults({
+      run: runOf({ world: "terrain-test", style: "photorealistic" }),
+      report: reportOf(),
+      trace: traceOf(),
+      memory: MEMORY,
+    });
+    expect(results.run).toMatchObject({ world: "terrain-test", style: "photorealistic" });
+    expect(summaryMarkdown(results)).toContain(
+      `seed ${results.run.seed}, world terrain-test, style photorealistic, window`,
+    );
+    expect(validateResults(parsedOver("terrain-test", "wireframe"))).toEqual([]);
+  });
+
+  it("records the test planet's run with no style, and its launch line states none", () => {
+    const results = buildResults({
+      run: runOf({ world: "test-planet", style: null }),
+      report: reportOf(),
+      trace: traceOf(),
+      memory: MEMORY,
+    });
+    expect(results.run).toMatchObject({ world: "test-planet", style: null });
+    expect(summaryMarkdown(results)).toContain(
+      `seed ${results.run.seed}, world test-planet, window`,
+    );
+    expect(summaryMarkdown(results)).not.toContain(", style ");
+    expect(validateResults(parsedOver("test-planet", null))).toEqual([]);
+  });
+
+  it("reads a served world's file as a generated world's, its style its own (R10.T15.b)", () => {
+    const parsed = parsedOver("terrain-test", "wireframe");
+    const run = { ...fieldsOf(parsed["run"]), world: "served" };
+    expect(worldOfRun(run)).toEqual({ world: "served", style: "wireframe" });
+    expect(worldOfRun({ ...run, style: null })).toBeNull();
+    expect(validateResults({ ...parsed, run })).toEqual([]);
+  });
+
+  it("reads a file without them as the test planet's, with no style", () => {
+    const parsed = parsedOver("test-planet", null);
+    const { world: _world, style: _style, ...older } = fieldsOf(parsed["run"]);
+    expect(worldOfRun(older)).toEqual({ world: "test-planet", style: null });
+    expect(validateResults({ ...parsed, run: older })).toEqual([]);
+  });
+
+  it("refuses a world that is not one of its choices, or a style that is not its world's", () => {
+    const parsed = parsedOver("terrain-test", "wireframe");
+    const run = fieldsOf(parsed["run"]);
+    const refusal =
+      "run.world is not test-planet, terrain-test or served, or run.style not its world's: none on test-planet, photorealistic or wireframe on a generated world";
+    expect(
+      [
+        { ...run, world: "earth" },
+        { ...run, world: "test-planet" },
+        { ...run, style: null },
+      ].map((each) => validateResults({ ...parsed, run: each })),
+    ).toEqual([[refusal], [refusal], [refusal]]);
+    expect(worldOfRun({ ...run, style: "lit" })).toBeNull();
+  });
+});
+
+/** A summary's `Launch:` line, or `undefined` where it has none. */
+function launchLineOf(summary: string): string | undefined {
+  return summary.split("\n").find((line) => line.startsWith("- **Launch:**"));
+}
+
+describe("a results file's measured sizes (R10.T14.b)", () => {
+  /** A `--sizes on` run's results over the terrain world, `sizes` its report's block. */
+  function sizedResults(
+    sizes: NonNullable<DescentSpikeReport["sizes"]> = sizesReportOf(),
+    memory: ReadonlyArray<MemorySample> = MEMORY,
+  ): DescentResults {
+    return buildResults({
+      run: runOf({
+        world: "terrain-test",
+        style: "photorealistic",
+        options: { setting: "low", seed: "18446744073709551615", workers: 3, sizes: "on" },
+      }),
+      report: reportOf({ sizes }),
+      trace: traceOf(),
+      memory,
+      load: measured([
+        { tS: 0, oneMinute: 0.52 },
+        { tS: 60, oneMinute: 0.61 },
+      ]),
+    });
+  }
+
+  it("writes the report's block with the load and the driver's figures, and checks it", () => {
+    const results = sizedResults();
+    const parsed: unknown = JSON.parse(JSON.stringify(results));
+    expect(results.sizes?.load.value).toEqual([
+      { tS: 0, oneMinute: 0.52 },
+      { tS: 60, oneMinute: 0.61 },
+    ]);
+    // The device's peak, 700 MiB, less the 168 MiB baseline.
+    expect(results.sizes?.driver.peakLessBaselineBytes).toEqual(measured(532 * MIB));
+    expect(results.sizes?.driver.endDeviceBytes).toEqual(measured(650 * MIB));
+    expect(validateResults(parsed)).toEqual([]);
+  });
+
+  it("writes no block for any other run, whose file reads as before", () => {
+    const results = buildResults({
+      run: runOf(),
+      report: reportOf(),
+      trace: traceOf(),
+      memory: MEMORY,
+    });
+    expect("sizes" in results).toBe(false);
+    expect(summaryMarkdown(results)).not.toContain("## Sizes");
+    expect(validateResults(JSON.parse(JSON.stringify(results)))).toEqual([]);
+  });
+
+  it("refuses a file whose block is malformed", () => {
+    const parsed = fieldsOf(JSON.parse(JSON.stringify(sizedResults())));
+    const sizes = fieldsOf(parsed["sizes"]);
+    expect(
+      validateResults({ ...parsed, sizes: { ...sizes, readouts: { publishes: 1 } } }),
+    ).toContain("sizes.readouts.intervalMs is missing");
+    const { driver: _driver, ...noDriver } = sizes;
+    expect(validateResults({ ...parsed, sizes: noDriver })).toContain(
+      "sizes.driver is not an object",
+    );
+  });
+
+  it("states the option on the summary's launch line, and summarises the block in its own section", () => {
+    const summary = summaryMarkdown(sizedResults());
+    expect(summary).toContain("world terrain-test, style photorealistic, sizes on, window");
+    expect(summary).toContain("## Sizes (R10.T14.b)");
+    expect(summary).toContain("### The lit cache: spike (photorealistic, weight 1)");
+  });
+
+  /** The CLI's launch over the terrain world with `sizes`' arguments, and its run's results. */
+  function launchedWith(sizes: ReadonlyArray<string>): {
+    readonly options: RunDescription["options"];
+    readonly summary: string;
+  } {
+    const launch = parseClientArgs(
+      ["--descent-spike", "--world", "terrain-test", "--setting", "low", ...sizes],
+      "0.1.0",
+    ).spike;
+    if (launch === undefined) {
+      throw new Error("the command line gave a spike launch");
+    }
+    const options = runOptionsOf(launch);
+    const results = buildResults({
+      run: runOf({ world: "terrain-test", style: "photorealistic", options }),
+      report: reportOf(),
+      trace: traceOf(),
+      memory: MEMORY,
+    });
+    return { options, summary: summaryMarkdown(results) };
+  }
+
+  it.each([[[]], [["--sizes", "off"]]])(
+    "records an unmeasured launch's options and launch line as before the option, with %j",
+    (sizes) => {
+      const { options, summary } = launchedWith(sizes);
+      const launchLine = summary.split("\n").find((line) => line.startsWith("- **Launch:**"));
+      expect(["sizes" in options, launchLine?.includes("sizes")]).toEqual([false, false]);
+    },
+  );
+
+  it("records a measured launch's sizes in its options and its launch line", () => {
+    const { options, summary } = launchedWith(["--sizes", "on"]);
+    const launchLine = summary.split("\n").find((line) => line.startsWith("- **Launch:**"));
+    expect([options["sizes"], launchLine?.includes(", sizes on, ")]).toEqual(["on", true]);
+  });
+
+  it("records the horizon map's A/B in its options and its launch line (R10.T15.b)", () => {
+    const off = launchedWith(["--horizon", "off"]);
+    const on = launchedWith(["--horizon", "on"]);
+    expect([
+      off.options["horizon"],
+      launchLineOf(off.summary)?.includes(", horizon map off (the A/B's), "),
+      "horizon" in on.options,
+      launchLineOf(on.summary)?.includes("horizon"),
+    ]).toEqual(["off", true, false, false]);
+  });
+
+  /** The bytes `sizes` adds to a 1,230-second run's results file once Prettier formats it. */
+  async function blockBytes(passes: SizesFixtureOptions["passes"]): Promise<{
+    readonly block: number;
+    readonly file: number;
+  }> {
+    const results = sizedResults(sizesReportOf({ samples: 1230, passes }), longRun(1230));
+    const { sizes: _sizes, ...without } = results;
+    const text = `${JSON.stringify(results, null, 2)}\n`;
+    const formatted = await prettier(text);
+    // The writer's own measure of it, which warns of a file over the limit, agrees.
+    expect(formatAsPrettier(text)).toBe(formatted);
+    const file = Buffer.byteLength(formatted, "utf8");
+    const bare = Buffer.byteLength(await prettier(`${JSON.stringify(without, null, 2)}\n`), "utf8");
+    return { block: file - bare, file };
+  }
+
+  it.each([
+    [
+      "two passes of one view each, low's photorealistic run",
+      [
+        { cache: "lit", views: 1 },
+        { cache: "wireframe", views: 1 },
+      ],
+    ],
+    [
+      "one pass of two views and its stand-in, high's photorealistic run",
+      [
+        { cache: "lit", views: 2 },
+        { cache: "wireframe", views: 0 },
+      ],
+    ],
+  ] as const)(
+    "keeps a 1,230-second run's block within its budget once Prettier formats it, with %s",
+    async (_, passes) => {
+      // 242.4 kB with two passes, the worst case, and 236.0 kB with one of two views and its
+      // stand-in (2026-10-21): each view's five count columns are most of a pass's.
+      expect((await blockBytes(passes)).block).toBeLessThan(SIZES_BLOCK_BUDGET_BYTES);
+    },
+  );
+
+  it("keeps the worst case's whole file under the repository's added-file limit", async () => {
+    // 358.3 kB here, its run's own part 115.9 kB against some 150–165 kB for a terrain run's.
+    const { file } = await blockBytes([
+      { cache: "lit", views: 1 },
+      { cache: "wireframe", views: 1 },
+    ]);
+    expect(file).toBeLessThan(ADDED_FILE_LIMIT_BYTES);
+  });
+});
+
+describe("a results file's untimed passes (R10.T14.c)", () => {
+  /** A run's results over `world`, its report counting `untimed` untimed passes. */
+  function resultsOver(world: RunDescription["world"], untimed: number): DescentResults {
+    return buildResults({
+      run: runOf(
+        world === "terrain-test" ? { world, style: "photorealistic" } : { world, style: null },
+      ),
+      report: reportOf({ untimedPasses: untimed }),
+      trace: traceOf(),
+      memory: MEMORY,
+    });
+  }
+
+  it("counts them over the test planet, in the file and the summary", () => {
+    const results = resultsOver("test-planet", 3);
+    expect([results.gpu.untimedPasses, summaryMarkdown(results)]).toEqual([
+      measured(3),
+      expect.stringContaining("pipelines created after warm-up; 3 untimed passes."),
+    ]);
+  });
+
+  it("claims none over a generated world, whose passes are not counted, saying why", () => {
+    const results = resultsOver("terrain-test", 0);
+    expect([
+      results.gpu.untimedPasses,
+      summaryMarkdown(results),
+      validateResults(JSON.parse(JSON.stringify(results))),
+    ]).toEqual([
+      missing(UNTIMED_NOT_COUNTED),
+      expect.stringContaining(
+        "pipelines created after warm-up; untimed passes — (no pass counted over a generated world).",
+      ),
+      [],
+    ]);
+  });
+
+  it("claims none over a served world either, and names its body in the summary (R10.T15.b)", () => {
+    const results = buildResults({
+      run: runOf({
+        world: "served",
+        style: "photorealistic",
+        options: {
+          setting: "low",
+          seed: "7",
+          world: "served",
+          universe: "000000000000002a",
+          body: "0200080020000000.0300",
+        },
+      }),
+      report: reportOf({ untimedPasses: 0 }),
+      trace: traceOf(),
+      memory: MEMORY,
+    });
+    expect([
+      results.gpu.untimedPasses,
+      validateResults(JSON.parse(JSON.stringify(results))),
+    ]).toEqual([missing(UNTIMED_NOT_COUNTED), []]);
+    expect(summaryMarkdown(results)).toContain(
+      "world served (body 0200080020000000.0300 of universe 000000000000002a), style photorealistic",
+    );
+  });
+
+  it("records a served world's universe and body among the launch's options (R10.T15.b)", () => {
+    const launch = parseClientArgs(
+      [
+        "--descent-spike",
+        "--world",
+        "served",
+        "--universe",
+        "000000000000002a",
+        "--body",
+        "0200080020000000.0300",
+      ],
+      "0.1.0",
+    ).spike;
+    if (launch === undefined) {
+      throw new Error("the command line gave a spike launch");
+    }
+    expect(runOptionsOf(launch)).not.toHaveProperty("served");
+    expect(runOptionsOf(launch)).toMatchObject({
+      world: "served",
+      universe: "000000000000002a",
+      body: "0200080020000000.0300",
+    });
+  });
+
+  it("reads an older file's bare count, as a native replay writes it too, and refuses a count that is not one", () => {
+    const parsed = fieldsOf(JSON.parse(JSON.stringify(resultsOver("test-planet", 2))));
+    const gpu = fieldsOf(parsed["gpu"]);
+    expect(
+      [2, -1, "2", measured(1.5)].map((untimedPasses) =>
+        validateResults({ ...parsed, gpu: { ...gpu, untimedPasses } }),
+      ),
+    ).toEqual([
+      [],
+      ["gpu.untimedPasses is not a count"],
+      ["gpu.untimedPasses is not a count"],
+      ["gpu.untimedPasses is not a count"],
+    ]);
+  });
+});
+
 describe("a native replay's results", () => {
   it("summarise the GPU's frame intervals an offscreen replay records", () => {
     const results = buildResults({
@@ -1974,7 +2396,7 @@ describe("the schema check", () => {
       JSON.stringify({ ...results, version: 1, memory: { samples: MEMORY, ...peaks } }),
     );
     expect(validateResults(v1)).toEqual([
-      `version is not ${RESULTS_VERSION}`,
+      "version is not 6 or 7 or 8 or 9",
       "memory.series is missing",
     ]);
   });
@@ -2313,10 +2735,288 @@ describe("the schema check", () => {
 
   it("refuses version 5", () => {
     const results = twoWindowResults();
-    expect(RESULTS_VERSION).toBe(6);
+    expect(RESULTS_VERSION).toBe(9);
     expect(validateResults(JSON.parse(JSON.stringify({ ...results, version: 5 })))).toEqual([
-      "version is not 6",
+      "version is not 6 or 7 or 8 or 9",
     ]);
+  });
+
+  it("reads a version 6 file, which holds no geometry, and a version 8 file's geometry block (plan R14, R14.T1.f)", () => {
+    const geometry = {
+      settings: {
+        clusterPath: true,
+        casterDepthCull: true,
+        casterStrideCap: 8,
+        overlayDepth: "cluster",
+        litClusters: true,
+        farCascadeRate: 4,
+        figureClusters: true,
+        hullClusters: true,
+        wireClusters: true,
+        pageBytes: 134_217_728,
+        meshTolerancePx: { camera: 1, wireframeOccluder: 0.5 },
+        finClusters: true,
+        strides: "measured",
+        occlusion: "hzb",
+        shading: "visibility",
+        terrainBudget: "triangles",
+        standInStrides: "all",
+        hiddenMarks: "culled",
+        edgeStandIns: "masks",
+        discCells: "packed",
+        figureShading: "screen",
+        terrainPlanetshine: "brightest",
+      },
+      segments: [
+        {
+          segment: "orbit coast",
+          interiorPatches: { frames: 3, p50: 59, max: 61 },
+          edgePatches: { frames: 3, p50: 33, max: 33 },
+          finPatches: { frames: 3, p50: 20, max: 30 },
+          drawnTriangles: { frames: 3, p50: 868_352, max: 880_000 },
+          litClusterTriangles: { frames: 2, p50: 700_000, max: 712_000 },
+          casterTriangles: null,
+          overlayTriangles: { frames: 2, p50: 600_000.5, max: 610_001 },
+        },
+      ],
+    } as const;
+    const results = buildResults({
+      run: runOf(),
+      report: { ...reportOf(), geometry },
+      trace: traceOf(),
+      memory: MEMORY,
+    });
+    const file: unknown = JSON.parse(JSON.stringify(results));
+    const { geometry: _geometry, ...withoutGeometry } = results;
+    expect([
+      results.version,
+      results.geometry,
+      validateResults(file),
+      validateResults(JSON.parse(JSON.stringify({ ...withoutGeometry, version: 6 }))),
+      validateResults(JSON.parse(JSON.stringify({ ...results, version: 6 }))),
+      validateResults(
+        JSON.parse(
+          JSON.stringify({
+            ...results,
+            geometry: { ...geometry, settings: { ...geometry.settings, casterStrideCap: 3 } },
+          }),
+        ),
+      ),
+    ]).toEqual([
+      9,
+      geometry,
+      [],
+      [],
+      ["geometry is a version 7, 8 or 9 file's, not this version's"],
+      ["geometry is not the settings and each segment's counts, every figure of its kind"],
+    ]);
+    const markdown = summaryMarkdown(results);
+    expect(markdown).toContain("## Geometry (plan R14)");
+    expect(markdown).toContain(
+      "overlay depth cluster, the lit pass's interior patches by clusters, far cascades every 4 frames, the mesh bodies' figures by clusters, the hulls' faces by clusters, the wireframe's interior patches by clusters, the mesh page pool's bytes 128 MiB, meshes cut at 1 px in the camera and 0.5 px as the wireframe's occluders, the lit pass's edge patches by clusters, the camera's strides by measured error, occlusion two-pass against the depth pyramid, the lit pass's interior patches shaded by the visibility buffer, the lit selection's budget its patches and lit triangles, the stand-ins strided, on their own grids at the camera's cap and their masks by their bands, the overlay's marks the ground hides culled, the edge bakes' stand-ins on the cluster path where exact, and as level-1 masks across the survey's edge, the disc cells packed, the mesh bodies' figures shaded once a pixel, the terrain lit by its brightest planetshine source.",
+    );
+    expect(markdown).toContain(
+      "| orbit coast | 59 (61) | 33 (33) | 20 (30) | 868,352 (880,000) | 700,000 (712,000) | — | 600,001 (610,001) |",
+    );
+    // The stand-ins on their own grids alone (R14.T3.c's stand-ins).
+    const ownGrids = {
+      ...geometry,
+      settings: { ...geometry.settings, standInStrides: "own-grids" as const },
+    };
+    expect(
+      summaryMarkdown(
+        buildResults({
+          run: runOf(),
+          report: { ...reportOf(), geometry: ownGrids },
+          trace: traceOf(),
+          memory: MEMORY,
+        }),
+      ),
+    ).toContain(
+      "the stand-ins on their own grids at the camera's stride cap, their masks at stride 1, the overlay's marks the ground hides culled, the edge bakes' stand-ins on the cluster path where exact, and as level-1 masks across the survey's edge, the disc cells packed, the mesh bodies' figures shaded once a pixel, the terrain lit by its brightest planetshine source.",
+    );
+    // The edge bakes' stand-ins where exact alone (R14.T3.c's edge stand-ins).
+    const surveyed = {
+      ...geometry,
+      settings: { ...geometry.settings, edgeStandIns: "surveyed" as const },
+    };
+    expect(
+      summaryMarkdown(
+        buildResults({
+          run: runOf(),
+          report: { ...reportOf(), geometry: surveyed },
+          trace: traceOf(),
+          memory: MEMORY,
+        }),
+      ),
+    ).toContain(
+      "the edge bakes' stand-ins on the cluster path where exact, the disc cells packed, the mesh bodies' figures shaded once a pixel, the terrain lit by its brightest planetshine source.",
+    );
+  });
+
+  it("reads a version 7 file's geometry, its five settings, and refuses five settings in a version 8 file or six in a version 7 (plan R14, R14.T6.b)", () => {
+    const settings = {
+      clusterPath: true,
+      casterDepthCull: true,
+      casterStrideCap: 8,
+      overlayDepth: "cluster",
+      litClusters: true,
+    } as const;
+    const segments = [
+      {
+        segment: "orbit coast",
+        interiorPatches: { frames: 3, p50: 59, max: 61 },
+        edgePatches: { frames: 3, p50: 33, max: 33 },
+        finPatches: null,
+        drawnTriangles: { frames: 3, p50: 868_352, max: 880_000 },
+        litClusterTriangles: null,
+        casterTriangles: null,
+        overlayTriangles: null,
+      },
+    ];
+    const results = buildResults({
+      run: runOf(),
+      report: {
+        ...reportOf(),
+        geometry: {
+          settings: {
+            ...settings,
+            farCascadeRate: 1,
+            figureClusters: false,
+            hullClusters: false,
+            wireClusters: false,
+            pageBytes: 0,
+            meshTolerancePx: { camera: 0, wireframeOccluder: 0 },
+            finClusters: false,
+            strides: "off",
+            occlusion: "off",
+            shading: "forward",
+            terrainBudget: "patches",
+            standInStrides: "off",
+            hiddenMarks: "drawn",
+            edgeStandIns: "off",
+            discCells: "per-cell",
+            figureShading: "forward",
+            terrainPlanetshine: "record",
+          },
+          segments,
+        },
+      },
+      trace: traceOf(),
+      memory: MEMORY,
+    });
+    const asFile = (version: number, fields: object): unknown =>
+      JSON.parse(JSON.stringify({ ...results, version, geometry: { settings: fields, segments } }));
+    const malformed = [
+      "geometry is not the settings and each segment's counts, every figure of its kind",
+    ];
+    expect([
+      validateResults(asFile(7, settings)),
+      validateResults(asFile(8, settings)),
+      validateResults(asFile(7, { ...settings, farCascadeRate: 1 })),
+      validateResults(asFile(8, { ...settings, farCascadeRate: 3 })),
+      // A consumer's lever (R14.T4.a) where the file holds it, absent where it was written before.
+      validateResults(asFile(8, { ...settings, farCascadeRate: 1, figureClusters: true })),
+      validateResults(asFile(8, { ...settings, farCascadeRate: 1, figureClusters: "yes" })),
+      // The page pool's bytes (R14.T5.b) the same: a count where the file holds it.
+      validateResults(asFile(8, { ...settings, farCascadeRate: 1, pageBytes: 33_554_432 })),
+      validateResults(asFile(8, { ...settings, farCascadeRate: 1, pageBytes: -1 })),
+      // And the meshes' tolerance (R14.T5.f): two numbers of at least 0 px where the file holds it.
+      validateResults(
+        asFile(8, {
+          ...settings,
+          farCascadeRate: 1,
+          meshTolerancePx: { camera: 2, wireframeOccluder: 0.5 },
+        }),
+      ),
+      validateResults(
+        asFile(8, { ...settings, farCascadeRate: 1, meshTolerancePx: { camera: 2 } }),
+      ),
+      // The edge patches' lever (R14.T1.g) likewise, and their count by clusters.
+      validateResults(asFile(8, { ...settings, farCascadeRate: 1, finClusters: true })),
+      // The camera passes' strides (R14.T3.c): `off` or `measured` where the file holds them.
+      validateResults(asFile(8, { ...settings, farCascadeRate: 1, strides: "measured" })),
+      validateResults(asFile(8, { ...settings, farCascadeRate: 1, strides: "on" })),
+      // The two-pass occlusion (R14.T3.d): `off` or `hzb` where the file holds it.
+      validateResults(asFile(8, { ...settings, farCascadeRate: 1, occlusion: "hzb" })),
+      validateResults(asFile(8, { ...settings, farCascadeRate: 1, occlusion: "none" })),
+      // The lit pass's shading (R14.T2): `forward` or `visibility` where the file holds it.
+      validateResults(asFile(8, { ...settings, farCascadeRate: 1, shading: "visibility" })),
+      validateResults(asFile(8, { ...settings, farCascadeRate: 1, shading: "deferred" })),
+      // The lit selection's budget (R14.T3.e): `patches` or `triangles` where the file holds it.
+      validateResults(asFile(8, { ...settings, farCascadeRate: 1, terrainBudget: "triangles" })),
+      validateResults(asFile(8, { ...settings, farCascadeRate: 1, terrainBudget: "frames" })),
+      // The stand-ins' strides (R14.T3.c's stand-ins): `off`, `own-grids` or `all` where the file
+      // holds it.
+      validateResults(asFile(8, { ...settings, farCascadeRate: 1, standInStrides: "own-grids" })),
+      validateResults(asFile(8, { ...settings, farCascadeRate: 1, standInStrides: "masks" })),
+      // The overlay's hidden marks (R10.T16.c): `drawn` or `culled` where the file holds them.
+      validateResults(asFile(8, { ...settings, farCascadeRate: 1, hiddenMarks: "culled" })),
+      validateResults(asFile(8, { ...settings, farCascadeRate: 1, hiddenMarks: "kept" })),
+      // The edge bakes' stand-ins (R14.T3.c's edge stand-ins): `off`, `surveyed` or `masks` where
+      // the file holds it.
+      validateResults(asFile(8, { ...settings, farCascadeRate: 1, edgeStandIns: "surveyed" })),
+      validateResults(asFile(8, { ...settings, farCascadeRate: 1, edgeStandIns: "all" })),
+      // Plan R07's disc cells: `per-cell` or `packed` where the file holds it.
+      validateResults(asFile(8, { ...settings, farCascadeRate: 1, discCells: "packed" })),
+      validateResults(asFile(8, { ...settings, farCascadeRate: 1, discCells: "pooled" })),
+      // And its figure's shading: `forward` or `screen` where the file holds it.
+      validateResults(asFile(8, { ...settings, farCascadeRate: 1, figureShading: "screen" })),
+      validateResults(asFile(8, { ...settings, farCascadeRate: 1, figureShading: "deferred" })),
+      // And the terrain's planetshine: `record` or `brightest` where the file holds it.
+      validateResults(
+        asFile(8, { ...settings, farCascadeRate: 1, terrainPlanetshine: "brightest" }),
+      ),
+      validateResults(asFile(8, { ...settings, farCascadeRate: 1, terrainPlanetshine: "all" })),
+      validateResults(
+        JSON.parse(
+          JSON.stringify({
+            ...results,
+            version: 8,
+            geometry: {
+              settings: { ...settings, farCascadeRate: 1 },
+              segments: segments.map(({ finPatches: _finPatches, ...before }) => before),
+            },
+          }),
+        ),
+      ),
+    ]).toEqual([
+      [],
+      malformed,
+      malformed,
+      malformed,
+      [],
+      malformed,
+      [],
+      malformed,
+      [],
+      malformed,
+      [],
+      [],
+      malformed,
+      [],
+      malformed,
+      [],
+      malformed,
+      [],
+      malformed,
+      [],
+      malformed,
+      [],
+      malformed,
+      [],
+      malformed,
+      [],
+      malformed,
+      [],
+      malformed,
+      [],
+      malformed,
+      [],
+    ]);
+    expect(summaryMarkdown(results)).toContain(
+      "the lit pass's interior patches by clusters, far cascades every frame, the mesh bodies' figures by their instanced draws, the hulls' faces by their instanced draws, the wireframe's interior patches by the lit mesh, no mesh page pool, meshes cut at 0 px in the camera and 0 px as the wireframe's occluders, the lit pass's edge patches by the lit mesh, the camera's strides off, occlusion off, the lit pass's interior patches shaded forward, the lit selection's budget its patches, the stand-ins at stride 1, the overlay's marks the ground hides drawn, the edge bakes' stand-ins by the lit mesh, the disc cells a cell an invocation, the mesh bodies' figures shaded forward, the terrain lit by every planetshine source.",
+    );
   });
 
   it("refuses a boundary count other than the windows less one", () => {

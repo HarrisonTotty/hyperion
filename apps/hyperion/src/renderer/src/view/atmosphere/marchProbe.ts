@@ -1,0 +1,232 @@
+/**
+ * The inspection profile's probes of the ray march from orbit (plan R08, R08.T8.d; the owner's Mac,
+ * 2026-11-01: from 22 Mm the march took 26% of the M5's GPU at 17.6 µs a workgroup against 5.1 µs
+ * at 390 km). Both are check-only: an inspection profile's `--march-probe` and its census, never a
+ * player's frame.
+ *
+ * @remarks
+ * - {@link marchProbedKernel}: the march with no far-limb footprint, every texel its centre ray
+ *   alone, so that one build's profiles tell the footprint's node rays apart from the rest of the
+ *   march; or without a part of its step's sources (R08.T8.e's measurement), their lookups, all
+ *   but the first or the forward lobes' higher orders, so that they tell each part's share apart.
+ * - {@link MARCH_CENSUS_KERNEL}: the footprint's rays counted over a march's area as its entry point
+ *   marches them (`marchCensus.wgsl`), texel by texel and tile by tile, so that a profile names how
+ *   many texels take how many node rays and how much of the area's work waits on them.
+ */
+
+import { BUFFER_USAGE } from "../engine/gpuFlags";
+import type { KernelPair } from "../engine/kernels";
+import type { BufferHandle, ComputeBindings } from "../engine/types";
+import preciseTrigWgsl from "../shaders/preciseTrig.wgsl?raw";
+import commonWgsl from "./shaders/common.wgsl?raw";
+import farLimbWgsl from "./shaders/farLimb.wgsl?raw";
+import marchAreaWgsl from "./shaders/marchArea.wgsl?raw";
+import marchCensusWgsl from "./shaders/marchCensus.wgsl?raw";
+import oblateWgsl from "./shaders/oblate.wgsl?raw";
+import viewWgsl from "./shaders/view.wgsl?raw";
+
+/**
+ * A probe of the march (`--march-probe`): `centre`, every texel's centre ray alone, as a texel of
+ * w_L 0 is marched, with no footprint formed or marched anywhere (R08.T8.d); or one of the step's
+ * sources (plan R08, R08.T8.e's measurement; the owner's Mac): `depth-zero`, each step's source
+ * lit through no air, its sliced lookup compiled out; `one-source`, the march's first source alone;
+ * `no-lobes`, no forward lobes' higher orders. A measurement's picture, never a player's.
+ */
+export type MarchProbe = "centre" | "depth-zero" | "one-source" | "no-lobes";
+
+/**
+ * The line of the march's entry points (`rayMarchFootprint.wgsl`, `rayMarchCentre.wgsl`) that a
+ * probe replaces: the camera above the top, which every footprint is formed under.
+ */
+const MARCH_ABOVE_LINE = "let above = view.camera.w * view.curvature.z >= medium.topHeightM;";
+
+/** A step's source lit through no air: never shadowed, its transmittance 1, the lobes' depth 0. */
+const NO_LOOKUP_LINE = "let light = SourceLight(1.0, vec3f(1.0), vec3f(0.0));";
+
+/** The line a thin march's step holds where it takes its sources from the sources' table. */
+const TABLED_STEP_LINE = "let tabled = marchTableTakes(";
+
+/**
+ * `depth-zero`'s lines in a march that takes each step's sources per step alone (the thick, deck
+ * and thermal marches, R08.T8.e's table): the step's lookup, the shared read's (`source.wgsl`'s
+ * `sourceInScatteringAt`, which `rayMarchCurves.wgsl`'s step takes) and the read by slot's
+ * (`rayMarchSlots.wgsl`'s `rayMarchSourcesAt`), each source lit through no air.
+ */
+const PER_STEP_DEPTH_ZERO_LINES: ReadonlyArray<readonly [string, string]> = [
+  ["let light = sourceLightAt(body, start, bodyDir, slot);", NO_LOOKUP_LINE],
+  ["let sliced = slicedRayOf(body, oblateBody, start, dir);", ""],
+  ["let read = slicedSlotDepthsOf(sliced, body, slot, lobes);", ""],
+  [
+    "let light = SourceLight(select(1.0, 0.0, sliced.shadowed), exp(-read[0]), read[1]);",
+    NO_LOOKUP_LINE,
+  ],
+];
+
+/**
+ * Each probe's lines of the march's sources and what stands in each one's place, each line at most
+ * once in a march: `centre`'s footprint test ({@link MARCH_ABOVE_LINE}); `depth-zero`'s step's
+ * light in a thin march, each source lit through no air and both its ways, from the sources' table
+ * and by the read's own lookup (`hillaire.ts`' `withMarchSourceTable`), left out, or in a march
+ * per step alone {@link PER_STEP_DEPTH_ZERO_LINES}, the bare ground's, the count's and the pieces'
+ * reads, once a ray, kept; `one-source`'s count of the drawn sources (`source.wgsl`'s
+ * `viewSourceCount`); and `no-lobes`' test (`rayMarch.wgsl`'s `marchRay`).
+ */
+const MARCH_PROBE_LINES: Readonly<Record<MarchProbe, ReadonlyArray<readonly [string, string]>>> = {
+  centre: [[MARCH_ABOVE_LINE, "let above = false;"]],
+  "depth-zero": [
+    [
+      "var light = SourceLight(0.0, vec3f(0.0), vec3f(0.0));",
+      "var light = SourceLight(1.0, vec3f(1.0), vec3f(0.0));",
+    ],
+    ["for (var fromTable = tabled; fromTable; fromTable = false) {", "if (false) {"],
+    ["for (var direct = !tabled; direct; direct = false) {", "if (false) {"],
+  ],
+  "one-source": [
+    ["return min(u32(view.sky.x), MAX_SKY_SOURCES);", "return min(u32(view.sky.x), 1u);"],
+  ],
+  "no-lobes": [["let lobes = hasForwardLobes();", "let lobes = false;"]],
+};
+
+/** The names of the march's kernels, each of which begins with the general march's. */
+const MARCH_KERNEL_PREFIX = "atmosphere ray march";
+
+/**
+ * `pair` under `probe` where it is one of the march's kernels: `centre` holds the camera under the
+ * top in the entry point's footprint test (`let above = false;`), so that no texel forms or marches
+ * a footprint and the tile cull's centre ray classes no tile as the footprint's; `depth-zero`,
+ * `one-source` and `no-lobes` rewrite the step's sources ({@link MARCH_PROBE_LINES}), so that the
+ * code they leave out is compiled out, which SwiftShader's times need (it runs both sides of a
+ * branch). Any other kernel, and a march's that holds none of the probe's lines (its fill), is
+ * `pair` itself. The name is kept, so that a profile's kernels read as they do unprobed.
+ *
+ * @throws Error naming the kernel where its WGSL holds one of the probe's lines more than once.
+ */
+export function marchProbedKernel(pair: KernelPair, probe: MarchProbe): KernelPair {
+  if (!pair.name.startsWith(MARCH_KERNEL_PREFIX)) {
+    return pair;
+  }
+  const rewrite = (wgsl: string): string =>
+    (probe === "depth-zero" && !wgsl.includes(TABLED_STEP_LINE)
+      ? PER_STEP_DEPTH_ZERO_LINES
+      : MARCH_PROBE_LINES[probe]
+    ).reduce((code, [line, probed]) => {
+      const at = code.indexOf(line);
+      if (at < 0) {
+        return code;
+      }
+      if (code.indexOf(line, at + 1) >= 0) {
+        throw new Error(`kernel ${pair.name} holds more than one place for: ${line}`);
+      }
+      return code.replace(line, probed);
+    }, wgsl);
+  const reference = rewrite(pair.reference);
+  return reference === pair.reference
+    ? pair
+    : {
+        ...pair,
+        reference,
+        subgroup: pair.subgroup === null ? null : rewrite(pair.subgroup),
+      };
+}
+
+/**
+ * The far limb's census over a march's area (`marchCensus.wgsl`): dispatched over the march's own
+ * tiles with its uniforms and depth, its counts integers, so read back exactly.
+ */
+export const MARCH_CENSUS_KERNEL: KernelPair = {
+  name: "atmosphere march census",
+  reference: `${preciseTrigWgsl}\n${commonWgsl}\n${viewWgsl}\n${oblateWgsl}\n${farLimbWgsl}\n${marchAreaWgsl}\n${marchCensusWgsl}`,
+  subgroup: null,
+  readback: "bit-exact",
+};
+
+/** The most nodes a footprint takes (`marchCensus.wgsl`'s MARCH_CENSUS_NODES): 2 and 8. */
+export const MARCH_CENSUS_NODES = 10;
+
+/** `marchCensus.wgsl`'s `MarchCensus`, in words: the texels by nodes, then six counts. */
+const MARCH_CENSUS_WORDS = MARCH_CENSUS_NODES + 1 + 6;
+
+/** The census buffer's size, bytes, and its usage: written by the kernel, cleared and read back. */
+export const MARCH_CENSUS_BUFFER = {
+  bytes: MARCH_CENSUS_WORDS * 4,
+  usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_SRC | BUFFER_USAGE.COPY_DST,
+} as const;
+
+/**
+ * A march's far-limb census: what each texel of its area marches under the `area` cover, the
+ * footprint's entry point over every tile, whatever cover drew the frame.
+ */
+export interface MarchCensus {
+  /** The march's kernel the census was taken beside. */
+  readonly kernel: string;
+  /** The texels on the target by their footprints' node rays, 0 to {@link MARCH_CENSUS_NODES}. */
+  readonly texelsByNodes: ReadonlyArray<number>;
+  /** The texels whose footprint's blend is 1, which march their nodes and no centre ray (E4). */
+  readonly wholeMeans: number;
+  /** The texels whose centre ray meets the top's shell ahead of the camera. */
+  readonly centresInAir: number;
+  /** The area's tiles of 8 × 8 texels, the march's workgroups. */
+  readonly tiles: number;
+  /** The tiles that hold a texel with a footprint's node ray. */
+  readonly limbTiles: number;
+  /** The rays marched that meet the shell: each texel's centre ray where it does, and its nodes. */
+  readonly rays: number;
+  /**
+   * The rays as each tile's lanes wait on its slowest texel: its texels on the target times that
+   * texel's rays, summed over the tiles. Over {@link MarchCensus.rays}, the share of the march's
+   * lanes' time spent waiting.
+   */
+  readonly laneRays: number;
+}
+
+/** The census of the words `marchCensus.wgsl` wrote, taken beside `kernel`. */
+export function marchCensusOf(kernel: string, words: Uint32Array): MarchCensus {
+  if (words.length < MARCH_CENSUS_WORDS) {
+    throw new RangeError(
+      `a march census holds ${String(MARCH_CENSUS_WORDS)} words, not ${String(words.length)}`,
+    );
+  }
+  const word = (i: number): number => words[i] ?? 0;
+  const first = MARCH_CENSUS_NODES + 1;
+  return {
+    kernel,
+    texelsByNodes: Array.from(words.subarray(0, first)),
+    wholeMeans: word(first),
+    centresInAir: word(first + 1),
+    tiles: word(first + 2),
+    limbTiles: word(first + 3),
+    rays: word(first + 4),
+    laneRays: word(first + 5),
+  };
+}
+
+/**
+ * The census's bindings beside a dispatch of `kernel` with `bindings`, given the buffer it counts
+ * into, or `null` where it is not a march's footprint over an area: one of the march's kernels but
+ * its tile cull's centre ray's, dispatched with the medium, the view and the area, the scene's depth
+ * and the body's table, as every footprint's entry point is, thin or thick, deck or thermal.
+ */
+export function marchCensusBindingsOf(
+  kernel: string,
+  bindings: ComputeBindings,
+): ((census: BufferHandle) => ComputeBindings) | null {
+  const { medium, view, marchArea } = bindings.uniforms;
+  const { sceneDepth, oblateBody } = bindings.sampled;
+  if (
+    !kernel.startsWith(MARCH_KERNEL_PREFIX) ||
+    kernel.includes("at the centre ray") ||
+    medium === undefined ||
+    view === undefined ||
+    marchArea === undefined ||
+    sceneDepth === undefined ||
+    oblateBody === undefined
+  ) {
+    return null;
+  }
+  return (census) => ({
+    uniforms: { medium, view, marchArea },
+    buffers: { census },
+    sampled: { sceneDepth, oblateBody },
+    storage: {},
+  });
+}

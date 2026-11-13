@@ -11,8 +11,22 @@
 //! Plan 13 adds a row for each substellar band after the five stellar rows. Those rows hold objects
 //! per system of the column, not shares: a layer's density is `Σ row × density` either way, so the
 //! thinning needs nothing else (plan 13, Design notes 2 and 3).
+//!
+//! Plan 08 installs its displaced classes here (P08.T12.a), from generator version 27. The matrix
+//! is keyed by
+//! population, while the sub-discs of different ages keep different shares of their layer-E
+//! budgets in the field, so each field component gets a factor of its own: the share of its band
+//! budget its field keeps, the class table's `stay_share` in rows D and E and 1 elsewhere, which
+//! [`component_share`](ShareMatrix::component_share) multiplies in. [`share`](ShareMatrix::share)
+//! stays the budget's share, the population's whole band share, which the class weights multiply
+//! (Design note 15). The displaced columns after the populations' hold each class's systems inside
+//! the root cube in rows D and E (its class weight times its source's band budget) and 0 in the
+//! other rows, the weight its density, normalised over the cube, takes
+//! (`displaced_share`). A matrix the build has installed nothing in
+//! has neither, and reads as it always did.
 
-use super::fields::Component;
+use super::displaced::DisplacedClassId;
+use super::fields::{Component, MAX_COMPONENTS};
 use super::imf::{BandShares, MassBand};
 use super::{POPULATIONS, Population};
 
@@ -48,7 +62,14 @@ pub struct ShareMatrix {
     columns: usize,
     /// Row-major, one row per band in [`MassBand::index`] order: `shares[band × columns + column]`.
     shares: Box<[f64]>,
+    /// The share of each field component's band budget its field keeps, row-major by band and
+    /// component, `kept[band × MAX_COMPONENTS + component]`: `None` until the displaced classes are
+    /// installed ([`with_displaced`](Self::with_displaced)).
+    kept: Option<Box<[f64]>>,
 }
+
+/// The number of rows: the five stellar bands, then the two substellar ones.
+const ROWS: usize = MassBand::ALL.len() + MassBand::SUBSTELLAR.len();
 
 impl ShareMatrix {
     /// Every column set to the mass function's band shares, as the brainstorm has it for the
@@ -68,6 +89,50 @@ impl ShareMatrix {
                 .chain(MassBand::SUBSTELLAR.map(|_| 0.0))
                 .flat_map(|share| std::iter::repeat_n(share, columns))
                 .collect(),
+            kept: None,
+        }
+    }
+
+    /// The same matrix with plan 08's displaced classes installed (P08.T12.a; module
+    /// documentation): `stay[c]`, field component `c`'s stay shares in layers D and E, becomes its
+    /// factor in rows D and E, and `counts[k]`, class `k`'s systems inside the cube in layers D and
+    /// E, its column in those rows, after the populations'; every other row's factor is 1 and its
+    /// displaced columns 0.
+    ///
+    /// The population columns, and so [`share`](Self::share), are untouched bit for bit.
+    ///
+    /// # Panics
+    ///
+    /// If `stay` holds more than [`MAX_COMPONENTS`] components, which no galaxy's fields do.
+    #[must_use]
+    pub(crate) fn with_displaced(self, stay: &[[f64; 2]], counts: &[[f64; 2]]) -> Self {
+        assert!(
+            stay.len() <= MAX_COMPONENTS,
+            "{} components exceed MAX_COMPONENTS",
+            stay.len()
+        );
+        let columns = POPULATION_COLUMNS + counts.len();
+        let mut shares = Vec::with_capacity(ROWS * columns);
+        let mut kept = vec![1.0; ROWS * MAX_COMPONENTS];
+        for row in 0..ROWS {
+            let slot = match row {
+                r if r == MassBand::D.index() => Some(0),
+                r if r == MassBand::E.index() => Some(1),
+                _ => None,
+            };
+            let start = row * self.columns;
+            shares.extend_from_slice(&self.shares[start..start + POPULATION_COLUMNS]);
+            shares.extend(counts.iter().map(|count| slot.map_or(0.0, |b| count[b])));
+            if let Some(b) = slot {
+                for (factor, share) in kept[row * MAX_COMPONENTS..].iter_mut().zip(stay) {
+                    *factor = share[b];
+                }
+            }
+        }
+        Self {
+            columns,
+            shares: shares.into_boxed_slice(),
+            kept: Some(kept.into_boxed_slice()),
         }
     }
 
@@ -98,12 +163,31 @@ impl ShareMatrix {
         self.shares[band.index() * self.columns + population.index()]
     }
 
-    /// The share of `component`'s systems in `band`: its population's. A component's density
-    /// already holds its share of its population, so a layer's density is the sum of this times
-    /// each component's density.
+    /// The share of `component`'s systems in `band` that its field holds: its population's, times
+    /// the share of its band budget its field keeps once the displaced classes are installed (the
+    /// class table's `stay_share` in layers D and E, P08.T12.a). A component's density already
+    /// holds its share of its population, so a layer's density is the sum of this times each
+    /// component's density, and then of each displaced class's
+    /// `displaced_share` times its density.
     #[must_use]
     pub fn component_share(&self, band: MassBand, component: &Component) -> f64 {
-        self.share(band, component.population())
+        let share = self.share(band, component.population());
+        match &self.kept {
+            None => share,
+            Some(kept) => share * kept[band.index() * MAX_COMPONENTS + component.id().index()],
+        }
+    }
+
+    /// Displaced class `id`'s column in `band`: its systems inside the root cube in layers D and E
+    /// once the classes are installed (P08.T12.a), the weight its density, normalised over the
+    /// cube, takes in the layer's sum; 0 in every other band, and everywhere before then.
+    #[must_use]
+    pub(crate) fn displaced_share(&self, band: MassBand, id: DisplacedClassId) -> f64 {
+        self.shares
+            .get(band.index() * self.columns + POPULATION_COLUMNS + id.index())
+            .copied()
+            .filter(|_| POPULATION_COLUMNS + id.index() < self.columns)
+            .unwrap_or(0.0)
     }
 
     /// The number of columns: the [`POPULATION_COLUMNS`] populations, then the displaced classes.
@@ -122,7 +206,7 @@ impl ShareMatrix {
     /// The bytes the matrix owns on the heap.
     #[must_use]
     pub(crate) fn heap_bytes(&self) -> usize {
-        size_of_val(&*self.shares)
+        size_of_val(&*self.shares) + self.kept.as_deref().map_or(0, size_of_val)
     }
 }
 

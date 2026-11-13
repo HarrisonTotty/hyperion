@@ -7,32 +7,85 @@ import { IDENTITY_ROTATION } from "../../view/coords/rotation";
 import { sceneOrigins, type ViewBody, type ViewBodyKind } from "../../view/scene/model";
 import { KEPT_BARYCENTRE, type KeptScene } from "../../view/scenes/kept";
 import { eclipseScene } from "../../view/scenes/eclipseScene";
-import { FRAME_CHANGE_MOON, frameChangeScene } from "../../view/scenes/frameChange";
+import {
+  FRAME_CHANGE_MOON,
+  FRAME_CHANGE_PLANET,
+  frameChangeScene,
+} from "../../view/scenes/frameChange";
 import { precisionScene } from "../../view/scenes/precision";
 import { phaseScene } from "../../view/scenes/phaseScene";
-import type { SystemIdHex } from "@hyperion/protocol";
-import { aViewScene } from "../../test/viewFixtures";
+import { ATMOSPHERE_STARS } from "../../view/scenes/atmosphereScene";
+import type { SystemIdHex, UniverseTime } from "@hyperion/protocol";
+import { type SceneFrame, sceneAt, shipObserver } from "../../lib/scene/apparent";
+import { FIXTURE_EARTH } from "../../test/planetaryFixture";
+import {
+  SCENE_CHARTED_PLACE,
+  SCENE_DESIGNATION,
+  sceneModelOf,
+  stateInSystem,
+  stateNearEarth,
+} from "../../test/sceneFixture";
+import { servedRun } from "../../test/servedRun";
+import { galacticPositionFromLy } from "@hyperion/protocol";
+import { toSystemBodiesModel } from "../../lib/system/bodiesWire";
+import {
+  FIXTURE_SYSTEM as SLICE_SYSTEM,
+  FIXTURE_UNIVERSE,
+  sliceBodies,
+} from "../../test/planetaryFixture";
+import { inspectionScene } from "../../view/scenes/inspectionScene";
+import { viewSceneFromServer } from "../../view/scene/fromServer";
+import {
+  aViewCraft,
+  aViewScene,
+  FIXTURE_MOON,
+  FIXTURE_PLANET,
+  FIXTURE_SHIP,
+  FIXTURE_SYSTEM,
+  NO_TURN,
+} from "../../test/viewFixtures";
 
 import { rotate } from "../../view/camera/quaternion";
 import {
   cameraReading,
+  commandCutsImage,
   commandRun,
+  contourIntervalLine,
   followRun,
+  framedRun,
   lookReading,
   photorealStatements,
+  PHOTOREAL_PREPARING,
+  POSITIONS_FROM_SHIP,
+  frameBody,
   frameName,
   freeRateReading,
+  instrumentPhotorealStatements,
+  type LabelLine,
   labelLines,
+  type LabelStatement,
   labelStatements,
   markRows,
   rangesFromCamera,
+  ROTATION_NOT_MODELLED,
+  ROTATION_NOT_RESOLVED,
   SCENE_OPTIONS,
   sceneClockReading,
+  sceneStarsStandIn,
+  slantRangeFromCamera,
+  STAR_SOURCE,
   type ViewRun,
   startInstrumentRun,
   startRun,
   startServerRun,
   stepRun,
+  statementGroups,
+  statementText,
+  surveyEdgeNotes,
+  whiteBalanceReading,
+  withGridLine,
+  withWhiteBalanceLine,
+  withSceneStarsLine,
 } from "./viewRun";
 
 const STILL = { serverScene: null, dtS: 0, held: new Set<string>(), reducedMotion: false };
@@ -70,6 +123,26 @@ function unrotated(kept: KeptScene): KeptScene {
 function turning(kept: KeptScene): KeptScene {
   return withBodies(kept, (body) =>
     body.kind === "star" ? body : { ...body, rotation: body.rotation ?? IDENTITY_ROTATION },
+  );
+}
+
+/**
+ * A kept scene whose moon's rotation the granted detail level withholds, its radius kept: a
+ * hand-built body, since no server sends a radius beside a withheld rotation today.
+ */
+function withheldMoon(kept: KeptScene): KeptScene {
+  return withBodies(kept, (body) =>
+    body.id === FRAME_CHANGE_MOON ? { ...body, rotation: null, rotationNotResolved: true } : body,
+  );
+}
+
+/**
+ * The frame-change scene with its planet's rotation not modelled and its moon's withheld
+ * ({@link withheldMoon}), each with its radius.
+ */
+function planetNotModelledMoonWithheld(): KeptScene {
+  return withBodies(withheldMoon(turning(frameChangeScene())), (body) =>
+    body.id === FRAME_CHANGE_PLANET ? { ...body, rotation: null } : body,
   );
 }
 
@@ -125,6 +198,37 @@ describe("a view's run", () => {
     expect([eased.camera.move === null, reduced.camera.move === null]).toEqual([false, true]);
   });
 
+  it.each([
+    {
+      name: "a preset's cut",
+      action: { kind: "preset", preset: "chase" },
+      options: CUT,
+      cuts: true,
+    },
+    { name: "a target's cut", action: { kind: "target", step: 1 }, options: CUT, cuts: true },
+    {
+      name: "an eased preset",
+      action: { kind: "preset", preset: "chase" },
+      options: { easedMoves: true, reducedMotion: false },
+      cuts: false,
+    },
+    {
+      name: "a field of view's step",
+      action: { kind: "fov", step: -1 },
+      options: CUT,
+      cuts: false,
+    },
+    {
+      name: "a style's change",
+      action: { kind: "style", style: "toggle" },
+      options: CUT,
+      cuts: false,
+    },
+  ] as const)("says whether $name cuts the image for its exposure", ({ action, options, cuts }) => {
+    const run = startRun(precisionScene());
+    expect(commandCutsImage(action, done(commandRun(run, action, options)))).toBe(cuts);
+  });
+
   it("steps the field of view", () => {
     const narrower = done(commandRun(startRun(precisionScene()), { kind: "fov", step: -1 }, CUT));
     expect(narrower.camera.fovDeg).toBe(45);
@@ -166,6 +270,45 @@ describe("a view's run", () => {
 function forward(run: ViewRun) {
   return rotate(run.camera.pose.orientation, vec3(0, 0, -1));
 }
+
+/** The slice's Earth's body inspection. */
+function earthInspection(): KeptScene {
+  const result = toSystemBodiesModel(sliceBodies(), "H7K 4C0RFZ D-7");
+  if (result.kind !== "ok") {
+    throw new Error(`the slice's answer is unusable: ${result.fault}`);
+  }
+  return inspectionScene({
+    universe: FIXTURE_UNIVERSE,
+    place: {
+      kind: "charted",
+      system: SLICE_SYSTEM,
+      designation: "H7K 4C0RFZ D-7",
+      barycentre: galacticPositionFromLy([26_000, 0, 12]),
+    },
+    model: result.model,
+    bodies: result.bodies,
+    body: FIXTURE_EARTH,
+    time: { seconds: 0, nanos: 0 },
+  });
+}
+
+describe("a run framed on its view's aspect (the owner's request)", () => {
+  it("takes the kept scene's pose for the aspect while its camera is free", () => {
+    const kept = earthInspection();
+    const framed = framedRun(startRun(kept), 1.26);
+    expect(framed.camera.pose).toEqual(kept.framedPoseFor?.(1.26));
+    expect(framed.camera.style).toBe("photorealistic");
+  });
+
+  it("leaves a scene that frames nothing, and a camera at its seat, as they are", () => {
+    const precision = startRun(precisionScene());
+    expect(framedRun(precision, 1.26)).toBe(precision);
+    const pose = earthInspection().cameraAt(0);
+    const seated = startRun({ ...precisionScene(), framedPoseFor: () => pose });
+    expect(seated.camera.preset).toBe("seat");
+    expect(framedRun(seated, 1.26)).toBe(seated);
+  });
+});
 
 describe("a view's run turned by a drag or the arrows (R07.T19.f)", () => {
   const turn = { yawRad: 0.3, pitchRad: 0 };
@@ -238,6 +381,41 @@ describe("the label block", () => {
     ]);
   });
 
+  it("reads STARS as SCENE TEST FIELD while the scene's own field is drawn, the source otherwise (decision-r08-t10b-ux §1)", () => {
+    const lines = labelLines(startRun(precisionScene()), DEFAULT_EXPOSURE);
+    const stars = (sceneStars: boolean): string | undefined =>
+      withSceneStarsLine(lines, sceneStars).find((line) => line.label === "STARS")?.value;
+    expect([stars(true), stars(false)]).toEqual(["SCENE TEST FIELD", STAR_SOURCE]);
+  });
+
+  it.each<readonly [string, boolean, "wireframe" | "photorealistic", boolean]>([
+    ["photorealistic with its GRID at OFF", false, "photorealistic", true],
+    ["photorealistic with its GRID at ON", true, "photorealistic", false],
+    ["in the wireframe, whose grid stands whatever it is", false, "wireframe", false],
+  ])(
+    "states GRID OFF after STYLE %s (the owner's request, 2026-10-31)",
+    (_, grid, drawn, states) => {
+      const labels = withGridLine(
+        labelLines(startRun(precisionScene()), DEFAULT_EXPOSURE),
+        grid,
+        drawn,
+      ).map((line) => `${line.label} ${line.value}`);
+      const style = labels.findIndex((line) => line.startsWith("STYLE "));
+      expect(labels[style + 1] === "GRID OFF").toBe(states);
+    },
+  );
+
+  it("stands the scene's own stars in only with no interim field and no sky drawn", () => {
+    const own = ATMOSPHERE_STARS;
+    const interim = own.slice(0, 1);
+    expect([
+      sceneStarsStandIn(own, [], false),
+      sceneStarsStandIn(own, interim, false),
+      sceneStarsStandIn(own, [], true),
+      sceneStarsStandIn([], [], false),
+    ]).toEqual([true, false, false, false]);
+  });
+
   it("reads the camera's preset, and in FREE its rate after a middle dot (R07.T19.b)", () => {
     const seat = startRun(precisionScene());
     const free = done(commandRun(seat, { kind: "preset", preset: "free" }, CUT));
@@ -273,6 +451,13 @@ describe("the label block", () => {
     const seat = startRun(precisionScene());
     const chase = done(commandRun(seat, { kind: "preset", preset: "chase" }, CUT));
     expect([offHull(seat), offHull(chase)]).toEqual([false, true]);
+  });
+
+  it("says the body inspection's positions are seen from its body, in SHIP's place", () => {
+    const statements = labelStatements(startRun(earthInspection()));
+    expect(
+      statements.filter((statement) => statement.startsWith("POSITIONS AS SEEN FROM")),
+    ).toEqual(["POSITIONS AS SEEN FROM H7K 4C0RFZ D-7 /768"]);
   });
 
   it("says ROTATION: NOT YET MODELLED while a planet or moon with a radius has no rotation", () => {
@@ -311,6 +496,54 @@ describe("the label block", () => {
     expect(labelStatements(run, null)).toEqual(["ROTATION: NOT YET MODELLED"]);
   });
 
+  it("adds DECORATION ON after the terrain annunciation only where it is asked (R11.T1)", () => {
+    const run = startRun(unrotated(frameChangeScene()));
+    expect(labelStatements(run, "TERRAIN: STREAMING", true)).toEqual([
+      "ROTATION: NOT YET MODELLED",
+      "TERRAIN: STREAMING",
+      "DECORATION ON",
+    ]);
+    expect(labelStatements(run, null, false)).toEqual(["ROTATION: NOT YET MODELLED"]);
+  });
+
+  // The not-resolved fixtures below are hand-built: no server sends a radius beside a withheld
+  // rotation today, since the rotation is withheld with the bulk (rotation-not-resolved).
+
+  it("names the two rotation notes as the guide's rows have them", () => {
+    expect([ROTATION_NOT_MODELLED, ROTATION_NOT_RESOLVED]).toEqual([
+      "ROTATION: NOT YET MODELLED",
+      "ROTATION: NOT RESOLVED",
+    ]);
+  });
+
+  it("says ROTATION: NOT RESOLVED while a moon with a radius has its rotation withheld", () => {
+    const run = startRun(withheldMoon(turning(frameChangeScene())));
+    expect(labelStatements(run)).toEqual(["ROTATION: NOT RESOLVED"]);
+  });
+
+  it("states ROTATION: NOT RESOLVED directly after ROTATION: NOT YET MODELLED, one body withheld and another not modelled", () => {
+    const run = startRun(planetNotModelledMoonWithheld());
+    expect(labelStatements(run)).toEqual(["ROTATION: NOT YET MODELLED", "ROTATION: NOT RESOLVED"]);
+  });
+
+  it("adds the terrain annunciation after both rotation notes", () => {
+    const run = startRun(planetNotModelledMoonWithheld());
+    expect(labelStatements(run, "TERRAIN: STREAMING")).toEqual([
+      "ROTATION: NOT YET MODELLED",
+      "ROTATION: NOT RESOLVED",
+      "TERRAIN: STREAMING",
+    ]);
+  });
+
+  it("states no rotation note for a withheld moon with no radius", () => {
+    const run = startRun(
+      withBodies(withheldMoon(turning(frameChangeScene())), (body) =>
+        body.id === FRAME_CHANGE_MOON ? { ...body, radiusM: 0 } : body,
+      ),
+    );
+    expect([unrotatedKinds(run), labelStatements(run)]).toEqual([["star", "moon"], []]);
+  });
+
   it("names the system and galactic frames", () => {
     const { scene } = startRun(precisionScene());
     expect([
@@ -332,12 +565,12 @@ describe("the label block", () => {
     ).toBe(`BODY ${body?.designation ?? ""}`);
   });
 
-  it("states ECLIPSE TEST's clock rate after its name, SCENE CLOCK ×100 (R07.T16.k)", () => {
+  it("states ECLIPSE TEST's clock rate after its name, SCENE CLOCK 100 s/s (R07.T16.k)", () => {
     const lines = labelLines(startRun(eclipseScene()), DEFAULT_EXPOSURE);
     const scene = lines.findIndex((line) => line.label === "SCENE");
     expect(lines.slice(scene)).toEqual([
       { label: "SCENE", value: "ECLIPSE TEST" },
-      { label: "SCENE CLOCK", value: "×100" },
+      { label: "SCENE CLOCK", value: "100 s/s" },
     ]);
   });
 
@@ -360,9 +593,9 @@ describe("the label block", () => {
 
   it("reads a kept scene's clock rate as a whole number, grouped from five digits (R07.T16.k)", () => {
     expect([sceneClockReading(100), sceneClockReading(1_000), sceneClockReading(86_400)]).toEqual([
-      "×100",
-      "×1000",
-      "×86,400",
+      "100 s/s",
+      "1000 s/s",
+      "86,400 s/s",
     ]);
   });
 
@@ -370,6 +603,62 @@ describe("the label block", () => {
     expect(
       SCENE_OPTIONS.map(({ name, make }) => [name, Number.isInteger(make().sceneAt(0).timeRate)]),
     ).toEqual(SCENE_OPTIONS.map(({ name }) => [name, true]));
+  });
+
+  describe("the wireframe's contour interval (R10.T11; the guide's Views)", () => {
+    it("states it directly after the field of view, the picture's other scale, while the view draws its terrain", () => {
+      const lines = labelLines(startRun(precisionScene()), DEFAULT_EXPOSURE, false, 200);
+      expect(lines.map((line) => line.label)).toEqual([
+        "FRAME",
+        "TIME",
+        "STYLE",
+        "CAMERA",
+        "FOV",
+        "CONTOUR INTERVAL",
+        "EXPOSURE",
+        "STARS",
+        "SCENE",
+      ]);
+    });
+
+    it.each([
+      [200, "200 m · INDEX 1 km"],
+      [2_000, "2 km · INDEX 10 km"],
+    ])("reads an interval of %d m as %s", (intervalM, reading) => {
+      expect(
+        labelLines(startRun(precisionScene()), DEFAULT_EXPOSURE, false, intervalM).find(
+          (line) => line.label === "CONTOUR INTERVAL",
+        )?.value,
+      ).toBe(reading);
+    });
+
+    it("states none while the view draws no terrain", () => {
+      expect(
+        labelLines(startRun(precisionScene()), DEFAULT_EXPOSURE, false, null).some(
+          (line) => line.label === "CONTOUR INTERVAL",
+        ),
+      ).toBe(false);
+    });
+
+    it("never marks it stale, a statement of the picture drawn, while the scene's time is", () => {
+      const server = startServerRun(aViewScene());
+      const lines = labelLines(server, DEFAULT_EXPOSURE, true, 200);
+      const line = lines.find((each) => each.label === "CONTOUR INTERVAL");
+      expect([
+        lines.find((each) => each.label === "TIME")?.stale,
+        line?.stale,
+        line?.fields?.map((field) => field.stale),
+      ]).toEqual([true, undefined, [false]]);
+    });
+
+    it("sets the interval in a field of its longest reading's width and the index in none, its dot leading the index", () => {
+      expect(contourIntervalLine(500)).toEqual({
+        label: "CONTOUR INTERVAL",
+        value: "500 m · INDEX 2.5 km",
+        fields: [{ text: "500 m", widthCh: 8, stale: false }],
+        dotsLead: true,
+      });
+    });
   });
 
   it("names the scene only in a kept scene", () => {
@@ -541,6 +830,64 @@ describe("the style", () => {
     ]);
   });
 
+  it("states the atmosphere's notes after the bodies' labels, a server's failure as a fault's status (R08.T10.b)", () => {
+    const photoreal = done(
+      commandRun(startRun(phaseScene()), { kind: "style", style: "toggle" }, CUT, BOTH),
+    );
+    const albedo = ["BODY PHOTOMETRY: NOT YET MODELLED"] as const;
+    const failed = "ATMOSPHERE REJECTED: for TEST GIANT, internal error, reopen VIEW to retry";
+    expect(
+      photorealStatements(photoreal, "lit", "photorealistic", albedo, {
+        labels: ["atmosphereNotYetModelled", "atmosphereNotResolved", "atmosphereApproximate"],
+        plate: [{ statement: failed, refusal: false }],
+        approximate: [],
+        fault: [],
+      }),
+    ).toEqual([
+      ...albedo,
+      "ATMOSPHERE: NOT YET MODELLED",
+      "ATMOSPHERE: NOT RESOLVED",
+      { text: failed, standing: "fault" },
+      "ATMOSPHERE: APPROXIMATE",
+    ]);
+  });
+
+  it("states each of APPROXIMATE's reasons on a line of its own straight after it, as a sentence, the other notes unmoved (R08.T10.c, R08.T10.d)", () => {
+    const photoreal = done(
+      commandRun(startRun(phaseScene()), { kind: "style", style: "toggle" }, CUT, BOTH),
+    );
+    const albedo = ["BODY PHOTOMETRY: NOT YET MODELLED"] as const;
+    const reasons = [
+      "Multiple scattering: drawn by the thin-atmosphere method beyond its checked range, for TEST GIANT",
+      "H2O: its absorption estimated, not measured, for TEST GIANT and TEST PLANET 0°",
+    ];
+    expect(
+      photorealStatements(photoreal, "lit", "photorealistic", albedo, {
+        labels: ["aerosolsNotYetModelled", "atmosphereApproximate"],
+        plate: [],
+        approximate: reasons,
+        fault: [],
+      }),
+    ).toEqual([
+      ...albedo,
+      "AEROSOLS AND ABSORBERS: NOT YET MODELLED",
+      "ATMOSPHERE: APPROXIMATE",
+      ...reasons.map((text) => ({ text, standing: "sentence" })),
+    ]);
+  });
+
+  it("states no atmosphere note in the wireframe", () => {
+    const run = startRun(phaseScene());
+    expect(
+      photorealStatements(run, "lit", "wireframe", [], {
+        labels: ["atmosphereNotYetModelled", "atmosphereApproximate"],
+        plate: [],
+        approximate: ["H2O: its absorption estimated, not measured, for TEST GIANT"],
+        fault: [],
+      }),
+    ).toEqual([]);
+  });
+
   it("states the craft's photometry with a craft, composed with the bodies' note (R07.T16.e)", () => {
     // PRECISION TEST: a planet and its moon, and the own ship.
     const wireframe = startRun(precisionScene());
@@ -625,5 +972,288 @@ describe("an instrument's run (R07.T19)", () => {
       { dtS: 0, held: new Set(), reducedMotion: true },
     );
     expect([moved.camera.preset, moved.camera.target]).toEqual(["chase", null]);
+  });
+});
+
+describe("an instrument's photorealistic statements (decision-r07-t19-layout, item 5; R08.T10.d)", () => {
+  const note = "ATMOSPHERE: APPROXIMATE";
+  const thick: LabelStatement = {
+    text: "Multiple scattering: drawn by the thin-atmosphere method beyond its checked range, for KX 4417 /2",
+    standing: "sentence",
+  };
+  const water: LabelStatement = {
+    text: "H2O: its absorption estimated, not measured, for KX 4417 /3",
+    standing: "sentence",
+  };
+  const albedo = "BODY PHOTOMETRY: NOT YET MODELLED";
+
+  it("drops each statement the primary's block shows already", () => {
+    expect(instrumentPhotorealStatements([albedo, "LIGHTING: PENDING"], [albedo])).toEqual([
+      "LIGHTING: PENDING",
+    ]);
+  });
+
+  it("keeps its own PHOTOREALISTIC: PREPARING, though the primary shows it", () => {
+    expect(instrumentPhotorealStatements([PHOTOREAL_PREPARING], [PHOTOREAL_PREPARING])).toEqual([
+      PHOTOREAL_PREPARING,
+    ]);
+  });
+
+  it("keeps a note with no reason of its own where the primary lacks the note", () => {
+    expect(instrumentPhotorealStatements([albedo, note], [albedo])).toEqual([note]);
+  });
+
+  it("keeps ATMOSPHERE: APPROXIMATE straight above a reason of its own the primary lacks, though the primary shows the note", () => {
+    expect(
+      instrumentPhotorealStatements([albedo, note, water, thick], [albedo, note, water]),
+    ).toEqual([note, thick]);
+  });
+
+  it("shows neither the note nor a reason where all its reasons are the primary's", () => {
+    expect(instrumentPhotorealStatements([albedo, note, water], [albedo, note, water])).toEqual([]);
+  });
+
+  it("shows its note and its reasons where the primary shows neither", () => {
+    expect(instrumentPhotorealStatements([albedo, note, water], [albedo])).toEqual([note, water]);
+  });
+});
+
+describe("the statements' groups, by which the plate folds a note's reasons (2026-11-01)", () => {
+  const note = "ATMOSPHERE: APPROXIMATE";
+  const water: LabelStatement = {
+    text: "H2O: its absorption estimated, not measured, for KX 4417 /3",
+    standing: "sentence",
+  };
+  const failed: LabelStatement = { text: "ATMOSPHERE REJECTED: KX 4417 /2", standing: "fault" };
+
+  it("sets each sentence with the note before it", () => {
+    expect(
+      statementGroups([POSITIONS_FROM_SHIP, note, water, failed]).map(({ statement, reasons }) => [
+        statementText(statement),
+        reasons.length,
+      ]),
+    ).toEqual([
+      [POSITIONS_FROM_SHIP, 0],
+      [note, 1],
+      [failed.text, 0],
+    ]);
+  });
+
+  it("sets a sentence after a request's status as a group of its own", () => {
+    expect(statementGroups([failed, water]).map(({ reasons }) => reasons.length)).toEqual([0, 0]);
+  });
+});
+
+describe("surveyEdgeNotes (R10.T16.c; decision-r10-t16-review §1)", () => {
+  const scene = aViewScene();
+
+  it("gives one note a body, nearest first", () => {
+    const notes = surveyEdgeNotes(scene, [
+      { body: FIXTURE_PLANET, nearestRangeM: 9_000 },
+      { body: FIXTURE_MOON, nearestRangeM: 412 },
+    ]);
+    expect(notes.map((note) => note.text)).toEqual([
+      "SURVEY EDGE TEST MOON 412 m",
+      "SURVEY EDGE TEST PLANET 9.00 km",
+    ]);
+  });
+
+  it("breaks a tie of ranges by the designation", () => {
+    const notes = surveyEdgeNotes(scene, [
+      { body: FIXTURE_PLANET, nearestRangeM: 4_210 },
+      { body: FIXTURE_MOON, nearestRangeM: 4_210 },
+    ]);
+    expect(notes.map((note) => note.designation)).toEqual(["TEST MOON", "TEST PLANET"]);
+  });
+
+  it("gives no note for an edge with no point seen", () => {
+    expect(surveyEdgeNotes(scene, [{ body: FIXTURE_MOON, nearestRangeM: null }])).toEqual([]);
+  });
+
+  it("labels its range FROM CAMERA in a scene with no own ship", () => {
+    const notes = surveyEdgeNotes(aViewScene({ craft: [], ownShip: null }), [
+      { body: FIXTURE_MOON, nearestRangeM: 412 },
+    ]);
+    expect(notes[0]?.text).toBe("SURVEY EDGE TEST MOON 412 m FROM CAMERA");
+  });
+
+  it("keeps each body's unit from the notes last shown", () => {
+    const shown = surveyEdgeNotes(scene, [{ body: FIXTURE_MOON, nearestRangeM: 990 }]);
+    const next = surveyEdgeNotes(scene, [{ body: FIXTURE_MOON, nearestRangeM: 1_020 }], shown);
+    expect(next[0]?.reading).toBe("1020 m");
+  });
+
+  it("drops a body's unit once its edge has left the view", () => {
+    const shown = surveyEdgeNotes(scene, [{ body: FIXTURE_MOON, nearestRangeM: 990 }]);
+    const gone = surveyEdgeNotes(scene, [], shown);
+    const back = surveyEdgeNotes(scene, [{ body: FIXTURE_MOON, nearestRangeM: 1_020 }], gone);
+    expect(back[0]?.reading).toBe("1.02 km");
+  });
+});
+
+describe("the terrain lines' body and range label (R10.T12)", () => {
+  it("takes a body frame's body as the FRAME body", () => {
+    const scene = aViewScene();
+    expect(frameBody({ kind: "body", body: FIXTURE_MOON }, scene)?.designation).toBe("TEST MOON");
+  });
+
+  it("takes a craft frame's body from the frame the craft's position is in, as frameName does", () => {
+    const scene = aViewScene();
+    expect(frameBody({ kind: "craft", craft: FIXTURE_SHIP }, scene)?.id).toBe(FIXTURE_PLANET);
+    const inSystem = aViewScene({
+      craft: [
+        aViewCraft({
+          pose: {
+            position: { kind: "system", system: FIXTURE_SYSTEM, m: vec3(1e9, 0, 0) },
+            attitude: NO_TURN,
+          },
+        }),
+      ],
+    });
+    expect(frameBody({ kind: "craft", craft: FIXTURE_SHIP }, inSystem)).toBeNull();
+  });
+
+  it("names no FRAME body for a system or galactic frame, or a body the scene does not hold", () => {
+    const scene = aViewScene();
+    expect([
+      frameBody({ kind: "system", system: FIXTURE_SYSTEM }, scene),
+      frameBody({ kind: "galactic", origin: KEPT_BARYCENTRE }, scene),
+      frameBody({ kind: "body", body: `${FIXTURE_SYSTEM}.0999` }, scene),
+    ]).toEqual([null, null, null]);
+  });
+
+  it("labels the slant range FROM CAMERA off the hull, or with no own ship, and not in SEAT", () => {
+    const run = startServerRun(aViewScene());
+    const shipless = aViewScene({ ownShip: null, craft: [] });
+    expect([
+      slantRangeFromCamera({ ...run.camera, preset: "seat" }, run.scene),
+      slantRangeFromCamera({ ...run.camera, preset: "chase" }, run.scene),
+      slantRangeFromCamera({ ...run.camera, preset: "free" }, run.scene),
+      slantRangeFromCamera({ ...run.camera, preset: "seat" }, shipless),
+    ]).toEqual([false, true, true, true]);
+  });
+});
+
+/** The speed of {@link servedRunInBand}'s ship out from the Earth, m/s. */
+const OUTWARD_M_PER_S = 1e4;
+
+/**
+ * A run of the server's scene, its camera at the ship's seat, the ship come out in the Earth's
+ * frame from half the slice's Earth's Hill radius to 0.95 of it with each frame carried, so that
+ * the frame rule's hysteresis keeps it in the Earth's frame, where a ship arriving from outside
+ * would not be.
+ *
+ * @throws Error when the scene cannot be drawn, or a fresh frame at 0.95 enters a sphere.
+ */
+function servedRunInBand(): ViewRun {
+  const hillRadiusM = sceneModelOf(stateNearEarth()).system?.hillRadiiM.get(FIXTURE_EARTH);
+  if (hillRadiusM === undefined) {
+    throw new Error("the fixture's Earth has a Hill radius");
+  }
+  const start = { seconds: 3_000, nanos: 0 };
+  const model = sceneModelOf({
+    ...stateNearEarth(),
+    ship: {
+      position: { frame: "body", body: FIXTURE_EARTH, offset_m: [0.5 * hillRadiusM, 0, 0] },
+      velocity_m_s: [OUTWARD_M_PER_S, 0, 0],
+      time: start,
+    },
+  });
+  const frameAt = (time: UniverseTime, previous: SceneFrame | null): SceneFrame => {
+    const observer = shipObserver(model, time);
+    const frame = observer === null ? null : sceneAt(model, observer, time, previous);
+    if (frame === null) {
+      throw new Error("the fixture's served scene has a frame");
+    }
+    return frame;
+  };
+  const inBand = {
+    seconds: start.seconds + Math.round((0.45 * hillRadiusM) / OUTWARD_M_PER_S),
+    nanos: 0,
+  };
+  if (frameAt(inBand, null).localBody !== null) {
+    throw new Error(
+      "0.95 of the Earth's Hill radius is in its band, where a fresh frame enters no sphere",
+    );
+  }
+  const scene = viewSceneFromServer(
+    model,
+    frameAt(inBand, frameAt(start, null)),
+    SCENE_CHARTED_PLACE,
+  );
+  if (scene === null) {
+    throw new Error("the fixture's served scene can be drawn");
+  }
+  return startServerRun(scene);
+}
+
+describe("the own ship's FRAME in a served system (R10.T12; decision-r10-ship-frame §3)", () => {
+  /** The slice's Earth's frame as the label block names it. */
+  const EARTH_FRAME = `BODY ${SCENE_DESIGNATION} /768`;
+
+  it.each([
+    ["SEAT", "seat"],
+    ["CHASE", "chase"],
+  ] as const)(
+    "names the Earth's frame in %s beside the served Earth, the Earth its FRAME body",
+    (_name, preset) => {
+      const { camera, scene } = servedRun(stateNearEarth(), preset);
+      expect([
+        frameName(camera.pose.frame, scene),
+        frameBody(camera.pose.frame, scene)?.id,
+      ]).toEqual([EARTH_FRAME, FIXTURE_EARTH]);
+    },
+  );
+
+  it.each([
+    ["SEAT", "seat"],
+    ["CHASE", "chase"],
+  ] as const)(
+    "names the system's frame in %s with the ship outside every sphere, and no FRAME body",
+    (_name, preset) => {
+      const { camera, scene } = servedRun(stateInSystem(), preset);
+      expect([frameName(camera.pose.frame, scene), frameBody(camera.pose.frame, scene)]).toEqual([
+        "SYSTEM BARYCENTRIC",
+        null,
+      ]);
+    },
+  );
+
+  it("keeps the Earth's frame for a FREE camera detached from the ship in the sphere's band, at 0.95 of its Hill radius", () => {
+    const free = done(commandRun(servedRunInBand(), { kind: "preset", preset: "free" }, CUT));
+    expect(free.camera.pose.frame).toEqual({ kind: "body", body: FIXTURE_EARTH });
+  });
+});
+
+describe("the label block's WHITE BALANCE line", () => {
+  const lines: ReadonlyArray<LabelLine> = [
+    { label: "STYLE", value: "PHOTOREALISTIC" },
+    { label: "EXPOSURE", value: "EV100 9.6 AUTO" },
+    { label: "METER", value: "INCIDENT" },
+    { label: "STARS", value: "V 9.5 mag CAM" },
+  ];
+
+  it("stands after METER while a photorealistic image is drawn", () => {
+    expect(withWhiteBalanceLine(lines, "host", 3_444, true).map((line) => line.label)).toEqual([
+      "STYLE",
+      "EXPOSURE",
+      "METER",
+      "WHITE BALANCE",
+      "STARS",
+    ]);
+    expect(withWhiteBalanceLine(lines, "d65", null, true)[3]?.value).toBe("D65");
+  });
+
+  it("stands after EXPOSURE where no METER stands, and not at all in the wireframe", () => {
+    const noMeter = lines.filter((line) => line.label !== "METER");
+    expect(withWhiteBalanceLine(noMeter, "host", 5_772, true)[2]).toEqual({
+      label: "WHITE BALANCE",
+      value: "HOST · T EFF 5772 K",
+    });
+    expect(withWhiteBalanceLine(lines, "host", 3_444, false)).toBe(lines);
+  });
+
+  it("groups a hot star's temperature in threes from five digits", () => {
+    expect(whiteBalanceReading("host", 31_400)).toBe("HOST · T EFF 31,400 K");
   });
 });

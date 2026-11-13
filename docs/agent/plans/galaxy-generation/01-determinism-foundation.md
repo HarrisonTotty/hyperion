@@ -328,9 +328,13 @@ otherwise.
     coordinates all lie in the inner half (4–11 of 16, or 8–23 of 32 at the centre) covers volume
     that level j − 1 owns. An ID naming it is rejected, because one system must have one ID.
 17. **The spare band value** (7) means a feature-level member in every nested layout: catalogue
-    feature, centre and dwarf core. Level and cell must then be zero. The brainstorm states this for
-    catalogue features and makes the central black hole "member zero", which implies it for the
-    centre. For a stream, band 7 is rejected: the brainstorm gives streams no feature-level members.
+    feature, centre and dwarf core. Its index counts the members from 0, and the bits between the
+    index and the band must be zero. A catalogue feature's and a dwarf core's index is 13 bits, so
+    their level and cell are zero, as the brainstorm states. At the centre the index is 16 bits,
+    `[15:0]`, with `[31:16]` zero: 65,536 entries, member 0 the central black hole, which the
+    brainstorm makes "member zero" (ruled 2026-10-26 and built by P11.T8.e.b, an extension that
+    changes no existing ID). For a stream, band 7 is rejected: the brainstorm gives streams no
+    feature-level members.
 18. **Catalogue-system cells.** "Coarser classes zero the low bits" depends on a class registry that
     plan 09 owns. This plan decodes the field widths only and offers
     `CatalogueSystemId::is_aligned_to(cell_log2_ly)`; plan 09's resolve applies it. IDs from saves
@@ -714,8 +718,10 @@ Prefix `10` is bits [60:59]; the sub-kind is [58:57]: `00` centre, `01` stream, 
 
 The centre has twelve levels of 32 cells per axis: levels 12–15 are rejected (`LevelOutOfRange`),
 the inner-cell rule uses 8–23, and band 7 is its feature-level list, whose member 0 is the central
-black hole. The dwarf core follows the catalogue-feature rules exactly, and its low 31 bits have the
-same positions. A stream rejects band 7 (Design note 17).
+black hole. Under band 7 the centre's index is `[15:0]` and `[31:16]` must be zero
+(`FeatureLevelFieldsSet`), 65,536 entries (Design note 17). The dwarf core follows the
+catalogue-feature rules exactly, and its low 31 bits have the same positions. A stream rejects band
+7 (Design note 17).
 
 Prefix `110` is bits [60:58]; [57:0] is an opaque 58-bit pinned number.
 

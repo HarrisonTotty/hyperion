@@ -1,5 +1,6 @@
 import { useId } from "react";
 
+import { StatusText } from "../../components/StatusText";
 import { formatNumber } from "../../lib/format";
 import type { ViewId } from "../../view/camera/state";
 import type { ExposureControl } from "../../view/photometry/exposure";
@@ -36,11 +37,15 @@ export interface MeterControlProps {
   readonly onMeter: (mode: MeterMode) => void;
 }
 
-/** The meters in Design note 10's order, with their labels, for T16's guide draft (`METER AVG`, …). */
+/**
+ * The meters in Design note 10's order, with their labels, as the guide's `METER` row names them
+ * (`METER AVG`, …).
+ */
 const METERS: ReadonlyArray<{ readonly mode: MeterMode; readonly label: string }> = [
   { mode: "average", label: "AVG" },
   { mode: "lit", label: "LIT" },
   { mode: "dark", label: "DARK" },
+  { mode: "incident", label: "INCIDENT" },
 ];
 
 /**
@@ -66,6 +71,8 @@ const REMEDIES: Readonly<Record<MeterMode, string>> = {
   average: "widen the view or turn from the star",
   lit: "choose AVG, or bring a sunlit body into view",
   dark: "choose AVG, or bring a night side into view",
+  // Whether no star's light reaches the body read at, or there is none: AVG meters either.
+  incident: "choose AVG",
 };
 
 /**
@@ -84,13 +91,14 @@ export function meterStatusLine(metering: Metering): string | null {
  * The exposure meter beside R02's `ExposurePanel` (plan R07, T13.b; Design notes 10–11): the
  * applied EV100 with its automation level, the meter's own value while the exposure does not follow
  * it (`METERED`, R07.T13.d), the meter, the photorealistic view it meters, and the choice of `AVG`,
- * `LIT` or `DARK`, each a keyboard-operable button, the chosen one underlined.
+ * `LIT`, `DARK` or `INCIDENT`, each a keyboard-operable button, the chosen one underlined.
  *
  * @remarks
  * `METERED` stands under `MAN` and `INHIBITED · OPERATOR`: it is the value `ENABLE` would take, and
  * one the operator may enter in the `MAN` field; before the first histogram it is missing, `—`.
  * `AVG` meters everything but a star's disc, `LIT` only bodies' sunlit sides and `DARK` only their
- * night sides. The meter is the view's own, not the ship's: a display control that acts at once.
+ * night sides, each from the image; `INCIDENT` reads the light the host stars give a flat receptor
+ * at the `FRAME` body, else the selected body (ux-calls-view, item 3b). The meter is the view's own, not the ship's: a display control that acts at once.
  * Without a value its status stands in the reading's place (`NO LIT SIDE: choose AVG, or bring a
  * sunlit body into view`), describing the chosen meter's button only, and its buttons still act,
  * so that a meter with nothing to weigh can be left by choosing another (mounted by R07.T8.a beside
@@ -156,7 +164,9 @@ export function MeterControl({
         </>
       ) : (
         <p className="view-meter__reason" id={reasonId}>
-          <output>{exposureNote(status)}</output>
+          <output>
+            <StatusText text={status} renderPart={exposureNote} />
+          </output>
         </p>
       )}
       <p className="field">

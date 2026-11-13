@@ -14,14 +14,31 @@
  * ship's velocity in the system frame, or, at rest, the galactic axes, which put the nose along
  * galactic −z. Hence the two placements:
  *
- * - a body, by default the system's first planet: at rest in the body's own non-rotating frame,
+ * - a body, by default the system's first planet (with `--survey`, its first with a solid surface
+ *   to survey, {@link firstPlanetToSurvey}): at rest in the body's own non-rotating frame,
  *   `distance` behind it along its orbital velocity. The ship then moves with the body, its
  *   velocity in the system frame is the body's, and the nose looks along that velocity at the
  *   body. The body's direction of motion turns as it orbits, a degree in a day for an Earth-like
- *   orbit, so a long run drifts off the body.
+ *   orbit, so a long run drifts off the body. Without `--distance` the ship stands at half the
+ *   body's Hill radius at pericentre ({@link defaultBodyDistanceM}), inside the view's entry ratio,
+ *   so that `VIEW` holds the ship in the body's frame and asks for its terrain (plan R10,
+ *   R10.T12's record). A body ID names its own system, so `--look-at` with one needs no `--system`.
  * - `barycentre`: at rest in the system frame, `distance` along galactic +z from the barycentre,
  *   so the nose looks back down at it: at a single system's star, but at empty space between the
  *   stars of a wide multiple (the default system's two stars are 19 and 69 au from it).
+ *
+ * With `--survey <SOURCE> <RESOLUTION_M>` (plan R10, R10.T16.d; decision-r10-live-path, gap G3),
+ * it then records one R09 `survey_pass` over the target body: every cell of its coarse field, one
+ * run at the level the server finds from the body's figure ({@link figureLevel} of `body_detail`'s),
+ * at the placement's time, so that a served world can be surveyed by hand once the serve
+ * gate opens and `VIEW` has its surveyed ground to draw. The pass is live, kept in the universe's
+ * survey log. Only `VIEW`'s body inspection sends the same pass besides it, marked for training
+ * and so never in that log ({@link wholeBodySurveyPass}; the owner's request, 2026-11-01): the
+ * sensors plan replaces both.
+ *
+ * With `--json` it prints the placement as one line of JSON ({@link Placement}) in place of its
+ * report, for a script that runs it before a check (plan R10, R10.T15.b: the descent spike's served
+ * world and the transfer check read the universe's ID and the body from it).
  *
  * Failures, a refused request or a system with no planet, end the run with a message: they are
  * thrown as `Error`s and `main` reports them, which suits a one-shot command line tool better
@@ -33,6 +50,7 @@
  */
 
 import {
+  type BodyRecordDto,
   type BodySummaryDto,
   decodeServerMessage,
   encodeClientMessage,
@@ -41,10 +59,12 @@ import {
   isBodyId,
   isHex64,
   type KinematicsDto,
+  parseBodyId,
   RequestClient,
   type RequestKind,
   type RequestOf,
   type ResponseFor,
+  type SurveySourceDto,
   type SystemRecord,
   type UniverseInfo,
   type UniverseTime,
@@ -60,6 +80,13 @@ import {
   parsePort,
   serverUrlOf,
 } from "../main/cli";
+import {
+  coarseCellCount,
+  figureLevel,
+  type SurveyAsked,
+  type SurveyRecorded,
+  wholeBodySurveyPass,
+} from "../renderer/src/lib/wholeBodySurvey";
 
 /** The astronomical unit, m (IAU 2012 Resolution B2). */
 export const AU_M = 149_597_870_700;
@@ -88,10 +115,30 @@ const SYSTEMS_EXAMINED = 60;
 export const DEFAULT_BARYCENTRE_DISTANCE_AU = 1;
 
 /**
- * The default distance from a body, au: 1.5 million km, inside an Earth's Hill sphere (0.01 au),
- * where a Jupiter spans about 5° and an Earth about half a degree.
+ * The distance from a body whose Hill radius the server does not state (its mass or a bound orbit
+ * withheld or absent), au: 1.5 million km, where a Jupiter spans about 5° and an Earth about half a
+ * degree. It is outside an Earth's entry ratio (1.017 of its Hill radius at pericentre) and further
+ * outside the other inner planets', so a body whose Hill radius is known takes
+ * {@link defaultBodyDistanceM} instead (plan R10, R10.T12's record).
  */
 export const DEFAULT_BODY_DISTANCE_AU = 0.01;
+
+/**
+ * The share of a body's Hill radius at pericentre the ship stands at without `--distance`: half,
+ * well inside the ratio of distance to Hill radius at which a camera enters a body's frame, 0.9
+ * (the sim's `BODY_FRAME_ENTRY`, plan R02's Design note 6). The ship is held at rest in the body's
+ * frame and the Hill radius is the orbit's least, so it stays there; the margin is for a camera
+ * flown from it (plan R10, R10.T12's record: "the fix is a default of half the target's pericentre
+ * Hill radius").
+ */
+export const DEFAULT_HILL_FRACTION = 0.5;
+
+/**
+ * The Newtonian constant of gravitation, m³ kg⁻¹ s⁻², CODATA 2018 (6.674 30 × 10⁻¹¹): the
+ * simulation's, and the client's `GRAVITATIONAL_CONSTANT_M3_PER_KG_S2`, which a test holds it to,
+ * so that the Hill radius here is the one the scene's frame rule reads (`sceneWire.ts`' `hillRadii`).
+ */
+export const GRAVITATIONAL_CONSTANT_M3_PER_KG_S2 = 6.674_3e-11;
 
 /** The interval over which a body's velocity is differenced from its two positions, s. */
 const VELOCITY_STEP_S = 1;
@@ -101,6 +148,9 @@ export type LookAt =
   | { readonly kind: "barycentre" }
   | { readonly kind: "planet" }
   | { readonly kind: "body"; readonly body: string };
+
+/** The survey sources the wire names (`SurveySourceDto`). */
+const SURVEY_SOURCES: ReadonlyArray<SurveySourceDto> = ["orbital", "close_range", "landed"];
 
 /** The tool's options, after parsing. */
 export interface PlaceShipOptions {
@@ -120,12 +170,22 @@ export interface PlaceShipOptions {
   readonly radiusLy: number;
   /** What the seat camera looks at. */
   readonly lookAt: LookAt;
-  /** The distance from it, au, or `null` for the target's default. */
+  /**
+   * The distance from it, au, or `null` for the target's default: 1 au from the barycentre, half a
+   * body's Hill radius at pericentre ({@link defaultBodyDistanceM}).
+   */
   readonly distanceAu: number | null;
   /** The scene time the clock is set to, whole seconds from the epoch. */
   readonly timeS: number;
   /** The clock's rate: 0 or a power of ten from 1 to 100,000, which the server checks. */
   readonly rate: number;
+  /**
+   * A survey pass to record over every cell of the target body (`--survey`), or `null` for none;
+   * never with the barycentre as the target.
+   */
+  readonly survey: SurveyAsked | null;
+  /** Whether the placement is printed as one line of JSON in place of the report (`--json`). */
+  readonly json: boolean;
 }
 
 /** Reads a number that must be finite and above zero. */
@@ -243,7 +303,8 @@ export function buildCommand(): Command {
     .addOption(
       new Option(
         "-l, --look-at <TARGET>",
-        "what the seat camera looks at: planet (the system's first), barycentre, or a body ID",
+        "what the seat camera looks at: planet (the system's first), barycentre, or a body ID " +
+          "(whose own system is taken without --system)",
       )
         .default({ kind: "planet" }, "planet")
         .argParser(parseLookAt),
@@ -251,7 +312,9 @@ export function buildCommand(): Command {
     .addOption(
       new Option(
         "-d, --distance <AU>",
-        `distance from the target, au (default ${String(DEFAULT_BARYCENTRE_DISTANCE_AU)} from the barycentre, ${String(DEFAULT_BODY_DISTANCE_AU)} from a body)`,
+        `distance from the target, au (default ${String(DEFAULT_BARYCENTRE_DISTANCE_AU)} from the ` +
+          `barycentre; from a body, half its Hill radius at pericentre, or ` +
+          `${String(DEFAULT_BODY_DISTANCE_AU)} where the server states none)`,
       ).argParser(parsePositive),
     )
     .addOption(
@@ -264,7 +327,47 @@ export function buildCommand(): Command {
         .default(1)
         .argParser(parseWhole),
     )
+    .addOption(
+      new Option(
+        "--survey <SOURCE> <RESOLUTION_M...>",
+        "after placing the ship, survey every cell of the target body (R09's survey_pass): " +
+          "its source, orbital, close_range or landed, then exactly one resolution in " +
+          "metres, such as --survey orbital 50",
+      ),
+    )
+    .addOption(
+      new Option("--json", "print the placement as one line of JSON in place of the report"),
+    )
     .exitOverride();
+}
+
+/**
+ * Reads `--survey`'s two values, its source and its resolution, refusing any other count or form
+ * through `command`, which throws its `CommanderError`.
+ */
+function surveyOf(command: Command, values: unknown): SurveyAsked | null {
+  if (values === undefined) {
+    return null;
+  }
+  const usage =
+    "option '--survey <SOURCE> <RESOLUTION_M...>' takes a source, orbital, close_range or " +
+    "landed, then exactly one resolution in metres above zero";
+  if (!Array.isArray(values) || values.length !== 2) {
+    command.error(`error: ${usage}`, { code: "commander.invalidArgument" });
+  }
+  const [source, resolution] = values;
+  const known = SURVEY_SOURCES.find((each) => each === source);
+  const resolutionM = typeof resolution === "string" ? Number(resolution) : Number.NaN;
+  if (
+    known === undefined ||
+    typeof resolution !== "string" ||
+    resolution.trim().length === 0 ||
+    !Number.isFinite(resolutionM) ||
+    resolutionM <= 0
+  ) {
+    command.error(`error: ${usage}`, { code: "commander.invalidArgument" });
+  }
+  return { source: known, resolutionM };
 }
 
 /** Narrows an option commander has already parsed, naming the broken invariant otherwise. */
@@ -299,11 +402,18 @@ const isLookAt = (value: unknown): value is LookAt => {
  * @throws CommanderError when an argument cannot be used, or when `--help` was asked for.
  */
 export function parsePlaceShipArgs(args: readonly string[]): PlaceShipOptions {
-  const options = buildCommand()
-    .parse([...args], { from: "user" })
-    .opts();
+  const command = buildCommand();
+  const options = command.parse([...args], { from: "user" }).opts();
   const distance = option(options["distance"], isOptionalNumber, "distance");
   const system = option(options["system"], isOptionalString, "system");
+  const lookAt = option(options["lookAt"], isLookAt, "target");
+  const survey = surveyOf(command, options["survey"]);
+  if (survey !== null && lookAt.kind === "barycentre") {
+    command.error(
+      "error: option '--survey' surveys a body: give --look-at planet or a body ID, not barycentre",
+      { code: "commander.conflictingOption" },
+    );
+  }
   return {
     address: option(options["address"], isString, "address"),
     port: option(options["port"], isNumber, "port"),
@@ -312,10 +422,12 @@ export function parsePlaceShipArgs(args: readonly string[]): PlaceShipOptions {
     system: system ?? null,
     nearLy: option(options["near"], isNear, "search centre"),
     radiusLy: option(options["radius"], isNumber, "radius"),
-    lookAt: option(options["lookAt"], isLookAt, "target"),
+    lookAt,
     distanceAu: distance ?? null,
     timeS: option(options["time"], isNumber, "time"),
     rate: option(options["rate"], isNumber, "rate"),
+    survey,
+    json: options["json"] === true,
   };
 }
 
@@ -336,7 +448,7 @@ export function askThrough(client: RequestClient): Ask {
       const field = "field" in outcome.error && outcome.error.field !== null;
       throw new Error(
         `${body.kind} failed: ${outcome.error.code}: ${outcome.error.message}` +
-          (field ? ` (field ${String(outcome.error.field)})` : ""),
+          (field ? ` (field ${outcome.error.field})` : ""),
       );
     }
     return outcome.response;
@@ -357,10 +469,58 @@ export interface Placement {
   readonly body: string | null;
   /** The distance from the target, m. */
   readonly distanceM: number;
+  /**
+   * The body's Hill radius at pericentre, m ({@link pericentreHillRadiusM}), or `null` for the
+   * barycentre and for a body the server states none for.
+   */
+  readonly hillRadiusM: number | null;
   /** The stand-in's kinematics as sent. */
   readonly ship: KinematicsDto;
   /** The clock rate as the server set it. */
   readonly rate: number;
+  /** The survey pass recorded over the body, or `null` for none asked. */
+  readonly survey: SurveyRecorded | null;
+}
+
+/**
+ * The level of `body`'s coarse field, as the server finds it for a pass: {@link figureLevel} of
+ * its figure, from `body_detail`.
+ *
+ * @throws Error for a body whose figure section is not `ok`, which the server refuses too.
+ */
+async function fieldLevel(
+  ask: Ask,
+  universe: string,
+  body: string,
+  time: UniverseTime,
+): Promise<number> {
+  const { record } = await ask({ kind: "body_detail", universe, body, time, detail: "full" });
+  const figure = record.figure;
+  if (figure?.state !== "ok") {
+    throw new Error(`body ${body} has no figure to give its coarse field's level`);
+  }
+  const { equatorial_radius_m: a, polar_radius_m: c } = figure.value;
+  return figureLevel({ equatorialRadiusM: a, polarRadiusM: c });
+}
+
+/**
+ * Records `survey` over every cell of `body`'s coarse field at `time`: one `survey_pass` of the
+ * run of every cell at the field's level ({@link wholeBodySurveyPass}, which `VIEW`'s body
+ * inspection sends too), R09's stand-in for the sensors, so that a served world's field holds
+ * surveyed ground to draw (decision-r10-live-path, gap G3).
+ */
+async function surveyBody(
+  ask: Ask,
+  universe: string,
+  body: string,
+  survey: SurveyAsked,
+  time: UniverseTime,
+): Promise<SurveyRecorded> {
+  const level = await fieldLevel(ask, universe, body, time);
+  const { revision } = await ask(
+    wholeBodySurveyPass({ universe, body, level, survey, time, scope: "live" }),
+  );
+  return { ...survey, level, revision };
 }
 
 /** The universe `name` or ID names, created with `seed` when a name is not found. */
@@ -387,22 +547,18 @@ async function findUniverse(
 }
 
 /**
- * A system's bodies at `time`, at `mass_and_orbit`: the lowest detail level that states each body's
- * kind (`contact` leaves it `unresolved`), and every level carries the positions.
+ * A system's bodies at `time`, at `mass_and_orbit` unless `detail` says: the lowest detail level
+ * that states each body's kind (`contact` leaves it `unresolved`), its mass and its orbit, and every
+ * level carries the positions; `bulk` adds its mean radius.
  */
 async function bodiesAt(
   ask: Ask,
   universe: string,
   system: string,
   time: UniverseTime,
+  detail: "mass_and_orbit" | "bulk" = "mass_and_orbit",
 ): Promise<readonly BodySummaryDto[]> {
-  const answer = await ask({
-    kind: "system_bodies",
-    universe,
-    system,
-    time,
-    detail: "mass_and_orbit",
-  });
+  const answer = await ask({ kind: "system_bodies", universe, system, time, detail });
   return answer.bodies;
 }
 
@@ -416,6 +572,46 @@ export function isPlacedWorld(body: BodySummaryDto): boolean {
 /** The system's first planet that is present, in index order, or `undefined`. */
 export function firstPlanet(bodies: readonly BodySummaryDto[]): BodySummaryDto | undefined {
   return bodies.find((body) => body.kind.type === "planet" && isPlacedWorld(body));
+}
+
+/**
+ * Whether a body's full record, from `body_detail`, holds what a survey of it reads: a solid
+ * surface (`surface` `ok`; a giant's, or a solid body's under a supercritical envelope, is
+ * `not_applicable`, and the server refuses its survey as having no solid surface) and a figure to
+ * give its coarse field's level ({@link fieldLevel}).
+ */
+export function canBeSurveyed(record: Pick<BodyRecordDto, "surface" | "figure">): boolean {
+  return record.surface.state === "ok" && record.figure?.state === "ok";
+}
+
+/**
+ * The first planet of `bodies`, in index order, present and with a solid surface to survey
+ * ({@link canBeSurveyed}), asked of the server one at a time; `undefined` for none. Which of a
+ * system's planets are giants moves with the generator version, so the default target of a
+ * survey (the descent spike's served world, the Mac batch's height-worker sweep) is found, not
+ * pinned.
+ */
+export async function firstPlanetToSurvey(
+  ask: Ask,
+  universe: string,
+  bodies: readonly BodySummaryDto[],
+  time: UniverseTime,
+): Promise<BodySummaryDto | undefined> {
+  for (const body of bodies.filter((each) => each.kind.type === "planet" && isPlacedWorld(each))) {
+    // One planet at a time, stopping at the first: a full record of each costs the server a draw.
+    // oxlint-disable-next-line no-await-in-loop
+    const { record } = await ask({
+      kind: "body_detail",
+      universe,
+      body: body.id,
+      time,
+      detail: "full",
+    });
+    if (canBeSurveyed(record)) {
+      return body;
+    }
+  }
+  return undefined;
 }
 
 /** The systems of a search, nearest to `nearLy` first. */
@@ -473,7 +669,56 @@ export function bodyKinematics(
   };
 }
 
-/** The system named by `options.system`, or the nearest with a planet. */
+/**
+ * The Hill radius at pericentre of a body of a system's list, m: a (1 − e) (m ÷ 3M)^⅓, with M its
+ * primary's mass, the orbit's μ ÷ G less the body's own (plan 14's `hill_radius`), operation for
+ * operation as the client's scene reads it for the camera's frame (`sceneWire.ts`' `hillRadii`);
+ * `null` where its mass or a bound orbit is not stated, as below `mass_and_orbit` or for what
+ * orbits nothing.
+ */
+export function pericentreHillRadiusM(body: BodySummaryDto): number | null {
+  if (body.mass_kg.state !== "ok" || body.orbit.state !== "ok") {
+    return null;
+  }
+  const massKg = body.mass_kg.value;
+  const orbit = body.orbit.value.orbit;
+  const primaryKg = orbit.mu_m3_s2 / GRAVITATIONAL_CONSTANT_M3_PER_KG_S2 - massKg;
+  const e = orbit.eccentricity;
+  if (!(massKg > 0 && primaryKg > 0 && e >= 0 && e < 1)) {
+    return null;
+  }
+  return orbit.semi_major_axis_m * (1 - e) * Math.cbrt(massKg / (3 * primaryKg));
+}
+
+/**
+ * The ship's distance from `body` without `--distance`, m: {@link DEFAULT_HILL_FRACTION} of its
+ * Hill radius at pericentre ({@link pericentreHillRadiusM}), or {@link DEFAULT_BODY_DISTANCE_AU}
+ * where the server states none.
+ *
+ * @throws Error where half the Hill radius is within the body's mean radius (a small moon deep in
+ *   its planet's tide, a Phobos): no default stands outside the body and inside its entry ratio, so
+ *   `--distance` must say.
+ */
+export function defaultBodyDistanceM(body: BodySummaryDto): number {
+  const hillRadiusM = pericentreHillRadiusM(body);
+  if (hillRadiusM === null) {
+    return DEFAULT_BODY_DISTANCE_AU * AU_M;
+  }
+  const distanceM = DEFAULT_HILL_FRACTION * hillRadiusM;
+  const radiusM = body.bulk.state === "ok" ? body.bulk.value.radius_m : null;
+  if (radiusM !== null && distanceM <= radiusM) {
+    throw new Error(
+      `half the Hill radius of body ${body.id}, ${String(Math.round(distanceM))} m, is within its ` +
+        `radius of ${String(Math.round(radiusM))} m: give --distance`,
+    );
+  }
+  return distanceM;
+}
+
+/**
+ * The system named by `options.system`, or the system of the body `--look-at` names, or the nearest
+ * with a planet.
+ */
 async function chooseSystem(
   ask: Ask,
   universe: string,
@@ -483,6 +728,10 @@ async function chooseSystem(
   if (options.system !== null && isHex64(options.system)) {
     return { id: options.system, designation: null };
   }
+  if (options.system === null && options.lookAt.kind === "body") {
+    return { id: parseBodyId(options.lookAt.body).system, designation: null };
+  }
+  const surveyed = options.survey !== null;
   const range = await ask({
     kind: "systems_in_range",
     universe,
@@ -505,38 +754,54 @@ async function chooseSystem(
     return { id: named.id, designation: named.designation };
   }
   for (const system of systems.slice(0, SYSTEMS_EXAMINED)) {
-    // One system at a time, nearest first, stopping at the first with a planet: asking for all
-    // sixty at once would generate systems that are never used.
+    // One system at a time, nearest first, stopping at the first with a planet (with a solid
+    // surface, for a survey): asking for all sixty at once would generate systems that are never
+    // used.
     // oxlint-disable-next-line no-await-in-loop
     const bodies = await bodiesAt(ask, universe, system.id, time);
-    if (firstPlanet(bodies) !== undefined) {
+    const planet = surveyed
+      ? // oxlint-disable-next-line no-await-in-loop
+        await firstPlanetToSurvey(ask, universe, bodies, time)
+      : firstPlanet(bodies);
+    if (planet !== undefined) {
       return { id: system.id, designation: system.designation };
     }
   }
   throw new Error(
     `none of the ${String(Math.min(systems.length, SYSTEMS_EXAMINED))} systems nearest ` +
-      `${options.nearLy.join(",")} ly has a planet; try another --near or a larger --radius`,
+      `${options.nearLy.join(",")} ly has a planet${surveyed ? " with a solid surface to survey" : ""}; ` +
+      "try another --near or a larger --radius",
   );
 }
 
-/** The body to look at, its system-frame velocity differenced from two positions. */
+/**
+ * The body to look at, at `bulk` so that its radius is stated, with its system-frame velocity
+ * differenced from two positions.
+ */
 async function bodyTarget(
   ask: Ask,
   universe: string,
   system: string,
   lookAt: Exclude<LookAt, { kind: "barycentre" }>,
   time: UniverseTime,
-): Promise<{ readonly id: string; readonly velocityMS: readonly [number, number, number] }> {
-  const before = await bodiesAt(ask, universe, system, time);
+  surveyed: boolean,
+): Promise<{
+  readonly summary: BodySummaryDto;
+  readonly velocityMS: readonly [number, number, number];
+}> {
+  const before = await bodiesAt(ask, universe, system, time, "bulk");
   const body =
-    lookAt.kind === "planet"
-      ? firstPlanet(before)
-      : before.find((candidate) => candidate.id === lookAt.body);
+    lookAt.kind === "body"
+      ? before.find((candidate) => candidate.id === lookAt.body)
+      : surveyed
+        ? await firstPlanetToSurvey(ask, universe, before, time)
+        : firstPlanet(before);
   if (body === undefined) {
     throw new Error(
-      lookAt.kind === "planet"
-        ? `system ${system} has no planet present at ${String(time.seconds)} s`
-        : `system ${system} has no body ${lookAt.body}`,
+      lookAt.kind === "body"
+        ? `system ${system} has no body ${lookAt.body}`
+        : `system ${system} has no planet ${surveyed ? "with a solid surface to survey " : ""}` +
+            `present at ${String(time.seconds)} s`,
     );
   }
   if (!isPlacedWorld(body)) {
@@ -552,7 +817,7 @@ async function bodyTarget(
     throw new Error(`body ${body.id} has no position ${String(VELOCITY_STEP_S)} s later`);
   }
   return {
-    id: body.id,
+    summary: body,
     velocityMS: [
       (to[0] - from[0]) / VELOCITY_STEP_S,
       (to[1] - from[1]) / VELOCITY_STEP_S,
@@ -566,8 +831,9 @@ async function bodyTarget(
  *
  * @throws Error naming what is missing: a universe ID that names none, a universe of another
  * generator version, a designation not found in the search, no system with a planet in it, a
- * target that is not a planet, dwarf planet or moon present at the time, or any request the
- * server refused (see {@link askThrough}).
+ * target that is not a planet, dwarf planet or moon present at the time, a body too small for the
+ * default distance ({@link defaultBodyDistanceM}), or any request the server refused (see
+ * {@link askThrough}).
  */
 export async function placeShip(ask: Ask, options: PlaceShipOptions): Promise<Placement> {
   const { info, created } = await findUniverse(ask, options.universe, options.seed);
@@ -575,15 +841,27 @@ export async function placeShip(ask: Ask, options: PlaceShipOptions): Promise<Pl
   const system = await chooseSystem(ask, info.id, options, time);
   let ship: KinematicsDto;
   let body: string | null = null;
-  let distanceAu: number;
+  let distanceM: number;
+  let hillRadiusM: number | null = null;
   if (options.lookAt.kind === "barycentre") {
-    distanceAu = options.distanceAu ?? DEFAULT_BARYCENTRE_DISTANCE_AU;
-    ship = barycentreKinematics(system.id, distanceAu * AU_M, time);
+    distanceM = (options.distanceAu ?? DEFAULT_BARYCENTRE_DISTANCE_AU) * AU_M;
+    ship = barycentreKinematics(system.id, distanceM, time);
   } else {
-    distanceAu = options.distanceAu ?? DEFAULT_BODY_DISTANCE_AU;
-    const target = await bodyTarget(ask, info.id, system.id, options.lookAt, time);
-    body = target.id;
-    ship = bodyKinematics(target.id, target.velocityMS, distanceAu * AU_M, time);
+    const target = await bodyTarget(
+      ask,
+      info.id,
+      system.id,
+      options.lookAt,
+      time,
+      options.survey !== null,
+    );
+    body = target.summary.id;
+    hillRadiusM = pericentreHillRadiusM(target.summary);
+    distanceM =
+      options.distanceAu === null
+        ? defaultBodyDistanceM(target.summary)
+        : options.distanceAu * AU_M;
+    ship = bodyKinematics(body, target.velocityMS, distanceM, time);
   }
   const set = await ask({
     kind: "scene_ship",
@@ -591,15 +869,22 @@ export async function placeShip(ask: Ask, options: PlaceShipOptions): Promise<Pl
     ship,
     time_rate: options.rate,
   });
+  // `parsePlaceShipArgs` refuses a survey of the barycentre, so a survey has a body here.
+  const survey =
+    options.survey === null || body === null
+      ? null
+      : await surveyBody(ask, info.id, body, options.survey, time);
   return {
     universe: info,
     created,
     system: system.id,
     designation: system.designation,
     body,
-    distanceM: distanceAu * AU_M,
+    distanceM,
+    hillRadiusM,
     ship,
     rate: set.clock.time_rate,
+    survey,
   };
 }
 
@@ -610,12 +895,24 @@ export function describePlacement(placement: Placement): string {
     placement.designation === null
       ? placement.system
       : `${placement.designation} (${placement.system})`;
+  const survey = placement.survey;
   return [
     `universe  ${placement.universe.name} (${placement.universe.id}, seed ${placement.universe.seed})` +
       (placement.created ? ", created" : ""),
     `system    ${system}`,
-    `ship      ${String(placement.distanceM / AU_M)} au from ${target}, looking at it from the seat`,
+    `ship      ${String(placement.distanceM / AU_M)} au from ${target}` +
+      (placement.hillRadiusM === null
+        ? ""
+        : `, ${(placement.distanceM / placement.hillRadiusM).toFixed(3)} of its Hill radius at pericentre`) +
+      ", looking at it from the seat",
     `clock     ${String(placement.ship.time.seconds)} s, rate ${String(placement.rate)}`,
+    ...(survey === null
+      ? []
+      : [
+          `survey    ${survey.source} at ${String(survey.resolutionM)} m over all ` +
+            `${String(coarseCellCount(survey.level))} cells of level ${String(survey.level)}, ` +
+            `revision ${String(survey.revision)}`,
+        ]),
     `next      in the client: F2, open ${placement.universe.name}, then F4 (VIEW)`,
   ].join("\n");
 }
@@ -716,7 +1013,9 @@ export async function main(args: readonly string[]): Promise<number> {
     const { client, close } = await link(url);
     try {
       const placement = await placeShip(askThrough(client), options);
-      process.stdout.write(`${describePlacement(placement)}\n`);
+      process.stdout.write(
+        `${options.json ? JSON.stringify(placement) : describePlacement(placement)}\n`,
+      );
     } finally {
       close();
     }

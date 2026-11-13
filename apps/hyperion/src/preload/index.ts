@@ -1,13 +1,20 @@
 import { contextBridge, ipcRenderer } from "electron";
 
 import type { GpuProcessGoneReport, HyperionApi } from "./api";
+import { compileBudgetFromArgv } from "./compileBudgetLaunch";
+import { framePacingFromArgv } from "./framePacingLaunch";
+import { geometryFromArgv } from "./geometryLaunch";
 import { graphicsLaunchFromArgv, subscribeGpuProcessGone } from "./graphicsLaunch";
+import { performanceThreadsFromArgv } from "./machineLaunch";
+import { planetViewerFromArgv } from "./planetViewerLaunch";
 import { qualityFromArgv } from "./qualityLaunch";
 import { serverUrlFromArgv } from "./serverUrl";
 import { spikeMember } from "./spikeApi";
 import { viewsCheckMember } from "./viewsCheckApi";
 
 const graphicsLaunch = graphicsLaunchFromArgv(process.argv, process.platform);
+const geometry = geometryFromArgv(process.argv);
+const compileBudget = compileBudgetFromArgv(process.argv);
 
 const api: HyperionApi = {
   platform: process.platform,
@@ -21,11 +28,18 @@ const api: HyperionApi = {
     },
   },
   setting: qualityFromArgv(process.argv),
+  framePacing: framePacingFromArgv(process.argv),
+  performanceThreads: performanceThreadsFromArgv(process.argv),
+  planetViewer: planetViewerFromArgv(process.argv),
   versions: {
     electron: process.versions.electron,
     chrome: process.versions.chrome,
     node: process.versions.node,
   },
+  // Only a spike's or a check's launch that gave `--geometry` has an override (plan R14).
+  ...(geometry === null ? {} : { geometry }),
+  // Only a spike's or a check's launch that gave `--compile-budget` has one (plan R14).
+  ...(compileBudget === null ? {} : { compileBudget }),
   // Only a `--descent-spike` launch has the spike's functions (R05.T13.c).
   ...spikeMember(process.argv, {
     invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args),

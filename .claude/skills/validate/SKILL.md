@@ -22,3 +22,19 @@ python3 .claude/skills/validate/scripts/select_checks.py <arguments>
 ```
 
 Then run the plan's tiers in order. Tier 3 is the gate: work isn't done until it passes.
+
+The gate is `just smart-ci`: the steps of `just ci` that the branch's change reaches, chosen from its
+diff against the integration branch (`just smart-ci --plan` lists them, each with the paths that
+caused it), and `just test-render`'s steps when a shader, the engine or the smoke harness changed
+(its harness in the same hold of the heavy-test lock as the suites; vitest takes no lock). Of the
+test suites it runs only the tests that reach the changed code, in any crate, through the code's
+dependency graph (Rust item by item, TypeScript by its imports), and the plan shows how many and
+why (`--explain` shows each test's chain). `just smart-ci --all-tests` runs every test of the
+changed crates instead, as before the graph. It runs the full `just ci`'s phases by itself when the
+change touches an input of the whole workspace (the justfile, a manifest or lock file, the
+toolchain) or a path no rule knows. Suites small by the timings recorded from earlier runs run
+without the heavy-test lock, capped at 4 test threads and 4 cores (the plan says which, and why).
+A lane runs `just smart-ci`, not `just ci`, with `SMART_CI_SLOT` naming the build-slot command and
+never inside it; integration runs it over its unpushed commits with `SMART_CI_PRIORITY=1`, which
+gives its suites priority on the lock. A `just ci` in a task's acceptance criteria is met by
+`just smart-ci`.

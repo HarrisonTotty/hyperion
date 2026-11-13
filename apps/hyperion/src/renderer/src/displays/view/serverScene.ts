@@ -4,8 +4,8 @@
  */
 import type { SystemIdHex } from "@hyperion/protocol";
 
-import { isRefusal } from "../../components/RequestStatus";
 import type { StatusStanding } from "../../components/StatusLine";
+import { isRefusal } from "../../lib/refusal";
 import {
   type CameraReportFault,
   SCENE_SILENCE_MS,

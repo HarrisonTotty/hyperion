@@ -1,0 +1,42 @@
+{
+  "key": "FeS",
+  "phase": "solid",
+  "variant": null,
+  "name": "solid FeS",
+  "temperatureK": null,
+  "shape": "nonSphericalMineral",
+  "provenance": "measured",
+  "paper": "J. B. Pollack, D. Hollenbach, S. Beckwith, D. P. Simonelli, T. Roush and W. Fong, \"Composition and radiative properties of grains in molecular clouds and accretion disks\", Astrophys. J. 421 (1994) 615, DOI 10.1086/173677, for the visible; Th. Henning and H. Mutschke, Astron. Astrophys. 327 (1997) 743, for the infrared; as compiled by D. Kitzmann and K. Heng, \"Optical properties of potential condensates in exoplanetary atmospheres\", Mon. Not. R. Astron. Soc. 475 (2018) 94–107, DOI 10.1093/mnras/stx3141",
+  "source": "Kitzmann and Heng 2018's compilation (D. Kitzmann and K. Heng, \"Optical properties of potential condensates in exoplanetary atmospheres\", Mon. Not. R. Astron. Soc. 475 (2018) 94–107, DOI 10.1093/mnras/stx3141), LX-MIE's compilation/FeS.dat at commit 38cc6d97c2268d58c41ccfc3955283ab6ee2ca44, https://raw.githubusercontent.com/NewStrangeWorlds/LX-MIE/38cc6d97c2268d58c41ccfc3955283ab6ee2ca44/compilation/FeS.dat, SHA-256 ae2ba0daab33afc92d2d7590b1712cf7c09a35f8465915b19ab501396c4d60ea, fetched 2026-10-14; read as data, as the only machine-readable copy of its primary",
+  "licence": "reduced values from Kitzmann and Heng 2018's compilation, the only machine-readable copy found, cited to the primary and to Kitzmann and Heng as the compiler: the measured values are the authors' facts, and the repository's GPL-3.0 covers its code and arrangement, not a reduced visible subset of one material; its compilation/readme.txt sets no separate terms for the data. No compilation file and none of LX-MIE's code is committed (decision-composition §5; decision-r08-licences.md)",
+  "reduction": "n linear and k linear in log k in wavelength between the source's rows, onto 380–780 nm every 5 nm, to six significant figures. The source's rows near the visible are 300, 460, 610 and 1,000 nm, so 380–780 nm is interpolated across them, as coarse as the source; the visible primary, Pollack et al. 1994, was not found in another machine-readable copy (the Jena database's FeS is infrared only). The copy states no temperature",
+  "standIn": null,
+  "fit": null,
+  "wavelengthsNm": [
+    380, 385, 390, 395, 400, 405, 410, 415, 420, 425, 430, 435, 440, 445, 450, 455, 460, 465, 470,
+    475, 480, 485, 490, 495, 500, 505, 510, 515, 520, 525, 530, 535, 540, 545, 550, 555, 560, 565,
+    570, 575, 580, 585, 590, 595, 600, 605, 610, 615, 620, 625, 630, 635, 640, 645, 650, 655, 660,
+    665, 670, 675, 680, 685, 690, 695, 700, 705, 710, 715, 720, 725, 730, 735, 740, 745, 750, 755,
+    760, 765, 770, 775, 780
+  ],
+  "n": [
+    1.39, 1.38511, 1.38022, 1.37533, 1.37044, 1.36554, 1.36065, 1.35576, 1.35087, 1.34598, 1.34108,
+    1.33619, 1.3313, 1.32641, 1.32151, 1.31662, 1.31173, 1.31746, 1.32319, 1.32892, 1.33464,
+    1.34037, 1.3461, 1.35183, 1.35756, 1.36329, 1.36901, 1.37474, 1.38047, 1.3862, 1.39193, 1.39766,
+    1.40338, 1.40911, 1.41484, 1.42057, 1.4263, 1.43202, 1.43775, 1.44348, 1.44921, 1.45494,
+    1.46067, 1.46639, 1.47212, 1.47785, 1.48358, 1.49209, 1.50061, 1.50912, 1.51764, 1.52615,
+    1.53467, 1.54318, 1.5517, 1.56021, 1.56873, 1.57724, 1.58576, 1.59427, 1.60279, 1.6113, 1.61982,
+    1.62833, 1.63685, 1.64536, 1.65388, 1.66239, 1.67091, 1.67942, 1.68794, 1.69645, 1.70497,
+    1.71348, 1.722, 1.73051, 1.73903, 1.74754, 1.75606, 1.76457, 1.77309
+  ],
+  "k": [
+    1.19363, 1.20167, 1.20976, 1.21791, 1.22611, 1.23437, 1.24269, 1.25106, 1.25949, 1.26797,
+    1.27651, 1.28511, 1.29377, 1.30248, 1.31126, 1.32009, 1.32898, 1.33379, 1.33861, 1.34345,
+    1.34831, 1.35319, 1.35808, 1.363, 1.36793, 1.37288, 1.37784, 1.38283, 1.38783, 1.39285, 1.39789,
+    1.40294, 1.40802, 1.41311, 1.41822, 1.42335, 1.4285, 1.43367, 1.43885, 1.44406, 1.44928,
+    1.45452, 1.45978, 1.46506, 1.47036, 1.47568, 1.48102, 1.48828, 1.49557, 1.5029, 1.51026,
+    1.51766, 1.5251, 1.53257, 1.54008, 1.54762, 1.55521, 1.56283, 1.57048, 1.57818, 1.58591,
+    1.59368, 1.60149, 1.60934, 1.61722, 1.62515, 1.63311, 1.64111, 1.64915, 1.65723, 1.66535,
+    1.67351, 1.68171, 1.68995, 1.69823, 1.70655, 1.71491, 1.72331, 1.73176, 1.74024, 1.74877
+  ]
+}

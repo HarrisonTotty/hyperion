@@ -3,7 +3,7 @@
 //! irregulars, the occasional giant-impact moon)").
 //!
 //! Every draw here is on the parent's own streams, keyed by the parent's
-//! [`BodyId`](crate::id::BodyId) (design note 4): a planet's moons can be generated alone, and
+//! [`BodyId`] (design note 4): a planet's moons can be generated alone, and
 //! adding a property to moons can never move a planet. The three kinds are independent, each on
 //! its own domain tags, so that the order in which P14.T22's `generate_satellites` runs them
 //! (regular moons, the giant-impact moon, captures and their removals) moves no draw of another:
@@ -29,12 +29,15 @@
 //!
 //! # Frames
 //!
-//! Every satellite orbit is a [`KeplerElements`] about its parent, with μ = G (`M_p` + m), in the
-//! parent's body frame (plan 14, phase D): referred to the parent's equator for regular moons and
-//! for a giant-impact moon, which forms in the equatorial plane of the debris disc (see
-//! [`impact`]), and to its orbital plane for captures. The parent's equator is placed by its
-//! obliquity and pole (P14.T14.a, T14.c), which are not built; until they are, the elements are
-//! relative to that plane and nothing here needs its orientation.
+//! Every satellite orbit is a [`KeplerElements`] about its parent, with μ = G (`M_p` + m), whose
+//! inclination, node and periapsis the generators here draw against a reference plane they never
+//! orient: the equator for regular moons and for a giant-impact moon, which forms in the
+//! equatorial plane of the debris disc (see [`impact`]), and the orbital plane for captures.
+//! P14.T22.a places that plane in the parent's body frame: the parent's local Laplace plane at
+//! the moon's distance (P14.T56.a, [`laplace`](crate::planetary::laplace)), which is the equator
+//! well inside the Laplace radius and the orbital plane well beyond it. A parent with no Laplace
+//! frame, one with no rotation law, refers its moons to its orbital plane
+//! ([`satellites`](crate::planetary::satellites)).
 //!
 //! # Sub-indices
 //!
@@ -58,9 +61,11 @@ use crate::units::{
     EarthMasses, GravitationalParameter, Kilograms, KilogramsPerCubicMetre, Metres, Radians,
 };
 
+pub mod eccentricity;
 pub mod impact;
 pub mod irregular;
 pub mod regular;
+pub mod tides;
 
 pub use impact::{ImpactMoon, giant_impact_moon};
 pub use irregular::{

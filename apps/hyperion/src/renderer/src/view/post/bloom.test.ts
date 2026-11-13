@@ -9,6 +9,7 @@ import {
   bloomDown,
   bloomEnergy,
   bloomExcess,
+  bloomExcessOf,
   bloomImage,
   bloomKernel,
   bloomThreshold,
@@ -20,6 +21,7 @@ import {
   spreadPixelEE,
 } from "./bloom";
 import { glareSourceVeil, sphereIntegral, type GlareSource } from "./glare";
+import { METER_CLASS } from "./meter";
 import { SETTINGS } from "../quality/qualitySetting";
 
 const EYE = { ageYears: 25, pigmentation: 0.5 };
@@ -122,9 +124,21 @@ describe("bloomKernel", () => {
   });
 });
 
+describe("bloomExcessOf (fix-view-light)", () => {
+  it.each([
+    { name: "a host disc's texel", alpha: METER_CLASS.hostDisc, excess: 0 },
+    { name: "the sky's", alpha: METER_CLASS.other, excess: 84 },
+    { name: "a lit body's", alpha: METER_CLASS.litBody, excess: 84 },
+    { name: "a filtered texel a quarter off the disc", alpha: 0.25, excess: 21 },
+  ])("gives the chain $excess of $name light 100 over a threshold of 16", ({ alpha, excess }) => {
+    expect(bloomExcessOf(100, alpha, 16)).toBe(excess);
+  });
+});
+
 describe("stored and injected glare", () => {
-  // 2 × 10⁸: the injected veil carries nearly all of it; 1.5 × 10⁵: the stored part, bloomed
-  // through the chain, carries more than a third.
+  // 2 × 10⁸: above the target's 65,504; 1.5 × 10⁵: a disc the target holds. Either way the disc's
+  // texels, meter class 0, stay out of the chain, and its glare source carries its light above
+  // the threshold (fix-view-light).
   it.each([2e8, 1.5e5])("together hold the unclamped energy to 1% (L = %d)", (trueLuminance) => {
     const side = 768;
     const centre = side / 2;
@@ -138,7 +152,7 @@ describe("stored and injected glare", () => {
       for (let i = 0; i < side; i += 1) {
         if (Math.hypot(i - centre, j - centre) <= radiusPx) {
           const value = Math.min(trueLuminance, HALF_FLOAT_MAX);
-          stored.values[j * side + i] = bloomExcess(value, threshold);
+          stored.values[j * side + i] = bloomExcessOf(value, METER_CLASS.hostDisc, threshold);
           shown.values[j * side + i] = Math.min(value, threshold);
           discPixels += 1;
         }
@@ -148,7 +162,8 @@ describe("stored and injected glare", () => {
     const source: GlareSource = {
       direction: { x: 0, y: 0, z: -1 },
       angularRadiusRad: Math.sqrt(discPixels / Math.PI) * RAD_PER_PX_1080P,
-      excessLuminance: [trueLuminance - HALF_FLOAT_MAX, 0, 0],
+      excessLuminance: [trueLuminance - threshold, 0, 0],
+      luminance: [trueLuminance, 0, 0],
     };
     for (const role of ["eye", "camera"] as const) {
       const kernel = bloomKernel(SETTINGS.high.photoreal.bloom, role, RAD_PER_PX_1080P, EYE);

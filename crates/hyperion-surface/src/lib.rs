@@ -8,8 +8,26 @@
 //! function (the rendering plans' R05 writes a provisional one for a hand-made test planet, R09 the
 //! real one), the material classes (R10) and the rocks (R11). Today it holds R05's: the cube
 //! sphere ([`cube`], [`geometry`]), the provisional [`test_planet`] and its noise basis
-//! ([`noise`]), the patch bake and the collision interpolant ([`patch`]), and the datum heights
-//! are measured from, the reference [`spheroid`] (plan 14's P14.T46.e).
+//! ([`noise`]), the patch bake and the collision interpolant ([`patch`]), with R10's authoritative
+//! ground over R09's synthesis ([`ground`]) and what a readout may quote of it given the survey
+//! ([`reading`]), what every height source returns ([`height`]), and the datum heights are
+//! measured from, the reference [`spheroid`] (plan 14's P14.T46.e); and the first of R09's: the coarse field's types ([`field`]) with the header's
+//! crater contract ([`craters`]), which R09's later tasks give their behaviour, and the key of plan
+//! 14's substances, which the header's palette carries ([`substance_key`]); the codec of the
+//! field's bulk payload ([`wire`]); the synthesis over a field ([`synth`]): its `Synthesiser`,
+//! the whole height function, the coarse cells interpolated over the sphere (`synth::interp`) with
+//! the bands below them that each level evaluates, the structural octaves (`synth::relief`), the
+//! channels' incision (`synth::channels`), the small craters and the coarse craters' rims
+//! (`synth::craters`); its patch bake (`synth::bake`), its level sets and bound
+//! (`synth::levels`) and the closed forms of the unresolved ground (`synth`), with the header's
+//! spectrum;
+//! the cold-trap fraction that plan 14 and R09.T13.f share ([`cold_trap`]), with the fitted table
+//! of a bowl's permanent shadow it reads ([`tables`]); and, for tests, synthetic fields
+//! (`testing`, feature `testing`). Of R10's it holds the material classes and their physical
+//! properties ([`material`]), and the classifier that decides them at every point, and the bake of
+//! a patch on real terrain with its layers ([`bake`]), with the type of the layers R11 adds to it
+//! ([`scatter`]), and what a client's height worker holds and answers, a client's field a body with
+//! the bake, readings and material over it ([`worker`]), which the client's module exports.
 //!
 //! # The contract of the height function
 //!
@@ -43,26 +61,47 @@ compile_error!(
      client's terrain would not match the server's bit for bit"
 );
 
+pub mod bake;
+pub mod cold_trap;
+pub mod craters;
 pub mod cube;
+pub mod field;
 pub mod geometry;
+pub mod ground;
+pub mod height;
+pub mod material;
+mod memo;
 pub mod noise;
 pub mod num;
 pub mod patch;
+pub mod reading;
+pub mod scatter;
 pub mod spheroid;
+pub mod substance_key;
+pub mod synth;
+pub mod tables;
 pub mod tags;
 pub mod test_planet;
+#[cfg(test)]
+mod test_sizes;
+#[cfg(any(test, feature = "testing"))]
+pub mod testing;
+pub mod wire;
+pub mod worker;
 
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 mod wasm;
 
-/// The version of the provisional test planet, written into the header of every golden file of
-/// this crate in place of the generator version (plan R05, Design note 13).
+/// The version of the provisional test planet, written into the header of every golden file
+/// directly in this crate's `tests/golden/` in place of the generator version (plan R05, Design
+/// note 13).
 ///
 /// The test planet (R05) belongs to no universe, so a change to it moves no universe's output and
 /// does not bump `GENERATOR_VERSION`; it bumps this instead, as does any change to the cube
 /// sphere's mapping or a patch bake's bytes. Where a golden test of this crate fails with the
-/// testkit's hint to "bump `GENERATOR_VERSION`", read "bump `TEST_PLANET_VERSION`". R09's real height
-/// function writes `GENERATOR_VERSION` into its own goldens.
+/// testkit's hint to "bump `GENERATOR_VERSION`", read "bump `TEST_PLANET_VERSION`". R09's goldens,
+/// in subdirectories of `tests/golden/` (`wire/`, and the real height function's), carry
+/// `GENERATOR_VERSION`.
 pub const TEST_PLANET_VERSION: u32 = 2;
 
 /// The generator version this build of the crate computes surfaces for.

@@ -1,0 +1,3042 @@
+//! What a client's height worker holds and answers for real bodies (plan R10, T6.b): a
+//! [`PartialField`] a body, built from R09's payload blocks as the render thread posts them, and
+//! over it R10's bake ([`bake_terrain`]), readings ([`surveyed_reading`], [`slant_range`]),
+//! material ([`material_at`] with its [`exposed_properties`] at the point's maturity,
+//! [`maturity_at`]), the photometry the lit terrain draws a bake's palette with
+//! ([`WorkerFields::photometry`], R10.T10.b, at the header's maturity; R10.T1.c) and its albedo
+//! nodes at a patch's level, which the terrain interpolates at each vertex's maturity
+//! ([`WorkerFields::maturity_nodes`], R10.T1.c's client half), and the whole of a
+//! view's terrain readout where its line of sight meets the ground ([`WorkerFields::ground_readout`],
+//! R10.T12: the slant range, the reading, the material and the ground's two properties, the bearing
+//! capacity and the pad friction, with the month's temperature the friction is taken at).
+//!
+//! The client's WebAssembly module wraps [`WorkerFields`] in its `SurfaceFields` export
+//! (`src/wasm.rs`) thinly: the decoding, the merge, the survey's change, the level table, σ by
+//! level (R10.T4.b; surveyed only where the field is started with [`SigmaSurvey::Surveyed`],
+//! R10.T4.c), the level charge (R09.T8.d (b3)) and each query's synthesis are here, so that the
+//! native and wasip1 tests check them as the browser target runs them, and the client's worker test
+//! holds the module's answers to this module's on a fixture field
+//! (`tests/golden/worker/moon_like.golden`, `golden`).
+//!
+//! # A body's field
+//!
+//! [`WorkerFields::init`] starts a body's field from a block 0, which carries the field's header
+//! (R09's Design note 17), replacing any field of the body held, and [`WorkerFields::chunk`] adds
+//! each later block, a later payload's block 0 among them, each through [`decode_block`] and
+//! [`PartialField::insert`] (R10's Design note 16). A block is taken whole or refused whole
+//! ([`TakeBlockError`]), the field then as it was. [`WorkerFields::release`] drops the body.
+//!
+//! Each block taken answers with what it changed of the field ([`SurveyChange`]): the cells it
+//! surveyed that the field did not hold as surveyed, and the cells it brought, surveyed or margin,
+//! that the field did not hold at all. A block can change a baked patch only there, or where the
+//! patch was not complete, which is the rebake rule below.
+//!
+//! # The rebake rule (Design note 16, as built)
+//!
+//! Cells arrive exact and whole with their margins, so a block changes no value at a vertex the
+//! field held before it, surveyed or answered from a margin, and a resolution code alone changes no
+//! byte (R10.T6.a). A patch baked before a block is baked again after it exactly where
+//!
+//! 1. the bake was not [complete](crate::bake::TerrainLayers::is_complete): some vertex took the
+//!    reference surface, or has no weights, because the field lacked a cell its reads reach, which
+//!    any block may bring, whether or not it changes the mask (main's ruling of 2026-10-14 on
+//!    R10.T6.a's question);
+//! 2. the block surveys a cell that holds one of the patch's vertices outside the survey, so that
+//!    its survey mask changes: the change meets the bake's [`BodyBake::unsurveyed_cells`]; or
+//! 3. the block brings a cell, surveyed or margin, that the bake's horizon map's far field was
+//!    refused for ([`HorizonMap::refused_cells`](crate::bake::HorizonMap::refused_cells)): a
+//!    refused height names the first cell its reads lacked, every read before it held and final,
+//!    so it can change only once that cell is held, and a block that brings none of them leaves
+//!    the map's words as they are (decision-r10-t8a §3, R10.T8.b). A margin cell answers a far
+//!    height with the true ground, so "brings" counts margin as well as surveyed ground.
+//!
+//! The client's `workers/rebake.ts` (`needsRebake`) applies the rule to the bakes it holds, from
+//! each bake's [`unsurveyed_cells`](BodyBake::unsurveyed_cells), its horizon map's refused cells
+//! and its completeness, and each block's [`SurveyChange`]. A bake in flight while its body's blocks
+//! arrive is taken conservatively there: baked again unless it is complete, its horizon map is
+//! [complete](crate::bake::HorizonMap::is_complete), and its mask is whole.
+//!
+//! # The synthesis
+//!
+//! Each query builds the body's [`Synthesiser`] over its field as it then is, since a synthesiser
+//! borrows the field, which the next block changes, from the parts the body keeps for the query's
+//! seed: the octaves, craters, rims and level bounds, functions of the header and the seed alone,
+//! made on the first query with that seed (17.6 ms a query on `bake/patch_65`'s Earth-like world
+//! before they were kept, natively, one thread, pod, 2026-11-01). A ground readout builds one for
+//! all of its parts, the line of sight, the readings and the material. The [`SynthCache`] is the
+//! body's, from its field's start to its release: [`SynthCache`]'s rule lets one cache serve views
+//! whose held cells only grow, as a body's field does. The body's detail seed is each query's
+//! argument, the client's from the body's record (R09.T1.b); the field carries none. No answer
+//! depends on the order of queries or on what the cache holds.
+//!
+//! Nothing here draws from a stream, so the module opens no domain tag; the answers are
+//! presentation, under no generator version but R09's and R10's functions'.
+//!
+//! # The disc's class map (plan R10, T10.d)
+//!
+//! [`WorkerFields::class_map`] answers R07's disc with the body's coarse class weights over the
+//! survey: a texel a cell of [`CLASS_MAP_LEVEL`] (64 × 64 a face), each texel touched by the
+//! survey with its weights over the body's classes, at most [`CLASS_MAP_CLASSES`], and the share of
+//! it surveyed. The render thread packs it into R07's map (`view/terrain/classMap.ts`). Where the
+//! header carries a maturity, each texel has its ground's maturity at the map's band level and
+//! each class its albedo nodes there (R10.T1.c's client half). A texel whose field cells' classes
+//! the disc would draw apart carries each cell's own weights too ([`RefinedTexel`], R10.T15.b.2),
+//! which the disc draws at the field's level, as the terrain draws a coast.
+//!
+//! # The disc's normal map (plan R10, T10.g)
+//!
+//! [`WorkerFields::normal_map`] answers the disc with the body's cell-scale shading normals over the
+//! survey, at the field's own level ([`NormalMap`]): one a surveyed cell, the normal the root
+//! terrain's coarsest patches shade that cell's centre with, so that the disc and the terrain share
+//! their cell-scale slopes at the hand-over (decision-r10-t16-leans §1, remedy 1). The render
+//! thread packs it beside the class map (`view/bodies/discNormals.ts`).
+//!
+//! # The terrain readout (plan R10, T12)
+//!
+//! [`WorkerFields::ground_readout`] answers a view's `GROUND AT LINE OF SIGHT` at its 4 Hz in one
+//! query: where the line of sight meets the ground ([`slant_range`]), the reading at its foot
+//! ([`surveyed_reading`] over the operator's `BASELINE`), the material there, and the ground's two
+//! properties ([`GroundProperties`]): the ultimate bearing capacity ([`bearing_capacity_on_slope`]
+//! at the body's surface gravity under the query's pad, on the RMS slope over the fixed
+//! [`CAPACITY_SLOPE_BASELINE`]) and the pad friction ([`interface_friction`]), at the ground's mean
+//! temperature for the month the season's mean anomaly falls in where the friction depends on it.
+//! Each part is the separate query's to the bit, and `NOT SURVEYED` stands for all of them wherever
+//! one would not read surveyed ground.
+
+use std::collections::{BTreeMap, BTreeSet};
+
+use hyperion_base::rng::DetailSeed;
+use hyperion_base::units::{Kelvin, Metres, Pascals, Radians, SquareMetres};
+
+use crate::bake::{
+    RefinedNormals, TerrainBake, TerrainBakeOptions, UNSURVEYED, bake_terrain, encode_maturity,
+    refine_normals,
+};
+use crate::cube::{
+    Edge, FaceUv, MAX_LEVEL, PATCH_QUADS, PatchKey, face_uv_to_xyz, st_to_uv, unit_dir,
+};
+use crate::field::{
+    BodyRef, FieldHeader, FieldView, InsertBlockError, PartialField, ResolutionCode, cell_at_index,
+    cell_index, month_at,
+};
+use crate::geometry::vertex_spacing;
+use crate::material::{
+    ClassWeights, FrictionModel, GroundExposure, GroundMaterial, MATURITY_NODES, Material,
+    MaterialProperties, PhaseLaw, ResolvePropertiesError, UnresolvedTerms, WEIGHT_TOTAL,
+    bearing_capacity_on_slope, cell_material, exposed_properties, interface_friction, lapse_drop_k,
+    material_at, maturity_at, maturity_at_level, maturity_at_level_dir, maturity_nodes,
+    scaled_normal_albedo, unresolved_mix, unresolved_terms, weights_at, weights_with_sample,
+};
+use crate::num;
+use crate::patch::NormalScale;
+use crate::patch::normals::{encode_octahedral_f32, surface_normal};
+// The free query each march here answers as, bit for bit, under its kept ceiling: the docs'
+// links name it, and the tests hold the readout to it.
+#[cfg(any(test, doc))]
+use crate::reading::slant_range;
+use crate::reading::{
+    LineOfSight, SLOPE_BASELINES, SlantRange, SurveyedGround, SurveyedReading, slant_range_under,
+    surveyed_reading,
+};
+use crate::synth::craters::CraterOctaves;
+use crate::synth::levels::HeldChannels;
+use crate::synth::{
+    BandLevel, LevelBounds, QueryHeightError, SynthCache, SynthesisParts, Synthesiser,
+    omitted_variance_in,
+};
+use crate::wire::{DecodeBlockError, DecodedBlock, decode_block};
+
+/// The values a level's row of a [level table](WorkerFields::level_table) holds: 4.
+pub const LEVEL_TABLE_STRIDE: usize = 4;
+
+/// The rows of a [level table](WorkerFields::level_table): one a band level, 0 to 24.
+pub const LEVEL_TABLE_ROWS: usize = MAX_LEVEL as usize + 1;
+
+/// Millimetres a metre, the unit of a cell's elevation.
+const MM_PER_M: f64 = 1000.0;
+
+/// The fields a client's height worker holds, one [`PartialField`] a body, with each body's cache
+/// and level bounds (the [module documentation](self)).
+#[derive(Debug, Clone, Default)]
+pub struct WorkerFields {
+    bodies: BTreeMap<BodyRef, BodyField>,
+}
+
+/// One body's field and what the worker keeps with it.
+#[derive(Debug, Clone)]
+struct BodyField {
+    field: PartialField,
+    /// The body's level bounds, from the field's header alone, built once at the field's start.
+    bounds: LevelBounds,
+    /// The lowest and highest elevation of the cells held, millimetres, `None` before any.
+    elevation_mm: Option<(i32, i32)>,
+    /// What the cells held certify of the channels' incision, which holds the channels' share of
+    /// the level table's lowest heights (R09.T8.d (b2)).
+    channels: HeldChannels,
+    /// The body's σ by level over the cells held as surveyed (R10.T4.b), or `None` where the field
+    /// was started with [`SigmaSurvey::Skipped`] (R10.T4.c).
+    sigma: Option<LevelSigma>,
+    /// The body's synthesis cache, kept from the field's start to its release. It is correct only
+    /// because the field never drops a cell ([`SynthCache`]'s rule): a change that evicts cells
+    /// must start it afresh with them.
+    cache: SynthCache,
+    /// What the body's albedo nodes are made from, kept from the field's start to its release: a
+    /// function of the header alone, which a block never changes.
+    nodes: NodeCache,
+    /// The synthesis's parts for the detail seed last asked ([`BodyField::synthesiser`]), made on
+    /// the first query with it: a function of the header and the seed alone, which a block never
+    /// changes, so that each query's synthesiser over the field as it then is skips their build.
+    parts: Option<SynthesisParts>,
+    /// The slant range's ceiling over the cells held, with the parts kept
+    /// ([`SurveyedGround::ceiling_m`]), formed at the first march after the field took a block or
+    /// the parts were made, `None` until then: a function of the cells held and the parts alone, so
+    /// that every march between two blocks reads one scan's answer ([`slant_range_under`]).
+    ceiling_m: Option<f64>,
+}
+
+impl BodyField {
+    /// The synthesis over the field as it is held, with the body's detail seed `seed`, and the
+    /// body's cache: [`Synthesiser::new`]'s, bit for bit, from the parts kept for `seed`, which are
+    /// made again only for another seed.
+    fn synthesiser(
+        &mut self,
+        seed: DetailSeed,
+    ) -> (Synthesiser<'_, PartialField>, &mut SynthCache) {
+        self.keep_parts(seed);
+        let parts = self.parts.as_ref().expect("the parts are kept above");
+        (Synthesiser::with_parts(&self.field, parts), &mut self.cache)
+    }
+
+    /// [`synthesiser`](Self::synthesiser), with the slant range's ceiling over the cells held,
+    /// formed here at the first march after a block or a new seed and kept until the next.
+    fn marcher(
+        &mut self,
+        seed: DetailSeed,
+    ) -> (Synthesiser<'_, PartialField>, &mut SynthCache, f64) {
+        self.keep_parts(seed);
+        let parts = self.parts.as_ref().expect("the parts are kept above");
+        let synth = Synthesiser::with_parts(&self.field, parts);
+        let ceiling_m = *self
+            .ceiling_m
+            .get_or_insert_with(|| SurveyedGround::ceiling_m(&synth));
+        (synth, &mut self.cache, ceiling_m)
+    }
+
+    /// Keeps the parts for `seed`: made afresh for another seed, the ceiling let go with the old
+    /// ones.
+    fn keep_parts(&mut self, seed: DetailSeed) {
+        if self.parts.as_ref().is_none_or(|parts| parts.seed() != seed) {
+            self.parts = Some(SynthesisParts::new(self.field.header(), seed));
+            self.ceiling_m = None;
+        }
+    }
+}
+
+/// What a body's field keeps for its materials' albedo nodes ([`WorkerFields::maturity_nodes`];
+/// R10.T1.c's client half): the body's unresolved terms, built on the first ask, and each
+/// material's drawn albedo at each maturity a level's nodes have read.
+///
+/// The nodes read a material's albedo only at the K node maturities and the mix's 52 edge
+/// maturities (`maturity_nodes`), the same fractions of `m_body` at every level, so a material holds
+/// at most 68 values, and a level's nodes are weighted sums of them.
+#[derive(Debug, Clone, Default)]
+struct NodeCache {
+    /// The body's unresolved terms ([`unresolved_terms`]), once asked.
+    terms: BodyTerms,
+    /// Each material's drawn albedo in B, V and R at each maturity read, in rising maturity.
+    drawn: BTreeMap<Material, Vec<(f64, [f64; 3])>>,
+}
+
+/// A body's unresolved terms as its field keeps them.
+#[derive(Debug, Clone, Default)]
+enum BodyTerms {
+    /// Not asked yet.
+    #[default]
+    Unasked,
+    /// None: the header carries no maturity or no weathering rate.
+    Absent,
+    /// The terms, built at the first ask.
+    Built(UnresolvedTerms),
+}
+
+impl BodyTerms {
+    /// The terms of the body of `header`, built at the first ask and kept, or `None` where the
+    /// header carries none.
+    fn of(&mut self, header: &FieldHeader) -> Option<&UnresolvedTerms> {
+        if matches!(self, Self::Unasked) {
+            *self = unresolved_terms(header).map_or(Self::Absent, Self::Built);
+        }
+        match self {
+            Self::Built(terms) => Some(terms),
+            Self::Unasked | Self::Absent => None,
+        }
+    }
+}
+
+/// The drawn albedo G(`maturity`) of `material` on the body of `header`: [`scaled_normal_albedo`]
+/// of its [`exposed_properties`] at the header's exposure at `maturity`, under the header's scale
+/// (1 where it holds none), as [`WorkerFields::photometry`] draws it at `m_body`.
+///
+/// # Panics
+///
+/// If `material`'s entry is past the header's palette, which the callers have checked.
+fn drawn_albedo(header: &FieldHeader, material: Material, maturity: f64) -> [f64; 3] {
+    let exposure = GroundExposure::of_header(header).with_maturity(maturity);
+    let exposed = exposed_properties(material, header.palette(), exposure)
+        .expect("the material's entry is the palette's, as its photometry found");
+    scaled_normal_albedo(&exposed, header.albedo_scale().unwrap_or(1.0))
+}
+
+/// The albedo `values` holds at `maturity`, or `draw`'s, kept in its place: `values` rises by
+/// maturity, each once, as [`f64::total_cmp`] orders them.
+fn drawn_at(
+    values: &mut Vec<(f64, [f64; 3])>,
+    maturity: f64,
+    draw: impl FnOnce() -> [f64; 3],
+) -> [f64; 3] {
+    match values.binary_search_by(|(m, _)| m.total_cmp(&maturity)) {
+        Ok(at) => values[at].1,
+        Err(at) => {
+            let value = draw();
+            values.insert(at, (maturity, value));
+            value
+        }
+    }
+}
+
+impl BodyField {
+    /// Widens the elevations held, and what the cells held certify of the channels, by `block`'s
+    /// cells.
+    fn hold_cells(&mut self, block: &DecodedBlock) {
+        for cell in block.cells() {
+            let e = cell.elevation_mm;
+            self.elevation_mm = Some(
+                self.elevation_mm
+                    .map_or((e, e), |(lo, hi)| (lo.min(e), hi.max(e))),
+            );
+            self.channels.hold(cell);
+        }
+    }
+
+    /// Widens the body's σ by the cells a block taken surveyed anew, `change`'s, where the field
+    /// surveys σ at all ([`SigmaSurvey`]).
+    fn survey_sigma(&mut self, change: &SurveyChange) {
+        if let Some(sigma) = &mut self.sigma {
+            sigma.survey(&self.field, &self.bounds, change.runs());
+        }
+    }
+}
+
+/// Whether a body's field surveys its σ by level as it takes blocks ([`WorkerFields::init`]; plan
+/// R10, R10.T4.c; decision-r10-item30 §4).
+///
+/// Only R10's statistical selection rule reads σ (the client's `levelBounds.ts`, whose
+/// `SELECTION_RULE` sets it), and the survey costs some 50 to 70 µs a cell, 25 to 28 s of every
+/// worker's time for a whole level-8 field (R10.T4.b's record). So the hard rule starts its fields
+/// [`Skipped`](Self::Skipped), and a switch of rule starts them again. Nothing else a field answers
+/// depends on it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SigmaSurvey {
+    /// Each block widens the body's σ by the cells it surveys anew, as R10.T4.b built it.
+    Surveyed,
+    /// No σ is read: [`WorkerFields::level_sigma_m`] answers 0 at every level, the "no σ read"
+    /// that the statistical rule charges `ε_n` for.
+    Skipped,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The cells' σ reads on this thread, [`omitted_variance_in`]'s calls from
+    /// [`LevelSigma::survey`], for the tests that hold a [`SigmaSurvey::Skipped`] field to none.
+    static SIGMA_READS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// A body's σ by level as its worker keeps it (R10.T4.b): for band level n, the largest of R09's
+/// [`Synthesiser::omitted_rms`] at n over the cells the field holds as surveyed, metres, 0 before
+/// any ([`WorkerFields::level_sigma_m`]).
+///
+/// It grows with the cells each block surveys anew, each read once the field holds what its forms
+/// read (a cell whose margin is still to come waits for a later block, R09.T6.g), and never
+/// shrinks, since a cell surveyed stays surveyed and its record never changes (R10.T6.a): the
+/// largest over a set, so the same whatever the order of the blocks. Each level's small-crater share is the body's,
+/// the same in every cell ([`omitted_variance_in`]), so it is built once at the field's start,
+/// leaving each cell its relief, channels and coarse rims; a cell's σ is then
+/// [`Synthesiser::omitted_rms`]'s to the bit. A level whose bound is zero, from the band limit's
+/// level on, leaves nothing out, so its σ is 0 and no cell is read there (R10.T4.a's record: on
+/// every sample world σ is 0 exactly where the bound is; the worker's test holds the two to the
+/// bit). The rest costs about 50 to 70 µs a cell (R10.T4.b's record).
+#[derive(Debug, Clone)]
+struct LevelSigma {
+    /// Each level's small-crater share of the variance it leaves out, square metres
+    /// ([`CraterOctaves::omitted_variance`] at the level's set), or `None` for a level whose
+    /// bound is zero.
+    small_craters: [Option<SquareMetres>; LEVEL_TABLE_ROWS],
+    /// Each level's largest σ so far, metres.
+    largest_m: [f64; LEVEL_TABLE_ROWS],
+    /// The cells surveyed whose σ the field cannot answer yet, by [`cell_index`] in the order they
+    /// came: a survey's margin still to come in a later block, since the channels' closed forms
+    /// read a cell's edge neighbours (R09.T6.g). Each is read once its margin is held.
+    pending: Vec<u32>,
+}
+
+impl LevelSigma {
+    /// No cell read yet, with each level's small-crater share from `octaves`, the body's, at
+    /// `bounds`' sets.
+    #[must_use]
+    fn new(bounds: &LevelBounds, octaves: &CraterOctaves) -> Self {
+        let mut small_craters = [None; LEVEL_TABLE_ROWS];
+        for (level, share) in (0..=MAX_LEVEL).zip(&mut small_craters) {
+            let n = band(level);
+            *share = (bounds.bound_m(n) > 0.0).then(|| octaves.omitted_variance(bounds.set(n)));
+        }
+        Self {
+            small_craters,
+            largest_m: [0.0; LEVEL_TABLE_ROWS],
+            pending: Vec::new(),
+        }
+    }
+
+    /// Widens each level's σ by the cells of `runs`, which `field` holds as surveyed: a block's
+    /// [`SurveyChange::runs`] once the field has taken it. A cell whose σ the field cannot answer
+    /// yet, its margin still to come, waits for a later block, and every waiting cell is tried
+    /// again first; so once a payload's blocks are all taken, every surveyed cell is read, and the
+    /// largest σ is the same whatever the order of the blocks.
+    fn survey(&mut self, field: &PartialField, bounds: &LevelBounds, runs: &[(u32, u32)]) {
+        let level = field.header().level().get();
+        let waiting = std::mem::take(&mut self.pending);
+        let fresh = runs.iter().flat_map(|&(start, end)| start..end);
+        for index in waiting.into_iter().chain(fresh) {
+            let cell = cell_at_index(level, index).expect("a run's cells are the field's level's");
+            if !self.read(field, bounds, cell) {
+                self.pending.push(index);
+            }
+        }
+    }
+
+    /// Widens each level's σ by `cell`'s, held as surveyed, and returns whether the field could
+    /// answer it at every level; where it could not, no level changes.
+    fn read(&mut self, field: &PartialField, bounds: &LevelBounds, cell: PatchKey) -> bool {
+        let mut sigma = [None; LEVEL_TABLE_ROWS];
+        for ((n, &share), at) in (0..=MAX_LEVEL).zip(&self.small_craters).zip(&mut sigma) {
+            let Some(share) = share else {
+                continue;
+            };
+            #[cfg(test)]
+            SIGMA_READS.with(|reads| reads.set(reads.get() + 1));
+            let Some(variance) = omitted_variance_in(field, bounds.set(band(n)), share, cell)
+            else {
+                return false;
+            };
+            *at = Some(variance.total().value().sqrt());
+        }
+        for (largest, at) in self.largest_m.iter_mut().zip(sigma) {
+            if let Some(sigma) = at {
+                *largest = num::max(*largest, sigma);
+            }
+        }
+        true
+    }
+}
+
+/// What a block changed of its body's field: the cells it surveyed anew, and those it brought.
+///
+/// Both are runs of cell indices at the field's level ([`cell_index`]): the cells the block
+/// surveyed that the field did not hold as surveyed, where a baked patch's survey mask can change,
+/// and the cells it brought, surveyed or margin, that the field did not hold at all, where a horizon
+/// map's refused far field can change (the [module documentation](self)'s rebake rule). Both are
+/// empty for a block sent again; a margin, or a finer survey of cells held, surveys nothing new,
+/// though a margin may bring cells.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+pub struct SurveyChange {
+    runs: Vec<(u32, u32)>,
+    held: Vec<(u32, u32)>,
+}
+
+impl SurveyChange {
+    /// The runs of the cells surveyed anew, each its first cell index and the index past its last,
+    /// sorted, disjoint and with no two adjacent.
+    #[must_use]
+    pub fn runs(&self) -> &[(u32, u32)] {
+        &self.runs
+    }
+
+    /// The runs of the cells the field did not hold before the block, surveyed or margin.
+    ///
+    /// They are laid out as [`runs`](Self::runs) are. Every cell surveyed anew that the field did
+    /// not hold as margin is among them.
+    #[must_use]
+    pub fn held_runs(&self) -> &[(u32, u32)] {
+        &self.held
+    }
+
+    /// Whether the block surveyed no cell anew; it may still have brought cells as margin
+    /// ([`held_runs`](Self::held_runs)), which the rebake rule's third case reads.
+    #[must_use]
+    pub fn surveys_nothing(&self) -> bool {
+        self.runs.is_empty()
+    }
+
+    /// Whether the block surveyed the cell of index `index` anew.
+    #[must_use]
+    pub fn surveys(&self, index: u32) -> bool {
+        holds(&self.runs, index)
+    }
+
+    /// Whether the block surveyed anew any of `indices`.
+    #[must_use]
+    pub fn surveys_any(&self, indices: &[u32]) -> bool {
+        indices.iter().any(|&index| self.surveys(index))
+    }
+
+    /// Whether the block brought the cell of index `index`, surveyed or margin, which the field did
+    /// not hold before it.
+    #[must_use]
+    pub fn brings(&self, index: u32) -> bool {
+        holds(&self.held, index)
+    }
+
+    /// Whether the block brought any of `indices` that the field did not hold before it.
+    #[must_use]
+    pub fn brings_any(&self, indices: &[u32]) -> bool {
+        indices.iter().any(|&index| self.brings(index))
+    }
+}
+
+/// Whether `runs`, sorted and disjoint, hold `index`.
+#[must_use]
+fn holds(runs: &[(u32, u32)], index: u32) -> bool {
+    let after = runs.partition_point(|&(start, _)| start <= index);
+    after > 0 && index < runs[after - 1].1
+}
+
+/// Adds the cell of index `index`, the next in rising order, to `runs`.
+fn push_run(runs: &mut Vec<(u32, u32)>, index: u32) {
+    match runs.last_mut() {
+        Some((_, end)) if *end == index => *end = index + 1,
+        _ => runs.push((index, index + 1)),
+    }
+}
+
+/// Why a worker refused a block. The body's field is then as it was before it.
+#[derive(Debug, Clone, PartialEq)]
+pub enum TakeBlockError {
+    /// The block's bytes are not a block this build reads.
+    Decode(DecodeBlockError),
+    /// A field was started from a block that is not a block 0, which alone carries the header.
+    NoHeader {
+        /// The block's index in its payload.
+        index: u32,
+    },
+    /// A later block of a body whose field was not started.
+    NotStarted(BodyRef),
+    /// The block is of another body than the one it was posted for.
+    WrongBody {
+        /// The body it was posted for.
+        named: BodyRef,
+        /// The block's own.
+        found: BodyRef,
+    },
+    /// The field refused to merge it.
+    Insert(InsertBlockError),
+}
+
+impl std::fmt::Display for TakeBlockError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Decode(e) => write!(f, "the block does not decode: {e}"),
+            Self::NoHeader { index } => write!(
+                f,
+                "a field starts from a block 0, which carries its header, not from block {index}"
+            ),
+            Self::NotStarted(body) => write!(
+                f,
+                "a block of body {} of system {:#x} arrived before its field was started",
+                body.body_index(),
+                body.raw_system_id()
+            ),
+            Self::WrongBody { named, found } => write!(
+                f,
+                "a block of body {} of system {:#x} was posted for body {} of system {:#x}",
+                found.body_index(),
+                found.raw_system_id(),
+                named.body_index(),
+                named.raw_system_id()
+            ),
+            Self::Insert(e) => write!(f, "the field refused the block: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for TakeBlockError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Decode(e) => Some(e),
+            Self::Insert(e) => Some(e),
+            Self::NoHeader { .. } | Self::NotStarted(_) | Self::WrongBody { .. } => None,
+        }
+    }
+}
+
+/// Why a worker could not answer a query of a body.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum QueryBodyError {
+    /// No field of the body is held.
+    NotStarted(BodyRef),
+    /// The query reads a cell the body's field does not hold
+    /// ([`QueryHeightError::NotSurveyed`]): one a later block may bring.
+    NotSurveyed(PatchKey),
+}
+
+impl std::fmt::Display for QueryBodyError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotStarted(body) => write!(
+                f,
+                "no field of body {} of system {:#x} is held",
+                body.body_index(),
+                body.raw_system_id()
+            ),
+            Self::NotSurveyed(cell) => write!(f, "{}", QueryHeightError::NotSurveyed(*cell)),
+        }
+    }
+}
+
+impl std::error::Error for QueryBodyError {}
+
+impl From<QueryHeightError> for QueryBodyError {
+    fn from(e: QueryHeightError) -> Self {
+        match e {
+            QueryHeightError::NotSurveyed(cell) => Self::NotSurveyed(cell),
+        }
+    }
+}
+
+/// A material's photometry as the lit terrain draws it (plan R10, T10.b; Design note 8): its normal
+/// albedo in B, V and R exposed as the body's background ground is, at the header's maturity
+/// `m_body` and organic cover ([`exposed_properties`] at [`GroundExposure::of_header`], R10.T1.c),
+/// under the body's albedo scale ([`scaled_normal_albedo`]), its law, and the law's L(0) at the
+/// scaled V ([`PhaseLaw::limb_parameter`]), as T10.a's solve assumed them.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DrawnPhotometry {
+    normal_albedo_bvr: [f64; 3],
+    phase_law: PhaseLaw,
+    limb_parameter: f64,
+}
+
+impl DrawnPhotometry {
+    /// The normal albedo in the Johnson B, V and R bands under the field header's albedo scale c,
+    /// dimensionless: c `A_N`, `A_N` exposed at the header's `m_body` and cover, its V clamped to
+    /// the material's
+    /// [`scale_range`](crate::material::scale_range) and its B and R taking V's factor, each from 0
+    /// to its law's ceiling ([`PhaseLaw::normal_albedo_ceiling`]: 1.35 for the particulate laws, 1
+    /// for Lambert's).
+    #[must_use]
+    pub const fn normal_albedo_bvr(&self) -> [f64; 3] {
+        self.normal_albedo_bvr
+    }
+
+    /// The photometric law: its row's f(α) and L(α) (R07's phase table, R10.T10.b).
+    #[must_use]
+    pub const fn phase_law(&self) -> PhaseLaw {
+        self.phase_law
+    }
+
+    /// L(0), the law's Lommel–Seeliger share at opposition at the scaled albedo in V, dimensionless:
+    /// 0 for Lambert's law, 0.38 to 1 for the particulate laws ([`limb_parameter`](
+    /// crate::material::limb_parameter)), NaN for a NaN albedo.
+    #[must_use]
+    pub const fn limb_parameter(&self) -> f64 {
+        self.limb_parameter
+    }
+}
+
+/// A material's albedo nodes at a patch's band level and at its parent's, as the lit terrain draws
+/// them (R10.T1.c's client half; [`WorkerFields::maturity_nodes`]): [`MATURITY_NODES`] each, node j
+/// at the maturity `m_body` × [`maturity_node_share`](crate::material::maturity_node_share) of j,
+/// each its normal albedo in B, V and R under the header's scale, the level's unresolved octaves
+/// in expectation ([`maturity_nodes`]). The shader interpolates them at each vertex's maturity
+/// ([`maturity_node_albedo`](crate::material::maturity_node_albedo)).
+#[derive(Debug, Clone, PartialEq)]
+pub struct DrawnNodes {
+    level: [[f64; 3]; MATURITY_NODES],
+    parent: [[f64; 3]; MATURITY_NODES],
+}
+
+impl DrawnNodes {
+    /// The nodes at the patch's band level n, each dimensionless in B, V and R.
+    #[must_use]
+    pub const fn level(&self) -> &[[f64; 3]; MATURITY_NODES] {
+        &self.level
+    }
+
+    /// The nodes at its parent's, n − 1 (level 0's own at level 0), each dimensionless in B, V
+    /// and R.
+    #[must_use]
+    pub const fn parent(&self) -> &[[f64; 3]; MATURITY_NODES] {
+        &self.parent
+    }
+}
+
+/// Why a worker could not give a material's photometry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ResolvePhotometryError {
+    /// No field of the body is held.
+    NotStarted(BodyRef),
+    /// The material's entry is past the body's palette.
+    Properties(ResolvePropertiesError),
+}
+
+impl std::fmt::Display for ResolvePhotometryError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotStarted(body) => write!(
+                f,
+                "no field of body {} of system {:#x} is held",
+                body.body_index(),
+                body.raw_system_id()
+            ),
+            Self::Properties(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl std::error::Error for ResolvePhotometryError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::NotStarted(_) => None,
+            Self::Properties(e) => Some(e),
+        }
+    }
+}
+
+/// A patch baked over a body's field, with the cells its survey mask holds unsurveyed.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BodyBake {
+    terrain: TerrainBake,
+    unsurveyed_cells: Vec<u32>,
+}
+
+impl BodyBake {
+    /// R10.T6.a's bake: R05's arrays and R10's layers.
+    #[must_use]
+    pub const fn terrain(&self) -> &TerrainBake {
+        &self.terrain
+    }
+
+    /// The [`cell_index`] of each cell of the field's level that holds a vertex whose survey mask
+    /// is [`UNSURVEYED`], rising, each once: the cells whose survey would change the mask (the
+    /// [module documentation](self)'s rebake rule). Empty for a patch surveyed whole.
+    #[must_use]
+    pub fn unsurveyed_cells(&self) -> &[u32] {
+        &self.unsurveyed_cells
+    }
+
+    /// Whether a block that made `change` makes this bake stale, so that the patch is baked again.
+    ///
+    /// It is the [module documentation](self)'s rebake rule: the bake is not complete, the block
+    /// surveys a cell its mask holds unsurveyed, or it brings a cell its horizon map's far field
+    /// was refused for. Where it is `false`, the patch bakes the same bytes after the block, its
+    /// horizon map's words and refused cells included.
+    #[must_use]
+    pub fn needs_rebake(&self, change: &SurveyChange) -> bool {
+        let layers = self.terrain.layers();
+        !layers.is_complete()
+            || change.surveys_any(&self.unsurveyed_cells)
+            || change.brings_any(layers.horizon().refused_cells())
+    }
+
+    /// The two parts, to hand on without a copy.
+    #[must_use]
+    pub fn into_parts(self) -> (TerrainBake, Vec<u32>) {
+        (self.terrain, self.unsurveyed_cells)
+    }
+}
+
+/// The quadtree level of the disc's class map (plan R10, T10.d): 64 × 64 texels a face, each the
+/// cell (face, 6, i, j) of R05's cube sphere, as R07's `classMapTexelOf` finds it.
+///
+/// A texel of band level n is a cell of quadtree level n + 6 ([`weights_at`]), so a texel here takes
+/// its weights at band level 0 ([`CLASS_MAP_BAND`]): inside Design note 8's "level 4 or shallower"
+/// (main's provisional ruling on R10.T2's question, a map at quadtree level L reading band level
+/// L − 6, so L at most 10), and of Design note 8's "a few hundred kilobytes": 66 × 66 texels a
+/// layer with R07's gutter, 24 layers at 16 classes, 418 KB, where a map at L = 10 would take about
+/// 100 MB.
+pub const CLASS_MAP_LEVEL: u8 = 6;
+
+/// The band level a class-map texel's weights are taken at: [`CLASS_MAP_LEVEL`] − 6.
+pub const CLASS_MAP_BAND: u8 = CLASS_MAP_LEVEL - 6;
+
+/// The classes a class map holds at most: R07's `MAX_DISC_CLASSES`, the laws its disc carries.
+pub const CLASS_MAP_CLASSES: usize = 16;
+
+/// How finely a [`ClassMap`] reads its texels: the map's detail. [`WorkerFields::class_map`]
+/// answers at [`Corners`](Self::Corners) (R10.T15.b.2): a coast, an ice edge, or a crust's or a
+/// climate's bound runs along the field's cells, and the terrain draws it so, while a texel of
+/// [`CLASS_MAP_LEVEL`] over a level-8 field reads one class mix for its 16 cells, the coast then
+/// popped by up to 2–3 stops at the hand-over.
+///
+/// A field cell of level L is a quad of the terrain's patches of level L − 6, whose class weights
+/// are baked at its corners, the patch's vertices, and drawn bilinearly between them; read at the
+/// cells' centres ([`Refined`](Self::Refined), the map below generator version 28), a coast's
+/// cells differed by over a third of a stop in 8,655 of the served wet world's 36,576 refined
+/// cells (lane fix-coast-class-map, 2026-11-03).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum ClassMapDetail {
+    /// Each texel one reading at its centre, or its surveyed cells' mean where its centre's cell is
+    /// not surveyed: the map before R10.T15.b.2, which the tests compare the refined one with.
+    Coarse,
+    /// As [`Coarse`](Self::Coarse), but over a field finer than [`CLASS_MAP_LEVEL`] a texel two of
+    /// whose surveyed field cells' classes, by their records (`cell_material`), are drawn apart
+    /// ([`looks_apart`]) is read at each surveyed cell's centre and carries those readings
+    /// ([`RefinedTexel`]), their mean its own; and one whose cells are drawn alike but one of which
+    /// is drawn apart from the surveyed cell beside it across the texel's edge carries its own
+    /// reading for each of its surveyed cells: the map before generator version 28, which the
+    /// tests compare the corners' with.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "the worker answers the corners' map; the tests compare the centres' one"
+        )
+    )]
+    Refined,
+    /// As [`Refined`](Self::Refined), but each refined texel carries the readings at its cells'
+    /// corners, the terrain's lattice of level L − 6 ([`RefinedTexel::corners`]): the map
+    /// [`WorkerFields::class_map`] answers.
+    Corners,
+}
+
+impl ClassMapDetail {
+    /// The lattice its refined texels carry: [`FineLattice::Corners`] at
+    /// [`Corners`](Self::Corners), [`FineLattice::Centres`] otherwise.
+    #[must_use]
+    const fn lattice(self) -> FineLattice {
+        match self {
+            Self::Coarse | Self::Refined => FineLattice::Centres,
+            Self::Corners => FineLattice::Corners,
+        }
+    }
+}
+
+/// One class of a [`ClassMap`]: a form of a palette entry, with the photometry it is drawn with.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClassMapClass {
+    material: GroundMaterial,
+    photometry: Option<DrawnPhotometry>,
+    nodes: Option<[[f64; 3]; MATURITY_NODES]>,
+}
+
+impl ClassMapClass {
+    /// The form and, where the palette names one, the substance.
+    #[must_use]
+    pub const fn material(&self) -> GroundMaterial {
+        self.material
+    }
+
+    /// Its photometry ([`WorkerFields::photometry`]), `None` where the palette names no substance:
+    /// the disc then shades it with the body's uniform law, as the lit terrain does its law 0.
+    #[must_use]
+    pub const fn photometry(&self) -> Option<DrawnPhotometry> {
+        self.photometry
+    }
+
+    /// Its albedo nodes at the map's band level, [`CLASS_MAP_BAND`] ([`DrawnNodes::level`] of
+    /// [`WorkerFields::maturity_nodes`] there; R10.T1.c's client half), which the disc interpolates
+    /// at each texel's maturity ([`ClassMapTexel::maturity`]): each node its
+    /// [`photometry`](Self::photometry)'s albedo where the header carries no maturity, and `None`
+    /// where the palette names no substance.
+    #[must_use]
+    pub const fn nodes(&self) -> Option<&[[f64; 3]; MATURITY_NODES]> {
+        self.nodes.as_ref()
+    }
+}
+
+/// One texel of a [`ClassMap`] that the survey touches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ClassMapTexel {
+    cell: PatchKey,
+    surveyed: u32,
+    cells: u32,
+    weights: [u8; CLASS_MAP_CLASSES],
+    maturity: Option<u16>,
+}
+
+impl ClassMapTexel {
+    /// The texel: a cell of [`CLASS_MAP_LEVEL`].
+    #[must_use]
+    pub const fn cell(&self) -> PatchKey {
+        self.cell
+    }
+
+    /// The field's cells under the texel that are surveyed, at least 1.
+    #[must_use]
+    pub const fn surveyed_cells(&self) -> u32 {
+        self.surveyed
+    }
+
+    /// The field's cells under the texel: 4^(field level − 6), or 1 where the field's level is 6 or
+    /// shallower, its one cell holding the texel.
+    #[must_use]
+    pub const fn cells(&self) -> u32 {
+        self.cells
+    }
+
+    /// The share of the texel the survey covers, (0, 1]: its field cells surveyed over its cells,
+    /// a margin cell counting as unsurveyed; 1 where the field's level is 6 or shallower.
+    #[must_use]
+    pub fn surveyed_fraction(&self) -> f64 {
+        f64::from(self.surveyed) / f64::from(self.cells)
+    }
+
+    /// Its weight bytes over the map's classes, in their order, the rest 0: summing to 255
+    /// ([`WEIGHT_TOTAL`]), or less where a class past [`CLASS_MAP_CLASSES`] was left out.
+    #[must_use]
+    pub const fn weights(&self) -> [u8; CLASS_MAP_CLASSES] {
+        self.weights
+    }
+
+    /// Its ground's space-weathering maturity at the map's band level, [`CLASS_MAP_BAND`], as the
+    /// layer's code (R10.T1.c's client half).
+    ///
+    /// The code is [`encode_maturity`]'s against the header's `m_body`, of the point rule at that
+    /// level ([`maturity_at_level`]) at the points its weights are read at, their mean where
+    /// several; `None` where the header carries no maturity or no weathering rate. Band level 0
+    /// draws the coarse craters' haloes and leaves a Moon's small craters to its classes'
+    /// [`nodes`](ClassMapClass::nodes).
+    #[must_use]
+    pub const fn maturity(&self) -> Option<u16> {
+        self.maturity
+    }
+}
+
+/// A body's coarse class map for R07's disc (plan R10, T10.d; Design note 8), from its field.
+///
+/// Each texel is a cell of [`CLASS_MAP_LEVEL`], and the map holds those the survey touches, in
+/// rising [`cell_index`], with:
+///
+/// - the share of it surveyed ([`ClassMapTexel::surveyed_fraction`]): of the field's cells under
+///   it, those surveyed, a margin cell counting as unsurveyed;
+/// - its weights over the map's classes: [`weights_at`] at the texel's centre at band level
+///   [`CLASS_MAP_BAND`] where the field's cell holding the centre is surveyed, and otherwise the
+///   mean of [`weights_at`] at the centres of the field's surveyed cells under it, at that band
+///   level, as bytes summing to 255 by the largest remainder (ties to the earlier class);
+/// - its maturity ([`ClassMapTexel::maturity`]), the mean of [`maturity_at_level`] at the same
+///   points and band level, where the header carries one (R10.T1.c's client half).
+///
+/// The classes are the materials the texels' weights name, in [`GroundMaterial`]'s order: a form
+/// of a palette entry, or a form whose palette names no substance. Past [`CLASS_MAP_CLASSES`] the
+/// lightest, by their weight summed over the texels times each texel's surveyed share (ties to the
+/// later material), are left out, and their weight with them, which the disc gives the body's
+/// uniform law.
+///
+/// Over a field finer than [`CLASS_MAP_LEVEL`], a texel two of whose surveyed field cells'
+/// classes, by their records, the disc draws apart (more than a third of a stop in a band's normal
+/// albedo, or on another law) is refined ([`ClassMap::refined`]): its weights and maturity are the
+/// mean of its surveyed cells' at their centres, as above where its centre's cell is not surveyed,
+/// and it carries each cell's own, so that the disc draws a coast along the field's cells as the
+/// terrain does. A texel whose cells are drawn alike, one of which is drawn apart from the surveyed
+/// cell beside it across the texel's edge, is refined too, a coast along its edge, each surveyed
+/// cell carrying the texel's own reading.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClassMap {
+    field_level: u8,
+    classes: Vec<ClassMapClass>,
+    texels: Vec<ClassMapTexel>,
+    refined: Vec<RefinedTexel>,
+    lattice: FineLattice,
+    complete: bool,
+}
+
+/// Where a [`ClassMap`]'s refined texels are read: at their field cells' centres, or at their
+/// corners (the worker's map, from generator version 28).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum FineLattice {
+    /// Each surveyed cell's reading at its centre ([`RefinedTexel::cells`]).
+    Centres,
+    /// The readings at the cells' corners, the vertices of the terrain's patch of level L − 6
+    /// ([`RefinedTexel::corners`]).
+    Corners,
+}
+
+/// A texel of a [`ClassMap`] refined to its field's level: its field cells' own readings at their
+/// centres, or under [`FineLattice::Corners`] the readings at their corners, and which of its cells
+/// are surveyed.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct RefinedTexel {
+    texel: u32,
+    cells: Vec<Option<FineTexel>>,
+    surveyed: Vec<bool>,
+    corners: Vec<Option<FineTexel>>,
+}
+
+impl RefinedTexel {
+    /// The refined texel at `texel` of its field cells' readings `cells` at their centres, each
+    /// surveyed where it has one.
+    fn of_cells(texel: u32, cells: Vec<Option<FineTexel>>) -> Self {
+        Self {
+            texel,
+            surveyed: cells.iter().map(Option::is_some).collect(),
+            cells,
+            corners: Vec::new(),
+        }
+    }
+
+    /// Its texel's place in [`ClassMap::texels`].
+    #[must_use]
+    pub const fn texel(&self) -> u32 {
+        self.texel
+    }
+
+    /// Its field cells, [`ClassMap::fine_side`]² of them in rising (j, i) as [`ClassMapTexel::cells`]
+    /// counts them, `None` for a cell not surveyed (a margin cell counting as unsurveyed); none
+    /// under [`FineLattice::Corners`].
+    #[must_use]
+    pub fn cells(&self) -> &[Option<FineTexel>] {
+        &self.cells
+    }
+
+    /// Whether each of its field cells is surveyed, in [`cells`](Self::cells)' order.
+    #[must_use]
+    pub fn surveyed(&self) -> &[bool] {
+        &self.surveyed
+    }
+
+    /// Under [`FineLattice::Corners`], the readings at its field cells' corners,
+    /// ([`ClassMap::fine_side`] + 1)² of them in rising (j, i): each the vertex of the patch of level
+    /// L − 6 there, as the bake reads it (`PatchKey::vertex_dir`), `None` where the field cell
+    /// holding the vertex is not surveyed, as the bake's survey mask leaves it; none under
+    /// [`FineLattice::Centres`].
+    #[must_use]
+    pub fn corners(&self) -> &[Option<FineTexel>] {
+        &self.corners
+    }
+}
+
+/// One surveyed field cell of a [`RefinedTexel`]: its reading at its centre, its weights at its own
+/// level's band, the field's level less 6 (Design note 8's rule, the normal map's band), and its
+/// maturity at the map's, [`CLASS_MAP_BAND`], that of the classes' albedo nodes; or, where its
+/// texel's cells are drawn alike and it is refined for a bound along its edge, its texel's. Under
+/// [`FineLattice::Corners`], one surveyed corner of its cells, its weights as the patches whose
+/// vertex it is bake them, at the same band, and its maturity at the map's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FineTexel {
+    weights: [u8; CLASS_MAP_CLASSES],
+    maturity: Option<u16>,
+}
+
+impl FineTexel {
+    /// Its weight bytes over the map's classes, as [`ClassMapTexel::weights`].
+    #[must_use]
+    pub const fn weights(&self) -> [u8; CLASS_MAP_CLASSES] {
+        self.weights
+    }
+
+    /// Its maturity's code, as [`ClassMapTexel::maturity`] at the cell's centre alone, or its
+    /// texel's; `None` where the header carries no maturity or no weathering rate.
+    #[must_use]
+    pub const fn maturity(&self) -> Option<u16> {
+        self.maturity
+    }
+}
+
+impl ClassMap {
+    /// The level of the field it was made from, 5 to 8.
+    #[must_use]
+    pub const fn field_level(&self) -> u8 {
+        self.field_level
+    }
+
+    /// Its classes, at most [`CLASS_MAP_CLASSES`], in the order the texels' weights take them.
+    #[must_use]
+    pub fn classes(&self) -> &[ClassMapClass] {
+        &self.classes
+    }
+
+    /// The texels the survey touches, in rising [`cell_index`].
+    #[must_use]
+    pub fn texels(&self) -> &[ClassMapTexel] {
+        &self.texels
+    }
+
+    /// The field cells along a texel's side: 2^(field level − [`CLASS_MAP_LEVEL`]), or 1 where the
+    /// field's level is [`CLASS_MAP_LEVEL`] or shallower.
+    #[must_use]
+    pub const fn fine_side(&self) -> u32 {
+        1 << self.field_level.saturating_sub(CLASS_MAP_LEVEL)
+    }
+
+    /// The texels refined to the field's level, in their texels' order.
+    #[must_use]
+    pub fn refined(&self) -> &[RefinedTexel] {
+        &self.refined
+    }
+
+    /// Where its refined texels are read: [`FineLattice::Corners`] for the worker's map.
+    #[must_use]
+    pub const fn lattice(&self) -> FineLattice {
+        self.lattice
+    }
+
+    /// Whether every texel the survey touches was answered, and each at its detail: `false` where a
+    /// texel's weights read a cell the field does not hold yet (a survey's margin in a later block),
+    /// which leaves the texel out until a later block, or where a refined map could not tell whether
+    /// a texel's cells' classes vary, which leaves it unrefined until then.
+    #[must_use]
+    pub const fn is_complete(&self) -> bool {
+        self.complete
+    }
+}
+
+/// The quadtree levels a patch spans, its 64 quads a side being 2⁶ cells of the level 6 below its
+/// own: a cell of a field's level L is a quad of the patches of level L − 6.
+const PATCH_SPAN_LEVELS: u8 = 6;
+
+/// The band level a normal map of a field of level `field_level` takes its heights at:
+/// max(`field_level` − 6, 0) ([`NormalMap::band`]).
+#[must_use]
+const fn normal_map_band(field_level: u8) -> u8 {
+    field_level.saturating_sub(PATCH_SPAN_LEVELS)
+}
+
+/// A body's normal map for R07's disc (plan R10, T10.g; decision-r10-t16-leans §1, remedy 1), from
+/// its field: each surveyed cell's shading normal at its centre, at the field's own level.
+///
+/// - **The cells** are the field's surveyed cells at its level L, 5 to 8, in rising
+///   [`cell_index`]. A margin cell, held but not surveyed, has none, as the class map leaves out
+///   what the survey has not measured.
+/// - **The normal** at a cell's centre (its centre in (s, t), the direction the class map's texels
+///   take theirs at) is [`surface_normal`] of R09's height and gradient there at band level
+///   [`band`](Self::band), max(L − 6, 0) ([`Synthesiser::height_at`]), on the field's spheroid: a
+///   unit vector, outward, in the body-fixed axes the field's figure has (z the rotation pole).
+/// - **The encoding** is the bake's
+///   ([`encode_octahedral`](crate::patch::normals::encode_octahedral), narrowed to `f32`): a pair (x, y), each
+///   dimensionless in [−1, 1], with |x| + |y| ≤ 1 where the normal's z is at least 0 and the lower
+///   hemisphere folded over the diagonals. The client narrows it to half floats as it narrows a
+///   bake's normals.
+///
+/// # Why band max(L − 6, 0), at the cells' centres
+///
+/// A patch of level P spans 64 quads a side, the cells of level P + 6, and its doubled normals
+/// ([`NormalScale::Double`], 129 samples a side, 128 intervals)
+/// put a sample at each such cell's centre, its odd–odd samples, at band level P. So at L of 6 or more each pair is,
+/// bit for bit, what the patches of level L − 6 bake at that cell's centre on the high setting (the
+/// root's at L = 6): the cell-scale slope the coarsest terrain shades the cell with, the terrain's
+/// finer patches adding only slopes below a cell's size. At L = 5 the root's band, 0, is the
+/// coarsest there is, and each cell's centre is one of the root's vertices.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NormalMap {
+    level: u8,
+    cells: Vec<u32>,
+    pairs: Vec<[f32; 2]>,
+    complete: bool,
+}
+
+impl NormalMap {
+    /// The level of the field it was made from, 5 to 8, whose cells it holds.
+    #[must_use]
+    pub const fn level(&self) -> u8 {
+        self.level
+    }
+
+    /// The band level its heights and gradients were taken at: max([`level`](Self::level) − 6, 0).
+    #[must_use]
+    pub const fn band(&self) -> u8 {
+        normal_map_band(self.level)
+    }
+
+    /// The [`cell_index`] at [`level`](Self::level) of each surveyed cell answered, rising.
+    #[must_use]
+    pub fn cells(&self) -> &[u32] {
+        &self.cells
+    }
+
+    /// Each cell's octahedral pair, in [`cells`](Self::cells)' order: body-fixed, dimensionless,
+    /// each coordinate in [−1, 1].
+    #[must_use]
+    pub fn pairs(&self) -> &[[f32; 2]] {
+        &self.pairs
+    }
+
+    /// Whether every surveyed cell was answered: `false` where a cell's height read a cell the field
+    /// does not hold yet (a survey's margin in a later block), which leaves that cell out until a
+    /// later block.
+    #[must_use]
+    pub const fn is_complete(&self) -> bool {
+        self.complete
+    }
+}
+
+/// A texel's surveyed cells and its weight bytes, per material, as means, and its maturity's code:
+/// before the map's classes are chosen.
+struct TexelReading {
+    cell: PatchKey,
+    surveyed: u32,
+    cells: u32,
+    weights: BTreeMap<GroundMaterial, f64>,
+    maturity: Option<u16>,
+    /// A refined texel's field cells, in [`field_cells_of`]'s order; `None` for a texel not
+    /// refined.
+    fine: Option<FineReadings>,
+}
+
+/// A refined texel's field cells, as its reading carries them, in [`field_cells_of`]'s order.
+enum FineReadings {
+    /// Each cell's own reading at its centre, `None` for a cell not surveyed: a texel whose cells
+    /// vary.
+    Own(Vec<Option<PointReading>>),
+    /// Whether each cell is surveyed, each surveyed one taking the texel's own reading: a texel of
+    /// one class refined for a bound along its edge.
+    Texel(Vec<bool>),
+    /// Whether each cell is surveyed, and the readings at the cells' corners in rising (j, i)
+    /// ([`corner_readings`]): a texel refined under [`ClassMapDetail::Corners`].
+    Corners {
+        surveyed: Vec<bool>,
+        corners: Vec<Option<PointReading>>,
+    },
+}
+
+/// One point's reading: its weights ([`weights_at`]) at [`CLASS_MAP_BAND`], or at its cell's band
+/// for a refined texel's cell, and its maturity at [`CLASS_MAP_BAND`] ([`maturity_at_level`]),
+/// `None` where the header carries no maturity or no weathering rate.
+#[derive(Clone, Copy)]
+struct PointReading {
+    weights: ClassWeights,
+    maturity: Option<f64>,
+}
+
+/// A class map's classes from its texels' readings ([`ClassMap`]): every material they name, in
+/// [`GroundMaterial`]'s order, or past [`CLASS_MAP_CLASSES`] the heaviest, by weight summed over
+/// the texels times each one's surveyed share, ties to the earlier material.
+#[must_use]
+fn kept_classes(readings: &[TexelReading]) -> Vec<GroundMaterial> {
+    let mut totals = BTreeMap::<GroundMaterial, f64>::new();
+    for reading in readings {
+        let share = f64::from(reading.surveyed) / f64::from(reading.cells);
+        for (&material, &weight) in &reading.weights {
+            *totals.entry(material).or_insert(0.0) += weight * share;
+        }
+    }
+    let mut ranked: Vec<(GroundMaterial, f64)> = totals.into_iter().collect();
+    ranked.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
+    ranked.truncate(CLASS_MAP_CLASSES);
+    let mut kept: Vec<GroundMaterial> = ranked.into_iter().map(|(m, _)| m).collect();
+    kept.sort_unstable();
+    kept
+}
+
+/// The field's cells of `level` under, or holding, the class-map texel `texel`, into `cells`, which
+/// it clears first: 4^(`level` − 6) of them in rising (j, i), or the one holding the texel where
+/// `level` is 6 or shallower.
+fn field_cells_of(texel: PatchKey, level: u8, cells: &mut Vec<PatchKey>) {
+    cells.clear();
+    if level <= CLASS_MAP_LEVEL {
+        let shift = CLASS_MAP_LEVEL - level;
+        cells.push(
+            PatchKey::new(texel.face(), level, texel.i() >> shift, texel.j() >> shift)
+                .expect("a texel's ancestor is a cell of its level"),
+        );
+    } else {
+        let shift = level - CLASS_MAP_LEVEL;
+        let side = 1_u32 << shift;
+        cells.extend(
+            (0..side)
+                .flat_map(|dj| (0..side).map(move |di| (di, dj)))
+                .map(|(di, dj)| {
+                    PatchKey::new(
+                        texel.face(),
+                        level,
+                        (texel.i() << shift) + di,
+                        (texel.j() << shift) + dj,
+                    )
+                    .expect("a texel's descendants are cells of their level")
+                }),
+        );
+    }
+}
+
+/// A texel's field cells as its reading carries them ([`FineReadings`]), in `cells`' order, by its
+/// [`Variation`]: none for one alike; for one varying within, each surveyed cell's own, `read`
+/// in their order; for one at an edge, which are surveyed.
+#[must_use]
+fn fine_readings(
+    field: &PartialField,
+    cells: &[PatchKey],
+    variation: Variation,
+    read: &[PointReading],
+) -> Option<FineReadings> {
+    match variation {
+        Variation::Alike => None,
+        Variation::Within => {
+            let mut own = read.iter().copied();
+            Some(FineReadings::Own(
+                cells
+                    .iter()
+                    .map(|&cell| {
+                        field
+                            .is_surveyed(cell)
+                            .then(|| own.next().expect("one reading a surveyed cell"))
+                    })
+                    .collect(),
+            ))
+        }
+        Variation::AtEdge => Some(FineReadings::Texel(
+            cells.iter().map(|&cell| field.is_surveyed(cell)).collect(),
+        )),
+    }
+}
+
+/// A texel's [`FineReadings::Corners`] where `variation` refines it: its field `cells`' survey, in
+/// their order, and their corners' readings ([`corner_readings`]); `None` for a texel whose cells
+/// are drawn alike, and for one a corner of which reads past the cells held, which stays unrefined
+/// until a later block, `complete` then set `false`.
+fn corner_fine_readings(
+    synth: &Synthesiser<'_, PartialField>,
+    cache: &mut SynthCache,
+    texel: PatchKey,
+    cells: &[PatchKey],
+    variation: Variation,
+    complete: &mut bool,
+) -> Option<FineReadings> {
+    if variation == Variation::Alike {
+        return None;
+    }
+    let field = synth.field();
+    let level = field.header().level().get();
+    let band =
+        BandLevel::new(normal_map_band(level)).expect("a field's level less 6 is a band level");
+    // At most 25 corners, a field of level 8's.
+    let mut corners = Vec::with_capacity(25);
+    match corner_readings(synth, cache, texel, level, band, &mut corners) {
+        Ok(()) => Some(FineReadings::Corners {
+            surveyed: cells.iter().map(|&cell| field.is_surveyed(cell)).collect(),
+            corners,
+        }),
+        Err(QueryHeightError::NotSurveyed(_)) => {
+            *complete = false;
+            None
+        }
+    }
+}
+
+/// The readings at a refined texel's field cells' corners, into `corners`, which it clears first:
+/// the (r + 1)² vertices, in rising (j, i), of the patch of level L − 6 holding `texel` (r field
+/// cells of level `level` a texel side), each the bake's (`PatchKey::vertex_dir`), its weights at
+/// `weights_band` from the height there ([`weights_with_sample`]), as the patch bakes them, and its
+/// maturity at [`CLASS_MAP_BAND`]; `None` where the field cell holding it is not surveyed.
+///
+/// # Errors
+///
+/// [`QueryHeightError::NotSurveyed`] for a read past the cells held.
+///
+/// # Panics
+///
+/// If `level` is not finer than [`CLASS_MAP_LEVEL`], or as [`weights_at`].
+fn corner_readings(
+    synth: &Synthesiser<'_, PartialField>,
+    cache: &mut SynthCache,
+    texel: PatchKey,
+    level: u8,
+    weights_band: BandLevel,
+    corners: &mut Vec<Option<PointReading>>,
+) -> Result<(), QueryHeightError> {
+    corners.clear();
+    let field = synth.field();
+    let patch_level = normal_map_band(level);
+    let shift = CLASS_MAP_LEVEL - patch_level;
+    let patch = PatchKey::new(
+        texel.face(),
+        patch_level,
+        texel.i() >> shift,
+        texel.j() >> shift,
+    )
+    .expect("a texel's ancestor is a patch of its level");
+    let side = 1_u32 << (level - CLASS_MAP_LEVEL);
+    let quad = |k: u32| u8::try_from(k).expect("a patch's vertex index is at most 64");
+    let x0 = (texel.i() & ((1 << shift) - 1)) * side;
+    let y0 = (texel.j() & ((1 << shift) - 1)) * side;
+    let maturity_band = BandLevel::new(CLASS_MAP_BAND).expect("band level 0 is a band level");
+    for b in 0..=side {
+        for a in 0..=side {
+            let dir = patch.vertex_dir(quad(x0 + a), quad(y0 + b));
+            let holding =
+                PatchKey::containing(level, dir).expect("a coarse level is a quadtree level");
+            if !field.is_surveyed(holding) {
+                corners.push(None);
+                continue;
+            }
+            let sample = synth.height_at(cache, dir, weights_band)?;
+            corners.push(Some(PointReading {
+                weights: weights_with_sample(synth, cache, dir, weights_band, &sample)?,
+                maturity: maturity_at_level_dir(synth, cache, dir, maturity_band)?,
+            }));
+        }
+    }
+    Ok(())
+}
+
+/// A class map's texels and its refined texels from its texels' readings, as bytes over the
+/// classes `kept` ([`bytes_by_largest_remainder`]), the refined cells' maturity coded against the
+/// body's `m_body`, `background`, where the header carries one.
+#[must_use]
+fn class_map_texels(
+    readings: Vec<TexelReading>,
+    kept: &[GroundMaterial],
+    background: Option<f64>,
+) -> (Vec<ClassMapTexel>, Vec<RefinedTexel>) {
+    let bytes_of = |weight_of: &dyn Fn(GroundMaterial) -> f64| {
+        let mut values = [0.0_f64; CLASS_MAP_CLASSES];
+        for (value, &material) in values.iter_mut().zip(kept) {
+            *value = weight_of(material);
+        }
+        bytes_by_largest_remainder(&values[..kept.len()])
+    };
+    let own_texel = |own: PointReading| FineTexel {
+        weights: bytes_of(&|m| f64::from(own.weights.weight(m))),
+        maturity: background
+            .zip(own.maturity)
+            .map(|(body, m)| texel_code(m, body)),
+    };
+    let mut texels = Vec::with_capacity(readings.len());
+    let mut refined = Vec::new();
+    for (at, reading) in readings.into_iter().enumerate() {
+        let texel = ClassMapTexel {
+            cell: reading.cell,
+            surveyed: reading.surveyed,
+            cells: reading.cells,
+            weights: bytes_of(&|m| reading.weights.get(&m).copied().unwrap_or(0.0)),
+            maturity: reading.maturity,
+        };
+        let place = u32::try_from(at).expect("a map holds at most 6 · 4⁶ texels");
+        match reading.fine {
+            None => {}
+            Some(FineReadings::Own(own)) => refined.push(RefinedTexel::of_cells(
+                place,
+                own.into_iter().map(|cell| cell.map(own_texel)).collect(),
+            )),
+            Some(FineReadings::Texel(surveyed)) => refined.push(RefinedTexel::of_cells(
+                place,
+                surveyed
+                    .iter()
+                    .map(|&surveyed| {
+                        surveyed.then_some(FineTexel {
+                            weights: texel.weights,
+                            maturity: texel.maturity,
+                        })
+                    })
+                    .collect(),
+            )),
+            Some(FineReadings::Corners { surveyed, corners }) => refined.push(RefinedTexel {
+                texel: place,
+                cells: Vec::new(),
+                surveyed,
+                corners: corners
+                    .into_iter()
+                    .map(|corner| corner.map(own_texel))
+                    .collect(),
+            }),
+        }
+        texels.push(texel);
+    }
+    (texels, refined)
+}
+
+/// A class-map point's reading ([`PointReading`]): its weights at band level `weights_band`, and
+/// its maturity at [`CLASS_MAP_BAND`], the band of the classes' albedo nodes it is read against.
+///
+/// # Errors
+///
+/// [`QueryHeightError::NotSurveyed`] for a read past the cells held.
+///
+/// # Panics
+///
+/// As [`weights_at`].
+fn point_reading(
+    synth: &Synthesiser<'_, PartialField>,
+    cache: &mut SynthCache,
+    at: FaceUv,
+    weights_band: BandLevel,
+) -> Result<PointReading, QueryHeightError> {
+    let band = BandLevel::new(CLASS_MAP_BAND).expect("band level 0 is a band level");
+    Ok(PointReading {
+        weights: weights_at(synth, cache, at, weights_band)?,
+        maturity: maturity_at_level(synth, cache, at, band)?,
+    })
+}
+
+/// The readings of `points`, in their order, into `read`, which it clears first ([`point_reading`],
+/// the weights at `weights_band`).
+///
+/// # Errors
+///
+/// [`QueryHeightError::NotSurveyed`] for a read past the cells held, the first point's that makes
+/// one, `read` then holding those before it.
+///
+/// # Panics
+///
+/// As [`weights_at`].
+fn read_points(
+    synth: &Synthesiser<'_, PartialField>,
+    cache: &mut SynthCache,
+    points: &[FaceUv],
+    weights_band: BandLevel,
+    read: &mut Vec<PointReading>,
+) -> Result<(), QueryHeightError> {
+    read.clear();
+    for &at in points {
+        read.push(point_reading(synth, cache, at, weights_band)?);
+    }
+    Ok(())
+}
+
+/// Points' readings summed: each material's weight bytes, and their maturities, `None` where the
+/// header carries no maturity or no weathering rate, each in the points' order from +0.
+#[must_use]
+fn summed(readings: &[PointReading]) -> (BTreeMap<GroundMaterial, f64>, Option<f64>) {
+    let mut weights = BTreeMap::<GroundMaterial, f64>::new();
+    let mut maturity: Option<f64> = None;
+    for reading in readings {
+        for (material, byte) in reading.weights.iter() {
+            *weights.entry(material).or_insert(0.0) += f64::from(byte);
+        }
+        // The first point's sum is +0 plus its value, as a sum from +0 always was.
+        if let Some(m) = reading.maturity {
+            maturity = Some(maturity.unwrap_or(0.0) + m);
+        }
+    }
+    (weights, maturity)
+}
+
+/// The contrast past which two of a texel's cells' classes are drawn apart, and the texel is
+/// refined: 2^(1/3), a third of a stop, the hand-over check's per-cell bound (plan R10, R10.T15.b).
+///
+/// A texel's class mix draws between its classes' extremes, so where every pair of its cells'
+/// classes is within a third of a stop in each band's normal albedo, on the same law, no cell can
+/// pop past the bound at the hand-over for its classes alone, and the texel is left as it is: on
+/// the served wet world `41ffecb200000002.0400`, 42% of its texels' cells are decided apart by
+/// their records, mostly between classes drawn alike (lane fix-coast-class-map, 2026-11-02).
+const REFINE_CONTRAST: f64 = 1.259_921_049_894_873_2;
+
+/// How the disc draws a class: its drawn photometry's normal albedo in B, V and R and its law
+/// ([`DrawnPhotometry`]), or `None` for a class whose palette names no substance, which shades with
+/// the body's uniform law.
+type ClassLook = Option<([f64; 3], PhaseLaw)>;
+
+/// Whether the disc draws two classes' looks apart: a named class beside an unnamed one, two laws,
+/// or a band's normal albedos more than [`REFINE_CONTRAST`] apart.
+#[must_use]
+fn looks_apart(a: ClassLook, b: ClassLook) -> bool {
+    match (a, b) {
+        (None, None) => false,
+        (Some((x, law_x)), Some((y, law_y))) => {
+            law_x != law_y
+                || x.iter().zip(&y).any(|(&p, &q)| {
+                    let (low, high) = if p < q { (p, q) } else { (q, p) };
+                    high > low * REFINE_CONTRAST
+                })
+        }
+        (None, Some(_)) | (Some(_), None) => true,
+    }
+}
+
+/// Each field cell's class as the disc draws it ([`ClassLook`]), by its record ([`cell_material`]),
+/// found once a class map: a texel reads its own cells' and its neighbours' edge cells', so that
+/// each cell would otherwise be classed up to five times. A cell holds its material's place in
+/// `materials` plus 1, 0 before it is found: 2 bytes a cell, 786 KB at level 8.
+struct CellLooks {
+    /// The level of the cells it is asked of, the field's, whose [`cell_index`] keys `places`.
+    level: u8,
+    places: Vec<u16>,
+    materials: Vec<(GroundMaterial, ClassLook)>,
+}
+
+impl CellLooks {
+    /// None found yet, for a field of level `level`.
+    #[must_use]
+    fn new(level: u8) -> Self {
+        let cells = 6_usize << (2 * u32::from(level));
+        Self {
+            level,
+            places: vec![0; cells],
+            materials: Vec::new(),
+        }
+    }
+
+    /// `cell`'s class's look by its record, found on the first ask.
+    ///
+    /// # Errors
+    ///
+    /// As [`cell_material`].
+    ///
+    /// # Panics
+    ///
+    /// If the classifier names an entry past the body's palette, which its tests rule out, or more
+    /// than 65,535 materials, which no palette holds (bugs).
+    fn of(&mut self, field: &PartialField, cell: PatchKey) -> Result<ClassLook, QueryHeightError> {
+        debug_assert_eq!(cell.level(), self.level, "a cell of the field's level");
+        let index = usize::try_from(cell_index(cell)).expect("a cell index fits a usize");
+        if let Some(place) = self.places[index].checked_sub(1) {
+            return Ok(self.materials[usize::from(place)].1);
+        }
+        let material = cell_material(field, cell)?;
+        let known = self.materials.iter().position(|&(m, _)| m == material);
+        let place = known.unwrap_or_else(|| {
+            let look = material.material().map(|m| {
+                let drawn = drawn_photometry(field.header(), m)
+                    .expect("the classifier names only entries of the body's palette");
+                (drawn.normal_albedo_bvr(), drawn.phase_law())
+            });
+            self.materials.push((material, look));
+            self.materials.len() - 1
+        });
+        self.places[index] = u16::try_from(place + 1).expect("a body's materials fit a u16");
+        Ok(self.materials[place].1)
+    }
+}
+
+/// How a class-map texel's field cells' classes vary as the disc draws them ([`looks_apart`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Variation {
+    /// Its surveyed cells' classes, and those of the cells beside them across its edges, are drawn
+    /// alike.
+    Alike,
+    /// Its surveyed cells' classes are drawn alike, but one beside them across its edge is drawn
+    /// apart: a bound along its edge.
+    AtEdge,
+    /// Two of its surveyed cells' classes are drawn apart.
+    Within,
+}
+
+/// How the disc draws apart the classes, by their records ([`cell_material`]), of the surveyed
+/// field cells `cells` of the class-map texel `texel`, and of those beside them across its edges,
+/// surveyed too ([`Variation`]): a class map's texel to refine.
+///
+/// The edge's catches a coast that runs along a texel's edge, whose texels on either side are each
+/// drawn alike; both are refined, so that the disc draws it at the field's cells from each side.
+///
+/// # Errors
+///
+/// [`QueryHeightError::NotSurveyed`] for a cell, its climate or an edge neighbour not held.
+fn variation_of(
+    field: &PartialField,
+    looks: &mut CellLooks,
+    texel: PatchKey,
+    cells: &[PatchKey],
+) -> Result<Variation, QueryHeightError> {
+    // The texel's distinct looks, at most one a class.
+    let mut distinct: Vec<ClassLook> = Vec::with_capacity(4);
+    for &cell in cells {
+        let look = looks.of(field, cell)?;
+        if !distinct.contains(&look) {
+            if distinct.iter().any(|&other| looks_apart(other, look)) {
+                return Ok(Variation::Within);
+            }
+            distinct.push(look);
+        }
+    }
+    for &cell in cells {
+        let look = looks.of(field, cell)?;
+        for edge in Edge::ALL {
+            let beside = cell.edge_neighbour(edge);
+            if texel_of(beside) != texel
+                && field.is_surveyed(beside)
+                && looks_apart(look, looks.of(field, beside)?)
+            {
+                return Ok(Variation::AtEdge);
+            }
+        }
+    }
+    Ok(Variation::Alike)
+}
+
+/// The class-map texel, a cell of [`CLASS_MAP_LEVEL`], holding the field's cell `cell`, of a level
+/// at least [`CLASS_MAP_LEVEL`].
+#[must_use]
+fn texel_of(cell: PatchKey) -> PatchKey {
+    let shift = cell.level() - CLASS_MAP_LEVEL;
+    PatchKey::new(
+        cell.face(),
+        CLASS_MAP_LEVEL,
+        cell.i() >> shift,
+        cell.j() >> shift,
+    )
+    .expect("a cell's ancestor is a cell of its level")
+}
+
+/// A maturity's code at a class map's point or texel: [`encode_maturity`] of `mean`, held at the
+/// body's `m_body`, `body`, against its sum's rounding.
+#[must_use]
+fn texel_code(mean: f64, body: f64) -> u16 {
+    encode_maturity(if mean < body { mean } else { body }, body)
+}
+
+/// The centre of `cell` in face coordinates.
+#[must_use]
+fn centre_of(cell: PatchKey) -> FaceUv {
+    let side = f64::from(1_u32 << cell.level());
+    FaceUv {
+        face: cell.face(),
+        u: st_to_uv((f64::from(cell.i()) + 0.5) / side),
+        v: st_to_uv((f64::from(cell.j()) + 0.5) / side),
+    }
+}
+
+/// `values`, at most [`CLASS_MAP_CLASSES`], as bytes in their order keeping their rounded sum, at
+/// most 255, the bytes past them 0: each rounded down, and the bytes that leaves short given to the
+/// largest remainders, ties to the earlier.
+///
+/// # Panics
+///
+/// If `values` holds more than [`CLASS_MAP_CLASSES`], which a map's classes never do (a bug).
+#[must_use]
+fn bytes_by_largest_remainder(values: &[f64]) -> [u8; CLASS_MAP_CLASSES] {
+    let n = values.len();
+    assert!(
+        n <= CLASS_MAP_CLASSES,
+        "{n} values for at most {CLASS_MAP_CLASSES} classes"
+    );
+    let total: f64 = values.iter().sum();
+    let mut bytes = [0_u8; CLASS_MAP_CLASSES];
+    let mut remainders = [0.0_f64; CLASS_MAP_CLASSES];
+    for ((byte, remainder), &value) in bytes.iter_mut().zip(&mut remainders).zip(values) {
+        let floor = value.floor();
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "each value lies in [0, 255], so its floor is a whole number a u8 holds"
+        )]
+        let whole = floor as u8;
+        *byte = whole;
+        *remainder = value - floor;
+    }
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "the values' sum lies in [0, 255], so its rounding is a whole number a u32 holds"
+    )]
+    let target = num::min(total.round(), f64::from(WEIGHT_TOTAL)) as u32;
+    let mut order: [usize; CLASS_MAP_CLASSES] = std::array::from_fn(|k| k);
+    // The index breaks every tie, so no two compare equal and the unstable sort is the stable one.
+    order[..n].sort_unstable_by(|&a, &b| remainders[b].total_cmp(&remainders[a]).then(a.cmp(&b)));
+    let held: u32 = bytes.iter().map(|&b| u32::from(b)).sum();
+    let mut short = target.saturating_sub(held);
+    for &k in &order[..n] {
+        if short == 0 {
+            break;
+        }
+        bytes[k] = bytes[k].saturating_add(1);
+        short -= 1;
+    }
+    bytes
+}
+
+/// The material at a surveyed point, its ground's space-weathering maturity, and, where the palette
+/// names its substance, its properties as the point's ground exposes them.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SurveyedMaterial {
+    ground: GroundMaterial,
+    maturity: Option<f64>,
+    properties: Option<MaterialProperties>,
+}
+
+impl SurveyedMaterial {
+    /// The classifier's answer: the form always, and the entry where the palette names one.
+    #[must_use]
+    pub const fn ground(&self) -> GroundMaterial {
+        self.ground
+    }
+
+    /// The space-weathering maturity of the point's ground, `m_local`, dimensionless in [0, 1]:
+    /// the header's `m_body` less the largest deficit a young crater's fresh ejecta leave there
+    /// ([`maturity_at`], R10.T1.c), or `None` where the header carries no maturity, as every
+    /// header did below generator version 24 (P14.T54.b).
+    #[must_use]
+    pub const fn maturity(&self) -> Option<f64> {
+        self.maturity
+    }
+
+    /// The material's properties, `None` where the palette names no entry
+    /// ([`GroundMaterial::material`] is `None`): [`exposed_properties`] at the point's
+    /// [`maturity`](Self::maturity) and the header's organic cover, so that the albedo is the
+    /// point's own, unscaled (the drawn one is [`WorkerFields::photometry`]'s, at `m_body`).
+    #[must_use]
+    pub const fn properties(&self) -> Option<&MaterialProperties> {
+        self.properties.as_ref()
+    }
+}
+
+/// One of the baselines a readout's slope may be read over, a member of [`SLOPE_BASELINES`]
+/// (Design note 7; the guide's `BASELINE`), so that no free length reaches [`surveyed_reading`],
+/// which panics on one that is not finite and positive (decision-r10-t12-leans §1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+pub enum SlopeBaseline {
+    /// 2 m, the default: the band limit, and the finest of `InSight`'s lander-stability baselines.
+    #[default]
+    TwoMetres,
+    /// 5 m, the other lander-stability baseline.
+    FiveMetres,
+    /// 100 m, near the landing radar's 84 m scale.
+    HundredMetres,
+}
+
+impl SlopeBaseline {
+    /// Every baseline, in [`SLOPE_BASELINES`]' order.
+    pub const ALL: [Self; 3] = [Self::TwoMetres, Self::FiveMetres, Self::HundredMetres];
+
+    /// The baseline's length, metres: its member of [`SLOPE_BASELINES`].
+    #[must_use]
+    pub const fn metres(self) -> Metres {
+        SLOPE_BASELINES[match self {
+            Self::TwoMetres => 0,
+            Self::FiveMetres => 1,
+            Self::HundredMetres => 2,
+        }]
+    }
+}
+
+impl TryFrom<Metres> for SlopeBaseline {
+    type Error = SelectSlopeBaselineError;
+
+    /// The baseline whose length is `length` to the bit.
+    ///
+    /// # Errors
+    ///
+    /// [`SelectSlopeBaselineError`] for a length that is none of [`SLOPE_BASELINES`].
+    fn try_from(length: Metres) -> Result<Self, Self::Error> {
+        Self::ALL
+            .into_iter()
+            .find(|b| b.metres().value().total_cmp(&length.value()).is_eq())
+            .ok_or(SelectSlopeBaselineError {
+                length_m: length.value(),
+            })
+    }
+}
+
+/// A slope baseline asked for that is none of [`SLOPE_BASELINES`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SelectSlopeBaselineError {
+    length_m: f64,
+}
+
+impl std::fmt::Display for SelectSlopeBaselineError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "a slope baseline of {} m is none of the readout's ",
+            self.length_m
+        )?;
+        let last = SLOPE_BASELINES.len() - 1;
+        for (n, baseline) in SLOPE_BASELINES.iter().enumerate() {
+            let before = match n {
+                0 => "",
+                n if n == last => " and ",
+                _ => ", ",
+            };
+            write!(f, "{before}{} m", baseline.value())?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for SelectSlopeBaselineError {}
+
+/// A seasonal orbit's mean anomaly, radians from periapsis: any finite angle, which [`month_at`]
+/// reduces (decision-r10-t12-leans §6 (f): never a NaN, on which it panics).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SeasonAnomaly(Radians);
+
+impl SeasonAnomaly {
+    /// The anomaly, radians, finite.
+    #[must_use]
+    pub const fn radians(self) -> Radians {
+        self.0
+    }
+}
+
+impl TryFrom<Radians> for SeasonAnomaly {
+    type Error = MakeSeasonAnomalyError;
+
+    /// `anomaly`, if finite.
+    ///
+    /// # Errors
+    ///
+    /// [`MakeSeasonAnomalyError`] for an anomaly that is not finite.
+    fn try_from(anomaly: Radians) -> Result<Self, Self::Error> {
+        if anomaly.value().is_finite() {
+            Ok(Self(anomaly))
+        } else {
+            Err(MakeSeasonAnomalyError {
+                anomaly_rad: anomaly.value(),
+            })
+        }
+    }
+}
+
+/// A season's mean anomaly that is not finite.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MakeSeasonAnomalyError {
+    anomaly_rad: f64,
+}
+
+impl std::fmt::Display for MakeSeasonAnomalyError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "a season's mean anomaly of {} rad is not finite",
+            self.anomaly_rad
+        )
+    }
+}
+
+impl std::error::Error for MakeSeasonAnomalyError {}
+
+/// The fixed baseline the bearing capacity's slope is read over: 2 m, the first of
+/// [`SLOPE_BASELINES`], whatever baseline the readout's `BASELINE` shows
+/// ([`bearing_capacity_on_slope`]'s "The slope's basis"; signoff-10 (h);
+/// decision-r10-slope-capacity §5).
+pub const CAPACITY_SLOPE_BASELINE: SlopeBaseline = SlopeBaseline::TwoMetres;
+
+/// What a view's terrain readout asks where its line of sight meets the ground
+/// ([`WorkerFields::ground_readout`], plan R10, T12): the line of sight and the readout's settings.
+///
+/// Plain data with public fields, as [`TerrainBakeOptions`] is.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GroundReadoutQuery {
+    /// The line of sight's origin, body-fixed, metres: finite.
+    pub origin_m: [f64; 3],
+    /// Its direction, body-fixed: finite and not zero, of any length.
+    pub direction: [f64; 3],
+    /// How far along it the ground is looked for, metres: finite and at least 0 ([`slant_range`]'s
+    /// reach; past the body's far side for a `NO GROUND` that means the line passes the body).
+    pub max: Metres,
+    /// The baseline the readout's `SLOPE` is read over: the operator's `BASELINE`, 2 m until its
+    /// selector is built (R10.T12.a). The capacity's slope is read over
+    /// [`CAPACITY_SLOPE_BASELINE`] whatever this is.
+    pub slope_baseline: SlopeBaseline,
+    /// The width of the pad the bearing capacity is taken under, metres, a square pad's side or a
+    /// round pad's diameter: the reference pad's 1.0 m until the own ship's hull defines its pads
+    /// (the guide's `PAD WIDTH`, signoff-10). One that is not finite and positive has no capacity.
+    pub pad_width: Metres,
+    /// The seasonal orbit's mean anomaly at the instant the view lights the body at: the body's own
+    /// orbit about its star or stars, or its planet's for a moon (R09's Design note 8;
+    /// decision-r10-t12-leans §6), or `None` where no orbit is known. A one-month year reads its
+    /// one month whatever is given.
+    pub season: Option<SeasonAnomaly>,
+}
+
+/// The ground's two properties a terrain readout states after `MATERIAL` (plan R10, T12; the
+/// guide's `ULTIMATE BEARING CAPACITY` and `PAD FRICTION`, signoff-10): what the ground at the point
+/// bears under a pad before it fails in shear, and how a metal pad grips it, with the slope and the
+/// temperature they were taken at.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GroundProperties {
+    bearing_capacity: Option<Pascals>,
+    capacity_slope: Radians,
+    pad_width: Metres,
+    friction: Option<f64>,
+    friction_on_temperature: bool,
+    temperature: Option<Kelvin>,
+}
+
+impl GroundProperties {
+    /// The ultimate bearing capacity, Pa: [`bearing_capacity_on_slope`] of the material's
+    /// properties at the body's surface gravity (the header's crater contract's,
+    /// [`CraterParams::gravity`](crate::craters::CraterParams::gravity)), under a pad of
+    /// [`pad_width`](Self::pad_width), on the ground's RMS slope over [`CAPACITY_SLOPE_BASELINE`]
+    /// ([`capacity_slope`](Self::capacity_slope)). `None` where it is not computed (the readout's
+    /// em dash, never 0): the palette names no substance, the pad's width is not finite and
+    /// positive, or [`bearing_capacity_on_slope`] gives `None` (its cases).
+    #[must_use]
+    pub const fn bearing_capacity(&self) -> Option<Pascals> {
+        self.bearing_capacity
+    }
+
+    /// The slope the capacity was taken on, radians from the local horizontal: the RMS adirectional
+    /// slope over [`CAPACITY_SLOPE_BASELINE`] at the point ([`SurveyedReading::slope_rms`] at 2 m;
+    /// an upper estimate where the point is unresolved, which errs low on the capacity).
+    #[must_use]
+    pub const fn capacity_slope(&self) -> Radians {
+        self.capacity_slope
+    }
+
+    /// The pad width the capacity was taken under, metres ([`GroundReadoutQuery::pad_width`]).
+    #[must_use]
+    pub const fn pad_width(&self) -> Metres {
+        self.pad_width
+    }
+
+    /// The pad's interface friction coefficient tan δ, dimensionless ([`interface_friction`],
+    /// Design note 2): the form's constant, NAVFAC DM-7.02's on a soil, whatever the temperature;
+    /// on an ice the interpolation at [`temperature`](Self::temperature) between Liefferink et
+    /// al.'s points. `None` where the form has no model, where the friction depends on a
+    /// temperature not known, or where the temperature lies outside the model's points.
+    #[must_use]
+    pub const fn friction(&self) -> Option<f64> {
+        self.friction
+    }
+
+    /// Whether the friction depends on the temperature ([`FrictionModel::ByTemperature`]), so that
+    /// the readout states the temperature it was taken at after `· AT`, the friction's em dash
+    /// included where the temperature lies outside the source's; `false` for a constant and for a
+    /// form with no model.
+    #[must_use]
+    pub const fn friction_on_temperature(&self) -> bool {
+        self.friction_on_temperature
+    }
+
+    /// The ground's mean temperature at the point for the month the readout's time falls in, kelvin
+    /// (the guide's `AT`): the climate record's month mean at sea level
+    /// ([`FieldHeader::month_temperature`]) carried to the reading's elevation by the header's lapse
+    /// rate as the classifier carries it, the month [`month_at`] the season's mean anomaly, or the
+    /// one month of a one-month year. `None` in a year of twelve months with no season given. The
+    /// day's cycle is not modelled.
+    #[must_use]
+    pub const fn temperature(&self) -> Option<Kelvin> {
+        self.temperature
+    }
+}
+
+/// A terrain readout's answer where the line of sight meets surveyed ground: the slant range, the
+/// reading at its foot, the material there and the ground's properties.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GroundAtSight {
+    sight: SlantRange,
+    reading: SurveyedReading,
+    material: SurveyedMaterial,
+    properties: GroundProperties,
+}
+
+impl GroundAtSight {
+    /// The slant range and its foot, as [`slant_range`] gives it.
+    #[must_use]
+    pub const fn sight(&self) -> &SlantRange {
+        &self.sight
+    }
+
+    /// The reading at the foot, its slope over the query's baseline, as [`surveyed_reading`] gives
+    /// it ([`WorkerFields::reading`]).
+    #[must_use]
+    pub const fn reading(&self) -> &SurveyedReading {
+        &self.reading
+    }
+
+    /// The material at the foot, as [`WorkerFields::material`] gives it.
+    #[must_use]
+    pub const fn material(&self) -> &SurveyedMaterial {
+        &self.material
+    }
+
+    /// The ground's bearing capacity and pad friction there.
+    #[must_use]
+    pub const fn properties(&self) -> &GroundProperties {
+        &self.properties
+    }
+}
+
+/// What a view's terrain readout reads where its line of sight meets the ground
+/// ([`WorkerFields::ground_readout`], plan R10, T12).
+#[derive(Debug, Clone, PartialEq)]
+pub enum GroundReadout {
+    /// The line of sight meets surveyed ground: every reading there.
+    Ground(Box<GroundAtSight>),
+    /// It meets no ground within its reach ([`LineOfSight::NoGround`]): the readout's `NO GROUND`.
+    NoGround,
+    /// It meets ground the ship has not surveyed first ([`LineOfSight::NotSurveyed`]), or its foot
+    /// lies in a cell the field does not hold as surveyed (a survey's margin): the readout's
+    /// `NOT SURVEYED`, in place of every reading.
+    NotSurveyed,
+}
+
+impl WorkerFields {
+    /// No field held.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            bodies: BTreeMap::new(),
+        }
+    }
+
+    /// The bodies whose fields are held, in [`BodyRef`]'s order.
+    pub fn bodies(&self) -> impl Iterator<Item = BodyRef> + '_ {
+        self.bodies.keys().copied()
+    }
+
+    /// The field of `body`, if one is held.
+    #[must_use]
+    pub fn field(&self, body: BodyRef) -> Option<&PartialField> {
+        self.bodies.get(&body).map(|b| &b.field)
+    }
+
+    /// The bytes the fields hold on the heap ([`PartialField::heap_bytes`] summed): the worker's
+    /// copy of the bodies' fields, for R12's memory line. The caches and bounds are not counted.
+    #[must_use]
+    pub fn heap_bytes(&self) -> usize {
+        self.bodies
+            .values()
+            .map(|b| b.field.heap_bytes())
+            .fold(0, usize::saturating_add)
+    }
+
+    /// Starts `body`'s field from `bytes`, one block 0, replacing any field of `body` held, and
+    /// answers with the cells it surveys and brings ([`SurveyChange`]).
+    ///
+    /// It builds the body's level bounds from the header ([`LevelBounds::new`], a few to some
+    /// tens of milliseconds) and starts its cache afresh. With `sigma`
+    /// [`Surveyed`](SigmaSurvey::Surveyed) it also builds each level's small-crater share of σ and
+    /// reads σ over the cells this block and each later one survey
+    /// ([`level_sigma_m`](Self::level_sigma_m)); with [`Skipped`](SigmaSurvey::Skipped) it reads
+    /// none, for the life of this start of the field (R10.T4.c).
+    ///
+    /// # Errors
+    ///
+    /// [`TakeBlockError`] if the bytes do not decode, are not a block 0, are of another body than
+    /// `body`, or are refused by the new field. Any field of `body` held is then kept as it was.
+    pub fn init(
+        &mut self,
+        body: BodyRef,
+        bytes: &[u8],
+        sigma: SigmaSurvey,
+    ) -> Result<SurveyChange, TakeBlockError> {
+        let block = decode_block(bytes).map_err(TakeBlockError::Decode)?;
+        check_body(body, &block)?;
+        let header = block.header().ok_or(TakeBlockError::NoHeader {
+            index: block.index(),
+        })?;
+        let mut field = PartialField::new(header.clone());
+        let change = survey_change(&field, &block);
+        field.insert(&block).map_err(TakeBlockError::Insert)?;
+        // `LevelBounds::new`'s own build, keeping its octaves for σ's small-crater shares.
+        let octaves = CraterOctaves::new(field.header());
+        let bounds = LevelBounds::of(field.header(), &octaves);
+        let sigma = match sigma {
+            SigmaSurvey::Surveyed => Some(LevelSigma::new(&bounds, &octaves)),
+            SigmaSurvey::Skipped => None,
+        };
+        let mut held = BodyField {
+            sigma,
+            bounds,
+            field,
+            elevation_mm: None,
+            channels: HeldChannels::new(header),
+            cache: SynthCache::new(),
+            nodes: NodeCache::default(),
+            parts: None,
+            ceiling_m: None,
+        };
+        held.hold_cells(&block);
+        held.survey_sigma(&change);
+        self.bodies.insert(body, held);
+        Ok(change)
+    }
+
+    /// Adds `bytes`, one block, to `body`'s field, and answers with the cells it surveys anew and
+    /// brings ([`SurveyChange`]).
+    ///
+    /// # Errors
+    ///
+    /// [`TakeBlockError`] if no field of `body` is held, or the bytes do not decode, are of another
+    /// body, or are refused by the field ([`PartialField::insert`]). The field is then as it was.
+    pub fn chunk(&mut self, body: BodyRef, bytes: &[u8]) -> Result<SurveyChange, TakeBlockError> {
+        let held = self
+            .bodies
+            .get_mut(&body)
+            .ok_or(TakeBlockError::NotStarted(body))?;
+        let block = decode_block(bytes).map_err(TakeBlockError::Decode)?;
+        check_body(body, &block)?;
+        // The insert refuses it too, but the change is read first, by the field's level.
+        let expected = held.field.header().level();
+        if block.level() != expected {
+            return Err(TakeBlockError::Insert(InsertBlockError::WrongLevel {
+                found: block.level(),
+                expected,
+            }));
+        }
+        let change = survey_change(&held.field, &block);
+        held.field.insert(&block).map_err(TakeBlockError::Insert)?;
+        held.ceiling_m = None;
+        held.hold_cells(&block);
+        held.survey_sigma(&change);
+        Ok(change)
+    }
+
+    /// Drops `body`'s field, its cache and bounds; whether one was held.
+    pub fn release(&mut self, body: BodyRef) -> bool {
+        self.bodies.remove(&body).is_some()
+    }
+
+    /// `body`'s level table, as R05's selection and culling read the test planet's
+    /// (`TestPlanet::level_table`): [`LEVEL_TABLE_ROWS`] rows of [`LEVEL_TABLE_STRIDE`], band level
+    /// n at `4 n`, each
+    ///
+    /// - the level bound `ε_n`, metres ([`LevelBounds::bound_m`], R09's [`level_bound_m`]);
+    /// - the lowest and highest height a patch of the level can bake, metres above the datum: the
+    ///   elevations of the cells held, which R09's approximating spline never leaves, widened by a
+    ///   micrometre and a part in 10¹² as R09's patch range is, plus the most the level's and its
+    ///   parent's contributions can add ([`LevelBounds::contribution_range_m`]), the channels'
+    ///   share of the lowest held by what the cells held certify: the deepest trunk groove among
+    ///   them, no finer level where none carries tributaries, and the channels' floor at the sea
+    ///   where none carries a wet epoch's incision (R09.T8.d (b2)); and stretched to the datum, 0,
+    ///   which a vertex outside the survey takes where the field cannot make it (R10.T6.a); exactly
+    ///   0 and 0 while no cell is held. The highest is the header's alone, which the client's
+    ///   off-survey ceiling reads as a bound on ground no cell held certifies;
+    /// - the largest vertex spacing of the level on the body's equatorial radius, metres
+    ///   ([`vertex_spacing`]).
+    ///
+    /// It grows as blocks bring cells, so a worker answers it after every block. `None` if no
+    /// field of `body` is held.
+    ///
+    /// [`level_bound_m`]: crate::synth::level_bound_m
+    #[must_use]
+    pub fn level_table(&self, body: BodyRef) -> Option<Vec<f64>> {
+        let held = self.bodies.get(&body)?;
+        let a = held.field.header().figure().equatorial_radius_m;
+        let base = held.elevation_mm.map(|(lo, hi)| {
+            let (lo, hi) = (f64::from(lo) / MM_PER_M, f64::from(hi) / MM_PER_M);
+            let slack = |x: f64| 1e-6 + 1e-12 * x.abs();
+            (lo - slack(lo), hi + slack(hi))
+        });
+        let mut table = Vec::with_capacity(LEVEL_TABLE_ROWS * LEVEL_TABLE_STRIDE);
+        for level in 0..=MAX_LEVEL {
+            let n = band(level);
+            let (low, high) = base.map_or((0.0, 0.0), |base| {
+                let (mut low, mut high) = held.bounds.held_height_range_m(n, base, &held.channels);
+                if let Some(parent) = level.checked_sub(1) {
+                    let (l, h) =
+                        held.bounds
+                            .held_height_range_m(band(parent), base, &held.channels);
+                    low = num::min(low, l);
+                    high = num::max(high, h);
+                }
+                (num::min(low, 0.0), num::max(high, 0.0))
+            });
+            table.extend([
+                held.bounds.bound_m(n),
+                low,
+                high,
+                vertex_spacing(a, level).max_m,
+            ]);
+        }
+        Some(table)
+    }
+
+    /// `body`'s σ by level, the statistical half of its level bounds beside
+    /// [`level_table`](Self::level_table)'s hard bound (plan R10, R10.T4.b; R10's Design note 5):
+    /// for band level n at index n, from 0 to 24, the largest of R09's level-keyed
+    /// [`Synthesiser::omitted_rms`] at n over the cells the field holds as surveyed, metres; 0 at
+    /// every level before any cell is surveyed.
+    ///
+    /// It is the body-wide σ that selection's min(`ε_n`, 4`σ_n`) reads under R10's statistical rule
+    /// (the client's `levelBounds.ts`), and it bounds nothing: the hard bound stays the table's. It
+    /// is taken over the surveyed ground alone, which is all a patch draws from the field (an
+    /// unsurveyed vertex takes the reference surface, R10.T6.a), as a bake's own σ is
+    /// ([`TerrainLayers::sigma`](crate::bake::TerrainLayers::sigma)). It grows as blocks survey
+    /// cells, each cell read once the field holds its margin, as its block or a later one is taken
+    /// (the closed forms of each level below the
+    /// band limit's, the small craters' share built once a level at the field's start: about 50 to
+    /// 70 µs a cell, some 2 s for a full 1 MiB block of a level-8 field), and is the same whatever
+    /// the order of the blocks. A field started with [`SigmaSurvey::Skipped`] reads none and
+    /// answers 0 at every level, as before any cell is surveyed (R10.T4.c). `None` if no field of
+    /// `body` is held.
+    #[must_use]
+    pub fn level_sigma_m(&self, body: BodyRef) -> Option<[f64; LEVEL_TABLE_ROWS]> {
+        self.bodies.get(&body).map(|held| {
+            held.sigma
+                .as_ref()
+                .map_or([0.0; LEVEL_TABLE_ROWS], |sigma| sigma.largest_m)
+        })
+    }
+
+    /// The surveyed cells of `body`'s field whose σ waits for their margin ([`LevelSigma`]'s
+    /// pending cells), `None` if no field of it surveys σ: the tests' view of the deferral.
+    #[cfg(test)]
+    pub(crate) fn sigma_pending(&self, body: BodyRef) -> Option<usize> {
+        self.bodies
+            .get(&body)
+            .and_then(|held| held.sigma.as_ref())
+            .map(|sigma| sigma.pending.len())
+    }
+
+    /// `body`'s level charge by level, the bound selection charges each level under the hard rule
+    /// beside [`level_table`](Self::level_table)'s stated bound (R09.T8.d (b3)): for band level n
+    /// at index n, from 0 to 24, `ε_n` with the channels' share held by what the cells held
+    /// certify (the crate's `LevelBounds::held_bound_m`), metres: the coarse level's cap held to
+    /// the deepest trunk groove among them, no finer level where none carries tributaries, and the
+    /// levels' corrections bounded jointly, inland where none is under water (R09.T8.d (b2)).
+    ///
+    /// It bounds |h(n) − h(m)| for every finer level m at every point the field answers, since
+    /// every cell a query reads is held, and it is below the table's `ε_n` wherever the level
+    /// leaves a channel level out, the table's elsewhere. It is selection's charge alone: the
+    /// skirts, the boxes' widening and the floors read the table's `ε_n`, so that no bake depends
+    /// on which blocks the worker holds. It grows as blocks bring cells, the same whatever their
+    /// order. `None` if no field of `body` is held.
+    #[must_use]
+    pub fn level_charge_m(&self, body: BodyRef) -> Option<[f64; LEVEL_TABLE_ROWS]> {
+        let held = self.bodies.get(&body)?;
+        let mut charge = [0.0; LEVEL_TABLE_ROWS];
+        for (level, value) in (0..=MAX_LEVEL).zip(&mut charge) {
+            *value = held.bounds.held_bound_m(band(level), &held.channels);
+        }
+        Some(charge)
+    }
+
+    /// Bakes `key` over `body`'s field with the body's detail seed `seed` ([`bake_terrain`], no
+    /// hooks), with the cells its survey mask holds unsurveyed.
+    ///
+    /// # Errors
+    ///
+    /// [`QueryBodyError::NotStarted`] if no field of `body` is held, and
+    /// [`QueryBodyError::NotSurveyed`] where a surveyed vertex reads a cell the field does not hold
+    /// yet: a survey whose margin is still to come in a later block.
+    ///
+    /// # Panics
+    ///
+    /// As [`bake_terrain`]: if `opts`' skirt margin is negative or not finite.
+    pub fn bake(
+        &mut self,
+        body: BodyRef,
+        seed: DetailSeed,
+        key: PatchKey,
+        opts: &TerrainBakeOptions,
+    ) -> Result<BodyBake, QueryBodyError> {
+        let (synth, cache) = self.held(body)?.synthesiser(seed);
+        let terrain = bake_terrain(&synth, cache, key, opts, &[])?;
+        let coarse = synth.field().header().level().get();
+        let quads = u8::try_from(PATCH_QUADS).expect("64 quads fit a u8");
+        let mask = terrain.layers().survey_mask();
+        let cells: BTreeSet<u32> = (0..=quads)
+            .flat_map(|y| (0..=quads).map(move |x| (x, y)))
+            .zip(mask)
+            .filter(|&(_, &m)| m == UNSURVEYED)
+            .map(|((x, y), _)| {
+                cell_index(
+                    PatchKey::containing(coarse, key.vertex_dir(x, y))
+                        .expect("a coarse level is a quadtree level"),
+                )
+            })
+            .collect();
+        Ok(BodyBake {
+            terrain,
+            unsurveyed_cells: cells.into_iter().collect(),
+        })
+    }
+
+    /// The normals between `key`'s vertices at `scale` that a bake of it with
+    /// [`NormalsLayer::Drafted`](crate::bake::NormalsLayer::Drafted) left, over `body`'s field
+    /// with the body's detail seed `seed` ([`refine_normals`]): a [`NormalsLayer::Baked`]
+    /// bake's there, bit for bit.
+    ///
+    /// [`NormalsLayer::Baked`]: crate::bake::NormalsLayer::Baked
+    ///
+    /// # Errors
+    ///
+    /// As [`bake`](Self::bake): no field of `body`, or a surveyed sample that reads a cell the
+    /// field does not hold yet.
+    pub fn refine_normals(
+        &mut self,
+        body: BodyRef,
+        seed: DetailSeed,
+        key: PatchKey,
+        scale: NormalScale,
+    ) -> Result<RefinedNormals, QueryBodyError> {
+        let (synth, cache) = self.held(body)?.synthesiser(seed);
+        Ok(refine_normals(&synth, cache, key, scale)?)
+    }
+
+    /// The reading at `at` on `body`, its slope over `slope_baseline` ([`surveyed_reading`]), or
+    /// `None` where the ground there has not been surveyed.
+    ///
+    /// # Errors
+    ///
+    /// As [`bake`](Self::bake): no field of `body`, or a height the slope reads past the cells
+    /// held.
+    ///
+    /// # Panics
+    ///
+    /// As [`surveyed_reading`]: if `slope_baseline` is not finite and positive or `at` names no
+    /// direction.
+    pub fn reading(
+        &mut self,
+        body: BodyRef,
+        seed: DetailSeed,
+        at: FaceUv,
+        slope_baseline: Metres,
+    ) -> Result<Option<SurveyedReading>, QueryBodyError> {
+        let (synth, cache) = self.held(body)?.synthesiser(seed);
+        Ok(surveyed_reading(&synth, cache, at, slope_baseline)?)
+    }
+
+    /// Where the line of sight from `origin_m` along `direction`, body-fixed, metres, meets
+    /// `body`'s ground within `max` metres, as far as the survey can say ([`slant_range`]).
+    ///
+    /// Its ceiling over the cells held is formed at the first march after a block and kept until
+    /// the next, so that the march's scan of every cell is not repeated on each 4 Hz ask; the
+    /// answer is [`slant_range`]'s, bit for bit (R10.T12.d).
+    ///
+    /// # Errors
+    ///
+    /// As [`bake`](Self::bake): no field of `body`, or a height on surveyed ground past the cells
+    /// held.
+    ///
+    /// # Panics
+    ///
+    /// As [`slant_range`]: if `origin_m` is not finite, `direction` is zero or not finite, or `max`
+    /// is not finite and non-negative.
+    pub fn slant_range(
+        &mut self,
+        body: BodyRef,
+        seed: DetailSeed,
+        origin_m: &[f64; 3],
+        direction: &[f64; 3],
+        max: Metres,
+    ) -> Result<LineOfSight, QueryBodyError> {
+        let (synth, cache, ceiling_m) = self.held(body)?.marcher(seed);
+        Ok(slant_range_under(
+            &synth, cache, origin_m, direction, max, ceiling_m,
+        )?)
+    }
+
+    /// The material at `at` on `body` ([`material_at`]) with its ground's maturity there
+    /// ([`maturity_at`], `m_local`) and its properties as that ground exposes them
+    /// ([`exposed_properties`] at `m_local` and the header's organic cover, R10.T1.c), or `None`
+    /// where the field's cell there is not surveyed: a survey's margin, whose ground is known but
+    /// which the ship has not measured, or a cell not held (the readout's `NOT SURVEYED`, as
+    /// [`reading`](Self::reading)'s). Where the header carries no maturity the properties are the
+    /// palette's as resolved, [`properties()`](crate::material::properties()), with the cover where
+    /// the header has one.
+    ///
+    /// # Errors
+    ///
+    /// As [`bake`](Self::bake): no field of `body`, or a read past the cells held.
+    ///
+    /// # Panics
+    ///
+    /// As [`material_at`]: if `at` names no direction. Also if the classifier names an entry past
+    /// the body's palette, which its tests rule out (a bug).
+    pub fn material(
+        &mut self,
+        body: BodyRef,
+        seed: DetailSeed,
+        at: FaceUv,
+    ) -> Result<Option<SurveyedMaterial>, QueryBodyError> {
+        let held = self.held(body)?;
+        if !held.field.is_surveyed(field_cell(&held.field, at)) {
+            return Ok(None);
+        }
+        let (synth, cache) = held.synthesiser(seed);
+        Ok(Some(surveyed_material(&synth, cache, at)?))
+    }
+
+    /// The whole of a view's terrain readout where the line of sight `query` gives meets `body`'s
+    /// ground (plan R10, T12), with the body's detail seed `seed`.
+    ///
+    /// - The slant range is [`slant_range`]'s, and its `NoGround` and `NotSurveyed` are the
+    ///   answer's.
+    /// - Where it meets ground whose foot lies in a cell the field does not hold as surveyed, as
+    ///   [`material`](Self::material) judges it (a margin is not surveyed), the answer is
+    ///   [`GroundReadout::NotSurveyed`], so that the readout never reads ground the survey does not
+    ///   hold. The march itself meets only surveyed ground, so this is a guard for the foot alone.
+    /// - Otherwise it is the reading at the foot over the query's baseline, as
+    ///   [`reading`](Self::reading) gives it; the material there, as `material` gives it; and the
+    ///   ground's [properties](GroundProperties): the bearing capacity on the RMS slope over
+    ///   [`CAPACITY_SLOPE_BASELINE`] (the reading's own where the query's baseline is it), and the
+    ///   pad friction, at the month's temperature where it depends on it.
+    ///
+    /// Every part is the separate query's to the bit. One [`Synthesiser`] serves them all.
+    ///
+    /// # Errors
+    ///
+    /// As [`bake`](Self::bake): no field of `body`, or a read past the cells held (a survey whose
+    /// margin is still to come in a later block).
+    ///
+    /// # Panics
+    ///
+    /// As [`slant_range`]: if the origin is not finite, the direction is zero or not finite, or the
+    /// reach is not finite and non-negative. The baseline and the season are of types that hold
+    /// only what [`surveyed_reading`] and [`month_at`] take.
+    pub fn ground_readout(
+        &mut self,
+        body: BodyRef,
+        seed: DetailSeed,
+        query: &GroundReadoutQuery,
+    ) -> Result<GroundReadout, QueryBodyError> {
+        let (synth, cache, ceiling_m) = self.held(body)?.marcher(seed);
+        let sight = match slant_range_under(
+            &synth,
+            cache,
+            &query.origin_m,
+            &query.direction,
+            query.max,
+            ceiling_m,
+        )? {
+            LineOfSight::Ground(sight) => sight,
+            LineOfSight::NoGround => return Ok(GroundReadout::NoGround),
+            LineOfSight::NotSurveyed => return Ok(GroundReadout::NotSurveyed),
+        };
+        Ok(match ground_at(&synth, cache, sight.at(), query)? {
+            Some(ground) => GroundReadout::Ground(Box::new(GroundAtSight {
+                sight,
+                reading: ground.reading,
+                material: ground.material,
+                properties: ground.properties,
+            })),
+            None => GroundReadout::NotSurveyed,
+        })
+    }
+
+    /// The photometry `material` is drawn with on `body` ([`DrawnPhotometry`]).
+    ///
+    /// Its properties over the body's palette as its background ground exposes them, at the
+    /// header's maturity `m_body` and organic cover ([`exposed_properties`] at
+    /// [`GroundExposure::of_header`], R10.T1.c: the albedos the header's scale was solved on), its
+    /// albedo under the field header's scale (R10.T10.a's c, 1 where the header holds none: the
+    /// palette's albedos as resolved, as
+    /// [`FieldHeaderParts::albedo_scale`](crate::field::FieldHeaderParts::albedo_scale)'s contract
+    /// has it), and its law's L(0) there. It reads the header alone, so it answers wherever the
+    /// body's field is held, surveyed or not; where the header carries neither a maturity nor a
+    /// cover, as every header did below generator version 24 (P14.T54.b), the properties are
+    /// [`properties()`](crate::material::properties())'.
+    ///
+    /// # Errors
+    ///
+    /// [`ResolvePhotometryError::NotStarted`] where no field of `body` is held, and
+    /// [`ResolvePhotometryError::Properties`] for an entry past its palette.
+    pub fn photometry(
+        &self,
+        body: BodyRef,
+        material: Material,
+    ) -> Result<DrawnPhotometry, ResolvePhotometryError> {
+        let header = self
+            .bodies
+            .get(&body)
+            .ok_or(ResolvePhotometryError::NotStarted(body))?
+            .field
+            .header();
+        drawn_photometry(header, material).map_err(ResolvePhotometryError::Properties)
+    }
+
+    /// The albedo nodes `material` is drawn with on `body` at band level `level` and at its
+    /// parent's ([`DrawnNodes`]; R10.T1.c's client half, decision-r10-t1c-client-scope §1.4).
+    ///
+    /// At each level, node j is [`maturity_nodes`]' over the level's [`unresolved_mix`]: the mean
+    /// over the octaves the level leaves out of the material's drawn albedo, G(m) =
+    /// [`scaled_normal_albedo`] of its [`exposed_properties`] at the header's exposure
+    /// ([`GroundExposure::of_header`]) at maturity m, under the header's scale (1 where it holds
+    /// none), the clamp [`photometry`](Self::photometry) takes, at min(`m_j`, μ). The parent of
+    /// level 0 is level 0. Where the header carries no maturity or no weathering rate, as every
+    /// header did below generator version 24 (P14.T54.b), every node of both is `photometry`'s
+    /// albedo to the bit.
+    ///
+    /// The body's unresolved terms ([`unresolved_terms`], some tens of milliseconds) are built on
+    /// the first ask and kept with the field, and each material's G at the maturities read, so that
+    /// a level's nodes are weighted sums. It reads the header alone, so it answers wherever the
+    /// body's field is held, surveyed or not, and needs no detail seed: the small craters' octaves
+    /// are the header's.
+    ///
+    /// # Errors
+    ///
+    /// [`ResolvePhotometryError::NotStarted`] where no field of `body` is held, and
+    /// [`ResolvePhotometryError::Properties`] for an entry past its palette.
+    pub fn maturity_nodes(
+        &mut self,
+        body: BodyRef,
+        material: Material,
+        level: BandLevel,
+    ) -> Result<DrawnNodes, ResolvePhotometryError> {
+        let BodyField { field, nodes, .. } = self
+            .bodies
+            .get_mut(&body)
+            .ok_or(ResolvePhotometryError::NotStarted(body))?;
+        let header = field.header();
+        let at_body = drawn_photometry(header, material)
+            .map_err(ResolvePhotometryError::Properties)?
+            .normal_albedo_bvr();
+        let NodeCache { terms, drawn } = nodes;
+        let Some(terms) = terms.of(header) else {
+            let repeated = [at_body; MATURITY_NODES];
+            return Ok(DrawnNodes {
+                level: repeated,
+                parent: repeated,
+            });
+        };
+        let parent = band(level.get().saturating_sub(1));
+        let values = drawn.entry(material).or_default();
+        let mut g = |maturity: f64| {
+            drawn_at(values, maturity, || {
+                drawn_albedo(header, material, maturity)
+            })
+        };
+        let level_nodes = maturity_nodes(&unresolved_mix(terms, level), &mut g);
+        let parent_nodes = maturity_nodes(&unresolved_mix(terms, parent), &mut g);
+        Ok(DrawnNodes {
+            level: level_nodes,
+            parent: parent_nodes,
+        })
+    }
+
+    /// `body`'s coarse class map for R07's disc ([`ClassMap`]), with the body's detail seed `seed`.
+    ///
+    /// Every cell of [`CLASS_MAP_LEVEL`] is a texel, and those under which the field holds a
+    /// surveyed cell are answered: 24,576 texels, each surveyed one at one [`weights_at`] or, where
+    /// its centre's field cell is not surveyed, one a surveyed field cell under it. A texel whose
+    /// weights read a cell the field does not hold yet is left out, and the map is then not
+    /// [complete](ClassMap::is_complete). Each texel over a field finer than [`CLASS_MAP_LEVEL`]
+    /// takes its surveyed cells' classes by their records (`cell_material`, once a cell a map)
+    /// first, and those of the surveyed cells beside it; where the disc would draw its own apart, its
+    /// own is its surveyed cells' mean at their centres, and it carries the readings at their
+    /// corners ([`ClassMap::refined`], [`ClassMap::lattice`]).
+    ///
+    /// # Errors
+    ///
+    /// [`QueryBodyError::NotStarted`] if no field of `body` is held.
+    ///
+    /// # Panics
+    ///
+    /// If the classifier names an entry past the body's palette, which its tests rule out (a bug).
+    pub fn class_map(
+        &mut self,
+        body: BodyRef,
+        seed: DetailSeed,
+    ) -> Result<ClassMap, QueryBodyError> {
+        self.class_map_at(body, seed, ClassMapDetail::Corners)
+    }
+
+    /// [`class_map`](Self::class_map) at an explicit detail, rather than the generator version's.
+    ///
+    /// # Errors
+    ///
+    /// As [`class_map`](Self::class_map).
+    ///
+    /// # Panics
+    ///
+    /// As [`class_map`](Self::class_map).
+    pub(crate) fn class_map_at(
+        &mut self,
+        body: BodyRef,
+        seed: DetailSeed,
+        detail: ClassMapDetail,
+    ) -> Result<ClassMap, QueryBodyError> {
+        let (synth, cache) = self.held(body)?.synthesiser(seed);
+        let field = synth.field();
+        let header = field.header();
+        let level = header.level().get();
+        // The texels' maturity, against `m_body`, where the header carries a maturity and a rate.
+        let background = header
+            .maturity()
+            .filter(|_| header.weathering_rate().is_some());
+        let band = BandLevel::new(CLASS_MAP_BAND).expect("band level 0 is a band level");
+        // A refined texel's cells are texels of the field's level L, whose weights are at band
+        // L − 6 (Design note 8's rule), the coarsest terrain's and the normal map's band.
+        let fine_band =
+            BandLevel::new(normal_map_band(level)).expect("a field's level less 6 is a band level");
+        let texel_count = 6_u32 << (2 * u32::from(CLASS_MAP_LEVEL));
+        let mut readings = Vec::new();
+        let mut complete = true;
+        // A texel's field cells, those surveyed and the points read, at most 16 each (a field of
+        // level 8), kept from texel to texel.
+        let mut cells = Vec::with_capacity(16);
+        let mut surveyed = Vec::with_capacity(16);
+        let mut points = Vec::with_capacity(16);
+        let mut read = Vec::with_capacity(16);
+        let count = |n: usize| u32::try_from(n).expect("a texel holds at most 16 field cells");
+        let mut looks = CellLooks::new(match detail {
+            ClassMapDetail::Coarse => 0,
+            ClassMapDetail::Refined | ClassMapDetail::Corners => level,
+        });
+        for index in 0..texel_count {
+            let texel =
+                cell_at_index(CLASS_MAP_LEVEL, index).expect("an index below 6 · 4⁶ is a texel");
+            field_cells_of(texel, level, &mut cells);
+            surveyed.clear();
+            surveyed.extend(
+                cells
+                    .iter()
+                    .copied()
+                    .filter(|&cell| field.is_surveyed(cell)),
+            );
+            if surveyed.is_empty() {
+                continue;
+            }
+            let variation = if detail != ClassMapDetail::Coarse && level > CLASS_MAP_LEVEL {
+                match variation_of(field, &mut looks, texel, &surveyed) {
+                    Ok(variation) => variation,
+                    Err(QueryHeightError::NotSurveyed(_)) => {
+                        // A record past the cells held: the texel stays unrefined until a later block.
+                        complete = false;
+                        Variation::Alike
+                    }
+                }
+            } else {
+                Variation::Alike
+            };
+            let centre = centre_of(texel);
+            let centre_cell = PatchKey::containing(level, unit_dir(face_uv_to_xyz(centre)))
+                .expect("a coarse level is a quadtree level");
+            points.clear();
+            if field.is_surveyed(centre_cell) && variation != Variation::Within {
+                points.push(centre);
+            } else {
+                points.extend(surveyed.iter().map(|&cell| centre_of(cell)));
+            }
+            let weights_band = if variation == Variation::Within {
+                fine_band
+            } else {
+                band
+            };
+            match read_points(&synth, cache, &points, weights_band, &mut read) {
+                Ok(()) => {}
+                Err(QueryHeightError::NotSurveyed(_)) => {
+                    // A read past the cells held: the texel waits for a later block.
+                    complete = false;
+                    continue;
+                }
+            }
+            let (mut weights, maturity) = summed(&read);
+            let points_read = f64::from(count(points.len()));
+            for value in weights.values_mut() {
+                *value /= points_read;
+            }
+            let fine = if detail == ClassMapDetail::Corners {
+                corner_fine_readings(&synth, cache, texel, &cells, variation, &mut complete)
+            } else {
+                fine_readings(field, &cells, variation, &read)
+            };
+            readings.push(TexelReading {
+                cell: texel,
+                surveyed: count(surveyed.len()),
+                cells: count(cells.len()),
+                weights,
+                // The sum is `Some` exactly where `background` is: both are the header's maturity
+                // where it carries a rate. The mean of maturities no higher than `m_body`, held there
+                // against the sum's rounding; one point's own value where one is read.
+                maturity: background
+                    .zip(maturity)
+                    .map(|(body, sum)| texel_code(sum / points_read, body)),
+                fine,
+            });
+        }
+        let kept = kept_classes(&readings);
+        let (texels, refined) = class_map_texels(readings, &kept, background);
+        let classes = self.class_map_classes(body, kept, band);
+        Ok(ClassMap {
+            field_level: level,
+            classes,
+            texels,
+            refined,
+            lattice: detail.lattice(),
+            complete,
+        })
+    }
+
+    /// `body`'s normal map for R07's disc ([`NormalMap`]), with the body's detail seed `seed`.
+    ///
+    /// Each cell of the field's level that it holds as surveyed is answered with its normal, one
+    /// [`Synthesiser::height_at`] at the cell's centre; a cell whose height reads a cell the field
+    /// does not hold yet is left out, and the map is then not
+    /// [complete](NormalMap::is_complete).
+    ///
+    /// # Errors
+    ///
+    /// [`QueryBodyError::NotStarted`] if no field of `body` is held.
+    ///
+    /// # Panics
+    ///
+    /// As [`Synthesiser::height_at`]: if a height or its gradient is not finite (a bug).
+    pub fn normal_map(
+        &mut self,
+        body: BodyRef,
+        seed: DetailSeed,
+    ) -> Result<NormalMap, QueryBodyError> {
+        let (synth, cache) = self.held(body)?.synthesiser(seed);
+        let field = synth.field();
+        let level = field.header().level();
+        let band_level = band(normal_map_band(level.get()));
+        let figure = field.header().figure();
+        let mut cells = Vec::new();
+        let mut pairs = Vec::new();
+        let mut complete = true;
+        for index in 0..level.cell_count() {
+            let cell = cell_at_index(level.get(), index)
+                .expect("an index below the level's count is a cell");
+            if !field.is_surveyed(cell) {
+                continue;
+            }
+            let dir = unit_dir(face_uv_to_xyz(centre_of(cell)));
+            match synth.height_at(cache, dir, band_level) {
+                Ok(sample) => {
+                    let normal = surface_normal(&figure, dir, sample.height_m, sample.gradient);
+                    pairs.push(encode_octahedral_f32(normal));
+                    cells.push(index);
+                }
+                Err(QueryHeightError::NotSurveyed(_)) => {
+                    // A read past the cells held: the cell waits for a later block.
+                    complete = false;
+                }
+            }
+        }
+        Ok(NormalMap {
+            level: level.get(),
+            cells,
+            pairs,
+            complete,
+        })
+    }
+
+    /// A class map's classes on `body`, the materials `kept`, each with its photometry and its
+    /// nodes at band level `band`, where its palette names its substance.
+    ///
+    /// # Panics
+    ///
+    /// If no field of `body` is held, or a material names an entry past the body's palette: the
+    /// class map has read the field, and the classifier names only the palette's entries.
+    fn class_map_classes(
+        &mut self,
+        body: BodyRef,
+        kept: Vec<GroundMaterial>,
+        band: BandLevel,
+    ) -> Vec<ClassMapClass> {
+        let mut classes = Vec::with_capacity(kept.len());
+        for material in kept {
+            let named = material.material();
+            let photometry = named.map(|m| {
+                self.photometry(body, m)
+                    .expect("the classifier names only entries of the body's palette")
+            });
+            let nodes = named.map(|m| {
+                *self
+                    .maturity_nodes(body, m, band)
+                    .expect("the classifier names only entries of the body's palette")
+                    .level()
+            });
+            classes.push(ClassMapClass {
+                material,
+                photometry,
+                nodes,
+            });
+        }
+        classes
+    }
+
+    /// The body's field and what is kept with it.
+    fn held(&mut self, body: BodyRef) -> Result<&mut BodyField, QueryBodyError> {
+        self.bodies
+            .get_mut(&body)
+            .ok_or(QueryBodyError::NotStarted(body))
+    }
+}
+
+/// [`WorkerFields::photometry`]'s answer for `material` on the body of `header`.
+///
+/// # Errors
+///
+/// [`ResolvePropertiesError::EntryNotInPalette`] for an entry past the header's palette.
+fn drawn_photometry(
+    header: &FieldHeader,
+    material: Material,
+) -> Result<DrawnPhotometry, ResolvePropertiesError> {
+    let resolved = exposed_properties(
+        material,
+        header.palette(),
+        GroundExposure::of_header(header),
+    )?;
+    let normal_albedo_bvr = scaled_normal_albedo(&resolved, header.albedo_scale().unwrap_or(1.0));
+    let phase_law = resolved.phase_law();
+    Ok(DrawnPhotometry {
+        normal_albedo_bvr,
+        phase_law,
+        limb_parameter: phase_law.limb_parameter(normal_albedo_bvr[1]),
+    })
+}
+
+/// The cell of `field`'s level that holds the point `at`.
+#[must_use]
+fn field_cell(field: &PartialField, at: FaceUv) -> PatchKey {
+    PatchKey::containing(field.header().level().get(), unit_dir(face_uv_to_xyz(at)))
+        .expect("a coarse level is a quadtree level")
+}
+
+/// [`WorkerFields::material`]'s answer at `at`, whose field cell the caller has found surveyed.
+///
+/// # Errors
+///
+/// [`QueryHeightError::NotSurveyed`] for a read past the cells held.
+///
+/// # Panics
+///
+/// As [`material_at`]: if `at` names no direction. Also if the classifier names an entry past the
+/// body's palette, which its tests rule out (a bug).
+fn surveyed_material(
+    synth: &Synthesiser<'_, PartialField>,
+    cache: &mut SynthCache,
+    at: FaceUv,
+) -> Result<SurveyedMaterial, QueryHeightError> {
+    let header = synth.field().header();
+    let ground = material_at(synth, cache, at)?;
+    let maturity = maturity_at(synth, cache, at)?;
+    let header_exposure = GroundExposure::of_header(header);
+    let exposure = maturity.map_or(header_exposure, |m| header_exposure.with_maturity(m));
+    let properties = ground.material().map(|m| {
+        exposed_properties(m, header.palette(), exposure)
+            .expect("the classifier names only entries of the body's palette")
+    });
+    Ok(SurveyedMaterial {
+        ground,
+        maturity,
+        properties,
+    })
+}
+
+/// A ground readout's parts at a line of sight's foot, the slant range apart.
+struct FootGround {
+    reading: SurveyedReading,
+    material: SurveyedMaterial,
+    properties: GroundProperties,
+}
+
+/// The reading, material and properties of the ground at the foot `at` for `query`
+/// ([`WorkerFields::ground_readout`]), or `None` where the field's cell there is not surveyed.
+///
+/// # Errors
+///
+/// [`QueryBodyError::NotSurveyed`] for a read past the cells held.
+fn ground_at(
+    synth: &Synthesiser<'_, PartialField>,
+    cache: &mut SynthCache,
+    at: FaceUv,
+    query: &GroundReadoutQuery,
+) -> Result<Option<FootGround>, QueryBodyError> {
+    let field = synth.field();
+    let cell = field_cell(field, at);
+    if !field.is_surveyed(cell) {
+        return Ok(None);
+    }
+    let Some(reading) = surveyed_reading(synth, cache, at, query.slope_baseline.metres())? else {
+        return Ok(None);
+    };
+    // The capacity's slope is read over the fixed 2 m whatever `BASELINE` shows: the readout's own
+    // reading where it shows 2 m, the same bits, and one more otherwise.
+    let capacity_slope = if query.slope_baseline == CAPACITY_SLOPE_BASELINE {
+        reading.slope_rms()
+    } else {
+        match surveyed_reading(synth, cache, at, CAPACITY_SLOPE_BASELINE.metres())? {
+            Some(two_metres) => two_metres.slope_rms(),
+            None => return Ok(None),
+        }
+    };
+    let material = surveyed_material(synth, cache, at)?;
+    let header = field.header();
+    let temperature = month_of(header, query.season).and_then(|month| {
+        let sea_level = header.month_temperature(field.climate(cell)?, month)?;
+        Some(Kelvin::new(
+            sea_level.value() - lapse_drop_k(header, reading.elevation().value()),
+        ))
+    });
+    let properties = properties_of(
+        material.properties(),
+        header,
+        query.pad_width,
+        capacity_slope,
+        temperature,
+    );
+    Ok(Some(FootGround {
+        reading,
+        material,
+        properties,
+    }))
+}
+
+/// The month (from 0) of `header`'s year the readout's time falls in: [`month_at`] the season's
+/// mean anomaly in a year of twelve months, `None` there without one, and the one month of a
+/// one-month year whatever is given.
+#[must_use]
+fn month_of(header: &FieldHeader, season: Option<SeasonAnomaly>) -> Option<u8> {
+    if header.months() == 1 {
+        Some(0)
+    } else {
+        season.map(|anomaly| month_at(header, anomaly.radians()))
+    }
+}
+
+/// The ground's [properties](GroundProperties) of a material whose properties are `material`, on a
+/// body of `header`, under a pad of `pad_width` on ground of slope `capacity_slope` at
+/// `temperature`; no capacity under a pad whose width is not finite and positive.
+#[must_use]
+fn properties_of(
+    material: Option<&MaterialProperties>,
+    header: &FieldHeader,
+    pad_width: Metres,
+    capacity_slope: Radians,
+    temperature: Option<Kelvin>,
+) -> GroundProperties {
+    let gravity = header.craters().gravity();
+    // `bearing_capacity_on_slope` takes a width of 0, where a cohesive soil's cohesion term alone
+    // bears; a pad is never that narrow (`GroundReadoutQuery::pad_width`).
+    let pad = pad_width.value();
+    let bears = pad.is_finite() && pad > 0.0;
+    let model = material.and_then(MaterialProperties::interface_friction_model);
+    let friction = material.and_then(|p| match p.interface_friction_model()? {
+        // `interface_friction`'s at every temperature, so asked of none.
+        FrictionModel::Constant(mu) => Some(mu),
+        FrictionModel::ByTemperature(_) => interface_friction(p, temperature?),
+    });
+    GroundProperties {
+        bearing_capacity: material
+            .filter(|_| bears)
+            .and_then(|p| bearing_capacity_on_slope(p, gravity, pad_width, capacity_slope)),
+        capacity_slope,
+        pad_width,
+        friction,
+        friction_on_temperature: matches!(model, Some(FrictionModel::ByTemperature(_))),
+        temperature,
+    }
+}
+
+/// Refuses a block of another body than `named`.
+fn check_body(named: BodyRef, block: &DecodedBlock) -> Result<(), TakeBlockError> {
+    if block.body() == named {
+        Ok(())
+    } else {
+        Err(TakeBlockError::WrongBody {
+            named,
+            found: block.body(),
+        })
+    }
+}
+
+/// The cells `block` surveys that `field` does not hold as surveyed, and the cells it carries,
+/// surveyed or margin, that `field` does not hold. A cell `field` already holds keeps the finer of
+/// its codes and a cell it does not takes the block's, so a surveyed code in the block makes the
+/// cell surveyed whatever was held ([`PartialField::insert`]).
+///
+/// # Panics
+///
+/// If `block` is at another level than `field`, whose cover could index past the field's cells:
+/// the callers check the level first.
+#[must_use]
+fn survey_change(field: &PartialField, block: &DecodedBlock) -> SurveyChange {
+    let level = field.header().level();
+    let mut change = SurveyChange::default();
+    for range in block.cover().ranges() {
+        let surveyed = range.code().is_surveyed();
+        for index in range.start()..range.end() {
+            let cell = cell_at_index(level.get(), index).expect("a cover's cells are the level's");
+            let held = field.resolution(cell);
+            if held.is_none() {
+                push_run(&mut change.held, index);
+            }
+            if surveyed && !held.is_some_and(ResolutionCode::is_surveyed) {
+                push_run(&mut change.runs, index);
+            }
+        }
+    }
+    change
+}
+
+/// R05's `u8` level as R09's band level.
+#[must_use]
+fn band(level: u8) -> BandLevel {
+    BandLevel::new(level).expect("a level up to MAX_LEVEL is a band level")
+}
+
+#[cfg(test)]
+mod golden;
+#[cfg(test)]
+mod tests;

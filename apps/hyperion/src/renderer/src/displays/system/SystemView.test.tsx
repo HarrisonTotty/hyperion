@@ -33,6 +33,7 @@ import {
 } from "../../test/systemFixtures";
 import { fitRadiiAu, orbitPlane, orbitScene } from "./orbitMap";
 import { SystemView } from "./SystemView";
+import { statusLine } from "../../test/statusLine";
 
 /** Every element laid out 400 × 300, so that the map's stage and canvas are that size. */
 const WIDTH_PX = 400;
@@ -62,7 +63,7 @@ function renderView() {
   vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(HEIGHT_PX);
   render(
     <ServerLinkHarness>
-      <SystemView target={aSystemTarget()} />
+      <SystemView target={aSystemTarget()} onViewBody={() => undefined} />
     </ServerLinkHarness>,
   );
   const socket = FakeWebSocket.latest();
@@ -97,6 +98,17 @@ function reading(label: string): string {
     .getAllByRole("term")
     .find((candidate) => candidate.textContent === label);
   return term?.nextElementSibling?.textContent ?? "";
+}
+
+/** A value of the orbit map's furniture, the row under its canvas, by its term's label. */
+function furnitureValue(label: string): HTMLElement {
+  const value = within(mapPanel()).getByText(label, {
+    selector: ".spatial-view__furniture dt",
+  }).nextElementSibling;
+  if (!(value instanceof HTMLElement)) {
+    throw new Error(`the orbit map's furniture has no ${label} value`);
+  }
+  return value;
 }
 
 /** Where each of the pinned binary's stars is drawn on the 400 × 300 canvas at the opening camera. */
@@ -165,7 +177,9 @@ describe("SystemView's requests", () => {
       socket.serverRejects(request?.id ?? -1, anUnsupportedError());
     });
 
-    const status = within(mapPanel()).getByText("REJECTED: system_summary is not served yet");
+    const status = within(mapPanel()).getByText(
+      statusLine("REJECTED: system_summary is not served yet"),
+    );
     expect(status).toHaveClass("request-status__text--fault");
 
     await user.click(within(mapPanel()).getByRole("button", { name: "RETRY" }));
@@ -181,7 +195,7 @@ describe("SystemView's requests", () => {
     });
 
     const status = within(mapPanel()).getByText(
-      "REJECTED: no system 0200080020000000 in this universe",
+      statusLine("REJECTED: no system 0200080020000000 in this universe"),
     );
     expect(status).not.toHaveClass("request-status__text--fault");
   });
@@ -203,8 +217,31 @@ describe("SystemView's requests", () => {
     });
 
     expect(screen.getByRole("application", { name: "Orbit map, stale" })).toBeInTheDocument();
-    expect(within(mapPanel()).getByRole("heading", { name: "Orbit map stale" })).toBeVisible();
+    // The title takes no mark: the canvas's name and the furniture's values say it (plan 05,
+    // P05.T14).
+    expect(within(mapPanel()).getByRole("heading", { name: "Orbit map" })).toBeVisible();
+    expect(
+      within(mapPanel()).getByText("RADIUS", { selector: ".spatial-view__furniture dt" })
+        .nextElementSibling,
+    ).toHaveTextContent(/S\s*stale$/u);
     expect(reading("CLASS")).toBe("DA9.2");
+  });
+
+  it("marks each of the map's furniture values stale, but not the display time (plan 12, P12.T11.d)", async () => {
+    const { socket } = renderView();
+    await answer(socket);
+    await server(() => {
+      socket.close();
+    });
+
+    for (const label of ["RADIUS", "ANGLE", "HEIGHT"]) {
+      expect(furnitureValue(label)).toHaveTextContent(/S\s*stale$/u);
+    }
+    // The display time is the console's own, which `RUN` and `HOLD` move: no slot and no mark.
+    const time = furnitureValue("DISPLAY TIME UT");
+    expect(time).not.toHaveTextContent(/stale/u);
+    expect(time.querySelector(".stale-slot")).toBeNull();
+    expect(time.parentElement).toHaveClass("spatial-reading--own");
   });
 
   it("reads a system not yet born as NOT YET FORMED, drawing nothing", async () => {
@@ -221,7 +258,7 @@ describe("SystemView's requests", () => {
     await answer(socket, aSystemSummary({ hierarchy: { nodes: [] } }));
 
     expect(
-      within(mapPanel()).getByText("SYSTEM DATA INVALID: hierarchy malformed"),
+      within(mapPanel()).getByText(statusLine("SYSTEM DATA INVALID: hierarchy malformed")),
     ).toBeInTheDocument();
     expect(within(mapPanel()).getByRole("button", { name: "RETRY" })).toBeInTheDocument();
   });

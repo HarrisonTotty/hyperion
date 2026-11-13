@@ -1,5 +1,6 @@
-import type { SkyRequest } from "@hyperion/protocol";
-import { act, renderHook } from "@testing-library/react";
+import type { SkyLayerCensusDto, SkyRequest } from "@hyperion/protocol";
+import { act, render, renderHook, screen } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { vec3 } from "../../geometry/vec3";
@@ -7,11 +8,17 @@ import { RECONNECT_DELAY_MS } from "../../lib/connection";
 import { binaryFrame } from "../../test/binaryFrames";
 import { FakeWebSocket } from "../../test/FakeWebSocket";
 import { ServerLinkHarness } from "../../test/ServerLinkHarness";
-import { type FixtureStar, skyPayload, skyRequest, skyResponse } from "../../test/skyFixtures";
+import {
+  type FixtureStar,
+  nearestFirstCensus,
+  skyPayload,
+  skyRequest,
+  skyResponse,
+} from "../../test/skyFixtures";
 import { galacticTranslated } from "../coords/position";
 import { decodeSkyPayload } from "./decodePayload";
 import type { SkyCamera } from "./model";
-import { type SkyDecoder, useSky } from "./useSky";
+import { type SkyDecoder, SkyKeep, useSky } from "./useSky";
 
 const CAMERAS: ReadonlyArray<SkyCamera> = [
   { position: skyRequest(0).observer, fovDeg: 60, widthPx: 1_920 },
@@ -78,16 +85,25 @@ function latestSky(socket: FakeWebSocket): { readonly id: number; readonly body:
   return sent;
 }
 
-/** Plays one reply to sky `id` of `stars`: its payload's frame, then its message. */
+/**
+ * Plays one reply to sky `id` of `stars`: its payload's frame, then its message, its census `census`
+ * (none by default).
+ */
 async function reply(
   socket: FakeWebSocket,
   id: number,
   stars: ReadonlyArray<FixtureStar>,
   final: boolean,
+  census: ReadonlyArray<SkyLayerCensusDto> = [],
 ): Promise<void> {
   const request = latestSky(socket).body;
   const payload = skyPayload(stars, 2, 6.6);
-  const body = { kind: "sky" as const, ...skyResponse(request, payload, stars.length, 2), final };
+  const body = {
+    kind: "sky" as const,
+    ...skyResponse(request, payload, stars.length, 2),
+    census: [...census],
+    final,
+  };
   await act(async () => {
     socket.serverSendsBinary(binaryFrame(id, 0, 1, [...payload]));
     if (final) {
@@ -116,6 +132,93 @@ async function answerSkyWith(
   stars: ReadonlyArray<FixtureStar>,
 ): Promise<void> {
   await reply(socket, id, stars, true);
+}
+
+/** Layers C, D and E's edges in a reply near the Sun, each final where `null` (R06.T11.d). */
+type Edges = readonly [number | null, number | null, number | null];
+
+/** The edges of a final reply. */
+const FINAL: Edges = [null, null, null];
+
+/**
+ * Plays a reply to sky `id` of `count` stars 20 ly away whose census reaches `edgesLy`: final
+ * where every layer is.
+ */
+async function replyAt(
+  socket: FakeWebSocket,
+  id: number,
+  count: number,
+  edgesLy: Edges,
+): Promise<void> {
+  const stars = Array.from({ length: count }, () => STARS[0]);
+  const final = edgesLy.every((edge) => edge === null);
+  await reply(socket, id, stars, final, nearestFirstCensus(edgesLy));
+}
+
+/** One pixel's angle at the default camera, rad: 60° over 1,920 px. */
+const PIXEL_RAD = Math.PI / 3 / 1_920;
+
+const LIGHT_YEAR_M = 9_460_730_472_580_800;
+
+/** The default camera moved so that the fixture's star 20 ly away shifts by `px` pixels. */
+function shiftedBy(px: number): SkyCamera {
+  return {
+    position: galacticTranslated(
+      skyRequest(0).observer,
+      vec3(px * PIXEL_RAD * 20 * LIGHT_YEAR_M, 0, 0),
+    ),
+    fovDeg: 60,
+    widthPx: 1_920,
+  };
+}
+
+/** The hook's props for a camera moved to `camera`, the sky asked from where it is. */
+function from(camera: SkyCamera, years = 0): SkyProps {
+  return { request: { ...skyRequest(years), observer: camera.position }, cameras: [camera] };
+}
+
+/** A stage's sky, its state as text: `pending`, `none`, or `held <stars> final|partial`. */
+function KeptStage({
+  request,
+  keep,
+  createDecoder,
+}: {
+  readonly request: SkyRequest | null;
+  readonly keep: SkyKeep;
+  readonly createDecoder: () => SkyDecoder;
+}): ReactNode {
+  const sky = useSky(request, CAMERAS, { createDecoder, keep });
+  const model = sky.model;
+  let text: string;
+  if (sky.pending) {
+    text = "pending";
+  } else if (model === null) {
+    text = "none";
+  } else {
+    text = `held ${String(model.stars.count)} ${model.response.final ? "final" : "partial"}`;
+  }
+  return <output aria-label="sky">{text}</output>;
+}
+
+/** One view's stages over one keep: `stage` remounts the next, as a new scene does. */
+function renderStages(keep: SkyKeep, createDecoder: () => SkyDecoder = inThreadDecoder) {
+  const tree = (stage: number, request: SkyRequest | null) => (
+    <ServerLinkHarness>
+      <KeptStage key={stage} request={request} keep={keep} createDecoder={createDecoder} />
+    </ServerLinkHarness>
+  );
+  const view = render(tree(1, skyRequest(0)));
+  const socket = FakeWebSocket.latest();
+  act(() => {
+    socket.serverWelcomes();
+  });
+  return {
+    socket,
+    remount: (stage: number, request: SkyRequest | null) => {
+      view.rerender(tree(stage, request));
+    },
+    shown: () => screen.getByRole("status", { name: "sky" }).textContent,
+  };
 }
 
 describe("useSky", () => {
@@ -375,5 +478,254 @@ describe("useSky", () => {
     rerender(at(0.1, "0200080020000001"));
     expect(socket.requestsOfKind("sky")).toHaveLength(2);
     expect(result.current.failure).toBeNull();
+  });
+
+  describe("a sky asked again within its arrival (R06.T12.b)", () => {
+    /** What a view has of the sky after each reply: its stars, whether final, and pending. */
+    type Seen = readonly [number | null, boolean | null, boolean];
+
+    /** Renders the hook and holds a final sky of three stars 20 ly away. */
+    async function heldFinal(initial: SkyRequest = skyRequest(0)) {
+      const hook = renderSky(initial);
+      await replyAt(hook.socket, latestSky(hook.socket).id, 3, FINAL);
+      const seen: Seen[] = [];
+      const record = (): void => {
+        const { model, pending } = hook.result.current;
+        seen.push([model?.stars.count ?? null, model?.response.final ?? null, pending]);
+      };
+      return { ...hook, seen, record };
+    }
+
+    it("keeps a final sky re-asked for parallax through the partial replies, then holds the final", async () => {
+      const { rerender, result, socket, seen, record } = await heldFinal();
+      const camera = shiftedBy(0.5);
+      rerender(from(camera));
+      expect(socket.requestsOfKind("sky")).toHaveLength(2);
+      const again = latestSky(socket).id;
+      record();
+      await replyAt(socket, again, 1, [125, 125, 125]);
+      record();
+      await replyAt(socket, again, 2, [1_000, 1_000, 1_000]);
+      record();
+      await replyAt(socket, again, 4, FINAL);
+      record();
+      // No reply of fewer stars than the held sky's three is ever held, and it is never pending.
+      expect(seen).toEqual([
+        [3, true, false],
+        [3, true, false],
+        [3, true, false],
+        [4, true, false],
+      ]);
+      expect(result.current.model?.request.observer).toEqual(camera.position);
+      // Asked from where the camera is, the final sky stands: nothing more is asked.
+      expect(socket.requestsOfKind("sky")).toHaveLength(2);
+    });
+
+    it("keeps a final sky re-asked for a deeper camera limit through the partial replies", async () => {
+      const { rerender, socket, seen, record } = await heldFinal();
+      rerender({ request: { ...skyRequest(0), camera_limit_v: 10.5 }, cameras: CAMERAS });
+      expect(latestSky(socket).body.camera_limit_v).toBe(10.5);
+      const again = latestSky(socket).id;
+      await replyAt(socket, again, 1, [125, 125, 125]);
+      record();
+      await replyAt(socket, again, 2, [500, 500, 500]);
+      record();
+      await replyAt(socket, again, 5, FINAL);
+      record();
+      expect(seen).toEqual([
+        [3, true, false],
+        [3, true, false],
+        [5, true, false],
+      ]);
+    });
+
+    it("holds the newest reply once the held sky's parallax reaches a pixel, and each later one", async () => {
+      const { rerender, socket, seen, record } = await heldFinal();
+      const camera = shiftedBy(0.5);
+      rerender(from(camera));
+      const again = latestSky(socket).id;
+      await replyAt(socket, again, 1, [125, 125, 125]);
+      record();
+      // The camera moves on while the request runs: no new request, but the held sky gives way.
+      rerender({ ...from(camera), cameras: [shiftedBy(1.01)] });
+      record();
+      await replyAt(socket, again, 2, [250, 250, 250]);
+      record();
+      expect(seen).toEqual([
+        [3, true, false],
+        [1, false, false],
+        [2, false, false],
+      ]);
+      expect(socket.requestsOfKind("sky")).toHaveLength(2);
+    });
+
+    it.each([
+      { reason: "expired", held: 0, now: 1.5 },
+      { reason: "jump", held: 10, now: 9 },
+    ])("holds each reply of a sky re-asked as $reason", async ({ held, now }) => {
+      const { rerender, socket, seen, record } = await heldFinal(skyRequest(held));
+      rerender(at(now));
+      expect(socket.requestsOfKind("sky")).toHaveLength(2);
+      const again = latestSky(socket).id;
+      record();
+      await replyAt(socket, again, 1, [125, 125, 125]);
+      record();
+      await replyAt(socket, again, 2, [250, 250, 250]);
+      record();
+      // The held sky stands for another time, so each reply is held; the sky is never pending.
+      expect(seen).toEqual([
+        [3, true, false],
+        [1, false, false],
+        [2, false, false],
+      ]);
+    });
+
+    it("gives a partial sky left by a lost link up to the first reply that reaches it, before the final", async () => {
+      vi.useFakeTimers();
+      const { result, socket } = renderSky(skyRequest(0));
+      await replyAt(socket, latestSky(socket).id, 3, [500, 500, 500]);
+      await act(async () => {
+        socket.close();
+        await Promise.resolve();
+      });
+      act(() => {
+        vi.advanceTimersByTime(RECONNECT_DELAY_MS);
+      });
+      const next = FakeWebSocket.latest();
+      act(() => {
+        next.serverWelcomes();
+      });
+      expect(next.requestsOfKind("sky")).toHaveLength(1);
+      const again = latestSky(next).id;
+      const seen: Array<readonly [number | null, number | null, boolean]> = [];
+      const record = (): void => {
+        const { model, pending } = result.current;
+        const c = model?.response.census.find((layer) => layer.layer === "c");
+        seen.push([model?.stars.count ?? null, c?.complete_to_ly ?? null, pending]);
+      };
+      record();
+      await replyAt(next, again, 1, [125, 125, 125]);
+      record();
+      await replyAt(next, again, 2, [250, 250, 250]);
+      record();
+      await replyAt(next, again, 4, [500, 500, 500]);
+      record();
+      await replyAt(next, again, 5, [1_000, 1_000, 1_000]);
+      record();
+      expect(seen).toEqual([
+        [3, 500, false],
+        [3, 500, false],
+        [3, 500, false],
+        [4, 500, false],
+        [5, 1_000, false],
+      ]);
+      expect(result.current.model?.stale).toBe(false);
+    });
+
+    it("is pending on a new arrival until its first reply", async () => {
+      const { rerender, result, socket } = await heldFinal();
+      rerender(at(0, "0200080020000001"));
+      expect([result.current.pending, result.current.model]).toEqual([true, null]);
+      await replyAt(socket, latestSky(socket).id, 1, [125, 125, 125]);
+      expect([result.current.pending, result.current.model?.stars.count]).toEqual([false, 1]);
+    });
+
+    it("keeps the held sky, asking nothing more, back in its arrival before another's first reply", async () => {
+      const { rerender, result, socket } = await heldFinal();
+      rerender(at(0, "0200080020000001"));
+      const other = latestSky(socket).id;
+      rerender(at(0));
+      expect([
+        socket.cancelledIds(),
+        socket.requestsOfKind("sky").length,
+        result.current.pending,
+        result.current.model?.stars.count,
+      ]).toEqual([[other], 2, false, 3]);
+    });
+  });
+
+  describe("kept above the stage (plan R15)", () => {
+    it("takes up the sky held and the request in flight as a new stage of its arrival mounts", async () => {
+      const { socket, remount, shown } = renderStages(new SkyKeep());
+      const first = latestSky(socket).id;
+      await replyAt(socket, first, 1, [125, 125, 125]);
+      remount(2, skyRequest(0));
+      const taken = shown();
+      await replyAt(socket, first, 3, FINAL);
+      expect([taken, socket.requestsOfKind("sky").length, socket.cancelledIds(), shown()]).toEqual([
+        "held 1 partial",
+        1,
+        [],
+        "held 3 final",
+      ]);
+    });
+
+    it("asks nothing again for a new stage of the arrival of the sky held", async () => {
+      const { socket, remount, shown } = renderStages(new SkyKeep());
+      await replyAt(socket, latestSky(socket).id, 3, FINAL);
+      remount(2, skyRequest(0));
+      expect([socket.requestsOfKind("sky").length, shown()]).toEqual([1, "held 3 final"]);
+    });
+
+    it("cancels the request kept where a new stage asks another arrival", () => {
+      const { socket, remount, shown } = renderStages(new SkyKeep());
+      const first = latestSky(socket).id;
+      remount(2, skyRequest(0, "0200080020000001"));
+      expect([socket.cancelledIds(), latestSky(socket).body.exclude_system, shown()]).toEqual([
+        [first],
+        "0200080020000001",
+        "pending",
+      ]);
+    });
+
+    it("decodes a reply once, whose decode the stage before began, and the new stage holds it", async () => {
+      // A decoder that takes its payload's buffers, as the worker's transfer does, and settles
+      // when the test says: a second decode of the same reply would find them gone.
+      const decodes: Array<() => void> = [];
+      const takingDecoder = (): SkyDecoder => ({
+        decode: (job) => {
+          const decodedNow = decodeSkyPayload({ ...job, id: 1 });
+          for (const chunk of job.chunks) {
+            if (chunk.buffer instanceof ArrayBuffer && chunk.buffer.byteLength > 0) {
+              structuredClone(chunk.buffer, { transfer: [chunk.buffer] });
+            }
+          }
+          return new Promise((resolve) => {
+            decodes.push(() => {
+              resolve(decodedNow);
+            });
+          });
+        },
+        dispose: () => undefined,
+      });
+      const { socket, remount, shown } = renderStages(new SkyKeep(), takingDecoder);
+      await replyAt(socket, latestSky(socket).id, 2, [125, 125, 125]);
+      remount(2, skyRequest(0));
+      await act(async () => {
+        decodes.shift()?.();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect([decodes.length, socket.requestsOfKind("sky").length, shown()]).toEqual([
+        0,
+        1,
+        "held 2 partial",
+      ]);
+    });
+
+    it("takes up nothing, and lets the request go, in a stage that asks no sky", () => {
+      const { socket, remount, shown } = renderStages(new SkyKeep());
+      const first = latestSky(socket).id;
+      remount(2, null);
+      expect([socket.cancelledIds(), shown()]).toEqual([[first], "none"]);
+    });
+
+    it("cancels the request kept once its view has gone", () => {
+      const keep = new SkyKeep();
+      const { socket } = renderStages(keep);
+      const first = latestSky(socket).id;
+      keep.dispose();
+      expect(socket.cancelledIds()).toEqual([first]);
+    });
   });
 });

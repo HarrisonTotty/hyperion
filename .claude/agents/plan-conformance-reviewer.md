@@ -19,7 +19,8 @@ and the plan extractor; don't run cargo or pnpm (the validator runs the checks).
    `python3 .claude/skills/implement-task/scripts/plan_task.py <task-id> --context`, adding
    `--feature <plan-set>` if you were given one. It prints the
    task with the plan header, the ordering notes, the design notes the task cites, the lines
-   elsewhere that mention it, and the plan's Generator version and Risks sections. Also read the
+   elsewhere that mention it, and the plan's Generator version and Risks sections, with the
+   task's record files in a split plan (`--records` prints any task's). Also read the
    plan's **Provides** and **Consumes** entries for what the task builds or uses, and the roadmap's
    conventions.
 2. **Build a checklist from the task text.** List every file it names, every item it says to
@@ -49,7 +50,8 @@ and the plan extractor; don't run cargo or pnpm (the validator runs the checks).
    (`plan_task.py <task-id> --acceptance` flags suspect forms). A bare
    `cargo test -p <crate> <filter>` matches test names, not files, and may select almost nothing.
 6. **Deviations.** Draft entries for everything that differs from the plan for a good reason, in
-   the style the plan's Risks section already uses (in galaxy-generation, plan 01 has
+   the style the plan's records already use, and say where they go: the plan's Risks section, or,
+   in a split plan, the task's record file that `plan_task.py <ID> --records` names (in galaxy-generation, plan 01 has
    `**Deviations in T<n>, as built.**` bullets and plan 02 numbered `**R<n>. … (P02.T<n>).**`
    items). If the plan has none yet, use the first form. Keep them terse and factual, each with
    its reason. List anything that needs the owner's ruling separately, marked "pending the owner's

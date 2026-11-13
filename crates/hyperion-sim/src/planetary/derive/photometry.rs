@@ -46,16 +46,46 @@
 //! ([`TemplateRow::reference_bond`]) is the Bond albedo the generator gives the analogue body, so
 //! that every Solar System analogue in its own state is drawn with its row's p (ruling 9). The
 //! stated ratio `p_V` `q_V` ÷ `A_Bond` is a check only.
+//!
+//! # The colour from the body's own surface (from generator version 31)
+//!
+//! Below 31 a body's B and R are its template's row scaled by the one Bond factor, so that every
+//! airless rock is Mercury's colour and every snowball the Moon's grey. From 31 `p_V` is as above, and `p_B` and `p_R` are `p_V` times the disc's
+//! own albedo in the B and R bins over its albedo in the V bin, `a_B` ÷ `a_V` and `a_R` ÷ `a_V`
+//! ([`DiscColour`]): its area mix taken in each bin alone, its crust, condensates,
+//! deposits and sediment under its cloud, its air's Rayleigh layer and its haze, as the Bond
+//! albedo sums them over its hosts' light (`area_mix::ColourBand`). Each is capped so that `p_c`
+//! `q_c` ≤ 1. The phase curve, its exponents and q stay the template's. Since every template's q is
+//! one value in B, V and R, `p_c` = `a_c` ÷ q band by band, and p's colour is the disc's spherical
+//! albedos' by band: an approximation, since a real surface's q rises with its single-scattering
+//! albedo and with phase reddening (Hapke 2012, _Theory of Reflectance and Emittance
+//! Spectroscopy_, 2nd ed., ch. 11, from memory), so that a coloured regolith of middling albedo
+//! has a p less contrasted than its a, by up to some 15% in a ratio, and a part whose q differs from
+//! its ground's (a Rayleigh layer's 4/3 against a regolith's about 0.5) weighs more in a than in p
+//! (the lane's science check, 2026-11-06). A part of the disc with
+//! no albedos by band of its own takes its analogue's measured colour, `p_c` ÷ `p_V` of its row:
+//! an airless silicate regolith under the space-weathering stand-in, or whose lid is not known,
+//! Mercury's, and Venus's deck Venus's; a disc with none at all (a gas envelope, a melt) is its
+//! template's row, as below 31. So every Solar System analogue in its own state is still drawn with
+//! its row (ruling 9): Mercury's regolith is the stand-in's and Venus's disc its deck.
+//!
+//! From 31 too a weathered lid's colour tends to the mature lunar colour as its npFe⁰
+//! extinguishes its grains' interiors (`area_mix`'s "The weathered area mix"), where the slab alone
+//! leaves a mature iron-rich lid grey (B/V 0.956 for `basalt_fe` against the Moon's 0.831).
 
 use core::f64::consts::PI;
 
 use crate::math;
 use crate::planetary::derive::PlanetClass;
-use crate::planetary::derive::atmosphere::{SurfaceMaterial, SurfaceState};
+use crate::planetary::derive::atmosphere::{RunawayDeck, SurfaceMaterial, SurfaceState};
 use crate::planetary::derive::composition::MassFractions;
 use crate::planetary::derive::irradiation::BondAlbedo;
 use crate::planetary::params::{JUPITER_HEAVY_ELEMENT_FRACTION, SATURN_HEAVY_ELEMENT_FRACTION};
+use crate::units::consts::SOLAR_EFFECTIVE_TEMPERATURE_K;
 use crate::units::{Kelvin, MetresPerSecondSquared, Pascals, Radians};
+
+pub(crate) mod area_mix;
+pub(crate) mod envelope_bond;
 
 /// The ceiling on the phase factor f: 4, R07's `PHASE_F_CLAMP` (a Lambert crescent vanishes faster
 /// than a cloudy one: Venus's f would reach 61 at 170°).
@@ -104,6 +134,58 @@ impl Bands {
     #[must_use]
     pub const fn grey(x: f64) -> Self {
         Self { b: x, v: x, r: x }
+    }
+}
+
+/// A disc's own albedo in the B, V and R bins, a colour (the [module documentation](self), "The
+/// colour from the body's own surface").
+///
+/// Each albedo is finite and at least 0, V's above 0, and B ÷ V and R ÷ V finite, so that its
+/// colour over V is one; its constructor refuses any other.
+///
+/// # Examples
+///
+/// A mature basaltic regolith's spherical albedos, red-sloped:
+///
+/// ```
+/// use hyperion_sim::planetary::derive::photometry::{Bands, DiscColour};
+///
+/// let colour = DiscColour::new(Bands { b: 0.029, v: 0.031, r: 0.033 }).expect("a colour");
+/// let (b, r) = colour.over_v();
+/// assert!(b < 1.0 && r > 1.0);
+/// assert!(DiscColour::new(Bands { b: 0.1, v: 0.0, r: 0.1 }).is_none());
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DiscColour {
+    albedo: Bands,
+}
+
+impl DiscColour {
+    /// The colour of the albedos `albedo` by band, `None` where they are not one: an albedo not
+    /// finite or below 0, V's not above 0, or a ratio to V not finite.
+    #[must_use]
+    pub fn new(albedo: Bands) -> Option<Self> {
+        let finite = |x: f64| x.is_finite() && x >= 0.0;
+        let (b, r) = (albedo.b / albedo.v, albedo.r / albedo.v);
+        (finite(albedo.b)
+            && finite(albedo.r)
+            && finite(albedo.v)
+            && albedo.v > 0.0
+            && b.is_finite()
+            && r.is_finite())
+        .then_some(Self { albedo })
+    }
+
+    /// The albedos by band, each 0 to 1.
+    #[must_use]
+    pub const fn albedo(&self) -> Bands {
+        self.albedo
+    }
+
+    /// Its colour over V, `a_B` ÷ `a_V` and `a_R` ÷ `a_V`.
+    #[must_use]
+    pub fn over_v(self) -> (f64, f64) {
+        (self.albedo.b / self.albedo.v, self.albedo.r / self.albedo.v)
     }
 }
 
@@ -267,13 +349,6 @@ pub struct TemplateRow {
     /// measured in one (the Moon's V, Ganymede's and Europa's, which show no significant colour
     /// over 0.4–0.6 µm, Squyres and Veverka 1982).
     pub albedo: Bands,
-    /// `A_ref`, the Bond albedo the generator gives the analogue body (decision-p14-phase-j,
-    /// ruling 9): a body of that albedo is drawn with [`albedo`](Self::albedo) itself.
-    ///
-    /// Each row reads it from [`SurfaceState::albedo`] in the analogue's state, so that the two
-    /// cannot drift apart. The material matters only to an airless state. The exception is
-    /// snowball's, Europa's measured 0.68, since the generator would class Europa as airless ice.
-    pub reference_bond: BondAlbedo,
     /// The exponents s in `Φ_t^s` per band.
     pub exponents: Bands,
     /// The phase integral q per band at [`exponents`](Self::exponents) and
@@ -290,6 +365,79 @@ pub struct TemplateRow {
     pub source: &'static str,
 }
 
+impl TemplateRow {
+    /// `A_ref`, the Bond albedo the generator gives the analogue body (decision-p14-phase-j,
+    /// ruling 9; P14.T51.b): a body of that albedo is drawn with [`albedo`](Self::albedo) itself.
+    ///
+    /// It is the Bond albedo P14.T51.b's area mix gives the analogue about a Sun (5,772 K), each
+    /// computed from the registry when it is called, so that an analogue in its own state is drawn
+    /// with its row's p:
+    ///
+    /// - the four giants', class I's about a 5,772 K host: Jupiter's and Saturn's Sudarsky, Burrows
+    ///   and Pinto 2000's class I under its hazes, and Uranus's and Neptune's the ice giants' class
+    ///   I (decision-p14-t54a-ganymede §2–3), every analogue's effective temperature lying below
+    ///   class I's 130 K model planet, where a giant's albedo is held at class I's (Jupiter's the
+    ///   warmest: 124.4 ± 0.3 K, Hanel et al. 1981, as Guillot 2005, Annu. Rev. Earth Planet. Sci.
+    ///   33, 493, Table 2, lists it; 125.57 ± 0.07 K, Li et al. 2012);
+    /// - airless ice's, the regolith an airless icy body whose lid is not known takes: `H2O`'s fresh
+    ///   frost, and under the icy regolith (P14.T49.m, from generator version 26) its rock's lag;
+    /// - the airless rock analogues' (the Moon's and Mercury's), the Moon's 0.11: an airless
+    ///   rocky body's whose lid the passes do not know, and from P14.T54.a the cap of an airless
+    ///   silicate lid's, which the Moon's `feldspathic` and Mercury's `basalt_reduced` take;
+    /// - Earth's and the other temperate references', their calibrated 0.294, and Venus's 0.76,
+    ///   which the area mix's cloud calibration and its runaway deck give exactly, and the thin
+    ///   magma ocean's, the airless rock's 0.11, since a melt keeps T13.c's 0.10: each
+    ///   [`SurfaceState::albedo`] in the analogue's state, so that the two cannot drift apart;
+    /// - the snowball's, Europa's measured 0.68 (Grundy et al. 2007), since the generator would
+    ///   class Europa as airless ice.
+    ///
+    /// Where a computed albedo is not one (not in 0 to 1), the analogue's state's table albedo
+    /// stands.
+    #[must_use]
+    pub fn reference_bond(&self) -> BondAlbedo {
+        let sun = Kelvin::new(SOLAR_EFFECTIVE_TEMPERATURE_K);
+        let rock = SurfaceMaterial::Rock;
+        let (computed, state, material) = match self.template {
+            PhaseTemplate::Jupiter | PhaseTemplate::Saturn => (
+                Some(area_mix::class_i_bond(sun, PlanetClass::GasGiant)),
+                SurfaceState::GasEnvelope,
+                rock,
+            ),
+            PhaseTemplate::Uranus | PhaseTemplate::Neptune => (
+                Some(area_mix::class_i_bond(sun, PlanetClass::IceGiant)),
+                SurfaceState::GasEnvelope,
+                rock,
+            ),
+            PhaseTemplate::AirlessIce => (
+                Some(
+                    area_mix::Regolith::of_material(SurfaceMaterial::Ice)
+                        .bond(SurfaceState::Airless, &area_mix::sun_bands())
+                        .bond,
+                ),
+                SurfaceState::Airless,
+                SurfaceMaterial::Ice,
+            ),
+            PhaseTemplate::Moon | PhaseTemplate::Mercury => (
+                Some(
+                    area_mix::Regolith::of_material(rock)
+                        .bond(SurfaceState::Airless, &area_mix::sun_bands())
+                        .bond,
+                ),
+                SurfaceState::Airless,
+                rock,
+            ),
+            PhaseTemplate::Mars | PhaseTemplate::Earth => (None, SurfaceState::Temperate, rock),
+            PhaseTemplate::Venus => (None, SurfaceState::RunawayGreenhouse, rock),
+            PhaseTemplate::Magma => (None, SurfaceState::Airless, rock),
+            // Europa's measured Bond albedo, not a state's (ruling 9).
+            PhaseTemplate::Snowball => return BondAlbedo::from_fraction(0.68),
+        };
+        computed
+            .and_then(BondAlbedo::new)
+            .unwrap_or_else(|| state.albedo(material))
+    }
+}
+
 /// Degrees to radians, for the rows' ranges.
 const DEG: f64 = PI / 180.0;
 
@@ -301,7 +449,6 @@ pub const PHASE_TEMPLATES: [TemplateRow; 12] = [
     TemplateRow {
         template: PhaseTemplate::Moon,
         albedo: Bands::grey(0.12),
-        reference_bond: SurfaceState::Airless.albedo(SurfaceMaterial::Rock),
         exponents: Bands::grey(1.0),
         phase_integral: Bands::grey(Q_MOON),
         lunar_lambert_share: 1.0,
@@ -318,15 +465,16 @@ pub const PHASE_TEMPLATES: [TemplateRow; 12] = [
             v: 0.142,
             r: 0.172,
         },
-        reference_bond: SurfaceState::Airless.albedo(SurfaceMaterial::Rock),
         exponents: Bands::grey(1.0),
         phase_integral: Bands::grey(Q_MERCURY),
         lunar_lambert_share: 1.0,
         valid_to: Radians::new(169.5 * DEG),
         provisional: false,
         source: "Mallama and Hilton 2018, Astronomy and Computing 25, 10, eq. 2, to 169.5°; \
-                 Mallama, Krobusek and Pavlov 2017, Icarus 282, 19, Table 7; measured Bond \
-                 albedo 0.088 (NASA's fact sheet), the generator's airless rock 0.11",
+                 Mallama, Krobusek and Pavlov 2017, Icarus 282, 19, Table 7; measured bolometric \
+                 Bond albedo 0.088 ± 0.003 (Mallama 2017, arXiv:1703.02670, Table 1; NASA's fact \
+                 sheet's 0.068 equals the V-band spherical albedo, p_V q_V = 0.142 × 0.478), the \
+                 generator's airless rock 0.11",
     },
     TemplateRow {
         template: PhaseTemplate::Mars,
@@ -335,7 +483,6 @@ pub const PHASE_TEMPLATES: [TemplateRow; 12] = [
             v: 0.170,
             r: 0.288,
         },
-        reference_bond: SurfaceState::Temperate.albedo(SurfaceMaterial::Rock),
         exponents: Bands::grey(1.0),
         phase_integral: Bands::grey(Q_MARS),
         lunar_lambert_share: 0.5,
@@ -352,7 +499,6 @@ pub const PHASE_TEMPLATES: [TemplateRow; 12] = [
             v: 0.689,
             r: 0.708,
         },
-        reference_bond: SurfaceState::RunawayGreenhouse.albedo(SurfaceMaterial::Rock),
         exponents: Bands::grey(1.0),
         phase_integral: Bands::grey(Q_VENUS),
         lunar_lambert_share: 0.0,
@@ -373,7 +519,6 @@ pub const PHASE_TEMPLATES: [TemplateRow; 12] = [
             v: 0.215,
             r: 0.210,
         },
-        reference_bond: SurfaceState::Temperate.albedo(SurfaceMaterial::Rock),
         exponents: Bands::grey(1.0),
         phase_integral: Bands::grey(Q_EARTH),
         lunar_lambert_share: 0.0,
@@ -390,15 +535,14 @@ pub const PHASE_TEMPLATES: [TemplateRow; 12] = [
             v: 0.538,
             r: 0.495,
         },
-        reference_bond: SurfaceState::GasEnvelope.albedo(SurfaceMaterial::Rock),
         exponents: Bands::grey(1.0),
         phase_integral: Bands::grey(Q_JUPITER),
         lunar_lambert_share: 0.0,
         valid_to: Radians::new(130.0 * DEG),
         provisional: false,
         source: "Mallama and Hilton 2018, eqs. 8–9, joined at 12°, to 130°; Mallama et al. 2017, \
-                 Table 7; measured Bond albedo 0.343 (Hanel et al. 1981), the generator's gas \
-                 envelope 0.34",
+                 Table 7; measured Bond albedo 0.503 ± 0.012 (Li et al. 2018; Hanel et al. 1981's \
+                 0.343 superseded), the generator's hazy class I 0.48",
     },
     TemplateRow {
         template: PhaseTemplate::Saturn,
@@ -407,15 +551,14 @@ pub const PHASE_TEMPLATES: [TemplateRow; 12] = [
             v: 0.499,
             r: 0.568,
         },
-        reference_bond: SurfaceState::GasEnvelope.albedo(SurfaceMaterial::Rock),
         exponents: Bands::grey(1.0),
         phase_integral: Bands::grey(Q_SATURN),
         lunar_lambert_share: 0.0,
         valid_to: Radians::new(150.0 * DEG),
         provisional: false,
         source: "Mallama and Hilton 2018, eqs. 11–12, the globe without rings, joined at 6°, to \
-                 150°; Mallama et al. 2017, Table 7; measured Bond albedo 0.342 (NASA's fact \
-                 sheet), the generator's gas envelope 0.34",
+                 150°; Mallama et al. 2017, Table 7; measured Bond albedo 0.41 ± 0.02 (Wang et \
+                 al. 2024; NASA's fact sheet's 0.342 older), the generator's hazy class I 0.48",
     },
     TemplateRow {
         template: PhaseTemplate::Uranus,
@@ -424,15 +567,14 @@ pub const PHASE_TEMPLATES: [TemplateRow; 12] = [
             v: 0.488,
             r: 0.202,
         },
-        reference_bond: SurfaceState::GasEnvelope.albedo(SurfaceMaterial::Rock),
         exponents: Bands::grey(1.0),
         phase_integral: Bands::grey(Q_URANUS),
         lunar_lambert_share: 0.0,
         valid_to: Radians::new(154.0 * DEG),
         provisional: false,
         source: "Mallama and Hilton 2018, eq. 15 at a sub-latitude of 0, to 154°; Mallama et al. \
-                 2017, Table 7; measured Bond albedo 0.300 (NASA's fact sheet), the generator's \
-                 gas envelope 0.34",
+                 2017, Table 7; measured Bond albedo 0.349 ± 0.016 (Irwin et al. 2025; NASA's \
+                 fact sheet's 0.300 older), the generator's ice-giant class I 0.32",
     },
     TemplateRow {
         template: PhaseTemplate::Neptune,
@@ -441,20 +583,18 @@ pub const PHASE_TEMPLATES: [TemplateRow; 12] = [
             v: 0.442,
             r: 0.181,
         },
-        reference_bond: SurfaceState::GasEnvelope.albedo(SurfaceMaterial::Rock),
         exponents: Bands::grey(1.0),
         phase_integral: Bands::grey(Q_NEPTUNE),
         lunar_lambert_share: 0.0,
         valid_to: Radians::new(133.0 * DEG),
         provisional: false,
         source: "Mallama and Hilton 2018, eq. 17, to 133°; Mallama et al. 2017, Table 7; \
-                 measured Bond albedo 0.290 (Pearl and Conrath 1991), the generator's gas \
-                 envelope 0.34",
+                 measured Bond albedo 0.290 ± 0.067 (Pearl and Conrath 1991), the generator's \
+                 ice-giant class I 0.32",
     },
     TemplateRow {
         template: PhaseTemplate::AirlessIce,
         albedo: Bands::grey(0.43),
-        reference_bond: SurfaceState::Airless.albedo(SurfaceMaterial::Ice),
         exponents: Bands::grey(S_AIRLESS_ICE),
         phase_integral: Bands::grey(0.80),
         lunar_lambert_share: 1.0,
@@ -468,8 +608,6 @@ pub const PHASE_TEMPLATES: [TemplateRow; 12] = [
     TemplateRow {
         template: PhaseTemplate::Snowball,
         albedo: Bands::grey(0.67),
-        // Europa's measured Bond albedo, not a state's (ruling 9).
-        reference_bond: BondAlbedo::from_fraction(0.68),
         exponents: Bands::grey(S_SNOWBALL),
         phase_integral: Bands::grey(1.01),
         lunar_lambert_share: 1.0,
@@ -486,7 +624,6 @@ pub const PHASE_TEMPLATES: [TemplateRow; 12] = [
             v: 0.142,
             r: 0.172,
         },
-        reference_bond: SurfaceState::Airless.albedo(SurfaceMaterial::Rock),
         exponents: Bands::grey(1.0),
         phase_integral: Bands::grey(Q_MERCURY),
         lunar_lambert_share: 1.0,
@@ -630,6 +767,12 @@ pub fn exponent_for(template: PhaseTemplate, l: f64, q: f64) -> f64 {
 pub struct PhotometryInputs {
     /// The surface state.
     pub state: SurfaceState,
+    /// Whether a runaway greenhouse keeps Venus's deck
+    /// ([`Atmosphere::runaway_deck`](crate::planetary::derive::Atmosphere::runaway_deck),
+    /// P14.T53.b part 1 (b)), a deckless one taking a dry temperate world's template.
+    ///
+    /// Every other state's is [`RunawayDeck::Kept`], which the template does not read.
+    pub runaway_deck: RunawayDeck,
     /// What an airless surface is made of, by the record's composition.
     pub material: SurfaceMaterial,
     /// The surface pressure; `None` for a gas envelope.
@@ -650,6 +793,13 @@ pub struct PhotometryInputs {
     pub fractions: MassFractions,
     /// The Bond albedo of the state on the material (P14.T13.c).
     pub bond: BondAlbedo,
+    /// The disc's own colour (from generator version 31).
+    ///
+    /// It is its albedo in the B, V and R bins
+    /// ([`Atmosphere::band_albedo`](crate::planetary::derive::Atmosphere::band_albedo)), whose
+    /// ratios to V give `p_B` and `p_R`. `None` for a disc with no albedos by band (a gas envelope,
+    /// a melt), which keeps its template's row.
+    pub band_albedo: Option<DiscColour>,
 }
 
 /// A body's photometry at a record's time (P14.T47.c): its template, its geometric albedo per
@@ -673,12 +823,23 @@ impl BodyPhotometry {
     pub fn derive(inputs: &PhotometryInputs) -> Self {
         let template = choose(inputs);
         let row = template.row();
-        let scale = inputs.bond.value() / row.reference_bond.value();
+        let scale = inputs.bond.value() / row.reference_bond().value();
         let q = row.phase_integral;
-        let p = Bands {
-            b: (row.albedo.b * scale).min(1.0 / q.b),
-            v: (row.albedo.v * scale).min(1.0 / q.v),
-            r: (row.albedo.r * scale).min(1.0 / q.r),
+        let colour = inputs.band_albedo.map(DiscColour::over_v);
+        let p = match colour {
+            None => Bands {
+                b: (row.albedo.b * scale).min(1.0 / q.b),
+                v: (row.albedo.v * scale).min(1.0 / q.v),
+                r: (row.albedo.r * scale).min(1.0 / q.r),
+            },
+            Some((b, r)) => {
+                let v = (row.albedo.v * scale).min(1.0 / q.v);
+                Bands {
+                    b: (v * b).min(1.0 / q.b),
+                    v,
+                    r: (v * r).min(1.0 / q.r),
+                }
+            }
         };
         let hot = inputs.state == SurfaceState::GasEnvelope
             && inputs.equilibrium_temperature > HOT_GIANT_TEMPERATURE;
@@ -744,6 +905,11 @@ impl BodyPhotometry {
 }
 
 /// The template of the body `inputs` describe, by its surface state (P14.T47.b).
+///
+/// A runaway greenhouse solved without Venus's deck ([`RunawayDeck::Deckless`], P14.T53.b part 1
+/// (b)) takes what a dry `Temperate` of the same cover takes: Mars's when its air is thin, else
+/// Earth's (decision-absurd-states-24 R3.2's lean), its cloud the water cloud's availability, none
+/// on a dry world, over the ground a dry world's.
 fn choose(inputs: &PhotometryInputs) -> PhaseTemplate {
     let thin = inputs
         .surface_pressure
@@ -762,16 +928,29 @@ fn choose(inputs: &PhotometryInputs) -> PhaseTemplate {
             | PlanetClass::IceGiant => PhaseTemplate::Neptune,
         },
         SurfaceState::MagmaOcean if thin => PhaseTemplate::Magma,
-        // A runaway greenhouse, and a magma ocean under a thick atmosphere (unlabelled: it has no
-        // analogue either).
-        SurfaceState::RunawayGreenhouse | SurfaceState::MagmaOcean => PhaseTemplate::Venus,
+        SurfaceState::RunawayGreenhouse | SurfaceState::SteamEnvelope
+            if inputs.runaway_deck == RunawayDeck::Deckless =>
+        {
+            if thin {
+                PhaseTemplate::Mars
+            } else {
+                PhaseTemplate::Earth
+            }
+        }
+        // A runaway greenhouse under its deck, and a magma ocean under a thick atmosphere
+        // (unlabelled: it has no analogue either); a steam envelope takes a runaway's photometry
+        // (P14.T53.b part 3).
+        SurfaceState::RunawayGreenhouse
+        | SurfaceState::MagmaOcean
+        | SurfaceState::SteamEnvelope => PhaseTemplate::Venus,
         SurfaceState::Snowball => PhaseTemplate::Snowball,
-        SurfaceState::Airless => match inputs.material {
+        // A tenuous air hides nothing of its ground (P14.T53.c).
+        SurfaceState::Airless | SurfaceState::Tenuous => match inputs.material {
             SurfaceMaterial::Rock => PhaseTemplate::Mercury,
             SurfaceMaterial::Ice => PhaseTemplate::AirlessIce,
         },
-        SurfaceState::Temperate if thin => PhaseTemplate::Mars,
-        SurfaceState::Temperate => PhaseTemplate::Earth,
+        SurfaceState::Temperate | SurfaceState::Desert if thin => PhaseTemplate::Mars,
+        SurfaceState::Temperate | SurfaceState::Desert => PhaseTemplate::Earth,
     }
 }
 
@@ -791,6 +970,7 @@ mod tests {
         let material = SurfaceMaterial::of(&d.fractions());
         PhotometryInputs {
             state: atmosphere.state(),
+            runaway_deck: atmosphere.runaway_deck(),
             material,
             surface_pressure: atmosphere.surface_pressure(),
             cloud_fraction: atmosphere.cloud_fraction(),
@@ -799,7 +979,8 @@ mod tests {
             surface_gravity: d.surface_gravity(),
             class: d.class(),
             fractions: d.fractions(),
-            bond: atmosphere.state().albedo(material),
+            bond: d.albedo(),
+            band_albedo: atmosphere.band_albedo(),
         }
     }
 
@@ -901,10 +1082,19 @@ mod tests {
     }
 
     /// (b) The Solar System table: each planet chooses its own template (Uranus Neptune's), and
-    /// each analogue's p is Table 7's to 10⁻¹² (decision-p14-phase-j, 9).
+    /// each analogue at its reference, its derivation's Bond albedo the template's
+    /// ([`TemplateRow::reference_bond`]), draws Table 7's p to 10⁻¹² (decision-p14-phase-j, 9):
+    /// Mercury and Venus. Earth and Mars take their area mix at the passes' stand-ins (no basins,
+    /// all their condensed water at their surface), off their references, so their p is printed
+    /// against Table 7's until P14.T54.a's Batch C gives the passes their basins and water share.
+    /// From generator version 27 the four giants take their own envelopes' Bond albedos
+    /// (P14.T24.h.b part 5: Jupiter 0.500, Saturn 0.388, Uranus 0.308, Neptune 0.324), off their
+    /// references, which stay T51.b's class I (its anchor on the analogue's own albedo left as it
+    /// was at the bump), so theirs are printed too.
     #[test]
     fn the_solar_system_draws_itself() {
         let planets = solar_system();
+        let mut at_reference = Vec::new();
         for (name, template, l) in [
             ("Mercury", PhaseTemplate::Mercury, 1.0),
             ("Venus", PhaseTemplate::Venus, 0.0),
@@ -919,11 +1109,25 @@ mod tests {
             assert_eq!(photometry.template(), template, "{name}");
             assert!((photometry.lunar_lambert_share() - l).abs() < 1e-15);
             let (p, table) = (photometry.geometric_albedo(), template.row().albedo);
-            for (got, want) in [(p.b, table.b), (p.v, table.v), (p.r, table.r)] {
-                assert!((got - want).abs() < 1e-12, "{name}: {got} against {want}");
+            let (bond, reference) = (
+                found(&planets, name).albedo().value(),
+                template.row().reference_bond().value(),
+            );
+            if (bond - reference).abs() < 1e-12 {
+                for (got, want) in [(p.b, table.b), (p.v, table.v), (p.r, table.r)] {
+                    assert!((got - want).abs() < 1e-12, "{name}: {got} against {want}");
+                }
+                at_reference.push(name);
+            } else {
+                eprintln!(
+                    "{name}: Bond albedo {bond:.5} against its reference {reference:.5}, p_V {:.5} \
+                     against Table 7's {:.5}",
+                    p.v, table.v
+                );
             }
             assert!(!photometry.provisional(), "{name}");
         }
+        assert_eq!(at_reference, ["Mercury", "Venus"]);
         // The stated ratios, findings for P14.T13.c and not failures: Mercury's 0.62
         // (decision-p14-phase-j) and Earth's 0.959 at the temperate 0.294 (decision-p11-t4k-faults;
         // 0.92 at 0.306, decision-r07-earth-albedo; Mallama's p gave 1.86).
@@ -1023,6 +1227,7 @@ mod tests {
     fn airless(material: SurfaceMaterial, state: SurfaceState, bond: f64) -> PhotometryInputs {
         PhotometryInputs {
             state,
+            runaway_deck: RunawayDeck::Kept,
             material,
             surface_pressure: None,
             cloud_fraction: 0.0,
@@ -1032,18 +1237,46 @@ mod tests {
             class: PlanetClass::Icy,
             fractions: MassFractions::solid(0.1, 0.4, 0.5),
             bond: BondAlbedo::new(bond).unwrap(),
+            band_albedo: None,
         }
     }
 
-    /// (b) An airless-ice body and a snowball state a ratio within 5% of 1 (0.98 and 0.99); the
-    /// rest of the rule; two calls agree bit for bit.
+    /// (b) A snowball states a ratio within 5% of 1 (0.99). An airless-ice body states `p_V` `q_V`
+    /// ÷ A = 0.43 × 0.80 ÷ `A_ref`, its reference the fresh `H2O` frost's about a Sun (0.832,
+    /// P14.T51.b's area mix), where Ganymede's measured Bond albedo, whose p the row draws, is
+    /// 0.35 (0.98 at it): a stated check, recorded in the bless note. Its owner is the icy
+    /// regolith, P14.T49.m (decision-p14-t54a-ganymede §1b): under its lag (at 26) the reference is
+    /// the lag's about a Sun, 0.3500, the measured Ganymede's, and the ratio within 5% of 1, as
+    /// the snowball's. The rest of the rule; two calls agree bit for bit.
     #[test]
     fn the_borrowed_curves_keep_their_ratios() {
+        use crate::planetary::derive::photometry::area_mix::{IcyRegolithRules, with_icy_regolith};
         let ice =
             BodyPhotometry::derive(&airless(SurfaceMaterial::Ice, SurfaceState::Airless, 0.35));
         assert_eq!(ice.template(), PhaseTemplate::AirlessIce);
         assert!(ice.provisional());
-        assert!((ice.bond_ratio() - 0.983).abs() < 0.05 && (ice.bond_ratio() - 1.0).abs() < 0.05);
+        let reference = PhaseTemplate::AirlessIce.row().reference_bond().value();
+        assert!((ice.bond_ratio() - 0.43 * 0.80 / reference).abs() < 1e-9);
+        eprintln!(
+            "airless ice: the stated ratio {:.4} at its reference {reference:.5}",
+            ice.bond_ratio()
+        );
+        let (lagged, lagged_reference) = with_icy_regolith(IcyRegolithRules::Mixture, || {
+            (
+                BodyPhotometry::derive(&airless(SurfaceMaterial::Ice, SurfaceState::Airless, 0.35)),
+                PhaseTemplate::AirlessIce.row().reference_bond().value(),
+            )
+        });
+        eprintln!(
+            "airless ice under its lag: the ratio {:.4} at its reference {lagged_reference:.5}",
+            lagged.bond_ratio()
+        );
+        assert!((lagged_reference - 0.35).abs() < 1e-3, "{lagged_reference}");
+        assert!(
+            (lagged.bond_ratio() - 1.0).abs() < 0.05,
+            "{}",
+            lagged.bond_ratio()
+        );
         let snow =
             BodyPhotometry::derive(&airless(SurfaceMaterial::Ice, SurfaceState::Snowball, 0.50));
         assert_eq!(snow.template(), PhaseTemplate::Snowball);
@@ -1071,6 +1304,24 @@ mod tests {
         };
         assert_eq!(temperate(29_999.0), PhaseTemplate::Mars);
         assert_eq!(temperate(30_000.0), PhaseTemplate::Earth);
+        // P14.T53.b part 1 (b): a runaway solved without its deck takes a dry temperate world's
+        // template, and one under it Venus's at any pressure.
+        let runaway = |pressure: f64, runaway_deck: RunawayDeck| {
+            BodyPhotometry::derive(&PhotometryInputs {
+                surface_pressure: Some(Pascals::new(pressure)),
+                runaway_deck,
+                ..airless(SurfaceMaterial::Rock, SurfaceState::RunawayGreenhouse, 0.2)
+            })
+            .template()
+        };
+        for pressure in [121.0, 29_999.0, 30_000.0, 1.13e5, 9.2e6] {
+            assert_eq!(
+                runaway(pressure, RunawayDeck::Deckless),
+                temperate(pressure),
+                "{pressure} Pa"
+            );
+            assert_eq!(runaway(pressure, RunawayDeck::Kept), PhaseTemplate::Venus);
+        }
         let rock = airless(SurfaceMaterial::Rock, SurfaceState::Airless, 0.11);
         let a = BodyPhotometry::derive(&rock);
         let b = BodyPhotometry::derive(&rock);
@@ -1083,6 +1334,53 @@ mod tests {
         ] {
             assert_same_bits(x, y);
         }
+    }
+
+    /// P14.T51.b: each template's reference is the Bond albedo the area mix gives its analogue
+    /// about a Sun, where its rule changes it in closed form (the gas giants' hazy class I of
+    /// Sudarsky, Burrows and Pinto and the ice giants' class I, decision-p14-t54a-ganymede §2–3;
+    /// airless ice's `H2O` regolith, from generator version 27 ice with its rock's lag, 0.350,
+    /// P14.T49.m, where it was fresh frost's 0.832), read from the registry, and the airless rock
+    /// analogues' the Moon's 0.11 while no lid is known; the rest are their state's table albedo,
+    /// and the snowball's Europa's 0.68. An analogue in its own state at its reference is drawn
+    /// with its row's p.
+    #[test]
+    fn the_references_are_the_area_mix_s() {
+        let sun = area_mix::sun_bands();
+        let water = area_mix::Regolith::of_material(SurfaceMaterial::Ice)
+            .bond(SurfaceState::Airless, &sun)
+            .bond;
+        let rock = SurfaceMaterial::Rock;
+        for template in PhaseTemplate::ALL {
+            let reference = template.row().reference_bond().value();
+            let expected = match template {
+                PhaseTemplate::Jupiter | PhaseTemplate::Saturn => area_mix::class_i_bond(
+                    Kelvin::new(SOLAR_EFFECTIVE_TEMPERATURE_K),
+                    PlanetClass::GasGiant,
+                ),
+                PhaseTemplate::Uranus | PhaseTemplate::Neptune => area_mix::class_i_bond(
+                    Kelvin::new(SOLAR_EFFECTIVE_TEMPERATURE_K),
+                    PlanetClass::IceGiant,
+                ),
+                PhaseTemplate::AirlessIce => water,
+                PhaseTemplate::Moon | PhaseTemplate::Mercury | PhaseTemplate::Magma => {
+                    SurfaceState::Airless.albedo(rock).value()
+                }
+                PhaseTemplate::Mars | PhaseTemplate::Earth => {
+                    SurfaceState::Temperate.albedo(rock).value()
+                }
+                PhaseTemplate::Venus => SurfaceState::RunawayGreenhouse.albedo(rock).value(),
+                PhaseTemplate::Snowball => 0.68,
+            };
+            assert_same_bits(reference, expected);
+            eprintln!("{template:?}: {reference:.5}");
+        }
+        let ice = BondAlbedo::new(water).unwrap();
+        let drawn = BodyPhotometry::derive(&PhotometryInputs {
+            bond: ice,
+            ..airless(SurfaceMaterial::Ice, SurfaceState::Airless, 0.35)
+        });
+        assert!((drawn.geometric_albedo().v - 0.43).abs() < 1e-12);
     }
 
     /// (b) A gas giant at an equilibrium temperature of 300 K is provisional, one at 120 K is not
@@ -1115,5 +1413,146 @@ mod tests {
         let photometry = BodyPhotometry::derive(&neptune);
         assert_eq!(photometry.template(), PhaseTemplate::Neptune);
         assert!(photometry.provisional());
+    }
+
+    /// From 31 `p_V` is the template's scale and `p_B` and `p_R` are `p_V` times the disc's own
+    /// albedo in the band over V, each capped so that p q ≤ 1; with no colour every band is the
+    /// row's scaled, to the bit. Albedos that are not a colour (`a_V` 0, a NaN, a
+    /// negative, an infinite ratio) make none.
+    #[test]
+    fn the_surface_s_colour_gives_b_and_r_relative_to_v() {
+        let weathered = Bands {
+            b: 0.0291,
+            v: 0.0313,
+            r: 0.0329,
+        };
+        let colour = DiscColour::new(weathered).expect("a colour");
+        assert_eq!(colour.albedo(), weathered);
+        let rock = |band_albedo: Option<DiscColour>| PhotometryInputs {
+            band_albedo,
+            ..airless(SurfaceMaterial::Rock, SurfaceState::Airless, 0.11)
+        };
+        let row = PhaseTemplate::Mercury.row();
+        let scale = 0.11 / row.reference_bond().value();
+        let scaled = BodyPhotometry::derive(&rock(None)).geometric_albedo();
+        for (got, want) in [
+            (scaled.b, row.albedo.b * scale),
+            (scaled.v, row.albedo.v * scale),
+            (scaled.r, row.albedo.r * scale),
+        ] {
+            assert_same_bits(got, want);
+        }
+        for broken in [
+            Bands {
+                v: 0.0,
+                ..weathered
+            },
+            Bands {
+                b: f64::NAN,
+                ..weathered
+            },
+            Bands {
+                r: -0.1,
+                ..weathered
+            },
+            // A subnormal V, over which B's ratio is infinite.
+            Bands {
+                v: 1.0e-310,
+                ..weathered
+            },
+        ] {
+            assert_eq!(DiscColour::new(broken), None, "{broken:?}");
+        }
+        let p = BodyPhotometry::derive(&rock(Some(colour))).geometric_albedo();
+        assert_same_bits(p.v, scaled.v);
+        assert_same_bits(p.b, scaled.v * (weathered.b / weathered.v));
+        assert_same_bits(p.r, scaled.v * (weathered.r / weathered.v));
+        // A bright snowball whose ground is redder than its V: R capped at 1 ÷ q.
+        let snow = BodyPhotometry::derive(&PhotometryInputs {
+            band_albedo: DiscColour::new(Bands {
+                b: 0.5,
+                v: 0.6,
+                r: 1.0,
+            }),
+            ..airless(SurfaceMaterial::Ice, SurfaceState::Snowball, 0.68)
+        });
+        let q = PhaseTemplate::Snowball.row().phase_integral;
+        assert_same_bits(snow.geometric_albedo().r, 1.0 / q.r);
+        assert!(snow.geometric_albedo().b < snow.geometric_albedo().v);
+    }
+
+    /// From 31 the Solar System still draws itself (ruling 9): Mercury, whose regolith is the
+    /// space-weathering stand-in's, and Venus, whose disc is its deck, at their references, draw
+    /// Table 7's B, V and R to 10⁻¹², and every giant, whose disc has no albedos by band, its row's
+    /// colour to the bit. Earth, off its reference, keeps the template's `p_V` and takes its own
+    /// surface's colour, blue under its Rayleigh layer (B over V above 1, R over V below it); Mars,
+    /// the passes' stand-in's (22 kPa of CO₂ over basalt, no `ferric` deposit), takes its own too,
+    /// printed against its row's (a finding). Two derivations agree to the bit.
+    #[test]
+    fn the_solar_system_draws_itself_in_its_surfaces_colours() {
+        let (planets, again) = (solar_system(), solar_system());
+        for (name, template) in [
+            ("Mercury", PhaseTemplate::Mercury),
+            ("Venus", PhaseTemplate::Venus),
+            ("Earth", PhaseTemplate::Earth),
+            ("Mars", PhaseTemplate::Mars),
+            ("Jupiter", PhaseTemplate::Jupiter),
+            ("Saturn", PhaseTemplate::Saturn),
+            ("Uranus", PhaseTemplate::Neptune),
+            ("Neptune", PhaseTemplate::Neptune),
+        ] {
+            let body = found(&planets, name);
+            let photometry = BodyPhotometry::derive(&inputs_of(body));
+            assert_eq!(photometry.template(), template, "{name}");
+            let (p, row) = (photometry.geometric_albedo(), template.row().albedo);
+            let twice = BodyPhotometry::derive(&inputs_of(found(&again, name)));
+            for (a, b) in [
+                (p.b, twice.geometric_albedo().b),
+                (p.v, twice.geometric_albedo().v),
+                (p.r, twice.geometric_albedo().r),
+            ] {
+                assert_same_bits(a, b);
+            }
+            let colour = body.atmosphere().band_albedo();
+            match name {
+                "Mercury" | "Venus" => {
+                    assert!(colour.is_some(), "{name}");
+                    for (got, want) in [(p.b, row.b), (p.v, row.v), (p.r, row.r)] {
+                        assert!((got - want).abs() < 1e-12, "{name}: {got} against {want}");
+                    }
+                }
+                "Jupiter" | "Saturn" | "Uranus" | "Neptune" => {
+                    assert_eq!(colour, None, "{name}");
+                    let scale = body.albedo().value() / template.row().reference_bond().value();
+                    let q = template.row().phase_integral;
+                    assert_same_bits(p.b, (row.b * scale).min(1.0 / q.b));
+                    assert_same_bits(p.r, (row.r * scale).min(1.0 / q.r));
+                }
+                _ => {
+                    let a = colour.expect("a surface's disc has a colour").albedo();
+                    let held =
+                        row.v * (body.albedo().value() / template.row().reference_bond().value());
+                    assert_same_bits(p.v, held.min(1.0 / template.row().phase_integral.v));
+                    if name == "Earth" {
+                        assert!(p.b > p.v && p.r < p.v, "Earth: {p:?}");
+                    }
+                    eprintln!(
+                        "{name}: its disc's albedos B, V, R {:.4}, {:.4}, {:.4}; p {:.4}, \
+                         {:.4}, {:.4} (B/V {:.3}, R/V {:.3}) against its row's B/V {:.3}, \
+                         R/V {:.3}",
+                        a.b,
+                        a.v,
+                        a.r,
+                        p.b,
+                        p.v,
+                        p.r,
+                        p.b / p.v,
+                        p.r / p.v,
+                        row.b / row.v,
+                        row.r / row.v
+                    );
+                }
+            }
+        }
     }
 }

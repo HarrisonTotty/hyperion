@@ -2,7 +2,14 @@ import { describe, expect, it } from "vitest";
 
 import { localFrameAt } from "../geometry/frame";
 import { isAbovePlane, type SizeClass, type SymbolShape } from "./marks";
-import { SIZE_CLASS_REM, SYMBOL_STROKE_PX, symbolOutline } from "./symbols";
+import {
+  GREEK_CROSS_ARM_SHARE,
+  SIZE_CLASS_REM,
+  SYMBOL_STROKE_PX,
+  symbolOutline,
+  TRANSIENT_WAIST_SHARE,
+  unitInradius,
+} from "./symbols";
 import { vec3 } from "../geometry/vec3";
 
 const POLYGONS: ReadonlyArray<SymbolShape> = ["diamond", "square", "triangle"];
@@ -79,6 +86,8 @@ const EVERY_SHAPE: ReadonlyArray<SymbolShape> = [
   ...POLYGONS,
   "ringed-circle",
   ...ADDED_POLYGONS,
+  "greek-cross",
+  "transient",
 ];
 
 /** The screen size at 100%, where a `rem` is 16 px. */
@@ -209,3 +218,118 @@ describe("the outlines the later plans add", () => {
     expect(holePx).toBeGreaterThanOrEqual(SYMBOL_STROKE_PX);
   });
 });
+
+/** The Greek cross's corners, checked to close, without the repeated first. */
+function crossCorners(): ReadonlyArray<{ readonly x: number; readonly y: number }> {
+  const outline = symbolOutline("greek-cross");
+  if (outline.kind !== "polygon") {
+    throw new Error("the Greek cross should be a polygon");
+  }
+  expect(outline.points.at(-1)).toEqual(outline.points[0]);
+  return outline.points.slice(0, -1);
+}
+describe("the Greek cross, a feature's mark (plan 09, P09.T41.a)", () => {
+  it("draws twelve corners about the centre, the outer ones on the unit circle", () => {
+    const corners = crossCorners();
+    const radii = corners.map((point) => Math.hypot(point.x, point.y));
+
+    expect(corners).toHaveLength(12);
+    expect(corners.reduce((sum, point) => sum + point.x, 0)).toBeCloseTo(0, 12);
+    expect(corners.reduce((sum, point) => sum + point.y, 0)).toBeCloseTo(0, 12);
+    expect(Math.max(...radii)).toBeCloseTo(1, 12);
+    expect(radii.filter((radius) => Math.abs(radius - 1) < 1e-12)).toHaveLength(8);
+  });
+
+  it("makes its arms as wide as they are long, a third of its span: five equal squares", () => {
+    const corners = crossCorners();
+    const reach = Math.max(...corners.map((point) => Math.abs(point.x)));
+    const xs = new Set(corners.map((point) => Math.abs(point.x).toFixed(12)));
+
+    expect(GREEK_CROSS_ARM_SHARE).toBe(1 / 3);
+    expect([...xs].map(Number).toSorted((a, b) => a - b)).toEqual([
+      Number((reach / 3).toFixed(12)),
+      Number(reach.toFixed(12)),
+    ]);
+    expect(Math.max(...corners.map((point) => Math.abs(point.y)))).toBeCloseTo(reach, 12);
+  });
+
+  it("moves its arms' sides out by the outline shift, its nearest sides being the arms'", () => {
+    const corners = crossCorners();
+    const reach = Math.max(...corners.map((point) => Math.abs(point.x)));
+
+    expect(unitInradius([...corners, corners[0] ?? { x: 0, y: 0 }])).toBeCloseTo(reach / 3, 12);
+  });
+
+  it("leaves each open arm a hole wider than its line at the largest size and 80% scale", () => {
+    const corners = crossCorners();
+    const reach = Math.max(...corners.map((point) => Math.abs(point.x)));
+    const armPx = 2 * (reach / 3) * pathRadiusPx(4, REM_PX * 0.8);
+
+    expect(armPx - SYMBOL_STROKE_PX).toBeGreaterThanOrEqual(SYMBOL_STROKE_PX);
+  });
+});
+
+/** The four-point star's corners, checked to close, without the repeated first. */
+function starCorners(): ReadonlyArray<{ readonly x: number; readonly y: number }> {
+  const outline = symbolOutline("transient");
+  if (outline.kind !== "polygon") {
+    throw new Error("the four-point star should be a polygon");
+  }
+  expect(outline.points.at(-1)).toEqual(outline.points[0]);
+  return outline.points.slice(0, -1);
+}
+
+describe("the four-point star, a transient's mark (plan 12, P12.T12)", () => {
+  it("points up, right, down and left on the unit circle, its waist between them", () => {
+    const corners = starCorners();
+
+    expect(corners).toHaveLength(8);
+    expect(corners.reduce((sum, point) => sum + point.x, 0)).toBeCloseTo(0, 12);
+    expect(corners.reduce((sum, point) => sum + point.y, 0)).toBeCloseTo(0, 12);
+    expect(nanos(corners[0])).toEqual({ x: 0, y: -1 });
+    expect(nanos(corners[2])).toEqual({ x: 1, y: 0 });
+    expect(nanos(corners[4])).toEqual({ x: 0, y: 1 });
+    expect(nanos(corners[6])).toEqual({ x: -1, y: 0 });
+    for (const waist of [corners[1], corners[3], corners[5], corners[7]]) {
+      expect(Math.hypot(waist?.x ?? 0, waist?.y ?? 0)).toBeCloseTo(TRANSIENT_WAIST_SHARE, 12);
+    }
+  });
+
+  it("lies within the diamond on the same axes, its waist well inside the diamond's sides", () => {
+    // The diamond's side passes √½ from its centre, along the waist's diagonal.
+    expect(TRANSIENT_WAIST_SHARE).toBeLessThan(Math.SQRT1_2 - 0.25);
+    expect(symbolOutline("transient")).not.toEqual(symbolOutline("diamond"));
+  });
+
+  it("moves every side out by the outline shift, all eight lying one distance from its centre", () => {
+    const corners = starCorners();
+    const distances = corners.map((from, index) => {
+      const to = corners[(index + 1) % corners.length] ?? from;
+      return Math.abs(from.x * to.y - from.y * to.x) / Math.hypot(to.x - from.x, to.y - from.y);
+    });
+
+    for (const distance of distances) {
+      expect(distance).toBeCloseTo(distances[0] ?? 0, 12);
+    }
+    expect(unitInradius([...corners, corners[0] ?? { x: 0, y: 0 }])).toBeCloseTo(0.3669, 4);
+  });
+
+  it("leaves the open star a hole wider than its line at the largest size and 80% scale", () => {
+    const holePx =
+      2 *
+      (inradius([...starCorners(), starCorners()[0] ?? { x: 0, y: 0 }]) *
+        pathRadiusPx(4, REM_PX * 0.8) -
+        SYMBOL_STROKE_PX / 2);
+
+    expect(holePx).toBeGreaterThanOrEqual(SYMBOL_STROKE_PX);
+  });
+});
+
+/** A point to the nanounit, its zeros unsigned, so that two computations of it compare equal. */
+function nanos(
+  point: { readonly x: number; readonly y: number } | undefined,
+): { x: number; y: number } | undefined {
+  return point === undefined
+    ? undefined
+    : { x: Math.round(point.x * 1e9) / 1e9 + 0, y: Math.round(point.y * 1e9) / 1e9 + 0 };
+}

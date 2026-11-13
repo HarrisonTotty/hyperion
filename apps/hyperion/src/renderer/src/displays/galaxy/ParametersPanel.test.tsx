@@ -6,11 +6,14 @@ import { UniverseProvider } from "../../components/UniverseProvider";
 import { FakeWebSocket } from "../../test/FakeWebSocket";
 import {
   anOpenedUniverse,
+  anUnknownUnit,
   aUniverse,
   aUniverseList,
   someGalaxyParameters,
 } from "../../test/galaxyFixtures";
+import { aGlobalFeatures, someProgenitors } from "../../test/globalListFixtures";
 import { ServerLinkHarness } from "../../test/ServerLinkHarness";
+import { statusLine } from "../../test/statusLine";
 import { ParametersPanel } from "./ParametersPanel";
 import { UniversePanel } from "./UniversePanel";
 
@@ -99,6 +102,8 @@ describe("ParametersPanel", () => {
 
     await server(() => {
       socket.serverAnswers("galaxy_parameters", (body) => someGalaxyParameters(body.universe));
+      // The global list, which brings the progenitors: none here (plan 10, P10.T11).
+      socket.serverAnswers("global_features", () => aGlobalFeatures({ progenitors: [] }));
     });
 
     const stellarMass = within(panel()).getByRole("row", { name: /STELLAR MASS/ });
@@ -109,6 +114,93 @@ describe("ParametersPanel", () => {
     expect(patternSpeed).toHaveTextContent("2.23°/MyrDERIVED");
     expect(within(panel()).getByRole("heading", { level: 3, name: "BULGE AND BAR" })).toBeVisible();
     expect(within(panel()).queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("lists the accreted progenitors after the parameters, each a group, once the list arrives", async () => {
+    const { user, socket } = await renderPanel();
+    await openFromList(user, socket, SURVEY_1);
+    await server(() => {
+      socket.serverAnswers("galaxy_parameters", (body) => someGalaxyParameters(body.universe));
+    });
+
+    expect(within(panel()).getByText(statusLine("PROGENITORS PENDING"))).toBeInTheDocument();
+    await server(() => {
+      socket.serverAnswers("global_features", () =>
+        aGlobalFeatures({ progenitors: someProgenitors() }),
+      );
+    });
+
+    expect(within(panel()).queryByText(statusLine("PROGENITORS PENDING"))).not.toBeInTheDocument();
+    const merger = within(panel()).getByRole("table", { name: "DOMINANT MERGER" });
+    expect(within(merger).getByRole("row", { name: /STELLAR MASS/ })).toHaveTextContent("3.00E8");
+    expect(within(merger).getByRole("row", { name: /ACCRETED AGO/ })).toHaveTextContent(
+      "10.0GyrDRAWN",
+    );
+    expect(within(merger).getByRole("row", { name: /LEFT/ })).toHaveTextContent("NONEDERIVED");
+    const recent = within(panel()).getByRole("table", { name: "RECENT DWARF 0" });
+    expect(within(recent).getByRole("row", { name: /PERICENTRE/ })).toHaveTextContent("30,000.0ly");
+    expect(within(recent).getByRole("row", { name: /LEFT/ })).toHaveTextContent(
+      "STREAM 1 · DWARF CORE 0",
+    );
+  });
+
+  it("says why the progenitors were refused, and asks again on RETRY", async () => {
+    const { user, socket } = await renderPanel();
+    await openFromList(user, socket, SURVEY_1);
+    await server(() => {
+      socket.serverAnswers("galaxy_parameters", (body) => someGalaxyParameters(body.universe));
+    });
+    const [request] = socket.requestsOfKind("global_features");
+    if (request === undefined) {
+      throw new Error("the page asked for no global list");
+    }
+
+    await server(() => {
+      socket.serverRejects(request.id, {
+        code: "internal",
+        message: "the list could not be built",
+        field: null,
+      });
+    });
+
+    expect(
+      within(panel()).getByText(statusLine("PROGENITORS REJECTED: the list could not be built")),
+    ).toBeInTheDocument();
+    await user.click(within(panel()).getByRole("button", { name: "RETRY" }));
+    expect(socket.requestsOfKind("global_features")).toHaveLength(2);
+  });
+
+  it("shows a number in a unit this build does not know as Missing, with no unit", async () => {
+    const { user, socket } = await renderPanel();
+    await openFromList(user, socket, SURVEY_1);
+    await server(() => {
+      socket.serverAnswers("galaxy_parameters", (body) => {
+        const parameters = someGalaxyParameters(body.universe);
+        return {
+          ...parameters,
+          groups: [
+            ...parameters.groups,
+            {
+              key: "gas",
+              parameters: [
+                {
+                  key: "gas.lane_offset",
+                  origin: "drawn",
+                  value: { type: "number", value: 450, unit: anUnknownUnit() },
+                },
+              ],
+            },
+          ],
+        };
+      });
+    });
+
+    const row = within(panel()).getByRole("row", { name: /DUST LANE OFFSET/ });
+    const [value, unit] = within(row).getAllByRole("cell");
+    expect(value).toHaveTextContent("—");
+    expect(value).toHaveClass("readout__missing");
+    expect(unit).toBeEmptyDOMElement();
+    expect(row).toHaveTextContent("DRAWN");
   });
 
   it("shows the seed and generator version first, and not again in their group", async () => {

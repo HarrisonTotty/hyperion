@@ -1,7 +1,7 @@
 /**
  * Opening the `SYSTEM` display from the `GALAXY` chart, through `App` (plan 14, P14.T41.a).
  */
-import { universeTimeFromYears } from "@hyperion/protocol";
+import { type SystemIdHex, universeTimeFromYears } from "@hyperion/protocol";
 import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -15,11 +15,21 @@ import {
   aUniverse,
   aUniverseList,
 } from "../../test/galaxyFixtures";
+import {
+  FIXTURE_SYSTEM,
+  populatedBodies,
+  populatedBodiesWith,
+  withEarthsFigure,
+} from "../../test/planetaryFixture";
 import { stubCanvas } from "../../test/RecordingContext2D";
 import { aSummaryResponse, aSystemSummary } from "../../test/systemFixtures";
+import { statusLine } from "../../test/statusLine";
 
 /** A second universe, which the operator can open instead of the first. */
 const SURVEY_2 = aUniverse({ id: "00000000000000b2", name: "SURVEY 2", seed: "000000000000beef" });
+
+/** The populated answer's ringed planet, `/256`. */
+const RINGED_PLANET = `${FIXTURE_SYSTEM}.0100`;
 
 /** The chart's time, which the answer echoes and `OPEN SYSTEM` carries. */
 const CHART_TIME_YR = 12.5;
@@ -54,8 +64,9 @@ function nextFrame(): void {
  * @param clock - `fake` runs the test on {@link fakeFramesAndTimeouts}'s clock, with `user-event`'s
  *   own delays on it too, so that the test gives each animation frame itself with
  *   {@link nextFrame}.
+ * @param system - The charted system's ID, the fixture's own where absent.
  */
-async function renderCharted(clock: "real" | "fake" = "real") {
+async function renderCharted(clock: "real" | "fake" = "real", system?: SystemIdHex) {
   const user = userEvent.setup(clock === "fake" ? { advanceTimers: fakeFramesAndTimeouts() } : {});
   stubCanvas();
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
@@ -77,14 +88,19 @@ async function renderCharted(clock: "real" | "fake" = "real") {
   await user.clear(screen.getByRole("textbox", { name: "X" }));
   await user.type(screen.getByRole("textbox", { name: "X" }), "26000");
   await user.click(screen.getByRole("button", { name: "C CENTRE CHART" }));
+  const charted = aSystemsInRange({
+    centreLy: [26_000, 0, 0],
+    timeYr: CHART_TIME_YR,
+    systems: [{ relLy: [0, 0, 10], layer: "c" }],
+  });
+  // A system of another ID, for a test whose bodies' answer names its own.
+  const [first, ...rest] = charted.systems;
+  const systems =
+    first === undefined || system === undefined
+      ? charted.systems
+      : [{ ...first, id: system }, ...rest];
   await server(() => {
-    socket.serverAnswers("systems_in_range", () =>
-      aSystemsInRange({
-        centreLy: [26_000, 0, 0],
-        timeYr: CHART_TIME_YR,
-        systems: [{ relLy: [0, 0, 10], layer: "c" }],
-      }),
-    );
+    socket.serverAnswers("systems_in_range", () => ({ ...charted, systems }));
   });
   return { user, socket };
 }
@@ -115,7 +131,9 @@ describe("the SYSTEM display", () => {
       "page",
     );
     expect(
-      screen.getByText("NO SYSTEM SELECTED: select one on GALAXY and press OPEN SYSTEM"),
+      screen.getByText(
+        statusLine("NO SYSTEM SELECTED: select one on GALAXY and press OPEN SYSTEM"),
+      ),
     ).toBeInTheDocument();
   });
 
@@ -201,8 +219,145 @@ describe("the SYSTEM display", () => {
     await user.keyboard("{F3}");
 
     expect(
-      screen.getByText("NO SYSTEM SELECTED: select one on GALAXY and press OPEN SYSTEM"),
+      screen.getByText(
+        statusLine("NO SYSTEM SELECTED: select one on GALAXY and press OPEN SYSTEM"),
+      ),
     ).toBeInTheDocument();
+  });
+
+  it("opens the focused planet in VIEW's body inspection with VIEW BODY (the owner's request)", async () => {
+    const { user, socket } = await renderCharted("real", FIXTURE_SYSTEM);
+    await user.click(screen.getByRole("option", { name: /^H7K 4C0RFZ C-1,/ }));
+    await user.click(screen.getByRole("button", { name: "OPEN SYSTEM" }));
+    await answerSummaries(socket);
+    await server(() => {
+      socket.serverAnswers("system_bodies", () => populatedBodies());
+    });
+    const tree = screen.getByRole("tree", { name: "Bodies" });
+    await user.click(within(tree).getByRole("treeitem", { name: /\/256,/ }));
+    await user.keyboard("c");
+    await user.keyboard("v");
+
+    expect(within(navigation()).getByRole("button", { name: "F4 View" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    const scenes = screen.getByRole("group", { name: "Scene" });
+    expect(within(scenes).getByRole("button", { name: "BODY INSPECTION" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    // The 800 × 500 layout is VIEW's compact one, its STYLE panel folded until opened.
+    await user.click(screen.getByRole("button", { name: "STYLE", expanded: false }));
+    const style = screen.getByRole("region", { name: "Style PRIMARY" });
+    expect(within(style).getByRole("button", { name: "PHOTOREALISTIC" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("status", { name: "Mode" })).toHaveTextContent("TRAINING");
+  });
+
+  describe("OPEN IN PLANET VIEWER (plan R15, T5)", () => {
+    /** Charts the fixture's system, opens it, and focuses the populated answer's planet `/256`. */
+    async function focusPlanet() {
+      vi.stubGlobal("hyperion", { ...window.hyperion, planetViewer: true });
+      const { user, socket } = await renderCharted("real", FIXTURE_SYSTEM);
+      await user.click(screen.getByRole("option", { name: /^H7K 4C0RFZ C-1,/ }));
+      await user.click(screen.getByRole("button", { name: "OPEN SYSTEM" }));
+      await answerSummaries(socket);
+      await server(() => {
+        socket.serverAnswers("system_bodies", () => populatedBodies());
+      });
+      const tree = screen.getByRole("tree", { name: "Bodies" });
+      await user.click(within(tree).getByRole("treeitem", { name: /\/256,/ }));
+      await user.keyboard("c");
+      return { user, socket };
+    }
+
+    it("hands the focused planet over to the PLANET VIEWER, which asks its inputs", async () => {
+      const { user, socket } = await focusPlanet();
+      await user.keyboard("p");
+      expect([
+        within(navigation())
+          .getByRole("button", { name: "F5 Planet Viewer" })
+          .getAttribute("aria-current"),
+        socket.requestsOfKind("viewer_inputs").map(({ body }) => body.body),
+      ]).toEqual(["page", [RINGED_PLANET]]);
+    });
+
+    it("is offered on VIEW's SCENE bar only where the launch offers the viewer", async () => {
+      const { user, socket } = await renderCharted("real", FIXTURE_SYSTEM);
+      await user.click(screen.getByRole("option", { name: /^H7K 4C0RFZ C-1,/ }));
+      await user.click(screen.getByRole("button", { name: "OPEN SYSTEM" }));
+      await answerSummaries(socket);
+      await server(() => {
+        socket.serverAnswers("system_bodies", () => populatedBodies());
+      });
+      const tree = screen.getByRole("tree", { name: "Bodies" });
+      await user.click(within(tree).getByRole("treeitem", { name: /\/256,/ }));
+      await user.keyboard("c");
+      await user.keyboard("v");
+      const scenes = screen.getByRole("group", { name: "Scene" });
+      expect(within(scenes).queryByRole("button", { name: "OPEN IN PLANET VIEWER" })).toBeNull();
+    });
+
+    it("hands a moon over from VIEW's SCENE bar, asking none of the viewer's inputs of it", async () => {
+      const { user, socket } = await focusPlanet();
+      const tree = screen.getByRole("tree", { name: "Bodies" });
+      await user.click(within(tree).getByRole("treeitem", { name: /\/257,/ }));
+      await user.keyboard("v");
+      const scenes = screen.getByRole("group", { name: "Scene" });
+      await user.click(within(scenes).getByRole("button", { name: "OPEN IN PLANET VIEWER" }));
+      expect([
+        within(navigation())
+          .getByRole("button", { name: "F5 Planet Viewer" })
+          .getAttribute("aria-current"),
+        socket.requestsOfKind("viewer_inputs").length,
+      ]).toEqual(["page", 0]);
+    });
+
+    it("hands VIEW's body inspection's planet over from its SCENE bar", async () => {
+      const { user, socket } = await focusPlanet();
+      await user.keyboard("v");
+      const scenes = screen.getByRole("group", { name: "Scene" });
+      await user.click(within(scenes).getByRole("button", { name: "OPEN IN PLANET VIEWER" }));
+      expect(socket.requestsOfKind("viewer_inputs").map(({ body }) => body.body)).toEqual([
+        RINGED_PLANET,
+      ]);
+    });
+  });
+
+  it("surveys the body it opens in VIEW whole through the server's survey pass, marked for training (the owner's request)", async () => {
+    const { user, socket } = await renderCharted("real", FIXTURE_SYSTEM);
+    await user.click(screen.getByRole("option", { name: /^H7K 4C0RFZ C-1,/ }));
+    await user.click(screen.getByRole("button", { name: "OPEN SYSTEM" }));
+    await answerSummaries(socket);
+    await server(() => {
+      socket.serverAnswers("system_bodies", () =>
+        populatedBodiesWith(withEarthsFigure(RINGED_PLANET)),
+      );
+    });
+    const tree = screen.getByRole("tree", { name: "Bodies" });
+    await user.click(within(tree).getByRole("treeitem", { name: /\/256,/ }));
+    await user.keyboard("c");
+    expect(socket.requestsOfKind("survey_pass")).toEqual([]);
+    await user.keyboard("v");
+
+    // At the display's time, every cell of the level of the figure's 6,371.0 km, 6 · 4⁸ of them.
+    const time = universeTimeFromYears(CHART_TIME_YR);
+    expect(socket.requestsOfKind("survey_pass").map(({ body }) => body)).toEqual([
+      {
+        kind: "survey_pass",
+        universe: aUniverse().id,
+        body: RINGED_PLANET,
+        from: time,
+        to: time,
+        source: "orbital",
+        resolution_m: 50,
+        cells: [{ start: 0, end: 393_216 }],
+        scope: "training",
+      },
+    ]);
   });
 
   it("asks nothing again for its answer when the display is left and shown again", async () => {

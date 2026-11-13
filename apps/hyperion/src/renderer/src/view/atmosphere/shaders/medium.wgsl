@@ -1,85 +1,190 @@
-// The atmosphere's medium, read in place (plan R05, Design note 16): the medium at a radius, and the
-// shell's distances and the tables' (r, mu) mappings on the medium's own shell. Prepended, after
-// `common.wgsl`, to every kernel, each of which declares the medium as
-// `@group(0) @binding(0) var<uniform> medium : Medium;`. The composite declares none and does not
-// take this.
+// The atmosphere's medium, read in place (plan R05, Design note 16; plan R08, R08.T6.b): each term's
+// density at a height, the medium at a height with its absorbers' columns (R08.T6.c), and the
+// shell's forms (`common.wgsl`) on the medium's own shell. Prepended, after `common.wgsl`, to every
+// kernel, each of which declares the medium's shell, its terms and their density tables as
+// `var<uniform> medium : Medium;`, `var<storage, read> terms : array<Term, MAX_TERMS>;` and
+// `var densityTables : texture_2d_array<f32>;` in group 0. The composite declares none and does
+// not take this.
 //
-// The helpers read `medium` where it is rather than taking a `Medium` by value. A 416 B `Medium`
-// passed by value and indexed by a loop variable (`terms[i]`) is, most likely, copied into each
-// invocation's own memory (Tint keeps a value indexed that way in a function variable), and the
-// ray march did that three times a sample: 6 to 70 ms a frame on high (plan R05's Risks, "R05.T14,
-// the high run's pass timer and atmosphere, diagnosed"). The arithmetic is common.wgsl's as it was.
+// The helpers read `medium` and `terms` where they are rather than taking them by value. A 416 B
+// `Medium` passed by value and indexed by a loop variable (`terms[i]`) is, most likely, copied into
+// each invocation's own memory (Tint keeps a value indexed that way in a function variable), and
+// the ray march did that three times a sample: 6 to 70 ms a frame on high (plan R05's Risks,
+// "R05.T14, the high run's pass timer and atmosphere, diagnosed"). Every height is formed from a
+// height, never as a radius less the ground's (plan R08, Design note 18, R08.T6.g), and R05's
+// radius forms (`mediumAt(r)`, `distanceToTop`, `distanceToBottom`, `intersectsGround`,
+// `maxDistance` and the tables' (r, mu) mappings) are gone.
 //
 // Ported from Bevy 0.19.1's functions.wgsl and bruneton_functions.wgsl (MIT) and Bruneton's
-// precomputed_atmospheric_scattering (BSD-3-Clause), with sebh's multiple-scattering mapping (MIT).
-// Bevy's and Bruneton's notices and the changes are in common.wgsl, sebh's notice in
-// multiScattering.wgsl.
+// precomputed_atmospheric_scattering (BSD-3-Clause), with Bruneton 2017's texel mapping on every
+// table (plan R08, Design note 19); the multiple-scattering table's 10 m ground offset is a
+// deliberate change from sebh's code (common.wgsl). Bevy's and Bruneton's notices and the changes
+// are in common.wgsl, sebh's notice in multiScattering.wgsl.
 
-fn mediumAt(r : f32) -> MediumSample {
-  let h = r - medium.bottomRadiusM;
+// A tabulated profile's relative density at a height h >= 0 above the ground, from layer `layer`
+// of `densityTables`, whose n levels stand at h_k = top (k / (n - 1))^2: linear in h between the
+// two levels about h, and the last level's beyond the top (`tables.ts`'s `resampledDensity`,
+// whose levels the CPU twin reads by `medium.ts`'s `tabulated` rule).
+fn tabulatedDensityOf(layer : u32, topM : f32, h : f32) -> f32 {
+  let n = textureDimensions(densityTables).x;
+  let last = f32(n - 1u);
+  let k = min(u32(sqrt(clamp(h / topM, 0.0, 1.0)) * last), n - 2u);
+  let below = f32(k) / last;
+  let above = f32(k + 1u) / last;
+  let h0 = topM * below * below;
+  let h1 = topM * above * above;
+  let f = clamp((h - h0) / (h1 - h0), 0.0, 1.0);
+  let d0 = textureLoad(densityTables, vec2u(k, 0u), layer, 0).r;
+  let d1 = textureLoad(densityTables, vec2u(k + 1u, 0u), layer, 0).r;
+  return mix(d0, d1, f);
+}
+
+// Term i's relative density at a height above the ground, its profile `profile` (Term.profile in
+// common.wgsl); a negative height is the ground's.
+fn densityOf(i : u32, profile : vec4f, heightM : f32) -> f32 {
+  let h = max(heightM, 0.0);
+  if (profile.x < 0.5) {
+    return exp(-h / profile.y);
+  }
+  if (profile.x < 1.5) {
+    let rising = (h - profile.y) / (profile.z - profile.y);
+    let falling = (profile.w - h) / (profile.w - profile.z);
+    return max(min(rising, falling), 0.0);
+  }
+  return tabulatedDensityOf(i, profile.y, h);
+}
+
+// The pressure at a height above the ground over ABSORBER_PRESSURE_REFERENCE_PA (R08.T4.d): the
+// layer of `densityTables` past the terms', read as a tabulated profile (`tables.ts`'s
+// packDensityTables), where `medium.absorbers.z` is 1; 0 for a medium without it, whose absorbers'
+// curves have no pressure rows.
+fn pressureBarAt(h : f32) -> f32 {
+  if (medium.absorbers.z < 0.5) {
+    return 0.0;
+  }
+  return tabulatedDensityOf(u32(medium.termCount), medium.topHeightM, max(h, 0.0));
+}
+
+// The medium at a height above the ground: its scattering, extinction and absorption, m^-1, the
+// last the terms' own absorption coefficients summed (R08.T6.d), its absorbers' columns per metre
+// (R08.T6.c), which an absorber adds in place of an extinction, and the same times the pressure
+// ratio there (R08.T4.d), each times the build's factor (R08.T6.f). The per-planet kernels read
+// it; the per-frame kernels read `source.wgsl`'s `sampleMediumAt`, which takes no factor.
+fn mediumAtHeight(h : f32) -> MediumSample {
   var scattering = vec3f(0.0);
   var extinction = vec3f(0.0);
+  var absorption = vec3f(0.0);
+  var columns = AbsorberColumns(0.0, vec4f(0.0));
+  var lobe = vec3f(0.0);
   let count = min(u32(medium.termCount), MAX_TERMS);
   for (var i = 0u; i < count; i++) {
-    let term = medium.terms[i];
-    let d = densityOf(term.profile, h);
+    let term = terms[i];
+    let d = densityOf(i, term.profile, h);
     scattering += term.scattering.rgb * d;
     extinction += (term.scattering.rgb + term.absorption.rgb) * d;
+    absorption += term.absorption.rgb * d;
+    columns = addColumns(columns, termColumns(term, d), 1.0);
+    if (term.phase.w > 2.5) {
+      // A tabulated phase's forward share, 0 where its forward part is no lobe (R08.T7).
+      lobe += term.phase.xyz * term.scattering.rgb * d;
+    }
   }
-  return MediumSample(scattering, extinction);
+  let pressureColumns = pressureColumnsOf(columns, lineSlots(), pressureBarAt(h));
+  // A latitude band's frame takes every coefficient and absorber column per metre over s_b
+  // (R08.T6.f; `tablesCpu.ts`'s scaledTerms); the pressure ratio, a ratio, and the lobes' shares stay.
+  let k = buildFactor();
+  let none = AbsorberColumns(0.0, vec4f(0.0));
+  return MediumSample(
+    scattering * k,
+    extinction * k,
+    absorption * k,
+    addColumns(none, columns, k),
+    addColumns(none, pressureColumns, k),
+    lobe * k,
+  );
 }
 
-fn distanceToTop(r : f32, mu : f32) -> f32 {
-  let discriminant = max(r * r * (mu * mu - 1.0) + medium.topRadiusM * medium.topRadiusM, 0.0);
-  return max(-r * mu + sqrt(discriminant), 0.0);
+// The factor a per-planet build's coefficients take (`Medium.build.x`): 1 ÷ s_b in a latitude
+// band's frame (plan R08, R08.T6.f), 1 elsewhere.
+fn buildFactor() -> f32 {
+  return medium.build.x;
 }
 
-fn distanceToBottom(r : f32, mu : f32) -> f32 {
-  let discriminant = max(r * r * (mu * mu - 1.0) + medium.bottomRadiusM * medium.bottomRadiusM, 0.0);
-  return max(-r * mu - sqrt(discriminant), 0.0);
+// The transmittance tables' layer a per-planet build writes or reads (`Medium.build.y`).
+fn buildTransmittanceLayer() -> u32 {
+  return u32(medium.build.y);
 }
 
-fn intersectsGround(r : f32, mu : f32) -> bool {
-  return shellIntersectsGround(medium.bottomRadiusM, r, mu);
+// The multiple-scattering table's layer a build writes (`Medium.build.z`): band × light slots +
+// the light slot `curveSlot` (R08.T6.f).
+fn buildMultiScatteringLayer() -> u32 {
+  return u32(medium.build.z);
 }
 
-// The ray's length inside the atmosphere, to the ground or to the top.
-fn maxDistance(r : f32, mu : f32) -> f32 {
-  if (intersectsGround(r, mu)) {
-    return distanceToBottom(r, mu);
-  }
-  return distanceToTop(r, mu);
+// The medium's line slots, the bitmask of its absorber slots whose curves have pressure rows
+// (`common.wgsl`'s `pressureChannelOf`; R08.T4.d).
+fn lineSlots() -> u32 {
+  return u32(medium.absorbers.w);
 }
 
-// Bruneton and Neyret 2008, section 4: (u, v) in [0, 1]^2 to (r, mu); u spans the distance to the
-// top between its least (straight up) and its greatest (to the horizon), v the distance to the
-// horizon.
-fn transmittanceUvToRMu(uv : vec2f) -> vec2f {
-  let bigH = sqrt(medium.topRadiusM * medium.topRadiusM - medium.bottomRadiusM * medium.bottomRadiusM);
-  let rho = bigH * uv.y;
-  let r = sqrt(rho * rho + medium.bottomRadiusM * medium.bottomRadiusM);
-  let dMin = medium.topRadiusM - r;
+// How many of the medium's terms are absorbers, each a slot of the absorber columns (R08.T6.c).
+fn absorberCount() -> u32 {
+  return min(u32(medium.absorbers.x), ABSORBER_SLOTS);
+}
+
+// The light slot whose curves of growth a per-planet table is built with (R08.T6.c), and the
+// multiple-scattering layer it writes: one dispatch a light slot since R08.T7.
+fn curveSlot() -> u32 {
+  return u32(medium.absorbers.y);
+}
+
+// r^2 - bottom^2 for a point `heightM` above the medium's ground (`shellAboveGround`).
+fn aboveGroundOf(heightM : f32) -> f32 {
+  return shellAboveGround(medium.bottomRadiusM, heightM);
+}
+
+// A ray's length inside the atmosphere from `heightM` above the ground at zenith cosine mu, to the
+// ground or to the top (`shellMaxDistance`).
+fn maxDistanceFromHeight(heightM : f32, mu : f32) -> f32 {
+  return shellMaxDistance(medium.bottomRadiusM, medium.topHeightM, heightM, mu);
+}
+
+// The height at distance t along a ray from `heightM` at zenith cosine mu, its radius there `rT`
+// (`shellHeightAlong`).
+fn heightAlong(heightM : f32, mu : f32, t : f32, rT : f32) -> f32 {
+  return shellHeightAlong(medium.bottomRadiusM, heightM, mu, t, rT);
+}
+
+// A transmittance texel's point and ray: its height, its zenith cosine, and rho = sqrt(r^2 -
+// bottom^2), the distance to the horizon, from which its own heights are formed.
+struct TransmittanceTexel {
+  heightM : f32,
+  mu : f32,
+  rho : f32,
+}
+
+// Bruneton 2017's GetRMuFromTransmittanceTextureUv (precomputed_atmospheric_scattering,
+// atmosphere/functions.glsl) after its texel mapping, from the unit range (x_mu, x_r) to the
+// texel's point and ray, in heights (plan R08, Design note 18): rho = H_rho x_r, h = rho^2 /
+// (sqrt(rho^2 + bottom^2) + bottom), and mu = (top^2 - r^2 - d^2) / (2 r d), with top^2 - r^2
+// formed from h as `transmittanceUnitAt` forms it (`shellBelowTop`), so that the read at the
+// texel's own (h, mu) returns the texel. From the nominal H_rho^2 (1 - x_r)(1 + x_r) it would not
+// at the top row, where h stands f32's 8 mm below the top while that form gives 0, and the first
+// texel's ray turned from the zenith to the horizontal, 0.036 of a texel off on a Saturn-radius
+// sphere (R08.T6.g).
+fn transmittanceTexelOf(unit : vec2f) -> TransmittanceTexel {
+  let bottom = medium.bottomRadiusM;
+  let topM = medium.topHeightM;
+  let bigH = sqrt(topM * (2.0 * bottom + topM));
+  let rho = bigH * unit.y;
+  let heightM = rho * rho / (sqrt(rho * rho + bottom * bottom) + bottom);
+  let dMin = topM - heightM;
   let dMax = rho + bigH;
-  let d = dMin + uv.x * (dMax - dMin);
+  let d = dMin + unit.x * (dMax - dMin);
+  let belowTop = shellBelowTop(bottom, topM, heightM);
   var mu = 1.0;
   if (d != 0.0) {
-    mu = (bigH * bigH - rho * rho - d * d) / (2.0 * r * d);
+    mu = (belowTop - d * d) / (2.0 * (bottom + heightM) * d);
   }
-  return vec2f(r, clamp(mu, -1.0, 1.0));
-}
-
-fn transmittanceRMuToUv(r : f32, mu : f32) -> vec2f {
-  return shellRMuToUv(medium.bottomRadiusM, medium.topRadiusM, r, mu);
-}
-
-// The multiple-scattering table's (u, v) to (r, mu_sun): u the sun's zenith cosine, v the height.
-fn multiScatteringUvToRMu(uv : vec2f, size : vec2f) -> vec2f {
-  let unit = clamp(subUvsToUnit(uv, size), vec2f(0.0), vec2f(1.0));
-  let r = medium.bottomRadiusM + GROUND_OFFSET_M
-    + unit.y * (medium.topRadiusM - medium.bottomRadiusM - GROUND_OFFSET_M);
-  return vec2f(r, unit.x * 2.0 - 1.0);
-}
-
-fn multiScatteringRMuToUv(r : f32, muSun : f32, size : vec2f) -> vec2f {
-  return shellMultiScatteringRMuToUv(medium.bottomRadiusM, medium.topRadiusM, r, muSun, size);
+  return TransmittanceTexel(heightM, clamp(mu, -1.0, 1.0), rho);
 }

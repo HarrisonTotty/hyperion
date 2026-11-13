@@ -7,8 +7,9 @@
  * each view drops those fainter than its own limit: the eye by the limit map's limit in the star's
  * direction, moved by the star's eye offset, its own eye limit less its texel's (its colour offset,
  * by which a hot star is seen fainter, Design note 3, and its glare's self-exclusion, R06.T9.h, from
- * the server's limit map since R06.T11.c); a camera by its one limit against the star's V plus its
- * camera band term (the sensor's response to the star's spectrum, Design note 6). A culled star's
+ * the server's limit map since R06.T11.c); a camera by its limit at the star's band texel, against
+ * the star's V plus its camera band term (the sensor's response to the star's spectrum, Design note
+ * 6; Design note 18's limit by texel, R06.T13.i). A culled star's
  * light is not lost: it is added to the band layer's texel in its direction, so the view's total
  * light is kept and the band is brightened by exactly what was dropped.
  */
@@ -18,7 +19,7 @@ import type { SkyStars } from "@hyperion/protocol";
 import { cubeTexelOf } from "./cube";
 import { starIlluminanceRgbLx } from "./photometry";
 
-/** A view's star limit: the eye's per direction, or a camera's. */
+/** A view's star limit: the eye's or a camera's, each per direction. */
 export type ViewStarLimit =
   | {
       readonly kind: "eye";
@@ -30,8 +31,12 @@ export type ViewStarLimit =
     }
   | {
       readonly kind: "camera";
-      /** The camera's limit, V (`cameraLimitV`). */
-      readonly limitV: number;
+      /**
+       * The camera's limit, V, in a direction on the galactic axes: its band texel's
+       * (`cameraTexelLimitsV` in `viewSky.ts`), which a star's V plus its camera band term must be
+       * brighter than.
+       */
+      readonly limitAt: (x: number, y: number, z: number) => number;
     };
 
 /** What a view keeps of the sky, and the light of what it dropped. */
@@ -51,20 +56,19 @@ export interface CulledSky {
 /** Whether a view sees one star of the sky, by its index. */
 export function starIsSeen(stars: SkyStars, index: number, limit: ViewStarLimit): boolean {
   const v = stars.vMag[index] ?? Number.POSITIVE_INFINITY;
+  const at = index * 3;
+  const limitV = limit.limitAt(
+    stars.directions[at] ?? 0,
+    stars.directions[at + 1] ?? 0,
+    stars.directions[at + 2] ?? 0,
+  );
   let seen: boolean;
   switch (limit.kind) {
-    case "eye": {
-      const at = index * 3;
-      const limitV = limit.limitAt(
-        stars.directions[at] ?? 0,
-        stars.directions[at + 1] ?? 0,
-        stars.directions[at + 2] ?? 0,
-      );
+    case "eye":
       seen = Number.isNaN(limitV) || v < limitV + (stars.eyeOffsetMag[index] ?? 0);
       break;
-    }
     case "camera":
-      seen = v + (stars.cameraBandMag[index] ?? 0) < limit.limitV;
+      seen = v + (stars.cameraBandMag[index] ?? 0) < limitV;
       break;
   }
   return seen;

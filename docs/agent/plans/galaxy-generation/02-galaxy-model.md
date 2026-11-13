@@ -353,7 +353,10 @@ other way round, so M1 ships a first cut:
   azimuthal average of the long bar's surface density at its nominal shape.
 - The potential is axisymmetric, as the (R, z) tables imply. The boxy bulge enters as the spheroidal
   exponential with the same mass and the same second moments ⟨R²⟩ and ⟨z²⟩, found by one quadrature
-  per galaxy. Plan 15 supplies a true two-dimensional expansion of exp(−m) per boxiness exponent.
+  per galaxy. Plan 15 supplies a true two-dimensional expansion of exp(−m) per boxiness exponent,
+  for the bulge made axisymmetric in the plane, its in-plane scales a and b replaced by
+  √((a² + b²) ÷ 2), which keeps its mass and both second moments exactly (P15.T3.c, version 25;
+  decision-p15-revalidation Q8, 2026-10-23).
 - The old thin disc and the young disc enter the potential as one double exponential with the drawn
   mean height, with the thin discs' central hole since P02.T12.b (`MGE_HOLED_EXP`, whose signed
   weights make the holed disc the exponential one less a disc of negative mass). The discs' vertical profiles are then solved in that potential in one pass, with no
@@ -760,6 +763,34 @@ Files: `galaxy/potential/{mod,mge,nfw,spherical,model,tables,sigma}.rs`, `src/ta
 `crates/hyperion-fit/{Cargo.toml,src/main.rs,src/lib.rs,src/tasks/mge.rs,tests/mge.rs}`,
 `tests/galaxy_potential.rs`, `tests/golden/galaxy_potential.golden`.
 
+**P02.T6.f The far field's force is its potential's gradient** (decision-p15-t6g-orbits §2,
+2026-10-12; no output moves). Beyond the grid's box (R or |z| above L = 2¹⁸ ly) `potential`
+continues the Gaussian components as Φ_G = A(R_c, z_c) ÷ h, with R_c = min(R, L), z_c = min(|z|, L),
+h = √(R² + z²), h_c = √(R_c² + z_c²) and A = g h_c, g = `Grid::at(R_c, z_c)`. `forces` returned
+−Φ_G R² ÷ h² and −Φ_G |z| ÷ h², the gradient only where both coordinates exceed L; where exactly one
+does it dropped A's change along the other. That error reaches 3.6 × 10⁻⁴ of |∇Φ| and does a work
+on escaping orbits that no step removes (P15.T6.g's reduced run). Make `forces` the exact gradient:
+R ∂Φ_G ÷ ∂R = R [𝟙(R < L) A_R ÷ h − A R ÷ h³] and ∂Φ_G ÷ ∂|z| = 𝟙(|z| < L) A_z ÷ h − A |z| ÷ h³,
+with A_R = h_c (∂g ÷ ∂ln R) ÷ R_c + g R_c ÷ h_c and A_z = h_c (∂g ÷ ∂ln z) ÷ z_c + g z_c ÷ h_c from
+`Grid::log_derivatives(R_c, z_c)`, ∂g ÷ ∂ln z taken as zero below 2⁻⁴ ly, where `Grid::at` is
+constant in z. Where both coordinates exceed L the code keeps today's arithmetic, bit for bit;
+`potential` is unchanged. The force still jumps at the box's faces, a kink of a continuous
+potential, which conserves energy. Correct `global_list/orbit.rs`'s "The far field" paragraph,
+whose "their force there is not the gradient of their potential" no longer holds; the global list
+keeps its own point-mass-plus-quadrupole far field, since replacing it would move output.
+**Moves no generated output**: no sim caller reads `forces` where exactly one coordinate exceeds L
+for anything a system receives (the Jeans tables evaluate on and inside the box; the disc tables'
+nodes beyond L, for discs over 17,830 ly, lie beyond every system; the global list's leapfrog uses
+its own far field from 2¹⁷·⁵ ly). It lands without a bump, ahead of P15.T6.g's re-emission.
+**Acceptance:** every sim golden bit-identical (a moved golden makes this a GENERATOR_VERSION
+change: stop and report to main); a new test in `tests/galaxy_potential.rs` holds `forces` to the
+central differences of `potential` within 10⁻⁷ of |∇Φ| at 30 points with exactly one coordinate
+beyond L (R to 2 × 10⁶ ly, |z| to 10⁶ ly), where today's code misses by up to 3.6 × 10⁻⁴.
+Files: `galaxy/potential/tables.rs`, `tests/galaxy_potential.rs`, `galaxy/global_list/orbit.rs`
+(documentation). A finding for the Risks: the face's kink and `InPlaneTable::at`'s separately
+scaled v_c² and Φ beyond L remain; smoothing either changes `potential` where the Jeans tables
+integrate and would move output.
+
 Acceptance for T6, and for each subtask with its own tests:
 `cargo test -p hyperion-sim galaxy_potential` passes and `just ci` is green; `just bench` reports
 `PotentialTables::in_plane` and `full` (targets 50 ms and 2 s; a miss is a finding).
@@ -1165,8 +1196,9 @@ component order and the map's quadrature scheme belong to the version as well.
   off. More or re-placed widths and relative weighting do not help, so the table stands. The 3% is
   read against the central value (2.9%), the mass is met (0.2%), and the mass inside a radius, which
   the rotation curve reads, is off by up to 6.6% just beyond the half-length (4.4% at best with the
-  other two held), bounded at 7% by the test. P15.T3.a's 2% for the bar meets the same limit unless
-  it allows negative weights or off-centre terms.
+  other two held), bounded at 7% by the test. P15.T3.a asks of the bar 3% of its central value and
+  its cumulative mass within 5%, which these limits allow; a local 2% would meet the same limit
+  unless it allowed negative weights or off-centre terms (P15.T3.a's acceptance).
 - **R15. Other as-built points (P02.T6).** `PotentialTables::full` takes 2.7 s against 2 s (R9):
   4,096 points × 767 Gaussians × 32 nodes. 44% of the evaluations regenerate their nodes, 32%
   because the point lies beyond the Gaussian's cut; sharing the other 12% along a column would save
@@ -2388,7 +2420,8 @@ GL4_WEIGHTS}`, whose inner pair is `±√((3 − 2√(6 ÷ 5)) ÷ 7)` with weigh
 - **P02.T8.a's tightness check at its rounding floor (P11.T4.h, 2026-10-04).**
   `envelopes_never_exceed_their_bounds` allows the exponent's rounding (4 |ln corner| ε) and, for a
   disc, 2⌈n0⌉ subnormal units in its tightness half; safety stays exact and `bounds.rs` is
-  untouched. See plan 09's and plan 11's Risks ("P11.T4.h as built").
+  untouched. See plan 09's and plan 11's Risks ("P11.T4.h as built"). Since 2026-10-12 the disc's
+  2⌈n0⌉ applies in both halves ("P02.T8.a's subnormal check, either way", below).
 - **The local V light is low (a pointer from rendering plan R06, 2026-10-06,
   `decision-r06-t9b-band.md`; for this plan's owner, not a ruling on this plan).** Nothing in the
   model is fitted to light, so the local V light is a prediction. This plan fits number and mass,
@@ -2416,3 +2449,123 @@ GL4_WEIGHTS}`, whose inner pair is `±√((3 − 2√(6 ÷ 5)) ÷ 7)` with weigh
 
   A fix is a `GENERATOR_VERSION` change here. R06's near-Sun tests carry the offset meanwhile, and
   if the light is raised they recentre towards their references, with nothing to re-rule.
+
+- **A drawn galaxy's sky at the fixture's solar radius (a pointer from rendering plan R06,
+  R06.T17, 2026-10-12; ruled 2026-10-13, `decision-r06-t17-findings.md` §3).**
+  - **Measured.** At (0, 26,000, 68) ly the server's galaxy for seed 0x4d2 lists 805 stars
+    brighter than V 3.0, 4.7 times Hipparcos's 172, and 66,614 to V 7.766, 1.9 times Tycho-2's
+    3.55 × 10⁴. The fixture at the same point lists 138 brighter than V 3.0 (0.80) and 9,430 to
+    V 6.5 (1.06), with the star-count slope within 7% of the real sky's. Within 125 ly the
+    server's galaxy holds 2.5 times the fixture's stars brighter than V 3.0, and over the whole
+    sky some 5.8 times, so the excess is the local density first, then young stars.
+  - **Both are draws here, not errors on present evidence.** The point is the fixture's solar
+    radius, not the drawn galaxy's own (`SOLAR_RADIUS_LENGTHS` thin scale lengths). Over the
+    ranges the plane's density at 26,000 ly spans 0.0008–0.008 systems per ly³ (the brainstorm,
+    "Fields"). The young disc's sharp arms put the young density there anywhere from 0.2 to about
+    7.4 times its azimuthal mean at the fixture's arm parameters, and wider at a drawn galaxy's.
+    Milky Way catalogues are compared on `milky_way_like` alone; a drawn galaxy is judged by its
+    own tables.
+  - **For this plan's owner, a measurement with no bump** (no census, minutes of CPU). At that
+    point on both galaxies:
+    1. `CapCount`'s expected count brighter than V 3.0, 6.5 and 7.766 per layer, against the
+       served census's listed counts (within R06.T5.f's realised-over-tabulated C 0.966 and
+       E 1.164);
+    2. each component's density and the young disc's arm factor;
+    3. the median A_V per 1,000 ly in the plane;
+    4. `CapCount` brighter than V 3.0 at the server galaxy's own solar radius, at four azimuths
+       on and between its arms.
+  - **The verdict.** If step 1 holds and steps 2 and 3 account for the ratio within a factor of
+    1.5, the item closes with no change. If step 1 fails at the bright end, it is plan 06's and
+    the tables lane's. If step 1 holds and the young density or dust at the point lies outside
+    what the drawn ranges give, it is this plan's (plan 07's for the dust).
+
+- **P02.T8.a's subnormal check, either way (lane slow-fix-tests, 2026-10-12, at version 21; the
+  slow-pass triage's T1).** Test-only: no generated output moves, and `bounds.rs` is untouched.
+  - `envelopes_never_exceed_their_bounds_over_many_cells_seed_0` and `_seed_1`
+    (`tests/galaxy_bounds.rs`) failed in slow passes 1A and 2A, as they had since ad16be12 (on
+    `origin/galaxy-generation`: pot02, ruling 144's holed inner part of the nuclear disc). That part
+    goes subnormal far out in the plane. There `envelope_sup`'s reconstruction, n0 times three
+    factors, stood above the sim's bound, n0 times one exponential, by more than the 64 units that
+    the half holding the reconstruction under the bound allowed: by 66–206 units in 12 cells, 10 at
+    seed 0 (n0 = 222.5 per ly³) and 2 at seed 1 (136.5).
+  - Each path rounds the subnormal factor once, by up to a unit in either direction, before × n0,
+    so the two may stand 2⌈n0⌉ units apart either way. P11.T4.h (above) allowed that in the
+    tightness half only. `assert_envelopes_bounded`'s subnormal branch now allows 64 + 2⌈n0⌉ units
+    on both sides (510 at seed 0, 338 at seed 1). The bulge's, the bar's and the halo's 64 units
+    are unchanged, as is the normal range.
+  - The bound is safe, and the test still proves it exactly. Every probe's envelope is at or below
+    the bound, as before. The nearest corner is one of the lattice's probes; the branch now names it
+    in an assertion of its own, for the message, with no new coverage. In the 12 cells the envelope
+    at the nearest corner stands 0 to 3.4 × 10⁷ units below the bound. In one (seed 0,
+    3.9 × 10⁻³²²) the bound's exponential underflows to 0, and so does the envelope at every probe.
+  - Both seeds pass by name (`--cargo-profile slow-test --run-ignored only`).
+
+- **P02.T6.f as built (lane p02-farfield, 2026-10-12, at version 21; decision-p15-t6g-orbits §2).**
+  No generated output moves: every sim golden is bit-identical, and nothing is bumped.
+  - `forces` keeps its old point-mass arithmetic wherever both coordinates are **at or beyond** L,
+    not only beyond it. On a face (R or |z| exactly 2¹⁸ ly) with the other coordinate beyond, the
+    indicator term vanishes, so that arithmetic is already the gradient, and those bits stay
+    unchanged too. `potential` is untouched. In the new branch `A` is named `amplitude`, since a
+    fifth single-letter binding trips Clippy's `many_single_char_names`.
+  - The test is `the_far_field_is_conservative_and_pinned` (`tests/galaxy_potential.rs`). It is in
+    the fast tier and builds the fixture's full tables once, in about 4 s. It runs three checks:
+    - **The gradient.** At the plan's 30 points, central differences of `potential` match `force`
+      to at most 8.4 × 10⁻⁹ of |∇Φ|; the bound is 10⁻⁷. The step is 10⁻⁴ of the coordinate, or a
+      third of it below 1 ly. A step of 10⁻⁵ of the spherical radius had missed by 1.0 × 10⁻⁷ at
+      (2 × 10⁶, 400) ly, from the differences' own truncation. The old force missed by up to
+      **5.0 × 10⁻⁴** at these points, at (2 × 10⁶, 1.2 × 10⁵) ly. That is more than the plan's
+      3.6 × 10⁻⁴, which was measured at the decision's points.
+    - **The sign of K_z (the science review's finding).** `forces` returned K_z as
+      `vertical.copysign(z)`, which assumes ∂Φ ÷ ∂|z| ≥ 0. The exact continuation breaks that: for
+      R > L and |z| below 2⁻⁴ ly, `g` is constant in z while `h_c ÷ h` rises, so the Gaussian part
+      pushes away from the plane, at (R² − L²) ÷ L² times a point mass's pull. Past
+      R ≈ 1.45 × 10⁶ ly that outweighs the spherical components. Beyond the box a negative
+      ∂Φ ÷ ∂|z| now keeps its sign. Inside the box `copysign` is unchanged, so no output can move
+      there, whether or not the interpolant's ∂Φ ÷ ∂|z| is ever negative. The flip had been
+      2.9 × 10⁻⁸ of |∇Φ| at (2 × 10⁶, 0.04) ly, under the bound, and most of what was first
+      measured there (3.5 × 10⁻⁸). Only the golden sees it, since Φ changes by under an ulp across
+      that difference.
+    - **The convergence (the lane brief's addition).** A fixed-step KDK leapfrog in the meridional
+      plane follows two orbits, each with exactly one coordinate beyond L throughout, over
+      1,000 ly per km/s at 40 to 640 steps. The largest energy error falls from 0.72 to
+      0.0028 (km/s)², 3.92 to 4.13 fold per halving, asserted within [3, 5]. With the old force the
+      first orbit's error levels off from 4.13 to 3.42 (km/s)²: falls of 1.15, 1.04, 1.01 and 1.00.
+    - **The golden (the determinism review's request).** A new golden,
+      `galaxy_potential_far_field`, pins `force` and `potential` at eight points, one in each
+      branch: R or |z| beyond, each above and below 2⁻⁴ ly in the other coordinate; both beyond; and
+      each face. It is an extension, not a move: no generated output reads these values. It holds
+      the far field's bits on wasip1 too, and against later rewrites, since plan 15's
+      displaced-form orbits integrate in this field.
+  - `global_list/orbit.rs`'s "The far field" is corrected as the task says. The global list keeps its
+    own far field. `PotentialTables::force`'s documentation (`force.rs`) now names the face's jump.
+  - **The fit's smoke orbits do move.** They integrate in `PotentialTables::force` with no far
+    field of their own, and their escapers leave the box through one face. So the slow test
+    `the_smoke_fit_runs_end_to_end_on_fresh_smoke_histograms`, which already fails at version 21
+    (slow-pass triage F1), gets a different fresh digest. P15.T6.g's re-emission absorbs it, as
+    the decision rules.
+  - The determinism review's check of the "no output moves" premise found it stronger than the
+    ruling states. No disc Jeans node reaches L at all: the thin disc's length is clamped to
+    7,000–11,500 ly, so radii reach at most 168,700 ly and tail heights 242,880 ly. The ruling's
+    17,830 ly threshold is 17,867 ly. Because of `dispersion_slope`, the radius read is from about
+    220,400 ly, not 240,000. The farthest system lies at R = 92,682 ly.
+  - The spheroid tables' last node, `exp(LN_FIRST + 63 STEP)`, is 262,143.999 999 999 94 ly, about
+    2 ulp below the edge. A node exactly at 2¹⁸ ly would still take the unchanged branch, but one
+    rounded above it would take the new one and move the bulge, bar and nuclear tables. Both
+    premises are guarded (2026-11-03, `galaxy/potential/reach_tests.rs`): the spheroid tables' last
+    node is at most 2¹⁸ ly, and the disc tables' largest radius (168,729 ly) and tail height
+    (242,880 ly) are at most 2¹⁸ ly over the ranges' edges and 16 seeded galaxies.
+  - **Remaining for the Risks, as ruled.** The force still jumps at the box's faces, where the
+    continuation's slope is not the grid's. `InPlaneTable::at` still scales `v_c²` and Φ
+    separately beyond L. Smoothing either would change `potential` where the Jeans tables integrate,
+    and so would move output. The science review adds three oddities of the unchanged box-shaped
+    continuation, all physically negligible:
+    - The push away from the plane, above, gives the field a kink at |z| = 2⁻⁴ ly beyond R = L,
+      which lies on no face.
+    - At R = L with |z| below 2⁻⁴ ly, Φ jumps by about 10⁻¹⁰ (km/s)², where the box's blend into
+      the plane meets the constant `g`.
+    - Along the faces A's angular variation is frozen, so the non-monopole part falls as 1 ÷ h, not
+      1 ÷ h³. Near the axis the Gaussian part's radial force points outward beyond h ≈ 2.4 × 10⁶ ly,
+      though with the halo the total stays inward to about 2 × 10⁷ ly.
+
+    The solid-body patch below 2⁻⁴ ly in R is not the gradient of `potential`, which is flat in R
+    there. It predates this task, and its work is at most about 10⁻⁹ (km/s)².

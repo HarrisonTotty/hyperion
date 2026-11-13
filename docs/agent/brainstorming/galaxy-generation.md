@@ -654,20 +654,21 @@ A member ID must carry all of that. As a sketch, under the reserved layer value:
 
 That is all 64 bits. The band field's spare value marks members drawn at feature level and not in a
 cell: a Poisson count on the feature's stream, with positions by inverse transform of the profile,
-which is exact. Under it the level and cell are zero and the index counts the members. Index 0 is
-member zero, such as a central black hole, and 1 upward are the feature's members of the
-[catalogue classes](#events-in-time), such as its recently dead. A chart then finds every shell in
-an association from the feature catalogue alone, where walking band E of each young feature would
-cost tens of thousands of cell draws apiece.
+which is exact. Under it the level and cell are zero and the index counts the members. At the
+galactic centre, whose list is the longest, the index takes 16 bits and the bits above it are zero
+(the prefix table below; ruled 2026-10-26). Index 0 is member zero, such as a central black hole,
+and 1 upward are the feature's members of the [catalogue classes](#events-in-time), such as its
+recently dead. A chart then finds every shell in an association from the feature catalogue alone,
+where walking band E of each young feature would cost tens of thousands of cell draws apiece.
 
 The kind field is a prefix:
 
-| Prefix | Meaning                                | Rest of the ID                                                                                                                                                                                                                                                                                                             |
-| ------ | -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `0`    | Member of a catalogue feature          | As above                                                                                                                                                                                                                                                                                                                   |
-| `10`   | Member of a feature on the global list | Sub-kind (2): centre, stream or dwarf core. Then for the centre band (3), level (4), cell (15, at 5 bits per axis) and index (13); for a stream its number (12), band (3), cell along (14) and across (6 + 6), and index (13); for a dwarf core its number (2), then band, level, cell and index as in a catalogue feature |
-| `110`  | Pinned content                         |                                                                                                                                                                                                                                                                                                                            |
-| `111`  | Catalogue system                       | Class (6), cell (24, at 8 bits per axis of 512 ly; coarser classes zero the low bits), index (24), member (4)                                                                                                                                                                                                              |
+| Prefix | Meaning                                | Rest of the ID                                                                                                                                                                                                                                                                                                                                                                                               |
+| ------ | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `0`    | Member of a catalogue feature          | As above                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `10`   | Member of a feature on the global list | Sub-kind (2): centre, stream or dwarf core. Then for the centre band (3), level (4), cell (15, at 5 bits per axis) and index (13), or under the spare band value an index of 16 bits with the 16 bits above it zero; for a stream its number (12), band (3), cell along (14) and across (6 + 6), and index (13); for a dwarf core its number (2), then band, level, cell and index as in a catalogue feature |
+| `110`  | Pinned content                         |                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `111`  | Catalogue system                       | Class (6), cell (24, at 8 bits per axis of 512 ly; coarser classes zero the low bits), index (24), member (4)                                                                                                                                                                                                                                                                                                |
 
 The galactic centre is the first entry of the global list. Its central black hole is member zero.
 
@@ -1226,9 +1227,9 @@ Ia.
 - **A monotone phase**, for cycles of accumulation and release. An event falls where t ÷ P plus a
   bounded-slope noise crosses an integer, which keeps events in order while letting the phase
   wander, with an optional skip mark for strongly irregular sources. A plain jittered lattice is
-  wrong, because its phase never diffuses. Classical and recurrent novae, with P from the ignition
-  mass and the accretion rate, dwarf novae, X-ray transients and bursts, Vela-like glitches, and
-  thermal pulses on the asymptotic giant branch.
+  wrong for internally timed cycles, because its phase never diffuses. Classical and recurrent
+  novae, with P from the ignition mass and the accretion rate, dwarf novae, X-ray transients and
+  bursts, Vela-like glitches, and thermal pulses on the asymptotic giant branch.
 
 No event may leave a mark that needs history replayed: a cumulative effect must be a closed form in
 the event number, as a pulsar's spin-down already includes its mean glitch activity, or vanish
@@ -1238,8 +1239,9 @@ within a bin.
 per 10⁴ years for the Milky Way's black hole (Stone and Metzger 2016), separate from the Kepler
 members, whose loss cone is empty by construction. The victim is a list member on a near-parabolic
 orbit. The black hole's luminosity is quiescence plus flares plus the t^−5/3 tails of recent
-disruptions, still 10³⁹ erg/s a thousand years on, which matches the light echoes seen around Sgr
-A\* (Ponti et al. 2010).
+disruptions, radiatively inefficient once the fallback falls below a few thousandths of
+Eddington's rate. The light echoes around Sgr A\* record short outbursts of about 10³⁹ erg/s a
+century or two ago, and a mean below 10³⁶ erg/s since (Ponti et al. 2010; Clavel et al. 2013).
 
 **Alerts.** "What went off?" walks the catalogue classes within the sensor's horizon and evaluates
 each host over the retarded interval, under the census rule: complete per class or nothing. A
@@ -1252,8 +1254,11 @@ only later as a resolved host.
 
 Each body ends with what later systems need and no more: a surface seed, bulk composition, surface
 conditions, a habitability assessment and resource abundances tied to composition and metallicity.
-The surface, life and civilisation generators consume these and do not reach back into this
-pipeline.
+Bulk composition includes the body's elements and the substances of its crust, ices, liquids and
+air, named from one substance registry. The pipeline reserves an empty biosphere slot for the life
+generator to fill, and makes no life itself. _Signed off 2026-10-09 by the sign-off agent (owner's
+delegation), from decision-composition._ The surface, life and civilisation generators consume
+these and do not reach back into this pipeline.
 
 Surfaces stop at orbital scale for now (see [Decisions](#decisions)): what a crew sees from orbit
 and through sensors. That means global maps at a resolution of kilometres (terrain class, ice, ocean
@@ -2305,7 +2310,7 @@ says. The text has been brought into line:
 1. **Light cluster members fall as r⁻² to r⁻²·⁵ outside the half-mass radius**, not r⁻³ or faster
    (ruling 139.1 and 139.3). Reason: in a multimass lowered-isothermal model every component tends
    to the same polytrope `r^−(g + 3/2)` in the Keplerian outskirts (Gieles and Zocchi 2015, eqs. 20
-   and 29), with g between 0.5 and 1 in real clusters (Hénault-Brunet et al. 2019 fit 0.57 at 47
+   and 29), with g between 0.5 and 1 in real clusters (Hénault-Brunet et al. 2020 fit 0.57 at 47
    Tucanae; Peuten et al. 2017 find about 0.73 late in N-body models). Their counts per cell rise
    gently outward, and the grid's width, not the profile, keeps the index. See [Dense
    features](#dense-features-clusters-and-the-galactic-centre).
@@ -2525,7 +2530,9 @@ belongs to the generator version and has a named source to fit against:
 - The Type Ia yield table and the conditional samplers of the other catalogue classes, against the
   binary formulae and the observed rates.
 - Black-hole loss from clusters, against the CMC cluster catalogue; the partial-equipartition
-  exponent, against multimass King models; the pulsar count against encounter rate.
+  exponent, against multimass King models; the pulsar count against encounter rate. _Done
+  2026-10-26 (plan 15's P15.T8.a–d; decision-p15-t8-blocks): the three blocks keep their
+  committed values as production, with no bump; the fits' own figures are reported in plan 15._
 - The number of orphan streams per globular cluster, 1.5 and uncertain threefold.
 - The helium correction to lifetimes and the horizontal branch.
 - The scaling of Chabrier's high-mass branch, now the default's, fitted together with the binary
@@ -2688,7 +2695,7 @@ Figures above are rounded and should be re-checked against these when they becom
 - Heinke et al. 2005, ApJ 625; Baumgardt and Sollima 2017, MNRAS 472; Trager, King and Djorgovski
   1995, AJ 109; Bahramian et al. 2013, ApJ 766.
 - Gieles and Zocchi 2015, _A family of lowered isothermal models_, MNRAS 454, 576; Peuten et al.
-  2017, MNRAS 470, 2736; Hénault-Brunet et al. 2019, MNRAS 491, 113 (multimass models and mass
+  2017, MNRAS 470, 2736; Hénault-Brunet et al. 2020, MNRAS 491, 113 (multimass models and mass
   segregation).
 - Küpper, Macleod and Heggie 2008, _On the structure of tidal tails_, MNRAS 387, 1248; Bovy 2017,
   _Galactic rotation in Gaia DR1_, MNRAS 468, L63 (the Oort constants; from memory, not re-read).
@@ -2708,7 +2715,8 @@ Figures above are rounded and should be re-checked against these when they becom
   MNRAS 520; Fardal, Huang and Weinberg 2015, MNRAS 452.
 - Kochanek, Adams and Belczynski 2014, MNRAS 443 (stellar mergers); Pala et al. 2020, MNRAS 494
   (cataclysmic variables); Corral-Santana et al. 2016, A&A 587.
-- Stone and Metzger 2016, MNRAS 455; Ponti et al. 2010, ApJ 714; Neilsen et al. 2013, ApJ 774.
+- Stone and Metzger 2016, MNRAS 455; Ponti et al. 2010, ApJ 714; Neilsen et al. 2013, ApJ 774;
+  Clavel et al. 2013, A&A 558; Xie and Yuan 2012, MNRAS 427 (the hot flow's falling efficiency).
 - Contreras Peña, Naylor and Morrell 2019, MNRAS 486; Melatos, Peralta and Wyithe 2008, ApJ 672;
   Fuentes et al. 2017, A&A 608.
 - Popov et al. 2010, MNRAS 401, 2675; Faucher-Giguère and Kaspi 2006, ApJ 643, 332 (pulsars'

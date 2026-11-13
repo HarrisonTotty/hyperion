@@ -12,25 +12,34 @@
 //! [`position_at`] is the epoch position plus the drift since the epoch. A galaxy built without its
 //! kinematic tables (without [`Galaxy::with_full_potential`]) has no velocities, and its systems
 //! keep their epoch positions at every `t`, as every system did before plan 08. No position at the
-//! epoch moves either way.
+//! epoch moves either way. From generator version 25 a grid system in the Kepler regime, near the
+//! black hole, follows its orbit instead, and the walks pad for it ([`kepler_pad_for`]; plan 09,
+//! P09.T28.b.b).
 //!
 //! The padding rests on one premise: every grid record of a layer moves below that layer's
 //! [`pad_speed`]. The range query, R06's sky census and plan 12's lensing walk all read it.
 //! [`epoch_velocity`], which every grid velocity passes through, checks it in debug builds, and
 //! [`escape_cut_holds`] names the layers whose grid records also all stay below the local escape
-//! speed (plan 08, P08.T17). Feature members move by their own laws, and plan 09 pads each feature
-//! by its own members' bound (P09.T23.b).
+//! speed (plan 08, P08.T17). From generator version 27 layer D holds the hypervelocity survivors,
+//! and pads as layer E does (plan 09, P09.T34.b). Feature members move by their own laws, and plan
+//! 09 pads each feature by its own members' bound (P09.T23.b).
 
 use super::result::SystemHit;
 use super::walk::QuerySphere;
 use crate::coords::{GalacticPosition, GalacticVelocity};
 use crate::galaxy::Galaxy;
+#[cfg(doc)]
+use crate::galaxy::catalogue_classes::CatalogueSystem;
+use crate::galaxy::catalogue_classes::system_of_record;
 use crate::galaxy::kinematics::draw_velocity;
-use crate::galaxy::placement::{Existence, SystemRecord};
+use crate::galaxy::motion::{EpochState, SpeedBound, StateAt, position_velocity_at};
+use crate::galaxy::placement::{Existence, SystemOrigin, SystemRecord};
 use crate::id::Layer;
 use crate::time::UniverseTime;
 use crate::units::consts::SPEED_OF_LIGHT;
-use crate::units::{KilometresPerSecond, LightYears, MetresPerSecond, Seconds};
+use crate::units::{
+    GravitationalParameter, KilometresPerSecond, LightYears, MetresPerSecond, Seconds,
+};
 
 /// The speed a sphere is padded by, 1,000 km/s: above any escape speed where the grid places a
 /// system (brainstorm, "The range query").
@@ -52,26 +61,24 @@ pub const PAD_SPEED: KilometresPerSecond = KilometresPerSecond::new(1_000.0);
 /// as built). With the progenitor's motion that is about 1,300 km/s. The fastest displaced
 /// classes' Gaussian laws have no such edge, and the reserved hypervelocity survivors move at up to
 /// 2,500 km/s; 3,000 km/s covers the survivors with a fifth to spare. Plan 08's P08.T12.d, which
-/// places those classes, will cap each below its layer's [`pad_speed`] (Design note 7), and
+/// places those classes behind its hold, caps each below its layer's [`pad_speed`] (Design note 7), and
 /// [`epoch_velocity`] asserts that in debug builds (P08.T17; decided 2026-10-05,
 /// `decision-r06-pad-speed.md`). Padding chooses cells and changes no generated output.
 pub const UNBOUND_PAD_SPEED: KilometresPerSecond = KilometresPerSecond::new(3_000.0);
 
 /// The speed the sphere is padded by when walking `layer`.
 ///
-/// [`UNBOUND_PAD_SPEED`] for layer E, the only layer whose cells hold plan 08's unbound class, and
-/// [`PAD_SPEED`] for every other layer (plan 08, Design note 27). Plan 09 raises layer D's together
-/// with the hypervelocity survivors it places there (P09.T34.b). It lives behind one function so
-/// that raising one layer's moves no other layer's cells (plan 03, Design note 13). Every grid
-/// record of a layer moves below it: [`epoch_velocity`] asserts that, and [`escape_cut_holds`] is
-/// read from it (P08.T17).
+/// [`UNBOUND_PAD_SPEED`] for layer E, whose cells hold plan 08's unbound class, and from generator
+/// version 27 for layer D, whose cells hold the hypervelocity survivors at up to 2,500 km/s (plan
+/// 09, P09.T34.b); [`PAD_SPEED`] for every other layer (plan 08, Design note 27). It lives behind
+/// one function so that raising one layer's moves no other layer's cells (plan 03, Design note
+/// 13). Every grid record of a layer moves below it: [`epoch_velocity`] asserts that, and
+/// [`escape_cut_holds`] is read from it (P08.T17).
 #[must_use]
 pub const fn pad_speed(layer: Layer) -> KilometresPerSecond {
     match layer {
-        Layer::E => UNBOUND_PAD_SPEED,
-        Layer::A | Layer::B | Layer::C | Layer::D | Layer::BrownDwarf | Layer::RoguePlanet => {
-            PAD_SPEED
-        }
+        Layer::D | Layer::E => UNBOUND_PAD_SPEED,
+        Layer::A | Layer::B | Layer::C | Layer::BrownDwarf | Layer::RoguePlanet => PAD_SPEED,
     }
 }
 
@@ -79,7 +86,7 @@ pub const fn pad_speed(layer: Layer) -> KilometresPerSecond {
 ///
 /// It is true exactly where [`pad_speed`] is [`PAD_SPEED`]. Plan 08's escape cut holds a grid
 /// record below the lesser of the local escape speed and [`PAD_SPEED`] (Design note 7). Only a
-/// displaced class exempt from the cut will move faster, once P08.T12.d places them, and such a
+/// displaced class exempt from the cut moves faster, behind P08.T12.d's hold, and such a
 /// class may have weight only in a layer padded at [`UNBOUND_PAD_SPEED`]. So a reader that bounds
 /// a layer's grid records more tightly than its pad, by the local escape speed, may do so exactly
 /// where this holds; plan 12's lensing walk does. It is read from [`pad_speed`], so the two cannot
@@ -104,12 +111,51 @@ pub const fn pad_speed(layer: Layer) -> KilometresPerSecond {
 /// assert!((bound(Layer::C, 574.0) - 574.0).abs() < 1e-9);
 /// // ...but layer E holds plan 08's unbound class, so only its pad bounds it.
 /// assert!((bound(Layer::E, 574.0) - 3_000.0).abs() < 1e-9);
+/// // So does layer D, which holds the hypervelocity survivors (P09.T34.b).
+/// assert!((bound(Layer::D, 574.0) - 3_000.0).abs() < 1e-9);
 /// ```
 #[must_use]
 pub const fn escape_cut_holds(layer: Layer) -> bool {
     // No layer pads below `PAD_SPEED`, which the escape cut can reach, so this is "is
     // `PAD_SPEED`" without comparing floats for equality.
     pad_speed(layer).value() <= PAD_SPEED.value()
+}
+
+/// What bounds one grid record's speed (plan 08, Design note 7; P08.T17): finer than
+/// [`escape_cut_holds`], which answers for a whole layer.
+///
+/// Plan 08 draws every grid velocity below the lesser of the local escape speed and [`PAD_SPEED`],
+/// the field's and every displaced class's alike, but for the classes the escape cut exempts, the
+/// fastest of each age bin and source and the hypervelocity survivors, which are cut at their
+/// layer's [`pad_speed`] (`kinematics::is_exempt`; P08.T17's
+/// `no_record_reaches_its_layers_pad_speed` holds both at 10⁵ members of each class). So in layers
+/// D and E, whose pad the exempt classes raise, every other record is still bound by the escape
+/// speed: plan 12's lens walk reads it from each candidate's pick (ruling 143.3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum SpeedCut {
+    /// Below the lesser of the escape speed at the epoch position and [`PAD_SPEED`].
+    Escape,
+    /// Below the layer's [`pad_speed`] alone: a member of a class the escape cut exempts.
+    Pad,
+}
+
+#[cfg(test)]
+impl SpeedCut {
+    /// What bounds `record`'s speed, from its placement class: its layer's pad for a member of a
+    /// class the escape cut exempts, as the candidate's pick says before its marks; for the tests
+    /// of the walks that read it.
+    pub(crate) fn of_record(galaxy: &Galaxy, record: &SystemRecord) -> Self {
+        use crate::galaxy::displaced::PlacementClass;
+        use crate::galaxy::kinematics::is_exempt;
+        match (record.placement_class(), galaxy.fields().displaced()) {
+            (PlacementClass::Displaced { class, .. }, Some(displaced))
+                if is_exempt(displaced.class(class).key()) =>
+            {
+                Self::Pad
+            }
+            _ => Self::Escape,
+        }
+    }
 }
 
 /// How far a sphere must be padded to hold everything that could reach it by `t` at `speed`,
@@ -136,37 +182,164 @@ pub fn pad_for(t: UniverseTime, speed: KilometresPerSecond) -> LightYears {
     LightYears::new(beta * t.since_epoch().as_julian_years_f64().abs())
 }
 
+/// The pad a walk of `layer`'s cells needs about a sphere of `radius` at `centre` at `t` once the
+/// layer's grid records in the Kepler regime follow their orbits (plan 09, P09.T29: "the same pad
+/// applies to grid systems in the Kepler regime"), ly: at least [`pad_for`] at the layer's
+/// [`pad_speed`], and more where the sphere comes near the black hole.
+///
+/// **The walks read it from generator version 25** (plan 09, P09.T28.b.b), when the Kepler law
+/// moves the regime's grid records in [`position_at`]: the range query's walk and the frame search
+/// pad by this, so that the walk's reach follows the law in force (decision-galaxy-25-train §2.2).
+/// Padding chooses cells and moves no hit by itself, but the census counts the walk's cells
+/// against its budget, so near the centre it can admit fewer layers (P09.T28.b.b as built).
+///
+/// The bound is P09.T29's for the centre's members (the centre source's module documentation),
+/// over the whole regime at once: a Kepler-regime record starts inside the influence radius
+/// `r_h`, with a speed under the layer's pad speed `V`, so its orbit's energy is under `V² ÷ 2`
+/// and its μ under G M(< `r_h`) ([`CentreMotion::enclosed_mass`]), and its speed at every radius r
+/// is under the escape speed of `μ′ = G M(< r_h) + V² r_h ÷ 2` inside `r_h`. So:
+///
+/// - a record starting at `r₀` beyond the plunge's full-scan radius `r_s` about μ′ moves at most
+///   the plunge pad Δ(r₀), which falls with `r₀`; one that reaches the sphere starts at
+///   `r₀ ≥ d − R − r_s` (`d` the sphere's distance from the black hole, R its radius), since
+///   Δ ≤ `r_s` there, and so moves at most Δ(max(`r_s`, d − R − `r_s`));
+/// - a record starting inside `r_s` stays within the outward reach of `r_s`, so it can reach the
+///   sphere only if d is within R of that reach, and then it starts within `d + r_s − R` of the
+///   sphere's radius.
+///
+/// The pad is the largest of the three. It is the walk's for the whole layer, so a sphere near
+/// the centre visits more cells than its records need: at Milky Way values a 1 ly sphere at the
+/// black hole is padded by 1.23 ly at a century and 5.71 ly at ±1,000 years for layers A–D,
+/// against the straight lines' 0.33 and 3.34 (P09.T29 as built).
+///
+/// [`CentreMotion::enclosed_mass`]: crate::galaxy::motion::CentreMotion::enclosed_mass
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::Seed;
+/// use hyperion_sim::coords::GalacticPosition;
+/// use hyperion_sim::galaxy::Galaxy;
+/// use hyperion_sim::galaxy::query::{PAD_SPEED, kepler_pad_for, pad_for};
+/// use hyperion_sim::id::Layer;
+/// use hyperion_sim::time::UniverseTime;
+/// use hyperion_sim::units::LightYears;
+///
+/// let galaxy = Galaxy::new(Seed::new(7));
+/// let t = UniverseTime::from_julian_years(100).expect("in the clock window");
+/// let pad = |x: f64| {
+///     let centre = GalacticPosition::from_light_years([x, 0.0, 0.0]).expect("in range");
+///     kepler_pad_for(&galaxy, Layer::C, &centre, LightYears::new(1.0), t).value()
+/// };
+/// let straight = pad_for(t, PAD_SPEED).value();
+/// // Near the black hole the orbits need more room than the straight lines' pad...
+/// assert!(pad(0.5) > straight);
+/// // ...and far from it, none.
+/// assert!((pad(5_000.0) - straight).abs() < 1e-12);
+/// ```
+#[must_use]
+pub fn kepler_pad_for(
+    galaxy: &Galaxy,
+    layer: Layer,
+    centre: &GalacticPosition,
+    radius: LightYears,
+    t: UniverseTime,
+) -> LightYears {
+    kepler_pad_below(galaxy, pad_speed(layer), centre, radius, t)
+}
+
+/// [`kepler_pad_for`] for records that move below `speed` at the epoch, ly: its bound with `speed`
+/// as V, which the derivation needs of a record's speed and nothing more. So it pads the records
+/// of a layer that [`SpeedCut::Escape`] bounds, below [`PAD_SPEED`], more tightly than their
+/// layer's pad: the range query's walk of a cell read in part reads it (P08.T12).
+#[must_use]
+pub(crate) fn kepler_pad_below(
+    galaxy: &Galaxy,
+    speed: KilometresPerSecond,
+    centre: &GalacticPosition,
+    radius: LightYears,
+    t: UniverseTime,
+) -> LightYears {
+    let straight = pad_for(t, speed).value();
+    if t == UniverseTime::EPOCH {
+        return LightYears::new(straight);
+    }
+    let motion = galaxy.centre_motion();
+    let dt = Seconds::new(t.since_epoch().as_seconds_f64());
+    let influence = motion.influence_radius();
+    let v = MetresPerSecond::from(speed).value();
+    let bound = SpeedBound::new(
+        GravitationalParameter::from_solar_masses(motion.enclosed_mass(influence)),
+        0.5 * v * v,
+    );
+    let d = LightYears::from(centre.distance_to(&GalacticPosition::ORIGIN)).value();
+    let r = radius.value();
+    let full = bound
+        .full_scan_edge(influence, dt)
+        .value()
+        .min(influence.value());
+    let inner = if d <= r + bound.outward(LightYears::new(full), dt).value() {
+        d + full - r
+    } else {
+        0.0
+    };
+    let start = full.max(d - r - full);
+    let plunge = if start < influence.value() {
+        bound
+            .reach(LightYears::new(start), influence, dt)
+            .map_or(full, LightYears::value)
+    } else {
+        0.0
+    };
+    LightYears::new(straight.max(inner).max(plunge))
+}
+
 /// The velocity a system has at the epoch, in the galactic frame.
 ///
 /// Plan 08's draw on the reserved domain tag `system.velocity`, keyed by the system's ID
 /// ([`draw_velocity`]), for a galaxy with its kinematic tables
 /// ([`Galaxy::with_full_potential`]); zero for a galaxy built without them, which has no
-/// velocities. A displaced record, once plan 08's P08.T12.d places them, has its class's law; until
-/// then every record is a field record and takes its component's.
+/// velocities. A displaced record has its class's law (plan 08's P08.T12.d, behind its hold);
+/// every other record takes its component's.
 ///
 /// Every grid velocity that the range query, R06's sky census and plan 12's lensing walk read
 /// passes through here, by [`position_at`] and
 /// [`Drift::of_record`](crate::observe::Drift::of_record). So this is where the padding's premise
-/// is checked: every grid record of a layer moves below that layer's [`pad_speed`] (P08.T17).
+/// is checked: every grid record of a layer moves below that layer's pad, [`pad_speed`]'s
+/// (P08.T17).
+///
+/// A catalogue system's is its class's, its broken line's at the epoch (plan 09, P09.T33.a): away
+/// from the epoch and across its explosion its velocity is the line's at that time
+/// ([`CatalogueSystem::position_at`] follows it), which a constant drift does not.
 ///
 /// # Panics
 ///
-/// - In a galaxy with kinematic tables, if `record` is not a grid record, as [`draw_velocity`].
-/// - In debug builds, if the drawn speed is not below `pad_speed(record.layer())`. Plan 08's draw
-///   prevents that: its escape cut holds every grid record below [`PAD_SPEED`], and P08.T12.d will
-///   cap each exempt class below its layer's pad (Design note 7).
+/// - In a galaxy with kinematic tables, if `record` is a feature member or a centre member, as
+///   [`draw_velocity`]; if it is a catalogue system that does not resolve in `galaxy`.
+/// - In debug builds, if the drawn speed is not below `pad_speed(record.layer())`. Plan
+///   08's draw prevents that: its escape cut holds every grid record below [`PAD_SPEED`], and
+///   P08.T12.d caps each exempt class below its layer's pad (Design note 7), the hypervelocity
+///   survivors of version 27 among them (P09.T34.b).
 #[must_use]
 pub fn epoch_velocity(galaxy: &Galaxy, record: &SystemRecord) -> GalacticVelocity {
+    // A catalogue system moves as its class says: its line's velocity at the epoch, the
+    // remnant's once it has exploded (plan 09, P09.T33.a).
+    if let SystemOrigin::CatalogueSystem(_) = record.origin() {
+        return system_of_record(galaxy, record)
+            .motion()
+            .velocity_at(UniverseTime::EPOCH);
+    }
     if galaxy.kinematics().is_some() {
         let velocity = draw_velocity(galaxy, record);
+        let pad = pad_speed(record.layer());
         debug_assert!(
-            velocity.speed().value() < MetresPerSecond::from(pad_speed(record.layer())).value(),
+            velocity.speed().value() < MetresPerSecond::from(pad).value(),
             "{:?} of layer {:?} moves at {} km/s, not below its layer's pad speed of {} km/s \
              (plan 08, P08.T17)",
             record.id(),
             record.layer(),
             velocity.speed().value() / 1e3,
-            pad_speed(record.layer()).value(),
+            pad.value(),
         );
         velocity
     } else {
@@ -180,6 +353,19 @@ pub fn epoch_velocity(galaxy: &Galaxy, record: &SystemRecord) -> GalacticVelocit
 /// coordinate arithmetic, so it is exact in whole light-years and rounds only in the offset inside a
 /// light-year. At the epoch it is the epoch position itself, and the velocity is not drawn.
 ///
+/// From generator version 25 a grid system follows its regime's law instead
+/// ([`position_velocity_at`]; plan 09, P09.T28.b.b): the straight line above outside the Kepler
+/// regime, bit for bit, and inside it its orbit about the black hole. A grid record the loss cone
+/// carves out is no system of the galaxy, which
+/// [`generate_cell`](crate::galaxy::placement::generate_cell) and
+/// [`resolve`](crate::galaxy::placement::resolve) never give; asked about one, made by hand, this
+/// gives its straight line rather than a position on an orbit it does not have. A feature
+/// member's, a centre member's or a global list member's record keeps its straight line: its own
+/// source moves it (the feature's members by their velocities, the centre's on their
+/// trajectories), and [`epoch_velocity`] panics for it in a galaxy with kinematic tables. A
+/// catalogue system is moved by its class, on the line its class breaks at its explosion (plan 09,
+/// P09.T33.a).
+///
 /// # Panics
 ///
 /// - If the drift would take the position out of the addressable cube. It cannot. Every grid
@@ -188,27 +374,68 @@ pub fn epoch_velocity(galaxy: &Galaxy, record: &SystemRecord) -> GalacticVelocit
 ///   cube, 65,536 ly from the centre, against the addressable range's 2³¹ ly. Plan 08's field draw
 ///   stays below [`PAD_SPEED`], and since plan 06's ruling 96.2 no natal kick exceeds 990 km/s
 ///   (about 1,300 km/s with the progenitor's motion). Only plan 08's fastest displaced classes,
-///   which P08.T12.d will cap below their layer's pad, and the hypervelocity survivors, at up to
+///   which P08.T12.d caps below their layer's pad, and the hypervelocity survivors, at up to
 ///   2,500 km/s, will move faster.
-/// - Away from the epoch, as [`epoch_velocity`].
+/// - Away from the epoch, as [`epoch_velocity`]; for a catalogue system, as its class's motion
+///   ([`CatalogueSystem::position_at`]) and if it does not resolve in `galaxy`.
 #[must_use]
 pub fn position_at(galaxy: &Galaxy, record: &SystemRecord, t: UniverseTime) -> GalacticPosition {
     if t == UniverseTime::EPOCH {
         return *record.epoch_position();
     }
-    drifted(record, epoch_velocity(galaxy, record), t)
+    match record.origin() {
+        SystemOrigin::Grid(_) => {
+            let start = EpochState::of_grid_record(galaxy, record);
+            match position_velocity_at(galaxy, &start, t) {
+                StateAt::Exists(state) => *state.position(),
+                StateAt::NoSuchSystem => drifted(record, start.velocity(), t),
+            }
+        }
+        SystemOrigin::FeatureMember { .. }
+        | SystemOrigin::CentreMember { .. }
+        | SystemOrigin::GlobalListMember { .. } => {
+            drifted(record, epoch_velocity(galaxy, record), t)
+        }
+        // A catalogue system moves as its class says, on a line broken at its explosion, not a
+        // drift at its epoch velocity, which is the remnant's once it has exploded (plan 09,
+        // P09.T33.a).
+        SystemOrigin::CatalogueSystem(_) => system_of_record(galaxy, record).position_at(t),
+    }
 }
 
-/// [`position_at`] with the velocity given.
+/// The pad a walk of `layer`'s cells about a sphere of `radius` at `centre` at `t` takes, ly: from
+/// generator version 25 the Kepler regime's [`kepler_pad_for`], at least the straight lines'
+/// [`pad_for`] at the layer's [`pad_speed`] (plan 09, P09.T28.b.b), so that the cells chosen
+/// hold every record [`position_at`] puts in the sphere at `t`. The range query's walk and the
+/// frame search pad by it.
 #[must_use]
-fn drifted(record: &SystemRecord, velocity: GalacticVelocity, t: UniverseTime) -> GalacticPosition {
+pub(crate) fn walk_pad(
+    galaxy: &Galaxy,
+    layer: Layer,
+    centre: &GalacticPosition,
+    radius: LightYears,
+    t: UniverseTime,
+) -> LightYears {
+    kepler_pad_for(galaxy, layer, centre, radius, t)
+}
+
+/// [`position_at`] with the velocity given: the straight line plan 08's drift follows, which the
+/// Kepler regime's [`position_velocity_at`](crate::galaxy::motion::position_velocity_at) takes
+/// outside the influence radius, bit for bit (plan 09, P09.T28.b.a).
+#[must_use]
+pub(crate) fn drifted(
+    record: &SystemRecord,
+    velocity: GalacticVelocity,
+    t: UniverseTime,
+) -> GalacticPosition {
     let elapsed = Seconds::new(t.since_epoch().as_seconds_f64());
     record
         .epoch_position()
         .translated(velocity.displacement_over(elapsed))
         .expect(
-            "a speed under 3,000 km/s over the clock window moves a position by at most 10.01 ly, \
-             which no cell of the root cube can leave the addressable range by",
+            "a grid speed under 3,000 km/s moves a position by at most 10.01 ly over the clock \
+             window, and any speed under light's by 1,000 ly, which no position in the root cube \
+             can leave the addressable range by",
         )
 }
 
@@ -289,12 +516,13 @@ mod tests {
         assert!((CLOCK_WINDOW_H.as_julian_years_f64() - 1_000.0).abs() < f64::EPSILON);
     }
 
-    /// Plan 08, P08.T6: layer E pads at the unbound class's 3,000 km/s, every other layer at plan
-    /// 03's 1,000 km/s; at |t| = H that is 10 ly, against layer E's 128 ly cells.
+    /// Plan 08, P08.T6: layer E pads at the unbound class's 3,000 km/s, and from generator version
+    /// 27 layer D at the same for the hypervelocity survivors (P09.T34.b), every other layer at
+    /// plan 03's 1,000 km/s; at |t| = H that is 10 ly, against layer E's 128 ly cells.
     #[test]
     fn motion_pads_layer_e_for_the_unbound_class() {
         for layer in Layer::ALL {
-            let expected = if layer == Layer::E {
+            let expected = if matches!(layer, Layer::D | Layer::E) {
                 UNBOUND_PAD_SPEED
             } else {
                 PAD_SPEED
@@ -306,7 +534,7 @@ mod tests {
     }
 
     /// Plan 08, P08.T17: the escape cut holds exactly where a layer pads at plan 03's speed, and
-    /// no layer pads below it, since the escape cut can reach it. Today that is every layer but E.
+    /// no layer pads below it, since the escape cut can reach it: every layer but D and E.
     #[test]
     fn escape_cut_holds_where_the_pad_is_plan_03s() {
         for layer in Layer::ALL {
@@ -314,7 +542,11 @@ mod tests {
             assert!(pad >= PAD_SPEED.value(), "{layer:?} pads at {pad} km/s");
             let is_plan_03s = pad.total_cmp(&PAD_SPEED.value()).is_eq();
             assert_eq!(escape_cut_holds(layer), is_plan_03s, "{layer:?}");
-            assert_eq!(escape_cut_holds(layer), layer != Layer::E, "{layer:?}");
+            assert_eq!(
+                escape_cut_holds(layer),
+                !matches!(layer, Layer::D | Layer::E),
+                "{layer:?}"
+            );
         }
     }
 
@@ -327,7 +559,7 @@ mod tests {
             CellKey::new(Layer::C, [0, 812, 0]).unwrap(),
             &mut cell,
         );
-        assert!(!cell.is_empty());
+        assert_ne!(cell, []);
         for system in &cell {
             assert_eq!(epoch_velocity(&galaxy, system), GalacticVelocity::default());
             for t in [UniverseTime::EPOCH, ClockWindow::START, ClockWindow::END] {

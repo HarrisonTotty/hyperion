@@ -6,7 +6,7 @@
  * one list from each to its {@link ViewSettings}. Later plans extend this module only by adding a
  * field to {@link ViewSettings}, with its high and low values in {@link SETTINGS}: R05.T12.c the
  * atmosphere's table sizes, R06 the sky, R07 its styles' passes, R08 the atmosphere's view, R11
- * decoration, R12 the ladder. They never add a setting name or a second list. Each feature builds its
+ * decoration, R12 the ladder, R14 the cluster path's geometry. They never add a setting name or a second list. Each feature builds its
  * low form beside its high form (the budget's third rule), so a field is never added for one setting
  * alone.
  *
@@ -15,10 +15,20 @@
  */
 
 import { TABLE_SIZES, type TableSizes } from "../atmosphere/hillaire";
+import {
+  ATMOSPHERE_SETTINGS,
+  ATMOSPHERE_VIEW_SETTINGS,
+  type AtmosphereSettings,
+  type AtmosphereViewSettings,
+} from "../atmosphere/settings";
 import { DISC_ANNULI_HIGH, DISC_ANNULI_LOW } from "../lighting/annuli";
 import { PLANETSHINE_SOURCES_HIGH, PLANETSHINE_SOURCES_LOW } from "../lighting/planetshine";
 import { BLOOM_LEVELS, type BloomLevels } from "../post/bloom";
 import { HIGH_SKY, LOW_SKY, type SkySettings } from "../sky/setting";
+import type { GeometryOverride, MeshTolerancePx } from "../../../../preload/api";
+import type { Stride } from "../clusters/templates";
+import type { FarCascadeRate } from "../terrain/shadows/cascades";
+import type { R11Ladder } from "../surface/decoration/decorationSetting";
 import type { TerrainNormals, TerrainVertexPath } from "./terrainKinds";
 
 /** The view's quality setting: `high` on the recommended specification, `low` on the UHD 620. */
@@ -40,11 +50,21 @@ export const QUALITY_NAMES = {
  * `terrainKinds.ts`, which the height workers read too. */
 export type { TerrainNormals, TerrainVertexPath } from "./terrainKinds";
 
+/**
+ * How a handed-over body's terrain draws its own sub-cell shading near the hand-over (plan R10,
+ * R10.T15.b.2): `faded`, the disc's at the hand-over and the hand-back, each texel lit at the
+ * disc's point along its ray on the disc's normal map's normal, its star cut by the datum's tangent
+ * plane, rising to its own place, normals and horizon map as the camera closes in
+ * (`terrain/handover.ts`' `handoverDetailShare`); `whole`, its own at every range.
+ */
+export type HandoverDetail = "faded" | "whole";
+
 /** The terrain's settings for one {@link QualitySetting} (R05 Design notes 4, 7, 10 and 26). */
 export interface TerrainSettings {
   /**
-   * The screen-space error tolerance τ in pixels at the presented resolution: the largest a level's
-   * error bound may subtend before a finer level is selected (R05 Design note 7).
+   * The screen-space error tolerance τ in pixels at the presented resolution's CSS px
+   * (`selectionViewport`): the largest a level's error bound may subtend before a finer level is
+   * selected (R05 Design note 7).
    */
   readonly tauPx: number;
   /**
@@ -58,22 +78,278 @@ export interface TerrainSettings {
   readonly vertexPath: TerrainVertexPath;
   /**
    * The patch cache's byte budget, from which its fixed slot count follows (R05 Design note 10),
-   * provisional until R10.T14.b sizes it.
+   * held by R10.T14.b (decision-r10-t14b-constants) on the hard bound, re-sized after R10.T4.b.
    */
   readonly cacheBytes: number;
+  /**
+   * How its sub-cell shading stands near the hand-over: `faded` on the high setting, whose τ of
+   * 1 px puts its hand-over twice as far out as the low setting's on one display (three times on the
+   * hand-over check's windows), so that a view there takes in the terminator, where the terrain's
+   * sub-cell slopes, its relief's parallax and its cast shadows, none of which the disc draws, move
+   * a cell by more than 1/3 stop (the served airless world's 90° look, R10.T15.b.2); `whole` on the
+   * low setting, as before.
+   */
+  readonly handoverDetail: HandoverDetail;
 }
+
+/**
+ * How the terrain's geometry is drawn (plan R14, the cluster path, terrain its first consumer): the
+ * way back to the geometry drawn before plan R14, kept compiled and selectable at every setting,
+ * and each lever of R14's first phase.
+ */
+export interface GeometrySettings {
+  /**
+   * Whether the terrain draws through plan R14's path: its interior patches by a mesh of their own,
+   * without the survey discard (R14.T1.a), and their casters through the cluster cull (R14.T1.b).
+   * `false` is the way back: every patch drawn and cast by the lit mesh, every other field of these
+   * settings unread.
+   */
+  readonly clusterPath: boolean;
+  /** R14.T1.c: casters culled by the view depths their receivers sample each cascade at. */
+  readonly casterDepthCull: boolean;
+  /** R14.T1.d: the coarsest stride a caster may take at its cascade's texel; 1 keeps stride 1. */
+  readonly casterStrideCap: Stride;
+  /**
+   * R14.T1.e: where the symbology's pass over the photorealistic image takes the terrain's depth
+   * for its marks' test. `redraw`, as before: each of the terrain's draws again with the depth
+   * material. `cluster`, both settings': the overlay's own depth, the edge patches' draws and the
+   * interior patches' clusters at stride 1, culled to the camera's frustum, which keeps every
+   * mark's visibility and is the one to keep once plan R14's T3.c strides the camera pass.
+   * `scene-depth`, the plan's lean: the scene target's depth where its size is the canvas's, and
+   * elsewhere as `cluster`; it carries the reference surfaces' tessellated depth, which hides marks
+   * on their datum that the redraw leaves in sight (R14.T1.e's smoke), so no setting takes it.
+   * Unread by the way back, which redraws.
+   */
+  readonly overlayDepth: "redraw" | "scene-depth" | "cluster";
+  /**
+   * R14.T2.a: the lit pass's interior patches drawn through the cluster path, culled to the
+   * camera's frustum and the body's horizon per cluster and compacted in the draw set's order, at
+   * stride 1, forward; `false` draws them by R14.T1.a's interior mesh. Both settings take it.
+   */
+  readonly litClusters: boolean;
+  /**
+   * R14.T6.b: the frames between re-renders of the far shadow cascades, 2 and 3 of 0 to 3, which
+   * are held between while the sun and the view's slice stay within their holds' bounds
+   * (`FarCascadeHolds`); 1 renders all four every frame. 4 on both settings, a lean (the low
+   * setting draws no cascades).
+   */
+  readonly farCascadeRate: FarCascadeRate;
+  /**
+   * R14.T4.a: the mesh regime's figures drawn through the cluster path, each patch's clusters culled
+   * to its view's frustum, at stride 1; `false` draws each figure by its instanced draw of R05's
+   * patch mesh. Both settings take it.
+   */
+  readonly figureClusters: boolean;
+  /**
+   * R14.T4.b: the hulls' occluder faces, in the wireframe and as the silhouette over the image,
+   * drawn through the cluster path as one-level DAG-cut pages, culled to the view's frustum;
+   * `false` draws each hull by its instanced draw of its faces. Both settings take it.
+   */
+  readonly hullClusters: boolean;
+  /**
+   * R14.T4.c: the wireframe's interior patches drawn through the cluster path at stride 1, culled
+   * to the view's frustum and the body's horizon per cluster, compacted in the draw set's order
+   * and drawn without the survey discard before the edge patches; `false` draws every patch by the
+   * lit mesh. Both settings take it.
+   */
+  readonly wireClusters: boolean;
+  /**
+   * R14.T5.b: the mesh page pool's bytes, its pages and their records together, category
+   * `geometry-pages`: 128 MiB high and 32 MiB low (Design note 15's leans), 10% of it for the
+   * meshes' pinned roots. 0 on the way back, which has no pool.
+   */
+  readonly pageBytes: number;
+  /**
+   * R14.T5.f: a mesh's DAG-cut tolerance, px: `camera`, its camera pass's (T5.e's), 1 high and 2
+   * low; `wireframeOccluder`, its occluder depth's in the wireframe, 0.5, half the thin stroke at a
+   * stroke scale of 1, so that a cut's silhouette moves under every stroke's half-width and hidden-
+   * line removal holds (Design note 13; both leans). 0 on the way back: the finest cut.
+   */
+  readonly meshTolerancePx: MeshTolerancePx;
+  /**
+   * R14.T1.g: the lit pass's edge patches drawn through the cluster path beside the interior
+   * patches, in the lit pass, the casters and the overlay's depth, at stride 1: each block and strip
+   * the survey keeps whole without the survey discard, each it keeps in part, and the skirt heads
+   * (`terrain-head`) and survey fins (`terrain-fin`), with it, and each it keeps nowhere not at all;
+   * `false` draws them by the lit mesh. Read where `litClusters` is on. Both settings take it.
+   */
+  readonly finClusters: boolean;
+  /**
+   * R14.T3.c: the lit pass's camera strides. `off` draws every cluster at stride 1; `measured` at
+   * the coarsest stride whose shared band the cluster lies beyond by (1 + β), the band the distance
+   * past which its block, the blocks on its sides and its edges' neighbours all draw that stride's
+   * stated error plus e_s within the view's τ′ (`clusters/strides.ts`), each vertex the stride
+   * drops moved onto the coarser mesh by a distance morph of its own, and stride 1 in the forced
+   * region. Read where `litClusters` is on; the overlay's depth then takes its own pass at stride
+   * 1, whatever `overlayDepth` says. On each setting where its acceptance passes on the pod's
+   * seamless probe, else `off` (the brief's ruling, 2026-11-02): `measured` on both, since a
+   * coarse–fine hold's release fades as its onset does (`StrideHoldFades`).
+   */
+  readonly strides: "off" | "measured";
+  /**
+   * R14.T3.d: two-pass occlusion against the depth pyramid. `hzb` draws the lit pass's clusters
+   * visible last frame first, builds the pyramid from that depth, and draws after it only the rest
+   * the pyramid does not refuse (`clusters/hzb.ts`); `off` draws every cluster the camera's tests
+   * keep in the one raster. Exact: the image differs only where two surfaces meet at equal depth,
+   * whose order it changes. Read where `litClusters` is on. `off` on both settings until its
+   * acceptance on the pod (the brief's ruling, 2026-11-02; the plan writes `none`).
+   */
+  readonly occlusion: "off" | "hzb";
+  /**
+   * R14.T2: the lit pass's interior patches shaded `forward`, each fragment the rasteriser covers
+   * (T2.a), or by the `visibility` buffer: rasterised once into the scene's depth and an `r32uint`
+   * ID of the visible cluster and its triangle (T2.c), then shaded once a pixel by a full-screen
+   * resolve that refetches the triangle's vertices (T2.d), the edge patches drawn forward after it.
+   * Read where `litClusters` is on. `forward` on both settings until the owner's Mac and RTX runs
+   * (T2.e; Design note 17): low waits on the UHD 620's.
+   */
+  readonly shading: "forward" | "visibility";
+  /**
+   * R14.T3.e: the lit pass's selection budget. `patches`, as before: at most half the cache's
+   * slots. `triangles`: that, and the lit triangles the selected patches draw, reckoned at the
+   * strides the cull takes (`select.ts`' `patchLitTriangles`), at most the setting's
+   * `TERRAIN_TRIANGLE_BUDGET`, the stride-1 frame of its own patch budget at its held cache, so that
+   * a larger cache selects more patches at no more lit triangles than that frame as selection
+   * reckons them, each lit view held to it alone. Read where `litClusters` is on. `triangles` on
+   * both settings, where the strides are on (a lean, 2026-11-05); at the held cache it selects as
+   * `patches` bit for bit.
+   * Whatever it says, where the strides are on but on low (which states it wherever it draws lit
+   * terrain), `TERRAIN: DETAIL LIMITED` is raised too wherever the cull draws a stride past the
+   * view's τ′ (`clusters/overCount.ts`; research-leans-42).
+   */
+  readonly terrainBudget: "patches" | "triangles";
+  /**
+   * R14.T3.c's stand-ins. `own-grids` draws each sub-patch stand-in on its own grid over its baked
+   * ancestor's triangles (`terrainPatch.wgsl`'s `sourceGridOf`: more than `TERRAIN_MASK_LEVELS`
+   * below it, or any where the masks are not drawn, as on low, which has no cluster casters) at the
+   * camera passes' cap up to 2^levels, wherever it is, but where a hold or a fade sets its edges'
+   * k: each stride's triangle lies in one of the ancestor's, so that it draws the surface stride 1
+   * draws but for the CDLOD morph's k between its vertices (`clusters/strides.ts`'
+   * `INSTANCE_SUB_GRID_STRIDES`). `all` strides the masks too, a stand-in one to three levels down
+   * drawn by its ancestor's own blocks (Design note 19): at that ancestor's scale, as a patch whose
+   * edges are its set's sides (`clusters/strides.ts`' remarks), over a band of its own, wider
+   * (`STRIDE_MASK_BAND_FRACTION`), so that the slewed τ′'s scale moves its vertices a little a
+   * frame. The triangle budget reckons both as T3.e does. `all` on high, which draws its stand-ins
+   * as masks, where its acceptance passed; `own-grids` on low, which draws no mask (no cluster
+   * casters). `off`, as before: every stand-in at stride 1. Read where the strides are on.
+   */
+  readonly standInStrides: "off" | "own-grids" | "all";
+  /**
+   * R10.T16.c's marks over the photorealistic image that a body's ground hides. `drawn`, the way
+   * back: every mark drawn, the terrain's depth before them. `culled`: where a body's survey is
+   * whole and its terrain draws all the ground its mask discards, its datum's lines, which give
+   * way everywhere, and every segment of a solid view-space mark that lies wholly behind the sphere
+   * inside all its ground, stroke and all, are left out of the overlay (`photoreal/overlay.ts`'
+   * `hiddenMarksCulled`), and the symbology's pass draws no terrain depth where no mark that tests
+   * depth is left: the same canvas, bit for bit. `culled` on both settings.
+   */
+  readonly hiddenMarks: "drawn" | "culled";
+  /**
+   * R14.T3.c's edge stand-ins: an edge bake's stand-ins (a bake the survey's edge crosses) on the
+   * cluster path, which otherwise draw by the lit mesh at stride 1 in every pass. `surveyed` takes
+   * the exact forms: a whole stand-in as its edge patch, and a sub-patch whose area lies on blocks
+   * all opaque in its slot's records as an interior bake's (a mask or an own grid), its blocks and
+   * strips opaque and real and no fin cluster (`clusters/cull.ts`' `CULL_INPUT_SURVEYED`). `masks`
+   * adds a level-1 mask across the survey's edge: its blocks by its slot's classes, its 16 strips by
+   * the may-discard template, each foot's survey read half a quad inside its set, and its quadrant's
+   * six fin and head runs, a run on the set's side drawn once (`CULL_INPUT_EDGE_MASK`). Read only
+   * with `finClusters` and `litClusters`. `masks` on high, `surveyed` on low (no masks); `off`, as
+   * before, bit for bit.
+   */
+  readonly edgeStandIns: "off" | "surveyed" | "masks";
+  /**
+   * Plan R07's `disc cells` pass (the owner's Mac): `per-cell`, as before, shades each cell of a
+   * job's pixel in its own invocation (`shaders/bodyDiscCells.wgsl`), which leaves most of a
+   * workgroup idle beside the cells across the limb that shade nine points; `packed` shades each
+   * workgroup's points one an invocation over the list of them and sums them in each cell's and
+   * pixel's order (`shaders/bodyDiscCellsPacked.wgsl`), the same sums bit for bit. `packed` on both
+   * settings (a lean, 2026-11-05).
+   */
+  readonly discCells: "per-cell" | "packed";
+  /**
+   * Plan R07's mesh-regime figure (the owner's Mac): `forward`, as before, shades each fragment its
+   * triangles cover (`shaders/smoothMesh.wgsl`), whose 2 × 2 quads' helper lanes along the figure's
+   * small triangles shade some 1.9 times the pixels it covers from orbit at high and 2.3 times at
+   * low (perf-body-shading's count); `screen` rasterises the figure's depth and an `r32uint` ID of
+   * its record with the forward draw's discards (`shaders/smoothMeshIds.wgsl`), then shades each
+   * pixel of a record's ID once in one rectangle draw (`shaders/figureResolve.wgsl`), the same light
+   * from the same pixel and record, bit for bit. `forward` on both settings until the owner's Mac
+   * pair (a lean, 2026-11-06): on the pod's SwiftShader, whose lanes outside a triangle cost little,
+   * `screen` drew the figure 7% slower from orbit at low and 70% slower at high, and 20% faster
+   * closed in at high (perf-body-shading's inspection timing).
+   */
+  readonly figureShading: "forward" | "screen";
+  /**
+   * The mesh-regime terrain's planetshine (perf-bodies-near-ground, the owner's Mac): `record`, as
+   * before, lights each texel by every planetshine source its body's disc record carries
+   * (`PhotorealSettings.planetshineSources`: two on high, one on low); `brightest` by the
+   * brightest of them alone, the low setting's count, so that on high each lit texel forms one
+   * source's sky term, direct term and three-node transmittance fewer, near the ground where the
+   * terrain shades most of the view. The disc, the figure and the sky keep the record's sources.
+   * `record` on both settings until the owner's Mac pair (a lean, 2026-11-08): on the pod's
+   * SwiftShader high's low window drew `bodies` some 10% faster with one source.
+   */
+  readonly terrainPlanetshine: "record" | "brightest";
+}
+
+/**
+ * `setting`'s geometry with a launch's development override over it (`--geometry`, plan R14,
+ * Design note 17): each field the override gives replaces the setting's.
+ */
+export function geometryOf(setting: QualitySetting, override: GeometryOverride): GeometrySettings {
+  return { ...SETTINGS[setting].geometry, ...override };
+}
+
+/** The way back (plan R14): the terrain's geometry as it was drawn before plan R14. */
+export const GEOMETRY_BEFORE_R14: GeometrySettings = {
+  clusterPath: false,
+  casterDepthCull: false,
+  casterStrideCap: 1,
+  overlayDepth: "redraw",
+  litClusters: false,
+  farCascadeRate: 1,
+  figureClusters: false,
+  hullClusters: false,
+  wireClusters: false,
+  pageBytes: 0,
+  meshTolerancePx: { camera: 0, wireframeOccluder: 0 },
+  finClusters: false,
+  strides: "off",
+  occlusion: "off",
+  shading: "forward",
+  terrainBudget: "patches",
+  standInStrides: "off",
+  hiddenMarks: "drawn",
+  edgeStandIns: "off",
+  discCells: "per-cell",
+  figureShading: "forward",
+  terrainPlanetshine: "record",
+};
 
 /**
  * Everything the view's quality setting decides, one field per feature.
  *
  * @remarks
  * Later plans add fields here and their values to {@link SETTINGS} (see the module's remarks).
+ * Plan R11's ladder entries are its fields directly ({@link R11Ladder}: `decoration`,
+ * `scatterDensity`, `clouds`, `cloudShadows`, `oceanComponents`, `oceanRefraction`, `whitecaps`,
+ * `rings` and `ringShadowOnBody`; R11.T1, Design note 18), as R12's `SettingSnapshot` reads them.
  */
-export interface ViewSettings {
+export interface ViewSettings extends R11Ladder {
   /** The terrain's settings (R05). */
   readonly terrain: TerrainSettings;
   /** The atmosphere's table sizes and sample counts (R05.T12.c, Design note 16; R08 widens them). */
   readonly atmosphere: TableSizes;
+  /**
+   * The atmosphere's view: the sky's sources and the stated quality limits (plan R08, R08.T7;
+   * `view/atmosphere/settings.ts`).
+   */
+  readonly atmosphereView: AtmosphereViewSettings;
+  /**
+   * The atmosphere's frame-cost levers, each with its way back (the owner's priority, 2026-11-01;
+   * `view/atmosphere/settings.ts`).
+   */
+  readonly atmosphereLevers: AtmosphereSettings;
   /** The sky's cube, sprites, census size and re-bake cadence (R06.T13.f, Design note 22). */
   readonly sky: SkySettings;
   /**
@@ -86,6 +362,8 @@ export interface ViewSettings {
   readonly budget: ViewBudgetSettings;
   /** The photorealistic style's passes: the histogram, bloom and the lit bodies (R07.T17). */
   readonly photoreal: PhotorealSettings;
+  /** How the terrain's geometry is drawn (plan R14). */
+  readonly geometry: GeometrySettings;
 }
 
 /**
@@ -94,9 +372,9 @@ export interface ViewSettings {
  *
  * @remarks
  * Design note 18's other two items are settings already: the view renders at most
- * {@link TerrainSettings.renderHeightPx} rows (720 on low), presented upscaled by the tone-mapping
- * pass, the render resolution that `ViewBudget.renderScale` is a fraction of; and the one
- * photorealistic view is {@link ViewBudgetSettings.photorealisticViews}.
+ * {@link TerrainSettings.renderHeightPx} rows (1,080 on high, 720 on low), presented upscaled by
+ * the tone-mapping pass, the render resolution that `ViewBudget.renderScale` is a fraction of; and
+ * the one photorealistic view is {@link ViewBudgetSettings.photorealisticViews}.
  */
 export interface PhotorealSettings {
   /**
@@ -113,6 +391,15 @@ export interface PhotorealSettings {
   readonly discAnnuli: number;
   /** The most lit neighbours that light a body by planetshine (R07 Design note 7): 2, or 1. */
   readonly planetshineSources: number;
+  /**
+   * The cells per axis a disc of 32 px or more takes in its limb pixels while a photorealistic
+   * primary's frame-rate floor stands at its lowest step (R07.T8.i, the owner's priority; built
+   * 2026-11-02, kept 2026-11-13): 2, a quarter of `LIMB_SAMPLES`' cells, every limb pixel within
+   * 1/3 stop of them or under one 8-bit code at black apart (99.15-99.74% by 1/3 stop alone);
+   * `LIMB_SAMPLES` (4) is the way back. The low setting never steps its floor
+   * (`aloneScaleBounds`), so its value is never read; it is the same.
+   */
+  readonly floorLimbSamples: number;
 }
 
 /** What the per-view budget reads of a setting (R07 Design notes 14 and 18). */
@@ -132,12 +419,24 @@ export interface ViewBudgetSettings {
 const MIB = 1024 * 1024;
 
 /**
- * The high setting's patch cache budget: about 400 MB, R10 Design note 15's 1.3 × the all-round
- * peak at 100 m (about 1,900 slots, 390 MB), until R10.T14.b measures.
+ * The high setting's patch cache budget, 400,000,000 B, held by R10.T14.b
+ * (decision-r10-t14b-constants) on the hard bound, re-sized after R10.T4.b (the rule in its union
+ * form asked 8,666 high lit slots, 2,996 low lit and 3,764 wireframe on TERRAIN TEST's moon, about
+ * seven times the held 1,286, 422 and 520): R10 Design note 15's research figure, 1.3 × the
+ * all-round peak at 100 m (about 1,900 slots, 390 MB at its 206 kB a slot). As built it holds 1,208
+ * lit slots of 330,996 B (`cacheBudget.ts`' `bytesPerPatch`, R10.T14.a, whose count model's figures
+ * plan 10 records beside it), 1,286 of 311,024 B before R10.T1.c's maturity layer grew each slot's
+ * class layers by its codes and nodes (decision-r10-t1c-client-scope §2.2: recorded, not re-ruled).
  */
 const HIGH_CACHE_BYTES = 400_000_000;
 
-/** The low setting's patch cache budget: 64 MiB, 1,296 slots of R05's low layout. */
+/**
+ * The low setting's patch cache budget, 64 MiB, held by R10.T14.b (decision-r10-t14b-constants) on
+ * the hard bound, re-sized after R10.T4.b and the owner's UHD 620 run (the rule in its union form
+ * asked 8,666 high lit slots, 2,996 low lit and 3,764 wireframe on TERRAIN TEST's moon, about seven
+ * times the held 1,286, 422 and 520): 1,296 slots of R05's spike layout; as built, 375 lit slots of
+ * 178,908 B (R10.T14.a), 422 of 158,936 B before R10.T1.c's maturity layer.
+ */
 const LOW_CACHE_BYTES = 64 * MIB;
 
 /**
@@ -146,26 +445,38 @@ const LOW_CACHE_BYTES = 64 * MIB;
  * @remarks
  * The low setting renders at 720 rows presented upscaled with τ = 2 px, mesh-resolution normals,
  * the `face-differences` vertex path (`baked-offsets` does not fit its 64 MiB cache) and a 64 MiB
- * cache. The high setting renders at the canvas's size with τ = 1 px, doubled normals and
- * `baked-offsets`, its precision holding by construction until R05.T18 chooses. Under a grounded
- * body every setting draws the finest level whatever these say (R05 Design note 9). Both settings
- * hold the photorealistic view's internal scale in [0.5, 1.0]; the low setting budgets a
+ * cache. The high setting renders at the canvas's size, at most 1,080 rows presented upscaled (lean
+ * 2026-11-01: the brainstorm states the budget at 1080p, a larger display rendering below native
+ * and upscaling, "Two deployments, one scene"; R07 Design note 14), with τ = 1 px, doubled normals
+ * and `baked-offsets`, its precision holding by construction until R05.T18 chooses, and its
+ * sub-cell shading faded in below the hand-over, where the low setting's stands whole
+ * (R10.T15.b.2). Under a
+ * grounded body every setting draws the finest level whatever these say (R05 Design note 9). Both
+ * settings hold the photorealistic view's internal scale in [0.5, 1.0]; the low setting budgets a
  * photorealistic primary view at 30 Hz and allows one photorealistic view (R07 Design notes 14 and
  * 18). The low setting's photorealistic style takes its histogram at a stride of 2, blooms over 5
  * levels from quarter resolution, eclipses with 3 annuli and lights each body by planetshine from
- * one neighbour, against 1, 7 levels from full resolution, 4 annuli and two neighbours (R07
- * Design note 18, R07.T17).
+ * one neighbour, against 1, 7 levels from full resolution, 4 annuli and two neighbours (R07 Design
+ * note 18, R07.T17). R11's ladder entries are Design note 18's (high; low): decoration on and off,
+ * the decorative scatter's density 1 and 0, the clouds' volume and layer with and without their
+ * shadows on the terrain, 32 and 8 Gerstner components with and without refraction and whitecaps,
+ * and the rings' particles and annulus with and without their shadow on the body, so that the low
+ * setting draws no decoration of any kind (R11.T1).
  */
 export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
   high: {
     terrain: {
       tauPx: 1,
-      renderHeightPx: null,
+      // A Retina or 4K canvas renders at 1080p and is upscaled, as low's at 720p (lean 2026-11-01).
+      renderHeightPx: 1080,
       normals: "double",
       vertexPath: "baked-offsets",
       cacheBytes: HIGH_CACHE_BYTES,
+      handoverDetail: "faded",
     },
     atmosphere: TABLE_SIZES.high,
+    atmosphereView: ATMOSPHERE_VIEW_SETTINGS.high,
+    atmosphereLevers: ATMOSPHERE_SETTINGS.high,
     sky: HIGH_SKY,
     internalScaleBounds: [0.5, 1],
     budget: { photorealisticRateHz: 60, photorealisticViews: null },
@@ -174,7 +485,41 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       bloom: BLOOM_LEVELS.high,
       discAnnuli: DISC_ANNULI_HIGH,
       planetshineSources: PLANETSHINE_SOURCES_HIGH,
+      floorLimbSamples: 2,
     },
+    geometry: {
+      clusterPath: true,
+      casterDepthCull: true,
+      casterStrideCap: 8,
+      overlayDepth: "cluster",
+      litClusters: true,
+      farCascadeRate: 4,
+      figureClusters: true,
+      hullClusters: true,
+      wireClusters: true,
+      pageBytes: 128 * 2 ** 20,
+      meshTolerancePx: { camera: 1, wireframeOccluder: 0.5 },
+      finClusters: true,
+      strides: "measured",
+      occlusion: "off",
+      shading: "forward",
+      terrainBudget: "triangles",
+      standInStrides: "all",
+      hiddenMarks: "culled",
+      edgeStandIns: "masks",
+      discCells: "packed",
+      figureShading: "forward",
+      terrainPlanetshine: "record",
+    },
+    decoration: true,
+    scatterDensity: 1,
+    clouds: "volume",
+    cloudShadows: true,
+    oceanComponents: 32,
+    oceanRefraction: true,
+    whitecaps: true,
+    rings: "particles",
+    ringShadowOnBody: true,
   },
   low: {
     terrain: {
@@ -183,8 +528,11 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       normals: "mesh",
       vertexPath: "face-differences",
       cacheBytes: LOW_CACHE_BYTES,
+      handoverDetail: "whole",
     },
     atmosphere: TABLE_SIZES.low,
+    atmosphereView: ATMOSPHERE_VIEW_SETTINGS.low,
+    atmosphereLevers: ATMOSPHERE_SETTINGS.low,
     sky: LOW_SKY,
     internalScaleBounds: [0.5, 1],
     budget: { photorealisticRateHz: 30, photorealisticViews: 1 },
@@ -193,7 +541,41 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       bloom: BLOOM_LEVELS.low,
       discAnnuli: DISC_ANNULI_LOW,
       planetshineSources: PLANETSHINE_SOURCES_LOW,
+      floorLimbSamples: 2,
     },
+    geometry: {
+      clusterPath: true,
+      casterDepthCull: true,
+      casterStrideCap: 8,
+      overlayDepth: "cluster",
+      litClusters: true,
+      farCascadeRate: 4,
+      figureClusters: true,
+      hullClusters: true,
+      wireClusters: true,
+      pageBytes: 32 * 2 ** 20,
+      meshTolerancePx: { camera: 2, wireframeOccluder: 0.5 },
+      finClusters: true,
+      strides: "measured",
+      occlusion: "off",
+      shading: "forward",
+      terrainBudget: "triangles",
+      standInStrides: "own-grids",
+      hiddenMarks: "culled",
+      edgeStandIns: "surveyed",
+      discCells: "packed",
+      figureShading: "forward",
+      terrainPlanetshine: "record",
+    },
+    decoration: false,
+    scatterDensity: 0,
+    clouds: "layer",
+    cloudShadows: false,
+    oceanComponents: 8,
+    oceanRefraction: false,
+    whitecaps: false,
+    rings: "annulus",
+    ringShadowOnBody: false,
   },
 };
 
@@ -202,6 +584,29 @@ export const TERRAIN_SETTINGS: Readonly<Record<QualitySetting, TerrainSettings>>
   high: SETTINGS.high.terrain,
   low: SETTINGS.low.terrain,
 };
+
+/**
+ * The wireframe style's screen-space error tolerance τ, px, on either setting: its depth-only
+ * terrain's (plan R10, T11) and the disc's hand-over to it (R10 Design note 13: τ is the style's
+ * own, {@link TerrainSettings.tauPx} in the photorealistic style, 1 px high and 2 px low, and
+ * 4 px in the wireframe).
+ */
+export const WIREFRAME_TERRAIN_TAU_PX = 4;
+
+/**
+ * The slots of the wireframe's terrain cache on either setting (plan R10, R10.T11), held by
+ * R10.T14.b (decision-r10-t14b-constants) on the hard bound, re-sized after R10.T4.b and the
+ * owner's UHD 620 run (the rule in its union form asked 8,666 high lit slots, 2,996 low lit and
+ * 3,764 wireframe on TERRAIN TEST's moon, about seven times the held 1,286, 422 and 520): Design
+ * note 15's sizing rule over its wireframe column (4 px at 1080p), max(1.3 × the all-round peak,
+ * 3 × the frustum peak) = max(1.3 × 284, 3 × 76) ≈ 370 at 100 m, and the 20–40% the count model
+ * leaves out for relief, the 2:1 rule and the forced region at its upper end, about 520. Sized by
+ * its slots, not by the setting's bytes: a wireframe slot holds its heights, offsets on their path
+ * and survey mask alone (139,428 B on `baked-offsets`, 42% of a lit slot; 38,028 B on
+ * `face-differences`, a fifth), so the high setting's 400 MB would give it 2,868 slots, whose
+ * offsets pass a default 128 MiB storage binding.
+ */
+export const WIREFRAME_TERRAIN_SLOTS = 520;
 
 /**
  * A terrain variant for the spike's runs (T13.c's `--vertex-path` and `--normals`, T17's): the

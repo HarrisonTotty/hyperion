@@ -18,6 +18,7 @@ import { viewStrokesAt } from "../view/wireframe/drawList";
 import { base64Of, type CapturedImage } from "./atmosphere";
 import { addCanvas } from "./frames";
 import { type Checks, pause } from "./harness";
+import { StreamSettle } from "./streamSettle";
 
 /** The spike's seed in the captures: T13.a's tests' own. */
 const SEED = 5n;
@@ -28,10 +29,6 @@ const SIZES = {
   orbit: { widthPx: 240, heightPx: 180 },
   craft: { widthPx: 240, heightPx: 180 },
 } as const;
-
-/** The longest a shot waits for its patches, and how long with no new patch counts as settled. */
-const SETTLE_MS = 120_000;
-const QUIET_MS = 3_000;
 
 /** One shot: a setting and a script time, seconds, or the script's end. */
 interface SpikeShot {
@@ -123,25 +120,14 @@ export async function captureSpike(engine: RenderEngine, checks: Checks): Promis
       });
       run.frame(input(0));
       const begun = performance.now();
-      let lastChange = begun;
-      let resident = -1;
+      const settle = new StreamSettle(begun);
       let frame: SpikeFrame | null = null;
       let reads: Promise<Uint8Array | Float32Array>[] = [];
       for (;;) {
         frame = run.frame(input(tS * 1000));
         // A canvas texture expires once the task yields: read the frame back now.
         reads = [run.readBack("main"), run.readBack("orbit"), run.readBack("craft")];
-        const now = performance.now();
-        const t = frame.terrain;
-        if (t.drawn - t.standingIn !== resident) {
-          resident = t.drawn - t.standingIn;
-          lastChange = now;
-        }
-        if (
-          (t.standingIn === 0 && t.missing === 0) ||
-          now - lastChange > QUIET_MS ||
-          now - begun > SETTLE_MS
-        ) {
+        if (settle.done(frame.terrain, performance.now())) {
           break;
         }
         // oxlint-disable-next-line no-await-in-loop

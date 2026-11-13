@@ -192,6 +192,44 @@ describe("a frame's encoding", () => {
     expect(commands.at(-1)?.op).toBe("end");
   });
 
+  it("sets a pipeline, resources and vertex buffers only where a draw changes them (plan R14)", async () => {
+    const { engine, gpu } = await engineOn();
+    const first = triangle(engine);
+    const second = triangle(engine);
+    const flat = material(engine, "flat");
+    const other = material(engine, "other", "other");
+    const target = engine.createRenderTarget({
+      name: "scene",
+      size: { widthPx: 8, heightPx: 8 },
+      format: "rgba16float",
+      mips: 1,
+      depth: true,
+      category: "render-targets",
+    });
+    target.render(
+      frame("shared", [
+        draw(first, flat),
+        draw(first, flat),
+        draw(second, flat),
+        draw(second, other),
+        draw(second, flat),
+      ]),
+    );
+    const commands = commandsOf(gpu, "shared");
+    const count = (op: string, index?: number): number =>
+      commands.filter(
+        ({ op: each, args: [slot] }) => each === op && (index === undefined || slot === index),
+      ).length;
+    // Five draws: the pipeline and the resources are set three times, the vertex buffer twice.
+    expect([
+      count("draw"),
+      count("setPipeline"),
+      count("setBindGroup", 1),
+      count("setBindGroup", 2),
+      count("setVertexBuffer"),
+    ]).toEqual([5, 3, 5, 3, 2]);
+  });
+
   it("chains post-processes through the intermediates, the last writing the output", async () => {
     const { engine, gpu } = await engineOn();
     const mesh = triangle(engine);
@@ -270,6 +308,120 @@ describe("a frame's encoding", () => {
     expect(logged).toHaveBeenCalledWith(
       "material broken (TEST BROKEN) failed to compile; its draws are left out:\n1:1 unresolved value 'oops'",
     );
+  });
+});
+
+/** A colour target of `size` px a side and `mips` levels, with no depth. */
+function chainTarget(engine: WebGpuRenderEngine, name: string, sizePx: number, mips = 1) {
+  return engine.createRenderTarget({
+    name,
+    size: { widthPx: sizePx, heightPx: sizePx },
+    format: "rgba16float",
+    mips,
+    depth: false,
+    category: "render-targets",
+  });
+}
+
+/** The `Frame` binding of each `setBindGroup(0, …)` in `commands`: its offset and its size. */
+function frameBindings(gpu: FakeDevice, commands: ReadonlyArray<FakeCommand>): unknown[] {
+  return commands
+    .filter(({ op, args: [index] }) => op === "setBindGroup" && index === 0)
+    .map(({ args: [, group] }) => {
+      const entry = [
+        ...(gpu.bindGroups.find((made) => made === group)?.descriptor.entries ?? []),
+      ][0];
+      const resource: unknown = entry?.resource;
+      return [Reflect.get(Object(resource), "offset"), Reflect.get(Object(resource), "size")];
+    });
+}
+
+describe("a chain of targets in one submission (plan R14)", () => {
+  it("encodes each frame in order into its target, one Frame block each, in one submission", async () => {
+    const { engine, gpu } = await engineOn();
+    const mesh = triangle(engine);
+    const flat = material(engine, "flat");
+    const targets = [
+      chainTarget(engine, "a", 16),
+      chainTarget(engine, "b", 8),
+      chainTarget(engine, "c", 4),
+    ];
+    const submit = vi.spyOn(gpu.queue, "submit");
+    const blocks: number[][] = [];
+    const writeBuffer = gpu.queue.writeBuffer.bind(gpu.queue);
+    vi.spyOn(gpu.queue, "writeBuffer").mockImplementation(
+      (buffer, offset, data, dataOffset, size) => {
+        if (buffer.label === "frame uniforms" && data instanceof ArrayBuffer) {
+          const floats = new Float32Array(
+            data.slice(dataOffset ?? 0, (dataOffset ?? 0) + (size ?? 0)),
+          );
+          // Each slot's viewport width, 64 floats (256 bytes) apart.
+          blocks.push(
+            Array.from(
+              { length: Math.ceil(floats.length / 64) },
+              (_, i) => floats[i * 64 + 32] ?? 0,
+            ),
+          );
+        }
+        return writeBuffer(buffer, offset, data, dataOffset, size);
+      },
+    );
+    engine.renderTargets(
+      targets.map((target, index) => ({
+        target,
+        frame: frame(`chain ${String(index)}`, [draw(mesh, flat)]),
+      })),
+    );
+    const commands = commandsOf(gpu, "chain 0");
+    expect([
+      submit.mock.calls.length,
+      gpu.encoders.filter(({ label }) => label.startsWith("chain")).length,
+      attachments(commands),
+      blocks,
+      frameBindings(gpu, commands),
+    ]).toEqual([
+      1,
+      1,
+      ["a:colour", "b:colour", "c:colour"],
+      [[16, 8, 4]],
+      [
+        [0, 144],
+        [256, 144],
+        [512, 144],
+      ],
+    ]);
+  });
+
+  it("leaves a disposed target out, and refuses another engine's", async () => {
+    const { engine, gpu } = await engineOn();
+    const other = await engineOn();
+    const mesh = triangle(engine);
+    const flat = material(engine, "flat");
+    const kept = chainTarget(engine, "kept", 8);
+    const gone = chainTarget(engine, "gone", 8);
+    gone.dispose();
+    engine.renderTargets([
+      { target: gone, frame: frame("gone", [draw(mesh, flat)]) },
+      { target: kept, frame: frame("kept", [draw(mesh, flat)]) },
+    ]);
+    expect(attachments(commandsOf(gpu, "kept"))).toEqual(["kept:colour"]);
+    const foreign = chainTarget(other.engine, "foreign", 8);
+    expect(() => {
+      engine.renderTargets([{ target: foreign, frame: frame("foreign", []) }]);
+    }).toThrow("target foreign was not made by this engine");
+  });
+
+  it("ends a submission at a target of several mips, its mips made before the next frame", async () => {
+    const { engine, gpu } = await engineOn();
+    const mesh = triangle(engine);
+    const flat = material(engine, "flat");
+    engine.renderTargets([
+      { target: chainTarget(engine, "mipped", 8, 2), frame: frame("first", [draw(mesh, flat)]) },
+      { target: chainTarget(engine, "plain", 8), frame: frame("second", [draw(mesh, flat)]) },
+    ]);
+    const order = gpu.encoders.map(({ label }) => label);
+    expect(order.indexOf("mipped:colour mips")).toBeGreaterThan(order.indexOf("first"));
+    expect(order.indexOf("second")).toBeGreaterThan(order.indexOf("mipped:colour mips"));
   });
 });
 

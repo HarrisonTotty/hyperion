@@ -43,28 +43,29 @@ mod helium;
 mod evolve;
 mod track;
 pub use evolve::{evolve, lifetime, main_sequence_state, turn_off_mass};
+pub(crate) use evolve::{lifetime_under, track_under};
 #[cfg(test)]
 pub(crate) use track::post_agb_ionising_years;
 pub(crate) use track::{
-    Fate, RemnantModel, Stage, bridged_origin, fate_of, is_companion_stripped, remnant_of,
+    Fate, RemnantModel, Stage, bridged_origin, early_agb_cores, fate_of, fate_to_age,
+    iron_core_fate, is_companion_stripped, is_companion_stripped_by, main_sequence_end_mass,
+    oxygen_neon_capture_fate, remnant_of,
 };
 // Plan 11's hooks into the track (P11.T4, ruling 34.1): see `track/binary.rs`.
 pub use track::{
-    AgeInterval, Bridges, MAX_INITIAL_MASS, MIN_INITIAL_MASS, PhasePredicate, Track, TrackOptions,
+    AgeInterval, Bridges, BuildCaptureWindowWidthsError, CaptureWindowWidths, MAX_INITIAL_MASS,
+    MIN_INITIAL_MASS, PhasePredicate, Track, TrackOptions,
 };
 pub(crate) use track::{
-    CORE_GYRATION, ConvectiveEnvelope, ENVELOPE_GYRATION, NewStar, Remains, Structure,
-    giant_radius_exponent, lightest_helium_star, main_sequence_lifetime, main_sequence_radius,
-    main_sequence_structure, new_star_mass,
+    CORE_GYRATION, ConvectiveEnvelope, ENVELOPE_GYRATION, NewStar, RadiusAtAge, Remains, Structure,
+    bare_core_light, degenerate_giant_mass, giant_radius_exponent, lightest_helium_star,
+    main_sequence_lifetime, main_sequence_radius, main_sequence_structure, new_star_mass,
+    pulsing_agb_helium_core,
 };
 #[cfg(test)]
 pub(crate) use track::{early_agb_core_radius_bound, helium_zams_radius};
 
 // The core mass at the base of the AGB and the interpulse period, for P06.T18.b and T28.f.
-#[cfg_attr(
-    not(test),
-    expect(unused_imports, reason = "P06.T18.b and T28.f are the first callers")
-)]
 pub(crate) use agb::interpulse_period;
 pub(crate) use gb::mc_bagb as m_c_bagb;
 
@@ -95,6 +96,10 @@ pub use wind::WindRecipe;
 // Defined with the remnants; re-exported beside `WindRecipe`, the other choice a track is built
 // with, where plan 06's Provides places both.
 pub use crate::stellar::remnant::RemnantRecipe;
+
+// Tracks under a candidate helium table (P15.T7.b's fit, in `hyperion-fit`; `track/excess.rs`).
+#[cfg(any(test, feature = "testing"))]
+pub use track::{CandidateHeliumTable, track_with_helium_table};
 
 use crate::units::{SolarLuminosities, SolarMasses, SolarRadii};
 

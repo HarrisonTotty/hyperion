@@ -5,6 +5,7 @@
  */
 
 import type { CatalogueEntry } from "../view/engine/catalogue";
+import type { KernelPair } from "../view/engine/kernels";
 import type { GraphicsStatusStore } from "../view/engine/status";
 import type { RenderEngine } from "../view/engine/types";
 import {
@@ -29,6 +30,18 @@ export const BROKEN_ENTRY: CatalogueEntry = {
   }),
 };
 
+/**
+ * The cluster cull's kernel broken (plan R14, Design notes 16 and 17): under the fixture, a lit
+ * terrain pass is given it, whose compiler refuses it, and the pass must draw today's path and
+ * state the refusal (`terrainFrame.ts`).
+ */
+export const BROKEN_CULL_KERNEL: KernelPair = {
+  name: "broken cluster cull",
+  reference: "@compute @workgroup_size(1) fn main() { let x : u32 = oops; }",
+  subgroup: null,
+  readback: "presentation-only",
+};
+
 /** Makes every entry once and checks it compiled, and that the shader fault stayed clear. */
 export async function checkCatalogue(
   engine: RenderEngine,
@@ -46,10 +59,12 @@ export async function checkCatalogue(
       // oxlint-disable-next-line no-await-in-loop
       await checks.group(name, async () => {
         switch (entry.kind) {
-          case "material":
-            await engine.createMaterialAsync(entry.spec, ["rgba16float"]);
-            checks.check(name, true, "compiled");
+          case "material": {
+            const targets = entry.targets ?? ["rgba16float"];
+            await engine.createMaterialAsync(entry.spec, targets);
+            checks.check(name, true, `compiled for ${targets.join(", ")}`);
             break;
+          }
           case "compute": {
             const kernel = await engine.createComputeAsync(entry.spec);
             checks.check(name, true, `compiled on the ${kernel.path} path`);

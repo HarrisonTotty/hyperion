@@ -10,7 +10,7 @@
 //! nearest end of its segment. A body then moves at its own elements' Kepler speed, and its
 //! phase does not depend on where the clock's origin sits. The receding moon's integral is in
 //! closed form. Circularisation and mass loss integrate by the 16-point Gauss–Legendre rule on
-//! each interval between the law's break points ([`composite_excess`], P14.T45.d): the host's
+//! each interval between the law's break points (`composite_excess`, P14.T45.d): the host's
 //! track knots and segment boundaries, its sudden deaths and the eccentricity floor's corners.
 //! Between two of them the mean motion is smooth (a polynomial of degree 6 in time where a host's
 //! winds alone move it, since n ∝ M² under adiabatic mass loss, a M constant (Veras et al. 2011,
@@ -19,11 +19,11 @@
 //! one function of time. The one corner left unbroken is the track's floor at the core mass, which an envelope
 //! run down at the AGB's end could meet inside a knot interval; the rule is then exact only to
 //! that corner's error, as T45.a's one panel was at every kink. The host's mass is read smoothly in time for it
-//! ([`StarModel::phase_and_mass_at`](crate::stellar::system::StarModel::phase_and_mass_at)):
+//! (`StarModel::phase_and_mass_at`):
 //! read at a summed age of gigayears it steps every few seconds, and the steps' noise in the
-//! integral stepped the velocity at cell ends by up to 10⁻² m s⁻¹ on AGB hosts. [`EvolvingLaw`] is
+//! integral stepped the velocity at cell ends by up to 10⁻² m s⁻¹ on AGB hosts. `EvolvingLaw` is
 //! a law with its anchor, and its phase is the anchored elements' own phase plus
-//! [`EvolvingLaw::phase_excess`], ∫ (n − n at the anchor) dt'.
+//! `EvolvingLaw::phase_excess`, ∫ (n − n at the anchor) dt'.
 //!
 //! **What the integral holds to.** Inside the clock window the law's own phase error, times the
 //! along-track factor a √((1 + e) ÷ (1 − e)), is at most a tenth of [`DRIFT_TOLERANCE`] (10 µm),
@@ -44,7 +44,7 @@
 //! cut at the segment's ends, the clock window's and the law's break points, so that no kink of
 //! the law lies inside a cell.
 //! - **Inside a cell:** a = aᵣ + ȧ Δt, e = eᵣ + ė Δt and M = Mᵣ + nᵣ Δt + ½ ṅ Δt²
-//!   ([`KeplerElements::drifting_state_at`]).
+//!   (`KeplerElements::drifting_state_at`).
 //! - **The rates:** secants that meet the law at both ends of the cell.
 //! - **The cell's size:** the largest k whose model stays within [`DRIFT_TOLERANCE`] plus 2⁻⁵² of
 //!   the apoapsis of the law at the cell's quarter points. The law's phase inside a cell is the
@@ -210,7 +210,7 @@ impl DriftingOrbit {
 
     /// The position and velocity relative to the primary at `t`, m and m s⁻¹: the elements'
     /// Kepler state, or for an evolving orbit the model of its cell
-    /// ([`KeplerElements::drifting_state_at`]), whose velocity is its position's time derivative
+    /// (`KeplerElements::drifting_state_at`), whose velocity is its position's time derivative
     /// (P14.T45.e).
     #[must_use]
     pub fn relative_state_at(&self, t: UniverseTime) -> (SystemVector, SystemVelocity) {

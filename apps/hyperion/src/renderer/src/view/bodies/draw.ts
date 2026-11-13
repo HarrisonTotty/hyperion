@@ -23,7 +23,8 @@
  * dispatch of the `disc cells` pass, which shades every cell of the discs under 32 px at once for
  * their draws to read (R07.T8.d, {@link BODY_DISC_CELLS_KERNEL}). A disc shades from its
  * `DiscSurface` (T8.b): its photometry's uniform law, or R10's class map with a law per class; a
- * point keeps the photometry's law.
+ * point keeps the photometry's law, or integrates the class map where the rotation is known
+ * (R10.T10.f).
  *
  * A disc whose footprint overlaps geometry that writes depth (a mesh body, R10's terrain, a craft,
  * given as {@link BodyFrameOptions.depthWriters}) is promoted to the mesh regime for the frame
@@ -31,32 +32,106 @@
  * covered pixels with depth in the `bodies` pass, before the painter's sequence, and its limb is the
  * disc's limb draw at its place in the sequence, on the limb's plane. Both shade from its disc
  * record, so a promoted disc and its mesh draw the same light.
+ *
+ * A disc whose relief subtends the photorealistic style's τ at its limb (plan R10, R10.T10.e; R10
+ * Design note 13) is handed over to terrain (`terrain/handover.ts`' `handOverRegimes`), before
+ * the promotion: its regime is `terrain`, drawn as a mesh body is, its figure and its limb the
+ * reference surface beneath its terrain, discarded where its survey's coverage mask holds the
+ * ground surveyed (R10.T10.c), and its terrain the view's own (`PhotorealFrame.terrain`); a view
+ * that draws none draws its figure whole, as a mesh body's. The hand-over counts the pixels the
+ * view's terrain selects at ({@link BodyFrameOptions.selectionPx}, the presented size's CSS px;
+ * R10.T10.g), R07's 3 px switch the frame's own.
+ *
+ * A class-map disc whose surface carries the field's normal map (plan R10, R10.T10.g) shades its
+ * surveyed ground with those normals, in its draws and in the point it switches with: its records'
+ * flag (`packDiscRecords`' row 24) and the normal map's texture at binding 14 (`surfaceNormals`).
+ *
+ * A body given its ground's temperature field ({@link LitBodyInput.thermal}, plan R08, R08.T18.a)
+ * above R08's visibility cut has its record carry its emission (`discReflectance.ts`'
+ * `discEmissionOf`), and its disc, its mesh and its cells are drawn by the kernels' emissive forms
+ * ({@link BODY_DISC_EMISSIVE_MATERIALS}, {@link SMOOTH_MESH_EMISSIVE_MATERIAL},
+ * {@link BODY_DISC_CELLS_EMISSIVE_KERNEL}), made at the first such record; every other body is
+ * drawn by the plain kernels, as before.
+ *
+ * A body given its atmosphere's disc table ({@link LitBodyInput.air}, plan R08, R08.T16.b) is drawn
+ * by it beyond `GAS_GIANT_FULL_PASS_BOUNDARY_M` (`regime.ts`' `drawnByTable`, with R07's
+ * `REGIME_HYSTERESIS`), once the air forms are prepared ({@link BodyFrameOptions.drawsAir}): its
+ * record carries its air, it is drawn as a disc (not as a mesh for its air's composite), and the
+ * plan names it among {@link BodyFramePlan.tabled}, whose full passes the renderer draws none of.
+ * Its disc, its mesh and its cells are drawn by the kernels' air forms
+ * ({@link BODY_DISC_AIR_MATERIALS}, {@link SMOOTH_MESH_AIR_MATERIAL},
+ * {@link BODY_DISC_CELLS_AIR_KERNEL}), the table at group 2's binding 15.
+ *
+ * A body given its disc's ground beneath a gas envelope's air ({@link LitBodyInput.ground}, plan
+ * R08, R08.T16.a.2 and R08.T16.b.2) draws its disc, its mesh and its limb black on that ground's
+ * figure, its table's where its table draws it; its point, the planetshine it gives and its
+ * eclipses keep its figure and photometry.
  */
 import type { BodyIdHex } from "@hyperion/protocol";
 
-import { norm, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
-import type { DiscSurface } from "../appearance/bodyAppearance";
+import { dot, norm, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
+import type { DiscNormalMap, DiscSurface } from "../appearance/bodyAppearance";
 import type { BodyFigure, BodyPhotometry } from "../appearance/fromWire";
-import type { QualitySetting } from "../quality/qualitySetting";
+import { lawFor } from "../appearance/phase";
+import type { DiscGround } from "../atmosphere/AtmosphereCache";
+import type { ClusterBuckets } from "../clusters/buckets";
+import { type ClusterConsumer, ClusterConsumerPath } from "../clusters/consumer";
+import { CLUSTER_CULL_KERNEL } from "../clusters/cull";
+import { type CullPass, MAX_CULL_PASSES } from "../clusters/cullPass";
+import { CLUSTER_SHAPE_CODE } from "../clusters/record";
+import { smoothFigureClusterMesh } from "../clusters/templates";
+import { TERRAIN_BLOCKS, TERRAIN_CLUSTERS_PER_PAGE } from "../clusters/terrain";
+import { type GeometrySettings, type QualitySetting, SETTINGS } from "../quality/qualitySetting";
+import { coverageMaskTextureSpec } from "../terrain/coverage";
+import { frustumOf } from "../terrain/cull";
 import { patchMeshData } from "../terrain/gpu/resources";
+import { INSTANCE_RECORD_BYTES } from "../terrain/gpu/uniforms";
+import {
+  handoverDetailShare,
+  type HandoverSphere,
+  handoverSubtense,
+  handOverRegimes,
+  handoverTauPx,
+  limbDistanceM,
+  pixelAngleRad,
+} from "../terrain/handover";
 import patchVertexWgsl from "../terrain/shaders/patchVertex.wgsl?raw";
-import { PHASE_TABLE_SAMPLES, type PhotometricLaw } from "../appearance/law";
+import { limbShareAt, PHASE_TABLE_SAMPLES, type PhotometricLaw } from "../appearance/law";
 import { packPhaseFactorRows } from "../appearance/litBodyProbe";
 import { BUFFER_USAGE, TEXTURE_USAGE } from "../engine/gpuFlags";
 import type { KernelPair } from "../engine/kernels";
+import { EngineUnavailable } from "../engine/resilientEngine";
 import type {
   BufferHandle,
   ComputeHandle,
   DrawItem,
   MaterialHandle,
   MeshHandle,
+  PreparedTarget,
   RenderEngine,
+  TextureBindingSpec,
   TextureHandle,
   ViewSize,
   WgslMaterialSpec,
 } from "../engine/types";
+import {
+  type DiscAir,
+  discEmissionOf,
+  withDiscAir,
+  withDiscEmission,
+  withDiscEmissionAndAir,
+} from "../atmosphere/discReflectance";
+import type { SurfaceTemperatureField } from "../atmosphere/thermal";
+import {
+  createAirlessTables,
+  SURFACE_LIGHTING_WGSL,
+  surfaceLightingDrawTextures,
+  surfaceLightingKernelTextures,
+  type SurfaceLightingTables,
+  surfaceLightingTextures,
+} from "../atmosphere/surfaceLighting";
 import { type ProjectionCamera, project, type Viewport } from "../camera/projection";
-import { type Rotation3, rotateToBody } from "../coords/rotation";
+import { IDENTITY_ROTATION, type Rotation3, rotateToBody } from "../coords/rotation";
 import { discEclipseVisible } from "../lighting/discEclipse";
 import { hostAnnuli, type LightAtPoint, lightsAt, type PlacedLight } from "../lighting/hostLights";
 import { type LightingBody, type LightingSphere, occludersFor } from "../lighting/occluders";
@@ -69,13 +144,19 @@ import {
 } from "../lighting/planetshine";
 import { PSF_QUAD_PX } from "../photometry/magnitude";
 import { type SpriteRecord, spriteRecord } from "../wireframe/drawList";
-import type { Rgb } from "../photometry/toneCurve";
+import { HDR_COLOUR_FORMAT, type Rgb } from "../photometry/toneCurve";
 import frameWgsl from "../shaders/frame.wgsl?raw";
 import litBodyWgsl from "../shaders/litBody.wgsl?raw";
 import bodyDiscWgsl from "../shaders/bodyDisc.wgsl?raw";
+import cubeTexelWgsl from "../shaders/cubeTexel.wgsl?raw";
+import maturityNodesWgsl from "../shaders/maturityNodes.wgsl?raw";
 import bodyDiscCellsWgsl from "../shaders/bodyDiscCells.wgsl?raw";
+import bodyDiscCellsPackedWgsl from "../shaders/bodyDiscCellsPacked.wgsl?raw";
 import bodyDiscDrawWgsl from "../shaders/bodyDiscDraw.wgsl?raw";
+import figureResolveWgsl from "../shaders/figureResolve.wgsl?raw";
 import smoothMeshWgsl from "../shaders/smoothMesh.wgsl?raw";
+import smoothMeshClusterWgsl from "../shaders/smoothMeshCluster.wgsl?raw";
+import smoothMeshIdsWgsl from "../shaders/smoothMeshIds.wgsl?raw";
 import { sphereOutsideView, sphereScreenRect, WIREFRAME_MESHES } from "../wireframe/submit";
 import {
   type DiscCellJobs,
@@ -90,14 +171,22 @@ import {
   MAX_DISC_OCCLUDERS,
   packDiscRecords,
 } from "./discShading";
+import { type AirPointBody, airPointReflection, warmAirPoint } from "./airPoint";
+import {
+  classMapPointReflection,
+  nearClassMapPointSwitch,
+  warmClassMapPoint,
+} from "./classMapPoint";
 import { CLASS_MAP_FORMAT, discSurfaceLaws } from "./discSurface";
 import { bodyReflection, figurePole } from "./oblate";
 import { type HostSphere, type PainterEntry, painterOrder } from "./painter";
 import {
+  drawnAsMesh,
+  drawnByTable,
   type LitRegime,
-  type LitSphere,
   litRegimes,
   promoteOverlapping,
+  REGIME_HYSTERESIS,
   type ScreenCircle,
   sphereFootprint,
 } from "./regime";
@@ -105,6 +194,7 @@ import {
   DISC_LIMB_DEPTHS,
   type LimbDepths,
   limbDepths,
+  packSmoothClusterRecords,
   packSmoothMeshes,
   rotationColumns,
   type SmoothMesh,
@@ -134,12 +224,83 @@ export interface LitBodyInput {
    * geometry: the frame's hosts and the other bodies where they are drawn.
    */
   readonly lighting: LightingFrame | undefined;
+  /**
+   * Its atmosphere's tables, through which its disc's light crosses the air (plan R08, R08.T9.b;
+   * `surfaceLighting.wgsl`): each star's and planetshine source's transmittance and the sky's
+   * irradiance. Absent, a body without one, whose draws bind the one-texel defaults. Until R08.T10.b
+   * draws a body's atmosphere in the view, no caller gives one.
+   */
+  readonly atmosphere?: SurfaceLightingTables;
+  /**
+   * Its ground's temperature field (plan R08, R08.T18.a; `thermal.ts`' `groundTemperatureFieldOf`),
+   * for a body drawn with no medium whose record gives one; above the visibility cut its disc adds
+   * the light its ground emits (`discReflectance.ts`). Absent, its disc reflects alone.
+   */
+  readonly thermal?: SurfaceTemperatureField;
+  /**
+   * Its atmosphere's disc table (plan R08, R08.T16.b; `AtmosphereTables.discReflectance`), by which
+   * its disc is drawn beyond the 10⁹ m boundary in place of its air's full passes; absent before
+   * its bake lands, or for a body without air.
+   */
+  readonly air?: DiscAir;
+  /**
+   * The ground its disc stands on beneath its air where its drawn medium has a gas envelope (plan
+   * R08, R08.T16.a.2 and R08.T16.b.2; `AtmosphereCache.discGroundOf`), given by a frame that draws
+   * that air: its disc, its mesh and its limb are drawn black on it, so that the air's march lays
+   * the envelope over its own ground and not over the record's 1-bar disc, whose photometry already
+   * holds the clouds. Its point, the planetshine it gives and its eclipses keep
+   * {@link LitBodyInput.figure} and {@link LitBodyInput.photometry}. Absent, its disc is drawn on
+   * them.
+   */
+  readonly ground?: DiscGround;
+  /**
+   * The GPU's coverage mask of its survey (plan R10, R10.T10.c; `terrain/coverage.ts`'
+   * `CoverageMask.texture`) with the axes it is read in, given by a view that draws its terrain,
+   * with which its figure and its limb, once it is handed over (`terrain`), are the reference
+   * surface beneath that terrain: discarded wherever the mask holds a cell surveyed, so that the
+   * terrain alone draws that ground (R10's Design note 12). Read by no other regime; absent, the
+   * figure and the limb are drawn whole.
+   */
+  readonly surveyCoverage?: MeshBodyCoverage;
+  /**
+   * Its relief for the hand-over to terrain (plan R10, R10.T10.e; `terrain/handover.ts`'
+   * `handoverReliefM`: R09's realised relief, m, where its field's header is held and its survey
+   * covers ground); absent, it never hands over.
+   */
+  readonly handoverReliefM?: number;
+}
+
+/** A mesh body's coverage mask and the body-fixed axes it is read in (R10.T10.c). */
+export interface MeshBodyCoverage {
+  readonly mask: TextureHandle;
+  /** The body's rotation, body-fixed to galactic axes. */
+  readonly rotation: Rotation3;
+  /**
+   * Whether the mask holds every cell surveyed (`CoverageMask.whole`), when the figure and the limb
+   * discard every pixel and the `disc cells` pass shades none of the body's (R07.T8.h).
+   */
+  readonly whole: boolean;
 }
 
 /** What the plan needs of the view. */
 export interface BodyFrameOptions {
   readonly camera: ProjectionCamera;
+  /** The frame's own viewport, device px: the scene target's, at the frame's internal scale. */
   readonly viewport: Viewport;
+  /**
+   * The size the view is presented at, device px, its canvas's, whose centre pixel the hand-over to
+   * terrain measures (plan R10, R10.T10.g; decision-r10-t16-leans §13), so that the resolution
+   * controller's scale never moves it: `viewport` itself where the frame is drawn at the presented
+   * size. R07's 3 px switch keeps `viewport`.
+   */
+  readonly presentedPx: Viewport;
+  /**
+   * The size the view's terrain selects at, whose centre pixel the hand-over measures in its place:
+   * {@link BodyFrameOptions.presentedPx} ÷ max(1, the display's device-pixel ratio), its CSS px
+   * (`selectionViewport`; lean 2026-11-01), so that the hand-over and the field's want stay
+   * together; absent, `presentedPx`, as at a ratio of 1.
+   */
+  readonly selectionPx?: Viewport;
   /** The exposure scale the target is pre-exposed with (`exposureScale`), 1 ÷ (cd/m²). */
   readonly exposureScale: number;
   /** The eclipse term's annuli: `DISC_ANNULI_HIGH` or `DISC_ANNULI_LOW`. */
@@ -154,8 +315,39 @@ export interface BodyFrameOptions {
    * disc overlapping one, or a mesh body, is drawn as a mesh (Design note 2). Absent, none.
    */
   readonly depthWriters?: ReadonlyArray<ScreenCircle>;
+  /**
+   * The bodies drawn with depth whenever they are drawn larger than a point, each with the radius
+   * of its air's shell, m: those whose atmosphere the frame draws (plan R08, R08.T10.b), whose
+   * composite lays the air over the ground by its depth and would otherwise draw its own bare
+   * ground over a disc's pixels. A disc among them is drawn as a mesh, and promotes the discs it
+   * overlaps as a mesh does, its footprint its shell's circle, over which its composite draws
+   * (`decision-r08-t10b-leans.md` §3). Absent, none.
+   */
+  readonly depthBodyShellRadiiM?: ReadonlyMap<BodyIdHex, number>;
   /** The view's quality setting, which a mesh body's selection takes. */
   readonly setting: QualitySetting;
+  /**
+   * Whether the air forms are prepared to draw a body by its disc table (plan R08, R08.T16.b): while
+   * they are not, every body with air keeps its full passes at every distance. Absent, `false`.
+   */
+  readonly drawsAir?: boolean;
+  /**
+   * The bodies drawn by their disc tables on the previous frame ({@link BodyFramePlan.tabled}), for
+   * the boundary's hysteresis. Absent, none.
+   */
+  readonly previousTabled?: ReadonlySet<BodyIdHex>;
+  /**
+   * Each body handed over on the previous frame and its relief's subtense where it handed over
+   * ({@link BodyFramePlan.handedOver}), from which its terrain's own detail fades in (R10.T15.b.2).
+   * Absent, every body's fade starts at τ (1 + h), the hand-over's own threshold.
+   */
+  readonly previousHandedOver?: ReadonlyMap<BodyIdHex, number>;
+  /**
+   * The cells per axis a disc of 32 px or more takes in its limb pixels (`discSamples`):
+   * `PhotorealSettings.floorLimbSamples` while the view's frame-rate floor stands at its lowest
+   * step (R07.T8.i). Absent, `LIMB_SAMPLES`.
+   */
+  readonly limbSamples?: number;
 }
 
 /** A body drawn as a mesh this frame (T9). */
@@ -166,6 +358,44 @@ export interface MeshBodyPlan {
   readonly mesh: SmoothMesh;
   /** Its limb draw's corner depths, on the limb's plane. */
   readonly limbDepths: LimbDepths;
+  /** How it came to be drawn as a mesh, and with it what its figure leaves to its terrain. */
+  readonly role: MeshBodyRole;
+}
+
+/**
+ * Why a body is drawn as a mesh (T9; plan R10, R10.T10.e): `promoted` by its overlaps alone
+ * (`mesh`), its figure drawn whole, or `handed-over` to terrain (`terrain`), whose ground R05's
+ * quadtree draws over its figure, with its survey's coverage mask, which discards its figure where
+ * the terrain draws the ground (R10.T10.c), or `null` where the view gives it none, and the share
+ * of its own sub-cell shading its terrain is drawn with this frame over the disc's (R10.T15.b.2;
+ * `handoverDetailShare`), 1 where its disc carries no normal map to fade from.
+ */
+export type MeshBodyRole =
+  | { readonly kind: "promoted" }
+  | {
+      readonly kind: "handed-over";
+      readonly coverage: MeshBodyCoverage | null;
+      readonly detailShare: number;
+    };
+
+/**
+ * The coverage mask that discards a mesh body's figure and its limb: a handed-over body's, a
+ * promoted one none.
+ *
+ * @remarks
+ * Over the image its datum gives way on the same mask (plan R10, R10.T16.f; `surveyedDatumsOf`).
+ */
+export function coverageOf(role: MeshBodyRole): MeshBodyCoverage | null {
+  let coverage: MeshBodyCoverage | null;
+  switch (role.kind) {
+    case "promoted":
+      coverage = null;
+      break;
+    case "handed-over":
+      coverage = role.coverage;
+      break;
+  }
+  return coverage;
 }
 
 /** A point body's sprite: R02's sprite record, its depth its own (decision-r07-t8a, item 2). */
@@ -195,10 +425,99 @@ export interface BodyFramePlan {
   /** The phase table's rows, the frame's distinct laws in first use, a class map's included. */
   readonly laws: ReadonlyArray<PhotometricLaw>;
   readonly steps: ReadonlyArray<BodyStep>;
+  /**
+   * The sources that light each body drawn as a disc or a mesh, by body: the arrays its record was
+   * shaded from, which its atmosphere's sky takes as they are (plan R08, Design note 7's one list;
+   * R08.T10.b), never ranked again.
+   */
+  readonly sources: ReadonlyMap<BodyIdHex, BodyLightSources>;
+  /**
+   * The bodies drawn by their disc tables beyond the 10⁹ m boundary (plan R08, R08.T16.b), each
+   * with a record that carries its air: their air's full passes are not drawn. The next frame's
+   * {@link BodyFrameOptions.previousTabled}.
+   */
+  readonly tabled: ReadonlySet<BodyIdHex>;
+  /**
+   * Each body handed over to terrain, with its relief's subtense, in τ, at its first frame handed
+   * over (`handoverSubtense`; R10.T15.b.2), for the next frame's
+   * {@link BodyFrameOptions.previousHandedOver}.
+   */
+  readonly handedOver: ReadonlyMap<BodyIdHex, number>;
 }
+
+/**
+ * The sources that light a body in a frame (plan R08, Design note 7's one list): its stars, R07's
+ * `lightsAt` past `STAR_CUT_RELATIVE`, brightest first, at most {@link MAX_DISC_LIGHTS}, each
+ * `toStarM` from its centre; and its planetshine sources (`planetshineSources`, at the setting's
+ * count), their directions along the same axes.
+ */
+export interface BodyLightSources {
+  readonly stars: ReadonlyArray<LightAtPoint>;
+  readonly planetshine: ReadonlyArray<SecondarySource>;
+}
+
+/**
+ * The sources that light `body` in a frame of `bodies`, as {@link planLitBodies} builds them for a
+ * body it draws: for one it holds no record of, the camera's local body while terrain draws it
+ * from inside its figure's sphere (plan R08, R08.T10.b), so that its air is lit as its surface is.
+ *
+ * @param bodies - The frame's lit bodies, which light it by planetshine.
+ * @param hosts - The lights where they are drawn, for a body without its own lighting frame.
+ */
+export function bodyLightSources(
+  body: LitBodyInput,
+  bodies: ReadonlyArray<LitBodyInput>,
+  hosts: ReadonlyArray<PlacedLight>,
+  options: Pick<BodyFrameOptions, "annuli" | "planetshine">,
+): BodyLightSources {
+  return {
+    stars: lightsOf(body, hosts),
+    planetshine: planetshineSources(
+      body,
+      litNeighbours(bodies, hosts, options.annuli),
+      options.planetshine,
+    ),
+  };
+}
+
+/**
+ * What a disc beneath a gas envelope's air is drawn with ({@link LitBodyInput.ground}; plan R08,
+ * R08.T16.a.2): black, a Lambert sphere of geometric albedo 0, as `ATMOSPHERE TEST` drew
+ * `TEST JUPITER`'s.
+ */
+const GROUND_SURFACE: DrawnDiscSurface = {
+  kind: "uniform",
+  law: lawFor([0, 0, 0], [1.5, 1.5, 1.5], "lambert"),
+};
+
+/** No body drawn with depth for its air. */
+const NO_DEPTH_BODY_SHELLS: ReadonlyMap<BodyIdHex, number> = new Map();
+
+/** No body. */
+const NO_BODIES: ReadonlySet<BodyIdHex> = new Set();
 
 /** A body whose centre is within this fraction of its radius is seen from inside, and not drawn. */
 const INSIDE_MARGIN = 1e-9;
+
+/**
+ * Whether the camera stands within a body's figure, `centreM` the body's centre from the camera,
+ * m: the spheroid of `figure`'s equatorial radius a and polar radius c, m, about the unit `pole`, to
+ * {@link INSIDE_MARGIN}: ρ²/a² + z²/c² ≤ (1 + margin)², z along the pole and ρ across it. Not its
+ * equatorial sphere: over an oblate body's high latitudes the ground lies inside that sphere, by
+ * about (a − c) sin²φ, some 19 km at 69° for the Earth (WGS 84's a − c, 21.4 km), so that a camera
+ * low over it stands within the sphere and still outside the figure (fix-mac-batch-tools: a
+ * decked world's low window, 4 km up at 69°, drew no body at all).
+ */
+export function insideFigure(
+  centreM: Vec3,
+  figure: Pick<BodyFigure, "equatorialRadiusM" | "polarRadiusM">,
+  pole: Vec3,
+): boolean {
+  const { equatorialRadiusM: a, polarRadiusM: c } = figure;
+  const zM = -dot(centreM, pole);
+  const rho2M2 = Math.max(0, dot(centreM, centreM) - zM * zM);
+  return !(rho2M2 / (a * a) + (zM * zM) / (c * c) > (1 + INSIDE_MARGIN) ** 2);
+}
 
 /**
  * The stars that light a body: past the cut, the brightest {@link MAX_DISC_LIGHTS}, from its
@@ -236,11 +555,20 @@ function occludersOf(
 /**
  * A point body's flux at the camera per display channel, lx: E p (a ÷ Δ)² Φ(α) for a sphere; for a
  * spheroid the law integrated over its figure, (E ÷ π)(a ÷ Δ)² A′ f(α) K (`bodyReflection`, A′ the
- * disc's scaled A), so that the point and the disc draw one flux. Each star's light is cut by its
- * eclipse over the disc the camera sees (`discEclipseVisible`, T10.b), the share of the light the
- * disc regime's pixels sum, so that the flux stays continuous at the 3 px switch through an
- * eclipse. Each planetshine source adds its own term, as a point source at its centre's direction
- * and never eclipsed (Design note 7).
+ * disc's scaled A), so that the point and the disc draw one flux. Under a class map, where the
+ * body's rotation is known, each light's term is the map integrated over the figure by the disc's
+ * own arithmetic (`classMapPointReflection`, plan R10, R10.T10.f), on its normal map's slopes where
+ * it carries one (R10.T10.g), so that the point meets the patterned disc it switches with;
+ * otherwise it is the photometry's law, which equals the map's `elsewhere`. Each star's light is
+ * cut by its eclipse over the disc the camera sees
+ * (`discEclipseVisible`, T10.b), the share of the light the disc regime's pixels sum, so that the
+ * flux stays continuous at the 3 px switch through an eclipse; it takes the photometry's limb
+ * share under a class map too. Each planetshine source adds its own term, as a point source at its
+ * centre's direction and never eclipsed (Design note 7). A body given its disc table
+ * ({@link LitBodyInput.air}) takes each star's term as its disc drawn by that table reflects it
+ * (`airPoint.ts`' `airPointReflection`, R08.T16.b), its ratio to the airless term found in the
+ * frames' slices, so that the point meets that disc at the 3 px switch; its planetshine stays
+ * airless.
  *
  * @param hosts - The lights where they are drawn, for a body without its own lighting frame.
  * @param occluders - The bodies that may eclipse its stars (`occludersFor`).
@@ -259,15 +587,20 @@ export function pointFlux(
   const toCamera = scale(body.centreM, -1 / distanceM);
   const solid = (body.figure.equatorialRadiusM / distanceM) ** 2;
   const blockers = occluders.map(({ centreM, radiusM }) => ({ centreM, radiusM }));
+  const reflection = pointReflectionOf(body, toCamera);
+  const lights = lightsOf(body, hosts);
+  // A body with air takes its tabled disc's light of each star (R08.T16.b; `airPoint.ts`).
+  const air = airPointBodyOf(body, lights, toCamera, k);
   const flux: [number, number, number] = [0, 0, 0];
-  for (const light of lightsOf(body, hosts)) {
-    const reflected = bodyReflection(body.figure, law, normalise(light.toStarM), toCamera);
+  for (const [slot, light] of lights.entries()) {
+    const airless = reflection(normalise(light.toStarM), starLightKey(light));
+    const reflected = air === null ? airless : airPointReflection(air, slot, airless);
     const visible = discEclipseVisible(
       light.host,
       body,
       blockers,
       toCamera,
-      law.lommelSeeligerShare,
+      (alpha) => limbShareAt(law, alpha),
       k,
     );
     for (const ch of [0, 1, 2] as const) {
@@ -275,12 +608,170 @@ export function pointFlux(
     }
   }
   for (const source of secondaries) {
-    const reflected = bodyReflection(body.figure, law, source.direction, toCamera);
+    const reflected = reflection(source.direction, source.body);
     for (const ch of [0, 1, 2] as const) {
       flux[ch] += source.illuminance[ch] * solid * reflected[ch];
     }
   }
   return flux;
+}
+
+/** A star's key among a body's lights, by which a class map's held ratios are its own. */
+function starLightKey(light: LightAtPoint): string {
+  return `star ${String(light.host.disc.star)}`;
+}
+
+/**
+ * A body with air as its point's samples take it (`airPoint.ts`): the disc its table draws, on its
+ * ground's table figure and black beneath a gas envelope's air (R08.T16.b.2), else on its own figure
+ * and surface; the point's own disc; and its stars, with the annuli its records take. `null` for a
+ * body given no disc table.
+ */
+function airPointBodyOf(
+  body: LitBodyInput,
+  lights: ReadonlyArray<LightAtPoint>,
+  towardsObserver: Vec3,
+  annuli: number,
+): AirPointBody | null {
+  const { air, ground } = body;
+  if (air === undefined) {
+    return null;
+  }
+  const surface = drawnSurface(body);
+  const figure = {
+    equatorialRadiusM: body.figure.equatorialRadiusM,
+    polarRadiusM: body.figure.polarRadiusM,
+  };
+  const classMapped = surface.kind === "class-map" ? surface : null;
+  return {
+    air,
+    figure,
+    surface,
+    airedFigure: ground === undefined ? figure : ground.tableFigure,
+    airedSurface: ground === undefined ? surface : GROUND_SURFACE,
+    pole:
+      classMapped === null
+        ? figurePole(body.figure)
+        : rotateToBody(classMapped.rotation, vec3(0, 0, 1)),
+    rotation: classMapped?.rotation ?? null,
+    classMap: classMapped?.texels ?? null,
+    towardsObserver,
+    airlessIsDisc: classMapped === null,
+    lights: lights.map((light) => {
+      const distanceM = norm(light.toStarM);
+      return {
+        towardsLight: scale(light.toStarM, 1 / distanceM),
+        distanceM,
+        radiusM: light.host.disc.radius_m,
+        annuli: hostAnnuli(light.host.disc, annuli),
+        key: starLightKey(light),
+      };
+    }),
+  };
+}
+
+/**
+ * Begins, in the frames' slices, each star's air ratio of a body with air drawn as a disc near the
+ * 3 px switch (`airPoint.ts`' `warmAirPoint`), from the geometry its point would take, so that its
+ * first frame as a point finds each star's held. Nothing for a body without a disc table or past the
+ * band.
+ */
+function warmAirPointOf(
+  body: LitBodyInput,
+  lit: BodyLightSources,
+  options: Pick<BodyFrameOptions, "camera" | "viewport" | "annuli">,
+): void {
+  if (
+    body.air === undefined ||
+    !nearClassMapPointSwitch(
+      angularDiameterPx(
+        body.centreM,
+        body.figure.equatorialRadiusM,
+        options.camera,
+        options.viewport,
+      ),
+    )
+  ) {
+    return;
+  }
+  const air = airPointBodyOf(
+    body,
+    lit.stars,
+    scale(body.centreM, -1 / norm(body.centreM)),
+    options.annuli,
+  );
+  if (air !== null) {
+    warmAirPoint(air);
+  }
+}
+
+/**
+ * Begins, in the frames' slices, the point's ratio of each light of a body drawn as a disc near the
+ * 3 px switch under a class map (plan R10, R10.T14.f's deferred lever; `warmClassMapPoint`), from
+ * the geometry its point would take (`pointFlux`'s lights, directions and keys), so that its first
+ * frame as a point finds each light's ratio held; and notes its map near the switch, so that the
+ * slices step its build. Nothing for a body without a class map, a known rotation, or the band.
+ */
+function warmPointOf(
+  body: LitBodyInput,
+  lit: BodyLightSources,
+  camera: ProjectionCamera,
+  viewport: Viewport,
+): void {
+  const { surface, rotation } = body;
+  if (
+    surface?.kind !== "class-map" ||
+    rotation === undefined ||
+    !nearClassMapPointSwitch(
+      angularDiameterPx(body.centreM, body.figure.equatorialRadiusM, camera, viewport),
+    )
+  ) {
+    return;
+  }
+  const toCamera = scale(body.centreM, -1 / norm(body.centreM));
+  for (const light of lit.stars) {
+    warmClassMapPoint(
+      body.figure,
+      surface,
+      rotation,
+      normalise(light.toStarM),
+      toCamera,
+      starLightKey(light),
+    );
+  }
+  for (const source of lit.planetshine) {
+    warmClassMapPoint(body.figure, surface, rotation, source.direction, toCamera, source.body);
+  }
+}
+
+/**
+ * What a point body reflects of a light from its direction towards the camera, uneclipsed: its
+ * class map integrated (`classMapPointReflection`, R10.T10.f) where its surface is one and its
+ * rotation is known, and otherwise its photometry's law over its figure (`bodyReflection`). The
+ * frame never makes a map's elements: until the frames' slices have, the point is the map's stand-in
+ * (the map it replaced) or the uniform point, as before the map came (R10.T14.f). Each light is
+ * named by its key, a star's index or a planetshine source's body, by which the map's held ratios
+ * are its own.
+ */
+function pointReflectionOf(
+  body: LitBodyInput,
+  toCamera: Vec3,
+): (towardsLight: Vec3, lightKey: string) => Rgb {
+  const { surface, rotation } = body;
+  if (surface?.kind === "class-map" && rotation !== undefined) {
+    return (towardsLight, lightKey) =>
+      classMapPointReflection(body.figure, surface, rotation, towardsLight, toCamera, lightKey);
+  }
+  return (towardsLight) => bodyReflection(body.figure, body.photometry.law, towardsLight, toCamera);
+}
+
+/**
+ * The normal map a drawn surface shades its surveyed ground with (plan R10, R10.T10.g), its class
+ * map's, or `null` where it has none: what a handed-over body's terrain fades its own shading from
+ * near the hand-over (R10.T15.b.2).
+ */
+export function drawnNormalMap(surface: DrawnDiscSurface): DiscNormalMap | null {
+  return surface.kind === "class-map" ? surface.normals : null;
 }
 
 /**
@@ -308,15 +799,22 @@ function drawnSurface(body: LitBodyInput): DrawnDiscSurface {
 function discRecordOf(
   body: LitBodyInput,
   surface: DrawnDiscSurface,
-  hosts: ReadonlyArray<PlacedLight>,
+  sources: BodyLightSources,
   occluders: ReadonlyArray<LightingBody>,
-  neighbours: ReadonlyArray<LitNeighbour>,
   tableRows: ReadonlyArray<number>,
   options: BodyFrameOptions,
+  air: DiscAir | undefined,
 ): DiscRecord | null {
   const { equatorialRadiusM: a, polarRadiusM: c } = body.figure;
   const distanceM = norm(body.centreM);
-  if (!(distanceM > a * (1 + INSIDE_MARGIN))) {
+  // A class map is oriented by the rotation, whose z axis is then the pole the figure is drawn about.
+  const pole =
+    surface.kind === "class-map"
+      ? rotateToBody(surface.rotation, vec3(0, 0, 1))
+      : figurePole(body.figure);
+  // Seen from inside its figure, which the camera may be within its equatorial sphere and outside
+  // of, low over an oblate body's high latitudes, where its terrain draws it.
+  if (insideFigure(body.centreM, body.figure, pole)) {
     return null;
   }
   // A body wholly off the view draws no pixel. Behind the camera or across its plane its rectangle
@@ -329,14 +827,12 @@ function discRecordOf(
     return null;
   }
   const direction = scale(body.centreM, 1 / distanceM);
-  // A class map is oriented by the rotation, whose z axis is then the pole the figure is drawn about.
-  const pole =
-    surface.kind === "class-map"
-      ? rotateToBody(surface.rotation, vec3(0, 0, 1))
-      : figurePole(body.figure);
   const aOverD = a / distanceM;
-  const samples = discSamples(angularDiameterPx(body.centreM, a, options.camera, options.viewport));
-  const lights: DiscLight[] = lightsOf(body, hosts).map((light) => {
+  const samples = discSamples(
+    angularDiameterPx(body.centreM, a, options.camera, options.viewport),
+    options.limbSamples,
+  );
+  const lights: DiscLight[] = sources.stars.map((light) => {
     const d = norm(light.toStarM);
     return {
       direction: scale(light.toStarM, 1 / d),
@@ -350,13 +846,24 @@ function discRecordOf(
     centre: scale(sub(occluder.centreM, body.centreM), 1 / a),
     radius: occluder.radiusM / a,
   }));
-  const secondaries = planetshineSources(body, neighbours, options.planetshine);
-  const shine: DiscSecondary[] = secondaries.map((source) => ({
+  const shine: DiscSecondary[] = sources.planetshine.map((source) => ({
     direction: source.direction,
     distance: source.distanceM / a,
     radius: source.radiusM / a,
     illuminance: source.illuminance,
   }));
+  // Its ground's emission above the cut (R08.T18.a), about its brightest star, beside its air's
+  // table where it is drawn by it (R08.T18.b), whose third form dims it by the air.
+  const emission =
+    body.thermal === undefined
+      ? null
+      : discEmissionOf(
+          body.thermal,
+          discSurfaceLaws(surface).map((law) => law.a),
+          lights.map((light) => light.illuminance),
+          lights[0]?.direction ?? vec3(0, 0, 0),
+          surface.kind === "class-map" ? (surface.meltClasses ?? []) : [],
+        );
   return {
     body: body.id,
     rect,
@@ -372,6 +879,9 @@ function discRecordOf(
     lights,
     occluders: blockers,
     secondaries: shine,
+    ...(body.atmosphere === undefined ? {} : { atmosphere: body.atmosphere }),
+    ...(emission === null ? {} : { emission }),
+    ...(air === undefined ? {} : { air }),
   };
 }
 
@@ -417,11 +927,29 @@ function pointSpriteOf(
  * sprites.
  *
  * @remarks
- * A disc whose footprint overlaps one of `options.depthWriters` or a mesh body is promoted to a
- * mesh (`promoteOverlapping`). A mesh body's limb is drawn in the sequence as a disc's is, so the
- * order takes it as a disc (Design note 2); its figure's pixels are drawn before the sequence, with
- * depth. The order is the drawing's, by the drawn centres; each body is lit by its own lighting
- * frame where it has one (T10.a).
+ * A disc whose relief subtends the photorealistic style's τ on `options.setting` (R10's
+ * `handoverTauPx`) at its limb, in the centre pixels of the size the view's terrain selects at
+ * (`options.selectionPx`, the presented size's CSS px; plan R10, R10.T10.g), is handed over to
+ * terrain (`handOverRegimes`, plan R10, R10.T10.e). The two switches now count different pixels:
+ * R07's 3 px switch (`litRegimes`) the frame's own (`options.viewport`), in which the disc's summed
+ * flux meets the point's, and the hand-over the selection's, so that the resolution controller's
+ * internal scale, which moves the first, never moves the second (decision-r10-t16-leans §13). Its
+ * role carries the share of its own sub-cell shading its terrain is drawn with, by the same range
+ * and limb on the setting's `TerrainSettings.handoverDetail` (`handoverDetailShare`, R10.T15.b.2),
+ * from its subtense where it handed over ({@link BodyFrameOptions.previousHandedOver}), where its
+ * drawn surface carries the normal map the terrain fades from ({@link drawnNormalMap}). A
+ * disc whose footprint overlaps one of `options.depthWriters`, a mesh body or a body handed over is
+ * promoted to a mesh (`promoteOverlapping`). A mesh body's limb, a handed-over body's included, is
+ * drawn in the sequence as a disc's is, so the order takes it as a disc (Design note 2); its
+ * figure's pixels are drawn before the sequence, with depth. The order is the drawing's, by the
+ * drawn centres; each body is lit by its own lighting frame where it has one (T10.a).
+ *
+ * Under a class map the plan has two side effects on the point's module-wide work (plan R10,
+ * R10.T14.f's levers; `classMapPoint.ts`): a point it draws queues its map's build or a refresh
+ * where they are missing, and a disc it draws within `CLASS_MAP_POINT_BAND` × 3 px of the frame's
+ * own pixels queues its lights' refreshes (`warmClassMapPoint`); either notes its map near the
+ * switch, so that the terrain session's slices step them. A caller with no session (the smoke
+ * page) steps none of that work.
  *
  * @param hosts - The host stars where they are drawn, which keep their place in the order and
  *   light each body that has no lighting frame of its own (`LitBodyInput.lighting`).
@@ -433,16 +961,34 @@ export function planLitBodies(
   options: BodyFrameOptions,
   previous: ReadonlyMap<BodyIdHex, LitRegime>,
 ): BodyFramePlan {
-  const spheres: LitSphere[] = bodies.map((body) => ({
+  const spheres: HandoverSphere[] = bodies.map((body) => ({
     id: body.id,
     centreM: body.centreM,
     radiusM: body.figure.equatorialRadiusM,
+    reliefM: body.handoverReliefM,
   }));
+  const { camera, viewport } = options;
+  // A body with its disc table beyond the 10⁹ m boundary, the air forms prepared, is drawn by its
+  // table (R08.T16.b), with R07's hysteresis about the boundary.
+  const wasTabled = options.previousTabled ?? NO_BODIES;
+  const byTable = new Set<BodyIdHex>();
+  if (options.drawsAir === true) {
+    for (const body of bodies) {
+      if (body.air !== undefined && drawnByTable(norm(body.centreM), wasTabled.has(body.id))) {
+        byTable.add(body.id);
+      }
+    }
+  }
+  // A body whose air is drawn is drawn with depth (R08.T10.b), a disc of it as a mesh, and its
+  // footprint is its air's shell, which its composite draws over; one drawn by its table is a disc.
+  const givenShells = options.depthBodyShellRadiiM ?? NO_DEPTH_BODY_SHELLS;
+  const depthBodyShellRadiiM =
+    byTable.size === 0 ? givenShells : new Map([...givenShells].filter(([id]) => !byTable.has(id)));
   const footprints = new Map<BodyIdHex, ScreenCircle>();
   for (const sphere of spheres) {
     const footprint = sphereFootprint(
       sphere.centreM,
-      sphere.radiusM,
+      Math.max(sphere.radiusM, depthBodyShellRadiiM.get(sphere.id) ?? 0),
       options.camera,
       options.viewport,
     );
@@ -450,11 +996,24 @@ export function planLitBodies(
       footprints.set(sphere.id, footprint);
     }
   }
-  const regimes = promoteOverlapping(
-    litRegimes(spheres, options.camera, options.viewport, previous),
-    footprints,
-    options.depthWriters ?? [],
+  // The 3 px switch counts the frame's own pixels, where its flux match is drawn; the hand-over
+  // the presented ones, as the field's want does (R10.T10.g).
+  const tauPx = handoverTauPx("photorealistic", options.setting);
+  const radPerPx = pixelAngleRad(camera, options.selectionPx ?? options.presentedPx);
+  const handed = handOverRegimes(
+    litRegimes(spheres, camera, viewport, previous),
+    spheres,
+    tauPx,
+    radPerPx,
+    previous,
   );
+  const meshed = new Map<BodyIdHex, LitRegime>(
+    [...handed].map(([id, regime]) => [
+      id,
+      regime === "disc" && depthBodyShellRadiiM.has(id) ? "mesh" : regime,
+    ]),
+  );
+  const regimes = promoteOverlapping(meshed, footprints, options.depthWriters ?? []);
   const hostSpheres: HostSphere[] = hosts.map((host) => ({
     star: host.disc.star,
     centreM: host.centreM,
@@ -462,7 +1021,7 @@ export function planLitBodies(
   }));
   // A mesh body's limb takes its place in the sequence as a disc's does.
   const ordered = new Map<BodyIdHex, LitRegime>(
-    [...regimes].map(([id, regime]) => [id, regime === "mesh" ? "disc" : regime]),
+    [...regimes].map(([id, regime]) => [id, drawnAsMesh(regime) ? "disc" : regime]),
   );
   const order = painterOrder(spheres, ordered, hostSpheres);
   const byId = new Map(bodies.map((body) => [body.id, body]));
@@ -477,6 +1036,16 @@ export function planLitBodies(
   const discs: DiscRecord[] = [];
   const meshes: MeshBodyPlan[] = [];
   const steps: BodyStep[] = [];
+  const sources = new Map<BodyIdHex, BodyLightSources>();
+  const tabled = new Set<BodyIdHex>();
+  // Each handed-over body's subtense where it handed over (R10.T15.b.2): the previous frame's, or
+  // this frame's at its first frame handed over; τ (1 + h) where the caller keeps none.
+  const handedOver = new Map<BodyIdHex, number>();
+  const wasHandedOver = options.previousHandedOver;
+  const startOf = (id: BodyIdHex, subtense: number | null): number =>
+    wasHandedOver === undefined
+      ? 1 + REGIME_HYSTERESIS
+      : (wasHandedOver.get(id) ?? subtense ?? 1 + REGIME_HYSTERESIS);
   let run: PointSprite[] = [];
   const closeRun = (): void => {
     if (run.length > 0) {
@@ -502,7 +1071,21 @@ export function planLitBodies(
       }
       continue;
     }
-    const drawn = drawnSurface(body);
+    const air = byTable.has(body.id) ? body.air : undefined;
+    // A disc beneath a gas envelope's air stands black on that air's ground (R08.T16.a.2), on its
+    // table's figure where its table draws it (R08.T16.b.2); every other use keeps its own figure.
+    const { ground } = body;
+    const shown: LitBodyInput =
+      ground === undefined
+        ? body
+        : {
+            ...body,
+            figure: {
+              ...(air === undefined ? ground.figure : ground.tableFigure),
+              pole: body.figure.pole,
+            },
+          };
+    const drawn = ground === undefined ? drawnSurface(body) : GROUND_SURFACE;
     const rows = discSurfaceLaws(drawn).map((law) => {
       let row = laws.indexOf(law);
       if (row < 0) {
@@ -511,20 +1094,59 @@ export function planLitBodies(
       }
       return row;
     });
-    const record = discRecordOf(body, drawn, hosts, occluders, neighbours, rows, options);
+    const lit: BodyLightSources = {
+      stars: lightsOf(body, hosts),
+      planetshine: planetshineSources(body, neighbours, options.planetshine),
+    };
+    const record = discRecordOf(shown, drawn, lit, occluders, rows, options, air);
     if (record === null) {
       continue;
     }
+    if (air !== undefined) {
+      tabled.add(body.id);
+    }
+    sources.set(body.id, lit);
     closeRun();
-    if (regimes.get(body.id) === "mesh") {
-      const { camera, viewport } = options;
+    const regime = regimes.get(body.id);
+    // A disc near the 3 px switch begins its point's lights in the slices (R10.T14.f), its air's
+    // too (R08.T16.b).
+    if (regime !== "terrain") {
+      warmPointOf(body, lit, camera, viewport);
+      warmAirPointOf(body, lit, options);
+    }
+    if (drawnAsMesh(regime)) {
+      // Only a body handed over has terrain over its figure to give the surveyed ground to.
+      const subtense = handoverSubtense(
+        limbDistanceM(norm(body.centreM), body.figure.equatorialRadiusM),
+        body.handoverReliefM ?? null,
+        tauPx,
+        radPerPx,
+      );
+      if (regime === "terrain" && subtense !== null) {
+        handedOver.set(body.id, startOf(body.id, subtense));
+      }
+      const role: MeshBodyRole =
+        regime === "terrain"
+          ? {
+              kind: "handed-over",
+              coverage: body.surveyCoverage ?? null,
+              detailShare:
+                drawnNormalMap(drawn) === null
+                  ? 1
+                  : handoverDetailShare(
+                      subtense,
+                      startOf(body.id, subtense),
+                      SETTINGS[options.setting].terrain.handoverDetail,
+                    ),
+            }
+          : { kind: "promoted" };
       steps.push({ kind: "limb", mesh: meshes.length });
       meshes.push({
         index: discs.length,
         mesh: smoothMeshOf(
           body.id,
           body.centreM,
-          body.figure,
+          shown.figure,
           record.pole,
           camera,
           viewport,
@@ -532,12 +1154,13 @@ export function planLitBodies(
         ),
         limbDepths: limbDepths(
           body.centreM,
-          body.figure,
+          shown.figure,
           record.pole,
           record.rect,
           camera,
           viewport,
         ),
+        role,
       });
     } else {
       steps.push({ kind: "disc", index: discs.length });
@@ -545,25 +1168,112 @@ export function planLitBodies(
     discs.push(record);
   }
   closeRun();
-  return { regimes, order, discs, meshes, laws, steps };
+  return { regimes, order, discs, meshes, laws, steps, sources, tabled, handedOver };
 }
 
-const DISC_SOURCE = frameWgsl + litBodyWgsl + bodyDiscWgsl + bodyDiscDrawWgsl;
+/**
+ * What every lit-body module composes before its own: R01's frame, R08's surface lighting (plan
+ * R08, R08.T9.b: `preciseTrig.wgsl`, `common.wgsl`, `oblate.wgsl` and `surfaceLighting.wgsl`, in
+ * place of `litBody.wgsl`'s stubs), the lit-body library, the cube sphere's texel lookup
+ * (`cubeTexel.wgsl`, R10.T11), the maturity nodes' formula (`maturityNodes.wgsl`, R10.T1.c) and
+ * the disc's shading.
+ */
+const LIT_SOURCE =
+  frameWgsl +
+  SURFACE_LIGHTING_WGSL +
+  litBodyWgsl +
+  cubeTexelWgsl +
+  maturityNodesWgsl +
+  bodyDiscWgsl;
 
-/** The disc's textures: the frame's phase table, and its class map (any texture where uniform). */
-const DISC_TEXTURES = [
-  { name: "phaseFactorTable", binding: 1, sampleType: "unfilterable-float" },
-  { name: "classWeights", binding: 2, viewDimension: "2d-array" },
-] as const;
+const DISC_SOURCE = LIT_SOURCE + bodyDiscDrawWgsl;
+
+/** The group 2 binding of the first of the body's atmosphere tables (`bodyDisc.wgsl`), past 0–5. */
+const ATMOSPHERE_FIRST_BINDING = 6;
+
+/** The group 2 binding of a class map's normal map (`bodyDisc.wgsl`'s `surface_normals`, R10.T10.g). */
+const SURFACE_NORMALS_BINDING = 14;
 
 /**
- * The disc draws' uniforms: the record, the draw (0 its wholly covered pixels, 1 its limb), and its
- * rectangle's corner depths (0 for a disc body; a mesh body's limb plane's, T9).
+ * The group 2 binding of the body's table below a cloud deck (`bodyDisc.wgsl`'s
+ * `atmosphere_below_deck`, R08.T15.b.2): past the mesh's coverage mask (13), the normal map (14)
+ * and the disc's table (15).
+ */
+const BELOW_DECK_BINDING = 16;
+
+/**
+ * The group 2 binding of the sources' transmittance table (`bodyDisc.wgsl`'s
+ * `atmosphere_source_table`, R08.T9.b's lever), past the table below a deck.
+ */
+const SOURCE_TABLE_BINDING = 17;
+
+/**
+ * The disc's textures: the frame's phase table, its class map (any texture where uniform), its
+ * body's atmosphere tables at bindings 6 to 12 (plan R08, R08.T9.b), the one-texel defaults for a
+ * body without one, and its class map's normal map at binding 14 (plan R10, R10.T10.g), any
+ * texture where it has none (its record's flag then 0, and the texture unread).
+ */
+const DISC_TEXTURES: ReadonlyArray<TextureBindingSpec> = [
+  { name: "phaseFactorTable", binding: 1, sampleType: "unfilterable-float" },
+  { name: "classWeights", binding: 2, viewDimension: "2d-array" },
+  ...surfaceLightingTextures(ATMOSPHERE_FIRST_BINDING, BELOW_DECK_BINDING, SOURCE_TABLE_BINDING),
+  { name: "surfaceNormals", binding: SURFACE_NORMALS_BINDING, viewDimension: "2d-array" },
+];
+
+/**
+ * The group 2 binding of a body's coverage mask (`smoothMesh.wgsl` and `bodyDiscDraw.wgsl`,
+ * R10.T10.c), past the disc's.
+ */
+const COVERAGE_MASK_BINDING = 13;
+
+/** The coverage mask's entry in the mesh's and the disc draws' layouts, read by `textureLoad`. */
+const COVERAGE_MASK_TEXTURE: TextureBindingSpec = {
+  name: "coverageMask",
+  binding: COVERAGE_MASK_BINDING,
+  viewDimension: "2d-array",
+};
+
+/**
+ * The disc draws' textures: {@link DISC_TEXTURES} with the body's coverage mask at binding 13
+ * (plan R10, R10.T10.c), which a handed-over mesh body's limb reads to discard its pixels over its
+ * surveyed terrain; the mask of no surveyed cell for every other draw.
+ */
+const DISC_DRAW_TEXTURES: ReadonlyArray<TextureBindingSpec> = [
+  ...DISC_TEXTURES,
+  COVERAGE_MASK_TEXTURE,
+];
+
+/** The group 2 binding of a body's disc table (`discAir.wgsl`'s `disc_reflectance`, R08.T16.b). */
+const DISC_TABLE_BINDING = 15;
+
+/** The disc table's entry in the air forms' layouts, read by `textureLoad`. */
+const DISC_TABLE_TEXTURE: TextureBindingSpec = {
+  name: "discReflectance",
+  binding: DISC_TABLE_BINDING,
+  sampleType: "unfilterable-float",
+  viewDimension: "2d-array",
+};
+
+/**
+ * The air forms' textures (plan R08, R08.T16.b): {@link DISC_DRAW_TEXTURES} with the body's disc
+ * table at binding 15, the first free past R08.T9.b's atmosphere tables, R10.T10.c's coverage mask
+ * (13) and R10.T10.g's normal map (14); the plain forms' layouts are as they were.
+ */
+const DISC_AIR_TEXTURES: ReadonlyArray<TextureBindingSpec> = [
+  ...DISC_DRAW_TEXTURES,
+  DISC_TABLE_TEXTURE,
+];
+
+/**
+ * The disc draws' uniforms: the record, the draw (0 its wholly covered pixels, 1 its limb), its
+ * rectangle's corner depths (0 for a disc body; a mesh body's limb plane's, T9), and the axes its
+ * coverage mask is read in (R10.T10.c).
  */
 const DISC_UNIFORMS = [
   { name: "disc", type: "u32" },
   { name: "edgePass", type: "u32" },
   { name: "depths", type: "vec4f" },
+  { name: "coverageAxes", type: "mat4x4f" },
 ] as const;
 
 /**
@@ -575,7 +1285,11 @@ const DISC_STORAGE = [
   { name: "cellSums", binding: 5 },
 ] as const;
 
-/** The disc's two materials: its wholly covered pixels, opaque, and its limb, premultiplied. */
+/**
+ * The disc's two materials: its wholly covered pixels, opaque, and its limb, premultiplied, which
+ * for a handed-over mesh body discards its pixels over the ground its coverage mask holds
+ * surveyed (`bodyDiscDraw.wgsl`, R10.T10.c).
+ */
 export const BODY_DISC_MATERIALS: Readonly<Record<"interior" | "limb", WgslMaterialSpec>> = {
   interior: {
     name: "bodies:disc",
@@ -584,7 +1298,7 @@ export const BODY_DISC_MATERIALS: Readonly<Record<"interior" | "limb", WgslMater
     fragmentWgsl: DISC_SOURCE,
     uniforms: DISC_UNIFORMS,
     samplers: [],
-    textures: DISC_TEXTURES,
+    textures: DISC_DRAW_TEXTURES,
     storageBuffers: DISC_STORAGE,
     cullMode: "none",
     depthWrite: false,
@@ -598,7 +1312,7 @@ export const BODY_DISC_MATERIALS: Readonly<Record<"interior" | "limb", WgslMater
     fragmentWgsl: DISC_SOURCE,
     uniforms: DISC_UNIFORMS,
     samplers: [],
-    textures: DISC_TEXTURES,
+    textures: DISC_DRAW_TEXTURES,
     storageBuffers: DISC_STORAGE,
     cullMode: "none",
     depthWrite: false,
@@ -607,13 +1321,99 @@ export const BODY_DISC_MATERIALS: Readonly<Record<"interior" | "limb", WgslMater
   },
 };
 
-const SMOOTH_MESH_SOURCE =
-  frameWgsl + litBodyWgsl + bodyDiscWgsl + patchVertexWgsl + smoothMeshWgsl;
+/**
+ * The disc's two materials' emissive forms (plan R08, R08.T18.a): their source with `shade` adding
+ * the ground's emission (`discReflectance.ts`' `withDiscEmission`), drawn for the records that carry
+ * it; the same bindings, uniforms and states.
+ */
+export const BODY_DISC_EMISSIVE_MATERIALS: Readonly<Record<"interior" | "limb", WgslMaterialSpec>> =
+  (() => {
+    const source = withDiscEmission(DISC_SOURCE);
+    const { interior, limb } = BODY_DISC_MATERIALS;
+    return {
+      interior: {
+        ...interior,
+        name: "bodies:discEmissive",
+        displayName: "EMISSIVE BODY DISCS",
+        vertexWgsl: source,
+        fragmentWgsl: source,
+      },
+      limb: {
+        ...limb,
+        name: "bodies:discLimbEmissive",
+        displayName: "EMISSIVE DISC LIMBS",
+        vertexWgsl: source,
+        fragmentWgsl: source,
+      },
+    };
+  })();
+
+/**
+ * The disc's two materials' air forms (plan R08, R08.T16.b): their source with `shade` handing its
+ * light to `disc_air` (`discReflectance.ts`' `withDiscAir`), drawn for the records that carry their
+ * air beyond the 10⁹ m boundary; the same uniforms and states, and the disc table at binding 15.
+ */
+export const BODY_DISC_AIR_MATERIALS: Readonly<Record<"interior" | "limb", WgslMaterialSpec>> =
+  (() => {
+    const source = withDiscAir(DISC_SOURCE);
+    const { interior, limb } = BODY_DISC_MATERIALS;
+    return {
+      interior: {
+        ...interior,
+        name: "bodies:discAir",
+        displayName: "ATMOSPHERIC BODY DISCS",
+        vertexWgsl: source,
+        fragmentWgsl: source,
+        textures: DISC_AIR_TEXTURES,
+      },
+      limb: {
+        ...limb,
+        name: "bodies:discLimbAir",
+        displayName: "ATMOSPHERIC DISC LIMBS",
+        vertexWgsl: source,
+        fragmentWgsl: source,
+        textures: DISC_AIR_TEXTURES,
+      },
+    };
+  })();
+
+/**
+ * The disc's two materials' forms for emission and air together (plan R08, R08.T18.b;
+ * `discReflectance.ts`' `withDiscEmissionAndAir`), drawn for the records that carry both: a body
+ * with air whose ground glows, drawn by its disc table beyond the 10⁹ m boundary; the air forms'
+ * uniforms, states and table.
+ */
+export const BODY_DISC_EMISSIVE_AIR_MATERIALS: Readonly<
+  Record<"interior" | "limb", WgslMaterialSpec>
+> = (() => {
+  const source = withDiscEmissionAndAir(DISC_SOURCE);
+  const { interior, limb } = BODY_DISC_AIR_MATERIALS;
+  return {
+    interior: {
+      ...interior,
+      name: "bodies:discEmissiveAir",
+      displayName: "GLOWING ATMOSPHERIC DISCS",
+      vertexWgsl: source,
+      fragmentWgsl: source,
+    },
+    limb: {
+      ...limb,
+      name: "bodies:discLimbEmissiveAir",
+      displayName: "GLOWING ATMOSPHERIC LIMBS",
+      vertexWgsl: source,
+      fragmentWgsl: source,
+    },
+  };
+})();
+
+const SMOOTH_MESH_SOURCE = LIT_SOURCE + patchVertexWgsl + smoothMeshWgsl;
 
 /**
  * The mesh regime's material (T9): R05's patches of a body's spheroid at zero height, one
  * instanced draw a body, opaque with depth, shading the pixels the body covers wholly from its
- * disc record (`shaders/smoothMesh.wgsl`).
+ * disc record (`shaders/smoothMesh.wgsl`), and, beneath a body's surveyed terrain, discarding the
+ * pixels whose ground the coverage mask holds surveyed (plan R10, R10.T10.c): the reference
+ * surface drawn with the inverse mask.
  */
 export const SMOOTH_MESH_MATERIAL: WgslMaterialSpec = {
   name: "bodies:smoothMesh",
@@ -624,9 +1424,10 @@ export const SMOOTH_MESH_MATERIAL: WgslMaterialSpec = {
     { name: "disc", type: "u32" },
     { name: "firstInstance", type: "u32" },
     { name: "bodyRotation", type: "mat4x4f" },
+    { name: "coverageAxes", type: "mat4x4f" },
   ],
   samplers: [],
-  textures: DISC_TEXTURES,
+  textures: [...DISC_TEXTURES, COVERAGE_MASK_TEXTURE],
   storageBuffers: [
     { name: "discs", binding: 0 },
     { name: "slots", binding: 3 },
@@ -640,40 +1441,397 @@ export const SMOOTH_MESH_MATERIAL: WgslMaterialSpec = {
 };
 
 /**
+ * The mesh regime's material's emissive form (plan R08, R08.T18.a; `withDiscEmission`), for the
+ * records that carry their ground's emission; the same bindings, uniforms and states.
+ */
+export const SMOOTH_MESH_EMISSIVE_MATERIAL: WgslMaterialSpec = (() => {
+  const source = withDiscEmission(SMOOTH_MESH_SOURCE);
+  return {
+    ...SMOOTH_MESH_MATERIAL,
+    name: "bodies:smoothMeshEmissive",
+    displayName: "EMISSIVE BODY MESHES",
+    vertexWgsl: source,
+    fragmentWgsl: source,
+  };
+})();
+
+/**
+ * The mesh regime's material's air form (plan R08, R08.T16.b; `withDiscAir`), for the records that
+ * carry their air; the same uniforms and states, and the disc table at binding 15.
+ */
+export const SMOOTH_MESH_AIR_MATERIAL: WgslMaterialSpec = (() => {
+  const source = withDiscAir(SMOOTH_MESH_SOURCE);
+  return {
+    ...SMOOTH_MESH_MATERIAL,
+    name: "bodies:smoothMeshAir",
+    displayName: "ATMOSPHERIC BODY MESHES",
+    vertexWgsl: source,
+    fragmentWgsl: source,
+    textures: [...(SMOOTH_MESH_MATERIAL.textures ?? []), DISC_TABLE_TEXTURE],
+  };
+})();
+
+/**
+ * The mesh regime's material's form for emission and air together (plan R08, R08.T18.b;
+ * `withDiscEmissionAndAir`), for the records that carry both; the air form's bindings and states.
+ */
+export const SMOOTH_MESH_EMISSIVE_AIR_MATERIAL: WgslMaterialSpec = (() => {
+  const source = withDiscEmissionAndAir(SMOOTH_MESH_SOURCE);
+  return {
+    ...SMOOTH_MESH_AIR_MATERIAL,
+    name: "bodies:smoothMeshEmissiveAir",
+    displayName: "GLOWING ATMOSPHERIC MESHES",
+    vertexWgsl: source,
+    fragmentWgsl: source,
+  };
+})();
+
+/** smoothMesh.wgsl's vertex stage's head, which the figure's cluster path calls as `smooth_vertex`. */
+const FIGURE_VERTEX_HEAD =
+  "@vertex\nfn vertexMain(@location(0) grid : vec3f, @builtin(instance_index) instance : u32) -> MeshVarying {";
+
+/** {@link FIGURE_VERTEX_HEAD} as a function, no longer an entry point. */
+const FIGURE_VERTEX_FUNCTION = "fn smooth_vertex(grid : vec3f, instance : u32) -> MeshVarying {";
+
+/** smoothMesh.wgsl's `Draw`'s last field and its end, after which the cluster path takes its base. */
+const FIGURE_DRAW_END = "  coverageAxes : mat4x4f,\n}";
+
+/**
+ * A form of the mesh regime's figure on the cluster path (plan R14, R14.T4.a): `spec`'s bindings,
+ * uniforms, states and fragment stage, its `Draw` taking `clusterBase` after its own fields, its
+ * vertex stage renamed `smooth_vertex`, a function, which `smoothMeshCluster.wgsl`'s entry point
+ * hands each template vertex as R05's patch mesh's own and its instance, read from a bucket's list;
+ * every placement as the instanced draw's.
+ *
+ * @throws Error unless the figure's vertex stage and its `Draw`'s end each occur once in `spec`.
+ */
+export function figureClusterMaterial(
+  spec: WgslMaterialSpec,
+  displayName: string,
+): WgslMaterialSpec {
+  const heads = spec.vertexWgsl.split(FIGURE_VERTEX_HEAD);
+  const draws = heads.join(FIGURE_VERTEX_FUNCTION).split(FIGURE_DRAW_END);
+  if (heads.length !== 2 || draws.length !== 2) {
+    throw new Error(
+      `a figure's cluster form needs smoothMesh.wgsl's vertex stage and Draw once each, found ${String(heads.length - 1)} and ${String(draws.length - 1)}`,
+    );
+  }
+  const source = `${draws.join(
+    "  coverageAxes : mat4x4f,\n  // The bucket's first entry in the lists (`clusters/buckets.ts`' `clusterBase`).\n  clusterBase : u32,\n}",
+  )}\n${smoothMeshClusterWgsl}`;
+  return {
+    ...spec,
+    name: `${spec.name}Cluster`,
+    displayName,
+    vertexWgsl: source,
+    fragmentWgsl: source,
+    uniforms: [...spec.uniforms, { name: "clusterBase", type: "u32" }],
+    storageBuffers: [
+      ...(spec.storageBuffers ?? []),
+      { name: "clusterLists", binding: 22, stages: ["vertex"] },
+    ],
+  };
+}
+
+/** The mesh regime's figure's material on the cluster path (plan R14, R14.T4.a). */
+export const SMOOTH_MESH_CLUSTER_MATERIAL = figureClusterMaterial(
+  SMOOTH_MESH_MATERIAL,
+  "BODY MESH CLUSTERS",
+);
+
+/** Its emissive form on the cluster path (plan R14, R14.T4.a; R08.T18.a). */
+export const SMOOTH_MESH_EMISSIVE_CLUSTER_MATERIAL = figureClusterMaterial(
+  SMOOTH_MESH_EMISSIVE_MATERIAL,
+  "EMISSIVE MESH CLUSTERS",
+);
+
+/** Its air form on the cluster path (plan R14, R14.T4.a; R08.T16.b). */
+export const SMOOTH_MESH_AIR_CLUSTER_MATERIAL = figureClusterMaterial(
+  SMOOTH_MESH_AIR_MATERIAL,
+  "ATMOSPHERIC MESH CLUSTERS",
+);
+
+/** Its form for emission and air together on the cluster path (plan R14, R14.T4.a; R08.T18.b). */
+export const SMOOTH_MESH_EMISSIVE_AIR_CLUSTER_MATERIAL = figureClusterMaterial(
+  SMOOTH_MESH_EMISSIVE_AIR_MATERIAL,
+  "GLOWING MESH CLUSTERS",
+);
+
+/** smoothMesh.wgsl's fragment stage's head, whose place the figure's raster takes. */
+const FIGURE_FRAGMENT_HEAD = "@fragment\nfn fragmentMain(v : MeshVarying) -> @location(0) vec4f {";
+
+/** bodyDiscDraw.wgsl's fragment stage's head, whose place the figure's resolve takes. */
+const DISC_FRAGMENT_HEAD = "@fragment\nfn fragmentMain(v : DiscVarying) -> @location(0) vec4f {";
+
+/**
+ * `source` with its fragment stage, from `head` to the source's end, where it is last, replaced by
+ * `stage`'s source.
+ *
+ * @throws Error unless `head` occurs once in `source`.
+ */
+function withFragmentStage(source: string, head: string, stage: string): string {
+  const parts = source.split(head);
+  const [kept] = parts;
+  if (parts.length !== 2 || kept === undefined) {
+    throw new Error(
+      `a figure's screen form needs its fragment stage once, found ${String(parts.length - 1)}`,
+    );
+  }
+  return `${kept}${stage}`;
+}
+
+/** The figure's raster's source: the mesh regime's vertex stage, then `smoothMeshIds.wgsl`. */
+const SMOOTH_MESH_IDS_SOURCE = withFragmentStage(
+  SMOOTH_MESH_SOURCE,
+  FIGURE_FRAGMENT_HEAD,
+  smoothMeshIdsWgsl,
+);
+
+/**
+ * The mesh regime's figure's raster (plan R07, the owner's Mac; `GeometrySettings.figureShading`
+ * `screen`, `shaders/smoothMeshIds.wgsl`): {@link SMOOTH_MESH_MATERIAL}'s vertex stage, bindings,
+ * uniforms and states, its fragment stage writing the record's index into the view's `r32uint`
+ * figure IDs wherever the forward draw's would shade, and discarding where it discards, so that it
+ * writes the forward draw's depth; one form for every record, since it forms no light.
+ */
+export const SMOOTH_MESH_IDS_MATERIAL: WgslMaterialSpec = {
+  ...SMOOTH_MESH_MATERIAL,
+  name: "bodies:smoothMeshIds",
+  displayName: "BODY MESH IDS",
+  vertexWgsl: SMOOTH_MESH_IDS_SOURCE,
+  fragmentWgsl: SMOOTH_MESH_IDS_SOURCE,
+};
+
+/** Its form on the cluster path (plan R14, R14.T4.a). */
+export const SMOOTH_MESH_IDS_CLUSTER_MATERIAL = figureClusterMaterial(
+  SMOOTH_MESH_IDS_MATERIAL,
+  "MESH ID CLUSTERS",
+);
+
+/** The group 2 binding of the view's figure IDs (`figureResolve.wgsl`), past every other. */
+const FIGURE_IDS_BINDING = 18;
+
+/** The figure IDs' entry in the resolve's layouts: an `r32uint` read by `textureLoad`. */
+const FIGURE_IDS_TEXTURE: TextureBindingSpec = {
+  name: "figureIds",
+  binding: FIGURE_IDS_BINDING,
+  sampleType: "uint",
+};
+
+/** The figure's resolve's source: the disc's vertex stage, then `figureResolve.wgsl`. */
+const FIGURE_RESOLVE_SOURCE = withFragmentStage(DISC_SOURCE, DISC_FRAGMENT_HEAD, figureResolveWgsl);
+
+/**
+ * The mesh regime's figure's resolve (plan R07, the owner's Mac; `GeometrySettings.figureShading`
+ * `screen`, `shaders/figureResolve.wgsl`), in each form: the disc's interior draw over the body's
+ * rectangle, its corners at depth 1 (`FIGURE_RESOLVE_DEPTHS`), shading each pixel whose figure ID is
+ * its record's as the forward draw does and discarding the rest; the disc's interior's uniforms,
+ * storage and states, its form's textures and the figure IDs at binding 18.
+ */
+export const FIGURE_RESOLVE_MATERIALS: Readonly<Record<"plain" | FormKind, WgslMaterialSpec>> =
+  (() => {
+    const plain: WgslMaterialSpec = {
+      ...BODY_DISC_MATERIALS.interior,
+      name: "bodies:figureResolve",
+      displayName: "BODY FIGURE RESOLVE",
+      vertexWgsl: FIGURE_RESOLVE_SOURCE,
+      fragmentWgsl: FIGURE_RESOLVE_SOURCE,
+      textures: [...DISC_DRAW_TEXTURES, FIGURE_IDS_TEXTURE],
+    };
+    const emissive = withDiscEmission(FIGURE_RESOLVE_SOURCE);
+    const air = withDiscAir(FIGURE_RESOLVE_SOURCE);
+    const emissiveAir = withDiscEmissionAndAir(FIGURE_RESOLVE_SOURCE);
+    return {
+      plain,
+      emissive: {
+        ...plain,
+        name: "bodies:figureResolveEmissive",
+        displayName: "EMISSIVE FIGURE RESOLVE",
+        vertexWgsl: emissive,
+        fragmentWgsl: emissive,
+      },
+      air: {
+        ...plain,
+        name: "bodies:figureResolveAir",
+        displayName: "ATMOSPHERIC FIGURE RESOLVE",
+        vertexWgsl: air,
+        fragmentWgsl: air,
+        textures: [...DISC_AIR_TEXTURES, FIGURE_IDS_TEXTURE],
+      },
+      emissiveAir: {
+        ...plain,
+        name: "bodies:figureResolveEmissiveAir",
+        displayName: "GLOWING FIGURE RESOLVE",
+        vertexWgsl: emissiveAir,
+        fragmentWgsl: emissiveAir,
+        textures: [...DISC_AIR_TEXTURES, FIGURE_IDS_TEXTURE],
+      },
+    };
+  })();
+
+/**
+ * The figure's resolve's rectangle's corner depths: the near plane's, 1 under reversed-Z, so that
+ * the `greater-equal` test passes every pixel whatever was drawn; it writes none.
+ */
+const FIGURE_RESOLVE_DEPTHS: LimbDepths = [1, 1, 1, 1];
+
+/** The figure's cluster mesh and its templates (plan R14, R14.T4.a). */
+export const FIGURE_CLUSTER_MESH = smoothFigureClusterMesh();
+
+/**
+ * The mesh regime's figure as a consumer of the cluster path (plan R14, R14.T4.a): a patch's 64
+ * blocks and 32 skirt strips, drawn at stride 1 alone, R05's instance records
+ * (`packSmoothMeshes`), each patch its own page (`packSmoothClusterRecords`).
+ */
+export const FIGURE_CLUSTER_CONSUMER: ClusterConsumer = {
+  name: "bodies:figure clusters",
+  templates: FIGURE_CLUSTER_MESH.templates,
+  clustersPerPage: TERRAIN_CLUSTERS_PER_PAGE,
+  firstShape: CLUSTER_SHAPE_CODE["terrain-block"],
+  templateClusters: FIGURE_CLUSTER_MESH.templates.map(({ shape, stride }) =>
+    stride !== 1
+      ? 0
+      : shape === "terrain-block"
+        ? TERRAIN_BLOCKS
+        : TERRAIN_CLUSTERS_PER_PAGE - TERRAIN_BLOCKS,
+  ),
+  instanceBytes: INSTANCE_RECORD_BYTES,
+  vertexWgsl: smoothMeshClusterWgsl,
+};
+
+/** The figures' cull's timed label (plan R14, R14.T4.a): one dispatch a frame of mesh bodies. */
+export const FIGURE_CLUSTER_CULL_LABEL = "body cluster cull";
+
+/**
+ * How far each side of a figure's frustum is opened for its cull, rad: past the `f32` rounding of
+ * the planes, as the terrain's overlay's is (`terrainPass.ts`), so that no cluster that draws is
+ * refused.
+ */
+const FIGURE_CULL_MARGIN_RAD = 0.01;
+
+/**
  * The `disc cells` pass's label (R07.T8.d), between R06's sky and the mesh bodies' figures, which
  * read its sums as the `discs` pass does (`PHOTOREAL_PASS_LABELS.discCells`).
  */
 export const DISC_CELLS_PASS = "disc cells";
 
 /**
- * The `disc cells` kernel (R07.T8.d, decision-r07-small-disc-cost §1.2; `shaders/bodyDiscCells.wgsl`):
- * every cell of every pixel of the frame's small discs shaded at once, one invocation a cell, and
- * summed in each pixel's order for the draws to read.
+ * The `disc cells` kernel (R07.T8.d–g, decision-r07-small-disc-cost §1.2, decision-r08-t11-frame
+ * §2; `shaders/bodyDiscCells.wgsl`): every cell of every pixel of the frame's small discs, and of
+ * its larger discs' limbs and their faces' near-limb bands, shaded at once, one invocation a cell,
+ * as many pixels a workgroup as fit (R07.T8.g), and summed in each pixel's order for the draws to
+ * read.
  *
  * @remarks
  * Its one source serves both capability paths: it has no subgroup variant. Its sums are a pure
- * function of its inputs, so its readback is `bit-exact`, though nothing reads them back.
+ * function of its inputs, so its readback is `bit-exact`, though nothing reads them back. Each
+ * dispatch binds one set of a record's textures: its body's atmosphere tables (plan R08, R08.T9.b)
+ * or the one-texel defaults, and its class map and normal map or the texel of no weight
+ * (R07.T8.e), one dispatch a set ({@link discCellJobs}' sets).
  */
 export const BODY_DISC_CELLS_KERNEL: KernelPair = {
   name: "BODY DISC CELLS",
-  reference: frameWgsl + litBodyWgsl + bodyDiscWgsl + bodyDiscCellsWgsl,
+  reference: LIT_SOURCE + bodyDiscCellsWgsl,
   subgroup: null,
   readback: "bit-exact",
 };
 
-/** The workgroups a dispatch lays along x at most, the kernel's `JOBS_PER_ROW`. */
-const CELL_JOBS_PER_ROW = 65_535;
+/**
+ * The `disc cells` kernel's emissive form (plan R08, R08.T18.a; `withDiscEmission`), one dispatch
+ * a set of records that carry their ground's emission (`DiscCellSet.emissive`): one kernel more in
+ * R01.T15's bounded cache, made at the first frame that has such a record.
+ */
+export const BODY_DISC_CELLS_EMISSIVE_KERNEL: KernelPair = {
+  name: "BODY DISC CELLS, emissive",
+  reference: withDiscEmission(LIT_SOURCE + bodyDiscCellsWgsl),
+  subgroup: null,
+  readback: "bit-exact",
+};
 
 /**
- * The `disc cells` dispatch's workgroups for `jobs` jobs, one a job: (min(J, 65,535),
- * ⌈J ÷ 65,535⌉, 1), within WebGPU's 65,535 a dimension; the kernel leaves the last row's excess.
+ * The `disc cells` kernel's air form (plan R08, R08.T16.b; `withDiscAir`), one dispatch a set of
+ * records that carry their air (`DiscCellSet.air`): one kernel more in R01.T15's bounded cache,
+ * made at the first frame that has such a record.
  */
-export function cellWorkgroups(jobs: number): readonly [number, number, number] {
-  return [Math.min(jobs, CELL_JOBS_PER_ROW), Math.ceil(jobs / CELL_JOBS_PER_ROW), 1];
+export const BODY_DISC_CELLS_AIR_KERNEL: KernelPair = {
+  name: "BODY DISC CELLS, with air",
+  reference: withDiscAir(LIT_SOURCE + bodyDiscCellsWgsl),
+  subgroup: null,
+  readback: "bit-exact",
+};
+
+/**
+ * The `disc cells` kernel's form for emission and air together (plan R08, R08.T18.b;
+ * `withDiscEmissionAndAir`), one dispatch a set of records that carry both
+ * (`DiscCellSet.emissive` and `DiscCellSet.air`): one kernel more in R01.T15's bounded cache, made
+ * at the first frame that has such a record.
+ */
+export const BODY_DISC_CELLS_EMISSIVE_AIR_KERNEL: KernelPair = {
+  name: "BODY DISC CELLS, emissive, with air",
+  reference: withDiscEmissionAndAir(LIT_SOURCE + bodyDiscCellsWgsl),
+  subgroup: null,
+  readback: "bit-exact",
+};
+
+/**
+ * The `disc cells` kernel packed (plan R07, the owner's Mac; `GeometrySettings.discCells`
+ * `packed`, `shaders/bodyDiscCellsPacked.wgsl`): {@link BODY_DISC_CELLS_KERNEL}'s jobs, workgroups
+ * and sums, each workgroup's points shaded one an invocation over its list of them rather than each
+ * cell's by its own invocation, which leaves most lanes idle beside the cells across the limb that
+ * shade nine. The same functions on the same values in the same order, so its sums are that
+ * kernel's, bit for bit, and either kernel may stand in for the other.
+ */
+export const BODY_DISC_CELLS_PACKED_KERNEL: KernelPair = {
+  name: "BODY DISC CELLS, packed",
+  reference: LIT_SOURCE + bodyDiscCellsPackedWgsl,
+  subgroup: null,
+  readback: "bit-exact",
+};
+
+/** {@link BODY_DISC_CELLS_PACKED_KERNEL}'s emissive form (R08.T18.a), as the per-cell kernel has. */
+export const BODY_DISC_CELLS_PACKED_EMISSIVE_KERNEL: KernelPair = {
+  name: "BODY DISC CELLS, packed, emissive",
+  reference: withDiscEmission(LIT_SOURCE + bodyDiscCellsPackedWgsl),
+  subgroup: null,
+  readback: "bit-exact",
+};
+
+/** {@link BODY_DISC_CELLS_PACKED_KERNEL}'s air form (R08.T16.b), as the per-cell kernel has. */
+export const BODY_DISC_CELLS_PACKED_AIR_KERNEL: KernelPair = {
+  name: "BODY DISC CELLS, packed, with air",
+  reference: withDiscAir(LIT_SOURCE + bodyDiscCellsPackedWgsl),
+  subgroup: null,
+  readback: "bit-exact",
+};
+
+/**
+ * {@link BODY_DISC_CELLS_PACKED_KERNEL}'s form for emission and air together (R08.T18.b), as the
+ * per-cell kernel has.
+ */
+export const BODY_DISC_CELLS_PACKED_EMISSIVE_AIR_KERNEL: KernelPair = {
+  name: "BODY DISC CELLS, packed, emissive, with air",
+  reference: withDiscEmissionAndAir(LIT_SOURCE + bodyDiscCellsPackedWgsl),
+  subgroup: null,
+  readback: "bit-exact",
+};
+
+/** The workgroups a dispatch lays along x at most, the kernel's `GROUPS_PER_ROW`. */
+const CELL_GROUPS_PER_ROW = 65_535;
+
+/**
+ * The `disc cells` dispatch's grid for a set's `groups` workgroups (its `DiscCellSet.groups`,
+ * each a run of pixels, R07.T8.g): (min(G, 65,535), ⌈G ÷ 65,535⌉, 1), within WebGPU's 65,535 a
+ * dimension; the kernel leaves the last row's excess.
+ */
+export function cellWorkgroups(groups: number): readonly [number, number, number] {
+  return [Math.min(groups, CELL_GROUPS_PER_ROW), Math.ceil(groups / CELL_GROUPS_PER_ROW), 1];
 }
 
 /** Bytes of one pixel's sums in `cell_sums`: two `vec4f`. */
 const CELL_SUM_BYTES = 32;
+
+/** The name of the buffer of the `disc cells` pass's sums, which the smoke reads back. */
+export const CELL_SUMS_BUFFER_NAME = "bodies:disc cell sums";
 
 /**
  * What the `disc cells` pass takes of the `discs` pass it serves (R07.T8.d): that pass's frame,
@@ -717,8 +1875,11 @@ export type LitBodyEngine = Pick<
   | "releaseBuffer"
   | "releaseTexture"
   | "dispatch"
+  | "createComputeAsync"
+  | "releaseCompute"
   | "onRestored"
   | "capabilities"
+  | "prepareMaterial"
 >;
 
 interface DeviceResources {
@@ -731,17 +1892,190 @@ interface DeviceResources {
   readonly sprites: BufferHandle[];
   table: TextureHandle;
   tableRows: number;
-  /** A texel of no weight, bound where a disc's surface is uniform and never read. */
+  /**
+   * A texel of no weight, bound where a disc's surface is uniform, and where it carries no normal
+   * map (R10.T10.g), and never read.
+   */
   readonly noClassMap: TextureHandle;
+  /**
+   * A coverage mask of no surveyed cell, one texel a face, bound where a mesh body has no survey
+   * (R10.T10.c): its figure is drawn whole.
+   */
+  readonly noCoverage: TextureHandle;
+  /**
+   * The one-texel atmosphere tables of a body without one (plan R08, R08.T9.b), and the `disc
+   * cells` pass's always: the lookups read 1 and 0 through them.
+   */
+  readonly noAtmosphere: SurfaceLightingTables;
+  /** A disc table of zeros, bound where a record carries no air (R08.T16.b), never read. */
+  readonly noDiscTable: TextureHandle;
   /** The mesh regime's material and R05's 65 × 65 patch with skirts (T9). */
   readonly mesh: MaterialHandle;
   readonly patch: MeshHandle;
+  /**
+   * The figure shaded once a pixel (plan R07, the owner's Mac; `GeometrySettings.figureShading`
+   * `screen`): its raster into the view's figure IDs, instanced and on the cluster path, one for
+   * every form, and its plain resolve; made with the rest, their pipelines prepared at the first
+   * plan that asks for them (`LitBodyRenderer.screenReady`).
+   */
+  readonly meshIds: MaterialHandle;
+  readonly meshClusterIds: MaterialHandle;
+  readonly resolve: MaterialHandle;
+  /**
+   * The figures' cluster path (plan R14, R14.T4.a): its material, its cluster mesh, its path's
+   * buckets, the frame's records, and the cull's kernel once compiled, `null` before and where it
+   * could not be, when every figure draws instanced.
+   */
+  readonly meshCluster: MaterialHandle;
+  readonly clusterMesh: MeshHandle;
+  readonly clusters: ClusterConsumerPath;
+  clusterRecords: BufferHandle;
+  cullKernel: ComputeHandle | null;
   /** The frame's smooth figures' slot and instance records. */
   slots: BufferHandle;
   instances: BufferHandle;
   /** The `disc cells` pass's jobs and the pixels' sums it leaves (R07.T8.d). */
   cellJobs: BufferHandle;
+  /** Its workgroups' runs of the jobs (R07.T8.g). */
+  cellGroups: BufferHandle;
   cellSums: BufferHandle;
+  /**
+   * The disc's and the mesh's emissive forms (R08.T18.a), made and prepared at the first record
+   * that carries its ground's emission, and drawn once prepared; `null` until then.
+   */
+  emissive: FormMaterials | null;
+  /**
+   * Their air forms (R08.T16.b), made and prepared at the first body given its disc table, and drawn
+   * once prepared; `null` until then.
+   */
+  air: FormMaterials | null;
+  /**
+   * Their forms for emission and air together (R08.T18.b), made and prepared at the first record
+   * that carries both; `null` until then.
+   */
+  emissiveAir: FormMaterials | null;
+}
+
+/**
+ * A form of a disc's two materials and the mesh's (R08.T18.a's emissive, R08.T16.b's air), and
+ * whether they are prepared.
+ */
+interface FormMaterials {
+  readonly interior: MaterialHandle;
+  readonly limb: MaterialHandle;
+  readonly mesh: MaterialHandle;
+  /** The mesh's form on the cluster path (plan R14, R14.T4.a). */
+  readonly meshCluster: MaterialHandle;
+  /**
+   * The figure's resolve in this form (`figureShading` `screen`), made with the rest but prepared
+   * only where a plan asks for it (`LitBodyRenderer.screenReady`); `ready` does not wait on it.
+   */
+  readonly resolve: MaterialHandle;
+  ready: boolean;
+  /** Settles once their pipelines are prepared, or could not be. */
+  prepared: Promise<void>;
+}
+
+/**
+ * The kernels' forms beside the plain ones: R08.T18.a's emissive, R08.T16.b's air, and R08.T18.b's
+ * emissive with air.
+ */
+type FormKind = "emissive" | "air" | "emissiveAir";
+
+/** Each form's materials and what its failure to prepare is reported as. */
+const FORM_SPECS: Readonly<
+  Record<
+    FormKind,
+    {
+      readonly interior: WgslMaterialSpec;
+      readonly limb: WgslMaterialSpec;
+      readonly mesh: WgslMaterialSpec;
+      readonly meshCluster: WgslMaterialSpec;
+      readonly what: string;
+    }
+  >
+> = {
+  emissive: {
+    interior: BODY_DISC_EMISSIVE_MATERIALS.interior,
+    limb: BODY_DISC_EMISSIVE_MATERIALS.limb,
+    mesh: SMOOTH_MESH_EMISSIVE_MATERIAL,
+    meshCluster: SMOOTH_MESH_EMISSIVE_CLUSTER_MATERIAL,
+    what: "the emissive forms of the lit bodies",
+  },
+  air: {
+    interior: BODY_DISC_AIR_MATERIALS.interior,
+    limb: BODY_DISC_AIR_MATERIALS.limb,
+    mesh: SMOOTH_MESH_AIR_MATERIAL,
+    meshCluster: SMOOTH_MESH_AIR_CLUSTER_MATERIAL,
+    what: "the air forms of the lit bodies",
+  },
+  emissiveAir: {
+    interior: BODY_DISC_EMISSIVE_AIR_MATERIALS.interior,
+    limb: BODY_DISC_EMISSIVE_AIR_MATERIALS.limb,
+    mesh: SMOOTH_MESH_EMISSIVE_AIR_MATERIAL,
+    meshCluster: SMOOTH_MESH_EMISSIVE_AIR_CLUSTER_MATERIAL,
+    what: "the emissive forms with air of the lit bodies",
+  },
+};
+
+/**
+ * A plan's records as the renderer draws them (R08.T18.a): its own, or with no record's emission
+ * while the emissive forms are not prepared, and no record's air while the air forms are not
+ * (R08.T16.b), so that a frame draws its emission in all its passes or in none.
+ */
+interface DrawnPlan {
+  readonly plan: BodyFramePlan;
+  readonly records: ReadonlyArray<DiscRecord>;
+  /** The prepared emissive forms its emitting records are drawn by; `null` where none emits. */
+  readonly emissive: FormMaterials | null;
+  /** The prepared air forms its records with air are drawn by; `null` where none has air. */
+  readonly air: FormMaterials | null;
+  /**
+   * The prepared forms its records with emission and air are drawn by (R08.T18.b); `null` where
+   * none has both.
+   */
+  readonly emissiveAir: FormMaterials | null;
+}
+
+/** Whether a record carries its ground's emission and its air together (R08.T18.b). */
+function withEmissionAndAir(record: DiscRecord): boolean {
+  return record.emission !== undefined && record.air !== undefined;
+}
+
+/** A record without its emission, as the plain forms draw it. */
+function withoutEmission(record: DiscRecord): DiscRecord {
+  if (record.emission === undefined) {
+    return record;
+  }
+  const { emission: _emission, ...plain } = record;
+  return plain;
+}
+
+/** A record without its air, as the plain forms draw it. */
+function withoutAir(record: DiscRecord): DiscRecord {
+  if (record.air === undefined) {
+    return record;
+  }
+  const { air: _air, ...plain } = record;
+  return plain;
+}
+
+/** The forms a record is drawn by: its air's, its emission's, or the plain ones. */
+function formsOf(
+  record: DiscRecord,
+  drawn: DrawnPlan,
+  plain: Pick<FormMaterials, "interior" | "limb" | "mesh" | "meshCluster" | "resolve">,
+): Pick<FormMaterials, "interior" | "limb" | "mesh" | "meshCluster" | "resolve"> {
+  if (record.air !== undefined && record.emission !== undefined && drawn.emissiveAir !== null) {
+    return drawn.emissiveAir;
+  }
+  if (record.air !== undefined && drawn.air !== null) {
+    return drawn.air;
+  }
+  if (record.emission !== undefined && drawn.emissive !== null) {
+    return drawn.emissive;
+  }
+  return plain;
 }
 
 /**
@@ -752,9 +2086,11 @@ interface DeviceResources {
  * and again after a device loss; buffers grow by doubling and the table by rows. Each disc is two
  * draws, its wholly covered pixels and then its limb; each run of points one draw of
  * `spriteMaterial`, an HDR twin of R02's star sprite reading `sprites` at binding 0. A mesh body is
- * one instanced draw of its figure ({@link LitBodyRenderer.meshDraws}, for the `bodies` pass) and
- * its limb's draw in the sequence. The small discs' cells are shaded first by the `disc cells`
- * pass ({@link LitBodyRenderer.dispatchCells}, R07.T8.d), whose sums their draws read. A plan's
+ * one instanced draw of its figure, or on the cluster path (plan R14, R14.T4.a) its buckets' draws
+ * ({@link LitBodyRenderer.meshDraws}, for the `bodies` pass), and its limb's draw in the sequence. The small discs' cells, and the larger discs' limb pixels' and
+ * their faces' near-limb bands', are shaded first by the `disc cells` pass
+ * ({@link LitBodyRenderer.dispatchCells}, R07.T8.d–g),
+ * whose sums their draws read. A plan's
  * records are written once, by whichever of the three is called first for it, so all three must
  * be called for a plan before its passes are submitted, {@link LitBodyRenderer.dispatchCells}
  * first: a plan whose records were written by the others first sums every disc's cells in its
@@ -768,17 +2104,123 @@ export class LitBodyRenderer {
   /** The plan whose records were written last, and each of its meshes' first instance. */
   #written: { readonly plan: BodyFramePlan; readonly firstInstance: ReadonlyArray<number> } | null =
     null;
+  /** The plan whose records were last drawn, as they are drawn (R08.T18.a). */
+  #drawn: DrawnPlan | null = null;
+  /**
+   * The plan whose figures were last culled on the cluster path (plan R14, R14.T4.a), and each
+   * culled mesh's pass, by its index in the plan's meshes.
+   */
+  #culled: { readonly plan: BodyFramePlan; readonly passes: ReadonlyMap<number, number> } | null =
+    null;
+  /** How the figures' geometry is drawn (plan R14): the setting's, or a launch's override. */
+  #geometry: GeometrySettings = SETTINGS.high.geometry;
+  /** Settles once the current device's cull kernel is made, or could not be (R14.T4.a). */
+  #cullReady: Promise<boolean> = Promise.resolve(false);
+  /**
+   * The figure's screen path's pipelines by their material (`figureShading` `screen`): absent
+   * before the first ask, `true` once prepared, and `false` while preparing and after a failure,
+   * which is reported and not asked again, its figures drawn forward.
+   */
+  readonly #screenPrepared = new WeakMap<MaterialHandle, boolean>();
+  #disposed = false;
   readonly #unsubscribe: () => void;
 
   constructor(engine: LitBodyEngine, spriteMaterial: WgslMaterialSpec) {
     this.#engine = engine;
     this.#spriteMaterial = spriteMaterial;
     this.#resources = this.#create();
+    this.#prepareRegimes(this.#resources);
     this.#unsubscribe = engine.onRestored(() => {
       this.#resources = this.#create();
+      this.#prepareRegimes(this.#resources);
       this.#tableLaws = [];
       this.#written = null;
+      this.#drawn = null;
+      this.#culled = null;
     });
+  }
+
+  /** How it draws the figures' geometry (plan R14, R14.T4.a): the high setting's until set. */
+  get geometry(): GeometrySettings {
+    return this.#geometry;
+  }
+
+  /**
+   * Draws the figures' geometry by `geometry` from the next plan on: on the cluster path where its
+   * `clusterPath` and `figureClusters` are on (plan R14, R14.T4.a), else instanced, as before.
+   */
+  setGeometry(geometry: GeometrySettings): void {
+    this.#geometry = geometry;
+    this.#culled = null;
+  }
+
+  /**
+   * Makes the regimes' pipelines for the scene target, with its depth, ahead of their first draws
+   * in a running view (plan R10, R10.T14.d; decision-r10-t14d-stall §1 and §2): the mesh regime's
+   * on the patch, whose first draw is a body's hand-over to the terrain (its synchronous compile
+   * stopped the page for 1,547 ms on a cold shader cache), and the disc's interior and limb on the
+   * quad, whose first draw is a body's first disc past the 3.3 px switch (1,128 and 1,093 ms). A
+   * draw before they are made makes its own, as before: a disc in VIEW's first frames does (R01's,
+   * deferred). The point sprites draw from the first frame, with the stars, and are not prepared.
+   */
+  #prepareRegimes(resources: DeviceResources): void {
+    const scene = [{ colour: HDR_COLOUR_FORMAT, depth: true }] as const;
+    const prepared: ReadonlyArray<readonly [MaterialHandle, MeshHandle]> = [
+      [resources.mesh, resources.patch],
+      [resources.meshCluster, resources.clusterMesh],
+      [resources.interior, resources.quad],
+      [resources.limb, resources.quad],
+    ];
+    this.#readyCull(resources);
+    for (const [material, mesh] of prepared) {
+      void this.#engine.prepareMaterial(material, scene, [mesh]).catch((error: unknown) => {
+        // A loss meanwhile is no failure: the restore makes and prepares them again.
+        if (!(error instanceof EngineUnavailable)) {
+          console.error(`the pipelines of ${material.name} could not be prepared:`, error);
+        }
+      });
+    }
+  }
+
+  /**
+   * Compiles the cluster cull's kernel for `resources`' device (plan R14, R14.T4.a), off the frame;
+   * never rejects. Until it is made, or where it cannot be, every figure draws instanced.
+   */
+  #readyCull(resources: DeviceResources): void {
+    // A refusal thrown at the call, as a lost device's, settles as one rejected.
+    this.#cullReady = (async () => this.#engine.createComputeAsync(CLUSTER_CULL_KERNEL))().then(
+      (kernel) => {
+        if (this.#resources === resources && !this.#disposed && resources.cullKernel === null) {
+          resources.cullKernel = kernel;
+          return true;
+        }
+        this.#engine.releaseCompute(kernel);
+        return false;
+      },
+      (error: unknown) => {
+        if (!(error instanceof EngineUnavailable)) {
+          console.error("the figures' cluster cull failed: every figure draws instanced", error);
+        }
+        return false;
+      },
+    );
+  }
+
+  /**
+   * Settles once the figures' cluster cull's kernel is made on the current device (plan R14,
+   * R14.T4.a), `true`, or could not be, `false`; until then every figure draws instanced.
+   */
+  clustersReady(): Promise<boolean> {
+    return this.#cullReady;
+  }
+
+  /**
+   * The figures' buckets as the last cull left them (plan R14, R14.T4.a), a pass a culled body in
+   * the plan's order, for the counters' reduction (`clusters/stats.ts`' `ClusterStats.sample`);
+   * `null` before the first.
+   */
+  get figureBuckets(): ClusterBuckets | null {
+    return this.#resources.clusters.buckets;
   }
 
   #create(): DeviceResources {
@@ -803,6 +2245,8 @@ export class LitBodyRenderer {
         usage: TEXTURE_USAGE.TEXTURE_BINDING,
         category: "other",
       }),
+      noAtmosphere: createAirlessTables(engine, "bodies:no atmosphere"),
+      noCoverage: this.#noCoverage(),
       mesh: engine.createMaterial(SMOOTH_MESH_MATERIAL),
       patch: engine.createMesh({
         name: "bodies:smooth patch",
@@ -810,11 +2254,193 @@ export class LitBodyRenderer {
         topology: "triangle-list",
         attributes: {},
       }),
+      meshCluster: engine.createMaterial(SMOOTH_MESH_CLUSTER_MATERIAL),
+      meshIds: engine.createMaterial(SMOOTH_MESH_IDS_MATERIAL),
+      meshClusterIds: engine.createMaterial(SMOOTH_MESH_IDS_CLUSTER_MATERIAL),
+      resolve: engine.createMaterial(FIGURE_RESOLVE_MATERIALS.plain),
+      clusterMesh: engine.createMesh(FIGURE_CLUSTER_MESH.mesh),
+      clusters: new ClusterConsumerPath(engine, FIGURE_CLUSTER_CONSUMER),
+      clusterRecords: this.#clusterBuffer("bodies:figure cluster records", MIN_BUFFER_BYTES),
+      cullKernel: null,
       slots: this.#buffer("bodies:mesh slots", MIN_BUFFER_BYTES),
       instances: this.#buffer("bodies:mesh instances", MIN_BUFFER_BYTES),
       cellJobs: this.#buffer("bodies:disc cell jobs", MIN_BUFFER_BYTES),
-      cellSums: this.#buffer("bodies:disc cell sums", MIN_BUFFER_BYTES),
+      cellGroups: this.#buffer("bodies:disc cell groups", MIN_BUFFER_BYTES),
+      cellSums: this.#buffer(CELL_SUMS_BUFFER_NAME, MIN_BUFFER_BYTES),
+      noDiscTable: this.#noDiscTable(),
+      emissive: null,
+      air: null,
+      emissiveAir: null,
     };
+  }
+
+  /**
+   * A form, prepared (R08.T18.a's emissive, R08.T16.b's air), or `null`: it is made and its
+   * pipelines prepared for the scene target at the first call, off the frame, as the plain forms are
+   * at construction (decision-r10-t14d-stall), so that a body's first frame that needs it never
+   * stalls on its compile; until it is prepared the records that need it are drawn as the plain
+   * forms draw them.
+   */
+  #formMaterials(kind: FormKind): FormMaterials | null {
+    const made = this.#formMade(kind);
+    return made.ready ? made : null;
+  }
+
+  /** A form, made at the first call on a device with its pipelines' preparing begun. */
+  #formMade(kind: FormKind): FormMaterials {
+    const resources = this.#resources;
+    const held = resources[kind];
+    if (held !== null) {
+      return held;
+    }
+    const engine = this.#engine;
+    const specs = FORM_SPECS[kind];
+    const interior = engine.createMaterial(specs.interior);
+    const limb = engine.createMaterial(specs.limb);
+    const mesh = engine.createMaterial(specs.mesh);
+    const meshCluster = engine.createMaterial(specs.meshCluster);
+    const resolve = engine.createMaterial(FIGURE_RESOLVE_MATERIALS[kind]);
+    const scene = [{ colour: HDR_COLOUR_FORMAT, depth: true }] as const;
+    const prepared: ReadonlyArray<readonly [MaterialHandle, MeshHandle]> = [
+      [mesh, resources.patch],
+      [meshCluster, resources.clusterMesh],
+      [interior, resources.quad],
+      [limb, resources.quad],
+    ];
+    const made: FormMaterials = {
+      interior,
+      limb,
+      mesh,
+      meshCluster,
+      resolve,
+      ready: false,
+      prepared: Promise.resolve(),
+    };
+    made.prepared = this.#readyForm(made, prepared, scene, specs.what);
+    resources[kind] = made;
+    return made;
+  }
+
+  /** Prepares a form's pipelines, and marks it ready once they are; never rejects. */
+  async #readyForm(
+    made: FormMaterials,
+    prepared: ReadonlyArray<readonly [MaterialHandle, MeshHandle]>,
+    scene: ReadonlyArray<PreparedTarget>,
+    what: string,
+  ): Promise<void> {
+    try {
+      await Promise.all(
+        prepared.map(([material, each]) => this.#engine.prepareMaterial(material, scene, [each])),
+      );
+      made.ready = true;
+    } catch (error: unknown) {
+      // A loss meanwhile is no failure: the restore makes the forms again at their next record.
+      if (!(error instanceof EngineUnavailable)) {
+        console.error(`${what} could not be prepared:`, error);
+      }
+    }
+  }
+
+  /**
+   * Makes the emissive forms and prepares their pipelines (R08.T18.a), ahead of a body's first
+   * frame above the cut, which until they are prepared draws its records as the plain forms do;
+   * resolves once they are, or could not be. A record drawn after it draws its emission.
+   */
+  prepareEmissive(): Promise<void> {
+    return this.#formMade("emissive").prepared;
+  }
+
+  /**
+   * Makes the air forms and prepares their pipelines (R08.T16.b), ahead of a body's first frame
+   * drawn by its disc table; resolves once they are, or could not be.
+   */
+  prepareAir(): Promise<void> {
+    return this.#formMade("air").prepared;
+  }
+
+  /**
+   * Makes the forms for emission and air together and prepares their pipelines (R08.T18.b), ahead
+   * of a glowing body's first frame drawn by its disc table; resolves once they are, or could not
+   * be.
+   */
+  prepareEmissiveAir(): Promise<void> {
+    return this.#formMade("emissiveAir").prepared;
+  }
+
+  /**
+   * Whether the air forms are prepared to draw a body by its disc table (R08.T16.b), their making
+   * begun at the first call: a plan's `drawsAir`, so that a body keeps its full passes until they
+   * are.
+   */
+  airReady(): boolean {
+    return this.#formMaterials("air") !== null;
+  }
+
+  /**
+   * A plan's records as this renderer draws them, decided once per plan ({@link DrawnPlan}): its
+   * own where its emission and air can be drawn, every record's emission or air dropped while it
+   * cannot.
+   */
+  #drawnPlan(plan: BodyFramePlan): DrawnPlan {
+    if (this.#drawn?.plan === plan) {
+      return this.#drawn;
+    }
+    const both = withEmissionAndAir;
+    const emits = plan.discs.some((record) => record.emission !== undefined && !both(record));
+    const emissive = emits ? this.#formMaterials("emissive") : null;
+    const aired = plan.discs.some((record) => record.air !== undefined);
+    const air = aired ? this.#formMaterials("air") : null;
+    const glowing = plan.discs.some(both);
+    const emissiveAir = glowing ? this.#formMaterials("emissiveAir") : null;
+    // A record keeps what a prepared form draws: with emission and air, by their form, or else by
+    // the air's without its emission (R08.T18.b); either alone by its own; the rest dropped.
+    const drawnOf = (record: DiscRecord): DiscRecord => {
+      if (both(record) && emissiveAir !== null) {
+        return record;
+      }
+      let out = both(record) ? withoutEmission(record) : record;
+      if (out.emission !== undefined && emissive === null) {
+        out = withoutEmission(out);
+      }
+      if (out.air !== undefined && air === null) {
+        out = withoutAir(out);
+      }
+      return out;
+    };
+    const records = emits || aired ? plan.discs.map(drawnOf) : plan.discs;
+    this.#drawn = { plan, records, emissive, air, emissiveAir };
+    return this.#drawn;
+  }
+
+  /**
+   * {@link DeviceResources.noDiscTable}: one zero texel, bound where a record carries no air and
+   * never read; two layers, so that it is a `2d-array` by its own dimension wherever it binds.
+   */
+  #noDiscTable(): TextureHandle {
+    return this.#engine.createTexture({
+      name: "bodies:no disc table",
+      size: { width: 1, height: 1, depthOrArrayLayers: 2 },
+      dimension: "2d",
+      format: "rgba16float",
+      mips: 1,
+      usage: TEXTURE_USAGE.TEXTURE_BINDING,
+      category: "other",
+    });
+  }
+
+  /** {@link DeviceResources.noCoverage}: one 0 texel a face, of the coverage mask's format. */
+  #noCoverage(): TextureHandle {
+    const texture = this.#engine.createTexture({
+      ...coverageMaskTextureSpec("bodies:no coverage", 0),
+      category: "other",
+    });
+    this.#engine.writeTexture(
+      texture,
+      { x: 0, y: 0, z: 0 },
+      { width: 1, height: 1, depthOrArrayLayers: 6 },
+      new Uint8Array(6),
+    );
+    return texture;
   }
 
   #buffer(name: string, bytes: number): BufferHandle {
@@ -823,6 +2449,16 @@ export class LitBodyRenderer {
       bytes,
       usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
       category: "other",
+    });
+  }
+
+  /** A buffer of the cluster path's (plan R14): `geometry-clusters`. */
+  #clusterBuffer(name: string, bytes: number): BufferHandle {
+    return this.#engine.createBuffer({
+      name,
+      bytes,
+      usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
+      category: "geometry-clusters",
     });
   }
 
@@ -856,7 +2492,7 @@ export class LitBodyRenderer {
   }
 
   /** Writes `data` into a buffer, replacing it by a doubled one if it is too small. */
-  #write(handle: BufferHandle, data: Float32Array | Int32Array): BufferHandle {
+  #write(handle: BufferHandle, data: Float32Array | Int32Array | Uint32Array): BufferHandle {
     const target = this.#reserve(handle, data.byteLength);
     if (data.byteLength > 0) {
       this.#engine.writeBuffer(target, 0, data);
@@ -890,24 +2526,63 @@ export class LitBodyRenderer {
     return surface.kind === "class-map" ? surface.weights : this.#resources.noClassMap;
   }
 
-  /** One of a disc's two draws: 0 its wholly covered pixels, 1 its limb, at `depths`. */
-  #discDraw(
-    index: number,
-    surface: DrawnDiscSurface,
-    edgePass: 0 | 1,
-    depths: LimbDepths,
-  ): DrawItem {
+  /**
+   * The normal map a record's draws bind (R10.T10.g): its class map's, or, where it has none, the
+   * texel of no weight, which its record's flag (row 24's w, 0) leaves unread.
+   */
+  #surfaceNormals(surface: DrawnDiscSurface): TextureHandle {
+    return surface.kind === "class-map" && surface.normals !== null
+      ? surface.normals.texture
+      : this.#resources.noClassMap;
+  }
+
+  /**
+   * The textures a record's draws bind: the frame's phase table, its class map, its body's
+   * atmosphere tables, or the defaults of a body without one (R08.T9.b), and its class map's normal
+   * map (R10.T10.g).
+   */
+  #recordTextures(record: DiscRecord): Readonly<Record<string, TextureHandle>> {
     const resources = this.#resources;
     return {
+      phaseFactorTable: resources.table,
+      classWeights: this.#classWeights(record.surface),
+      ...surfaceLightingDrawTextures(record.atmosphere ?? resources.noAtmosphere),
+      surfaceNormals: this.#surfaceNormals(record.surface),
+      discReflectance: record.air?.texture ?? resources.noDiscTable,
+    };
+  }
+
+  /**
+   * One of a disc's two draws: 0 its wholly covered pixels, 1 its limb, at `depths`; by the
+   * emissive forms where its record, as drawn, carries its emission (R08.T18.a), and by the air
+   * forms where it carries its air (R08.T16.b). A handed-over mesh body's limb takes its
+   * `coverage`, by which it leaves its surveyed ground to the terrain (R10.T10.c); every other
+   * draw `null`, the mask of no surveyed cell.
+   */
+  #discDraw(
+    index: number,
+    record: DiscRecord,
+    edgePass: 0 | 1,
+    depths: LimbDepths,
+    drawn: DrawnPlan,
+    coverage: MeshBodyCoverage | null,
+  ): DrawItem {
+    const resources = this.#resources;
+    const forms = formsOf(record, drawn, resources);
+    return {
       mesh: resources.quad,
-      material: edgePass === 0 ? resources.interior : resources.limb,
+      material: edgePass === 0 ? forms.interior : forms.limb,
       offsetFromCameraM: new Float32Array(3),
       uniforms: {
         disc: new Float32Array([index]),
         edgePass: new Float32Array([edgePass]),
         depths: new Float32Array(depths),
+        coverageAxes: rotationColumns(coverage?.rotation ?? IDENTITY_ROTATION),
       },
-      textures: { phaseFactorTable: resources.table, classWeights: this.#classWeights(surface) },
+      textures: {
+        ...this.#recordTextures(record),
+        coverageMask: coverage?.mask ?? resources.noCoverage,
+      },
       storageBuffers: { discs: resources.discs, cellSums: resources.cellSums },
     };
   }
@@ -924,7 +2599,8 @@ export class LitBodyRenderer {
     }
     const resources = this.#resources;
     this.#writeTable(plan.laws);
-    resources.discs = this.#write(resources.discs, packDiscRecords(plan.discs, cells));
+    const drawn = this.#drawnPlan(plan);
+    resources.discs = this.#write(resources.discs, packDiscRecords(drawn.records, cells));
     const records = packSmoothMeshes(plan.meshes.map(({ mesh }) => mesh));
     resources.slots = this.#write(resources.slots, records.slots);
     resources.instances = this.#write(resources.instances, records.instances);
@@ -933,29 +2609,61 @@ export class LitBodyRenderer {
   }
 
   /**
-   * Shades a plan's small discs' cells in parallel: the `disc cells` pass (R07.T8.d,
-   * decision-r07-small-disc-cost §1.2), one dispatch of `kernel` ({@link BODY_DISC_CELLS_KERNEL})
-   * for every disc whose pixels all take the same cells (`drawnThroughCells`: every disc under 32
-   * px of one law), and none where the plan has no such disc.
+   * Shades a plan's discs' cells in parallel: the `disc cells` pass (R07.T8.d–g,
+   * decision-r07-small-disc-cost §1.2, decision-r08-t11-frame §2), one dispatch of `kernel`
+   * ({@link BODY_DISC_CELLS_KERNEL}) for each set of textures its records bind, over every pixel of
+   * each disc under 32 px and each larger disc's limb pixels and its face's near-limb band
+   * ({@link discCellJobs}), and none where the plan has no such pixel.
    *
    * @remarks
    * It writes the plan's records with each such disc's sums in row 51, and is called for a plan
    * before {@link LitBodyRenderer.meshDraws} and {@link LitBodyRenderer.draws}, whose submissions
-   * then follow the dispatch's, after the sky's: each `render` and `dispatch` is its own queue
+   * then follow the dispatches', after the sky's: each `render` and `dispatch` is its own queue
    * submission, in call order. A plan already written by either of those is left to sum its own
-   * cells, and nothing is dispatched. Its workgroups are {@link cellWorkgroups}' for its jobs, one
-   * a pixel.
+   * cells, and nothing is dispatched. Each dispatch binds its set's textures, its body's
+   * atmosphere tables and its class map and normal map, or the defaults (R07.T8.e), takes its run
+   * of the workgroups from its first, and has {@link cellWorkgroups}' grid for them, each workgroup
+   * a run of up to `pixelsPerGroup` pixels of one cell count (R07.T8.g).
    *
-   * @param frame - The `discs` pass's own frame, which the kernel shades in.
+   * A set of records that carry their ground's emission (R08.T18.a) is dispatched with
+   * `emissiveKernel` ({@link BODY_DISC_CELLS_EMISSIVE_KERNEL}); without it, or while the emissive
+   * forms are not prepared, such records take no jobs and their draws sum their own cells. A set of
+   * records that carry their air (R08.T16.b) is dispatched with `airKernel`
+   * ({@link BODY_DISC_CELLS_AIR_KERNEL}) alike.
+   *
+   * @param frame - The `discs` pass's own frame, which the kernel shades in and a large disc's limb
+   *   is found in.
+   * @param emissiveKernel - The kernel's emissive form, or `null` where it is not made yet.
+   * @param airKernel - The kernel's air form, or `null` where it is not made yet.
    * @returns Whether it dispatched.
    */
-  dispatchCells(plan: BodyFramePlan, kernel: ComputeHandle, frame: DiscCellFrame): boolean {
+  dispatchCells(
+    plan: BodyFramePlan,
+    kernel: ComputeHandle,
+    frame: DiscCellFrame,
+    emissiveKernel: ComputeHandle | null = null,
+    airKernel: ComputeHandle | null = null,
+    emissiveAirKernel: ComputeHandle | null = null,
+  ): boolean {
     if (this.#written?.plan === plan) {
       return false;
     }
     // As many pixels' sums as one storage binding holds; a disc past them sums its own cells.
     const fits = Math.floor(this.#engine.capabilities.maxStorageBufferBindingSize / CELL_SUM_BYTES);
-    const cells = discCellJobs(plan.discs, fits);
+    const { records } = this.#drawnPlan(plan);
+    // A body handed over under a mask of every cell surveyed reads none of its sums (R07.T8.h).
+    const discarded = new Set(
+      plan.meshes.filter(({ role }) => coverageOf(role)?.whole === true).map(({ index }) => index),
+    );
+    const cells = discCellJobs(
+      records,
+      fits,
+      frame,
+      emissiveKernel !== null,
+      airKernel !== null,
+      emissiveAirKernel !== null,
+      discarded,
+    );
     if (cells.count === 0) {
       this.#upload(plan);
       return false;
@@ -963,37 +2671,79 @@ export class LitBodyRenderer {
     this.#upload(plan, cells);
     const resources = this.#resources;
     resources.cellJobs = this.#write(resources.cellJobs, cells.jobs);
+    resources.cellGroups = this.#write(resources.cellGroups, cells.groups);
     resources.cellSums = this.#reserve(resources.cellSums, cells.count * CELL_SUM_BYTES);
-    this.#engine.dispatch(
-      kernel,
-      {
-        uniforms: {
-          frame: discCellFrameBlock(frame),
-          cell_pass: new Uint32Array([cells.count, 0, 0, 0]),
+    const block = discCellFrameBlock(frame);
+    for (const set of cells.sets) {
+      const record = records[set.record];
+      if (record === undefined) {
+        throw new Error(`the cell pass's set from job ${set.first} has no record ${set.record}`);
+      }
+      const setKernel =
+        set.air && set.emissive
+          ? emissiveAirKernel
+          : set.air
+            ? airKernel
+            : set.emissive
+              ? emissiveKernel
+              : kernel;
+      if (setKernel === null) {
+        const form = set.air && set.emissive ? "emissive with air" : set.air ? "air" : "emissive";
+        throw new Error(`the cell pass's ${form} set from job ${set.first} has no kernel`);
+      }
+      this.#engine.dispatch(
+        setKernel,
+        {
+          uniforms: {
+            frame: block,
+            cell_pass: new Uint32Array([set.groups, set.firstGroup, 0, 0]),
+          },
+          buffers: {
+            discs: resources.discs,
+            cell_jobs: resources.cellJobs,
+            cell_groups: resources.cellGroups,
+            cell_sums: resources.cellSums,
+          },
+          sampled: {
+            phase_factor_table: resources.table,
+            class_weights: this.#classWeights(record.surface),
+            ...surfaceLightingKernelTextures(record.atmosphere ?? resources.noAtmosphere),
+            surface_normals: this.#surfaceNormals(record.surface),
+            // The air form's table alone, which no other form declares (R08.T16.b).
+            ...(set.air && record.air !== undefined
+              ? { disc_reflectance: record.air.texture }
+              : {}),
+          },
+          storage: {},
         },
-        buffers: {
-          discs: resources.discs,
-          cell_jobs: resources.cellJobs,
-          cell_sums: resources.cellSums,
-        },
-        sampled: { phase_factor_table: resources.table, class_weights: resources.noClassMap },
-        storage: {},
-      },
-      cellWorkgroups(cells.count),
-      DISC_CELLS_PASS,
-    );
+        cellWorkgroups(set.groups),
+        DISC_CELLS_PASS,
+      );
+    }
     return true;
   }
 
   /**
-   * The draws of a plan's mesh bodies, one instanced draw of its figure each, for the `bodies`
-   * pass: opaque, with depth, before the painter's sequence (Design note 8).
+   * The draws of a plan's mesh bodies' figures: for the `bodies` pass, opaque, with depth, before
+   * the painter's sequence (Design note 8), or their raster into the view's figure IDs. Each figure
+   * is one instanced draw, or on the cluster path (plan R14, R14.T4.a) the draws of its pass's
+   * stride-1 buckets, one a template, its clusters kept by the cull's frustum
+   * ({@link LitBodyRenderer.cullFigures}).
+   *
+   * @param shading - `forward`, the figures' own forms into the scene target; `ids`, their raster
+   *   (plan R07, `GeometrySettings.figureShading` `screen`) into the view's `r32uint` figure IDs on
+   *   the scene's depth, one material for every form, which {@link LitBodyRenderer.figureResolveDraws}
+   *   then shades.
    */
-  meshDraws(plan: BodyFramePlan): DrawItem[] {
+  meshDraws(plan: BodyFramePlan, shading: "forward" | "ids" = "forward"): DrawItem[] {
     const firstInstance = this.#upload(plan);
     const resources = this.#resources;
+    const drawn = this.#drawnPlan(plan);
+    const { records } = drawn;
+    const passes = this.cullFigures(plan);
+    const lists = resources.clusters.buckets?.lists;
     return plan.meshes.flatMap((body, i) => {
-      const record = plan.discs[body.index];
+      const record = records[body.index];
       if (record === undefined) {
         throw new Error(`the plan's mesh ${i} has no record ${body.index}`);
       }
@@ -1004,30 +2754,222 @@ export class LitBodyRenderer {
       if (body.mesh.patches.length === 0) {
         return [];
       }
+      const coverage = coverageOf(body.role);
+      const forms = formsOf(record, drawn, resources);
+      const pass = passes.get(i);
+      const uniforms = {
+        disc: new Float32Array([body.index]),
+        // A bucket's entry names its instance in the frame's records.
+        firstInstance: new Float32Array([pass === undefined ? first : 0]),
+        bodyRotation: rotationColumns(body.mesh.axes),
+        coverageAxes: rotationColumns(coverage?.rotation ?? IDENTITY_ROTATION),
+      };
+      const textures = {
+        ...this.#recordTextures(record),
+        coverageMask: coverage?.mask ?? resources.noCoverage,
+      };
+      const storageBuffers = {
+        discs: resources.discs,
+        slots: resources.slots,
+        instances: resources.instances,
+        cellSums: resources.cellSums,
+      };
+      const ids = shading === "ids";
+      if (pass !== undefined && lists !== undefined) {
+        return resources.clusters.drawItems(
+          pass,
+          resources.clusterMesh,
+          {
+            material: ids ? resources.meshClusterIds : forms.meshCluster,
+            offsetFromCameraM: new Float32Array(3),
+            uniforms,
+            textures,
+            storageBuffers: { ...storageBuffers, clusterLists: lists },
+          },
+          1,
+        );
+      }
       return [
         {
           mesh: resources.patch,
-          material: resources.mesh,
+          material: ids ? resources.meshIds : forms.mesh,
           offsetFromCameraM: new Float32Array(3),
-          uniforms: {
-            disc: new Float32Array([body.index]),
-            firstInstance: new Float32Array([first]),
-            bodyRotation: rotationColumns(body.mesh.axes),
-          },
-          textures: {
-            phaseFactorTable: resources.table,
-            classWeights: this.#classWeights(record.surface),
-          },
-          storageBuffers: {
-            discs: resources.discs,
-            slots: resources.slots,
-            instances: resources.instances,
-            cellSums: resources.cellSums,
-          },
+          uniforms,
+          textures,
+          storageBuffers,
           instanceCount: body.mesh.patches.length,
         },
       ];
     });
+  }
+
+  /**
+   * Whether a plan's figures can be shaded once a pixel (plan R07, the owner's Mac;
+   * `GeometrySettings.figureShading` `screen`): the raster's pipelines for the view's figure IDs
+   * with the scene's depth, and each mesh body's form's resolve for the scene target, prepared,
+   * their preparing begun at the first call off the frame, as the forms' are, so that no frame
+   * stalls on their compile. Until they are its figures are drawn forward, the same bits.
+   */
+  screenReady(plan: BodyFramePlan): boolean {
+    const resources = this.#resources;
+    const drawn = this.#drawnPlan(plan);
+    const ids = [{ colour: "r32uint", depth: true }] as const;
+    const scene = [{ colour: HDR_COLOUR_FORMAT, depth: true }] as const;
+    const wanted: Array<readonly [MaterialHandle, MeshHandle, ReadonlyArray<PreparedTarget>]> = [
+      [resources.meshIds, resources.patch, ids],
+      [resources.meshClusterIds, resources.clusterMesh, ids],
+    ];
+    for (const body of plan.meshes) {
+      const record = drawn.records[body.index];
+      if (record !== undefined) {
+        wanted.push([formsOf(record, drawn, resources).resolve, resources.quad, scene]);
+      }
+    }
+    let ready = true;
+    for (const [material, mesh, targets] of wanted) {
+      const state = this.#screenPrepared.get(material);
+      if (state === undefined) {
+        this.#screenPrepared.set(material, false);
+        void this.#prepareScreen(material, mesh, targets);
+      }
+      ready &&= state === true;
+    }
+    return ready;
+  }
+
+  /**
+   * Prepares one of the figure's screen pipelines (`figureShading` `screen`) and marks it so once
+   * prepared; a failure is reported, a loss's not, and it never rejects.
+   */
+  async #prepareScreen(
+    material: MaterialHandle,
+    mesh: MeshHandle,
+    targets: ReadonlyArray<PreparedTarget>,
+  ): Promise<void> {
+    try {
+      await this.#engine.prepareMaterial(material, targets, [mesh]);
+      this.#screenPrepared.set(material, true);
+    } catch (error: unknown) {
+      // A loss meanwhile is no failure: the restore makes the materials again.
+      if (!(error instanceof EngineUnavailable)) {
+        console.error(`the pipelines of ${material.name} could not be prepared:`, error);
+      }
+    }
+  }
+
+  /**
+   * The figures' resolve draws (plan R07, the owner's Mac; `GeometrySettings.figureShading`
+   * `screen`), after their raster ({@link LitBodyRenderer.meshDraws}' `ids`) into `ids`: one a
+   * mesh body with patches, its form's resolve over its disc's rectangle at the near plane, which
+   * shades each pixel whose ID is its record's as the forward draw does.
+   */
+  figureResolveDraws(plan: BodyFramePlan, ids: TextureHandle): DrawItem[] {
+    this.#upload(plan);
+    const resources = this.#resources;
+    const drawn = this.#drawnPlan(plan);
+    return plan.meshes.flatMap((body, i) => {
+      const record = drawn.records[body.index];
+      if (record === undefined) {
+        throw new Error(`the plan's mesh ${i} has no record ${body.index}`);
+      }
+      if (body.mesh.patches.length === 0) {
+        return [];
+      }
+      const draw = this.#discDraw(body.index, record, 0, FIGURE_RESOLVE_DEPTHS, drawn, null);
+      return [
+        {
+          ...draw,
+          material: formsOf(record, drawn, resources).resolve,
+          textures: { ...draw.textures, figureIds: ids },
+        },
+      ];
+    });
+  }
+
+  /**
+   * Culls a plan's figures' clusters into their buckets on the cluster path (plan R14, R14.T4.a),
+   * once a plan, and returns each culled mesh's pass by its index in the plan's meshes; none where
+   * the geometry keeps the instanced draw or the cull's kernel is not made.
+   *
+   * @remarks
+   * Each mesh body with patches, up to the cull's {@link MAX_CULL_PASSES}, is a camera pass of its
+   * own, its frustum its figure's camera's, each side opened by {@link FIGURE_CULL_MARGIN_RAD}, no
+   * horizon (selection's own refuses its patches behind it), at stride 1, its clusters appended:
+   * every fragment of a figure's pixel shades the same colour from the pixel's own rays, and the
+   * depth test keeps the nearest, so the buckets' order leaves the image as the instanced draw's.
+   * Each instance enters its body's pass alone. A body past the passes draws instanced. The
+   * dispatch is submitted at the call, before the `bodies` pass that draws the buckets.
+   */
+  cullFigures(plan: BodyFramePlan): ReadonlyMap<number, number> {
+    if (this.#culled?.plan === plan) {
+      return this.#culled.passes;
+    }
+    const resources = this.#resources;
+    const geometry = this.#geometry;
+    const kernel = resources.cullKernel;
+    const passes = new Map<number, number>();
+    this.#culled = { plan, passes };
+    if (!geometry.clusterPath || !geometry.figureClusters || kernel === null) {
+      return passes;
+    }
+    this.#upload(plan);
+    const count = plan.meshes.reduce((sum, body) => sum + body.mesh.patches.length, 0);
+    if (count === 0) {
+      return passes;
+    }
+    const inputs = new Uint32Array(2 * count);
+    const cullPasses: CullPass[] = [];
+    let instance = 0;
+    plan.meshes.forEach((body, i) => {
+      const patches = body.mesh.patches.length;
+      if (patches > 0 && cullPasses.length < MAX_CULL_PASSES) {
+        passes.set(i, cullPasses.length);
+        for (let n = instance; n < instance + patches; n += 1) {
+          inputs[2 * n] = 1 << cullPasses.length;
+        }
+        cullPasses.push({
+          kind: "camera",
+          planes: frustumOf(body.mesh.camera, FIGURE_CULL_MARGIN_RAD).planes,
+          horizon: null,
+          order: "appended",
+          // Unread: no figure's record is a DAG's.
+          toleranceRad: 0,
+          strideCap: 1,
+        });
+      }
+      instance += patches;
+    });
+    const records = new Float32Array(packSmoothClusterRecords(plan.meshes.map(({ mesh }) => mesh)));
+    resources.clusterRecords = this.#writeClusterRecords(resources.clusterRecords, records);
+    resources.clusters.cull(
+      kernel,
+      {
+        records: resources.clusterRecords,
+        instances: resources.instances,
+        count,
+        inputs,
+        passes: cullPasses,
+        rotationColumns: [vec3(1, 0, 0), vec3(0, 1, 0), vec3(0, 0, 1)],
+        viewAxis: vec3(0, 0, -1),
+      },
+      FIGURE_CLUSTER_CULL_LABEL,
+    );
+    return passes;
+  }
+
+  /** Writes the figures' cluster records, replacing the buffer by a doubled one if it is too small. */
+  #writeClusterRecords(handle: BufferHandle, data: Float32Array): BufferHandle {
+    let target = handle;
+    if (data.byteLength > handle.bytes) {
+      let size = handle.bytes;
+      while (size < data.byteLength) {
+        size *= 2;
+      }
+      this.#engine.releaseBuffer(handle);
+      target = this.#clusterBuffer(handle.name, size);
+    }
+    this.#engine.writeBuffer(target, 0, data);
+    return target;
   }
 
   /** A run of points' one instanced draw, from the run's own buffer. */
@@ -1065,6 +3007,8 @@ export class LitBodyRenderer {
     hostDraws: ReadonlyMap<number, ReadonlyArray<DrawItem>> = new Map(),
   ): DrawItem[] {
     this.#upload(plan);
+    const drawn = this.#drawnPlan(plan);
+    const { records } = drawn;
     const draws: DrawItem[] = [];
     let run = 0;
     for (const step of plan.steps) {
@@ -1073,23 +3017,25 @@ export class LitBodyRenderer {
           draws.push(...(hostDraws.get(step.star) ?? []));
           break;
         case "disc": {
-          const record = plan.discs[step.index];
+          const record = records[step.index];
           if (record === undefined) {
             throw new Error(`the plan's disc step ${step.index} has no record`);
           }
           draws.push(
-            this.#discDraw(step.index, record.surface, 0, DISC_LIMB_DEPTHS),
-            this.#discDraw(step.index, record.surface, 1, DISC_LIMB_DEPTHS),
+            this.#discDraw(step.index, record, 0, DISC_LIMB_DEPTHS, drawn, null),
+            this.#discDraw(step.index, record, 1, DISC_LIMB_DEPTHS, drawn, null),
           );
           break;
         }
         case "limb": {
           const body = plan.meshes[step.mesh];
-          const record = body === undefined ? undefined : plan.discs[body.index];
+          const record = body === undefined ? undefined : records[body.index];
           if (body === undefined || record === undefined) {
             throw new Error(`the plan's limb step ${step.mesh} has no mesh or record`);
           }
-          draws.push(this.#discDraw(body.index, record.surface, 1, body.limbDepths));
+          draws.push(
+            this.#discDraw(body.index, record, 1, body.limbDepths, drawn, coverageOf(body.role)),
+          );
           break;
         }
         case "points":
@@ -1108,13 +3054,21 @@ export class LitBodyRenderer {
    */
   dispose(): void {
     this.#unsubscribe();
+    this.#disposed = true;
     const resources = this.#resources;
+    resources.clusters.dispose();
+    if (resources.cullKernel !== null) {
+      this.#engine.releaseCompute(resources.cullKernel);
+      resources.cullKernel = null;
+    }
     const buffers = [
+      resources.clusterRecords,
       resources.discs,
       ...resources.sprites,
       resources.slots,
       resources.instances,
       resources.cellJobs,
+      resources.cellGroups,
       resources.cellSums,
     ];
     for (const buffer of buffers) {
@@ -1122,5 +3076,8 @@ export class LitBodyRenderer {
     }
     this.#engine.releaseTexture(resources.table);
     this.#engine.releaseTexture(resources.noClassMap);
+    this.#engine.releaseTexture(resources.noCoverage);
+    this.#engine.releaseTexture(resources.noDiscTable);
+    this.#engine.releaseTexture(resources.noAtmosphere.body);
   }
 }

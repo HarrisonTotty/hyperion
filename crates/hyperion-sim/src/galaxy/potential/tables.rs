@@ -12,13 +12,13 @@ use crate::units::{KilometresPerSecond, LightYears, Metres, PerYear, SolarMasses
 const POINTS: usize = 64;
 
 /// `ln` of the grids' first point, 2⁻⁴ ly.
-const LN_FIRST: f64 = -4.0 * core::f64::consts::LN_2;
+pub(crate) const LN_FIRST: f64 = -4.0 * core::f64::consts::LN_2;
 
 /// `ln` of the grids' last point, 2¹⁸ ly.
 const LN_LAST: f64 = 18.0 * core::f64::consts::LN_2;
 
 /// The grids' first and last points, ly.
-const FIRST: f64 = 0.0625;
+pub(crate) const FIRST: f64 = 0.0625;
 const LAST: f64 = 262_144.0;
 
 /// The (R, |z|) grid's outer edge on both axes, 2¹⁸ ly: beyond it the tables continue the
@@ -26,22 +26,31 @@ const LAST: f64 = 262_144.0;
 pub(crate) const GRID_EDGE_LY: f64 = LAST;
 
 /// The step between grid points in `ln R` (and `ln |z|`): 22 ln 2 ÷ 63.
-const STEP: f64 = (LN_LAST - LN_FIRST) / 63.0;
+pub(crate) const STEP: f64 = (LN_LAST - LN_FIRST) / 63.0;
 
 /// Where the denominator of the tidal radius is floored, as a fraction of Ω² (plan 02, Design
 /// note 17; brainstorm, "Coordinates").
-const TIDAL_FLOOR: f64 = 0.05;
+pub(crate) const TIDAL_FLOOR: f64 = 0.05;
 
 /// The share by which [`PotentialTables::tidal_radius_bound_within`] lowers the least Ω² it
 /// finds at the grid points, for the interpolation between them.
 pub const TIDAL_BOUND_MARGIN: f64 = 0.01;
 
-/// The grid point `i` of either axis, ly: `2⁻⁴ × 2^(22 i ÷ 63)`, with both ends exact.
-fn grid_point(i: usize) -> f64 {
+/// The grid point `i` of either axis, ly: `2⁻⁴ × 2^(22 i ÷ 63)`, with both ends exact. Beyond
+/// the last, 63, it continues the spacing, as plan 10's spray table does (P10.T5.b), up to 255.
+#[must_use]
+pub(crate) fn grid_point(i: usize) -> f64 {
     match i {
         0 => FIRST,
         63 => LAST,
-        _ => math::exp(LN_FIRST + STEP * f64::from(u8::try_from(i).expect("below 64"))),
+        _ => math::exp(
+            LN_FIRST
+                + STEP
+                    * f64::from(
+                        u8::try_from(i)
+                            .expect("a node below 256: the grids have 64 and the spray's 70"),
+                    ),
+        ),
     }
 }
 
@@ -60,7 +69,8 @@ fn cell(x: f64) -> (usize, f64) {
 
 /// The cubic Hermite basis at `t`: the weights of the two values and of the two slopes (in units
 /// of the cell).
-fn hermite(t: f64) -> [f64; 4] {
+#[must_use]
+pub(crate) fn hermite(t: f64) -> [f64; 4] {
     let t2 = t * t;
     let t3 = t2 * t;
     [
@@ -117,6 +127,22 @@ impl InPlaneTable {
         table
     }
 
+    /// [`at`](Self::at)`(r).potential` alone, by the same arithmetic: the Gaussians' `Φ(R, 0)`,
+    /// (km/s)², zero at infinity, at radius `r > 0` (ly).
+    #[must_use]
+    fn potential_at(&self, r: f64) -> f64 {
+        if r < FIRST {
+            let omega_sq = self.v_circ_sq[0] / (FIRST * FIRST);
+            return self.potential[0] + 0.5 * omega_sq * (r * r - FIRST * FIRST);
+        }
+        if r > LAST {
+            let scale = LAST / r;
+            return self.potential[POINTS - 1] * scale;
+        }
+        let (i, t) = cell(r);
+        interpolate(&self.potential, &self.v_circ_sq, i, t)
+    }
+
     /// The Gaussians' part at radius `r`: interpolated inside the grid, solid-body below it and
     /// Keplerian above it.
     fn at(&self, r: f64) -> Extended {
@@ -158,14 +184,14 @@ struct Grid {
 }
 
 impl Grid {
+    /// The grid of `model`, its points made in index order by [`grid_values`]: the bits of every
+    /// grid a [`PotentialGridPlan`] gathers.
     fn new(model: &MassModel) -> Self {
-        let mut points = Vec::with_capacity(POINTS * POINTS);
-        for i in 0..POINTS {
-            for j in 0..POINTS {
-                points.push(model.extended_grid_point(grid_point(i), grid_point(j)));
-            }
+        Self {
+            points: (0..GRID_POINTS)
+                .map(|k| grid_values(model, k).values)
+                .collect(),
         }
-        Self { points }
     }
 
     /// The Gaussians' potential at a point inside the grid's range, bicubic in the logarithms.
@@ -219,8 +245,149 @@ impl Grid {
     }
 }
 
+/// The points of the (R, |z|) grid, 64 radii by 64 heights: point `k` is at radius `R_i`, `i = k ÷
+/// 64`, and height `|z|_j`, `j = k mod 64`.
+pub const GRID_POINTS: usize = POINTS * POINTS;
+
+/// Point `k` of the (R, |z|) grid ([`GRID_POINTS`]): the Gaussians' potential and its
+/// logarithmic derivatives there, `[Φ, R ∂Φ ÷ ∂R, z ∂Φ ÷ ∂z, R z ∂²Φ ÷ ∂R ∂z]`, (km/s)².
+///
+/// [`PotentialGridPlan::point`] makes it, and it carries its index, so that
+/// [`PotentialGridPlan::finish`] puts it in its place whatever order the points come in.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GridValues {
+    k: usize,
+    values: [f64; 4],
+}
+
+/// Point `k` of `model`'s grid ([`GRID_POINTS`]).
+///
+/// # Panics
+///
+/// If `k` is not below [`GRID_POINTS`].
+#[must_use]
+fn grid_values(model: &MassModel, k: usize) -> GridValues {
+    assert!(
+        k < GRID_POINTS,
+        "the grid has {GRID_POINTS} points, and {k} is not one"
+    );
+    GridValues {
+        k,
+        values: model.extended_grid_point(grid_point(k / POINTS), grid_point(k % POINTS)),
+    }
+}
+
+/// The (R, |z|) grid of a mass model, made a point at a time, so that a caller with threads can
+/// make its points on all of them (the server's pool, perf-galaxy-build-start).
+///
+/// The grid takes some 3.45 s on one thread, nearly all of a full potential's cost (release, pod,
+/// 16 vCPU, 2026-11-05). Each point is a pure function of the model and its index, which it
+/// carries, and [`PotentialTables::with_grid`] makes its grid from the same points in index order,
+/// so a grid finished from them made in any shares, on any threads and gathered in any order is
+/// that grid, bit for bit.
+///
+/// # Examples
+///
+/// ```no_run
+/// use hyperion_sim::galaxy::params::GalaxyParams;
+/// use hyperion_sim::galaxy::potential::{GRID_POINTS, MassModel, PotentialGridPlan};
+///
+/// let plan = PotentialGridPlan::new(MassModel::new(&GalaxyParams::milky_way_like()));
+/// // Points dealt out in turn to two shares, each made where it may be, then gathered.
+/// let (even, odd): (Vec<usize>, Vec<usize>) = (0..GRID_POINTS).partition(|k| k % 2 == 0);
+/// let made = [odd, even].map(|share| share.into_iter().map(|k| plan.point(k)).collect::<Vec<_>>());
+/// let grid = plan.finish(made.into_iter().flatten());
+/// assert_eq!(grid.model(), &MassModel::new(&GalaxyParams::milky_way_like()));
+/// ```
+#[derive(Debug, Clone, PartialEq)]
+pub struct PotentialGridPlan {
+    model: MassModel,
+}
+
+impl PotentialGridPlan {
+    /// The plan of `model`'s grid.
+    #[must_use]
+    pub fn new(model: MassModel) -> Self {
+        Self { model }
+    }
+
+    /// The mass model whose grid this is.
+    #[must_use]
+    pub fn model(&self) -> &MassModel {
+        &self.model
+    }
+
+    /// Point `k` of the grid ([`GRID_POINTS`]).
+    ///
+    /// # Panics
+    ///
+    /// If `k` is not below [`GRID_POINTS`].
+    #[must_use]
+    pub fn point(&self, k: usize) -> GridValues {
+        grid_values(&self.model, k)
+    }
+
+    /// The grid of `points`, every point of the grid once, in any order, each as
+    /// [`point`](Self::point) made it.
+    ///
+    /// # Panics
+    ///
+    /// If a point comes twice, or one is missing.
+    #[must_use]
+    pub fn finish(self, points: impl IntoIterator<Item = GridValues>) -> PotentialGrid {
+        let mut placed = vec![None; GRID_POINTS];
+        for GridValues { k, values } in points {
+            assert!(
+                placed[k].replace(values).is_none(),
+                "a grid's point {k} is given once"
+            );
+        }
+        PotentialGrid {
+            model: self.model,
+            grid: Grid {
+                points: placed
+                    .into_iter()
+                    .enumerate()
+                    .map(|(k, values)| {
+                        values.unwrap_or_else(|| panic!("a grid's point {k} is missing"))
+                    })
+                    .collect(),
+            },
+        }
+    }
+}
+
+/// A mass model's (R, |z|) grid, gathered by a [`PotentialGridPlan`], with the model it is of:
+/// what [`Galaxy::with_full_potential_grid`](crate::galaxy::Galaxy::with_full_potential_grid)
+/// takes in place of the grid it would make.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PotentialGrid {
+    model: MassModel,
+    grid: Grid,
+}
+
+impl PotentialGrid {
+    /// The mass model whose grid this is.
+    #[must_use]
+    pub fn model(&self) -> &MassModel {
+        &self.model
+    }
+
+    /// A grid of `model` whose every value is `value`, which no model has: for the test that a
+    /// galaxy with its grid keeps it.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn filled(model: MassModel, value: f64) -> Self {
+        PotentialGridPlan::new(model).finish((0..GRID_POINTS).map(|k| GridValues {
+            k,
+            values: [value; 4],
+        }))
+    }
+}
+
 /// The derivative in `t` of the cubic Hermite basis of [`hermite`].
-fn hermite_slope(t: f64) -> [f64; 4] {
+#[must_use]
+pub(crate) fn hermite_slope(t: f64) -> [f64; 4] {
     let t2 = t * t;
     [
         6.0 * t2 - 6.0 * t,
@@ -239,8 +406,10 @@ fn hermite_slope(t: f64) -> [f64; 4] {
 /// the (R, z) grid) from exact derivatives. The dark halo, the nuclear cluster and the black hole
 /// are added at lookup, in closed form or from the cluster's shared table. Below 2⁻⁴ ly the
 /// Gaussians' part is taken as solid-body, where the black hole dominates anyway; beyond 2¹⁸ ly as
-/// a point mass; on the (R, z) grid, below 2⁻⁴ ly in R it is taken at 2⁻⁴ ly, and below 2⁻⁴ ly in
-/// |z| it is blended quadratically into the plane's value.
+/// a point mass in the plane, and beyond the (R, z) grid's box as its value at the clamped point
+/// `(min(R, 2¹⁸ ly), min(|z|, 2¹⁸ ly))`, scaled by that point's spherical radius over the true one,
+/// whose exact gradient the force is (P02.T6.f); on the (R, z) grid, below 2⁻⁴ ly in R it is taken
+/// at 2⁻⁴ ly, and below 2⁻⁴ ly in |z| it is blended quadratically into the plane's value.
 ///
 /// Ω and κ are in radians per year, speeds in km/s, potentials in (km/s)² with zero at infinity.
 ///
@@ -296,6 +465,16 @@ impl PotentialTables {
     pub fn with_grid(self, model: &MassModel) -> Self {
         Self {
             grid: Some(Grid::new(model)),
+            ..self
+        }
+    }
+
+    /// These tables with `grid` added, which must be of the model the tables were built from, as
+    /// the galaxy that calls this checks: [`with_grid`](Self::with_grid)'s tables, bit for bit.
+    #[must_use]
+    pub(crate) fn with_made_grid(self, grid: PotentialGrid) -> Self {
+        Self {
+            grid: Some(grid.grid),
             ..self
         }
     }
@@ -373,7 +552,13 @@ impl PotentialTables {
     /// The potential in the plane at radius `r > 0`, (km/s)², zero at infinity.
     #[must_use]
     pub fn potential_in_plane(&self, r: LightYears) -> f64 {
-        self.totals(r.value()).potential
+        // Φ alone, summed in `totals`' order, so the bits are `totals(r).potential`'s: the
+        // orbits' quadratures call this some thousands of times a progenitor, and v_c² and its
+        // slope cost three times as much again (1.2 µs a call against 0.31 µs, pod, 4 vCPU).
+        let x = r.value();
+        self.spherical()
+            .iter()
+            .fold(self.in_plane.potential_at(x), |sum, c| sum + c.potential(r))
     }
 
     /// The potential at `(R, z)`, (km/s)², zero at infinity; `None` without the (R, z) grid
@@ -464,7 +649,7 @@ impl PotentialTables {
     /// denominator at the floor, in metres (rendering plan R06, R06.T8.b).
     ///
     /// The denominator is never below 0.05 Ω² at its own radius. `Ω²_min` is the least Ω² at `r`
-    /// and at every grid point within it, less [`TIDAL_BOUND_MARGIN`] for the interpolation
+    /// and at every grid point within it, less `TIDAL_BOUND_MARGIN` for the interpolation
     /// between points: Ω² = `v_c²` ÷ R² falls by some 40% from one grid point to the next wherever
     /// the mean density enclosed falls outward, so no interpolated value between two points lies
     /// that far below both (a test checks it over many drawn galaxies). Zero at `r` = 0.
@@ -519,16 +704,61 @@ impl PotentialTables {
     /// They are the derivatives of what [`potential`](Self::potential) interpolates, so they agree
     /// with it to the interpolation's accuracy and are exact at the grid points. `K_z` is odd in z.
     /// Below 2⁻⁴ ly in R the Gaussians' radial term is continued as solid-body, as in the plane.
+    ///
+    /// Beyond the grid's box, where R or |z| exceeds 2¹⁸ ly, they are the exact gradient of the
+    /// potential's continuation there, `Φ_G = A(R_c, z_c) ÷ h` with `A = g h_c` (plan 02, P02.T6.f;
+    /// decision-p15-t6g-orbits §2):
+    ///
+    /// ```text
+    /// R ∂Φ_G/∂R = R [𝟙(R < L) A_R ÷ h − A R ÷ h³]     A_R = h_c (∂g/∂ln R) ÷ R_c + g R_c ÷ h_c
+    /// ∂Φ_G/∂|z| =    𝟙(|z| < L) A_z ÷ h − A |z| ÷ h³   A_z = h_c (∂g/∂ln z) ÷ z_c + g z_c ÷ h_c
+    /// ```
+    ///
+    /// with `L` = 2¹⁸ ly, `R_c = min(R, L)`, `z_c = min(|z|, L)`, `h = √(R² + z²)`,
+    /// `h_c = √(R_c² + z_c²)`, `g` the grid's value at `(R_c, z_c)` and its derivatives the
+    /// interpolant's own; `∂g/∂ln z` is zero below 2⁻⁴ ly, where `g` is constant in z. Where
+    /// both coordinates are at or beyond `L`, `A` is constant and the force is a point mass's. The
+    /// force still jumps where an orbit crosses a face of the box, since the continuation's slope
+    /// there is not the grid's: a kink of a continuous potential, which conserves energy.
     pub(crate) fn forces(&self, r_cyl: f64, z: f64) -> Option<[f64; 2]> {
         let grid = self.grid.as_ref()?;
         let height = z.abs();
         let r = r_cyl.max(FIRST);
-        let [mut radial, mut vertical] = if r > LAST || height > LAST {
-            // A point mass beyond the grid: Φ = Φ_edge h_edge ÷ h.
+        let beyond = r > LAST || height > LAST;
+        let [mut radial, mut vertical] = if beyond {
+            // Beyond the grid's box: Φ_G = A ÷ h, A = g h_c from the clamped point (`potential`).
             let (rc, zc) = (r.min(LAST), height.min(LAST));
             let h = math::hypot(r, height);
-            let phi = grid.at(rc, zc) * math::hypot(rc, zc) / h;
-            [-phi * r * r / (h * h), -phi * height / (h * h)]
+            let hc = math::hypot(rc, zc);
+            let g = grid.at(rc, zc);
+            let phi = g * hc / h;
+            if r >= LAST && height >= LAST {
+                // Neither clamped coordinate moves, so A is constant: the arithmetic from before
+                // P02.T6.f, bit for bit.
+                [-phi * r * r / (h * h), -phi * height / (h * h)]
+            } else {
+                // One coordinate is clamped at L, and A changes along the other (P02.T6.f).
+                let [g_by_ln_r, g_by_ln_z] = grid.log_derivatives(rc, zc);
+                let amplitude = g * hc;
+                let a_by_r = if r < LAST {
+                    hc * g_by_ln_r / rc + g * rc / hc
+                } else {
+                    0.0
+                };
+                let a_by_z = if height < LAST {
+                    // `cell` clamps below the grid's first point, so `Grid::at` is constant in z
+                    // there and `log_derivatives` returns the first point's slope instead.
+                    let g_by_z = if zc < FIRST { 0.0 } else { g_by_ln_z / zc };
+                    hc * g_by_z + g * zc / hc
+                } else {
+                    0.0
+                };
+                let h3 = h * h * h;
+                [
+                    r * (a_by_r / h - amplitude * r / h3),
+                    a_by_z / h - amplitude * height / h3,
+                ]
+            }
         } else if height < FIRST {
             let plane = self.in_plane.at(r);
             let edge = grid.at(r, FIRST);
@@ -554,7 +784,16 @@ impl PotentialTables {
                 vertical += v2 * height / (h * h);
             }
         }
-        Some([radial, vertical.copysign(z)])
+        // K_z is ∂Φ ÷ ∂|z| carrying z's sign. Beyond the box ∂Φ ÷ ∂|z| can be negative: for
+        // R > L and |z| below the grid's first point the continuation's Gaussian part pushes away
+        // from the plane, and past R ≈ 1.45 × 10⁶ ly it outweighs the spherical pull (P02.T6.f).
+        // Inside the box `copysign` stays as before, so that no output moves.
+        let k_z = if beyond && vertical < 0.0 {
+            -vertical.copysign(z)
+        } else {
+            vertical.copysign(z)
+        };
+        Some([radial, k_z])
     }
 
     /// The Gaussians' total mass, for tests of the far field.
@@ -568,6 +807,87 @@ impl PotentialTables {
 mod tests {
     use super::*;
     use crate::galaxy::params::GalaxyParams;
+
+    /// A grid plan's point `k` is the model's at row `k ÷ 64` and column `k mod 64`, at both ends
+    /// of each axis and through the grid, and its finish keeps every point at its index, so a grid
+    /// gathered by index is the grid [`Grid::new`] makes in index order (perf-galaxy-build-start);
+    /// the slow galaxy test holds a whole grid made in shares to it.
+    #[test]
+    fn a_grid_plan_s_points_are_the_model_s_and_its_finish_keeps_their_order() {
+        let model = MassModel::new(&GalaxyParams::milky_way_like());
+        let plan = PotentialGridPlan::new(model.clone());
+        for k in (0..GRID_POINTS)
+            .step_by(37)
+            .chain([63, 64, GRID_POINTS - 1])
+        {
+            let expected =
+                model.extended_grid_point(grid_point(k / POINTS), grid_point(k % POINTS));
+            let made = plan.point(k);
+            assert_eq!(made.k, k);
+            for (made, expected) in made.values.into_iter().zip(expected) {
+                hyperion_testkit::float::assert_same_bits(made, expected);
+            }
+        }
+        // Values that name their own index, given in reverse.
+        let grid = plan.finish((0..GRID_POINTS).rev().map(tagged));
+        assert_eq!(grid.model(), &model);
+        for (k, point) in grid.grid.points.iter().enumerate() {
+            assert_eq!(*point, tagged(k).values, "point {k}");
+        }
+    }
+
+    /// Point `k` with values that name it.
+    fn tagged(k: usize) -> GridValues {
+        let x = f64::from(u32::try_from(k).unwrap());
+        GridValues {
+            k,
+            values: [x, -x, x + 0.5, -x - 0.5],
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "a grid's point 4095 is missing")]
+    fn a_grid_plan_refuses_to_finish_short_of_a_point() {
+        let plan = PotentialGridPlan::new(MassModel::new(&GalaxyParams::milky_way_like()));
+        let _ = plan.finish((0..GRID_POINTS - 1).map(tagged));
+    }
+
+    #[test]
+    #[should_panic(expected = "a grid's point 7 is given once")]
+    fn a_grid_plan_refuses_a_point_given_twice() {
+        let plan = PotentialGridPlan::new(MassModel::new(&GalaxyParams::milky_way_like()));
+        let _ = plan.finish((0..GRID_POINTS).chain([7]).map(tagged));
+    }
+
+    /// `potential_in_plane` sums Φ alone, so that it must be `totals(r).potential` bit for bit:
+    /// below the grid, on and between its points, and beyond it out to the escape boundary and
+    /// the orphans' 10⁶ ly, for the fixture and two drawn galaxies (plan 10, P10.T3.d.a's cost,
+    /// which moved no output).
+    #[test]
+    fn the_potential_in_the_plane_is_the_totals_bit_for_bit() {
+        use crate::galaxy::imf::MassFunctionKind;
+        let drawn =
+            |seed| GalaxyParams::from_seed(crate::Seed::new(seed), MassFunctionKind::default());
+        for params in [
+            GalaxyParams::milky_way_like(),
+            drawn(0x0a10_3d01),
+            drawn(0x0a10_3d02),
+        ] {
+            let tables = PotentialTables::in_plane(&MassModel::new(&params));
+            let mut radii = vec![1e-3, 0.03, 3e5, 1e6, tables.escape_boundary().value()];
+            for i in 0..POINTS {
+                radii.extend([grid_point(i), grid_point(i) * 1.37]);
+            }
+            for r in radii {
+                let fast = tables.potential_in_plane(LightYears::new(r));
+                let total = tables.totals(r).potential;
+                assert!(
+                    fast.total_cmp(&total).is_eq(),
+                    "r {r}: {fast} against {total}"
+                );
+            }
+        }
+    }
 
     /// Ruling 91: the escape speed from the Milky Way fixture at the Sun's radius, measured to
     /// twice `r₂₀₀` as Deason et al. (2019) measure it, lies in the Milky Way's 500–580 km/s
@@ -597,15 +917,27 @@ mod tests {
         );
     }
 
+    /// The Milky Way fixture's model and its full (R, z) tables, built once, some 5 s in a test
+    /// build, for the two tests that read them, which nextest would otherwise run in processes of
+    /// their own: [`the_grid_forces_match_the_mass_model`], then
+    /// [`the_tables_force_is_the_gradient_of_the_tables_potential`], `force`'s.
+    #[test]
+    fn the_full_grid_s_forces_are_the_model_s_and_its_own_potential_s_gradient() {
+        let model = MassModel::new(&GalaxyParams::milky_way_like());
+        let tables = PotentialTables::full(&model);
+        the_grid_forces_match_the_mass_model(&model, &tables);
+        the_tables_force_is_the_gradient_of_the_tables_potential(&model, &tables);
+    }
+
     /// The tables' forces are the mass model's, to the interpolation's accuracy, across the disc,
     /// the bulge and the halo, above and below the plane, and beyond the grid (plan 08's force
     /// source).
-    #[test]
-    fn the_grid_forces_match_the_mass_model() {
-        let params = crate::galaxy::params::GalaxyParams::milky_way_like();
-        let model = MassModel::new(&params);
-        let tables = PotentialTables::full(&model);
-        assert!(PotentialTables::in_plane(&model).forces(1.0, 1.0).is_none());
+    ///
+    /// Run by [`the_full_grid_s_forces_are_the_model_s_and_its_own_potential_s_gradient`] on its one
+    /// build of the Milky Way fixture's model and full tables, which it gives as `model` and
+    /// `tables`.
+    fn the_grid_forces_match_the_mass_model(model: &MassModel, tables: &PotentialTables) {
+        assert!(PotentialTables::in_plane(model).forces(1.0, 1.0).is_none());
         for (r, z) in [
             (26_000.0, 300.0),
             (26_000.0, -1_500.0),
@@ -633,6 +965,58 @@ mod tests {
                 "R ∂Φ/∂R at ({r}, {z}): {radial} against {by_ln_r}"
             );
         }
+    }
+
+    /// The tables' force is the gradient of the tables' potential to rounding (it is the
+    /// interpolant's own derivative), and the model's to the interpolation's accuracy.
+    ///
+    /// Run by [`the_full_grid_s_forces_are_the_model_s_and_its_own_potential_s_gradient`] on its one
+    /// build of the Milky Way fixture's model and full tables, which it gives as `model` and
+    /// `tables`; it tests `force`'s [`PotentialTables::force`].
+    fn the_tables_force_is_the_gradient_of_the_tables_potential(
+        model: &MassModel,
+        tables: &PotentialTables,
+    ) {
+        for (r, z) in [
+            (26_000.0, 300.0),
+            (26_000.0, -1_500.0),
+            (3_000.0, 400.0),
+            (500.0, 60.0),
+            (40_000.0, 20_000.0),
+            (70_000.0, 3_000.0),
+        ] {
+            let f = tables
+                .force(LightYears::new(r), LightYears::new(z))
+                .expect("the full tables");
+            let phi = |a: f64, b: f64| {
+                tables
+                    .potential(LightYears::new(a), LightYears::new(b))
+                    .expect("the full tables")
+            };
+            let d = 1e-5 * math::hypot(r, z);
+            let by_r = (phi(r + d, z) - phi(r - d, z)) / (2.0 * d);
+            let by_z = (phi(r, z + d) - phi(r, z - d)) / (2.0 * d);
+            assert!(
+                (f.radial - by_r).abs() < 1e-6 * f.radial.abs().max(f.vertical.abs()),
+                "∂Φ/∂R at ({r}, {z}): {} against {by_r}",
+                f.radial
+            );
+            assert!(
+                (f.vertical - by_z).abs() < 1e-6 * f.radial.abs().max(f.vertical.abs()),
+                "∂Φ/∂z at ({r}, {z}): {} against {by_z}",
+                f.vertical
+            );
+            let exact = model.force(LightYears::new(r), LightYears::new(z));
+            assert!((f.radial / exact.radial - 1.0).abs() < 5e-3, "({r}, {z})");
+            assert!(
+                (f.vertical / exact.vertical - 1.0).abs() < 5e-3,
+                "({r}, {z})"
+            );
+        }
+        let axis = tables
+            .force(LightYears::ZERO, LightYears::new(100.0))
+            .expect("the full tables");
+        assert!(axis.radial.abs() < f64::EPSILON && axis.vertical > 0.0);
     }
 
     #[test]

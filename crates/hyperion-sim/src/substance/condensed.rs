@@ -1,0 +1,537 @@
+//! The condensed columns: what a row is as a solid or a liquid on a surface or in a cloud, its
+//! grain density, its transition (its first melt), and the family of its mechanical
+//! rows (plan 14, P14.T49.b's second step; decision-composition §1.7;
+//! science-composition-crusts.md §1.3, §2, §3, §4 and §7).
+//!
+//! Every row that can be a solid or a liquid and whose figures were read carries
+//! [`CondensedColumns`] ([`Substance::condensed`]):
+//!
+//! - **the grain density** ([`GrainDensity`]) is intrinsic, the mass of the solid or the liquid
+//!   over its own volume, with no pore space: porosity is how a material lies, which its reader
+//!   states (science-r09-drainage.md §3). A row with a phase diagram takes its solids' `ρ_s`(T)
+//!   and its saturated liquid's `ρ_l`(T) from it ([`GrainDensity::OfDiagram`]). Any other row
+//!   keeps one value for each phase that was read, at a stated temperature
+//!   ([`GrainDensity::Fixed`]): a rock or a salt at room temperature, with its error recorded in
+//!   its sources (science-composition-crusts.md §3.2), a solution at its reference composition;
+//! - **the transition** ([`Transition`]) is the row's first melt, for every kind: the lowest
+//!   temperature at about one atmosphere at which its frozen assemblage holds any liquid at
+//!   equilibrium, a pure substance's melting or triple point, a lithology's solidus, or a
+//!   solution's eutectic of the solids its reference composition freezes to. Above it some of it
+//!   is liquid; a solid that never melts at one atmosphere decomposes or sublimes there; an upper
+//!   bound where only a bound is read, labelled one in its source ([`TransitionKind`] says which
+//!   kind; decision-p14-t49b-condensed §2);
+//! - **the mechanics family** ([`MechanicsFamily`]) is the family of R10's material rows the
+//!   substance takes; a liquid's is its frozen form's.
+//!
+//! [`Substance::grain_density`] resolves the density of a phase at a temperature, which is what
+//! P14.T49.c's palette resolution reads. P14.T49.c adds the condensed optics. P14.T49.j gives the
+//! rows that can form a surface their solid's specific heat and conductivity, in
+//! `substance::thermal`'s table by key, with the airless regolith's thermal-inertia law; the
+//! geomorphic columns (`k_comp`, `k_target`, erodibility) are not part of the 22 → 23 batch
+//! (decision-p14-t49c-split §1.3). P14.T49.h adds the liquids' optical and transport columns, and
+//! the melts' densities, in their own group.
+//!
+//! Generator version 22 publishes none of it: nothing on the record reads these columns until
+//! P14.T54.a wires the palette (decision-bump-plan-after-22 §1.2).
+//!
+//! **The densities P14.T49.n read** are served from the 23 → 24 bump: a solid phase whose density
+//! it read ([`SolidPhase::density`](super::SolidPhase::density)) and a row's liquid by temperature
+//! ([`GrainDensity::MeasuredLiquid`]); version 23 modelled neither.
+
+use hyperion_surface::field::MechanicsFamily;
+
+use super::diagram::measured_at;
+use super::{Source, Substance};
+use crate::units::{Kelvin, KilogramsPerCubicMetre};
+
+/// A condensed phase: what a grain density is the density of.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum CondensedPhase {
+    /// The solid: a crystal, a glass, a rock or an organic solid.
+    Solid,
+    /// The liquid: a pure liquid, a solution or a melt.
+    Liquid,
+}
+
+/// One phase's grain density at the temperature it was measured or reduced at.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DensityAt {
+    pub(super) density: KilogramsPerCubicMetre,
+    pub(super) at: Kelvin,
+}
+
+impl DensityAt {
+    /// The density.
+    #[must_use]
+    pub const fn density(&self) -> KilogramsPerCubicMetre {
+        self.density
+    }
+
+    /// The temperature it is given at.
+    #[must_use]
+    pub const fn at(&self) -> Kelvin {
+        self.at
+    }
+}
+
+/// How a row's grain density is given.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum GrainDensity {
+    /// One value for each phase that was read, each at the temperature it was given at.
+    ///
+    /// A rock's or a salt's is at room temperature and kept at every temperature, with its error
+    /// recorded (science-composition-crusts.md §3.2); a crystal's is its cell's, at the cell's
+    /// temperature; a liquid's is at one atmosphere unless its source states another pressure,
+    /// and a solution's at its reference composition. A phase whose density was not read is
+    /// `None`, not modelled; at least one phase is given.
+    Fixed {
+        /// The solid's.
+        solid: Option<DensityAt>,
+        /// The liquid's.
+        liquid: Option<DensityAt>,
+    },
+    /// The row's phase diagram's: each solid phase's measured `ρ_s`(T) from 0 K to the triple
+    /// temperature, where one was read, and the saturated liquid's ancillary `ρ_l`(T), under its
+    /// own vapour's pressure, from the triple to the critical temperature
+    /// ([`PhaseDiagram`](super::PhaseDiagram)).
+    OfDiagram,
+    /// The solid's one value, as [`Fixed`](Self::Fixed)'s, and the liquid's by temperature
+    /// (P14.T49.n): a melt or a molecular liquid whose density falls as it warms, read where a
+    /// cloud deck or a lava lies hundreds of kelvin above its melting point.
+    ///
+    /// The liquid's nodes rise in temperature, at one atmosphere unless its source states another
+    /// pressure; its density is linear between them and held beyond the first and the last, the
+    /// arithmetic of [`SolidDensity::Measured`](super::SolidDensity::Measured), to the bit. Two
+    /// nodes are a source's linear law at the ends of its range. Each node is a measured law's or
+    /// a melt model's, as the row's `liquid grain density` source states. Served from generator
+    /// version 24 (P14.T49.n).
+    MeasuredLiquid {
+        /// The solid's.
+        solid: DensityAt,
+        /// The liquid's (temperature, density) nodes, rising in temperature.
+        liquid: &'static [(Kelvin, KilogramsPerCubicMetre)],
+    },
+}
+
+/// What kind of first melt a row's transition is (the [module documentation](self)).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TransitionKind {
+    /// A pure solid's melting point at one atmosphere.
+    Melting,
+    /// A lithology's solidus at about one atmosphere: where it first melts.
+    Solidus,
+    /// A solution's eutectic at one atmosphere, of the two solids its reference composition
+    /// freezes to: the lowest temperature at which any of its liquid remains at equilibrium.
+    ///
+    /// For the brines, ammonia–water and Titan's liquid it is the solute–solvent eutectic; for
+    /// the 75 wt% sulphuric acid, the dihydrate–monohydrate one (decision-p14-t49b-condensed
+    /// §2.1). A metastable assemblage or a supercooled liquid can hold liquid below it.
+    Eutectic {
+        /// The solute's mass fraction at the eutectic, in (0, 1): a brine's salt, ammonia in the
+        /// ammonia–water system, ethane in Titan's methane–ethane liquid, `H2SO4` in the aqueous
+        /// acid.
+        solute_mass_fraction: f64,
+    },
+    /// The temperature at which a solid decomposes at one atmosphere before it can melt.
+    Decomposition,
+    /// The temperature at which a solid's vapour reaches one atmosphere, where it sublimes
+    /// before it can melt.
+    Sublimation,
+    /// The row's phase diagram's triple point, where its melting line meets its saturation curve,
+    /// the lowest pressure at which its liquid exists.
+    TriplePoint,
+}
+
+impl TransitionKind {
+    /// The kind's name, as the registry's golden writes it.
+    #[must_use]
+    pub const fn name(&self) -> &'static str {
+        match self {
+            Self::Melting => "melting",
+            Self::Solidus => "solidus",
+            Self::Eutectic { .. } => "eutectic",
+            Self::Decomposition => "decomposition",
+            Self::Sublimation => "sublimation",
+            Self::TriplePoint => "triple point",
+        }
+    }
+}
+
+/// A substance's first melt, with what kind of transition it is: above it some of the substance
+/// is liquid, or, for a solid that never melts at one atmosphere, decomposed or sublimed
+/// ([`TransitionKind`]); an upper bound where only a bound was read.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Transition {
+    pub(super) kind: TransitionKind,
+    pub(super) temperature: Kelvin,
+}
+
+impl Transition {
+    /// What kind of transition it is.
+    #[must_use]
+    pub const fn kind(&self) -> TransitionKind {
+        self.kind
+    }
+
+    /// Its temperature: the value a palette entry's `transition` holds.
+    #[must_use]
+    pub const fn temperature(&self) -> Kelvin {
+        self.temperature
+    }
+}
+
+/// A row's condensed columns (the [module documentation](self)), each value named with its
+/// sources in [`sources`](Self::sources).
+#[derive(Debug, Clone, PartialEq)]
+pub struct CondensedColumns {
+    pub(super) grain_density: GrainDensity,
+    pub(super) transition: Transition,
+    pub(super) mechanics: MechanicsFamily,
+    pub(super) sources: &'static [Source],
+}
+
+impl CondensedColumns {
+    /// How its grain density is given; [`Substance::grain_density`] resolves it.
+    #[must_use]
+    pub const fn grain_density(&self) -> GrainDensity {
+        self.grain_density
+    }
+
+    /// Its first melt, above which some of it is liquid, decomposed or sublimed.
+    #[must_use]
+    pub const fn transition(&self) -> Transition {
+        self.transition
+    }
+
+    /// The family of its mechanical rows in R10's material table; a liquid's is its frozen form's.
+    #[must_use]
+    pub const fn mechanics(&self) -> MechanicsFamily {
+        self.mechanics
+    }
+
+    /// Where its values come from: each source's `covers` names `grain density`, `liquid grain
+    /// density` (a [`GrainDensity::MeasuredLiquid`] row's liquid), `transition` or `mechanics`.
+    #[must_use]
+    pub const fn sources(&self) -> &'static [Source] {
+        self.sources
+    }
+}
+
+impl Substance {
+    /// Its condensed columns, for a row that can be a solid or a liquid and whose figures were
+    /// read; `None` where they are not modelled.
+    ///
+    /// From generator version 25 (P14.T49.p) a molten salt's, `KCl`'s or `Na2S`'s, give its liquid
+    /// by temperature beside its solid.
+    #[must_use]
+    pub fn condensed(&self) -> Option<&CondensedColumns> {
+        self.condensed.as_ref()
+    }
+
+    /// Its grain density as `phase` at `temperature`, without pore space.
+    ///
+    /// A [`GrainDensity::Fixed`] row gives its phase's one value at any temperature, and `None`
+    /// for a phase that was not read (a rock's melt is P14.T49.h's). A
+    /// [`GrainDensity::OfDiagram`] row gives its diagram's: the solid's density from 0 K to the
+    /// triple temperature, `None` above it and in a solid phase whose density was not read, and
+    /// the saturated liquid's from the triple to the critical temperature, `None` outside them.
+    /// A [`GrainDensity::MeasuredLiquid`] row gives its solid's one value at any temperature and
+    /// its liquid's nodes' law, held beyond them. `None` too for a row with no condensed columns.
+    ///
+    /// # Panics
+    ///
+    /// Never: an [`OfDiagram`](GrainDensity::OfDiagram) row has its phase diagram, which the
+    /// registry's tests hold for every row.
+    ///
+    /// # Examples
+    ///
+    /// Carbon dioxide's frost is denser on a cold Mars's winter pole than near its triple point,
+    /// while a basalt keeps its room-temperature grain density:
+    ///
+    /// ```
+    /// use hyperion_sim::substance::{CondensedPhase, by_key};
+    /// use hyperion_sim::units::Kelvin;
+    ///
+    /// # fn main() {
+    /// #     assert!(example().is_some(), "every value the example reads is there");
+    /// # }
+    /// # fn example() -> Option<()> {
+    /// let co2 = by_key("CO2")?.substance();
+    /// let polar = co2.grain_density(CondensedPhase::Solid, Kelvin::new(148.0))?;
+    /// let warm = co2.grain_density(CondensedPhase::Solid, Kelvin::new(190.0))?;
+    /// assert!(polar > warm);
+    /// let basalt = by_key("basalt")?.substance();
+    /// let rock = basalt.grain_density(CondensedPhase::Solid, Kelvin::new(150.0))?;
+    /// assert!((rock.value() - 3_010.0).abs() < 1e-9);
+    /// // A rock's melt is not one of the registry's columns.
+    /// assert_eq!(basalt.grain_density(CondensedPhase::Liquid, Kelvin::new(1_400.0)), None);
+    /// # Some(())
+    /// # }
+    /// ```
+    #[must_use]
+    pub fn grain_density(
+        &self,
+        phase: CondensedPhase,
+        temperature: Kelvin,
+    ) -> Option<KilogramsPerCubicMetre> {
+        match self.condensed()?.grain_density() {
+            GrainDensity::Fixed { solid, liquid } => match phase {
+                CondensedPhase::Solid => solid,
+                CondensedPhase::Liquid => liquid,
+            }
+            .map(|given| given.density),
+            GrainDensity::MeasuredLiquid { solid, liquid } => Some(match phase {
+                CondensedPhase::Solid => solid.density,
+                CondensedPhase::Liquid => measured_at(liquid, temperature),
+            }),
+            GrainDensity::OfDiagram => {
+                let diagram = self.diagram.as_ref().expect(
+                    "an OfDiagram row has a phase diagram, as \
+                     substance_condensed_columns_cover_the_condensed_rows holds for every row",
+                );
+                match phase {
+                    CondensedPhase::Solid => diagram.solid_density(temperature),
+                    CondensedPhase::Liquid => diagram.liquid_density(temperature),
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    use hyperion_testkit::float::assert_same_bits;
+
+    use super::*;
+    use crate::substance::{PhaseDiagram, by_key, condensables};
+
+    /// A temperature range of a row's solid with no density: its key, from where, inclusive, to
+    /// where, exclusive, kelvin, `f64::INFINITY` for through the triple point, and why it stays.
+    type Gap = (&'static str, f64, f64, &'static str);
+
+    /// The solids the registry gives no density at 24: β-CO (61.585 K to the triple point),
+    /// whose density was not found in a readable source (P14.T49.n's open gap; searched again by
+    /// P14.T49.o, 2026-10-30). It leaves the list as its density is read. Hydrogen sulphide's
+    /// phase II left it with its stand-in between its neighbours' (P14.T49.o, main's ruling of
+    /// 2026-10-30).
+    const GAPS_AT_24: [Gap; 1] = [(
+        "CO",
+        61.585,
+        f64::INFINITY,
+        "β-CO's cell was not read: Krupskii et al. 1975 is closed",
+    )];
+
+    /// The rows whose liquid by temperature P14.T49.n read, from 24.
+    const READ_LIQUIDS: [&str; 6] = ["Fe", "MgSiO3", "Mg2SiO4", "Al2O3", "CaTiO3", "S8"];
+
+    /// Whether `gaps` hold `key`'s solid at `t` kelvin.
+    fn in_gap(gaps: &[Gap], key: &str, t: f64) -> bool {
+        gaps.iter()
+            .any(|&(row, from, to, _)| row == key && from <= t && t < to)
+    }
+
+    /// The keys `gaps` name.
+    fn keys(gaps: &[Gap]) -> BTreeSet<String> {
+        gaps.iter().map(|&(key, ..)| key.to_owned()).collect()
+    }
+
+    /// The temperatures, kelvin, at which a condensable's solid is read: 4,096 steps from 0 K to
+    /// its triple temperature, each phase's start and 10⁻⁹ K either side of it, and the triple
+    /// temperature itself, those inside [0, `T_t`].
+    fn solid_samples(diagram: &PhaseDiagram) -> Vec<f64> {
+        let t_t = diagram.triple_temperature().value();
+        let mut samples: Vec<f64> = (0..=4_096_u32)
+            .map(|j| t_t * f64::from(j) / 4_096.0)
+            .collect();
+        for phase in diagram.solid_phases() {
+            let start = phase.start().value();
+            samples.extend([start - 1e-9, start, start + 1e-9]);
+        }
+        samples.push(t_t);
+        samples.retain(|t| (0.0..=t_t).contains(t));
+        samples
+    }
+
+    /// `row`'s grain density as `phase` at `t` kelvin, kg m⁻³.
+    fn density(row: &Substance, phase: CondensedPhase, t: f64) -> Option<f64> {
+        row.grain_density(phase, Kelvin::new(t))
+            .map(KilogramsPerCubicMetre::value)
+    }
+
+    /// Every condensable has a solid grain density over its whole solid range from 24, finite and
+    /// positive, but for the named gaps that remain ([`GAPS_AT_24`]): swept from 0 K to its triple
+    /// temperature, at each phase's start and 10⁻⁹ K either side of it, and at the triple point
+    /// (decision-p14-t51a-part2 §3.4's registry test).
+    #[test]
+    fn every_condensable_has_a_solid_density_over_its_solid_range() {
+        let mut missing_at_24 = BTreeSet::new();
+        let mut count = 0;
+        for id in condensables() {
+            count += 1;
+            let row = id.substance();
+            let key = row.key();
+            let key = key.as_str();
+            let diagram = row.phase_diagram().expect("a condensable has a diagram");
+            for t in solid_samples(diagram) {
+                let read = density(row, CondensedPhase::Solid, t);
+                assert_eq!(
+                    read.is_none(),
+                    in_gap(&GAPS_AT_24, key, t),
+                    "{key} at {t} K, read"
+                );
+                match read {
+                    Some(read) => {
+                        assert!(read.is_finite() && read > 0.0, "{key} at {t} K: {read}");
+                    }
+                    None => {
+                        missing_at_24.insert(key.to_owned());
+                    }
+                }
+            }
+        }
+        assert_eq!(count, 14, "the condensables");
+        assert_eq!(
+            missing_at_24,
+            keys(&GAPS_AT_24),
+            "24's gaps are the named ones"
+        );
+        for (key, .., why) in GAPS_AT_24 {
+            assert!(!why.is_empty(), "{key}'s gap states its reason");
+        }
+    }
+
+    /// The densities P14.T49.n read are their sources' (the rows' `ρ_s` and `liquid grain
+    /// density` sources) under 24's rules: solid argon's Eq. (27) of Maltby, Hammer and
+    /// Wilhelmsen 2024 within 0.013%, held at 1,770.74 kg m⁻³ below 5 K; liquid iron's and
+    /// alumina's linear laws within 10⁻⁹; the melt models' M ÷ V within 1.2 × 10⁻⁴ at the cloud
+    /// decks of `condense.golden`; and liquid sulphur within 3.5 kg m⁻³ of Kellas 1918's means.
+    #[test]
+    fn the_read_densities_follow_their_sources() {
+        let read = |key: &str, phase, t| {
+            let row = by_key(key).unwrap().substance();
+            density(row, phase, t).unwrap()
+        };
+        let (solid, liquid) = (CondensedPhase::Solid, CondensedPhase::Liquid);
+        let relative = |ours: f64, theirs: f64| (ours / theirs - 1.0).abs();
+        let argon = |t: f64| {
+            let x = t / 34.70;
+            let p = 3.160e-4 + 0.038_21 * x - 0.015_40 * x * x + 0.003_152 * x * x * x;
+            39.948e3 / (22.56 * (1.0 + p / (crate::math::exp(1.0 / x) - 1.0)))
+        };
+        assert_same_bits(read("Ar", solid, 0.0), 1_770.74);
+        assert_same_bits(read("Ar", solid, 83.8058), 1_621.60);
+        for t in [5.0, 12.5, 23.3, 40.0, 52.5, 61.0, 77.7, 83.8] {
+            let ours = read("Ar", solid, t);
+            assert!(relative(ours, argon(t)) < 1.3e-4, "Ar at {t} K: {ours}");
+        }
+        let iron = |t: f64| 7_034.96 - 0.926 * (t - 1_811.0);
+        let alumina = |t: f64| 2_900.0 - 0.09 * (t - 2_327.0);
+        for t in [1_811.15, 1_905.0, 2_400.0, 2_500.0] {
+            assert!(
+                relative(read("Fe", liquid, t), iron(t)) < 1e-9,
+                "Fe at {t} K"
+            );
+        }
+        assert_same_bits(read("Fe", liquid, 3_000.0), read("Fe", liquid, 2_500.0));
+        for t in [2_327.0, 2_603.7, 3_240.0] {
+            assert!(
+                relative(read("Al2O3", liquid, t), alumina(t)) < 1e-9,
+                "Al2O3 at {t} K"
+            );
+        }
+        // Lange 1997's set for the magnesium silicates, MELTS's for perovskite, at the decks.
+        for (key, molar_mass, volume, slope, reference, deck) in [
+            ("MgSiO3", 100.387, 38.88, 0.003_27, 1_773.0, 2_028.9),
+            ("Mg2SiO4", 140.691, 50.90, 0.006_54, 1_773.0, 2_276.9),
+            ("CaTiO3", 135.942, 39.73, 0.010_166, 1_673.0, 2_514.7),
+        ] {
+            let model = molar_mass * 1e3 / (volume + slope * (deck - reference));
+            let ours = read(key, liquid, deck);
+            assert!(
+                relative(ours, model) < 1.2e-4,
+                "{key} at {deck} K: {ours} against {model}"
+            );
+        }
+        // Kellas 1918's means, ICT vol. III p. 21, from the melt to 445 °C.
+        for (celsius, kellas) in [
+            (122.2, 1_802.75),
+            (145.5, 1_782.60),
+            (158.5, 1_772.40),
+            (171.3, 1_770.45),
+            (210.0, 1_750.75),
+            (278.5, 1_709.50),
+            (357.0, 1_659.10),
+            (445.0, 1_606.66),
+        ] {
+            let ours = read("S8", liquid, celsius + 273.15);
+            assert!((ours - kellas).abs() < 3.5, "S8 at {celsius} °C: {ours}");
+        }
+        // Each row's solid is its one fixed value, as at 23.
+        for key in READ_LIQUIDS {
+            assert_same_bits(read(key, solid, 300.0), read(key, solid, 1_000.0));
+        }
+    }
+
+    /// The molten salts (P14.T49.p): `KCl`'s and `Na2S`'s liquids follow their nodes from their
+    /// melting points, below their solids' densities, beside their solids at 293 K (1,987 and
+    /// 1,856 kg m⁻³) and their melting points (1,044 and 1,445 K), each liquid's source stated.
+    #[test]
+    fn the_molten_salts_liquids_are_served_from_25() {
+        let (solid, liquid) = (CondensedPhase::Solid, CondensedPhase::Liquid);
+        for (key, crystal_density, melt, deck) in [
+            ("KCl", 1_987.0, 1_044.0, 1_780.0),
+            ("Na2S", 1_856.0, 1_445.0, 1_780.0),
+        ] {
+            let row = by_key(key).unwrap().substance();
+            let molten = row.condensed().unwrap();
+            let GrainDensity::MeasuredLiquid {
+                solid: crystal,
+                liquid: nodes,
+            } = molten.grain_density()
+            else {
+                panic!("{key}'s columns give its liquid by temperature");
+            };
+            assert_same_bits(crystal.density().value(), crystal_density);
+            assert_same_bits(crystal.at().value(), 293.0);
+            assert_same_bits(molten.transition().temperature().value(), melt);
+            assert_eq!(molten.transition().kind(), TransitionKind::Melting, "{key}");
+            assert_eq!(molten.mechanics(), MechanicsFamily::Salt, "{key}");
+            assert!(
+                molten
+                    .sources()
+                    .iter()
+                    .any(|s| s.covers() == "liquid grain density"),
+                "{key}"
+            );
+            assert!(nodes.windows(2).all(|w| w[0].0 < w[1].0), "{key}");
+            assert!(
+                (nodes[0].0.value() - melt).abs() < 1e-9,
+                "{key}: from its melt"
+            );
+            for t in [melt, f64::midpoint(melt, deck), deck] {
+                let at = density(row, liquid, t).unwrap_or_else(|| panic!("{key} at {t} K"));
+                assert!(
+                    at.is_finite() && at > 0.0 && at < crystal.density().value(),
+                    "{key}"
+                );
+                assert_same_bits(density(row, solid, t).unwrap(), crystal_density);
+            }
+        }
+        // KCl's is Janz 1988's law, 2,135.9 − 0.5831 T kg m⁻³, inside its range and out to
+        // 1,800 K; Na2S's the solid's 1,856 kg m⁻³ over 1.2, to its printed digits, at every
+        // temperature.
+        let kcl = by_key("KCl").unwrap().substance();
+        for t in [1_044.0, 1_100.0, 1_212.0, 1_500.0, 1_800.0] {
+            let ours = density(kcl, liquid, t).unwrap();
+            let janz = 2_135.9 - 0.583_1 * t;
+            assert!((ours / janz - 1.0).abs() < 1e-9, "KCl at {t} K: {ours}");
+        }
+        let na2s = by_key("Na2S").unwrap().substance();
+        for t in [1_445.0, 1_600.0, 1_800.0] {
+            let ours = density(na2s, liquid, t).unwrap();
+            assert!((ours - 1_856.0 / 1.2).abs() < 0.05, "Na2S at {t} K: {ours}");
+        }
+    }
+}

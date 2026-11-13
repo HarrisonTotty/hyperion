@@ -3,7 +3,11 @@ import { describe, expect, it } from "vitest";
 
 import type { GraphicsLaunchMode } from "../../../preload/api";
 import { FakeAdapter, FakeGpu, INTEL_UHD_620_INFO, SWIFTSHADER_INFO } from "../test/fakeGpu";
-import { type AdapterOutcome, requestAdapterOutcome } from "../view/engine/platform";
+import {
+  type AdapterOutcome,
+  requestAdapterOutcome,
+  WANTED_FEATURES,
+} from "../view/engine/platform";
 import {
   type GraphicsEvent,
   GraphicsStatusContext,
@@ -11,6 +15,7 @@ import {
   initialGraphicsStatus,
 } from "../view/engine/status";
 import { GraphicsPanel } from "./GraphicsPanel";
+import { statusLine } from "../test/statusLine";
 
 async function adapter(
   info = INTEL_UHD_620_INFO,
@@ -72,6 +77,15 @@ describe("GraphicsPanel", () => {
     expect(within(panel).queryByText(/^GRAPHICS /)).not.toBeInTheDocument();
   });
 
+  it("lists every wanted feature the adapter offers in the wanted features' order, primitive-index last", async () => {
+    renderPanel("vulkan", {
+      kind: "adapter-outcome",
+      outcome: await adapter(INTEL_UHD_620_INFO, [...WANTED_FEATURES].toReversed()),
+    });
+    expect(reading("Features")).toHaveTextContent(WANTED_FEATURES.join(", "));
+    expect(WANTED_FEATURES.at(-1)).toBe("primitive-index");
+  });
+
   it("states a software adapter in plain text", async () => {
     renderPanel("vulkan", {
       kind: "adapter-outcome",
@@ -81,27 +95,27 @@ describe("GraphicsPanel", () => {
     expect(reading("Styles")).toHaveTextContent("WIREFRAME");
     expect(reading("GPU Timer")).toHaveTextContent("ABSENT");
     const statement = screen.getByText(
-      "GRAPHICS SOFTWARE ADAPTER: photorealistic style not available",
+      statusLine("GRAPHICS SOFTWARE ADAPTER: photorealistic style not available"),
     );
     expect(statement).not.toHaveClass("request-status__text--fault");
   });
 
   it("states no WebGPU", () => {
     renderPanel("vulkan", { kind: "adapter-outcome", outcome: { kind: "no-webgpu" } });
-    expect(screen.getByText("GRAPHICS NOT AVAILABLE: no WebGPU")).toBeInTheDocument();
+    expect(screen.getByText(statusLine("GRAPHICS NOT AVAILABLE: no WebGPU"))).toBeInTheDocument();
     expect(reading("Styles")).toHaveTextContent("NONE");
   });
 
   it("states no adapter", () => {
     renderPanel("vulkan", { kind: "adapter-outcome", outcome: { kind: "no-adapter" } });
     expect(
-      screen.getByText("GRAPHICS NO ADAPTER: views not available, relaunch to retry"),
+      screen.getByText(statusLine("GRAPHICS NO ADAPTER: views not available, relaunch to retry")),
     ).toBeInTheDocument();
   });
 
   it("reports a lost device as a fault, with its count", async () => {
     renderPanel("vulkan", { kind: "adapter-outcome", outcome: await adapter() }, LOST);
-    expect(screen.getByText("GRAPHICS DEVICE LOST: re-creating")).toHaveClass(
+    expect(screen.getByText(statusLine("GRAPHICS DEVICE LOST: re-creating"))).toHaveClass(
       "request-status__text--fault",
     );
     expect(reading("Device Losses")).toHaveTextContent("1");
@@ -115,7 +129,9 @@ describe("GraphicsPanel", () => {
     );
     expect(
       screen.getByText(
-        "GRAPHICS VIEW REFUSED: not re-created after device loss, not drawn, relaunch to retry",
+        statusLine(
+          "GRAPHICS VIEW REFUSED: not re-created after device loss, not drawn, relaunch to retry",
+        ),
       ),
     ).toHaveClass("request-status__text--fault");
   });
@@ -126,7 +142,7 @@ describe("GraphicsPanel", () => {
     act(() => {
       store.dispatch({ kind: "gpu-process-gone", count: 2 });
     });
-    expect(screen.getByText("GRAPHICS PROCESS RESTARTED: re-acquiring")).toHaveClass(
+    expect(screen.getByText(statusLine("GRAPHICS PROCESS RESTARTED: re-acquiring"))).toHaveClass(
       "request-status__text--fault",
     );
     expect(reading("Process Restarts")).toHaveTextContent("2");
@@ -142,14 +158,14 @@ describe("GraphicsPanel", () => {
     expect(reading("Mode")).toHaveTextContent(/^SAFE MODE$/);
     expect(reading("Styles")).toHaveTextContent("NONE");
     expect(
-      screen.getByText("GRAPHICS SAFE MODE: views not available, relaunch to retry"),
+      screen.getByText(statusLine("GRAPHICS SAFE MODE: views not available, relaunch to retry")),
     ).not.toHaveClass("request-status__text--fault");
   });
 
   it("states the disabled state after three losses", async () => {
     renderPanel("vulkan", { kind: "adapter-outcome", outcome: await adapter() }, LOST, LOST, LOST);
     expect(
-      screen.getByText("GRAPHICS DISABLED: 3 device losses, relaunch to retry"),
+      screen.getByText(statusLine("GRAPHICS DISABLED: 3 device losses, relaunch to retry")),
     ).not.toHaveClass("request-status__text--fault");
   });
 
@@ -158,13 +174,27 @@ describe("GraphicsPanel", () => {
       kind: "adapter-withdrawn",
     });
     expect(
-      screen.getByText("GRAPHICS DISABLED: adapter withdrawn, relaunch to retry"),
+      screen.getByText(statusLine("GRAPHICS DISABLED: adapter withdrawn, relaunch to retry")),
     ).toBeInTheDocument();
   });
 
   it("reads the default mode", () => {
     renderPanel("default");
     expect(reading("Mode")).toHaveTextContent("DEFAULT");
+  });
+
+  it("names the check-only software mode, its software adapter and both styles (R01.T16)", async () => {
+    renderPanel("software", {
+      kind: "adapter-outcome",
+      outcome: await adapter(SWIFTSHADER_INFO, ["subgroups"]),
+    });
+    expect([
+      reading("Mode").textContent,
+      reading("Software Adapter").textContent,
+      reading("Styles").textContent,
+    ]).toEqual(["SOFTWARE", "YES", "WIREFRAME, PHOTOREALISTIC"]);
+    const panel = screen.getByRole("region", { name: "Graphics" });
+    expect(within(panel).queryByText(/^GRAPHICS /)).not.toBeInTheDocument();
   });
 
   it.each([

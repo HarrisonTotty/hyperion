@@ -11,8 +11,14 @@
  * Earth mass, so that the readout's `M⊕` is the server's.
  */
 import {
+  type AbsorberDto,
+  type AerosolInventoryDto,
+  type AerosolModeDto,
+  type AerosolNotModelledDto,
   type BandsDto,
+  type BiosphereDto,
   type BodyDetailDto,
+  type BodyEnvelopeDto,
   type BodyFigureDto,
   type BodyIdHex,
   type BodyKindDto,
@@ -22,40 +28,93 @@ import {
   type BodyRotationDto,
   type BodyStateDto,
   type BodySummaryDto,
+  type BodySurfaceDto,
   type BulkPropertiesDto,
+  type ClimateRegimeDto,
+  type CondensateDeckDto,
+  type CraterContractDto,
+  type CraterScreeningDto,
+  type CrustCompositionDto,
+  type DestructionCauseDto,
+  type DetailSeedHex,
+  type GasShareDto,
+  type HabitabilityDto,
+  type HabitabilityLimitDto,
   type HabitableZoneDto,
   isBodyId,
+  type NotFormedCondensateDto,
   type OrbitDriftDto,
   type OrbitHostDto,
   parseBodyId,
   type PopulationDto,
+  type ProfileNodeDto,
   type RequestOf,
+  type ResourceAbundancesDto,
   type SectionDto,
+  type SilicateVapourDto,
+  type SizeDistributionDto,
+  type SubstanceAreaDto,
+  type SubstancePhaseDto,
+  type SubsurfaceOceanDto,
+  type SurfaceCondensateDto,
+  type SurfaceModifiersDto,
+  type SurfaceStateDto,
   type SystemBodiesDto,
   type SystemIdHex,
   type SystemPlaneDto,
   type UniverseIdHex,
   type UniverseTime,
+  type VerticalStructureDto,
+  type WetEpochDto,
   type ZoneDto,
 } from "@hyperion/protocol";
 
 import { cross, dot, vec3, type Vec3 } from "../../geometry/vec3";
 import { ROTATION_ORTHONORMAL_TOLERANCE } from "../../view/coords/rotation";
-import { NEAR_PARABOLIC_ECCENTRICITY, type OrbitDrift } from "../orbit";
+import { type KeplerOrbit, NEAR_PARABOLIC_ECCENTRICITY, type OrbitDrift } from "../orbit";
+import { GRAVITATIONAL_CONSTANT_M3_PER_KG_S2 } from "./constants";
 import type {
+  Absorber,
+  AerosolInventory,
+  AerosolMode,
+  AerosolNotModelled,
+  AerosolPhase,
+  Biosphere,
   BodyDetail,
+  BodyEnvelope,
   BodyKind,
   BodyOrbit,
   BodyRecord,
   BodyState,
+  BodySurface,
   BulkProperties,
+  ClimateRegime,
+  CondensateDeck,
+  CondensatePhase,
+  CraterContract,
+  CraterScreening,
+  CrustComposition,
+  DestructionCause,
+  GasShare,
+  Habitability,
+  HabitabilityLimit,
   HabitableZone,
   HierarchyNode,
   JohnsonBands,
+  NotFormedCondensate,
   OrbitHost,
   Population,
+  ProfileNode,
+  ResourceAbundances,
   RotationLock,
   Section,
+  SilicateVapour,
+  SizeDistribution,
+  SubstanceArea,
+  SubsurfaceOcean,
+  SurfaceCondensate,
+  SurfaceModifiers,
+  SurfaceState,
   SystemBodies,
   SystemBody,
   SystemBodyFigure,
@@ -63,16 +122,18 @@ import type {
   SystemBodyRotation,
   SystemModel,
   SystemPlane,
+  VerticalStructure,
+  WetEpoch,
   Zone,
 } from "./model";
-import { bodyDesignation, toKeplerOrbit, toSystemModel } from "./wire";
+import { bodyDesignation, modelled, pending, toKeplerOrbit, toSystemModel } from "./wire";
 
 /**
  * The simulation's Earth mass, in kilograms: GM⊕ ÷ G, 3.986 004 × 10¹⁴ m³ s⁻² over
- * 6.674 30 × 10⁻¹¹ m³ kg⁻¹ s⁻², `units::consts::EARTH_MASS_KG` in `hyperion-sim`, the same quotient
- * to the bit (the orchestrator's ruling 64.3).
+ * {@link GRAVITATIONAL_CONSTANT_M3_PER_KG_S2}, `units::consts::EARTH_MASS_KG` in `hyperion-sim`, the
+ * same quotient to the bit (the orchestrator's ruling 64.3).
  */
-export const EARTH_MASS_KG = 3.986_004e14 / 6.674_3e-11;
+export const EARTH_MASS_KG = 3.986_004e14 / GRAVITATIONAL_CONSTANT_M3_PER_KG_S2;
 
 /** The detail level the display asks for: everything, which the server grants until P14's overlay. */
 const DETAIL_ASKED = "full";
@@ -105,6 +166,71 @@ export function toBodyDetailRequest(
   return { kind: "body_detail", universe, body, time, detail: DETAIL_ASKED };
 }
 
+/** A detail seed's form on the wire: exactly 16 lowercase hexadecimal digits (`DetailSeedHex`). */
+const DETAIL_SEED_FORM = /^[0-9a-f]{16}$/u;
+
+/**
+ * A body record's detail seed (`BodyHooksDto.detail_seed`, R09.T1.b), the seed of the client's
+ * terrain synthesis, without reading the rest of the record: `null` where its hooks or the seed
+ * are not `ok` (not modelled, not applicable, or above the detail granted) or the seed is not of
+ * its wire form.
+ *
+ * @remarks
+ * The terrain session's want of a body (plan R10, R10.T16.a) reads it from one `body_detail` a
+ * want, as {@link toBodyDetail}'s record reads it whole for the `SYSTEM` display.
+ */
+export function bodyDetailSeed(record: Pick<BodyRecordDto, "hooks">): DetailSeedHex | null {
+  const { hooks } = record;
+  if (hooks.state !== "ok" || hooks.value.detail_seed.state !== "ok") {
+    return null;
+  }
+  const seed = hooks.value.detail_seed.value;
+  return DETAIL_SEED_FORM.test(seed) ? seed : null;
+}
+
+/**
+ * A body record's own orbit about its parent, as the client propagates it (with its drift), without
+ * reading the rest of the record: `null` where the section is not `ok` (a free-floating body's is
+ * `not_applicable`) or the orbit is not one the client can propagate.
+ */
+export function bodyRecordOrbit(record: Pick<BodyRecordDto, "orbit">): KeplerOrbit | null {
+  const { orbit } = record;
+  if (orbit.state !== "ok") {
+    return null;
+  }
+  const converted = faultOf(() => toOrbit(orbit.value));
+  return "ok" in converted ? converted.ok.orbit : null;
+}
+
+/**
+ * Whose orbit sets a body's seasons, by its record (R09's Design note 8; decision-r10-t12-leans §6
+ * (b)): a moon's, one whose kind is `moon` about a body, its planet's, whose record holds it; every
+ * other body's its own, a circumbinary planet's and a belt member's included.
+ */
+export type RecordSeasons =
+  /** The body's own orbit sets them. */
+  | { readonly kind: "own"; readonly orbit: KeplerOrbit }
+  /** A moon: its planet's orbit sets them, from the planet's own record. */
+  | { readonly kind: "planet"; readonly planet: BodyIdHex }
+  /** No orbit the client can propagate is on the record. */
+  | { readonly kind: "none" };
+
+/**
+ * Whose orbit sets the seasons of the body of `record` (plan R10, T12): the sim's
+ * `CoarseInputs::planet_of`'s rule, a moon by its kind about a body, read off the record's kind and
+ * parent, and otherwise the record's own orbit ({@link bodyRecordOrbit}).
+ */
+export function bodyRecordSeasons(
+  record: Pick<BodyRecordDto, "kind" | "parent" | "orbit">,
+): RecordSeasons {
+  const { kind, parent } = record;
+  if (kind.type === "moon" && parent?.type === "body") {
+    return { kind: "planet", planet: parent.id };
+  }
+  const orbit = bodyRecordOrbit(record);
+  return orbit === null ? { kind: "none" } : { kind: "own", orbit };
+}
+
 /**
  * Thrown inside this module for a value the display cannot use, and caught at its two entry points
  * into a fault in words, so that a check deep in a record need not thread a result back up: an
@@ -126,6 +252,11 @@ function positive(value: number): boolean {
 
 function atLeastZero(value: number): boolean {
   return Number.isFinite(value) && value >= 0;
+}
+
+/** A mode's mixing-ratio exponent: finite and above −1; at −1 its share above a level is singular. */
+function aboveMinusOne(value: number): boolean {
+  return Number.isFinite(value) && value > -1;
 }
 
 function toSection<T, U>(section: SectionDto<T>, convert: (value: T) => U): Section<U> {
@@ -189,7 +320,7 @@ function validNanos(nanos: number): boolean {
 }
 
 /** A time the client computes with: whole seconds that a JavaScript number holds exactly. */
-function usableTime(time: UniverseTime): boolean {
+export function usableTime(time: UniverseTime): boolean {
   return Number.isSafeInteger(time.seconds) && validNanos(time.nanos);
 }
 
@@ -206,6 +337,21 @@ function displayableTime(time: UniverseTime): boolean {
   return Number.isInteger(time.seconds) && validNanos(time.nanos);
 }
 
+/** Every destruction cause this build knows, so that one it does not reads `unknown`. */
+const DESTRUCTION_CAUSES: Readonly<Record<DestructionCauseDto, true>> = {
+  dispersed: true,
+  engulfed: true,
+  tidally_disrupted: true,
+  collided: true,
+  evaporated: true,
+};
+
+// The causes grow without a protocol bump (galaxy plan 04's growing enums), and the decoder trusts
+// the generated types, so a newer server's string arrives typed as one this build knows.
+function toDestructionCause(wire: DestructionCauseDto): DestructionCause {
+  return Object.hasOwn(DESTRUCTION_CAUSES, wire) ? wire : "unknown";
+}
+
 function toState(state: BodyStateDto): BodyState {
   let result: BodyState;
   switch (state.type) {
@@ -215,7 +361,7 @@ function toState(state: BodyStateDto): BodyState {
       break;
     case "destroyed":
       check(displayableTime(state.at), "state time unusable");
-      result = { kind: "destroyed", cause: state.cause, at: state.at };
+      result = { kind: "destroyed", cause: toDestructionCause(state.cause), at: state.at };
       break;
     case "unbound":
       check(displayableTime(state.at), "state time unusable");
@@ -320,6 +466,13 @@ function unit(v: Vec3): boolean {
     finite(v.z) &&
     Math.abs(dot(v, v) - 1) <= AXES_ORTHONORMAL_TOLERANCE
   );
+}
+
+/** A ring's plane's normal, checked: finite and of unit length, as a pole is. */
+function toRingNormal(components: [number, number, number]): Vec3 {
+  const normal = toVec3(components);
+  check(unit(normal), "ring normal unusable");
+  return normal;
 }
 
 /** Whether two vectors are perpendicular to {@link AXES_ORTHONORMAL_TOLERANCE}. */
@@ -501,6 +654,7 @@ function toPopulation(population: PopulationDto): Population {
           check(isBodyId(gap.moon) && positive(gap.radius_m), "ring gap unusable");
           return { moon: gap.moon, resonance: toResonance(gap.resonance), radiusM: gap.radius_m };
         }),
+        normal: population.normal === undefined ? null : toRingNormal(population.normal),
       };
       break;
     case "belt": {
@@ -563,6 +717,38 @@ function toPopulation(population: PopulationDto): Population {
         outerEdgeM: population.outer_edge_m,
         comets: population.comets,
         cometRatePerS: population.comet_rate_per_s,
+      };
+      break;
+    case "protoplanetary_disc":
+      check(population.host.type !== "body", "disc host malformed");
+      checkEdges(population.inner_edge_m, population.outer_edge_m, "disc");
+      check(
+        positive(population.snow_line_m) && positive(population.characteristic_radius_m),
+        "disc radii unusable",
+      );
+      result = {
+        kind: "protoplanetary_disc",
+        host: toHost(population.host),
+        innerEdgeM: population.inner_edge_m,
+        outerEdgeM: population.outer_edge_m,
+        snowLineM: population.snow_line_m,
+        characteristicRadiusM: population.characteristic_radius_m,
+        gasMassMearth: toMassMearth(population.gas_mass_kg),
+        solidMassMearth: toMassMearth(population.solid_mass_kg),
+        gaps: population.gaps.map((gap) => {
+          check(isBodyId(gap.giant) && positive(gap.radius_m), "disc gap unusable");
+          return { giant: gap.giant, radiusM: gap.radius_m };
+        }),
+      };
+      break;
+    case "debris_disc":
+      check(population.host.type !== "body", "debris disc host malformed");
+      checkEdges(population.inner_edge_m, population.outer_edge_m, "debris disc");
+      result = {
+        kind: "debris_disc",
+        host: toHost(population.host),
+        innerEdgeM: population.inner_edge_m,
+        outerEdgeM: population.outer_edge_m,
       };
       break;
   }
@@ -788,17 +974,918 @@ export function toSystemBodiesModel(
     : { kind: "ok", model, bodies: converted.ok };
 }
 
+/** Whether a value is a fraction, finite and in `[0, 1]`. */
+function fraction(value: number): boolean {
+  return Number.isFinite(value) && value >= 0 && value <= 1;
+}
+
+/**
+ * How far a mixture's mole fractions may sum from 1: 10⁻⁹, the protocol's tolerance, below which
+ * rendering plan R08's column refuses a mixture (R08.T3.c).
+ */
+const MIXTURE_SUM_TOLERANCE = 1e-9;
+
+/**
+ * A mixture of gases, checked: each fraction in `[0, 1]`, largest first, and summing to 1 to
+ * {@link MIXTURE_SUM_TOLERANCE} unless the mixture is empty. A species is any registry key, a key
+ * this client does not know included.
+ */
+function toGases(gases: ReadonlyArray<GasShareDto>, what: string): ReadonlyArray<GasShare> {
+  const sum = gases.reduce((total, gas) => total + gas.mole_fraction, 0);
+  check(
+    gases.every((gas) => fraction(gas.mole_fraction)) &&
+      gases.every(
+        (gas, index) => index === 0 || gas.mole_fraction <= (gases[index - 1]?.mole_fraction ?? 1),
+      ) &&
+      (gases.length === 0 || Math.abs(sum - 1) <= MIXTURE_SUM_TOLERANCE),
+    `${what} unusable`,
+  );
+  return gases.map((gas) => ({ species: gas.species, moleFraction: gas.mole_fraction }));
+}
+
+/**
+ * Areas by substance, checked: each a fraction, summing to `total` to
+ * {@link MIXTURE_SUM_TOLERANCE}.
+ */
+function toAreas(
+  areas: ReadonlyArray<SubstanceAreaDto>,
+  total: number,
+): ReadonlyArray<SubstanceArea> {
+  const sum = areas.reduce((all, area) => all + area.area_fraction, 0);
+  check(
+    areas.every((area) => fraction(area.area_fraction)) &&
+      Math.abs(sum - total) <= MIXTURE_SUM_TOLERANCE,
+    "surface cover unusable",
+  );
+  return areas.map((area) => ({ substance: area.substance, areaFraction: area.area_fraction }));
+}
+
+/** A positive figure that may be `null`, as an airless body's mixture figures are. */
+function positiveOrNull(value: number | null): boolean {
+  return value === null || positive(value);
+}
+
+/** Profile nodes, checked: positive, their pressures in the given order. */
+function toNodes(
+  nodes: ReadonlyArray<ProfileNodeDto>,
+  order: "ascending" | "descending",
+  what: string,
+): ReadonlyArray<ProfileNode> {
+  check(
+    nodes.every((node) => positive(node.pressure_pa) && positive(node.temperature_k)) &&
+      nodes.every((node, index) => {
+        const previous = nodes[index - 1];
+        if (previous === undefined) {
+          return true;
+        }
+        return order === "ascending"
+          ? node.pressure_pa > previous.pressure_pa
+          : node.pressure_pa < previous.pressure_pa;
+      }),
+    `${what} unusable`,
+  );
+  return nodes.map((node) => ({ pressurePa: node.pressure_pa, temperatureK: node.temperature_k }));
+}
+
+function toClimateRegime(regime: ClimateRegimeDto): ClimateRegime {
+  return {
+    thermal: regime.thermal,
+    forcing: regime.forcing,
+    condensable: regime.condensable,
+    model: regime.model,
+  };
+}
+
+function toSubsurfaceOcean(ocean: SubsurfaceOceanDto): SubsurfaceOcean {
+  check(
+    atLeastZero(ocean.shell_thickness_m) &&
+      positive(ocean.thickness_m) &&
+      fraction(ocean.solute_mass_fraction) &&
+      positive(ocean.base_temperature_k),
+    "subsurface ocean unusable",
+  );
+  return {
+    shellThicknessM: ocean.shell_thickness_m,
+    thicknessM: ocean.thickness_m,
+    floor: ocean.floor,
+    liquid: ocean.liquid,
+    soluteMassFraction: ocean.solute_mass_fraction,
+    baseTemperatureK: ocean.base_temperature_k,
+  };
+}
+
+function toScreening(screening: CraterScreeningDto): CraterScreening {
+  let result: CraterScreening;
+  switch (screening.type) {
+    case "none":
+      result = { kind: "none" };
+      break;
+    case "atmosphere":
+      check(atLeastZero(screening.column_mass_kg_m2), "crater contract unusable");
+      result = { kind: "atmosphere", columnMassKgM2: screening.column_mass_kg_m2 };
+      break;
+    case "cutoff":
+      check(positive(screening.diameter_m), "crater contract unusable");
+      result = { kind: "cutoff", diameterM: screening.diameter_m };
+      break;
+  }
+  return result;
+}
+
+function toCraters(craters: CraterContractDto): CraterContract {
+  check(
+    atLeastZero(craters.lunar_equivalent_n_1km_per_km2) &&
+      positive(craters.projectile_density_kg_m3) &&
+      positive(craters.k_target) &&
+      positive(craters.target_density_kg_m3) &&
+      atLeastZero(craters.system_age_s) &&
+      positiveOrNull(craters.impact_velocity_m_s),
+    "crater contract unusable",
+  );
+  return {
+    lunarEquivalentN1kmPerKm2: craters.lunar_equivalent_n_1km_per_km2,
+    screening: toScreening(craters.screening),
+    projectileDensityKgM3: craters.projectile_density_kg_m3,
+    kTarget: craters.k_target,
+    targetClass: craters.target_class,
+    targetDensityKgM3: craters.target_density_kg_m3,
+    systemAgeS: craters.system_age_s,
+    impactVelocityMS: craters.impact_velocity_m_s,
+  };
+}
+
+function toWetEpoch(epoch: WetEpochDto): WetEpoch {
+  check(
+    atLeastZero(epoch.end_ago_s) &&
+      Number.isFinite(epoch.start_ago_s) &&
+      epoch.start_ago_s >= epoch.end_ago_s &&
+      atLeastZero(epoch.effective_flow_yr) &&
+      atLeastZero(epoch.runoff_m_per_yr) &&
+      atLeastZero(epoch.paleo_inventory_kg_m2),
+    "wet epoch unusable",
+  );
+  return {
+    liquid: epoch.liquid,
+    startAgoS: epoch.start_ago_s,
+    endAgoS: epoch.end_ago_s,
+    effectiveFlowYr: epoch.effective_flow_yr,
+    runoffMPerYr: epoch.runoff_m_per_yr,
+    paleoInventoryKgM2: epoch.paleo_inventory_kg_m2,
+  };
+}
+
+function toVerticalStructure(structure: VerticalStructureDto): VerticalStructure {
+  check(
+    positive(structure.alpha) && positive(structure.skin_temperature_k),
+    "vertical structure unusable",
+  );
+  return {
+    alpha: structure.alpha,
+    skinTemperatureK: structure.skin_temperature_k,
+    adiabat: toNodes(structure.adiabat, "descending", "vertical structure"),
+  };
+}
+
+/** The largest fractal dimension an aerosol's aggregate may have: Tazaki and Tanaka 2018's model's. */
+const AGGREGATE_MAX_FRACTAL_DIMENSION = 2.5;
+
+function toSizeDistribution(distribution: SizeDistributionDto): SizeDistribution {
+  let result: SizeDistribution;
+  switch (distribution.type) {
+    case "gamma":
+    case "log_normal":
+      check(
+        positive(distribution.effective_radius_m) && positive(distribution.effective_variance),
+        "aerosol mode unusable",
+      );
+      result = {
+        kind: distribution.type,
+        effectiveRadiusM: distribution.effective_radius_m,
+        effectiveVariance: distribution.effective_variance,
+      };
+      break;
+    case "aggregate":
+      check(
+        positive(distribution.monomer_radius_m) &&
+          Number.isFinite(distribution.monomer_count) &&
+          distribution.monomer_count >= 1 &&
+          distribution.fractal_dimension >= 1 &&
+          distribution.fractal_dimension <= AGGREGATE_MAX_FRACTAL_DIMENSION &&
+          positive(distribution.fractal_prefactor),
+        "aerosol mode unusable",
+      );
+      result = {
+        kind: "aggregate",
+        monomerRadiusM: distribution.monomer_radius_m,
+        monomerCount: distribution.monomer_count,
+        fractalDimension: distribution.fractal_dimension,
+        fractalPrefactor: distribution.fractal_prefactor,
+      };
+      break;
+  }
+  return result;
+}
+
+/** A layer's base and top pressures, checked: positive, the base at or below the top. */
+function layerUsable(basePa: number, topPa: number): boolean {
+  return positive(basePa) && positive(topPa) && basePa >= topPa;
+}
+
+/**
+ * The phase of an aerosol mode: `solid` or `liquid`, since a particle is never a vapour or a
+ * supercritical fluid (plan 14's P14.T24.c).
+ */
+function toAerosolPhase(phase: SubstancePhaseDto): AerosolPhase {
+  let result: AerosolPhase;
+  switch (phase) {
+    case "solid":
+    case "liquid":
+      result = phase;
+      break;
+    case "vapour":
+    case "supercritical":
+      throw new Unusable("aerosol phase unusable");
+  }
+  return result;
+}
+
+/** Which of an aerosol mode's members that may be left out the wire sends. */
+interface ModeMembers {
+  readonly size: boolean;
+  readonly column: boolean;
+  readonly tau: boolean;
+  readonly temperature: boolean;
+}
+
+/**
+ * Whether a mode's members are the ones its not-modelled reason leaves (plan 14's P14.T54.b.b;
+ * decision-p14-t54b-open §2.2): with no reason, every one; a grain density's, no optical depth;
+ * a size's, no size or optical depth over a column; the optics', no optical depth over a size; and
+ * no mass extinction, an aggregate's, no column mass or temperature beside its size and optical
+ * depth. Every reason keeps the temperature but the last.
+ */
+function membersFitReason(
+  sent: ModeMembers,
+  reason: AerosolNotModelledDto["type"] | null,
+): boolean {
+  let fits: boolean;
+  switch (reason) {
+    case null:
+      fits = sent.size && sent.column && sent.tau && sent.temperature;
+      break;
+    case "no_grain_density":
+      fits = !sent.tau && sent.temperature;
+      break;
+    case "no_collision_constants":
+    case "no_condensate":
+    case "no_size_distribution":
+      fits = !sent.size && sent.column && !sent.tau && sent.temperature;
+      break;
+    case "optics_not_modelled":
+      fits = sent.size && !sent.tau && sent.temperature;
+      break;
+    case "no_mass_extinction":
+      fits = sent.size && !sent.column && sent.tau && !sent.temperature;
+      break;
+  }
+  return fits;
+}
+
+/** A mode's not-modelled reason in the model, its temperature checked. */
+function toNotModelled(reason: AerosolNotModelledDto): AerosolNotModelled {
+  let result: AerosolNotModelled;
+  switch (reason.type) {
+    case "no_grain_density":
+      check(positive(reason.temperature_k), "aerosol mode unusable");
+      result = {
+        kind: "no_grain_density",
+        phase: toAerosolPhase(reason.phase),
+        temperatureK: reason.temperature_k,
+      };
+      break;
+    case "no_collision_constants":
+    case "no_condensate":
+    case "no_size_distribution":
+    case "optics_not_modelled":
+    case "no_mass_extinction":
+      result = { kind: reason.type };
+      break;
+  }
+  return result;
+}
+
+/**
+ * An aerosol mode, checked: its column mass and optical depth, where sent, not negative, the
+ * optical depth sent with its basis, its temperature, where sent, positive, its coverage a
+ * fraction, its layer usable, its exponent finite and above −1, and the members it leaves out the ones
+ * its not-modelled reason names ({@link membersFitReason}).
+ *
+ * @remarks
+ * A member the server's generator does not model is absent, never `null` (decision-p14-t54b-open
+ * §2.2), and reads as not modelled, as one an older or hand-written frame sends as `null` does.
+ */
+function toAerosolMode(mode: AerosolModeDto): AerosolMode {
+  const size = absentIfNull(mode.size_distribution);
+  const column = absentIfNull(mode.column_mass_kg_m2);
+  const tau = absentIfNull(mode.tau_550);
+  const basis = absentIfNull(mode.tau_basis);
+  const temperature = absentIfNull(mode.temperature_k);
+  const reason = absentIfNull(mode.not_modelled);
+  const sent = {
+    size: size !== undefined,
+    column: column !== undefined,
+    tau: tau !== undefined,
+    temperature: temperature !== undefined,
+  };
+  check(
+    (column === undefined || atLeastZero(column)) &&
+      (tau === undefined || atLeastZero(tau)) &&
+      (tau === undefined) === (basis === undefined) &&
+      (temperature === undefined || positive(temperature)) &&
+      fraction(mode.coverage) &&
+      layerUsable(mode.base_pa, mode.top_pa) &&
+      aboveMinusOne(mode.f_sed) &&
+      membersFitReason(sent, reason?.type ?? null),
+    "aerosol mode unusable",
+  );
+  return {
+    material: mode.material,
+    phase: toAerosolPhase(mode.phase),
+    deck: mode.deck,
+    shape: mode.shape,
+    sizeDistribution: pending(size, toSizeDistribution),
+    columnMassKgM2: pending(column, (kilograms) => kilograms),
+    opticalDepth:
+      tau === undefined || basis === undefined
+        ? { kind: "not_modelled" }
+        : { kind: "value", value: { tau550: tau, basis } },
+    basePa: mode.base_pa,
+    topPa: mode.top_pa,
+    fSed: mode.f_sed,
+    coverage: mode.coverage,
+    temperatureK: pending(temperature, (kelvin) => kelvin),
+    notModelled: reason === undefined ? null : toNotModelled(reason),
+  };
+}
+
+function toAbsorber(absorber: AbsorberDto): Absorber {
+  const profile = absorber.profile;
+  check(
+    atLeastZero(absorber.column_m2) &&
+      layerUsable(absorber.base_pa, absorber.top_pa) &&
+      (profile === null ||
+        profile.every(
+          (node, index) =>
+            positive(node.pressure_pa) &&
+            fraction(node.relative_mixing_ratio) &&
+            node.pressure_pa < (profile[index - 1]?.pressure_pa ?? Number.POSITIVE_INFINITY),
+        )),
+    "absorber unusable",
+  );
+  return {
+    species: absorber.species,
+    columnPerM2: absorber.column_m2,
+    basePa: absorber.base_pa,
+    topPa: absorber.top_pa,
+    profile:
+      profile === null
+        ? null
+        : profile.map((node) => ({
+            pressurePa: node.pressure_pa,
+            relativeMixingRatio: node.relative_mixing_ratio,
+          })),
+  };
+}
+
+/**
+ * A condensate deck, checked: its vapours fractions, its layer usable, its base's temperature
+ * positive and its exponent not negative.
+ */
+function toCondensateDeck(deck: CondensateDeckDto): CondensateDeck {
+  check(
+    fraction(deck.vapour_mole_fraction_below) &&
+      fraction(deck.vapour_mole_fraction_above) &&
+      layerUsable(deck.base_pa, deck.top_pa) &&
+      positive(deck.base_temperature_k) &&
+      atLeastZero(deck.f_sed),
+    "condensate deck unusable",
+  );
+  return {
+    condensate: deck.condensate,
+    phase: toAerosolPhase(deck.phase),
+    basePa: deck.base_pa,
+    baseTemperatureK: deck.base_temperature_k,
+    topPa: deck.top_pa,
+    vapourMoleFractionBelow: deck.vapour_mole_fraction_below,
+    vapourMoleFractionAbove: deck.vapour_mole_fraction_above,
+    fSed: deck.f_sed,
+    extrapolated: deck.extrapolated,
+  };
+}
+
+/** A condensable not formed, with its reason. */
+function toNotFormed(entry: NotFormedCondensateDto): NotFormedCondensate {
+  const why = entry.reason;
+  let reason: NotFormedCondensate["reason"];
+  switch (why.type) {
+    case "bulk_gas":
+      reason = { kind: "bulk_gas" };
+      break;
+    case "displaced":
+      reason = { kind: "displaced", by: why.by };
+      break;
+    case "supercritical":
+      reason = { kind: "supercritical" };
+      break;
+  }
+  return { condensate: entry.condensate, reason };
+}
+
+/** Which decks the modes of a list may name: one of the listed decks, none, or either. */
+type DeckNaming = "listed" | "none" | "listed_or_none";
+
+/** Whether a mode naming `deck` names what `naming` lets it, of the decks `decks`. */
+function namesAsAllowed(
+  deck: string | null,
+  decks: ReadonlyArray<CondensateDeck>,
+  naming: DeckNaming,
+): boolean {
+  const listed = deck !== null && decks.some((listedDeck) => listedDeck.condensate === deck);
+  let allowed: boolean;
+  switch (naming) {
+    case "listed":
+      allowed = listed;
+      break;
+    case "none":
+      allowed = deck === null;
+      break;
+    case "listed_or_none":
+      allowed = deck === null || listed;
+      break;
+  }
+  return allowed;
+}
+
+/**
+ * The checks of an inventory's decks and the decks its modes name, a surface's and an envelope's
+ * alike (decision-p14-t54b-open §2.2; R08's reviews of P14.T54.b.b, S3, and of P14.T54.b.i, S4):
+ * at most one deck a condensate, and the modes of each list naming the decks its rule lets them
+ * ({@link DeckNaming}), which is what a mode's `deck` means. Two decks of one condensate are
+ * "condensate deck unusable", and a mode that names a deck its list's rule does not let it is
+ * "aerosol mode unusable".
+ */
+function checkDeckNames(
+  decks: ReadonlyArray<CondensateDeck>,
+  lists: ReadonlyArray<readonly [ReadonlyArray<AerosolMode>, DeckNaming]>,
+): void {
+  check(
+    new Set(decks.map((deck) => deck.condensate)).size === decks.length,
+    "condensate deck unusable",
+  );
+  check(
+    lists.every(([modes, naming]) =>
+      modes.every((mode) => namesAsAllowed(mode.deck, decks, naming)),
+    ),
+    "aerosol mode unusable",
+  );
+}
+
+/**
+ * A surface air's inventory, checked: its modes and decks each as above, at most one deck a
+ * condensate, and every mode's deck, where it names one, one of the inventory's decks
+ * ({@link checkDeckNames}).
+ */
+function toAerosols(inventory: AerosolInventoryDto): AerosolInventory {
+  const decks = inventory.decks.map(toCondensateDeck);
+  const modes = inventory.modes.map(toAerosolMode);
+  checkDeckNames(decks, [[modes, "listed_or_none"]]);
+  return {
+    modes,
+    decks,
+    absorbers: inventory.absorbers.map(toAbsorber),
+    notFormed: inventory.not_formed.map(toNotFormed),
+  };
+}
+
+/** The phase of a surface condensate: never `vapour`, since it is condensed (P14.T51.a). */
+function toCondensatePhase(phase: SubstancePhaseDto): CondensatePhase {
+  let result: CondensatePhase;
+  switch (phase) {
+    case "solid":
+    case "liquid":
+    case "supercritical":
+      result = phase;
+      break;
+    case "vapour":
+      throw new Unusable("condensate unusable");
+  }
+  return result;
+}
+
+/**
+ * An optional wire member as absent where a frame sends `null` for it, as the server's own reader
+ * takes it: the type leaves the key out, but an older or hand-written frame may send `null`.
+ */
+function absentIfNull<T>(value: T | null | undefined): T | undefined {
+  return value ?? undefined;
+}
+
+/**
+ * A surface's condensates, checked: each mass not negative, each layer, where the server sends
+ * one, not negative, each area a fraction, and each trapped area, where the server sends one, a
+ * fraction no larger than its area.
+ *
+ * @remarks
+ * A layer is absent where the server's registry has not read the phase's density (P14.T54.a), and
+ * a trapped area from every server before P14.T54.b's cold traps; either reads not modelled, never
+ * none, and so does either sent as `null`.
+ */
+function toCondensates(
+  condensates: ReadonlyArray<SurfaceCondensateDto>,
+): ReadonlyArray<SurfaceCondensate> {
+  return condensates.map((condensate) => {
+    const layer = absentIfNull(condensate.reservoir_gel_m);
+    const trapped = absentIfNull(condensate.trapped_area_fraction);
+    check(
+      atLeastZero(condensate.reservoir_kg_m2) &&
+        (layer === undefined || atLeastZero(layer)) &&
+        fraction(condensate.area_fraction) &&
+        (trapped === undefined || (fraction(trapped) && trapped <= condensate.area_fraction)),
+      "condensate unusable",
+    );
+    return {
+      substance: condensate.substance,
+      phase: toCondensatePhase(condensate.phase),
+      reservoirKgM2: condensate.reservoir_kg_m2,
+      reservoirGelM: pending(layer, (metres) => metres),
+      areaFraction: condensate.area_fraction,
+      trappedAreaFraction: pending(trapped, (share) => share),
+      seasonal: condensate.seasonal,
+    };
+  });
+}
+
+/** Whether a crust's lid names one of its present members. */
+function lidPresent(crust: CrustCompositionDto): boolean {
+  let present: boolean;
+  switch (crust.lid) {
+    case "primary":
+      present = crust.primary !== null;
+      break;
+    case "secondary":
+      present = crust.secondary !== null;
+      break;
+    case "bulk":
+      present = crust.bulk !== null;
+      break;
+  }
+  return present;
+}
+
+/**
+ * A crust, checked: `bulk` alone or at least one of `primary` and `secondary`, its lid a present
+ * member, its melt area a fraction (plan 14's P14.T51.c).
+ */
+function toCrust(crust: CrustCompositionDto): CrustComposition {
+  const crusts = [crust.primary, crust.secondary, crust.tertiary];
+  check(
+    (crust.bulk === null
+      ? crust.primary !== null || crust.secondary !== null
+      : crusts.every((member) => member === null)) &&
+      lidPresent(crust) &&
+      Number.isFinite(crust.mantle_redox_iw) &&
+      fraction(crust.melt_area_fraction),
+    "crust unusable",
+  );
+  return {
+    primary: crust.primary,
+    secondary: crust.secondary,
+    tertiary: crust.tertiary,
+    bulk: crust.bulk,
+    lid: crust.lid,
+    provinces: crust.provinces,
+    redox: crust.redox,
+    mantleRedoxIw: crust.mantle_redox_iw,
+    meltAreaFraction: crust.melt_area_fraction,
+  };
+}
+
+function toModifiers(modifiers: SurfaceModifiersDto): SurfaceModifiers {
+  const deposits = modifiers.volcanic_deposits;
+  const weathered = modifiers.weathering_deposits;
+  const deposited = [...deposits, ...weathered].reduce(
+    (all, deposit) => all + deposit.area_fraction,
+    0,
+  );
+  check(
+    fraction(modifiers.maturity) &&
+      atLeastZero(modifiers.weathering_rate) &&
+      fraction(modifiers.organic_cover) &&
+      atLeastZero(modifiers.resurfacing_m_per_yr) &&
+      deposits.every((deposit) => fraction(deposit.area_fraction)) &&
+      weathered.every((deposit) => fraction(deposit.area_fraction)) &&
+      deposited <= 1 + MIXTURE_SUM_TOLERANCE,
+    "surface modifiers unusable",
+  );
+  return {
+    maturity: modifiers.maturity,
+    weatheringRate: modifiers.weathering_rate,
+    organicCover: modifiers.organic_cover,
+    resurfacingMPerYr: modifiers.resurfacing_m_per_yr,
+    volcanicDeposits: deposits.map((deposit) => ({
+      substance: deposit.substance,
+      areaFraction: deposit.area_fraction,
+    })),
+    weatheringDeposits: weathered.map((deposit) => ({
+      substance: deposit.substance,
+      areaFraction: deposit.area_fraction,
+    })),
+  };
+}
+
+function toBiosphere(biosphere: BiosphereDto): Biosphere {
+  check(
+    biosphere.fluxes.every((flux) => Number.isFinite(flux.flux_earth)),
+    "biosphere unusable",
+  );
+  return {
+    fluxes: biosphere.fluxes.map((flux) => ({ species: flux.species, fluxEarth: flux.flux_earth })),
+  };
+}
+
+/**
+ * A melt's own vapour (P14.T35.f), checked for nothing, since its type has no members until
+ * P14.T55.b: a newer server's value reads as a value, never as a fault in the record.
+ */
+function toSilicateVapour(vapour: SilicateVapourDto): SilicateVapour {
+  return vapour;
+}
+
+/**
+ * A surface section, checked as the photometry is (plan 14, P14.T35.e): temperatures positive,
+ * contrasts finite and the day–night one not negative, pressures, fluxes and figures not
+ * negative, every fraction in `[0, 1]`, the gases summing to 1 and largest first, the liquids and
+ * ices summing to the ocean and ice fractions.
+ *
+ * @remarks
+ * A substance is never checked against a list, so that a key this client does not know, a newer
+ * server's, still reads (decision-p14-t35e-wire; a check refusing it would bump the protocol). A
+ * member a later task fills is read absent as not modelled, `null` as none.
+ */
+function toSurface(surface: BodySurfaceDto): BodySurface {
+  check(
+    positive(surface.mean_surface_temperature_k) &&
+      Number.isFinite(surface.equator_pole_contrast_k) &&
+      atLeastZero(surface.day_night_contrast_k) &&
+      atLeastZero(surface.surface_pressure_pa) &&
+      atLeastZero(surface.stellar_flux_w_m2) &&
+      positiveOrNull(surface.mean_molar_mass_g_per_mol) &&
+      positiveOrNull(surface.heat_capacity_over_r),
+    "surface conditions unusable",
+  );
+  check(
+    [
+      surface.ocean_fraction,
+      surface.ice_fraction,
+      surface.cloud_fraction,
+      surface.continental_fraction,
+    ].every(fraction),
+    "surface cover unusable",
+  );
+  check(
+    [
+      surface.sigma_h_m,
+      surface.heat_flow_w_m2,
+      surface.volcanism_level,
+      surface.outgassing_earth,
+      surface.surface_age_s,
+    ].every(atLeastZero),
+    "global figures unusable",
+  );
+  return {
+    state: toSurfaceState(surface.state),
+    material: surface.material,
+    meanSurfaceTemperatureK: surface.mean_surface_temperature_k,
+    equatorPoleContrastK: surface.equator_pole_contrast_k,
+    dayNightContrastK: surface.day_night_contrast_k,
+    surfacePressurePa: surface.surface_pressure_pa,
+    gases: toGases(surface.gases, "surface gases"),
+    meanMolarMassGPerMol: surface.mean_molar_mass_g_per_mol,
+    heatCapacityOverR: surface.heat_capacity_over_r,
+    stellarFluxWM2: surface.stellar_flux_w_m2,
+    radiationClass: surface.radiation_class,
+    liquidWater: surface.liquid_water,
+    climateRegime: toClimateRegime(surface.climate_regime),
+    oceanFraction: surface.ocean_fraction,
+    iceFraction: surface.ice_fraction,
+    cloudFraction: surface.cloud_fraction,
+    surfaceLiquids: toAreas(surface.surface_liquids, surface.ocean_fraction),
+    surfaceIces: toAreas(surface.surface_ices, surface.ice_fraction),
+    sigmaHM: surface.sigma_h_m,
+    continentalFraction: surface.continental_fraction,
+    heatFlowWM2: surface.heat_flow_w_m2,
+    tectonicRegime: surface.tectonic_regime,
+    volcanismLevel: surface.volcanism_level,
+    outgassingEarth: surface.outgassing_earth,
+    magneticFieldClass: surface.magnetic_field_class,
+    surfaceAgeS: surface.surface_age_s,
+    subsurfaceOcean: modelled(surface.subsurface_ocean, toSubsurfaceOcean),
+    craters: toCraters(surface.craters),
+    wetEpoch: surface.wet_epoch === null ? null : toWetEpoch(surface.wet_epoch),
+    verticalStructure: modelled(surface.vertical_structure, toVerticalStructure),
+    aerosols: modelled(surface.aerosols, toAerosols),
+    condensates: modelled(surface.condensates, toCondensates),
+    crust: modelled(surface.crust, toCrust),
+    modifiers: modelled(surface.modifiers, toModifiers),
+    taxonomicClass: modelled(surface.taxonomic_class, (taxonomicClass) => taxonomicClass),
+    biosphere: modelled(surface.biosphere, toBiosphere),
+    silicateVapour: modelled(surface.silicate_vapour, toSilicateVapour),
+  };
+}
+
+/**
+ * A gas-envelope body's envelope section, checked (plan 14's P14.T24.d with P14.T52.d, on the wire
+ * by P14.T35.e and P14.T54.b.i): the internal temperature positive and the irradiation
+ * temperature not negative, the profile's parameters and the join positive, the optical depth's
+ * exponent finite and at least 1, the adiabat's pressures rising
+ * from the join, none above it, the composition summing to 1 and largest first. Its supercritical
+ * condensable is any registry key, or `null` for an H₂/He envelope (P14.T54.b.d).
+ *
+ * @remarks
+ * Its modes, decks, absorbers and condensables not formed are each checked as a surface's are, and
+ * joined as one inventory ({@link BodyEnvelope.aerosols}; R08's review of P14.T54.b.i, C1) after
+ * the wire's split is checked ({@link checkDeckNames}): every mode of `decks` names one of
+ * `condensate_decks`, and no haze names any. A mode's coverage is taken as the fraction it is, not
+ * refused where it is not 1.
+ */
+function toEnvelope(envelope: BodyEnvelopeDto): BodyEnvelope {
+  const profile = envelope.profile;
+  const first = envelope.adiabat[0];
+  check(
+    positive(envelope.internal_temperature_k) &&
+      atLeastZero(envelope.irradiation_temperature_k) &&
+      positive(profile.thermal_opacity_m2_per_kg) &&
+      Number.isFinite(profile.optical_depth_exponent) &&
+      profile.optical_depth_exponent >= 1 &&
+      positive(profile.opacity_ratio) &&
+      positive(profile.redistribution_factor) &&
+      positive(envelope.join_pressure_pa) &&
+      (first === undefined || first.pressure_pa >= envelope.join_pressure_pa) &&
+      positive(envelope.mean_molar_mass_g_per_mol) &&
+      positive(envelope.heat_capacity_over_r) &&
+      atLeastZero(envelope.haze_tau_550),
+    "envelope unusable",
+  );
+  const decks = envelope.condensate_decks.map(toCondensateDeck);
+  const deckModes = envelope.decks.map(toAerosolMode);
+  const hazes = envelope.hazes.map(toAerosolMode);
+  checkDeckNames(decks, [
+    [deckModes, "listed"],
+    [hazes, "none"],
+  ]);
+  return {
+    supercritical: envelope.supercritical,
+    internalTemperatureK: envelope.internal_temperature_k,
+    irradiationTemperatureK: envelope.irradiation_temperature_k,
+    profile: {
+      thermalOpacityM2PerKg: profile.thermal_opacity_m2_per_kg,
+      opticalDepthExponent: profile.optical_depth_exponent,
+      opacityRatio: profile.opacity_ratio,
+      redistributionFactor: profile.redistribution_factor,
+    },
+    joinPressurePa: envelope.join_pressure_pa,
+    adiabat: toNodes(envelope.adiabat, "ascending", "envelope"),
+    composition: toGases(envelope.composition, "envelope composition"),
+    meanMolarMassGPerMol: envelope.mean_molar_mass_g_per_mol,
+    heatCapacityOverR: envelope.heat_capacity_over_r,
+    aerosols: {
+      modes: [...deckModes, ...hazes],
+      decks,
+      absorbers: envelope.absorbers.map(toAbsorber),
+      notFormed: envelope.not_formed.map(toNotFormed),
+    },
+    hazeTau550: envelope.haze_tau_550,
+  };
+}
+
+/** Every surface state this build knows, so that one it does not reads `unknown`. */
+const SURFACE_STATES: Readonly<Record<SurfaceStateDto, true>> = {
+  magma_ocean: true,
+  airless: true,
+  runaway_greenhouse: true,
+  temperate: true,
+  snowball: true,
+  steam_envelope: true,
+  tenuous: true,
+  desert: true,
+};
+
+// The states grow without a protocol bump (galaxy plan 04's growing enums), and the decoder trusts
+// the generated types, so a newer server's string arrives typed as one this build knows.
+function toSurfaceState(wire: SurfaceStateDto): SurfaceState {
+  return Object.hasOwn(SURFACE_STATES, wire) ? wire : "unknown";
+}
+
+/** Every habitability limit this build knows, so that one it does not reads `unknown`. */
+const HABITABILITY_LIMITS: Readonly<Record<HabitabilityLimitDto, true>> = {
+  outside_optimistic_zone: true,
+  outside_conservative_zone: true,
+  no_atmosphere: true,
+  below_triple_point: true,
+  runaway_greenhouse: true,
+  snowball: true,
+  gas_envelope: true,
+  tidally_locked: true,
+  high_eccentricity: true,
+  active_host: true,
+  young_host: true,
+  leaving_main_sequence: true,
+  extrapolated_zone: true,
+  molten_surface: true,
+  dry_surface: true,
+  mass_outside_temperate_range: true,
+  frozen_surface: true,
+};
+
+// The limits grow without a protocol bump (galaxy plan 04's growing enums), and the decoder trusts
+// the generated types, so a newer server's string arrives typed as one this build knows.
+function toHabitabilityLimit(wire: HabitabilityLimitDto): HabitabilityLimit {
+  return Object.hasOwn(HABITABILITY_LIMITS, wire) ? wire : "unknown";
+}
+
+function toHabitability(habitability: HabitabilityDto): Habitability {
+  return {
+    habitabilityClass: habitability.class,
+    limits: habitability.limits.map(toHabitabilityLimit),
+  };
+}
+
+/** Whether a mass fraction is one: finite and from 0 to 1. */
+function massFraction(value: number): boolean {
+  return Number.isFinite(value) && value >= 0 && value <= 1;
+}
+
+/**
+ * Resource abundances, each fraction checked to lie from 0 to 1 (P14.T26), a helium-3 the server
+ * leaves off, as a solid layer's, not modelled. Their sum, at most 1 to the server's rounding, is
+ * not checked, since the wire states no rounding to hold it to.
+ */
+function toResources(resources: ResourceAbundancesDto): ResourceAbundances {
+  const { radioisotopes } = resources;
+  check(
+    [
+      resources.iron_group,
+      resources.light_lithophiles,
+      resources.rare_earths,
+      resources.platinum_group,
+      resources.radioactives,
+      resources.silicates,
+      resources.water_ice,
+      resources.other_ices,
+      resources.hydrocarbons,
+      resources.helium_3 ?? 0,
+      resources.deuterium,
+      radioisotopes.uranium_238,
+      radioisotopes.uranium_235,
+      radioisotopes.thorium_232,
+      radioisotopes.potassium_40,
+    ].every(massFraction),
+    "resources unusable",
+  );
+  return {
+    ironGroup: resources.iron_group,
+    lightLithophiles: resources.light_lithophiles,
+    rareEarths: resources.rare_earths,
+    platinumGroup: resources.platinum_group,
+    radioactives: resources.radioactives,
+    silicates: resources.silicates,
+    waterIce: resources.water_ice,
+    otherIces: resources.other_ices,
+    hydrocarbons: resources.hydrocarbons,
+    helium3: pending(absentIfNull(resources.helium_3), (helium3) => helium3),
+    deuterium: resources.deuterium,
+    radioisotopes: {
+      uranium238: radioisotopes.uranium_238,
+      uranium235: radioisotopes.uranium_235,
+      thorium232: radioisotopes.thorium_232,
+      potassium40: radioisotopes.potassium_40,
+    },
+  };
+}
+
 /** A whole record, checked and in the display's units. */
 function toRecord(record: BodyRecordDto, system: SystemIdHex, designation: string): BodyRecord {
   return {
     ...toBody(record, system, designation),
-    // `BodySurfaceDto` has no value yet, so no `ok` surface can parse; its value passes as it is.
-    surface: toSection(record.surface, (surface) => surface),
+    surface: toSection(record.surface, toSurface),
+    envelope: toOptionalSection(record.envelope, toEnvelope),
     hooks: toSection(record.hooks, (hooks) => ({
       detailSeed: toSection(hooks.detail_seed, (seed) => {
-        check(/^[0-9a-f]{16}$/.test(seed), "detail seed malformed");
+        check(DETAIL_SEED_FORM.test(seed), "detail seed malformed");
         return seed;
       }),
+      habitability: toOptionalSection(hooks.habitability, toHabitability),
+      resources: toOptionalSection(hooks.resources, toResources),
     })),
   };
 }

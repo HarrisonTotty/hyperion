@@ -19,7 +19,8 @@ use std::num::NonZeroUsize;
 
 use hyperion_sim::sky::envelope::{
     AGE_BINS, AGE_SPREAD_FACTOR, BrightnessEnvelope, ETA_DRAWS, FE_H_NODES, MARGIN_MAG, MASS_NODES,
-    MAX_AGE_YEARS, SAMPLES_PER_PHASE, from_millimag, mass_nodes, raw_node, to_millimag,
+    MAX_AGE_YEARS, SAMPLES_PER_PHASE, from_millimag, helium_excess_nodes_in_force, mass_nodes,
+    raw_helium_node, raw_node, to_millimag,
 };
 use hyperion_sim::stellar::sse::MIN_INITIAL_MASS;
 
@@ -38,6 +39,12 @@ pub const FINGERPRINT_MASSES: [f64; 7] = [0.05, 0.1, 0.4, 1.0, 3.0, 25.0, 100.0]
 /// The \[Fe/H\] of the fingerprint's probe nodes: the envelope's metal-poor end, which the
 /// tracks read as their clamp, and solar.
 pub const FINGERPRINT_FE_H: [f64; 2] = [-2.5, 0.0];
+
+/// The masses, M☉, and \[Fe/H\] of the fingerprint's helium-rich probes, at the largest helium
+/// excess the envelope is built at, under a version whose tracks read a fitted helium table
+/// (R06.T16.a): a metal-poor globular's turn-off stars, which its later populations' excess brings
+/// to their giant branch within a Hubble time.
+pub const FINGERPRINT_HELIUM: [(f64, f64); 2] = [(0.8, -1.5), (0.9, -1.5)];
 
 /// The probes' samples per phase: fewer than the table's, since only their values matter.
 const FINGERPRINT_SAMPLES: u32 = 4;
@@ -110,6 +117,7 @@ pub fn fit(threads: NonZeroUsize) -> Result<SkyEnvelopeFit, BuildThreadPoolError
             .filter(|&&m| m >= MIN_INITIAL_MASS.value())
             .count()
             * FE_H_NODES.len()
+            * helium_excess_nodes_in_force().len()
             * ETA_DRAWS.len(),
         dark: 0,
         largest_rounding: 0.0,
@@ -223,13 +231,17 @@ pub fn render(fit: &SkyEnvelopeFit) -> RustTable {
     let notes = format!(
         "\
 Each node is `sky::envelope::raw_node`: the brightest V of the tracks of its mass at
-{z} \\[Fe/H\\] nodes (−2.5 to +0.18) and {e} Reimers η draws (from η = 0, no Reimers wind, to
+{z} \\[Fe/H\\] nodes (−2.5 to +0.18){helium} and {e} Reimers η draws (from η = 0, no Reimers wind, to
 +7σ), each phase cut into {s} parts, and of the cooling fits at and below 0.1 M☉. Then
 `BrightnessEnvelope::assemble` spreads each node over ages within a factor of {spread}, takes the
 running minimum over mass and brightens by the {margin} mag margin. Each value is rounded toward
 −∞ to the millimagnitude (`sky::envelope::to_millimag`), so the table bounds the build.",
         z = FE_H_NODES.len(),
         e = ETA_DRAWS.len(),
+        helium = match helium_excess_nodes_in_force() {
+            [_] => String::new(),
+            nodes => format!(", each at {} helium excesses (0 to {})", nodes.len(), nodes[nodes.len() - 1]),
+        },
         s = SAMPLES_PER_PHASE,
         spread = AGE_SPREAD_FACTOR,
         margin = MARGIN_MAG,
@@ -273,7 +285,7 @@ impl FitTask for SkyEnvelopeTask {
     }
 
     /// The mass nodes' count and ends, and, at [`FINGERPRINT_MASSES`] and each of
-    /// [`FINGERPRINT_FE_H`] with [`FINGERPRINT_SAMPLES`] parts a phase, each raw node's brightest
+    /// [`FINGERPRINT_FE_H`] with `FINGERPRINT_SAMPLES` parts a phase, each raw node's brightest
     /// bin, the sum of its shining bins and their number: some sixty tracks, which `just ci`'s
     /// fit-check can afford.
     fn fingerprint(&self) -> SimFingerprint {
@@ -285,11 +297,20 @@ impl FitTask for SkyEnvelopeTask {
             ("mass_nodes[0]".to_owned(), masses[0]),
             ("mass_nodes[last]".to_owned(), masses[masses.len() - 1]),
         ];
-        for (m, fe_h) in FINGERPRINT_FE_H
+        let helium = helium_excess_nodes_in_force();
+        let helium_rich = helium
+            .last()
+            .filter(|&&dy| dy > 0.0)
+            .map(|&dy| FINGERPRINT_HELIUM.map(|(m, fe_h)| (m, fe_h, Some(dy))));
+        for (m, fe_h, dy) in FINGERPRINT_FE_H
             .iter()
-            .flat_map(|&z| FINGERPRINT_MASSES.map(|m| (m, z)))
+            .flat_map(|&z| FINGERPRINT_MASSES.map(|m| (m, z, None)))
+            .chain(helium_rich.into_iter().flatten())
         {
-            let bins = raw_node(m, &[fe_h], FINGERPRINT_SAMPLES);
+            let bins = match dy {
+                None => raw_node(m, &[fe_h], FINGERPRINT_SAMPLES),
+                Some(dy) => raw_helium_node(m, fe_h, dy, FINGERPRINT_SAMPLES),
+            };
             let shining: Vec<f64> = bins.iter().copied().filter(|v| v.is_finite()).collect();
             let brightest = shining.iter().copied().fold(f64::INFINITY, f64::min);
             // A node that never shines has no brightest bin; its probe is 0, a finite stand-in.
@@ -301,7 +322,10 @@ impl FitTask for SkyEnvelopeTask {
             #[expect(clippy::cast_precision_loss, reason = "at most 193 bins")]
             let count = shining.len() as f64;
             let sum = shining.iter().fold(0.0, |a, &v| a + v);
-            let at = format!("raw_node({m} M☉, [Fe/H] {fe_h})");
+            let at = match dy {
+                None => format!("raw_node({m} M☉, [Fe/H] {fe_h})"),
+                Some(dy) => format!("raw_helium_node({m} M☉, [Fe/H] {fe_h}, ΔY {dy})"),
+            };
             probes.push((format!("{at}.brightest"), brightest));
             probes.push((format!("{at}.sum"), sum));
             probes.push((format!("{at}.shining"), count));

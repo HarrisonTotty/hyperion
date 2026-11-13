@@ -1,0 +1,26 @@
+# The stellar mergers' sampler and share row (plan 15, P15.T10.b's merger step; read by plan 11's
+# P11.T8.c class from generator version 31), fitted against plan 11's engine at generator version
+# 31's rules through the sim's own merger census (`stellar::binary::testing::merger_census_in`) of
+# the pairs the generator draws at each record's first attempt, on the Milky Way fixture with the
+# binary classes' scratch tables. The slab's census is 4 × 10^6 records of layers A–E about the
+# solar circle in the band shares' proportion; each population scarce there has 3 × 10^5 records
+# of its own at a site where it lies ([x, y, z, half-widths] in ly). The fit takes parts 0–31 of
+# 64 of every census's cells, and the sim's slow tests the rest. The row is scaled to the
+# brainstorm's 9 × 10^4 mergers in the source horizon (0.34 a year, Kochanek, Adams and Belczynski
+# 2014, MNRAS 443, 1319). A mark or a layer's law is fitted to a Kish size of at least 50.
+task = "binary_merger"
+
+[params]
+seed = 0x0b17_15a0_0000_0001
+generator_version = 31
+records = 4_000_000
+population_records = 300_000
+parts = 32
+part_count = 64
+young_thin_disc_site = [0, 0, 0, 40_000, 40_000, 600]
+bulge_site = [0, 0, 0, 5_000, 5_000, 2_000]
+long_bar_site = [0, 0, 0, 16_000, 4_000, 1_000]
+nuclear_disc_site = [0, 0, 0, 800, 800, 200]
+halo_site = [0, 0, 10_000, 10_000, 10_000, 5_000]
+min_members = 50
+total_hosts = 9.0e4

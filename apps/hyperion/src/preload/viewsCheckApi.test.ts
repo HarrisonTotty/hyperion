@@ -1,11 +1,20 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { VIEWS_CHECK_CHANNELS } from "../main/viewsCheck";
-import type { ViewsCheckRecord } from "./api";
+import { ATMOSPHERE_RECORD } from "../main/fixtures/atmosphereRecord";
+import { HANDOVER_RECORD } from "../main/fixtures/handoverRecord";
+import { TERRAIN_RECORD } from "../main/fixtures/terrainRecord";
+import type { TerrainCheckPhaseUpdate, ViewsCheckRecord } from "./api";
 import { VIEWS_CHECK_CHANNEL_NAMES, viewsCheckApi, viewsCheckMember } from "./viewsCheckApi";
 import { type ViewsCheckLaunch, viewsCheckSwitch } from "./viewsCheckLaunch";
 
-const LAUNCH: ViewsCheckLaunch = { setting: "high", smoke: true, out: null };
+const LAUNCH: ViewsCheckLaunch = {
+  setting: "high",
+  smoke: true,
+  out: null,
+  run: "several-views",
+  fixture: "terrain-test",
+};
 
 const RECORD: ViewsCheckRecord = {
   timer: "full",
@@ -46,6 +55,153 @@ describe("the preload's views-check functions", () => {
       [VIEWS_CHECK_CHANNEL_NAMES.writeResults, RECORD],
       [VIEWS_CHECK_CHANNEL_NAMES.end, { status: "pass" }],
     ]);
+  });
+
+  it("send a terrain run's operations on their own channels (R10.T16.d)", async () => {
+    const invoke = vi.fn<(channel: string, ...args: unknown[]) => Promise<unknown>>((channel) =>
+      Promise.resolve(
+        channel === VIEWS_CHECK_CHANNEL_NAMES.writeTerrainResults
+          ? { json: "a", markdown: "b" }
+          : null,
+      ),
+    );
+    const api = viewsCheckApi({ ...LAUNCH, run: "terrain" }, { invoke });
+    await api.startPhase("terrain-loss");
+    await api.capture("restored");
+    await api.endPhase("terrain-loss", { startMs: 1, endMs: 2 });
+    expect(await api.writeTerrainResults(TERRAIN_RECORD)).toEqual({ json: "a", markdown: "b" });
+    expect(invoke.mock.calls).toEqual([
+      [VIEWS_CHECK_CHANNEL_NAMES.startPhase, "terrain-loss"],
+      [VIEWS_CHECK_CHANNEL_NAMES.capture, "restored"],
+      [VIEWS_CHECK_CHANNEL_NAMES.endPhase, "terrain-loss", { startMs: 1, endMs: 2 }],
+      [VIEWS_CHECK_CHANNEL_NAMES.writeTerrainResults, TERRAIN_RECORD],
+    ]);
+  });
+
+  it("ask the whole-body field on its own channel, and refuse an answer that is no text (R10.T14.c)", async () => {
+    const answers: unknown[] = ["# generator_version = 24\n", null];
+    const invoke = vi.fn<(channel: string, ...args: unknown[]) => Promise<unknown>>(() =>
+      Promise.resolve(answers.shift()),
+    );
+    const api = viewsCheckApi({ ...LAUNCH, run: "terrain" }, { invoke });
+    await expect(api.wholeField()).resolves.toBe("# generator_version = 24\n");
+    await expect(api.wholeField()).rejects.toThrow("the main process read no whole-body field");
+    expect(invoke.mock.calls).toEqual([
+      [VIEWS_CHECK_CHANNEL_NAMES.wholeField],
+      [VIEWS_CHECK_CHANNEL_NAMES.wholeField],
+    ]);
+  });
+
+  it("send a hand-over check's record on its own channel (R10.T10.g)", async () => {
+    const invoke = vi.fn<(channel: string, ...args: unknown[]) => Promise<unknown>>(() =>
+      Promise.resolve({ json: "a", markdown: "b" }),
+    );
+    const api = viewsCheckApi({ ...LAUNCH, run: "handover" }, { invoke });
+    expect(await api.writeHandoverResults(HANDOVER_RECORD)).toEqual({ json: "a", markdown: "b" });
+    expect(invoke.mock.calls).toEqual([
+      [VIEWS_CHECK_CHANNEL_NAMES.writeHandoverResults, HANDOVER_RECORD],
+    ]);
+  });
+
+  it("send an atmosphere run's captures and record on their own channels (R08.T10.b)", async () => {
+    const invoke = vi.fn<(channel: string, ...args: unknown[]) => Promise<unknown>>((channel) =>
+      Promise.resolve(
+        channel === VIEWS_CHECK_CHANNEL_NAMES.writeAtmosphereResults
+          ? { json: "a", markdown: "b" }
+          : null,
+      ),
+    );
+    const api = viewsCheckApi({ ...LAUNCH, run: "atmosphere" }, { invoke });
+    await api.capture("fixture-test-earth");
+    expect(await api.writeAtmosphereResults(ATMOSPHERE_RECORD)).toEqual({
+      json: "a",
+      markdown: "b",
+    });
+    await api.end({ status: "pass" });
+    expect(invoke.mock.calls).toEqual([
+      [VIEWS_CHECK_CHANNEL_NAMES.capture, "fixture-test-earth"],
+      [VIEWS_CHECK_CHANNEL_NAMES.writeAtmosphereResults, ATMOSPHERE_RECORD],
+      [VIEWS_CHECK_CHANNEL_NAMES.end, { status: "pass" }],
+    ]);
+  });
+
+  it("send the inspection run's frame profile on its own channels (the owner's report)", async () => {
+    const invoke = vi.fn<(channel: string, ...args: unknown[]) => Promise<unknown>>((channel) =>
+      Promise.resolve(
+        channel === VIEWS_CHECK_CHANNEL_NAMES.writeTimingResults
+          ? { json: "a", markdown: "b" }
+          : null,
+      ),
+    );
+    const api = viewsCheckApi(LAUNCH, { invoke });
+    const record = {
+      timer: "absent",
+      devicePixelRatio: 1,
+      windows: [],
+      longTasks: null,
+      engineAtMs: null,
+      compiles: [],
+      firstFrames: [],
+    } as const;
+    await api.startProfile("orbit");
+    await api.endProfile("orbit", { startMs: 1, endMs: 2 });
+    expect(await api.writeTimingResults(record)).toEqual({ json: "a", markdown: "b" });
+    expect(invoke.mock.calls).toEqual([
+      [VIEWS_CHECK_CHANNEL_NAMES.startProfile, "orbit"],
+      [VIEWS_CHECK_CHANNEL_NAMES.endProfile, "orbit", { startMs: 1, endMs: 2 }],
+      [VIEWS_CHECK_CHANNEL_NAMES.writeTimingResults, record],
+    ]);
+  });
+
+  it("refuses a timing file's answer of the wrong shape", async () => {
+    const api = viewsCheckApi(LAUNCH, { invoke: () => Promise.resolve(undefined) });
+    await expect(
+      api.writeTimingResults({
+        timer: "absent",
+        devicePixelRatio: 1,
+        windows: [],
+        longTasks: null,
+        engineAtMs: null,
+        compiles: [],
+        firstFrames: [],
+      }),
+    ).rejects.toThrow("the main process wrote no timing file");
+  });
+
+  it("refuses an atmosphere results answer of the wrong shape", async () => {
+    const api = viewsCheckApi(LAUNCH, { invoke: () => Promise.resolve(undefined) });
+    await expect(api.writeAtmosphereResults(ATMOSPHERE_RECORD)).rejects.toThrow(
+      "the main process wrote no atmosphere results file",
+    );
+  });
+
+  it("refuses a hand-over results answer of the wrong shape", async () => {
+    const api = viewsCheckApi(LAUNCH, { invoke: () => Promise.resolve(undefined) });
+    await expect(api.writeHandoverResults(HANDOVER_RECORD)).rejects.toThrow(/hand-over results/);
+  });
+
+  it("send a terrain run's phase as it ends on its own channel, and refuse an answer that names no files (R14's Mac measurements)", async () => {
+    const [phase] = TERRAIN_RECORD.phases;
+    if (phase === undefined) {
+      throw new Error("the fixture has no first phase");
+    }
+    const update: TerrainCheckPhaseUpdate = { timer: "quantized", devicePixelRatio: 2, phase };
+    const invoke = vi.fn<(channel: string, ...args: unknown[]) => Promise<unknown>>(() =>
+      Promise.resolve({ json: "a-partial.json", markdown: "a-partial.md" }),
+    );
+    const api = viewsCheckApi({ ...LAUNCH, run: "terrain" }, { invoke });
+    expect(await api.writeTerrainPhase(update)).toEqual({
+      json: "a-partial.json",
+      markdown: "a-partial.md",
+    });
+    expect(invoke.mock.calls).toEqual([[VIEWS_CHECK_CHANNEL_NAMES.writeTerrainPhase, update]]);
+    const refused = viewsCheckApi(LAUNCH, { invoke: () => Promise.resolve(undefined) });
+    await expect(refused.writeTerrainPhase(update)).rejects.toThrow(/terrain phases/);
+  });
+
+  it("refuses a terrain results answer of the wrong shape", async () => {
+    const api = viewsCheckApi(LAUNCH, { invoke: () => Promise.resolve(undefined) });
+    await expect(api.writeTerrainResults(TERRAIN_RECORD)).rejects.toThrow(/terrain results/);
   });
 
   it("refuses a results answer of the wrong shape", async () => {

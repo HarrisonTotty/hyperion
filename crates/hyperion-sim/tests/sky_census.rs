@@ -13,8 +13,16 @@
 //! | fast | nuclear disc | A and B, 1.5 ly (the eight cells at the place) | 11 | 49,534 |
 //! | slow | near the Sun | A 300 ly, B 500 ly | 7.95 | 246,600 |
 //! | slow | near the Sun | C, D and E, 1,000 ly | 7.95 | 1.40 M |
-//! | slow | nuclear disc | D and E, 20 ly (the eight cells at the place) | 7.95 | 0.88 M |
+//! | 4 slow | nuclear disc | D and E, 20 ly (the eight cells at the place) | 7.95 | 0.88 M |
 //! | slow | near the Sun at +H, in motion | every layer, 150 ly | 11 | 39,600 |
+//!
+//! The nuclear disc's slow test is four, one for each quadrant about the place, each holding one
+//! of the four cells of D and one of E, so that nextest can run them side by side. A system there
+//! costs 7–17 ms to generate, so an E cell's census, which is one job, takes about half an hour on
+//! one thread, and its oracle as long again: each quadrant runs E's census, E's oracle, and D's
+//! census then D's oracle, a thread each, and asserts all that the one test asserted.
+//! `the_nuclear_discs_quadrants_hold_each_of_its_cells_once` checks, without a census, that the
+//! quadrants hold each of the plan's cells once.
 //!
 //! The fixture is built without kinematic tables, so its systems keep their epoch positions. The
 //! census pads its cells and its bound before the drift by each layer's pad speed, so the last row
@@ -39,8 +47,10 @@
 //! primaries with M-dwarf companions, in systems 5–7 Gyr old, that T8.e's oracle found the census
 //! missing when its bound read the envelope at the primary's own mass and age, and one merger
 //! still on its main sequence, in a system 267 Myr old. Each is now listed by the census of its
-//! cell, which equals its oracle bit for bit; each lies beyond the bound at its primary's own mass
-//! and age, and within the bound at twice that mass over ages from zero.
+//! cell, which equals its oracle bit for bit, and lies within the bound at twice its primary's
+//! mass over ages from zero. Each lay beyond the bound at its primary's own mass and age; from
+//! generator version 27, whose envelope holds the tracks' helium excesses (R06.T16.a), the main
+//! sequence's merger still does, and the two giants lie within it.
 //!
 //! On wasm32-wasip1, which has no threads, the oracle runs on one: there the fast identity tests
 //! are slow tests (`just test-wasm-slow` runs them, a 32-bit check of the identity), and the slow
@@ -57,8 +67,8 @@ use std::sync::OnceLock;
 
 use common::sky::{
     NUCLEAR_DISC_LY, Part, SUN_LY, assert_same_stars, brute_force_parts, brute_force_parts_of,
-    brute_force_sky, census_parts, census_parts_of, every_layer, observer_in_nuclear_disc,
-    observer_near_sun,
+    brute_force_sky, census_parts, census_parts_of, every_layer, forced_query,
+    observer_in_nuclear_disc, observer_near_sun, plan_cells,
 };
 use hyperion_sim::Seed;
 use hyperion_sim::coords::GalacticPosition;
@@ -71,6 +81,8 @@ use hyperion_sim::math;
 use hyperion_sim::observe::Observer;
 use hyperion_sim::sky::EyeObserver;
 use hyperion_sim::sky::caps::CAPPED_LAYERS;
+#[cfg(not(target_family = "wasm"))]
+use hyperion_sim::sky::census::SkyStar;
 use hyperion_sim::sky::census::{
     CensusTallies, GRID_STAR_BOUND, RecordLight, SkyQuery, StarBounds, flux_bound, merge_census,
     star_offset_bound,
@@ -80,7 +92,13 @@ use hyperion_sim::sky::luminosity::{LuminosityTables, REFERENCE_TIME};
 use hyperion_sim::sky::phase::PhaseEnvelope;
 use hyperion_sim::sky::photometry::absolute_v_of_state;
 use hyperion_sim::stellar::Phase;
+#[cfg(not(target_family = "wasm"))]
+use hyperion_sim::stellar::binary::{PairLight, pair_light_bound};
+#[cfg(not(target_family = "wasm"))]
+use hyperion_sim::stellar::multiplicity::{StarIndex, hierarchy_bound};
 use hyperion_sim::stellar::system::SystemStars;
+#[cfg(not(target_family = "wasm"))]
+use hyperion_sim::stellar::system::draw_metallicity;
 use hyperion_sim::time::{Span, UniverseTime};
 use hyperion_sim::units::{LightYears, Magnitudes};
 use hyperion_testkit::float;
@@ -144,6 +162,20 @@ fn agree_in(
     let n_max = query.n_max();
     let census = census_parts(g, query.clone(), radii);
     let brute = brute_force_parts(g, query, radii);
+    agree_parts(what, n_max, census, brute, &[], skips)
+}
+
+/// [`agree`]'s assertions on the census's parts and its oracle's, a part per cell in the same
+/// order, for a query of `n_max`, with each layer's `apart` stars of the oracle's accepted taken
+/// out of its parts ([`wind_fed_apart`]; none but in the 1,000 ly test).
+fn agree_parts(
+    what: &str,
+    n_max: NonZeroU32,
+    census: Vec<Part>,
+    brute: Vec<Part>,
+    apart: &[(Layer, u64)],
+    skips: Skips,
+) -> Generated {
     assert_eq!(census.len(), brute.len(), "{what}: the cells opened");
     let (c, b) = (tallies(&census), tallies(&brute));
     let mut generated = Vec::new();
@@ -156,7 +188,15 @@ fn agree_in(
             bl.generated(),
             cl.accepted(),
         );
-        assert_eq!(cl.accepted(), bl.accepted(), "{what}: {layer:?} accepted");
+        let set_apart = apart
+            .iter()
+            .find(|(l, _)| *l == layer)
+            .map_or(0, |&(_, k)| k);
+        assert_eq!(
+            cl.accepted() + set_apart,
+            bl.accepted(),
+            "{what}: {layer:?} accepted"
+        );
         generated.push((layer, cl.generated(), bl.generated()));
     }
     let (whole, oracle) = (
@@ -228,12 +268,28 @@ fn within_ly(radii: &[(Layer, f64)]) -> Vec<(Layer, LightYears)> {
         .collect()
 }
 
+/// How a pinned merger product stands against the bound at its primary's own mass and age,
+/// R06.T8.b's, which the census read until R06.T16.b.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AtItsPrimary {
+    /// Brighter than that bound, and so skipped by T8.b's census for the query: a product only
+    /// T16.b's bound lists.
+    Beyond,
+    /// Within it: from generator version 27 the brightness envelope is built at every helium
+    /// excess too (R06.T16.a's helium nodes, refitted at 27 from 46,200 tracks against 9,240), and
+    /// a helium-rich star of a K dwarf's mass reaches its late giant phases within the galaxy's
+    /// ages (M<sub>V</sub> −5.18 by 5 Gyr at 0.67 M☉, which never passed +4.81 before), so T8.b's
+    /// bound would no longer miss these products.
+    Within,
+}
+
 /// Censuses the cell of grid system `raw` for `query` beside its oracle and asserts that the two
 /// agree star for star and bit for bit, and that the system's listed star is a merger product in
 /// `phase`: heavier than its primary was born and no heavier than [`max_star_mass`] allows, its
-/// companion merged away, brighter than the bound at its primary's own mass and age (R06.T8.b's,
-/// under which the census would have skipped it for `query`), and within R06.T16.b's bound.
-fn pinned_merger(raw: u64, query: &SkyQuery, phase: Phase) {
+/// companion merged away, standing `at` the bound at its primary's own mass and age (R06.T8.b's,
+/// under which the census would have skipped it for `query` were it beyond), and within R06.T16.b's
+/// bound and R06.T8.g's bound star by star.
+fn pinned_merger(raw: u64, query: &SkyQuery, phase: Phase, at: AtItsPrimary) {
     let g = galaxy();
     let id = SystemId::from_raw(raw).expect("a system ID");
     let what = format!("{id:?}");
@@ -280,16 +336,29 @@ fn pinned_merger(raw: u64, query: &SkyQuery, phase: Phase) {
         .value()
         - 2.5 * math::log10(f64::from(GRID_STAR_BOUND));
     let m_v = absolute_v_of_state(merged).expect("it shines").value();
-    assert!(m_v < at_m1, "{what}: M_V {m_v} within {at_m1}");
     // T8.b's census skipped a system whose bound could not pass the cut at its nearest; the eye
     // adds nothing to the cut since R06.T8.k.
     let nearest = star.distance().value() - star_offset_bound(g, record).value();
     let faintest =
         query.cut().value() - 5.0 * math::log10(nearest / (10.0 * LIGHT_YEARS_PER_PARSEC));
-    assert!(
-        at_m1 > faintest,
-        "{what}: the bound at m₁, {at_m1}, passes {faintest}"
+    eprintln!(
+        "{what}: {:?} of {:?} at V {} from {} ly, M_V {m_v}; the bound at m₁ {at_m1}, the \
+         faintest T8.b's census lists at its nearest {faintest}",
+        merged.mass(),
+        m1,
+        star.v().value(),
+        star.distance().value()
     );
+    match at {
+        AtItsPrimary::Beyond => {
+            assert!(m_v < at_m1, "{what}: M_V {m_v} within {at_m1}");
+            assert!(
+                at_m1 > faintest,
+                "{what}: the bound at m₁, {at_m1}, passes {faintest}"
+            );
+        }
+        AtItsPrimary::Within => assert!(m_v >= at_m1, "{what}: M_V {m_v} beyond {at_m1}"),
+    }
     let bound = flux_bound(&envelope, record, star.emitted()).expect("a bound");
     assert!(bound.value() <= m_v, "{what}: {} over {m_v}", bound.value());
     // R06.T8.g's bound star by star holds it too: its pair is one plan 11 cannot bound, so the
@@ -308,13 +377,16 @@ fn pinned_merger(raw: u64, query: &SkyQuery, phase: Phase) {
 
 /// T8.e's two merged giants near the Sun, which its oracle found the census missing (R06's Risks,
 /// "Merger products outshine the flux bound until T16.b"), listed at the eye's cut, 7.95: in B,
-/// a 1.19 M☉ giant of a 0.64 M☉ primary at V 7.27 from 354 ly; in C, a 1.12 M☉
-/// core-helium-burning giant of a 0.76 M☉ primary at V 7.08 from 620 ly. Before P11.T4.i (the
-/// integration branch's version 20) the second was a 1.23 M☉ giant on its first giant branch at
-/// V 7.44, and the first was at V 7.53. T4.i, which starts a pair at its first arrival on the main
-/// sequence (generator version 21), merges the first pair at 107.3 Myr rather than 136.0 Myr and
-/// the second at 58.4 rather than 144.2 Myr, so at the same age the second is past its helium
-/// flash.
+/// a 1.19 M☉ giant of a 0.64 M☉ primary at V 7.23 from 354 ly; in C, a 1.12 M☉
+/// core-helium-burning giant of a 0.76 M☉ primary at V 7.05 from 620 ly (re-measured at 27; V
+/// 7.27 and 7.08 when pinned). Before P11.T4.i (the integration branch's version 20) the second
+/// was a 1.23 M☉ giant on its first giant branch at V 7.44, and the first was at V 7.53. T4.i,
+/// which starts a pair at its first arrival on the main sequence (generator version 21), merges
+/// the first pair at 107.3 Myr rather than 136.0 Myr and the second at 58.4 rather than 144.2 Myr,
+/// so at the same age the second is past its helium flash. From version 27 both lie within the
+/// bound at their primaries' own mass and age ([`AtItsPrimary::Within`]): the envelope's helium
+/// nodes put it at M<sub>V</sub> −6.93 and −7.17, five stars' light included, against the giants'
+/// 1.86 and 0.45.
 #[test]
 fn the_merged_giants_near_the_sun_are_listed_as_their_oracle_lists_them() {
     let query = eye_query(observer_near_sun(galaxy()), Magnitudes::new(7.95));
@@ -322,20 +394,27 @@ fn the_merged_giants_near_the_sun_are_listed_as_their_oracle_lists_them() {
         (0x21fe_5648_7ff0_0001, Phase::FirstGiantBranch),
         (0x4204_6c99_ff00_000a, Phase::CoreHeliumBurning),
     ] {
-        pinned_merger(raw, &query, phase);
+        pinned_merger(raw, &query, phase, AtItsPrimary::Within);
     }
 }
 
 /// A merger on its main sequence near the Sun: a 0.90 M☉ primary and its near twin, merged into
 /// one 1.80 M☉ star of M<sub>V</sub> 1.98 in a system 267 Myr old, at V 5.87 from 191 ly. Its
-/// primary's own bound is M<sub>V</sub> 2.35, so a camera's cut of 5.95 lists it where T8.b's
-/// census skipped it.
+/// primary's own bound is M<sub>V</sub> 2.24, five stars' light included, so a camera's cut of
+/// 5.88 lists it where T8.b's census skipped it, which skipped it below 5.898. Re-measured at 27,
+/// whose envelope's helium nodes (R06.T16.a, the envelope refitted at 27) brighten the bound from
+/// 2.35: until then the cut was 5.95, at which T8.b's census would now list it.
 #[test]
 fn a_main_sequence_merger_is_listed_as_its_oracle_lists_it() {
-    let query = SkyQuery::builder(observer_near_sun(galaxy()), Magnitudes::new(5.95))
+    let query = SkyQuery::builder(observer_near_sun(galaxy()), Magnitudes::new(5.88))
         .build()
         .expect("a valid query");
-    pinned_merger(0x41fe_eca2_0000_0000, &query, Phase::MainSequence);
+    pinned_merger(
+        0x41fe_eca2_0000_0000,
+        &query,
+        Phase::MainSequence,
+        AtItsPrimary::Beyond,
+    );
 }
 
 #[test]
@@ -482,38 +561,355 @@ fn the_census_is_its_oracle_for_the_dwarfs_near_the_sun() {
     generates_under_a_quarter("the dwarfs near the Sun", &generated, &[Layer::B], &[]);
 }
 
+/// Whether star `index` of grid system `id`, seen as `emitted`, is one its partner's wind
+/// moved off its own model, with what it is, for a message: its pair at the attempt the generator
+/// kept is answered `Detached` at the system's age then and its state is not its own model's, as
+/// `sky::census::cell`'s realised check knows one. From generator version 27 a wide pair's
+/// main-sequence star takes its partner's wind (P11.T12), which the bound's `Detached` verdict
+/// reaches from 29, its wind reach on the record: to 28 such a star could outshine the bound the
+/// census skips its record by.
+#[cfg(not(target_family = "wasm"))]
+fn wind_fed_star(
+    g: &Galaxy,
+    id: SystemId,
+    index: StarIndex,
+    emitted: UniverseTime,
+) -> (bool, String) {
+    let mut cell = Vec::new();
+    generate_cell(g, CellKey::of(id).expect("a grid system"), &mut cell);
+    let record = cell.iter().find(|r| r.id() == id).expect("in its cell");
+    let stars = SystemStars::generate(g, record);
+    let composition = draw_metallicity(g, record);
+    let hierarchy = hierarchy_bound(g, record, &composition);
+    let age = record.age_at(emitted);
+    let i = usize::from(index.get());
+    let star = stars
+        .state_at(emitted)
+        .expect("a listed star is born")
+        .stars()[i];
+    let departs = Some(star) != stars.stars()[i].state_at(emitted);
+    let detached = hierarchy.attempt(stars.attempt()).is_some_and(|listed| {
+        listed.pairs().iter().any(|pair| {
+            let [first, second] = pair.stars().map(|s| usize::from(s.get()));
+            (first == i || second == i)
+                && pair_light_bound(
+                    listed.stars()[first].initial_mass(),
+                    listed.stars()[second].initial_mass(),
+                    pair.periastron(),
+                    &composition,
+                    age..=age,
+                ) == Some(PairLight::Detached)
+        })
+    });
+    let bounds = StarBounds::of(g, record, (age, age));
+    let bound = core::iter::once(bounds.primary())
+        .chain(bounds.companions())
+        .find(|b| b.index() == index && (i == 0 || b.attempt() == stars.attempt()))
+        .and_then(|b| b.brightest(PhaseEnvelope::shared(), bounds.composition(), (age, age)));
+    let about = format!(
+        "{id:?} star {i}: {:?} of {:?} (born {:?}), M_V {:?} against its bound {bound:?}; \
+         Detached {detached}, off its own model {departs}",
+        star.phase(),
+        star.mass(),
+        stars.stars()[i].initial_mass(),
+        absolute_v_of_state(&star).map(Magnitudes::value),
+    );
+    (detached && departs, about)
+}
+
+/// The oracle's parts less the stars of theirs that the census, a part's stars in its oracle's
+/// order less those of the records it skipped, does not hold, each of which must be a wind-fed
+/// star ([`wind_fed_star`]); with how many each layer sets apart. A star the census lists that its
+/// oracle does not fails.
+#[cfg(not(target_family = "wasm"))]
+fn wind_fed_apart(
+    g: &Galaxy,
+    what: &str,
+    census: &[Part],
+    brute: Vec<Part>,
+) -> (Vec<Part>, Vec<(Layer, u64)>) {
+    let mut apart: Vec<(Layer, u64)> = Vec::new();
+    let parts = census
+        .iter()
+        .zip(brute)
+        .map(|((listed, _), (oracle, tallies))| {
+            let mut next = listed.iter().peekable();
+            let mut kept: Vec<SkyStar> = Vec::with_capacity(listed.len());
+            for star in oracle {
+                if next.peek() == Some(&&star) {
+                    next.next();
+                    kept.push(star);
+                    continue;
+                }
+                let (wind_fed, about) =
+                    wind_fed_star(g, star.system(), star.star(), star.emitted());
+                assert!(
+                    wind_fed,
+                    "{what}: the census misses {about}, which no partner's wind moved"
+                );
+                eprintln!("{what}: set apart, wind-fed: {about}");
+                match apart.iter_mut().find(|(l, _)| *l == star.layer()) {
+                    Some((_, k)) => *k += 1,
+                    None => apart.push((star.layer(), 1)),
+                }
+            }
+            assert!(
+                next.next().is_none(),
+                "{what}: the census lists a star its oracle does not"
+            );
+            (kept, tallies)
+        })
+        .collect();
+    (parts, apart)
+}
+
+/// The census of C to E within 1,000 ly of the Sun is its oracle, star for star and bit for bit,
+/// but for the stars a partner's wind moved off their own models past the bound the census skips
+/// their records by ([`wind_fed_apart`]), which it sets apart from the oracle's and counts. From
+/// generator version 29 the bound's `Detached` takes the wind's reach (P11.T12) and there are none,
+/// as measured. At 27 and 28 they were 14 of C's 20,246 accepted and 1 of D's 6,376, each
+/// of a Detached pair: giants, core-helium burners and blue stragglers its partner's wind grew,
+/// up to 4.20 mag past their bounds (`0x42006cd5fbc00004`'s early-AGB companion, M<sub>V</sub>
+/// −0.23 against 3.97), the brightest D's `0x6202d8880e000009`, a giant of M<sub>V</sub> −0.96.
 #[cfg(not(target_family = "wasm"))]
 #[test]
 #[ignore = "slow: generates every system of layers C to E within 1,000 ly of the Sun"]
 fn the_census_is_its_oracle_1000_ly_from_the_sun() {
+    let what = "C to E within 1,000 ly of the Sun";
     let query = eye_query(observer_near_sun(galaxy()), Magnitudes::new(7.95));
-    let generated = agree(
-        "C to E within 1,000 ly of the Sun",
-        query,
-        &within_ly(&[
-            (Layer::C, 1_000.0),
-            (Layer::D, 1_000.0),
-            (Layer::E, 1_000.0),
-        ]),
-        Skips::Asserted,
+    let radii = within_ly(&[
+        (Layer::C, 1_000.0),
+        (Layer::D, 1_000.0),
+        (Layer::E, 1_000.0),
+    ]);
+    let n_max = query.n_max();
+    let census = census_parts(galaxy(), query.clone(), &radii);
+    let brute = brute_force_parts(galaxy(), query, &radii);
+    let (brute, apart) = wind_fed_apart(galaxy(), what, &census, brute);
+    let generated = agree_parts(what, n_max, census, brute, &apart, Skips::Asserted);
+    eprintln!("{what}: the wind-fed stars set apart, by layer: {apart:?}");
+    assert_eq!(
+        apart,
+        Vec::<(Layer, u64)>::new(),
+        "{what}: the wind-fed stars set apart, by layer"
     );
     generates_under_a_quarter(
         "C to E near the Sun",
         &generated,
-        &[Layer::C],
-        &[Layer::D, Layer::E],
+        &[],
+        &[Layer::C, Layer::D, Layer::E],
     );
+    // R06.T8.g's quarter, missed from 29 (a finding): the bound skips fewer of C's records since
+    // its `Detached` takes the wind's reach, and the census generates 302,178 of its oracle's
+    // 1,097,661 systems of C near the Sun, 0.275 of them. Pinned under 0.28 as measured.
+    let (_, census, brute) = generated
+        .iter()
+        .copied()
+        .find(|&(layer, ..)| layer == Layer::C)
+        .expect("the census generates C near the Sun");
+    assert!(
+        census * 100 < brute * 28,
+        "{what}: C generates {census} of {brute} systems"
+    );
+}
+
+/// The layers of the nuclear disc's slow identity test, and their radii, ly: D and E within 20 ly
+/// of the place, whose plan opens four cells of each (the module's table).
+const DISC_D_AND_E: [(Layer, f64); 2] = [(Layer::D, 20.0), (Layer::E, 20.0)];
+
+/// A side of a plane through the place in the nuclear disc ([`NUCLEAR_DISC_LY`]): x or z below the
+/// place's, or at or above it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Side {
+    /// Below the place's coordinate.
+    Minus,
+    /// At or above it.
+    Plus,
+}
+
+impl Side {
+    /// Both sides.
+    const BOTH: [Self; 2] = [Self::Minus, Self::Plus];
+
+    /// The side of the plane at `place_ly` that a cell whose low corner is at `origin_ly` starts
+    /// on, which it lies wholly on unless it straddles the plane: no cell of [`DISC_D_AND_E`]'s
+    /// plan does (`the_nuclear_discs_quadrants_hold_each_of_its_cells_once`).
+    fn of(origin_ly: i32, place_ly: f64) -> Self {
+        if f64::from(origin_ly) < place_ly {
+            Self::Minus
+        } else {
+            Self::Plus
+        }
+    }
+}
+
+/// A quadrant about the place in the nuclear disc, one of its slow identity tests: the cells of
+/// [`DISC_D_AND_E`]'s plan on side `x` of the plane x = 0 through the place and Sgr A*, and on
+/// side `z` of the galactic plane, z = 0, which holds the place too. Each layer's four cells meet
+/// on the line where the two planes cross, so a quadrant holds one cell of D and one of E.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Quadrant {
+    x: Side,
+    z: Side,
+}
+
+impl Quadrant {
+    /// The four quadrants.
+    fn all() -> impl Iterator<Item = Self> {
+        Side::BOTH
+            .into_iter()
+            .flat_map(|x| Side::BOTH.into_iter().map(move |z| Self { x, z }))
+    }
+
+    /// The quadrant's cells of `cells`, in their order.
+    fn cells(self, cells: &[CellKey]) -> Vec<CellKey> {
+        let [x, _, z] = NUCLEAR_DISC_LY;
+        cells
+            .iter()
+            .copied()
+            .filter(|key| {
+                let [cx, _, cz] = key.origin_ly();
+                Side::of(cx, x) == self.x && Side::of(cz, z) == self.z
+            })
+            .collect()
+    }
+
+    /// What the quadrant's assertions name it.
+    fn what(self) -> String {
+        let x = match self.x {
+            Side::Minus => "at −x",
+            Side::Plus => "at +x",
+        };
+        let z = match self.z {
+            Side::Minus => "below the plane",
+            Side::Plus => "above the plane",
+        };
+        format!("D and E within 20 ly in the nuclear disc, {x} {z}")
+    }
+}
+
+/// The nuclear disc's slow identity query, at the eye's cut, 7.95, with [`DISC_D_AND_E`]'s caps
+/// forced, and the cells of its plan.
+fn disc_d_and_e() -> (SkyQuery, Vec<CellKey>) {
+    let query = eye_query(observer_in_nuclear_disc(galaxy()), Magnitudes::new(7.95));
+    let forced = forced_query(query, &within_ly(&DISC_D_AND_E));
+    let cells = plan_cells(galaxy(), &forced);
+    (forced, cells)
+}
+
+/// [`agree`] for D and E within 20 ly in the nuclear disc, over `quadrant`'s cells alone, with
+/// every assertion of the whole, on three threads: E's census, E's oracle, and D's census then D's
+/// oracle, which together take about as long as E's oracle.
+///
+/// Each quadrant's census lists or overflows every star of its cells (`merge_census`), and its
+/// order is total, so the quadrants' identities star for star and bit for bit, over cells they
+/// partition (`the_nuclear_discs_quadrants_hold_each_of_its_cells_once`), are the whole's at any
+/// `n_max`, its third included; the accepted are summed. That no star is in two cells' parts,
+/// which `merge_census` asserted of the whole, holds as each part's stars are of its cell's
+/// systems. That the census lists stars, that a third overflows and that it skips systems are
+/// each asserted of every quadrant, not only of the whole.
+#[cfg(not(target_family = "wasm"))]
+fn agree_in_the_nuclear_disc(quadrant: Quadrant) {
+    let g = galaxy();
+    let what = quadrant.what();
+    let (forced, cells) = disc_d_and_e();
+    let keys = quadrant.cells(&cells);
+    let [d, e] = <[CellKey; 2]>::try_from(keys.as_slice()).expect("a cell of D and one of E");
+    assert_eq!((d.layer(), e.layer()), (Layer::D, Layer::E), "{what}");
+    let (census, brute) = std::thread::scope(|scope| {
+        let e_census = scope.spawn(|| census_parts_of(g, &forced, &[e]));
+        let e_oracle = scope.spawn(|| brute_force_parts_of(g, &forced, &[e]));
+        let mut census = census_parts_of(g, &forced, &[d]);
+        let mut brute = brute_force_parts_of(g, &forced, &[d]);
+        census.extend(e_census.join().expect("E's census panicked"));
+        brute.extend(e_oracle.join().expect("E's oracle panicked"));
+        (census, brute)
+    });
+    for parts in [&census, &brute] {
+        for (key, (stars, _)) in keys.iter().zip(parts) {
+            for star in stars {
+                let of = CellKey::of(star.system()).expect("a grid system");
+                assert_eq!(of, *key, "{what}: {:?} in {key:?}'s part", star.system());
+            }
+        }
+    }
+    agree_parts(&what, forced.n_max(), census, brute, &[], Skips::Asserted);
+}
+
+/// The nuclear disc's slow identity quadrants partition its D and E within 20 ly: the plan's eight
+/// cells, four of each layer, lie each wholly on one side of the planes x = 0 and z = 0 through the
+/// place, and each is held by one quadrant alone, a cell of D and one of E a quadrant, as their
+/// times are budgeted. It builds the plan alone and runs no census.
+#[test]
+fn the_nuclear_discs_quadrants_hold_each_of_its_cells_once() {
+    let (_, cells) = disc_d_and_e();
+    let mut every = cells.clone();
+    every.sort_unstable();
+    every.dedup();
+    assert_eq!(every.len(), cells.len(), "the plan opens each cell once");
+    for layer in [Layer::D, Layer::E] {
+        let of_layer = cells.iter().filter(|key| key.layer() == layer).count();
+        assert_eq!(of_layer, 4, "{layer:?}: the four cells about the place");
+    }
+    assert_eq!(cells.len(), 8, "D's and E's cells alone");
+    let [x, _, z] = NUCLEAR_DISC_LY;
+    for key in &cells {
+        let size = f64::from(key.size_ly());
+        let [cx, _, cz] = key.origin_ly().map(f64::from);
+        for (low, place) in [(cx, x), (cz, z)] {
+            assert!(
+                low + size <= place || low >= place,
+                "{key:?} straddles a plane through the place"
+            );
+        }
+    }
+    let mut held = Vec::new();
+    for quadrant in Quadrant::all() {
+        let mine = quadrant.cells(&cells);
+        let layers: Vec<Layer> = mine.iter().map(CellKey::layer).collect();
+        assert_eq!(layers, [Layer::D, Layer::E], "{}", quadrant.what());
+        held.extend(mine);
+    }
+    held.sort_unstable();
+    assert_eq!(held, every, "the quadrants hold every cell once");
 }
 
 #[cfg(not(target_family = "wasm"))]
 #[test]
-#[ignore = "slow: generates every system of the D and E cells at a place in the nuclear disc"]
-fn the_census_is_its_oracle_for_d_and_e_in_the_nuclear_disc() {
-    let query = eye_query(observer_in_nuclear_disc(galaxy()), Magnitudes::new(7.95));
-    agree(
-        "D and E within 20 ly in the nuclear disc",
-        query,
-        &within_ly(&[(Layer::D, 20.0), (Layer::E, 20.0)]),
-        Skips::Asserted,
-    );
+#[ignore = "slow: generates every system of a D cell and an E cell at a place in the nuclear disc"]
+fn the_census_is_its_oracle_for_d_and_e_in_the_nuclear_disc_at_minus_x_below_the_plane() {
+    agree_in_the_nuclear_disc(Quadrant {
+        x: Side::Minus,
+        z: Side::Minus,
+    });
+}
+
+#[cfg(not(target_family = "wasm"))]
+#[test]
+#[ignore = "slow: generates every system of a D cell and an E cell at a place in the nuclear disc"]
+fn the_census_is_its_oracle_for_d_and_e_in_the_nuclear_disc_at_minus_x_above_the_plane() {
+    agree_in_the_nuclear_disc(Quadrant {
+        x: Side::Minus,
+        z: Side::Plus,
+    });
+}
+
+#[cfg(not(target_family = "wasm"))]
+#[test]
+#[ignore = "slow: generates every system of a D cell and an E cell at a place in the nuclear disc"]
+fn the_census_is_its_oracle_for_d_and_e_in_the_nuclear_disc_at_plus_x_below_the_plane() {
+    agree_in_the_nuclear_disc(Quadrant {
+        x: Side::Plus,
+        z: Side::Minus,
+    });
+}
+
+#[cfg(not(target_family = "wasm"))]
+#[test]
+#[ignore = "slow: generates every system of a D cell and an E cell at a place in the nuclear disc"]
+fn the_census_is_its_oracle_for_d_and_e_in_the_nuclear_disc_at_plus_x_above_the_plane() {
+    agree_in_the_nuclear_disc(Quadrant {
+        x: Side::Plus,
+        z: Side::Plus,
+    });
 }

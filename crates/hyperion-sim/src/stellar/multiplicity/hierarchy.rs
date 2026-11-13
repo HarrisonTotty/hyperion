@@ -31,7 +31,7 @@ use crate::stellar::draws::ATTEMPT_WORDS;
 use crate::stellar::draws::StarDraws;
 use crate::stellar::remnant::collapse::ElectronCaptureWindows;
 use crate::stellar::sse::ZCoeffs;
-use crate::stellar::system::{draw_metallicity, primary_draws};
+use crate::stellar::system::{StarModel, draw_metallicity, primary_kept_stripped_mark};
 use crate::units::consts::GM_SUN;
 use crate::units::{Days, GravitationalParameter, Metres, Radians, Seconds, SolarMasses};
 
@@ -42,6 +42,10 @@ use crate::units::{Days, GravitationalParameter, Metres, Radians, Seconds, Solar
 /// (P11.T6–T8), and keeps the last attempt, with its innermost period moved out of the
 /// interacting range, after this many.
 pub const MAX_REDRAWS: u8 = 8;
+
+/// The redraw attempts of a feature member's conditional draw on its recycled-object mark (plan
+/// 11, P11.T8.f): attempts 8 to 255, after the grid's, whose words no other draw reads.
+pub(crate) const MARKED_ATTEMPTS: u8 = u8::MAX - MAX_REDRAWS + 1;
 
 /// The words of each stream that one redraw attempt owns: attempt n reads words 64n to 64n + 63.
 ///
@@ -102,7 +106,7 @@ pub(super) const WINDOW_MARGIN: f64 = 1e-6;
 /// `m_cc(Z)` − 1 M☉, the lower end of the companion-stripped electron-capture window, from which
 /// the track reads the same mark (ruling 93.3 of 2026-09-22, after ruling 45.2; plan 11, Design
 /// note 1). It is 7.2 M☉ at Z = 0.02 and never below 5.72 M☉, the lowest `m_cc` of the fits
-/// ([`STRIPPED_MARK_FLOOR`]).
+/// (`STRIPPED_MARK_FLOOR`).
 ///
 /// The track tests its window in the mass its early AGB's `m_c_bagb` reads, a little below the
 /// initial mass after the main sequence's winds (ruling 45.1); this compares the initial mass,
@@ -159,7 +163,19 @@ impl RedrawAttempt {
         if n < MAX_REDRAWS { Some(Self(n)) } else { None }
     }
 
-    /// The attempt's number, 0 to [`MAX_REDRAWS`] − 1.
+    /// Attempt `k` of a marked feature member's conditional draw (P11.T8.f): attempt
+    /// [`MAX_REDRAWS`] + `k`, or `None` unless `k` < [`MARKED_ATTEMPTS`].
+    #[must_use]
+    pub(crate) const fn marked(k: u8) -> Option<Self> {
+        if k < MARKED_ATTEMPTS {
+            Some(Self(MAX_REDRAWS + k))
+        } else {
+            None
+        }
+    }
+
+    /// The attempt's number, 0 to [`MAX_REDRAWS`] − 1, or for a marked feature member's
+    /// conditional draw up to 255.
     #[must_use]
     pub const fn get(self) -> u8 {
         self.0
@@ -194,9 +210,10 @@ pub enum MultiplicityContext {
     /// At least one companion, the count drawn from the model given that there is one.
     ///
     /// With `max_separation`, no orbit's semi-major axis exceeds it: plan 09's cluster members,
-    /// truncated at the cluster's hard–soft boundary, which P11.T8.f supplies. No caller passes
-    /// this context before then. If every companion is dropped by the stability test the system
-    /// comes out single; [`SystemHierarchy::dropped_companions`] says so.
+    /// truncated at the cluster's hard–soft boundary, which P11.T8.f supplies from generator
+    /// version 27 (`members::hard_soft_separation`). If every companion is dropped by the
+    /// stability test the system comes out single; [`SystemHierarchy::dropped_companions`] says
+    /// so.
     ForcedMultiple {
         /// The widest semi-major axis any orbit of the system may have, m.
         max_separation: Option<Metres>,
@@ -240,6 +257,17 @@ impl NodeIndex {
     #[must_use]
     pub const fn get(self) -> u8 {
         self.0
+    }
+
+    /// This node's index in the hierarchy of the part under `part` ([`SystemHierarchy::part`]),
+    /// for a node under it.
+    ///
+    /// # Panics
+    ///
+    /// If this node lies before `part` in the depth-first list.
+    #[must_use]
+    pub(crate) const fn in_part(self, part: Self) -> Self {
+        Self(self.0 - part.0)
     }
 }
 
@@ -503,8 +531,9 @@ impl SystemHierarchy {
 /// lies outside the band, in the merger band, beyond it (Case C) or wide (ruling 123.5). Both are
 /// conditional draws, the orbit's by rejection among its tries, and they keep the share of
 /// stripped primaries at the mark's. The mark is the primary's own draws' (the system stage's
-/// `primary_draws`): attempt 0 for a grid record until plan 08's `SystemRecord::mark_attempt`
-/// exists (P11.T2.c's second seam), and a feature member's conditional-draw attempt.
+/// `primary_kept_stripped_mark`): a grid record's at its `SystemRecord::mark_attempt` (P11.T2.c's
+/// second seam), or at the attempt plan 08's kick loop keeps for a record whose class constrains
+/// its kick (P08.T12.c), and a feature member's conditional-draw attempt.
 /// [`draw_hierarchy_of_composition`] judges the mark at a feature member's own composition.
 ///
 /// P11.T2.c wires it into the system stage:
@@ -582,8 +611,8 @@ impl SystemHierarchy {
 /// new one encloses; against the orbit that encloses it, the criterion with that orbit's own
 /// eccentricity, which is known; and the tidal cut for a new outermost orbit. Each node's window
 /// has a weight, its period distribution's share inside the window, times Tokovinin's (2014)
-/// correlation of subsystems for a node inside a secondary component ([`SUBSYSTEM_WEIGHT_SINGLE`]
-/// and [`SUBSYSTEM_WEIGHT_PAIRED`], ruling 74). One mark then picks both the
+/// correlation of subsystems for a node inside a secondary component (`SUBSYSTEM_WEIGHT_SINGLE`
+/// and `SUBSYSTEM_WEIGHT_PAIRED`, ruling 74). One mark then picks both the
 /// node, by integer thresholds on the weights, and the period, by inverse transform inside that
 /// node's window of the mark's residual, and the whole test accepts or rejects the try.
 ///
@@ -701,7 +730,40 @@ pub(super) fn draw_hierarchy_with(
     attempt: RedrawAttempt,
     correction: &[[f64; 8]; 4],
 ) -> SystemHierarchy {
-    RecordDraw::new(galaxy, record, composition, ctx, correction).stars_at(attempt)
+    RecordDraw::new(
+        galaxy,
+        record,
+        composition,
+        ctx,
+        correction,
+        KeptPrimary::FromRecord,
+    )
+    .stars_at(attempt)
+}
+
+/// [`draw_hierarchy_of_composition`] of the system of `primary`, `record`'s primary's model, at
+/// its composition: its stripped mark read from the model, the attempt the kick loop kept
+/// (P08.T12.c), so that the system stage, which holds the model, builds no track again. For the
+/// model [`SystemStars`](crate::stellar::system::SystemStars) keeps it is
+/// `draw_hierarchy_of_composition`, bit for bit.
+#[must_use]
+pub(crate) fn draw_hierarchy_of_primary(
+    galaxy: &Galaxy,
+    record: &SystemRecord,
+    primary: &StarModel,
+    ctx: MultiplicityContext,
+    attempt: RedrawAttempt,
+) -> SystemHierarchy {
+    let stars = RecordDraw::new(
+        galaxy,
+        record,
+        Some(primary.composition()),
+        ctx,
+        &PERIOD_CORRECTION,
+        KeptPrimary::Model(primary),
+    )
+    .stars_at(attempt);
+    substellar::with_companion(galaxy, record, ctx, attempt, stars)
 }
 
 /// One record's draw of its stars, attempt by attempt: [`draw_hierarchy_with`] with what every
@@ -742,7 +804,7 @@ impl fmt::Debug for RecordDraw<'_> {
 impl<'a> RecordDraw<'a> {
     /// The draw of `record`'s stars under `ctx`, at `composition` if given and otherwise at the
     /// record's [`draw_metallicity`], with the direct companions' period law corrected by
-    /// `correction`.
+    /// `correction`, with the primary's stripped mark read where `primary` says (`innermost`).
     #[must_use]
     pub(super) fn new(
         galaxy: &'a Galaxy,
@@ -750,6 +812,7 @@ impl<'a> RecordDraw<'a> {
         composition: Option<&Composition>,
         ctx: MultiplicityContext,
         correction: &'a [[f64; 8]; 4],
+        primary: KeptPrimary<'_>,
     ) -> Self {
         Self {
             galaxy,
@@ -763,7 +826,7 @@ impl<'a> RecordDraw<'a> {
                     MultiplicityContext::ForcedMultiple { max_separation } => max_separation,
                     MultiplicityContext::Free | MultiplicityContext::ForcedSingle => None,
                 },
-                innermost(galaxy, record, composition, ctx),
+                innermost(galaxy, record, composition, ctx, primary),
             ),
             correction,
             direct_periods: None,
@@ -894,22 +957,14 @@ fn star_count_with(
     ctx: MultiplicityContext,
     attempt: RedrawAttempt,
 ) -> u8 {
-    let model = MultiplicityModel::default_v1();
-    let streams = Streams::new(galaxy, record.id(), attempt);
-    let m0 = record.primary_initial_mass();
-    let pmf = if is_direct(&streams, m0) {
-        direct_count_pmf(m0)
-    } else {
-        model.companion_count_pmf(m0)
-    };
-    if companion_count(
-        &streams,
-        innermost(galaxy, record, composition, ctx),
-        &pmf,
+    if drawn_single(
+        galaxy,
+        record,
+        composition,
         ctx,
-    ) == 0
-        && !substellar::wants_companion(galaxy.seed(), record.id(), m0, ctx, attempt)
-    {
+        attempt,
+        KeptPrimary::FromRecord,
+    ) {
         return 1;
     }
     let stars = draw_hierarchy_with(
@@ -923,17 +978,63 @@ fn star_count_with(
     substellar::with_companion(galaxy, record, ctx, attempt, stars).star_count()
 }
 
+/// Whether `record`'s system is drawn single under `ctx` at `attempt`, at `composition` if given
+/// and otherwise at the record's [`draw_metallicity`]: no companion to try and no brown dwarf, from
+/// the count words alone, as [`draw_star_count`] decides before it builds any orbit. Where it is
+/// not, the hierarchy is drawn in full (plan 11, P11.T11.a: the range brief's gate then reads that
+/// draw's attempt 0 for its count and its pairs at once). The primary's stripped mark is read
+/// where `primary` says (`innermost`).
+#[must_use]
+pub(crate) fn drawn_single(
+    galaxy: &Galaxy,
+    record: &SystemRecord,
+    composition: Option<&Composition>,
+    ctx: MultiplicityContext,
+    attempt: RedrawAttempt,
+    primary: KeptPrimary<'_>,
+) -> bool {
+    let model = MultiplicityModel::default_v1();
+    let streams = Streams::new(galaxy, record.id(), attempt);
+    let m0 = record.primary_initial_mass();
+    let pmf = if is_direct(&streams, m0) {
+        direct_count_pmf(m0)
+    } else {
+        model.companion_count_pmf(m0)
+    };
+    companion_count(
+        &streams,
+        innermost(galaxy, record, composition, ctx, primary),
+        &pmf,
+        ctx,
+    ) == 0
+        && !substellar::wants_companion(galaxy.seed(), record.id(), m0, ctx, attempt)
+}
+
+/// Where the hierarchy reads the primary's companion-stripped mark: from the kick loop's kept
+/// attempt (plan 08, P08.T12.c), as [`SystemStars`](crate::stellar::system::SystemStars) keeps
+/// the primary's draws.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum KeptPrimary<'a> {
+    /// The primary's model, which the caller holds: the system stage's or the range brief's.
+    Model(&'a StarModel),
+    /// From the record: its own attempt's mark, or, for a record whose class constrains its
+    /// kick, the kept attempt's, which builds the primary's track
+    /// (`primary_kept_stripped_mark`).
+    FromRecord,
+}
+
 /// What the primary's stripped mark asks of its orbit under `ctx` (Design note 1; ruling 123.5),
 /// at `composition` if given and otherwise at the record's [`draw_metallicity`], which is a grid
-/// record's alone. The mark is the primary's own, read at the attempt its record carries (0 for a
-/// grid record, a feature member's conditional-draw attempt otherwise), as
-/// [`SystemStars`](crate::stellar::system::SystemStars) reads its draws.
+/// record's alone. The mark is the primary's own, as
+/// [`SystemStars`](crate::stellar::system::SystemStars) keeps its draws, read where `primary`
+/// says ([`KeptPrimary`]).
 #[must_use]
 fn innermost(
     galaxy: &Galaxy,
     record: &SystemRecord,
     composition: Option<&Composition>,
     ctx: MultiplicityContext,
+    primary: KeptPrimary<'_>,
 ) -> Innermost {
     match ctx {
         MultiplicityContext::ForcedSingle => return Innermost::Free,
@@ -947,10 +1048,14 @@ fn innermost(
     if m1 < stripped_mark_min_mass(&comp) {
         return Innermost::Free;
     }
-    let mark = primary_draws(galaxy, record).stripped();
+    let mark = match primary {
+        KeptPrimary::Model(model) => model.draws().stripped(),
+        KeptPrimary::FromRecord => primary_kept_stripped_mark(galaxy, record, &comp),
+    };
     // One reading of the seam for the share and the radii: `binarity::is_stripped`'s comparison
-    // on the share it would read.
-    let node = binarity::stripping_node(m1, &comp);
+    // on the share it would read, its exact path's track under the galaxy's stellar rules, as the
+    // primary's own track's mark reads it.
+    let node = binarity::stripping_node_under(m1, &comp, galaxy.rules().stellar);
     let (radii, share) = (node.radii(), node.share());
     if mark != binarity::NEVER_STRIPPED && binarity::is_stripped_at(mark, share) {
         Innermost::Stripped(radii)
@@ -1520,7 +1625,7 @@ pub(super) fn direct_tries(
             galaxy.potential(),
             PointLy::from(record.epoch_position()),
             None,
-            innermost(galaxy, record, None, ctx),
+            innermost(galaxy, record, None, ctx, KeptPrimary::FromRecord),
         ),
     };
     let m0 = record.primary_initial_mass();
@@ -1929,7 +2034,23 @@ impl SystemHierarchy {
             flat,
             Radians::ZERO,
         )?;
-        Ok(Self {
+        Ok(Self::binary_on(system, m0, (m1, kind), orbit))
+    }
+
+    /// Two stars of `system` on `orbit`: the primary, star 0, of initial mass `m0` M☉, and the
+    /// companion, star 1, of `m1` M☉ and kind `kind`, laid out as [`binary`](Self::binary) lays
+    /// them out. A catalogue entry of a binary class holds its marked orbit here (plan 11,
+    /// P11.T8.a): the orbit now, whose parameter is its stars' masses now, beside their initial
+    /// masses, as a grid pair's drawn orbit sits beside the stars the engine changes.
+    #[must_use]
+    pub(crate) fn binary_on(
+        system: SystemId,
+        m0: SolarMasses,
+        (m1, kind): (SolarMasses, SlotKind),
+        orbit: KeplerElements,
+    ) -> Self {
+        let mass = m0 + m1;
+        Self {
             nodes: vec![
                 HierarchyNode::Pair {
                     inner: NodeIndex(1),
@@ -1953,7 +2074,64 @@ impl SystemHierarchy {
             ],
             node_masses: vec![mass, m0, m1],
             dropped: 0,
-        })
+        }
+    }
+
+    /// The part of this hierarchy under `node`, a node whose first star is the primary, as a
+    /// hierarchy of its own: its nodes, depth first from `node` and renumbered from it, its stars
+    /// 0 to its count less one, which keep their bodies, and their orbits as drawn (plan 11,
+    /// P11.T10's fix: what a system shows once an orbit above it is unbound).
+    ///
+    /// The nodes under a node are contiguous in the depth-first list and the stars under one on
+    /// the primary's inner chain are the first, so nothing is renumbered but the nodes.
+    ///
+    /// # Panics
+    ///
+    /// If `node` is not a node of this hierarchy or its first star is not the primary.
+    #[must_use]
+    pub(crate) fn part(&self, node: NodeIndex) -> Self {
+        assert_eq!(
+            self.first_star(node),
+            StarIndex::PRIMARY,
+            "a shown part holds the primary"
+        );
+        let start = usize::from(node.0);
+        // Depth first, a node is followed by everything under it.
+        let mut end = start;
+        let mut open = 1_usize;
+        while open > 0 {
+            match self.nodes[end] {
+                HierarchyNode::Star(_) => open -= 1,
+                HierarchyNode::Pair { .. } => open += 1,
+            }
+            end += 1;
+        }
+        let shift = |n: NodeIndex| n.in_part(node);
+        let nodes: Vec<HierarchyNode> = self.nodes[start..end]
+            .iter()
+            .map(|n| match *n {
+                HierarchyNode::Star(star) => HierarchyNode::Star(star),
+                HierarchyNode::Pair {
+                    inner,
+                    outer,
+                    orbit,
+                } => HierarchyNode::Pair {
+                    inner: shift(inner),
+                    outer: shift(outer),
+                    orbit,
+                },
+            })
+            .collect();
+        let count = nodes
+            .iter()
+            .filter(|n| matches!(n, HierarchyNode::Star(_)))
+            .count();
+        Self {
+            nodes,
+            stars: self.stars[..count].to_vec(),
+            node_masses: self.node_masses[start..end].to_vec(),
+            dropped: 0,
+        }
     }
 }
 
@@ -2216,6 +2394,7 @@ mod tests {
                 None,
                 ctx,
                 &PERIOD_CORRECTION,
+                KeptPrimary::FromRecord,
             ));
             assert_order_independent(&attempts, |&attempt| shared.borrow_mut().stars_at(attempt));
             for &attempt in &attempts {

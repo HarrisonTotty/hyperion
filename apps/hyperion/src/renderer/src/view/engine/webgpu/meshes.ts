@@ -119,6 +119,11 @@ export class MeshRecord {
   readonly vertexCount: number;
   readonly vertexBuffers: ReadonlyArray<GPUBuffer>;
   readonly index: { readonly buffer: GPUBuffer; readonly count: number } | null;
+  /**
+   * The handles of its buffers, its vertex buffers' then its index buffer's, which
+   * `RenderEngine.releaseMesh` destroys (plan R10, R10.T16.b).
+   */
+  readonly buffers: ReadonlyArray<BufferHandle>;
 
   constructor(host: MeshHost, spec: MeshSpec) {
     assertMeshData(spec);
@@ -130,26 +135,28 @@ export class MeshRecord {
       this.attributes.map(({ attribute, instanced }) => [attribute.size, instanced]),
     ]);
     this.vertexCount = spec.positions.length / 3;
-    this.vertexBuffers = this.attributes.map(({ name, attribute }) =>
+    const vertex = this.attributes.map(({ name, attribute }) =>
       upload(host, `${spec.name}:${name}`, BUFFER_USAGE.VERTEX, attribute.data),
     );
+    this.vertexBuffers = vertex.map((handle) => host.gpuBufferOf(handle));
+    const indices = spec.indices;
+    const index =
+      indices === null ? null : upload(host, `${spec.name}:indices`, BUFFER_USAGE.INDEX, indices);
     this.index =
-      spec.indices === null
+      index === null || indices === null
         ? null
-        : {
-            buffer: upload(host, `${spec.name}:indices`, BUFFER_USAGE.INDEX, spec.indices),
-            count: spec.indices.length,
-          };
+        : { buffer: host.gpuBufferOf(index), count: indices.length };
+    this.buffers = index === null ? vertex : [...vertex, index];
   }
 }
 
-/** A buffer of `usage` holding `data`, made and written through the host. */
+/** A buffer of `usage` holding `data`, made and written through the host: its handle. */
 function upload(
   host: MeshHost,
   name: string,
   usage: number,
   data: Float32Array | Uint32Array,
-): GPUBuffer {
+): BufferHandle {
   const handle = host.createBuffer({
     name,
     bytes: wholeWords(data.byteLength),
@@ -159,5 +166,5 @@ function upload(
   if (data.byteLength > 0) {
     host.writeBuffer(handle, 0, data);
   }
-  return host.gpuBufferOf(handle);
+  return handle;
 }

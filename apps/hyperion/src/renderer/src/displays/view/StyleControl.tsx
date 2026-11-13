@@ -1,8 +1,39 @@
 import { useId } from "react";
 
+import { StatusText } from "../../components/StatusText";
+import { formatNumber } from "../../lib/format";
 import type { RenderStyle } from "../../view/camera/state";
 import { RENDER_STYLES, STYLE_TOGGLE_KEY, styleName } from "../../view/photoreal/style";
-import type { StyleRefusals } from "./styleRefusals";
+import { SLOPE_BASELINES_M } from "../../view/terrain/readouts";
+import type { SlopeBaselineM } from "../../view/terrain/workers/messages";
+import { GRID_KEY } from "./displayKeys";
+import { gridRowStands, type StyleRefusals } from "./styleRefusals";
+
+/**
+ * The `BASELINE` row's state and its callback (plan R10, R10.T12.a; decision-r10-t12a-scope §3.1):
+ * the baseline the `CONTROLS` view's terrain readout reads `SLOPE` over.
+ */
+export interface StyleBaseline {
+  /** The baseline chosen, m, whose button is pressed. */
+  readonly chosen: SlopeBaselineM;
+  /** Called with the baseline chosen, m; a display control, so it acts at once. */
+  readonly onBaseline: (baselineM: SlopeBaselineM) => void;
+}
+
+/**
+ * The `GRID` row's state and its callback (the owner's requests, 2026-10-31 and 2026-11-05):
+ * whether the view's symbology, its reference grid, marks and their labels, is drawn over its
+ * photorealistic image.
+ */
+export interface StyleGrid {
+  /**
+   * Whether the view draws its symbology over the image, `ON`; `false` as a view opens and each
+   * time its style becomes `PHOTOREALISTIC` (`gridAfterStyle`).
+   */
+  readonly on: boolean;
+  /** Called with the setting chosen; a display control, so it acts at once. */
+  readonly onGrid: (on: boolean) => void;
+}
 
 /** Props of {@link StyleControl}. */
 export interface StyleControlProps {
@@ -23,6 +54,91 @@ export interface StyleControlProps {
   readonly faulted: boolean;
   /** Called with the style chosen; a display control, so it acts at once. */
   readonly onStyle: (style: RenderStyle) => void;
+  /**
+   * The `BASELINE` row's state (R10.T12.a), given while the panel's view states a terrain readout,
+   * the `PRIMARY` one; absent, the row is left out, as an instrument's slot states no readout.
+   */
+  readonly baseline?: StyleBaseline | undefined;
+  /**
+   * The `GRID` row's state (the owner's requests, 2026-10-31 and 2026-11-05): the panel's view's
+   * own, the row standing while the view's style is `PHOTOREALISTIC`; absent, the row is left out.
+   */
+  readonly grid?: StyleGrid | undefined;
+}
+
+/** Props of {@link GridRow}. */
+interface GridRowProps {
+  readonly grid: StyleGrid;
+}
+
+/** The `GRID` row's settings, in order. */
+const GRID_SETTINGS: ReadonlyArray<{ readonly on: boolean; readonly label: string }> = [
+  { on: true, label: "ON" },
+  { on: false, label: "OFF" },
+];
+
+/**
+ * The `GRID` row (the owner's request, 2026-10-31): its legend on the left of `ON` and `OFF` in
+ * the panel's row form, the chosen one pressed and underlined as a preset is; a display control,
+ * acting at once. Its legend shows its key, `5 GRID`, which gives the other setting, as the
+ * style's `4 STYLE` does, so that the grid is set from the keyboard while `MAXIMIZE VIEW` hides the
+ * panel (the owner's request, 2026-11-01).
+ */
+function GridRow({ grid }: GridRowProps) {
+  return (
+    <fieldset
+      className="preset-buttons view-style__baseline view-style__grid"
+      aria-keyshortcuts={GRID_KEY}
+    >
+      <legend className="field__label view-style__baseline-label">
+        <span className="control__key">{GRID_KEY}</span> GRID
+      </legend>
+      {GRID_SETTINGS.map((setting) => (
+        <button
+          key={setting.label}
+          type="button"
+          className="control preset-buttons__button view-style__baseline-button"
+          aria-pressed={setting.on === grid.on}
+          onClick={() => {
+            grid.onGrid(setting.on);
+          }}
+        >
+          {setting.label}
+        </button>
+      ))}
+    </fieldset>
+  );
+}
+
+/** Props of {@link BaselineRow}. */
+interface BaselineRowProps {
+  readonly baseline: StyleBaseline;
+}
+
+/**
+ * The `BASELINE` row (plan R10, R10.T12.a; decision-r10-t12a-scope §3.1): its legend on the left
+ * of `2 m`, `5 m` and `100 m` in the `INSTRUMENTS` panel's row form, the chosen one pressed and
+ * underlined as a preset is; a display control, acting at once, with no key.
+ */
+function BaselineRow({ baseline }: BaselineRowProps) {
+  return (
+    <fieldset className="preset-buttons view-style__baseline">
+      <legend className="field__label view-style__baseline-label">BASELINE</legend>
+      {SLOPE_BASELINES_M.map((baselineM) => (
+        <button
+          key={baselineM}
+          type="button"
+          className="control preset-buttons__button view-style__baseline-button"
+          aria-pressed={baselineM === baseline.chosen}
+          onClick={() => {
+            baseline.onBaseline(baselineM);
+          }}
+        >
+          {formatNumber(baselineM, 0)} m
+        </button>
+      ))}
+    </fieldset>
+  );
 }
 
 /**
@@ -35,6 +151,19 @@ export interface StyleControlProps {
  * (the photorealistic style on a software adapter) is held back and says why, in the guide's
  * words: the graphics' condition, or the photorealistic view's failure to make its pipelines
  * (`styleRefusals`). Mounted by R07.T8.a beside the camera controls.
+ *
+ * Under them, while the view's style is `PHOTOREALISTIC` and offered and `grid` is given, stands
+ * the `GRID` row, whose `OFF`, as the style opens, leaves the image as the picture alone, with no
+ * symbology over it, and whose `ON` draws the symbology (the owner's requests, 2026-10-31 and
+ * 2026-11-05). A style asked for and held back draws the wireframe, which has no
+ * image to clear, so the row never stands beside the reason, and the panel's tallest state, the
+ * reason and `BASELINE`, keeps the full layout's least height (plan R10, R10.T12.d; lean,
+ * 2026-10-31).
+ *
+ * After the style's buttons and their reason stands the `BASELINE` row while `baseline` is given
+ * (R10.T12.a): the baseline `SLOPE` is read over on the view's terrain readout, which it sets
+ * whatever the readout's state and whether or not a view is drawn, since it is the readout's
+ * setting, not the drawing's.
  */
 export function StyleControl({
   renderStyle,
@@ -44,6 +173,8 @@ export function StyleControl({
   designator,
   id,
   hidden,
+  baseline,
+  grid,
 }: StyleControlProps) {
   const titleId = useId();
   const reasonId = useId();
@@ -93,9 +224,13 @@ export function StyleControl({
           }
           id={reasonId}
         >
-          {reason}
+          <StatusText text={reason} />
         </p>
       )}
+      {grid === undefined || !gridRowStands(renderStyle, byStyle.photorealistic) ? null : (
+        <GridRow grid={grid} />
+      )}
+      {baseline === undefined ? null : <BaselineRow baseline={baseline} />}
     </section>
   );
 }

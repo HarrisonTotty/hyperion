@@ -22,8 +22,11 @@ import { type AdapterOutcome, type GpuCapabilities, requestAdapterOutcome } from
 import type { GraphicsFault, GraphicsStatusStore } from "./status";
 import type {
   BufferHandle,
+  CompileEvent,
   ComputeBindings,
   ComputeHandle,
+  DepthLayersSpec,
+  DepthLayerTarget,
   DepthPolicy,
   FrameSubmission,
   IndirectArgs,
@@ -34,11 +37,13 @@ import type {
   PointSplatHandle,
   PointSplatSpec,
   PostProcessHandle,
+  PreparedTarget,
   RenderEngine,
   RenderTarget,
   RenderTargetFormat,
   RenderTargetSpec,
   RenderView,
+  TargetRender,
   TexelRect,
   TextureHandle,
   ViewSize,
@@ -134,6 +139,9 @@ class ResilientView implements RenderView {
   }
 }
 
+/** A handle a caller releases through the engine that made it. */
+type Released = BufferHandle | TextureHandle | MeshHandle | MaterialHandle | ComputeHandle;
+
 /** The engine a caller holds: the current one, re-created after each loss. */
 export class ResilientEngine implements RenderEngine {
   readonly depthPolicy: DepthPolicy = "reversed-z-float";
@@ -144,10 +152,15 @@ export class ResilientEngine implements RenderEngine {
   readonly #restoredListeners = new Set<() => void>();
   readonly #faultListeners = new Set<(fault: GraphicsFault) => void>();
   readonly #allocationListeners = new Set<(event: AllocationEvent) => void>();
+  readonly #compileListeners = new Set<(event: CompileEvent) => void>();
   readonly #passTimeListeners = new Set<(times: PassTimes) => void>();
   #inner: RenderEngine | null = null;
-  /** The engine that made each buffer and texture, so that a release reaches it or is dropped. */
-  readonly #makers = new WeakMap<BufferHandle | TextureHandle, RenderEngine>();
+  /**
+   * The engine that made each buffer, texture, mesh, material and kernel, so that a release
+   * reaches it or is dropped (R06.T13.h; meshes and materials from R10.T16.b, kernels from
+   * R01.T15).
+   */
+  readonly #makers = new WeakMap<Released, RenderEngine>();
   #capabilities: GpuCapabilities;
   #unsubscribe: Array<() => void> = [];
   #disposed = false;
@@ -197,12 +210,27 @@ export class ResilientEngine implements RenderEngine {
     return this.#current("createRenderTarget").createRenderTarget(spec);
   }
 
+  /** Nothing while there is no device, as a target's own `render` draws nothing then. */
+  renderTargets(renders: ReadonlyArray<TargetRender>): void {
+    this.#inner?.renderTargets(renders);
+  }
+
+  /**
+   * The current engine's depth-layer target (plan R10, R10.T9.b), which dies with its device as a
+   * render target does: after a loss it draws nothing, and its owner makes it again at the restore.
+   *
+   * @throws {@link EngineUnavailable} while there is no device.
+   */
+  createDepthLayers(spec: DepthLayersSpec): DepthLayerTarget {
+    return this.#current("createDepthLayers").createDepthLayers(spec);
+  }
+
   createMesh(spec: MeshSpec): MeshHandle {
-    return this.#current("createMesh").createMesh(spec);
+    return this.#made(this.#current("createMesh").createMesh(spec));
   }
 
   createMaterial(spec: WgslMaterialSpec): MaterialHandle {
-    return this.#current("createMaterial").createMaterial(spec);
+    return this.#made(this.#current("createMaterial").createMaterial(spec));
   }
 
   createMaterialAsync(
@@ -210,9 +238,37 @@ export class ResilientEngine implements RenderEngine {
     targets: ReadonlyArray<RenderTargetFormat>,
     meshes: ReadonlyArray<MeshHandle> = [],
   ): Promise<MaterialHandle> {
-    return this.#currentAsync("createMaterialAsync", (inner) =>
-      inner.createMaterialAsync(spec, targets, meshes),
-    );
+    return this.#currentAsync("createMaterialAsync", async (inner) => {
+      const material = await inner.createMaterialAsync(spec, targets, meshes);
+      // The engine asked, which a loss during the compile has left behind: its release is dropped.
+      this.#makers.set(material, inner);
+      return material;
+    });
+  }
+
+  /**
+   * Prepares a material the current engine made (R10.T14.d); one a lost engine made rejects with
+   * {@link EngineUnavailable}, since its owner makes it again, and prepares it again, at the
+   * restore.
+   *
+   * @throws Error, as a rejection, for a material no engine of this one made, or one released.
+   */
+  prepareMaterial(
+    material: MaterialHandle,
+    targets: ReadonlyArray<PreparedTarget>,
+    meshes: ReadonlyArray<MeshHandle>,
+  ): Promise<void> {
+    return this.#currentAsync("prepareMaterial", (inner) => {
+      const maker = this.#makers.get(material);
+      if (maker === undefined) {
+        return Promise.reject(
+          new Error(`material ${material.name} was not made through this engine, or was released`),
+        );
+      }
+      return maker === inner
+        ? inner.prepareMaterial(material, targets, meshes)
+        : Promise.reject(new EngineUnavailable("prepareMaterial"));
+    });
   }
 
   createPostProcess(spec: WgslPostProcessSpec): PostProcessHandle {
@@ -220,11 +276,16 @@ export class ResilientEngine implements RenderEngine {
   }
 
   createCompute(pair: KernelPair): ComputeHandle {
-    return this.#current("createCompute").createCompute(pair);
+    return this.#made(this.#current("createCompute").createCompute(pair));
   }
 
   createComputeAsync(pair: KernelPair): Promise<ComputeHandle> {
-    return this.#currentAsync("createComputeAsync", (inner) => inner.createComputeAsync(pair));
+    return this.#currentAsync("createComputeAsync", async (inner) => {
+      const kernel = await inner.createComputeAsync(pair);
+      // The engine asked, which a loss during the compile has left behind: its release is dropped.
+      this.#makers.set(kernel, inner);
+      return kernel;
+    });
   }
 
   createBuffer(spec: BufferSpec): BufferHandle {
@@ -270,8 +331,44 @@ export class ResilientEngine implements RenderEngine {
     }
   }
 
+  /**
+   * Releases a mesh the current engine made (R10.T16.b); the release of one a lost engine made is
+   * dropped, as a buffer's is.
+   *
+   * @throws Error as {@link ResilientEngine.releaseBuffer} does.
+   */
+  releaseMesh(mesh: MeshHandle): void {
+    if (this.#releasedFromMaker("mesh", mesh)) {
+      this.#inner?.releaseMesh(mesh);
+    }
+  }
+
+  /**
+   * Releases a material the current engine made (R10.T16.b), as
+   * {@link ResilientEngine.releaseMesh} does a mesh.
+   *
+   * @throws Error as {@link ResilientEngine.releaseBuffer} does.
+   */
+  releaseMaterial(material: MaterialHandle): void {
+    if (this.#releasedFromMaker("material", material)) {
+      this.#inner?.releaseMaterial(material);
+    }
+  }
+
+  /**
+   * Releases a kernel's handle the current engine made (R01.T15), as
+   * {@link ResilientEngine.releaseMesh} does a mesh.
+   *
+   * @throws Error as {@link ResilientEngine.releaseBuffer} does.
+   */
+  releaseCompute(kernel: ComputeHandle): void {
+    if (this.#releasedFromMaker("kernel", kernel)) {
+      this.#inner?.releaseCompute(kernel);
+    }
+  }
+
   /** Forgets a handle's maker and says whether it is the current engine, which then releases it. */
-  #releasedFromMaker(kind: string, handle: BufferHandle | TextureHandle): boolean {
+  #releasedFromMaker(kind: string, handle: Released): boolean {
     const maker = this.#makers.get(handle);
     if (maker === undefined) {
       throw new Error(`${kind} ${handle.name} was not made through this engine, or was released`);
@@ -289,12 +386,14 @@ export class ResilientEngine implements RenderEngine {
     level: number,
     packed: BufferHandle,
     face?: number,
+    region?: TexelRect,
   ): void {
     this.#current("writePackedCubeLevelFromBuffer").writePackedCubeLevelFromBuffer(
       cube,
       level,
       packed,
       face,
+      region,
     );
   }
 
@@ -315,6 +414,12 @@ export class ResilientEngine implements RenderEngine {
     pass?: string,
   ): void {
     this.#inner?.dispatch(kernel, bindings, workgroups, pass);
+  }
+
+  stagedWrites<T>(label: string, write: () => T): T {
+    // With no device the writes inside are dropped, as each is outside a scope.
+    const inner = this.#inner;
+    return inner === null ? write() : inner.stagedWrites(label, write);
   }
 
   writeBuffer(buffer: BufferHandle, offsetBytes: number, data: ArrayBufferView): void {
@@ -358,6 +463,10 @@ export class ResilientEngine implements RenderEngine {
     return this.#listen(this.#allocationListeners, listener);
   }
 
+  onCompile(listener: (event: CompileEvent) => void): () => void {
+    return this.#listen(this.#compileListeners, listener);
+  }
+
   onFault(listener: (fault: GraphicsFault) => void): () => void {
     return this.#listen(this.#faultListeners, listener);
   }
@@ -376,6 +485,7 @@ export class ResilientEngine implements RenderEngine {
     this.#restoredListeners.clear();
     this.#faultListeners.clear();
     this.#allocationListeners.clear();
+    this.#compileListeners.clear();
     this.#passTimeListeners.clear();
   }
 
@@ -399,7 +509,7 @@ export class ResilientEngine implements RenderEngine {
   }
 
   /** Notes the current engine as a handle's maker, so that its release is forwarded. */
-  #made<T extends BufferHandle | TextureHandle>(handle: T): T {
+  #made<T extends Released>(handle: T): T {
     if (this.#inner !== null) {
       this.#makers.set(handle, this.#inner);
     }
@@ -427,6 +537,11 @@ export class ResilientEngine implements RenderEngine {
       }),
       inner.onAllocation((event) => {
         for (const listener of this.#allocationListeners) {
+          listener(event);
+        }
+      }),
+      inner.onCompile((event) => {
+        for (const listener of this.#compileListeners) {
           listener(event);
         }
       }),

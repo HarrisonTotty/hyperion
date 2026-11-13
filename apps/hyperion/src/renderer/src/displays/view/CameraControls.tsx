@@ -1,5 +1,6 @@
-import { useId } from "react";
+import { type ReactNode, useId } from "react";
 
+import { StatusText } from "../../components/StatusText";
 import type { PrimaryModifier } from "../../lib/platform";
 import type { ViewKeyAction } from "../../view/camera/keys";
 import { FOV_STEPS_DEG } from "../../view/camera/projection";
@@ -20,6 +21,12 @@ export interface CameraControlsProps {
    * `INSTRUMENT 1`; R07.T19), or none.
    */
   readonly designator?: string | undefined;
+  /**
+   * Whether the controls stand bare, with no panel or title row of their own: as the body of the
+   * camera panel's place while `CONTROLS` names an instrument, whose panel and tabs stay mounted as
+   * its pages change (`PlacePanel`; plan R10, R10.T12.d).
+   */
+  readonly bare?: boolean | undefined;
   readonly preset: CameraPreset;
   /** The presets the scene offers: `FREE` alone where it has no own ship. */
   readonly offered: ReadonlyArray<CameraPreset>;
@@ -61,7 +68,37 @@ const PRESET_KEYS: ReadonlyArray<{ readonly preset: CameraPreset; readonly key: 
   { preset: "seat", key: "1" },
   { preset: "chase", key: "2" },
   { preset: "free", key: "3" },
+  { preset: "orbit", key: "0" },
 ];
+
+/** The rate's chord as the words of its limit reason name it, before the platform's is set. */
+function chordWords(arrow: "↑" | "↓"): string {
+  return `CTRL+${arrow}`;
+}
+
+/**
+ * Why the rate's step is held back at an end, as one line for `StatusText` to split, its chord
+ * in words: `NOT AVAILABLE: CTRL+↑, RATE at its highest step`.
+ */
+function rateLimitReason(arrow: "↑" | "↓"): string {
+  return `NOT AVAILABLE: ${chordWords(arrow)}, RATE at its ${arrow === "↑" ? "highest" : "lowest"} step`;
+}
+
+/** A part of the rate's limit reason with its chord as the platform reads it (`⌘↑` drawn on macOS). */
+function withRateChord(part: string, modifier: PrimaryModifier, arrow: "↑" | "↓"): ReactNode {
+  const words = chordWords(arrow);
+  const at = part.indexOf(words);
+  if (at < 0) {
+    return part;
+  }
+  return (
+    <>
+      {part.slice(0, at)}
+      <RateChord modifier={modifier} arrows={arrow} />
+      {part.slice(at + words.length)}
+    </>
+  );
+}
 
 /**
  * The view's camera controls (plan R02, R02.T15.c): the presets `SEAT`, `CHASE` and `FREE`, the
@@ -93,6 +130,7 @@ export function CameraControls({
   onAction,
   onEasedMovesChange,
   designator,
+  bare = false,
   id,
   hidden,
 }: CameraControlsProps) {
@@ -104,20 +142,16 @@ export function CameraControls({
   const widest = fovDeg >= Math.max(...FOV_STEPS_DEG);
   const slowest = rateStep <= 0;
   const fastest = rateStep >= maxRateStep;
-  const anyHeldBack = PRESET_KEYS.some(({ preset: each }) => !offered.includes(each));
-  return (
-    <section className="panel view-camera" aria-labelledby={titleId} id={id} hidden={hidden}>
-      <h2 className="panel__title" id={titleId}>
-        Camera
-        {designator === undefined ? null : (
-          <>
-            {" "}
-            <span className="panel__designator">{designator}</span>
-          </>
-        )}
-      </h2>
+  // `ORBIT` stands only where the scene has a body to hold it about (plan R15, T4); the others stand
+  // held back where they cannot act.
+  const shownPresets = PRESET_KEYS.filter(
+    ({ preset: each }) => each !== "orbit" || offered.includes(each),
+  );
+  const anyHeldBack = shownPresets.some(({ preset: each }) => !offered.includes(each));
+  const body = (
+    <>
       <fieldset className="preset-buttons" aria-label="Camera presets">
-        {PRESET_KEYS.map(({ preset: each, key }) => {
+        {shownPresets.map(({ preset: each, key }) => {
           const heldBack = !offered.includes(each);
           return (
             <button
@@ -141,7 +175,7 @@ export function CameraControls({
       </fieldset>
       {anyHeldBack ? (
         <p className="view-camera__reason" id={noShipId}>
-          {NO_OWN_SHIP}
+          <StatusText text={NO_OWN_SHIP} />
         </p>
       ) : null}
       <fieldset className="preset-buttons" aria-label="Target">
@@ -204,14 +238,18 @@ export function CameraControls({
       </fieldset>
       {narrowest || widest ? (
         <p className="view-camera__reason" id={fovLimitId}>
-          NOT AVAILABLE: FOV at its {narrowest ? "narrowest" : "widest"} step
+          <StatusText
+            text={`NOT AVAILABLE: FOV at its ${narrowest ? "narrowest" : "widest"} step`}
+          />
         </p>
       ) : null}
       <CameraReadings rateStep={rateStep} place={place} sceneStale={sceneStale} />
       {slowest || fastest ? (
         <p className="view-camera__reason">
-          NOT AVAILABLE: <RateChord modifier={modifier} arrows={fastest ? "↑" : "↓"} />, RATE at its{" "}
-          {fastest ? "highest" : "lowest"} step
+          <StatusText
+            text={rateLimitReason(fastest ? "↑" : "↓")}
+            renderPart={(part) => withRateChord(part, modifier, fastest ? "↑" : "↓")}
+          />
         </p>
       ) : null}
       <div className="view-camera__setting">
@@ -229,10 +267,27 @@ export function CameraControls({
         <output aria-hidden="true">{easedMoves ? "ON" : "OFF"}</output>
         {reducedMotion ? (
           <span className="view-camera__reason" id={reducedId}>
-            NOT APPLIED: reduced motion
+            <StatusText text="NOT APPLIED: reduced motion" />
           </span>
         ) : null}
       </div>
+    </>
+  );
+  if (bare) {
+    return body;
+  }
+  return (
+    <section className="panel view-camera" aria-labelledby={titleId} id={id} hidden={hidden}>
+      <h2 className="panel__title" id={titleId}>
+        Camera
+        {designator === undefined ? null : (
+          <>
+            {" "}
+            <span className="panel__designator">{designator}</span>
+          </>
+        )}
+      </h2>
+      {body}
     </section>
   );
 }

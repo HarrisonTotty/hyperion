@@ -7,6 +7,7 @@ import {
   destinationChevrons,
   destinationLabelRisePx,
   type OffsetPx,
+  type ScreenBoxPx,
   SIZE_CLASS_REM,
   symbolOutline,
   unitInradius,
@@ -14,7 +15,7 @@ import {
 import { type ProjectionCamera, project, type Viewport } from "../camera/projection";
 import type { CameraTarget } from "../camera/state";
 import type { BodyMarkSymbol } from "../scene/model";
-import { isSymbolSized } from "./bodies";
+import { type DiscExtentPx, isSymbolSized } from "./bodies";
 
 /** A point on the view, px from the top left. */
 export interface ScreenPx {
@@ -31,8 +32,9 @@ export type ScreenSegment = readonly [ScreenPx, ScreenPx];
  */
 export interface ScreenMark {
   /** What the mark is. */
-  readonly kind: "selection" | "destination" | "target" | "flight_path" | "body_symbol";
-  /** The body or craft it marks, or `null` for the flight path marker. */
+  readonly kind:
+    "selection" | "destination" | "target" | "flight_path" | "body_symbol" | "line_of_sight";
+  /** The body or craft it marks, or `null` for the flight path marker and the line-of-sight mark. */
   readonly target: CameraTarget | null;
   /** The token its strokes are drawn in (plan 05's `readTokens` names). */
   readonly token: ColourToken;
@@ -75,15 +77,43 @@ export const LABEL_CLEARANCE_REM = 0.125;
  */
 export const FLIGHT_PATH_MARKER_REM = { radius: 0.375, wing: 0.5, fin: 0.3125 } as const;
 
-/** Four corner brackets of the square of half-width `halfPx` about `at`. */
-function corners(at: ScreenPx, halfPx: number): ScreenSegment[] {
-  const arm = bracketArmPx(halfPx);
+/**
+ * Four corner brackets of the square of half-width `halfPx` about `at`. Where `bounds` is given and
+ * the square overlaps the view, each corner is held within the view, inset by `insetPx`, so that a
+ * corner past its edge stands on the edge and still marks the target, and each arm is a third of
+ * its held side, so that the sides' middles stay open (the owner's request, 2026-10-31); a square
+ * wholly off the view stands where it falls, unseen.
+ */
+function corners(
+  at: ScreenPx,
+  halfPx: number,
+  bounds: { readonly viewport: Viewport; readonly insetPx: number } | null = null,
+): ScreenSegment[] {
+  const held = (value: number, extentPx: number): number =>
+    bounds === null ? value : Math.min(Math.max(value, bounds.insetPx), extentPx - bounds.insetPx);
+  const overlaps =
+    bounds !== null &&
+    at.xPx + halfPx >= 0 &&
+    at.xPx - halfPx <= bounds.viewport.widthPx &&
+    at.yPx + halfPx >= 0 &&
+    at.yPx - halfPx <= bounds.viewport.heightPx;
+  const along = (value: number, extentPx: number): number =>
+    overlaps ? held(value, extentPx) : value;
+  const widthPx = bounds?.viewport.widthPx ?? 0;
+  const heightPx = bounds?.viewport.heightPx ?? 0;
+  const left = along(at.xPx - halfPx, widthPx);
+  const right = along(at.xPx + halfPx, widthPx);
+  const top = along(at.yPx - halfPx, heightPx);
+  const bottom = along(at.yPx + halfPx, heightPx);
+  // Each arm a third of its side as held: an unheld side's is the bracket's own share.
+  const armX = bracketArmPx((right - left) / 2);
+  const armY = bracketArmPx((bottom - top) / 2);
   const segments: ScreenSegment[] = [];
   for (const sx of [-1, 1] as const) {
     for (const sy of [-1, 1] as const) {
-      const corner = { xPx: at.xPx + sx * halfPx, yPx: at.yPx + sy * halfPx };
-      segments.push([corner, { xPx: corner.xPx - sx * arm, yPx: corner.yPx }]);
-      segments.push([corner, { xPx: corner.xPx, yPx: corner.yPx - sy * arm }]);
+      const corner = { xPx: sx < 0 ? left : right, yPx: sy < 0 ? top : bottom };
+      segments.push([corner, { xPx: corner.xPx - sx * armX, yPx: corner.yPx }]);
+      segments.push([corner, { xPx: corner.xPx, yPx: corner.yPx - sy * armY }]);
     }
   }
   return segments;
@@ -228,11 +258,14 @@ export function markLabelRisePx(
 
 /**
  * The bracket reticle about the selection, in `--accent`, as the spatial view's: its half-size the
- * marked symbol's radius and a margin, moved out by four times the outlines' shift
- * ({@link bracketHalfSizePx}).
+ * mark's radius and a margin, moved out by four times the outlines' shift
+ * ({@link bracketHalfSizePx}), the mark's radius a body's drawn disc's where that is the larger
+ * ({@link reticleRadiusPx}); each corner held within the view, inset by the margin, where it is
+ * given.
  *
  * @param markRadiusPx - The radius of the mark it encloses, px.
  * @param shiftPx - The marks' outline shift δ, device px (`ViewStrokes.markShiftPx`).
+ * @param viewport - The view its corners are held within, or none to leave them where they fall.
  */
 export function bracketReticle(
   target: CameraTarget,
@@ -240,12 +273,17 @@ export function bracketReticle(
   markRadiusPx: number,
   remPx: number,
   shiftPx: number,
+  viewport: Viewport | null = null,
 ): ScreenMark {
   return {
     kind: "selection",
     target,
     token: "accent",
-    segments: corners(at, bracketHalfSizePx(markRadiusPx, remPx, shiftPx)),
+    segments: corners(
+      at,
+      bracketHalfSizePx(markRadiusPx, remPx, shiftPx),
+      viewport === null ? null : { viewport, insetPx: BRACKET_MARGIN_REM * remPx },
+    ),
     anchor: at,
   };
 }
@@ -469,8 +507,15 @@ export interface SymbologyAnchor {
   readonly target: CameraTarget;
   /** Where it falls on the view. */
   readonly at: ScreenPx;
-  /** A body's symbol and apparent diameter, px; `null` for a craft. */
-  readonly body: { readonly symbol: BodyMarkSymbol; readonly diameterPx: number } | null;
+  /**
+   * A body's symbol and apparent diameter, px, and, where its disc is drawn, the disc's extent
+   * about the mark (`discExtentPx`, the owner's request, 2026-10-31); `null` for a craft.
+   */
+  readonly body: {
+    readonly symbol: BodyMarkSymbol;
+    readonly diameterPx: number;
+    readonly extentPx?: DiscExtentPx;
+  } | null;
   /**
    * A craft's place and motion for its target brackets: from the own ship where there is one, else
    * from the camera (the range is then `FROM CAMERA`, Design note 17); `null` for a body.
@@ -492,6 +537,49 @@ export function contactRadiusPx(remPx: number): number {
  */
 export function anchorRadiusPx(anchor: Pick<SymbologyAnchor, "body">, remPx: number): number {
   return anchor.body === null ? contactRadiusPx(remPx) : symbolRadiusPx(anchor.body.symbol, remPx);
+}
+
+/**
+ * The radius the selection's bracket and the destination's chevrons stand about, and the marks'
+ * labels and reach are placed from, px (the owner's request, 2026-10-31): a body's symbol's or its
+ * drawn disc's half-size about the mark, the larger (`DiscExtentPx.halfPx`, or half its angular
+ * diameter without one), so that the bracket's corners stand just outside the disc at any range; a
+ * craft's contact's. Its symbol's where the disc is unbounded.
+ */
+export function reticleRadiusPx(anchor: Pick<SymbologyAnchor, "body">, remPx: number): number {
+  const markPx = anchorRadiusPx(anchor, remPx);
+  if (anchor.body === null) {
+    return markPx;
+  }
+  const discPx = anchor.body.extentPx?.halfPx ?? anchor.body.diameterPx / 2;
+  // An unbounded disc, the camera in or by the body, fills the view: no reticle stands about it.
+  return Number.isFinite(discPx) ? Math.max(markPx, discPx) : markPx;
+}
+
+/**
+ * Whether a body's drawn disc fills the view about its mark (the owner's request, 2026-10-31): its
+ * least radius (`DiscExtentPx.leastPx`, a flattened body's polar), or half its angular diameter,
+ * covers every corner of the view.
+ */
+export function anchorFillsView(
+  anchor: Pick<SymbologyAnchor, "at" | "body">,
+  viewport: Viewport,
+): boolean {
+  return (
+    anchor.body !== null &&
+    discFillsView(anchor.at, anchor.body.extentPx?.leastPx ?? anchor.body.diameterPx / 2, viewport)
+  );
+}
+
+/**
+ * Whether a body's drawn disc of `radiusPx` about `at` covers the whole view, each of its corners
+ * within it: no bracket is drawn about it then, the view's list marking the selection (the owner's
+ * request, 2026-10-31).
+ */
+export function discFillsView(at: ScreenPx, radiusPx: number, viewport: Viewport): boolean {
+  const xs = [0, viewport.widthPx];
+  const ys = [0, viewport.heightPx];
+  return xs.every((xPx) => ys.every((yPx) => Math.hypot(xPx - at.xPx, yPx - at.yPx) <= radiusPx));
 }
 
 /** What the symbology marks beyond the anchors themselves. */
@@ -529,7 +617,10 @@ function sameTarget(a: CameraTarget | null, b: CameraTarget): boolean {
  * The view's symbology (plan R02, R02.T12.c): each body under 3 px its symbol, each craft its target
  * mark (four ticks) with range and closure (for the DOM label beside it), the selection's
  * bracket reticle in `--accent`, the destination's chevrons in `--target` outside it
- * ({@link destinationReticle}), and the own ship's flight path marker, in that order.
+ * ({@link destinationReticle}), and the own ship's flight path marker, in that order. The
+ * line-of-sight mark is not among them: the view's draw list places it at the picture's centre and
+ * decides from these marks whether it gives way ({@link lineOfSightTripod},
+ * {@link lineOfSightGivesWay}).
  */
 export function symbologyMarks(
   input: SymbologyInput,
@@ -539,6 +630,10 @@ export function symbologyMarks(
   const marks: ScreenMark[] = [];
   for (const anchor of input.anchors) {
     const markRadiusPx = anchorRadiusPx(anchor, input.remPx);
+    // The bracket and the chevrons grow with a body's drawn disc (the owner's request).
+    const reticlePx = reticleRadiusPx(anchor, input.remPx);
+    // Once the disc fills the view neither reticle is drawn: the view's list marks the target.
+    const fills = anchorFillsView(anchor, viewport);
     if (anchor.craft !== null) {
       marks.push(
         targetMark(
@@ -564,17 +659,24 @@ export function symbologyMarks(
         marks.push(symbol);
       }
     }
-    if (sameTarget(input.selection, anchor.target)) {
+    if (sameTarget(input.selection, anchor.target) && !fills) {
       marks.push(
-        bracketReticle(anchor.target, anchor.at, markRadiusPx, input.remPx, input.markShiftPx),
+        bracketReticle(
+          anchor.target,
+          anchor.at,
+          reticlePx,
+          input.remPx,
+          input.markShiftPx,
+          viewport,
+        ),
       );
     }
-    if (sameTarget(input.destination, anchor.target)) {
+    if (sameTarget(input.destination, anchor.target) && !fills) {
       marks.push(
         destinationReticle(
           anchor.target,
           anchor.at,
-          markRadiusPx,
+          reticlePx,
           input.remPx,
           input.markShiftPx,
           input.minReticleGapPx,
@@ -593,4 +695,278 @@ export function symbologyMarks(
     marks.push(marker);
   }
   return marks;
+}
+
+// --- The line-of-sight mark (plan R10, R10.T12) --------------------------------------------------
+
+/**
+ * The line-of-sight mark's ticks, rem (the guide's tripod, "Size and stroke"): each starts 0.1875
+ * rem from the point and is 0.25 rem long, as a craft's tick is, so that it reaches 0.4375 rem,
+ * inside the selection's bracket about any mark.
+ */
+export const LINE_OF_SIGHT_TICK_REM = { inner: 0.1875, length: 0.25 } as const;
+
+/**
+ * How near a body's symbol, a craft's ticks or the flight path marker may come to the
+ * line-of-sight mark's ticks before it gives way, rem: the guide's 0.5, measured as
+ * {@link lineOfSightClearancePx} measures it.
+ */
+export const LINE_OF_SIGHT_LEAVE_REM = 0.5;
+
+/**
+ * How clear of its ticks every such mark must stand before the line-of-sight mark is drawn again,
+ * rem: the guide's 0.75, so that it does not come and go beside a mark that wanders at the edge of
+ * {@link LINE_OF_SIGHT_LEAVE_REM}.
+ */
+export const LINE_OF_SIGHT_RETURN_REM = 0.75;
+
+/**
+ * How far past its half-width a view's stroke lights a pixel, device px: `lines.wgsl`'s coverage at
+ * a pixel's centre a distance d from the segment, with round caps, `clamp(w ÷ 2 + 0.5 − d, 0, 1)`,
+ * is zero from w ÷ 2 + 0.5 out.
+ */
+export const STROKE_FRINGE_PX = 0.5;
+
+/** The upper ticks' angle from the upward vertical, rad: the guide's 60°. */
+const UPPER_TICK_RAD = Math.PI / 3;
+
+/** The strokes the line-of-sight mark is drawn with, device px: the view's (`ViewStrokes`). */
+export interface LineOfSightStrokes {
+  /** The marks' outline width (`ViewStrokes.markStrokePx`). */
+  readonly markStrokePx: number;
+  /** The marks' outline shift δ (`ViewStrokes.markShiftPx`). */
+  readonly markShiftPx: number;
+}
+
+/**
+ * How far from its point the line-of-sight mark's ticks start, device px: 0.1875 rem moved out by
+ * the outline's shift δ, as a craft's ticks are; or, where that would close the point, as far out
+ * as keeps it open, the ticks keeping their length (the guide's tripod, "Size and stroke", and
+ * "Layout": an open mark keeps its hole at every ratio).
+ *
+ * @remarks
+ * The criterion (decision-r10-t12-commit3 §3): the point is open where no tick's coloured stroke
+ * lights the device pixel that holds it, wherever the point falls on the grid, as Layout's hole is
+ * the stroke's, which δ keeps at its inner edge; the ticks' `--surface-0` casings, the mark's own
+ * dark surface, may meet over it, as a symbol's casing lies in its hole. A tick's inner end, with
+ * its round cap, lights the pixels whose centres lie within half its stroke and
+ * {@link STROKE_FRINGE_PX} of it, and the pixel that holds the point has its centre within half a
+ * pixel's diagonal, √2 ÷ 2, of it; so each inner end stands at least m ÷ 2 + 0.5 + √2 ÷ 2 px from
+ * the point, m being the marks' stroke: 2.21 px at a ratio of 1 (m 2) and 2.71 px at 2 (m 3). That
+ * guard never binds at a ratio in use from the 80% interface scale up: 0.1875 rem and δ are 2.65 px
+ * at a ratio of 1 and 80%, 3.25 px at 100%, and 2.29 px at 0.78125 and 80%, 0.08 px to spare.
+ *
+ * @param remPx - The interface's rem, device px.
+ */
+export function lineOfSightInnerPx(remPx: number, strokes: LineOfSightStrokes): number {
+  const openPx = strokes.markStrokePx / 2 + STROKE_FRINGE_PX + Math.SQRT1_2;
+  return Math.max(LINE_OF_SIGHT_TICK_REM.inner * remPx + strokes.markShiftPx, openPx);
+}
+
+/**
+ * The line-of-sight mark, the tripod (plan R10, R10.T12; the guide's `TRIPOD GROUND AT LINE OF
+ * SIGHT`): at the point where the view's line of sight meets the ground its terrain readout reads,
+ * the picture's centre, three short straight `--text` ticks pointing at the point, one from directly
+ * below it and two from above, each 60° from the upward vertical, so 120° apart, the point left
+ * open.
+ *
+ * @remarks
+ * Each tick runs out from {@link lineOfSightInnerPx} for 0.25 rem, in the order below, upper left,
+ * upper right, each from its inner end. It is drawn at the marks' outline width and cased as every
+ * mark is, in both styles; the view's draw list decides whether it is drawn
+ * ({@link lineOfSightGivesWay}).
+ *
+ * @param at - The point, the view's centre, device px from its top left.
+ * @param remPx - The interface's rem, device px.
+ */
+export function lineOfSightTripod(
+  at: ScreenPx,
+  remPx: number,
+  strokes: LineOfSightStrokes,
+): ScreenMark {
+  const innerPx = lineOfSightInnerPx(remPx, strokes);
+  const outerPx = innerPx + LINE_OF_SIGHT_TICK_REM.length * remPx;
+  const across = Math.sin(UPPER_TICK_RAD);
+  const up = Math.cos(UPPER_TICK_RAD);
+  // Each tick's unit direction out from the point, +y down the view.
+  const directions = [
+    { x: 0, y: 1 },
+    { x: -across, y: -up },
+    { x: across, y: -up },
+  ];
+  const segments = directions.map(({ x, y }): ScreenSegment => [
+    { xPx: at.xPx + x * innerPx, yPx: at.yPx + y * innerPx },
+    { xPx: at.xPx + x * outerPx, yPx: at.yPx + y * outerPx },
+  ]);
+  return { kind: "line_of_sight", target: null, token: "text", segments, anchor: at };
+}
+
+/** The squared distance, px², from `p` to the segment `s`. */
+function squaredDistanceToSegment(p: ScreenPx, s: ScreenSegment): number {
+  const [a, b] = s;
+  const dx = b.xPx - a.xPx;
+  const dy = b.yPx - a.yPx;
+  const length2 = dx * dx + dy * dy;
+  const t =
+    length2 > 0
+      ? Math.min(1, Math.max(0, ((p.xPx - a.xPx) * dx + (p.yPx - a.yPx) * dy) / length2))
+      : 0;
+  const x = a.xPx + t * dx - p.xPx;
+  const y = a.yPx + t * dy - p.yPx;
+  return x * x + y * y;
+}
+
+/** Twice the signed area of the triangle `a`, `b`, `c`: its sign says on which side of a → b c is. */
+function turn(a: ScreenPx, b: ScreenPx, c: ScreenPx): number {
+  return (b.xPx - a.xPx) * (c.yPx - a.yPx) - (b.yPx - a.yPx) * (c.xPx - a.xPx);
+}
+
+/**
+ * The least distance between two straight strokes on the view, px, centreline to centreline: 0
+ * where they cross, else the least of each end's distance from the other segment (which is 0 where
+ * an end lies on it).
+ */
+export function segmentDistancePx(a: ScreenSegment, b: ScreenSegment): number {
+  const [p, q] = a;
+  const [r, s] = b;
+  const rSide = turn(p, q, r);
+  const sSide = turn(p, q, s);
+  const pSide = turn(r, s, p);
+  const qSide = turn(r, s, q);
+  if (rSide * sSide < 0 && pSide * qSide < 0) {
+    return 0;
+  }
+  return Math.sqrt(
+    Math.min(
+      squaredDistanceToSegment(r, a),
+      squaredDistanceToSegment(s, a),
+      squaredDistanceToSegment(p, b),
+      squaredDistanceToSegment(q, b),
+    ),
+  );
+}
+
+/**
+ * Whether a mark makes the line-of-sight mark give way where it comes near (the guide's "Beside
+ * other marks"): a body's symbol, which is drawn only where the body is symbol-sized, a craft's
+ * ticks and the own ship's flight path marker do, since each then stands where the line of sight
+ * is; the reticles, which stand round it, do not.
+ */
+function crowdsLineOfSight(kind: ScreenMark["kind"]): boolean {
+  let crowds: boolean;
+  switch (kind) {
+    case "body_symbol":
+    case "target":
+    case "flight_path":
+      crowds = true;
+      break;
+    case "selection":
+    case "destination":
+    case "line_of_sight":
+      crowds = false;
+      break;
+  }
+  return crowds;
+}
+
+/**
+ * A craft's hull as the line-of-sight mark gives way to it (plan R10, R10.T12;
+ * decision-r10-t12-commit3 §1): a hull the view draws, in sight and nearer than the point.
+ */
+export interface HullOnView {
+  /** Its edges, projected and clipped at the near plane, device px; hidden ones among them. */
+  readonly edges: ReadonlyArray<ScreenSegment>;
+  /**
+   * Whether one of its opaque faces stands over the point: the line of sight meets it in front of
+   * the near plane. A window is no face.
+   */
+  readonly coversPoint: boolean;
+}
+
+/**
+ * How clear of the line-of-sight mark's ticks the marks and hulls that make it give way stand,
+ * device px: the least distance between any of their drawn segments, or a hull's edges, and any of
+ * its ticks, centreline to centreline ({@link segmentDistancePx}); 0 where a hull's opaque face
+ * stands over the point; infinite where there is none.
+ *
+ * @param ticks - The tripod's ticks where it stands ({@link lineOfSightTripod}).
+ * @param marks - The frame's other marks ({@link symbologyMarks}).
+ * @param hulls - The craft's hulls that count ({@link HullOnView}); none by default.
+ */
+export function lineOfSightClearancePx(
+  ticks: ReadonlyArray<ScreenSegment>,
+  marks: ReadonlyArray<ScreenMark>,
+  hulls: ReadonlyArray<HullOnView> = [],
+): number {
+  if (hulls.some((hull) => hull.coversPoint)) {
+    return 0;
+  }
+  let clearancePx = Number.POSITIVE_INFINITY;
+  const crowding = [
+    ...marks.flatMap((mark) => (crowdsLineOfSight(mark.kind) ? mark.segments : [])),
+    ...hulls.flatMap((hull) => hull.edges),
+  ];
+  for (const segment of crowding) {
+    for (const tick of ticks) {
+      clearancePx = Math.min(clearancePx, segmentDistancePx(segment, tick));
+    }
+  }
+  return clearancePx;
+}
+
+/**
+ * Whether the line-of-sight mark gives way in this frame, with the guide's hysteresis ("Beside other
+ * marks"): it is left out where a body's symbol, a craft's ticks, the own ship's flight path
+ * marker or a craft's hull nearer than the point, by its outline or its opaque faces, comes within
+ * 0.5 rem of its ticks, and drawn again only once all are 0.75 rem clear.
+ *
+ * @remarks
+ * "Within" is measured as {@link lineOfSightClearancePx} measures it: the least distance between
+ * the other mark's drawn segments and the tripod's ticks, centreline to centreline. A mark under
+ * 0.5 rem makes it leave, and once left it returns only at 0.75 rem or more; between the two it
+ * keeps the state it had. The reticles never make it give way. A hull does, as a craft's ticks do
+ * (plan R10, R10.T12; decision-r10-t12-commit3 §1): an edge of it beside the ticks would read with
+ * them as one new symbol, and a face of it over the point hides the ground the tripod marks, so in
+ * `CHASE`, whose line of sight passes through the own ship, the tripod is never drawn.
+ *
+ * @param ticks - The tripod's ticks where it stands ({@link lineOfSightTripod}), drawn or not.
+ * @param marks - The frame's other marks ({@link symbologyMarks}).
+ * @param remPx - The interface's rem, device px.
+ * @param yielded - Whether it gave way in the view's frame before.
+ * @param hulls - The craft's hulls that count ({@link lineOfSightClearancePx}).
+ */
+export function lineOfSightGivesWay(
+  ticks: ReadonlyArray<ScreenSegment>,
+  marks: ReadonlyArray<ScreenMark>,
+  remPx: number,
+  yielded: boolean,
+  hulls: ReadonlyArray<HullOnView> = [],
+): boolean {
+  const thresholdRem = yielded ? LINE_OF_SIGHT_RETURN_REM : LINE_OF_SIGHT_LEAVE_REM;
+  return lineOfSightClearancePx(ticks, marks, hulls) < thresholdRem * remPx;
+}
+
+/**
+ * The box that holds every pixel a mark's strokes light, device px: its segments' ends' bounds,
+ * widened on each side by `reachPx`.
+ *
+ * @param reachPx - How far past a segment its stroke lights, device px: half the stroke, its casing
+ *   and {@link STROKE_FRINGE_PX}.
+ * @throws RangeError for a mark with no segments, which has no box.
+ */
+export function markBoxPx(mark: Pick<ScreenMark, "segments">, reachPx: number): ScreenBoxPx {
+  const ends = mark.segments.flat();
+  if (ends.length === 0) {
+    throw new RangeError("a mark with no segments has no box");
+  }
+  const xs = ends.map((end) => end.xPx);
+  const ys = ends.map((end) => end.yPx);
+  const leftPx = Math.min(...xs) - reachPx;
+  const topPx = Math.min(...ys) - reachPx;
+  return {
+    leftPx,
+    topPx,
+    widthPx: Math.max(...xs) + reachPx - leftPx,
+    heightPx: Math.max(...ys) + reachPx - topPx,
+  };
 }

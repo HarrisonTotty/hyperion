@@ -1,0 +1,1080 @@
+/**
+ * The atmosphere cache's optics workers (plan R08, R08.T10.a): a worker's answers
+ * (`opticsJobs.ts`), their transfer, and the pool that splits a body's curves of growth between
+ * its workers (`opticsPool.ts`; `decision-r08-t4d-kdist-chain.md` §15, ruling 3), and asks a thick
+ * body's bake (R08.T14.c). The workers here are the real job logic run in process, on toy line
+ * tables, or scripted for their answers and failures.
+ */
+import { describe, expect, it, onTestFinished } from "vitest";
+
+import {
+  earthBody,
+  planckBakeSpectrum,
+  r05EarthWithOzoneAbsorber,
+  saturnBody,
+} from "../../test/atmosphereFixtures";
+import { detailOf, recordInput, SUN_LIGHT } from "../../test/atmosphereRecords";
+import { handJupiterDetail } from "../../test/giantFixtures";
+import { InProcessOpticsWorker } from "../../test/inProcessOpticsWorker";
+import { hotToyTable, microtasks, NOT_MODELLED, toyLoader, toyTable } from "../../test/opticsFakes";
+import {
+  earthDetail,
+  earthDetailOfAnOlderServer,
+  FIXTURE_SYSTEM,
+  jupiterDetail,
+} from "../../test/planetaryFixture";
+import { ScriptedOpticsWorker } from "../../test/scriptedOpticsWorker";
+import {
+  patternedCorrection,
+  patternedDeckTables,
+  patternedThickBake,
+} from "../../test/thickTables";
+import {
+  type AbsorberCurve,
+  type AbsorberCurveSums,
+  absorberCurvesBySun,
+  type AbsorberSpec,
+} from "./absorbers";
+import { type AssembledMedium, lineSpeciesOf } from "./assemble";
+import type { BodyAtmosphereInput, BodyLight } from "./atmosphereInput";
+import { R05_EARTH_REFERENCE } from "./earth";
+import { type ForwardLobe, forwardLobeOfTable, madeLobesOf } from "./forwardLobe";
+import { FORWARD_PEAK_GRID_ENTRIES, FORWARD_PEAK_U } from "./forwardPeak";
+import { phaseTable } from "./medium";
+import { OPTICS_ASSEMBLY, OpticsJobs } from "./opticsJobs";
+import { type OpticsReply, type OpticsRequest, transferablesOf } from "./opticsMessages";
+import {
+  type DeckBakeAsk,
+  type DeckBakeOutcome,
+  defaultOpticsWorkers,
+  MAX_CONSECUTIVE_OPTICS_FAILURES,
+  type OpticsBuildOutcome,
+  OpticsWorkerPool,
+  type ThickBakeAsk,
+  type PolarisationBakeOutcome,
+  type ThickBakeOutcome,
+} from "./opticsPool";
+import { type MsSourceTable, thickBakeBands } from "./thick/bake";
+import { spectralColumnOf } from "./thick/columnLayout";
+import { sphereBakeBody } from "./thick/keptBake";
+import { THICK_REASON } from "./thick/regime";
+import { channelSource } from "./thick/spectralColumn";
+
+/** A second star, cooler than the Sun. */
+const RED_DWARF_LIGHT: BodyLight = {
+  star: `${FIXTURE_SYSTEM}.0101`,
+  spectrum: planckBakeSpectrum(3_200),
+};
+
+/** The generated Earth (the wire fixture's), its water's and its CO₂'s lines on the toy tables. */
+function earthInput(lights: ReadonlyArray<BodyLight> = [SUN_LIGHT]): BodyAtmosphereInput {
+  return recordInput(detailOf(earthDetail()), lights);
+}
+
+/** The largest difference of two curves' optical depths, relative where a depth passes 1. */
+function worstDepth(a: AbsorberCurve, b: AbsorberCurve): number {
+  let worst = 0;
+  for (const [c, depths] of a.opticalDepth.entries()) {
+    for (const [i, value] of depths.entries()) {
+      const other = b.opticalDepth[c]?.[i] ?? Number.NaN;
+      worst = Math.max(worst, Math.abs(value - other) / Math.max(Math.abs(other), 1));
+    }
+  }
+  return worst;
+}
+
+/** A build's assembly, or a test failure. */
+function builtOf(outcome: OpticsBuildOutcome): AssembledMedium {
+  if (outcome.kind !== "built") {
+    throw new Error(
+      `the build ended ${outcome.kind}${outcome.kind === "failed" ? `: ${outcome.message}` : ""}`,
+    );
+  }
+  return outcome.assembled;
+}
+
+/**
+ * A pool of `count` in-process workers on toy tables, logging every request posted, terminated
+ * when the test ends however it ends.
+ */
+function inProcessPool(count: number): {
+  readonly pool: OpticsWorkerPool;
+  readonly log: OpticsRequest[];
+  readonly workers: InProcessOpticsWorker[];
+  readonly asked: string[][];
+} {
+  const log: OpticsRequest[] = [];
+  const workers: InProcessOpticsWorker[] = [];
+  const asked: string[][] = [];
+  const pool = new OpticsWorkerPool({
+    workers: count,
+    createWorker: () => {
+      const species: string[] = [];
+      asked.push(species);
+      const worker = new InProcessOpticsWorker(toyLoader(species), log);
+      workers.push(worker);
+      return worker;
+    },
+  });
+  onTestFinished(() => {
+    pool.terminate();
+  });
+  return { pool, log, workers, asked };
+}
+
+/**
+ * A pool of `count` scripted workers, the replacements among them, terminated when the test ends
+ * however it ends.
+ */
+function scriptedPool(count: number): {
+  readonly pool: OpticsWorkerPool;
+  readonly workers: ScriptedOpticsWorker[];
+} {
+  const workers: ScriptedOpticsWorker[] = [];
+  const pool = new OpticsWorkerPool({
+    workers: count,
+    createWorker: () => {
+      const worker = new ScriptedOpticsWorker();
+      workers.push(worker);
+      return worker;
+    },
+  });
+  onTestFinished(() => {
+    pool.terminate();
+  });
+  return { pool, workers };
+}
+
+/** The worker at `index`, or a test failure. */
+function workerAt(
+  workers: ReadonlyArray<ScriptedOpticsWorker>,
+  index: number,
+): ScriptedOpticsWorker {
+  const worker = workers[index];
+  if (worker === undefined) {
+    throw new Error(`no worker ${index} was started`);
+  }
+  return worker;
+}
+
+/** The request a worker was last posted, or a test failure. */
+function lastPosted(worker: ScriptedOpticsWorker): OpticsRequest {
+  const request = worker.received.at(-1);
+  if (request === undefined) {
+    throw new Error("the worker was posted nothing");
+  }
+  return request;
+}
+
+const KEPT_UNSET: BodyAtmosphereInput = { kind: "kept", atmosphere: { kind: "unset" } };
+
+describe("an optics worker's answers", () => {
+  it("assembles a body with its line tables, the toy's absorbing", async () => {
+    const jobs = new OpticsJobs(toyLoader());
+    const { reply } = await jobs.answer({ kind: "assemble", id: 1, input: earthInput() });
+    if (reply.kind !== "assembled" || reply.assembled.drawn === undefined) {
+      throw new Error(`the Earth was answered ${reply.kind} with no medium`);
+    }
+    const lined = reply.assembled.drawn.absorbers.filter(
+      (spec) => spec.kind === "column" && spec.species.some((s) => s.lines !== undefined),
+    );
+    expect([lined.length > 0, reply.assembled.drawn.curves]).toEqual([true, []]);
+  });
+
+  it("answers an assembly with its tabulated terms' lobes as the page's readers take them, a giant's clouds' (lane perf-page-long-tasks)", async () => {
+    const jobs = new OpticsJobs(toyLoader());
+    const input = recordInput(detailOf(jupiterDetail()));
+    const { reply } = await jobs.answer({ kind: "assemble", id: 1, input });
+    if (reply.kind !== "assembled" || reply.assembled.medium === undefined) {
+      throw new Error(`the giant was answered ${reply.kind} with no medium`);
+    }
+    // Its NH₃ deck's, its haze's and its chromophore's, and from 31 its NH₄SH and H₂O decks' too.
+    expect(reply.lobes.length).toBe(5);
+    expect(reply.lobes).toEqual(madeLobesOf(reply.assembled.medium));
+  }, 300_000);
+
+  it.each([
+    ["an assembly", { kind: "assemble", id: 1, input: earthInput() }],
+    [
+      "a share of the curves",
+      {
+        kind: "curve-sums",
+        id: 2,
+        input: earthInput(),
+        slots: [0],
+        share: { index: 1, count: 2 },
+      },
+    ],
+  ] satisfies ReadonlyArray<readonly [string, OpticsRequest]>)(
+    "transfers every buffer of %s, keeping its own: a second answer equals the first's copy",
+    async (_, request) => {
+      const jobs = new OpticsJobs(toyLoader());
+      const first = await jobs.answer(request);
+      const copy = structuredClone(first.reply, { transfer: first.transfer });
+      expect([
+        first.transfer.length > 0,
+        first.transfer.every((buffer) => buffer.byteLength === 0),
+      ]).toEqual([true, true]);
+      expect(copy).toEqual((await jobs.answer(request)).reply);
+    },
+  );
+
+  it("transfers a join's curves, joined from sums that crossed to it transferred", async () => {
+    const jobs = new OpticsJobs(toyLoader());
+    const input = earthInput();
+    const share = await jobs.answer({
+      kind: "curve-sums",
+      id: 1,
+      input,
+      slots: [0],
+      share: { index: 0, count: 1 },
+    });
+    if (share.reply.kind !== "curve-sums") {
+      throw new Error(`the share was answered ${share.reply.kind}`);
+    }
+    const sums = [structuredClone(share.reply.sums, { transfer: share.transfer })];
+    const join = await jobs.answer({ kind: "curve-join", id: 2, input, slots: [0], sums });
+    const copy = structuredClone(join.reply, { transfer: join.transfer });
+    expect([copy.kind, join.transfer.every((buffer) => buffer.byteLength === 0)]).toEqual([
+      "curves",
+      true,
+    ]);
+  });
+
+  it("loads each line species' table once a worker, however many jobs ask for it", async () => {
+    const asked: string[] = [];
+    const jobs = new OpticsJobs(toyLoader(asked));
+    await jobs.answer({ kind: "assemble", id: 1, input: earthInput() });
+    await jobs.answer({ kind: "assemble", id: 2, input: earthInput([SUN_LIGHT, RED_DWARF_LIGHT]) });
+    await jobs.answer({
+      kind: "curve-sums",
+      id: 3,
+      input: earthInput(),
+      slots: [0],
+      share: { index: 0, count: 1 },
+    });
+    expect([asked.length > 0, asked]).toEqual([true, [...new Set(asked)]]);
+  });
+
+  it("keeps both of a species' tables where a hot one continues a temperate one", async () => {
+    const earth = earthInput();
+    const species = lineSpeciesOf(earth)[0] ?? "";
+    const hot = hotToyTable(species);
+    const jobs = new OpticsJobs({
+      // The hot table first, so that a cache keeping one table a species would keep the wrong one
+      // for an Earth.
+      loadKDistributions: async (asked) =>
+        Promise.resolve(asked.flatMap((key) => (key === species ? [hot, toyTable(key)] : []))),
+    });
+    const { reply } = await jobs.answer({ kind: "assemble", id: 1, input: earth });
+    if (reply.kind !== "assembled" || reply.assembled.drawn === undefined) {
+      throw new Error(`the Earth was answered ${reply.kind} with no medium`);
+    }
+    const sources = reply.assembled.drawn.absorbers.flatMap((spec) =>
+      spec.kind === "column"
+        ? spec.species.flatMap((s) => (s.lines === undefined ? [] : [s.lines.kDistribution.source]))
+        : [],
+    );
+    expect([sources.length > 0, sources.every((s) => !s.startsWith("hot"))]).toEqual([true, true]);
+  });
+
+  it("answers a job that throws as failed, with its message", async () => {
+    const jobs = new OpticsJobs(toyLoader());
+    const lights = [SUN_LIGHT, RED_DWARF_LIGHT, SUN_LIGHT];
+    const { reply } = await jobs.answer({ kind: "assemble", id: 7, input: earthInput(lights) });
+    expect(reply).toEqual({ kind: "failed", id: 7, message: expect.stringMatching(/light/u) });
+  });
+
+  it("rejects where a k-table cannot be read, as the worker's error, and reads it afresh after", async () => {
+    let failing = true;
+    const jobs = new OpticsJobs({
+      loadKDistributions: async (species) => {
+        if (failing) {
+          throw new Error("the part could not be fetched");
+        }
+        return Promise.resolve(species.map((key) => toyTable(key)));
+      },
+    });
+    const request: OpticsRequest = { kind: "assemble", id: 1, input: earthInput() };
+    await expect(jobs.answer(request)).rejects.toThrow(/fetched/u);
+    failing = false;
+    expect((await jobs.answer(request)).reply.kind).toBe("assembled");
+  });
+});
+
+describe("an optics worker's gas envelopes (R08.T16.a.2)", () => {
+  // Which of the NH₃ deck, the NH₄SH deck, the H₂O deck and the NH₃ deck's haze each draws. The
+  // generated Jupiter, generator version 31's record, carries its NH₃ deck's haze at τ 7 (P14.T24.h.b
+  // part 6's follow-up), which puts its floor at 1.878 bar inside its NH₄SH and H₂O decks, so all
+  // three decks and the haze are drawn; 27's to 30's haze of τ 10 put it at 0.566 bar inside it,
+  // and the cut dropped those two decks; 26's record drew all three decks and had no haze. The hand Jupiter
+  // carries the haze at 30's τ 7 (`giantFixtures.ts`'s `coldGiantHazes`) over its own decks, its
+  // floor at 2.12 bar, above its H₂O deck.
+  it.each([
+    ["the hand Jupiter", handJupiterDetail, [true, true, false, true]],
+    ["the protocol fixture's generated Jupiter", jupiterDetail, [true, true, true, true]],
+  ] as const)(
+    "assembles %s's envelope, split at its floor, its volatile decks above it drawn, APPROXIMATE with the thick reason",
+    async (_, detail, decks) => {
+      const jobs = new OpticsJobs(toyLoader());
+      const { reply } = await jobs.answer({
+        kind: "assemble",
+        id: 1,
+        input: recordInput(detailOf(detail())),
+      });
+      if (reply.kind !== "assembled" || reply.assembled.medium === undefined) {
+        throw new Error(`the giant was answered ${reply.kind} with no medium`);
+      }
+      const { medium, drawn, regime, labels, reasons } = reply.assembled;
+      const names = new Set(medium.terms.map((term) => term.name));
+      expect([
+        regime,
+        ["aerosol:NH3", "aerosol:NH4SH", "aerosol:H2O", "aerosol:NH3:2"].map((name) =>
+          names.has(name),
+        ),
+        labels.includes("atmosphereNotYetModelled"),
+        labels.includes("atmosphereApproximate"),
+        reasons.includes(THICK_REASON),
+      ]).toEqual([
+        { kind: "cloudDeck", deckAltitudeM: drawn.envelope?.floorAltitudeM },
+        decks,
+        false,
+        true,
+        true,
+      ]);
+    },
+    120_000,
+  );
+
+  it("loads the envelope's line species as it assembles it", async () => {
+    const asked: string[] = [];
+    const jobs = new OpticsJobs(toyLoader(asked));
+    const input = recordInput(detailOf(handJupiterDetail()));
+    await jobs.answer({ kind: "assemble", id: 1, input });
+    const species = lineSpeciesOf(input, OPTICS_ASSEMBLY);
+    expect([lineSpeciesOf(input), species.length > 0, asked]).toEqual([[], true, species]);
+  }, 120_000);
+});
+
+describe("transferablesOf", () => {
+  it("lists each buffer once, however many arrays view it, and none of a shared buffer", () => {
+    const buffer = new ArrayBuffer(16);
+    const value = {
+      a: new Float64Array(buffer, 0, 1),
+      b: [new Float64Array(buffer, 8, 1)],
+      c: new Map([["k", new Float32Array(2)]]),
+      d: new Int32Array(new SharedArrayBuffer(8)),
+    };
+    const lengths = transferablesOf(value).map((each) => each.byteLength);
+    expect(lengths.toSorted((a, b) => a - b)).toEqual([8, 16]);
+  });
+});
+
+describe("the optics-worker pool", () => {
+  it.each([1, 2, 3])(
+    "joins %i shares a light set into each light's whole curves (to 10⁻¹² in τ)",
+    async (count) => {
+      const { pool } = inProcessPool(count);
+      const lights = [SUN_LIGHT, RED_DWARF_LIGHT];
+      const assembled = builtOf(await pool.build(earthInput(lights)).outcome);
+      if (assembled.drawn === undefined) {
+        throw new Error("the Earth drew no medium");
+      }
+      const { absorbers, spectra, curves } = assembled.drawn;
+      const whole = absorbers.map((spec: AbsorberSpec) => absorberCurvesBySun(spec, spectra));
+      let worst = 0;
+      for (const [j, slot] of curves.entries()) {
+        for (const [k, curve] of slot.entries()) {
+          const reference = whole[k]?.[j]?.channels;
+          worst =
+            reference === undefined ? Number.NaN : Math.max(worst, worstDepth(curve, reference));
+        }
+      }
+      expect([curves.length, curves.every((slot) => slot.length === absorbers.length)]).toEqual([
+        2,
+        true,
+      ]);
+      expect(worst).toBeLessThan(1e-12);
+    },
+  );
+
+  it("asks for the brightest light's shares first and alone, then the others', behind the assembly", async () => {
+    const { pool, log } = inProcessPool(3);
+    builtOf(await pool.build(earthInput([SUN_LIGHT, RED_DWARF_LIGHT])).outcome);
+    const asked = log.map((request) =>
+      request.kind === "curve-sums"
+        ? `sums ${request.slots.join("+")} ${request.share.index}/${request.share.count}`
+        : request.kind,
+    );
+    expect(asked.slice(0, 7)).toEqual([
+      "assemble",
+      "sums 0 0/3",
+      "sums 0 1/3",
+      "sums 0 2/3",
+      "sums 1 0/3",
+      "sums 1 1/3",
+      "sums 1 2/3",
+    ]);
+  });
+
+  it("loads each line species once a worker over many builds", async () => {
+    const { pool, asked } = inProcessPool(2);
+    builtOf(await pool.build(earthInput()).outcome);
+    builtOf(await pool.build(earthInput([SUN_LIGHT, RED_DWARF_LIGHT])).outcome);
+    expect([
+      asked.some((species) => species.length > 0),
+      asked.every((species) => species.length === new Set(species).size),
+    ]).toEqual([true, true]);
+  });
+
+  it("lands a body that draws no medium with no curves, joining none", async () => {
+    const { pool, log } = inProcessPool(2);
+    const input = recordInput(detailOf(earthDetailOfAnOlderServer()), [SUN_LIGHT, RED_DWARF_LIGHT]);
+    const assembled = builtOf(await pool.build(input).outcome);
+    expect([assembled.medium, assembled.labels, log.some((r) => r.kind === "curve-join")]).toEqual([
+      undefined,
+      ["atmosphereNotYetModelled"],
+      false,
+    ]);
+  });
+
+  it("lands a medium with no absorber with an empty curve list a light", async () => {
+    const { pool, workers } = scriptedPool(1);
+    const build = pool.build(earthInput());
+    const worker = workerAt(workers, 0);
+    const { medium } = r05EarthWithOzoneAbsorber();
+    worker.reply({
+      kind: "assembled",
+      lobes: [],
+      id: lastPosted(worker).id,
+      assembled: {
+        medium: { ...medium, terms: medium.terms.filter((term) => term.absorber === undefined) },
+        drawn: {
+          body: earthBody(),
+          bottomRadiusM: 6_371_008.8,
+          absorbers: [],
+          spectra: [SUN_LIGHT.spectrum],
+          curves: [],
+          sources: [],
+        },
+        labels: [],
+        reasons: [],
+        negligible: [],
+        regime: { kind: "thin" },
+      },
+    });
+    expect(builtOf(await build.outcome).drawn?.curves).toEqual([[]]);
+  });
+
+  it("lands the regime the worker computed with its medium (R08.T13.d)", async () => {
+    const { pool, workers } = scriptedPool(1);
+    const build = pool.build(earthInput());
+    const worker = workerAt(workers, 0);
+    const { medium } = r05EarthWithOzoneAbsorber();
+    const regime = { kind: "cloudDeck", deckAltitudeM: 4_000 } as const;
+    worker.reply({
+      kind: "assembled",
+      lobes: [],
+      id: lastPosted(worker).id,
+      assembled: {
+        medium: { ...medium, terms: medium.terms.filter((term) => term.absorber === undefined) },
+        drawn: {
+          body: earthBody(),
+          bottomRadiusM: 6_371_008.8,
+          absorbers: [],
+          spectra: [SUN_LIGHT.spectrum],
+          curves: [],
+          sources: [],
+        },
+        labels: ["atmosphereApproximate"],
+        reasons: [],
+        negligible: [],
+        regime,
+      },
+    });
+    const built = builtOf(await build.outcome);
+    expect(built.medium === undefined ? null : built.regime).toEqual(regime);
+  });
+
+  it("fails a build whose job throws, with the job's message", async () => {
+    const { pool } = inProcessPool(2);
+    const outcome = await pool.build(earthInput([SUN_LIGHT, RED_DWARF_LIGHT, SUN_LIGHT])).outcome;
+    expect(outcome).toEqual({ kind: "failed", message: expect.stringMatching(/light/u) });
+  });
+
+  it("keeps the lobes an assembly carries, so that the page's readers make none (lane perf-page-long-tasks)", async () => {
+    const { pool, workers } = scriptedPool(1);
+    const build = pool.build(KEPT_UNSET);
+    const worker = workerAt(workers, 0);
+    // An even table on the kernels' grid of values no other test's lobe holds.
+    const table = phaseTable(FORWARD_PEAK_U, [
+      new Float64Array(FORWARD_PEAK_GRID_ENTRIES).fill(0.0791),
+      new Float64Array(FORWARD_PEAK_GRID_ENTRIES).fill(0.0791),
+      new Float64Array(FORWARD_PEAK_GRID_ENTRIES).fill(0.0791),
+    ]);
+    const lobe: ForwardLobe = { share: [0.3, 0.3, 0.3], table: [] };
+    worker.reply({
+      kind: "assembled",
+      id: lastPosted(worker).id,
+      assembled: NOT_MODELLED,
+      lobes: [{ table, lobe }],
+    });
+    expect((await build.outcome).kind).toBe("built");
+    expect(forwardLobeOfTable(structuredClone(table))).toBe(lobe);
+  });
+
+  it("replaces a worker that fails and asks its job again", async () => {
+    const { pool, workers } = scriptedPool(2);
+    const build = pool.build(KEPT_UNSET);
+    workerAt(workers, 0).fail();
+    const replacement = workerAt(workers, 2);
+    const asked = lastPosted(replacement);
+    expect([
+      workerAt(workers, 0).terminated,
+      asked.kind,
+      "input" in asked ? asked.input : undefined,
+    ]).toEqual([true, "assemble", KEPT_UNSET]);
+    replacement.reply({ kind: "assembled", id: asked.id, assembled: NOT_MODELLED, lobes: [] });
+    expect((await build.outcome).kind).toBe("built");
+  });
+
+  it(`gives a worker's place up after ${MAX_CONSECUTIVE_OPTICS_FAILURES} failures in a row, starting no other`, () => {
+    const { pool, workers } = scriptedPool(1);
+    pool.build(KEPT_UNSET);
+    failEveryTime(workers);
+    expect([workers.length, pool.lostWorkers]).toEqual([MAX_CONSECUTIVE_OPTICS_FAILURES, 1]);
+  });
+
+  it("fails the build under way once no worker runs", async () => {
+    const { pool, workers } = scriptedPool(1);
+    const build = pool.build(KEPT_UNSET);
+    failEveryTime(workers);
+    expect(await build.outcome).toEqual({
+      kind: "failed",
+      message: "every optics worker was given up",
+    });
+  });
+
+  it("fails every later build at once when no worker runs", async () => {
+    const { pool, workers } = scriptedPool(1);
+    pool.build(KEPT_UNSET);
+    failEveryTime(workers);
+    expect((await pool.build(KEPT_UNSET).outcome).kind).toBe("failed");
+  });
+
+  it("asks a light set's shares again when the join's worker fails with their sums", async () => {
+    const { pool, workers } = scriptedPool(1);
+    const { medium, curves } = r05EarthWithOzoneAbsorber();
+    const ozone = medium.terms.find((term) => term.absorber !== undefined)?.absorber?.spec;
+    const curve = curves[0]?.[0];
+    if (ozone === undefined || curve === undefined) {
+      throw new Error("R05's Earth with ozone has its absorber and its curve");
+    }
+    const build = pool.build(earthInput());
+    const first = workerAt(workers, 0);
+    first.reply({
+      kind: "assembled",
+      lobes: [],
+      id: lastPosted(first).id,
+      assembled: absorbing(ozone, medium),
+    });
+    first.reply({ kind: "curve-sums", id: lastPosted(first).id, sums: [toySums()] });
+    await microtasks(10);
+    expect(lastPosted(first).kind).toBe("curve-join");
+    first.fail();
+    await microtasks(10);
+    const second = workerAt(workers, 1);
+    expect(lastPosted(second).kind).toBe("curve-sums");
+    second.reply({ kind: "curve-sums", id: lastPosted(second).id, sums: [toySums()] });
+    await microtasks(10);
+    second.reply({ kind: "curves", id: lastPosted(second).id, curves: [[curve]] });
+    expect(builtOf(await build.outcome).drawn?.curves).toEqual([[curve]]);
+  });
+
+  it("drops a cancelled build's jobs not yet sent", async () => {
+    const { pool } = scriptedPool(1);
+    pool.build(KEPT_UNSET);
+    const second = pool.build(KEPT_UNSET);
+    second.cancel();
+    expect([pool.queuedCount, await second.outcome]).toEqual([0, { kind: "cancelled" }]);
+  });
+
+  describe("a build cancelled with its assembly already sent", () => {
+    /** One worker, a build cancelled during its assembly and a second queued behind it. */
+    function cancelledDuringAssembly(): {
+      readonly worker: ScriptedOpticsWorker;
+      readonly cancelled: Promise<OpticsBuildOutcome>;
+      readonly next: Promise<OpticsBuildOutcome>;
+      readonly late: OpticsRequest;
+    } {
+      const { pool, workers } = scriptedPool(1);
+      const first = pool.build(KEPT_UNSET);
+      const second = pool.build(KEPT_UNSET);
+      const worker = workerAt(workers, 0);
+      const late = lastPosted(worker);
+      first.cancel();
+      return { worker, cancelled: first.outcome, next: second.outcome, late };
+    }
+
+    it("settles cancelled at once", async () => {
+      const { cancelled } = cancelledDuringAssembly();
+      expect(await cancelled).toEqual({ kind: "cancelled" });
+    });
+
+    it("holds its worker until the late reply, then sends it the next queued job", () => {
+      const { worker, late } = cancelledDuringAssembly();
+      const before = worker.received.length;
+      worker.reply({ kind: "assembled", id: late.id, assembled: NOT_MODELLED, lobes: [] });
+      expect([before, worker.received.length, lastPosted(worker).id]).toEqual([1, 2, late.id + 1]);
+    });
+
+    it("gives the late reply to no build, the next waiting for its own", async () => {
+      const { worker, next, late } = cancelledDuringAssembly();
+      worker.reply({ kind: "assembled", id: late.id, assembled: NOT_MODELLED, lobes: [] });
+      const settled = await Promise.race([next, microtasks().then(() => "still waiting" as const)]);
+      expect(settled).toBe("still waiting");
+    });
+  });
+
+  it("terminates every worker, its builds cancelled", async () => {
+    const { pool, workers } = scriptedPool(2);
+    const build = pool.build(KEPT_UNSET);
+    pool.terminate();
+    expect([workers.map((worker) => worker.terminated), await build.outcome]).toEqual([
+      [true, true],
+      { kind: "cancelled" },
+    ]);
+  });
+
+  it("starts no worker before its first build", () => {
+    const { pool, workers } = scriptedPool(3);
+    expect([pool.workerCount, workers.length]).toEqual([3, 0]);
+  });
+
+  it.each([
+    [Number.NaN, 1],
+    [1, 1],
+    [4, 2],
+    [8, 4],
+    [16, 4],
+    [32, 4],
+  ])("runs clamp(⌊%d threads ÷ 2⌋, 1, 4) = %d workers by default", (threads, workers) => {
+    expect(defaultOpticsWorkers(threads)).toBe(workers);
+  });
+
+  // An M5's 4 and 6 cores (6 performance threads of 10), an M1's 4 and 4 (5 of 8), an M1 Pro's 8
+  // and 2 (8 of 10), and a chip of 1 and 2 (1 of 3).
+  it.each<readonly [number, number, number]>([
+    [10, 6, 3],
+    [8, 5, 2],
+    [10, 8, 4],
+    [3, 1, 1],
+  ])(
+    "runs clamp(⌊%d threads' %d performance threads ÷ 2⌋, 1, 4) = %d workers on Apple silicon",
+    (threads, performance, workers) => {
+      expect(defaultOpticsWorkers(threads, performance)).toBe(workers);
+    },
+  );
+
+  it.each<readonly [number | null, number]>([
+    [null, 4],
+    [0, 4],
+    [2.5, 4],
+    [Number.NaN, 4],
+  ])(
+    "counts 10 threads where the performance threads are %s, no whole number from 1",
+    (performance, workers) => {
+      expect(defaultOpticsWorkers(10, performance)).toBe(workers);
+    },
+  );
+});
+
+/** A bake's tables for `ask`, one a band it asks, on the bake's grid. */
+function tablesFor(ask: ThickBakeAsk): ReadonlyArray<MsSourceTable> {
+  return patternedThickBake(thickBakeBands(ask.body), R05_EARTH_REFERENCE, ask.slots.length);
+}
+
+describe("the optics-worker pool's thick bake (R08.T14.c)", () => {
+  /** R_ref of the asks' sphere, m: R05's Earth's. */
+  const RADIUS_M = 6_371_008.8;
+
+  /** A bake of R05's Earth's column, by its channels, on a sphere's one band, or on Saturn's four. */
+  function bakeAsk(saturn = false): ThickBakeAsk {
+    const body = saturn
+      ? { ...saturnBody(), bottomRadiusM: RADIUS_M }
+      : sphereBakeBody(RADIUS_M, 9.806_65);
+    return {
+      input: KEPT_UNSET,
+      slots: [0],
+      bands: thickBakeBands(body).map((_, band) => band),
+      column: spectralColumnOf(R05_EARTH_REFERENCE, R05_EARTH_REFERENCE.terms.map(channelSource)),
+      body,
+    };
+  }
+
+  it("asks a sphere's one band of one worker in one thick-bake request and lands its table as baked", async () => {
+    const { pool, workers } = scriptedPool(1);
+    const ask = bakeAsk();
+    const bake = pool.bakeThick(ask);
+    const worker = workerAt(workers, 0);
+    const posted = lastPosted(worker);
+    const tables = tablesFor(ask);
+    worker.reply({ kind: "thick-baked", id: posted.id, tables });
+    const outcome = await bake.outcome;
+    expect([
+      workers.map((each) => each.received.length),
+      posted,
+      outcome.kind === "baked" && outcome.tables === tables,
+    ]).toEqual([[1], { kind: "thick-bake", id: posted.id, ...ask }, true]);
+  });
+
+  it("asks Saturn's four bands one thick-bake request a band, the first two at once", () => {
+    const { pool, workers } = scriptedPool(2);
+    const ask = bakeAsk(true);
+    pool.bakeThick(ask);
+    expect([
+      workers.map((each) => each.received.map((request) => request.kind)),
+      workers.map((each) => each.received.map((request) => ({ ...request, id: 0 }))),
+      pool.queuedCount,
+    ]).toEqual([
+      [["thick-bake"], ["thick-bake"]],
+      [
+        [{ ...ask, kind: "thick-bake", id: 0, bands: [0] }],
+        [{ ...ask, kind: "thick-bake", id: 0, bands: [1] }],
+      ],
+      2,
+    ]);
+  });
+
+  it.each([
+    [
+      "thick-bake-failed, as failed with its message",
+      (id: number): OpticsReply => ({
+        kind: "thick-bake-failed",
+        id,
+        bands: [0],
+        message: "the solver refused a layer",
+      }),
+      { kind: "failed", message: "the solver refused a layer" },
+    ],
+    [
+      "failed, a job that threw, as failed with its message",
+      (id: number): OpticsReply => ({ kind: "failed", id, message: "a bug in the bake" }),
+      { kind: "failed", message: "a bug in the bake" },
+    ],
+    [
+      "with another kind's answer, as failed",
+      (id: number): OpticsReply => ({ kind: "curves", id, curves: [] }),
+      { kind: "failed", message: "a thick bake was answered curves" },
+    ],
+    [
+      "with a table fewer than its bands, as failed",
+      (id: number): OpticsReply => ({ kind: "thick-baked", id, tables: [] }),
+      { kind: "failed", message: "a thick bake of 1 bands was answered with 0 tables" },
+    ],
+  ] satisfies ReadonlyArray<readonly [string, (id: number) => OpticsReply, ThickBakeOutcome]>)(
+    "settles a bake answered %s",
+    async (_, replyOf, expected) => {
+      const { pool, workers } = scriptedPool(1);
+      const bake = pool.bakeThick(bakeAsk());
+      const worker = workerAt(workers, 0);
+      worker.reply(replyOf(lastPosted(worker).id));
+      expect(await bake.outcome).toEqual(expected);
+    },
+  );
+
+  it("asks the bake again of a replacement when its worker fails, and lands the answer", async () => {
+    const { pool, workers } = scriptedPool(1);
+    const ask = bakeAsk();
+    const bake = pool.bakeThick(ask);
+    workerAt(workers, 0).fail();
+    const replacement = workerAt(workers, 1);
+    const asked = lastPosted(replacement);
+    replacement.reply({ kind: "thick-baked", id: asked.id, tables: tablesFor(ask) });
+    expect([asked.kind, (await bake.outcome).kind]).toEqual(["thick-bake", "baked"]);
+  });
+
+  it("fails the bake once every worker is given up, saying so", async () => {
+    const { pool, workers } = scriptedPool(1);
+    const bake = pool.bakeThick(bakeAsk());
+    failEveryTime(workers);
+    expect(await bake.outcome).toEqual({
+      kind: "failed",
+      message: "every optics worker was given up",
+    });
+  });
+
+  it("settles a bake cancelled at once, its late answer taken by none", async () => {
+    const { pool, workers } = scriptedPool(1);
+    const ask = bakeAsk();
+    const bake = pool.bakeThick(ask);
+    const worker = workerAt(workers, 0);
+    const late = lastPosted(worker);
+    bake.cancel();
+    worker.reply({ kind: "thick-baked", id: late.id, tables: tablesFor(ask) });
+    expect(await bake.outcome).toEqual({ kind: "cancelled" });
+  });
+
+  it("settles a bake under way cancelled when the pool is terminated", async () => {
+    const { pool } = scriptedPool(1);
+    const bake = pool.bakeThick(bakeAsk());
+    pool.terminate();
+    expect(await bake.outcome).toEqual({ kind: "cancelled" });
+  });
+
+  it("refuses a bake once the pool is terminated", () => {
+    const { pool } = scriptedPool(1);
+    pool.terminate();
+    expect(() => pool.bakeThick(bakeAsk())).toThrow(/terminated/u);
+  });
+});
+
+/** A correction's tables for `ask`, one a band it asks, on the bake's grid (R08.T14.f). */
+function correctionFor(ask: ThickBakeAsk): ReturnType<typeof patternedCorrection> {
+  return patternedCorrection(thickBakeBands(ask.body), R05_EARTH_REFERENCE, ask.slots.length);
+}
+
+describe("the optics-worker pool's polarisation correction (R08.T14.f)", () => {
+  /** A correction of R05's Earth's column, by its channels, on a sphere's one band. */
+  function correctionAsk(): ThickBakeAsk {
+    const body = sphereBakeBody(6_371_008.8, 9.806_65);
+    return {
+      input: KEPT_UNSET,
+      slots: [0],
+      bands: thickBakeBands(body).map((_, band) => band),
+      column: spectralColumnOf(R05_EARTH_REFERENCE, R05_EARTH_REFERENCE.terms.map(channelSource)),
+      body,
+    };
+  }
+
+  it("asks a sphere's one band of one worker in one polarisation-bake request and lands its tables as baked", async () => {
+    const { pool, workers } = scriptedPool(1);
+    const ask = correctionAsk();
+    const correction = pool.bakePolarisation(ask);
+    const worker = workerAt(workers, 0);
+    const posted = lastPosted(worker);
+    const tables = correctionFor(ask);
+    worker.reply({ kind: "polarisation-baked", id: posted.id, tables });
+    const outcome = await correction.outcome;
+    expect([
+      workers.map((each) => each.received.length),
+      posted,
+      outcome.kind === "baked" && outcome.tables === tables,
+    ]).toEqual([[1], { kind: "polarisation-bake", id: posted.id, ...ask }, true]);
+  });
+
+  it.each([
+    [
+      "polarisation-bake-failed, as failed with its message",
+      (id: number): OpticsReply => ({
+        kind: "polarisation-bake-failed",
+        id,
+        bands: [0],
+        message: "the vector solver refused a layer",
+      }),
+      { kind: "failed", message: "the vector solver refused a layer" },
+    ],
+    [
+      "failed, a job that threw, as failed with its message",
+      (id: number): OpticsReply => ({ kind: "failed", id, message: "a bug in the correction" }),
+      { kind: "failed", message: "a bug in the correction" },
+    ],
+    [
+      "with another kind's answer, as failed",
+      (id: number): OpticsReply => ({ kind: "thick-baked", id, tables: [] }),
+      { kind: "failed", message: "a polarisation correction was answered thick-baked" },
+    ],
+    [
+      "with a table fewer than its bands, as failed",
+      (id: number): OpticsReply => ({ kind: "polarisation-baked", id, tables: [] }),
+      {
+        kind: "failed",
+        message: "a polarisation correction of 1 bands was answered with 0 tables",
+      },
+    ],
+  ] satisfies ReadonlyArray<
+    readonly [string, (id: number) => OpticsReply, PolarisationBakeOutcome]
+  >)("settles a correction answered %s", async (_, replyOf, expected) => {
+    const { pool, workers } = scriptedPool(1);
+    const correction = pool.bakePolarisation(correctionAsk());
+    const worker = workerAt(workers, 0);
+    worker.reply(replyOf(lastPosted(worker).id));
+    expect(await correction.outcome).toEqual(expected);
+  });
+
+  it("asks the correction again of a replacement when its worker fails, and lands the answer", async () => {
+    const { pool, workers } = scriptedPool(1);
+    const ask = correctionAsk();
+    const correction = pool.bakePolarisation(ask);
+    workerAt(workers, 0).fail();
+    const replacement = workerAt(workers, 1);
+    const asked = lastPosted(replacement);
+    replacement.reply({ kind: "polarisation-baked", id: asked.id, tables: correctionFor(ask) });
+    expect([asked.kind, (await correction.outcome).kind]).toEqual(["polarisation-bake", "baked"]);
+  });
+
+  it("fails the correction once every worker is given up, saying so", async () => {
+    const { pool, workers } = scriptedPool(1);
+    const correction = pool.bakePolarisation(correctionAsk());
+    failEveryTime(workers);
+    expect(await correction.outcome).toEqual({
+      kind: "failed",
+      message: "every optics worker was given up",
+    });
+  });
+
+  it("settles a correction cancelled at once, its late answer taken by none", async () => {
+    const { pool, workers } = scriptedPool(1);
+    const ask = correctionAsk();
+    const correction = pool.bakePolarisation(ask);
+    const worker = workerAt(workers, 0);
+    const late = lastPosted(worker);
+    correction.cancel();
+    worker.reply({ kind: "polarisation-baked", id: late.id, tables: correctionFor(ask) });
+    expect(await correction.outcome).toEqual({ kind: "cancelled" });
+  });
+
+  it("settles a correction under way cancelled when the pool is terminated", async () => {
+    const { pool } = scriptedPool(1);
+    const correction = pool.bakePolarisation(correctionAsk());
+    pool.terminate();
+    expect(await correction.outcome).toEqual({ kind: "cancelled" });
+  });
+
+  it("refuses a correction once the pool is terminated", () => {
+    const { pool } = scriptedPool(1);
+    pool.terminate();
+    expect(() => pool.bakePolarisation(correctionAsk())).toThrow(/terminated/u);
+  });
+});
+
+/** A deck's tables for `ask`, one a band it asks, split 3 km up (R08.T15.a.2). */
+function decksFor(ask: DeckBakeAsk): ReturnType<typeof patternedDeckTables> {
+  return patternedDeckTables(
+    thickBakeBands(ask.body),
+    R05_EARTH_REFERENCE,
+    ask.slots.length,
+    3_000,
+  );
+}
+
+describe("the optics-worker pool's deck bake (R08.T15.a.2)", () => {
+  /** A deck of R05's Earth's column, by its channels, split 3 km up on a sphere's one band. */
+  function deckAsk(): DeckBakeAsk {
+    const body = sphereBakeBody(6_371_008.8, 9.806_65);
+    return {
+      input: KEPT_UNSET,
+      slots: [0],
+      bands: thickBakeBands(body).map((_, band) => band),
+      column: spectralColumnOf(R05_EARTH_REFERENCE, R05_EARTH_REFERENCE.terms.map(channelSource)),
+      body,
+      split: { altitudeM: 3_000, floor: "ground" },
+    };
+  }
+
+  it("asks a sphere's one band of one worker in one deck-bake request and lands its tables and correction as baked", async () => {
+    const { pool, workers } = scriptedPool(1);
+    const ask = deckAsk();
+    const deck = pool.bakeDeck(ask);
+    const worker = workerAt(workers, 0);
+    const posted = lastPosted(worker);
+    const tables = decksFor(ask);
+    const correction = correctionFor(ask);
+    worker.reply({ kind: "deck-baked", id: posted.id, tables, correction });
+    const outcome = await deck.outcome;
+    expect([
+      workers.map((each) => each.received.length),
+      posted,
+      outcome.kind === "baked" && outcome.tables === tables && outcome.correction === correction,
+    ]).toEqual([[1], { kind: "deck-bake", id: posted.id, ...ask }, true]);
+  });
+
+  it.each([
+    [
+      "deck-bake-failed, as failed with its message",
+      (id: number): OpticsReply => ({
+        kind: "deck-bake-failed",
+        id,
+        bands: [0],
+        message: "a split lies above its deck's floor",
+      }),
+      { kind: "failed", message: "a split lies above its deck's floor" },
+    ],
+    [
+      "with another kind's answer, as failed",
+      (id: number): OpticsReply => ({ kind: "thick-baked", id, tables: [] }),
+      { kind: "failed", message: "a deck's bake was answered thick-baked" },
+    ],
+    [
+      "with a table fewer than its bands, as failed",
+      (id: number): OpticsReply => ({ kind: "deck-baked", id, tables: [], correction: null }),
+      { kind: "failed", message: "a deck of 1 bands was answered with 0 tables" },
+    ],
+    [
+      "with a correction fewer than its bands, as failed",
+      (id: number): OpticsReply => ({
+        kind: "deck-baked",
+        id,
+        tables: decksFor(deckAsk()),
+        correction: [],
+      }),
+      { kind: "failed", message: "a deck of 1 bands was answered with a correction of 0" },
+    ],
+  ] satisfies ReadonlyArray<readonly [string, (id: number) => OpticsReply, DeckBakeOutcome]>)(
+    "settles a deck answered %s",
+    async (_, replyOf, expected) => {
+      const { pool, workers } = scriptedPool(1);
+      const deck = pool.bakeDeck(deckAsk());
+      const worker = workerAt(workers, 0);
+      worker.reply(replyOf(lastPosted(worker).id));
+      expect(await deck.outcome).toEqual(expected);
+    },
+  );
+
+  it("settles a deck under way cancelled when the pool is terminated, and refuses one after", async () => {
+    const { pool } = scriptedPool(1);
+    const deck = pool.bakeDeck(deckAsk());
+    pool.terminate();
+    expect(await deck.outcome).toEqual({ kind: "cancelled" });
+    expect(() => pool.bakeDeck(deckAsk())).toThrow(/terminated/u);
+  });
+});
+
+/** Fails the pool's one worker, and each replacement, until its place is given up. */
+function failEveryTime(workers: ReadonlyArray<ScriptedOpticsWorker>): void {
+  for (let n = 0; n < MAX_CONSECUTIVE_OPTICS_FAILURES; n += 1) {
+    workerAt(workers, n).fail();
+  }
+}
+
+/** An assembly of `medium` drawing `spec`, one light. */
+function absorbing(spec: AbsorberSpec, medium: AssembledMedium["medium"]): AssembledMedium {
+  if (medium === undefined) {
+    throw new Error("a medium is needed");
+  }
+  return {
+    medium,
+    drawn: {
+      body: earthBody(),
+      bottomRadiusM: 6_371_008.8,
+      absorbers: [spec],
+      spectra: [SUN_LIGHT.spectrum],
+      curves: [],
+      sources: [],
+    },
+    labels: [],
+    reasons: [],
+    negligible: [],
+    regime: { kind: "thin" },
+  };
+}
+
+/** One share's sums, as placeholders a scripted worker answers. */
+function toySums(): AbsorberCurveSums {
+  return {
+    share: { index: 0, count: 1 },
+    channels: [[new Float64Array(1), new Float64Array(1), new Float64Array(1)]],
+    bins: undefined,
+    binLogs: undefined,
+  };
+}

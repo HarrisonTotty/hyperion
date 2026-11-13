@@ -1,0 +1,908 @@
+import type { BodyIdHex } from "@hyperion/protocol";
+import { describe, expect, it } from "vitest";
+
+import { add, cross, dot, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
+import { aHostDisc } from "../../test/litFixtures";
+import {
+  constantNormalMap,
+  datumNormalAt,
+  directionAt,
+  perpendicularTo,
+  tilted,
+  UNREAD_TEXTURES,
+  unreadNormalMap,
+} from "../../test/normalMapFixtures";
+import { PROVISIONAL_PHOTOMETRY } from "../appearance/fromWire";
+import { type PhaseTemplateId, phaseFactorTableOf, type PhotometricLaw } from "../appearance/law";
+import { geometricAlbedo, lawFor, withTemplateCurve } from "../appearance/phase";
+import { packPhaseFactorRows } from "../appearance/litBodyProbe";
+import { shapeGeometricAlbedo } from "../appearance/shapes";
+import { AIRLESS_LIGHTING } from "../atmosphere/surfaceLighting";
+import { normalMapNormalAt } from "../bodies/discNormals";
+import { discReflectance, shadeDiscPoint } from "../bodies/discShading";
+import {
+  type ClassMapTexels,
+  classMapSharesAt,
+  classMapSurface,
+  packClassMap,
+} from "../bodies/discSurface";
+import { type LitBodyInput, planLitBodies } from "../bodies/draw";
+import { type LitRegime, REGIME_HYSTERESIS } from "../bodies/regime";
+import { IDENTITY_QUATERNION } from "../camera/quaternion";
+import type { ProjectionCamera } from "../camera/projection";
+import { rotateToBody, rotateToBodyFixed, rotation3FromRows } from "../coords/rotation";
+import { DISC_ANNULI_HIGH } from "../lighting/annuli";
+import { PLANETSHINE_SOURCES_HIGH } from "../lighting/planetshine";
+import { sphereIrradianceFactor } from "../lighting/sphereIrradiance";
+import type { Rgb } from "../photometry/toneCurve";
+import { SETTINGS, WIREFRAME_TERRAIN_TAU_PX } from "../quality/qualitySetting";
+import { AU_M } from "../scenes/kept";
+import { terrainHorizonFactor } from "./shadows/litFraction";
+import type { CachedPatch, DrawnPatch, DrawSet } from "./cache";
+import { CLASS_MAP_LEVEL, classMapLawsOf } from "./classMap";
+import { CoverageView } from "./coverage";
+import {
+  cellPatchLevel,
+  CLASS_FADE_FAR,
+  CLASS_FADE_NEAR,
+  classCellFade,
+  drawsCells,
+  handoverDetailShare,
+  HANDOVER_FADE_SPAN,
+  handoverRangeM,
+  handoverRangeRatio,
+  handoverReliefM,
+  handOverRegimes,
+  handoverTauPx,
+  handsOver,
+  type HandoverSphere,
+  handoverSubtense,
+  limbDistanceM,
+  pixelAngleRad,
+  selectionViewport,
+  storeReliefSource,
+} from "./handover";
+import {
+  classRowLaw,
+  PHASE_LAW,
+  type PhaseLawCode,
+  TERRAIN_CLASSES,
+  type TexelLaw,
+  TerrainPhaseRows,
+  terrainReflectance,
+  terrainTexelLaws,
+} from "./terrainMaterial";
+import { PHOTOMETRY_STRIDE } from "./workers/messages";
+
+const RAD = Math.PI / 180;
+
+/** Design note 13's pixel: 1080p across 60° by width ÷ field, 5.454 × 10⁻⁴ rad. */
+const NOTE_RAD_PER_PX = (60 * RAD) / 1920;
+
+/** Design note 13's relief: an Earth's 10 km, m. */
+const EARTH_RELIEF_M = 1e4;
+
+/** A 1080p view across 60°, as R07's regimes measure it. */
+const CAMERA: ProjectionCamera = { orientation: IDENTITY_QUATERNION, fovXRad: 60 * RAD };
+const HD = { widthPx: 1920, heightPx: 1080 };
+
+const BODY: BodyIdHex = "0200080020000000.0300";
+
+/** A level-6 coverage with the given cells surveyed at resolution code 40, or none. */
+function coverageOf(cells: ReadonlyArray<number>): CoverageView {
+  const empty = CoverageView.empty(6);
+  if (cells.length === 0) {
+    return empty;
+  }
+  const result = empty.merged(
+    { ranges: cells.map((start) => ({ start, end: start + 1, resolution: 40 })) },
+    1,
+  );
+  if (!result.ok) {
+    throw new Error(result.message);
+  }
+  return result.coverage;
+}
+
+/** `x` within a relative `tolerance` of `expected`. */
+function near(x: number, expected: number, tolerance: number): boolean {
+  return Math.abs(x / expected - 1) <= tolerance;
+}
+
+describe("the size a view's terrain selects at (the owner's Retina report, lean 2026-11-01)", () => {
+  it("selects 3200 × 1800 device px at a ratio of 2 as 1600 × 900, its CSS px", () => {
+    expect(selectionViewport({ widthPx: 3200, heightPx: 1800 }, 2)).toEqual({
+      widthPx: 1600,
+      heightPx: 900,
+    });
+  });
+
+  it.each([1, 0.75, Number.NaN])("is the presented size itself at a ratio of %s", (ratio) => {
+    expect(selectionViewport(HD, ratio)).toBe(HD);
+  });
+
+  it("widens a centre pixel's angle by the ratio, so that a body hands over at its CSS px", () => {
+    const retina = selectionViewport({ widthPx: 2 * HD.widthPx, heightPx: 2 * HD.heightPx }, 2);
+    expect(pixelAngleRad(CAMERA, retina)).toBe(pixelAngleRad(CAMERA, HD));
+  });
+});
+
+describe("the hand-over range (R10.T10.e, Design note 13)", () => {
+  it("is about 1.8 × 10⁷ m for 10 km of relief at 1080p and 1 px, and 4.6 × 10⁶ m at the wireframe's 4 px", () => {
+    const atOnePx = handoverRangeM(EARTH_RELIEF_M, 1, NOTE_RAD_PER_PX);
+    const atFourPx = handoverRangeM(EARTH_RELIEF_M, WIREFRAME_TERRAIN_TAU_PX, NOTE_RAD_PER_PX);
+    expect(near(atOnePx, 1.833e7, 1e-3)).toBe(true);
+    expect(near(atFourPx, 4.584e6, 1e-3)).toBe(true);
+    expect(atOnePx / atFourPx).toBe(4);
+  });
+
+  it("falls at 1.66 × 10⁷ m and 4.16 × 10⁶ m at a live 1080p view's centre pixel across 60°, as the 3 px switch counts pixels", () => {
+    const radPerPx = pixelAngleRad(CAMERA, HD);
+    expect(near(radPerPx, 6.01e-4, 1e-3)).toBe(true);
+    // The inverse of the regimes' scale (`angularDiameterPx`'s width ÷ 2 tan(fov ÷ 2)).
+    expect(radPerPx * (HD.widthPx / (2 * Math.tan(CAMERA.fovXRad / 2)))).toBeCloseTo(1, 15);
+    expect(near(handoverRangeM(EARTH_RELIEF_M, 1, radPerPx), 1.663e7, 1e-3)).toBe(true);
+    expect(near(handoverRangeM(EARTH_RELIEF_M, 4, radPerPx), 4.157e6, 1e-3)).toBe(true);
+  });
+
+  it("takes the style's τ: 1 px high and 2 px low in the photorealistic style, 4 px in the wireframe on both", () => {
+    expect(handoverTauPx("photorealistic", "high")).toBe(1);
+    expect(handoverTauPx("photorealistic", "low")).toBe(2);
+    expect(handoverTauPx("photorealistic", "high")).toBe(SETTINGS.high.terrain.tauPx);
+    expect(handoverTauPx("photorealistic", "low")).toBe(SETTINGS.low.terrain.tauPx);
+    expect(handoverTauPx("wireframe", "high")).toBe(4);
+    expect(handoverTauPx("wireframe", "low")).toBe(4);
+  });
+
+  it("refuses a relief that is negative or not finite, and a τ or pixel that is not positive", () => {
+    expect(handoverRangeM(0, 1, NOTE_RAD_PER_PX)).toBe(0);
+    expect(() => handoverRangeM(-1, 1, NOTE_RAD_PER_PX)).toThrow(RangeError);
+    expect(() => handoverRangeM(Number.NaN, 1, NOTE_RAD_PER_PX)).toThrow(RangeError);
+    expect(() => handoverRangeM(1e4, 0, NOTE_RAD_PER_PX)).toThrow(RangeError);
+    expect(() => handoverRangeM(1e4, 1, 0)).toThrow(RangeError);
+  });
+
+  it("is a view's range ratio for the field's demand, unbounded with no relief known", () => {
+    const rangeM = handoverRangeM(EARTH_RELIEF_M, 2, NOTE_RAD_PER_PX);
+    expect(handoverRangeRatio(rangeM / 2, EARTH_RELIEF_M, 2, NOTE_RAD_PER_PX)).toBeCloseTo(0.5, 12);
+    expect(handoverRangeRatio(1e3, null, 2, NOTE_RAD_PER_PX)).toBe(Number.POSITIVE_INFINITY);
+    expect(handoverRangeRatio(1e3, 0, 2, NOTE_RAD_PER_PX)).toBe(Number.POSITIVE_INFINITY);
+  });
+});
+
+describe("the hand-over's relief", () => {
+  const header = { realised_relief_m: 18_000 };
+
+  it("is the field header's realised relief where the survey covers ground", () => {
+    expect(handoverReliefM(header, coverageOf([7, 8]))).toBe(18_000);
+  });
+
+  it("never hands a body over with no survey, no coverage or no header, however near", () => {
+    for (const [held, coverage] of [
+      [header, coverageOf([])],
+      [header, null],
+      [null, coverageOf([7])],
+    ] as const) {
+      const reliefM = handoverReliefM(held, coverage);
+      expect(reliefM).toBeNull();
+      for (const distanceM of [0, 1, 1e3, 1e7]) {
+        expect(handsOver(distanceM, reliefM, 1, NOTE_RAD_PER_PX, false)).toBe(false);
+        expect(handsOver(distanceM, reliefM, 1, NOTE_RAD_PER_PX, true)).toBe(false);
+      }
+    }
+    expect(handoverReliefM({ realised_relief_m: 0 }, coverageOf([7]))).toBeNull();
+  });
+
+  it("reads a store's header and coverage of each body", () => {
+    const store = {
+      header: (body: BodyIdHex) => (body === BODY ? header : null),
+      coverage: (body: BodyIdHex) => (body === BODY ? coverageOf([3]) : null),
+    };
+    const source = storeReliefSource(store);
+    expect(source.reliefM(BODY)).toBe(18_000);
+    expect(source.reliefM("0200080020000000.0301")).toBeNull();
+  });
+});
+
+/** A body of 1 m `distanceM` ahead, whose limb is its centre's distance, and its relief. */
+function sphere(id: BodyIdHex, distanceM: number, reliefM?: number): HandoverSphere {
+  return { id, centreM: vec3(0, 0, -distanceM), radiusM: 1, reliefM };
+}
+
+describe("the hand-over's decision", () => {
+  const rangeM = handoverRangeM(EARTH_RELIEF_M, 1, NOTE_RAD_PER_PX);
+  const h = REGIME_HYSTERESIS;
+
+  it("hands over once the relief subtends τ (1 + h) px, and back once under τ (1 − h), R07's hysteresis", () => {
+    const at = (distanceM: number, was: boolean): boolean =>
+      handsOver(distanceM, EARTH_RELIEF_M, 1, NOTE_RAD_PER_PX, was);
+    // Inside the band either side of the range, a body keeps what it was.
+    for (const distanceM of [rangeM * 0.95, rangeM, rangeM * 1.05]) {
+      expect(at(distanceM, false)).toBe(false);
+      expect(at(distanceM, true)).toBe(true);
+    }
+    expect(at(rangeM / (1 + h), false)).toBe(true);
+    expect(at((rangeM / (1 + h)) * 1.001, false)).toBe(false);
+    expect(at(rangeM / (1 - h), true)).toBe(true);
+    expect(at((rangeM / (1 - h)) * 1.001, true)).toBe(false);
+  });
+
+  it("measures from the camera to the limb, so that a body of little relief beside its radius hands over as the camera nears its ground", () => {
+    expect(limbDistanceM(5, 3)).toBe(4);
+    expect(limbDistanceM(3, 3)).toBe(0);
+    expect(limbDistanceM(1, 3)).toBe(0);
+    // A Venus of 6,051.8 km and 13 km of relief in the wireframe at 1080p: its range, 5.4 × 10⁶ m,
+    // is inside its radius, so the centre's distance would never hand it over.
+    const radPerPx = pixelAngleRad(CAMERA, HD);
+    const venusM = 6.0518e6;
+    const reliefM = 1.3e4;
+    const wire = handoverRangeM(reliefM, WIREFRAME_TERRAIN_TAU_PX, radPerPx);
+    expect(wire).toBeLessThan(venusM);
+    const at = (altitudeM: number): boolean =>
+      handsOver(
+        limbDistanceM(venusM + altitudeM, venusM),
+        reliefM,
+        WIREFRAME_TERRAIN_TAU_PX,
+        radPerPx,
+        false,
+      );
+    expect(at(1e3)).toBe(true);
+    expect(at(2e6)).toBe(false);
+    // Its limb is at the range (less the hysteresis) about 1,740 km up.
+    const altitudeM = Math.sqrt((wire / (1 + REGIME_HYSTERESIS)) ** 2 + venusM ** 2) - venusM;
+    expect(at(altitudeM * 0.999)).toBe(true);
+    expect(at(altitudeM * 1.001)).toBe(false);
+    expect(altitudeM).toBeGreaterThan(1.5e6);
+    expect(altitudeM).toBeLessThan(2.5e6);
+  });
+
+  it("hands over at the wireframe's 4 px a quarter as far", () => {
+    const wire = handoverRangeM(EARTH_RELIEF_M, WIREFRAME_TERRAIN_TAU_PX, NOTE_RAD_PER_PX);
+    const tau = handoverTauPx("wireframe", "high");
+    expect(handsOver(wire / 1.11, EARTH_RELIEF_M, tau, NOTE_RAD_PER_PX, false)).toBe(true);
+    expect(handsOver(wire / 1.09, EARTH_RELIEF_M, tau, NOTE_RAD_PER_PX, false)).toBe(false);
+    expect(handsOver(rangeM / 2, EARTH_RELIEF_M, tau, NOTE_RAD_PER_PX, false)).toBe(false);
+  });
+
+  it("hands over discs alone, by each body's own relief, whatever the input order", () => {
+    const inside = rangeM / 2;
+    const bodies = [
+      sphere("0200080020000000.0300", inside, EARTH_RELIEF_M),
+      sphere("0200080020000000.0301", inside),
+      sphere("0200080020000000.0302", inside, EARTH_RELIEF_M),
+      sphere("0200080020000000.0303", rangeM * 2, EARTH_RELIEF_M),
+    ];
+    const regimes = new Map<BodyIdHex, LitRegime>([
+      ["0200080020000000.0300", "disc"],
+      ["0200080020000000.0301", "disc"],
+      // A point is the point regime's however near: R10.T10.f's flux.
+      ["0200080020000000.0302", "point"],
+      ["0200080020000000.0303", "disc"],
+    ]);
+    const handed = handOverRegimes(regimes, bodies, 1, NOTE_RAD_PER_PX, new Map());
+    expect([...handed]).toEqual([
+      ["0200080020000000.0300", "terrain"],
+      ["0200080020000000.0301", "disc"],
+      ["0200080020000000.0302", "point"],
+      ["0200080020000000.0303", "disc"],
+    ]);
+    const reversed = handOverRegimes(regimes, bodies.toReversed(), 1, NOTE_RAD_PER_PX, new Map());
+    expect(new Map(reversed)).toEqual(new Map(handed));
+    // Handed over before, a body just past the range stays handed over.
+    const held = handOverRegimes(
+      new Map([[BODY, "disc"]]),
+      [sphere(BODY, rangeM * 1.05, EARTH_RELIEF_M)],
+      1,
+      NOTE_RAD_PER_PX,
+      new Map([[BODY, "terrain"]]),
+    );
+    expect(held.get(BODY)).toBe("terrain");
+  });
+});
+
+describe("the terrain's own detail near the hand-over (R10.T15.b.2)", () => {
+  const rangeM = handoverRangeM(EARTH_RELIEF_M, 1, NOTE_RAD_PER_PX);
+  const h = REGIME_HYSTERESIS;
+  const subtense = (limbM: number): number | null =>
+    handoverSubtense(limbM, EARTH_RELIEF_M, 1, NOTE_RAD_PER_PX);
+  const share = (limbM: number, startSubtense = 1 + h): number =>
+    handoverDetailShare(subtense(limbM), startSubtense, "faded");
+
+  it("is none at the hand-over, at the hand-back and between, so that both switches see the disc's shading", () => {
+    expect([
+      share(rangeM / (1 + h)),
+      share(rangeM),
+      share(rangeM / (1 - h)),
+      share(4 * rangeM),
+    ]).toEqual([0, 0, 0, 0]);
+  });
+
+  it("rises linearly in the relief's subtense to the whole at τ (1 + 3h) px", () => {
+    expect(HANDOVER_FADE_SPAN).toBeCloseTo(2 * h, 15);
+    expect(share(rangeM / (1 + 2 * h))).toBeCloseTo(0.5, 12);
+    expect(share(rangeM / (1 + 1.5 * h))).toBeCloseTo(0.25, 12);
+    expect(share(rangeM / (1 + 3 * h) / 1.000_001)).toBe(1);
+    expect(share(rangeM / 10)).toBe(1);
+    // It never falls as the camera closes in.
+    const limbsM = Array.from({ length: 40 }, (_, k) => (rangeM / (1 + h)) * (1 - k / 50));
+    const shares = limbsM.map((limbM) => share(limbM));
+    expect(shares.every((value, k) => k === 0 || value >= (shares[k - 1] ?? 0))).toBe(true);
+  });
+
+  it("starts where the body handed over, past τ (1 + h), as a hand-over at the field's cells may (HANDOVER_AT_CELLS)", () => {
+    // Handed over at 1.25 τ: none there, half a span on, whole a span on.
+    expect([
+      share(rangeM / 1.25, 1.25),
+      share(rangeM / (1.25 + h), 1.25),
+      share(rangeM / (1.25 + 2 * h) / 1.000_001, 1.25),
+    ]).toEqual([0, expect.closeTo(0.5, 12), 1]);
+    // A start inside the hysteresis band counts from τ (1 + h).
+    expect(share(rangeM / (1 + 2 * h), 1)).toBeCloseTo(0.5, 12);
+  });
+
+  it("is the relief's subtense in τ, the range over the camera's distance to the limb", () => {
+    expect([subtense(rangeM / 1.1), subtense(rangeM), subtense(0)]).toEqual([
+      expect.closeTo(1.1, 12),
+      1,
+      null,
+    ]);
+    expect(handoverSubtense(rangeM, null, 1, NOTE_RAD_PER_PX)).toBeNull();
+  });
+
+  it("stands whole on a setting whose detail is whole, with no relief known, and at the ground", () => {
+    expect([
+      handoverDetailShare(1, 1.1, "whole"),
+      handoverDetailShare(null, 1.1, "faded"),
+      share(0),
+    ]).toEqual([1, 1, 1]);
+  });
+
+  it("gives the terrain the disc's horizon term at a share of 0, the star cut by the datum's tangent plane", () => {
+    // The Sun from 1 au behind a map's horizon of 8°: its centre 0.1° above the datum over a slope
+    // tilted 10° towards it, whose disc the datum's plane cuts, and 3° above it over a slope tilted
+    // 1° away, which its own plane cuts.
+    const hSun = AU_M / 6.957e8;
+    const mapHorizon = 8 * RAD;
+    for (const [starDeg, tiltDeg] of [
+      [0.1, 10],
+      [3, -1],
+    ] as const) {
+      const star = starDeg * RAD;
+      const phiDatum = Math.PI / 2 - star;
+      const phi = phiDatum - tiltDeg * RAD;
+      // The terrain's term with the map's elevation by the share, as `terrain_horizon` takes it.
+      const terrain = (mapShare: number): number =>
+        terrainHorizonFactor(hSun, phi, star, mapShare * mapHorizon);
+      const disc = sphereIrradianceFactor(hSun, phi, Math.max(phiDatum - phi, 0));
+      expect([terrain(1), disc > 0]).toEqual([0, true]);
+      expect(terrain(0)).toBeCloseTo(disc, 12);
+    }
+  });
+});
+
+/** A class map's answer holding the given classes' photometry and no texel. */
+function answerOf(
+  photometry: ReadonlyArray<readonly [number, number, number, number, number]>,
+): Parameters<typeof classMapLawsOf>[0] {
+  const values = new Float32Array(photometry.length * PHOTOMETRY_STRIDE);
+  photometry.forEach((slot, k) => {
+    values.set(slot, PHOTOMETRY_STRIDE * k);
+  });
+  return {
+    level: CLASS_MAP_LEVEL,
+    fieldLevel: 6,
+    classes: new Uint8Array(photometry.length * 2),
+    photometry: values,
+    texels: new Uint32Array(0),
+    fractions: new Float32Array(0),
+    weights: new Uint8Array(0),
+    complete: true,
+    normalLevel: 6,
+    normalCells: new Uint32Array(0),
+    normalPairs: new Float16Array(0),
+    normalsComplete: true,
+  };
+}
+
+/** A bake's photometry holding the given slots, the rest empty. */
+function bakePhotometryOf(
+  photometry: ReadonlyArray<readonly [number, number, number, number, number]>,
+): Float32Array {
+  const values = new Float32Array(TERRAIN_CLASSES * PHOTOMETRY_STRIDE);
+  photometry.forEach((slot, k) => {
+    values.set(slot, PHOTOMETRY_STRIDE * k);
+  });
+  return values;
+}
+
+/** A body's uniform law on a template from its p and q, display order. */
+function uniformLaw(p: Rgb, q: Rgb, template: PhaseTemplateId): PhotometricLaw {
+  return lawFor(p, q, template);
+}
+
+// Each class law, [B, V, R, code, L(0)] as the worker resolves it: a regolith at L(0) 1, an ice
+// frost at 0.9 (L(0) = 0.6696 ÷ 0.9 − 0.1160, decision-r10-limb), and a consolidated class under
+// Lambert's law.
+const CLASSES = [
+  [0.105, 0.142, 0.172, PHASE_LAW.regolith, 1],
+  [0.86, 0.9, 0.92, PHASE_LAW.ice, 0.6696 / 0.9 - 0.116],
+  [0.78, 0.8, 0.81, PHASE_LAW.lambert, 0],
+] as const;
+
+// Law 0, the body's own: Mercury's template at the Moon-like world's p (R10.T10.a's table).
+const ELSEWHERE = uniformLaw([0.172, 0.142, 0.105], [0.48, 0.48, 0.48], "mercury");
+
+describe("the disc and the terrain draw one law a class (R10.T10.e)", () => {
+  const GEOMETRIES = [1, 0.7, 0.4, 0.1].flatMap((mu0) =>
+    [1, 0.6, 0.2, 0.05].map((mu) => [mu0, mu] as const),
+  );
+
+  it.each([
+    ["a sphere", 1],
+    ["an oblate body", 0.9],
+  ])(
+    "agree to 10⁻⁶ at 30° and 90° of phase on %s, per class law and law 0, each law's one row read by both",
+    (_, cOverA) => {
+      const discLaws = [ELSEWHERE, ...classMapLawsOf(answerOf(CLASSES), ELSEWHERE)];
+      const terrainLaws = terrainTexelLaws(bakePhotometryOf(CLASSES), ELSEWHERE, cOverA);
+      const rows = new TerrainPhaseRows(ELSEWHERE);
+      const names = ["law 0", "Regolith", "Ice", "Lambert"];
+      let worst = 0;
+      let checked = 0;
+      discLaws.forEach((discLaw, m) => {
+        if (discLaw === null) {
+          throw new Error(`class ${String(m)} has a law`);
+        }
+        // The row each side reads: the disc's frame's from its law, the terrain's from its rows.
+        const code = CLASSES[m - 1]?.[3];
+        const l0 = CLASSES[m - 1]?.[4];
+        const terrainRow =
+          code === undefined || l0 === undefined
+            ? rows.laws[0]
+            : rows.laws[rows.rowOf(code satisfies PhaseLawCode, Math.fround(l0))];
+        if (terrainRow === undefined) {
+          throw new Error(`${names[m] ?? ""} has no row`);
+        }
+        expect(packPhaseFactorRows([discLaw])).toEqual(packPhaseFactorRows([terrainRow]));
+        const shares = discLaws.map((_law, k) => (k === m ? 1 : 0));
+        for (const alphaDeg of [30, 90]) {
+          for (const [mu0, mu] of GEOMETRIES) {
+            const disc = discReflectance(
+              discLaws.map((law) => law ?? ELSEWHERE),
+              cOverA,
+              shares,
+              mu0,
+              mu,
+              alphaDeg * RAD,
+            );
+            const terrain = terrainReflectance(terrainLaws, shares, mu0, mu, alphaDeg * RAD);
+            for (const c of [0, 1, 2] as const) {
+              expect(disc[c]).toBeGreaterThan(0);
+              worst = Math.max(worst, Math.abs(terrain[c] - disc[c]) / disc[c]);
+              checked += 1;
+            }
+          }
+        }
+      });
+      expect(checked).toBe(4 * 2 * GEOMETRIES.length * 3);
+      expect(worst).toBeLessThan(1e-6);
+    },
+  );
+});
+
+describe("the disc under the field's normal map and the terrain at the same cell normal (R10.T10.g)", () => {
+  /** The body's equatorial radius, m; the camera 100 radii from the shaded point. */
+  const RADIUS_M = 1.7374e6;
+  const RANGE_M = 100 * RADIUS_M;
+  /** The cell shaded: (+x, 20, 37) of the field's level 6, as the class map's. */
+  const FACE = 0;
+  const I = 20;
+  const J = 37;
+  const N = 2 ** 6;
+  /** Its neighbours within this many cells hold the class and the normal, the rest neither. */
+  const NEAR_RAD = 3.5 * (Math.PI / 2 / N);
+  const CENTRE = directionAt(FACE, (I + 0.5) / N, (J + 0.5) / N);
+  /** The shading normals' tilts from the datum's, deg, and their azimuths about it. */
+  const TILTS_DEG = [0, 5, 10, 15, 20];
+  const AZIMUTHS_DEG = [0, 90, 180, 270];
+
+  /** The class map: law `m`'s class (m ≥ 1) about the cell, or no class there for law 0. */
+  function classMapFor(m: number): ClassMapTexels {
+    return packClassMap(N, CLASSES.length, ({ face, i, j }) => {
+      const centre = directionAt(face, (i + 0.5) / N, (j + 0.5) / N);
+      if (m === 0 || Math.acos(Math.min(1, dot(centre, CENTRE))) > NEAR_RAD) {
+        return null;
+      }
+      return CLASSES.map((_, k) => (k === m - 1 ? 1 : 0));
+    });
+  }
+
+  /**
+   * One shading: the disc's I/F at the cell's centre lit at phase α, its datum's i = e = α ÷ 2, under
+   * a normal map holding `normal` (body-fixed) about it, against the terrain's twin at the normal
+   * the map holds there, and the geometry the test states.
+   */
+  function shadedPair(
+    m: number,
+    cOverA: number,
+    alphaRad: number,
+    normal: Vec3,
+  ): {
+    readonly disc: Rgb;
+    readonly terrain: Rgb;
+    readonly muFloorClear: boolean;
+    readonly cutClear: boolean;
+  } {
+    const datum = datumNormalAt(CENTRE, cOverA);
+    const across = perpendicularTo(datum, 0.3);
+    const observer = tilted(datum, across, alphaRad / 2);
+    const sun = tilted(datum, across, -alphaRad / 2);
+    // Body-fixed to galactic, the observer along galactic +z, towards the camera at the origin.
+    const e1 = perpendicularTo(observer, 0.7);
+    const rotation = rotation3FromRows([e1, cross(observer, e1), observer]);
+    const spheroidPoint = vec3(CENTRE.x, CENTRE.y, CENTRE.z * cOverA);
+    const pointM = vec3(0, 0, -RANGE_M);
+    const centreM = sub(pointM, scale(rotateToBody(rotation, spheroidPoint), RADIUS_M));
+    const normals = constantNormalMap(6, normal, CENTRE, NEAR_RAD);
+    const discLaws = classMapLawsOf(answerOf(CLASSES), ELSEWHERE).map((law) => law ?? ELSEWHERE);
+    const surface = classMapSurface(
+      UNREAD_TEXTURES,
+      "test",
+      classMapFor(m),
+      discLaws,
+      ELSEWHERE,
+      unreadNormalMap(normals),
+    );
+    const body: LitBodyInput = {
+      id: BODY,
+      centreM,
+      figure: {
+        equatorialRadiusM: RADIUS_M,
+        polarRadiusM: cOverA * RADIUS_M,
+        pole: rotateToBody(rotation, vec3(0, 0, 1)),
+      },
+      photometry: { ...PROVISIONAL_PHOTOMETRY, law: ELSEWHERE },
+      surface,
+      rotation,
+      lighting: undefined,
+    };
+    const starM = add(pointM, scale(rotateToBody(rotation, sun), AU_M));
+    const host = aHostDisc();
+    const plan = planLitBodies(
+      [body],
+      [{ disc: host, centreM: starM }],
+      {
+        camera: CAMERA,
+        viewport: HD,
+        presentedPx: HD,
+        exposureScale: 1e-3,
+        annuli: DISC_ANNULI_HIGH,
+        planetshine: PLANETSHINE_SOURCES_HIGH,
+        setting: "high",
+      },
+      new Map([[BODY, "disc"]]),
+    );
+    const record = plan.discs[0];
+    const light = record?.lights[0];
+    if (record === undefined || light === undefined) {
+      throw new Error("the body is drawn as a lit disc");
+    }
+    // The disc's side: its twin at the cell's centre, along the ray to it (the view's axes are the
+    // galactic, the camera unturned).
+    const shaded = shadeDiscPoint(
+      record,
+      CAMERA,
+      rotateToBody(rotation, spheroidPoint),
+      vec3(0, 0, -1),
+      AIRLESS_LIGHTING,
+      surface.texels,
+    );
+    const exposure = record.exposureOverPi;
+    const disc: Rgb = [
+      shaded.radiance[0] / (light.illuminance[0] * exposure),
+      shaded.radiance[1] / (light.illuminance[1] * exposure),
+      shaded.radiance[2] / (light.illuminance[2] * exposure),
+    ];
+    // The terrain's side, body-fixed: the map's normal there as its shading normal, its horizon
+    // term above a horizon map of 0 (the datum's horizontal), no cascades and no air.
+    const shading = normalMapNormalAt(normals, [CENTRE.x, CENTRE.y, CENTRE.z]);
+    if (shading === null) {
+      throw new Error("the map holds a normal at the cell");
+    }
+    const towards = normalise(rotateToBodyFixed(rotation, sub(starM, pointM)));
+    const mu0 = dot(shading, towards);
+    const mu = dot(shading, observer);
+    const phiDatum = Math.acos(Math.min(1, dot(datum, towards)));
+    const phi = Math.acos(Math.min(1, mu0));
+    const starRadiusRad = Math.asin(host.radius_m / AU_M);
+    const h = terrainHorizonFactor(AU_M / host.radius_m, phi, Math.PI / 2 - phiDatum, 0);
+    const shares = Array.from({ length: TERRAIN_CLASSES + 1 }, (_, k) => (k === m ? 1 : 0));
+    const laws = terrainTexelLaws(bakePhotometryOf(CLASSES), ELSEWHERE, cOverA);
+    const flat = terrainReflectance(laws, shares, mu0, mu, Math.acos(dot(towards, observer)));
+    const terrain: Rgb = [(flat[0] * h) / mu0, (flat[1] * h) / mu0, (flat[2] * h) / mu0];
+    return {
+      disc,
+      terrain,
+      // μ′ at least half the datum's μ, and the star's whole disc above both the datum's plane and
+      // the shading normal's: the floor and the cut at the datum's horizon take no part here.
+      muFloorClear: mu > 0.5 * dot(datum, observer),
+      cutClear: phi + starRadiusRad < Math.PI / 2 && phiDatum + starRadiusRad < Math.PI / 2,
+    };
+  }
+
+  it.each([
+    ["a sphere", 1],
+    ["an oblate body", 0.9],
+  ])(
+    "agree to 10⁻⁶ per class law and law 0 at 30° and 90° of phase, the normal tilted 0° to 20°, on %s",
+    (_, cOverA) => {
+      let worst = 0;
+      let checked = 0;
+      for (const m of [0, 1, 2, 3]) {
+        for (const alphaDeg of [30, 90]) {
+          for (const tiltDeg of TILTS_DEG) {
+            for (const azimuthDeg of AZIMUTHS_DEG) {
+              const datum = datumNormalAt(CENTRE, cOverA);
+              const normal = tilted(
+                datum,
+                perpendicularTo(datum, 0.3 + azimuthDeg * RAD),
+                tiltDeg * RAD,
+              );
+              const pair = shadedPair(m, cOverA, alphaDeg * RAD, normal);
+              expect([pair.muFloorClear, pair.cutClear]).toEqual([true, true]);
+              for (const c of [0, 1, 2] as const) {
+                expect(pair.disc[c]).toBeGreaterThan(0);
+                worst = Math.max(worst, Math.abs(pair.terrain[c] / pair.disc[c] - 1));
+                checked += 1;
+              }
+            }
+          }
+        }
+      }
+      expect(checked).toBe(4 * 2 * TILTS_DEG.length * AZIMUTHS_DEG.length * 3);
+      expect(worst).toBeLessThan(1e-6);
+    },
+  );
+});
+
+/** A served body's law at p per display channel: its template at its own L, s = 1 (plan 14). */
+function served(template: PhaseTemplateId, share: number, p: Rgb): PhotometricLaw {
+  const k = shapeGeometricAlbedo(share);
+  return withTemplateCurve({
+    a: [p[0] / k, p[1] / k, p[2] / k],
+    lommelSeeligerShare: share,
+    template,
+    phaseExponent: [1, 1, 1],
+  });
+}
+
+/**
+ * The worker's regolith of the body's p, [B, V, R, code, L(0)] in `f32`: under the particulate
+ * rule its L(0) is 1, so its A is p (R10.T10.a's p = A (2 + L(0)) ÷ 3).
+ */
+function regolithOf(body: PhotometricLaw): readonly [number, number, number, number, number] {
+  const [r, v, b] = geometricAlbedo(body);
+  return [Math.fround(b), Math.fround(v), Math.fround(r), PHASE_LAW.regolith, 1];
+}
+
+/** The worst step in stops, |log₂(surveyed ÷ unsurveyed)| over the channels. */
+function stops(surveyed: Rgb, unsurveyed: Rgb): number {
+  return Math.max(...surveyed.map((x, c) => Math.abs(Math.log2(x / (unsurveyed[c] ?? 0)))));
+}
+
+/** Mars's polar over its equatorial radius, 3,376.2 ÷ 3,396.2 km (NASA's Mars fact sheet). */
+const MARS_C_OVER_A = 3376.2 / 3396.2;
+
+describe("the survey's edge on a regolith body (R10.T10.e)", () => {
+  // The Moon-like world's p on Mercury's template, as `ELSEWHERE`, and plan 14's Mars row's p on
+  // Mars's (R10.T10.a's table): the airless rocks' and the thin-aired worlds' templates.
+  const BODIES = [
+    ["a Mercury-like", served("mercury", 1, [0.172, 0.142, 0.105])],
+    ["a Mars-like", served("mars", 0.5, [0.288, 0.17, 0.088])],
+  ] as const;
+
+  /** Half the body surveyed at the class map's level: the regolith where a texel's x > 0. */
+  const N = 2 ** CLASS_MAP_LEVEL;
+  const HALF = packClassMap(N, 1, ({ face, i, j }) =>
+    directionAt(face, (i + 0.5) / N, (j + 0.5) / N).x > 0 ? [1] : null,
+  );
+  /** A surveyed point and an unsurveyed one, a quarter of a radius either side of the edge. */
+  const INSIDE = [0.25, 0.6, Math.sqrt(1 - 0.25 ** 2 - 0.6 ** 2)] as const;
+  const OUTSIDE = [-0.25, 0.6, Math.sqrt(1 - 0.25 ** 2 - 0.6 ** 2)] as const;
+
+  /** In-plane geometries at phase α, deg, as (μ₀, μ): i and e either side of the normal and on one. */
+  function geometriesAt(alphaDeg: number): ReadonlyArray<readonly [number, number]> {
+    return [
+      [alphaDeg / 2, alphaDeg / 2],
+      [0, alphaDeg],
+      [alphaDeg, 0],
+      [alphaDeg + 20, 20],
+      [20, alphaDeg + 20],
+      [alphaDeg / 2 + 30, alphaDeg / 2 - 30],
+    ]
+      .filter(([i = 0, e = 0]) => Math.abs(i) < 85 && Math.abs(e) < 85)
+      .map(([i = 0, e = 0]) => [Math.cos(i * RAD), Math.cos(e * RAD)] as const);
+  }
+
+  /** The regolith's laws as the terrain's twin and the disc draw them, law 0 the body's. */
+  interface EdgeLaws {
+    readonly terrain: ReadonlyArray<TexelLaw | null>;
+    readonly disc: ReadonlyArray<PhotometricLaw>;
+  }
+
+  /**
+   * The regolith's laws on its body's curve, from the readers themselves, or as they were before,
+   * on the Moon's row at s = 1 (R10.T10.e's finding), its A the same.
+   */
+  function edgeLaws(body: PhotometricLaw, cOverA: number, rule: "now" | "before"): EdgeLaws {
+    const photometry = regolithOf(body);
+    const terrain = terrainTexelLaws(bakePhotometryOf([photometry]), body, cOverA);
+    const [disc] = classMapLawsOf(answerOf([photometry]), body);
+    const slot = terrain[1];
+    if (disc === undefined || disc === null || slot === undefined || slot === null) {
+      throw new Error("the regolith has a law");
+    }
+    if (rule === "now") {
+      return { terrain, disc: [body, disc] };
+    }
+    const moonRow: PhotometricLaw = { ...classRowLaw(PHASE_LAW.regolith, 1), a: disc.a };
+    return {
+      terrain: [terrain[0] ?? null, { a: slot.a, table: phaseFactorTableOf(moonRow) }],
+      disc: [body, moonRow],
+    };
+  }
+
+  /** The worst step across the edge at phase α on the terrain's twin and on the disc, stops. */
+  function stepsAt(
+    laws: EdgeLaws,
+    cOverA: number,
+    alphaDeg: number,
+  ): { readonly terrain: number; readonly disc: number } {
+    const inside = classMapSharesAt(HALF, INSIDE);
+    const outside = classMapSharesAt(HALF, OUTSIDE);
+    expect([inside, outside]).toEqual([
+      [0, 1],
+      [1, 0],
+    ]);
+    const alpha = alphaDeg * RAD;
+    let terrain = 0;
+    let disc = 0;
+    for (const [mu0, mu] of geometriesAt(alphaDeg)) {
+      terrain = Math.max(
+        terrain,
+        stops(
+          terrainReflectance(laws.terrain, [0, 1], mu0, mu, alpha),
+          terrainReflectance(laws.terrain, [1, 0], mu0, mu, alpha),
+        ),
+      );
+      disc = Math.max(
+        disc,
+        stops(
+          discReflectance(laws.disc, cOverA, inside, mu0, mu, alpha),
+          discReflectance(laws.disc, cOverA, outside, mu0, mu, alpha),
+        ),
+      );
+    }
+    return { terrain, disc };
+  }
+
+  const PHASES_DEG = [0, 30, 60, 90] as const;
+
+  it.each(BODIES)(
+    "draws no step across it on %s body at 0°, 30°, 60° and 90° of phase, on the terrain's twin and on the disc, to 0.02 stop",
+    (_, body) => {
+      for (const cOverA of [1, MARS_C_OVER_A]) {
+        const laws = edgeLaws(body, cOverA, "now");
+        for (const alphaDeg of PHASES_DEG) {
+          const steps = stepsAt(laws, cOverA, alphaDeg);
+          expect(steps.terrain).toBeLessThan(0.02);
+          expect(steps.disc).toBeLessThan(0.02);
+        }
+      }
+    },
+  );
+
+  it("stood 0.36 stop at 30° to 90° on the Mercury-like body and over 1.3 at 90° on the Mars-like, on the Moon's row (before)", () => {
+    const [[, mercury], [, mars]] = BODIES;
+    for (const alphaDeg of [30, 60, 90]) {
+      expect(stepsAt(edgeLaws(mercury, 1, "before"), 1, alphaDeg).disc).toBeGreaterThan(0.35);
+    }
+    const marsAt90 = stepsAt(edgeLaws(mars, 1, "before"), 1, 90);
+    expect(marsAt90.disc).toBeGreaterThan(1.3);
+    expect(marsAt90.terrain).toBeCloseTo(marsAt90.disc, 12);
+  });
+});
+
+/**
+ * A draw set as `drawsCells` reads it: `missing` patches missing, for the views `missingViews`, and
+ * patches drawn at `levels`, stand-ins where `standIn`, each seen by the views `views` (every view
+ * where absent).
+ */
+function set(
+  missing: number,
+  drawn: ReadonlyArray<{
+    readonly level: number;
+    readonly standIn: boolean;
+    readonly views?: number;
+  }>,
+  missingViews = missing > 0 ? ~0 : 0,
+): Pick<DrawSet, "count" | "missing" | "patches" | "views" | "missingViews"> {
+  return {
+    count: drawn.length,
+    missing,
+    missingViews,
+    views: Uint32Array.from(drawn, ({ views }) => views ?? ~0),
+    patches: drawn.map(({ level, standIn }, slot): DrawnPatch => {
+      const patch: CachedPatch = {
+        key: { face: 0, level, i: 0, j: 0 },
+        generation: 0,
+        originM: vec3(0, 0, 0),
+        heightRangeM: [0, 0],
+        boundingRadiusM: 1,
+        slot,
+        keyString: `0/${String(level)}/0/0`,
+      };
+      return { keyString: patch.keyString, patch, standIn, within: null };
+    }),
+  };
+}
+
+describe("the hand-over at the field's cells (lane fix-coast-class-map; HANDOVER_AT_CELLS)", () => {
+  it("takes the patches whose quads are the field's cells, level L − 6, at 0 from a field of level 6 down", () => {
+    expect([5, 6, 7, 8].map(cellPatchLevel)).toEqual([0, 0, 1, 2]);
+  });
+
+  it("draws the cells where nothing is missing and nothing coarser than the cells' level stands in", () => {
+    expect([
+      drawsCells(set(0, [{ level: 2, standIn: false }]), 2),
+      drawsCells(set(0, [{ level: 3, standIn: true }]), 2),
+      drawsCells(set(0, [{ level: 1, standIn: true }]), 2),
+      drawsCells(set(1, [{ level: 2, standIn: false }]), 2),
+      drawsCells(null, 2),
+    ]).toEqual([true, true, false, false, false]);
+  });
+
+  it("draws the cells of a set of none, its seen ground all unsurveyed, but not of one still missing", () => {
+    expect([drawsCells(set(0, []), 2), drawsCells(set(1, []), 2)]).toEqual([true, false]);
+  });
+
+  it("judges a view's patches alone where given its bit: another view's coarse stand-in or missing patch apart", () => {
+    const first = 0b01;
+    const second = 0b10;
+    const drawSet = set(
+      1,
+      [
+        { level: 2, standIn: false, views: first | second },
+        { level: 1, standIn: true, views: second },
+      ],
+      second,
+    );
+    expect([
+      drawsCells(drawSet, 2, first),
+      drawsCells(drawSet, 2, second),
+      drawsCells(drawSet, 2),
+    ]).toEqual([true, false, false]);
+  });
+});
+
+describe("a lit terrain's fade to its cells' class weights (lane fix-coast-class-map)", () => {
+  it("fades from 1 at three quarters of the hand-over's ratio outwards to 0 at half that, both switches within it", () => {
+    expect(
+      [
+        CLASS_FADE_FAR,
+        CLASS_FADE_NEAR,
+        classCellFade(1 / 1.1),
+        classCellFade(1 / 0.9),
+        classCellFade(Number.POSITIVE_INFINITY),
+        classCellFade((CLASS_FADE_FAR + CLASS_FADE_NEAR) / 2),
+        classCellFade(CLASS_FADE_NEAR),
+        classCellFade(0),
+        classCellFade(Number.NaN),
+      ].map((value) => Math.round(value * 1e12) / 1e12),
+    ).toEqual(
+      [0.75 / 1.1, 0.375 / 1.1, 1, 1, 1, 0.5, 0, 0, 0].map(
+        (value) => Math.round(value * 1e12) / 1e12,
+      ),
+    );
+  });
+});

@@ -12,6 +12,7 @@ import type { ViewId } from "../camera/state";
 import {
   controlEv100,
   ev100FromAverageLuminance,
+  ev100FromIlluminance,
   MAN_EV100_MIN,
   METER_CALIBRATION_K,
   NO_IMAGE_INHIBIT,
@@ -49,7 +50,9 @@ export const FULL_WINDOW: PercentileWindow = { low: 0, high: 1 };
 /**
  * The metered average luminance, cd/m²: the weighted arithmetic mean Σ nᵢ Lᵢ ÷ Σ nᵢ over the
  * counts inside `window`, with Lᵢ = 2^(bin centre) ÷ the pre-exposure and bin 0 at luminance 0
- * (Design note 11). The veil is never in it: the histogram is taken before the glare is drawn.
+ * (Design note 11). The glare sources' veil is in it, of each source's whole light, as the optic
+ * delivers it (`histogram.wgsl`); the host disc's own pixels are not, and nor is the bloom chain's
+ * light, which only moves the weighed texels' light and leaves the disc's out.
  *
  * @returns 0 when the window holds no counts.
  */
@@ -126,16 +129,69 @@ export function meteredAverage(
 }
 
 /**
- * Smoothing speeds, EV/s: Unreal's `FCameraExposureSettings` defaults, Speed Up 3 and Speed Down 1
- * f-stops per second (UE 4.26 Python API, `CameraExposureSettings`), linear while the metered value
- * is more than {@link SMOOTHING_BAND_EV} away and exponential inside the band with a continuous
- * first derivative (UE 4.27, "Auto Exposure", `r.EyeAdaptation.ExponentialTransitionDistance`);
- * to be settled by eye (plan R07, Risks).
+ * The smoothing speed, EV/s, the same toward a brighter scene and a darker one: a camera's
+ * automatic exposure, which settles in 0.1 to 0.5 s (fix-view-light's design value, 2026-11-01,
+ * after a still camera's AE on a step of a few EV; no measurement read), linear while the
+ * metered value is more than {@link SMOOTHING_BAND_EV} away and exponential inside the band at
+ * speed ÷ band, 16 s⁻¹, with a continuous first derivative (Unreal's form, UE 4.27, "Auto
+ * Exposure", `r.EyeAdaptation.ExponentialTransitionDistance`). A 10 EV step comes within 0.1 EV in
+ * 0.52 s and a 3 EV step in 0.23 s.
+ *
+ * @remarks
+ * It replaces Unreal's `FCameraExposureSettings` defaults, 3 EV/s brightening and 1 darkening (UE
+ * 4.26 Python API), which left a sunlit body some 8 s overexposed after a starfield and took some
+ * 23 s back. Every view is a camera, `VIEW_CAMERA`'s triple at every level, and the operator's own
+ * eyes adapt to the display. The eye is not modelled: its dark adaptation takes minutes, the cones'
+ * plateau near 10 min and the rods' at 30 to 40 min (Hecht, Haig and Chase 1937, "The influence of
+ * light adaptation on subsequent dark adaptation of the eye", J. Gen. Physiol. 20, 831–850,
+ * doi:10.1085/jgp.20.6.831; recalled, not read here), which would blind the console for minutes
+ * after a star left the frame.
  */
-export const SMOOTHING_SPEED_EV_PER_S = { brighten: 3, darken: 1 } as const;
+export const SMOOTHING_SPEED_EV_PER_S = 24;
 
 /** The half-width of the band, EV, inside which the approach is exponential: Unreal's default 1.5. */
 export const SMOOTHING_BAND_EV = 1.5;
+
+/**
+ * The longest a cut holds the view's image back while it waits for a reading inside the
+ * histogram's range, s: 0.15, nine frames at 60 Hz, three readings each the reader's three frames
+ * late at most (`HISTOGRAM_RING`); each frame counts at most {@link METER_STEP_MAX_S}.
+ */
+export const CUT_HOLD_MAX_S = 0.15;
+
+/**
+ * The fraction of a reading's weighed counts in the histogram's top bin above which the reading is
+ * clipped: 0.5%. Those texels hold at least 60,404 after pre-exposure (2^15.88, the top bin's
+ * floor), up to `rgba16float`'s clamp at 65,504 and the veil's light beyond it, all metered at the
+ * bin's centre, so the mean is only a lower bound on the light. At `AUTO` the top bin lies
+ * 19.2 EV above the metered mean.
+ */
+export const CLIPPED_TOP_FRACTION = 0.005;
+
+/**
+ * Where a reading lies against the histogram's range: `inside` it, a value; `above` it, more than
+ * {@link CLIPPED_TOP_FRACTION} of its weighed counts in the top bin, so that the light is at least
+ * what it meters; or `below` it, every count in bin 0, so that the light is at most what it
+ * meters.
+ */
+export type ReadingRange = "inside" | "above" | "below";
+
+/** Where a histogram's reading lies against its range; `inside` for one that weighs nothing. */
+export function readingRange(h: Histogram): ReadingRange {
+  let total = 0;
+  for (const n of h.bins) {
+    total += n;
+  }
+  const top = h.bins[HISTOGRAM_BINS - 1] ?? 0;
+  const zero = h.bins[0] ?? 0;
+  let range: ReadingRange = "inside";
+  if (total > 0 && top > CLIPPED_TOP_FRACTION * total) {
+    range = "above";
+  } else if (total > 0 && zero === total) {
+    range = "below";
+  }
+  return range;
+}
 
 /**
  * How long the meter holds its value without a histogram that weighs a pixel before it reports
@@ -156,10 +212,11 @@ export const METER_STEP_MAX_S = 0.1;
  * Why a controller holds no metered value (plan R07, R07.T16.b; decision-r07-t8a-meter, item 1).
  *
  * @remarks
- * - `no-image`: no photorealistic image is drawn, or no histogram has arrived for
- *   {@link METER_TIMEOUT_S} (`NO IMAGE TO METER`).
+ * - `no-image`: no photorealistic image is drawn, or no histogram, or under `INCIDENT` no reading,
+ *   has arrived for {@link METER_TIMEOUT_S} (`NO IMAGE TO METER`).
  * - `nothing-weighed`: for that long the histograms of a drawn image weighed no pixel under
- *   `meter`, the meter in force (`NO LIT SIDE`, `NO DARK SIDE`, `STAR DISC ONLY`).
+ *   `meter`, the meter in force (`NO LIT SIDE`, `NO DARK SIDE`, `STAR DISC ONLY`), or under
+ *   `INCIDENT` no host disc reached its body (`NO LIGHT`).
  * - `acquiring`: under that long since the image came to be drawn, or since the meter changed,
  *   with no value held: the transient before the first histogram, which gets no word.
  */
@@ -173,6 +230,22 @@ export type Metering = { readonly kind: "metered"; readonly ev100: number } | Me
 
 const NO_IMAGE: MeterCause = { kind: "no-image" };
 const ACQUIRING: MeterCause = { kind: "acquiring" };
+
+/**
+ * One step's reading under the meter in force: `none` arrived (no histogram, or under `INCIDENT`
+ * no reading); under `INCIDENT`, one `pending` while the scene's lighting is awaited; one that
+ * weighs `nothing` (`LIT` with no lit body, `INCIDENT` with no light); or one `weighed`, with its
+ * EV100 and where it lies against the histogram's range.
+ */
+type MeterSample =
+  | { readonly kind: "none" }
+  | { readonly kind: "pending" }
+  | { readonly kind: "nothing-weighed" }
+  | { readonly kind: "weighed"; readonly ev100: number; readonly range: ReadingRange };
+
+const NO_SAMPLE: MeterSample = { kind: "none" };
+const PENDING_SAMPLE: MeterSample = { kind: "pending" };
+const NOTHING_WEIGHED_SAMPLE: MeterSample = { kind: "nothing-weighed" };
 
 /**
  * The metering as the panels show it beside the operator's chosen `meter`: a meter's own status is
@@ -206,9 +279,9 @@ export function meterStatus(metering: Metering): string | null {
 }
 
 /**
- * One step of the applied EV toward the metered one, frame-rate independent: linear at the
- * direction's speed down to the band's edge, then exponential with the rate that makes the speed
- * continuous there (speed ÷ band), each in closed form over the step.
+ * One step of the applied EV toward the metered one, frame-rate independent: linear at
+ * {@link SMOOTHING_SPEED_EV_PER_S} down to the band's edge, then exponential with the rate that
+ * makes the speed continuous there (speed ÷ band), each in closed form over the step.
  *
  * @param currentEv - The applied EV100.
  * @param targetEv - The metered EV100.
@@ -219,8 +292,7 @@ export function smoothEv(currentEv: number, targetEv: number, dtS: number): numb
   if (gap === 0 || dtS <= 0) {
     return gap === 0 ? targetEv : currentEv;
   }
-  // A higher EV100 is a brighter scene.
-  const speed = gap > 0 ? SMOOTHING_SPEED_EV_PER_S.brighten : SMOOTHING_SPEED_EV_PER_S.darken;
+  const speed = SMOOTHING_SPEED_EV_PER_S;
   const sign = Math.sign(gap);
   let remaining = Math.abs(gap);
   let time = dtS;
@@ -257,16 +329,33 @@ export interface AutoExposureOptions {
   readonly meter: MeterMode;
   /** {@link FULL_WINDOW} unless an operator's meter says otherwise. */
   readonly window?: PercentileWindow;
+  /**
+   * Whether it opens at the first metered value: `AUTO` at it at once, not smoothed toward it,
+   * from whatever level it starts at, unless an operator's command comes first (a kept scene's
+   * `startExposure`, the body inspection's; the owner's request, 2026-11-01).
+   */
+  readonly opensAtMeter?: boolean;
 }
 
 /**
- * One photorealistic view's exposure controller: it meters each histogram as it arrives, smooths
- * the applied EV toward it, and keeps R02's `ExposureControl` through `onMetering`.
+ * One photorealistic view's exposure controller: it meters each histogram as it arrives, or under
+ * `INCIDENT` each frame's incident reading, smooths the applied EV toward it, and keeps R02's
+ * `ExposureControl` through `onMetering`.
  *
  * @remarks
  * Under `MAN` and `INHIBITED` the applied value does not move; the meter still reads, so that
- * `setAuto` and `enable` can take its value. Exposure adaptation is not motion, so
+ * `setAuto` and `enable` can take its value. One that opens at its meter
+ * ({@link AutoExposureOptions.opensAtMeter}) takes `AUTO` at its first metered value at once. Exposure adaptation is not motion, so
  * `prefers-reduced-motion` leaves it alone. No dark adaptation of the eye is modelled.
+ *
+ * A cut ({@link AutoExposure.cut}) is a new scene or framing, and the exposure snaps to it, as a
+ * camera's does: the next histogram that weighs a pixel while the control follows the meter sets
+ * the applied value with no smoothing, and while the readings are clipped
+ * ({@link readingRange}) each sets it to its bound, never back past an earlier one, until one lies
+ * inside the range. A reading above the range moves the exposure at least 19.2 EV, so `MAN`'s
+ * 56 EV needs at most three toward a brighter scene; one below it moves 10.74 EV, so toward a
+ * darker one up to six. The frames drawn before a reading inside the range are held back
+ * ({@link AutoExposure.holds}).
  *
  * Each frame the owner calls {@link AutoExposure.step} with the histogram that arrived, then draws
  * at the reading's control, then tells the controller whether that frame drew the photorealistic
@@ -283,14 +372,22 @@ export class AutoExposure {
   #control: ExposureControl;
   #meter: MeterMode;
   #targetEv: number | null = null;
-  // Since the last histogram that weighed a pixel, or since the acquiring window opened, s.
+  // Since the last reading that weighed something, or since the acquiring window opened, s.
   #unweighedS = 0;
-  // Since the last histogram of any kind, or since the acquiring window opened, s.
-  #sinceHistogramS = 0;
+  // Since the last reading of any kind, a histogram or an incident reading, or since the acquiring
+  // window opened, s.
+  #sinceReadingS = 0;
   #imageDrawn = false;
   // Whether the window since the image came to be drawn, or the meter changed, with no value held
   // is still open.
   #acquiring = false;
+  // Whether `AUTO` is still to be taken at the first metered value at once.
+  #opensAtMeter: boolean;
+  // Whether a cut waits for a reading inside the histogram's range, which ends it.
+  #cut = false;
+  // Whether the cut's frames are still held back (`holds`), and for how long they have been, s.
+  #holding = false;
+  #heldS = 0;
 
   constructor(options: AutoExposureOptions) {
     this.#source = options.source;
@@ -298,6 +395,7 @@ export class AutoExposure {
     this.#window = options.window ?? FULL_WINDOW;
     this.#control = options.control;
     this.#meter = options.meter;
+    this.#opensAtMeter = options.opensAtMeter === true;
   }
 
   /** The operator's meter. */
@@ -327,7 +425,7 @@ export class AutoExposure {
       metering = NO_IMAGE;
     } else if (this.#acquiring) {
       metering = ACQUIRING;
-    } else if (this.#sinceHistogramS > METER_TIMEOUT_S) {
+    } else if (this.#sinceReadingS > METER_TIMEOUT_S) {
       metering = NO_IMAGE;
     } else {
       metering = { kind: "nothing-weighed", meter: this.#meter };
@@ -350,19 +448,63 @@ export class AutoExposure {
 
   /**
    * Notes whether the frame just drawn drew the photorealistic image this controller meters: its
-   * coming to be drawn with no value held opens the `acquiring` window, and while it is not drawn
-   * the meter has no image to meter and takes no histogram.
+   * coming to be drawn opens the `acquiring` window where no value is held, and is a cut, the style
+   * turning photorealistic; while it is not drawn the meter has no image to meter and takes no
+   * histogram.
    */
   noteImage(drawn: boolean): void {
     if (drawn && !this.#imageDrawn) {
       this.#openWindow();
+      this.#startCut();
     }
     this.#imageDrawn = drawn;
   }
 
   /**
+   * Whether the view holds back the frame it draws now, presenting nothing new, so that no frame of
+   * a new scene or framing is shown at the exposure from before it (the UX guide's flash rule over
+   * the brief's frames at the old exposure; fix-view-light, 2026-11-02).
+   *
+   * @remarks
+   * While the control follows the meter (`AUTO`, a system inhibit, or a view that opens at its
+   * meter), it holds the image's first frame, and every frame of a cut until a reading lies inside
+   * the histogram's range: the frame is drawn into the scene target, which the histogram reads, but
+   * not presented, so the view shows the image it last showed. A cut toward a brighter scene costs
+   * the read-back's one to three frames, a clipped one up to {@link CUT_HOLD_MAX_S}, past which the
+   * frame is shown as it is: so too a cut whose readings weigh nothing (`NO LIT SIDE`), since a
+   * new framing's first reading may weigh nothing before its bodies are drawn. `MAN`
+   * the operator has set and the operator's `INHIBIT` hold nothing; the display's default `MAN`
+   * holds where the view opens at its meter.
+   */
+  get holds(): boolean {
+    const control = this.#control;
+    const follows =
+      this.#opensAtMeter ||
+      control.kind === "auto" ||
+      (control.kind === "inhibited" && control.reason !== "operator");
+    return follows && (this.#holding || !this.#imageDrawn) && this.#heldS < CUT_HOLD_MAX_S;
+  }
+
+  /** Begins a cut: the next readings snap, and its frames are held from the first. */
+  #startCut(): void {
+    this.#cut = true;
+    this.#holding = true;
+    this.#heldS = 0;
+  }
+
+  /**
+   * Marks a cut: a new scene, or a camera change that is not an eased move. The exposure snaps to
+   * the next histogram that weighs a pixel while the control follows the meter, and to each one
+   * after it until a reading lies inside the histogram's range (the class's remarks).
+   */
+  cut(): void {
+    this.#startCut();
+  }
+
+  /**
    * Takes an operator's command's outcome from R02's `setManual`, `setAuto`, `inhibit` or
-   * `enable`.
+   * `enable`; one that puts the exposure under `AUTO` from another level is a cut, so that it
+   * snaps to the meter.
    *
    * @returns Whether it was accepted.
    */
@@ -370,7 +512,12 @@ export class AutoExposure {
     if (result.kind === "refused") {
       return false;
     }
+    if (result.control.kind === "auto" && this.#control.kind !== "auto") {
+      this.#startCut();
+    }
     this.#control = result.control;
+    // The operator's command decides the exposure from here.
+    this.#opensAtMeter = false;
     return true;
   }
 
@@ -378,37 +525,71 @@ export class AutoExposure {
    * Advances one frame.
    *
    * @param h - The histogram that arrived since the last step, if one did; one taken of an image
-   *   no longer drawn is not metered.
+   *   no longer drawn is not metered, nor any under `INCIDENT`.
    * @param dtS - The frame's duration, s.
+   * @param incidentLx - Under `INCIDENT`, the frame's reading (`incidentReadingLx`), lx: the
+   *   illuminance on its flat receptor, 0 where no host disc reaches its body; `null` while the
+   *   scene's lighting is awaited, which keeps the meter acquiring, with no status; absent where
+   *   none was taken. Read only while the image is drawn, as a histogram is.
    */
-  step(h: Histogram | undefined, dtS: number): ExposureReading {
-    const histogram = this.#imageDrawn ? h : undefined;
-    const average = histogram === undefined ? null : meteredAverage(histogram, this.#window);
-    if (average === null) {
-      // No histogram, or one with no pixel of a class the meter weighs (`LIT` with no lit body):
-      // the meter holds its value until the timeout, then says why it has none.
-      const countedS = Math.min(dtS, METER_STEP_MAX_S);
-      this.#unweighedS += countedS;
-      this.#sinceHistogramS = histogram === undefined ? this.#sinceHistogramS + countedS : 0;
-      if (this.#unweighedS > METER_TIMEOUT_S) {
-        this.#targetEv = null;
-        this.#acquiring = false;
+  step(h: Histogram | undefined, dtS: number, incidentLx?: number | null): ExposureReading {
+    if (this.#imageDrawn && this.holds) {
+      this.#heldS += Math.min(dtS, METER_STEP_MAX_S);
+    }
+    const sample = this.#imageDrawn ? this.#sample(h, incidentLx) : NO_SAMPLE;
+    let range: ReadingRange | null = null;
+    switch (sample.kind) {
+      case "pending":
+        // The scene's lighting is awaited: the window stays open, as when the image comes to be
+        // drawn, so that the meter says nothing it would take back once the light arrives.
+        this.#openWindow();
+        break;
+      case "none":
+      case "nothing-weighed": {
+        // No reading, or one that weighs nothing (`LIT` with no lit body, `INCIDENT` with no
+        // light): the meter holds its value until the timeout, then says why it has none.
+        const countedS = Math.min(dtS, METER_STEP_MAX_S);
+        this.#unweighedS += countedS;
+        this.#sinceReadingS = sample.kind === "none" ? this.#sinceReadingS + countedS : 0;
+        if (this.#unweighedS > METER_TIMEOUT_S) {
+          this.#targetEv = null;
+          this.#acquiring = false;
+        }
+        break;
       }
-    } else {
-      this.#unweighedS = 0;
-      this.#sinceHistogramS = 0;
-      this.#acquiring = false;
-      this.#targetEv = ev100FromAverageLuminance(average);
+      case "weighed":
+        this.#unweighedS = 0;
+        this.#sinceReadingS = 0;
+        this.#acquiring = false;
+        this.#targetEv = sample.ev100;
+        range = sample.range;
+        break;
     }
     const metering = this.metering;
     const control = this.#control;
-    if (control.kind !== "manual") {
+    if (this.#opensAtMeter && metering.kind === "metered") {
+      // Opened at the first metered value, as `ENABLE` sets it, not walked to it: a cut's first
+      // reading, so that a clipped one is a bound the next readings snap past, and one inside the
+      // range ends the cut, AUTO smoothing from there.
+      this.#opensAtMeter = false;
+      this.#cut = true;
+      this.#control = {
+        kind: "auto",
+        ev100:
+          range === null ? metering.ev100 : this.#snapped(metering.ev100, metering.ev100, range),
+      };
+    } else if (control.kind !== "manual") {
       // `AUTO` follows the value, and a system inhibit resumes from where it was held and smooths
       // from there, or takes the new cause; an operator's inhibit is untouched (R02's
       // `onMetering`). While acquiring, the control stands as it is.
       switch (metering.kind) {
         case "metered":
-          this.#control = onMetering(control, smoothEv(control.ev100, metering.ev100, dtS));
+          this.#control = onMetering(
+            control,
+            this.#cut && range !== null
+              ? this.#snapped(control.ev100, metering.ev100, range)
+              : smoothEv(control.ev100, metering.ev100, dtS),
+          );
           break;
         case "acquiring":
           break;
@@ -426,10 +607,67 @@ export class AutoExposure {
     return this.reading();
   }
 
+  /**
+   * This step's reading under the meter in force (`MeterSample`).
+   *
+   * @remarks
+   * A histogram meter's frame below the range metered at {@link EMPTY_FRAME_CD_M2} is at the value
+   * the exposure stops at, as good as one inside it. An incident reading has no range to clip it,
+   * so it always lies inside.
+   */
+  #sample(h: Histogram | undefined, incidentLx: number | null | undefined): MeterSample {
+    if (this.#meter === "incident") {
+      if (incidentLx === undefined) {
+        return NO_SAMPLE;
+      }
+      if (incidentLx === null) {
+        return PENDING_SAMPLE;
+      }
+      return incidentLx > 0
+        ? { kind: "weighed", ev100: ev100FromIlluminance(incidentLx), range: "inside" }
+        : NOTHING_WEIGHED_SAMPLE;
+    }
+    if (h === undefined) {
+      return NO_SAMPLE;
+    }
+    const average = meteredAverage(h, this.#window);
+    if (average === null) {
+      return NOTHING_WEIGHED_SAMPLE;
+    }
+    return {
+      kind: "weighed",
+      ev100: ev100FromAverageLuminance(average),
+      range: average === EMPTY_FRAME_CD_M2 ? "inside" : readingRange(h),
+    };
+  }
+
+  /**
+   * The applied EV100 a cut takes from a reading: its value where it lies inside the range, which
+   * ends the cut; else its bound, never back past the applied value, since a reading taken before
+   * the last snap is a looser bound of the same side.
+   */
+  #snapped(appliedEv: number, meteredEv: number, range: ReadingRange): number {
+    let ev: number;
+    switch (range) {
+      case "inside":
+        this.#cut = false;
+        this.#holding = false;
+        ev = meteredEv;
+        break;
+      case "above":
+        ev = Math.max(appliedEv, meteredEv);
+        break;
+      case "below":
+        ev = Math.min(appliedEv, meteredEv);
+        break;
+    }
+    return ev;
+  }
+
   /** Opens the window in which the meter, with no value held, is `acquiring`. */
   #openWindow(): void {
     this.#unweighedS = 0;
-    this.#sinceHistogramS = 0;
+    this.#sinceReadingS = 0;
     this.#acquiring = this.#targetEv === null;
   }
 

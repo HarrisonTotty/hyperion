@@ -1,0 +1,1932 @@
+//! The condensed phases' thermal columns and the regolith's thermal inertia (plan 14, P14.T49.j;
+//! decision-p14-t49c-split, 2026-10-16; science-r09-drainage.md §3; science-p14-t24a-climate.md §6,
+//! item 2).
+//!
+//! # The thermal columns
+//!
+//! Every registry row that can form a surface carries its solid's specific heat c(T), J kg⁻¹ K⁻¹,
+//! and thermal conductivity k(T), W m⁻¹ K⁻¹ ([`ThermalColumns`], through
+//! [`Substance::thermal_columns`]). Both are the dense solid's, with no pore space, as the row's
+//! grain density is: porosity is how a material lies, which its form states, so that "the row
+//! should carry its solid's specific heat and conductivity, and the form its layer's inertia"
+//! (science-r09-drainage.md §3). The columns are a table in `thermal/rows.rs`, found by key, so
+//! that [`Substance`] gains no field; [`rows`] lists it in registry order, and that file's module
+//! documentation lists the rows not modelled, each with its reason.
+//!
+//! Each column ([`ThermalColumn`]) is a closed form its source gives or a few read points
+//! ([`ThermalForm`]), over its valid range, in one piece per solid phase. Outside the range the end
+//! value is held, as [`SolidDensity::Polynomial`](super::SolidDensity::Polynomial)'s density is.
+//! Every column names its sources and their basis ([`Source`], [`Basis`]): a measured value or a
+//! reference equation's is a fact, a mode-weighted sum is reduced, and HYPERION's own choice beside
+//! the cited values is adopted. A row that takes another row's figure because its own was not read
+//! is a stand-in ([`Provenance::StandIn`]): its source says why, and the figure is the same
+//! constant as the row it borrows from.
+//!
+//! # The regolith's thermal inertia
+//!
+//! [`regolith_thermal_inertia`] gives a substance's thermal inertia as a dry regolith in vacuum,
+//! Γ = √(`k_eff` `ρ_bulk` c), J m⁻² K⁻¹ s^−½, at a [`RegolithForm`]'s porosity ψ and grain size:
+//!
+//! - `ρ_bulk` = `ρ_g` (1 − ψ), the row's solid grain density at the temperature
+//!   ([`Substance::grain_density`]) times one less the form's porosity
+//!   (science-r09-drainage.md §3);
+//! - c is the solid's c(T), the pores being empty;
+//! - `k_eff` is Gundlach and Blum's granular conductivity (2013, Icarus 223, 479, arXiv:1212.3108,
+//!   eq. 5, after their 2012 model, Icarus 219, 618, arXiv:1111.0535), with φ = 1 − ψ the volume
+//!   filling factor, r the grain radius, `k_s`(T) the solid's conductivity, ε the form's emissivity
+//!   and σ Stefan and Boltzmann's constant:
+//!
+//!   `k_eff` = `k_s` [(9π ÷ 4) (1 − ν²) ÷ E · γ(T) ÷ r]^⅓ · f₁ exp(f₂ φ) · χ
+//!   + 8 σ ε T³ · e₁ (1 − φ) ÷ φ · r.
+//!
+//!   The first term is conduction through the grains' contacts: Chan and Tien's (1973) network of
+//!   spheres in contact, its contact force the grains' van der Waals adhesion by the theory of
+//!   Johnson, Kendall and Roberts (1971) in place of their weight, which dominates in a regolith's
+//!   top layers. E, ν and γ are the grains' Young's modulus, Poisson's ratio and specific surface
+//!   energy, the form's by family ([`ContactConstants`]); f₁ exp(f₂ φ) is the packing's structure
+//!   and χ the reduction for irregular, polydisperse grains (`CONTACT_STRUCTURE_F1`,
+//!   `CONTACT_STRUCTURE_F2`, `IRREGULAR_GRAIN_FACTOR`). The second is radiation across the pores,
+//!   its photons' mean free path e₁ (1 − φ) ÷ φ · r (`PHOTON_PATH_FACTOR`).
+//!
+//! Gundlach and Blum's model is chosen over Sakatani et al.'s (2017, AIP Advances 7, 015310, read
+//! in abstract), for three reasons: its one irregularity factor χ is calibrated on the returned
+//! lunar regolith (Cremers et al. 1971; Cremers and Birkebak 1971), where Sakatani et al.'s is
+//! built on glass beads; it takes the adhesion of the grains, and so no body's gravity or
+//! compressional stress, which Sakatani et al.'s needs as an input, so that the inertia stays a
+//! function of the substance, the form and the temperature alone; and the same equations serve
+//! silicate and icy regoliths (Gundlach and Blum 2012 built it for icy bodies' dust layers).
+//!
+//! The law is the airless one, as ruled: it has no pore gas. Under an atmosphere, gas in the pores
+//! raises a regolith's conductivity well above the vacuum's (Presley and Christensen 1997, JGR
+//! 102, 6535; Piqueux and Christensen 2009, JGR 114, E09005; neither re-read), so the law
+//! under-reads a regolith under air, Mars's among them. The temperature is the caller's.
+//!
+//! # The pore gas, and the outer system's ice (P14.T49.l, from generator version 26)
+//!
+//! [`regolith_thermal_inertia_with_pores`] adds to `k_eff` the conduction through the gas in the
+//! pores ([`Pores`], [`PoreGas`]), in parallel with the contact and radiative terms, so that a
+//! regolith in vacuum, or under a gas at zero pressure, takes the law above to the bit. The gas
+//! term is Zehner, Bauer and Schlünder's packed bed with the Smoluchowski effect (Zehner and
+//! Schlünder 1970, Chem. Ing. Tech. 42, 933; Bauer and Schlünder 1978, Int. Chem. Eng. 18, its
+//! part II; as Tsotsas's chapter of the VDI Heat Atlas gives them; none re-read), its contact
+//! flattening and
+//! its radiation left to Gundlach and Blum's terms:
+//!
+//! `k_gas` = `k_f` [(1 − √φ) ψ ÷ (ψ + ℓ) + √φ `k_c`], `k_c` = 2 ∫₀¹ s (1 + (B − 1) s) ÷ (1 + ℓ − N
+//! s) ds,
+//!
+//! with `k_f` the free gas's conductivity, ψ the porosity and φ = 1 − ψ, B = `C_f` (φ ÷ ψ)^(10/9)
+//! the grains' shape (`PACKED_BED_SHAPE_FACTOR`), κ = `k_s` ÷ `k_f`, N = (1 − B)(1 + ℓ) + B (1 −
+//! 1 ÷ κ), and ℓ = l ÷ d the gas's temperature-jump length over the grain diameter. `k_c` is the
+//! cell's conduction through a grain and the gas gap in series, whose closed form is the one the
+//! VDI Heat Atlas prints: the integral is evaluated so that its removable singularity at N = 0
+//! costs no precision. The jump length is Kennard's at both walls (Kennard 1938, Kinetic Theory of
+//! Gases, not re-read), l = 2 (2 − α) ÷ α · √(2π R T ÷ M) · `k_f` ÷ (p (2 `c_p` − R ÷ M)), α the
+//! thermal accommodation (`THERMAL_ACCOMMODATION`). The grain size enters through ℓ alone, and
+//! where l κ is far below the grains the term barely depends on it: at Titan's pressure, l κ is
+//! about 19 µm for crystalline ice, and the term moves about 5 per cent over 50 µm–2 mm (by this
+//! model, not a measurement); at Mars's it rises by half and more. Zehner and Schlünder fitted B
+//! to packed beds of porosity up to about 0.6 (the review's recollection, not re-read), so above it,
+//! the outer system's ice's 0.80 among them, B is extrapolated. `k_f` is
+//! Eucken's, η (`c_v` + 9 R ÷ 4M), on Chapman and Enskog's viscosity η with the Lennard-Jones
+//! constants of the gas's most abundant species, as the condensates' fall speed reads it
+//! ([`condense`](crate::planetary::chem::condense)).
+//!
+//! From the same version, under [`RegolithInertiaRules::PoreGas`], the water-ice reference form of
+//! an airless lid is the outer system's fluffy amorphous ice
+//! ([`RegolithForm::reference_under`], [`LidAir`]): 67P's porosity, its pebbles' size and amorphous
+//! ice's conductivity in place of the crystal's, so that its radiative term carries the
+//! temperature from the trans-Neptunian objects' inertia of a few SI units to Ganymede's tens. A
+//! lid under an air keeps P14.T49.j's crystalline form, the gas in its pores. The porosity and
+//! grain size are an adopted, effective parameterisation of the radiative path, not a packing of
+//! real grains: 67P's 0.80 is its total
+//! porosity, within its pebbles and between them, where dense grains of 2 mm pack at about 0.4,
+//! whose void ratio would make the radiative term six times smaller and Ganymede's Γ about 10
+//! (lean, 2026-10-31; Gundlach and Blum 2012's two levels, the pebbles' packing for the path and
+//! the total for the density, are not modelled). The trans-Neptunian figure rests on amorphous
+//! ice's conductivity: the crystal's would read about 17 at 40 K.
+//!
+//! # On the record from generator version 23
+//!
+//! P14.T54.a passes the inertia at P14.T51.c's lid ([`reference_regolith_thermal_inertia`]) to
+//! P14.T24.a's climate and to rendering plan R09's airless model (R09.T13.c), through the ground's
+//! inertia of [`hooks::surface`](crate::planetary::hooks::surface), whose two constants,
+//! `ROCK_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S` and
+//! `ICE_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S`, stay as its fallback alone: a lid not known,
+//! a row with no thermal columns or no regolith form, and a lid above its transition
+//! (decision-pre-23-review item 7). Under air the law is a vacuum lower bound, with no pore gas,
+//! which P14.T49.l adds. A change here moves the record at the version it lands in, and
+//! re-blesses `tests/golden/substance/thermal.golden` with it.
+//!
+//! Everything here is a pure function of the registry and its arguments: no draws, no state, no
+//! caches, loops in registry order and sums in a fixed order, with the crate's deterministic
+//! [`math`].
+
+use core::f64::consts::PI;
+use std::error::Error;
+use std::fmt;
+
+use hyperion_surface::field::MechanicsFamily;
+use hyperion_surface::material::{MaterialClass, ShearLayer, form_row};
+
+use super::condensed::CondensedPhase;
+use super::{Basis, MOLAR_GAS_CONSTANT, Source, Substance, SubstanceId, ids};
+use crate::math;
+use crate::planetary::chem::condense::{CollisionConstants, collision_integral};
+use crate::planetary::hooks::surface::REGOLITH_EMISSIVITY;
+use crate::units::consts::{BOLTZMANN_CONSTANT, STEFAN_BOLTZMANN};
+use crate::units::{Kelvin, KilogramsPerCubicMetre, Metres, Pascals};
+
+mod rows;
+#[cfg(test)]
+pub(super) mod tests;
+
+/// How one piece of a thermal column follows temperature.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ThermalForm {
+    /// One value at every temperature, in the column's unit.
+    Constant(f64),
+    /// Σ cᵢ Tⁱ, T in kelvin, from c₀, evaluated by Horner's rule from the highest power: two
+    /// coefficients are a line.
+    Polynomial(&'static [f64]),
+    /// Σ cᵢ T^(i/2), T in kelvin, from c₀, evaluated by Horner's rule in √T from the highest
+    /// power, as Winter and Saari 1969's silicate heat capacity in T^½, T and T^(3/2).
+    HalfPowers(&'static [f64]),
+    /// exp(Σ aᵢ (ln T)ⁱ), T in kelvin, from a₀, the sum by Horner's rule in ln T: a conductivity
+    /// fitted in its logarithm, as Saiduzzaman et al. 2025's solid CO₂.
+    LogPolynomial(&'static [f64]),
+    /// a ÷ T + b, T in kelvin: a crystal's conductivity above its low-temperature peak, as ice
+    /// Ih's 567 ÷ T (Klinger 1980).
+    Reciprocal {
+        /// a, in the column's unit times kelvin.
+        a: f64,
+        /// b, in the column's unit.
+        b: f64,
+    },
+    /// Read points (T in kelvin, value), in increasing temperature, linear in T between
+    /// neighbours; each point is its source's value, converted to SI, never a source's table whole.
+    Points(&'static [(f64, f64)]),
+    /// Ice Ih's specific isobaric heat capacity at one atmosphere, `c_p` = −T ∂²g ÷ ∂T², from the
+    /// Gibbs function of IAPWS R10-06(2009) (Feistel and Wagner 2006, J. Phys. Chem. Ref. Data 35,
+    /// 1021): the closed form of complex reciprocals of its Table 4, with its Table 2's constants.
+    IceIh,
+}
+
+impl ThermalForm {
+    /// The form's value at `temperature_k`, kelvin, in the column's unit.
+    #[must_use]
+    fn evaluate(self, temperature_k: f64) -> f64 {
+        match self {
+            Self::Constant(value) => value,
+            Self::Polynomial(coefficients) => coefficients
+                .iter()
+                .rev()
+                .fold(0.0, |sum, &c| sum * temperature_k + c),
+            Self::HalfPowers(coefficients) => {
+                let root = temperature_k.sqrt();
+                coefficients
+                    .iter()
+                    .rev()
+                    .fold(0.0, |sum, &c| sum * root + c)
+            }
+            Self::LogPolynomial(coefficients) => {
+                let log = math::ln(temperature_k);
+                math::exp(coefficients.iter().rev().fold(0.0, |sum, &c| sum * log + c))
+            }
+            Self::Reciprocal { a, b } => a / temperature_k + b,
+            Self::Points(points) => interpolate(points, temperature_k),
+            Self::IceIh => ice_ih_heat_capacity(temperature_k, ONE_ATMOSPHERE_PA),
+        }
+    }
+}
+
+/// The read points' value at `t`: the first point's at or below it, the last's at or above it,
+/// and otherwise linear between the two neighbours that hold it, so that a read point returns its
+/// own value to the bit; a NaN gives a NaN.
+#[must_use]
+fn interpolate(points: &[(f64, f64)], t: f64) -> f64 {
+    if t.is_nan() {
+        return t;
+    }
+    let mut previous: Option<(f64, f64)> = None;
+    for &(t1, y1) in points {
+        if t < t1 {
+            return match previous {
+                Some((t0, y0)) => y0 + (y1 - y0) * (t - t0) / (t1 - t0),
+                None => y1,
+            };
+        }
+        previous = Some((t1, y1));
+    }
+    previous.map_or(f64::NAN, |(_, y)| y)
+}
+
+/// One atmosphere, Pa, at which [`ThermalForm::IceIh`] evaluates IAPWS R10-06's Gibbs function:
+/// its normal pressure p₀ (Table 1).
+const ONE_ATMOSPHERE_PA: f64 = 101_325.0;
+
+/// A complex number, for IAPWS R10-06's Gibbs function alone, in a fixed order of operations.
+#[derive(Debug, Clone, Copy)]
+struct Complex {
+    re: f64,
+    im: f64,
+}
+
+impl Complex {
+    #[must_use]
+    const fn new(re: f64, im: f64) -> Self {
+        Self { re, im }
+    }
+
+    #[must_use]
+    fn add(self, other: Self) -> Self {
+        Self::new(self.re + other.re, self.im + other.im)
+    }
+
+    #[must_use]
+    fn sub(self, other: Self) -> Self {
+        Self::new(self.re - other.re, self.im - other.im)
+    }
+
+    #[must_use]
+    fn scale(self, factor: f64) -> Self {
+        Self::new(self.re * factor, self.im * factor)
+    }
+
+    /// The real part of the product `self × other`.
+    #[must_use]
+    fn real_of_product(self, other: Self) -> f64 {
+        self.re * other.re - self.im * other.im
+    }
+
+    /// 1 ÷ `self`, as (a − bi) ÷ (a² + b²).
+    #[must_use]
+    fn recip(self) -> Self {
+        let norm = self.re * self.re + self.im * self.im;
+        Self::new(self.re / norm, -self.im / norm)
+    }
+}
+
+/// IAPWS R10-06(2009)'s triple-point temperature `T_t`, K (Table 1).
+const IAPWS_TRIPLE_TEMPERATURE_K: f64 = 273.16;
+/// IAPWS R10-06(2009)'s experimental triple-point pressure `p_t`, Pa (Table 1).
+const IAPWS_TRIPLE_PRESSURE_PA: f64 = 611.657;
+/// IAPWS R10-06(2009)'s Table 2: t₁.
+const IAPWS_T1: Complex = Complex::new(0.368_017_112_855_051e-1, 0.510_878_114_959_572e-1);
+/// IAPWS R10-06(2009)'s Table 2: r₁, J kg⁻¹ K⁻¹.
+const IAPWS_R1: Complex = Complex::new(0.447_050_716_285_388e2, 0.656_876_847_463_481e2);
+/// IAPWS R10-06(2009)'s Table 2: t₂.
+const IAPWS_T2: Complex = Complex::new(0.337_315_741_065_416, 0.335_449_415_919_309);
+/// IAPWS R10-06(2009)'s Table 2: r₂₀, J kg⁻¹ K⁻¹.
+const IAPWS_R20: Complex = Complex::new(-0.725_974_574_329_220e2, -0.781_008_427_112_870e2);
+/// IAPWS R10-06(2009)'s Table 2: r₂₁, J kg⁻¹ K⁻¹.
+const IAPWS_R21: Complex = Complex::new(-0.557_107_698_030_123e-4, 0.464_578_634_580_806e-4);
+/// IAPWS R10-06(2009)'s Table 2: r₂₂, J kg⁻¹ K⁻¹.
+const IAPWS_R22: Complex = Complex::new(0.234_801_409_215_913e-10, -0.285_651_142_904_972e-10);
+
+/// Ice Ih's specific isobaric heat capacity, J kg⁻¹ K⁻¹, at `temperature_k` kelvin and
+/// `pressure_pa` pascals (IAPWS R10-06(2009), Tables 3 and 4).
+///
+/// It is `c_p` = −T `g_TT`, with `g_TT` = (1 ÷ `T_t`) Re Σₖ rₖ [1 ÷ (tₖ − τ) + 1 ÷ (tₖ + τ) − 2 ÷
+/// tₖ], τ = T ÷ `T_t` and r₂(p) = Σ r₂ₖ (π − π₀)ᵏ, π = p ÷ `p_t`. It is valid over 0–273.16 K and
+/// 0–2.1 × 10⁸ Pa, within 2 per cent at or below 10⁵ Pa (its Table 5). At one atmosphere π − π₀ is
+/// exactly 0, so r₂ is r₂₀.
+#[must_use]
+fn ice_ih_heat_capacity(temperature_k: f64, pressure_pa: f64) -> f64 {
+    let tau = temperature_k / IAPWS_TRIPLE_TEMPERATURE_K;
+    let excess =
+        pressure_pa / IAPWS_TRIPLE_PRESSURE_PA - ONE_ATMOSPHERE_PA / IAPWS_TRIPLE_PRESSURE_PA;
+    let r2 = IAPWS_R20
+        .add(IAPWS_R21.scale(excess))
+        .add(IAPWS_R22.scale(excess * excess));
+    let term = |r: Complex, t: Complex| {
+        let tau = Complex::new(tau, 0.0);
+        let bracket = t
+            .sub(tau)
+            .recip()
+            .add(t.add(tau).recip())
+            .sub(t.recip().scale(2.0));
+        r.real_of_product(bracket)
+    };
+    -tau * (term(IAPWS_R1, IAPWS_T1) + term(r2, IAPWS_T2))
+}
+
+/// One piece of a thermal column: one solid phase's form over its temperatures.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ThermalPiece {
+    phase: &'static str,
+    low: Kelvin,
+    high: Kelvin,
+    form: ThermalForm,
+}
+
+impl ThermalPiece {
+    /// The solid phase it is, such as `"α"` or `"β"`, or `""` for a row's only solid.
+    #[must_use]
+    pub const fn phase(&self) -> &'static str {
+        self.phase
+    }
+
+    /// The lowest temperature it covers.
+    #[must_use]
+    pub const fn low(&self) -> Kelvin {
+        self.low
+    }
+
+    /// The highest temperature it covers, where the next piece, the next phase, begins.
+    #[must_use]
+    pub const fn high(&self) -> Kelvin {
+        self.high
+    }
+
+    /// Its form.
+    #[must_use]
+    pub const fn form(&self) -> ThermalForm {
+        self.form
+    }
+}
+
+/// Whether a column is the row's own or another's standing in for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Provenance {
+    /// The row's own: measured on it, its reference equation's, or reduced from its stated mode.
+    Own,
+    /// Another row's or a class's figure, taken because the row's own was not read: its source
+    /// says why, and the figure is the same constant as the one it borrows.
+    StandIn,
+}
+
+/// One thermal column, the specific heat or the conductivity of a row's solid: its pieces, in
+/// increasing temperature, each beginning where the last ends, with its provenance.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ThermalColumn {
+    pieces: &'static [ThermalPiece],
+    provenance: Provenance,
+}
+
+impl ThermalColumn {
+    /// Its pieces, in increasing temperature: one for a row's only solid, one per phase otherwise.
+    #[must_use]
+    pub const fn pieces(&self) -> &'static [ThermalPiece] {
+        self.pieces
+    }
+
+    /// Whether it is the row's own or a stand-in.
+    #[must_use]
+    pub const fn provenance(&self) -> Provenance {
+        self.provenance
+    }
+
+    /// Whether it stands in for the row's own figure.
+    #[must_use]
+    pub const fn is_stand_in(&self) -> bool {
+        matches!(self.provenance, Provenance::StandIn)
+    }
+
+    /// The lowest temperature of its valid range.
+    ///
+    /// # Panics
+    ///
+    /// Never: every column has a piece, which `substance_thermal_ranges_and_values_are_physical`
+    /// holds.
+    #[must_use]
+    pub fn low(&self) -> Kelvin {
+        self.pieces
+            .first()
+            .expect("every column has a piece, as the rows' tests hold")
+            .low
+    }
+
+    /// The highest temperature of its valid range.
+    ///
+    /// # Panics
+    ///
+    /// Never, as [`low`](Self::low).
+    #[must_use]
+    pub fn high(&self) -> Kelvin {
+        self.pieces
+            .last()
+            .expect("every column has a piece, as the rows' tests hold")
+            .high
+    }
+
+    /// Its value at `temperature`, in its unit: its piece's form at the temperature, the end
+    /// value held outside its range, and at a piece's upper bound the lower piece's. A NaN gives
+    /// a NaN.
+    ///
+    /// # Panics
+    ///
+    /// Never, as [`low`](Self::low): the rows' tests hold each range finite and increasing.
+    #[must_use]
+    pub fn at(&self, temperature: Kelvin) -> f64 {
+        if temperature.value().is_nan() {
+            return f64::NAN;
+        }
+        let t = temperature
+            .value()
+            .clamp(self.low().value(), self.high().value());
+        let piece = self
+            .pieces
+            .iter()
+            .find(|piece| t <= piece.high.value())
+            .or_else(|| self.pieces.last())
+            .expect("every column has a piece, as the rows' tests hold");
+        piece.form.evaluate(t)
+    }
+}
+
+/// A row's thermal columns (the [module documentation](self)): its solid's specific heat and
+/// conductivity, each value named with its sources in [`sources`](Self::sources).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ThermalColumns {
+    heat_capacity: ThermalColumn,
+    conductivity: ThermalColumn,
+    sources: &'static [Source],
+}
+
+impl ThermalColumns {
+    /// The solid's specific heat at `temperature`, J kg⁻¹ K⁻¹, its end value held outside its
+    /// range ([`ThermalColumn::at`]).
+    #[must_use]
+    pub fn heat_capacity_j_per_kg_k(&self, temperature: Kelvin) -> f64 {
+        self.heat_capacity.at(temperature)
+    }
+
+    /// The dense solid's thermal conductivity at `temperature`, W m⁻¹ K⁻¹, its end value held
+    /// outside its range ([`ThermalColumn::at`]).
+    #[must_use]
+    pub fn conductivity_w_per_m_k(&self, temperature: Kelvin) -> f64 {
+        self.conductivity.at(temperature)
+    }
+
+    /// The specific heat's column, J kg⁻¹ K⁻¹.
+    #[must_use]
+    pub const fn heat_capacity(&self) -> &ThermalColumn {
+        &self.heat_capacity
+    }
+
+    /// The conductivity's column, W m⁻¹ K⁻¹.
+    #[must_use]
+    pub const fn conductivity(&self) -> &ThermalColumn {
+        &self.conductivity
+    }
+
+    /// Where its values come from: each source's `covers` names `heat capacity` or
+    /// `conductivity`.
+    #[must_use]
+    pub const fn sources(&self) -> &'static [Source] {
+        self.sources
+    }
+
+    /// Whether either column stands in for the row's own figure.
+    #[must_use]
+    pub const fn is_stand_in(&self) -> bool {
+        self.heat_capacity.is_stand_in() || self.conductivity.is_stand_in()
+    }
+}
+
+impl Substance {
+    /// Its thermal columns, for a row that can form a surface and whose figures were read (the
+    /// [`thermal`](self) module's table); `None` where they are not modelled.
+    ///
+    /// # Examples
+    ///
+    /// Ice Ih stores less heat at Europa's night than at its melting point, and conducts better:
+    ///
+    /// ```
+    /// use hyperion_sim::substance::by_key;
+    /// use hyperion_sim::units::Kelvin;
+    ///
+    /// # fn main() {
+    /// #     assert!(example().is_some(), "every value the example reads is there");
+    /// # }
+    /// # fn example() -> Option<()> {
+    /// let ice = by_key("H2O")?.substance().thermal_columns()?;
+    /// let (night, thaw) = (Kelvin::new(90.0), Kelvin::new(270.0));
+    /// assert!(ice.heat_capacity_j_per_kg_k(night) < ice.heat_capacity_j_per_kg_k(thaw));
+    /// assert!(ice.conductivity_w_per_m_k(night) > ice.conductivity_w_per_m_k(thaw));
+    /// # Some(())
+    /// # }
+    /// ```
+    #[must_use]
+    pub fn thermal_columns(&self) -> Option<&'static ThermalColumns> {
+        rows::THERMAL_ROWS
+            .iter()
+            .find(|(key, _)| *key == self.key)
+            .map(|(_, columns)| columns)
+    }
+}
+
+/// Every row with thermal columns, in registry order.
+pub fn rows() -> impl Iterator<Item = (SubstanceId, &'static ThermalColumns)> {
+    ids().filter_map(|id| {
+        id.substance()
+            .thermal_columns()
+            .map(|columns| (id, columns))
+    })
+}
+
+/// Gundlach and Blum's f₁, the structure factor's scale, dimensionless: (5.18 ± 3.45) × 10⁻², their
+/// fit f₁ exp(f₂ φ) to Chan and Tien 1973's simple, body-centred and face-centred cubic packings
+/// (filling factors 0.52, 0.68 and 0.74; Gundlach and Blum 2012, Icarus 219, 618, arXiv:1111.0535,
+/// eq. 18 and Fig. 14), which their 2013 paper applies at filling factors 0.1–0.6 (Icarus 223,
+/// 479, arXiv:1212.3108, §2–§3).
+pub(crate) const CONTACT_STRUCTURE_F1: f64 = 5.18e-2;
+
+/// Gundlach and Blum's f₂, the structure factor's exponent, dimensionless: 5.26 ± 0.94 (Gundlach
+/// and Blum 2012, eq. 18), as `CONTACT_STRUCTURE_F1`.
+pub(crate) const CONTACT_STRUCTURE_F2: f64 = 5.26;
+
+/// Gundlach and Blum's χ, the contact conduction's reduction for irregular, polydisperse grains,
+/// dimensionless: 0.41 ± 0.02 (statistical) ± 0.10 (systematic), calibrated on the Apollo 11 and
+/// 12 regolith's measured conductivity in vacuum (Cremers et al. 1971; Cremers and Birkebak 1971)
+/// at a grain radius of 20 µm, a filling factor of 0.43 and a solid conductivity of 1.78 W m⁻¹ K⁻¹,
+/// the mean of silica's 1.37 and the ordinary chondrites' 2.18, which give 0.50 and 0.31 alone
+/// (Gundlach and Blum 2013, §4 and Table 2, read).
+///
+/// The calibration pairs χ with that solid conductivity, so a row's own `k_s` carries the
+/// calibration's spread, about ±25 per cent, into the contact term.
+pub(crate) const IRREGULAR_GRAIN_FACTOR: f64 = 0.41;
+
+/// Gundlach and Blum's e₁, the photons' mean free path in the pores per grain radius at a filling
+/// factor of one half, dimensionless: 1.34 ± 0.01, their fit of Dullien 1991's form e₁ (1 − φ) ÷ φ
+/// to Skorov et al. 2011's computed paths (Gundlach and Blum 2012, eq. 13, read; kept in their
+/// 2013 eq. 3 over a two-parameter refit, e₁ 1.66 ± 0.21 with χ 0.37).
+pub(crate) const PHOTON_PATH_FACTOR: f64 = 1.34;
+
+/// How a grain material's specific surface energy γ follows temperature.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SurfaceEnergy {
+    /// γ = d₁ T, J m⁻²: zero at 0 K, as Gundlach and Blum assume for silica (2012, eq. 11).
+    ProportionalToTemperature {
+        /// d₁, J m⁻² K⁻¹.
+        j_per_m2_k: f64,
+    },
+    /// One value at every temperature, J m⁻².
+    Constant {
+        /// γ, J m⁻².
+        j_per_m2: f64,
+    },
+}
+
+impl SurfaceEnergy {
+    /// γ at `temperature_k` kelvin, J m⁻².
+    #[must_use]
+    pub fn j_per_m2_at(self, temperature_k: f64) -> f64 {
+        match self {
+            Self::ProportionalToTemperature { j_per_m2_k } => j_per_m2_k * temperature_k,
+            Self::Constant { j_per_m2 } => j_per_m2,
+        }
+    }
+}
+
+/// The grain material's constants of the contact term, by the theory of Johnson, Kendall and
+/// Roberts (1971): a regolith form's, by family, each cited in its form's sources. They are not
+/// per-row columns.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ContactConstants {
+    youngs_modulus: Pascals,
+    poisson_ratio: f64,
+    surface_energy: SurfaceEnergy,
+}
+
+impl ContactConstants {
+    /// The grains' Young's modulus E.
+    #[must_use]
+    pub const fn youngs_modulus(&self) -> Pascals {
+        self.youngs_modulus
+    }
+
+    /// The grains' Poisson's ratio ν.
+    #[must_use]
+    pub const fn poisson_ratio(&self) -> f64 {
+        self.poisson_ratio
+    }
+
+    /// The grains' specific surface energy γ(T).
+    #[must_use]
+    pub const fn surface_energy(&self) -> SurfaceEnergy {
+        self.surface_energy
+    }
+}
+
+/// Whose conductivity a regolith form's grains conduct with.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum GrainConductivity {
+    /// The row's own dense solid's, its thermal column ([`ThermalColumns::conductivity`]).
+    Row,
+    /// The form's own, W m⁻¹ K⁻¹, in place of the row's: an amorphous solid's, where the row holds
+    /// its crystal's, evaluated at the temperature with no range held.
+    Form(ThermalForm),
+}
+
+/// A family's grain material: its contact constants, its grains' conductivity and its emissivity,
+/// with their sources.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct FamilyMaterial {
+    contact: ContactConstants,
+    conductivity: GrainConductivity,
+    sources: &'static [Source],
+}
+
+/// A family's reference layer: where its porosity and grain size come from.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ReferenceLayer {
+    /// R10's regolith form of the family ([`form_row`]): its shear table's narrowest layer from
+    /// the surface that holds `depth`, whose porosity it takes, with a grain diameter of its own.
+    FormRow {
+        depth: Metres,
+        grain_diameter: Metres,
+    },
+    /// A porosity and a grain diameter from the family's own sources.
+    Fixed {
+        porosity: f64,
+        grain_diameter: Metres,
+    },
+}
+
+/// The depth at which the silicate form reads R10's regolith of silicate: 7 cm, the deep end of
+/// the Moon's diurnal skin depth, the "4–7 cm" over which Hayne et al. 2017 fit their 55 ± 2 J m⁻²
+/// K⁻¹ s^−½ (JGR Planets 122, 2371, abstract). The narrowest of the Lunar Sourcebook's layers
+/// from the surface that holds it, at either end of 4–7 cm, is its 0–15 cm layer.
+pub(crate) const LUNAR_DIURNAL_SKIN_DEPTH: Metres = Metres::new(0.07);
+
+/// The lunar soil's grain diameter, m: 70 µm, the Lunar Sourcebook's average, its median spanning
+/// 40–130 µm (Carrier, Olhoeft and Mendell 1991, ch. 9, p. 478).
+pub(crate) const LUNAR_SOIL_GRAIN_DIAMETER: Metres = Metres::new(70e-6);
+
+/// The silicate grains' Young's modulus, Pa: (7.8 ± 1.9) × 10¹⁰, a basaltic rock's, as Gundlach
+/// and Blum 2013 take it (Table 1, "Schultz, 1995", not re-read).
+const SILICATE_YOUNGS_MODULUS_PA: f64 = 7.8e10;
+
+/// The silicate grains' Poisson's ratio: 0.25, a basaltic rock's (Gundlach and Blum 2013, Table 1,
+/// "Schultz, 1995", not re-read).
+const SILICATE_POISSON_RATIO: f64 = 0.25;
+
+/// The silicate grains' specific surface energy per kelvin, J m⁻² K⁻¹: d₁ = 6.67 × 10⁻⁵, so that
+/// γ = d₁ T is zero at 0 K and silica's measured 0.02 J m⁻² at 300 K (Kendall et al. 1987, Heim
+/// et al. 1999 and Gundlach et al. 2011, as Gundlach and Blum 2012 cite them, eq. 11, read), an
+/// assumption there; Gundlach and Blum 2013 take it for every silicate (Table 1).
+const SILICATE_SURFACE_ENERGY_J_PER_M2_K: f64 = 6.67e-5;
+
+/// The emissivity's source, for every family's form.
+const EMISSIVITY: Source = source(
+    "emissivity",
+    "`planetary::hooks::surface::REGOLITH_EMISSIVITY`, 0.95, the lunar regolith's (Hayne et al. \
+     2017, JGR Planets 122, 2371, Table A1), read by path: a per-row infrared emissivity is not \
+     modelled",
+    Basis::Fact,
+);
+
+/// The silicate form's grain material and layer.
+const SILICATE_MATERIAL: FamilyMaterial = FamilyMaterial {
+    contact: ContactConstants {
+        youngs_modulus: Pascals::new(SILICATE_YOUNGS_MODULUS_PA),
+        poisson_ratio: SILICATE_POISSON_RATIO,
+        surface_energy: SurfaceEnergy::ProportionalToTemperature {
+            j_per_m2_k: SILICATE_SURFACE_ENERGY_J_PER_M2_K,
+        },
+    },
+    conductivity: GrainConductivity::Row,
+    sources: &[
+        source(
+            "porosity",
+            "R10's regolith of silicate (`hyperion_surface::material::form_row`), read through its \
+             public API: the narrowest layer of its shear table from the surface that holds the \
+             Moon's diurnal skin depth, 7 cm (Hayne et al. 2017's 4–7 cm), the 0–15 cm layer, \
+             n = 1 − 1.50 ÷ 3.1 (Carrier, Olhoeft and Mendell 1991, Lunar Sourcebook, ch. 9, Table \
+             9.4, p. 484, and p. 492)",
+            Basis::Reduced,
+        ),
+        source(
+            "grain diameter",
+            "70 µm: \"The median particle size is 40 to 130 µm, with an average of 70 µm\" \
+             (Carrier, Olhoeft and Mendell 1991, Lunar Sourcebook, ch. 9, p. 478); Gundlach and \
+             Blum 2013 find a grain radius of 48 (+115/−27) µm for the Moon from its inertia (§6)",
+            Basis::Fact,
+        ),
+        EMISSIVITY,
+        source(
+            "Young's modulus, Poisson's ratio",
+            "a basaltic rock's, E (7.8 ± 1.9) × 10¹⁰ Pa and ν 0.25, as Gundlach and Blum 2013 \
+             (Icarus 223, 479, arXiv:1212.3108, Table 1) take them from Schultz 1995, not re-read",
+            Basis::Fact,
+        ),
+        source(
+            "surface energy",
+            "γ = 6.67 × 10⁻⁵ J m⁻² K⁻¹ × T, zero at 0 K and silica's measured 0.02 J m⁻² at 300 K \
+             (Gundlach and Blum 2012, Icarus 219, 618, arXiv:1111.0535, eq. 11, an assumption \
+             there), which Gundlach and Blum 2013 take for every silicate (Table 1)",
+            Basis::Adopted,
+        ),
+    ],
+};
+
+/// Water ice's grains' Young's modulus, Pa: 9.332 × 10⁹, an isotropic polycrystal's, averaged from
+/// single crystals' adiabatic elastic constants by Brillouin spectroscopy at −16 °C, "E = 93.32 ×
+/// 10⁸ N m⁻²" (Gammon, Kiefte, Clouter and Denner 1983, J. Glaciol. 29, 433, Table VIII, read),
+/// held at every temperature: Gundlach and Blum 2015 take 7 × 10⁹ Pa and Ferrari and Lucas 2016
+/// 9 × 10⁹.
+const ICE_YOUNGS_MODULUS_PA: f64 = 9.332e9;
+
+/// Water ice's grains' Poisson's ratio: 0.325, Gammon et al. 1983's isotropic polycrystal average,
+/// 0.32521 at −16 °C (Table VIII, read).
+const ICE_POISSON_RATIO: f64 = 0.325;
+
+/// Water ice's grains' specific surface energy, J m⁻²: 0.19, from the rolling friction of
+/// micrometre ice grains at 189–226 K, "γice = 0.190 J m−2" (Gundlach, Kilias, Beitz and Blum
+/// 2011, Icarus 214, 717, arXiv:1102.0430, abstract, read), ± 0.04 within a literature span of
+/// 0.07–0.37 (Gundlach and Blum 2015, ApJ 798, 34, arXiv:1410.7199, §3.2, read), held at every
+/// temperature as they hold it.
+const ICE_SURFACE_ENERGY_J_PER_M2: f64 = 0.19;
+
+/// The icy regolith's porosity: 0.64 ± 0.08, Europa's globally averaged at ALMA's 1.25 mm, its band
+/// within the diurnal wave's top few centimetres (Thelen et al. 2024, arXiv:2402.01952, Table 3,
+/// read).
+pub(crate) const ICY_REGOLITH_POROSITY: f64 = 0.64;
+
+/// The icy regolith's grain diameter, m: 100 µm, Thelen et al. 2024's "intermediate surface grain
+/// size of 100 µm" (§3, read; tested over 50 µm–1 mm, a radius or a diameter not stated, taken
+/// as a diameter).
+pub(crate) const ICY_REGOLITH_GRAIN_DIAMETER: Metres = Metres::new(100e-6);
+
+/// Water ice's grains' contact constants, crystalline or amorphous.
+const ICE_CONTACT: ContactConstants = ContactConstants {
+    youngs_modulus: Pascals::new(ICE_YOUNGS_MODULUS_PA),
+    poisson_ratio: ICE_POISSON_RATIO,
+    surface_energy: SurfaceEnergy::Constant {
+        j_per_m2: ICE_SURFACE_ENERGY_J_PER_M2,
+    },
+};
+
+/// The sources of water ice's grains' contact constants.
+const ICE_CONTACT_SOURCES: [Source; 2] = [
+    source(
+        "Young's modulus, Poisson's ratio",
+        "an isotropic polycrystal's average of single crystals' adiabatic elastic constants by \
+         Brillouin spectroscopy at −16 °C, E 93.32 × 10⁸ N m⁻² and ν 0.32521 (Gammon, Kiefte, \
+         Clouter and Denner 1983, J. Glaciol. 29, 433, Table VIII), held at every temperature",
+        Basis::Fact,
+    ),
+    source(
+        "surface energy",
+        "0.19 J m⁻², from the rolling friction of micrometre ice grains at 189–226 K (Gundlach, \
+         Kilias, Beitz and Blum 2011, Icarus 214, 717, arXiv:1102.0430, abstract), ± 0.04 within \
+         the literature's 0.07–0.37 (Gundlach and Blum 2015, ApJ 798, 34, arXiv:1410.7199, §3.2), \
+         held at every temperature as they hold it",
+        Basis::Fact,
+    ),
+];
+
+/// The outer system's icy regolith's porosity (P14.T49.l): 0.80, the middle of comet 67P's
+/// "75–85%" from CONSERT's permittivity of its nucleus (Kofman et al. 2015, Science 349, aab0639,
+/// read by P14.T49.j), as fluffy ice: from 26, the porosity of an airless lid's water-ice
+/// reference form ([`LidAir::Airless`]); Europa's crystalline regolith's 0.64
+/// ([`ICY_REGOLITH_POROSITY`]) stays below it, and a lid under an air, Titan's among them, keeps
+/// it.
+pub(crate) const OUTER_ICE_POROSITY: f64 = 0.80;
+
+/// The outer system's icy regolith's grain diameter, m (P14.T49.l): 2 mm, the smallest of the
+/// pebbles of 1–6 mm radius that comet 67P's thermal and gas activity call for (Blum et al. 2017,
+/// arXiv:1710.07846, read by P14.T49.j), taken as the radiative term's grain: the pebbles, not
+/// their micrometre monomers, set the pores across which the photons cross. With
+/// [`OUTER_ICE_POROSITY`] it is an effective parameterisation of the radiative path, not a packing
+/// of dense 2 mm grains, which would lie at about 0.4 (the [module documentation](self)).
+pub(crate) const OUTER_ICE_GRAIN_DIAMETER: Metres = Metres::new(2e-3);
+
+/// Amorphous water ice's conductivity, W m⁻¹ K⁻¹, as Σ cᵢ Tⁱ: 2.34 × 10⁻³ T + 2.8 × 10⁻², Klinger's
+/// estimate for a phonon mean free path of the order of the lattice's spacing (Klinger 1980,
+/// Science 209, 271, as comet nuclei's models take it, Prialnik, Benkhoff and Podolak 2004, in
+/// Comets II, 359; neither re-read): 0.12 at 40 K and 0.29 at 110 K, against the crystal's 14.2 and
+/// 5.2.
+///
+/// Its valid range is amorphous ice's, below the temperature at which the ice crystallises: about
+/// 130–140 K in the laboratory, and lower over a world's age (the lane's recollection of Kouchi et
+/// al. 1994's crystallisation times, not re-read). The form applies it at every temperature of the
+/// solid, so a warmer water-ice lid conducts as amorphous ice where its ice would be crystalline
+/// (Γ 42.5 at 150 K and 134.8 at 273.15 K), Ganymede's at 110 K perhaps among them: a form by
+/// temperature is not modelled (P14.T49.l's records).
+const AMORPHOUS_ICE_CONDUCTIVITY: [f64; 2] = [2.8e-2, 2.34e-3];
+
+/// The outer system's ice form's grain material (P14.T49.l): water ice's contact constants with
+/// amorphous ice's conductivity.
+const OUTER_ICE_MATERIAL: FamilyMaterial = FamilyMaterial {
+    contact: ICE_CONTACT,
+    conductivity: GrainConductivity::Form(ThermalForm::Polynomial(&AMORPHOUS_ICE_CONDUCTIVITY)),
+    sources: &[
+        source(
+            "porosity",
+            "0.80, the middle of comet 67P's 75–85 per cent from CONSERT (Kofman et al. 2015, \
+             Science 349, aab0639), as the outer system's fluffy ice on every airless water-ice \
+             lid: the trans-Neptunian objects' mean inertia, 2.5 ± 0.5 \
+             (Santos-Sanz et al. 2017, A&A 604, A95; not re-read), calls for a far looser \
+             regolith than Europa's 0.64",
+            Basis::Adopted,
+        ),
+        source(
+            "grain diameter",
+            "2 mm, the smallest of 67P's pebbles of 1–6 mm radius (Blum et al. 2017, \
+             arXiv:1710.07846), the radiative term's grain",
+            Basis::Adopted,
+        ),
+        source(
+            "conductivity",
+            "amorphous ice's 2.34 × 10⁻³ T + 2.8 × 10⁻² W m⁻¹ K⁻¹, Klinger's estimate from a \
+             phonon mean free path of the lattice's spacing, not a measurement (Klinger 1980, \
+             Science 209, 271, as Prialnik, Benkhoff and Podolak 2004, Comets II, 359, take it; \
+             not re-read), in place of the row's crystalline 567 ÷ T, at every temperature of the \
+             solid, above the ice's crystallisation too",
+            Basis::Adopted,
+        ),
+        EMISSIVITY,
+        ICE_CONTACT_SOURCES[0],
+        ICE_CONTACT_SOURCES[1],
+    ],
+};
+
+/// The water-ice form's grain material.
+const WATER_ICE_MATERIAL: FamilyMaterial = FamilyMaterial {
+    contact: ICE_CONTACT,
+    conductivity: GrainConductivity::Row,
+    sources: &[
+        source(
+            "porosity",
+            "an icy satellite's regolith, Europa's, at the top few centimetres the diurnal wave \
+             samples: 0.64 ± 0.08, the global weighted average of ALMA's 1.25 mm band (Thelen, de \
+             Kleer, Camarca, Akins, Gurwell, Butler and de Pater 2024, arXiv:2402.01952, Table 3; \
+             its 3.05 and 0.87 mm bands 0.50 (+0.20/−0.10) and 0.52 ± 0.07, its hemispheres \
+             0.75–0.50 leading and 0.50–0.40 trailing, abstract), which the infrared bound agrees \
+             with: at least 0.61 ± 0.1 in the upper centimetres from Galileo PPR, about 5 per \
+             cent more for grains under 1 mm (Lange et al. 2026, arXiv:2604.14374, abstract and \
+             §3.3). Ferrari and Lucas 2016 (A&A 588, A133, §3.3) find that crystalline grains in \
+             tight contact give the Saturnian moons' inertias under 60 only above 0.8. The band's \
+             choice is HYPERION's; no Saturnian moon's porosity was read",
+            Basis::Adopted,
+        ),
+        source(
+            "grain diameter",
+            "100 µm, Thelen et al. 2024's \"intermediate surface grain size of 100 µm\" for \
+             Europa, tested over 50 µm–1 mm (§3), a diameter by assumption; Europa's \"∼50-100 \
+             µm\" (Lange et al. 2026, §2.4, after Hansen and McCord 2004), and Enceladus's \
+             15 ± 5 to 30 ± 10 µm by Cassini VIMS (Jaumann et al. 2008, Icarus 193, 407), \
+             recorded",
+            Basis::Adopted,
+        ),
+        EMISSIVITY,
+        ICE_CONTACT_SOURCES[0],
+        ICE_CONTACT_SOURCES[1],
+    ],
+};
+
+/// Whether a regolith's lid lies under an air (P14.T49.l), which picks its water-ice reference form
+/// under [`RegolithInertiaRules::PoreGas`] ([`RegolithForm::reference_under`]).
+///
+/// The outer system's fluffy ice is the airless lid's: the trans-Neptunian objects' mean inertia of
+/// 2.5 ± 0.5 that it is fitted to is the airless ones' (Santos-Sanz et al. 2017, A&A 604, A95; not
+/// re-read). A lid under an air keeps P14.T49.j's crystalline form, the gas in its pores: the one
+/// measured N₂-aired world of the outer system, Pluto, has a diurnal inertia of 20–30 (Lellouch et
+/// al. 2011, Icarus 214, 701; not re-read), and an air in vapour equilibrium with its ice holds its
+/// frost by latent heat, as [`tenuous`](crate::planetary::chem::tenuous) takes it, so a fluffy dry
+/// lid's cold night is no cold trap for its air. A ground takes it once a pass from the column of
+/// its whole airborne inventory, none of it condensed, so that it cannot feed back on the air it
+/// leaves (lean, 2026-11-01).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum LidAir {
+    /// No air over the lid: under the pore gas's rules, the outer system's ice.
+    Airless,
+    /// An air over the lid, at or above the airless line: P14.T49.j's form at every rule.
+    UnderAir,
+}
+
+/// The grain material and reference layer of `family`'s form under `rules` on a lid under `air`,
+/// `None` for a family with none: under [`RegolithInertiaRules::PoreGas`] an airless lid's
+/// water-ice form is the outer system's ([`OUTER_ICE_MATERIAL`]), and every other is P14.T49.j's.
+#[must_use]
+const fn family_form(
+    family: MechanicsFamily,
+    rules: RegolithInertiaRules,
+    air: LidAir,
+) -> Option<(FamilyMaterial, ReferenceLayer)> {
+    match family {
+        MechanicsFamily::Silicate => Some((
+            SILICATE_MATERIAL,
+            ReferenceLayer::FormRow {
+                depth: LUNAR_DIURNAL_SKIN_DEPTH,
+                grain_diameter: LUNAR_SOIL_GRAIN_DIAMETER,
+            },
+        )),
+        MechanicsFamily::WaterIce => match (rules, air) {
+            (RegolithInertiaRules::Vacuum, _)
+            | (RegolithInertiaRules::PoreGas, LidAir::UnderAir) => Some((
+                WATER_ICE_MATERIAL,
+                ReferenceLayer::Fixed {
+                    porosity: ICY_REGOLITH_POROSITY,
+                    grain_diameter: ICY_REGOLITH_GRAIN_DIAMETER,
+                },
+            )),
+            (RegolithInertiaRules::PoreGas, LidAir::Airless) => Some((
+                OUTER_ICE_MATERIAL,
+                ReferenceLayer::Fixed {
+                    porosity: OUTER_ICE_POROSITY,
+                    grain_diameter: OUTER_ICE_GRAIN_DIAMETER,
+                },
+            )),
+        },
+        MechanicsFamily::Metal
+        | MechanicsFamily::VolatileIce
+        | MechanicsFamily::Salt
+        | MechanicsFamily::Organic => None,
+    }
+}
+
+/// A regolith form: how a substance's grains lie in a regolith, its porosity and grain size, with
+/// the grains' emissivity and the granular model's material constants by family.
+///
+/// [`RegolithForm::reference`] gives each family's reference form; [`RegolithForm::new`] a
+/// layer of the caller's own porosity and grain size, as rendering plan R09's R09.T13.c passes its
+/// layers.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RegolithForm {
+    family: MechanicsFamily,
+    porosity: f64,
+    grain_diameter: Metres,
+    emissivity: f64,
+    contact: ContactConstants,
+    conductivity: GrainConductivity,
+    sources: &'static [Source],
+}
+
+/// Why a [`RegolithForm`] could not be built.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum BuildRegolithFormError {
+    /// The family has no regolith form: no cited grain material constants.
+    NoForm {
+        /// The family asked for.
+        family: MechanicsFamily,
+    },
+    /// The porosity is not above 0 and below 1.
+    Porosity {
+        /// The value given.
+        porosity: f64,
+    },
+    /// The grain diameter is not positive and finite.
+    GrainDiameter {
+        /// The value given.
+        grain_diameter: Metres,
+    },
+}
+
+impl fmt::Display for BuildRegolithFormError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NoForm { family } => write!(f, "the {family:?} family has no regolith form"),
+            Self::Porosity { porosity } => {
+                write!(f, "a porosity of {porosity} is not between 0 and 1")
+            }
+            Self::GrainDiameter { grain_diameter } => write!(
+                f,
+                "a grain diameter of {} m is not positive and finite",
+                grain_diameter.value()
+            ),
+        }
+    }
+}
+
+impl Error for BuildRegolithFormError {}
+
+impl RegolithForm {
+    /// The reference form of `family`'s regolith, `None` for a family with none:
+    /// [`MechanicsFamily::Metal`], [`MechanicsFamily::VolatileIce`], [`MechanicsFamily::Salt`] and
+    /// [`MechanicsFamily::Organic`], none with cited grain-contact constants.
+    ///
+    /// The silicate form takes the porosity of R10's regolith of silicate, the Lunar
+    /// Sourcebook's, through [`form_row`], so that the two cannot disagree.
+    ///
+    /// # Panics
+    ///
+    /// Never: R10's regolith of silicate has a layer from the surface that holds the Moon's
+    /// diurnal skin depth, which `substance_thermal_silicate_form_is_r10_s_regolith` holds.
+    ///
+    /// # Examples
+    ///
+    /// The Moon's soil is about half pore space:
+    ///
+    /// ```
+    /// use hyperion_sim::substance::RegolithForm;
+    /// use hyperion_surface::field::MechanicsFamily;
+    ///
+    /// # fn main() {
+    /// #     assert!(example().is_some(), "every value the example reads is there");
+    /// # }
+    /// # fn example() -> Option<()> {
+    /// let lunar = RegolithForm::reference(MechanicsFamily::Silicate)?;
+    /// assert!((lunar.porosity() - (1.0 - 1.50 / 3.1)).abs() < 1e-12);
+    /// assert!(RegolithForm::reference(MechanicsFamily::Metal).is_none());
+    /// # Some(())
+    /// # }
+    /// ```
+    #[must_use]
+    pub fn reference(family: MechanicsFamily) -> Option<Self> {
+        Self::reference_under(family, RegolithInertiaRules::Vacuum, LidAir::Airless)
+    }
+
+    /// The reference form of `family`'s regolith under `rules` on a lid under `air`, `None` for a
+    /// family with none ([`reference`](Self::reference)'s): under [`RegolithInertiaRules::Vacuum`]
+    /// the forms of P14.T49.j; under [`RegolithInertiaRules::PoreGas`], P14.T49.l's, whose
+    /// water-ice form on an airless lid is the outer system's fluffy amorphous ice (the [module
+    /// documentation](self)), every other form, a water-ice lid's under an air among them, being
+    /// P14.T49.j's ([`LidAir`]).
+    ///
+    /// # Panics
+    ///
+    /// Never, as [`reference`](Self::reference).
+    ///
+    /// # Examples
+    ///
+    /// The outer system's airless ice is looser than Europa's, and conducts as amorphous ice; a lid
+    /// under an air keeps Europa's:
+    ///
+    /// ```
+    /// use hyperion_sim::substance::RegolithForm;
+    /// use hyperion_sim::substance::thermal::{GrainConductivity, LidAir, RegolithInertiaRules};
+    /// use hyperion_surface::field::MechanicsFamily;
+    ///
+    /// # fn main() {
+    /// #     assert!(example().is_some(), "every value the example reads is there");
+    /// # }
+    /// # fn example() -> Option<()> {
+    /// let ice = MechanicsFamily::WaterIce;
+    /// let europa = RegolithForm::reference(ice)?;
+    /// let rules = RegolithInertiaRules::PoreGas;
+    /// let outer = RegolithForm::reference_under(ice, rules, LidAir::Airless)?;
+    /// let aired = RegolithForm::reference_under(ice, rules, LidAir::UnderAir)?;
+    /// assert!(outer.porosity() > europa.porosity());
+    /// assert_eq!(europa.grain_conductivity(), GrainConductivity::Row);
+    /// assert_ne!(outer.grain_conductivity(), GrainConductivity::Row);
+    /// assert_eq!(aired, europa);
+    /// # Some(())
+    /// # }
+    /// ```
+    #[must_use]
+    pub fn reference_under(
+        family: MechanicsFamily,
+        rules: RegolithInertiaRules,
+        air: LidAir,
+    ) -> Option<Self> {
+        let (material, layer) = family_form(family, rules, air)?;
+        let (porosity, grain_diameter) = match layer {
+            ReferenceLayer::FormRow {
+                depth,
+                grain_diameter,
+            } => (
+                narrowest_surface_layer(form_row(MaterialClass::Regolith, family).shear(), depth)
+                    .expect(
+                        "R10's regolith of silicate has a surface layer holding the skin depth, as \
+                         substance_thermal_silicate_form_is_r10_s_regolith holds",
+                    )
+                    .porosity(),
+                grain_diameter,
+            ),
+            ReferenceLayer::Fixed {
+                porosity,
+                grain_diameter,
+            } => (porosity, grain_diameter),
+        };
+        Some(Self {
+            family,
+            porosity,
+            grain_diameter,
+            emissivity: REGOLITH_EMISSIVITY,
+            contact: material.contact,
+            conductivity: material.conductivity,
+            sources: material.sources,
+        })
+    }
+
+    /// A layer of `family`'s grain material at `porosity` (the void share of its volume, above 0
+    /// and below 1) and `grain_diameter`, with its family's contact constants, conductivity and
+    /// emissivity: [`reference`](Self::reference)'s, P14.T49.j's, at every rule.
+    ///
+    /// # Errors
+    ///
+    /// [`BuildRegolithFormError::NoForm`] for a family without a form,
+    /// [`BuildRegolithFormError::Porosity`] for a porosity that is not above 0 and below 1, and
+    /// [`BuildRegolithFormError::GrainDiameter`] for a grain diameter that is not positive and
+    /// finite.
+    pub fn new(
+        family: MechanicsFamily,
+        porosity: f64,
+        grain_diameter: Metres,
+    ) -> Result<Self, BuildRegolithFormError> {
+        let reference = Self::reference(family).ok_or(BuildRegolithFormError::NoForm { family })?;
+        if !(porosity > 0.0 && porosity < 1.0) {
+            return Err(BuildRegolithFormError::Porosity { porosity });
+        }
+        let diameter = grain_diameter.value();
+        if !(diameter.is_finite() && diameter > 0.0) {
+            return Err(BuildRegolithFormError::GrainDiameter { grain_diameter });
+        }
+        Ok(Self {
+            porosity,
+            grain_diameter,
+            ..reference
+        })
+    }
+
+    /// The family of the grains.
+    #[must_use]
+    pub const fn family(&self) -> MechanicsFamily {
+        self.family
+    }
+
+    /// The porosity ψ, the void share of the layer's volume.
+    #[must_use]
+    pub const fn porosity(&self) -> f64 {
+        self.porosity
+    }
+
+    /// The grains' diameter.
+    #[must_use]
+    pub const fn grain_diameter(&self) -> Metres {
+        self.grain_diameter
+    }
+
+    /// The grains' infrared emissivity ε: [`REGOLITH_EMISSIVITY`], the lunar regolith's, for every
+    /// family, a per-row emissivity being not modelled.
+    #[must_use]
+    pub const fn emissivity(&self) -> f64 {
+        self.emissivity
+    }
+
+    /// The grain material's contact constants.
+    #[must_use]
+    pub const fn contact(&self) -> ContactConstants {
+        self.contact
+    }
+
+    /// Whose conductivity its grains conduct with: the row's own, or the form's.
+    #[must_use]
+    pub const fn grain_conductivity(&self) -> GrainConductivity {
+        self.conductivity
+    }
+
+    /// Where the reference form's figures come from: each source's `covers` names `porosity`,
+    /// `grain diameter`, `emissivity`, `Young's modulus`, `Poisson's ratio`, `surface energy` or,
+    /// for a form of its own conductivity, `conductivity`. A form built by [`new`](Self::new) keeps
+    /// them, its porosity and grain size being its caller's.
+    #[must_use]
+    pub const fn sources(&self) -> &'static [Source] {
+        self.sources
+    }
+}
+
+/// The narrowest layer of `shear` from the surface (its top at 0 m) that holds `depth`: R10's
+/// rule for the layer at a depth (`MaterialProperties::shear_layer_at`), among the layers that
+/// reach the surface.
+#[must_use]
+fn narrowest_surface_layer(shear: &[ShearLayer], depth: Metres) -> Option<ShearLayer> {
+    shear
+        .iter()
+        .filter(|layer| layer.top().value() <= 0.0 && depth.value() < layer.bottom().value())
+        .min_by(|a, b| a.bottom().total_cmp(&b.bottom()))
+        .copied()
+}
+
+/// A regolith's thermal inertia, with its parts.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RegolithInertia {
+    inertia_j_per_m2_k_sqrt_s: f64,
+    conductivity_w_per_m_k: f64,
+    contact_conductivity_w_per_m_k: f64,
+    radiative_conductivity_w_per_m_k: f64,
+    gas_conductivity_w_per_m_k: f64,
+    solid_conductivity_w_per_m_k: f64,
+    grain_density: KilogramsPerCubicMetre,
+    bulk_density: KilogramsPerCubicMetre,
+    heat_capacity_j_per_kg_k: f64,
+}
+
+impl RegolithInertia {
+    /// Γ = √(`k_eff` `ρ_bulk` c), J m⁻² K⁻¹ s^−½.
+    #[must_use]
+    pub const fn inertia_j_per_m2_k_sqrt_s(&self) -> f64 {
+        self.inertia_j_per_m2_k_sqrt_s
+    }
+
+    /// `k_eff`, the regolith's conductivity, W m⁻¹ K⁻¹: the contact term plus the radiative, and
+    /// the pore gas's where its pores hold a gas at a positive pressure.
+    #[must_use]
+    pub const fn conductivity_w_per_m_k(&self) -> f64 {
+        self.conductivity_w_per_m_k
+    }
+
+    /// The conduction through the grains' contacts, W m⁻¹ K⁻¹.
+    #[must_use]
+    pub const fn contact_conductivity_w_per_m_k(&self) -> f64 {
+        self.contact_conductivity_w_per_m_k
+    }
+
+    /// The radiation across the pores, W m⁻¹ K⁻¹.
+    #[must_use]
+    pub const fn radiative_conductivity_w_per_m_k(&self) -> f64 {
+        self.radiative_conductivity_w_per_m_k
+    }
+
+    /// The conduction through the gas in the pores, W m⁻¹ K⁻¹ ([`Pores`]): zero in vacuum and at
+    /// zero pressure.
+    #[must_use]
+    pub const fn gas_conductivity_w_per_m_k(&self) -> f64 {
+        self.gas_conductivity_w_per_m_k
+    }
+
+    /// The dense solid's conductivity `k_s`, W m⁻¹ K⁻¹, at the temperature: the row's column, or
+    /// the form's own ([`GrainConductivity`]).
+    #[must_use]
+    pub const fn solid_conductivity_w_per_m_k(&self) -> f64 {
+        self.solid_conductivity_w_per_m_k
+    }
+
+    /// The solid's grain density `ρ_g` at the temperature.
+    #[must_use]
+    pub const fn grain_density(&self) -> KilogramsPerCubicMetre {
+        self.grain_density
+    }
+
+    /// `ρ_bulk` = `ρ_g` (1 − ψ).
+    #[must_use]
+    pub const fn bulk_density(&self) -> KilogramsPerCubicMetre {
+        self.bulk_density
+    }
+
+    /// c, the solid's specific heat at the temperature, J kg⁻¹ K⁻¹.
+    #[must_use]
+    pub const fn heat_capacity_j_per_kg_k(&self) -> f64 {
+        self.heat_capacity_j_per_kg_k
+    }
+
+    /// The dense solid's own inertia √(`k_s` `ρ_g` c), J m⁻² K⁻¹ s^−½: bedrock's, which the
+    /// regolith's is below at every porosity.
+    #[must_use]
+    pub fn solid_inertia_j_per_m2_k_sqrt_s(&self) -> f64 {
+        (self.solid_conductivity_w_per_m_k
+            * self.grain_density.value()
+            * self.heat_capacity_j_per_kg_k)
+            .sqrt()
+    }
+}
+
+/// Why a regolith's thermal inertia could not be evaluated.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum EvaluateRegolithInertiaError {
+    /// The temperature is not positive and finite.
+    Temperature {
+        /// The value given.
+        temperature: Kelvin,
+    },
+    /// The row has no condensed columns: a gas, or a row whose condensed figures were not read.
+    NotCondensed {
+        /// The row.
+        id: SubstanceId,
+    },
+    /// The row has no solid at the temperature: it is above its transition, or its solid's density
+    /// there was not read.
+    NoSolid {
+        /// The row.
+        id: SubstanceId,
+        /// The temperature asked for.
+        temperature: Kelvin,
+    },
+    /// The row has no thermal columns: not modelled.
+    NoThermalColumns {
+        /// The row.
+        id: SubstanceId,
+    },
+    /// The row's family has no regolith form ([`reference_regolith_thermal_inertia`]).
+    NoRegolithForm {
+        /// The row's family.
+        family: MechanicsFamily,
+    },
+    /// The form is of another family than the row's, whose contact constants are not its grains'.
+    FamilyMismatch {
+        /// The row's family.
+        row: MechanicsFamily,
+        /// The form's family.
+        form: MechanicsFamily,
+    },
+}
+
+impl fmt::Display for EvaluateRegolithInertiaError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Temperature { temperature } => {
+                write!(f, "{} K is not a temperature", temperature.value())
+            }
+            Self::NotCondensed { id } => {
+                write!(f, "{} has no condensed columns", id.substance().key())
+            }
+            Self::NoSolid { id, temperature } => write!(
+                f,
+                "{} has no solid at {} K",
+                id.substance().key(),
+                temperature.value()
+            ),
+            Self::NoThermalColumns { id } => {
+                write!(f, "{} has no thermal columns", id.substance().key())
+            }
+            Self::NoRegolithForm { family } => {
+                write!(f, "the {family:?} family has no regolith form")
+            }
+            Self::FamilyMismatch { row, form } => {
+                write!(f, "a {form:?} form cannot hold a {row:?} row's grains")
+            }
+        }
+    }
+}
+
+impl Error for EvaluateRegolithInertiaError {}
+
+/// The thermal inertia of the substance `id` as a dry regolith in vacuum of `form`, at
+/// `temperature` (the [module documentation](self)): [`regolith_thermal_inertia_with_pores`] with
+/// empty pores ([`Pores::Vacuum`]).
+///
+/// # Errors
+///
+/// [`EvaluateRegolithInertiaError::Temperature`] for a temperature that is not positive and finite;
+/// [`NotCondensed`](EvaluateRegolithInertiaError::NotCondensed) for a row without condensed
+/// columns; [`FamilyMismatch`](EvaluateRegolithInertiaError::FamilyMismatch) for a form of another
+/// family than the row's; [`NoThermalColumns`](EvaluateRegolithInertiaError::NoThermalColumns)
+/// for a row without thermal columns; and [`NoSolid`](EvaluateRegolithInertiaError::NoSolid)
+/// above the row's transition, or where its solid's density was not read.
+///
+/// # Examples
+///
+/// The Moon's highland soil at noon of an equatorial day stores tens of SI units, bedrock
+/// thousands:
+///
+/// ```
+/// use hyperion_sim::substance::{RegolithForm, by_key, regolith_thermal_inertia};
+/// use hyperion_sim::units::Kelvin;
+/// use hyperion_surface::field::MechanicsFamily;
+///
+/// let highlands = by_key("feldspathic").ok_or("the registry holds the highlands")?;
+/// let soil = RegolithForm::reference(MechanicsFamily::Silicate).ok_or("silicate has a form")?;
+/// let gamma = regolith_thermal_inertia(highlands, &soil, Kelvin::new(273.15))?;
+/// assert!((30.0..100.0).contains(&gamma.inertia_j_per_m2_k_sqrt_s()));
+/// assert!(gamma.solid_inertia_j_per_m2_k_sqrt_s() > 1_000.0);
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+pub fn regolith_thermal_inertia(
+    id: SubstanceId,
+    form: &RegolithForm,
+    temperature: Kelvin,
+) -> Result<RegolithInertia, EvaluateRegolithInertiaError> {
+    regolith_thermal_inertia_with_pores(id, form, temperature, &Pores::Vacuum)
+}
+
+/// The thermal inertia of the substance `id` as a dry regolith of `form` whose pores hold `pores`,
+/// at `temperature` (P14.T49.l; the [module documentation](self)): `k_eff` is the contact term
+/// plus the radiative, and where the pores hold a gas at a positive pressure, its conduction in
+/// parallel. Empty pores, or a gas at zero pressure, give the law in vacuum to the bit.
+///
+/// # Errors
+///
+/// As [`regolith_thermal_inertia`].
+///
+/// # Examples
+///
+/// Mars's 6 mbar of carbon dioxide raises a basaltic soil's inertia several times over the
+/// vacuum's:
+///
+/// ```
+/// use hyperion_sim::planetary::chem::condense::COLLISION_CONSTANTS;
+/// use hyperion_sim::substance::thermal::{PoreGas, Pores, regolith_thermal_inertia_with_pores};
+/// use hyperion_sim::substance::{RegolithForm, by_key};
+/// use hyperion_sim::units::{Kelvin, Pascals};
+/// use hyperion_surface::field::MechanicsFamily;
+///
+/// let basalt = by_key("basalt_fe").ok_or("the registry holds Mars's basalt")?;
+/// let soil = RegolithForm::reference(MechanicsFamily::Silicate).ok_or("silicate has a form")?;
+/// let co2 = COLLISION_CONSTANTS.iter().find(|c| c.key == "CO2").ok_or("CO₂ has constants")?;
+/// let air = PoreGas::new(Pascals::new(610.0), 44.0, 735.0, *co2)?;
+/// let t = Kelvin::new(214.0);
+/// let vacuum = regolith_thermal_inertia_with_pores(basalt, &soil, t, &Pores::Vacuum)?;
+/// let mars = regolith_thermal_inertia_with_pores(basalt, &soil, t, &Pores::Gas(air))?;
+/// let ratio = mars.inertia_j_per_m2_k_sqrt_s() / vacuum.inertia_j_per_m2_k_sqrt_s();
+/// assert!((2.0..5.0).contains(&ratio), "{ratio}");
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+pub fn regolith_thermal_inertia_with_pores(
+    id: SubstanceId,
+    form: &RegolithForm,
+    temperature: Kelvin,
+    pores: &Pores,
+) -> Result<RegolithInertia, EvaluateRegolithInertiaError> {
+    let t = temperature.value();
+    if !(t.is_finite() && t > 0.0) {
+        return Err(EvaluateRegolithInertiaError::Temperature { temperature });
+    }
+    let row = id.substance();
+    let condensed = row
+        .condensed()
+        .ok_or(EvaluateRegolithInertiaError::NotCondensed { id })?;
+    if condensed.mechanics() != form.family {
+        return Err(EvaluateRegolithInertiaError::FamilyMismatch {
+            row: condensed.mechanics(),
+            form: form.family,
+        });
+    }
+    let columns = row
+        .thermal_columns()
+        .ok_or(EvaluateRegolithInertiaError::NoThermalColumns { id })?;
+    let no_solid = EvaluateRegolithInertiaError::NoSolid { id, temperature };
+    if t > condensed.transition().temperature().value() {
+        return Err(no_solid);
+    }
+    let grain_density = row
+        .grain_density(CondensedPhase::Solid, temperature)
+        .ok_or(no_solid)?;
+    let bulk_density = KilogramsPerCubicMetre::new(grain_density.value() * (1.0 - form.porosity));
+    let heat_capacity = columns.heat_capacity_j_per_kg_k(temperature);
+    let solid = match form.conductivity {
+        GrainConductivity::Row => columns.conductivity_w_per_m_k(temperature),
+        GrainConductivity::Form(own) => own.evaluate(t),
+    };
+    let filling = 1.0 - form.porosity;
+    let radius = form.grain_diameter.value() / 2.0;
+    let contact = form.contact;
+    let nu = contact.poisson_ratio;
+    let hertz = math::cbrt(
+        9.0 * PI / 4.0 * (1.0 - nu * nu) / contact.youngs_modulus.value()
+            * contact.surface_energy.j_per_m2_at(t)
+            / radius,
+    );
+    let contact_conductivity = solid
+        * hertz
+        * (CONTACT_STRUCTURE_F1 * math::exp(CONTACT_STRUCTURE_F2 * filling))
+        * IRREGULAR_GRAIN_FACTOR;
+    let radiative_conductivity = 8.0
+        * STEFAN_BOLTZMANN
+        * form.emissivity
+        * (t * t * t)
+        * (PHOTON_PATH_FACTOR * (1.0 - filling) / filling * radius);
+    let conductivity = contact_conductivity + radiative_conductivity;
+    // A gas term is added only where there is one, so that empty pores are the vacuum's to the bit.
+    let gas = match pores {
+        Pores::Vacuum => None,
+        Pores::Gas(gas) => pore_gas_conductivity_w_per_m_k(gas, form, solid, temperature),
+    };
+    let conductivity = gas.map_or(conductivity, |gas| conductivity + gas);
+    Ok(RegolithInertia {
+        inertia_j_per_m2_k_sqrt_s: (conductivity * bulk_density.value() * heat_capacity).sqrt(),
+        conductivity_w_per_m_k: conductivity,
+        contact_conductivity_w_per_m_k: contact_conductivity,
+        radiative_conductivity_w_per_m_k: radiative_conductivity,
+        gas_conductivity_w_per_m_k: gas.unwrap_or(0.0),
+        solid_conductivity_w_per_m_k: solid,
+        grain_density,
+        bulk_density,
+        heat_capacity_j_per_kg_k: heat_capacity,
+    })
+}
+
+/// The thermal inertia of the substance `id` as a dry regolith in vacuum of its family's
+/// reference form ([`RegolithForm::reference`]) at `temperature`: the law at a crust's lid, as
+/// P14.T54.a passed it to P14.T24.a to version 25, under P14.T49.j's law.
+///
+/// # Errors
+///
+/// [`EvaluateRegolithInertiaError::NotCondensed`] for a row without condensed columns,
+/// [`EvaluateRegolithInertiaError::NoRegolithForm`] for a family without a form, and otherwise
+/// [`regolith_thermal_inertia`]'s.
+pub fn reference_regolith_thermal_inertia(
+    id: SubstanceId,
+    temperature: Kelvin,
+) -> Result<RegolithInertia, EvaluateRegolithInertiaError> {
+    let family = id
+        .substance()
+        .condensed()
+        .ok_or(EvaluateRegolithInertiaError::NotCondensed { id })?
+        .mechanics();
+    let form = RegolithForm::reference(family)
+        .ok_or(EvaluateRegolithInertiaError::NoRegolithForm { family })?;
+    regolith_thermal_inertia(id, &form, temperature)
+}
+
+/// The thermal inertia of the substance `id` at its family's reference form under `rules` on a lid
+/// under `air` ([`RegolithForm::reference_under`]), its pores holding `pores`, at `temperature`:
+/// the law at a crust's lid, the one choke point of P14.T49.l, which a ground's inertia reads at
+/// the rules in force.
+///
+/// Under [`RegolithInertiaRules::Vacuum`] it is [`reference_regolith_thermal_inertia`] to the bit,
+/// its pores taken as empty whatever `pores` holds, as P14.T49.j's law has none; under
+/// [`RegolithInertiaRules::PoreGas`], [`regolith_thermal_inertia_with_pores`] at P14.T49.l's form
+/// for the lid's air.
+///
+/// # Errors
+///
+/// As [`reference_regolith_thermal_inertia`].
+///
+/// # Examples
+///
+/// The same Mars air in the pores of a basaltic lid: ignored under the vacuum's rules, which are
+/// P14.T49.j's law, and read under the pore gas's:
+///
+/// ```
+/// use hyperion_sim::planetary::chem::condense::COLLISION_CONSTANTS;
+/// use hyperion_sim::substance::by_key;
+/// use hyperion_sim::substance::thermal::{
+///     LidAir, PoreGas, Pores, RegolithInertiaRules, reference_regolith_thermal_inertia,
+///     reference_regolith_thermal_inertia_under,
+/// };
+/// use hyperion_sim::units::{Kelvin, Pascals};
+///
+/// let basalt = by_key("basalt_fe").ok_or("the registry holds Mars's basalt")?;
+/// let co2 = COLLISION_CONSTANTS.iter().find(|c| c.key == "CO2").ok_or("CO₂ has constants")?;
+/// let mars = Pores::Gas(PoreGas::new(Pascals::new(610.0), 44.0, 735.0, *co2)?);
+/// let t = Kelvin::new(214.0);
+/// let gamma = |rules| {
+///     reference_regolith_thermal_inertia_under(basalt, t, rules, LidAir::UnderAir, &mars)
+///         .map(|inertia| inertia.inertia_j_per_m2_k_sqrt_s())
+/// };
+/// let vacuum = reference_regolith_thermal_inertia(basalt, t)?.inertia_j_per_m2_k_sqrt_s();
+/// assert!(gamma(RegolithInertiaRules::Vacuum)?.total_cmp(&vacuum).is_eq());
+/// assert!(gamma(RegolithInertiaRules::PoreGas)? > 2.0 * vacuum);
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+pub fn reference_regolith_thermal_inertia_under(
+    id: SubstanceId,
+    temperature: Kelvin,
+    rules: RegolithInertiaRules,
+    air: LidAir,
+    pores: &Pores,
+) -> Result<RegolithInertia, EvaluateRegolithInertiaError> {
+    let family = id
+        .substance()
+        .condensed()
+        .ok_or(EvaluateRegolithInertiaError::NotCondensed { id })?
+        .mechanics();
+    match rules {
+        RegolithInertiaRules::Vacuum => reference_regolith_thermal_inertia(id, temperature),
+        RegolithInertiaRules::PoreGas => {
+            let form = RegolithForm::reference_under(family, rules, air)
+                .ok_or(EvaluateRegolithInertiaError::NoRegolithForm { family })?;
+            regolith_thermal_inertia_with_pores(id, &form, temperature, pores)
+        }
+    }
+}
+
+/// Which law of a regolith's inertia a ground reads (P14.T49.l): the pore gas from generator
+/// version 26, and in the tests the vacuum too, their oracle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum RegolithInertiaRules {
+    /// Version 25's and before: P14.T49.j's law, a dry regolith in vacuum at every pressure, its
+    /// water-ice form Europa's crystalline regolith.
+    Vacuum,
+    /// Version 26's: the gas in the pores at the air's pressure ([`Pores`]), and the outer system's
+    /// fluffy amorphous ice as an airless lid's water-ice form ([`RegolithForm::reference_under`],
+    /// [`LidAir`]).
+    PoreGas,
+}
+
+impl RegolithInertiaRules {
+    /// The rules in force: the pore gas; in the tests, the rules a test's switch sets on its
+    /// thread ([`with_regolith_inertia`]).
+    #[must_use]
+    pub(crate) fn in_force() -> Self {
+        #[cfg(test)]
+        if let Some(rules) = REGOLITH_INERTIA_RULES.with(core::cell::Cell::get) {
+            return rules;
+        }
+        Self::PoreGas
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The regolith inertia's rules a test sets on its thread, `None` for the pore gas.
+    static REGOLITH_INERTIA_RULES: core::cell::Cell<Option<RegolithInertiaRules>> =
+        const { core::cell::Cell::new(None) };
+}
+
+/// `run`'s result with the regolith inertia's rules `rules` on this thread, the vacuum the tests'
+/// oracle; the pore gas is set back after, a panic in `run` included.
+#[cfg(test)]
+pub(crate) fn with_regolith_inertia<R>(rules: RegolithInertiaRules, run: impl FnOnce() -> R) -> R {
+    /// Sets the thread's rules back as it drops.
+    struct Restore(Option<RegolithInertiaRules>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            REGOLITH_INERTIA_RULES.with(|cell| cell.set(self.0));
+        }
+    }
+    let _restore = Restore(REGOLITH_INERTIA_RULES.with(|cell| cell.replace(Some(rules))));
+    run()
+}
+
+/// Zehner and Schlünder's shape factor `C_f` of a packed bed's grains, dimensionless: 1.4, theirs
+/// for broken particles, against 1.25 for spheres and 2.5 for cylinders (Zehner and Schlünder 1970,
+/// Chem. Ing. Tech. 42, 933, as Tsotsas's chapter of the VDI Heat Atlas gives them; not re-read): a
+/// regolith's grains are broken rock and ice.
+pub(crate) const PACKED_BED_SHAPE_FACTOR: f64 = 1.4;
+
+/// The power of (1 − ψ) ÷ ψ in Zehner and Schlünder's shape B = `C_f` ((1 − ψ) ÷ ψ)^(10/9), their
+/// fit to packed beds' measured conductivities (Zehner and Schlünder 1970; not re-read).
+const PACKED_BED_SHAPE_EXPONENT: f64 = 10.0 / 9.0;
+
+/// The thermal accommodation coefficient α of the pore gas on the grains, dimensionless: 1, full
+/// accommodation, the limit of rough grains whose surfaces hold an adsorbed layer of the gas,
+/// adopted (Kennard 1938's jump distance, l ∝ (2 − α) ÷ α; not re-read). A coefficient of 0.8
+/// would lengthen the jump by half.
+pub(crate) const THERMAL_ACCOMMODATION: f64 = 1.0;
+
+/// Eucken's factor, the translational share of a gas's conductivity per its viscosity in units of
+/// R ÷ M: 9 ÷ 4, so that k = η (`c_v` + (9 ÷ 4) R ÷ M) (Eucken 1913; Poling, Prausnitz and
+/// O'Connell 2001, The Properties of Gases and Liquids, eq. 10-3.3, λM′ ÷ η`C_v` = 1 + (9 ÷ 4) ÷
+/// (`C_v` ÷ R); not re-read). It reads carbon dioxide's 0.0108 W m⁻¹ K⁻¹ at 214 K and nitrogen's
+/// 0.0096 at 94 K, within about 7 per cent of the measured gases' 0.0105 and 0.0090 as the lane
+/// recalled them (not re-read).
+const EUCKEN_FACTOR: f64 = 9.0 / 4.0;
+
+/// Grams in a kilogram, for the molar masses in g mol⁻¹.
+const GRAMS_PER_KILOGRAM: f64 = 1_000.0;
+
+/// The gas in a regolith's pores (P14.T49.l): its pressure, its mean molar mass and specific heat,
+/// and the Lennard-Jones constants of its most abundant species, from which its conductivity
+/// ([`conductivity_w_per_m_k`](Self::conductivity_w_per_m_k)) and its temperature-jump length
+/// ([`jump_length`](Self::jump_length)) follow at the regolith's temperature.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PoreGas {
+    pressure: Pascals,
+    molar_mass_g_per_mol: f64,
+    specific_heat_j_per_kg_k: f64,
+    collision: CollisionConstants,
+}
+
+/// Why a [`PoreGas`] could not be built.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum BuildPoreGasError {
+    /// The pressure is not finite and at least zero.
+    Pressure {
+        /// The value given.
+        pressure: Pascals,
+    },
+    /// The molar mass is not positive and finite.
+    MolarMass {
+        /// The value given, g mol⁻¹.
+        molar_mass_g_per_mol: f64,
+    },
+    /// The specific heat is not finite and above the gas's R ÷ M, so that its `c_v` is not
+    /// positive.
+    SpecificHeat {
+        /// The value given, J kg⁻¹ K⁻¹.
+        specific_heat_j_per_kg_k: f64,
+    },
+    /// The Lennard-Jones constants are not positive and finite.
+    Collision {
+        /// The species' key.
+        key: &'static str,
+    },
+}
+
+impl fmt::Display for BuildPoreGasError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Pressure { pressure } => {
+                write!(
+                    f,
+                    "a pressure of {} Pa is not a pore gas's",
+                    pressure.value()
+                )
+            }
+            Self::MolarMass {
+                molar_mass_g_per_mol,
+            } => write!(
+                f,
+                "a molar mass of {molar_mass_g_per_mol} g/mol is not positive and finite"
+            ),
+            Self::SpecificHeat {
+                specific_heat_j_per_kg_k,
+            } => write!(
+                f,
+                "a specific heat of {specific_heat_j_per_kg_k} J/kg/K leaves the gas no positive c_v"
+            ),
+            Self::Collision { key } => {
+                write!(
+                    f,
+                    "{key}'s Lennard-Jones constants are not positive and finite"
+                )
+            }
+        }
+    }
+}
+
+impl Error for BuildPoreGasError {}
+
+impl PoreGas {
+    /// The gas at `pressure` of mean molar mass `molar_mass_g_per_mol`, g mol⁻¹, and specific heat
+    /// at constant pressure `specific_heat_j_per_kg_k`, J kg⁻¹ K⁻¹, whose most abundant species has
+    /// the Lennard-Jones constants `collision` ([`COLLISION_CONSTANTS`]).
+    ///
+    /// [`COLLISION_CONSTANTS`]: crate::planetary::chem::condense::COLLISION_CONSTANTS
+    ///
+    /// # Errors
+    ///
+    /// [`BuildPoreGasError::Pressure`] for a pressure that is not finite and at least zero;
+    /// [`BuildPoreGasError::MolarMass`] for a molar mass that is not positive and finite;
+    /// [`BuildPoreGasError::SpecificHeat`] for a specific heat that is not finite and above R ÷ M;
+    /// and [`BuildPoreGasError::Collision`] for constants that are not positive and finite.
+    pub fn new(
+        pressure: Pascals,
+        molar_mass_g_per_mol: f64,
+        specific_heat_j_per_kg_k: f64,
+        collision: CollisionConstants,
+    ) -> Result<Self, BuildPoreGasError> {
+        let p = pressure.value();
+        if !(p.is_finite() && p >= 0.0) {
+            return Err(BuildPoreGasError::Pressure { pressure });
+        }
+        if !(molar_mass_g_per_mol.is_finite() && molar_mass_g_per_mol > 0.0) {
+            return Err(BuildPoreGasError::MolarMass {
+                molar_mass_g_per_mol,
+            });
+        }
+        let r_specific = MOLAR_GAS_CONSTANT / (molar_mass_g_per_mol / GRAMS_PER_KILOGRAM);
+        if !(specific_heat_j_per_kg_k.is_finite() && specific_heat_j_per_kg_k > r_specific) {
+            return Err(BuildPoreGasError::SpecificHeat {
+                specific_heat_j_per_kg_k,
+            });
+        }
+        let (d, well) = (collision.diameter_m, collision.well_depth_k);
+        if !(d.is_finite() && d > 0.0 && well.is_finite() && well > 0.0) {
+            return Err(BuildPoreGasError::Collision { key: collision.key });
+        }
+        Ok(Self {
+            pressure,
+            molar_mass_g_per_mol,
+            specific_heat_j_per_kg_k,
+            collision,
+        })
+    }
+
+    /// Its pressure.
+    #[must_use]
+    pub const fn pressure(&self) -> Pascals {
+        self.pressure
+    }
+
+    /// Its mean molar mass, g mol⁻¹.
+    #[must_use]
+    pub const fn molar_mass_g_per_mol(&self) -> f64 {
+        self.molar_mass_g_per_mol
+    }
+
+    /// Its specific heat at constant pressure, J kg⁻¹ K⁻¹.
+    #[must_use]
+    pub const fn specific_heat_j_per_kg_k(&self) -> f64 {
+        self.specific_heat_j_per_kg_k
+    }
+
+    /// The Lennard-Jones constants of its most abundant species.
+    #[must_use]
+    pub const fn collision(&self) -> CollisionConstants {
+        self.collision
+    }
+
+    /// Its specific gas constant R ÷ M, J kg⁻¹ K⁻¹.
+    #[must_use]
+    fn specific_gas_constant_j_per_kg_k(&self) -> f64 {
+        MOLAR_GAS_CONSTANT / (self.molar_mass_g_per_mol / GRAMS_PER_KILOGRAM)
+    }
+
+    /// Its dynamic viscosity at `temperature` (positive and finite), Pa s: Chapman and Enskog's
+    /// first approximation, η = (5 ÷ 16) √(π m k T) ÷ (π d² Ω^(2,2)*), with m its mean molecular mass
+    /// and Neufeld, Janzen and Aziz 1972's collision integral, as the condensates' fall speed reads
+    /// it ([`condense`](crate::planetary::chem::condense)).
+    #[must_use]
+    pub fn viscosity_pa_s(&self, temperature: Kelvin) -> f64 {
+        let t = temperature.value();
+        let molecule = self.molar_mass_g_per_mol / GRAMS_PER_KILOGRAM * BOLTZMANN_CONSTANT
+            / MOLAR_GAS_CONSTANT;
+        let diameter = self.collision.diameter_m;
+        5.0 / 16.0 * (PI * molecule * BOLTZMANN_CONSTANT * t).sqrt()
+            / (PI * diameter * diameter * collision_integral(t / self.collision.well_depth_k))
+    }
+
+    /// Its conductivity at `temperature` (positive and finite), W m⁻¹ K⁻¹: Eucken's, η (`c_v` +
+    /// (9 ÷ 4) R ÷ M), `c_v` = `c_p` − R ÷ M (`EUCKEN_FACTOR`), the free gas's at any pressure.
+    #[must_use]
+    pub fn conductivity_w_per_m_k(&self, temperature: Kelvin) -> f64 {
+        let r = self.specific_gas_constant_j_per_kg_k();
+        self.viscosity_pa_s(temperature) * (self.specific_heat_j_per_kg_k - r + EUCKEN_FACTOR * r)
+    }
+
+    /// Its temperature-jump length l at `temperature` (positive and finite): Kennard's jump
+    /// distance at both walls of a gap, the modified mean free path of Zehner, Bauer and
+    /// Schlünder's model, l = 2 (2 − α) ÷ α · √(2π R T ÷ M) · `k_f` ÷ (p (2 `c_p` − R ÷ M)), α
+    /// `THERMAL_ACCOMMODATION`: about 14 µm in Mars's carbon dioxide at 6 mbar and 214 K, and
+    /// 30 nm in Titan's nitrogen. Infinite at zero pressure.
+    #[must_use]
+    pub fn jump_length(&self, temperature: Kelvin) -> Metres {
+        let t = temperature.value();
+        let r = self.specific_gas_constant_j_per_kg_k();
+        let alpha = THERMAL_ACCOMMODATION;
+        Metres::new(
+            2.0 * (2.0 - alpha) / alpha
+                * (2.0 * PI * r * t).sqrt()
+                * self.conductivity_w_per_m_k(temperature)
+                / (self.pressure.value() * (2.0 * self.specific_heat_j_per_kg_k - r)),
+        )
+    }
+}
+
+/// What fills a regolith's pores (P14.T49.l).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Pores {
+    /// Nothing: the law in vacuum (P14.T49.j's).
+    Vacuum,
+    /// A gas, its conduction in parallel with the grains' contacts and radiation.
+    Gas(PoreGas),
+}
+
+/// The bound on |x| under which [`cell_moments`] sums its series, where the closed form's division
+/// by x would lose precision.
+const CELL_SERIES_BOUND: f64 = 0.25;
+
+/// The terms of [`cell_moments`]'s series: 0.25³² ≈ 5 × 10⁻²⁰, below a double's rounding.
+const CELL_SERIES_TERMS: u32 = 32;
+
+/// J₁ = ∫₀¹ s ÷ (1 − x s) ds and J₂ = ∫₀¹ s² ÷ (1 − x s) ds for x < 1, `one_less` being 1 − x as
+/// its caller computes it without the cancellation: by their series Σ xᵏ ÷ (k + 2) and Σ xᵏ ÷ (k +
+/// 3) where |x| < `CELL_SERIES_BOUND`, and otherwise from J₀ = −ln(1 − x) ÷ x by Jₘ = (Jₘ₋₁ − 1 ÷
+/// m) ÷ x.
+#[must_use]
+fn cell_moments(x: f64, one_less: f64) -> (f64, f64) {
+    if x.abs() < CELL_SERIES_BOUND {
+        let (mut first, mut second, mut power) = (0.0, 0.0, 1.0);
+        for k in 0..CELL_SERIES_TERMS {
+            first += power / f64::from(k + 2);
+            second += power / f64::from(k + 3);
+            power *= x;
+        }
+        (first, second)
+    } else {
+        let zeroth = -math::ln(one_less) / x;
+        let first = (zeroth - 1.0) / x;
+        (first, (first - 0.5) / x)
+    }
+}
+
+/// The conduction through the gas `gas` in the pores of `form`, whose grains conduct
+/// `solid_w_per_m_k`, at `temperature` (positive and finite), W m⁻¹ K⁻¹: the free gas's
+/// conductivity times [`packed_bed_ratio`] at the form's porosity and the gas's jump length over
+/// the grain diameter; `None` at zero pressure, and at a pressure so small that the jump length
+/// overflows, where the term's limit is the vacuum's.
+#[must_use]
+fn pore_gas_conductivity_w_per_m_k(
+    gas: &PoreGas,
+    form: &RegolithForm,
+    solid_w_per_m_k: f64,
+    temperature: Kelvin,
+) -> Option<f64> {
+    if gas.pressure.value() <= 0.0 {
+        return None;
+    }
+    let free = gas.conductivity_w_per_m_k(temperature);
+    let jump = gas.jump_length(temperature).value() / form.grain_diameter.value();
+    if !jump.is_finite() {
+        return None;
+    }
+    Some(free * packed_bed_ratio(form.porosity, solid_w_per_m_k / free, jump))
+}
+
+/// Zehner, Bauer and Schlünder's packed bed's conductivity over its gas's, with no contact
+/// flattening and no radiation, at the porosity ψ `porosity` (above 0 and below 1), the grains'
+/// conductivity over the gas's κ `ratio` (positive) and the jump length over the grain diameter ℓ
+/// `jump` (at least 0): (1 − √φ) ψ ÷ (ψ + ℓ) + √φ `k_c` (the [module documentation](self)). At ℓ =
+/// 0 it is Zehner and Schlünder's continuum bed; it tends to 0 as ℓ grows. Its shape B is fitted
+/// to beds of porosity up to about 0.6, and extrapolated above.
+#[must_use]
+fn packed_bed_ratio(porosity: f64, ratio: f64, jump: f64) -> f64 {
+    let shape = PACKED_BED_SHAPE_FACTOR
+        * math::powf((1.0 - porosity) / porosity, PACKED_BED_SHAPE_EXPONENT);
+    // 1 ÷ k_G, the Smoluchowski effect's reduction of the gas in the cell.
+    let reach = 1.0 + jump;
+    let n = (1.0 - shape) * reach + shape * (1.0 - 1.0 / ratio);
+    // 1 − N ÷ (1 + ℓ), from the cell's ends, B (ℓ + 1 ÷ κ) ÷ (1 + ℓ): positive at any pressure.
+    let one_less = shape * (jump + 1.0 / ratio) / reach;
+    let (first, second) = cell_moments(n / reach, one_less);
+    let core = 2.0 * (first + (shape - 1.0) * second) / reach;
+    let root = (1.0 - porosity).sqrt();
+    let bypass = (1.0 - root) * porosity / (porosity + jump);
+    bypass + root * core
+}
+
+/// A source of the values `covers` names, for the rows' and the forms' tables.
+#[must_use]
+const fn source(covers: &'static str, citation: &'static str, basis: Basis) -> Source {
+    Source {
+        covers,
+        citation,
+        basis,
+    }
+}

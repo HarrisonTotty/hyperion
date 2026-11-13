@@ -80,6 +80,11 @@ interface ReadingProps {
   readonly wide?: boolean;
 }
 
+/**
+ * One of the primary's readings: its value, or the em dash with why. Each is given `stale`, the
+ * em dash too, so that each keeps its slot for the `S`, which the em dash, having no last value,
+ * leaves empty (plan 05, P05.T14).
+ */
 function Reading({ label, reading, stale, wide = false }: ReadingProps) {
   return reading.kind === "value" ? (
     <SystemReading
@@ -94,6 +99,7 @@ function Reading({ label, reading, stale, wide = false }: ReadingProps) {
       label={label}
       value={null}
       wide={wide}
+      stale={stale}
       {...(reading.why === undefined ? {} : { missingWhy: reading.why })}
     />
   );
@@ -191,7 +197,10 @@ export interface PrimaryReadingsProps {
   readonly host: HostBody;
   /** The time the summary describes, from which a death is counted. */
   readonly at: UniverseTime;
-  /** Whether the answer is a stale snapshot, for a time the chart has left or a failed request. */
+  /**
+   * Whether the answer is a stale snapshot: one the link no longer backs, for a time the chart has
+   * left, or kept after a failed request.
+   */
   readonly stale: boolean;
 }
 
@@ -210,14 +219,26 @@ export interface PrimaryReadingsProps {
  * remnant has nothing whose light or size could be read, so those rows are left out. A death inside
  * the clock window reads `DIES IN 312 yr`, or `DIED 312 yr AGO` for one before the time shown. Its
  * mass now stands in the system's rows beside its initial mass. A stale answer's values are muted
- * and trail the guide's `S`.
+ * and each trails the guide's `S`, words that are values among them (a kind, a phase, a class,
+ * `NONE`), in the slot each reading keeps while live, after its unit and before the words beside
+ * it (`DIED 312 yr S AGO`); the em dash keeps its slot and takes none (plan 05, P05.T14).
+ *
+ * `NEBULA RADIUS` is the planetary nebula's, read always, the em dash where it is not modelled and
+ * `NONE` where the star lights none (the orchestrator's ruling 149.4), but for a neutron star or a
+ * black hole, which never light one: a planetary nebula comes only from a star of 0.8–8 M☉ that
+ * leaves a white dwarf (Kwitter and Henry 2022, PASP 134, 022001, §1), and a neutron star or a
+ * black hole from one above about 8 M☉, through core collapse (Smartt 2009, ARA&A 47, 63). So for
+ * those two the row is left out, as a row that does not apply is (plan 09, P09.T44), until
+ * P09.T41.c's remnant rows take its place. A star shown as its light shows it keeps the row by the
+ * kind it then had.
  */
 export function PrimaryReadings({ host, at, stale }: PrimaryReadingsProps) {
   const gone = host.kind === "no_remnant";
-  const radius =
-    host.kind === "neutron_star" || host.kind === "black_hole"
-      ? shown(formatRadiusKm(host.radiusRsun * KM_PER_RSUN), "km")
-      : shown(formatRadiusRsun(host.radiusRsun), <SolarUnit quantity="radius" />);
+  // A core-collapse remnant: read in km (ruling 36), and lighting no planetary nebula (P09.T44).
+  const collapsed = host.kind === "neutron_star" || host.kind === "black_hole";
+  const radius = collapsed
+    ? shown(formatRadiusKm(host.radiusRsun * KM_PER_RSUN), "km")
+    : shown(formatRadiusRsun(host.radiusRsun), <SolarUnit quantity="radius" />);
   return (
     <>
       <Reading label="KIND" reading={shown(objectKindLabel(host.kind))} stale={stale} wide />
@@ -280,13 +301,15 @@ export function PrimaryReadings({ host, at, stale }: PrimaryReadingsProps) {
             )}
             stale={stale}
           />
-          <Reading
-            label="NEBULA RADIUS"
-            reading={modelled(host.planetaryNebula, (nebula) =>
-              shown(formatSignificant(nebula.radiusLy), "ly"),
-            )}
-            stale={stale}
-          />
+          {collapsed ? null : (
+            <Reading
+              label="NEBULA RADIUS"
+              reading={modelled(host.planetaryNebula, (nebula) =>
+                shown(formatSignificant(nebula.radiusLy), "ly"),
+              )}
+              stale={stale}
+            />
+          )}
           <Reading label="EVENTS" reading={eventsShown(host.activeEvents)} stale={stale} wide />
         </>
       )}

@@ -43,6 +43,9 @@ export function objectKindLabel(kind: ObjectKindDto): string {
     case "hot_subdwarf":
       label = "HOT SUBDWARF";
       break;
+    case "stripped_helium_star":
+      label = "STRIPPED HELIUM STAR";
+      break;
     case "white_dwarf":
       label = "WHITE DWARF";
       break;

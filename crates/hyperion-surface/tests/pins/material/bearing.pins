@@ -1,0 +1,9 @@
+# Pinned figures (hyperion_testkit::pins): re-pin them by test name with `just repin <test>`.
+material_bearing_capacity_on_slope_keeps_its_bits.cases = 7
+material_bearing_capacity_on_slope_keeps_its_bits.cohesionless_phi_30deg_at_10deg = 56305.47175827266
+material_bearing_capacity_on_slope_keeps_its_bits.lander_2_soil_at_10deg = 209915.94084549276
+material_bearing_capacity_on_slope_keeps_its_bits.lunar_1m_at_10deg = 3730032.6365767326
+material_bearing_capacity_on_slope_keeps_its_bits.lunar_1m_at_20deg = 2331035.4377538115
+material_bearing_capacity_on_slope_keeps_its_bits.lunar_1m_just_under_phi = 5386.7445905839395
+material_bearing_capacity_on_slope_keeps_its_bits.lunar_30_60cm_weightless_at_10deg = 2766499.1796659296
+material_bearing_capacity_on_slope_keeps_its_bits.mars_drift_at_10deg = 27841.611749292802

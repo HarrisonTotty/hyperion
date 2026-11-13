@@ -14,14 +14,20 @@
  * the sky's cube under its own name, so that one sky is baked once. A drawer asked for during a
  * loss is made at the restore ({@link makeViewFrameDrawer}).
  */
+import type { AtmosphereLeversOverride } from "../../../../preload/api";
 import type { BodyIdHex } from "@hyperion/protocol";
 
+import { type Vec3, vec3 } from "../../geometry/vec3";
 import type { ElementSize } from "../../lib/useElementSize";
+import type { AtmosphereViewReport } from "../../view/atmosphere/AtmosphereCache";
+import type { BodyLightSources } from "../../view/bodies/draw";
 import type { ColourTokens } from "../../spatial/paint";
 import type { LitRegime } from "../../view/bodies/regime";
+import type { SystemHostDiscs } from "../../view/lighting/hostLights";
 import type { CameraPose } from "../../view/camera/pose";
 import type { CameraTarget, RenderStyle } from "../../view/camera/state";
 import type { StyleAvailability } from "../../view/engine/platform";
+import { relativeToCamera } from "../../view/coords/relative";
 import { EngineUnavailable } from "../../view/engine/resilientEngine";
 import type { RenderEngine, RenderView, ViewSize } from "../../view/engine/types";
 import { controlEv100, type ExposureControl, exposureScale } from "../../view/photometry/exposure";
@@ -30,12 +36,18 @@ import {
   renderViewport,
   spritesAtScale,
 } from "../../view/photoreal/internalScale";
-import { overlaySubmission } from "../../view/photoreal/overlay";
+import { overlayDrawsAt, overlaySubmission } from "../../view/photoreal/overlay";
 import { PhotorealRenderer, type PhotorealStatus } from "../../view/photoreal/renderer";
+import type { ViewBudget } from "../../view/budget/viewBudget";
 import type { Histogram } from "../../view/post/histogram";
-import type { MeterMode } from "../../view/post/meter";
-import { type QualitySetting, SETTINGS } from "../../view/quality/qualitySetting";
-import type { ViewScene, ViewStar } from "../../view/scene/model";
+import type { HistogramMeter } from "../../view/post/meter";
+import type { BalancedWhite } from "../../view/post/whiteBalance";
+import {
+  type GeometrySettings,
+  type QualitySetting,
+  SETTINGS,
+} from "../../view/quality/qualitySetting";
+import { sceneOrigins, type ViewScene, type ViewStar } from "../../view/scene/model";
 import { BandLayer } from "../../view/sky/band";
 import type { BakedCube } from "../../view/sky/bake";
 import { skyCubeCacheOf } from "../../view/sky/cache";
@@ -43,20 +55,48 @@ import { cameraFromObserverM } from "../../view/sky/camera";
 import { SkyCubeLayer } from "../../view/sky/cubeLayer";
 import { HostDiscLayer } from "../../view/sky/disc";
 import { skySpriteStars } from "../../view/sky/sprites";
+import type { TerrainAnnunciation } from "../../view/terrain/annunciation";
+import type { ClassMapSource } from "../../view/terrain/classMap";
+import { TerrainFailureGuard } from "../../view/terrain/failureGuard";
+import {
+  LiveFrameTerrain,
+  surveyEdgeViewsOf,
+  type ViewTerrainInput,
+  type ViewTerrainSession,
+  type WireframeTerrainFrame,
+  type WireframeTerrainInput,
+  wireframeTerrainOf,
+} from "../../view/terrain/frameTerrain";
+import { type HandoverReliefSource, selectionViewport } from "../../view/terrain/handover";
+import type { TerrainViewReport } from "../../view/terrain/session";
 import {
   buildWireframeDrawList,
   type DrawAnchor,
+  type DrawnLineOfSight,
+  type DrawnSurveyEdge,
+  type LineOfSightPoint,
   type SpriteStar,
   viewStrokesAt,
 } from "../../view/wireframe/drawList";
-import { WireframeRenderer } from "../../view/wireframe/submit";
+import { NO_WIREFRAME_TERRAIN, WireframeRenderer } from "../../view/wireframe/submit";
 import { photorealFrame } from "./photorealFrame";
+import {
+  atmosphereFrameOf,
+  cameraObservers,
+  cloudFreeGrounds,
+  type ViewAtmosphereInput,
+} from "./viewAtmosphere";
 import { bakeInputOf, type DrawnSky } from "./useViewSky";
-import { runPose, type ViewRun } from "./viewRun";
+import { runPose, sceneStarsStandIn, type ViewRun } from "./viewRun";
 
 /** What one frame of a view draws from. */
 export interface ViewFrameInputs {
   readonly run: ViewRun;
+  /**
+   * Whether its list draws the own ship's hull (`DrawOptions.ownHull`): drawn where absent; hidden
+   * for the descent spike's main view, whose camera stands inside it.
+   */
+  readonly ownHull?: "drawn" | "hidden";
   /** The view's stage, as laid out, or `null` before it is. */
   readonly size: ElementSize | null;
   /** The colour tokens, read from the canvas, or `null` while it is not connected. */
@@ -66,10 +106,22 @@ export interface ViewFrameInputs {
    * control and for an instrument the display's control (Design note 11).
    */
   readonly exposure: ExposureControl;
+  /**
+   * The white its photorealistic frames' tone step adapts the light to (`WHITE BALANCE`; the
+   * owner's report, 2026-11-05): the display's, found from the `PRIMARY` view's lights under
+   * `HOST` (`frameWhiteBalance`), which every view takes, as it takes the primary's exposure;
+   * `null` under `D65`. The wireframe takes none.
+   */
+  readonly white: BalancedWhite | null;
   /** The interim stars (R02.T16), drawn until the sky arrives. */
   readonly stars: ReadonlyArray<ViewStar>;
   /** The sky (R06), or `null` before it arrives. */
   readonly sky: DrawnSky | null;
+  /**
+   * The scene's system's discs on their own (`host_discs`; plans R06 and R07), which light a served
+   * scene until a sky that names its system is held, or `null`.
+   */
+  readonly hostDiscs: SystemHostDiscs | null;
   readonly selection: CameraTarget | null;
   /** The style its budget draws (`ViewBudget.style`). */
   readonly style: RenderStyle;
@@ -78,6 +130,27 @@ export interface ViewFrameInputs {
    * photorealistic frame's forms, and the render resolution its scale is a fraction of.
    */
   readonly setting: QualitySetting;
+  /**
+   * How its geometry is drawn (plan R14, Design note 17): a launch's `--geometry` over its
+   * setting's, which its mesh bodies' figures take (R14.T4.a); the setting's where absent.
+   */
+  readonly geometry: GeometrySettings | undefined;
+  /**
+   * The setting whose sizes its photorealistic frame's air is drawn at: the low setting's while
+   * its frame-rate floor has stepped it down (`BudgetedScale.airStepped`; the owner's report,
+   * 2026-11-01); {@link setting} where absent.
+   */
+  readonly atmosphereSetting?: QualitySetting | undefined;
+  /**
+   * A frame profile's atmosphere levers over its setting's (plan R08, R08.T8.d), which its
+   * photorealistic frame's atmospheres draw with; the setting's where absent.
+   */
+  readonly atmosphereLevers?: AtmosphereLeversOverride | undefined;
+  /**
+   * Whether its frame-rate floor holds its scale at its lowest step (`BudgetedScale.atLowestStep`),
+   * when its large discs' limbs take fewer cells (R07.T8.i); `false` where absent.
+   */
+  readonly floorLowest?: boolean | undefined;
   /**
    * Its budget's internal scale, a photorealistic frame's (`ViewBudget.renderScale`), of the render
    * resolution (`renderViewport`).
@@ -88,17 +161,211 @@ export interface ViewFrameInputs {
   /**
    * The operator's meter where the view is the exposure's source, whose photorealistic frames then
    * take the histogram {@link ViewFrameDrawer.takeHistogram} hands over; `null` for a view that
-   * meters nothing, an instrument (Design note 11), whose frames take none.
+   * meters nothing, an instrument (Design note 11), or whose meter reads no histogram, `INCIDENT`'s
+   * (ux-calls-view, item 3b), whose frames take none.
    */
-  readonly meter: MeterMode | null;
+  readonly meter: HistogramMeter | null;
+  /**
+   * Whether a photorealistic frame is presented, or held back while its exposure's cut awaits its
+   * reading (`AutoExposure.holds`; fix-view-light), the scene target drawn and its histogram taken;
+   * presented where absent.
+   */
+  readonly present?: boolean | undefined;
+  /**
+   * The class maps its lit bodies' discs shade with (plan R10, R10.T10.d), made on the drawer's
+   * engine: the terrain session's (R10.T16.a), every view's alike; absent, every disc is uniform.
+   */
+  readonly classMaps?: ClassMapSource | undefined;
+  /**
+   * Its lit bodies' reliefs, by which a body hands over to terrain (plan R10, R10.T10.e): the
+   * terrain session's (R10.T16.a), every view's alike; absent, none hands over.
+   */
+  readonly reliefs?: HandoverReliefSource | undefined;
+  /**
+   * The view's terrain this frame (plan R10, R10.T16.c): the terrain session, the view's ID in it
+   * and the frame's time, from which the drawer makes its photorealistic frame's `FrameTerrain`
+   * (`LiveFrameTerrain`: the terrain of the bodies it hands over, on the drawer's engine), its
+   * wireframe frame's terrain (`wireframeTerrainOf`, R10.T11) and its draw list's survey edges, in
+   * either style (`surveyEdgeViewsOf`); absent, a body handed over is drawn as a mesh body is, the
+   * wireframe draws no terrain and no survey edge is marked.
+   */
+  readonly terrain?: ViewTerrainInput | undefined;
+  /**
+   * What the view's terrain readout reads of its line of sight this frame, which its tripod marks
+   * at the picture's centre (plan R10, R10.T12): with a point while the readout stands over ground,
+   * surveyed or not, and the point's slant range where it is known; without one at `NO GROUND`.
+   * Absent for a view that states no readout, which draws no tripod: an instrument
+   * (decision-r10-t12-leans §3), a view under `TERRAIN NOT AVAILABLE` (§5), or one whose readout
+   * gives way for room. The drawer keeps the tripod's give-way from frame to frame while it is
+   * given.
+   */
+  readonly lineOfSightPoint?: LineOfSightPoint | undefined;
+  /**
+   * The view's `GRID` (the owner's requests, 2026-10-31 and 2026-11-05): `false` (`OFF`) draws its
+   * photorealistic frame as the picture alone, its overlay keeping only the stand-ins and survey
+   * edges (`overlayDrawList`), its symbology pass drawn only for them ({@link overlayDrawsAt}), no
+   * line-of-sight mark, and its marks those the picture draws, unlabelled
+   * ({@link ViewFrameDrawn.anchors}); `ON` unless given, the whole of R02's list cased over it. The
+   * wireframe style draws its list whatever it is.
+   */
+  readonly grid?: boolean | undefined;
+  /**
+   * The view's atmospheres this frame (plan R08, R08.T10.b): its handle on the device's cache, the
+   * scene its requests take and the frame's time. The drawer notes the frame's lit bodies with the
+   * cache before it draws, each at its regime on the last photorealistic plan, and draws each
+   * body's air the cache holds tables for; a wireframe frame notes none wanted, and draws none.
+   * Absent, no atmosphere is noted or drawn.
+   */
+  readonly atmosphere?: ViewAtmosphereInput | undefined;
 }
 
 /** What a frame drew. */
 export interface ViewFrameDrawn {
-  /** The marks where the frame drew them, device px. */
+  /**
+   * The marks where the frame drew them, device px; over a photorealistic image with its `GRID` at
+   * `OFF`, only those the picture draws, unlabelled (`bareAnchors`).
+   */
   readonly anchors: ReadonlyArray<DrawAnchor>;
   /** The style it was drawn in: the wireframe while the photorealistic pipelines compile. */
   readonly drawnStyle: RenderStyle;
+  /**
+   * Whether its stars were the kept scene's own field, standing in for the interim field
+   * ({@link sceneStarsStandIn}), so that its `STARS` line reads `SCENE TEST FIELD` (plan R08,
+   * R08.T10.b; `decision-r08-t10b-ux.md`, item 1).
+   */
+  readonly sceneStars: boolean;
+  /**
+   * The terrain's annunciation of the bodies the frame hands over, for the view's label block
+   * (`labelStatements(run, terrain)`, plan R10, R10.T16.c), in either style (the wireframe's from
+   * R10.T11); `null` with none.
+   */
+  readonly terrain: TerrainAnnunciation | null;
+  /**
+   * Whether the frame drew any decoration on the bodies it hands over (`LiveFrameTerrain.decorated`;
+   * plan R11, R11.T1), for the view's `DECORATION ON`: what was drawn, never the setting alone, and
+   * never in the wireframe.
+   */
+  readonly decoration: boolean;
+  /**
+   * The contour interval the frame's wireframe terrain is drawn at, m, for the view's label block's
+   * `CONTOUR INTERVAL` line (plan R10, R10.T11); `null` for a frame that draws no contours.
+   */
+  readonly contourIntervalM: number | null;
+  /**
+   * The bodies' survey edges the frame marked, each with the range to its nearest point seen
+   * (`WireframeDrawList.surveyEdges`), for the view's list notes (plan R10, R10.T16.c;
+   * decision-r10-t16-review §1); none without a terrain session.
+   */
+  readonly surveyEdges: ReadonlyArray<DrawnSurveyEdge>;
+  /**
+   * The line-of-sight mark the frame drew (`WireframeDrawList.lineOfSight`, plan R10, R10.T12): its
+   * box where it is drawn, which the view's mark labels stand clear of; `null` where the frame was
+   * given no line of sight.
+   */
+  readonly lineOfSight: DrawnLineOfSight | null;
+  /**
+   * What the atmosphere cache said of the frame's bodies (`AtmosphereView.noteFrame`'s report, plan
+   * R08, R08.T10.b), for its label block; `null` without {@link ViewFrameInputs.atmosphere}.
+   */
+  readonly atmosphere: AtmosphereViewReport | null;
+}
+
+/**
+ * A photorealistic frame's marks with its view's `GRID` at `OFF`, the picture alone (the owner's
+ * request and its UX ruling, 2026-11-05): those the picture draws, a body's disc drawn larger than
+ * its symbol and a craft on its silhouette, each picked where it stands and none labelled; a body
+ * drawn as its symbol is left out, so that no press picks what is not drawn.
+ */
+function bareAnchors(anchors: ReadonlyArray<DrawAnchor>): ReadonlyArray<DrawAnchor> {
+  const drawn: DrawAnchor[] = [];
+  for (const anchor of anchors) {
+    if (anchor.label === null) {
+      drawn.push(anchor);
+      continue;
+    }
+    switch (anchor.label.kind) {
+      case "symbol":
+        break;
+      case "target":
+        drawn.push({ ...anchor, label: null });
+        break;
+    }
+  }
+  return drawn;
+}
+
+/**
+ * The size a view presents its frames at, device px: its stage's laid-out size times its
+ * device-pixel ratio, rounded, at least 1 on each axis; its canvas's, which its wireframe draws at
+ * and its photorealistic frame is presented at.
+ */
+export function presentedViewport(size: ElementSize): ViewSize {
+  const ratio = size.devicePixelRatio;
+  return {
+    widthPx: Math.max(1, Math.round(size.widthPx * ratio)),
+    heightPx: Math.max(1, Math.round(size.heightPx * ratio)),
+  };
+}
+
+/**
+ * What a view draws this frame, for the terrain session (plan R10, R10.T16.a): its run's scene and
+ * pose, its field of view, its presented size, its budget's style and streaming priority, the
+ * style it last drew in, the setting and its drawer's last plan's regimes; `null` while its stage
+ * is not laid out, when it draws nothing.
+ *
+ * @param regimes - Its drawer's last photorealistic plan's regimes ({@link ViewFrameDrawer.regimes}).
+ * @param regimesFromM - The centres from the camera of the bodies they hand over, when they were
+ *   planned ({@link ViewFrameDrawer.regimesFromM}), or `null` where they are not known.
+ * @param streamPriority - Its budget's terrain streaming priority (`ViewBudget.streamPriority`).
+ * @param drawnStyle - The style its last frame was drawn in ({@link ViewFrameDrawn.drawnStyle}), by
+ *   which the session's passes take the views that hand a body over (the batch review's S8).
+ */
+export function terrainReportOf(
+  inputs: ViewFrameInputs,
+  regimes: ReadonlyMap<BodyIdHex, LitRegime>,
+  streamPriority: ViewBudget["streamPriority"],
+  drawnStyle: RenderStyle,
+  regimesFromM: ReadonlyMap<BodyIdHex, Vec3> | null,
+): TerrainViewReport | null {
+  const { run, size } = inputs;
+  if (size === null) {
+    return null;
+  }
+  const presentedPx = presentedViewport(size);
+  return {
+    scene: run.scene,
+    pose: runPose(run),
+    fovXRad: (run.camera.fovDeg * Math.PI) / 180,
+    presentedPx,
+    selectionPx: selectionViewport(presentedPx, size.devicePixelRatio),
+    style: inputs.style,
+    drawnStyle,
+    setting: inputs.setting,
+    streamPriority,
+    regimes,
+    regimesFromM,
+  };
+}
+
+/**
+ * The style a view's frame is drawn in, as near as it is known before the draw (plan R10, R10.T16;
+ * the batch review's S8): photorealistic where the view may draw so and its photorealistic
+ * pipelines are made, and the wireframe otherwise, its stand-in while they are made, after a device
+ * loss, or for good where they failed. A frame refused within its draw (a loss meanwhile) is drawn
+ * in the wireframe all the same, which its {@link ViewFrameDrawn.drawnStyle} says. The frame's
+ * draw list is built for this style: its survey edges (R10.T16.c), and its bodies' datums inside
+ * their figures where it is photorealistic (`DrawOptions.datumInside`, R10.T16.g), so that a frame
+ * refused within its draw draws that one wireframe frame with them.
+ */
+export function frameStyleOf(
+  inputs: Pick<ViewFrameInputs, "style" | "availability">,
+  status: PhotorealStatus,
+): RenderStyle {
+  return inputs.style === "photorealistic" &&
+    inputs.availability.photorealistic &&
+    status === "ready"
+    ? "photorealistic"
+    : "wireframe";
 }
 
 /**
@@ -139,7 +406,34 @@ export class ViewFrameDrawer {
   /** A sky whose bake failed is not baked again until another sky or a restore. */
   #failedFor: DrawnSky | null = null;
   #frameFailed = false;
+  /**
+   * The guards of the survey edges (S5) and of the wireframe's terrain (R10.T11), R10.T16.e's: a
+   * failure said once until the call succeeds again, and the session's terrain faulted once it has
+   * failed on for 250 ms; made anew for each session (`#guardsFor`).
+   */
+  #edgesGuard = new TerrainFailureGuard();
+  #wireGuard = new TerrainFailureGuard();
+  /** The session the guards guard. */
+  #guarded: ViewTerrainSession | null = null;
+  /** The contour interval the view's wireframe terrain last held, its hysteresis's (R10.T11). */
+  #contourIntervalM: number | null = null;
   #regimes: ReadonlyMap<BodyIdHex, LitRegime> = new Map();
+  #regimesFromM: ReadonlyMap<BodyIdHex, Vec3> = new Map();
+  /** The bodies the last photorealistic plan drew by their disc tables (R08.T16.b), its hysteresis's. */
+  #tabled: ReadonlySet<BodyIdHex> = new Set();
+  /** The bodies the previous frame's plan handed over, with their subtense there (R10.T15.b.2). */
+  #handedOver: ReadonlyMap<BodyIdHex, number> = new Map();
+  /**
+   * Each body's sources on its last photorealistic plan (`BodyFramePlan.sources`), the lights the
+   * atmosphere cache builds its medium for (R08.T10.b); none before such a frame.
+   */
+  #sources: ReadonlyMap<BodyIdHex, BodyLightSources> = new Map();
+  /**
+   * Whether the view's tripod gave way in its last frame drawn (plan R10, R10.T12), the give-way's
+   * hysteresis, which its next frame's draw list starts from (`LineOfSightOptions.yielded`); `false`
+   * before its first, and once a frame is drawn with no line of sight.
+   */
+  #lineOfSightYielded = false;
   #sized: ViewSize | null = null;
   readonly #unsubscribe: () => void;
 
@@ -185,11 +479,35 @@ export class ViewFrameDrawer {
   }
 
   /**
+   * Each lit body's regime in its last photorealistic plan (R07's, with T10.e's `terrain`), the
+   * hysteresis's previous frame, by which the terrain session takes the bodies it hands over
+   * (plan R10, R10.T16.a's report); none before such a frame. A frame drawn in the wireframe plans
+   * no regimes and leaves them as they were.
+   */
+  get regimes(): ReadonlyMap<BodyIdHex, LitRegime> {
+    return this.#regimes;
+  }
+
+  /**
+   * Each body {@link ViewFrameDrawer.regimes} hand over (their `terrain`), its centre from the
+   * camera when they were planned, m along the galactic axes (plan R10, R10.T16.b's report; the
+   * owner's Mac A/B); none before such a frame.
+   */
+  get regimesFromM(): ReadonlyMap<BodyIdHex, Vec3> {
+    return this.#regimesFromM;
+  }
+
+  /**
    * The latest histogram read back since the last call (`PhotorealRenderer.takeHistogram`), or
    * `undefined` where none has arrived: always, for a view whose frames carry no meter.
    */
   takeHistogram(): Histogram | undefined {
     return this.#photoreal.takeHistogram();
+  }
+
+  /** Drops the histograms of frames drawn before a cut (`PhotorealRenderer.dropHistograms`). */
+  dropHistograms(): void {
+    this.#photoreal.dropHistograms();
   }
 
   /** Draws one frame, or nothing (`null`) while the stage is not laid out. */
@@ -199,18 +517,35 @@ export class ViewFrameDrawer {
       return null;
     }
     const ratio = size.devicePixelRatio;
-    const viewport = {
-      widthPx: Math.max(1, Math.round(size.widthPx * ratio)),
-      heightPx: Math.max(1, Math.round(size.heightPx * ratio)),
-    };
+    const viewport = presentedViewport(size);
+    // Its terrain selects and hands over at its CSS px, whatever the display's density.
+    const selection = selectionViewport(viewport, ratio);
     if (this.#sized?.widthPx !== viewport.widthPx || this.#sized.heightPx !== viewport.heightPx) {
       this.#view.resize(viewport);
       this.#sized = viewport;
     }
     const camera = { pose: runPose(run), fovXRad: (run.camera.fovDeg * Math.PI) / 180 };
+    // Its hulls' faces, in both styles, by the launch's geometry or its setting's (plan R14).
+    const geometry = inputs.geometry ?? SETTINGS[inputs.setting].geometry;
+    if (this.#wireframe.geometry !== geometry) {
+      this.#wireframe.setGeometry(geometry);
+    }
     const ev100 = controlEv100(inputs.exposure);
+    // The style this frame is drawn in, as near as it is known before the draw: photorealistic
+    // where it may draw so and its pipelines are made (the batch review's S8).
+    const triesPhotoreal =
+      inputs.style === "photorealistic" &&
+      inputs.availability.photorealistic &&
+      this.#photoreal.status !== "failed";
+    // Offline (no server) the interim field is empty, and a kept scene's own stars, as
+    // `ATMOSPHERE TEST` carries (plan R08, R08.T10.b), stand in for the field where no sky is drawn
+    // either; R06's star layer is the server's. Every other kept scene has none.
+    const sceneStars = sceneStarsStandIn(run.scene.stars, inputs.stars, inputs.sky !== null);
+    // The style this frame is foreseen to draw in, the one its list is built for: a frame that
+    // falls back to the wireframe within its draw keeps that style's survey edges and inside datum.
+    const style = frameStyleOf(inputs, this.#photoreal.status);
     const list = buildWireframeDrawList(
-      { ...run.scene, stars: inputs.stars },
+      { ...run.scene, stars: sceneStars ? run.scene.stars : inputs.stars },
       camera,
       viewport,
       tokens,
@@ -224,40 +559,185 @@ export class ViewFrameDrawer {
         // The guide's CSS-pixel widths at the display's ratio, never under 2 device pixels.
         ...viewStrokesAt(ratio),
         skyStars: inputs.sky === null ? null : skySprites(inputs.sky, camera.pose, run.scene),
+        // The surveys' edges, in both styles (R10.T16.c), in the style the frame draws.
+        surveyEdges:
+          inputs.terrain === undefined
+            ? []
+            : this.#surveyEdges(inputs.terrain, run.scene, camera, viewport, style),
+        // The bodies' datums inside their figures over the image, the wireframe's centred on them
+        // (R10.T16.g).
+        datumInside: style === "photorealistic",
+        // The tripod at the picture's centre where the readout has a point, and its give-way's
+        // state from the frame before (R10.T12); none over the picture alone at GRID OFF, whose
+        // survey edges then keep no ticks clear of it (2026-11-05).
+        lineOfSight:
+          inputs.lineOfSightPoint === undefined ||
+          (style === "photorealistic" && inputs.grid === false)
+            ? null
+            : { ...inputs.lineOfSightPoint, yielded: this.#lineOfSightYielded },
+        ...(inputs.ownHull === undefined ? {} : { ownHull: inputs.ownHull }),
       },
     );
+    this.#lineOfSightYielded = list.lineOfSight?.yielded ?? false;
+    // The frame's bodies noted with the atmosphere cache before the draw, which takes the tables
+    // the cache holds after it (R08.T10.b).
+    const air = inputs.atmosphere;
+    const atmosphere =
+      air === undefined
+        ? null
+        : air.view.noteFrame(
+            atmosphereFrameOf(
+              run.scene,
+              this.#regimes,
+              this.#sources,
+              air,
+              triesPhotoreal,
+              cameraObservers(run.scene, camera.pose),
+              cloudFreeGrounds(inputs.classMaps),
+            ),
+          );
     const cube = this.#cubeFor(inputs.sky, inputs.setting);
     const exposed = exposureScale(ev100);
     let drawn = false;
-    if (
-      inputs.style === "photorealistic" &&
-      inputs.availability.photorealistic &&
-      this.#photoreal.status !== "failed"
-    ) {
-      drawn = this.#drawPhotoreal(inputs, tokens, viewport, camera, list, cube, exposed);
+    let terrain: TerrainAnnunciation | null = null;
+    let decoration = false;
+    if (triesPhotoreal) {
+      const photoreal = this.#drawPhotoreal(
+        inputs,
+        tokens,
+        { presentedPx: viewport, selectionPx: selection },
+        camera,
+        list,
+        cube,
+        exposed,
+      );
+      drawn = photoreal.drawn;
+      terrain = photoreal.terrain;
+      decoration = photoreal.decorated;
     }
-    if (!drawn) {
+    let contourIntervalM: number | null = null;
+    if (drawn) {
+      // A photorealistic frame states no interval for its pose (R10.T12.b).
+      inputs.terrain?.intervals?.forget(inputs.terrain.view);
+    } else {
+      // The bodies this view hands over to the wireframe's passes (R10.T11).
+      const wire =
+        inputs.terrain === undefined
+          ? null
+          : this.#wireTerrain(inputs.terrain, {
+              view: inputs.terrain.view,
+              scene: run.scene,
+              camera,
+              viewport,
+              selectionPx: selection,
+              strokeScale: list.strokeScale,
+              lowSetting: inputs.setting === "low",
+              tokens,
+              occluderSlopePx: list.occluderSlopePx,
+              nowMs: inputs.terrain.nowMs,
+              previousIntervalM: this.#contourIntervalM,
+              intervals: inputs.terrain.intervals,
+            });
+      if (wire !== null) {
+        terrain = wire.annunciation;
+        contourIntervalM = wire.intervalM;
+        this.#contourIntervalM = wire.heldIntervalM;
+      }
       this.#wireframe.render(
         this.#view,
         list,
         camera,
         viewport,
         cube === null ? [] : [this.#cubes.draw(cube, "display", exposed)],
+        wire ?? NO_WIREFRAME_TERRAIN,
       );
     }
-    return { anchors: list.anchors, drawnStyle: drawn ? "photorealistic" : "wireframe" };
+    return {
+      anchors: drawn && inputs.grid === false ? bareAnchors(list.anchors) : list.anchors,
+      drawnStyle: drawn ? "photorealistic" : "wireframe",
+      sceneStars,
+      terrain,
+      decoration,
+      contourIntervalM,
+      surveyEdges: list.surveyEdges,
+      lineOfSight: list.lineOfSight,
+      atmosphere,
+    };
+  }
+
+  /**
+   * The wireframe's terrain this frame (`wireframeTerrainOf`, plan R10, R10.T11), or none where it
+   * cannot be drawn: a loss (`EngineUnavailable`) passes in silence, and anything else, a bug, is
+   * reported once until it is drawn again, so that the view draws on, as the survey edges do; once
+   * it has failed for `ANNUNCIATION_ONSET_MS`, the session's terrain is faulted (R10.T16.e).
+   */
+  #wireTerrain(
+    terrain: ViewTerrainInput,
+    input: WireframeTerrainInput,
+  ): WireframeTerrainFrame | null {
+    const session = terrain.source;
+    return this.#guardsFor(session).wire.run(
+      () => wireframeTerrainOf(session, input),
+      null,
+      terrain.nowMs,
+      {
+        describe: `the wireframe terrain of ${this.#name} could not be drawn:`,
+        onFault: () => {
+          session.failComputation();
+        },
+      },
+    );
+  }
+
+  /** The guards of `session`'s calls, made anew when the session changes (R10.T16.e). */
+  #guardsFor(session: ViewTerrainSession): {
+    readonly edges: TerrainFailureGuard;
+    readonly wire: TerrainFailureGuard;
+  } {
+    if (session !== this.#guarded) {
+      this.#guarded = session;
+      this.#edgesGuard = new TerrainFailureGuard();
+      this.#wireGuard = new TerrainFailureGuard();
+    }
+    return { edges: this.#edgesGuard, wire: this.#wireGuard };
   }
 
   #drawPhotoreal(
     inputs: ViewFrameInputs,
     tokens: ColourTokens,
-    viewport: ViewSize,
+    sizes: { readonly presentedPx: ViewSize; readonly selectionPx: ViewSize },
     camera: { readonly pose: CameraPose; readonly fovXRad: number },
     list: ReturnType<typeof buildWireframeDrawList>,
     cube: BakedCube | null,
     exposed: number,
-  ): boolean {
+  ): {
+    readonly drawn: boolean;
+    readonly terrain: TerrainAnnunciation | null;
+    readonly decorated: boolean;
+  } {
     const { sky, run } = inputs;
+    const grid = inputs.grid ?? true;
+    const { presentedPx: viewport, selectionPx } = sizes;
+    const airView = inputs.atmosphere?.view;
+    const reportAirFailure =
+      airView === undefined
+        ? undefined
+        : (body: BodyIdHex, error: unknown, viewName: string): void => {
+            airView.reportDrawFailure(body, error, viewName);
+          };
+    // The view's own terrain of the session's passes, for this frame alone (R10.T16.c).
+    const terrain =
+      inputs.terrain === undefined
+        ? undefined
+        : new LiveFrameTerrain(inputs.terrain.source, {
+            view: inputs.terrain.view,
+            camera: { orientation: camera.pose.orientation, fovXRad: camera.fovXRad },
+            presentedPx: viewport,
+            selectionPx,
+            exposureScale: exposed,
+            occluderSlopePx: list.occluderSlopePx,
+            nowMs: inputs.terrain.nowMs,
+          });
     try {
       if (sky !== null && sky !== this.#bandFor) {
         this.#band.update(
@@ -277,26 +757,83 @@ export class ViewFrameDrawer {
           run,
           pose: camera.pose,
           viewport: internal,
+          // The hand-over's pixel, which the internal scale must not move (R10.T10.g), at the
+          // selection's CSS px.
+          presentedPx: viewport,
+          selectionPx,
           setting: inputs.setting,
+          geometry: inputs.geometry,
+          atmosphereSetting: inputs.atmosphereSetting,
+          atmosphereLevers: inputs.atmosphereLevers,
+          floorLowest: inputs.floorLowest,
           exposureScale: exposed,
+          white: inputs.white,
           list: { ...list, sprites: spritesAtScale(list.sprites, viewport, internal) },
           sky,
+          hostDiscs: inputs.hostDiscs,
           band: sky === null ? null : this.#band,
           discs: this.#discs,
           cube: cube === null ? null : this.#cubes.draw(cube, "hdr", exposed),
           previousRegimes: this.#regimes,
+          previousTabled: this.#tabled,
+          previousHandedOver: this.#handedOver,
           meter: inputs.meter,
-          // The marks cased over the tone-mapped image at the canvas's resolution (R07.T16.a), and
-          // the craft on their silhouettes (R07.T16.e).
-          overlay: overlaySubmission(this.#wireframe, list, tokens, camera, viewport),
+          present: inputs.present,
+          classMaps: inputs.classMaps,
+          reliefs: inputs.reliefs,
+          terrain,
+          // The marks cased over the tone-mapped image at the canvas's resolution (R07.T16.a), the
+          // craft on their silhouettes (R07.T16.e), and each handed-over body's datum giving way
+          // over its surveyed ground, built once the renderer has the plan (R10.T16.f); at GRID OFF
+          // the stand-ins and survey edges alone, and no pass where there are none (the owner's
+          // request, 2026-11-05).
+          overlay: overlayDrawsAt(list, grid)
+            ? (surveyed, hiders) =>
+                overlaySubmission(
+                  this.#wireframe,
+                  list,
+                  tokens,
+                  camera,
+                  viewport,
+                  surveyed,
+                  grid,
+                  hiders,
+                )
+            : null,
+          atmospheres: inputs.atmosphere?.tablesOf,
+          // Each body's ground drawn emitting where its record's field is above the cut (R08.T18.a).
+          groundFields: inputs.atmosphere?.groundFieldOf,
+          // A disc beneath a gas envelope's air on that air's ground, not its 1-bar figure (R08.T16.a.2).
+          discGrounds: inputs.atmosphere?.discGroundOf,
+          // A body's air that throws as it is drawn is the cache's to hold failed (R08.T10.b;
+          // decision-r08-t10b-leans §2).
+          atmosphereFailed: reportAirFailure,
         }),
       );
       if (plan === null) {
-        return false;
+        return { drawn: false, terrain: null, decorated: false };
       }
       this.#regimes = plan.regimes;
+      const origins = sceneOrigins(run.scene);
+      const fromCamera = new Map<BodyIdHex, Vec3>();
+      for (const [body, regime] of plan.regimes) {
+        if (regime === "terrain") {
+          fromCamera.set(
+            body,
+            relativeToCamera({ kind: "body", body, m: vec3(0, 0, 0) }, camera.pose, origins),
+          );
+        }
+      }
+      this.#regimesFromM = fromCamera;
+      this.#tabled = plan.tabled;
+      this.#handedOver = plan.handedOver;
+      this.#sources = plan.sources;
       this.#frameFailed = false;
-      return true;
+      return {
+        drawn: true,
+        terrain: terrain?.annunciation ?? null,
+        decorated: terrain?.decorated ?? false,
+      };
     } catch (error: unknown) {
       // A creation refused between a device loss and its restore: this frame draws the
       // wireframe, and the next tries again; said once until a frame draws or a restore.
@@ -304,8 +841,36 @@ export class ViewFrameDrawer {
         console.error(`the photorealistic frame of ${this.#name} could not be drawn:`, error);
         this.#frameFailed = true;
       }
-      return false;
+      return { drawn: false, terrain: null, decorated: false };
     }
+  }
+
+  /**
+   * The survey edges the frame marks (`surveyEdgeViewsOf`), or none where they cannot be made: a
+   * loss (`EngineUnavailable`) passes in silence, and anything else, a bug, is reported once until
+   * they are made again, so that the view draws on (the batch review's S5); once they have failed
+   * for `ANNUNCIATION_ONSET_MS`, the session's terrain is faulted (`TerrainFailureGuard`;
+   * R10.T16.e), since the guide requires the edge wherever surveyed terrain meets unsurveyed ground.
+   */
+  #surveyEdges(
+    terrain: ViewTerrainInput,
+    scene: ViewScene,
+    camera: { readonly pose: CameraPose; readonly fovXRad: number },
+    viewport: ViewSize,
+    style: RenderStyle,
+  ): ReturnType<typeof surveyEdgeViewsOf> {
+    const session = terrain.source;
+    return this.#guardsFor(session).edges.run(
+      () => surveyEdgeViewsOf(session, terrain.view, scene, camera, viewport, style),
+      [],
+      terrain.nowMs,
+      {
+        describe: `the survey edges of ${this.#name} could not be marked:`,
+        onFault: () => {
+          session.failComputation();
+        },
+      },
+    );
   }
 
   #cubeFor(sky: DrawnSky | null, setting: QualitySetting): BakedCube | null {
@@ -331,13 +896,17 @@ export class ViewFrameDrawer {
     }
   }
 
-  /** Releases the renderers, the layers, the view's hold on the cube, and the view itself. */
+  /**
+   * Releases the renderers, the layers, the view's hold on the cube, and the view itself. The cube
+   * is let go as the cache's spare (`SkyCubeCache.letGo`), so that a stage remounted for a new scene
+   * of the same sky takes it up again.
+   */
   dispose(): void {
     this.#unsubscribe();
     this.#wireframe.dispose();
     this.#photoreal.dispose();
     this.#band.dispose();
-    skyCubeCacheOf(this.#engine).release(this.#name);
+    skyCubeCacheOf(this.#engine).letGo(this.#name);
     this.#cubes.dispose();
     this.#view.dispose();
   }

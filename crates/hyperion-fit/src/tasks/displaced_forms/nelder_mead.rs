@@ -71,14 +71,32 @@ impl Bounded {
     /// Whether `value` lies within `fraction` of the box's width (on its scale) of an end.
     #[must_use]
     pub fn at_edge(self, value: f64, fraction: f64) -> bool {
+        self.at_low_end(value, fraction) || self.at_high_end(value, fraction)
+    }
+
+    /// Whether `value` lies within `fraction` of the box's width (on its scale) of its least end.
+    #[must_use]
+    pub fn at_low_end(self, value: f64, fraction: f64) -> bool {
         let (a, b) = self.ends();
-        let s = if self.log {
+        self.scaled(value) - a <= fraction * (b - a)
+    }
+
+    /// Whether `value` lies within `fraction` of the box's width (on its scale) of its greatest
+    /// end.
+    #[must_use]
+    pub fn at_high_end(self, value: f64, fraction: f64) -> bool {
+        let (a, b) = self.ends();
+        b - self.scaled(value) <= fraction * (b - a)
+    }
+
+    /// `value` on the scale the parameter moves on.
+    #[must_use]
+    fn scaled(self, value: f64) -> f64 {
+        if self.log {
             math::ln(value.max(self.lo))
         } else {
             value
-        };
-        let width = b - a;
-        s - a <= fraction * width || b - s <= fraction * width
+        }
     }
 }
 
@@ -281,7 +299,11 @@ mod tests {
             stop,
         );
         assert!(boxes[0].at_edge(m.values[0], 1e-6), "{m:?}");
+        assert!(boxes[0].at_high_end(m.values[0], 1e-6) && !boxes[0].at_low_end(m.values[0], 1e-6));
         assert!(!boxes[0].at_edge(0.0, 1e-3));
+        // On a log box the ends are judged in ln: ln(0.01009 ÷ 0.01) is within 10⁻³ of the width.
+        assert!(boxes[1].at_low_end(0.010_09, 1e-3) && !boxes[1].at_high_end(0.010_09, 1e-3));
+        assert!(!boxes[1].at_low_end(0.0102, 1e-3));
     }
 
     #[test]

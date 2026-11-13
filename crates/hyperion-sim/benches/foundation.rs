@@ -51,7 +51,7 @@ fn mixed_ids() -> Vec<SystemId> {
                 band: Layer::ALL[usize::try_from(below(7)).unwrap()],
                 level: 0,
                 cell: [0, 1, 2].map(|_| u8::try_from(below(16)).unwrap()),
-                index: u16::try_from(below(8_192)).unwrap(),
+                index: u32::try_from(below(8_192)).unwrap(),
             }
         };
         let id: SystemId = match i % 11 {

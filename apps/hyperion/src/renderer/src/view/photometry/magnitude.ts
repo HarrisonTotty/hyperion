@@ -16,7 +16,10 @@
  * Allen's value, Cox (ed.), _Allen's Astrophysical Quantities_, 4th ed. (2000), §15 (Crumey cites
  * the edition as Cox 1999); Crumey, "Human contrast threshold and astronomical visibility", MNRAS
  * 442 (2014) 2600, §2, which takes the same zero point. Cross-checked by the Sun: V = −26.76 (Willmer, ApJS 236,
- * 47, 2018) gives 1.28 × 10⁵ lx, the solar illuminance at 1 au.
+ * 47, 2018) gives 1.28 × 10⁵ lx. The zero point takes no account of the spectrum, and is a hot
+ * star's lux per unit of V flux, within 0.6% of an A0 spectrum's by R06's table: the Sun's own
+ * spectrum gives 1.0367 times it (R06's `lux_per_v0`), 1.335 × 10⁵ lx at 1 au for M_V 4.81 (V
+ * −26.762), which is ASTM E-490's photopic illuminance to 0.11% (plan R08, R08.T6.j).
  */
 export const V0_ILLUMINANCE_LX = 2.54e-6;
 

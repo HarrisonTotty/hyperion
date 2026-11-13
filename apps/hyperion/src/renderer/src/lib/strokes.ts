@@ -29,9 +29,9 @@ export const MIN_STROKE_DEVICE_PX = 2;
 
 /**
  * The width of the `--surface-0` casing on each side of a stroke, CSS px: 1, the guide's casing
- * over a raster, which every mark over the image takes (the guide's drafted "Outlines for
- * symbology", R02.T2.b item 3; R02 Design note 9). Drawn at {@link lineScale} device px for each,
- * as every line width and dash is (R07.T16.d).
+ * over a raster, which every mark over the image takes (the guide's "Outlines for symbology",
+ * R02.T2.b item 3; R02 Design note 9). Drawn at {@link lineScale} device px for each, as every line
+ * width and dash is (R07.T16.d).
  */
 export const CASING_PX = 1;
 

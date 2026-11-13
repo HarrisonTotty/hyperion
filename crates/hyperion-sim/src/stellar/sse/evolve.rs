@@ -5,10 +5,12 @@
 //! asks about one star more than once keeps the [`Track`] instead, which is what the server's cache
 //! holds (plan 06, design note 19).
 
+use crate::GENERATOR_VERSION;
 use crate::galaxy::quad::bisect;
 use crate::math;
 use crate::stellar::draws::StarDraws;
 use crate::stellar::premain;
+use crate::stellar::rules::StellarRules;
 use crate::stellar::substellar;
 use crate::stellar::{Composition, StarState};
 use crate::units::{SolarMasses, Years};
@@ -76,6 +78,59 @@ pub fn lifetime(m0: SolarMasses, composition: &Composition, draws: &StarDraws) -
     track::lifetime_of(m0, composition, draws, TrackOptions::default())
 }
 
+/// [`lifetime`] under the stellar stage's `rules` in place of the generator version's.
+///
+/// It is the lifetime of a star generated in a galaxy, under `galaxy.rules().stellar`, which is
+/// its [`StarModel`](crate::stellar::system::StarModel)'s track's, bit for bit. Under the
+/// version's rules it is [`lifetime`].
+///
+/// # Panics
+///
+/// In debug builds, if `m0` lies outside [`Track`]'s range, 0.1–150 M☉.
+#[must_use]
+pub(crate) fn lifetime_under(
+    m0: SolarMasses,
+    composition: &Composition,
+    draws: &StarDraws,
+    rules: StellarRules,
+) -> Years {
+    track::lifetime_of(
+        m0,
+        composition,
+        draws,
+        TrackOptions::default().with_rules(rules),
+    )
+}
+
+/// The whole track of a star of initial mass `m0`, `composition` and `draws` under the stellar
+/// stage's `rules`: [`Track::full_with`] under the generator's options with `rules`, whose death is
+/// `track::fate_of`'s of the same arguments, bit for bit, at its cost and some 0–60% more for the
+/// segments it keeps (290–490 µs at 8.5–80 M☉, solar, median draws; release, pod, 2026-11-02).
+///
+/// It is the track of the star's [`StarModel`](crate::stellar::system::StarModel) generated in a
+/// galaxy under `rules` wherever that star dies by the clock window's end: its model's track is
+/// built to an age at or past its death, which [`Track::to_age_with`] builds whole. So a caller
+/// that asks how the star dies, and then builds its stars on the track, pays for one build, not two
+/// (plan 09, the core-collapse class's candidates and their test, P09.T37's bench).
+///
+/// # Panics
+///
+/// In debug builds, if `m0` lies outside [`Track`]'s range, 0.1–150 M☉.
+#[must_use]
+pub(crate) fn track_under(
+    m0: SolarMasses,
+    composition: &Composition,
+    draws: &StarDraws,
+    rules: StellarRules,
+) -> Track {
+    Track::full_with(
+        m0,
+        composition,
+        draws,
+        TrackOptions::default().with_rules(rules),
+    )
+}
+
 /// The state at `age` of a star on a main sequence without knots: [`Track::state_at`] of its
 /// track, bit for bit, at the cost of the main sequence's closed forms alone (plan 06, P06.T38.b),
 /// or `None` where the star is not on such a main sequence at `age`.
@@ -125,6 +180,11 @@ pub fn main_sequence_state(
 /// Held to 0.1–150 M☉: an age beyond the main sequence of a 0.1 M☉ star gives 0.1, and one before
 /// that of a 150 M☉ star gives 150.
 ///
+/// It reads the helium table of the generator version's rules (`stellar::rules`), as everything
+/// that builds no galaxy does. Every turn-off the galaxy asks for is a population's at no helium
+/// excess (a cluster's own composition, the centre's, the global list's), which no helium table
+/// moves.
+///
 /// # Examples
 ///
 /// ```
@@ -139,12 +199,14 @@ pub fn main_sequence_state(
 #[must_use]
 pub fn turn_off_mass(age: Years, composition: &Composition) -> SolarMasses {
     let c = ZCoeffs::new(composition.z_fit());
+    let table = HeliumTable::of(StellarRules::of_version(GENERATOR_VERSION));
     let age_myr = age.value() * 1e-6;
     let (lo, hi) = (
         math::log10(MIN_INITIAL_MASS.value()),
         math::log10(MAX_INITIAL_MASS.value()),
     );
-    let excess = |log_m: f64| main_sequence_end_myr(math::exp10(log_m), composition, &c) - age_myr;
+    let excess =
+        |log_m: f64| main_sequence_end_myr(math::exp10(log_m), composition, &c, &table) - age_myr;
     if excess(lo) <= 0.0 {
         return MIN_INITIAL_MASS;
     }
@@ -156,16 +218,21 @@ pub fn turn_off_mass(age: Years, composition: &Composition) -> SolarMasses {
 
 /// The age at which the main sequence of a star of `m` M☉ ends at constant mass, Myr since the
 /// onset of collapse: its arrival (P06.T15.b) plus HPT's `t_MS`, with the helium excess's
-/// correction (P06.T17).
+/// correction (P06.T17) from `table`.
 #[must_use]
-fn main_sequence_end_myr(m: f64, composition: &Composition, c: &ZCoeffs) -> f64 {
+fn main_sequence_end_myr(
+    m: f64,
+    composition: &Composition,
+    c: &ZCoeffs,
+    table: &HeliumTable,
+) -> f64 {
     let mass = SolarMasses::new(m);
     let ms = ms::MainSequence::new(mass, c);
     let zams = ms.at(crate::units::Megayears::ZERO);
     let arrival = premain::arrival_years(m, zams.luminosity.value(), zams.radius.value());
     let t_ms = ms.t_ms().value();
-    let lifetime = HeliumHook::of(composition, &HeliumTable::COMMITTED)
-        .map_or(t_ms, |hook| t_ms * hook.timescale_factor(m));
+    let lifetime =
+        HeliumHook::of(composition, table).map_or(t_ms, |hook| t_ms * hook.timescale_factor(m));
     arrival * 1e-6 + lifetime
 }
 
@@ -236,7 +303,7 @@ mod tests {
     fn the_turn_off_mass_inverts_the_main_sequence_lifetime() {
         let c = ZCoeffs::new(Composition::SOLAR.z_fit());
         for m in [0.3, 0.8, 1.0, 2.0, 7.0, 40.0] {
-            let t = main_sequence_end_myr(m, &Composition::SOLAR, &c) * 1e6;
+            let t = main_sequence_end_myr(m, &Composition::SOLAR, &c, &HeliumTable::FITTED) * 1e6;
             let back = turn_off_mass(Years::new(t), &Composition::SOLAR).value();
             assert!((back / m - 1.0).abs() < 1e-12, "{m}: {back}");
         }

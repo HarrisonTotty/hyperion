@@ -23,30 +23,32 @@ use std::fmt;
 use std::sync::Arc;
 
 use hyperion_protocol::{
-    CameraReportDto, ErrorCode, FramePositionDto, RequestError, SceneArrivalDto, SceneBodyDto,
-    SceneClockDto, SceneCraftDto, SceneNotificationDto, SceneStateDto, SceneSystemDto,
-    SeenPositionDto, SystemIdHex, SystemSummaryDto, SystemSummaryRequest, UniverseIdHex,
+    CameraReportDto, ErrorCode, FramePositionDto, QueryModeDto, RequestError, SceneArrivalDto,
+    SceneBodyDto, SceneClockDto, SceneCraftDto, SceneNotificationDto, SceneStateDto,
+    SceneSystemDto, SeenPositionDto, SystemIdHex, SystemSummaryDto, SystemSummaryRequest,
+    UniverseIdHex,
 };
 use hyperion_sim::Seed;
 use hyperion_sim::coords::{
-    BodyPosition, GalacticPosition, LyCell, SystemPosition, SystemVelocity,
+    BodyPosition, GalacticPosition, GalacticVelocity, LyCell, SystemPosition, SystemVelocity,
 };
 use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::frame::{candidate_at, frame_at};
 use hyperion_sim::galaxy::placement::{SystemRecord, resolve};
-use hyperion_sim::galaxy::query::{epoch_velocity, position_at};
+use hyperion_sim::galaxy::query::position_at;
 use hyperion_sim::id::{BodyId, SystemId};
 use hyperion_sim::observe::{BodyTrack, SystemObserver, retarded_in_system};
-use hyperion_sim::planetary::BodyIndex;
-use hyperion_sim::planetary::record::{BodyRecord, DetailLevel};
+use hyperion_sim::planetary::record::DetailLevel;
+use hyperion_sim::planetary::{BodyIndex, HostKind, SystemContext};
 use hyperion_sim::time::UniverseTime;
 use hyperion_sim::units::Metres;
 
 use super::sensing::{CraftState, SceneKnowledge};
 use super::{ClockReading, Ship, ShipPosition};
-use crate::compute::{GalaxyKey, GeneratedSystem, SharedCellCache, SharedSystemCache};
+use crate::compute::{GalaxyKey, GeneratedSystem, Listing, SharedCellCache, SharedSystemCache};
 use crate::convert::{
-    BodiesRequest, ListedBody, scene_body, scene_system, system_place, system_summary, wire_time,
+    BodiesRequest, ListedBody, MotionReads, scene_body, scene_system, starless_summary,
+    system_motion, system_place, system_summary, wire_time,
 };
 use crate::limits::MAX_SCENE_CAMERAS;
 
@@ -133,18 +135,29 @@ impl SceneWorld<'_> {
         .expect("the scene time is inside the clock window")
     }
 
-    /// The system's stars at `t`, as `system_summary` answers them: the hosts of its bodies.
+    /// The system's stars at `t`, as `system_summary` answers them: the hosts of its bodies; for a
+    /// rogue planet, which has none, its starless summary (P14.T27.b), which the system cache has
+    /// no stars to give.
     #[must_use]
-    fn hosts(&self, record: &SystemRecord, t: UniverseTime) -> SystemSummaryDto {
-        let stars = self
-            .stars
-            .get_or_generate(self.key, self.galaxy, record.id())
-            .expect("a system frame_at named resolves");
+    fn hosts(
+        &self,
+        record: &SystemRecord,
+        ctx: &SystemContext,
+        t: UniverseTime,
+    ) -> SystemSummaryDto {
         let request = SystemSummaryRequest {
             universe: self.universe.clone(),
             system: SystemIdHex::from_u64(record.id().raw()),
             time: wire_time(t),
+            mode: QueryModeDto::Now,
         };
+        if ctx.host_kind() == HostKind::RoguePlanet {
+            return starless_summary(request, ctx, t);
+        }
+        let stars = self
+            .stars
+            .get_or_generate(self.key, self.galaxy, record.id(), &Listing::Unlisted)
+            .expect("a system frame_at named resolves");
         system_summary(request, &stars, t)
     }
 }
@@ -204,10 +217,15 @@ impl Sent {
 struct InSystem {
     record: SystemRecord,
     generated: Arc<GeneratedSystem>,
-    /// Every body of the system, resolved or not, in index order.
+    /// Every body of the system, resolved or not, in index order: [`PlanetarySystem::indices`],
+    /// the snapshot's own list (P14.T36.c).
+    ///
+    /// [`PlanetarySystem::indices`]: hyperion_sim::planetary::PlanetarySystem::indices
     all: Vec<BodyIndex>,
     /// The bodies sent, by index.
     sent: BTreeMap<BodyIndex, Sent>,
+    /// The scene time the scene entered the system at, and the ship's place in its frame then.
+    entered: (UniverseTime, SystemPosition),
 }
 
 /// The system a scene is to be in, worked out before anything changes.
@@ -240,7 +258,7 @@ impl SceneCore {
         world: &SceneWorld<'_>,
     ) -> Result<(Self, SceneStateDto), FetchSystemError> {
         let t = inputs.clock.time();
-        let ship = ship_galactic(world, inputs.ship.position_at(t), t)?;
+        let ship = ship_galactic(world, inputs.ship, t)?;
         let target = select(world, None, &ship, t)?;
         let mut core = Self {
             asked,
@@ -280,7 +298,7 @@ impl SceneCore {
         beat: Beat,
     ) -> Result<SceneDelta, FetchSystemError> {
         let t = inputs.clock.time();
-        let ship = ship_galactic(world, inputs.ship.position_at(t), t)?;
+        let ship = ship_galactic(world, inputs.ship, t)?;
         let current = self.system.as_ref().map(|system| system.record.id());
         let target = select(world, current, &ship, t)?;
         match (target, current) {
@@ -311,6 +329,16 @@ impl SceneCore {
     #[must_use]
     pub(crate) fn system_id(&self) -> Option<SystemId> {
         self.system.as_ref().map(|system| system.record.id())
+    }
+
+    /// The planetary system the scene is in, with the scene time it entered at and the ship's
+    /// place in its frame then, the barycentre where the ship could not observe: what the surface
+    /// prefetch orders the system's bodies by (rendering plan R09, R09.T17).
+    #[must_use]
+    pub(crate) fn entered(&self) -> Option<(&Arc<GeneratedSystem>, UniverseTime, SystemPosition)> {
+        let system = self.system.as_ref()?;
+        let (time, ship) = system.entered;
+        Some((&system.generated, time, ship))
     }
 
     /// The next scene time at which [`SceneCore::advance`] must be called for a body's
@@ -442,7 +470,7 @@ impl SceneCore {
         let id = record.id();
         let (mut system, listed) = scene_system(
             BodiesRequest::new(id, t, self.asked),
-            world.hosts(&record, t),
+            world.hosts(&record, ctx, t),
             ctx,
             planets,
             world.seed(),
@@ -459,12 +487,13 @@ impl SceneCore {
         self.system = Some(InSystem {
             record,
             generated: Arc::clone(generated),
-            all: planets
-                .snapshot_at(ctx, t)
-                .bodies()
-                .iter()
-                .map(BodyRecord::index)
-                .collect(),
+            all: planets.indices(),
+            entered: (
+                t,
+                observer
+                    .as_ref()
+                    .map_or(SystemPosition::ORIGIN, |observer| *observer.position()),
+            ),
             sent: listed
                 .into_iter()
                 .map(|listed| {
@@ -613,13 +642,22 @@ fn select<'w>(
     }))
 }
 
-/// Where the ship is at `t` in the galactic frame.
+/// Where `ship` is at `t` in the galactic frame: its frame's system on its path
+/// ([`frame_motion`]), and its offset from there.
+///
+/// # Panics
+///
+/// If the ship's frame names a system that [`frame_motion`] cannot place, or its offset takes the
+/// ship out of the galactic frame's range; neither can. The scene's setting lives only in memory
+/// and is set only by `scene_ship` ([`SceneService::set`]), which refuses every such frame.
+///
+/// [`SceneService::set`]: super::SceneService::set
 fn ship_galactic(
     world: &SceneWorld<'_>,
-    position: ShipPosition,
+    ship: &dyn Ship,
     t: UniverseTime,
 ) -> Result<GalacticPosition, FetchSystemError> {
-    let (system, offset) = match position {
+    let (system, offset) = match ship.position_at(t) {
         ShipPosition::Galactic(position) => return Ok(position),
         ShipPosition::System { system, offset } => (system, offset),
         ShipPosition::Body { body, offset } => {
@@ -627,10 +665,39 @@ fn ship_galactic(
             (body.system(), offset.to_system(&centre))
         }
     };
-    let record = resolve(world.galaxy, system).expect("scene_ship resolved the ship's frame");
+    let (barycentre, _) = frame_motion(world.galaxy, ship, system, t);
     Ok(offset
-        .to_galactic(&position_at(world.galaxy, &record, t))
+        .to_galactic(&barycentre)
         .expect("scene_ship placed the ship in the root cube, which drift cannot leave the range"))
+}
+
+/// Where the system `system` of `ship`'s frame is at `t` and its velocity there, m/s along the
+/// galactic axes: on the path `scene_ship` found for it ([`Ship::frame_line`]), which needs no
+/// cache, and for a pose set without one by its origin ([`system_motion`]) through none, a member
+/// resolved afresh.
+///
+/// # Panics
+///
+/// If the frame names a system that does not resolve or that `scene_ship` would not place; none
+/// can. `scene_ship` places every frame it accepts at the pose's time and at the clock window's
+/// end, and a path placed then is placed at every time of the window, which is all a scene clock
+/// reads: the only one whose place ends, a tidal disruption's victim's, ends at its disruption.
+fn frame_motion(
+    galaxy: &Galaxy,
+    ship: &dyn Ship,
+    system: SystemId,
+    t: UniverseTime,
+) -> (GalacticPosition, GalacticVelocity) {
+    let placed = if let Some(line) = ship
+        .frame_line()
+        .filter(|line| line.record().id() == system)
+    {
+        line.at(galaxy, t)
+    } else {
+        let record = resolve(galaxy, system).expect("scene_ship resolved the ship's frame");
+        system_motion(galaxy, MotionReads::uncached(), &record, t)
+    };
+    placed.expect("scene_ship placed the ship's frame, at every time of the clock window")
 }
 
 /// A body's centre and velocity at `t` in its system's frame; the barycentre at rest for a body
@@ -666,30 +733,43 @@ fn observer(
         elsewhere => {
             // Through the galactic frame: the frame's own drift, and a body's motion in it, are
             // added, and this system's drift taken away.
+            let frame_drift = |system| {
+                let (_, velocity) = frame_motion(world.galaxy, ship, system, t);
+                SystemVelocity::new(velocity.metres_per_second())
+            };
             let frame_velocity = match elsewhere {
                 ShipPosition::Galactic(_) => SystemVelocity::ZERO,
-                ShipPosition::System { system, .. } => drift(world.galaxy, system),
+                ShipPosition::System { system, .. } => frame_drift(system),
                 ShipPosition::Body { body, .. } => {
                     let (_, moving) = body_state(world.system(body.system())?, body, t);
-                    drift(world.galaxy, body.system()) + moving
+                    frame_drift(body.system()) + moving
                 }
             };
-            let galactic = ship_galactic(world, elsewhere, t)?;
+            let galactic = ship_galactic(world, ship, t)?;
             let barycentre = position_at(world.galaxy, record, t);
             (
                 SystemPosition::from_galactic(&galactic, &barycentre),
-                velocity + frame_velocity - drift(world.galaxy, record.id()),
+                velocity + frame_velocity - drift(world.galaxy, record.id(), t),
             )
         }
     };
     Ok(SystemObserver::new(position, velocity, t).ok())
 }
 
-/// A system's drift through the galaxy, m/s along the galactic axes (plan 08's epoch velocity).
+/// The scene's own system's drift through the galaxy at `t`, m/s along the galactic axes: its
+/// velocity by its origin ([`system_motion`]), plan 08's epoch velocity for the grid system that
+/// `frame_at` names. The ship's frame's is [`frame_motion`]'s.
+///
+/// # Panics
+///
+/// If `system` does not resolve or `system_motion` cannot place it; neither can happen for a grid
+/// system that `frame_at` names.
 #[must_use]
-fn drift(galaxy: &Galaxy, system: SystemId) -> SystemVelocity {
+fn drift(galaxy: &Galaxy, system: SystemId, t: UniverseTime) -> SystemVelocity {
     let record = resolve(galaxy, system).expect("the scene's systems resolve");
-    SystemVelocity::new(epoch_velocity(galaxy, &record).metres_per_second())
+    let (_, velocity) = system_motion(galaxy, MotionReads::uncached(), &record, t)
+        .expect("the scene's system is a grid system frame_at names, placed at every time");
+    SystemVelocity::new(velocity.metres_per_second())
 }
 
 /// Where the ship sees body `index`: its apparent position, light time and aberration together,
@@ -834,13 +914,16 @@ mod tests {
     use hyperion_sim::GENERATOR_VERSION;
     use hyperion_sim::coords::GalacticDisplacement;
     use hyperion_sim::galaxy::placement::{CellKey, generate_cell};
+    use hyperion_sim::galaxy::query::epoch_velocity;
     use hyperion_sim::id::Layer;
+    use hyperion_sim::observe::{Drift, Trajectory};
+    use hyperion_sim::planetary::record::BodyRecord;
     use hyperion_sim::planetary::{SystemContext, generate};
     use hyperion_sim::time::Span;
     use tokio::time::Instant;
 
     use super::*;
-    use crate::convert::system_bodies;
+    use crate::convert::{SystemLine, origins, system_bodies};
     use crate::scene::sensing::GrantAsked;
     use crate::scene::{SceneClock, ShipStandIn, TimeRate};
     use crate::subscriptions::{Merge, ScenePush};
@@ -1134,6 +1217,100 @@ mod tests {
         assert_eq!(arrivals[1].1, SceneArrivalDto::NoSystem);
     }
 
+    /// Every index of the snapshot of `generated` at `t`, in the snapshot's order.
+    fn snapshot_indices(generated: &GeneratedSystem, t: UniverseTime) -> Vec<BodyIndex> {
+        let (ctx, planets) = generated;
+        planets
+            .snapshot_at(ctx, t)
+            .bodies()
+            .iter()
+            .map(BodyRecord::index)
+            .collect()
+    }
+
+    #[test]
+    fn an_arrival_keeps_every_index_of_the_snapshot_in_its_order() {
+        let fixture = Fixture::new();
+        let world = fixture.world();
+        let ship = system_ship(&fixture);
+        let mut populations = false;
+        for t in [UniverseTime::EPOCH, at(1_000), at(86_400)] {
+            for (id, generated) in &fixture.systems {
+                let (_, planets) = generated.as_ref();
+                let indices = planets.indices();
+                assert_eq!(
+                    indices,
+                    snapshot_indices(generated, t),
+                    "{id:?} at {t:?}: the same bodies in the same order"
+                );
+                populations |= indices.len() > planets.bodies().len();
+            }
+            let (core, _) = SceneCore::build(
+                DetailLevel::Full,
+                inputs(t, &ship, &GrantAsked),
+                Vec::new(),
+                &world,
+            )
+            .unwrap();
+            let all = &core.system.as_ref().expect("the ship is in the system").all;
+            assert_eq!(
+                *all,
+                snapshot_indices(fixture.generated(), t),
+                "the arrival at {t:?} keeps the snapshot's every index"
+            );
+        }
+        assert!(
+            populations,
+            "some system of the fixture holds a belt or a halo beside its bodies"
+        );
+    }
+
+    /// The cost of an arrival in release against one `snapshot_at` and one `indices()` of the
+    /// scene's system (P14.T36.c; plan 14's Risks record it).
+    #[test]
+    #[ignore = "a timing, run by name in release"]
+    fn time_an_arrival() {
+        let fixture = Fixture::new();
+        let world = fixture.world();
+        let ship = system_ship(&fixture);
+        let t = UniverseTime::EPOCH;
+        let (ctx, planets) = fixture.generated();
+        let n = 50_u32;
+        let mean_s = |start: std::time::Instant| start.elapsed().as_secs_f64() / f64::from(n);
+        let arrive = || {
+            SceneCore::build(
+                DetailLevel::Full,
+                inputs(t, &ship, &GrantAsked),
+                Vec::new(),
+                &world,
+            )
+            .unwrap()
+        };
+        std::hint::black_box(arrive());
+        let start = std::time::Instant::now();
+        for _ in 0..n {
+            std::hint::black_box(arrive());
+        }
+        let arrival_s = mean_s(start);
+        let start = std::time::Instant::now();
+        for _ in 0..n {
+            std::hint::black_box(planets.snapshot_at(ctx, t));
+        }
+        let snapshot_s = mean_s(start);
+        let start = std::time::Instant::now();
+        for _ in 0..n {
+            std::hint::black_box(planets.indices());
+        }
+        let indices_s = mean_s(start);
+        eprintln!(
+            "{} bodies: arrival {:.3} ms, snapshot_at {:.3} ms, indices() {:.3} µs (n = {n})",
+            planets.indices().len(),
+            arrival_s * 1e3,
+            snapshot_s * 1e3,
+            indices_s * 1e6
+        );
+    }
+
     #[test]
     fn a_ship_in_a_system_s_frame_holds_its_bodies_and_stars_and_the_galactic_frame_none() {
         let fixture = Fixture::new();
@@ -1153,7 +1330,7 @@ mod tests {
             "the system's stars are its hosts"
         );
         let (ctx, planets) = fixture.generated();
-        let hosts = world.hosts(&fixture.record, t);
+        let hosts = world.hosts(&fixture.record, ctx, t);
         let expected: SystemBodiesDto = system_bodies(
             BodiesRequest::new(fixture.id(), t, DetailLevel::Full),
             hosts,
@@ -1285,7 +1462,7 @@ mod tests {
             assert_eq!(contacts.contains(&grant.body), odd);
             let alone = system_bodies(
                 BodiesRequest::new(fixture.id(), t, own),
-                world.hosts(&fixture.record, t),
+                world.hosts(&fixture.record, ctx, t),
                 ctx,
                 planets,
                 world.seed(),
@@ -1411,7 +1588,7 @@ mod tests {
         else {
             panic!("the system arrives again: {:?}", delta.arrival);
         };
-        assert!(delta.bodies.is_empty());
+        assert_eq!(delta.bodies, []);
         assert_eq!(system.system.hosts.system.to_u64(), fixture.id().raw());
         assert_eq!(
             tidal_radius_m.to_bits(),
@@ -1655,7 +1832,7 @@ mod tests {
         );
         // Through the galactic frame the same ship lands within a metre of it, a light-year cell's
         // offsets resolving about that finely.
-        let galactic = ship_galactic(&world, ship.position_at(t), t).unwrap();
+        let galactic = ship_galactic(&world, &ship, t).unwrap();
         let barycentre = position_at(world.galaxy, &fixture.record, t);
         let through = SystemPosition::from_galactic(&galactic, &barycentre);
         let gap = through
@@ -1675,6 +1852,57 @@ mod tests {
             system_of(&state).system.hosts.system.to_u64(),
             fixture.id().raw()
         );
+    }
+
+    /// In the galaxy the server builds, whose kinematic tables plan 03's `position_at` and plan
+    /// 08's draw panic on for a member, a ship framed on a feature member is placed on the
+    /// member's own line, its offset from there, and drifts with it, away from the epoch
+    /// (P07.T10.c).
+    #[test]
+    fn a_ship_framed_on_a_feature_member_rides_the_member_s_line() {
+        let galaxy = origins::galaxy();
+        let member = origins::a_feature_member();
+        let line = Drift::of_record(galaxy, &member).unwrap();
+        let (universe, systems) = (UniverseIdHex::from_u64(1), BTreeMap::new());
+        let (cells, stars) = (
+            SharedCellCache::new(64 << 20),
+            SharedSystemCache::new(64 << 20),
+        );
+        let world = SceneWorld {
+            universe: &universe,
+            galaxy,
+            key: GalaxyKey::new(origins::SEED, GENERATOR_VERSION),
+            cells: &cells,
+            stars: &stars,
+            systems: &systems,
+        };
+        let offset = SystemPosition::new([1.496e11, -2.0e10, 3.0e9]);
+        let framed = ShipPosition::System {
+            system: member.id(),
+            offset,
+        };
+        let found = Arc::new(SystemLine::of(galaxy, MotionReads::uncached(), &member).unwrap());
+        for years in [0, 100, -999] {
+            let t = UniverseTime::from_julian_years(years).unwrap();
+            // Set without its frame's path, and with the one `scene_ship` finds.
+            let unfound = ShipStandIn::new(framed, [0.0; 3], t, wire());
+            let set = unfound.clone().with_frame(Some(Arc::clone(&found)));
+            for ship in [&unfound, &set] {
+                let placed = ship_galactic(&world, ship, t).unwrap();
+                let expected = offset.to_galactic(&line.position_at(t)).unwrap();
+                assert_eq!(
+                    (placed.cell(), placed.offset_metres().map(f64::to_bits)),
+                    (expected.cell(), expected.offset_metres().map(f64::to_bits)),
+                    "{t}"
+                );
+                let (_, velocity) = frame_motion(galaxy, ship, member.id(), t);
+                assert_eq!(
+                    velocity.metres_per_second().map(f64::to_bits),
+                    line.velocity().metres_per_second().map(f64::to_bits),
+                    "{t}"
+                );
+            }
+        }
     }
 
     fn camera(view: u8, position: FramePositionDto) -> CameraReportDto {
@@ -1868,6 +2096,7 @@ mod tests {
             arrival: None,
             bodies: Vec::new(),
             craft: None,
+            surface_revisions: None,
         };
         assert!(!is_large_notification(&quiet));
         let leaving = SceneNotificationDto {

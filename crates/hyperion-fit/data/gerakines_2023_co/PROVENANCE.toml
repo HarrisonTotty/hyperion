@@ -1,0 +1,20 @@
+# Crystalline α-CO ice's optical constants at 25 K of Gerakines, Materese and Hudson (2023), from
+# NASA's Optical Constants Database: the frost `CO`'s infrared index over 3.33-5 µm, its
+# fundamental band (plan 14, P14.T49.i). Reduced by `reduce.py` from the database's export
+# (git-ignored, `data/cache/gerakines_2023_co/all.csv`) to its rows from 1990 cm⁻¹, averaged over
+# blocks of 8 rows (0.48 cm⁻¹, the measurement's 0.5 cm⁻¹ resolution), and committed as measured
+# values with the citation. Reproduced from the raw by hand on 2026-10-16: `python3 -I
+# crates/hyperion-fit/data/gerakines_2023_co/reduce.py <raw>
+# crates/hyperion-fit/data/gerakines_2023_co/nk_25k.csv`, from outside the raw's directory. Read
+# by `run substance_albedos`.
+dataset = "gerakines_2023_co"
+class = "committed"
+citation = "P. A. Gerakines, C. K. Materese and R. L. Hudson (2023), Mon. Not. R. Astron. Soc. 522, 3145-3162, DOI 10.1093/mnras/stad1164: carbon monoxide ices, a semicentennial review and update for crystalline CO; n and k of α-CO deposited and measured at 25 K, by infrared transmission over 1500-3000 cm⁻¹; retrieved from the Optical Constants database (OCdb, NASA)"
+url = "https://ocdb.smce.nasa.gov/dataset/Gerakines_2023_MNRAS_dataset-2_ice_CO_1_25K_Crystalline/download-data/all"
+retrieved = "2026-10-16"
+release = "OCdb's dataset Gerakines_2023_MNRAS_dataset-2_ice_CO_1_25K_Crystalline, its all-data export as served on the retrieval date (UTF-16 text; sha256 3a87d56c7869955f70581ffabe7e630d245e642c79bc331577c4ffd9e72bc8a3), reduced by reduce.py"
+licence = "OCdb's Terms of Use (https://ocdb.smce.nasa.gov/page/toc, read 2026-10-16): \"Data acquired through the OCdb Data Repository website are distributed under NASA's Open Access Data Policy\", with the request \"Please cite the reference associated with the dataset you are using\" and the acknowledgment \"Optical constants data were retrieved from the Optical Constants database\"; reduced values committed with the citation"
+
+[[files]]
+name = "nk_25k.csv"
+sha256 = "8f058ec268666508b42f8f53b2224979e2b3430a87eea428bcb7fb82870fa87f"

@@ -35,6 +35,28 @@ valid_until: UniverseTime,
  */
 cut_v: number, 
 /**
+ * The synthetic ceiling, V, at which the sky's real tier is held (rendering plan R13, Design
+ * notes 3 and 4): the server's constant V<sub>P</sub>, V 5.0 in RM3's interim, or the
+ * request's cut where the cut is brighter (decided 2026-10-09, `decision-r13-t2b-ceiling.md`).
+ *
+ * Layers C, D and E are then censused only to their real boundary, ray by ray the least of the
+ * radius beyond which under one star brighter than the ceiling is expected, the cut's own cap
+ * and [`real_limit_ly`](Self::real_limit_ly); beyond it their stars brighter than the cut are
+ * not listed, and their light is in the band. Each such layer's `cap_ly` is its real boundary at
+ * its farthest ray, the final reply's `complete_to_rays_ly` that boundary ray by ray, and its
+ * `expected_beyond` and `bright_beyond` count what lies beyond it. Absent where the reply has
+ * no real boundary: a request whose cut is at or brighter than V<sub>P</sub> and whose C, D and
+ * E caps at the cut lie within the real limit on every ray, where a ceiling would hold no ray,
+ * so that its census is R06's to the cut's own caps (rendering plan R13, R13.T2.b).
+ */
+synthetic_ceiling_v?: number, 
+/**
+ * The real limit, ly: the farthest any ray of layers C, D and E is censused where the reply
+ * states a [`synthetic_ceiling_v`](Self::synthetic_ceiling_v), 2,000 ly (the sim's
+ * `sky::caps::REAL_LIMIT_LY`; decided by the owner on 2026-10-09). Absent with the ceiling.
+ */
+real_limit_ly?: number, 
+/**
  * Each layer's census, in the layers' order.
  */
 census: Array<SkyLayerCensusDto>, 

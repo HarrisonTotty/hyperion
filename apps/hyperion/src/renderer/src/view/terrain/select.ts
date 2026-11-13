@@ -3,14 +3,28 @@
  * setting and the grounded bodies (plan R05, T7.b–T7.d, Design note 7).
  *
  * @remarks
- * A level is drawn where its error bound subtends at most τ pixels at the nearest point of the
- * patch's bounding volume; a camera inside the volume refines, down to the finest level. The set is
- * a function of each view's pose, field of view and viewport, the setting, the grounded bodies,
- * the height ranges of the patches baked so far and the patch budget alone: no history, no arrival
- * order and no hysteresis, the morph hiding a level change. The
+ * A level is drawn where its error bound, the level's selection bound under the rule in force
+ * (`levelBounds.ts`; plan R10, R10.T4.b) plus its chords' sagitta, subtends at most τ pixels at the
+ * nearest point of the patch's bounding volume; a camera inside the volume refines, down to the
+ * finest level. The set is a function of each view's pose, field of view and viewport, the
+ * setting, the grounded bodies, the height ranges of the patches baked so far and the patch budget
+ * alone: no history, no arrival order and no hysteresis, the morph hiding a level change. The
  * selected patches form a restricted quadtree: no two neighbours, across face edges and at cube
  * corners included, differ by more than one level. Patches no view can see, outside every frustum
  * or below every horizon, are not selected.
+ *
+ * Given a survey lookup (plan R10, R10.T16.b; decision-r10-live-path, D6, and
+ * decision-r10-t16-contracts §2–3), a patch with no surveyed coarse cell under it is bare: the
+ * reference surface is the ground there (R10 Design note 12), so it is never refined, forced,
+ * demanded or drawn, whatever the view, the setting or a contact. It stays in the quadtree, seen as
+ * before, so that the balance is the same, but counts against no budget and is left out of the
+ * result. Without a lookup, and with one that calls every patch surveyed, the selection is R05's,
+ * bit for bit.
+ *
+ * Two options are for counting alone, by R10.T14.b's measurement harness, and are never set by the
+ * terrain pass: an all-round view, culled by its horizon alone ({@link ViewSelectionInput.allRound}),
+ * and a diagnostic occluder's height ({@link SelectionInput.occluderHeightM}). With neither, the
+ * selection is as above, bit for bit.
  */
 
 import type { Quaternion } from "../camera/pose";
@@ -24,8 +38,9 @@ import {
   patchGeometryInto,
   unpackPatchBounds,
 } from "./bounds";
+import { TERRAIN_MASK_LEVELS } from "../clusters/terrain";
 import { vertexSpacing } from "./cube";
-import { frustumOf, horizonCone } from "./cull";
+import { type Frustum, frustumOf, horizonCone } from "./cull";
 import {
   type CellOut,
   childKeys,
@@ -40,8 +55,20 @@ import {
 } from "./patchKey";
 import { finestPatchSizeM, type GroundContact, inForcedRegionPacked } from "./grounded";
 import { compareRequests } from "./priority";
-import { type BodyFixedVec3, levelBoundM, levelHeightRangeM, type PlanetGeometry } from "./planet";
-import { type ViewGeometry, viewExcessPacked, viewGeometry } from "./viewGeometry";
+import {
+  type BodyFixedVec3,
+  F32_RELATIVE_STEP,
+  levelBoundM,
+  type PlanetGeometry,
+  selectionBoundM,
+  subtreeHeightRangeM,
+} from "./planet";
+import {
+  distanceToPackedBoxFromM,
+  type ViewGeometry,
+  viewExcessPacked,
+  viewGeometry,
+} from "./viewGeometry";
 
 /*
  * The imports selection reads for every node, split or comparison, bound once. Under a module
@@ -65,6 +92,12 @@ export interface SelectedPatch {
    * `maxPatches`.
    */
   readonly seen: boolean;
+  /**
+   * The views that see it, bit k for `SelectionInput.views[k]` (plan R10, R10.T16.b): a
+   * non-negative 32-bit integer, since at most {@link MAX_SELECTION_VIEWS} views are selected for;
+   * 0 for a forced patch no view sees.
+   */
+  readonly views: number;
 }
 
 /** A request to bake a patch, with its streaming priority (Design note 24). */
@@ -74,6 +107,12 @@ export interface PatchRequest {
   readonly priority: number;
   /** Whether it lies in a grounded body's forced region, which outranks everything. */
   readonly forced: boolean;
+  /**
+   * The time until the views need it, s, at least 0, which breaks ties of priority alone: a
+   * terrain pass's lookahead's estimate (`lookahead.ts`' `timeToNeedS`; R10.T14.b). Selection's
+   * own demand gives none, which orders as 0.
+   */
+  readonly needS?: number;
 }
 
 /** What selection returns: the patches to draw, by `patchKeyString`, and the demand to bake. */
@@ -81,13 +120,15 @@ export interface Selection {
   readonly patches: ReadonlyMap<string, SelectedPatch>;
   readonly demand: ReadonlyArray<PatchRequest>;
   /**
-   * Whether `maxPatches` stopped a split that a view's tolerance asked for, so that the drawn
-   * error is above τ somewhere: what drives `TERRAIN: DETAIL LIMITED` (the patch-demand ruling,
-   * 2026-10-03).
+   * Whether the budget, `maxPatches` or the triangle budget (plan R14, R14.T3.e), stopped a split
+   * that a view's tolerance asked for, so that the drawn error is above τ somewhere: what drives
+   * `TERRAIN: DETAIL LIMITED` (the patch-demand ruling, 2026-10-03). A split only
+   * {@link SelectionInput.surveyedFloorLevel} asked for, refused, is not one, and stops none after
+   * it.
    */
   readonly limited: boolean;
   /**
-   * The weighted excess w_view × ρ ÷ τ of the split `maxPatches` refused, from which each view's
+   * The weighted excess w_view × ρ ÷ τ of the split the budget refused, from which each view's
    * effective tolerance τ′ = τ × max(1, limitExcess ÷ w) follows; 0 where `limited` is false
    * (decision-r05-high-bound.md, F1).
    *
@@ -119,6 +160,32 @@ export interface Selection {
    * approach's coarse patches thrashed this way (decision-r05-high-bound.md, reason 3c).
    */
   readonly hiddenBaked: ReadonlyArray<PatchKey>;
+  /**
+   * The distance from the nearest view's camera to the nearest surveyed ground, metres, at least
+   * one finest patch: the box distance of the nearest patch of level {@link NEAREST_SURVEY_LEVEL}
+   * (or the finest) with a surveyed cell under it; `+∞` with no survey lookup or no surveyed cell
+   * (plan R10, R10.T16.b; decision-r10-t16-contracts §3).
+   *
+   * @remarks
+   * The terrain pass's move rule takes it only where no selected patch above the finest level gives
+   * a distance, as over bare ground with the survey out of view: closing on a survey, the pass
+   * selects again on the way, and the survey's patches enter within a reselection step of the first
+   * pose at which a fresh selection holds them. With no lookup it is `+∞`, so R05's reselection is
+   * unchanged.
+   */
+  readonly nearestSurveyM: number;
+  /**
+   * {@link Selection.nearestSurveyM} for each view alone, in `views`' order: view k's camera's
+   * distance to the nearest surveyed ground, metres, at least one finest patch, `+∞` with no survey
+   * lookup or no surveyed cell (plan R10, R10.T16; the batch review's S9), so that a view over bare
+   * ground reselects by its own distance, not another view's. `nearestSurveyM` is their least.
+   */
+  readonly nearestSurveyByViewM: ReadonlyArray<number>;
+  /**
+   * Each view's lit triangles as the triangle budget reckons them over the patches it sees, in
+   * `views`' order (plan R14, R14.T3.e; {@link patchLitTriangles}); absent without a budget.
+   */
+  readonly litTriangles?: ReadonlyArray<number>;
 }
 
 /**
@@ -128,6 +195,19 @@ export interface Selection {
 export interface HeightRangeLookup {
   /** The lowest and highest baked height of `key`, metres, or `undefined` if it is not baked. */
   heightRangeM(key: PatchKey): readonly [number, number] | undefined;
+}
+
+/**
+ * Which patches have surveyed ground under them (plan R10, R10.T16.b; decision-r10-live-path, D6):
+ * the body's coverage as selection reads it, from the coarse-field store's coverage and the blocks
+ * the workers took (`surveyLookup.ts`' `SurveyedCells`).
+ */
+export interface SurveyLookup {
+  /**
+   * Whether any coarse cell that a vertex of patch `key` reads for its survey mask is surveyed: a
+   * conservative answer, so that no patch it calls bare bakes a vertex inside the survey.
+   */
+  surveyedUnder(key: PatchKey): boolean;
 }
 
 /** One view's part in selection (Design notes 7, 23 and 24). */
@@ -140,12 +220,38 @@ export interface ViewSelectionInput {
   readonly camera: { readonly positionM: BodyFixedVec3; readonly orientation: Quaternion };
   /** The horizontal field of view, rad, in (0, π). */
   readonly fovXRad: number;
-  /** The presented size in device pixels (Design note 23), not the render resolution. */
+  /**
+   * The size its pixels are counted at (Design note 23), not the render resolution: the presented
+   * size, device px, ÷ max(1, the display's device-pixel ratio), its CSS px (`selectionViewport`).
+   */
   readonly viewport: ViewSize;
   /** The view's streaming weight: 1 for the primary view, 0.25 for a secondary (Design note 24). */
   readonly weight: number;
   /** The view's tolerance τ, pixels: the setting's, or a style's own (the wireframe's 4 px). */
   readonly tauPx: number;
+  /**
+   * The angle each side of the view's frustum is opened outwards by for culling, rad, at least 0
+   * (plan R10, R10.T16; the terrain pass's margin for the view's motion between selections);
+   * absent or 0, the camera's own frustum, so that every caller that gives none, R05's spike and
+   * fixtures among them, selects as before, bit for bit. Its error, morph bands and budget weight
+   * are the view's own whatever the margin.
+   */
+  readonly frustumMarginRad?: number;
+  /**
+   * Whether the view culls by its horizon alone, with no frustum (plan R10, R10.T14.b; R10 Design
+   * note 15's all-round count): it sees every patch above its horizon over a full turn of the
+   * camera. Absent or `false`, its frustum culls too, as before, bit for bit.
+   *
+   * @remarks
+   * For counting only, by R10.T14.b's measurement harness, in its unbudgeted re-selections of the
+   * terrain pass's own inputs: never set by the terrain pass, and never given for a selection that
+   * is drawn or demanded. The view has no side planes and no near plane, so
+   * {@link ViewSelectionInput.frustumMarginRad} is ignored. Its horizon, its error and refinement
+   * (ρ by distance, floored at the near plane's distance as ever), its weight and its tolerance are
+   * the view's own, and its bit in `SelectedPatch.views` marks the patches above its horizon. A
+   * camera at or below the occluder's radius has no horizon test, so such a view sees every patch.
+   */
+  readonly allRound?: boolean;
 }
 
 /** Everything selection reads. */
@@ -167,11 +273,180 @@ export interface SelectionInput {
    */
   readonly maxPatches?: number;
   /**
+   * The triangle budget (plan R14, R14.T3.e): a split is refused, as `maxPatches` refuses one, where
+   * it would take the lit triangles of the patches any one view sees, each reckoned by
+   * {@link patchLitTriangles} in that view, past {@link TriangleBudget.maxTriangles}; forced patches
+   * count against it but are never refused. Absent, no triangle limit, the selection `maxPatches` alone
+   * stops, as before, bit for bit.
+   */
+  readonly triangleBudget?: TriangleBudget;
+  /**
+   * The budget's hold (plan R10, R10.T16.i; research-next-work-11), a hysteresis on its refusals:
+   * a split the last selection did not make is refused past `1 − margin` of `maxPatches`, and one
+   * it made only past the whole of it, so that at the budget's margin a patch split last time stays
+   * split, and a pair near the margin does not coarsen and refine by turns. Past the first refusal,
+   * which sets `limitExcess`, the last selection's splits alone go on. It moves no split where the
+   * budget does not bind. Absent, the selection has no history, as before, bit for bit.
+   */
+  readonly budgetHold?: BudgetHold;
+  /**
    * The skirt margin the height workers bake with, metres (the bake's `skirtM`): the bounds reach
    * down to the skirts' bottoms. Absent, 0.
    */
   readonly skirtMarginM?: number;
+  /**
+   * The body's survey (R10.T16.b): a patch it calls bare is never refined, forced, demanded or
+   * drawn. Absent, every patch is surveyed, as on the test planet and R07's reference spheroid.
+   * Selection stays a pure function of its inputs: the lookup is one of them.
+   */
+  readonly survey?: SurveyLookup;
+  /**
+   * A diagnostic horizon occluder's height above the datum, metres, finite and above minus the
+   * spheroid's polar radius c (plan R10, R10.T14.b's A/B; decision-r09-t8d-reach §5): the sampled
+   * extreme depth, in place of `lowestHeightM` in every view's horizon, whose occluder is then the
+   * sphere of radius c + `occluderHeightM`. Absent, each view's horizon is `horizonCone`'s, bit for
+   * bit, as it is given `lowestHeightM(planet)` itself.
+   *
+   * @remarks
+   * For counting only, by R10.T14.b's measurement harness: never set by the terrain pass, never
+   * shipped and never drawn. Only the horizon's sphere moves, for every view and wherever selection
+   * tests the horizon (the patches' visibility and the demand's priorities). The boxes, built from
+   * the level table's subtree ranges and the baked ranges, and the level table itself are
+   * untouched, as are the frustums, the error and the forced region. While a camera is above both,
+   * a higher occluder (shallower ground) culls at least as much as a deeper one. An occluder above
+   * the lowest ground makes the horizon test no longer conservative: that looseness is what the A/B
+   * prices.
+   */
+  readonly occluderHeightM?: number;
+  /**
+   * The level surveyed ground a view sees is refined to at least (lane fix-coast-class-map; the
+   * hand-over's `HANDOVER_AT_CELLS`): a seen patch with a surveyed cell under it, coarser than this,
+   * asks to split whatever its error, as one a view finds ρ > τ of does, under the same streaming
+   * gate and budget. The terrain pass gives the level whose quads are the field's cells, max(L − 6,
+   * 0), so that the terrain draws the field's own cells, its coasts among them. Absent, 0: no floor,
+   * every split decided by the error alone, as before, bit for bit.
+   */
+  readonly surveyedFloorLevel?: number;
 }
+
+/**
+ * A selection's triangle budget (plan R14, R14.T3.e; {@link SelectionInput.triangleBudget}): the
+ * most lit triangles the patches each view sees may draw in it, each patch reckoned in each view that
+ * sees it by {@link patchLitTriangles}, each lit view held to it alone (the research's review,
+ * research-leans-42: summed, a second lit view would bind before the patches at the held cache).
+ */
+export interface TriangleBudget {
+  /** The most lit triangles one view's patches may draw in it. */
+  readonly maxTriangles: number;
+  /**
+   * Each view's tolerance its camera passes take their strides at, pixels, in `views`' order: the
+   * terrain pass's slewed τ′ of the view (its morph bands' and strides' scale), which the budget
+   * binding raises; the view's own `tauPx` where absent.
+   */
+  readonly tolerancesPx: ReadonlyArray<number>;
+  /**
+   * The share β of a stride's band by which the cull takes the stride only past it
+   * (`clusters/strides.ts`' `STRIDE_BAND_FRACTION`).
+   */
+  readonly bandFraction: number;
+  /**
+   * The share of a seen patch's distance the camera may close before the next selection (the terrain
+   * pass's `RESELECT_MOVE_FRACTION` of the nearest non-finest patch's distance, and so no more than
+   * any non-finest patch's own), by which each patch's strides are reckoned at its box's nearest
+   * point less it, so that the reckoning holds until then (plan R14, R14.T3.e; R14.T3.c's edge
+   * stand-ins' part 2: at 5,100 km on TERRAIN TEST's descent the strides' bands lie within 1% of
+   * each other, and the camera may close 9%).
+   */
+  readonly moveFraction: number;
+  /**
+   * A resident patch's largest measured errors towards strides 2, 4 and 8 over its clusters, m
+   * (`largestStrideErrorsM` of its bake), or `undefined` where it is not resident, not measured,
+   * not an interior bake (an edge patch's may-discard clusters draw at stride 1) or its view draws
+   * no strides (the strides off, or the lit pass not drawing on the cluster path yet).
+   */
+  strideErrorsM(key: PatchKey): StrideErrorsM | undefined;
+  /**
+   * The lit triangles drawn over `key`'s area at stride 1 whatever its strides, where the selection
+   * draws its own patch there (`resident`) or a stand-in: the terrain pass's record whose heights mix
+   * from another surface (plan R10, R10.T16.i's fades: a refine's, a rise's, a rebake's, and a
+   * coarser patch still falling over a stand-in's area), which the cull keeps whole (the time
+   * morph's `fadesOver`); 0 for none. A seen patch is reckoned at the larger of this
+   * and {@link patchLitTriangles}' (plan R14, R14.T3.e's reckoning, R14.T3.c's edge stand-ins'
+   * part 2). At most a whole patch's, so that the budget binds no sooner than the patches would at
+   * stride 1: a coarse node is a leaf for a while as the traversal splits it.
+   */
+  fadingTriangles(key: PatchKey, resident: boolean): number;
+}
+
+/** A patch's largest errors towards strides 2, 4 and 8, m (`clusters/strides.ts`' `StrideErrorsM`). */
+export type StrideErrorsM = readonly [number, number, number];
+
+/**
+ * A patch's lit triangles on the cluster path at strides 1, 2, 4 and 8 (plan R14, R14.T3.c;
+ * `clusters/templates.ts`): its 64 blocks' 128 ÷ s² each and its 32 skirt strips' 16 ÷ s each.
+ */
+export const PATCH_LIT_TRIANGLES: readonly [number, number, number, number] = [
+  8_704, 2_304, 640, 192,
+];
+
+/**
+ * The lit triangles the triangle budget reckons a seen patch to draw in one view (plan R14,
+ * R14.T3.e), never fewer than the cull draws there at the view's strides but where a neighbour's
+ * band holds an edge finer (a reckoning, not a bound; a fade's whole records are the budget's
+ * {@link TriangleBudget.fadingTriangles}, taken beside it):
+ *
+ * - **measured** (`errorsM` given): the coarsest stride s = 2^l, l up to 3, whose every band up to
+ *   it, (1 + β) (E_L + e_s) ÷ τ_rad, the patch's box's nearest point `distanceM` is past, so that
+ *   every block, at that distance or farther, takes a stride at least as coarse (the cull's
+ *   `cameraStrideLevel`, at the tolerance the view's strides are drawn at);
+ * - **standing in** (`standInLevels` above 0), as a sub-patch stand-in draws at stride 1: one to
+ *   {@link TERRAIN_MASK_LEVELS} levels below its baked ancestor, that ancestor's blocks over its
+ *   area and their strips (Design note 19's mask), as many triangles as a whole patch at stride
+ *   2^levels; deeper, a whole grid; nothing with no baked ancestor (`null`);
+ * - otherwise (forced, unmeasured, or no strides): its whole grid at stride 1.
+ *
+ * @param statedM - E_L, its level's selection error ({@link selectionErrorM}).
+ * @param toleranceRad - The view's τ over its px per radian.
+ * @param standInLevels - The levels from it to its nearest baked ancestor, 0 for none, or `null`
+ *   where none is baked.
+ */
+export function patchLitTriangles(
+  statedM: number,
+  errorsM: StrideErrorsM | undefined,
+  distanceM: number,
+  toleranceRad: number,
+  bandFraction: number,
+  standInLevels: number | null,
+): number {
+  if (standInLevels === null) {
+    return 0;
+  }
+  if (standInLevels > 0) {
+    return standInLevels <= TERRAIN_MASK_LEVELS
+      ? (PATCH_LIT_TRIANGLES[standInLevels] ?? PATCH_LIT_TRIANGLES[0])
+      : PATCH_LIT_TRIANGLES[0];
+  }
+  if (errorsM === undefined || !(toleranceRad > 0)) {
+    return PATCH_LIT_TRIANGLES[0];
+  }
+  let level = 0;
+  while (level < 3) {
+    const bandM =
+      ((1 + bandFraction) * (statedM + (errorsM[level] ?? Number.POSITIVE_INFINITY))) /
+      toleranceRad;
+    if (!(distanceM >= bandM)) {
+      break;
+    }
+    level += 1;
+  }
+  return PATCH_LIT_TRIANGLES[level] ?? PATCH_LIT_TRIANGLES[0];
+}
+
+/**
+ * The frustum of an all-round view ({@link ViewSelectionInput.allRound}): no planes, so that its
+ * horizon alone culls.
+ */
+const ALL_ROUND: Frustum = { planes: [] };
 
 /**
  * The screen-space error ρ, pixels, of an error `boundM` metres at `distanceM` metres in `view`:
@@ -217,18 +492,23 @@ export function chordSagittaM(planet: PlanetGeometry, level: number): number {
 }
 
 /**
- * The error selection charges a level, metres: the level bound ε_n against the finest level
- * (Design note 15) plus {@link chordSagittaM}; nothing at the finest level.
+ * The error selection charges a level, metres: the level's selection bound, ε_n against the
+ * finest level (Design note 15) under the rule in force (`selectionBoundM`; plan R10, R10.T4.b),
+ * plus {@link chordSagittaM}; nothing at the finest level.
  *
  * @remarks
  * The sagitta is what a zero-height spheroid with no level table (R07's `mesh` regime) refines on;
- * on the test planet it is under a sixth of ε_n at level 0 and under a tenth from level 1.
+ * on the test planet it is under a sixth of ε_n at level 0 and under a tenth from level 1. Under
+ * the hard rule the selection bound is the level charge, ε_n with the channels' share held by the
+ * cells the workers hold (R09.T8.d (b3)), or the stated ε_n, `levelBoundM`, where none is given;
+ * under the statistical one min(ε_n, 4σ_n). Only this error takes it: the boxes, the skirts and
+ * the baked ranges' widening read the stated ε_n.
  */
 export function selectionErrorM(planet: PlanetGeometry, level: number): number {
   if (level >= planet.finestLevel) {
     return 0;
   }
-  return levelBoundM(planet, level) + chordSagittaM(planet, level);
+  return selectionBoundM(planet, level) + chordSagittaM(planet, level);
 }
 
 /** One view, prepared once a call: its frustum, its horizon and its error scale. */
@@ -268,6 +548,16 @@ interface TraversalNode {
   readonly baked: BakedRange | null;
   /** Whether it is baked itself. */
   readonly resident: boolean;
+  /**
+   * Its lit triangles under the triangle budget in each view, in `views`' order, 0 in a view that
+   * does not see it ({@link patchLitTriangles}); none without a budget, and where it is bare.
+   */
+  readonly triangles: ReadonlyArray<number>;
+  /**
+   * Whether no surveyed cell lies under it ({@link SurveyLookup}): never refined, forced, demanded
+   * or drawn, and counted against no budget; `false` with no lookup.
+   */
+  readonly bare: boolean;
   /** The node it was split from, `null` for a root. */
   readonly parent: TraversalNode | null;
   /**
@@ -295,8 +585,6 @@ interface MemoCell {
   /** The height range the bounds were built for, metres. */
   lowM: number;
   highM: number;
-  /** Whether that range was the level's own, with nothing baked above. */
-  levelRange: boolean;
   /** The bounds as an object, made when first drawn and kept while the range holds. */
   bounds: PatchBounds | null;
   /**
@@ -324,7 +612,6 @@ function memoCell(key: PatchKey): MemoCell {
     built: false,
     lowM: 0,
     highM: 0,
-    levelRange: false,
     bounds: null,
     keyString: null,
     geometrySlot: -1,
@@ -365,10 +652,23 @@ interface MemoState {
 interface PlanetTables {
   /** {@link selectionErrorM} per level, metres. */
   readonly errorM: ReadonlyArray<number>;
-  /** Per level: ε_n and the lowest and highest height, metres, from the level table. */
+  /**
+   * Per level: ε_n, metres, from the level table, and the lowest and highest height its patches
+   * and every finer one beneath them reach, skirts included but for the bake's margin
+   * ({@link subtreeHeightRangeM}): the range a box that prunes its subtree holds.
+   */
   readonly levelBoundM: ReadonlyArray<number>;
   readonly levelLowM: ReadonlyArray<number>;
   readonly levelHighM: ReadonlyArray<number>;
+  /**
+   * Per level n, metres: ε*_n, the largest ε_m over m ≥ n − 1 to the finest level drawn, by which a
+   * vertex or morph target of the level or any finer one lies from the finest ground; and the
+   * largest ε_m over m ≥ n alike, the deepest any of their skirts hangs but for its `f32` step and
+   * margin. A baked range widens by these, which hold where ε does not fall with the level
+   * (R09.T8.d, follow-up 2).
+   */
+  readonly widenBoundM: ReadonlyArray<number>;
+  readonly skirtBoundM: ReadonlyArray<number>;
   /** Bounds already built. */
   readonly memo: MemoState;
 }
@@ -380,11 +680,21 @@ function tablesOf(planet: PlanetGeometry): PlanetTables {
   let tables = planetTables.get(planet);
   if (tables === undefined) {
     const levels = { length: MAX_LEVEL + 1 };
+    const bounds = Array.from(levels, (_, level) => levelBoundM(planet, level));
+    // The largest ε from each level to the deepest drawn, the planet's finest, beneath which no
+    // patch is drawn: from it on each level's is its own.
+    const fromBound = bounds.map((bound, level) =>
+      level >= planet.finestLevel
+        ? bound
+        : Math.max(...bounds.slice(level, planet.finestLevel + 1)),
+    );
     tables = {
       errorM: Array.from(levels, (_, level) => selectionErrorM(planet, level)),
-      levelBoundM: Array.from(levels, (_, level) => levelBoundM(planet, level)),
-      levelLowM: Array.from(levels, (_, level) => levelHeightRangeM(planet, level)[0]),
-      levelHighM: Array.from(levels, (_, level) => levelHeightRangeM(planet, level)[1]),
+      levelBoundM: bounds,
+      widenBoundM: fromBound.map((_, level) => fromBound[Math.max(0, level - 1)] ?? 0),
+      skirtBoundM: fromBound,
+      levelLowM: Array.from(levels, (_, level) => subtreeHeightRangeM(planet, level)[0]),
+      levelHighM: Array.from(levels, (_, level) => subtreeHeightRangeM(planet, level)[1]),
       memo: {
         roots: FACES.map((face) => memoCell(rootKey(face))),
         cells: 0,
@@ -472,7 +782,11 @@ function cellOf(t: Traversal, key: PatchKey, parent: TraversalNode | null): Memo
     }
     return root;
   }
-  const up = parent.cell;
+  return memoChild(t, parent.cell, key);
+}
+
+/** The memo cell of `key`, a child of the patch whose cell is `up`, made where there is none. */
+function memoChild(t: Traversal, up: MemoCell, key: PatchKey): MemoCell {
   const n = (key.i & 1) | ((key.j & 1) << 1);
   const known = n === 0 ? up.child0 : n === 1 ? up.child1 : n === 2 ? up.child2 : up.child3;
   if (known !== null) {
@@ -497,11 +811,9 @@ function cellOf(t: Traversal, key: PatchKey, parent: TraversalNode | null): Memo
  * where the memo does not hold them for that range already.
  */
 function buildBounds(t: Traversal, cell: MemoCell, key: PatchKey, baked: BakedRange | null): void {
-  // The range only when the memo cannot answer with the level's own (nothing baked above it).
-  if (cell.built && baked === null && cell.levelRange) {
-    return;
-  }
-  let lowM = t.levelLowM[key.level] ?? 0;
+  // The level's subtree range, the skirts' margin taken off its low: a node no view sees drops its
+  // subtree, so its box holds every descendant's vertices, morph targets and skirts (R09.T8.d).
+  let lowM = (t.levelLowM[key.level] ?? 0) - t.skirtMarginM;
   let highM = t.levelHighM[key.level] ?? 0;
   if (baked !== null) {
     const range = t.range;
@@ -509,8 +821,8 @@ function buildBounds(t: Traversal, cell: MemoCell, key: PatchKey, baked: BakedRa
       range,
       lowM,
       highM,
-      (t.levelBoundM[baked.level] ?? 0) + (t.levelBoundM[Math.max(0, key.level - 1)] ?? 0),
-      t.levelBoundM[key.level] ?? 0,
+      (t.levelBoundM[baked.level] ?? 0) + (t.widenBoundM[key.level] ?? 0),
+      t.skirtBoundM[key.level] ?? 0,
       baked,
       t.skirtMarginM,
     );
@@ -524,7 +836,6 @@ function buildBounds(t: Traversal, cell: MemoCell, key: PatchKey, baked: BakedRa
   cell.built = true;
   cell.lowM = lowM;
   cell.highM = highM;
-  cell.levelRange = baked === null;
   cell.bounds = null;
 }
 
@@ -561,9 +872,6 @@ function boundsOfCell(cell: MemoCell): PatchBounds {
   return cell.bounds;
 }
 
-/** One `f32` step's relative size: a baked height rounded to `f32` is within this of its value. */
-const F32_RELATIVE_STEP = 2 ** -23;
-
 /** One call's state, with its planet's tables. */
 interface Traversal extends PlanetTables {
   readonly planet: PlanetGeometry;
@@ -572,18 +880,27 @@ interface Traversal extends PlanetTables {
   readonly range: Float64Array;
   readonly grounded: ReadonlyArray<GroundContact>;
   readonly heightRanges: HeightRangeLookup | null;
+  /** The body's survey, or `null`, every patch then surveyed. */
+  readonly survey: SurveyLookup | null;
   /** The bake's skirt margin, metres. */
   readonly skirtMarginM: number;
   /** The finest level's patch edge, metres: the forced region's unit. */
   readonly patchSizeM: number;
+  /** {@link SelectionInput.surveyedFloorLevel}, 0 where absent. */
+  readonly surveyedFloorLevel: number;
+  /** {@link SelectionInput.triangleBudget}, or `null`. */
+  readonly triangleBudget: TriangleBudget | null;
 }
 
 /**
- * The height range a patch can reach, metres (the patch-demand ruling, 2026-10-03, item 4a): from
- * its nearest baked ancestor A at level m (or itself), A's baked range rounded outward from `f32`,
- * widened by ε_m (S_m lies within A's range and |S_f − S_m| ≤ ε_m) and ε_{n−1} (a vertex and its
- * morph target lie within ε_{n−1} of S_f), and below by the skirt (ε_n and an `f32` step), kept
- * within the level's range; the level's range itself with nothing baked.
+ * The height range a patch and every patch beneath it can reach, metres (the patch-demand ruling,
+ * 2026-10-03, item 4a; R09.T8.d): from its nearest baked ancestor A at level k (or itself), A's
+ * baked range rounded outward from `f32`, widened by ε_k (S_k lies within A's range and
+ * |S_f − S_k| ≤ ε_k) and ε*_n, the largest ε_m over m ≥ n − 1 (a vertex or morph target of the patch
+ * or a finer one lies within it of S_f), and below by the deepest skirt from level n on (the
+ * largest ε_m over m ≥ n, an `f32` step and the margin), kept within the range of the level's
+ * subtree, skirts included ({@link subtreeHeightRangeM}); that range itself with nothing baked. The
+ * suffix maxima hold where ε does not fall with the level (decision-r09-t8d-reach, follow-up 2).
  */
 export function inheritedHeightRangeM(
   planet: PlanetGeometry,
@@ -591,18 +908,19 @@ export function inheritedHeightRangeM(
   baked: BakedRange | null,
   skirtMarginM = 0,
 ): readonly [number, number] {
-  const [levelLow, levelHigh] = levelHeightRangeM(planet, key.level);
+  const [levelLow, levelHigh] = subtreeHeightRangeM(planet, key.level, skirtMarginM);
   if (baked === null) {
     return [levelLow, levelHigh];
   }
   const n = key.level;
+  const tables = tablesOf(planet);
   const range = new Float64Array(2);
   inheritedRangeInto(
     range,
     levelLow,
     levelHigh,
-    levelBoundM(planet, baked.level) + levelBoundM(planet, Math.max(0, n - 1)),
-    levelBoundM(planet, n),
+    levelBoundM(planet, baked.level) + (tables.widenBoundM[n] ?? 0),
+    tables.skirtBoundM[n] ?? 0,
     baked,
     skirtMarginM,
   );
@@ -611,14 +929,15 @@ export function inheritedHeightRangeM(
 
 /**
  * Writes {@link inheritedHeightRangeM}'s range for a baked ancestor into `out`, low then high,
- * metres, from the level's range, the widening ε_m + ε_{n−1} and the level's own bound ε_n.
+ * metres, from the level's subtree range, the widening ε_k + ε*_n and the deepest skirt's bound,
+ * the largest ε_m over m ≥ n.
  */
 function inheritedRangeInto(
   out: Float64Array,
   levelLowM: number,
   levelHighM: number,
   widenM: number,
-  ownBoundM: number,
+  skirtBoundM: number,
   baked: BakedRange,
   skirtMarginM: number,
 ): void {
@@ -626,8 +945,8 @@ function inheritedRangeInto(
   // `f32_step(largest_h)` in its skirt depth, and the rounding of the baked range.
   const largest = Math.max(Math.abs(baked.lowM), Math.abs(baked.highM)) + widenM;
   const step = largest * F32_RELATIVE_STEP;
-  // The bake's skirt depth: ε_n, an f32 step of the largest height and the caller's margin.
-  const skirt = ownBoundM + step + skirtMarginM;
+  // The deepest skirt from the level on: its ε, an f32 step of the largest height and the margin.
+  const skirt = skirtBoundM + step + skirtMarginM;
   const low = baked.lowM - step - widenM - skirt;
   const high = baked.highM + step + widenM;
   out[0] = Math.max(levelLowM, low);
@@ -644,6 +963,8 @@ function nodeOf(t: Traversal, key: PatchKey, parent: TraversalNode | null): Trav
   buildBounds(t, cell, key, baked);
   const packed = cell.packed;
   const errorM = t.errorM[key.level] ?? 0;
+  // Bare ground is the reference surface's: seen, for the balance, but wanting nothing.
+  const bare = t.survey !== null && !t.survey.surveyedUnder(key);
   let seenBy = 0;
   let wantedBy = 0;
   let excess = 0;
@@ -659,19 +980,27 @@ function nodeOf(t: Traversal, key: PatchKey, parent: TraversalNode | null): Trav
       continue;
     }
     seenBy |= 1 << n;
+    if (bare) {
+      continue;
+    }
     if (e > 1) {
       wantedBy |= 1 << n;
     }
     excess = Math.max(excess, e);
     weighted = Math.max(weighted, v.input.weight * e);
   }
-  const forced = t.grounded.length > 0 && forcedAt(packed, t.grounded, t.patchSizeM);
+  // Unsurveyed ground wins over the forced region (decision-r10-t16-contracts §2).
+  const forced = !bare && t.grounded.length > 0 && forcedAt(packed, t.grounded, t.patchSizeM);
   if (seenBy === 0 && !forced) {
     if (own !== undefined && parent !== null) {
       parent.hiddenBaked |= 1 << ((key.i & 1) | ((key.j & 1) << 1));
     }
     return null;
   }
+  const triangles =
+    t.triangleBudget === null || bare || seenBy === 0
+      ? NO_TRIANGLES
+      : nodeTriangles(t, t.triangleBudget, key, packed, seenBy, forced, own !== undefined, baked);
   return {
     key,
     cell,
@@ -682,10 +1011,80 @@ function nodeOf(t: Traversal, key: PatchKey, parent: TraversalNode | null): Trav
     forced,
     baked,
     resident: own !== undefined,
+    triangles,
+    bare,
     parent,
     split: false,
     hiddenBaked: 0,
   };
+}
+
+/** `key`'s ancestor at `level`, at or above its own. */
+function ancestorKeyAt(key: PatchKey, level: number): PatchKey {
+  const shift = key.level - level;
+  return { face: key.face, level, i: key.i >> shift, j: key.j >> shift };
+}
+
+/** A node's lit triangles where it reckons none: no budget, or bare. */
+const NO_TRIANGLES: ReadonlyArray<number> = [];
+
+/**
+ * A seen node's lit triangles under `budget` in each view, those in `seenBy` reckoned by
+ * {@link patchLitTriangles}: a forced patch, which the camera passes draw at stride 1, its whole grid
+ * in each; where baked ranges are given, an unbaked one as its baked ancestor's stand-in draws, a
+ * mask where that ancestor is a measured interior bake and else its lit mesh, whole; each at least
+ * its fades' whole records ({@link TriangleBudget.fadingTriangles}).
+ */
+function nodeTriangles(
+  t: Traversal,
+  budget: TriangleBudget,
+  key: PatchKey,
+  packed: Float64Array,
+  seenBy: number,
+  forced: boolean,
+  resident: boolean,
+  baked: BakedRange | null,
+): number[] {
+  const levels =
+    forced || t.heightRanges === null || resident
+      ? 0
+      : baked === null
+        ? null
+        : key.level - baked.level;
+  // A stand-in of an edge or unmeasured bake draws by its lit mesh, whole: as one levels deep.
+  const standIn =
+    levels !== null &&
+    levels > 0 &&
+    levels <= TERRAIN_MASK_LEVELS &&
+    budget.strideErrorsM(ancestorKeyAt(key, key.level - levels)) === undefined
+      ? TERRAIN_MASK_LEVELS + 1
+      : levels;
+  const errorsM = forced || standIn !== 0 ? undefined : budget.strideErrorsM(key);
+  const statedM = t.errorM[key.level] ?? 0;
+  // Its fades' records, kept whole at stride 1 whatever its strides (R10.T16.i).
+  const fading = forced || levels === null ? 0 : budget.fadingTriangles(key, levels === 0);
+  const out = t.views.map(() => 0);
+  for (let n = 0; n < t.views.length; n += 1) {
+    const v = t.views[n];
+    if (v === undefined || (seenBy & (1 << n)) === 0) {
+      continue;
+    }
+    const { viewport, fovXRad, tauPx, camera } = v.input;
+    out[n] = Math.max(
+      fading,
+      patchLitTriangles(
+        statedM,
+        errorsM,
+        errorsM === undefined
+          ? 0
+          : (1 - budget.moveFraction) * distanceToPackedBoxFromM(packed, camera.positionM),
+        (2 * Math.tan(fovXRad / 2) * (budget.tolerancesPx[n] ?? tauPx)) / viewport.widthPx,
+        budget.bandFraction,
+        standIn,
+      ),
+    );
+  }
+  return out;
 }
 
 /** The most views selection takes at once: one bit each in a node's view masks. */
@@ -719,7 +1118,8 @@ function requestPriority(t: Traversal, target: TraversalNode, standIn: Traversal
 }
 
 /**
- * Whether a selected patch should be split: it is in a forced region, or a view finds ρ > τ and,
+ * Whether a selected patch should be split: it is in a forced region, or a view finds ρ > τ, or a
+ * view sees it over surveyed ground coarser than {@link SelectionInput.surveyedFloorLevel}, and,
  * where baked ranges are given, it is baked itself (the streaming gate).
  *
  * @remarks
@@ -740,7 +1140,8 @@ function wantsRefining(t: Traversal, node: TraversalNode): boolean {
   if (node.forced) {
     return true;
   }
-  return node.excess > 1 && (t.heightRanges === null || node.resident);
+  const belowFloor = node.key.level < t.surveyedFloorLevel && node.seenBy !== 0 && !node.bare;
+  return (node.excess > 1 || belowFloor) && (t.heightRanges === null || node.resident);
 }
 
 /**
@@ -880,6 +1281,38 @@ class CandidateHeap {
   }
 }
 
+/** The budget's hold on the last selection's splits ({@link SelectionInput.budgetHold}). */
+export interface BudgetHold {
+  /** The patches the last selection split: every ancestor of one of its patches. */
+  readonly split: ReadonlySet<string>;
+  /** The share of `maxPatches` the last selection's splits alone may take, 0 to 1. */
+  readonly margin: number;
+}
+
+/**
+ * The keys of the patches a selection split to select `patches`: each one's every ancestor, as
+ * `patchKeyString`s, for {@link SelectionInput.budgetHold}.
+ */
+export function splitKeysOf(patches: Iterable<SelectedPatch>): Set<string> {
+  const split = new Set<string>();
+  for (const { key } of patches) {
+    for (let level = key.level - 1; level >= 0; level -= 1) {
+      const cells = 2 ** (key.level - level);
+      const keyString = patchKeyString({
+        face: key.face,
+        level,
+        i: Math.floor(key.i / cells),
+        j: Math.floor(key.j / cells),
+      });
+      if (split.has(keyString)) {
+        break;
+      }
+      split.add(keyString);
+    }
+  }
+  return split;
+}
+
 /**
  * Selects the patches to draw for every view at once (Design note 7, with the patch-demand ruling
  * of 2026-10-03): from the six roots, the patch with the largest weighted error is split first,
@@ -889,7 +1322,8 @@ class CandidateHeap {
  * split's weighted excess as `limitExcess`. Forced splits are never refused, and a forced region is
  * selected whether or not a view sees it.
  *
- * @throws RangeError for more than {@link MAX_SELECTION_VIEWS} views.
+ * @throws RangeError for more than {@link MAX_SELECTION_VIEWS} views, or for an
+ *   `occluderHeightM` that is not finite or puts the occluder's radius at or below 0.
  */
 export function selectPatches(input: SelectionInput): Selection {
   const { planet } = input;
@@ -898,6 +1332,7 @@ export function selectPatches(input: SelectionInput): Selection {
       `selection takes at most ${MAX_SELECTION_VIEWS} views, got ${input.views.length}`,
     );
   }
+  const occluderRadiusM = diagnosticOccluderRadiusM(planet, input.occluderHeightM);
   const tables = tablesOf(planet);
   const memo = tables.memo;
   if (memo.cells > memo.limit) {
@@ -909,9 +1344,14 @@ export function selectPatches(input: SelectionInput): Selection {
     views: input.views.map((v) => ({
       input: v,
       geometry: viewGeometry(
-        frustumOf({ orientation: v.camera.orientation, fovXRad: v.fovXRad, viewport: v.viewport }),
+        v.allRound === true
+          ? ALL_ROUND
+          : frustumOf(
+              { orientation: v.camera.orientation, fovXRad: v.fovXRad, viewport: v.viewport },
+              v.frustumMarginRad ?? 0,
+            ),
         v.camera.positionM,
-        horizonCone(planet, v.camera.positionM).occluderRadiusM,
+        occluderRadiusM ?? horizonCone(planet, v.camera.positionM).occluderRadiusM,
         v.viewport.widthPx / (2 * Math.tan(v.fovXRad / 2) * v.tauPx),
       ),
     })),
@@ -919,12 +1359,21 @@ export function selectPatches(input: SelectionInput): Selection {
     range: new Float64Array(2),
     grounded: input.grounded,
     heightRanges: input.heightRanges ?? null,
+    survey: input.survey ?? null,
     skirtMarginM: input.skirtMarginM ?? 0,
     patchSizeM: finestPatchSizeM(planet),
+    surveyedFloorLevel: input.surveyedFloorLevel ?? 0,
+    triangleBudget: input.triangleBudget ?? null,
   };
   const maxPatches = input.maxPatches ?? Infinity;
-  // A forced patch no view sees is selected, to be kept resident, but neither drawn nor counted.
-  const tree = new PatchLeafSet<TraversalNode>((node) => node.seenBy !== 0);
+  const maxTriangles = input.triangleBudget?.maxTriangles ?? Infinity;
+  // A forced patch no view sees is selected, to be kept resident, but neither drawn nor counted;
+  // nor is a bare one, which the reference surface draws. Each counted leaf weighs its triangles.
+  const tree = new PatchLeafSet<TraversalNode>(
+    (node) => node.seenBy !== 0 && !node.bare,
+    t.triangleBudget === null ? 0 : t.views.length,
+    (node, view) => node.triangles[view] ?? 0,
+  );
   const heap = new CandidateHeap();
   const offer = (node: TraversalNode): void => {
     if (wantsRefining(t, node)) {
@@ -942,6 +1391,11 @@ export function selectPatches(input: SelectionInput): Selection {
       offer(root);
     }
   }
+  const hold = input.budgetHold ?? null;
+  // A split the last selection did not make is refused past this many patches and triangles
+  // (`budgetHold`).
+  const newMax = hold === null ? maxPatches : maxPatches * (1 - hold.margin);
+  const newMaxTriangles = hold === null ? maxTriangles : maxTriangles * (1 - hold.margin);
   let limited = false;
   let limitExcess = 0;
   for (let node = heap.pop(); node !== undefined; node = heap.pop()) {
@@ -949,20 +1403,40 @@ export function selectPatches(input: SelectionInput): Selection {
     if (node.split) {
       continue;
     }
+    const held =
+      hold !== null && hold.split.has((node.cell.keyString ??= patchKeyString(node.key)));
+    if (limited && !held && !node.forced) {
+      // Past the first refusal, the hold lets the last selection's splits alone go on.
+      continue;
+    }
     tree.begin();
     const added = tree.splitBalanced(node.key, childOf);
-    if (!node.forced && tree.size > maxPatches) {
+    if (
+      !node.forced &&
+      (tree.size > (held ? maxPatches : newMax) ||
+        tree.weight > (held ? maxTriangles : newMaxTriangles))
+    ) {
       tree.rollback();
-      limited = true;
-      limitExcess = node.weighted;
-      break;
+      if (node.excess <= 1) {
+        // A split the surveyed floor alone asked for: no view's tolerance is above τ for it.
+        continue;
+      }
+      if (!limited) {
+        limited = true;
+        limitExcess = node.weighted;
+      }
+      if (hold === null) {
+        break;
+      }
+      continue;
     }
     tree.commit();
     for (const leaf of added) {
       offer(leaf);
     }
   }
-  const leaves = tree.leafValues();
+  // A bare leaf is the reference surface's: neither drawn nor asked for.
+  const leaves = t.survey === null ? tree.leafValues() : tree.leafValues().filter((n) => !n.bare);
   const patches = new Map<string, SelectedPatch>();
   for (const node of leaves) {
     const cell = node.cell;
@@ -970,25 +1444,130 @@ export function selectPatches(input: SelectionInput): Selection {
     const bounds = boundsOfCell(cell);
     const forced = node.forced && node.key.level === planet.finestLevel;
     const seen = node.seenBy !== 0;
+    const views = node.seenBy;
     let selected = cell.selected;
     if (
       selected === null ||
       selected.bounds !== bounds ||
       selected.forced !== forced ||
-      selected.seen !== seen
+      selected.seen !== seen ||
+      selected.views !== views
     ) {
-      selected = { key: node.key, bounds, forced, seen };
+      selected = { key: node.key, bounds, forced, seen, views };
       cell.selected = selected;
     }
     patches.set(cell.keyString, selected);
   }
+  // In the order the result was always made: the demand, the hidden bakes, then the survey's.
+  const demand = demandOf(t, leaves);
+  const hiddenBaked = hiddenBakedOf(t, tree);
+  const nearestSurveyByView = nearestSurveyByViewOf(t);
   return {
     patches,
-    demand: demandOf(t, leaves),
+    demand,
     limited,
     limitExcess,
-    hiddenBaked: hiddenBakedOf(t, tree),
+    hiddenBaked,
+    nearestSurveyM: Math.min(Number.POSITIVE_INFINITY, ...nearestSurveyByView),
+    nearestSurveyByViewM: nearestSurveyByView,
+    ...(t.triangleBudget === null ? {} : { litTriangles: t.views.map((_, n) => tree.weightOf(n)) }),
   };
+}
+
+/**
+ * The radius, metres, of the diagnostic occluder at `heightM` above the datum
+ * ({@link SelectionInput.occluderHeightM}): `horizonCone`'s c + h with `heightM` for h, the same
+ * sum in the same order, so that `lowestHeightM(planet)` gives its radius bit for bit; `null` with
+ * no height given.
+ *
+ * @throws RangeError for a height that is not finite or puts the radius at or below 0.
+ */
+function diagnosticOccluderRadiusM(
+  planet: PlanetGeometry,
+  heightM: number | undefined,
+): number | null {
+  if (heightM === undefined) {
+    return null;
+  }
+  const radiusM = planet.figure.polarRadiusM + heightM;
+  if (!(Number.isFinite(heightM) && radiusM > 0)) {
+    throw new RangeError(
+      `selection's occluderHeightM must be finite and above minus the polar radius, got ${heightM}`,
+    );
+  }
+  return radiusM;
+}
+
+/**
+ * The level whose patches {@link Selection.nearestSurveyM} measures to: R09's deepest coarse field
+ * (no survey lookup holds finer cells), whose cells are no wider than about 40 km.
+ */
+export const NEAREST_SURVEY_LEVEL = 8;
+
+/** A patch with surveyed ground under it, on the way down to the nearest surveyed ground. */
+interface SurveyStep {
+  readonly key: PatchKey;
+  readonly cell: MemoCell;
+  readonly baked: BakedRange | null;
+  /** Its box's distance from the camera, metres. */
+  readonly distanceM: number;
+}
+
+/**
+ * {@link Selection.nearestSurveyByViewM}: for each view, its camera's box distance to the nearest
+ * patch of {@link NEAREST_SURVEY_LEVEL} (or the finest level) with surveyed ground under it, found
+ * best first from the six roots through the patches with surveyed ground under them, and at least
+ * one finest patch; `+∞` with no lookup or no surveyed ground.
+ */
+function nearestSurveyByViewOf(t: Traversal): number[] {
+  const survey = t.survey;
+  if (survey === null) {
+    return t.views.map(() => Number.POSITIVE_INFINITY);
+  }
+  const deepest = Math.min(NEAREST_SURVEY_LEVEL, t.planet.finestLevel);
+  return t.views.map((view) => {
+    let nearest = Number.POSITIVE_INFINITY;
+    const camera = view.input.camera.positionM;
+    const step = (key: PatchKey, cell: MemoCell, above: BakedRange | null): SurveyStep => {
+      cell.usedAt = t.memo.call;
+      const own = t.heightRanges?.heightRangeM(key);
+      const baked: BakedRange | null =
+        own === undefined ? above : { level: key.level, lowM: own[0], highM: own[1] };
+      buildBounds(t, cell, key, baked);
+      return { key, cell, baked, distanceM: distanceToPackedBoxFromM(cell.packed, camera) };
+    };
+    const frontier: SurveyStep[] = [];
+    for (const face of FACES) {
+      const key = rootKey(face);
+      const root = t.memo.roots[face];
+      if (root !== undefined && survey.surveyedUnder(key)) {
+        frontier.push(step(key, root, null));
+      }
+    }
+    for (;;) {
+      // The frontier holds a few patches a level: a scan finds its nearest.
+      let at = -1;
+      for (let n = 0; n < frontier.length; n += 1) {
+        if (at < 0 || (frontier[n]?.distanceM ?? 0) < (frontier[at]?.distanceM ?? 0)) {
+          at = n;
+        }
+      }
+      const next = at < 0 ? undefined : frontier.splice(at, 1)[0];
+      if (next === undefined || next.distanceM >= nearest) {
+        break;
+      }
+      if (next.key.level >= deepest) {
+        nearest = next.distanceM;
+        break;
+      }
+      for (const child of childKeys(next.key)) {
+        if (survey.surveyedUnder(child)) {
+          frontier.push(step(child, memoChild(t, next.cell, child), next.baked));
+        }
+      }
+    }
+    return Number.isFinite(nearest) ? Math.max(nearest, t.patchSizeM) : nearest;
+  });
 }
 
 /** The baked patches among the tree's bare keys ({@link Selection.hiddenBaked}). */
@@ -1014,6 +1593,7 @@ function hiddenBakedOf(t: Traversal, tree: PatchLeafSet<TraversalNode>): PatchKe
 function demandOf(t: Traversal, leaves: ReadonlyArray<TraversalNode>): PatchRequest[] {
   const requests = new Map<TraversalNode, PatchRequest>();
   for (const leaf of leaves) {
+    // The caller leaves the bare leaves out; a surveyed leaf's ancestors are surveyed too.
     if (leaf.resident) {
       continue;
     }
@@ -1113,6 +1693,8 @@ export class PatchLeafSet<T> {
   private recording = false;
   private count = 0;
   private readonly counts: (value: T) => boolean;
+  private readonly weightSums: Float64Array;
+  private readonly weigh: (value: T, weight: number) => number;
   /** {@link splitBalanced}'s scratch: the new leaves to check, and every node it added. */
   private readonly work: TreeNode<T>[] = [];
   private readonly added: TreeNode<T>[] = [];
@@ -1123,14 +1705,46 @@ export class PatchLeafSet<T> {
   /**
    * @param counts - Whether a leaf counts towards {@link PatchLeafSet.size}: every leaf by default;
    *   selection leaves out the forced patches no view sees, which are kept resident but not drawn.
+   * @param weights - How many weights each leaf that counts has, summed apart: none by default;
+   *   selection's, one a view (plan R14, R14.T3.e).
+   * @param weigh - What a leaf that counts weighs in weight `weight`, a whole number so that the
+   *   sums are exact in any order: selection's, its lit triangles in that view.
    */
-  constructor(counts: (value: T) => boolean = () => true) {
+  constructor(
+    counts: (value: T) => boolean = () => true,
+    weights = 0,
+    weigh: (value: T, weight: number) => number = () => 0,
+  ) {
     this.counts = counts;
+    this.weightSums = new Float64Array(weights);
+    this.weigh = weigh;
   }
 
   /** How many leaves there are that count. */
   get size(): number {
     return this.count;
+  }
+
+  /** The largest of the weights' sums over the leaves that count; 0 with no weight. */
+  get weight(): number {
+    let most = 0;
+    for (const sum of this.weightSums) {
+      most = Math.max(most, sum);
+    }
+    return most;
+  }
+
+  /** Weight `weight`'s sum over the leaves that count; 0 past the weights. */
+  weightOf(weight: number): number {
+    return this.weightSums[weight] ?? 0;
+  }
+
+  /** Adds `sign` times `value`'s weights to their sums. */
+  private addWeights(value: T, sign: 1 | -1): void {
+    const sums = this.weightSums;
+    for (let w = 0; w < sums.length; w += 1) {
+      sums[w] = (sums[w] ?? 0) + sign * this.weigh(value, w);
+    }
   }
 
   /**
@@ -1145,6 +1759,7 @@ export class PatchLeafSet<T> {
     this.roots[key.face] = treeNode(key, value, null);
     if (this.counts(value)) {
       this.count += 1;
+      this.addWeights(value, 1);
     }
   }
 
@@ -1268,6 +1883,7 @@ export class PatchLeafSet<T> {
         const child = childAt(node, c);
         if (child !== null && this.counts(child.value)) {
           this.count -= 1;
+          this.addWeights(child.value, -1);
         }
       }
       node.split = false;
@@ -1277,6 +1893,7 @@ export class PatchLeafSet<T> {
       node.child3 = null;
       if (this.counts(node.value)) {
         this.count += 1;
+        this.addWeights(node.value, 1);
       }
     }
     this.commit();
@@ -1294,6 +1911,7 @@ export class PatchLeafSet<T> {
     }
     if (this.counts(node.value)) {
       this.count -= 1;
+      this.addWeights(node.value, -1);
     }
     // `childKeys`' keys, made one at a time.
     const below = level + 1;
@@ -1319,6 +1937,7 @@ export class PatchLeafSet<T> {
     }
     if (this.counts(value)) {
       this.count += 1;
+      this.addWeights(value, 1);
     }
     return treeNode(key, value, parent);
   }

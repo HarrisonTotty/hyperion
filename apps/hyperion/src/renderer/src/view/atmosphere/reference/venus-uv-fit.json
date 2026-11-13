@@ -1,0 +1,201 @@
+{
+  "description": "R08.T5.e's fit of Venus's ultraviolet absorber (plan R08): every trial's geometric albedo on the reference tracer's plane-parallel Venus deck, its sigma, its wall time on 4 threads (pod, 4 vCPU), and the fitted k365 and L, which apps/hyperion/src/tools/materials.ts holds. Each trial is test/venusAlbedo.ts's albedoCaseJson at this seed and the trial's bands, mode 2 on the 75 wt% acid's file with k from acidUvAbsorberIndexK at the trial's k365 and L ('none': the 75 wt% acid's own k, the clear deck), traced by `hyperion-fit atmosphere-reference <case> --out <reference> --samples 1024 --stokes --threads 4` and read by geometricAlbedo. The trials were run in turn, by hand, as R08's records (T5.e) state their order. A record: not to be edited.",
+  "targets": {
+    "p365": 0.36,
+    "gOverR": 0.933
+  },
+  "wavelengthsNm": {
+    "u365": 365,
+    "b": 436,
+    "v": 549,
+    "g": 469,
+    "r": 616
+  },
+  "samples": 1024,
+  "seed": 3000,
+  "threads": 4,
+  "binarySha256": "d7dc014ac94a5dac39c30ad409e8e9ca5e199b2dac89289c166f2d078b1696d4",
+  "trials": [
+    {
+      "absorber": {
+        "k365": 0.0012,
+        "decayNm": 26.9
+      },
+      "bands": ["u365"],
+      "albedo": {
+        "u365": {
+          "albedo": 0.39831296249969306,
+          "standardError": 0.005298476426709357
+        }
+      },
+      "wallS": 336.13145020800005
+    },
+    {
+      "absorber": {
+        "k365": 0.0024,
+        "decayNm": 26.9
+      },
+      "bands": ["u365"],
+      "albedo": {
+        "u365": {
+          "albedo": 0.278848125335109,
+          "standardError": 0.0037332388326987366
+        }
+      },
+      "wallS": 245.93544474400002
+    },
+    {
+      "absorber": {
+        "k365": 0.001584845918605256,
+        "decayNm": 26.9
+      },
+      "bands": ["u365"],
+      "albedo": {
+        "u365": {
+          "albedo": 0.3538669694342945,
+          "standardError": 0.004825769977535171
+        }
+      },
+      "wallS": 351.617163869
+    },
+    {
+      "absorber": {
+        "k365": 0.0015317416538761478,
+        "decayNm": 26.9
+      },
+      "bands": ["u365"],
+      "albedo": {
+        "u365": {
+          "albedo": 0.3534748197693283,
+          "standardError": 0.004880889798273851
+        }
+      },
+      "wallS": 330.61001816200024
+    },
+    {
+      "absorber": {
+        "k365": 0.0014474529452501478,
+        "decayNm": 26.9
+      },
+      "bands": ["u365"],
+      "albedo": {
+        "u365": {
+          "albedo": 0.3667435514891736,
+          "standardError": 0.004962550502404198
+        }
+      },
+      "wallS": 324.47535248699995
+    },
+    {
+      "absorber": {
+        "k365": 0.0014902908937878556,
+        "decayNm": 26.9
+      },
+      "bands": ["u365"],
+      "albedo": {
+        "u365": {
+          "albedo": 0.3638020234450626,
+          "standardError": 0.005080882398800913
+        }
+      },
+      "wallS": 325.0110141789999
+    },
+    {
+      "absorber": {
+        "k365": 0.00149,
+        "decayNm": 26.9
+      },
+      "bands": ["r"],
+      "albedo": {
+        "r": {
+          "albedo": 0.7347093010790446,
+          "standardError": 0.013299452713567578
+        }
+      },
+      "wallS": 403.582048593
+    },
+    {
+      "absorber": {
+        "k365": 0.00149,
+        "decayNm": 26.9
+      },
+      "bands": ["g"],
+      "albedo": {
+        "g": {
+          "albedo": 0.7150718504996977,
+          "standardError": 0.011448050709108202
+        }
+      },
+      "wallS": 607.92420333
+    },
+    {
+      "absorber": {
+        "k365": 0.00149,
+        "decayNm": 34.97
+      },
+      "bands": ["g"],
+      "albedo": {
+        "g": {
+          "albedo": 0.7139965679336661,
+          "standardError": 0.012487318405637746
+        }
+      },
+      "wallS": 469.4567480189998
+    },
+    {
+      "absorber": {
+        "k365": 0.00149,
+        "decayNm": 45.461
+      },
+      "bands": ["g"],
+      "albedo": {
+        "g": {
+          "albedo": 0.6931568176244925,
+          "standardError": 0.011841863675733555
+        }
+      },
+      "wallS": 551.3494629869999
+    },
+    {
+      "absorber": {
+        "k365": 0.00149,
+        "decayNm": 59.0993
+      },
+      "bands": ["g"],
+      "albedo": {
+        "g": {
+          "albedo": 0.6436143793871784,
+          "standardError": 0.010435428614382214
+        }
+      },
+      "wallS": 445.4876598980003
+    },
+    {
+      "absorber": {
+        "k365": 0.00149,
+        "decayNm": 47.573274270419105
+      },
+      "bands": ["g"],
+      "albedo": {
+        "g": {
+          "albedo": 0.6873955693181321,
+          "standardError": 0.011789250874989943
+        }
+      },
+      "wallS": 586.8777466480001
+    },
+    {
+      "absorber": "none",
+      "bands": ["u365"],
+      "albedo": {
+        "u365": {
+          "albedo": 0.785467477769168,
+          "standardError": 0.01758388392246089
+        }
+      },
+      "wallS": 717.415624802
+    }
+  ],
+  "k365": 0.00149,
+  "decayNm": 47.6
+}

@@ -1,5 +1,6 @@
 /**
- * The Chromium switches that give the client a hardware WebGPU adapter on Linux.
+ * The Chromium switches that give the client a hardware WebGPU adapter on Linux, and lift Dawn's
+ * timestamp quantization on every backend for a measurement run.
  *
  * @remarks
  * The switches are data: {@link graphicsSwitches} says which, and {@link applyGraphicsSwitches}
@@ -15,7 +16,12 @@ import type { CommandLine } from "electron";
 import type { GraphicsLaunchMode } from "../../preload/api";
 
 export type { GraphicsLaunchMode } from "../../preload/api";
-export { GPU_TIMING_SWITCH, launchModeOf, SAFE_MODE_SWITCH } from "../../preload/graphicsLaunch";
+export {
+  GPU_TIMING_SWITCH,
+  launchModeOf,
+  SAFE_MODE_SWITCH,
+  SOFTWARE_MODE_SWITCH,
+} from "../../preload/graphicsLaunch";
 
 /** One Chromium switch; `value` absent for a bare flag. */
 export interface ChromiumSwitch {
@@ -52,7 +58,12 @@ const VULKAN_SWITCHES: ReadonlyArray<ChromiumSwitch> = [
   { name: "enable-dawn-features", value: "enable_subgroups_intel_gen9" },
 ];
 
-/** The one Dawn toggle that lifts timestamp quantization and adds no feature or adapter. */
+/**
+ * The one Dawn toggle that lifts timestamp quantization and adds no feature or adapter: a Dawn
+ * device toggle, which Chromium hands to Dawn on every backend (Vulkan, Metal, D3D12), so that a
+ * Mac's measurement run times its passes unquantized too (R14's Mac measurements; the owner's Mac
+ * A/B of 2026-11-01 read Metal's times quantized).
+ */
 const GPU_TIMING_DAWN_SWITCH: ChromiumSwitch = {
   name: "disable-dawn-features",
   value: "timestamp_quantization",
@@ -61,16 +72,18 @@ const GPU_TIMING_DAWN_SWITCH: ChromiumSwitch = {
 /**
  * The switches for a launch.
  *
- * @returns The Vulkan set, plus the timing toggle when `gpuTiming` is on, in `vulkan` mode on
- * Linux; nothing in `safe` mode (no Vulkan, no Dawn toggle and no timing, since nothing draws with
- * WebGPU there) and nothing in `default` mode, or on any other platform, which needs none.
+ * @returns The Vulkan set in `vulkan` mode on Linux, and the timing toggle when `gpuTiming` is on in
+ * any mode that draws with WebGPU: `vulkan`, `default` (macOS's Metal, Windows' D3D12) and
+ * `software`, whose SwiftShader switches are the command line's own (`viewsCheck.sh --software` and
+ * `descentSpike.sh --software`, plan R01, R01.T16). Nothing in `safe` mode (no Vulkan, no Dawn
+ * toggle and no timing, since nothing draws with WebGPU there), and nothing else in any mode.
  */
 export function graphicsSwitches(options: GraphicsLaunchOptions): ReadonlyArray<ChromiumSwitch> {
-  const forced = options.platform === "linux" && options.mode === "vulkan";
-  if (!forced) {
+  if (options.mode === "safe") {
     return [];
   }
-  return options.gpuTiming ? [...VULKAN_SWITCHES, GPU_TIMING_DAWN_SWITCH] : VULKAN_SWITCHES;
+  const forced = options.platform === "linux" && options.mode === "vulkan" ? VULKAN_SWITCHES : [];
+  return options.gpuTiming ? [...forced, GPU_TIMING_DAWN_SWITCH] : forced;
 }
 
 /**

@@ -2,6 +2,8 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import type { PrimaryModifier } from "../../lib/platform";
+import { statusLine } from "../../test/statusLine";
+import type { CameraPreset } from "../../view/camera/state";
 import { CameraControls } from "./CameraControls";
 import type { CameraPlace } from "./cameraPlace";
 
@@ -14,11 +16,15 @@ const PLACE: CameraPlace = {
 };
 
 /** The camera panel at `rateStep` of the 0–12 steps, for `modifier`'s platform. */
-function renderAt(rateStep: number, modifier: PrimaryModifier): void {
+function renderAt(
+  rateStep: number,
+  modifier: PrimaryModifier,
+  offered: ReadonlyArray<CameraPreset> = ["seat", "chase", "free"],
+): void {
   render(
     <CameraControls
       preset="free"
-      offered={["seat", "chase", "free"]}
+      offered={offered}
       fovDeg={60}
       rateStep={rateStep}
       maxRateStep={12}
@@ -35,7 +41,7 @@ function renderAt(rateStep: number, modifier: PrimaryModifier): void {
 
 /** The rate's limit reason's text, the drawn sign's name read in its place. */
 function rateReason(): string | null {
-  return screen.getByText(/RATE at its/u).textContent;
+  return screen.getByText(statusLine(/RATE at its/u)).textContent;
 }
 
 describe("the camera panel's rate limit (decision-r07-t19f-position, item 5)", () => {
@@ -62,6 +68,22 @@ describe("the camera panel's rate limit (decision-r07-t19f-position, item 5)", (
     renderAt(12, "ctrl");
     expect(rateReason()).not.toContain("PAGE");
   });
+
+  it("tracks NOT AVAILABLE: and sets the drawn chord inside the untracked sentence", () => {
+    renderAt(0, "meta");
+    const reason = screen.getByText(statusLine(/RATE at its/u));
+    const parts = [...reason.children].map((part) => [
+      part.className,
+      part.querySelector("svg.glyph--command") !== null,
+    ]);
+    expect([reason.className, parts]).toEqual([
+      "view-camera__reason",
+      [
+        ["status-text__state", false],
+        ["status-text__sentence", true],
+      ],
+    ]);
+  });
 });
 
 describe("the camera panel's readings (decision-r07-t19f-position, item 2)", () => {
@@ -81,5 +103,17 @@ describe("the camera panel's readings (decision-r07-t19f-position, item 2)", () 
         ),
       );
     expect(following).toEqual([true, true, true]);
+  });
+});
+
+describe("the camera panel's presets (plan R15, T4)", () => {
+  it("shows ORBIT only where the scene offers it", () => {
+    renderAt(6, "ctrl");
+    expect(screen.queryByRole("button", { name: "0 ORBIT" })).toBeNull();
+  });
+
+  it("shows ORBIT with its key where the scene offers it", () => {
+    renderAt(6, "ctrl", ["free", "orbit"]);
+    expect(screen.getByRole("button", { name: "0 ORBIT" })).toBeInTheDocument();
   });
 });

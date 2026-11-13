@@ -12,7 +12,7 @@
 //! exceeds the tolerances P06.T12.b validates the backbone to. The doc comment of each function
 //! concerned names the case.
 
-use crate::math;
+use crate::math::{self, PositivePowers};
 use crate::units::{Megayears, SolarLuminosities, SolarMasses, SolarRadii};
 
 use super::PhasePoint;
@@ -55,9 +55,9 @@ fn t_bgb_myr(m: f64, c: &ZCoeffs) -> f64 {
 /// The fraction µ of `t_bgb` at which the hook ends (HPT equation 7):
 /// max(0.5, 1.0 − 0.01 max(a6 ÷ M^a7, a8 + a9 ÷ M^a10)).
 #[must_use]
-fn hook_fraction(m: f64, c: &ZCoeffs) -> f64 {
-    let first = c.a(6) / math::powf_positive(m, c.a(7));
-    let second = c.a(8) + c.a(9) / math::powf_positive(m, c.a(10));
+fn hook_fraction(m: PositivePowers, c: &ZCoeffs) -> f64 {
+    let first = c.a(6) / m.pow(c.a(7));
+    let second = c.a(8) + c.a(9) / m.pow(c.a(10));
     0.5_f64.max(1.0 - 0.01 * first.max(second))
 }
 
@@ -83,9 +83,9 @@ fn ms_fraction(c: &ZCoeffs) -> f64 {
 /// `t_hook` and `t_MS` in Myr for a mass `m` in M☉ (HPT equations 5–7): µ `t_bgb`, and
 /// max(`t_hook`, x `t_bgb`).
 #[must_use]
-fn timescales_myr(m: f64, c: &ZCoeffs) -> (f64, f64) {
+fn timescales_myr(m: f64, powers: PositivePowers, c: &ZCoeffs) -> (f64, f64) {
     let t_bgb = t_bgb_myr(m, c);
-    let t_hook = hook_fraction(m, c) * t_bgb;
+    let t_hook = hook_fraction(powers, c) * t_bgb;
     (t_hook, t_hook.max(ms_fraction(c) * t_bgb))
 }
 
@@ -93,24 +93,29 @@ fn timescales_myr(m: f64, c: &ZCoeffs) -> (f64, f64) {
 #[cfg(test)]
 #[must_use]
 pub(crate) fn t_hook(m: SolarMasses, c: &ZCoeffs) -> Megayears {
-    Megayears::new(timescales_myr(m.value(), c).0)
+    Megayears::new(timescales_myr(m.value(), PositivePowers::of(m.value()), c).0)
 }
 
 /// The main-sequence lifetime, max(`t_hook`, x `t_bgb`) (HPT equation 5), Myr.
 #[must_use]
 pub(crate) fn t_ms(m: SolarMasses, c: &ZCoeffs) -> Megayears {
-    Megayears::new(timescales_myr(m.value(), c).1)
+    Megayears::new(timescales_myr(m.value(), PositivePowers::of(m.value()), c).1)
 }
 
 /// The luminosity at the end of the main sequence (HPT equation 8):
 /// (a11 M³ + a12 M⁴ + a13 M^(a16 + 1.8)) ÷ (a14 + a15 M⁵ + M^a16).
 #[must_use]
 pub(crate) fn l_tms(m: SolarMasses, c: &ZCoeffs) -> SolarLuminosities {
-    let m = m.value();
+    l_tms_powers(m.value(), PositivePowers::of(m.value()), c)
+}
+
+/// [`l_tms`] with the mass's `powers` given.
+#[must_use]
+fn l_tms_powers(m: f64, powers: PositivePowers, c: &ZCoeffs) -> SolarLuminosities {
     let m3 = m * m * m;
-    let m_a16 = math::powf_positive(m, c.a(16));
+    let m_a16 = powers.pow(c.a(16));
     SolarLuminosities::new(
-        (c.a(11) * m3 + c.a(12) * m3 * m + c.a(13) * m_a16 * math::powf_positive(m, 1.8))
+        (c.a(11) * m3 + c.a(12) * m3 * m + c.a(13) * m_a16 * powers.pow(1.8))
             / (c.a(14) + c.a(15) * m3 * m * m + m_a16),
     )
 }
@@ -172,37 +177,35 @@ pub(crate) fn l_bgb(m: SolarMasses, c: &ZCoeffs) -> SolarLuminosities {
 
 /// The luminosity hook's amplitude ΔL at mass `m` in M☉ (HPT equation 16).
 #[must_use]
-fn delta_l(m: f64, c: &ZCoeffs) -> f64 {
+fn delta_l(m: f64, powers: PositivePowers, c: &ZCoeffs) -> f64 {
     let m_hook = c.m_hook().value();
     let a33 = c.a(33);
-    let high = |m: f64| c.hook_luminosity_scale().at(m);
     if m <= m_hook {
         0.0
     } else if m < a33 {
-        high(a33) * math::powf_positive((m - m_hook) / (a33 - m_hook), 0.4)
+        c.hook_luminosity_scale().at(a33) * math::powf_positive((m - m_hook) / (a33 - m_hook), 0.4)
     } else {
-        high(m)
+        c.hook_luminosity_scale().at_powers(m, powers)
     }
 }
 
 /// The radius hook's amplitude ΔR at mass `m` in M☉ (HPT equation 17).
 #[must_use]
-fn delta_r(m: f64, c: &ZCoeffs) -> f64 {
+fn delta_r(m: f64, powers: PositivePowers, c: &ZCoeffs) -> f64 {
     let m_hook = c.m_hook().value();
     let (a42, a43) = (c.a(42), c.a(43));
-    let high = |m: f64| {
-        (c.a(38) + c.a(39) * m * m * m * m.sqrt())
-            / (c.a(40) * m * m * m + math::powf_positive(m, c.a(41)))
-            - 1.0
+    let high = |m: f64, m_a41: f64| {
+        (c.a(38) + c.a(39) * m * m * m * m.sqrt()) / (c.a(40) * m * m * m + m_a41) - 1.0
     };
     if m <= m_hook {
         0.0
     } else if m <= a42 {
         a43 * ((m - m_hook) / (a42 - m_hook)).sqrt()
     } else if m < 2.0 {
-        a43 + (high(2.0) - a43) * math::powf_positive((m - a42) / (2.0 - a42), c.a(44))
+        let at_2 = high(2.0, math::powf_positive(2.0, c.a(41)));
+        a43 + (at_2 - a43) * math::powf_positive((m - a42) / (2.0 - a42), c.a(44))
     } else {
-        high(m)
+        high(m, powers.pow(c.a(41)))
     }
 }
 
@@ -221,14 +224,13 @@ fn eta(m: f64, c: &ZCoeffs) -> f64 {
 
 /// The luminosity α coefficient at mass `m` in M☉ (HPT equations 19a and 19b).
 #[must_use]
-fn alpha_l(m: f64, c: &ZCoeffs) -> f64 {
-    let high = |m: f64| {
-        (c.a(45) + c.a(46) * math::powf_positive(m, c.a(48)))
-            / (math::powf_positive(m, 0.4) + c.a(47) * math::powf_positive(m, 1.9))
+fn alpha_l(m: f64, powers: PositivePowers, c: &ZCoeffs) -> f64 {
+    let high = |powers: PositivePowers| {
+        (c.a(45) + c.a(46) * powers.pow(c.a(48))) / (powers.pow(0.4) + c.a(47) * powers.pow(1.9))
     };
     let (a49, a50, a51, a52, a53) = (c.a(49), c.a(50), c.a(51), c.a(52), c.a(53));
     if m >= 2.0 {
-        high(m)
+        high(powers)
     } else if m < 0.5 {
         a49
     } else if m < 0.7 {
@@ -238,19 +240,19 @@ fn alpha_l(m: f64, c: &ZCoeffs) -> f64 {
     } else if m < a53 {
         a50 + (a51 - a50) * (m - a52) / (a53 - a52)
     } else {
-        a51 + (high(2.0) - a51) * (m - a53) / (2.0 - a53)
+        a51 + (high(PositivePowers::of(2.0)) - a51) * (m - a53) / (2.0 - a53)
     }
 }
 
 /// The luminosity β coefficient at mass `m` in M☉ (HPT equation 20): max(0, a54 − a55 M^a56), and
 /// above a57, while positive, falling linearly to zero over 0.1 M☉ from its value at a57.
 #[must_use]
-fn beta_l(m: f64, c: &ZCoeffs) -> f64 {
-    let base = |m: f64| 0.0_f64.max(c.a(54) - c.a(55) * math::powf_positive(m, c.a(56)));
-    let beta = base(m);
+fn beta_l(m: f64, powers: PositivePowers, c: &ZCoeffs) -> f64 {
+    let base = |m_a56: f64| 0.0_f64.max(c.a(54) - c.a(55) * m_a56);
+    let beta = base(powers.pow(c.a(56)));
     let a57 = c.a(57);
     if m > a57 && beta > 0.0 {
-        let b = base(a57);
+        let b = base(math::powf_positive(a57, c.a(56)));
         0.0_f64.max(b - 10.0 * (m - a57) * b)
     } else {
         beta
@@ -269,11 +271,11 @@ fn alpha_r(m: f64, c: &ZCoeffs) -> f64 {
     } else if m < a68 {
         a63 + (a64 - a63) * (m - 0.65) / (a68 - 0.65)
     } else if m < a66 {
-        a64 + (c.alpha_r_power_law(a66) - a64) * (m - a68) / (a66 - a68)
+        a64 + (c.alpha_r_power_law_ends()[0] - a64) * (m - a68) / (a66 - a68)
     } else if m <= a67 {
         c.alpha_r_power_law(m)
     } else {
-        c.alpha_r_power_law(a67) + c.a(65) * (m - a67)
+        c.alpha_r_power_law_ends()[1] + c.a(65) * (m - a67)
     }
 }
 
@@ -283,20 +285,20 @@ fn alpha_r(m: f64, c: &ZCoeffs) -> f64 {
 /// the denominator as a74 − 1.06 (in the journal and the preprint), which would not reach a72 at
 /// a74; the published SSE code has a74 − 1.0, a misprint settled.
 #[must_use]
-fn beta_r(m: f64, c: &ZCoeffs) -> f64 {
-    let power_law =
-        |m: f64| c.a(69) * m * m * m * m.sqrt() / (c.a(70) + math::powf_positive(m, c.a(71)));
+fn beta_r(m: f64, powers: PositivePowers, c: &ZCoeffs) -> f64 {
+    let power_law = |m: f64, m_a71: f64| c.a(69) * m * m * m * m.sqrt() / (c.a(70) + m_a71);
+    let at = |m: f64| power_law(m, math::powf_positive(m, c.a(71)));
     let (a72, a74) = (c.a(72), c.a(74));
     let beta_prime = if m <= 1.0 {
         1.06
     } else if m < a74 {
         1.06 + (a72 - 1.06) * (m - 1.0) / (a74 - 1.0)
     } else if m < 2.0 {
-        a72 + (power_law(2.0) - a72) * (m - a74) / (2.0 - a74)
+        a72 + (at(2.0) - a72) * (m - a74) / (2.0 - a74)
     } else if m <= 16.0 {
-        power_law(m)
+        power_law(m, powers.pow(c.a(71)))
     } else {
-        power_law(16.0) + c.a(73) * (m - 16.0)
+        at(16.0) + c.a(73) * (m - 16.0)
     };
     beta_prime - 1.0
 }
@@ -337,23 +339,41 @@ pub(crate) fn hydrogen(z: f64) -> f64 {
 
 /// A star of one mass on the main sequence: every mass-dependent quantity of HPT section 5.1.1,
 /// evaluated once, and luminosity and radius at any age along it.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub(crate) struct MainSequence {
-    t_ms: f64,
-    t_hook: f64,
+    /// The radius's quantities, and the lifetimes, which the radius alone reads.
+    radius: MainSequenceRadius,
     l_zams: f64,
-    r_zams: f64,
     log_l_tms: f64,
-    log_r_tms: f64,
     alpha_l: f64,
     beta_l: f64,
     eta: f64,
     delta_l: f64,
-    alpha_r: f64,
-    beta_r: f64,
-    gamma: f64,
-    delta_r: f64,
-    r_degenerate: f64,
+}
+
+// The fields as one flat list in their order before the radius's were split out, so that a
+// track's `Debug` text, which the binary timelines' golden digest reads, is unchanged.
+impl core::fmt::Debug for MainSequence {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let r = &self.radius;
+        f.debug_struct("MainSequence")
+            .field("t_ms", &r.t_ms)
+            .field("t_hook", &r.t_hook)
+            .field("l_zams", &self.l_zams)
+            .field("r_zams", &r.r_zams)
+            .field("log_l_tms", &self.log_l_tms)
+            .field("log_r_tms", &r.log_r_tms)
+            .field("alpha_l", &self.alpha_l)
+            .field("beta_l", &self.beta_l)
+            .field("eta", &self.eta)
+            .field("delta_l", &self.delta_l)
+            .field("alpha_r", &r.alpha_r)
+            .field("beta_r", &r.beta_r)
+            .field("gamma", &r.gamma)
+            .field("delta_r", &r.delta_r)
+            .field("r_degenerate", &r.r_degenerate)
+            .finish()
+    }
 }
 
 impl MainSequence {
@@ -361,36 +381,26 @@ impl MainSequence {
     #[must_use]
     pub(crate) fn new(m: SolarMasses, c: &ZCoeffs) -> Self {
         let l_zams = zams::luminosity(m, c).value();
-        let r_zams = zams::radius(m, c).value();
         let mass = m.value();
-        let (t_hook, t_ms) = timescales_myr(mass, c);
-        // HPT equation 24: low-mass stars are partly degenerate (Tout et al. 1997), so the radius
-        // is held above 0.0258 (1 + X)^(5/3) M^(−1/3). The floor binds only near 0.1 M☉ and is
-        // applied at every mass, which changes nothing above.
-        let r_degenerate = c.degenerate_radius() / math::cbrt(mass);
+        // Every power of the mass below shares one logarithm of it (`PositivePowers`), the same
+        // bits as a `powf_positive` each: the lifetime-only build evaluates this some 120 times a
+        // star (P08.T12's layer-E fates).
+        let powers = PositivePowers::of(mass);
         Self {
-            t_ms,
-            t_hook,
+            radius: MainSequenceRadius::with_powers(m, powers, c),
             l_zams,
-            r_zams,
-            log_l_tms: math::log10(l_tms(m, c).value() / l_zams),
-            log_r_tms: math::log10(r_tms(m, c).value() / r_zams),
-            alpha_l: alpha_l(mass, c),
-            beta_l: beta_l(mass, c),
+            log_l_tms: math::log10(l_tms_powers(mass, powers, c).value() / l_zams),
+            alpha_l: alpha_l(mass, powers, c),
+            beta_l: beta_l(mass, powers, c),
             eta: eta(mass, c),
-            delta_l: delta_l(mass, c),
-            alpha_r: alpha_r(mass, c),
-            beta_r: beta_r(mass, c),
-            gamma: gamma(mass, c),
-            delta_r: delta_r(mass, c),
-            r_degenerate,
+            delta_l: delta_l(mass, powers, c),
         }
     }
 
     /// The main-sequence lifetime, Myr.
     #[must_use]
     pub(crate) const fn t_ms(&self) -> Megayears {
-        Megayears::new(self.t_ms)
+        self.radius.t_ms()
     }
 
     /// The fractional ages τ around the hook (HPT equations 12 and 14), where the luminosity and
@@ -398,8 +408,8 @@ impl MainSequence {
     /// ε `t_hook`, for the track's samples of its maxima.
     #[must_use]
     pub(crate) fn hook_fractions(&self) -> [f64; 8] {
-        [0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 5.0, 8.0]
-            .map(|k| (1.0 - k * HOOK_EPSILON) * self.t_hook / self.t_ms)
+        let (t_ms, t_hook) = (self.radius.t_ms, self.radius.t_hook);
+        [0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 5.0, 8.0].map(|k| (1.0 - k * HOOK_EPSILON) * t_hook / t_ms)
     }
 
     /// Luminosity and radius at `t` from the zero-age main sequence, 0 ≤ t ≤ `t_ms` (HPT
@@ -411,18 +421,8 @@ impl MainSequence {
     /// polynomials in τ extrapolate.
     #[must_use]
     pub(crate) fn at(&self, t: Megayears) -> PhasePoint {
-        let t = t.value();
-        let tau = t / self.t_ms;
-        debug_assert!(
-            (-1e-12..=1.0 + 1e-9).contains(&tau),
-            "the main sequence runs for τ from 0 to 1, not {tau}"
-        );
-        let tau1 = (t / self.t_hook).min(1.0);
-        let tau2 = 0.0_f64.max(
-            1.0_f64.min((t - (1.0 - HOOK_EPSILON) * self.t_hook) / (HOOK_EPSILON * self.t_hook)),
-        );
+        let (tau, tau1, tau2) = self.radius.fractions(t);
         let tau_squared = tau * tau;
-        let tau_cubed = tau_squared * tau;
         let log_l = self.alpha_l * tau
             // τ is 0 at the zero-age main sequence, outside `powf_positive`'s domain.
             + self.beta_l
@@ -433,6 +433,102 @@ impl MainSequence {
                 }
             + (self.log_l_tms - self.alpha_l - self.beta_l) * tau_squared
             - self.delta_l * (tau1 * tau1 - tau2 * tau2);
+        PhasePoint {
+            luminosity: SolarLuminosities::new(self.l_zams * math::exp10(log_l)),
+            radius: self.radius.of_fractions(tau, tau1, tau2),
+            core_mass: SolarMasses::ZERO,
+        }
+    }
+}
+
+/// The radius alone of a star of one mass on the main sequence ([`MainSequence`]'s, bit for bit):
+/// its lifetimes and the quantities of HPT's equations 9, 13 and 24, without the luminosity's.
+///
+/// A step of the binary engine's stable transfer finds its rate by bisection, each trial reading
+/// only the donor's radius at its mass then, and a main-sequence donor's was a third of those
+/// reads (R06.T16.a's cost: the sky's census of the field near the Sun is mostly the engine).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct MainSequenceRadius {
+    t_ms: f64,
+    t_hook: f64,
+    r_zams: f64,
+    log_r_tms: f64,
+    alpha_r: f64,
+    beta_r: f64,
+    gamma: f64,
+    delta_r: f64,
+    r_degenerate: f64,
+}
+
+impl MainSequenceRadius {
+    /// The radius of a star of mass `m` (0.1–100 M☉) on the main sequence at the metallicity of
+    /// `c`.
+    #[must_use]
+    pub(crate) fn new(m: SolarMasses, c: &ZCoeffs) -> Self {
+        Self::with_powers(m, PositivePowers::of(m.value()), c)
+    }
+
+    /// [`new`](Self::new) with the powers of the mass given, which [`MainSequence`] shares.
+    #[must_use]
+    fn with_powers(m: SolarMasses, powers: PositivePowers, c: &ZCoeffs) -> Self {
+        let r_zams = zams::radius(m, c).value();
+        let mass = m.value();
+        let (t_hook, t_ms) = timescales_myr(mass, powers, c);
+        // HPT equation 24: low-mass stars are partly degenerate (Tout et al. 1997), so the radius
+        // is held above 0.0258 (1 + X)^(5/3) M^(−1/3). The floor binds only near 0.1 M☉ and is
+        // applied at every mass, which changes nothing above.
+        let r_degenerate = c.degenerate_radius() / math::cbrt(mass);
+        Self {
+            t_ms,
+            t_hook,
+            r_zams,
+            log_r_tms: math::log10(r_tms(m, c).value() / r_zams),
+            alpha_r: alpha_r(mass, c),
+            beta_r: beta_r(mass, powers, c),
+            gamma: gamma(mass, c),
+            delta_r: delta_r(mass, powers, c),
+            r_degenerate,
+        }
+    }
+
+    /// The main-sequence lifetime, Myr.
+    #[must_use]
+    pub(crate) const fn t_ms(&self) -> Megayears {
+        Megayears::new(self.t_ms)
+    }
+
+    /// The radius at `t` from the zero-age main sequence, 0 ≤ t ≤ `t_ms` (HPT equations 13–15
+    /// and 24): [`MainSequence::at`]'s, bit for bit.
+    ///
+    /// # Panics
+    ///
+    /// As [`MainSequence::at`].
+    #[must_use]
+    pub(crate) fn at(&self, t: Megayears) -> SolarRadii {
+        let (tau, tau1, tau2) = self.fractions(t);
+        self.of_fractions(tau, tau1, tau2)
+    }
+
+    /// The fractional age τ at `t` and the hook's τ₁ and τ₂ (HPT equations 11, 12 and 14).
+    #[must_use]
+    fn fractions(&self, t: Megayears) -> (f64, f64, f64) {
+        let t = t.value();
+        let tau = t / self.t_ms;
+        debug_assert!(
+            (-1e-12..=1.0 + 1e-9).contains(&tau),
+            "the main sequence runs for τ from 0 to 1, not {tau}"
+        );
+        let tau1 = (t / self.t_hook).min(1.0);
+        let tau2 = 0.0_f64.max(
+            1.0_f64.min((t - (1.0 - HOOK_EPSILON) * self.t_hook) / (HOOK_EPSILON * self.t_hook)),
+        );
+        (tau, tau1, tau2)
+    }
+
+    /// The radius at the fractions of [`fractions`](Self::fractions).
+    #[must_use]
+    fn of_fractions(&self, tau: f64, tau1: f64, tau2: f64) -> SolarRadii {
+        let tau_cubed = tau * tau * tau;
         let tau_10 = math::powi(tau, 10);
         let tau_40 = math::powi(tau_10, 4);
         let log_r = self.alpha_r * tau
@@ -440,11 +536,7 @@ impl MainSequence {
             + self.gamma * tau_40
             + (self.log_r_tms - self.alpha_r - self.beta_r - self.gamma) * tau_cubed
             - self.delta_r * (tau1 * tau1 * tau1 - tau2 * tau2 * tau2);
-        PhasePoint {
-            luminosity: SolarLuminosities::new(self.l_zams * math::exp10(log_l)),
-            radius: SolarRadii::new((self.r_zams * math::exp10(log_r)).max(self.r_degenerate)),
-            core_mass: SolarMasses::ZERO,
-        }
+        SolarRadii::new((self.r_zams * math::exp10(log_r)).max(self.r_degenerate))
     }
 }
 
@@ -485,7 +577,7 @@ mod tests {
 
     /// log₁₀ L and log₁₀ R of a main sequence at fraction τ of it.
     fn log_lr(ms: &MainSequence, tau: f64) -> [f64; 2] {
-        let point = ms.at(Megayears::new(tau * ms.t_ms));
+        let point = ms.at(Megayears::new(tau * ms.radius.t_ms));
         [
             math::log10(point.luminosity.value()),
             math::log10(point.radius.value()),
@@ -558,14 +650,14 @@ mod tests {
     #[test]
     fn every_coefficient_of_the_evolution_is_continuous_in_mass() {
         let coefficients: [(&str, Coefficient); 8] = [
-            ("αL", alpha_l),
-            ("βL", beta_l),
+            ("αL", |m, c| alpha_l(m, PositivePowers::of(m), c)),
+            ("βL", |m, c| beta_l(m, PositivePowers::of(m), c)),
             ("η", eta),
-            ("ΔL", delta_l),
+            ("ΔL", |m, c| delta_l(m, PositivePowers::of(m), c)),
             ("αR", alpha_r),
-            ("βR", beta_r),
+            ("βR", |m, c| beta_r(m, PositivePowers::of(m), c)),
             ("γ", gamma),
-            ("ΔR", delta_r),
+            ("ΔR", |m, c| delta_r(m, PositivePowers::of(m), c)),
         ];
         let masses: Vec<f64> = log_mass_sweep(2_000).into_iter().map(math::exp10).collect();
         for z in REFERENCE_Z {
@@ -610,9 +702,9 @@ mod tests {
                 let ms = MainSequence::new(m, &c);
                 let start = ms.at(Megayears::ZERO);
                 let end = ms.at(ms.t_ms());
-                let floor = |r: f64| r.max(ms.r_degenerate);
+                let floor = |r: f64| r.max(ms.radius.r_degenerate);
                 let l0 = start.luminosity.value() / ms.l_zams;
-                let r0 = start.radius.value() / floor(ms.r_zams);
+                let r0 = start.radius.value() / floor(ms.radius.r_zams);
                 let l1 = end.luminosity / l_tms(m, &c);
                 let r1 = end.radius.value() / floor(r_tms(m, &c).value());
                 for (name, ratio) in [("L(0)", l0), ("R(0)", r0), ("L(1)", l1), ("R(1)", r1)] {
@@ -804,6 +896,35 @@ mod tests {
             let (l, r) = crate::stellar::substellar::backbone_zams_at_tenth(MetalFraction::new(z));
             hyperion_testkit::float::assert_same_bits(start.luminosity.value(), l.value());
             hyperion_testkit::float::assert_same_bits(start.radius.value(), r.value());
+        }
+    }
+    /// The radius alone is the main sequence's radius, bit for bit, at every mass and age
+    /// (R06.T16.a's cost): over the five calibration metallicities and 40 masses from 0.1 to
+    /// 100 M☉, at 41 ages from the zero-age main sequence to its end, the hook's among them.
+    #[test]
+    fn the_radius_alone_is_the_main_sequences_bit_for_bit() {
+        use hyperion_testkit::float::bits;
+
+        for z in REFERENCE_Z {
+            let c = coeffs(z);
+            for log_m in log_mass_sweep(40) {
+                let m = mass(math::exp10(log_m));
+                let ms = MainSequence::new(m, &c);
+                let radius = MainSequenceRadius::new(m, &c);
+                assert_eq!(radius, ms.radius);
+                assert_eq!(bits(radius.t_ms().value()), bits(ms.t_ms().value()));
+                let ages = (0..=40)
+                    .map(|i| f64::from(i) / 40.0)
+                    .chain(ms.hook_fractions());
+                for tau in ages {
+                    let t = ms.t_ms() * tau;
+                    assert_eq!(
+                        bits(radius.at(t).value()),
+                        bits(ms.at(t).radius.value()),
+                        "{m:?} at Z {z}, τ {tau}"
+                    );
+                }
+            }
         }
     }
 }

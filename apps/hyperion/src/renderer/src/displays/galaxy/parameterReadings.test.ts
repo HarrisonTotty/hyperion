@@ -1,6 +1,7 @@
 import type { Parameter, ParameterOrigin, Unit } from "@hyperion/protocol";
 import { describe, expect, it } from "vitest";
 
+import { anUnknownUnit } from "../../test/galaxyFixtures";
 import { groupLabel, parameterLabel } from "./parameterLabels";
 import { toReading } from "./parameterReadings";
 
@@ -28,12 +29,31 @@ describe("toReading", () => {
     ["a share to three figures", 0.112, "none", "0.112"],
     ["a tiny share in E notation", 0.000_42, "none", "4.20E-4"],
     ["a density in E notation", 0.004, "per_ly3", "4.00E-3"],
+    ["a gas density in E notation", 0.0335, "per_cm3", "3.35E-2"],
+    ["a pressure to three figures", 412.5, "k_per_cm3", "413"],
+    ["an extinction to two decimals", 1.2345, "mag", "1.23"],
     ["a negative value with its sign", -0.25, "none", "-0.250"],
   ])("reads %s", (_, value, unit, text) => {
     const reading = toReading(aNumber(value, unit));
 
     expect(reading.text).toBe(text);
     expect(reading.unit).toBe(unit);
+  });
+
+  it("reads a number in a unit this build does not know as Missing, with no unit", () => {
+    const reading = toReading(aNumber(450, anUnknownUnit(), "gas.lane_offset"));
+
+    expect(reading).toEqual({
+      key: "gas.lane_offset",
+      label: "DUST LANE OFFSET",
+      text: null,
+      unit: null,
+      origin: "DRAWN",
+    });
+  });
+
+  it("does not take a unit's precision from the object prototype", () => {
+    expect(toReading(aNumber(1, anUnknownUnit("toString"))).text).toBeNull();
   });
 
   it("labels a parameter from the glossary", () => {

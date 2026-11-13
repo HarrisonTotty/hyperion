@@ -1,4 +1,3 @@
-import type { LayerCensus, LayerStatus } from "@hyperion/protocol";
 import { type ReactNode, useId, useRef } from "react";
 
 import { DisclosureGlyph } from "../../components/DisclosureGlyph";
@@ -6,6 +5,7 @@ import { annunciation } from "../../components/RequestStatus";
 import { EarthMassUnit } from "../../components/EarthMassUnit";
 import { SolarMassUnit } from "../../components/SolarMassUnit";
 import { StaleMark } from "../../components/StaleMark";
+import { StatusText } from "../../components/StatusText";
 import {
   type FormattedSubstellarMass,
   formatListPosition,
@@ -13,8 +13,13 @@ import {
   formatSci,
   formatSubstellarMass,
 } from "../../lib/format";
-import type { ChartResult, ChartSystem } from "../../lib/galaxy/model";
-import { layerLetter } from "../../lib/galaxy/wire";
+import type {
+  ChartLayerLine,
+  ChartLayerStatus,
+  ChartResult,
+  ChartSystem,
+} from "../../lib/galaxy/model";
+import { layerLetter, UNLISTED_LAYER } from "../../lib/galaxy/wire";
 import { useScrollMetrics } from "../../lib/useScrollMetrics";
 import type { RequestState } from "../../lib/useServerRequest";
 import { windowRange } from "../../lib/windowRange";
@@ -24,14 +29,17 @@ import {
   censusLinesLightestFirst,
   formatBandMsun,
   inRangeCount,
-  shownCountText,
+  shownCount,
   type StarFilter,
 } from "./chartModel";
 import { usePageTabFocus } from "./pageTabFocus";
 
+/** A value of the census readout that is Missing: a status this build does not know, an edge. */
+const MISSING = <span className="readout__missing">—</span>;
+
 /** What a layer's line in the census table says about the layer, in words. */
-function statusWords(status: LayerStatus): string {
-  let words: string;
+function statusWords(status: ChartLayerStatus): ReactNode {
+  let words: ReactNode;
   switch (status) {
     case "included":
       words = "INCLUDED";
@@ -44,6 +52,9 @@ function statusWords(status: LayerStatus): string {
       break;
     case "over_cell_budget":
       words = "OVER CELL BUDGET";
+      break;
+    case "unknown":
+      words = MISSING;
       break;
   }
   return words;
@@ -85,14 +96,16 @@ const SPAN = " – ";
 
 /** Props of {@link Band}. */
 interface BandProps {
-  readonly line: LayerCensus;
+  readonly line: ChartLayerLine;
 }
 
 /**
  * A layer's band as the table writes it, one span with one unit, the header's `M☉` but for the
  * free-floating planets': the stellar layers' exact edges (`0.08 – 0.5`), the brown dwarfs' 13
  * Jupiter masses to three decimals up to the stars' `0.08` (`0.012 – 0.08`), and the planets' in
- * Earth masses with their drawn `M⊕` (`0.33 – 4132 M⊕`; plan 13, design note 14).
+ * Earth masses with their drawn `M⊕` (`0.33 – 4132 M⊕`; plan 13, design note 14). The table never
+ * writes the band of a layer this build does not know, whose unit and precision are not known: it
+ * names that layer across the band's cell ({@link CensusTable}), so its case here is Missing.
  */
 function Band({ line }: BandProps) {
   let band: ReactNode;
@@ -117,18 +130,34 @@ function Band({ line }: BandProps) {
         </>
       );
       break;
+    case "unknown":
+      band = MISSING;
+      break;
   }
   return band;
 }
 
+/**
+ * A key for a census line: its layer, or for a layer this build does not know, which every such
+ * line shares, its band's lower edge as well, since no two layers' bands share one.
+ */
+function lineKey(line: ChartLayerLine): string {
+  return line.layer === "unknown" ? `unknown ${line.mass_min_msun}` : line.layer;
+}
+
 interface CensusTableProps {
-  readonly layers: ReadonlyArray<LayerCensus>;
+  readonly layers: ReadonlyArray<ChartLayerLine>;
 }
 
 /**
  * One row per mass layer, lightest first: its band, what was expected in the sphere, and what came
  * back. The substellar layers a query asked for come first, named by their designation letters, `G`
  * for the free-floating planets and `F` for the brown dwarfs (plan 13, P13.T8.c).
+ *
+ * @remarks
+ * A layer this build does not know is named {@link UNLISTED_LAYER} across its letter's and band's
+ * cells, since the server sent it and the letter's column cannot hold the name; its band, whose
+ * unit only the layer decides, is not shown (the guide's `UNLISTED LAYER` row, 2026-11-13).
  */
 function CensusTable({ layers }: CensusTableProps) {
   return (
@@ -145,24 +174,35 @@ function CensusTable({ layers }: CensusTableProps) {
         </tr>
       </thead>
       <tbody>
-        {censusLinesLightestFirst(layers).map((layer) => (
-          <tr key={layer.layer}>
-            <th scope="row">{layerLetter(layer.layer)}</th>
-            <td className="census-table__band">
-              <Band line={layer} />
-            </td>
-            <td className="census-table__count">{expectedCount(layer.expected)}</td>
-            <td className="census-table__count">{formatNumber(layer.returned, 0)}</td>
-            <td className="census-table__status">{statusWords(layer.status)}</td>
-          </tr>
-        ))}
+        {censusLinesLightestFirst(layers).map((layer) => {
+          const letter = layerLetter(layer.layer);
+          return (
+            <tr key={lineKey(layer)}>
+              {letter === null ? (
+                <th scope="row" colSpan={2}>
+                  {UNLISTED_LAYER}
+                </th>
+              ) : (
+                <>
+                  <th scope="row">{letter}</th>
+                  <td className="census-table__band">
+                    <Band line={layer} />
+                  </td>
+                </>
+              )}
+              <td className="census-table__count">{expectedCount(layer.expected)}</td>
+              <td className="census-table__count">{formatNumber(layer.returned, 0)}</td>
+              <td className="census-table__status">{statusWords(layer.status)}</td>
+            </tr>
+          );
+        })}
       </tbody>
     </table>
   );
 }
 
 interface CensusByLayerProps {
-  readonly layers: ReadonlyArray<LayerCensus>;
+  readonly layers: ReadonlyArray<ChartLayerLine>;
   readonly id: string;
   readonly hidden: boolean;
 }
@@ -211,7 +251,10 @@ interface CensusReadoutProps {
   readonly state: RequestState<"systems_in_range">;
   /** The range the counts are taken against (plan 05, design note D9). */
   readonly driveRangeLy: number;
-  /** Whether the answer is a snapshot the link no longer backs: then muted, with a trailing `S`. */
+  /**
+   * Whether the answer is a snapshot the link no longer backs: then muted, with an `S` after each
+   * of its values, the complete line's mass, `SYSTEMS` and `IN RANGE`, but none after a caution.
+   */
   readonly stale: boolean;
   /** Sends the query again after a failure; the readout moves the focus off `RETRY` first. */
   readonly onRetry: () => void;
@@ -232,21 +275,34 @@ interface CensusReadoutProps {
  * The census line is the brainstorm's rule that a result is a complete census or nothing, per
  * layer, so it stands beside every chart. Nothing fitting the census limit is an answer, not a
  * failure, and reads in `--status-caution` as a limit reached, with what the operator can do. A
- * layer the server left out adds a hint under it. The counts are of what was returned and of what
- * lies within the drive range; under a `STARS` filter other than `ALL` the first says what the
- * filter hides (`412 OF 1630 SHOWN: LIVING`), and both count the systems shown. The per-layer table, which is how placement is checked against the
- * fields by eye, folds: the chart's column cannot hold both it and the chart at 1280 px. While a
+ * layer the server left out adds a hint under it. The cautions, the hint and the request's state
+ * are set through `StatusText`: a state tracked, the sentence after it not
+ * (`NOTHING FITS: reduce radius`). The counts are of what was returned and of what lies within the
+ * drive range; under a `STARS` filter other than `ALL` the first says what the filter hides
+ * (`412 OF 1630 SHOWN: LIVING`), and both count the systems shown. The per-layer table, which is
+ * how placement is checked against the fields by eye, folds: the chart's column cannot hold both it and the chart at 1280 px. While a
  * newer query is in flight its `PENDING` stands beside the census and the answer on show stays. An
- * answer the link no longer backs reads as stale: muted, with the guide's trailing `S`.
+ * answer the link no longer backs reads as stale: muted, with the guide's trailing `S` after each
+ * value, `COMPLETE ABOVE 0.08 M☉ S`, `SYSTEMS 9 OF 88 S SHOWN: REMNANTS` (its `S` after the figure
+ * and before the filter's words, which are the console's own, as the HR page has it) and
+ * `IN RANGE 88 S`; `NOTHING FITS: …` is a caution, not a value, and takes none. The marks come
+ * with the stale answer only and keep no slot while it is live: the counts keep no fixed width,
+ * so a kept slot would buy no stillness (plan 05, P05.T14). Its second reason, that in the compact
+ * layout the slots would push `CENSUS BY LAYER` onto a line of its own whenever `PENDING` shows,
+ * ended with P12.T11.g, which gives the toggle a column of its own there; the marks are unchanged.
  *
  * The summary is a live region holding text only — the census line, the request's state in words
  * and the counts — read as a whole when it changes, so that a query given from the keyboard
  * announces that it started and then what came back. `RETRY` and `CENSUS BY LAYER` stand beside it,
- * outside it. The camera's readouts are deliberately silent; `CHART DATA INVALID`, the
- * selected-system readout and the cursor line announce from their own places, each being a region
- * in its own right. `RETRY` goes as it is pressed, since the query is then pending, so it hands the
- * focus to `CENSUS BY LAYER` beside it, or, before the first answer, when there is no toggle, to
- * the page's tab: never to the document's body (the orchestrator's ruling 18).
+ * outside it, and the hint after them, in the same row and outside the region too: on a line of
+ * its own under the row on the stacked page; on the compact page under the summary, the toggle
+ * keeping the row's first line in a column of its own, so that a hint and a summary on two lines
+ * take one line from the chart's stage between them, not two (plan 12, P12.T11.g). The camera's
+ * readouts are deliberately silent; `CHART DATA INVALID`, the selected-system readout and the
+ * cursor line announce from their own places, each being a region in its own right. `RETRY` goes
+ * as it is pressed, since the query is then pending, so it hands the focus to `CENSUS BY LAYER`
+ * beside it, or, before the first answer, when there is no toggle, to the page's tab: never to the
+ * document's body (the orchestrator's ruling 18).
  */
 export function CensusReadout({
   result,
@@ -266,6 +322,8 @@ export function CensusReadout({
   const line = result === null ? null : censusLine(result.census);
   const hint = result === null ? null : censusHint(result.layers);
   const shown = annunciation(state);
+  const shownSystems =
+    result === null ? null : shownCount(systems.length, result.systems.length, starFilter);
 
   return (
     <div className={stale ? "census-readout census-readout--stale" : "census-readout"}>
@@ -306,10 +364,12 @@ export function CensusReadout({
             >
               {line.kind === "complete" ? (
                 <>
-                  {line.text} <MassWithUnit mass={line.above} />
+                  {line.text} {line.above === null ? MISSING : <MassWithUnit mass={line.above} />}
+                  {/* The em dash has no last value, so it takes no mark. */}
+                  {stale && line.above !== null ? <StaleMark /> : null}
                 </>
               ) : (
-                line.text
+                <StatusText text={line.text} />
               )}
             </p>
           )}
@@ -322,13 +382,17 @@ export function CensusReadout({
                   : "census-readout__state"
               }
             >
-              {shown.text}
+              <StatusText text={shown.text} />
             </p>
           )}
-          {result === null ? null : (
+          {shownSystems === null ? null : (
             <dl className="readout census-readout__counts">
               <dt>SYSTEMS</dt>
-              <dd>{shownCountText(systems.length, result.systems.length, starFilter)}</dd>
+              <dd>
+                {shownSystems.figure}
+                {stale ? <StaleMark /> : null}
+                {shownSystems.filterWords === null ? null : ` ${shownSystems.filterWords}`}
+              </dd>
               <dt>IN RANGE</dt>
               <dd>
                 {formatNumber(inRangeCount(systems, driveRangeLy), 0)}
@@ -343,7 +407,7 @@ export function CensusReadout({
           // words, so that it says which failure it retries wherever it is reached from.
           <button
             type="button"
-            className="control"
+            className="control census-readout__retry"
             aria-describedby={stateId}
             onClick={() => {
               // The query goes pending and RETRY with it, so the focus goes to a control that
@@ -378,8 +442,18 @@ export function CensusReadout({
             CENSUS BY LAYER
           </button>
         )}
+        {/*
+         * In the row, after the toggle and outside the region, so that it is read after the
+         * census and its controls, as it stands: on a line of its own under the row on the
+         * stacked page, and under the summary, beside the toggle, on the compact one, where the
+         * census's lines share the room the chart's state lines take (plan 12, P12.T11.g).
+         */}
+        {hint === null ? null : (
+          <p className="census-readout__hint">
+            <StatusText text={hint} />
+          </p>
+        )}
       </div>
-      {hint === null ? null : <p className="census-readout__hint">{hint}</p>}
       {result === null ? null : (
         <CensusByLayer layers={result.layers} id={tableId} hidden={!tableShown} />
       )}

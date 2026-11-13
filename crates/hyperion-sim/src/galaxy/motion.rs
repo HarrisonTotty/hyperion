@@ -12,6 +12,51 @@
 //! companion or a planet held as elements and phased from integer seconds. An orbit here starts from
 //! a drawn position and velocity and may be unbound, so it is held as that state.
 //!
+//! # The regime (P09.T28.b.a)
+//!
+//! "The Kepler regime is a property of the system" (plan 09, Design note 12): a system is in it if
+//! its epoch distance from the black hole is inside the influence radius, where the stars inside
+//! weigh the black hole's mass, whatever the query's time, so no system changes regime during play
+//! ([`Regime`], [`regime_of`]). [`position_velocity_at`] is a system's state at any time under its
+//! regime's law: outside, plan 08's straight line, as plan 03's
+//! [`position_at`](crate::galaxy::query::position_at) draws it, bit for bit; inside, the
+//! [`KeplerOrbit`] from its epoch state about μ = G (`M_bh` + M★(< r₀)). A grid system takes plan
+//! 08's epoch velocity as that state's velocity, and one whose orbit passes inside the black hole's
+//! loss cone is "no such system", as a centre member's would have been at its placement
+//! ([`loss_cone_verdict`]). The galaxy holds what these read, its [`CentreMotion`], and builds it
+//! on first read (Design note 15).
+//!
+//! **They reach the record from generator version 25** (P09.T28.b.b; decision-galaxy-25-train §1
+//! and §2): plan 03's [`position_at`](crate::galaxy::query::position_at) takes
+//! [`position_velocity_at`] for a grid record, the candidate evaluation behind
+//! [`generate_cell`](crate::galaxy::placement::generate_cell) and
+//! [`resolve`](crate::galaxy::placement::resolve) lets the loss cone carve out a grid record whose
+//! orbit passes inside it, and the walks pad for the orbits
+//! ([`kepler_pad_for`](crate::galaxy::query::kepler_pad_for)). P09.T29's centre source reads them
+//! too.
+//!
+//! **From generator version 25 the orbit is the exact one in the centre's potential**
+//! (P09.T28.d.b): a Kepler-regime state whose orbit is bound in the centre's Ψ follows that orbit
+//! exactly, with the Schwarzschild advance on top ([`spherical`]), and one that is not keeps the
+//! [`KeplerOrbit`]: through [`Trajectory::new`], which [`position_velocity_at`] and the centre's
+//! source read. The Kepler orbit still sets the bounds read off it (the loss cone's verdict,
+//! P09.T28.c's radius, P09.T29's shells and pads), which hold the exact orbit too. From version 27
+//! (P09.T28.d.c) an exact orbit not near a circle takes its state within half a radial period of
+//! the epoch by the arc from the epoch ([`spherical`]'s "The arc from the epoch").
+//!
+//! # The range query near the black hole (P09.T29)
+//!
+//! A [`Trajectory`] is a system's law prepared once, the [`KeplerOrbit`] built and the loss cone
+//! asked, so that the centre's cache of orbits can propagate it to any time:
+//! [`position_velocity_at`] is its two steps in one. Systems near the black hole move far and fast,
+//! so the range query chooses the cells they lie in by how far they can go: the radial plunge
+//! [`plunge_pad`] at the escape speed, and inside [`full_scan_radius`], where a plunge reaches the
+//! black hole, a full scan (brainstorm, "The range query"). A crate-internal speed bound carries
+//! the μ and the energy that make those rules hold for the systems as they move here, whose
+//! orbits may be unbound about the mass inside them; the centre's source
+//! ([`CentreMemberSource`](crate::galaxy::features::centre::CentreMemberSource)) and the grid's
+//! Kepler-regime pad ([`kepler_pad_for`](crate::galaxy::query::kepler_pad_for)) read it.
+//!
 //! # Method
 //!
 //! With `r₀`, `v₀` the state at the epoch, `σ₀ = r₀ · v₀ ÷ √μ` and `α = 2 ÷ r₀ − v₀² ÷ μ` (the
@@ -24,10 +69,14 @@
 //! g, ḟ and ġ (Battin 1999, *An Introduction to the Mathematics and Methods of Astrodynamics*, rev.
 //! ed., §4.5; Vallado 2013, *Fundamentals of Astrodynamics and Applications*, 4th ed., §2.3,
 //! algorithm 8). The equation is solved by the Laguerre–Conway iteration (Conway 1986, *Celestial
-//! Mechanics* 39, 199), which converges from a poor starting value for every conic, run a fixed
-//! [`UNIVERSAL_ITERATIONS`] times and never stopped on a tolerance. A bound orbit's time is first
-//! reduced to within half a period of the epoch, so the anomaly never winds up over the thousand
-//! orbits an inner star completes in the clock window.
+//! Mechanics* 39, 199), which converges from a poor starting value for nearly every state, run a
+//! fixed [`UNIVERSAL_ITERATIONS`] times and never stopped early. Its result is then checked
+//! against the equation, and a χ it leaves unsolved, to `UNSOLVED_RESIDUAL` of the equation's
+//! largest term, is found again by a fixed `BISECTION_STEPS` bisections, which cannot fail: an
+//! inbound flyby that passes its pericentre within the span can need them (P09.T28.a's fix, found
+//! by P09.T28.b.a). A bound orbit's time is first reduced to within half a period of the epoch, so
+//! the anomaly never winds up over the thousand orbits an inner star completes in the clock
+//! window.
 //!
 //! # Units and precision
 //!
@@ -45,21 +94,35 @@
 //!
 //! The module is pure: no streams, no tags, no caches. Every operation is an IEEE operation or a
 //! [`math`] function, the iteration count is fixed, and the arithmetic's form is fixed, so every
-//! platform gives the same bits. [`UNIVERSAL_ITERATIONS`], the Stumpff series' length and the form
-//! of every expression here belong to the generator version once P09.T28.b wires the propagator
-//! into the drift hook; until then nothing generated reads it.
+//! platform gives the same bits; the residual's test compares deterministic values, so a state
+//! takes the bisection on every platform or on none. [`UNIVERSAL_ITERATIONS`],
+//! `UNSOLVED_RESIDUAL`, `BISECTION_STEPS`, the Stumpff series' length, the bisection of the
+//! influence radius and the form of every expression here belong to the generator version from
+//! version 25, when the drift hook reads the propagator (P09.T28.b.b). A grid system's velocity is
+//! plan 08's draw on its own stream ([`epoch_velocity`]), which [`EpochState::of_grid_record`]
+//! reads and nothing here adds a word to.
 
 use std::error::Error;
 use std::fmt;
+use std::sync::Arc;
 
-use crate::coords::GalacticVelocity;
-use crate::galaxy::PointLy;
+use self::spherical::{CentrePotential, SphericalOrbit};
+use crate::coords::{GalacticDisplacement, GalacticPosition, GalacticVelocity};
+use crate::galaxy::features::centre::members::CentreMemberRecord;
+use crate::galaxy::features::centre::{BuildCentreError, CentreProfile, LossCone};
+use crate::galaxy::params::GalaxyParams;
+use crate::galaxy::placement::{SystemOrigin, SystemRecord};
+use crate::galaxy::potential::MassModel;
+use crate::galaxy::query::{drifted, epoch_velocity};
+use crate::galaxy::{Galaxy, PointLy};
 use crate::math;
-use crate::units::consts::METRES_PER_LIGHT_YEAR;
-use crate::units::{GravitationalParameter, LightYears, Metres, Seconds};
+use crate::time::UniverseTime;
+use crate::units::consts::{METRES_PER_LIGHT_YEAR, SPEED_OF_LIGHT};
+use crate::units::{GravitationalParameter, LightYears, Metres, Seconds, SolarMasses};
 
 /// How many Laguerre–Conway iterations solve Kepler's equation in universal form: a fixed count,
-/// never a tolerance, so that every platform takes the same steps.
+/// never stopped early, so that every platform takes the same steps; a result they leave unsolved
+/// is bisected (`UNSOLVED_RESIDUAL`).
 ///
 /// From the starting values below the iteration reaches the root to 10⁻¹³ relative in at most
 /// seven steps over the stress set of this module's tests (bound orbits to e = 0.9999, parabolic,
@@ -75,6 +138,18 @@ const LAGUERRE_ORDER: f64 = 5.0;
 /// Above this eccentricity an unbound orbit's starting value comes from its hyperbolic anomaly,
 /// which is ill-conditioned as e approaches 1, where the parabolic cubic serves instead.
 const HYPERBOLIC_STARTER_ECCENTRICITY: f64 = 1.01;
+
+/// The share of the largest of its terms within which Kepler's universal equation counts as solved
+/// ([`KeplerOrbit::universal_anomaly`]): far above the 10⁻¹³ to which a solved χ leaves it, even
+/// far out on a hyperbola, where its terms are a million times χ's own, and far below what an
+/// unsolved one leaves, a large share of its terms.
+const UNSOLVED_RESIDUAL: f64 = 1e-8;
+
+/// How many bisections solve Kepler's universal equation when the iteration has not: 128 halve the
+/// bracket `√μ τ ÷ q`, under 10²⁶ √m over ±10⁴ yr for any pericentre over a metre about any
+/// black hole under 10¹⁰ M☉, by 3 × 10³⁸, to below the rounding of any root it holds. Steps
+/// past the rounding leave the bracket where it is.
+const BISECTION_STEPS: u32 = 128;
 
 /// Below this |z| the Stumpff functions come from their series, where the closed forms lose
 /// digits to cancellation.
@@ -247,6 +322,13 @@ impl KeplerOrbit {
         PointLy::new(x, y, z)
     }
 
+    /// The position relative to the black hole as a displacement in metres, galactic axes: the
+    /// orbit's own state, without [`position`](Self::position)'s rounding to light-years.
+    #[must_use]
+    pub(crate) fn displacement(&self) -> GalacticDisplacement {
+        GalacticDisplacement::new(self.position)
+    }
+
     /// The velocity, galactic axes.
     #[must_use]
     pub fn velocity(&self) -> GalacticVelocity {
@@ -306,6 +388,15 @@ impl KeplerOrbit {
         dot(h, h) / (self.mu * (1.0 + self.eccentricity()))
     }
 
+    /// The apocentre distance `2a − q`, which is `a (1 + e)`, of a bound orbit, or `None` for a
+    /// parabolic or unbound one, which has none: with the [`pericentre`](Self::pericentre), the
+    /// shell the orbit never leaves (P09.T29's cache of orbits reads both).
+    #[must_use]
+    pub fn apocentre(&self) -> Option<LightYears> {
+        (self.alpha > 0.0)
+            .then(|| LightYears::from(Metres::new(2.0 / self.alpha - self.pericentre_m())))
+    }
+
     /// The semi-major axis 1 ÷ α of a bound orbit, or `None` for a parabolic or unbound one.
     #[must_use]
     pub fn semi_major_axis(&self) -> Option<LightYears> {
@@ -351,7 +442,7 @@ impl KeplerOrbit {
         let sqrt_mu = self.mu.sqrt();
         let tau = self.reduced_time(dt.value());
         let sigma = dot(self.position, self.velocity) / sqrt_mu;
-        let chi = self.solve(tau * sqrt_mu, sigma, iterations);
+        let chi = self.universal_anomaly(tau * sqrt_mu, sigma, iterations);
         let (r0, alpha) = (self.radius, self.alpha);
         let z = alpha * chi * chi;
         let (c, s) = stumpff(z);
@@ -383,6 +474,90 @@ impl KeplerOrbit {
         } else {
             dt
         }
+    }
+
+    /// The universal anomaly χ, √m, at which Kepler's universal equation gives `sqrt_mu_tau`: by
+    /// `iterations` Laguerre–Conway steps ([`KeplerOrbit::solve`]), or, if they leave the equation
+    /// unsolved, by [`KeplerOrbit::bisect_anomaly`].
+    ///
+    /// From its starting value the iteration reaches the root in a few steps for every state of
+    /// P09.T28.a's stress set, but not for every state the centre holds. An inbound flyby that
+    /// passes its pericentre within the span starts near the pericentre, where `F′ = r` is least,
+    /// and its first step can overshoot into the hyperbolic branch, where each step gains only
+    /// about `1 ÷ √−α`: a rogue planet at 1.5 ly falling in at 958 km/s on an orbit of e = 1.45
+    /// came out 26,480 ly away after −1,000 yr (plan 09's Risks, "P09.T28.a's propagator: an
+    /// unsolved universal anomaly is bisected"). Such a χ is found by its
+    /// residual, which is then a large share of the equation's terms, and solved again. A state
+    /// the iteration solves keeps its bits, so P09.T28.a's goldens and tests are unchanged.
+    #[must_use]
+    fn universal_anomaly(&self, sqrt_mu_tau: f64, sigma: f64, iterations: u32) -> f64 {
+        let chi = self.solve(sqrt_mu_tau, sigma, iterations);
+        if self.solves(chi, sqrt_mu_tau, sigma) {
+            chi
+        } else {
+            self.bisect_anomaly(sqrt_mu_tau, sigma)
+        }
+    }
+
+    /// Whether `chi` solves Kepler's universal equation for `sqrt_mu_tau` to
+    /// [`UNSOLVED_RESIDUAL`] of the largest of its terms.
+    #[must_use]
+    fn solves(&self, chi: f64, sqrt_mu_tau: f64, sigma: f64) -> bool {
+        let (r0, alpha) = (self.radius, self.alpha);
+        let z = alpha * chi * chi;
+        let (c, s) = stumpff(z);
+        let chi2 = chi * chi;
+        let terms = [
+            sigma * chi2 * c,
+            (1.0 - alpha * r0) * chi2 * chi * s,
+            r0 * chi,
+            -sqrt_mu_tau,
+        ];
+        let residual = terms[0] + terms[1] + terms[2] + terms[3];
+        let scale = terms.iter().fold(0.0_f64, |m, t| m.max(t.abs()));
+        // An overflowed χ is never solved, whatever its terms' signs.
+        residual.is_finite() && residual.abs() <= UNSOLVED_RESIDUAL * scale
+    }
+
+    /// χ by [`BISECTION_STEPS`] bisections of Kepler's universal equation `F(χ) = √μ τ`, with
+    /// `F(χ) = σ₀ χ² C(z) + (1 − α r₀) χ³ S(z) + r₀ χ`. Slow, and certain, because the bracket
+    /// always holds the one root:
+    ///
+    /// - `F` is strictly increasing: `dF ÷ dχ = r(χ)`, the distance at χ (Battin 1999, §4.5), which
+    ///   is positive on every orbit that has a pericentre, as every one built does (not `Radial`,
+    ///   not `AtCentre`);
+    /// - `F(0) = 0`, and since `r ≥ q`, the pericentre distance, `F(√μ τ ÷ q) = ∫ r dχ` over
+    ///   `[0, √μ τ ÷ q]` is at least `q × √μ τ ÷ q = √μ τ` for `τ > 0`, and at most it for `τ < 0`
+    ///   over `[√μ τ ÷ q, 0]`, so the root lies between 0 and `√μ τ ÷ q`.
+    ///
+    /// Far out on a hyperbola the bracket's end can lie where the Stumpff terms overflow, and
+    /// their sum is then not a number. Such a χ lies beyond the root: the terms grow with |χ|, and
+    /// every root the clock window reaches is finite ([`KeplerOrbit::propagate`]'s domain), so the
+    /// bracket's far end moves in to it.
+    #[must_use]
+    fn bisect_anomaly(&self, sqrt_mu_tau: f64, sigma: f64) -> f64 {
+        let (r0, alpha) = (self.radius, self.alpha);
+        let b = 1.0 - alpha * r0;
+        let far = sqrt_mu_tau / self.pericentre_m();
+        let (mut lo, mut hi) = if far >= 0.0 { (0.0, far) } else { (far, 0.0) };
+        for _ in 0..BISECTION_STEPS {
+            let chi = f64::midpoint(lo, hi);
+            let z = alpha * chi * chi;
+            let (c, s) = stumpff(z);
+            let chi2 = chi * chi;
+            let value = sigma * chi2 * c + b * chi2 * chi * s + r0 * chi;
+            let below = if value.is_finite() {
+                value < sqrt_mu_tau
+            } else {
+                far < 0.0
+            };
+            if below {
+                lo = chi;
+            } else {
+                hi = chi;
+            }
+        }
+        f64::midpoint(lo, hi)
     }
 
     /// The universal anomaly χ, √m, at which Kepler's universal equation gives `sqrt_mu_tau`,
@@ -527,6 +702,1142 @@ fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
 fn length(a: [f64; 3]) -> f64 {
     dot(a, a).sqrt()
 }
+
+/// The law a system moves by (plan 09, Design note 12): a property of the system, fixed by its
+/// epoch distance from the black hole, so no system changes regime during play.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Regime {
+    /// At or outside the influence radius: a straight line from the epoch position at the epoch
+    /// velocity, plan 08's drift.
+    Straight,
+    /// Inside the influence radius: the Kepler orbit about the black hole and the stars inside the
+    /// epoch radius (brainstorm, "Orbits and time").
+    Kepler,
+}
+
+impl Regime {
+    /// A short snake-case name, `straight` or `kepler`, for logs and golden files.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Straight => "straight",
+            Self::Kepler => "kepler",
+        }
+    }
+}
+
+/// What a galaxy's Kepler regime reads of its centre: the stars about the black hole, the
+/// influence radius where they weigh it and the black hole's loss cone, held by the galaxy and
+/// built on first read (plan 09, Design note 15; P09.T28.b.a), through [`Galaxy::centre_motion`].
+///
+/// - **The mass inside** a radius, M(< r), is the nuclear cluster's ([`CentreProfile`]) and the
+///   rest of the galaxy's discs, bar and bulge, as the centre's spherical average of the mass
+///   model holds them
+///   ([`SphericalAverage::extended_mass`](crate::galaxy::potential::SphericalAverage::extended_mass)),
+///   which includes the gas disc and not the dark halo ([`stars_within`](Self::stars_within)).
+///   The gas is 2 × 10⁻⁶ of it at the Milky Way fixture's edge and 10⁻⁴ at seed 1's, and an NFW
+///   halo of Milky Way normalisation holds some 0.1% of the black hole's mass inside the
+///   fixture's edge: "gas and dark matter probably do not contribute significantly" there
+///   (Genzel, Eisenhauer and Gillessen 2010, Rev. Mod. Phys. 82, 3121, §5). The brainstorm's
+///   regime is where the black hole "outweighs the stars inside" ("Orbits and time"), all of
+///   them: a fifth of drawn galaxies have a black hole heavier than their whole cluster (60 of
+///   seeds 1–300), which the cluster alone never weighs, so its edge would be no radius at all
+///   (main's ruling of 2026-10-27 on P09.T28.b.a; plan 09's Risks, "P09.T28.b.a as built").
+/// - **The influence radius** `r_h` is where the mass inside equals the black hole's,
+///   M(< `r_h`) = `M_bh` ([`influence_radius`](Self::influence_radius)): the enclosed-mass
+///   convention of Baumgardt, Amaro-Seoane and Schödel (2018, A&A 609, A28, §3, "the radius
+///   where the cumulated mass in stars becomes equal to the central black hole mass"). It is
+///   neither Merritt's `r_m`, where M★(< `r_m`) = 2 `M_bh`, nor G `M_bh` ÷ σ² (Merritt 2004,
+///   arXiv `astro-ph/0301257`, eqs. 1–2; Merritt 2013, CQG 30, 244005, eqs. 5–6), which agree with each
+///   other in a singular isothermal sphere, where this radius is half of them. At Milky Way
+///   values it is 7.19 ly, 2.20 pc, against the 2.18 pc that Schödel et al.'s (2018, A&A 609,
+///   A27, §4.5) masses inside 1 and 3 pc give; the brainstorm's "about 10 ly" is the
+///   literature's ~3 pc, which is `r_m`, some 11 ly here. Over drawn galaxies it is 1.9–177 ly,
+///   median 11.8 ly (seeds 1–300; P09.T28.b.a as built).
+/// - **μ** of an orbit from r₀ is G (`M_bh` + M(< r₀)) over the same mass
+///   ([`enclosed_mass`](Self::enclosed_mass)), held fixed along the orbit (brainstorm, "Orbits
+///   and time"): the spherical average's exact pull at r₀, which errs as M(< r) changes along
+///   the orbit, by about 1% of `M_bh` at 0.5 ly, where orbits close within the clock window, and
+///   over under a seventh of a period each way beyond 1 ly. The enclosed stars' precession is
+///   P09.T28.d's.
+/// - **The loss cone** is the one the centre's members are thinned by ([`LossCone`]).
+///
+/// The profile is the centre's model's, bit for bit
+/// ([`CentreModel`](crate::galaxy::features::centre::CentreModel)'s: the same parameters and the
+/// same mass model), and so is the loss cone; a test holds them equal. The model's own
+/// [`influence_radius`](crate::galaxy::features::centre::CentreModel::influence_radius) counts the
+/// cluster alone and is unchanged. The galaxy holds this part and not the whole model, whose
+/// four inversions take 91 ms (P09.T27 as built), and builds it when first read: about 64 ms,
+/// nearly all the galaxy's spherical average (P09.T28.b.a as built). It is a pure function of the
+/// parameters and the mass model.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CentreMotion {
+    profile: CentreProfile,
+    influence_radius: LightYears,
+    loss_cone: LossCone,
+}
+
+impl CentreMotion {
+    /// The centre's motion of a galaxy of `params` whose mass model is `model`.
+    ///
+    /// # Errors
+    ///
+    /// [`BuildCentreError::Mass`] if the nuclear cluster's or the black hole's mass is negative
+    /// or not finite, which no parameters the builder accepts have;
+    /// [`BuildCentreError::NoInfluenceRadius`] if the mass inside 10⁻³–10⁴ ly does not bracket the
+    /// black hole's, which no galaxy of the sweep (seeds 1–300) and no model of its own
+    /// parameters does.
+    pub fn new(params: &GalaxyParams, model: &MassModel) -> Result<Self, BuildCentreError> {
+        let black_hole = params.black_hole().mass();
+        let profile = CentreProfile::new(params.nuclear_cluster(), black_hole)?.in_galaxy(model);
+        let influence_radius = influence_radius_of(&profile)?;
+        Ok(Self {
+            profile,
+            influence_radius,
+            loss_cone: LossCone::new(black_hole),
+        })
+    }
+
+    /// The centre's profile: the nuclear cluster about the black hole, in the galaxy's monopole.
+    #[must_use]
+    pub fn profile(&self) -> &CentreProfile {
+        &self.profile
+    }
+
+    /// The influence radius, where the stars inside weigh the black hole's mass: the edge of the
+    /// Kepler regime.
+    #[must_use]
+    pub fn influence_radius(&self) -> LightYears {
+        self.influence_radius
+    }
+
+    /// The black hole's loss cone.
+    #[must_use]
+    pub fn loss_cone(&self) -> &LossCone {
+        &self.loss_cone
+    }
+
+    /// The bytes it owns on the heap, about 20 KiB: the cluster's tables and the galaxy's
+    /// monopole.
+    #[must_use]
+    pub(crate) fn heap_bytes(&self) -> usize {
+        self.profile.heap_bytes()
+    }
+
+    /// The stars inside `r` of the black hole: the nuclear cluster's and the rest of the galaxy's
+    /// discs, bar and bulge (their gas disc included), in that order.
+    #[must_use]
+    pub fn stars_within(&self, r: LightYears) -> SolarMasses {
+        stars_within(&self.profile, r.value())
+    }
+
+    /// The mass a Kepler orbit from `r` out of the black hole moves about: the black hole's and
+    /// the stars' inside `r` (brainstorm, "Orbits and time").
+    #[must_use]
+    pub fn enclosed_mass(&self, r: LightYears) -> SolarMasses {
+        self.profile.black_hole() + self.stars_within(r)
+    }
+
+    /// The regime of a system whose epoch position is `position`: [`Regime::Kepler`] strictly
+    /// inside the influence radius, [`Regime::Straight`] at it and beyond.
+    #[must_use]
+    pub fn regime_at(&self, position: &GalacticPosition) -> Regime {
+        if distance_ly(&PointLy::from(position)) < self.influence_radius.value() {
+            Regime::Kepler
+        } else {
+            Regime::Straight
+        }
+    }
+
+    /// The Kepler orbit `start` follows if it is in the regime, about μ = G (`M_bh` + M(< r₀)) at
+    /// its epoch distance r₀ ([`enclosed_mass`](Self::enclosed_mass)), the orbit
+    /// [`position_velocity_at`] propagates, bit for bit; `None` for a state that has none, at the
+    /// black hole itself or with no angular momentum, which includes every grid system of a
+    /// galaxy built without its kinematic tables (P09.T28.a as built). It does not ask the
+    /// regime: for P09.T28.c's pericentre and P09.T29's cache of orbits.
+    ///
+    /// # Panics
+    ///
+    /// Never: an [`EpochState`]'s velocity is finite, a record's position is, and the mass inside
+    /// is finite and positive.
+    #[must_use]
+    pub fn kepler_orbit(&self, start: &EpochState) -> Option<KeplerOrbit> {
+        let position = PointLy::from(start.record.epoch_position());
+        let mu = GravitationalParameter::from_solar_masses(
+            self.enclosed_mass(LightYears::new(distance_ly(&position))),
+        );
+        match KeplerOrbit::from_state(position, start.velocity, mu) {
+            Ok(orbit) => Some(orbit),
+            Err(BuildKeplerOrbitError::AtCentre | BuildKeplerOrbitError::Radial) => None,
+            Err(
+                error @ (BuildKeplerOrbitError::PositionNotFinite { .. }
+                | BuildKeplerOrbitError::VelocityNotFinite { .. }
+                | BuildKeplerOrbitError::GravitationalParameterNotPositive { .. }),
+            ) => panic!(
+                "an epoch state is finite by its constructors, and the mass inside it is finite \
+                 and positive: {error}"
+            ),
+        }
+    }
+}
+
+/// The distance of `p` from the black hole, at the origin, ly.
+#[must_use]
+fn distance_ly(p: &PointLy) -> f64 {
+    length([p.x, p.y, p.z])
+}
+
+/// [`CentreMotion::stars_within`] of `profile` at `r` ly.
+#[must_use]
+fn stars_within(profile: &CentreProfile, r: f64) -> SolarMasses {
+    let rest = profile
+        .galaxy()
+        .map_or(SolarMasses::ZERO, |g| g.extended_mass(LightYears::new(r)));
+    profile.stellar_mass_within(r) + rest
+}
+
+/// The radius where the stars inside `profile`'s black hole weigh its mass, by a fixed bisection
+/// in `ln r` over 10⁻³–10⁴ ly, as [`CentreProfile::influence_radius`] takes the cluster's.
+///
+/// The bracket holds the root at every galaxy of the sweep (seeds 1–300, roots at 1.9–177 ly;
+/// P09.T28.b.a as built): inside 10⁻³ ly the cluster holds about one solar mass, and 10⁴ ly takes
+/// in the bulge and the bar.
+///
+/// # Errors
+///
+/// [`BuildCentreError::NoInfluenceRadius`] if the bracket holds no root.
+fn influence_radius_of(profile: &CentreProfile) -> Result<LightYears, BuildCentreError> {
+    let black_hole = profile.black_hole().value();
+    let excess = |ln_r: f64| stars_within(profile, math::exp(ln_r)).value() - black_hole;
+    let (lo, hi) = (math::ln(1e-3), math::ln(1e4));
+    if !(excess(lo) < 0.0 && excess(hi) > 0.0) {
+        return Err(BuildCentreError::NoInfluenceRadius);
+    }
+    Ok(LightYears::new(math::exp(crate::galaxy::quad::bisect(
+        excess, lo, hi, 64,
+    ))))
+}
+
+/// The regime of `record` in `galaxy` (plan 09, Design note 12): [`Regime::Kepler`] if its epoch
+/// distance from the black hole is inside the galaxy's influence radius
+/// ([`CentreMotion::influence_radius`]), whatever the time it is asked about, and
+/// [`Regime::Straight`] otherwise.
+///
+/// It reads the epoch position alone, so it is the same for a grid system, a feature member, a
+/// centre member or a catalogue system, and costs a distance. It does not say which law moves the
+/// system: a catalogue system follows its class's line in either regime (P09.T33.a).
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::Seed;
+/// use hyperion_sim::coords::GalacticPosition;
+/// use hyperion_sim::galaxy::motion::{Regime, regime_of};
+/// use hyperion_sim::galaxy::placement::{SystemOrigin, SystemRecord};
+/// use hyperion_sim::galaxy::{Galaxy, Population};
+/// use hyperion_sim::id::{CentreMemberId, Layer, MemberSlot, SystemId};
+/// use hyperion_sim::units::{SolarMasses, Years};
+///
+/// let galaxy = Galaxy::new(Seed::new(7));
+/// let edge = galaxy.centre_motion().influence_radius().value();
+/// let slot = MemberSlot::InCell { band: Layer::A, level: 4, cell: [0, 0, 0], index: 0 };
+/// let id = SystemId::from(CentreMemberId::new(slot)?);
+/// let at = |x: f64| {
+///     SystemRecord::from_parts(
+///         id,
+///         GalacticPosition::from_light_years([x, 0.0, 0.0]).expect("in range"),
+///         SystemOrigin::CentreMember { attempt: 0 },
+///         Population::NuclearDisc,
+///         SolarMasses::new(1.0),
+///         Years::new(1e9),
+///     )
+/// };
+/// // The edge sits some light-years out, where the stars inside weigh the black hole.
+/// assert!((3.0..30.0).contains(&edge), "{edge} ly");
+/// assert_eq!(regime_of(&galaxy, &at(0.9 * edge)), Regime::Kepler);
+/// assert_eq!(regime_of(&galaxy, &at(1.1 * edge)), Regime::Straight);
+/// # Ok::<(), hyperion_sim::id::BuildSystemIdError>(())
+/// ```
+#[must_use]
+pub fn regime_of(galaxy: &Galaxy, record: &SystemRecord) -> Regime {
+    galaxy.centre_motion().regime_at(record.epoch_position())
+}
+
+/// A system's state at the epoch, where its motion starts: its record and its epoch velocity.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EpochState {
+    record: SystemRecord,
+    velocity: GalacticVelocity,
+}
+
+impl EpochState {
+    /// The state of `record` moving at `velocity` at the epoch, for a source whose velocity is its
+    /// own, and for tests.
+    ///
+    /// # Errors
+    ///
+    /// [`BuildEpochStateError::VelocityNotFinite`] if a component is not finite, and
+    /// [`BuildEpochStateError::FasterThanLight`] if the speed is not below light's, so that no
+    /// law here can take the state out of the addressable range over the clock window.
+    pub fn new(
+        record: SystemRecord,
+        velocity: GalacticVelocity,
+    ) -> Result<Self, BuildEpochStateError> {
+        if !velocity.metres_per_second().iter().all(|c| c.is_finite()) {
+            return Err(BuildEpochStateError::VelocityNotFinite { velocity });
+        }
+        if velocity.speed().value() >= SPEED_OF_LIGHT {
+            return Err(BuildEpochStateError::FasterThanLight { velocity });
+        }
+        Ok(Self { record, velocity })
+    }
+
+    /// A grid system's state: its record and plan 08's epoch velocity ([`epoch_velocity`]), zero in
+    /// a galaxy built without its kinematic tables (plan 09, Design note 12: "a grid system there
+    /// takes plan 08's velocity as the initial condition").
+    ///
+    /// # Panics
+    ///
+    /// As [`epoch_velocity`]: in a galaxy with kinematic tables, if `record` is not a grid record.
+    #[must_use]
+    pub fn of_grid_record(galaxy: &Galaxy, record: &SystemRecord) -> Self {
+        // Plan 08's draw is finite and below its layer's pad speed, at most 3,000 km/s.
+        Self {
+            record: *record,
+            velocity: epoch_velocity(galaxy, record),
+        }
+    }
+
+    /// A centre member's state: its record and its own velocity, drawn from the centre's
+    /// distribution function at its placement (P09.T27).
+    #[must_use]
+    pub fn of_centre_member(member: &CentreMemberRecord) -> Self {
+        // The distribution function's draw is finite and below the escape speed, under light's.
+        Self {
+            record: *member.record(),
+            velocity: member.velocity(),
+        }
+    }
+
+    /// The system's record.
+    #[must_use]
+    pub const fn record(&self) -> &SystemRecord {
+        &self.record
+    }
+
+    /// The velocity at the epoch, galactic axes.
+    #[must_use]
+    pub const fn velocity(&self) -> GalacticVelocity {
+        self.velocity
+    }
+}
+
+/// An [`EpochState`] could not be built: its velocity is not one any system can have.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum BuildEpochStateError {
+    /// A component of the velocity was not finite.
+    VelocityNotFinite {
+        /// The offending velocity.
+        velocity: GalacticVelocity,
+    },
+    /// The speed was not below light's.
+    FasterThanLight {
+        /// The offending velocity.
+        velocity: GalacticVelocity,
+    },
+}
+
+impl fmt::Display for BuildEpochStateError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::VelocityNotFinite { velocity } => {
+                let [x, y, z] = velocity.metres_per_second();
+                write!(f, "velocity ({x}, {y}, {z}) m/s is not finite")
+            }
+            Self::FasterThanLight { velocity } => write!(
+                f,
+                "speed {} m/s is not below light's",
+                velocity.speed().value()
+            ),
+        }
+    }
+}
+
+impl Error for BuildEpochStateError {}
+
+/// Where a system is at a time and how it moves there.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MotionState {
+    position: GalacticPosition,
+    velocity: GalacticVelocity,
+}
+
+impl MotionState {
+    /// The state at `position` moving at `velocity`, for a source whose motion is its own (the
+    /// centre's tidal-disruption victims, P09.T30.b).
+    #[must_use]
+    pub(crate) const fn new(position: GalacticPosition, velocity: GalacticVelocity) -> Self {
+        Self { position, velocity }
+    }
+
+    /// The position, galactic.
+    #[must_use]
+    pub const fn position(&self) -> &GalacticPosition {
+        &self.position
+    }
+
+    /// The velocity, galactic axes.
+    #[must_use]
+    pub const fn velocity(&self) -> GalacticVelocity {
+        self.velocity
+    }
+}
+
+/// A system's state at a time under its regime's law, or the loss cone's verdict that there is no
+/// such system ([`position_velocity_at`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum StateAt {
+    /// The system is there, in this state.
+    Exists(MotionState),
+    /// Its orbit passes inside the black hole's loss cone, so there is no such system at any time
+    /// (plan 09, Design note 12; [`LossConeVerdict::Inside`]).
+    NoSuchSystem,
+}
+
+/// Whether a system's orbit passes inside the black hole's loss cone (plan 09, Design note 12):
+/// "one whose pericentre falls inside the loss cone resolves to 'no such system', as a member
+/// would".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum LossConeVerdict {
+    /// The system exists: its orbit stays outside the loss cone, or the verdict does not apply to
+    /// it ([`loss_cone_verdict`]).
+    Clear,
+    /// Its Kepler pericentre about the black hole lies inside the loss cone: there is no such
+    /// system.
+    Inside,
+}
+
+/// The loss cone's verdict on a system starting from `start` in `galaxy` (plan 09, Design note
+/// 12), the same test the centre's members are thinned by
+/// ([`LossCone::contains`](crate::galaxy::features::centre::LossCone::contains): the Kepler
+/// pericentre about the black hole alone, inside about 2 au).
+///
+/// It applies to a system in the Kepler regime, which would follow that orbit. It is
+/// [`LossConeVerdict::Clear`] for:
+///
+/// - a system in the straight regime, which follows no orbit about the black hole;
+/// - a centre member, whose placement has passed the same test already (P09.T25): a member that
+///   resolves is outside the loss cone, so the verdict is not taken again on its rounded record;
+/// - a catalogue system (P09.T33.a), which follows its class's straight line and its kick;
+/// - a state with no orbit, at the black hole itself or with no angular momentum, which includes
+///   every grid system of a galaxy built without its kinematic tables.
+#[must_use]
+pub fn loss_cone_verdict(galaxy: &Galaxy, start: &EpochState) -> LossConeVerdict {
+    let motion = galaxy.centre_motion();
+    if motion.regime_at(start.record.epoch_position()) == Regime::Straight
+        || motion.kepler_orbit(start).is_none()
+    {
+        return LossConeVerdict::Clear;
+    }
+    verdict_on(motion, start)
+}
+
+/// [`loss_cone_verdict`] for a Kepler-regime `start` that has an orbit.
+#[must_use]
+fn verdict_on(motion: &CentreMotion, start: &EpochState) -> LossConeVerdict {
+    match start.record.origin() {
+        // A catalogue system moves on its class's own line, not on an orbit about the black hole
+        // (plan 09, P09.T33.a).
+        SystemOrigin::CentreMember { .. } | SystemOrigin::CatalogueSystem(_) => {
+            return LossConeVerdict::Clear;
+        }
+        SystemOrigin::Grid(_)
+        | SystemOrigin::FeatureMember { .. }
+        | SystemOrigin::GlobalListMember { .. } => {}
+    }
+    let p = PointLy::from(start.record.epoch_position());
+    let velocity_km_s = start.velocity.metres_per_second().map(|c| c / 1e3);
+    if motion.loss_cone.contains([p.x, p.y, p.z], velocity_km_s) {
+        LossConeVerdict::Inside
+    } else {
+        LossConeVerdict::Clear
+    }
+}
+
+/// Where a system starting from `start` is at `t` in `galaxy`, and how it moves there, under its
+/// regime's law (plan 09, Design note 12; P09.T28.b.a; [`Trajectory::new`]).
+///
+/// - **[`Regime::Straight`]:** plan 08's straight line from the epoch position at the epoch
+///   velocity, the same bits as plan 03's [`position_at`](crate::galaxy::query::position_at)
+///   gives a grid system.
+/// - **[`Regime::Kepler`]:** the [`KeplerOrbit`] from the epoch state about μ = G (`M_bh` +
+///   M★(< r₀)), r₀ the epoch distance from the black hole ([`CentreMotion::enclosed_mass`]),
+///   propagated by the span from the epoch to `t`. An orbit that passes inside the loss cone is
+///   [`StateAt::NoSuchSystem`] at every time ([`loss_cone_verdict`]). A state with no orbit, the
+///   black hole itself or a state with no angular momentum, keeps its epoch position, which is how
+///   a grid system of a galaxy built without its kinematic tables stays put, as plan 03's systems
+///   do there.
+///
+///   From generator version 25 (P09.T28.d.b) an orbit bound in the centre's potential takes its
+///   exact orbit there instead ([`spherical::SphericalOrbit`]).
+///
+/// At the epoch either law gives the epoch state to the bit. The two laws meet at the influence
+/// radius: a thousand years on they differ there by G `M_bh` t² ÷ r², the pull of the black hole
+/// and the mass inside over the span to leading order in t, 0.0130 ly at the Milky Way fixture's
+/// 7.19 ly (P09.T28.b.a as built).
+///
+/// Plan 03's [`position_at`](crate::galaxy::query::position_at) reads it for a grid record from
+/// generator version 25 (P09.T28.b.b).
+///
+/// # Panics
+///
+/// Never: an [`EpochState`] is finite and slower than light, and no law moves anything slower
+/// than light by 1,000 ly over the clock window, from inside the cube or an influence radius
+/// (under 200 ly at every drawn seed of P09.T28.b.a's sweep), against the range's 2³¹ ly.
+///
+/// # Examples
+///
+/// A star on a circle at 0.1 ly from the black hole stays at 0.1 ly, where a straight line would
+/// have left it:
+///
+/// ```
+/// use hyperion_sim::Seed;
+/// use hyperion_sim::coords::{GalacticPosition, GalacticVelocity};
+/// use hyperion_sim::galaxy::motion::{EpochState, StateAt, position_velocity_at};
+/// use hyperion_sim::galaxy::placement::{SystemOrigin, SystemRecord};
+/// use hyperion_sim::galaxy::{Galaxy, Population};
+/// use hyperion_sim::id::{CentreMemberId, Layer, MemberSlot, SystemId};
+/// use hyperion_sim::time::UniverseTime;
+/// use hyperion_sim::units::consts::METRES_PER_LIGHT_YEAR;
+/// use hyperion_sim::units::{GravitationalParameter, LightYears, SolarMasses, Years};
+///
+/// let galaxy = Galaxy::new(Seed::new(7));
+/// let slot = MemberSlot::InCell { band: Layer::A, level: 4, cell: [0, 0, 0], index: 0 };
+/// let record = SystemRecord::from_parts(
+///     SystemId::from(CentreMemberId::new(slot)?),
+///     GalacticPosition::from_light_years([0.1, 0.0, 0.0]).expect("in range"),
+///     SystemOrigin::CentreMember { attempt: 0 },
+///     Population::NuclearDisc,
+///     SolarMasses::new(1.0),
+///     Years::new(1e9),
+/// );
+/// // The circular speed about the black hole and the stars inside 0.1 ly.
+/// let inside = galaxy.centre_motion().enclosed_mass(LightYears::new(0.1));
+/// let mu = GravitationalParameter::from_solar_masses(inside).value();
+/// let speed = (mu / (0.1 * METRES_PER_LIGHT_YEAR)).sqrt();
+/// let start = EpochState::new(record, GalacticVelocity::new([0.0, speed, 0.0]))?;
+/// let t = UniverseTime::from_julian_years(100).expect("in the clock window");
+/// let StateAt::Exists(later) = position_velocity_at(&galaxy, &start, t) else {
+///     panic!("a circular orbit at 0.1 ly misses the loss cone");
+/// };
+/// let r = GalacticPosition::ORIGIN.distance_to(later.position()).value() / METRES_PER_LIGHT_YEAR;
+/// // It follows its exact orbit in the centre's potential, whose circular speed at 0.1 ly is some
+/// // 5 × 10⁻⁷ above this one, so it dips some 10⁻⁸ ly inside the circle.
+/// assert!((r - 0.1).abs() < 1e-7, "{r} ly");
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+#[must_use]
+pub fn position_velocity_at(galaxy: &Galaxy, start: &EpochState, t: UniverseTime) -> StateAt {
+    Trajectory::new(galaxy, *start).state_at(t)
+}
+
+/// A system's law of motion from its epoch state, prepared once so that it can be asked about at
+/// many times: [`position_velocity_at`] is this type's two steps in one, so the two give the same
+/// bits (P09.T29, for the centre's cache of orbits).
+///
+/// Preparing reads the regime, builds the [`KeplerOrbit`] of a Kepler-regime state
+/// ([`CentreMotion::kepler_orbit`]) and takes the loss cone's verdict, and prepares the exact orbit
+/// of one bound in the centre's potential ([`spherical::SphericalOrbit`]);
+/// [`state_at`](Self::state_at) then only propagates. It holds the epoch state and the orbit, some
+/// 190 bytes, and the exact orbit, boxed, some 640 bytes more ([`heap_bytes`](Self::heap_bytes)).
+///
+/// # Examples
+///
+/// A centre member's orbit, prepared once and asked about at a century either side:
+///
+/// ```
+/// use hyperion_sim::Seed;
+/// use hyperion_sim::coords::{GalacticPosition, GalacticVelocity};
+/// use hyperion_sim::galaxy::motion::{EpochState, Regime, Trajectory, position_velocity_at};
+/// use hyperion_sim::galaxy::placement::{SystemOrigin, SystemRecord};
+/// use hyperion_sim::galaxy::{Galaxy, Population};
+/// use hyperion_sim::id::{CentreMemberId, Layer, MemberSlot, SystemId};
+/// use hyperion_sim::time::UniverseTime;
+/// use hyperion_sim::units::{SolarMasses, Years};
+///
+/// let galaxy = Galaxy::new(Seed::new(7));
+/// let slot = MemberSlot::InCell { band: Layer::A, level: 4, cell: [0, 0, 0], index: 0 };
+/// let record = SystemRecord::from_parts(
+///     SystemId::from(CentreMemberId::new(slot)?),
+///     GalacticPosition::from_light_years([0.2, 0.1, 0.0]).expect("in range"),
+///     SystemOrigin::CentreMember { attempt: 0 },
+///     Population::NuclearDisc,
+///     SolarMasses::new(1.0),
+///     Years::new(1e9),
+/// );
+/// let start = EpochState::new(record, GalacticVelocity::new([-2e5, 4e5, 1e5]))?;
+/// let trajectory = Trajectory::new(&galaxy, start);
+/// assert_eq!(trajectory.regime(), Regime::Kepler);
+/// for years in [-100, 100] {
+///     let t = UniverseTime::from_julian_years(years).expect("in the clock window");
+///     assert_eq!(trajectory.state_at(t), position_velocity_at(&galaxy, &start, t));
+/// }
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+#[derive(Debug, Clone, PartialEq)]
+pub struct Trajectory {
+    start: EpochState,
+    law: Law,
+}
+
+/// How a [`Trajectory`] moves.
+#[derive(Debug, Clone, PartialEq)]
+enum Law {
+    /// The straight regime: plan 08's straight line.
+    Straight,
+    /// The Kepler regime with no orbit, at the black hole itself or with no angular momentum:
+    /// the epoch position at every time.
+    Still,
+    /// The Kepler regime: the orbit from the epoch state.
+    Kepler(KeplerOrbit),
+    /// The Kepler regime under the exact orbit's law (P09.T28.d.b), bound in the centre's
+    /// potential: the exact orbit there, with the Kepler orbit from the epoch state for the bounds
+    /// read off it.
+    Spherical(KeplerOrbit, Box<SphericalOrbit>),
+    /// The Kepler regime, on an orbit that passes inside the loss cone: no such system.
+    NoSuchSystem,
+}
+
+impl Trajectory {
+    /// The trajectory of `start` in `galaxy`, under its regime's law as the galaxy's rules take it
+    /// (as [`position_velocity_at`]): [`in_potential_by_arc`](Self::in_potential_by_arc) in the
+    /// galaxy's centre's potential (P09.T28.d.b, the exact orbit by the arc from the epoch from
+    /// version 27, P09.T28.d.c).
+    #[must_use]
+    pub fn new(galaxy: &Galaxy, start: EpochState) -> Self {
+        Self::in_potential_by_arc(galaxy.centre_motion(), galaxy.centre_potential(), start)
+    }
+
+    /// The trajectory of `start` about a galaxy's centre whose motion is `motion`
+    /// ([`Galaxy::centre_motion`]), for a caller that holds it: the two-body law in the Kepler
+    /// regime, which [`in_potential`](Self::in_potential) starts from and keeps for an orbit
+    /// unbound in the potential.
+    #[must_use]
+    pub fn of(motion: &CentreMotion, start: EpochState) -> Self {
+        let law = match motion.regime_at(start.record.epoch_position()) {
+            Regime::Straight => Law::Straight,
+            Regime::Kepler => match motion.kepler_orbit(&start) {
+                None => Law::Still,
+                Some(orbit) => match verdict_on(motion, &start) {
+                    LossConeVerdict::Inside => Law::NoSuchSystem,
+                    LossConeVerdict::Clear => Law::Kepler(orbit),
+                },
+            },
+        };
+        Self { start, law }
+    }
+
+    /// The trajectory of `start` about a galaxy's centre whose motion is `motion` and whose
+    /// potential is `potential` ([`spherical::CentrePotential::new`] of the same motion), under
+    /// the exact orbit's law (P09.T28.d.b): as [`of`](Self::of), but that a Kepler-regime orbit
+    /// bound in the potential follows its exact orbit there
+    /// ([`spherical::SphericalOrbit::new`]); one that is not keeps its Kepler orbit.
+    ///
+    /// # Examples
+    ///
+    /// A member 1 ly from the Milky Way's black hole, a millennium on, by the two laws:
+    ///
+    /// ```
+    /// use hyperion_sim::coords::{GalacticPosition, GalacticVelocity};
+    /// use hyperion_sim::galaxy::Population;
+    /// use hyperion_sim::galaxy::motion::spherical::CentrePotential;
+    /// use hyperion_sim::galaxy::motion::{CentreMotion, EpochState, StateAt, Trajectory};
+    /// use hyperion_sim::galaxy::params::GalaxyParams;
+    /// use hyperion_sim::galaxy::placement::{SystemOrigin, SystemRecord};
+    /// use hyperion_sim::galaxy::potential::MassModel;
+    /// use hyperion_sim::id::{CentreMemberId, Layer, MemberSlot, SystemId};
+    /// use hyperion_sim::time::UniverseTime;
+    /// use hyperion_sim::units::consts::METRES_PER_LIGHT_YEAR;
+    /// use hyperion_sim::units::{SolarMasses, Years};
+    ///
+    /// let params = GalaxyParams::milky_way_like();
+    /// let motion = CentreMotion::new(&params, &MassModel::new(&params))?;
+    /// let potential = CentrePotential::new(&motion);
+    /// let slot = MemberSlot::InCell { band: Layer::A, level: 4, cell: [0, 0, 0], index: 0 };
+    /// let record = SystemRecord::from_parts(
+    ///     SystemId::from(CentreMemberId::new(slot)?),
+    ///     GalacticPosition::from_light_years([1.0, 0.0, 0.0]).expect("in range"),
+    ///     SystemOrigin::CentreMember { attempt: 0 },
+    ///     Population::NuclearDisc,
+    ///     SolarMasses::new(1.0),
+    ///     Years::new(1e9),
+    /// );
+    /// let start = EpochState::new(record, GalacticVelocity::new([3e4, 1.5e5, 0.0]))?;
+    /// let t = UniverseTime::from_julian_years(1_000).expect("in the clock window");
+    /// let at = |trajectory: Trajectory| match trajectory.state_at(t) {
+    ///     StateAt::Exists(state) => *state.position(),
+    ///     StateAt::NoSuchSystem => panic!("far from the loss cone"),
+    /// };
+    /// let two_body = at(Trajectory::of(&motion, start));
+    /// let exact = at(Trajectory::in_potential(&motion, &potential, start));
+    /// // The stars spread over the orbit pull it some 10⁻⁴ ly off the two-body law's, where the
+    /// // mass inside 1 ly is held fixed.
+    /// let apart = two_body.distance_to(&exact).value() / METRES_PER_LIGHT_YEAR;
+    /// assert!((1e-5..1e-2).contains(&apart), "{apart} ly");
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn in_potential(
+        motion: &CentreMotion,
+        potential: &CentrePotential,
+        start: EpochState,
+    ) -> Self {
+        Self::exact_in(motion, potential, start, |orbit| {
+            SphericalOrbit::new(potential, orbit)
+        })
+    }
+
+    /// [`in_potential`](Self::in_potential), but that an exact orbit that is not near-circular
+    /// takes its state within half a radial period of the epoch by the arc from the epoch
+    /// ([`spherical::SphericalOrbit::by_arc`]; P09.T28.d.c, from version 27).
+    ///
+    /// An orbit on the arc keeps a clone of `potential`. A galaxy's law at its version is
+    /// [`new`](Self::new)'s; this is the arm itself, for the benches and the tests.
+    ///
+    /// # Examples
+    ///
+    /// A member 0.1 ly from the Milky Way's black hole at 1.6 times its Kepler orbit's circular
+    /// speed, bound only some 10⁴ ly out: a second on, the arc keeps it on the epoch state's
+    /// course, where the series alone is some 3 au off it.
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    ///
+    /// use hyperion_sim::coords::{GalacticPosition, GalacticVelocity};
+    /// use hyperion_sim::galaxy::Population;
+    /// use hyperion_sim::galaxy::motion::spherical::CentrePotential;
+    /// use hyperion_sim::galaxy::motion::{CentreMotion, EpochState, StateAt, Trajectory};
+    /// use hyperion_sim::galaxy::params::GalaxyParams;
+    /// use hyperion_sim::galaxy::placement::{SystemOrigin, SystemRecord};
+    /// use hyperion_sim::galaxy::potential::MassModel;
+    /// use hyperion_sim::id::{CentreMemberId, Layer, MemberSlot, SystemId};
+    /// use hyperion_sim::time::{Span, UniverseTime};
+    /// use hyperion_sim::units::consts::METRES_PER_LIGHT_YEAR;
+    /// use hyperion_sim::units::{GravitationalParameter, LightYears, SolarMasses, Years};
+    ///
+    /// let params = GalaxyParams::milky_way_like();
+    /// let motion = CentreMotion::new(&params, &MassModel::new(&params))?;
+    /// let potential = Arc::new(CentrePotential::new(&motion));
+    /// let slot = MemberSlot::InCell { band: Layer::A, level: 4, cell: [0, 0, 0], index: 0 };
+    /// let record = SystemRecord::from_parts(
+    ///     SystemId::from(CentreMemberId::new(slot)?),
+    ///     GalacticPosition::from_light_years([0.1, 0.0, 0.0]).expect("in range"),
+    ///     SystemOrigin::CentreMember { attempt: 0 },
+    ///     Population::NuclearDisc,
+    ///     SolarMasses::new(1.0),
+    ///     Years::new(1e9),
+    /// );
+    /// let r = 0.1;
+    /// let mu = GravitationalParameter::from_solar_masses(motion.enclosed_mass(LightYears::new(r)));
+    /// let speed = 1.6 * (mu.value() / (r * METRES_PER_LIGHT_YEAR)).sqrt();
+    /// let velocity = GalacticVelocity::new([0.3 * speed, 0.95 * speed, 0.0]);
+    /// let start = EpochState::new(record, velocity)?;
+    /// let t = UniverseTime::EPOCH
+    ///     .checked_add(Span::from_seconds(1))
+    ///     .expect("in the clock window");
+    /// let at = |trajectory: Trajectory| match trajectory.state_at(t) {
+    ///     StateAt::Exists(state) => *state.position(),
+    ///     StateAt::NoSuchSystem => panic!("far from the loss cone"),
+    /// };
+    /// // A second along the Kepler orbit, whose pull at the epoch radius is the potential's.
+    /// let kepler = at(Trajectory::of(&motion, start));
+    /// let off = |p: GalacticPosition| p.distance_to(&kepler).value() / METRES_PER_LIGHT_YEAR;
+    /// assert!(off(at(Trajectory::in_potential_by_arc(&motion, &potential, start))) < 1e-12);
+    /// assert!(off(at(Trajectory::in_potential(&motion, &potential, start))) > 1e-5);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn in_potential_by_arc(
+        motion: &CentreMotion,
+        potential: &Arc<CentrePotential>,
+        start: EpochState,
+    ) -> Self {
+        Self::exact_in(motion, potential, start, |orbit| {
+            SphericalOrbit::by_arc(potential, orbit)
+        })
+    }
+
+    /// [`of`](Self::of)'s trajectory, but that a Kepler orbit with an `exact` orbit in
+    /// `potential` follows it.
+    #[must_use]
+    fn exact_in(
+        motion: &CentreMotion,
+        potential: &CentrePotential,
+        start: EpochState,
+        exact: impl FnOnce(&KeplerOrbit) -> Option<SphericalOrbit>,
+    ) -> Self {
+        debug_assert!(
+            (potential.black_hole().value()
+                / GravitationalParameter::from_solar_masses(motion.profile().black_hole()).value()
+                - 1.0)
+                .abs()
+                < 1e-12,
+            "the potential is the same centre's as the motion"
+        );
+        let law = match Self::of(motion, start).law {
+            Law::Kepler(orbit) => exact(&orbit).map_or(Law::Kepler(orbit), |exact| {
+                Law::Spherical(orbit, Box::new(exact))
+            }),
+            law @ (Law::Straight | Law::Still | Law::NoSuchSystem | Law::Spherical(..)) => law,
+        };
+        Self { start, law }
+    }
+
+    /// Its exact orbit in the centre's potential, under that law (P09.T28.d.b); `None` otherwise.
+    #[must_use]
+    pub fn exact_orbit(&self) -> Option<&SphericalOrbit> {
+        match &self.law {
+            Law::Spherical(_, exact) => Some(exact),
+            Law::Straight | Law::Still | Law::Kepler(_) | Law::NoSuchSystem => None,
+        }
+    }
+
+    /// The bytes it owns on the heap: its exact orbit's, if it has one, for P09.T29's cache.
+    ///
+    /// The centre's potential an orbit on the arc from the epoch holds is the galaxy's, shared, and
+    /// counted there ([`Galaxy::heap_bytes`]).
+    #[must_use]
+    pub fn heap_bytes(&self) -> usize {
+        match &self.law {
+            Law::Spherical(..) => size_of::<SphericalOrbit>(),
+            Law::Straight | Law::Still | Law::Kepler(_) | Law::NoSuchSystem => 0,
+        }
+    }
+
+    /// The epoch state it starts from.
+    #[must_use]
+    pub const fn start(&self) -> &EpochState {
+        &self.start
+    }
+
+    /// Its regime.
+    #[must_use]
+    pub const fn regime(&self) -> Regime {
+        match self.law {
+            Law::Straight => Regime::Straight,
+            Law::Still | Law::Kepler(_) | Law::Spherical(..) | Law::NoSuchSystem => Regime::Kepler,
+        }
+    }
+
+    /// The Kepler orbit it follows: `None` in the straight regime, for a state with no orbit, and
+    /// for one the loss cone carves out. Under the exact orbit's law it is the Kepler orbit from
+    /// the epoch state, whose radial range and speeds bound the exact orbit's
+    /// ([`spherical`]'s "What follows for the bounds").
+    #[must_use]
+    pub const fn orbit(&self) -> Option<&KeplerOrbit> {
+        match &self.law {
+            Law::Kepler(orbit) | Law::Spherical(orbit, _) => Some(orbit),
+            Law::Straight | Law::Still | Law::NoSuchSystem => None,
+        }
+    }
+
+    /// Where the system is at `t` and how it moves there, or [`StateAt::NoSuchSystem`]
+    /// ([`position_velocity_at`]).
+    ///
+    /// # Panics
+    ///
+    /// Never, as [`position_velocity_at`].
+    #[must_use]
+    pub fn state_at(&self, t: UniverseTime) -> StateAt {
+        let epoch = MotionState {
+            position: *self.start.record.epoch_position(),
+            velocity: self.start.velocity,
+        };
+        match &self.law {
+            Law::Straight => {
+                if t == UniverseTime::EPOCH {
+                    return StateAt::Exists(epoch);
+                }
+                StateAt::Exists(MotionState {
+                    position: drifted(&self.start.record, self.start.velocity, t),
+                    velocity: self.start.velocity,
+                })
+            }
+            Law::Still => StateAt::Exists(epoch),
+            Law::NoSuchSystem => StateAt::NoSuchSystem,
+            Law::Kepler(orbit) => {
+                if t == UniverseTime::EPOCH {
+                    return StateAt::Exists(epoch);
+                }
+                let later = orbit.propagate(Seconds::new(t.since_epoch().as_seconds_f64()));
+                let position = GalacticPosition::ORIGIN
+                    .translated(later.displacement())
+                    .expect(
+                        "an orbit slower than light moves under 1,000 ly over the clock window, \
+                         from inside the influence radius, and stays in the addressable range",
+                    );
+                StateAt::Exists(MotionState {
+                    position,
+                    velocity: later.velocity(),
+                })
+            }
+            Law::Spherical(_, exact) => {
+                if t == UniverseTime::EPOCH {
+                    return StateAt::Exists(epoch);
+                }
+                let (displacement, velocity) =
+                    exact.position_velocity(Seconds::new(t.since_epoch().as_seconds_f64()));
+                let position = GalacticPosition::ORIGIN.translated(displacement).expect(
+                    "an orbit bound in the centre's potential stays inside its apocentre, under \
+                     10⁶ ly, and in the addressable range",
+                );
+                StateAt::Exists(MotionState { position, velocity })
+            }
+        }
+    }
+}
+
+/// Whether the loss cone carves grid `record` out, from generator version 25 (P09.T28.b.b): its
+/// orbit from plan 08's epoch velocity passes inside the black hole's loss cone
+/// ([`loss_cone_verdict`]), so that there is no such system (plan 09, Design note 12). The
+/// candidate evaluation behind [`generate_cell`](crate::galaxy::placement::generate_cell) and
+/// [`resolve`](crate::galaxy::placement::resolve) asks it of a record of any layer
+/// ([`CandidateOutcome::InLossCone`](crate::galaxy::placement::CandidateOutcome::InLossCone)). The
+/// cone is the centre's members' (about 2 au at Sgr A*'s mass, some 2.6 times a Sun-like star's
+/// tidal radius); brown dwarfs and rogue planets would survive to about 0.34–0.79 au, so it removes
+/// a few times more of them than it need (plan 09, "P09.T28.b.b as built"). It reads the record's
+/// own `system.velocity` stream, which adds no word to any draw of the candidate.
+///
+/// Only a Kepler-regime record with an orbit can be: in a galaxy without kinematic tables every
+/// grid record has no velocity and so no orbit, and none is carved out. That galaxy is answered
+/// without reading [`Galaxy::centre_motion`], which a galaxy that never asks about its centre does
+/// not build (about 64 ms, P09.T28.b.a as built); a galaxy with its tables builds it with the first
+/// record it places. A record outside the regime is answered by its epoch distance, and only one
+/// inside draws its velocity.
+///
+/// # Panics
+///
+/// As [`epoch_velocity`]: in a galaxy with kinematic tables, if `record` is not a grid record.
+#[must_use]
+pub(crate) fn carved_by_the_loss_cone(galaxy: &Galaxy, record: &SystemRecord) -> bool {
+    // The regime first: a record outside it, nearly every one, is answered by a distance, without
+    // drawing its velocity.
+    may_be_carved_at(galaxy, record.epoch_position())
+        && loss_cone_verdict(galaxy, &EpochState::of_grid_record(galaxy, record))
+            == LossConeVerdict::Inside
+}
+
+/// Whether [`carved_by_the_loss_cone`] can carve out a grid record whose epoch position is
+/// `position`: only in a galaxy with kinematic tables and inside the Kepler regime, so that a
+/// record elsewhere is answered without being made.
+#[must_use]
+pub(crate) fn may_be_carved_at(galaxy: &Galaxy, position: &GalacticPosition) -> bool {
+    galaxy.kinematics().is_some() && galaxy.centre_motion().regime_at(position) == Regime::Kepler
+}
+
+/// The relative margin every pad and reach below is widened by, 10⁻⁹: it covers the rounding of
+/// their closed forms and of the distances they are compared with, some 10⁻¹⁵ relative, and moves
+/// no bound measurably.
+const REACH_MARGIN: f64 = 1e-9;
+
+/// The fixed iterations [`SpeedBound::outward`] takes towards its fixed point from above, 16: each
+/// is a bound already, and they converge as the cube root does, to 10⁻⁶ in about eight.
+const OUTWARD_ITERATIONS: u32 = 16;
+
+/// `3⁄2 √(2μ) |dt|`, m^(3⁄2): the most `r^(3⁄2)` can change over `dt` for a system whose speed at
+/// every radius r is at most the escape speed `√(2μ ÷ r)` from a mass of gravitational parameter
+/// `mu` (μ in m³ s⁻², `dt` in s), since then `|d(r^(3⁄2)) ÷ dt| = 3⁄2 r^(1⁄2) |dr ÷ dt| ≤ 3⁄2
+/// √(2μ)`.
+#[must_use]
+fn plunge_term(mu: f64, dt: Seconds) -> f64 {
+    1.5 * (2.0 * mu).sqrt() * dt.value().abs()
+}
+
+/// `x^(2⁄3)` for `x ≥ 0`.
+#[must_use]
+pub(crate) fn two_thirds_power(x: f64) -> f64 {
+    let c = math::cbrt(x);
+    c * c
+}
+
+/// The radial plunge pad Δ(r₀, t) = r₀ − (r₀^(3⁄2) − 3⁄2 √(2μ) |t|)^(2⁄3): the farthest a system
+/// starting `r0` from a mass of gravitational parameter `mu` can move in `dt`, or `None` if a
+/// radial plunge at the escape speed reaches the mass within |dt|.
+///
+/// The premise: the system's speed is at most the escape speed √(2μ ÷ r) at every radius r ≤ r₀
+/// it reaches, and at most √(2μ ÷ r₀) whenever it is beyond r₀ (brainstorm, "The range query":
+/// "around the central black hole the pad per level is the distance a radial plunge could
+/// cover"). `None` is `r0` inside [`full_scan_radius`], where everything is scanned in full.
+///
+/// Why it bounds the path, not only the radial distance: by the premise `r^(3⁄2)` falls by at most
+/// `3⁄2 √(2μ)` a second, so the system is never nearer the mass than the radial plunge at escape
+/// speed from `r0`, and its speed is never above the plunge's at the same time, whose path is Δ.
+/// It holds forward and backward in time alike, and is widened by 10⁻⁹ for rounding. A straight
+/// line at a speed under the escape speed from `r0` meets the premise, its speed being constant.
+///
+/// A system on an unbound orbit about `mu` breaks the premise. [`CentreMemberSource`] takes a μ
+/// that holds the centre's members, whose speeds the galaxy's whole potential bounds and so can
+/// exceed the escape speed from the mass inside their orbits (P09.T29 as built).
+///
+/// [`CentreMemberSource`]: crate::galaxy::features::centre::CentreMemberSource
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::galaxy::motion::{full_scan_radius, plunge_pad};
+/// use hyperion_sim::units::{GravitationalParameter, LightYears, Seconds, SolarMasses};
+/// use hyperion_sim::units::consts::SECONDS_PER_JULIAN_YEAR;
+///
+/// // Sgr A*'s 4.3 × 10⁶ M☉ (GRAVITY Collaboration 2022, A&A 657, L12: 4.297 × 10⁶), a century
+/// // either way.
+/// let mu = GravitationalParameter::from_solar_masses(SolarMasses::new(4.3e6));
+/// let century = Seconds::new(-100.0 * SECONDS_PER_JULIAN_YEAR);
+/// // Inside 0.31 ly a plunge reaches the black hole within the century: scanned in full.
+/// assert!((full_scan_radius(mu, century).value() - 0.3114).abs() < 0.0005);
+/// assert_eq!(plunge_pad(mu, LightYears::new(0.3), century), None);
+/// // From 2 ly it covers 0.083 ly: the escape speed there, 246 km/s, over the century, and more
+/// // as the plunge speeds up.
+/// let pad = plunge_pad(mu, LightYears::new(2.0), century).expect("outside the full scan");
+/// assert!((0.08..0.085).contains(&pad.value()), "{pad:?}");
+/// ```
+#[must_use]
+pub fn plunge_pad(mu: GravitationalParameter, r0: LightYears, dt: Seconds) -> Option<LightYears> {
+    plunge_pad_m(
+        r0.value() * METRES_PER_LIGHT_YEAR,
+        plunge_term(mu.value(), dt),
+    )
+    .map(|pad| LightYears::new(pad / METRES_PER_LIGHT_YEAR))
+}
+
+/// [`plunge_pad`] from `r0_m` m with the plunge term `k_m32` ([`plunge_term`], m^(3⁄2)), m.
+#[must_use]
+fn plunge_pad_m(r0_m: f64, k_m32: f64) -> Option<f64> {
+    let r32 = r0_m * r0_m.sqrt();
+    if r32 < k_m32 {
+        return None;
+    }
+    let pad = (r0_m - two_thirds_power(r32 - k_m32)).max(0.0);
+    Some(pad * (1.0 + REACH_MARGIN))
+}
+
+/// The radius `r_full` = (3⁄2 √(2μ) |t|)^(2⁄3) inside which a radial plunge at the escape speed from
+/// a mass of gravitational parameter `mu` reaches it within `dt` ([`plunge_pad`]).
+///
+/// It is 0.311 ly at a century about Sgr A*'s 4.3 × 10⁶ M☉ (the brainstorm's 0.31 ly, "The range
+/// query"). Everything inside it is scanned in full. Widened by 10⁻⁹ for rounding.
+#[must_use]
+pub fn full_scan_radius(mu: GravitationalParameter, dt: Seconds) -> LightYears {
+    LightYears::new(
+        two_thirds_power(plunge_term(mu.value(), dt)) * (1.0 + REACH_MARGIN)
+            / METRES_PER_LIGHT_YEAR,
+    )
+}
+
+/// A bound on the speeds of a set of systems about the black hole, as the pads read it: at every
+/// radius r a system reaches, its speed is at most `√(2ε + 2μ ÷ r)` (P09.T29 as built).
+///
+/// A system on a Kepler orbit about a gravitational parameter μᵢ ≤ μ with a specific energy
+/// `v² ÷ 2 − μᵢ ÷ r` ≤ ε has exactly that bound everywhere on its orbit, bound or not. A system
+/// moving in a straight line from r₀ at a speed under `√(2ε + 2μ ÷ r₀)` has it at every radius
+/// inside r₀, and its constant speed is under that beyond r₀, which is all
+/// [`reach`](Self::reach) asks for; not what [`outward`](Self::outward) asks for.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct SpeedBound {
+    /// μ, m³ s⁻².
+    mu: f64,
+    /// ε, J kg⁻¹, non-negative.
+    excess_j_per_kg: f64,
+}
+
+impl SpeedBound {
+    /// The bound of gravitational parameter `mu` and specific energy `excess_j_per_kg`, which is
+    /// taken as zero if negative.
+    #[must_use]
+    pub(crate) fn new(mu: GravitationalParameter, excess_j_per_kg: f64) -> Self {
+        Self {
+            mu: mu.value(),
+            excess_j_per_kg: excess_j_per_kg.max(0.0),
+        }
+    }
+
+    /// The gravitational parameter, m³ s⁻², whose escape speed bounds these systems' speeds at
+    /// every radius inside `far`: `μ + ε far`, since `2(μ + ε far) ÷ r ≥ 2ε + 2μ ÷ r` for
+    /// `r ≤ far`.
+    #[must_use]
+    fn effective_mu(self, far: LightYears) -> f64 {
+        self.mu + self.excess_j_per_kg * (far.value() * METRES_PER_LIGHT_YEAR)
+    }
+
+    /// The farthest a system starting between `near` and `far` from the black hole can move in
+    /// `dt` ([`plunge_pad`] about [`effective_mu`](Self::effective_mu) at `far`, from `near`, the
+    /// plunge's longest start); `None` if that plunge reaches the black hole, inside
+    /// [`full_scan_edge`](Self::full_scan_edge).
+    #[must_use]
+    pub(crate) fn reach(
+        self,
+        near: LightYears,
+        far: LightYears,
+        dt: Seconds,
+    ) -> Option<LightYears> {
+        let mu = self.effective_mu(far);
+        plunge_pad_m(near.value() * METRES_PER_LIGHT_YEAR, plunge_term(mu, dt))
+            .map(|pad| LightYears::new(pad / METRES_PER_LIGHT_YEAR))
+    }
+
+    /// The full scan's edge for systems starting within `far`: [`full_scan_radius`] about
+    /// [`effective_mu`](Self::effective_mu) at `far`, not widened; a start inside it has no
+    /// [`reach`](Self::reach), to rounding.
+    #[must_use]
+    pub(crate) fn full_scan_edge(self, far: LightYears, dt: Seconds) -> LightYears {
+        let term_m32 = plunge_term(self.effective_mu(far), dt);
+        LightYears::new(two_thirds_power(term_m32) / METRES_PER_LIGHT_YEAR)
+    }
+
+    /// The farthest from the black hole that a system on a Kepler orbit under this bound, starting
+    /// within `far` of it, can be after `dt` (not for straight lines, whose speed is not bounded
+    /// so beyond their start).
+    ///
+    /// On such an orbit `d(r^(3⁄2)) ÷ dt ≤ 3⁄2 √(2εr + 2μ)`, so while `r ≤ x` the radius obeys
+    /// `r^(3⁄2) ≤ far^(3⁄2) + 3⁄2 |dt| √(2εx + 2μ)`, and every `x` with `g(x) ≤ x`, `g(x)` that
+    /// right side to the power ⅔, bounds it. With `A = far^(3⁄2)`, `B = 3⁄2 |dt| √(2ε)` and
+    /// `C = μ ÷ ε`, `x₀ = max(C, (2A)^(2⁄3), 2√2 B)` is one (for `x ≥ C`, `√(x + C) ≤ √(2x)`), and
+    /// since g increases, each of [`OUTWARD_ITERATIONS`] steps `x ← g(x)` is another, nearer the
+    /// least.
+    #[must_use]
+    pub(crate) fn outward(self, far: LightYears, dt: Seconds) -> LightYears {
+        let start_m = far.value() * METRES_PER_LIGHT_YEAR;
+        let a_m32 = start_m * start_m.sqrt();
+        let tau = dt.value().abs();
+        let excess = self.excess_j_per_kg;
+        let g = |x_m: f64| {
+            two_thirds_power(a_m32 + 1.5 * tau * (2.0 * (excess * x_m + self.mu)).sqrt())
+        };
+        let bound_m = if excess > 0.0 {
+            let b_m = 1.5 * tau * (2.0 * excess).sqrt();
+            let mut x_m = (self.mu / excess)
+                .max(two_thirds_power(2.0 * a_m32))
+                .max(2.0 * core::f64::consts::SQRT_2 * b_m);
+            for _ in 0..OUTWARD_ITERATIONS {
+                x_m = g(x_m);
+            }
+            x_m
+        } else {
+            g(0.0)
+        };
+        LightYears::new(bound_m * (1.0 + REACH_MARGIN) / METRES_PER_LIGHT_YEAR)
+    }
+}
+
+pub mod secular;
+pub mod spherical;
+pub mod tidal;
+
+#[cfg(test)]
+mod kepler_arc_hold;
+#[cfg(test)]
+mod kepler_regime_hold;
+#[cfg(test)]
+mod kepler_secular_hold;
 
 #[cfg(test)]
 mod tests {
@@ -810,6 +2121,11 @@ mod tests {
                     .unwrap();
                 worst = worst.max(needed);
                 let fixed = orbit.solve(tau * sqrt_mu, sigma, UNIVERSAL_ITERATIONS);
+                // The stress set never takes the fallback, so its states keep the iterated χ.
+                assert!(
+                    orbit.solves(fixed, tau * sqrt_mu, sigma),
+                    "the stress set took the fallback after {years} yr: {orbit:?}"
+                );
                 assert!(
                     (fixed - reference).abs() <= tolerance,
                     "χ {fixed} against {reference} after {years} yr: {orbit:?}"
@@ -837,6 +2153,11 @@ mod tests {
         assert!(circular.eccentricity() < 1e-15);
         assert!(relative(circular.pericentre().value(), 1.0) < 1e-14);
         assert!(relative(circular.semi_major_axis().unwrap().value(), 1.0) < 1e-14);
+        assert!(relative(circular.apocentre().unwrap().value(), 1.0) < 1e-14);
+        // S2-like, from its apocentre: a (1 + e).
+        let eccentric = from_apocentre(0.0163, 0.8846, sgr_a());
+        let apocentre = eccentric.apocentre().unwrap().value();
+        assert!(relative(apocentre, 0.0163 * 1.8846) < 1e-12, "{apocentre}");
 
         let r = METRES_PER_LIGHT_YEAR;
         let escape = (2.0 * sgr_a().value() / r).sqrt();
@@ -850,6 +2171,7 @@ mod tests {
         assert!(relative(unbound.eccentricity(), 7.0) < 1e-14);
         assert!(relative(unbound.pericentre().value(), 1.0) < 1e-14);
         assert_eq!(unbound.semi_major_axis(), None);
+        assert_eq!(unbound.apocentre(), None);
         assert_eq!(unbound.period(), None);
         assert!(unbound.specific_energy_j_per_kg() > 0.0);
         // It leaves: a thousand years on it is far out and still moving at above the escape speed
@@ -889,6 +2211,199 @@ mod tests {
         let kepler = start.propagate(Seconds::new(span));
         let dr = distance(kepler.position, r) / kepler.radius;
         assert!(dr < 1e-8, "off by {dr:e}");
+    }
+
+    /// The position `dt` seconds on of a hyperbolic orbit by its hyperbolic anomaly, a reference
+    /// independent of the universal variables: `M = e sinh H − H` advanced by the mean motion
+    /// `√(μ ÷ |a|³)` and solved for H by bisection (it is increasing in H), and the perifocal
+    /// position `x = |a| (e − cosh H)`, `y = |a| √(e² − 1) sinh H` (Vallado 2013, §2.2), with
+    /// `sinh H₀ = r · v ÷ (e √(μ |a|))` at the start.
+    #[expect(
+        clippy::many_single_char_names,
+        reason = "the literature's symbols: r, v, e, h, x, y"
+    )]
+    fn hyperbolic_reference(orbit: &KeplerOrbit, dt: f64) -> [f64; 3] {
+        let (r, v, mu) = (orbit.position, orbit.velocity, orbit.mu);
+        let semi = -1.0 / orbit.alpha;
+        let ev = orbit.eccentricity_vector();
+        let e = length(ev);
+        let p_hat = ev.map(|c| c / e);
+        let h = cross(r, v);
+        let q_hat = cross(h, p_hat).map(|c| c / length(h));
+        let h0 = math::asinh(dot(r, v) / (e * (mu * semi).sqrt()));
+        let mean = e * math::sinh(h0) - h0 + (mu / (semi * semi * semi)).sqrt() * dt;
+        let reach = math::asinh(mean.abs() / (e - 1.0)) + 1.0;
+        let (mut lo, mut hi) = (-reach, reach);
+        for _ in 0..200 {
+            let mid = f64::midpoint(lo, hi);
+            if e * math::sinh(mid) - mid < mean {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        let anomaly = f64::midpoint(lo, hi);
+        let x = semi * (e - math::cosh(anomaly));
+        let y = semi * (e * e - 1.0).sqrt() * math::sinh(anomaly);
+        [0, 1, 2].map(|i| x * p_hat[i] + y * q_hat[i])
+    }
+
+    /// The position `dt` seconds on of a parabolic orbit by Barker's equation, a reference
+    /// independent of the universal variables: `D + D³ ÷ 3 = W`, D = tan(ν ÷ 2), with W advanced
+    /// by `dt ÷ √(2q³ ÷ μ)` and solved by bisection, and the perifocal position `x = q (1 − D²)`,
+    /// `y = 2qD` (Vallado 2013, §2.2), with `D₀ = r · v ÷ √(2μq)` at the start.
+    #[expect(
+        clippy::many_single_char_names,
+        reason = "the literature's symbols: r, v, h, q, w, d, x, y"
+    )]
+    fn parabolic_reference(orbit: &KeplerOrbit, dt: f64) -> [f64; 3] {
+        let (r, v, mu) = (orbit.position, orbit.velocity, orbit.mu);
+        let h = cross(r, v);
+        let q = dot(h, h) / (2.0 * mu);
+        let ev = orbit.eccentricity_vector();
+        let p_hat = ev.map(|c| c / length(ev));
+        let q_hat = cross(h, p_hat).map(|c| c / length(h));
+        let d0 = dot(r, v) / (2.0 * mu * q).sqrt();
+        let w = d0 + d0 * d0 * d0 / 3.0 + dt / (2.0 * q * q * q / mu).sqrt();
+        let reach = math::cbrt(3.0 * w.abs()) + 1.0;
+        let (mut lo, mut hi) = (-reach, reach);
+        for _ in 0..200 {
+            let mid = f64::midpoint(lo, hi);
+            if mid + mid * mid * mid / 3.0 < w {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        let d = f64::midpoint(lo, hi);
+        let (x, y) = (q * (1.0 - d * d), 2.0 * q * d);
+        [0, 1, 2].map(|i| x * p_hat[i] + y * q_hat[i])
+    }
+
+    /// A rogue planet of seed 0x5eed0000c0ffee00's centre (`0xcfffdfffc0005f87`, P09.T28.b.a's
+    /// pre-pin): 1.5 ly out on a nearly radial flyby, e = 1.45, q = 0.0875 ly. A thousand years
+    /// back it passes its pericentre on the way in, and ten Laguerre–Conway steps from the
+    /// starting value leave Kepler's equation unsolved: the state came out 26,480 ly away, where
+    /// the orbit is some 2 ly out. The bisection solves it, to the hyperbolic anomaly's answer.
+    #[test]
+    fn an_inbound_flyby_through_its_pericentre_is_solved_pinned() {
+        let orbit = KeplerOrbit::from_state(
+            PointLy::new(
+                -0.924_728_158_321_281,
+                -0.523_016_646_507_413_1,
+                1.062_825_901_658_277_5,
+            ),
+            GalacticVelocity::new([
+                -521_820.097_021_385_2,
+                -277_315.864_063_661_37,
+                753_724.179_127_419,
+            ]),
+            GravitationalParameter::new(1.344_056_460_257_621_7e27),
+        )
+        .unwrap();
+        assert!((orbit.eccentricity() - 1.4486).abs() < 1e-4);
+        let dt = -1_000.0 * YEAR;
+        let sqrt_mu = orbit.mu.sqrt();
+        let sigma = dot(orbit.position, orbit.velocity) / sqrt_mu;
+        let target = orbit.reduced_time(dt) * sqrt_mu;
+        let iterated = orbit.solve(target, sigma, UNIVERSAL_ITERATIONS);
+        assert!(
+            !orbit.solves(iterated, target, sigma),
+            "the iteration solved it"
+        );
+        let chi = orbit.universal_anomaly(target, sigma, UNIVERSAL_ITERATIONS);
+        assert!(orbit.solves(chi, target, sigma));
+        let later = orbit.propagate(Seconds::new(dt));
+        let expected = hyperbolic_reference(&orbit, dt);
+        let off = distance(later.position, expected) / length(expected);
+        assert!(off < 1e-9, "{off:e} from the hyperbolic anomaly's position");
+        let r = later.distance().value() / METRES_PER_LIGHT_YEAR;
+        assert!((1.5..2.5).contains(&r), "{r} ly");
+        let de = relative(
+            later.specific_energy_j_per_kg(),
+            orbit.specific_energy_j_per_kg(),
+        );
+        assert!(de < 1e-12, "{de:e}");
+    }
+
+    /// Nearly radial and parabolic flybys, inbound and outbound, at e from 1 to 2, pericentres
+    /// of 10⁻⁴–1 ly and starts 1–300 pericentres out, over up to ±10⁴ yr, each against a
+    /// reference independent of the universal variables: Barker's equation for the parabolas and
+    /// the hyperbolic anomaly for the rest, both solved by bisection. The sweep reaches the two
+    /// regions where ten steps fall short (a solve towards the pericentre from 20 or more
+    /// pericentres out, and a nearly parabolic flyby over 10⁶ of its pericentre's time scale
+    /// √(q³ ÷ μ)), so the fallback serves some of it; every propagation solves Kepler's
+    /// equation, and the positions agree to 10⁻⁹ of the farther radius.
+    #[test]
+    fn nearly_radial_flybys_match_independent_references_pinned() {
+        let mut lcg = Lcg::new(0x0928_a000_0000_0f1b);
+        let mu = sgr_a().value();
+        let (mut worst, mut fallbacks, mut count) = (0.0_f64, 0_u32, 0_u32);
+        for e in [1.0, 1.0 + 1e-6, 1.0 + 1e-4, 1.01, 1.05, 1.2, 1.45, 2.0] {
+            for n in 0..24 {
+                let q = 1e-4 * math::exp10(4.0 * lcg.next_f64());
+                let out = math::exp10(math::log10(300.0) * lcg.next_f64());
+                if q * out > 10.0 {
+                    continue;
+                }
+                let q_m = q * METRES_PER_LIGHT_YEAR;
+                let p = q_m * (1.0 + e);
+                // The true anomaly `out` pericentres out, falling in for even n and leaving for odd.
+                let cos = ((1.0 + e) / out - 1.0) / e;
+                let sin = (1.0 - cos * cos).max(0.0).sqrt() * if n % 2 == 0 { -1.0 } else { 1.0 };
+                let r = p / (1.0 + e * cos);
+                let vr = (mu / p).sqrt() * e * sin;
+                let vt = (mu / p).sqrt() * (1.0 + e * cos);
+                let angles = [0, 1, 2].map(|_| std::f64::consts::TAU * lcg.next_f64());
+                let position =
+                    rotate([r * cos, r * sin, 0.0], angles).map(|c| c / METRES_PER_LIGHT_YEAR);
+                let orbit = KeplerOrbit::from_state(
+                    PointLy::new(position[0], position[1], position[2]),
+                    GalacticVelocity::new(rotate(
+                        [vr * cos - vt * sin, vr * sin + vt * cos, 0.0],
+                        angles,
+                    )),
+                    GravitationalParameter::new(mu),
+                )
+                .unwrap();
+                let sqrt_mu = orbit.mu.sqrt();
+                let sigma = dot(orbit.position, orbit.velocity) / sqrt_mu;
+                for years in [
+                    -1e4, -3e3, -1e3, -300.0, -100.0, -1.0, 1.0, 100.0, 300.0, 1e3, 3e3, 1e4,
+                ] {
+                    let dt = years * YEAR;
+                    let target = orbit.reduced_time(dt) * sqrt_mu;
+                    let iterated = orbit.solve(target, sigma, UNIVERSAL_ITERATIONS);
+                    if !orbit.solves(iterated, target, sigma) {
+                        fallbacks += 1;
+                    }
+                    let chi = orbit.universal_anomaly(target, sigma, UNIVERSAL_ITERATIONS);
+                    assert!(
+                        orbit.solves(chi, target, sigma),
+                        "unsolved after {years} yr: {orbit:?}"
+                    );
+                    let later = orbit.propagate(Seconds::new(dt));
+                    let expected = if orbit.alpha < 0.0 && e > 1.0 {
+                        hyperbolic_reference(&orbit, dt)
+                    } else {
+                        parabolic_reference(&orbit, dt)
+                    };
+                    let scale = length(expected).max(orbit.radius);
+                    let off = distance(later.position, expected) / scale;
+                    worst = worst.max(off);
+                    count += 1;
+                    assert!(
+                        off < 1e-9,
+                        "{off:e} off after {years} yr at e = {e}, q = {q} ly, {out} q out: {orbit:?}"
+                    );
+                }
+            }
+        }
+        println!(
+            "{count} propagations, {fallbacks} by the fallback, worst {worst:e} of the radius"
+        );
+        assert!(fallbacks > 0, "the sweep never reached the fallback");
+        assert!(count > 1_000, "{count} propagations");
     }
 
     #[test]
@@ -938,5 +2453,81 @@ mod tests {
             KeplerOrbit::from_state(r, GalacticVelocity::default(), sgr_a()),
             Err(BuildKeplerOrbitError::Radial)
         );
+    }
+
+    /// P09.T29's pads bound every orbit of the stress set, bound and unbound, both ways in time:
+    /// its displacement from its start within the reach of a speed bound of its own μ and energy,
+    /// and its distance from the black hole within the outward reach; and a straight line from the
+    /// same start at the bound's greatest speed there within the reach too.
+    #[test]
+    fn the_pads_bound_every_orbit_and_straight_line() {
+        let mut tightest: f64 = 0.0;
+        for orbit in stress_set() {
+            let r0 = orbit.radius / METRES_PER_LIGHT_YEAR;
+            let energy = orbit.specific_energy_j_per_kg();
+            let bound = SpeedBound::new(orbit.gravitational_parameter(), energy);
+            let fastest = (2.0 * energy.max(0.0) + 2.0 * orbit.mu / orbit.radius).sqrt();
+            for years in [-1_000.0, -100.0, -10.0, 10.0, 100.0, 1_000.0] {
+                let dt = Seconds::new(years * YEAR);
+                let later = orbit.propagate(dt);
+                let moved = distance(later.position, orbit.position) / METRES_PER_LIGHT_YEAR;
+                let start = LightYears::new(r0);
+                if let Some(reach) = bound.reach(start, start, dt).map(LightYears::value) {
+                    assert!(
+                        moved <= reach,
+                        "{orbit:?} moved {moved} ly in {years} yr, past {reach}"
+                    );
+                    let straight = fastest * dt.value().abs() / METRES_PER_LIGHT_YEAR;
+                    assert!(
+                        straight <= reach,
+                        "{orbit:?}: a straight line {straight} ly"
+                    );
+                    tightest = tightest.max(moved / reach);
+                }
+                let out = later.radius / METRES_PER_LIGHT_YEAR;
+                let outward = bound.outward(start, dt).value();
+                assert!(
+                    out <= outward,
+                    "{orbit:?} at {out} ly in {years} yr, past {outward}"
+                );
+            }
+        }
+        // The bound is no looser than it must be for the plunge-like orbits.
+        assert!(tightest > 0.5, "{tightest}");
+    }
+
+    /// The plunge pad and the full-scan radius at their closed forms: Sgr A*'s 0.311 ly at a
+    /// century, `r₀ − (r₀^(3⁄2) − k)^(2⁄3)` beyond it, nothing inside, and zero at the epoch.
+    #[test]
+    fn the_plunge_pad_is_its_closed_form() {
+        let century = Seconds::new(100.0 * YEAR);
+        let mu = GravitationalParameter::from_solar_masses(SolarMasses::new(4.3e6));
+        let r_full = full_scan_radius(mu, century).value();
+        assert!((r_full - 0.3114).abs() < 0.0002, "{r_full}");
+        assert_eq!(
+            full_scan_radius(mu, Seconds::new(-100.0 * YEAR)),
+            full_scan_radius(mu, century)
+        );
+        assert_eq!(
+            plunge_pad(mu, LightYears::new(0.99 * r_full), century),
+            None
+        );
+        for r0 in [1.01 * r_full, 1.0, 3.0, 10.0] {
+            let pad = plunge_pad(mu, LightYears::new(r0), century)
+                .unwrap()
+                .value();
+            let k = r_full * r_full.sqrt();
+            let want = r0 - math::powf(r0 * r0.sqrt() - k, 2.0 / 3.0);
+            assert!(
+                (pad / want - 1.0).abs() < 1e-6,
+                "{r0} ly: {pad} against {want}"
+            );
+            // At least the escape speed at the start over the span: the plunge speeds up as it
+            // falls.
+            let escape = (2.0 * mu.value() / (r0 * METRES_PER_LIGHT_YEAR)).sqrt();
+            assert!(pad >= escape * century.value() / METRES_PER_LIGHT_YEAR);
+        }
+        let still = plunge_pad(mu, LightYears::new(1.0), Seconds::new(0.0)).unwrap();
+        assert!(still.value() < 1e-15, "{still:?}");
     }
 }

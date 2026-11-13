@@ -4,11 +4,15 @@
 //! generator itself must not contain:
 //!
 //! - [`golden`](mod@golden): the golden-file harness that pins generated output bit for bit.
+//! - [`pins`](mod@pins): pinned figures, the values a test measures, kept in data files and blessed by
+//!   test name as goldens are.
 //! - [`order`]: the order-independence check ("A then B equals B then A equals B alone").
 //! - [`stats`]: hand-written statistical tests (chi-square, Kolmogorov–Smirnov, Poisson counts).
 //! - [`lcg`]: a small fixed generator for test inputs, independent of the sim's own streams.
 //! - [`float`]: bit-exact float comparison, which `hyperion-sim` may not do itself because its
 //!   Clippy configuration forbids `f64::to_bits`.
+//! - [`threads`]: how many threads a test that runs its own may run, from the slots it reserves and
+//!   the slots nextest grants it, and its fixed shares of work run on them.
 //!
 //! It depends on the exactly pinned `libm` and on nothing else. It never depends on
 //! `hyperion-sim`: that cycle would compile the sim's types twice inside the sim's own unit tests.
@@ -17,4 +21,6 @@ pub mod float;
 pub mod golden;
 pub mod lcg;
 pub mod order;
+pub mod pins;
 pub mod stats;
+pub mod threads;

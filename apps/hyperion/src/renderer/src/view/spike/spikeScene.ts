@@ -5,13 +5,20 @@
  * as a `GroundContact` once it is descending.
  *
  * @remarks
+ * The scene is of a world (R10.T14.c, `spikeWorld.ts`): the test planet's by default, bit for bit
+ * as T13.b built it, or `TERRAIN TEST`'s moon, which carries its appearance and detail seed and
+ * stands under its host disc. Everything below holds on either, with the world's figure, rotation
+ * and pole in place of the test planet's.
+ *
  * The planet stands still in the system over the script: its orbital motion over the 1,230 s
  * descent is about 0.014° (360° × 1,230 s ÷ 365.256363 d, the sidereal year), which the spike
  * neglects. The star lies in the planet's equatorial plane over the landing site's meridian at
  * touchdown, an equinox at local noon, so that the site is lit at every latitude the seed can
  * draw: T13.a draws the parametric latitude within ±60°, whose geodetic latitude on WGS 84 is at
  * most 60.083°, so the Sun stands 29.9° or more above the horizon. The script's day exposure
- * (Design note 17) holds at the end of the run, where the streaming load is highest.
+ * (Design note 17) holds at the end of the run, where the streaming load is highest. Over
+ * `TERRAIN TEST`'s moon the star stands on the track's great circle instead, and a served world is
+ * lit by its own, its site drawn where it stands 20–45° high (`siteLight.ts`; the owner's request).
  *
  * Altitudes are T13.a's: above the site's terrain, measured once before the run through the
  * surface query (`surfaceQuery.ts`), with the low pass above a true bound of the terrain under its
@@ -33,33 +40,33 @@ import { bodyKindSymbol, staticRetarded, type ViewScene } from "../scene/model";
 import {
   AU_M,
   KEPT_BARYCENTRE,
-  KEPT_SYSTEM,
   KEPT_TIDAL_RADIUS_M,
   type KeptScene,
-  keptBody,
   keptTime,
 } from "../scenes/kept";
 import type { SunState } from "../atmosphere/hillaire";
+import type { Rgb } from "../photometry/toneCurve";
+import { MAX_BLOCK_BYTES } from "../terrain/coarseFieldStore";
 import type { Xyz } from "../terrain/cube";
+import type { HeightWorkerPool } from "../terrain/workers/pool";
 import {
   finestPatchSizeM,
   type GroundContact,
   heldRadiusM,
   isDescending,
 } from "../terrain/grounded";
-import { planetGeometry, spheroidNormal } from "../terrain/planet";
+import { type BodyFigure, planetGeometry, spheroidNormal } from "../terrain/planet";
 import { TEST_PLANET_FIGURE } from "./testPlanetFigure";
 import type { DescentPose, DescentProfile } from "./descentProfile";
-import { testPlanetRotationAt } from "./rotation";
+import { timeAfter } from "../../lib/scene/lightTime";
+import { keptStarDirection } from "./siteLight";
+import { SPIKE_PLANET, type SpikeWorld, TEST_PLANET_WORLD } from "./spikeWorld";
 
 /** The spike scene's name, as the label block's `SCENE` line shows it. */
 export const SPIKE_SCENE_NAME = "DESCENT SPIKE";
 
-/** The scene's star, at the kept system's barycentre. */
-export const SPIKE_STAR = keptBody(0);
-
-/** The test planet. */
-export const SPIKE_PLANET = keptBody(1);
+/** The scene's star, at the kept system's barycentre, and the test planet (`spikeWorld.ts`'s). */
+export { SPIKE_PLANET, SPIKE_STAR } from "./spikeWorld";
 
 /** The scripted craft, the scene's own ship. */
 export const SPIKE_CRAFT = "spike-craft";
@@ -77,15 +84,44 @@ export { TEST_PLANET_FIGURE } from "./testPlanetFigure";
 export const SYNTHETIC_FIELD_BYTES = 15_000_000;
 
 /**
- * The synthetic field, every byte written so that its pages are committed and count in the
- * workers' memory as a real field would; the test planet never reads it.
+ * The synthetic field in pieces of at most R09's largest block (`MAX_BLOCK_BYTES`, 1 MiB), every
+ * byte written so that its pages are committed and count in the workers' memory as a real field
+ * would.
+ *
+ * @remarks
+ * The test planet never reads it, and no piece is an R09 payload block: they stand in for a field's
+ * memory alone, posted as one would be (R10.T7).
  */
-export function syntheticField(): ArrayBuffer {
-  const bytes = new Uint8Array(SYNTHETIC_FIELD_BYTES);
-  for (let i = 0; i < bytes.length; i += 1) {
-    bytes[i] = (i * 151 + 7) & 0xff;
+export function syntheticFieldBlocks(): ArrayBuffer[] {
+  const blocks: ArrayBuffer[] = [];
+  for (let start = 0; start < SYNTHETIC_FIELD_BYTES; start += MAX_BLOCK_BYTES) {
+    const bytes = new Uint8Array(Math.min(MAX_BLOCK_BYTES, SYNTHETIC_FIELD_BYTES - start));
+    for (let i = 0; i < bytes.length; i += 1) {
+      bytes[i] = ((start + i) * 151 + 7) & 0xff;
+    }
+    blocks.push(bytes.buffer);
   }
-  return bytes.buffer;
+  return blocks;
+}
+
+/**
+ * Posts the synthetic field to the height workers as the test planet's ({@link SPIKE_PLANET}): its
+ * first piece as the body's `field_init`, the rest as its `field_chunk`s, as R10's store posts a
+ * real field's blocks, so that each worker holds its 15 MB.
+ *
+ * @remarks
+ * The pieces are posted as a stand-in (R10.T6.b), which the workers hold undecoded: the workers
+ * decode a payload's blocks into the module's field, and these are no payload's.
+ */
+export function postSyntheticField(pool: Pick<HeightWorkerPool, "fieldInit" | "fieldChunk">): void {
+  const [first, ...rest] = syntheticFieldBlocks();
+  if (first === undefined) {
+    return;
+  }
+  pool.fieldInit(SPIKE_PLANET, first, "stand-in");
+  for (const block of rest) {
+    pool.fieldChunk(SPIKE_PLANET, block);
+  }
 }
 
 /**
@@ -95,7 +131,10 @@ export function syntheticField(): ArrayBuffer {
  */
 export const SPIKE_SUN_ANGULAR_RADIUS_RAD = 0.004_650_5;
 
-/** The star's nominal radius, m (IAU 2015 Resolution B3). */
+/**
+ * The Sun's nominal radius R☉ᴺ, m (IAU 2015 Resolution B3): the star's radius where the world
+ * states none, as the test planet and `TERRAIN TEST` do.
+ */
 const SUN_RADIUS_M = 6.957e8;
 
 /** The craft's bounding radius, m: the test hull's farthest vertex from its reference point. */
@@ -104,14 +143,20 @@ export const SPIKE_CRAFT_RADIUS_M = Math.max(
 );
 
 /**
- * The clearance at or below which the craft is grounded whatever its vertical speed, metres: the
- * held radius r_g, its bounding radius plus one finest patch (Design note 9), within which its held
- * sphere reaches the ground, as T13.a's `craftContacts` has it.
+ * The clearance at or below which the craft is grounded whatever its vertical speed over a body of
+ * `figure`, metres: the held radius r_g, its bounding radius plus one of the body's finest patches
+ * (Design note 9), within which its held sphere reaches the ground, as T13.a's `craftContacts` has
+ * it.
  */
-export const GROUNDED_CLEARANCE_M = heldRadiusM(
-  { positionM: vec3(0, 0, 0), radiusM: SPIKE_CRAFT_RADIUS_M },
-  finestPatchSizeM(planetGeometry(TEST_PLANET_FIGURE, null)),
-);
+export function groundedClearanceM(figure: BodyFigure): number {
+  return heldRadiusM(
+    { positionM: vec3(0, 0, 0), radiusM: SPIKE_CRAFT_RADIUS_M },
+    finestPatchSizeM(planetGeometry(figure, null)),
+  );
+}
+
+/** {@link groundedClearanceM} over the test planet, metres. */
+export const GROUNDED_CLEARANCE_M = groundedClearanceM(TEST_PLANET_FIGURE);
 
 /** How many points the scene's drawn path has, over the whole script. */
 const PATH_SAMPLES = 256;
@@ -121,15 +166,16 @@ const ONSET_STEP_S = 1 / 64;
 
 /**
  * Whether the craft is grounded or descending at `tS` (Design note 9, on its height above the
- * floor under it, `heightAboveFloorM`): descending by `isDescending`, or within {@link GROUNDED_CLEARANCE_M} of the ground, where
- * a hover at zero vertical speed is a grounded body.
+ * floor under it, `heightAboveFloorM`): descending by `isDescending`, or within `groundedM` (the
+ * profile's body's {@link groundedClearanceM}) of the ground, where a hover at zero vertical speed
+ * is a grounded body.
  */
-function descendingAt(profile: DescentProfile, tS: number): boolean {
+function descendingAt(profile: DescentProfile, tS: number, groundedM: number): boolean {
   const pose = profile.poseAt(tS);
   // The height above the floor under the craft, as T13.a's demand record judges it: the true
   // height above the terrain, which over the site is the clearance.
   const h = pose.heightAboveFloorM;
-  return isDescending(h, pose.verticalSpeedMps) || h <= GROUNDED_CLEARANCE_M;
+  return isDescending(h, pose.verticalSpeedMps) || h <= groundedM;
 }
 
 /** When the scripted craft is a contact (Design note 9, held to the end once it last descends). */
@@ -141,7 +187,12 @@ export interface ContactRule {
 }
 
 /** The time in (`low`, `high`] at which `descendingAt` turns from false to true, by bisection. */
-function risingEdgeS(profile: DescentProfile, low: number, high: number): number {
+function risingEdgeS(
+  profile: DescentProfile,
+  low: number,
+  high: number,
+  groundedM: number,
+): number {
   let lo = low;
   let hi = high;
   for (let k = 0; k < 64; k += 1) {
@@ -149,7 +200,7 @@ function risingEdgeS(profile: DescentProfile, low: number, high: number): number
     if (mid === lo || mid === hi) {
       break;
     }
-    if (descendingAt(profile, mid)) {
+    if (descendingAt(profile, mid, groundedM)) {
       hi = mid;
     } else {
       lo = mid;
@@ -163,10 +214,11 @@ function risingEdgeS(profile: DescentProfile, low: number, high: number): number
  * then by bisection to the double's resolution.
  */
 export function contactRule(profile: DescentProfile): ContactRule {
+  const groundedM = groundedClearanceM(profile.figure);
   let firstOnsetS: number | null = null;
   let holdFromS: number | null = null;
   let before = 0;
-  let was = descendingAt(profile, 0);
+  let was = descendingAt(profile, 0, groundedM);
   if (was) {
     firstOnsetS = 0;
     holdFromS = 0;
@@ -174,9 +226,9 @@ export function contactRule(profile: DescentProfile): ContactRule {
   const steps = Math.ceil(profile.durationS / ONSET_STEP_S);
   for (let n = 1; n <= steps; n += 1) {
     const t = Math.min(n * ONSET_STEP_S, profile.durationS);
-    const now = descendingAt(profile, t);
+    const now = descendingAt(profile, t, groundedM);
     if (now && !was) {
-      const edge = risingEdgeS(profile, before, t);
+      const edge = risingEdgeS(profile, before, t, groundedM);
       firstOnsetS ??= edge;
       holdFromS = edge;
     }
@@ -202,24 +254,50 @@ export function spikeContactAt(
   tS: number,
 ): GroundContact | null {
   const held = rule.holdFromS !== null && tS >= rule.holdFromS;
-  if (!held && !descendingAt(profile, tS)) {
+  if (!held && !descendingAt(profile, tS, groundedClearanceM(profile.figure))) {
     return null;
   }
   return { positionM: profile.poseAt(tS).groundPointM, radiusM: SPIKE_CRAFT_RADIUS_M };
 }
 
-/**
- * The unit direction to the star in the planet's non-rotating axes: in its equatorial plane, over
- * the landing site's meridian at the end of the script.
- */
-export function sunDirectionBody(profile: DescentProfile): Vec3 {
-  const end = profile.durationS;
-  const site = rotateToBody(testPlanetRotationAt(end), profile.poseAt(end).groundPointM);
-  return normalise(vec3(site.x, site.y, 0));
+/** The body's pole, its body-fixed +z, in its non-rotating axes at script time `tS`. */
+function poleAt(world: SpikeWorld, tS: number): Vec3 {
+  return rotateToBody(world.rotationAt(tS), vec3(0, 0, 1));
 }
 
-/** The star seen from the planet, for the atmosphere (`HillaireAtmosphere.drawFrame`). */
-export function spikeSunState(sunBody: Vec3, rotation: Rotation3): SunState {
+/**
+ * The unit direction to the star in the body's non-rotating axes: a served world's own
+ * (`SpikeWorld.starDirection`); over the test planet in its equatorial plane, over the landing
+ * site's meridian at the end of the script; over any other kept world on the track's great circle,
+ * so that its start is lit too (`siteLight.ts`' `keptStarDirection`; the owner's request).
+ *
+ * @remarks
+ * The test planet's is the site less its part along the pole. Its pole is +z exactly, so that this
+ * is its site's x and y with z = 0, bit for bit.
+ */
+export function sunDirectionBody(
+  profile: DescentProfile,
+  world: SpikeWorld = TEST_PLANET_WORLD,
+): Vec3 {
+  if (world.starDirection !== undefined) {
+    return world.starDirection;
+  }
+  if (world.name !== "test-planet") {
+    return keptStarDirection(profile, world);
+  }
+  const end = profile.durationS;
+  const site = rotateToBody(world.rotationAt(end), profile.poseAt(end).groundPointM);
+  const pole = poleAt(world, end);
+  return normalise(sub(site, scale(pole, dot(site, pole))));
+}
+
+/**
+ * The star seen from the planet, for the atmosphere (`HillaireAtmosphere.drawFrame`).
+ *
+ * @param illuminanceLx - The star's illuminance at the planet per channel, lx (plan R08, R08.T6.d:
+ *   `earth.ts`'s `referenceSunIlluminanceLx()`, R07's `starIlluminance` of R06's Sun at 1 au).
+ */
+export function spikeSunState(sunBody: Vec3, rotation: Rotation3, illuminanceLx: Rgb): SunState {
   const [r0, r1, r2] = rotation.rows;
   // Rᵀ · s: the body's axes into its body-fixed ones.
   return {
@@ -228,7 +306,7 @@ export function spikeSunState(sunBody: Vec3, rotation: Rotation3): SunState {
       r0.y * sunBody.x + r1.y * sunBody.y + r2.y * sunBody.z,
       r0.z * sunBody.x + r1.z * sunBody.y + r2.z * sunBody.z,
     ),
-    distanceAu: 1,
+    illuminanceLx,
     angularRadiusRad: SPIKE_SUN_ANGULAR_RADIUS_RAD,
   };
 }
@@ -238,12 +316,16 @@ function rotationQuaternion(rotation: Rotation3): Quaternion {
   return quaternionFromRows(rotation.rows);
 }
 
-/** The scripted camera at `tS` in the planet's non-rotating frame: the craft's own pose. */
-export function spikeCameraAt(profile: DescentProfile, tS: number): CameraPose {
-  const rotation = testPlanetRotationAt(tS);
+/** The scripted camera at `tS` in the body's non-rotating frame: the craft's own pose. */
+export function spikeCameraAt(
+  profile: DescentProfile,
+  tS: number,
+  world: SpikeWorld = TEST_PLANET_WORLD,
+): CameraPose {
+  const rotation = world.rotationAt(tS);
   const pose = profile.poseAt(tS);
   return {
-    frame: { kind: "body", body: SPIKE_PLANET },
+    frame: { kind: "body", body: world.body },
     positionM: rotateToBody(rotation, pose.positionM),
     orientation: multiply(rotationQuaternion(rotation), pose.orientation),
   };
@@ -259,49 +341,64 @@ export function siteDirection(profile: DescentProfile): Xyz {
  * The craft's path still to fly, from `tS` to the end, body-fixed, drawn dashed as its predicted
  * path: the flown part is no prediction, and at the end there is none (decision-r05-spike-ux.md).
  */
-function remainingPath(profile: DescentProfile, tS: number): ReadonlyArray<ViewPosition> | null {
+function remainingPath(
+  profile: DescentProfile,
+  tS: number,
+  body: SpikeWorld["body"],
+): ReadonlyArray<ViewPosition> | null {
   if (tS >= profile.durationS) {
     return null;
   }
   const path: ViewPosition[] = [];
   for (let n = 0; n < PATH_SAMPLES; n += 1) {
     const t = tS + (n / (PATH_SAMPLES - 1)) * (profile.durationS - tS);
-    path.push({ kind: "body_fixed", body: SPIKE_PLANET, m: profile.positionAt(t) });
+    path.push({ kind: "body_fixed", body, m: profile.positionAt(t) });
   }
   return path;
 }
 
 /**
- * The descent spike as a kept scene: the star, the turning test planet and the scripted craft,
- * the own ship, with its path still to fly as its predicted path; the camera is the craft's own
- * pose.
+ * The descent spike as a kept scene of `world`: the star, the turning body and the scripted craft,
+ * the own ship, held in the body's fixed frame, with its path still to fly as its predicted path;
+ * the camera is the craft's own pose.
+ *
+ * @remarks
+ * A generated world's body carries its appearance and detail seed, which the terrain session takes
+ * in place of asking `body_detail`, and the scene its host discs; the test planet's carries
+ * neither, as T13.b built it. A served world's body carries no detail seed, which the session asks
+ * the server for, and stands at its own distance from a star of its own radius (R10.T15.b); every
+ * other world's at 1 au from a star of the Sun's.
  */
-export function spikeScene(profile: DescentProfile): KeptScene {
-  const sunBody = sunDirectionBody(profile);
-  const planetCentreM = scale(sunBody, -AU_M);
+export function spikeScene(
+  profile: DescentProfile,
+  world: SpikeWorld = TEST_PLANET_WORLD,
+): KeptScene {
+  const sunBody = sunDirectionBody(profile, world);
+  const planetCentreM = scale(sunBody, -(world.starDistanceM ?? AU_M));
   return {
     name: SPIKE_SCENE_NAME,
     durationS: profile.durationS,
-    cameraAt: (tS) => spikeCameraAt(profile, tS),
+    cameraAt: (tS) => spikeCameraAt(profile, tS, world),
     sceneAt: (tS): ViewScene => {
-      const rotation = testPlanetRotationAt(tS);
+      const rotation = world.rotationAt(tS);
       const pose = profile.poseAt(tS);
-      const camera = spikeCameraAt(profile, tS);
+      const camera = spikeCameraAt(profile, tS, world);
       const velocity = rotateToBody(rotation, pose.velocityMps);
       return {
         provenance: { kind: "kept", name: SPIKE_SCENE_NAME },
-        time: keptTime(tS),
+        // A served world's clock counts from the scene's time it was read at (R10.T15.b).
+        time: world.epoch === undefined ? keptTime(tS) : timeAfter(world.epoch, tS),
         timeRate: 1,
-        system: KEPT_SYSTEM,
+        system: world.system,
         barycentre: KEPT_BARYCENTRE,
         tidalRadiusM: KEPT_TIDAL_RADIUS_M,
         bodies: [
           {
-            id: SPIKE_STAR,
+            id: world.star,
             parent: null,
             kind: "star",
-            designation: "TEST STAR",
-            radiusM: SUN_RADIUS_M,
+            designation: world.starDesignation,
+            radiusM: world.starRadiusM ?? SUN_RADIUS_M,
             hillRadiusM: null,
             centreM: vec3(0, 0, 0),
             retarded: staticRetarded(vec3(0, 0, 0)),
@@ -311,19 +408,19 @@ export function spikeScene(profile: DescentProfile): KeptScene {
             orbitNormal: null,
           },
           {
-            id: SPIKE_PLANET,
-            parent: SPIKE_STAR,
-            kind: "planet",
-            designation: "TEST PLANET",
-            radiusM: TEST_PLANET_FIGURE.equatorialRadiusM,
-            // Earth's Hill radius, 1.5 × 10⁹ m (R02.T4's figure, as `frameChange.ts` takes it).
-            hillRadiusM: 1.5e9,
+            id: world.body,
+            parent: world.star,
+            kind: world.bodyKind,
+            designation: world.bodyDesignation,
+            radiusM: world.figure.equatorialRadiusM,
+            hillRadiusM: world.hillRadiusM,
             centreM: planetCentreM,
             retarded: staticRetarded(planetCentreM),
             rotation,
-            appearance: null,
-            symbol: bodyKindSymbol("planet"),
+            appearance: world.appearance,
+            symbol: bodyKindSymbol(world.bodyKind),
             orbitNormal: null,
+            ...(world.detailSeed === undefined ? {} : { detailSeed: world.detailSeed }),
           },
         ],
         rings: [],
@@ -334,11 +431,11 @@ export function spikeScene(profile: DescentProfile): KeptScene {
             designation: "TEST CRAFT",
             hull: TEST_HULL,
             pose: {
-              position: { kind: "body_fixed", body: SPIKE_PLANET, m: pose.positionM },
+              position: { kind: "body_fixed", body: world.body, m: pose.positionM },
               attitude: camera.orientation,
             },
             predictedPath:
-              remainingPath(profile, tS)?.map((position) => ({
+              remainingPath(profile, tS, world.body)?.map((position) => ({
                 position,
                 attitude: camera.orientation,
               })) ?? null,
@@ -348,6 +445,7 @@ export function spikeScene(profile: DescentProfile): KeptScene {
         stars: [],
         ownShip: SPIKE_CRAFT,
         defaultPose: camera,
+        ...(world.hostDiscs === undefined ? {} : { hostDiscs: world.hostDiscs }),
       };
     },
   };
@@ -360,19 +458,23 @@ export function spikeScene(profile: DescentProfile): KeptScene {
 export const ORBIT_INSTRUMENT_RADII = 7;
 
 /**
- * The orbit instrument's camera at `tS`: {@link ORBIT_INSTRUMENT_RADII} planetary radii out over the craft, looking at the
- * planet's centre with the pole up (or the star's direction where the craft is over a pole), so
- * that the graticule, the craft and its path show together.
+ * The orbit instrument's camera at `tS`: {@link ORBIT_INSTRUMENT_RADII} radii of the body out over
+ * the craft, looking at the body's centre with its pole up (or the star's direction where the
+ * craft is over a pole), so that the graticule, the craft and its path show together.
  */
-export function orbitInstrumentPose(profile: DescentProfile, tS: number): CameraPose {
-  const craft = spikeCameraAt(profile, tS).positionM;
+export function orbitInstrumentPose(
+  profile: DescentProfile,
+  tS: number,
+  world: SpikeWorld = TEST_PLANET_WORLD,
+): CameraPose {
+  const craft = spikeCameraAt(profile, tS, world).positionM;
   const out = normalise(craft);
-  const pole = vec3(0, 0, 1);
-  const up = Math.abs(dot(out, pole)) > 0.99 ? sunDirectionBody(profile) : pole;
-  const positionM = scale(out, ORBIT_INSTRUMENT_RADII * TEST_PLANET_FIGURE.equatorialRadiusM);
+  const pole = poleAt(world, tS);
+  const up = Math.abs(dot(out, pole)) > 0.99 ? sunDirectionBody(profile, world) : pole;
+  const positionM = scale(out, ORBIT_INSTRUMENT_RADII * world.figure.equatorialRadiusM);
   const forward = scale(out, -1);
   return {
-    frame: { kind: "body", body: SPIKE_PLANET },
+    frame: { kind: "body", body: world.body },
     positionM,
     orientation: lookAlong(forward, normalise(sub(up, scale(forward, dot(up, forward))))),
   };
@@ -380,11 +482,15 @@ export function orbitInstrumentPose(profile: DescentProfile, tS: number): Camera
 
 /**
  * The scripted camera's elevation of view at `pose`, degrees: the angle of its forward axis above
- * the local horizontal, the spheroid's tangent plane under it, `-90` at the nadir.
+ * the local horizontal, the tangent plane under it of the spheroid `figure` (the test planet's by
+ * default), `-90` at the nadir.
  */
-export function cameraElevationDeg(pose: DescentPose): number {
+export function cameraElevationDeg(
+  pose: DescentPose,
+  figure: BodyFigure = TEST_PLANET_FIGURE,
+): number {
   const g = pose.groundDir;
-  const [nx, ny, nz] = spheroidNormal(TEST_PLANET_FIGURE, [g.x, g.y, g.z]);
+  const [nx, ny, nz] = spheroidNormal(figure, [g.x, g.y, g.z]);
   const forward = rotate(pose.orientation, vec3(0, 0, -1));
   const sine = forward.x * nx + forward.y * ny + forward.z * nz;
   return (Math.asin(Math.min(1, Math.max(-1, sine))) * 180) / Math.PI;

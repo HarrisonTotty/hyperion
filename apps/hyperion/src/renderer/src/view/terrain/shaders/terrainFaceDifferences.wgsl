@@ -1,6 +1,7 @@
 // The `FaceDifferences` vertex path (plan R05, Design note 4): each offset rebuilt from the slot's
-// terms, the shared grid and the heights, never from an absolute position. Composed after
-// terrain.wgsl. vertexEmulation.ts mirrors `morphOffset` operation for operation.
+// terms, the shared grid and the heights, never from an absolute position. Composed with
+// terrainPatch.wgsl (`heightAt`) and a terrain material (R05's terrain.wgsl, R10's terrainLit.wgsl).
+// vertexEmulation.ts mirrors `morphOffset` operation for operation.
 
 // The vertex's own-level offset from its patch origin, body-fixed metres.
 fn ownOffset(slot : u32, rec : SlotRecord, x : u32, y : u32) -> vec3f {

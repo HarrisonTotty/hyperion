@@ -35,8 +35,25 @@ export interface ViewCanvasProps {
   readonly onTurn: (turn: ViewTurn) => void;
   /** Called with a click's position, CSS px from the canvas's top left. */
   readonly onPick: (xPx: number, yPx: number) => void;
+  /**
+   * Called with a wheel's steps over the canvas, nearer for a positive step, one a notch (100 CSS
+   * px of a pixel-mode wheel), which an `ORBIT` camera zooms by (plan R15, T4); none where absent.
+   */
+  readonly onZoom?: ((steps: number) => void) | undefined;
   /** The DOM drawn over the canvas: the label block on its plate. */
   readonly children: ReactNode;
+}
+
+/** CSS px of a pixel-mode wheel's scroll that make one step: a common mouse's notch. */
+const WHEEL_PX_PER_STEP = 100;
+
+/**
+ * The steps a wheel's scroll of `deltaY` in `deltaMode` (`WheelEvent.deltaMode`: 0 px, 1 lines,
+ * 2 pages) makes, nearer for a scroll up, a line or a page a step and pixels by
+ * {@link WHEEL_PX_PER_STEP}.
+ */
+export function wheelSteps(deltaY: number, deltaMode: number): number {
+  return deltaMode === 0 ? -deltaY / WHEEL_PX_PER_STEP : -Math.sign(deltaY);
 }
 
 /**
@@ -63,6 +80,7 @@ export function ViewCanvas({
   onPress,
   onTurn,
   onPick,
+  onZoom,
   children,
 }: ViewCanvasProps) {
   const drag = useViewDrag({ fovDeg, dragKind, remPx, onPress, onTurn, onPick });
@@ -90,6 +108,11 @@ export function ViewCanvas({
         onPointerUp={drag.onPointerUp}
         onPointerCancel={drag.onPointerCancel}
         onLostPointerCapture={drag.onLostPointerCapture}
+        onWheel={(event) => {
+          if (onZoom !== undefined && event.deltaY !== 0) {
+            onZoom(wheelSteps(event.deltaY, event.deltaMode));
+          }
+        }}
       />
       <div className="view__overlay">{children}</div>
     </div>

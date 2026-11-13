@@ -1,0 +1,361 @@
+import { describe, expect, it } from "vitest";
+
+import { norm, normalise, scale, sub } from "../../../geometry/vec3";
+import { rotate } from "../../../view/camera/quaternion";
+import { rotateToBody } from "../../../view/coords/rotation";
+import { limbDistanceM } from "../../../view/terrain/handover";
+import {
+  terrainMoon,
+  terrainMoonPhotometry,
+  terrainTestGolden,
+} from "../../../view/scenes/terrainScene";
+import { SCENE_OPTIONS } from "../viewRun";
+import {
+  datumNormal,
+  datumPointM,
+  HALO_CRATER_CENTRE,
+  HANDOVER_APPROACH,
+  HANDOVER_HALO_LOOK,
+  HANDOVER_LOOKS,
+  type HandoverLook,
+} from "./handoverGeometry";
+import {
+  coverageSurveyedCells,
+  handoverRangeAtM,
+  HandoverScenes,
+  servedHandoverWorld,
+  surveyMiddleOf,
+  terrainTestHandoverWorld,
+} from "./handoverScenes";
+import { moonLikeHeader } from "../../../test/coarseFieldFixtures";
+import { FIXTURE_EARTH } from "../../../test/planetaryFixture";
+import { SERVED_DETAIL_SEED } from "../../../test/servedHandoverFixtures";
+import { sceneModelOf, stateNearEarth } from "../../../test/sceneFixture";
+import { TEST_HULL } from "../../../view/scene/hull";
+import { type ServedBody, servedBodyOf } from "../../../view/scene/servedBody";
+import { TERRAIN_HOST_DISCS } from "../../../view/scenes/terrainScene";
+import { CoverageView, fieldCellAt } from "../../../view/terrain/coverage";
+import { vertexDir } from "../../../view/terrain/cube";
+import type { TerrainRequests } from "../../../view/terrain/session";
+import { TerrainProbe } from "./terrainProbe";
+import { ViewsProbe } from "./viewsProbe";
+
+const LOOK_SCENES = ["HAND-OVER 30°", "HAND-OVER 90°", "HAND-OVER TERMINATOR", "HAND-OVER HALO"];
+
+/** The range of the high setting's primary, 1126 px across. */
+const RANGE_M = 1.5419e7;
+
+/** The look `index`. */
+function lookAt(index: number): HandoverLook {
+  const look = HANDOVER_LOOKS[index];
+  if (look === undefined) {
+    throw new Error(`no look ${String(index)}`);
+  }
+  return look;
+}
+
+/** A provisional range, m: other than the run's. */
+const PROVISIONAL_M = 9.0e6;
+
+/** The scenes over `TERRAIN TEST`'s world, their range set. */
+function scenes(): HandoverScenes {
+  const made = new HandoverScenes(
+    terrainTestHandoverWorld(),
+    HANDOVER_APPROACH.full,
+    PROVISIONAL_M,
+  );
+  made.setRangeM(RANGE_M);
+  return made;
+}
+
+/** The own ship's distance to the moon's limb in the first look's scene at script time `tS`, m. */
+function shipLimbM(made: HandoverScenes, tS: number): number {
+  const look = HANDOVER_LOOKS[0];
+  const position = made.sceneOptions[0]?.make().sceneAt(tS).craft[0]?.pose.position;
+  if (look === undefined || position?.kind !== "body_fixed") {
+    throw new Error("the first look's ship is not placed in the moon's axes");
+  }
+  const galactic = rotateToBody(made.geometry(look).rotation, position.m);
+  return limbDistanceM(norm(galactic), terrainTestGolden().header.equatorial_radius_m);
+}
+
+describe("TERRAIN TEST's hand-over world", () => {
+  it.each([
+    ["high", 1126, 15_419],
+    ["low", 822, 5_628],
+  ] as const)("hands over on %s at %i px from %i km", (setting, widthPx, rangeKm) => {
+    const range = handoverRangeAtM(terrainTestHandoverWorld(), setting, widthPx);
+    expect(Math.round(range.rangeM / 1000)).toBe(rangeKm);
+  });
+
+  it("is the terrain golden's moon, its relief, its level and its whole survey's 48 cells", () => {
+    const world = terrainTestHandoverWorld();
+    const { header } = terrainTestGolden();
+    expect([world.body, world.reliefM, world.cellLevel, world.surveyedCells]).toEqual([
+      terrainMoon(),
+      header.realised_relief_m,
+      6,
+      48,
+    ]);
+  });
+});
+
+/** The slice's Earth, served, from the ship's scene in its frame. */
+function servedEarth(): ServedBody {
+  const read = servedBodyOf(sceneModelOf(stateNearEarth()), "000000000000002a", FIXTURE_EARTH);
+  if (read.kind !== "served") {
+    throw new Error(`the slice's Earth is a served world, not ${read.gap}`);
+  }
+  return read.served;
+}
+
+/** A coverage at level 5 of the cells from `start` to `end`, surveyed. */
+function coverageOf(start: number, end: number): CoverageView {
+  const merged = CoverageView.empty(5).merged({ ranges: [{ start, end, resolution: 9 }] }, 1);
+  if (!merged.ok) {
+    throw new Error(merged.message);
+  }
+  return merged.coverage;
+}
+
+/** A link that answers nothing, which the world hands each look's fixture. */
+const LINK = {
+  requests: {
+    request: () => {
+      throw new Error("not asked");
+    },
+    requestBulk: () => {
+      throw new Error("not asked");
+    },
+  } satisfies TerrainRequests,
+  onSurface: () => () => undefined,
+};
+
+describe("a served world's hand-over world (R10.T15.b)", () => {
+  const served = servedEarth();
+  const header = moonLikeHeader(FIXTURE_EARTH);
+  const coverage = coverageOf(0, 1_024);
+  const world = servedHandoverWorld({
+    served,
+    hostDiscs: TERRAIN_HOST_DISCS,
+    header,
+    coverage,
+    detailSeed: SERVED_DETAIL_SEED,
+    link: LINK,
+  });
+
+  it("is the served body by its designation, its field's figure, relief, level and survey", () => {
+    expect(world.name).toBe(served.body.designation);
+    expect(world.body).toBe(FIXTURE_EARTH);
+    expect(world.figure).toEqual({
+      equatorialRadiusM: header.equatorial_radius_m,
+      polarRadiusM: header.polar_radius_m,
+    });
+    expect([world.reliefM, world.cellLevel, world.surveyedCells]).toEqual([
+      header.realised_relief_m,
+      5,
+      1_024,
+    ]);
+    expect(world.towardStarM).toBe(served.towardStarM);
+    expect(world.eyePointM).toBe(TEST_HULL.eyePointM);
+  });
+
+  it("draws each look's star at the origin and the body where the server's scene puts it", () => {
+    const made = new HandoverScenes(world, HANDOVER_APPROACH.full, PROVISIONAL_M);
+    const scene = made.sceneOptions[0]?.make().sceneAt(0);
+    const [star, body] = scene?.bodies ?? [];
+    expect(scene?.system).toBe(served.system);
+    expect([star?.id, star?.designation, star?.radiusM, star?.centreM]).toEqual([
+      served.star.id,
+      served.star.designation,
+      served.star.radiusM,
+      { x: 0, y: 0, z: 0 },
+    ]);
+    expect([body?.id, body?.kind, body?.parent, body?.hillRadiusM]).toEqual([
+      FIXTURE_EARTH,
+      "planet",
+      served.star.id,
+      served.hillRadiusM,
+    ]);
+    expect(body?.centreM).toEqual(scale(served.towardStarM, -1));
+    expect(body?.appearance?.photometry).toBe(served.appearance.photometry);
+    expect(scene?.hostDiscs).toBe(TERRAIN_HOST_DISCS);
+  });
+
+  it("gives each look's kept scene's body its record's detail seed, so that its terrain draws (R10.T15.b.1)", () => {
+    const made = new HandoverScenes(world, HANDOVER_APPROACH.full, PROVISIONAL_M);
+    const looks = made.sceneOptions.map((option) => option.make().sceneAt(0));
+    expect(looks.map((scene) => [scene.provenance.kind, scene.bodies[1]?.detailSeed])).toEqual(
+      looks.map(() => ["kept", SERVED_DETAIL_SEED]),
+    );
+  });
+
+  it("serves each look's terrain through the server's link, which no look closes", () => {
+    const fixture = world.fixture();
+    expect(fixture.universe).toBe(served.universe);
+    const link = fixture.open();
+    expect(link.requests).toBe(LINK.requests);
+    expect(link.onSurface).toBe(LINK.onSurface);
+    expect(() => {
+      link.close();
+    }).not.toThrow();
+  });
+
+  it("takes its survey's middle as its surveyed cells' mean direction", () => {
+    // One cell: the middle is its centre.
+    const cell = fieldCellAt(5, 300);
+    const [x, y, z] = vertexDir(cell, 32, 32);
+    const middle = surveyMiddleOf(coverageOf(300, 301));
+    expect([middle.x, middle.y, middle.z].map((each) => Number(each.toFixed(12)))).toEqual(
+      [x, y, z].map((each) => Number(each.toFixed(12))),
+    );
+  });
+
+  it("takes TERRAIN TEST's middle for a survey of the whole body, whose mean is nought", () => {
+    const whole = coverageOf(0, 6 * 4 ** 5);
+    expect(coverageSurveyedCells(whole)).toBe(6_144);
+    expect(surveyMiddleOf(whole)).toEqual(normalise({ x: 1, y: 1, z: 0.71 }));
+  });
+});
+
+describe("TEST MOON weathered's hand-over world (R10.T1.c)", () => {
+  const WEATHERED = "terrain-test-weathered";
+
+  it("is TERRAIN TEST WEATHERED: the weathered golden's moon, relief, level and survey", () => {
+    const world = terrainTestHandoverWorld(WEATHERED);
+    const { body, header } = terrainTestGolden(WEATHERED);
+    expect([world.name, world.body, world.reliefM, world.cellLevel, world.surveyedCells]).toEqual([
+      "TERRAIN TEST WEATHERED",
+      body,
+      header.realised_relief_m,
+      header.level,
+      terrainTestHandoverWorld().surveyedCells,
+    ]);
+  });
+
+  it("draws each look's moon with the weathered field's photometry, from its crust_albedo", () => {
+    const made = new HandoverScenes(
+      terrainTestHandoverWorld(WEATHERED),
+      HANDOVER_APPROACH.full,
+      PROVISIONAL_M,
+    );
+    const { header, maturity } = terrainTestGolden(WEATHERED);
+    const moons = made.sceneOptions.map(
+      (option) =>
+        option
+          .make()
+          .sceneAt(0)
+          .bodies.find((body) => body.id === terrainMoon(WEATHERED))?.appearance?.photometry,
+    );
+    expect(moons).toEqual(LOOK_SCENES.map(() => terrainMoonPhotometry(header, maturity)));
+  });
+});
+
+describe("the hand-over check's scenes", () => {
+  it("are one a look, in the looks' order", () => {
+    expect(scenes().sceneOptions.map((option) => option.name)).toEqual(LOOK_SCENES);
+  });
+
+  it("are no kept scene of an ordinary launch", () => {
+    expect(SCENE_OPTIONS.filter((option) => LOOK_SCENES.includes(option.name))).toEqual([]);
+  });
+
+  it("are offered by the terrain probe after VIEW's kept scenes only when given", () => {
+    const plain = new TerrainProbe(new ViewsProbe(), { paceMs: 0, readBackMs: 1_000 });
+    const checked = new TerrainProbe(new ViewsProbe(), {
+      paceMs: 0,
+      readBackMs: 1_000,
+      checkScenes: scenes().sceneOptions,
+    });
+    expect([
+      plain.sceneOptions.map((option) => option.name),
+      checked.sceneOptions.map((option) => option.name),
+    ]).toEqual([
+      SCENE_OPTIONS.map((option) => option.name),
+      [...SCENE_OPTIONS.map((option) => option.name), ...LOOK_SCENES],
+    ]);
+  });
+
+  it("draw a look chosen before the run sets its range at the provisional range", () => {
+    const unset = new HandoverScenes(
+      terrainTestHandoverWorld(),
+      HANDOVER_APPROACH.full,
+      PROVISIONAL_M,
+    );
+    expect(shipLimbM(unset, 0) / PROVISIONAL_M).toBeCloseTo(3, 9);
+  });
+
+  it("turn the halo's crater, not the survey's middle, to the halo look's incidence (R10.T1.c)", () => {
+    const made = scenes();
+    const halo = made.geometry(HANDOVER_HALO_LOOK);
+    const at30 = made.geometry(lookAt(0));
+    expect([
+      norm(
+        sub(
+          halo.surveyNormal,
+          datumNormal(datumPointM(HALO_CRATER_CENTRE, made.world.figure), made.world.figure),
+        ),
+      ),
+      norm(sub(at30.surveyNormal, halo.surveyNormal)) > 0.01,
+    ]).toEqual([expect.closeTo(0, 12), true]);
+  });
+
+  it("draw a look at the run's range once it is set, in the provisional's place", () => {
+    const made = new HandoverScenes(
+      terrainTestHandoverWorld(),
+      HANDOVER_APPROACH.full,
+      PROVISIONAL_M,
+    );
+    made.sceneOptions[0]?.make();
+    made.setRangeM(RANGE_M);
+    expect(shipLimbM(made, 0) / RANGE_M).toBeCloseTo(3, 9);
+  });
+
+  it("refuse a provisional range that is not positive", () => {
+    expect(() => new HandoverScenes(terrainTestHandoverWorld(), HANDOVER_APPROACH.full, 0)).toThrow(
+      /provisional hand-over range must be positive/,
+    );
+  });
+
+  it("hold the moon still at the look's rotation, the clock at one second a second", () => {
+    const made = scenes();
+    const scene = made.sceneOptions[1]?.make().sceneAt(40);
+    const moon = scene?.bodies.find((body) => body.id === terrainMoon());
+    expect([scene?.timeRate, moon?.rotation]).toEqual([1, made.geometry(lookAt(1)).rotation]);
+  });
+
+  it("start the own ship at 3 times the range from the limb, on the line to the moon's centre", () => {
+    const made = scenes();
+    const geometry = made.geometry(lookAt(0));
+    const ship = made.sceneOptions[0]?.make().sceneAt(0).craft[0];
+    const position = ship?.pose.position;
+    if (position?.kind !== "body_fixed") {
+      throw new Error("the ship is not placed in the moon's axes");
+    }
+    const galactic = rotateToBody(geometry.rotation, position.m);
+    const { header } = terrainTestGolden();
+    expect([
+      limbDistanceM(norm(galactic), header.equatorial_radius_m) / RANGE_M,
+      norm(sub(normalise(galactic), geometry.towardCamera)),
+    ]).toEqual([expect.closeTo(3, 9), expect.closeTo(0, 12)]);
+  });
+
+  it("look the seat at the moon's centre", () => {
+    const made = scenes();
+    const geometry = made.geometry(lookAt(2));
+    const camera = made.sceneOptions[2]?.make().cameraAt(0);
+    const forward = camera === undefined ? null : rotate(camera.orientation, { x: 0, y: 0, z: -1 });
+    expect(
+      forward === null ? null : norm(sub(forward, scale(geometry.towardCamera, -1))),
+    ).toBeCloseTo(0, 12);
+  });
+
+  it("follow each look's script as its stage plays it, afresh at each choice", () => {
+    const made = scenes();
+    const option = made.sceneOptions[0];
+    option?.terrain?.notePlayed?.(12.5);
+    const played = made.scriptS(lookAt(0));
+    option?.make();
+    expect([played, made.scriptS(lookAt(0)), made.scriptS(lookAt(1))]).toEqual([12.5, null, null]);
+  });
+});

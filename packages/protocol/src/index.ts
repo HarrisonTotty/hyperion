@@ -12,7 +12,10 @@ import type { BeltDto } from "./generated/BeltDto";
 import type { BeltGapDto } from "./generated/BeltGapDto";
 import type { BeltSiteDto } from "./generated/BeltSiteDto";
 import type { CometaryHaloDto } from "./generated/CometaryHaloDto";
+import type { DebrisDiscDto } from "./generated/DebrisDiscDto";
+import type { DiscGapDto } from "./generated/DiscGapDto";
 import type { PopulationDto } from "./generated/PopulationDto";
+import type { ProtoplanetaryDiscDto } from "./generated/ProtoplanetaryDiscDto";
 import type { RingDto } from "./generated/RingDto";
 import type { RingGapDto } from "./generated/RingGapDto";
 import type { RingKindDto } from "./generated/RingKindDto";
@@ -22,7 +25,16 @@ import type { BodyDetailRequest } from "./generated/BodyDetailRequest";
 import type { BodyEventDto } from "./generated/BodyEventDto";
 import type { BodyEventsDto } from "./generated/BodyEventsDto";
 import type { BodyEventsRequest } from "./generated/BodyEventsRequest";
+import type { CometEventDto } from "./generated/CometEventDto";
+import type { CometTrackPointDto } from "./generated/CometTrackPointDto";
+import type { EventIdHex } from "./generated/EventIdHex";
+import type { StormBandDto } from "./generated/StormBandDto";
 import type { BodyHooksDto } from "./generated/BodyHooksDto";
+import type { HabitabilityClassDto } from "./generated/HabitabilityClassDto";
+import type { HabitabilityDto } from "./generated/HabitabilityDto";
+import type { HabitabilityLimitDto } from "./generated/HabitabilityLimitDto";
+import type { RadioisotopesDto } from "./generated/RadioisotopesDto";
+import type { ResourceAbundancesDto } from "./generated/ResourceAbundancesDto";
 import type { BodyIdHex } from "./generated/BodyIdHex";
 import type { BodyKindDto } from "./generated/BodyKindDto";
 import type { BodyOrbitDto } from "./generated/BodyOrbitDto";
@@ -39,6 +51,48 @@ import type { FigureDatumDto } from "./generated/FigureDatumDto";
 import type { FigureLawDto } from "./generated/FigureLawDto";
 import type { PhaseTemplateDto } from "./generated/PhaseTemplateDto";
 import type { SpinResonanceDto } from "./generated/SpinResonanceDto";
+// The surface section and the gas envelope (galaxy plan 14, P14.T35.e).
+import type { AbsorberDto } from "./generated/AbsorberDto";
+import type { AerosolInventoryDto } from "./generated/AerosolInventoryDto";
+import type { AerosolModeDto } from "./generated/AerosolModeDto";
+import type { AerosolNotModelledDto } from "./generated/AerosolNotModelledDto";
+import type { AerosolShapeDto } from "./generated/AerosolShapeDto";
+import type { AerosolTauBasisDto } from "./generated/AerosolTauBasisDto";
+import type { BiosphereDto } from "./generated/BiosphereDto";
+import type { BiosphereFluxDto } from "./generated/BiosphereFluxDto";
+import type { BodyEnvelopeDto } from "./generated/BodyEnvelopeDto";
+import type { ClimateForcingDto } from "./generated/ClimateForcingDto";
+import type { ClimateRegimeDto } from "./generated/ClimateRegimeDto";
+import type { CondensateDeckDto } from "./generated/CondensateDeckDto";
+import type { CraterContractDto } from "./generated/CraterContractDto";
+import type { CraterScreeningDto } from "./generated/CraterScreeningDto";
+import type { CraterTargetClassDto } from "./generated/CraterTargetClassDto";
+import type { CrustCompositionDto } from "./generated/CrustCompositionDto";
+import type { CrustLidDto } from "./generated/CrustLidDto";
+import type { GasShareDto } from "./generated/GasShareDto";
+import type { GuillotProfileDto } from "./generated/GuillotProfileDto";
+import type { MagneticFieldClassDto } from "./generated/MagneticFieldClassDto";
+import type { MixingRatioNodeDto } from "./generated/MixingRatioNodeDto";
+import type { NotFormedCondensateDto } from "./generated/NotFormedCondensateDto";
+import type { NotFormedReasonDto } from "./generated/NotFormedReasonDto";
+import type { OceanFloorDto } from "./generated/OceanFloorDto";
+import type { ProfileNodeDto } from "./generated/ProfileNodeDto";
+import type { RadiationClassDto } from "./generated/RadiationClassDto";
+import type { RedoxClassDto } from "./generated/RedoxClassDto";
+import type { SilicateVapourDto } from "./generated/SilicateVapourDto";
+import type { SizeDistributionDto } from "./generated/SizeDistributionDto";
+import type { SubstanceAreaDto } from "./generated/SubstanceAreaDto";
+import type { SubstancePhaseDto } from "./generated/SubstancePhaseDto";
+import type { SubsurfaceOceanDto } from "./generated/SubsurfaceOceanDto";
+import type { SurfaceCondensateDto } from "./generated/SurfaceCondensateDto";
+import type { SurfaceMaterialDto } from "./generated/SurfaceMaterialDto";
+import type { SurfaceModifiersDto } from "./generated/SurfaceModifiersDto";
+import type { SurfaceStateDto } from "./generated/SurfaceStateDto";
+import type { TaxonomicClassDto } from "./generated/TaxonomicClassDto";
+import type { TectonicRegimeDto } from "./generated/TectonicRegimeDto";
+import type { ThermalRegimeDto } from "./generated/ThermalRegimeDto";
+import type { VerticalStructureDto } from "./generated/VerticalStructureDto";
+import type { WetEpochDto } from "./generated/WetEpochDto";
 import type { Census } from "./generated/Census";
 import type { ClientMessage } from "./generated/ClientMessage";
 import type { CreateUniverseRequest } from "./generated/CreateUniverseRequest";
@@ -48,6 +102,11 @@ import type { DestructionCauseDto } from "./generated/DestructionCauseDto";
 import type { DetailLevelDto } from "./generated/DetailLevelDto";
 import type { DetailSeedHex } from "./generated/DetailSeedHex";
 import type { ErrorCode } from "./generated/ErrorCode";
+import type { ExtinctionMap } from "./generated/ExtinctionMap";
+import type { ExtinctionMapRequest } from "./generated/ExtinctionMapRequest";
+import type { ExtinctionRequest } from "./generated/ExtinctionRequest";
+import type { ExtinctionResult } from "./generated/ExtinctionResult";
+import type { ExtinctionTarget } from "./generated/ExtinctionTarget";
 import type { GalacticPosition } from "./generated/GalacticPosition";
 import type { GalaxyParameters } from "./generated/GalaxyParameters";
 import type { GalaxyParametersRequest } from "./generated/GalaxyParametersRequest";
@@ -64,6 +123,7 @@ import type { MassLayer } from "./generated/MassLayer";
 import type { MoonOriginDto } from "./generated/MoonOriginDto";
 import type { NatalKickDto } from "./generated/NatalKickDto";
 import type { ObjectKindDto } from "./generated/ObjectKindDto";
+import type { ObservedDto } from "./generated/ObservedDto";
 import type { OpenUniverseRequest } from "./generated/OpenUniverseRequest";
 import type { OrbitDriftDto } from "./generated/OrbitDriftDto";
 import type { OrbitDto } from "./generated/OrbitDto";
@@ -73,14 +133,18 @@ import type { ParameterGroup } from "./generated/ParameterGroup";
 import type { ParameterOrigin } from "./generated/ParameterOrigin";
 import type { ParameterValue } from "./generated/ParameterValue";
 import type { PhaseDto } from "./generated/PhaseDto";
+import type { PlacementKind } from "./generated/PlacementKind";
 import type { PlanetClassDto } from "./generated/PlanetClassDto";
 import type { PlanetaryNebulaDto } from "./generated/PlanetaryNebulaDto";
 import type { Population } from "./generated/Population";
 import type { PulsarDto } from "./generated/PulsarDto";
+import type { QueryModeDto } from "./generated/QueryModeDto";
 import type { RemnantDto } from "./generated/RemnantDto";
 import type { RequestBody } from "./generated/RequestBody";
 import type { RequestError } from "./generated/RequestError";
 import type { RequestId } from "./generated/RequestId";
+import type { ResolveSystemRequest } from "./generated/ResolveSystemRequest";
+import type { ResolvedSystem } from "./generated/ResolvedSystem";
 import type { ResponseBody } from "./generated/ResponseBody";
 // The subscription envelope (plan 12's P12.T9, built by rendering plan R03's R03.T5.a).
 import type { NotificationBody } from "./generated/NotificationBody";
@@ -89,6 +153,24 @@ import type { Subscribed } from "./generated/Subscribed";
 import type { SubscriptionState } from "./generated/SubscriptionState";
 import type { SubscriptionTopic } from "./generated/SubscriptionTopic";
 import type { UnsubscribeRequest } from "./generated/UnsubscribeRequest";
+// The alerts (plan 12, P12.T9.a).
+import type { AlertBandDto } from "./generated/AlertBandDto";
+import type { AlertsAcknowledgeRequest } from "./generated/AlertsAcknowledgeRequest";
+import type { AlertsNotification } from "./generated/AlertsNotification";
+import type { AlertsObserverRequest } from "./generated/AlertsObserverRequest";
+import type { AlertsSubscribeRequest } from "./generated/AlertsSubscribeRequest";
+import type { AlertsSubscribed } from "./generated/AlertsSubscribed";
+import type { BandLimitsDto } from "./generated/BandLimitsDto";
+import type { BearingContactDto } from "./generated/BearingContactDto";
+import type { BearingDto } from "./generated/BearingDto";
+import type { BearingFrameDto } from "./generated/BearingFrameDto";
+import type { ClassCensusDto } from "./generated/ClassCensusDto";
+import type { ClassCensusStatusDto } from "./generated/ClassCensusStatusDto";
+import type { ContactDto } from "./generated/ContactDto";
+import type { DetectionPhaseDto } from "./generated/DetectionPhaseDto";
+import type { ResolvedContactDto } from "./generated/ResolvedContactDto";
+import type { SensorDto } from "./generated/SensorDto";
+import type { TransientKindDto } from "./generated/TransientKindDto";
 // Bulk answers (rendering plan R03, R03.T10.a).
 import type { BulkManifestDto } from "./generated/BulkManifestDto";
 // The scene (rendering plan R03, R03.T4).
@@ -114,11 +196,32 @@ import type { BandSpecDto } from "./generated/BandSpecDto";
 import type { ConeDto } from "./generated/ConeDto";
 import type { EyeDto } from "./generated/EyeDto";
 import type { HostDiscDto } from "./generated/HostDiscDto";
+import type { HostDiscsDto } from "./generated/HostDiscsDto";
+import type { HostDiscsRequest } from "./generated/HostDiscsRequest";
 import type { PowerTwoDto } from "./generated/PowerTwoDto";
 import type { SkyGapDto } from "./generated/SkyGapDto";
 import type { SkyLayerCensusDto } from "./generated/SkyLayerCensusDto";
 import type { SkyRequest } from "./generated/SkyRequest";
 import type { SkyResponse } from "./generated/SkyResponse";
+// The surface (rendering plan R09, R09.T19.a and R09.T19.b).
+import type { CellRangeDto } from "./generated/CellRangeDto";
+import type { ClimateModelDto } from "./generated/ClimateModelDto";
+import type { CoverDto } from "./generated/CoverDto";
+import type { CoverRangeDto } from "./generated/CoverRangeDto";
+import type { LiquidBasisDto } from "./generated/LiquidBasisDto";
+import type { LiquidDto } from "./generated/LiquidDto";
+import type { PaletteEntryDto } from "./generated/PaletteEntryDto";
+import type { PaletteRoleDto } from "./generated/PaletteRoleDto";
+import type { PrecipitationSourceDto } from "./generated/PrecipitationSourceDto";
+import type { RecordSectionDto } from "./generated/RecordSectionDto";
+import type { SurfaceFieldDto } from "./generated/SurfaceFieldDto";
+import type { SurfaceFieldRequest } from "./generated/SurfaceFieldRequest";
+import type { SurfaceHeaderDto } from "./generated/SurfaceHeaderDto";
+import type { SurfaceRevisionDto } from "./generated/SurfaceRevisionDto";
+import type { SurveyPassDto } from "./generated/SurveyPassDto";
+import type { SurveyPassRequest } from "./generated/SurveyPassRequest";
+import type { SurveyScopeDto } from "./generated/SurveyScopeDto";
+import type { SurveySourceDto } from "./generated/SurveySourceDto";
 import type { SectionDto } from "./generated/SectionDto";
 import type { SeedHex } from "./generated/SeedHex";
 import type { ServerMessage } from "./generated/ServerMessage";
@@ -137,6 +240,70 @@ import type { SystemSummaryDto } from "./generated/SystemSummaryDto";
 import type { SystemSummaryRequest } from "./generated/SystemSummaryRequest";
 import type { SystemsInRange } from "./generated/SystemsInRange";
 import type { SystemsInRangeRequest } from "./generated/SystemsInRangeRequest";
+import type { TargetExtinction } from "./generated/TargetExtinction";
+// Plan 09's features, the black hole and a range row's origin (P09.T39).
+import type { AssociationStructure } from "./generated/AssociationStructure";
+import type { BlackHoleLuminosityWire } from "./generated/BlackHoleLuminosityWire";
+import type { BlackHoleState } from "./generated/BlackHoleState";
+import type { BlackHoleStateRequest } from "./generated/BlackHoleStateRequest";
+import type { BrightShell } from "./generated/BrightShell";
+import type { CatalogueClassWire } from "./generated/CatalogueClassWire";
+import type { CentreStructure } from "./generated/CentreStructure";
+import type { CentreTracerWire } from "./generated/CentreTracerWire";
+import type { ClassCountWire } from "./generated/ClassCountWire";
+import type { ClassKindWire } from "./generated/ClassKindWire";
+import type { CloudStructure } from "./generated/CloudStructure";
+import type { ClusterStructure } from "./generated/ClusterStructure";
+import type { DisruptionOutcomeWire } from "./generated/DisruptionOutcomeWire";
+import type { EmissionClassWire } from "./generated/EmissionClassWire";
+import type { FeatureDetail } from "./generated/FeatureDetail";
+import type { FeatureDetailRequest } from "./generated/FeatureDetailRequest";
+import type { FeatureIdHex } from "./generated/FeatureIdHex";
+import type { FeatureKindCensus } from "./generated/FeatureKindCensus";
+import type { FeatureKindStatus } from "./generated/FeatureKindStatus";
+import type { FeatureKindWire } from "./generated/FeatureKindWire";
+import type { FeatureStructure } from "./generated/FeatureStructure";
+import type { FeatureSummary } from "./generated/FeatureSummary";
+import type { FeaturesInRange } from "./generated/FeaturesInRange";
+import type { FeaturesInRangeRequest } from "./generated/FeaturesInRangeRequest";
+import type { GalaxyFeatures } from "./generated/GalaxyFeatures";
+import type { GalaxyFeaturesRequest } from "./generated/GalaxyFeaturesRequest";
+import type { GenerationWire } from "./generated/GenerationWire";
+import type { MapFeatureKindWire } from "./generated/MapFeatureKindWire";
+import type { MapFeatureList } from "./generated/MapFeatureList";
+import type { MapFeatures } from "./generated/MapFeatures";
+import type { MapShells } from "./generated/MapShells";
+import type { MemberClassWire } from "./generated/MemberClassWire";
+import type { MultiplicityWire } from "./generated/MultiplicityWire";
+import type { PulsarWindNebulaWire } from "./generated/PulsarWindNebulaWire";
+import type { RemnantSummary } from "./generated/RemnantSummary";
+import type { ShellEmissionWire } from "./generated/ShellEmissionWire";
+import type { ShellPhaseWire } from "./generated/ShellPhaseWire";
+import type { ShellSummary } from "./generated/ShellSummary";
+import type { SupernovaStateWire } from "./generated/SupernovaStateWire";
+import type { SystemOriginWire } from "./generated/SystemOriginWire";
+import type { TidalDisruptionWire } from "./generated/TidalDisruptionWire";
+// Plan 10's global list: its entries and progenitors, and a stream's track (P10.T10.a).
+import type { AccretedProgenitorWire } from "./generated/AccretedProgenitorWire";
+import type { GlobalEntryWire } from "./generated/GlobalEntryWire";
+import type { GlobalFeatures } from "./generated/GlobalFeatures";
+import type { GlobalFeaturesRequest } from "./generated/GlobalFeaturesRequest";
+import type { ProgenitorKindWire } from "./generated/ProgenitorKindWire";
+import type { ShellWire } from "./generated/ShellWire";
+import type { StreamTrackRequest } from "./generated/StreamTrackRequest";
+import type { StreamTrackWire } from "./generated/StreamTrackWire";
+import type { TrackPointWire } from "./generated/TrackPointWire";
+import type { TrackStatusWire } from "./generated/TrackStatusWire";
+import type { TrackWire } from "./generated/TrackWire";
+// The planet viewer's kinds (rendering plan R15).
+import type { PlanetInputsDto } from "./generated/PlanetInputsDto";
+import type { ViewerDrawDto } from "./generated/ViewerDrawDto";
+import type { ViewerDrawnDto } from "./generated/ViewerDrawnDto";
+import type { ViewerInputsRequest } from "./generated/ViewerInputsRequest";
+import type { ViewerPlanetDto } from "./generated/ViewerPlanetDto";
+import type { ViewerPlanetRequest } from "./generated/ViewerPlanetRequest";
+import type { ViewerRandomizeRequest } from "./generated/ViewerRandomizeRequest";
+import type { ViewerReadDto } from "./generated/ViewerReadDto";
 import type { Unit } from "./generated/Unit";
 import type { UniverseIdHex } from "./generated/UniverseIdHex";
 import type { UniverseInfo } from "./generated/UniverseInfo";
@@ -148,13 +315,76 @@ import type { VariableKindDto } from "./generated/VariableKindDto";
 import type { ZoneDto } from "./generated/ZoneDto";
 
 export type {
+  AssociationStructure,
+  BlackHoleLuminosityWire,
+  BlackHoleState,
+  BlackHoleStateRequest,
+  BrightShell,
+  CatalogueClassWire,
+  CentreStructure,
+  CentreTracerWire,
+  ClassCountWire,
+  ClassKindWire,
+  CloudStructure,
+  ClusterStructure,
+  DisruptionOutcomeWire,
+  EmissionClassWire,
+  FeatureDetail,
+  FeatureDetailRequest,
+  FeatureIdHex,
+  FeatureKindCensus,
+  FeatureKindStatus,
+  FeatureKindWire,
+  FeatureStructure,
+  FeatureSummary,
+  FeaturesInRange,
+  FeaturesInRangeRequest,
+  GalaxyFeatures,
+  GalaxyFeaturesRequest,
+  GenerationWire,
+  MapFeatureKindWire,
+  MapFeatureList,
+  MapFeatures,
+  MapShells,
+  MemberClassWire,
+  MultiplicityWire,
+  PulsarWindNebulaWire,
+  RemnantSummary,
+  ShellEmissionWire,
+  ShellPhaseWire,
+  ShellSummary,
+  SupernovaStateWire,
+  SystemOriginWire,
+  TidalDisruptionWire,
+  AccretedProgenitorWire,
+  GlobalEntryWire,
+  GlobalFeatures,
+  GlobalFeaturesRequest,
+  ProgenitorKindWire,
+  ShellWire,
+  StreamTrackRequest,
+  StreamTrackWire,
+  TrackPointWire,
+  TrackStatusWire,
+  TrackWire,
+  PlanetInputsDto,
+  ViewerDrawDto,
+  ViewerDrawnDto,
+  ViewerInputsRequest,
+  ViewerPlanetDto,
+  ViewerPlanetRequest,
+  ViewerRandomizeRequest,
+  ViewerReadDto,
   BeltComponentDto,
   BeltCompositionDto,
   BeltDto,
   BeltGapDto,
   BeltSiteDto,
   CometaryHaloDto,
+  DebrisDiscDto,
+  DiscGapDto,
   PopulationDto,
+  ProtoplanetaryDiscDto,
   RingDto,
   RingGapDto,
   RingKindDto,
@@ -167,7 +397,16 @@ export type {
   BodyEventDto,
   BodyEventsDto,
   BodyEventsRequest,
+  CometEventDto,
+  CometTrackPointDto,
+  EventIdHex,
+  StormBandDto,
   BodyHooksDto,
+  HabitabilityClassDto,
+  HabitabilityDto,
+  HabitabilityLimitDto,
+  RadioisotopesDto,
+  ResourceAbundancesDto,
   BodyIdHex,
   BodyKindDto,
   BodyOrbitDto,
@@ -184,6 +423,47 @@ export type {
   FigureLawDto,
   PhaseTemplateDto,
   SpinResonanceDto,
+  AbsorberDto,
+  AerosolInventoryDto,
+  AerosolModeDto,
+  AerosolNotModelledDto,
+  AerosolShapeDto,
+  AerosolTauBasisDto,
+  BiosphereDto,
+  BiosphereFluxDto,
+  BodyEnvelopeDto,
+  ClimateForcingDto,
+  ClimateRegimeDto,
+  CondensateDeckDto,
+  CraterContractDto,
+  CraterScreeningDto,
+  CraterTargetClassDto,
+  CrustCompositionDto,
+  CrustLidDto,
+  GasShareDto,
+  GuillotProfileDto,
+  MagneticFieldClassDto,
+  MixingRatioNodeDto,
+  NotFormedCondensateDto,
+  NotFormedReasonDto,
+  OceanFloorDto,
+  ProfileNodeDto,
+  RadiationClassDto,
+  RedoxClassDto,
+  SilicateVapourDto,
+  SizeDistributionDto,
+  SubstanceAreaDto,
+  SubstancePhaseDto,
+  SubsurfaceOceanDto,
+  SurfaceCondensateDto,
+  SurfaceMaterialDto,
+  SurfaceModifiersDto,
+  SurfaceStateDto,
+  TaxonomicClassDto,
+  TectonicRegimeDto,
+  ThermalRegimeDto,
+  VerticalStructureDto,
+  WetEpochDto,
   CataclysmicKindDto,
   Census,
   ClientMessage,
@@ -194,6 +474,11 @@ export type {
   DetailLevelDto,
   DetailSeedHex,
   ErrorCode,
+  ExtinctionMap,
+  ExtinctionMapRequest,
+  ExtinctionRequest,
+  ExtinctionResult,
+  ExtinctionTarget,
   GalacticPosition,
   GalaxyParameters,
   GalaxyParametersRequest,
@@ -211,6 +496,7 @@ export type {
   MoonOriginDto,
   NatalKickDto,
   ObjectKindDto,
+  ObservedDto,
   OpenUniverseRequest,
   OrbitDriftDto,
   OrbitDto,
@@ -220,14 +506,18 @@ export type {
   ParameterOrigin,
   ParameterValue,
   PhaseDto,
+  PlacementKind,
   PlanetClassDto,
   PlanetaryNebulaDto,
   Population,
   PulsarDto,
+  QueryModeDto,
   RemnantDto,
   RequestBody,
   RequestError,
   RequestId,
+  ResolveSystemRequest,
+  ResolvedSystem,
   ResponseBody,
   NotificationBody,
   SubscribeRequest,
@@ -235,6 +525,23 @@ export type {
   SubscriptionState,
   SubscriptionTopic,
   UnsubscribeRequest,
+  AlertBandDto,
+  AlertsAcknowledgeRequest,
+  AlertsNotification,
+  AlertsObserverRequest,
+  AlertsSubscribeRequest,
+  AlertsSubscribed,
+  BandLimitsDto,
+  BearingContactDto,
+  BearingDto,
+  BearingFrameDto,
+  ClassCensusDto,
+  ClassCensusStatusDto,
+  ContactDto,
+  DetectionPhaseDto,
+  ResolvedContactDto,
+  SensorDto,
+  TransientKindDto,
   BodyGrantDto,
   BulkManifestDto,
   CameraReportDto,
@@ -258,11 +565,31 @@ export type {
   ConeDto,
   EyeDto,
   HostDiscDto,
+  HostDiscsDto,
+  HostDiscsRequest,
   PowerTwoDto,
   SkyGapDto,
   SkyLayerCensusDto,
   SkyRequest,
   SkyResponse,
+  CellRangeDto,
+  ClimateModelDto,
+  CoverDto,
+  CoverRangeDto,
+  LiquidBasisDto,
+  LiquidDto,
+  PaletteEntryDto,
+  PaletteRoleDto,
+  PrecipitationSourceDto,
+  RecordSectionDto,
+  SurfaceFieldDto,
+  SurfaceFieldRequest,
+  SurfaceHeaderDto,
+  SurfaceRevisionDto,
+  SurveyPassDto,
+  SurveyPassRequest,
+  SurveyScopeDto,
+  SurveySourceDto,
   SeedHex,
   ServerMessage,
   StarEventDto,
@@ -280,6 +607,7 @@ export type {
   SystemSummaryRequest,
   SystemsInRange,
   SystemsInRangeRequest,
+  TargetExtinction,
   Unit,
   UniverseIdHex,
   UniverseInfo,
@@ -306,7 +634,12 @@ export {
   type ParsedBinaryFrame,
   parseBinaryFrameHeader,
 } from "./bulk";
-export { decodeDensityMap, type DecodedDensityMap } from "./densityMap";
+export {
+  decodeDensityMap,
+  decodeExtinctionMap,
+  type DecodedDensityMap,
+  type DecodedExtinctionMap,
+} from "./densityMap";
 export {
   decodeSkyBand,
   decodeSkyStars,
@@ -334,8 +667,11 @@ export {
   RequestChannel,
   RequestClient,
   type BinaryFrameReceipt,
+  type BulkAssemblyFailure,
+  type BulkChunk,
   type BulkOutcome,
   type BulkRequestOptions,
+  isBulkAssemblyFailure,
   type PartialBulkAnswer,
   type PendingBulkRequest,
   type PendingRequest,
@@ -346,6 +682,7 @@ export {
   type RequestOutcome,
   type ResponseFor,
   type SubscribeOutcome,
+  type UnknownRequestError,
 } from "./requests";
 export type {
   NotificationOf,

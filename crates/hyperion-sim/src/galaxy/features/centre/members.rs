@@ -35,7 +35,8 @@
 //! member's (P09.T10): its age uniform in its component's span (`centre.age`), its primary's
 //! initial mass from the galaxy's mass function in the class's range below the turn-off at that
 //! age for a living star and above it for a white dwarf, and for a remnant class the redraws,
-//! attempt after attempt on `centre.mass` (six words each, as `member.mass`), until its remnant is
+//! attempt after attempt on `centre.mass` (six words each, as `member.mass`), from generator
+//! version 27 each attempt `k` with its own age on word `k` of `centre.age` (P09.T37), until its remnant is
 //! of the class's kind with a kick below the local escape speed from the cluster `√(2Ψ_cluster)`
 //! (retained means bound to the cluster, not to the galaxy), a low-mode neutron star
 //! judged on its pair's systemic speed. Composition: the centre's [`CENTRE_FE_H`], no helium
@@ -53,8 +54,13 @@
 //!
 //! Member zero of the centre's feature-level list, `0xF000_0007_0000_0000`
 //! ([`CentreMemberId::CENTRAL_BLACK_HOLE`]), at the galactic origin and at rest, with the mass of
-//! [`GalaxyParams`](crate::galaxy::params::GalaxyParams)' black hole. It counts in layer E. The
-//! centre's list registers no class yet (the tidal-disruption victims are P09.T30.b's).
+//! [`GalaxyParams`](crate::galaxy::params::GalaxyParams)' black hole. It counts in layer E. From
+//! index 1 come the tidal disruptions' victims, the first class of the centre's list (P09.T30.b,
+//! [`events::victims`](super::events::victims)); no other class is registered on it yet.
+//!
+//! [`CentreClasses`]: super::CentreClasses
+
+use std::sync::OnceLock;
 
 use crate::coords::{GalacticDisplacement, GalacticPosition, GalacticVelocity};
 use crate::galaxy::Galaxy;
@@ -73,7 +79,9 @@ use super::super::interior::{ClassKind, LocalCell};
 use super::super::members::{ATTEMPT_WORDS, MAX_ATTEMPTS, remnant_fits, systemic_speed};
 use super::super::nested::{NestedCell, NestedGrid};
 use super::classes::{CENTRE_FE_H, CentreClass, CentreClassKind, CentreTracer, age_components};
+use super::events::victims::CentreVictims;
 use super::profile::REACH;
+use super::recent::{list_claims, recent_member};
 use super::{CentreModel, DistributionFunction};
 
 /// The width of the centre's finest cells: 1 ⁄ 256 ly (the brainstorm, "Dense features").
@@ -88,6 +96,11 @@ pub const CENTRE_GRID_LEVELS: u8 = 12;
 /// The relative margin of a cusp proposal over the classes' densities: the realised densities'
 /// tables lie within 10⁻⁴ of the profiles (P09.T24.b), which lie under their envelopes.
 const CUSP_MARGIN: f64 = 1e-3;
+
+/// The relative margin of a uniform cell's bound over the classes' densities at its nearest
+/// radius, 10⁻¹²: over the rounding of the densities and their sum. Every reading of a cell's
+/// bound takes it, so that their proposals agree bit for bit (P09.T37's corner bounds).
+const UNIFORM_MARGIN: f64 = 1e-12;
 
 /// Standard deviations of a Poisson count the index must spare (plan 03, Design note 6).
 const HEADROOM_SIGMAS: f64 = 8.0;
@@ -214,6 +227,24 @@ pub struct CentreMemberRecord {
 }
 
 impl CentreMemberRecord {
+    /// A member of `class` from its parts: its record, its composition and its velocity at the
+    /// epoch relative to the black hole, km/s, galactic axes. For the centre's feature-level
+    /// members, whose draws are their own (the tidal-disruption victims, P09.T30.b).
+    #[must_use]
+    pub(crate) const fn from_parts(
+        record: SystemRecord,
+        class: CentreClass,
+        composition: Composition,
+        velocity_km_s: [f64; 3],
+    ) -> Self {
+        Self {
+            record,
+            class: Some(class),
+            composition,
+            velocity: velocity_km_s,
+        }
+    }
+
     /// Its plan 03 record, of origin `CentreMember`.
     #[must_use]
     pub const fn record(&self) -> &SystemRecord {
@@ -254,6 +285,62 @@ impl CentreMemberRecord {
     #[must_use]
     pub fn local_position(&self) -> PointLy {
         PointLy::from(self.record.epoch_position())
+    }
+}
+
+/// Each band's bound at each corner radius a cell of [`centre_grid`] has: the bound a uniform
+/// cell is proposed under, every class's density at the cell's nearest radius times its greatest
+/// angular factor (module documentation), a pure function of the band and the cell's
+/// [`CornerKey`](super::super::nested::NestedGrid::corner_key), which gives that radius to the bit
+/// (P09.T37's bench).
+///
+/// A 50 ly census about the black hole reads some 1.5 × 10⁶ cells and bands, and found each
+/// bound again in 560 ms of the query's 680 (measured 2026-11-02, pod, release), where a level
+/// has at most 769 corner radii. So each level's and band's bounds are made at once, when a
+/// cell of theirs is first read, in some 0.3 ms, and kept with the galaxy's centre
+/// ([`CentreModel`]): bounded by the grid, 12 levels × 5 bands × 769, some 370 kB, they need no
+/// budget of their own. They are the same bits whenever made, so a model's equality and its
+/// `Debug` text do not depend on what has read them.
+#[derive(Clone)]
+pub(crate) struct CornerBounds(Box<[OnceLock<Box<[f64]>>]>);
+
+impl Default for CornerBounds {
+    /// None made yet: a table for each level and band of the centre's grid.
+    fn default() -> Self {
+        let tables = usize::from(CENTRE_GRID_LEVELS) * MassBand::ALL.len();
+        Self((0..tables).map(|_| OnceLock::new()).collect())
+    }
+}
+
+impl CornerBounds {
+    /// The table of `band`'s bounds on `level`, made or not, by the corner keys' sums of squares.
+    #[must_use]
+    fn table(&self, level: u8, band: MassBand) -> &OnceLock<Box<[f64]>> {
+        &self.0[usize::from(level) * MassBand::ALL.len() + band.index()]
+    }
+
+    /// The bytes its tables own on the heap once all are made, whether or not they are yet, so
+    /// that a model's count does not depend on what has read it.
+    #[must_use]
+    pub(crate) fn heap_bytes(&self) -> usize {
+        let radii = usize::try_from(centre_grid().corner_squares_max())
+            .expect("a level's 769 corner radii fit in usize")
+            + 1;
+        size_of_val(&*self.0) + self.0.len() * radii * size_of::<f64>()
+    }
+}
+
+/// Equal always: the bounds are a pure function of the model they are kept with.
+impl PartialEq for CornerBounds {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+/// The same text whether or not a table has been made.
+impl std::fmt::Debug for CornerBounds {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("CornerBounds")
     }
 }
 
@@ -365,13 +452,69 @@ impl<'a> CentrePlacement<'a> {
             .sum()
     }
 
+    /// `band`'s bound at the nearest radius of the owned `cell`, whose box is `local`:
+    /// [`bound_density`](Self::bound_density) there, bit for bit, read from the model's
+    /// [`CornerBounds`], which the cell's level and band are made in if no reading has yet.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, if `local` is not `cell`'s box.
+    #[must_use]
+    fn corner_bound(&self, band: MassBand, cell: NestedCell, local: &LocalCell) -> f64 {
+        let (level, squares) = self.grid.corner_key(cell).parts();
+        self.corner_bound_at(band, (level, squares), local)
+    }
+
+    /// [`corner_bound`](Self::corner_bound) of the cell whose corner key's level and sum of
+    /// squares are `key` and whose box is `local`.
+    #[must_use]
+    fn corner_bound_at(
+        &self,
+        band: MassBand,
+        (level, squares): (u8, u32),
+        local: &LocalCell,
+    ) -> f64 {
+        // A corner's offsets are whole numbers of one power-of-two edge, so its squared radius is
+        // its sum of squares times the edge's square exactly, as `nearest_radius` sums it.
+        let square = local.edge * local.edge;
+        debug_assert!(
+            (f64::from(squares) * square)
+                .sqrt()
+                .total_cmp(&local.nearest_radius())
+                .is_eq(),
+            "a corner key has one radius: level {level}, {squares} at {local:?}"
+        );
+        let table = self
+            .model
+            .corner_bounds()
+            .table(level, band)
+            .get_or_init(|| {
+                (0..=self.grid.corner_squares_max())
+                    .map(|s| self.bound_density(band, (f64::from(s) * square).sqrt()))
+                    .collect()
+            });
+        table[usize::try_from(squares).expect("a sum of three squares of cells fits in usize")]
+    }
+
+    /// [`proposal`](Self::proposal) of the owned `cell`, whose box is `local`, bit for bit: a
+    /// uniform cell's bound from the model's corner bounds ([`corner_bound`](Self::corner_bound)).
+    #[must_use]
+    fn cell_proposal(&self, band: MassBand, cell: NestedCell, local: &LocalCell) -> CentreProposal {
+        if local.nearest_radius() > 0.0 {
+            return CentreProposal::Uniform {
+                bound: self.corner_bound(band, cell, local) * (1.0 + UNIFORM_MARGIN),
+            };
+        }
+        self.proposal(band, local)
+    }
+
     /// How `band`'s candidates are proposed in `cell` (module documentation).
     #[must_use]
     pub fn proposal(&self, band: MassBand, cell: &LocalCell) -> CentreProposal {
         let near = cell.nearest_radius();
         if near > 0.0 {
             return CentreProposal::Uniform {
-                bound: self.bound_density(band, near) * (1.0 + 1e-12),
+                bound: self.bound_density(band, near) * (1.0 + UNIFORM_MARGIN),
             };
         }
         let classes = &self.bands[band.index()];
@@ -398,7 +541,25 @@ impl<'a> CentrePlacement<'a> {
     #[must_use]
     pub fn expected_candidates(&self, band: MassBand, cell: NestedCell) -> f64 {
         let local = self.grid.local_cell(cell);
-        self.proposal(band, &local).expected(&local)
+        self.cell_proposal(band, cell, &local).expected(&local)
+    }
+
+    /// The expected candidates of every band in `cell`, in [`MassBand::ALL`]'s order:
+    /// [`expected_candidates`](Self::expected_candidates) of each, bit for bit, with the cell's
+    /// box found once, for the census, which reads every band of every cell (P09.T37's bench).
+    #[must_use]
+    pub(crate) fn expected_by_band(&self, cell: NestedCell) -> [f64; MassBand::ALL.len()] {
+        let local = self.grid.local_cell(cell);
+        let key = self.grid.corner_key(cell).parts();
+        // A cell whose nearest corner is the black hole's, the one sum of squares of zero, is a
+        // cusp's ([`cell_proposal`](Self::cell_proposal)).
+        if key.1 == 0 {
+            return MassBand::ALL.map(|band| self.proposal(band, &local).expected(&local));
+        }
+        MassBand::ALL.map(|band| {
+            let bound = self.corner_bound_at(band, key, &local) * (1.0 + UNIFORM_MARGIN);
+            CentreProposal::Uniform { bound }.expected(&local)
+        })
     }
 
     /// The member ID of candidate `index` of `band` in `cell`.
@@ -413,7 +574,7 @@ impl<'a> CentrePlacement<'a> {
             band: band.layer(),
             level: cell.level(),
             cell: cell.cell(),
-            index,
+            index: u32::from(index),
         })
         .expect("an owned cell of the centre's grid and an index under 8,192 make an ID")
     }
@@ -464,7 +625,7 @@ impl<'a> CentrePlacement<'a> {
         index: u16,
     ) -> Option<CentreMemberRecord> {
         let local = self.grid.local_cell(cell);
-        let proposal = self.proposal(band, &local);
+        let proposal = self.cell_proposal(band, cell, &local);
         self.candidate_under(galaxy, band, cell, index, &proposal, &local)
     }
 
@@ -477,19 +638,11 @@ impl<'a> CentrePlacement<'a> {
         proposal: &CentreProposal,
         local: &LocalCell,
     ) -> Option<CentreMemberRecord> {
-        let id = self.member_id(band, cell, index);
-        let system = SystemId::from(id);
+        let (class, p) = self.class_under(galaxy, (band, cell, index), proposal, local)?;
+        let system = SystemId::from(self.member_id(band, cell, index));
         let key = ObjectKey::from(system);
         let seed = galaxy.seed();
-        let mut position = Stream::open(seed, tags::MEMBER_POSITION, key);
-        let u = [0; 3].map(|_| position.uniform());
-        let (p, bound) = proposal.place(local, u)?;
         let r = (p.x * p.x + p.y * p.y + p.z * p.z).sqrt();
-        let mark = Stream::open(seed, tags::MEMBER_ACCEPT, key).mark();
-        let mut weights = Vec::with_capacity(self.bands[band.index()].len());
-        self.densities(band, [p.x, p.y, p.z], &mut weights);
-        let picked = pick(mark, &weights, bound)?;
-        let class = self.bands[band.index()][picked].class;
         let df = self.model.distribution(class.tracer);
         let profile = self.model.profile();
         let at = [p.x, p.y, p.z];
@@ -518,12 +671,40 @@ impl<'a> CentrePlacement<'a> {
             SolarMasses::new(primary),
             age,
         );
-        Some(CentreMemberRecord {
+        let member = CentreMemberRecord {
             record,
             class: Some(class),
             composition: centre_composition(),
             velocity,
-        })
+        };
+        // From generator version 26 a band-E member of a young class that the centre's list holds
+        // is the list's, not the cells' (P09.T36.b).
+        if band == MassBand::E && list_claims(galaxy, &member) {
+            return None;
+        }
+        Some(member)
+    }
+
+    /// The class candidate `index` of `band` in `cell` is of and its place, or `None` where its
+    /// proposal or its acceptance mark refuses it: [`candidate_under`](Self::candidate_under)'s
+    /// first draws.
+    fn class_under(
+        &self,
+        galaxy: &Galaxy,
+        (band, cell, index): (MassBand, NestedCell, u16),
+        proposal: &CentreProposal,
+        local: &LocalCell,
+    ) -> Option<(CentreClass, PointLy)> {
+        let key = ObjectKey::from(SystemId::from(self.member_id(band, cell, index)));
+        let seed = galaxy.seed();
+        let mut position = Stream::open(seed, tags::MEMBER_POSITION, key);
+        let u = [0; 3].map(|_| position.uniform());
+        let (p, bound) = proposal.place(local, u)?;
+        let mark = Stream::open(seed, tags::MEMBER_ACCEPT, key).mark();
+        let mut weights = Vec::with_capacity(self.bands[band.index()].len());
+        self.densities(band, [p.x, p.y, p.z], &mut weights);
+        let picked = pick(mark, &weights, bound)?;
+        Some((self.bands[band.index()][picked].class, p))
     }
 
     /// Every accepted member of `band` in `cell`, in index order.
@@ -535,7 +716,7 @@ impl<'a> CentrePlacement<'a> {
         cell: NestedCell,
     ) -> Vec<CentreMemberRecord> {
         let local = self.grid.local_cell(cell);
-        let proposal = self.proposal(band, &local);
+        let proposal = self.cell_proposal(band, cell, &local);
         let n = count_from_mean(
             galaxy,
             self.member_id(band, cell, 0),
@@ -623,7 +804,8 @@ fn pick(mark: Mark, weights: &[f64], bound: f64) -> Option<usize> {
 }
 
 /// The centre's composition.
-fn centre_composition() -> Composition {
+#[must_use]
+pub(crate) fn centre_composition() -> Composition {
     Composition::from_fe_h(CENTRE_FE_H, HeliumExcess::ZERO)
 }
 
@@ -637,8 +819,22 @@ fn galactic(p: &PointLy) -> GalacticPosition {
 }
 
 /// A member's star of `class` (module documentation): its primary's initial mass, the attempt
-/// its draws are read at, and its age; `None` if the draw exhausts its attempts or the class's
-/// range is empty at the drawn age.
+/// its draws are read at, and its age; `None` if the draw exhausts its attempts.
+///
+/// A class's attempt `k` draws its age on word `k` of `centre.age` and its mass over the class's
+/// whole initial-mass range, and keeps the pair only where that star at that age is of the class:
+/// below the turn-off if living, at it or above and then [`remnant_fits`] if dead (P09.T37, with
+/// which the centre's members are first served; fix-p09-centre-joint-draw; research-leans-33).
+/// That is exact rejection from the component's uniform ages and the initial mass function, so the
+/// kept stars are the class's count's mix, which weighs each age by the stars of the class then.
+/// Up to 26 a class drew one age and the mass over the class's masses at it, a uniform age over
+/// the ages where any is: the continuous component's band-E living stars (8–16.5 M☉), alive only
+/// in its first some 35 Myr of 150, averaged 18.3 Myr against their count's 12.2, and kept a fifth
+/// of their 626 expected, refusing the dead ages; its neutron stars drawn in the first few million
+/// years, where only black holes are made (at 24's rules, every star of 52–100 M☉ dead by 3.3–4.0
+/// Myr), exhausted their 4,096 attempts (the debug assertion of P09.T31's and P09.T36.b's
+/// finding). The least likely class keeps some 0.15 of its tries, so 4,096 attempts do not run
+/// out.
 fn draw_star(
     galaxy: &Galaxy,
     class: &CentreClass,
@@ -648,39 +844,28 @@ fn draw_star(
     let seed = galaxy.seed();
     let key = ObjectKey::from(system);
     let component = age_components()[usize::from(class.component)];
-    let u = Stream::open(seed, tags::CENTRE_AGE, key).uniform();
-    let age = Years::new(
-        component.youngest.value() + u * (component.oldest.value() - component.youngest.value()),
-    );
+    let mut ages = Stream::open(seed, tags::CENTRE_AGE, key);
+    let age_at = |u: f64| {
+        Years::new(
+            component.youngest.value()
+                + u * (component.oldest.value() - component.youngest.value()),
+        )
+    };
     let composition = centre_composition();
-    let m_to = turn_off_mass(Years::new(age.value().max(1e4)), &composition).value();
+    let turn_off =
+        |age: Years| turn_off_mass(Years::new(age.value().max(1e4)), &composition).value();
     let (lo, hi) = (
         class.initial_mass_range.0.value(),
         class.initial_mass_range.1.value(),
     );
-    let (lo, hi) = match class.kind {
-        CentreClassKind::Living => (lo, hi.min(m_to)),
-        CentreClassKind::WhiteDwarf | CentreClassKind::NeutronStar | CentreClassKind::BlackHole => {
-            (lo.max(m_to), hi)
-        }
-    };
-    if hi <= lo {
-        return None;
-    }
     let kind = match class.kind {
         CentreClassKind::Living => ClassKind::Living,
         CentreClassKind::WhiteDwarf => ClassKind::WhiteDwarf,
         CentreClassKind::NeutronStar => ClassKind::NeutronStar,
         CentreClassKind::BlackHole => ClassKind::BlackHole,
     };
-    let imf = galaxy.mass_function();
-    let mut stream = Stream::open(seed, tags::CENTRE_MASS, key);
-    for attempt in 0..MAX_ATTEMPTS {
-        stream.seek(ATTEMPT_WORDS * u64::from(attempt));
-        let mass = imf.quantile_in(lo, hi, stream.uniform());
-        let _mark = stream.mark();
-        let systemic = systemic_speed(&mut stream);
-        if kind == ClassKind::Living
+    let fits = |mass: f64, attempt: u32, age: Years, systemic: f64| {
+        kind == ClassKind::Living
             || remnant_fits(
                 kind,
                 mass,
@@ -688,8 +873,26 @@ fn draw_star(
                 (seed, system, attempt),
                 age,
                 (escape, systemic),
+                galaxy.rules().stellar,
             )
-        {
+    };
+    let imf = galaxy.mass_function();
+    let mut stream = Stream::open(seed, tags::CENTRE_MASS, key);
+    for attempt in 0..MAX_ATTEMPTS {
+        ages.seek(u64::from(attempt));
+        let age = age_at(ages.uniform());
+        stream.seek(ATTEMPT_WORDS * u64::from(attempt));
+        let mass = imf.quantile_in(lo, hi, stream.uniform());
+        let _mark = stream.mark();
+        let systemic = systemic_speed(&mut stream);
+        let of_class = match kind {
+            ClassKind::Living => mass < turn_off(age),
+            ClassKind::WhiteDwarf
+            | ClassKind::NeutronStar
+            | ClassKind::BlackHole
+            | ClassKind::Tail => mass >= turn_off(age) && fits(mass, attempt, age, systemic),
+        };
+        if of_class {
             return Some((mass, attempt, age));
         }
     }
@@ -716,16 +919,24 @@ fn count_from_mean(galaxy: &Galaxy, first: CentreMemberId, mean: f64) -> u16 {
     u16::try_from(drawn.min(u64::from(limit))).expect("a count clamped at 8,192 fits in u16")
 }
 
-/// The centre member `id` names in `galaxy`, building the centre's model for it (about 90 ms in
-/// release) unless it is the black hole, which needs none.
+/// The centre member `id` names in `galaxy`, from the centre's model the galaxy holds
+/// ([`Galaxy::centre`], built on its first read, about 0.1 s in release; P09.T29) unless it is
+/// the black hole, which needs none.
 ///
 /// # Errors
 ///
 /// As [`resolve_centre_member_with`], and [`ResolveSystemError::NoSuchSystem`] if the centre
 /// cannot be built: its [`BuildCentreError`](super::BuildCentreError) says only that no
-/// isotropic cluster has the drawn profile, which no seed of the sweeps draws
-/// (`no_drawn_centre_fails_its_inversion`), and a caller asking for a member can do nothing but
+/// isotropic cluster has the drawn profile, which no seed of the sweeps draws (16 drawn seeds per
+/// commit in `no_seed_s_centre_overflows_its_index`, 64 in the slow
+/// `no_drawn_centre_of_64_fails_its_inversion`, and the builder's extremes in
+/// `no_drawn_centre_fails_its_inversion`), and a caller asking for a member can do nothing but
 /// learn there is none.
+///
+/// # Panics
+///
+/// As [`Galaxy::centre`], for a member other than the black hole: if the galaxy's mass inside
+/// 10⁻³–10⁴ ly does not bracket its black hole's, which no seed of P09.T28.b.a's sweep does.
 pub fn resolve_centre_member(
     galaxy: &Galaxy,
     id: CentreMemberId,
@@ -733,19 +944,22 @@ pub fn resolve_centre_member(
     if id == CentreMemberId::CENTRAL_BLACK_HOLE {
         return Ok(black_hole_of(galaxy.params().black_hole().mass()));
     }
-    let model = CentreModel::new(galaxy).map_err(|_| ResolveSystemError::NoSuchSystem)?;
-    resolve_centre_member_with(galaxy, &model, id)
+    let model = galaxy
+        .centre()
+        .map_err(|_| ResolveSystemError::NoSuchSystem)?;
+    resolve_centre_member_with(galaxy, model, id)
 }
 
 /// The centre member `id` names in `galaxy`, whose centre is `model`: the black hole for member
-/// zero, a candidate for an ID in a cell.
+/// zero, a tidal disruption's victim for a feature-level index from 1 (P09.T30.b), a candidate for
+/// an ID in a cell.
 ///
 /// # Errors
 ///
-/// [`ResolveSystemError::NoSuchSystem`] for a feature-level index other than the black hole's
-/// (no class is registered on the centre's list yet), a band that is not stellar, a cell the
-/// grid does not own, an index at or past its cell's count, or a candidate the thinning, the
-/// marks or its draw reject.
+/// [`ResolveSystemError::NoSuchSystem`] for a feature-level index past the victims that no recent
+/// class keeps (P09.T36.b, from generator version 26; none before), a band that is not stellar, a
+/// cell the grid does not own, an index at or past its cell's count, or a candidate the thinning,
+/// the marks, its draw or the list's claim reject.
 pub fn resolve_centre_member_with(
     galaxy: &Galaxy,
     model: &CentreModel,
@@ -754,7 +968,13 @@ pub fn resolve_centre_member_with(
     let placement = CentrePlacement::new(model);
     match id.slot() {
         MemberSlot::FeatureLevel { index: 0 } => Ok(placement.black_hole()),
-        MemberSlot::FeatureLevel { .. } => Err(ResolveSystemError::NoSuchSystem),
+        // The disruptions' model refuses only a black hole no galaxy the builder allows has.
+        MemberSlot::FeatureLevel { index } => {
+            if let Some(victim) = CentreVictims::one(galaxy, model, index).ok().flatten() {
+                return Ok(*victim.member());
+            }
+            recent_member(galaxy, model, index).ok_or(ResolveSystemError::NoSuchSystem)
+        }
         MemberSlot::InCell {
             band,
             level,
@@ -776,6 +996,8 @@ pub fn resolve_centre_member_with(
                 placement.member_id(band, cell, 0),
                 proposal.expected(&local),
             );
+            // The centre's slot holds 13 bits, so a valid ID's index is a `u16`.
+            let index = u16::try_from(index).map_err(|_| ResolveSystemError::NoSuchSystem)?;
             if index >= count {
                 return Err(ResolveSystemError::NoSuchSystem);
             }
@@ -791,7 +1013,7 @@ mod tests {
     use super::*;
     use crate::GENERATOR_VERSION;
     use crate::galaxy::features::centre::testing::{milky_way_centre, milky_way_galaxy};
-    use crate::galaxy::imf::MassFunctionKind;
+    use crate::galaxy::imf::{MassFunction, MassFunctionKind};
     use crate::galaxy::params::{GalaxyParams, GalaxyParamsBuilder};
     use crate::galaxy::placement::resolve;
     use crate::id::SystemIdKind;
@@ -805,6 +1027,36 @@ mod tests {
 
     fn innermost(placement: &CentrePlacement<'_>) -> NestedCell {
         placement.grid().cell(0, [16, 16, 16]).unwrap()
+    }
+
+    /// P09.T37's bench: every owned cell's proposal in every band, its bound read from the model's
+    /// corner bounds, is the one found without them, and so are its expected candidates, bit for
+    /// bit, one band at a time and every band at once, whichever cell made its level's tables.
+    #[test]
+    fn the_corner_bounds_change_no_cell_s_proposal() {
+        let model = CentreModel::from_params(&GalaxyParams::milky_way_like()).unwrap();
+        let placement = CentrePlacement::new(&model);
+        let cells: Vec<NestedCell> = placement.grid().owned_cells().collect();
+        assert_eq!(cells.len(), 32_768 + 11 * (32_768 - 4_096));
+        // Outermost first, so that each level's tables are made by its last cell in the walk.
+        for &cell in cells.iter().rev() {
+            let local = placement.grid().local_cell(cell);
+            let by_band = placement.expected_by_band(cell);
+            for band in MassBand::ALL {
+                let found = placement.proposal(band, &local);
+                assert_eq!(
+                    placement.cell_proposal(band, cell, &local),
+                    found,
+                    "{cell:?}"
+                );
+                let expected = found.expected(&local);
+                hyperion_testkit::float::assert_same_bits(
+                    placement.expected_candidates(band, cell),
+                    expected,
+                );
+                hyperion_testkit::float::assert_same_bits(by_band[band.index()], expected);
+            }
+        }
     }
 
     /// P09.T27 and ruling 144.5a: the fullest cell and band, under the flattened bound, at the
@@ -1000,6 +1252,12 @@ mod tests {
 
     /// P09.T27 and ruling 144.5: the headroom check over 16 drawn seeds, none of which fails under
     /// plan 02's cap; the slow sweep takes 512.
+    ///
+    /// It also proves the inversion of those 16 drawn centres (family `0x0927`), each built by
+    /// `CentreModel::from_params`, which inverts every tracer (`invert_tracers`) and is checked:
+    /// with the extreme corners of `centre::tests::no_drawn_centre_fails_its_inversion`, the fast
+    /// tier's drawn inversions, since the 64 seeds of family `0x0924` run in the slow pass
+    /// (`no_drawn_centre_of_64_fails_its_inversion`; `decision-test-coverage.md`, N3).
     #[test]
     fn no_seed_s_centre_overflows_its_index() {
         let (_, failing, clamping) = sweep_fullest_cells(0..16);
@@ -1018,12 +1276,19 @@ mod tests {
 
     /// P09.T27: every member's ID round-trips through plan 01's decode, at every level; a
     /// resolved ID gives the generated member; an index past the count is no system.
+    ///
+    /// Every member is resolved on the shared model (`resolve_centre_member_with`), and the first of
+    /// each cell and band through the public `resolve` too, which builds a fresh model each call:
+    /// ten such builds, two of the twelve cells and bands holding no member, rather than one a
+    /// member (`decision-test-coverage.md`, N1). The members differ only in the argument passed,
+    /// after the same dispatch, to the function asserted for each;
+    /// `centre_members_are_order_independent` holds the fresh model's members the shared one's.
     #[test]
     fn members_round_trip_and_resolve() {
         let galaxy = milky_way_galaxy();
         let model = milky_way_centre();
         let placement = CentrePlacement::new(model);
-        let mut seen = 0;
+        let (mut seen, mut public) = (0, 0);
         for (level, cell) in [
             (0, [16, 16, 16]),
             (0, [15, 16, 17]),
@@ -1033,7 +1298,7 @@ mod tests {
             let cell = placement.grid().cell(level, cell).unwrap();
             for band in [MassBand::A, MassBand::C, MassBand::E] {
                 let members = placement.members_in_cell(galaxy, band, cell);
-                for m in members.iter().take(40) {
+                for (index, m) in members.iter().take(40).enumerate() {
                     let id = m.record().id();
                     assert_eq!(SystemId::from_raw(id.raw()), Ok(id));
                     let SystemIdKind::Centre(member) = id.kind() else {
@@ -1045,7 +1310,10 @@ mod tests {
                     assert!(l < 12);
                     let resolved = resolve_centre_member_with(galaxy, model, member).unwrap();
                     assert_eq!(&resolved, m);
-                    assert_eq!(resolve(galaxy, id).unwrap(), *m.record());
+                    if index == 0 {
+                        assert_eq!(resolve(galaxy, id).unwrap(), *m.record());
+                        public += 1;
+                    }
                     let r = m.local_position();
                     assert_eq!(placement.grid().owner_of(&r), Some(cell), "{r:?}");
                     seen += 1;
@@ -1059,6 +1327,10 @@ mod tests {
             }
         }
         assert!(seen > 100, "{seen}");
+        assert_eq!(
+            public, 10,
+            "the first member of each cell and band that holds one, through `resolve`"
+        );
     }
 
     /// P09.T27: the black hole resolves from `0xF000_0007_0000_0000`, with the parameters' mass.
@@ -1163,6 +1435,285 @@ mod tests {
         );
     }
 
+    /// P09.T37: from 27 a remnant class's attempts draw its age with its mass. The continuous
+    /// component's stars dead in its first few million years leave black holes, or neutron stars
+    /// mostly kicked past the cluster's escape speed, so a neutron star whose first age falls there
+    /// may keep none of its attempts at that age (at 24's rules, where only black holes were made,
+    /// the attempts were exhausted, a debug assertion); drawn age by age it is kept at a later
+    /// attempt and another age.
+    #[test]
+    fn a_centre_remnant_draws_its_age_with_each_attempt_from_27() {
+        let galaxy = milky_way_galaxy();
+        let model = milky_way_centre();
+        let class = *model
+            .classes()
+            .classes()
+            .iter()
+            .find(|c| {
+                c.band == MassBand::E && c.component == 3 && c.kind == CentreClassKind::NeutronStar
+            })
+            .expect("the continuous component's neutron stars");
+        let component = age_components()[3];
+        let placement = CentrePlacement::new(model);
+        let cell = placement
+            .grid()
+            .owned_cells()
+            .next()
+            .expect("an owned cell");
+        let escape = model.profile().cluster_escape_speed(2.0).value();
+        let composition = centre_composition();
+        let first_age = |system: SystemId| {
+            let u =
+                Stream::open(galaxy.seed(), tags::CENTRE_AGE, ObjectKey::from(system)).uniform();
+            Years::new(
+                component.youngest.value()
+                    + u * (component.oldest.value() - component.youngest.value()),
+            )
+        };
+        // Whether any of the first 64 attempts at `age` keeps a neutron star, as `draw_star`'s.
+        let keeps_any = |system: SystemId, age: Years| {
+            let m_to = turn_off_mass(age, &composition).value();
+            let (lo, hi) = (class.initial_mass_range.0.value().max(m_to), 100.0);
+            let mut stream =
+                Stream::open(galaxy.seed(), tags::CENTRE_MASS, ObjectKey::from(system));
+            (0..64).any(|attempt| {
+                stream.seek(ATTEMPT_WORDS * u64::from(attempt));
+                let mass = galaxy.mass_function().quantile_in(lo, hi, stream.uniform());
+                let _mark = stream.mark();
+                let systemic = systemic_speed(&mut stream);
+                remnant_fits(
+                    ClassKind::NeutronStar,
+                    mass,
+                    &composition,
+                    (galaxy.seed(), system, attempt),
+                    age,
+                    (escape, systemic),
+                    galaxy.rules().stellar,
+                )
+            })
+        };
+        let member = |index: u16| SystemId::from(placement.member_id(MassBand::E, cell, index));
+        // At 26's rules (measured 2026-11-03) two of the cell's 1,100 members whose first age lies
+        // in the component's first 20 Myr keep no neutron star in their first 64 attempts: member
+        // 334 at 6.48 Myr (56 black holes and 8 neutron stars kicked out) and member 2,579 at 4.52
+        // Myr (61 and 3). At 24's rules the first member whose first age lay at 3.4–3.9 Myr kept
+        // none.
+        let system = member(334);
+        let age = first_age(system);
+        assert!((6.4e6..6.5e6).contains(&age.value()), "{age:?}");
+        assert!(!keeps_any(system, age), "a neutron star kept at {age:?}");
+        let (mass, attempt, drawn) =
+            draw_star(galaxy, &class, system, escape).expect("kept at another age");
+        eprintln!(
+            "{system:?}: first age {age:?}; kept at attempt {attempt}, {drawn:?}, {mass} M_sun"
+        );
+        assert!(attempt > 0);
+        assert_ne!(drawn, age);
+    }
+
+    /// From generator version 27 (beside the band-E draw's fix) a living class yields its expected
+    /// count. The continuous component's band-E living stars (8–16.5 M☉), 628 expected, live only
+    /// in its first some 35 Myr of 150; drawn age by age, every candidate of the class keeps one,
+    /// and the class's members in every cell of band E are within the Poisson interval of its 628.
+    /// Re-pinned at 27's re-pin from 626, a figure the train's base already measured as 628.2.
+    #[test]
+    fn a_centre_living_class_yields_its_expected_count_from_27() {
+        /// The two-sided Poisson interval's half-width, in standard deviations.
+        const Z: f64 = 4.0;
+        let galaxy = milky_way_galaxy();
+        let model = milky_way_centre();
+        let class = *model
+            .classes()
+            .classes()
+            .iter()
+            .find(|c| {
+                c.band == MassBand::E && c.component == 3 && c.kind == CentreClassKind::Living
+            })
+            .expect("the continuous component's living band-E class");
+        let mut pins = hyperion_testkit::pins!(
+            "galaxy/features/centre/members",
+            "a_centre_living_class_yields_its_expected_count_from_27"
+        );
+        pins.exact("expected", class.expected.round());
+        let placement = CentrePlacement::new(model);
+        // The class's members in every cell, each candidate drawn whole only where it picks the
+        // class (the other classes' remnants take most of the time).
+        let count = |galaxy: &Galaxy| -> usize {
+            let mut n = 0;
+            for cell in placement.grid().owned_cells() {
+                let local = placement.grid().local_cell(cell);
+                let proposal = placement.proposal(MassBand::E, &local);
+                let first = placement.member_id(MassBand::E, cell, 0);
+                for index in 0..count_from_mean(galaxy, first, proposal.expected(&local)) {
+                    let at = (MassBand::E, cell, index);
+                    if placement
+                        .class_under(galaxy, at, &proposal, &local)
+                        .is_some_and(|(picked, _)| picked == class)
+                        && placement
+                            .candidate_under(galaxy, MassBand::E, cell, index, &proposal, &local)
+                            .is_some()
+                    {
+                        n += 1;
+                    }
+                }
+            }
+            n
+        };
+        let yielded = count(galaxy);
+        eprintln!("{:.1} expected: {yielded} from 27", class.expected);
+        let off = (f64::from(u32::try_from(yielded).unwrap()) - class.expected).abs();
+        assert!(
+            off <= Z * class.expected.sqrt(),
+            "{yielded} members against {:.1} expected",
+            class.expected
+        );
+    }
+
+    /// The masses of `class` at `age`: its whole range below the turn-off, if living, or at it and
+    /// above, if dead (empty where the turn-off leaves none).
+    fn class_masses_at(class: &CentreClass, age: f64) -> (f64, f64) {
+        let m_to = turn_off_mass(Years::new(age.max(1e4)), &centre_composition()).value();
+        let (lo, hi) = (
+            class.initial_mass_range.0.value(),
+            class.initial_mass_range.1.value(),
+        );
+        match class.kind {
+            CentreClassKind::Living => (lo, hi.min(m_to)),
+            CentreClassKind::WhiteDwarf
+            | CentreClassKind::NeutronStar
+            | CentreClassKind::BlackHole => (lo.max(m_to), hi),
+        }
+    }
+
+    /// The mean of `of(age, masses)` over `class`'s count's integrand on `imf`: its component's
+    /// ages by composite Gauss–Legendre over 256 parts, each age weighted by the initial mass
+    /// function over the class's masses there ([`class_masses_at`]).
+    fn integrand_mean(
+        imf: &dyn MassFunction,
+        class: &CentreClass,
+        of: &dyn Fn(f64, (f64, f64)) -> f64,
+    ) -> f64 {
+        use crate::tables::gauss_legendre::{GL4_NODES, GL4_WEIGHTS};
+        const PARTS: u32 = 256;
+        let component = age_components()[usize::from(class.component)];
+        let (a, b) = (component.youngest.value(), component.oldest.value());
+        let half = 0.5 * (b - a) / f64::from(PARTS);
+        let (mut sum, mut weight) = (0.0, 0.0);
+        for k in 0..PARTS {
+            let mid = a + half * (2.0 * f64::from(k) + 1.0);
+            for (&x, &w) in GL4_NODES.iter().zip(&GL4_WEIGHTS) {
+                let age = mid + half * x;
+                let (lo, hi) = class_masses_at(class, age);
+                if hi > lo {
+                    let n = imf.integral(lo, hi);
+                    sum += w * n * of(age, (lo, hi));
+                    weight += w * n;
+                }
+            }
+        }
+        sum / weight
+    }
+
+    /// The mean of `values` and its standard error.
+    fn mean_and_error(values: &[f64]) -> (f64, f64) {
+        let n = f64::from(u32::try_from(values.len()).unwrap());
+        let mean = values.iter().sum::<f64>() / n;
+        let variance = values.iter().map(|v| (v - mean) * (v - mean)).sum::<f64>() / (n - 1.0);
+        (mean, (variance / n).sqrt())
+    }
+
+    /// fix-p09-centre-joint-draw (research-leans-33): under every 27 hold a class's kept stars
+    /// are its count's mix of ages and masses. The count integrates, over its component's ages,
+    /// the initial mass function over the masses of the class at each age, so an age weighs as
+    /// many stars as are of the class then: the continuous component's band-E living stars
+    /// (8–16.5 M☉), alive only in its first some 35 Myr, and the 150–500 Myr component's band-D
+    /// white dwarfs, whose progenitors die from 4.5 M☉ to 2.7 M☉ over it. Each class's 8,192
+    /// draws' mean age, and the living class's share above 12 M☉, are the integrand's
+    /// ([`integrand_mean`]) within four standard deviations.
+    #[test]
+    fn a_centre_class_s_draws_are_its_count_s_mix_of_ages_and_masses_from_27() {
+        /// The bound, in standard deviations of the draws' mean.
+        const Z: f64 = 4.0;
+        let held = milky_way_galaxy();
+        let on = Galaxy::from_params_with_rules(
+            held.seed(),
+            GalaxyParams::milky_way_like(),
+            crate::galaxy::rules::GalaxyRules::of_version(crate::GENERATOR_VERSION),
+        )
+        .expect("the fixture builds");
+        let model = milky_way_centre();
+        let class_of = |component: u8, band: MassBand, kind: CentreClassKind| {
+            *model
+                .classes()
+                .classes()
+                .iter()
+                .find(|c| c.band == band && c.component == component && c.kind == kind)
+                .expect("the class")
+        };
+        let placement = CentrePlacement::new(model);
+        let cell = placement
+            .grid()
+            .owned_cells()
+            .next()
+            .expect("an owned cell");
+        let escape = model.profile().cluster_escape_speed(2.0).value();
+        let stars_of = |class: &CentreClass| -> Vec<(f64, f64)> {
+            (0..8_192)
+                .map(|index| {
+                    let system = SystemId::from(placement.member_id(MassBand::E, cell, index));
+                    let (mass, _, age) = draw_star(&on, class, system, escape).expect("a star");
+                    (mass, age.value())
+                })
+                .collect()
+        };
+        let imf = on.mass_function();
+        let living = class_of(3, MassBand::E, CentreClassKind::Living);
+        let living_stars = stars_of(&living);
+        let white_dwarfs = class_of(2, MassBand::D, CentreClassKind::WhiteDwarf);
+        let mut faults = Vec::new();
+        for (name, class, stars) in [
+            ("band-E living", &living, living_stars.clone()),
+            (
+                "band-D white dwarfs",
+                &white_dwarfs,
+                stars_of(&white_dwarfs),
+            ),
+        ] {
+            let ages: Vec<f64> = stars.iter().map(|&(_, age)| age).collect();
+            let (mean, error) = mean_and_error(&ages);
+            let want = integrand_mean(imf, class, &|age, _| age);
+            eprintln!(
+                "{name}: mean age {:.3} Myr, the count's {:.3} (± {:.3})",
+                mean / 1e6,
+                want / 1e6,
+                error / 1e6
+            );
+            if (mean - want).abs() > Z * error {
+                faults.push(format!("{name}: mean age {mean:.4e} yr against {want:.4e}"));
+            }
+        }
+        let above: Vec<f64> = living_stars
+            .iter()
+            .map(|&(mass, _)| if mass > 12.0 { 1.0 } else { 0.0 })
+            .collect();
+        let (share, _) = mean_and_error(&above);
+        let want = integrand_mean(imf, &living, &|_, (lo, hi)| {
+            if hi <= 12.0 {
+                0.0
+            } else {
+                imf.integral(lo.max(12.0), hi) / imf.integral(lo, hi)
+            }
+        });
+        let error = (want * (1.0 - want) / 8_192.0).sqrt();
+        eprintln!("band-E living: {share:.4} above 12 M_sun, the count's {want:.4} (± {error:.4})");
+        if (share - want).abs() > Z * error {
+            faults.push(format!(
+                "band-E living: {share:.4} above 12 M_sun against {want:.4}"
+            ));
+        }
+        assert!(faults.is_empty(), "{faults:#?}");
+    }
+
     #[test]
     fn generating_a_cell_twice_gives_the_same_members() {
         let galaxy = milky_way_galaxy();
@@ -1171,6 +1722,6 @@ mod tests {
         let a = placement.members_in_cell(galaxy, MassBand::B, cell);
         let b = CentrePlacement::new(milky_way_centre()).members_in_cell(galaxy, MassBand::B, cell);
         assert_eq!(a, b);
-        assert!(!a.is_empty());
+        assert_ne!(a, []);
     }
 }

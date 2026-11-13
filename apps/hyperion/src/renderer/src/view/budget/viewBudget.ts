@@ -16,9 +16,14 @@
  * `ViewSettings.internalScaleBounds`, holding the frame's GPU time, every view's included, to
  * {@link GPU_FRAME_SHARE} of the period less {@link PER_CANVAS_OVERHEAD_MS} for each instrument's
  * canvas; the instruments' cost so comes out of the primary's margin. With no instrument open the
- * primary renders at the bounds' max. A wireframe view draws straight to its canvas (R02 Design
- * note 12) and has no internal scale: it renders at 1. The outputs are data that R12's runs
- * record.
+ * primary renders at the bounds' max, unless its frames run long: then its scale is the
+ * controller's down to its frame-rate floor ({@link aloneScaleBounds}; the owner's report,
+ * 2026-11-01), holding its GPU time to {@link GPU_FRAME_SHARE} of {@link FLOOR_RATE_HZ}'s period,
+ * and its image never drawn below the low setting's look, {@link LOW_LOOK_ROWS_PX} rows; once it
+ * steps, its air is drawn at the low setting's sizes too (`BudgetedScale.airStepped`), and its
+ * label block states {@link IMAGE_DETAIL_LIMITED} while its scale is below 1 or its air stepped. A wireframe view draws
+ * straight to its canvas (R02 Design note 12) and has no internal scale: it renders at 1. The
+ * outputs are data that R12's runs record.
  */
 
 import type { RenderStyle, ViewId } from "../camera/state";
@@ -36,8 +41,13 @@ export interface ViewSpec {
   readonly style: RenderStyle;
 }
 
-/** A view whose internal scale the resolution controller holds: its bounds and target. */
+/**
+ * A view whose internal scale the resolution controller holds: its bounds and target, and why it
+ * is held: beside open instruments (Design note 14), or alone, as its frame-rate floor (the owner's
+ * report, 2026-11-01), under which its air is drawn at the low setting's sizes once it steps.
+ */
 export interface ScaleControl {
+  readonly kind: "instruments" | "floor";
   readonly bounds: ScaleBounds;
   readonly target: ResolutionTarget;
 }
@@ -82,6 +92,50 @@ export const INSTRUMENT_RATE_HZ = 30;
 export const WIREFRAME_PRIMARY_RATE_HZ = 60;
 
 /**
+ * The rate a photorealistic primary alone holds by stepping its image down (the owner's report,
+ * 2026-11-01: the brief's 30 fps on the high setting): its frame-rate floor's budget is
+ * {@link GPU_FRAME_SHARE} of this rate's period, so that a frame that meets the setting's own rate,
+ * or comes near it, never steps.
+ */
+export const FLOOR_RATE_HZ = 30;
+
+/**
+ * The rows the low setting renders its photorealistic image at (`TerrainSettings.renderHeightPx`,
+ * 720): the low setting's look, below which a primary's frame-rate floor never draws its image.
+ */
+export const LOW_LOOK_ROWS_PX = 720;
+
+/**
+ * The label block's statement while a photorealistic primary's image is drawn below its quality
+ * setting's resolution or air detail (the guide's `IMAGE: DETAIL LIMITED`, an annunciation as
+ * `TERRAIN: DETAIL LIMITED` is): its frames take too long to keep {@link FLOOR_RATE_HZ} a second
+ * and its frame-rate floor has stepped its scale or its air down to keep their rate, or instruments
+ * are open and the resolution controller holds its scale there (Design note 14).
+ */
+export const IMAGE_DETAIL_LIMITED = "IMAGE: DETAIL LIMITED";
+
+/**
+ * A photorealistic primary's scale bounds alone, its frame-rate floor (the owner's report,
+ * 2026-11-01): from the setting's bounds' max down to where its image would stand at
+ * {@link LOW_LOOK_ROWS_PX} rows, never below the bounds' min; `null` where that leaves no room, on
+ * the low setting, whose look it is, and at a render resolution of {@link LOW_LOOK_ROWS_PX} rows
+ * or fewer.
+ *
+ * @param renderRowsPx - The primary's render resolution's rows (`renderViewport`'s), device px.
+ */
+export function aloneScaleBounds(
+  setting: QualitySetting,
+  renderRowsPx: number,
+): ScaleBounds | null {
+  const [min, max] = SETTINGS[setting].internalScaleBounds;
+  if (setting === "low" || !(renderRowsPx > LOW_LOOK_ROWS_PX)) {
+    return null;
+  }
+  const floor = Math.max(min, Math.min(max, LOW_LOOK_ROWS_PX / renderRowsPx));
+  return floor < max ? [floor, max] : null;
+}
+
+/**
  * Why a view's photorealistic style is held back on the low setting (the guide's `NOT AVAILABLE`
  * form).
  */
@@ -106,11 +160,15 @@ export function frameGpuBudgetMs(rateHz: 60 | 30, extraCanvases: number): number
  * @param views - The views shown: one primary, and the open instruments in their slots' order,
  *   whether or not an instrument at 30 Hz draws in a given frame. Instruments are open exactly
  *   when some are listed.
+ * @param primaryRenderRowsPx - The primary's render resolution's rows, device px, by which a
+ *   photorealistic primary alone takes its frame-rate floor ({@link aloneScaleBounds}); `null`
+ *   before its stage is laid out, when it takes none.
  * @throws RangeError unless there is exactly one primary view and every identity is distinct.
  */
 export function viewBudgets(
   views: ReadonlyArray<ViewSpec>,
   setting: QualitySetting,
+  primaryRenderRowsPx: number | null = null,
 ): ReadonlyMap<ViewId, ViewBudget> {
   const settings = SETTINGS[setting];
   const bounds = settings.internalScaleBounds;
@@ -135,16 +193,18 @@ export function viewBudgets(
           rateHz,
           style,
           streamPriority: "primary",
-          control:
-            photorealistic && instruments > 0
+          control: !photorealistic
+            ? null
+            : instruments > 0
               ? {
+                  kind: "instruments",
                   bounds,
                   target: {
                     periodMs: 1000 / rateHz,
                     gpuBudgetMs: frameGpuBudgetMs(rateHz, instruments),
                   },
                 }
-              : null,
+              : floorControl(setting, primaryRenderRowsPx),
         };
         break;
       }
@@ -161,6 +221,21 @@ export function viewBudgets(
     budgets.set(view.id, budget);
   }
   return budgets;
+}
+
+/**
+ * A photorealistic primary's control alone, its frame-rate floor: {@link aloneScaleBounds} held to
+ * {@link FLOOR_RATE_HZ}'s budget; `null` where the floor leaves no room or the rows are not known.
+ */
+function floorControl(setting: QualitySetting, renderRowsPx: number | null): ScaleControl | null {
+  const bounds = renderRowsPx === null ? null : aloneScaleBounds(setting, renderRowsPx);
+  return bounds === null
+    ? null
+    : {
+        kind: "floor",
+        bounds,
+        target: { periodMs: 1000 / FLOOR_RATE_HZ, gpuBudgetMs: frameGpuBudgetMs(FLOOR_RATE_HZ, 0) },
+      };
 }
 
 /**

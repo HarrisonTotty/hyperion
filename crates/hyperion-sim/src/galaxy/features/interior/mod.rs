@@ -17,6 +17,7 @@ pub mod table;
 
 pub use abundances::MemberAbundances;
 pub use profile::{ClassProfile, ProfileShape};
+pub(crate) use table::BoundMemo;
 pub use table::{CellProposal, LocalCell, MemberClassTable, TailClass};
 
 use crate::galaxy::imf::MassBand;

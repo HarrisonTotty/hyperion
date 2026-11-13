@@ -219,7 +219,7 @@ fn galaxy_map_rows_are_the_same_in_any_band() {
         }
         // An empty range renders nothing.
         render_rows(&fields, &spec, 7..7, &mut again);
-        assert!(again.is_empty());
+        assert_eq!(again, [] as [f64; 0]);
     }
 }
 
@@ -472,6 +472,9 @@ fn write_map(w: &mut GoldenWriter, label: &str, galaxy: &Galaxy) {
             (MapView::FaceOn, MapSelection::YoungOnly) => "face_on.young",
             (MapView::EdgeOn, MapSelection::AllSystems) => "edge_on.all",
             (MapView::EdgeOn, MapSelection::YoungOnly) => "edge_on.young",
+            (_, MapSelection::LayerERemnants) => {
+                unreachable!("the golden pins the two selections the protocol offers")
+            }
         };
         write(name, &whole_cube(view, selection, 16, 16));
     }

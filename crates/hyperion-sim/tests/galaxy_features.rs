@@ -4,14 +4,17 @@
 //! The windows on the clusters' lives, the core collapses inside features, the clouds' sizes, the
 //! superbubbles' radii and the central molecular zone are ruling 118's of 2026-09-22.
 
-use hyperion_sim::Seed;
+use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex};
+
 use hyperion_sim::coords::GalacticPosition;
 use hyperion_sim::galaxy::ages::SubDisc;
 use hyperion_sim::galaxy::features::FeatureProcess;
 use hyperion_sim::galaxy::features::catalogue::{
-    FeatureCatalogue, FeatureMarks, FeatureRecord, NoFeatureCache,
+    FeatureCatalogue, FeatureCellCache, FeatureCellContents, FeatureMarks, FeatureRecord,
+    NoFeatureCache,
 };
-use hyperion_sim::galaxy::features::gas_overlay::FeatureGas;
+use hyperion_sim::galaxy::features::gas_overlay::{FeatureGas, FeatureGasIndex};
 use hyperion_sim::galaxy::features::kinds::nursery::{
     BLOW_OUT_HEIGHTS, BOUND_FRACTION, NurseryStage, Superbubble,
 };
@@ -20,9 +23,10 @@ use hyperion_sim::galaxy::features::kinds::open_cluster::{
 };
 use hyperion_sim::galaxy::features::shares::phi_young;
 use hyperion_sim::galaxy::gas::SOLAR_MASSES_PER_LY3_AT_UNIT_DENSITY;
-use hyperion_sim::galaxy::gas::extinction::{NoiseMode, Quality, sightline};
+use hyperion_sim::galaxy::gas::extinction::{NoiseMode, Quality, SIGHTLINE_QUALITY, sightline};
 use hyperion_sim::galaxy::gas::modifiers::{GasModifier, GasModifierSource};
 use hyperion_sim::galaxy::gas::noise::NoiseCache;
+use hyperion_sim::galaxy::global_list::discrete_share;
 use hyperion_sim::galaxy::params::GalaxyParams;
 use hyperion_sim::galaxy::quad::gl_panels;
 use hyperion_sim::galaxy::{Galaxy, Population};
@@ -32,7 +36,13 @@ use hyperion_sim::stellar::draws::StarDraws;
 use hyperion_sim::stellar::{Composition, lifetime};
 use hyperion_sim::units::consts::METRES_PER_LIGHT_YEAR;
 use hyperion_sim::units::{LightYears, SolarMasses, Years};
+use hyperion_sim::words::{WordSink, WordSource};
+use hyperion_sim::{GENERATOR_VERSION, Seed};
 use hyperion_testkit::float::assert_same_bits;
+use hyperion_testkit::golden;
+use hyperion_testkit::golden::GoldenWriter;
+use hyperion_testkit::lcg::Lcg;
+use hyperion_testkit::order::assert_order_independent;
 use hyperion_testkit::stats::{ALPHA, assert_p_value, ks_one_sample};
 
 const SEED: u64 = 0x0900_0005_0000_0000;
@@ -191,7 +201,7 @@ fn nurseries_have_sizes_and_bubbles_in_the_plan_s_ranges() {
     let galaxy = milky_way();
     let clock = galaxy.feature_shares().supernova_clock();
     let gas = galaxy.gas();
-    let mut radii = Vec::new();
+    let (mut radii, mut merged) = (Vec::new(), Vec::new());
     let mut stages = [0_u32; 3];
     for feature in disc_features(&galaxy) {
         let FeatureMarks::Nursery(marks) = feature.marks() else {
@@ -208,18 +218,25 @@ fn nurseries_have_sizes_and_bubbles_in_the_plan_s_ranges() {
                 panic!("{:?} is not alive", feature.id())
             }
         }
-        if let Some(bubble) = Superbubble::of(
+        let weaver = Superbubble::of(
             marks,
             age,
             gas.mean_density(feature.position()),
             gas.params().neutral_height(),
             clock,
-        ) {
-            radii.push(bubble.radius().value());
+        );
+        let bubble = Superbubble::in_galaxy(&galaxy, feature.position(), marks, age);
+        assert_eq!(bubble.is_some(), weaver.is_some(), "{:?}", feature.id());
+        if let (Some(weaver), Some(bubble)) = (weaver, bubble) {
+            assert!(bubble.radius() <= weaver.radius(), "{bubble:?} {weaver:?}");
+            radii.push(weaver.radius().value());
+            merged.push(bubble.radius().value());
         }
     }
     // Ruling 118.4: 80% of radii in 100–1,000 ly, every one at or below the blow-out cap and
-    // 3,300 ly (McClure-Griffiths et al. 2002: 40 pc to 1 kpc).
+    // 3,300 ly (McClure-Griffiths et al. 2002: 40 pc to 1 kpc), of the bubbles as grown to
+    // blow-out (`Superbubble::of`), which the merge (P09.T5) stops sooner: 0.403 of the merged
+    // radii lie in 100–1,000 ly (measured at 29, a finding), the rest below.
     assert!(radii.len() > 1_000, "{}", radii.len());
     let cap = BLOW_OUT_HEIGHTS * gas.params().neutral_height().value();
     for &r in &radii {
@@ -232,6 +249,13 @@ fn nurseries_have_sizes_and_bubbles_in_the_plan_s_ranges() {
     let share =
         f64::from(u32::try_from(inside).unwrap()) / f64::from(u32::try_from(radii.len()).unwrap());
     assert!(share >= 0.8, "{share} of radii in 100–1,000 ly");
+    let inside = merged
+        .iter()
+        .filter(|&&r| (100.0..=1_000.0).contains(&r))
+        .count();
+    let share =
+        f64::from(u32::try_from(inside).unwrap()) / f64::from(u32::try_from(merged.len()).unwrap());
+    assert!(share >= 0.4, "{share} of the merged radii in 100–1,000 ly");
     // About ten thousand star-forming regions, and 1.2–2.1 × 10⁵ associations (ruling 140.3: the
     // birth rate of ruling 140.2 × (1 − Γ_b) × their mean stage of about 61 Myr).
     let [embedded, bound, associations] = stages;
@@ -418,7 +442,6 @@ fn a_ray_through_a_cloud_gains_the_plummer_column() {
 #[test]
 fn a_point_in_a_bubble_reads_its_interior() {
     let galaxy = milky_way();
-    let clock = *galaxy.feature_shares().supernova_clock();
     let gas = galaxy.gas();
     let (feature, bubble) = disc_cells()
         .flat_map(|cell| FeatureCatalogue::cell(&galaxy, cell).features().to_vec())
@@ -426,19 +449,14 @@ fn a_point_in_a_bubble_reads_its_interior() {
             let FeatureMarks::Nursery(marks) = f.marks() else {
                 return None;
             };
-            Superbubble::of(
-                marks,
-                marks.age_at_epoch(),
-                gas.mean_density(f.position()),
-                gas.params().neutral_height(),
-                &clock,
-            )
-            .map(|b| (f, b))
+            Superbubble::in_galaxy(&galaxy, f.position(), marks, marks.age_at_epoch())
+                .map(|b| (f, b))
         })
         .expect("the disc holds bubbles");
     let [x, y, z] = feature.position().to_light_years_f64();
+    // Within its hot core, inside the wall of the gas it swept up (P09.T5).
     let inside =
-        GalacticPosition::from_light_years([x + 0.3 * bubble.radius().value(), y, z]).unwrap();
+        GalacticPosition::from_light_years([x + 0.3 * bubble.core_radius().value(), y, z]).unwrap();
     let source = FeatureGas::new(&galaxy, &NoFeatureCache, Years::ZERO);
     let mut mods = Vec::new();
     source.modifiers_near_segment(&inside, &inside, &mut mods);
@@ -459,7 +477,7 @@ fn a_point_in_a_bubble_reads_its_interior() {
                 interior,
             } => (centre.distance_to(&inside).value() / METRES_PER_LIGHT_YEAR < radius.value())
                 .then_some(interior.value()),
-            GasModifier::Cloud { .. } => None,
+            GasModifier::Cloud { .. } | GasModifier::Wall { .. } => None,
         })
         .fold(f64::INFINITY, f64::min);
     assert!(
@@ -515,7 +533,375 @@ fn a_segment_s_modifiers_do_not_depend_on_its_direction() {
     source.modifiers_near_segment(&a, &b, &mut ab);
     source.modifiers_near_segment(&b, &a, &mut ba);
     assert_eq!(ab, ba);
-    assert!(!ab.is_empty());
+    assert_ne!(ab, []);
+}
+
+/// A cache that keeps every cell it makes: the reference lookups' cells, made once.
+#[derive(Default)]
+struct KeepCells(Mutex<BTreeMap<[i32; 3], Arc<FeatureCellContents>>>);
+
+impl FeatureCellCache for KeepCells {
+    fn contents(&self, galaxy: &Galaxy, cell: FeatureCell) -> Arc<FeatureCellContents> {
+        let mut kept = self.0.lock().expect("no lookup panics");
+        Arc::clone(
+            kept.entry(cell.to_array())
+                .or_insert_with(|| Arc::new(FeatureCatalogue::cell(galaxy, cell))),
+        )
+    }
+}
+
+/// The features' gas index finds what the cells find (P09.T40.a): for rays from the Sun-like point
+/// to the root cube's edge, which cross the galaxy, and for segments of a light-year to ten
+/// thousand, through the disc, out of it, inside a bubble and of no length, the indexed source's
+/// modifiers are the cells' lookup's, the same modifiers in the same order, at the epoch and a
+/// million years on, and in any order. The index holds every nursery and cloud of the catalogue,
+/// in the cells' order.
+#[test]
+fn gas_index_finds_what_the_cells_find() {
+    let galaxy = milky_way();
+    let cells = KeepCells::default();
+    let index = FeatureGasIndex::build(&galaxy, &cells);
+    let held: Vec<FeatureRecord> = FeatureGasIndex::SLABS
+        .flat_map(|i| {
+            FeatureGasIndex::SLABS.flat_map(move |j| {
+                FeatureGasIndex::SLABS.map(move |k| FeatureCell::new([i, j, k]).unwrap())
+            })
+        })
+        .flat_map(|cell| cells.contents(&galaxy, cell).features().to_vec())
+        .filter(|f| matches!(f.process(), FeatureProcess::Nursery | FeatureProcess::Cloud))
+        .collect();
+    assert_eq!(index.features(), held.as_slice());
+    assert!(held.len() > 100_000, "{} nurseries and clouds", held.len());
+
+    let at = |ly: [f64; 3]| GalacticPosition::from_light_years(ly).unwrap();
+    let sun = [0.0, 26_000.0, 68.0];
+    let mut segments = Vec::new();
+    // Rays to the root cube's edge, the half-width 65,536 ly, along 13 axes and diagonals and 24
+    // directions drawn at random.
+    let mut lcg = Lcg::new(SEED ^ 0x40a);
+    let mut directions: Vec<[f64; 3]> = [
+        [1.0, 0.0, 0.0],
+        [-1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, -1.0, 0.0],
+        [0.0, 0.0, 1.0],
+        [0.0, 0.0, -1.0],
+        [0.6, -0.8, 0.0],
+        [-0.6, -0.8, 0.0],
+        [0.7, -0.7, 0.1],
+        [1.0, 1.0, 1.0],
+        [-1.0, -1.0, -1.0],
+        [1.0, -1.0, 0.02],
+        [-0.3, -0.95, 0.001],
+    ]
+    .to_vec();
+    directions.extend((0..24).map(|_| [0; 3].map(|_| 2.0 * lcg.next_f64() - 1.0)));
+    for direction in directions {
+        let norm = direction.iter().map(|c| c * c).sum::<f64>().sqrt();
+        let along = direction.map(|c| c / norm);
+        let edge = (0..3)
+            .filter(|&k| along[k].abs() > 0.0)
+            .map(|k| (along[k].signum() * 65_536.0 - sun[k]) / along[k])
+            .fold(f64::INFINITY, f64::min);
+        segments.push((at(sun), at([0, 1, 2].map(|k| sun[k] + edge * along[k]))));
+    }
+    // Segments of 1 to 10,000 ly about the disc, and some inside a cloud or of no length.
+    for _ in 0..240 {
+        let length = math::exp10(4.0 * lcg.next_f64());
+        let from = [
+            40_000.0 * (2.0 * lcg.next_f64() - 1.0),
+            40_000.0 * (2.0 * lcg.next_f64() - 1.0),
+            1_500.0 * (2.0 * lcg.next_f64() - 1.0),
+        ];
+        let direction = [0; 3].map(|_| 2.0 * lcg.next_f64() - 1.0);
+        let norm = direction.iter().map(|c| c * c).sum::<f64>().sqrt();
+        segments.push((
+            at(from),
+            at([0, 1, 2].map(|k| from[k] + length * direction[k] / norm)),
+        ));
+    }
+    let cloud = find_cloud(&galaxy);
+    let [x, y, z] = cloud.position().to_light_years_f64();
+    segments.push((*cloud.position(), *cloud.position()));
+    segments.push((at([x - 3.0, y, z]), at([x + 3.0, y + 1.0, z])));
+
+    let mut found = 0;
+    for years in [0.0, 1e6] {
+        let looked_up = FeatureGas::new(&galaxy, &cells, Years::new(years));
+        let indexed = FeatureGas::indexed(&galaxy, &index, Years::new(years));
+        for (a, b) in &segments {
+            let (mut expected, mut got, mut back) = (Vec::new(), Vec::new(), Vec::new());
+            looked_up.modifiers_near_segment(a, b, &mut expected);
+            indexed.modifiers_near_segment(a, b, &mut got);
+            indexed.modifiers_near_segment(b, a, &mut back);
+            assert_eq!(got, expected, "{a:?} to {b:?} at {years} yr");
+            assert_eq!(back, expected, "{b:?} to {a:?} at {years} yr");
+            found += usize::from(!expected.is_empty());
+        }
+    }
+    assert!(
+        found > segments.len(),
+        "{found} of twice {} segments find gas",
+        segments.len()
+    );
+    // The server keeps the index for every job of every sky, which read it in any order.
+    let indexed = FeatureGas::indexed(&galaxy, &index, Years::ZERO);
+    assert_order_independent(&segments, |(a, b)| {
+        let mut out = Vec::new();
+        indexed.modifiers_near_segment(a, b, &mut out);
+        out
+    });
+}
+
+/// A table's words as little-endian bytes, as a store outside the sim keeps them, read back from the
+/// first.
+#[derive(Debug, Default)]
+struct Bytes {
+    bytes: Vec<u8>,
+    at: usize,
+}
+
+impl Bytes {
+    /// The bytes written, cut to the first `len`, to be read again from the first.
+    fn cut(&self, len: usize) -> Self {
+        Self {
+            bytes: self.bytes[..len].to_vec(),
+            at: 0,
+        }
+    }
+}
+
+impl WordSink for Bytes {
+    fn word(&mut self, word: u64) {
+        self.bytes.extend(word.to_le_bytes());
+    }
+
+    fn float(&mut self, value: f64) {
+        WordSink::word(self, hyperion_testkit::float::bits(value));
+    }
+}
+
+impl WordSource for Bytes {
+    fn word(&mut self) -> Option<u64> {
+        let word = self.bytes.get(self.at..self.at + 8)?;
+        self.at += 8;
+        Some(u64::from_le_bytes(word.try_into().ok()?))
+    }
+
+    fn float(&mut self) -> Option<f64> {
+        WordSource::word(self).map(f64::from_bits)
+    }
+
+    fn words_left(&self) -> usize {
+        (self.bytes.len() - self.at) / 8
+    }
+}
+
+/// The features' gas index reads back from its words as it was assembled, bit for bit, every
+/// nursery and cloud and the field at each one's centre, its spheres and bins made again, owning
+/// the heap the assembled one does, finding the same gas; and its words read as none for another
+/// galaxy or cut short (perf-sky-tables-on-disk).
+#[test]
+fn the_gas_index_reads_back_from_its_words_bit_for_bit() {
+    let galaxy = milky_way();
+    let index = FeatureGasIndex::build(&galaxy, &NoFeatureCache);
+    let mut written = Bytes::default();
+    index.write_words(&mut written);
+    let len = written.bytes.len();
+    let mut words = written.cut(len);
+    let back = FeatureGasIndex::read_words(&mut words, &galaxy).expect("the words written");
+    assert_eq!(words.words_left(), 0);
+    assert_eq!(back.heap_bytes(), index.heap_bytes());
+    // Some 2 × 10⁵ features and 50 MB, compared whole rather than printed.
+    assert!(back == index, "the index read back differs");
+    let mut again = Bytes::default();
+    back.write_words(&mut again);
+    assert!(again.bytes == written.bytes, "its words differ");
+    let gas = |index| {
+        let mut found = Vec::new();
+        FeatureGas::indexed(&galaxy, index, Years::ZERO).modifiers_near_segment(
+            &GalacticPosition::from_light_years([0.0, 26_000.0, 68.0]).unwrap(),
+            &GalacticPosition::from_light_years([0.0, -60_000.0, 0.0]).unwrap(),
+            &mut found,
+        );
+        found
+    };
+    let found = gas(&back);
+    assert_ne!(found.len(), 0, "the gas along the ray");
+    assert_eq!(found, gas(&index));
+
+    let other = Galaxy::from_params(Seed::new(SEED + 1), GalaxyParams::milky_way_like())
+        .expect("another Milky Way");
+    assert!(FeatureGasIndex::read_words(&mut written.cut(len), &other).is_none());
+    assert!(FeatureGasIndex::read_words(&mut written.cut(len - 8), &galaxy).is_none());
+}
+
+/// The features' gas about the Sun-like point, bit for bit, its superbubbles merged and walled
+/// (P09.T5): the bubbles of the nurseries in the Sun's cell, and the modifiers and the served lines'
+/// extinction over a kiloparsec of the plane in four directions, at the epoch and a million years
+/// on.
+#[test]
+fn feature_gas_about_the_sun_is_pinned() {
+    golden!(
+        "galaxy/features/gas",
+        &feature_gas_about_the_sun(&milky_way())
+    );
+}
+
+/// The golden text of the features' gas about the Sun-like point in `galaxy`.
+fn feature_gas_about_the_sun(galaxy: &Galaxy) -> String {
+    let cells = KeepCells::default();
+    let mut w = GoldenWriter::new();
+    w.header(GENERATOR_VERSION.get());
+    let cell = FeatureCell::new([0, 6, 0]).unwrap();
+    let nurseries = cells.contents(galaxy, cell);
+    let mut written = 0;
+    for feature in nurseries.features() {
+        let FeatureMarks::Nursery(marks) = feature.marks() else {
+            continue;
+        };
+        for (when, t) in [("epoch", 0.0), ("myr", 1e6)] {
+            let age = Years::new(marks.age_at_epoch().value() + t);
+            let label = format!("bubble.{}.{when}", feature.id().index());
+            match Superbubble::in_galaxy(galaxy, feature.position(), marks, age) {
+                Some(bubble) => {
+                    w.f64(&format!("{label}.radius"), bubble.radius().value());
+                    w.f64(
+                        &format!("{label}.interior"),
+                        bubble.interior_density().value(),
+                    );
+                    if let Some(wall) = bubble.wall_density() {
+                        w.f64(&format!("{label}.wall"), wall.value());
+                    }
+                }
+                None => w.line(&format!("{label} = none")),
+            }
+        }
+        written += 1;
+        if written == 24 {
+            break;
+        }
+    }
+    let sun = [0.0, 26_000.0, 68.0];
+    let start = GalacticPosition::from_light_years(sun).unwrap();
+    let mut noise = NoiseCache::with_capacity(4_096);
+    for (when, t) in [("epoch", 0.0), ("myr", 1e6)] {
+        let source = FeatureGas::new(galaxy, &cells, Years::new(t));
+        for (name, d) in [
+            ("px", [1.0, 0.0]),
+            ("mx", [-1.0, 0.0]),
+            ("py", [0.0, 1.0]),
+            ("my", [0.0, -1.0]),
+        ] {
+            let end = GalacticPosition::from_light_years([
+                sun[0] + 3_261.56 * d[0],
+                sun[1] + 3_261.56 * d[1],
+                sun[2],
+            ])
+            .unwrap();
+            let mut mods = Vec::new();
+            source.modifiers_near_segment(&start, &end, &mut mods);
+            let count = |kind: fn(&GasModifier) -> bool| mods.iter().filter(|m| kind(m)).count();
+            let label = format!("line.{when}.{name}");
+            w.line(&format!(
+                "{label}.modifiers = {} holes, {} clouds, {} walls",
+                count(|m| matches!(m, GasModifier::Hole { .. })),
+                count(|m| matches!(m, GasModifier::Cloud { .. })),
+                count(|m| matches!(m, GasModifier::Wall { .. })),
+            ));
+            let line = sightline(
+                galaxy.gas(),
+                &start,
+                &end,
+                NoiseMode::Realised,
+                SIGHTLINE_QUALITY,
+                &mods,
+                &mut noise,
+            );
+            w.f64(&format!("{label}.a_v"), line.a_v().value());
+            w.f64(
+                &format!("{label}.hydrogen_column"),
+                line.hydrogen_column().value(),
+            );
+            w.f64(
+                &format!("{label}.neutral_column"),
+                line.neutral_hydrogen_column().value(),
+            );
+        }
+    }
+    w.as_str().to_owned()
+}
+
+/// The superbubbles' hot cores (P09.T5) fill a fifth to a half of the plane at the solar circle, against a hot filling of 0.2–0.5 there (Ferrière 2001, Rev. Mod. Phys. 73, 1031),
+/// where grown as Weaver's they filled 0.96; and their walls keep the plane's extinction from the
+/// Sun-like point within a factor of two of 1.8 mag/kpc (Whittet 2003, *Dust in the Galactic
+/// Environment*, 2nd ed.), where it fell to 0.32. Measured: 0.216 of 8,000 midplane points within
+/// 500 ly of the solar circle in a core, and 2.14 mag/kpc over 64 directions of a kiloparsec.
+#[test]
+fn the_bubbles_cores_fill_a_fifth_of_the_plane_and_keep_its_extinction() {
+    let galaxy = milky_way();
+    let cells = KeepCells::default();
+    let source = FeatureGas::new(&galaxy, &cells, Years::ZERO);
+    let mut lcg = Lcg::new(0x0905_f111);
+    let mut out = Vec::new();
+    let points = 8_000;
+    let mut cored = 0_u32;
+    for _ in 0..points {
+        let phi = std::f64::consts::TAU * lcg.next_f64();
+        let r = 26_000.0 + 1_000.0 * (lcg.next_f64() - 0.5);
+        let p = GalacticPosition::from_light_years([r * math::sin(phi), r * math::cos(phi), 0.0])
+            .unwrap();
+        out.clear();
+        source.modifiers_near_segment(&p, &p, &mut out);
+        cored += u32::from(out.iter().any(|m| match *m {
+            GasModifier::Hole { centre, radius, .. } => {
+                centre.distance_to(&p).value() / METRES_PER_LIGHT_YEAR < radius.value()
+            }
+            GasModifier::Cloud { .. } | GasModifier::Wall { .. } => false,
+        }));
+    }
+    let filling = f64::from(cored) / f64::from(points);
+    assert!(
+        (0.2..=0.5).contains(&filling),
+        "{filling} of the plane in a core"
+    );
+    let sun = [0.0, 26_000.0, 68.0];
+    let start = GalacticPosition::from_light_years(sun).unwrap();
+    let mut noise = NoiseCache::with_capacity(4_096);
+    let (mut total, mut walls) = (0.0, 0);
+    let directions = 64;
+    for k in 0..directions {
+        let phi = std::f64::consts::TAU * (f64::from(k) + 0.5) / f64::from(directions);
+        let kpc = 3_261.563_777;
+        let end = GalacticPosition::from_light_years([
+            sun[0] + kpc * math::cos(phi),
+            sun[1] + kpc * math::sin(phi),
+            sun[2],
+        ])
+        .unwrap();
+        let mut mods = Vec::new();
+        source.modifiers_near_segment(&start, &end, &mut mods);
+        walls += mods
+            .iter()
+            .filter(|m| matches!(m, GasModifier::Wall { .. }))
+            .count();
+        let line = sightline(
+            galaxy.gas(),
+            &start,
+            &end,
+            NoiseMode::Realised,
+            SIGHTLINE_QUALITY,
+            &mods,
+            &mut noise,
+        );
+        total += line.a_v().value();
+    }
+    let per_kpc = total / f64::from(directions);
+    assert!(walls > 0, "the bubbles have walls");
+    assert!(
+        (0.9..=3.6).contains(&per_kpc),
+        "{per_kpc} mag/kpc in the plane"
+    );
 }
 
 // --- P09.T3.b: the index's headroom ---
@@ -747,6 +1133,26 @@ fn young_members(galaxy: &Galaxy, lo: f64, hi: f64) -> f64 {
     )
 }
 
+/// At three seeds, every population's field, feature members and carved binary classes add up
+/// to its budget in every mass band, to 10⁻⁶ relative (P09.T6).
+///
+/// The members come from closed forms, not from sampling: the clusters' and nurseries' rates ×
+/// their mean members, mass outermost, not in the order φ is computed in, the globulars'
+/// expected mass over the population's mean system mass, by band weight, and from generator
+/// version 27 the halo's discrete share of streams and dwarf cores, which the galaxy's build
+/// stores and the halo's field gives up in every band (P10.T3.d.b, P09.T2.c), recomputed here
+/// from the seed, the parameters and the potential (`global_list::discrete_share`). Left out, it
+/// fails the halo by its size, −1.03 × 10⁻² in every band at the first seed (2026-11-05). The
+/// carved classes' share is the one that
+/// [`field_factor`](hyperion_sim::galaxy::features::shares::FeatureShares::field_factor) gives up
+/// to plan 11's catalogue classes (P11.T7). By age, in ten bins of 10 Myr, the young disc's
+/// members and its 1 − φ, the field with the carved classes, add up to its budget likewise.
+///
+/// The tolerance is P09.T6's. The carved share is the value the field factor subtracts, so it
+/// adds only rounding. What is left is the young disc's members' quadratures', far inside it
+/// (2026-10-12): 5.1 × 10⁻¹² in the bands and 2.9 × 10⁻¹¹ by age (bins 7–9). Leaving the carved
+/// share out fails bands B to E by its size, 1.8 × 10⁻⁶ to 7.7 × 10⁻⁴, in every population at
+/// every seed (band A's 1.6 × 10⁻⁷ passes).
 #[test]
 #[ignore = "slow: the budget's quadratures at three seeds"]
 fn field_and_features_add_up_to_every_budget() {
@@ -778,6 +1184,14 @@ fn field_and_features_add_up_to_every_budget() {
                 _ => 0.0,
             };
             let globular_members = globular_mass / galaxy.mean_system_mass(population).value();
+            // The halo's streams and dwarf cores: its discrete share of the budget in every band,
+            // from 27 (P10.T3.d.b).
+            let discrete = match population {
+                Population::Halo => {
+                    discrete_share(Seed::new(SEED | n), galaxy.params(), galaxy.potential())
+                }
+                _ => 0.0,
+            };
             let weights = shares.globular_band_weights();
             let conserved: f64 = MassBand::ALL
                 .iter()
@@ -790,8 +1204,12 @@ fn field_and_features_add_up_to_every_budget() {
             for band in MassBand::ALL {
                 let share = band_shares.share(band);
                 let field = budget * share * shares.field_factor(population, band);
-                let total =
-                    field + members * share + globular_members * share * weights[band.index()];
+                let carved = budget * share * shares.class_share(population, band);
+                let total = field
+                    + carved
+                    + members * share
+                    + globular_members * share * weights[band.index()]
+                    + budget * share * discrete;
                 let relative = total / (budget * share) - 1.0;
                 assert!(
                     relative.abs() < 1e-6,

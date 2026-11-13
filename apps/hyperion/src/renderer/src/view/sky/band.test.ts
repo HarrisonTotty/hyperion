@@ -36,7 +36,7 @@ describe("bandTexels", () => {
       ),
       2,
     ).stars;
-    const culled = cullSky(stars, { kind: "camera", limitV: 5 }, FACE);
+    const culled = cullSky(stars, { kind: "camera", limitAt: () => 5 }, FACE);
     const empty = { ...band(), luminanceCdM2: new Float32Array(6 * FACE * FACE) };
     const texels = bandTexels(empty, FACE, culled.bandIlluminanceLx);
     const omegas = texelSolidAnglesSr(FACE);

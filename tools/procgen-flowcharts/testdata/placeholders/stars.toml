@@ -1,0 +1,41 @@
+# Test fixture: a stars part whose references to other files are still placeholders.
+
+[meta]
+stage = "stars"
+part = "stars"
+prefix = "s"
+title = "Star Systems"
+snapshot = "a6d3f6dd"
+
+[[node]]
+id = "s.track"
+label = "Track interpolation"
+kind = "model"
+summary = "L, T_eff and R by bilinear interpolation in log space"
+status = "built"
+
+[[node]]
+id = "s.star"
+label = "Star record"
+kind = "entity"
+summary = "Mass, age, L, T_eff, R, MK class and remnant flag"
+status = "built"
+
+[[edge]]
+from = "@galaxy:local [Fe/H] at position"
+to = "s.track"
+label = "[Fe/H] < 0 → metal-poor"
+
+[[edge]]
+from = "g.system"
+to = "s.track"
+label = "birth time"
+
+[[edge]]
+from = "s.track"
+to = "s.star"
+
+[[edge]]
+from = "s.star"
+to = "@planets-systems:disc mass draw"
+label = "M★"

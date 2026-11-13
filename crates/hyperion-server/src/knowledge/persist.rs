@@ -2,9 +2,15 @@
 //! directory (plan 12, P12.T7.b; Design note 10).
 //!
 //! The file is `<data_dir>/universes/<id>/knowledge/contacts.v1.jsonl`. Its first line is the
-//! header, `{"format":1}`; every other line is one change, a sighting or an acknowledgement, in
-//! the order it was made, and the store is rebuilt by applying them in order. A change is
-//! appended, synced, and only then applied in memory, so memory never runs ahead of the disk.
+//! header, `{"format":1}`; every other line is one change, a sighting, an acknowledgement or a
+//! clear (P12.T8.c), in the order it was made, and the store is rebuilt by applying them in
+//! order. A change is appended, synced, and only then applied in memory, so memory never runs
+//! ahead of the disk. Each change applied raises its contact in the store's `ChangedContacts`, a
+//! [`watch`] channel each alerts subscription of the universe reads to tell its subscriber of the
+//! contacts that changed (P12.T8.c), as the survey log's revisions tell a scene.
+//!
+//! The clear's line joins format 1 without a bump (lean, 2026-11-01): the first build to write a
+//! sighting is P12.T8.b's, so no file holds a contact that a build unable to read a clear wrote.
 //!
 //! On load, a header of another format, or a file of a later format beside this one
 //! (`contacts.v2.jsonl` and on), is [`LoadKnowledgeError::UnsupportedFormat`]. A last line with no
@@ -14,32 +20,35 @@
 //!
 //! Every file operation is blocking and runs on [`tokio::task::spawn_blocking`], never on the
 //! runtime; the blocking task finishes even if the future awaiting it is dropped, so the store and
-//! its file stay in step.
+//! its file stay in step. The log itself, its loading and its appends are the private `jsonl`
+//! module's, which the survey passes share (plan R09, R09.T18).
 
+use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
-use std::fs::{self, File, OpenOptions};
-use std::io::{self, Seek, SeekFrom, Write};
-use std::path::{Path, PathBuf};
+use std::io;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use hyperion_sim::alerts::AlertBand;
+use hyperion_sim::alerts::{AlertBand, DetectionPhase, TransientKind};
 use hyperion_sim::coords::{GalacticPosition, LyCell};
 use hyperion_sim::galaxy::gas::ccm::Band;
 use hyperion_sim::id::EventId;
 use hyperion_sim::time::UniverseTime;
-use hyperion_sim::units::WattsPerSquareMetre;
+use hyperion_sim::units::{LightYears, WattsPerSquareMetre};
 use serde::{Deserialize, Serialize};
+use tokio::sync::watch;
 
+use super::jsonl::{self, KnowledgeLog, LogName, TimeLine};
 use super::record::{ContactId, KnowledgeLevel, Sighting, SightingParts};
 use super::store::{AcknowledgeContactError, KnowledgeEntry, KnowledgeStore};
 use crate::universe::{UniverseId, UniverseStore};
 
-/// The file format this build writes and the only one it reads.
+/// The contacts file's format: the one this build writes and the only one it reads.
 pub const KNOWLEDGE_FORMAT: u32 = 1;
 
-/// The contacts file's name for [`KNOWLEDGE_FORMAT`].
-const CONTACTS_FILE: &str = "contacts.v1.jsonl";
+/// The contacts file, `contacts.v1.jsonl` for [`KNOWLEDGE_FORMAT`].
+const CONTACTS: LogName = LogName::new("contacts", KNOWLEDGE_FORMAT);
 
 /// A universe's Knowledge store, kept in step with its file (plan 12, P12.T7.b).
 ///
@@ -58,6 +67,40 @@ pub struct PersistedKnowledge {
 struct Shared {
     log: Mutex<KnowledgeLog>,
     store: Mutex<KnowledgeStore>,
+    /// Each change applied raises its contact here, under the file's lock.
+    changed: watch::Sender<ChangedContacts>,
+}
+
+/// The contacts changed since a universe's Knowledge was opened, each with the count of its
+/// changes: what each alerts subscription reads to tell its subscriber which contacts to push
+/// again (P12.T8.c), whichever subscription's push made the change.
+///
+/// It holds only the changes made since, not those loaded from the file, which a subscription
+/// opens with.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+pub(crate) struct ChangedContacts {
+    contacts: BTreeMap<ContactId, u64>,
+}
+
+impl ChangedContacts {
+    /// The contacts changed here since `earlier`, in contact order.
+    pub(crate) fn since<'a>(&'a self, earlier: &'a Self) -> impl Iterator<Item = ContactId> + 'a {
+        self.contacts
+            .iter()
+            .filter(|(contact, changes)| {
+                earlier
+                    .contacts
+                    .get(contact)
+                    .is_none_or(|then| then < *changes)
+            })
+            .map(|(&contact, _)| contact)
+    }
+
+    /// Counts one more change of `contact`.
+    fn raise(&mut self, contact: ContactId) {
+        let changes = self.contacts.entry(contact).or_default();
+        *changes = changes.saturating_add(1);
+    }
 }
 
 impl PersistedKnowledge {
@@ -88,6 +131,7 @@ impl PersistedKnowledge {
             shared: Arc::new(Shared {
                 log: Mutex::new(log),
                 store: Mutex::new(store),
+                changed: watch::Sender::default(),
             }),
         })
     }
@@ -133,6 +177,34 @@ impl PersistedKnowledge {
             })?
     }
 
+    /// Clears `event`'s contact at `at`, the observer's time its light fell under the detection
+    /// limit ([`KnowledgeStore::record_clear`]), appending the clear to the file first: the contact
+    /// if it was lit, and `None`, writing nothing, for an event never seen or a contact cleared
+    /// already.
+    ///
+    /// # Errors
+    ///
+    /// As [`record_sighting`](Self::record_sighting).
+    pub async fn record_clear(
+        &self,
+        event: EventId,
+        at: UniverseTime,
+    ) -> Result<Option<ContactId>, SaveKnowledgeError> {
+        let shared = Arc::clone(&self.shared);
+        tokio::task::spawn_blocking(move || shared.record_clear(event, at))
+            .await
+            .map_err(|error| {
+                tracing::error!(%error, "a knowledge append's blocking task did not finish");
+                SaveKnowledgeError::Interrupted
+            })?
+    }
+
+    /// The contacts changed from now on: a receiver of the store's `ChangedContacts`, its value as
+    /// it stands now marked seen, which every change wakes.
+    pub(crate) fn changes(&self) -> watch::Receiver<ChangedContacts> {
+        self.shared.changed.subscribe()
+    }
+
     /// Calls `f` with the store, for its [`contacts`](KnowledgeStore::contacts) and
     /// [`view`](KnowledgeStore::view)s. The lock is held only while `f` runs and never over a
     /// write, so `f` should be short.
@@ -150,11 +222,30 @@ impl Shared {
         let mut log = self.writer()?;
         let entry = lock(&self.store).sighting_entry(event, sighting);
         let contact = entry.contact();
-        log.append(&entry)?;
+        log.append(&EntryLine::from(&entry))?;
         lock(&self.store)
             .apply(entry)
             .expect("an entry the store planned under the file's lock still fits it");
+        self.changed.send_modify(|changed| changed.raise(contact));
         Ok(contact)
+    }
+
+    fn record_clear(
+        &self,
+        event: EventId,
+        at: UniverseTime,
+    ) -> Result<Option<ContactId>, SaveKnowledgeError> {
+        let mut log = self.writer()?;
+        let Some(entry) = lock(&self.store).clear_entry(event, at) else {
+            return Ok(None);
+        };
+        let contact = entry.contact();
+        log.append(&EntryLine::from(&entry))?;
+        lock(&self.store)
+            .apply(entry)
+            .expect("an entry the store planned under the file's lock still fits it");
+        self.changed.send_modify(|changed| changed.raise(contact));
+        Ok(Some(contact))
     }
 
     fn acknowledge(&self, contact: ContactId) -> Result<bool, AcknowledgeContactError> {
@@ -167,10 +258,12 @@ impl Shared {
             Some(_) => {}
         }
         let entry = KnowledgeEntry::Acknowledged { contact };
-        log.append(&entry).map_err(AcknowledgeContactError::Save)?;
+        log.append(&EntryLine::from(&entry))
+            .map_err(AcknowledgeContactError::Save)?;
         lock(&self.store)
             .apply(entry)
             .expect("a contact the store had under the file's lock still has it");
+        self.changed.send_modify(|changed| changed.raise(contact));
         Ok(true)
     }
 }
@@ -190,226 +283,19 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// The contacts file, as far as it holds good lines.
-#[derive(Debug)]
-struct KnowledgeLog {
-    dir: PathBuf,
-    path: PathBuf,
-    /// Open once the first append needs it.
-    file: Option<File>,
-    /// The length of the good lines: an append starts here, cutting off whatever a failed append
-    /// or a crash left beyond it.
-    len: u64,
-}
-
-impl KnowledgeLog {
-    /// Appends `entry`, after the header if the file holds nothing yet, and syncs it.
-    fn append(&mut self, entry: &KnowledgeEntry) -> Result<(), SaveKnowledgeError> {
-        let mut text = String::new();
-        if self.len == 0 {
-            push_line(
-                &mut text,
-                &HeaderLine {
-                    format: KNOWLEDGE_FORMAT,
-                },
-            );
-        }
-        push_line(&mut text, &EntryLine::from(entry));
-        let len = self.len;
-        let path = self.path.clone();
-        let file = self.file()?;
-        file.set_len(len).map_err(save_io("truncate", &path))?;
-        file.seek(SeekFrom::Start(len))
-            .map_err(save_io("seek", &path))?;
-        file.write_all(text.as_bytes())
-            .map_err(save_io("write", &path))?;
-        file.sync_data().map_err(save_io("sync", &path))?;
-        self.len = len + u64::try_from(text.len()).expect("a line's length fits in 64 bits");
-        Ok(())
-    }
-
-    /// The open file, created with its directory if need be. The directory is created inside the
-    /// universe's, never the universe's itself, so that no directory appears for a universe with
-    /// no save.
-    fn file(&mut self) -> Result<&mut File, SaveKnowledgeError> {
-        if self.file.is_none() {
-            let made_dir = match fs::create_dir(&self.dir) {
-                Ok(()) => true,
-                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => false,
-                Err(error) => return Err(save_io("create directory", &self.dir)(error)),
-            };
-            let existed = self.path.exists();
-            let file = OpenOptions::new()
-                .write(true)
-                .create(true)
-                .truncate(false)
-                .open(&self.path)
-                .map_err(save_io("open", &self.path))?;
-            if !existed {
-                sync_directory(&self.dir).map_err(save_io("sync directory", &self.dir))?;
-            }
-            if made_dir && let Some(universe) = self.dir.parent() {
-                sync_directory(universe).map_err(save_io("sync directory", universe))?;
-            }
-            self.file = Some(file);
-        }
-        Ok(self.file.as_mut().expect("the file was opened above"))
-    }
-}
-
-/// The error of a failed step of an append.
-fn save_io(operation: &'static str, path: &Path) -> impl FnOnce(io::Error) -> SaveKnowledgeError {
-    let path = path.to_path_buf();
-    move |source| SaveKnowledgeError::Io {
-        operation,
-        path,
-        source,
-    }
-}
-
-/// Appends `line` as JSON and a newline.
-fn push_line(text: &mut String, line: &impl Serialize) {
-    text.push_str(&serde_json::to_string(line).expect("a line of strings and numbers serialises"));
-    text.push('\n');
-}
-
-/// Makes the entries of `dir` durable on Unix, and does nothing elsewhere.
-///
-/// On Windows std's `File::open` cannot open a directory, and flushing a directory handle is
-/// undocumented, as [`UniverseStore::write`] explains (plan 04, P04.T17.b). There the new
-/// `knowledge/` directory and the contacts file's name are left to NTFS, which logs metadata
-/// changes in one sequential log. Each append's own `sync_data`, a `FlushFileBuffers` of the file,
-/// is expected to carry them with it, but Microsoft documents no such guarantee. On FAT, exFAT and
-/// network shares nothing is promised beyond the file's own data.
-///
-/// On macOS std's `sync_all` and `sync_data` are `fcntl(F_FULLFSYNC)`. This sync and every
-/// append's therefore flush the drive's cache.
-fn sync_directory(dir: &Path) -> io::Result<()> {
-    if cfg!(unix) {
-        File::open(dir).and_then(|handle| handle.sync_all())
-    } else {
-        Ok(())
-    }
-}
-
 /// Reads the store in `dir` (module documentation).
 fn load(dir: PathBuf) -> Result<(KnowledgeStore, KnowledgeLog), LoadKnowledgeError> {
-    refuse_later_formats(&dir)?;
-    let path = dir.join(CONTACTS_FILE);
-    let mut log = KnowledgeLog {
-        dir,
-        path,
-        file: None,
-        len: 0,
-    };
-    let bytes = match fs::read(&log.path) {
-        Ok(bytes) => bytes,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            return Ok((KnowledgeStore::new(), log));
-        }
-        Err(source) => {
-            return Err(LoadKnowledgeError::Io {
-                operation: "read",
-                path: log.path,
-                source,
-            });
-        }
-    };
     let mut store = KnowledgeStore::new();
-    let mut good = 0;
-    let mut rest = bytes.as_slice();
-    let mut number = 0;
-    while !rest.is_empty() {
-        number += 1;
-        let Some(end) = rest.iter().position(|&byte| byte == b'\n') else {
-            tracing::warn!(
-                path = %log.path.display(),
-                line = number,
-                bytes = rest.len(),
-                "dropping a torn last line of a knowledge file"
-            );
-            break;
-        };
-        let line = &rest[..end];
-        let malformed = |reason, source| LoadKnowledgeError::MalformedLine {
-            path: log.path.clone(),
-            line: number,
-            reason,
-            source,
-        };
-        if number == 1 {
-            let header: HeaderLine = serde_json::from_slice(line)
-                .map_err(|error| malformed("not a header", Some(error)))?;
-            match header.format {
-                KNOWLEDGE_FORMAT => {}
-                0 => return Err(malformed("format 0 is never written", None)),
-                format => {
-                    return Err(LoadKnowledgeError::UnsupportedFormat {
-                        path: log.path,
-                        format,
-                    });
-                }
-            }
-        } else {
-            let parsed: EntryLine = serde_json::from_slice(line)
-                .map_err(|error| malformed("not an entry", Some(error)))?;
-            let entry = KnowledgeEntry::try_from(parsed).map_err(|field| malformed(field, None))?;
-            store
-                .apply(entry)
-                .map_err(|_| malformed("does not fit the contacts before it", None))?;
-        }
-        good += end + 1;
-        rest = &rest[end + 1..];
-    }
-    log.len = u64::try_from(good).expect("a file's length fits in 64 bits");
+    let log = jsonl::load(dir, CONTACTS, |line: EntryLine| {
+        let entry = KnowledgeEntry::try_from(line)?;
+        store
+            .apply(entry)
+            .map_err(|_| "does not fit the contacts before it")
+    })?;
     Ok((store, log))
 }
 
-/// Refuses a directory that holds a contacts file of a later format than this build's.
-fn refuse_later_formats(dir: &Path) -> Result<(), LoadKnowledgeError> {
-    let entries = match fs::read_dir(dir) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
-        Err(source) => {
-            return Err(LoadKnowledgeError::Io {
-                operation: "list",
-                path: dir.to_path_buf(),
-                source,
-            });
-        }
-    };
-    let mut latest = None;
-    for entry in entries {
-        let entry = entry.map_err(|source| LoadKnowledgeError::Io {
-            operation: "list",
-            path: dir.to_path_buf(),
-            source,
-        })?;
-        let format = entry
-            .file_name()
-            .to_str()
-            .and_then(|name| name.strip_prefix("contacts.v"))
-            .and_then(|name| name.strip_suffix(".jsonl"))
-            .and_then(|number| number.parse::<u32>().ok());
-        if let Some(format) = format
-            && format > KNOWLEDGE_FORMAT
-        {
-            latest = latest.max(Some((format, entry.path())));
-        }
-    }
-    match latest {
-        Some((format, path)) => Err(LoadKnowledgeError::UnsupportedFormat { path, format }),
-        None => Ok(()),
-    }
-}
-
-/// The header line.
-#[derive(Debug, Serialize, Deserialize)]
-struct HeaderLine {
-    format: u32,
-}
-
-/// One change, as a line of format 1. Field order is the order on disk.
+/// One change, as a line of format 1, tagged by `kind`. Field order is the order on disk.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum EntryLine {
@@ -425,9 +311,18 @@ enum EntryLine {
         flux_w_m2: f64,
         band: BandLine,
         level: LevelLine,
+        /// What kind of event was seen, and where it stood (P12.T9.a).
+        transient: TransientLine,
+        phase: PhaseLine,
+        curvature_error_ly: f64,
     },
     Acknowledged {
         contact: u32,
+    },
+    /// Its light fell under the detection limit at `at`, the observer's time (P12.T8.c).
+    Cleared {
+        contact: u32,
+        at: TimeLine,
     },
 }
 
@@ -436,13 +331,6 @@ enum EntryLine {
 struct PositionLine {
     cell_ly: [i32; 3],
     offset_m: [f64; 3],
-}
-
-/// An instant of the universe clock, exactly.
-#[derive(Debug, Serialize, Deserialize)]
-struct TimeLine {
-    seconds: i64,
-    nanos: u32,
 }
 
 /// An [`AlertBand`].
@@ -470,6 +358,36 @@ enum LevelLine {
     Resolved,
 }
 
+/// A [`TransientKind`].
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum TransientLine {
+    CoreCollapse,
+    TypeIa,
+    LuminousRedNova,
+    Kilonova,
+    Nova,
+    DwarfNova,
+    XrayTransient,
+    XrayBurst,
+    BeXOutburst,
+    GiantEruption,
+    TidalDisruption,
+    CentralFlare,
+    Flare,
+    Glitch,
+    MagnetarBurst,
+    FuOrionisOutburst,
+}
+
+/// A [`DetectionPhase`].
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum PhaseLine {
+    Onset,
+    InProgress,
+}
+
 impl From<&KnowledgeEntry> for EntryLine {
     fn from(entry: &KnowledgeEntry) -> Self {
         match entry {
@@ -490,10 +408,17 @@ impl From<&KnowledgeEntry> for EntryLine {
                     flux_w_m2: parts.flux.value(),
                     band: BandLine::from(parts.band),
                     level: LevelLine::from(parts.level),
+                    transient: TransientLine::from(parts.kind),
+                    phase: PhaseLine::from(parts.phase),
+                    curvature_error_ly: parts.curvature_error.value(),
                 }
             }
             KnowledgeEntry::Acknowledged { contact } => Self::Acknowledged {
                 contact: contact.get(),
+            },
+            KnowledgeEntry::Cleared { contact, at } => Self::Cleared {
+                contact: contact.get(),
+                at: TimeLine::from(*at),
             },
         }
     }
@@ -517,9 +442,15 @@ impl TryFrom<EntryLine> for KnowledgeEntry {
                 flux_w_m2,
                 band,
                 level,
+                transient,
+                phase,
+                curvature_error_ly,
             } => {
                 if !(flux_w_m2.is_finite() && flux_w_m2 >= 0.0) {
                     return Err("flux_w_m2");
+                }
+                if !(curvature_error_ly.is_finite() && curvature_error_ly >= 0.0) {
+                    return Err("curvature_error_ly");
                 }
                 let sighting = Sighting::from_parts(SightingParts {
                     observer: observer.to_position().ok_or("observer")?,
@@ -532,6 +463,9 @@ impl TryFrom<EntryLine> for KnowledgeEntry {
                     flux: WattsPerSquareMetre::new(flux_w_m2),
                     band: AlertBand::from(band),
                     level: KnowledgeLevel::from(level),
+                    kind: TransientKind::from(transient),
+                    phase: DetectionPhase::from(phase),
+                    curvature_error: LightYears::new(curvature_error_ly),
                 });
                 Ok(Self::Sighting {
                     contact: contact_of(contact)?,
@@ -543,6 +477,10 @@ impl TryFrom<EntryLine> for KnowledgeEntry {
             }
             EntryLine::Acknowledged { contact } => Ok(Self::Acknowledged {
                 contact: contact_of(contact)?,
+            }),
+            EntryLine::Cleared { contact, at } => Ok(Self::Cleared {
+                contact: contact_of(contact)?,
+                at: at.to_time().ok_or("at")?,
             }),
         }
     }
@@ -562,23 +500,6 @@ impl PositionLine {
     /// the caller names the field.
     fn to_position(&self) -> Option<GalacticPosition> {
         GalacticPosition::new(LyCell::new(self.cell_ly), self.offset_m).ok()
-    }
-}
-
-impl From<UniverseTime> for TimeLine {
-    fn from(time: UniverseTime) -> Self {
-        Self {
-            seconds: time.seconds(),
-            nanos: time.subsec_nanos(),
-        }
-    }
-}
-
-impl TimeLine {
-    /// The time, or `None` for nanoseconds past a second, which only damage makes; the caller
-    /// names the field.
-    fn to_time(&self) -> Option<UniverseTime> {
-        UniverseTime::new(self.seconds, self.nanos).ok()
     }
 }
 
@@ -636,6 +557,70 @@ impl From<LevelLine> for KnowledgeLevel {
     }
 }
 
+impl From<TransientKind> for TransientLine {
+    fn from(kind: TransientKind) -> Self {
+        match kind {
+            TransientKind::CoreCollapse => Self::CoreCollapse,
+            TransientKind::TypeIa => Self::TypeIa,
+            TransientKind::LuminousRedNova => Self::LuminousRedNova,
+            TransientKind::Kilonova => Self::Kilonova,
+            TransientKind::Nova => Self::Nova,
+            TransientKind::DwarfNova => Self::DwarfNova,
+            TransientKind::XrayTransient => Self::XrayTransient,
+            TransientKind::XrayBurst => Self::XrayBurst,
+            TransientKind::BeXOutburst => Self::BeXOutburst,
+            TransientKind::GiantEruption => Self::GiantEruption,
+            TransientKind::TidalDisruption => Self::TidalDisruption,
+            TransientKind::CentralFlare => Self::CentralFlare,
+            TransientKind::Flare => Self::Flare,
+            TransientKind::Glitch => Self::Glitch,
+            TransientKind::MagnetarBurst => Self::MagnetarBurst,
+            TransientKind::FuOrionisOutburst => Self::FuOrionisOutburst,
+        }
+    }
+}
+
+impl From<TransientLine> for TransientKind {
+    fn from(kind: TransientLine) -> Self {
+        match kind {
+            TransientLine::CoreCollapse => Self::CoreCollapse,
+            TransientLine::TypeIa => Self::TypeIa,
+            TransientLine::LuminousRedNova => Self::LuminousRedNova,
+            TransientLine::Kilonova => Self::Kilonova,
+            TransientLine::Nova => Self::Nova,
+            TransientLine::DwarfNova => Self::DwarfNova,
+            TransientLine::XrayTransient => Self::XrayTransient,
+            TransientLine::XrayBurst => Self::XrayBurst,
+            TransientLine::BeXOutburst => Self::BeXOutburst,
+            TransientLine::GiantEruption => Self::GiantEruption,
+            TransientLine::TidalDisruption => Self::TidalDisruption,
+            TransientLine::CentralFlare => Self::CentralFlare,
+            TransientLine::Flare => Self::Flare,
+            TransientLine::Glitch => Self::Glitch,
+            TransientLine::MagnetarBurst => Self::MagnetarBurst,
+            TransientLine::FuOrionisOutburst => Self::FuOrionisOutburst,
+        }
+    }
+}
+
+impl From<DetectionPhase> for PhaseLine {
+    fn from(phase: DetectionPhase) -> Self {
+        match phase {
+            DetectionPhase::Onset => Self::Onset,
+            DetectionPhase::InProgress => Self::InProgress,
+        }
+    }
+}
+
+impl From<PhaseLine> for DetectionPhase {
+    fn from(phase: PhaseLine) -> Self {
+        match phase {
+            PhaseLine::Onset => Self::Onset,
+            PhaseLine::InProgress => Self::InProgress,
+        }
+    }
+}
+
 /// A universe's Knowledge could not be loaded.
 #[derive(Debug)]
 pub enum LoadKnowledgeError {
@@ -656,7 +641,8 @@ pub enum LoadKnowledgeError {
         /// The format it declares.
         format: u32,
     },
-    /// A line other than a torn last one does not parse or does not fit the contacts before it.
+    /// A line other than a torn last one does not parse or does not fit the lines before it: the
+    /// contacts, or the survey passes (R09.T18).
     MalformedLine {
         /// The file.
         path: PathBuf,
@@ -723,8 +709,8 @@ pub enum SaveKnowledgeError {
     },
     /// The blocking task that wrote the change did not finish.
     Interrupted,
-    /// An earlier change panicked, so the file and the store may disagree: nothing more is
-    /// written until the universe's Knowledge is opened again.
+    /// An earlier change panicked, so the file and what is held in memory may disagree: nothing
+    /// more is written to that log until it is opened again.
     Poisoned,
 }
 
@@ -751,16 +737,28 @@ impl Error for SaveKnowledgeError {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use hyperion_sim::GeneratorVersion;
     use hyperion_sim::coords::GalacticVelocity;
     use hyperion_sim::observe::{Drift, Observer, retarded};
+    use hyperion_sim::time::UniverseTime;
 
     use super::*;
-    use crate::knowledge::testing::{event_of, host, other_host, third_host};
+    use crate::knowledge::testing::{event_of, flare_in, host, other_host, third_host};
     use crate::knowledge::{Acknowledgement, ContactView};
     use crate::universe::SavedUniverse;
 
     const UNIVERSE: UniverseId = UniverseId::new(0xab);
+
+    /// The contacts file's name for [`KNOWLEDGE_FORMAT`].
+    const CONTACTS_FILE: &str = "contacts.v1.jsonl";
+
+    /// The name the log is given is the one P12.T7.b wrote.
+    #[test]
+    fn knowledge_contacts_file_keeps_its_name() {
+        assert_eq!(CONTACTS.file_name(), CONTACTS_FILE);
+    }
 
     /// A data directory holding universe [`UNIVERSE`]'s save.
     fn universe() -> (tempfile::TempDir, UniverseStore) {
@@ -795,12 +793,13 @@ mod tests {
         Sighting::new(
             &observer,
             &retarded(&observer, &star),
-            band,
+            &flare_in(band),
             // A flux with every digit in use, so that the round trip is tested to the bit.
             WattsPerSquareMetre::new(
                 1.234_567_890_123_456_7e-15 * f64::from(u32::try_from(years).unwrap() + 1),
             ),
             level,
+            LightYears::new(0.123_456_789_012_345_67),
         )
     }
 
@@ -869,6 +868,73 @@ mod tests {
         assert_eq!(lines[2]["band"], "x_ray");
         assert_eq!(lines[3]["level"], "resolved");
         assert_eq!(lines[1]["event"], event_of(host()).to_string());
+    }
+
+    /// P12.T8.c: a clear is a line of its own, read back with its time; a clear of a contact
+    /// cleared already writes nothing; and each change that is made, a sighting, an
+    /// acknowledgement or a clear, names its contact in the store's `ChangedContacts`, and none
+    /// that is not.
+    #[tokio::test]
+    async fn knowledge_clears_round_trip_and_each_change_names_its_contact() {
+        let (_dir, store) = universe();
+        let knowledge = PersistedKnowledge::open(&store, UNIVERSE).await.unwrap();
+        let mut changes = knowledge.changes();
+        let mut told = changes.borrow_and_update().clone();
+        let mut named = || {
+            let now = changes.borrow_and_update().clone();
+            let since: Vec<u32> = now.since(&told).map(ContactId::get).collect();
+            told = now;
+            since
+        };
+        let v = AlertBand::Photometric(Band::V);
+        let event = event_of(host());
+        let seen = sighting([0.0, 25_000.0, 0.0], 0, v, KnowledgeLevel::Bearing);
+        let contact = knowledge.record_sighting(event, seen).await.unwrap();
+        assert_eq!(named(), [1]);
+        let at = UniverseTime::from_julian_years(2).unwrap();
+        assert_eq!(
+            knowledge.record_clear(event, at).await.unwrap(),
+            Some(contact)
+        );
+        assert_eq!(named(), [1]);
+        assert_eq!(knowledge.record_clear(event, at).await.unwrap(), None);
+        let unseen = event_of(other_host());
+        assert_eq!(knowledge.record_clear(unseen, at).await.unwrap(), None);
+        assert_eq!(
+            named(),
+            Vec::<u32>::new(),
+            "a clear that changes nothing names nothing"
+        );
+        assert!(knowledge.acknowledge(contact).await.unwrap());
+        assert!(!knowledge.acknowledge(contact).await.unwrap());
+        assert_eq!(named(), [1]);
+        let written = knowledge.read(Clone::clone);
+        drop(knowledge);
+
+        let reread = PersistedKnowledge::open(&store, UNIVERSE).await.unwrap();
+        assert_eq!(reread.read(Clone::clone), written);
+        assert_eq!(
+            reread.read(|store| store.view(contact).unwrap().seen().cleared()),
+            Some(at)
+        );
+        let text = fs::read_to_string(contacts_file(&store)).unwrap();
+        let lines: Vec<serde_json::Value> = text
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        let kinds: Vec<_> = lines[1..].iter().map(|line| line["kind"].clone()).collect();
+        assert_eq!(
+            kinds,
+            ["sighting", "cleared", "acknowledged"].map(serde_json::Value::from)
+        );
+        assert_eq!(
+            lines[2],
+            serde_json::json!({
+                "kind": "cleared",
+                "contact": 1,
+                "at": { "seconds": at.seconds(), "nanos": 0 },
+            })
+        );
     }
 
     /// P12.T7.b: reopening a universe restores its contacts and acknowledgements, and the

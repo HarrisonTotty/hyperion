@@ -2,19 +2,17 @@ import type { MassLayer } from "@hyperion/protocol";
 import { type ReactNode, useEffect, useId, useState } from "react";
 
 import { EarthMassUnit } from "../../components/EarthMassUnit";
+import { type DisplayMode, ModeControl } from "../../components/ModeControl";
 import { SolarMassUnit } from "../../components/SolarMassUnit";
-import {
-  formatNumber,
-  formatScaleLength,
-  formatSubstellarMass,
-  formatUniverseTimeYr,
-} from "../../lib/format";
+import { StatusText } from "../../components/StatusText";
+import { formatNumber, formatSubstellarMass, formatUniverseTimeYr } from "../../lib/format";
 import { CLOCK_WINDOW_YR } from "../../lib/galaxy/model";
 import { isEmptyEntry, isTextEntry, showSelected } from "../../lib/textEntry";
 import { RADIUS_STEPS_LY } from "../../spatial/scale";
 import {
   formatBandMsun,
   formatChartLengthLy,
+  formatQueryRadius,
   type LayerBand,
   nextStarFilter,
   STAR_FILTERS,
@@ -29,12 +27,22 @@ import {
  */
 export const STARS_KEY = "K";
 
-/** The narrowest and widest drive range the field accepts, in light-years. */
-const DRIVE_RANGE_MIN_LY = 0.01;
+/**
+ * The narrowest and widest drive range the field accepts, in light-years: the narrowest and widest
+ * query radius, so that the range a chart starts from is drawn on every chart (plan 05, design
+ * note D9; plan 09, P09.T42).
+ */
+const DRIVE_RANGE_MIN_LY = 0.001;
 const DRIVE_RANGE_MAX_LY = 500;
 
-/** Decimals a drive range keeps: the narrowest chart is 0.01 ly across. */
-const DRIVE_RANGE_DECIMALS = 2;
+/**
+ * Decimals a drive range keeps: 0.0001 ly, about 6.3 AU, a tenth of the narrowest it accepts, as
+ * the chart's lengths are written to at most four (`formatChartLengthLy`).
+ */
+const DRIVE_RANGE_DECIMALS = 4;
+
+/** Decimals the drive range's hint and refusal write its narrowest with: `0.001`. */
+const DRIVE_RANGE_MIN_DECIMALS = 3;
 
 /** Decimals a chart time keeps, as `formatUniverseTimeYr` writes it. */
 const TIME_DECIMALS = 2;
@@ -63,9 +71,12 @@ interface NumberFieldProps {
   readonly name: string;
   /** The value on show, formatted without its unit. */
   readonly text: string;
-  /** The format the field expects, shown under it: `0.01-500 ly`. */
+  /**
+   * The format the field expects, shown beside it: `0.001 to 500 ly`, a span written with "to", as
+   * inside a sentence (§ Numbers).
+   */
   readonly hint: string;
-  /** What the operator may enter, in words, for a refusal: `enter 0.01 to 500 ly`. */
+  /** What the operator may enter, in words, for a refusal: `enter 0.001 to 500 ly`. */
   readonly valid: string;
   /** The unit after the value, or an element such as a time system's label before it. */
   readonly unit: string;
@@ -80,6 +91,25 @@ interface NumberFieldProps {
 }
 
 /**
+ * A refusal's part, with the field's name and the space after it in an element of its own where the
+ * part starts with them (`DRIVE RANGE ` of `DRIVE RANGE INVALID:`), which the compact layout hides
+ * from sight alone, in the `.visually-hidden` pattern: there the refusal stands on the field's own
+ * row, whose label already names the field (plan 12, P12.T11.c). Any other part is set as it stands.
+ */
+function refusalPart(part: string, name: string): ReactNode {
+  const named = `${name} `;
+  if (!part.startsWith(named)) {
+    return part;
+  }
+  return (
+    <>
+      <span className="chart-controls__error-name">{named}</span>
+      {part.slice(named.length)}
+    </>
+  );
+}
+
+/**
  * One number the operator sets: entered when the field is left or with `Enter`, never at each
  * keystroke, so that a chart is not queried for every digit typed on the way.
  *
@@ -88,6 +118,14 @@ interface NumberFieldProps {
  * shows the value again, selected so that typing replaces it (decision-r07-t19b-exposure-fit,
  * item 6), and `Enter` on the field emptied does the same; left emptied, it shows the value.
  * Neither is refused.
+ *
+ * A refusal reads `<NAME> INVALID: <what is valid>` and describes the input after the hint. On the
+ * stacked page it takes a line of its own under the field. On the compact page it stands in the
+ * hint's place on the field's own row, never wrapping: the hint gives way (`display: none`, which
+ * the input's description still reaches) and the name is hidden from sight alone
+ * ({@link refusalPart}), so that no refusal, nor two at once, adds a line to the column (plan 12,
+ * P12.T11.c). Its text, and so the input's description and what a screen reader says, is the same
+ * on both.
  */
 function NumberField({
   label,
@@ -145,7 +183,13 @@ function NumberField({
   };
 
   return (
-    <div className="form-field chart-controls__field">
+    <div
+      className={
+        refused
+          ? "form-field chart-controls__field chart-controls__field--refused"
+          : "form-field chart-controls__field"
+      }
+    >
       <label className="form-field__label" htmlFor={fieldId}>
         {label}
       </label>
@@ -191,12 +235,38 @@ function NumberField({
       </span>
       {refused ? (
         <p className="form-field__error chart-controls__error" id={errorId}>
-          {name} INVALID: {valid}
+          <StatusText
+            text={`${name} INVALID: ${valid}`}
+            renderPart={(part) => refusalPart(part, name)}
+          />
         </p>
       ) : null}
     </div>
   );
 }
+
+/** What the chart's mode controls show and do (plan 12, P12.T11). */
+export interface ChartModeControls {
+  /** The mode chosen. */
+  readonly mode: DisplayMode;
+  readonly onMode: (mode: DisplayMode) => void;
+  /**
+   * Why `OBSERVED` is held back for a reason of its own, such as no chart on show to observe from;
+   * `null` when it acts. The link's reason is the controls' own, shown once above them.
+   */
+  readonly observedHeldBack: string | null;
+  /** Why the observer cannot be moved to the chart's centre, as `observedHeldBack` says it. */
+  readonly moveHeldBack: string | null;
+  /** Moves the observer to the centre of the chart on show. */
+  readonly onMoveObserver: () => void;
+}
+
+/**
+ * The command that moves the observer to the centre of the chart on show: named for what it moves
+ * and where to, so that it is not taken for `CENTRE CHART`, which moves the chart (§ Controls), and
+ * its `CENTRE` is the chart's (P12.T11.c).
+ */
+export const MOVE_OBSERVER_LABEL = "OBSERVER TO CHART CENTRE";
 
 interface ChartControlsProps {
   /** The radius the operator chose, or `null` while it follows the drive range. */
@@ -229,6 +299,8 @@ interface ChartControlsProps {
    * compact page (the orchestrator's ruling 149.1). `K` still steps the `STARS` filter.
    */
   readonly hidden?: boolean;
+  /** The chart's mode and its observer (plan 12, P12.T11); no mode control when absent. */
+  readonly modes?: ChartModeControls | undefined;
 }
 
 /** The five stellar layers, lightest first, for the mass floors before the first census arrives. */
@@ -270,8 +342,10 @@ const LOWEST_FLOOR: MassLayer = "rogue_planet";
  * its time.
  *
  * @remarks
- * The radius steps 1-2-5 from 0.01 ly to 500 ly, the scale from the galactic centre out; until the
- * operator chooses one it follows the drive range, raised to the next step. The mass floor is a
+ * The radius steps 1-2-5 from 0.001 ly to 500 ly, the scale from the stars about the central black
+ * hole out, the steps below 0.01 ly read in AU as the scale bar reads there (`316 AU` to `63.2 AU`;
+ * plan 09, P09.T42); until the operator chooses one it follows the drive range, raised to the next
+ * step. The mass floor is a
  * radio group of the layers' lower edges, which is also the declutter control: the five stellar
  * layers' and, below `0.08`, the brown dwarfs' `0.012` and the free-floating planets' `0.33 M⊕`
  * (plan 13, P13.T8.c), the lowest, which alone reads `ALL`. The group's unit, `M☉`, is drawn once
@@ -289,6 +363,15 @@ const LOWEST_FLOOR: MassLayer = "rogue_planet";
  * `REMNANTS`, from the answer on show: a display control that asks nothing of the server, so it acts
  * with the link down. Its key, `K`, steps to the next filter from anywhere on the page but a text
  * field, and is shown on the group, as the guide asks of a frequent action.
+ *
+ * Last, the chart's mode (plan 12, P12.T11): `NOW` or `OBSERVED` ({@link ModeControl}, its key `M`,
+ * live while the controls are hidden as `K` is), held back with the link as every control that
+ * asks the server is, and `OBSERVED` with no chart on show to observe from. Beside it, in either
+ * mode, `OBSERVER TO CHART CENTRE` moves the observer to the centre of the chart on show, held back
+ * with the link and with no chart on show; in `NOW` it sets where the next `OBSERVED` observes from.
+ * On the compact page the two keep one row while no held-back reason of theirs stands, which is
+ * while a chart is on show; the row is marked `chart-controls__modes--reason` while one does, and
+ * may then wrap (P12.T11.c).
  */
 export function ChartControls({
   radiusChoiceLy,
@@ -305,12 +388,16 @@ export function ChartControls({
   onStarFilter,
   heldBack,
   hidden = false,
+  modes,
 }: ChartControlsProps) {
   const radiusId = useId();
   const floorName = useId();
   const filterName = useId();
   const heldBackId = useId();
+  const moveReasonId = useId();
   const held = heldBack === null ? null : heldBackId;
+  const moveHeld =
+    held ?? (modes === undefined || modes.moveHeldBack === null ? null : moveReasonId);
 
   // The key reaches the selector from anywhere on the chart's page but a text field; the page is
   // under `Activity`, so the listener goes while another page is shown.
@@ -358,7 +445,7 @@ export function ChartControls({
         >
           {RADIUS_STEPS_LY.map((step) => (
             <option key={step} value={step}>
-              {formatScaleLength(step)}
+              {formatQueryRadius(step)}
             </option>
           ))}
         </select>
@@ -435,8 +522,8 @@ export function ChartControls({
         label="DRIVE RANGE"
         name="DRIVE RANGE"
         text={formatChartLengthLy(driveRangeLy)}
-        hint={`${formatNumber(DRIVE_RANGE_MIN_LY, 2)}-${formatNumber(DRIVE_RANGE_MAX_LY, 0)} ly`}
-        valid={`enter ${formatNumber(DRIVE_RANGE_MIN_LY, 2)} to ${formatNumber(DRIVE_RANGE_MAX_LY, 0)} ly`}
+        hint={`${formatNumber(DRIVE_RANGE_MIN_LY, DRIVE_RANGE_MIN_DECIMALS)} to ${formatNumber(DRIVE_RANGE_MAX_LY, 0)} ly`}
+        valid={`enter ${formatNumber(DRIVE_RANGE_MIN_LY, DRIVE_RANGE_MIN_DECIMALS)} to ${formatNumber(DRIVE_RANGE_MAX_LY, 0)} ly`}
         unit="ly"
         decimals={DRIVE_RANGE_DECIMALS}
         accepts={(value) => value >= DRIVE_RANGE_MIN_LY && value <= DRIVE_RANGE_MAX_LY}
@@ -456,6 +543,48 @@ export function ChartControls({
         onEnter={onTime}
         heldBackId={held}
       />
+      {modes === undefined ? null : (
+        <div
+          className={
+            // Either reason stands only with the link up and no chart on show: `NO CHART`.
+            held === null && (modes.observedHeldBack !== null || modes.moveHeldBack !== null)
+              ? "chart-controls__modes chart-controls__modes--reason"
+              : "chart-controls__modes"
+          }
+        >
+          <ModeControl
+            mode={modes.mode}
+            onMode={modes.onMode}
+            heldBackId={held}
+            observedHeldBack={modes.observedHeldBack}
+          />
+          {/*
+           * In both modes, so that `M` never takes it from under the focus and the row never moves;
+           * in `NOW` it sets where the next `OBSERVED` observes from.
+           */}
+          <p className="chart-controls__observer">
+            <button
+              type="button"
+              className="control"
+              // Held back rather than disabled, so that it keeps its focus and can say why.
+              aria-disabled={moveHeld === null ? undefined : "true"}
+              aria-describedby={moveHeld ?? undefined}
+              onClick={() => {
+                if (moveHeld === null) {
+                  modes.onMoveObserver();
+                }
+              }}
+            >
+              {MOVE_OBSERVER_LABEL}
+            </button>
+            {held !== null || modes.moveHeldBack === null ? null : (
+              <span className="chart-controls__observer-reason" id={moveReasonId}>
+                <StatusText text={modes.moveHeldBack} />
+              </span>
+            )}
+          </p>
+        </div>
+      )}
     </div>
   );
 }

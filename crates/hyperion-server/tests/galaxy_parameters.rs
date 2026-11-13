@@ -55,10 +55,32 @@ async fn open(client: &mut TestClient, universe: &UniverseIdHex) -> UniverseInfo
     }
 }
 
+/// The parameters of a fixed seed on one server: the golden response, and two universes of the seed
+/// sharing their galaxy and its parameters.
+///
+/// Nextest runs each test in its own process, and each server builds its galaxy, 4.4 s with its
+/// full potential in a test build, so the two share one server: each takes a client and its
+/// universes of its own, as it did with a server of its own, and its assertions and their messages
+/// are unchanged. The golden pins the server's first universe and its client's requests, so it
+/// comes first. The two universes then find the galaxy the golden's request built: their one build
+/// and one entry are still the cache's keying by seed and version, since a galaxy built for each
+/// universe would make three. The tests that count from a fresh server
+/// (`open_warms_the_galaxy_so_the_parameters_need_no_build`,
+/// `an_unknown_universe_is_refused_before_any_galaxy_is_built`) keep a server each. A server holds
+/// one universe of a name, so each property's universe is named apart (no assertion reads a name),
+/// the first keeping its test's.
 #[tokio::test]
-async fn the_parameters_of_a_fixed_seed_are_the_golden_response() {
+async fn the_golden_parameters_are_shared_by_every_universe_of_the_seed() {
     let server = TestServer::start().await;
-    let mut client = connected(&server).await;
+    the_parameters_of_a_fixed_seed_are_the_golden_response(&server).await;
+    two_universes_of_one_seed_share_their_galaxy_and_its_parameters(&server).await;
+    server.stop().await;
+}
+
+/// Run first by [`the_golden_parameters_are_shared_by_every_universe_of_the_seed`] on its shared
+/// server, so that its universe is the server's first, as the golden's is.
+async fn the_parameters_of_a_fixed_seed_are_the_golden_response(server: &TestServer) {
+    let mut client = connected(server).await;
     let universe = create(&mut client, "Kepler Reach", SEED).await;
     let response = parameters(&mut client, &universe.id).await.unwrap();
     assert_eq!(response.seed, SeedHex::from_u64(SEED));
@@ -91,14 +113,13 @@ async fn the_parameters_of_a_fixed_seed_are_the_golden_response() {
     golden!("galaxy_parameters", &golden.finish());
 
     client.close().await;
-    server.stop().await;
 }
 
-#[tokio::test]
-async fn two_universes_of_one_seed_share_their_galaxy_and_its_parameters() {
-    let server = TestServer::start().await;
-    let mut client = connected(&server).await;
-    let first = create(&mut client, "Kepler Reach", SEED).await;
+/// Run by [`the_golden_parameters_are_shared_by_every_universe_of_the_seed`] on its shared server,
+/// after the golden, whose universe is of the same seed.
+async fn two_universes_of_one_seed_share_their_galaxy_and_its_parameters(server: &TestServer) {
+    let mut client = connected(server).await;
+    let first = create(&mut client, "Kepler Reach: the first of two", SEED).await;
     let second = create(&mut client, "Talos", SEED).await;
     assert_ne!(first.id, second.id);
 
@@ -119,7 +140,6 @@ async fn two_universes_of_one_seed_share_their_galaxy_and_its_parameters() {
     assert!(galaxies.bytes() > 0);
 
     client.close().await;
-    server.stop().await;
 }
 
 #[tokio::test]
